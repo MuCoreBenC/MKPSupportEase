@@ -37,6 +37,21 @@
   background: var(--scrim);
 }
 
+/*
+ * 框上面那一层（`overlay` prop）：与遮罩同尺寸、压在框之上。
+ *
+ * 遮罩自己就是 `position: absolute`（不是 fixed，见 `Modal.tsx` 头注②），所以这一层
+ * 跟着它走 —— "内容区"的几何天然对上，不用再算一次视口，也不会被窗口那个 transform
+ * 的包含块坑到。z-index 只要压过框（框是静态定位，带 z-index 的定位元素自然在上）。
+ *
+ * 里面怎么摆（背景、留白、点击收起）**由调用方定** —— 这一层只管"盖在框上面"。
+ */
+.overlayLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+
 .box {
   display: flex;
   max-width: 100%; /* 窄窗口里框不许比可用区宽，三档一律让位给容器 */

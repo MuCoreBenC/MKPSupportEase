@@ -161,6 +161,8 @@ export const bridgeApi: MkpApi = {
    * 回来的那句是下一步提示，直接弹给用户。
    */
   openDefaultAppSettings: () => call('openDefaultAppSettings', 'open_default_app_settings'),
+  /* 「自动化」授权被拒后的反悔入口：直达系统设置那一页（macOS 拒过一次就不再弹框） */
+  openAutomationSettings: () => call('openAutomationSettings', 'open_automation_settings'),
   /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
   getPostProcessCommand: (machineId, versionId) =>
     call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),

@@ -445,3 +445,20 @@
 [data-theme='dark'] .noteBad {
   color: var(--warn-ink);
 }
+
+/*
+ * 图片引导里那颗「去重新允许」（2026-10-17）：只有"自动化授权被拒"那一条错才摆。
+ * 按钮 + 一句"勾完回来再点一次"的小字 —— 反悔的正路只有系统设置那一页
+ * （macOS 拒过一次就永远不再弹框），把落点与后续一步说清。
+ */
+.guideGrant {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.guideGrantNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}

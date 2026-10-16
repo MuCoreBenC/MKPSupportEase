@@ -31,7 +31,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { AssetList, BundleList, BundleView, MachineList, Words } from '../api'
+import type {
+  AssetList,
+  BundleList,
+  BundleRefView,
+  BundleView,
+  MachineList,
+  Words,
+} from '../api'
 import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
@@ -51,6 +58,36 @@ interface Props {
   /** 跨页定位带来的预选（机型页 ④ 关联的「选择套餐…」跳过来就是用这个） */
   initialSel?: string | null
   onGoto: (view: string, focus?: GotoFocus) => void
+}
+
+/**
+ * 「显示名留空时该叫什么」的唯一出处（页面兜底 + 探针夹具共用一份）。
+ *
+ * 以前这里是硬编码字面量 `'推荐'` —— 九份套餐于是全都叫「推荐」，
+ * 列表里谁也认不出谁（作者 2026-10-16 截图点名：「它的名字怎么都一样，都叫推荐」）。
+ * 改成**从 id 派生**：`A1_MINI_FASTV3.3` → `A1_MINI_FASTV3.3`（原样，等用户自己填），
+ * 至少每条都不同、能被认出来；填了显示名就以显示名为准。
+ */
+function expectedBundleDisplay(id: string): string {
+  return id.trim()
+}
+
+/**
+ * 台账键 → **真实文件名（带扩展名）**。
+ *
+ * `BundleRefView` 只带登记的 `name`，不带路径；真实文件名要去资产库清单（`assets`）里按
+ * id 找 `AssetView.path` 的末段。作者 2026-10-16：「它最主要的还是我希望他把文件名显示是
+ * 真实的，带有后缀的就是扩展名的」。查不到就回落 `name || id`（不显示空白）。
+ */
+function refFileName(assets: AssetList | null, r: BundleRefView): string {
+  /* MKP 预设：名字 = **产物文件名**（后端现算，见 `BundleRefView.productName`）——
+     它没有源文件，`path` 是空的，拿不到就说不出「哪一份」（作者 2026-10-16 截图 2 的红框空白）。 */
+  if (r.kind === 'mkPreset') return r.productName || r.name || r.id
+  const hit = assets?.assets.find((a) => a.id === r.id)
+  if (hit === undefined) return r.name || r.id
+  const cut = Math.max(hit.path.lastIndexOf('/'), hit.path.lastIndexOf('\\'))
+  const base = cut === -1 ? hit.path : hit.path.slice(cut + 1)
+  return base !== '' ? base : r.name || r.id
 }
 
 export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) {
@@ -99,7 +136,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
           wb.bundles(q || null),
           wb.machines(),
           /* 套餐内容框的候选池（切片器页签）—— 没有它「改套餐内容」就没得选 */
-          assets ? Promise.resolve(assets) : wb.assets(null, null, null, null, null, null),
+          assets ? Promise.resolve(assets) : wb.assets(null, null, null, null, null, null, null, null),
         ])
         setList(b)
         setMachines(m)
@@ -199,9 +236,16 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
 
   const create = () => {
     if (!newId.trim() || !newMachine) return
+    const id = newId.trim()
     void run(
-      () => wb.addBundle(newId.trim(), newMachine, newDisplay.trim() || '推荐', newRefs),
-      `已新建套餐 ${newId.trim()}（${newRefs.length} 份文件）`,
+      () =>
+        wb.addBundle(
+          id,
+          newMachine,
+          newDisplay.trim() || expectedBundleDisplay(id),
+          newRefs,
+        ),
+      `已新建套餐 ${id}（${newRefs.length} 份文件）`,
     )
     setCreating(false)
     setNewRefs([])
@@ -379,6 +423,8 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                  * 上面一行 = **显示名**（主）+ 版本数（0/1 常态灰、多个红）；
                  * 下面一行 = id + 装了几个文件 —— 四个事实挤一行时，
                  * 显示名会被省略成「官…」（实测），也正是「名字左边右边都很像」的病根。
+                 * ★ 2026-10-16：显示名现在能区分了（见 `presets/bundles.toml`），
+                 *   id 退成**第二行的等宽小字**（作者：「主要的是显示名可以加一个附加 ID」）。
                  */}
                 <span className={s.rowTop}>
                   <span className={s.rowName}>{b.display || b.id}</span>
@@ -433,9 +479,10 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
         ) : (
           <div className={s.card}>
             <div className={s.cardHead}>
-              {/* 大标题 = 显示名，id 退成附注（与机型页「A1 + A1.toml」同一排法） */}
+              {/* 大标题 = 显示名，id 退成附注（与机型页「A1 + A1.toml」同一排法）；
+                  id 走等宽 —— 它是文件名那一串，与中文显示名不是一回事 */}
               <h2>{cur.display || cur.id}</h2>
-              <span className={s.cardNote}>{cur.id}</span>
+              <span className={`${s.cardNote} ${s.mono}`}>{cur.id}</span>
               <button type="button" className={s.btn} onClick={() => { setEditId(cur.id); setEditDisplay(cur.display); setEditing(true) }}>
                 编辑
               </button>
@@ -448,9 +495,8 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
             </div>
             <div className={s.cardBody}>
               {cur.defaultFor.length > 0 && (
-                <p className={s.note} style={{ marginTop: 0 }}>
+                <p className={s.cardNoteDim} style={{ marginTop: 0 }}>
                   机型默认跟着它的：<strong>{cur.defaultFor.join('、')}</strong>
-                  （版本没自己指套餐时，生成侧回退到这份）
                 </p>
               )}
               {cur.assetRefs.some((r) => r.visibility === 'archiveOnly') && (
@@ -466,14 +512,13 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               <div className={s.group}>
                 <div className={s.groupHead}>
                   MKP 预设（{cur.assetRefs.filter((r) => r.kind === 'mkPreset').length}）
+                  <HelpDot text="资产库里的 MKP 预设类。文件在不在都能挂 —— 「有没有生成」是生成页的状态，不拦选用。" />
                 </div>
-                {/* 资产库里的 `mkPreset` 类（2026-10-03 按作者裁决进的台账）——
-                    **文件在不在都能挂**，「有没有生成」是生成页的状态，不拦选用 */}
                 {cur.assetRefs
                   .filter((r) => r.kind === 'mkPreset')
                   .map((r) => (
                     <div key={r.id} className={s.fileRow} {...fMenu.triggerProps(r.id)}>
-                      <span className={`${s.fileName} ${s.mono}`}>{r.name || r.id}</span>
+                      <span className={`${s.fileName} ${s.mono}`}>{refFileName(assets, r)}</span>
                       <span className={s.tag}>MKP</span>
                       {/* 生成状态徽章（与资产库 / 生成页同一套词与判据）：
                           「有没有生成」是生成页的状态，不拦挂载 */}
@@ -505,7 +550,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                   .filter((r) => r.kind !== 'slicerProfile' && r.kind !== 'mkPreset')
                   .map((r) => (
                     <div key={r.id} className={s.fileRow} {...fMenu.triggerProps(r.id)}>
-                      <span className={`${s.fileName} ${s.mono}`}>{r.name || r.id}</span>
+                      <span className={`${s.fileName} ${s.mono}`}>{refFileName(assets, r)}</span>
                       <span className={s.tag}>{r.kind}</span>
                       {r.visibility === 'archiveOnly' && (
                         <span className={`${s.tag} ${s.tagDanger}`}>仅归档</span>
@@ -526,20 +571,21 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                     </div>
                   ))}
                 {!cur.assetRefs.some((r) => r.kind !== 'slicerProfile') && (
-                  <p className={s.note} style={{ margin: 0 }}>
-                    一个都没装 —— 点「改套餐内容…」从资产库挂 MKP 预设
-                    （文件还没生成也能先挂，生成之后文件自动补上）
+                  <p className={s.cardNoteDim} style={{ margin: 0 }}>
+                    一个都没装 —— 点「改套餐内容…」从资产库挂
                   </p>
                 )}
               </div>
 
               <div className={s.group}>
-                <div className={s.groupHead}>切片器文件（{cur.assetRefs.filter((r) => r.kind === 'slicerProfile').length}）</div>
+                <div className={s.groupHead}>
+                  切片器文件（{cur.assetRefs.filter((r) => r.kind === 'slicerProfile').length}）
+                </div>
                 {cur.assetRefs
                   .filter((r) => r.kind === 'slicerProfile')
                   .map((r) => (
                     <div key={r.id} className={s.fileRow} {...fMenu.triggerProps(r.id)}>
-                      <span className={`${s.fileName} ${s.mono}`}>{r.name || r.id}</span>
+                      <span className={`${s.fileName} ${s.mono}`}>{refFileName(assets, r)}</span>
                       <span className={s.tag}>BBS</span>
                       {r.visibility === 'archiveOnly' && (
                         <span className={`${s.tag} ${s.tagDanger}`}>仅归档</span>
@@ -560,14 +606,13 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                     </div>
                   ))}
                 {!cur.assetRefs.some((r) => r.kind === 'slicerProfile') && (
-                  <p className={s.note} style={{ margin: 0 }}>
+                  <p className={s.cardNoteDim} style={{ margin: 0 }}>
                     一个都没装
                   </p>
                 )}
               </div>
 
               <div className={s.group}>
-                <div className={s.groupHead}>套餐里的文件</div>
                 <div className={s.addRow}>
                   <button
                     type="button"
@@ -576,19 +621,15 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                   >
                     改套餐内容…
                   </button>
-                  <span className={s.cardNote}>
-                    一个框里两个页签（MKP 预设 / 切片器）——
-                    和机型页那颗「改套餐内容…」打开的是<strong>同一个框</strong>
-                  </span>
+                  <HelpDot text="一个框里两个页签（MKP 预设 / 切片器）—— 和机型页那颗「改套餐内容…」打开的是同一个框。改动即时落盘（updatedAt 会盖上今天）；存一条 BBS 都没有的套餐存不进去 —— MKP 与 BBS 必须成套配发。" />
                 </div>
-                <p className={s.note}>
-                  改动即时落盘（updatedAt 会盖上今天）；存一条 BBS 都没有的套餐存不进去
-                  —— MKP 与 BBS 必须成套配发。
-                </p>
               </div>
 
               <div className={s.group}>
-                <div className={s.groupHead}>被哪些版本指向（{cur.users.length}）</div>
+                <div className={s.groupHead}>
+                  被哪些版本指向（{cur.users.length}）
+                  <HelpDot text="点 chip 跳到那个版本，点 × 取消它自己的指向（它会回到机型默认）。右键 chip 也是这两项。" />
+                </div>
                 <div className={s.chips}>
                   {cur.users.length ? (
                     cur.users.map((u) => {
@@ -631,33 +672,17 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                       )
                     })
                   ) : (
-                    <span className={s.cardNote}>
+                    <span className={s.cardNoteDim}>
                       没有版本用它 —— 合法中间状态（大家都走机型默认），不是错误
                     </span>
                   )}
                 </div>
-                {cur.users.length > 0 && (
-                  <p className={s.note}>
-                    点 chip 跳到那个版本，点 <strong>×</strong> 取消它自己的指向
-                    （它会回到机型默认）。右键 chip 也是这两项。
-                  </p>
-                )}
               </div>
 
               <div className={s.group}>
-                <div className={s.groupHead}>把版本指到这个套餐</div>
-                <div className={s.addRow}>
-                  <button
-                    type="button"
-                    className={s.btn}
-                    onClick={() => setAssignPickOpen(true)}
-                  >
-                    选择版本…（{assignPicks.length} 已选）
-                  </button>
-                  <span className={s.cardNote}>
-                    <strong>一个套餐可以被多个版本指</strong>（不限机型）；
-                    <strong>一个版本只指一个套餐</strong> —— 一版一套
-                  </span>
+                <div className={s.groupHead}>
+                  把版本指到这个套餐
+                  <HelpDot text="一个套餐可以被多个版本指（不限机型）；一个版本只指一个套餐 —— 一版一套。真源关系就是一版一套：改了指向之后那一版的生成与发布跟着走（后端判据，不在前端）。" />
                 </div>
                 {assignPicks.length > 0 && (
                   <div className={s.chips}>
@@ -688,7 +713,14 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                     })}
                   </div>
                 )}
-                <div className={s.addRow} style={{ marginTop: 8 }}>
+                <div className={s.addRow}>
+                  <button
+                    type="button"
+                    className={s.btn}
+                    onClick={() => setAssignPickOpen(true)}
+                  >
+                    选择版本…（{assignPicks.length} 已选）
+                  </button>
                   <button
                     type="button"
                     className={`${s.btn} ${s.btnPrimary}`}
@@ -698,15 +730,9 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                   >
                     确认指向
                   </button>
-                  <span className={s.cardNote}>
-                    点了先看<strong>影响预览</strong>（哪些版本会被改、原来指着谁），确认之后才落盘
-                  </span>
+                  <HelpDot text="「确认指向」先给你看影响预览（哪些版本会被改、原来指着谁），确认之后才落盘 —— 即时生效、没有草稿、没有撤销。" />
                 </div>
               </div>
-              <p className={s.note}>
-                真源关系是<strong>一版一套</strong>：每个版本指向自己的套餐，改了指向之后
-                那一版的生成与发布跟着走（后端判据，不在前端）。
-              </p>
             </div>
           </div>
         )}
@@ -732,7 +758,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       <ModalC14
         open={creating}
         title="新建套餐"
-        subtitle="一份交付装什么（MKP 预设 + 切片器），装好再建 —— 内容以后也能改"
         size="md"
         onClose={() => setCreating(false)}
         footer={
@@ -753,7 +778,8 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
           </>
         }
       >
-        <div className={s.addRow}>
+        <div className={s.fieldCol}>
+          <span className={s.fieldLabel}>归属机型</span>
           <SelectField
             label="归属机型"
             value={newMachine}
@@ -765,26 +791,32 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
           />
         </div>
         <div className={s.addRow}>
-          <input
-            className={s.filter}
-            value={newId}
-            placeholder="id（如 A1_NEW，不许空白或 /）"
-            aria-label="新套餐 id"
-            onChange={(e) => setNewId(e.target.value)}
-          />
-          <input
-            className={s.filter}
-            value={newDisplay}
-            placeholder="显示名（默认：推荐）"
-            aria-label="新套餐显示名"
-            onChange={(e) => setNewDisplay(e.target.value)}
-          />
+          <label className={s.fieldCol}>
+            <span className={s.fieldLabel}>套餐 id</span>
+            <input
+              className={s.filter}
+              value={newId}
+              placeholder="如 A1_NEW（不许空白或 /）"
+              aria-label="新套餐 id"
+              onChange={(e) => setNewId(e.target.value)}
+            />
+          </label>
+          <label className={s.fieldCol}>
+            <span className={s.fieldLabel}>显示名</span>
+            <input
+              className={s.filter}
+              value={newDisplay}
+              placeholder="留空 = 用 id"
+              aria-label="新套餐显示名"
+              onChange={(e) => setNewDisplay(e.target.value)}
+            />
+          </label>
         </div>
         <div className={s.addRow}>
           <button type="button" className={s.btn} onClick={() => setNewResOpen(true)}>
             选内容…（{newRefs.length} 份）
           </button>
-          <span className={s.cardNote}>至少一条切片器预设 —— MKP 与 BBS 必须成套配发</span>
+          <HelpDot text="至少一条切片器预设 —— MKP 与 BBS 必须成套配发，缺了存不进去。内容以后也能改。" />
         </div>
         <BundleResourcesModal
           open={newResOpen}
@@ -802,7 +834,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       <ModalC14
         open={editing}
         title={`编辑套餐 · ${cur?.id ?? ''}`}
-        subtitle="改 id 会把机型文件里的 defaultBundle / recommendedBundle 一并重指"
         size="md"
         onClose={() => setEditing(false)}
         footer={
@@ -824,20 +855,29 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
         }
       >
         <div className={s.addRow}>
-          <input
-            className={s.filter}
-            value={editId}
-            placeholder="id"
-            aria-label="套餐 id"
-            onChange={(e) => setEditId(e.target.value)}
-          />
-          <input
-            className={s.filter}
-            value={editDisplay}
-            placeholder="显示名"
-            aria-label="套餐显示名"
-            onChange={(e) => setEditDisplay(e.target.value)}
-          />
+          <label className={s.fieldCol}>
+            <span className={s.fieldLabel}>
+              套餐 id
+              <HelpDot text="改 id 会把机型文件里的 defaultBundle / recommendedBundle 一并重指（后端做）—— 它同时是 bundles.toml 里的键。" />
+            </span>
+            <input
+              className={`${s.filter} ${s.mono}`}
+              value={editId}
+              placeholder="如 A1_STANDARD"
+              aria-label="套餐 id"
+              onChange={(e) => setEditId(e.target.value)}
+            />
+          </label>
+          <label className={s.fieldCol}>
+            <span className={s.fieldLabel}>显示名</span>
+            <input
+              className={s.filter}
+              value={editDisplay}
+              placeholder="给人看的名字"
+              aria-label="套餐显示名"
+              onChange={(e) => setEditDisplay(e.target.value)}
+            />
+          </label>
         </div>
       </ModalC14>
 
@@ -845,7 +885,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       <ModalC14
         open={copying}
         title={`复制套餐 · ${cur?.id ?? ''}`}
-        subtitle="内容与归属照抄；复制出来的那份不被任何版本指着 —— 指向要人显式改"
         size="md"
         onClose={() => setCopying(false)}
         footer={
@@ -866,13 +905,19 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
         }
       >
         <div className={s.addRow}>
-          <input
-            className={s.filter}
-            value={copyId}
-            placeholder="新套餐 id"
-            aria-label="新套餐 id"
-            onChange={(e) => setCopyId(e.target.value)}
-          />
+          <label className={s.fieldCol}>
+            <span className={s.fieldLabel}>
+              新套餐 id
+              <HelpDot text="内容与归属照抄；复制出来的那份不被任何版本指着 —— 指向要人显式改。" />
+            </span>
+            <input
+              className={`${s.filter} ${s.mono}`}
+              value={copyId}
+              placeholder="如 A1_STANDARD_COPY"
+              aria-label="新套餐 id"
+              onChange={(e) => setCopyId(e.target.value)}
+            />
+          </label>
         </div>
       </ModalC14>
 
@@ -880,7 +925,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       <ModalC14
         open={assignPickOpen}
         title={`选择版本 · ${cur ? `${cur.display || cur.id}（${cur.id}）` : ''}`}
-        subtitle="可以多选；一个套餐可以被多个版本指，一个版本只指一个套餐"
         size="md"
         onClose={() => setAssignPickOpen(false)}
         footer={
@@ -897,6 +941,10 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
          * 机型一行组头、版本在下面缩进 —— 与参数台左树同一副长相（同样的类）。
          * 之前每行把 `机型/版本` 与版本 id 都摊两遍、还各自垫了背景色，两件事一起被点名。
          */}
+        <p className={s.cardNoteDim} style={{ marginTop: 0 }}>
+          可以多选 —— <strong>一个套餐可以被多个版本指，一个版本只指一个套餐</strong>
+          <HelpDot text="不限机型：本机型的排前面只是方便，别家的也能选。" />
+        </p>
         <div className={s.pickTree}>
           {machines.machines.map((m) => (
             <div key={m.id} className={s.pMg}>
@@ -958,7 +1006,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
       <ModalC14
         open={assignConfirm}
         title={`确认指向 · ${cur ? `${cur.display || cur.id}（${cur.id}）` : ''}`}
-        subtitle="一个套餐可以被多个版本指 —— 改了指向之后，这些版本的生成与发布都会跟着走"
         size="md"
         onClose={() => setAssignConfirm(false)}
         footer={
@@ -987,6 +1034,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               )
               return noop.length > 0 ? `（其中 ${noop.length} 个已经指着它，不算改动）` : ''
             })()}
+            <HelpDot text="确认之后即时落盘（没有草稿、没有撤销）；要撤就把这些版本改指回原来的套餐。" />
           </span>
         </div>
         <div className={s.chips} style={{ marginTop: 8 }}>
@@ -996,9 +1044,6 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
             </span>
           ))}
         </div>
-        <p className={s.note}>
-          确认之后<strong>即时落盘</strong>（没有草稿、没有撤销）；要撤就把这些版本改指回原来的套餐。
-        </p>
       </ModalC14>
 
       {/* —— 删除：被机型默认或版本指着时是拦截页（说清是谁、去哪解除） —— */}
@@ -1057,6 +1102,21 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
   )
 }
 
+/**
+ * 分组标题旁那枚「?」——原说明全文挂在它的 `title` 上（悬停才出现）。
+ *
+ * 用原生 `title` 而不是自绘浮层：这一页有二十来处这种小提示，自绘要么引一层
+ * portal、要么在模态框里被遮罩裁掉；`title` 零成本、哪儿都在。见 `c14.module.css`
+ * 的 `.helpDot`（那条注释写了口径）。
+ */
+function HelpDot({ text }: { text: string }) {
+  return (
+    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+      ?
+    </span>
+  )
+}
+
 /** 新建流程里「选内容」用的合成套餐（空清单起步） */
 function syntheticBundle(
   id: string,
@@ -1066,16 +1126,19 @@ function syntheticBundle(
 ): BundleView {
   return {
     id: id.trim() || '(新套餐)',
-    display: display.trim() || '推荐',
+    display: display.trim() || expectedBundleDisplay(id),
     machineId,
     assetRefs: refs.map((r) => {
-      /* 勾选态只要 id —— 其余字段是详情卡用的，给中性值 */
+      /* 勾选态只要 id —— 其余字段是详情卡用的，给中性值。
+         ★ `productName` 是必填格（后端 DTO 2026-10-16 加的），缺了 tsc 会红；
+         合成套餐还没落盘，产物名无从算起 ⇒ 空串（详情卡会回落 `name`）。 */
       return {
         id: r,
         kind: 'slicerProfile' as const,
         resolvable: true,
         isBbs: true,
         name: r,
+        productName: '',
         present: true,
         buildState: null,
         visibility: 'menu' as const,

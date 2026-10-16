@@ -1401,6 +1401,9 @@ export interface AssetView {
   display: string
   /** 台账登记的名字（不是显示真源，详情卡里作对照） */
   name: string
+  /** **产物文件名**（只 MKP 预设类有，如 `A1-standard.toml`）：后端按命名规则现算，
+   *  台账里不存、前端**不许自己拼**。其余类恒空串（真名走 `path` 末段 / `display`） */
+  productName: string
   /**
    * 相对**资产源根**（`presets/assets/`）的一段 —— 工作台读的是源，与交付档位无关。
    * 它同时就是 `/assets/` 那条 URL 的后半截（`url` 由后端拼，前端只 encode）
@@ -1426,11 +1429,106 @@ export interface AssetView {
   /** **生成状态**（只 `mkPreset` 类有，与生成页同一套判据）：没生成过 = 待生成；
    *  生成过、参数改完还没重新生成 = **待更新**。其余四类恒 null */
   buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
+  /**
+   * **它属于哪个分组**（2026-10-16）。没进组 = 两个 `null`。
+   *
+   * ★ 由**后端**从台账 `[[groups]]` 算好再发过来 —— 前端不自己推"谁跟谁一组"
+   * （那会让"哪几张共用一份标注"有两套算法）
+   */
+  groupId: string | null
+  groupName: string | null
+  /** 它在这个组里演什么（`light` / `dark` / …）。没进组或没写角色 ⇒ null */
+  role: string | null
+}
+
+/** `assets::GroupView` —— 一个分组在界面上的样子（资产库页的分组管理器用） */
+export interface GroupView {
+  id: string
+  name: string
+  members: GroupMemberView[]
+}
+
+/** `assets::GroupMemberView` —— 分组里的一名成员（带显示名，管理器直接画） */
+export interface GroupMemberView {
+  asset: string
+  display: string
+  role: string
+}
+
+/**
+ * 一个框（**百分比**，相对整张图）—— 与客户端 `GuideMark.at` 同形
+ */
+export interface AnnoBox {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** 一条标注画出来什么样（全可选；一个都不写 = 站点缺省：圆角 8 / 线宽 2 / 编号 18） */
+export interface AnnoStyle {
+  radius?: number
+  stroke?: number
+  badge?: number
+}
+
+/** 图上的一块标注（`step` = 框角上那颗编号，一份里不许重号） */
+export interface AnnoMark {
+  step: number
+  at: AnnoBox
+  /** 给自己看的名字（只进导出那行注释，不进客户端契约） */
+  note?: string
+  style?: AnnoStyle
+}
+
+/**
+ * 这份标注画在**哪几张图上**（路径 = **资产根**里的相对路径）＋ 当时的图尺寸。
+ *
+ * ★ 2026-10-16 泛化：原来是 `light` / `dark` 两个字段（浅 / 深一对），改成**一个路径列表** ——
+ * 一份源稿＝一组，`images` 就是这一组的全部成员；浅 / 深那一对只是"现在恰好两个成员"的特例。
+ * 将来一组三张以上（macOS + Windows 同一套引导）不用再动 schema。
+ */
+export interface AnnoSource {
+  /** 这一组图（同一份标注画上去的那些）—— 顺序就是"组内次序" */
+  images: string[]
+  size: { w: number; h: number }
+}
+
+/** 一份标注**源稿**（入库的那一份，`presets/assets/…/<对>.anno.json`） */
+export interface AnnoDoc {
+  annoSchema: number
+  source: AnnoSource
+  marks: AnnoMark[]
+  /** 后端盖的时间（前端不造时间） */
+  updatedAt: string
+}
+
+/** `annotation::AnnoView` —— 读回来的样子：源稿 + 它在资产根里的落点 */
+export interface AnnoView {
+  /** **没有源稿是合法状态**（还没拖过）⇒ `null` */
+  doc: AnnoDoc | null
+  /** 相对资产根的落点，例如 `guides/open-with.anno.json` */
+  path: string
+  /** **标注台该显示的那张图**（相对资产根）= **原图**，不是台账那条成品图。
+   *  台账 `path` 指成品 `.rendered.webp`（框已烧进像素），在它上面再画框就是"框上叠框" */
+  sourceImage: string
+}
+
+/** `annotation::RenderedShot` —— 「生成预览」烘出来的一张（**没落盘**，只回字节） */
+export interface RenderedShot {
+  /** 输入用哪张原图（相对资产根） */
+  original: string
+  /** 成品该落在哪（相对资产根）—— 预览时只当标识（保存时后端照这个写） */
+  out: string
+  /** webp 字节的 base64（前端 `new Blob` 成 `blob:` URL 去预览） */
+  bytesB64: string
 }
 
 /** `assets::AssetList` */
 export interface AssetList {
   assets: AssetView[]
+  /** **分组登记**（2026-10-16）—— 管理器要的那张表，**全量**、不随筛选变 */
+  groups: GroupView[]
   /** 资产根的绝对路径 */
   root: string
   /** 喷嘴轴候选值。从全部切片器条目取，**不随筛选变** —— 选中一个值不能让别的选项消失 */
@@ -1498,6 +1596,9 @@ export interface BundleRefView {
   isBbs: boolean
   /** 资产域登记的名字。解析不到时是空串 */
   name: string
+  /** **产物文件名**（只 MKP 预设类有，如 `A1-standard.toml`）—— 后端按命名规则现算，
+   *  台账里不存、前端**不许自己拼**（那会变成第二份规则）。其余类恒空串 */
+  productName: string
   /** 文件在不在。**MKP 预设按生成状态判**（产物不在资产根里） */
   present: boolean
   /** **生成状态**（只 `mkPreset` 类有，与生成页 / 资产库同一套判据），其余类恒 null */
@@ -1634,7 +1735,21 @@ export const wb = {
     layer: string | null,
     identity: string | null,
     query: string | null,
-  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, identity, query }),
+    /** 只看某一个分组（组 id）。与 `ungrouped` **二选一**，都不给 = 不过滤 */
+    group: string | null,
+    /** 只看没进任何组的那些 */
+    ungrouped: boolean | null,
+  ) =>
+    invoke<AssetList>('wb_assets', {
+      kind,
+      slicer,
+      nozzle,
+      layer,
+      identity,
+      query,
+      group,
+      ungrouped,
+    }),
 
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
@@ -1642,6 +1757,48 @@ export const wb = {
   /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
   setAssetDelivery: (assetId: string, delivery: 'download' | 'bundled') =>
     invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
+
+  /**
+   * **新建或改写一个分组**（2026-10-16）。即时落盘，回一份新清单。
+   *
+   * 分组 = "哪几张图共用同一份标注源稿"，登记在台账 `[[groups]]` 里 ——
+   * 跟资产一起入库、跟仓库走、编进 catalog（客户端按 `role` 挑图，不认文件名）。
+   * 坏值（跨目录 / 一图两组 / id 不能当文件名）后端整次拒绝。
+   */
+  setGroup: (id: string, name: string, members: { asset: string; role: string }[]) =>
+    invoke<AssetList>('wb_set_group', { id, name, members }),
+
+  /** 删掉一个分组。**成员原地变回"未分组"** —— 资产一条不动 */
+  removeGroup: (id: string) => invoke<AssetList>('wb_remove_group', { id }),
+
+  /**
+   * 「标注台」读**源稿**（2026-10-16）—— 图上那些框"能再编辑的那一份"。
+   *
+   * 住在 `presets/assets/<同类目录>/<对>.anno.json`（与图**同层**、随仓库走、**不进交付目录**）。
+   * 浅 / 深两张共用一份 ⇒ 落点抹掉浅深后缀（`open-with-light` / `-dark` ⇒ `open-with`）。
+   * **没有源稿是合法状态**（`doc === null`：第一次打开、或还没拖过）—— 不是错误。
+   */
+  annoRead: (assetId: string) => invoke<AnnoView>('wb_anno_read', { assetId }),
+
+  /**
+   * 「标注台」写**源稿**（入库的那一份）**＋同趟烘成品图**。路径由后端从台账派生（前端只给 id），
+   * `updatedAt` 由后端盖章；坏值（负坐标 / 伸出图外 / 重号 / 样式离谱）**整次拒绝**，
+   * 不写下去 —— 宁可报错，也不在仓库里留一份"看着有、其实读不了"的。
+   *
+   * `displayScale` = **这份成品图的参考显示比例**（客户端把这张图显示多大，即
+   * `314 / 图宽` —— 标注台的 `refScale`）—— 与标注台当前缩放**无关**：
+   * 同一份标注换视角 / 换窗口保存，烧出来一模一样。
+   */
+  annoWrite: (assetId: string, doc: AnnoDoc, displayScale: number) =>
+    invoke<AnnoView>('wb_anno_write', { assetId, doc, displayScale }),
+
+  /**
+   * 「生成预览」—— 按 `displayScale`（**参考显示比例**，同上）烘一张成品图，
+   * **只回字节、一个盘都不写**（作者：「它生成一个预览的，然后我在客户视角下去看没问题了。
+   * 我点保存它就存进去，不然它就只是一个临时的……拍一张照只是不存回我们的相册」）。
+   */
+  annoRender: (assetId: string, doc: AnnoDoc, displayScale: number) =>
+    invoke<RenderedShot[]>('wb_anno_render', { assetId, doc, displayScale }),
 
   /**
    * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、

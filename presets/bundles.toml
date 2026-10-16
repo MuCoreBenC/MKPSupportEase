@@ -32,74 +32,76 @@
 #
 # - `id`：机型文件引用着它（`defaultBundle` 五处 + 每个版本的 `recommendedBundle`
 #   一处）。**机型默认套餐 = 该机型的 STANDARD 版那份**（生成侧回退的口径）。
-# - `display`：给人看的名字，沿用「推荐」。
+# - `display`：给人看的名字。**必须能区分是哪一版**（作者 2026-10-16：「为什么要叫
+#   推荐呢？你帮我每个改好他们的名字」）—— 一律取 `机型显示名 + 版本 name`（见
+#   `presets/machines/*.toml` 的 `versions[].name`）。九份都叫「推荐」时列表读不出谁是谁。
 # - `assetRefs`：**我们的资产 id**（MKP 预设类 + 切片器类混一份清单，前端按类型分组）。
 
 # ---------------- A1：三个版本各一份 ----------------
 
 [[bundles]]
 id = 'A1_STANDARD'
-display = '推荐'
+display = 'A1 标准版'
 machineId = 'A1'
-assetRefs = ['a1-standard', 'a1-bbs-04-020']
-updatedAt = '2026-10-03'
+assetRefs = ["a1-standard", "a1-bbs-04-020"]
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'A1_FAST'
-display = '推荐'
+display = 'A1 快拆版6月以前'
 machineId = 'A1'
 assetRefs = ['a1-fast', 'a1-bbs-04-020']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'A1_FASTV3.3'
-display = '推荐'
+display = 'A1 快拆版260628'
 machineId = 'A1'
 assetRefs = ['a1-fastv3.3', 'a1-bbs-04-020']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 # ---------------- A1 mini：三个版本各一份 ----------------
 
 [[bundles]]
 id = 'A1_MINI_STANDARD'
-display = '推荐'
+display = 'A1 mini 标准版'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-standard', 'a1_mini-bbs-04-020']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'A1_MINI_FAST'
-display = '推荐'
+display = 'A1 mini 快拆版6月以前'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fast', 'a1_mini-bbs-04-020']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'A1_MINI_FASTV3.3'
-display = '推荐'
+display = 'A1 mini 快拆版260628'
 machineId = 'A1_MINI'
 assetRefs = ['a1_mini-fastv3.3', 'a1_mini-bbs-04-020']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 # ---------------- P1S / P2S / X1C：单版本机型沿用旧名 ----------------
 
 [[bundles]]
 id = 'P1S_default'
-display = '推荐'
+display = 'P1S lite版'
 machineId = 'P1S'
 assetRefs = ['p1s-lite', 'p1s-bbs-04-024']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'P2S_default'
-display = '推荐'
+display = 'P2S 标准版'
 machineId = 'P2S'
 assetRefs = ['p2s-standard', 'p2s-bbs-04-024']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'
 
 [[bundles]]
 id = 'X1C_default'
-display = '推荐'
+display = 'X1C lite版'
 machineId = 'X1C'
 assetRefs = ['x1c-lite', 'x1c-bbs-04-024']
-updatedAt = '2026-10-03'
+updatedAt = '2026-10-16'

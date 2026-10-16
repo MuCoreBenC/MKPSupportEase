@@ -27,11 +27,16 @@ use crate::runtime;
 
 use super::traced;
 
+/// 界面读的那份目录：② 为准 + **随包那份只兜底**（补 ② 里没有的 bundled 资产条目）。
+///
+/// ★ 走 [`runtime::catalog_for_ui`] 而不是直接 [`runtime::load_released_catalog`]：
+///   随包资产的字节在程序里，② 比程序旧时不该让界面"找不到那张图"
+///   （2026-10-16 实测的丢图就是这么来的，见那个函数的注释）。盘上一个字节都不动。
 #[tauri::command]
 pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, AppError> {
     traced("getRuntimeCatalog", |_| {
         let root = internal_root(&app)?;
-        runtime::load_released_catalog(&root)
+        runtime::catalog_for_ui(&root)
     })
 }
 

@@ -276,22 +276,55 @@ export function syncBundledAssets(repoRoot, outRoot) {
  * 用途只有一处：工作台构建时把**全部有 `path` 的台账条目**铺进 `dist/assets/`，
  * 好让工作台界面按 `/assets/<path>` 预览任何登记过的资产（包含 cloud 档）。
  */
-export function copyAssetsInto(repoRoot, destRoot, items) {
+export function copyAssetsInto(repoRoot, destRoot, items, { withGuideSources = false } = {}) {
   const srcRoot = join(repoRoot, SOURCE_ROOT_REL)
   let n = 0
-  for (const a of items) {
-    if (a.path === '') continue
-    const from = join(srcRoot, a.path)
+  const copyOne = (rel, required = false) => {
+    const from = join(srcRoot, rel)
     if (!existsSync(from) || !statSync(from).isFile()) {
-      throw new Error(
-        `资产 ${a.id} 的文件不在：${from}\n` +
-          '  装配（工作台构建）要求台账里每一条有 path 的资产都真在源目录里 —— 先补文件再构建。',
-      )
+      if (required) {
+        throw new Error(
+          `资产文件不在：${from}\n` +
+            '  装配要求台账里每一条有 path 的资产都真在源目录里 —— 先补文件再构建。',
+        )
+      }
+      return false
     }
-    const dest = join(destRoot, a.path)
+    const dest = join(destRoot, rel)
     mkdirSync(dirname(dest), { recursive: true })
     writeFileSync(dest, readFileSync(from))
     n += 1
+    return true
+  }
+  for (const a of items) {
+    if (a.path === '') continue
+    copyOne(a.path, true)
+  }
+  /*
+   * ★★★ 引导图的**原图**也要铺进来 —— **只给工作台**（2026-10-16 方案 A）。
+   *
+   * 台账那条指针的是**成品图**（`.rendered.webp`，框已烧进像素），原图在
+   * **同层 `source/` 子目录**下、同名同后缀 —— 它**不是台账条目**（不进交付），
+   * 但**工作台的标注台要显示它**（在成品图上再画框 = 框上叠框）。
+   *
+   * ★ `withGuideSources` 只有**工作台那一趟**为真：**客户端绝不能带上原图** ——
+   * 那是"像 PSD 一样自己留存"的那一份，进了用户包就是白占体积、还泄了源料。
+   *
+   * 判据与后端 `annotation::source_image_rel_of` 的兜底那条一致：
+   * `<dir>/<stem>.rendered.webp` ⇒ `<dir>/source/<stem>.png`。
+   * 找不到就**跳过**（老条目还没挪 source/ 时会走这一支，标注台自己会回落成品图）。
+   */
+  if (withGuideSources) {
+    for (const a of items) {
+      if (a.path === '') continue
+      const at = a.path.lastIndexOf('/')
+      const dir = at < 0 ? '' : `${a.path.slice(0, at)}/`
+      const base = at < 0 ? a.path : a.path.slice(at + 1)
+      const stem = base.replace(/\.rendered\.webp$/i, '').replace(/\.[^.]+$/, '')
+      for (const ext of ['png', 'jpg', 'jpeg', 'webp']) {
+        if (copyOne(`${dir}source/${stem}.${ext}`)) break
+      }
+    }
   }
   return n
 }

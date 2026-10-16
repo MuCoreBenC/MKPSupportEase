@@ -625,31 +625,121 @@
  * 差一像素，打几行字两层就错开。
  */
 .editWrap {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* `min-height: 0` 是**必须**的：不然它在 flex 里按内容撑高，正文一长就把说明行顶出框外 */
+  min-height: 0;
   flex: 1;
-  min-height: 240px;
   /* 四周留白：框身（`bodyFill`）自己不留内衬 —— 留白由这一块出，代码区像一块面板浮着 */
   margin: 14px 16px 16px;
+}
+
+/*
+ * 正文那块 = 一层（`.editBody`，相对定位的容器；着色层与 textarea 在它里面绝对定位铺满）。
+ *
+ * ★★★ **行号不许单独成块**（2026-10-16 第三版，作者看过上一版之后）：
+ *   「它又有这个圆角，然后又有这一个什么的」「滚动的时候它这左边的那个跟右侧的是分开的，
+ *   很割裂」—— 上一版把行号做成左边**独立的一格**（自己一圈描边、自己一个圆角），
+ *   于是屏幕上看着是两块拼起来的：滚动条 / 圆角 / 底色各是一套，左右像两个窗口。
+ * ⇒ 回成**一个面板**：行号就是面板自己的左内衬里画的一列刻度（下面那 `.editNums`
+ *   只占左边那一条，没有边框、没有圆角、底色用实色把横滚过来的字挡掉）。
+ *   面板那圈描边与圆角因此只有**一套**，滚动也是一起滚的（本就是一个滚动容器）。
+ *
+ * ★ 两条必须记住的：
+ *   ① 这里**不能**用 flex 排"行号 + 正文"（一 flex 就把行号挤成一个独立列，
+ *      回到上一版那个割裂的样子）；
+ *   ② `.editBody` 必须是 `flex: 1; min-height: 0`、**不是** `height: 100%` ——
+ *      父级 `.editWrap` 是 flex 项，`height: 100%` 在 Safari/Tauri 里会解析成 auto，
+ *      正文短的时候整块面板塌到只剩内衬那么高。
+ */
+.editBody {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * 编辑区底下那句常驻说明（「文件头几行锁定不可改 · ⇧滚轮左右看 · ⌥Z 软折行」）——
+ * 2026-10-16 作者那天连问的三件事（横向怎么滚 / 有没有 ⌥Z / 上面那几行为什么灰着）
+ * 都**没有可见入口**，不写出来用户只能猜。见 JSX 里那段注释。
+ *
+ * 它不进"正文那两层"的对齐体系（那两层的字体 / 行高 / 内衬是逐像素绑死的）——
+ * 它是普通说明文字，用全局的字号与色号，放在正文块底下、右对齐。
+ */
+.editHint {
+  /* 不参与 flex 伸缩：它在本行就那点高度，绝不被上面那块挤走、也绝不挤别人 */
+  flex: none;
+  margin: 8px 2px 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: right;
+  line-height: 1.5;
 }
 
 .editArea,
 .editPaint {
   margin: 0;
-  padding: 14px 16px;
+  /*
+   * 左边那一段多出来的内衬 = **行号那一列**（`.editNumsGutter` 画在那儿）。
+   * 下面那 14 加的是 `--scrollbar-pad`：**只在滚动条真占位**的平台才非零
+   * （macOS 是覆盖式的，量出来就是 0 —— 见 `PagePresets` 的 `scrollbarPad`），
+   * 免得最后一行被那条横条盖住。
+   */
+  padding: 14px 16px calc(14px + var(--scrollbar-pad, 0px)) 62px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: var(--fs-label);
   line-height: 1.7;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
+  /*
+   * ★★ **不折行**（2026-10-16 作者，小窗口截图：「它换行了，我感觉它不像注释的感觉」）：
+   * 一折行，续行就没有行首那个 `#`、也拿不到注释色 —— 看着就不像注释了
+   * （第 7 行那条 `# based_on_sha256:` 的尾巴就是这么飘出去的）。
+   * 一折行还有第二个副作用：**行号对不上号**（一个逻辑行 = 屏幕上两行，行号只能给第一行）。
+   * 代价是要横向滚 —— 代码编辑器的老规矩，长行（那条 sha256）本来就该滚着看。
+   */
+  white-space: pre;
 }
+
+/*
+ * **软折行**（⌥Z 切，作者 2026-10-16 第三轮：「有没有按那个 ALT Z 去换行啊，苹果上面的
+ * 好像是 option Z 吧」）：折着看 = 长行不再横滚、行号那一列让回去。
+ *
+ * 只在 `[data-wrap]` 上动手 —— **行高与字号一个都不许改**（改了行号就错位），
+ * 只换"换行规则"和"左边那一段内衬"。
+ * ★ 折行之后一个逻辑行占好几屏行 ⇒ **行号天然对不上号**（老实话：折行视图里它就是装饰）。
+ *   想按行号找东西就按一下 ⌥Z 切回来 —— 这也是把这段写在 `[data-wrap]` 上的原因。
+ */
+.editArea[data-wrap],
+.editPaint[data-wrap] {
+  /* 内衬与不折行时**一个值都不改**（行号那一列照旧在左边，见上面那条）——
+     改了就会跟行号对不上：这一层与行号那一列是两套行高体系，内衬一错位，
+     第 1 行就差半格。 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* 折着看就没有横向溢出了：那一维干脆不收（省得留一条空槽） */
+  overflow-x: hidden;
+}
+
+/*
+ * 折行视图里行号那一列**照旧画着**（作者 2026-10-16 连着两轮都在说它：
+ * 「会把那个行号顶掉」「换行了之后，左侧的行号还是不见了，继续修」）。
+ *
+ * ★★ 先说清一件事：折行之后一个逻辑行会占**好几屏行**，所以行号与屏幕行天然对不上
+ *   （第 7 行折成三屏，那三屏都该显示 7 吗？还是 7/8/9？—— 编辑器们各有各的答法，
+ *   VSCode 干脆就不给折行视图画行号）。**但这不该由我们替用户决定"藏起来"**：
+ *   作者的观感是"我明明要它一直在左边"，一藏就是 bug 的样子。
+ * ⇒ 一律画着（一格号对一个逻辑行，与不折行时同一份 `numsText`）。
+ *
+ * 早先那条 `.editBody:has([data-wrap]) .editNumsGutter { display: none }` **删掉了** ——
+ * 它一上去行号就整列消失、左边还留着 62px 空，看着就是"被顶掉"。
+ */
 
 /* 下面那层：画字、不接事件；滚动由上面那层管（它只跟着走） */
 .editPaint {
   position: absolute;
   inset: 0;
-  overflow: hidden;
+  overflow: hidden scroll;
   pointer-events: none;
   background: var(--surface-sunken);
   color: var(--text-1);
@@ -659,10 +749,98 @@
 .editArea {
   position: absolute;
   inset: 0;
+  overflow: hidden scroll;
   color: transparent;
   caret-color: var(--text-1);
   background: transparent;
   resize: none;
+}
+
+/*
+ * **横向怎么看**（作者 2026-10-16：「别人不是用触摸板的，是怎么左右滑动的？」）。
+ *
+ * ★★★ 来回试过三版，**最终是"让系统画它自己那条"**（作者第三次的原话：「你看 VSCode 啊，
+ *   这一些啊，IDE 啊，我看到都可以的」）—— VSCode 在 macOS 上用的就是系统那条覆盖式滚动条：
+ *   不滚的时候看不见、一滚就浮出来，什么都不用画。
+ *   前面两版都错了：
+ *     · 第一版"整体零占位"（`::-webkit-scrollbar { width:0 }`）⇒ 条永远看不见，
+ *       鼠标用户不知道能横着看；
+ *     · 第二版"自己画一条常驻实底条" ⇒ 它是**占位**的（正文右边多出一整条、
+ *       还要给它补底衬），而且 CSS Modules 里得裹 `:global(...)`，把那条全域规则捅了个洞。
+ * ⇒ 现在：这两层**从全域那条"幽灵滚动条"里摘出来**（见 `global.css` 那条 `:not()`），
+ *   于是它们自动拿到 macOS 的原生覆盖式滚动条 —— 与 VSCode 同一个长相、同一个时机，
+ *   零占位（不滚的时候一点都不挡内容）。
+ *   `--scrollbar-pad`（下面那两层用）是给**真占位**的平台兜底的
+ *   （`scrollbarPad`，见 `PagePresets`：覆盖式滚动条量出来是 0，占位式才有值）。
+ */
+
+/*
+ * **行号那一列**（作者 2026-10-16：「有没有说给这些东西加上行号呀？就左侧出现行号」）。
+ *
+ * 值不值得加：**值** —— 预设页那条"用不了"的原因就是按行报的
+ * （`LocalPresetFileDto.state_detail`：「TOML 语法不对（第 3 行第 1 列）」），
+ * 没有行号用户得自己数；有行号那句话才对得上号。
+ *
+ * ★★★ 它是**面板自己的一条左刻度**，不是一块拼上去的板子（作者第二版看过之后：
+ *   「它又有这个圆角，然后又有这一个什么的」「左边的那个跟右侧的是分开的，很割裂」）：
+ *   · **没有自己的边框、没有自己的圆角** —— 面板那圈描边与圆角因此只有一套；
+ *   · 底色是**实色**（`--surface-sunken-solid`）只为了挡住横滚过来的正文（见下面那条 ★★），
+ *     不是"再起一块面"；
+ *   · 它盖在着色层**之上**（`z-index: 1`，所以要自己铺一层底）、
+ *     纵向跟着正文滚（`scrollTop` 由 `syncScroll` 喂）、横向永远钉死；
+ *   · **不许给它 `overflow: auto`** —— 自画滚动条那条铁律会把它变成
+ *     "一个有自己滚动条的小窗口"，就是上一版那个割裂感的来源。
+ *
+ * 位置：面板的 `border: 1px` 之内（`inset: 1px auto 1px 1px`），圆角跟着面板走。
+ * 内衬与行高必须与上面那条共用规则**逐值相同**（`14px` / `1.7`），否则第 1 行就错位。
+ *
+ * ★★ 底必须**不透明**（作者 2026-10-16：「这个行号最好不要有透明度吧，不然会遮挡住」）：
+ *    `--surface-sunken` 是半透明的（全站拿它当"轻压一层"的底），拿它当这一列的底
+ *    等于没上色 —— 横滚过来的正文会从数字底下透出来，看着就是"叠字"。
+ */
+.editNumsGutter {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  left: 1px;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 46px;
+  /* 点行号 = 点正文那一处（别抢光标、别抢选择） */
+  pointer-events: none;
+  user-select: none;
+  /*
+   * ★★★ 底色的解法（2026-10-16 第三版）：**实色 token + 只圆左边两个角**。
+   *
+   * 上一版这里是"半透明底 + 右边一条 1px 描边"，作者看到的两个毛病都出在这儿：
+   *   ① `--surface-sunken` 是半透明的 —— 拿它当底等于没上色，横滚过来的正文照样
+   *      从数字底下透出来（「行号最好不要有透明度」）；
+   *   ② 那一条 `border-right` 从左缘一直拉到底，**把面板自己的圆角顶掉了一个**
+   *      （作者截图里左上一块方角、左下还多出一小截竖线）。
+   * ⇒ 描边**撤了**（行号与正文本来就是一块面板，不该有内部分隔线），
+   *   底换成实色 token；圆角只画左边那两个（右边接正文，直的）。
+   */
+  border-radius: calc(var(--r-md) - 1px) 0 0 calc(var(--r-md) - 1px);
+  background: var(--surface-sunken-solid);
+}
+
+.editNums {
+  /* 纵向滚（`scrollTop` 由 `syncScroll` 喂）；横向钉死 —— 谁来搬都不动它 */
+  box-sizing: border-box;
+  height: 100%;
+  overflow: hidden;
+  padding: 14px 10px 14px 0;
+}
+
+.editNumsInner {
+  margin: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+  text-align: right;
+  /* 与正文同一套换行规矩：一个逻辑行 = 一格行号（不折行，见上面那条 ★★） */
+  white-space: pre;
 }
 
 /*

@@ -419,6 +419,33 @@ pub fn open_default_app_settings(file: &Path) -> Result<String, AppError> {
     out
 }
 
+/// 「自动化」授权被拒后的**反悔入口**（2026-10-17 作者：「如果用户后悔了，有再次触发的
+/// 开关吗」）。
+///
+/// ★ macOS 的规矩：**拒绝过一次，系统就永远不会再弹那个授权框** —— TCC 没有"再问一次"
+///   的 API，`osascript` 每一次都会直接吃 `-1743`。用户反悔的唯一正路是
+///   **系统设置 → 隐私与安全性 → 自动化** 里把「访达」勾回来。
+///
+///   这里能做的就是把他**送到那一页**：macOS 给"直达某个设置面板"的 URL
+///   （`x-apple.systempreferences:com.apple.preference.security?Privacy_Automation`）——
+///   用它开，用户落点就在「自动化」那一页，不用自己在系统设置里翻。
+///   ★ 依旧**不替他勾**：勾不勾还是他自己的账，我们只负责"别让他找不到在哪儿"。
+/// - Windows：那条「打开方式」框没有"授权"这一说（勾"始终"就是改默认），
+///   这条入口在 Windows 上没有意义 —— 返回"没有这一页"。
+pub fn open_automation_settings() -> Result<(), AppError> {
+    #[cfg(target_os = "macos")]
+    let out = std::process::Command::new("/usr/bin/open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| AppError::io("打不开系统设置的「自动化」页").with_detail(e.to_string()));
+    #[cfg(not(target_os = "macos"))]
+    let out: Result<(), AppError> = Err(AppError::not_implemented(
+        "这台系统上没有「自动化授权」这一页（那是 macOS 的东西）",
+    ));
+    out
+}
+
 /// 那把 `osascript` 的口令，三段各一条 `-e`（`on run argv` / 正文 / `end run`）。
 ///
 /// ★ 路径**不走这几段**，走末尾那个 argv 实参 —— 拼进字符串就得处理引号与转义，

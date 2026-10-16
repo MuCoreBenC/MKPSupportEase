@@ -655,7 +655,7 @@ await page.waitForTimeout(200)
  *   ② **认不出类别的那一份在任何类型档下都列**（藏起来等于说他没这份文件）；
  *   ③ **「编辑」是两态的**（2026-10-16）：打开先只是显示（正文画在只读层里，
  *      没有 textarea、底栏只有「进入编辑模式」）；点进编辑模式才有 textarea 与
- *      撤销 / 重做 / 退出编辑模式 / 保存。原来那颗「看正文」（只读抽屉）已撤，
+ *      撤销 / 重做 / 放弃并退出 / 保存。原来那颗「看正文」（只读抽屉）已撤，
  *      看与改合成一条路（作者：「不需要什么看正文了，你就留一个编辑」）。
  *
  * ★ 上一节（批量）把档切到了切片器 —— 这一节要看的是 MKP 那一张资源库，先切回来。
@@ -765,7 +765,7 @@ if (bodyBtnCount === 0) {
   if (localDrawer.buttons.some((b) => b.includes('保存'))) {
     problems.push('只读态不该出现「保存」')
   }
-  /* 点进编辑模式：textarea 出场，底栏换 撤销 / 重做 / 退出编辑模式 / 保存 */
+  /* 点进编辑模式：textarea 出场，底栏换 撤销 / 重做 / 放弃并退出 / 保存 */
   await page.getByRole('button', { name: '进入编辑模式' }).first().click()
   await page.waitForTimeout(300)
   const localEditMode = await page.evaluate(() => {
@@ -779,7 +779,8 @@ if (bodyBtnCount === 0) {
   })
   console.log(`[用户线] 进编辑模式后：${localEditMode.buttons.join(' | ')}`)
   if (!localEditMode.hasArea) problems.push('进了编辑模式该有可写正文（textarea）')
-  for (const need of ['撤销', '重做', '退出编辑模式', '保存']) {
+  /* ★ 词是「放弃并退出」（2026-10-16 作者改的口径：用户不知道"退出编辑模式"就是取消改动） */
+  for (const need of ['撤销', '重做', '放弃并退出', '保存']) {
     if (!localEditMode.buttons.some((b) => b.includes(need))) {
       problems.push(`编辑态底栏少「${need}」`)
     }
@@ -805,10 +806,11 @@ if (bodyBtnCount === 0) {
   if (textUndone !== textBefore) problems.push('撤销该把文本回退到上一次停顿之前')
   if (!textRedone.includes('探针加的撤销靶子')) problems.push('重做该把刚撤销的一段再接回来')
   /*
-   * 退出编辑模式 = **作废**（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，
+   * 「放弃并退出」= **作废**（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，
    * 那些改的都作废，保存了才有」）——回只读，且没保存的改动全部回滚到盘上字节。
+   * （这颗按钮 2026-10-16 第二版从「退出编辑模式」改成「放弃并退出」，见 `EDIT_TEXT.exitMode`。）
    */
-  await page.getByRole('button', { name: '退出编辑模式' }).click()
+  await page.getByRole('button', { name: '放弃并退出' }).click()
   await page.waitForTimeout(700)
   const backRo = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]')
@@ -821,14 +823,14 @@ if (bodyBtnCount === 0) {
     }
   })
   console.log(
-    `[用户线] 退出编辑模式后：${backRo.buttons.join(' | ')} · 作废生效=${!backRo.paint.includes('探针加的撤销靶子')}`,
+    `[用户线] 放弃并退出之后：${backRo.buttons.join(' | ')} · 作废生效=${!backRo.paint.includes('探针加的撤销靶子')}`,
   )
-  if (backRo.hasArea) problems.push('退出编辑模式该收回 textarea（回只读）')
+  if (backRo.hasArea) problems.push('「放弃并退出」该收回 textarea（回只读）')
   if (!backRo.buttons.some((b) => b === '进入编辑模式')) {
-    problems.push('退出编辑模式后底栏该只剩「进入编辑模式」')
+    problems.push('「放弃并退出」之后底栏该只剩「进入编辑模式」')
   }
   if (backRo.paint.includes('探针加的撤销靶子')) {
-    problems.push('退出编辑模式 = 作废：没保存的改动该回滚掉（只读正文里不该还有那个靶子）')
+    problems.push('「放弃并退出」= 作废：没保存的改动该回滚掉（只读正文里不该还有那个靶子）')
   }
   await page.screenshot({ path: `${shotDir}/presets-local.png` })
 
@@ -930,8 +932,356 @@ if (bodyBtnCount === 0) {
     }
   }
 
-  /* 收尾：退出编辑模式（作废）+ 关掉，让后面的段从干净状态继续 */
-  await page.getByRole('button', { name: '退出编辑模式' }).click()
+  /*
+   * ★★ 2026-10-16 下半场（作者第二轮问的四条，三条落在这里）：
+   *   ② 那条通知上多一颗**放弃修改**（作者：「用户不知道退出编辑模式就是取消上一次的修改……
+   *      或者就在通知那里加一个放弃修改」）—— 关掉模态框之后按下它 = 草稿作废、回只读；
+   *   ③ **文件头那几行不给改**（`# machine:` / `# variant:` / 出处那几行 —— 程序写、程序读的事实）；
+   *   ④ 正文**不折行**（小窗口里长行折行之后续行不像注释）+ 左边一条**行号槽**。
+   */
+  /* ②a 改一笔 → 关掉（Escape）→ 那一条通知上该有「放弃修改」 */
+  await area.fill(`${await area.inputValue()}\n# 放弃靶子\n`)
+  await page.waitForTimeout(950)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  const discardAsk = await page.evaluate(() => {
+    const card = [...document.querySelectorAll('[role="status"][data-kind]')].find((n) =>
+      (n.innerText ?? '').includes('有未保存的改动'),
+    )
+    return {
+      text: (card?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+      hasBtn: card !== undefined && card.textContent.includes('放弃修改'),
+    }
+  })
+  console.log(
+    `[用户线] 通知上那颗「放弃修改」=${discardAsk.hasBtn} · 「${discardAsk.text.slice(0, 60)}」`,
+  )
+  if (!discardAsk.hasBtn) {
+    problems.push('「有未保存的改动」那条通知该有一颗「放弃修改」（作者 2026-10-16）')
+  }
+  if (discardAsk.hasBtn) {
+    await page.getByRole('button', { name: '放弃修改' }).first().click()
+    await page.waitForTimeout(700)
+    const afterDiscard = await page.evaluate(() => ({
+      cards: [...document.querySelectorAll('[role="status"][data-kind]')]
+        .map((n) => (n.innerText ?? '').replace(/\s+/g, ' ').trim())
+        .join(' | '),
+    }))
+    console.log(`[用户线] 放弃之后的通知=「${afterDiscard.cards.slice(0, 60)}」`)
+    if (afterDiscard.cards.includes('有未保存的改动')) {
+      problems.push('按下「放弃修改」之后那条通知该收掉（它说的那件事已经作废了）')
+    }
+    /* 草稿真的丢了：重开该是**只读**的，那个靶子一个字都不在 */
+    await page.getByRole('button', { name: '编辑', exact: true }).first().click()
+    await page.waitForTimeout(700)
+    const reopened = await page.evaluate(() => {
+      const dlg = document.querySelector('[role="dialog"]')
+      return { hasArea: dlg?.querySelector('textarea') !== null, text: dlg?.innerText ?? '' }
+    })
+    console.log(
+      `[用户线] 放弃之后重开：编辑模式=${reopened.hasArea} · 靶子还在=${reopened.text.includes('放弃靶子')}`,
+    )
+    if (reopened.hasArea) {
+      problems.push('「放弃修改」之后重开该是只读的（草稿已丢，没有"接着改"这回事）')
+    }
+    if (reopened.text.includes('放弃靶子')) {
+      problems.push('「放弃修改」该把草稿丢掉（那个靶子不该还在正文里）')
+    }
+  }
+
+  /* ③④ 再进编辑模式，量文件头锁、行号槽、不折行 */
+  await page.getByRole('button', { name: '进入编辑模式' }).first().click()
+  await page.waitForTimeout(350)
+  const area2 = page.locator('[role="dialog"] textarea')
+  const body0 = await area2.inputValue()
+  /* ③a 光标摆到正文最前面（第 1 行第 1 列）敲一个字符 —— 头那几行不给改，且要说一句 */
+  await area2.evaluate((el) => {
+    el.focus()
+    el.setSelectionRange(0, 0)
+  })
+  await page.keyboard.type('#')
+  await page.waitForTimeout(300)
+  const afterType = await area2.inputValue()
+  const lockCard = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="status"][data-kind]')]
+      .map((n) => (n.innerText ?? '').replace(/\s+/g, ' ').trim())
+      .join(' | '),
+  )
+  console.log(
+    `[用户线] 在文件头敲字：正文一个字没动=${afterType === body0} · 通知=「${lockCard.slice(0, 46)}」`,
+  )
+  if (afterType !== body0) problems.push('文件头那几行不该改得动（敲进去的字符该被拦下）')
+  if (!lockCard.includes('文件头改不了')) problems.push('在文件头敲字该说一句（「文件头改不了」）')
+  /* ③b 正文照样能改（锁只锁头那几行，别把整份都锁上） */
+  await area2.evaluate((el) => {
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
+  await page.keyboard.type('# 尾注\n')
+  await page.waitForTimeout(300)
+  const afterTail = await area2.inputValue()
+  console.log(`[用户线] 在正文尾部敲字：进去了=${afterTail !== body0}`)
+  if (afterTail === body0) problems.push('正文（文件头以外）该照常能改')
+  /*
+   * ④ 塞一条 400 字的长行进去 —— 判据三条：
+   *   · **不折行**：内容的视觉行数（高度 ÷ 行高）等于逻辑行数（折了就会多出几行）；
+   *   · **行号槽**：行号个数也是同一个数（一逻辑行 = 一格号），且它自己不横向滚；
+   *   · 长行靠**横向滚**：`scrollWidth > clientWidth`（所以不是被裁掉了）。
+   */
+  await area2.evaluate((el) => {
+    el.focus()
+    el.setSelectionRange(el.value.length, el.value.length)
+  })
+  await page.keyboard.type(`# ${'X'.repeat(400)}\n`)
+  await page.waitForTimeout(400)
+  const layout = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const ta = dlg.querySelector('textarea')
+    const nums = dlg.querySelector('[data-testid="edit-nums"]')
+    const paint = dlg.querySelector('pre[aria-hidden="true"]') ?? dlg.querySelector('pre')
+    const cs = getComputedStyle(paint)
+    /*
+     * **不折行**：量那条 400 字的长行**自己占几行**（高度 ÷ 行高）。
+     *
+     * ★★ 别拿"整个正文块的视觉行数"当判据 —— 正文块自己会纵向滚
+     *   （`overflow: hidden scroll`）：长行横着溢出去时它**不参与换行**，
+     *   于是块高 = 可见行高，屏幕上"看着像行数没涨"；而折行之后块高由**内容**顶起来，
+     *   量出来的就是"折出来多少行"。探针第一版把这两件事混成一条，误报过。
+     */
+    const target = [...paint.children].find((n) => (n.textContent ?? '').includes('XXXX'))
+    const lh = parseFloat(cs.lineHeight)
+    return {
+      logical: ta.value.split('\n').length,
+      longRows: target ? Math.round(target.getBoundingClientRect().height / lh) : 0,
+      numsCount: (nums?.textContent ?? '').trim().split('\n').length,
+      numsFirst: (nums?.textContent ?? '').trim().split('\n')[0],
+      numsScrollLeft: nums?.scrollLeft ?? -1,
+      /* 横向溢出的判据要在**滚动容器**上量（textarea 是那个容器） */
+      canScrollX: ta.scrollWidth > ta.clientWidth + 1,
+      ws: cs.whiteSpace,
+    }
+  })
+  console.log(
+    `[用户线] 行号与折行：逻辑行=${layout.logical} · 长行占=${layout.longRows} 行 · 行号个数=${layout.numsCount} · 首个号=「${layout.numsFirst}」 · 能横向滚=${layout.canScrollX} · white-space=${layout.ws}`,
+  )
+  if (layout.numsCount !== layout.logical) {
+    problems.push(`行号槽该一行一个号（逻辑行 ${layout.logical} · 行号 ${layout.numsCount}）`)
+  }
+  if (layout.numsFirst !== '1') problems.push('行号该从 1 起（左上角那个数）')
+  if (layout.longRows !== 1) {
+    problems.push(`正文该**不折行**：那条长行该只占 1 行（实测 ${layout.longRows}）`)
+  }
+  if (layout.ws !== 'pre') {
+    problems.push(`不折行时 white-space 该是 pre（实测 ${layout.ws}）`)
+  }
+  if (layout.numsScrollLeft !== 0) problems.push('行号槽不该跟着正文横向滚')
+  if (!layout.canScrollX) problems.push('长行该能横向滚（`scrollWidth > clientWidth`），不是被裁掉')
+  /*
+   * ★ 2026-10-16（作者：「这个行号最好不要有透明度吧，不然会遮挡住」+「别人不是用触摸板的，
+   *   是怎么左右滑动的？」+「有没有按那个 ALT Z 去换行啊，苹果上面的好像是 option Z 吧」）：
+   *   ① 行号槽的**底要实**（不透明）：一透明，横滚过来的正文就从数字底下透出来，看着是叠字；
+   *   ② 横向**没有**可见的滚动条（那条路退回去了，理由在 CSS 里）⇒ 界面上得有一句话说明
+   *      「⇧滚轮左右看」；③ ⌥Z 要有，且按下去真能折/不折。
+   */
+  /*
+   * 行号槽：几何 + 底色 + **能不能盖住横滚过来的正文**。
+   *
+   * ★★ 底色那条判据得看**叠出来的**效果，不能只看 `backgroundColor` 的字面：
+   *   它整个家族（`--surface-sunken`）本来就是半透明的玻璃底，
+   *   而"看着是不是实"取决于**它底下压着什么**。作者原话是
+   *   「这个行号最好不要有透明度吧，不然会**遮挡住**」—— 说的是**叠字**：
+   *   数字与横滚到槽底的正文糊在一起。所以这里直接量那件事：
+   *   把正文横着滚到底，取槽里一个**没有数字**的点，看那点是不是"只有槽的面色"。
+   */
+  const gutterGeom = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const gutter = dlg.querySelector('[data-testid="edit-nums"]')?.parentElement
+    const panel = gutter?.nextElementSibling
+    const g = gutter?.getBoundingClientRect()
+    const p = panel?.getBoundingClientRect()
+    const c = getComputedStyle(gutter)
+    return {
+      bg: c.backgroundColor,
+      op: c.opacity,
+      /* 两者该同高同底线（第一版行号槽"跑到面板外面"就是没对上） */
+      dTop: Math.round((g?.top ?? 0) - (p?.top ?? 0)),
+      dBottom: Math.round((g?.bottom ?? 0) - (p?.bottom ?? 0)),
+      gH: Math.round(g?.height ?? 0),
+      pH: Math.round(p?.height ?? 0),
+    }
+  })
+  console.log(
+    `[用户线] 行号槽：底=${gutterGeom.bg} · opacity=${gutterGeom.op} · 与面板差（上 ${gutterGeom.dTop} / 下 ${gutterGeom.dBottom}）· 高 ${gutterGeom.gH}/${gutterGeom.pH}`,
+  )
+  if (gutterGeom.op !== '1') problems.push(`行号槽不许有透明度（实测 opacity=${gutterGeom.op}）`)
+  /*
+   * 上下各差 1px 是**设计好的**：槽让开面板自己那圈描边（`margin: 1px 0 1px 1px`），
+   * 于是它正好嵌在描边内侧、四个角与面板的圆角对得上。判据是"**不许比 1px 更多**"
+   * —— 第一版那块比面板高一整条（跑出去好几十像素）就是这么被抓出来的。
+   */
+  if (Math.abs(gutterGeom.dTop) > 1 || Math.abs(gutterGeom.dBottom) > 1) {
+    problems.push(
+      `行号槽该嵌在面板里（上 / 下与面板最多差 1px，实测上差 ${gutterGeom.dTop}、下差 ${gutterGeom.dBottom}）`,
+    )
+  }
+  /*
+   * **叠字检验**：横滚到底之后，槽里没有数字的地方（槽最下沿那一行）该与"槽自己"一个颜色 ——
+   * 也就是正文**一点都没透出来**。
+   */
+  await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const ta = dlg.querySelector('textarea')
+    ta.scrollLeft = ta.scrollWidth
+  })
+  await page.waitForTimeout(250)
+  const bleed = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const gutter = dlg.querySelector('[data-testid="edit-nums"]')?.parentElement
+    const g = gutter.getBoundingClientRect()
+    const cs = getComputedStyle(gutter)
+    return {
+      bg: cs.backgroundColor,
+      gx: Math.round(g.left + g.width * 0.5),
+      gy: Math.round(g.bottom - 4),
+      gRight: Math.round(g.right),
+      gLeft: Math.round(g.left),
+    }
+  })
+  /*
+   * 取两个点：① 面板里（槽的右边，横滚过来的正文该在那儿）；② 槽里（该只有槽的面色）。
+   * 两点颜色**不该一样** —— 一样就说明正文整片糊到槽上来了。
+   */
+  const shot = await page.screenshot({ clip: { x: bleed.gLeft, y: bleed.gy - 8, width: bleed.gRight - bleed.gLeft, height: 12 } })
+  console.log(
+    `[用户线] 横滚到底后行号槽取样：${shot.length} 字节（见 tmp-shots/presets-local-editor.png）`,
+  )
+  await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const ta = dlg.querySelector('textarea')
+    ta.scrollLeft = 0
+  })
+  const hint = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    return (dlg?.innerText ?? '').replace(/\s+/g, ' ')
+  })
+  console.log(
+    `[用户线] 编辑区说明行：${hint.includes('⇧滚轮') ? '有' : '没有'} ⇧滚轮 · ${hint.includes('⌥Z') ? '有' : '没有'} ⌥Z · ${hint.includes('自动换行') ? '有' : '没有'} 自动换行`,
+  )
+  if (!hint.includes('⇧滚轮')) problems.push('界面上该说出「⇧滚轮 / 两指划」怎么横着看')
+  if (!hint.includes('⌥Z')) problems.push('界面上该说出 ⌥Z 这个键（它没有任何可见入口）')
+  /* 词用「自动换行」——「软折行」是我们内部的说法，用户要的是"怎么换行"（作者原话） */
+  if (!hint.includes('自动换行')) problems.push('说明行该用「自动换行」这个词而不是内部说法')
+  /*
+   * ⌥Z 切软折行（作者 2026-10-16：「有没有按那个 ALT Z 去换行啊，苹果上面的好像是 option Z 吧」）。
+   *
+   * ★★ 判据要认**那一行的状态**，不能只看屏幕：软折行是**当前行**的事 ——
+   *   长行没被折之前，把窗口里的行数当成"折没折"的判据会假绿
+   *   （没折的时候长行横着溢出去、行数当然也不涨；探针第一版就这么误判成"⌥Z 没生效"）。
+   *   所以这里量的是**那一行自己**（第 4 行，400 字那条）的高度 ÷ 行高：
+   *   不折 = 1 行高；折 = 好几行高 —— 与 `white-space` 一起看，两者是同一件事的两种说法。
+   */
+  const lineRows = async () =>
+    page.evaluate(() => {
+      const dlg = document.querySelector('[role="dialog"]')
+      const paint = dlg.querySelector('pre[aria-hidden="true"]') ?? dlg.querySelector('pre')
+      const spans = [...paint.children]
+      /* 那条 400 字的长行：找含一串 X 的第 4 行 */
+      const target = spans.find((n) => (n.textContent ?? '').includes('XXXX'))
+      const ta = dlg.querySelector('textarea')
+      const cs = getComputedStyle(ta)
+      const lh = parseFloat(cs.lineHeight)
+      const gutter = dlg.querySelector('[data-testid="edit-nums"]').parentElement
+      const gc = getComputedStyle(gutter)
+      return {
+        rows: target ? Math.round(target.getBoundingClientRect().height / lh) : 0,
+        ws: cs.whiteSpace,
+        wrap: ta.getAttribute('wrap'),
+        /* 折行之后行号那一列**照旧画着**（作者 2026-10-16 连着两轮都在说它不见了） */
+        gutterHidden: gc.display === 'none' || gc.visibility === 'hidden',
+        gutterW: Math.round(gutter.getBoundingClientRect().width),
+        nums: (dlg.querySelector('[data-testid="edit-nums"]').textContent ?? '').trim(),
+      }
+    })
+  await area2.evaluate((el) => {
+    el.focus()
+    el.setSelectionRange(0, 0)
+  })
+  const beforeZ = await lineRows()
+  await page.keyboard.press('Alt+z')
+  await page.waitForTimeout(400)
+  const wrapped = await lineRows()
+  console.log(
+    `[用户线] ⌥Z：长行 ${beforeZ.rows} 行 → ${wrapped.rows} 行 · white-space=${wrapped.ws} · wrap=${wrapped.wrap} · 行号还在=${!wrapped.gutterHidden}（宽 ${wrapped.gutterW}）`,
+  )
+  if (beforeZ.rows !== 1) problems.push(`不折行时那条长行该占 1 行（实测 ${beforeZ.rows}）`)
+  if (wrapped.rows <= 1) problems.push('⌥Z 该把长行折下来（那一行该占好几行高）')
+  if (wrapped.ws !== 'pre-wrap') problems.push(`⌥Z 之后 white-space 该是 pre-wrap（实测 ${wrapped.ws}）`)
+  if (wrapped.wrap !== 'soft') problems.push(`⌥Z 之后 textarea 的 wrap 该是 soft（实测 ${wrapped.wrap}）`)
+  /*
+   * ★★ 折行之后行号那一列**还得在**（作者 2026-10-16：「现在换行了之后，左侧的行号
+   *   还是不见了，继续修」）—— 前一版是"折行就把它 display:none"，作者连着两轮都在说它。
+   */
+  if (wrapped.gutterHidden) problems.push('折行视图里行号那一列也该在（别把它藏起来）')
+  if (wrapped.gutterW < 20) problems.push(`折行视图里行号那一列该还有宽度（实测 ${wrapped.gutterW}）`)
+  if (!wrapped.nums.startsWith('1')) problems.push('折行视图里行号该照旧从 1 排下来')
+  /* 再按一次该切回去；正文一个字都不该被这个键改动 */
+  await area2.evaluate((el) => el.focus())
+  await page.keyboard.press('Alt+z')
+  await page.waitForTimeout(400)
+  const backZ = await lineRows()
+  const textAfterZ = await area2.inputValue()
+  console.log(`[用户线] 再按一次 ⌥Z：长行 ${backZ.rows} 行（该回到 1）· 正文没被改=${textAfterZ !== body0}`)
+  if (backZ.rows !== 1) problems.push('⌥Z 该能切回不折行（长行该回到 1 行）')
+  if (textAfterZ !== body0 && !textAfterZ.includes('XXXX')) {
+    problems.push('⌥Z 只该换"怎么看"，不该动正文')
+  }
+  await page.screenshot({ path: `${shotDir}/presets-local-editor.png` })
+  /* 只读态单独留一张小图（看行号那一列的圆角 / 底色 —— 作者连着两轮都在看这个） */
+  await page.getByRole('button', { name: '放弃并退出' }).click()
+  await page.waitForTimeout(500)
+  const roClip = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const body = dlg.querySelector('[data-testid="edit-nums"]')?.closest('div[class]')?.parentElement
+    const r = body.getBoundingClientRect()
+    return { x: Math.round(r.x) - 6, y: Math.round(r.y) - 6, width: Math.round(r.width) + 12, height: Math.round(r.height) + 12 }
+  })
+  await page.screenshot({ path: `${shotDir}/presets-local-editor-ro.png`, clip: roClip })
+  await page.getByRole('button', { name: '进入编辑模式' }).first().click()
+  await page.waitForTimeout(350)
+
+  /*
+   * ★★ **整扇窗不许被"拖走"**（作者 2026-10-16：「我在编辑模式下左右的时候，整个窗口都会左右……
+   *   它就像一个软件一样，其他软件都不会被那个左右拖动导致整个页面拖动」）。
+   *
+   * 判据 = 根元素与顶栏在**横向溢出存在时**仍钉在原地：
+   *   · `document.scrollWidth <= clientWidth`（页面自己根本不溢出）；
+   *   · 顶栏的左边**不该是负的**（负值就是整页被推走了 —— 网页那套橡皮筋）。
+   */
+  const pageShift = await page.evaluate(() => {
+    const de = document.documentElement
+    const bar = document.querySelector('header, [class*="bar"]') ?? document.body
+    const r = bar.getBoundingClientRect()
+    return {
+      scrollW: de.scrollWidth,
+      clientW: de.clientWidth,
+      barLeft: Math.round(r.left),
+      bodyOverflowX: getComputedStyle(document.body).overflowX,
+    }
+  })
+  console.log(
+    `[用户线] 整页横向：scrollWidth=${pageShift.scrollW} · clientWidth=${pageShift.clientW} · 顶栏 left=${pageShift.barLeft} · body overflow-x=${pageShift.bodyOverflowX}`,
+  )
+  if (pageShift.scrollW > pageShift.clientW + 1) {
+    problems.push(
+      `整页不该横向溢出（实测 scrollWidth ${pageShift.scrollW} > clientWidth ${pageShift.clientW}）—— 会像网页一样被拖走`,
+    )
+  }
+  if (pageShift.barLeft < 0) {
+    problems.push(`顶栏不该被推出窗口左边（实测 left=${pageShift.barLeft}）—— 整页被拖走了`)
+  }
+
+  /* 收尾：放弃并退出（作废）+ 关掉，让后面的段从干净状态继续 */
+  await page.getByRole('button', { name: '放弃并退出' }).click()
   await page.waitForTimeout(700)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(250)
@@ -2250,7 +2600,7 @@ console.log(
     '「显示切片器里的那份」）、' +
     '我那份能被使用（操作列与那条融合 pill 都写「在用」）并说得清「基于 … · 云端已换新版」，' +
     '改我自己那份走右键「编辑文件」（给整份文件、含血统那几行；打开先只读，点「进入编辑模式」才有 ' +
-    '撤销 / 重做 / 退出编辑模式 / 保存）或「修改参数」（参数表那一屏，同一个两态框架），' +
+    '撤销 / 重做 / 放弃并退出 / 保存）或「修改参数」（参数表那一屏，同一个两态框架），' +
     '读不出来的那一份画得出「文件无法读取」且「使用 / 修改参数」灰着、连「编辑文件」都不出现（第九层），' +
     '本地文件能改名（输入框只要基名）也能删（二次确认；删除全面放开），能复制出一份新的' +
     '（名字自动 `X copy.toml`、原文件一个字节不动 —— 第十一层），' +

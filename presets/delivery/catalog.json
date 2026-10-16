@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "13aad1b8f33947ff",
+  "revision": "4f4aa3378c5e689a",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -786,107 +786,123 @@
       "id": "guide-open-with-light",
       "type": "guide",
       "name": "「改 .3mf 默认打开方式」引导图（浅色）",
-      "path": "guides/open-with-light.png",
+      "path": "guides/open-with-light.rendered.webp",
       "delivery": "bundled"
     },
     {
       "id": "guide-open-with-dark",
       "type": "guide",
       "name": "「改 .3mf 默认打开方式」引导图（深色）",
-      "path": "guides/open-with-dark.png",
+      "path": "guides/open-with-dark.rendered.webp",
       "delivery": "bundled"
+    }
+  ],
+  "groups": [
+    {
+      "id": "open-with",
+      "name": "「改 .3mf 默认打开方式」引导图",
+      "members": [
+        {
+          "asset": "guide-open-with-light",
+          "role": "light"
+        },
+        {
+          "asset": "guide-open-with-dark",
+          "role": "dark"
+        }
+      ]
     }
   ],
   "bundles": [
     {
       "id": "A1_STANDARD",
-      "display": "推荐",
+      "display": "A1 标准版",
       "machineId": "A1",
       "assetRefs": [
         "a1-standard",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_FAST",
-      "display": "推荐",
+      "display": "A1 快拆版6月以前",
       "machineId": "A1",
       "assetRefs": [
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_FASTV3.3",
-      "display": "推荐",
+      "display": "A1 快拆版260628",
       "machineId": "A1",
       "assetRefs": [
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_STANDARD",
-      "display": "推荐",
+      "display": "A1 mini 标准版",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-standard",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_FAST",
-      "display": "推荐",
+      "display": "A1 mini 快拆版6月以前",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_FASTV3.3",
-      "display": "推荐",
+      "display": "A1 mini 快拆版260628",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "P1S_default",
-      "display": "推荐",
+      "display": "P1S lite版",
       "machineId": "P1S",
       "assetRefs": [
         "p1s-lite",
         "p1s-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "P2S_default",
-      "display": "推荐",
+      "display": "P2S 标准版",
       "machineId": "P2S",
       "assetRefs": [
         "p2s-standard",
         "p2s-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "X1C_default",
-      "display": "推荐",
+      "display": "X1C lite版",
       "machineId": "X1C",
       "assetRefs": [
         "x1c-lite",
         "x1c-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     }
   ],
   "registry": {

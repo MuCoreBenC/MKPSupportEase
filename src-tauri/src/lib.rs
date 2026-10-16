@@ -267,6 +267,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::get_system_slicer_app,
         // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
         ipc::open_default_app_settings,
+        // 「自动化」授权被拒后的反悔入口：把用户送到系统设置那一页（macOS）
+        ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
@@ -407,6 +409,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::get_system_slicer_app,
         // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
         ipc::open_default_app_settings,
+        // 「自动化」授权被拒后的反悔入口：把用户送到系统设置那一页（macOS）
+        ipc::open_automation_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
@@ -563,6 +567,17 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
         app::assets::wb_set_asset_delivery,
+        // 「分组」（2026-10-16）：哪几张图共用同一份标注源稿 —— 登记在台账 `[[groups]]`，
+        // 即时落盘、回一份新清单。作者要的是"像台账那样的管理器"，不是靠文件名算
+        app::assets::wb_set_group,
+        app::assets::wb_remove_group,
+        // 「标注台」（2026-10-16）：图上那些框的**源稿** —— 与图同层、随仓库走、不进交付目录。
+        // 前端只给资产 id，落点由后端从台账派生（读不到 = 还没拖过，合法，不是错误）
+        app::annotation::wb_anno_read,
+        app::annotation::wb_anno_write,
+        // 「生成预览」：按**当前视角**烘一张成品图**只回字节、一个盘都不写** ——
+        // 相当于"拍一张照不存相册"（作者 2026-10-16）。确认满意了再 `wb_anno_write` 存进去。
+        app::annotation::wb_anno_render,
         // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
         // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）；
         // 2026-10-03 起新建 / 编辑（改 id 连带重指机型文件）/ 复制 / 删除（被指着整次拒绝）

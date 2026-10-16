@@ -168,6 +168,37 @@ export interface HistoryGroup {
   items: HistoryEntry[]
 }
 
+/**
+ * 一批改动 → 只留**净变化**（2026-10-16 作者的口径：「按保存批次的话……
+ * 它只记录那个最终的」）。
+ *
+ * · 同一项在这一批里改了几次只看**头尾**：`70 → 75 → 80 → 90` 就是一条 `70 → 90`；
+ * · 头尾相同的整条不出现：`-0.7 → -0.75 → -0.7` 等于没改（作者原话：
+ *   「如果你看最后他从 -0.7 到最后还是 -0.7，那就不算，不用记录了」）；
+ * · **撤回过的那几条跳过** —— 撤销已经把值退回去了，后面那条的 `from` 里已经算过它。
+ *
+ * 出去的顺序 = 各项**在这一批里第一次被改**的先后；`from` / `to` 取的是那句话
+ * 当时的快照（`item.label` / `tab` / `section` / `unit` 用最近那一条）。
+ */
+export function netOf(entries: HistoryEntry[]): HistoryItem[] {
+  const head = new Map<string, HistoryItem>()
+  const tail = new Map<string, HistoryItem>()
+  for (const e of entries) {
+    if (e.state === 'undone') continue
+    for (const it of e.items) {
+      if (!head.has(it.key)) head.set(it.key, it)
+      tail.set(it.key, it)
+    }
+  }
+  const out: HistoryItem[] = []
+  for (const [key, first] of head) {
+    const last = tail.get(key)
+    if (last === undefined || first.from === last.to) continue
+    out.push({ ...last, from: first.from, to: last.to })
+  }
+  return out
+}
+
 /** 一处要写入的改动 */
 export interface Patch {
   key: string
@@ -496,7 +527,7 @@ export interface Params {
   restoreDefaults: () => void
   /**
    * 全部未保存的改动**一次退回已保存值**（原「取消」；2026-10-16 起 =
-   * 「退出编辑模式」做的事——作者：「退出编辑模式就是作废，那些改的都作废，
+   * 「放弃并退出」做的事——作者：「退出编辑模式就是作废，那些改的都作废，
    * 保存了才有」）。
    *
    * 走的还是 `apply`（一次动作、可整体撤销、草稿 TOML 同步落盘），
@@ -516,7 +547,8 @@ export interface Params {
   historyByBatch: HistoryGroup[]
   /** 这个组合保存过几次 */
   savedBatches: number
-  revertEntry: (id: number) => void
+  /** 「还原」历史里那一条（实时 = 那一动作；按保存批次 = 那一项的净变化） */
+  revertEntry: (entry: HistoryEntry) => void
 
   /** 切机型 / 切版本。有未保存改动时先问一句，不静默丢 */
   requestCombo: (machineId: string, versionId: string) => void
@@ -1376,17 +1408,23 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setLog(log.map((e) => (e.state === 'draft' ? { ...e, state: 'saved', batch } : e)))
   }, [at, batchesByCombo, commitDraft, combo, draft, log, saved, savedBatches])
 
-  /** 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销） */
+  /**
+   * 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销）。
+   *
+   * ★ 收整个 `entry` 而不是 id（2026-10-16）：**按保存批次**那一屏的行是聚合出来的
+   *   （一项一行、`from` 是"这一段开始前的"），它不在 `log` 里、没有自己的 id ——
+   *   退货的判据只能是它身上那份 `items`。实时那一屏的行原样带着自己那份 items，
+   *   行为一个字没变。
+   */
   const revertEntry = useCallback(
-    (id: number) => {
-      const entry = log.find((e) => e.id === id)
-      if (entry === undefined || entry.state === 'undone') return
+    (entry: HistoryEntry) => {
+      if (entry.state === 'undone' || entry.items.length === 0) return
       apply(
         `回退 ${entry.action}`,
         entry.items.map((item) => ({ key: item.key, value: item.from })),
       )
     },
-    [apply, log],
+    [apply],
   )
 
   /*
@@ -1539,20 +1577,44 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
   /**
    * 「按保存批次」视图：未保存的一段在最上，然后是第 N 次、第 N-1 次…… 保存。
-   * 撤销过的条目**留在原来那一段里**（仍标「已撤销」划掉）—— 挪走或删掉都会让
-   * 「我那次保存到底改了什么」说不清。
+   *
+   * ★ 2026-10-16 作者口径（见 `netOf`）：**这一批只看净变化** —— 同一项改了几次
+   * 只记头尾（`70 → 75 → 80 → 90` 就是一条 `70 → 90`），改回原值的不出现。
+   * 于是每一段里**一项一行**（不再是"一个动作一行"），行上的「还原」退的是
+   * 这一项在**这一段开始前**的值。
+   *
+   * 净变化为空的那一段（这一批的改动全被改回来了）**整段不摆** —— 摆一个
+   * 「0 条」的空段只是噪声；批号本身照真号走，不会因为跳过一段就串号。
    */
   const historyByBatch = useMemo<HistoryGroup[]>(() => {
     const groups: HistoryGroup[] = []
-    const drafts = log.filter((e) => e.batch === null)
-    if (drafts.length > 0) {
-      groups.push({ batch: null, title: '未保存', items: [...drafts].reverse() })
+    /* 段内序号：跨段连续（与旧版"全局递增"同一种读法，不因分段而重号） */
+    let no = 0
+    let id = 0
+    const push = (batch: number | null, title: string, src: HistoryEntry[]) => {
+      const items = netOf(src)
+      if (items.length === 0) return
+      groups.push({
+        batch,
+        title,
+        items: items.map((it) => {
+          id -= 1
+          no += 1
+          return {
+            id,
+            no,
+            action: `改 ${it.label}`,
+            items: [it],
+            /* 未保存那一段标「未保存」，落过盘的标「已保存」 —— 与旧版同一套词 */
+            state: batch === null ? 'draft' : 'saved',
+            batch,
+          }
+        }),
+      })
     }
+    push(null, '未保存', log.filter((e) => e.batch === null))
     for (let b = savedBatches; b >= 1; b -= 1) {
-      const items = log.filter((e) => e.batch === b)
-      if (items.length > 0) {
-        groups.push({ batch: b, title: `第 ${b} 次保存`, items: [...items].reverse() })
-      }
+      push(b, `第 ${b} 次保存`, log.filter((e) => e.batch === b))
     }
     return groups
   }, [log, savedBatches])

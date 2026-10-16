@@ -67,6 +67,12 @@ pub struct AssetView {
     /// 台账登记的名字（`presets/assets.toml` 的 `name`）。**不是显示真源** ——
     /// 留着是为了详情卡能对照「登记名叫什么」
     pub name: String,
+    /// **产物文件名**（只 `mkPreset` 类有，如 `A1-standard.toml`）：由命名规则**现算**
+    /// （唯一实现 `super::build::preset_file_name`），台账里不存。其余类恒空串
+    /// —— 它们的文件名就是 [`Self::path`] 的末段 / [`Self::display`]。
+    ///
+    /// 作者 2026-10-16：「MKP 那一行的完整名字……点 TOML 要显示出来吧」。
+    pub product_name: String,
     /// 相对资产根的一段
     pub path: String,
     /// 前端可直接用的 URL（**用之前 encodeURI**）
@@ -92,12 +98,50 @@ pub struct AssetView {
     /// 没生成过 = 待生成；生成过、参数改完还没重新生成 = **待更新**。
     /// 其余四类恒为 `null`（它们的"文件在不在"由 `present` 说）
     pub build_state: Option<crate::workbench::domain::wording::BuildState>,
+    /// **它属于哪个分组**（2026-10-16 加）：组 id / 组名 —— 没进组就是两个 `null`。
+    ///
+    /// 由**后端**从 `[[groups]]` 算好（前端不自己推 —— 免得"谁在一组"有两套算法）
+    pub group_id: Option<String>,
+    pub group_name: Option<String>,
+    /// 它在这个组里演什么（`light` / `dark` / …）。没进组或没写角色 ⇒ `null`
+    pub role: Option<String>,
+}
+
+/// 一个**分组**在界面上的样子（资产库页的分组管理器用）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupView {
+    pub id: String,
+    pub name: String,
+    pub members: Vec<GroupMemberView>,
+}
+
+/// 分组里的一名成员（带**显示名** —— 管理器直接画，不必再查一次资产）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMemberView {
+    pub asset: String,
+    /// 真名（与 [`AssetView::display`] 同一条派生）
+    pub display: String,
+    pub role: String,
+}
+
+/// 命令入参：一名成员。`role` 可省
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupMemberInput {
+    pub asset: String,
+    #[serde(default)]
+    pub role: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AssetList {
     pub assets: Vec<AssetView>,
+    /// **分组登记**（2026-10-16）：管理器要的那张表（组名 + 成员 + 角色）。
+    /// 是**全量**的，不随筛选变 —— 与喷嘴 / 层高那两根轴同一条理由
+    pub groups: Vec<GroupView>,
     /// 资产根的绝对路径，显示在状态条上
     pub root: String,
     /// 喷嘴轴的候选值。从**全部**切片器条目取，不随筛选变 ——
@@ -282,6 +326,10 @@ fn list_of(
     layer: Option<&str>,
     identity: Option<AssetIdentity>,
     query: Option<&str>,
+    // 只看某一个分组（组 id，大小写不敏感）。与 `ungrouped` 二选一
+    group: Option<&str>,
+    // 只看**没进任何组**的那些（作者：先按未分组筛一下，一起拉进新建的组）
+    ungrouped: bool,
 ) -> AssetList {
     // 装着它的套餐集合（bundles.toml 反查，大小写不敏感）
     let bundled: std::collections::BTreeSet<String> = presets
@@ -348,6 +396,16 @@ fn list_of(
         .filter(|a| {
             q.is_empty() || a.name.to_lowercase().contains(&q) || a.id.to_lowercase().contains(&q)
         })
+        .filter(|a| {
+            let g = presets.assets.group_of(&a.id);
+            if let Some(want) = group {
+                return g.is_some_and(|g| g.id.eq_ignore_ascii_case(want.trim()));
+            }
+            if ungrouped {
+                return g.is_none();
+            }
+            true
+        })
         .map(|a| {
             let (nozzle, layer) = slicer_axes(a.kind, &a.path);
             // 生成状态：只有 MKP 预设类有（那一版的产物处于哪一档）
@@ -368,6 +426,15 @@ fn list_of(
                 version_id: a.version_id.clone(),
                 display: display_name(presets, a),
                 name: a.name.clone(),
+                // 产物名只 MKP 预设才有，一律现算（命名规则唯一实现，不存台账）
+                product_name: if a.kind == AssetKind::MkPreset {
+                    super::build::preset_file_name(
+                        a.machine_id.as_deref().unwrap_or_default(),
+                        a.version_id.as_deref().unwrap_or_default(),
+                    )
+                } else {
+                    String::new()
+                },
                 path: a.path.clone(),
                 url: format!("/assets/{}", a.path),
                 slicer: a.slicer.clone(),
@@ -386,11 +453,47 @@ fn list_of(
                     _ => presets.assets.present(a),
                 },
                 build_state,
+                group_id: presets.assets.group_of(&a.id).map(|g| g.id.clone()),
+                group_name: presets.assets.group_of(&a.id).map(|g| g.name.clone()),
+                role: presets
+                    .assets
+                    .group_of(&a.id)
+                    .and_then(|g| {
+                        g.members
+                            .iter()
+                            .find(|m| m.asset.trim().eq_ignore_ascii_case(a.id.trim()))
+                    })
+                    .map(|m| m.role.clone())
+                    .filter(|r| !r.trim().is_empty()),
             }
+        })
+        .collect();
+    /* 分组表：全量（不随筛选变），成员带显示名 —— 管理器直接画 */
+    let groups = presets
+        .assets
+        .groups()
+        .iter()
+        .map(|g| GroupView {
+            id: g.id.clone(),
+            name: g.name.clone(),
+            members: g
+                .members
+                .iter()
+                .map(|m| GroupMemberView {
+                    asset: m.asset.clone(),
+                    display: presets
+                        .assets
+                        .get(&m.asset)
+                        .map(|a| display_name(presets, a))
+                        .unwrap_or_else(|| m.asset.clone()),
+                    role: m.role.clone(),
+                })
+                .collect(),
         })
         .collect();
     AssetList {
         assets,
+        groups,
         root: paths::assets_root().map_or_else(|_| String::new(), |p| p.display().to_string()),
         nozzles,
         layers,
@@ -412,7 +515,11 @@ fn sort_numeric(values: &mut Vec<String>) {
     values.dedup();
 }
 
-/// 资产库清单。类型 / 三根轴 / 交付身份四态 / 搜索全部在这里筛
+/// 资产库清单。类型 / 三根轴 / 交付身份四态 / 搜索全部在这里筛。
+///
+/// `group` 与 `ungrouped` **二选一**：前者只看某一个分组（组 id），后者只看没进任何组的那些；
+/// 都不给 = 这一轴不过滤。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command(async)]
 pub fn wb_assets(
     kind: Option<String>,
@@ -421,6 +528,8 @@ pub fn wb_assets(
     layer: Option<String>,
     identity: Option<String>,
     query: Option<String>,
+    group: Option<String>,
+    ungrouped: Option<bool>,
 ) -> Result<AssetList, AppError> {
     traced("wb_assets", |_| {
         with_ctx(|ctx| {
@@ -440,9 +549,72 @@ pub fn wb_assets(
                 layer.as_deref(),
                 identity,
                 query.as_deref(),
+                group.as_deref(),
+                ungrouped.unwrap_or(false),
             ))
         })
     })
+}
+
+/// **新建或改写一个分组**（作者 2026-10-16）。即时落盘（与 [`wb_set_asset_delivery`] 同一风格），
+/// 回一份新的清单 —— 界面显示的必须是落盘结果，不是它自己那份。
+///
+/// 守卫在数据层（[`crate::presetdata::Assets::upsert_group`]）：成员必须在同一个目录、
+/// 一张资产至多属于一个组、组 id 得能当文件名。
+#[tauri::command]
+pub fn wb_set_group(
+    id: String,
+    name: String,
+    members: Vec<GroupMemberInput>,
+) -> Result<AssetList, AppError> {
+    traced("wb_set_group", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.set_group(crate::presetdata::Group {
+                id,
+                name,
+                members: members
+                    .into_iter()
+                    .map(|m| crate::presetdata::GroupMember {
+                        asset: m.asset,
+                        role: m.role,
+                    })
+                    .collect(),
+            })?;
+            list_now(ctx)
+        })
+    })
+}
+
+/// 删掉一个分组。**成员原地变回"未分组"** —— 资产一条不动
+#[tauri::command]
+pub fn wb_remove_group(id: String) -> Result<AssetList, AppError> {
+    traced("wb_remove_group", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.remove_group(&id)?;
+            list_now(ctx)
+        })
+    })
+}
+
+/// 改完立刻回一份**全新的全量清单**（不带任何筛选 —— 与 `wb_set_asset_delivery` 同一条：
+/// 界面拿到它自己重筛，免得"改完才发现筛选条件变了"）
+fn list_now(ctx: &mut super::Ctx) -> Result<AssetList, AppError> {
+    let (committed, draft, _) = state(ctx)?;
+    let book = crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+    Ok(list_of(
+        &ctx.presets,
+        &book,
+        &committed.visibility,
+        &draft.visibility,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+    ))
 }
 
 /// 改一条资产的交付档位（`download` ↔ `bundled`）。**即时落盘**（清单编辑，
@@ -455,21 +627,7 @@ pub fn wb_set_asset_delivery(asset_id: String, delivery: String) -> Result<Asset
     traced("wb_set_asset_delivery", |_| {
         with_ctx_mut(|ctx| {
             ctx.presets.set_asset_delivery(&asset_id, &delivery)?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ))
+            list_now(ctx)
         })
     })
 }
@@ -481,21 +639,7 @@ pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
     traced("wb_remove_asset", |_| {
         with_ctx_mut(|ctx| {
             ctx.presets.remove_asset(&asset_id)?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ))
+            list_now(ctx)
         })
     })
 }
@@ -815,7 +959,8 @@ mod tests {
     /// （`present`、`url` 前缀、类型都在）。
     #[test]
     fn the_real_asset_list_is_complete_and_present() {
-        let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let list =
+            wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
             31,
@@ -852,7 +997,8 @@ mod tests {
     /// 喷嘴 / 层高从路径与文件名派生得出来，选项表按数值排序且不随筛选变
     #[test]
     fn the_real_slicer_axes_derive_from_path_and_name() {
-        let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let list =
+            wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
 
         let bbs: Vec<&AssetView> = list
             .assets
@@ -888,6 +1034,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            None,
         )
         .expect("按喷嘴筛");
         assert_eq!(
@@ -906,7 +1054,8 @@ mod tests {
     /// 被当成「不过滤」，整机图 / 图标全放出来
     #[test]
     fn the_kind_axis_filters_each_kind_cleanly() {
-        let all = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let all =
+            wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         let want_of = [
             // image 档 5 = 整机图 4 + 品牌字标 1（2026-10-03 品牌图正式进台账）
             (AssetKind::Image, 5usize),
@@ -918,8 +1067,17 @@ mod tests {
             (AssetKind::Guide, 2),
         ];
         for (kind, want) in want_of {
-            let got = wb_assets(Some(kind.key().to_owned()), None, None, None, None, None)
-                .unwrap_or_else(|e| panic!("按 {} 筛：{e}", kind.key()));
+            let got = wb_assets(
+                Some(kind.key().to_owned()),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .unwrap_or_else(|e| panic!("按 {} 筛：{e}", kind.key()));
             assert_eq!(
                 got.assets.len(),
                 want,
@@ -950,7 +1108,8 @@ mod tests {
     #[test]
     fn the_real_identity_states_match_the_model() {
         use AssetIdentity::{ArchiveOnly, Bundled, InBundle, Optional};
-        let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
+        let list =
+            wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         let count = |want: AssetIdentity| {
             list.assets
                 .iter()
@@ -983,8 +1142,17 @@ mod tests {
         );
 
         // 身份轴筛选：每一档筛出来都恰好是那一档
-        let filtered =
-            wb_assets(None, None, None, None, Some("bundled".to_owned()), None).expect("按随包筛");
+        let filtered = wb_assets(
+            None,
+            None,
+            None,
+            None,
+            Some("bundled".to_owned()),
+            None,
+            None,
+            None,
+        )
+        .expect("按随包筛");
         assert!(filtered
             .assets
             .iter()

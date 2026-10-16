@@ -141,13 +141,14 @@
   height: var(--num-h, 30px);
 }
 
-/* mini 档收箭头：宽度真的不够，键盘上下键与滚轮仍然可用 */
-[data-density='mini'] .arrows {
-  display: none;
-}
-
+/*
+ * mini 档**不再收箭头**（2026-10-16 作者：「小尺寸……该步进还是继续步进，
+ * 它的高度啊、宽度啊，那些没必要变」）—— 原来两条（`arrows { display: none }`
+ * 把步进器藏掉、`padding-right: 8px` 把那一格补掉）会让同一只框在小窗里换一副
+ * 长相、宽度也跟着变。现在只留高度那一行（与 compact 同值，管的是没设
+ * `--num-h` 的页，回落 30px）。
+ */
 [data-density='mini'] .box,
 [data-density='mini'] .boxOff {
   height: var(--num-h, 30px);
-  padding-right: 8px;
 }

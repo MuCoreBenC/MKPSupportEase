@@ -352,8 +352,104 @@ fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
 ///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
 ///   （2026-10-05 真机：手动指定"云端地址"反而不通，就是这一处）。
 /// 所以：**原样先试**，不成再在目录上补文件名。返回值带上"命中它该记哪个形状"。
-fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
+/// 把**人从浏览器地址栏复制来的仓库网页地址**转成"交付根那一层的 raw 地址"。
+///
+/// 2026-10-16（作者：「是客户端的那个填自定义的里面呀，我可以自己填哪个就是哪个呀
+/// <https://github.com/MuCoreBenC/MKPSupportEase/tree/feat/dark-mode> 比如我粘贴的就是这样的」）。
+///
+/// 客户端的「自定义地址」原先是**只认交付根 / `source.json` 两种形状**的 —— 用户贴一个
+/// 仓库页 / 分支页，只会得到"读不到寻址规则声明"。可那是人手里最常见的东西
+/// （在网页上挑好分支、复制地址栏），所以这里补一步**认网页地址**：
+///
+/// | 输入 | 转成 |
+/// | --- | --- |
+/// | `https://github.com/<o>/<r>` | `https://raw.githubusercontent.com/<o>/<r>/main` |
+/// | `https://github.com/<o>/<r>/tree/<ref>` | `https://raw.githubusercontent.com/<o>/<r>/<ref>` |
+/// | `https://github.com/<o>/<r>/tree/<ref>/<path…>` | `…/<ref>/<path…>`（人指到哪就带到哪） |
+/// | `https://gitee.com/<o>/<r>[/tree/<ref>[/…]]` | `https://gitee.com/<o>/<r>/raw/<ref>[/…]` |
+/// | `…/blob/<ref>/<file>`（网页版文件页） | 对应的 raw 文件地址 |
+/// | 已经是 raw / 别的 host | **原样**（自建源那条路不动） |
+///
+/// ★ 缺省 ref 用 `main`（与工作台 `delivery::DEFAULT_REF`、客户端内置源同一条）。
+/// ★ 只认 `github.com` / `gitee.com` 两个 host 的**网页形状**：别的 host 一律原样返回，
+///   把判断留给 [`bootstrap_candidates`]（自建源不许被这里改坏）。
+fn web_url_to_raw_base(url: &str) -> String {
     let trimmed = url.trim().trim_end_matches('/');
+
+    let convert = |rest: &str, host: &str| -> Option<String> {
+        let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.len() < 2 {
+            return None;
+        }
+        let owner = parts[0];
+        let repo = parts[1].strip_suffix(".git").unwrap_or(parts[1]);
+        /* 已经是 raw 形状（gitee 的 raw 与网页同域）⇒ 别动它 */
+        if parts.get(2) == Some(&"raw") {
+            return None;
+        }
+        if host == "gitee.com" {
+            let after = if parts.get(2) == Some(&"tree") {
+                /* tree/<ref>[/path…] */
+                if parts.len() >= 4 {
+                    format!("{}/{}", parts[3], parts[4..].join("/"))
+                } else {
+                    DEFAULT_REF.to_owned()
+                }
+            } else {
+                DEFAULT_REF.to_owned()
+            };
+            return Some(format!(
+                "https://gitee.com/{owner}/{repo}/raw/{}",
+                after.trim_end_matches('/')
+            ));
+        }
+        /* GitHub：raw 住在另一个域名上 */
+        let after = match parts.get(2) {
+            Some(&"tree") => {
+                if parts.len() >= 4 {
+                    format!("{}/{}", parts[3], parts[4..].join("/"))
+                } else {
+                    DEFAULT_REF.to_owned()
+                }
+            }
+            Some(&"blob") => {
+                /* blob/<ref>/<file…> ⇒ 按人指的那一份转（与工作台同一条） */
+                if parts.len() >= 5 {
+                    parts[3..].join("/")
+                } else {
+                    DEFAULT_REF.to_owned()
+                }
+            }
+            _ => DEFAULT_REF.to_owned(),
+        };
+        Some(format!(
+            "https://raw.githubusercontent.com/{owner}/{repo}/{}",
+            after.trim_end_matches('/')
+        ))
+    };
+
+    for host in ["github.com", "gitee.com"] {
+        for scheme in ["https://", "http://"] {
+            if let Some(rest) = trimmed
+                .strip_prefix(scheme)
+                .and_then(|r| r.strip_prefix(&format!("{host}/")))
+            {
+                if let Some(out) = convert(rest, host) {
+                    return out;
+                }
+            }
+        }
+    }
+    trimmed.to_owned()
+}
+
+/// 缺省分支 —— 与工作台 `delivery::DEFAULT_REF` 同一个值（`main`）。
+const DEFAULT_REF: &str = "main";
+
+fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
+    /* ★ 先认"网页地址"（仓库页 / `tree/<分支>` 页 / blob 页）—— 人手里最常见的就是它 */
+    let converted = web_url_to_raw_base(url);
+    let trimmed = converted.trim().trim_end_matches('/');
     let mut out: Vec<(String, CustomShape)> = Vec::new();
     if trimmed.ends_with(SOURCE_FILE_NAME) {
         out.push((trimmed.to_owned(), CustomShape::Bootstrap));
@@ -620,6 +716,65 @@ mod two_source_tests {
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
+    }
+
+    /// **网页地址 → raw 交付根**（2026-10-16，作者贴的就是 `.../tree/feat/dark-mode`）。
+    #[test]
+    fn a_web_url_becomes_the_raw_delivery_base() {
+        // 仓库页 → 默认 main
+        assert_eq!(
+            web_url_to_raw_base("https://github.com/MuCoreBenC/MKPSupportEase"),
+            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main"
+        );
+        // ★ 作者贴的那一条：tree/<分支>
+        assert_eq!(
+            web_url_to_raw_base("https://github.com/MuCoreBenC/MKPSupportEase/tree/feat/dark-mode"),
+            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/feat/dark-mode"
+        );
+        // `.git` 后缀去掉
+        assert_eq!(
+            web_url_to_raw_base("https://github.com/o/r.git"),
+            "https://raw.githubusercontent.com/o/r/main"
+        );
+        // 指到某个子目录也带上
+        assert_eq!(
+            web_url_to_raw_base("https://github.com/o/r/tree/feat/x/presets/delivery"),
+            "https://raw.githubusercontent.com/o/r/feat/x/presets/delivery"
+        );
+        // blob 文件页 → 对应的 raw 文件（与工作台同一条）
+        assert_eq!(
+            web_url_to_raw_base("https://github.com/o/r/blob/main/presets/delivery/source.json"),
+            "https://raw.githubusercontent.com/o/r/main/presets/delivery/source.json"
+        );
+        // Gitee：raw 与网页同域
+        assert_eq!(
+            web_url_to_raw_base("https://gitee.com/o/r/tree/feat/x"),
+            "https://gitee.com/o/r/raw/feat/x"
+        );
+        assert_eq!(
+            web_url_to_raw_base("https://gitee.com/o/r"),
+            "https://gitee.com/o/r/raw/main"
+        );
+        // ★ 已经是 raw / 别的 host ⇒ 原样（自建源不许被改坏）
+        let raw = "https://raw.githubusercontent.com/o/r/main/presets/delivery";
+        assert_eq!(web_url_to_raw_base(raw), raw);
+        assert_eq!(
+            web_url_to_raw_base("https://gitee.com/o/r/raw/main"),
+            "https://gitee.com/o/r/raw/main"
+        );
+        let mine = "https://my.host/delivery";
+        assert_eq!(web_url_to_raw_base(mine), mine);
+    }
+
+    /// 网页地址进 `bootstrap_candidates` 后，拼出来的候选是 raw 那一份的 `source.json`
+    #[test]
+    fn a_tree_url_yields_the_raw_source_json_candidate() {
+        let c = bootstrap_candidates("https://github.com/o/r/tree/feat/x");
+        assert!(
+            c.iter()
+                .any(|(u, _)| u == "https://raw.githubusercontent.com/o/r/feat/x/source.json"),
+            "该按 feat/x 拼 source.json，得到：{c:?}"
+        );
     }
 
     /// 1 代老档（只有 `baseUrl`）读成**自定义源** —— 那份地址本来就是用户手填的

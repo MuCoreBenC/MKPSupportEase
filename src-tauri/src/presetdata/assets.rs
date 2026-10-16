@@ -171,12 +171,70 @@ pub enum Delivery {
     Bundled,
 }
 
+/// **一组图**里的一名成员（作者 2026-10-16）。
+///
+/// 为什么成员要带 `role`：客户端要按主题挑图（浅色版 / 深色版），而"哪张是浅色那张"
+/// 是**内容属性**，不是文件名属性 —— 所以它写在台账里，由人指定（也可以不填）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GroupMember {
+    /// 指 [`Asset::id`]（**指向 id，不指路径** —— 路径会改，id 不改）
+    pub asset: String,
+    /// 这张在这个组里演什么角色（`light` / `dark` / …）。**可以空** ——
+    /// 空 = "只是一伙的、不担任什么"，客户端挑不出具体一张时回落到组里第一张
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub role: String,
+}
+
+/// **一组图**：共用一份标注源稿的那几张（作者 2026-10-16）。
+///
+/// > 「不能只用文件名去实现，必须有一个去管理它，像那个 catalog 那种的」
+///
+/// 从前"哪几张是一组"是**从文件名算**的（抹掉 `-light` / `-dark` 后缀）。现在它是一条
+/// 登记：组有名、有 id、成员按顺序摆着，跟资产一样入库、跟仓库走、编进 catalog。
+///
+/// # `id` 为什么同时就是那份源稿的文件名
+///
+/// 一份源稿的落点是 `<组成员所在目录>/<组 id>.anno.json`。id 与文件名同值 ⇒
+/// **改组名不动落点**，而且"这一组共用哪份标注"在目录里一眼看得出来。
+/// 现有那对引导图的组 id 正好是 `open-with`（旧口径 `pair_stem` 算出来也是它）
+/// ⇒ 老文件零迁移。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Group {
+    /// 主键，**大小写不敏感**唯一；也用作那份源稿的文件名（所以必须是安全的文件名）
+    pub id: String,
+    /// 给人看的组名（作者要的"套装的感觉"就靠它）
+    pub name: String,
+    /// 成员，**有序**（第一个是"没指定角色时"的兜底）
+    pub members: Vec<GroupMember>,
+}
+
+/// 旧口径的"一对图"共同干名：`open-with-light` / `open-with-dark` ⇒ `open-with`。
+///
+/// ★ 现在它是**兜底**（[`Assets::anno_stem_of`] 的第 ② 条），不再是分组的主判据 ——
+/// 分组请用 [`Group`]。留着它只为"没建组的那张图也能单独标一下"。
+///
+/// ★ 客户端 `openWithGuide.ts` 那一侧的浅深配对是**另一回事**（它按组的 `role` 挑），
+/// 那边已经不吃这条了。
+pub fn pair_stem(stem: &str) -> &str {
+    for suf in ["-light", "-dark", "_light", "_dark"] {
+        if let Some(rest) = stem.strip_suffix(suf) {
+            return rest;
+        }
+    }
+    stem
+}
+
 /// 文件形状。`[[assets]]` 数组表，与 `brands.toml` 那份"一份集中定义"同一写法。
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AssetsFile {
     #[serde(default)]
     assets: Vec<Asset>,
+    /// **分组登记**（2026-10-16 加）。缺省空 = 一份组都没有（旧文件照读）
+    #[serde(default)]
+    groups: Vec<Group>,
 }
 
 /// 一次加载的资产定义。
@@ -186,6 +244,8 @@ struct AssetsFile {
 #[derive(Debug)]
 pub struct Assets {
     items: Vec<Asset>,
+    /// 分组登记（[`Group`]）。与 `items` 一样是**从文档读出来的**，改动同样要落到 `doc` 上
+    groups: Vec<Group>,
     doc: DocumentMut,
     file: PathBuf,
     /// 载荷根。**由调用方给**，没有就是"这一侧没有资产文件本体"（见模块头）
@@ -206,6 +266,7 @@ impl Assets {
 
         let out = Self {
             items: parsed.assets,
+            groups: parsed.groups,
             doc,
             file,
             asset_root: None,
@@ -237,6 +298,47 @@ impl Assets {
     pub fn get(&self, id: &str) -> Option<&Asset> {
         let want = id.trim().to_lowercase();
         self.items.iter().find(|a| a.id.to_lowercase() == want)
+    }
+
+    /// 全部分组登记（按文档里的顺序）
+    pub fn groups(&self) -> &[Group] {
+        &self.groups
+    }
+
+    /// 按组 id 取（大小写不敏感，同 [`Self::get`] 的理由）
+    pub fn group_by_id(&self, id: &str) -> Option<&Group> {
+        let want = id.trim().to_lowercase();
+        self.groups.iter().find(|g| g.id.to_lowercase() == want)
+    }
+
+    /// 这条资产属于哪一组（不属任何组 ⇒ `None`）。
+    ///
+    /// 判据链只有这一条，别处别再算一遍（"一张图至多属一组"由 [`Self::check_groups`] 保着）
+    pub fn group_of(&self, asset_id: &str) -> Option<&Group> {
+        let want = asset_id.trim().to_lowercase();
+        self.groups.iter().find(|g| {
+            g.members
+                .iter()
+                .any(|m| m.asset.trim().to_lowercase() == want)
+        })
+    }
+
+    /// 这张资产生的那份**标注源稿干名**（⇒ `<同一目录>/<干名>.anno.json`）。
+    ///
+    /// ★ **唯一判据**（`workbench::app::annotation` 也走这一条，别在那边再写一份）：
+    /// ① 有登记的组 → **组 id**；② 没有 → 旧的 [`pair_stem`]（抹掉浅 / 深后缀）兜底。
+    ///
+    /// ② 留着是为了"给一张图单独标一下"这种小事不用先建组 —— 代价是那份源稿的落点
+    /// 仍受文件名影响（改名会让它挪窝）。真在意稳定的话，给它建个组。
+    pub fn anno_stem_of(&self, asset_id: &str) -> Option<String> {
+        if let Some(g) = self.group_of(asset_id) {
+            return Some(g.id.clone());
+        }
+        let a = self.get(asset_id)?;
+        let stem = Path::new(a.path.trim())
+            .file_stem()
+            .and_then(|s| s.to_str())?;
+        Some(pair_stem(stem).to_owned())
     }
 
     /// 一个条目的**真实路径**：载荷根 + `path`，走 [`resolve_in`] 的三道闸。
@@ -429,6 +531,88 @@ impl Assets {
         Ok(())
     }
 
+    /// **新建或改写一个分组**（作者 2026-10-16）。
+    ///
+    /// 先过 [`Self::check_groups`] 那几条不变量（**坏值整次拒绝，不写下去** ——
+    /// 与 [`Self::set_delivery`] 同一条纪律），再内存与文档面一起改。
+    ///
+    /// 文档面**整段重写** `[[groups]]`：分组是工具管的登记段（不是人手写的大注释区），
+    /// 整段重写比"精确改某一行"少一类漂移。`[[assets]]` 那一段一个字节都不碰。
+    pub fn upsert_group(&mut self, group: Group) -> Result<(), AppError> {
+        let candidate = Group {
+            id: group.id.trim().to_owned(),
+            name: group.name.trim().to_owned(),
+            members: group
+                .members
+                .into_iter()
+                .map(|m| GroupMember {
+                    asset: m.asset.trim().to_owned(),
+                    role: m.role.trim().to_owned(),
+                })
+                .collect(),
+        };
+        let want = candidate.id.to_lowercase();
+        let mut next: Vec<Group> = self
+            .groups
+            .iter()
+            .filter(|g| g.id.to_lowercase() != want)
+            .cloned()
+            .collect();
+        next.push(candidate);
+        next.sort_by_key(|g| g.id.to_lowercase());
+
+        /* 先把候选摆进去试一遍，过了才认 —— 拒绝时内存与盘上都不留痕 */
+        let prev = std::mem::replace(&mut self.groups, next);
+        if let Err(e) = self.check_groups() {
+            self.groups = prev;
+            return Err(e);
+        }
+        self.write_groups_doc();
+        Ok(())
+    }
+
+    /// 删掉一个分组。成员**原地变回"未分组"**（资产一条不动 —— 分组只是登记，不是归属）。
+    pub fn remove_group(&mut self, id: &str) -> Result<Group, AppError> {
+        let want = id.trim().to_lowercase();
+        let Some(pos) = self.groups.iter().position(|g| g.id.to_lowercase() == want) else {
+            return Err(AppError::not_found(format!("没有分组 {id}")));
+        };
+        let removed = self.groups.remove(pos);
+        self.write_groups_doc();
+        Ok(removed)
+    }
+
+    /// 把内存里那份 `groups` 整段写回文档面（`[[groups]]` 表数组）。
+    ///
+    /// ★ 只在 [`Self::upsert_group`] / [`Self::remove_group`] 里调 —— 别在加载路径上调，
+    /// 那会把"读进来不改再写出去逐字节相同"这条底破掉。
+    fn write_groups_doc(&mut self) {
+        let mut arr = toml_edit::ArrayOfTables::new();
+        for g in &self.groups {
+            let mut t = toml_edit::Table::new();
+            t["id"] = super::literal_str(&g.id);
+            t["name"] = super::literal_str(&g.name);
+            /* ★ 先把**全部**成员攒进一个表数组再挂上去 —— 逐个 `t["members"] = …` 是覆盖，
+            只剩最后一个（2026-10-16 实测踩到：写出去只剩一名成员，读回来少一半） */
+            let mut inner = toml_edit::ArrayOfTables::new();
+            for m in &g.members {
+                let mut mt = toml_edit::Table::new();
+                mt["asset"] = super::literal_str(&m.asset);
+                if !m.role.is_empty() {
+                    mt["role"] = super::literal_str(&m.role);
+                }
+                inner.push(mt);
+            }
+            t["members"] = toml_edit::Item::ArrayOfTables(inner);
+            arr.push(t);
+        }
+        if arr.is_empty() {
+            self.doc.remove("groups");
+        } else {
+            self.doc["groups"] = toml_edit::Item::ArrayOfTables(arr);
+        }
+    }
+
     /// 原子写回。**唯一的写盘点**（与 [`super::Catalog::write_machine`] 同一条出口）
     pub fn write(&self) -> Result<(), AppError> {
         crate::fsx::atomic::atomic_write(&self.file, self.to_toml().as_bytes())
@@ -459,6 +643,139 @@ impl Assets {
                             .to_owned(),
                     ),
                 );
+            }
+        }
+
+        self.check_groups()?;
+        Ok(())
+    }
+
+    /// **分组那几条不变量**（作者 2026-10-16 新增）。
+    ///
+    /// 为什么放在加载期：这些坏掉的表现都**不是报错**，而是"某几张图共用错了标注"或
+    /// "两份源稿抢同一个文件"—— 与 id 撞车同一类，早拦早好。
+    ///
+    /// 1. `id` 非空、**大小写不敏感唯一**、且是**安全的文件名**（它同时是源稿的文件名）；
+    /// 2. `name` 非空（界面上要显示的就是它）；
+    /// 3. 成员至少一个、每个都指着真资产、同一组里不重复；
+    /// 4. **同一组的成员必须在同一个目录**（源稿落点 = 成员所在目录 + 组 id ⇒ 否则不唯一）；
+    /// 5. **一张资产至多属于一个组**（否则"它跟谁共用一份标注"有两种答案）；
+    /// 6. 组 id 不许与**同目录下某张未分组资产**的旧口径干名撞（那样两份源稿同名）。
+    fn check_groups(&self) -> Result<(), AppError> {
+        let mut seen_ids: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+        /* 组 id → 那个组所在目录（第 6 条要用） */
+        let mut group_dirs: std::collections::BTreeMap<String, PathBuf> =
+            std::collections::BTreeMap::new();
+        /* 资产 id（小写）→ 它已经属于哪个组（第 5 条） */
+        let mut owned: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
+
+        for g in &self.groups {
+            let id = g.id.trim();
+            let lower = id.to_lowercase();
+            if id.is_empty() {
+                return Err(AppError::corrupted(format!(
+                    "{} 里有一个分组没有 id",
+                    self.file.display()
+                )));
+            }
+            /* 安全文件名（它同时是那份源稿的文件名）：借 path 那两道与根无关的闸 */
+            check_relative(&format!("{id}.anno.json")).map_err(|e| {
+                AppError::corrupted(format!("分组 id 不能当文件名用：{id}")).with_detail(format!(
+                    "组 id 同时就是那份标注源稿的文件名（`<目录>/<组 id>.anno.json`）—— \
+                     得是个安全的名字。{e}"
+                ))
+            })?;
+            if let Some(prev) = seen_ids.insert(lower.clone(), id.to_owned()) {
+                return Err(AppError::corrupted(format!("分组 id 撞了：{prev} 与 {id}"))
+                    .with_detail("id 是主键，且**大小写不敏感**".to_owned()));
+            }
+            if g.name.trim().is_empty() {
+                return Err(AppError::corrupted(format!("分组 {id} 没有 name"))
+                    .with_detail("界面上要显示的就是它（作者要的「套装感」）".to_owned()));
+            }
+            if g.members.is_empty() {
+                return Err(
+                    AppError::corrupted(format!("分组 {id} 一个成员都没有")).with_detail(
+                        "分组就是「哪几张图共用一份标注」—— 没有成员的组没有意义，删掉它"
+                            .to_owned(),
+                    ),
+                );
+            }
+
+            let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+            for m in &g.members {
+                let mid = m.asset.trim();
+                let Some(a) = self.get(mid) else {
+                    return Err(AppError::corrupted(format!(
+                        "分组 {id} 的成员 {mid} 不是一条资产"
+                    ))
+                    .with_detail("成员要写资产 id（`presets/assets.toml` 的 id）".to_owned()));
+                };
+                let dir = Path::new(a.path.trim())
+                    .parent()
+                    .map(|p| p.to_string_lossy().replace('\\', "/"))
+                    .unwrap_or_default();
+                dirs.insert(dir);
+                if let Some(prev) = owned.insert(a.id.to_lowercase(), id.to_owned()) {
+                    return Err(AppError::corrupted(format!(
+                        "资产 {} 同时属于两个组：{prev} 与 {id}",
+                        a.id
+                    ))
+                    .with_detail(
+                        "一张图只能跟一伙人共用一份标注 —— 它属于谁，那份 `.anno.json` 就只有一个"
+                            .to_owned(),
+                    ));
+                }
+            }
+            if dirs.len() > 1 {
+                let which: Vec<String> = dirs.iter().cloned().collect();
+                return Err(
+                    AppError::corrupted(format!("分组 {id} 的成员不在同一个目录")).with_detail(
+                        format!(
+                        "分别在：{}。一份标注源稿只能落在一个目录里（`<目录>/<组 id>.anno.json`）",
+                        which.join("、")
+                    ),
+                    ),
+                );
+            }
+            group_dirs.insert(
+                lower,
+                PathBuf::from(dirs.first().cloned().unwrap_or_default()),
+            );
+        }
+
+        /* 第 6 条：未分组资产的旧口径干名，不许与同目录的组 id 撞 */
+        for a in &self.items {
+            if owned.contains_key(&a.id.to_lowercase()) {
+                continue;
+            }
+            let Some(stem) = Path::new(a.path.trim())
+                .file_stem()
+                .and_then(|s| s.to_str())
+            else {
+                continue;
+            };
+            let derived = pair_stem(stem);
+            if derived.trim().is_empty() {
+                continue;
+            }
+            let dir = Path::new(a.path.trim())
+                .parent()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if let Some(g) = group_dirs.get(&derived.to_lowercase()) {
+                if g.to_string_lossy().replace('\\', "/") == dir {
+                    return Err(AppError::corrupted(format!(
+                        "资产 {} 的旧口径干名 `{derived}` 与同目录的分组 id 撞了",
+                        a.id
+                    ))
+                    .with_detail(
+                        "那样两份源稿会抢同一份文件。把这张图收进那个组，或者给它单独建一个组"
+                            .to_owned(),
+                    ));
+                }
             }
         }
         Ok(())
@@ -795,5 +1112,149 @@ mod tests {
             a.file().is_file(),
             "presets/assets.toml 应当存在 —— 它是资产域①层的定义文件"
         );
+    }
+
+    /* ---------------- 分组（`[[groups]]`，2026-10-16） ---------------- */
+
+    /// 旧口径那条——抹掉浅 / 深后缀。**它现在只是兜底**，但算法本身不能变
+    #[test]
+    fn pair_stem_strips_the_theme_suffix() {
+        assert_eq!(pair_stem("open-with-light"), "open-with");
+        assert_eq!(pair_stem("open-with-dark"), "open-with");
+        assert_eq!(pair_stem("open-with_light"), "open-with");
+        assert_eq!(pair_stem("open-with"), "open-with", "没有浅深后缀就原样");
+    }
+
+    /// `anno_stem_of`：**有组 → 组 id；没组 → 旧口径兜底**
+    #[test]
+    fn the_source_stem_comes_from_the_group_then_falls_back_to_the_name() {
+        let text = "[[assets]]\nid = 'g-light'\ntype = 'guide'\nname = 'n'\npath = 'guides/x-light.png'\n\
+                    [[assets]]\nid = 'g-dark'\ntype = 'guide'\nname = 'n'\npath = 'guides/x-dark.png'\n\
+                    [[assets]]\nid = 'lonely'\ntype = 'guide'\nname = 'n'\npath = 'guides/y-dark.png'\n\
+                    [[groups]]\nid = 'x'\nname = 'X 那套'\n\
+                    [[groups.members]]\nasset = 'g-light'\nrole = 'light'\n\
+                    [[groups.members]]\nasset = 'g-dark'\nrole = 'dark'\n";
+        let (_d, a) = fixture(text);
+        assert_eq!(
+            a.anno_stem_of("g-light").as_deref(),
+            Some("x"),
+            "进组的用组 id"
+        );
+        assert_eq!(a.anno_stem_of("g-dark").as_deref(), Some("x"));
+        assert_eq!(
+            a.anno_stem_of("lonely").as_deref(),
+            Some("y"),
+            "没进组的走旧口径（抹掉 `-dark`）"
+        );
+        assert_eq!(
+            a.group_of("g-light").map(|g| g.name.as_str()),
+            Some("X 那套")
+        );
+        assert!(a.group_of("lonely").is_none());
+    }
+
+    /// **同一组的成员必须在同一个目录**（否则那份源稿不知道落哪）
+    #[test]
+    fn members_of_one_group_must_share_a_directory() {
+        let text = "[[assets]]\nid = 'a'\ntype = 'guide'\nname = 'n'\npath = 'guides/a.png'\n\
+                    [[assets]]\nid = 'b'\ntype = 'guide'\nname = 'n'\npath = 'printers/b.png'\n\
+                    [[groups]]\nid = 'mix'\nname = '混的'\n\
+                    [[groups.members]]\nasset = 'a'\n\
+                    [[groups.members]]\nasset = 'b'\n";
+        let dir = tempfile::tempdir().expect("临时目录");
+        put(dir.path(), text);
+        let err = Assets::load_from(dir.path()).expect_err("跨目录的组必须被拦");
+        assert!(
+            err.message.contains("不在同一个目录"),
+            "实测：{}",
+            err.message
+        );
+    }
+
+    /// **一张资产至多属一个组**（否则"它跟谁共用标注"有两种答案）
+    #[test]
+    fn an_asset_belongs_to_at_most_one_group() {
+        let text = "[[assets]]\nid = 'a'\ntype = 'guide'\nname = 'n'\npath = 'guides/a.png'\n\
+                    [[groups]]\nid = 'one'\nname = '一'\n\
+                    [[groups.members]]\nasset = 'a'\n\
+                    [[groups]]\nid = 'two'\nname = '二'\n\
+                    [[groups.members]]\nasset = 'a'\n";
+        let dir = tempfile::tempdir().expect("临时目录");
+        put(dir.path(), text);
+        let err = Assets::load_from(dir.path()).expect_err("一图两组必须被拦");
+        assert!(
+            err.message.contains("同时属于两个组"),
+            "实测：{}",
+            err.message
+        );
+    }
+
+    /// **组 id 不许与同目录下某张未分组资产的旧口径干名撞**（两份源稿会同名）
+    #[test]
+    fn a_group_id_may_not_collide_with_an_ungrouped_stem() {
+        let text =
+            "[[assets]]\nid = 'a'\ntype = 'guide'\nname = 'n'\npath = 'guides/x-light.png'\n\
+                    [[assets]]\nid = 'b'\ntype = 'guide'\nname = 'n'\npath = 'guides/b.png'\n\
+                    [[groups]]\nid = 'x'\nname = '撞的'\n\
+                    [[groups.members]]\nasset = 'b'\n";
+        let dir = tempfile::tempdir().expect("临时目录");
+        put(dir.path(), text);
+        let err = Assets::load_from(dir.path()).expect_err("撞名必须被拦");
+        assert!(err.message.contains("撞"), "实测：{}", err.message);
+    }
+
+    /// 坏值**整次拒绝、内存与盘上都不留痕**；写下去的那份能被重读、且带 `[[groups]]`
+    #[test]
+    fn upserting_a_group_is_all_or_nothing_and_lands_in_the_file() {
+        let text = "[[assets]]\n# 这行注释必须活下来（改分组不许动 assets 那一段）\nid = 'a'\n\
+                    type = 'guide'\nname = 'n'\npath = 'guides/a.png'\n\
+                    [[assets]]\nid = 'b'\ntype = 'guide'\nname = 'n'\npath = 'guides/b-dark.png'\n";
+        let (_d, mut a) = fixture(text);
+
+        // 坏值：成员指向不存在的资产 ⇒ 拒绝，而且一条都不留下
+        let bad = Group {
+            id: "g".into(),
+            name: "G".into(),
+            members: vec![GroupMember {
+                asset: "nope".into(),
+                role: String::new(),
+            }],
+        };
+        assert!(a.upsert_group(bad).is_err());
+        assert!(a.groups().is_empty(), "拒绝之后内存里不许留半条");
+
+        // 好值：写下去、重读得到、`role` 保住、`members` 顺序保住
+        a.upsert_group(Group {
+            id: "g".into(),
+            name: "G 那套".into(),
+            members: vec![
+                GroupMember {
+                    asset: "a".into(),
+                    role: "light".into(),
+                },
+                GroupMember {
+                    asset: "b".into(),
+                    role: "dark".into(),
+                },
+            ],
+        })
+        .expect("好值该过");
+        a.write().expect("写");
+        let again = Assets::load_from(a.file().parent().expect("有父目录")).expect("重读");
+        assert_eq!(again.groups().len(), 1);
+        assert_eq!(again.groups()[0].id, "g");
+        assert_eq!(again.groups()[0].members[0].role, "light");
+        assert_eq!(again.groups()[0].members[1].asset, "b");
+        assert_eq!(again.anno_stem_of("a").as_deref(), Some("g"));
+        assert!(
+            again.to_toml().contains("# 这行注释必须活下来"),
+            "改分组不许动 `[[assets]]` 那一段（注释也得原样）"
+        );
+
+        // 删组：成员原地变回"未分组"，资产一条不动
+        let mut again = again;
+        again.remove_group("g").expect("删组");
+        assert!(again.groups().is_empty());
+        assert_eq!(again.items().len(), 2, "删组不许动资产");
     }
 }

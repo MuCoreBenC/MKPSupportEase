@@ -10,7 +10,7 @@
  *   ① 「修改参数」弹窗（预设页本地面那一行右键进入 —— ★ 参数**页签** 2026-10-09 已退役，
  *      旧版入口那几步早跑不到底，2026-10-16 按弹窗入口重写）：分类 / 卡片 / 行全部来自
  *      目录（catalog 的 registry）；**两态**（打开先只读 → 「进入编辑模式」→
- *      撤销/重做/退出编辑模式/保存 → 「退出编辑模式」回只读）；改一个值当场进草稿 TOML；
+ *      撤销/重做/放弃并退出/保存 → 「放弃并退出」回只读）；改一个值当场进草稿 TOML；
  *      修改历史条目带上下文；弃用字段只读；塔地图消费 catalog.plates
  *   ② 设置页 · 高级设置 → 预设数据源：读得出「当前：还没配置」（假后端没有内置源）；
  *      「自定义地址（开发 / 排查）」能应用（尾斜杠砍掉 —— 与真机 `normalize_base_url`
@@ -142,8 +142,9 @@ for (const size of SIZES) {
    *   现在的真入口是**预设页那一行右键「修改参数」**（同一个 `PageParams`，嵌在
    *   `PresetParamsModal` 里）。顺带把 2026-10-16 的**两态**钉在这里：
    *     打开先只读（行里没有可改控件、底栏只有「进入编辑模式」）→
-   *     点它进编辑模式（撤销 / 重做 / 退出编辑模式 / 保存出场）→
-   *     点「退出编辑模式」= 作废（回只读，没保存的改退回已保存值 —— 2026-10-16 作者口径）。
+   *     点它进编辑模式（撤销 / 重做 / 放弃并退出 / 保存出场）→
+   *     点「放弃并退出」= 作废（回只读，没保存的改退回已保存值 —— 2026-10-16 作者口径；
+   *     这颗按钮当天从「退出编辑模式」改的词，见 `EDIT_TEXT.exitMode`）。
    */
   await page.getByRole('button', { name: '预设', exact: true }).first().click()
   await page.waitForSelector('main tbody tr[data-rowkey]', { timeout: 10000 })
@@ -182,11 +183,34 @@ for (const size of SIZES) {
   )
   check(
     tag,
-    '弹窗标题与底栏在（标题=文件名，副题与底栏状态都从包里来）',
-    full.text.includes('A1 涂胶.toml') &&
-      full.text.includes('改的是本地这一份') &&
+    '弹窗标题与底栏在（照 a05：大标题「修改参数」+ 副标题=文件名；底栏状态从包里来）',
+    full.text.includes('修改参数') &&
+      full.text.includes('A1 涂胶.toml') &&
       full.text.includes('没有未保存的改动'),
     full.text.slice(0, 60),
+  )
+  /*
+   * 版式（照 a05）：**「修改历史」在模态框标题栏那一簇里**（`×` 左边，见 PageParams 的
+   * `headActions`）；**搜索框在分类条那一行**（够宽时）—— 不再占头部一行。
+   */
+  const layout = await page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const head = d?.querySelector('header')
+    const tablist = d?.querySelector('[role="tablist"][aria-label="参数分类"]')
+    /* 分类条那一行 = `.bar`：`.group[role=tablist]` → `.wrap` → `.bar`（搜索框与 `.wrap` 同级） */
+    const bar = tablist?.parentElement?.parentElement ?? null
+    const inHead = (text) =>
+      [...(head?.querySelectorAll('button') ?? [])].some((b) => (b.textContent ?? '').includes(text))
+    return {
+      historyInHead: inHead('修改历史'),
+      searchInBar: bar !== null && bar.querySelector('[aria-label="搜索参数"]') !== null,
+    }
+  })
+  check(
+    tag,
+    '版式照 a05：「修改历史」在标题栏、「搜索框」在分类条那一行',
+    layout.historyInHead && layout.searchInBar,
+    `标题栏 ${layout.historyInHead} / 分类条行 ${layout.searchInBar}`,
   )
 
   /* ①a 打开先只读（2026-10-16 两态）：行里没有可改控件，底栏只有「进入编辑模式」 */
@@ -198,20 +222,20 @@ for (const size of SIZES) {
       roState.names.includes('进入编辑模式') &&
       /* 判据看**按钮名**（"没有未保存的改动"这句状态文字里也含"保存"二字，别用脚本文本判） */
       !roState.names.includes('保存') &&
-      !roState.names.includes('退出编辑模式'),
+      !roState.names.includes('放弃并退出'),
     `行内控件 ${roState.rowControls} · 底栏 ${JSON.stringify(roState.names)}`,
   )
   await page.screenshot({ path: `${shotDir}/wire-params-${tag}.png` })
 
-  /* ①a2 点「进入编辑模式」→ 控件出场、底栏 = 撤销 / 重做 / 退出编辑模式 / 保存 */
+  /* ①a2 点「进入编辑模式」→ 控件出场、底栏 = 撤销 / 重做 / 放弃并退出 / 保存 */
   await dlgFootBtn(page, '进入编辑模式')
   await page.waitForTimeout(400)
   const edState = await dlgState(page)
   check(
     tag,
-    '进编辑模式：行内控件出场、底栏 = 撤销/重做/退出编辑模式/保存',
+    '进编辑模式：行内控件出场、底栏 = 撤销/重做/放弃并退出/保存',
     edState.rowControls > 0 &&
-      ['撤销', '重做', '退出编辑模式', '保存'].every((n) => edState.names.includes(n)),
+      ['撤销', '重做', '放弃并退出', '保存'].every((n) => edState.names.includes(n)),
     `行内控件 ${edState.rowControls} · 底栏 ${JSON.stringify(edState.names)}`,
   )
 
@@ -370,13 +394,13 @@ for (const size of SIZES) {
   }
   check(tag, '塔地图按默认板画出轮廓并替下 X/Y 行（消费 catalog.plates）', towerOk, towerNote)
 
-  /* ①f 退出编辑模式（2026-10-16）：**= 作废** —— 回只读，且没保存的改动全部回滚 */
-  await dlgFootBtn(page, '退出编辑模式')
+  /* ①f 「放弃并退出」（2026-10-16）：**= 作废** —— 回只读，且没保存的改动全部回滚 */
+  await dlgFootBtn(page, '放弃并退出')
   await page.waitForTimeout(400)
   const backRo = await dlgState(page)
   check(
     tag,
-    '退出编辑模式回到只读（行内控件收回、底栏回到「进入编辑模式」）',
+    '「放弃并退出」回到只读（行内控件收回、底栏回到「进入编辑模式」）',
     backRo.rowControls === 0 && backRo.foot.includes('进入编辑模式'),
     `行内控件 ${backRo.rowControls} · 底栏「${backRo.foot}」`,
   )
@@ -407,15 +431,15 @@ for (const size of SIZES) {
   const restoredState = await dlgState(page)
   check(
     tag,
-    '退出编辑模式 = 作废（值退回已保存的 22.4、底栏没有未保存的改动）',
+    '「放弃并退出」= 作废（值退回已保存的 22.4、底栏没有未保存的改动）',
     restored === '22.4' && /没有未保存的改动/.test(restoredState.foot),
     `offset_y=${restored} · 底栏「${restoredState.foot}」`,
   )
   /* 收尾回只读，别把编辑态带去设置页那一节 */
-  await dlgFootBtn(page, '退出编辑模式')
+  await dlgFootBtn(page, '放弃并退出')
   await page.waitForTimeout(300)
 
-  /* 关掉弹窗（未保存的改动留在草稿里 —— 与「退出编辑模式」同一条口径），别影响设置页那一节 */
+  /* 关掉弹窗（未保存的改动留在草稿里 —— 与「放弃并退出」同一条口径），别影响设置页那一节 */
   await page.keyboard.press('Escape')
   await page.waitForTimeout(400)
   /* 保险：真有没关掉的弹窗就再补一记（它的遮罩会挡住设置页里的点击） */

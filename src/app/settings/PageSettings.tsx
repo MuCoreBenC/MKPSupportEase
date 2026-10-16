@@ -72,7 +72,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 
-import { api, errorText } from '../../api'
+import { api, errorText, isAppError } from '../../api'
 import type { PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated } from '../state/deliveryState'
@@ -388,6 +388,12 @@ export default function PageSettings() {
    *
    * ★ 失败**照样开这张引导**：他手里的活没变（还是去访达里改那两下）——
    *   权限被拒（他点了「不允许」）是预期内的一条走法，壳那边已经退回去在访达里定位好了。
+   *
+   * ★★ **拒绝态要给"反悔"的入口**（2026-10-17 作者：「如果用户后悔了，有再次触发的开关吗」）：
+   *   macOS 拒过一次就**永远不会再弹**那个授权框（TCC 没有"再问一次"的 API）——
+   *   用户反悔的唯一正路是系统设置 → 自动化里把「访达」勾回来。⇒ 错的码是
+   *   `PERMISSION_DENIED` 时，在引导里摆一颗「去重新允许」，点了把**那一页**直达打开
+   *   （`openAutomationSettings`），他自己勾完回来再点一次「去系统里改…」就走通了。
    */
   const openSystemDefaults = () => {
     if (slicerToSystem) return
@@ -395,13 +401,27 @@ export default function PageSettings() {
     api.openDefaultAppSettings().then(
       (hint) => {
         setSlicerToSystem(false)
+        setGuideAskGrant(false)
         setGuide(hint)
       },
       (e: unknown) => {
         setSlicerToSystem(false)
+        setGuideAskGrant(isAppError(e) && e.code === 'PERMISSION_DENIED')
         setGuide(errorText(e))
       },
     )
+  }
+
+  /** 引导里那颗「去重新允许」摆不摆 —— 只有"自动化授权被拒"这一种错才摆 */
+  const [guideAskGrant, setGuideAskGrant] = useState(false)
+
+  /** 把用户送到系统设置 → 自动化那一页（勾「访达」那一下还是他自己来） */
+  const openAutomationSettings = async () => {
+    try {
+      await api.openAutomationSettings()
+    } catch (e) {
+      setNote({ text: errorText(e), bad: true })
+    }
   }
 
   /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
@@ -805,7 +825,21 @@ export default function PageSettings() {
         open={guide !== null}
         title="改 .3mf 的默认打开方式"
         status={guide ?? ''}
-        figure={openWithGuideFigure(catalog.assets)}
+        figure={openWithGuideFigure(catalog.assets, catalog.groups)}
+        statusExtra={
+          guideAskGrant ? (
+            <p className={s.guideGrant}>
+              <Btn
+                onClick={() => {
+                  void openAutomationSettings()
+                }}
+              >
+                去重新允许（系统设置 → 自动化）
+              </Btn>
+              <span className={s.guideGrantNote}>勾上「访达」后，回来再点一次「去系统里改…」就行</span>
+            </p>
+          ) : undefined
+        }
         steps={[
           {
             text: '在「打开方式」下拉里选好你要的应用',

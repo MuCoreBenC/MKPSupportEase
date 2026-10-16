@@ -37,6 +37,10 @@
 /// `<appDataDir>/publish-account.json`（**不含 token**；token 住凭据文件
 /// `credentials.json`，见 [`credentials`]）。发布目标由它决定，`git remote` 只作校验
 pub mod account;
+/// **标注源稿**（2026-10-16）：工作台「标注台」读写的那一份"能再编辑的源文件"，
+/// 住在 `presets/assets/<同类目录>/<对>.anno.json`（与它描述的图**同层**、随仓库走、
+/// **不进交付目录**）。路径由后端从台账派生，前端只给资产 id
+pub mod annotation;
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
 pub mod assets;
@@ -79,6 +83,10 @@ pub mod release_history;
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
 pub mod release_tx;
+/// **成品图渲染**（2026-10-16，方案 A）：把标注**烧进图片**，产出交付给客户端的
+/// `<图干>.rendered.webp`（无损 webp，纯 Rust 编码）—— 客户端 `<img>` 直接显示，
+/// 不再"读原图 + 前端现画框"。原图与源稿照旧留存（像 PSD）可再编辑
+pub mod render;
 /// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
 /// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
 pub mod sandbox;

@@ -23,10 +23,13 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { STORAGE } from '../../api/storageKeys'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
 import { FieldLayer } from '../../components/field'
+/* 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts） */
+import { useModalHeadSlot } from '../../components/modal'
 import CategoryPills from './CategoryPills'
 import GcodeBlock from './GcodeBlock'
 import HistoryDrawer from './HistoryDrawer'
@@ -44,6 +47,8 @@ import TowerMap from './TowerMap'
 import type { TowerCoreProps } from './TowerCoreSvg'
 import { useParams, valueText } from './useParams'
 import type { ParamDef } from './useParams'
+/* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
+import { EDIT_TEXT } from '../presets/presetTree'
 import s from './PageParams.module.css'
 
 interface Props {
@@ -74,8 +79,8 @@ interface Props {
    * 底栏只有「进入编辑模式」），点它才进入可改的那一态；false（默认）打开即可改。
    *
    * `PresetParamsModal`（当前唯一调用点）恒传 true —— 与参数对比台同一个框架：
-   * 只读态 → 进编辑模式 → 撤销 / 重做 / 退出编辑模式 / 保存。
-   * 「退出编辑模式」= **作废**这一次没保存的改动（回只读；见下面 `editMode` 那段）。
+   * 只读态 → 进编辑模式 → 撤销 / 重做 / 放弃并退出 / 保存（词在 `EDIT_TEXT`）。
+   * 「放弃并退出」= **作废**这一次没保存的改动（回只读；见下面 `editMode` 那段）。
    */
   gateEdit?: boolean
 }
@@ -365,6 +370,8 @@ export default function PageParams({
   openSyncOnStart = false,
   gateEdit = false,
 }: Props) {
+  /* 标题栏动作槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
+  const headSlot = useModalHeadSlot()
   const u = useParams(target === undefined ? undefined : { target })
 
   /*
@@ -372,7 +379,7 @@ export default function PageParams({
    *
    * `gateEdit` 时打开先只读 —— 控件全体降成纯文本值、底栏只有「进入编辑模式」
    * （与参数对比台、编辑文件两个模态框同一个框架）；点它进编辑模式，底栏换成
-   * 撤销 / 重做 / 退出编辑模式 / 保存。退出 = **作废**（作者 2026-10-16：「没有保存的话，
+   * 撤销 / 重做 / 放弃并退出 / 保存。退出 = **作废**（作者 2026-10-16：「没有保存的话，
    * 退出编辑模式就是作废，那些改的都作废，保存了才有」）—— 走 `u.discardAll()`：
    * 全部未保存的改动一次退回已保存值；要留住改动只有「保存」一条路。
    *
@@ -403,6 +410,21 @@ export default function PageParams({
   const pillRef = useRef<HTMLButtonElement>(null)
   /** 搜索框的 ref —— `Ctrl+F` 把焦点放进去（槽在头部还是分类条那一行由布局定） */
   const searchRef = useRef<HTMLInputElement | null>(null)
+  /**
+   * mini 档搜索**是否收起**（作者：「这个搜索框还是不要这样子，它多占了位置」）——
+   * 这一档输入框常驻就是整整一行（上面还带着头部内衬），收起之后只剩一颗放大镜
+   * 图标（28px），点开才在分类条那一行铺开输入框（见 `searchCollapsed`）。
+   */
+  const [searchOpen, setSearchOpen] = useState(false)
+  /**
+   * mini 档那颗放大镜是**用户点的**吗？
+   *
+   * ★ 只有点它才给焦点（作者：「我本来没有点它的话，我变小了还会自己聚焦上去，
+   *   这是不对的」）—— 原来那个 effect 只看「展开没展开」，于是窗口一跨到 mini 档、
+   *   或从 mini 档回来，输入框都会自己抢焦点。现在用一个一次性的意图标记，
+   *   把"聚焦"这个动作绑死在**点击**这一个入口上。
+   */
+  const wantSearchFocus = useRef(false)
 
   const closePicker = useCallback(() => {
     setPickerOpen(false)
@@ -567,13 +589,30 @@ export default function PageParams({
    * 搜索框放哪一行：够宽时待在分类条那一行的右端，不够时搬到头部标题行。
    * `bodyWidth` 量的是卡片区（`.bodyWrap`，见 useWidth），阈值与实测边界见 BAR_NEED。
    *
-   * **mini 档一律在上面** —— 作者要的小尺寸摆法是「搜索在上面、
-   * 修改历史在下面」，所以这一档不再看阈值，免得 480 与 460 两种宽度算法不一。
+   * **mini 档不再看这个阈值**：那一档搜索收成一颗放大镜钉在分类条那一行
+   * （`searchCollapsed`），点了才铺开 —— 于是头部不外借任何东西，
+   * `[data-row='head']` 那一套在 mini 档不再出现。
    */
-  const searchInHead = density === 'mini' || bodyWidth < BAR_NEED[density]
+  const searchInHead = density !== 'mini' && bodyWidth < BAR_NEED[density]
 
-  /** 「修改历史」在 mini 档跟着搜索框换到下一行（分类条那一行）的右端 */
-  const historyInBar = density === 'mini'
+  /**
+   * mini 档搜索**是否收起**（作者：「这个搜索框还是不要这样子，它多占了位置」）——
+   * 这一档它常驻就是整整一行（上面还带着头部内衬），收起之后只剩一颗放大镜图标
+   * （28px），点开才在分类条那一行铺开输入框。
+   */
+  const searchCollapsed = density === 'mini' && !searchOpen
+
+  /*
+   * mini 档点开那颗放大镜之后，焦点直接进输入框 —— 展开与聚焦是同一个动作的两半，
+   * 还要再点一下才输字就烦人了（`SearchField` 认 `inputRef`）。
+   * 它必须待在**所有 early return 之前**（hooks 的规矩），所以放在这一层。
+   */
+  useEffect(() => {
+    if (!wantSearchFocus.current) return
+    wantSearchFocus.current = false
+    if (searchCollapsed) return
+    searchRef.current?.focus()
+  }, [searchCollapsed])
 
   /** 保存确认弹层要显示的改动列表。from = 已保存值，to = 草稿值 */
   const changedEntries = useMemo(() => {
@@ -818,7 +857,8 @@ export default function PageParams({
   }
 
   /*
-   * 「修改历史」那颗按钮：标题行（宽档）与分类条那一行（mini 档）两处共用同一颗。
+   * 「修改历史」那颗按钮：它进**标题栏动作槽**（`×` 左边，见下面的 `headActions`）——
+   * 嵌在模态框里时 portal 到那颗槽、单独当页用时落在头部那一行的右端。
    *
    * **它是开关**（作者对着开着抽屉的截图：「这个时候点击了修改历史应该可以
    * 折叠起来」）。原来是 `setHistoryOpen(true)` —— 抽屉已经开着时点它什么都不发生，
@@ -844,7 +884,19 @@ export default function PageParams({
   )
 
   /*
-   * 搜索框也是两处共用（分类条那一行右端 / mini 档搬到标题行，见 searchInHead）——
+   * ★ **离开就折回去**（作者：「我希望它自己折回去，就是我离开了之后，它又继续
+   *   自己变小，不要一直留在这个地方」）—— mini 档那颗放大镜展开出来的输入框一失焦
+   *   （或按回车）就收回成图标：它是**临时借来的位置**，不该常驻。
+   *   `onCommit` 正是「离开框 / 回车」那一下（见 SearchField 的文件头）。
+   *   搜过的字照旧留着（`query` 不变）—— 收回的是位置，不是筛选。
+   */
+  const onSearchCommit = (term: string) => {
+    rememberSearch(term)
+    if (density === 'mini') setSearchOpen(false)
+  }
+
+  /*
+   * 搜索框也是两处共用（分类条那一行右端 / 不够宽时搬到标题行，见 searchInHead）——
    * 加上「最近搜索」那几个 prop 之后，再各写一份就该分叉了。
    */
   const searchField = (
@@ -854,7 +906,7 @@ export default function PageParams({
       inputRef={searchRef}
       history={searchHistory}
       onChange={setQuery}
-      onCommit={rememberSearch}
+      onCommit={onSearchCommit}
       onPick={(term) => {
         setQuery(term)
         rememberSearch(term)
@@ -862,6 +914,51 @@ export default function PageParams({
       onForget={forgetSearch}
     />
   )
+
+  /*
+   * **「回到已应用」**（只在「看的那份不是已应用那份」时出现）。
+   *
+   * 原来它缀在内容区顶上那一行「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」
+   * 的尾巴上；那一行退役之后（作者：「没有意义的这一行就可以去掉」），
+   * 这颗**动作**留下来、搬进**标题栏动作槽**，与「修改历史」并排。
+   *
+   * 它**能点** —— 名字都很像，一键回到已应用的那份，不靠认名字；
+   * 也**不点名**（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标，
+   * 见 useParams 的 ActiveUse）。已应用那份不在包里就没有动作，只陈述。
+   */
+  const backToActiveNode =
+    au === null || au.onIt ? null : au.canJump ? (
+      <button type="button" className={s.headBtn} onClick={backToActive}>
+        回到已应用
+      </button>
+    ) : (
+      <span className={s.headHint}>已应用的是另一份</span>
+    )
+
+  /*
+   * ★ **标题栏动作槽里那一簇**（照 a05）：左 → 右 = 回到已应用 · 修改历史。
+   *
+   * 撤销 / 重做 / 保存那些属于**这一页的编辑框架**（MKP 那一套：只读 → 进编辑模式 →
+   * 撤销 / 重做 / 放弃并退出 / 保存，见 `editMode` 与底栏），不在这一簇里 ——
+   * 「修改历史」与「回到已应用」是**参数这一页自己的**两个出口，才搬进标题栏。
+   */
+  const headActions = (
+    <>
+      {backToActiveNode}
+      {historyButton}
+    </>
+  )
+
+  /*
+   * 有动作槽（住在模态框里 / `embedded`）→ portal 进去，与 `×` 同一排；
+   * 没有槽（单独当页用）→ 原样摆在头部那一行右端（`headActionsInline` 的 `margin-left: auto`）。
+   */
+  const headActionsNode =
+    headSlot === null ? (
+      <span className={s.headActionsInline}>{headActions}</span>
+    ) : (
+      createPortal(headActions, headSlot)
+    )
 
   return (
     <div className={s.page} data-density={density}>
@@ -913,44 +1010,16 @@ export default function PageParams({
                 )}
 
                 {/*
-                 * 修改历史搬到**右上角**（作者：「右上角不用出现那个卡片了，
-                 * 太占位置了」）—— 文件概要卡整个撤掉：机型/版本
-                 * 副标题那一行本来就在说，历史抽屉里还有全部账。按钮 margin-left:auto
-                 * 顶到最右，与参考布局一致。
+                 * 右上角那一簇（照 a05）：**回到已应用 · 修改历史** —— 见 `headActions`。
+                 * 在模态框里它们 portal 到标题栏那颗动作槽（`×` 左边，`margin-left:auto`
+                 * 顶到最右）；单独当页用时落在这一行右端。
                  *
-                 * **mini 档不放在这一行**，下一行（分类条那一行）的右端才是它的位置
-                 * —— 作者对着自己画的示意图说的原话：「小尺寸这时候搜索在上面，
-                 * 修改历史在下面」。抽成 `historyButton` 一个变量，两处共用同一颗。
+                 * 原来还有一行副标题「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」：
+                 * 作者圈出那一行说「没有意义的这一行就可以去掉」（机型版本副标题本来就在说、
+                 * 参数卡自己会讲）—— 整行退役，尾巴上那颗「回到已应用」搬进了这一簇。
                  */}
-                {!historyInBar && historyButton}
+                {headActionsNode}
               </div>
-              {/*
-                提示挂在副标题行尾，不放 pill 那一行：窄档（mini 400px）标题 / pill /
-                搜索三件正好铺满，实测没有余量再塞一句话（见 .headTop 的 mini 注释）。
-                这一行本来就是「当前在看哪台」的说明，给「切换回已应用」这个动作正合适；
-                它**能点** —— 名字都很像，一键回到已应用的那份，不靠认名字；
-                也**不点名**（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标，
-                见 useParams 的 ActiveUse）。已应用那份不在包里就没有动作，只陈述。
-              */}
-              <p className={s.sub}>
-                {u.machine?.display ?? '—'} · {u.version?.name ?? '—'} · 精细调整参数，优化涂胶表现
-                {au !== null &&
-                  !au.onIt &&
-                  (au.canJump ? (
-                    <button
-                      type="button"
-                      className={s.usingNote}
-                      title="点击切换回已应用的那一份"
-                      onClick={backToActive}
-                    >
-                      切换回已应用
-                    </button>
-                  ) : (
-                    <span className={s.usingNote} title="已应用那份不在当前数据包里，这里切不过去">
-                      已应用的是另一份
-                    </span>
-                  ))}
-              </p>
             </header>
 
             <div className={s.bar}>
@@ -969,15 +1038,35 @@ export default function PageParams({
                  */
                 onSelect={setCategoryId}
               />
-              {/* 搜索框在这一行的右端；窄窗时它已经搬到上面那行了（见 searchInHead） */}
-              {!searchInHead && (
-                <div className={s.searchSlot} data-row="bar">
-                  {searchField}
-                </div>
-              )}
-
-              {/* mini 档的「修改历史」搬到这里（见 historyInBar）：搜索在上面，它在下面 */}
-              {historyInBar && historyButton}
+              {/*
+               * 搜索框在这一行的右端；不够宽时它搬到上面那行（见 searchInHead）。
+               *
+               * ★ mini 档**收成一颗放大镜**（作者：「这个搜索框还是不要这样子，
+               *   它多占了位置」）—— 那一档它常驻就是整整一行；收起时只占 28px，
+               *   点开才在分类条这一行的右端铺成输入框（`:focus` 由上面那个 effect 给）。
+               */}
+              {!searchInHead &&
+                (searchCollapsed ? (
+                  <button
+                    type="button"
+                    className={s.searchIcon}
+                    /* 收起来的时候筛选**还在生效**（`query` 没清）—— 这件事要说出来，
+                       否则"怎么只剩三条"会没头没脑 */
+                    data-on={query !== ''}
+                    aria-label="搜索参数"
+                    aria-expanded={false}
+                    onClick={() => {
+                      wantSearchFocus.current = true
+                      setSearchOpen(true)
+                    }}
+                  >
+                    <Icon name="search" size={15} />
+                  </button>
+                ) : (
+                  <div className={s.searchSlot} data-row="bar">
+                    {searchField}
+                  </div>
+                ))}
             </div>
 
             {/*
@@ -1096,11 +1185,11 @@ export default function PageParams({
          * 底栏（2026-10-16 两态，与参数对比台 / 编辑文件模态框同一套框架）：
          *
          *   只读态   左状态 · 右下「进入编辑模式」
-         *   编辑态   左「恢复默认值 + 状态」· 右下 撤销 / 重做 / 退出编辑模式 / 保存
+         *   编辑态   左「恢复默认值 + 状态」· 右下 撤销 / 重做 / 放弃并退出 / 保存
          *
          * ★ 撤销 / 重做从**左下**搬到右下（与对比台同一位置）——作者：
          *   「我发现它有的撤销重做位置都不一样……你把他们的文案也统一一下」。
-         * ★ 「取消」退休（「退出编辑模式」统一收编：回只读、什么都不丢）；
+         * ★ 「取消」退休（那一颗统一收编：回只读并作废）；
          *   「保存修改」的按钮字收短成「保存」（三个模态框一个词）。
          */}
         <footer className={s.foot}>
@@ -1124,7 +1213,7 @@ export default function PageParams({
                   title="进编辑模式：参数就可以改了"
                   onClick={() => setEditMode(true)}
                 >
-                  进入编辑模式
+                  {EDIT_TEXT.enterMode}
                 </button>
               </div>
             </>
@@ -1175,10 +1264,10 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.textBtn}
-                  title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+                  title={EDIT_TEXT.exitTitle}
                   onClick={() => {
                     /*
-                     * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+                     * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
                      * 就是作废，那些改的都作废，保存了才有」）——`discardAll` 正是这件事：
                      * 全部未保存的改动一次退回已保存值（草稿条目删掉、草稿 TOML 逐键回写）。
                      * 它本身是"一次动作"，重进编辑模式后按撤销还能整个拉回来。
@@ -1187,7 +1276,7 @@ export default function PageParams({
                     setEditMode(false)
                   }}
                 >
-                  退出编辑模式
+                  {EDIT_TEXT.exitMode}
                 </button>
                 <button
                   type="button"

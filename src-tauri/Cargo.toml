@@ -127,6 +127,35 @@ sha2.workspace = true
 # 那不是产品行为，是脚手架。
 ureq = { version = "3", default-features = false, features = ["rustls", "multipart"] }
 
+# 图像解码 / 编码（**只 workbench 用**：标注台保存时把框渲进图，落成品 webp）。
+#
+# **为什么现在才引**（2026-10-16，作者：「保存时就渲一张带框成品图，客户端只读成品」）：
+# 在那之前，引导图是「原图 + 前端按 marks 现画框」—— 客户端放大时看得出框是"贴上去的"。
+# 成品图把框烧进像素，客户端 `<img>` 直接显示、跨平台一致。
+#
+# **为什么 `default-features = false` + 只开 png/webp**：默认那套会拖进 jpeg/gif/tiff/avif…
+# 与一大堆解码器；这里要的只有「读 PNG（原图）+ 写 WebP（成品）」两件事。
+#
+# ★ 编码走 `image-webp`（**纯 Rust**，不绑 libwebp）—— 代价是**只能无损**。
+#   实测（`cwebp` 对真图量的）：原 PNG 309.5 KB → 无损 webp **77.9 KB**（小 75%），
+#   而有损 q90 只再省 ~7 KB ⇒ 不值得为这点体积引一套 C 工具链（三平台 CI 都要能编）。
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+# 编号里那个数字（`workbench/app/render.rs` 的 `draw_number`）。
+#
+# 2026-10-16 作者点名的病：「为什么编号的数字要用矢量图啊？他不应该用那种开源的免费字体吗」——
+# 第一版是**手写矢量描点**（一段段折线硬编码在 `glyph_of` 里），树的是"不引字体库"；
+# 代价是字形与标注台/客户端那份（真字体）对不上，且那套描点被反复挑剔地改过好几次。
+#
+# **`ab_glyph` 是纯 Rust**（底层 `ttf-parser` + `ab_glyph_rasterizer`，无 C 依赖）——
+# 与 `image` 选 `image-webp` 同一条理由：三个平台的 CI 都只从源码编，不要环境差异。
+#
+# 字体本体是 `public/fonts/badge-digits.ttf` —— **Poppins（OFL 1.1）裁到只剩 `0-9`**（2 KB），
+# 前端那份 `@font-face` 用的是**同一个文件**（两处一套字，才谈得上"烧出来和标注台一样"）。
+# 2026-10-17 由 Inter 换成 Poppins（作者：「这个 1 看起来不在视觉中心」）。
+# 许可全文在 `public/fonts/OFL.txt`，别删。
+ab_glyph = "0.2"
+
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
 # **选它而不是 `toml` 是一条设计决定，不是口味**：预设层要编辑 `presets/*.toml`，

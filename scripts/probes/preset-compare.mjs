@@ -17,7 +17,7 @@
  * 现在守的是对比台本身（入口 · 两态 · 采用 · 保存）：
  *   ① 右键两下开台：第一下「参数对比」记下那份、第二下「与「X」对比」开台；
  *   ② 打开先只读（2026-10-16）：没有 input、「采用此值」不出现，底栏只有「进入编辑模式」；
- *   ③ 点「进入编辑模式」→ 控件与「采用此值」出场，底栏 = 撤销/重做/退出编辑模式/保存；
+ *   ③ 点「进入编辑模式」→ 控件与「采用此值」出场，底栏 = 撤销/重做/放弃并退出/保存；
  *   ④ 点「采用此值」→ 底栏报「未保存的改动」、两格值趋同 → 「保存」把模态框关掉并提示；
  *   ⑤ 整页跑完没有多出来的 console error / pageerror / >=400 响应。
  *
@@ -171,11 +171,11 @@ const edState = await footState()
 console.log(`[③ 对比台] 编辑态：控件=${edState.controls} 底栏=${JSON.stringify(edState.names)}`)
 if (edState.controls < 1) problems.push('进了编辑模式该有可改的控件')
 /* 撤销 / 重做是图标按钮 —— 认名字要连 aria-label 一起看（footState 已经这么取） */
-for (const need of ['撤销', '重做', '退出编辑模式', '保存']) {
+for (const need of ['撤销', '重做', '放弃并退出', '保存']) {
   if (!edState.names.includes(need)) problems.push(`编辑态底栏少「${need}」`)
 }
 
-/* ---------- ③b 退出编辑模式 = 作废（2026-10-16）；再进来接着走 ---------- */
+/* ---------- ③b 「放弃并退出」= 作废（2026-10-16）；再进来接着走 ---------- */
 /* 先造一处脏（点第一枚「采用此值」），把"作废"能验到实处 */
 await page.evaluate(() => {
   const btn = [...document.querySelectorAll('[role="dialog"] button')].find(
@@ -190,10 +190,10 @@ if (!/未保存的改动/.test(dirtyFoot)) {
   problems.push(`点「采用此值」该记一处未保存的改动，实测「${dirtyFoot}」`)
 }
 
-/* 退出编辑模式（= 作废：未保存的改动全丢）→ 回只读 */
+/* 「放弃并退出」（= 作废：未保存的改动全丢）→ 回只读 */
 await page.evaluate(() => {
   const d = document.querySelector('[role="dialog"]')
-  const b = [...d.querySelectorAll('footer button')].find((x) => x.textContent.trim() === '退出编辑模式')
+  const b = [...d.querySelectorAll('footer button')].find((x) => x.textContent.trim() === '放弃并退出')
   b?.click()
 })
 await page.waitForTimeout(400)
@@ -204,12 +204,12 @@ const backAdopts = await page.evaluate(
       (b) => b.textContent.trim() === '采用此值',
     ).length,
 )
-console.log(`[③b 对比台] 退出编辑模式后：控件=${backRo.controls} 采用此值=${backAdopts}`)
+console.log(`[③b 对比台] 「放弃并退出」后：控件=${backRo.controls} 采用此值=${backAdopts}`)
 if (backRo.controls !== 0 || backAdopts !== 0) {
-  problems.push('退出编辑模式该回只读（控件与「采用此值」都收回）')
+  problems.push('「放弃并退出」该回只读（控件与「采用此值」都收回）')
 }
 if (!backRo.names.some((n) => n === '进入编辑模式')) {
-  problems.push('退出编辑模式后底栏该回到「进入编辑模式」')
+  problems.push('「放弃并退出」后底栏该回到「进入编辑模式」')
 }
 /* 再进来：底栏该是干净的（作废生效）—— ④ 接着用它 */
 await page.evaluate(() => {
@@ -221,7 +221,7 @@ await page.waitForTimeout(400)
 const afterExit = await footState()
 console.log(`[③b 对比台] 作废后再进来：${afterExit.foot}`)
 if (!afterExit.foot.includes('没有未保存的改动')) {
-  problems.push('退出编辑模式 = 作废：再进来该是「没有未保存的改动」')
+  problems.push('「放弃并退出」= 作废：再进来该是「没有未保存的改动」')
 }
 
 /* ---------- ④ 差异行 →「采用此值」→ 保存 ---------- */

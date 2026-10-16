@@ -16,6 +16,12 @@
  *               后者回答的是「我上次保存都改了些什么」
  *   段头 sticky  仓库有一条幽灵滚动条约定（global.css 把滚动条宽度设成 0），
  *               看不见滚动条，滚起来必须始终知道自己在哪一段
+ *
+ * # 按保存批次那一屏**只记净变化**（2026-10-16 作者）
+ *
+ *   「它只记录那个最终的」—— 同一项一批里改了几次只记头尾（`70 → 75 → 80 → 90`
+ *   就是一条 `70 → 90`），改回原值的不出现。聚合在 `useParams` 的 `netOf` 里做；
+ *   这一层只是照收到的 `groups` 摆行，行上的「还原」退的是"这一段开始前"的值。
  */
 
 import { SegmentedField } from '../../components/field'
@@ -46,7 +52,11 @@ interface Props {
   onView: (v: HistoryView) => void
   onMode: (m: DrawerMode) => void
   onClose: () => void
-  onRevert: (id: number) => void
+  /**
+   * 「还原」那一条。**收整个 entry 而不是 id**（2026-10-16）：按保存批次那一屏的行是
+   * 聚合出来的（一项一行、`from` 是"这一段开始前"的值），它没有 `log` 里的 id。
+   */
+  onRevert: (entry: HistoryEntry) => void
   /**
    * **只读**（2026-10-16 的编辑模式两态）：历史照看，「还原」那颗不画 ——
    * 它是个写入口，只读态只负责"看得见改过什么"。
@@ -119,7 +129,7 @@ export default function HistoryDrawer({
           {STATE_TEXT[entry.state]}
         </span>
         {entry.state !== 'undone' && !readonly && (
-          <button type="button" className={s.revert} onClick={() => onRevert(entry.id)}>
+          <button type="button" className={s.revert} onClick={() => onRevert(entry)}>
             还原
           </button>
         )}
@@ -168,6 +178,9 @@ export default function HistoryDrawer({
         <div className={s.scroll}>
           {view === 'live' ? (
             <ul className={s.list}>{history.map(row)}</ul>
+          ) : groups.length === 0 ? (
+            /* 净变化全为零（改动都被改回原值了）—— 说一句，不摆一个「0 条」的空段 */
+            <p className={s.empty}>改动都改回了原值 —— 按保存批次看，这里没有净变化</p>
           ) : (
             groups.map((g) => (
               <section key={g.batch ?? 'draft'} className={s.group}>

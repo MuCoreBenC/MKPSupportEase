@@ -23,6 +23,10 @@ export interface GotoFocus {
  *
  * `dev`（开发台）排在 `settings` 之后：同样不是业务页 —— 把"平时看不见的那几屏"
  * 做成按钮（作者 2026-10-14）。只在 workbench 构建里存在（正式包编不到这一页）。
+ *
+ * `annotate`（标注台）跟在资产库后面：它管的正是**资产里那些图**（今天主要是引导图
+ * `type = 'guide'`）—— 作者 2026-10-16：「你要不做一个小工具吧，在工作台里面……
+ * 让我可以去自己拖动框框」。见 `views/AnnotatePage.tsx` 的头注。
  */
 export type PageId =
   | 'machines'
@@ -30,5 +34,6 @@ export type PageId =
   | 'bundles'
   | 'build'
   | 'assets'
+  | 'annotate'
   | 'settings'
   | 'dev'

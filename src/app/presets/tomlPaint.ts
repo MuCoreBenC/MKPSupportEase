@@ -32,6 +32,31 @@ export function tomlTokens(text: string): TomlToken[][] {
   return text.split('\n').map(lineTokens)
 }
 
+/**
+ * **文件头**（正文开头那一段注释放行）与正文的分界 —— 编辑器的"这几行不许改"用的就是它。
+ *
+ * 「文件头」= 开头**连续的注释行与空行**，到第一个既不是注释也不是空行的行（`[toolhead]`
+ * 那种表头）为止。为什么整段都算头、而不是只认 `# machine:` 那几行：
+ * 这一段是**程序写、程序读**的 —— `# machine:` / `# variant:` 是这一份自己的归属
+ * （列表的机型 / 版本两列、参数表都读它），`# based_on*` 三行是它从云端哪一版派生的血统。
+ * 手改它们只会让程序认错自己，所以编辑器里锁住（作者 2026-10-16：
+ * 「这上面这一些灰色的，有没有可能说不让用户更改呀」）。
+ *
+ * `head` 含它自己的换行（所以 `head + body` 逐字符等于原文）；整份都是注释时 `body` 是空串。
+ */
+export function splitHeader(text: string): { head: string; body: string } {
+  let cut = 0
+  while (cut < text.length) {
+    const nl = text.indexOf('\n', cut)
+    const line = nl === -1 ? text.slice(cut) : text.slice(cut, nl)
+    const t = line.trim()
+    /* 不是注释、也不是空行 ⇒ 正文从这里开始（这一行不属于头） */
+    if (t !== '' && !t.startsWith('#')) break
+    cut = nl === -1 ? text.length : nl + 1
+  }
+  return { head: text.slice(0, cut), body: text.slice(cut) }
+}
+
 function lineTokens(line: string): TomlToken[] {
   const out: TomlToken[] = []
   const push = (text: string, kind: TomlKind) => {

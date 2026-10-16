@@ -1031,6 +1031,16 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 「自动化」授权面板：浏览器里更没有系统设置可开 —— 照实拒（与上一条同口径）。
+   */
+  async openAutomationSettings() {
+    throw new NotImplementedError(
+      'openAutomationSettings',
+      '浏览器预览里打不开系统设置 —— 授权请用桌面版（SupportEase 应用）',
+    )
+  },
+
+  /*
    * 「复制后处理脚本」那一整条命令 —— 浏览器里没有本机可执行物、也没有盘上真实落点，
    * 如实答 `ready: false` + 原因（真机那份由壳现拼：`current_exe()` + 预设绝对落点）。
    * **不编一条假命令**：编出来的东西贴进切片器只会让人以为"复制成功了"，其实指不到东西。
@@ -1865,20 +1875,37 @@ export const mockApi: MkpApi = {
           id: 'guide-open-with-light',
           type: 'guide',
           name: '「改 .3mf 默认打开方式」引导图（浅色）',
-          path: 'guides/open-with-light.png',
+          /* ★ 2026-10-16 方案 A：交付的是**成品图**（框已烧进像素），原图留在仓库
+             `guides/source/` 下自己留存（客户端只读这一条） */
+          path: 'guides/open-with-light.rendered.webp',
           delivery: 'bundled',
         },
         {
           id: 'guide-open-with-dark',
           type: 'guide',
           name: '「改 .3mf 默认打开方式」引导图（深色）',
-          path: 'guides/open-with-dark.png',
+          path: 'guides/open-with-dark.rendered.webp',
           delivery: 'bundled',
         },
       ],
       registry: catalogRegistry(),
       /* 品牌（含品牌图的资产 id）—— 客户端在机型与版本都没图时回落到它 */
       brands: [{ id: 'Bambu Lab', name: '拓竹 (Bambu Lab)', logo: 'bambu-lab-logo' }],
+      /*
+       * **分组登记**（2026-10-16）—— 与 `presets/assets.toml` 的 `[[groups]]` 同形。
+       * 引导图靠它挑"哪张是浅色那张"（从前写死两个资产 id）。
+       * ★ 夹具要跟真台账同形：漏了组 ⇒ 那一处引导直接不出图（缺图一路往下落）。
+       */
+      groups: [
+        {
+          id: 'open-with',
+          name: '「改 .3mf 默认打开方式」引导图',
+          members: [
+            { asset: 'guide-open-with-light', role: 'light' },
+            { asset: 'guide-open-with-dark', role: 'dark' },
+          ],
+        },
+      ],
       plates: allPlates(),
     }
   },

@@ -47,8 +47,12 @@ export default function PresetParamsModal({
   return (
     <Modal
       open={open}
-      title={target.fileName}
-      subtitle="改的是本地这一份；云端那一版只用来标明默认值与有没有更新"
+      title="修改参数"
+      /*
+       * 副标题 = **文件名**（照 a05 那一版：大标题是「修改参数」，文件名摆在它下面）。
+       * 原来那句 38 字的长文在窄屏上要占两行。
+       */
+      subtitle={target.fileName}
       size="full"
       bodyFill
       host={host}

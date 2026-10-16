@@ -33,7 +33,6 @@
 //! # release_time: 2026-08-19 01:38:13
 //! # machine: A1
 //! # variant: standard
-//! #胶笔配置
 //!
 //! [toolhead]
 //! offset = { x = -1, y = 18.6, z = 4 } # 笔尖偏移
@@ -49,6 +48,15 @@
 //! - **段名** = `param.section`（实测只有 `toolhead` 与 `wiping` 两个）
 //! - **几个参数共享同一个 `tomlKey` 时合成内联表**，成员名取 `jsonKey`
 //!   （`toolhead.offset.x/y/z` 的 `tomlKey` 都是 `offset`，`jsonKey` 分别是 `x/y/z`）
+//!
+//! ★ 2026-10-16（作者看客户端截图时点的两句）：头三行之后那句段落标签 `#胶笔配置`
+//!   （上游原样，没写空格）**不写了** —— 它没有任何读者：机型 / 版本由上面两行承担、
+//!   出处由血统三行承担，工作台与后处理内核一个都不读它（作者：「好像没有意义呀，
+//!   那个没有意义的注释可以不存在」）。
+//!   已经在盘上 / 已经发出去的那几份**一个字节都不动**（改一个字等于换版，见
+//!   `docs/RELEASE-TRANSACTIONS.md`）：新写出来的没有这一行。M0 那条判据
+//!   （`our_render_matches_the_machine_verified_baseline`）为此把这一行**从比较里滤掉**
+//!   —— 基线是历史产物、带着它；那是散文标签，不是值。
 //!
 //! **不追求与上游产物逐字节相同**：那是另一个 builder 生成的，键序也不一致。
 //! 要的是「合法 TOML + 值对 + 同样的输入产出同样的字节」。
@@ -184,7 +192,7 @@ fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     out.push_str(&format!("# release_time: {}\n", clock::now_release_time()));
     out.push_str(&format!("# machine: {}\n", machine.id));
     out.push_str(&format!("# variant: {}\n", v.version_id.to_lowercase()));
-    out.push_str("#胶笔配置\n");
+    /* 这里原来还有一句段落标签 `#胶笔配置`（照上游抄的）—— 2026-10-16 删，见模块文档那一节 */
 
     // 段名从数据里来。段序按每段内最小的 layout.order —— 与界面上的顺序一致
     let mut sections: Vec<(&str, f64)> = Vec::new();
@@ -1595,8 +1603,10 @@ mod tests {
             );
         }
         // 资产台账上的 mkp 条目也全部「在」—— 另一条 CI 判据（资产清单完整）的形状
-        let list =
-            crate::workbench::app::assets::wb_assets(None, None, None, None, None, None).unwrap();
+        let list = crate::workbench::app::assets::wb_assets(
+            None, None, None, None, None, None, None, None,
+        )
+        .unwrap();
         let missing: Vec<&str> = list
             .assets
             .iter()
@@ -1858,11 +1868,20 @@ mod tests {
             baselines.keys().collect::<Vec<_>>()
         );
 
-        /// 去掉按定义不对齐的头部行：release_time 是当下时间；
-        /// uuid 只存在于历史基线那侧（现役产物已不写它，见模块文档）
+        /// 去掉按定义不对齐的头部行：release_time 是当下时间；uuid 与那句段落标签
+        /// 只存在于**历史基线**那侧（现役产物都不写了，见模块文档）。
+        ///
+        /// ★ 滤掉的**就这三种行**，别扩成"头部整段不比"那种口子 —— 那样头里的
+        /// 机型 / 版本写错了也绿，而头部正是身份（那条判据要守的东西之一）。
         fn body(s: &str) -> String {
             s.lines()
-                .filter(|l| !l.starts_with("# uuid:") && !l.starts_with("# release_time:"))
+                .filter(|l| {
+                    let t = l.trim();
+                    !l.starts_with("# uuid:")
+                        && !l.starts_with("# release_time:")
+                        && t != "#胶笔配置"
+                        && t != "# 胶笔配置"
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         }

@@ -88,6 +88,16 @@ export interface ModalProps {
   closeOnEsc?: boolean
   /** 页眉那枚「关闭」的悬停说明 —— 关闭不总是「放弃」，有草稿语义的稿要写清 */
   closeTitle?: string
+  /**
+   * **框上面那一层**（可选）。还挂在同一个遮罩里（于是几何 = 内容区、居中不用自己算，
+   * z-index 也天然在框之上），但**不摆头尾、不进焦点锁** —— 就是一个盖在框上的层。
+   *
+   * 用来做"从框里浮起来看大的东西"：图片引导点小图放大就是它（2026-10-16 作者：
+   * 「我不希望再弹一个窗出来。我希望就在这个模态框里面实现这个图片的那种放大的感觉，
+   *   它就是那种感觉可以点就悬浮出来的感觉……但是没那么突兀，它就是悬浮了出来，居中」）。
+   * 这一层里怎么摆由调用方定（背景、留白、点击收起）。
+   */
+  overlay?: ReactNode
   onClose: () => void
   children: ReactNode
 }
@@ -104,6 +114,7 @@ export default function Modal({
   closeTitle,
   hideClose = false,
   closeOnEsc = true,
+  overlay,
   onClose,
   children,
 }: ModalProps) {
@@ -217,6 +228,9 @@ export default function Modal({
 
         {footer !== undefined && <footer className={s.foot}>{footer}</footer>}
       </div>
+
+      {/* 框上面那一层（`overlay`）—— 见 props 里那段：同一个遮罩、压在框之上 */}
+      {overlay !== undefined && <div className={s.overlayLayer}>{overlay}</div>}
     </div>
   )
 

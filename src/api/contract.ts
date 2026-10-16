@@ -1121,6 +1121,31 @@ export interface CatalogAsset {
   delivery: 'download' | 'bundled'
 }
 
+/**
+ * 分组里的一名成员（`presets/assets.toml` 的 `[[groups.members]]`）。
+ *
+ * `role` = 这张在这一组里演什么（`light` / `dark` / …，可空）。客户端按它挑图 ——
+ * 「哪张是浅色那张」是**内容属性**，所以它写在登记里，不看文件名。
+ */
+export interface CatalogGroupMember {
+  /** 指 [`CatalogAsset.id`]（**指 id，不指路径** —— 路径会改，id 不改） */
+  asset: string
+  role?: string
+}
+
+/**
+ * **一组图**（2026-10-16）：共用同一份标注源稿的那几张。
+ *
+ * 与 `assets` 同一类东西 —— 都是台账登记、都进目录、都可云端下发 ⇒ 改组不用重编客户端。
+ */
+export interface CatalogGroup {
+  /** 组 id（**同时就是那份标注源稿的文件名**） */
+  id: string
+  /** 组名（给人看的） */
+  name: string
+  members: CatalogGroupMember[]
+}
+
 export interface RuntimeCatalog {
   catalogSchema: number
   /** 目录指纹：源或交付产物变了它就变 —— 将来「该不该同步」看它，不作完整性校验 */
@@ -1150,6 +1175,17 @@ export interface RuntimeCatalog {
    * （那一版里没有这一栏）。缺了就是「图认不出文件在哪」⇒ 回落品牌 logo，不是错误。
    */
   assets?: CatalogAsset[]
+  /**
+   * **分组登记**（2026-10-16）：哪几张图共用同一份标注、每张在那个组里演什么角色。
+   *
+   * 客户端**按它挑图**（例：引导图按主题要 `role = 'light'` / `'dark'` 那一张）——
+   * 从前那种"把两个资产 id 写死在源码里"的做法，一改名或一换图就得重编客户端。
+   * 现在组是台账里的一份登记 ⇒ 换图、换成员、改组名都只是发一份新目录，**不用重编**。
+   *
+   * **可选**：盘上那份 catalog.json 可能还是旧版释放的（那一版里没有这一栏）。
+   * 缺了就是「不知道哪张是哪张」⇒ 那一处引导不出图（缺图一路往下落，不白屏）。
+   */
+  groups?: CatalogGroup[]
   registry: CatalogRegistry
   /** 打印板（2026-10-02）：机型持引用（`Machine.plateIds`），几何住这里，按 id 查 */
   plates: Plate[]
@@ -1876,6 +1912,17 @@ export interface MkpApi {
    * 由壳那一侧说清（`src-tauri/src/ipc/slicer.rs`），前端不复述、不翻译。
    */
   openDefaultAppSettings(): Promise<string>
+
+  /**
+   * **「自动化」授权被拒后的反悔入口**（2026-10-17）：macOS 拒过一次就永远不会再弹
+   * 授权框（TCC 没有"再问一次"的 API）—— 用户反悔的唯一正路是系统设置 →
+   * 隐私与安全性 → 自动化 里把「访达」勾回来。这一条用系统给的直达 URL 把
+   * **那一页**打开，省得他自己翻。依旧**不替他勾**。
+   *
+   * 前端**只在 `PERMISSION_DENIED` 那条错之后**摆这颗按钮 —— 授权没被拒过，
+   * 那一页对他没有信息量。Windows / 其余平台没有"授权"这回事（`NOT_IMPLEMENTED`）。
+   */
+  openAutomationSettings(): Promise<void>
 
   /**
    * 首页「复制后处理脚本」要的**那一整条命令**（**当前平台、当前实例、真实落点**现拼）。

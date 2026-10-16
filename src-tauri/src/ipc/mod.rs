@@ -314,6 +314,18 @@ pub fn open_default_app_settings(app: AppHandle) -> Result<String, AppError> {
     })
 }
 
+/// 「自动化」授权被拒后的**反悔入口**：把用户送到系统设置 → 隐私与安全性 → 自动化
+/// 那一页（macOS 拒过一次就永远不会再弹框，见 [`slicer::open_automation_settings`]）。
+///
+/// ★ 前端**只在 `PERMISSION_DENIED` 那条错之后**摆这颗按钮 —— 授权没被拒过，
+///   这一页本来就不需要去（去了也是空的，反而让人迷糊）。
+#[tauri::command(async)]
+pub fn open_automation_settings() -> Result<(), AppError> {
+    traced("openAutomationSettings", |_| {
+        slicer::open_automation_settings()
+    })
+}
+
 /// 那份示例 `.3mf` 的文件名。它会被用户看见（访达里选中、Windows 那个框里点名的就是它），
 /// 所以名字得说得出自己是干嘛的。
 const APP_SETTINGS_SAMPLE: &str = "打开方式示例.3mf";

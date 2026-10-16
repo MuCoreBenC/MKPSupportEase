@@ -198,7 +198,8 @@ export function mkpAssets({ workbench }) {
       if (command !== 'build') return
       const items = assemblyItems(repoRoot, workbench)
       const dest = join(outDir, 'assets')
-      const n = copyAssetsInto(repoRoot, dest, items)
+      /* ★ 引导图原图只给工作台（客户端带上就是白占体积 + 泄源料）—— 见 `copyAssetsInto` */
+      const n = copyAssetsInto(repoRoot, dest, items, { withGuideSources: workbench })
       const what = workbench ? '工作台预览：全部有 path 的登记资产' : '客户端随包：delivery = bundled'
       this.info?.(`[assets] 装配 ${n} 份（${what}）→ ${dest}`)
     },

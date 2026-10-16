@@ -101,6 +101,26 @@ pub fn load_released_catalog(root: &std::path::Path) -> Result<Catalog, crate::e
     Catalog::parse(&load_released_catalog_bytes(root)?)
 }
 
+/// **界面要用的那份目录**：② 为准，**随包那份只兜底**（2026-10-16，作者定）。
+///
+/// 兜的只有一样：② 里**没有、而随包那份有**的 `bundled` 资产条目（机型整机图、
+/// 引导图那些 —— 字节随程序本体走、客户端不下载）。理由与边界写在
+/// [`Catalog::with_missing_bundled_from`]。
+///
+/// # 为什么不在读 ② 那一层直接改
+///
+/// [`load_released_catalog`] 是"**盘上那一份**"的字面读法，别处（可信度判定、
+/// 换代归档、检查更新）要的就是它原样 —— 只在这里多走一步，是因为**只有界面**
+/// 需要"随包的东西不依赖云端那份目录"。
+///
+/// ★ 这与「启动绝不覆盖 ②」是同一条纪律的两面：**盘上的字节一个都不动**，
+///   这一步只在内存里补几条给界面看。
+pub fn catalog_for_ui(root: &std::path::Path) -> Result<Catalog, crate::error::AppError> {
+    let released = load_released_catalog(root)?;
+    let embedded = Catalog::parse(EMBEDDED_CATALOG)?;
+    Ok(released.with_missing_bundled_from(&embedded))
+}
+
 /// 随安装包走的那份 catalog —— 发布构建（`cargo run --bin gen-catalog`）的产物。
 ///
 /// 编译期钉进二进制，运行时与仓库无关（用户机器上没有仓库）。它是不是最新的，
@@ -139,6 +159,44 @@ mod tests {
         assert_eq!(
             catalog.files[0].kind, "mkp_preset",
             "第一圈的清单只有 MKP 预设一种"
+        );
+    }
+
+    /// **随包那份只兜底**（2026-10-16，作者「编译进去的，就只当兜底」）——
+    /// 界面读的那份 = ② + ② 里缺的 `bundled` 条目。
+    ///
+    /// 摆一次事故现场：盘上那份目录是"加引导图之前"的（`assets` 空），
+    /// 界面仍要能从**随包那份**里找到那两张引导图（作者：「诶图片不见了」就是这儿丢的）；
+    /// 而要按需下载的条目一件都不许兜上来（补了就是个下不到的条目）。
+    #[test]
+    fn ui_catalog_backfills_bundled_assets_that_the_released_one_lacks() {
+        use crate::fsx::atomic::atomic_write;
+        use crate::presetdata::assets::Delivery;
+        use crate::presetdata::AssetKind;
+
+        let d = tempfile::tempdir().unwrap();
+        let released = r#"{ "catalogSchema": 1, "revision": "加引导图之前那一版", "machines": [], "files": [], "assets": [] }"#;
+        atomic_write(&paths::catalog_file(d.path()), released.as_bytes()).unwrap();
+
+        let ui = catalog_for_ui(d.path()).expect("盘上那份读得出来");
+
+        let guides: Vec<&str> = ui
+            .assets
+            .iter()
+            .filter(|a| a.kind == AssetKind::Guide)
+            .map(|a| a.id.as_str())
+            .collect();
+        assert!(
+            guides.contains(&"guide-open-with-light") && guides.contains(&"guide-open-with-dark"),
+            "两张引导图都得从随包那份兜上来，读到的是 {guides:?}"
+        );
+        assert!(
+            ui.assets.iter().all(|a| a.delivery == Delivery::Bundled),
+            "只有随包条目能被兜上来 —— 下载面的一条都不许进"
+        );
+        assert!(
+            ui.files.is_empty(),
+            "② 说没有交付文件，这一步不许给它编出文件来"
         );
     }
 }

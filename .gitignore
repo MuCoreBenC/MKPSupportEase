@@ -67,8 +67,9 @@ tmp-port/
 # 刻意不入库 —— 它有自己的上游仓库，进来只会变成第二份真源。
 /local-reference/
 
-# AI 工具的本机记忆/状态（codebuddy 等）。设计文档若被代码引用会放 .trae/documents/
-# ——那是文档，这个是工具自己的笔记，入库只会变成另一份会漂移的底账
+# AI 工具的本机记忆/状态（codebuddy 等）。设计文档一律住 `docs/` ——
+# 那是文档，这个是工具自己的笔记，入库只会变成另一份会漂移的底账
+# （2026-10-17 清场：`.trae/`、`.comate/`、`.zcodeignore` 都已退役，里面的两份设计文档搬进了 docs/）
 .codebuddy/
 
 # 随包资产的交付根：`tools/assets/sync.mjs` 从 `presets/assets.toml` 的

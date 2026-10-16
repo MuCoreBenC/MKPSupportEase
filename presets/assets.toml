@@ -2,6 +2,8 @@
 #
 # 这里登记我们管的资产：整机图 / 图标 / 模型 / 切片器预设（BBS）/ 引导图五类
 # （2026-10-16 加的第五类：`guide`，见文件末尾那一段）。
+# **2026-10-16 起这里还登记「分组」**（`[[groups]]`，见文件最末尾）：哪几张图共用同一份
+# 标注源稿 —— 与资产一起入库、编进 catalog，由工作台「资产库」页的分组管理器维护。
 # **文件本体不在这里** —— 它们在资产根 `<repo>/presets/assets/` 下，条目里的 `path`
 # 就是相对那个根的一段。
 #
@@ -335,18 +337,55 @@ profile = 'process'
 #   ★ 换图不用改 TS：台账 `path` 不变、字节变 ⇒ 同步器按 SHA 覆盖 ✓。
 #
 # ★ 两张**必须同尺寸同裁切** —— 标注（百分比坐标）只写一份，两张共用。
+#
+# ★★★ 台账 `path` 指**成品图**（`.rendered.webp`），不是原图（2026-10-16 方案 A）。
+#   作者：「客户端收到的不是原文件，而是最终的渲染」—— 框烧进像素，客户端 `<img>` 直接
+#   显示，跨平台一致（见 `src-tauri/src/workbench/app/render.rs`）。
+#   **原图（`source/*.png`）不进台账** —— 它是"像 PSD 一样自己留存、可再编辑"的那一份，
+#   标注台显示原图、保存时渲成品图。两份都在仓库里，只有成品图随包发货。
 
 [[assets]]
 id = 'guide-open-with-light'
 type = 'guide'
 name = '「改 .3mf 默认打开方式」引导图（浅色）'
-path = 'guides/open-with-light.png'
+path = 'guides/open-with-light.rendered.webp'
 delivery = 'bundled'
 
 [[assets]]
 id = 'guide-open-with-dark'
 type = 'guide'
 name = '「改 .3mf 默认打开方式」引导图（深色）'
-path = 'guides/open-with-dark.png'
+path = 'guides/open-with-dark.rendered.webp'
 delivery = 'bundled'
+
+# ==================== 分组（`[[groups]]` · 2026-10-16） ====================
+#
+# **一组图** = 共用同一份标注源稿的那几张（作者：「用同样的框的就是一组」，要"套装的感觉"）。
+#
+# 从前"哪几张是一组"是**从文件名算**的（抹掉 `-light` / `-dark` 后缀）。现在它是一条登记：
+# 跟资产一样入库、跟仓库走、编进 catalog —— 由工作台「资产库」页的分组管理器维护
+# （作者：「不能只用文件名去实现，必须有一个去管理它，像那个 catalog 那种的」）。
+#
+# 三条硬规矩（加载期就拦，见 `presetdata::assets::check_groups`）：
+#   ① 同一组的成员必须**在同一个目录** —— 源稿落点 = `<成员所在目录>/<组 id>.anno.json`；
+#   ② 一张资产**至多属于一个组** —— 否则"它跟谁共用一份标注"有两种答案；
+#   ③ `id` 同时就是那份源稿的**文件名**，所以得是个安全的名字（无 `/`、无 `..`）。
+#
+# 没登记的图不受影响：它仍按旧口径（抹掉浅深后缀）单独成一份源稿 —— 只是那份的落点
+# 会跟着文件名走。真在意稳定，就给它建个组。
+#
+# `role` 是"这张在这个组里演什么"（客户端按主题挑 `light` / `dark`）。**可以空**。
+# ★ 客户端**不认文件名**：它读 catalog 里的这张组表，按 `role` 挑图。
+
+[[groups]]
+id = 'open-with'
+name = '「改 .3mf 默认打开方式」引导图'
+
+[[groups.members]]
+asset = 'guide-open-with-light'
+role = 'light'
+
+[[groups.members]]
+asset = 'guide-open-with-dark'
+role = 'dark'
 

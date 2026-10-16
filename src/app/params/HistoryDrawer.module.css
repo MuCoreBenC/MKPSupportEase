@@ -17,7 +17,14 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 10px 10px;
+  /*
+   * ★ 2026-10-16：**缩进从这一层挪给每一行**（`.groupHead` / `.item`）。
+   *   原来 `padding: 0 10px 10px` 把整个列表往里缩，于是**吸顶的段头**只有
+   *   379 − 20 = 359px 宽 —— 滚起来的时候它左右各差一条：既不贴抽屉的两边，
+   *   又像没盖住（作者：「没贴紧没贴稳」）。缩进挪进行内之后，段头是一条**通栏**，
+   *   行里的字仍在原来的位置上（6 + 10 = 16px）。
+   */
+  padding: 0 0 10px;
 }
 
 .empty {
@@ -26,11 +33,18 @@
   color: var(--text-3);
 }
 
-.group + .group {
-  margin-top: 6px;
-}
+/*
+ * ★ 2026-10-16：段与段之间**不再留那道 6px 缝**。原来 `.group + .group` 有一条
+ *   `margin-top: 6px`，它落在上一段的末行与下一段的**段头**之间 —— 段头是吸顶的
+ *   不透明横带，可那 6px 缝在它**上边**，滚到段与段交界时就是「段头上缘露出一条
+ *   背景」（作者：「他位置好像不够，上面它上边露出了一点背景」）。
+ *   缝去掉之后，下一段的段头紧接上一段的末行，横带自己（通栏 + 下缘的影）
+ *   负责把两段分开。
+ */
 
-/* 段头 sticky —— 幽灵滚动条看不见条，靠它定位 */
+/* 段头 sticky —— 幽灵滚动条看不见条，靠它定位。
+ * **通栏**（左右不再缩进）+ 下缘一层浅浅的影：条目从它下面滑过时，
+ * 「这一段到这儿」读得出来，也不会有背景从它旁边/上边露出来。 */
 .groupHead {
   position: sticky;
   top: 0;
@@ -39,9 +53,10 @@
   align-items: baseline;
   justify-content: space-between;
   margin: 0;
-  padding: 8px 6px;
+  padding: 8px 16px;
   background: var(--surface-solid);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 5px 8px -6px rgb(16 24 32 / 22%);
   font-size: var(--fs-label);
   font-weight: 600;
   color: var(--text-1);
@@ -64,7 +79,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 6px;
+  /* 左边距 16px = 段头那一条的 16px（缩进从 .scroll 挪进来之后，字仍在原位） */
+  padding: 9px 16px;
   font-size: var(--fs-body);
 }
 

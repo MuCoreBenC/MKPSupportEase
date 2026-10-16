@@ -201,8 +201,8 @@
   font-size: calc(var(--fs-label) - 1px);
 }
 
-[data-density='mini'] .group,
-[data-density='mini'] .groupOff {
-  --seg-y: 4px;
-  --seg-x: 9px;
-}
+/*
+ * mini 档**不再另给一套尺码**（2026-10-16 作者：「小尺寸……它的高度啊、宽度啊，
+ * 那些没必要变」）—— 原来这一档 `--seg-y: 4px / --seg-x: 9px`（比外面那套更矮更宽），
+ * 同一只开关在小窗里换一副长相。现在跟着页面那套 `--seg-*` 走，各档一条线。
+ */

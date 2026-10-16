@@ -1,0 +1,43 @@
+{
+  "annoSchema": 1,
+  "source": {
+    "images": [
+      "guides/open-with-light.rendered.webp",
+      "guides/open-with-dark.rendered.webp"
+    ],
+    "size": {
+      "w": 754,
+      "h": 904
+    }
+  },
+  "marks": [
+    {
+      "step": 1,
+      "at": {
+        "left": 18.8,
+        "top": 58.2,
+        "width": 62.3,
+        "height": 4.4
+      },
+      "note": "打开方式",
+      "style": {
+        "radius": 4.0
+      }
+    },
+    {
+      "step": 2,
+      "at": {
+        "left": 18.8,
+        "top": 68.4,
+        "width": 19.4,
+        "height": 4.4
+      },
+      "note": "全部更改",
+      "style": {
+        "radius": 4.0,
+        "badge": 18.0
+      }
+    }
+  ],
+  "updatedAt": "2026-10-16T17:25:49Z"
+}

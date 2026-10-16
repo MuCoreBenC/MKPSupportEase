@@ -4,11 +4,57 @@
   box-sizing: border-box;
 }
 
+/*
+ * 编号字体（`public/fonts/badge-digits.ttf`）：Poppins（OFL 1.1）裁到只剩 `0-9`，2 KB。
+ *
+ * ★★ **与 Rust 那边烧进成品图的是同一个文件**（`src-tauri/.../render.rs` 的 `BADGE_FONT`）——
+ *   两处一套字，成品图里那颗编号才和标注台 / 客户端里这颗长得一样。
+ *   2026-10-16 作者点名的病：「为什么编号的数字要用矢量图啊？他不应该用那种开源的免费字体吗」。
+ *   ★ 2026-10-17 由 Inter 换成 Poppins（作者：「这个 1 看起来不在视觉中心」）。
+ *   许可全文在 `public/fonts/OFL.txt`。
+ */
+@font-face {
+  font-family: 'MKP Badge';
+  src: url('/fonts/badge-digits.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+/*
+ * ★★★ **整扇窗不是网页**（2026-10-16 作者：「我在编辑模式下左右的时候，整个窗口都会左右……
+ *   我希望这整个窗口的话，你能做到它不要像那种网页一样被拖动啊，它就像一个软件一样」）。
+ *
+ * 这是一条**壳级**的规矩，不是某个编辑器的事 —— 任何一处让内容溢出（长行、宽表格、
+ * 拖到边缘的选中），浏览器就会把**整页**当成一张可以左右拉的大纸：
+ * 触控板两指一划、或者选中文字拖到边缘，整扇窗跟着橡皮筋一样左右跑，
+ * 背景渐变露出来一条、连顶栏都跟着挪。成熟桌面软件从不这样。
+ *
+ * 三层一起上（缺一层都会漏）：
+ *   ① `overflow: hidden` 在 `html/body` 上 —— **页面永不横向滚**。
+ *      内部该滚的地方都各自有自己的滚动容器（列表 / 编辑器 / 抽屉），一个都不受影响。
+ *   ② `overscroll-behavior: none` —— 到底了也**不许把滚动"传"给外层**
+ *      （macOS 上就是那条露底的橡皮筋；Windows 上是滚动链）。
+ *   ③ `position: fixed` 不给 —— 那一手（老 iOS 的锁页套路）会毁掉主窗那些
+ *      transform / 圆角裁切，作者 §7.5 那一套窗口外观全在这条链上，别碰。
+ *
+ * ★ 横向：`overflow-x: hidden` 之外还要 `max-width: 100%`（在 `html` 上）——
+ *   有些引擎在"根元素自己溢出"时不认 `overflow-x`，加这一条才真收得住。
+ * ★ 纵向仍用 `overflow: hidden`（不是 `auto`）：整页从来就不该滚，
+ *   各个页面自己管自己的滚动条（这条自 v023 起就是这样）。
+ */
+html,
+body {
+  overflow: hidden;
+  max-width: 100%;
+  overscroll-behavior: none;
 }
 
 body {
@@ -202,14 +248,25 @@ img {
  * 扁窗里那条细条本身就要占宽、还把内容挤得更窄，而卡片里真正需要的提示
  * 是"内容压缩到放得下"，不是"告诉用户下面还有"。预览区外壳（App.module.css
  * 的 .stage）有自己的一套滚动条规则，不受这里影响。
+ *
+ * ★ 2026-10-16 起多**一处例外**（下面那条 `:not()` 里那两层）：见 WebKit 那一段。
  */
 * {
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* 老 Edge */
 }
 
-/* WebKit / Blink：Chrome、Edge、Safari、Electron、WebView2 */
-::-webkit-scrollbar {
+/*
+ * WebKit / Blink：Chrome、Edge、Safari、Electron、WebView2
+ *
+ * ★★ 2026-10-16 唯一的例外：「编辑文件」里那个正文编辑器（`.editArea` / `.editPaint`）。
+ *   那里长行**不折行** ⇒ 只能横着滚，而"看不见的条"等于告诉鼠标用户"这东西不能横着看"
+ *   （作者：「别人不是用触摸板的，是怎么左右滑动的？」「你看 VSCode 啊…IDE 啊，都可以的」）。
+ *   VSCode 在 macOS 上用**系统那条覆盖式滚动条**（不滚看不见、一滚就浮出来、零占位）——
+ *   把这两层从"幽灵"里摘出来，它们就自动是这个长相，一个像素都不用自己画。
+ *   别的组件不许学。
+ */
+::-webkit-scrollbar:not(.editArea, .editPaint) {
   width: 0;
   height: 0;
   background: transparent;

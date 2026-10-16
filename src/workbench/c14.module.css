@@ -792,6 +792,50 @@
   border-color: var(--wb-primary);
 }
 
+/*
+ * 深色下的选中按钮（2026-10-16，作者截图点名：「当前生效那一栏的底色不好看，跟整体不搭」）。
+ *
+ * 病根：`--wb-primary-soft` 在浅色是 12% 蓝、在深色是 18% 蓝 —— 18% 的蓝压在
+ * `#232323` 面上是一片**发闷的灰蓝**，和旁边那几个未选中的深灰按钮几乎分不出来
+ * （浅色那边白底压 12% 蓝是清爽的，深色不是）。
+ *
+ * 治法：深色单独给一组**更亮、更实**的值 —— 底抬到 30%（一眼看得出"这是当前那栏"），
+ * 字用更亮的蓝（`#8fbcff` 一档，压在蓝底上仍然清楚），描边再提一档。
+ * 只改这一档，不动 token（token 还管着导航 / chips / 行选中那些地方）。
+ */
+[data-theme='dark'] .btnOn {
+  color: #9dc2fb;
+  background: rgba(75, 142, 247, 0.3);
+  border-color: rgba(122, 176, 250, 0.85);
+}
+
+/* 选中态本来就"已经在这儿了"，悬停别再叠一层 —— 免得按下去像还能再选一次 */
+[data-theme='dark'] .btnOn:hover:not(:disabled) {
+  background: rgba(75, 142, 247, 0.34);
+}
+
+/*
+ * 资产库那一格缩略图外面套的按钮（2026-10-16）：点一下放大看。
+ * 常态与"就是一张图"没两样（不留边框、不留底），悬停才浮出一圈描边表示"这个能点"。
+ */
+.shotBtn {
+  display: inline-block;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+
+.shotBtn:hover {
+  border-color: var(--line-strong, var(--line));
+}
+
+.shotBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* 主操作：工作台蓝实心，一页最多一个（弹窗内算独立一层） */
 .btnPrimary {
   color: #fff;
@@ -953,6 +997,12 @@
   flex-wrap: wrap;
 }
 
+/*
+ * 分类筛选（2026-10-16）：先是 `.chipFilter` 一排 chip，作者当天改成「下拉菜单吧」——
+ * 那一排 chip 已撤，这里只留一句记录，免得下一个人再来一轮。
+ * 现在是 `c14/field/SelectField`（全仓库统一的自绘下拉，没有原生 select）。
+ */
+
 /* 可操作的 chip：左半点进去看，右半的 × 解除（C05） */
 .chip:has(.chipX) {
   padding: 0 2px 0 8px;
@@ -1060,6 +1110,17 @@
 .cardNote {
   font-size: var(--fs-label);
   color: var(--text-3);
+}
+
+/*
+ * 图表里那种「标题下挂一行附注」的排布：附注必须比标题弱一档，
+ * 不然读起来是一团（作者 2026-10-16：「副标题长得跟那个主标题差不多的颜色，
+ * 差不多的字号，对阅读不友好」）。要露在页面上的附注都走这一条。
+ */
+.cardNoteDim {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  opacity: 0.85;
 }
 
 .cardBody {
@@ -1706,6 +1767,12 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /*
+   * 主名要压得住下面那行 id：中黑、正文色、不缩水。
+   * 之前显示名与 id 都是同号灰字，「主副标题长得差不多」——作者点名过。
+   */
+  font-weight: 600;
+  color: var(--text-1);
 }
 
 .rowMeta {
@@ -1832,6 +1899,36 @@
 }
 
 /*
+ * 分组标题旁的「?」（2026-10-16，作者：「我希望就是比较多的是这些可以点击的框框，
+ * 那些说明的就比较少，你可以藏起来」）。
+ *
+ * 正文里那些整段解释（「改动即时落盘…」「真源关系是一版一套…」）不再是页面上的字，
+ * 全部挂到这一枚图标的 `title` 上 —— **悬停才出现**，扫描时一行字都不占。
+ *
+ * 为什么不自己画浮层：原生 `title` 零依赖、零 z-index 风险、在模态框里也不会被遮罩
+ * 裁掉。这里只是个"提示存在"的锚点。
+ */
+.helpDot {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  /* 跟在前一行字后面时留一点气口，别贴着句末的标点 */
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  vertical-align: -2px;
+  color: var(--text-3);
+  cursor: help;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+/*
  * 只读的代码/正文块（C15 的「查看 JSON / TOML」那一块）。等宽、可滚、不高过一屏。
  * 滚动条自己那条规矩仍然只有全局那一处（组件级不许写 ::-webkit-scrollbar）。
  *
@@ -1938,6 +2035,36 @@
   gap: 8px;
   align-items: center;
   margin-top: 12px;
+}
+
+/*
+ * 「标签在输入框上方」的一格（2026-10-16，作者：「这上面还有点空间啊，
+ * 可以把它那一个要显示的东西放到文本框的上面呀」）。
+ *
+ * 模态框表单字段统一走这一条 —— 以前只靠 `placeholder` 说这是什么格，
+ * 一填字标签就没了，人得回头猜。标签是**常驻**的，与字段一起缩。
+ */
+.fieldCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+.fieldCol > .filter,
+.fieldCol > .inp {
+  width: 100%;
+}
+
+/* 字段标签：比正文小一档、比说明重一点 —— 三级里的中间那层 */
+.fieldLabel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* 行里那段说明文字要能自己占一行并折行 —— 否则它会把整行撑宽、被卡片右侧裁掉 */

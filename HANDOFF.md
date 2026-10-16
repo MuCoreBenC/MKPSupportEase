@@ -2360,3 +2360,74 @@ BBS 显示什么不显示什么」。之前那一轮的结论（"切片器不吃
   全绿（src-tauri lib **483** + 内核 lib **165** + 集成测试全过）/
   `cargo test -p mkp-support-ease --features workbench`（**836**）/ `npx tsc -b` /
   `npm run lint` / `npm run build` + 四道闸全过。
+
+## 增量之三十六 · 图片引导（客户端弹窗 + 工作台标注台）：能缩放 / 缺图留空 / 源稿进仓库（2026-10-16，分支 `feat/dark-mode`）
+
+> 交接文档：[`docs/GUIDE-IMAGE-HANDOFF-2026-10-16.md`](docs/GUIDE-IMAGE-HANDOFF-2026-10-16.md)
+> —— 那一份写的是**下一刀**（① 图片按需下载 ② "一组/套装"的三件裁决）与不许违背的六条口径；
+> 本节只记这一轮**做了什么**。
+
+**§1 客户端那个弹窗**（`src/app/guide/`）
+
+- 版式：图在左、**文字（状态句 + 步骤）全在右**；图 = `width/height:auto` + `max-width:min(314px,46vw)` + `max-height:min(46vh,460px)`
+  ⇒ 两个方向谁紧听谁，任何窗高都完整显示、框身不滚。
+- **图可点开放大**：走 `Modal` 新加的 `overlay` 槽（同一个遮罩里浮起来、不另开窗），进出 = **FLIP + WAAPI**
+  （进 240ms / 收 200ms 倒放；遮罩底画在 `::before` 上、父级从不改 opacity —— 这是"缩小时会闪"的正解）。
+- **放大后可缩放**：`wheel`（`ctrlKey` = 触控板双指捏合，否则普通滚轮）+ 两指 pointer；只写内联 `transform` + rAF、
+  以指针为不动点、`scale ∈ [0.5,4]` 带阻尼；**每次打开复位成默认大小**。框的线 / 圆角 / 编号视觉大小恒定
+  （`calc(… / var(--zoom-k))`；线改用 `box-shadow` —— `border-width` 被引擎钳在最小 1px）。
+- **图取不到 = 整块留空**：`img.onError` ⇒ 与"台账里没有这条"同一条落法（不画那块、右列占满、不留裂图、不写 console）。
+
+**§2 工作台「标注台」**（`src/workbench/views/AnnotatePage.tsx`，nav 排在「资产库」后）
+
+- 图上拖框 / 拉边 / 方向键 / ⌘Z / 删除 + 图层列表 + 四格 px；**框的样子**三格（圆角 / 线宽 / 编号直径，缺省 8/2/18，
+  与客户端**同名 CSS 变量 + 同缺省**）；选图**按组摆**（`<optgroup>` = 一组 2 张 · 共用一份标注）+ 页脚点名同组那张。
+- **源稿进仓库**（作者：「像 PS 那样能再编辑、跟着项目仓库走，换设备也能接着编」）：
+  `presets/assets/guides/<对>.anno.json`（与图同层），读写走 `wb_anno_read` / `wb_anno_write`
+  （`src-tauri/src/workbench/app/annotation.rs`：路径由后端从台账派生、`updatedAt` 后端盖、坏值整次拒绝、
+  **不进资产也不进交付**）；localStorage 退成"没写进仓库的暂存"（保存即清；**内容真的不一样**才弹冲突）。
+
+**§3 「随包资产只兜底」收口**（"图片不见了"那次的根治）
+
+- `runtime::catalog_for_ui` = ② + `Catalog::with_missing_bundled_from(&EMBEDDED)`
+  （只补 ② 里没有的 `bundled` 条目、② 里已有的绝不动、下载面一条不补、**盘上字节一个不改**）；
+  `ipc::catalog::get_runtime_catalog` 走它 ⇒ 随包的东西不再依赖任何一份云端文件。
+
+**§4 验证**
+
+- `cargo fmt` / 双 feature `clippy --all-targets -D warnings` / `cargo test --lib`（**550**）/
+  `--features workbench --lib`（**911**，+4）/ `npx tsc -b` / `npm run lint` / `npm run build` + 三道 check。
+- 探针两条：`scripts/probes/guide-image.mjs`（~70 条：版式 + 放大层 + 缩放 + 404 留空）、
+  `scripts/probes/annotate.mjs`（一组 / 拖拽 / 样式 / 源稿读写）。**两条全绿**。
+
+## 增量之三十七 · 客户端放大层可拖动 + trae 清场（2026-10-17，分支 `feat/dark-mode`）
+
+**§1 客户端图片引导放大层：拖动平移（作者：「我希望客户端的也可以拖动，现在只有缩放还没法拖动」）**
+
+- 病根与工作台标注台那条同款：`GuideFigure` 的 `<img>` 没禁**原生拖图**——按住一拖，
+  WebKit 起的是"拖走这张图"，pointer 序列当场断掉 ⇒ 平移废了（平移的 pointer 逻辑本来就在，
+  单指就是拖、双指是捏合，只是被原生拖拽截胡）。
+- 治法：`GuideFigure` 的 img 加 `draggable={false}`；`.zoomLayer` 补 `user-select` / `-webkit-user-select`
+  （WKWebView 只认带前缀的）+ `.zoomLayer img { -webkit-user-drag: none }`。
+- 放大层提示句补全：「拖动挪位置 · 滚轮 / 捏合缩放 · 点任意处或 Esc 收起」。
+
+**§2 trae 清场（作者：「检查一下有没有 trae 留下的记号之类的，清理掉」）**
+
+- `.trae/documents/` 两份设计文档**搬进 docs/**：`PRESET-DATA-SHAPE.md`、`PRESET-PAGE-NATIVE-PLAN.md`
+  （`git mv`，内容一字未动），`DOC-INDEX.md` §2 各补一行；`.trae/`、`.comate/`、`.zcodeignore` 删除。
+- `.gitignore` 那条注释同步改口径：设计文档一律住 `docs/`。
+- `PageCalib.module.css` 里几处 "trae-counter" 是**出处注**（那几条玻璃样式的来源），保留；
+  `HANDOFF` / `UpdateIndicator` 里"像 Trae 那样"是作者的原话引用，保留。
+
+**§3 「去重新允许」按钮（同日作者追问：「如果用户后悔了，有再次触发的开关吗」）**
+
+- macOS 的死规矩：**拒绝过一次就永远不会再弹**授权框（TCC 没有"再问一次"的 API）⇒
+  反悔的唯一正路是系统设置 → 自动化里把「访达」勾回来。
+- 落法：`ipc::slicer::open_automation_settings` 用系统直达 URL
+  （`x-apple.systempreferences:com.apple.preference.security?Privacy_Automation`）
+  开**那一页**（依旧不替他勾）；前端只在错误码 `PERMISSION_DENIED` 时在引导的
+  `statusExtra` 槽摆一颗「去重新允许（系统设置 → 自动化）」+ 小字
+  「勾上「访达」后，回来再点一次「去系统里改…」就行」。
+  命令注册两份清单都加了（`lib.rs`）；mock 照实拒（浏览器没有系统设置）。
+- 验证：`tsc -b` / 双 feature clippy / `cargo test --lib`（558）/ `--features workbench`（934）/
+  `npm run lint` / `npm run build` + 三道 check。全绿。

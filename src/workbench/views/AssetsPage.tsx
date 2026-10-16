@@ -29,6 +29,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type { AssetInspectView, AssetList, AssetView, Words } from '../api'
+import { assetsBus } from '../assetsBus'
+import GroupManagerModal from './GroupManagerModal'
+import ImageZoom from '../components/ImageZoom'
 import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
@@ -77,6 +80,14 @@ type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset' | 
 /** 交付身份四态（作者 2026-10-03 定的模型）：进套餐 / 可选 / 随包 / 仅归档 */
 type Assign = 'all' | 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 
+/**
+ * 分组轴里那个"只看没进组的"取值。
+ *
+ * ★ 用一个**不可能撞上真组 id** 的哨兵（组 id 得能当文件名 ⇒ 不可能含 `:`），
+ * 而不是空串 —— 空串在别处是"不过滤"，一码两义最容易日后踩雷。
+ */
+const UNGROUPED = ':ungrouped:'
+
 export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
@@ -90,15 +101,30 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
   const [nozzle, setNozzle] = useState('')
   const [layer, setLayer] = useState('')
   const [q, setQ] = useState('')
+  /**
+   * **分组轴**（2026-10-16）。三态挤在一个字符串里：`''` = 不过滤；
+   * [`UNGROUPED`] = 只看没进组的（"一起拉进新建的组"那一步要用）；其它 = 组 id。
+   */
+  const [group, setGroup] = useState('')
+  /** 分组管理器开着没 */
+  const [mgrOpen, setMgrOpen] = useState(false)
+  /**
+   * 管理器挑成员要的那份清单 —— **不带任何筛选**（`list.assets` 是筛过的：按"机型图"筛过
+   * 之后还拿它挑成员，就会"看不见别的种类"，那是个坑）。
+   * 只在打开管理器那一刻取一次（静态数据，不必每渲染都问）。
+   */
+  const [mgrAssets, setMgrAssets] = useState<AssetView[]>([])
   const [confirm, setConfirm] = useState<'archive' | 'delete' | null>(null)
   const [pageErr, setPageErr] = useState<string | null>(null)
+  /** 点开看大的那条（2026-10-16）：`null` = 没开。只看图，不动数据 */
+  const [zoom, setZoom] = useState<AssetView | null>(null)
   const aMenu = useContextMenu<string>()
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
   const rail = useSplitRail('assets', bodyRef)
 
   const load = useCallback(
-    (k: Kind, a: Assign, sl: string, nz: string, ly: string, query: string) => {
+    (k: Kind, a: Assign, sl: string, nz: string, ly: string, query: string, g: string) => {
       void (async () => {
         try {
           const l = await wb.assets(
@@ -108,6 +134,8 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
             k === 'slicerProfile' && ly ? ly : null,
             a === 'all' ? null : a,
             query || null,
+            g === '' || g === UNGROUPED ? null : g,
+            g === UNGROUPED ? true : null,
           )
           setList(l)
         } catch (e) {
@@ -118,8 +146,8 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     [],
   )
   useEffect(() => {
-    load(kind, assign, slicer, nozzle, layer, q)
-  }, [load, kind, assign, slicer, nozzle, layer, q, tick])
+    load(kind, assign, slicer, nozzle, layer, q, group)
+  }, [load, kind, assign, slicer, nozzle, layer, q, group, tick])
 
   /** 选中一条就问一次反查 —— 谁在用它必须看得见（详情卡与删除拦截页都读它） */
   useEffect(() => {
@@ -191,13 +219,15 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     ])
     toasts.push(`已把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}（改了先进草稿，保存才落盘）`)
     /* 可见性连着四态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
-    load(kind, assign, slicer, nozzle, layer, q)
+    load(kind, assign, slicer, nozzle, layer, q, group)
   }
 
   /** 改交付档位（download ↔ bundled）。即时落盘（清单编辑，不走参数草稿） */
   const applyDelivery = async (id: string, v: 'download' | 'bundled') => {
     try {
       setList(await wb.setAssetDelivery(id, v))
+      /* 清单动过了 ⇒ 敲一下信号：标注台那些常驻页要重取（见 `assetsBus.ts`） */
+      assetsBus.bump()
       toasts.push(
         v === 'bundled'
           ? `已把 ${id} 设为随包（构建期打进客户端，客户端不再单独下载）`
@@ -222,6 +252,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     try {
       const next = await wb.removeAsset(id)
       setList(next)
+      assetsBus.bump()
       toasts.push(`已删除 ${id}（登记条目没了，文件本体还在资产目录里）`)
       setConfirm(null)
       setSel(null)
@@ -327,6 +358,58 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
             </button>
           ))}
         </div>
+        {/*
+          * **分组轴**（2026-10-16 作者：「我如果能自己分一下组，就更方便了」）——
+          * 组是真值（台账 `[[groups]]`），不是按文件名算的。右边那颗进管理器。
+          */}
+        <div className={s.bar}>
+          <span className={s.axisGroup}>
+            <span className={s.barLabel}>分组</span>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm} ${group === '' ? s.btnOn : ''}`}
+              onClick={() => setGroup('')}
+            >
+              全部
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm} ${group === UNGROUPED ? s.btnOn : ''}`}
+              onClick={() => setGroup(UNGROUPED)}
+              title="没进任何组的那些 —— 先筛出来，再一起拉进一个新建的组"
+            >
+              未分组
+            </button>
+            {(list?.groups ?? []).map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                className={`${s.btn} ${s.btnSm} ${group === g.id ? s.btnOn : ''}`}
+                onClick={() => setGroup(g.id)}
+                title={`${g.id} · ${g.members.length} 张共用一份标注`}
+              >
+                {g.name}
+              </button>
+            ))}
+          </span>
+          <span className={s.axisGroup}>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              onClick={() => {
+                setMgrOpen(true)
+                /* 挑成员要的是**全量**清单（不受这一页的筛选影响） */
+                void wb
+                  .assets(null, null, null, null, null, null, null, null)
+                  .then((l) => setMgrAssets(l.assets))
+                  .catch(() => undefined)
+              }}
+              title="建组 / 改名 / 拉图进出 / 删组 —— 分组登记在台账 `[[groups]]`，跟仓库走"
+            >
+              管理分组…
+            </button>
+          </span>
+        </div>
         {kind === 'slicerProfile' && (
           <div className={s.bar}>
             {/*
@@ -429,6 +512,15 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               >
                 {words.identity[a.identity].label}
               </span>
+              {/* 它属于哪一组（2026-10-16）：一份标注这几张共用 —— 行上就看得见谁跟谁一伙 */}
+              {a.groupName !== null && (
+                <span
+                  className={`${s.tag} ${s.tagGhost}`}
+                  title={`分组 ${a.groupId}${a.role === null ? '' : ` · 角色 ${a.role}`}`}
+                >
+                  {a.groupName}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -449,6 +541,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 setSlicer('')
                 setNozzle('')
                 setLayer('')
+                setGroup('')
               }}
             >
               清空筛选
@@ -561,12 +654,21 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   {!cur.present ? (
                     <span className={s.kvDim}>登记了，文件还没搬进来</span>
                   ) : cur.kind === 'image' || cur.kind === 'icon' || cur.kind === 'guide' ? (
-                    <img
-                      src={encodeURI(cur.url)}
-                      alt={cur.display}
-                      loading="lazy"
-                      style={{ maxWidth: 200, maxHeight: 120, display: 'block', borderRadius: 4 }}
-                    />
+                    /* 点一下放大看（作者 2026-10-16：「资产库的话，大部分图片的话，
+                       我希望都可以点击把它放大之类的」）—— 缩略图 200×120 看不清细节 */
+                    <button
+                      type="button"
+                      className={s.shotBtn}
+                      title="点一下放大看"
+                      onClick={() => setZoom(cur)}
+                    >
+                      <img
+                        src={encodeURI(cur.url)}
+                        alt={cur.display}
+                        loading="lazy"
+                        style={{ maxWidth: 200, maxHeight: 120, display: 'block', borderRadius: 4 }}
+                      />
+                    </button>
                   ) : (
                     <span className={`${s.kvVal} ${s.mono}`}>{cur.path.split('/').pop()}</span>
                   )}
@@ -767,6 +869,48 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
       </div>
 
       <ContextMenu at={aMenu.at} entries={assetEntries} onClose={aMenu.close} />
+
+      {/* 点开看大的（2026-10-16）—— 只看图，不动数据 */}
+      <ImageZoom
+        open={zoom !== null}
+        src={zoom === null ? '' : encodeURI(zoom.url)}
+        alt={zoom?.display ?? ''}
+        onClose={() => setZoom(null)}
+      />
+
+      {/* **分组管理器**（2026-10-16）：组是真值（台账 `[[groups]]`），不是按文件名算的。
+          一次手势落一个文件；落完敲 `assetsBus`，标注台那些常驻页跟着重取 */}
+      <GroupManagerModal
+        open={mgrOpen}
+        groups={list.groups}
+        assets={mgrAssets.length > 0 ? mgrAssets : list.assets}
+        onClose={() => setMgrOpen(false)}
+        onSave={async (id, name, members) => {
+          try {
+            const next = await wb.setGroup(id, name, members)
+            setList(next)
+            setMgrAssets(next.assets)
+            assetsBus.bump()
+            /* 落盘回的是**全量**清单 —— 把这一页自己的筛选条件再套回去（不然筛好的视图会被冲掉） */
+            load(kind, assign, slicer, nozzle, layer, q, group)
+            toasts.push(`已写进台账：分组「${name}」（${members.length} 张共用一份标注）`)
+          } catch (e) {
+            toasts.push(isAppError(e) ? e.message : String(e))
+          }
+        }}
+        onRemove={async (id) => {
+          try {
+            const next = await wb.removeGroup(id)
+            setList(next)
+            setMgrAssets(next.assets)
+            assetsBus.bump()
+            load(kind, assign, slicer, nozzle, layer, q, group)
+            toasts.push(`已删除分组 ${id}（成员变回未分组，图没动）`)
+          } catch (e) {
+            toasts.push(isAppError(e) ? e.message : String(e))
+          }
+        }}
+      />
 
       {/* 反查没回来之前不亮「删除」—— 旧结果不能拿来说话；回来之后：
           有引用时它是拦截页（说清楚谁在用、去哪解除），没引用才是确认框 */}

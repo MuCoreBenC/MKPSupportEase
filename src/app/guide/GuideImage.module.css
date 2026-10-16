@@ -7,43 +7,178 @@
   color: var(--text-1);
 }
 
-/* 图在左、步骤在右。图窄、字宽 —— 图是竖着的系统窗口截图，撑宽了会把步骤挤到屏幕外 */
+/* 图在左、文字在右。图窄、字宽 —— 图是竖着的系统窗口截图，撑宽了会把文字挤到屏幕外 */
 .split {
   display: flex;
   align-items: flex-start;
   gap: 20px;
-  margin-top: 14px;
 }
 
 /*
- * 图的容器 = **标注的坐标系**：标注一律百分比，所以缩放它（`width`）框会跟着走。
- * `position: relative` 是框的定位祖先；图自己 `display:block` 免得底下多出基线缝。
+ * 右边那一列：**先"此刻在哪"，再"怎么做"**（状态那句 2026-10-16 从大标题下面搬进来）。
+ * `flex: 1 1 auto` + `min-width: 0`：图定宽，剩下的全归文字，且长句能正常折行。
+ */
+.side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/*
+ * 图的容器 = **标注的坐标系**：标注一律百分比，所以框跟着容器走。
+ * `position: relative` 是框的定位祖先。
+ *
+ * ★ 容器**不给宽**（原来写死 `width: 314px`）：宽度交给里面那张图自己的 max-* 决定，
+ *   容器取内容的 max-content ⇒ **容器与图永远一样大**。差一点点标注就飘
+ *   （框是按容器的百分比画的）。
  */
 .frame {
   position: relative;
   flex: 0 0 auto;
-  /*
-   * 宽度按"窗口要看得清"定：作者给的系统截图**四周带投影边距**（754×904 里窗口只占
-   * 中间那块），所以这个数比"窗口宽度"要大一档 —— 268px 时窗口只剩 ~185px，字就糊了。
-   */
-  width: 314px;
-  max-width: 46%;
 }
 
 /*
- * 图（作者给的系统截图，四周自带"桌面"那圈底）：
- * ★ 浅色模式下那圈底和模态框的白底**粘在一起**，窗口看着就没边了 ⇒
- *   给图自己加圆角 + 一条发丝线 + 一层浅影，两套主题下都看得出"这是一张图"。
- * ★ 圆角与影子加在**图**上、不加在 `.frame` 上（那是标注的坐标系）：给 frame 加
- *   `overflow:hidden` 会把贴边的编号裁掉。
+ * 图（作者给的系统截图）—— **一像素装饰都不加**（作者 2026-10-16 定的）。
+ *
+ * 曾经给它加过圆角 + 发丝线 + 一层浅影（怕浅色下图和模态框白底粘在一起），作者当场纠：
+ * 「你这个图片不要外面再嵌套一个那个容器了……不要再加那个背景、不要再加那一个阴影了，
+ *   因为我原本截出的图片，它就已经自带的那一个阴影背景啊」
+ * —— 他给的截图四周自带系统窗口的投影与一圈桌面底，那是**图的一部分**（也正因为如此，
+ * 标注的百分比里本来就含那圈边距）；再套一层就是两个边、两层影。
+ *
+ * ============ 尺寸：**宽和高都算，谁紧听谁的**（2026-10-16 作者点名的） ============
+ *
+ * 「那个图片它可以适当的缩放，你不只是判断它的这个宽度、高度，反正你要把它缩放，
+ *   可以显示完整，就像我的测试模型那一页那个图片的变化一样」（= 校准页那张合影，
+ *   见 `PageCalib.module.css` 的 `.modelsImg`：任何窗高都完整显示）。
+ *
+ * 就三行，每一行都有原因：
+ *   `width/height: auto` + 两个 `max-*` ⇒ 替换元素按**等比**收，不会拉扁；
+ *   `max-width` 管"窗口宽"：平时 314px（作者给的截图四周带投影边距，比窗口本身宽一档；
+ *              268px 时窗口只剩 ~185px、字就糊了），窄窗再让给 `46vw`；
+ *   `max-height` 管"窗口高"：`56vh` 那一档 —— 模态框的框身上限就在视口里，
+ *              图比它还高时就要进滚动，作者要的正是"完整显示、不滚"。
+ *
+ * `display:block` 留着：`<img>` 是行内替换元素，底下会多出一条基线缝，
+ * 而这条缝会让「图的底边」量在缝上面（标注坐标系的底边就不是看起来那个了）。
  */
 .shot {
   display: block;
-  width: 100%;
-  border-radius: 12px;
-  box-shadow:
-    0 0 0 1px var(--hairline),
-    0 8px 20px rgb(0 0 0 / 12%);
+  width: auto;
+  height: auto;
+  max-width: min(314px, 46vw);
+  max-height: min(46vh, 460px);
+}
+
+/*
+ * 放大看那一档（`<GuideFigure big />`）—— 两条上限各放大一档：
+ * 宽 640（作者给的截图 754 宽，这个数已经能看清窗口里的字）、
+ * 高 = 视口减 150（模态框遮罩上下各留一份内衬 ≈ 52、再加底下那句提示 ≈ 30）。
+ * ★ 写在 `.shot` **之后**：单类名同权重，靠源序覆盖那两条 `max-*`。
+ */
+.zoomShot {
+  max-width: min(86vw, 640px);
+  max-height: min(calc(100vh - 150px), 820px);
+}
+
+/*
+ * 图那一块现在是个按钮（点开看大的）—— 把按钮自己的皮扒干净，只留"能点"这件事：
+ * 图仍是图，外面不套容器（作者对"再套一层"是明确否过的）。
+ */
+.figBtn {
+  display: block;
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  /* 能点的意思只说给光标听（作者 2026-10-16：不要"点一下放大"那种提示文字） */
+  cursor: zoom-in;
+}
+
+/*
+ * 放大那一层（2026-10-16 作者：「可以点就悬浮出来……没那么突兀，它就是悬浮了出来，居中」）。
+ *
+ * 挂在 `Modal` 的 `overlay` 里 ⇒ 遮罩就是它的舞台：**不另开一个模态框**、不摆头尾，
+ * 几何与下面那个框完全一致（居中由 flex 管，不用自己算）。
+ * 背景用同一个 `--scrim`（两套主题都是"让背后更暗"），于是它读起来是"从框里浮出来的一层"。
+ */
+.zoomLayer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: clamp(8px, 2.4vw, 40px);
+  cursor: zoom-out;
+  /* 自己接管捏合 / 拖动：**别让浏览器拿触摸手势去滚页面 / 缩整页**（触摸屏那一路要用） */
+  touch-action: none;
+  /*
+   * ★★ **整层禁选**（2026-10-17）：拖动平移时按到字上，WebKit 会把那一下拿去当
+   *   文字选择 ⇒ pointer 序列断掉、平移废掉。这层里没有一个字是要选的。
+   *   （WKWebView 只认带前缀的 `user-select`，见工作台标注台同一条。）
+   */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 图的原生拖拽（按住一拖 = "拖走这张图"）也禁掉 —— 平移靠 pointer，不靠它 */
+.zoomLayer img {
+  -webkit-user-drag: none;
+}
+
+/*
+ * ★★ 那一层底 **画在 `::before` 上、不画在这一层自己身上**：动效只许动这个伪元素
+ * （登场渐显），父级始终不动。理由见 `GuideImage.tsx` 的 `close()` 注释①——
+ * 动父级自己的 `opacity`，透明那一帧会把背后整块界面透出来（就是闪）。
+ * `inset: 0` 相对这一层的内衬盒，正好铺满整块遮罩。
+ */
+.zoomLayer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+/* 图与那句提示要浮在底之上（`::before` 不带 z-index，会被后画的兄弟盖住） */
+.zoomHit,
+.zoomHint {
+  position: relative;
+}
+
+/* 大图自己也是"点一下就收"的靶子（按钮的皮同样扒掉） */
+.zoomHit {
+  display: block;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: zoom-out;
+  /* 缩小时图自己渐隐（见 `.close` 那一趟）—— 别让"能点"的按钮皮漏出来 */
+  will-change: transform, opacity;
+}
+
+/* 遮罩上的字：两套主题的 `--scrim` 都是深色 ⇒ 固定白（与 `GuideCard` 那条同款） */
+.zoomHint {
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: #fff;
+  opacity: 0.8;
+}
+
+/*
+ * 那一趟"图飞起来"的起点 —— 由 FLIP 写成行内 `transform`，这一条只是个兜底声明，
+ * 让浏览器提前把这一层提到合成器上（缩小时不抖）。
+ */
+.zoomLayer > .zoomHit {
+  transform: translateZ(0);
+}
+
+/* 用户自己缩放时每帧都在改这张图的 `transform` ⇒ 提前提层，捏合才跟手 */
+.zoomLayer .frame {
+  will-change: transform;
 }
 
 /*
@@ -54,24 +189,44 @@
  */
 .mark {
   position: absolute;
-  border: 2px solid var(--accent);
-  border-radius: 8px;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 28%);
+  /*
+   * ★★ 三个数都**除掉 `--zoom-k`**（放大看的那一层里写的当前倍率，平时是 1）——
+   *   图的 `transform: scale(k)` 会把子元素一起放大，线宽 / 圆角 / 编号圆点若跟着涨，
+   *   放大到 4 倍就是一圈 8px 的橡皮筋 + 一颗 72px 的大圆点压在图上。
+   *   除回去 = **视觉大小恒定**（框线始终 2px、圆点始终 18px）。
+   *   ★ 三个值都能被标注源稿覆盖（`--mark-stroke` / `--mark-radius` / `--badge-size`，
+   *     由 `GuideFigure` 按每条标注写在 `.frame` 上）——缺省就是今天的样子。
+   *
+   * ★★ 那一圈线**不能用 `border`**：浏览器把非零 `border-width` **钳到最小 1px**
+   *   （Blink/WebKit 都是），除到 0.45px 也只会画成 1px ⇒ 放大到 2 倍以上又开始变粗
+   *   （2026-10-16 实测：k=4.4 时量到 1px，视觉就是 4.4px）。
+   *   改用**两层外扩的影**：`box-shadow` 的扩散半径**没有 1px 下限**，能真缩到细；
+   *   顺带一个好处 —— 影画在盒子**外面**，不再吃掉控件自身那 2px（原来是 border 画在内侧）。
+   */
+  border-radius: calc(var(--mark-radius, 8px) / var(--zoom-k, 1));
+  box-shadow:
+    0 0 0 calc(var(--mark-stroke, 2px) / var(--zoom-k, 1)) var(--accent),
+    0 0 0 calc((var(--mark-stroke, 2px) + 1px) / var(--zoom-k, 1)) rgb(0 0 0 / 28%);
 }
 
-/* 框角上那颗编号：与右侧那几步对得上 */
+/* 框角上那颗编号：与右侧那几步对得上（尺寸 / 字号同样除掉 `--zoom-k`，见 `.mark` 那段） */
 .badge {
   position: absolute;
-  left: -9px;
-  top: -9px;
-  width: 18px;
-  height: 18px;
+  --badge: calc(var(--badge-size, 18px) / var(--zoom-k, 1));
+
+  left: calc(var(--badge) / -2);
+  top: calc(var(--badge) / -2);
+  width: var(--badge);
+  height: var(--badge);
   display: grid;
   place-items: center;
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
-  font-size: 11px;
+  /* ★★ 同一套字（`global.css` 的 `@font-face`）＋ 同一个比例（圆径 × 11/18）—— 见
+     标注台 `.badge` 那段与 `render.rs` 的 `BADGE_FONT_RATIO`，三处必须一条口径 */
+  font-family: 'MKP Badge', system-ui, sans-serif;
+  font-size: calc(var(--badge) * 11 / 18);
   line-height: 1;
 }
 

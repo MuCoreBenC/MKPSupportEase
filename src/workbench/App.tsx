@@ -57,10 +57,12 @@ import MachinesPage from './views/MachinesPage'
 import ParamsPage from './views/ParamsPage'
 import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
+import AnnotatePage from './views/AnnotatePage'
 import BuildPage from './views/BuildPage'
 import SettingsPage from './views/SettingsPage'
 import DevPage from './views/DevPage'
 import s from './c14.module.css'
+import { pageActions } from './pageActions'
 
 /**
  * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
@@ -135,6 +137,17 @@ const NAV: NavItem[] = [
       </>
     ),
   },
+  /* 四角框 + 中间一块选中 = 在图上拖框 */
+  {
+    id: 'annotate',
+    label: '标注台',
+    icon: (
+      <>
+        <path d="M4 8.5V6.5A2.5 2.5 0 0 1 6.5 4h2M15.5 4h2A2.5 2.5 0 0 1 20 6.5v2M20 15.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M8.5 20h-2A2.5 2.5 0 0 1 4 17.5v-2" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+      </>
+    ),
+  },
   /* 齿轮 = 只读的设置（数据根与子目录职责） */
   {
     id: 'settings',
@@ -160,6 +173,16 @@ const NAV: NavItem[] = [
 ]
 
 type NavId = NavItem['id']
+
+/**
+ * **走参数草稿的那几页**（页头那套「已保存 / 放弃 / 保存」的老语义属于它们）。
+ *
+ * 判据 = 这一页会不会往参数草稿里放东西（`wb.applyDraft` 那一路）：
+ * 机型（先落盘再生成）、参数台、资产库（交付身份改了先进草稿）、生成与发布（同上）。
+ * 其余：套餐页是即时落盘、设置页只读、开发台不落盘 ⇒ 页头不摆这一槽。
+ * ★ 草稿非空时**无论在哪一页都摆**（见 `headOpsVisible` 的 ③）—— 别让改动存不下去。
+ */
+const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>(['machines', 'params', 'assets', 'build'])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
 const NAVW = { dft: 236, min: 64, max: 320 }
@@ -200,6 +223,11 @@ export function WorkbenchApp() {
   const rootRef = useRef<HTMLDivElement>(null)
   const density = useDensity(rootRef)
   const toastList = useSyncExternalStore(toasts.subscribe, toasts.get)
+  /**
+   * 页头那一槽：**哪一页登记了就用它的**（例：标注台接管成"保存到仓库 / 放弃改动"）。
+   * 没人登记（`null`）⇒ 回落到外壳自己那套（参数草稿）。见 `pageActions.ts` 头注。
+   */
+  const pageSlotRaw = useSyncExternalStore(pageActions.subscribe, pageActions.get)
 
   const [boot, setBoot] = useState<Boot | null>(null)
   /**
@@ -215,6 +243,13 @@ export function WorkbenchApp() {
   const [busy, setBusy] = useState(false)
 
   const [page, setPage] = useState<NavId>('machines')
+  /**
+   * 只认**当前页**那一槽：非激活页的元素被冻结、不会重渲染 ⇒ 它没机会注销自己，
+   * 所以靠"页对不上就当没有"来失效（见 `pageActions.ts` 头注）。
+   * ★ 这一份是**看得见的字**，不含动作；按钮点击一律走 `pageActions.run(…)`
+   *   （拿最新那份闭包，见 `pageActions.ts` 头注"为什么 save/discard 不进快照"）。
+   */
+  const pageSlot = pageSlotRaw !== null && pageSlotRaw.page === page ? pageSlotRaw : null
   const [focus, setFocus] = useState<Focus | null>(null)
   /** 定位页的 remount 代号：`goto` 过来是「换现场」，要重挂去读新的主选中 */
   const [focusGen, setFocusGen] = useState(0)
@@ -485,6 +520,33 @@ export function WorkbenchApp() {
 
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
   const dirty = (book?.dirtyCount ?? 0) > 0
+
+  /**
+   * 页头那一槽要不要显示（作者 2026-10-16：「有需要的页面就显示，不需要的页面就不显示」）。
+   *
+   * 三种"显示"的理由，任一成立即显示：
+   *   ① 当前页**自己登记了**一槽（标注台）；
+   *   ② 当前页**走参数草稿**（机型 / 参数 / 资产 / 生成 —— 那套老语义属于它们）；
+   *   ③ 草稿**非空** —— 切到别的页也留一颗「保存」给它，别让改动存不下去。
+   * 其余（设置页只读、开发台）不显示。
+   */
+  const headOpsVisible =
+    pageSlot !== null || DRAFT_PAGES.has(page) || dirty
+  /**
+   * 「保存」那颗**现在点不点得动**（2026-10-17）：
+   * - 页头被某一页接管（标注台）⇒ 听它的 `canSave`；
+   * - 否则是外壳这套参数草稿 ⇒ 草稿非空、且没在保存中。
+   */
+  const saveOn =
+    pageSlot !== null ? pageSlot.canSave === true && pageSlot.busy !== true : dirty && !busy
+  /**
+   * 点不动时**说出为什么**（悬停看得见）。禁用按钮恰恰是最需要 title 的地方 ——
+   * 作者这一轮的病就是"点了没反应却不知道为什么"（其实是压根点不动）。
+   */
+  const saveWhy =
+    pageSlot !== null
+      ? '这一份没有要写回去的改动（和仓库里那份一样）'
+      : (words?.disabled.nothingToSave ?? '没有未保存的改动')
   useEffect(() => {
     if (!dirty) return
     const guard = (e: BeforeUnloadEvent) => {
@@ -541,6 +603,8 @@ export function WorkbenchApp() {
           : ''
       case 'assets':
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+      case 'annotate':
+        return '在图上拖框 —— 导出的就是 marks（百分比坐标，浅深两张图共用一份）'
       case 'settings':
         return '只读 —— 数据根与工作台子目录的职责'
       case 'dev':
@@ -571,6 +635,9 @@ export function WorkbenchApp() {
         return <PageSkeleton layout="flow" cards={3} rows={5} label="生成与发布正在加载" />
       case 'assets':
         return <PageSkeleton layout="cols" cards={2} rows={6} label="资产库正在加载" />
+      case 'annotate':
+        /* 这一页不读整本 / 词表，骨架基本见不到；给一具形状对得上的占位（见 renderPage 的门） */
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="标注台正在加载" />
       case 'settings':
         return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
       case 'dev':
@@ -582,6 +649,10 @@ export function WorkbenchApp() {
     /* 开发台不依赖整本 / 词表（它读的是后处理状态与场景清单）—— 先于数据闸渲染，
        不必跟着"整本还没到"一起给骨架 */
     if (id === 'dev') return <DevPage />
+    /* 标注台同理：它读的是资产清单（一条独立命令）与一张图，等整本没有意义。
+       ★ 它自己往页头登记那一槽（`usePageActions('annotate', …)`）—— 外壳按"页对不对得上"筛，
+         非激活页即使被冻结复用也不会污染页头。 */
+    if (id === 'annotate') return <AnnotatePage />
     /* 数据没到先给骨架（不再黑屏）—— 见 skeletonFor 的注 */
     if (!book || !words) return skeletonFor(id)
     switch (id) {
@@ -868,39 +939,87 @@ export function WorkbenchApp() {
                     <span className={s.headSub}>{headSub}</span>
                   </div>
                   {/*
-                    保存三件常驻（C14）：改参数会让这里亮起来；「机型与版本」页的
-                    新增与删除是即时落盘的，不经过这三个按钮 —— 徽章只反映草稿。
+                    保存那一槽（C14 / 2026-10-16 作者）：
+                    **上面这一个就是全站唯一的位置** —— 不再让哪一页在下面自己再摆一套。
+                    三种情形：
+                      ① 当前页**自己登记了**一槽（例：标注台 → 「保存到仓库 / 放弃改动」）⇒ 用它；
+                      ② 走参数草稿的页（机型 / 参数 / 资产 / 生成）⇒ 用外壳这套（老样子）；
+                      ③ 只读页与开发台 ⇒ **不显示**（作者：「有需要的页面就显示，不需要的页面就不显示」）。
+                    ★ 草稿非空时**无论在哪一页都显示** —— 别让"改了参数切到设置页就存不了"。
                   */}
-                  <div className={s.headOps}>
-                    <span
-                      className={`${s.tag} ${s.tagGhost}`}
-                      title={
-                        dirty
-                          ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
-                          : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
-                      }
-                    >
-                      {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
-                    </span>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnSm}`}
-                      disabled={!dirty || busy}
-                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
-                      onClick={() => void discard()}
-                    >
-                      放弃
-                    </button>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                      disabled={!dirty || busy}
-                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
-                      onClick={() => void save()}
-                    >
-                      保存
-                    </button>
-                  </div>
+                  {headOpsVisible && (
+                    <div className={s.headOps}>
+                      {pageSlot !== null ? (
+                        <>
+                          <span
+                            className={`${s.tag} ${s.tagGhost}`}
+                            title={pageSlot.dirtyTitle ?? pageSlot.dirtyLabel}
+                          >
+                            {pageSlot.dirty ? pageSlot.dirtyLabel : pageSlot.savedLabel}
+                          </span>
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            disabled={!pageSlot.canDiscard || pageSlot.busy === true}
+                            title={pageSlot.discardTitle ?? '放弃这一次的改动'}
+                            onClick={() => pageActions.run('discard')}
+                          >
+                            放弃
+                          </button>
+                          {/*
+                           * ★★ **保存默认灰色、能保存才上主色**（2026-10-17 作者：「保存应该
+                           *   默认灰色，可以保存才显示，用有颜色的」）。
+                           *   旧写法是 `btnPrimary` **恒挂** + `disabled` ⇒ 走的是
+                           *   `.btnPrimary:disabled`（底 = `--line-strong`、字仍白）：浅色下白字
+                           *   压在 14% 灰上几乎看不见，看着像"还能点"，点下去当然没反应。
+                           *   ⇒ 不能保存时**连 `btnPrimary` 都不挂**，回落普通 `.btn` 的禁用态
+                           *     （灰字 + 淡描边，一眼是"点不了"）。
+                           */}
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
+                            disabled={!saveOn}
+                            title={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
+                            onClick={() => pageActions.run('save')}
+                          >
+                            {pageSlot.busy === true ? (pageSlot.savingLabel ?? '保存中…') : '保存'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            className={`${s.tag} ${s.tagGhost}`}
+                            title={
+                              dirty
+                                ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
+                                : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                            }
+                          >
+                            {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
+                          </span>
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            disabled={!dirty || busy}
+                            title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
+                            onClick={() => void discard()}
+                          >
+                            放弃
+                          </button>
+                          {/* 同上：能保存才上主色，不能保存是普通灰按钮（见上面那条注释） */}
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
+                            disabled={!saveOn}
+                            title={saveOn ? (words?.save.dirty.explain ?? undefined) : saveWhy}
+                            onClick={() => void save()}
+                          >
+                            保存
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/*

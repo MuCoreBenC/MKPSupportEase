@@ -241,6 +241,60 @@ say(
   bad.length === 0 ? '' : bad.map(([rel, s]) => `${rel}→${s}`).join(' · '),
 )
 
+/* ---------------------------------------------------------------------------
+ * **分组管理器**（2026-10-16 作者：「不能只用文件名去实现，必须有一个去管理它」）
+ *
+ * 查的是那条链真的通：筛选轴认台账的组 → 管理器开得出、成员与角色对得上 →
+ * 建一个新组 → 列表里真的多一条（数据在**台账** `[[groups]]`，不是本地算的）。
+ * ------------------------------------------------------------------------- */
+const groupAxis = page.getByRole('button', { name: '「改 .3mf 默认打开方式」引导图' })
+say((await groupAxis.count()) >= 1, '分组筛选轴：组名来自台账（`[[groups]]` 的 name）')
+say(
+  (await page.getByRole('button', { name: '未分组' }).count()) === 1,
+  '分组筛选轴：有「未分组」（先筛出来再一起拉进新建的组）',
+)
+
+await page.getByRole('button', { name: '管理分组…' }).first().click()
+const dlg = page.locator('[class*="modalBox"], [role="dialog"]').filter({ hasText: '管理分组' })
+const opened = await until(() => dlg.first().isVisible().catch(() => false), 4000)
+say(opened, '「管理分组…」开得出管理器')
+
+const dlgText = async () =>
+  (await dlg.first().innerText().catch(() => '')).replace(/\s+/g, ' ')
+const membersShown = await until(async () => (await dlgText()).includes('2 张'), 3000)
+say(membersShown, '管理器里那组写着「2 张」（成员数与台账一致）')
+
+/* 建一个新组：名字一填，id 自动给；先加一张成员，再落盘 */
+await page.getByRole('button', { name: '+ 新建分组' }).first().click()
+await page.locator('input[placeholder^="例：「改"]').first().fill('探针临时组')
+const idInp = page.locator('input[placeholder="例：open-with"]').first()
+const autoId = await idInp.inputValue()
+say(
+  autoId === '探针临时组',
+  `新建时 id 自动从组名给、**中文照留**（读到 ${autoId || '空'} —— 逼人再起英文名是白添一步）`,
+)
+
+/* 拉第一张候选进来（管理器只列"还没进别的组"的） */
+await page.getByRole('button', { name: '+ 添加资产…' }).first().click()
+const firstCand = page.locator('[class*="addBox"] [class*="row"]').first()
+const candOk = await until(() => firstCand.isVisible().catch(() => false), 3000)
+say(candOk, '「添加资产…」列得出可加的（排除了已进别的组的）')
+if (candOk) {
+  const candName = ((await firstCand.innerText()) ?? '').split('\n')[0].trim()
+  await firstCand.click()
+  await page.getByRole('button', { name: /建立这一组/ }).first().click()
+  const made = await until(async () => !(await dlgText()).includes('还没有分组'), 4000)
+  say(made, `建组落盘：列表里出现了新组（拉了「${candName}」进来）`)
+  const stillThere = await until(async () => (await dlgText()).includes('探针临时组'), 3000)
+  say(stillThere, '新组在左列表里（组数据在台账，不是界面上自己编的）')
+  /* 删掉，别把这条探针的痕迹留在演示数据里 */
+  await page.getByRole('button', { name: '删除这个分组' }).first().click()
+  await page.getByRole('button', { name: '确认删除' }).first().click()
+  const gone = await until(async () => !(await dlgText()).includes('探针临时组'), 4000)
+  say(gone, '删组：成员变回未分组、组从列表里消失')
+}
+await page.getByRole('button', { name: '关闭' }).first().click()
+
 if (wantShots) await page.screenshot({ path: `${shotDir}/wb-asset-preview.png` })
 
 console.log('-'.repeat(96))

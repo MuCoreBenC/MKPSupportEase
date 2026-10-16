@@ -57,7 +57,7 @@ use toml_edit::DocumentMut;
 
 use crate::error::AppError;
 
-pub use assets::{Asset, AssetKind, Assets};
+pub use assets::{Asset, AssetKind, Assets, Group, GroupMember};
 pub use bundles::{Bundle, Bundles};
 pub use catalog::{
     Brand, BrandField, Catalog, Dimensions, Machine, MachineField, MachineVersion, Plate,
@@ -834,6 +834,24 @@ impl Presets {
             }
         };
         self.assets.set_delivery(id, d)?;
+        self.assets.write()?;
+        Ok(())
+    }
+
+    /// **新建或改写一个分组**（作者 2026-10-16），落盘。
+    ///
+    /// 守卫全在 [`Assets::upsert_group`]（成员必须在同一目录 / 一张资产至多属一组 /
+    /// id 得能当文件名）—— 这里只管"改完就写"。
+    pub fn set_group(&mut self, group: crate::presetdata::Group) -> Result<(), AppError> {
+        self.assets.upsert_group(group)?;
+        self.assets.write()?;
+        Ok(())
+    }
+
+    /// 删掉一个分组，落盘。**成员原地变回"未分组"** —— 资产一条不动
+    /// （分组是登记，不是归属：删组不该顺手把图删了）。
+    pub fn remove_group(&mut self, id: &str) -> Result<(), AppError> {
+        self.assets.remove_group(id)?;
         self.assets.write()?;
         Ok(())
     }

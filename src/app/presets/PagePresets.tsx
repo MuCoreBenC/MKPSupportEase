@@ -150,6 +150,8 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+/* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
+import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
 import type { ArchivedFile, ParamDecision } from '../../api'
 import { longStatText } from '../store/package'
@@ -196,6 +198,7 @@ import {
   CLOUD_LOCAL_TEXT,
   CLOUD_LOCAL_WHY,
   EDIT_TEXT,
+  HEAD_LOCKED,
   LOCAL_COPY,
   LOCAL_DRAWER,
   LOCAL_NOT_PRESET_WHY,
@@ -223,7 +226,7 @@ import type {
 } from './presetTree'
 import { usePresetData, usePresetPage } from './usePresetData'
 /* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
-import { tomlTokens } from './tomlPaint'
+import { splitHeader, tomlTokens } from './tomlPaint'
 import s from './PagePresets.module.css'
 
 
@@ -302,8 +305,15 @@ interface Note {
  * 「有未保存的改动」通知停留时长（2026-10-16）：原来跟「复制后处理脚本」一档（5200），
  * 作者当晚看过说「这个通知太短暂了，时间可以延长一点」→ **9000**。
  * 它是一条"要去行动"的话（去保存），得留够读完再走一趟的工夫。
+ *
+ * ★ 现在它上面还挂着一颗动作按钮（`EDIT_TEXT.discard`）—— 9000 对一条"要去读"的话够，
+ *   对一颗"要去点"的按钮偏紧（`notify.ts` 里带动作的那类默认是 0 = 不自己走）。
+ *   先照作者定的 9000 不动：真机上看过嫌它走得快，改成 0 是一句话的事。
  */
 const UNSAVED_NOTICE_MS = 9000
+
+/* 「文件头改不了」那一句：一次短促的说明，不是"要去行动"的话 —— 说完就走 */
+const HEAD_LOCKED_MS = 2600
 
 /*
  * 撤销 / 重做历史**按 path 记在模块级**（2026-10-16 作者：「我这次再次进来，有没有那种
@@ -319,16 +329,68 @@ const textHistCache = new Map<string, { undo: string[]; redo: string[]; head: st
  * 「有未保存的改动」**屏幕上只留一条** —— 关窗那条（"刚才…"）与重开那条（"上次…"）
  * 说的是同一件事；不动手的话两条会叠在一起（2026-10-16 截图里就是这样，像在重复念叨）。
  * 新的一条上来先把旧的那条 `dismiss` 掉。
+ *
+ * ★ 2026-10-16 下半场：这一条上多了一颗**放弃修改**（作者：「我希望这个时候那个通知的话，
+ *   他可以给我就是选择那个放弃保存的那种……用户不知道退出编辑模式就是取消上一次的修改」）。
+ *   于是它不再只是"一句通知"：改动落地（保存）或作废（退出编辑模式 / 放弃修改）之后
+ *   必须**收掉**它，否则它会继续待在右上角说一件已经不存在的事 —— 三处都调
+ *   `clearUnsavedNotice`。
+ *
+ * `onDiscard` 由调用方给（它要按"此刻模态框开没开"走两条不同的路，见 `discardNowRef`）。
  */
 let unsavedNoticeId: string | null = null
-function notifyUnsaved(text: string) {
-  if (unsavedNoticeId !== null) dismiss(unsavedNoticeId)
+function clearUnsavedNotice() {
+  if (unsavedNoticeId === null) return
+  dismiss(unsavedNoticeId)
+  unsavedNoticeId = null
+}
+
+function notifyUnsaved(text: string, onDiscard: () => void) {
+  clearUnsavedNotice()
   unsavedNoticeId = notify({
     kind: 'warn',
     title: '有未保存的改动',
     text,
     ttl: UNSAVED_NOTICE_MS,
+    actions: [{ label: EDIT_TEXT.discard, onClick: onDiscard }],
   })
+}
+
+/**
+ * 「文件头改不了」（`HEAD_LOCKED`）：试了一次没改成，说一句就走。
+ *
+ * 按住 `Backspace` 会连发（每一个键都判一次），所以**卡片已经在屏幕上就不再发一条**
+ * —— 同一句话重复入队只会让它闪。ttl 到了把 id 落回 `null`，下一次再试还能说。
+ */
+let headLockedNoticeId: string | null = null
+function notifyHeadLocked() {
+  if (headLockedNoticeId !== null) return
+  const id = notify({
+    kind: 'warn',
+    title: HEAD_LOCKED.title,
+    text: HEAD_LOCKED.text,
+    ttl: HEAD_LOCKED_MS,
+  })
+  headLockedNoticeId = id
+  window.setTimeout(() => {
+    if (headLockedNoticeId === id) headLockedNoticeId = null
+  }, HEAD_LOCKED_MS + 200)
+}
+
+/**
+ * **把文件头原样钉回去**：万一有一条路绕过了按键那道闸（输入法合成、拖放文本进来），
+ * 头被动过的这一刻把它换回来、只留正文（`cur` = 改之前的文本、`next` = 改之后的）。
+ *
+ * 分界怎么重新认：先看正文第一行（`[toolhead]` 那种）在改后的文本里还在不在 ——
+ * 在就**从它那儿切**（用户可能正好把头尾那个换行删了，"头 = 连续注释行"会连着把
+ * 紧挨的 `[表]` 一起吞掉，那就把一个表头弄丢了）；找不到才退回按行切。
+ */
+function keepHead(cur: string, next: string): string {
+  const before = splitHeader(cur)
+  if (next.startsWith(before.head)) return next
+  const first = before.body.split('\n')[0]
+  const at = first === '' ? -1 : next.indexOf(first)
+  return before.head + (at >= 0 ? next.slice(at) : splitHeader(next).body)
 }
 
 export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
@@ -524,8 +586,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
    * 打开先只读（`<pre>` 画着色，textarea 不出现），底栏只有「进入编辑模式」；
-   * 进了编辑模式才有 撤销 / 重做 / 退出编辑模式 / 保存。
-   * 与参数对比台、修改参数弹窗是**同一套框架**（只读 → 进编辑 → 退出/保存）。
+   * 进了编辑模式才有 撤销 / 重做 / 放弃并退出 / 保存。
+   * 与参数对比台、修改参数弹窗是**同一套框架**（只读 → 进编辑 → 作废/保存），
+   * 两颗按钮的词取自 `EDIT_TEXT`（`presetTree.ts`）。
    */
   const [editMode, setEditMode] = useState(false)
   /**
@@ -558,6 +621,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const openTextRef = useRef('')
   const openDirtyRef = useRef(false)
+  /**
+   * 通知上那颗「放弃修改」**此刻该走哪条路**：模态框还开着 ⇒ 底栏那颗「放弃并退出」；
+   * 已经关了 ⇒ 只把草稿丢掉。每次渲染后刷新（见 `exitEdit` 后面那一个 effect 里的说明）。
+   */
+  const discardNowRef = useRef<() => void>(() => {})
 
   /*
    * **撞名那一格**（a04）：云端那份要落下来时，本机已经有一份同名的了 ——
@@ -593,6 +661,205 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     () => (editing === null ? [] : tomlTokens(editing.text)),
     [editing],
   )
+
+  /**
+   * **行号槽**（`2026-10-16` 作者：「有没有说给这些东西加上行号呀？就左侧出现行号」）。
+   *
+   * 它自己不滚（CSS 里 `overflow: hidden`）—— `scrollTop` 只由 `syncScroll` 喂，
+   * 所以永远和正文同一格（正文那两层谁是滚动容器都不影响它）。
+   *
+   * 为什么值得加：预设行"用不了"的那句原因就是按行报的
+   * （`state_detail`：「TOML 语法不对（第 3 行第 1 列）」）—— 没有行号，用户得自己数。
+   */
+  const numsRef = useRef<HTMLDivElement>(null)
+  const areaRef = useRef<HTMLTextAreaElement>(null)
+  /*
+   * 行号文本（一行一个数）。跟着**行数**走，不跟着内容走 —— 正文里打字不该重算这一串。
+   * ★ 不折行是前提：一个逻辑行 = 屏幕上一行，行号才一一对得上（见 CSS 那条 ★★）。
+   *   末行是"空行"（正文以 `\n` 结尾）时它也占一个号，与着色层画出那一行一致。
+   */
+  const numsText = useMemo(
+    () => paintedLines.map((_, i) => i + 1).join('\n'),
+    [paintedLines],
+  )
+
+  /**
+   * **软折行开不开**（作者 2026-10-16 第三轮：「有没有按那个 ALT Z 去换行啊，
+   * 苹果上面的好像是 option Z 吧」）。
+   *
+   * 口径是那条 ★★ 立下的：默认**不折**（小窗口里长行折了续行不像注释，行号也对不上号）；
+   * 想看得全就自己按一下。编辑器界的老规矩（VS Code / 记事本都是这个键）。
+   *
+   * 不落盘：它是"怎么看"的偏好，跟窗口宽度一样属于当下这一眼 —— 关掉重开回到默认
+   * （不折行）。真要记住它，将来接 `useSessionState` 一句话的事。
+   */
+  const [softWrap, setSoftWrap] = useState(false)
+  const applySoftWrap = (next: boolean) => {
+    setSoftWrap(next)
+    setNote({ text: next ? '软折行：开（长行折着看）' : '软折行：关（长行横着滚）', bad: false })
+  }
+
+  /**
+   * **⌥Z 要在整个模态框里都灵** —— 这是 2026-10-16 作者报的那个"按了没反应"。
+   *
+   * 原来只挂在 `textarea` 的 `onKeyDown` 上 ⇒ **只读态**（没有 textarea）与
+   * "焦点在底栏按钮 / 正文以外"的时候，按下去什么都不发生。作者看到的正是这个：
+   * 打开模态框先落在只读态，那会儿 ⌥Z 本来就该能用（说明行就在那儿写着）。
+   *
+   * 挂在 `document` 上、**只在编辑文件这个模态框开着时**接（`editing === null` 直接返回）；
+   * 认 `altKey`（苹果上就是 option）+ `z`，且不带 ⌘/Ctrl —— **⌘Z 是撤销，绝不抢**。
+   * 只读态在模态框里选中文字按 ⌥Z 也照切（那是"看"的偏好，不是编辑动作）。
+   */
+  useEffect(() => {
+    if (editing === null) return
+    const onKey = (e: KeyboardEvent) => {
+      /*
+       * ★★ 判 `e.code === 'KeyZ'`，**不看 `e.key`** —— 苹果上按住 option 再敲 Z，
+       *    `e.key` 会变成 `'Ω'`（option 是字符选择键：⌥Z 打出来的就是 Ω），
+       *    拿 `e.key.toLowerCase() === 'z'` 去比永远不成立 —— 作者截图里那个 "Ω"
+       *    就是这么来的（按对键了、判错了）。`e.code` 是**物理键位**，与修饰键无关，
+       *    VSCode 这类编辑器认的也是它。
+       */
+      if (!e.altKey || e.metaKey || e.ctrlKey) return
+      if (e.code !== 'KeyZ') return
+      e.preventDefault()
+      e.stopPropagation()
+      applySoftWrap(!softWrap)
+    }
+    /* 捕获阶段接：抢在别的 keydown 处理之前（它只认一个组合键，不碍别人） */
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [editing, softWrap])
+
+  /**
+   * **滚动同步**：正文滚了，另外两层跟着 —— 着色层（画字的）与行号槽。
+   *
+   * 编辑态由 `textarea` 当滚动容器；只读态由那层 `<pre>` 自己当（`data-ro` 才 `overflow: auto`）。
+   * 两条路都调这一个函数。
+   *
+   * ★★ 行号那层**只搬纵向**（作者 2026-10-16 截图：横向一滚，行号跟着飘、正压在正文底下
+   *   那串数字/字上）。它本来就不该横着动 —— 行号要永远钉在左边当刻度。
+   *   横向只搬给着色层（两层的字必须逐像素对上）。
+   */
+  const syncScroll = (el: HTMLTextAreaElement | HTMLPreElement) => {
+    const nums = numsRef.current
+    if (nums !== null) nums.scrollTop = el.scrollTop
+    const paint = paintRef.current
+    if (paint !== null) {
+      paint.scrollTop = el.scrollTop
+      paint.scrollLeft = el.scrollLeft
+    }
+  }
+
+  /**
+   * **触控板两指左右划**（2026-10-16 作者第三轮：「现在编辑模式下，双指触摸板呀，
+   * 左右拖动还是不行」）。
+   *
+   * 为什么原生不管用：`overflow: hidden scroll` 只在**这一层自己**是滚动容器时才有横向滚，
+   * 而这里 `<textarea>` 铺在上面、`<pre>` 铺在下面 —— **两次滚动都打不到该动的那一层**：
+   *   · 打在上面那层 textarea 上：它是 `wrap="off"`，横向**内容**不溢出（它只滚纵向）；
+   *   · 打在下面那层 pre 上：`pointer-events: none`（它不接事件）。
+   * 于是"看起来能滚、实际上不动" —— 这正是作者看到的现象。
+   *
+   * 解法（开源编辑器都是这一手：Monaco / CodeMirror / VSCode 的 `ScrollableElement`
+   * 都是**自己接管 wheel**）：在这一层上接 `wheel`，把**带横向分量**的那一份
+   * 按滚动容器自己的方式搬过去。
+   *   · `deltaX`（触控板两指横划、⇧滚轮、鼠标横向滚轮）→ `scrollLeft`；
+   *   · 只有在**真横着滚**的时候才 `preventDefault`（纵向仍交给浏览器，
+   *     不然整页的纵向手感会被破坏 —— 而纵向本来就是原生滚动，不用接）。
+   * `scrollLeft` 一改就派发 `scroll` 事件，`onScroll` 那条链照旧把另外两层带上。
+   */
+  /*
+   * 这一次 wheel 攒下来的横向距离。**不直接写 `scrollLeft`** —— 触控板一划会连发
+   * 十几个 wheel（每个几像素），逐个同步写会让合成器/渲染器被顶在同一个像素帧里，
+   * 手上就是"不太流畅"。攒到下一帧再一次性搬过去。
+   */
+  const wheelDxRef = useRef(0)
+  const wheelRafRef = useRef(0)
+
+  const onWheel = (e: React.WheelEvent<HTMLElement>) => {
+    /*
+     * ★★ **纵向一律放行**（作者 2026-10-16：「怎么感觉没有那个预览模式下流畅啊」）：
+     *   这一层上接 `wheel` 之后，**每次事件都要走一遍 React 的合成层** ——
+     *   纵向如果也在这儿被"过一手"（哪怕只是判一下再返回），滚起来就比原生那条路钝。
+     *   第一版就是 `deltaX` 与 `⇧+纵向` 都接，纵向的顺滑跟着被拖累了。
+     * ⇒ 这里只认**纯横向那一种**（触控板两指横划 / 鼠标横向滚轮）；
+     *   `⇧ + 滚轮` 是浏览器自己把 `deltaY` 改写成 `deltaX` 的，不用我们换。
+     */
+    const dx = e.deltaX
+    if (dx === 0) return
+    /*
+     * **一帧一次**（`requestAnimationFrame` 合并）：触控板划一下连发十几个 wheel，
+     * 每个都直接写 `scrollLeft` 会让浏览器在每个事件里做一次样式/绘制 —— 手上就是"不跟手"。
+     * 攒着，到下一帧统一搬（同 Monaco / CodeMirror 那条 `ScrollableElement` 的路子）。
+     */
+    wheelDxRef.current += dx
+    if (wheelRafRef.current !== 0) return
+    wheelRafRef.current = window.requestAnimationFrame(() => {
+      wheelRafRef.current = 0
+      const d = wheelDxRef.current
+      wheelDxRef.current = 0
+      const cur = editMode ? areaRef.current : paintRef.current
+      if (cur === null || d === 0) return
+      const limit = cur.scrollWidth - cur.clientWidth
+      cur.scrollLeft = Math.max(0, Math.min(limit, cur.scrollLeft + d))
+      syncScroll(cur)
+    })
+  }
+
+  /**
+   * **横向滚动条多高，正文就得在底下让出多高** —— 2026-10-16 作者问「别人不是用触摸板的，
+   * 是怎么左右滑动的？」，最终形态是**让系统画它自己那条**（与 VSCode 同一个长相：
+   * macOS 上是覆盖式的，不滚看不见、一滚浮出来、零占位 —— 见 CSS 里那一段）。
+   *
+   * 但**别的平台**（Windows / Linux 的 WebView）那条是**占位**的：横向槽在框内，
+   * 会盖住最后一行的尾巴。所以这里量一下 `offsetHeight - clientHeight`：
+   *   · 覆盖式（macOS，含 Tauri 的 WKWebView）= 0 ⇒ `--scrollbar-pad` 为 0，什么都不变；
+   *   · 占位式 = 十几像素 ⇒ 补到正文那两层的 `padding-bottom` 上（**只动内衬**，
+   *     行高没被碰，行号那一列照旧与正文同一格）。
+   *
+   * `ResizeObserver` 认的是元素盒子的变化 —— 滚动条出现 / 消失会改 `clientHeight`，
+   * 这条回调就会再走一遍（算出同一个值就不 setState，不会打转）。
+   */
+  const [scrollbarPad, setScrollbarPad] = useState(0)
+  useEffect(() => {
+    const el = editMode ? areaRef.current : paintRef.current
+    if (el === null) return
+    const read = () => {
+      const h = el.offsetHeight - el.clientHeight
+      setScrollbarPad((cur) => (cur === h ? cur : h))
+    }
+    read()
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [editMode, editing])
+
+  /*
+   * **文件头那一段在正文里的长度**（字符数）—— 它锁着，不许手改（见 `HEAD_LOCKED`）。
+   * 分界规则在 `tomlPaint.ts` 的 `splitHeader`（开头连续的注释 / 空行，到第一个 `[表]` 为止）。
+   *
+   * ★ 跟着**当前文本**算，不记"打开时那一份的头"：`恢复默认值` 会把正文整份换成最初那份
+   *   （头可能不一样），锁要跟着换过去。
+   */
+  const headLen = useMemo(
+    () => (editing === null ? 0 : splitHeader(editing.text).head.length),
+    [editing],
+  )
+
+  /**
+   * **这次动作会不会动到文件头**（`from` = 这次要改写的区间在正文里的起点）——
+   * 会就拦下并说一句（`HEAD_LOCKED`）。
+   *
+   * 判的是**将要被改写的区间**而不是光标位置：`Backspace` 没有选区时删的是光标
+   * **左边**那一格，所以它的起点要减一（`Delete` 删的是右边那一格）。不改内容的键
+   * （方向键 / Home / End / ⌘A / ⌘C / ⌘Z）在调用处就被筛掉了，压根不走这儿。
+   */
+  const headLockedAt = (e: { preventDefault: () => void }, from: number): void => {
+    if (headLen === 0 || from >= headLen) return
+    e.preventDefault()
+    notifyHeadLocked()
+  }
 
   /*
    * **重命名那一口框**（第十层）。2026-10-10 起这里只剩它一件事 ——
@@ -1063,7 +1330,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       (draft) => {
         savedTextRef.current = draft.text
         /*
-         * 打开先只读（2026-10-16）——**除非**上一次的改动还没保存、也没退出编辑模式
+         * 打开先只读（2026-10-16）——**除非**上一次的改动还没保存、也没作废掉
          * 就被关掉了（后端答 `reused && dirty`：草稿还在、且与盘上字节不一样）。
          * 作者 2026-10-16：「下次打开这个模态框，它里面还是显示编辑模式……
          * 好的提示、或者通知，就是说刚才那些修改还没保存、没生效」。
@@ -1101,8 +1368,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           () => setOriginText(null),
         )
         if (unsaved) {
-          /* 提醒归提醒，改动本身一个字不动 —— 就挂在草稿里等他回来保存 */
-          notifyUnsaved('上次那些改动还没保存、还没生效 —— 要生效得先保存')
+          /*
+           * 提醒归提醒，改动本身一个字不动 —— 就挂在草稿里等他回来保存。
+           * 后半句是 2026-10-16 作者要的"那一个提示"：**底栏那颗 = 作废**
+           * （用户不知道这件事，于是不敢关、也不敢点）。通知自己那颗「放弃修改」
+           * 就是这件事的另一个入口。
+           */
+          notifyUnsaved(
+            '上次那些改动还没保存、还没生效 —— 要生效得先保存（底栏「放弃并退出」= 作废这次改动）',
+            () => discardNowRef.current(),
+          )
         }
       },
       (e: unknown) => {
@@ -1240,6 +1515,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setUndoStack([])
           setRedoStack([])
           setEditing(null)
+          /* 那一条"还没保存"的通知跟着过期（它已经是保存过的了） */
+          clearUnsavedNotice()
           setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
         },
         (e: unknown) =>
@@ -1261,17 +1538,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const unsaved = openDirtyRef.current || editing.text !== openTextRef.current
     setEditing(null)
     if (unsaved) {
-      notifyUnsaved('刚才那些改动还没保存、还没生效 —— 要生效得先保存')
+      /* 这一条不用教底栏那颗（按钮已经不在屏幕上了）—— 那颗「放弃修改」就在卡上 */
+      notifyUnsaved('刚才那些改动还没保存、还没生效 —— 要生效得先保存', () =>
+        discardNowRef.current(),
+      )
     }
   }
 
   /**
-   * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，
-   * 那些改的都作废，保存了才有」）。
+   * **底栏那颗（「放弃并退出」）= 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+   * 就是作废，那些改的都作废，保存了才有」）。
    *
    * 丢正文草稿 → 重读盘上字节回填 → 回只读。撤销栈跟着清：内容换了一版，
    * 旧快照对不上手（与"这份刚在修改参数里保存过"那一手同一条口径）。
    * 要留住改动只有一条路 —— **保存**。
+   *
+   * ★ 2026-10-16：通知上那颗「放弃修改」在**模态框开着**时走的就是这里
+   * （作者要的正是这个 —— 用户不知道"退出编辑模式"就是作废，于是把它写进了按钮词）。
    */
   const exitEdit = () => {
     if (editing === null) return
@@ -1296,10 +1579,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           histJumpRef.current = false
           setEditing((cur) => (cur === null ? cur : { ...cur, text: fresh.text, draftError: null }))
           setEditMode(false)
+          /* 那一条"还没保存"的通知跟着过期（它说的那件事已经作废了） */
+          clearUnsavedNotice()
         },
         (e: unknown) => setNote({ text: `退回没成：${errorText(e)}`, bad: true }),
       )
   }
+
+  /**
+   * 通知上那颗**放弃修改**按下去走哪条路 —— 每次渲染后刷新。
+   *
+   * 为什么不能直接把它写进 `notifyUnsaved(...)` 的回调里：通知的动作闭包**定格在发出
+   * 那一帧**（关窗那条是在 `editing` 已经变成 null 之后发的、重开那条是在 `setEditing`
+   * 之后发的），抓状态会抓到旧值。所以只留一个"此刻该走的那条"在这里，动作只认它。
+   *
+   * 两条路：
+   *   模态框还开着   ⇒ 就是底栏那颗「放弃并退出」（作废 + 回只读 + 按盘上字节重读）；
+   *   已经关了       ⇒ 只把草稿丢掉 —— 盘上那份文件全程没被碰过，丢掉就是"回到保存过的样子"。
+   */
+  useEffect(() => {
+    discardNowRef.current =
+      editing === null
+        ? () => {
+            void data.discardTextDraft().then(
+              () => {
+                clearUnsavedNotice()
+                setNote({ text: '已放弃上次那些改动 —— 那份文件还是保存过的样子', bad: false })
+              },
+              (e: unknown) => setNote({ text: `放弃没成：${errorText(e)}`, bad: true }),
+            )
+          }
+        : exitEdit
+  })
 
   /**
    * **重命名我自己那一份**（第十层）：只改名字，**字节一个不动**。
@@ -2659,13 +2970,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           {/*
            * **编辑器**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
            * 编辑期间只动正文草稿 —— 所以这里没有"保存到云端"这种动作：
-           * 只有「退出编辑模式」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
+           * 只有「放弃并退出」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
            * （2026-10-10 作者：「没有点保存的时候千万不要保存进来」，两条草稿分开存）。
            *
            * ★ 2026-10-16 两态（作者：「点进去之后，它一开始只是显示……」）：
            *   打开 = **只读**（着色正文 + 右下「进入编辑模式」），点进编辑模式才有
-           *   撤销 / 重做 / 退出编辑模式 / 保存。原来那颗「放弃」退休 ——
-           *   「退出编辑模式」什么都不丢：草稿在盘上，下次进来接着改。
+           *   撤销 / 重做 / 放弃并退出 / 保存。原来那颗「放弃」退休 ——
+           *   那一颗**什么都不丢**：草稿在盘上，下次进来接着改。
            *
            * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（交付预设那一份是模板），
            * 所以这里只有一套说法：保存 = 写回它自己。
@@ -2721,7 +3032,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
              * 底栏（2026-10-16 两态，与参数对比 / 修改参数弹窗同一套框架）：
              *
              *   只读态   右下「进入编辑模式」（打开先只是显示 —— 图二那颗的位置）
-             *   编辑态   撤销 / 重做 / 退出编辑模式 / 保存
+             *   编辑态   撤销 / 重做 / 放弃并退出 / 保存
              *
              * 左边仍只在**出错**时说话 —— 那两句过程说明（"改动自动存草稿"等）
              * 2026-10-10 第三轮就撤了（"草稿""盘上"是内部的词，用户不需要被通知）；
@@ -2788,7 +3099,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                         <button
                           type="button"
                           className={s.textBtn}
-                          title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+                          /* 词与说明都取自 `EDIT_TEXT`（三个模态框同一句话，见那一份的长注释） */
+                          title={EDIT_TEXT.exitTitle}
                           onClick={exitEdit}
                         >
                           {EDIT_TEXT.exitMode}
@@ -2818,55 +3130,133 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               /*
                * 正文区。**编辑态** = 着色的 <pre>（下）+ "文字透明"的 textarea（上）——
                * 自己写的语法高亮（词法在 `tomlPaint.ts`）。两层同字体 / 同内衬 / 同行高，
-               * 逐像素对齐；滚动由 textarea 管，`onScroll` 搬给下面那层。
+               * 逐像素对齐；滚动由 textarea 管，`onScroll` 搬给下面那层**与左边的行号槽**。
                * **只读态** = 就那层 <pre>（`data-ro`：自己滚、能选字，没有 textarea）。
+               * **行号槽**（`.editNums`，2026-10-16 加）两态都在，只是编辑态它才真有用
+               * （预设行"用不了"的原因按行报：「TOML 语法不对（第 3 行第 1 列）」）。
                * 这一块**占满整屏**（`bodyFill`：框身不滚，四周留白交给 `.editWrap`）。
                */
               <div className={s.editWrap}>
-                <pre
-                  className={s.editPaint}
-                  ref={paintRef}
-                  /* 编辑态时它是 textarea 的视觉副本（字透明），只读态时它就是内容本体 */
-                  aria-hidden={editMode || undefined}
-                  data-ro={editMode ? undefined : '1'}
+                {/*
+                 * 正文那块 = **一个面板**（`.editBody`）：里面是绝对定位铺满的着色层 + textarea，
+                 * 以及**左边那一列行号**（`.editNumsGutter`，也是绝对定位的一条刻度）。
+                 *
+                 * ★★★ 行号**不是**单独一块板子（2026-10-16 第三版，作者看过上一版之后：
+                 *   「它又有这个圆角，然后又有这一个什么的」「左边的那个跟右侧的是分开的，
+                 *   很割裂」）—— 它就在面板自己的左内衬里画着，面板那圈描边 / 圆角只有一套，
+                 *   滚动也是同一个容器一起滚。上一版那"两块拼起来"的结构已拆掉。
+                 */}
+                <div
+                  className={s.editBody}
+                  /* 占位式滚动条的平台才非零（macOS 上是 0），见 `scrollbarPad` */
+                  style={{ '--scrollbar-pad': `${scrollbarPad}px` } as CSSProperties}
+                  /*
+                   * 触控板两指左右划 / ⇧滚轮 —— 浏览器自己滚不到该动的那一层，
+                   * 这里自己接管（见 `onWheel`）。
+                   */
+                  onWheel={onWheel}
                 >
-                  {paintedLines.map((line, i) => (
-                    <span key={i}>
-                      {line.map((t, j) =>
-                        t.kind === 'plain' ? (
-                          t.text
-                        ) : (
-                          <span key={j} className={TOKEN_CLASS[t.kind]}>
-                            {t.text}
-                          </span>
-                        ),
-                      )}
-                      {'\n'}
-                    </span>
-                  ))}
-                </pre>
-                {editMode && (
+                  <div className={s.editNumsGutter} aria-hidden="true">
+                    <div className={s.editNums} ref={numsRef} data-testid="edit-nums">
+                      <pre className={s.editNumsInner}>{numsText}</pre>
+                    </div>
+                  </div>
+                  <pre
+                    className={s.editPaint}
+                    ref={paintRef}
+                    /* 编辑态时它是 textarea 的视觉副本（字透明），只读态时它就是内容本体 */
+                    aria-hidden={editMode || undefined}
+                    data-ro={editMode ? undefined : '1'}
+                    /* 软折行（⌥Z 切）：折了就横着不再滚（`white-space` 也跟着），行号那一列随之收回 */
+                    data-wrap={softWrap ? '1' : undefined}
+                    /* 只读态它是那个滚动容器（`data-ro` 那条 CSS）—— 行号那一列跟着它走 */
+                    onScroll={(e) => syncScroll(e.currentTarget)}
+                  >
+                    {paintedLines.map((line, i) => (
+                      <span key={i}>
+                        {line.map((t, j) =>
+                          t.kind === 'plain' ? (
+                            t.text
+                          ) : (
+                            <span key={j} className={TOKEN_CLASS[t.kind]}>
+                              {t.text}
+                            </span>
+                          ),
+                        )}
+                        {'\n'}
+                      </span>
+                    ))}
+                  </pre>
+                  {editMode && (
                   <textarea
                     className={s.editArea}
+                    ref={areaRef}
                     value={editing.text}
                     spellCheck={false}
                     aria-label="预设正文"
                     autoFocus
-                    onScroll={(e) => {
-                      const paint = paintRef.current
-                      if (paint === null) return
-                      paint.scrollTop = e.currentTarget.scrollTop
-                      paint.scrollLeft = e.currentTarget.scrollLeft
+                    /*
+                     * ★ `wrap="off"` = **不软折行**（与那两层 CSS 的 `white-space: pre` 是一件事）。
+                     * 只写 CSS 也能让 Chrome/Safari 不折，但 `wrap` 属性才是这条规矩的本源
+                     * （HTML 规范说 textarea 的换行由它管），两处都写死。
+                     */
+                    wrap={softWrap ? 'soft' : 'off'}
+                    /* 软折行（⌥Z 切）：折了就横着不再滚（`white-space` 跟着换；行号那一列照旧在） */
+                    data-wrap={softWrap ? '1' : undefined}
+                    onScroll={(e) => syncScroll(e.currentTarget)}
+                    /*
+                     * **文件头那几行不给改**（`HEAD_LOCKED`）。
+                     * 先把"不改内容"的键放过去：只有 `Backspace` / `Delete` / `Enter` /
+                     * 不带 ⌘·Ctrl 的单字符才算要动正文（带修饰键的那些是 ⌘A / ⌘C / ⌘V
+                     * 一类，粘贴与剪切各有 `onPaste` / `onCut`）。
+                     */
+                    onKeyDown={(e) => {
+                      /* ⌥Z 不在这里管：它在模态框那一层统一接（见 `useEffect` 那段），
+                         这里只管"文件头那几行不给改"这道闸 */
+                      const el = e.currentTarget
+                      const a = Math.min(el.selectionStart, el.selectionEnd)
+                      const isDel = e.key === 'Backspace' || e.key === 'Delete'
+                      const isType =
+                        e.key === 'Enter' || (e.key.length === 1 && !e.metaKey && !e.ctrlKey)
+                      if (!isDel && !isType) return
+                      const from =
+                        e.key === 'Backspace' && el.selectionStart === el.selectionEnd ? a - 1 : a
+                      headLockedAt(e, from)
+                    }}
+                    onPaste={(e) => {
+                      const el = e.currentTarget
+                      headLockedAt(e, Math.min(el.selectionStart, el.selectionEnd))
+                    }}
+                    onCut={(e) => {
+                      const el = e.currentTarget
+                      headLockedAt(e, Math.min(el.selectionStart, el.selectionEnd))
                     }}
                     onChange={(e) => {
                       /* 用户敲的（不是撤销/重做造的）—— 下一拍落盘要进撤销栈 */
                       histJumpRef.current = false
+                      const next = e.target.value
                       setEditing((cur) =>
-                        cur === null ? cur : { ...cur, text: e.target.value },
+                        cur === null ? cur : { ...cur, text: keepHead(cur.text, next) },
                       )
                     }}
                   />
-                )}
+                  )}
+                </div>
+                {/*
+                 * **怎么看全 + 怎么能改** —— 一句常驻说明（作者 2026-10-16 那天连问了三件事：
+                 * 横向怎么滚、有没有 ⌥Z、上面那几行为什么灰着）。这三件都**没有可见的入口**，
+                 * 不写在这儿用户只能猜：横向滚动条平时看不见（只在滚的时候浮出来）、
+                 * ⌥Z 是快捷键（更没有形）、文件头那几行锁着（看着像能改）。
+                 *
+                 * 常驻而不是 tooltip：⌥Z 这件事没说出口就等于不存在（作者原话就是问句）。
+                 * ★ 词跟着做法走：横向**用「⇧滚轮 / 两指划」**（不是"⇧ 滚轮左右看"那种
+                 *   把两件事混成一句），自动换行**用「⌥Z 切换自动换行」**（不写"软折行"——
+                 *   那是我们内部的说法，作者问的就是"怎么换行"）。
+                 * ⚠️ 它在 `.editBody` **外面**（面板那块的下一条）—— 进面板就是压在代码上。
+                 */}
+                <p className={s.editHint}>
+                  文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · ⌥Z 切换自动换行
+                </p>
               </div>
             )}
           </Modal>

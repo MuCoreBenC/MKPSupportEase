@@ -9,9 +9,10 @@
  *      作者后来的口径是「进入编辑模式的那个按钮位置也统一一下」——挪到底栏右下，
  *      与「编辑文件」模态框、修改参数弹窗三处同位。
  *   ② 编辑态才有控件（`FieldControl` form="cell"，与修改参数弹窗**同一份共用件**——
- *      作者：「对比的和修改参数的控件可以复用」）+ 底栏 撤销/重做/退出编辑模式/保存。
- *      「退出编辑模式」= **作废这一次没保存的改动**、回只读（2026-10-16 作者立的口径，
- *      三个模态框统一；原来是「取消」：丢改动但留在编辑态）。
+ *      作者：「对比的和修改参数的控件可以复用」）+ 底栏 撤销/重做/放弃并退出/保存。
+ *      「放弃并退出」= **作废这一次没保存的改动**、回只读（2026-10-16 作者立的口径，
+ *      三个模态框统一；原来是「取消」：丢改动但留在编辑态。词从「退出编辑模式」
+ *      改到「放弃并退出」是当天第二版的裁决 —— 见 `EDIT_TEXT.exitMode`）。
  *   ③ 候选**不摊一排 chips**（作者：「他就不该显示那么多 toml，一般只是两个对比的，最多三个」）
  *      —— 右键带进来的两份直接坐列，「＋ 加一份对比」的弹层里才列候选（最多 3 份）。
  *
@@ -35,6 +36,8 @@ import type { FieldSchema } from '../../components/field'
 import { boolOf } from '../../components/field/value'
 import Icon from '../shell/icons'
 import { Modal } from '../../components/modal'
+/* 两态框架那两颗按钮的词（与「编辑文件」/「修改参数」**同一个源**，见那一份的 `EDIT_TEXT`） */
+import { EDIT_TEXT } from './presetTree'
 import s from './CompareModal.module.css'
 
 /** 最多同时比几份 —— 再多就摆不开了，也不符合"几个版本放一起看"这个用法 */
@@ -465,11 +468,11 @@ export default function CompareModal({
    *   几乎都要一样……进入编辑模式的那个按钮位置也统一一下」）：
    *
    *   只读态   左「只读对照」· 右下「进入编辑模式」（原来这颗在**标题栏**，挪下来）
-   *   编辑态   左「未保存的改动（N）」· 右下 撤销 / 重做 / 退出编辑模式 / 保存
+   *   编辑态   左「未保存的改动（N）」· 右下 撤销 / 重做 / 放弃并退出 / 保存
    *
-   * 「退出编辑模式」= 回只读态 + **作废未保存的改动**（2026-10-16 作者：「退出编辑模式
+   * 「放弃并退出」= 回只读态 + **作废未保存的改动**（2026-10-16 作者：「退出编辑模式
    * 就是作废，那些改的都作废，保存了才有」；原来那颗「取消」丢改动但留在编辑态，
-   * 随这一刀退休）。
+   * 随这一刀退休）。两颗按钮的词都取自 `EDIT_TEXT`（三个模态框同一句话）。
    */
   const footer = (
     <>
@@ -509,10 +512,10 @@ export default function CompareModal({
               type="button"
               className={s.textBtn}
               disabled={busy}
-              title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+              title={EDIT_TEXT.exitTitle}
               onClick={() => {
                 /*
-                 * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+                 * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
                  * 就是作废，那些改的都作废，保存了才有」）——与「编辑文件」/「修改参数」
                  * 三处同一个口径。本来这台就是"打开那一下清草稿"（见 `justOpened`），
                  * 这一步与它同一条路。
@@ -523,7 +526,7 @@ export default function CompareModal({
                 setEditing(false)
               }}
             >
-              退出编辑模式
+              {EDIT_TEXT.exitMode}
             </button>
             <button
               type="button"
@@ -545,7 +548,7 @@ export default function CompareModal({
             title="进编辑模式：这一台的值就可以改了"
             onClick={() => setEditing(true)}
           >
-            进入编辑模式
+            {EDIT_TEXT.enterMode}
           </button>
         </>
       )}
