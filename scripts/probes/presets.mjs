@@ -28,8 +28,8 @@ const problems = []
  *   ② 浏览器里点「下载 / 更新」**必然**抛「未实现的接口」（没有下载区、没有数据源）——
  *      那是设计成要报错的：探针自己在第 5 节点了它一次，页面把这条错误如实显示出来，
  *      正是要的结果（"点了说成功但盘上什么都没有"才是要抓的）；
- *   ③ 同一档还有「看正文」：归档里那份 / 用户自己那份的字节都要真的盘，浏览器里没有 ——
- *      页面照实说"读不出来"。
+ *   ③ 同一档还有「看正文」（切片器档 / 认不出类别的那几行 —— MKP 行 2026-10-16 起
+ *      并进了「编辑」的只读态）：它的字节要真的盘，浏览器里没有 —— 页面照实说"读不出来"。
  */
 const BENIGN = [
   /\/favicon\.ico$/,
@@ -39,6 +39,10 @@ const BENIGN = [
   /* 第十七刀：进入预设会后台检查一次远端目录（Bootstrap）。浏览器里没有远端（假后端必抛），
      这一条是**设计成要发生的** —— 页面把它静默吞掉（第 5n 节正是断言"静默"） */
   /未实现的接口: checkRemoteUpdate/,
+  /* 「失败保持」那一段直连假后端（`import('/src/api/mock.ts')`）—— preview 产物里
+     没有源码路径，必然 404；它 catch 住了照旧跳过（那一段只有在 dev server 下跑得动）。
+     2026-10-16：404 之前一直记进 problems，三条噪声恒红 —— 归入已知无害。 */
+  /\/src\/api\/mock\.ts$/,
 ]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
@@ -649,8 +653,10 @@ await page.waitForTimeout(200)
  * 守三件事：
  *   ① 用户线那两份在资源库里列得出来（假后端给两条演示：一份 `.toml` 认得出、一份 `.json` 认不出）；
  *   ② **认不出类别的那一份在任何类型档下都列**（藏起来等于说他没这份文件）；
- *   ③ 「看正文」是**只读**的：读不出来如实说，抽屉里不许出现 改 / 保存 / 另存 / 删除
- *      （改它要等"临时编辑 → 保存"那一层）。
+ *   ③ **「编辑」是两态的**（2026-10-16）：打开先只是显示（正文画在只读层里，
+ *      没有 textarea、底栏只有「进入编辑模式」）；点进编辑模式才有 textarea 与
+ *      撤销 / 重做 / 退出编辑模式 / 保存。原来那颗「看正文」（只读抽屉）已撤，
+ *      看与改合成一条路（作者：「不需要什么看正文了，你就留一个编辑」）。
  *
  * ★ 上一节（批量）把档切到了切片器 —— 这一节要看的是 MKP 那一张资源库，先切回来。
  */
@@ -711,15 +717,20 @@ if (!/本地|复制自|导入/.test(localFacts['来源'] ?? '')) {
 
 /*
  * ★ 2026-10-14：一段里**只展开一次**（上面 ③ 已经展开了这一份）。原来这里又展开
- * 一遍（`openDetailOf` 是 toggle）⇒ 等于把它关掉，后面那颗「看正文」自然找不到。
+ * 一遍（`openDetailOf` 是 toggle）⇒ 等于把它关掉，后面那颗按钮自然找不到。
+ *
+ * ★★ 2026-10-16（作者：「不需要什么看正文了，你就留一个编辑的可能就足够了」）：
+ *   快捷操作区那颗「看正文」撤了，MKP 行的查看并进「编辑」模态框的**只读态** ——
+ *   打开先只是显示（没有 textarea、底栏只有「进入编辑模式」），点它才进编辑模式。
+ *   这里守新的两段：只读态长得对 + 点进去 textarea 与四件套底栏出场。
  */
-const bodyBtn = page.getByRole('button', { name: '看正文' })
+const bodyBtn = page.getByRole('button', { name: '编辑', exact: true })
 const bodyBtnCount = await bodyBtn.count()
-console.log(`[用户线] 「看正文」按钮 ${bodyBtnCount} 个`)
+console.log(`[用户线] 「编辑」按钮 ${bodyBtnCount} 个`)
 if (bodyBtnCount === 0) {
-  problems.push('展开我自己的那一份，里面没有「看正文」')
+  problems.push('展开我自己的那一份，里面没有「编辑」')
 } else {
-  await bodyBtn.last().click()
+  await bodyBtn.first().click()
   await page.waitForTimeout(500)
   const localDrawer = await page.evaluate(() => {
     const dlg = document.querySelector('[role="dialog"]')
@@ -728,30 +739,215 @@ if (bodyBtnCount === 0) {
       buttons: [...(dlg?.querySelectorAll('button') ?? [])].map(
         (b) => (b.innerText || b.getAttribute('aria-label') || '').trim(),
       ),
+      hasArea: dlg?.querySelector('textarea') !== null,
     }
   })
-  console.log(`[用户线] 抽屉：${localDrawer.text}`)
+  console.log(`[用户线] 编辑器（只读态）：${localDrawer.text}`)
   if (!localDrawer.text.includes('A1 涂胶.toml')) {
-    problems.push('抽屉里要认出看的是哪一份')
+    problems.push('编辑器里要认出看的是哪一份')
   }
   /*
    * ★★ 2026-10-14 反过来了：假后端**现在给得出正文**（`mockLocalText` 里种了这几份的
    * 字节，与真机上"用户自己的文件当然读得出来"一致）。原来判的「读不出来」是更早那版
-   * mock（没有正文）的产物。现在判**读得出来**：抽屉里要出现正文头几行里的东西
+   * mock（没有正文）的产物。现在判**读得出来**：正文里要出现头几行里的东西
    *（血统那两行 —— 它们是为这一份种下去的）。
    */
   if (!/based_on/.test(localDrawer.text)) {
     problems.push('我自己的那一份在浏览器里读得出来正文（该看见血统那几行）')
   }
-  /* 这一层只能看：写入动作连按钮都不该有 */
-  for (const forbidden of ['保存', '另存', '删除', '改名']) {
-    if (localDrawer.buttons.some((b) => b.includes(forbidden))) {
-      problems.push(`这一层只能看，抽屉里不该有「${forbidden}」`)
+  /* 打开先只是显示（2026-10-16）：没有 textarea；写入动作只有「进入编辑模式」那一颗 */
+  if (localDrawer.hasArea) {
+    problems.push('编辑器打开该是只读的：不该出 textarea')
+  }
+  if (!localDrawer.buttons.some((b) => b.includes('进入编辑模式'))) {
+    problems.push('只读态底栏该有「进入编辑模式」')
+  }
+  if (localDrawer.buttons.some((b) => b.includes('保存'))) {
+    problems.push('只读态不该出现「保存」')
+  }
+  /* 点进编辑模式：textarea 出场，底栏换 撤销 / 重做 / 退出编辑模式 / 保存 */
+  await page.getByRole('button', { name: '进入编辑模式' }).first().click()
+  await page.waitForTimeout(300)
+  const localEditMode = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    return {
+      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map(
+        (b) => (b.innerText || b.getAttribute('aria-label') || '').trim(),
+      ),
+      hasArea: dlg?.querySelector('textarea') !== null,
+    }
+  })
+  console.log(`[用户线] 进编辑模式后：${localEditMode.buttons.join(' | ')}`)
+  if (!localEditMode.hasArea) problems.push('进了编辑模式该有可写正文（textarea）')
+  for (const need of ['撤销', '重做', '退出编辑模式', '保存']) {
+    if (!localEditMode.buttons.some((b) => b.includes(need))) {
+      problems.push(`编辑态底栏少「${need}」`)
     }
   }
+  /*
+   * ★ 2026-10-16 新按钮的硬验证：**撤销 / 重做真的回退与前进**
+   *   （快照栈的粒度 = 一次「打字停顿」= 草稿落盘那一拍，700ms —— 所以改动后要等过防抖，
+   *   快照与草稿都落定，撤销才有一格可退）。
+   */
+  const area = page.locator('[role="dialog"] textarea')
+  const textBefore = await area.inputValue()
+  await area.fill(`${textBefore}\n# 探针加的撤销靶子\n`)
+  await page.waitForTimeout(950)
+  await page.getByRole('button', { name: '撤销' }).click()
+  await page.waitForTimeout(400)
+  const textUndone = await area.inputValue()
+  await page.getByRole('button', { name: '重做' }).click()
+  await page.waitForTimeout(400)
+  const textRedone = await area.inputValue()
+  console.log(
+    `[用户线] 撤销回退=${textUndone === textBefore} · 重做前进=${textRedone.includes('探针加的撤销靶子')}`,
+  )
+  if (textUndone !== textBefore) problems.push('撤销该把文本回退到上一次停顿之前')
+  if (!textRedone.includes('探针加的撤销靶子')) problems.push('重做该把刚撤销的一段再接回来')
+  /*
+   * 退出编辑模式 = **作废**（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，
+   * 那些改的都作废，保存了才有」）——回只读，且没保存的改动全部回滚到盘上字节。
+   */
+  await page.getByRole('button', { name: '退出编辑模式' }).click()
+  await page.waitForTimeout(700)
+  const backRo = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    return {
+      hasArea: dlg?.querySelector('textarea') !== null,
+      buttons: [...(dlg?.querySelectorAll('button') ?? [])].map(
+        (b) => (b.innerText || b.getAttribute('aria-label') || '').trim(),
+      ),
+      paint: dlg?.querySelector('[data-ro]')?.innerText ?? '',
+    }
+  })
+  console.log(
+    `[用户线] 退出编辑模式后：${backRo.buttons.join(' | ')} · 作废生效=${!backRo.paint.includes('探针加的撤销靶子')}`,
+  )
+  if (backRo.hasArea) problems.push('退出编辑模式该收回 textarea（回只读）')
+  if (!backRo.buttons.some((b) => b === '进入编辑模式')) {
+    problems.push('退出编辑模式后底栏该只剩「进入编辑模式」')
+  }
+  if (backRo.paint.includes('探针加的撤销靶子')) {
+    problems.push('退出编辑模式 = 作废：没保存的改动该回滚掉（只读正文里不该还有那个靶子）')
+  }
   await page.screenshot({ path: `${shotDir}/presets-local.png` })
+
+  /*
+   * 不保存、也不退出 —— **直接关掉模态框** → 重开（作者 2026-10-16 / 晚些补的一条），
+   * 四件事一起守：
+   *   ① 关掉那一刻就**喊一声**（作者：「我如果没保存的时候关闭了模态框也需要有通知」）；
+   *   ② 改动不生效（没保存，盘上一个字没动）；
+   *   ③ 再打开**直接进编辑模式**（改的东西还在草稿里，一个字不丢）；
+   *   ④ 重开再喊一条「上次……」（同一件事的两个时刻：刚才 / 上次）。
+   */
+  await page.getByRole('button', { name: '进入编辑模式' }).click()
+  await page.waitForTimeout(300)
+  await area.fill(`${await area.inputValue()}\n# 探针加的第二个靶子\n`)
+  await page.waitForTimeout(950)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  const closeCard = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="status"][data-kind]')]
+      .map((n) => (n.innerText ?? '').replace(/\s+/g, ' ').trim())
+      .join(' | '),
+  )
+  console.log(`[用户线] 关掉那一刻的通知=「${closeCard.slice(0, 90)}」`)
+  if (!closeCard.includes('有未保存的改动') || !closeCard.includes('刚才')) {
+    problems.push('没保存就关掉模态框，那一刻该来一条通知（「刚才那些改动还没保存……」）')
+  }
+  /* 重开：详情行还开着，「编辑」还是那一颗 */
+  await page.getByRole('button', { name: '编辑', exact: true }).first().click()
+  await page.waitForTimeout(700)
+  const reopen = await page.evaluate(() => {
+    const dlg = document.querySelector('[role="dialog"]')
+    const card = [...document.querySelectorAll('[role="status"][data-kind]')]
+      .map((n) => (n.innerText ?? '').replace(/\s+/g, ' ').trim())
+      .join(' | ')
+    return {
+      hasArea: dlg?.querySelector('textarea') !== null,
+      text: dlg?.querySelector('textarea')?.value ?? '',
+      card,
+    }
+  })
+  console.log(
+    `[用户线] 直接关掉再重开：编辑模式=${reopen.hasArea} · 靶子还在=${reopen.text.includes('探针加的第二个靶子')} · 通知=「${reopen.card.slice(0, 90)}」`,
+  )
+  if (!reopen.hasArea) problems.push('有未保存的改动时，重开该直接进编辑模式（作者 2026-10-16）')
+  if (!reopen.text.includes('探针加的第二个靶子')) {
+    problems.push('重开时未保存的改动该还在草稿里（一个字不丢）')
+  }
+  if (!reopen.card.includes('有未保存的改动') || !reopen.card.includes('还没生效')) {
+    problems.push('重开该来一条通知：「有未保存的改动 / 还没生效，要生效得先保存」')
+  }
+
+  /*
+   * ★ **撤销 / 重做跨重开还活着**（作者 2026-10-16：「我这次再次进来，有没有那种可以做到
+   * 还保留撤销重做的呀」）：栈按 path 记在模块级缓存里，`head` 对得上就接着用。
+   * 第一次那把（打字 → 等防抖落盘 → Esc）已经推过一格了。
+   */
+  const undoBtn = page.getByRole('button', { name: '撤销' })
+  const redoBtn = page.getByRole('button', { name: '重做' })
+  const undoAlive = (await undoBtn.count()) > 0 && (await undoBtn.first().isEnabled())
+  console.log(`[用户线] 重开之后撤销按钮还活着=${undoAlive}`)
+  if (!undoAlive) problems.push('重开之后撤销该还活着（按 path 记着的那份历史）')
+  if (undoAlive) {
+    await undoBtn.first().click()
+    await page.waitForTimeout(1000)
+    const undone = await page.locator('[role="dialog"] textarea').inputValue()
+    if (undone.includes('探针加的第二个靶子')) {
+      problems.push('重开后点撤销，该退回上一格（那个靶子该被撤掉）')
+    }
+    await redoBtn.first().click()
+    await page.waitForTimeout(1000)
+    const redone = await page.locator('[role="dialog"] textarea').inputValue()
+    if (!redone.includes('探针加的第二个靶子')) {
+      problems.push('重开后的重做该把刚撤销的再接回来')
+    }
+  }
+
+  /*
+   * ★ **恢复默认值**（2026-10-16 作者：「就是左侧那个修改参数里面有按钮是恢复默认值，
+   * 那这个也可以有个按钮编辑文件的恢复默认值」）：退回这份文件**最初落到盘上时**
+   * 那一份（`baseline-local/` 的原文镜像）——靶子该整个消失。它算一次可撤销的改动。
+   */
+  const restoreBtn = page.getByRole('button', { name: '恢复默认值' })
+  const restoreAlive = (await restoreBtn.count()) > 0 && (await restoreBtn.first().isEnabled())
+  console.log(`[用户线] 「恢复默认值」在且可用=${restoreAlive}`)
+  if (!restoreAlive) {
+    problems.push('编辑态底栏该有可用的「恢复默认值」（演示那份有原文镜像）')
+  } else {
+    await restoreBtn.first().click()
+    await page.waitForTimeout(350)
+    const restored = await page.locator('[role="dialog"] textarea').inputValue()
+    console.log(
+      `[用户线] 恢复之后：靶子没了=${!restored.includes('探针加的第二个靶子')} · 开头=「${restored.slice(0, 24).replace(/\n/g, '⏎')}」`,
+    )
+    if (restored.includes('探针加的第二个靶子')) {
+      problems.push('「恢复默认值」该把正文退回最初那份（靶子该整个消失）')
+    }
+    if (!restored.includes('# based_on')) {
+      problems.push('「恢复默认值」退的该是原文（血统三行还在的那份演出文件）')
+    }
+  }
+
+  /* 收尾：退出编辑模式（作废）+ 关掉，让后面的段从干净状态继续 */
+  await page.getByRole('button', { name: '退出编辑模式' }).click()
+  await page.waitForTimeout(700)
   await page.keyboard.press('Escape')
   await page.waitForTimeout(250)
+  /*
+   * ★ 通知也要收掉：通知卡停泊在**右上角**，正好盖着工具栏右簇（机型 / 位置分段 / 搜索）。
+   *   后面 5f 的 `mkpAt` 用的是 `force: true`（不做命中测试）——通知还挂着的话，
+   *   点击全落在通知上，面切不过去、后面整段崩在"行找不到"（2026-10-16 探针实测踩到）。
+   */
+  await page.evaluate(() => {
+    for (const b of document.querySelectorAll(
+      '[role="status"][data-kind] button[aria-label="关闭"]',
+    )) {
+      b.click()
+    }
+  })
+  await page.waitForTimeout(200)
 }
 
 /* ---------- 5e. 一个预设一行：官方与我的各是各的（2026-10-08 资源库改判） ---------- */
@@ -791,9 +987,10 @@ await page.screenshot({ path: `${shotDir}/presets-world.png` })
 /*
  * ★ 2026-10-13 按**现在的表**重写。原版要"官方行与我的行同屏"（旧表），现在这两类
  *   分在两张脸上，菜单也各归各位：
- *   云端面（云端交付行）  「下载 / 更新」+「复制链接」+「在 BBS 中查看」（MKP 配方给不出
- *                         BBS 入口，那一项灰着）—— **不该有**「使用 / 另存为本地预设 /
- *                         重命名 / 删除」：要动它先「下载」，下载会另落一份你自己的；
+ *   云端面（云端交付行）  「下载 / 更新」+「复制链接」（MKP 配方给不出「查看工艺预设」——
+ *                         2026-10-16 起那一档干脆**不列**，不再灰着占位）—— **不该有**
+ *                         「使用 / 另存为本地预设 / 重命名 / 删除」：要动它先「下载」，
+ *                         下载会另落一份你自己的；
  *   本地面（本地文件）    「使用 / 修改参数 / 复制 / 重命名 / 显示所在文件夹 / 删除」
  *                         —— **不该有**「另存为本地预设」（它自己已经是本地了）。
  *
@@ -847,6 +1044,10 @@ else {
     if (cloudMenu.some((m) => m.includes(gone))) {
       problems.push(`云端那一行不该有「${gone}」（云端行只下载；要改走「下载」落一份你的）`)
     }
+  }
+  /* MKP 档整档都是 MKP 配方 —— 「查看工艺预设」给不出落点（2026-10-16：干脆不列，不再灰着） */
+  if (cloudMenu.some((m) => m.includes('查看工艺预设'))) {
+    problems.push('MKP 档的云端行不该有「查看工艺预设」（它不是 BBS 工艺预设）')
   }
 }
 
@@ -1014,8 +1215,11 @@ await page.screenshot({ path: `${shotDir}/presets-local-apply.png` })
  *   ① 入口在右键菜单（我自己的文件才有这一项）；
  *   ② 编辑器里是**整份文件**：血统那几行也在（口径与"参数级编辑"不同，别拿旧标准判）；
  *   ③ 保存后说得出"保存回我自己那一份"、**写回同一条路径**，表里**不多出一份**；
- *   ④ **血统还在**（只改参数行的那种改法）：「看正文」看得见那三行，
+ *   ④ **血统还在**（只改参数行的那种改法）：再开「编辑」，只读态里看得见那三行，
  *      行上「云端模板已更新」那一枚也没变。
+ *
+ * ★ 2026-10-16 两态：编辑器打开先只读（正文在 pre 里），要动 textarea 先点
+ *   「进入编辑模式」。下面两处读正文的地方跟着分了工（只读读 pre、要改先进模式）。
  *
  * 真机那条更硬的判据在 Rust 侧：`local::save_back`（同一路径写回）与
  * `lineage`（改参数不该把出处抹了）。
@@ -1031,22 +1235,25 @@ const openEditFile = async () => {
 await openEditFile()
 const localEditor = await page.evaluate(() => {
   const dlg = document.querySelector('[role="dialog"]')
-  const area = dlg?.querySelector('textarea')
   return {
-    open: area !== null && area !== undefined,
+    /* 2026-10-16 两态：打开是只读的 —— 正文读那一层 <pre>，不是 textarea */
+    hasArea: dlg?.querySelector('textarea') !== null,
     whole: (dlg?.innerText ?? '').replace(/\s+/g, ' ').trim(),
-    text: area?.value ?? '',
+    text: dlg?.querySelector('pre')?.innerText ?? '',
   }
 })
-console.log(`\n[改我这份] 抽屉：${localEditor.whole.slice(0, 80)}`)
-if (!localEditor.open) problems.push('右键「编辑文件」没有打开编辑器')
+console.log(`\n[改我这份] 编辑器（只读态）：${localEditor.whole.slice(0, 80)}`)
 if (!localEditor.whole.includes('编辑文件')) {
   problems.push(`编辑器的标题该说「编辑文件」，实测「${localEditor.whole.slice(0, 40)}」`)
 }
+if (localEditor.hasArea) problems.push('编辑器打开该是只读的：不该出 textarea')
 if (!localEditor.text.includes('# based_on')) {
   problems.push('「编辑文件」给的是整份文件，血统那几行该在编辑器里（口径见这一段注释）')
 }
 if (localEditor.text.trim() === '') problems.push('编辑器里没有我那份的正文（空编辑器）')
+/* 要动正文：点「进入编辑模式」，textarea 才出场 */
+await page.getByRole('button', { name: '进入编辑模式' }).first().click()
+await page.waitForTimeout(300)
 
 /*
  * 只改**参数那一行**（血统留着）：这才对应 Rust 侧那条"改参数不丢出处"。
@@ -1091,12 +1298,13 @@ if (localNames.some((n) => n.includes('A1 涂胶（已修改）'))) {
   problems.push('写回我自己那份不该另存出一份新的（不产生「（已修改）」）')
 }
 
-/* 血统还在：保存之后看正文，那几行该还在 */
+/* 血统还在：保存之后再开「编辑」，只读态里那几行该还在 */
 await openDetailOf(myTrKey)
-/* 「看正文」现在挂在展开行里（详情面板换成 `_dGrid` 那一套之后，不再是 `dl` 里的按钮） */
+/* 「编辑」挂在展开行里（详情面板换成 `_dGrid` 那一套之后，不再是 `dl` 里的按钮）；
+   2026-10-16 起它就是唯一入口（「看正文」已撤），打开先只读 —— 读 `<pre>` 即可 */
 await page
   .locator('main tbody tr td[colspan]')
-  .getByRole('button', { name: '看正文' })
+  .getByRole('button', { name: '编辑', exact: true })
   .first()
   .click()
 await page.waitForTimeout(600)
@@ -1436,11 +1644,16 @@ const editFileOf = async (tr) => {
   await page.waitForTimeout(700)
 }
 await editFileOf(liveTr)
+/* 2026-10-16 两态：打开是只读的 —— 要动正文先「进入编辑模式」 */
+await page.getByRole('button', { name: '进入编辑模式' }).first().click()
+await page.waitForTimeout(300)
 const liveBefore = await page.locator('[role="dialog"] textarea').inputValue()
 await page
   .locator('[role="dialog"] textarea')
   .fill(liveBefore.replace('offset_y = 33.0', 'offset_y = 44.0 # 又改了一行'))
-await page.waitForTimeout(600)
+/* 等过 700ms 的「边改边存」防抖再按保存 —— 原来这里只等 600ms：草稿还没落定，
+   commit 的是上一版内容，"改过的字"就永远进不了字节（2026-10-16 探针修） */
+await page.waitForTimeout(900)
 await page.locator('[role="dialog"]').getByRole('button', { name: '保存', exact: true }).click()
 await page.waitForTimeout(800)
 await page.keyboard.press('Escape')
@@ -1467,13 +1680,14 @@ const liveRenamedTr = page
   .filter({ has: page.locator('td:not([colspan])') })
   .filter({ hasText: 'A1 涂胶-高速版.toml' })
   .first()
-/* 改过的内容跟着走：改名之后「看正文」，刚才那行该还在。
-   读**文件字节**这一条路（`看正文`）而不是「编辑文件」——后者给的是草稿优先的视图，
-   而"改名之后草稿还认不认"在假后端里没有对应的实现（真机那条由 `repoint` 负责）。 */
+/* 改过的内容跟着走：改名之后再开「编辑」（只读态），刚才那行该还在。
+   ★ 2026-10-16 改判死：假后端两条挂账都已跟上 —— 保存写的是**字节**
+   （`commitTextDraft` 直接落 `mockLocalText`），改名也会把字节与草稿的路径
+   一起重指（`renameLocalPreset` 那段）。原来"改过的字住在草稿里"的形状已不存在。 */
 await openDetailOf((await liveRenamedTr.getAttribute('data-rowkey')) ?? '')
 await page
   .locator('main tbody tr td[colspan]')
-  .getByRole('button', { name: '看正文' })
+  .getByRole('button', { name: '编辑', exact: true })
   .first()
   .click()
 await page.waitForTimeout(600)
@@ -1481,15 +1695,10 @@ const textAfterRename = await page.evaluate(
   () => document.querySelector('[role="dialog"] pre')?.innerText ?? '',
 )
 console.log(
-  `[第十层 · 改名 · 改过的内容] 改名之后「看正文」含 44.0 = ${textAfterRename.includes('offset_y = 44.0')}`,
+  `[第十层 · 改名 · 改过的内容] 改名之后「编辑」只读态含 44.0 = ${textAfterRename.includes('offset_y = 44.0')}`,
 )
-/*
- * ★ 2026-10-13 这条**不判死**，只如实打出来：假后端把「编辑文件」的保存落在**草稿**上，
- *   而改名之后草稿那条链在假后端里没有跟着走（真机由 `local::rename_file` 的 repoint
- *   负责）—— 拿它判红，红的是假后端，不是产品。真机验收时看这一行即可。
- */
 if (!textAfterRename.includes('offset_y = 44.0')) {
-  console.log('  （假后端里改名不动草稿 —— 这条只在真机上有意义：看 `repoint` 那一手）')
+  problems.push('改名之后编辑只读态该读到改过的那一行（字节与草稿都该跟着改名重指）')
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(200)
@@ -1557,7 +1766,7 @@ if (original === undefined) {
   problems.push(`复制不该断原文件的「在用」，实测操作列「${original.action}」`)
 }
 
-/* ② 新那份的正文 = 原来那份的字节（前面改过的字还在）—— 看**文件字节**（「看正文」） */
+/* ② 新那份的正文 = 原来那份的字节（前面改过的字还在）—— 开「编辑」看只读态 */
 const copiedTr = page
   .locator('main tbody tr[data-rowkey]')
   .filter({ has: page.locator('td:not([colspan])') })
@@ -1566,7 +1775,7 @@ const copiedTr = page
 await openDetailOf((await copiedTr.getAttribute('data-rowkey')) ?? '')
 await page
   .locator('main tbody tr td[colspan]')
-  .getByRole('button', { name: '看正文' })
+  .getByRole('button', { name: '编辑', exact: true })
   .first()
   .click()
 await page.waitForTimeout(600)
@@ -1576,12 +1785,12 @@ const copiedText = await page.evaluate(
 const copiedTextOk = copiedText.includes('offset_y = 44.0')
 console.log(`[第十一层 · 复制] 新那份正文带着原来改过的字：${copiedTextOk ? '是' : '否'}`)
 /*
- * ★ 2026-10-13 同上：假后端把"编辑文件"的保存落在草稿上，而复制那一手在假后端里只搬
- *   文件字节（真机 `local::copy_as_new` 是**按字节复制文件**）—— 所以这里读到旧内容是
- *   假后端的形状，不是产品的。真机上这一条该是"是"。
+ * ★ 2026-10-16 改判死：假后端两边都对齐了 —— 保存写字节、复制按字节搬
+ *   （`copyLocalPreset` 把 `mockLocalText` 原样拷到新路径），"改过的字"现在
+ *   住在字节里。原来"只搬字节、改过的字在草稿里"的形状已不存在。
  */
 if (!copiedTextOk) {
-  console.log('  （假后端里"改过的字"住在草稿里，真机按字节复制文件才读得到）')
+  problems.push('复制出来的那份该按字节带着原来改过的字（copy 是一份真副本）')
 }
 await page.keyboard.press('Escape')
 await page.waitForTimeout(300)
@@ -1764,6 +1973,10 @@ if (!/只收 ?\.toml|没有认领它的导入器/.test(zipBanner)) {
 if ((await actions()).some((r) => r.name.includes('备份.zip'))) {
   problems.push('ZIP 不许被当成预设复制进「本地文件」')
 }
+/* ★ 2026-10-16 补：读完结果框要**关掉它**（与上面 ② 同一手）——
+   不关的话 5m 第一手就被这格的遮罩挡死（既有漏洞，`closeBannerModal` 上面那句
+   注释早就写着"不关的话后面几手会挡在对话框上"，ZIP 这一段漏用了）。 */
+await closeBannerModal()
 await page.screenshot({ path: `${shotDir}/presets-import.png` })
 
 /* ---------- 5m. 第十三层：文件外部管理（在 Finder 中显示） ---------- */
@@ -1934,13 +2147,14 @@ if (!/\.toml/.test(pillText)) {
 }
 await page.screenshot({ path: `${shotDir}/presets-pill.png` })
 
-/* ---------- 6. 跨页那一条：切片器行右键 → 「在 BBS 中查看」 ---------- */
+/* ---------- 6. 跨页那一条：切片器行右键 → 「查看工艺预设」 ---------- */
 /*
  * 这一条量的是**外壳那一层**的接线：点了之后 tab 要切到工艺页（页签名 2026-10-13 从
  * 「BBS 预设」改成「工艺」；路由 id 仍是 `bbs`）。
  *
  * ★ 2026-10-13 按现状改了三处：
- *   ① 菜单项从「在 BBS 预设查看器中打开」压成了「**在 BBS 中查看**」（2026-10-10 那次压缩）；
+ *   ① 菜单项的文案沿革：「在 BBS 预设查看器中打开」→「在 BBS 中查看」（2026-10-10）→
+ *      **「查看工艺预设」**（2026-10-16 作者：「在 BBS 中查看这个文案改成查看工艺预设」）；
  *   ② 灰的判据换成 `aria-disabled`（早先的 `data-on` 不用了）；
  *   ③ 挑的行必须是**切片器的工艺 profile（.json / bbs_config）** —— 原来抓的是表里第一行，
  *      那可能是「本地文件」里认不出类别的那一份，对它这一项本来就该灰着。
@@ -1957,7 +2171,7 @@ const bbsRow = page
   .first()
 await bbsRow.click({ button: 'right' })
 await page.waitForTimeout(200)
-const bbsItem = page.getByRole('menuitem', { name: '在 BBS 中查看', exact: true })
+const bbsItem = page.getByRole('menuitem', { name: '查看工艺预设', exact: true })
 const bbsCount = await bbsItem.count()
 /* 灰的判据两样都认：菜单项现在挂的是 `disabled` 属性（`aria-disabled` 一并兜住） */
 const bbsDisabled =
@@ -1968,9 +2182,9 @@ const bbsDisabled =
     : null
 console.log(`\n[BBS 入口] 菜单项 ${bbsCount} 个，aria-disabled=${bbsDisabled}`)
 if (bbsCount === 0) {
-  problems.push('BBS 行右键没有「在 BBS 中查看」')
+  problems.push('BBS 行右键没有「查看工艺预设」')
 } else if (bbsDisabled === true) {
-  problems.push('BBS 行的「在 BBS 中查看」是灰的（切片器工艺 profile 应该可点）')
+  problems.push('BBS 行的「查看工艺预设」是灰的（切片器工艺 profile 应该可点）')
 } else {
   await bbsItem.first().click()
   await page.waitForTimeout(350)
@@ -1980,7 +2194,7 @@ if (bbsCount === 0) {
   }))
   console.log(`[BBS 入口] 点完落在 ${after.active}：${after.text.slice(0, 80)}`)
   if (after.active !== '工艺') {
-    problems.push(`点「在 BBS 中查看」之后没有切到「工艺」页（现在是 ${after.active}）`)
+    problems.push(`点「查看工艺预设」之后没有切到「工艺」页（现在是 ${after.active}）`)
   }
 }
 await page.getByRole('button', { name: '预设', exact: true }).first().click()
@@ -2031,11 +2245,12 @@ if (problems.length > 0) {
 console.log(
   '\n预设页（2026-10-13 按**现在的表**整体校过一遍）：两条轴都点得动（MKP 档**也有**「本地 / 云端」：' +
     '本地那面是「本地文件」、云端那面是云端交付行）、点行展开（详情面板是 `_dGrid` 那一套：版本 / 来源 / 基于）、' +
-    '右键菜单按行给（云端交付行：下载 / 更新 · 复制链接 · 在 BBS 中查看；本地文件：使用 · 修改参数 · 参数对比 · 编辑文件 · ' +
-    '复制 · 重命名 · 显示所在文件夹 · 置顶 · 在 BBS 中查看（灰）· 删除；切片器交付行还多两条「显示我们那份的文件夹」/' +
+    '右键菜单按行给（云端交付行：下载 / 更新 · 复制链接；本地文件：使用 · 修改参数 · 参数对比 · 编辑文件 · ' +
+    '复制 · 重命名 · 显示所在文件夹 · 置顶 · 删除；切片器那一档才多「查看工艺预设」与「显示我们那份的文件夹」/' +
     '「显示切片器里的那份」）、' +
     '我那份能被使用（操作列与那条融合 pill 都写「在用」）并说得清「基于 … · 云端已换新版」，' +
-    '改我自己那份走右键「编辑文件」（给整份文件、含血统那几行）或「修改参数」（参数表那一屏），' +
+    '改我自己那份走右键「编辑文件」（给整份文件、含血统那几行；打开先只读，点「进入编辑模式」才有 ' +
+    '撤销 / 重做 / 退出编辑模式 / 保存）或「修改参数」（参数表那一屏，同一个两态框架），' +
     '读不出来的那一份画得出「文件无法读取」且「使用 / 修改参数」灰着、连「编辑文件」都不出现（第九层），' +
     '本地文件能改名（输入框只要基名）也能删（二次确认；删除全面放开），能复制出一份新的' +
     '（名字自动 `X copy.toml`、原文件一个字节不动 —— 第十一层），' +

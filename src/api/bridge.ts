@@ -147,6 +147,20 @@ export const bridgeApi: MkpApi = {
     if (picked === null || Array.isArray(picked)) return null
     return { name: appNameOf(picked), path: picked }
   },
+  /*
+   * 「跟随系统默认」到底是哪个应用（2026-10-16）：**问系统真值** ——
+   * macOS 走 LaunchServices、Windows 走注册表，两套都在壳那一侧
+   * （`ipc::slicer::system_default_app`：前端不扫盘、不猜安装位置）。
+   * 问不出来给 `null`，界面回落原来那句话术。
+   */
+  getSystemSlicerApp: () => call('getSystemSlicerApp', 'get_system_slicer_app'),
+  /*
+   * 「去系统里改默认应用」：**我们不替用户改**，只把他送到系统那一处 ——
+   * macOS 打开那份空的示例 `.3mf` 的**「显示简介」窗口**（要过一次「控制访达」的授权；
+   * 只把文件夹定位出来不算，作者 2026-10-16 纠过），Windows 打开「打开方式」框。
+   * 回来的那句是下一步提示，直接弹给用户。
+   */
+  openDefaultAppSettings: () => call('openDefaultAppSettings', 'open_default_app_settings'),
   /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
   getPostProcessCommand: (machineId, versionId) =>
     call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),
@@ -187,6 +201,9 @@ export const bridgeApi: MkpApi = {
     call('getPresetDraftSummary', 'get_preset_draft_summary'),
   beginTextEdit: (fileName, path) =>
     call('beginTextEdit', 'begin_text_edit', { fileName, path }),
+  /* 「恢复默认值」（编辑文件那颗）读的原文镜像 —— `baseline-local/`，见 Rust `runtime::baseline` */
+  readLocalOriginText: (path) =>
+    call('readLocalOriginText', 'read_local_origin_text', { path }),
   putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
   commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
   discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),

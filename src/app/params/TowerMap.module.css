@@ -47,6 +47,12 @@
   -webkit-user-select: none;
 }
 
+/* 只读（编辑模式之外）：十字收成默认 —— 拖不动的东西别摆一副能拖的样子 */
+.map[data-ro],
+.mapPlate[data-ro] {
+  cursor: default;
+}
+
 /*
  * 真板轮廓：铺满画布。描边用 non-scaling 固定像素宽 —— 再缩放机型之间粗细一致；
  * overflow 放开是让贴着 viewBox 边缘的卡舌尖 / 把手尖能画满整根描边（不裁半根）。

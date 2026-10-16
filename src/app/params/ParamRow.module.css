@@ -262,6 +262,19 @@
 }
 
 /*
+ * 只读态的值（2026-10-16 两态）：纯文本，不出现控件 —— 与参数对比台的只读值
+ * （`.ro`：--fs-body / --text-2）同一长相。数字右对齐（一列数字可比大小，
+ * 与 `.edNum` 的只读对齐口径同一条）。
+ */
+.roVal {
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/*
  * 数字步进器的外壳（见 ParamRow.tsx 里的说明）：
  * 132px 定宽，箭头永远靠右；进入编辑（聚焦）数值靠左 —— 只读态照旧右对齐，
  * 一列数字右对齐才好比大小。改在这一层壳上，不动共用件的 `.input`，别处不受影响。

@@ -31,6 +31,17 @@ body {
 }
 
 /*
+ * ★ 深色档这一层也要跟着翻：它在 `[data-wb]` **之外**（`--w-page` 取不到），
+ * 所以按判据属性直接给值。
+ *
+ * ★★ 判据是 `<html data-theme>`，不是 `@media (prefers-color-scheme: dark)` ——
+ * 后者是**系统**深浅，用户选了「深色」而系统是浅色时它不响（那正是要修的那一档）。
+ */
+html[data-theme='dark'] body {
+  background: #1c1c1c;
+}
+
+/*
  * 盒模型：试验场的样式全都建立在 global.css 那条全局 border-box 之上
  * （行高 43 = --p-ctl-h 34 + 内衬 8 + 边 1；G-code 框 172×88；控件 34）。
  * 工作台入口原本没有这条 reset，content-box 会把每一格撑高几像素，
@@ -390,15 +401,16 @@ body {
   color: var(--w-src-factory-t);
 }
 
+/* 三档状态各读 tokens 里那一组（字 / 底 / 边）—— 硬编码的话两套主题必然漏一处 */
 .wb-tag[data-state="ok"] {
-  border-color: rgb(16 185 129 / 25%);
-  background: rgb(16 185 129 / 10%);
+  border-color: var(--w-ok-line);
+  background: var(--w-ok-soft);
   color: var(--w-ok);
 }
 
 .wb-tag[data-state="warn"] {
-  border-color: rgb(217 119 6 / 25%);
-  background: rgb(217 119 6 / 10%);
+  border-color: var(--w-warn-line);
+  background: var(--w-warn-soft);
   color: var(--w-warn);
 }
 

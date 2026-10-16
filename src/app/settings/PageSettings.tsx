@@ -81,13 +81,22 @@ import { appStateMutated, useThemePref } from '../state/appState'
 import {
   SLICER_CHOOSE,
   slicerOptionsOf,
+  systemSlicerLine,
   useSlicerAppPref,
   useSlicerPref,
+  useSystemSlicerApp,
   type SlicerId,
 } from '../shared/slicer'
 /* 自绘下拉共用件（#33）：项目里的下拉一律用它，原生 `<select>` 一个不留 */
 import { SelectField } from '../../components/field'
 import type { FieldOption } from '../../components/field'
+/* 「去系统里改…」那一处的**图片引导**（2026-10-16）：图 + 框 + 两步，见它们的头注。
+   ★ 与 `guide/GuideCard` 那扇"屏幕引导"是两件事（那个贴到切片器窗口上指）。 */
+import GuideImageModal from '../guide/GuideImage'
+import { openWithGuideFigure } from '../guide/openWithGuide'
+/* 引导图那两张**住资产台账**（`presets/assets.toml` 的 `type = 'guide'`）——
+   按 id 取 URL 要靠当前这份 catalog（与首页机型图同一条路） */
+import { useCatalog } from '../home/useCatalog'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -149,8 +158,23 @@ export default function PageSettings() {
    */
   const [slicer, setSlicer] = useSlicerPref()
   const [slicerApp, setSlicerApp] = useSlicerAppPref()
+  /*
+   * 「跟随系统默认」到底指谁（2026-10-16）：问壳要一次系统真值（macOS LaunchServices /
+   * Windows 注册表），挂在下拉下面那行小字里 —— 那一档名字里没有应用名，光看认不出来。
+   * 问不出来给 `null` ⇒ 那行不摆（回落原来那句话术，不编一个名字）。
+   */
+  const systemApp = useSystemSlicerApp()
   const [slicerBusy, setSlicerBusy] = useState(false)
   const [slicerErr, setSlicerErr] = useState<string | null>(null)
+  /* 「去系统里改…」那一颗：点了会弹一个系统窗口/框，防连点 */
+  const [slicerToSystem, setSlicerToSystem] = useState(false)
+  /*
+   * 「去系统里改…」之后那张图片引导开着没有 —— 非 null 就是开着，内容是**壳给的那句话**
+   * （成功 = 已打开那份文件的「显示简介」；失败 = 那条错的原话）。见 `openSystemDefaults`。
+   */
+  const [guide, setGuide] = useState<string | null>(null)
+  /* 引导图按**资产 id** 取（见 `guide/openWithGuide.ts`）：URL 只能从这份登记里算 */
+  const catalog = useCatalog()
 
   /*
    * 执行记录（「执行记录」那一块）：`null` = 还没读到（控件先禁用，
@@ -349,6 +373,37 @@ export default function PageSettings() {
     })()
   }
 
+  /*
+   * 「去系统里改…」（2026-10-16，作者：「还是不要帮我改了……打开系统那个页面给用户
+   * 自己去改」）：**我们不替他改**系统默认应用 —— 系统默认是他自己的账，改不改、改成
+   * 什么由他在系统那一侧按。这一颗只把他送过去：
+   *   macOS  → 打开那份空的示例 `.3mf` 的**「显示简介」窗口**（要过一次「自动化 → 控制访达」
+   *            的授权；只把文件夹定位出来不算 —— 作者 2026-10-16 纠过这一条）；
+   *   Windows→ 打开「打开方式」那个框。
+   * 两边都在壳那一侧，见 `ipc::slicer`。
+   *
+   * 回来后**开那张图片引导**（`GuideModal`，不是通知）：壳给的那句是"此刻在哪"
+   * （成功 = 已打开那份文件的「显示简介」；失败 = 那条错的原话，里面写着手工怎么做），
+   * 引导里那两步是"接着怎么点"。前端不复述、不翻译壳给的那句。
+   *
+   * ★ 失败**照样开这张引导**：他手里的活没变（还是去访达里改那两下）——
+   *   权限被拒（他点了「不允许」）是预期内的一条走法，壳那边已经退回去在访达里定位好了。
+   */
+  const openSystemDefaults = () => {
+    if (slicerToSystem) return
+    setSlicerToSystem(true)
+    api.openDefaultAppSettings().then(
+      (hint) => {
+        setSlicerToSystem(false)
+        setGuide(hint)
+      },
+      (e: unknown) => {
+        setSlicerToSystem(false)
+        setGuide(errorText(e))
+      },
+    )
+  }
+
   /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
   const currentText =
     loadErr !== null
@@ -366,13 +421,15 @@ export default function PageSettings() {
 
   /* 切片下拉的选项：内置 + 已指定 + 最后那条动作项（共用件 `SelectField` 要的形状） */
   const slicerList: FieldOption[] = [
-    ...slicerOptionsOf(slicerApp),
+    ...slicerOptionsOf(slicerApp, systemApp),
     { value: SLICER_CHOOSE, label: '其他应用…', note: '从磁盘选择' },
   ]
   /* 选着"你从磁盘指定的"时的那个应用（其余档 `null`） */
   const slicerCustom = slicer === 'custom' ? slicerApp : null
   /* `custom` 但记录不在（清过缓存）：按跟随系统显示 —— 值不在选项里时触发器显示原值，更难懂 */
   const slicerShow: SlicerId = slicer === 'custom' && slicerCustom === null ? 'system' : slicer
+  /* 「跟随系统默认」在这台机器上指谁那一句（问不到 = `null` ⇒ 那行不摆） */
+  const slicerSystem = systemSlicerLine(systemApp)
 
   /**
    * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
@@ -579,6 +636,19 @@ export default function PageSettings() {
               打开模型时交给「{slicerCustom.name}」：{slicerCustom.path}
             </p>
           )}
+          {/*
+           * 「跟随系统默认」那一档（2026-10-16）：名字里没有应用名，把它在这台机器上
+           * **指谁**摆在下拉下面（与弹层里那条 note 是同一句话，`systemSlicerLine`）；
+           * 右边那颗「去系统里改…」把用户**送到**系统能改的那一处 —— 我们不替他改。
+           */}
+          {slicerShow === 'system' && (
+            <div className={s.slicerRow}>
+              <p className={s.slicerHint}>{slicerSystem}</p>
+              <Btn disabled={slicerToSystem} onClick={openSystemDefaults}>
+                去系统里改…
+              </Btn>
+            </div>
+          )}
           {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{slicerErr}</p>}
         </div>
       </section>
@@ -712,6 +782,42 @@ export default function PageSettings() {
           </div>
         )}
       </section>
+
+      {/*
+       * 图片引导（2026-10-16）：**模态框**，不是通知。
+       * 作者看过那条通知之后说的：「这个通知时间有点短呀，你看是做成模态框的还是说延长一下
+       * 这个通知时间」—— 加了图之后答案就定了：通知装不下图（通知只是角落里一小条），
+       * 而这一步要的正是"照着这张图点"。所以这一处的两条通知都撤掉，换成这张引导。
+       *
+       * ★ 图与标注住在 `guide/openWithGuide.ts`（浅 / 深两张 + 百分比框），
+       *   通用件是 `guide/GuideImage.tsx`（模态框 + 画框那个图），见它们各自的头注。
+       *
+       * ★ 那两张图**住资产台账**（`presets/assets/guides/` + `presets/assets.toml` 里
+       *   `type = 'guide'` 那两条，`delivery = 'bundled'` 先随包）—— 作者 2026-10-16 拍的：
+       *   「难道我不应该就直接放在 preset 里面吗？这样方便管理呀，到时候工作台也方便管理」。
+       *   所以这一页只做一件事：把**当前 catalog** 交给取图那一步（id → path → URL）。
+       *
+       * ★ 作者的系统截图（浅 / 深各一张，754×904）**2026-10-16 已经放进来了**，
+       *   那两个方框的坐标就是按它量的（量法写在 `openWithGuide.ts` 头注里）。
+       *   以后**换图或重裁要重量一次** —— 百分比坐标是相对整张图算的。
+       */}
+      <GuideImageModal
+        open={guide !== null}
+        title="改 .3mf 的默认打开方式"
+        status={guide ?? ''}
+        figure={openWithGuideFigure(catalog.assets)}
+        steps={[
+          {
+            text: '在「打开方式」下拉里选好你要的应用',
+            note: '选完，右边那颗「更改全部…」才会亮',
+          },
+          {
+            text: '点「更改全部…」',
+            note: '从此所有 .3mf 都归它；不点它只对这一个文件生效',
+          },
+        ]}
+        onClose={() => setGuide(null)}
+      />
     </div>
   )
 }

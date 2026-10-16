@@ -81,6 +81,13 @@ interface Props {
   /** 退回已保存值 */
   onRevertToSaved: (key: string) => void
   /**
+   * **只读**（2026-10-16 的两态）：控件整个替成**纯文本值**（`valueText` 的那套翻译，
+   * 与参数对比台的只读值同一长相）——「看得见、改不动」的第三种画法，
+   * 与 blocked / 弃用那两档**不叠用**（那两档画的是灰控件，这里是文本）。
+   * 还原 chip 也不摆（chip 是个写入口）。
+   */
+  readonly?: boolean
+  /**
    * 搜索词：行名与展开后那几格里命中的字加底。
    * 不搜索时是空串 —— `Highlight` 收到空串原样返回，不白包一层。
    */
@@ -138,6 +145,7 @@ export default function ParamRow({
   onToggleExpand,
   onEdit,
   onRevertToSaved,
+  readonly = false,
   query = '',
 }: Props) {
   const blocked = blockedBy !== null
@@ -252,7 +260,7 @@ export default function ParamRow({
             </button>
           )}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值） */}
-          {dirty && !locked && (
+          {dirty && !locked && !readonly && (
             <button
               type="button"
               className={s.restore}
@@ -267,7 +275,10 @@ export default function ParamRow({
               已弃用
             </span>
           )}
-          {def.field.control === 'number' ? (
+          {readonly ? (
+            /* 只读态：纯文本值（编辑模式之外的那一态，见 Props.readonly） */
+            <span className={s.roVal}>{valueText(def, value)}</span>
+          ) : def.field.control === 'number' ? (
             /*
              * 数字步进器包一层同款的 `.edNum`（作者：「我专门调整过的，应该可以复用」）：
              *   132px 定宽 —— 箭头永远靠右落在同一条竖线上，不跟数值长短左右跳；

@@ -1,6 +1,7 @@
 # 资产域①层：**一份集中定义**（b05 Task 8）。
 #
-# 这里登记我们管的资产：整机图 / 图标 / 模型 / 切片器预设（BBS）四类。
+# 这里登记我们管的资产：整机图 / 图标 / 模型 / 切片器预设（BBS）/ 引导图五类
+# （2026-10-16 加的第五类：`guide`，见文件末尾那一段）。
 # **文件本体不在这里** —— 它们在资产根 `<repo>/presets/assets/` 下，条目里的 `path`
 # 就是相对那个根的一段。
 #
@@ -317,3 +318,35 @@ name = 'X1C：0.4 喷头 0.24 层高'
 path = 'bbs/Process/0.4mm/MKPProcess X1 0.4 0.24.json'
 slicer = 'bbs'
 profile = 'process'
+
+# ---------------- 引导图（guide · 2026-10-16） ----------------
+#
+# 「图片引导」那套里用的**系统窗口截图**（浅 / 深各一张）—— 见 `src/app/guide/GuideImage.tsx`。
+#
+# 为什么进台账、而不是躺在 `src/app/assets/`（作者 2026-10-16 问的那句）：
+# 界面自带素材（品牌 logo、首页那张 hero 合影）是**跟着前端源码走**的，改一张图要改代码；
+# 而引导图是**产品资产**：会加、会换、会变大，得在工作台的资产库里看得见、选得着、
+# 能对照落点 —— 那就只有一条路：住资产根 + 进台账（客户端按 **id** 取，不认识文件名）。
+#
+# ★ `delivery = 'bundled'`（今天）：图不大，先随包 —— 客户端那条 `/assets/<path>` 现在
+#   就能取到（**dev 与打包后都取得到**，见 `tools/assets/plugin.mjs` 头注）。
+#   作者定的方向是**按需下载**：那时候把这一行删掉（不写 `delivery` = 进交付集合 = 按需），
+#   再给客户端补一条"读下载区图片"的口子（今天没有：下载区的东西只有文本走 IPC）。
+#   ★ 换图不用改 TS：台账 `path` 不变、字节变 ⇒ 同步器按 SHA 覆盖 ✓。
+#
+# ★ 两张**必须同尺寸同裁切** —— 标注（百分比坐标）只写一份，两张共用。
+
+[[assets]]
+id = 'guide-open-with-light'
+type = 'guide'
+name = '「改 .3mf 默认打开方式」引导图（浅色）'
+path = 'guides/open-with-light.png'
+delivery = 'bundled'
+
+[[assets]]
+id = 'guide-open-with-dark'
+type = 'guide'
+name = '「改 .3mf 默认打开方式」引导图（深色）'
+path = 'guides/open-with-dark.png'
+delivery = 'bundled'
+

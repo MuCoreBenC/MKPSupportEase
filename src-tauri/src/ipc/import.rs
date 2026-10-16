@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use crate::error::AppError;
+use crate::fsx::paths::internal_root;
 use crate::ipc::traced;
 use crate::runtime;
 
@@ -78,6 +79,7 @@ pub async fn commit_import(
     items: Vec<ImportItemDto>,
 ) -> Result<Vec<ImportOutcomeDto>, AppError> {
     traced("commitImport", |_| {
+        let internal = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let items: Vec<runtime::import::ImportItem> = items
             .into_iter()
@@ -91,6 +93,10 @@ pub async fn commit_import(
             .map(|outcome| {
                 // 成的那一份记进出处账（「来源：导入」）—— 记不上不影响这次导入本身
                 if outcome.ok {
+                    /* 原文镜像：导入**落盘之后**存一份 —— 导入 / 复制进来的那两份在摘库里
+                    没有对应，这份镜像就是它们"恢复默认值"唯一能退回去的地方 */
+                    let _ =
+                        runtime::baseline::ensure_origin_copy(&internal, &user_root, &outcome.path);
                     let _ = runtime::provenance::record(
                         &user_root,
                         &outcome.path,

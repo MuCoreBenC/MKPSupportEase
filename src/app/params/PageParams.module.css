@@ -509,12 +509,6 @@ button.usingNote:hover {
   gap: 12px;
 }
 
-.sep {
-  width: 1px;
-  height: 18px;
-  background: var(--line-strong);
-}
-
 .state {
   font-size: var(--fs-label);
   color: var(--text-3);

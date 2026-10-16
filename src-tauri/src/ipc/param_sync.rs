@@ -456,6 +456,8 @@ fn apply_at(
          * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
          */
         if next != text {
+            /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
+            let _ = runtime::baseline::ensure_origin_copy(root, user, path);
             runtime::local::write_text(user, path, &next)?;
         }
     }

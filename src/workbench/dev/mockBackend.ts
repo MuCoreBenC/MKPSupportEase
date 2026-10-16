@@ -582,6 +582,13 @@ function bundleListOf(query: string | null) {
 let mockBootstrap: string | null = null
 let mockGiteeBootstrap: string | null = null
 
+/**
+ * **主题档位**（2026-10-16）：`get_theme` / `set_theme` 的桩。
+ * `null` = 还没选过（= 跟随系统）—— 与真机同一个语义。浏览器里没有盘可落，
+ * 刷一次页面就回到"没选过"。
+ */
+let mockTheme: 'light' | 'dark' | 'system' | null = null
+
 /** `app::Boot` 的桩。**唯一的数据根是 presets/**（没有第二候选、不 fallback） */
 function mockBoot(): Json {
   return {
@@ -1106,6 +1113,21 @@ export function installMockBackend() {
       /* 「软件版本」展示位：桩里报与真机同源的那个演示版本号 */
       case 'wb_app_version':
         return Promise.resolve('0.0.1')
+      /*
+       * 主题档位（2026-10-16）：桩里没有盘可落 —— **只记在这一次会话的内存里**，
+       * 于是"设置 → 外观"能点、能立刻翻色；重开页面回到"没选过"（= 跟随系统）。
+       * ★ `null` 就是那一档，不是"读失败"。
+       */
+      case 'get_theme':
+        return Promise.resolve(mockTheme)
+      case 'set_theme': {
+        const next = (args as { theme?: string } | undefined)?.theme
+        if (next !== 'light' && next !== 'dark' && next !== 'system') {
+          return Promise.reject(new Error(`认不出的主题档位：${String(next)}`))
+        }
+        mockTheme = next
+        return Promise.resolve(mockTheme)
+      }
       case 'wb_words':
         return Promise.resolve(WORDS)
       case 'wb_book':

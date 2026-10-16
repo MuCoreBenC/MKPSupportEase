@@ -263,6 +263,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
+        // 「跟随系统默认」到底是哪个应用：去问系统（macOS LaunchServices / Windows 注册表）
+        ipc::get_system_slicer_app,
+        // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
+        ipc::open_default_app_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
@@ -299,6 +303,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::commit_text_draft,
         ipc::local::discard_text_draft,
         ipc::local::get_preset_draft_summary,
+        // 「恢复默认值」（编辑文件那颗）读的原文镜像
+        ipc::local::read_local_origin_text,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
@@ -397,6 +403,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
+        // 「跟随系统默认」到底是哪个应用：去问系统（macOS LaunchServices / Windows 注册表）
+        ipc::get_system_slicer_app,
+        // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
+        ipc::open_default_app_settings,
         // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
         ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
@@ -434,6 +444,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::commit_text_draft,
         ipc::local::discard_text_draft,
         ipc::local::get_preset_draft_summary,
+        // 「恢复默认值」（编辑文件那颗）读的原文镜像
+        ipc::local::read_local_origin_text,
         // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
         ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）

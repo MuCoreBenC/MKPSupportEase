@@ -29,6 +29,15 @@
   background: rgb(229 72 77 / 6%);
 }
 
+/*
+ * 深色对比度（2026-10-16，与 SegmentedField 同一轮）：框面 `--surface-solid`
+ * （#303030）贴在 #232323 卡面上只差半档，看着像没画框。提到 8% 白面 + 框线提亮。
+ */
+[data-theme='dark'] .box {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 22%);
+}
+
 /* 改不动：看得见的虚线框 */
 .boxOff {
   display: inline-flex;

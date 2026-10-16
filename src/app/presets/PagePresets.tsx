@@ -169,10 +169,15 @@ import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
 import { detectPlatform } from '../../hooks/usePlatform'
+import Icon from '../shell/icons'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
 /* 「复制后处理脚本」全站那一份（与标题栏 MKP 字标、首页那颗同一个出口）—— 见那个文件的文件头 */
 import { copyPostProcessScript } from '../postprocess/copyScript'
+/* 全站通知（右上角那三格通知中心）："改动没保存"这类跨一步的话要说得比提示条响
+   —— 没有 index，全站都按这个文件引（与 `copyScript` / `PageSettings` 一致）。
+   `dismiss` 给下面那个"只留一条"的小封装用 */
+import { dismiss, notify } from '../notify/notify'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
@@ -291,6 +296,39 @@ interface Note {
   text: string
   bad: boolean
   lines?: string[]
+}
+
+/*
+ * 「有未保存的改动」通知停留时长（2026-10-16）：原来跟「复制后处理脚本」一档（5200），
+ * 作者当晚看过说「这个通知太短暂了，时间可以延长一点」→ **9000**。
+ * 它是一条"要去行动"的话（去保存），得留够读完再走一趟的工夫。
+ */
+const UNSAVED_NOTICE_MS = 9000
+
+/*
+ * 撤销 / 重做历史**按 path 记在模块级**（2026-10-16 作者：「我这次再次进来，有没有那种
+ * 可以做到还保留撤销重做的呀」）——组件 state 会随关闭 / 组件重挂丢，这里不会（不重启就一直在）。
+ *
+ * 每格：`undo`/`redo` 两个文本快照栈 + `head`（写下这一格时手上的正文）。
+ * 重开时只认 `head === 读到的草稿正文` 的缓存；对不上（草稿被保存 / 被别处动过）就丢掉。
+ * 作废、保存、参数页覆盖这几条路都不用显式清 —— 文本一换，`head` 自己就对不上了。
+ */
+const textHistCache = new Map<string, { undo: string[]; redo: string[]; head: string }>()
+
+/**
+ * 「有未保存的改动」**屏幕上只留一条** —— 关窗那条（"刚才…"）与重开那条（"上次…"）
+ * 说的是同一件事；不动手的话两条会叠在一起（2026-10-16 截图里就是这样，像在重复念叨）。
+ * 新的一条上来先把旧的那条 `dismiss` 掉。
+ */
+let unsavedNoticeId: string | null = null
+function notifyUnsaved(text: string) {
+  if (unsavedNoticeId !== null) dismiss(unsavedNoticeId)
+  unsavedNoticeId = notify({
+    kind: 'warn',
+    title: '有未保存的改动',
+    text,
+    ttl: UNSAVED_NOTICE_MS,
+  })
 }
 
 export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
@@ -483,8 +521,43 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     text: string
     draftError: string | null
   } | null>(null)
+  /**
+   * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
+   * 打开先只读（`<pre>` 画着色，textarea 不出现），底栏只有「进入编辑模式」；
+   * 进了编辑模式才有 撤销 / 重做 / 退出编辑模式 / 保存。
+   * 与参数对比台、修改参数弹窗是**同一套框架**（只读 → 进编辑 → 退出/保存）。
+   */
+  const [editMode, setEditMode] = useState(false)
+  /**
+   * **撤销 / 重做**（本地文本快照栈）。粒度 = 一次「打字停顿」（就是草稿落盘那一拍，
+   * 700ms）——不按每击键分格：撤销回退的是"一段字"，不是一个个字母。
+   * 与参数对比台的本地栈同一个路数（那边编辑的是一份、这里一份正文）。
+   */
+  const [undoStack, setUndoStack] = useState<string[]>([])
+  const [redoStack, setRedoStack] = useState<string[]>([])
+  /**
+   * 这回文本变化是**撤销 / 重做自己造的**（true）还是用户敲的（false）。
+   * 落盘那一拍据此决定要不要往撤销栈推快照 —— 自己造的变化再推一条，
+   * 撤销就会来回跳（撤销本身成了可撤销的一步）。
+   */
+  const histJumpRef = useRef(false)
   /** 上一次真正落到临时文件里的正文。用它判断"值不值得再存一次" */
   const savedTextRef = useRef<string>('')
+  /**
+   * **这份文件的原文**（它最初落到盘上时的那一份）——「恢复默认值」那颗退回的地方。
+   * 打开编辑器时预读一次（`readLocalOriginText`）；`null` = 没有原始备份（按钮禁用，
+   * 不猜、不编一个"默认"出来）。见 Rust `runtime::baseline` 的原文镜像一段。
+   */
+  const [originText, setOriginText] = useState<string | null>(null)
+  /**
+   * **打开那一刻的两样快照** —— 关窗时用它判"有没有没保存的改动"
+   * （作者 2026-10-16：「我如果没保存的时候关闭了模态框也需要有通知」）：
+   * `openDirtyRef` = 打开时后端答的"草稿已经和盘上不一样"；`openTextRef` = 打开时的正文。
+   * 关窗那一下：`openDirty || text !== openText` ⇒ 有没保存的改动，喊一声。
+   * `exitEdit`（作废）会把 `openDirtyRef` 落回 `false` —— 改动都作废了，关窗不该再喊。
+   */
+  const openTextRef = useRef('')
+  const openDirtyRef = useRef(false)
 
   /*
    * **撞名那一格**（a04）：云端那份要落下来时，本机已经有一份同名的了 ——
@@ -989,12 +1062,48 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     data.beginTextEdit(row.fileName, row.path).then(
       (draft) => {
         savedTextRef.current = draft.text
+        /*
+         * 打开先只读（2026-10-16）——**除非**上一次的改动还没保存、也没退出编辑模式
+         * 就被关掉了（后端答 `reused && dirty`：草稿还在、且与盘上字节不一样）。
+         * 作者 2026-10-16：「下次打开这个模态框，它里面还是显示编辑模式……
+         * 好的提示、或者通知，就是说刚才那些修改还没保存、没生效」。
+         */
+        const unsaved = draft.reused && draft.dirty
+        setEditMode(unsaved)
+        /* 关窗时的"有没有没保存的改动"以这一刻为基准（见两个 ref 的注释） */
+        openTextRef.current = draft.text
+        openDirtyRef.current = unsaved
+        /*
+         * ★ 撤销 / 重做历史**按 path 记着**（作者 2026-10-16：「我这次再次进来，有没有那种
+         * 可以做到还保留撤销重做的呀」）——关掉模态框再进来，栈还接着用。
+         * 有效性只认一条：缓存里记的"上次离开时的正文"（`head`）与这次读到的草稿正文
+         * 一模一样才认这份历史（正文被别处动过 ⇒ 旧快照对不上手，干脆丢掉重来）。
+         */
+        const kept = textHistCache.get(draft.path)
+        if (kept !== undefined && kept.head === draft.text) {
+          setUndoStack(kept.undo)
+          setRedoStack(kept.redo)
+        } else {
+          if (kept !== undefined) textHistCache.delete(draft.path)
+          setUndoStack([])
+          setRedoStack([])
+        }
+        histJumpRef.current = false
         setEditing({
           fileName: draft.fileName,
           path: draft.path,
           text: draft.text,
           draftError: null,
         })
+        /* 「恢复默认值」的原文预读（读到什么算什么；读不到 = 按钮禁用） */
+        data.readLocalOriginText(draft.path).then(
+          (text) => setOriginText(text),
+          () => setOriginText(null),
+        )
+        if (unsaved) {
+          /* 提醒归提醒，改动本身一个字不动 —— 就挂在草稿里等他回来保存 */
+          notifyUnsaved('上次那些改动还没保存、还没生效 —— 要生效得先保存')
+        }
       },
       (e: unknown) => {
         setNote({
@@ -1009,14 +1118,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 边改边存：停下 700ms 才落一次（在打字的中间态里反复写盘没有意义）。
    * 落盘的是**正文草稿** —— 盘上那份文件一动不动，这也是"改到一半关掉还在"的来源。
    * 失败写进抽屉里那一行（不弹提示条：用户还在打字，别拿一条会闪的条子打断他）。
+   *
+   * ★ 撤销栈的快照也挂在这一拍上（2026-10-16）：落盘时把**改动前的那份文本**
+   * 推一格 —— 一次停顿 = 一格，撤销回退的是"一段字"而不是一个个字母。
+   * 撤销 / 重做自己造的落盘（`histJumpRef`）**不推快照**，否则撤销本身会被记成一步。
    */
   useEffect(() => {
     if (editing === null || editing.text === savedTextRef.current) return
     const text = editing.text
+    const before = savedTextRef.current
+    const jump = histJumpRef.current
     const timer = window.setTimeout(() => {
       data.putTextDraft(text).then(
         () => {
           savedTextRef.current = text
+          histJumpRef.current = false
+          if (!jump) {
+            setUndoStack((st) => [...st, before])
+            setRedoStack([])
+          }
         },
         (e: unknown) =>
           setEditing((cur) =>
@@ -1028,6 +1148,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     }, 700)
     return () => window.clearTimeout(timer)
   }, [data, editing])
+
+  /*
+   * 编辑中随时把两份栈镜像进模块级缓存（见 `textHistCache`）——关掉模态框那一下
+   * 手上有"最后一眼"的完整状态；重开时按 `head` 认它。（这个 effect 只写模块级 Map，
+   * 不 set state —— 没有回环。）
+   */
+  useEffect(() => {
+    if (editing === null) return
+    textHistCache.set(editing.path, { undo: undoStack, redo: redoStack, head: editing.text })
+  }, [editing, undoStack, redoStack])
 
   /*
    * **这份刚在「修改参数」里保存过 —— 编辑区按盘上最新内容重开**（2026-10-10）。
@@ -1049,6 +1179,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     void data.beginTextEdit(editing.fileName, dropped).then(
       (draft) => {
         savedTextRef.current = draft.text
+        /* 重开 = 换了一版内容，旧的撤销栈对不上手（一步都不能撤了） */
+        setUndoStack([])
+        setRedoStack([])
         setEditing((cur) => (cur === null ? cur : { ...cur, text: draft.text, draftError: null }))
         setNote({ text: '这份刚在「修改参数」里保存过 —— 编辑区已按最新内容重开', bad: false })
       },
@@ -1056,16 +1189,29 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     )
   }, [data, editing, textDropRev])
 
-  /** 放弃这次编辑：丢正文草稿（盘上那份文件全程没被碰过，所以它天生安全） */
-  const discardEdit = () => {
-    data.discardTextDraft().then(
-      () => {
-        setEditing(null)
-        setNote({ text: '已放弃这次编辑 —— 你的那份从头到尾没有被改过', bad: false })
-      },
-      (e: unknown) =>
-        setNote({ text: `放弃不了：${errorText(e)}`, bad: true }),
-    )
+  /*
+   * **撤销 / 重做**（编辑模式的底栏，2026-10-16）。栈里存的是**整份文本快照**：
+   * 一份预设几十 KB，几十格快照不痛不痒。两条都置 `histJumpRef` ——
+   * 这次文本变化是"我们自己造的"，下一拍落盘不许再推快照。
+   */
+  const undoEdit = () => {
+    if (editing === null) return
+    const prev = undoStack[undoStack.length - 1]
+    if (prev === undefined) return
+    setUndoStack(undoStack.slice(0, -1))
+    setRedoStack([...redoStack, editing.text])
+    histJumpRef.current = true
+    setEditing({ ...editing, text: prev })
+  }
+
+  const redoEdit = () => {
+    if (editing === null) return
+    const next = redoStack[redoStack.length - 1]
+    if (next === undefined) return
+    setRedoStack(redoStack.slice(0, -1))
+    setUndoStack([...undoStack, editing.text])
+    histJumpRef.current = true
+    setEditing({ ...editing, text: next })
   }
 
   /**
@@ -1075,17 +1221,84 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 而且只有这一下才碰盘：没点保存时，改到哪都只在正文草稿里。
    */
   const commitEdit = () => {
-    data.commitTextDraft().then(
-      (done) => {
-        setEditing(null)
-        setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
-      },
-      (e: unknown) =>
-        setNote({
-          text: `没存上：${errorText(e)}`,
-          bad: true,
-        }),
-    )
+    if (editing === null) return
+    /*
+     * ★ 2026-10-16：先把手上的正文**补落一次草稿**再 commit ——
+     * 边改边存是 700ms 防抖，"改完立刻点保存"时最后一笔可能还在路上；
+     * 直接 commit 存的就是**上一个版本**（探针里踩到过：fill 完 600ms 就按保存，
+     * 保存下来的内容少一行）。putTextDraft 本身幂等，先补这一次没有副作用。
+     */
+    const text = editing.text
+    data
+      .putTextDraft(text)
+      .then(() => data.commitTextDraft())
+      .then(
+        (done) => {
+          savedTextRef.current = text
+          /* 保存 = 落定，一段新的开始：撤销历史（连模块级那份缓存）跟着清 */
+          textHistCache.delete(editing.path)
+          setUndoStack([])
+          setRedoStack([])
+          setEditing(null)
+          setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
+        },
+        (e: unknown) =>
+          setNote({
+            text: `没存上：${errorText(e)}`,
+            bad: true,
+          }),
+      )
+  }
+
+  /**
+   * **关窗**（Esc / ×；保存走 `commitEdit`，那条路不算"关"）——**只是关，一个字不丢**，
+   * 但**没保存的改动要说一声**（作者 2026-10-16：「我如果没保存的时候关闭了模态框也需要
+   * 有通知」）：改动留在草稿里、还没生效，下次打开会直接进编辑模式并再提醒一次
+   * （两条通知：一条说"刚才"、一条说"上次"，同一件事的两个时刻）。
+   */
+  const closeEdit = () => {
+    if (editing === null) return
+    const unsaved = openDirtyRef.current || editing.text !== openTextRef.current
+    setEditing(null)
+    if (unsaved) {
+      notifyUnsaved('刚才那些改动还没保存、还没生效 —— 要生效得先保存')
+    }
+  }
+
+  /**
+   * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，
+   * 那些改的都作废，保存了才有」）。
+   *
+   * 丢正文草稿 → 重读盘上字节回填 → 回只读。撤销栈跟着清：内容换了一版，
+   * 旧快照对不上手（与"这份刚在修改参数里保存过"那一手同一条口径）。
+   * 要留住改动只有一条路 —— **保存**。
+   */
+  const exitEdit = () => {
+    if (editing === null) return
+    const there = editing
+    /*
+     * 先把 `savedTextRef` 顶到当前文本：挡掉"还有一笔没落盘"的判定 ——
+     * 否则退出这一下若正逢 700ms 防抖的窗口，pending 的 put 可能与 discard 乱序到，
+     * 草稿被写回、作废就白做了（下面的 `setEditing` 也会让那个 effect 自己清掉 timer）。
+     */
+    savedTextRef.current = there.text
+    data
+      .discardTextDraft()
+      .then(() => data.beginTextEdit(there.fileName, there.path))
+      .then(
+        (fresh) => {
+          savedTextRef.current = fresh.text
+          /* 改动都作废了 —— 关窗时不该再喊"还没保存"（基准换成刚读回来的这份） */
+          openTextRef.current = fresh.text
+          openDirtyRef.current = false
+          setUndoStack([])
+          setRedoStack([])
+          histJumpRef.current = false
+          setEditing((cur) => (cur === null ? cur : { ...cur, text: fresh.text, draftError: null }))
+          setEditMode(false)
+        },
+        (e: unknown) => setNote({ text: `退回没成：${errorText(e)}`, bad: true }),
+      )
   }
 
   /**
@@ -2444,16 +2657,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           />
 
           {/*
-           * **编辑器抽屉**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
+           * **编辑器**（「编辑文件」那条链）。初稿 = **盘上那份文件的字节**，
            * 编辑期间只动正文草稿 —— 所以这里没有"保存到云端"这种动作：
-           * 只有「放弃」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
+           * 只有「退出编辑模式」与「保存（写回我这份）」。参数页那份未保存的改动**不进来**
            * （2026-10-10 作者：「没有点保存的时候千万不要保存进来」，两条草稿分开存）。
+           *
+           * ★ 2026-10-16 两态（作者：「点进去之后，它一开始只是显示……」）：
+           *   打开 = **只读**（着色正文 + 右下「进入编辑模式」），点进编辑模式才有
+           *   撤销 / 重做 / 退出编辑模式 / 保存。原来那颗「放弃」退休 ——
+           *   「退出编辑模式」什么都不丢：草稿在盘上，下次进来接着改。
            *
            * 2026-10-08 资源库改判起，编辑的对象只有**「我的预设」**（交付预设那一份是模板），
            * 所以这里只有一套说法：保存 = 写回它自己。
-           *
-           * 关掉（Esc / 点遮罩）= **只关，不丢**：正文草稿在盘上，回头点「改这份」接着改。
-           * 真正丢掉草稿只有一个入口：footer 里那颗「放弃这次编辑」。
+           * 关掉（Esc / ×）= **只关，不丢**（同上：草稿在盘上）。
            */}
           {/*
            * **撞名那一格**（a04）：云端那份要落下来、而本机已经有一份同名的了 ——
@@ -2502,18 +2718,44 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             /* 副标题只写**文件名**（2026-10-10 作者：「不要显示那个路径」）—— 与「修改参数」同一条 */
             subtitle={editing === null ? undefined : editing.fileName}
             /*
-             * 底栏：**右边两颗短按钮**，左边只在**出错**时说话。
+             * 底栏（2026-10-16 两态，与参数对比 / 修改参数弹窗同一套框架）：
              *
-             * ★ 2026-10-10 第三轮（作者圈着那句「接着上次改 —— 草稿已经在盘上」问
-             *   「那这个文案是什么意思？去掉它」）：原来这里有三种状态 ——
-             *   草稿没存上（警示色）/ 接着上次改 / 默认那句「改动会自动存进草稿」。
-             *   后两种是**过程说明**，"草稿""盘上"都是内部的词，用户不知道指什么，
-             *   也不需要被通知（要保存，右边那颗就是）。
-             *   留下的只有**异常**：临时文件没写进去时必须看得见。
+             *   只读态   右下「进入编辑模式」（打开先只是显示 —— 图二那颗的位置）
+             *   编辑态   撤销 / 重做 / 退出编辑模式 / 保存
+             *
+             * 左边仍只在**出错**时说话 —— 那两句过程说明（"改动自动存草稿"等）
+             * 2026-10-10 第三轮就撤了（"草稿""盘上"是内部的词，用户不需要被通知）；
+             * 留下的只有**异常**：临时文件没写进去时必须看得见。
              */
             footer={
               editing !== null && (
                 <div className={s.editorFoot}>
+                  {/*
+                   * **恢复默认值**（2026-10-16 作者：「就是左侧那个修改参数里面有按钮是恢复
+                   * 默认值，那这个也可以有个按钮编辑文件的恢复默认值」）——与参数弹窗那颗
+                   * **同一个位置**（底栏左下）、同一个词。退的是这份文件**最初落到盘上时**
+                   * 那一份（`originText`，来自 `baseline-local/` 的原文镜像）。
+                   * 算**一次改动**：按「撤销」能整个退回来；要落地还得按「保存」。
+                   */}
+                  {editMode && (
+                    <button
+                      type="button"
+                      className={`${s.textBtn} ${s.editorRestore}`}
+                      disabled={originText === null}
+                      title={
+                        originText === null
+                          ? '这份还没有原始备份 —— 退回不了最初那份'
+                          : '把正文退回它最初落到你盘上时的那一份 —— 算一次改动，按「撤销」能整个退回来'
+                      }
+                      onClick={() => {
+                        if (originText === null) return
+                        setEditing((cur) => (cur === null ? cur : { ...cur, text: originText }))
+                        setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
+                      }}
+                    >
+                      恢复默认值
+                    </button>
+                  )}
                   {editing.draftError !== null && (
                     <span className={s.editorStateBad}>
                       {EDIT_TEXT.draftFailed}
@@ -2521,27 +2763,73 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     </span>
                   )}
                   <span className={s.editorActs}>
-                    <button type="button" className={s.editGhost} onClick={discardEdit}>
-                      {EDIT_TEXT.discard}
-                    </button>
-                    <button type="button" className={s.editPrimary} onClick={commitEdit}>
-                      {EDIT_TEXT.commit}
-                    </button>
+                    {editMode ? (
+                      <>
+                        <button
+                          type="button"
+                          className={s.iconBtn}
+                          disabled={undoStack.length === 0}
+                          title="撤销（一次打字停顿回退一格）"
+                          aria-label="撤销"
+                          onClick={undoEdit}
+                        >
+                          <Icon name="undo" size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className={s.iconBtn}
+                          disabled={redoStack.length === 0}
+                          title="重做"
+                          aria-label="重做"
+                          onClick={redoEdit}
+                        >
+                          <Icon name="redo" size={15} />
+                        </button>
+                        <button
+                          type="button"
+                          className={s.textBtn}
+                          title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+                          onClick={exitEdit}
+                        >
+                          {EDIT_TEXT.exitMode}
+                        </button>
+                        <button type="button" className={s.primary} onClick={commitEdit}>
+                          {EDIT_TEXT.commit}
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className={s.primary}
+                        title="进编辑模式：正文就可以改了"
+                        onClick={() => setEditMode(true)}
+                      >
+                        {EDIT_TEXT.enterMode}
+                      </button>
+                    )}
                   </span>
                 </div>
               )
             }
-            onClose={() => setEditing(null)}
+            /* 关窗 = 只关不丢；没保存的改动会喊一声（见 `closeEdit`） */
+            onClose={closeEdit}
           >
             {editing !== null && (
               /*
-               * 正文区 = **着色的 <pre>（下）+ "文字透明"的 textarea（上）** ——
+               * 正文区。**编辑态** = 着色的 <pre>（下）+ "文字透明"的 textarea（上）——
                * 自己写的语法高亮（词法在 `tomlPaint.ts`）。两层同字体 / 同内衬 / 同行高，
                * 逐像素对齐；滚动由 textarea 管，`onScroll` 搬给下面那层。
+               * **只读态** = 就那层 <pre>（`data-ro`：自己滚、能选字，没有 textarea）。
                * 这一块**占满整屏**（`bodyFill`：框身不滚，四周留白交给 `.editWrap`）。
                */
               <div className={s.editWrap}>
-                <pre className={s.editPaint} ref={paintRef} aria-hidden>
+                <pre
+                  className={s.editPaint}
+                  ref={paintRef}
+                  /* 编辑态时它是 textarea 的视觉副本（字透明），只读态时它就是内容本体 */
+                  aria-hidden={editMode || undefined}
+                  data-ro={editMode ? undefined : '1'}
+                >
                   {paintedLines.map((line, i) => (
                     <span key={i}>
                       {line.map((t, j) =>
@@ -2557,22 +2845,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     </span>
                   ))}
                 </pre>
-                <textarea
-                  className={s.editArea}
-                  value={editing.text}
-                  spellCheck={false}
-                  aria-label="预设正文"
-                  autoFocus
-                  onScroll={(e) => {
-                    const paint = paintRef.current
-                    if (paint === null) return
-                    paint.scrollTop = e.currentTarget.scrollTop
-                    paint.scrollLeft = e.currentTarget.scrollLeft
-                  }}
-                  onChange={(e) =>
-                    setEditing((cur) => (cur === null ? cur : { ...cur, text: e.target.value }))
-                  }
-                />
+                {editMode && (
+                  <textarea
+                    className={s.editArea}
+                    value={editing.text}
+                    spellCheck={false}
+                    aria-label="预设正文"
+                    autoFocus
+                    onScroll={(e) => {
+                      const paint = paintRef.current
+                      if (paint === null) return
+                      paint.scrollTop = e.currentTarget.scrollTop
+                      paint.scrollLeft = e.currentTarget.scrollLeft
+                    }}
+                    onChange={(e) => {
+                      /* 用户敲的（不是撤销/重做造的）—— 下一拍落盘要进撤销栈 */
+                      histJumpRef.current = false
+                      setEditing((cur) =>
+                        cur === null ? cur : { ...cur, text: e.target.value },
+                      )
+                    }}
+                  />
+                )}
               </div>
             )}
           </Modal>

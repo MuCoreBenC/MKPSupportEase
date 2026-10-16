@@ -48,6 +48,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import type { ThemePref } from '../../api/contract'
 import { isAppError, wb } from '../api'
 import type {
   Boot,
@@ -57,10 +58,19 @@ import type {
   PublishAccount,
   SandboxStatus,
 } from '../api'
+/* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
+import { setTheme, useResolvedDark, useThemePref } from '../theme'
 import s from '../c14.module.css'
 
 /** 字节数给人看（一位小数够） */
 const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** 外观三档（与客户端「设置 → 外观」同一套说法、同一个 id —— 后端那边的 ThemePref 钉着） */
+const THEME_OPTS: { id: ThemePref; label: string; note: string }[] = [
+  { id: 'system', label: '跟随系统', note: '系统切深色就跟着深色 —— 没选过的时候就是这一档' },
+  { id: 'light', label: '浅色', note: '一直是浅色，不管系统怎么设' },
+  { id: 'dark', label: '深色', note: '一直是深色，不管系统怎么设' },
+]
 
 interface Props {
   boot: Boot
@@ -362,6 +372,31 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   const [sandBusy, setSandBusy] = useState(false)
   const [sandNote, setSandNote] = useState<{ text: string; bad: boolean } | null>(null)
 
+  /*
+   * 外观（深浅）：**选哪一档**由 `theme.ts` 拿着（它同时管着 `<html data-theme>`），
+   * 这一页只负责"点一下 → 交后端落盘 → 回来那一档是什么就显示什么"。
+   *
+   * ★ 真值一律取**后端答回来的那一份**（`setTheme` 的返回值）—— 界面不自己记住
+   *   "我以为是深色"，否则后端拒了而界面已经翻过去，就是"界面说了不算"。
+   */
+  const themePref = useThemePref()
+  const isDark = useResolvedDark()
+  const [themeBusy, setThemeBusy] = useState(false)
+  const [themeNote, setThemeNote] = useState<string | null>(null)
+
+  const pickTheme = async (next: ThemePref) => {
+    if (themeBusy) return
+    setThemeBusy(true)
+    setThemeNote(null)
+    try {
+      await setTheme(next)
+    } catch (e) {
+      setThemeNote(isAppError(e) ? e.message : e instanceof Error ? e.message : String(e))
+    } finally {
+      setThemeBusy(false)
+    }
+  }
+
   const sandboxAct = async (what: 'set' | 'refill' | 'wipe', enabled?: boolean) => {
     if (sandBusy) return
     setSandBusy(true)
@@ -447,6 +482,52 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
 
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      {/* ——— 外观：深浅两套配色（2026-10-16，与客户端同一套取值） ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>外观</b>
+          <span className={s.cardNote}>
+            深浅两套配色 —— 现在这一窗是{isDark ? '深色' : '浅色'}
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              工作台与客户端<b>各记各的一档</b>（两个应用的数据根是分开的，谁也不去读对方那棵树）
+              —— 这儿改的是<b>工作台这一窗</b>；客户端那扇窗在它自己的「设置 → 外观」里。
+            </p>
+            {THEME_OPTS.map((o) => (
+              <label
+                key={o.id}
+                className={s.vrow}
+                style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+              >
+                <input
+                  type="radio"
+                  name="wb-theme"
+                  value={o.id}
+                  /* 「没选过」= 跟随系统那一档（`null` 与 `system` 是一个意思） */
+                  checked={(themePref ?? 'system') === o.id}
+                  disabled={themeBusy}
+                  onChange={() => void pickTheme(o.id)}
+                />
+                <span className={s.grow}>
+                  <b>{o.label}</b>
+                  <span className={s.vhelp} style={{ display: 'block' }}>
+                    {o.note}
+                  </span>
+                </span>
+              </label>
+            ))}
+            {themeNote !== null && (
+              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                {themeNote}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* ——— 测试模式（沙箱）：整套数据根切到另一棵树 ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>

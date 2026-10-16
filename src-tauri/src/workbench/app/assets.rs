@@ -786,6 +786,8 @@ fn parse_kind(s: &str) -> Option<AssetKind> {
         // mkPreset 2026-10-03 进了台账 —— 漏了它的话「MKP 预设」那档会被当成
         // 「这一轴不过滤」，列表把整机图 / 图标全放出来（作者截图点名）
         AssetKind::MkPreset,
+        // 同一条道理（2026-10-16）：引导图那一档也要在这儿认领，不然筛它就等于不筛
+        AssetKind::Guide,
     ]
     .into_iter()
     .find(|k| k.key() == s)
@@ -816,10 +818,11 @@ mod tests {
         let list = wb_assets(None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            29,
-            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 3 + BBS 9 ——
+            31,
+            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 3 + BBS 9 + 引导图 2 ——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
              品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
+             2026-10-16：引导图进台账（`type = 'guide'`，bundled —— 图片引导那两张）。
              条数变了要说清为什么"
         );
 
@@ -911,6 +914,8 @@ mod tests {
             (AssetKind::Model, 3),
             (AssetKind::SlicerProfile, 9),
             (AssetKind::MkPreset, 9),
+            // 引导图 2 = 「改 .3mf 默认打开方式」那一处的浅 / 深两张（2026-10-16 进台账）
+            (AssetKind::Guide, 2),
         ];
         for (kind, want) in want_of {
             let got = wb_assets(Some(kind.key().to_owned()), None, None, None, None, None)
@@ -966,8 +971,9 @@ mod tests {
         let bundled = count(Bundled);
         assert_eq!(
             bundled.len(),
-            5,
-            "四条整机图 + 品牌字标是随包档（品牌图 2026-10-03 进台账）：{bundled:?}"
+            7,
+            "四条整机图 + 品牌字标 + **两条引导图**是随包档（品牌图 2026-10-03 进台账；
+             引导图 2026-10-16 进台账）：{bundled:?}"
         );
         assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
         assert_eq!(
@@ -985,8 +991,9 @@ mod tests {
             .all(|a| a.identity == AssetIdentity::Bundled));
         assert_eq!(
             filtered.assets.len(),
-            5,
-            "按随包身份筛 = 4 张整机图 + 品牌字标（品牌图 2026-10-03 进台账）"
+            7,
+            "按随包身份筛 = 4 张整机图 + 品牌字标 + 2 张引导图（品牌图 2026-10-03 进台账；
+             引导图 2026-10-16 进台账）"
         );
     }
 

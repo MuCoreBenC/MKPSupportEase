@@ -26,10 +26,14 @@
   outline-offset: 0;
 }
 
-/* tokens.css 里没有告警色，这个红与 #32 各处「未保存红点」用的是同一个值 */
+/*
+ * 告警态的框：字 / 边取 `--danger`、底取 `--danger-soft`（深色那边两个值都换过 ——
+ * 硬编码的红压在深底上发闷，6% 那层淡红更是等于没画）。
+ * 保留兜底值：这几件共用组件不止工作台在用（它们本来就是"假定了一组变量"的件）。
+ */
 .box[data-invalid='true'] {
-  border-color: #e5484d;
-  background: rgb(229 72 77 / 6%);
+  border-color: var(--danger, #e5484d);
+  background: var(--danger-soft, rgb(229 72 77 / 6%));
 }
 
 /* 改不动：看得见的虚线框 */
@@ -104,8 +108,9 @@
   color: var(--wb-primary-deep);
 }
 
+/* 按下比悬停再重一档：走 `--wb-primary-press`（硬编码的蓝在深底上是一块发闷的斑） */
 .arrow:active {
-  background: rgb(59 130 246 / 20%);
+  background: var(--wb-primary-press, rgb(59 130 246 / 20%));
 }
 
 .arrow svg {

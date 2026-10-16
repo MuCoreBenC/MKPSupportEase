@@ -13,7 +13,9 @@
   align-items: center;
   justify-content: center;
   padding: var(--pad);
-  background: rgba(16, 24, 32, 0.28);
+  /* ★ 遮罩取 `--scrim`（`c14tokens.css`）：深色那边必须是**中性黑** ——
+     给它压一层蓝黑，整屏界面就"变色"了（客户端 `--scrim` 那条教训） */
+  background: var(--scrim);
   /* 滚动穿透（2026-10-02）：滚到框内滚动容器的头、或鼠标落在遮罩空白处，
      滚动链不许再传给背后页面 —— 遮罩自己当滚动链的最后一环。
      代价是框贴到遮罩边时投影会被裁掉一点（阴影扩散 50px > --pad），值得。 */

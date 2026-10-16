@@ -665,6 +665,19 @@
   resize: none;
 }
 
+/*
+ * **只读态**（2026-10-16 两态；`data-ro` = 没有 textarea 那一层）：
+ * 这层 <pre> 从"视觉副本"变回"内容本体" —— 自己滚、能选字。
+ * 编辑态那套（绝对定位 + 隐藏滚动 + 不接事件）原样保留。
+ */
+.editPaint[data-ro] {
+  position: static;
+  height: 100%;
+  overflow: auto;
+  pointer-events: auto;
+  user-select: text;
+}
+
 /* 选中也要看得见（字是透明的，只画选区那一块） */
 .editArea::selection {
   background: rgb(32 178 90 / 28%);
@@ -702,10 +715,84 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * 「恢复默认值」（2026-10-16）：底栏**左下** —— 与「修改参数」弹窗那颗同一个位置、
+ * 同一个词。`margin-right: auto` 把它顶到左端（底栏本体是靠右收的）。
+ * 只在编辑态出现（只读态没有可"恢复"的东西 —— 那颗按钮改的是草稿）。
+ */
+.editorRestore {
+  margin-right: auto;
+}
+
 .editorActs {
   display: inline-flex;
   flex-shrink: 0;
   gap: 8px;
+}
+
+/*
+ * 底栏按钮三件（2026-10-16 两态）：**与参数对比台、修改参数弹窗同一套尺寸** ——
+ * 28px 高 · `--r-sm` 圆角 · `--fs-label` 字号 · 8px 间隔。
+ * 作者：「样式反正几乎都是同样的框架」——三个模态框之间来回看，按钮要对得上。
+ */
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.iconBtn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.textBtn {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.textBtn:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.primary {
+  height: 28px;
+  padding: 0 18px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: #fff;
+  cursor: pointer;
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-deep);
+}
+
+.iconBtn:disabled,
+.textBtn:disabled,
+.primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 /* ---------- 着色 token（`tomlPaint.ts` 的那几种） ---------- */

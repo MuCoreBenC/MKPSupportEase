@@ -72,6 +72,16 @@ pub enum AssetKind {
     Image,
     Icon,
     Model,
+    /// **引导图**（2026-10-16 加的第五类）：图片引导那套里用的**系统窗口截图**
+    /// （浅 / 深各一张，挂在"某一步"上，见 `src/app/guide/GuideImage.tsx`）。
+    ///
+    /// 与 [`Self::Image`] 分开：那一类**挂在机型上**（机型文件里的 `image` 指过来），
+    /// 这一类**挂在某个步骤上**（引导 spec 按 id 取）—— 两类都够不上对方那套回落链。
+    ///
+    /// 今天不进下载面（`kind_of_asset` 给 `None`）：`delivery = 'bundled'` 先随包，
+    /// 客户端走构建期装配出来的 `/assets/<path>` 取。作者要的**按需下载**是下一刀
+    /// （那时在这儿与 `kind_of_asset` 各加一格，再给客户端补"读下载区图片"的口子）。
+    Guide,
     /// 切片器预设。今天只有 BBS，`slicer` 字段留着别的切片器的位置
     SlicerProfile,
     /// **MKP 预设**（作者 2026-10-03：「为什么资产库里面不放 mkp 预设」——
@@ -95,6 +105,7 @@ impl AssetKind {
             Self::Model => "model",
             Self::SlicerProfile => "slicerProfile",
             Self::MkPreset => "mkPreset",
+            Self::Guide => "guide",
         }
     }
 }

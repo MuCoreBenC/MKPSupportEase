@@ -2227,6 +2227,7 @@ dependencies = [
  "tracing-subscriber",
  "ureq",
  "uuid",
+ "winreg",
 ]
 
 [[package]]

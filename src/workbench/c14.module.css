@@ -17,7 +17,13 @@
   --wb-primary: #3b82f6;
   --wb-primary-deep: #2f74dd;
   --wb-primary-soft: rgba(59, 130, 246, 0.12);
+  /* 分隔条悬停那条线：主色的半透明版（与 --wb-primary 同源，硬编码会漂） */
+  --wb-primary-line: rgba(59, 130, 246, 0.4);
+  /* 按下态：比悬停（--wb-primary-soft）再重一档（数字框步进箭头） */
+  --wb-primary-press: rgba(59, 130, 246, 0.2);
   --wb-ok: #10b981;
+  /* 「要留意」那一档的字色（弃用徽章以外的几处提示行读它） */
+  --wb-warn: #b45309;
   /*
    * C14：圆角是**控件属性**，不是整个页面的建筑风格（作者原话：该直角的时候
    * 就要直角）。全局那套 --r-* 是给首页卡片墙的宽松量（8/12/16），C14 在稿内
@@ -125,6 +131,31 @@
   background: var(--bg-1);
   color: var(--text-1);
   font: var(--fs-body) / 1.5 -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/*
+ * 深色那一套里**只有这几条**是 `.shell` 自己的（其余全走 `c14tokens.css` 的
+ * `[data-theme='dark'] [data-wb]`）—— 它们是工作台蓝 / 弃用红那一族，客户端那一份
+ * tokens 里没有同名变量，所以按同一套口径在这里给：
+ *   · 蓝 / 绿各提亮或压暗一档（深底上原值发闷或晃眼）；
+ *   · 「更深的蓝」在深色里反过来是**更亮的蓝** —— dark 上往下压会看不见；
+ *   · 弃用红整族换成半透明底 + 提亮的字（浅色那套是"红往灰里退"，深色要反过来）。
+ */
+[data-theme='dark'] .shell {
+  --wb-primary: #4b8ef7;
+  --wb-primary-deep: #7ab0fa;
+  --wb-primary-soft: rgba(75, 142, 247, 0.18);
+  --wb-primary-line: rgba(75, 142, 247, 0.55);
+  --wb-primary-press: rgba(75, 142, 247, 0.34);
+  --wb-ok: #2f9e5b;
+  --wb-warn: #d9942b;
+
+  --dep-red: #e09a92;
+  --dep-red-soft: rgba(226, 104, 94, 0.16);
+  --dep-red-line: rgba(226, 104, 94, 0.34);
+
+  /* 分段选择器选中那块滑块的投影：深色里浅影等于没画 */
+  --seg-on-shadow: 0 1px 3px rgb(0 0 0 / 45%);
 }
 
 /* ---------- 窗口栏 ---------- */
@@ -253,13 +284,14 @@
 }
 
 
+/* 两级"叠一层"：浅色是墨压一层，深色是白提一层（判据只有 tokens 那两个变量） */
 .wb:hover {
   color: var(--text-1);
-  background: rgb(16 24 32 / 6%);
+  background: var(--hover-1);
 }
 
 .wb:active {
-  background: rgb(16 24 32 / 11%);
+  background: var(--hover-2);
 }
 
 .wbClose:hover {
@@ -780,19 +812,24 @@
   border-color: var(--line-strong);
 }
 
+/*
+ * 危险按钮：底取 `--w-danger-fill`（**不是** `--danger` —— 那是"字"的红，
+ * 白字压在它上面对比不够）。
+ */
 .btnDanger {
   color: #fff;
   font-weight: 600;
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--w-danger-fill);
+  border-color: var(--w-danger-fill);
 }
 
 /* 危险按钮自己的悬停（C14）。少了这条，鼠标一悬停就被 `.btn:hover` 的灰底
    按特异性盖掉 —— 「确认恢复？」的红色瞬间变灰（作者：「恢复默认的时候，
-   我悬停的时候它的颜色不对」）。hover 只能更深一档的红，不许换成一族别的颜色。 */
+   我悬停的时候它的颜色不对」）。hover 只能更深一档的红，不许换成一族别的颜色。
+   ★ 深色里"更深一档"反而是**提亮**一档：深底上往下压，看着就像被按灭了。 */
 .btnDanger:hover:not(:disabled) {
-  background: #a8382f;
-  border-color: #a8382f;
+  background: var(--w-danger-fill-hover);
+  border-color: var(--w-danger-fill-hover);
 }
 
 .btnDanger:disabled {
@@ -858,9 +895,11 @@
   background: var(--danger-soft);
 }
 
+/* 「阻断」徽章：实心红底 + 白字。底同样取 `--w-danger-fill`（深色里 `--danger`
+   是"字"的红，白字压上去读不清） */
 .tagSevBlock {
   color: #fff;
-  background: var(--danger);
+  background: var(--w-danger-fill);
 }
 
 .tagSevTodo {
@@ -874,9 +913,9 @@
 }
 
 .tagBuildBuilt {
-  /* 「已生成」是成功语义，不是主操作 —— ok 绿 */
+  /* 「已生成」是成功语义，不是主操作 —— ok 绿（底是 ok 的浅底，跟着主题走） */
   color: var(--wb-ok);
-  background: rgba(16, 185, 129, 0.12);
+  background: var(--w-ok-soft);
 }
 
 .tagBuildStale {
@@ -1835,36 +1874,39 @@
 }
 
 /*
- * 语法高亮的字色（VSCode Light+ 的取向，浅底可读）。
- * **只在这一处定义** ——「生成前确认」的行级 diff 也 import 这一份（`c.tok_*`）。
+ * 语法高亮的字色。**只在这一处定义** ——「生成前确认」的行级 diff 也 import
+ * 这一份（`c.tok_*`）。
+ *
+ * ★ 值是 `--tok-*`（`c14tokens.css`）：浅色取 VSCode Light+、深色取 Dark+ 那两套。
+ *   直接写色值的话，深底上 `#00f` 的蓝关键字几乎看不见 —— 而这是"看整份 TOML"的正文。
  */
 .tok_key {
-  color: #0451a5;
+  color: var(--tok-key);
 }
 
 .tok_string {
-  color: #a31515;
+  color: var(--tok-string);
 }
 
 .tok_number {
-  color: #098658;
+  color: var(--tok-number);
 }
 
 .tok_keyword {
-  color: #00f;
+  color: var(--tok-keyword);
 }
 
 .tok_comment {
-  color: #008000;
+  color: var(--tok-comment);
 }
 
 .tok_section {
-  color: #795e26;
+  color: var(--tok-section);
   font-weight: 500;
 }
 
 .tok_punct {
-  color: #6a737d;
+  color: var(--tok-punct);
 }
 
 .fileRow {
@@ -2144,9 +2186,11 @@
   margin-top: 8px;
 }
 
+/* 阻断那一条：底是 `--danger-soft`（深色自带半透明版），描边同样走变量 ——
+   浅色那支 30% 的"深红发丝"压在深底上等于没画 */
 .issueBlock {
   background: var(--danger-soft);
-  border-color: rgba(200, 69, 60, 0.3);
+  border-color: var(--dep-red-line);
 }
 
 .issueTxt {
@@ -2637,11 +2681,12 @@
   transition: background 0.12s ease;
 }
 
-/* 悬停：主色的半透明版（rgba 与 --wb-primary 同源）。
+/* 悬停：主色的半透明版 —— 取 `--wb-primary-line`（与 `--wb-primary` 同源，
+   深色那边提亮过，硬编码的 0.4 蓝在深底上就是一条看不见的线）。
    原来用 --line-strong，截图里在预览窗口的 90% 缩放下几乎看不见 ——
    提示线看不见就等于没提示 */
 .pSplit:hover::before {
-  background: rgba(59, 130, 246, 0.4);
+  background: var(--wb-primary-line);
 }
 
 /* 拖动中：线是实心主色，松手前一直看得见它在哪 */

@@ -158,9 +158,11 @@
   border-color: var(--text-1);
 }
 
+/* 实心红底（"删除"那颗）：底取 `--w-danger-fill`，与 `.btnDanger` 同一支 ——
+   深色里 `--danger` 是**字**的红，白字压上去读不清 */
 .ok {
-  border-color: var(--danger);
-  background: var(--danger);
+  border-color: var(--w-danger-fill);
+  background: var(--w-danger-fill);
   color: #fff;
   font-weight: 600;
 }

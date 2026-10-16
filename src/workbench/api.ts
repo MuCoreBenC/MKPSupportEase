@@ -16,6 +16,9 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 
+/* 主题档位的字面量与客户端是同一份契约（三个值的 id 由 Rust 那边的 ThemePref 钉着） */
+import type { ThemePref } from '../api/contract'
+
 /* ---------- 错误 ---------- */
 
 /** `error::AppError`。与客户端共用同一套 —— trace id 也共用一条日志线 */
@@ -1377,8 +1380,13 @@ export interface MachineList {
  *
  * `image`（整机图）2026-10-03 回到台账（第三刀的剥离已作废）：它用
  * `delivery = 'bundled'` 表达「不进交付预设那一档、但工作台可管可换图」。
+ *
+ * `guide`（引导图）2026-10-16 进台账（`type = 'guide'`，bundled —— 图片引导那两张：
+ * 「改 .3mf 默认打开方式」的浅 / 深截图）。★ 当天那一刀 Rust 侧（`AssetKind::Guide`）
+ * 与 AssetsPage 都加了，**漏了这里** —— `tsc -b` 撞在 `cur.kind === 'guide'` 上
+ * （TS2367 零交集），顺手补齐。
  */
-export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset' | 'guide'
 
 /** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
 export interface AssetView {
@@ -1583,6 +1591,16 @@ export const wb = {
       giteeUrl,
     }),
   words: () => invoke<Words>('wb_words'),
+
+  /**
+   * 界面偏好：**主题档位**（`light` / `dark` / `system`）。`null` = 还没选过 ⇒ 跟随系统。
+   *
+   * ★ 命令就是客户端那两条（`ipc::prefs`），但**落点是工作台自己那棵数据根**
+   * （identifier = `SupportEase-Workbench`）—— 两个应用各记各的一档，不互相读。
+   */
+  theme: () => invoke<ThemePref | null>('get_theme'),
+  /** 换档：立即生效并落盘。返回值是**存下去的那一档**（认不出的字符串会被后端整次拒绝） */
+  setTheme: (theme: ThemePref) => invoke<ThemePref>('set_theme', { theme }),
 
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),

@@ -58,6 +58,8 @@ const KIND_LABEL: Record<string, string> = {
   model: '模型',
   slicerProfile: '切片器',
   mkPreset: 'MKP 预设',
+  /* 引导图（2026-10-16）：图片引导那套里的系统窗口截图（浅 / 深各一张） */
+  guide: '引导图',
 }
 
 /** 字节数给人看的写法（检查面板「大小」那一格）：B / KB / MB 一位小数 */
@@ -71,7 +73,7 @@ function formatBytes(n: number): string {
  *  `image`（整机图）**回到台账**：作者 2026-10-03 改判 —— 第三刀把它挪进客户端
  *  源码是错的（不会编程的用户改不了图）。它仍然**不进交付预设**，但必须
  *  在工作台看得见、选得着 */
-type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
+type Kind = 'all' | 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset' | 'guide'
 /** 交付身份四态（作者 2026-10-03 定的模型）：进套餐 / 可选 / 随包 / 仅归档 */
 type Assign = 'all' | 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
 
@@ -289,6 +291,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               ['all', '全部'],
               ['image', '机型图'],
               ['icon', '图标'],
+              ['guide', '引导图'],
               ['model', '模型'],
               ['slicerProfile', '切片器'],
               ['mkPreset', 'MKP 预设'],
@@ -557,7 +560,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 <span className={s.kvVal}>
                   {!cur.present ? (
                     <span className={s.kvDim}>登记了，文件还没搬进来</span>
-                  ) : cur.kind === 'image' || cur.kind === 'icon' ? (
+                  ) : cur.kind === 'image' || cur.kind === 'icon' || cur.kind === 'guide' ? (
                     <img
                       src={encodeURI(cur.url)}
                       alt={cur.display}

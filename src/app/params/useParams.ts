@@ -494,6 +494,15 @@ export interface Params {
    * 算一次动作、可整体撤销（2026-10-08 资源库改判：不再问任何历史快照）。
    */
   restoreDefaults: () => void
+  /**
+   * 全部未保存的改动**一次退回已保存值**（原「取消」；2026-10-16 起 =
+   * 「退出编辑模式」做的事——作者：「退出编辑模式就是作废，那些改的都作废，
+   * 保存了才有」）。
+   *
+   * 走的还是 `apply`（一次动作、可整体撤销、草稿 TOML 同步落盘），
+   * 不是清栈——作废也是一次改动，按撤销能整个回来。
+   */
+  discardAll: () => void
   save: () => void
   /** 保存成功后的那一行绿字；null = 不显示 */
   savedNote: string | null
@@ -1424,6 +1433,20 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
   const dirtyKeys = useMemo(() => Object.keys(draft), [draft])
 
+  /**
+   * 底栏「取消」（2026-10-16，作者：「我的修改参数还缺少取消按钮，风格要一样呀」）：
+   * 全部未保存的改动**一次退回已保存值**。`apply` 的既有语义正好接住——
+   * 「改成与已保存值相同 = 撤掉草稿」——所以这只是一次普通的批量 apply：
+   * 一次撤销能整个回来、草稿 TOML 逐键回写、日志记一条「取消改动」。
+   */
+  const discardAll = useCallback(() => {
+    if (dirtyKeys.length === 0) return
+    apply(
+      '取消改动',
+      dirtyKeys.map((key) => ({ key, value: savedValueOf(key) })),
+    )
+  }, [apply, dirtyKeys, savedValueOf])
+
   const requestCombo = useCallback(
     (nextMachine: string, nextVersion: string) => {
       /* 钉住模式（右键某一份预设）：编辑的是那一份，换目标这件事整个不存在 */
@@ -1776,6 +1799,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     dismissReslice: useCallback(() => setResliceAsk(false), []),
     revertToSaved,
     restoreDefaults,
+    discardAll,
     save,
     savedNote,
     gateNote,

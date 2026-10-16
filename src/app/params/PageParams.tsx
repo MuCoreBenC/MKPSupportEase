@@ -68,6 +68,16 @@ interface Props {
   target?: { path: string; fileName: string; machineId: string; versionId: string }
   /** 一进来就把「选择要跟随的更新」那一屏打开 */
   openSyncOnStart?: boolean
+  /**
+   * **编辑模式闸**（2026-10-16，作者：「不管是对比还是那个修改参数，他们的那个
+   * 编辑模式布局几乎都要一样」）：true 时**打开先只读**（控件全体降成纯文本值，
+   * 底栏只有「进入编辑模式」），点它才进入可改的那一态；false（默认）打开即可改。
+   *
+   * `PresetParamsModal`（当前唯一调用点）恒传 true —— 与参数对比台同一个框架：
+   * 只读态 → 进编辑模式 → 撤销 / 重做 / 退出编辑模式 / 保存。
+   * 「退出编辑模式」= **作废**这一次没保存的改动（回只读；见下面 `editMode` 那段）。
+   */
+  gateEdit?: boolean
 }
 
 interface ShownCard {
@@ -98,8 +108,10 @@ function towerNumOf(raw: string, fallback: number): number {
  *   板轮廓      按机型的 `defaultPlateId` 从 catalog 的 plates 查（没配板就退回圆角矩形）
  *
  * 拖拽与轴输入的提交都走这一页的 `u.apply`：一次手势一条撤销、还原胶囊指已保存值。
+ *
+ * `disabled`（2026-10-16 编辑模式两态）：只读态里地图拖不动 —— 按下直接不响应。
  */
-function towerSlotOf(u: ReturnType<typeof useParams>): TowerSlot | undefined {
+function towerSlotOf(u: ReturnType<typeof useParams>, disabled: boolean): TowerSlot | undefined {
   const dims = u.machine?.dimensions ?? null
   const xDef = u.defOf('wiping.wiper_x')
   const yDef = u.defOf('wiping.wiper_y')
@@ -155,6 +167,7 @@ function towerSlotOf(u: ReturnType<typeof useParams>): TowerSlot | undefined {
         core={core}
         plate={plate}
         side={side}
+        disabled={disabled}
         onCommit={(nx, ny) =>
           u.apply('移动擦料塔', [
             { key: xDef.key, value: String(nx) },
@@ -350,8 +363,26 @@ export default function PageParams({
   embedded = false,
   target,
   openSyncOnStart = false,
+  gateEdit = false,
 }: Props) {
   const u = useParams(target === undefined ? undefined : { target })
+
+  /*
+   * **编辑模式**（2026-10-16，作者：「进入编辑模式的那个按钮位置也统一一下」）。
+   *
+   * `gateEdit` 时打开先只读 —— 控件全体降成纯文本值、底栏只有「进入编辑模式」
+   * （与参数对比台、编辑文件两个模态框同一个框架）；点它进编辑模式，底栏换成
+   * 撤销 / 重做 / 退出编辑模式 / 保存。退出 = **作废**（作者 2026-10-16：「没有保存的话，
+   * 退出编辑模式就是作废，那些改的都作废，保存了才有」）—— 走 `u.discardAll()`：
+   * 全部未保存的改动一次退回已保存值；要留住改动只有「保存」一条路。
+   *
+   * ★ 例外：`openSyncOnStart`（右键「选择要跟随的更新」那条直路）**直接进编辑模式**
+   * —— 用户是带着"来处理更新"的意图点进来的，再让他先点一下「进入编辑模式」
+   * 是白拦一道（那屏里的采用 / 保持本来就是写操作）。
+   */
+  const [editMode, setEditMode] = useState(gateEdit !== true || openSyncOnStart)
+  /** 只读 = 有闸且还没进编辑模式 */
+  const ro = gateEdit && !editMode
 
   const [categoryId, setCategoryId] = useState('')
   const [query, setQuery] = useState('')
@@ -623,7 +654,7 @@ export default function PageParams({
   const closeHistory = () => setHistoryOpen(false)
 
   /** 擦料塔地图的供数（见 towerSlotOf）：坐标字段不在 / 没配尺寸时是 undefined，坐标行照旧 */
-  const tower = towerSlotOf(u)
+  const tower = towerSlotOf(u, ro)
 
   const renderCards = (cards: ShownCard[]) =>
     cards.map(({ id, title, subtitle, fields }) => (
@@ -648,13 +679,17 @@ export default function PageParams({
         onToggleExpand={(key) => setExpandedDetailKey((prev) => (prev === key ? null : key))}
         onEdit={u.edit}
         onRevertToSaved={u.revertToSaved}
+        /* 只读态（编辑模式之外）：控件降成纯文本值、分支卡头点不动 */
+        readonly={ro}
         /*
          * 云端更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
          * 认不出是哪一版云端）时不传 —— 行上一律不画，与以前长得一模一样。
+         * 只读态两个动作也不传（ParamRow：「不传就画不出那两颗按钮」）——
+         * 「云端已更新 · 云端 x → y」那两行说明照常显示。
          */
         syncOf={u.sync === null ? undefined : u.syncOf}
-        onAdoptSync={(key) => u.decideSync([key], 'adopt')}
-        onHoldSync={(key) => u.decideSync([key], 'hold')}
+        onAdoptSync={ro ? undefined : (key) => u.decideSync([key], 'adopt')}
+        onHoldSync={ro ? undefined : (key) => u.decideSync([key], 'hold')}
         syncBusy={u.syncBusy}
         renderBlock={(def) => (
           <GcodeBlock
@@ -730,12 +765,15 @@ export default function PageParams({
       /* 认得出是这一页的键，就先吃掉 —— 弹层开着也一样（理由见上面注释） */
       e.preventDefault()
       if (sheetOpen) return
-      if (k === 's') {
-        if (dirtyCount > 0) setAskSave(true)
+      if (k === 'f') {
+        /* 搜索是"看"的一部分，只读态照认 */
+        searchRef.current?.focus()
         return
       }
-      if (k === 'f') {
-        searchRef.current?.focus()
+      /* 只读态（编辑模式之外）：s / z / y 到此为止 —— 没有可保存、可撤销的东西 */
+      if (ro) return
+      if (k === 's') {
+        if (dirtyCount > 0) setAskSave(true)
         return
       }
       if (k === 'y' || e.shiftKey) redo()
@@ -744,7 +782,7 @@ export default function PageParams({
     /* 捕获阶段：Esc 要抢在 `document` 上那些抽屉监听之前（见注释） */
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, askSave, askRestore])
+  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, askSave, askRestore, ro])
 
   if (u.loading) {
     return (
@@ -958,7 +996,18 @@ export default function PageParams({
                     —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
                   </span>
                 </span>
-                <button type="button" className={s.syncBarBtn} onClick={() => setSyncOpen(true)}>
+                <button
+                  type="button"
+                  className={s.syncBarBtn}
+                  /*
+                   * 只读态点它 = 顺手进编辑模式再开面板 —— "处理更新"本来就是写操作，
+                   * 用不着让用户先去找底栏那颗「进入编辑模式」。
+                   */
+                  onClick={() => {
+                    if (ro) setEditMode(true)
+                    setSyncOpen(true)
+                  }}
+                >
                   选择要跟随的更新
                 </button>
               </div>
@@ -1037,71 +1086,122 @@ export default function PageParams({
               onMode={setHistoryMode}
               onClose={closeHistory}
               onRevert={u.revertEntry}
+              /* 只读态：历史照看，「还原」那颗不画（写入口） */
+              readonly={ro}
             />
           )}
         </div>
 
+        {/*
+         * 底栏（2026-10-16 两态，与参数对比台 / 编辑文件模态框同一套框架）：
+         *
+         *   只读态   左状态 · 右下「进入编辑模式」
+         *   编辑态   左「恢复默认值 + 状态」· 右下 撤销 / 重做 / 退出编辑模式 / 保存
+         *
+         * ★ 撤销 / 重做从**左下**搬到右下（与对比台同一位置）——作者：
+         *   「我发现它有的撤销重做位置都不一样……你把他们的文案也统一一下」。
+         * ★ 「取消」退休（「退出编辑模式」统一收编：回只读、什么都不丢）；
+         *   「保存修改」的按钮字收短成「保存」（三个模态框一个词）。
+         */}
         <footer className={s.foot}>
-          <div className={s.footLeft}>
-            {/*
-             * 撤销 / 重做改图标（作者：「撤销重做用图标吧，或者省略？只用快捷键」）。
-             * 选图标不选「省略」：当时**这一页还没有绑 Ctrl+Z / Ctrl+Y**（整份稿查过一遍），
-             * 删了就等于撤销这条路彻底看不见了。图标 28×28，两颗共省下约 44px ——
-             * 正好是 mini 档底栏「多一行」缺的那一截。
-             *
-             * 快捷键后来补上了（见上面那个 keydown effect），所以 tooltip 里现在
-             * **写得**出快捷键了 —— 那句话当时留的备注就是「没配就不写，免得骗人」。
-             */}
-            <button
-              type="button"
-              className={s.iconBtn}
-              disabled={!u.canUndo}
-              onClick={u.undo}
-              title="撤销（Ctrl+Z）"
-              aria-label="撤销"
-              aria-keyshortcuts="Control+Z"
-            >
-              <Icon name="undo" size={15} />
-            </button>
-            <button
-              type="button"
-              className={s.iconBtn}
-              disabled={!u.canRedo}
-              onClick={u.redo}
-              title="重做（Ctrl+Y）"
-              aria-label="重做"
-              aria-keyshortcuts="Control+Y"
-            >
-              <Icon name="redo" size={15} />
-            </button>
-            <span className={s.sep} aria-hidden />
-            <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
-              恢复默认值
-            </button>
-          </div>
+          {ro ? (
+            <>
+              <div className={s.footLeft}>
+                {/*
+                 * mini 档只留「N 处未保存」—— 「保存会写回 xxx」那半句实测 153px，
+                 * 会把底栏顶成两行（作者：「下面改不改都多一行」）。
+                 * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
+                 * 而且这里挂了 title，悬停还能看全。
+                 */}
+                <span className={s.state} title={stateText}>
+                  {stateText}
+                </span>
+              </div>
+              <div className={s.footRight}>
+                <button
+                  type="button"
+                  className={s.primary}
+                  title="进编辑模式：参数就可以改了"
+                  onClick={() => setEditMode(true)}
+                >
+                  进入编辑模式
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={s.footLeft}>
+                {/*
+                 * 「恢复默认值」留在左下（右下的保存组离它远一点 —— 它一按下去
+                 * 全部参数回出厂值，虽然在撤销栈里、也不该挨着保存键）。
+                 */}
+                <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
+                  恢复默认值
+                </button>
+                <span className={s.state} title={stateText}>
+                  {stateText}
+                </span>
+              </div>
 
-          <div className={s.footRight}>
-            {/*
-             * mini 档只留「N 处未保存」—— 「保存后会覆盖 xxx.toml」那半句实测 153px，
-             * 加上左边那三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
-             * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
-             * 而且这里挂了 title，悬停还能看全。
-             */}
-            <span className={s.state} title={stateText}>
-              {stateText}
-            </span>
-
-            <button
-              type="button"
-              className={s.primary}
-              disabled={u.dirtyCount === 0}
-              title="保存修改（Ctrl+S）"
-              aria-keyshortcuts="Control+S"
-              onClick={() => setAskSave(true)}
-            >
-              保存修改
-            </button>
-          </div>
+              <div className={s.footRight}>
+                {/*
+                 * 撤销 / 重做改图标（作者：「撤销重做用图标吧，或者省略？只用快捷键」）。
+                 * 选图标不选「省略」：当时**这一页还没有绑 Ctrl+Z / Ctrl+Y**（整份稿查过一遍），
+                 * 删了就等于撤销这条路彻底看不见了。图标 28×28，两颗共省下约 44px。
+                 * 快捷键后来补上了（见上面那个 keydown effect），tooltip 里写得出快捷键。
+                 */}
+                <button
+                  type="button"
+                  className={s.iconBtn}
+                  disabled={!u.canUndo}
+                  onClick={u.undo}
+                  title="撤销（Ctrl+Z）"
+                  aria-label="撤销"
+                  aria-keyshortcuts="Control+Z"
+                >
+                  <Icon name="undo" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={s.iconBtn}
+                  disabled={!u.canRedo}
+                  onClick={u.redo}
+                  title="重做（Ctrl+Y）"
+                  aria-label="重做"
+                  aria-keyshortcuts="Control+Y"
+                >
+                  <Icon name="redo" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={s.textBtn}
+                  title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+                  onClick={() => {
+                    /*
+                     * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+                     * 就是作废，那些改的都作废，保存了才有」）——`discardAll` 正是这件事：
+                     * 全部未保存的改动一次退回已保存值（草稿条目删掉、草稿 TOML 逐键回写）。
+                     * 它本身是"一次动作"，重进编辑模式后按撤销还能整个拉回来。
+                     */
+                    u.discardAll()
+                    setEditMode(false)
+                  }}
+                >
+                  退出编辑模式
+                </button>
+                <button
+                  type="button"
+                  className={s.primary}
+                  disabled={u.dirtyCount === 0}
+                  title="保存（Ctrl+S）"
+                  aria-keyshortcuts="Control+S"
+                  onClick={() => setAskSave(true)}
+                >
+                  保存
+                </button>
+              </div>
+            </>
+          )}
         </footer>
 
         {/* 切机型确认：有未保存改动时先问 */}
@@ -1330,6 +1430,8 @@ export default function PageParams({
           onMode={setHistoryMode}
           onClose={closeHistory}
           onRevert={u.revertEntry}
+          /* 只读态：历史照看，「还原」那颗不画（写入口） */
+          readonly={ro}
         />
       )}
 

@@ -60,6 +60,16 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
         if let Some(win) = app.get_webview_window("main") {
             crate::chrome::repaint_corner_fill(&win, resolved_dark(Some(pref), &win));
         }
+        /*
+         * ★ 工作台那扇窗（只在 `workbench` feature 下存在）也要跟着翻（2026-10-16）。
+         * 它没有"圆角填色"那一层（那扇窗用系统原生装饰，不是无边框玻璃）——
+         * 它要换的是**原生外观**：标题栏 / 滚动条 / 原生控件。少这一步，
+         * 深色档下就是"页面是深色、标题栏还浅着"。
+         */
+        #[cfg(feature = "workbench")]
+        if let Some(win) = app.get_webview_window(crate::workbench::WINDOW_LABEL) {
+            apply_native_theme(&win, Some(pref));
+        }
         Ok(pref.wire().to_owned())
     })
 }
@@ -81,6 +91,32 @@ pub fn resolved_dark<R: tauri::Runtime>(
         Some(ThemePref::Light) => false,
         _ => matches!(win.theme(), Ok(tauri::Theme::Dark)),
     }
+}
+
+/// **原生外观**该设成哪一档 —— 返回值直接喂 [`tauri::WebviewWindow::set_theme`]。
+///
+/// ★ `None` 不是"不设"，是**交回给系统**：用户选了「跟随系统」（或还没选过）时，
+/// 窗口外观就该跟着系统走。硬设成"系统现在这一档"反而把它**钉死**了 ——
+/// 之后系统切另一档，它就再也不动。
+pub fn native_theme(pref: Option<ThemePref>) -> Option<tauri::Theme> {
+    match pref {
+        Some(ThemePref::Dark) => Some(tauri::Theme::Dark),
+        Some(ThemePref::Light) => Some(tauri::Theme::Light),
+        _ => None,
+    }
+}
+
+/// 把一扇窗的**原生那一层**换到 `pref` 那一档（2026-10-16 工作台做深色时加的）。
+///
+/// 客户端主窗口那一条"原生"是**圆角外的填色**（[`crate::chrome::repaint_corner_fill`]）
+/// —— 它无边框，圆角是自己画的；工作台那扇窗是**系统原生装饰**，CSS 只画得到内容区，
+/// 所以它的"原生那一层"是 `set_theme`：**标题栏 / 滚动条 / 原生控件**跟着一起翻。
+/// 少这一步，工作台在深色档下就是"页面深色、标题栏浅色"。
+pub fn apply_native_theme<R: tauri::Runtime>(
+    win: &tauri::WebviewWindow<R>,
+    pref: Option<ThemePref>,
+) {
+    let _ = win.set_theme(native_theme(pref));
 }
 
 /// 读盘上那一档（给启动时算原生外观用；`None` = 还没选过 ⇒ 跟随系统）。

@@ -47,6 +47,11 @@ interface Props {
   onMode: (m: DrawerMode) => void
   onClose: () => void
   onRevert: (id: number) => void
+  /**
+   * **只读**（2026-10-16 的编辑模式两态）：历史照看，「还原」那颗不画 ——
+   * 它是个写入口，只读态只负责"看得见改过什么"。
+   */
+  readonly?: boolean
 }
 
 const STATE_TEXT: Record<HistoryEntry['state'], string> = {
@@ -74,6 +79,7 @@ export default function HistoryDrawer({
   onMode,
   onClose,
   onRevert,
+  readonly = false,
 }: Props) {
   /*
    * 一条改动 → 两句：
@@ -112,7 +118,7 @@ export default function HistoryDrawer({
         <span className={entry.state === 'saved' ? s.badgeSaved : s.badge}>
           {STATE_TEXT[entry.state]}
         </span>
-        {entry.state !== 'undone' && (
+        {entry.state !== 'undone' && !readonly && (
           <button type="button" className={s.revert} onClick={() => onRevert(entry.id)}>
             还原
           </button>

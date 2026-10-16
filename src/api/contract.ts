@@ -786,6 +786,16 @@ export interface PresetTextDraft {
   updatedUnix: number
   /** 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的 */
   reused: boolean
+  /**
+   * 草稿与**盘上当前字节**比过：真有未保存的改动才算脏（2026-10-16 加）。
+   *
+   * 与 `reused` 是两个维度：`reused && !dirty` = "接着上次打开、但一字没改"
+   * （打开过又关掉，草稿还在但内容没变）。界面拿它决定"重开时要不要直接进编辑模式
+   * 并提醒还没保存"（作者 2026-10-16：「下次打开这个模态框……说刚才那些修改还没保存」）。
+   *
+   * ★ 比不了（那一份读不出来 / 被移走了）时**保守算脏** —— 宁可多提醒一句，不要漏报。
+   */
+  dirty: boolean
 }
 
 /*
@@ -1095,7 +1105,7 @@ export interface CatalogRegistry {
 export interface CatalogAsset {
   /** 主键，**大小写不敏感**唯一 */
   id: string
-  /** `'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'` */
+  /** `'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset' | 'guide'` */
   type: string
   /** 归属机型；不属于任何机型时不给这个字段 */
   machineId?: string
@@ -1775,10 +1785,12 @@ export interface CopyToSlicerOutcome {
 export type SlicerId = 'system' | 'bambu' | 'orca' | 'custom'
 
 /**
- * 用户从磁盘挑的那个切片软件（[`MkpApi.pickSlicerApp`] 的返回值）。
+ * 一个切片软件：用户从磁盘挑的那个（[`MkpApi.pickSlicerApp`]），
+ * 或系统当前关联的那个（[`MkpApi.getSystemSlicerApp`]）。
  *
- * `path` 是**可执行物**（macOS 是 `.app` 包、Windows 是 `.exe`）。挑的时候就把
- * `name` 一起取好 —— 界面直接拿来显示（下拉里那一条），壳不用再解析路径。
+ * `path` 是**可执行物**（macOS 是 `.app` 包、Windows 是 `.exe`）。`name` 在取它的
+ * 那一刻就该取好（列目录时取 / 问系统时取）—— 界面直接拿来显示（下拉里那一条），
+ * 不再让谁去解析路径。
  */
 export interface SlicerApp {
   /** 显示名（如 `PrusaSlicer`） */
@@ -1827,6 +1839,43 @@ export interface MkpApi {
    * **取消给 `null`，不是错误**（与 `pickExportDir` 同一条口径）—— 什么都不写。
    */
   pickSlicerApp(): Promise<SlicerApp | null>
+
+  /**
+   * **这台机器上 `.3mf` 现在关联的程序**（2026-10-16）。
+   *
+   * 「切片」那格与「打开模型」框里都有「跟随系统默认」这一档 —— 它是四档里**唯一一档
+   * 名字里没有应用名**的：用户看着它没法知道双击会开哪个软件（作者原话：「我不知道
+   * 它默认的是哪一个」）。这一条就是去把这个名字取回来，让界面摆在该档旁边。
+   *
+   * 问的是**系统真值**，两边各自问各自的那一套（macOS 走 LaunchServices、
+   * Windows 走注册表，见 `src-tauri/src/ipc/slicer.rs` —— 都在壳那一侧：
+   * 前端不扫盘、不猜安装位置）。
+   *
+   * **问不出来给 `null`**（这台机器没关联任何程序 / 这一次问不成）：界面回落原来那句话
+   * （「用 .3mf 关联的程序打开」），**不编一个应用名顶上** —— 那句话是给用户看的。
+   */
+  getSystemSlicerApp(): Promise<SlicerApp | null>
+
+  /**
+   * **把用户送到"改 `.3mf` 默认应用"的那一处**（2026-10-16）。
+   *
+   * 我们**不替用户改**系统默认 —— 那是他自己的账，改不改、改成什么该由他在系统那一侧按。
+   * 这一条只把他送过去：
+   * - macOS：**系统设置里根本没有"文件关联"这一页**（查过：那 280 个设置扩展里没有一个
+   *   管默认应用），唯一能改的是访达的「显示简介 → 打开方式 → 更改全部…」⇒ 我们**打开那份
+   *   示例的「显示简介」窗口**。★ 要过一次「自动化 → 控制访达」的授权（第一次弹一张系统框，
+   *   点「好」之后不再弹）；拒绝了就如实报错，并把手工那三步写在那句话里。
+   *   ★ 只把文件夹定位出来**不算**（作者 2026-10-16：「我不是要打开那个文件夹呀，我是要像
+   *   你那个打开显示简介一样呀」）。
+   * - Windows：「你要如何打开这个文件？」那个框（勾上"始终"就是改默认）。
+   *
+   * 拿去当把手的是壳自己放的**一份空的示例 `.3mf`**（`<内部根>/open-with/`）——
+   * 两个平台的 UI 都只是"对一份文件发问"，判据是扩展名，**不依赖本机下载过什么**。
+   *
+   * 回来的是**下一步提示**（界面照原样弹一条）—— "到了那儿还要点哪儿"是平台知识，
+   * 由壳那一侧说清（`src-tauri/src/ipc/slicer.rs`），前端不复述、不翻译。
+   */
+  openDefaultAppSettings(): Promise<string>
 
   /**
    * 首页「复制后处理脚本」要的**那一整条命令**（**当前平台、当前实例、真实落点**现拼）。
@@ -1984,6 +2033,17 @@ export interface MkpApi {
    * 且要带着 **这份文件的 sha256**（保存时比一下有没有被别人抢先改）。
    */
   beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
+
+  /**
+   * **这份用户文件的原文**（它最初落到盘上时的那一份）——「编辑文件」模态框那颗
+   * **「恢复默认值」**读的就是它（2026-10-16 作者：「编辑文件这个也可以有个按钮……
+   * 恢复默认值……对于用户导进来的，可能需要你去做一种备份」）。
+   *
+   * 来源 = `baseline-local/` 的路径镜像：下载 / 导入 / 复制 / 另存的那几份在**落盘时**
+   * 存过；老文件在**第一次被我们改写**（编辑器保存 / 参数写回 / 校准 / 归属机型）之前补上。
+   * 都没有 ⇒ `null` —— 界面把那颗按钮禁用（不猜、不编一个"默认"出来）。
+   */
+  readLocalOriginText(path: string): Promise<string | null>
 
   /**
    * 把改动写进临时文件（编辑框边改边存）。**只动正文**，[`beginTextEdit`] 那一刻的其它不变。

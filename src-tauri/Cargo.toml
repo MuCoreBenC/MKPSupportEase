@@ -178,6 +178,14 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 # + `objc2-core-graphics`：CALayer 的 `setBackgroundColor`（铺圆角窗外那圈填色）在这个 feature 后面
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }
 
+# Windows 那半的**只读查询**：「跟随系统默认」到底是谁，要去问注册表
+# （`HKCR\.3mf` → ProgID → `…\shell\open\command`，见 `src/ipc/slicer.rs`）。
+# 它是**最小的那种**读写注册表库（没有任何默认 feature），而且
+# **本来就在依赖树里**（`embed-resource` 带进来的那一档，锁里是 0.55）——
+# 这里直写一行只是让它能被 `use` 到，不新增任何包。
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
+
 [dev-dependencies]
 # 测试里用它把夹具的 JSON 转成 TOML（`testkit` / `presets::registry`），
 # 以及把产出的 TOML 解析回来（`app::build`）。版本取 workspace 那一档（0.8，见根上的说明）

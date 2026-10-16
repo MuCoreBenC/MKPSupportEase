@@ -47,7 +47,7 @@
 }
 
 .item:hover {
-  background: rgb(16 24 32 / 4%);
+  background: var(--w-hover);
 }
 
 .itemOn,
@@ -59,7 +59,7 @@
 .itemName {
   overflow: hidden;
   font-size: 12.5px;
-  color: var(--w-text-1);
+  color: var(--w-t1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -77,12 +77,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 增 / 删两行的字色：取 `--w-diff-*-ink`（深色那边提亮过 —— 深绿 / 深红压在
+   深底上读不出来） */
 .add {
-  color: #1a7f43;
+  color: var(--w-diff-add-ink);
 }
 
 .del {
-  color: #b4402f;
+  color: var(--w-diff-del-ink);
 }
 
 /* 三档状态的小字 */
@@ -93,15 +95,15 @@
 }
 
 .state_added {
-  color: #1a7f43;
+  color: var(--w-diff-add-ink);
 }
 
 .state_modified {
-  color: #b06a00;
+  color: var(--w-diff-mod-ink);
 }
 
 .state_unchanged {
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
 /*
@@ -109,12 +111,12 @@
  * 压淡是**故意的**：它们混在清单里，但这一次生成一个字节都不碰它们。
  */
 .stateFrozen {
-  color: var(--w-text-3);
+  color: var(--w-t3);
   font-weight: 500;
 }
 
 .itemFrozen .itemName {
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
 /*
@@ -128,7 +130,7 @@
   background: var(--w-card-inner);
   font-size: 11px;
   letter-spacing: 0.06em;
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
 /* 「N 份无变化」的可折叠组头 */
@@ -142,18 +144,18 @@
   background: transparent;
   font: inherit;
   font-size: 12px;
-  color: var(--w-text-3);
+  color: var(--w-t3);
   text-align: left;
   cursor: pointer;
 }
 
 .groupToggle:hover {
-  background: rgb(16 24 32 / 4%);
+  background: var(--w-hover);
 }
 
 .caret {
   flex: none;
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
 /* ---------- 右：详情（行级 diff） ---------- */
@@ -183,7 +185,7 @@
 .detailName {
   font-family: var(--w-mono, ui-monospace, Menlo, monospace);
   font-size: 12.5px;
-  color: var(--w-text-1);
+  color: var(--w-t1);
 }
 
 .detailMeta {
@@ -209,16 +211,18 @@
   min-width: 0;
 }
 
+/* 增 / 删行的底：取 `--w-diff-add` / `--w-diff-del`（深色那边是 18% / 16% 的
+   深绿深红 —— 10% 那两档压在深底上等于没画） */
 .lineAdd {
-  background: rgb(32 178 90 / 10%);
+  background: var(--w-diff-add);
 }
 
 .lineDel {
-  background: rgb(200 70 50 / 9%);
+  background: var(--w-diff-del);
 }
 
 .lineCtx {
-  color: var(--w-text-2);
+  color: var(--w-t2);
 }
 
 /* 行号槽定宽、右对齐、等宽数字 —— 一列对齐才读得出"第几行" */
@@ -226,7 +230,7 @@
   flex: none;
   width: 44px;
   padding-right: 10px;
-  color: var(--w-text-3);
+  color: var(--w-t3);
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;
@@ -236,18 +240,18 @@
 .gutter {
   flex: none;
   width: 18px;
-  color: var(--w-text-3);
+  color: var(--w-t3);
   text-align: center;
   user-select: none;
   -webkit-user-select: none;
 }
 
 .lineAdd .gutter {
-  color: #1a7f43;
+  color: var(--w-diff-add-ink);
 }
 
 .lineDel .gutter {
-  color: #b4402f;
+  color: var(--w-diff-del-ink);
 }
 
 .lineTxt {
@@ -281,7 +285,7 @@
   background: var(--w-card);
   font: inherit;
   font-size: 12px;
-  color: var(--w-text-2);
+  color: var(--w-t2);
   cursor: pointer;
 }
 
@@ -290,7 +294,7 @@
 }
 
 .viewBtn:hover {
-  color: var(--w-text-1);
+  color: var(--w-t1);
 }
 
 .viewBtnOn,
@@ -306,17 +310,19 @@
   margin: 0;
   padding: 16px 14px;
   font-size: 12.5px;
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
+/* 报错块：淡红那一套走 `--danger-surface` / `--danger-ink` + `--dep-red-line`
+   （`c14tokens.css` 两套都给了）。硬编码的话深色里就是一块**浅色**的红底浮在深底上 */
 .error {
   margin: 0 0 12px;
   padding: 10px 12px;
-  border: 1px solid #e3b0a4;
+  border: 1px solid var(--dep-red-line);
   border-radius: var(--w-r-card);
-  background: #fdf2ef;
+  background: var(--danger-surface);
   font-size: 12.5px;
-  color: #8a3b2a;
+  color: var(--danger-ink);
 }
 
 /* ---------- 底部 ---------- */
@@ -325,7 +331,7 @@
    撑开用它的 .grow —— 这里不再自养第二套按钮。 */
 .footNote {
   font-size: 12px;
-  color: var(--w-text-3);
+  color: var(--w-t3);
 }
 
 /* ---------- 窄框：两栏退成一栏 ---------- */
@@ -353,7 +359,7 @@
 .summary {
   margin: 0;
   font-size: 13px;
-  color: var(--w-text-1);
+  color: var(--w-t1);
 }
 
 .resultGroup {
@@ -366,7 +372,7 @@
   margin: 0;
   font-size: 12px;
   font-weight: 600;
-  color: var(--w-text-2);
+  color: var(--w-t2);
 }
 
 .resultList {
@@ -384,7 +390,7 @@
   gap: 8px;
   font-family: var(--w-mono, ui-monospace, Menlo, monospace);
   font-size: 12px;
-  color: var(--w-text-1);
+  color: var(--w-t1);
 }
 
 .dotWritten,
@@ -396,14 +402,16 @@
   border-radius: 50%;
 }
 
+/* 图例那三颗小圆点：写 / 未变 / 跳过 —— 与清单里的字色同一支 token，
+   深浅两套都不会跑偏 */
 .dotWritten {
-  background: #1a7f43;
+  background: var(--w-diff-add-ink);
 }
 
 .dotUnchanged {
-  background: #b9c0c7;
+  background: var(--w-t-off);
 }
 
 .dotSkipped {
-  background: #d08a2a;
+  background: var(--w-warn);
 }

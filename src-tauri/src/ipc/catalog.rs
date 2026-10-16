@@ -521,6 +521,9 @@ pub async fn fetch_cloud_preset(
             let (file_name_here, path_here, taken_by, suggested_name) = if created {
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 runtime::local::save_cloud_as_new(&user, file, &text, &file.file_name)?;
+                /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
+                落到我盘上那一刻（「恢复默认值」退的就是它） */
+                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
                 (file.file_name.clone(), rel, None, None)
             } else if rename_if_taken == Some(true) {
                 /*
@@ -531,6 +534,9 @@ pub async fn fetch_cloud_preset(
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
                 runtime::local::save_cloud_as_new(&user, file, &text, &name)?;
+                /* 原文镜像同上一支 */
+                let _ =
+                    runtime::baseline::ensure_origin_copy(&root, &user, &format!("{dir}/{name}"));
                 (name.clone(), format!("{dir}/{name}"), None, None)
             } else {
                 /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */

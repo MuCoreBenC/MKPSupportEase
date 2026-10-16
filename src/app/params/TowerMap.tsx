@@ -45,6 +45,11 @@ interface Props {
   side: ReactNode
   /** 一次拖拽手势的落点提交 —— 调用方走 apply，一次 = 一条撤销 */
   onCommit: (x: number, y: number) => void
+  /**
+   * **只读**（2026-10-16 的编辑模式两态）：看得见、拖不动 —— 按下直接不响应，
+   * 光标也从十字收成默认（拖了没反应还不知道为什么，是最坏的那种）。
+   */
+  disabled?: boolean
 }
 
 /** 位置落在 0.1mm —— 拖拽是连续量，不收个位小数的话撤销清单里会出现一长串 */
@@ -63,6 +68,7 @@ export default function TowerMap({
   plate,
   side,
   onCommit,
+  disabled = false,
 }: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
   /** 留白带裁剪用的 clipPath id —— useId 带冒号，url(#) 引用里去掉稳妥 */
@@ -114,6 +120,7 @@ export default function TowerMap({
   }
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (disabled) return
     if (e.button !== 0) return
     e.preventDefault()
     const at = bedPointOf(e)
@@ -159,7 +166,12 @@ export default function TowerMap({
           style={{ aspectRatio: `${mapW} / ${mapD}` }}
           role="application"
           tabIndex={0}
-          aria-label={`擦料塔位置：X ${round1(shown.x)}、Y ${round1(shown.y)}，点击或拖动调整`}
+          data-ro={disabled || undefined}
+          aria-label={
+            disabled
+              ? `擦料塔位置：X ${round1(shown.x)}、Y ${round1(shown.y)}（只读）`
+              : `擦料塔位置：X ${round1(shown.x)}、Y ${round1(shown.y)}，点击或拖动调整`
+          }
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}

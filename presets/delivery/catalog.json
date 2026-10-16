@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "8147a839118ecc64",
+  "revision": "13aad1b8f33947ff",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -781,6 +781,20 @@
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
+    },
+    {
+      "id": "guide-open-with-light",
+      "type": "guide",
+      "name": "「改 .3mf 默认打开方式」引导图（浅色）",
+      "path": "guides/open-with-light.png",
+      "delivery": "bundled"
+    },
+    {
+      "id": "guide-open-with-dark",
+      "type": "guide",
+      "name": "「改 .3mf 默认打开方式」引导图（深色）",
+      "path": "guides/open-with-dark.png",
+      "delivery": "bundled"
     }
   ],
   "bundles": [

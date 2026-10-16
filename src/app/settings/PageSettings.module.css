@@ -132,6 +132,17 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * 「跟随系统默认」那行 + 右边那颗「去系统里改…」（2026-10-16）：
+ * 一句话一颗按钮，同一行；字太长时按钮**换到下一行**（不把字挤成一列窄条）。
+ */
+.slicerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .current {
   margin: 2px 0 0;
   font-size: var(--fs-body);

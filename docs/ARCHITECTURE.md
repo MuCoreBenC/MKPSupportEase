@@ -168,10 +168,13 @@ Rust 侧的字段名与 TS 那份靠 `error.rs` 里的单元测试钉住 —— 
 拉起的那一次进程）写 `hook.log.<日期>` —— 读者与量级都不同（而且钩子的 stderr 是对外契约，
 不许叠日志层）。为什么分家、各记什么见 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4。
 
-## 7.5 窗口外观（macOS）：四个坑
+## 7.5 窗口外观（macOS）：四个坑（+ 工作台那扇窗的一条）
 
 原生圆角与原生红绿灯都不是 CSS 能做的，`src-tauri/src/chrome.rs` 里那几件事各对应一个坑。
 做法参考 `neteasemusicc`（同机另一个项目，这几条上是对的）。
+
+★ ①②③④ 都是**客户端主窗口**（无边框、自己画圆角）那一条路；**工作台那扇窗走的是另一条**
+—— 它用系统原生装饰，那件事是 ⑤（2026-10-16 工作台做深色时补的）。
 
 **① `trafficLightPosition` 在 `titleBarStyle: "Overlay"` 下不生效。**
 Overlay 只给窗口加了 `fullSizeContentView`，**没有**真正的 `NSToolbar`。AppKit 摆灯有两档：
@@ -284,6 +287,22 @@ Chromium 的连击计数被打断，双击最大化要点得极快才触发。
 `mousedown` 调 `startResizeDragging(dir)`，两圈一夹，
 抓取带跨在可见边界上。两个 API 都需要各自的 ACL 权限
 （`allow-start-dragging` / `allow-start-resize-dragging`）。
+
+**⑤ 工作台那扇窗的"原生那一层"是 `set_theme`（2026-10-16 工作台做深色时补）。**
+同一个问题在**工作台**上换了另一条路：它**不无边框** —— 用的是系统原生装饰
+（`titleBarStyle` 那一套只给客户端主窗口），CSS 只画得到内容区。所以深色那一刀在它这边
+要动的是**窗口外观本身**：`win.set_theme(Some(Theme::Dark | Light))`；
+**`None` = 交回系统** —— "跟随系统"那一档必须传 `None`，把系统现在这一档钉到窗口上，
+之后系统再切它就不动了。
+
+- 两个调用点：`workbench::open_window`（开场按盘上那一档设一次）、
+  `ipc::prefs::set_theme`（人在工作台设置页换档时，`#[cfg(feature = "workbench")]`
+  —— 客户端构建里那扇窗根本不存在）。
+- ★ tao 在 macOS 上的 `set_ns_theme` 设的是 **`NSApplication`** 那一层（不是单窗）；
+  工作台那份配置 `app.windows` 是**空数组**，这个进程里只有它一扇窗，所以等价。
+- ★ **别把这条路搬去客户端主窗口**：那扇窗的"原生"是**圆角外那圈填色**（① / ③），
+  给它套 `NSAppearance` 会把 CSS 的 `prefers-color-scheme` 一起改掉 ——
+  "跟随系统"那一档就不再跟系统了（第一版干过，已删）。
 
 ## 8. 前端约定
 

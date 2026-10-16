@@ -16,6 +16,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+import { api } from '../../api'
 import type { SlicerApp } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
 
@@ -27,6 +28,13 @@ export const SLICER_CHOICES: { id: SlicerId; label: string; hint: string }[] = [
   { id: 'bambu', label: 'Bambu Studio', hint: '总是交给 Bambu Studio' },
   { id: 'orca', label: 'OrcaSlicer', hint: '总是交给 OrcaSlicer' },
 ]
+
+/**
+ * 「跟随系统默认」那一档。**单独取出来是为了别的代码不靠下标说话** —— 见
+ * [`systemSlicerLine`]：问不到应用名时回落的就是它自己的 hint（那档的说明只有一个出处，
+ * 就是上面那张表）。
+ */
+const SYSTEM_CHOICE = SLICER_CHOICES[0]
 
 /**
  * 设置页下拉里那条**动作项**（不是真的档位）：选中它 = 去磁盘挑一个（走
@@ -44,13 +52,68 @@ export const SLICER_CHOOSE = '__choose'
  *
  * 自定义那条 label 只写应用名（"（你指定的）"由 note 承担）；完整路径太长，
  * 不进弹层，摆在下拉下面那行（见 `PageSettings`）。
+ *
+ * `systemApp`（2026-10-16）= 「跟随系统默认」**在这台机器上指谁**：问到就把名字写进
+ * 那条的 note，问不到（`null`）就用原来那句话 —— 见 [`systemSlicerLine`]。
  */
 export function slicerOptionsOf(
   app: SlicerApp | null,
+  systemApp: SlicerApp | null,
 ): { value: SlicerId; label: string; note: string }[] {
-  const base = SLICER_CHOICES.map((c) => ({ value: c.id, label: c.label, note: c.hint }))
+  const base = SLICER_CHOICES.map((c) => ({
+    value: c.id,
+    label: c.label,
+    note: c.id === 'system' ? systemSlicerLine(systemApp) : c.hint,
+  }))
   if (app === null) return base
   return [...base, { value: 'custom', label: app.name, note: '你指定的' }]
+}
+
+/**
+ * 「跟随系统默认」**在这台机器上**是什么意思（作者 2026-10-16：那一档名字里没有
+ * 应用名，看不出它指谁）。三处说同一句：下拉那条 note、设置页下面那行小字、
+ * 「打开模型」框里那行 —— 同一句话只写一次，免得三处各漂一处。
+ *
+ * 问不到应用名（`null`：这台机器没关联任何程序 / 这一次问不成）就回落**那一档自己的
+ * 说明**：界面照旧显示原来那句，**不编一个名字顶上**。
+ */
+export function systemSlicerLine(systemApp: SlicerApp | null): string {
+  return systemApp === null
+    ? SYSTEM_CHOICE.hint
+    : `用 .3mf 关联的程序打开：${systemApp.name}`
+}
+
+/**
+ * 「跟随系统默认」到底交给谁 —— 问一次壳（`api.getSystemSlicerApp`，问的是系统真值）。
+ *
+ * 什么时候问：**挂载时**一次（设置页与「打开模型」框各问各的；那个框每次打开都是新挂载
+ * ⇒ 每次打开都是新答案）+ **窗口重新拿到焦点时**再问一次 —— 用户完全可能切出去在系统
+ * 里换一个关联再回来，而那件事没有任何广播可听（它不是我们改的，是系统改的）。
+ *
+ * 问不出来 / 还没答上来一律 `null`：调用方按"不知道"渲染（回落原来那句话术，不编）。
+ */
+export function useSystemSlicerApp(): SlicerApp | null {
+  const [app, setApp] = useState<SlicerApp | null>(null)
+  useEffect(() => {
+    let alive = true
+    const read = () => {
+      api.getSystemSlicerApp().then(
+        (found) => {
+          if (alive) setApp(found)
+        },
+        () => {
+          /* 问不出来不是错：那句话术本来就有"没选过时就是这个"的写法，界面不报这一条 */
+        },
+      )
+    }
+    read()
+    window.addEventListener('focus', read)
+    return () => {
+      alive = false
+      window.removeEventListener('focus', read)
+    }
+  }, [])
+  return app
 }
 
 /** 默认那一份（设置页写，打开模型读）。值不合法时回落到跟随系统 */

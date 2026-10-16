@@ -206,10 +206,13 @@ pub mod kind {
 
 /// 资产台账里的类型 → 目录里的 kind。
 ///
-/// **返回 `None` 就是不登记**。今天两种：
+/// **返回 `None` 就是不登记**。今天三种：
 ///
 /// - `Image`：图片**不进下载面**（整机图 / 品牌图都走 `bundled` 档随包，
 ///   客户端靠构建期装配拿它们，不按 URL 取）；
+/// - `Guide`（2026-10-16）：引导图同上 —— 今天 `bundled` 随包、走
+///   `/assets/<path>` 取；**将来要按需下载时，这一行才给目录**
+///   （见 `presetdata::AssetKind::Guide` 那段）；
 /// - `MkPreset`：MKP 预设的产物文件**已经**作为 `files` 条目进来了（B 类，
 ///   生成侧算的，落点 `delivery/mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
 ///   再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）。
@@ -222,6 +225,7 @@ fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static st
         crate::presetdata::AssetKind::Model => Some(kind::MODEL),
         crate::presetdata::AssetKind::Icon => Some(kind::ICON),
         crate::presetdata::AssetKind::Image => None,
+        crate::presetdata::AssetKind::Guide => None,
         crate::presetdata::AssetKind::MkPreset => None,
     }
 }
@@ -819,7 +823,8 @@ mod tests {
             "下载区没有 images 这一类：整机图不进 Delivery"
         );
         // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
-        // 今天 28 条 = 9 MKP 预设 + 4 整机图（bundled）+ 9 BBS + 3 图标 + 3 模型
+        // 今天 31 条 = 9 MKP 预设 + 4 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
+        //              + 3 模型 + 2 引导图（bundled，2026-10-16）
         assert_eq!(
             catalog.assets.len(),
             source.assets.items().len(),
@@ -827,10 +832,10 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            29,
-            "实测 29 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
-             2026-10-03 三类进台账（mkPreset / bundled image / 品牌图），条数变了要核对台账
-             再改这里的期望"
+            31,
+            "实测 31 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型 + 2 引导图）——
+             2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
+             （`type = 'guide'`，bundled）——条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -1074,10 +1079,11 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            29,
-            "实测 29 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
+            31,
+            "实测 31 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型
+             + 2 引导图）——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
-             登记归属不登记路径；两者都不进 files[]）"
+             登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）"
         );
         assert_eq!(
             catalog.bundles.len(),

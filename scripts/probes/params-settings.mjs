@@ -7,11 +7,14 @@
  *   node scripts/probes/params-settings.mjs [url]
  *
  * 走一遍真实的路（每档尺寸一个全新 profile）：
- *   ① 参数页：分类 / 卡片 / 行全部来自目录（catalog 的 registry）—— 直接画得出来
- *   ② 底栏在：从包里来的那两句（「修改参数」/「没有未保存的改动」）
- *   ③ 设置页 · 高级设置 → 预设数据源：读得出「当前：还没配置」；手动指定能应用
- *      （尾斜杠砍掉 —— 与真机 `normalize_base_url` 同一套）；非法地址如实拒；
- *      「恢复内置默认」能撤回覆盖（假后端没有内置源 → 回到「没配」）
+ *   ① 「修改参数」弹窗（预设页本地面那一行右键进入 —— ★ 参数**页签** 2026-10-09 已退役，
+ *      旧版入口那几步早跑不到底，2026-10-16 按弹窗入口重写）：分类 / 卡片 / 行全部来自
+ *      目录（catalog 的 registry）；**两态**（打开先只读 → 「进入编辑模式」→
+ *      撤销/重做/退出编辑模式/保存 → 「退出编辑模式」回只读）；改一个值当场进草稿 TOML；
+ *      修改历史条目带上下文；弃用字段只读；塔地图消费 catalog.plates
+ *   ② 设置页 · 高级设置 → 预设数据源：读得出「当前：还没配置」（假后端没有内置源）；
+ *      「自定义地址（开发 / 排查）」能应用（尾斜杠砍掉 —— 与真机 `normalize_base_url`
+ *      同一套）；非法地址如实拒（主句说"取不到、没有改"）
  *
  * **改名与重写记（2026-10-02）**：原版叫 `params-sync.mjs`，第二半走的是**同步页**
  * （口径与账 / catalog 调试信息 / 检查更新按钮）。作者裁决「同步」页整页退役 ——
@@ -20,6 +23,10 @@
  * （本仓纪律：探针会和它测的流一起腐烂，收口一层就要回头跑一遍）。
  * 没换的还是那几条「看得见」的判据 —— 页面有没有内容、控制台有没有 error、
  * 有没有 >=400 的响应。两档尺寸：Ultra 1760×900 / Compact 900×640。
+ *
+ * **再改记（2026-10-16）**：参数**页签**退役之后，参数那一半自己也在腐烂
+ * （旧版第一步还去点一颗不存在的「参数」按钮，从那以后整段跑不到底）——
+ * 跟着新入口（预设行右键「修改参数」）与编辑模式两态一起翻修。设置页那一半没动。
  */
 import { mkdir } from 'node:fs/promises'
 
@@ -42,8 +49,13 @@ const check = (tag, what, ok, detail = '') => {
   if (!ok) problems.push(`${tag} ${what}${detail ? ` —— ${detail}` : ''}`)
 }
 
-/* 已知且无害：index.html 没写 favicon，浏览器自己会去要一次 */
-const BENIGN = [/\/favicon\.ico$/]
+/*
+ * 已知且无害：
+ *   · index.html 没写 favicon，浏览器自己会去要一次；
+ *   · 假后端必抛的那几条「未实现的接口」—— 其中 `checkRemoteUpdate` 是**设计成要发生的**
+ *     （进入预设页会后台检查一次远端目录；浏览器里没有远端，页面自己静默吞掉）。
+ */
+const BENIGN = [/\/favicon\.ico$/, /未实现的接口/]
 const benign = (text) => BENIGN.some((re) => re.test(text))
 
 const mainText = (page) =>
@@ -59,6 +71,44 @@ async function until(fn, ms = 5000) {
   }
 }
 
+/** 弹窗（「修改参数」）里的小工具：底栏按钮名 / 行内控件数 —— 全在 dialog 作用域里数 */
+const dlgState = (page) =>
+  page.evaluate(() => {
+    const d = document.querySelector('[role="dialog"]')
+    const foot = d?.querySelector('footer')
+    return {
+      foot: foot?.innerText.replace(/\s+/g, ' ').trim() ?? '',
+      /* 撤销 / 重做是图标按钮 —— 名字连 aria-label / title 一起取 */
+      names: [...(foot?.querySelectorAll('button') ?? [])].map((b) =>
+        (b.innerText || b.getAttribute('aria-label') || b.getAttribute('title') || '').trim(),
+      ),
+      rowControls: d?.querySelectorAll('[data-key] input, [data-key] textarea').length ?? -1,
+      text: (d?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+    }
+  })
+
+/** 点弹窗底栏一颗「文字正好是这些字」的按钮 */
+const dlgFootBtn = (page, text) =>
+  page.evaluate((want) => {
+    const d = document.querySelector('[role="dialog"]')
+    const b = [...(d?.querySelectorAll('footer button') ?? [])].find(
+      (x) => x.textContent.trim() === want,
+    )
+    b?.click()
+    return b !== undefined
+  }, text)
+
+/** 切分段控件的那一档（`本地 / 云端`、`MKP 配置 / 切片器配置`） */
+const pickSeg = async (page, want) => {
+  await page.evaluate((w) => {
+    const l = [...document.querySelectorAll('main [role="radiogroup"] label')].find(
+      (x) => (x.textContent ?? '').trim() === w,
+    )
+    l?.click()
+  }, want)
+  await page.waitForTimeout(400)
+}
+
 const browser = await chromium.launch({ channel: 'msedge' })
 
 for (const size of SIZES) {
@@ -69,7 +119,9 @@ for (const size of SIZES) {
   page.on('console', (m) => {
     if (m.type() !== 'error') return
     const at = m.location?.()?.url ?? ''
-    if (benign(at)) return
+    /* 白名单要**连正文一起看**：`未实现的接口: checkRemoteUpdate` 认的是消息本身
+       （2026-10-16：原来只查 URL，这条设计成要发生的消息每档恒进 problems） */
+    if (benign(at) || benign(m.text())) return
     problems.push(`${tag} console.error: ${m.text()}${at ? ` @ ${at}` : ''}`)
   })
   page.on('pageerror', (e) => problems.push(`${tag} pageerror: ${e.message}`))
@@ -83,60 +135,127 @@ for (const size of SIZES) {
   await page.goto(url, { waitUntil: 'load' })
   await page.waitForSelector('header nav', { timeout: 10000 })
 
-  /* ① 参数页：直接画目录的 registry（分类 / 卡片 / 行） */
-  await page.getByRole('button', { name: '参数', exact: true }).first().click()
+  /* ① 进「预设」页 → 右键本地那一份 MKP 预设 → 「修改参数」弹窗 → 两态 */
+  /*
+   * ★ 2026-10-16 重写入口：参数**页签** 2026-10-09 整页退场（`constants/tabs.ts`），
+   *   旧版还去点「参数」页签 —— 自那以后这一段一直跑不到底（点不到那颗按钮）。
+   *   现在的真入口是**预设页那一行右键「修改参数」**（同一个 `PageParams`，嵌在
+   *   `PresetParamsModal` 里）。顺带把 2026-10-16 的**两态**钉在这里：
+   *     打开先只读（行里没有可改控件、底栏只有「进入编辑模式」）→
+   *     点它进编辑模式（撤销 / 重做 / 退出编辑模式 / 保存出场）→
+   *     点「退出编辑模式」= 作废（回只读，没保存的改退回已保存值 —— 2026-10-16 作者口径）。
+   */
+  await page.getByRole('button', { name: '预设', exact: true }).first().click()
+  await page.waitForSelector('main tbody tr[data-rowkey]', { timeout: 10000 })
+  await page.waitForTimeout(500)
+  await pickSeg(page, '本地')
+  const paramRow = page
+    .locator('main tbody tr[data-rowkey]')
+    .filter({ has: page.locator('td:not([colspan])') })
+    .filter({ hasText: 'A1 涂胶.toml' })
+    .first()
+  if ((await paramRow.count()) === 0) {
+    problems.push(`${tag} 预设页本地面没有 A1 涂胶.toml —— 「修改参数」弹窗进不去`)
+  } else {
+    await paramRow.click({ button: 'right' })
+    await page.waitForTimeout(300)
+    await page.getByRole('menuitem', { name: '修改参数', exact: true }).click()
+  }
   await page.waitForSelector('[role="tablist"][aria-label="参数分类"]', { timeout: 10000 })
-  await page.waitForTimeout(200)
+  await page.waitForTimeout(300)
   const full = await page.evaluate(() => {
-    const tabs = [...document.querySelectorAll('[role="tablist"][aria-label="参数分类"] [role="tab"]')]
+    const d = document.querySelector('[role="dialog"]')
+    const tabs = [...(d?.querySelectorAll('[role="tablist"][aria-label="参数分类"] [role="tab"]') ?? [])]
     return {
       tabs: tabs.length,
       current: tabs.find((t) => t.getAttribute('aria-current') === 'true')?.textContent?.trim() ?? '',
-      cards: document.querySelectorAll('main section[aria-label]').length,
-      rows: document.querySelectorAll('[data-key]').length,
-      text: (document.querySelector('main')?.innerText ?? '').replace(/\s+/g, ' ').trim(),
+      cards: d?.querySelectorAll('section[aria-label]').length ?? 0,
+      rows: d?.querySelectorAll('[data-key]').length ?? 0,
+      text: (d?.innerText ?? '').replace(/\s+/g, ' ').trim(),
     }
   })
   check(
     tag,
-    '参数页画的是真目录（分类 / 卡片 / 行都来了）',
+    '「修改参数」弹窗画的是真目录（分类 / 卡片 / 行都来了）',
     full.tabs >= 2 && full.cards > 0 && full.rows > 0,
     `分类 ${full.tabs} / 卡片 ${full.cards} / 行 ${full.rows}`,
   )
   check(
     tag,
-    '参数页标题与底栏在（每一条都从包里来）',
-    full.text.includes('修改参数') && full.text.includes('没有未保存的改动'),
+    '弹窗标题与底栏在（标题=文件名，副题与底栏状态都从包里来）',
+    full.text.includes('A1 涂胶.toml') &&
+      full.text.includes('改的是本地这一份') &&
+      full.text.includes('没有未保存的改动'),
     full.text.slice(0, 60),
+  )
+
+  /* ①a 打开先只读（2026-10-16 两态）：行里没有可改控件，底栏只有「进入编辑模式」 */
+  const roState = await dlgState(page)
+  check(
+    tag,
+    '弹窗打开先只读（行内无可改控件、底栏只有「进入编辑模式」）',
+    roState.rowControls === 0 &&
+      roState.names.includes('进入编辑模式') &&
+      /* 判据看**按钮名**（"没有未保存的改动"这句状态文字里也含"保存"二字，别用脚本文本判） */
+      !roState.names.includes('保存') &&
+      !roState.names.includes('退出编辑模式'),
+    `行内控件 ${roState.rowControls} · 底栏 ${JSON.stringify(roState.names)}`,
   )
   await page.screenshot({ path: `${shotDir}/wire-params-${tag}.png` })
 
-  /* ①b 参数页接草稿链（参数页底座 ③）：改一个值 → 当场 patch 草稿 TOML，不报错 */
+  /* ①a2 点「进入编辑模式」→ 控件出场、底栏 = 撤销 / 重做 / 退出编辑模式 / 保存 */
+  await dlgFootBtn(page, '进入编辑模式')
+  await page.waitForTimeout(400)
+  const edState = await dlgState(page)
+  check(
+    tag,
+    '进编辑模式：行内控件出场、底栏 = 撤销/重做/退出编辑模式/保存',
+    edState.rowControls > 0 &&
+      ['撤销', '重做', '退出编辑模式', '保存'].every((n) => edState.names.includes(n)),
+    `行内控件 ${edState.rowControls} · 底栏 ${JSON.stringify(edState.names)}`,
+  )
+
+  /* ①b 草稿链（参数页底座 ③）：改一个值 → 当场 patch 草稿 TOML，不报错 */
   /*
    * 守两件事：
-   *   ① 参数页有**编辑目标**（当前 combo 的 MKP 文件）——没有它改值就只是内存改动；
+   *   ① 弹窗有**编辑目标**（这一份 MKP 文件）——没有它改值就只是内存改动；
    *   ② 改一个值之后**没有"草稿没写进磁盘"那行红字** —— 说明 patchPresetDraft 这条路通了
    *      （假后端按 tomlKey 改草稿正文，与真后端 `presetdata::patch` 同一件事）。
    * 真机上的保真与形态由 `presetdata::patch` 的 7 条单测钉着，这里量的是"接线通不通"。
    */
-  const targets = await page.evaluate(() =>
-    (document.querySelector('main')?.innerText ?? '').includes('这个版本没配 MKP 预设文件'),
-  )
+  const targets = (await dlgState(page)).text.includes('这个版本没配 MKP 预设文件')
   const editTargetOk = !targets
-  const numRow = page.locator('[data-key] input').first()
+  /*
+   * ★ 2026-10-16：fill 的目标改挑 `toolhead.offset_y` —— 演示那份 `A1 涂胶.toml` 的字节里
+   *   只有 `[toolhead] offset_y / speed_limit` 两个键；原样取"第一个 input"会落到
+   *   `offset_x` 上，patch 找不到那一行、**如实报"草稿的 [toolhead] 里没有 offset_x"**
+   *   （产品行为对，是探针挑错了目标）。
+   */
+  const keyShapes = await page.evaluate(() =>
+    [...document.querySelectorAll('[role="dialog"] [data-key]')]
+      .map((r) => r.getAttribute('data-key') ?? '')
+      .filter((k) => k.includes('offset')),
+  )
+  console.log(`[${tag}] offset 那两行的 data-key：${JSON.stringify(keyShapes)}`)
+  const numRow = page
+    .locator('[role="dialog"] [data-key$="offset.y"], [role="dialog"] [data-key$="offset_y"]')
+    .locator('input')
+    .first()
   let draftOk = true
+  let draftWhy = ''
   if ((await numRow.count()) > 0) {
     await numRow.fill('1.23')
     await numRow.blur().catch(() => {})
     await page.waitForTimeout(500)
-    const after = (await mainText(page)) ?? ''
+    const after = (await dlgState(page)).text
     draftOk = !after.includes('草稿没写进磁盘')
+    if (!draftOk) draftWhy = after.slice(Math.max(0, after.indexOf('草稿没写进磁盘')), 160)
   }
   check(
     tag,
-    '参数页有编辑目标、改值当场写进草稿 TOML（没有"草稿没写进磁盘"那行）',
+    '弹窗有编辑目标、改值当场写进草稿 TOML（没有"草稿没写进磁盘"那行）',
     editTargetOk && draftOk,
-    editTargetOk ? '' : '参数页说"这个版本没配 MKP 预设文件"',
+    draftOk ? (editTargetOk ? '' : '弹窗说"这个版本没配 MKP 预设文件"') : draftWhy,
   )
 
   /* ①c 操作记录带上下文（参数页底座 ④）：历史条目说得出"分类 → 参数 → 旧 → 新" */
@@ -148,19 +267,28 @@ for (const size of SIZES) {
   if (draftOk) {
     await page.getByRole('button', { name: /修改历史/ }).first().click()
     await page.waitForTimeout(500)
-    const hist = (await mainText(page)) ?? ''
+    const hist = (await dlgState(page)).text
     const hasItem = /#1/.test(hist)
-    const hasCtx = hist.includes('空间偏移') && hist.includes('X 轴偏移')
+    /* 刚改的那一条 = 空间偏移 → Y 轴偏移（上面 fill 的是 toolhead.offset_y） */
+    const hasCtx = hist.includes('空间偏移') && hist.includes('Y 轴偏移')
     check(
       tag,
       '修改历史条目带上下文（分类 / 参数名都在，不是裸 key）',
       hasItem && hasCtx,
-      hist.slice(Math.max(0, hist.indexOf('#1')), hist.indexOf('#1') + 80),
+      hist.includes('还没有改动')
+        ? '抽屉说：这个文件本次打开还没有改动'
+        : `#1=${hasItem} 上下文=${hasCtx} · ${hist.slice(hist.indexOf('修改历史'), hist.indexOf('修改历史') + 220)}`,
     )
-    /* 关掉抽屉，别影响后面的设置页那一节 */
-    const closeBtn = page.locator('[aria-label="关闭"]').first()
-    if ((await closeBtn.count()) > 0) await closeBtn.click().catch(() => {})
-    await page.waitForTimeout(200)
+    /*
+     * 收起抽屉：点**抽屉自己那颗 ×**。两条弯路别走：
+     *   · 「修改历史」那颗开关在浮层态被抽屉自己盖住（它俩都在右上角，点击被抽屉拦截）；
+     *   · Esc 不行 —— Modal 与 Drawer 都挂了 document 级 Esc，会连弹窗一起关掉。
+     */
+    await page
+      .getByRole('dialog', { name: '修改历史' })
+      .getByRole('button', { name: '关闭' })
+      .click()
+    await page.waitForTimeout(300)
   }
 
   /* ①d 弃用字段「显示，但只读」（2026-10-02，① deprecated 链路） */
@@ -189,8 +317,9 @@ for (const size of SIZES) {
         /*
          * 弃用行有的摊开成子卡、有的折在收拢的分支里（分支收拢时只有卡头，没有控件）。
          * 取**第一枚带「已弃用」徽章的那一行** —— 那才是摊开的、能验只读的行。
+         * 作用域在 dialog 里（参数弹窗；2026-10-16 起这里也是编辑态）。
          */
-        const rows = [...document.querySelectorAll('[data-dep]')]
+        const rows = [...document.querySelectorAll('[role="dialog"] [data-dep]')]
         const row = rows.find((r) =>
           [...r.querySelectorAll('*')].some(
             (el) => el.children.length === 0 && el.textContent?.trim() === '已弃用',
@@ -227,10 +356,13 @@ for (const size of SIZES) {
     for (const t of tabs) {
       await t.click()
       await page.waitForTimeout(200)
-      const hasTower = await page.locator('svg text').filter({ hasText: '塔' }).count()
+      const hasTower = await page
+        .locator('[role="dialog"] svg text')
+        .filter({ hasText: '塔' })
+        .count()
       if (hasTower === 0) continue
-      const plate = await page.locator('svg path[fill-rule="evenodd"]').count()
-      const txt = (await mainText(page)) ?? ''
+      const plate = await page.locator('[role="dialog"] svg path[fill-rule="evenodd"]').count()
+      const txt = (await dlgState(page)).text
       towerOk = plate > 0 && txt.includes('擦料塔位置') && txt.includes('擦料塔X坐标')
       towerNote = `塔画布在 · 板轮廓 ${plate} · 槽位含坐标行 ${txt.includes('擦料塔X坐标')}`
       break
@@ -238,7 +370,69 @@ for (const size of SIZES) {
   }
   check(tag, '塔地图按默认板画出轮廓并替下 X/Y 行（消费 catalog.plates）', towerOk, towerNote)
 
+  /* ①f 退出编辑模式（2026-10-16）：**= 作废** —— 回只读，且没保存的改动全部回滚 */
+  await dlgFootBtn(page, '退出编辑模式')
+  await page.waitForTimeout(400)
+  const backRo = await dlgState(page)
+  check(
+    tag,
+    '退出编辑模式回到只读（行内控件收回、底栏回到「进入编辑模式」）',
+    backRo.rowControls === 0 && backRo.foot.includes('进入编辑模式'),
+    `行内控件 ${backRo.rowControls} · 底栏「${backRo.foot}」`,
+  )
+  /*
+   * 作废的硬判据（作者 2026-10-16：「没有保存的话，退出编辑模式就是作废，那些改的都作废，
+   * 保存了才有」）：①b 填过 offset_y=1.23，退出后该退回已保存的 22.4；底栏也该干净。
+   *
+   * ★ offset_y 住偏移那一类 —— ①d 找弃用行把分类切走了（停在擦料那一类），要读那一行
+   *   先切回来。**认 tab 要按 `title` 里的简写**：界面上分类名是短的（实测
+   *   `偏移 · 5 项 / 擦料 · 27 项 / 风扇 · 3 项 / 涂胶 · 19 项 / 切换 · 2 项 / 更多 · 18 项`），
+   *   胶囊里只有图标和数量，分类名根本不在 textContent 上（探针 2026-10-16 实测踩到）。
+   */
+  const tabHit = await page.evaluate(() => {
+    const t = [
+      ...document.querySelectorAll('[role="tablist"][aria-label="参数分类"] [role="tab"]'),
+    ].find((x) => (x.getAttribute('title') ?? '').startsWith('偏移'))
+    t?.click()
+    return t !== undefined
+  })
+  console.log(`[${tag}] 切回「偏移」那一类=${tabHit}`)
+  await page.waitForTimeout(350)
+  await dlgFootBtn(page, '进入编辑模式')
+  await page.waitForTimeout(400)
+  const restored = await page
+    .locator('[role="dialog"] [data-key$="offset.y"] input')
+    .first()
+    .inputValue()
+  const restoredState = await dlgState(page)
+  check(
+    tag,
+    '退出编辑模式 = 作废（值退回已保存的 22.4、底栏没有未保存的改动）',
+    restored === '22.4' && /没有未保存的改动/.test(restoredState.foot),
+    `offset_y=${restored} · 底栏「${restoredState.foot}」`,
+  )
+  /* 收尾回只读，别把编辑态带去设置页那一节 */
+  await dlgFootBtn(page, '退出编辑模式')
+  await page.waitForTimeout(300)
+
+  /* 关掉弹窗（未保存的改动留在草稿里 —— 与「退出编辑模式」同一条口径），别影响设置页那一节 */
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  /* 保险：真有没关掉的弹窗就再补一记（它的遮罩会挡住设置页里的点击） */
+  if ((await page.getByRole('dialog').count()) > 0) {
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(300)
+  }
+
   /* ② 设置页：高级设置 → 预设数据源（同步页退役后，这一格搬到了这儿） */
+  /*
+   * ★ 2026-10-16 按现状重写：原来那两档（「手动指定」/「使用内置云端源」+「恢复内置默认」）
+   *   已经改成「两个固定内置单选（构建期注入）+ 收起的自定义地址」——
+   *   假后端没有内置源（`getPresetSource()` 给 null），所以这里只有：
+   *     当前「还没配置」→ 选「自定义地址（开发 / 排查）」→ 填地址 → 应用 →
+   *     当前变「你指定：…」（尾斜杠砍掉，与真机 `normalize_base_url` 同一套）→
+   *     非法地址如实拒（主句说"取不到、没有改"，技术详情收在折叠里）。
+   */
   await page.getByRole('button', { name: '设置', exact: true }).first().click()
   const setReady = await until(async () => (await mainText(page)).includes('预设数据源'), 8000)
   const setText = await mainText(page)
@@ -255,36 +449,31 @@ for (const size of SIZES) {
     '',
   )
 
-  /* 手动指定：填一个带尾斜杠的地址 → 应用 → 生效值砍掉尾斜杠 */
-  await page.getByRole('radio', { name: /手动指定/ }).check()
+  /* 自定义地址：选上才展开输入框（防错第一道：普通用户没有输错地址的机会）。
+     原生 radio 被自绘墨点盖着（`.mark` 拦 pointer）—— 直接 dispatch 点击，别用 `.check()` */
+  await page.evaluate(() => {
+    const input = [...document.querySelectorAll('input[name="preset-source"]')].find((x) =>
+      (x.closest('label')?.textContent ?? '').includes('自定义地址'),
+    )
+    input?.click()
+  })
+  await page.waitForTimeout(300)
   await page.getByLabel('数据源地址').fill('https://example.com/mkp/')
   await page.getByRole('button', { name: '应用', exact: true }).click()
   const applied = await until(async () => (await mainText(page)).includes('已应用'), 5000)
   const setText2 = await mainText(page)
   check(
     tag,
-    '手动指定能应用（尾斜杠砍掉 —— 与真机 normalize 同一套）',
+    '自定义地址能应用（尾斜杠砍掉 —— 与真机 normalize 同一套）',
     applied && setText2.includes('你指定：https://example.com/mkp'),
     setText2.slice(0, 120),
   )
 
-  /* 非法地址如实拒（校验消息与真机同一份） */
+  /* 非法地址如实拒：主句说清"取不到、没有改"（校验消息在折叠的技术详情里） */
   await page.getByLabel('数据源地址').fill('file:///tmp/presets')
   await page.getByRole('button', { name: '应用', exact: true }).click()
-  const rejected = await until(async () => (await mainText(page)).includes('只认 http'), 5000)
-  check(tag, '非法地址如实拒（只认 http(s)）', rejected, '')
-
-  /* 恢复内置默认：撤掉覆盖 → 回到「没配」（假后端没有内置源） */
-  await page.getByRole('radio', { name: /使用内置云端源/ }).check()
-  await page.getByRole('button', { name: '恢复内置默认', exact: true }).click()
-  const cleared = await until(async () => (await mainText(page)).includes('已撤掉你填的地址'), 5000)
-  const setText3 = await mainText(page)
-  check(
-    tag,
-    '恢复内置默认能撤回（没有内置源 → 回到「没配」）',
-    cleared && setText3.includes('还没配置'),
-    setText3.slice(0, 120),
-  )
+  const rejected = await until(async () => (await mainText(page)).includes('这个地址取不到预设数据'), 5000)
+  check(tag, '非法地址如实拒（主句说"取不到、没有改"）', rejected, '')
   await page.screenshot({ path: `${shotDir}/wire-settings-${tag}.png` })
 
   console.log(

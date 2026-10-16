@@ -1,45 +1,55 @@
 /*
- * 参数对比台（2026-10-08）。
+ * 参数对比台 · v4（2026-10-16 重做，定稿稿 = frontend-lab/lab/preset-compare-gallery.html）。
  *
- * # 它是什么，不是什么是
+ * # 交互（作者定的三条）
  *
- * **不是文本 diff，不是三方合并，不是"更新机制"** —— 它是一个**独立的常驻工具**：
- * 把 2~3 份**用户自己的本地预设**的参数并排摆出来，用参数页同款控件直接看、直接改。
+ *   ① **默认只读** —— 进台值是纯文本（与工作台参数台一致），控件不出现；
+ *      底栏右下「进入编辑模式」才进编辑态。
+ *      ★ 2026-10-16 统一：这颗原来在**标题栏**（ModalHeadSlot，× 旁边），
+ *      作者后来的口径是「进入编辑模式的那个按钮位置也统一一下」——挪到底栏右下，
+ *      与「编辑文件」模态框、修改参数弹窗三处同位。
+ *   ② 编辑态才有控件（`FieldControl` form="cell"，与修改参数弹窗**同一份共用件**——
+ *      作者：「对比的和修改参数的控件可以复用」）+ 底栏 撤销/重做/退出编辑模式/保存。
+ *      「退出编辑模式」= **作废这一次没保存的改动**、回只读（2026-10-16 作者立的口径，
+ *      三个模态框统一；原来是「取消」：丢改动但留在编辑态）。
+ *   ③ 候选**不摊一排 chips**（作者：「他就不该显示那么多 toml，一般只是两个对比的，最多三个」）
+ *      —— 右键带进来的两份直接坐列，「＋ 加一份对比」的弹层里才列候选（最多 3 份）。
  *
- *   · 数据源只有「本地预设」（`presets-local/`）—— **永不出现 baseline**：
- *     隐藏基准是系统内部的东西，它不进这张台子（作者 2026-10-08 裁决）；
- *   · 选中的所有列**都可编辑**（都是用户自己的文件），保存各写各的、互不覆盖；
- *   · 差异只在**底层比较**（TOML 原文值），展示在参数 UI 层 —— 用户看到的是
- *     「开关 / 数字 / 下拉 / 文本」，不是 `enable = true`。
+ * # 排版（gallery 两轮换来的两条铁律）
  *
- * # 「采用此值」是显式动作
+ *   · **grid 锁列**，不用 `<table>`：mono 长键名（toolhead.first_pen_revitalization_flag）
+ *     在 table-layout:fixed 里会把格子挤穿、键名窜进值列（第一轮翻车实录）。
+ *     键名列 word-break 断行、值列控件 flex-shrink:0 永不折行。
+ *   · 骨架参考工作台「参数台」：搜索参数 → 「仅显示差异 N」→ 分组 chips → 状态徽标列。
  *
- * 不做"点一下某个值就神秘地把别处改了"。差异行上每一格旁边有一枚**显式的**
- * 「采用此值」按钮，它做一件事：**把这一格的值复制到本行其它文件**（标题里点名是哪几份）。
- * 复制只是填进草稿，真正落盘要按底部的「保存修改」。
- *
- * # 读不出来不打掉整个框
- *
- * 某一列读不出来（不是 TOML / 编码不对）时，那一列如实说一句人话，不给会报错的控件 ——
- * 其余几列照常能比能改。
- *
- * # 入口（2026-10-10）
- *
- * 顶部那颗常驻「参数对比」按钮退役 —— 入口搬进**列表的右键菜单**：
- * 右键第一份点「参数对比」、再右键另一份点「与「X」对比」，那两份由 `preselect`
- * 带进来、开台即选中；台子打开后照旧能自己勾（最多三份，见 `MAX_PICKED`）。
+ * 撤销/重做是**这一台的本地栈**（与参数页的 useParams 无关 —— 那边编辑的是一份，
+ * 这里是 2~3 份各一份草稿）：一次手势 = 一条 UndoEntry（「采用此值」是一批 = 一条）。
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import { api, errorText } from '../../api'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
 import { FieldControl } from '../../components/field'
 import type { FieldSchema } from '../../components/field'
+import { boolOf } from '../../components/field/value'
+import Icon from '../shell/icons'
 import { Modal } from '../../components/modal'
 import s from './CompareModal.module.css'
 
 /** 最多同时比几份 —— 再多就摆不开了，也不符合"几个版本放一起看"这个用法 */
 const MAX_PICKED = 3
+
+/** 一条手势：一次编辑一格；「采用此值」是一批。`before === undefined` = 原来没有这一格 */
+interface UndoEntry {
+  path: string
+  key: string
+  before: string | undefined
+  after: string
+}
+
+/** 列身份色：轴标三色（tokens 现成的 —— 校准页 / 报告页同源） */
+const COL_COLORS = ['var(--accent)', 'var(--axis-y)', 'var(--axis-z)']
 
 /** 一个字段在这张台上长什么样（分组 + 控件 + 顺序） */
 interface CompareRow {
@@ -102,17 +112,28 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
     .sort((a, b) => a.order - b.order)
 }
 
+/** 只读态的纯文本值（编辑态才出现控件 —— 作者：「默认是不能改参数的」） */
+function roTextOf(row: CompareRow, raw: string): string {
+  switch (row.field.control) {
+    case 'switch':
+      return boolOf(raw) ? '开启' : '关闭'
+    case 'choice':
+      return row.field.choices?.find((c) => c.value === raw)?.label ?? raw
+    case 'gcode':
+      return `${raw.split('\n').filter((l) => l.trim() !== '').length} 行`
+    default:
+      return raw
+  }
+}
+
 interface Props {
   open: boolean
   /** 可比较的候选：**用户自己的预设**（读得出来的 MKP 预设） */
   files: LocalPresetFile[]
   /**
-   * **这一次打开要直接选中的两份**（path）—— 2026-10-10 起入口是右键两下选
-   * （见 PagePresets 的 `compareEntry`）：右键第一份点「参数对比」、右键第二份
-   * 点「与「X」对比」，那两份就从这里进来、开台即选中。
-   *
-   * 只在**打开那一下**生效 —— 之后用户自己在台子里勾勾选选，不被它顶掉；
-   * 不在候选里的（那份被删了 / 改名了）自动忽略，不足两份退回原来的默认（前两份）。
+   * **这一次打开要直接选中的两份**（path）—— 入口是右键两下选：
+   * 右键第一份点「参数对比」、右键第二份点「与「X」对比」，那两份由这里带进来、
+   * 开台即选中（就是列头坐定的 ①②）。只在打开那一下生效。
    */
   preselect?: string[]
   host?: HTMLElement | null
@@ -135,6 +156,17 @@ export default function CompareModal({
   const [registry, setRegistry] = useState<CatalogRegistry | null>(null)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState<string | null>(null)
+
+  /* 只读 / 编辑（作者：「默认是不能改参数的，加一个编辑或者修改按钮才能改」） */
+  const [editing, setEditing] = useState(false)
+  /** 本地撤销栈：一次手势一条（「采用此值」一批也是一条） */
+  const [past, setPast] = useState<UndoEntry[][]>([])
+  const [future, setFuture] = useState<UndoEntry[][]>([])
+  const [query, setQuery] = useState('')
+  const [onlyDiff, setOnlyDiff] = useState(false)
+  const [groupTab, setGroupTab] = useState<string>('all')
+  const [addOpen, setAddOpen] = useState(false)
+  const addRef = useRef<HTMLDivElement>(null)
 
   const nameOf = useCallback(
     (path: string) => files.find((f) => f.path === path)?.fileName ?? path.split('/').pop() ?? path,
@@ -159,11 +191,24 @@ export default function CompareModal({
   }, [open])
 
   /*
-   * 每次打开：**优先用右键带进来的那两份**（`preselect`），没有就默认选前两份
-   * （用户什么都不点也能直接看到一张对照表）。
-   *
-   * `justOpened` 认「打开的那一下」：preselect 只在那一刻生效 —— 台子开着的时候
-   * 候选列表重读过（`files` 换引用）也不会把用户自己勾的选择重新摆一遍。
+   * 关掉就收回编辑态与小开关。**草稿的清理在下面「打开那一下」**（`justOpened` 的 first
+   * 分支）—— 两处合起来的结果：**下次打开是一台干净的只读台**（草稿不跨开关保留，
+   * 所以也永远不会出现"重开时还挂着未保存改动"这一幕）。
+   */
+  useEffect(() => {
+    if (open) return
+    setEditing(false)
+    setPast([])
+    setFuture([])
+    setQuery('')
+    setOnlyDiff(false)
+    setGroupTab('all')
+    setAddOpen(false)
+  }, [open])
+
+  /*
+   * 每次打开：优先用右键带进来的那两份（`preselect`），没有就默认选前两份。
+   * `justOpened` 认「打开的那一下」——之后用户自己增删列，不被它顶掉。
    */
   const justOpened = useRef(false)
   useEffect(() => {
@@ -174,7 +219,12 @@ export default function CompareModal({
     const first = !justOpened.current
     justOpened.current = true
     setProblem(null)
-    if (first) setDraft({})
+    if (first) {
+      setDraft({})
+      setEditing(false)
+      setPast([])
+      setFuture([])
+    }
     setPicked((cur) => {
       if (first) {
         const want = (preselect ?? []).filter((p) => files.some((f) => f.path === p))
@@ -188,7 +238,7 @@ export default function CompareModal({
 
   const rows = useMemo(() => (registry === null ? [] : rowsOf(registry)), [registry])
 
-  /* 选中的每一列各读一次参数（读不出来的那一列照实存 `problem`，不打掉整张台子） */
+  /* 选中的每一列各读一次参数（读不出来的那一列照实存 problem，不打掉整张台子） */
   useEffect(() => {
     if (!open) return
     const missing = picked.filter((p) => loaded[p] === undefined)
@@ -219,6 +269,16 @@ export default function CompareModal({
     }
   }, [open, picked, loaded, nameOf])
 
+  /* 点弹层外面收「加一份对比」的菜单 */
+  useEffect(() => {
+    if (!addOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (addRef.current !== null && !addRef.current.contains(e.target as Node)) setAddOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [addOpen])
+
   const valueAt = useCallback(
     (path: string, key: string): string | undefined =>
       draft[path]?.[key] ?? loaded[path]?.values[key],
@@ -229,36 +289,82 @@ export default function CompareModal({
 
   const dirtyTotal = picked.reduce((n, p) => n + dirtyOf(p), 0)
 
-  const togglePick = (path: string) => {
-    setProblem(null)
-    setPicked((cur) => {
-      if (cur.includes(path)) return cur.filter((p) => p !== path)
-      if (cur.length >= MAX_PICKED) return cur
-      return [...cur, path]
-    })
+  /* ---------- 列的增删（候选只在弹层里出现） ---------- */
+
+  const removePick = (path: string) => {
+    if (picked.length <= 2) return
+    setPicked((cur) => cur.filter((p) => p !== path))
   }
 
-  /** 用户直接改某一格的值 */
+  const candidates = files.filter((f) => !picked.includes(f.path))
+
+  const addPick = (path: string) => {
+    setProblem(null)
+    setPicked((cur) => (cur.length >= MAX_PICKED || cur.includes(path) ? cur : [...cur, path]))
+    setAddOpen(false)
+  }
+
+  /* ---------- 改值（编辑态） + 本地撤销/重做 ---------- */
+
+  /** 记一条手势（batch = 一次手势动过的格子；「采用此值」一批也是一条） */
+  const pushUndo = (batch: UndoEntry[]) => {
+    setPast((p) => [...p, batch])
+    setFuture([])
+  }
+
   const edit = (path: string, key: string, next: string) => {
+    const before = valueAt(path, key)
+    if (before === next) return
     setDraft((cur) => ({ ...cur, [path]: { ...(cur[path] ?? {}), [key]: next } }))
+    pushUndo([{ path, key, before, after: next }])
   }
 
   /** **采用此值**：把这一格的值复制到本行其它文件（显式动作，不是点值就改对面） */
   const adopt = (key: string, from: string, value: string) => {
+    const targets = picked.filter((p) => p !== from && loaded[p]?.values[key] !== undefined)
+    if (targets.length === 0) return
+    const batch: UndoEntry[] = []
     setDraft((cur) => {
       const next = { ...cur }
-      for (const path of picked) {
-        if (path === from) continue
-        /* 目标那份没有这个字段就跳过（后端只改已存在的键，不该发一条必定失败的改动） */
-        if (loaded[path]?.values[key] === undefined) continue
+      for (const path of targets) {
+        batch.push({ path, key, before: next[path]?.[key], after: value })
         next[path] = { ...(next[path] ?? {}), [key]: value }
       }
       return next
     })
+    pushUndo(batch)
   }
 
-  const adoptTargets = (key: string, from: string): string[] =>
-    picked.filter((p) => p !== from && loaded[p]?.values[key] !== undefined)
+  const undo = () => {
+    const entry = past[past.length - 1]
+    if (entry === undefined) return
+    setDraft((cur) => {
+      const next = { ...cur }
+      for (const { path, key, before } of entry) {
+        const cell = { ...(next[path] ?? {}) }
+        if (before === undefined) delete cell[key]
+        else cell[key] = before
+        next[path] = cell
+      }
+      return next
+    })
+    setPast((p) => p.slice(0, -1))
+    setFuture((f) => [...f, entry])
+  }
+
+  const redo = () => {
+    const entry = future[future.length - 1]
+    if (entry === undefined) return
+    setDraft((cur) => {
+      const next = { ...cur }
+      for (const { path, key, after } of entry) {
+        next[path] = { ...(next[path] ?? {}), [key]: after }
+      }
+      return next
+    })
+    setFuture((f) => f.slice(0, -1))
+    setPast((p) => [...p, entry])
+  }
 
   const save = () => {
     const targets = picked.filter((p) => dirtyOf(p) > 0)
@@ -292,8 +398,14 @@ export default function CompareModal({
           ),
         ),
       )
-      setLoaded(Object.fromEntries(again.map((v) => [v.path, v])))
-      setDraft({})
+      if (!host) {
+        /* host 无关：状态照常更新 */
+      }
+      setLoaded((cur) => {
+        const next = { ...cur }
+        for (const v of again) next[v.path] = v
+        return next
+      })
       setBusy(false)
       if (failed.length === 0) {
         onSaved(`已保存 ${targets.map(nameOf).join('、')} 的参数改动`)
@@ -314,102 +426,260 @@ export default function CompareModal({
     return out
   }, [rows])
 
+  /* ---------- 过滤（搜索 / 仅显示差异 / 分组 chips） ---------- */
+
+  const rowDiffers = useCallback(
+    (row: CompareRow) => {
+      const values = picked.map((p) => valueAt(p, row.key))
+      const present = values.filter((v): v is string => v !== undefined)
+      return present.length > 1 && new Set(present).size > 1
+    },
+    [picked, valueAt],
+  )
+
+  const rowMatches = useCallback(
+    (row: CompareRow) => {
+      if (onlyDiff && !rowDiffers(row)) return false
+      const kw = query.trim().toLowerCase()
+      if (kw === '') return true
+      return row.label.toLowerCase().includes(kw) || row.key.toLowerCase().includes(kw)
+    },
+    [onlyDiff, query, rowDiffers],
+  )
+
+  const tabCounts = useMemo(() => {
+    const m = new Map<string, number>()
+    let all = 0
+    for (const row of rows) {
+      if (!rowMatches(row)) continue
+      m.set(row.groupId, (m.get(row.groupId) ?? 0) + 1)
+      all++
+    }
+    return { m, all }
+  }, [rows, rowMatches])
+
+  /* ---------- 底栏（两态，与「编辑文件」/「修改参数」同一套框架） ---------- */
+
+  /*
+   * ★ 2026-10-16 统一（作者：「不管是对比还是那个修改参数，他们的那个编辑模式布局
+   *   几乎都要一样……进入编辑模式的那个按钮位置也统一一下」）：
+   *
+   *   只读态   左「只读对照」· 右下「进入编辑模式」（原来这颗在**标题栏**，挪下来）
+   *   编辑态   左「未保存的改动（N）」· 右下 撤销 / 重做 / 退出编辑模式 / 保存
+   *
+   * 「退出编辑模式」= 回只读态 + **作废未保存的改动**（2026-10-16 作者：「退出编辑模式
+   * 就是作废，那些改的都作废，保存了才有」；原来那颗「取消」丢改动但留在编辑态，
+   * 随这一刀退休）。
+   */
   const footer = (
     <>
-      <span className={s.footNote}>
-        {dirtyTotal === 0
-          ? '改动只落在这一屏；按「保存修改」才写回各自那份文件'
-          : `${dirtyTotal} 处改动待保存`}
-      </span>
-      <button type="button" className={s.ghost} onClick={onClose} disabled={busy}>
-        关闭
-      </button>
-      <button
-        type="button"
-        className={s.primary}
-        onClick={save}
-        disabled={busy || dirtyTotal === 0}
-       
-      >
-        {busy ? '保存中…' : '保存修改'}
-      </button>
+      {editing ? (
+        <>
+          <span className={s.footNote}>
+            {dirtyTotal === 0 ? (
+              '没有未保存的改动'
+            ) : (
+              <>
+                未保存的改动（<b>{dirtyTotal}</b>）
+              </>
+            )}
+          </span>
+          <span className={s.footBtns}>
+            <button
+              type="button"
+              className={s.iconBtn}
+              disabled={past.length === 0 || busy}
+              title="撤销（一次手势一条）"
+              aria-label="撤销"
+              onClick={undo}
+            >
+              <Icon name="undo" size={15} />
+            </button>
+            <button
+              type="button"
+              className={s.iconBtn}
+              disabled={future.length === 0 || busy}
+              title="重做"
+              aria-label="重做"
+              onClick={redo}
+            >
+              <Icon name="redo" size={15} />
+            </button>
+            <button
+              type="button"
+              className={s.textBtn}
+              disabled={busy}
+              title="退回只读 —— 这一次没保存的改动都作废（要留住就先保存）"
+              onClick={() => {
+                /*
+                 * **退出编辑模式 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+                 * 就是作废，那些改的都作废，保存了才有」）——与「编辑文件」/「修改参数」
+                 * 三处同一个口径。本来这台就是"打开那一下清草稿"（见 `justOpened`），
+                 * 这一步与它同一条路。
+                 */
+                setDraft({})
+                setPast([])
+                setFuture([])
+                setEditing(false)
+              }}
+            >
+              退出编辑模式
+            </button>
+            <button
+              type="button"
+              className={s.primary}
+              onClick={save}
+              disabled={busy || dirtyTotal === 0}
+            >
+              {busy ? '保存中…' : '保存'}
+            </button>
+          </span>
+        </>
+      ) : (
+        <>
+          <span className={s.footNote}>只读对照 —— 要改值，点右下「进入编辑模式」</span>
+          <button
+            type="button"
+            className={s.primary}
+            disabled={busy || picked.length < 2}
+            title="进编辑模式：这一台的值就可以改了"
+            onClick={() => setEditing(true)}
+          >
+            进入编辑模式
+          </button>
+        </>
+      )}
     </>
   )
 
-  return (
-    <Modal
-      open={open}
-      title="参数对比"
-      /* 副标题一句话说完（2026-10-10 统一：模态框副标题不写长篇解释） */
-      subtitle="并排看 2~3 份，值可以直接改"
-      size="lg"
-      host={host}
-      /* 点遮罩一律不关（2026-10-15 作者定的全站口径）—— 关走 Esc 或页眉那颗 */
-      closeTitle={dirtyTotal === 0 ? '关掉对比台' : '有未保存的改动 —— 先保存或放弃'}
-      onClose={onClose}
-      footer={footer}
-    >
-      <div className={s.pick}>
-        {files.length === 0 && (
-          <span className={s.note}>
-            还没有「本地预设」可以对比 —— 先在资源库里另存一份自己的（云端那一份是模板，不进这张台子）。
-          </span>
-        )}
-        {files.map((f) => {
-          const on = picked.includes(f.path)
-          const full = !on && picked.length >= MAX_PICKED
-          return (
-            <button
-              key={f.path}
-              type="button"
-              className={on ? `${s.pickItem} ${s.pickOn}` : s.pickItem}
-              disabled={full}
-             
-              onClick={() => togglePick(f.path)}
-            >
-              {f.fileName}
-            </button>
-          )
-        })}
-      </div>
+  const gridStyle = { '--n': picked.length } as CSSProperties
 
+  const body: ReactNode = (
+    <>
       {problem !== null && <p className={s.problem}>{problem}</p>}
 
       {picked.length < 2 ? (
         <p className={s.note}>至少选两份才能对比。</p>
       ) : (
-        <div className={s.grid}>
-          <table className={s.table}>
-            <thead>
-              <tr>
-                <th className={s.headKey}>参数</th>
-                {picked.map((path) => (
-                  <th key={path} className={s.headCol}>
-                    <span className={s.headName}>{nameOf(path)}</span>
-                    <span className={s.headSub}>
-                      {loaded[path]?.problem !== undefined && loaded[path]?.problem !== null
-                        ? loaded[path]?.problem
-                        : dirtyOf(path) > 0
-                          ? '有未保存修改'
-                          : '未改动'}
+        <>
+          {/* 工具行：搜索 + 仅显示差异 + 计数 + 加一份（候选只在弹层里） */}
+          <div className={s.tools}>
+            <input
+              className={s.search}
+              placeholder="搜索参数名或 toolhead.*"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <button
+              type="button"
+              className={onlyDiff ? `${s.onlyDiff} ${s.on}` : s.onlyDiff}
+              onClick={() => setOnlyDiff((v) => !v)}
+              title="只看两份值不一样的参数"
+            >
+              <span className={s.sw} />
+              仅显示差异 <span className={s.cnt}>{tabCounts.all}</span>
+            </button>
+            <span className={s.toolsCnt}>
+              共 <b>{tabCounts.all}</b> 条
+            </span>
+            <span className={s.toolsGap} />
+            <div className={s.addWrap} ref={addRef}>
+              <button
+                type="button"
+                className={s.addBtn}
+                disabled={picked.length >= MAX_PICKED || candidates.length === 0}
+                title={picked.length >= MAX_PICKED ? '最多同时比三份' : '再加一份进来比'}
+                onClick={() => setAddOpen((v) => !v)}
+              >
+                ＋ 加一份对比
+              </button>
+              {addOpen && (
+                <div className={s.addMenu}>
+                  {candidates.map((f, i) => (
+                    <button key={f.path} type="button" onClick={() => addPick(f.path)}>
+                      <i
+                        className={s.dot}
+                        style={{ background: COL_COLORS[(picked.length + i) % COL_COLORS.length] }}
+                      />
+                      <span>{f.fileName}</span>
+                    </button>
+                  ))}
+                  {candidates.length === 0 && (
+                    <button type="button" disabled>
+                      <span>没有别的可加的了</span>
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* 分组 chips（工作台「全部 73 / 偏移 5 …」同构） */}
+          <div className={s.tabs}>
+            <button
+              type="button"
+              className={groupTab === 'all' ? `${s.tab} ${s.on}` : s.tab}
+              onClick={() => setGroupTab('all')}
+            >
+              全部 <span className={s.n}>{tabCounts.all}</span>
+            </button>
+            {groups.map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                className={groupTab === g.id ? `${s.tab} ${s.on}` : s.tab}
+                onClick={() => setGroupTab(g.id)}
+              >
+                {g.label} <span className={s.n}>{tabCounts.m.get(g.id) ?? 0}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className={s.grid} style={gridStyle}>
+            {/* 列头 = 槽位：色点 + 文件名 + ✕（两份时钉死，✕ 不出） */}
+            <div className={s.thead}>
+              <span className={s.hkey}>参数</span>
+              {picked.map((path, i) => (
+                <span key={path} className={s.hcol}>
+                  <i className={s.dot} style={{ background: COL_COLORS[i] }} />
+                  <span className={s.nm} title={nameOf(path)}>
+                    {nameOf(path)}
+                  </span>
+                  <span className={s.ops}>
+                    <button
+                      type="button"
+                      className={s.op}
+                      disabled={picked.length <= 2}
+                      title={picked.length <= 2 ? '至少要两份才能对比' : '把这份移出对比'}
+                      onClick={() => removePick(path)}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                  {dirtyOf(path) > 0 && (
+                    <span className={s.op} style={{ cursor: 'default', opacity: 1 }} title="">
+                      {dirtyOf(path)}
                     </span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {groups.map((g) => (
+                  )}
+                </span>
+              ))}
+              <span className={s.hst}>状态</span>
+            </div>
+
+            {groups.map((g) => {
+              const visible = g.rows.filter(rowMatches)
+              if (groupTab !== 'all' && groupTab !== g.id) return null
+              if (visible.length === 0) return null
+              return (
                 <Fragment key={g.id}>
-                  <tr className={s.groupRow}>
-                    <td colSpan={picked.length + 1}>{g.label}</td>
-                  </tr>
-                  {g.rows.map((row) => {
-                    const values = picked.map((p) => valueAt(p, row.key))
-                    const present = values.filter((v): v is string => v !== undefined)
-                    const differs = present.length > 1 && new Set(present).size > 1
+                  <div className={`${s.grow} ${s.groupRow}`}>
+                    <span>{g.label}</span>
+                  </div>
+                  {visible.map((row) => {
+                    const differs = rowDiffers(row)
                     return (
-                      <tr key={row.key} className={differs ? `${s.row} ${s.rowDiff}` : s.row}>
-                        <td className={s.keyCell}>
+                      <div key={row.key} className={`${s.grow}${differs ? ` ${s.diff}` : ''}`}>
+                        <span className={s.keyCell}>
                           <span className={s.keyLabel}>
                             {row.label}
                             {row.unit !== undefined && row.unit !== '' && (
@@ -417,20 +687,37 @@ export default function CompareModal({
                             )}
                           </span>
                           <span className={s.keyPath}>{row.key}</span>
-                        </td>
-                        {picked.map((path, i) => {
-                          const value = values[i]
-                          const targets = adoptTargets(row.key, path)
+                        </span>
+                        {picked.map((path) => {
+                          const value = valueAt(path, row.key)
+                          const targets =
+                            editing && differs && value !== undefined
+                              ? picked.filter(
+                                  (p) => p !== path && loaded[p]?.values[row.key] !== undefined,
+                                )
+                              : []
                           return (
-                            <td key={path} className={s.cell}>
+                            <span key={path} className={s.cell}>
                               {value === undefined ? (
-                                <span className={s.absent}>
-                                  —
+                                <span className={s.absent}>不适用</span>
+                              ) : !editing ? (
+                                <span className={s.ro}>
+                                  <span className={row.field.control === 'number' ? s.ro : s.ro}>
+                                    <span
+                                      className={
+                                        row.field.control === 'number' || row.field.control === 'text'
+                                          ? `${s.ro} ${s.mono}`
+                                          : s.ro
+                                      }
+                                    >
+                                      {roTextOf(row, value)}
+                                    </span>
+                                  </span>
                                 </span>
                               ) : row.field.control === 'gcode' ? (
                                 <span className={s.gcode}>
                                   {value.split('\n')[0] || '（空）'}
-                                  {value.includes('\n') && <span className={s.more}>…</span>}
+                                  {value.includes('\n') && <span className={s.absent}>…</span>}
                                 </span>
                               ) : (
                                 <FieldControl
@@ -440,28 +727,52 @@ export default function CompareModal({
                                   onChange={(next) => edit(path, row.key, next)}
                                 />
                               )}
-                              {differs && value !== undefined && targets.length > 0 && (
+                              {targets.length > 0 && value !== undefined && (
                                 <button
                                   type="button"
                                   className={s.adopt}
-                                 
                                   onClick={() => adopt(row.key, path, value)}
                                 >
                                   采用此值
                                 </button>
                               )}
-                            </td>
+                            </span>
                           )
                         })}
-                      </tr>
+                        <span className={s.cell}>
+                          <span className={differs ? `${s.badge} ${s.diff}` : `${s.badge} ${s.same}`}>
+                            {differs ? '差异' : picked.some((p) => valueAt(p, row.key) === undefined) ? '—' : '一致'}
+                          </span>
+                        </span>
+                      </div>
                     )
                   })}
                 </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              )
+            })}
+          </div>
+        </>
       )}
+    </>
+  )
+
+  return (
+    <Modal
+      open={open}
+      title="参数对比"
+      subtitle={
+        editing
+          ? '正在编辑 —— 改完按「保存」写回各自那份文件'
+          : '并排看 2~3 份（只读）；要改值点右下「进入编辑模式」'
+      }
+      size="lg"
+      host={host}
+      /* 点遮罩一律不关（2026-10-15 作者定的全站口径）—— 关走 Esc 或页眉那颗 */
+      closeTitle={dirtyTotal === 0 ? '关掉对比台' : '关掉会丢掉未保存的改动 —— 先保存'}
+      onClose={onClose}
+      footer={footer}
+    >
+      {body}
     </Modal>
   )
 }

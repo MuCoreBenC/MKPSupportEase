@@ -52,9 +52,11 @@
   border-color: var(--wb-primary);
 }
 
+/* ★ 红取 `--danger`（深色那边是提亮过的 `#e5484d`）—— 硬编码的那个值压在
+   深底上发闷，描边看着像"灰了一条边" */
 .input[data-invalid='true'],
 .view[data-invalid='true'] {
-  border-color: #e5484d;
+  border-color: var(--danger, #e5484d);
 }
 
 /*
@@ -62,7 +64,7 @@
  * `data-error` 只在编辑态挂上 —— 收起之后没有框可标，错误也不该继续留着。
  */
 .input[data-error='true'] {
-  border-color: #e5484d;
+  border-color: var(--danger, #e5484d);
 }
 
 .err {
@@ -70,5 +72,5 @@
   margin-top: 4px;
   font-size: var(--fs-label);
   line-height: 1.4;
-  color: #e5484d;
+  color: var(--danger, #e5484d);
 }

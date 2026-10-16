@@ -115,6 +115,8 @@ pub async fn save_preset_params(
         if next == text {
             return Ok(());
         }
+        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文；新文件那一路在落盘时就存过） */
+        let _ = runtime::baseline::ensure_origin_copy(&root, &user, &path);
         runtime::local::write_text(&user, &path, &next)
     })
 }

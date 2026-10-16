@@ -288,6 +288,55 @@ pub fn open_model(
     })
 }
 
+/// **这台机器上 `.3mf` 现在关联的程序**（2026-10-16）——
+/// 设置页「切片」那格与「打开模型」框里那句「跟随系统默认」到底指谁。
+///
+/// 读的是**系统真值**（macOS 问 LaunchServices、Windows 问注册表，
+/// 见 [`slicer::system_default_app`]），问不出来（没关联 / 查不了）给 `null`：
+/// 界面按原来那句话显示，**不编一个应用名顶上**。
+///
+/// 异步那一档：问系统要走一遍 LaunchServices / 注册表，不该压在事件循环上。
+#[tauri::command(async)]
+pub fn get_system_slicer_app() -> Result<Option<slicer::SlicerApp>, AppError> {
+    traced("getSystemSlicerApp", |_| Ok(slicer::system_default_app()))
+}
+
+/// **把用户送到"改 .3mf 默认应用"那一处**（2026-10-16 作者口径：我们不替他改，
+/// 只把他送到系统里能改的地方）。
+///
+/// 回来的那句是**下一步提示**（界面照原样弹一条）—— 平台差异在 [`slicer::open_default_app_settings`]
+/// 那一侧说清（macOS 在访达里定位那份示例 + 把方法交给用户；Windows 开「打开方式」框）。
+#[tauri::command(async)]
+pub fn open_default_app_settings(app: AppHandle) -> Result<String, AppError> {
+    traced("openDefaultAppSettings", |_| {
+        let sample = app_settings_sample(&crate::fsx::paths::internal_root(&app)?)?;
+        slicer::open_default_app_settings(&sample)
+    })
+}
+
+/// 那份示例 `.3mf` 的文件名。它会被用户看见（访达里选中、Windows 那个框里点名的就是它），
+/// 所以名字得说得出自己是干嘛的。
+const APP_SETTINGS_SAMPLE: &str = "打开方式示例.3mf";
+
+/// 「改关联」用的把手文件：`<内部根>/open-with/打开方式示例.3mf`。
+///
+/// # 为什么是**一份空的假文件**，而不是用户下载过的那个模型
+///
+/// 作者 2026-10-16 拍：「能不能做一个假的 3MF 就是空的文件，**不要依赖那个有没有下载文件**」。
+/// 两个平台的 UI 都只是"对一份文件发问"（判据是**扩展名**，内容一个字都不看），
+/// 所以本机有没有下载过模型，跟这件事本来就不该有关系。
+///
+/// **留着不删**：访达里选中之后，用户可能过一会儿才按 ⌘I —— 那份文件得还在盘上。
+///
+/// 写盘走 [`crate::fsx::atomic::atomic_write`]（全仓唯一写口）。
+fn app_settings_sample(internal_root: &std::path::Path) -> Result<std::path::PathBuf, AppError> {
+    let file = internal_root.join("open-with").join(APP_SETTINGS_SAMPLE);
+    if !file.is_file() {
+        crate::fsx::atomic::atomic_write(&file, b"")?;
+    }
+    Ok(file)
+}
+
 /* ---------- 「复制后处理脚本」那一整条命令（前端不拼路径） ---------- */
 
 /// 首页那颗「复制后处理脚本」现在能不能给、给了是什么（**那一条命令的唯一数据面**）。
@@ -452,6 +501,30 @@ mod tests {
         assert_eq!(size_text(512), "512 B");
         assert_eq!(size_text(284 * 1024), "284 KB");
         assert_eq!(size_text(3_250_000), "3.1 MB");
+    }
+
+    /// 「改关联」那份示例（2026-10-16 作者口径）：**空的、留着不删、再叫一次还是同一份**
+    /// —— 它只是个把手，判据是扩展名，所以内容一个字都不需要有。
+    #[test]
+    fn the_app_settings_sample_is_an_empty_file_that_stays() {
+        let root = tempfile::tempdir().expect("临时目录");
+        let file = app_settings_sample(root.path()).expect("该落得下来");
+        assert!(file.is_file(), "示例得真落盘：{}", file.display());
+        assert_eq!(
+            std::fs::metadata(&file).expect("读得到").len(),
+            0,
+            "它就得是空的"
+        );
+        assert_eq!(
+            file.file_name().map(|s| s.to_string_lossy().into_owned()),
+            Some(APP_SETTINGS_SAMPLE.to_string()),
+            "名字是用户看得见的那一个"
+        );
+        /* 再叫一次：还是那一份（不换名、不重写、也不抛） */
+        assert_eq!(
+            app_settings_sample(root.path()).expect("第二次也该给"),
+            file
+        );
     }
 
     /* ---------- 「复制后处理脚本」那一整条命令（2026-10-10） ---------- */

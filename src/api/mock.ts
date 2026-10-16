@@ -459,6 +459,18 @@ mockLocalText.set(
   ['# 坏了的演示（假后端演示正文）', '[toolhead]', 'offset_x = (1', ''].join('\n'),
 )
 
+/**
+ * **原文镜像（假后端版）**：这份文件"最初落到盘上时"的字节 —— 把上面种好的那份抄一遍就是它。
+ *
+ * 与真机同语义（Rust `runtime::baseline` 的原文镜像一段）：下载 / 导入 / 复制 / 另存
+ * 在**落盘那一刻**存一份、老文件在**第一次被我们改写**（保存 / 写回 / 校准 / 归属）
+ * **之前**补上；「编辑文件」模态框那颗「恢复默认值」读的就是它。
+ *
+ * 往后每次"诞生一份新文件"（复制 / 导入 / 另存）都要在这张表里同步落一份 ——
+ * 保存 / 改名这些**改写**动作则不碰它（改名只搬家）。
+ */
+const mockLocalOrigin = new Map<string, string>(mockLocalText)
+
 /* ---------- 逐参数「云端更新」（2026-10-09）----------
  *
  * 真机上这件事由三份东西凑出来：
@@ -998,6 +1010,27 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 「跟随系统默认」到底指谁 —— 浏览器里**没有系统关联这回事**（没有 LaunchServices、
+   * 也没有注册表），所以如实答 `null`：界面回落原来那句话术（"用 .3mf 关联的程序打开"）。
+   * 与 `getPostProcessCommand` 同一条口径：这一格是要显示给用户看的**名字**，
+   * 编一个像模像样的出来比空着更坏（真机上由 Rust `get_system_slicer_app` 答）。
+   */
+  async getSystemSlicerApp() {
+    return null
+  },
+
+  /*
+   * 「去系统里改默认应用」：浏览器里一个系统窗口都开不了（没有访达、没有「打开方式」框），
+   * **照实拒** —— 与 `getFileUrl` / `checkRemoteUpdate` 同一条口径：这一步是桌面版的事。
+   */
+  async openDefaultAppSettings() {
+    throw new NotImplementedError(
+      'openDefaultAppSettings',
+      '浏览器预览里打不开系统那一处 —— 改默认应用请用桌面版（SupportEase 应用）',
+    )
+  },
+
+  /*
    * 「复制后处理脚本」那一整条命令 —— 浏览器里没有本机可执行物、也没有盘上真实落点，
    * 如实答 `ready: false` + 原因（真机那份由壳现拼：`current_exe()` + 预设绝对落点）。
    * **不编一条假命令**：编出来的东西贴进切片器只会让人以为"复制成功了"，其实指不到东西。
@@ -1264,6 +1297,8 @@ export const mockApi: MkpApi = {
       mockLocal[mockLocal.findIndex((f) => f.path === path)] = entry
     } else {
       mockLocal.push(entry)
+      /* 另存出来的新文件：落盘那一刻就是它的原文（覆盖别人的分支不碰 —— 那份早就有原文了） */
+      mockLocalOrigin.set(path, text)
     }
     mockLocalText.set(path, text)
     mockDraft = null
@@ -1273,6 +1308,11 @@ export const mockApi: MkpApi = {
   },
 
   /* ---------- 「编辑文件」那条链（2026-10-10：与参数草稿分开存） ---------- */
+
+  /** 「恢复默认值」（编辑文件那颗）读的原文 —— 见 `mockLocalOrigin` 的注释 */
+  async readLocalOriginText(path) {
+    return mockLocalOrigin.get(path) ?? null
+  },
 
   /** 参数草稿的**摘要** —— 预设列表行上的「未保存」标记用。没有草稿就是 `null` */
   async getPresetDraftSummary() {
@@ -1292,7 +1332,15 @@ export const mockApi: MkpApi = {
   /** 开始改一份用户预设的正文。已经有同一份（同路径）的草稿就**接着改** */
   async beginTextEdit(fileName, path) {
     if (mockTextDraft !== null && mockTextDraft.path === path) {
-      return { ...mockTextDraft, reused: true }
+      /* ★ `dirty`（2026-10-16）：与盘上字节**比过** —— "有草稿"≠"改过"
+         （打开过又关掉也算有草稿）；比不了（演示里读不到这一份）保守算脏，
+         与真机 `begin_text_edit` 同一句口径 */
+      const raw = mockLocalText.get(path)
+      return {
+        ...mockTextDraft,
+        reused: true,
+        dirty: raw === undefined ? true : raw !== mockTextDraft.text,
+      }
     }
     const raw = mockLocalText.get(path)
     if (raw === undefined) {
@@ -1303,7 +1351,8 @@ export const mockApi: MkpApi = {
     }
     /* 编辑器里这份**带着它自己的血统三行**（在这一份上有效，保存时照写回） */
     mockTextDraft = { fileName, path, text: raw, updatedUnix: nowSec() }
-    return { ...mockTextDraft, reused: false }
+    /* 新建的草稿 = 盘上字节本身，不脏 */
+    return { ...mockTextDraft, reused: false, dirty: false }
   },
 
   async putTextDraft(text) {
@@ -1376,6 +1425,12 @@ export const mockApi: MkpApi = {
         mockLocalText.delete(path)
         mockLocalText.set(newPath, text)
       }
+      /* 原文镜像跟着搬家（改名只动名字，不动字节 —— 真机 `move_origin_copy`） */
+      const origin = mockLocalOrigin.get(path)
+      if (origin !== undefined) {
+        mockLocalOrigin.delete(path)
+        mockLocalOrigin.set(newPath, origin)
+      }
       /* 逐参数「云端更新」决定账按**路径**认这一份 —— 改名之后它得跟到新路径上
          （不跟的话，云端下一次发布会把处理过的项全翻出来） */
       const book = mockParamDecisions.get(path)
@@ -1406,7 +1461,11 @@ export const mockApi: MkpApi = {
       throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
     }
     const text = mockLocalText.get(path)
-    if (text !== undefined) mockLocalText.set(newPath, text)
+    if (text !== undefined) {
+      mockLocalText.set(newPath, text)
+      /* 副本诞生那一刻的字节就是它的原文（真机在 `copy_as_new` 落盘后写镜像） */
+      mockLocalOrigin.set(newPath, text)
+    }
     mockLocal.push({
       ...hit,
       path: newPath,
@@ -1525,6 +1584,8 @@ export const mockApi: MkpApi = {
         continue
       }
       mockLocalText.set(path, MOCK_IMPORTED_TEXT)
+      /* 导入落盘那一刻的字节就是它的原文（真机在 `commit_import` 写镜像） */
+      mockLocalOrigin.set(path, MOCK_IMPORTED_TEXT)
       mockLocal.push({
         path,
         fileName: name,
@@ -1595,6 +1656,8 @@ export const mockApi: MkpApi = {
     }
     mockLocal.splice(i, 1)
     mockLocalText.delete(path)
+    /* 原文镜像一起走（这份都没了，"它最初的样子"不该留着） */
+    mockLocalOrigin.delete(path)
     /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句） */
     mockRemarks.delete(path)
     /* 逐参数「云端更新」决定账跟着删：文件都不在了，留着一本账只会是悬空的 */
@@ -1791,6 +1854,25 @@ export const mockApi: MkpApi = {
           machineId: 'P1S',
           name: 'P1S 外观图',
           path: 'printers/p1s.webp',
+          delivery: 'bundled',
+        },
+        /*
+         * 引导图（2026-10-16）：与上面那几张同一条路 —— **真 id + 真 path**，
+         * 文件也被装配进 dist（`delivery = 'bundled'`），所以浏览器演示里
+         * 「去系统里改…」那张图片引导是**真取到图**的，不是画个占位。
+         */
+        {
+          id: 'guide-open-with-light',
+          type: 'guide',
+          name: '「改 .3mf 默认打开方式」引导图（浅色）',
+          path: 'guides/open-with-light.png',
+          delivery: 'bundled',
+        },
+        {
+          id: 'guide-open-with-dark',
+          type: 'guide',
+          name: '「改 .3mf 默认打开方式」引导图（深色）',
+          path: 'guides/open-with-dark.png',
           delivery: 'bundled',
         },
       ],

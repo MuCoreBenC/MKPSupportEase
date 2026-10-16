@@ -66,6 +66,12 @@ interface Props {
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
   /**
+   * **只读**（2026-10-16 的「进入编辑模式」两态）：行里的控件替成纯文本值、
+   * 分支卡头点不动、gcode 整块编辑器降成一行「N 行」—— 整张卡只是「看」。
+   * 页面的编辑态才传 false（默认）。
+   */
+  readonly?: boolean
+  /**
    * **云端更新账**（逐项）。不给就是"这一段没有云端更新这回事"（云端线 / 认不出是哪一版云端）——
    * 行上一律不画，页面的长相与以前完全一样。
    */
@@ -193,6 +199,7 @@ export default function ParamCard({
   onToggleExpand,
   onEdit,
   onRevertToSaved,
+  readonly = false,
   syncOf,
   onAdoptSync,
   onHoldSync,
@@ -234,8 +241,9 @@ export default function ParamCard({
   /*
    * 整卡都是 G-code 编辑器且不止一块（「切换」分类那两张：装载 / 卸载胶箱）
    * —— 宽窗口下并排摆。宽窄交给容器查询（见 module.css 的 @container）。
+   * 只读态不适用：那时它们降成普通行（没有整块编辑器）。
    */
-  const gcodePair = fields.length > 1 && fields.every((d) => d.field.control === 'gcode')
+  const gcodePair = !readonly && fields.length > 1 && fields.every((d) => d.field.control === 'gcode')
 
   /*
    * 条件小签的文字：「外围结构 = 斜肋外墙」。条件参数的 label + 符号 +
@@ -256,7 +264,11 @@ export default function ParamCard({
   const renderList = (items: TreeNode[]): ReactNode[] =>
     items.map((node, i) => {
       if (node.kind === 'row') {
-        return node.def.field.control === 'gcode' && renderBlock !== undefined ? (
+        /*
+         * 只读态 gcode 不走整块编辑器（`renderBlock`）：降成普通行 ——
+         * 值文本「N 行」（`valueText`），与参数对比台的只读值同一口径。
+         */
+        return node.def.field.control === 'gcode' && renderBlock !== undefined && !readonly ? (
           <div key={node.def.key} className={s.block}>
             {renderBlock(node.def)}
           </div>
@@ -278,6 +290,7 @@ export default function ParamCard({
             onToggleExpand={onToggleExpand}
             onEdit={onEdit}
             onRevertToSaved={onRevertToSaved}
+            readonly={readonly}
             query={query}
           />
         )
@@ -317,8 +330,9 @@ export default function ParamCard({
                 type="button"
                 className={s.fold}
                 aria-expanded={open}
-                disabled={!switchable || open}
-                title={!open && switchable ? `切换到「${valueLabel}」` : undefined}
+                /* 只读态点不动（它是一条真的写值路径：点了 = 把条件参数改成这一支的值） */
+                disabled={!switchable || open || readonly}
+                title={!open && switchable && !readonly ? `切换到「${valueLabel}」` : undefined}
                 onClick={() => onEdit(node.cond.key, node.cond.value)}
               >
                 <span className={s.foldMark} aria-hidden>

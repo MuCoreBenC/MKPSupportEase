@@ -54,7 +54,7 @@ export default function PresetParamsModal({
       host={host}
       /* 框里有没保存的改动（草稿在盘上）—— 手滑点一下遮罩不该把关掉变成丢东西 */
       closeOnScrim={false}
-      closeTitle="关掉（没保存的改动还在草稿里，回来点「改这份」接着改）"
+      closeTitle="关掉（没保存的改动还在草稿里，回来接着改）"
       onClose={onClose}
     >
       {/*
@@ -67,6 +67,11 @@ export default function PresetParamsModal({
         embedded
         target={target}
         openSyncOnStart={openSyncOnStart}
+        /*
+         * **打开先只读**（2026-10-16）：进编辑模式才动得了 —— 与参数对比台、
+         * 编辑文件模态框同一个框架（只读 → 进编辑 → 撤销/重做/退出/保存）。
+         */
+        gateEdit
       />
     </Modal>
   )

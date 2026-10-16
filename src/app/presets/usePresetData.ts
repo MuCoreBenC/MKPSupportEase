@@ -299,9 +299,20 @@ export interface PresetData {
    * `reused` = 接着上次那半截改。
    */
   beginTextEdit: (fileName: string, path: string) => Promise<PresetTextDraft>
+  /**
+   * **这份文件的原文**（最初落到盘上时的那一份）——「恢复默认值」那颗退回的地方。
+   * `null` = 没有原始备份（按钮禁用）。见契约里的同名接口。
+   */
+  readLocalOriginText: (path: string) => Promise<string | null>
   /** 正文的改动写进正文草稿（边改边存 —— 改到一半关掉也还在；盘上那份文件不碰） */
   putTextDraft: (text: string) => Promise<void>
-  /** 放弃这次正文编辑（丢正文草稿；盘上那份文件全程没被碰过，所以它天生安全） */
+  /**
+   * 放弃这次正文编辑（丢正文草稿；盘上那份文件全程没被碰过，所以它天生安全）。
+   *
+   * ★ 2026-10-16：现在是「退出编辑模式」的作废那一步在调用（丢草稿 → 重读盘上字节回填，
+   *   见 `PagePresets` 的 `exitEdit`）—— 作者：「没有保存的话，退出编辑模式就是作废，
+   *   那些改的都作废，保存了才有」。
+   */
   discardTextDraft: () => Promise<void>
   /**
    * 保存正文：**写回它自己**（第八层，整份原子替换），然后丢掉正文草稿。
@@ -932,6 +943,8 @@ export function usePresetData(importRevision = 0): PresetData {
     [],
   )
 
+  const readLocalOriginText = useCallback((path: string) => api.readLocalOriginText(path), [])
+
   const putTextDraft = useCallback((text: string) => api.putTextDraft(text), [])
 
   const discardTextDraft = useCallback(() => api.discardTextDraft(), [])
@@ -1114,6 +1127,7 @@ export function usePresetData(importRevision = 0): PresetData {
     downloadPreset,
     downloadPresetBatch,
     beginTextEdit,
+    readLocalOriginText,
     putTextDraft,
     discardTextDraft,
     commitTextDraft,

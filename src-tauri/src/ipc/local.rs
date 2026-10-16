@@ -350,6 +350,10 @@ pub struct PresetTextDraftDto {
     pub updated_unix: u64,
     /// 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的
     pub reused: bool,
+    /// 草稿与**盘上当前字节**比过：真有未保存的改动才算脏（2026-10-16）。
+    /// 界面拿它决定"重开时要不要直接进编辑模式 + 提醒还没保存"；
+    /// **比不了（读不出来）时保守算脏** —— 宁可多提醒一句，不要漏报。
+    pub dirty: bool,
 }
 
 /// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
@@ -467,12 +471,19 @@ pub async fn begin_text_edit(
         /* 同一份（路径相同）已经有草稿 → 接着改，不覆盖用户已经敲进去的字 */
         if let Some(draft) = runtime::app_state::text_draft(&root)? {
             if draft.key() == path {
+                /* ★ `dirty` = 与盘上字节**比过**（"有草稿"≠"改过"——打开过又关掉也算有草稿）：
+                界面拿它决定"重开时要不要直接进编辑模式 + 提醒还没保存"。
+                读不出来（这一份被移走 / 删了）保守算脏，宁可多提醒一句。 */
+                let dirty = runtime::local::read_preset_text(&user_root, &path)
+                    .map(|raw| raw != draft.text)
+                    .unwrap_or(true);
                 return Ok(PresetTextDraftDto {
                     file_name: draft.file_name,
                     path: draft.path,
                     text: draft.text,
                     updated_unix: draft.updated_unix,
                     reused: true,
+                    dirty,
                 });
             }
         }
@@ -487,6 +498,8 @@ pub async fn begin_text_edit(
             text: draft.text,
             updated_unix: draft.updated_unix,
             reused: false,
+            /* 新建的草稿 = 盘上字节本身，不脏 */
+            dirty: false,
         })
     })
 }
@@ -515,6 +528,9 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
         let user_root = crate::fsx::paths::user_root(&app)?;
         let draft = runtime::app_state::text_draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文，没得存"))?;
+        /* ★ 原文镜像：编辑器保存**写盘之前**存 —— 此刻盘上还是原文
+        （保存之后就再也见不到它了）。新文件那一路在落盘时就存过，这里是幂等的空转 */
+        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &draft.path);
         runtime::local::write_text(&user_root, &draft.path, &draft.text)?;
         runtime::app_state::clear_text_draft(&root)?;
         /* 另一侧作废：盘上字节换了，参数页手上那份就成了孤儿 */
@@ -538,6 +554,27 @@ pub async fn discard_text_draft(app: AppHandle) -> Result<(), AppError> {
         runtime::app_state::clear_text_draft(&root)?;
         super::notify_app_state(&app);
         Ok(())
+    })
+}
+
+/// **这份用户文件的原文**（它最初落到盘上时的那一份）——「编辑文件」模态框那颗
+/// 「恢复默认值」读的就是它（作者 2026-10-16：「编辑文件这个也可以有个按钮……
+/// 恢复默认值……可能需要你去做一种备份」）。
+///
+/// 来源 = `baseline-local/` 的路径镜像（见 [`runtime::baseline`] 的模块头）：
+/// 下载 / 导入 / 复制 / 另存的那几份在**落盘时**存过；老文件在**第一次被我们改写**
+/// （编辑器保存 / 参数写回 / 校准 / 归属机型）之前补上。
+///
+/// 都没有 ⇒ `None` —— 界面把那颗按钮禁用（不猜、不编）。路径闸与读正文同一道
+/// （[`runtime::baseline::read_origin_copy`] → `check_local_prefix` + 防穿越）。
+#[tauri::command]
+pub async fn read_local_origin_text(
+    app: AppHandle,
+    path: String,
+) -> Result<Option<String>, AppError> {
+    traced("readLocalOriginText", |_| {
+        let root = internal_root(&app)?;
+        runtime::baseline::read_origin_copy(&root, &path)
     })
 }
 
@@ -673,12 +710,16 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                     .unwrap_or_else(|| draft.source_file_name.clone());
 
                 /* 另存本体在 `runtime::local`（纯函数、有判据盯着"云端原件一动不动"） */
-                runtime::local::commit_draft(
+                let done = runtime::local::commit_draft(
                     &user_root,
                     &draft.source_file_name,
                     &based_on,
                     &draft.text,
-                )?
+                )?;
+                /* 原文镜像：新文件**落盘之后**存（刚写进去的就是原文）。
+                记不上不影响保存本身 —— 与出处账同一条口径 */
+                let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &done.path);
+                done
             }
             /*
              * 用户线：**写回它自己**（第八层）—— 同一个路径、同一份文件，
@@ -689,6 +730,9 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                 let rel = draft.path.clone().ok_or_else(|| {
                     AppError::corrupted("这份草稿说它是我自己那份，却没记路径 —— 存不回去")
                 })?;
+                /* ★ 原文镜像：写回**之前**存 —— 那一刻盘上还是原文（保存改了就补不回来了）。
+                新文件那一路在落盘时就存过，这里是幂等的空转 */
+                let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &rel);
                 runtime::local::save_back(&user_root, &rel, &draft.text)?
             }
         };
@@ -733,6 +777,8 @@ pub async fn rename_local_preset(
         runtime::app_state::load(&root)?;
 
         let done = runtime::local::rename_file(&user_root, &path, &new_name)?;
+        /* 原文镜像跟着搬家（改名前那份的原文，改名后还是它）—— 没有镜像就没什么可搬的 */
+        let _ = runtime::baseline::move_origin_copy(&root, &path, &done.path);
 
         /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格；
         万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
@@ -772,8 +818,13 @@ pub async fn copy_local_preset(
     new_name: String,
 ) -> Result<LocalFileIdentityDto, AppError> {
     traced("copyLocalPreset", |_| {
+        let internal = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let done = runtime::local::copy_as_new(&user_root, &path, &new_name)?;
+        /* 原文镜像：副本**落盘之后**存一份（副本的"最初那样"= 它诞生那一刻的字节）。
+        ★ 没有这一步，导入 / 复制出来的那两份"恢复默认值"就没得退 —— 它们在摘库里
+        没有对应（`based_on_sha256` 指的是更上一层的云端原文，不是自己） */
+        let _ = runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path);
         /* 出处账：副本从哪来的 —— 界面上「来源：复制自 X」靠它。记不上不影响复制本身 */
         let _ = runtime::provenance::record(
             &user_root,
@@ -900,6 +951,8 @@ pub async fn save_preset_calibration(
                 &crate::presetdata::patch::FieldEdit::new(key, value.to_string()),
             )?;
         }
+        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
+        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &path);
         runtime::local::write_text(&user_root, &path, &text)
     })
 }
@@ -934,6 +987,8 @@ pub async fn delete_local_preset(app: AppHandle, path: String) -> Result<(), App
             state_cleared = true;
         }
         runtime::local::delete_file(&user_root, &path)?;
+        /* 原文镜像一起走（这份都没了，"它最初的样子"不该留在内部存储里） */
+        let _ = runtime::baseline::remove_origin_copy(&root, &path);
         /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句；删账失败不拦删除） */
         let _ = runtime::remarks::remove(&user_root, &path);
         /*
@@ -1027,6 +1082,8 @@ pub async fn set_local_preset_machine_version(
                 "{machine_id} 不是目录里登记的机型 —— 归属的机型要选一台真的机器"
             )));
         }
+        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
+        let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &path);
         runtime::local::set_machine_variant(&user_root, &path, machine_id, version_id)
     })
 }

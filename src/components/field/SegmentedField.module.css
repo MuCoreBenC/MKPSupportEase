@@ -77,13 +77,28 @@
   box-shadow: var(--seg-on-shadow, inset 0 0 0 1px var(--accent));
 }
 
-/* 深色（2026-10-12 第二遍）：滑块那道浅影在深底上看不见 —— "滑块浮在轨道上"的层次会丢 */
+/* 深色（2026-10-12 第二遍）：滑块那道浅影在深底上看不见 —— "滑块浮在轨道上"的层次会丢。
+   2026-10-16 第三遍（作者：「开关看不清……修改参数的里面也是这样的」）：滑块从
+   `--surface-solid`（#303030）提到 **18% 白** —— 轨道也提到 8% 白（见下面 .group 那条），
+   原来两档只差半档，滑块与轨道一起隐形。 */
 [data-theme='dark'] .pill {
+  background: rgb(255 255 255 / 18%);
   box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
 
 [data-theme='dark'] .pill[data-on='true'] {
   box-shadow: var(--seg-on-shadow, inset 0 0 0 1px var(--accent));
+}
+
+/*
+ * 深色对比度（2026-10-16，作者对着对比台截图：「开关看不清……修改参数的里面也是这样的」）：
+ * 轨道原是 `--surface-sunken`（3.5% 白），贴在 #232323 卡面上整个隐形。提到 **8% 白**，
+ * 发丝线同步提亮一档 —— 未选中段的字仍走 `.seg` 的 `--text-2`，这条只修"轨道看不见"。
+ */
+[data-theme='dark'] .group,
+[data-theme='dark'] .groupOff {
+  background: rgb(255 255 255 / 8%);
+  border-color: rgb(255 255 255 / 14%);
 }
 
 .seg,

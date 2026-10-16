@@ -1,0 +1,103 @@
+/* 图片引导件（2026-10-16）—— 见 GuideModal.tsx 头注 */
+
+/* 状态那一句：与图分开，先说"此刻在哪" */
+.status {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/* 图在左、步骤在右。图窄、字宽 —— 图是竖着的系统窗口截图，撑宽了会把步骤挤到屏幕外 */
+.split {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-top: 14px;
+}
+
+/*
+ * 图的容器 = **标注的坐标系**：标注一律百分比，所以缩放它（`width`）框会跟着走。
+ * `position: relative` 是框的定位祖先；图自己 `display:block` 免得底下多出基线缝。
+ */
+.frame {
+  position: relative;
+  flex: 0 0 auto;
+  /*
+   * 宽度按"窗口要看得清"定：作者给的系统截图**四周带投影边距**（754×904 里窗口只占
+   * 中间那块），所以这个数比"窗口宽度"要大一档 —— 268px 时窗口只剩 ~185px，字就糊了。
+   */
+  width: 314px;
+  max-width: 46%;
+}
+
+/*
+ * 图（作者给的系统截图，四周自带"桌面"那圈底）：
+ * ★ 浅色模式下那圈底和模态框的白底**粘在一起**，窗口看着就没边了 ⇒
+ *   给图自己加圆角 + 一条发丝线 + 一层浅影，两套主题下都看得出"这是一张图"。
+ * ★ 圆角与影子加在**图**上、不加在 `.frame` 上（那是标注的坐标系）：给 frame 加
+ *   `overflow:hidden` 会把贴边的编号裁掉。
+ */
+.shot {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+  box-shadow:
+    0 0 0 1px var(--hairline),
+    0 8px 20px rgb(0 0 0 / 12%);
+}
+
+/*
+ * 一块框选：`left/top/width/height` 由 JS 按百分比给（见 GuideMark）。
+ *
+ * ★ 认得出的三条：2px 强调色、圆角 8、外面再兜一圈半透明黑 —— 系统截图有浅有深，
+ *   只靠强调色在深色截图里会糊进背景（那圈黑把框从底上"抬"起来）。
+ */
+.mark {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 28%);
+}
+
+/* 框角上那颗编号：与右侧那几步对得上 */
+.badge {
+  position: absolute;
+  left: -9px;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+}
+
+/* 步骤那一列 */
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.stepText {
+  display: block;
+}
+
+/* 那步下面的小字（"不点它只对这一个文件生效"） */
+.stepNote {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-2);
+}
