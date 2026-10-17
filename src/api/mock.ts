@@ -1119,6 +1119,10 @@ export const mockApi: MkpApi = {
     /* 浏览器里没有钩子那一趟 —— 没有问句可补推，静默成功即可 */
   },
 
+  async replayPostProcessRun() {
+    /* 浏览器里没有钩子那一趟 —— 没有这一趟可重推，静默成功即可 */
+  },
+
   /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———
    *
    * 数据来自 `src/api/mockServer/`：那份假后端把 `data/*.json` 的六份上游快照

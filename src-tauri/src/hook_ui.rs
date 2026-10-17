@@ -68,6 +68,17 @@ pub type QuestionDto = QuestionPayload;
 /// 结论长什么样。
 pub type FinishedDto = FinishedPayload;
 
+/// **这一趟的整份状态**（开场 / 事实 / 进度 / 那一问 / 结论）——
+/// [`HookView::replay_run`] 照这一份重推；给它一个名字，免得那一串
+/// `Option<…>` 到处长出来（clippy 也不会再说类型太绕）。
+pub type ReplayShot = (
+    StartedDto,
+    Option<FactsDto>,
+    Option<ProgressDto>,
+    Option<QuestionDto>,
+    Option<FinishedDto>,
+);
+
 /// 新一趟的开场。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -690,6 +701,62 @@ impl HookView {
         }
     }
 
+    /// **把这一趟整份重推一遍**（2026-10-18）：开场 → 事实 → 进度 → 那一问 → 结论。
+    ///
+    /// 补的是同一类竞态的**另一半**（那一半是 [`Self::replay_question`]）。
+    /// 界面首帧同时做两件事：读快照 **与** 订阅 `postprocess-started`，谁先到全看运气 ——
+    /// 中间落进那条缝里（读快照时这一趟还没来、订阅挂上时开场那一条已经 emit 完了）
+    /// 就是**这一趟永远进不了界面**：`run` 恒为 `null`，而 `bind` 那几条一律
+    /// `prev === null ? prev : …`，之后每条进度都被丢掉。
+    ///
+    /// 真机看到的正是这个（作者 2026-10-18）：点了导出，**窗口被抬起来了、屏上却没有
+    /// 那一屏** —— 抬窗就住 `Hello` 那一条里、还排在 `emit` 前面，所以"窗口起来了"
+    /// 不等于"事件送到了"。
+    ///
+    /// 只补"界面没看见的那一段"：**状态一个都不动**（`shared` 原样，钩子那边照跑）。
+    /// 这一趟从没来过（`preset_name` 还是 `None`）就什么都不推 —— 那是"用户自己打开了
+    /// 程序"，本来就没有这一屏。
+    pub fn replay_run(&self, app: &AppHandle) {
+        let Some((started, facts, progress, question, finished)) = self.replay_shot() else {
+            return;
+        };
+        tracing::info!(gcode = %started.gcode_name, "界面晚了一步：把这一趟重推一遍");
+        let _ = app.emit(STARTED_EVENT, started);
+        if let Some(facts) = facts {
+            let _ = app.emit(FACTS_EVENT, facts);
+        }
+        if let Some(progress) = progress {
+            let _ = app.emit(PROGRESS_EVENT, progress);
+        }
+        if let Some(question) = question {
+            let _ = app.emit(QUESTION_EVENT, question);
+        }
+        if let Some(finished) = finished {
+            let _ = app.emit(FINISHED_EVENT, finished);
+        }
+    }
+
+    /// 这一趟**当前整份状态**的快照（开场 / 事实 / 进度 / 那一问 / 结论）。
+    /// 从没来过（`preset_name` 还是 `None`）⇒ `None` —— 只读，不动状态
+    /// （[`Self::replay_run`] 就照这一份重推）。
+    fn replay_shot(&self) -> Option<ReplayShot> {
+        let g = self.shared.lock().expect("锁没坏");
+        match (g.preset_name.clone(), g.gcode_name.clone()) {
+            (Some(preset_name), Some(gcode_name)) => Some((
+                StartedDto {
+                    preset_name,
+                    gcode_name,
+                    preview: g.preview,
+                },
+                g.facts.clone(),
+                g.progress.clone(),
+                g.question.clone(),
+                g.finished.clone(),
+            )),
+            _ => None,
+        }
+    }
+
     /// 有没有钩子连着（界面据此把「停止」变灰：点了也没对象）。
     pub fn hook_connected(&self) -> bool {
         self.writer
@@ -1149,5 +1216,64 @@ mod tests {
             "没对象时要报错"
         );
         assert!(!view.hook_connected());
+    }
+
+    /// **补推只补"界面没看见的那一段"，状态一个都不动**（2026-10-18）。
+    /// 这一趟从没来过（`preset_name` 还是 `None`）⇒ 什么都不推（那是用户自己打开
+    /// 的程序，没有这一屏），且 `shared` 保持原样 —— 钉住"补推不得凭空造一屏"。
+    #[test]
+    fn replaying_a_run_that_never_came_does_nothing() {
+        let view = HookView::new();
+        assert!(
+            view.replay_shot().is_none(),
+            "这一趟从没来过 ⇒ 没有可补推的东西（别凭空造一屏）"
+        );
+    }
+
+    /// 抬窗与送事件是两件事（作者真机那次：窗口被抬起来了、屏上却没有那一屏）
+    /// ⇒ 补推要能把**整份**状态取出来：开场 + 事实 + 进度 + 那一问 + 结论。
+    #[test]
+    fn the_replay_shot_carries_the_whole_run() {
+        let view = HookView::new();
+        {
+            let mut g = view.shared.lock().expect("锁没坏");
+            *g = Shared {
+                preset_name: Some("A1_MINI-fast.toml".to_owned()),
+                gcode_name: Some("板.gcode".to_owned()),
+                facts: Some(FactsPayload {
+                    gcode_machine: "A1".to_owned(),
+                    preset_machine: "A1".to_owned(),
+                    filament_type: "PLA".to_owned(),
+                    file_size_bytes: 1024,
+                    nozzle_diameter: 0.4,
+                    layer_height: 0.2,
+                    glue_speed: None,
+                    slicer: None,
+                    slicer_print_time_seconds: None,
+                }),
+                progress: Some(ProgressPayload {
+                    step: "pass1".to_owned(),
+                    fraction_in_step: Some(0.5),
+                    message: "第一遍处理中".to_owned(),
+                }),
+                question: Some(QuestionPayload {
+                    question_kind: "machine-mismatch".to_owned(),
+                    text: "还继续吗？".to_owned(),
+                    deadline_unix_ms: 1_763_000_000_000,
+                    choices: Vec::new(),
+                }),
+                ..Shared::default()
+            };
+        }
+        let (started, facts, progress, question, finished) = view.replay_shot().expect("有这一趟");
+        assert_eq!(started.preset_name, "A1_MINI-fast.toml");
+        assert_eq!(started.gcode_name, "板.gcode");
+        assert!(facts.is_some(), "事实要跟着一起补推");
+        assert_eq!(progress.expect("进度要跟着").step, "pass1");
+        assert_eq!(
+            question.expect("那一问要跟着").question_kind,
+            "machine-mismatch"
+        );
+        assert!(finished.is_none(), "没结论就不推结论");
     }
 }

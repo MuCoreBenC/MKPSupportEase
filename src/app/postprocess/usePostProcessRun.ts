@@ -118,14 +118,25 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
    */
   const [forcedOpen, setForcedOpen] = useState(false)
 
+  /*
+   * 这一趟**界面到底看见过没有**（2026-10-18）。
+   *
+   * 首帧两条路（读快照 / 订阅事件）谁先到全看运气，光靠"读回来的快照是 null"
+   * 分不清两件事：① 这一趟还没来（正常：用户自己打开的程序）② 开场那一条落在
+   * 缝里丢了（那时窗口已经被抬起来，屏上却没有那一屏 —— 作者真机这回看到的就是它）。
+   * 于是"订阅挂上之后"再问一次后端：它手里有这一趟就整份重推一遍。
+   */
+  const sawRun = useRef(false)
+
   useEffect(() => {
     let alive = true
     const offs: (() => void)[] = []
 
-    void api
+    const snapshotDone = api
       .getPostProcessRun()
       .then((snap) => {
         if (!alive) return
+        if (snap !== null) sawRun.current = true
         setRun((prev) => prev ?? snap)
         /*
          * ★★ 首帧那两条路的收尾（2026-10-17，作者真机踩到："没有出现选择的模态框，
@@ -174,8 +185,9 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
      *
      *   起点也在这里记（不是 setState 外面）：订阅晚于开场时也不丢。
      */
-    void listen<PostProcessStarted>(STARTED_EVENT, (started: PostProcessStarted) => {
+    const startedReady = listen<PostProcessStarted>(STARTED_EVENT, (started: PostProcessStarted) => {
       if (!alive) return
+      sawRun.current = true
       setRun({
         presetName: started.presetName,
         gcodeName: started.gcodeName,
@@ -198,6 +210,20 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
     }).then((off) => {
       if (alive) offs.push(off)
       else off()
+    })
+
+    /*
+     * **收尾**：快照读完了、订阅也挂上了，两件事都落定之后再回头看一眼 ——
+     * 这一趟还是没看见，就请后端把整份重推一遍（2026-10-18）。
+     *
+     * 只补"落在缝里"的那一次：后端手里没有这一趟就什么都不推，
+     * 于是"用户自己打开程序"这种日常情形不会凭空多出一屏。
+     */
+    void Promise.all([snapshotDone, startedReady]).then(() => {
+      if (!alive || sawRun.current) return
+      void api.replayPostProcessRun().catch(() => {
+        /* 补推失败不致命：后面每一条进度仍是正常事件，只是这一趟的开场没接上 */
+      })
     })
 
     /* 事实那一条紧跟在开场后面（左栏那张表），收不到就空着 —— 不编 */

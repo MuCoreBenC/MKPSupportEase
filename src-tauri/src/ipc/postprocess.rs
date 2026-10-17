@@ -74,3 +74,20 @@ pub fn replay_post_process_question(
         Ok(())
     })
 }
+
+/// **首帧那两条路的收尾（另一半）**（2026-10-18）：界面读完快照、订阅也挂上了，
+/// 却**还是什么都没看见** ⇒ 开场那一条落在缝里了（抬窗已经发生，事件没送到），
+/// 喊这一声把这一趟整份重推一遍。
+///
+/// 与上面那条问句补推同一个形状：只重新 `emit`，不动任何状态。
+/// 这一趟从没来过就什么都不推（程序是用户自己打开的，没有这一屏）。
+#[tauri::command]
+pub fn replay_post_process_run(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<(), AppError> {
+    traced("replayPostProcessRun", |_| {
+        slot.0.replay_run(&app);
+        Ok(())
+    })
+}

@@ -288,6 +288,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::postprocess::reset_post_process_state,
         ipc::postprocess::answer_post_process,
         ipc::postprocess::replay_post_process_question,
+        ipc::postprocess::replay_post_process_run,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（只读；见 `ipc/bbs.rs`）
         ipc::bbs::get_bbs_presets,
         ipc::bbs::read_bbs_preset,
@@ -451,6 +452,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::postprocess::reset_post_process_state,
         ipc::postprocess::answer_post_process,
         ipc::postprocess::replay_post_process_question,
+        ipc::postprocess::replay_post_process_run,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（与上面那份清单一字不差）
         ipc::bbs::get_bbs_presets,
         ipc::bbs::read_bbs_preset,

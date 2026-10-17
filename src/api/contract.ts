@@ -2184,6 +2184,16 @@ export interface MkpApi {
    */
   replayPostProcessQuestion(): Promise<void>
 
+  /**
+   * **这一趟整份重推一遍**（2026-10-18，首帧竞态的另一半）。
+   *
+   * 界面读完快照、订阅也挂上之后仍然什么都没看见 ⇒ `postprocess-started` 落在
+   * 「读快照」与「订阅挂上」那条缝里了（抬窗在 `Hello` 里、还排在 emit 前面，
+   * 所以"窗口被抬起来了"不代表事件送到了）。喊一声把开场 / 事实 / 进度 / 那一问 /
+   * 结论按序重推。不动任何状态。
+   */
+  replayPostProcessRun(): Promise<void>
+
   /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 
   /** 机型目录：品牌 → 机型 → 版本。客户端画三级选择用 */

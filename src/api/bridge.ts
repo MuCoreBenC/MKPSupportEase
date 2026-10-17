@@ -175,6 +175,8 @@ export const bridgeApi: MkpApi = {
   /* 首帧那两条路的收尾：快照里有一问、但自己没收到事件 ⇒ 让它补推一次（只重新 emit） */
   replayPostProcessQuestion: () =>
     call('replayPostProcessQuestion', 'replay_post_process_question'),
+  /* 首帧竞态的另一半：开场那条落在缝里 ⇒ 把这一趟整份重推（只重新 emit） */
+  replayPostProcessRun: () => call('replayPostProcessRun', 'replay_post_process_run'),
 
   /* ——— 预设页（A41）的读接口：走真 command —— */
   getMachines: () => call('getMachines', 'get_machines'),
