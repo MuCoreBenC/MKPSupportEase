@@ -17,6 +17,7 @@ import type {
   ParamSyncEntry,
   PresetParamSync,
   PresetParamValues,
+  PresetHistory,
   PresetSource,
   SoftwareUpdate,
   ThemePref,
@@ -357,6 +358,18 @@ function mockUntakenName(wanted: string): string {
   }
   return wanted
 }
+/**
+ * **修改历史账本**（假后端版，2026-10-17）：键 = "哪条线 + 身份"，
+ * 与真机 `runtime::history::key_of` 同形状（真机是 sha256、这里直接拼字符串 ——
+ * 假后端不需要那一层），值 = 整本账。
+ */
+const mockHistory = new Map<string, PresetHistory>()
+
+/** 一本账认一份文件：同一条线 + 同一个身份 = 同一本（两份同名文件各有一本） */
+function historyKeyOf(origin: string, id: string): string {
+  return `${origin}:${id}`
+}
+
 /*
  * 「编辑文件」那条链的草稿（2026-10-10：与上面 `mockDraft` **分开存**）——
  * 两侧互相作废：任一侧保存都把另一侧丢掉（编辑器手上那份就成了孤儿）。
@@ -1245,6 +1258,44 @@ export const mockApi: MkpApi = {
 
   async discardPresetDraft() {
     mockDraft = null
+  },
+
+  /*
+   * **修改历史账本**（2026-10-17）：浏览器预览里用内存顶替 —— 一份文件一本（钥匙同真机：
+   * 哪条线 + 身份），于是"改过 → 关掉 → 再打开还在"这条在预览里也走得通，
+   * 只是**退出浏览器就没了**（真机那份在盘上）。
+   */
+  async getPresetHistory(origin, id) {
+    return mockHistory.get(historyKeyOf(origin, id)) ?? { batches: 0, entries: [] }
+  },
+
+  async putPresetHistory(origin, id, history) {
+    const key = historyKeyOf(origin, id)
+    /* 空本 = 没有这一本（与后端"清空就删掉文件"同一条规矩） */
+    if (history.entries.length === 0 && history.batches === 0) mockHistory.delete(key)
+    else mockHistory.set(key, { batches: history.batches, entries: [...history.entries] })
+  },
+
+  async clearPresetHistory(origin, id) {
+    mockHistory.delete(historyKeyOf(origin, id))
+  },
+
+  /*
+   * **备份**：浏览器预览里**没有家当可打包**（没有数据根），所以照实说没有 ——
+   * 不假装打了一份（那会让用户以为自己有备份）。
+   */
+  async createBackup() {
+    throw new NotImplementedError(
+      'createBackup',
+      '浏览器预览里打不了备份（没有本机数据）—— 用桌面版就能打（设置页这一块）',
+    )
+  },
+
+  async restoreBackup() {
+    throw new NotImplementedError(
+      'restoreBackup',
+      '浏览器预览里恢复不了备份（没有本机数据）—— 用桌面版就能恢复（设置页这一块）',
+    )
   },
 
   /** 云端线：另存成 `presets-local/<原名>（已修改）.toml`（与 Rust 侧 `local::edited_name` 同一条规则） */

@@ -44,11 +44,12 @@
   font-size: 12px;
 }
 
+/*
+ * 「仅这一次」那一行（2026-10-17）：框身与对勾归共用件 `components/check`
+ *（原来这里是原生控件，吃全站的印刷机绿），这里只剩**字号与文字色**这一档
+ * —— 它是小字灰字，共用件不锁这一档（见它头注释）。
+ */
 .check {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   color: var(--text-2);
   font-size: 12px;
-  cursor: pointer;
 }

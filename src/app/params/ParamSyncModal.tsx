@@ -27,6 +27,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Modal } from '../../components/modal'
+/* 勾选共用件（2026-10-17「统一全站的勾和框」）：行勾 / 全选那只原生绿勾换成墨色，
+   半选（`indeterminate`）也由它现设 —— 见它头注释 */
+import { Check } from '../../components/check'
 import type { ParamDecisionKind, ParamSyncEntry, PresetParamSync } from '../../api'
 import { valueText } from './useParams'
 import type { ParamDef } from './useParams'
@@ -141,19 +144,15 @@ export default function ParamSyncModal({
       ) : (
         <>
           <div className={s.selectbar}>
-            <label className={s.checkLabel}>
-              <input
-                type="checkbox"
-                aria-label="全选"
-                checked={chosen > 0 && chosen === all}
-                ref={(el) => {
-                  /* 「勾了一部分」那一档：原生复选框没有这个属性，只能现设 */
-                  if (el !== null) el.indeterminate = chosen > 0 && chosen < all
-                }}
-                onChange={toggleAll}
-              />
+            <Check
+              ariaLabel="全选"
+              className={s.checkLabel}
+              checked={chosen > 0 && chosen === all}
+              indeterminate={chosen > 0 && chosen < all}
+              onChange={toggleAll}
+            >
               全选
-            </label>
+            </Check>
             <span className={s.selHint}>
               已选 {chosen} / {all} 项
             </span>
@@ -170,14 +169,11 @@ export default function ParamSyncModal({
                   : '云端这一项的值还没拿到'
               return (
                 <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
-                  <label className={s.check}>
-                    <input
-                      type="checkbox"
-                      aria-label={def?.label ?? e.key}
-                      checked={on}
-                      onChange={() => setChecked((cur) => ({ ...cur, [e.key]: !on }))}
-                    />
-                  </label>
+                  <Check
+                    ariaLabel={def?.label ?? e.key}
+                    checked={on}
+                    onChange={() => setChecked((cur) => ({ ...cur, [e.key]: !on }))}
+                  />
                   <div className={s.what}>
                     <div className={s.name}>
                       {def?.label ?? e.key}

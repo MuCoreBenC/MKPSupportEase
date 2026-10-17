@@ -33,7 +33,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon'
-import { ModalHeadSlotContext } from './modalHeadSlot'
+import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
 export interface ModalProps {
@@ -124,6 +124,11 @@ export default function Modal({
    * 见 `modalHeadSlot.ts`（「修改历史」就是这么搬到 × 旁边的）。
    */
   const [headSlot, setHeadSlot] = useState<HTMLSpanElement | null>(null)
+  /*
+   * 标题栏那颗**回执槽**（副标题右边）。框里想往头上塞一句状态（「已写回 xxx.toml」）
+   * 就往这儿 portal —— 见 `modalHeadSlot.ts` 的头注。
+   */
+  const [headNoteSlot, setHeadNoteSlot] = useState<HTMLSpanElement | null>(null)
   /* 关掉之后焦点要还回去，不然键盘用户会掉到文档开头 */
   const returnTo = useRef<HTMLElement | null>(null)
 
@@ -204,7 +209,17 @@ export default function Modal({
         <header className={s.head}>
           <span className={s.headText}>
             <strong className={s.title}>{title}</strong>
-            {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
+            {/*
+             * 副标题那一行 = 文件名 + **回执槽**（框里 portal 进来的那句状态）。
+             * 两者同一行是刻意的：那句回执说的就是这份文件名（「已写回 A1-fast.toml」）。
+             * 没有副标题也没有回执时整行不画（别为空格子留一道 3px 的缝）。
+             */}
+            {(subtitle !== undefined || headNoteSlot !== null) && (
+              <span className={s.subRow}>
+                {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
+                <span ref={setHeadNoteSlot} className={s.headNote} />
+              </span>
+            )}
           </span>
           {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
           <span className={s.headActs}>
@@ -234,9 +249,13 @@ export default function Modal({
     </div>
   )
 
-  /* 动作槽的 context 要罩住**框里的内容**（`children` 就在 `scrim` 里），才找得到落点 */
+  /* 两个槽的 context 要罩住**框里的内容**（`children` 就在 `scrim` 里），才找得到落点 */
   const tree = (
-    <ModalHeadSlotContext.Provider value={headSlot}>{scrim}</ModalHeadSlotContext.Provider>
+    <ModalHeadSlotContext.Provider value={headSlot}>
+      <ModalHeadNoteSlotContext.Provider value={headNoteSlot}>
+        {scrim}
+      </ModalHeadNoteSlotContext.Provider>
+    </ModalHeadSlotContext.Provider>
   )
   return host !== null ? createPortal(tree, host) : tree
 }

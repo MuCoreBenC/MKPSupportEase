@@ -15,6 +15,8 @@
  */
 
 import { SelectField } from '../../components/field'
+/* 勾选共用件（2026-10-17「统一全站的勾和框」）：那只原生绿勾换成全站同一套墨色 */
+import { Check } from '../../components/check'
 import {
   slicerOptionsOf,
   systemSlicerLine,
@@ -62,14 +64,9 @@ export function SlicerPickView({
        *   "这一次用哪个打开"，不摆设置动作。
        */}
       {shown === 'system' && <p className={s.sysNote}>{systemSlicerLine(systemApp)}</p>}
-      <label className={s.check}>
-        <input
-          type="checkbox"
-          checked={once}
-          onChange={(e) => onOnceChange(e.target.checked)}
-        />
-        <span>仅这一次用选定的（默认不写回设置）</span>
-      </label>
+      <Check className={s.check} checked={once} onChange={onOnceChange}>
+        仅这一次用选定的（默认不写回设置）
+      </Check>
     </div>
   )
 }

@@ -213,7 +213,20 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
     return () => ro.disconnect()
   }, [])
   const narrow = pageW < NARROW_W
-  const drawerMode: 'side' | 'float' = density !== 'mini' && !narrow ? 'side' : 'float'
+  /*
+   * 右侧「详情」栏的开合（声明挪在左抽屉形态之前 —— 下面浮不浮的判据要读它）：
+   * **默认收起**（2026-10-17 作者：「默认左侧展开，右侧收起」）。
+   * 口径沿革见下面 `openRail` 那一段注释。
+   */
+  const [railOpen, setRailOpen] = useSessionState('bbs.rail', false)
+  /*
+   * 左抽屉浮不浮（2026-10-17 作者口径）：**浮只在「右栏开着」的前提下发生** ——
+   * 「右侧的没展开的时候，左侧没必要悬浮」「小尺寸的时候，右侧收起的时候，左侧的不要悬浮」。
+   * 右栏收着时整幅宽都是参数区的，左边并排就够了。
+   * mini 档 / 页面窄于 880 仍会改浮层（老判据不动），但都以右栏开着为前提。
+   */
+  const drawerMode: 'side' | 'float' =
+    railOpen && (density === 'mini' || narrow) ? 'float' : 'side'
   /** 宽度、拖动状态、热区那一套 props */
   const sizing = useBbsDrawer()
 
@@ -227,13 +240,13 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
    *   · 宽度：`useBbsRail` → 全仓共用的 `shared/useDrawerWidth`（拖宽 + 三态吸附 + 键盘 +
    *     记住宽度）。作者：「本地项目其他页面也在用，不要自己复用」—— 即别另起一份；
    *   · 开合：工具条上那颗「详情」（与左边 ☰ 对称），只记这一次会话。
+   *     ★ 声明挪到了上面（左抽屉浮不浮的判据要读它），**默认收起**（2026-10-17）。
    *
    * ★ 它**不再是浮层**（2026-10-13 作者：「右侧的那个详情呀，我不想让它悬浮起来，
    *   还是不要悬浮起来了」）。左抽屉照旧会浮（窄窗里它盖住参数区、点一下就收），
    *   而这一栏在任何宽度下都并排站着 —— 所以 BbsRail 里那半套浮层样式也一并删了，
    *   要恢复就是给它加回 `position: absolute` 与按宽度给的 mode。
    */
-  const [railOpen, setRailOpen] = useSessionState('bbs.rail', true)
   const railSizing = useBbsRail()
   /*
    * 两条侧栏的开关：**各开各的，互不牵连**。

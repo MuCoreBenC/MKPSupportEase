@@ -8,6 +8,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+/* 「保存后的重切引导」共用开关（与参数页同一个键，决定存完弹不弹那一屏） */
+import { guidesEnabled } from '../guide/guidesPref'
 import { LADDER } from './plateLadder'
 import {
   matchXY,
@@ -264,8 +266,11 @@ export function useCalibration(preset: PresetState): Calibration {
     setSavedNote(true)
     void api.savePresetCalibration(copy.path, draft).then(
       /* 存下了 ⇒ 问一句"要不要回切片器重切"（切片器不会自己知道 XYZ 变了），
-         理由与参数页那一处同一条，见 `app/guide/ResliceNotice.tsx` 模块头 */
-      () => setResliceAsk(true),
+         理由与参数页那一处同一条，见 `app/guide/ResliceNotice.tsx` 模块头。
+         ★ 只有共用开关开着（`guidesEnabled()`，与参数页同一个键）才问 —— 关过就不再打扰 */
+      () => {
+        if (guidesEnabled()) setResliceAsk(true)
+      },
       () => {
         /* 保存失败什么都不做：`savedNote` 那条绿字与控制台已经说过了，
            这里不叠第二句，更不该在这种时候还问重切 */

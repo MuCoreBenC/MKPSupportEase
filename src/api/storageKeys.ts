@@ -83,6 +83,17 @@ export const STORAGE = {
   clientReportExportDir: 'mkp.A40.report.exportDir',
 
   /**
+   * **要不要弹"保存之后的引导提示"**（布尔，2026-10-17）。纯前端偏好。
+   *
+   * 现在管的是"参数已保存 → 要不要回切片器重切"那一屏（`app/guide/ResliceNotice`，
+   * 参数页与校准页共用同一句话）—— 作者要的是**一处关、处处关**：提示里的
+   * 「不再显示」与设置页「引导」那一格**写的是同一个键**（见 `app/guide/guidesPref`）。
+   *
+   * **没设过 = 显示**（`true`）：默认是"问一句"，用户明确关掉才不弹。
+   */
+  clientShowGuides: 'mkp.A40.guide.show',
+
+  /**
    * 后处理进度的**每步节奏**缓存（`{ [stepId]: msPerMB }`，JSON）——
    * `useSmoothPercent` 拿它当"这一步通常多久"的先验（跨运行学习，2026-10-14 作者批）。
    *

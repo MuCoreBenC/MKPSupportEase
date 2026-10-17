@@ -45,6 +45,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
+/* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
+import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
 import { useDeliveryRevision } from '../state/deliveryState'
 import type {
@@ -159,6 +161,12 @@ export interface HistoryEntry {
   state: 'draft' | 'saved' | 'undone'
   /** 第几次保存把它落地的；`null` = 还没保存过 */
   batch: number | null
+  /**
+   * 发生那一刻（UTC epoch 秒）。**落盘之后才有的字段**（2026-10-17）：
+   * 内存日志时代"什么时候改的"没处去，持久化之后它跟着这一条一起留着 ——
+   * 界面上暂时不显示它，但账本里不能没有（将来"这一条是上周改的"要靠它）。
+   */
+  tsUnix?: number
 }
 
 export interface HistoryGroup {
@@ -393,6 +401,11 @@ export function valueText(def: ParamDef | undefined, raw: string): string {
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`
 
+/** 现在（UTC epoch 秒）—— 历史条目落盘时刻用（与后端 `ts_unix` 同一口径） */
+function nowSec(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
 /**
  * 「已应用的那一份 × 当前在看的那一份」。
  *
@@ -545,10 +558,21 @@ export interface Params {
   canRedo: boolean
   history: HistoryEntry[]
   historyByBatch: HistoryGroup[]
+  /**
+   * 「修改历史 N」徽标上的数 = **净变化小项数**（2026-10-17 作者：「要显示小项的」）——
+   * 两屏的分段数据里一项一条，加起来就是它。动作条数（`history.length`）会虚高：
+   * 同一项改三次在动作里是三条、在这里只是一项。
+   */
+  historyItemCount: number
   /** 这个组合保存过几次 */
   savedBatches: number
-  /** 「还原」历史里那一条（实时 = 那一动作；按保存批次 = 那一项的净变化） */
+  /** 「还原」历史里那一条（逐项 = 那一项的净变化；整批 = 那一整段的所有项） */
   revertEntry: (entry: HistoryEntry) => void
+  /**
+   * **清空这一份的修改历史**（2026-10-17 抽屉右上那颗，二次确认在前端做）。
+   * 记录与批号一起归零 —— 之后的保存从「第 1 次保存」重新数起。
+   */
+  clearHistory: () => void
 
   /** 切机型 / 切版本。有未保存改动时先问一句，不静默丢 */
   requestCombo: (machineId: string, versionId: string) => void
@@ -746,8 +770,39 @@ export function useParams(opts: UseParamsOptions = {}): Params {
                 : `已另存为 ${done.fileName}`,
           )
           setSaveResult(done.path)
-          /* 存下了 ⇒ 问一次"要不要回切片器重切" —— 切片器自己不会知道参数变了 */
-          setResliceAsk(true)
+          /*
+           * ★ **存完要重开草稿**（2026-10-17 真机那两条红字的正解）。
+           *
+           * 后端契约是「存完丢草稿」（`commit_preset_draft` 成功后 `clear_draft`）——
+           * 后端没错、不改；可这一屏还在开着，用户接着改一个值就打到一条**没有草稿**
+           * 的链上：`patch_preset_draft` 报「现在没有正在改的那一份，改不了参数」，
+           * 再点保存报「…没得存」（`editingTarget` 没变 ⇒ 重开草稿那个 effect 不会重跑）。
+           *
+           * 重开的对象 = **刚落盘的那一份**（云端线另存出来的现在就在用户根，
+           * 用户线写的还是它自己），于是"保存 → 接着改 → 再保存"是一条不断的链。
+           */
+          const next: { fileName: string; origin: ActiveOrigin; path: string | null } = {
+            fileName: done.fileName,
+            origin: 'local',
+            path: done.path,
+          }
+          setEditingPreset(next)
+          /*
+           * 存完之后这一份的身份可能换了（云端线另存出来的那一份现在是**用户线**的了）
+           * ⇒ 历史账本跟着换到新钥匙上：**先认下新钥匙**，别让"读那一本"的 effect
+           * 再去读一次（那会把刚保存的这批记录从界面上冲掉）。
+           */
+          const nextKey = `local:${next.path ?? next.fileName}`
+          lastHistoryKeyRef.current = nextKey
+          setHistoryReady({ key: nextKey, writable: true })
+          void api.beginPresetEdit(next.fileName, next.origin, next.path ?? undefined).then(
+            () => setDraftError(null),
+            (err: unknown) => setDraftError(errorText(err)),
+          )
+          /* 存下了 ⇒ 问一次"要不要回切片器重切" —— 切片器自己不会知道参数变了。
+             ★ 只有共用开关开着（`guidesEnabled()`）才问：用户在提示里勾过「不再显示」
+             或去设置页关过这一格，就不再打扰（那个开关与校准页共用同一个键）。 */
+          if (guidesEnabled()) setResliceAsk(true)
         },
         (e: unknown) => setSavedNote(`保存失败：${errorText(e)}`),
       )
@@ -1287,7 +1342,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       setDraft(next)
       setPast([...past, { patch, before, logId: id }])
       setFuture([]) // 新动作把「重做」那一支剪掉，撤销栈的通例
-      setLog([...log, { id, no: id, action: label, items, state: 'draft', batch: null }])
+      setLog([
+        ...log,
+        { id, no: id, action: label, items, state: 'draft', batch: null, tsUnix: nowSec() },
+      ])
       setSavedNote(null)
       /* 这次写成功 → 上一次的拦截提示收掉 */
       setGateNote(null)
@@ -1382,6 +1440,96 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const at = `${machineId}:${versionId}`
   const savedBatches = batchesByCombo.get(at) ?? 0
 
+  /* --------------------------------------------------------------------------
+   * 修改历史**落在盘上**（2026-10-17 作者口径：「类似 git 的保存那种形式，不要清空，
+   * 每次重新打开软件都存在」）。
+   *
+   * 一本账认一份文件：钥匙 = 哪条线 + 身份（用户线按相对路径、云端线按文件名）——
+   * 于是**导入的 toml 也有自己的一本**（它进来之后就是用户线的一份文件），
+   * 而用户目录里两份同名文件不会串账。
+   * ------------------------------------------------------------------------ */
+  const historyOrigin: ActiveOrigin | null = editingPreset?.origin ?? null
+  const historyId: string | null =
+    editingPreset === null
+      ? null
+      : editingPreset.origin === 'local'
+        ? (editingPreset.path ?? editingPreset.fileName)
+        : editingPreset.fileName
+  const historyKeyText: string | null =
+    historyOrigin === null || historyId === null ? null : `${historyOrigin}:${historyId}`
+
+  /** 读完了哪一本（`writable: false` = 读不出来 ⇒ **一个字都不许写回去**，免得把盘上那本冲了） */
+  const [historyReady, setHistoryReady] = useState<{ key: string; writable: boolean } | null>(null)
+  /** 上一次读的是哪一本（同 key 不重读 —— 重读会把刚改的冲掉） */
+  const lastHistoryKeyRef = useRef<string | null>(null)
+
+  /* 读：换了一份文件（或第一次打开这一份）就读它那一本 */
+  useEffect(() => {
+    if (historyOrigin === null || historyId === null || historyKeyText === null) return
+    if (lastHistoryKeyRef.current === historyKeyText) return
+    lastHistoryKeyRef.current = historyKeyText
+    let alive = true
+    void api
+      .getPresetHistory(historyOrigin, historyId)
+      .then((book) => {
+        if (!alive) return
+        setLog(
+          book.entries.map((e) => ({
+            id: e.id,
+            no: e.no,
+            action: e.action,
+            state: e.state,
+            batch: e.batch,
+            tsUnix: e.tsUnix,
+            items: e.items.map((i) => ({
+              key: i.key,
+              from: i.from,
+              to: i.to,
+              label: i.label,
+              tab: i.tab,
+              section: i.section,
+              unit: i.unit,
+            })),
+          })),
+        )
+        setSeq(book.entries.reduce((n, e) => Math.max(n, e.id), 0))
+        setBatchesByCombo((prev) => new Map(prev).set(at, book.batches))
+        setHistoryReady({ key: historyKeyText, writable: true })
+      })
+      .catch(() => {
+        /* 读不出来 = 不写（静默）：界面照样能改值，只是这一本暂时不落到盘上 */
+        if (alive) setHistoryReady({ key: historyKeyText, writable: false })
+      })
+    return () => {
+      alive = false
+    }
+  }, [at, historyId, historyKeyText, historyOrigin])
+
+  /* 写：改一条 / 撤销一条 / 保存一次之后整本写回（600ms 合批，连着敲几下只写一次） */
+  useEffect(() => {
+    if (historyOrigin === null || historyId === null || historyKeyText === null) return
+    if (historyReady === null || historyReady.key !== historyKeyText || !historyReady.writable) return
+    const timer = window.setTimeout(() => {
+      void api
+        .putPresetHistory(historyOrigin, historyId, {
+          batches: savedBatches,
+          entries: log.map((e) => ({
+            id: e.id,
+            no: e.no,
+            action: e.action,
+            state: e.state,
+            batch: e.batch,
+            tsUnix: e.tsUnix ?? nowSec(),
+            items: e.items,
+          })),
+        })
+        .catch(() => {
+          /* 写不进去不挡着改值 —— 历史是"记着"，不是"能不能改"的闸 */
+        })
+    }, 600)
+    return () => window.clearTimeout(timer)
+  }, [historyId, historyKeyText, historyOrigin, historyReady, log, savedBatches])
+
   /**
    * 保存：草稿并进已保存层、清撤销栈、日志里那批草稿条目转成「已保存」。
    *
@@ -1411,10 +1559,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   /**
    * 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销）。
    *
-   * ★ 收整个 `entry` 而不是 id（2026-10-16）：**按保存批次**那一屏的行是聚合出来的
-   *   （一项一行、`from` 是"这一段开始前的"），它不在 `log` 里、没有自己的 id ——
-   *   退货的判据只能是它身上那份 `items`。实时那一屏的行原样带着自己那份 items，
-   *   行为一个字没变。
+   * ★ 收整个 `entry` 而不是 id（2026-10-16）：抽屉两屏的行都是聚合出来的
+   *   （逐项 = 一项、`from` 是"这一段开始前的"；整批 = 这一段的全部项），
+   *   它们都不在 `log` 里、没有自己的 id —— 退货的判据只能是它身上那份 `items`。
+   *   整批交进来的是一整段 ⇒ 一次 `apply` 退完、**撤销一次全回来**。
    */
   const revertEntry = useCallback(
     (entry: HistoryEntry) => {
@@ -1576,7 +1724,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const history = useMemo(() => [...log].reverse(), [log])
 
   /**
-   * 「按保存批次」视图：未保存的一段在最上，然后是第 N 次、第 N-1 次…… 保存。
+   * 抽屉两屏共用的**分段数据**（2026-10-17：逐项 / 整批都读它，只是摆法不同）：
+   * 未保存的一段在最上，然后是第 N 次、第 N-1 次…… 保存。
    *
    * ★ 2026-10-16 作者口径（见 `netOf`）：**这一批只看净变化** —— 同一项改了几次
    * 只记头尾（`70 → 75 → 80 → 90` 就是一条 `70 → 90`），改回原值的不出现。
@@ -1871,6 +2020,18 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     canRedo: future.length > 0,
     history,
     historyByBatch,
+    historyItemCount: historyByBatch.reduce((n, g) => n + g.items.length, 0),
+    clearHistory: useCallback(() => {
+      setLog([])
+      setSeq(0)
+      setBatchesByCombo((prev) => new Map(prev).set(at, 0))
+      /* 盘上那本也要清（作者口径：历史是一直留着的，只有这一颗按钮能清掉它） */
+      if (historyOrigin !== null && historyId !== null) {
+        void api.clearPresetHistory(historyOrigin, historyId).catch(() => {
+          /* 清不掉就照界面上的"已清空"走 —— 下一次写回会再试一次 */
+        })
+      }
+    }, [at, historyId, historyOrigin]),
     savedBatches,
     revertEntry,
     requestCombo,

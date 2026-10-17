@@ -766,6 +766,63 @@ export interface CommittedDraft {
 }
 
 /*
+ * **修改历史账本**（2026-10-17）—— 参数弹窗「修改历史」抽屉的**持久化形态**。
+ *
+ * 作者口径：「修改历史是类似 git 的保存的那种形式吧，**不要清空，每次重新打开软件
+ * 都存在**；所有的 toml 文件都需要存历史修改的，不管是导入的还是什么的」。
+ *
+ * 于是它不再是一份内存日志：一份文件一本账，落在内部根 `run/preset-history/<指纹>.json`
+ * （后端 `runtime::history`），钥匙 = 哪条线 + 身份（用户线按相对路径 / 云端线按文件名）——
+ * **导入的 toml 进来之后就是用户线的一份文件**，所以也天然有自己的一本。
+ *
+ * 前端仍然拿整本（读一次、整本写回）：一本账通常几十条、几 KB，
+ * 而"撤销把上一条标成 undone"这类动作改的是**已有条目**，追加模型反而要多造一层协议。
+ */
+export interface PresetHistory {
+  /** 这一份保存过几次（批号的水位，与条目的 `batch` 同一套数） */
+  batches: number
+  entries: HistoryRecord[]
+}
+
+/** 打完 / 恢复完一份备份的回执 */
+export interface BackupSummary {
+  /** 备份文件自己的绝对路径（界面照原样显示：用户要知道东西落在哪了） */
+  path: string
+  /** 里面几个文件 */
+  files: number
+  /** 字节数（恢复时 = 那份 zip 的大小） */
+  bytes: number
+  /** 什么时候打的这份备份（UTC epoch 秒） */
+  createdUnix: number
+}
+
+/** 账本里的一条改动（一次动作）。`state` 与 `HistoryEntry` 同一个枚举 */
+export interface HistoryRecord {
+  id: number
+  no: number
+  /** 人话的事件名（「改 Y 轴偏移」/「回退 第 1 次保存」） */
+  action: string
+  /** 发生那一刻（UTC epoch 秒）—— 持久化之后才有它 */
+  tsUnix: number
+  /** `draft` = 还没保存过；`saved` = 落在某次保存里；`undone` = 被撤销掉了 */
+  state: 'draft' | 'saved' | 'undone'
+  /** 第几次保存把它落地的；`null` = 还没保存过 */
+  batch: number | null
+  items: HistoryRecordItem[]
+}
+
+/** 一条改动里的**一项**（一个参数） */
+export interface HistoryRecordItem {
+  key: string
+  from: string
+  to: string
+  label: string
+  tab: string
+  section: string
+  unit: string | null
+}
+
+/*
  * **正文编辑器**（「编辑文件」）那条链的草稿 —— 与上面 `PresetDraft`（参数页那条链）
  * **分开存**（2026-10-10 作者裁决）：两处同时改一份文件时互不干扰，也不互相作废。
  *
@@ -2048,6 +2105,45 @@ export interface MkpApi {
 
   /** 放弃这次编辑：丢掉临时文件（幂等；云端原件与下载区全程没被碰过，所以它天生安全） */
   discardPresetDraft(): Promise<void>
+
+  /**
+   * **读这一份的修改历史**（一份文件一本；没改过 = 空本，不是错误）。
+   * `origin` 与 `beginPresetEdit` 同一套：用户线认 `path`、云端线认 `fileName`。
+   */
+  getPresetHistory(origin: ActiveOrigin, id: string): Promise<PresetHistory>
+
+  /**
+   * **整本写回**这一份的修改历史（改一条 / 撤销一条 / 保存一次之后）。
+   * 给的就是界面眼里整本账（含批号水位），后端照写 —— 空本会被删掉文件。
+   */
+  putPresetHistory(origin: ActiveOrigin, id: string, history: PresetHistory): Promise<void>
+
+  /** **清空**这一份的修改历史（抽屉右上那颗；二次确认在界面那侧做） */
+  clearPresetHistory(origin: ActiveOrigin, id: string): Promise<void>
+
+  /**
+   * **打一份备份**（设置页）：把这台机器的家当收进一个 zip，落在 `destDir` 里。
+   *
+   * 备份里有的：应用设置（`run/app-state.json`）、目录（`catalog.json`）、
+   * **全部用户预设 toml（含导入的）**、**修改历史**、云端基准与原文镜像、执行归档。
+   * 备份里没有的：云端下载区原件 / 换代归档 / 日志 / 导出产物 —— 那些都能重新拿到，
+   * 备份要的是"丢了就再也回不来的东西"。
+   *
+   * 文件名由后端定（`SupportEase-备份-<时刻>.zip`），于是同一天打几份也不会互相盖掉。
+   */
+  createBackup(destDir: string): Promise<BackupSummary>
+
+  /**
+   * **从一份备份恢复**（设置页）：**全量覆盖** —— 备份里有的一律覆盖，
+   * 被管的那几棵树里备份没有的删掉（= 回到"打那份备份那一刻"）。
+   *
+   * ★ 不做选择性恢复：同名文件"选哪一份"没有天然答案，成熟方案要么整机快照
+   * （靠多份备份按时间选拿细粒度），要么细粒度同步（要求每个文件有稳定 id 与合并语义）。
+   * 我们走前者。
+   *
+   * 恢复完界面要**整窗重载**（盘上的数据换过了，内存里的都不算数）。
+   */
+  restoreBackup(zipPath: string): Promise<BackupSummary>
 
   /**
    * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：

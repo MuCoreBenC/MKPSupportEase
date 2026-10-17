@@ -155,12 +155,12 @@ pub fn run() {
                 let dark = ipc::prefs::resolved_dark(ipc::prefs::theme_pref(app.handle()), &win);
                 chrome::apply_native_corners(&win, dark);
                 /* 红绿灯：装了统一工具栏之后 AppKit 摆的是 (26,26) 那组默认坐标，
-                我们按作者的要求再往左上挪一点；★ 它会在 resize / 进出全屏 / 切外观时
-                被 AppKit 摆回去 ⇒ 下面那两个事件里都要**再摆一次**（函数是幂等的） */
+                我们用 Auto Layout 约束钉到作者要的位置（2026-10-17 起 —— 补摆 frame
+                的老路在拖窗过程中一帧错一下，约束是布局的一部分，没有这个问题）。 */
                 chrome::reposition_traffic_lights(&win);
-                /* 两条原生的"重摆"时机：① 档位是"跟随系统"时系统深浅变了（CSS 那侧由
-                `prefers-color-scheme` 自己跟上，原生这侧没人管就会留旧色）；
-                ② 尺寸变了（拉窗 / 进出全屏）—— 灯的位置要补一次 */
+                /* 两个重钉时机：① 档位是"跟随系统"时系统深浅变了；
+                ② 尺寸变了（拉窗 / 进出全屏）—— 进出全屏 AppKit 可能整棵标题栏视图树
+                重建，按钮换新对象时要在它们身上重新钉约束（平时这些调用都是空转） */
                 let watcher = win.clone();
                 win.on_window_event(move |event| match event {
                     tauri::WindowEvent::ThemeChanged(_) => {
@@ -319,6 +319,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 找「我那一份」+ 把校准值写进它（2026-10-08 资源库改判）
         ipc::local::get_local_copy_for,
         ipc::local::save_preset_calibration,
+        // 备份与恢复（2026-10-17）：设置页 —— 打一份 zip / 从一份 zip 全量恢复
+        ipc::backup::create_backup,
+        ipc::backup::restore_backup,
+        // 修改历史（2026-10-17）：一份文件一本账，盘上留着
+        ipc::history::get_preset_history,
+        ipc::history::put_preset_history,
+        ipc::history::clear_preset_history,
         // 对比台 + 云端版本账（2026-10-08）：只在**用户自己的预设**之间对比
         ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
@@ -462,6 +469,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 找「本地那份」+ 把校准值写进它（与上面那份清单一字不差）
         ipc::local::get_local_copy_for,
         ipc::local::save_preset_calibration,
+        // 备份与恢复（与上面那份清单一字不差）
+        ipc::backup::create_backup,
+        ipc::backup::restore_backup,
+        // 修改历史（与上面那份清单一字不差）
+        ipc::history::get_preset_history,
+        ipc::history::put_preset_history,
+        ipc::history::clear_preset_history,
         // 对比台 + 云端版本账（与上面那份清单一字不差）
         ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,

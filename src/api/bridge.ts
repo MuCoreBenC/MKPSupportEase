@@ -197,6 +197,20 @@ export const bridgeApi: MkpApi = {
   patchPresetDraft: (paramKey, value) =>
     call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
+  /* 修改历史账本（2026-10-17）：一份文件一本，盘上留着、重开软件还在 */
+  getPresetHistory: (origin, id) => call('getPresetHistory', 'get_preset_history', { origin, id }),
+  putPresetHistory: (origin, id, history) =>
+    call('putPresetHistory', 'put_preset_history', {
+      origin,
+      id,
+      batches: history.batches,
+      entries: history.entries,
+    }),
+  clearPresetHistory: (origin, id) =>
+    call('clearPresetHistory', 'clear_preset_history', { origin, id }),
+  /* 备份与恢复（2026-10-17）：设置页，zip 快照 + 全量覆盖 */
+  createBackup: (destDir) => call('createBackup', 'create_backup', { destDir }),
+  restoreBackup: (zipPath) => call('restoreBackup', 'restore_backup', { zipPath }),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
   /* 「编辑文件」那条链（2026-10-10：与参数草稿分开存，两侧互相作废） */
   getPresetDraftSummary: () =>

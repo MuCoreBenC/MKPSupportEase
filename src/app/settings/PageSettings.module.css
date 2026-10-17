@@ -246,22 +246,18 @@
   flex-shrink: 0;
 }
 
-/* ============ 自绘选择控件（单选圈 / 复选方框） ============
- * 原生 `<input>` 只留语义与键盘：视觉上收成 1px 透明（**不是 `display: none`** ——
- * 那样读屏与方向键就一起没了）。标记由紧跟其后的 `.mark` 画，`:checked` 仍是原生状态，
- * 所以 `name` 分组、方向键切换、Tab 顺序、读屏播报全部免费拿到。 */
+/* ============ 勾选行（框身住共用件 `components/check`） ============
+ * 2026-10-17：这一页原来自带的那一整套自绘墨色（`.choice / .choiceInput / .mark /
+ * `.markRadio / .markCheck / `:checked` 那几条 / 焦点环 / 禁用）**整段搬去了共用件
+ * `components/check`** —— 它是全站唯一的那份规格，页面里再画一份就是"又长出一个样子"。
+ *
+ * 留在这里的只有**这一页专属**的两件事：
+ *   1. `.choiceRow` —— 整行可点的行框感（左右各让出 6px 再用负 margin 拉回来，悬停整行提亮）
+ *   2. `.choiceText / .choiceLabel / .choiceHint` —— 主文案 + 小字说明的两行文字盒
+ * 字号与文字色也留在这里（共用件不锁这一档，见它头注释）。
+ */
 
-.choice {
-  position: relative;
-  display: flex;
-  /*
-   * ★ `align-items` **不能是 `flex-start`**：方框（16px）与第一行文字
-   * 在顶边对齐，而 CJK 字形坐在行盒的中下部 ⇒ 方框看着偏高、勾看着没落在框中间。
-   * `center` = **按内容盒的中线对齐**，两边的几何中心自己就重合了
-   *（2026-10-12 报告页 `.grpBar` 那条"让中线重合"的同一条口径）。
-   */
-  align-items: center;
-  gap: 8px;
+.choiceRow {
   /* 左右各让出 6px、再用负 margin 拉回来：让悬停那块高亮比文字宽一点，
      又不把行文挤歪（老稿里说明行顶格的样式不变） */
   padding: 3px 6px;
@@ -270,109 +266,12 @@
   border-radius: var(--r-sm);
   color: var(--text-1);
   font-size: var(--fs-body);
-  cursor: pointer;
   /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来） */
   transition: background-color 0.12s ease;
 }
 
-.choice:hover {
+.choiceRow:hover {
   background: var(--hover-1);
-}
-
-/* 原生 input 只剩语义：视觉上收成 1px 透明（不是 display:none —— 那样读屏就没了） */
-.choiceInput {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.mark {
-  position: relative;
-  display: block;
-  flex-shrink: 0;
-  box-sizing: border-box;
-  width: 16px;
-  height: 16px;
-  /*
-   * 与第一行文字**中线对齐**（外层 `.choice` 是 `align-items: center`，这里是框自己的
-   * 内容盒中线）。框的 16px 盒高里内容盒只有 13px（1.5px 上下边框），而 `top` 定位的
-   * 原点在**内边距盒**顶边 ⇒ 3px 的「视觉中心」要落在 1.5px + 6.5px 处。
-   *
-   * ★ 这里**不许再改成 `margin-top`**：那会把外边距加进"行内元素的内容盒"，
-   * `align-items: center` 跟着把整框往下推，勾就又悬出线框外去了。
-   */
-  margin-top: 0;
-  border: 1.5px solid var(--line-strong);
-  background: transparent;
-  transition: border-color 0.12s ease, background-color 0.12s ease;
-}
-
-.markRadio {
-  border-radius: 50%;
-}
-
-.markCheck {
-  border-radius: 4px;
-}
-
-/* 悬停：整行已提亮，圈线再提一档，两下都看得出"这是一行，不是一格" */
-.choice:hover .mark {
-  border-color: var(--text-2);
-}
-
-/* 选中：圈线走墨色，填充按控件类型分开画 */
-.choiceInput:checked + .mark {
-  border-color: var(--text-1);
-}
-
-/* 实心墨点：内阴影比伪元素更稳（不依赖"`input` 上的伪元素算不算渲染"）；
-   spread 3.5px 留出一枚约 6px 的实心点，占 16px 圈径四成上下，与原生观感最接近 */
-.choiceInput:checked + .markRadio {
-  box-shadow: inset 0 0 0 3.5px var(--text-1);
-}
-
-/* 墨底 + 反白勾 */
-.choiceInput:checked + .markCheck {
-  background: var(--text-1);
-}
-
-/*
- * 对勾（撇 + 2px 描边）在方框里**几何居中**。
- *
- * ★ 这里**不手算 `left/top`**（踩过两次）：`::after` 的包含块是标记的**内边距盒**，
- * 而它的边框盒是 `4.5 + 2×2 = 8.5` × `8 + 2×2 = 12`（`::after` 默认 content-box），
- * 转 45° 之后的外接盒比 13px 的内盒还大 —— 按"外接尺寸减一半"算出来的值必然是偏的。
- * `inset: 0` + `margin: auto` 交给浏览器做居中（按**边框盒**算，与旋转无关），
- * 一行搞定且不会随描边宽度漂。
- *
- * ★ `transform-origin` 保持默认的 `50% 50%`（元素中心）：旋转**绕中心**，中心不动，
- * 居中就不受影响。2026-10-12 首页那颗对勾用的是 `bottom left` 的"大头针"画法，
- * 两处定位口径不同 —— 别互相抄。
- */
-.choiceInput:checked + .markCheck::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  width: 4.5px;
-  height: 8px;
-  border: 2px solid var(--surface-solid);
-  border-top: 0;
-  border-left: 0;
-  transform: rotate(45deg);
-}
-
-/* 键盘焦点：焦点环画在标记上（原生 input 被收成 1px，默认焦点环是看不见的） */
-.choiceInput:focus-visible + .mark {
-  outline: 2px solid var(--text-1);
-  outline-offset: 2px;
-}
-
-.choiceInput:disabled + .mark {
-  opacity: 0.4;
 }
 
 .choiceText {

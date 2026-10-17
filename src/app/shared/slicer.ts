@@ -15,10 +15,12 @@
  * 每次打开时把选择重置回当前默认 —— 上一次的「仅这一次」不该渗到下一次。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import type { SlicerApp } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
+/* 多实例同步的 sticky 偏好：切片这一格与「引导提示」开关共用这一份（见 `hooks/`） */
+import { useSyncedStickyState } from '../../hooks/useSyncedStickyState'
 
 /** 四档，**id 是给壳的契约**（跟随系统 = 交给系统关联程序，不指定具体应用） */
 export type SlicerId = 'system' | 'bambu' | 'orca' | 'custom'
@@ -138,66 +140,6 @@ function isSlicerApp(v: unknown): v is SlicerApp | null {
   if (typeof v !== 'object') return false
   const o = v as { name?: unknown; path?: unknown }
   return typeof o.name === 'string' && typeof o.path === 'string'
-}
-
-/**
- * 与 `useStickyState` 同口径，但**同一文档里的多份实例互相同步** ——
- * 外壳的页签是常驻挂载的，设置页那份 state 在模态框里「不勾仅这一次」写回默认时
- * 不会重新挂载，纯 useStickyState 会显示旧值。写的时候顺手广播一个自定义事件，
- * storage 事件兜底跨标签页的场景。
- */
-function useSyncedStickyState<T>(
-  key: string,
-  initial: T,
-  is: (v: unknown) => v is T,
-): [T, (v: T) => void] {
-  const EVT = `mkp:synced-sticky:${key}`
-  const [value, setValue] = useState<T>(() => {
-    try {
-      const raw = localStorage.getItem(key)
-      if (raw === null) return initial
-      const v = JSON.parse(raw) as unknown
-      return is(v) ? v : initial
-    } catch {
-      return initial
-    }
-  })
-  useEffect(() => {
-    const on = (e: Event) => {
-      const detail = (e as CustomEvent<T>).detail
-      if (is(detail)) setValue(detail)
-    }
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== key) return
-      try {
-        const v = e.newValue === null ? initial : (JSON.parse(e.newValue) as unknown)
-        setValue(is(v) ? v : initial)
-      } catch {
-        setValue(initial)
-      }
-    }
-    window.addEventListener(EVT, on)
-    window.addEventListener('storage', onStorage)
-    return () => {
-      window.removeEventListener(EVT, on)
-      window.removeEventListener('storage', onStorage)
-    }
-    /* `is` 是模块级纯函数，不进依赖 —— 关掉这条警示 */
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [EVT, key, initial])
-  const set = useCallback(
-    (v: T) => {
-      try {
-        localStorage.setItem(key, JSON.stringify(v))
-      } catch {
-        /* 无痕模式：存不了就算了 */
-      }
-      window.dispatchEvent(new CustomEvent(EVT, { detail: v }))
-      setValue(v)
-    },
-    [EVT, key],
-  )
-  return [value, set]
 }
 
 /** 模态框里的瞬时选择：每次打开重置为当前默认、「仅这一次」清掉 */

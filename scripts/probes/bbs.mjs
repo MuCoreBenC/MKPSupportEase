@@ -1,5 +1,5 @@
 /*
- * P5 探针：工艺页（BBS 预设查看器）—— 两档尺寸。
+ * P5 探针：工艺页（BBS 预设查看器）—— 三档尺寸。
  *
  * 用法（先 `npm run build`，再让静态预览在 4173 上跑着）：
  *   npm run build
@@ -17,13 +17,16 @@
  * 由此，"没装 BBS"那一档（诚实空态）在浏览器里**造不出来**了（演示集合恒 available），
  * 它现在只在真机（没装 BBS 的机器）上看得到 —— 这一条从探针里撤了。
  *
- * 走一遍真实的路（两档尺寸：Ultra 1760×900 / Compact 900×640）：
- *   ① 顶栏「工艺」→ 页面装配起来（不是白屏、不是空屏）
+ * 走一遍真实的路（三档尺寸：Ultra 1760×900 / Compact 900×640 / Narrow 800×640）：
+ *   ① 顶栏「工艺」→ 页面装配起来（不是白屏、不是空屏）；**详情栏默认收起**（2026-10-17）
  *   ② 左抽屉最上面是两枚来源胶囊，默认停在 «MKP 工艺»
  *   ③ MKP 档（默认档）：默认选中盘上那一份 + 参数区真画出行 + 详情栏「改动」是算出来的数
+ *      （详情栏默认收着 —— 探针先点页签行那颗图标把它打开）
  *   ③′ 换成「全部」：登记的 9 份都列出来 —— 其中 8 份灰着、带一颗「还没下载」
  *   ④ 详情栏那颗叉与页签行右端的图标**同一个位置换面孔**：开着没有图标
  *      → 收起后图标出现 → 点它还能开回来
+ *   ④′ **左抽屉浮不浮跟着右栏走**（2026-10-17）：右栏开着 + 窄窗 → 浮层（有遮罩）；
+ *      右栏收起 → 永远并排（没有遮罩），小窗口也是
  *   ⑤ 切到 «本机工艺»：列出演示集合（用户配置 / 系统配置），机型下拉第一项是「全部（N）」
  *      ⑤′ 复制进来的那一份标着「我们发的」
  *   ⑥ 本机工艺档里点一份用户预设：参数区有行、详情栏「改动」是 `N / M 项`、继承链 ≥ 2 节
@@ -42,6 +45,8 @@ const url = process.argv[2]?.startsWith('http') ? process.argv[2] : 'http://loca
 const SIZES = [
   { tag: 'ultra', width: 1760, height: 900 },
   { tag: 'compact', width: 900, height: 640 },
+  /* 800 < 880（浮层那道线）：专门验「右栏收着时左抽屉不浮」（2026-10-17） */
+  { tag: 'narrow', width: 800, height: 640 },
 ]
 
 /*
@@ -110,6 +115,8 @@ const facts = (page) =>
       hasRail: rail !== null,
       railText: flat(rail?.innerText),
       hasRailIcon: document.querySelector('button[aria-label="详情"]') !== null,
+      /* 左抽屉浮层态才画的那颗遮罩（点一下收抽屉）—— 有它 = 浮着，没它 = 并排 */
+      hasScrim: document.querySelector('button[aria-label="关闭预设列表"]') !== null,
       rows: document.querySelectorAll('[data-key]').length,
       params: flat(document.querySelector('[data-role="params"]')?.innerText),
       paramTabs: listTabs ? listTabs.querySelectorAll('button').length : 0,
@@ -173,9 +180,9 @@ for (const size of SIZES) {
 
   check(
     tag,
-    '① 工艺页装配起来了（左抽屉 + 参数区 + 详情栏都在）',
-    f.hasDrawer && f.hasRail && f.main.length > 0,
-    `抽屉 ${f.hasDrawer} / 详情栏 ${f.hasRail}`,
+    '① 工艺页装配起来了（左抽屉 + 参数区都在；详情栏默认收起，图标站岗）',
+    f.hasDrawer && !f.hasRail && f.hasRailIcon && f.main.length > 0,
+    `抽屉 ${f.hasDrawer} / 详情栏 ${f.hasRail} / 图标 ${f.hasRailIcon}`,
   )
   check(
     tag,
@@ -191,15 +198,19 @@ for (const size of SIZES) {
   /* ---------- ③ MKP 档：默认选中"盘上那一份"，参数区真有东西 ---------- */
   check(
     tag,
-    '③ 默认选中的是**盘上那一份**（不是灰着的那几份）',
-    f.groups.some((g) => g === `MKP 工艺（${READY}）`) && f.railText.includes('MKPProcess A1 0.4'),
-    `列表 ${f.groups.join(' | ')} / ${f.railText.replace(/\s+/g, ' ').slice(0, 60)}`,
-  )
-  check(
-    tag,
     '③ 参数区真画出了行（不是空壳）',
     f.rows > 0,
     `行 ${f.rows} / ${f.params.slice(0, 40)}`,
+  )
+  /* 详情栏默认收着（2026-10-17）—— 验它的内容之前先点页签行那颗图标把它打开 */
+  await page.locator('button[aria-label="详情"]').click()
+  await page.waitForSelector('aside[aria-label="详情"]', { timeout: 5000 })
+  f = await facts(page)
+  check(
+    tag,
+    '③ 默认选中的是**盘上那一份**（不是灰着的那几份）',
+    f.groups.some((g) => g === `MKP 工艺（${READY}）`) && f.railText.includes('MKPProcess A1 0.4'),
+    `列表 ${f.groups.join(' | ')} / ${f.railText.replace(/\s+/g, ' ').slice(0, 60)}`,
   )
   check(
     tag,
@@ -238,8 +249,38 @@ for (const size of SIZES) {
   await page.waitForSelector('aside[aria-label="详情"]', { timeout: 5000 })
   check(tag, '④ 点它还能再开回来', (await facts(page)).hasRail)
 
+  /* ---------- ④′ 左抽屉浮不浮跟着右栏走（2026-10-17） ----------
+   * 右栏开着：窄窗（< 880）下左抽屉浮层（有遮罩），宽窗并排（无遮罩）；
+   * 右栏收起：**任何宽度都并排** —— 小窗口也不浮。 */
+  f = await facts(page)
+  check(
+    tag,
+    '④′ 右栏开着时：窄窗浮层 / 宽窗并排（遮罩只在窄窗出现）',
+    (tag === 'narrow') === f.hasScrim,
+    `${tag} 遮罩 ${f.hasScrim}`,
+  )
+  await page.locator('button[aria-label="收起详情"]').click()
+  await page.waitForSelector('aside[aria-label="详情"]', { state: 'detached', timeout: 5000 })
+  f = await facts(page)
+  check(tag, '④′ 右栏收起之后，左抽屉**任何宽度都并排**（没有遮罩）', !f.hasScrim, `遮罩 ${f.hasScrim}`)
+  /* 后面 ⑤~⑨ 都要在右栏开着的状态下读详情栏，把它开回来 */
+  await page.locator('button[aria-label="详情"]').click()
+  await page.waitForSelector('aside[aria-label="详情"]', { timeout: 5000 })
+
+  /*
+   * 浮层态（只 narrow 有）下抽屉「用完即收」：选完一份、按下 Esc 都会自己收起 ——
+   * 那是产品行为，不是 bug。探针凡是要去抽屉里点东西/读清单，先把它开回来。
+   */
+  const ensureDrawer = async () => {
+    if (!(await page.locator('[data-role="preset-list"]').isVisible())) {
+      await page.locator('button[aria-label="预设列表"]').click()
+      await page.waitForTimeout(300)
+    }
+  }
+
   /* ---------- ⑤ 切到本机工艺：演示集合 ---------- */
   await page.locator('[role="tablist"][aria-label="预设来源"] [role="tab"]', { hasText: '本机工艺' }).click()
+  await ensureDrawer()
   await page.waitForTimeout(500)
   f = await facts(page)
   check(
@@ -259,6 +300,7 @@ for (const size of SIZES) {
    * 机型那一档默认跟着**当前选中的那一份**走（MKP 档默认选中 A1 那台）——
    * 所以刚切过来时系统那组只列 A1 的。换成「全部」之后三台机的都该在。
    */
+  await ensureDrawer()
   await chooseTargetOption(page, '全部（')
   f = await facts(page)
   check(
@@ -281,6 +323,7 @@ for (const size of SIZES) {
 
   /* ---------- ⑥ 用户预设：改动是算出来的、继承链走得通 ---------- */
   const userGroup = page.locator('[data-role="preset-list"] > div', { hasText: '用户配置' })
+  await ensureDrawer()
   await userGroup.locator('button').first().click()
   await page.waitForTimeout(600)
   f = await facts(page)
@@ -292,11 +335,7 @@ for (const size of SIZES) {
   const sysGroup = page.locator('[data-role="preset-list"] > div', { hasText: '系统配置' })
   const sysCount = await sysGroup.locator('button').count()
   if (sysCount > 0) {
-    /* 浮层态下点一份就自动收起抽屉，所以再点一次来源胶囊把它开回来 */
-    if (!(await page.locator('[data-role="preset-list"]').isVisible())) {
-      await page.locator('button[aria-label="预设列表"]').click()
-      await page.waitForTimeout(300)
-    }
+    await ensureDrawer()
     await sysGroup.locator('button').first().click()
     await page.waitForTimeout(600)
     const g = await facts(page)
@@ -312,10 +351,7 @@ for (const size of SIZES) {
   }
 
   /* ---------- ⑧ 重扫本机 ---------- */
-  if (!(await page.locator('[data-role="preset-list"]').isVisible())) {
-    await page.locator('button[aria-label="预设列表"]').click()
-    await page.waitForTimeout(300)
-  }
+  await ensureDrawer()
   const before = (await facts(page)).items
   await page.locator('button[aria-label="重扫本机"]').click()
   await page.waitForTimeout(1200)
@@ -330,6 +366,7 @@ for (const size of SIZES) {
   /* ---------- ⑨ 点一份"还没下载"的 → 落到预设页的「切片器配置 → 云端」 ---------- */
   await page.locator('[role="tablist"][aria-label="预设来源"] [role="tab"]', { hasText: 'MKP 工艺' }).click()
   await page.waitForTimeout(400)
+  await ensureDrawer()
   const grey = page.locator('[data-role="preset-list"] button[data-need-download="true"]').first()
   if ((await grey.count()) > 0) {
     await grey.click()

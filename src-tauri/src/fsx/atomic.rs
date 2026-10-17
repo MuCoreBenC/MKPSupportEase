@@ -61,6 +61,44 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     Ok(())
 }
 
+/// **流式原子写**（2026-10-17，给备份那一处）：给一个 `&mut File` 让调用方边读边写，
+/// 写完由本函数负责 `sync_all` → `persist` → fsync 父目录。
+///
+/// 为什么要有这一条：`atomic_write` 收的是**整串字节**，而备份那种东西
+/// （执行归档三件套能到几百 MB）不该先整个进内存再落盘。
+/// 规矩与它**一字不差** —— 同样是"临时文件 → 落盘 → 同分区 rename"，
+/// 所以写盘出口仍然只有这一个文件。
+#[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
+pub fn atomic_write_stream(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::invalid_argument("写入路径没有父目录"))?;
+
+    std::fs::create_dir_all(parent).map_err(|e| {
+        AppError::io(format!("建不出目录：{}", parent.display())).with_detail(e.to_string())
+    })?;
+
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
+        AppError::io("创建临时文件失败").with_detail(format!("{} / {e}", parent.display()))
+    })?;
+
+    write(tmp.as_file_mut())?;
+
+    tmp.as_file()
+        .sync_all()
+        .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
+    tmp.persist(path)?;
+
+    if let Ok(dir) = File::open(parent) {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
+
 /// 写 JSON。序列化失败与写盘失败都会被转成 `AppError`
 pub fn atomic_write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), AppError> {
     let bytes = serde_json::to_vec_pretty(value)?;
@@ -130,6 +168,28 @@ mod tests {
             before,
             "真写入要更新 mtime"
         );
+    }
+
+    /// 流式那一档（备份 zip 用）：边读边写，落出来的与一次性写的一模一样，且不留临时文件
+    #[test]
+    fn streaming_writes_land_the_same_bytes_and_leave_no_temp_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("big.bin");
+        atomic_write_stream(&p, |f| {
+            f.write_all(b"part-1-")
+                .map_err(|e| AppError::io("写不了").with_detail(e.to_string()))?;
+            f.write_all(b"part-2")
+                .map_err(|e| AppError::io("写不了").with_detail(e.to_string()))
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"part-1-part-2");
+
+        let leftovers: Vec<_> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "big.bin")
+            .collect();
+        assert!(leftovers.is_empty(), "临时文件残留：{leftovers:?}");
     }
 
     #[test]

@@ -12,8 +12,10 @@
 //!
 //! 我们的标题栏是 52px（`--titlebar-h`），所以要装一个**空**工具栏 —— 不放任何 item，
 //! 控件全由 WebView 画，只借它的布局结果。`trafficLightPosition` 这条配置在 Overlay 下
-//! 不生效（试过），而逐颗改 `standardWindowButton(...).frame` 要在 resize / 进出全屏 /
-//! 切外观时各补摆一次，每次补摆都有一帧错位 —— 交回给系统算才是稳的。
+//! 不生效（试过）。灯的位置（2026-10-17 起）用 **Auto Layout 约束钉死**（见
+//! `reposition_traffic_lights`）—— 逐颗改 `standardWindowButton(...).frame` 的老路
+//! 在 resize 的每一次布局里都会先被 AppKit 摆回去、再被我们的补摆拉回来，
+//! 拖窗过程中一帧错一下（作者报的「改变窗口大小的时候红绿灯在变化位置」就是这个）。
 //!
 //! **圆角**：这是 tauri#14165。窗口的原生边框是圆的，但 WKWebView 没有被裁 ——
 //! 它把内容画进圆角外面，看上去就是直角。**现在自己裁**（2026-10-15 第六版）：
@@ -79,8 +81,9 @@ const MAIN_RADIUS: f64 = 13.0;
 /// ★ `19` 的来历：标题栏 38 高 ⇒ 竖直居中的灯心就是 `38 / 2 = 19`。
 /// "左 = 上"和"在标题栏里竖直居中"在这里**是同一个数**，不用二选一。
 ///
-/// ★★ AppKit 会在 **resize / 进出全屏 / 切外观**时**重摆**这些按钮 ⇒ 不是"设一次"，
-/// 而是"每次布局之后再摆一次"（本函数是幂等的：每次都按绝对值重设）。
+/// ★★ AppKit 会在 **resize / 进出全屏 / 切外观**时重摆这些按钮 ⇒ 不能只设一次。
+/// 第九版起用 **Auto Layout 约束**钉死（约束本身就是布局的一部分，AppKit 每次布局
+/// 自己按约束摆，resize 过程中不再错位）；本函数在按钮被重建时重钉（见 `LIGHTS_PINS`）。
 /// 调用点见 `lib.rs` 的窗口事件那一段与 `set_theme`。
 #[cfg(target_os = "macos")]
 const LIGHTS_CENTER: f64 = 19.0;
@@ -101,6 +104,23 @@ const LIGHTS_PITCH: f64 = 23.0;
 /// 以及"AppKit 到底把灯摆在哪"这个事实的留档（诊断用）。
 #[cfg(target_os = "macos")]
 static LIGHTS_BASE: std::sync::Mutex<Option<[(f64, f64); 3]>> = std::sync::Mutex::new(None);
+
+/// 已钉上的约束记录（第九版）。
+///
+/// `buttons` = 钉的时候那三颗按钮的指针，`constraints` = 我们建的三条横向约束的指针
+/// （每颗一条就够作证；竖直那三条与它们同生共死）。
+///
+/// ★ 记指针而不是"装没装"一个布尔：**进出全屏时 AppKit 可能整棵标题栏视图树重建** ——
+/// 按钮是新对象、旧约束随旧视图一起没了，这时必须重钉。
+/// 指针一样（还是那三颗）且容器里还找得到我们的约束，就什么都不做。
+#[cfg(target_os = "macos")]
+struct LightsPins {
+    buttons: [usize; 3],
+    constraints: [usize; 3],
+}
+
+#[cfg(target_os = "macos")]
+static LIGHTS_PINS: std::sync::Mutex<Option<LightsPins>> = std::sync::Mutex::new(None);
 
 /// 让 AppKit 按「统一工具栏」那一档摆红绿灯。失败只打日志 —— 灯偏 10px 是外观问题，
 /// 不该让启动挂掉。
@@ -259,21 +279,32 @@ pub fn repaint_corner_fill<R: Runtime>(win: &WebviewWindow<R>, dark: bool) {
     }
 }
 
-/// 把三颗灯摆到**灯心距左 = 距上 = `LIGHTS_CENTER`**（幂等：每次按绝对值重设）。
+/// 把三颗灯**用 Auto Layout 约束钉到灯心距左 = 距上 = `LIGHTS_CENTER`**（第九版，幂等）。
 ///
 /// ★ 只在装了统一工具栏之后调用有意义（那一档的灯径/间距才是量过的那组）。
-/// ★★ 每次调用都重设一遍是**故意的**：AppKit 在 resize / 进出全屏 / 切外观时会把它们摆回去。
 /// 只打日志不中止 —— 灯偏几像素是外观问题，不该影响别的。
 ///
+/// ★★★ **为什么是约束而不是补摆 frame**（2026-10-17，作者报「改变窗口大小的时候
+/// 红绿灯在变化位置」）：AppKit 在 resize 的**每一次布局**都把灯摆回它的默认位置，
+/// 而我们的 `Resized` 事件只在布局之后才补 —— 于是拖窗过程中灯先跳回去再被拉回来，
+/// 一帧错一下。约束是**布局的一部分**：装上之后 AppKit 每次布局自己就按约束摆灯，
+/// 没有"跳回去"那一步，resize / 进出全屏 / 切外观都不用我们再管。
+/// （重钉只发生在按钮被 AppKit 重建之后，见 `LIGHTS_PINS`。）
+///
 /// ★★★ **坐标系**：`standardWindowButton(...).frame()` 是 **NSView 坐标（原点在左下）**，
-/// 而我们要的是"距窗口上边"。这里用按钮自己的 `superview`（标题栏那一层）高度来翻，
+/// 而我们要的是"距窗口上边"。这里用按钮自己的 `superview`（标题栏那一层）来翻，
 /// **不用窗口高度** —— 第一版用了窗口高度，算出"灯心距上 607"这种一眼假的值
-/// （按钮的 y 是相对 superview 的，不是相对整窗）。
+/// （按钮的 y 是相对 superview 的，不是相对整窗）。约束从**按钮**出发锚到容器的
+/// `topAnchor` / `leadingAnchor`（方向语义 = a = b + c，见函数体里的注释），连换算都省了。
+///
+/// ★★★ **每颗灯四条约束：上 · 左 · 宽 · 高**。少了尺寸那两条，关掉 autoresizing 之后
+/// 按钮的 frame 由布局引擎重算 ⇒ 没有尺寸约束就**塌成 0×0 ⇒ 红绿灯整组不见了**
+/// （2026-10-17 第一版就是这个症状，灯"消失"）。
 #[cfg(target_os = "macos")]
 #[allow(unsafe_code)]
 pub fn reposition_traffic_lights<R: Runtime>(win: &WebviewWindow<R>) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::{NSWindow, NSWindowButton};
+    use objc2::{rc::Retained, MainThreadMarker};
+    use objc2_app_kit::{NSButton, NSWindow, NSWindowButton};
     use objc2_foundation::NSPoint;
 
     let Ok(ptr) = win.ns_window() else {
@@ -297,45 +328,112 @@ pub fn reposition_traffic_lights<R: Runtime>(win: &WebviewWindow<R>) {
         NSWindowButton::MiniaturizeButton,
         NSWindowButton::ZoomButton,
     ];
-
-    let mut base = LIGHTS_BASE.lock().unwrap_or_else(|e| e.into_inner());
-    let frames: Vec<_> = buttons
+    let lights: Vec<Retained<NSButton>> = buttons
         .iter()
         .filter_map(|b| window.standardWindowButton(*b))
-        .map(|b| b.frame())
         .collect();
-    if frames.len() != 3 {
-        eprintln!("[chrome] 只找到 {} 颗红绿灯，跳过挪位", frames.len());
+    if lights.len() != 3 {
+        eprintln!("[chrome] 只找到 {} 颗红绿灯，跳过挪位", lights.len());
         return;
     }
+
+    let mut base = LIGHTS_BASE.lock().unwrap_or_else(|e| e.into_inner());
     if base.is_none() {
         *base = Some(std::array::from_fn(|i| {
-            (frames[i].origin.x, frames[i].origin.y)
+            let f = lights[i].frame();
+            (f.origin.x, f.origin.y)
         }));
     }
 
-    /* 灯径与"距上"的换算都要一个**容器高度**。取第一颗灯的 superview（标题栏那层）；
-    取不到就退回 `LIGHTS_DIAMETER`（只影响"距上"，灯径本身是常量，不怕）。 */
-    let radius = LIGHTS_DIAMETER / 2.0;
-    let container_h = buttons
+    /* 约束要挂在**按钮与参照视图的公共祖先**上。参照视图用 `contentView`
+    （= WryWebViewParent，铺满整窗）：★★ 标题栏容器（按钮的 superview）自己的
+    高度/位置**不可靠** —— 实测同一份代码下它一会 45 一会 90，顶边还会伸到窗口
+    上缘之外（第三版锚它，灯整体高出 17pt、被窗口上缘裁掉半截）。
+    窗口顶（contentView 的 top）才是稳定参照。 */
+    let Some(content) = window.contentView() else {
+        return;
+    };
+    // SAFETY: superview() 是纯读；视图在窗口存活期间有效。
+    let Some(frame_view) = (unsafe { content.superview() }) else {
+        return;
+    };
+    /* 已经钉过（还是那三颗按钮、我们的约束还在宿主里）就什么都不做 ——
+    后面 lib.rs 那几个事件调用点只是"按钮被重建后补钉"的保险，平时都是空转。 */
+    let pins_now = [
+        Retained::as_ptr(&lights[0]) as usize,
+        Retained::as_ptr(&lights[1]) as usize,
+        Retained::as_ptr(&lights[2]) as usize,
+    ];
+    let present: Vec<usize> = frame_view
+        .constraints()
         .iter()
-        .find_map(|b| window.standardWindowButton(*b))
-        .and_then(|b| unsafe { b.superview() })
-        .map(|sv| sv.frame().size.height);
-
-    for (i, kind) in buttons.iter().enumerate() {
-        let Some(btn) = window.standardWindowButton(*kind) else {
-            continue;
-        };
-        /* 灯心 → frame 原点：横竖各减一个半径（灯是圆的，宽高都是 LIGHTS_DIAMETER）。 */
-        let x = LIGHTS_CENTER + LIGHTS_PITCH * i as f64 - radius;
-        let y = match container_h {
-            /* NSView 的 y 从**下往上**长 ⇒ "距上 center" 换成 y = 容器高 - 距上 - 半径 */
-            Some(h) => h - LIGHTS_CENTER - radius,
-            None => LIGHTS_CENTER - radius,
-        };
-        btn.setFrameOrigin(NSPoint::new(x, y));
+        .map(|c| Retained::as_ptr(&c) as usize)
+        .collect();
+    let already = {
+        let guard = LIGHTS_PINS.lock().unwrap_or_else(|e| e.into_inner());
+        match &*guard {
+            Some(p) => p.buttons == pins_now && p.constraints.iter().all(|c| present.contains(c)),
+            None => false,
+        }
+    };
+    if already {
+        return;
     }
+
+    let radius = LIGHTS_DIAMETER / 2.0;
+    let mut pinned_constraints: [usize; 3] = [0; 3];
+    for (i, btn) in lights.iter().enumerate() {
+        /* 灯心 → frame 原点：横竖各减一个半径（灯是圆的，宽高都是 LIGHTS_DIAMETER）。
+        ① 先把 frame 摆到目标位置 —— 约束要到下一次 layout 才生效，先摆一帧免得闪。 */
+        let x = LIGHTS_CENTER + LIGHTS_PITCH * i as f64 - radius;
+        btn.setFrameOrigin(NSPoint::new(
+            x,
+            content.frame().size.height - LIGHTS_CENTER - radius,
+        ));
+        btn.setTranslatesAutoresizingMaskIntoConstraints(false);
+        /*
+         * ② **四条**等号约束（必需优先级）：上边 / 左边 / 宽 / 高。
+         *
+         * ★★★ **尺寸那两条必须给**（第一版只给了位置 ⇒ 布局引擎把按钮
+         * **塌成 0×0 ⇒ 红绿灯整组不见了**）。"位置 + 尺寸"四条一起，几何才是唯一的。
+         *
+         * ★★★ **方向别搞反**：`a.constraintEqualToAnchor_constant(b, c)` 的语义是
+         * **a = b + c**（self 是被约束的那个）。这里从**按钮**出发钉到 contentView：
+         *   btn.centerY = content.top + 19      （灯心距窗口顶 19）
+         *   btn.leading = content.leading + x   （灯心距窗左 19 + 23·i，减半径）
+         * 第二版把 self/anchor 写反 ⇒ x 变成 −12、整组灯被裁到窗口左缘外
+         * （日志抓到的 `x=-12.00 y=64.00`；纵向碰巧没露馅，别指望那个运气）。
+         */
+        let top = btn
+            .centerYAnchor()
+            .constraintEqualToAnchor_constant(&content.topAnchor(), LIGHTS_CENTER);
+        let lead = btn
+            .leadingAnchor()
+            .constraintEqualToAnchor_constant(&content.leadingAnchor(), x);
+        let w = btn.widthAnchor().constraintEqualToConstant(LIGHTS_DIAMETER);
+        let h = btn
+            .heightAnchor()
+            .constraintEqualToConstant(LIGHTS_DIAMETER);
+        frame_view.addConstraint(&top);
+        frame_view.addConstraint(&lead);
+        frame_view.addConstraint(&w);
+        frame_view.addConstraint(&h);
+        pinned_constraints[i] = Retained::as_ptr(&lead) as usize;
+    }
+    /* 钉完立刻跑一次布局并留下实测几何 —— 灯"在不在、在哪"这个事实只认这一行，
+    不猜（诊断用：真机上 `[chrome] 红绿灯钉完` 这一行要说 x=12 / y=h−26 / 14×14 那组数）。 */
+    frame_view.layoutSubtreeIfNeeded();
+    if let Some(f) = lights.first() {
+        let got = f.frame();
+        eprintln!(
+            "[chrome] 红绿灯钉完：第一颗 x={:.2} y={:.2} {:.2}×{:.2}",
+            got.origin.x, got.origin.y, got.size.width, got.size.height,
+        );
+    }
+    *LIGHTS_PINS.lock().unwrap_or_else(|e| e.into_inner()) = Some(LightsPins {
+        buttons: pins_now,
+        constraints: pinned_constraints,
+    });
 }
 
 /// 非 macOS：这两件事都不存在（Windows 侧的窗口键是我们自己画的，见 TopTabs）

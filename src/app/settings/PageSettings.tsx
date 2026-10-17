@@ -71,6 +71,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react'
+/* 系统文件选择框：挑"备份放哪个文件夹"与"恢复哪一份 zip" —— 位置一律由用户点名 */
+import { open } from '@tauri-apps/plugin-dialog'
 
 import { api, errorText, isAppError } from '../../api'
 import type { PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
@@ -90,10 +92,16 @@ import {
 /* 自绘下拉共用件（#33）：项目里的下拉一律用它，原生 `<select>` 一个不留 */
 import { SelectField } from '../../components/field'
 import type { FieldOption } from '../../components/field'
+/* 勾选 / 单选共用件（2026-10-17「统一全站的勾和框」）：框身与对勾归它，
+   这一页只把"整行可点"的行框感（`s.choiceRow`）与两行文字盒传进去 */
+import { Check } from '../../components/check'
 /* 「去系统里改…」那一处的**图片引导**（2026-10-16）：图 + 框 + 两步，见它们的头注。
    ★ 与 `guide/GuideCard` 那扇"屏幕引导"是两件事（那个贴到切片器窗口上指）。 */
 import GuideImageModal from '../guide/GuideImage'
 import { openWithGuideFigure } from '../guide/openWithGuide'
+/* 「保存后的重切引导」那个共用开关（与提示里的「不再显示」写同一个键）：
+   这一页是它**唯一能重新打开**的地方，见 `guide/guidesPref` */
+import { useGuidesPref } from '../guide/guidesPref'
 /* 引导图那两张**住资产台账**（`presets/assets.toml` 的 `type = 'guide'`）——
    按 id 取 URL 要靠当前这份 catalog（与首页机型图同一条路） */
 import { useCatalog } from '../home/useCatalog'
@@ -177,12 +185,90 @@ export default function PageSettings() {
   const catalog = useCatalog()
 
   /*
+   * 「保存后的重切引导」共用开关（2026-10-17）：与参数已保存那一屏里的「不再显示」
+   * **写同一个键**（`guide/guidesPref`）。这一格是把它**重新打开**的唯一入口 ——
+   * 用户在提示里勾过「不再显示」之后，到这里就能解开。写盘**立即生效**（与主题 /
+   * 自动清理那几格同一条口径），`useGuidesPref` 会广播一声，已开着的那几处一起变。
+   */
+  const [showGuides, setShowGuides] = useGuidesPref()
+
+  /*
    * 执行记录（「执行记录」那一块）：`null` = 还没读到（控件先禁用，
    * **不拿一个猜出来的默认值顶上去**）。点一下立即落盘，失败**不改开关**、只把原因摆出来。
    */
   const [autoClean, setAutoClean] = useState<boolean | null>(null)
   const [autoCleanBusy, setAutoCleanBusy] = useState(false)
   const [autoCleanErr, setAutoCleanErr] = useState<string | null>(null)
+
+  /*
+   * **备份与恢复**（2026-10-17）：两个动作都要先问系统要一个位置（文件夹 / 那份 zip）。
+   *
+   * ★ 「恢复」是**不可撤销**的（它把现在的数据换掉）⇒ 与「清空历史」同一条规矩：
+   *   点一下只是武装，再点才真做（二次确认在界面这一侧，后端只管照做）。
+   * ★ 恢复完要**整窗重载**：盘上的数据换过了，内存里的都不算数。
+   */
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  /* 恢复的二次确认：点了「从备份恢复」之后摆出来（再点一次才真恢复） */
+  const [restoreArm, setRestoreArm] = useState<string | null>(null)
+  const [backupNote, setBackupNote] = useState<{ text: string; bad: boolean } | null>(null)
+
+  /** 备份：问系统"放到哪个文件夹"，剩下的（文件名、打包）全交给后端 */
+  const doBackup = useCallback(async () => {
+    setBackupBusy(true)
+    setBackupNote(null)
+    try {
+      const picked = await open({ directory: true, title: '把备份放到哪个文件夹' })
+      const dir = Array.isArray(picked) ? picked[0] : picked
+      if (typeof dir !== 'string' || dir === '') {
+        setBackupBusy(false)
+        return
+      }
+      const sum = await api.createBackup(dir)
+      setBackupNote({ text: `备份好了：${sum.path}（${sum.files} 个文件）`, bad: false })
+    } catch (e) {
+      setBackupNote({ text: `这次没打成备份：${errorText(e)}`, bad: true })
+    } finally {
+      setBackupBusy(false)
+    }
+  }, [])
+
+  /** 恢复：问系统"哪一份备份"，**二次确认**之后才真的覆盖 */
+  const doRestore = useCallback(async () => {
+    /* 第一下：挑一份备份 + 武装；第二下：拿已经挑好的那份真恢复 */
+    if (restoreArm === null) {
+      setBackupNote(null)
+      try {
+        const picked = await open({
+          directory: false,
+          multiple: false,
+          title: '挑一份 SupportEase 备份',
+          filters: [{ name: 'SupportEase 备份', extensions: ['zip'] }],
+        })
+        const at = Array.isArray(picked) ? picked[0] : picked
+        if (typeof at !== 'string' || at === '') return
+        setRestoreArm(at)
+        setBackupNote({
+          text: `要从这份备份恢复吗？它会**完全覆盖**现在的数据（${at}）—— 再点一次「确认恢复」才真的做。`,
+          bad: false,
+        })
+      } catch (e) {
+        setBackupNote({ text: `这次挑不到备份：${errorText(e)}`, bad: true })
+      }
+      return
+    }
+    setRestoreBusy(true)
+    try {
+      const sum = await api.restoreBackup(restoreArm)
+      /* 盘上换过了 ⇒ 整窗重载（内存里的都不算数） */
+      setBackupNote({ text: `恢复完了（${sum.files} 个文件）—— 正在重新载入…`, bad: false })
+      window.setTimeout(() => window.location.reload(), 600)
+    } catch (e) {
+      setBackupNote({ text: `这次没恢复成：${errorText(e)}`, bad: true })
+      setRestoreArm(null)
+      setRestoreBusy(false)
+    }
+  }, [restoreArm])
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -597,21 +683,20 @@ export default function PageSettings() {
           <p className={s.fieldNote}>换完立刻生效，记在应用状态里 —— 下次打开还是这一档。</p>
 
           {THEME_CHOICES.map((t) => (
-            <label key={t.id} className={s.choice}>
-              <input
-                type="radio"
-                name="theme"
-                className={s.choiceInput}
-                checked={currentTheme === t.id}
-                onChange={() => void pickTheme(t.id)}
-                disabled={themeBusy}
-              />
-              <span className={`${s.mark} ${s.markRadio}`} aria-hidden="true" />
+            <Check
+              key={t.id}
+              kind="radio"
+              name="theme"
+              className={s.choiceRow}
+              checked={currentTheme === t.id}
+              onChange={() => void pickTheme(t.id)}
+              disabled={themeBusy}
+            >
               <span className={s.choiceText}>
                 <span className={s.choiceLabel}>{t.label}</span>
                 <span className={s.choiceHint}>{t.hint}</span>
               </span>
-            </label>
+            </Check>
           ))}
         </div>
 
@@ -674,6 +759,43 @@ export default function PageSettings() {
       </section>
 
       {/*
+       * 引导（2026-10-17 作者：「能不能做一个不再显示的选项……然后设置里面能解开，显示引导的」）。
+       *
+       * 管的就是"参数保存成功 → 该回切片器重切一次"那一屏（`guide/ResliceNotice`）。
+       * ★ 它与那一屏里的「不再显示」**是同一个开关**（`guide/guidesPref` 里那个键），
+       *   不是第二份偏好 —— 一处关、处处关；这一格是把它**重新打开**的地方。
+       *   **参数页与校准页共用**（同一个组件，同一个键）。
+       *
+       * 写盘**立即生效**（与主题 / 自动清理那几格同一条口径 —— 开关本身就是明确的意图）；
+       * 默认（没设过）是**显示**：只有用户明确关掉才不弹。
+       */}
+      <section className={s.section} aria-label="引导">
+        <h2 className={s.secTitle}>引导</h2>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>保存参数后的重新切片提示</div>
+          <p className={s.fieldNote}>
+            参数保存成功后，会弹一句"切片器不会自己知道参数变了"，并带你去看重新切片那一步。
+            关掉之后保存就不再弹（提示里那个「不再显示」就是它，两边是同一个开关）。
+          </p>
+
+          <Check
+            className={s.choiceRow}
+            checked={showGuides}
+            onChange={setShowGuides}
+          >
+            <span className={s.choiceText}>
+              <span className={s.choiceLabel}>
+                {showGuides
+                  ? '显示 —— 保存后会提示回切片器重切'
+                  : '不显示 —— 保存后不再打扰'}
+              </span>
+            </span>
+          </Check>
+        </div>
+      </section>
+
+      {/*
        * 执行记录（产品 2026-10-13 那一刀，a07 照搬进来）：后处理每跑一次都在盘上留三件套，
        * 攒久了很占地方 —— 这一格管"要不要自动清"。
        *
@@ -692,15 +814,12 @@ export default function PageSettings() {
             最新那条永远留着，停用多久回来都还在。
           </p>
 
-          <label className={s.choice}>
-            <input
-              type="checkbox"
-              className={s.choiceInput}
-              checked={autoClean ?? false}
-              onChange={(e) => void pickAutoClean(e.target.checked)}
-              disabled={autoClean === null || autoCleanBusy}
-            />
-            <span className={`${s.mark} ${s.markCheck}`} aria-hidden="true" />
+          <Check
+            className={s.choiceRow}
+            checked={autoClean ?? false}
+            onChange={(v) => void pickAutoClean(v)}
+            disabled={autoClean === null || autoCleanBusy}
+          >
             <span className={s.choiceText}>
               <span className={s.choiceLabel}>
                 {autoClean === null
@@ -710,11 +829,69 @@ export default function PageSettings() {
                     : '自动清理：关 —— 记录一直留着'}
               </span>
             </span>
-          </label>
+          </Check>
         </div>
 
         {autoCleanErr !== null && (
           <p className={`${s.note} ${s.noteBad}`}>{autoCleanErr}</p>
+        )}
+      </section>
+
+      {/*
+       * **备份与恢复**（2026-10-17）。
+       *
+       * 一个 zip = 这台机器的全部家当：设置（app-state）、目录（catalog）、
+       * **全部用户预设 toml（含导入的）**、**修改历史**、云端基准与原文镜像、执行归档。
+       * 云端下载区原件 / 日志 / 导出产物不进（那些能重新拿到）。
+       *
+       * 恢复 = **全量覆盖**（备份里有的一律覆盖、被管的几棵树里备份没有的删掉）——
+       * 想回到"某个时间点"就**多留几份备份、挑哪一份恢复**，而不是在一份里挑文件
+       * （同名文件"选哪一份"没有天然答案，那是另一整套冲突解决界面）。
+       */}
+      <section className={s.section} aria-label="备份与恢复">
+        <h2 className={s.secTitle}>备份与恢复</h2>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>备份</div>
+          <p className={s.fieldNote}>
+            打一个 zip：应用设置、目录、你自己那些预设 toml（含导入进来的）、
+            <strong>修改历史</strong>、云端基准与原文镜像、执行归档 ——
+            全都在里面。文件名带时刻，一天打几份也不会互相盖掉。
+          </p>
+
+          <div className={s.row}>
+            <Btn disabled={backupBusy} onClick={() => void doBackup()}>
+              {backupBusy ? '正在打备份…' : '打一份备份…'}
+            </Btn>
+          </div>
+        </div>
+
+        <div className={s.field}>
+          <div className={s.fieldTitle}>从备份恢复</div>
+          <p className={s.fieldNote}>
+            <strong>完全覆盖</strong>现在的数据 —— 备份里有的一律覆盖，
+            备份里没有的会跟着删掉（回到"打那份备份那一刻"的样子）。恢复完会重新载入一次。
+          </p>
+
+          <div className={s.row}>
+            <Btn disabled={restoreBusy} onClick={() => void doRestore()}>
+              {restoreBusy ? '正在恢复…' : restoreArm === null ? '从备份恢复…' : '确认恢复'}
+            </Btn>
+            {restoreArm !== null && (
+              <Btn
+                onClick={() => {
+                  setRestoreArm(null)
+                  setBackupNote(null)
+                }}
+              >
+                算了
+              </Btn>
+            )}
+          </div>
+        </div>
+
+        {backupNote !== null && (
+          <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{backupNote.text}</p>
         )}
       </section>
 
@@ -731,16 +908,15 @@ export default function PageSettings() {
           {/* ★ 两个固定单选 = 防错第一道：用户没有输错地址的机会。选上**立即生效**。
               地址提示跟在**各自**那一档里面（原来两条 URL 挤在一处，看不出归属） */}
           {(source?.builtin ?? []).map((b) => (
-            <label key={b.id} className={s.choice}>
-              <input
-                type="radio"
-                name="preset-source"
-                className={s.choiceInput}
-                checked={mode === b.id}
-                onChange={() => void pick(b.id as Mode)}
-                disabled={busy}
-              />
-              <span className={`${s.mark} ${s.markRadio}`} aria-hidden="true" />
+            <Check
+              key={b.id}
+              kind="radio"
+              name="preset-source"
+              className={s.choiceRow}
+              checked={mode === b.id}
+              onChange={() => void pick(b.id as Mode)}
+              disabled={busy}
+            >
               <span className={s.choiceText}>
                 <span className={s.choiceLabel}>
                   {b.label}
@@ -748,24 +924,22 @@ export default function PageSettings() {
                 </span>
                 <span className={s.choiceHint}>{b.address}</span>
               </span>
-            </label>
+            </Check>
           ))}
 
           {/* 收起的自定义：默认不展开（普通用户不需要看见输入框）；选上只展开，按「应用」才写 */}
-          <label className={s.choice}>
-            <input
-              type="radio"
-              name="preset-source"
-              className={s.choiceInput}
-              checked={mode === 'custom'}
-              onChange={() => void pick('custom')}
-              disabled={busy}
-            />
-            <span className={`${s.mark} ${s.markRadio}`} aria-hidden="true" />
+          <Check
+            kind="radio"
+            name="preset-source"
+            className={s.choiceRow}
+            checked={mode === 'custom'}
+            onChange={() => void pick('custom')}
+            disabled={busy}
+          >
             <span className={s.choiceText}>
               <span className={s.choiceLabel}>自定义地址（开发 / 排查）</span>
             </span>
-          </label>
+          </Check>
           {mode === 'custom' && (
             <div className={s.row}>
               <input

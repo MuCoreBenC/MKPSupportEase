@@ -22,21 +22,14 @@
   background: var(--bg-1);
 }
 
+/*
+ * 「全选」那条（2026-10-17）：框身与对勾 / 半选归共用件 `components/check`
+ *（原来是原生绿勾 + 一处现设 `indeterminate` 的 `ref`），这里只剩**小字灰字**这一档
+ * —— 共用件不锁字号 / 文字色（见它头注释）。
+ */
 .checkLabel {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
   font-size: var(--fs-label);
   color: var(--text-2);
-  cursor: pointer;
-}
-
-.checkLabel input,
-.check input {
-  width: 15px;
-  height: 15px;
-  margin: 0;
-  cursor: pointer;
 }
 
 .selHint {
@@ -69,11 +62,6 @@
 /* 勾上的行给一层极淡的底：一排勾里，"哪几行会被采用"一眼看得出来 */
 .rowOn {
   background: var(--bg-1);
-}
-
-.check {
-  display: inline-flex;
-  align-items: center;
 }
 
 .what {

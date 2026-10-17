@@ -24,6 +24,8 @@
 //! 退役 —— 校准值随**用户工作副本**走（`ipc::local::save_preset_calibration` 写进那份
 //! TOML 的 `offset_x/y/z`），落点与读写口都在用户线那一族里。
 
+/// **备份的两条命令**（2026-10-17）：打一份 zip / 从一份 zip 全量恢复 —— 入口在设置页
+pub mod backup;
 /// **本机 BBS 工艺预设**（2026-10-13）：工艺页「本机工艺」那一档的清单与单份正文
 /// —— 试验场那个 dev 端点在桌面版里的等价物。
 pub mod bbs;
@@ -31,6 +33,9 @@ pub mod catalog;
 /// **屏幕引导**（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
 /// **指给用户看**（只读坐标 + 引导窗口）。不替用户点、不改切片器任何参数。
 pub mod guide;
+/// **修改历史的两条命令**（2026-10-17）：一份文件一本账，盘上留着 ——
+/// 重开软件还在（读 `get_preset_history` / 写 `put_preset_history` / 清 `clear_preset_history`）
+pub mod history;
 /// **通用导入入口**（第十二层）：看落点（`stage_import`）与提交（`commit_import`）
 pub mod import;
 pub mod local;

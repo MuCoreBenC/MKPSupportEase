@@ -190,6 +190,7 @@ mkpse-postprocess = { path = "../crates/postprocess" }
 # Ctrl-C → **协作取消**（只在钩子模式装，见 src/hook.rs）：内核在步骤边界停下，
 # `.part` 丢掉、原文件不动。装不上处理器不阻断那一趟（最坏退回默认硬杀）。
 ctrlc.workspace = true
+zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -202,7 +203,7 @@ objc2 = "0.6"
 # objc2-quartz-core：CALayer 的 cornerCurve —— 圆角曲率要从普通圆弧换成系统原生的连续曲率（见 chrome.rs）
 # + `NSColor` 与 `objc2-core-graphics`：圆角窗外那圈填色要算成 CGColor 铺到 CALayer 上
 # （见 chrome.rs 的 `paint_corner_fill`）；`objc2-core-graphics` 是它取 `CGColor` 的开关。
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "NSColor", "NSBox", "NSAppearance", "objc2-quartz-core", "objc2-core-graphics"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "NSColor", "NSBox", "NSAppearance", "NSLayoutAnchor", "NSLayoutConstraint", "objc2-quartz-core", "objc2-core-graphics"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 # + `objc2-core-graphics`：CALayer 的 `setBackgroundColor`（铺圆角窗外那圈填色）在这个 feature 后面
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }

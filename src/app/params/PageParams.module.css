@@ -379,6 +379,39 @@
   color: var(--accent-deep);
 }
 
+/*
+ * **保存回执**（2026-10-17）：嵌在模态框里时它住在标题栏副标题右边，
+ * 与文件名同一行（见 PageParams.tsx 的 `savedNoteNode` 那段）。
+ *
+ * 语气两档：`ok` 成功（accent）/ `bad` 失败或"没有可保存的目标"（红）。
+ * 窄窗里先截它、不截文件名 —— 所以是 `min-width: 0` + 省略号。
+ */
+.note {
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 前面那枚小点 = 状态灯；`inline-block` 才吃得了宽高 */
+.note::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  vertical-align: 1px;
+}
+
+/* 失败 / 没有可保存的目标：走 `--danger`（深色下它自己提亮一档，不像写死的红那样发暗） */
+.note[data-tone='bad'] {
+  color: var(--danger);
+}
+
 /* 草稿那一行没落盘 / 这份没有可编辑文件时的提示（比 .ok 显眼一档，是"要处理"的话） */
 .warn {
   margin: 0 var(--pad) 10px;

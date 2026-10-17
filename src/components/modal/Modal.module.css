@@ -180,9 +180,29 @@
   color: var(--text-1);
 }
 
+/*
+ * 副标题那一行 = 文件名 + 回执槽（2026-10-17）—— 见 `modalHeadSlot.ts` 里那段。
+ * `baseline` 对齐：回执与文件名是同一行字，不靠上下居中猜。
+ * `min-width: 0` 一路开到底：窄窗里先被截的是回执，不是文件名。
+ */
+.subRow {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+}
+
 .sub {
+  flex-shrink: 0;
   font-size: var(--fs-label);
   color: var(--text-2);
+}
+
+/* 回执槽：没人 portal 进来时它就是零宽 —— 副标题右边不会凭空留一道缝 */
+.headNote {
+  display: inline-flex;
+  min-width: 0;
+  align-items: baseline;
 }
 
 /*

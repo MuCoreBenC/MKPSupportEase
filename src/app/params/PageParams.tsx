@@ -28,8 +28,11 @@ import { STORAGE } from '../../api/storageKeys'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
 import { FieldLayer } from '../../components/field'
-/* 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts） */
-import { useModalHeadSlot } from '../../components/modal'
+/*
+ * 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts）；
+ * 保存回执（「已写回 xxx.toml」）走同一套机制的**回执槽**。
+ */
+import { useModalHeadNoteSlot, useModalHeadSlot } from '../../components/modal'
 import CategoryPills from './CategoryPills'
 import GcodeBlock from './GcodeBlock'
 import HistoryDrawer from './HistoryDrawer'
@@ -370,8 +373,9 @@ export default function PageParams({
   openSyncOnStart = false,
   gateEdit = false,
 }: Props) {
-  /* 标题栏动作槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
+  /* 标题栏两个借位槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
   const headSlot = useModalHeadSlot()
+  const headNoteSlot = useModalHeadNoteSlot()
   const u = useParams(target === undefined ? undefined : { target })
 
   /*
@@ -395,7 +399,8 @@ export default function PageParams({
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyMode, setHistoryMode] = useState<DrawerMode>('float')
-  const [historyView, setHistoryView] = useState<HistoryView>('live')
+  /* 默认「逐项」（一项一行）；另一档「整批」是一次保存一行、一次退整段 */
+  const [historyView, setHistoryView] = useState<HistoryView>('item')
   const [expandedDetailKey, setExpandedDetailKey] = useState<string | null>(null)
   const [askRestore, setAskRestore] = useState(false)
   const [askSave, setAskSave] = useState(false)
@@ -879,7 +884,7 @@ export default function PageParams({
       onClick={() => setHistoryOpen((v) => !v)}
     >
       修改历史
-      {u.history.length > 0 && <span className={s.detailCount}>{u.history.length}</span>}
+      {u.historyItemCount > 0 && <span className={s.detailCount}>{u.historyItemCount}</span>}
     </button>
   )
 
@@ -960,8 +965,36 @@ export default function PageParams({
       createPortal(headActions, headSlot)
     )
 
+  /*
+   * **保存回执搬到模态框标题栏**（2026-10-17，作者看截图圈着那行绿字：
+   * 「这个我想换一个位置，在模态框的框架上面可以吗」）。
+   *
+   * 它原来是内容区顶上的一行 `<p class="ok">` —— 每保存一次就把参数列表往下顶一行，
+   * 而这件事只是一句回执、没有要人做决定的地方。放进标题栏之后：
+   *   · 位置 = 副标题（**文件名**）右边同一行 —— 「已写回 A1-fast.toml」贴着文件名读最顺；
+   *   · 版面 = 什么都不动：它左对齐，右侧动作簇（回到已应用 / 修改历史 / ×）是
+   *     `margin-left: auto`，出现与消失都推不走它们；副标题那一行本来就在。
+   *
+   * 与「修改历史」同一个机制（portal 进槽）：单独当页用时没有槽，落回内容区顶上那一行。
+   * ★ 语气分两档：成功（`ok`，accent）/ 失败（`bad`，红）—— 同一格里原来是绿的，
+   *   连「保存失败：…」也染绿，那是错的。
+   */
+  const noteBad =
+    u.savedNote !== null &&
+    (u.savedNote.startsWith('保存失败') || u.savedNote.startsWith('这份没有可保存'))
+  const savedNoteNode =
+    u.savedNote === null ? null : (
+      <span className={s.note} data-tone={noteBad ? 'bad' : 'ok'}>
+        {u.savedNote}
+      </span>
+    )
+
   return (
     <div className={s.page} data-density={density}>
+      {/* 保存回执 → 模态框标题栏（副标题右边）；没有槽时它渲染在内容区顶上 */}
+      {headNoteSlot !== null && savedNoteNode !== null
+        ? createPortal(savedNoteNode, headNoteSlot)
+        : null}
       <FieldLayer>
         <div className={s.main}>
           <div className={s.left}>
@@ -1113,7 +1146,10 @@ export default function PageParams({
             )}
             {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
 
-            {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
+            {/* 嵌在模态框里时它在标题栏（见 `savedNoteNode` 那段）；没槽才落在这儿 */}
+            {u.savedNote !== null && headNoteSlot === null && (
+              <p className={s.ok}>{u.savedNote}</p>
+            )}
             {/*
               写值闸拦下一次改动（2026-10-02）：改的是弃用字段 / 弃用选项。
               说一句人话 —— 原子拒绝（整次动作没发生），不是「跳过那几条、其余照写」。
@@ -1175,6 +1211,7 @@ export default function PageParams({
               onMode={setHistoryMode}
               onClose={closeHistory}
               onRevert={u.revertEntry}
+              onClearHistory={u.clearHistory}
               /* 只读态：历史照看，「还原」那颗不画（写入口） */
               readonly={ro}
             />
@@ -1519,6 +1556,7 @@ export default function PageParams({
           onMode={setHistoryMode}
           onClose={closeHistory}
           onRevert={u.revertEntry}
+          onClearHistory={u.clearHistory}
           /* 只读态：历史照看，「还原」那颗不画（写入口） */
           readonly={ro}
         />

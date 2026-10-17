@@ -79,6 +79,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * 跟本地/云端差不多高」，原本 38px 的那一级退回。
        */}
       <span className={s.seg} role="radiogroup" aria-label="文件类型">
+        {/* eslint-disable no-restricted-syntax -- 分段控件的就地例外：原生 radio 只作语义壳（分组 / 方向键 / 读屏），圆点由 `.radio` 刻意藏起来，用户看到的是两块文字底片、不是"勾和框"，不在「统一勾和框」那一刀的范围内 */}
         {KINDS.map((k) => (
           <label key={k} className={s.opt} data-on={k === kind}>
             <input
@@ -92,6 +93,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
             <SegText text={KIND_AXIS_TEXT[k]} />
           </label>
         ))}
+        {/* eslint-enable no-restricted-syntax */}
       </span>
 
       {/*
@@ -106,12 +108,12 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * 第一排从此两档一致（类型 / 位置(右) / 搜索），窄窗不再把搜索挤出第一排。
        */}
       <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
+        {/* eslint-disable no-restricted-syntax -- 同上：分段控件，原生 radio 只作语义壳（圆点被 `.radio` 藏起来） */}
         {SCOPES.map((sc) => (
           <label
             key={sc}
             className={s.opt}
             data-on={sc === scope}
-           
           >
             <input
               type="radio"
@@ -124,6 +126,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
             <SegText text={SCOPE_AXIS_TEXT[sc]} />
           </label>
         ))}
+        {/* eslint-enable no-restricted-syntax */}
       </span>
     </>
   )

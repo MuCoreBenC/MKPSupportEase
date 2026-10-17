@@ -101,10 +101,52 @@
 
 .no {
   flex-shrink: 0;
+  /* 有展开箭头时它右边留一点，号与箭头不挤在一起 */
+  margin-right: 2px;
   width: 26px;
   font-size: var(--fs-label);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* 整批那一屏的展开箭头（作者：「整批的要可以展开看详细的」）。
+   只是一颗字符按钮 —— 不画边框，免得行上多出一颗方块 */
+.caret {
+  flex-shrink: 0;
+  width: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-label);
+  line-height: 1;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.caret:hover {
+  color: var(--text-1);
+}
+
+.caret:focus-visible {
+  outline: none;
+}
+
+/* 整批的一段（行 + 展开出来的明细） */
+.block {
+  display: block;
+}
+
+/* 展开出来的明细：每一项缩进一档，读得出"它属于上面那一段" */
+.subList {
+  margin: 0;
+  padding: 0 0 2px;
+  list-style: none;
+}
+
+.subItem {
+  padding-left: 36px;
+  background: var(--hover-1);
 }
 
 .text {
@@ -167,6 +209,22 @@
 .revert:hover,
 .ghost:hover {
   color: var(--text-1);
+}
+
+/* 「清空历史」武装态（二次确认的第二下之前）：红的，一眼知道再点就没了。
+   底色照 PageParams 的 `.danger`（#e5484d 实心 + 白字）——同一个 app 里危险按钮只有一张脸 */
+.clearArm {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: #e5484d;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 /* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」） */

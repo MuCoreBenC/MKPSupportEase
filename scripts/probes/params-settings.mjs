@@ -267,6 +267,11 @@ for (const size of SIZES) {
     .first()
   let draftOk = true
   let draftWhy = ''
+  /*
+   * 「已保存值」：**下面 ①c2 真的保存过两次之后它就变成 2.34**（22.4 是文件里原本的值）。
+   * ①f「放弃并退出 = 作废」比的是"退回已保存值"，所以这个期望值跟着保存走。
+   */
+  let expectSaved = '22.4'
   if ((await numRow.count()) > 0) {
     await numRow.fill('1.23')
     await numRow.blur().catch(() => {})
@@ -304,6 +309,74 @@ for (const size of SIZES) {
         : `#1=${hasItem} 上下文=${hasCtx} · ${hist.slice(hist.indexOf('修改历史'), hist.indexOf('修改历史') + 220)}`,
     )
     /*
+     * 两档视图（2026-10-17 作者口径）：「逐项」（一项一行）与「整批」（一次保存一行、
+     * 一次退整段）—— **两个都按保存组织，「实时」（变一下记一条）那一档没了**。
+     */
+    const views = await page.evaluate(() => {
+      const d = document.querySelector('[role="dialog"][aria-label="修改历史"]')
+      const btns = [...(d?.querySelectorAll('button') ?? [])].map((b) => (b.textContent ?? '').trim())
+      return { hasItem: btns.includes('逐项'), hasBatch: btns.includes('整批'), live: btns.includes('实时') }
+    })
+    check(
+      tag,
+      '修改历史两档：逐项 / 整批在，实时不在',
+      views.hasItem && views.hasBatch && !views.live,
+      `逐项=${views.hasItem} 整批=${views.hasBatch} 实时=${views.live}`,
+    )
+    /*
+     * 整批那一屏：一段一行、行上有「还原」。
+     * ★ 两档是 `SegmentedField` —— 它的段是 `role="radio"`（不是普通 button），
+     *   按 button 找会一直等到超时。
+     */
+    await page.getByRole('radio', { name: '整批', exact: true }).click()
+    await page.waitForTimeout(400)
+    const whole = (await dlgState(page)).text
+    check(
+      tag,
+      '整批那一屏：一段一行（未保存段在、行上有还原）',
+      /未保存/.test(whole) && /还原/.test(whole),
+      whole.slice(whole.indexOf('修改历史'), whole.indexOf('修改历史') + 200),
+    )
+    /*
+     * 整批行**可以展开看明细**（作者 2026-10-17：「整批的要可以展开看详细的」）——
+     * 点那颗展开箭头，这一段里的每一项摊出来（每项自己也带「还原」）。
+     */
+    const caret = page
+      .getByRole('dialog', { name: '修改历史' })
+      .getByRole('button', { name: /展开 .*的明细/ })
+      .first()
+    const before = (await dlgState(page)).text
+    await caret.click()
+    await page.waitForTimeout(400)
+    const after = (await dlgState(page)).text
+    check(
+      tag,
+      '整批行可展开：展开后这一段里每一项都摊出来',
+      after.length > before.length && /Y 轴偏移/.test(after),
+      `展开前 ${before.length} 字 → 展开后 ${after.length} 字 · ${after.slice(after.indexOf('修改历史'), after.indexOf('修改历史') + 200)}`,
+    )
+    /*
+     * **清空历史**（2026-10-17 作者要求：抽屉右上那颗 + 二次确认）。
+     * 点第一下只是武装（变「确认清空？」），再点才真清 —— 清完抽屉回到"还没有改动记录"。
+     */
+    const dlg = page.getByRole('dialog', { name: '修改历史' })
+    await dlg.getByRole('button', { name: '清空历史' }).click()
+    await page.waitForTimeout(300)
+    const armed = await dlg.getByRole('button', { name: '确认清空？' }).count()
+    await dlg.getByRole('button', { name: '确认清空？' }).click()
+    await page.waitForTimeout(400)
+    const cleared = (await dlgState(page)).text
+    check(
+      tag,
+      '清空历史：二次确认（先武装）之后真的清掉',
+      armed === 1 && /还没有改动/.test(cleared),
+      `武装=${armed} · ${cleared.slice(cleared.indexOf('修改历史'), cleared.indexOf('修改历史') + 160)}`,
+    )
+    /* 切回「逐项」—— 后面几步在默认那一屏上做 */
+    await page.getByRole('radio', { name: '逐项', exact: true }).click()
+    await page.waitForTimeout(200)
+
+    /*
      * 收起抽屉：点**抽屉自己那颗 ×**。两条弯路别走：
      *   · 「修改历史」那颗开关在浮层态被抽屉自己盖住（它俩都在右上角，点击被抽屉拦截）；
      *   · Esc 不行 —— Modal 与 Drawer 都挂了 document 级 Esc，会连弹窗一起关掉。
@@ -313,6 +386,56 @@ for (const size of SIZES) {
       .getByRole('button', { name: '关闭' })
       .click()
     await page.waitForTimeout(300)
+
+    /*
+     * ①c2 **保存 → 接着改 → 再保存**（2026-10-17 真机两条红字的回归判据）。
+     *
+     * 后端契约是「存完丢草稿」（`commit_preset_draft` 成功后 `clear_draft`），
+     * 前端必须**重开草稿**（`beginPresetEdit`）—— 否则保存后改一个值就报
+     * 「草稿没写进磁盘：现在没有正在改的那一份，改不了参数」，再点保存报「…没得存」。
+     * 判据：保存之后再改一个值、再保存一次，**两条红字都不许出现**。
+     */
+    if (draftOk) {
+      await dlgFootBtn(page, '保存')
+      await page.waitForTimeout(400)
+      await page.getByRole('button', { name: '确认保存' }).click()
+      await page.waitForTimeout(600)
+      /*
+       * 保存成功后会问一次「要不要回切片器重切」（`ResliceNotice`，有遮罩）——
+       * 它盖着页面，后面几步点不动 ⇒ 这里点「关闭」把它收掉（"这次不问了"）。
+       */
+      const reslice = page.getByRole('dialog', { name: '参数已保存' })
+      if ((await reslice.count()) > 0) {
+        /* 这一屏有两颗「关闭」（标题栏 × 与底栏那颗）—— 点底栏那颗 */
+        await reslice.getByRole('button', { name: '关闭' }).last().click()
+      }
+      await page.waitForTimeout(300)
+      /* 保存完接着改同一个值 —— 草稿链该还开着 */
+      expectSaved = '2.34'
+      await numRow.fill(expectSaved)
+      await numRow.blur().catch(() => {})
+      await page.waitForTimeout(600)
+      const after1 = (await dlgState(page)).text
+      await dlgFootBtn(page, '保存')
+      await page.waitForTimeout(400)
+      await page.getByRole('button', { name: '确认保存' }).click()
+      await page.waitForTimeout(600)
+      const after2 = (await dlgState(page)).text
+      /* 第二次保存同样会问一次，照样收掉 */
+      const reslice2 = page.getByRole('dialog', { name: '参数已保存' })
+      if ((await reslice2.count()) > 0) {
+        await reslice2.getByRole('button', { name: '关闭' }).last().click()
+      }
+      await page.waitForTimeout(300)
+      check(
+        tag,
+        '保存 → 接着改 → 再保存：全程没有"现在没有正在改的那一份"',
+        !after1.includes('现在没有正在改的那一份') &&
+          !after2.includes('现在没有正在改的那一份') &&
+          !after2.includes('保存失败'),
+        `改值后=${after1.includes('现在没有正在改的那一份')} 二次保存后=${after2.includes('保存失败')} · ${after2.slice(Math.max(0, after2.indexOf('已写回')), 120)}`,
+      )
+    }
   }
 
   /* ①d 弃用字段「显示，但只读」（2026-10-02，① deprecated 链路） */
@@ -431,9 +554,9 @@ for (const size of SIZES) {
   const restoredState = await dlgState(page)
   check(
     tag,
-    '「放弃并退出」= 作废（值退回已保存的 22.4、底栏没有未保存的改动）',
-    restored === '22.4' && /没有未保存的改动/.test(restoredState.foot),
-    `offset_y=${restored} · 底栏「${restoredState.foot}」`,
+    `「放弃并退出」= 作废（值退回已保存的 ${expectSaved}、底栏没有未保存的改动）`,
+    restored === expectSaved && /没有未保存的改动/.test(restoredState.foot),
+    `offset_y=${restored}（期望 ${expectSaved}） · 底栏「${restoredState.foot}」`,
   )
   /* 收尾回只读，别把编辑态带去设置页那一节 */
   await dlgFootBtn(page, '放弃并退出')
@@ -471,6 +594,19 @@ for (const size of SIZES) {
     '浏览器里如实说「当前：还没配置」（假后端没有内置源）',
     setText.includes('还没配置'),
     '',
+  )
+  /*
+   * **备份与恢复**（2026-10-17）：设置页那一块在（两颗按钮都在）。
+   * 真的打包 / 恢复要本机数据根 —— 浏览器预览里假后端照实说做不到，
+   * 所以这里只量"这一块摆出来了、入口在哪"，不假装打过一份备份。
+   */
+  check(
+    tag,
+    '设置页「备份与恢复」那一块在（打一份 / 从备份恢复两颗按钮都在）',
+    setText.includes('备份与恢复') &&
+      (await page.getByRole('button', { name: '打一份备份…' }).count()) === 1 &&
+      (await page.getByRole('button', { name: '从备份恢复…' }).count()) === 1,
+    setText.includes('备份与恢复') ? '' : `没看到那一块：${setText.slice(0, 120)}`,
   )
 
   /* 自定义地址：选上才展开输入框（防错第一道：普通用户没有输错地址的机会）。
