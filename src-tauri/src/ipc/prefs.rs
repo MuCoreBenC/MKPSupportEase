@@ -151,3 +151,58 @@ pub async fn set_auto_clean_history(app: AppHandle, enabled: bool) -> Result<boo
         Ok(got)
     })
 }
+
+/* ---------- 后处理偏好（2026-10-17）：设置页那一整块 ---------- */
+
+/// 读后处理偏好 —— 回的是**解析后**的值（`None` 已经解成出厂档、量程已经夹住）。
+///
+/// 与自动清理那一条同一条口径：**"没选过"该怎么解释是后端的事**，
+/// 界面不自己拿 `null` 去猜默认值（猜出来的迟早与管线实际执行的那一档漂开）。
+#[tauri::command]
+pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, AppError> {
+    traced("getPostprocPrefs", |_| {
+        let root = internal_root(&app)?;
+        let raw = runtime::app_state::postproc_prefs(&root)?;
+        let r = raw.resolved();
+        Ok(serde_json::json!({
+            /* 原样那一格（界面用来判断"这一项动过没有"） */
+            "raw": raw,
+            /* 解析后（界面直接摆这些） */
+            "resolved": {
+                "notifyOnFinish": r.notify_on_finish,
+                "uiMode": r.ui_mode.wire(),
+                "glueBottomEnabled": r.glue_bottom_enabled,
+                "skipVibrationCalibration": r.skip_vibration_calibration,
+                "beginStageRetractEnabled": r.begin_stage_retract_enabled,
+                "beginStageRetractZLiftMm": r.begin_stage_retract_z_lift_mm,
+                "zCalibrationDwellSec": r.z_calibration_dwell_sec,
+                "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
+                "bedGlueEnabled": r.bed_glue_enabled,
+                "bedGlueAllModels": r.bed_glue_all_models,
+            },
+            /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
+            "limits": {
+                "zDwell": { "min": runtime::app_state::Z_DWELL_MIN, "max": runtime::app_state::Z_DWELL_MAX },
+                "xyDwell": { "min": runtime::app_state::XY_DWELL_MIN, "max": runtime::app_state::XY_DWELL_MAX },
+                "zLift": { "min": 1, "max": 300 },
+            },
+        }))
+    })
+}
+
+/// 写后处理偏好（**整格覆盖**，见 `runtime::app_state::set_postproc_prefs` 的注释）。
+///
+/// 参数是一整份 `PostprocPrefs`：界面手里就有全量，改一项传全量。
+/// 传 `null` 进来 = 清回出厂档（这也正是"整格覆盖"才能表达的那一档）。
+#[tauri::command]
+pub async fn set_postproc_prefs(
+    app: AppHandle,
+    prefs: runtime::app_state::PostprocPrefs,
+) -> Result<serde_json::Value, AppError> {
+    traced("setPostprocPrefs", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::set_postproc_prefs(&root, prefs)?;
+        notify_app_state(&app);
+        Ok(serde_json::json!({ "ok": true }))
+    })
+}

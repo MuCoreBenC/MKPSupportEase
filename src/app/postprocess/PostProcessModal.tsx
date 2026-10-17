@@ -562,12 +562,23 @@ function AskHero({
 
 /* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
 
-/** 四格齐（三轴偏移 + 涂胶速度）才摆 —— 缺格的时候这条空着比缺一角好 */
+/**
+ * 四格齐（三轴偏移 + 涂胶速度）才摆 —— 缺格的时候这条空着比缺一角好。
+ *
+ * ★★ 第一道闸是 `res == null`，**不是** `res !== undefined`（2026-10-17 实测踩到）：
+ *   类型上这一格写的是 `PostProcessResult | undefined`，但**线上真的会出现 `null`**
+ *   （后端 `Option` 序列化出来就是 `null`，不存在的格一律 `null` 而不是省略键）。
+ *   `null !== undefined` 为真 ⇒ 往下读 `res.penX` 当场抛
+ *   `TypeError: Cannot read properties of null (reading 'penX')`，
+ *   那一屏整块白掉（React 没有边界兜它）。
+ *
+ *   `== null` 同时盖住 `null` 与 `undefined`，正好是这里要的两种"没有读数"。
+ */
 function metricsReady(
-  res: PostProcessResult | undefined,
+  res: PostProcessResult | null | undefined,
 ): res is Required<Pick<PostProcessResult, 'penX' | 'penY' | 'penZ' | 'glueSpeed'>> {
   return (
-    res !== undefined &&
+    res != null &&
     typeof res.penX === 'number' &&
     typeof res.penY === 'number' &&
     typeof res.penZ === 'number' &&

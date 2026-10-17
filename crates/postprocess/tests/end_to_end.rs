@@ -89,6 +89,23 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
         "-o".into(),
         out_path.to_string_lossy().into_owned(),
     ];
+    /*
+     * 用户偏好（`Ir.prefs`，2026-10-17 落地）的两颗钉子：参考输出 fixture 是按
+     * 「抬升 Z=20 + 跳过震动检测」生成的（= 旧管线的两个写死常量）。这轮把这两档
+     * 变成了**设置页偏好**，出厂档分别改成 100 / 不跳 —— 判据若不钉回去就会假红。
+     * 钉在测试这层（`--set` 盖掉出厂档），fixture 保持"从 IR JSON 派生"的原样
+     * （`pipeline.rs` 的派生判据不许为端到端让路）。
+     */
+    args.extend(
+        [
+            "--set",
+            "Prefs.BeginStageRetractZLiftMm=20",
+            "--set",
+            "Prefs.SkipVibrationCalibration=true",
+        ]
+        .iter()
+        .map(|s| (*s).to_string()),
+    );
     args.extend(extra.iter().map(|s| (*s).to_string()));
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let out = run_cli(&refs);

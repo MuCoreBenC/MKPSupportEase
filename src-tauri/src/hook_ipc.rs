@@ -330,9 +330,14 @@ impl Client {
             if let Some(conn) = connect(internal_root) {
                 return Self::with_conn(conn, cancel);
             }
-            /* 先把界面拉起来，再每 25ms 试一次（总预算 SPAWN_WAIT） */
+            /* 先把界面拉起来，再每 25ms 试一次（总预算 SPAWN_WAIT）。
+            ★ 只有 `ui_mode == gui` 才起窗（2026-10-17）：设置页「静默 / GUI 界面」
+            那一档以前只是存了个值，钩子照旧会把窗拉起来 —— 勾了静默也没用。
+            静默档下钩子照常干活、照常发消息，只是没有窗来接（`headless` 那一条）。 */
             if !spawned {
-                spawn_display();
+                if wants_display(internal_root) {
+                    spawn_display();
+                }
                 spawned = true;
             }
             if Instant::now() >= deadline {
@@ -529,6 +534,22 @@ fn read_port(internal_root: &Path) -> Option<u16> {
 ///
 /// 为什么必须把所有管道接 null：钩子的 stdout/stderr 是**切片器的管道**，
 /// 子进程若继承了它们，钩子退出后切片器还在等管道关闭 —— 那就成了"看起来还卡着"。
+/// 这一趟**该不该起窗**（设置页「静默 / GUI 界面」那一档，2026-10-17）。
+///
+/// `true` = 起（GUI 档，也是出厂档）；`false` = 静默 —— 钩子照常跑、照常写盘，
+/// 只是不拉那扇窗出来看。
+///
+/// ★ 读不出来（状态文件坏了 / 目录不在）**按 GUI 起窗**：静默是用户主动选的
+///   "我这次不想看"，而不是默认；读不到偏好时退回"看得见"这一侧，
+///   免得用户以为程序没动静。这与 `notify_on_finish` 那条兜底同一个取向。
+///
+/// ★★ 只影响"**新起**一扇窗"：已经开着的界面不受影响（用户自己开的窗当然留着）。
+fn wants_display(internal_root: &Path) -> bool {
+    crate::runtime::app_state::resolved_postproc_prefs(internal_root)
+        .map(|p| p.ui_mode == crate::runtime::app_state::PostprocUiMode::Gui)
+        .unwrap_or(true)
+}
+
 fn spawn_display() {
     let Ok(exe) = std::env::current_exe() else {
         return;

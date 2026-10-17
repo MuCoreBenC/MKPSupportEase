@@ -430,6 +430,8 @@ mod tests {
         seed(&internal);
         let foreign = d.path().join("别的.zip");
         {
+            /* 测试造坏档 / 造外来 zip，不走 atomic（不是产品数据落点） */
+            #[allow(clippy::disallowed_methods)]
             let f = std::fs::File::create(&foreign).unwrap();
             let mut zip = zip::ZipWriter::new(f);
             zip.start_file("whatever.txt", zip::write::SimpleFileOptions::default())

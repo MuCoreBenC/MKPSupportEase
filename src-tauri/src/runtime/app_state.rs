@@ -155,6 +155,150 @@ impl PinPref {
     }
 }
 
+/// **后处理这一层怎么看、怎么跑**（2026-10-17）：`run/app-state.json` 的 `postproc` 格。
+///
+/// # 为什么住在应用状态里、不塞进预设
+///
+/// 预设（`presets-local/*.toml`）描述的是**这一台机器的工艺**：机型、涂胶量、擦料塔……
+/// 而这一格描述的是**用户想怎么看 / 想额外做点什么**：跑完发不发系统通知、开不开独立窗、
+/// 要不要跳过震动检测、热床涂不涂胶。同一台机器换一份预设，这些偏好**不该跟着变**；
+/// 反过来把用户偏好写进预设，会让"导出预设给别人"时把别人的界面习惯也带过去。
+///
+/// 所以它是**应用级偏好**，与 `theme` / `pin` / `auto_clean_history` 同一族。
+///
+/// # 每一项都是 `Option`
+///
+/// `None` = **这一项从没动过** ⇒ 用 [`Self::default`] 里那个出厂档。
+/// 分得开"没动过"与"明确选了出厂档"，将来若要改默认值，前者能跟着变、后者不跟着变
+/// —— 与 `theme` 那一格的读法完全一致。
+///
+/// # 它们落到哪儿
+///
+/// 前两项（通知 / 界面）只影响**界面行为**，进管线时不起作用；
+/// 后面那几项由 `runtime::postproc_prefs::apply_to_ir` 写进 `Ir`，**真改变切出来的 G-code**。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostprocPrefs {
+    /// 跑完发不发系统通知（点通知能打开结果那一屏）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_on_finish: Option<bool>,
+    /// 界面形态：`"silent"`（后台静默，不显示任何窗口）/ `"gui"`（独立窗口显示进度）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_mode: Option<PostprocUiMode>,
+    /// **支撑面底面涂胶**：在支撑面下方一层也涂（比主涂胶低一个层高）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub glue_bottom_enabled: Option<bool>,
+    /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skip_vibration_calibration: Option<bool>,
+    /// **开始阶段收笔**：开头插入工具头收起序列（抬升 Z 并收笔）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub begin_stage_retract_enabled: Option<bool>,
+    /// 收笔抬升的 Z 高度（mm）。`None` = 出厂 100。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub begin_stage_retract_z_lift_mm: Option<i64>,
+    /// Z 轴校准每层测量后的停留秒数（1–20）。`None` = 出厂 2。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub z_calibration_dwell_sec: Option<i64>,
+    /// XY 轴校准每条线测量后的停留秒数（1–10）。`None` = 出厂 3。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xy_calibration_dwell_sec: Option<i64>,
+    /// **热床预涂胶**（危险操作：可能划伤打印板，出厂关）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_glue_enabled: Option<bool>,
+    /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bed_glue_all_models: Option<bool>,
+}
+
+/// 「跑完这一趟界面怎么摆」。
+///
+/// ★ `silent` 不是"把窗口藏起来"—— 它是**根本不起那一扇窗**：后处理照样跑完、照样改
+/// G-code，只是不给用户看进度。作者 2026-10-17 的原始文案：「后台静默运行，不显示任何窗口」。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PostprocUiMode {
+    /// 后台静默：不显示任何窗口
+    Silent,
+    /// 独立窗口：显示处理进度和详细信息（出厂）
+    Gui,
+}
+
+impl PostprocUiMode {
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Silent => "silent",
+            Self::Gui => "gui",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "silent" => Some(Self::Silent),
+            "gui" => Some(Self::Gui),
+            _ => None,
+        }
+    }
+}
+
+impl PostprocPrefs {
+    /// 每一项的**出厂档**（`None` 的落点）。这里就是真值，界面不另写一份。
+    pub fn resolved(&self) -> ResolvedPostprocPrefs {
+        ResolvedPostprocPrefs {
+            notify_on_finish: self.notify_on_finish.unwrap_or(true),
+            ui_mode: self.ui_mode.unwrap_or(PostprocUiMode::Gui),
+            glue_bottom_enabled: self.glue_bottom_enabled.unwrap_or(false),
+            skip_vibration_calibration: self.skip_vibration_calibration.unwrap_or(false),
+            begin_stage_retract_enabled: self.begin_stage_retract_enabled.unwrap_or(true),
+            begin_stage_retract_z_lift_mm: self
+                .begin_stage_retract_z_lift_mm
+                .unwrap_or(BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT)
+                .clamp(1, 300),
+            z_calibration_dwell_sec: self
+                .z_calibration_dwell_sec
+                .unwrap_or(Z_DWELL_DEFAULT)
+                .clamp(Z_DWELL_MIN, Z_DWELL_MAX),
+            xy_calibration_dwell_sec: self
+                .xy_calibration_dwell_sec
+                .unwrap_or(XY_DWELL_DEFAULT)
+                .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
+            bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
+            bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
+        }
+    }
+}
+
+/// Z 轴校准停留时间的出厂值与量程（秒）。
+pub const Z_DWELL_DEFAULT: i64 = 2;
+pub const Z_DWELL_MIN: i64 = 1;
+pub const Z_DWELL_MAX: i64 = 20;
+
+/// XY 轴校准停留时间的出厂值与量程（秒）。
+pub const XY_DWELL_DEFAULT: i64 = 3;
+pub const XY_DWELL_MIN: i64 = 1;
+pub const XY_DWELL_MAX: i64 = 10;
+
+/// 开始阶段收笔抬升高度（mm）的出厂值。
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 100;
+
+/// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
+///
+/// 管线只认这个类型 —— 于是"量程/默认值"这一层判断只在这里做一次，
+/// 下游不会各夹各的。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedPostprocPrefs {
+    pub notify_on_finish: bool,
+    pub ui_mode: PostprocUiMode,
+    pub glue_bottom_enabled: bool,
+    pub skip_vibration_calibration: bool,
+    pub begin_stage_retract_enabled: bool,
+    pub begin_stage_retract_z_lift_mm: i64,
+    pub z_calibration_dwell_sec: i64,
+    pub xy_calibration_dwell_sec: i64,
+    pub bed_glue_enabled: bool,
+    pub bed_glue_all_models: bool,
+}
+
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。
 ///
 /// 它回答的是"用户上一次自己把窗口摆成什么样"，唯一用途 = 退出窄窗时还原。
@@ -253,6 +397,13 @@ pub struct AppStateFile {
     /// 它是"这一趟窄窗的还原点"，与 [`WindowBox`] 同族：`None` = 不在窄窗 / 没有可还原的档。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pin_before_compact: Option<PinPref>,
+    /// **后处理这一层怎么看、怎么跑**（2026-10-17，见 [`PostprocPrefs`]）。
+    ///
+    /// 它是"用户点出来的偏好"，不是业务数据 —— 与 `theme` / `pin` 同族，住在这里。
+    /// 整格 `None` = **还没动过任何一项** ⇒ 全按 [`PostprocPrefs::default`]（出厂档）。
+    /// 这一格里每一项自己也是 `Option`（"没动过"与"明确选了出厂档"要分得开）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub postproc: Option<PostprocPrefs>,
 }
 
 impl Default for AppStateFile {
@@ -270,6 +421,7 @@ impl Default for AppStateFile {
             compact: None,
             last_window_box: None,
             pin_before_compact: None,
+            postproc: None,
         }
     }
 }
@@ -426,6 +578,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         compact: None,
         last_window_box: None,
         pin_before_compact: None,
+        /* 后处理偏好这一格是 2026-10-17 才有的：旧档里本来就没有它（没动过 = 出厂档） */
+        postproc: None,
     };
     retire_legacy_paths(&mut snapshot);
     Ok(snapshot)
@@ -767,6 +921,32 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
         state.auto_clean_history = Some(enabled);
         Ok(enabled)
     })
+}
+
+/* ---------- postproc：后处理这一层怎么看、怎么跑（2026-10-17） ---------- */
+
+/// 读后处理偏好。**整格 `None` = 一项都没动过** —— 调用方用 [`PostprocPrefs::default`]
+/// 顶上（它的 [`PostprocPrefs::resolved`] 就是出厂档，见类型注释）。
+pub fn postproc_prefs(root: &Path) -> Result<PostprocPrefs, AppError> {
+    Ok(load(root)?.postproc.unwrap_or_default())
+}
+
+/// 记下后处理偏好（整份状态原子替换，别的格一个不动）。
+///
+/// **整格覆盖**：界面上那些开关是"一次改一项"，但传进来的永远是**改完之后的全量**
+/// （界面手里就有全量，见 `src/app/settings/PageSettings.tsx`）——
+/// 这样"清掉某一项回到出厂"能表达出来（传 `None` 进来），而"改一项"只是把那一项填上。
+/// 逐项合并的写法做不到"清回出厂"。
+pub fn set_postproc_prefs(root: &Path, prefs: PostprocPrefs) -> Result<PostprocPrefs, AppError> {
+    with_state(root, |state| {
+        state.postproc = Some(prefs.clone());
+        Ok(prefs)
+    })
+}
+
+/// 管线要的那一份（已解掉 `None`、已夹量程）。
+pub fn resolved_postproc_prefs(root: &Path) -> Result<ResolvedPostprocPrefs, AppError> {
+    Ok(postproc_prefs(root)?.resolved())
 }
 
 /* ---------- pin / compact / lastWindowBox：窗口怎么摆（2026-10-17） ---------- */

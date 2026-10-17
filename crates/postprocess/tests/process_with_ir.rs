@@ -66,6 +66,14 @@ fn reference_output() -> PathBuf {
     repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
 }
 
+/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「抬升 Z=20 + 跳过震动检测」生成
+/// （= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳 —— 两张脸都钉回去，
+/// 字节判据才不假红（同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
+const PREFERENCE_PINS: &[&str] = &[
+    "Prefs.BeginStageRetractZLiftMm=20",
+    "Prefs.SkipVibrationCalibration=true",
+];
+
 /// 把输入复制进临时目录，原地跑一遍，返回原地覆盖后的字节。
 ///
 /// **调用方必须持有 [`lock_sequence`] 的锁**：里面会 reset 那条进程级伪随机序列。
@@ -82,7 +90,8 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
     if with_ir {
         // 钩子路径：配置先变成 IR，再把 IR 交给管线。
         let raw = std::fs::read_to_string(&work).expect("读输入");
-        let ir = pipeline::resolve_ir(&config_a1(), &[], Some(&raw)).expect("配置 → IR");
+        let overrides: Vec<String> = PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect();
+        let ir = pipeline::resolve_ir(&config_a1(), &overrides, Some(&raw)).expect("配置 → IR");
         pipeline::process_with_ir(
             IrProcessRequest {
                 gcode_path: work.clone(),
@@ -98,7 +107,7 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
             ProcessRequest {
                 gcode_path: work.clone(),
                 config_path: config_a1(),
-                overrides: Vec::new(),
+                overrides: PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect(),
                 output_path: None, // 原地
             },
             &mut sink,

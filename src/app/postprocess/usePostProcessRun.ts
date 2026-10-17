@@ -22,7 +22,7 @@
  * **报告页也认 `finished` 那一条**（跑完自己重读一遍），所以字面量只许有那一处。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, listen } from '../../api'
 import type {
@@ -44,6 +44,14 @@ import {
   POSTPROCESS_STARTED as STARTED_EVENT,
 } from './events'
 
+/**
+ * 静默档下，结论那枚胶囊在标题栏留多久（毫秒）。
+ *
+ * 作者 2026-10-17：「右上角的一分钟后自动消失」。一分钟够他扫一眼"这一盘成没成"，
+ * 又不至于一直挂在那儿像没处理完。
+ */
+export const SILENT_KEEP_MS = 60_000
+
 export interface PostProcessRunView {
   /** 现在这一趟（**不看用户关没关** —— 后台那条窄条要它）；`null` = 这一趟还没来过 */
   run: PostProcessRun | null
@@ -60,12 +68,55 @@ export interface PostProcessRunView {
   dismiss: () => void
   /** 把那一屏叫回来（点那条窄条） */
   reopen: () => void
+  /**
+   * **静默档**（设置页「后处理模式」选了静默）。
+   *
+   * `true` 时这一屏**永远不会自己弹出来**：不是"弹了再收"，是压根不弹 ——
+   * 用户选静默要的就是"别拿窗口打扰我"。只有他点右上角那枚状态胶囊才会把它叫回来
+   * （`reopen` 仍然有效，那是一次主动动作，不算打扰）。
+   *
+   * ★ 与 `dismissed` 的区别：`dismissed` 是"用户关过这一屏"，`silent` 是"这一档根本不许弹"。
+   *   两者都不弹，但语义不同 —— 静默档下 `dismissed` 始终为 `true`（由这里统一置位）。
+   */
+  silent: boolean
+  /**
+   * 静默档下结论那枚胶囊**留到哪一刻**（unix 毫秒；`null` = 不留 / 不是静默档）。
+   *
+   * 结论到达时定下 `now + SILENT_KEEP_MS`（60 秒）。到点胶囊自己消失
+   * （作者 2026-10-17：「右上角的一分钟后自动消失」）。
+   * 用户点过胶囊（`reopen` → 把那一屏叫出来）就算"看过了"，立刻清掉 —— 不再等满一分钟。
+   */
+  quietUntil: number | null
 }
 
-export function usePostProcessRun(): PostProcessRunView {
+export function usePostProcessRun(silent = false): PostProcessRunView {
   const [run, setRun] = useState<PostProcessRun | null>(null)
+  /* 静默档在回调里也要读（事件回调只装一次，不能闭包旧的 `silent`） */
+  const silentRef = useRef(silent)
+  silentRef.current = silent
+  /*
+   * `dismissed` 记的是"用户主动关过这一屏"（GUI 档那颗「后台运行」）。
+   *
+   * ★★ 不拿 `silent` 初始化它 —— `useState(silent)` 只吃**第一次渲染**的值，
+   *   而偏好是异步读回来的：首帧 `silent` 必然是 `false`，于是静默档永远不生效
+   *   （2026-10-17 实测：设了静默，模态框照样弹）。静默档对"弹不弹"的答案是
+   *   **派生的**，见下面的 `effectiveDismissed`。
+   */
   const [dismissed, setDismissed] = useState(false)
+  /* 结论到达那条回调要读"用户收起来过没有" —— 回调只装一次，不能闭包旧的 `dismissed` */
+  const dismissedRef = useRef(false)
+  dismissedRef.current = dismissed
   const [sinceMs, setSinceMs] = useState<number | null>(null)
+  /* 静默档：结论胶囊留到哪一刻（见 `quietUntil` 的注释） */
+  const [quietUntil, setQuietUntil] = useState<number | null>(null)
+  /*
+   * 静默档下用户**主动点开过**那一屏。
+   *
+   * 静默档让 `dismissed` 恒 `true`（不许自己弹），但"点胶囊要看"是一次主动动作，
+   * 那时得让那一屏真出来 —— 于是记这一笔把它顶回来。
+   * 新一趟开场 / 结论到达都清掉：下一次仍旧不许自己弹。
+   */
+  const [forcedOpen, setForcedOpen] = useState(false)
 
   useEffect(() => {
     let alive = true
@@ -137,8 +188,13 @@ export function usePostProcessRun(): PostProcessRunView {
         /* 新一趟还没有问句，自然也就没有"推过没有" */
         questionEmitted: false,
       })
+      /* 新一趟该露脸 —— 但静默档不露（`effectiveDismissed` 已经处理，见下面）。
+         这里仍然写 `false`：它是"用户没关过这一趟"的事实，与档位无关。 */
       setDismissed(false)
       setSinceMs(Date.now())
+      /* 新一趟开始：上一趟那枚"已完成"的账清掉，静默档下也重新"收着" */
+      setQuietUntil(null)
+      setForcedOpen(false)
     }).then((off) => {
       if (alive) offs.push(off)
       else off()
@@ -178,7 +234,28 @@ export function usePostProcessRun(): PostProcessRunView {
      * 让他自己去找入口才叫弄丢了。**不是通知**（窗口不抢焦点、也不弹系统横幅）。
      */
     void listen<PostProcessFinished>(FINISHED_EVENT, () => {
-      if (alive) setDismissed(false)
+      /*
+       * 跑完了：**要不要把那一屏叫回来**？
+       *
+       * 2026-10-17 改口径（作者：「点击后台处理之后就不要弹出来了吧，就像静默的一样，
+       * 就这一次，在右上角显示已完成就可以…静默的他们的逻辑都一样复用的，
+       * 一分钟自动消失…如果点击了出现了模态框就消失」）：
+       *
+       *   这一趟**用户自己收起来过**（GUI 档点了「后台运行」）⇒ 跑完也**不弹**，
+       *   与静默档完全同一条路 —— 右上角那枚胶囊换成「已完成」，60 秒后自己消失。
+       *
+       * 原来这里 GUI 档一律 `setDismissed(false)`（"点过后台运行的人，等的是结论"）。
+       * 那条在"用户压根不想看"的时候是反的 —— 他刚说了别打扰我，跑完又把窗顶到脸上。
+       *
+       * ★ 静默档与"手动收起"合流成**同一个判据**：`silent || dismissed`。
+       *   于是 `PostProcessChip` 那一侧不用分两套逻辑，只认 `quietUntil` 有没有值。
+       */
+      if (!alive) return
+      if (silentRef.current || dismissedRef.current) {
+        setQuietUntil(Date.now() + SILENT_KEEP_MS)
+        /* 跑完也不许自己弹出来（哪怕中途点开看过） */
+        setForcedOpen(false)
+      } else setDismissed(false)
     }).then((off) => {
       if (alive) offs.push(off)
       else off()
@@ -190,8 +267,56 @@ export function usePostProcessRun(): PostProcessRunView {
     }
   }, [])
 
-  const dismiss = useCallback(() => setDismissed(true), [])
-  const reopen = useCallback(() => setDismissed(false), [])
+  /*
+   * 「后台运行」那颗按钮（以及 Esc）：**把这一屏收起来**。
+   *
+   * ★★ 必须同时清掉 `forcedOpen`（2026-10-17）：静默档下，用户点了胶囊把那屏翻出来、
+   *   看了一半再点「后台运行」——  只设 `dismissed` 是**收不回去的**
+   *   （`effectiveDismissed = dismissed || (silent && !forcedOpen)`，`forcedOpen`
+   *   还挂着 true，模态框照样渲染）。两个状态要一起翻，否则"收起来"这条路断一半。
+   *
+   * 来回切（点开 → 后台 → 再点开 → 再后台）着走没问题：两个开关各归各位，
+   * 每一步都是幂等的。
+   */
+  const dismiss = useCallback(() => {
+    setDismissed(true)
+    setForcedOpen(false)
+    /* 收起来之后不再"留着结论"—— 结论出来时会重新定一次 60 秒 */
+    setQuietUntil(null)
+  }, [])
 
-  return { run, dismissed, sinceMs, dismiss, reopen }
+  /*
+   * 点胶囊 = 用户主动要看 ⇒ 立刻把那一屏叫回来，那枚「已完成」不再留着等满一分钟。
+   *
+   * ★ `forcedOpen` 只顶开"这一下"，不是永久开关：它要在
+   *   · 用户再点「后台运行」（`dismiss` 里清）、
+   *   · 下一趟开场（`Hello` 里清）、
+   *   · 结论到达（`Finished` 里清）
+   *   这三处复位。否则静默档一旦点开过，之后就再也收不回去了。
+   */
+  const reopen = useCallback(() => {
+    setDismissed(false)
+    setForcedOpen(true)
+    setQuietUntil(null)
+  }, [])
+
+  /*
+   * 对外那个 `dismissed` = **"这一屏现在该不该收着"**：
+   *   用户关过（`dismissed`）**或** 静默档（`silent`）。
+   *
+   * 静默档下它恒为 `true` ⇒ 模态框恒不渲染；而 `reopen` 仍然有效 ——
+   * 用户点右上角那枚胶囊是主动动作，那时把这一屏叫出来是对的。
+   * 为了让 `reopen` 在静默档下也能生效，`reopen` 里额外记一笔 `forcedOpen`。
+   */
+  const effectiveDismissed = dismissed || (silent && !forcedOpen)
+
+  return {
+    run,
+    dismissed: effectiveDismissed,
+    sinceMs,
+    dismiss,
+    reopen,
+    silent,
+    quietUntil,
+  }
 }

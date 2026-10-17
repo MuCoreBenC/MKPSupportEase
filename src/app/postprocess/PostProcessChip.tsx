@@ -26,7 +26,7 @@
  *   CSS 动画不播（同 `HANDOVER.md` §4）。`prefers-reduced-motion` 时干脆不动。
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import TitlebarChip from '../components/TitlebarChip'
 import { percentOf, stepName } from './steps'
@@ -77,22 +77,109 @@ function Dots() {
 }
 
 export default function PostProcessChip({ view }: { view: PostProcessRunView }) {
-  const { run, dismissed, reopen } = view
-  if (run === null || !dismissed || run.finished !== null) return null
+  const { run, dismissed, reopen, quietUntil } = view
+  /*
+   * 「这枚胶囊在不在」—— **两档同一套逻辑**（2026-10-17 作者：
+   * 「静默的他们的逻辑都一样复用的，一分钟自动消失，除非遇到下一个又刷新一分钟的，
+   * 如果点击了出现了模态框就消失」）。
+   *
+   *   · **跑着**：`dismissed`（那一屏没在眼前 —— 静默档恒如此，GUI 档点了「后台运行」）
+   *     ⇒ 显示三颗点 + 百分比；
+   *   · **跑完**：`quietUntil` 有值 ⇒ 显示结论（已完成 / 没成），到点自己消失；
+   *   · **点它**（`reopen`）⇒ 那一屏出来，`quietUntil` 立刻清掉，胶囊随之不见。
+   *
+   * ★ 60 秒的账记在 `usePostProcessRun` 的 `quietUntil`（结论到达那一刻定下），
+   *   不是这里"挂载起数 60 秒" —— 那样窗口重开一次就重新计一遍，胶囊永远不消失。
+   * ★ 下一趟开场会把 `quietUntil` 清成 `null`，于是"又刷新一分钟"这件事由
+   *   **下一趟的结论到达**重新计时，不需要这里自己累加。
+   */
+  const expired = useRunExpiry(run, quietUntil)
 
-  const percent =
-    run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
-  const pct = Math.round(percent)
-  const phase = run.progress === null ? '准备中' : stepName(run.progress.step)
+  if (run === null) return null
+  if (run.finished === null) {
+    /* 跑着：只在那一屏没摆在眼前时才需要这一枚 */
+    if (!dismissed) return null
+  } else if (quietUntil === null || expired) {
+    /* 跑完了但没有"留一会儿"的账（GUI 档下那一屏正在显示结论）⇒ 不摆 */
+    return null
+  }
 
+  /* ---- 跑着：三颗点 + 百分比 ---- */
+  if (run.finished === null) {
+    const percent =
+      run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
+    const pct = Math.round(percent)
+    const phase = run.progress === null ? '准备中' : stepName(run.progress.step)
+
+    return (
+      <TitlebarChip
+        testId="postprocess-chip"
+        icon={<Dots />}
+        label={`${pct}%`}
+        title={`后处理在后台跑：${phase} · ${pct}%（点击看进度）`}
+        ariaLabel={`后处理在后台跑：${phase}，${pct}%，点击看进度`}
+        onClick={reopen}
+      />
+    )
+  }
+
+  /* ---- 跑完了：一句话说结果，悬停看原因，点一下还能翻出那一屏 ---- */
+  const ok = run.finished.ok
   return (
     <TitlebarChip
       testId="postprocess-chip"
-      icon={<Dots />}
-      label={`${pct}%`}
-      title={`后处理在后台跑：${phase} · ${pct}%（点击看进度）`}
-      ariaLabel={`后处理在后台跑：${phase}，${pct}%，点击看进度`}
+      icon={<OutcomeGlyph ok={ok} />}
+      label={ok ? '已完成' : '没成'}
+      tone={ok ? 'accent' : 'danger'}
+      title={`后处理${ok ? '完成' : '没成'}：${run.finished.message}（点击看详情）`}
+      ariaLabel={`后处理${ok ? '完成' : '没成'}：${run.finished.message}，点击看详情`}
       onClick={reopen}
     />
+  )
+}
+
+/**
+ * 那颗胶囊**过期了没有**（过期 = 该消失了）。
+ *
+ * 两档共用（静默档 / GUI 档点过「后台运行」）—— 判据只看 `quietUntil` 有没有到点，
+ * **不再分档**（作者：「静默的他们的逻辑都一样复用的」）。
+ *
+ * 到点那一刻自己刷一次，胶囊随之退场；`quietUntil` 变了（下一趟的结论到了）
+ * 就重新排一次定时器 —— 那正是"又刷新一分钟"。
+ */
+function useRunExpiry(run: PostProcessRunView['run'], quietUntil: number | null): boolean {
+  const [, force] = useState(0)
+  const live = run !== null && run.finished !== null && quietUntil !== null
+
+  useEffect(() => {
+    if (!live || quietUntil === null) return
+    const left = quietUntil - Date.now()
+    if (left <= 0) return
+    const t = window.setTimeout(() => force((n) => n + 1), left)
+    return () => window.clearTimeout(t)
+  }, [live, quietUntil])
+
+  if (!live) return false
+  return Date.now() >= quietUntil!
+}
+
+/** 结论那一枚小图标：成功是对勾、失败是感叹号（与 `tone` 同一套语义） */
+function OutcomeGlyph({ ok }: { ok: boolean }) {
+  return ok ? (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <path
+        d="m3.6 8.4 2.8 2.8 6-6.4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" aria-hidden="true">
+      <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M8 4.8v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="8" cy="11.2" r="0.7" fill="currentColor" />
+    </svg>
   )
 }

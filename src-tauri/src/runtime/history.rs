@@ -216,17 +216,19 @@ mod tests {
     fn what_is_written_survives_a_fresh_read() {
         let d = tempfile::tempdir().unwrap();
         let key = key_of("local", "presets-local/A1 涂胶.toml");
-        let mut file = HistoryFile::default();
-        file.batches = 2;
-        file.entries.push(HistoryEntry {
-            id: 3,
-            no: 3,
-            action: "改 Y 轴偏移".to_owned(),
-            ts_unix: 1_700_000_000,
-            state: "saved".to_owned(),
-            batch: Some(2),
-            items: vec![item()],
-        });
+        let file = HistoryFile {
+            batches: 2,
+            entries: vec![HistoryEntry {
+                id: 3,
+                no: 3,
+                action: "改 Y 轴偏移".to_owned(),
+                ts_unix: 1_700_000_000,
+                state: "saved".to_owned(),
+                batch: Some(2),
+                items: vec![item()],
+            }],
+            ..HistoryFile::default()
+        };
         write(d.path(), &key, &file).unwrap();
 
         let again = read(d.path(), &key).unwrap();
@@ -269,6 +271,8 @@ mod tests {
         let key = key_of("preset", "A1-standard.toml");
         let at = file_of(d.path(), &key);
         std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        /* 测试造坏档，不走 atomic（不是产品数据落点） */
+        #[allow(clippy::disallowed_methods)]
         std::fs::write(&at, "{ 这不是 json".as_bytes()).unwrap();
 
         let err = read(d.path(), &key).expect_err("坏档得报错");

@@ -64,11 +64,18 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
 
     let raw = std::fs::read_to_string(&work).expect("读输入");
-    let ir = preset::load_ir(
+    let mut ir = preset::load_ir(
         &core_path("tests/fixtures/presets/A1-standard.toml"),
         Some(&raw),
     )
     .expect("预设 → IR 必须成功");
+
+    // 用户偏好（`Ir.prefs`，2026-10-17 落地）的两颗钉子：参考输出按「抬升 Z=20 +
+    // 跳过震动检测」生成（= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳。
+    // 预设文件不带 prefs ⇒ 出厂档兜底，这里手动钉回参考档，字节判据才不假红
+    // （同 `crates/postprocess/tests/end_to_end.rs` 的同名注释）。
+    ir.prefs.begin_stage_retract_z_lift_mm = 20;
+    ir.prefs.skip_vibration_calibration = true;
 
     // 顺手把「第 7、8 步真的发生了」钉住：文件名带扩展名、机型已归一。
     // 名字跟着夹具一起改了（b05 Task 5）：`preset_name` 取的是**实际路径**的文件名。

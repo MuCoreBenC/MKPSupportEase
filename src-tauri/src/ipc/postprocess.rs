@@ -33,6 +33,19 @@ pub fn cancel_post_process(slot: State<'_, HookSlot>) -> Result<(), AppError> {
     traced("cancelPostProcess", |_| slot.0.cancel())
 }
 
+/// **重置后处理状态**（设置页那一颗按钮，2026-10-17）。
+///
+/// 治的是"钩子还在等答复、界面已经不在了"留下的那一屏：先让钩子别等，再清界面状态。
+/// 返回一句给用户读的回执 —— 设置页原样摆出来，于是"点了没反应"与"本来就没东西"
+/// 分得开（见 [`crate::hook_ui::HookView::reset`]）。
+#[tauri::command]
+pub fn reset_post_process_state(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<String, AppError> {
+    traced("resetPostProcessState", |_| slot.0.reset(&app))
+}
+
 /// 回答屏幕上那一问（机型 / 校准方式 …）：`id` 就是那一颗按钮的 id。
 ///
 /// 2026-10-17 从 `answer_post_process_mismatch(keep)` 泛化而来 —— 校准件那一问有三个

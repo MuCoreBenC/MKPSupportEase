@@ -90,6 +90,16 @@ TempYOffsetCalibr = 0.0
 TempZOffsetCalibr = 0.0
 UpdateDate = ""
 
+[Prefs]
+BedGlueAllModels = false
+BedGlueEnabled = false
+BeginStageRetractEnabled = true
+BeginStageRetractZLiftMm = 100
+GlueBottomEnabled = false
+SkipVibrationCalibration = false
+XyCalibrationDwellSec = 3
+ZCalibrationDwellSec = 2
+
 [Prime]
 Enabled = true
 EveryLayer = false

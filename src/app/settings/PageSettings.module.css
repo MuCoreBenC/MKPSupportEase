@@ -361,3 +361,164 @@
   font-size: var(--fs-label);
   color: var(--text-3);
 }
+
+/* ============================================================================
+ * 后处理模式 / 校准与补偿 / 热床预涂胶 / 清理与卸载（2026-10-17）
+ *
+ * 四块共用同一套"一行 = 左边说明 + 右边控件"的排版：`.fieldRow` 只加这一层
+ * 横排，**不改既有 `.field`**（那个是竖排，老块还在用，动了会连锁）。
+ *
+ * 颜色全部复用已有 token：
+ *   危险块  `--warn-surface / --warn-line / --warn-ink`（与后处理那扇 hero 同一套橙）
+ *   选中态  `--accent-soft / --accent`（印刷机绿，全站唯一的强调色）
+ * 没有一处写死色值 —— 深浅两套因此自动都对。
+ * ========================================================================== */
+
+/* ---- 一行两列：左说明、右控件 ---- */
+
+.fieldRow {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fieldText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 允许收缩：说明再长也不许把右边的开关挤出框 */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- 静默 / GUI 两卡 ---- */
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.modeCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: center;
+  /* 全局 `button { white-space: nowrap }` 对这三行字不适用，卡片里要允许折行 */
+  white-space: normal;
+}
+
+.modeCard:hover {
+  border-color: var(--line-strong);
+}
+
+/* 选中：绿底 + 绿描边 + 绿字。颜色只在"选了"这一态出现（这一页唯一的色彩） */
+.modeCardOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.modeIcon {
+  display: flex;
+  line-height: 0;
+}
+
+.modeLabel {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.modeHint {
+  font-size: var(--fs-label);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* 选中时说明文字也跟着绿一档 —— 否则绿底灰字读起来发虚 */
+.modeCardOn .modeHint {
+  color: var(--accent-deep);
+  opacity: 0.82;
+}
+
+/* ---- 数字框（停留时间）：定宽、贴右 ---- */
+
+.numBox {
+  flex: 0 0 auto;
+  width: 108px;
+}
+
+/* ---- 危险块（热床预涂胶 / 清理与卸载） ---- */
+
+.dangerBlock {
+  border-color: var(--warn-line);
+  background: var(--warn-surface);
+}
+
+.dangerTitle {
+  color: var(--warn-ink);
+  /* 标题前面的小三角与字对齐（`WarnIcon` 是 inline svg） */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 内嵌那段风险提示：底再压深一档 + 发丝内描边，与"这一块的说明"分开 */
+.dangerNote {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-xs, 6px);
+  background: var(--warn-surface);
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--warn-ink);
+  /* 背景与外面那层同色，靠描边分开；深色下也不至于糊成一片 */
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%);
+}
+
+.dangerNoteHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+/* ---- 中性小字提示（"不会读写你的 3MF"那一句） ---- */
+
+.noteHint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---- 窄窗：两卡降成一列，行内控件也改上下排 ---- */
+
+@media (width <= 620px) {
+  .modeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .numBox {
+    width: 100%;
+  }
+}

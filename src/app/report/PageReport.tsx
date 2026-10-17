@@ -696,14 +696,23 @@ export default function PageReport() {
    */
   const suppressClick = useRef(false)
 
-  const read = useCallback(() => {
+  /**
+   * `pickNewest` = 读完把选中切到最新那条。手动刷新不传（别抢用户正看着的那条）；
+   * **后处理跑完那一趟才传**（作者 2026-10-17）—— 新记录就该是主角，右栏跟着换详情。
+   */
+  const read = useCallback((pickNewest = false) => {
     setErr(null)
     setRows(null)
     api.getReportList().then(
       (list) => {
         setRows(list)
-        /* 默认选中最新那条：进页面就有内容看，不用先点一下 */
-        setSelId((cur) => cur ?? list[0]?.id ?? null)
+        if (pickNewest) {
+          /* 后处理刚跑完：选最新那条（失败记录也选 —— 失败更该立刻看见） */
+          setSelId(list[0]?.id ?? null)
+        } else {
+          /* 默认选中最新那条：进页面就有内容看，不用先点一下 */
+          setSelId((cur) => cur ?? list[0]?.id ?? null)
+        }
         /*
          * 读到了就收掉那条「正在重读…」——不收回就是挂着的谎：
          * 页面早就不在读了，提示还赖在那儿，用户只会当它坏了（提示条本来
@@ -736,7 +745,7 @@ export default function PageReport() {
     let alive = true
     const offs: (() => void)[] = []
     void listen(POSTPROCESS_FINISHED, () => {
-      if (alive) read()
+      if (alive) read(true)
     }).then((off) => {
       /* 订阅回执比卸载晚到时就地退订（否则监听器留在后端没人收） */
       if (alive) offs.push(off)

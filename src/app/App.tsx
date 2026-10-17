@@ -26,6 +26,7 @@ import { DevPreviewTabs } from './dev/DevPreviewTabs'
 import PostProcessModal from './postprocess/PostProcessModal'
 import { usePostProcessRun } from './postprocess/usePostProcessRun'
 import { usePinPref } from './state/appState'
+import { usePostprocPrefs } from './state/usePostprocPrefs'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -153,7 +154,20 @@ export default function App() {
   const openReport = useCallback(() => setTab('report'), [])
 
   /* 后处理那一趟：读一次，两处用（见 import 处那条注释） */
-  const postProcess = usePostProcessRun()
+  /*
+   * 后处理那一趟的状态：`silent` 决定它会不会自己弹出来。
+   *
+   * 设置页「后处理模式」选了静默 ⇒ 这一屏**永远不自己弹**（跑着不弹、跑完也不弹），
+   * 只在标题栏右上角留一枚状态（作者 2026-10-17：「选择了静默，就不用出现弹窗，
+   * 就是不用这个后处理的前端出现，缩在右上角就可以，结束也不出现」）。
+   *
+   * ★ 读不到偏好（还没读回来 / 读失败）按 **GUI** 处理：静默是用户主动选的
+   *   "这次别打扰我"，读不到时退回"看得见"这一侧 —— 免得用户以为程序没动静。
+   *   与后端 `hook_ipc::wants_display` 的兜底同一个取向。
+   */
+  const { prefs: postprocPrefs } = usePostprocPrefs()
+  const silentPostproc = postprocPrefs?.resolved.uiMode === 'silent'
+  const postProcess = usePostProcessRun(silentPostproc)
 
   return (
     <div ref={rootRef} className={s.shell} data-density={density}>

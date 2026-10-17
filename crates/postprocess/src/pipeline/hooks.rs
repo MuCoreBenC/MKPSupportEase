@@ -217,11 +217,9 @@ pub fn apply_begin_stage_retract(
     result
 }
 
-/// `ApplyPrePrintBedGlue`：BedGlueEnabled 默认 false —— 钩子点保留，本体未移植
-/// （默认关 + 无字节参考，见模块文档）。
-pub fn apply_pre_print_bed_glue(lines: Vec<String>, _ir_data: &Ir) -> Vec<String> {
-    lines
-}
+/* `apply_pre_print_bed_glue` 那个**空壳已删**（2026-10-17）：它一直"钩子点保留、
+本体未移植"，于是设置页那一档勾了也没有任何效果。真实现现在在
+[`super::bed_glue::apply_bed_glue`]，由 `pipeline/mod.rs` 的写步调用。 */
 
 #[cfg(test)]
 mod tests {

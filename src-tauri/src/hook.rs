@@ -538,7 +538,7 @@ pub fn run(
     let archived = archive_begin(&job.gcode, &raw, &mut archive_warnings);
 
     // 预设 → IR：唯一入口（`crates/preset`）。预设里的参数错、机型不认识都在这一步报出来
-    let ir = match preset::load_ir(&job.toml, Some(&raw)) {
+    let mut ir = match preset::load_ir(&job.toml, Some(&raw)) {
         Ok(ir) => ir,
         Err(e) => {
             /* 界面得开窗把这次失败摆出来（真实原因多半就在下面那句话里）—— 表里全是 `—` */
@@ -560,6 +560,22 @@ pub fn run(
             return Err(err);
         }
     };
+
+    /*
+     * 把用户在设置页里点出来的那几档**覆盖**到 IR 上（2026-10-17）。
+     *
+     * ★ 位置在这里、不能挪：`preset::load_ir` 刚把预设里的值铺满整个 IR，
+     *   早一步写会被它盖掉；晚一步写（进管线之后）就没用了。
+     *
+     * ★ 读不出来（状态文件坏了 / 目录不在）**不阻断这一趟**：偏好只是"额外怎么做"，
+     *   缺了它按出厂档跑仍然是对的 —— 与 `usage` 那个账同一个口径（提示而非用户资产）。
+     *   记录也照落，只是那几档是出厂值。
+     */
+    if let Some(root) = crate::fsx::paths::internal_root_headless() {
+        if let Ok(prefs) = crate::runtime::app_state::resolved_postproc_prefs(&root) {
+            crate::runtime::postproc_prefs::apply_to_ir(&mut ir, &prefs);
+        }
+    }
 
     /*
      * 一开场把左栏那张表要的事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）**连开场那一条一起**报过去
@@ -631,7 +647,6 @@ pub fn run(
      * 所以这个选择必须**写回 IR**再进管线 —— 界面只是把它问出来，真正的差别在内核里。
      * 超时不答 = 停下（与机型那一问同一条口径）。
      */
-    let mut ir = ir;
     let mut calib_choice: Option<String> = None;
     /*
      * `mismatch` 在机型那一段已经被 `match` 用掉了（`MismatchPolicy::Ask(&mut asker)` 是一次

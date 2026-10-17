@@ -47,6 +47,8 @@ pub mod hook_ui;
 pub mod ipc;
 /// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
 pub mod legacy;
+/// 系统通知（2026-10-17）：设置页「处理完成发送系统通知」那一格的真实现。
+pub mod notify;
 pub mod obs;
 /// 预设数据的**纯读写与解析核心**：机型目录 / 资产 / 套餐 / 字段定义 / 界面布局，
 /// 加上三层取值。[`presetdata::Presets::load_from`] 只要一个根。
@@ -283,6 +285,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
+        ipc::postprocess::reset_post_process_state,
         ipc::postprocess::answer_post_process,
         ipc::postprocess::replay_post_process_question,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（只读；见 `ipc/bbs.rs`）
@@ -400,6 +403,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        ipc::prefs::get_postproc_prefs,
+        ipc::app::open_preset_folder,
+        ipc::app::uninstall,
+        ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗。落 AppState 的
         // pin / compact / lastWindowBox 三格；窗口几何的副作用只在 `ipc::window_layout`
         ipc::window_layout::get_window_prefs,
@@ -441,6 +448,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
+        ipc::postprocess::reset_post_process_state,
         ipc::postprocess::answer_post_process,
         ipc::postprocess::replay_post_process_question,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（与上面那份清单一字不差）
@@ -554,6 +562,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        ipc::prefs::get_postproc_prefs,
+        ipc::app::open_preset_folder,
+        ipc::app::uninstall,
+        ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：与上面那份清单一字不差
         ipc::window_layout::get_window_prefs,
         ipc::window_layout::set_pin,

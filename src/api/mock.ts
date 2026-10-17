@@ -20,6 +20,8 @@ import type {
   PresetHistory,
   PresetSource,
   PinPref,
+  PostprocPrefsWire,
+  ResolvedPostprocPrefs,
   SoftwareUpdate,
   ThemePref,
   LocalPresetFile,
@@ -138,6 +140,9 @@ let mockTheme: ThemePref | null = null
  * 演示里给"开着"——与真机同一个出厂默认（没选过 = 开），别在这里另立一套。
  */
 let mockAutoClean = true
+
+/** 后处理偏好（2026-10-17）：内存镜像，形状就是盘上那一格 */
+let mockPostproc: PostprocPrefsWire = {}
 
 /*
  * 浏览器演示用的窗口两格（**内存态，刷新即还原**；真数据在 Rust 侧 run/app-state.json）。
@@ -2124,6 +2129,62 @@ export const mockApi: MkpApi = {
   async setAutoCleanHistory(enabled) {
     mockAutoClean = enabled
     return mockAutoClean
+  },
+
+  /*
+   * 后处理偏好（2026-10-17）：与主题同一套口径 —— 内存镜像。
+   * 出厂档**照抄后端那一份**（`runtime::app_state::PostprocPrefs::resolved`），
+   * 量程也照抄；这里不另发明一套默认值，否则浏览器里看到的样子会与真机不同。
+   */
+  async getPostprocPrefs() {
+    const resolved: ResolvedPostprocPrefs = {
+      notifyOnFinish: mockPostproc.notifyOnFinish ?? true,
+      uiMode: mockPostproc.uiMode ?? 'gui',
+      glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
+      skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
+      beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
+      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 100,
+      zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,
+      xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
+      bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
+      bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
+    }
+    return {
+      raw: mockPostproc,
+      resolved,
+      limits: {
+        zDwell: { min: 1, max: 20 },
+        xyDwell: { min: 1, max: 10 },
+        zLift: { min: 1, max: 300 },
+      },
+    }
+  },
+
+  async setPostprocPrefs(prefs) {
+    mockPostproc = prefs
+    return { ok: true }
+  },
+
+  /* 浏览器里没有钩子，也就没有"残留状态"——照实说，不假装清掉了什么 */
+  async resetPostProcessState() {
+    return '浏览器预览里没有正在跑的处理 —— 不用重置'
+  },
+
+  /*
+   * 应用本体那两条（2026-10-17）。
+   *
+   * `openPresetFolder` 给一个**像样的假路径**：这一行要显示"东西放哪"，
+   * 空字符串会让界面画出一个没有意义的空行。
+   *
+   * `uninstall` **不许在浏览器里演成功** —— 那是不可逆动作，在预览里"假装卸掉了"
+   * 比报错更糟（用户会以为真卸了）。照实抛 `NotImplementedError`。
+   */
+  async openPresetFolder() {
+    return '/Users/you/Library/Application Support/MKPSupportEase/presets-local'
+  },
+
+  async uninstall() {
+    throw new NotImplementedError('浏览器预览里不能卸载应用')
   },
 
   /*

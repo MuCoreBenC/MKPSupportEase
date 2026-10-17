@@ -245,6 +245,54 @@ fn raise_main_window(app: &AppHandle) {
     }
 }
 
+/// 系统通知那两行字（标题 / 正文）。
+///
+/// 文案口径与界面上那一屏一致：**成功就说成功的那句**（校准件那两种跑法各一句），
+/// 失败就把钩子给的那句话原样带上（那是用户最需要看到的）。
+///
+/// ★ 这里**不编码表条目**：通知是"界面之外的一句提示"，不是错误，也不是记录；
+/// 真正要查的细节在界面与 `_meta.json` 里。正文仍带 G-code 名，便于对上是哪一盘。
+fn notify_lines(finished: &FinishedDto, gcode_name: Option<&str>) -> (String, String) {
+    const TITLE_OK: &str = "后处理完成";
+    const TITLE_BAD: &str = "后处理没成";
+
+    /* 名字从**共享状态**里取（`FinishedPayload` 本身不带文件名 —— 那一份在开场那一条里）。
+    取不到就说"这一盘"，不编一个名字出来 */
+    let name = match gcode_name {
+        Some(n) if !n.is_empty() => n.to_owned(),
+        _ => "这一盘".to_owned(),
+    };
+
+    if finished.ok {
+        /* 校准件那趟：两种跑法的结论不一样（打印件留没留），与界面读同一组键 */
+        let body = crate::hook::calib_done_line(finished.calib_choice.as_deref())
+            .unwrap_or_else(|| format!("{name} 已经处理好了"));
+        (TITLE_OK.to_owned(), body)
+    } else {
+        (
+            TITLE_BAD.to_owned(),
+            format!("{name}：{}", finished.message),
+        )
+    }
+}
+
+/// 现在是不是**静默档**（设置页「后处理模式」那一档）。
+///
+/// 静默档要做的三件事，全在"别打扰用户"这一条上：
+///   · 不抬窗、不抢焦点、不置顶（本函数的两处调用点）；
+///   · 前端那一屏永不自己弹（`usePostProcessRun(silent)`）；
+///   · 只在右上角留一枚状态，跑完 60 秒自己消失（`PostProcessChip`）。
+///
+/// ★ 读不出来（状态文件坏了 / 目录不在）按 **GUI**：静默是用户主动选的"这次别打扰我"，
+///   读不到时退回"看得见"那一侧 —— 免得用户以为程序没动静。
+///   与 `hook_ipc::wants_display` 的兜底**同一个取向**（两处必须一致，见那条判据）。
+fn silent_mode(app: &AppHandle) -> bool {
+    crate::fsx::paths::internal_root(app)
+        .ok()
+        .and_then(|root| crate::runtime::app_state::resolved_postproc_prefs(&root).ok())
+        .is_some_and(|p| p.ui_mode == crate::runtime::app_state::PostprocUiMode::Silent)
+}
+
 impl HookView {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
@@ -274,8 +322,16 @@ impl HookView {
                 进度，这一扇就该出现在他面前；不抬的话，他能看到的只有切片器那句退出码。
                 只在这一条（新一趟的开场）里抬：`progress` 一趟发上千条，**绝不每条都抬**
                 —— 那等于处理期间反复抢焦点，用户什么都干不了。
-                跑完不再抢（见下面 `Finished` 那一条里那句"不抢焦点"）。 */
-                raise_main_window(app);
+                跑完不再抢（见下面 `Finished` 那一条里那句"不抢焦点"）。
+
+                ★★ **静默档不抬**（2026-10-17 作者：「选择了静默，就不用出现弹窗，就是不用
+                   这个后处理的前端出现，缩在右上角就可以，结束也不出现`,
+                   还有「也不用置顶 mkp」）：那一档用户明说了别打扰他 ——
+                   抬窗（`unminimize + show + set_focus`）正是最打扰的那一下。
+                   静默档下这一趟照样跑、右上角照样有状态，只是窗口不动。 */
+                if !silent_mode(app) {
+                    raise_main_window(app);
+                }
                 {
                     let mut g = self.shared.lock().expect("锁没坏");
                     /* 新一趟：上一趟的结论与问句一起清掉（旧世代：结果态留到下一次顶掉它）——
@@ -340,24 +396,54 @@ impl HookView {
                     cancelled = finished.cancelled,
                     "钩子那一趟结束"
                 );
-                {
+                /* 静默档在下面两处要读（闪不闪 Dock、发不发通知的那条口子同源） */
+                let silent = silent_mode(app);
+                /* 通知正文要文件名：`FinishedPayload` 不带它（那一份在 `Hello` 里），
+                所以在锁里取出来 —— 下面 `*finished` 会被 `emit` 移走。
+                取不到（没开场就收场，理论分支）就是 `None`，通知里说"这一盘"。 */
+                let gcode_name = {
                     let mut g = self.shared.lock().expect("锁没坏");
                     /* 结论已出：那一问不可能还有人在等，清掉免得界面还挂着它 */
                     g.question = None;
                     g.finished = Some((*finished).clone());
-                }
+                    g.gcode_name.clone()
+                };
                 /* 要不要喊这一下，得在 payload 被 `emit` 带走**之前**算出来 */
                 let shout = !finished.ok && !finished.cancelled;
+                /* 通知要的那两行也在这儿算好（`*finished` 下一行就被移走了） */
+                let notify_body =
+                    (finished.ok || shout).then(|| notify_lines(&finished, gcode_name.as_deref()));
                 let _ = app.emit(FINISHED_EVENT, *finished);
                 /* 落完之后**喊一下这扇窗**：切片器那边只弹一句 "Error code: N"，
                 用户很可能压根不知道自己这扇窗里有话要说（作者 2026-10-11）。
                 Windows 闪任务栏、macOS 跳 Dock —— 只"提醒"，**不抢焦点**
                 （开工那一下已经抬过窗了，见 `raise_main_window`；跑完再抢只会打断用户）。
                 失败才喊：成功不用惊动谁。 */
-                if shout {
+                /* ★ 静默档也**不闪任务栏、不跳 Dock**（作者：「也不用置顶 mkp」，
+                那一档整条意思是"别打扰我"）。它照样能收到系统通知（如果用户开着那格）——
+                通知是"留在通知中心的一条"，闪 Dock 是"现在就要你看"，两件事。 */
+                if shout && !silent {
                     if let Some(win) = app.get_webview_window("main") {
                         let _ =
                             win.request_user_attention(Some(tauri::UserAttentionType::Critical));
+                    }
+                }
+
+                /* 系统通知（2026-10-17）：设置页那一格「处理完成发送系统通知」的真实现。
+                以前这一格只是**存了个值**，跑完什么都不会发生 —— 那种开关不如不摆。
+
+                ★ 只在**用户开着**时发：读不出来（状态文件坏了）按出厂档（开着）。
+                ★ 只发"有结果"的那几种：成功 / 失败 / 校准那趟的两种跑法。
+                  用户自己按停止的**不发** —— 他刚按的，他知道。
+                ★ 不进 IR、不影响产物：纯界面行为（见 `PostprocPrefs` 头注两档的分工）。 */
+                if let Some((title, body)) = notify_body {
+                    let prefs = crate::fsx::paths::internal_root(app).ok().and_then(|root| {
+                        crate::runtime::app_state::resolved_postproc_prefs(&root).ok()
+                    });
+                    /* `is_none_or` 要 Rust 1.82，本项目 MSRV 1.77 —— 用等价的 `map_or` */
+                    let want = prefs.map_or(true, |p| p.notify_on_finish);
+                    if want {
+                        crate::notify::notify(&title, &body);
                     }
                 }
             }
@@ -611,6 +697,71 @@ impl HookView {
             .expect("锁没坏")
             .as_ref()
             .is_some_and(hook_ipc::Handle::connected)
+    }
+
+    /// **重置后处理状态**（2026-10-17，设置页那一颗按钮）。
+    ///
+    /// # 它治的是什么病
+    ///
+    /// 旧世代那颗按钮治的是「BambuStudio 卡在 95%」：那边是**同一个进程**握着
+    /// `isGUIProcessMode` 这个布尔，进程卡住 ⇒ 那一位永远是 true ⇒ 后续请求全被拒。
+    /// 我们这个架构里没有那一位 —— 钩子是**独立进程**，跑完就走，状态本来就不会残留。
+    ///
+    /// 但有一类残留是真会发生的：**钩子进程还在等答复，界面却已经离开**（窗口关掉、
+    /// 崩溃、用户在问句上一直没搭理）。这时：
+    ///   · 共享状态里挂着一条问句（或上一趟的结论）；
+    ///   · 钩子那头阻塞在「等一个永远不来的答案」上，最后被 120 秒超时收成 cancelled；
+    ///   · 用户打开界面看到的是一屏**属于上次的**旧内容，点「停止」也未必对得上。
+    ///
+    /// 这一颗按钮就干两件事，顺序不能反：
+    ///
+    /// 1. **先让钩子那边别再等**（`Cancel`）：能连上就发一条；连不上（它已经没了）
+    ///    就跳过 —— 这时下面那步清状态就是全部。
+    /// 2. **再清掉界面这一侧的共享状态**，并推一条“这一趟结束了”的事件，
+    ///    让还开着的窗口把自己那屏收掉（否则它要等到下次 hello 才会变）。
+    ///
+    /// 返回**做了什么**（发给谁 / 清了什么）—— 设置页把它原样摆成一行回执，
+    /// 这样"点了没反应"与"点了但本来就没东西"分得开。
+    pub fn reset(&self, app: &AppHandle) -> Result<String, AppError> {
+        /* ① 先让钩子那头别再等 */
+        let cancelled = self.write(ToHook::Cancel, "这一趟已经结束了").is_ok();
+
+        /* ② 再清界面这一侧 */
+        let had_run = {
+            let mut g = self.shared.lock().expect("锁没坏");
+            let had = g.preset_name.is_some();
+            *g = Shared::default();
+            had
+        };
+
+        /* 还开着的窗口靠这条事件收掉自己那屏（只推结论那一格，界面按"已取消"处理） */
+        let _ = app.emit(
+            FINISHED_EVENT,
+            FinishedDto {
+                ok: false,
+                cancelled: true,
+                /* 这一行只在"设置页按了重置、还开着的窗口要收掉自己那屏"时出现，
+                不是钩子那条线上的结论 —— 所以句子直接写在这里，不进码表。
+                ★ 码仍然给：排查时照着它能在日志里认出"是重置收的场"。 */
+                message: "后处理状态已被重置（由设置页触发）".to_owned(),
+                code: Some("W_SYS_RESET_001".to_owned()),
+                stage: None,
+                exit_code: 0,
+                elapsed_ms: 0,
+                output: None,
+                warnings: Vec::new(),
+                result: None,
+                calib_choice: None,
+            },
+        );
+
+        Ok(if cancelled {
+            "已让正在跑的那一趟停下，界面状态也清干净了".to_owned()
+        } else if had_run {
+            "没有钩子在跑，界面状态已清干净".to_owned()
+        } else {
+            "没有正在跑的处理，也没有留下状态 —— 不用重置".to_owned()
+        })
     }
 
     /// 界面那颗「停止」：往通道里写一条取消。

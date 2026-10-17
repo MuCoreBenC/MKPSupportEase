@@ -32,6 +32,8 @@
 //!    两张脸的差别仅在 [`IrSource`] 这一个枚举上 —— 复制一条管线出来就等于
 //!    有两条会各自漂移的产品路径。判据：拆之前拆之后 G2 与整链参考仍字节相等。
 
+/// 热床预涂胶（`bed_glue.go` 那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
+pub mod bed_glue;
 pub mod hooks;
 pub mod progress;
 
@@ -571,14 +573,15 @@ fn run(
         } else {
             (None, crate::postproc::disk::CentroidResult::default())
         };
+        /* 停留秒数读**用户设置**（2026-10-17 之前这里是写死的两个常量，
+        于是设置页那两格"改了也不生效"）。量程已在 `PrefsIr` 那层夹过。
+        先取出来再传：`&mut ir` 已经借出去了，表达式里不能再读它的字段。 */
+        let (z_dwell, xy_dwell) = (
+            ir.prefs.z_calibration_dwell_sec,
+            ir.prefs.xy_calibration_dwell_sec,
+        );
         out_lines = crate::postproc::calibration::insert_calibration_gcode(
-            out_lines,
-            calib_mode,
-            &mut ir,
-            bbox,
-            centroid,
-            DEFAULT_Z_DWELL_SEC,
-            DEFAULT_XY_DWELL_SEC,
+            out_lines, calib_mode, &mut ir, bbox, centroid, z_dwell, xy_dwell,
         )?;
     }
 
@@ -587,14 +590,18 @@ fn run(
     checkpoint(cancel)?;
     timer.begin(Step::Write, "正在写入文件...");
     executed.push(Step::Write);
+    /* 这三处以前各读一个 `DEFAULT_*` 常量 —— 也就是"设置页那几档从来没被读过"。
+    现在全部走 `ir.prefs`（`runtime::postproc_prefs::apply_to_ir` 是唯一写入点）。 */
     out_lines = hooks::apply_begin_stage_retract(
         out_lines,
         &ir,
-        DEFAULT_BEGIN_STAGE_RETRACT,
-        DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM,
+        ir.prefs.begin_stage_retract_enabled,
+        ir.prefs.begin_stage_retract_z_lift_mm,
     );
-    out_lines = hooks::apply_skip_vibration_calibration(out_lines, DEFAULT_SKIP_VIBRATION);
-    out_lines = hooks::apply_pre_print_bed_glue(out_lines, &ir);
+    out_lines =
+        hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
+    /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
+    out_lines = bed_glue::apply_bed_glue(out_lines, &ir);
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS。
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。

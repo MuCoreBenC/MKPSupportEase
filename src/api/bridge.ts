@@ -307,6 +307,15 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
+     读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
+  getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
+  setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
+  /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
+  resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),
+  /* 应用本体那两条（2026-10-17）：「预设位置」打开目录；「卸载」删程序本体、数据不动 */
+  openPresetFolder: () => call('openPresetFolder', 'open_preset_folder'),
+  uninstall: () => call('uninstall', 'uninstall'),
   /* 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗 —— 落 pin / compact 两格。
      窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
   getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),

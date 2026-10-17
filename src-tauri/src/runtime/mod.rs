@@ -50,6 +50,8 @@ pub mod net;
 /// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
 pub mod param_sync;
 pub mod paths;
+/// 用户偏好 → IR（2026-10-17）：设置页那几档开关真正生效的唯一写入点。
+pub mod postproc_prefs;
 /// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
 /// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
 pub mod preset_events;

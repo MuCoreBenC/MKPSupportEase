@@ -173,8 +173,12 @@ pub fn insert_calibration_gcode(
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
         minimize_startup_gcode(filtered, &machine_type_str)
-    } else {
+    } else if ir_data.prefs.skip_vibration_calibration {
+        /* ★ 2026-10-17：这一支原来是**无条件**跑的 —— 也就是说"跳过震动检测"从来没听过
+        用户的设置，一直被当成开着。现在按设置页那一档来（出厂关 ⇒ 保留 M970/M974）。 */
         remove_vibration_detection_from_mech_mode(&content)
+    } else {
+        content
     };
 
     let insert_idx = output

@@ -98,6 +98,11 @@ import { Check } from '../../components/check'
 /* 「去系统里改…」那一处的**图片引导**（2026-10-16）：图 + 框 + 两步，见它们的头注。
    ★ 与 `guide/GuideCard` 那扇"屏幕引导"是两件事（那个贴到切片器窗口上指）。 */
 import GuideImageModal from '../guide/GuideImage'
+/* 后处理偏好那四块（2026-10-17）：各自一个文件，迁页时整块搬走即可 */
+import PostprocModeSection from './PostprocModeSection'
+import CalibSection from './CalibSection'
+import BedGlueSection from './BedGlueSection'
+import DataSection from './DataSection'
 import { openWithGuideFigure } from '../guide/openWithGuide'
 /* 「保存后的重切引导」那个共用开关（与提示里的「不再显示」写同一个键）：
    这一页是它**唯一能重新打开**的地方，见 `guide/guidesPref` */
@@ -894,6 +899,22 @@ export default function PageSettings() {
           <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{backupNote.text}</p>
         )}
       </section>
+
+      {/*
+       * 后处理那三块 + 数据/卸载（2026-10-17）。
+       *
+       * ★ 作者：「有的事设置页面的，有的到时候我要迁移到其他页面，但是你先都做出来吧，
+       *   都放在设置页面」—— 所以**暂时**全摆在这儿。将来迁走时，把对应的那个
+       *   组件（`PostprocModeSection` / `CalibSection` / `BedGlueSection` / `DataSection`）
+       *   整块搬到目标页就行：它们各自只依赖 `usePostprocPrefs` 与自己的命令，不依赖这一页。
+       *
+       * ★ 顺序照截图：后处理模式 → 校准与补偿 → 热床预涂胶 → 数据与维护 → 清理与卸载。
+       *   危险块（热床 / 卸载）放在两块常规块之后 —— 一路读下来先看常规项。
+       */}
+      <PostprocModeSection />
+      <CalibSection />
+      <BedGlueSection />
+      <DataSection />
 
       <section className={s.section} aria-label="高级设置">
         <h2 className={s.secTitle}>高级设置</h2>

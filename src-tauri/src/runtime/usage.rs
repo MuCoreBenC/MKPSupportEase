@@ -200,6 +200,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join("run")).unwrap();
+        /* 测试造坏档，不走 atomic（不是产品数据落点） */
+        #[allow(clippy::disallowed_methods)]
         std::fs::write(file_of(root), b"{not json").unwrap();
 
         assert!(load(root).items.is_empty());

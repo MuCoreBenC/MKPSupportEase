@@ -113,7 +113,15 @@ impl Sink for ClientSink {
                 accent: true,
             },
         ];
-        self.0.ask(question, choices, "stop").as_deref() == Some("keep")
+        self.0
+            .ask(
+                mkp_support_ease_lib::hook_ipc::QKIND_MACHINE_MISMATCH,
+                question,
+                choices,
+                "stop",
+            )
+            .as_deref()
+            == Some("keep")
     }
 
     /// 校准件那一问（2026-10-17）：真的推到界面上去问，选项表就是演出里那两颗。
@@ -127,7 +135,12 @@ impl Sink for ClientSink {
                 accent: *id == "print",
             })
             .collect();
-        self.0.ask(question, table, "stop")
+        self.0.ask(
+            mkp_support_ease_lib::hook_ipc::QKIND_CALIBRATION_MODE,
+            question,
+            table,
+            "stop",
+        )
     }
 }
 

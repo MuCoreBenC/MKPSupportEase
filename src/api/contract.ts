@@ -1533,6 +1533,62 @@ export interface WindowPrefs {
   compact: boolean
 }
 
+/* ---------- 后处理偏好（2026-10-17） ---------- */
+
+/** 「跑完这一趟界面怎么摆」：`silent` = 后台静默不起窗，`gui` = 独立窗口（出厂）。 */
+export type PostprocUiMode = 'silent' | 'gui'
+
+/**
+ * 设置页里那几档的**解析后**值（`null` 已解、量程已夹）。
+ *
+ * 管线读的就是这一份（经 `runtime::postproc_prefs::apply_to_ir` 写进 `ir.prefs`）——
+ * 界面只负责把它画出来、改它。
+ */
+export interface ResolvedPostprocPrefs {
+  notifyOnFinish: boolean
+  uiMode: PostprocUiMode
+  glueBottomEnabled: boolean
+  skipVibrationCalibration: boolean
+  beginStageRetractEnabled: boolean
+  beginStageRetractZLiftMm: number
+  zCalibrationDwellSec: number
+  xyCalibrationDwellSec: number
+  bedGlueEnabled: boolean
+  bedGlueAllModels: boolean
+}
+
+/**
+ * 盘上那一格（`run/app-state.json` 的 `postproc`）。
+ *
+ * 每一项 `null`/缺省 = **这一项从没动过** ⇒ 用出厂档
+ * （与"明确选了出厂档"分得开，见 `runtime::app_state::PostprocPrefs` 的注释）。
+ * 写的时候传这个形状：改一项传全量，某项给 `null` = 那一项回到出厂档。
+ */
+export interface PostprocPrefsWire {
+  notifyOnFinish?: boolean | null
+  uiMode?: PostprocUiMode | null
+  glueBottomEnabled?: boolean | null
+  skipVibrationCalibration?: boolean | null
+  beginStageRetractEnabled?: boolean | null
+  beginStageRetractZLiftMm?: number | null
+  zCalibrationDwellSec?: number | null
+  xyCalibrationDwellSec?: number | null
+  bedGlueEnabled?: boolean | null
+  bedGlueAllModels?: boolean | null
+}
+
+/** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */
+export interface PostprocPrefsView {
+  raw: PostprocPrefsWire
+  resolved: ResolvedPostprocPrefs
+  /** 量程来自后端，界面**不另写一份** */
+  limits: {
+    zDwell: { min: number; max: number }
+    xyDwell: { min: number; max: number }
+    zLift: { min: number; max: number }
+  }
+}
+
 /* ---------- 屏幕引导（2026-10-15） ---------- */
 
 /** 屏幕坐标下的一个矩形（左上角 + 宽高，单位是**点**，与 Rust `ax::RectDto` 同形）。 */
@@ -1793,8 +1849,13 @@ export interface PostProcessFinished {
    * 内核在成功那一条里报上来（Rust 侧 `hook::result_facts`，值就是归档那份事实：
    * `detail.glue` / `detail.slicer` / `printTime`）；失败 / 取消没有这一段
    * （内核还没把那几个数算出来）。界面按"有哪几格摆哪几格"渲染。
+   *
+   * ★★ **必须写成 `| null`**（2026-10-17 实测踩到）：Rust 侧这一格是
+   *   `Option<...>`，序列化出来是**显式的 `null`**、不是省略这个键。
+   *   只写 `?`（= `| undefined`）的话，判空写成 `res !== undefined` 就是一路假安全 ——
+   *   线上真的会传 `null` 进来，然后在 `res.penX` 上当场抛。
    */
-  result?: PostProcessResult
+  result?: PostProcessResult | null
 }
 
 /**
@@ -2626,6 +2687,53 @@ export interface MkpApi {
    * （**已经清掉的不会回来**）。清理全程静默，界面上不会有任何提示。
    */
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
+
+  /**
+   * 设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块的当前值（2026-10-17）。
+   *
+   * 回的是**解析后**的值（盘上 `null` 已经解成出厂档、量程已经夹住）——
+   * 界面不自己拿 null 去猜默认值，与自动清理那一条同一条口径。
+   *
+   * `raw` 是盘上原样那一格：界面用它判断"这一项动过没有"。
+   * `limits` 是后端那边量的量程，界面**不另写一份**在 TS 里。
+   */
+  getPostprocPrefs(): Promise<PostprocPrefsView>
+
+  /**
+   * 写后处理偏好：**整格覆盖**（界面手里就有全量，改一项传全量）。
+   *
+   * 传 `null`（或省略项）进来 = 那一项回到出厂档 —— 这是"整格覆盖"才能表达的。
+   */
+  setPostprocPrefs(prefs: PostprocPrefsWire): Promise<{ ok: boolean }>
+
+  /**
+   * **重置后处理状态**（2026-10-17）：治"钩子还在等答复、界面已经走了"留下的那一屏。
+   *
+   * 先让钩子那头别再等，再清界面这一侧的共享状态。回一句话 ——
+   * 设置页原样摆出来，于是"点了没反应"与"本来就没东西"分得开。
+   */
+  resetPostProcessState(): Promise<string>
+
+  /**
+   * 打开**用户预设目录**（`presets-local/`）并把窗口喊到前台（2026-10-17）。
+   *
+   * 回的是那个目录的绝对路径 —— 界面上那一行可以把路径显示出来（用户要知道"东西放哪"）。
+   * 目录不存在时后端会**先建一个空的**：新建的机器上它本来就该在，报"找不到"只会让人以为坏了。
+   */
+  openPresetFolder(): Promise<string>
+
+  /**
+   * **卸载应用**（2026-10-17）：删程序本体，然后退出。
+   *
+   * ★ 不可逆，且**用户数据一个不碰**（预设 / 执行记录 / 备份原样留着）。
+   * ★ 后端会先把 `.app` 删掉再 `exit`：删完这一下进程就没了。
+   *   Windows 上交给一个 detach 的 `cmd` 等我们退出后再删（正在跑的 exe 删不掉）。
+   * ★ 失败**原样报错**（detail 里带 `E_SYS_UNINSTALL_001`）——
+   *   静默失败会让用户以为卸了，结果切片器下次还在调它。
+   *
+   * 界面必须**两段式确认**之后再调它（见设置页那个 3 秒回退的按钮）。
+   */
+  uninstall(): Promise<void>
 
   /**
    * 窗口这一族的两格账（2026-10-17）：置顶档位 + 在不在窄窗。
