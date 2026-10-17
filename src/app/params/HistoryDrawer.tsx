@@ -28,12 +28,43 @@
  *   **逐项退一项、整批退整段**（都走同一个 `onRevert`，见下面 `wholeEntry`）。
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SegmentedField } from '../../components/field'
 import Drawer from '../shared/Drawer'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
+/* 「进入编辑模式」那颗按钮说的就是外面同一句话（三个模态框 + 这里共用一个源） */
+import { EDIT_TEXT } from '../presets/presetTree'
 import type { HistoryEntry, HistoryGroup } from './useParams'
 import s from './HistoryDrawer.module.css'
+
+/**
+ * 「还原」之后那句回话。**进场动一下**（作者要的"效果"）：
+ * 160ms 从上方 3px 淡入 —— 不弹、不跳，只是让人看见"刚刚发生了一件事"。
+ * ★ 动效走 WAAPI（WKWebView 不播 CSS animation）。
+ */
+function RevertNote({ note }: { note: { text: string; tone: 'ok' | 'muted' } }) {
+  const ref = useRef<HTMLParagraphElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const anim = el.animate(
+      [
+        { opacity: 0, transform: 'translateY(-3px)' },
+        { opacity: 1, transform: 'translateY(0)' },
+      ],
+      { duration: 160, easing: 'ease-out' },
+    )
+    return () => anim.cancel()
+  }, [note.text])
+
+  return (
+    <p ref={ref} className={s.revertNote} data-tone={note.tone} title={note.text}>
+      {note.text}
+    </p>
+  )
+}
 
 /** 逐项 = 一项一行；整批 = 一次保存（或未保存那一段）一行 */
 export type HistoryView = 'item' | 'batch'
@@ -64,6 +95,23 @@ interface Props {
    * 它们都没有 `log` 里的 id。整批那一份由 `wholeEntry` 在这里合成。
    */
   onRevert: (entry: HistoryEntry) => void
+  /**
+   * 「还原」之后那一句回话（2026-10-17）：成功 / 没变化 / 改不了。
+   *
+   * 作者的原话：「怎么我点了还原没反应…是真的没还原还是没有交互效果」——
+   * 真相是**还原成功有变化、但命中 noop 时界面一个像素都不动**（目标值就是现值），
+   * 而抽屉盖住了右边那列数值。所以这里必须回一句话，不能让人对着一颗按钮发愣。
+   */
+  note?: { text: string; tone: 'ok' | 'muted' } | null
+  /**
+   * **进入编辑模式**（2026-10-17，作者：「没有进入编辑模式就没有还原按钮，怎么让用户
+   * 知道点击进入编辑模式…和外面的按钮复用同样的逻辑」）。
+   *
+   * 只读态里「还原」不画（它是写入口）—— 用户看到一排"已保存"却没有任何动作可做，
+   * 也不知道门槛在哪（底栏那颗按钮还被抽屉盖在右边）。所以抽屉自己摆一颗，
+   * **点的是页面同一个 `setEditMode(true)`**，不另开一套逻辑。
+   */
+  onEnterEdit?: () => void
   /**
    * **只读**（2026-10-16 的编辑模式两态）：历史照看，「还原」那颗不画 ——
    * 它是个写入口，只读态只负责"看得见改过什么"。
@@ -101,6 +149,8 @@ export default function HistoryDrawer({
   onMode,
   onClose,
   onRevert,
+  note = null,
+  onEnterEdit,
   readonly = false,
   onClearHistory,
 }: Props) {
@@ -298,6 +348,9 @@ export default function HistoryDrawer({
         </p>
       }
     >
+      {/* 「还原」的回话：一句话、占一行，几秒后自己消失（状态由页面管） */}
+      {note !== null && <RevertNote note={note} />}
+
       <div className={s.views}>
         <span className={s.viewLabel}>视图</span>
         <SegmentedField
@@ -307,7 +360,27 @@ export default function HistoryDrawer({
           value={view}
           onChange={(v) => onView(v as HistoryView)}
         />
+        {/*
+          只读态：把人领到「进入编辑模式」那一态（点的是页面同一颗逻辑）。
+          没有它，这一屏就只有一排"已保存"，还原藏在编辑模式后面，而底栏那颗按钮
+          正好被抽屉盖着 —— 作者：「怎么让用户知道点击进入编辑模式」。
+        */}
+        {readonly && onEnterEdit !== undefined && (
+          <button
+            type="button"
+            className={s.enterEdit}
+            title="进入编辑模式之后，这里的每一条都能还原"
+            onClick={onEnterEdit}
+          >
+            {EDIT_TEXT.enterMode}
+          </button>
+        )}
       </div>
+
+      {/* 只读态把门槛说清楚（一句话，进编辑模式后自己消失） */}
+      {readonly && onEnterEdit !== undefined && history.length > 0 && (
+        <p className={s.readonlyHint}>当前只读：进入编辑模式后，每一条都能还原</p>
+      )}
 
       {history.length === 0 ? (
         <p className={s.empty}>这个文件本次打开还没有改动</p>

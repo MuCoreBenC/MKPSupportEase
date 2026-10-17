@@ -92,6 +92,16 @@ interface Props {
    * 不搜索时是空串。
    */
   query?: string
+  /**
+   * **只改"显示"，不改"值"**（2026-10-17）：`key → 显示用的原文`。
+   *
+   * 唯一的用户是擦料塔拖动 —— 塔在画布上走的时候，右侧 X/Y 两格要跟着走，
+   * 但那时**草稿一个字都没改**（一次拖动只提交一次、只进一条撤销）。所以这一段
+   * 不能走 `valueOf`（那是草稿的真值），只能另开一条显示通道。
+   *
+   * 不存在这里面的 key 一律走 `valueOf`；拖动一结束页面就把这一份清空。
+   */
+  valueOverrides?: Record<string, string>
 }
 
 type ShowWhen = NonNullable<NonNullable<ParamDef['meta']>['showWhen']>
@@ -207,7 +217,10 @@ export default function ParamCard({
   renderBlock,
   tower,
   query = '',
+  valueOverrides,
 }: Props) {
+  /** 行上的显示值：拖动中的临时值优先（见 Props.valueOverrides） */
+  const shownValueOf = (key: string): string => valueOverrides?.[key] ?? valueOf(key)
   /*
    * 整张卡都不适用就整张收起来（**只在浏览态**）。
    *
@@ -276,7 +289,7 @@ export default function ParamCard({
           <ParamRow
             key={node.def.key}
             def={node.def}
-            value={valueOf(node.def.key)}
+            value={shownValueOf(node.def.key)}
             savedValue={savedValueOf(node.def.key)}
             factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}

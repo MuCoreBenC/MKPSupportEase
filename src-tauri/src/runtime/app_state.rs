@@ -116,6 +116,59 @@ impl ThemePref {
     }
 }
 
+/// **主窗置顶档位**（2026-10-17「工艺页加一颗置顶开关」那一刀）。
+///
+/// 三档，与前端 `src/api/contract.ts` 的 `PinPref` 一一对应 —— **id 是契约**：
+///
+/// - `off`：不置顶（没选过也是这一档）；
+/// - `page`：**只有工艺页置顶** —— 切到别的页签自动解除，切回来又浮上去；
+/// - `always`：任何页面都置顶。
+///
+/// ★ 为什么是一格三档、不是两个 bool：两个开关能拼出"关着又始终"这种非法态，
+///   而"该不该真置顶"是**算出来的**（见 `ipc::window_layout::apply_pin`），不落盘。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PinPref {
+    Off,
+    Page,
+    Always,
+}
+
+impl PinPref {
+    /// 线上字符串 → 枚举；认不出给 `None`（调用方如实报错，**不静默回落到不置顶**）
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "off" => Some(Self::Off),
+            "page" => Some(Self::Page),
+            "always" => Some(Self::Always),
+            _ => None,
+        }
+    }
+
+    /// 枚举 → 线上字符串。只写这一处（盘上 / DTO / 前端共用同一个字面量）
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Page => "page",
+            Self::Always => "always",
+        }
+    }
+}
+
+/// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。
+///
+/// 它回答的是"用户上一次自己把窗口摆成什么样"，唯一用途 = 退出窄窗时还原。
+/// ★ 只记**普通态**（非最大化 / 非全屏 / 非窄窗）—— 最大化不是"摆放"，
+///   把它记成还原点的话，用户拉一下最大化就把"原本的位置和尺寸"弄丢了。
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowBox {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
 /// 应用状态格式的代次。加 section / 加字段不升号，改语义才升（与 catalog 同一条）。
 ///
 /// 代次史：
@@ -174,6 +227,32 @@ pub struct AppStateFile {
     /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clean_history: Option<bool>,
+    /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
+    ///
+    /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
+    /// 前端不另存一份（读口只有 `src/app/state/appState.ts`）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<PinPref>,
+    /// **主窗在窄窗态吗**（2026-10-17）：`None` = 还没选过 ⇒ 不在。
+    ///
+    /// 它是"窗口现在长什么样"的账，不是业务数据；重启时按它把窗口摆回去，
+    /// 于是"关掉软件再打开还是那个小窗"成立。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compact: Option<bool>,
+    /// **上一次手动摆放的位置与尺寸**（2026-10-17，见 [`WindowBox`]）。
+    ///
+    /// 写入点只有一个：主窗 `Moved` / `Resized` 且**不在**程序自己搬窗的那一小段、
+    /// 也不在最大化 / 全屏 / 窄窗态里（`ipc::window_layout::note_manual_geometry`）。
+    /// 读它的只有"退出窄窗"那一下。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_window_box: Option<WindowBox>,
+    /// **进窄窗之前用户自己选的那一档置顶**（2026-10-17）。
+    ///
+    /// 窄窗会替用户打开置顶（作者：「点击窄窗的时候自动置顶」），退出时要把置顶
+    /// **放回原来那一档**（「还原的时候置顶也还原成原本的」）—— 所以原档要记下来。
+    /// 它是"这一趟窄窗的还原点"，与 [`WindowBox`] 同族：`None` = 不在窄窗 / 没有可还原的档。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_before_compact: Option<PinPref>,
 }
 
 impl Default for AppStateFile {
@@ -187,6 +266,10 @@ impl Default for AppStateFile {
             param_decisions: BTreeMap::new(),
             theme: None,
             auto_clean_history: None,
+            pin: None,
+            compact: None,
+            last_window_box: None,
+            pin_before_compact: None,
         }
     }
 }
@@ -338,6 +421,11 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         theme: None,
         /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_clean_history: None,
+        /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
+        pin: None,
+        compact: None,
+        last_window_box: None,
+        pin_before_compact: None,
     };
     retire_legacy_paths(&mut snapshot);
     Ok(snapshot)
@@ -678,6 +766,62 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
     with_state(root, |state| {
         state.auto_clean_history = Some(enabled);
         Ok(enabled)
+    })
+}
+
+/* ---------- pin / compact / lastWindowBox：窗口怎么摆（2026-10-17） ---------- */
+
+/// 主窗置顶档位。**`None` = 还没选过 ⇒ `off`**（见 [`PinPref`]）。
+pub fn pin(root: &Path) -> Result<PinPref, AppError> {
+    Ok(load(root)?.pin.unwrap_or(PinPref::Off))
+}
+
+/// 记下置顶档位（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_pin(root: &Path, pref: PinPref) -> Result<PinPref, AppError> {
+    with_state(root, |state| {
+        state.pin = Some(pref);
+        Ok(pref)
+    })
+}
+
+/// 主窗在不在窄窗态。**`None` = 还没选过 ⇒ 不在**。
+pub fn compact(root: &Path) -> Result<bool, AppError> {
+    Ok(load(root)?.compact.unwrap_or(false))
+}
+
+/// 记下窄窗态（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_compact(root: &Path, on: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        state.compact = Some(on);
+        Ok(on)
+    })
+}
+
+/// 上一次手动摆放的窗口几何（没记过 = `None`，退出窄窗时按出厂尺寸居中兜底）。
+pub fn last_window_box(root: &Path) -> Result<Option<WindowBox>, AppError> {
+    Ok(load(root)?.last_window_box)
+}
+
+/// 记下这一次手动摆放。**高频调用**（拖窗 / 拉窗），调用方要自己防抖 ——
+/// 这里只管"整份状态原子替换"，不替谁攒批。
+pub fn set_last_window_box(root: &Path, b: WindowBox) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.last_window_box = Some(b);
+        Ok(())
+    })
+}
+
+/// 进窄窗之前的置顶档（`None` = 没有可还原的 —— 不在窄窗，或那一趟本来就没记）。
+pub fn pin_before_compact(root: &Path) -> Result<Option<PinPref>, AppError> {
+    Ok(load(root)?.pin_before_compact)
+}
+
+/// 记下 / 清掉"进窄窗之前的置顶档"。退出窄窗还原完就该清掉（`None`），
+/// 否则下一次进窄窗会拿一个过期的原档去还原。
+pub fn set_pin_before_compact(root: &Path, pref: Option<PinPref>) -> Result<(), AppError> {
+    with_state(root, |state| {
+        state.pin_before_compact = pref;
+        Ok(())
     })
 }
 
@@ -1225,6 +1369,84 @@ mod tests {
         assert_eq!(ThemePref::Dark.wire(), "dark");
         assert!(ThemePref::parse("黑").is_none());
         assert!(ThemePref::parse("").is_none());
+    }
+
+    /* ---------- pin / compact / lastWindowBox ---------- */
+
+    /// 三格都是"没写过 = 出厂那一档"：不置顶、不在窄窗、没有还原点；
+    /// 写过之后各自读得回来，**互不踩**（三格同一次原子替换里）
+    #[test]
+    fn window_prefs_start_at_default_and_roundtrip() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(pin(d.path()).unwrap(), PinPref::Off, "没选过 = 不置顶");
+        assert!(!compact(d.path()).unwrap(), "没选过 = 不在窄窗");
+        assert_eq!(
+            last_window_box(d.path()).unwrap(),
+            None,
+            "没记过 = 没有还原点"
+        );
+
+        set_pin(d.path(), PinPref::Always).unwrap();
+        set_compact(d.path(), true).unwrap();
+        let box_ = WindowBox {
+            x: 1280.0,
+            y: 80.0,
+            width: 600.0,
+            height: 864.0,
+        };
+        set_last_window_box(d.path(), box_).unwrap();
+
+        assert_eq!(pin(d.path()).unwrap(), PinPref::Always);
+        assert!(compact(d.path()).unwrap());
+        assert_eq!(last_window_box(d.path()).unwrap(), Some(box_));
+        /* 三格同住一份状态文件，但一个都不许被邻居改写 */
+        assert_eq!(theme(d.path()).unwrap(), None);
+        assert!(auto_clean_history(d.path()).unwrap());
+
+        set_pin(d.path(), PinPref::Page).unwrap();
+        assert_eq!(pin(d.path()).unwrap(), PinPref::Page);
+        assert!(compact(d.path()).unwrap(), "改置顶档不该把窄窗态带掉");
+    }
+
+    /// **窄窗的置顶还原点**（2026-10-17 作者：「点击窄窗的时候自动置顶…还原的时候置顶也还原成原本的」）：
+    /// 记得住、清得掉，且与 `pin` 那一格互不踩
+    #[test]
+    fn pin_before_compact_remembers_and_clears() {
+        let d = tempfile::tempdir().unwrap();
+        assert_eq!(
+            pin_before_compact(d.path()).unwrap(),
+            None,
+            "没进过窄窗 = 没有可还原的档"
+        );
+
+        set_pin(d.path(), PinPref::Off).unwrap();
+        set_pin_before_compact(d.path(), Some(PinPref::Off)).unwrap();
+        set_pin(d.path(), PinPref::Always).unwrap();
+        assert_eq!(
+            pin_before_compact(d.path()).unwrap(),
+            Some(PinPref::Off),
+            "置顶被顶成 always 之后，原档要还在"
+        );
+        assert_eq!(pin(d.path()).unwrap(), PinPref::Always);
+
+        set_pin(d.path(), PinPref::Off).unwrap();
+        set_pin_before_compact(d.path(), None).unwrap();
+        assert_eq!(
+            pin_before_compact(d.path()).unwrap(),
+            None,
+            "还原完就该清掉，免得下一次拿过期的原档"
+        );
+    }
+
+    /// **认字符串是契约**（与主题那一条同一个口径）：只认三个字面量，别的给 None
+    #[test]
+    fn pin_wire_ids_are_the_contract() {
+        assert_eq!(PinPref::parse("off"), Some(PinPref::Off));
+        assert_eq!(PinPref::parse(" page "), Some(PinPref::Page));
+        assert_eq!(PinPref::parse("always"), Some(PinPref::Always));
+        assert_eq!(PinPref::Page.wire(), "page");
+        assert!(PinPref::parse("auto").is_none());
+        assert!(PinPref::parse("").is_none());
     }
 
     /* ---------- 迁移（一次性、惰性） ---------- */

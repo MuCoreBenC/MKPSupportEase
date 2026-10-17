@@ -20,7 +20,8 @@
  *
  *   滚轮 / 方向键**只在编辑态（聚焦）生效**：滚轮监听里补一道 `activeElement` 判断，
  *   没聚焦就放行走页面滚动、不 preventDefault、更不改数字 —— 手滑一下不会把已保存的
- *   值改掉（这正是作者要修的）。聚焦后滚轮仍按 0.05 步进、方向键走 step="0.01"。
+ *   值改掉（这正是作者要修的）。聚焦后滚轮仍按 0.05 步进；方向键/箭头自 2026-10-17 起
+ *   也走 `step="0.05"`（原来 0.01，与滚轮两条口径）。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -74,7 +75,9 @@ export default function CalibReadings({
   /*
    * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
    * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
-   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减。
+   * ★ 2026-10-17：`step` 也改成 0.05（见 `data-step` 那一行）—— 滚轮 / 箭头 / 键盘
+   *   三者同一档，不再出现"滚一下 0.05、按一下 0.01"。
    *
    * **只在这一格聚焦（编辑态）时才动手**：没聚焦就直接 return，让滚轮照常滚页面 ——
    * 否则鼠标划过就把已保存的值改了（作者第十一轮要修的正是这个）。
@@ -135,7 +138,7 @@ export default function CalibReadings({
                     id={id}
                     className={s.fieldInput}
                     type="number"
-                    step="0.01"
+                    step="0.05"
                     min={-50}
                     max={50}
                     inputMode="decimal"

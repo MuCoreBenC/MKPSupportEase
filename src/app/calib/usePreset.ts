@@ -21,7 +21,7 @@
  * 的夹具）：文件体系是唯一的路，这里也不会再出现第二份"按版本索引的表"。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { isAppError } from '../../api/contract'
 import type { AppError, Axes, Preset } from '../../api/contract'
@@ -34,11 +34,12 @@ export type { Preset }
  * 预设的加载态。
  *
  * `idle` 是"还没选齐二级 / 后端没有这一份"，不是"空闲等着下载" —— 没选完就没有"哪一份预设"可谈。
- * 中间态只有 `waiting` 会真的停留：假后端是同进程的同步数据，真后端连接慢时这一步会亮骨架。
+ * 中间态只有 `waiting` 会真的停留：假后端是同进程的同步数据，真机是一次本地 IPC
+ * （**不联网** —— 目录、参数、副本三样都在本机）。
  * `downloading` 这一档**取不到** —— 它原本只由试验场的调试面板扳出来。形状留着不动：
  * 读它的那几个组件是照搬过来的，不为了删一个分支去改它们。
  *
- * `failed` 多带一个 `error`：界面光说一句「连接失败」对排查毫无帮助，日志里那一条才有
+ * `failed` 多带一个 `error`：界面光说一句「读取失败」对排查毫无帮助，日志里那一条才有
  * 上下文，两者之间唯一的桥是 `traceId` —— 所以错误对象要一路带到 `PresetStack` 上
  * （见 `components/TraceTag`）。
  */
@@ -81,23 +82,33 @@ export function usePreset(sel: Selection): PresetState {
   /* 本机文件面代次：别处下载 / 另存 / 删除之后，这一支要重读（见 effect 尾部注释） */
   const deliveryRevision = useDeliveryRevision()
 
-  const [state, setState] = useState<PresetState>(() => {
-    const hit =
-      machine !== null && version !== null ? presetCache.get(`${machine}/${version}`) : undefined
-    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'idle' }
-  })
+  /*
+   * ★★ 状态**跟着"哪一版"走**（2026-10-17 第六轮）。
+   *
+   * 原来是裸 `useState`：换一版时 effect 里才 `setState(waiting)`，于是**中间有一帧**
+   * 是"旧的 ready + 新的选择" —— 选机型页那一格就拿着旧名字配新副本画出来，看起来
+   * 是"先多出来、再变少、再改名"（作者连拍照到的就是它）。
+   *
+   * 现在状态带钥匙：渲染时发现钥匙对不上，**当帧**就换成新版的（缓存命中直接 ready），
+   * 不会出现混合态。`useMemo` 保证对象身份稳定（`useCalibration` 那条 effect 依赖它）。
+   */
+  const key = complete && machine !== null && version !== null ? `${machine}/${version}` : null
+  const [entry, setEntry] = useState<{ key: string; state: PresetState } | null>(null)
+  const state = useMemo<PresetState>(() => {
+    if (key === null) return { status: 'idle' }
+    if (entry !== null && entry.key === key) return entry.state
+    const hit = presetCache.get(key)
+    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'waiting', name: PENDING_NAME }
+  }, [entry, key])
 
   useEffect(() => {
-    if (!complete || machine === null || version === null) {
-      setState({ status: 'idle' })
-      return
-    }
+    if (!complete || key === null || machine === null || version === null) return
 
     /* 选择在请求回来之前又改了：旧那一份的结果直接丢掉，不许它盖掉新的 */
     let alive = true
     /* 缓存里有上一份就站在它上面刷新，不清成 waiting —— 重挂时读数不许闪「—」 */
-    if (!presetCache.has(`${machine}/${version}`)) {
-      setState({ status: 'waiting', name: PENDING_NAME })
+    if (!presetCache.has(key)) {
+      setEntry({ key, state: { status: 'waiting', name: PENDING_NAME } })
     }
 
     Promise.all([
@@ -112,8 +123,8 @@ export function usePreset(sel: Selection): PresetState {
         /* 这个版本没有配 MKP 预设文件（如 A2L）：当没选，别拿半份数据糊弄 */
         const file = files?.files.find((f) => f.kind === 'mkp_preset')
         if (file === undefined) {
-          presetCache.delete(`${machine}/${version}`)
-          setState({ status: 'idle' })
+          presetCache.delete(key)
+          setEntry({ key, state: { status: 'idle' } })
           return
         }
 
@@ -137,12 +148,16 @@ export function usePreset(sel: Selection): PresetState {
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
         if (axes === null || speed === null) {
-          setState({ status: 'failed', name: PENDING_NAME })
+          setEntry({ key, state: { status: 'failed', name: PENDING_NAME } })
           return
         }
 
         const preset: Preset = {
+          /* 「实际会用的那一份」：有副本就是副本（校准写它） */
           name: copy?.fileName ?? file.fileName,
+          /* 套餐里那份 —— 选机型页的「预设文件」只认它（见 contract 里那段） */
+          bundleName: file.fileName,
+          bundlePath: file.path,
           path: copy?.path ?? file.path,
           axes,
           speed,
@@ -150,17 +165,20 @@ export function usePreset(sel: Selection): PresetState {
              ★ 本仓术语是 `preset / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */
           local: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
-        presetCache.set(`${machine}/${version}`, preset)
-        setState({ status: 'ready', preset })
+        presetCache.set(key, preset)
+        setEntry({ key, state: { status: 'ready', preset } })
       },
       (err: unknown) => {
         if (!alive) return
         console.error('[preset] 取预设失败', err)
         /* 带着 AppError 一起进状态：界面要能显示 traceId，否则日志里那条查不到人 */
-        setState({
-          status: 'failed',
-          name: PENDING_NAME,
-          error: isAppError(err) ? err : undefined,
+        setEntry({
+          key,
+          state: {
+            status: 'failed',
+            name: PENDING_NAME,
+            error: isAppError(err) ? err : undefined,
+          },
         })
       },
     )
@@ -175,10 +193,11 @@ export function usePreset(sel: Selection): PresetState {
      * 一个陈旧的 `local`（比如你刚在预设页另存了一份，这里还以为"还没有本地这份"，
      * 校准就没地方写）。同一条口径见 `../state/deliveryState.ts` 文件头。
      */
-  }, [complete, machine, version, deliveryRevision])
+  }, [complete, machine, version, key, deliveryRevision])
 
   /* 直接把 state 交出去。
      身份必须稳定：useCalibration 的「预设换了就作废草稿」那条 effect 依赖的是这个对象本身，
-     每次渲染新造一个会让它反复清空草稿。useState 持有的对象只在 setState 时才换，所以够稳。 */
+     每次渲染新造一个会让它反复清空草稿。`useMemo` + `setEntry` 只在"哪一版"或它那一份状态
+     真的变了时才换引用（同键重读回来的新对象会换 —— 那是新事实，本来该换）。 */
   return state
 }

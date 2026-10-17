@@ -118,7 +118,9 @@ export default function PresetPickerDrawer({
 
   if (!open) return null
 
-  /* 按机型分组（保持 rows 给的顺序 —— 调用方已按机型显示名 + 版本排好） */
+  /* 按机型分组（保持 rows 给的顺序 —— 调用方已按机型显示名 + 版本排好）。
+     ★ 2026-10-17：**不要按"使用次数"重排这里**（作者：「不要动这些列表的」）——
+     学习账只用来决定"默认展示哪一份"，不参与列表排序。 */
   const groups: { id: string; display: string; items: PresetPickerRow[] }[] = []
   for (const row of rows) {
     const last = groups[groups.length - 1]

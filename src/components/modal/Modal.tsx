@@ -208,18 +208,22 @@ export default function Modal({
       >
         <header className={s.head}>
           <span className={s.headText}>
-            <strong className={s.title}>{title}</strong>
             {/*
-             * 副标题那一行 = 文件名 + **回执槽**（框里 portal 进来的那句状态）。
-             * 两者同一行是刻意的：那句回执说的就是这份文件名（「已写回 A1-fast.toml」）。
-             * 没有副标题也没有回执时整行不画（别为空格子留一道 3px 的缝）。
+             * 标题那一行 = 标题 + **回执槽**（框里 portal 进来的那一句状态）。
+             *
+             * ★ 2026-10-17 晚：回执从「副标题右边」搬到**标题右边**（作者：
+             *   「要不然利用起来标题旁边的空间」「文字长的话会导致换行」）。
+             *   原因很实在：副标题那一行已经被文件名占着，回执一长就顶着文件名与
+             *   右侧动作簇，窄窗里直接换行 / 压到按钮底下。标题右边那一整片本来是空的。
+             *
+             * 回执本身永远是**一行 + 省略号**（`white-space: nowrap` 在页面的 `.note` 上），
+             * 这里只负责给它一块**能收缩**的地方：`flex: 1 1 auto` + `min-width: 0`。
              */}
-            {(subtitle !== undefined || headNoteSlot !== null) && (
-              <span className={s.subRow}>
-                {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
-                <span ref={setHeadNoteSlot} className={s.headNote} />
-              </span>
-            )}
+            <span className={s.titleRow}>
+              <strong className={s.title}>{title}</strong>
+              <span ref={setHeadNoteSlot} className={s.headNote} />
+            </span>
+            {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
           </span>
           {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
           <span className={s.headActs}>

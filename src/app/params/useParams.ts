@@ -66,6 +66,8 @@ import type {
   RuntimeCatalog,
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
+/* 显示精度唯一出口（`mm` 两位、其余原样）—— 与 `FieldControl` / `NumberField` 同一套 */
+import { displayDecimals, formatNum } from '../../components/field/value'
 
 /**
  * 参数编辑器的两种打开方式。
@@ -213,6 +215,18 @@ export interface Patch {
   /** `undefined` = 撤掉草稿（回到已保存的值） */
   value: string | undefined
 }
+
+/**
+ * `apply` 的结果 —— 三种，缺一不可：
+ *
+ *   `applied`  真写进去了（撤销栈 / 历史各多一条）
+ *   `noop`     目标值与现值**逐项相同**，没有可写的（不产生任何记录）
+ *   `blocked`  写值闸拦住了（弃用字段 / 弃用选项），已经写好一句人话（`gateNote`）
+ *
+ * ★ 存在的理由：「历史 → 还原」点了要回话。原来 `apply` 不说话，点了命中 noop
+ *   就静悄悄 —— 作者的原话是「怎么我点了还原没反应…是真的没还原还是没有交互效果」。
+ */
+export type ApplyResult = 'applied' | 'noop' | 'blocked'
 
 interface EditStep {
   patch: Record<string, string | undefined>
@@ -381,12 +395,27 @@ function controlFromUi(ui: string): 'number' | 'switch' | 'choice' | 'text' {
  */
 const RANGE_LIKE_UNIT = /^\s*\d+(?:\.\d+)?\s*[-~～—–]\s*\d+(?:\.\d+)?\s*$/
 
-function unitOf(raw: string | undefined): string | undefined {
-  if (raw === undefined) return undefined
+/**
+ * 单位归一：`null` 与 `undefined` **同义 = 没有单位**。
+ *
+ * ★ 2026-10-17：「擦料塔挤出倍率」曾显示成 `1 null`。注册表里那一条根本没有 `unit`
+ *   字段，但配方/定义通道过来是 JSON 的 `null` —— 而下游判的是 `!== undefined`，
+ *   `null` 就那么一字不改地拼进了字符串。这不是脏数据，是**两种"没有"**。
+ *   所以这里把 `null` 也吞掉，往后的类型只有 `string | undefined` 一种缺失形态。
+ */
+function unitOf(raw: string | null | undefined): string | undefined {
+  if (raw == null) return undefined
   return RANGE_LIKE_UNIT.test(raw) ? undefined : raw
 }
 
-/** 某个值该显示成什么字 —— 还原 chip、历史条目、保存确认都走这一套翻译 */
+/**
+ * 某个值该显示成什么字 —— 还原 chip、历史条目、保存确认、行内只读值全走这一套翻译。
+ *
+ * 两条规矩（2026-10-17）：
+ *   1. **有单位才拼单位**（`null` 不算，见 `unitOf`）；
+ *   2. **数字按显示精度渲染**（`formatNum`）：`mm` 固定两位（`-0.50` / `24.00` / `3.70`），
+ *      其余单位原样、只修浮点尾巴。盘上的原文一个字都不改 —— 这里只管"给我看的字"。
+ */
 export function valueText(def: ParamDef | undefined, raw: string): string {
   if (raw === '') return '空'
   if (def === undefined) return raw
@@ -395,7 +424,9 @@ export function valueText(def: ParamDef | undefined, raw: string): string {
     return def.field.choices?.find((c) => c.value === raw)?.label ?? raw
   }
   if (def.field.control === 'gcode') return `${raw.split('\n').length} 行`
-  return def.unit !== undefined ? `${raw} ${def.unit}` : raw
+  /* 数字按显示精度走；非数字（`tower` / G-code 之类）`formatNum` 原样退回 */
+  const text = formatNum(raw, displayDecimals(def.unit, def.field.step))
+  return def.unit != null ? `${text} ${def.unit}` : text
 }
 
 const cellKey = (machineId: string, versionId: string, key: string) =>
@@ -507,7 +538,14 @@ export interface Params {
   plateOf: () => Plate | undefined
 
   /** 唯一写入口。一次调用 = 一条撤销 + 一条日志 */
-  apply: (label: string, patches: Patch[]) => void
+  /**
+   * 一次动作写进草稿。**返回结果**（2026-10-17 加）：
+   *   `applied` 真改了 · `noop` 目标值就是现值（什么都不用做）· `blocked` 被写值闸拦住
+   *
+   * 「历史抽屉的还原」要拿它回话 —— 点了没反应到底是"本来就一样"还是"改不了"，
+   * 不区分的话用户只会觉得按钮坏了。
+   */
+  apply: (label: string, patches: Patch[]) => ApplyResult
   edit: (key: string, value: string) => void
 
   /**
@@ -567,7 +605,7 @@ export interface Params {
   /** 这个组合保存过几次 */
   savedBatches: number
   /** 「还原」历史里那一条（逐项 = 那一项的净变化；整批 = 那一整段的所有项） */
-  revertEntry: (entry: HistoryEntry) => void
+  revertEntry: (entry: HistoryEntry) => ApplyResult
   /**
    * **清空这一份的修改历史**（2026-10-17 抽屉右上那颗，二次确认在前端做）。
    * 记录与批号一起归零 —— 之后的保存从「第 1 次保存」重新数起。
@@ -1269,7 +1307,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 值没变的项不占一格撤销。
    */
   const apply = useCallback(
-    (label: string, patches: Patch[]) => {
+    (label: string, patches: Patch[]): ApplyResult => {
       /*
        * **写值闸**（2026-10-02，作者裁决）：弃用字段 / 弃用选项不许写新值。
        *
@@ -1298,7 +1336,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             ? `${def?.label ?? dep.key} 的「${choice.label}」已弃用，不能改（上游已标记）`
             : `${def?.label ?? dep.key} 已弃用，不能改（上游已标记）`,
         )
-        return
+        return 'blocked'
       }
 
       const patch: Record<string, string | undefined> = {}
@@ -1329,7 +1367,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         })
       }
 
-      if (items.length === 0) return
+      /* 逐项都等于现值 ⇒ 没有要写的东西（历史「还原」最常见的一下）：如实回答，不装作写了 */
+      if (items.length === 0) return 'noop'
 
       const id = seq + 1
       const next = { ...draft }
@@ -1361,6 +1400,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       for (const [key, value] of Object.entries(patch)) {
         patchDraft(key, value ?? savedValueOf(key))
       }
+      return 'applied'
     },
     [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq],
   )
@@ -1565,9 +1605,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *   整批交进来的是一整段 ⇒ 一次 `apply` 退完、**撤销一次全回来**。
    */
   const revertEntry = useCallback(
-    (entry: HistoryEntry) => {
-      if (entry.state === 'undone' || entry.items.length === 0) return
-      apply(
+    (entry: HistoryEntry): ApplyResult => {
+      if (entry.state === 'undone' || entry.items.length === 0) return 'noop'
+      /*
+       * 「还原」= 把这一段开始前的值**再写一遍**（一次动作、可撤销、进历史）。
+       * 返回 `apply` 的三种结果：抽屉拿它回话 —— 命中 `noop` 很常见
+       * （这几天你已经手动改回那个值了），那时界面上不会有一丝变化。
+       */
+      return apply(
         `回退 ${entry.action}`,
         entry.items.map((item) => ({ key: item.key, value: item.from })),
       )

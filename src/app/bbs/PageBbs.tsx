@@ -49,6 +49,7 @@ import { useBbsDelivered } from './useBbsDelivered'
 import { useBbsDrawer } from './useBbsDrawer'
 import { useBbsRail } from './useBbsRail'
 import { useBbsPreset } from './useBbsPreset'
+import WindowGadgets from './WindowGadgets'
 import type { BbsViewMode } from './bbsTypes'
 import s from './PageBbs.module.css'
 
@@ -509,6 +510,13 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           label="在当前预设的参数里搜索"
           onChange={setParamQuery}
         />
+
+        {/*
+          窗口的两枚开关（2026-10-17，作者：「置顶」「窄窗」）—— 挂在这一行最右端。
+          为什么是这一页：他的用法是"置顶之后贴到切片器旁边看参数"，工艺页正是那一页；
+          为什么是文字胶囊：这两件事图标读不出来（见 `WindowGadgets` 文件头）。
+        */}
+        <WindowGadgets />
 
         {/*
           「导入 JSON」已退役（2026-10-13 作者口径）：这一页只看真源 ——

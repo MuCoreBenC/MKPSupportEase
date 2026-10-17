@@ -199,6 +199,8 @@ export const bridgeApi: MkpApi = {
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   /* 修改历史账本（2026-10-17）：一份文件一本，盘上留着、重开软件还在 */
   getPresetHistory: (origin, id) => call('getPresetHistory', 'get_preset_history', { origin, id }),
+  /* 「哪份用得最多」：只读；写在后端"应用预设"那一步（2026-10-17） */
+  getPresetUsage: () => call('getPresetUsage', 'get_preset_usage'),
   putPresetHistory: (origin, id, history) =>
     call('putPresetHistory', 'put_preset_history', {
       origin,
@@ -301,6 +303,12 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗 —— 落 pin / compact 两格。
+     窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
+  getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),
+  setPin: (pin, onBbs) => call('setPin', 'set_pin', { pin, onBbs }),
+  applyPin: (onBbs) => call('applyPin', 'apply_pin', { onBbs }),
+  setCompact: (compact) => call('setCompact', 'set_compact', { compact }),
   /* 屏幕引导（2026-10-15）：改了参数之后指给用户看那一步 —— 只读坐标，不替用户点 */
   locateBedTypeControl: () => call('locateBedTypeControl', 'locate_bed_type_control'),
   guideShow: () => call('guideShow', 'guide_show'),

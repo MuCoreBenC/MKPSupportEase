@@ -158,6 +158,9 @@ pub fn run() {
                 我们用 Auto Layout 约束钉到作者要的位置（2026-10-17 起 —— 补摆 frame
                 的老路在拖窗过程中一帧错一下，约束是布局的一部分，没有这个问题）。 */
                 chrome::reposition_traffic_lights(&win);
+                /* 上次是窄窗就还摆成窄窗、置顶档也照盘上那一格落（2026-10-17）。
+                ★ 摆在装饰装好之后：搬窗会触发 `Resized`，那一下要重钉红绿灯 */
+                ipc::window_layout::restore_at_startup(app.handle());
                 /* 两个重钉时机：① 档位是"跟随系统"时系统深浅变了；
                 ② 尺寸变了（拉窗 / 进出全屏）—— 进出全屏 AppKit 可能整棵标题栏视图树
                 重建，按钮换新对象时要在它们身上重新钉约束（平时这些调用都是空转） */
@@ -173,6 +176,12 @@ pub fn run() {
                     }
                     tauri::WindowEvent::Resized(_) => {
                         chrome::reposition_traffic_lights(&watcher);
+                        /* 「上一次手动摆放」的记账点（2026-10-17）。事件这侧只补一个代数，
+                        判定与落盘在 400ms 之后由后台线程做（见 `ipc::window_layout`） */
+                        ipc::window_layout::touch_geometry(watcher.app_handle());
+                    }
+                    tauri::WindowEvent::Moved(_) => {
+                        ipc::window_layout::touch_geometry(watcher.app_handle());
                     }
                     _ => {}
                 });
@@ -326,6 +335,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,
         ipc::history::clear_preset_history,
+        // 「哪份预设用得最多」的本机学习账（2026-10-17）：只读；写入在"应用预设"那一步
+        ipc::usage::get_preset_usage,
         // 对比台 + 云端版本账（2026-10-08）：只在**用户自己的预设**之间对比
         ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
@@ -388,6 +399,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗。落 AppState 的
+        // pin / compact / lastWindowBox 三格；窗口几何的副作用只在 `ipc::window_layout`
+        ipc::window_layout::get_window_prefs,
+        ipc::window_layout::set_pin,
+        ipc::window_layout::apply_pin,
+        ipc::window_layout::set_compact,
         // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
         // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
         ipc::guide::locate_bed_type_control,
@@ -476,6 +493,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,
         ipc::history::clear_preset_history,
+        // 学习账（与上面那份清单一字不差）
+        ipc::usage::get_preset_usage,
         // 对比台 + 云端版本账（与上面那份清单一字不差）
         ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
@@ -533,6 +552,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 主窗怎么摆（2026-10-17）：与上面那份清单一字不差
+        ipc::window_layout::get_window_prefs,
+        ipc::window_layout::set_pin,
+        ipc::window_layout::apply_pin,
+        ipc::window_layout::set_compact,
         // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
         // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
         ipc::guide::locate_bed_type_control,

@@ -1,0 +1,37 @@
+/*
+ * 「处理中」的三颗点（见 PostProcessChip.tsx 头注释：为什么是点、为什么用 WAAPI）。
+ *
+ * 尺寸按标题栏胶囊那一格 16×16 配：每颗 3px、间隔 3px，三颗正好 15px 宽；
+ * 起伏幅度 3px —— 再大就会顶到胶囊上下那两条边。
+ * 颜色继承 `.icon`（`--accent`），这里不写色值。
+ */
+
+.dots {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+}
+
+.dots > i {
+  display: block;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentcolor;
+  /* 静态值是"停在起点"，第一帧与动画 0% 一致（不先闪一下） */
+  opacity: 0.35;
+}
+
+/* 不动的时候（`prefers-reduced-motion`）也要能读出"在跑"：不透明的那一颗留在中间。
+   只在降级档写 —— 平时它是动画管的事，静态写着会在错峰那 140ms 里闪一下 */
+@media (prefers-reduced-motion: reduce) {
+  .dots > i:nth-child(1),
+  .dots > i:nth-child(3) {
+    opacity: 0.35;
+  }
+
+  .dots > i:nth-child(2) {
+    opacity: 1;
+  }
+}

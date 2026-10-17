@@ -19,6 +19,7 @@ import type {
   PresetParamValues,
   PresetHistory,
   PresetSource,
+  PinPref,
   SoftwareUpdate,
   ThemePref,
   LocalPresetFile,
@@ -137,6 +138,18 @@ let mockTheme: ThemePref | null = null
  * 演示里给"开着"——与真机同一个出厂默认（没选过 = 开），别在这里另立一套。
  */
 let mockAutoClean = true
+
+/*
+ * 浏览器演示用的窗口两格（**内存态，刷新即还原**；真数据在 Rust 侧 run/app-state.json）。
+ * 与真机同一个出厂默认：不置顶、不在窄窗。
+ *
+ * ★ 真窗口那半（`set_always_on_top` / `set_size` / `set_position`）在浏览器里**空转**——
+ *   没有窗口可摆。但这两格照常记账：探针要验"点两下文字换了、盒子没变宽"。
+ */
+let mockPin: PinPref = 'off'
+let mockCompact = false
+/* 进小窗之前用户自己选的那一档（退出时还原）—— 与 Rust 侧 `pinBeforeCompact` 同一格 */
+let mockPinBeforeCompact: PinPref | null = null
 
 /*
  * 浏览器里的「用户目录」：**内存态**（刷新还原）—— 与 `mockActive` 同一套做法。
@@ -364,6 +377,14 @@ function mockUntakenName(wanted: string): string {
  * 假后端不需要那一层），值 = 整本账。
  */
 const mockHistory = new Map<string, PresetHistory>()
+
+/**
+ * **学习账**（2026-10-17）：真机在 `<appDataDir>/run/usage.json`（**不进备份**）。
+ *
+ * 计数点是**后处理那一趟**（钩子载入 IR 之后），不是"点了使用" ——
+ * 浏览器里没有钩子进程，所以这一档在预览里**永远是空的**（如实为假，不铺假数据）。
+ */
+const mockUsage = new Map<string, { count: number; lastUnix: number }>()
 
 /** 一本账认一份文件：同一条线 + 同一个身份 = 同一本（两份同名文件各有一本） */
 function historyKeyOf(origin: string, id: string): string {
@@ -1280,6 +1301,15 @@ export const mockApi: MkpApi = {
     mockHistory.delete(historyKeyOf(origin, id))
   },
 
+  /* 学习账：真机读 `run/usage.json`；浏览器里读内存（上面 `mockUsage`） */
+  async getPresetUsage() {
+    return [...mockUsage.entries()].map(([key, e]) => ({
+      key,
+      count: e.count,
+      lastUnix: e.lastUnix,
+    }))
+  },
+
   /*
    * **备份**：浏览器预览里**没有家当可打包**（没有数据根），所以照实说没有 ——
    * 不假装打了一份（那会让用户以为自己有备份）。
@@ -2090,6 +2120,41 @@ export const mockApi: MkpApi = {
   async setAutoCleanHistory(enabled) {
     mockAutoClean = enabled
     return mockAutoClean
+  },
+
+  /*
+   * 主窗怎么摆（2026-10-17）：与主题同一套口径 —— 内存镜像、认档才收。
+   * 窗口行为空转：浏览器里那扇窗不是我们能摆的，"置顶 / 窄窗"只在真机上有体感。
+   */
+  async getWindowPrefs() {
+    return { pin: mockPin, compact: mockCompact }
+  },
+
+  /* 第二个参数（`onBbs`）在演示后端没有读者：浏览器里本来就没有"置顶"这件事 */
+  async setPin(pin: PinPref) {
+    if (pin !== 'off' && pin !== 'page' && pin !== 'always') {
+      throw new Error(`认不出的置顶档：${pin}（只能是 off / page / always）`)
+    }
+    mockPin = pin
+    return mockPin
+  },
+
+  async applyPin() {
+    return mockPin === 'always'
+  },
+
+  /* 与真后端同一套口径（2026-10-17 作者第二轮）：**小窗一开就置顶，还原时把置顶放回去** */
+  async setCompact(compact: boolean) {
+    if (compact === mockCompact) return mockCompact
+    if (compact) {
+      mockPinBeforeCompact = mockPin
+      mockPin = 'always'
+    } else if (mockPin === 'always' && mockPinBeforeCompact !== null) {
+      mockPin = mockPinBeforeCompact
+      mockPinBeforeCompact = null
+    }
+    mockCompact = compact
+    return mockCompact
   },
 
   /* —— baseline + 对比台（2026-10-08）：固定演示版本账 + 从演示正文里读写参数 ——

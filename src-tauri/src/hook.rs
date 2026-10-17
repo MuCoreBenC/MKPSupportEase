@@ -539,7 +539,9 @@ pub fn run(
     // 报的是"模型超出打印边界 X：185.9mm"，把真正的原因埋在了一句听不懂的话里）。
     let preset_machine = ir.machine.machine_type.clone();
     let gcode_machine = ir.machine.gcode_machine_type.clone();
-    if is_machine_mismatch(&preset_machine, &gcode_machine) {
+    /* 学习账要用：机型不符的那一趟**不算**（见下面成功出口那段） */
+    let machine_mismatch = is_machine_mismatch(&preset_machine, &gcode_machine);
+    if machine_mismatch {
         /* 三句（问句 / 停下 / 拒绝）共用同一份事实：两个机型名 */
         let with_machines = |key: &'static str| {
             Reason::new(key)
@@ -652,6 +654,30 @@ pub fn run(
     } else {
         None
     };
+
+    /*
+     * **学习账记一次**（2026-10-17 晚定口径，作者：「不是使用就增加，是后处理才加」
+     * 「机型不符、后面失败不算」）。
+     *
+     * 位置就在成功出口：走到这儿说明这一趟**真的跑成了**。机型不符的那一趟跳过
+     * （哪怕用户选择"继续"，它用的也是一份对不上机型的预设，不该给那份加分）。
+     *
+     * 钥匙 = 切片器给的绝对路径 → `local:` / `cloud:` 前缀（[`runtime::usage::key_of_path`]）；
+     * 落在两个根之外的 TOML（用户放桌面）就不记。写不进去只记日志 ——
+     * 这一趟后处理绝不能因为学习账失败而失败。
+     */
+    if !machine_mismatch {
+        if let (Some(internal), Some(user)) = (
+            crate::fsx::paths::internal_root_headless(),
+            crate::fsx::paths::user_root_headless(),
+        ) {
+            if let Some(key) = crate::runtime::usage::key_of_path(&internal, &user, &job.toml) {
+                if let Err(err) = crate::runtime::usage::bump(&internal, &key) {
+                    eprintln!("[usage] 记一次后处理失败（不影响这一趟）：{err}");
+                }
+            }
+        }
+    }
 
     Ok(Outcome {
         output: done.output_path,

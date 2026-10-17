@@ -1,8 +1,12 @@
 /*
  * **标题栏的下载指示器 + 详情面板**（2026-10-05 第五刀）。
  *
- * 作者要的是"像 Trae / WorkBuddy 那样"：**状态栏一个小图标、环形进度、点开是详情面板
- * （下载 / 暂停 / 取消）、下载完出现「重启并安装」**。所以：
+ * 作者要的是"像 Trae / WorkBuddy 那样"：**状态栏一个小图标、点开是详情面板
+ * （下载 / 暂停 / 取消）、下载完出现「重启并安装」**。
+ *
+ * 进度**原来是圆环**（`stroke-dashoffset` 画一圈），2026-10-17 作者改口：
+ * 「更新的也可以不用圆环，用下载的动态的图标」—— 于是那一格换成
+ * **一枚会往下跑的下载箭头 + 百分比**（WAAPI 驱动，见 `DownloadIcon`）：
  *
  * - **常驻标题栏**（不在设置页里）—— 用户在哪一页都看得见它在下载；
  * - **没有任务时什么都不占**（`state = idle` 直接不渲染，不留一个灰图标占位）；
@@ -20,11 +24,48 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { api, errorText, listen } from '../../api'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateInfo, UpdateState } from '../../api/contract'
-import s from './UpdateIndicator.module.css'
+import TitlebarChip from './TitlebarChip'
 
-/** 进度环那一圈（SVG 直径，stroke 居中画在半径上） */
-const RING = 13
-const CIRC = 2 * Math.PI * RING
+/**
+ * 下载那一枚（16×16）：**托盘不动，箭头往下走** —— "正在把东西取回来"最省话的动法。
+ *
+ * ★ 动效走 WAAPI（`element.animate()`），不走 CSS animation：WKWebView 上 CSS 动画
+ *   不播（`app/postprocess/HANDOVER.md` §4）。暂停时停在原位、失败时干脆不动。
+ * ★ 淡入淡出收在关键帧里（末尾 opacity 归 0 再从头起），循环那一瞬不跳。
+ */
+function DownloadIcon({ active }: { active: boolean }) {
+  const arrowRef = useRef<SVGGElement | null>(null)
+
+  useEffect(() => {
+    const el = arrowRef.current
+    if (el === null || !active) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const anim = el.animate(
+      [
+        { transform: 'translateY(-2px)', opacity: 0 },
+        { transform: 'translateY(-1px)', opacity: 1, offset: 0.25 },
+        { transform: 'translateY(2px)', opacity: 1, offset: 0.7 },
+        { transform: 'translateY(2.6px)', opacity: 0 },
+      ],
+      { duration: 1100, iterations: Infinity, easing: 'ease-in-out', fill: 'both' },
+    )
+    return () => anim.cancel()
+  }, [active])
+
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+      <g ref={arrowRef}>
+        <path d="M8 2.6v7.6M5 7.4 8 10.4l3-3" strokeLinecap="round" strokeLinejoin="round" />
+      </g>
+      <path
+        d="M4 11.6v1.4a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
 
 /** 字节数 → 人话（MB / GB；`total = 0` 就是"总量未知"） */
 function mb(v: number): string {
@@ -33,8 +74,8 @@ function mb(v: number): string {
   return `${Math.max(1, Math.round(v / 1024))} KB`
 }
 
-/** 进度环那一格显示什么（**百分比优先**；总量未知时给"已下多少"） */
-export function progressLabel(state: UpdateState): string {
+/** 标题栏那一格显示什么（**百分比优先**；总量未知时给"已下多少"）—— 只本文件用，不导出 */
+function progressLabel(state: UpdateState): string {
   switch (state.state) {
     case 'downloading':
     case 'paused':
@@ -50,8 +91,8 @@ export function progressLabel(state: UpdateState): string {
   }
 }
 
-/** 这一态要不要在标题栏露脸（**没任务就不占位**） */
-export function isVisible(state: UpdateState): boolean {
+/** 这一态要不要在标题栏露脸（**没任务就不占位**）—— 只本文件用，不导出 */
+function isVisible(state: UpdateState): boolean {
   return state.state === 'downloading' || state.state === 'paused' || state.state === 'ready' || state.state === 'failed'
 }
 
@@ -283,40 +324,22 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
 
   if (!isVisible(shown)) return null
 
-
-  const ring =
-    shown.state === 'downloading' || shown.state === 'paused'
-      ? shown.total > 0
-        ? (shown.received / shown.total) * CIRC
-        : CIRC * 0.25 /* 总量未知：给一小段"还在动"的暗示，不假装知道多少 */
-      : shown.state === 'ready'
-        ? CIRC
-        : CIRC * 0.15
-
   return (
-    <div className={s.wrap} data-testid="update-indicator">
-      <button
-        type="button"
-        className={s.icon}
-        title={progressLabel(shown)}
-        aria-label={`软件更新：${progressLabel(shown)}`}
-        onClick={() => setOpen((v) => !v)}
-        disabled={busy}
-      >
-        <svg viewBox="0 0 32 32" className={s.ring} aria-hidden="true">
-          <circle cx="16" cy="16" r={RING} className={s.track} />
-          <circle
-            cx="16"
-            cy="16"
-            r={RING}
-            className={s.bar}
-            strokeDasharray={CIRC}
-            strokeDashoffset={CIRC - ring}
-          />
-        </svg>
-        <span className={s.label}>{progressLabel(shown)}</span>
-      </button>
-
-    </div>
+    <TitlebarChip
+      testId="update-indicator"
+      icon={<DownloadIcon active={shown.state === 'downloading'} />}
+      label={progressLabel(shown)}
+      tone={
+        shown.state === 'failed'
+          ? 'danger'
+          : shown.state === 'paused'
+            ? 'muted'
+            : 'accent'
+      }
+      title={`软件更新：${progressLabel(shown)}（点击查看详情）`}
+      ariaLabel={`软件更新：${progressLabel(shown)}`}
+      onClick={() => setOpen((v) => !v)}
+      disabled={busy}
+    />
   )
 }

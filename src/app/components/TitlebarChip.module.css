@@ -1,0 +1,68 @@
+/*
+ * 标题栏小胶囊（更新 / 后处理后台跑）—— 一份身子，两处消费者。
+ *
+ * 几何：24 高（标题栏 38 里上下各留 7）、图标 16、字 11。
+ * 颜色：图标走 `--accent`（进行中）/ `--text-3`（停着）/ `--danger`（失败），
+ * 文字恒 `--text-2` —— 不新增色板，深色由 token 自己翻。
+ */
+
+.chip {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px 0 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.chip:hover {
+  background: var(--hover-1);
+  color: var(--text-1);
+}
+
+.chip:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* 图标那一格：固定 16，里面的 SVG / 圆点都按它居中 */
+.icon {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
+.chip[data-tone='accent'] .icon {
+  color: var(--accent);
+}
+
+.chip[data-tone='muted'] .icon {
+  color: var(--text-3);
+}
+
+.chip[data-tone='danger'] .icon {
+  color: var(--danger);
+}
+
+/* 等宽数字：百分比从 9% 涨到 100% 时胶囊不跟着抽动 */
+.label {
+  font-variant-numeric: tabular-nums;
+}

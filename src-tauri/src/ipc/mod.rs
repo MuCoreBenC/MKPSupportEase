@@ -63,6 +63,12 @@ pub mod slicer;
 /// **应用内更新 + 打开外链**（2026-10-05 第五刀）。`open_url` 是修「查看更新点了没反应」
 /// 那个 bug 的：webview 没 opener 权限，外链一律过命令
 pub mod update;
+/// **「哪份预设用得最多」**（2026-10-17）：一条读命令；写入口在"应用预设"那一步
+/// （[`catalog::apply_active_preset`]），见 [`crate::runtime::usage`]
+pub mod usage;
+/// **主窗怎么摆**（2026-10-17）：置顶三档 + 窄窗（600 宽、贴右缘、高占屏 90%），
+/// 以及"上一次手动摆放"的记账。窗口几何的副作用**只有这一处**，见模块头。
+pub mod window_layout;
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;

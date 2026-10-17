@@ -46,14 +46,30 @@ interface Props {
   /** 一次拖拽手势的落点提交 —— 调用方走 apply，一次 = 一条撤销 */
   onCommit: (x: number, y: number) => void
   /**
+   * **拖动中的临时位置**（2026-10-17）：拖的时候每帧回调一次，松手回调 `null`。
+   *
+   * 为什么要有它：右侧那两个 X/Y 输入框原来读的是外部值（草稿），所以拖动画布时
+   * 塔在走、数字不动，松手才跳一下 —— 作者的原话是「拖动擦料塔，右侧的坐标变化有延迟」。
+   * 有了这个回调，调用方可以拿它喂给那两行的**显示值**（不进草稿、不进撤销栈），
+   * 于是数字全程跟着走，而**一次拖动仍然只产生一条撤销**（提交只在松手那一下）。
+   */
+  onDrag?: (pos: { x: number; y: number } | null) => void
+  /**
    * **只读**（2026-10-16 的编辑模式两态）：看得见、拖不动 —— 按下直接不响应，
    * 光标也从十字收成默认（拖了没反应还不知道为什么，是最坏的那种）。
    */
   disabled?: boolean
 }
 
-/** 位置落在 0.1mm —— 拖拽是连续量，不收个位小数的话撤销清单里会出现一长串 */
-const round1 = (n: number) => Math.round(n * 10) / 10
+/**
+ * 位置落在**整毫米**（2026-10-17 作者：「坐标拖动的是整数，用户在文本框输入的可以有小数」）。
+ *
+ * 原来是 0.1mm（`round1`）—— 拖一下就会得到 58.8、65.9 这种数，画布上看着没问题，
+ * 但盘上、撤销清单里全是这种"贴不上"的值。吸附到整数之后：
+ *   · 拖动 / 画布落点 = 整数；
+ *   · 手输**不受影响**（输入框那一路是 `NumberField` 自己的提交，小数照收）。
+ */
+const snap = (n: number) => Math.round(n)
 
 export default function TowerMap({
   bedW,
@@ -68,6 +84,7 @@ export default function TowerMap({
   plate,
   side,
   onCommit,
+  onDrag,
   disabled = false,
 }: Props) {
   const mapRef = useRef<HTMLDivElement | null>(null)
@@ -119,6 +136,13 @@ export default function TowerMap({
     }
   }
 
+  /*
+   * 拖拽期间的位置**先吸附整毫米再存**（`snap`）。
+   *
+   * 直接在连续量上 `setDragPos` 会让塔每像素抖一次；吸附之后塔按整毫米"跳格"，
+   * 与松手后落盘的值完全一致 —— 所以松手那一刻数字不会再有一下"对齐"的跳动。
+   * 上限/下限也一并按整数收，免得贴着留白带时出现 9.6 这种半格。
+   */
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (disabled) return
     if (e.button !== 0) return
@@ -127,7 +151,9 @@ export default function TowerMap({
     if (at === null) return
     const target = clamp(at.x - towerSize / 2, at.y - towerSize / 2)
     dragOffsetRef.current = { x: at.x - (target.x + towerSize / 2), y: at.y - (target.y + towerSize / 2) }
-    setDragPos(target)
+    const pos = { x: snap(target.x), y: snap(target.y) }
+    setDragPos(pos)
+    onDrag?.(pos)
     mapRef.current?.setPointerCapture(e.pointerId)
   }
 
@@ -135,19 +161,29 @@ export default function TowerMap({
     if (dragPos === null) return
     const at = bedPointOf(e)
     if (at === null) return
-    setDragPos(clamp(at.x - towerSize / 2 - dragOffsetRef.current.x, at.y - towerSize / 2 - dragOffsetRef.current.y))
+    const c = clamp(
+      at.x - towerSize / 2 - dragOffsetRef.current.x,
+      at.y - towerSize / 2 - dragOffsetRef.current.y,
+    )
+    const pos = { x: snap(c.x), y: snap(c.y) }
+    /* 整毫米吸附之后，一像素内的大量移动是**同一个值** —— 不比较就会每帧 setState */
+    if (pos.x === dragPos.x && pos.y === dragPos.y) return
+    setDragPos(pos)
+    onDrag?.(pos)
   }
 
   const endDrag = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (dragPos === null) return
     const final = dragPos
     setDragPos(null)
+    onDrag?.(null)
     try {
       mapRef.current?.releasePointerCapture(e.pointerId)
     } catch {
       /* 捕获已经丢了（比如 pointercancel 先到）就算了 */
     }
-    onCommit(round1(final.x), round1(final.y))
+    /* 一次手势 = 一条撤销：中间那些位置一个都不进栈，只有这条落点 */
+    onCommit(final.x, final.y)
   }
 
   /* 塔方块：大小 = 包围盒 / 可打印区，位移以方块自身尺寸为基准（translate 的 % 是自己的） */
@@ -169,8 +205,8 @@ export default function TowerMap({
           data-ro={disabled || undefined}
           aria-label={
             disabled
-              ? `擦料塔位置：X ${round1(shown.x)}、Y ${round1(shown.y)}（只读）`
-              : `擦料塔位置：X ${round1(shown.x)}、Y ${round1(shown.y)}，点击或拖动调整`
+              ? `擦料塔位置：X ${snap(shown.x)}、Y ${snap(shown.y)}（只读）`
+              : `擦料塔位置：X ${snap(shown.x)}、Y ${snap(shown.y)}，点击或拖动调整`
           }
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}

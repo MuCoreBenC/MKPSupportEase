@@ -1,5 +1,6 @@
-import { useCallback, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
+import { api } from '../api'
 import { FieldLayer } from '../components/field'
 import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
@@ -21,10 +22,10 @@ import { DevPreviewTabs } from './dev/DevPreviewTabs'
 /* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
    普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够。
    ★ 那一趟的状态**在 App 这一层读一次**（`usePostProcessRun`），同时喂给两处：
-     那一屏模态框 + 后台那条窄条（「后台运行」收起来之后总得有个入口回得去）。 */
+     那一屏模态框 + 标题栏那枚小胶囊（「后台运行」收起来之后总得有个入口回得去）。 */
 import PostProcessModal from './postprocess/PostProcessModal'
-import PostProcessStrip from './postprocess/PostProcessStrip'
 import { usePostProcessRun } from './postprocess/usePostProcessRun'
+import { usePinPref } from './state/appState'
 import { inTauri } from './window'
 import s from './App.module.css'
 
@@ -86,6 +87,23 @@ export default function App() {
   const rootRef = useRef<HTMLDivElement>(null)
   const density = useDensity(rootRef)
   const [tab, setTab] = useState('machine')
+
+  /*
+   * 窗口置顶（2026-10-17）：**落地只看这一处** —— 档位来自 AppState（工艺页那枚胶囊
+   * 点出来的），"现在在哪一页"只有这里知道（`tab`）。于是：
+   *
+   *   always → 恒置顶；page → 只有 `bbs`（工艺页）置顶；off → 不置顶。
+   *
+   * ★ 切页的每一个入口（顶栏页签、`openBbs`、`openPresetsForSlicer`、开发台）
+   *   最终都改的是 `tab`，所以一条 effect 就够，不必逐处埋点。
+   * ★ 不写盘、不发广播：档位没变，只是把它落到窗口上（见 `api.applyPin`）。
+   */
+  const pin = usePinPref()
+  useEffect(() => {
+    void api.applyPin(tab === 'bbs').catch(() => {
+      /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
+    })
+  }, [pin, tab])
 
   /*
    * 预设页右键「在 BBS 预设查看器中打开」要跨页带一个目标过去。
@@ -155,13 +173,13 @@ export default function App() {
             density={density}
             platform={PLATFORM}
             fluid
+            /* 后台跑着的那一趟：喂给标题栏那枚小胶囊（**不再是页签下面一条横条**，
+               那条一出现就把整页往下推 —— 作者 2026-10-17 否了它的位置） */
+            postProcess={postProcess}
           />
 
           {/* 导入结果条（in-flow，标签栏下面一条）：有结果才出现，不是会自己消失的提示 */}
           <ImportBanner />
-
-          {/* 后处理在后台跑那条窄条：只在「后台运行」收起来之后、那一趟还没跑完时出现 */}
-          <PostProcessStrip view={postProcess} />
 
           <main className={s.body}>
             <PageSlot hidden={tab !== 'machine'}>

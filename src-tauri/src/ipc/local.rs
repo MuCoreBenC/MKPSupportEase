@@ -880,13 +880,34 @@ pub(crate) fn local_copy_for(
         })
         .collect();
 
+    /*
+     * 挑「我那一份」的次序（2026-10-17 定死）：
+     *
+     *   ① 底账里**正在使用**的那份（用户明确选过它）
+     *   ② **最近改过**的那份（mtime 新 → 旧；文件系统没给 mtime 的排最后）
+     *   ③ 文件名（同一个 mtime 的平手局，保证结果每次都一样）
+     *
+     * ★ 原来最后一步是 `matched.first()` —— 那是目录遍历顺序，等于**随机挑一份**。
+     *   同一版本下有几份副本（`… copy….toml`）时，首页「预设文件」就会显示成
+     *   其中某一份，作者看到的正是这个（「他为什么显示复制出来的」）。
+     *   显示层已经改看套餐名（`Preset::bundleName`），但**写校准/后处理用的哪一份**
+     *   仍由这里决定 —— 所以这一处必须可复现、且优先挑用户真在用的那份。
+     */
     let active = runtime::app_state::active_preset(internal_root)?;
-    let pick = active
+    let by_active = active
         .as_ref()
         .filter(|a| a.origin == runtime::state::ActiveOrigin::Local)
         .and_then(|a| a.path.as_deref())
-        .and_then(|p| matched.iter().find(|f| f.path == p).copied())
-        .or_else(|| matched.first().copied());
+        .and_then(|p| matched.iter().find(|f| f.path == p).copied());
+    let pick = by_active.or_else(|| {
+        let mut rest: Vec<&runtime::local::LocalFile> = matched.clone();
+        rest.sort_by(|a, b| {
+            b.modified_unix
+                .cmp(&a.modified_unix)
+                .then_with(|| a.path.cmp(&b.path))
+        });
+        rest.first().copied()
+    });
     Ok(pick.cloned())
 }
 

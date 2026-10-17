@@ -1,0 +1,71 @@
+/*
+ * 工艺页工具条右端的两枚开关胶囊（2026-10-17）。
+ *
+ * 语言照 `.iconBtn`（PageBbs.module.css）：**平时几乎看不见**，悬停才承认自己在。
+ * 差别只在形状 —— 这两件事（置顶 / 窄窗）用图标读不出来，作者要"带文字的胶囊"。
+ *
+ * 颜色全部走 BBS 那一套 `--bbs-*`（两套主题各一份，定义在 PageBbs.module.css 的 .page
+ * 上，这一块是它的后代，变量自然继承）+ 全站的 `--accent` / `--accent-soft`。
+ * 不写死任何色值 ⇒ 深色模式跟着翻，不用在这里再写一份。
+ *
+ * ★ 尺寸是"状态无关"的：`min-width` 按最长那档（「仅本页置顶」）预留，
+ *   切换档位只换字，盒子一个像素都不动（全站铁律）。
+ */
+
+.gadgets {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  /* 最长那档「仅本页置顶」= 5 个字（12px）≈ 60 + 两侧内衬 20 —— 留到 88 不挤 */
+  min-width: 88px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--bbs-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bbs-label);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 悬停：底色淡入（描边不动 —— 动描边会让它看起来在"跳"）
+   ★ 不写 CSS transition：WKWebView 上不播（全站动效一律 WAAPI，这里干脆不做过渡） */
+.pill:hover:not(:disabled) {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+/*
+ * 按下：**什么都不动**（2026-10-17 作者：「点击的时候好像有像素位移」）。
+ *
+ * 上一版给了 `translateY(1px)` 的"下沉手感"—— 在标题栏这一排里，它读起来不是
+ * "按下去"而是"这颗按钮在抖"。状态反馈由颜色与文字承担就够了。
+ */
+
+/* 开启态：与 `.iconBtn[data-on]` 同一套语言（accent 字 + accent 淡染底）。
+   ★ 字色用 `--accent` 而不是 `--accent-deep`：深色主题下 deep 那一档偏暗，
+     压在深底上读不清（`.iconBtn` 选的是同一个理由） */
+.pill[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 焦点只加深描边、不发光，也不改变尺寸 */
+.pill:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: 2px solid var(--bbs-focus);
+  outline-offset: 2px;
+}

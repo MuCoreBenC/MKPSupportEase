@@ -16,9 +16,38 @@ export interface Axes {
 }
 
 /** 一份预设 = 某机型某打印件版本对应的那个 toml，外加它带来的偏移基准 */
+/**
+ * 一份预设的用量（`getPresetUsage` 的一行）。
+ *
+ * `count` = 被"应用"过几次；`lastUnix` 是最近一次（UTC epoch 秒），现在只留作以后
+ * "最近用过"的排序尺，界面暂时不用。
+ */
+export interface PresetUsageEntry {
+  /** `local:<用户根相对路径>` / `cloud:<内部根相对路径>` */
+  key: string
+  count: number
+  lastUnix: number
+}
+
 export interface Preset {
-  /** 文件名，界面上直接显示 */
+  /**
+   * **实际会用的那一份**的文件名（有「我的一份」时就是它）。
+   *
+   * 用它回答"我现在改/校准的是哪份文件"（校准页 pill、首页卡片的「正在使用」）。
+   * 但**它不该回答"这个套餐配的是哪份预设"** —— 那件事看 `bundleName`。
+   */
   name: string
+  /**
+   * **套餐（云端交付）里那份 MKP 预设**的文件名（2026-10-17 加）。
+   *
+   * 选机型页那一块「预设文件」显示的是它：第三级选的就是套餐，用户要看的就是
+   * "这个套餐配的预设叫什么"，而不是他自己复制出来的那一份
+   * （作者：「他为什么显示复制出来的，而不是显示云端下载的、套餐里面的」）。
+   * 与 `name` 分开存，是为了让两句话各说各的 —— `name` 说"在用哪份"，它说"套餐是哪份"。
+   */
+  bundleName: string
+  /** 套餐里那份的落点（与 `bundleName` 成对）—— 只当悬停提示用 */
+  bundlePath: string
   /**
    * **落点**（用户线是相对用户根的 `presets-local/…`，云端线是相对内部根的
    * `delivery/mkp/presets/…`）—— 读正文、保存校准都把它交回后端，所以它**不是**
@@ -1482,6 +1511,28 @@ export interface PresetSource {
  */
 export type ThemePref = 'light' | 'dark' | 'system'
 
+/* ---------- 主窗怎么摆（2026-10-17） ---------- */
+
+/**
+ * 置顶档位 —— **id 是契约**（与 Rust `runtime::app_state::PinPref` 一一对应）。
+ *
+ * - `off`：不置顶；
+ * - `page`：**只有工艺页置顶**（切到别的页签自动解除，切回来又浮上去）；
+ * - `always`：任何页面都置顶。
+ *
+ * ★ 档位是"用户选的"，**当刻真有没有置顶**是算出来的（`page` 档不在工艺页时就不置顶），
+ *   两件事不要混成一个开关。
+ */
+export type PinPref = 'off' | 'page' | 'always'
+
+/** 窗口这一族的两格账（与 Rust `ipc::window_layout::WindowPrefs` 同形） */
+export interface WindowPrefs {
+  /** 置顶档位 */
+  pin: PinPref
+  /** 现在是不是窄窗态（600 宽、贴屏幕右缘、高占可用高 90%） */
+  compact: boolean
+}
+
 /* ---------- 屏幕引导（2026-10-15） ---------- */
 
 /** 屏幕坐标下的一个矩形（左上角 + 宽高，单位是**点**，与 Rust `ax::RectDto` 同形）。 */
@@ -2122,6 +2173,17 @@ export interface MkpApi {
   clearPresetHistory(origin: ActiveOrigin, id: string): Promise<void>
 
   /**
+   * **「哪份预设用得最多」的本机学习账**（2026-10-17）。
+   *
+   * 写在"应用预设"那一步（后端 `apply_active_preset` 成功 +1），所以这里只有读。
+   * 界面拿它给选择器抽屉排序：**同一版本里用得多的排前面**。
+   *
+   * ★ 这份数据住在 `<appDataDir>/run/usage.json`，**不进备份**（换设备就从零学）。
+   * ★ 引擎：`local:<用户根相对路径>` / `cloud:<内部根相对路径>` —— 与行上的 `ref` 同口径。
+   */
+  getPresetUsage(): Promise<PresetUsageEntry[]>
+
+  /**
    * **打一份备份**（设置页）：把这台机器的家当收进一个 zip，落在 `destDir` 里。
    *
    * 备份里有的：应用设置（`run/app-state.json`）、目录（`catalog.json`）、
@@ -2506,6 +2568,39 @@ export interface MkpApi {
    * （**已经清掉的不会回来**）。清理全程静默，界面上不会有任何提示。
    */
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
+
+  /**
+   * 窗口这一族的两格账（2026-10-17）：置顶档位 + 在不在窄窗。
+   *
+   * 一次读齐是有意的 —— 它们同住 `run/app-state.json`、同一次广播，
+   * 分两次读只会让"刚点完窄窗、置顶那格还是旧的"这种时序缝隙变多。
+   */
+  getWindowPrefs(): Promise<WindowPrefs>
+
+  /**
+   * 换置顶档位：**先落盘、再设窗口标志**，成功后广播一次。
+   *
+   * `onBbs` = 现在这一页是不是工艺页（`page` 档要用它算"该不该真置顶"）。
+   * 页签的真值在前端，后端不复制一份。
+   */
+  setPin(pin: PinPref, onBbs: boolean): Promise<PinPref>
+
+  /**
+   * 切页之后重算一次"该不该置顶"（**不写盘、不广播**）。
+   *
+   * 为什么与 `setPin` 分开：切页是高频动作、且档位没变 —— 走写盘那条会把前端
+   * 绕回自己的 effect 里。这一条只把已经选好的档落到窗口上。
+   */
+  applyPin(onBbs: boolean): Promise<boolean>
+
+  /**
+   * 进 / 出窄窗：宽 600、高 = 当前屏可用高 90%、贴右缘。
+   *
+   * 退出时回到**上一次手动摆放的位置与尺寸**（用户自己拖过 / 拉过的最后一次）；
+   * 从没摆放过就是出厂尺寸居中。失败时后端把 `compact` 那格回滚 ——
+   * 盘上不会出现"说着在窄窗、窗口其实没动"的状态。
+   */
+  setCompact(compact: boolean): Promise<boolean>
 
   /**
    * 「板子类型」控件此刻在屏幕上的哪一块（**只读**，2026-10-15）。

@@ -372,27 +372,31 @@
   color: var(--accent-deep);
 }
 
-.ok {
-  flex-shrink: 0;
-  margin: 0 calc(var(--pad) + 10px) 10px;
-  font-size: var(--fs-label);
-  color: var(--accent-deep);
-}
-
 /*
- * **保存回执**（2026-10-17）：嵌在模态框里时它住在标题栏副标题右边，
- * 与文件名同一行（见 PageParams.tsx 的 `savedNoteNode` 那段）。
+ * **标题栏那一句状态**（2026-10-17 第二版）：嵌入模态框时住在**标题右边**，
+ * 成功 / 警告 / 失败三条共用这一格（见 PageParams.tsx 的 `headNote` 那段）。
  *
- * 语气两档：`ok` 成功（accent）/ `bad` 失败或"没有可保存的目标"（红）。
- * 窄窗里先截它、不截文件名 —— 所以是 `min-width: 0` + 省略号。
+ * 形状是硬的：**永远一行**、超出省略号、`flex: 1 1 auto` 让它在 `.headNote`
+ * 那一格里收缩 —— 作者的要求是「文字长的话会导致换行，反正就是不好」。
+ * 全文在 `title` 上（悬停可读），所以截断不丢信息。
+ *
+ * 语气三档：`ok` 成功（accent）/ `warn` 被闸拦住（琥珀）/ `bad` 失败（红）。
  */
 .note {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   font-size: var(--fs-label);
   color: var(--accent-deep);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 单独当页用（没有模态框标题栏可借位）时落回内容区顶上 —— 同一句话、同一套颜色 */
+.noteLine {
+  margin: 0 calc(var(--pad) + 10px) 10px;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
 }
 
 /* 前面那枚小点 = 状态灯；`inline-block` 才吃得了宽高 */
@@ -407,8 +411,16 @@
   vertical-align: 1px;
 }
 
+/* 被写值闸拦住（弃用字段 / 弃用选项）：琥珀 —— 不是失败，是"这条改不了"。
+   走 `--warn`（深色下自己提亮），不要写死色值 */
+.note[data-tone='warn'],
+.noteLine[data-tone='warn'] {
+  color: var(--warn);
+}
+
 /* 失败 / 没有可保存的目标：走 `--danger`（深色下它自己提亮一档，不像写死的红那样发暗） */
-.note[data-tone='bad'] {
+.note[data-tone='bad'],
+.noteLine[data-tone='bad'] {
   color: var(--danger);
 }
 

@@ -22,7 +22,7 @@
 import { useSyncExternalStore } from 'react'
 
 import { api, listen } from '../../api'
-import type { ActiveOrigin, ActivePreset, ThemePref } from '../../api/contract'
+import type { ActiveOrigin, ActivePreset, PinPref, ThemePref } from '../../api/contract'
 import { inTauri } from '../window'
 /*
  * 主题那一句（档位 + 系统深浅 ⇒ 是不是深色 ⇒ 落 `<html data-theme>`）住在
@@ -42,9 +42,13 @@ interface AppStateSnapshot {
   active: ActivePreset | null
   /** 主题档位（null = 还没选过 ⇒ 按"跟随系统"） */
   theme: ThemePref | null
+  /** 置顶档位（2026-10-17；`off` = 没选过，与后端同一个出厂默认） */
+  pin: PinPref
+  /** 主窗在不在窄窗态（同上） */
+  compact: boolean
 }
 
-let snapshot: AppStateSnapshot = { active: null, theme: null }
+let snapshot: AppStateSnapshot = { active: null, theme: null, pin: 'off', compact: false }
 let loaded = false
 let inflight: Promise<void> | null = null
 const listeners = new Set<() => void>()
@@ -68,9 +72,19 @@ export function appStateMutated(): void {
      */
     api.getActivePreset().catch(() => null),
     api.getTheme().catch(() => null),
+    /*
+     * 窗口那两格（2026-10-17）。读不到就按**后端也认同的出厂默认**兜底
+     * （不置顶 / 不在窄窗）—— 与主题那条"失败当没有"同一个口径。
+     */
+    api.getWindowPrefs().catch(() => null),
   ])
-    .then(([active, theme]) => {
-      snapshot = { active, theme }
+    .then(([active, theme, win]) => {
+      snapshot = {
+        active,
+        theme,
+        pin: win?.pin ?? 'off',
+        compact: win?.compact ?? false,
+      }
       applyTheme(theme)
     })
     .finally(() => {
@@ -122,6 +136,34 @@ export function useThemePref(): ThemePref | null {
 
 function getThemePref(): ThemePref | null {
   return snapshot.theme
+}
+
+/**
+ * 置顶档位（AppState 的 `pin` 格，2026-10-17）。
+ *
+ * 读者两处：工艺页那枚胶囊（显示 / 切档）与外壳 `App.tsx`（按"档位 + 当前页签"
+ * 算该不该真置顶 —— 那条 effect 是**唯一**落地的地方）。
+ */
+export function usePinPref(): PinPref {
+  return useSyncExternalStore(subscribe, getPinPref)
+}
+
+function getPinPref(): PinPref {
+  return snapshot.pin
+}
+
+/**
+ * 主窗在不在窄窗态（AppState 的 `compact` 格）。
+ *
+ * 只有工艺页那枚胶囊读它 —— 窗口几何的真实状态在 Rust 侧，
+ * 前端不量 `window.innerWidth` 去猜（判据不许两个源）。
+ */
+export function useCompactWindow(): boolean {
+  return useSyncExternalStore(subscribe, getCompactWindow)
+}
+
+function getCompactWindow(): boolean {
+  return snapshot.compact
 }
 
 /* 系统深浅那一档的订阅（`prefers-color-scheme`）。只有"要拿真值去画"的读者需要它 ——

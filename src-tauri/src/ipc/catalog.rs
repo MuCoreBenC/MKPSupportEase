@@ -995,6 +995,11 @@ pub async fn apply_active_preset(
         let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
 
+        /*
+         * ★ 这里**不记学习账**（2026-10-17 晚改口径）：作者的原话是「不是使用就增加，
+         *   是后处理才加」—— 计数点在钩子那一趟（`hook.rs` 载入 IR 之后）。
+         *   "应用了一份"只是把它设成当前预设，不等于拿它跑过后处理。
+         */
         let state = match origin.unwrap_or_default() {
             ActiveOrigin::Preset => {
                 let file = catalog

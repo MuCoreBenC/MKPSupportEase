@@ -13,6 +13,47 @@
   color: var(--text-3);
 }
 
+/*
+ * 只读态那颗「进入编辑模式」（2026-10-17）：贴在这一行右端。
+ * 尺寸与外观沿用 `.revert` / `.ghost`（抽屉里的次要动作只有一张脸），
+ * 只用 accent 字色说明它是个"往前一步"的动作。
+ */
+.enterEdit {
+  flex-shrink: 0;
+  height: 24px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.enterEdit:hover {
+  background: var(--hover-1);
+}
+
+.enterEdit:active {
+  transform: translateY(1px);
+  background: var(--hover-2);
+}
+
+.enterEdit:focus-visible {
+  outline: none;
+}
+
+/* 只读态那句门槛说明：小一号、次级色，不抢列表 */
+.readonlyHint {
+  margin: 0 14px 8px;
+  font-size: calc(var(--fs-label) - 0.5px);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
 .scroll {
   flex: 1;
   min-height: 0;
@@ -209,6 +250,39 @@
 .revert:hover,
 .ghost:hover {
   color: var(--text-1);
+  background: var(--hover-1);
+  border-color: var(--line-strong);
+}
+
+/* 按下去要"陷一下" —— 这颗按钮点了常常什么都不变（目标值 = 现值），
+   手感是唯一立刻能感觉到的东西 */
+.revert:active,
+.ghost:active {
+  transform: translateY(1px);
+  background: var(--hover-2);
+}
+
+/*
+ * 「还原」的回话（2026-10-17）：一行、几秒后自己消失。
+ * `ok` = 真写进去了（accent）；`muted` = 没变化 / 改不了（次级文字色，不吓人）。
+ */
+.revertNote {
+  margin: 10px 12px 0;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  /* 长句子截断——抽屉窄，别让它撑成三行 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.revertNote[data-tone='muted'] {
+  color: var(--text-2);
+  background: var(--surface-sunken);
 }
 
 /* 「清空历史」武装态（二次确认的第二下之前）：红的，一眼知道再点就没了。

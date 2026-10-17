@@ -2,9 +2,11 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import Icon from '../../components/Icon'
 import UpdateIndicator from './UpdateIndicator'
+import PostProcessChip from '../postprocess/PostProcessChip'
 import { useActivePreset } from '../state/appState'
 /* 「复制后处理脚本」走全站那一份（不再自己调 api / 自己写通知）—— 见那个文件的文件头 */
 import { copyPostProcessScript } from '../postprocess/copyScript'
+import type { PostProcessRunView } from '../postprocess/usePostProcessRun'
 import { useDevPreview } from '../dev/useDevPreview'
 import { useWindowMaximized } from '../../hooks/useWindowMaximized'
 import { useTitlebarDrag } from '../useTitlebarDrag'
@@ -28,6 +30,14 @@ interface TopTabsProps {
   fluid?: boolean
   /** 传了就只显示这一行标题，页签条整个不渲染 —— 报告这类全屏子视图用 */
   title?: string
+  /**
+   * 后处理那一趟（后台跑着的时候标题栏要露一枚小胶囊）。
+   *
+   * ★ 2026-10-17：这条身份原来住在**页签下面一条 in-flow 的横条**里，一出现就把整页
+   *   往下推（作者：「出现这个会把页面往下我不喜欢」）。现在与更新指示器并排，
+   *   不占内容流 —— 这一格由外壳（`App.tsx`）喂进来，标题栏自己不去读那一趟。
+   */
+  postProcess?: PostProcessRunView
 }
 
 
@@ -75,6 +85,7 @@ export default function TopTabs({
   platform,
   fluid,
   title,
+  postProcess,
 }: TopTabsProps) {
 
   const isMac = platform === 'macos'
@@ -228,6 +239,14 @@ export default function TopTabs({
       </button>
 
       {tabStrip}
+
+      {/*
+        后处理在后台跑的那枚小胶囊（2026-10-17）：与更新指示器**同一种身子、不同图标**。
+        它只在「用户把那一屏收起来了、而那一趟还在跑」时出现；
+        `run = null` / 已经出结论时什么都不渲染（结论会把那一屏自己叫回来）。
+        ★ 它不是流程里的一条、不占内容流 —— 出现与消失都不推任何一页。
+      */}
+      {postProcess && <PostProcessChip view={postProcess} />}
 
       {/*
         下载指示器（2026-10-05 第五刀）：**在页签与窗口键之间**，任何页面都看得见。

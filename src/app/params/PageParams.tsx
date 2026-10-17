@@ -49,7 +49,7 @@ import Icon from '../shell/icons'
 import TowerMap from './TowerMap'
 import type { TowerCoreProps } from './TowerCoreSvg'
 import { useParams, valueText } from './useParams'
-import type { ParamDef } from './useParams'
+import type { HistoryEntry, ParamDef } from './useParams'
 /* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
 import { EDIT_TEXT } from '../presets/presetTree'
 import s from './PageParams.module.css'
@@ -118,8 +118,15 @@ function towerNumOf(raw: string, fallback: number): number {
  * 拖拽与轴输入的提交都走这一页的 `u.apply`：一次手势一条撤销、还原胶囊指已保存值。
  *
  * `disabled`（2026-10-16 编辑模式两态）：只读态里地图拖不动 —— 按下直接不响应。
+ *
+ * `onDrag`（2026-10-17）：拖动中的临时位置往上抛，让右侧 X/Y 两行**显示**跟着走
+ * （只有显示跟着走，草稿不动 —— 一次拖动仍然只产生一条撤销）。
  */
-function towerSlotOf(u: ReturnType<typeof useParams>, disabled: boolean): TowerSlot | undefined {
+function towerSlotOf(
+  u: ReturnType<typeof useParams>,
+  disabled: boolean,
+  onDrag?: (pos: { x: number; y: number } | null) => void,
+): TowerSlot | undefined {
   const dims = u.machine?.dimensions ?? null
   const xDef = u.defOf('wiping.wiper_x')
   const yDef = u.defOf('wiping.wiper_y')
@@ -176,6 +183,8 @@ function towerSlotOf(u: ReturnType<typeof useParams>, disabled: boolean): TowerS
         plate={plate}
         side={side}
         disabled={disabled}
+        /* 拖动中的位置往上抛：页面拿它喂右侧 X/Y 两格的显示（草稿不动） */
+        onDrag={onDrag}
         onCommit={(nx, ny) =>
           u.apply('移动擦料塔', [
             { key: xDef.key, value: String(nx) },
@@ -697,8 +706,79 @@ export default function PageParams({
 
   const closeHistory = () => setHistoryOpen(false)
 
+  /**
+   * **「历史 → 还原」点完的那一句回话**（2026-10-17）。
+   *
+   * 作者：「怎么我点了还原没反应…是真的没还原还是没有交互效果」。
+   * 查下来按钮是好的：还原成功会写出草稿、底栏变「N 处未保存」、抽屉顶上多一条
+   * 「未保存」；而**命中 noop 时（目标值就是现值）界面一个像素都不动** —— 那正是
+   * 他看到的那一下。而抽屉正好盖住右边那列数值，连成功也不容易看见。
+   *
+   * 所以这里按 `apply` 的三种结果各回一句话（几秒后自己消失）：
+   *   applied  绿：`已还原：X 轴偏移 → -0.45 mm`
+   *   blocked  灰：被上游标记弃用，改不了
+   *   noop     灰：现在就是那个值，不用还原
+   */
+  const [revertNote, setRevertNote] = useState<{ text: string; tone: 'ok' | 'muted' } | null>(null)
+  const revertNoteTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (revertNoteTimer.current !== null) window.clearTimeout(revertNoteTimer.current)
+    },
+    [],
+  )
+  const onRevertHistory = useCallback(
+    (entry: HistoryEntry) => {
+      const result = u.revertEntry(entry)
+      const first = entry.items[0]
+      const many = entry.items.length > 1
+      const target = first === undefined ? '' : valueText(u.defOf(first.key), first.from)
+      const label = first?.label ?? '这一项'
+
+      const next =
+        result === 'applied'
+          ? {
+              text: many ? `已还原 ${entry.items.length} 项（含 ${label} → ${target}）` : `已还原：${label} → ${target}`,
+              tone: 'ok' as const,
+            }
+          : result === 'blocked'
+            ? { text: `没有还原：${label} 已被上游标记弃用，改不了`, tone: 'muted' as const }
+            : {
+                text: many ? '没有变化：这几项现在就是当时那个值' : `没有变化：${label} 现在就是 ${target}`,
+                tone: 'muted' as const,
+              }
+
+      setRevertNote(next)
+      if (revertNoteTimer.current !== null) window.clearTimeout(revertNoteTimer.current)
+      revertNoteTimer.current = window.setTimeout(() => setRevertNote(null), 3200)
+    },
+    [u],
+  )
+
+  /**
+   * 拖动擦料塔时的临时位置（`null` = 没在拖）。
+   *
+   * 它**只喂显示**：右侧 X/Y 两格在拖动期间显示这个数，于是"塔在走、数字也在走"；
+   * 松手后 `TowerMap` 提交一次（一条撤销），这个 state 立刻清掉、交回草稿值。
+   * 草稿 / 撤销栈 / 历史清单全程不碰这里 —— 作者要的是"不记中间值"。
+   */
+  const [towerDrag, setTowerDrag] = useState<{ x: number; y: number } | null>(null)
+  /* 松手时 TowerMap 回调一次 `null` ⇒ 这里清空，两格立刻交回草稿值 */
+  const onTowerDrag = useCallback((pos: { x: number; y: number } | null) => setTowerDrag(pos), [])
+
   /** 擦料塔地图的供数（见 towerSlotOf）：坐标字段不在 / 没配尺寸时是 undefined，坐标行照旧 */
-  const tower = towerSlotOf(u, ro)
+  const tower = towerSlotOf(u, ro, onTowerDrag)
+  /**
+   * 拖动期间那一卡里 X/Y 两行该显示什么：**临时值优先**。
+   *
+   * `ParamCard` 只认 `fields` 里的 key → 值；这里不改字段，只在渲染前把这两条的
+   * `def.key` 换成同一份"假 def + 临时值"代价太大，所以走 `ParamCard` 新增的
+   * `overrides` 通道（值 → 显示用的原文）。
+   */
+  const towerDragTexts =
+    towerDrag === null || tower === undefined
+      ? undefined
+      : { [tower.xKey]: String(towerDrag.x), [tower.yKey]: String(towerDrag.y) }
 
   const renderCards = (cards: ShownCard[]) =>
     cards.map(({ id, title, subtitle, fields }) => (
@@ -719,6 +799,8 @@ export default function PageParams({
         condOn={u.condOn}
         /* 擦料塔地图槽位：坐标两字段都在这张卡时才生效（见 ParamCard） */
         tower={tower}
+        /* 拖动擦料塔时 X/Y 两格显示的临时值（只喂显示，草稿不动 —— 见 Props.valueOverrides） */
+        valueOverrides={towerDragTexts}
         expandedKey={expandedDetailKey}
         onToggleExpand={(key) => setExpandedDetailKey((prev) => (prev === key ? null : key))}
         onEdit={u.edit}
@@ -966,34 +1048,43 @@ export default function PageParams({
     )
 
   /*
-   * **保存回执搬到模态框标题栏**（2026-10-17，作者看截图圈着那行绿字：
-   * 「这个我想换一个位置，在模态框的框架上面可以吗」）。
+   * **标题栏那一句状态 —— 成功 / 警告 / 失败共用一格**（2026-10-17 两改）。
    *
-   * 它原来是内容区顶上的一行 `<p class="ok">` —— 每保存一次就把参数列表往下顶一行，
-   * 而这件事只是一句回执、没有要人做决定的地方。放进标题栏之后：
-   *   · 位置 = 副标题（**文件名**）右边同一行 —— 「已写回 A1-fast.toml」贴着文件名读最顺；
-   *   · 版面 = 什么都不动：它左对齐，右侧动作簇（回到已应用 / 修改历史 / ×）是
-   *     `margin-left: auto`，出现与消失都推不走它们；副标题那一行本来就在。
+   * 第一改（上午）：保存回执从内容区顶上搬进模态框框架 —— 它原来每出现一次就把
+   * 参数列表往下顶一行。第二改（晚上，作者看截图）：搬过去之后**回执太长会换行**、
+   * 还压到右侧动作簇；而「弃用不能改」那种警告还留在内容区里没跟过来。
+   * 原话：「还有一些失败、警告的没改」「不管是成功的还是失败的，我觉得都应该复用
+   * 同样的位置和显示、和提示」「要不然利用起来标题旁边的空间」。
    *
-   * 与「修改历史」同一个机制（portal 进槽）：单独当页用时没有槽，落回内容区顶上那一行。
-   * ★ 语气分两档：成功（`ok`，accent）/ 失败（`bad`，红）—— 同一格里原来是绿的，
-   *   连「保存失败：…」也染绿，那是错的。
+   * 于是三条并成一条，位置 = **标题右边那一格**（`Modal` 的 `.titleRow`）：
+   *
+   *   优先级  `draftError`（草稿没落盘，最要紧）> `gateNote`（动手被闸拦住）> `savedNote`
+   *   语气    `bad` 红 / `warn` 琥珀 / `ok` 绿 —— 位置与长相一样，只换颜色
+   *   长相    **永远一行**，长就省略号（`.note` 的 nowrap + ellipsis），`title` 里给全文
+   *
+   * 单独当页用（没有槽）时同一份落回内容区顶上 —— 一套代码两种住处。
    */
   const noteBad =
     u.savedNote !== null &&
     (u.savedNote.startsWith('保存失败') || u.savedNote.startsWith('这份没有可保存'))
-  const savedNoteNode =
-    u.savedNote === null ? null : (
-      <span className={s.note} data-tone={noteBad ? 'bad' : 'ok'}>
-        {u.savedNote}
+  const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
+    if (u.draftError !== null) return { text: `草稿没写进磁盘：${u.draftError}`, tone: 'bad' }
+    if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
+    if (u.savedNote === null) return null
+    return { text: u.savedNote, tone: noteBad ? 'bad' : 'ok' }
+  })()
+  const headNoteNode =
+    headNote === null ? null : (
+      <span className={s.note} data-tone={headNote.tone} title={headNote.text}>
+        {headNote.text}
       </span>
     )
 
   return (
     <div className={s.page} data-density={density}>
-      {/* 保存回执 → 模态框标题栏（副标题右边）；没有槽时它渲染在内容区顶上 */}
-      {headNoteSlot !== null && savedNoteNode !== null
-        ? createPortal(savedNoteNode, headNoteSlot)
+      {/* 那一句状态 → 模态框标题栏（标题右边）；没有槽时它渲染在内容区顶上（见下面那段） */}
+      {headNoteSlot !== null && headNoteNode !== null
+        ? createPortal(headNoteNode, headNoteSlot)
         : null}
       <FieldLayer>
         <div className={s.main}>
@@ -1146,22 +1237,14 @@ export default function PageParams({
             )}
             {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
 
-            {/* 嵌在模态框里时它在标题栏（见 `savedNoteNode` 那段）；没槽才落在这儿 */}
-            {u.savedNote !== null && headNoteSlot === null && (
-              <p className={s.ok}>{u.savedNote}</p>
-            )}
             {/*
-              写值闸拦下一次改动（2026-10-02）：改的是弃用字段 / 弃用选项。
-              说一句人话 —— 原子拒绝（整次动作没发生），不是「跳过那几条、其余照写」。
+              那一句状态：嵌入模态框时它住在**标题右边**（见 `headNoteNode` 那段）；
+              单独当页用（没有槽）时才落回这里 —— 同一份节点、同一套语气。
             */}
-            {u.gateNote !== null && <p className={s.warn}>{u.gateNote}</p>}
-            {/*
-              草稿那一行的状态（参数页底座）：改的值**当场写进草稿 TOML**，
-              所以关掉软件再回来还在。写失败要看得见 —— 不能只有界面上改了、盘上没改。
-              没有可编辑目标时（这个 combo 没配 MKP）也说一句，别让人以为改了会保存。
-            */}
-            {u.draftError !== null && (
-              <p className={s.warn}>草稿没写进磁盘：{u.draftError}</p>
+            {headNoteSlot === null && headNote !== null && (
+              <p className={s.noteLine} data-tone={headNote.tone} title={headNote.text}>
+                {headNote.text}
+              </p>
             )}
             {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (
               <p className={s.warn}>
@@ -1210,8 +1293,11 @@ export default function PageParams({
               onView={setHistoryView}
               onMode={setHistoryMode}
               onClose={closeHistory}
-              onRevert={u.revertEntry}
+              onRevert={onRevertHistory}
+              /* 只读态抽屉里那颗「进入编辑模式」= 底栏同一颗（同一个 setEditMode） */
+              onEnterEdit={() => setEditMode(true)}
               onClearHistory={u.clearHistory}
+              note={revertNote}
               /* 只读态：历史照看，「还原」那颗不画（写入口） */
               readonly={ro}
             />
@@ -1555,8 +1641,11 @@ export default function PageParams({
           onView={setHistoryView}
           onMode={setHistoryMode}
           onClose={closeHistory}
-          onRevert={u.revertEntry}
+          onRevert={onRevertHistory}
+          /* 只读态抽屉里那颗「进入编辑模式」= 底栏同一颗（同一个 setEditMode） */
+          onEnterEdit={() => setEditMode(true)}
           onClearHistory={u.clearHistory}
+          note={revertNote}
           /* 只读态：历史照看，「还原」那颗不画（写入口） */
           readonly={ro}
         />

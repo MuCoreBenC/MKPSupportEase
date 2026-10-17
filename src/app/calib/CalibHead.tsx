@@ -110,9 +110,12 @@ export function AxisBar({
   }, [buf, draft])
 
   /*
-   * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
+   * 滚轮步进 0.05。
    * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
-   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减。
+   * ★ 2026-10-17：`step` 也从 0.01 改成 0.05 —— 原来「滚轮 0.05、箭头/键盘 0.01」
+   *   是两条口径（作者：「箭头键盘的步进是 0.05，不是 0.01」）。现在三者同一档，
+   *   这个手挂监听可以留着（它管的是"连滚不叠步"），只是不再和原生步长打架。
    * 挂在 dl 上做委托：三颗输入框共用一个监听，轴从 data-axis 读。
    */
   useEffect(() => {
@@ -241,7 +244,7 @@ export function AxisBar({
                       id={id}
                       className={p.axisInput}
                       type="number"
-                      step="0.01"
+                      step="0.05"
                       min={-50}
                       max={50}
                       inputMode="decimal"

@@ -404,19 +404,19 @@ export default function PageHome({ density }: PageHomeProps) {
   const ready = Boolean(sel.brand && sel.model && sel.variant)
 
   /*
-   * 「应用 / 下载并应用 / 更新并应用 / 已应用」那颗按钮（作者 2026-10-06：第二页要一颗
-   * **明确的**应用按钮，放在「下一步」旁边，宽度固定不随文字变）。
+   * 「使用 / 下载并使用 / 更新并使用 / 正在使用」那颗按钮（作者 2026-10-06：第二页要一颗
+   * **明确的**动作按钮，放在「下一步」旁边，宽度固定不随文字变）。
    *
    * ★ 它消费的是**整个套餐**（`useBundleFiles` = `getVersionFiles`：MKP + 配套 BBS），
-   *   **不是**"一个 TOML 能不能应用" —— 单文件布尔值表达不了这个页面的状态。
+   *   **不是**"一个 TOML 能不能用" —— 单文件布尔值表达不了这个页面的状态。
    *   四态严格按顺序判、互斥（`docs/HOME-BUNDLE-DOWNLOAD.md` §2）：
    *
-   *     底账正指着这个 combo        → 已应用（定格，点不了）
-   *     套餐里缺任一份              → 下载并应用   ← 缺 + 漂同时存在时也是这一态
-   *     无缺、但有漂的              → 更新并应用
-   *     全齐且全新                  → 应用（一个字节都不重下）
+   *     底账正指着这个 combo        → 正在使用（定格，点不了）
+   *     套餐里缺任一份              → 下载并使用   ← 缺 + 漂同时存在时也是这一态
+   *     无缺、但有漂的              → 更新并使用
+   *     全齐且全新                  → 使用（一个字节都不重下）
    *
-   *   判不了（套餐没拿到 / 清单还没回来）= `unknown`：卡住，**不许**滑进「应用」。
+   *   判不了（套餐没拿到 / 清单还没回来）= `unknown`：卡住，**不许**滑进「使用」。
    *   盘的现状与预设页同一套账（下载清单 + 漂移清单）；失败说人话，不编成功。
    */
   const [applying, setApplying] = useState(false)
@@ -440,9 +440,94 @@ export default function PageHome({ density }: PageHomeProps) {
     activeEntry.machineId === sel.model &&
     activeEntry.versionId === sel.variant
 
+  /*
+   * **这一版下我自己的那些副本**（2026-10-17 晚，作者：「要都显示出来，套餐的始终和
+   * 其他的分开」「这下面还有显示那些可以选的」）。
+   *
+   * 与抽屉同一份数据（`pickerRows` 已经按机型 → 版本摊好），这里只挑当前这一版的那几行；
+   * 每条带**后处理次数**（学习账 `getPresetUsage`），那一格按次数降序摆 —— 只排这一格，
+   * 预设页列表与抽屉**一个都不动**（作者明确要求）。
+   */
+  /*
+   * 选中的副本**带钥匙**（属于哪一版）：换一版之后它自然不作数。
+   * 原来靠一条 effect 事后 `setPickedCopy(null)` —— effect 在下一帧才跑，中间那一帧
+   * 还牵着上一版的选中；带钥匙就没有那一帧。
+   */
+  const [picked, setPicked] = useState<{ key: string; fileName: string; path: string } | null>(null)
+  const pickedCopy = picked !== null && picked.key === comboKey ? picked : null
+  /*
+   * 学习账（次数）：**按路径记账、跨版累积**，所以换一版不清空重读，读回来往下合并 ——
+   * 新那一版的行当帧就有次数，不用等一趟 IPC 才"长出"行尾那个 `N 次`。
+   */
+  const [usage, setUsage] = useState<Map<string, number>>(() => new Map())
+  useEffect(() => {
+    if (comboKey === null) return
+    let alive = true
+    void api
+      .getPresetUsage()
+      .then((list) => {
+        if (!alive) return
+        setUsage((prev) => {
+          const next = new Map(prev)
+          for (const e of list) next.set(e.key, e.count)
+          return next
+        })
+      })
+      .catch(() => {
+        /* 读不到 = 全是 0（只影响先后的排法） */
+      })
+    return () => {
+      alive = false
+    }
+  }, [comboKey])
+
+  const copyList = useMemo(() => {
+    if (sel.model === null || sel.variant === null) return []
+    return pickerRows
+      .filter((r) => r.machineId === sel.model && r.versionId === sel.variant)
+      .map((r) => ({
+        fileName: r.fileName,
+        path: r.ref,
+        count: usage.get(`local:${r.ref}`) ?? 0,
+      }))
+  }, [pickerRows, sel.model, sel.variant, usage])
+
+  /* 选中的那份正被底账用着（用户线按路径比） */
+  const pickedActive =
+    pickedCopy !== null &&
+    activeEntry !== null &&
+    activeEntry.origin === 'local' &&
+    activeEntry.path === pickedCopy.path
+
+
+
   const bundle = useBundleFiles(sel.model, sel.variant)
-  /** 「应用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
+  /** 「使用」的目标：套餐里那一份 MKP（只有它能被应用；BBS 这一轮只落盘） */
   const presetFile = bundle.presetFileName
+
+  /*
+   * **这一版套餐里那份预设的文件名 —— 同步就有**（目录里 `machineId/versionId` 的倒查，
+   * 与 `getVersionFiles` 是同一件事实的两种读法）。
+   *
+   * 两个用处，都是"换一版那一帧不许拿旧事实":
+   *   · `PresetStack.fallbackName` —— 名字决定「我的副本」筛几行（见那边的 prop 注释）；
+   *   · 「默认」那一行的「正在使用」标签 —— `presetFile` 要等一趟 IPC，
+   *     等它回来标签会先掉一下再加回来。
+   */
+  const defaultName =
+    sel.model !== null && sel.variant !== null ? fileOf(sel.model, sel.variant) : null
+
+  /*
+   * 「默认」那一行是不是在用：底账指着**云端原件**，或指着 `presets-local/` 里**同名**
+   * 那份（使用之后实际生效的是后者）。按**文件**判，不按 combo —— 同版本另一份在用着时
+   * 这一行仍该能点（作者截图：「默认那个也要可以应用呀」）。
+   */
+  const defaultActive =
+    comboApplied &&
+    activeEntry !== null &&
+    (activeEntry.origin === 'preset' ||
+      (defaultName !== null && activeEntry.fileName === defaultName) ||
+      activeEntry.fileName === presetFile)
 
   /* 盘上那两份单子：combo 换台时读一次；**投递面代次一变就重读**（谁写的都算） */
   useEffect(() => {
@@ -498,20 +583,26 @@ export default function PageHome({ density }: PageHomeProps) {
     return { kind, todo: [...todo], missing, drift }
   }, [bundle, onDisk])
 
+  /*
+   * 文案口径（作者 2026-10-17 第七轮）：「**下面的按钮从应用改成使用**」——
+   * 全站这件事的动词是「使用」（抽屉里那颗也叫「使用」、行上的状态叫「正在使用」），
+   * 这里原来叫「应用」，同一个动作两个词。
+   */
   const actionLabel = applying
-    ? '应用中…'
+    ? '使用中…'
     : comboApplied
-      ? '已应用'
+      ? '正在使用'
       : bundleState.kind === 'unknown'
         ? bundle.problems.length > 0
           ? '套餐未配置'
           : '读取中…'
         : bundleState.kind === 'missing'
-          ? '下载并应用'
+          ? '下载并使用'
           : bundleState.kind === 'drift'
-            ? '更新并应用'
-            : '应用'
-  const actionDisabled = comboApplied || applying || bundleState.kind === 'unknown'
+            ? '更新并使用'
+            : '使用'
+  /* 主按钮的可用性在下面按「选中的那份文件」算（`actionOff`）——
+     combo 级的旧判据（`comboApplied || …`）不再直接使用，留着这一行只会误导。 */
 
   const applyCurrent = useCallback(async () => {
     if (applying || bundleState.kind === 'unknown' || presetFile === null) return
@@ -544,7 +635,7 @@ export default function PageHome({ density }: PageHomeProps) {
         const failed = outcomes.filter((o) => !o.ok)
         if (failed.length > 0) {
           throw new Error(
-            `套餐没下全，先不应用：${failed.map((o) => `${o.fileName}（${o.message}）`).join('；')}`,
+            `套餐没下全，这次不使用：${failed.map((o) => `${o.fileName}（${o.message}）`).join('；')}`,
           )
         }
       }
@@ -573,10 +664,10 @@ export default function PageHome({ density }: PageHomeProps) {
       /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
       setScriptNote(
         bundleState.kind === 'ready'
-          ? '已应用：这份现在就是正在使用的那一份'
+          ? '已使用：这份现在就是正在使用的那一份'
           : bundleState.kind === 'drift'
-            ? '已更新并应用：这份现在就是正在使用的那一份'
-            : '已下载并应用：这份现在就是正在使用的那一份',
+            ? '已更新并使用：这份现在就是正在使用的那一份'
+            : '已下载并使用：这份现在就是正在使用的那一份',
       )
     } catch (e) {
       const msg = errorText(e)
@@ -590,6 +681,52 @@ export default function PageHome({ density }: PageHomeProps) {
       deliveryMutated()
     }
   }, [applying, bundleState, presetFile])
+
+  /*
+   * **用我选中的那份副本**（2026-10-17 晚）。
+   *
+   * 与上面那颗按钮的区别只有一句：不下载、不落副本 —— 它本来就在 `presets-local/`
+   * 里，直接设成正在使用的那一份（与抽屉里那颗「使用」同一个后端动作）。
+   */
+  const applyPickedCopy = useCallback(async () => {
+    if (pickedCopy === null || applying) return
+    setApplying(true)
+    setApplyError(null)
+    try {
+      await api.applyActivePreset(pickedCopy.fileName, 'local', pickedCopy.path)
+      appStateMutated()
+      setScriptNote('已使用：这份现在就是正在使用的那一份')
+    } catch (e) {
+      const msg = errorText(e)
+      setApplyError(msg)
+      setScriptNote(msg)
+    } finally {
+      setApplying(false)
+    }
+  }, [applying, pickedCopy])
+
+  /*
+   * 那颗主按钮的**目标**与**文字**（2026-10-17 晚，两改）：
+   *   选中了某份副本 → 使用它；选的是「默认」→ 走原来那套（缺就下载、有就直接用）。
+   *
+   * ★★ 「正在使用」必须按**选中的那份文件**判，不能按 combo：
+   *   同一版本下 `A1-fast copy.toml` 在用着、而这里选的是「默认」那份 —— 按 combo 判会
+   *   显示「正在使用」并把按钮禁掉（作者截图：「默认那个也要可以应用呀」）。
+   */
+  const targetActive = pickedCopy !== null ? pickedActive : defaultActive
+  const actionText = applying
+    ? '使用中…'
+    : targetActive
+      ? '正在使用'
+      : pickedCopy !== null
+        ? '使用'
+        : /* 默认那份没在用：`actionLabel` 里那句"正在使用"是 combo 级的，这里换成"使用" */
+          actionLabel === '正在使用'
+          ? '使用'
+          : actionLabel
+  const actionOff =
+    applying || targetActive || (pickedCopy === null && bundleState.kind === 'unknown')
+  const runAction = pickedCopy === null ? applyCurrent : applyPickedCopy
 
   /** 已经拿到的那一份预设；还在等 / 失败时为 null —— 不回退到 mock 里的默认那份 */
   const presetInfo = preset.status === 'ready' ? preset.preset : null
@@ -870,13 +1007,14 @@ export default function PageHome({ density }: PageHomeProps) {
               ...(ready
                 ? [
                     {
-                      label: actionLabel,
-                      primary: !actionDisabled,
+                      /* 选中了副本 ⇒ 目标就是那份副本（不下载、不落副本）；否则还是原口径 */
+                      label: actionText,
+                      primary: !actionOff,
                       fixed: true,
-                      disabled: actionDisabled,
+                      disabled: actionOff,
                       on: true,
                       onClick: () => {
-                        void applyCurrent()
+                        void runAction()
                       },
                     },
                   ]
@@ -909,7 +1047,30 @@ export default function PageHome({ density }: PageHomeProps) {
                   它不要出现这个偏移值」，见 PresetStack 文件头。） */}
               {preset.status !== 'idle' && (
                 <div className={p.pickerPreset}>
-                  <PresetStack state={presetView} inUse={inUseNote} />
+                  <PresetStack
+                    state={presetView}
+                    /* 这一版套餐里那份预设的名字 —— 目录里同步就有，换一版当帧就在（见 prop 注释） */
+                    fallbackName={defaultName}
+                    inUse={inUseNote}
+                    /* 这一版下我自己的副本（按后处理次数排）+ 选中态（见 PresetStack 头注释） */
+                    copies={copyList}
+                    /* 「正在使用」只挂在**这一版**的那份上：底账指着别版时不许在别版列表里乱标 */
+                    activePath={
+                      comboApplied && activeEntry !== null && activeEntry.origin === 'local'
+                        ? (activeEntry.path ?? null)
+                        : null
+                    }
+                    /* 第一行（默认那份）在用：底账指着云端原件，或指着本地同名那份 */
+                    defaultActive={defaultActive}
+                    pickedPath={pickedCopy?.path ?? null}
+                    onPick={(c) =>
+                      setPicked(
+                        c === null || comboKey === null
+                          ? null
+                          : { key: comboKey, fileName: c.fileName, path: c.path },
+                      )
+                    }
+                  />
                 </div>
               )}
 
@@ -1141,6 +1302,7 @@ export default function PageHome({ density }: PageHomeProps) {
       },
     ],
     [
+      activeEntry,
       artAlt,
       axisView,
       brandOptions,
@@ -1177,9 +1339,14 @@ export default function PageHome({ density }: PageHomeProps) {
       savedNote,
       scriptAction,
       sel,
-      actionDisabled,
-      actionLabel,
-      applyCurrent,
+      actionText,
+      actionOff,
+      runAction,
+      copyList,
+      comboKey,
+      pickedCopy,
+      defaultActive,
+      defaultName,
       applyError,
       bundle,
       settle,

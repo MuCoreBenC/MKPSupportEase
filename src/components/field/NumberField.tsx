@@ -30,7 +30,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { decimalsOf } from './value'
+import { decimalsOf, formatNum } from './value'
 import s from './NumberField.module.css'
 
 interface Props {
@@ -40,8 +40,15 @@ interface Props {
   min?: number
   max?: number
   step?: number
-  /** 小数位。不给就按 step 推 */
-  decimals?: number
+  /**
+   * 小数位。不给就按 `step` 推。
+   *
+   * ★ 2026-10-17：翻成 `null` 是**合法的** —— 那是"不补零、只修浮点尾巴"
+   *   （擦料塔 X/Y 就是这种：拖动落整数、手输可以有小数，所以绝不能按
+   *   `step=1.0` 推出 0 位、把用户打的 58.8 抹成 59）。`undefined` 仍然表示
+   *   "按 step 推"，两个缺省语义不同，别合并。
+   */
+  decimals?: number | null
   disabled?: boolean
   /** 宿主认定这个值不合法（例如原文根本不是数字）—— 与本地的越界判定一起标红 */
   invalid?: boolean
@@ -76,8 +83,17 @@ export default function NumberField({
   focusOnBoxClick = false,
   onChange,
 }: Props) {
+  /*
+   * `decimals === null` = 不补零（见 Props.decimals）：这时还按 step 推出来的
+   * 小数位仍然要用来**四舍五入**（拖动/连发不许留浮点尾巴），
+   * 只是**不显示**成固定位数。所以这里分成两个量：
+   *   `digits`      —— 算数用（null 时退回 step 的位数）
+   *   `showDigits`  —— 显示用（null 原样传下去）
+   */
   const digits = decimals ?? decimalsOf(step)
-  const [text, setText] = useState(() => String(value))
+  const showDigits = decimals === undefined ? decimalsOf(step) : decimals
+  const fmt = useCallback((n: number) => formatNum(String(n), showDigits), [showDigits])
+  const [text, setText] = useState(() => formatNum(String(value), showDigits))
   const inputRef = useRef<HTMLInputElement>(null)
 
   /** 连发期间的当前值放 ref 里：interval 里读 state 会读到旧值 */
@@ -88,9 +104,10 @@ export default function NumberField({
   const holdingRef = useRef(false)
 
   useEffect(() => {
-    setText(String(value))
+    /* 外部值一变（拖别的控件 / 撤销 / 应用预设）就重新按显示口径渲染 */
+    setText(fmt(value))
     numRef.current = value
-  }, [value])
+  }, [fmt, value])
 
   /** 修浮点尾巴：0.1 * 3 会得到 0.30000000000000004 */
   const round = useCallback(
@@ -117,10 +134,10 @@ export default function NumberField({
     (dir: 1 | -1) => {
       const next = clamp(numRef.current + dir * step)
       numRef.current = next
-      setText(String(next))
+      setText(fmt(next))
       return next
     },
-    [clamp, step],
+    [clamp, fmt, step],
   )
 
   const commit = useCallback(() => {
@@ -193,13 +210,13 @@ export default function NumberField({
   const commitTyped = () => {
     const n = Number(text)
     if (text.trim() === '' || !Number.isFinite(n)) {
-      setText(String(value))
+      setText(fmt(value))
       numRef.current = value
       return
     }
     const next = round(n)
     numRef.current = next
-    setText(String(next))
+    setText(fmt(next))
     if (next !== value) onChange(next)
   }
 
@@ -294,7 +311,7 @@ export default function NumberField({
             commitTyped()
           } else if (e.key === 'Escape') {
             /* 还原：回到外部值，什么都不提交 */
-            setText(String(value))
+            setText(fmt(value))
             numRef.current = value
           } else if (e.key === 'ArrowUp') {
             e.preventDefault()
