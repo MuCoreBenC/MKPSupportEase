@@ -145,6 +145,9 @@ import {
   UPDATE_STATE_TEXT,
   KIND_AXIS_TEXT,
   LIVE_TEXT,
+  USAGE_HINT,
+  USAGE_KEY,
+  usageCellText,
   originCellOf,
   updateStateOf,
   UNKNOWN,
@@ -346,6 +349,14 @@ interface Props {
     machineId: string,
     versionId: string,
   ) => Promise<void>
+  /**
+   * 本机学习账（`run/usage.json`）：钥匙 → 后处理**成功**跑过的次数。
+   *
+   * 详情面板那一格「后处理 N 次」读它。空 Map = 一次都没跑过（换台设备从零学），
+   * 不是错误 —— 所以那一格写「还没跑过」，不写「—」也不报错。
+   * 钥匙在行上（`row.usageKey`），表这边不拿 `path` 现拼（口径两张表不同）。
+   */
+  usage: Map<string, number>
 }
 
 export default function PresetTable({
@@ -376,6 +387,7 @@ export default function PresetTable({
   remarks,
   onSetRemark,
   onSetAttribution,
+  usage,
 }: Props) {
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
@@ -397,59 +409,21 @@ export default function PresetTable({
   }, [expandedKey])
 
   /*
-   * **收起动画 + 点击排队**（2026-10-10 第九/十轮，第十一轮修关键时序）——
+   * **收起没有动画**（2026-10-17 第七轮，作者：「旧的没有收起动画」「我希望是保持高度
+   * 不变……而且只是收起的话，这个动画也不好，先快后慢，最后的慢有点不舒服」）。
    *
-   * 收起的动画靠「这一行先留在 DOM 里、把内容收走，动画走完再卸载」
-   * （CSS `.dFoldIn`；2026-10-16 第四轮起**行高不再动**，见 CSS 里那段），
-   * 「哪些行正在收」就是 `closing`。**关键：记账必须和 `onToggleExpand` 在同一次
-   * 事件里发生**（同一个批处理、同一帧提交）—— 放在 `useEffect` 里晚一帧，那一帧
-   * 旧行就已经被卸载了，收起动画根本没机会播（作者：「收起一点动画都没有，它直接
-   * 就消失了」）。做成数组：连着点几行时，没收完的互不打断。
+   * 两条事实叠在一起，才得出这个结论：
+   *   · 行高**本来就是瞬间到位**的（2026-10-16 第四轮：`<table>` 里动行高 = 每帧整表重排，
+   *     见 CSS 那段），所以"收起"能播的动画只剩内容层的淡出 —— 但内容还占着那一整行高度，
+   *     看到的顺序是「先淡一点 → 停一下 → 整行突然消失」，作者说的"最后的慢"就是这一段。
+   *   · 换行时旧那张卡还留在 DOM 里播淡出 ⇒ 那一帧**两张卡同时开着**（作者连拍截到的就是
+   *     它），表也跟着高出一整张。
    *
-   * 排队规则（作者：「我收起来的时候，我打断了它，我又点了一下展开它好像就卡住了……
-   * 动画不要被打断，要执行完。你可以加速把它收起，然后再展开」）：
-   *   · 点一个**正在收**的行 → 这一下不掐断收起：记进 `queuedRef`，把当前收起**加速**
-   *     （`rush` → CSS 里那段 240ms 变 130ms），收完（`finishClose`）立刻接着展开；
-   *   · 「展开中再点收」不排队：收起直接接过去（过渡从当前值反向，不跳）。
+   * 所以收起一律**瞬时**：`onToggleExpand` 直接换键，旧行同帧卸载 —— 任何时刻最多一张卡，
+   * 表高只换一次。要动的只剩入场那一层（CSS `.dFoldIn` 的 opacity / transform）。
+   * 原来那套 `closing / rush / queuedRef`（收起动画 + 点击排队 + 加速收尾）整段退役 ——
+   * 没有收起动画，也就没有"收一半又被点开"要排队。
    */
-  const [closing, setClosing] = useState<string[]>([])
-  const [rush, setRush] = useState(false)
-  const queuedRef = useRef<string | null>(null)
-  /** 一次收起的收尾：卸载那一行、撤掉加速，并兑现排着的那次「展开」（如果就是它） */
-  const finishClose = (key: string) => {
-    setClosing((c) => c.filter((k) => k !== key))
-    setRush(false)
-    if (queuedRef.current === key) {
-      queuedRef.current = null
-      onToggleExpand(key)
-    }
-  }
-  /**
-   * 让一行开始收：记账（与下面的 `onToggleExpand` 同帧）+ 排好收尾。
-   * ★ 270ms ≈ CSS 那段 240ms 收起动画 + 余量（2026-10-16 第五轮：收起与展开
-   *   对称到 240ms；行高不再动，动画只剩内容层的 opacity/transform）。
-   *   ⚠️ 这个数必须**略大于 CSS 时长**：小了动画会被腰斩，大了行会在原地多停一拍。
-   */
-  const startClose = (key: string) => {
-    setClosing((c) => (c.includes(key) ? c : [...c, key]))
-    window.setTimeout(() => finishClose(key), 270)
-  }
-  /** 行上那一下点击、卡头那颗「收起」—— 都从这里进（见上面那段说明） */
-  const requestToggle = (rowKey: string) => {
-    /* 正在收的这一行又被点开：加速收尾 + 排队（收完再展开，不互相掐） */
-    if (closing.includes(rowKey)) {
-      setRush(true)
-      queuedRef.current = rowKey
-      /* 加速那一档 130ms（见 CSS 的 `[data-rush='true']`），这里给 160ms 收尾 */
-      window.setTimeout(() => finishClose(rowKey), 160)
-      return
-    }
-    /* 换行：旧行从这一刻开始收（紧跟的 onToggleExpand 会展开新行，同帧提交） */
-    if (expandedKey !== null && expandedKey !== rowKey) startClose(expandedKey)
-    /* 收起这一行：它自己开始收 */
-    if (expandedKey === rowKey) startClose(rowKey)
-    onToggleExpand(rowKey)
-  }
 
   /** 空表三种话，说的是三件不同的事 —— 混成一句「没有数据」就查不出是哪一件 */
   const emptyText = (): string => {
@@ -589,11 +563,10 @@ export default function PresetTable({
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               /*
-               * 「这一行还热着」= 展开着，或者正播**收起动画**（在 `closing` 里）——
-               * 行白底在这期间保持、卡片留在 DOM 里收高度；两样都读它
-               * （见上面 `closing` 那段）。
+               * 「这一行还热着」= 就它展开着。收起没有动画（见上面那段），
+               * 所以这里没有"正在收"这第三态 —— 行白底与卡片同进同出。
                */
-              const rowHot = expanded || closing.includes(row.rowKey)
+              const rowHot = expanded
               /*
                * 备注 / 归属这两块的身份（第八轮）：
                * `localAttr` = 这一行有没有归属可改（我自己那份、认得出的 MKP 预设，
@@ -626,7 +599,7 @@ export default function PresetTable({
                   onClick={(e) => {
                     /* 点在按钮上不算「展开这一行」—— 按钮有自己的动作 */
                     if ((e.target as HTMLElement).closest('button') !== null) return
-                    requestToggle(row.rowKey)
+                    onToggleExpand(row.rowKey)
                   }}
                 >
                   <td className={s.name}>
@@ -939,12 +912,7 @@ export default function PresetTable({
                 </tr>
 
                 {rowHot && (
-                  <tr
-                    className={s.expandRow}
-                    data-open={expanded}
-                    /* 加速（第十轮）：收起动画中这一行又被点了「展开」—— 这条收起快放完 */
-                    data-rush={rush && closing.includes(row.rowKey)}
-                  >
+                  <tr className={s.expandRow}>
                     {/*
                      * colSpan 必须**跟着上面的表头列数走**：MKP 5 列（名称 / 机型 / 版本 / 时间 /
                      * 操作）、切片器 6 列（名称 / 机型 / 喷嘴 / 层高 / 时间 / 操作）。
@@ -953,14 +921,14 @@ export default function PresetTable({
                      */}
                     <td colSpan={mkp ? 5 : 6}>
                       {/*
-                       * —— 展开 / 收起的小动画（2026-10-16 第四轮：行高不再动）——
+                       * —— 展开的小动画（2026-10-16 第四轮：行高不再动）——
                        * 三段内衬：`.dFold`（撑开格子）→ `.dFoldCut`（裁）→ `.dFoldIn`
                        * （内容落下 + 渐显 + 内边距 —— 卡片影子要的余地也在这里，
                        * 贴着裁剪边影子会被切）。
                        * 动画只跑在 `.dFoldIn` 上（opacity / transform，走合成器）：
                        * 在 `<table>` 里动行高 = 每帧整表重排，那是不顺的根源。
-                       * 退场：收起时这一行先留在 DOM 里（`closing`）把内容收走，
-                       * 动画走完再卸载（见上面 `closing` 那段）。
+                       * **退场没有动画**（2026-10-17 第七轮）：这一行卸载就是收起，
+                       * 同帧换到新那一行，任何时刻最多一张卡（见上面那段说明）。
                        */}
                       <div className={s.dFold}>
                         <div className={s.dFoldCut}>
@@ -1021,14 +989,14 @@ export default function PresetTable({
                             </span>
                           </span>
                           {/*
-                            收起：与点这一行（再点一次）同一件事 —— 安静的小按钮，
-                            不抢摘要；也走 `requestToggle`（收起动画中点它 = 排队再开）
+                            收起：与点这一行（再点一次）同一件事 —— 安静的小按钮，不抢摘要。
+                            收起没有动画（见上面那段），点它就是这一行消失。
                           */}
                           <button
                             type="button"
                             className={s.dHeadFold}
                             title="收起详情（与点这一行同一件事）"
-                            onClick={() => requestToggle(row.rowKey)}
+                            onClick={() => onToggleExpand(row.rowKey)}
                           >
                             收起
                           </button>
@@ -1090,6 +1058,24 @@ export default function PresetTable({
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>{BASED_ON_KEY}</span>
                                   <span className={s.dVal}>{basedOnCellText(row)}</span>
+                                </div>
+                              )}
+
+                              {/*
+                                后处理跑成过几次（2026-10-17 作者：「加一个显示的字段，
+                                后处理使用次数……在展开的详细里面吧」）。
+
+                                数据是本机学习账（`run/usage.json`），不在任何契约里；
+                                钥匙在行上（`usageKey`，见 `PresetRowBase`）。只有 MKP 预设
+                                才有这一格 —— 切片器配置不跑后处理，那几行连钥匙都没有。
+                                0 次照常显示「还没跑过」：这是事实，不是缺数据。
+                              */}
+                              {row.usageKey !== undefined && (
+                                <div className={s.dRow} title={USAGE_HINT}>
+                                  <span className={s.dKey}>{USAGE_KEY}</span>
+                                  <span className={s.dVal}>
+                                    {usageCellText(usage.get(row.usageKey))}
+                                  </span>
                                 </div>
                               )}
                             </div>

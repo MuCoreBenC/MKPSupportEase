@@ -22,6 +22,23 @@
 # - code         —— 对外稳定错误码。**键本身就是码时可省**（`E_*` 开头的键按码算）；
 #                  `hook.*` 那几条要给码才写。同一个码允许在两层各有一条（说法不同是常态：
 #                  内核那句给排查，钩子那句给用户）。
+#
+#                  ★★★ **每一条用户能读到的句子都必须有码**（2026-10-17 作者定）：
+#                  「这样就方便我给 AI 去看啊，这样子，就算信息不全，也能通过错误码找到对应的」。
+#                  前三个字母是**类别**，一眼分得出"出故障"还是"你自己让它停的"：
+#
+#                    E_*  故障  —— 系统判定这件事没成（解析失败、写盘失败、内核报错…）
+#                    W_*  停下  —— **不是故障**：用户按了停止 / 在问句里选了停 / 某一步降级了
+#                                  （归档没落成但 G-code 是好的那几条也归这儿）
+#                    N_*  成功  —— 跑完了。几种"都算成功但结果不同"的情形各有各的码
+#                                  （校准件：`N_CALIB_PRINT_001` / `N_CALIB_DIRECT_001`）
+#                    Q_*  提问  —— 钩子停下来问用户的那几句（不是错，也不是结束）
+#
+#                  `*_NNN` 那截是序号，**加新条目就往后排，不要复用/改号** ——
+#                  改了号，用户贴在 issue 里的旧码就搜不到了。
+#
+#                  查码的入口：`python3 scripts/message-codes.mjs <码或键>` 打印这句的
+#                  全部口径（`text` / `slicer` / 参数 / 说明）；不带参数则列出整张码表。
 # - text         —— 本程序里给用户看的那一句（界面模态框、执行记录、日志）。`{名字}` 是占位符。
 # - slicer       —— 给**切片器**那一行的口径，缺省 = 与 `text` 同一句。
 #                  ★ 「让切片器少看 / 别看 / 换个说法」就写在这个字段上。
@@ -144,13 +161,38 @@ slicer = "读不到切片器给的那份 G-code：{path}"
 params = ["path", "detail"]
 
 ["hook.mismatch_question"]
-text = "这份 G-code 是 {gcode} 切出来的，而选中的预设是 {preset} 的 —— 维度与打印边界会按预设算，跑出来的可能是错的。还继续吗？"
+code = "Q_CFG_MISMATCH_001"
+text = "G-code 是 {gcode}，预设是 {preset} —— 机型对不上，结果可能出错。还继续吗？"
 params = ["gcode", "preset"]
+note = "2026-10-17 作者：「文案不好，什么纬度？你就用很简单的文案，简短几行的」—— 原来那句解释「维度与打印边界会按预设算」，是内核口径、不是用户的话"
 
 ["hook.mismatch_stopped"]
+code = "W_CFG_MISMATCH_001"
 text = "已停下（机型不匹配：G-code 是 {gcode}，预设是 {preset}）—— 原文件没有被改动"
 slicer = "机型不匹配，按你的选择停下：G-code 是 {gcode}，预设是 {preset}；原文件没有被改动"
 params = ["gcode", "preset"]
+
+["hook.calib_mode_question"]
+code = "Q_CALIB_MODE_001"
+text = "这份 G-code 是{kind}件。保留打印件一起后处理，还是只跑校准？"
+params = ["kind"]
+note = "2026-10-17：后处理认出这是校准件时那一问（作者：「后处理会识别到是校准文件的时候」）。{kind} = Z 偏移校准 / XY 精度校准 / XY 粗校准 / 重复性校准。选项的后果写在按钮上（print / direct），正文**不再重复选项名**——按钮就在下面一行"
+
+["hook.calib_stopped"]
+code = "W_CALIB_MODE_001"
+text = "已停下（{kind}校准件，没有选校准方式）—— 原文件没有被改动"
+slicer = "校准件没有选校准方式，按你的选择停下：原文件没有被改动"
+params = ["kind"]
+
+["hook.calib_done_print"]
+code = "N_CALIB_PRINT_001"
+text = "打印件保留，只加了涂胶与擦料 —— 处理完成"
+note = "2026-10-17：校准件那一问答「先打印，再校准」的成功结论。两种跑法**都是成功**，同一屏，只有这一句不同；界面读 `finished.calibChoice`，报告读 `_meta.json` 的 `calib_choice` —— 同一个键，不许两边各写一份"
+
+["hook.calib_done_direct"]
+code = "N_CALIB_DIRECT_001"
+text = "已去掉打印件，只保留校准路径 —— 处理完成"
+note = "2026-10-17：校准件那一问答「直接校准」的成功结论（口径同 `hook.calib_done_print`）"
 
 ["hook.mismatch_refuse"]
 code = "E_CFG_MISMATCH_001"
@@ -160,6 +202,7 @@ params = ["gcode", "preset"]
 note = "E_CFG_MISMATCH_001 是**新造码**（旧词汇表里没有）：这一档以前无码，报告与日志里搜不到"
 
 ["hook.cancelled"]
+code = "W_SYS_CANCELLED_001"
 text = "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）"
 slicer = "这一盘没有做后处理，原文件没有被改动"
 
@@ -175,34 +218,42 @@ text = "超时停止：这一趟超过 {minutes} 分钟 —— 原文件没有�
 params = ["minutes"]
 
 ["hook.ok"]
+code = "N_OK_001"
 text = "处理完成：{output}（{ms} ms）"
 params = ["output", "ms"]
 
 ["hook.warning"]
+code = "W_WARNING_001"
 text = "警告：{text}"
 params = ["text"]
 
 # 归档那一路的降级警告（产物优先：这些句子的意思都是"记录没落成，但 G-code 是好的"）
 ["hook.archive_unavailable"]
+code = "W_ARCHIVE_UNAVAILABLE_001"
 text = "归档不可用：找不到应用数据目录（这一次不落执行记录）"
 
 ["hook.archive_backup_failed"]
+code = "W_ARCHIVE_BACKUP_001"
 text = "原件备份失败（这一次不落执行记录）：{detail}"
 params = ["detail"]
 
 ["hook.archive_output_failed"]
+code = "W_ARCHIVE_OUTPUT_001"
 text = "输出归档失败：{detail}"
 params = ["detail"]
 
 ["hook.archive_fact_failed"]
+code = "W_ARCHIVE_FACT_001"
 text = "输出文件事实读不出来：{detail}"
 params = ["detail"]
 
 ["hook.archive_sha_failed"]
+code = "W_ARCHIVE_SHA_001"
 text = "输出文件摘要算不出来：{detail}"
 params = ["detail"]
 
 ["hook.archive_meta_failed"]
+code = "W_ARCHIVE_META_001"
 text = "执行记录写入失败：{detail}"
 params = ["detail"]
 
@@ -211,24 +262,30 @@ params = ["detail"]
 # 切片器那一行（stderr）与界面那一屏共用同一个「原因」，但**框子**分开写：
 # 切片器只看到一句结论，界面上有自己的表头，不需要"处理失败："那层皮。
 ["hook.line.failed"]
+code = "W_LINE_FAILED_001"
 text = "处理失败：{reason}［{code}］"
 params = ["reason", "code"]
 
 # 失败但没有码：理论分支（现在每一条失败都有码，留着是为了"哪天有人加了一条无码的
 # 失败"时，那一行仍然是一句人话，而不是一个空框）
 ["hook.line.failed_nocode"]
+code = "W_LINE_FAILED_002"
 text = "处理失败：{reason}"
 params = ["reason"]
 
 ["hook.line.stopped"]
+code = "W_LINE_STOPPED_001"
 text = "已停止：{reason}［{code}］"
 params = ["reason", "code"]
 
 ["hook.line.cancelled"]
-text = "已取消：{reason}"
-params = ["reason"]
+code = "W_LINE_CANCELLED_001"
+text = "已取消：{reason}［{code}］"
+params = ["reason", "code"]
+note = "2026-10-17：框子里原来**没有 {code}**，于是用户自己按停止时日志那一行是 `code=\"\"` —— 这正是\"信息不全就定位不了\"的那种。现在与另三档一样把码写在句子里"
 
 ["hook.log_path"]
+code = "N_LOG_PATH_001"
 text = "完整日志：{path}"
 params = ["path"]
 note = "失败/取消时追加在结论后面那一行 —— 用户报问题时把日志整段给我们"

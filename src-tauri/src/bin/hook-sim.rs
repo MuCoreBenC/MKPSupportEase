@@ -38,7 +38,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use mkp_support_ease_lib::devsim::{self, Mode, Options, Sink};
-use mkp_support_ease_lib::hook_ipc::{Client, FromHook};
+use mkp_support_ease_lib::hook_ipc::{Client, FromHook, QuestionChoice};
 use postprocess::diag::CancelToken;
 
 const USAGE: &str = "\
@@ -98,7 +98,36 @@ impl Sink for ClientSink {
         self.0.send(msg);
     }
     fn ask(&self, question: &str) -> bool {
-        self.0.ask(question)
+        /* 机型那一问：两颗老按钮（`keep` / `stop`），超时口径由 `Client::ask` 自己定 */
+        let choices = vec![
+            QuestionChoice {
+                id: "keep".to_owned(),
+                label: "强制继续".to_owned(),
+                hint: None,
+                accent: false,
+            },
+            QuestionChoice {
+                id: "stop".to_owned(),
+                label: "终止".to_owned(),
+                hint: None,
+                accent: true,
+            },
+        ];
+        self.0.ask(question, choices, "stop").as_deref() == Some("keep")
+    }
+
+    /// 校准件那一问（2026-10-17）：真的推到界面上去问，选项表就是演出里那两颗。
+    fn ask_calibration(&self, question: &str, choices: &[(&str, &str, &str)]) -> Option<String> {
+        let table = choices
+            .iter()
+            .map(|(id, label, hint)| QuestionChoice {
+                id: (*id).to_owned(),
+                label: (*label).to_owned(),
+                hint: Some((*hint).to_owned()),
+                accent: *id == "print",
+            })
+            .collect();
+        self.0.ask(question, table, "stop")
     }
 }
 

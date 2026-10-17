@@ -109,6 +109,108 @@ fn scenes() -> Vec<DevScene> {
             slot_label: "后处理".to_owned(),
         });
     }
+    /* ★★ 2026-10-17：那一问的两种**收场**（作者：「帮我在工作台加上更多的触发按钮…
+    比如触发红字的」「没必要的就不要显示，而是显示在 hero 里面」）。
+    它们不是"另一屏"，而是**同一扇窗里 hero / 标题栏的另一档** —— 所以挨着那一问摆，
+    名字也照"那一问 · …"起（排在 `Mode::ALL` 之后，读的人先看到四档主干）。 */
+    out.push(DevScene {
+        id: "postprocess-question-timeout".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "那一问 · 等超时".to_owned(),
+        note: "机型不匹配那一问停着，倒计时走完（这里压成 12 秒）自己收成「已停止」—— \
+               真机上要干等满两分钟才看得到的那一屏"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-answer-stale".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "那一问 · 点下去已经晚了".to_owned(),
+        note: "那一问还挂在屏上、钩子已经没了：真机上这时点「强制继续 / 终止」，\
+               答案会落在**标题右边**那一行（开发台直接把那一行注入，看位置与省略号）"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-backgrounded".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "跑着 · 收进后台".to_owned(),
+        note: "跑着的时候点一下「后台运行」：这一屏收走，标题栏换成那枚「有事在跑」的胶囊 \
+               （点胶囊能重新打开）。这一步是界面自己点，所以开发台只把场景推过去"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    /* 校准件那一问（2026-10-17）：后处理认出这是校准件时才出现 —— 平时要真切一张校准件
+    才看得到。四档都是**同一扇窗**（hero 换一档），不另开屏。 */
+    out.push(DevScene {
+        id: "postprocess-calib-question".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "校准件 · 问怎么跑".to_owned(),
+        note: "后处理认出这是一份校准件时那一问：先打印再校准 / 直接校准（hero 里带倒计时）。\
+               平时要真导一张校准件才看得到"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-calib-print-done".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "校准件 · 先打印（成功）".to_owned(),
+        note: "答「先打印，再校准」跑完的那一屏：**模型原样**，成功结论说打印件保留".to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-calib-direct-done".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "校准件 · 直接校准（成功）".to_owned(),
+        note: "答「直接校准」跑完的那一屏：**去掉打印件、只留校准路径**，成功结论也这么说"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-calib-timeout".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "校准件 · 等超时".to_owned(),
+        note: "那一问没人答，倒计时走完（这里压成 12 秒）自己收成「已停止」—— \
+               真机上要干等满两分钟才看得到的那一屏"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-success-no-metrics".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "成功 · 没有结果读数".to_owned(),
+        note: "老记录那种成功（迁移前跑的那几次）：跑成了，但结果屏上**没有**指标条与 \
+               「擦料与胶水消耗」那几格 —— 看那一版排版用的"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
+    out.push(DevScene {
+        id: "postprocess-success-long-warning".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "成功 · 好几行警告".to_owned(),
+        note: "跑成了但内核报了好几条警告（这一盘没有支撑之类）：框身被警告行撑高，\
+               验下面那张事实表会不会被挤坏"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
 
     // ---- 其余界面格：id 是**稳定 slug**（前端 Provider 按它认领），label 才是人话 ----
     //
@@ -207,7 +309,16 @@ fn slot_label_of(id: &str) -> &'static str {
         | "postprocess-success"
         | "postprocess-fail"
         | "postprocess-cancel"
-        | "postprocess-question" => "后处理",
+        | "postprocess-question"
+        | "postprocess-question-timeout"
+        | "postprocess-answer-stale"
+        | "postprocess-backgrounded"
+        | "postprocess-success-no-metrics"
+        | "postprocess-success-long-warning"
+        | "postprocess-calib-question"
+        | "postprocess-calib-print-done"
+        | "postprocess-calib-direct-done"
+        | "postprocess-calib-timeout" => "后处理",
         "update-prompt" => "标题栏",
         "delete-confirm" => "菜单",
         "float-toast" => "提示条",

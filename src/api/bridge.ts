@@ -169,8 +169,12 @@ export const bridgeApi: MkpApi = {
   /* 钩子那一趟：切片器导出时本程序被带参数拉起来的那一次（快照 / 停 / 答一问） */
   getPostProcessRun: () => call('getPostProcessRun', 'get_post_process_run'),
   cancelPostProcess: () => call('cancelPostProcess', 'cancel_post_process'),
-  answerPostProcessMismatch: (keep) =>
-    call('answerPostProcessMismatch', 'answer_post_process_mismatch', { keep }),
+  /* 回答屏幕上那一问：`id` 是那一颗按钮的 id（`keep` / `stop` / `print` / `direct` …） */
+  answerPostProcess: (questionKind, id) =>
+    call('answerPostProcess', 'answer_post_process', { questionKind, id }),
+  /* 首帧那两条路的收尾：快照里有一问、但自己没收到事件 ⇒ 让它补推一次（只重新 emit） */
+  replayPostProcessQuestion: () =>
+    call('replayPostProcessQuestion', 'replay_post_process_question'),
 
   /* ——— 预设页（A41）的读接口：走真 command —— */
   getMachines: () => call('getMachines', 'get_machines'),

@@ -37,12 +37,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
+
 import { api, errorText } from '../../api'
 import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
-import { Modal } from '../../components/modal'
+import { HeadNote, Modal, summarizeNotes } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
+import { useDevPreviewNonce } from '../dev/useDevPreview'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
@@ -324,6 +326,33 @@ function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null
   return { title: '擦料与胶水消耗', rows }
 }
 
+/**
+ * 这一屏的**提示**一律走共用件 [`HeadNote`]（`components/modal`）—— 落点是标题右边
+ * 那一格（回执槽），不是框身。
+ *
+ * 作者 2026-10-17 三次点名之后收的口径：
+ *   · 「这种错误一行的能不能放到标题右侧」
+ *   · 「这个文字提示不应该加在这个地方，应该加在标题后面……会导致我的模态框高度宽度变化」
+ *   · 「把所有这些提示的，不管是什么的，都用同一套组件，同一套逻辑复用在标题后面显示」
+ *
+ * 原来这一屏自己抄了一份 `HeadNote` + `.headErr/.headNote/.headOk` 三档样式，
+ * 现在那三档住共用件里（`components/modal/HeadNote.module.css`）—— 别在这里再抄一遍。
+ *
+ * ★ 必须**在 `Modal` 里面渲染**：槽是 `Modal` 自己给的（`modalHeadSlot.ts`），
+ * 在外面拿到的永远是 `null`。
+ */
+
+/**
+ * 内核那几条警告压成**一行**（标题右边那一格只放得下一行）。
+ *
+ * 多条那半截的写法归共用件（`summarizeNotes`）；这里只加"警告："这层帽子 ——
+ * 因为报告页那些"读不出来"之类的提示也是同一格，帽子里得说清是哪一类事。
+ */
+function warningsLine(list: string[]): string {
+  const one = summarizeNotes(list)
+  return list.length === 1 ? `警告：${one}` : `警告 ${one}`
+}
+
 function FactsGroups({ groups }: { groups: FactGroup[] }) {
   return (
     <div className={s.groups}>
@@ -419,19 +448,116 @@ function ProgressHero({
 
 /* ---- ② 机型不匹配：红警告 hero（空心圈 + 标题 + 后端那一句问话） ---- */
 
-function WarnHero({ text }: { text: string }) {
+/**
+ * 「1 分 52 秒后自动终止」——没人答就自动按"不跑"收场。
+ *
+ * 作者 2026-10-17：「文案里面出现自动停止的倒计时」。后端给的是**绝对时刻**
+ * （`question.deadlineUnixMs`），所以补推一次也不会从头数。
+ * 每秒重算一次靠上面那条 `running` 的 interval（`setTick`）——这一屏跑着的时候本来就每秒重渲。
+ */
+/**
+ * 校准那趟的**那一句结论**（`print` / `direct` 两种跑法各一句）。
+ *
+ * ★ 与 Rust 侧 `hook::calib_done_line` 读的是**同一组键**（`messages.toml` 的
+ * `hook.calib_done_print` / `hook.calib_done_direct`）—— 报告页那一侧也读它，
+ * 于是界面与报告不会各说各的。这里这份是它的前端镜像：那一行住在标题右边
+ * （`HeadNote`），要的是"立刻能画"的短句，不再回一趟后端。
+ *
+ * ★★ 两边**必须逐字一致**；改文案时 `messages.toml` 与这里一起改。
+ */
+function calibDoneLine(choice: 'print' | 'direct'): string {
+  return choice === 'direct'
+    ? '已去掉打印件，只保留校准路径 —— 处理完成'
+    : '打印件保留，只加了涂胶与擦料 —— 处理完成'
+}
+
+function countdownText(deadlineUnixMs: number | undefined): string | null {
+  /* 老一侧（没这个字段）/ 预览那一档（0）= 不摆倒计时，不许摆出个 `NaN 秒` */
+  if (deadlineUnixMs === undefined || !Number.isFinite(deadlineUnixMs) || deadlineUnixMs <= 0) {
+    return null
+  }
+  const left = deadlineUnixMs - Date.now()
+  if (!Number.isFinite(left)) return null
+  if (left <= 0) return '正在自动终止…'
+  const sec = Math.ceil(left / 1000)
+  if (sec < 60) return `${sec} 秒后自动终止`
+  const m = Math.floor(sec / 60)
+  return `${m} 分 ${sec - m * 60} 秒后自动终止`
+}
+
+function WarnHero({ text, deadlineUnixMs }: { text: string; deadlineUnixMs?: number }) {
+  const left = countdownText(deadlineUnixMs)
   return (
     <div className={`${s.warnHero} ${s.warnSoft}`} role="status">
       <span className={s.warnGlyph} aria-hidden="true">
         <span className={s.warnBadge}>!</span>
       </span>
       <div className={s.warnCopy}>
-        <span className={s.warnTitle}>预设与机型不匹配</span>
-        {/* 正文就是后端那一句问话（`question.text`）—— 不另编文案 */}
-        <span className={s.warnLine}>{text}</span>
+        {/*
+          这一叠（标题 + 问话 + 倒计时）在框内滚：hero 与其它三扇一样**定死 104px**
+          （作者 2026-10-17：「内容在里面滚动」），内容多的时候不许把框撑高。
+
+          ★ 文案只留三行（作者：「你就用很简单的文案，简短几行的」）：
+            标题（是什么事）+ 后端那一句（哪两台机对不上）+ 倒计时（不管会怎样）。
+          原来那两句"维度按预设算 / 怎么答"是内核口径，作者原话：「文案不好，什么纬度？」
+        */}
+        <div className={s.warnScroll}>
+          <span className={s.warnTitle}>预设与机型不匹配 · 等你决定</span>
+          {/* 正文就是后端那一句问话（`question.text`）—— 不另编文案 */}
+          <span className={s.warnLine}>{text}</span>
+          {left !== null && <span className={s.warnHint}>{left}</span>}
+        </div>
       </div>
     </div>
   )
+}
+
+/**
+ * **那一问的 hero**（2026-10-17 泛化）：按 `questionKind` 分两种长相，**同一口 104px 的框、
+ * 同一套 `.warnScroll` 内滚**（作者：「hero 高度定死，内容在里面滚动」）。
+ *
+ * - `machine-mismatch` = 警告橙（`.warnSoft`）：这是"结果可能出错"，要拦一下；
+ * - `calibration-mode` = 中性绿（`.askSoft`）：**不是出错**，是"这一盘怎么跑"的流程选择，
+ *   拿警告色去说它会让用户以为出了问题（作者：「这不是警告」）。
+ *
+ * ★ 种类串必须与后端常量**逐字一致**（`hook_ipc::QKIND_*`）。这里原来写的是
+ * `calibration-print`，而后端发的是 `calibration-mode` —— 对不上就落到兜底那条，
+ * 校准那一问被套上"预设与机型不匹配 · 等你决定"的橙框（作者 2026-10-17 截图）。
+ *
+ * 两种都只摆三行：标题 + 后端那一句 + 倒计时。文案不在这里编（正文就是 `question.text`）。
+ */
+function AskHero({
+  questionKind,
+  text,
+  deadlineUnixMs,
+}: {
+  questionKind: string
+  text: string
+  deadlineUnixMs?: number
+}) {
+  if (questionKind === 'calibration-mode') {
+    const left = countdownText(deadlineUnixMs)
+    return (
+      <div className={`${s.warnHero} ${s.askSoft}`} role="status">
+        <span className={s.warnGlyph} aria-hidden="true">
+          {/* 圈里那枚记号是**画出来的 SVG**，不是文字符号 —— 与 `.resBadge` 那条同一条理由：
+              字体里的 `✦` 自带基线偏移（`align-items: center` 居中的是行盒、不是字形），
+              看上去会偏低。SVG 占满整个盒子，几何上就是正的（作者 2026-10-17 截图）。 */}
+          <span className={`${s.warnBadge} ${s.askBadge}`}>
+            <SparkMark />
+          </span>
+        </span>
+        <div className={s.warnCopy}>
+          <div className={s.warnScroll}>
+            <span className={s.warnTitle}>这是校准件 · 选怎么跑</span>
+            <span className={s.warnLine}>{text}</span>
+            {left !== null && <span className={s.warnHint}>{left}</span>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+  return <WarnHero text={text} deadlineUnixMs={deadlineUnixMs} />
 }
 
 /* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
@@ -504,6 +630,25 @@ function SquareMark() {
 }
 
 /**
+ * 四角星（「这是校准件 · 选怎么跑」那一枚记号）。
+ *
+ * 为什么不写 `✦` 文本：字体里的星号自带基线偏移，`align-items: center` 居中的是
+ * **行盒**而不是字形，作者看到的那颗星"略微偏低"。SVG 用几何坐标画，正中心就是正中心。
+ *
+ * 形状 = 四条内凹的边（每边一个控制点拉向圆心），比正菱形更像"闪光"，与 `✦` 同一种感觉。
+ */
+function SparkMark() {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path
+        d="M10 2.2 C10.7 6.4 13.6 9.3 17.8 10 C13.6 10.7 10.7 13.6 10 17.8 C9.3 13.6 6.4 10.7 2.2 10 C6.4 9.3 9.3 6.4 10 2.2 Z"
+        fill="currentcolor"
+      />
+    </svg>
+  )
+}
+
+/**
  * 已停止（§4 定稿 = sm4「柔和内影」）：**同一张气泡卡**，只换面 / 线 / 影，
  * 图标**进板**（板是 [圈 + 文案列] 的一行）。
  *
@@ -569,8 +714,42 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   /* 跑着的时候顶上那条拖窗带用它（与标题栏同一条动作，见文件头第 1 条下面那段） */
   const drag = useTitlebarDrag()
 
+  /*
+   * **开发台**：`postprocess-answer-stale`（那一问还挂着、钩子已经没了）。
+   *
+   * 那一行红字是"点按钮那一下才产生"的本地状态，后端造不出来 —— 所以这一档由开发台
+   * 把场景推过来，这里自己把同一句话摆上去（八秒后自己收），看的正是**位置与省略号**
+   * （作者 2026-10-17：「比如触发红字的」）。正式包里收不到这个事件，恒为 0。
+   */
+  const staleNonce = useDevPreviewNonce('postprocess-answer-stale')
+  useEffect(() => {
+    if (staleNonce === 0) return
+    setErr('刚才那个问题已经结束了，不用再回答')
+    const timer = window.setTimeout(() => setErr(null), 8000)
+    return () => window.clearTimeout(timer)
+  }, [staleNonce])
+
+  /*
+   * **开发台**：`postprocess-backgrounded`（跑着的时候点了「后台运行」）。
+   *
+   * 那一步是这一屏自己的动作（`dismiss`），开发台替用户点一下 —— 于是标题栏那枚
+   * 「有事在跑」的胶囊与它的详情面板才看得见（跑着才有的状态）。
+   */
+  const backNonce = useDevPreviewNonce('postprocess-backgrounded')
+  useEffect(() => {
+    if (backNonce === 0) return
+    dismiss()
+  }, [backNonce, dismiss])
+
   const finished = run?.finished ?? null
   const running = run !== null && finished === null
+  /*
+   * ★★ 正在等用户作答（2026-10-17）。**要不要问，看的是"问句还在不在"**：
+   * 钩子那边推完问句就在原地等，直到有人答 / 按停止 / 超时 —— 这一整段时间界面上
+   * 都必须是"等你回答"那一屏，不能还挂着"准备中 6%"（作者真机看到的就是那个，
+   * 然后两分钟后被静默终止）。
+   */
+  const asking = running && run.question !== null
   /*
    * 收尾窗口：跑完那一刻**先让条子把最后几个点走完**（95% → 100%），再切结果态。
    * 作者 2026-10-14：「最后 95% 的时候就直接结束消失了，出现了结果页面」—— 太突兀。
@@ -765,7 +944,6 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
 
   const percent =
     run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
-  const asking = running && run.question !== null
   const eta = running ? etaText(view.sinceMs, percent) : null
   const facts = run.facts
 
@@ -784,7 +962,13 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    */
   let lead: ReactNode = null
   if (asking && run.question !== null) {
-    lead = <WarnHero text={run.question.text} />
+    lead = (
+      <AskHero
+        questionKind={run.question.questionKind}
+        text={run.question.text}
+        deadlineUnixMs={run.question.deadlineUnixMs}
+      />
+    )
   } else if (showProgress) {
     lead = (
       /*
@@ -817,6 +1001,18 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
            `key` 与 hero 那一层必须不同（见那边注释） */
         <div ref={leadBoxRef} key="leadBox">
           <MetricsStrip res={finished.result} onDoubleTap={() => startFlip('hero')} />
+          {/*
+            校准件那一趟：**两种跑法都是成功**，同一屏，只有这一句按选择分开说
+            （作者 2026-10-17：「两边一样的成功，但是文案可以区别一下」）。
+
+            ★ 这一句**摆在标题右边那一格**（`HeadNote`），不是框身里 —— 作者：
+            「这一个文字提示不应该加在这个地方，应该加在标题后面。因为你加在这的话，
+            会导致我的模态框高度宽度变化」。文案住 `messages.toml`（`hook.calib_done_*`），
+            报告读同一组键 —— 这里只挑键。
+          */}
+          {finished.calibChoice !== undefined && (
+            <HeadNote text={calibDoneLine(finished.calibChoice)} tone="note" />
+          )}
         </div>
       ) : null
     } else {
@@ -865,22 +1061,58 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
               关闭预览
             </Btn>
           </>
-        ) : asking ? (
-          /* 那一问的两颗按钮：**强制继续不强调、终止占强调位**（第 9~11 轮定的）——
-             「终止」就是回答"不跑"那一条（与「停止」同一个落点，见契约里那条注释）。
-             按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className */
-          <>
-            <Btn disabled={busy} onClick={() => act(() => api.answerPostProcessMismatch(true))}>
-              强制继续
-            </Btn>
-            <Btn
-              variant="accent"
-              disabled={busy}
-              onClick={() => act(() => api.answerPostProcessMismatch(false))}
-            >
-              终止
-            </Btn>
-          </>
+        ) : asking && run.question !== null ? (
+          /*
+           * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
+           * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
+           * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
+           */
+          run.question.choices !== undefined && run.question.choices.length > 0 ? (
+            /* `data-choices` = 「问句自带选项」那一档：页脚**允许折行**（见 `.footChoices`）。
+               ★ 原来的样子（作者 2026-10-17 截图）：两颗长按钮都不许收缩（全局
+               `button { white-space: nowrap }`），中号框装不下 ⇒ 第二颗被推出框外看不见。
+               `hint` 只是补充说明，**不再塞进按钮里**：按钮的字 = `label`，
+               后果交给 `title`（悬停可读），按钮本身短了才排得下。 */
+            <span className={s.footChoices} data-choices>
+              {run.question.choices.map((c) => (
+                /* 外观 = 全站那颗 `Btn`（深浅两套都在 `ui.module.css` 里，
+                   深色下 accent 是实心绿白字）；这里只**借**一个布局类让它能折行收缩。
+                   `hint` 挂 `title`：后果说明不该挤在按钮上（按钮越长越排不下）。 */
+                <Btn
+                  key={c.id}
+                  variant={c.accent ? 'accent' : 'default'}
+                  className={s.choiceBtn}
+                  disabled={busy}
+                  title={c.hint}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', c.id))
+                  }
+                >
+                  {c.label}
+                </Btn>
+              ))}
+            </span>
+          ) : (
+            <>
+              <Btn
+                disabled={busy}
+                onClick={() =>
+                  act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
+                }
+              >
+                强制继续
+              </Btn>
+              <Btn
+                variant="accent"
+                disabled={busy}
+                onClick={() =>
+                  act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
+                }
+              >
+                终止
+              </Btn>
+            </>
+          )
         ) : running ? (
           <>
             <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
@@ -925,17 +1157,24 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
               : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
           }
         />
+        {/*
+          内核那几条警告（"这一盘没有支撑"之类）：
+            · **标题右边那一格**（`HeadNote`）= 汇总一句话「警告 N 条 · 首条…」，
+              作者 2026-10-17：「把所有这些提示的，不管是什么的，都用同一套组件、同一套逻辑
+              复用在标题后面显示」；
+            · 框身这张列表 = **明细**（每条一行，要读全就得在这儿）。
+          两者分工不同，不是重复：格子只回答"有没有事、什 么事"，
+          明细回答"具体哪几条"。明细的条数不影响格子（格子只有一行、省略号）。 */}
+        {finished !== null && finished.warnings.length > 0 && (
+          <HeadNote text={warningsLine(finished.warnings)} tone="note" />
+        )}
         {finished !== null &&
           finished.warnings.map((w) => (
             <p className={s.warn} key={w}>
               警告：{w}
             </p>
           ))}
-        {err !== null && (
-          <p className={s.bad} role="alert">
-            {err}
-          </p>
-        )}
+        {err !== null && <HeadNote text={err} tone="error" />}
       </div>
     </Modal>
   )

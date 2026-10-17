@@ -113,6 +113,9 @@ pub struct RunSnapshot {
     /// 并标上「预览模式」—— 那些按钮走的是真钩子回写线，预览里点了只会如实报
     /// "现在没有在跑后处理"（作者 2026-10-14 裁定：预览就明确是预览，不许点出真业务）。
     pub preview: bool,
+    /// 快照里这一份问句，事件有没有送到过界面（见 [`Shared::question_emitted`]）。
+    /// `false` = 界面拿到快照后应当喊 [`HookView::replay_question`] 补推一次。
+    pub question_emitted: bool,
 }
 
 /// Tauri `manage` 那一格里放的东西（命令从它那三条读 / 写）。
@@ -142,6 +145,15 @@ struct Shared {
     finished: Option<FinishedDto>,
     /// 这一屏是**开发台演出来的**（不是真钩子）—— 见 [`RunSnapshot::preview`]
     preview: bool,
+    /// 这一份问句**有没有推过事件**（2026-10-17）。
+    ///
+    /// 为什么要有这一笔：界面首帧同时做两件事 —— 读快照（`get_post_process_run`）与订阅
+    /// `postprocess-question`。钩子那边「推问句 → 等答复」是一气呵成的：推送与开始等待
+    /// 之间没有间隙，于是这两条路的先后全看运气。慢的那一路（订阅还没挂上）就会**一片空白
+    /// 地等** —— 用户看到的正是这个：没有那个选择框，120 秒后被超时终止。
+    /// 所以快照里带着"推过没有"：没推过的，界面回来喊一声 [`HookView::replay_question`]
+    /// 补推一次（只重新 emit，不动任何状态）。
+    question_emitted: bool,
 }
 
 /// 补一条执行记录的打印时间（**后台线程里跑**，不占钩子那条关键路径）。
@@ -294,7 +306,16 @@ impl HookView {
                 let _ = app.emit(PROGRESS_EVENT, progress);
             }
             FromHook::Question(question) => {
-                self.shared.lock().expect("锁没坏").question = Some(question.clone());
+                {
+                    let mut g = self.shared.lock().expect("锁没坏");
+                    g.question = Some(question.clone());
+                    g.question_emitted = true;
+                }
+                /* 这一条是用户"答不答"的唯一入口：推过没有要留痕（见 `question_emitted`） */
+                tracing::info!(
+                    kind = %question.question_kind,
+                    "钩子在等一个答复：问句已推给界面"
+                );
                 let _ = app.emit(QUESTION_EVENT, question);
             }
             FromHook::DeferPrintTime { record_id, output } => {
@@ -373,10 +394,60 @@ impl HookView {
         认不出来 ⇒ 它是**界面指令**：推给前端 Provider，由持有那一格界面的组件自己认领。
         这一类**不演出、不占后处理那套状态**。 */
         let tail = scene.strip_prefix("postprocess-");
-        /* ★「处理中（停住不动）」：走 success 的演出，但在第二遍扫描**停住**（见下 `hold_at`） */
-        let hold_at = (tail == Some("running")).then(|| "pass2".to_owned());
+        /* ★「处理中（停住不动）」「跑着被踢到后台」：走 success 的演出，但在第二遍扫描
+         **停住**（见下 `hold_at`） */
+        let hold_at = matches!(tail, Some("running" | "backgrounded")).then(|| "pass2".to_owned());
+        /*
+         * 2026-10-17 新加几档（作者：「帮我在工作台加上更多的触发按钮…比如触发红字的」）。
+         * 都演在**同一扇窗**里，不另开屏：
+         *   · `question-timeout` —— 那一问 + 真倒计时，到点自己收成「已停止」；
+         *   · `answer-stale`   —— 那一问还挂在屏上、钩子已经没了：真机上点一下，
+         *     答案会落在**标题右边**那一行（红字）。那一行是界面本地状态，所以这一档
+         *     除了演出，还要把 slug 推给前端，由弹窗自己认领；
+         *   · `backgrounded`   —— 跑着的时候被踢到后台（标题栏那枚胶囊 + 详情面板）。
+         *     这一步是**界面自己点**「后台运行」，所以也只推 slug；
+         *   · `success-no-metrics` —— 老记录那种成功：结果屏上没有读数那条。
+         */
+        let ask_wait =
+            (tail == Some("question-timeout")).then(|| std::time::Duration::from_secs(12));
+        /* 这两档要额外通知前端（红字 / 踢后台都是界面本地状态） */
+        let tell_ui = matches!(tail, Some("answer-stale" | "backgrounded"));
+        /* 老记录那种成功：跑成了，但没有那包读数 */
+        let metrics = tail != Some("success-no-metrics");
+        /* 「成功 · 好几行警告」：框身被警告撑高那一档（验下面那张事实表） */
+        let many_warnings = tail == Some("success-long-warning");
+        /*
+         * 校准件那几档（2026-10-17）：
+         *   · `calib-question`   —— 那一问停着（倒计时在 hero 里），选了哪个都等下一档；
+         *   · `calib-timeout`    —— 那一问没人答，12 秒后**收成已停止**；
+         *   · `calib-print-done` —— 答「先打印，再校准」，跑完落成功屏（模型原样）；
+         *   · `calib-direct-done`—— 答「直接校准」，跑完落成功屏（只留校准路径）。
+         * 这几档都是**同一扇窗**，不另开屏。
+         */
+        let calib_question = matches!(
+            tail,
+            Some("calib-question" | "calib-timeout" | "calib-print-done" | "calib-direct-done")
+        );
+        let calib_choice = match tail {
+            Some("calib-print-done") => Some("print"),
+            Some("calib-direct-done") => Some("direct"),
+            _ => None,
+        };
+        /* 那一档要等超时收场：与 question-timeout 同一条（12 秒） */
+        let ask_wait = if tail == Some("calib-timeout") {
+            Some(std::time::Duration::from_secs(12))
+        } else {
+            ask_wait
+        };
         let mode = match tail {
-            Some("running") => Some(crate::devsim::Mode::Success),
+            Some("running" | "backgrounded" | "success-no-metrics" | "success-long-warning") => {
+                Some(crate::devsim::Mode::Success)
+            }
+            Some("question-timeout" | "answer-stale") => Some(crate::devsim::Mode::Question),
+            /* 校准件那几档都用「那一问」的骨架演（机型两边给成一样的，免得先弹机型那一问） */
+            Some("calib-question" | "calib-timeout" | "calib-print-done" | "calib-direct-done") => {
+                Some(crate::devsim::Mode::Success)
+            }
             other => other.and_then(crate::devsim::Mode::parse),
         };
         let Some(mode) = mode else {
@@ -405,6 +476,7 @@ impl HookView {
                 view: me.clone(),
                 app: handle.clone(),
                 generation,
+                ask_wait,
             };
             crate::devsim::drive(
                 &sink,
@@ -412,11 +484,29 @@ impl HookView {
                     mode,
                     delay: std::time::Duration::from_millis(700),
                     hold_at,
+                    /* `Some(..)` = 要问；里面的 bool 只是"演成选哪个"，演出那侧按
+                    `calib_choice` / 超时判，不看它 */
+                    calib_question: calib_question.then_some(calib_choice == Some("direct")),
+                    calib_choice,
+                    metrics,
+                    many_warnings,
                 },
                 &postprocess::diag::CancelToken::new(),
             );
             tracing::info!(scene = %mode.id(), "开发台：客户端这一屏演完了");
         });
+
+        if tell_ui {
+            /* 这两件都是**界面本地状态**（点按钮 / 点后台那一下才产生），后端造不出来 ——
+            所以除了开演，还把 slug 推给前端：弹窗自己认领（红字 / 主动收起） */
+            tracing::info!(scene = %scene, "开发台：这一档还要界面自己补一步");
+            let _ = app.emit(
+                DEV_PREVIEW_EVENT,
+                DevPreviewDto {
+                    scene: scene.to_owned(),
+                },
+            );
+        }
     }
 
     /// 开演前的一下：置 `preview`、清上一趟、发一条"新一趟开场"。
@@ -495,7 +585,23 @@ impl HookView {
             progress: g.progress.clone(),
             finished: g.finished.clone(),
             preview: g.preview,
+            question_emitted: g.question_emitted,
         })
+    }
+
+    /// 把快照里那一份问句**再推一次事件**（2026-10-17）。
+    ///
+    /// 只给"首帧那两条路谁先到"这一个竞态收尾：界面读到快照里有一问、却从没收到过
+    /// 对应事件（`question_emitted == false`）时喊它一次。**不动任何状态** —— 问句本来就
+    /// 还在 `shared` 里，钩子那边还在等；这里只是让界面画出来。
+    ///
+    /// 已经不在了（问句被结论清掉）就什么都不做 —— 界面会自己在快照回来之后重画。
+    pub fn replay_question(&self, app: &AppHandle) {
+        let question = self.shared.lock().expect("锁没坏").question.clone();
+        if let Some(question) = question {
+            tracing::info!("界面晚了一步：把在等的问句补推一次");
+            let _ = app.emit(QUESTION_EVENT, question);
+        }
     }
 
     /// 有没有钩子连着（界面据此把「停止」变灰：点了也没对象）。
@@ -509,12 +615,32 @@ impl HookView {
 
     /// 界面那颗「停止」：往通道里写一条取消。
     pub fn cancel(&self) -> Result<(), AppError> {
-        self.write(ToHook::Cancel, "现在没有在跑后处理")
+        /*
+         * ★ 这两句是**给用户看的**（界面把 AppError 的那句话原样摆出来）——
+         * 2026-10-17 作者：「不允许用这种口气说话，给用户看的」。原来写的是
+         * "现在没有在问你要不要继续"，读起来像在数落人；改成陈述事实 + 不必再做什么。
+         */
+        self.write(ToHook::Cancel, "这一趟已经结束了，没有正在跑的处理")
     }
 
-    /// 回答"机型不匹配还跑不跑"。
-    pub fn answer(&self, keep: bool) -> Result<(), AppError> {
-        self.write(ToHook::Answer { keep }, "现在没有在问你要不要继续")
+    /// 回答屏幕上那一问（机型 / 校准方式 …）：`id` 就是那一颗按钮的 id。
+    ///
+    /// `question_kind` 只做校验用：它要**对得上现在挂在屏上的那一问**，否则说明界面上
+    /// 还是过期的一屏（问句已经被结论清掉 / 换成下一问了）—— 回一句"已经结束了"，
+    /// 不把过期的答案塞给钩子。
+    pub fn answer(&self, question_kind: &str, id: &str) -> Result<(), AppError> {
+        let current = self.shared.lock().expect("锁没坏").question.clone();
+        let same = current.is_some_and(|q| q.question_kind == question_kind);
+        if !same {
+            return Err(AppError::not_found("刚才那个问题已经结束了，不用再回答"));
+        }
+        self.write(
+            ToHook::Answer {
+                question_kind: question_kind.to_owned(),
+                id: id.to_owned(),
+            },
+            "那一趟已经结束了，这一下没有送出去",
+        )
     }
 
     fn write(&self, msg: ToHook, absent: &str) -> Result<(), AppError> {
@@ -538,6 +664,12 @@ struct PreviewSink {
     app: AppHandle,
     /// 这一趟演出属于哪一代（见 [`HookView::preview_gen`]）
     generation: u64,
+    /// 那一问**等多久就自己收场**（`None` = 一直停着给人看）。
+    ///
+    /// 只有「超时被终止」那一档给 `Some(..)`：问句照常推、倒计时也照常走（界面读的是
+    /// `deadline_unix_ms`），到点这一趟就返回"不跑"，于是屏上落到「已停止」——
+    /// 真机上等满两分钟看到的那一屏，这里十几秒就能看一遍。
+    ask_wait: Option<std::time::Duration>,
 }
 
 impl crate::devsim::Sink for PreviewSink {
@@ -575,21 +707,74 @@ impl crate::devsim::Sink for PreviewSink {
     /// 发完就**一直等**，直到**下一趟预览来了**（代次变了）才放行 —— 那一刻这一趟收场、
     /// 把屏让给新的那一趟（与"再点另一个场景"同一条路）。作者 2026-10-14：点一下就要
     /// 看到那一屏，不能演一下就没了。
-    fn ask(&self, question: &str) -> bool {
+    /// 校准件那一问（开发台那几档）：把选项表照真机那样推上去，等下一档顶替。
+    fn ask_calibration(&self, question: &str, choices: &[(&str, &str, &str)]) -> Option<String> {
+        let deadline_unix_ms = self.ask_wait.map_or(0, |w| {
+            crate::hook_ipc::unix_ms_now() + u64::try_from(w.as_millis()).unwrap_or(u64::MAX)
+        });
         self.send(&FromHook::Question(crate::hook_ipc::QuestionPayload {
-            kind: "machine-mismatch".to_owned(),
+            question_kind: crate::hook_ipc::QKIND_CALIBRATION_MODE.to_owned(),
             text: question.to_owned(),
+            deadline_unix_ms,
+            choices: choices
+                .iter()
+                .enumerate()
+                .map(|(i, (id, label, hint))| crate::hook_ipc::QuestionChoice {
+                    id: (*id).to_owned(),
+                    label: (*label).to_owned(),
+                    hint: Some((*hint).to_owned()),
+                    /* 第一颗是主按钮（与真钩子那一侧同一套摆法） */
+                    accent: i == 0,
+                })
+                .collect(),
         }));
-        while self
-            .view
-            .preview_gen
-            .load(std::sync::atomic::Ordering::SeqCst)
-            == self.generation
-        {
+        let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
+        loop {
+            if self
+                .view
+                .preview_gen
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != self.generation
+            {
+                /* 被下一趟顶掉 ⇒ 不答，收场让位给新的那一趟 */
+                return None;
+            }
+            if until.is_some_and(|t| std::time::Instant::now() >= t) {
+                /* 「超时」那一档：没人答 ⇒ 收成已停止（真机两分钟后就是这么收的） */
+                return None;
+            }
             std::thread::sleep(std::time::Duration::from_millis(150));
         }
-        /* 被下一趟顶掉 ⇒ 不继续（收场），把屏让给新的那一趟 */
-        false
+    }
+
+    fn ask(&self, question: &str) -> bool {
+        /* 倒计时那一行读的就是它；`None`（默认那几档）= 0 = 不摆倒计时 */
+        let deadline_unix_ms = self.ask_wait.map_or(0, |w| {
+            crate::hook_ipc::unix_ms_now() + u64::try_from(w.as_millis()).unwrap_or(u64::MAX)
+        });
+        self.send(&FromHook::Question(crate::hook_ipc::QuestionPayload {
+            question_kind: crate::hook_ipc::QKIND_MACHINE_MISMATCH.to_owned(),
+            text: question.to_owned(),
+            deadline_unix_ms,
+            choices: Vec::new(),
+        }));
+        let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
+        loop {
+            if self
+                .view
+                .preview_gen
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != self.generation
+            {
+                /* 被下一趟顶掉 ⇒ 不继续（收场），把屏让给新的那一趟 */
+                return false;
+            }
+            if until.is_some_and(|t| std::time::Instant::now() >= t) {
+                /* 「超时」那一档：屏上落成「已停止」（真的那一条是两分钟后这么收的） */
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
     }
 }
 
@@ -741,17 +926,22 @@ mod tests {
                     message: "第一遍处理中".to_owned(),
                 }),
                 question: Some(QuestionPayload {
-                    kind: "machine-mismatch".to_owned(),
+                    question_kind: "machine-mismatch".to_owned(),
                     text: "还继续吗？".to_owned(),
+                    deadline_unix_ms: 1_763_000_000_000,
+                    choices: Vec::new(),
                 }),
                 finished: None,
                 preview: false,
+                question_emitted: false,
             };
         }
         let snap = view.snapshot().expect("来过就该有快照");
         assert_eq!(snap.preset_name, "A1_MINI-fast.toml");
         assert!(snap.question.is_some());
         assert!(!snap.preview, "真钩子那一趟不是预览");
+        /* 没推过事件的问句：界面读到快照后要去补推（2026-10-17 首帧那个竞态） */
+        assert!(!snap.question_emitted, "这一份是直接塞进 shared 的，没推过");
         assert_eq!(snap.progress.expect("有进度").step, "pass1");
 
         /* 结论一来：问句清掉、结论留下（界面不该还挂着一条已经不可能有人答的问题） */
@@ -768,6 +958,7 @@ mod tests {
             warnings: Vec::new(),
             /* 失败没有读数（与真钩子同一个形状） */
             result: None,
+            calib_choice: None,
         });
         let snap = view.snapshot().expect("结论也在快照里");
         assert!(snap.question.is_none());
@@ -801,7 +992,11 @@ mod tests {
     fn without_a_hook_the_buttons_report_it() {
         let view = HookView::new();
         assert!(view.cancel().is_err(), "没对象时要报错");
-        assert!(view.answer(true).is_err(), "没对象时要报错");
+        assert!(
+            view.answer(crate::hook_ipc::QKIND_MACHINE_MISMATCH, "keep")
+                .is_err(),
+            "没对象时要报错"
+        );
         assert!(!view.hook_connected());
     }
 }

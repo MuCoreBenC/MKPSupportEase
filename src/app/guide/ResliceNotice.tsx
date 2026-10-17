@@ -32,7 +32,7 @@
 import { useState } from 'react'
 
 import { api, errorText } from '../../api'
-import { Modal } from '../../components/modal'
+import { HeadNote, Modal } from '../../components/modal'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：原来是原生绿勾，换成全站同一套墨色 */
 import { Check } from '../../components/check'
 import { useGuidesPref } from './guidesPref'
@@ -112,9 +112,15 @@ export default function ResliceNotice({
         {/*
          * 回执：引导卡片已经摆到切片器那边了。★ 提示用户"切片器这会儿在最前"，
          * 免得他以为点了没反应（卡片不在我们这扇窗里，看不见是正常的）。
+         *
+         * ★ 2026-10-17 收口：这两句都进**标题右边那一格**（共用件 `HeadNote`）——
+         *   原来它们在框身里，每出现一次就把下面的正文与勾选框往下顶一截。
+         *   作者定死「所有提示都用同一套组件、同一套逻辑复用在标题后面」。
          */}
-        {shown && !err && <p className={s.done}>引导卡片已摆到切片器那边（它这会儿在最前）。</p>}
-        {err && <p className={s.err}>{err}</p>}
+        {shown && err === null && (
+          <HeadNote text="引导卡片已摆到切片器那边（它这会儿在最前）。" tone="ok" />
+        )}
+        {err !== null && <HeadNote text={err} tone="error" />}
         {/*
          * 「不再显示」（2026-10-17 作者）：与设置页「引导」那一格**同一个键** ——
          * 一处关、处处关（参数页与校准页共用）。勾上**立即写盘**（见模块头），

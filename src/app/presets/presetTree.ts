@@ -748,6 +748,23 @@ export const LOCAL_DRAWER = {
 /** 展开详情里那一格的名字 */
 export const BASED_ON_KEY = '基于'
 
+/** 展开详情里「后处理」那一格（本机学习账：这一份后处理成功跑过几次） */
+export const USAGE_KEY = '后处理'
+
+/**
+ * 「后处理」那一格写什么。
+ *
+ * 计数点在后处理**成功**那一趟（`runtime::usage`；机型不符、中途失败都不加），
+ * 所以它答的是"真跑成过几次"，不是"点过几次使用"。0 次 = 还没跑成过 ——
+ * 写「还没跑过」而不是「0 次」/「—」：前者像计数，后者像"不知道"，这句是事实。
+ */
+export function usageCellText(count: number | undefined): string {
+  return count === undefined || count <= 0 ? '还没跑过' : `${count} 次`
+}
+
+/** 那一格的 tooltip：把"怎么算一次"当场说清，省得用户拿它跟「使用」次数对不上 */
+export const USAGE_HINT = '后处理成功跑完才算一次（机型不符、中途失败的都不算）'
+
 /**
  * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
  * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
@@ -1269,6 +1286,17 @@ export interface PresetRowBase {
   fileName: string
   /** 相对预设仓库根。表格第二行的小字与「在文件夹中显示」都用它 */
   path: string
+  /**
+   * 本机学习账里这一份的钥匙（`local:<相对用户根>` / `cloud:<相对内部根>`，见
+   * `runtime::usage`）—— 详情面板那一格「后处理 N 次」读它。
+   *
+   * 为什么在行上算、不在界面里拿 `path` 现拼：两张表的 `path` 口径不同（本地表是
+   * 相对用户根，云端表那几行是「云端 / 机型 / 版本」这种展示文案）。钥匙必须从**真正
+   * 的落点**来 —— 哪儿知道路径，哪儿给钥匙。
+   *
+   * **没有这个字段 = 这一份不进这本账**：后处理只跑 MKP 预设（切片器配置不跑）。
+   */
+  usageKey?: string
   /**
    * **表格第二行的小字（副标题）= 备注**（2026-10-07 作者定：副标题不要位置文案）。
    *
@@ -2039,6 +2067,8 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         pinKey: f.path,
         fileName: f.fileName,
         path: f.path,
+        /* 我自己的文件落在用户根里 ⇒ `local:`（认不出是哪一类的 `.json` 不进这本账） */
+        usageKey: canApply ? `local:${f.path}` : undefined,
         /* 副标题 = 备注覆盖账里的 → 归属那一版的备注 → 空着（路径在 title 里，不丢） */
         subtitle: remarkOr(
           f.path,
@@ -2169,6 +2199,8 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
+        /* 仓库里那份落在内部根 ⇒ `cloud:`（只有 MKP 预设跑后处理） */
+        usageKey: f.kind === 'mkp_preset' ? `cloud:${f.path}` : undefined,
         /* 云端仓库行没有备注的来源也没有覆盖（remarkKey null）—— 副标题空着（路径在 title 里） */
         subtitle: '',
         remarkKey: null,
@@ -2235,6 +2267,8 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         /* 仓库里没有它，没有 assetId —— 「使用」认 fileName（页面里分流） */
         pinKey: `preset:${p.fileName}`,
         fileName: p.fileName,
+        /* 下载区里那份也落在内部根 ⇒ `cloud:`（只有 MKP 预设跑后处理） */
+        usageKey: p.kind === 'mkp_preset' ? `cloud:${p.path}` : undefined,
         /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
            副标题 = 备注覆盖账里的 → 那一版工作台写的 → 空着；
            盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
@@ -2461,6 +2495,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         pinKey,
         fileName: f.fileName,
         path: f.path,
+        /* 仓库里那份落在内部根 ⇒ `cloud:`（只有 MKP 预设跑后处理） */
+        usageKey: f.kind === 'mkp_preset' ? `cloud:${f.path}` : undefined,
         /* 云端仓库行没有备注的来源（工作台只给交付预设写 remark）—— 副标题空着（路径在 title 里） */
         subtitle: '',
         remarkKey: null,
@@ -2528,6 +2564,8 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         rowKey: `preset-cloud:${p.fileName}`,
         pinKey: `preset:${p.fileName}`,
         fileName: p.fileName,
+        /* 这一行的 `path` 是展示文案（下面那行）—— 真正的落点在 `p.path`，钥匙从它来 */
+        usageKey: p.kind === 'mkp_preset' ? `cloud:${p.path}` : undefined,
         path: `云端 / ${p.machineId} / ${p.versionId}`,
         /*
          * 副标题 = **只读工作台写的那句**（这一版发布时带进目录的 `remark`）。

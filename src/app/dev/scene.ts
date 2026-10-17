@@ -40,6 +40,17 @@ const SLOT_OF: Record<string, DevSlot> = {
   'postprocess-fail': 'full',
   'postprocess-cancel': 'full',
   'postprocess-question': 'full',
+  /* 那一问的两种收场：仍是同一扇窗（'full'），只是 hero / 标题栏换一档 */
+  'postprocess-question-timeout': 'full',
+  'postprocess-answer-stale': 'full',
+  'postprocess-backgrounded': 'full',
+  'postprocess-success-no-metrics': 'full',
+  'postprocess-success-long-warning': 'full',
+  /* 校准件那一问（同一扇窗，hero 换一档） */
+  'postprocess-calib-question': 'full',
+  'postprocess-calib-print-done': 'full',
+  'postprocess-calib-direct-done': 'full',
+  'postprocess-calib-timeout': 'full',
   /* 菜单 / 弹层 */
   'delete-confirm': 'field',
   /* 标题栏 */

@@ -129,7 +129,85 @@ Windows 上它是**唯一**能进切片器那一框的东西（§1），所以�
 
 ---
 
-## 5. 相关
+## 5. 问句队列：钩子中途要用户挑一件事
+
+后处理跑到一半可能要**停下来问一句**。到 2026-10-17 为止有两种，走的是同一条线
+（`FromHook::Question` → 界面答 → `ToHook::Answer { id }`）：
+
+| `questionKind` | 什么时候问 | 选项 id | 超时 / 不答 |
+| --- | --- | --- | --- |
+| `machine-mismatch` | G-code 的机型与预设的机型对不上 | `keep`（强制继续）/ `stop`（终止） | `stop` |
+| `calibration-print` | 内核认出这是**校准件**（Z 偏移 / XY 精度 / XY 粗 / 重复性） | `print`（先打印，再校准）/ `direct`（直接校准） | `stop` |
+
+**排队 = 识别先后**（作者 2026-10-17 定稿）：先机型、后校准件。前一问答"停"或判成拒绝就
+**直接收场**，不再问后面的（都没在跑了，问怎么跑没有意义）。以后新的冲突类问题照这条排，
+**不许并排弹**。
+
+**倒计时**：两问都是 `ANSWER_GRACE`(8s) + `ANSWER_STAKE`(112s) = 120 秒，界面上的倒计时读
+`QuestionPayload.deadline_unix_ms`（绝对时刻；`0` = 不超时，界面就不摆那一行）。
+
+**两个选项对模型的实际后果**（不是界面在"演"）：`print` = 预设原样跑（保留打印件）；
+`direct` = 走校准那一支，去掉打印件、只留空驶路径。选择写进 `ir.safety.calibration_execution_mode`
+（`CALIBRATION_EXEC_PRINT_THEN_CALIBRATE` / `CALIBRATION_EXEC_DIRECT_CALIBRATE`），并由内核执行。
+
+**结论文案按选择分键**：`hook.calib_done_print` / `hook.calib_done_direct`，界面（`finished.calibChoice`）
+与报告（`_meta.json` 的 `calib_choice`）读同一组键，两处不许各写一份。
+
+**铁律**：新弹窗**一律复用后处理那扇 hero 模态框**（同一口 104px、内容在 `.warnScroll` 里滚）。
+颜色只表达语义：警告橙 `--warn-*` = 可能出错、要你拦一下；流程选择 `--ask-*`（绿）= 没出错、
+只是请你挑；红只留「处理失败」。
+
+---
+
+## 6. 错误码：**每一句都有码**，前三个字母是类别（2026-10-17）
+
+作者的原话：「这样就方便我给 AI 去看啊，这样子，就算信息不全，也能通过错误码找到对应的」。
+
+所以定了一条硬口径：**用户能读到的每一句都必须带码**。以前只有"失败"才带码，
+而**最常出现的那几条**（用户自己按停止、在问句里选了停）是 `code=""` ——
+偏偏这几条最需要查。
+
+### 三档前缀
+
+| 前缀 | 意思 | 例子 |
+| --- | --- | --- |
+| `E_` | **故障** —— 系统判定这件事没成 | `E_CAL_FAILED_001` / `E_CFG_MISMATCH_001` |
+| `W_` | **停下 / 降级** —— *不是故障*：用户让它停的，或某一步降级了 | `W_SYS_CANCELLED_001` / `W_ARCHIVE_META_001` |
+| `N_` | **成功** —— 跑完了，不同结果各有各的码 | `N_CALIB_PRINT_001` / `N_CALIB_DIRECT_001` |
+| `Q_` | **提问** —— 钩子停下来问用户的那几句 | `Q_CFG_MISMATCH_001` / `Q_CALIB_MODE_001` |
+
+`*_NNN` 是序号：**加新条目往后排，不许复用或改号** —— 改了号，用户贴在 issue 里的旧码就搜不到了。
+
+### 怎么查
+
+```bash
+node scripts/message-codes.mjs                      # 整张码表
+node scripts/message-codes.mjs W_SYS_CANCELLED_001  # 按码查
+node scripts/message-codes.mjs hook.cancelled       # 按键查
+node scripts/message-codes.mjs 校准                  # 模糊：码/键/文案
+```
+
+打出来的是这句的**全部口径**：本程序怎么说、切片器怎么说、用哪些参数、为什么这么写。
+排查时只要用户给一个码（或一行日志），就能反查到完整上下文 —— **不需要复现**。
+
+### 判据（钉住的四条）
+
+| 判据 | 钉住什么 |
+| --- | --- |
+| `every_hook_line_carries_a_code_with_its_class` | 每一条 `hook.*` 都有码，且是 `E_/W_/N_/Q_` 之一 |
+| `codes_do_not_collide_silently` | 同码下不许有两句一模一样的话（同码不同话 = 两层各有说法，允许） |
+| `code_of_answers_the_three_shapes` | 键即码 / 声明码 / 无码三种取法 |
+| `the_conclusion_line_frames_the_three_kinds` | 结论行三档各自的框子与码 |
+
+### 实现上的一条坑
+
+日志那个字段是 `tracing::warn!(code, …)` —— `code` 是 `String`，
+**`unwrap_or_default()` 会给出空串**，日志里就成了 `code=""`（等于查不到）。
+所以两处取码都改成"兜底给 `W_UNCLASSIFIED_001`"，绝不给空。
+
+---
+
+## 7. 相关
 
 - `crates/postprocess/messages.toml` —— 表本体（字段说明写在表头）
 - `crates/postprocess/src/diag/messages.rs` —— 载入与渲染（缺键、缺参数的表现写在模块头）

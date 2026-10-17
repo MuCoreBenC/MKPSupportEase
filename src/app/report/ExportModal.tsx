@@ -15,7 +15,14 @@
  * 1. **不在框里造词**：归档里缺的那几份照实说（失败的那一次不会有"处理后的文件"），
  *    不摆一行"缺"的空行、也不假装三件套都齐；
  * 2. **失败留在框里**：导出没成（不覆盖 / 目录建不出来 / 一份都不在盘上）→ 后端那句
- *    原话摆在框里、框不关 —— 用户就着这句话改位置或先把那一份挪走，不用从头来一遍；
+ *    原话**摆在标题右边那一格**、框不关 —— 用户就着这句话改位置或先把那一份挪走，
+ *    不用从头来一遍；
+ *
+ *    ★ 2026-10-17 收口：原来那句话是框身里一块带底色的 `<p className={s.bad}>`，
+ *    每出现一次就把文件清单往下顶一截。作者定死「所有提示都进标题右边那一格」⇒
+ *    现在走共用件 `HeadNote`（`components/modal`）。**代价是长错误被省略号截掉**
+ *    （全文在 `title` 悬停可读），这是作者在"绝对统一 vs 框身可读全文"之间选的后者优先 —— 
+ *    别再自作主张把它挪回框身；
  * 3. **成了也不关、也不长高**（作者 2026-10-11 两次点名）：
  *    · 导完最要紧的下一步是"去那个文件夹里看看"，框一关路径就没了 ⇒ 框留着；
  *    · 但**不许因此多出一条东西**：原来那句绿色横条把框顶高了、看着像闪了一下 ⇒
@@ -38,7 +45,7 @@ import type { ReactNode } from 'react'
 import { api, errorText } from '../../api'
 import type { ReportExportKind, ReportExportPlan } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
-import { Modal } from '../../components/modal'
+import { HeadNote, Modal } from '../../components/modal'
 import { useStickyState } from '../../hooks/useStickyState'
 import { Btn } from '../ui/Controls'
 import s from './ExportModal.module.css'
@@ -239,11 +246,9 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     >
       {/* `.body` 那条最小高度是"读计划"与"计划到手"两态一样高 —— 不长高就不会跳 */}
       <div className={s.body}>
-        {planErr !== null && (
-          <p className={s.bad} role="alert">
-            导出清单读不出来：{planErr}
-          </p>
-        )}
+        {/* 提示一律进标题右边那一格（`HeadNote`，2026-10-17 收口）：
+            摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳 */}
+        {planErr !== null && <HeadNote text={`导出清单读不出来：${planErr}`} tone="error" />}
         {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
 
         {plan !== null && (
@@ -282,10 +287,10 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         )}
 
         {fail !== null && (
-          <p className={s.bad} role="alert">
-            {fail.what === 'export' ? '导出没成：' : '打开没成：'}
-            {fail.text}
-          </p>
+          <HeadNote
+            text={`${fail.what === 'export' ? '导出没成：' : '打开没成：'}${fail.text}`}
+            tone="error"
+          />
         )}
 
         {path !== null && (

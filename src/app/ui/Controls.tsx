@@ -108,11 +108,25 @@ export function Btn({
   variant = 'default',
   disabled,
   onClick,
+  className,
+  title,
 }: {
   children: ReactNode
   variant?: 'default' | 'accent' | 'primary' | 'ghost' | 'danger'
   disabled?: boolean
   onClick?: () => void
+  /**
+   * **额外**的类（外观仍是 `variant` 那一套）。
+   *
+   * 2026-10-17 加：只该由布局方用来表达"这一颗允许折行 / 收缩"。
+   * 后处理那一问的两颗长按钮就是这么排的（`PostProcessModal` 的 `.choiceBtn`）——
+   * 全局 `button { white-space: nowrap }` 让它们既不能缩也不能折，中号框里第二颗直接被
+   * 挤出框外。**别再为这种需求另抄一套按钮皮**（抄出来的那套没有深色分支，
+   * 深色下主按钮就不是全站那颗实心绿了）。
+   */
+  className?: string
+  /** 悬停提示（`hint` / 全文这类"看得见但占地方"的补充说明挂这儿） */
+  title?: string
 }) {
   const cls = [
     s.btn,
@@ -120,11 +134,12 @@ export function Btn({
     variant === 'primary' ? s.btnPrimary : '',
     variant === 'ghost' ? s.btnGhost : '',
     variant === 'danger' ? s.btnDanger : '',
+    className ?? '',
   ]
     .filter(Boolean)
     .join(' ')
   return (
-    <button type="button" className={cls} disabled={disabled} onClick={onClick}>
+    <button type="button" className={cls} disabled={disabled} onClick={onClick} title={title}>
       {children}
     </button>
   )

@@ -164,6 +164,7 @@ import { Modal } from '../../components/modal'
 /* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
 import { useDevPreview } from '../dev/useDevPreview'
+import { usePresetUsage } from '../state/usePresetUsage'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
@@ -460,6 +461,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 这些功能重复了」）。同一时刻只开一行 —— 与参数页的 expandedKey 同构。
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
+  /*
+   * 详情卡里「后处理 N 次」读的那本账（本机学习账 `run/usage.json`）。
+   * 拿 `expandedKey` 当刷新信号：这一页是常驻的（六页签都在 DOM 里），只靠挂载读一次
+   * 会一直显示旧的；每开一行重读一遍 —— 刚跑完一趟后处理回来，展开就看见新数。
+   */
+  const usage = usePresetUsage(expandedKey)
   const [note, setNote] = useState<Note | null>(null)
   /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"云端版本"或"更新"上，
@@ -2800,6 +2807,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}
                 onEdit={openEdit}
+                usage={usage}
                 onLive={runLive}
                 /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份本地文件 */
                 onUse={runUse}

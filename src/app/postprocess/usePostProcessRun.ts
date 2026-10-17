@@ -76,6 +76,22 @@ export function usePostProcessRun(): PostProcessRunView {
       .then((snap) => {
         if (!alive) return
         setRun((prev) => prev ?? snap)
+        /*
+         * ★★ 首帧那两条路的收尾（2026-10-17，作者真机踩到："没有出现选择的模态框，
+         *   超时了就停止了"）。
+         *
+         * 钩子那边「推问句 → 开始等答复」之间没有间隙，所以"快照"与"订阅事件"谁先到
+         * 全看运气：订阅晚一步，快照里那份问句就永远不会以事件形式到达，而 `bind` 那几条
+         * 一律 `prev === null ? prev : …` 也不建场 ⇒ 界面一片空白地等，直到钩子超时
+         * 按"不跑"处理（日志里只有一条 `cancelled=true`）。
+         *
+         * 补推一次就够：它只重新 emit，问句本来就还在后端手里、钩子还在等。
+         */
+        if (snap !== null && snap.question !== null && !snap.questionEmitted) {
+          void api.replayPostProcessQuestion().catch(() => {
+            /* 补推失败不致命：钩子那侧超时照样会把结论送来 */
+          })
+        }
       })
       .catch((err: unknown) => {
         // 读不到快照 = 这一屏什么都显示不了；但**不装成"没有在跑"**，日志里留一条
@@ -118,6 +134,8 @@ export function usePostProcessRun(): PostProcessRunView {
         finished: null,
         /* 开发台演出来的那一趟带 `preview: true` —— 界面据此禁掉真业务按钮 */
         preview: started.preview,
+        /* 新一趟还没有问句，自然也就没有"推过没有" */
+        questionEmitted: false,
       })
       setDismissed(false)
       setSinceMs(Date.now())

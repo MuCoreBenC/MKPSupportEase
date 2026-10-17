@@ -283,7 +283,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
-        ipc::postprocess::answer_post_process_mismatch,
+        ipc::postprocess::answer_post_process,
+        ipc::postprocess::replay_post_process_question,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（只读；见 `ipc/bbs.rs`）
         ipc::bbs::get_bbs_presets,
         ipc::bbs::read_bbs_preset,
@@ -440,7 +441,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
-        ipc::postprocess::answer_post_process_mismatch,
+        ipc::postprocess::answer_post_process,
+        ipc::postprocess::replay_post_process_question,
         // 工艺页「本机工艺」那一档：读本机 BBS 目录（与上面那份清单一字不差）
         ipc::bbs::get_bbs_presets,
         ipc::bbs::read_bbs_preset,

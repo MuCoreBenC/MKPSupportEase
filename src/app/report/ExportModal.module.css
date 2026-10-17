@@ -104,17 +104,14 @@
   line-height: 1.7;
 }
 
-/* 导出没成时后端那句原话（留在框里，改完位置就地重试） */
-.bad {
-  margin: 0 0 14px;
-  padding: 10px 14px;
-  border-radius: var(--r-md);
-  background: var(--danger-soft);
-  color: var(--danger);
-  font-size: var(--fs-label);
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
+/*
+ * 导出没成时后端那句原话**已经不在这里了**（2026-10-17 收口）：它走共用件
+ * `components/modal/HeadNote.tsx`，落在**标题右边那一格**。
+ *
+ * 理由（作者定死）：「把所有这些提示的，不管是什么的，都用同一套组件、同一套逻辑
+ * 复用在标题后面显示」。框身是按内容撑高的 —— 原来这块带底色的字每出现一次就把
+ * 文件清单往下顶一截。代价是长错误被省略号截掉（全文在 `title` 上），这是作者选的那一档。
+ */
 
 /* 还没读到计划时的一句话 */
 .filling {

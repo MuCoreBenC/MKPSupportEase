@@ -1103,11 +1103,15 @@ export const mockApi: MkpApi = {
     )
   },
 
-  async answerPostProcessMismatch() {
+  async answerPostProcess() {
     throw new NotImplementedError(
-      'answerPostProcessMismatch',
+      'answerPostProcess',
       '浏览器预览里没有在跑的后处理 —— 那一趟由切片器带参数拉起来（用桌面版试）',
     )
+  },
+
+  async replayPostProcessQuestion() {
+    /* 浏览器里没有钩子那一趟 —— 没有问句可补推，静默成功即可 */
   },
 
   /* ——— 「客户端接发布包」这一轮（P1）新增的十二个 ———

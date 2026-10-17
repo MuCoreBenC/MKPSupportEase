@@ -1725,10 +1725,41 @@ export interface PostProcessProgress {
 }
 
 /** 要用户回答的一个问题 */
+/** 问句里的一颗按钮（与 Rust `hook_ipc::QuestionChoice` 逐字对齐） */
+export interface PostProcessChoice {
+  /** 回给钩子的 id：`keep` / `stop` / `print` / `direct` … */
+  id: string
+  label: string
+  /** 一行补充说明（后果 / 何时选它） */
+  hint?: string
+  /** `true` = 主按钮 */
+  accent: boolean
+}
+
 export interface PostProcessQuestion {
-  /** 问题种类：`machine-mismatch` = 机型不匹配（给「继续 / 停下」两颗按钮） */
-  kind: string
+  /**
+   * 问题种类：`machine-mismatch` = 机型不匹配（给「继续 / 停下」两颗按钮）。
+   *
+   * ★ 字段名是 `questionKind` 而不是 `kind`（2026-10-17 真机事故）：线上的枚举标签
+   * 已经叫 `kind`（`{"kind":"question",…}`），payload 再来一个同名键，解析会报
+   * `duplicate field 'kind'` 并把这一条**整条丢掉** —— 界面上就是"没有选择框"。
+   */
+  questionKind: string
   text: string
+  /**
+   * **可选答项**（2026-10-17 泛化）：空 / 缺省 = 用默认那两颗按钮（机型那一问）；
+   * 非空 = 照这张表画按钮，点哪颗就把它的 `id` 回给钩子。
+   *
+   * 文案由后端给（后端才知道每个选项对管线意味着什么），界面不按 id 猜。
+   */
+  choices?: PostProcessChoice[]
+  /**
+   * 没人作答时**什么时候自动按"不跑"收场**（unix 毫秒；`0` = 这一问不会自己超时）。
+   *
+   * 界面据此显示倒计时（「1 分 52 秒后自动终止」）。给绝对时刻、不给"还剩几秒"：
+   * 补推那一趟也照着同一条数，不会重新从头开始数。
+   */
+  deadlineUnixMs?: number
 }
 
 /** 那一趟的结论 */
@@ -1749,6 +1780,13 @@ export interface PostProcessFinished {
   /** 产物落点（成功时就是输入那一份 —— 原地覆盖） */
   output: string | null
   warnings: string[]
+  /**
+   * 校准件那一趟选了哪种跑法：`print` = 先打印再校准（模型原样）/ `direct` = 直接校准
+   * （去掉打印件）。不是校准件 = 缺省。
+   *
+   * 两种**都是成功**，界面同一个成功屏，只有那一句结论文案按它分开说。
+   */
+  calibChoice?: 'print' | 'direct'
   /**
    * **结果读数**（那一屏「结果」几扇要摆的读数：指标条 + 擦料与胶水消耗那几格）。
    *
@@ -1831,6 +1869,14 @@ export interface PostProcessRun {
    * "现在没有在跑后处理"（作者 2026-10-14：预览就明确是预览，不许点出真业务）。
    */
   preview: boolean
+  /**
+   * 快照里这份问句，事件**有没有送到过界面**（2026-10-17）。
+   *
+   * `false` = 读快照与订阅事件这两条路里，订阅慢了（钩子推问句和开始等答复之间没有
+   * 间隙，先后全看运气）—— 界面得喊一声 `replayPostProcessQuestion` 补推一次，
+   * 否则就是"一片空白地等"，直到钩子那侧超时按不跑处理（作者真机看到的就是这个）。
+   */
+  questionEmitted: boolean
 }
 
 /**
@@ -2063,7 +2109,19 @@ export interface MkpApi {
   cancelPostProcess(): Promise<void>
 
   /** 回答「机型不匹配还跑不跑」：`keep = true` 继续，`false` 停下 */
-  answerPostProcessMismatch(keep: boolean): Promise<void>
+  /**
+   * 回答屏幕上那一问（机型 / 校准方式 …）：`questionKind` 对得上那一问、`id` 是按钮 id
+   * （`keep` / `stop` / `print` / `direct`）。对不上 = 那一屏已经过期，后端会拒绝。
+   */
+  answerPostProcess(questionKind: string, id: string): Promise<void>
+
+  /**
+   * 把快照里那份问句**再推一次事件**（只给首帧竞态收尾用）。
+   *
+   * 见 `PostProcessRun.questionEmitted`：界面读完快照发现"有一问、但自己从没收到过事件"
+   * 时喊一次。不动任何状态 —— 问句还在后端手里，钩子那边还在等。
+   */
+  replayPostProcessQuestion(): Promise<void>
 
   /* ——— 机型与文件（预设页 / 参数页要读的） ——— */
 

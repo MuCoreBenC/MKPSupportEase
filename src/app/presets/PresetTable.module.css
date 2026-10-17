@@ -652,10 +652,12 @@
  *   ★ 代价如实登记：**下面的行是一次跳下去的，不再是"被推下去"的**。要顺就得
  *     交出"逐帧推"这件事，二者不可兼得（作者选顺）。
  *
- * 退场：收起时这一行先留在 DOM 里（表组件的 `closing`）把内容收回，动画走完再卸载。
+ * **退场没有动画**（2026-10-17 第七轮，作者：「旧的没有收起动画」「只是收起的话，
+ * 这个动画也不好，先快后慢，最后的慢有点不舒服」）：行高本来就是瞬间到位的，
+ * 收起能播的只剩内容层淡出 —— 内容还占着一整行高，看到的顺序是"先淡 → 停一下 →
+ * 整行突然消失"；换行时还会让**两张卡同时开着**。所以收起 = 卸载，任何时刻最多一张。
  *
- * 内边距（原 `.expandRow td` 的 6/14）搬进 `.dFoldIn` —— td 自己零内边距，
- * 收起时才能收得干净（一点残高都不留）。
+ * 内边距（原 `.expandRow td` 的 6/14）搬进 `.dFoldIn` —— td 自己零内边距。
  */
 .expandRow td {
   padding: 0;
@@ -681,46 +683,26 @@
  * transform 就会退化成"每帧重新栅格化整块文字"（正是第一次改动的翻车点）。
  * 同一时刻只有一行是热的 ⇒ 常驻一层，代价可忽略。
  */
+/*
+ * 入场曲线（2026-10-17 第七轮重定）：原来 `cubic-bezier(0.22, 0.85, 0.3, 1)` 是
+ * "头一下蹿掉大半、剩下 0.18s 慢慢蹭" —— 作者：「先快后慢，最后的慢有点不舒服」。
+ * 换成等速感的标准曲线（加速进来、收尾不长），时长也压到 180ms；
+ * 位移 10 → 8px，那一点距离本来就不该占满 240ms。
+ */
 .dFoldIn {
   padding: 6px var(--page-x) 16px;
   will-change: opacity, transform;
   transition:
-    opacity 0.18s ease,
-    transform 0.24s cubic-bezier(0.22, 0.85, 0.3, 1);
+    opacity 0.16s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.18s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* 刚挂载那一下：从上方 10px、透明起步（`@starting-style` 只给入场，不碰退场） */
+/* 刚挂载那一下：从上方 8px、透明起步（`@starting-style` 只给入场） */
 @starting-style {
-  .expandRow[data-open='true'] .dFoldIn {
+  .expandRow .dFoldIn {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(-8px);
   }
-}
-
-/*
- * 收起（2026-10-16 第五轮：作者「收起的没那么流畅」）。
- *
- * 与展开**对称**（同样 10px、同样 240ms）—— 原来收起只有 8px / 160ms，比入场
- * 短一截，看着就是"抽走"而不是"收走"。曲线反过来：入场是"减速落定"（ease-out），
- * 收起用**加速离开** `cubic-bezier(0.4, 0, 0.9, 0.6)` —— 先慢慢离位、后段加速，
- * 高度归零那一下（ unavoidable 的一次跳）发生时内容已经淡到看不见了。
- */
-.expandRow[data-open='false'] .dFoldIn {
-  opacity: 0;
-  transform: translateY(-10px);
-  transition:
-    opacity 0.2s cubic-bezier(0.4, 0, 0.9, 0.6),
-    transform 0.24s cubic-bezier(0.4, 0, 0.9, 0.6);
-}
-
-/*
- * 加速（第十轮）：收起动画中这一行又被点了「展开」—— 当前这条收起快放完，
- * 收完立刻播展开（排队在表组件的 `requestToggle` 里）。
- */
-.expandRow[data-open='false'][data-rush='true'] .dFoldIn {
-  transition:
-    opacity 0.1s cubic-bezier(0.4, 0, 0.9, 0.6),
-    transform 0.13s cubic-bezier(0.4, 0, 0.9, 0.6);
 }
 
 /*

@@ -59,6 +59,31 @@ pub fn is_any(m: Mode) -> bool {
     m != Mode::None
 }
 
+/// 从**输入正文**认出这是哪一种校准件（2026-10-17，给钩子开场用）。
+///
+/// 与管线里那一判据**同一个函数**（[`detect_mode`] 按标记串扫），只是这里先跑一次：
+/// 钩子要在**跑之前**就问「先打印再校准 / 直接校准」，那一刻还没进管线。
+///
+/// 成本 O(行数) 的一次扫描 —— 正文本来就已经在内存里（钩子读过一遍了），不重复读盘。
+pub fn detect_mode_in(raw: &str) -> Mode {
+    let lines: Vec<String> = raw.lines().map(str::to_owned).collect();
+    detect_mode(&lines)
+}
+
+/// 校准件的人类可读名字（`Z 偏移校准` / `XY 精度校准` / `XY 粗校准` / `重复性校准`）。
+///
+/// 与 [`mode_to_calibration_string`] 分工不同：那个是**给内核与报告用的稳定 id**
+/// （`ZOffset` / `Precise` …），这个只是**问句正文里那一小截字**。
+pub fn mode_display_name(m: Mode) -> &'static str {
+    match m {
+        Mode::ZOffset => "Z 偏移校准",
+        Mode::XyPrecise => "XY 精度校准",
+        Mode::XyRough => "XY 粗校准",
+        Mode::Repetition => "重复性校准",
+        Mode::None => "",
+    }
+}
+
 pub fn need_collision_check(m: Mode) -> bool {
     m == Mode::None
 }

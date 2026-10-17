@@ -28,6 +28,7 @@ import type { CalibModel, PostProcessCommand } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
+import { usePresetUsage } from '../state/usePresetUsage'
 import { uidOfFile, useCatalog } from './useCatalog'
 import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
@@ -456,30 +457,11 @@ export default function PageHome({ density }: PageHomeProps) {
   const [picked, setPicked] = useState<{ key: string; fileName: string; path: string } | null>(null)
   const pickedCopy = picked !== null && picked.key === comboKey ? picked : null
   /*
-   * 学习账（次数）：**按路径记账、跨版累积**，所以换一版不清空重读，读回来往下合并 ——
-   * 新那一版的行当帧就有次数，不用等一趟 IPC 才"长出"行尾那个 `N 次`。
+   * 学习账（次数）：整本一次取回，按路径查。共用 `usePresetUsage`（预设页详情卡读的
+   * 是同一本）—— 模块缓存让换一版时行尾那个 `N 次` 当帧就在，不必等一趟 IPC。
+   * `comboKey` 只是刷新信号：这一页也是常驻的，挂载读一次之后就再也不会读了。
    */
-  const [usage, setUsage] = useState<Map<string, number>>(() => new Map())
-  useEffect(() => {
-    if (comboKey === null) return
-    let alive = true
-    void api
-      .getPresetUsage()
-      .then((list) => {
-        if (!alive) return
-        setUsage((prev) => {
-          const next = new Map(prev)
-          for (const e of list) next.set(e.key, e.count)
-          return next
-        })
-      })
-      .catch(() => {
-        /* 读不到 = 全是 0（只影响先后的排法） */
-      })
-    return () => {
-      alive = false
-    }
-  }, [comboKey])
+  const usage = usePresetUsage(comboKey)
 
   const copyList = useMemo(() => {
     if (sel.model === null || sel.variant === null) return []

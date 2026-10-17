@@ -104,7 +104,7 @@
 
 /* ============================================================
  * ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽进度条嵌底）
- * ② 问句：红警告 hero（同一口尺寸：min-height 104 + 同内衬同圆角）
+ * ② 问句：**警告橙** hero（同一口尺寸：高 104 + 同内衬同圆角；内容多了在框内滚）
  * ③ 成功：四格指标条（同高）
  * ④⑤ 结果 hero（同高）—— 四样都是同一口 104px 的框，切状态时不跳
  * ============================================================ */
@@ -222,23 +222,47 @@
    `.leadOut` / `.leadIn` / `.popIn` 与三个 `@keyframes` 一并删除，别再往这里加 CSS 动画：
    加了也播不出来，只会让人以为"实现过了"。 */
 
-/* ---- ② 机型不匹配：红警告 hero ---- */
+/* ---- ② 机型不匹配：**警告橙** hero（不是错误红，见下面那段） ---- */
 
 .warnHero {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
   align-items: center;
   gap: 16px;
-  min-height: 104px;
-  padding: 14px 18px;
+  /*
+   * ★★ 定死高度之后，内衬不算在 104 里（`border-box` 才不算；而 flex 子项默认
+   *    按内容高度撑）—— 让 `.warnScroll` 的 `max-height: 100%` 真正等于"内容盒的高度"，
+   *    不然它按 104（含内衬 28）去算，一有滚动条就把最后一行切掉半截。
+   */
+  box-sizing: border-box;
+  /*
+   * ★★ 高度**与其它三扇一样定死 104**（作者 2026-10-17：「这个怎么 hero 这么高，
+   *    我不是固定了所有的 hero 高度吗，内容在里面滚动」）。
+   *
+   * 原来是 `min-height`：补了那两句说明之后这一扇自己长到 ~230px，整屏跟着跳，
+   * 与绿 hero / 结果 hero 齐平这件事就没了。现在框不动 —— 内容超高在 `.warnScroll`
+   * 里滚（与 `.failWarn .resCopy` 同一条：74 = 104 − 2 描边 − 28 内衬）。
+   */
+  height: 104px;
+  /* 上下各收 4px（14 → 10），给"标题 + 正文 + 倒计时"多让出 8px 的显示面积 */
+  padding: 10px 18px;
   border-radius: var(--r-md);
+  overflow: hidden;
 }
 
+/*
+ * ★★★ **警告用警告色，不用错误色**（作者 2026-10-17：「这个警告的有没有复用错误的？
+ * 还有警告的到时候换成橙色，就是警告色的」）。
+ *
+ * 这一张原来借的是 `--danger-soft` + 一圈 35% 红描边 —— 与「处理失败」那张长得一样，
+ * 用户分不出"要你决定"和"已经坏了"。现在走 token 里现成那一套**整块浅底**：
+ *   `--warn-surface` 块底 / `--warn-line` 描边 / `--warn-ink` 块里的字（深浅两套都有）。
+ * 失败那扇（`.failWarn`）继续是红的 —— 两件事，两种颜色。
+ */
 .warnSoft {
-  background: var(--danger-soft);
-  border: 1px solid rgb(200 69 60 / 35%);
-  color: var(--danger);
+  background: var(--warn-surface);
+  border: 1px solid var(--warn-line);
+  color: var(--warn-ink);
 }
 
 .warnGlyph {
@@ -248,7 +272,7 @@
   justify-content: center;
 }
 
-/* 红圈白叹号：40px 空心圈、2px currentColor 描边、24px 粗体文字「!」 */
+/* 空心叹号圈：40px、2px currentColor 描边、24px 粗体文字「!」（颜色跟随 `.warnSoft` 的墨色） */
 .warnBadge {
   display: flex;
   align-items: center;
@@ -256,28 +280,50 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: rgb(255 255 255 / 18%);
+  background: var(--warn-soft);
   border: 2px solid currentcolor;
   font-size: 24px;
   font-weight: 700;
   line-height: 1;
 }
 
-.warnSoft .warnBadge {
-  background: var(--danger-soft);
-}
-
 .warnCopy {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
   text-align: left;
 }
 
+/*
+ * 可滚的那一叠（标题 + 问话 + 两句说明）。
+ *
+ * `margin-block: auto` = 内容短就居中、超高**就从第一行开始滚**（溢出时 auto 边距
+ * 自己归零，不会像 `justify-content: center` 那样把顶上一截裁掉看不见）。
+ */
+.warnScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-self: stretch;
+  max-height: 100%;
+  margin-block: auto;
+  /* 右侧只留 8px：滚动条本身要占宽，别再让它挤掉正文的显示面积 */
+  padding-right: 8px;
+  overflow-y: auto;
+  /*
+   * ★ 这里**不许挂 `mask-image` 做"上下褪色"**（2026-10-17 作者：「这些字的上边缘下边缘
+   *   有点模糊」）：那一层渐变是**无条件**的，内容没有超高时也照样把第一行的上半截和
+   *   最后一行的下半截调成半透明 —— 看起来就是标题与倒计时那两行"发虚"。
+   *   要滚动提示就等真的溢出再说，别拿字迹的清晰度换。
+   */
+}
+
 .warnTitle {
+  flex-shrink: 0;
   margin-bottom: 3px;
   font-size: var(--fs-body);
   font-weight: 600;
@@ -290,6 +336,81 @@
   line-height: 1.65;
   letter-spacing: 0.2px;
   opacity: 0.85;
+}
+
+/*
+ * 那一问下面的两句说明（2026-10-17）：怎么答 / 不答会怎样。
+ * 比 `.warnLine` 再轻一档（它是"问句本身"的注），分隔靠间距不靠线。
+ */
+.warnHint {
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  opacity: 0.72;
+}
+
+.warnHint + .warnHint {
+  margin-top: 1px;
+}
+
+/* ---- 那一问的按钮簇（页脚，2026-10-17 修） ---- */
+
+/*
+ * ★ 选项簇是页脚里**唯一**的东西时，它自己吃满一行、按钮仍然贴右（页脚本来就
+ *   `justify-content: flex-end`）。原来这里写了 `margin-right: auto` —— 那是
+ *   "我还要在右边放别的东西"的写法，结果整簇被推到左边去了（作者 2026-10-17 截图）。
+ */
+.footChoices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * ★ 这一条**只管布局**，不管长相：皮仍旧是 `Btn` 的 `variant`
+ *   （`ui.module.css` 的 `.btn*`，深浅两套齐全）。
+ *
+ * 第一版这里自己抄了一套 `.choiceBtn` + `.choiceAccent`，漏了深色分支 ——
+ * 深色下主按钮还是浅底绿字，与全站那颗实心绿白字不一样。
+ * 现在只补"允许收缩 + 允许折行"这两条，覆掉全局 `button { white-space: nowrap }`。
+ */
+.choiceBtn {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
+/*
+ * 校准件那一问（2026-10-17）：**中性绿**，不是警告橙。
+ *
+ * 这一问不是"出错了"，是"这一盘怎么跑"的流程选择（先打印再校准 / 直接校准）——
+ * 拿 `--warn-*` 那一套去问，用户会以为出了故障。所以只换**这一块的三种颜色**
+ * （`--ask-surface / --ask-ink / --ask-line`，深浅两套都在 `tokens.css`），
+ * 骨架（104px、内衬、`.warnScroll` 内滚、字级）逐条沿用 `.warnHero`。
+ */
+.askSoft {
+  background: var(--ask-surface);
+  border: 1px solid var(--ask-line);
+  color: var(--ask-ink);
+}
+
+/* 圈里那枚符号跟着绿：`✦` 是"一件要你挑的事"，不是「!」那种拦下来 */
+.askBadge {
+  background: var(--ask-line);
+}
+
+/*
+ * 圈里那枚四角星是**画出来的 SVG**（见 `SparkMark`）：字体符号会偏低，几何坐标不会。
+ * 19px 与 `.resBadge svg` 同值 —— 两种 hero 的记号看起来一样大。
+ */
+.askBadge svg {
+  display: block;
+  width: 19px;
+  height: 19px;
 }
 
 /* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
@@ -524,11 +645,14 @@
 }
 
 /* ============================================================
- * ⑤ 失败 · 定稿皮 = `.failWarn`：照「机型不匹配」那一张红卡
+ * ⑤ 失败 · 定稿皮 = `.failWarn`：当年照「机型不匹配」那一张卡做的
  * （用户原话："算了算了，失败的也用这一种吧"）——
- * 同一件底（--danger-soft + 一圈 35% 描边）、同一个红圈叹号、
- * **图标在板外**、文案直接落在红卡上（没有白板）。
+ * 同一件底（--danger-soft + 一圈 35% 描边）、同一个圈叹号、
+ * **图标在板外**、文案直接落在卡上（没有白板）。
  * 盒子逐条照 `.warnSoft`：内衬 14/18 + 1px 描边、圈盒 40×40、板高 74（= 104 − 2 − 28）。
+ *
+ * ★ 2026-10-17 起**只有这一扇是红的**：机型不匹配那一扇改成了警告橙（`--warn-*`）——
+ *   "要你决定"与"已经坏了"不该一个颜色。
  * ============================================================ */
 
 .failWarn {
@@ -685,11 +809,12 @@
   color: var(--warn);
 }
 
-.bad {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--danger);
-}
+/*
+ * 提示那三档（`.headErr / .headNote / .headOk`）与它们的框身回落版
+ * **已经搬去共用件** `components/modal/HeadNote.module.css` —— 2026-10-17 收口：
+ * 作者要求"不管是什么提示都用同一套组件、同一套逻辑复用在标题后面"，
+ * 所以这一屏不再自己持有一份。要改那一行的样子去共用件里改（一处，全站生效）。
+ */
 
 /*
  * 「预览模式」那一枚小字（开发台演出来的那一趟）。
@@ -755,27 +880,9 @@
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
 }
 
-/* ② 机型不匹配（深色）：同一张浅红卡，底压深、标题与圈留产品的红 */
-[data-theme='dark'] .warnSoft {
-  border-color: rgb(200 69 60 / 42%);
-  background: rgb(120 32 27 / 34%);
-  color: #c8453c;
-}
-
-[data-theme='dark'] .warnSoft .warnTitle {
-  color: #c8453c;
-}
-
-[data-theme='dark'] .warnSoft .warnLine {
-  color: rgb(255 255 255 / 78%);
-  opacity: 1;
-}
-
-[data-theme='dark'] .warnSoft .warnBadge {
-  border-color: #c8453c;
-  background: rgb(200 69 60 / 12%);
-  color: #c8453c;
-}
+/* ② 机型不匹配（深色）：**不用另写** —— `--warn-surface / --warn-line / --warn-ink`
+   本来就是深浅两套（tokens §「警告」那一组）。原来这里手写了一遍红，是因为当时借的是
+   错误色；换成警告色之后那一套照旧生效。 */
 
 /* ⑤ 失败（深色）：同一套 */
 [data-theme='dark'] .failWarn {

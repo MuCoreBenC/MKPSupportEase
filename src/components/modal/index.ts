@@ -25,3 +25,15 @@ export type { ModalProps } from './Modal'
  *   回执 = `createPortal(node, useModalHeadNoteSlot())`  —— 一句状态，排在副标题右边
  */
 export { useModalHeadNoteSlot, useModalHeadSlot } from './modalHeadSlot'
+/*
+ * **一句提示的唯一出口**（2026-10-17，作者：「把所有这些提示的，不管是什么的，
+ * 都用同一套组件，同一套逻辑复用在标题后面显示」）。
+ *
+ *   <HeadNote text="…" tone="error" | "note" | "ok" />
+ *
+ * 别自己在框身里摆 `<p className={s.bad}>` —— 框身按内容撑高，加一行框就长一截，
+ * 下面那张表跟着跳。这一格永远一行、超出省略号、**字数不影响框的尺寸**。
+ */
+export { HeadNote } from './HeadNote'
+export type { HeadNoteTone } from './HeadNote'
+export { summarizeNotes } from './noteText'

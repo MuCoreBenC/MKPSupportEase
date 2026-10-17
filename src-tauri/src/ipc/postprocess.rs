@@ -33,8 +33,31 @@ pub fn cancel_post_process(slot: State<'_, HookSlot>) -> Result<(), AppError> {
     traced("cancelPostProcess", |_| slot.0.cancel())
 }
 
-/// 回答"机型不匹配还跑不跑"：`keep = true` 继续，`false` 停下。
+/// 回答屏幕上那一问（机型 / 校准方式 …）：`id` 就是那一颗按钮的 id。
+///
+/// 2026-10-17 从 `answer_post_process_mismatch(keep)` 泛化而来 —— 校准件那一问有三个
+/// 以上选项，布尔表达不了。`question_kind` 用来挡"界面上过期那一屏"的答案
+/// （见 [`crate::hook_ui::HookView::answer`]）。
 #[tauri::command]
-pub fn answer_post_process_mismatch(slot: State<'_, HookSlot>, keep: bool) -> Result<(), AppError> {
-    traced("answerPostProcessMismatch", |_| slot.0.answer(keep))
+pub fn answer_post_process(
+    slot: State<'_, HookSlot>,
+    question_kind: String,
+    id: String,
+) -> Result<(), AppError> {
+    traced("answerPostProcess", |_| slot.0.answer(&question_kind, &id))
+}
+
+/// **首帧那两条路的收尾**（2026-10-17）：界面读完快照，若发现里面有一份问句、但自己从没
+/// 收到过对应事件（订阅挂晚了），喊这一声把问句补推一次。
+///
+/// 只重新 `emit`，不动任何状态 —— 问句本来就还在，钩子那边还在等。
+#[tauri::command]
+pub fn replay_post_process_question(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<(), AppError> {
+    traced("replayPostProcessQuestion", |_| {
+        slot.0.replay_question(&app);
+        Ok(())
+    })
 }

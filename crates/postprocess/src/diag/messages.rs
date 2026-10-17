@@ -255,8 +255,87 @@ mod tests {
             Some("E_FS_NOT_FOUND_001")
         );
         assert_eq!(code_of("boundary.clause"), None);
-        assert_eq!(code_of("hook.cancelled"), None, "用户自己按的停止不给码");
+        /* 2026-10-17 改口径（作者：「就算信息不全，也能通过错误码找到对应的」）：
+        用户自己按的停止**现在也给码**，只是换成 `W_` 打头 —— 一眼分得出
+        "出故障"还是"你自己让它停的"。原来是 `None`，于是日志里那一行是 `code=""`。 */
+        assert_eq!(
+            code_of("hook.cancelled").as_deref(),
+            Some("W_SYS_CANCELLED_001"),
+            "主动停止也给码，但必须是 W_ 打头（不是故障）"
+        );
         assert_eq!(code_of("没有这条"), None);
+    }
+
+    /// ★★★ **每一条 `hook.*` 都必须有码**，且**不许是 `E_` 打头以外的哑码**。
+    ///
+    /// 这条判据是给"AI 只看一行日志"用的（作者 2026-10-17）：日志里出现 `code=""`
+    /// 就等于这句话在码表里不存在，搜不到、也定位不了。以前 `hook.cancelled` /
+    /// `hook.mismatch_stopped` / `hook.calib_stopped` 就是这么漏的 ——
+    /// 偏偏这几条是**最常出现**的那几条（用户自己按的停止）。
+    ///
+    /// 三档前缀：`E_` 故障 / `W_` 停下（含降级） / `N_` 成功 / `Q_` 提问。
+    #[test]
+    fn every_hook_line_carries_a_code_with_its_class() {
+        const CLASSES: &[&str] = &["E_", "W_", "N_", "Q_"];
+        let mut missing = Vec::new();
+        let mut bad_class = Vec::new();
+        for key in keys() {
+            if !key.starts_with("hook.") {
+                continue;
+            }
+            match code_of(key) {
+                None => missing.push(key),
+                Some(code) => {
+                    if !CLASSES.iter().any(|p| code.starts_with(p)) {
+                        bad_class.push((key, code));
+                    }
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些 hook.* 没有码，日志里会是 code=\"\"：{missing:?}"
+        );
+        assert!(
+            bad_class.is_empty(),
+            "这些码不是 E_/W_/N_/Q_ 打头，AI 分不出类别：{bad_class:?}"
+        );
+    }
+
+    /// 码不许重号 —— 两个不同的键共用一个码，靠码反查就查到两句话，
+    /// "信息不全也能定位"这件事当场破产。
+    ///
+    /// 唯一允许的重复是**同一件事在两层各有一条**（内核那句 + 钩子那句），
+    /// 前提是两条的 `text` 不一样（说法不同是常态）。这里把这条写成判据：
+    /// 同码可以，同码又同句不行。
+    #[test]
+    fn codes_do_not_collide_silently() {
+        use std::collections::HashMap;
+        let mut by_code: HashMap<String, Vec<&str>> = HashMap::new();
+        for key in keys() {
+            if let Some(code) = code_of(key) {
+                by_code.entry(code).or_default().push(key);
+            }
+        }
+        let mut problems = Vec::new();
+        for (code, ks) in by_code {
+            if ks.len() < 2 {
+                continue;
+            }
+            /* 同码的多条之间，文案必须真的不一样，否则就是纯重号 */
+            for (i, a) in ks.iter().enumerate() {
+                for b in &ks[i + 1..] {
+                    if text(a, &[]) == text(b, &[]) {
+                        problems.push((code.clone(), *a, *b));
+                    }
+                }
+            }
+        }
+        problems.sort();
+        assert!(
+            problems.is_empty(),
+            "同一个码下有两句一模一样的话（纯重号）：{problems:?}"
+        );
     }
 
     /// 值里的花括号不被二次展开（`render` 的实现承诺）。

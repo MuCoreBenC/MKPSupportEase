@@ -120,6 +120,24 @@ pub struct Options {
     pub delay: Duration,
     /// 走到这一步就停住不动（截图用）；`None` = 一路演完
     pub hold_at: Option<String>,
+    /// 演出里要不要问那句「校准件怎么跑」，以及**问了之后选什么**。
+    ///
+    /// - `Some(true)`  = 问，且演成"用户选了「直接校准」"；
+    /// - `Some(false)` = 问，演成"用户选了「先打印，再校准」"（或没人答 → 收成已停止）；
+    /// - `None`        = 不问（普通那几档）。
+    pub calib_question: Option<bool>,
+    /// 那一趟的 `calib_choice`（`print` / `direct`）；不走提问段的档位也可以直接给。
+    pub calib_choice: Option<&'static str>,
+
+    /// 成功那一档**带不带结果读数**（`result` 那一包）。
+    ///
+    /// `false` = 老记录那种：跑成了，但盘上没有那次的结果读数 ⇒ 结果那一屏**没有**
+    /// 指标条与「擦料与胶水消耗」那几格（2026-10-17 开发台加的那一档就要看这个）。
+    pub metrics: bool,
+
+    /// 成功那一档要不要演**好几条**警告（2026-10-17 开发台「成功 · 好几行警告」）：
+    /// `true` = 摆四条警告，验框身被撑高时下面那张事实表不被挤坏。
+    pub many_warnings: bool,
 }
 
 impl Default for Options {
@@ -128,6 +146,10 @@ impl Default for Options {
             mode: Mode::Success,
             delay: Duration::from_millis(700),
             hold_at: None,
+            calib_question: None,
+            calib_choice: None,
+            metrics: true,
+            many_warnings: false,
         }
     }
 }
@@ -139,6 +161,14 @@ impl Default for Options {
 pub trait Sink {
     fn send(&self, msg: &FromHook);
     fn ask(&self, question: &str) -> bool;
+
+    /// 校准件那一问（2026-10-17）：`question` + 选项表（`(id, label, hint)`），
+    /// 返回被选中的 id；`None` = 没人答（演出里就是"超时"那一档）。
+    ///
+    /// 默认 `None`：只有实现了"真的一问"的那一侧才需要它。
+    fn ask_calibration(&self, _question: &str, _choices: &[(&str, &str, &str)]) -> Option<String> {
+        None
+    }
 }
 
 /// 演一遍。**阻塞**（每条进度之间睡 `delay`），调用方负责放到后台线程里。
@@ -176,12 +206,50 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
 
     /* 「那一问」在真钩子里排在管线的**前面**（机型核对先做）—— 这里同一个位置 */
     if opts.mode == Mode::Question {
-        let keep = sink.ask(
-            "这份 G-code 是 A1 切出来的，而选中的预设是 A1_MINI 的 —— \
-             维度与打印边界会按预设算，跑出来的可能是错的。还继续吗？",
-        );
+        /* 与 `messages.toml` 的 `hook.mismatch_question` 同一句（演出来的那一屏要和真跑的一样；
+        2026-10-17 作者嫌原来那句"维度与打印边界"太像内核口径，改成了这一句短的） */
+        let keep = sink.ask("G-code 是 A1，预设是 A1_MINI —— 机型对不上，结果可能出错。还继续吗？");
         if !keep {
-            return finish(sink, Mode::Question, true, 120);
+            return finish(
+                sink,
+                Mode::Question,
+                true,
+                120,
+                opts.metrics,
+                opts.many_warnings,
+                opts.calib_choice,
+            );
+        }
+    }
+
+    /*
+     * 校准件那一问（2026-10-17）：真钩子排在机型那一问**之后**、进管线之前 —— 这里同一个位置。
+     * 演出来的选择直接写进结论（`calib_choice`），界面据此把两种成功分开说。
+     */
+    let mut calib_choice: Option<&'static str> = opts.calib_choice;
+    if opts.calib_question.is_some() {
+        let asked = sink.ask_calibration(
+            "这份 G-code 是Z 偏移校准件。保留打印件一起后处理，还是只跑校准？",
+            &[
+                ("print", "先打印，再校准", "打印件保留"),
+                ("direct", "直接校准", "去掉打印件，只走校准路径"),
+            ],
+        );
+        match asked.as_deref() {
+            Some("direct") => calib_choice = Some("direct"),
+            /* 不答 / 选了「先打印」：都按"模型原样"跑；不答则**停下**（与真钩子同一条口径） */
+            Some(_) => calib_choice = Some("print"),
+            None => {
+                return finish(
+                    sink,
+                    opts.mode,
+                    true,
+                    120,
+                    opts.metrics,
+                    opts.many_warnings,
+                    None,
+                )
+            }
         }
     }
 
@@ -221,6 +289,9 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
         opts.mode,
         cancelled,
         started.elapsed().as_millis() as u64,
+        opts.metrics,
+        opts.many_warnings,
+        calib_choice,
     )
 }
 
@@ -230,7 +301,15 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
 /// 渲出来（[`HookError::from`] + [`crate::hook::conclusion_line`] 那条链），成功与取消那两句
 /// 走的是钩子自己那两个构造函数。抄一份的代价以前就摆在这儿 —— 演示屏上的字会与真跑
 /// 慢慢漂开，而演示屏的用处正是"看起来跟真的一样"。
-fn finish(sink: &dyn Sink, mode: Mode, cancelled: bool, elapsed_ms: u64) -> bool {
+fn finish(
+    sink: &dyn Sink,
+    mode: Mode,
+    cancelled: bool,
+    elapsed_ms: u64,
+    metrics: bool,
+    many_warnings: bool,
+    calib_choice: Option<&'static str>,
+) -> bool {
     const OUT: &str = "C:\\Users\\wzy\\AppData\\Local\\Temp\\（假钩子）演示.gcode";
     let payload = if cancelled {
         /* 用户按的停止：**不给码**（同真钩子） */
@@ -266,11 +345,23 @@ fn finish(sink: &dyn Sink, mode: Mode, cancelled: bool, elapsed_ms: u64) -> bool
             exit_code: 0,
             elapsed_ms,
             output: Some(OUT.to_owned()),
-            /* 警告那一行也演一条：它是"要你看一眼"的东西，排版得试到 */
-            warnings: vec!["这一盘没有支撑，支撑相关的那几步按空跑".to_owned()],
+            /* 警告那一行也演一条：它是"要你看一眼"的东西，排版得试到；
+            `many_warnings` 那一档摆四条（验框身被撑高时事实表不被挤坏） */
+            warnings: if many_warnings {
+                vec![
+                    "这一盘没有支撑，支撑相关的那几步按空跑".to_owned(),
+                    "擦料塔位置被模型占了一半，擦料路径往里挪了 6 mm".to_owned(),
+                    "这一盘的层高与预设里那两档都不一致，按预设值继续".to_owned(),
+                    "涂胶起点比上一盘晚 0.4 mm，末尾可能少一小段".to_owned(),
+                ]
+            } else {
+                vec!["这一盘没有支撑，支撑相关的那几步按空跑".to_owned()]
+            },
             /* 结果读数那一包也演一份（指标条 + 擦料与胶水消耗那几格）——
-            值照归档演示那一批给，好把那几格的样子一次试全 */
-            result: Some(ResultFacts {
+            值照归档演示那一批给，好把那几格的样子一次试全。
+            `metrics: false` 的那一档**不给**（老记录就是这么回来的：跑成了，但那次
+            的结果读数没落盘 ⇒ 结果屏上没有那一条） */
+            result: metrics.then_some(ResultFacts {
                 pen_x: -0.9,
                 pen_y: 23.0,
                 pen_z: 4.0,
@@ -279,6 +370,8 @@ fn finish(sink: &dyn Sink, mode: Mode, cancelled: bool, elapsed_ms: u64) -> bool
                 glue_length_mm: 9350.85,
                 slicer: "BambuStudio 02.08.02.60".to_owned(),
             }),
+            /* 校准件那几档演出：结论里也带上"选了哪种跑法" */
+            calib_choice: calib_choice.map(std::string::ToString::to_string),
         }
     };
     sink.send(&FromHook::Finished(Box::new(payload)));
@@ -289,6 +382,7 @@ fn finish(sink: &dyn Sink, mode: Mode, cancelled: bool, elapsed_ms: u64) -> bool
 fn finished_payload(err: &HookError, stage: &str, elapsed_ms: u64) -> FinishedPayload {
     let (message, code) = err.describe();
     FinishedPayload {
+        calib_choice: None,
         ok: false,
         cancelled: err.cancelled(),
         message,
@@ -380,6 +474,7 @@ mod tests {
                 mode: Mode::Fail,
                 delay: Duration::from_millis(0),
                 hold_at: None,
+                ..Options::default()
             },
             &CancelToken::new(),
         );
@@ -404,6 +499,7 @@ mod tests {
                 mode: Mode::Cancel,
                 delay: Duration::from_millis(0),
                 hold_at: None,
+                ..Options::default()
             },
             &CancelToken::new(),
         );
@@ -411,7 +507,13 @@ mod tests {
         match seen.last() {
             Some(FromHook::Finished(f)) => {
                 assert!(!f.ok && f.cancelled);
-                assert!(f.code.is_none(), "用户按的停止不给码");
+                /* 2026-10-17 改口径：主动停止也给码（`W_` 打头，不是故障）。
+                演示屏与真跑一次同一个形状 —— 真钩子那边现在是 `W_SYS_CANCELLED_001`。 */
+                assert_eq!(
+                    f.code.as_deref(),
+                    Some("W_SYS_CANCELLED_001"),
+                    "用户按的停止要给 W_ 码（以前这里是 None）"
+                );
             }
             other => panic!("最后一条该是结论：{other:?}"),
         }
@@ -430,6 +532,7 @@ mod tests {
                 mode: Mode::Question,
                 delay: Duration::from_millis(0),
                 hold_at: None,
+                ..Options::default()
             },
             &CancelToken::new(),
         );

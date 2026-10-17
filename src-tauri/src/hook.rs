@@ -86,6 +86,12 @@ mod keys {
     pub const MISMATCH_QUESTION: &str = "hook.mismatch_question";
     pub const MISMATCH_STOPPED: &str = "hook.mismatch_stopped";
     pub const MISMATCH_REFUSE: &str = "hook.mismatch_refuse";
+    pub const CALIB_MODE_QUESTION: &str = "hook.calib_mode_question";
+    pub const CALIB_STOPPED: &str = "hook.calib_stopped";
+    /* 校准件那一趟的两种成功结论（`print` = 打印件保留 / `direct` = 去掉打印件）——
+     * 界面与报告读同一组键，见 `hook::calib_done_line` */
+    pub const CALIB_DONE_PRINT: &str = "hook.calib_done_print";
+    pub const CALIB_DONE_DIRECT: &str = "hook.calib_done_direct";
     pub const CANCELLED: &str = "hook.cancelled";
     pub const STALLED: &str = "hook.stalled";
     pub const OVERRUN: &str = "hook.overrun";
@@ -117,6 +123,10 @@ const ALL_KEYS: &[&str] = &[
     keys::MISMATCH_QUESTION,
     keys::MISMATCH_STOPPED,
     keys::MISMATCH_REFUSE,
+    keys::CALIB_MODE_QUESTION,
+    keys::CALIB_STOPPED,
+    keys::CALIB_DONE_PRINT,
+    keys::CALIB_DONE_DIRECT,
     keys::CANCELLED,
     keys::STALLED,
     keys::OVERRUN,
@@ -254,8 +264,12 @@ impl HookError {
         &self.reason
     }
 
-    /// 「用户自己按的停止」那一条：Ctrl-C 与界面上的停止按钮都归它（**无码** ——
-    /// 那是他的选择，不是错误；见 [`Reason::code`]）。
+    /// 「用户自己按的停止」那一条：Ctrl-C 与界面上的停止按钮都归它。
+    ///
+    /// ★ 2026-10-17 改口径：以前它是**无码**的（"那是他的选择，不是错误"），于是日志里
+    /// 那一行是 `code=""` —— 恰恰是最常出现的那一行搜不到东西。现在给
+    /// `W_SYS_CANCELLED_001`：仍然是"停下"不是"故障"（`W_` 打头、退出码与原来一样），
+    /// 但照着码能查到它是什么。见 `messages.toml` 表头那三档前缀。
     pub fn user_cancelled() -> Self {
         Self::stopped(Reason::new(keys::CANCELLED))
     }
@@ -321,6 +335,9 @@ pub struct Outcome {
     pub deferred_print_time: Option<DeferredPrintTime>,
     /// 结果读数（界面「结果 · 成功」那几格）—— 见 [`result_facts`]。
     pub result: crate::hook_ipc::ResultFacts,
+    /// 校准件那一趟选了哪种跑法（`print` / `direct`）；不是校准件 = `None`。
+    /// 结论里带上它，界面与报告才能把两种成功分开说。
+    pub calib_choice: Option<String>,
 }
 
 /// 一条"待补全的打印时间"。
@@ -339,6 +356,16 @@ pub struct DeferredPrintTime {
 pub trait Asker {
     /// 返回 `true` = 继续跑，`false` = 不跑。
     fn confirm(&mut self, question: &str) -> bool;
+
+    /// 校准件那一问：选「先打印，再校准」/「直接校准」。
+    ///
+    /// 返回被选中的 id（`print` / `direct`）；`None` = 没有界面 / 超时 / 用户按了停止 ——
+    /// 由调用方决定收场（**停下**，与机型那一问同一条）。
+    ///
+    /// 默认实现给"没有界面"那一档用：不会替用户决定，一律 `None`。
+    fn ask_calibration(&mut self, _question: &str) -> Option<String> {
+        None
+    }
 }
 
 /// 机型不匹配时怎么处置。
@@ -360,11 +387,20 @@ pub enum UiLine<'a> {
     Silent,
 }
 
-impl UiLine<'_> {
+impl<'a> UiLine<'a> {
     fn send(&self, msg: crate::hook_ipc::FromHook) {
         match self {
             Self::Send(client) => client.send(&msg),
             Self::Silent => {}
+        }
+    }
+
+    /// 那条通道（`Silent` 时没有）。给"机型那一问之后还要再问一句"用 ——
+    /// `MismatchPolicy` 里那次 `&mut` 借用到不了下面。
+    fn client(&self) -> Option<&'a crate::hook_ipc::Client> {
+        match self {
+            Self::Send(client) => Some(client),
+            Self::Silent => None,
         }
     }
 }
@@ -583,6 +619,76 @@ pub fn run(
         }
     }
 
+    /*
+     * 校准件那一问（2026-10-17）：**排在机型那一问之后**（识别先后，作者定的）——
+     * 机型那问答"停"就已经 return 了，走不到这里。
+     *
+     * 两个选项对**模型**的后果不同：
+     *   · `print`  =「先打印，再校准」→ 什么都不改，就按预设里写的那套跑（打印件保留）；
+     *   · `direct` =「直接校准」→ 去掉打印件，只留校准路径（内核按
+     *     `calibration_execution_mode == "direct_calibrate"` 分派，见 `postproc::calibration`）。
+     *
+     * 所以这个选择必须**写回 IR**再进管线 —— 界面只是把它问出来，真正的差别在内核里。
+     * 超时不答 = 停下（与机型那一问同一条口径）。
+     */
+    let mut ir = ir;
+    let mut calib_choice: Option<String> = None;
+    /*
+     * `mismatch` 在机型那一段已经被 `match` 用掉了（`MismatchPolicy::Ask(&mut asker)` 是一次
+     * 独占借用）。所以这里**再问一次那条线有没有界面** —— 与 `MismatchPolicy` 同一个判据
+     * （`ui.connected()`），不需要把借用续命到下面。
+     */
+    let calib_mode = postprocess::postproc::calibration::detect_mode_in(&raw);
+    if let (true, Some(client)) = (
+        postprocess::postproc::calibration::is_any(calib_mode),
+        ui.client(),
+    ) {
+        let mut calib_asker = ChannelAsker { client };
+        let kind = postprocess::postproc::calibration::mode_display_name(calib_mode);
+        {
+            let asker = &mut calib_asker;
+            let question = Reason::new(keys::CALIB_MODE_QUESTION)
+                .with("kind", kind)
+                .text();
+            let answer = asker.ask_calibration(&question);
+            /*
+             * ★★★ 这里比的是**选项 id**（界面上那颗按钮回给钩子的 `id`），不是管线常量。
+             *
+             * 选项 id 与管线常量是**两套不同的字**：
+             *   · 选项 id（`hook_ipc::CHOICE_CALIB_*`）= `"print"` / `"direct"` —— 界面回的是这个；
+             *   · 管线常量（`ir::CALIBRATION_EXEC_*`）  = `"print_then_calibrate"` / `"direct_calibrate"`
+             *     —— 写进 IR 给内核分派的是这个。
+             *
+             * 第一版拿 `answer` 直接跟 `CALIBRATION_EXEC_DIRECT_CALIBRATE` 比，`"direct"` 永远
+             * 不等于 `"direct_calibrate"` ⇒ 无论选哪颗都掉进下面那个兜底臂，"直接校准"被当成
+             * "先打印，再校准"跑（作者真机：选了直接校准，切出来还是有打印件）。
+             * 判据见 `tests::a_direct_choice_really_writes_direct_into_the_ir`。
+             */
+            match answer.as_deref() {
+                Some(id) => {
+                    ir.safety.calibration_execution_mode = calib_exec_mode_of(id).to_owned();
+                    calib_choice = Some(calib_choice_of(id).to_owned());
+                }
+                /* 超时 / 没有界面 / 按了停止：停下，原文件一字不动 */
+                None => {
+                    let err =
+                        HookError::stopped(Reason::new(keys::CALIB_STOPPED).with("kind", kind));
+                    archive_failure(
+                        &archived,
+                        job,
+                        &preset_machine,
+                        &conclusion_line(&err),
+                        true,
+                        raw.len() as u64,
+                        started_at,
+                        started,
+                    );
+                    return Err(err);
+                }
+            }
+        }
+    }
+
     // 12 步管线。`output_path: None` = 原地覆盖（`.part` + rename，见内核 pipeline 文档）
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time(
@@ -685,6 +791,7 @@ pub fn run(
         warnings,
         deferred_print_time,
         result,
+        calib_choice,
     })
 }
 
@@ -957,7 +1064,11 @@ pub fn conclusion_line(err: &HookError) -> String {
             messages::text(keys::LINE_STOPPED, &refs(&p))
         }
         (true, None) => {
-            let p = params(&reason.slicer(), "");
+            /* 这一档以前不带码，日志里是 `code=""`。现在每一句都带码（作者 2026-10-17：
+            「就算信息不全，也能通过错误码找到对应的」）——
+            `hook.line.cancelled` 自己就声明了 `W_LINE_CANCELLED_001`。 */
+            let code = messages::code_of(keys::LINE_CANCELLED).unwrap_or_default();
+            let p = params(&reason.slicer(), &code);
             messages::text(keys::LINE_CANCELLED, &refs(&p))
         }
     }
@@ -973,6 +1084,50 @@ pub fn success_line(output: &Path, elapsed_ms: u128) -> String {
             ("ms", &elapsed_ms.to_string()),
         ],
     )
+}
+
+/// 界面回的那个**选项 id** → 写进 IR 的**管线常量**。
+///
+/// ★★★ 这两套字**不一样**，别把它们当同一个（2026-10-17 真机事故）：
+///
+/// | 谁 | `print` 那一支 | `direct` 那一支 |
+/// | --- | --- | --- |
+/// | 选项 id（`hook_ipc::CHOICE_CALIB_*`，界面回给钩子的） | `"print"` | `"direct"` |
+/// | 管线常量（`postprocess::ir::CALIBRATION_EXEC_*`，写进 IR 的） | `"print_then_calibrate"` | `"direct_calibrate"` |
+///
+/// 拿 `"direct"` 去跟 `"direct_calibrate"` 比永远是 false —— 那样写出来的结果是**两颗按钮
+/// 都按"先打印，再校准"跑**（作者选的"直接校准"，切出来还是有打印件）。
+///
+/// 认不出的 id 一律按 `print`：那是"什么都不改"的那一支，也是预设原本就写着的那种。
+pub fn calib_exec_mode_of(choice_id: &str) -> &'static str {
+    if choice_id == crate::hook_ipc::CHOICE_CALIB_DIRECT {
+        postprocess::ir::CALIBRATION_EXEC_DIRECT_CALIBRATE
+    } else {
+        postprocess::ir::CALIBRATION_EXEC_PRINT_THEN_CALIBRATE
+    }
+}
+
+/// 选项 id → 结论里那个 `calib_choice`（`"print"` / `"direct"`，界面与报告按它分文案）。
+pub fn calib_choice_of(choice_id: &str) -> &'static str {
+    if choice_id == crate::hook_ipc::CHOICE_CALIB_DIRECT {
+        "direct"
+    } else {
+        "print"
+    }
+}
+
+/// 校准件那一趟的**那一句结论**（两种跑法都是成功，只有这句不同）。
+///
+/// `None` = 不是校准件这一趟 ⇒ 调用方走 [`success_line`]。键住 `messages.toml`
+/// （`hook.calib_done_print` / `hook.calib_done_direct`）—— 界面与报告读的是同一组，
+/// **不许在 JSX 里另写一份**。
+pub fn calib_done_line(choice: Option<&str>) -> Option<String> {
+    let key = match choice? {
+        "print" => keys::CALIB_DONE_PRINT,
+        "direct" => keys::CALIB_DONE_DIRECT,
+        _ => return None,
+    };
+    Some(messages::text(key, &[]))
 }
 
 /// 失败/取消时往 stderr 写的**那几行**（**纯函数**，判据咬得住"日志路径那一行在不在"）。
@@ -1150,7 +1305,45 @@ struct ChannelAsker<'a> {
 
 impl Asker for ChannelAsker<'_> {
     fn confirm(&mut self, question: &str) -> bool {
-        self.client.ask(question)
+        /* 机型那一问：不摆选项表（界面用默认那两颗），超时 = 停下（`stop`） */
+        matches!(
+            self.client.ask(
+                crate::hook_ipc::QKIND_MACHINE_MISMATCH,
+                question,
+                Vec::new(),
+                crate::hook_ipc::CHOICE_STOP
+            ),
+            Some(id) if id == crate::hook_ipc::CHOICE_KEEP
+        )
+    }
+
+    /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。
+    fn ask_calibration(&mut self, question: &str) -> Option<String> {
+        use crate::hook_ipc::{
+            QuestionChoice, CHOICE_CALIB_DIRECT, CHOICE_CALIB_PRINT, CHOICE_STOP,
+        };
+        let choices = vec![
+            QuestionChoice {
+                id: CHOICE_CALIB_PRINT.to_owned(),
+                label: "先打印，再校准".to_owned(),
+                hint: Some("打印件保留".to_owned()),
+                accent: true,
+            },
+            QuestionChoice {
+                id: CHOICE_CALIB_DIRECT.to_owned(),
+                label: "直接校准".to_owned(),
+                hint: Some("去掉打印件，只走校准路径".to_owned()),
+                accent: false,
+            },
+        ];
+        let answer = self.client.ask(
+            crate::hook_ipc::QKIND_CALIBRATION_MODE,
+            question,
+            choices,
+            CHOICE_STOP,
+        )?;
+        /* 超时回的是 `stop`（不是选项之一）⇒ 当成"没答" */
+        (answer != CHOICE_STOP).then_some(answer)
     }
 }
 
@@ -1254,7 +1447,11 @@ fn spawn_watchdog(watch: Arc<Watch>, cancel: CancelToken) {
             /* 日志那一面：叫停这件事**当场**记下来（结论行要等管线收手才出来，
             中间隔着内核的检查间隔；卡死那一档尤其要看得出"是看门狗先动的"） */
             tracing::warn!(
-                code = reason.code().unwrap_or_default(),
+                /* 兜底不给空串：见 `failure_lines` 那一段的同一条理由 ——
+                日志里 `code=""` 等于这一行查不到 */
+                code = reason
+                    .code()
+                    .unwrap_or_else(|| "W_UNCLASSIFIED_001".to_owned()),
                 "{}",
                 reason.text()
             );
@@ -1285,6 +1482,8 @@ fn finished_payload(
             warnings: out.warnings.clone(),
             /* 结果读数：成功才有（失败 / 取消时内核没把这几个数算出来 —— 空着） */
             result: Some(out.result.clone()),
+            /* 校准件那一趟选了哪种跑法 —— 界面与报告据此分开说"两种成功" */
+            calib_choice: out.calib_choice.clone(),
         },
         Err(err) => {
             /* 原因与码分家：界面把原因摆正中、码摆小字。
@@ -1306,6 +1505,7 @@ fn finished_payload(
                 output: None,
                 warnings: Vec::new(),
                 result: None,
+                calib_choice: None,
             }
         }
     }
@@ -1335,7 +1535,23 @@ pub fn report(done: Result<Outcome, HookError>, log: Option<&Path>) -> u8 {
             let lines = failure_lines(&err, log);
             /* 日志那一面：码单独成字段（能按码检索），停/失败用不同级别 ——
             "中断"与"失败"在翻日志时是第一眼要分开的 */
-            let code = err.reason().code().unwrap_or_default();
+            /* ★ 码**不许是空串**（作者 2026-10-17：「就算信息不全，也能通过错误码找到
+            对应的」）：日志里 `code=""` 等于这一行在码表里查不到。
+            兜底顺序：这条 reason 自己的码 → 结论框子那个码（`hook.line.*` 各有一个）
+            → 再不行才写 `W_UNCLASSIFIED_001`（判据 `every_hook_line_carries_a_code…`
+            会先咬住"哪条 hook.* 没码"，所以这个兜底正常永远用不到）。 */
+            let code = err
+                .reason()
+                .code()
+                .or_else(|| {
+                    let key = if err.cancelled() {
+                        keys::LINE_CANCELLED
+                    } else {
+                        keys::LINE_FAILED
+                    };
+                    messages::code_of(key)
+                })
+                .unwrap_or_else(|| "W_UNCLASSIFIED_001".to_owned());
             if err.cancelled() {
                 tracing::warn!(code, exit_code = err.exit_code(), "{}", lines[0]);
             } else {
@@ -1357,6 +1573,51 @@ mod tests {
 
     use super::*;
     use crate::args::HookJob;
+
+    /// ★★★ 校准那一问：**界面回的是选项 id**（`print` / `direct`），写进 IR 的却是管线常量
+    /// （`print_then_calibrate` / `direct_calibrate`）—— 两套字不一样。
+    ///
+    /// 2026-10-17 真机的表现：选了「直接校准」，切出来还有打印件。原因就是把 `"direct"`
+    /// 直接跟 `"direct_calibrate"` 比，两边永远不等 ⇒ 掉进兜底臂，按"先打印"跑了。
+    /// 这条判据钉住**映射本身**（纯函数，不需要真跑一趟管线）。
+    #[test]
+    fn a_direct_choice_really_writes_direct_into_the_ir() {
+        /* 界面回的那颗「直接校准」 */
+        assert_eq!(
+            calib_exec_mode_of(crate::hook_ipc::CHOICE_CALIB_DIRECT),
+            postprocess::ir::CALIBRATION_EXEC_DIRECT_CALIBRATE,
+            "选「直接校准」必须把 direct_calibrate 写进 IR —— 否则内核照旧保留打印件"
+        );
+        assert_eq!(
+            calib_choice_of(crate::hook_ipc::CHOICE_CALIB_DIRECT),
+            "direct"
+        );
+
+        /* 另一颗「先打印，再校准」 */
+        assert_eq!(
+            calib_exec_mode_of(crate::hook_ipc::CHOICE_CALIB_PRINT),
+            postprocess::ir::CALIBRATION_EXEC_PRINT_THEN_CALIBRATE
+        );
+        assert_eq!(
+            calib_choice_of(crate::hook_ipc::CHOICE_CALIB_PRINT),
+            "print"
+        );
+
+        /* ★ 两种 id 的**字面量本来就不一样** —— 这条断言是把"为什么会有那个 bug"钉在代码里，
+        谁要是哪天想拿 id 直接跟常量比，读到这里就停下了 */
+        assert_ne!(
+            crate::hook_ipc::CHOICE_CALIB_DIRECT,
+            postprocess::ir::CALIBRATION_EXEC_DIRECT_CALIBRATE,
+            "选项 id 与管线常量是两套字，不许直接相等比较"
+        );
+
+        /* 认不出的 id（老界面 / 手滑）按"什么都不改"那一支，绝不当成 direct */
+        assert_eq!(
+            calib_exec_mode_of("keep"),
+            postprocess::ir::CALIBRATION_EXEC_PRINT_THEN_CALIBRATE
+        );
+        assert_eq!(calib_choice_of("keep"), "print");
+    }
 
     fn job(toml: &std::path::Path, gcode: &std::path::Path) -> HookJob {
         HookJob {
@@ -1725,8 +1986,19 @@ mod tests {
 
         let by_user = HookError::stopped(Reason::new(keys::CANCELLED));
         let line = conclusion_line(&by_user);
-        assert!(line.starts_with("已取消："), "{line}");
-        assert!(!line.contains("E_"), "用户按的停不该摆码：{line}");
+        /* 「停下」这一档统一说"已停止"（`hook.line.stopped`），**不是**"已取消"——
+        后者是"失败但没有码"那条理论分支用的框子。 */
+        assert!(line.starts_with("已停止："), "{line}");
+        /* 2026-10-17 改口径：用户按的停**也给码**，方便照着码查（作者要的就是这个）。
+        它不许是 `E_`（那不是故障），而是 `W_` 打头的"停下"类。 */
+        assert!(
+            line.contains("［W_SYS_CANCELLED_001］"),
+            "用户按的停要给 W_ 码：{line}"
+        );
+        assert!(
+            !line.contains("［E_"),
+            "用户按的停不是故障，不该出现 E_ 码：{line}"
+        );
         assert!(line.contains("原文件没有被改动"), "{line}");
 
         let by_watchdog = HookError::stopped(
