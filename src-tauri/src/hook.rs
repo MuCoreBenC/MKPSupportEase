@@ -62,7 +62,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use postprocess::diag::{messages, CancelToken, PostprocError};
-use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressSink};
+use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressEvent, ProgressSink};
 
 use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
 use crate::args::HookJob;
@@ -556,6 +556,7 @@ pub fn run(
                 raw.len() as u64,
                 started_at,
                 started,
+                Vec::new(),
             );
             return Err(err);
         }
@@ -614,6 +615,8 @@ pub fn run(
                         raw.len() as u64,
                         started_at,
                         started,
+                        /* 管线还没进（预设错 / 停在问句），没有步骤账 */
+                        Vec::new(),
                     );
                     return Err(err);
                 }
@@ -629,6 +632,8 @@ pub fn run(
                     raw.len() as u64,
                     started_at,
                     started,
+                    /* 管线还没进（停在机型那一问），没有步骤账 */
+                    Vec::new(),
                 );
                 return Err(err);
             }
@@ -697,6 +702,8 @@ pub fn run(
                         raw.len() as u64,
                         started_at,
                         started,
+                        /* 管线还没进（预设错 / 停在问句），没有步骤账 */
+                        Vec::new(),
                     );
                     return Err(err);
                 }
@@ -705,6 +712,13 @@ pub fn run(
     }
 
     // 12 步管线。`output_path: None` = 原地覆盖（`.part` + rename，见内核 pipeline 文档）
+    /* 步骤记账包在真正的进度出口外面：失败 / 取消时把"跑到哪一步"写进记录
+    （成功路径用内核自己那份 step_timings，这份记账用不上） */
+    let mut steps = StepRecorder {
+        inner: sink,
+        current: None,
+        done: Vec::new(),
+    };
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time(
             IrProcessRequest {
@@ -712,7 +726,7 @@ pub fn run(
                 ir,
                 output_path: None,
             },
-            sink,
+            &mut steps,
             cancel,
         )
     } else {
@@ -722,7 +736,7 @@ pub fn run(
                 ir,
                 output_path: None,
             },
-            sink,
+            &mut steps,
             cancel,
         )
     };
@@ -730,6 +744,11 @@ pub fn run(
         Ok(done) => done,
         Err(err) => {
             let e = HookError::from(err);
+            let failed_pipeline = steps.finish(if e.cancelled() {
+                PipelineStatus::Cancelled
+            } else {
+                PipelineStatus::Error
+            });
             archive_failure(
                 &archived,
                 job,
@@ -739,6 +758,7 @@ pub fn run(
                 raw.len() as u64,
                 started_at,
                 started,
+                failed_pipeline,
             );
             return Err(e);
         }
@@ -982,6 +1002,8 @@ fn archive_failure(
     input_size_bytes: u64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
+    // 已经跑到的那几步（`StepRecorder` 记的账）。管线还没进（预设错 / 停在问句）就给空。
+    pipeline: Vec<PipelineStep>,
 ) {
     let Some(paths) = archived else { return };
     let meta = Meta {
@@ -1000,7 +1022,7 @@ fn archive_failure(
         warnings: Vec::new(),
         error: Some(error.to_string()),
         cancelled,
-        pipeline: Vec::new(),
+        pipeline,
         detail: Detail {
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,
@@ -1313,11 +1335,65 @@ impl ProgressSink for ChannelSink<'_> {
     }
 }
 
+/// **管线步骤记账**（2026-10-18）：包住真正的进度出口，每一步"开始了"就记一笔，
+/// 下一步开始（或这一趟收场）时结算耗时 —— 于是**失败 / 取消的那一趟也有
+/// 「管线计时」**：跑到哪一步、前面几步各花了多久（作者：「失败的管线也要写出来，
+/// 第一步干嘛了，比如检测机型之类的」）。
+///
+/// 内核成功时自己带 `step_timings`（`ProcessResult`），记账只服务失败路径；
+/// 成功路径的逐字账仍以内核那份为准（含 `detail` 多行事实），这里记的不用。
+struct StepRecorder<'a> {
+    inner: &'a mut dyn ProgressSink,
+    /// 正在跑的那一步：步骤 / 入口那句话 / 开始时刻。`None` = 还没进任何步。
+    current: Option<(postprocess::pipeline::Step, String, std::time::Instant)>,
+    /// 已经跑完的步骤（按执行顺序）。
+    done: Vec<PipelineStep>,
+}
+
+impl StepRecorder<'_> {
+    fn settle(&mut self, status: PipelineStatus) {
+        if let Some((step, message, started_at)) = self.current.take() {
+            self.done.push(PipelineStep {
+                id: step.id(),
+                message,
+                elapsed_ms: started_at.elapsed().as_millis() as u64,
+                status,
+                /* 失败路径没有 `DetailFacts`（那要等整链成功），小字整组不写
+                —— 页面口径「没给就不摆」 */
+                detail: None,
+            });
+        }
+    }
+
+    /// 收场：最后停在的那一步按 `status` 结算（前面的都是跑完的）。
+    fn finish(mut self, last_status: PipelineStatus) -> Vec<PipelineStep> {
+        self.settle(last_status);
+        self.done
+    }
+}
+
+impl ProgressSink for StepRecorder<'_> {
+    fn emit(&mut self, event: ProgressEvent) {
+        /* 新一步的入口事件 = `fraction_in_step: None`（步内进度是 `Some`，且步号不变）。
+        内核的 `StepTimer` 就是这个语义，这里照抄同一份判据 —— 不认它就会把
+        pass1 的 0% / 2% / … 进度帧错当成一步一个。 */
+        if event.fraction_in_step.is_none()
+            && self
+                .current
+                .as_ref()
+                .map_or(true, |(step, _, _)| *step != event.step)
+        {
+            self.settle(PipelineStatus::Complete);
+            self.current = Some((event.step, event.message.clone(), std::time::Instant::now()));
+        }
+        self.inner.emit(event);
+    }
+}
+
 /// 通道那一侧的问句：推给界面，等它答（见 [`crate::hook_ipc::Client::ask`]）。
 struct ChannelAsker<'a> {
     client: &'a crate::hook_ipc::Client,
 }
-
 impl Asker for ChannelAsker<'_> {
     fn confirm(&mut self, question: &str) -> bool {
         /* 机型那一问：不摆选项表（界面用默认那两颗），超时 = 停下（`stop`） */
@@ -1587,6 +1663,88 @@ mod tests {
     #![allow(clippy::disallowed_methods)]
 
     use super::*;
+    use postprocess::pipeline::{ProgressEvent, Step};
+
+    /// **失败也有管线账**（2026-10-18，作者：「失败的管线也要写出来，第一步干嘛了」）：
+    /// 记账器把"进了哪些步、各花多久、停在哪一步"记全 —— 前面的步是跑完的，
+    /// 最后停在的那一步带 `error` / `cancelled` 状态。
+    #[test]
+    fn the_step_recorder_setstles_started_steps_and_marks_the_last_one() {
+        struct Sink;
+        impl ProgressSink for Sink {
+            fn emit(&mut self, _: ProgressEvent) {}
+        }
+        let mut inner = Sink;
+        let mut rec = StepRecorder {
+            inner: &mut inner,
+            current: None,
+            done: Vec::new(),
+        };
+
+        /* 三步：input（完成）→ machine-detect（完成）→ parse（在这步失败）。
+        步内进度帧（fraction Some）不许被当成新一步 —— pass1 的 0%/2%/… 帧就长这样 */
+        rec.emit(ProgressEvent {
+            step: Step::Input,
+            fraction_in_step: None,
+            message: "正在读取文件...".into(),
+        });
+        rec.emit(ProgressEvent {
+            step: Step::MachineDetect,
+            fraction_in_step: None,
+            message: "识别机型...".into(),
+        });
+        rec.emit(ProgressEvent {
+            step: Step::Parse,
+            fraction_in_step: None,
+            message: "解析 G-code...".into(),
+        });
+        rec.emit(ProgressEvent {
+            step: Step::Parse,
+            fraction_in_step: Some(0.4),
+            message: "解析 G-code... 40%".into(),
+        });
+
+        let steps = rec.finish(PipelineStatus::Error);
+        assert_eq!(steps.len(), 3, "三步都该有账：{steps:?}");
+        assert_eq!(steps[0].id, "input");
+        assert_eq!(steps[0].status, PipelineStatus::Complete);
+        assert_eq!(steps[1].id, "machine-detect");
+        assert_eq!(steps[1].status, PipelineStatus::Complete);
+        assert_eq!(steps[2].id, "parse");
+        assert_eq!(
+            steps[2].status,
+            PipelineStatus::Error,
+            "最后停在的那一步要标记"
+        );
+        for s in &steps {
+            assert!(s.elapsed_ms < 5_000, "测试里不该跑出真耗时：{s:?}");
+            assert_eq!(s.detail, None, "失败路径没有 DetailFacts，小字整组不写");
+        }
+        assert_eq!(steps[2].message, "解析 G-code...");
+    }
+
+    /// 取消那一条：最后一步的状态是 `cancelled`（作者口径：停下不是故障）。
+    #[test]
+    fn a_cancelled_run_marks_the_last_step_cancelled() {
+        struct Sink;
+        impl ProgressSink for Sink {
+            fn emit(&mut self, _: ProgressEvent) {}
+        }
+        let mut inner = Sink;
+        let mut rec = StepRecorder {
+            inner: &mut inner,
+            current: None,
+            done: Vec::new(),
+        };
+        rec.emit(ProgressEvent {
+            step: Step::Input,
+            fraction_in_step: None,
+            message: "正在读取文件...".into(),
+        });
+        let steps = rec.finish(PipelineStatus::Cancelled);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].status, PipelineStatus::Cancelled);
+    }
     use crate::args::HookJob;
 
     /// ★★★ 校准那一问：**界面回的是选项 id**（`print` / `direct`），写进 IR 的却是管线常量

@@ -13,6 +13,11 @@ use crate::gcode::{format_python_float, has_e_param};
 use crate::ir::Ir;
 
 /// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
+///
+/// TODO（2026-10-18 作者）：这个开关目前只在 **A1 / A1 mini** 上验证过 —— 只有
+/// 这两家机器的切片器会往 G-code 里写 M970/M974 震动补偿校准序列。别的机型
+/// （P1/X1 系列）用的命令集不一样，还没逐台核对：开关勾了之后该删什么、有没有
+/// 对应的检测序列，以后适配一轮（逐机型实测产物，别只按命令名猜）。
 pub fn apply_skip_vibration_calibration(lines: Vec<String>, skip: bool) -> Vec<String> {
     if !skip {
         return lines;

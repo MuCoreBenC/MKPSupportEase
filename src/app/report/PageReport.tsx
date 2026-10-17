@@ -1294,6 +1294,14 @@ export default function PageReport() {
                                       <span className={s.stepMs}>
                                         {elapsedText(step.elapsedMs ?? null)}
                                       </span>
+                                      {/* 失败 / 取消的记录：最后停在的那一步给个记号
+                                          （status 由钩子写侧给；旧记录没有就不摆） */}
+                                      {step.status === 'error' && (
+                                        <span className={s.stepBad}>停在这一步</span>
+                                      )}
+                                      {step.status === 'cancelled' && (
+                                        <span className={s.stepStopped}>在这一步取消</span>
+                                      )}
                                     </span>
                                     {step.message !== undefined && step.message !== '' && (
                                       <span className={s.stepMsg}>{step.message}</span>
