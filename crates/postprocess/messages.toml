@@ -89,6 +89,23 @@ note = "**兜底码**：参数级校验失败都走它。更具体的错走自�
 text = "模型与擦料塔的位置冲突：挪开模型或换一个擦料塔位置再切片"
 slicer = "模型与擦料塔的位置冲突 —— 回切片器挪开模型再切一次"
 
+# 建议那句（2026-10-18）—— **同一件事的三种处置**，码分开排，旧号一个不动。
+# 谁挑这句：`postproc::disk::CollisionResult::advice` 按 `collision_type` 分档。
+# 数字是"至少挪多少"（内核那边已经按 0.1mm 向上取整过）。
+["E_GCODE_COLLISION_002"]
+text = "建议：把模型往{direction}挪 —— X 至少 {x}mm，Y 至少 {y}mm"
+params = ["direction", "x", "y"]
+note = "挪模型的那一档：方向是内核按最小退出距离挑出来的（旧侧 resolveModelAdjustment）"
+
+["E_GCODE_COLLISION_003"]
+text = "模型这边挪不开了：建议调整擦料塔位置（wiper_x / wiper_y）后再切片"
+note = "兜底：三个候选方向都挪不开（越界或挪完还撞），只能动塔"
+
+["E_GCODE_COLLISION_004"]
+text = "擦料塔位置落在机型的额外禁区里：把塔挪开 —— X 至少 {x}mm，Y 至少 {y}mm（或改机型的禁区配置）"
+params = ["x", "y"]
+note = "禁区那一档：挪的是塔不是模型，数字是最小平移向量（MTV）"
+
 ["E_CAL_FAILED_001"]
 text = "校准代码没有生成出来：{detail}"
 slicer = "校准代码没有生成出来 —— 详见日志，把日志里那一段发给我们"

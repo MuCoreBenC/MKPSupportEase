@@ -100,6 +100,7 @@ import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
 import ExportModal from './ExportModal'
+import CollisionMap from './CollisionMap'
 import { useDevPreview } from '../dev/useDevPreview'
 import s from './PageReport.module.css'
 
@@ -213,6 +214,21 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     <>
       <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
       <path d="M13.5 3v5h5" />
+    </>
+  ),
+  /* 建议（2026-10-18）：一个箭头 —— "往这边挪" */
+  advice: (
+    <>
+      <path d="M4 12h11" />
+      <path d="M11.5 8.5l4 3.5-4 3.5" />
+    </>
+  ),
+  /* 碰撞位置：热床俯视 —— 外框 + 里面两块相撞 */
+  collision: (
+    <>
+      <rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
+      <rect x="6.5" y="7.5" width="7" height="6" rx="1" />
+      <rect x="11.5" y="11.5" width="6" height="5" rx="1" />
     </>
   ),
 }
@@ -540,6 +556,57 @@ function buildGroups(detail: ReportDetail): Group[] {
   if (detail.slicer !== undefined && detail.slicer !== null) {
     const g = slicerGroup(detail.slicer)
     if (g !== null) groups.push(g)
+  }
+
+  /*
+   * **碰撞那两块**（2026-10-18）：只有碰撞失败的那一趟有 `collision` ⇒ 别的记录
+   * 一组都不多（旧记录读到 `null`，整组不摆）。
+   *
+   * ① 建议：内核已经把方向 / 至少挪多少算好了，连那句话（含码）都渲染好了 ——
+   *   这里只管摆，不自己拼（拼了就等于句子有两处真值）。
+   * ② 碰撞位置：一张俯视图，撞在哪一眼看见（组件自己画）。
+   */
+  if (detail.collision != null) {
+    const c = detail.collision
+    const adviceCells: [string, string][] = []
+    if (c.adviceText !== undefined && c.adviceText !== '') {
+      adviceCells.push(['建议', c.adviceText])
+    }
+    /* 方向 / 至少挪多少：**只有"挪模型"那档才有数**（挪塔那档是 0，摆出来是噪音） */
+    if (c.target === 'model') {
+      if (c.direction !== undefined && c.direction !== '') {
+        adviceCells.push(['方向', `往${c.direction}挪`])
+      }
+      const mm = (v: number | undefined): string | null =>
+        v === undefined || v <= 0 ? null : `${v.toFixed(1)} mm`
+      const xs = [mm(c.requiredMoveX), mm(c.requiredMoveY)]
+      if (xs[0] !== null || xs[1] !== null) {
+        adviceCells.push([
+          '至少移动',
+          [`X ${xs[0] ?? '不用挪'}`, `Y ${xs[1] ?? '不用挪'}`].join(' · '),
+        ])
+      }
+    }
+    if (c.conflictCount !== undefined && c.conflictCount > 0) {
+      adviceCells.push(['冲突点', `${c.conflictCount} 个`])
+    }
+    if (c.adviceCode !== undefined && c.adviceCode !== '') {
+      adviceCells.push(['码', c.adviceCode])
+    }
+    if (adviceCells.length > 0) {
+      groups.push({
+        id: 'advice',
+        title: '建议',
+        sum: c.target === 'wipe-tower' ? '挪擦料塔' : '挪模型',
+        cells: adviceCells,
+      })
+    }
+    groups.push({
+      id: 'collision',
+      title: '碰撞位置',
+      sum: '热床俯视',
+      cells: [],
+    })
   }
 
   /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
@@ -1312,12 +1379,23 @@ export default function PageReport() {
                                   </li>
                                 ))}
                               </ol>
+                            ) : g.id === 'collision' ? (
+                              /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
+                              detail.collision !== null ? (
+                                <CollisionMap collision={detail.collision} />
+                              ) : null
                             ) : (
                               <dl className={s.kv}>
                                 {g.cells.map(([k, v], i) => (
                                   <div className={s.kvRow} key={`${k}-${i}`}>
                                     <dt>{k}</dt>
-                                    <dd className={k === '调用' ? s.mono : undefined}>{v}</dd>
+                                    <dd
+                                      className={
+                                        k === '调用' || k === '码' ? s.mono : undefined
+                                      }
+                                    >
+                                      {v}
+                                    </dd>
                                   </div>
                                 ))}
                               </dl>

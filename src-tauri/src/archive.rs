@@ -352,6 +352,15 @@ pub struct Meta {
     pub error: Option<String>,
     pub cancelled: bool,
     pub pipeline: Vec<PipelineStep>,
+    /**
+     * **碰撞那一趟的额外一格**（2026-10-18；只有 `E_GCODE_COLLISION_001` 会写）。
+     *
+     * 报告页拿它回答"撞在哪、往哪挪多少"（建议那句的码与正文也在里面），并画一张
+     * 俯视图。别的失败 / 成功记录一律 `null` —— 于是"有没有这两块"是数据说了算。
+     *
+     * 键是**新增**的（旧记录没有 ⇒ 读到 `null` ⇒ 整组不摆），不碰任何旧键。
+     */
+    pub collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
     pub detail: Detail,
 }
 
@@ -1101,6 +1110,8 @@ mod tests {
                 status: PipelineStatus::Complete,
                 detail: Some("读取 909465 行".into()),
             }],
+            /* 成功记录没有碰撞事实 */
+            collision: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
@@ -1186,6 +1197,8 @@ mod tests {
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
             cancelled: false,
             pipeline: Vec::new(),
+            /* 越界失败不是碰撞 —— 那一格必须是 null（判据里钉住键名即可） */
+            collision: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),

@@ -1,0 +1,132 @@
+/*
+ * 碰撞俯视图的样式（2026-10-18）。
+ *
+ * 走报告页那套安静读数风格：中性底 + 发丝线，只有"撞了"这件事用红。
+ * 塔的颜色沿用参数页那套（塔身琥珀 #fcd34d / 描边 #d97706，辅助结构绿）
+ * —— 那是这台程序里塔的既定长相，不在这一稿重新设计。
+ */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 0;
+}
+
+/* 画布：宽度跟着容器，高度按热床比例（aspectRatio 由组件按 mm 给） */
+.map {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* 热床（可打印区） */
+.bed {
+  fill: var(--surface-solid);
+  stroke: var(--line-strong);
+  stroke-width: 1;
+}
+
+/* 淡网格：只给尺度感，不抢视线 */
+.grid line {
+  stroke: var(--line);
+  stroke-width: 1;
+  opacity: 0.55;
+}
+
+/* 机型额外禁区 */
+.zone {
+  fill: var(--warn-soft, rgb(245 158 11 / 14%));
+  stroke: var(--warn, #f59e0b);
+  stroke-width: 1;
+  stroke-dasharray: 3 2;
+}
+
+/* 模型整体包围盒：中性描边 + 极淡填充，虚线（与塔的长相分开） */
+.model {
+  fill: var(--text-3, #6b7280);
+  fill-opacity: 0.1;
+  stroke: var(--text-2, #6b7280);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 3;
+}
+
+/* 判据框：碰撞按这一块算（与塔的真实形状同一个外沿，所以画成虚线压在上面） */
+.towerBox {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+}
+
+/* 冲突点 */
+.points circle {
+  fill: var(--danger);
+}
+
+/* 塔的真实形状：绝对定位盖在判据框上（百分比由组件按 mm 算） */
+.tower {
+  position: absolute;
+  pointer-events: none;
+}
+
+.core {
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- 图例 ---- */
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend span[aria-hidden='true'] {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.swTower {
+  background: #fcd34d;
+  border: 1px solid #d97706;
+}
+
+.swModel {
+  background: rgb(107 114 128 / 14%);
+  border: 1px dashed var(--text-2, #6b7280);
+}
+
+.swHit {
+  background: var(--danger);
+}
+
+.legendNum {
+  color: var(--text-3);
+}

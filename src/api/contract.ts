@@ -108,6 +108,55 @@ export interface ReportPipelineStep {
   detail?: string
 }
 
+/** 一个轴对齐框（mm，机器坐标） */
+export interface ReportBox4 {
+  xMin?: number
+  xMax?: number
+  yMin?: number
+  yMax?: number
+}
+
+/**
+ * **碰撞那一趟的事实**（2026-10-18）。
+ *
+ * 内核算完检测就把这些一起带出来（旧版有"移动建议"，这一稿把它落进执行记录）：
+ * 撞的是谁、建议挪谁、往哪挪多少、冲突点在哪、画俯视图要的几何。
+ *
+ * 建议那句（`adviceText`）是**内核按 `messages.toml` 渲染好的**，码在 `adviceCode` ——
+ * 界面只管摆，不自己拼句子。
+ */
+export interface ReportCollision {
+  /** `model` / `prime-tower` / `both` / `forbidden` / `wipe-tower-needed` */
+  kind?: string
+  /** 建议挪谁：`model` / `wipe-tower` */
+  target?: string
+  /** 方向（中文；算不出方向是空串 —— 那时看 `target` 走"挪塔"那句） */
+  direction?: string
+  requiredMoveX?: number
+  requiredMoveY?: number
+  conflictCount?: number
+  /** 冲突点采样（mm，机器坐标；内核封顶 200 个，够画出分布） */
+  conflictPoints?: [number, number][]
+  /** **判据用的塔包围盒**（含外围结构扩展；左下角 = wiper_x / wiper_y） */
+  towerBBox?: ReportBox4
+  /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0） */
+  modelBBox?: ReportBox4
+  /** 可打印区 */
+  printable?: ReportBox4
+  /** 画塔真实形状要的参数（与参数页同一套算法） */
+  tower?: {
+    outerStructure?: string
+    bodyMm?: number
+    ribWidth?: number
+    ribExtraLength?: number
+    ribFilletWall?: boolean
+    sheathBaseExpand?: number
+  } | null
+  forbiddenZones?: [number, number][][]
+  adviceCode?: string
+  adviceText?: string
+}
+
 /** 涂胶组（`detail.glue`）—— 键名与旧版 `_meta.json` 的 `detail` 同名 */
 export interface ReportGlueFacts {
   glueTotalLength?: number
@@ -209,6 +258,13 @@ export interface ReportDetail {
   /** 切片工艺组 */
   slicer?: ReportSlicerFacts | null
   pipeline: ReportPipelineStep[]
+  /**
+   * **碰撞那一趟的事实**（2026-10-18，`_meta.json` 顶层 `collision`）。
+   *
+   * 只有 `E_GCODE_COLLISION_001` 那一趟会写：撞在哪、建议往哪挪多少、画俯视图的几何。
+   * 别的记录（含成功记录与旧记录）一律 `null` ⇒ 报告页那两块整组不摆。
+   */
+  collision: ReportCollision | null
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
   invocation: { exe?: string; args?: string[] } | null

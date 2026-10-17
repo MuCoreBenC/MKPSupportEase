@@ -4,6 +4,87 @@
 use crate::ir::Ir;
 use crate::postproc::geom::{self, BBox as GBBox, MoveDirection, Polygon};
 use crate::postproc::tower::calculate_tower_bbox;
+use crate::postproc::tower::constants::{TOWER_INNER_BOUND, TOWER_OUTER_BOUND};
+use serde::Serialize;
+
+/// **给记录用的冲突点上限**（2026-10-18）。
+///
+/// 检测本身按文件长短取 200 / 500，那份是"算建议"用的；写进 `_meta.json` 的只留
+/// 前 200 个 —— 报告页要的是"撞在哪一片"，不是逐点复刻（一份记录不该被几百个
+/// 坐标撑大，而 200 个点足够画出分布）。
+const CONFLICT_POINT_CAP: usize = 200;
+
+/// 轴对齐框（mm）—— 事实里的几何一律用它（camelCase 进 `_meta.json`）。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Box4 {
+    pub x_min: f64,
+    pub x_max: f64,
+    pub y_min: f64,
+    pub y_max: f64,
+}
+
+impl Box4 {
+    fn of(b: &GBBox) -> Self {
+        Self {
+            x_min: b.x_min,
+            x_max: b.x_max,
+            y_min: b.y_min,
+            y_max: b.y_max,
+        }
+    }
+}
+
+/// **画塔用的那几个参数**（2026-10-18）—— 不是句子，是几何。
+///
+/// 报告页拿它按参数页同一套算法画出塔的真实形状（塔身 / 斜肋 / 护套），
+/// 于是"图上这块"与"判据按这块算"是同一件事实的两个说法。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TowerShape {
+    /// `brim` / `rib` / `sheath`（`ir.wiping.outer_structure`）
+    pub outer_structure: String,
+    /// 塔身边长 mm（`TOWER_OUTER_BOUND - TOWER_INNER_BOUND`，与参数页同一个数）
+    pub body_mm: f64,
+    pub rib_width: f64,
+    pub rib_extra_length: f64,
+    pub rib_fillet_wall: bool,
+    pub sheath_base_expand: f64,
+}
+
+/// **碰撞事实**（2026-10-18）：撞的是谁、建议往哪挪多少、撞在哪、几何长什么样。
+///
+/// 只装**数据**与**已经渲染好的那句建议**（建议正文从 `messages.toml` 来，码在
+/// `advice_code`）—— 内核不认识"界面"，也不拼别的句子。上层（`src-tauri`）原样
+/// 落进 `_meta.json` 的 `collision` 一格。
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CollisionFacts {
+    /// 撞的是谁：`model` / `prime-tower` / `both` / `forbidden` / `wipe-tower-needed`
+    pub kind: &'static str,
+    /// 建议挪谁：`model` / `wipe-tower`
+    pub target: &'static str,
+    /// 方向（中文；算不出方向时是空串 —— 那时看 `target` 走"挪塔"那句）
+    pub direction: String,
+    pub required_move_x: f64,
+    pub required_move_y: f64,
+    pub conflict_count: i64,
+    /// 冲突点采样（mm，机器坐标；封顶 [`CONFLICT_POINT_CAP`]）
+    pub conflict_points: Vec<[f64; 2]>,
+    /// **判据用的塔包围盒**（含外围结构扩展；左下角 = `wiper_x` / `wiper_y`）
+    pub tower_bbox: Box4,
+    /// 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0 框，界面按 `kind` 判）
+    pub model_bbox: Box4,
+    /// 可打印区（机型 `min_x/max_x/min_y/max_y`）
+    pub printable: Box4,
+    pub tower: Option<TowerShape>,
+    /// 机型额外禁区（通常为空）
+    pub forbidden_zones: Vec<Vec<[f64; 2]>>,
+    /// 建议那句的**码**（`E_GCODE_COLLISION_002/003/004`）
+    pub advice_code: String,
+    /// 建议那句的**正文**（表里渲染好的，一个字都不在这里拼）
+    pub advice_text: String,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CollisionType {
@@ -47,6 +128,10 @@ pub struct CollisionResult {
     pub attempts: Vec<MoveAttempt>,
     /// 实际冲突点采样（调试/模拟用）
     pub conflict_points: Vec<[f64; 2]>,
+    /// **判据用的塔包围盒**（2026-10-18：要带出门给报告页画图，所以存下来）
+    pub tower_bbox: Option<GBBox>,
+    /// 模型挤出点的整体包围盒（禁区那一档没有）
+    pub model_bbox: Option<GBBox>,
 }
 
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
@@ -60,6 +145,7 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
 
     let tower_bbox = calculate_tower_collision_bbox(ir_data);
 
+    result.tower_bbox = Some(tower_bbox);
     let tower_poly: Polygon = vec![
         vec![tower_bbox.x_min, tower_bbox.y_min],
         vec![tower_bbox.x_max, tower_bbox.y_min],
@@ -81,6 +167,104 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
     }
 
     detect_tower_collision_all_layers(content, &tower_bbox, ir_data)
+}
+
+impl CollisionResult {
+    /// **把检测结论变成"能带出门"的一份事实**（2026-10-18）。
+    ///
+    /// 建议那句按 `collision_type` / `adjustment_target` 挑码，正文由 `messages.toml`
+    /// 渲染 —— 这里只给参数（方向 / X / Y），一个字都不拼。
+    pub fn facts(&self, ir: &Ir) -> CollisionFacts {
+        let kind = match self.collision_type {
+            CollisionType::None => "none",
+            CollisionType::Model => "model",
+            CollisionType::PrimeTower => "prime-tower",
+            CollisionType::Both => "both",
+            CollisionType::Forbidden => "forbidden",
+            CollisionType::WipeTowerNeeded => "wipe-tower-needed",
+        };
+        let target = match self.adjustment_target {
+            AdjustmentTarget::Model => "model",
+            AdjustmentTarget::WipeTower => "wipe-tower",
+        };
+        let (advice_code, advice_text) = self.advice();
+        CollisionFacts {
+            kind,
+            target,
+            direction: self.direction_cn.clone(),
+            required_move_x: self.required_move_x,
+            required_move_y: self.required_move_y,
+            conflict_count: self.conflict_count,
+            conflict_points: self
+                .conflict_points
+                .iter()
+                .take(CONFLICT_POINT_CAP)
+                .copied()
+                .collect(),
+            tower_bbox: self.tower_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
+            model_bbox: self.model_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
+            printable: Box4 {
+                x_min: ir.machine.min_x,
+                x_max: ir.machine.max_x,
+                y_min: ir.machine.min_y,
+                y_max: ir.machine.max_y,
+            },
+            tower: Some(TowerShape {
+                outer_structure: ir.wiping.outer_structure.clone(),
+                body_mm: TOWER_OUTER_BOUND - TOWER_INNER_BOUND,
+                rib_width: ir.rib.width,
+                rib_extra_length: ir.rib.extra_length,
+                rib_fillet_wall: ir.rib.fillet_wall,
+                sheath_base_expand: ir.sheath.base_expand,
+            }),
+            forbidden_zones: ir
+                .machine
+                .forbidden_zones
+                .iter()
+                .map(|zone| zone.iter().map(|p| [p[0], p[1]]).collect())
+                .collect(),
+            advice_code,
+            advice_text,
+        }
+    }
+
+    /// 建议那句：码 + 正文（正文由 `messages.toml` 渲染）。
+    ///
+    /// 三条，按 `collision_type` 分：禁区 ⇒ 挪塔（_004）；算得出方向 ⇒ 挪模型（_002）；
+    /// 三个候选方向都挪不开 ⇒ 改塔位置（_003）。
+    fn advice(&self) -> (String, String) {
+        /* 数字进模板要字符串（表里 `params` 那一档），一位小数够用 ——
+        建议里的"至少几毫米"本来就是取整过的 `ceil_to_01`。 */
+        let one_dp = |v: f64| format!("{:.1}", v.abs());
+        let (code, params): (&str, Vec<(&str, String)>) = match self.collision_type {
+            CollisionType::Forbidden => (
+                "E_GCODE_COLLISION_004",
+                vec![
+                    ("x", one_dp(self.required_move_x)),
+                    ("y", one_dp(self.required_move_y)),
+                ],
+            ),
+            CollisionType::WipeTowerNeeded => ("E_GCODE_COLLISION_003", Vec::new()),
+            _ => {
+                if self.adjustment_target == AdjustmentTarget::Model
+                    && !self.direction_cn.is_empty()
+                {
+                    (
+                        "E_GCODE_COLLISION_002",
+                        vec![
+                            ("direction", self.direction_cn.clone()),
+                            ("x", one_dp(self.required_move_x)),
+                            ("y", one_dp(self.required_move_y)),
+                        ],
+                    )
+                } else {
+                    ("E_GCODE_COLLISION_003", Vec::new())
+                }
+            }
+        };
+        let refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        (code.to_string(), crate::diag::messages::text(code, &refs))
+    }
 }
 
 /// `isExtrusionMove`：G0/G1/G2/G3 行含 " E" 且 rest 有 X/Y，NumStrip 取 [1]/[2]。
@@ -151,7 +335,11 @@ fn detect_tower_collision_all_layers(
     tower_bbox: &GBBox,
     ir_data: &Ir,
 ) -> CollisionResult {
-    let mut result = CollisionResult::default();
+    /* 判据用的塔框跟着结论一起出门（报告页画俯视图要它） */
+    let mut result = CollisionResult {
+        tower_bbox: Some(*tower_bbox),
+        ..CollisionResult::default()
+    };
 
     let mut processed_count: i64 = 0;
     let mut model_conflict_count: i64 = 0;
@@ -253,6 +441,14 @@ fn detect_tower_collision_all_layers(
 
     if has_model_collision || has_prime_tower_collision {
         result.has_collision = true;
+        if model_bbox_tracking {
+            result.model_bbox = Some(GBBox {
+                x_min: model_min_x,
+                x_max: model_max_x,
+                y_min: model_min_y,
+                y_max: model_max_y,
+            });
+        }
 
         let mut ref_bbox = GBBox::default();
         if has_model_collision {
@@ -518,6 +714,76 @@ mod tests {
         disabled.tower.use_towers = false;
         let r2 = detect_tower_collision(&content, &disabled);
         assert!(!r2.has_collision, "UseTowers=false 必须整体跳过检测");
+    }
+
+    /// **建议是跟着事实一起出门的**（2026-10-18，作者：「碰撞检测…移动的建议，
+    /// 我的旧版是有移动的建议的」）：命中那一趟必须带得出"往哪挪、至少几毫米"。
+    #[test]
+    fn a_collision_carries_the_move_advice() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "G1 X100 Y100 E0.5 ; 远离塔",
+            "G1 X30 Y30 E0.6 ; 塔内冲突点",
+            "G1 X120 Y120 E0.7",
+        ]);
+        let r = detect_tower_collision(&content, &ir);
+        assert!(r.has_collision);
+        assert!(!r.direction_cn.is_empty(), "得给出方向：{:?}", r);
+        assert!(
+            r.required_move_x > 0.0 || r.required_move_y > 0.0,
+            "得给出至少挪多少：{:?}",
+            r
+        );
+
+        let facts = r.facts(&ir);
+        assert_eq!(facts.kind, "model");
+        assert_eq!(facts.target, "model");
+        assert_eq!(facts.direction, r.direction_cn);
+        assert_eq!(facts.advice_code, "E_GCODE_COLLISION_002");
+        assert!(
+            facts.advice_text.contains(&facts.direction) && !facts.advice_text.contains('{'),
+            "建议那句要渲染好（不能有没填的占位符）：{}",
+            facts.advice_text
+        );
+        /* 俯视图要的几何：塔框（含外围扩展）、模型框、可打印区、冲突点 */
+        assert!(facts.tower_bbox.x_max > facts.tower_bbox.x_min);
+        assert!(facts.model_bbox.x_max > facts.model_bbox.x_min);
+        assert_eq!(facts.printable.x_max, 256.0);
+        assert!(!facts.conflict_points.is_empty());
+        assert!(
+            facts.conflict_points.len() <= 200,
+            "写进记录的冲突点要封顶：{}",
+            facts.conflict_points.len()
+        );
+        let tower = facts.tower.expect("画塔要的参数");
+        assert_eq!(tower.outer_structure, "brim");
+        assert!(
+            (tower.body_mm - 19.58).abs() < 1e-6,
+            "塔身边长：{}",
+            tower.body_mm
+        );
+    }
+
+    /// 禁区那一档：挪的是**塔**不是模型（建议句也不同 ⇒ 码不同）。
+    #[test]
+    fn a_forbidden_tower_advises_moving_the_tower() {
+        let mut ir = tower_ir();
+        ir.machine.forbidden_zones = vec![vec![
+            vec![22.0, 22.0],
+            vec![60.0, 22.0],
+            vec![60.0, 60.0],
+            vec![22.0, 60.0],
+        ]];
+        let r = detect_tower_collision(&lines(&["G1 X200 Y200 E0.5"]), &ir);
+        let facts = r.facts(&ir);
+        assert_eq!(facts.kind, "forbidden");
+        assert_eq!(facts.advice_code, "E_GCODE_COLLISION_004");
+        assert!(
+            facts.advice_text.contains("禁区"),
+            "禁区那句要说清是禁区：{}",
+            facts.advice_text
+        );
+        assert_eq!(facts.forbidden_zones.len(), 1);
     }
 
     /// 禁区命中：塔多边形与 ForbiddenZones 相交 → Forbidden 类型 + MTV 位移。

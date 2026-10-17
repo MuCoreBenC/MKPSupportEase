@@ -221,6 +221,15 @@ enum HookErrorKind {
 pub struct HookError {
     kind: HookErrorKind,
     reason: Reason,
+    /// **碰撞那一份事实**（2026-10-18；只有 `E_GCODE_COLLISION_001` 那一趟有）。
+    ///
+    /// 它不进文案、不进码 —— 是给执行记录那一格用的（报告页据此给建议 + 画俯视图）。
+    /// 别的失败一律 `None`（于是"这条失败记录有没有俯视图"是数据说了算）。
+    ///
+    /// ★ `Box`：这一份带几百个冲突点，内联会把 `HookError` 撑到几百字节 ——
+    /// 于是每个 `Result<Outcome, HookError>` 都跟着变大（clippy `result_large_err`
+    /// 当场红，内核那个 `PostprocError::Collision` 也是同一个原因装箱）。
+    collision: Option<Box<postprocess::postproc::disk::collision::CollisionFacts>>,
 }
 
 impl HookError {
@@ -228,6 +237,7 @@ impl HookError {
         Self {
             kind: HookErrorKind::BadInput,
             reason,
+            collision: None,
         }
     }
 
@@ -235,6 +245,7 @@ impl HookError {
         Self {
             kind: HookErrorKind::Failed,
             reason,
+            collision: None,
         }
     }
 
@@ -245,7 +256,14 @@ impl HookError {
         Self {
             kind: HookErrorKind::Cancelled,
             reason,
+            collision: None,
         }
+    }
+
+    /// 碰撞那一趟的事实（**只有** `E_GCODE_COLLISION_001` 会带）——
+    /// 报告页据此给"往哪挪多少"的建议并画俯视图。
+    pub fn collision(&self) -> Option<&postprocess::postproc::disk::collision::CollisionFacts> {
+        self.collision.as_ref().map(|b| b.as_ref())
     }
 
     pub fn exit_code(&self) -> u8 {
@@ -303,12 +321,16 @@ impl From<PostprocError> for HookError {
         match e {
             PostprocError::Cancelled { .. } => HookError::user_cancelled(),
             other => {
+                /* 碰撞那一份事实**原样搭过来**（它不在文案里，只能在转换这一层接住） */
+                let collision = other.collision_facts().cloned().map(Box::new);
                 let key = other.code();
                 let reason = other
                     .params()
                     .into_iter()
                     .fold(Reason::new(key), |r, (name, value)| r.with(name, value));
-                HookError::failed(reason)
+                let mut e = HookError::failed(reason);
+                e.collision = collision;
+                e
             }
         }
     }
@@ -557,6 +579,7 @@ pub fn run(
                 started_at,
                 started,
                 Vec::new(),
+                None,
             );
             return Err(err);
         }
@@ -617,6 +640,7 @@ pub fn run(
                         started,
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
+                        None,
                     );
                     return Err(err);
                 }
@@ -634,6 +658,7 @@ pub fn run(
                     started,
                     /* 管线还没进（停在机型那一问），没有步骤账 */
                     Vec::new(),
+                    None,
                 );
                 return Err(err);
             }
@@ -704,6 +729,7 @@ pub fn run(
                         started,
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
+                        None,
                     );
                     return Err(err);
                 }
@@ -749,6 +775,9 @@ pub fn run(
             } else {
                 PipelineStatus::Error
             });
+            /* 碰撞那一趟把"撞在哪 + 建议"一起归档（报告页据此给建议、画俯视图）；
+            别的失败 `None` —— 那一格照旧是 `null` */
+            let collision = e.collision().cloned();
             archive_failure(
                 &archived,
                 job,
@@ -759,6 +788,7 @@ pub fn run(
                 started_at,
                 started,
                 failed_pipeline,
+                collision,
             );
             return Err(e);
         }
@@ -978,6 +1008,8 @@ fn archive_success(
         error: None,
         cancelled: false,
         pipeline,
+        /* 成功那一趟没有碰撞事实（撞了就走不到这里）—— 这一格恒 `null` */
+        collision: None,
         detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
@@ -1004,6 +1036,8 @@ fn archive_failure(
     started: std::time::Instant,
     // 已经跑到的那几步（`StepRecorder` 记的账）。管线还没进（预设错 / 停在问句）就给空。
     pipeline: Vec<PipelineStep>,
+    // 碰撞那一趟的事实（`HookError::collision()`）—— 不是碰撞就是 `None`。
+    collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
 ) {
     let Some(paths) = archived else { return };
     let meta = Meta {
@@ -1023,6 +1057,7 @@ fn archive_failure(
         error: Some(error.to_string()),
         cancelled,
         pipeline,
+        collision,
         detail: Detail {
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,

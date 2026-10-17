@@ -39,6 +39,7 @@
 use std::io;
 
 use crate::diag::messages;
+use crate::postproc::disk::collision::CollisionFacts;
 
 /// 后处理错误。每个变体都必须能给出 `E_*_NNN` 形式的稳定错误码。
 ///
@@ -74,8 +75,14 @@ pub enum PostprocError {
 
     /// 碰撞检测命中（`disk.DetectTowerCollision`），`E_GCODE_COLLISION_001`。
     ///
-    /// **无字段**：这条从句子里唯一能拿到的东西是"命中了"，其余全是文案（表里那条）。
-    Collision,
+    /// `facts` 是**撞在哪 + 建议挪多少 + 画俯视图要的几何**（2026-10-18 才有：
+    /// 以前这一支无字段，用户只能读到"撞了"两个字，不知道往哪挪）。
+    /// 建议那句也在里面（码 + 表里渲好的正文），上层原样落进执行记录。
+    ///
+    /// ★ `Box`：**这一支的载荷大**（冲突点采样几百个 `[f64;2]`），直接内联会把整个
+    /// 枚举撑到几百字节 —— 于是每个 `Result<_, PostprocError>` 都跟着变大（clippy
+    /// `large_enum_variant` / `result_large_err` 当场红）。装箱之后变体回到指针大小。
+    Collision { facts: Box<CollisionFacts> },
 
     /// 校准生成/插入失败，`E_CAL_FAILED_001`。
     Calibration { message: String },
@@ -137,7 +144,7 @@ impl PostprocError {
             Self::TomlParse { .. } => "E_TOML_PARSE_001",
             Self::MissingMachine { .. } => "E_CFG_PARSE_001",
             Self::InvalidConfig { .. } => "E_CFG_INVALID_001",
-            Self::Collision => "E_GCODE_COLLISION_001",
+            Self::Collision { .. } => "E_GCODE_COLLISION_001",
             Self::Calibration { .. } => "E_CAL_FAILED_001",
             Self::CalibrationMismatch { code, .. } => code,
             Self::Processing { .. } => "E_GCODE_FAILED_001",
@@ -165,7 +172,7 @@ impl PostprocError {
             }
             Self::MissingMachine { path } => vec![("path", path.clone())],
             Self::InvalidConfig { message } => vec![("detail", message.clone())],
-            Self::Collision => Vec::new(),
+            Self::Collision { .. } => Vec::new(),
             Self::Calibration { message } => vec![("detail", message.clone())],
             Self::CalibrationMismatch { message, .. } => vec![("diagnostics", message.clone())],
             Self::Processing { message } => vec![("detail", message.clone())],
@@ -182,6 +189,17 @@ impl PostprocError {
     /// "这句话是从表里来的"。
     pub fn body(&self) -> String {
         self.to_string()
+    }
+
+    /// **碰撞那一份事实**（2026-10-18）：只有 `Collision` 这一支有。
+    ///
+    /// 上层（钩子）拿它写进执行记录的 `collision` 一格；别的错误一律 `None`
+    /// （于是"失败记录有没有俯视图"是数据说了算，不是某一层 if 说了算）。
+    pub fn collision_facts(&self) -> Option<&CollisionFacts> {
+        match self {
+            Self::Collision { facts } => Some(facts.as_ref()),
+            _ => None,
+        }
     }
 }
 
@@ -231,7 +249,9 @@ mod tests {
             PostprocError::InvalidConfig {
                 message: "bad".into(),
             },
-            PostprocError::Collision,
+            PostprocError::Collision {
+                facts: Box::new(CollisionFacts::default()),
+            },
             PostprocError::Calibration {
                 message: "cal".into(),
             },
@@ -341,7 +361,13 @@ mod tests {
             .code(),
             "E_FS_NOT_FOUND_001"
         );
-        assert_eq!(PostprocError::Collision.code(), "E_GCODE_COLLISION_001");
+        assert_eq!(
+            PostprocError::Collision {
+                facts: Box::new(CollisionFacts::default())
+            }
+            .code(),
+            "E_GCODE_COLLISION_001"
+        );
     }
 
     /// NotFound 分流：同一个 Io 变体按 io::ErrorKind 给出不同码。

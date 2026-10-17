@@ -487,9 +487,13 @@ fn run(
     if crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
         if collision.has_collision {
-            /* 无字段：码是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码
-            拼进正文，用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`） */
-            return Err(PostprocError::Collision);
+            /* 码仍是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码拼进正文，
+            用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`）。
+            **2026-10-18**：这一支带上"撞在哪 + 建议挪多少 + 俯视图几何"，
+            让报告页能回答"挪多少、撞在哪"，不再只有"撞了"两个字。 */
+            return Err(PostprocError::Collision {
+                facts: Box::new(collision.facts(&ir)),
+            });
         }
     }
 

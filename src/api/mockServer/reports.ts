@@ -361,6 +361,8 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
       treeSupport: false,
       useDiskWipe: false,
     },
+    /* 真机夹具里没有碰撞那一趟（那条记录是别的失败）⇒ 恒 null */
+    collision: null,
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',
@@ -461,6 +463,8 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
           useDiskWipe: false,
         }
       : null,
+    /* 同上：夹具照真机，碰撞那一格没有就是 null（预览里那两块整组不摆） */
+    collision: null,
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',

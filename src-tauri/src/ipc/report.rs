@@ -113,6 +113,10 @@ pub struct ReportDetail {
     pub slicer: Option<serde_json::Value>,
     /// 管线各步计时（`pipeline`：id / elapsedMs / message / status）
     pub pipeline: Vec<serde_json::Value>,
+    /// **碰撞那一趟的事实**（`_meta.json` 顶层 `collision`，2026-10-18）——
+    /// 只有 `E_GCODE_COLLISION_001` 会写：撞在哪、建议往哪挪多少、画俯视图的几何。
+    /// 别的记录一律 `null`（原样透传，不在这一层挑字段）。
+    pub collision: Option<serde_json::Value>,
     pub warnings: Vec<String>,
     /// 调用现场（exe + argv）—— 复制脚本 / 排查对不上时看它
     pub invocation: Option<serde_json::Value>,
@@ -308,6 +312,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
                     .collect()
             })
             .unwrap_or_default(),
+        collision: meta.get("collision").cloned(),
         invocation: meta.get("invocation").cloned(),
         preset_path: str_at("presetPath"),
         gcode_path: str_at("gcodePath"),
