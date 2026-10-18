@@ -110,6 +110,24 @@ function devPostProcessRun(): PostProcessRun | null {
             { xMin: 40, xMax: 96, yMin: 26, yMax: 58 },
             { xMin: 52, xMax: 90, yMin: 62, yMax: 88 },
           ],
+          /* 俯视图画轮廓（真机由内核算凸包；这里演两件不规则的） */
+          modelPolygons: [
+            [
+              [40, 26],
+              [70, 22],
+              [96, 30],
+              [94, 58],
+              [56, 58],
+              [40, 44],
+            ],
+            [
+              [52, 62],
+              [72, 60],
+              [90, 64],
+              [90, 88],
+              [52, 88],
+            ],
+          ],
           printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
           tower: {
             outerStructure: 'brim',

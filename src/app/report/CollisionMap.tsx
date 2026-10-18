@@ -155,6 +155,19 @@ export default function CollisionMap({
     frame.y + (frame.h - (y - bed.y)),
   ]
 
+  /*
+   * 模型轮廓（2026-10-18 作者：「能不能真的做成俯视图，多边形的，可以用 12 边形，
+   * 或者 24 边形」）—— 内核按占用格连通块切好、交给的是凸包（≤24 边）。
+   * 空 / 旧记录 ⇒ 下面退回 `modelRects` 的矩形。
+   */
+  const modelPolys = (collision.modelPolygons ?? [])
+    .map((poly) =>
+      poly
+        .filter((p): p is [number, number] => Array.isArray(p) && p.length === 2)
+        .map(([x, y]) => bedPt(x, y)),
+    )
+    .filter((poly) => poly.length >= 3)
+
   const towerShape = collision.tower ?? null
   const bodyMm = towerShape?.bodyMm ?? tower.w
   /*
@@ -311,15 +324,24 @@ export default function CollisionMap({
         )
       })}
 
-      {/* 模型包围盒（另一种颜色 + 虚线：一眼和塔分开）。
-          ★ 一个模型一个框（2026-10-18 作者：「做出来，分开的独立的包围盒」）——
-            内核按占用格的连通块切好了；旧记录没有这一格 ⇒ 退回整体那一个框。 */}
-      {modelRects.map((b, i) => {
-        const [lx, ty] = bedPt(b.x, b.y + b.h)
-        return (
-          <rect key={`m${i}`} className={s.model} x={lx} y={ty} width={b.w} height={b.h} />
-        )
-      })}
+      {/* 模型轮廓（另一种颜色 + 虚线：一眼和塔分开）。
+          ★ **一个模型一块轮廓**，不是矩形（2026-10-18 作者：「图片的都是矩形的看着好像
+            碰撞了一样，能不能真的做成俯视图，多边形的」）——矩形四个角会把模型旁边的空
+            算进去。内核给的是凸包（≤24 边）；旧记录没有这一格 ⇒ 退回矩形。 */}
+      {modelPolys.length > 0
+        ? modelPolys.map((poly, i) => (
+            <polygon
+              key={`mp${i}`}
+              className={s.model}
+              points={poly.map(([x, y]) => `${x},${y}`).join(' ')}
+            />
+          ))
+        : modelRects.map((b, i) => {
+            const [lx, ty] = bedPt(b.x, b.y + b.h)
+            return (
+              <rect key={`m${i}`} className={s.model} x={lx} y={ty} width={b.w} height={b.h} />
+            )
+          })}
 
       {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上） */}
       <rect
@@ -517,7 +539,7 @@ export default function CollisionMap({
         </li>
         <li>
           <span className={s.swModel} aria-hidden="true" />
-          模型包围盒
+          模型轮廓
         </li>
         <li>
           <span className={s.swHit} aria-hidden="true" />

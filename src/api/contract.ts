@@ -151,6 +151,12 @@ export interface ReportCollision {
    * 旧记录 / 没算这一档 ⇒ `undefined` 或空数组，界面退回 `modelBbox` 那一个框。
    */
   modelBoxes?: ReportBox4[]
+  /**
+   * **每个模型各自的轮廓**（凸包，≤24 边，机器坐标）。俯视图画的是它 ——
+   * 矩形四个角会把模型旁边的空算进去，看着像早就撞上了。
+   * 空 / 缺这一格（旧记录、稀疏块）⇒ 界面退回 `modelBoxes` 的矩形。
+   */
+  modelPolygons?: [number, number][][]
   /** 可打印区 */
   printable?: ReportBox4
   /** 画塔真实形状要的参数（与参数页同一套算法） */

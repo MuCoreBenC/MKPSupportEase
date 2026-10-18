@@ -85,6 +85,12 @@ pub struct CollisionFacts {
     /// **每个模型各自的包围盒**（2026-10-18）：按占用格连通块切出来的，图上画成
     /// 一个个框。空数组 = 旧记录 / 这一档没算（界面退回 `model_bbox`）。
     pub model_boxes: Vec<Box4>,
+    /// **每个模型各自的轮廓**（凸包，≤24 边；机器坐标，同一块里的点）。
+    ///
+    /// 俯视图画的是它 —— 矩形四个角会把模型旁边的空算进去，看着像早就撞上了。
+    /// 空数组（旧记录 / 稀疏到不足 3 个点）⇒ 界面退回 `model_boxes` 的矩形。
+    #[serde(default)]
+    pub model_polygons: Vec<Vec<[f64; 2]>>,
     /// 可打印区外接框（mm，机器坐标）：**gcode 里切片器写下的 `; printable_area` 优先**
     /// （[`printable_area_of`]），gcode 没写才退回机型 toml 的 `min_x…max_y`
     pub printable: Box4,
@@ -192,6 +198,8 @@ pub struct CollisionResult {
     /// **每个模型各自的包围盒**（按占用格的连通块算；报告页画成一个个框）。
     /// `model_bbox` 仍然保留：它是"整体一块"，给"挪模型"的建议方向用。
     pub model_boxes: Vec<GBBox>,
+    /// **每个模型各自的轮廓**（凸包，≤24 边）—— 俯视图画的是它，矩形只是兜底
+    pub model_polygons: Vec<Vec<[f64; 2]>>,
     /// 避让用的**占用格**（板内挤出点，2mm 一格）—— 自动摆塔按它判"会不会压到东西"。
     /// 不进 `facts`（那是对外形状），只在这一层用。
     pub occupancy: Occupancy,
@@ -301,18 +309,14 @@ impl Occupancy {
         false
     }
 
-    /// **每个模型各自的包围盒**（2026-10-18 作者：「看起来确实不是大包围盒，那你需要
-    /// 做出来，分开的独立的包围盒」）。
-    ///
-    /// 按占用格的**四连通块**算：一个模型哪怕分成很多层，它的挤出点在 2mm 格上连成
-    /// 一片 ⇒ 一块；两个模型中间隔着空 ⇒ 两块。于是图上画出来的是一台台模型，
-    /// 而不是把它们兜在一起的大方框。
+    /// 把占用格切成**四连通块**（每块 = 一个模型：点密到连成一片 ⇒ 同一件东西；
+    /// 中间隔着空 ⇒ 两件）。返回每块占的格子坐标。
     ///
     /// 单格也算一块（一个孤立的挤出点仍是板上的一件东西；真实切片里基本见不到 ——
     /// 一份 gcode 的点密到"每个模型一大片连通"，这里不额外过滤，宁可多画一个 2mm 小框，
     /// 也不许把"稀疏但真实"的样例切成零个框）。
-    pub fn boxes(&self) -> Vec<GBBox> {
-        let mut out = Vec::new();
+    fn components(&self) -> Vec<Vec<(usize, usize)>> {
+        let mut out: Vec<Vec<(usize, usize)>> = Vec::new();
         if self.bits.is_empty() {
             return out;
         }
@@ -326,12 +330,9 @@ impl Occupancy {
                 }
                 seen[idx] = true;
                 stack.push((cx, cy));
-                let (mut x0, mut x1, mut y0, mut y1) = (cx, cx, cy, cy);
+                let mut cells = Vec::new();
                 while let Some((x, y)) = stack.pop() {
-                    x0 = x0.min(x);
-                    x1 = x1.max(x);
-                    y0 = y0.min(y);
-                    y1 = y1.max(y);
+                    cells.push((x, y));
                     let neighbours = [
                         (x.wrapping_sub(1), y),
                         (x + 1, y),
@@ -349,16 +350,90 @@ impl Occupancy {
                         }
                     }
                 }
-                out.push(GBBox {
-                    x_min: self.origin_x + x0 as f64 * self.cell,
-                    x_max: self.origin_x + (x1 as f64 + 1.0) * self.cell,
-                    y_min: self.origin_y + y0 as f64 * self.cell,
-                    y_max: self.origin_y + (y1 as f64 + 1.0) * self.cell,
-                });
+                out.push(cells);
             }
         }
         out
     }
+
+    /// 格子中心（机器坐标）
+    fn cell_center(&self, (cx, cy): (usize, usize)) -> [f64; 2] {
+        [
+            self.origin_x + (cx as f64 + 0.5) * self.cell,
+            self.origin_y + (cy as f64 + 0.5) * self.cell,
+        ]
+    }
+
+    /// **每个模型各自的包围盒**（2026-10-18 作者：「看起来确实不是大包围盒，那你需要
+    /// 做出来，分开的独立的包围盒」）。图上优先画 [`Self::polygons`]；这个是兜底与
+    /// "整块在不在板内"那类判据用。
+    pub fn boxes(&self) -> Vec<GBBox> {
+        self.components()
+            .iter()
+            .map(|cells| {
+                let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+                for &(x, y) in cells {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                }
+                GBBox {
+                    x_min: self.origin_x + x0 as f64 * self.cell,
+                    x_max: self.origin_x + (x1 as f64 + 1.0) * self.cell,
+                    y_min: self.origin_y + y0 as f64 * self.cell,
+                    y_max: self.origin_y + (y1 as f64 + 1.0) * self.cell,
+                }
+            })
+            .collect()
+    }
+
+    /// **每个模型各自的轮廓**（2026-10-18 作者：「能不能真的做成俯视图，多边形的，
+    /// 可以用 12 边形，或者 24 边形」）。
+    ///
+    /// 外接矩形的四个角会把"模型旁边的空"也算进去 —— 图上看着像早就撞上了。
+    /// 这里交的是这一块点的**凸包**（保证包住全部点：碰撞示意图不许比真实占地小），
+    /// 顶点超过 [`MODEL_POLY_MAX_POINTS`] 时按"最没信息量的那个角"逐个削掉。
+    ///
+    /// 少于 3 个顶点的块（一两个孤点）不画多边形 —— 交给 `boxes()` 那个小矩形。
+    pub fn polygons(&self) -> Vec<Vec<[f64; 2]>> {
+        self.components()
+            .iter()
+            .map(|cells| {
+                let points: Vec<[f64; 2]> = cells.iter().map(|&c| self.cell_center(c)).collect();
+                simplify_polygon(crate::postproc::disk::wipe::convex_hull(&points))
+            })
+            .filter(|poly| poly.len() >= 3)
+            .collect()
+    }
+}
+
+/// 模型轮廓最多几条边（作者给的上限：12 或 24 —— 取细的那一档，
+/// 既不像矩形，也不至于把 2mm 格网的锯齿全画出来）
+const MODEL_POLY_MAX_POINTS: usize = 24;
+
+/// 顶点过多时逐个削掉"面积贡献最小"的那个（Visvalingam）。
+///
+/// 为什么不是等距采样：等距会把尖角（模型的鼻子、爪子）削平，而"看着像撞了"正是
+/// 那个角造成的 —— 削最平的角，形状才留得住。
+fn simplify_polygon(mut poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    while poly.len() > MODEL_POLY_MAX_POINTS {
+        let n = poly.len();
+        let mut worst = 1usize;
+        let mut worst_area = f64::INFINITY;
+        for i in 1..n - 1 {
+            let a = poly[i - 1];
+            let b = poly[i];
+            let c = poly[i + 1];
+            let area = ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])).abs();
+            if area < worst_area {
+                worst_area = area;
+                worst = i;
+            }
+        }
+        poly.remove(worst);
+    }
+    poly
 }
 
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
@@ -511,6 +586,7 @@ impl CollisionResult {
             tower_bbox: self.tower_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
             model_bbox: self.model_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
             model_boxes: self.model_boxes.iter().map(Box4::of).collect(),
+            model_polygons: self.model_polygons.clone(),
             printable: self.printable.unwrap_or(Box4 {
                 x_min: ir.machine.min_x,
                 x_max: ir.machine.max_x,
@@ -1865,6 +1941,74 @@ mod tests {
         assert!(
             has(60.0, 62.0, 4.0, 6.0),
             "孤点自己一个 2mm 小框：{boxes:?}"
+        );
+    }
+
+    /// 多边形面积（鞋带公式；测试里量"轮廓比外接矩形瘦多少"）
+    fn polygon_area(poly: &[[f64; 2]]) -> f64 {
+        let n = poly.len();
+        let mut sum = 0.0;
+        for i in 0..n {
+            let a = poly[i];
+            let b = poly[(i + 1) % n];
+            sum += a[0] * b[1] - b[0] * a[1];
+        }
+        sum / 2.0
+    }
+
+    /// **俯视图画轮廓，不画矩形**（2026-10-18 作者：「能不能真的做成俯视图，多边形的，
+    /// 可以用 12 边形，或者 24 边形」）。
+    ///
+    /// 一条圆环点云：矩形框会比它大一圈（"看着像撞了"正是这么来的），凸包贴得住；
+    /// 顶点要削到 24 以内，而且**不许比真实占地小**。
+    #[test]
+    fn model_outlines_are_polygons_not_boxes() {
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 80.0,
+            y_min: 0.0,
+            y_max: 80.0,
+        };
+        let mut occ = Occupancy::new(&bed, 2.0);
+        /* 一个实心圆盘（半径 20mm）：4 连通的一块，轮廓该是 24 边形而不是方框 */
+        for cy in 0..40 {
+            for cx in 0..40 {
+                let (x, y) = (cx as f64 * 2.0, cy as f64 * 2.0);
+                if (x - 40.0).powi(2) + (y - 40.0).powi(2) <= 400.0 {
+                    occ.mark(x, y);
+                }
+            }
+        }
+        let polys = occ.polygons();
+        assert_eq!(polys.len(), 1, "一个圆盘 = 一块");
+        let poly = &polys[0];
+        assert!(poly.len() >= 3, "不到三个点画不成多边形：{poly:?}");
+        assert!(poly.len() <= 24, "顶点要削到 24 以内，实际 {}", poly.len());
+
+        let mut x0 = f64::MAX;
+        let mut x1 = f64::MIN;
+        let mut y0 = f64::MAX;
+        let mut y1 = f64::MIN;
+        for p in poly {
+            x0 = x0.min(p[0]);
+            x1 = x1.max(p[0]);
+            y0 = y0.min(p[1]);
+            y1 = y1.max(p[1]);
+        }
+        for cells in occ.components() {
+            for cell in cells {
+                let [x, y] = occ.cell_center(cell);
+                assert!(
+                    x >= x0 - 1e-6 && x <= x1 + 1e-6 && y >= y0 - 1e-6 && y <= y1 + 1e-6,
+                    "轮廓不许比真实占地小：点 ({x},{y}) 在框外"
+                );
+            }
+        }
+        let rect = (x1 - x0) * (y1 - y0);
+        let area = polygon_area(poly).abs();
+        assert!(
+            area < rect * 0.9,
+            "圆形轮廓该明显小于外接矩形（这才叫俯视图）：{area} vs {rect}"
         );
     }
 
