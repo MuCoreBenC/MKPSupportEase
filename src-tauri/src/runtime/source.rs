@@ -38,8 +38,9 @@
 //! "当前用哪个远端"有两个来源，语义**故意不同**：
 //!
 //! ```text
-//! 手动覆盖（设置页 → 高级设置）  = 交付目录或 source.json 地址
-//!                                 （开发 / 排查通道：本地 http.server、自建镜像…）
+//! 手动覆盖（设置页 → 高级设置）  = 交付目录 / source.json 地址 / 仓库·分支页
+//!                                 （开发 / 排查通道：本地 http.server、自建镜像、
+//!                                   自己那一支还没合的预设数据…）
 //! 内置（构建期注入）            = 一个 Bootstrap 地址：指向 source.json，
 //!                                 由它声明寻址规则
 //!                                 （正式通道：换部署位置只改 source.json，客户端不重发）
@@ -95,18 +96,24 @@ const DEFAULT_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE");
 ///   没注入就不出现在界面里（不硬编一个地址进来：那会把"部署在哪"这件事写死在客户端）。
 const GITEE_BASE_URL: Option<&str> = option_env!("MKPSE_PRESET_SOURCE_GITEE");
 
-/// 自定义源的**两种形状**（作者 2026-10-05 真机踩出来的）。
+/// 自定义源的**三种形状**（作者 2026-10-05 / 2026-10-18 两次真机踩出来的）。
 ///
 /// ```text
-/// 交付目录        https://host/presets/delivery/          目录下就有 source.json
-/// Bootstrap       https://host/presets/delivery/source.json  寻址规则声明
+/// 交付目录        https://host/presets/delivery/              目录下就有 source.json
+/// Bootstrap       https://host/presets/delivery/source.json   寻址规则声明
+/// 仓库 / 分支页   https://github.com/<o>/<r>/tree/<分支>       按仓库约定找 presets/delivery
 /// ```
 ///
-/// ★ **同一个"云端地址"，用户十有八九会填后者**（他们看到的就是这个 `source.json` 地址）。
-/// 自 Source Manifest v2 起**两种形状殊途同归**：最终都读 `{交付目录}/source.json`
-/// （寻址规则只住这一份文件，"直接读 catalog.json"的第三种读法已废 —— 没有 Manifest
-/// 就没有 `filesRoot`，客户端只能靠猜，那正是要消灭的）。形状的区别只剩
-/// "用户填的是目录还是文件"，记在盘上只为省一次探测。
+/// ★ **同一个"云端地址"，用户十有八九会填后两种**（他们看到的就是 `source.json`
+/// 那个文件、或者网页上挑好分支的那一页）。自 Source Manifest v2 起前两种殊途同归：
+/// 最终都读 `{交付目录}/source.json`（寻址规则只住这一份文件，"直接读 catalog.json"
+/// 的第三种读法已废 —— 没有 Manifest 就没有 `filesRoot`，客户端只能靠猜，那正是要
+/// 消灭的）。形状的区别只剩"用户当初填的是哪一种"，记在盘上只为省一次探测。
+///
+/// ★ **第三种是唯一需要"猜路径"的一种**（作者 2026-10-18：「我之前要做的一个功能
+/// 就是支持分支」）：他贴的是分支页，不是交付目录 —— 那就按**仓库约定**
+/// （[`REPO_DELIVERY_DIR`]）往下找。只对 `github.com` / `gitee.com` 的网页地址猜，
+/// 自建源与 raw 地址一律不动。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CustomShape {
@@ -117,6 +124,9 @@ pub enum CustomShape {
     Root,
     /// 用户填的就是 `source.json` 地址（原样读）
     Bootstrap,
+    /// 用户填的是**仓库页 / 分支页**（`…/tree/<ref>`）：按仓库约定到
+    /// [`REPO_DELIVERY_DIR`] 下读 `source.json`（ref 由他填的那条 URL 决定）
+    Repo,
 }
 
 /// 用户在三个值里选哪一个（盘上就存这个）。
@@ -188,12 +198,33 @@ pub struct PresetSource {
     pub source_schema: u32,
     /// 用户选了哪一个（`gitee` / `github` / `custom`）
     pub mode: SourceMode,
-    /// `mode = custom` 时的那份地址（其余模式为 `null`）
+    /// `mode = custom` 时的那份地址（其余模式为 `null`）—— **用户填的那一份**，
+    /// 界面显示它、跳转也用它（他填的是分支页，就该看见分支页）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_url: Option<String>,
     /// 自定义那份地址是**哪种形状**（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）
     #[serde(default)]
     pub custom_shape: CustomShape,
+    /// 探通之后**实际读到 `source.json` 的那一份地址**（`custom` 才有）。
+    ///
+    /// ★ 为什么把"探出来的结果"也存下来：用户贴的可能是仓库 / 分支页
+    ///   （`…/tree/<ref>`），真正能读的那一份在 `presets/delivery/` 下面。只存
+    ///   "形状 + 用户输入"就等于**再推一遍**，而推导是第二套判据 —— 推错一次
+    ///   就是"设置页看着成、重启之后静默失灵"（2026-10-18 就是这一处没做好）。
+    ///   存下它，解析时只有一个事实：**从这一份读的**。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_resolved: Option<String>,
+}
+
+impl PresetSource {
+    /// 把"探通的那一份"钉在设置上（只有 `custom` 用得上）。
+    ///
+    /// 地址与 `custom_url` 一样过 [`normalize_base_url`]（只认 http(s)、去尾斜杠）：
+    /// 它要交给下载栈，不能被塞进 `file://` 之类的东西。
+    pub fn with_resolved(mut self, url: &str) -> Result<Self, AppError> {
+        self.custom_resolved = Some(normalize_base_url(url)?);
+        Ok(self)
+    }
 }
 
 /// 当前这一台机器的"远端入口"（覆盖优先，见模块头）。
@@ -203,8 +234,14 @@ pub enum SourceEntry {
     /// 开发 / 排查通道（本地 http.server、自建镜像、另一个云端源…）。
     ///
     /// ★ `shape` 是探出来的那一种（[`CustomShape::Unset`] = 还没探过 → 运行时自适应）：
-    /// **同一个地址两种读法**（目录 / `source.json`）都能认，见 [`probe_custom_shape`]。
-    Custom { url: String, shape: CustomShape },
+    /// **同一个地址几种读法**（目录 / `source.json` / 仓库页）都能认，见 [`probe_custom`]。
+    /// ★ `resolved` = 探通之后**实际读的那一份**（新档都有）。有它就直接读它 ——
+    /// 不再按形状重推（重推是第二套判据，2026-10-18 的分支页就是栽在那儿）。
+    Custom {
+        url: String,
+        shape: CustomShape,
+        resolved: Option<String>,
+    },
     /// 构建期注入：**Bootstrap 地址** —— 指向 `source.json`，
     /// 由它声明寻址规则。正式通道
     Bootstrap { url: String },
@@ -286,6 +323,8 @@ fn read_v1(bytes: &[u8]) -> Result<Option<PresetSource>, AppError> {
         // ★ 老档**没探过形状** → `Unset` → 运行时自适应（先目录后 Bootstrap）。
         //   0.0.2 之前用户手填 `source.json` 地址的那些档，就是这样被救回来的。
         custom_shape: CustomShape::Unset,
+        // 老档没记过"实际读的那一份" ⇒ 解析时按形状重推（那时只有两种形状，推得回来）
+        custom_resolved: None,
     }))
 }
 
@@ -322,6 +361,9 @@ pub fn make_source(
         } else {
             CustomShape::Unset
         },
+        // "实际读的那一份"由 [`PresetSource::with_resolved`] 在探通之后补上 ——
+        // 构造的时候还没有事实，不能编一个（编了就是两套判据）
+        custom_resolved: None,
     })
 }
 
@@ -346,20 +388,13 @@ fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
     )
 }
 
-/// **这个地址可能是哪一个文件**（纯函数，判据钉它）。
-///
-/// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
-///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
-///   （2026-10-05 真机：手动指定"云端地址"反而不通，就是这一处）。
-/// 所以：**原样先试**，不成再在目录上补文件名。返回值带上"命中它该记哪个形状"。
-/// 把**人从浏览器地址栏复制来的仓库网页地址**转成"交付根那一层的 raw 地址"。
+/// 缺省分支 —— 与工作台 `delivery::DEFAULT_REF` 同一个值（`main`）。
+const DEFAULT_REF: &str = "main";
+
+/// 把**人从浏览器地址栏复制来的仓库网页地址**转成 `(raw 交付根, 是不是网页版文件页)`。
 ///
 /// 2026-10-16（作者：「是客户端的那个填自定义的里面呀，我可以自己填哪个就是哪个呀
 /// <https://github.com/MuCoreBenC/MKPSupportEase/tree/feat/dark-mode> 比如我粘贴的就是这样的」）。
-///
-/// 客户端的「自定义地址」原先是**只认交付根 / `source.json` 两种形状**的 —— 用户贴一个
-/// 仓库页 / 分支页，只会得到"读不到寻址规则声明"。可那是人手里最常见的东西
-/// （在网页上挑好分支、复制地址栏），所以这里补一步**认网页地址**：
 ///
 /// | 输入 | 转成 |
 /// | --- | --- |
@@ -368,15 +403,19 @@ fn real_fetch(url: &str, what: &str) -> Result<Vec<u8>, AppError> {
 /// | `https://github.com/<o>/<r>/tree/<ref>/<path…>` | `…/<ref>/<path…>`（人指到哪就带到哪） |
 /// | `https://gitee.com/<o>/<r>[/tree/<ref>[/…]]` | `https://gitee.com/<o>/<r>/raw/<ref>[/…]` |
 /// | `…/blob/<ref>/<file>`（网页版文件页） | 对应的 raw 文件地址 |
-/// | 已经是 raw / 别的 host | **原样**（自建源那条路不动） |
+/// | 已经是 raw / 别的 host | `None` —— 调用方原样用（自建源那条路一步都不动） |
 ///
+/// ★ 第二个分量 = "这一页指的是一个**文件**"（blob 页）。文件页不参与按仓库约定
+///   找交付目录 —— 他就指着那一份。
+/// ★ `tree/` 后面**不能**假设第一段就是 ref：分支名自己可以带斜杠
+///   （`feat/dark-mode`），与"ref + 子目录"在 URL 上**长得一模一样**，
+///   所以两条解释都要留给候选表（见 [`bootstrap_candidates`]）。
 /// ★ 缺省 ref 用 `main`（与工作台 `delivery::DEFAULT_REF`、客户端内置源同一条）。
-/// ★ 只认 `github.com` / `gitee.com` 两个 host 的**网页形状**：别的 host 一律原样返回，
-///   把判断留给 [`bootstrap_candidates`]（自建源不许被这里改坏）。
-fn web_url_to_raw_base(url: &str) -> String {
+/// ★ 只认 `github.com` / `gitee.com` 两个 host 的**网页形状**。
+fn web_url_to_raw(url: &str) -> Option<(String, bool)> {
     let trimmed = url.trim().trim_end_matches('/');
 
-    let convert = |rest: &str, host: &str| -> Option<String> {
+    let convert = |rest: &str, host: &str| -> Option<(String, bool)> {
         let parts: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
         if parts.len() < 2 {
             return None;
@@ -387,45 +426,35 @@ fn web_url_to_raw_base(url: &str) -> String {
         if parts.get(2) == Some(&"raw") {
             return None;
         }
-        if host == "gitee.com" {
-            let after = if parts.get(2) == Some(&"tree") {
-                /* tree/<ref>[/path…] */
-                if parts.len() >= 4 {
-                    format!("{}/{}", parts[3], parts[4..].join("/"))
-                } else {
-                    DEFAULT_REF.to_owned()
-                }
-            } else {
-                DEFAULT_REF.to_owned()
-            };
-            return Some(format!(
-                "https://gitee.com/{owner}/{repo}/raw/{}",
-                after.trim_end_matches('/')
-            ));
-        }
-        /* GitHub：raw 住在另一个域名上 */
-        let after = match parts.get(2) {
-            Some(&"tree") => {
-                if parts.len() >= 4 {
-                    format!("{}/{}", parts[3], parts[4..].join("/"))
-                } else {
-                    DEFAULT_REF.to_owned()
-                }
-            }
+        /* `after` = ref[/path…]；`is_file` = 网页版文件页（blob） */
+        let (after, is_file) = match parts.get(2) {
+            Some(&"tree") => match parts.len() {
+                4 => (parts[3].to_owned(), false),
+                n if n > 4 => (format!("{}/{}", parts[3], parts[4..].join("/")), false),
+                _ => (DEFAULT_REF.to_owned(), false),
+            },
             Some(&"blob") => {
                 /* blob/<ref>/<file…> ⇒ 按人指的那一份转（与工作台同一条） */
                 if parts.len() >= 5 {
-                    parts[3..].join("/")
+                    (parts[3..].join("/"), true)
                 } else {
-                    DEFAULT_REF.to_owned()
+                    (DEFAULT_REF.to_owned(), true)
                 }
             }
-            _ => DEFAULT_REF.to_owned(),
+            _ => (DEFAULT_REF.to_owned(), false),
         };
-        Some(format!(
-            "https://raw.githubusercontent.com/{owner}/{repo}/{}",
-            after.trim_end_matches('/')
-        ))
+        let base = if host == "gitee.com" {
+            format!(
+                "https://gitee.com/{owner}/{repo}/raw/{}",
+                after.trim_end_matches('/')
+            )
+        } else {
+            format!(
+                "https://raw.githubusercontent.com/{owner}/{repo}/{}",
+                after.trim_end_matches('/')
+            )
+        };
+        Some((base, is_file))
     };
 
     for host in ["github.com", "gitee.com"] {
@@ -435,26 +464,68 @@ fn web_url_to_raw_base(url: &str) -> String {
                 .and_then(|r| r.strip_prefix(&format!("{host}/")))
             {
                 if let Some(out) = convert(rest, host) {
-                    return out;
+                    return Some(out);
                 }
             }
         }
     }
-    trimmed.to_owned()
+    None
 }
 
-/// 缺省分支 —— 与工作台 `delivery::DEFAULT_REF` 同一个值（`main`）。
-const DEFAULT_REF: &str = "main";
+/// 只要 raw 交付根的那一份（不是网页地址就原样：去首尾空白、去尾斜杠）。
+fn web_url_to_raw_base(url: &str) -> String {
+    web_url_to_raw(url)
+        .map(|(base, _)| base)
+        .unwrap_or_else(|| url.trim().trim_end_matches('/').to_owned())
+}
 
+/// 仓库里交付根的**约定位置**。
+///
+/// ★ 只有一种输入需要它：用户贴的是**仓库页 / 分支页**（`…/tree/<ref>`）—— 他指到了
+///   "哪一支"，没指到"交付目录"。这是客户端**唯一**一处"按约定猜路径"，
+///   而且只对 `github.com` / `gitee.com` 的网页地址猜（自建源、raw 地址一律不猜）。
+/// ★ 约定值 = 本仓库的实际布局（`presets/delivery/source.json`），与工作台
+///   `delivery.rs` 认得的是同一份交付面。
+const REPO_DELIVERY_DIR: &str = "presets/delivery";
+
+/// `Repo` 形状要读的那一份 `source.json`（纯计算）。
+///
+/// ★ **探与读共用它**：探的时候按约定找到路、读的时候按同一份约定再算一遍 ——
+///   两处各写一份就是第二套判据，一处改了另一处不知道（2026-10-18 之前就是这样）。
+fn repo_bootstrap_url(url: &str) -> String {
+    format!(
+        "{}/{REPO_DELIVERY_DIR}/{SOURCE_FILE_NAME}",
+        web_url_to_raw_base(url)
+    )
+}
+
+/// **这个地址可能是哪几个文件**（纯函数，判据钉它）：按"最可能先试"排。
+///
+/// ★ **用户复制来的地址通常已经带着 `source.json`**（他们从浏览器地址栏复制的就是它）
+///   —— 那种情况再拼一层 `/source.json` 会拼出 `…/source.json/source.json`，永远不通
+///   （2026-10-05 真机：手动指定"云端地址"反而不通，就是这一处）。
+/// 所以：**原样先试**，不成再在目录上补文件名。返回值带上"命中它该记哪个形状"。
 fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
     /* ★ 先认"网页地址"（仓库页 / `tree/<分支>` 页 / blob 页）—— 人手里最常见的就是它 */
-    let converted = web_url_to_raw_base(url);
+    let web = web_url_to_raw(url);
+    let from_web = web.is_some();
+    let from_file_page = web.as_ref().is_some_and(|(_, is_file)| *is_file);
+    let converted = web
+        .map(|(base, _)| base)
+        .unwrap_or_else(|| url.trim().trim_end_matches('/').to_owned());
     let trimmed = converted.trim().trim_end_matches('/');
+    let base = normalize_base_url(trimmed).unwrap_or_else(|_| trimmed.to_owned());
     let mut out: Vec<(String, CustomShape)> = Vec::new();
+    // ★ 贴的是仓库 / 分支页：真正那份 `source.json` 在仓库约定的交付目录里。
+    // 不试这一条，用户就只能自己摸到 `presets/delivery/` 那一层 —— 而他要的是
+    // "我贴哪一支就读哪一支"（作者 2026-10-18：「支持分支，怎么这个也没做好」）。
+    // ★ 他已经指到交付目录本身（`…/presets/delivery`）或指着某个文件，就不再猜。
+    if from_web && !from_file_page && !trimmed.ends_with(REPO_DELIVERY_DIR) {
+        out.push((repo_bootstrap_url(url), CustomShape::Repo));
+    }
     if trimmed.ends_with(SOURCE_FILE_NAME) {
         out.push((trimmed.to_owned(), CustomShape::Bootstrap));
     }
-    let base = normalize_base_url(trimmed).unwrap_or_else(|_| trimmed.to_owned());
     let appended = format!("{base}/{SOURCE_FILE_NAME}");
     if !out.iter().any(|(u, _)| *u == appended) {
         out.push((appended, CustomShape::Root));
@@ -462,26 +533,40 @@ fn bootstrap_candidates(url: &str) -> Vec<(String, CustomShape)> {
     out
 }
 
-/// **探一个自定义地址是哪种形状**（真联网：原样、再补文件名，各一次机会）。
-/// **两条都不通** → 如实报错，并把两条各自的失败原因都摆出来（只说"不行"等于让用户猜）。
-pub fn probe_custom_shape(url: &str) -> Result<(CustomShape, ResolvedSource), AppError> {
-    probe_custom_shape_with(url, &real_fetch)
+/// 一次探测的结果：填的是**哪种形状** + **真正读到 `source.json` 的那一份**。
+///
+/// ★ 两样都要存盘（[`PresetSource::custom_shape`] / [`PresetSource::custom_resolved`]）：
+///   形状回答"你填的是哪一种"，`bootstrap_url` 回答"实际读的是哪一份"。
+///   有了后者，重启之后的解析**不必再推一遍**（推是第二套判据，推错一次就是静默失灵）。
+#[derive(Debug)]
+pub struct ProbeOutcome {
+    pub shape: CustomShape,
+    /// 探通的那一份 `source.json` 地址（存盘用；也是重启后解析要读的那一份）
+    pub bootstrap_url: String,
 }
 
-/// [`probe_custom_shape`] 的注入版（判据走它，**不开端口**）。
-pub fn probe_custom_shape_with(
-    url: &str,
-    fetch: FetchBytes<'_>,
-) -> Result<(CustomShape, ResolvedSource), AppError> {
+/// **探一个自定义地址**（真联网：按 [`bootstrap_candidates`] 依次试，命中即停）。
+/// **都不通** → 如实报错，并把每一处的失败原因都摆出来（只说"不行"等于让用户猜）。
+pub fn probe_custom(url: &str) -> Result<ProbeOutcome, AppError> {
+    probe_custom_with(url, &real_fetch)
+}
+
+/// [`probe_custom`] 的注入版（判据走它，**不开端口**）。
+pub fn probe_custom_with(url: &str, fetch: FetchBytes<'_>) -> Result<ProbeOutcome, AppError> {
     let mut reasons = Vec::new();
     for (candidate, shape) in bootstrap_candidates(url) {
         match parse_source_json_with(fetch, &candidate).and_then(|r| fetch_and_accept(fetch, &r)) {
-            Ok(resolved) => return Ok((shape, resolved)),
+            Ok(_) => {
+                return Ok(ProbeOutcome {
+                    shape,
+                    bootstrap_url: candidate,
+                })
+            }
             Err(e) => reasons.push(format!("{candidate}（{e}）")),
         }
     }
     Err(AppError::invalid_argument(format!(
-        "这个地址下面读不到寻址规则声明（{SOURCE_FILE_NAME}）—— 试了 {} 次也不通：{}",
+        "这个地址下面读不到寻址规则声明（{SOURCE_FILE_NAME}）—— 试了 {} 处也不通：{}",
         reasons.len(),
         reasons.join("；")
     )))
@@ -534,6 +619,7 @@ fn debug_source_override() -> Option<SourceEntry> {
     Some(SourceEntry::Custom {
         url,
         shape: CustomShape::Root,
+        resolved: None,
     })
 }
 
@@ -551,6 +637,7 @@ pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
             Some(s) => s.custom_url.map(|url| SourceEntry::Custom {
                 url,
                 shape: s.custom_shape,
+                resolved: s.custom_resolved,
             }),
             // 选了自定义却没地址 = 用户删了输入框里的字。**不静默回落**到默认源：
             // 那会让界面显示"用 Gitee"、实际连的是别的地方。
@@ -564,33 +651,37 @@ pub fn current_entry(root: &Path) -> Result<Option<SourceEntry>, AppError> {
 
 /// 把入口解析成"远端在哪"。
 ///
-/// - 自定义（[`SourceEntry::Custom`]）：**按记下来的形状**读；形状还没探过（老档）
-///   就**自适应**：先当 `source.json` 文件地址，读不到再当交付目录补文件名
-///   —— 这正是 0.0.2 那个"填云端地址反而不通"的修法；
+/// - 自定义（[`SourceEntry::Custom`]）：**探通时记下的那一份优先**
+///   （[`PresetSource::custom_resolved`]）—— 它就是"实际读的"，不再按形状重推。
+///   老档（没记过）就按 [`bootstrap_candidates`] 的候选表依次试、**记下来的形状先试**
+///   —— 候选表是唯一推导源，这里不另算一遍；
 /// - 内置（[`SourceEntry::Bootstrap`]）：**读 `source.json`**（一次很小的网络请求），
 ///   按它声明的寻址规则算 —— 部署位置变了只改它，客户端不用重发。
 pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
     match entry {
-        SourceEntry::Custom { url, shape } => match shape {
-            // 原样先试（用户复制来的地址通常已经带着 `source.json`）
-            CustomShape::Bootstrap => parse_source_json(&url),
-            // 填的是交付目录：补上文件名读
-            CustomShape::Root => {
-                let base = normalize_base_url(&url)?;
-                parse_source_json(&format!("{base}/{SOURCE_FILE_NAME}"))
+        SourceEntry::Custom {
+            resolved: Some(bootstrap),
+            ..
+        } => parse_source_json(&bootstrap),
+        SourceEntry::Custom {
+            url,
+            shape,
+            resolved: None,
+        } => {
+            let mut candidates = bootstrap_candidates(&url);
+            if shape != CustomShape::Unset {
+                /* 稳定排序：记下来的形状排最前（省一次 404），其余照原顺序兜着 */
+                candidates.sort_by_key(|(_, s)| u8::from(*s != shape));
             }
-            // 自适应：两条都试，报错时把两次尝试的原因都摆出来（只说"不行"等于让用户猜）
-            CustomShape::Unset => {
-                let mut last = None;
-                for (candidate, _) in bootstrap_candidates(&url) {
-                    match parse_source_json(&candidate) {
-                        Ok(r) => return Ok(r),
-                        Err(e) => last = Some(e),
-                    }
+            let mut last = None;
+            for (candidate, _) in candidates {
+                match parse_source_json(&candidate) {
+                    Ok(r) => return Ok(r),
+                    Err(e) => last = Some(e),
                 }
-                Err(last.expect("候选表不为空（至少会补一个文件名）"))
             }
-        },
+            Err(last.expect("候选表不为空（至少会补一个文件名）"))
+        }
         SourceEntry::Bootstrap { url } => parse_source_json(&url),
     }
 }
@@ -610,8 +701,8 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
 ///
 /// ★ 它是"换源之前先看一眼"的实现（作者 2026-10-05：用户容易输错地址）：
 /// **取不到就整次拒绝**，而不是"先存上再说" —— 错地址留在设置里比"没配"更难查。
-/// 自定义源探的是 `{地址}/source.json` 声明的那份 catalog；内置源探的是它自己
-/// 在 `source.json` 里说的那个 catalog 地址。
+/// 自定义源按入口解析（落过盘的读 [`PresetSource::custom_resolved`]，老档按形状重推）
+/// 再取它声明的那份 catalog；内置源探的是它自己在 `source.json` 里说的那个 catalog 地址。
 pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
     let entry = current_entry(root)?.ok_or_else(|| {
         AppError::invalid_argument("还没有选数据源 —— 先在上面选一个云端源，或填一个地址")
@@ -713,6 +804,7 @@ mod two_source_tests {
 
     use super::*;
     use crate::fsx::atomic::atomic_write;
+    use crate::runtime::app_state;
 
     fn dir() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
@@ -766,14 +858,30 @@ mod two_source_tests {
         assert_eq!(web_url_to_raw_base(mine), mine);
     }
 
-    /// 网页地址进 `bootstrap_candidates` 后，拼出来的候选是 raw 那一份的 `source.json`
+    /// 分支页的候选表：**先按仓库约定**（`presets/delivery/`），再退仓库根
+    /// —— 作者 2026-10-18 贴的就是 `…/tree/feat/dark-mode`，而 `source.json`
+    /// 从来不在仓库根。
     #[test]
-    fn a_tree_url_yields_the_raw_source_json_candidate() {
+    fn a_tree_url_tries_the_repo_delivery_dir_first() {
         let c = bootstrap_candidates("https://github.com/o/r/tree/feat/x");
+        assert_eq!(
+            c.first().map(|(u, s)| (u.as_str(), *s)),
+            Some((
+                "https://raw.githubusercontent.com/o/r/feat/x/presets/delivery/source.json",
+                CustomShape::Repo
+            )),
+            "该按 feat/x 先找约定的交付目录：{c:?}"
+        );
         assert!(
             c.iter()
                 .any(|(u, _)| u == "https://raw.githubusercontent.com/o/r/feat/x/source.json"),
-            "该按 feat/x 拼 source.json，得到：{c:?}"
+            "仓库根那条仍要兜着：{c:?}"
+        );
+        // 人指到子目录时**不许**再按约定往下钻（他指到哪就是哪）
+        let deep = bootstrap_candidates("https://github.com/o/r/tree/feat/x/presets/delivery");
+        assert!(
+            !deep.iter().any(|(_, s)| *s == CustomShape::Repo),
+            "指到交付目录本身就不该再猜：{deep:?}"
         );
     }
 
@@ -855,37 +963,81 @@ mod two_source_tests {
         let fetch = fake_fetch(&["delivery/source.json", "delivery/catalog.json"]);
         let root_url = "https://mirror.example/presets/delivery";
 
-        let (root_shape, resolved) = probe_custom_shape_with(root_url, &fetch).expect("当目录该通");
-        assert_eq!(root_shape, CustomShape::Root);
-        assert!(
-            resolved
-                .catalog_url()
-                .expect("该推得出")
-                .ends_with("/catalog.json"),
-            "交付目录形状：catalog 地址由 Manifest 声明"
+        let root_probe = probe_custom_with(root_url, &fetch).expect("当目录该通");
+        assert_eq!(root_probe.shape, CustomShape::Root);
+        assert_eq!(
+            root_probe.bootstrap_url,
+            format!("{root_url}/source.json"),
+            "交付目录形状：读的就是目录下那份"
         );
 
         // ★ 用户复制来的地址**本身带着 source.json**（0.0.2 真机就是这条路不通的）
         let bootstrap_url = "https://mirror.example/presets/delivery/source.json";
-        let (shape, resolved) =
-            probe_custom_shape_with(bootstrap_url, &fetch).expect("当 source.json 也该通");
-        assert_eq!(shape, CustomShape::Bootstrap);
-        assert_eq!(
-            resolved.catalog_url().expect("该推得出"),
-            format!("{root_url}/catalog.json"),
-            "两个地址都由 Manifest 相对声明给出"
-        );
+        let boot_probe = probe_custom_with(bootstrap_url, &fetch).expect("当 source.json 也该通");
+        assert_eq!(boot_probe.shape, CustomShape::Bootstrap);
+        assert_eq!(boot_probe.bootstrap_url, bootstrap_url, "原样读，不改地址");
     }
 
-    /// 两条都不通 → 拒绝，且**两条的原因都摆出来**（只说"不行"等于让用户猜）
+    /// ★ **分支页这一条走到底**（2026-10-18）：贴在客户端里的就是 `…/tree/<分支>`。
+    ///
+    /// 要钉三件事：① 探通的那一份在 `presets/delivery/` 下面；② 探与读**共用同一份
+    /// 约定**（不是两处各算一遍）；③ 落盘带着"实际读的那一份"，重启之后的解析
+    /// **不再按形状重推** —— 推不回来就是"设置页看着成、实际读的还是 main"。
+    #[test]
+    fn a_branch_page_is_probed_and_remembered() {
+        let fetch = fake_fetch(&["delivery/source.json", "delivery/catalog.json"]);
+        let page = "https://github.com/MuCoreBenC/MKPSupportEase/tree/feat/dark-mode";
+        let probed = probe_custom_with(page, &fetch).expect("分支页该通");
+        assert_eq!(probed.shape, CustomShape::Repo, "认成仓库 / 分支页");
+        assert_eq!(
+            probed.bootstrap_url,
+            "https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/feat/dark-mode/presets/delivery/source.json"
+        );
+        assert_eq!(
+            repo_bootstrap_url(page),
+            probed.bootstrap_url,
+            "探与读必须是同一份约定"
+        );
+
+        let d = dir();
+        let source = make_source(SourceMode::Custom, Some(page), probed.shape)
+            .expect("写设置")
+            .with_resolved(&probed.bootstrap_url)
+            .expect("记下探通的那一份");
+        app_state::set_preset_source(d.path(), source).expect("落盘");
+
+        let saved = app_state::preset_source(d.path())
+            .expect("读设置")
+            .expect("刚写完的");
+        assert_eq!(
+            saved.custom_url.as_deref(),
+            Some(page),
+            "用户填的那份原样留着（界面显示 / 跳转都用它）"
+        );
+        assert_eq!(
+            saved.custom_resolved.as_deref(),
+            Some(probed.bootstrap_url.as_str()),
+            "实际读的那一份也要留着 —— 解析不该再推一遍"
+        );
+        match current_entry(d.path()).expect("读入口").expect("该有入口") {
+            SourceEntry::Custom {
+                shape, resolved, ..
+            } => {
+                assert_eq!(shape, CustomShape::Repo);
+                assert_eq!(resolved.as_deref(), Some(probed.bootstrap_url.as_str()));
+            }
+            other => panic!("该是自定义入口：{other:?}"),
+        }
+    }
+
+    /// 候选都不通 → 拒绝，且**每一处的原因都摆出来**（只说"不行"等于让用户猜）
     #[test]
     fn an_unusable_address_is_refused_with_both_reasons() {
-        // 目录里什么都没有：原样与补文件名两条都要试、都要说清为什么
+        // 目录里什么都没有：原样与补文件名都要试、都要说清为什么
         let fetch = fake_fetch(&[]);
-        // 地址本身带 source.json → 两条候选（原样 + 补名去重后同一条）都会试
-        let e =
-            probe_custom_shape_with("https://empty.example/presets/delivery/source.json", &fetch)
-                .unwrap_err();
+        // 地址本身带 source.json → 原样那条（补名去重后同一条）
+        let e = probe_custom_with("https://empty.example/presets/delivery/source.json", &fetch)
+            .unwrap_err();
         let text = format!("{}{}", e.message, e.detail.unwrap_or_default());
         assert!(
             text.contains(SOURCE_FILE_NAME),

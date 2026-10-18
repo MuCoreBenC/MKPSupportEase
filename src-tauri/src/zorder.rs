@@ -59,8 +59,8 @@ pub fn slicer_window(bbs_pid: i32) -> Option<SlicerWindow> {
     }
     #[cfg(not(target_os = "macos"))]
     {
-        /* ★ CoreGraphics 的窗口列表只有 macOS 有 —— 别处恒 `None`，
-           调用方（`ipc::guide::decide`）会退回 AX 那条口径。 */
+        // ★ CoreGraphics 的窗口列表只有 macOS 有 —— 别处恒 `None`，
+        // 调用方（`ipc::guide::decide`）会退回 AX 那条口径。
         let _ = bbs_pid;
         None
     }

@@ -1927,8 +1927,8 @@ mod tests {
         // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
         assert_eq!(
             catalog.files.len(),
-            15,
-            "反空转：说明书登记台账全部 15 条（9 BBS + 3 图标 + 3 模型）；\
+            16,
+            "反空转：说明书登记台账全部 16 条（9 BBS + 3 图标 + 4 模型）；\
              没跑 wb_generate 所以没有 mkp 产物条目（宽松构建跳过）"
         );
         for f in &catalog.files {

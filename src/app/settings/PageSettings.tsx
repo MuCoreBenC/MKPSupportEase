@@ -967,7 +967,7 @@ export default function PageSettings() {
                 className={s.input}
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                placeholder="https://…/presets/delivery/ 或 …/source.json"
+                placeholder="https://…/presets/delivery/、…/source.json 或仓库分支页"
                 aria-label="数据源地址"
               />
               <Btn onClick={() => void apply()} disabled={busy || !canSet}>
@@ -977,7 +977,7 @@ export default function PageSettings() {
           )}
           {mode === 'custom' && (
             <p className={s.hint}>
-              数据源根与 source.json 地址都认；应用前会先探一次，取不到就不改。
+              数据源根、source.json 地址、仓库 / 分支页（…/tree/&lt;分支&gt;）都认；应用前会先探一次，取不到就不改。
             </p>
           )}
         </div>

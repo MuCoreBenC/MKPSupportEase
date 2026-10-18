@@ -963,11 +963,12 @@ mod tests {
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            31,
-            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 3 + BBS 9 + 引导图 2 ——
+            32,
+            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 4 + BBS 9 + 引导图 2 ——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
              品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
              2026-10-16：引导图进台账（`type = 'guide'`，bundled —— 图片引导那两张）。
+             2026-10-18：模型 3 → 4（`zoffset-calibration-ext`，Z 校准加长版进台账）。
              条数变了要说清为什么"
         );
 
@@ -1060,7 +1061,8 @@ mod tests {
             // image 档 5 = 整机图 4 + 品牌字标 1（2026-10-03 品牌图正式进台账）
             (AssetKind::Image, 5usize),
             (AssetKind::Icon, 3),
-            (AssetKind::Model, 3),
+            // 模型 4 = Z 旧版 / Z 加长版（2026-10-18 进台账）/ XY / 支撑测试
+            (AssetKind::Model, 4),
             (AssetKind::SlicerProfile, 9),
             (AssetKind::MkPreset, 9),
             // 引导图 2 = 「改 .3mf 默认打开方式」那一处的浅 / 深两张（2026-10-16 进台账）
@@ -1103,8 +1105,8 @@ mod tests {
     }
 
     /// **四态身份在真数据上的分布**（作者 2026-10-03 定的模型）：
-    /// 进套餐 14（9 条 mkPreset + 5 条被套餐引用的 BBS）、随包 4（整机图）、
-    /// 仅归档 0（没人动过可见性）、其余可选 10
+    /// 进套餐 14（9 条 mkPreset + 5 条被套餐引用的 BBS）、随包 7（整机图 4 + 品牌字标 1 +
+    /// 引导图 2）、仅归档 0（没人动过可见性）、其余可选 11（2026-10-18 加长版模型也是可选）
     #[test]
     fn the_real_identity_states_match_the_model() {
         use AssetIdentity::{ArchiveOnly, Bundled, InBundle, Optional};
@@ -1137,8 +1139,8 @@ mod tests {
         assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
         assert_eq!(
             count(Optional).len(),
-            10,
-            "29 - 14 进套餐 - 5 随包 = 10 可选（图标 3 + 模型 3 + 没进套餐的 BBS 4）"
+            11,
+            "30 - 14 进套餐 - 5 随包 = 11 可选（图标 3 + 模型 4 + 没进套餐的 BBS 4）"
         );
 
         // 身份轴筛选：每一档筛出来都恰好是那一档

@@ -818,10 +818,9 @@ fn generate_xy_calibration_new(
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let profile = resolve_profile(mode, model_bbox, "generate_xy_calibration_new")?;
     let expect = profile.centroid;
-    let pattern = profile
-        .pattern
-        .as_ref()
-        .ok_or_else(|| pattern_missing(profile, "[models.pattern] —— XY 图案那七个偏移没有别的来源"))?;
+    let pattern = profile.pattern.as_ref().ok_or_else(|| {
+        pattern_missing(profile, "[models.pattern] —— XY 图案那七个偏移没有别的来源")
+    })?;
 
     if centroid.valid {
         check_rotation_by_centroid(

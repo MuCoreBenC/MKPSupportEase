@@ -219,8 +219,8 @@ pub fn known_footprints(profiles: &[ModelProfile], mode: &str) -> String {
 /// 文件不存在由调用方决定（`machine_dims` 那边给 `None`）—— 这里只管这份文件本身
 /// 能不能用：解析不了、一条都没有、字段缺、id 撞名，都是硬错，消息里带文件名与档 id。
 pub fn load(path: &Path) -> Result<Vec<ModelProfile>, String> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| format!("读不到 {}（{e}）", path.display()))?;
+    let raw =
+        std::fs::read_to_string(path).map_err(|e| format!("读不到 {}（{e}）", path.display()))?;
     let file: ModelsFile =
         toml::from_str(&raw).map_err(|e| format!("{} 解析失败：{e}", path.display()))?;
     if file.models.is_empty() {
@@ -279,10 +279,8 @@ fn validate(p: &ModelProfile) -> Result<(), String> {
                 ));
             }
         }
-        "Repetition" => {
-            if p.datum_x == 0.0 || p.datum_y == 0.0 {
-                return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
-            }
+        "Repetition" if p.datum_x == 0.0 || p.datum_y == 0.0 => {
+            return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
         }
         _ => {}
     }

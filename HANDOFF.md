@@ -2499,3 +2499,51 @@ BBS 显示什么不显示什么」。之前那一轮的结论（"切片器不吃
 - `npm run build`（`tsc -b` + vite）、`npm run lint`（eslint + stylelint）、`cargo check -p mkp-support-ease`：绿。
 - 剩一条**真机验收**：拿作者那份 `.44432.0.gcode` 跑一遍后处理 —— 应不再报 `E_CAL_MISMATCH_002`，
   且插入的 11 个方块相对旧版同参数**只在 Y 基准上平移 1mm**。
+
+## 增量之四十 · 自定义数据源认仓库 / 分支页（2026-10-18，分支 `feat/dark-mode`）
+
+**症状**：设置页「预设数据源 → 自定义地址」贴 `https://github.com/MuCoreBenC/MKPSupportEase/tree/feat/dark-mode`
+点「应用」→「这个地址取不到预设数据，没有改，现在用的还是 GitHub」；校准页「打开模型」于是报
+「目录里没有 ZOffset_Calibration_ext.3mf」—— 客户端读的一直是 `main`，加长版只在分支上。
+
+**根因**（两层，第二层才是真原因）：
+
+1. 网页地址 → raw 的转换本身是通的（2026-10-16 那条），`tree/feat/dark-mode` 能变成
+   `raw.githubusercontent.com/…/feat/dark-mode`；
+2. **但 `source.json` 从来不在仓库根**，它在 `presets/delivery/` 下面 —— 候选表只试了
+   `<ref>/source.json`（真机 404），所以必然失败。`curl` 实证：根 404、`presets/delivery` 200；
+3. 附带隐患：落盘只有 `customUrl + customShape`，重启后要**按形状再推一遍**才解析得回来 ——
+   推导是第二套判据，推不回来就是"设置页看着成、实际读的还是 main"。
+
+**治法**：
+
+- `runtime::source` 加 `CustomShape::Repo`（仓库 / 分支页）+ 约定常量 `REPO_DELIVERY_DIR = "presets/delivery"`；
+  候选表顺序 = 按约定（`…/<ref>/presets/delivery/source.json`）→ 仓库根 → 交付目录。
+  `tree/` 后面**不假设**第一段就是 ref（`feat/dark-mode` 与"ref + 子目录"在 URL 上同形，
+  两条解释都留给候选表）；人已经指到交付目录本身或指着某个文件就不再猜。
+- 探通的那一份**存进设置**（`PresetSource::custom_resolved`，加字段不升号）：解析第一依据是它，
+  `customShape` 只在老档兜底（`bootstrap_candidates` 稳定排序把记下来的形状排最前 ——
+  推导仍只有一张候选表）。用户填的 `customUrl` 原样留着，界面显示与「查看更新」跳转都用它。
+- 设置页文案 / 占位符补一句：仓库 / 分支页（`…/tree/<分支>`）也认。
+
+**判据**（`runtime::source::two_source_tests`）：
+`a_tree_url_tries_the_repo_delivery_dir_first`（候选顺序 + 指到子目录不再猜）、
+`a_branch_page_is_probed_and_remembered`（探 → 落盘 → 重启读入口，实际读的那一份跟着走）。
+
+**顺手修掉三笔既有红**（都是 `eaba9fb` / `8e6ba47` 带进来、CI 会拦的；作者看完报告说「可以修」）：
+
+1. `crates/postprocess` 的 clippy `collapsible_match`（`eaba9fb`）：`calib_models.rs` 的
+   `"Repetition"` 臂是「只有一个 `if` + `return`」⇒ 合并成 match guard，行为等价；
+2. `cargo fmt --check` 四处（`eaba9fb` 三处：`calib_models.rs:219`、`disk/calibration.rs:818`、
+   `postproc/mod.rs:13` 的 `mod` 字母序；`8e6ba47` 一处：`zorder.rs` 的块注释缩进）——
+   **块注释那处 1.97 与 1.99 的要求相反**（对齐 `/*` vs 拉回代码缩进），所以改成 `//` 行注释，
+   两个 rustfmt 版本才都认；
+3. 工作台四条判据的期望值还停在「3 个模型」（`assets.rs` 总条数 31 / model 3 / 可选 10、
+   `delivery.rs` 目录 15 条）：`eaba9fb` 加进 `zoffset-calibration-ext` 之后应为 32 / 4 / 11 / 16。
+
+**验证**：`cargo test`（工作区，默认 feature）**全绿**；`cargo test -p mkp-support-ease --features workbench --lib`
+**966 全绿**；`cargo clippy --all-targets -- -D warnings` 两档 feature（默认 / workbench）+ `+1.99.0` 全 **exit=0**；
+`cargo fmt --all -- --check` 在 **1.97.1 与 1.99.0** 下都干净。
+
+**真机待验收**：设置页贴分支页 → 「当前：你指定：…/tree/feat/dark-mode」→ 校准页「从云端获取」
+拿到 `ZOffset_Calibration_ext.3mf` → 「打开模型」能开。

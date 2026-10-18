@@ -147,10 +147,14 @@ pub async fn set_preset_source(
         let raw = custom_url.unwrap_or_default();
         let task = tauri::async_runtime::spawn_blocking(move || {
             traced("setPresetSource", |_| {
-                // ★ 先探形状（根 / source.json 两种都认），**通了才落盘** ——
+                // ★ 先探（交付根 / source.json / 仓库·分支页都认），**通了才落盘** ——
                 //   错地址留在设置里比"没配"更难查（0.0.2 的教训）。
-                let (shape, _resolved) = runtime::source::probe_custom_shape(&raw)?;
-                let source = runtime::source::make_source(mode, Some(&raw), shape)?;
+                // ★ 探通的那一份**一起存下来**：他贴的是分支页时，实际读的是
+                //   `presets/delivery/source.json` —— 只存"分支页 + 形状"就等于让
+                //   重启后再推一遍（2026-10-18 那份分支数据读不到，就是推不回来）。
+                let probed = runtime::source::probe_custom(&raw)?;
+                let source = runtime::source::make_source(mode, Some(&raw), probed.shape)?
+                    .with_resolved(&probed.bootstrap_url)?;
                 runtime::app_state::set_preset_source(&root, source)?;
                 source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
             })
