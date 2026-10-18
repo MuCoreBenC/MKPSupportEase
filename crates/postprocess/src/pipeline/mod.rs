@@ -46,6 +46,7 @@ use sha2::{Digest, Sha256};
 use crate::config;
 use crate::diag::{CancelToken, PostprocError};
 use crate::ir::Ir;
+use crate::postproc::calibration::Mode;
 use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 
 /// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
@@ -94,6 +95,29 @@ pub struct IrProcessRequest {
     pub ir: Ir,
     /// None / 等于输入路径 → 原地覆盖（.part + rename）。
     pub output_path: Option<PathBuf>,
+    /// **这一盘是什么校准件** —— 由调用方定案，管线**只消费、不判定**。
+    ///
+    /// 2026-10-18 起身份的唯一来源是原始 3MF 的 `MKPSE:Calibration`（钩子顺着
+    /// `origin.txt` 读出来）。那件事只有钩子能做：管线手里只有 G-code，而 G-code 里
+    /// 没有任何身份信息 —— 早先那行 `;MKPCalibration …` 会被某些版本的 Bambu Studio
+    /// 在保存时吃掉，留着它做判据就是"模型明明带身份、管线却按普通模型跑"。
+    ///
+    /// 所以这条链是单向的：**钩子定案 → 传进来 → 管线照办**。管线不再自己扫、也不许
+    /// 拿尺寸去猜（`calib_models::find_profile` 只收 `Mode`，几何只决定用哪一档）。
+    ///
+    /// 缺省 `Mode::None`（普通模型）：`Default` 就取它，免得每个构造点都得写一遍。
+    pub calibration: crate::postproc::calibration::Mode,
+}
+
+impl Default for IrProcessRequest {
+    fn default() -> Self {
+        Self {
+            gcode_path: PathBuf::new(),
+            ir: Ir::default(),
+            output_path: None,
+            calibration: crate::postproc::calibration::Mode::None,
+        }
+    }
 }
 
 /// 第 2 步的 IR 从哪来 —— 私有，两张公开脸各自对应一个变体。
@@ -127,6 +151,8 @@ struct Job<'a> {
     /// 生命周期只活在本文件里：几张嘴（CLI / 钩子 / 判据）都是**并列入口**，
     /// `IrProcessRequest` 那个按值传的公开结构体一个字都不用动。
     tower_ask: Option<&'a mut dyn TowerAsk>,
+    /// 这一盘是什么校准件 —— **调用方定案**，管线只消费（见 [`IrProcessRequest::calibration`]）。
+    calibration: Mode,
 }
 
 /// 处理产物（printtime 只填字段，不作为 transform）。
@@ -148,6 +174,11 @@ pub struct ProcessResult {
     /// 管线自己不消费它（见 [`HeaderFacts`]），但**执行记录要**：`_meta.json` 的
     /// `detail.slicer` 里那几个键就住在这里 —— 搭车出门，调用方不用为它再扫一遍输入。
     pub header_facts: HeaderFacts,
+    /// 校准这一趟**用了什么**（认到哪一档、实测多大、容差多少）。
+    ///
+    /// 非校准件那一趟恒为 `None`。管线自己不消费它 —— 它是给执行记录的证据：
+    /// 原来这些值在 `resolve_profile` 之后就被消费掉了，成功那趟一个字都不出门。
+    pub calibration_receipt: Option<crate::postproc::calibration::CalibrationReceipt>,
 }
 
 /// 出口事实集 —— **只搬运，不新算**。
@@ -318,6 +349,7 @@ pub fn process_with_ir_and_cancel_interval(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: true,
             tower_ask: None,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -328,7 +360,7 @@ pub fn process_with_ir_and_cancel_interval(
 /// 同 [`process_with_ir`]，但**第 6 步撞了可以停下来问人**（2026-10-18 方案 B）。
 ///
 /// 存在理由：那一问要发生在**真实进度 ~55%**（`Step::Collision` 入口），而且撞塔这件事
-/// 本来就在第 6 步判 —— 在管线之前再预检一遍等于把 `detect_mode` / 擦料决策 / 碰撞扫描
+/// 本来就在第 6 步判 —— 在管线之前再预检一遍等于把 擦料决策 / 碰撞扫描
 /// 各跑两次，还让用户看到"0% 就停住了"。
 ///
 /// **为什么不往 `IrProcessRequest` 里塞这个回调**：那个结构体是按值传的，加一个
@@ -349,6 +381,7 @@ pub fn process_with_ir_with_tower_ask(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: true,
             tower_ask: ask,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -377,6 +410,7 @@ pub fn process_with_ir_deferred_print_time(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: false,
             tower_ask: None,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -399,6 +433,7 @@ pub fn process_with_ir_deferred_print_time_with_tower_ask(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: false,
             tower_ask: ask,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -430,6 +465,7 @@ pub fn process_with_cancel_interval(
             },
             compute_print_time: true,
             tower_ask: None,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -452,6 +488,7 @@ fn run(
         ir_source,
         compute_print_time,
         mut tower_ask,
+        calibration: calib_mode,
     } = job;
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
     /// （原地模式的原文件因此保证不动）。
@@ -516,8 +553,8 @@ fn run(
     let header = header_facts(&content, &gcode_path.display().to_string());
 
     // ---- step 4 ∥ step 5 的只读半段 —— 两个全文件扫描并行 ----
-    // `detect_mode`（parse 步）与 `decide_wiping`（support 步的只读半段）都是全文件
-    // 扫描、互不写状态，串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
+    // `decide_wiping`（support 步的只读半段）是一次全文件扫描；它和 parse 步的
+    // 头部事实读取串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
     // 并行的墙钟时间记在 parse 步上 —— support 步只剩 ApplyWipingDecision 那一笔，
     // 两步相加仍等于真实总耗时。
     //
@@ -527,15 +564,17 @@ fn run(
     // 而不是把 TOML 结构重新拉进来。钉住这条恒等的判据在
     // `tests/pipeline_wiping_source.rs`。
     let preferred = ir.wiping.preferred_mode.clone();
-    let (calib_mode, decision) = std::thread::scope(|s| {
-        let scan = s.spawn(|| crate::postproc::calibration::detect_mode(&content));
-        let decision = crate::postproc::support::decide_wiping(&preferred, &content);
-        (scan.join().expect("detect_mode 不 panic"), decision)
-    });
+    /* 校准身份**不从 G-code 认**（2026-10-18）：`calib_mode` 是调用方传进来的。
+    早先这里自己 `detect_mode(&content)` 扫 `;MKPCalibration …`，那条链已整条删除 ——
+    G-code 里再不会有身份，扫也只会得到 `None`，那正是"钩子认对了、管线却当普通模型跑"
+    的来路。擦料决策仍要扫正文，所以这一步照样和它并行。 */
+    let decision = crate::postproc::support::decide_wiping(&preferred, calib_mode, &content);
     ir.safety.is_calibration_mode = crate::postproc::calibration::is_any(calib_mode);
     // **无条件**取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
     // 这个事实）。零新计算，只是提早取。
     let calibration_mode = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
+    /* 第 7 步认档的回执（非校准件恒为 `None`）。只承载事实，不参与任何判定。 */
+    let mut calib_receipt: Option<crate::postproc::calibration::CalibrationReceipt> = None;
 
     // ---- step 5: support —— ApplyWipingDecision ----
     checkpoint(cancel)?;
@@ -618,6 +657,10 @@ fn run(
     }
 
     // ---- step 7: calib-check —— 仅动态校准：BBox + 质心 + dry-run ----
+    //
+    // 这一步的 dry-run 结果会**带出去**（`CalibrationReceipt`）：认到哪一档、实测多大、
+    // 容差多少。原来这些全在内核里被消费掉，执行记录只能记"校准模式: ZOffset"，
+    // 于是"为什么这次用了加长版的基准"永远无法解释（2026-10-18 补的证据链）。
     checkpoint(cancel)?;
     if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
         timer.begin(Step::CalibCheck, "校准模型检测...");
@@ -625,7 +668,8 @@ fn run(
         let bbox = crate::postproc::disk::compute_bbox(&content)?;
         let centroid = centroid_of(&content);
         let mode_str = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
-        crate::postproc::disk::generate_calibration_gcode_with_centroid(
+        let mut receipt = crate::postproc::calibration::CalibrationReceipt::default();
+        crate::postproc::disk::generate_calibration_gcode_with_centroid_rec(
             mode_str,
             &machine_type,
             &ir,
@@ -633,7 +677,9 @@ fn run(
             centroid,
             DEFAULT_Z_DWELL_SEC,
             DEFAULT_XY_DWELL_SEC,
+            Some(&mut receipt),
         )?;
+        calib_receipt = Some(receipt);
     }
 
     // ---- step 8: pass1 ----
@@ -725,7 +771,7 @@ fn run(
     out_lines =
         hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
     /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
-    out_lines = bed_glue::apply_bed_glue(out_lines, &ir);
+    out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS。
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。
@@ -788,6 +834,7 @@ fn run(
             calibration_mode: calibration_mode.to_string(),
         },
         header_facts: header,
+        calibration_receipt: calib_receipt,
     })
 }
 

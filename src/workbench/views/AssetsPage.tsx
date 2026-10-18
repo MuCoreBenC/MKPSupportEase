@@ -88,12 +88,29 @@ type Assign = 'all' | 'inBundle' | 'optional' | 'bundled' | 'archiveOnly'
  */
 const UNGROUPED = ':ungrouped:'
 
+/** 四种校准身份（界面标签；值就是 3MF 里那个标准 id，与 `parse_mode_id` 同一套字） */
+const CALIB_MODES: { id: string; label: string }[] = [
+  { id: 'ZOffset', label: 'Z 偏移校准' },
+  { id: 'Precise', label: 'XY 精度校准' },
+  { id: 'Rough', label: 'XY 粗校准' },
+  { id: 'Repetition', label: '重复性校准' },
+]
+
+const calibLegal = (v: string) => CALIB_MODES.some((m) => m.id === v)
+
 export default function AssetsPage({ words, tick, initialSel, initialAssign, onGoto, onApply }: Props) {
   const [list, setList] = useState<AssetList | null>(null)
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof wb.assetUsage>> | null>(null)
   /** 检查面板（第四刀）：盘上那个文件的样子 —— 选中一条才问（重字段要读真实字节） */
   const [inspect, setInspect] = useState<AssetInspectView | null>(null)
   const [sel, setSel] = useState<string | null>(initialSel ?? null)
+  /**
+   * 「校准身份」那一栏的选择框展开与否（2026-10-19）。
+   *
+   * 与「交付身份」那种按钮不同：身份有四个值，摆四个按钮太挤；所以缺标记时
+   * 先给一个「补标记」按钮，点了再展开四个身份让人选。
+   */
+  const [calibPick, setCalibPick] = useState(false)
   const [kind, setKind] = useState<Kind>('all')
   const [assign, setAssign] = useState<Assign>((initialAssign as Assign) ?? 'all')
   /** 切片器的三根轴（C14 第二十八轮）：只在 kind = 切片器时生效，换走后留着不丢（粘性） */
@@ -220,6 +237,36 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     toasts.push(`已把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}（改了先进草稿，保存才落盘）`)
     /* 可见性连着四态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
     load(kind, assign, slicer, nozzle, layer, q, group)
+  }
+
+  /**
+   * **补标 / 改写 / 移除校准身份**（2026-10-19）。
+   *
+   * 写的是盘上那份真 3MF（后端走 `calibration_asset`，与 `check:calibration-assets`
+   * 同一个实现）。写完**重新读盘**：清单与检查面板都重取 —— 显示的就是文件里的
+   * 实测结果，不做乐观更新（作者：「修改后立即重新读取并验证实际文件内容」）。
+   */
+  const setCalib = async (id: string, value: string | null) => {
+    try {
+      setList(await wb.setCalibrationIdentity(id, value))
+      assetsBus.bump()
+      /* 详情卡那份读数也要重取：它显示的是字节、sha 与身份 */
+      if (sel != null) {
+        try {
+          setInspect(await wb.assetInspect(sel))
+        } catch {
+          /* 详情卡重取失败不影响已经成功的那次写：清单会如实说结果 */
+        }
+      }
+      setCalibPick(false)
+      toasts.push(
+        value == null
+          ? `已移除 ${id} 的校准身份标记`
+          : `已把 ${id} 的校准身份写成 ${value}`,
+      )
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
   }
 
   /** 改交付档位（download ↔ bundled）。即时落盘（清单编辑，不走参数草稿） */
@@ -796,6 +843,97 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 </p>
               </div>
 
+              {/*
+                * **校准身份**（2026-10-19，作者：「工作台负责查看和管理」）。
+                *
+                * 只有模型类、且台账声明了预期或文件里真带标记时才摆 —— 普通拼盘
+                * （`MKP_support_test_models.3mf`）不是校准件，不该在这里报"缺标记"。
+                *
+                * 三种形态：
+                *   · 有标记且对得上 ⇒ 显示身份 + 「改写」「移除」
+                *   · 没标记 / 值不对 ⇒ 显示现状 + 「补标记」/「改写」
+                *   · 文件读不出来（坏包 / 不在）⇒ 只说不合格，不给补标按钮
+                */}
+              {cur.calibration != null && (
+                <div className={s.group}>
+                  <div className={s.groupHead}>
+                    校准身份 ·{' '}
+                    <span className={s.cardNote} style={{ display: 'inline' }}>
+                      {cur.calibration.actual ?? '未标记'}
+                    </span>
+                  </div>
+                  <div className={s.kv}>
+                    <div className={s.kvKey}>文件里的标记</div>
+                    <div className={s.kvVal}>
+                      {cur.calibration.actual ?? '—'}
+                      {cur.calibration.actual != null && !calibLegal(cur.calibration.actual) && (
+                        <span className={s.kvDim}>（不是合法身份）</span>
+                      )}
+                    </div>
+                    <div className={s.kvKey}>台账预期</div>
+                    <div className={s.kvVal}>{cur.calibration.expected ?? '—'}</div>
+                    <div className={s.kvKey}>校验</div>
+                    <div className={s.kvVal}>
+                      {cur.calibration.ok ? '合格' : '不合格'}
+                      {cur.calibration.problem != null && (
+                        <span className={s.kvDim}> {cur.calibration.problem}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className={s.bar}>
+                    {calibPick ? (
+                      <>
+                        {CALIB_MODES.map((m) => (
+                          <button
+                            key={m.id}
+                            type="button"
+                            className={`${s.btn} ${s.btnSm} ${
+                              cur.calibration?.actual === m.id ? s.btnOn : ''
+                            }`}
+                            onClick={() => void setCalib(cur.id, m.id)}
+                          >
+                            {m.label}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          onClick={() => setCalibPick(false)}
+                        >
+                          取消
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className={`${s.btn} ${s.btnSm}`}
+                          onClick={() => setCalibPick(true)}
+                          disabled={!cur.present}
+                          title={cur.present ? undefined : '文件不在，先把它放回来'}
+                        >
+                          {cur.calibration.actual == null ? '补标记' : '改写'}
+                        </button>
+                        {cur.calibration.actual != null && (
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            onClick={() => void setCalib(cur.id, null)}
+                            disabled={!cur.present}
+                          >
+                            移除
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  <p className={s.note}>
+                    标记住在 3MF 内部（`3D/3dmodel.model` 的 `MKPSE:Calibration`），
+                    写的是盘上那份真文件，改前会留一份 `.bak`。
+                    后处理只认这份标记 —— 没有它，这盘会被当普通模型跑。
+                  </p>
+                </div>
+              )}
               <div className={s.group}>
                 <div className={s.groupHead}>
                   交付身份 ·{' '}

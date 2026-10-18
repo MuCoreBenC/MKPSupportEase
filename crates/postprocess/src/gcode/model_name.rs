@@ -77,7 +77,7 @@ fn from_temp_config(gcode_path: &Path) -> Option<String> {
 ///
 /// 不校验目录名：G-code 被搬到别处时这里读不到东西（结果就是 `None`）—— 那正是要的
 /// （搬走之后模型名**应当**丢，不编一个出来）。
-fn temp_root(gcode_path: &Path) -> Option<&Path> {
+pub(crate) fn temp_root(gcode_path: &Path) -> Option<&Path> {
     gcode_path.parent()?.parent()
 }
 
@@ -167,7 +167,7 @@ fn attr_value(tag: &str, key: &str) -> Option<String> {
 
 /// XML 的五个预定义实体。模型名里真会出现 `&`（`Tom &amp; Jerry.3mf`），
 /// 不解的话名字会带着 `&amp;` 显示。`&amp;` 放最后替换（先解它会把 `&amp;lt;` 变成 `<`）。
-fn xml_unescape(s: &str) -> String {
+pub(crate) fn xml_unescape(s: &str) -> String {
     if !s.contains('&') {
         return s.to_string();
     }
@@ -184,7 +184,7 @@ fn xml_unescape(s: &str) -> String {
 /// 4.3.7：压缩方式 8、压缩后长度 18、名字长 26、扩展长 28），名字比中即取数据区。
 /// `store` 直读，`deflate` 交给 flate2 —— deflate 流自带结束标记，所以压缩后长度
 /// 是不是写在头里（有些写法放数据描述符）都不影响。
-fn zip_entry_text(zip: &[u8], want: &str) -> Option<String> {
+pub(crate) fn zip_entry_text(zip: &[u8], want: &str) -> Option<String> {
     const SIG: &[u8; 4] = b"PK\x03\x04";
     let mut at = 0usize;
     while let Some(rel) = find_bytes(zip.get(at..)?, SIG) {

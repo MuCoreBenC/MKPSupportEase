@@ -41,8 +41,16 @@ fn default_tolerance() -> f64 {
 pub struct ModelProfile {
     /// 档位 id（唯一）。报错、判据、前端选版都用它。
     pub id: String,
-    /// `ZOffset` / `XY` / `Repetition` —— 分组见 [`mode_group`]。
-    pub mode: String,
+    /// **这一档服务哪些身份**（`ZOffset` / `Precise` / `Rough` / `Repetition`）。
+    ///
+    /// 2026-10-18 从单个分组字符串改成数组，理由有两条：
+    /// 1. `Precise` 与 `Rough` 是**两种不同的校准模式**，只是碰巧共用同一块 50.5×50.5
+    ///    的板。原来把它们归并成 `XY` 之后，身份层就没法区分这两种校准了；
+    /// 2. 将来某一档可能服务多个身份（同一块板做两种校准），也可能同一个身份挂多档
+    ///    （Z 校准已有旧版与加长版）—— 两个方向都只需要动这份表。
+    ///
+    /// 值必须能被 [`crate::postproc::calibration::parse_mode_id`] 认出来，装载期校验。
+    pub mode: Vec<String>,
     /// catalog 里的模型资产 id（`presets/assets.toml` 那条）。可缺省。
     #[serde(default)]
     pub asset: Option<String>,
@@ -77,6 +85,22 @@ impl ModelProfile {
     /// 这一档要不要参与尺寸认档。`Repetition` 的 L 形件没有标称外形 ⇒ 不参与。
     pub fn has_footprint(&self) -> bool {
         self.footprint_w > 0.0 && self.footprint_h > 0.0
+    }
+
+    /// 这一档服务 `identity` 这个身份吗（身份串是 `mode_to_calibration_string` 那四个）。
+    ///
+    /// 这就是原先 `mode_group()` 干的事，但**只做包含判断、不做归并**：
+    /// 一块板服务 `Precise` 与 `Rough` 两个身份时，在表里写
+    /// `mode = ['Precise', 'Rough']` —— 谁服务谁写在数据里，代码里没有那张对照表。
+    pub fn serves(&self, identity: &str) -> bool {
+        self.mode.iter().any(|m| m.eq_ignore_ascii_case(identity))
+    }
+
+    /// 这一档是否**不做尺寸校验**（`Repetition`：L 形件没有标称外形）。
+    ///
+    /// 判断依据仍然是"没有外形"，不靠身份名 —— 免得将来某个身份既没有外形又要校验。
+    pub fn skips_size_check(&self) -> bool {
+        !self.has_footprint()
     }
 }
 
@@ -115,19 +139,6 @@ struct ModelsFile {
     models: Vec<ModelProfile>,
 }
 
-/// 模式串 → 档位分组。表里写的是面板级的名字（`XY`），运行时给的是内核那三个
-/// 稳定 id（`Precise` / `Rough`）—— 它们是同一张板，归一组。
-///
-/// 认不认识由它回答（空串 = 不认识）。
-pub fn mode_group(mode: &str) -> &'static str {
-    match mode {
-        "ZOffset" => "ZOffset",
-        "XY" | "Precise" | "Rough" => "XY",
-        "Repetition" => "Repetition",
-        _ => "",
-    }
-}
-
 /// 认档结果。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ProfileMatch<'a> {
@@ -152,22 +163,23 @@ pub fn find_profile<'a>(
     width: f64,
     height: f64,
 ) -> Option<ProfileMatch<'a>> {
-    let group = mode_group(mode);
-    if group.is_empty() {
+    // `mode` 是身份串（`ZOffset` / `Precise` / `Rough` / `Repetition`）。
+    // 空串 = 没有身份（普通模型）⇒ 一档都不参与，**不许按尺寸猜**。
+    if mode.trim().is_empty() {
         return None;
     }
 
-    // Repetition 不做尺寸校验（没有标称外形）⇒ 该组唯一那一档直接命中。
-    if group == "Repetition" {
-        return profiles
-            .iter()
-            .find(|p| mode_group(&p.mode) == group)
-            .map(ProfileMatch::Direct);
+    // 没有标称外形的那一档不做尺寸校验 ⇒ 直接命中（Repetition 的 L 形件）。
+    if let Some(p) = profiles
+        .iter()
+        .find(|p| p.serves(mode) && p.skips_size_check())
+    {
+        return Some(ProfileMatch::Direct(p));
     }
 
     let mut direct: Option<(f64, &ModelProfile)> = None;
     let mut swapped: Option<(f64, &ModelProfile)> = None;
-    for p in profiles.iter().filter(|p| mode_group(&p.mode) == group) {
+    for p in profiles.iter().filter(|p| p.serves(mode)) {
         if !p.has_footprint() {
             continue;
         }
@@ -201,14 +213,13 @@ pub fn find_profile<'a>(
 /// 认档失败只有两种可能 —— 模型被缩放，或者这是一块我们还没登记的板；
 /// 把已知尺寸摆出来，两种都能自己看出来。
 pub fn known_footprints(profiles: &[ModelProfile], mode: &str) -> String {
-    let group = mode_group(mode);
     let list: Vec<String> = profiles
         .iter()
-        .filter(|p| mode_group(&p.mode) == group && p.has_footprint())
+        .filter(|p| p.serves(mode) && p.has_footprint())
         .map(|p| format!("{}={}x{}", p.id, p.footprint_w, p.footprint_h))
         .collect();
     if list.is_empty() {
-        "（这一组没有登记任何档位）".to_string()
+        "（这个身份没有登记任何档位）".to_string()
     } else {
         list.join(" ")
     }
@@ -249,40 +260,56 @@ pub fn load(path: &Path) -> Result<Vec<ModelProfile>, String> {
 /// 「必填」不写进类型（那些字段跨 mode 共用），所以在这里逐 mode 点名 ——
 /// 报出来的话必须直接说清是**哪一档缺哪个键**，否则改表的人得自己猜。
 fn validate(p: &ModelProfile) -> Result<(), String> {
-    let group = mode_group(&p.mode);
-    if group.is_empty() {
+    if p.mode.is_empty() {
         return Err(format!(
-            "档 '{}' 的 mode '{}' 不认识（只有 ZOffset / XY / Repetition）",
-            p.id, p.mode
-        ));
-    }
-    if !p.has_footprint() && group != "Repetition" {
-        return Err(format!(
-            "档 '{}' 缺 footprintW/footprintH —— {group} 档要给尺寸校验一个标称外形",
+            "档 '{}' 的 mode 是空数组 —— 至少要写一个身份（ZOffset / Precise / Rough / Repetition）",
             p.id
         ));
     }
-    match group {
-        "ZOffset" => {
-            if p.datum_x == 0.0 || p.datum_y == 0.0 {
-                return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
-            }
-            if p.square_count == 0 || p.square_spacing <= 0.0 {
-                return Err(format!("档 '{}' 缺 squareSpacing/squareCount", p.id));
-            }
+    for m in &p.mode {
+        if crate::postproc::calibration::parse_mode_id(m).is_none() {
+            return Err(format!(
+                "档 '{}' 的 mode '{}' 不认识 —— 只有 ZOffset / Precise / Rough / Repetition \
+                 （旧写法 'XY' 已废：Precise 与 Rough 是两个身份，同一块板就写 \
+                 mode = ['Precise', 'Rough']）",
+                p.id, m
+            ));
         }
-        "XY" => {
-            if p.pattern.is_none() {
+    }
+    if !p.has_footprint() && !p.mode.iter().any(|m| m.eq_ignore_ascii_case("Repetition")) {
+        return Err(format!(
+            "档 '{}' 缺 footprintW/footprintH —— 只有 Repetition（L 形件）才可以没有标称外形",
+            p.id
+        ));
+    }
+    // 逐身份点名要用的数：一块板服务两个身份时，两个身份要的键都得在。
+    for m in &p.mode {
+        let id = crate::postproc::calibration::parse_mode_id(m);
+        match id {
+            Some(crate::postproc::calibration::Mode::ZOffset) => {
+                if p.datum_x == 0.0 || p.datum_y == 0.0 {
+                    return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
+                }
+                if p.square_count == 0 || p.square_spacing <= 0.0 {
+                    return Err(format!("档 '{}' 缺 squareSpacing/squareCount", p.id));
+                }
+            }
+            Some(crate::postproc::calibration::Mode::XyPrecise)
+            | Some(crate::postproc::calibration::Mode::XyRough)
+                if p.pattern.is_none() =>
+            {
                 return Err(format!(
                     "档 '{}' 缺 [models.pattern] —— XY 图案那七个偏移没有别的来源",
                     p.id
                 ));
             }
+            Some(crate::postproc::calibration::Mode::Repetition)
+                if p.datum_x == 0.0 || p.datum_y == 0.0 =>
+            {
+                return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
+            }
+            _ => {}
         }
-        "Repetition" if p.datum_x == 0.0 || p.datum_y == 0.0 => {
-            return Err(format!("档 '{}' 缺 datumX/datumY", p.id));
-        }
-        _ => {}
     }
     Ok(())
 }
@@ -291,10 +318,10 @@ fn validate(p: &ModelProfile) -> Result<(), String> {
 mod tests {
     use super::*;
 
-    fn profile(id: &str, mode: &str, w: f64, h: f64) -> ModelProfile {
+    fn profile(id: &str, mode: &[&str], w: f64, h: f64) -> ModelProfile {
         ModelProfile {
             id: id.to_string(),
-            mode: mode.to_string(),
+            mode: mode.iter().map(|m| m.to_string()).collect(),
             asset: None,
             footprint_w: w,
             footprint_h: h,
@@ -313,11 +340,11 @@ mod tests {
         }
     }
 
-    /// 生产清单那两档：同一 mode 下按尺寸分得开。
+    /// 生产清单那两档：同一个身份下按尺寸分得开。
     fn two_z_offsets() -> Vec<ModelProfile> {
         vec![
-            profile("zoffset", "ZOffset", 119.58, 13.063),
-            profile("zoffset-ext", "ZOffset", 119.58, 16.063),
+            profile("zoffset", &["ZOffset"], 119.58, 13.063),
+            profile("zoffset-ext", &["ZOffset"], 119.58, 16.063),
         ]
     }
 
@@ -353,7 +380,7 @@ mod tests {
     /// 宽高互换 ⇒ `Swapped`（报旋转），而不是「尺寸已变化」。
     #[test]
     fn swapped_dimensions_are_reported_as_rotation() {
-        let ps = vec![profile("zoffset", "ZOffset", 119.58, 13.063)];
+        let ps = vec![profile("zoffset", &["ZOffset"], 119.58, 13.063)];
         match find_profile(&ps, "ZOffset", 13.063, 119.58) {
             Some(ProfileMatch::Swapped(p)) => assert_eq!(p.id, "zoffset"),
             other => panic!("互换尺寸应判成旋转: {other:?}"),
@@ -364,29 +391,80 @@ mod tests {
     /// 方向只能靠质心（与 `generator_new.go` 同口径）。
     #[test]
     fn square_profile_never_matches_swapped() {
-        let ps = vec![profile("precise", "XY", 50.5, 50.5)];
+        let ps = vec![profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5)];
         assert!(matches!(
             find_profile(&ps, "Precise", 50.5, 50.5),
             Some(ProfileMatch::Direct(_))
         ));
+        assert!(find_profile(&ps, "Rough", 50.5, 50.5).is_some());
         assert!(find_profile(&ps, "Rough", 40.0, 30.0).is_none());
     }
 
-    /// 分组：Precise / Rough 走同一组，ZOffset 的档不会被 XY 认走。
+    /// 身份不串门：ZOffset 的档不会被 XY 的两个身份认走，空身份（普通模型）一档都不认。
     #[test]
-    fn modes_do_not_cross_groups() {
+    fn identities_do_not_cross() {
         let ps = two_z_offsets();
         assert!(find_profile(&ps, "Precise", 119.58, 13.063).is_none());
+        assert!(find_profile(&ps, "Rough", 119.58, 13.063).is_none());
+        assert!(find_profile(&ps, "", 119.58, 13.063).is_none());
         assert!(find_profile(&ps, "None", 119.58, 13.063).is_none());
     }
 
-    /// Repetition 不参与尺寸校验 ⇒ 无视尺寸直接命中该组那一档。
+    /// **两个身份可以共用一个档**：`Precise` 与 `Rough` 是两种校准，但同一块板。
+    /// 这就是原来 `mode_group()` 那张硬编码对照表被数据取代的地方。
+    #[test]
+    fn one_profile_can_serve_two_identities() {
+        let ps = vec![profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5)];
+        for identity in ["Precise", "Rough"] {
+            match find_profile(&ps, identity, 50.5, 50.5) {
+                Some(ProfileMatch::Direct(p)) => assert_eq!(p.id, "xy-square-50"),
+                other => panic!("{identity} 应认到共用那块板: {other:?}"),
+            }
+        }
+    }
+
+    /// **一个身份可以挂多档**：Z 校准已有旧版与加长版，将来再加第三块也只是加一行。
+    #[test]
+    fn one_identity_can_have_many_profiles() {
+        let mut ps = two_z_offsets();
+        ps.push(profile("zoffset-v3", &["ZOffset"], 119.58, 19.0));
+        for (h, want) in [
+            (13.063, "zoffset"),
+            (16.063, "zoffset-ext"),
+            (19.0, "zoffset-v3"),
+        ] {
+            match find_profile(&ps, "ZOffset", 119.58, h) {
+                Some(ProfileMatch::Direct(p)) => assert_eq!(p.id, want),
+                other => panic!("高度 {h} 应认到 {want}: {other:?}"),
+            }
+        }
+    }
+
+    /// Repetition 没有标称外形 ⇒ 不做尺寸校验，无视尺寸直接命中。
     #[test]
     fn repetition_matches_without_size_check() {
-        let ps = vec![profile("repetition", "Repetition", 0.0, 0.0)];
+        let ps = vec![profile("repetition", &["Repetition"], 0.0, 0.0)];
         match find_profile(&ps, "Repetition", 12.0, 34.0) {
             Some(ProfileMatch::Direct(p)) => assert_eq!(p.id, "repetition"),
             other => panic!("Repetition 应无视尺寸命中: {other:?}"),
         }
+    }
+
+    /// 旧写法 `mode = ['XY']` 必须被装载期拦住，并且说清该怎么改 ——
+    /// 悄悄放行会让身份层重新长出 `XY` 这个不存在的模式。
+    #[test]
+    fn legacy_xy_mode_is_rejected_with_a_hint() {
+        let p = profile("precise", &["XY"], 50.5, 50.5);
+        let err = validate(&p).unwrap_err();
+        assert!(err.contains("XY"), "{err}");
+        assert!(err.contains("Precise"), "{err}");
+    }
+
+    /// 一块板服务两个身份时，**两个身份要的键都得在**：漏了 pattern 就算坏档。
+    #[test]
+    fn shared_profile_needs_the_keys_of_every_identity() {
+        let p = profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5);
+        let err = validate(&p).unwrap_err();
+        assert!(err.contains("pattern"), "{err}");
     }
 }

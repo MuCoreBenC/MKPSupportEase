@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "1a8580be168e22fe",
+  "revision": "86f181a215256874",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -683,21 +683,24 @@
       "type": "model",
       "name": "精密校准模型",
       "path": "models/Precise_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "Precise"
     },
     {
       "id": "zoffset-calibration",
       "type": "model",
       "name": "Z 轴偏移校准模型",
       "path": "models/ZOffset_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "ZOffset"
     },
     {
       "id": "zoffset-calibration-ext",
       "type": "model",
       "name": "Z 轴偏移校准模型（加长版）",
       "path": "models/ZOffset_Calibration_ext.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "ZOffset"
     },
     {
       "id": "a1-bbs-02-010",

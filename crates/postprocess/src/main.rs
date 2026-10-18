@@ -119,6 +119,21 @@ enum Command {
         #[arg(long = "set", value_name = "路径=值")]
         set: Vec<String>,
     },
+    /// 校验**校准素材**的 3MF 身份（`npm run check:calibration-assets` 调它）
+    ///
+    /// 逐份读 `3D/3dmodel.model` 里的 `MKPSE:Calibration`，与台账里的预期比。
+    /// **只读，不写任何文件**（改文件是工作台的事）。
+    ///
+    /// 输出：stdout 每份一行（制表符分隔，给机器读），stderr 是给人看的摘要。
+    /// 退出码：`0` 全过 / `1` 有不合格 / `2` 台账读不了。
+    CheckAssets {
+        /// 资产台账。缺省取仓库里的 `presets/assets.toml`
+        #[arg(long, value_name = "台账")]
+        manifest: Option<PathBuf>,
+        /// 也扫 `assets/models` 下**没登记进台账**的 .3mf（防新增素材漏登记）
+        #[arg(long)]
+        scan: bool,
+    },
 }
 
 fn main() -> ExitCode {
@@ -136,6 +151,166 @@ fn main() -> ExitCode {
         Command::Init { out } => cmd_init(out.as_deref()),
         Command::DumpIr { config, set, gcode } => cmd_dump_ir(&config, &set, gcode.as_deref()),
         Command::Check { config, set } => cmd_check(&config, &set),
+        Command::CheckAssets { manifest, scan } => cmd_check_assets(manifest.as_deref(), scan),
+    }
+}
+
+// ---------------------------------------------------------------- check-assets
+
+/// `check-assets`：校准素材的身份验收（**只读**）。
+///
+/// 三件事一次做完：
+/// 1. 台账里每一条声明了 `calibration` 的模型，文件里必须真的是那个身份；
+/// 2. 台账里 `type = 'model'` 但**没声明** `calibration` 的，报"未声明预期"（不是失败，
+///    只是提醒 —— 也许它压根不是校准件，比如测试拼盘）；
+/// 3. `--scan`：`assets/models` 下有 `.3mf` 却没登记进台账的，报出来（防漏登记）。
+///
+/// 判定逻辑全部走 `calibration_asset`（与工作台同一个实现），本函数只负责排序与输出。
+fn cmd_check_assets(manifest: Option<&Path>, scan: bool) -> ExitCode {
+    let manifest = match manifest {
+        Some(p) => p.to_path_buf(),
+        None => match default_manifest() {
+            Some(p) => p,
+            None => {
+                eprintln!("找不到 presets/assets.toml（请在仓库根运行，或用 --manifest 指定）");
+                return ExitCode::from(2);
+            }
+        },
+    };
+
+    let text = match std::fs::read_to_string(&manifest) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("台账读不出来（{}）：{e}", manifest.display());
+            return ExitCode::from(2);
+        }
+    };
+    let table: toml::Value = match text.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("台账格式不对（{}）：{e}", manifest.display());
+            return ExitCode::from(2);
+        }
+    };
+
+    let assets_root = manifest.parent().unwrap_or(Path::new(".")).join("assets");
+    let entries = match table.get("assets").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => {
+            eprintln!("台账里没有 [[assets]] 段");
+            return ExitCode::from(2);
+        }
+    };
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut failures = 0usize;
+    let mut checked = 0usize;
+    let mut undeclared: Vec<String> = Vec::new();
+    let mut registered: Vec<String> = Vec::new();
+
+    for a in entries {
+        let kind = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if kind != "model" || path.is_empty() {
+            continue;
+        }
+        registered.push(path.to_string());
+        let expected = a.get("calibration").and_then(|v| v.as_str()).unwrap_or("");
+        if expected.is_empty() {
+            undeclared.push(format!(
+                "{path}（id={}）",
+                a.get("id").and_then(|v| v.as_str()).unwrap_or("")
+            ));
+            continue;
+        }
+
+        checked += 1;
+        let abs = assets_root.join(path);
+        let asset = postprocess::calibration_asset::read_identity(&abs);
+        let verdict = match asset.identity.as_deref() {
+            Some(raw) if raw == expected => "ok",
+            Some(_) if asset.is_valid() => "mismatch",
+            Some(_) => "invalid",
+            None => {
+                if asset.problem.as_deref().unwrap_or("").contains("没有") {
+                    "missing"
+                } else {
+                    "unreadable"
+                }
+            }
+        };
+        if verdict != "ok" {
+            failures += 1;
+        }
+        /* 机器可读一行：路径 \t 预期 \t 实际 \t 结论 \t 说明 */
+        rows.push(format!(
+            "{path}\t{expected}\t{}\t{verdict}\t{}",
+            asset.identity.as_deref().unwrap_or("-"),
+            asset.problem.as_deref().unwrap_or("-").replace('\t', " ")
+        ));
+    }
+
+    /* --scan：扫 assets/models 下没登记的 .3mf */
+    let mut unregistered: Vec<String> = Vec::new();
+    if scan {
+        let models = assets_root.join("models");
+        if let Ok(dir) = std::fs::read_dir(&models) {
+            for e in dir.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let rel = format!("models/{name}");
+                if name.to_ascii_lowercase().ends_with(".3mf")
+                    && !registered.iter().any(|r| r == &rel)
+                {
+                    unregistered.push(rel);
+                }
+            }
+        }
+        unregistered.sort();
+    }
+
+    for r in &rows {
+        println!("{r}");
+    }
+
+    eprintln!("校准素材身份检查：{checked} 份声明了预期，{failures} 份不合格");
+    for r in &rows {
+        let cols: Vec<&str> = r.split('\t').collect();
+        if cols.len() >= 5 && cols[3] != "ok" {
+            eprintln!(
+                "  ✗ {} —— 预期 {}，实际 {}（{}）",
+                cols[0], cols[1], cols[2], cols[4]
+            );
+        }
+    }
+    for u in &undeclared {
+        eprintln!("  · 未声明预期（如果不是校准件就不用管）：{u}");
+    }
+    for u in &unregistered {
+        eprintln!("  · 台账里没登记的 .3mf：{u}");
+    }
+    if !unregistered.is_empty() {
+        eprintln!("  （--scan 发现的未登记文件不算失败，但请确认它该不该进台账）");
+    }
+
+    if failures == 0 {
+        eprintln!("✓ 全部通过");
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// 缺省台账：从当前目录往上找 `presets/assets.toml`（仓库根跑、`src-tauri` 里跑都行）。
+fn default_manifest() -> Option<PathBuf> {
+    let mut at = std::env::current_dir().ok()?;
+    loop {
+        let p = at.join("presets").join("assets.toml");
+        if p.is_file() {
+            return Some(p);
+        }
+        if !at.pop() {
+            return None;
+        }
     }
 }
 

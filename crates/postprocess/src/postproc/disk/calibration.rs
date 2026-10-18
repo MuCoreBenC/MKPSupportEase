@@ -12,6 +12,7 @@ use crate::diag::PostprocError;
 use crate::gcode::{OffsetMode, filter_e_moves, format_float, format_speed, format_z};
 use crate::ir::Ir;
 use crate::postproc::calib_models::{self, ModelProfile, ProfileMatch};
+use crate::postproc::calibration::CalibrationReceipt;
 use crate::postproc::machine_dims::{self, get_machine_dimensions};
 use crate::postproc::offset::{MM_PER_MINUTE, process_gcode_offset};
 
@@ -224,6 +225,33 @@ pub fn generate_calibration_gcode_with_centroid(
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
 ) -> Result<Option<Vec<String>>, PostprocError> {
+    generate_calibration_gcode_with_centroid_rec(
+        mode,
+        machine_type_str,
+        ir_data,
+        model_bbox,
+        centroid,
+        z_dwell_sec,
+        xy_dwell_sec,
+        None,
+    )
+}
+
+/// 同 [`generate_calibration_gcode_with_centroid`]，外加把「认到的档」写进 `receipt`。
+///
+/// 回执**只在认档成功那一支**（`*_new` 与 Repetition）有值：经典分支按机型固定坐标走，
+/// 根本没有档可言。`receipt = None` 时与旧函数逐字节相同。
+#[allow(clippy::too_many_arguments)]
+pub fn generate_calibration_gcode_with_centroid_rec(
+    mode: &str,
+    machine_type_str: &str,
+    ir_data: &Ir,
+    model_bbox: Option<&BBox>,
+    centroid: CentroidResult,
+    z_dwell_sec: i64,
+    xy_dwell_sec: i64,
+    receipt: Option<&mut CalibrationReceipt>,
+) -> Result<Option<Vec<String>>, PostprocError> {
     let mt = parse_machine_type(machine_type_str);
     let z_dwell_ms = z_dwell_sec * 1000;
     let xy_dwell_ms = xy_dwell_sec * 1000;
@@ -232,7 +260,15 @@ pub fn generate_calibration_gcode_with_centroid(
             if ir_data.safety.xy_calibration == "new"
                 && let Some(bbox) = model_bbox
             {
-                return generate_xy_calibration_new(mode, mt, ir_data, bbox, centroid, xy_dwell_ms);
+                return generate_xy_calibration_new(
+                    mode,
+                    mt,
+                    ir_data,
+                    bbox,
+                    centroid,
+                    xy_dwell_ms,
+                    receipt,
+                );
             }
             generate_xy_calibration(mode, mt, ir_data, xy_dwell_ms)
         }
@@ -240,11 +276,13 @@ pub fn generate_calibration_gcode_with_centroid(
             if ir_data.safety.z_calibration == "new"
                 && let Some(bbox) = model_bbox
             {
-                return generate_z_offset_calibration_new(mt, ir_data, bbox, centroid, z_dwell_ms);
+                return generate_z_offset_calibration_new(
+                    mt, ir_data, bbox, centroid, z_dwell_ms, receipt,
+                );
             }
             generate_z_offset_calibration(mt, ir_data, z_dwell_ms)
         }
-        "Repetition" => generate_repetition_calibration(mt, ir_data, model_bbox),
+        "Repetition" => generate_repetition_calibration(mt, ir_data, model_bbox, receipt),
         _ => Ok(None),
     }
 }
@@ -606,6 +644,7 @@ fn generate_repetition_calibration(
     mt: &str,
     ir_data: &Ir,
     model_bbox: Option<&BBox>,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let mut output: Vec<String> = Vec::new();
 
@@ -636,6 +675,9 @@ fn generate_repetition_calibration(
         let profile = resolve_profile("Repetition", b, "generate_repetition_calibration")?;
         if profile.datum_x == 0.0 || profile.datum_y == 0.0 {
             return Err(pattern_missing(profile, "datumX/datumY"));
+        }
+        if let Some(r) = receipt {
+            *r = CalibrationReceipt::with_profile(b, profile);
         }
         (b.x_min + profile.datum_x, b.y_min + profile.datum_y)
     } else {
@@ -808,6 +850,7 @@ fn pattern_missing(profile: &ModelProfile, keys: &str) -> PostprocError {
 /// 2. 每轮末尾有 `G4 P{xy_dwell_ms}` —— 经典分支根本不消费 dwell 参数；
 /// 3. 先横线（H）11 轮再竖线（V）11 轮，经典分支是先 Y 线再 X 线；
 /// 4. mount/unmount 行逐行过 `filter_e_moves`。
+#[allow(clippy::too_many_arguments)]
 fn generate_xy_calibration_new(
     mode: &str,
     mt: &str,
@@ -815,8 +858,12 @@ fn generate_xy_calibration_new(
     model_bbox: &BBox,
     centroid: CentroidResult,
     xy_dwell_ms: i64,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let profile = resolve_profile(mode, model_bbox, "generate_xy_calibration_new")?;
+    if let Some(r) = receipt {
+        *r = CalibrationReceipt::with_profile(model_bbox, profile);
+    }
     let expect = profile.centroid;
     let pattern = profile.pattern.as_ref().ok_or_else(|| {
         pattern_missing(profile, "[models.pattern] —— XY 图案那七个偏移没有别的来源")
@@ -1012,14 +1059,19 @@ fn generate_xy_calibration_new(
 /// `loadCalibrationTemplate(template_dir, "z_offset_path_new.gcode")` 无 Rust 对位：
 /// 本项目没有运行时模板目录，Go 侧 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
 /// 所以这里直接用 `Z_OFFSET_SING_LINES`，与经典分支同源。
+#[allow(clippy::too_many_arguments)]
 fn generate_z_offset_calibration_new(
     mt: &str,
     ir_data: &Ir,
     model_bbox: &BBox,
     centroid: CentroidResult,
     z_dwell_ms: i64,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let profile = resolve_profile("ZOffset", model_bbox, "generate_z_offset_calibration_new")?;
+    if let Some(r) = receipt {
+        *r = CalibrationReceipt::with_profile(model_bbox, profile);
+    }
     let expect = profile.centroid;
     let (datum_x, datum_y, spacing, count) = z_pattern(profile)?;
 
@@ -1295,7 +1347,7 @@ mod tests {
     }
 
     fn xy_new(mode: &str, mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_xy_calibration_new(mode, mt, ir, bbox, CentroidResult::default(), 3000)
+        generate_xy_calibration_new(mode, mt, ir, bbox, CentroidResult::default(), 3000, None)
             .expect("生成失败")
             .expect("New 变体不该返回空")
     }
@@ -1405,6 +1457,7 @@ mod tests {
             &scaled,
             CentroidResult::default(),
             3000,
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
@@ -1428,7 +1481,8 @@ mod tests {
                 &ir,
                 &noisy,
                 CentroidResult::default(),
-                3000
+                3000,
+                None
             )
             .is_ok()
         );
@@ -1446,8 +1500,8 @@ mod tests {
             centroid_y: cy + (cy - 82.5736),
             valid: true,
         };
-        let err =
-            generate_xy_calibration_new("Precise", "P1S", &ir, &b, mirrored, 3000).unwrap_err();
+        let err = generate_xy_calibration_new("Precise", "P1S", &ir, &b, mirrored, 3000, None)
+            .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
 
         // valid=false 时不判（调用方语义）
@@ -1457,7 +1511,7 @@ mod tests {
             valid: false,
         };
         assert!(
-            generate_xy_calibration_new("Precise", "P1S", &ir, &b, ignored, 3000).is_ok(),
+            generate_xy_calibration_new("Precise", "P1S", &ir, &b, ignored, 3000, None).is_ok(),
             "valid=false 的质心不该参与判定"
         );
     }
@@ -1560,7 +1614,7 @@ mod tests {
     }
 
     fn z_new(mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_z_offset_calibration_new(mt, ir, bbox, CentroidResult::default(), 2000)
+        generate_z_offset_calibration_new(mt, ir, bbox, CentroidResult::default(), 2000, None)
             .expect("生成失败")
             .expect("New 变体不该返回空")
     }
@@ -1646,6 +1700,7 @@ mod tests {
             &rotated,
             CentroidResult::default(),
             2000,
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
@@ -1662,9 +1717,15 @@ mod tests {
             y_min: 84.618,
             y_max: 84.618 + z_profile().footprint_h,
         };
-        let err =
-            generate_z_offset_calibration_new("P1S", &ir, &scaled, CentroidResult::default(), 2000)
-                .unwrap_err();
+        let err = generate_z_offset_calibration_new(
+            "P1S",
+            &ir,
+            &scaled,
+            CentroidResult::default(),
+            2000,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
     }
 
@@ -1703,9 +1764,15 @@ mod tests {
             y_min: 0.0,
             y_max: 16.0,
         };
-        let err =
-            generate_z_offset_calibration_new("P1S", &ir, &weird, CentroidResult::default(), 2000)
-                .unwrap_err();
+        let err = generate_z_offset_calibration_new(
+            "P1S",
+            &ir,
+            &weird,
+            CentroidResult::default(),
+            2000,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
         assert!(
             err.to_string().contains("zoffset=119.58x13.063")
@@ -1747,7 +1814,8 @@ mod tests {
             centroid_y: cy + (cy - 91.0501),
             valid: true,
         };
-        let err = generate_z_offset_calibration_new("P1S", &ir, &b, mirrored, 2000).unwrap_err();
+        let err =
+            generate_z_offset_calibration_new("P1S", &ir, &b, mirrored, 2000, None).unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
     }
 

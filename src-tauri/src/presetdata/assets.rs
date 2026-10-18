@@ -158,6 +158,19 @@ pub struct Asset {
     /// 这一栏管**它到不到客户端手里**。
     #[serde(default)]
     pub delivery: Delivery,
+    /// **这份模型是哪一种校准件**（2026-10-19 加）—— 只有 `type = 'model'` 用得上，
+    /// 其余类留空。
+    ///
+    /// 值的真源住在模型文件自己身上（`3D/3dmodel.model` 的 `<metadata name="MKPSE:Calibration">`），
+    /// 台账这一格是**预期**：检查脚本拿它与文件里读到的那份比，对不上就报"改了没同步"。
+    ///
+    /// 为什么不靠 id 后缀猜：id 是被人起的名，改个名字不该让校验跟着变；写在这里，
+    /// "这份文件该是什么身份"就有一个可读的真值。
+    ///
+    /// 取值只认四个：`ZOffset` / `Precise` / `Rough` / `Repetition`（解析出口是
+    /// `postprocess::calibration_asset::validate_identity`）。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub calibration: String,
 }
 
 /// [`Asset::delivery`] —— 这份资产**怎么到客户端手里**
@@ -1047,6 +1060,7 @@ mod tests {
             slicer: None,
             profile: None,
             delivery: Delivery::Download,
+            calibration: String::new(),
         })
         .expect("加一条");
         let after = a.to_toml();
@@ -1068,6 +1082,7 @@ mod tests {
             slicer: None,
             profile: None,
             delivery: Delivery::Bundled,
+            calibration: String::new(),
         })
         .expect_err("同 id 再插一条必须被拦");
 
@@ -1083,6 +1098,7 @@ mod tests {
             slicer: None,
             profile: None,
             delivery: Delivery::Download,
+            calibration: String::new(),
         })
         .expect_err("越界 path 必须被拦");
         assert_eq!(a.items().len(), 2, "被拦下的两条都不该进内存");

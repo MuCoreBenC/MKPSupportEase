@@ -7,6 +7,19 @@
 //
 // Go 里这些函数挂在 Engine（helpers.go），但它们是纯内容变换、无编排逻辑，
 // 按「算法全下沉 postproc」原则落在本模块；engine 只调用。
+//
+// **校准身份从哪来（2026-10-18 定案）**：只有一个地方 —— 原始 3MF 的
+// `MKPSE:Calibration`（`gcode::model_identity`），由钩子顺着 `origin.txt` 读出来，
+// 经 [`crate::pipeline::IrProcessRequest::calibration`] 传进管线。
+//
+// 那条 `DetectMode`（mode.go:23，按 G-code 里的标记串认校准模式）**已整条删除**。
+// 删的理由不是简化，是**它会给出错答案**：标记住在 `Metadata/custom_gcode_per_layer.xml`
+// 里，某些版本的 Bambu Studio 存一次就把这个条目丢掉（真机核对：原件
+// `BambuStudio-02.05.00.66` 有、被 `02.08.02.60` 存过一遍的那份没有）。于是同一份模型
+// 换个版本另存一遍，G-code 里就一个字都没有，管线便把校准件当普通模型跑。
+//
+// **G-code 里即便还留着旧注释，也一律忽略。** 几何只参与认档
+// （`calib_models::find_profile`），永远不能决定"是不是校准件"。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -21,11 +34,15 @@ use crate::gcode::{
 };
 use crate::ir::{CALIBRATION_EXEC_DIRECT_CALIBRATE, Ir};
 
-use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
+use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid_rec};
 
 /// `Mode`（calibration/mode.go:11）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// 缺省是 `None`（普通模型）—— 与"没查到身份"是同一件事，所以让 `Default` 取它，
+/// 调用点不用写 `Mode::None` 这种重复。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Mode {
+    #[default]
     None,
     ZOffset,
     XyPrecise,
@@ -36,38 +53,33 @@ pub enum Mode {
 /// Z 校准的涂胶总长常量（mode.go:21）。
 pub const Z_CALIBRATION_GLUE_TOTAL_LENGTH: f64 = 2431.32;
 
-/// `DetectMode`（mode.go:23）：按标记串识别校准模式（顺序即优先级）。
-pub fn detect_mode(lines: &[String]) -> Mode {
-    for line in lines {
-        if line.contains("Precise Calibration") {
-            return Mode::XyPrecise;
-        }
-        if line.contains("Rough Calibration") {
-            return Mode::XyRough;
-        }
-        if line.contains("ZOffset Calibration") {
-            return Mode::ZOffset;
-        }
-        if line.contains("LShape Repetition") {
-            return Mode::Repetition;
-        }
+/// 身份串 → `Mode`。**全仓唯一的解析出口**。
+///
+/// 认的是 `mode_to_calibration_string` 那四个稳定 id（`ZOffset` / `Precise` / `Rough` /
+/// `Repetition`）。3MF 的 `MKPSE:Calibration` 与档位表的 `mode` 数组都只写这几个字，
+/// 也只经这里变成 `Mode` —— 前端与存档不许自己拼。
+///
+/// 不认 `XY`：那是几何分组的旧口径（一块板服务 Precise / Rough 两个身份），
+/// 身份层面从来没有 `XY` 这个模式。大小写不敏感、首尾空白忽略。
+pub fn parse_mode_id(id: &str) -> Option<Mode> {
+    let t = id.trim();
+    if t.eq_ignore_ascii_case("ZOffset") {
+        return Some(Mode::ZOffset);
     }
-    Mode::None
+    if t.eq_ignore_ascii_case("Precise") {
+        return Some(Mode::XyPrecise);
+    }
+    if t.eq_ignore_ascii_case("Rough") {
+        return Some(Mode::XyRough);
+    }
+    if t.eq_ignore_ascii_case("Repetition") {
+        return Some(Mode::Repetition);
+    }
+    None
 }
 
 pub fn is_any(m: Mode) -> bool {
     m != Mode::None
-}
-
-/// 从**输入正文**认出这是哪一种校准件（2026-10-17，给钩子开场用）。
-///
-/// 与管线里那一判据**同一个函数**（[`detect_mode`] 按标记串扫），只是这里先跑一次：
-/// 钩子要在**跑之前**就问「先打印再校准 / 直接校准」，那一刻还没进管线。
-///
-/// 成本 O(行数) 的一次扫描 —— 正文本来就已经在内存里（钩子读过一遍了），不重复读盘。
-pub fn detect_mode_in(raw: &str) -> Mode {
-    let lines: Vec<String> = raw.lines().map(str::to_owned).collect();
-    detect_mode(&lines)
 }
 
 /// 校准件的人类可读名字（`Z 偏移校准` / `XY 精度校准` / `XY 粗校准` / `重复性校准`）。
@@ -122,8 +134,47 @@ fn is_new_calibration_mode(mode_str: &str, model_bbox: Option<&BBox>) -> bool {
     matches!(mode_str, "Precise" | "Rough" | "ZOffset")
 }
 
+/// **校准这一趟「用了什么」的回执**（2026-10-18，执行记录用）。
+///
+/// 为什么需要它：`resolve_profile` 认出的档、实测尺寸、容差全都在
+/// [`insert_calibration_gcode`] **内部**就被消费掉了，成功那趟一个字都不出门 ——
+/// 于是"为什么这次用了加长版的基准"永远无法解释。这个结构把那几个事实**带出来**，
+/// 但它**不参与任何计算**：里面每个值都是同一次调用里已经在手的东西。
+///
+/// 全字段可空：经典分支（按机型固定坐标走）根本不认档 ⇒ `profile_id` 为 `None`；
+/// 认档失败 ⇒ 三个 geometry 字段都是 `None`（错误本身照旧报出去）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CalibrationReceipt {
+    /// 实测挤出包围盒（只有 New 变体与 Repetition 拿得到；经典分支没有）。
+    pub measured: Option<BBox>,
+    /// 命中的档 id（`presets/calibration_models.toml` 的 `[[models]] id`）。
+    pub profile_id: Option<String>,
+    /// 该档的尺寸容差（mm）。
+    pub tolerance: Option<f64>,
+    /// 该档声明的标称外形（宽, 高）。
+    pub footprint: Option<(f64, f64)>,
+}
+
+impl CalibrationReceipt {
+    /// 从认出来的那一档填一次（认档成功才有）。
+    pub(crate) fn with_profile(
+        measured: &BBox,
+        profile: &crate::postproc::calib_models::ModelProfile,
+    ) -> Self {
+        Self {
+            measured: Some(*measured),
+            profile_id: Some(profile.id.clone()),
+            tolerance: Some(profile.tolerance),
+            footprint: Some((profile.footprint_w, profile.footprint_h)),
+        }
+    }
+}
+
 /// `InsertCalibrationGcode`（helpers.go:162）——内存行序列版（13.3 偏离）。
 /// 返回插入后的行序列；落盘（.part + rename）由 engine write 步执行。
+///
+/// 不关心回执的调用方（CLI / 判据）走这一张脸：与
+/// [`insert_calibration_gcode_with_receipt`] 传 `None` **完全等价**。
 #[allow(clippy::too_many_arguments)]
 pub fn insert_calibration_gcode(
     content: Vec<String>,
@@ -134,13 +185,40 @@ pub fn insert_calibration_gcode(
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
 ) -> Result<Vec<String>, PostprocError> {
+    insert_calibration_gcode_with_receipt(
+        content,
+        mode,
+        ir_data,
+        original_bbox,
+        centroid,
+        z_dwell_sec,
+        xy_dwell_sec,
+        None,
+    )
+}
+
+/// 同 [`insert_calibration_gcode`]，但把「用了什么」写进 `receipt`。
+///
+/// 回执里的值全是同一次调用里已经在手的事实，**不新增任何计算**；
+/// `receipt = None` 时行为与旧入口逐字节相同（reference 判据因此不受影响）。
+#[allow(clippy::too_many_arguments)]
+pub fn insert_calibration_gcode_with_receipt(
+    content: Vec<String>,
+    mode: Mode,
+    ir_data: &mut Ir,
+    original_bbox: Option<BBox>,
+    centroid: CentroidResult,
+    z_dwell_sec: i64,
+    xy_dwell_sec: i64,
+    receipt: Option<&mut CalibrationReceipt>,
+) -> Result<Vec<String>, PostprocError> {
     crate::ir::fill_defaults(ir_data);
     let machine_type_str = ir_data.machine.machine_type.clone();
 
     let model_bbox = original_bbox;
 
     let mode_str = mode_to_calibration_string(mode);
-    let calibration_lines = generate_calibration_gcode_with_centroid(
+    let generated = generate_calibration_gcode_with_centroid_rec(
         mode_str,
         &machine_type_str,
         ir_data,
@@ -148,21 +226,23 @@ pub fn insert_calibration_gcode(
         centroid,
         z_dwell_sec,
         xy_dwell_sec,
-    )
-    .map_err(|e| match e {
-        // 形变检测（`E_CAL_MISMATCH_001/002`）的码是对外契约，不许被
-        // `E_CAL_FAILED_001` 吃掉 —— 前者告诉用户「把校准模型转回来」，
-        // 后者只能让人去翻日志。
-        PostprocError::CalibrationMismatch { .. } => e,
-        // 这里只留**诊断细节**：「校准代码没有生成出来」那句与码都在表里
-        // （`messages.toml` 的 E_CAL_FAILED_001），正文里再写一遍码就是自我引用。
-        other => PostprocError::Calibration {
-            message: format!("mode={mode_str}：{other}"),
-        },
-    })?
-    .ok_or_else(|| PostprocError::Calibration {
-        message: format!("无输出，mode={mode_str}"),
-    })?;
+        receipt,
+    );
+    let calibration_lines = generated
+        .map_err(|e| match e {
+            // 形变检测（`E_CAL_MISMATCH_001/002`）的码是对外契约，不许被
+            // `E_CAL_FAILED_001` 吃掉 —— 前者告诉用户「把校准模型转回来」，
+            // 后者只能让人去翻日志。
+            PostprocError::CalibrationMismatch { .. } => e,
+            // 这里只留**诊断细节**：「校准代码没有生成出来」那句与码都在表里
+            // （`messages.toml` 的 E_CAL_FAILED_001），正文里再写一遍码就是自我引用。
+            other => PostprocError::Calibration {
+                message: format!("mode={mode_str}：{other}"),
+            },
+        })?
+        .ok_or_else(|| PostprocError::Calibration {
+            message: format!("无输出，mode={mode_str}"),
+        })?;
 
     let is_direct_calibrate =
         ir_data.safety.calibration_execution_mode == CALIBRATION_EXEC_DIRECT_CALIBRATE;

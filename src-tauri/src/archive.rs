@@ -324,6 +324,56 @@ pub struct Detail {
     /// 切片工艺组（`detail.slicer`）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub slicer: Option<SlicerFacts>,
+    /// 校准件身份证据链（`detail.calibration`，2026-10-18）。
+    ///
+    /// **只加不改**：旧记录读到 `null` ⇒ 前端整块不摆（与 `slicer` / `tower` / `relocation`
+    /// 同一套习惯）。普通模型那一趟恒为 `null`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<CalibrationFacts>,
+}
+
+/// **校准件这一趟的证据链**（2026-10-18）。
+///
+/// 作者原话：「每次处理拿到了什么、从哪里拿到、怎么判断、最终用了什么，都留下记录。
+/// 以后出现识别错误、模型版本不对、参数不匹配，都能回头查清楚。」
+///
+/// 所以这一组回答五件事，**成功与失败都写**：
+///
+/// | 问题 | 字段 |
+/// | --- | --- |
+/// | 原始模型是哪个文件、还在不在 | [`ModelOrigin`] |
+/// | 3MF 说的是什么 | `identity_3mf` |
+/// | 怎么判的 | `verdict` + `note` |
+/// | 实测多大、命中哪一档、容差多少 | `measured` / `profile_id` / `tolerance` / `footprint` |
+/// | 最终采用什么身份 | `mode` |
+///
+/// 形状注意：`identity_3mf` 存的是**原值**（可能是旧写法
+/// `ZOffset Calibration`），不做归一 —— 排查时要看的就是"它当时到底写了什么"。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationFacts {
+    /// 原始模型路径与存在性（值来自切片器临时目录的 `origin.txt`）。
+    #[serde(flatten)]
+    pub origin: postprocess::gcode::ModelOrigin,
+    /// 3MF `MKPSE:Calibration` 的原值；读不到 = `null`。
+    pub identity_3mf: Option<String>,
+    /// `from_3mf`（3MF 里有身份）/ `absent`（没有、或读不到，原因见 `note`）。
+    ///
+    /// **只有这两种**：G-code 那一路来源已整条删除（2026-10-18），不再有
+    /// `only_gcode` / `conflict` 这些格里解释得通、实际却永远出现不了的值。
+    pub verdict: String,
+    /// 读不到的原因（人可读、一条）。不是错误，只是解释。
+    pub note: Option<String>,
+    /// 实测挤出包围盒 `[xMin, xMax, yMin, yMax]`（mm）；经典分支拿不到 = `null`。
+    pub measured: Option<[f64; 4]>,
+    /// 命中的档 id（`calibration_models.toml` 的 `[[models]] id`）。
+    pub profile_id: Option<String>,
+    /// 该档的尺寸容差（mm）。
+    pub tolerance: Option<f64>,
+    /// 该档声明的标称外形 `[宽, 高]`。
+    pub footprint: Option<[f64; 2]>,
+    /// 最终采用的校准身份（`ZOffset` / `Precise` / `Rough` / `Repetition`；无 = `null`）。
+    pub mode: Option<String>,
 }
 
 /// **挪塔这件事的记录**（2026-10-18）。
@@ -426,6 +476,8 @@ pub struct ReportFacts<'a> {
     pub header: &'a postprocess::pipeline::HeaderFacts,
     /// 校准模式串（非校准模式是空串）。
     pub calibration_mode: &'a str,
+    /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
+    pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
 }
 
 /// 涂胶速度（mm/s）：内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
@@ -563,7 +615,32 @@ impl ReportFacts<'_> {
                 ));
                 Some(lines.join("\n"))
             }
-            Step::CalibCheck => None,
+            Step::CalibCheck => {
+                /* 这一步原来恒为 `None`（只跑 dry-run、什么事实都不留）。现在把认档结果
+                摆出来：**成功那趟也写** —— 否则"为什么这次用了加长版的基准"没法解释。
+                只写事实，不写结论（结论在 `detail.calibration` 那一组里）。 */
+                let r = self.calibration_receipt?;
+                let mut lines = Vec::new();
+                if let Some(b) = r.measured {
+                    lines.push(format!(
+                        "实测包围盒: {:.4} × {:.4} mm\nX[{:.4}, {:.4}]  Y[{:.4}, {:.4}]",
+                        b.x_max - b.x_min,
+                        b.y_max - b.y_min,
+                        b.x_min,
+                        b.x_max,
+                        b.y_min,
+                        b.y_max
+                    ));
+                }
+                match (&r.profile_id, r.footprint, r.tolerance) {
+                    (Some(id), Some((w, h)), Some(tol)) => {
+                        lines.push(format!("命中档位: {id}（标称 {w} × {h}，容差 {tol}）"))
+                    }
+                    (Some(id), _, _) => lines.push(format!("命中档位: {id}")),
+                    _ => lines.push("档位: 按机型固定坐标（经典分支，未认档）".to_string()),
+                }
+                Some(lines.join("\n"))
+            }
             Step::Pass1 => Some(format!(
                 "收集 {} 层高索引\n涂胶遍数: {}\n润笔: {}",
                 self.stats.total_layer_number,
@@ -957,6 +1034,7 @@ mod tests {
                 tower_height: 6.46,
                 header: &self.header,
                 calibration_mode: "",
+                calibration_receipt: None,
             }
         }
     }
@@ -1098,9 +1176,42 @@ mod tests {
         assert!(write.contains("原地覆盖完成"));
         assert!(write.contains("输出 22.89 MB"), "实际：{write}");
 
-        // 没有素材的步：键直接不写（页面口径：没给就不摆）
+        // 没有素材的步：键直接不写（页面口径：没给就不摆）。
+        // `CalibCheck` 在**非校准件**那一趟没有回执 ⇒ 整格不写（校准件那趟见
+        // `calib_check_step_reports_the_profile_it_used`）。
         assert!(facts.step_detail(Step::CalibCheck).is_none());
         assert!(facts.step_detail(Step::PrintTime).is_none());
+    }
+
+    /// 第 7 步认档**成功那趟也要留事实**（2026-10-18 补的证据链）：
+    /// 原来这一步恒为 `None`，于是"为什么这次用了加长版的基准"没法解释。
+    #[test]
+    fn calib_check_step_reports_the_profile_it_used() {
+        use postprocess::postproc::calibration::CalibrationReceipt;
+        use postprocess::postproc::disk::BBox;
+
+        let s = sample();
+        let mut facts = s.facts();
+        let receipt = CalibrationReceipt {
+            measured: Some(BBox {
+                x_min: 67.921,
+                x_max: 187.4321,
+                y_min: 121.408,
+                y_max: 137.471,
+            }),
+            profile_id: Some("zoffset-ext".to_string()),
+            tolerance: Some(0.5),
+            footprint: Some((119.58, 16.063)),
+        };
+        facts.calibration_receipt = Some(&receipt);
+
+        let detail = facts.step_detail(Step::CalibCheck).unwrap();
+        assert!(
+            detail.contains("119.5111 × 16.0630"),
+            "实测尺寸要在，实际：{detail}"
+        );
+        assert!(detail.contains("命中档位: zoffset-ext"), "实际：{detail}");
+        assert!(detail.contains("容差 0.5"), "实际：{detail}");
     }
 
     /// 校准模式没跑过碰撞检测（`need_collision_check`）—— 细节**不许**写"无碰撞"，
@@ -1163,6 +1274,7 @@ mod tests {
                 glue: Some(facts.glue()),
                 tower: Some(facts.tower()),
                 slicer: Some(facts.slicer()),
+                calibration: None,
             },
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -1251,6 +1363,7 @@ mod tests {
                 glue: None,
                 tower: None,
                 slicer: None,
+                calibration: None,
             },
         };
         write_meta(&paths, &meta).expect("写记录");

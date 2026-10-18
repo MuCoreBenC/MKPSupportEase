@@ -97,6 +97,7 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
                 gcode_path: work.clone(),
                 ir,
                 output_path: None, // 原地
+                calibration: Default::default(),
             },
             &mut sink,
             &cancel,

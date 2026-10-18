@@ -63,6 +63,7 @@ use std::time::{Duration, Instant};
 
 use postprocess::diag::{messages, CancelToken, PostprocError};
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressEvent, ProgressSink};
+use postprocess::postproc::calibration;
 use postprocess::postproc::disk::{CollisionFacts, TowerAsk, TowerAskOutcome};
 
 use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
@@ -628,6 +629,9 @@ pub fn run(
                 Vec::new(),
                 None,
                 relocation.as_ref(),
+                // 这一笔在身份探测之前（预设都读不出来）⇒ 空探测："没有身份"是事实，
+                // 不是"没去查"。
+                &postprocess::gcode::IdentityProbe::default(),
             );
             return Err(err);
         }
@@ -657,6 +661,20 @@ pub fn run(
      *   用户看着表上那两行答"要不要继续"才答得明白（旧世代那屏也是这么摆的）。
      */
     say_hello(Some(facts_from(&ir, &raw, raw.len() as u64)));
+
+    /*
+     * 校准件身份探测（2026-10-18）：**必须在这里跑，且只跑这一次**。
+     *
+     * 证据（`origin.txt` / 原始 3MF）全在切片器的临时目录里，G-code 一被搬走就够不着。
+     * 所以刚拿到路径时读一次，结果一直带到执行记录里 —— 以后复盘按记录看，
+     * 不重新读盘（用户把原始 3MF 删了也解释得清当时发生了什么）。
+     *
+     * **身份只有一处真值**：原始 3MF 的 `MKPSE:Calibration`（真机实测：Bambu Studio
+     * 另存后仍在）。G-code 里那行 `;MKPCalibration …` 整条链已删除 —— 某些版本的
+     * Bambu Studio 存一次就把 `custom_gcode_per_layer.xml` 丢掉，拿它当判据会
+     * "模型带身份、程序却按普通模型跑"。**G-code 里即便还留着旧注释，也一律忽略。**
+     */
+    let identity_probe = postprocess::gcode::probe_model_identity(&job.gcode);
 
     // 机型核对：预设说一台、切片器那份自报另一台 —— 维度与边界全按预设算，
     // 闷头跑出来的是垃圾（旧世代那次实测：A1 的图 + A1 mini 的预设，
@@ -690,6 +708,7 @@ pub fn run(
                         Vec::new(),
                         None,
                         relocation.as_ref(),
+                        &identity_probe,
                     );
                     return Err(err);
                 }
@@ -709,6 +728,7 @@ pub fn run(
                     Vec::new(),
                     None,
                     relocation.as_ref(),
+                    &identity_probe,
                 );
                 return Err(err);
             }
@@ -733,7 +753,14 @@ pub fn run(
      * 独占借用）。所以这里**再问一次那条线有没有界面** —— 与 `MismatchPolicy` 同一个判据
      * （`ui.connected()`），不需要把借用续命到下面。
      */
-    let calib_mode = postprocess::postproc::calibration::detect_mode_in(&raw);
+    /*
+     * 身份定案：**只有一处来源** —— 3MF 里那条 `MKPSE:Calibration`。
+     *
+     * `None`（模型没标记 / 读不到）⇒ `Mode::None`，整盘按普通模型跑、不弹校准问句。
+     * **不猜**：不看正文里的旧注释、不看尺寸、不看文件名（2026-10-18 删掉的那条
+     * G-code 标记链就是"看了会给出错答案"的例子）。
+     */
+    let calib_mode = mode_of(&identity_probe);
     if let (true, Some(client)) = (
         postprocess::postproc::calibration::is_any(calib_mode),
         ui.client(),
@@ -781,6 +808,7 @@ pub fn run(
                         Vec::new(),
                         None,
                         relocation.as_ref(),
+                        &identity_probe,
                     );
                     return Err(err);
                 }
@@ -797,7 +825,7 @@ pub fn run(
      *     行为与改造前一字不差；
      *   · 递进去之后，等不到答复由这边收成 `Declined`（超时）或 `Cancelled`（按了停止）。
      *
-     * ★ 这里**不再**预检：`detect_mode` / 擦料决策 / 碰撞扫描都只由管线各跑一次。
+     * ★ 这里**不再**预检：擦料决策 / 碰撞扫描都只由管线各跑一次。
      */
     let mut tower_ask = if ir.prefs.auto_tower_position {
         ui.client().map(|client| ChannelTowerAsk {
@@ -824,6 +852,8 @@ pub fn run(
                 gcode_path: job.gcode.clone(),
                 ir,
                 output_path: None,
+                // 身份从钩子带进管线：**管线不许自己再认一遍**（认也认不出来，G-code 里没有）
+                calibration: calib_mode,
             },
             ask,
             &mut steps,
@@ -835,6 +865,8 @@ pub fn run(
                 gcode_path: job.gcode.clone(),
                 ir,
                 output_path: None,
+                // 身份从钩子带进管线：**管线不许自己再认一遍**（认也认不出来，G-code 里没有）
+                calibration: calib_mode,
             },
             ask,
             &mut steps,
@@ -877,6 +909,7 @@ pub fn run(
                 failed_pipeline,
                 collision,
                 relocation.as_ref(),
+                &identity_probe,
             );
             return Err(e);
         }
@@ -895,6 +928,7 @@ pub fn run(
             started,
             &mut archive_warnings,
             relocation.as_ref(),
+            &identity_probe,
         );
     }
 
@@ -1003,6 +1037,8 @@ fn archive_success(
     started: std::time::Instant,
     warnings: &mut Vec<String>,
     relocation: Option<&crate::archive::RelocationRecord>,
+    // 校准件身份探测结果（在机型核对之前那一次读盘拿到的，见 `probe_model_identity`）
+    identity: &postprocess::gcode::IdentityProbe,
 ) {
     // 延后模式下：输出的复制与 sha 都交给界面进程 —— 这条路上只写记录，不碰那 26MB。
     let deferred = done.print_time.is_none();
@@ -1052,6 +1088,7 @@ fn archive_success(
         tower_height: done.stats.tower_height,
         header: &done.header_facts,
         calibration_mode: &done.detail_facts.calibration_mode,
+        calibration_receipt: done.calibration_receipt.as_ref(),
     };
     let pipeline: Vec<PipelineStep> = done
         .step_timings
@@ -1081,6 +1118,9 @@ fn archive_success(
         glue: Some(facts.glue()),
         tower: Some(facts.tower()),
         slicer: Some(facts.slicer()),
+        // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
+        // 成功时一个字都不留 —— "为什么这次用了加长版的基准"永远无法解释）。
+        calibration: calibration_facts(identity, done),
     };
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
@@ -1133,6 +1173,9 @@ fn archive_failure(
     collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
     // 挪塔那一趟的记录（2026-10-18）—— 没走到那一问就是 `None`。
     relocation: Option<&crate::archive::RelocationRecord>,
+    // 校准件身份探测结果。**失败也要留**（作者："不能只在成功时产生"）——
+    // 身份冲突就把两边的原值留在记录里，那正是复盘要看的东西。
+    identity: &postprocess::gcode::IdentityProbe,
 ) {
     let Some(paths) = archived else { return };
     let meta = Meta {
@@ -1165,10 +1208,83 @@ fn archive_failure(
             glue: None,
             tower: None,
             slicer: None,
+            calibration: calibration_facts_failed(identity),
         },
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
         tracing::warn!(error = %e, "执行记录写入失败（失败/取消那一条）");
+    }
+}
+
+/// 3MF 里那条身份 → `Mode`。**全仓唯一把身份字变成 `Mode` 的地方**（钩子这一侧）。
+///
+/// 解析器只有 `calibration::parse_mode_id` 一个；`gcode::model_identity` 那层是叶子模块
+/// （不许引用本 crate 其他模块，见 `tests/boundaries.rs`），所以它只交出原值，由这里解析。
+/// 认不出（没写、写错、写成旧口径 `XY`）一律 `Mode::None` —— **不猜**。
+fn mode_of(identity: &postprocess::gcode::IdentityProbe) -> calibration::Mode {
+    identity
+        .identity_3mf
+        .as_deref()
+        .and_then(calibration::parse_mode_id)
+        .unwrap_or(calibration::Mode::None)
+}
+
+/// 校准件验收那一组（`detail.calibration`）—— **只搬运，不判定**。
+///
+/// 两边素材都在手上：`identity` 是机型核对之前那一次探测（3MF 身份 + G-code 标记 + 判定），
+/// `done.calibration_receipt` 是第 7 步 dry-run 认档的结果（实测尺寸 / 命中档 / 容差）。
+///
+/// 普通模型那一趟：探测是 `Absent`、回执是 `None` ⇒ 整组**不写**（返回 `None`），
+/// 报告页自然不摆这一块。旧记录也一样（读到 `null`）。
+fn calibration_facts(
+    identity: &postprocess::gcode::IdentityProbe,
+    done: &postprocess::pipeline::ProcessResult,
+) -> Option<crate::archive::CalibrationFacts> {
+    let receipt = done.calibration_receipt.as_ref();
+    // 既没身份、又没回执 ⇒ 这就是一盘普通模型，别给报告页添一块空表。
+    if identity.verdict == postprocess::gcode::IdentityVerdict::Absent && receipt.is_none() {
+        return None;
+    }
+    /* 「最终用的身份」取**内核实际跑的那个**（`detail_facts.calibration_mode`），
+    不是 3MF 里那个原值 —— 两者理应相同（钩子把 `calib_mode` 传进管线），
+    但记录要回答的是"实际执行了什么"，所以记内核那一份。 */
+    let ran = done.detail_facts.calibration_mode.as_str();
+    Some(build_calibration_facts(
+        identity,
+        receipt,
+        (!ran.is_empty()).then_some(ran),
+    ))
+}
+
+/// 失败 / 取消那一趟：尺寸与档位拿不到（管线可能没跑到第 7 步），
+/// 但**身份那一半照写** —— 冲突、标记缺失、原始模型被移走，恰恰都是失败时最该看的。
+fn calibration_facts_failed(
+    identity: &postprocess::gcode::IdentityProbe,
+) -> Option<crate::archive::CalibrationFacts> {
+    if identity.verdict == postprocess::gcode::IdentityVerdict::Absent {
+        return None;
+    }
+    Some(build_calibration_facts(identity, None, None))
+}
+
+fn build_calibration_facts(
+    identity: &postprocess::gcode::IdentityProbe,
+    receipt: Option<&postprocess::postproc::calibration::CalibrationReceipt>,
+    mode: Option<&str>,
+) -> crate::archive::CalibrationFacts {
+    let mode = mode.filter(|m| !m.is_empty()).map(str::to_string);
+    crate::archive::CalibrationFacts {
+        origin: identity.origin.clone(),
+        identity_3mf: identity.identity_3mf.clone(),
+        verdict: identity.verdict.as_str().to_string(),
+        note: identity.note.clone(),
+        measured: receipt
+            .and_then(|r| r.measured)
+            .map(|b| [b.x_min, b.x_max, b.y_min, b.y_max]),
+        profile_id: receipt.and_then(|r| r.profile_id.clone()),
+        tolerance: receipt.and_then(|r| r.tolerance),
+        footprint: receipt.and_then(|r| r.footprint).map(|(w, h)| [w, h]),
+        mode,
     }
 }
 
@@ -1929,6 +2045,48 @@ mod tests {
 
     use super::*;
     use postprocess::pipeline::{ProgressEvent, Step};
+
+    /// **身份只从 3MF 来**（2026-10-18 用户定的硬口径）：
+    /// 3MF 有身份 ⇒ 就是那个身份；没有 ⇒ `Mode::None`，**正文里写什么都不算**。
+    ///
+    /// 这条同时钉住"钩子交给管线的身份"这个出口（`identity_probe.mode()`），
+    /// 是 `IrProcessRequest::calibration` 的唯一来源。
+    #[test]
+    fn identity_comes_only_from_the_3mf() {
+        let with = |m: Option<&str>| postprocess::gcode::IdentityProbe {
+            identity_3mf: m.map(str::to_string),
+            verdict: if m.is_some() {
+                postprocess::gcode::IdentityVerdict::From3mf
+            } else {
+                postprocess::gcode::IdentityVerdict::Absent
+            },
+            ..Default::default()
+        };
+
+        /* 3MF 说 ZOffset ⇒ ZOffset */
+        assert_eq!(
+            calibration::mode_to_calibration_string(mode_of(&with(Some("ZOffset")))),
+            "ZOffset"
+        );
+        /* 4 个身份都认 */
+        for (raw, want) in [
+            ("ZOffset", "ZOffset"),
+            ("Precise", "Precise"),
+            ("Rough", "Rough"),
+            ("Repetition", "Repetition"),
+        ] {
+            assert_eq!(
+                calibration::mode_to_calibration_string(mode_of(&with(Some(raw)))),
+                want
+            );
+        }
+
+        /* 没有身份 ⇒ `None`；值乱写也 ⇒ `None`（不猜、不按尺寸凑） */
+        assert!(!calibration::is_any(mode_of(&with(None))));
+        assert!(!calibration::is_any(mode_of(&with(Some("随便写的")))));
+        /* 旧口径 `XY` 不认 —— 身份层面从来没有这个模式 */
+        assert!(!calibration::is_any(mode_of(&with(Some("XY")))));
+    }
 
     /// **失败也有管线账**（2026-10-18，作者：「失败的管线也要写出来，第一步干嘛了」）：
     /// 记账器把"进了哪些步、各花多久、停在哪一步"记全 —— 前面的步是跑完的，

@@ -105,6 +105,29 @@ pub struct AssetView {
     pub group_name: Option<String>,
     /// 它在这个组里演什么（`light` / `dark` / …）。没进组或没写角色 ⇒ `null`
     pub role: Option<String>,
+    /// **校准身份状态**（2026-10-19）。只有 `type = 'model'` 且有 `calibration` 预期、
+    /// 或文件里确实带标记时才有；其余资产（图 / 图标 / 切片器预设…）恒 `null`。
+    ///
+    /// 名字叫 `calibration` 不叫 `identity` —— `identity` 那一格已经被「交付身份四态」
+    /// （进套餐 / 可选 / 随包 / 仅归档）占了，两者毫无关系。
+    pub calibration: Option<CalibrationStatus>,
+}
+
+/// 一份校准素材的身份校验状态（列表那一栏用）。
+///
+/// 结论来自 [`postprocess::calibration_asset::read_identity`] —— 与
+/// `npm run check:calibration-assets` 和详情卡**同一个实现**，不在这里重算一遍。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationStatus {
+    /// 台账里声明的预期身份（`presets/assets.toml` 的 `calibration`）；没声明 = `null`
+    pub expected: Option<String>,
+    /// 文件里实际写的原值（照实，不归一）；没有那条 metadata = `null`
+    pub actual: Option<String>,
+    /// 两者都有且一致（或没声明预期但文件里的值合法）
+    pub ok: bool,
+    /// 读不到 / 值非法 / 与预期不符的原因
+    pub problem: Option<String>,
 }
 
 /// 一个**分组**在界面上的样子（资产库页的分组管理器用）。
@@ -213,6 +236,11 @@ pub struct AssetInspectView {
     /// 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>`。
     /// 绝对的那一份在 [`Self::abs_path`]
     pub product_path: Option<String>,
+    /// **校准身份**（2026-10-19）：`3MF` 才有，其余 `null`。
+    ///
+    /// 与列表里那一格同一份判据（[`calibration_status_of`]），详情卡的「校准身份」段
+    /// 读它；写完身份后前端会重新拉一次 inspect，看到的就是盘上最新的值。
+    pub calibration: Option<CalibrationStatus>,
 }
 
 /// 切片器三根轴之二三（C14 `derive.slicerMetaOf` 同一条判据，搬进后端）：
@@ -465,6 +493,7 @@ fn list_of(
                     })
                     .map(|m| m.role.clone())
                     .filter(|r| !r.trim().is_empty()),
+                calibration: calibration_status_of(presets, a),
             }
         })
         .collect();
@@ -617,6 +646,113 @@ fn list_now(ctx: &mut super::Ctx) -> Result<AssetList, AppError> {
     ))
 }
 
+/// 一份资产的校准身份状态；不是校准模型就 `None`。
+///
+/// "是不是校准模型"的判据：`type = 'model'` **且**（台账声明了 `calibration`
+/// 或文件里确实带了 `MKPSE:Calibration`）。只看 `type = 'model'` 会把测试拼盘
+/// （`MKP_support_test_models.3mf`）也算进来 —— 它不是校准件，不该报"缺标记"。
+fn calibration_status_of(
+    presets: &Presets,
+    asset: &crate::workbench::presets::Asset,
+) -> Option<CalibrationStatus> {
+    if asset.kind != AssetKind::Model || asset.path.is_empty() {
+        return None;
+    }
+    let expected = Some(asset.calibration.trim())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let abs = presets.assets.resolve(asset).ok()?;
+    let read = postprocess::calibration_asset::read_identity(&abs);
+
+    /* 既没预期、文件也没标记 ⇒ 它不是校准件，这一栏不摆 */
+    if expected.is_none() && read.identity.is_none() {
+        return None;
+    }
+
+    let problem = if let Some(note) = read.problem.clone() {
+        Some(note)
+    } else if let Some(exp) = expected.as_deref() {
+        match read.identity.as_deref() {
+            Some(actual) if actual == exp => None,
+            Some(actual) if read.is_valid() => {
+                Some(format!("文件里写的是「{actual}」，台账预期「{exp}」"))
+            }
+            Some(actual) => Some(format!("「{actual}」不是合法身份")),
+            None => Some("文件里没有标记".to_string()),
+        }
+    } else if !read.is_valid() {
+        Some(format!(
+            "「{}」不是合法身份",
+            read.identity.as_deref().unwrap_or_default()
+        ))
+    } else {
+        None
+    };
+
+    Some(CalibrationStatus {
+        ok: problem.is_none(),
+        expected,
+        actual: read.identity,
+        problem,
+    })
+}
+
+/// **补标 / 改写 / 移除一份校准 3MF 的身份**（2026-10-19）。
+///
+/// `value`：`Some("ZOffset" | "Precise" | "Rough" | "Repetition")` = 写入或改写，
+/// `None` = 移除那条 metadata。
+///
+/// 三条纪律：
+/// 1. **写的是真文件**，走 `postprocess::calibration_asset` —— 与检查脚本、后处理
+///    同一个实现，不碰界面状态、不往旁边塞一份 JSON；
+/// 2. 写前先留一份 `.bak`（已存在就不覆盖：保住用户第一次的原始件）；
+/// 3. 写完**重新读盘**再回状态，不做乐观更新 —— 显示的就是盘上那份。
+#[tauri::command]
+pub fn wb_set_calibration_identity(
+    asset_id: String,
+    value: Option<String>,
+) -> Result<AssetList, AppError> {
+    traced("wb_set_calibration_identity", |_| {
+        with_ctx_mut(|ctx| {
+            let asset =
+                ctx.presets.assets.get(&asset_id).cloned().ok_or_else(|| {
+                    AppError::invalid_argument(format!("没有这条资产：{asset_id}"))
+                })?;
+            if asset.kind != AssetKind::Model {
+                return Err(AppError::invalid_argument(
+                    "只有模型（3MF）才有校准身份，这条不是模型".to_string(),
+                ));
+            }
+            let abs = ctx.presets.assets.resolve(&asset)?;
+
+            match value.as_deref() {
+                Some(raw) => {
+                    /* 只认四个身份 —— 非法值直接拒绝，一个字节都不写 */
+                    let mode = postprocess::calibration_asset::validate_identity(raw)
+                        .ok_or_else(|| {
+                            AppError::invalid_argument(format!(
+                                "「{raw}」不是合法身份（只认 ZOffset / Precise / Rough / Repetition）"
+                            ))
+                        })?;
+                    postprocess::calibration_asset::keep_backup(&abs)
+                        .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
+                    postprocess::calibration_asset::write_identity(&abs, mode)
+                        .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
+                }
+                None => {
+                    postprocess::calibration_asset::keep_backup(&abs)
+                        .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
+                    postprocess::calibration_asset::remove_identity(&abs)
+                        .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
+                }
+            }
+
+            /* 写完重新读盘，回全新清单（不手工改内存视图） */
+            list_now(ctx)
+        })
+    })
+}
+
 /// 改一条资产的交付档位（`download` ↔ `bundled`）。**即时落盘**（清单编辑，
 /// 不走参数草稿），回一份新的清单。
 ///
@@ -761,6 +897,7 @@ fn inspect_of(
         height,
         format,
         product_path,
+        calibration: calibration_status_of(presets, asset),
     })
 }
 

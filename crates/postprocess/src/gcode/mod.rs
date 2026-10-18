@@ -35,6 +35,7 @@ pub mod format;
 pub mod header;
 pub mod line_builder;
 pub mod markers;
+pub mod model_identity;
 pub mod model_name;
 pub mod parser;
 pub mod postprocess;
@@ -51,6 +52,9 @@ pub use header::{
 };
 pub use line_builder::LineBuilder;
 pub use markers::*;
+pub use model_identity::{
+    IdentityProbe, IdentityVerdict, ModelOrigin, probe as probe_model_identity,
+};
 pub use model_name::model_name;
 pub use parser::{is_feature_line, is_layer_num_line, is_z_height_line, trim_line};
 pub use postprocess::{

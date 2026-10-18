@@ -13,10 +13,21 @@
 # 读取走机型表同一条链（显式 install → MKPSE_PRESETS_DIR → 仓库相对 presets/）——
 # 见 postproc/machine_dims.rs 的模块头，不另造一份路径依赖。
 #
-# 【切片进来时选哪一档】按实测包围盒**自动匹配**：同一 mode 的档里挑偏差最小、
-# 且两轴都在 `tolerance` 内的一档。都不命中 = 不是我们认识的模型（或模型被缩放），
+# 【切进来的是不是校准件】**只由模型身份标记回答**，不看尺寸：
+#   3MF 里 `3D/3dmodel.model` 的 <metadata name="MKPSE:Calibration">（持久身份，
+#   Bambu Studio 另存后仍在；G-code 里那行旧注释一律忽略）。
+#   没有它 ⇒ 普通模型，**一档都不参与匹配** —— 尺寸恰好等于某块校准板也不算。
+#
+# 【身份只有四个】ZOffset / Precise / Rough / Repetition（= 内核 Mode）。`mode` 是**数组**：
+# 写"这一档服务哪些身份"。一块板服务两种校准就写两个（Precise 与 Rough 是**两种身份**，
+# 不是一种叫 XY 的东西——它们只是碰巧共用同一块 50.5×50.5 的板）。
+# 同一个身份也可以挂多档（Z 校准现有旧版与加长版）：加模型就是加一条。
+#
+# 【选哪一档】身份对上的档里按实测包围盒**自动匹配**：挑偏差最小、且两轴都在
+# `tolerance` 内的一档。都不命中 = 模型被缩放（或这块板还没登记），
 # 报 E_CAL_MISMATCH_002 并把已知档位的外形尺寸列出来。
-# 【已知局限】只按外形尺寸认档：把旧档模型整体放大 3mm，会被认成恰好同尺寸的新档。
+# 【已知局限】已在允许的档里只按尺寸认档：把旧档模型整体放大 3mm，会被认成新档。
+# 这只影响"已识别的校准件选哪一档"，**不会**让普通模型被认成校准件。
 #
 # 【footprint 口径】写的是**切片后实测**的挤出包围盒宽高（打印区网格尺寸 − 一个挤出宽度
 # 的内缩），网格尺寸写在旁边的注释里，方便对账。`0.0` = 这一档不参与尺寸校验（Repetition）。
@@ -28,7 +39,7 @@
 
 [[models]]
 id = 'zoffset'
-mode = 'ZOffset'
+mode = ['ZOffset']
 asset = 'zoffset-calibration'
 # 现行出厂那一版：打印区网格 120.000 × 13.484 ⇒ 切片实测 119.58 × 13.063
 footprintW = 119.58
@@ -47,7 +58,7 @@ square = false
 
 [[models]]
 id = 'zoffset-ext'
-mode = 'ZOffset'
+mode = ['ZOffset']
 asset = 'zoffset-calibration-ext'
 # 2026-10-18 新版：打印区低沿往下延长 1mm、高沿往上延长 2mm（中间圆点未动）
 # ⇒ 网格 120.000 × 16.484 ⇒ 切片实测 119.58 × 16.063。
@@ -67,11 +78,11 @@ dySign = 0
 minRatio = 0.01
 square = false
 
-# ---------------- XY 偏移校准（Precise / Rough 共用一张板） ----------------
+# ---------------- XY 偏移校准（Precise 与 Rough 两种身份共用这一张板） ----------------
 
 [[models]]
-id = 'precise'
-mode = 'XY'
+id = 'xy-square-50'
+mode = ['Precise', 'Rough']
 asset = 'precise-calibration'
 # 正方形板 50.5 × 50.5：转 90° 与转 180° 的 BBox 一模一样，所以只靠质心判方向
 # （见 `[models.centroid]` 的 `square = true` 那一路）。
@@ -101,7 +112,7 @@ square = true
 
 [[models]]
 id = 'repetition'
-mode = 'Repetition'
+mode = ['Repetition']
 datumX = 0.079
 datumY = 3.755
 

@@ -622,6 +622,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
         app::assets::wb_set_asset_delivery,
+        app::assets::wb_set_calibration_identity,
         // 「分组」（2026-10-16）：哪几张图共用同一份标注源稿 —— 登记在台账 `[[groups]]`，
         // 即时落盘、回一份新清单。作者要的是"像台账那样的管理器"，不是靠文件名算
         app::assets::wb_set_group,

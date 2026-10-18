@@ -90,6 +90,7 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
             gcode_path: work.clone(),
             ir,
             output_path: None,
+            calibration: Default::default(),
         },
         &mut NoProgress,
         &CancelToken::new(),

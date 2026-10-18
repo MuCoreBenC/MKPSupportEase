@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "6374b7c4729e5a5d",
+  "revision": "638456a9ef14cafd",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -683,21 +683,24 @@
       "type": "model",
       "name": "精密校准模型",
       "path": "models/Precise_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "Precise"
     },
     {
       "id": "zoffset-calibration",
       "type": "model",
       "name": "Z 轴偏移校准模型",
       "path": "models/ZOffset_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "ZOffset"
     },
     {
       "id": "zoffset-calibration-ext",
       "type": "model",
       "name": "Z 轴偏移校准模型（加长版）",
       "path": "models/ZOffset_Calibration_ext.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "ZOffset"
     },
     {
       "id": "a1-bbs-02-010",
@@ -4996,8 +4999,8 @@
       "path": "assets/models/Precise_Calibration.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "9d7b373d3aa90fe2e68a6760d54e1bbd8d4a9259006959665ac91cdee68b4f32",
-      "size": 385969
+      "sha256": "1f49e748edd63aa04caa5fabed293b9da5a36049f350ed6c1c646df70cf83e1c",
+      "size": 385735
     },
     {
       "kind": "model",
@@ -5005,8 +5008,8 @@
       "path": "assets/models/ZOffset_Calibration.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "773b65b0dcdf09472c013bd4eec0edff94372e795dd50d1db99d9cef85f9490c",
-      "size": 290327
+      "sha256": "63ff715eff4c2d177b91d469790340fefac1ec74349d34040d11fea016333384",
+      "size": 290079
     },
     {
       "kind": "model",
@@ -5014,8 +5017,8 @@
       "path": "assets/models/ZOffset_Calibration_ext.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "b22822cbf3446a9af3b8358b8e094a55b788dc11022ec78d87a12909253263e5",
-      "size": 159132
+      "sha256": "0b3b2a274240a2fedd1adb8aec32494949bac628f649b4b671051347224d40c8",
+      "size": 158883
     },
     {
       "kind": "bbs_config",

@@ -425,7 +425,17 @@ const MACHINE_VIEWS: {
   },
 ]
 
-type FixtureRef = { id: string; kind: string; slicer: string | null; profile: string | null; name: string; path: string; delivery?: 'download' | 'bundled' }
+type FixtureRef = {
+  id: string
+  kind: string
+  slicer: string | null
+  profile: string | null
+  name: string
+  path: string
+  delivery?: 'download' | 'bundled'
+  /** 台账声明的预期校准身份（2026-10-19）；只有 model 类可能非空 */
+  calibration?: string
+}
 
 /* ---------- 「标注台」源稿（2026-10-16）：演示后端的内存版 ----------
    真机上它落在 `presets/assets/<同类目录>/<对>.anno.json`（随仓库走、不进交付目录）。
@@ -505,6 +515,9 @@ const ASSETS: FixtureRef[] = [
   { id: 'a1-fast', kind: 'mkPreset', slicer: null, profile: null, name: 'A1 高速版预设', path: '' },
   { id: 'p1s-icon', kind: 'icon', slicer: null, profile: null, name: 'P1S 图标', path: 'icons/p1s.svg' },
   { id: 'mkp-support-models', kind: 'model', slicer: null, profile: null, name: '支撑测试模型', path: 'models/support-test.3mf' },
+  /* 演示校准素材（2026-10-19）：一份已被识别、一份故意没打标记 —— 好让工作台那一段两种形态都看得见 */
+  { id: 'zoffset-calibration', kind: 'model', slicer: null, profile: null, name: 'Z 轴偏移校准模型', path: 'models/ZOffset_Calibration.3mf', calibration: 'ZOffset' },
+  { id: 'precise-calibration', kind: 'model', slicer: null, profile: null, name: '精密校准模型', path: 'models/Precise_Calibration.3mf', calibration: 'Precise' },
   { id: 'a1-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 0.2 0.10.json' },
   { id: 'a1-bbs-04-020', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1：0.4 喷头 0.20 层高', path: 'bbs/Process/0.4mm/MKPProcess A1 0.4 0.20.json' },
   { id: 'a1-mini-bbs-02-010', kind: 'slicerProfile', slicer: 'bbs', profile: 'process', name: 'A1 mini：0.2 喷头 0.10 层高', path: 'bbs/Process/0.2mm/MKPProcess A1 mini 0.2 0.10.json' },
@@ -686,6 +699,7 @@ function assetListOf(
       groupId: g?.id ?? null,
       groupName: g?.name ?? null,
       role: role === '' ? null : role,
+      calibration: mockCalibrationOf(a),
     }
   })
   const q = (query ?? '').trim().toLowerCase()
@@ -735,6 +749,32 @@ function mockSha(id: string): string {
  * （`presets/delivery/mkp/presets/A1-standard.toml`，一份已生成、一份还没）。
  * 文件不在的那一条给期望路径 + 空读数（照真机的口径）。
  */
+/**
+ * 演示用的校准身份账（2026-10-19）。
+ *
+ * 真机里这个值住在 3MF 内部，mock 拿不到 —— 所以在这里记一条"文件里有什么"，
+ * 让界面两种形态（已标记 / 缺标记）都能演示到。**只在 mock 里存在**，
+ * 生产走 `wb_set_calibration_identity` → Rust 的 `calibration_asset`。
+ */
+const MOCK_CALIBRATION: Record<string, string | null> = {
+  'zoffset-calibration': 'ZOffset',
+  'precise-calibration': null,
+}
+
+/** 与后端 `calibration_status_of` 同一套判定（预期 vs 实值） */
+function mockCalibrationOf(a: FixtureRef) {
+  if (a.kind !== 'model' || !a.path) return null
+  const expected = (a as { calibration?: string }).calibration ?? null
+  const actual = MOCK_CALIBRATION[a.id] ?? null
+  if (expected == null && actual == null) return null
+  const LEGAL = ['ZOffset', 'Precise', 'Rough', 'Repetition']
+  let problem: string | null = null
+  if (actual == null) problem = '3MF 里没有 MKPSE:Calibration 这条 metadata'
+  else if (!LEGAL.includes(actual)) problem = `「${actual}」不是合法身份`
+  else if (expected != null && actual !== expected) problem = `文件里写的是「${actual}」，台账预期「${expected}」`
+  return { expected, actual, ok: problem == null, problem }
+}
+
 function assetInspectOf(a: FixtureRef) {
   const toWin = (p: string) => p.replace(/\//g, '\\')
   if (a.kind === 'mkPreset') {
@@ -746,7 +786,7 @@ function assetInspectOf(a: FixtureRef) {
     return {
       id: a.id, fileName, absPath: `C:\\dev\\${toWin(productPath)}`, exists,
       bytes: exists ? 4312 : null, sha256: exists ? mockSha(a.id) : null,
-      width: null, height: null, format: 'toml', productPath,
+      width: null, height: null, format: 'toml', productPath, calibration: null,
     }
   }
   const fileName = a.path.split('/').pop() ?? a.path
@@ -760,6 +800,7 @@ function assetInspectOf(a: FixtureRef) {
     width: image ? 1024 : icon ? 24 : null,
     height: image ? 768 : icon ? 24 : null,
     productPath: null,
+    calibration: mockCalibrationOf(a),
   }
 }
 
@@ -1570,6 +1611,22 @@ export function installMockBackend() {
             (args?.ungrouped as boolean | null) ?? null,
           ),
         )
+      /* 补标 / 改写 / 移除校准身份（2026-10-19）—— 与后端同一套守卫：
+         只认四个身份、只有模型类有身份 */
+      case 'wb_set_calibration_identity': {
+        const assetId = args?.assetId as string
+        const value = (args?.value as string | null) ?? null
+        const a = ASSETS.find((x) => x.id === assetId)
+        if (!a) return Promise.reject({ code: 'NOT_FOUND', message: `没有资产 ${assetId}`, traceId: 'mock' })
+        if (a.kind !== 'model') {
+          return Promise.reject({ code: 'INVALID', message: `资产 ${assetId} 不是模型，没有校准身份`, traceId: 'mock' })
+        }
+        if (value != null && !['ZOffset', 'Precise', 'Rough', 'Repetition'].includes(value)) {
+          return Promise.reject({ code: 'INVALID', message: `「${value}」不是合法身份`, traceId: 'mock' })
+        }
+        MOCK_CALIBRATION[assetId] = value
+        return Promise.resolve(assetListOf(null, null, null, null, null, null, null, null))
+      }
       case 'wb_set_asset_delivery': {
         const assetId = args?.assetId as string
         const delivery = args?.delivery as 'download' | 'bundled'

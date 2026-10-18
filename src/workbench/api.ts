@@ -1439,6 +1439,31 @@ export interface AssetView {
   groupName: string | null
   /** 它在这个组里演什么（`light` / `dark` / …）。没进组或没写角色 ⇒ null */
   role: string | null
+  /**
+   * **校准身份状态**（2026-10-19）。只有模型类、且台账声明了预期或文件里真带标记时才有；
+   * 图 / 图标 / 切片器预设一律 `null`。
+   *
+   * ★ 与上面那个 `identity`（交付身份四态）毫无关系 —— 那是"怎么到客户端手里"，
+   * 这是"这份 3MF 是哪一种校准件"。
+   */
+  calibration: CalibrationStatus | null
+}
+
+/**
+ * 一份校准素材的身份校验（`assets::CalibrationStatus`）。
+ *
+ * 结论来自 Rust 的 `calibration_asset::read_identity` —— 与
+ * `npm run check:calibration-assets` 同一个实现，前端不自己拆 3MF。
+ */
+export interface CalibrationStatus {
+  /** 台账里声明的预期身份；没声明 = null */
+  expected: string | null
+  /** 文件里实际写的原值（照实，不归一）；没有那条 metadata = null */
+  actual: string | null
+  /** 预期与实值一致（或没声明预期但值合法） */
+  ok: boolean
+  /** 读不到 / 值非法 / 与预期不符的原因 */
+  problem: string | null
 }
 
 /** `assets::GroupView` —— 一个分组在界面上的样子（资产库页的分组管理器用） */
@@ -1583,6 +1608,8 @@ export interface AssetInspectView {
   format: string | null
   /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>` */
   productPath: string | null
+  /** **校准身份**（2026-10-19）：3MF 才有，其余 null。写完身份后重新拉一次就是最新值 */
+  calibration: CalibrationStatus | null
 }
 
 /** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
@@ -1755,6 +1782,17 @@ export const wb = {
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
 
   /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  /**
+   * **补标 / 改写 / 移除一份校准 3MF 的身份**（2026-10-19）。
+   *
+   * `value = null` ⇒ 移除那条 `MKPSE:Calibration`。
+   *
+   * 写的是**盘上那份真文件**（后端走 `calibration_asset`，与检查脚本同一个实现），
+   * 写完重新读盘回全新清单 —— 前端拿到的是实测结果，不是乐观更新的界面状态。
+   */
+  setCalibrationIdentity: (assetId: string, value: string | null) =>
+    invoke<AssetList>('wb_set_calibration_identity', { assetId, value }),
+
   setAssetDelivery: (assetId: string, delivery: 'download' | 'bundled') =>
     invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
 

@@ -227,12 +227,16 @@ id = 'precise-calibration'
 type = 'model'
 name = '精密校准模型'
 path = 'models/Precise_Calibration.3mf'
+# 预期身份（2026-10-19）：文件里 `3D/3dmodel.model` 的 MKPSE:Calibration 必须与之相同。
+# 真源是模型文件自己；这一格是**验收用的预期**，`npm run check:calibration-assets` 拿它比对。
+calibration = 'Precise'
 
 [[assets]]
 id = 'zoffset-calibration'
 type = 'model'
 name = 'Z 轴偏移校准模型'
 path = 'models/ZOffset_Calibration.3mf'
+calibration = 'ZOffset'
 
 # 2026-10-18：新版 Z 校准模型（打印区低沿 −1mm / 高沿 +2mm ⇒ 深 13.063 → 16.063，宽不变）。
 # 字节是作者导出的正式件（159132 字节，sha256 `b22822cb…`）；实测打印区网格 120.000 × 16.484
@@ -244,6 +248,7 @@ id = 'zoffset-calibration-ext'
 type = 'model'
 name = 'Z 轴偏移校准模型（加长版）'
 path = 'models/ZOffset_Calibration_ext.3mf'
+calibration = 'ZOffset'
 
 # ---------------- 切片器预设（BBS） ----------------
 #

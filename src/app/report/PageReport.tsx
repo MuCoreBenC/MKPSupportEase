@@ -91,6 +91,7 @@ import type {
   ReportDetail,
   ReportExportPlan,
   ReportGlueFacts,
+  ReportCalibrationFacts,
   ReportSlicerFacts,
   ReportSummary,
   ReportTowerFacts,
@@ -489,6 +490,58 @@ function slicerGroup(slicer: ReportSlicerFacts): Group | null {
   return { id: 'slicer', title: '切片工艺', sum: slicer.slicerVersion ?? '', cells }
 }
 
+/**
+ * 校准件身份证据链（键与 `detail.calibration` 同名）。
+ *
+ * 这一组回答的是**当时怎么判的**，不是结论好不好：
+ * 原始模型是哪个、两边各写了什么、实测多大、最终用了哪一档。排查"识别错了 /
+ * 档位选错了"全看这几行。
+ *
+ * 值一律**照实说话**：读不到就摆 `—`，判定结果翻成人话，不把 `only_3mf` 这种机器串
+ * 直接甩给用户。
+ */
+function calibrationGroup(c: ReportCalibrationFacts): Group | null {
+  const verdictText: Record<string, string> = {
+    from_3mf: '模型里带校准标记',
+    absent: '没有校准标记',
+  }
+  const modelFile =
+    c.model3mf != null
+      ? `${c.model3mf}${c.exists ? '' : '（已不在原路径）'}`
+      : c.originPath != null
+        ? `${c.originPath}（不是 .3mf）`
+        : '—'
+
+  const cells: [string, string][] = [
+    ['原始模型', modelFile],
+    ['校准标记', c.identity3mf ?? '—'],
+    ['判定', verdictText[c.verdict] ?? c.verdict],
+  ]
+  if (c.note != null && c.note !== '') cells.push(['说明', c.note])
+
+  if (c.measured != null) {
+    const [x0, x1, y0, y1] = c.measured
+    cells.push(['实测尺寸', `${fmtNum(x1 - x0)} × ${fmtNum(y1 - y0)} mm`])
+  }
+  if (c.profileId != null) {
+    const nominal =
+      c.footprint != null ? `标称 ${fmtNum(c.footprint[0])} × ${fmtNum(c.footprint[1])}` : null
+    const tol = c.tolerance != null ? `容差 ${fmtNum(c.tolerance)}` : null
+    const extra = [nominal, tol].filter((x): x is string => x !== null).join('，')
+    cells.push(['命中档位', extra === '' ? c.profileId : `${c.profileId}（${extra}）`])
+  }
+  if (c.mode != null && c.mode !== '') cells.push(['校准身份', c.mode])
+
+  /* 只有"没有标记 + 也没认到档"才是真的一无所有（普通模型本不该进这里） */
+  if (!hasAnyValue(cells)) return null
+  return {
+    id: 'calibration',
+    title: '校准身份',
+    sum: c.mode ?? verdictText[c.verdict] ?? '',
+    cells,
+  }
+}
+
 /** 一组里所有格子的值都是「—」就别摆这一组（成功/失败两种情况字段不一样多） */
 function hasAnyValue(cells: [string, string][]): boolean {
   return cells.some(([, v]) => v !== '—')
@@ -574,6 +627,12 @@ function buildGroups(detail: ReportDetail): Group[] {
   }
   if (detail.slicer !== undefined && detail.slicer !== null) {
     const g = slicerGroup(detail.slicer)
+    if (g !== null) groups.push(g)
+  }
+
+  /* 校准件身份证据链：普通模型那一趟后端不写这一格 ⇒ 整组不摆（旧记录同理） */
+  if (detail.calibration != null) {
+    const g = calibrationGroup(detail.calibration)
     if (g !== null) groups.push(g)
   }
 

@@ -22,6 +22,9 @@
 //! - **错误即中止**：没有「Warn 一下继续跑」。
 
 // 模块按 Task 顺序逐个接入（每个 Task 结束时 `cargo build` 必须退 0）。
+/// 校准素材的 3MF 身份（读 / 校验 / 写回 / 移除）—— **全仓唯一实现**。
+/// 后处理钩子只读、检查脚本只校验、工作台可写，三张嘴都调这里（见模块头）。
+pub mod calibration_asset;
 pub mod diag;
 pub mod gcode;
 pub mod ir;

@@ -53,13 +53,18 @@ pub const BLOCK_END: &str = ";===== pre-print bed glue end ============";
 /// 与旧侧 `applyPrePrintBedGlueToFile` 的差别只有一处：那边自己读文件、自己写文件；
 /// 这里收**行序列**、还行序列 —— 管线是内存里跑到底再一次落盘的，
 /// 中间不落盘（`pipeline/mod.rs` 的写步才是唯一写点）。
-pub fn apply_bed_glue(lines: Vec<String>, ir: &Ir) -> Vec<String> {
+pub fn apply_bed_glue(
+    lines: Vec<String>,
+    ir: &Ir,
+    calibration: crate::postproc::calibration::Mode,
+) -> Vec<String> {
     if !ir.prefs.bed_glue_enabled {
         return lines;
     }
 
-    /* 校准件这一趟不涂：没有擦料塔，路径会跑出校准区域 */
-    if calibration::is_any(calibration::detect_mode(&lines)) {
+    /* 校准件这一趟不涂：没有擦料塔，路径会跑出校准区域。
+    身份由调用方定案传进来（`IrProcessRequest::calibration`）—— 不在这里扫 G-code。 */
+    if calibration::is_any(calibration) {
         return lines;
     }
 
@@ -569,7 +574,10 @@ mod tests {
             "G1 X1 Y1",
         ]);
         let ir = Ir::default();
-        assert_eq!(apply_bed_glue(src.clone(), &ir), src);
+        assert_eq!(
+            apply_bed_glue(src.clone(), &ir, crate::postproc::calibration::Mode::None),
+            src
+        );
     }
 
     /// 开着时插在 `nozzle load line` **之前**，且首尾标记都在。
@@ -583,7 +591,7 @@ mod tests {
         ]);
         let mut ir = Ir::default();
         ir.prefs.bed_glue_enabled = true;
-        let out = apply_bed_glue(src, &ir);
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
 
         let start = out
             .iter()
@@ -612,7 +620,7 @@ mod tests {
         ]);
         let mut ir = Ir::default();
         ir.prefs.bed_glue_enabled = true;
-        let out = apply_bed_glue(src, &ir);
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
         let block_at = out.iter().position(|l| l == BLOCK_START).expect("插了");
         let exec_at = out
             .iter()
@@ -632,7 +640,7 @@ mod tests {
         ]);
         let mut ir = Ir::default();
         ir.prefs.bed_glue_enabled = true;
-        let out = apply_bed_glue(src, &ir);
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
 
         assert!(
             out.iter().any(|l| l.starts_with("M140 S50")),
@@ -659,7 +667,7 @@ mod tests {
         ]);
         let mut ir = Ir::default();
         ir.prefs.bed_glue_enabled = true;
-        let out = apply_bed_glue(src, &ir);
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
 
         assert!(out.iter().any(|l| l.starts_with("M140 S30")), "不许升温");
         assert!(out.iter().any(|l| l.starts_with("M190 S30")));

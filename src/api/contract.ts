@@ -222,6 +222,42 @@ export interface ReportSlicerFacts {
   useDiskWipe?: boolean
 }
 
+/**
+ * 校准件身份证据链（`_meta.json` 的 `detail.calibration`）。
+ *
+ * 一份记录能独立回答「当时看的是哪个模型、两边各写了什么、怎么判的、最终用了哪一档」——
+ * 用户把原始 3MF 删了也解释得清。
+ */
+export interface ReportCalibrationFacts {
+  /** `origin.txt` 的原值（可能是 `.stl`，也可能为空） */
+  originPath: string | null
+  /** 仅当扩展名是 `.3mf` 时给出 —— 只有它才可能是身份来源 */
+  model3mf: string | null
+  /** 该路径**当时**是否真实存在（现在可能已被移走） */
+  exists: boolean
+  /** 3MF `MKPSE:Calibration` 的**原值**（未归一，可能是旧写法） */
+  identity3mf: string | null
+  /**
+   * `from_3mf`（3MF 里有身份）/ `absent`（没有或读不到，原因见 `note`）。
+   *
+   * 只有这两种 —— 身份的唯一来源是 3MF 里那条 `MKPSE:Calibration`，
+   * G-code 那一路载体已整条删除。
+   */
+  verdict: string
+  /** 读不到的原因（人可读一条）；不是错误，只是解释 */
+  note: string | null
+  /** 实测挤出包围盒 `[xMin, xMax, yMin, yMax]`（mm）；经典分支拿不到 */
+  measured: [number, number, number, number] | null
+  /** 命中的档 id（`calibration_models.toml` 的 `[[models]] id`） */
+  profileId: string | null
+  /** 该档的尺寸容差（mm） */
+  tolerance: number | null
+  /** 该档声明的标称外形 `[宽, 高]` */
+  footprint: [number, number] | null
+  /** 最终采用的校准身份（`ZOffset` / `Precise` / `Rough` / `Repetition`） */
+  mode: string | null
+}
+
 /** 一次执行的摘要（报告页列表行）。字段与 `_meta.json`（schema v2）一一对应 */
 export interface ReportSummary {
   /** 记录 id = `_meta.json` 文件名去掉后缀，全树唯一 */
@@ -278,6 +314,14 @@ export interface ReportDetail {
   tower?: ReportTowerFacts | null
   /** 切片工艺组 */
   slicer?: ReportSlicerFacts | null
+  /**
+   * **校准件身份证据链**（2026-10-18，`_meta.json` 的 `detail.calibration`）。
+   *
+   * 作者原话：「每次处理拿到了什么、从哪里拿到、怎么判断、最终用了什么，都留下记录。」
+   * 普通模型那一趟后端**不写这一格**；旧记录也没有 ⇒ `null` ⇒ 整块不摆。
+   * 判空一律 `!= null`（Rust 的 `Option` 线上是显式 `null`）。
+   */
+  calibration?: ReportCalibrationFacts | null
   pipeline: ReportPipelineStep[]
   /**
    * **碰撞那一趟的事实**（2026-10-18，`_meta.json` 顶层 `collision`）。

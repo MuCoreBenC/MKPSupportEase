@@ -62,6 +62,13 @@ const ALLOWED: &[(&str, &str)] = &[
         "postprocess/src/main.rs",
         "CLI 的 `init` 子命令：先判 exists 再写，已存在就报错退出；写的是用户在命令行指定的路径",
     ),
+    (
+        "postprocess/src/calibration_asset.rs",
+        "改 3MF 里的校准身份标记（工作台 / 检查共用）：同目录临时文件 → sync_all → rename，\
+         目标 3MF 在 rename 那一刻之前一个字节都没被碰过 —— 与 `pipeline/mod.rs` 的 `.part`\
+         同一个模式。崩在半路坏掉的是那个 `.mkpse-tmp` 临时文件（下次改会覆盖它），\
+         用户的 3MF 仍是原样可打开的。`fs::remove_file` 只删这个自己的临时文件",
+    ),
 ];
 
 fn crates_root() -> PathBuf {

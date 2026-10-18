@@ -1,4 +1,4 @@
-//! Task 13 判据：校准检测（DetectMode）与插入（insert_calibration_gcode）。
+//! Task 13 判据：校准插入（insert_calibration_gcode）。
 //!
 //! 字节锚点：生成器本体已由 reference_calibration.rs（Task 9.5，四模式逐字节）
 //! 钉住；插入编排（filter/minimize/插入点选择）在旧侧**无字节参考**
@@ -6,7 +6,7 @@
 //! 三种 exec_mode 各一条（13.5）。
 
 use postprocess::ir::Ir;
-use postprocess::postproc::calibration::{Mode, detect_mode, insert_calibration_gcode};
+use postprocess::postproc::calibration::{Mode, insert_calibration_gcode};
 use postprocess::postproc::disk::{BBox, CentroidResult};
 
 fn fixture_ir() -> Ir {
@@ -37,39 +37,6 @@ fn centroid() -> CentroidResult {
         centroid_y: 100.0,
         valid: true,
     }
-}
-
-#[test]
-fn detect_mode_priority_matrix() {
-    assert_eq!(
-        detect_mode(&lines(&[
-            "; total layer number: 1/1",
-            "; Precise Calibration"
-        ])),
-        Mode::XyPrecise
-    );
-    assert_eq!(detect_mode(&lines(&["; Rough Calibration"])), Mode::XyRough);
-    assert_eq!(
-        detect_mode(&lines(&["; ZOffset Calibration"])),
-        Mode::ZOffset
-    );
-    assert_eq!(
-        detect_mode(&lines(&["; LShape Repetition"])),
-        Mode::Repetition
-    );
-    assert_eq!(detect_mode(&lines(&["G1 X1 Y1"])), Mode::None);
-    // Go 逐行判定（外层行、内层标记）：首行命中 ZOffset 即返回，
-    // 不是「标记种类优先级」—— 单行多标记才是 Precise > Rough > ZOffset > Repetition。
-    assert_eq!(
-        detect_mode(&lines(&["; ZOffset Calibration", "; Precise Calibration"])),
-        Mode::ZOffset
-    );
-    assert_eq!(
-        detect_mode(&lines(&[
-            "; line has Precise Calibration and ZOffset Calibration"
-        ])),
-        Mode::XyPrecise
-    );
 }
 
 /// print_then_calibrate / ""：不删模型路径，校准段插到 "; filament end gcode" 之后。

@@ -1254,6 +1254,7 @@ mod tests {
                 slicer: None,
                 profile: None,
                 delivery,
+                calibration: String::new(),
             }
         }
 
