@@ -20,7 +20,8 @@ use std::path::PathBuf;
 use postprocess::diag::{CancelToken, PostprocError};
 use postprocess::ir::Ir;
 use postprocess::pipeline::{
-    self, IrProcessRequest, ProgressEvent, ProgressSink, STEPS, Step, process_with_ir,
+    self, IrProcessRequest, ProgressEvent, ProgressSink, STEPS, Step,
+    process_with_ir_with_tower_ask,
 };
 use postprocess::postproc::disk::{
     CollisionFacts, TowerAsk, TowerAskOutcome, detect_tower_collision,
@@ -166,13 +167,14 @@ fn no_asker_keeps_the_old_behaviour() {
     let path = write_input("no-asker-old");
     let mut sink = Recorder::default();
     let cancel = CancelToken::new();
-    let old = process_with_ir(
+    let old = process_with_ir_with_tower_ask(
         IrProcessRequest {
             gcode_path: path.clone(),
             ir: ir_at([20.0, 20.0]),
             output_path: None,
             calibration: Default::default(),
         },
+        None,
         &mut sink,
         &cancel,
     );

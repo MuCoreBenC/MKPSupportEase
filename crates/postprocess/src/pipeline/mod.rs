@@ -326,40 +326,16 @@ pub fn process(
     process_with_cancel_interval(request, sink, cancel, DEFAULT_CANCEL_CHECK_INTERVAL)
 }
 
-/// 同 [`process`]，但 IR 由调用方给出（钩子 / GUI 走这条）。
-pub fn process_with_ir(
-    request: IrProcessRequest,
-    sink: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-) -> Result<ProcessResult, PostprocError> {
-    process_with_ir_and_cancel_interval(request, sink, cancel, DEFAULT_CANCEL_CHECK_INTERVAL)
-}
-
-/// [`process_with_ir`] 的判据缝，理由同 [`process_with_cancel_interval`]。
-pub fn process_with_ir_and_cancel_interval(
-    request: IrProcessRequest,
-    sink: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-    cancel_check_interval: std::time::Duration,
-) -> Result<ProcessResult, PostprocError> {
-    run(
-        Job {
-            gcode_path: request.gcode_path,
-            output_path: request.output_path,
-            ir_source: IrSource::Prebuilt(Box::new(request.ir)),
-            compute_print_time: true,
-            tower_ask: None,
-            calibration: Mode::None,
-        },
-        sink,
-        cancel,
-        cancel_check_interval,
-    )
-}
-
-/// 同 [`process_with_ir`]，但**第 6 步撞了可以停下来问人**（2026-10-18 方案 B）。
+/// 同 [`process`]，但 IR 由调用方给出（**钩子走这条**）、且第 6 步撞了可以停下来问人。
 ///
-/// 存在理由：那一问要发生在**真实进度 ~55%**（`Step::Collision` 入口），而且撞塔这件事
+/// 「IR 从哪来」与「要不要问人」在这里是**两个正交的轴**，但产品只需要两个组合：
+/// 本函数（立即算打印时间）与 [`process_with_ir_deferred_print_time_with_tower_ask`]
+/// （延后算）。所以 `process_with_ir` / `process_with_ir_and_cancel_interval` /
+/// `process_with_ir_deferred_print_time`（不带 ask）三个都不再单独存在 ——
+/// 2026-10-19 按"零产品调用方"删除。**别再为了对称感把它们加回来**：
+/// 多一层转发就多一个能在构造内部请求时悄悄丢参数的地方（那次 `Mode::None` 就是这么来的）。
+///
+/// 为什么需要「问人」这一轴（2026-10-18 方案 B）：那一问要发生在**真实进度 ~55%**（`Step::Collision` 入口），而且撞塔这件事
 /// 本来就在第 6 步判 —— 在管线之前再预检一遍等于把 擦料决策 / 碰撞扫描
 /// 各跑两次，还让用户看到"0% 就停住了"。
 ///
@@ -381,7 +357,9 @@ pub fn process_with_ir_with_tower_ask(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: true,
             tower_ask: ask,
-            calibration: Mode::None,
+            /* ★ 透传 —— **这是 SupportEase 的正式主链**（`hook.rs` 非延后那一支）。
+            写死 `None` 等于把校准件当普通模型跑，且不会有任何报错。 */
+            calibration: request.calibration,
         },
         sink,
         cancel,
@@ -389,7 +367,7 @@ pub fn process_with_ir_with_tower_ask(
     )
 }
 
-/// 同 [`process_with_ir`]，但**打印时间估算延后**（这一趟不算）。
+/// 同 [`process_with_ir`]，但**打印时间估算延后**（这一趟不算），且带上第 6 步那一问。
 ///
 /// 打印时间是**纯报告数据**（内核零读取，见 `printtime` 模块头），所以可以让常驻
 /// 进程接手：钩子写完盘就退，切片器少等几百毫秒；执行记录先落一条
@@ -398,26 +376,11 @@ pub fn process_with_ir_with_tower_ask(
 /// **输出 G-code 与 [`process_with_ir`] 逐字节相同** —— 延后的只是填字段这件事，
 /// 没有跳过任何 transform。没有界面接手时（无头场景）必须走 [`process_with_ir`]，
 /// 否则记录会永远停在"正在估算"。
-pub fn process_with_ir_deferred_print_time(
-    request: IrProcessRequest,
-    sink: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-) -> Result<ProcessResult, PostprocError> {
-    run(
-        Job {
-            gcode_path: request.gcode_path,
-            output_path: request.output_path,
-            ir_source: IrSource::Prebuilt(Box::new(request.ir)),
-            compute_print_time: false,
-            tower_ask: None,
-            calibration: Mode::None,
-        },
-        sink,
-        cancel,
-        DEFAULT_CANCEL_CHECK_INTERVAL,
-    )
-}
-
+///
+/// ★ 2026-10-19：不带 `ask` 的那个版本（`process_with_ir_deferred_print_time`）
+/// 已删除 —— 产品与测试的调用方都是 0。它和本函数只差一个 `ask: None`，
+/// 留着就是第二个"看着能用、实际没人维护"的入口。钩子在无界面时走
+/// [`process_with_ir`]（见上面那句"没有界面接手时必须走它"），不需要这个中间态。
 /// 同 [`process_with_ir_deferred_print_time`]，但带上第 6 步那一问
 /// （理由与"并列入口"的取舍见 [`process_with_ir_with_tower_ask`]）。
 pub fn process_with_ir_deferred_print_time_with_tower_ask(
@@ -433,7 +396,9 @@ pub fn process_with_ir_deferred_print_time_with_tower_ask(
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: false,
             tower_ask: ask,
-            calibration: Mode::None,
+            /* ★ 透传 —— SupportEase 正式主链的另一支（`defer_print_time` 为真的那次）。
+            "打印时间延后算"与"这是什么校准件"是两件事，别顺手把后者也置空。 */
+            calibration: request.calibration,
         },
         sink,
         cancel,

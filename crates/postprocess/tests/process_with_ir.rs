@@ -1,4 +1,4 @@
-//! `pipeline::process_with_ir` 的判据：**两张公开脸必须产出同一份字节**。
+//! 后处理两条入口的判据：**钩子那条脸与 CLI 那条脸必须产出同一份字节**。
 //!
 //! 背景：mkp-ssr 的钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），
 //! 不是 TOML 配置文件，所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，
@@ -92,17 +92,21 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
         let raw = std::fs::read_to_string(&work).expect("读输入");
         let overrides: Vec<String> = PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect();
         let ir = pipeline::resolve_ir(&config_a1(), &overrides, Some(&raw)).expect("配置 → IR");
-        pipeline::process_with_ir(
+        /* ★ 走**产品真正用的那个**函数（`hook.rs` 调的就是它），不是 `process_with_ir`。
+        2026-10-19 收敛之后，`process_with_ir` / `_and_cancel_interval` 已随
+        "零产品调用方"一起删除 —— 判据若还指着它们，守的就是一条没人走的路。 */
+        pipeline::process_with_ir_with_tower_ask(
             IrProcessRequest {
                 gcode_path: work.clone(),
                 ir,
                 output_path: None, // 原地
                 calibration: Default::default(),
             },
+            None,
             &mut sink,
             &cancel,
         )
-        .expect("process_with_ir 必须成功");
+        .expect("process_with_ir_with_tower_ask 必须成功");
     } else {
         pipeline::process(
             ProcessRequest {

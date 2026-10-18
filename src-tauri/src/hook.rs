@@ -2046,6 +2046,52 @@ mod tests {
     use super::*;
     use postprocess::pipeline::{ProgressEvent, Step};
 
+    /// **存档里那一格必须说真话**（2026-10-19）。
+    ///
+    /// `detail.calibration` 是用户唯一能查的凭据：`mode` 写的是"实际跑了什么"、
+    /// `profileId` 写的是"用了哪一档"。这条咬住三件事：
+    /// 1. 内核给了 `ZOffset` ⇒ 存档 `mode` 就是 `ZOffset`（不是 3MF 原值，也不是空）；
+    /// 2. 回执里的档位 / 容差 / 实测尺寸原样带进存档；
+    /// 3. 给了空串（普通模型那一趟）⇒ `mode` 是 `null`，不是 `""`。
+    ///
+    /// 第 3 条防的是"把空串当身份写进记录" —— 那是另一种假数据。
+    #[test]
+    fn the_archive_records_the_mode_that_actually_ran() {
+        use postprocess::postproc::calibration::CalibrationReceipt;
+        use postprocess::postproc::disk::BBox;
+
+        let identity = postprocess::gcode::IdentityProbe {
+            identity_3mf: Some("ZOffset".to_string()),
+            verdict: postprocess::gcode::IdentityVerdict::From3mf,
+            ..Default::default()
+        };
+        let receipt = CalibrationReceipt {
+            measured: Some(BBox {
+                x_min: 67.921,
+                x_max: 187.4321,
+                y_min: 121.408,
+                y_max: 137.471,
+            }),
+            profile_id: Some("zoffset-ext".to_string()),
+            tolerance: Some(0.5),
+            footprint: Some((119.58, 16.063)),
+        };
+
+        let facts = build_calibration_facts(&identity, Some(&receipt), Some("ZOffset"));
+        assert_eq!(facts.mode.as_deref(), Some("ZOffset"), "实际跑的就是它");
+        assert_eq!(facts.identity_3mf.as_deref(), Some("ZOffset"));
+        assert_eq!(facts.profile_id.as_deref(), Some("zoffset-ext"));
+        assert_eq!(facts.tolerance, Some(0.5));
+        assert_eq!(facts.footprint, Some([119.58, 16.063]));
+        assert_eq!(facts.measured, Some([67.921, 187.4321, 121.408, 137.471]));
+        assert_eq!(facts.verdict, "from_3mf");
+
+        /* 普通模型那一趟：内核给的是 `""` ⇒ 存档 `mode` 必须是 null，不能是空串 */
+        let plain = build_calibration_facts(&identity, None, Some(""));
+        assert_eq!(plain.mode, None, "空串不是身份，别原样写进记录");
+        assert!(plain.profile_id.is_none());
+    }
+
     /// **身份只从 3MF 来**（2026-10-18 用户定的硬口径）：
     /// 3MF 有身份 ⇒ 就是那个身份；没有 ⇒ `Mode::None`，**正文里写什么都不算**。
     ///

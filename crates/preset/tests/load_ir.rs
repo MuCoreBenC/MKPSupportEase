@@ -85,13 +85,14 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     );
     assert_eq!(ir.machine.machine_type, "A1", "机型必须归一成 Canonical ID");
 
-    pipeline::process_with_ir(
+    pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
             gcode_path: work.clone(),
             ir,
             output_path: None,
             calibration: Default::default(),
         },
+        None,
         &mut NoProgress,
         &CancelToken::new(),
     )
