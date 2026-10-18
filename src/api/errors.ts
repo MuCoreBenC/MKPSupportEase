@@ -45,8 +45,12 @@ export class NotImplementedError extends Error {
  *   字符串      → 原样（边界外直接抛字符串的那种）
  *   其余        → 尽力拼一个能看的（JSON 化；连这也做不了才退回 `String`）
  *
- * **不展开 `code` 与 `traceId`**：那是日志对账用的编号，不是给用户看的话 ——
- * 它们露出来的地方是控制台与后端日志，不是提示条。
+ * **不展开 `traceId`**：那是日志对账用的编号，不是给用户看的话 —— 它露出来的地方是
+ * 控制台与后端日志，不是提示条。
+ *
+ * ★★ 2026-10-19（作者：「不用错误码吗」）：`AppError` 的稳定码收在 `message` 的末尾
+ *   （`…（E_DELIVERY_STALE_001）`）—— 由后端 `AppError::text` 拼好，这一层**不再带一次**
+ *   （两份都带就成了「（码）（码）」）。`messageCode` 那一格留给需要单独拿码的人。
  */
 export function errorText(v: unknown): string {
   if (isAppError(v)) return v.message
@@ -57,4 +61,23 @@ export function errorText(v: unknown): string {
   } catch {
     return String(v)
   }
+}
+
+/** 界面拿得住的一条错：给人看的那句（已带码）+ 稳定码（`E_*_NNN`，可以没有）。 */
+export interface UiError {
+  /** `errorText(v)` 那一句 —— 直接显示，不要在上面再加工 */
+  text: string
+  /** 稳定码。缺 = 这一条后端还没盖码（那时别猜它是哪一种） */
+  code: string | null
+}
+
+/**
+ * `errorText` 那句 + 稳定码，一次取齐。
+ *
+ * 2026-10-19：界面要**按码决定给不给"怎么办"**（同一句"内容对不上"，
+ * 目录过期要人重启、文件真坏要人重下 —— 只有码分得清），于是除了那句人话
+ * 还得把码一起留住。
+ */
+export function uiErrorOf(v: unknown): UiError {
+  return { text: errorText(v), code: isAppError(v) ? (v.messageCode ?? null) : null }
 }

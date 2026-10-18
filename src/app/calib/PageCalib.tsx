@@ -23,13 +23,15 @@ import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import type { PresetPickerRow } from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
+import { StaleCatalogHelp } from '../shared/StaleCatalogHelp'
+import { isStaleCatalogError } from '../shared/staleCatalog'
 import { STORAGE } from '../../api/storageKeys'
 import { Btn } from '../ui/Controls'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
-import { Modal } from '../../components/modal'
-import { api, errorText } from '../../api'
-import type { CalibModel } from '../../api'
+import { HeadNote, Modal } from '../../components/modal'
+import { api, uiErrorOf } from '../../api'
+import type { CalibModel, UiError } from '../../api'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
 import { activateFile, useActivePreset, useActivePresetReady } from '../state/appState'
 import { useCatalog } from '../home/useCatalog'
@@ -382,7 +384,9 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
    */
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
-  const [modelErr, setModelErr] = useState<string | null>(null)
+  /* 打开模型那一步的错：留**整条**（人话 + 稳定码）—— 内容区那块"怎么办"按码出现
+     （见 StaleCatalogHelp 抬头：目录过期要人重启，文件真坏要人重下，只有码分得清） */
+  const [modelErr, setModelErr] = useState<UiError | null>(null)
 
   useEffect(() => {
     if (opening === null) {
@@ -397,7 +401,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         if (alive) setModelInfo(list.find((m) => m.id === opening.id) ?? null)
       },
       (e: unknown) => {
-        if (alive) setModelErr(errorText(e))
+        if (alive) setModelErr(uiErrorOf(e))
       },
     )
     return () => {
@@ -431,7 +435,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       },
       (e: unknown) => {
         setModelBusy(false)
-        setModelErr(errorText(e))
+        setModelErr(uiErrorOf(e))
       },
     )
   }
@@ -451,22 +455,10 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         setOpening(null)
       } catch (e) {
         setModelBusy(false)
-        setModelErr(errorText(e))
+        setModelErr(uiErrorOf(e))
       }
     })()
   }
-
-  useEffect(() => {
-    if (opening === null && pending === null && presetAsk === null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      setOpening(null)
-      setPending(null)
-      setPresetAsk(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [opening, pending, presetAsk])
 
   const go = useCallback(
     (next: Step) => {
@@ -949,17 +941,27 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             onChange={slicerPick.setValue}
             onOnceChange={slicerPick.setOnce}
           />
+          {/*
+           * ★ 2026-10-19：错误搬进**标题右边那一格**（`HeadNote`，与后处理 / 导出 /
+           *   重切提示同一个件）。原来它和"本机有没有缓存"共用这行 `.note` 挤在框身里：
+           *   一条 SHA 对不上的错带着两串 64 位摘要 + 两个 revision，十几行字把框撑高、
+           *   还和正常状态一个颜色 —— 作者截图里那一团就是这么来的。
+           *   现在：回执永远一行（超出省略号、全文在 title 上），框身只留**中性状态**，
+           *   字数不影响框的任何尺寸。
+           */}
+          {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={s.note}>
-            {modelErr !== null
-              ? modelErr
-              : modelBusy
-                ? `${openingLabel} · 正在处理，请稍候…`
-                : modelInfo === null
-                  ? `${openingLabel} · 正在看本机有没有缓存…`
-                  : modelInfo.ready
-                    ? `${openingLabel} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
-                    : `${openingLabel} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
+            {modelBusy
+              ? `${openingLabel} · 正在处理，请稍候…`
+              : modelInfo === null
+                ? `${openingLabel} · 正在看本机有没有缓存…`
+                : modelInfo.ready
+                  ? `${openingLabel} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                  : `${openingLabel} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
+          {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
+              下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}
+          {isStaleCatalogError(modelErr) && <StaleCatalogHelp />}
         </Modal>
       )}
 

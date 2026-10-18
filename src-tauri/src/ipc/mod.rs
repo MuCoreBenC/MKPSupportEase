@@ -133,9 +133,20 @@ pub(crate) fn traced<T>(
             Ok(v)
         }
         Err(e) => {
-            // 错误进日志一次（带 detail），给前端的那份 message 保持可展示
-            tracing::warn!(code = ?e.code, detail = ?e.detail, "{}", e.message);
-            Err(e.with_trace(&trace_id))
+            /*
+             * 错误进日志一次（带 detail 与稳定码），给前端的那份 message 保持可展示 ——
+             * ★ 2026-10-19：`message` 里现在**带着稳定码**（`（E_*_NNN）`，见 `AppError::text`）。
+             *   放进 message 而不是只给 `messageCode`：前端每个调用点都走 `errorText()`，
+             *   "天然带码"只能靠这一句自己带着（作者：不用错误码吗）。
+             */
+            tracing::warn!(
+                code = ?e.code,
+                message_code = ?e.message_code,
+                detail = ?e.detail,
+                "{}",
+                e.text()
+            );
+            Err(e.text_err().with_trace(&trace_id))
         }
     }
 }

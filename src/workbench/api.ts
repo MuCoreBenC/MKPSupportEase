@@ -1081,6 +1081,28 @@ export interface SandboxStatus {
  * —— 加一档只改 Rust 那一处。后处理那一组现在就能点；后面几组（导入 / 文件冲突 /
  * 校验更新 / 浮出的条）先摆出来标 `ready: false`，点了给一句"还没做"。
  */
+/**
+ * **开发台 · 故障注入**的一档（`app::devfault::DevFault`）。
+ *
+ * 与 [`DevScene`] 的分工：那是"打开一格界面"，这是"让某个 API 方法失一次真"。
+ * ★ `method` 是**客户端那边**的方法名（camelCase，`MkpApiMethod`）——
+ * 装的是方法不是某个框，于是**所有**走它的界面一起中。
+ */
+export interface DevFault {
+  /** 稳定 id（`delivery-stale` 之类） */
+  id: string
+  /** 装在哪个 API 方法上（camelCase，客户端 `MkpApiMethod` 名） */
+  method: string
+  /** 行上的名字 */
+  label: string
+  /** 一句话说清它什么时候真出现 / 装了之后会看到什么 */
+  note: string
+  /** 分组键 */
+  group: string
+  /** 组名（人话） */
+  groupLabel: string
+}
+
 export interface DevScene {
   /** 稳定 id（`postprocess-success` 之类） */
   id: string
@@ -2133,6 +2155,21 @@ export const wb = {
    */
   devSimScenes: () => invoke<DevScene[]>('wb_dev_devsim_scenes'),
   devTrigger: (scene: string) => invoke<void>('wb_dev_trigger', { scene }),
+
+  /**
+   * **开发台 · 故障注入**（`app::devfault`，2026-10-19）—— 与上面那两条是
+   * **相反的两件事**：那是"打开一格界面"（不动后端），这是"让后端失一次真"（不动界面）。
+   *
+   * `devFaults` 列清单；`devFaultArm(id)` 把那一档错装到它对应的 **API 方法**上 ——
+   * 客户端进程**按 id 自己造那条错**（真值同一份代码），于是客户端里**所有**走这个
+   * 方法的界面都会真的报错：真组件 / 真按钮 / 真文案 / 真错误码。
+   * `devFaultClear()` 卸下，客户端恢复。
+   *
+   * 只在 workbench 构建里存在。
+   */
+  devFaults: () => invoke<DevFault[]>('wb_dev_faults'),
+  devFaultArm: (id: string) => invoke<void>('wb_dev_fault_arm', { id }),
+  devFaultClear: () => invoke<void>('wb_dev_fault_clear'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

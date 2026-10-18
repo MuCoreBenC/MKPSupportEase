@@ -1,6 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
+import { armedFaultFor } from '../app/dev/fault'
 import {
   isAppError,
   type AppError,
@@ -72,9 +73,20 @@ function safeStringify(v: unknown): string {
   }
 }
 
-/** 调一个 command，失败时把错误规整成 AppError 再抛 */
+/**
+ * 调一个 command，失败时把错误规整成 AppError 再抛。
+ *
+ * ★ 2026-10-19：**开发台的故障注入在这一层查一次表**（`armedFaultFor`）。
+ * 命中就**不调后端**、直接 reject 那一条错 —— 那条错是客户端进程按真值代码造的，
+ * 于是界面上出问题的是真组件、真按钮、真文案、真错误码（作者：「要真实的 mock 触发」）。
+ *
+ * 查询在**这一层**而不是散在各页面：产品逻辑一行不改，一个开关覆盖所有走这个方法的
+ * 界面（详见 `src/app/dev/fault.ts` 抬头）。正式包里那张表恒空 —— 恒不命中。
+ */
 async function call<T>(method: MkpApiMethod, command: string, args?: Record<string, unknown>) {
   try {
+    const injected = armedFaultFor(method)
+    if (injected !== null) throw injected
     return await invoke<T>(command, args)
   } catch (err) {
     const app = normalizeError(err, method)

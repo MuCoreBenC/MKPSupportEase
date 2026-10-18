@@ -554,6 +554,7 @@ mod tests {
                 FromHook::Finished(_) => "finished",
                 /* 演出自己只发前五种；这一支只为穷尽 `FromHook` */
                 FromHook::DevScene { .. } => "dev-scene",
+                FromHook::DevFault { .. } => "dev-fault",
             })
             .collect()
     }

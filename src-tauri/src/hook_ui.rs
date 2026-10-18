@@ -59,6 +59,15 @@ pub const PRINT_TIME_EVENT: &str = "postprocess-print-time";
 /// （它有自己的演出，见 [`HookView::run_preview`]）。
 pub const DEV_PREVIEW_EVENT: &str = "dev-preview";
 
+/// **开发台 · 故障注入**（2026-10-19）：把某一档错**装到某个 API 方法上**。
+///
+/// 与 [`DEV_PREVIEW_EVENT`] 完全相反的两件事：那条是"把一格界面打开"（不动后端），
+/// 这一条是"让后端失一次真"（不动界面）—— 于是**所有**走那个方法的模态框都会中，
+/// 而且中的是**真组件、真按钮、真 `AppError`**（作者：「要真实的 mock 触发」）。
+///
+/// `payload` 是 [`DevFaultDto`]：`method: None` = 卸下。
+pub const DEV_FAULT_EVENT: &str = "dev-fault";
+
 /// 一条进度长什么样（与 Rust 侧 [`ProgressPayload`] 一一对应；前端只认字段名）。
 pub type ProgressDto = ProgressPayload;
 /// 开场那几个事实长什么样。
@@ -104,6 +113,17 @@ pub struct PrintTimeDto {
 #[serde(rename_all = "camelCase")]
 pub struct DevPreviewDto {
     pub scene: String,
+}
+
+/// 一条**故障注入**指令（[`DEV_FAULT_EVENT`]）：把 `error` 装到 `method` 上。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevFaultDto {
+    /// 装在哪个 API 方法上（前端 `MkpApiMethod` 名，camelCase）。
+    /// **`None` = 卸下**（客户端恢复正常）
+    pub method: Option<String>,
+    /// 那一条错（客户端进程按 id 自己造的，与真机同一份代码）。`method` 为 `None` 时它是 `None`
+    pub error: Option<crate::error::AppError>,
 }
 
 /// 窗口起来时读的那份**全量快照**（进度 / 待答的问句 / 结论都在里面）。
@@ -465,6 +485,9 @@ impl HookView {
             FromHook::DevScene { scene } => {
                 tracing::debug!(scene = %scene, "开发台演出指令到了 apply（该由监听器直接处理）");
             }
+            FromHook::DevFault { fault } => {
+                tracing::debug!(fault = ?fault, "开发台故障注入到了 apply（该由监听器直接处理）");
+            }
         }
     }
 
@@ -608,6 +631,43 @@ impl HookView {
                 },
             );
         }
+    }
+
+    /// **开发台 · 故障注入**：把 `fault` 那一档错**装到它对应的 API 方法上**
+    /// （作者 2026-10-19：「所有模态框都能触发，而且要真实的 mock 触发」）。
+    ///
+    /// 与 [`Self::run_preview`] 是**相反的两件事**：
+    ///
+    /// - `run_preview` —— **打开一格界面**（不碰后端）；
+    /// - `run_fault`   —— **让后端失一次真**（不碰界面）。
+    ///
+    /// 装上之后，客户端里**所有**走那个方法的界面都会真的 reject 一条 `AppError`：
+    /// 真组件、真按钮、真文案、真错误码 —— 没有"预览模式"那一层假。
+    /// 卸下（`None`）即恢复。
+    ///
+    /// ★ 错是**在这一侧（客户端进程）造的**（[`crate::devfault::armed`]），
+    /// 那条 loopback 只过一个 id —— 于是演示出来的与真机走同一份代码。
+    pub fn run_fault(&self, app: &AppHandle, fault: Option<&str>) {
+        /* 与 run_preview 同一条：让用户正眼看那一扇窗 */
+        raise_main_window(app);
+
+        let dto = match fault {
+            None => DevFaultDto {
+                method: None,
+                error: None,
+            },
+            Some(id) => match crate::devfault::armed(id) {
+                Some(a) => DevFaultDto {
+                    method: Some(a.method),
+                    error: Some(a.error),
+                },
+                None => {
+                    tracing::warn!(fault = %id, "开发台：认不出这一档故障，什么都不装");
+                    return;
+                }
+            },
+        };
+        let _ = app.emit(DEV_FAULT_EVENT, dto);
     }
 
     /// 开演前的一下：置 `preview`、清上一趟、发一条"新一趟开场"。

@@ -30,7 +30,7 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { DevScene } from '../api'
+import type { DevFault, DevScene } from '../api'
 import s from '../c14.module.css'
 
 /** 分组按这个顺序摆（后端给的 `group` 键是稳定串，顺序归界面） */
@@ -40,12 +40,22 @@ export default function DevPage() {
   const [scenes, setScenes] = useState<DevScene[] | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /* 故障注入：清单 + 现在装着哪一档（装/卸都走同一颗按钮那套 busy/note） */
+  const [faults, setFaults] = useState<DevFault[] | null>(null)
+  const [armed, setArmed] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
     wb.devSimScenes()
       .then((rows) => {
         if (alive) setScenes(rows)
+      })
+      .catch((e: unknown) => {
+        if (alive) setNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      })
+    wb.devFaults()
+      .then((rows) => {
+        if (alive) setFaults(rows)
       })
       .catch((e: unknown) => {
         if (alive) setNote({ text: isAppError(e) ? e.message : String(e), bad: true })
@@ -72,6 +82,38 @@ export default function DevPage() {
       setBusy(null)
     }
   }, [])
+
+  /**
+   * **装 / 卸一档故障**（2026-10-19，作者：「希望所有的模态框都能触发，
+   * 而且要真实的 mock 触发」）。
+   *
+   * 与上面那个 `run` 是**相反的两件事**：`run` 打开一格界面（不动后端），
+   * 这个让**某个 API 方法**从此真的报错（不动界面）。于是客户端里所有走那个方法的
+   * 界面一起中 —— 真组件、真按钮、真错误码，没有"预览模式"那一层假。
+   */
+  const toggleFault = useCallback(
+    async (row: DevFault) => {
+      const off = armed === row.id
+      setBusy(row.id)
+      setNote(null)
+      try {
+        if (off) await wb.devFaultClear()
+        else await wb.devFaultArm(row.id)
+        setArmed(off ? null : row.id)
+        setNote({
+          text: off
+            ? `已卸下「${row.label}」—— 客户端恢复正常`
+            : `已装上「${row.label}」—— 客户端里走 ${row.method} 的界面现在都会真的报错，去点一下试试`,
+          bad: false,
+        })
+      } catch (e) {
+        setNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+      } finally {
+        setBusy(null)
+      }
+    },
+    [armed],
+  )
 
   /* 分组：按 GROUP_ORDER 排，认不出的组挂到末尾（后端加了新组不会被吞掉） */
   const grouped = (scenes ?? []).reduce<Record<string, DevScene[]>>((acc, sc) => {
@@ -155,6 +197,53 @@ export default function DevPage() {
                 </div>
               )
             })
+          )}
+
+          {/*
+           * ★ 2026-10-19：**故障注入** —— 与上面那张场景表相反的两件事。
+           * 那边"打开一格界面"，这边"让某个 API 方法真的报错"。装了之后客户端里
+           * **所有**走那个方法的界面一起中（真组件 / 真按钮 / 真错误码），
+           * 不用逐个框做一遍。
+           */}
+          {faults !== null && faults.length > 0 && (
+            <div className={s.vfield}>
+              <div className={s.vhead}>
+                <b>故障注入</b>
+                <span className={s.vkey}>
+                  {armed === null ? '没装' : `装着：${armed}`} · 按方法生效
+                </span>
+              </div>
+              <span className={s.vhelp} style={{ display: 'block' }}>
+                装上之后，**客户端里所有走这个方法的界面**都会真的报这一条错 ——
+                界面、按钮、文案、错误码全是真的（不是"预览模式"那一套）。
+                自己去客户端点一下那个框就看得见；换一档或再点一次同一档即卸下。
+              </span>
+              {faults.map((row) => {
+                const on = armed === row.id
+                return (
+                  <div key={row.id} className={s.vrow} style={{ alignItems: 'flex-start' }}>
+                    <span className={s.grow}>
+                      <b>{row.label}</b>
+                      <span className={s.vkey} style={{ marginLeft: 8 }}>
+                        {row.method}
+                      </span>
+                      <span className={s.vhelp} style={{ display: 'block' }}>
+                        {row.note}
+                      </span>
+                    </span>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${on ? '' : s.btnPrimary}`}
+                      disabled={busy !== null}
+                      title={on ? `卸下「${row.label}」` : `装上「${row.label}」`}
+                      onClick={() => void toggleFault(row)}
+                    >
+                      {busy === row.id ? '处理中…' : on ? '卸下' : '装上'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
 
           {note !== null && (

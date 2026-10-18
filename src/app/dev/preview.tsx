@@ -41,6 +41,8 @@ import { listen } from '../../api'
 import { DEV_PREVIEW_EVENT, slotOf } from './scene'
 import type { DevSlot, Occupied, Slot } from './scene'
 import { DevPreviewContext } from './context'
+import { DEV_FAULT_EVENT, setArmedFault } from './fault'
+import type { DevFaultDto } from './fault'
 
 export function DevPreviewProvider({ children }: { children: ReactNode }) {
   /* 每一层类摆着哪一格 —— **同类互斥**就落在这儿（后到的覆盖自己那一类） */
@@ -62,6 +64,34 @@ export function DevPreviewProvider({ children }: { children: ReactNode }) {
         next.set(s, occupied)
         return next
       })
+    }).then((un) => {
+      if (alive) off = un
+      else un()
+    })
+    return () => {
+      alive = false
+      off?.()
+    }
+  }, [])
+
+  /*
+   * ★ 2026-10-19：开发台现在发**两类**指令，这一层都收：
+   *   ① `dev-preview`  —— 打开一格界面（上面那个 effect）
+   *   ② `dev-fault`    —— 给某个 API 方法装一条错（下面这个 effect）
+   *
+   * 两者是相反的两件事：一个动界面、一个动后端。装了故障之后**所有**走那个方法的
+   * 界面都会真的报错（真组件 / 真按钮 / 真错误码）—— 见 `fault.ts` 抬头。
+   */
+  useEffect(() => {
+    let alive = true
+    let off: (() => void) | null = null
+    void listen<DevFaultDto>(DEV_FAULT_EVENT, (payload) => {
+      if (!alive) return
+      setArmedFault(
+        payload.method === null || payload.error === null
+          ? null
+          : { method: payload.method, error: payload.error },
+      )
     }).then((un) => {
       if (alive) off = un
       else un()

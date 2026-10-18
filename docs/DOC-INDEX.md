@@ -11,7 +11,7 @@
 
 | 群 | 位置 | 数量 | 性质 |
 | --- | --- | --- | --- |
-| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md) | 约 12 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
+| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md)（**活台账**，2026-10-19 清理过：历史部分搬进 [`HANDOFF-ARCHIVE-2026-10-19.md`](HANDOFF-ARCHIVE-2026-10-19.md)，**没删**） | 约 13 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
 | 记录与计划 | `docs/` 顶层（带日期的那些） | 约 19 份 | 裁决记录 / 台账 / 施工计划 / 测试协议 |
 | 审计基线 | `docs/audit-current-state/` | 9 md + data/map | 重写前的只读审计（"建议，不是现状"） |
 | 移植方案 | 根 [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) / [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 2 份 | 被 `src/workbench` 现行代码引用（方案 / 待裁决清单），保留 |
@@ -46,6 +46,7 @@
 | --- | --- | --- | --- |
 | [`HOOK-ERRORS-AND-MESSAGES.md`](HOOK-ERRORS-AND-MESSAGES.md) | 2026-10-11 | 后处理的错误：切片器那一框吃什么（BBS 源码证据）+ 文案表 + 两条日志流 | 现行（本分支新增，随"切片器能显示什么"那一刀） |
 | [`GUIDE-IMAGE-HANDOFF-2026-10-16.md`](GUIDE-IMAGE-HANDOFF-2026-10-16.md) | 2026-10-16 | **图片引导交接**：现状口径六条 + 下一刀（① 图片按需下载 ② "一组/套装"三件裁决）+ 判据与探针清单 | 现行（本分支新增；对应 `HANDOFF.md` 增量之三十六） |
+| [`DEV-REAL-POSTPROCESS-HANDOFF-2026-10-19.md`](DEV-REAL-POSTPROCESS-HANDOFF-2026-10-19.md) | 2026-10-19 | **开发台「真实后处理」入口交接**：要什么 / 六条验收判据 / 三步路径 / 待核三件事。★ 文内 §4 现状是 10-19 快照，动手前须重核 | **未施工（只交接）**；对应 `HANDOFF.md` 增量之四十一 |
 | [`A05-PORT-LEDGER.md`](A05-PORT-LEDGER.md) | 2026-10-11 | a05 前端整份搬运台账（源 = frontend-lab） | 现行（本分支新增，对应"前端照搬 a05"提交） |
 | [`A06-PORT-LEDGER.md`](A06-PORT-LEDGER.md) | 2026-10-12 | a06 后处理那一屏搬运台账 + 读数那一刀（源 = frontend-lab a06 + lab/mkp-postprocess 定稿） | 现行（本分支新增，两刀都已完成） |
 | [`A07-PORT-LEDGER.md`](A07-PORT-LEDGER.md) | 2026-10-14 | a07 全量搬运台账 + **术语改造（官方/我的 → 云端/本地）施工单**（源 = frontend-lab a07 + lab/term-rename-local-cloud.md） | 两刀都已完成：界面同步 `b7ebafb` + 术语改造全量（2026-10-14，含 Rust/契约/`presets-local/`）；**剩作者走一遍验收**（§5） |

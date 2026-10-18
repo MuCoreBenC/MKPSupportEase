@@ -334,7 +334,7 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   1. **先摆正它是什么**（这一步真正的收获是把模型写下来了）：`archive/` 是**官方版本生命周期**
      的一部分（云端换版本 → 旧份进归档，保留最早一份、不覆盖、不删），**不是用户修改历史**。
      两条线不许混：**官方线**（云端 → `mkp/` → `archive/`）与**用户线**（另存 → `presets-mine/`）。
-     已写进 `docs/DATA-ARCHITECTURE.md` §1③「预设 TOML 的一生」，HANDOFF §3.5 按它排了七步。
+     已写进 `docs/DATA-ARCHITECTURE.md` §1③「预设 TOML 的一生」，HANDOFF-ARCHIVE §3.5 按它排了七步。
   2. **落点**：两条读（`get_archived_files` / `read_archived_text`，**只读、只认归档区**）
      + 一行界面（交付行展开详情里「旧版本 N 份」→ 抽屉：列表 + 看正文）。
      认人**不解析文件名**：按"去掉 `archive/` 前缀后与目录里哪一份同位"匹配；

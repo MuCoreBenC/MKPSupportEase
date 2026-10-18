@@ -23,8 +23,8 @@ import {
 } from 'react'
 import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
-import { api, errorText } from '../../api'
-import type { CalibModel, PostProcessCommand } from '../../api'
+import { api, errorText, uiErrorOf } from '../../api'
+import type { CalibModel, PostProcessCommand, UiError } from '../../api'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -36,6 +36,8 @@ import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
+import { StaleCatalogHelp } from '../shared/StaleCatalogHelp'
+import { isStaleCatalogError } from '../shared/staleCatalog'
 import { STORAGE } from '../../api/storageKeys'
 import HeroFade from './HeroFade'
 import CardFrame from './CardFrame'
@@ -48,7 +50,7 @@ import { postProcessCommand } from '../postprocess/copyScript'
 import { Btn } from '../ui/Controls'
 /* 模态框**只有一套**（2026-10-10 作者：两套"不行……强制去统一只能用一种"）——
    稿内那套 `ui/Modal` 退场，一律用通用居中框 */
-import { Modal } from '../../components/modal'
+import { HeadNote, Modal } from '../../components/modal'
 import type { Density } from '../../hooks/useDensity'
 import { useDevDefaults } from './devDefaults'
 import { pickArt } from './heroArt'
@@ -132,7 +134,9 @@ export default function PageHome({ density }: PageHomeProps) {
   /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
-  const [modelErr, setModelErr] = useState<string | null>(null)
+  /* 打开模型那一步的错：留**整条**（人话 + 稳定码）—— 内容区那块"怎么办"按码出现
+     （见 StaleCatalogHelp 抬头：目录过期要人重启，文件真坏要人重下，只有码分得清） */
+  const [modelErr, setModelErr] = useState<UiError | null>(null)
   /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
   const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
   /* 设置页「其他应用…」指定的那个 —— 选着它时随 openModel 把路径带给壳（见 slicerArgsOf） */
@@ -199,19 +203,6 @@ export default function PageHome({ density }: PageHomeProps) {
     commitAll,
   } = calib
 
-  // v005 那个 Modal 不认 Esc，这里补上：Esc = 取消
-  useEffect(() => {
-    if (openModel === null && pending === null && presetAsk === null) return
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return
-      setOpenModel(null)
-      setPending(null)
-      setPresetAsk(null)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [openModel, pending, presetAsk])
-
   /* 「打开测试模型」弹窗：盘上有没有缓存查一次（下载区 + 旧缓存），失败照实说 */
   useEffect(() => {
     if (openModel === null) {
@@ -226,7 +217,7 @@ export default function PageHome({ density }: PageHomeProps) {
         if (alive) setModelInfo(list.find((m) => m.id === openModel.id) ?? null)
       },
       (e: unknown) => {
-        if (alive) setModelErr(errorText(e))
+        if (alive) setModelErr(uiErrorOf(e))
       },
     )
     return () => {
@@ -245,7 +236,7 @@ export default function PageHome({ density }: PageHomeProps) {
       },
       (e: unknown) => {
         setModelBusy(false)
-        setModelErr(errorText(e))
+        setModelErr(uiErrorOf(e))
       },
     )
   }
@@ -265,7 +256,7 @@ export default function PageHome({ density }: PageHomeProps) {
         setOpenModel(null)
       } catch (e) {
         setModelBusy(false)
-        setModelErr(errorText(e))
+        setModelErr(uiErrorOf(e))
       }
     })()
   }
@@ -1430,17 +1421,21 @@ export default function PageHome({ density }: PageHomeProps) {
             onChange={slicerPick.setValue}
             onOnceChange={slicerPick.setOnce}
           />
+          {/* 错误进标题右边那一格（`HeadNote`，与校准页那颗同一套 —— 见那边那段长注释：
+              一句话的错误不该住进框身，它会把框撑高、还和正常状态一个颜色） */}
+          {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={p.note}>
-            {modelErr !== null
-              ? modelErr
-              : modelBusy
-                ? `${openModel.name} · 正在处理，请稍候…`
-                : modelInfo === null
-                  ? `${openModel.name} · 正在看本机有没有缓存…`
-                  : modelInfo.ready
-                    ? `${openModel.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
-                    : `${openModel.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
+            {modelBusy
+              ? `${openModel.name} · 正在处理，请稍候…`
+              : modelInfo === null
+                ? `${openModel.name} · 正在看本机有没有缓存…`
+                : modelInfo.ready
+                  ? `${openModel.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                  : `${openModel.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
+          {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
+              下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}
+          {isStaleCatalogError(modelErr) && <StaleCatalogHelp />}
         </Modal>
       )}
 

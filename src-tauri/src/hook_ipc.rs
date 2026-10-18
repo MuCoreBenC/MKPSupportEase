@@ -315,6 +315,19 @@ pub enum FromHook {
     DevScene {
         scene: String,
     },
+    /// **开发台的故障注入**（2026-10-19）：让客户端把某一档错**装到某个 API 方法上**。
+    ///
+    /// 它**不是钩子发的** —— 是工作台「开发台」发来的（跨进程，走同一条 loopback 口），
+    /// 与 [`FromHook::DevScene`] 同一族。
+    ///
+    /// ★★ **只过 `id`，不过那条 `AppError`**：错由**客户端进程**按 id 自己造
+    /// （`workbench::app::devfault::fault_error`），于是演示出来的那条错与真机那条
+    /// 走的是同一份代码、同一个码 —— 这正是作者要的"真实的 mock 触发"。
+    ///
+    /// `None` = **卸下**（客户端恢复正常）。
+    DevFault {
+        fault: Option<String>,
+    },
 }
 
 /// 界面 → 钩子。

@@ -3259,6 +3259,17 @@ export interface AppError {
   code: ErrorCode
   message: string
   traceId: string
+  /**
+   * **稳定错误码**（`E_*_NNN` / `W_*_NNN`）—— 与 `code` 那个英文类别不是一回事。
+   *
+   * 2026-10-19（作者：「不用错误码吗」）：作者定的"每一条用户能读到的句子都必须有码"，
+   * 以前只落在后处理/钩子那条链上，客户端的交付、读写、更新这些没码 —— 用户把错贴给 AI
+   * 时无码可贴。现在码由后端**拼在 message 里**（`AppError::text`），这一格是给
+   * 需要单独拿码的人（面包屑、日志对账）用的。
+   *
+   * 缺失 = 这一条还没迁（那时 message 里也没有码）。
+   */
+  messageCode?: string
   detail?: string
 }
 

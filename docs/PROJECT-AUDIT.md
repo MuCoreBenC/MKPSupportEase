@@ -161,7 +161,7 @@
 - **已完成的大清扫**：`client/` 模块删除（R3）、`dist-presets` 全仓零命中、
   localStorage 三格底账退役（C4）、B 套命名 `presetFile` 从代码消失、假云端只在工作台、
   判据 1/2 挂 CI。
-- **差**（**前三条 2026-10-02 清扫批次已办掉**，登记见 HANDOFF §4 同批）：
+- **差**（**前三条 2026-10-02 清扫批次已办掉**，登记见 HANDOFF-ARCHIVE 同批）：
   - ~~死命令 / 死契约~~ ✅ 已删：`get_preset`（Rust 命令 + `preset_of` 硬编码表 + 两份注册清单
     + 假后端夹具 + 测试）与 `getAppliedPreset`（契约 + 演示集合 + `notWired` + `AppliedPreset` 类型）。
   - ~~`chain.mjs` 探针两条病~~ ✅ 已重写：客户端那半（同步→下载→应用）在浏览器里**结构性

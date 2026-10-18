@@ -247,8 +247,16 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
       {/* `.body` 那条最小高度是"读计划"与"计划到手"两态一样高 —— 不长高就不会跳 */}
       <div className={s.body}>
         {/* 提示一律进标题右边那一格（`HeadNote`，2026-10-17 收口）：
-            摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳 */}
+            摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳。
+            ★ 2026-10-19：**只留这一处** —— 下面原来还给 `planErr` 摆了一份红字，
+            同一条错同一个框里出现两遍（作者看见了那句重复）。 */}
         {planErr !== null && <HeadNote text={`导出清单读不出来：${planErr}`} tone="error" />}
+        {fail !== null && (
+          <HeadNote
+            text={`${fail.what === 'export' ? '导出没成：' : '打开没成：'}${fail.text}`}
+            tone="error"
+          />
+        )}
         {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
 
         {plan !== null && (
@@ -284,13 +292,6 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
             归档里没有{plan.missing.map((k) => `「${KIND_LABEL[k]}」`).join('、')} ——
             它不会出现在导出清单里。
           </p>
-        )}
-
-        {fail !== null && (
-          <HeadNote
-            text={`${fail.what === 'export' ? '导出没成：' : '打开没成：'}${fail.text}`}
-            tone="error"
-          />
         )}
 
         {path !== null && (

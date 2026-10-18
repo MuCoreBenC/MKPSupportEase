@@ -130,27 +130,67 @@ fn sha_mismatch_error(internal_root: &Path, file: &CatalogFile, got: &str) -> Ap
     let stale = remote_revision(internal_root)
         .zip(local_revision(internal_root))
         .filter(|(remote, local)| remote != local);
-    AppError::sha_mismatch(sha_mismatch_message(file, got, stale))
+    /* 技术值下线：两串 SHA + 两个 revision 只有排查时用得上，进 detail（进日志），
+    界面那一句一个技术值都不出现 */
+    let detail = format!(
+        "{} 期望 SHA {}，拿到 {}；stale = {:?}",
+        file.path,
+        file.expected_sha().unwrap_or("<目录未登记>"),
+        got,
+        stale
+    );
+    AppError::sha_mismatch(sha_mismatch_message(file, stale.as_ref()))
+        .with_message_code(sha_mismatch_code(stale.is_some()))
+        .with_detail(detail)
+}
+
+/// 那句话的**码**：两种成因两件事，用户要做的事也不同（刷新目录 vs 找发布方），
+/// 于是两个码 —— 贴给 AI 的时候，"目录过期"与"文件真坏"不该搜到同一行。
+pub(crate) fn sha_mismatch_code(stale: bool) -> &'static str {
+    if stale {
+        "E_DELIVERY_STALE_001"
+    } else {
+        "E_DELIVERY_SHA_001"
+    }
 }
 
 /// 那句话本身 —— 与"怎么拿到两个 revision"分开，于是它能被单测逐字钉住
 /// （取 revision 要联网，这台机器上测不了；说话不该跟着一起测不了）。
-fn sha_mismatch_message(file: &CatalogFile, got: &str, stale: Option<(String, String)>) -> String {
-    let why = match stale {
+///
+/// ★ 2026-10-19（作者：「这段话这么长」）：**只留用户要做的那个动作**。
+///   原来那句把两串 64 位 SHA、两个 revision、外加一段"目录过期时拿旧 SHA 比对必然
+///   对不上"的因果解释全塞进一句话 —— 那是排查时给自己看的，不是给用户的。
+///   SHA 与 revision 从此只在**日志**里（`tracing::warn!` 把 detail 带上），
+///   界面这句话一个技术值都不出现。
+fn sha_mismatch_message(file: &CatalogFile, stale: Option<&(String, String)>) -> String {
+    sha_mismatch_sentence(&file.file_name, stale)
+}
+
+/// 那句话本身，**不依赖 `CatalogFile`**。
+///
+/// 拆这一层是为了**开发台的故障注入**（`workbench/app/devfault`）：那边要造一条
+/// "目录过期"的错给界面演，走这一个函数 ⇒ **演示里那条错与真机上那条错一字不差**。
+/// 抄第二份文案的话，改一处就漂一处，演示出来的反而是错的那句。
+pub(crate) fn sha_mismatch_sentence(name: &str, stale: Option<&(String, String)>) -> String {
+    match stale {
+        // 已定位到目录过期：说清是哪一步，给一个动作
         Some((remote, local)) => format!(
-            "本地目录停在 revision {local}，云端已经是 {remote} —— \
-             先点「检查更新」刷新目录再下载（目录过期时拿旧 SHA 比对，必然对不上）"
+            "{name} 的内容对不上 —— 本机目录停在 {local}，云端已是 {remote}，先点「检查更新」再重试"
         ),
         // 取不到远端（没配源 / 离线）时照保守说：**不拿本机目录当"远端"**，
         // 那会把"没联网"误报成"文件坏了"
-        None => "文件在源头就被改过或传坏了".to_owned(),
-    };
-    format!(
-        "{} 的内容对不上（期望 SHA {}，拿到 {}）—— {why}",
-        file.file_name,
-        file.expected_sha().unwrap_or("<目录未登记>"),
-        got
-    )
+        None => format!(
+            "{name} 的内容对不上（和本机目录登记的那份不是同一版）—— 文件可能在源头被改过或传坏了，先重下一遍；还不行就找我们要一份"
+        ),
+    }
+}
+
+/// 「大小对不上」那句话的**码**（与 [`sha_mismatch_code`] 同一族：交付校验失败）。
+pub(crate) const SIZE_MISMATCH_CODE: &str = "E_DELIVERY_SIZE_001";
+
+/// 「大小对不上」那句话本身 —— 与 [`sha_mismatch_sentence`] 同一个拆法（给开发台故障注入用）
+pub(crate) fn size_mismatch_sentence(name: &str) -> String {
+    format!("{name} 的大小对不上 —— 不是目录登记的那一版，重下一遍；还不行就找我们要一份")
 }
 
 /// 本机 registry 里那份 catalog 的 revision（读不到就 `None`）
@@ -197,12 +237,13 @@ pub fn deliver(
     }
     if let Some(want) = file.expected_size() {
         if bytes.len() as u64 != want {
-            return Err(AppError::corrupted(format!(
-                "{} 的大小对不上（目录记 {} 字节，拿到 {} 字节）",
-                file.file_name,
-                want,
-                bytes.len()
-            )));
+            return Err(AppError::corrupted(size_mismatch_sentence(&file.file_name))
+                .with_message_code(SIZE_MISMATCH_CODE)
+                .with_detail(format!(
+                    "{} 目录记 {want} 字节，拿到 {} 字节",
+                    file.path,
+                    bytes.len()
+                )));
         }
     }
 
@@ -1228,7 +1269,7 @@ mod tests {
         // 拿不到远端目录（这个夹具没配源、没联网）时**退回保守说法** ——
         // 不许把"没联网"说成"目录过期"，更不许编一个 revision
         assert!(
-            e.message.contains("文件在源头就被改过或传坏了"),
+            e.message.contains("文件可能在源头被改过或传坏了"),
             "取不到远端时照保守说：{}",
             e.message
         );
@@ -1237,25 +1278,27 @@ mod tests {
             "没确认目录过期就不要提『检查更新』：{}",
             e.message
         );
+        /* ★ 2026-10-19（作者：「不用错误码吗」）：那条错必须自带稳定码 ——
+        没码的句子用户贴给 AI 时无从检索，这正是作者点名要补的那一半 */
+        assert_eq!(e.message_code.as_deref(), Some("E_DELIVERY_SHA_001"));
+        assert!(
+            !e.text().contains(&"0".repeat(64)),
+            "界面那一句里不该出现整串 SHA：{}",
+            e.text()
+        );
     }
 
-    /// ★ **目录过期与文件坏是两种话**（2026-10-04）。
+    /// ★ **目录过期与文件坏是两种话、两个码**（2026-10-04 定话，2026-10-19 补码）。
     ///
     /// SHA 对不上有两种成因，用户能据以行动的动作完全不同：
-    /// 目录过期 → 去刷新目录；文件真坏 → 换一台机器 / 找发布方。
-    /// 以前两种共用"文件在源头就被改过或传坏了"，导致用户照着这句话查不出问题。
-    ///
-    /// 判据直接钉那句话本身（取 revision 要联网，测试里不碰网络）。
+    /// 目录过期 → 去刷新目录；文件真坏 → 重下一遍 / 找发布方。
+    /// 判据直接钉那句话与那个码本身（取 revision 要联网，测试里不碰网络）。
     #[test]
     fn stale_catalog_gets_a_different_message_than_a_bad_file() {
         let file = entry("A1-standard.toml", "真内容".as_bytes());
 
         // ① 两个 revision 不同 → 说"目录过期"，并给出行动建议
-        let stale = sha_mismatch_message(
-            &file,
-            "got-sha",
-            Some(("remote-rev".to_owned(), "local-rev".to_owned())),
-        );
+        let stale = sha_mismatch_message(&file, Some(&("remote-rev".into(), "local-rev".into())));
         assert!(
             stale.contains("local-rev") && stale.contains("remote-rev"),
             "两个 revision 都要摆出来：{stale}"
@@ -1265,17 +1308,19 @@ mod tests {
             !stale.contains("传坏了"),
             "已定位到目录过期，就别说文件坏了：{stale}"
         );
+        assert_eq!(sha_mismatch_code(true), "E_DELIVERY_STALE_001");
 
         // ② 拿不到远端（None）→ 保守说法，且**不提**「检查更新」
-        let unknown = sha_mismatch_message(&file, "got-sha", None);
+        let unknown = sha_mismatch_message(&file, None);
         assert!(
-            unknown.contains("文件在源头就被改过或传坏了"),
+            unknown.contains("文件可能在源头被改过或传坏了"),
             "取不到远端时照保守说：{unknown}"
         );
         assert!(
             !unknown.contains("检查更新"),
             "没据实确认就不要提『检查更新』：{unknown}"
         );
+        assert_eq!(sha_mismatch_code(false), "E_DELIVERY_SHA_001");
     }
 
     #[test]

@@ -28,6 +28,10 @@ pub mod ax;
 #[cfg(target_os = "macos")]
 pub mod ax_watch;
 pub mod chrome;
+/// **开发台的故障档位表**（2026-10-19）：给某一个 API 方法装一条错，客户端里所有走
+/// 这个方法的界面从此真的报错。**无条件编译** —— 造错发生在客户端进程里（工作台那条
+/// loopback 只过一个 id），而客户端是普通构建；正式包里没有命令发得进来，这张表恒不被问到。
+pub mod devfault;
 /// **开发台的演出脚本**（`hook-sim` 假钩子与开发台共用一份）。
 ///
 /// ★ 2026-10-14 起**不再门在 workbench 档**：演出发生在**客户端进程**
@@ -227,6 +231,11 @@ pub fn run() {
                             match msg {
                                 hook_ipc::FromHook::DevScene { scene } => {
                                     view.run_preview(&to_ui, &scene);
+                                }
+                                /* 开发台 · 故障注入（2026-10-19）：让后端失一次真 ——
+                                客户端自己按 id 造那条错，emit 给前端的拦截表 */
+                                hook_ipc::FromHook::DevFault { fault } => {
+                                    view.run_fault(&to_ui, fault.as_deref());
                                 }
                                 other => view.apply(&to_ui, other),
                             }
@@ -738,6 +747,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。
         app::devsim::wb_dev_devsim_scenes,
         app::devsim::wb_dev_trigger,
+        // **开发台 · 故障注入**（2026-10-19）：给某个 API 方法装一条错 ——
+        // 客户端里所有走这个方法的界面从此真的报错（真组件 / 真按钮 / 真错误码）。
+        // 同一条 loopback、同一个"客户端没开就如实报"的口径（见 `app::devfault` 模块头）。
+        app::devfault::wb_dev_faults,
+        app::devfault::wb_dev_fault_arm,
+        app::devfault::wb_dev_fault_clear,
     ])
 }
 

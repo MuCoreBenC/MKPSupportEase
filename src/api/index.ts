@@ -4,7 +4,8 @@ import { mockApi } from './mock'
 
 export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset } from './contract'
 export { isAppError } from './contract'
-export { errorText, NotImplementedError } from './errors'
+export { errorText, NotImplementedError, uiErrorOf } from './errors'
+export type { UiError } from './errors'
 
 /*
  * 剩下的类型一律整份转出去（`export type *`）——
