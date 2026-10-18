@@ -200,6 +200,10 @@ pub struct CollisionResult {
     pub model_boxes: Vec<GBBox>,
     /// **每个模型各自的轮廓**（凸包，≤24 边）—— 俯视图画的是它，矩形只是兜底
     pub model_polygons: Vec<Vec<[f64; 2]>>,
+    /// **箭头起点**：真正撞上的那个模型的中心（作者 2026-10-18：「这个箭头应该从具体的
+    /// 哪个模型指出去的才对」）——`None` = 没有模型块吃到冲突点（原塔撞 / 禁区那一档），
+    /// 那时退回整体框中心。
+    pub arrow_origin: Option<[f64; 2]>,
     /// 避让用的**占用格**（板内挤出点，2mm 一格）—— 自动摆塔按它判"会不会压到东西"。
     /// 不进 `facts`（那是对外形状），只在这一层用。
     pub occupancy: Occupancy,
@@ -353,6 +357,17 @@ impl Occupancy {
                 out.push(cells);
             }
         }
+        /*
+         * 碎点过滤（2026-10-18 作者：「包围盒有点不干净」）：板上有大块（≥8 格）时，
+         * 1-2 格的孤点算噪声（回抽 / 清料的零头）—— 留着会在轮廓旁边画出小方块，
+         * 看着像脏东西。**全是小块时不滤**（稀疏 G-code 宁可多画，也不许画成零块）。
+         */
+        if out.len() > 1 {
+            let largest = out.iter().map(Vec::len).max().unwrap_or(0);
+            if largest >= 8 {
+                out.retain(|cells| cells.len() > 2);
+            }
+        }
         out
     }
 
@@ -362,6 +377,61 @@ impl Occupancy {
             self.origin_x + (cx as f64 + 0.5) * self.cell,
             self.origin_y + (cy as f64 + 0.5) * self.cell,
         ]
+    }
+
+    /// **冲突点落在哪个连通块最多** ⇒ 那一块的中心（机器坐标）。
+    ///
+    /// 箭头起点要"从具体的哪个模型指出去"（作者 2026-10-18）——之前的起点是**所有模型
+    /// 的整体框中心**，模型分成两三堆时那个点常常落在中间的空白里，箭头看着凭空出现。
+    /// 一个冲突点都没落进任何块（原塔撞 / 禁区那一档）⇒ `None`，调用方退回整体框中心。
+    fn conflict_center(&self, points: &[[f64; 2]]) -> Option<[f64; 2]> {
+        if points.is_empty() || self.bits.is_empty() {
+            return None;
+        }
+        let components = self.components();
+        if components.is_empty() {
+            return None;
+        }
+        /* 格 → 属于第几块（一次线性建表，冲突点最多几百个，别做嵌套遍历） */
+        let mut comp_of = vec![usize::MAX; self.bits.len()];
+        for (i, cells) in components.iter().enumerate() {
+            for &(cx, cy) in cells {
+                comp_of[cy * self.cols + cx] = i;
+            }
+        }
+        let mut counts = vec![0usize; components.len()];
+        for p in points {
+            let cx = ((p[0] - self.origin_x) / self.cell).floor();
+            let cy = ((p[1] - self.origin_y) / self.cell).floor();
+            if cx < 0.0 || cy < 0.0 {
+                continue;
+            }
+            let (cx, cy) = (cx as usize, cy as usize);
+            if cx >= self.cols || cy >= self.rows {
+                continue;
+            }
+            let i = comp_of[cy * self.cols + cx];
+            if i != usize::MAX {
+                counts[i] += 1;
+            }
+        }
+        let mut best: Option<(usize, usize)> = None;
+        for (i, &n) in counts.iter().enumerate() {
+            if n == 0 {
+                continue;
+            }
+            /* 显式 match：MSRV 1.77 没有 `Option::is_none_or` */
+            let better = match best {
+                Some((bn, _)) => n > bn,
+                None => true,
+            };
+            if better {
+                best = Some((n, i));
+            }
+        }
+        let (_, index) = best?;
+        let b = self.bbox_of(&components[index]);
+        Some([(b.x_min + b.x_max) / 2.0, (b.y_min + b.y_max) / 2.0])
     }
 
     /// 一块格子的外接框（机器坐标）
@@ -425,11 +495,83 @@ impl Occupancy {
 /// 既不像矩形，也不至于把 2mm 格网的锯齿全画出来）
 const MODEL_POLY_MAX_POINTS: usize = 24;
 
-/// 顶点过多时逐个削掉"面积贡献最小"的那个（Visvalingam）。
+/// 轮廓平滑的容差（mm）：小于它的起伏当锯齿抹掉。
 ///
-/// 为什么不是等距采样：等距会把尖角（模型的鼻子、爪子）削平，而"看着像撞了"正是
-/// 那个角造成的 —— 削最平的角，形状才留得住。
-fn simplify_polygon(mut poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+/// 取 1.6 —— 2mm 格网走出来的"楼梯"（单步起伏 ≤ 半格对角线 ≈ 1.4mm）正好被抹平，
+/// 真实拐角（远大于它的）留着。代价是轮廓最多往里收 1.6mm；**判"撞没撞"仍然按逐个
+/// 占用格来**，图只是示意，所以这点内收不影响结论。
+const MODEL_POLY_EPSILON_MM: f64 = 1.6;
+
+/// 点到直线（过 a、b）的距离
+fn point_line_distance(p: [f64; 2], a: [f64; 2], b: [f64; 2]) -> f64 {
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return ((p[0] - a[0]).powi(2) + (p[1] - a[1]).powi(2)).sqrt();
+    }
+    ((p[0] - a[0]) * dy - (p[1] - a[1]) * dx).abs() / len
+}
+
+/// Douglas–Peucker：把"近似一条线"的中间点去掉。
+fn rdp(points: &[[f64; 2]], eps: f64) -> Vec<[f64; 2]> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+    let a = points[0];
+    let b = points[points.len() - 1];
+    let mut index = 0usize;
+    let mut worst = 0.0f64;
+    for (i, p) in points.iter().enumerate().take(points.len() - 1).skip(1) {
+        let d = point_line_distance(*p, a, b);
+        if d > worst {
+            worst = d;
+            index = i;
+        }
+    }
+    if worst <= eps {
+        return vec![a, b];
+    }
+    let mut left = rdp(&points[..=index], eps);
+    let right = rdp(&points[index..], eps);
+    left.pop();
+    left.extend(right);
+    left
+}
+
+/// 轮廓整形：① 先抹锯齿（RDP，闭合环要从最远两点切开）；② 还超 24 个顶点就按
+/// 面积贡献继续削（Visvalingam）。
+///
+/// 为什么第 ② 步不是等距采样：等距会把尖角（模型的鼻子、爪子）削平，而"看着像撞了"
+/// 正是那个角造成的 —— 削最平的角，形状才留得住。
+fn simplify_polygon(poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
+    let original = poly.clone();
+    let mut poly = poly;
+    if poly.len() >= 4 {
+        let start = poly[0];
+        let mut far = 0usize;
+        let mut best = -1.0f64;
+        for (i, p) in poly.iter().enumerate().skip(1) {
+            let d = (p[0] - start[0]).powi(2) + (p[1] - start[1]).powi(2);
+            if d > best {
+                best = d;
+                far = i;
+            }
+        }
+        let mut head = rdp(&poly[..=far], MODEL_POLY_EPSILON_MM);
+        let mut tail_points = poly[far..].to_vec();
+        tail_points.push(start);
+        let mut tail = rdp(&tail_points, MODEL_POLY_EPSILON_MM);
+        head.pop(); // 与 tail 首点重复（far）
+        tail.pop(); // 回到起点的那一点
+        head.extend(tail);
+        /* 退化成一条线（点几乎共线）⇒ 不抹，交给下面的限顶点 */
+        if head.len() >= 3 {
+            poly = head;
+        }
+    }
+    if poly.len() < 3 {
+        return original;
+    }
     while poly.len() > MODEL_POLY_MAX_POINTS {
         let n = poly.len();
         let mut worst = 1usize;
@@ -567,18 +709,24 @@ impl CollisionResult {
             Some(b) => [(b.x_min + b.x_max) / 2.0, (b.y_min + b.y_max) / 2.0],
             None => [0.0, 0.0],
         };
+        /*
+         * 起点：**撞上的那个模型**（冲突点落在哪个连通块就取哪个的中心），
+         * 没有就退回整体框中心。终点一直是"整体框中心 + 位移"的语义 ——
+         * 建议句里说的"往右上挪多少"是按它算的，箭头只是起步点更贴近现场。
+         */
+        let model_center = self
+            .arrow_origin
+            .unwrap_or_else(|| center_of(self.model_bbox));
         let (arrow_from, arrow_vec) = match self.collision_type {
             CollisionType::Forbidden => (
                 center_of(self.tower_bbox),
                 [self.required_move_x, self.required_move_y],
             ),
-            CollisionType::None | CollisionType::WipeTowerNeeded => {
-                (center_of(self.model_bbox), [0.0, 0.0])
-            }
+            CollisionType::None | CollisionType::WipeTowerNeeded => (model_center, [0.0, 0.0]),
             _ => {
                 let (dx, dy) = self.direction.delta();
                 (
-                    center_of(self.model_bbox),
+                    model_center,
                     [dx * self.required_move_x, dy * self.required_move_y],
                 )
             }
@@ -1251,6 +1399,8 @@ fn detect_tower_collision_all_layers(
             y_max: bed.y_max,
         };
         result.conflict_points = conflict_points.clone();
+        /* 箭头起点 = **实际撞上的那个模型**的中心（不是所有模型的整体框中心） */
+        result.arrow_origin = model_occ.conflict_center(&conflict_points);
         result =
             resolve_model_adjustment(result, &ref_bbox, tower_bbox, &bed_bbox, &conflict_points);
     }
@@ -1694,7 +1844,16 @@ mod tests {
         ]);
         let r = detect_tower_collision(&content, &ir);
         let facts = r.facts(&ir);
-        assert_eq!(facts.arrow_from, [75.0, 75.0], "起点 = 模型框中心");
+        /*
+         * 起点 = **撞上的那个模型**的中心（2026-10-18 作者：「这个箭头应该从具体的
+         * 哪个模型指出去的才对」）。这份输入里三个点各成一块，冲突点落在 (30,30)
+         * 那一格 ⇒ 起点是它的格子中心；**不是**三块的整体框中心 (75,75)。
+         */
+        assert_eq!(
+            facts.arrow_from,
+            [31.0, 31.0],
+            "起点 = 撞上的那个模型的中心"
+        );
         let vec_len = (facts.arrow_vec[0] * facts.arrow_vec[0]
             + facts.arrow_vec[1] * facts.arrow_vec[1])
             .sqrt();
@@ -2034,6 +2193,42 @@ mod tests {
         assert!(
             area < rect * 0.9,
             "圆形轮廓该明显小于外接矩形（这才叫俯视图）：{area} vs {rect}"
+        );
+    }
+
+    /// **箭头从撞上的那个模型出发**（2026-10-18 作者：「这个箭头应该从具体的哪个模型
+    /// 指出去的才对」）—— 之前取的是所有模型的整体框中心，模型分两三堆时那个点落在
+    /// 中间的空白里，箭头看着凭空出现。
+    #[test]
+    fn the_arrow_starts_at_the_model_that_collides() {
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 80.0,
+            y_min: 0.0,
+            y_max: 80.0,
+        };
+        let mut occ = Occupancy::new(&bed, 2.0);
+        for x in [10.0, 12.0, 14.0, 16.0] {
+            for y in [10.0, 12.0, 14.0] {
+                occ.mark(x, y);
+            }
+        }
+        for x in [50.0, 52.0, 54.0, 56.0] {
+            for y in [50.0, 52.0, 54.0] {
+                occ.mark(x, y);
+            }
+        }
+        /* 冲突点只在右上那一块 ⇒ 起点必须落在右上 */
+        let center = occ
+            .conflict_center(&[[52.0, 52.0], [54.0, 52.0]])
+            .expect("冲突点该落在某一块里");
+        assert!(
+            center[0] > 45.0 && center[1] > 45.0,
+            "箭头要从撞上的那块出发：{center:?}"
+        );
+        assert!(
+            occ.conflict_center(&[]).is_none(),
+            "没有冲突点就没有起点（调用方退回整体框）"
         );
     }
 
