@@ -1223,12 +1223,12 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    * 让给拖窗带的只有**标题栏那一格里的几块**（北边一条、上面两个角，以及左右两条边
    * 顶上那 38px）：拖窗带必须整条盖住窗控键才管用，而那几块本来就在标题栏上。
    *
-   * 不跑的那一态（结论留在屏上）**退回普通模态框**：那时窗控键照旧点得着 ——
-   * 看完结果顺手关窗是正常动作，不该拦。
+   * 不跑的那一态（结论留在屏上）**层高不降**（2026-10-18：结果框要压过参数弹窗，
+   * 它是这一屏的头等事），但仍低于窗控键（94）—— 看完结果顺手关窗照旧。
    */
   return (
     <>
-      <div className={s.layer} data-full={running}>
+      <div className={s.layer}>
         {screen}
       </div>
       {running && (

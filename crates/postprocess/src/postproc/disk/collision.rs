@@ -284,13 +284,34 @@ impl CollisionResult {
         /* 数字进模板要字符串（表里 `params` 那一档），一位小数够用 ——
         建议里的"至少几毫米"本来就是取整过的 `ceil_to_01`。 */
         let one_dp = |v: f64| format!("{:.1}", v.abs());
+        /* 只列**真的要动**的那个轴（2026-10-18）：单轴方向下另一个轴是 0，
+        旧模板固定写 `X 至少 …，Y 至少 …`，屏幕上就是 "Y 至少 0.0mm" 的噪音。
+        分量表放 `amounts` 一个参数里，句子仍只在 `messages.toml` 有一份。 */
+        let amounts = |x: f64, y: f64| -> String {
+            let xs = if x.abs() > 0.0 {
+                Some(format!("X 至少 {}mm", one_dp(x)))
+            } else {
+                None
+            };
+            let ys = if y.abs() > 0.0 {
+                Some(format!("Y 至少 {}mm", one_dp(y)))
+            } else {
+                None
+            };
+            match (xs, ys) {
+                (Some(x), Some(y)) => format!("{x}，{y}"),
+                (Some(x), None) => x,
+                (None, Some(y)) => y,
+                (None, None) => "0mm".to_string(),
+            }
+        };
         let (code, params): (&str, Vec<(&str, String)>) = match self.collision_type {
             CollisionType::Forbidden => (
                 "E_GCODE_COLLISION_004",
-                vec![
-                    ("x", one_dp(self.required_move_x)),
-                    ("y", one_dp(self.required_move_y)),
-                ],
+                vec![(
+                    "amounts",
+                    amounts(self.required_move_x, self.required_move_y),
+                )],
             ),
             CollisionType::WipeTowerNeeded => ("E_GCODE_COLLISION_003", Vec::new()),
             _ => {
@@ -301,8 +322,10 @@ impl CollisionResult {
                         "E_GCODE_COLLISION_002",
                         vec![
                             ("direction", self.direction_cn.clone()),
-                            ("x", one_dp(self.required_move_x)),
-                            ("y", one_dp(self.required_move_y)),
+                            (
+                                "amounts",
+                                amounts(self.required_move_x, self.required_move_y),
+                            ),
                         ],
                     )
                 } else {
@@ -814,24 +837,54 @@ fn resolve_model_adjustment(
     result
 }
 
+/// 候选方向 = **背离塔的那几条轴**（2026-10-18 晚重写）。
+///
+/// 旧实现是"bbox 相交就给四个对角"，真机上出了两张票（作者的原话：
+/// 「怎么这个箭头总是右上角呢」「而且这个方向也不对」）：
+///
+/// · 模型明明在塔的右边，却能建议「往左上挪」—— 那要整个越过塔到另一侧，
+///   虽然算出来"不撞"，但没人会这么搬模型；
+/// · 对角方向要求两个轴一起动，`X 至少 32.7mm，Y 至少 32.7mm` 每次都一样，
+///   读数看着像常数 —— 而实际只需要沿一个轴走。
+///
+/// 现在的口径：
+/// 1. 只在**确实重叠的轴**上给方向（不重叠的轴本来就不用动）；
+/// 2. 方向必须**背离塔**：模型框中心在塔中心右边就只给「向右」，左边只给
+///    「向左」—— 不允许把模型推到塔的另一侧；中心重合（模型横跨塔）时两侧
+///    都给，让退出距离自己挑；
+/// 3. **不再给对角**：模型框与塔框都是轴对齐的，单轴总能脱离；对角只会
+///    多挪另一个轴的那一段，永远更远。
 fn build_adjustment_directions(ref_bbox: &GBBox, tower_bbox: &GBBox) -> Vec<MoveDirection> {
     let x_overlap = ref_bbox.x_min < tower_bbox.x_max && ref_bbox.x_max > tower_bbox.x_min;
     let y_overlap = ref_bbox.y_min < tower_bbox.y_max && ref_bbox.y_max > tower_bbox.y_min;
 
-    if x_overlap && y_overlap {
-        vec![
-            MoveDirection::LeftFront,
-            MoveDirection::RightFront,
-            MoveDirection::LeftBack,
-            MoveDirection::RightBack,
-        ]
-    } else if x_overlap {
-        vec![MoveDirection::Left, MoveDirection::Right]
-    } else if y_overlap {
-        vec![MoveDirection::Front, MoveDirection::Back]
-    } else {
-        Vec::new()
+    let ref_cx = (ref_bbox.x_min + ref_bbox.x_max) / 2.0;
+    let ref_cy = (ref_bbox.y_min + ref_bbox.y_max) / 2.0;
+    let tower_cx = (tower_bbox.x_min + tower_bbox.x_max) / 2.0;
+    let tower_cy = (tower_bbox.y_min + tower_bbox.y_max) / 2.0;
+
+    let mut dirs = Vec::with_capacity(2);
+    if x_overlap {
+        if (ref_cx - tower_cx).abs() < 1e-9 {
+            dirs.push(MoveDirection::Left);
+            dirs.push(MoveDirection::Right);
+        } else if ref_cx > tower_cx {
+            dirs.push(MoveDirection::Right);
+        } else {
+            dirs.push(MoveDirection::Left);
+        }
     }
+    if y_overlap {
+        if (ref_cy - tower_cy).abs() < 1e-9 {
+            dirs.push(MoveDirection::Back);
+            dirs.push(MoveDirection::Front);
+        } else if ref_cy > tower_cy {
+            dirs.push(MoveDirection::Front);
+        } else {
+            dirs.push(MoveDirection::Back);
+        }
+    }
+    dirs
 }
 
 fn has_conflicts_after_move(
@@ -1025,6 +1078,58 @@ mod tests {
             "键名必须是 modelBbox：{wire:?}"
         );
         assert!(wire.get("conflictPoints").is_some());
+    }
+
+    /// **建议只往背离塔的那一侧挪，且只动一个轴**（2026-10-18 真机两张票）：
+    ///
+    /// · 模型主体在塔右边时，建议只能是「向右」—— 旧实现会给「向左上」
+    ///   （越过整座塔到另一侧），箭头指回去，作者一眼看出不对；
+    /// · 单轴就够脱离，`Y` 不许再跟着一起动（旧实现给出 `X 32.7 / Y 32.7`
+    ///   那种看着像常数的读数）。
+    #[test]
+    fn the_advice_never_moves_the_model_across_the_tower() {
+        let ir = tower_ir();
+
+        /* 模型主体在塔右侧（x 40..120），只有左缘压进塔 —— 只许往右 */
+        let right = detect_tower_collision(
+            &lines(&[
+                "G1 X40 Y30 E0.5 ; 塔内（塔 22.96..57.04）",
+                "G1 X120 Y30 E0.6",
+                "G1 X40 Y120 E0.7",
+                "G1 X120 Y120 E0.8",
+            ]),
+            &ir,
+        );
+        assert!(right.has_collision);
+        assert_eq!(
+            right.direction,
+            MoveDirection::Right,
+            "模型在塔右边，不许建议往左：{right:?}"
+        );
+        assert_eq!(right.required_move_y, 0.0, "单轴就够，Y 不许跟着动");
+        assert!(
+            right.required_move_x > 0.0 && right.required_move_x < 34.1,
+            "向右只需走到塔右缘（不到一个塔宽），不是对角那种两轴一起动：{}",
+            right.required_move_x
+        );
+
+        /* 模型主体在塔左侧（x 22..40）—— 只许往左 */
+        let left = detect_tower_collision(
+            &lines(&[
+                "G1 X22 Y30 E0.5",
+                "G1 X40 Y30 E0.6 ; 塔内",
+                "G1 X22 Y120 E0.7",
+                "G1 X40 Y120 E0.8",
+            ]),
+            &ir,
+        );
+        assert!(left.has_collision);
+        assert_eq!(
+            left.direction,
+            MoveDirection::Left,
+            "模型在塔左边，不许建议往右：{left:?}"
+        );
+        assert_eq!(left.required_move_y, 0.0);
     }
 
     /// **热床按 gcode 判**（2026-10-18）：gcode 写了 `; printable_area` 就听 gcode 的，

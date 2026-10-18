@@ -780,36 +780,53 @@ pub fn run(
      *
      * ★ 开关在 `ir.prefs.auto_tower_position`（设置页「智能塔位置」）—— 关着就完全不预检，
      *   行为与今天一字不差。
+     *
+     * ★ **闸门必须与管线同一套判据**（2026-10-18 真机：开关打开了却一次都不问）。
+     *   `ir.tower.use_towers` 不是预设里的一格 —— IR 里默认 `false`，它由管线第 5 步
+     *   `apply_wiping_decision` 按**这一份 G-code** 现算（有支撑 ⇒ 开塔；`disk` 档 ⇒ 关）。
+     *   预检发生在第 5 步之前，拿默认值当闸门 ⇒ 永远不进这一块。
+     *   这里在**克隆**上跑同一条 decision（管线之后还会再跑一次，幂等），
+     *   既不改变这一趟进管线的 IR，也保证"预检说会撞"与"第 6 步真撞"是同一份输入。
      */
-    if ir.prefs.auto_tower_position && ir.tower.use_towers {
+    if ir.prefs.auto_tower_position {
         let content: Vec<String> = raw
             .lines()
             .map(|l| l.trim_end_matches('\r').to_string())
             .collect();
-        let collision = postprocess::postproc::disk::detect_tower_collision(&content, &ir);
-        if collision.has_collision {
-            let facts = collision.facts(&ir);
-            let candidate = postprocess::postproc::disk::auto_tower_position_for_facts(
-                &ir,
-                &facts,
-                collision.model_bbox,
+        /* 第 6 步的另一个闸门：只有非校准件那一趟才查碰撞，预检跟着它走 */
+        let calib_mode = postprocess::postproc::calibration::detect_mode(&content);
+        if postprocess::postproc::calibration::need_collision_check(calib_mode) {
+            let mut probe = ir.clone();
+            let decision = postprocess::postproc::support::decide_wiping(
+                &probe.wiping.preferred_mode,
+                &content,
             );
-            if let Some(client) = ui.client() {
-                let mut asker = ChannelAsker { client };
-                let geo = crate::hook_ipc::RelocateGeoPayload {
-                    collision: Some(facts.clone()),
-                    candidate,
-                    current: [ir.wiping.wiper_x, ir.wiping.wiper_y],
-                };
-                let question = Reason::new(keys::TOWER_RELOCATION_QUESTION)
-                    .with("count", facts.conflict_count.to_string())
-                    .text();
-                if let Some([x, y]) = tower_relocation_of(
-                    asker.ask_tower_relocation(&question, geo).as_deref(),
-                    candidate,
-                ) {
-                    ir.wiping.wiper_x = x;
-                    ir.wiping.wiper_y = y;
+            postprocess::postproc::support::apply_wiping_decision(&mut probe, &decision);
+            let collision = postprocess::postproc::disk::detect_tower_collision(&content, &probe);
+            if probe.tower.use_towers && collision.has_collision {
+                let facts = collision.facts(&probe);
+                let candidate = postprocess::postproc::disk::auto_tower_position_for_facts(
+                    &ir,
+                    &facts,
+                    collision.model_bbox,
+                );
+                if let Some(client) = ui.client() {
+                    let mut asker = ChannelAsker { client };
+                    let geo = crate::hook_ipc::RelocateGeoPayload {
+                        collision: Some(facts.clone()),
+                        candidate,
+                        current: [ir.wiping.wiper_x, ir.wiping.wiper_y],
+                    };
+                    let question = Reason::new(keys::TOWER_RELOCATION_QUESTION)
+                        .with("count", facts.conflict_count.to_string())
+                        .text();
+                    if let Some([x, y]) = tower_relocation_of(
+                        asker.ask_tower_relocation(&question, geo).as_deref(),
+                        candidate,
+                    ) {
+                        ir.wiping.wiper_x = x;
+                        ir.wiping.wiper_y = y;
+                    }
                 }
             }
         }

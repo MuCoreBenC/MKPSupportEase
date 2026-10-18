@@ -93,18 +93,18 @@ slicer = "模型与擦料塔的位置冲突 —— 回切片器挪开模型再�
 # 谁挑这句：`postproc::disk::CollisionResult::advice` 按 `collision_type` 分档。
 # 数字是"至少挪多少"（内核那边已经按 0.1mm 向上取整过）。
 ["E_GCODE_COLLISION_002"]
-text = "建议：把模型往{direction}挪 —— X 至少 {x}mm，Y 至少 {y}mm"
-params = ["direction", "x", "y"]
-note = "挪模型的那一档：方向是内核按最小退出距离挑出来的（旧侧 resolveModelAdjustment）"
+text = "建议：把模型往{direction}挪 —— {amounts}"
+params = ["direction", "amounts"]
+note = "挪模型的那一档：方向是内核按最小退出距离挑出来的（旧侧 resolveModelAdjustment）；amounts 只列真要动的轴（单轴方向下另一边不写 0）"
 
 ["E_GCODE_COLLISION_003"]
 text = "模型这边挪不开了：建议调整擦料塔位置（wiper_x / wiper_y）后再切片"
 note = "兜底：三个候选方向都挪不开（越界或挪完还撞），只能动塔"
 
 ["E_GCODE_COLLISION_004"]
-text = "擦料塔位置落在机型的额外禁区里：把塔挪开 —— X 至少 {x}mm，Y 至少 {y}mm（或改机型的禁区配置）"
-params = ["x", "y"]
-note = "禁区那一档：挪的是塔不是模型，数字是最小平移向量（MTV）"
+text = "擦料塔位置落在机型的额外禁区里：把塔挪开 —— {amounts}（或改机型的禁区配置）"
+params = ["amounts"]
+note = "禁区那一档：挪的是塔不是模型，数字是最小平移向量（MTV）；amounts 只列真要动的轴"
 
 ["E_CAL_FAILED_001"]
 text = "校准代码没有生成出来：{detail}"

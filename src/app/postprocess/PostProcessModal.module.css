@@ -31,11 +31,18 @@
 .layer {
   position: absolute;
   inset: 0;
-  pointer-events: none;
-}
-
-.layer[data-full='true'] {
+  /*
+   * ★ 2026-10-18 作者：「后处理的应该最高的优先显示」。
+   *
+   * 这一层原来只在**跑着那一态**抬到 92（`[data-full='true']`）；结果态退回 0，
+   * 而参数弹窗的宿主层是 70（`PagePresets.module.css .paramsLayer`）⇒ 参数弹窗
+   * 一开就把后处理结果框压在下面，用户看到的是"改参数比后处理还高"。
+   *
+   * 现在两态同一层高：结果框永远压过普通模态框（40）与参数弹窗（70），
+   * 仍低于窗控键（94）、通知（96）与 resize 手柄（93）—— 那些还得点得着。
+   */
   z-index: 92;
+  pointer-events: none;
 }
 
 /* 这一层铺满整扇窗又不吃点击，所以里面的东西得自己把命中重新打开（遮罩就是那一个） */
@@ -361,7 +368,7 @@
 }
 
 /* 窄窗（<720px）：图在上、字在下 —— 挤成两栏谁都看不清 */
-@media (max-width: 720px) {
+@media (width <= 720px) {
   .relocateHero {
     flex-direction: column;
   }
