@@ -91,6 +91,7 @@ TempZOffsetCalibr = 0.0
 UpdateDate = ""
 
 [Prefs]
+AutoTowerPosition = false
 BedGlueAllModels = false
 BedGlueEnabled = false
 BeginStageRetractEnabled = true
