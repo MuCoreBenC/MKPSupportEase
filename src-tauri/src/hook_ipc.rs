@@ -112,6 +112,24 @@ pub struct QuestionPayload {
     /// 对管线意味着什么。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub choices: Vec<QuestionChoice>,
+    /// **挪塔那一问附带的画布几何**（2026-10-18）：界面照它画俯视图
+    /// （原塔位置 / 自动摆放位置 / 坐标），别的问没有 ⇒ `None`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo: Option<RelocateGeoPayload>,
+}
+
+/// 挪塔那一问的**画布几何 + 坐标**（机器坐标，mm；坐标不取整 —— 作者原话
+/// 「可以显示坐标，不用整数也可以的」）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateGeoPayload {
+    /// 碰撞那一整套事实（模型框 / 塔框 / 可打印区 / 冲突点 / 建议箭头）——
+    /// 与报告页俯视图**同一份**结构，界面复用同一个画布。
+    pub collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+    /// 自动摆塔算出来的塔**左下角**；`None` = 板子摆不下（那就没有这一问）
+    pub candidate: Option<[f64; 2]>,
+    /// 现在塔的左下角（`wiper_x` / `wiper_y`）
+    pub current: [f64; 2],
 }
 
 /* ---------- 问句的稳定串（钩子与界面两边都认这几个字面量） ---------- */
@@ -120,11 +138,17 @@ pub struct QuestionPayload {
 pub const QKIND_MACHINE_MISMATCH: &str = "machine-mismatch";
 /// 这是一份校准件：先打印再校准 / 直接校准
 pub const QKIND_CALIBRATION_MODE: &str = "calibration-mode";
+/// 模型与擦料塔相撞：自动把塔挪到不撞的位置 / 自己去挪模型（2026-10-18）
+pub const QKIND_TOWER_RELOCATION: &str = "tower-relocation";
 
 /// 机型那一问：继续（`keep = true`）
 pub const CHOICE_KEEP: &str = "keep";
 /// 任一问：停下 / 终止（**超时也回这个**）
 pub const CHOICE_STOP: &str = "stop";
+/// 挪塔那一问：自动把塔挪到算出来的那个位置（**只改这一趟**）
+pub const CHOICE_RELOCATE: &str = "relocate";
+/// 挪塔那一问：塔不动，用户自己回切片器挪模型 ⇒ 这一趟停下（与超时同一条）
+pub const CHOICE_MODEL: &str = "model";
 /// 校准那一问：先打印，再校准（模型原样跑）
 pub const CHOICE_CALIB_PRINT: &str = "print";
 /// 校准那一问：直接校准（去掉打印件，只留校准路径）
@@ -264,7 +288,11 @@ pub enum FromHook {
         facts: Option<FactsPayload>,
     },
     Progress(ProgressPayload),
-    Question(QuestionPayload),
+    /// 问句（带倒计时与可选答项）。
+    ///
+    /// ★ `Box`：挪塔那一问（2026-10-18）把整份碰撞几何塞进来了 —— 不装箱会把这个
+    /// 枚举撑大（clippy `large_enum_variant`，与内核 `PostprocError::Collision` 同一个原因）。
+    Question(Box<QuestionPayload>),
     /// 打印时间估算**交给你了**：钩子写完盘就退，界面按 id 补全那条记录。
     ///
     /// 为什么钩子不能自己留后台任务：它必须**立刻退出**（切片器在等退出码）。
@@ -423,17 +451,31 @@ impl Client {
         choices: Vec<QuestionChoice>,
         on_timeout: &str,
     ) -> Option<String> {
+        self.ask_with_geo(question_kind, question, choices, on_timeout, None)
+    }
+
+    /// 同 [`Self::ask`]，但**带画布几何**（2026-10-18 挪塔那一问：界面要画俯视图
+    /// 与坐标，光有一句话答不明白）。
+    pub fn ask_with_geo(
+        &self,
+        question_kind: &str,
+        question: &str,
+        choices: Vec<QuestionChoice>,
+        on_timeout: &str,
+        geo: Option<RelocateGeoPayload>,
+    ) -> Option<String> {
         if !self.connected() {
             return None;
         }
         /* 界面上那个倒计时读的就是它：**两段都算进去**（界面露面那 8 秒也等） */
         let deadline_unix_ms = unix_ms_now() + (ANSWER_GRACE + ANSWER_STAKE).as_millis() as u64;
-        self.send(&FromHook::Question(QuestionPayload {
+        self.send(&FromHook::Question(Box::new(QuestionPayload {
             question_kind: question_kind.to_owned(),
             text: question.to_owned(),
             deadline_unix_ms,
             choices,
-        }));
+            geo,
+        })));
 
         /*
          * ★★ 两段倒计时（2026-10-17，作者真机踩到的那一版）：
@@ -743,15 +785,16 @@ mod tests {
                 fraction_in_step: Some(0.25),
                 message: "第一遍处理中".to_owned(),
             }),
-            FromHook::Question(QuestionPayload {
+            FromHook::Question(Box::new(QuestionPayload {
                 question_kind: "machine-mismatch".to_owned(),
                 text: "G-code 是 A1，预设是 A1_MINI —— 机型对不上，结果可能出错。还继续吗？"
                     .to_owned(),
                 deadline_unix_ms: 1_763_000_000_000,
                 choices: Vec::new(),
-            }),
+                geo: None,
+            })),
             /* 带选项表的那一问（2026-10-17 新增的校准件那一问就是这种） */
-            FromHook::Question(QuestionPayload {
+            FromHook::Question(Box::new(QuestionPayload {
                 question_kind: "calibration-mode".to_owned(),
                 text: "这是 Z 偏移校准件 —— 怎么跑？".to_owned(),
                 deadline_unix_ms: 1_763_000_000_000,
@@ -769,7 +812,8 @@ mod tests {
                         accent: false,
                     },
                 ],
-            }),
+                geo: None,
+            })),
             FromHook::DeferPrintTime {
                 record_id: "r1".to_owned(),
                 output: "/tmp/o.gcode".to_owned(),

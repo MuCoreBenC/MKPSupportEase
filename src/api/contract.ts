@@ -137,10 +137,12 @@ export interface ReportCollision {
   conflictCount?: number
   /** 冲突点采样（mm，机器坐标；内核封顶 200 个，够画出分布） */
   conflictPoints?: [number, number][]
-  /** **判据用的塔包围盒**（含外围结构扩展；左下角 = wiper_x / wiper_y） */
-  towerBBox?: ReportBox4
+  /** **判据用的塔包围盒**（含外围结构扩展；左下角 = wiper_x / wiper_y）。
+   *  ★ 键名是 `Bbox` 不是 `BBox`：Rust 侧 `tower_bbox` 走 camelCase 就长这样 ——
+   *  第一稿写成 `towerBBox`，大小写对不上 ⇒ 俯视图整块退掉（2026-10-18 真机踩的）。 */
+  towerBbox?: ReportBox4
   /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0） */
-  modelBBox?: ReportBox4
+  modelBbox?: ReportBox4
   /** 可打印区 */
   printable?: ReportBox4
   /** 画塔真实形状要的参数（与参数页同一套算法） */
@@ -155,6 +157,11 @@ export interface ReportCollision {
   forbiddenZones?: [number, number][][]
   adviceCode?: string
   adviceText?: string
+  /** **建议挪动的箭头**（俯视图画"往哪边、挪多少"）：起点 = 挪谁的中心（机器坐标）、
+   *  位移 = **带符号** mm；位移为零 = 没有方向可画（挪不开那一档）。
+   *  旧记录没有这两格 ⇒ 可缺（缺就不画箭头）。 */
+  arrowFrom?: [number, number]
+  arrowVec?: [number, number]
 }
 
 /** 涂胶组（`detail.glue`）—— 键名与旧版 `_meta.json` 的 `detail` 同名 */
@@ -1611,6 +1618,8 @@ export interface ResolvedPostprocPrefs {
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
+  /** **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才改这一趟的塔位置 */
+  autoTowerPosition: boolean
 }
 
 /**
@@ -1631,6 +1640,8 @@ export interface PostprocPrefsWire {
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
+  /** **自动摆塔**（2026-10-18）：`null` = 回到出厂档（关） */
+  autoTowerPosition?: boolean | null
 }
 
 /** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */
@@ -1872,6 +1883,24 @@ export interface PostProcessQuestion {
    * 补推那一趟也照着同一条数，不会重新从头开始数。
    */
   deadlineUnixMs?: number
+  /**
+   * **挪塔那一问附带的画布几何**（2026-10-18）：只有 `tower-relocation` 这一问有，
+   * 别的一问没有这一格 ⇒ 缺省。界面照它画俯视图与坐标。
+   */
+  geo?: RelocateGeo | null
+}
+
+/**
+ * 挪塔那一问的**画布几何 + 坐标**（机器坐标 mm；**不取整** —— 作者：「可以显示坐标，
+ * 不用整数也可以的」）。
+ */
+export interface RelocateGeo {
+  /** 碰撞那一整套事实（与报告页俯视图同一份结构 ⇒ 界面复用同一个画布） */
+  collision?: ReportCollision | null
+  /** 自动摆塔算出来的塔**左下角**；`null` = 板子摆不下（那就没有"自动挪塔"这颗按钮） */
+  candidate?: [number, number] | null
+  /** 现在塔的左下角（`wiper_x` / `wiper_y`） */
+  current: [number, number]
 }
 
 /** 那一趟的结论 */

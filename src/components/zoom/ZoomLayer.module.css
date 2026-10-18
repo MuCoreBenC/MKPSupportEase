@@ -1,0 +1,88 @@
+/*
+ * 通用放大层的样式（2026-10-18）—— 从 `app/guide/GuideImage.module.css` 的
+ * `.zoomLayer` 那一族抽出来的，一条不许退的理由都写在 `ZoomLayer.tsx` 头注。
+ */
+
+/*
+ * 那一层自己 = 舞台：铺满视口。挂 `Modal` 的 `overlay` 里时，遮罩就是同一块几何
+ * （`.overlayLayer` 铺在 fixed 的遮罩内）；不在模态框里的（报告页）由调用方
+ * `createPortal` 到 `body` —— `fixed` 两种场合都落在视口上。
+ * z-index 与"后处理全屏"同档（96 通知仍压得住它）。
+ */
+.layer {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: clamp(8px, 2.4vw, 40px);
+  cursor: zoom-out;
+  /* 自己接管捏合 / 拖动：别让浏览器拿触摸手势去滚页面 / 缩整页（触摸屏那一路要用） */
+  touch-action: none;
+  /*
+   * ★★ **整层禁选**：拖动平移时按到字上，WebKit 会把那一下拿去当文字选择
+   *   ⇒ pointer 序列断掉、平移废掉。这层里没有一个字是要选的。
+   *   （WKWebView 只认带前缀的 `user-select`。）
+   */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * ★★ 那一层底 **画在 `::before` 上、不画在这一层自己身上**：动效只许动这个伪元素
+ * （登场渐显），父级始终不动 —— 动父级自己的 `opacity`，透明那一帧会把背后整块
+ * 界面透出来（就是闪）。`inset: 0` 相对这一层的内衬盒，正好铺满整块舞台。
+ *
+ * ★ 背景用**固定的深色遮罩**（2026-10-18 作者：浅色模式下那层 42% 灰"背景有问题，
+ *   也用深色的吧"）—— 不再跟 `--scrim` 走主题。遮罩上的提示字本来就是固定白，
+ *   两套主题下都站得住。
+ */
+.layer::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 52%);
+}
+
+/* 内容与那句提示要浮在底之上（`::before` 不带 z-index，会被后画的兄弟盖住） */
+.hit,
+.hint {
+  position: relative;
+}
+
+/* 收起按钮 = "点一下就收"的靶子；皮扒干净，只留"能点"这件事 */
+.hit {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: zoom-out;
+}
+
+/*
+ * 内容根：FLIP / 用户缩放的 `transform` 与 `--zoom-k` 都写在这里 —— 后代
+ * （标注框、线宽）拿 CSS 变量除回去，视觉大小恒定。
+ * ★ 那一趟"飞起来"的起点由 WAAPI 写成内联 transform，这条只是提前提层（缩小时不抖）。
+ */
+.content {
+  will-change: transform;
+  transform: translateZ(0);
+  max-width: 100%;
+}
+
+/* 图的原生拖拽（按住一拖 = "拖走这张图"）禁掉 —— 平移靠 pointer，不靠它 */
+.layer img {
+  -webkit-user-drag: none;
+}
+
+/* 遮罩上的字：两套主题的 `--scrim` 都是深色 ⇒ 固定白 */
+.hint {
+  font-size: var(--fs-label);
+  line-height: 1.5;
+  color: #fff;
+  opacity: 0.8;
+}

@@ -13,7 +13,8 @@ pub mod wipe;
 
 pub use calibration::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
 pub use collision::{
-    AdjustmentTarget, CollisionResult, CollisionType, MoveAttempt, detect_tower_collision,
+    AdjustmentTarget, CollisionResult, CollisionType, MoveAttempt, auto_tower_position_for_facts,
+    detect_tower_collision,
 };
 
 /// processor.ComputeBBox（对照 bbox_compute.go / model_z_map.go:59）：

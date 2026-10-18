@@ -2,8 +2,9 @@
  * 碰撞俯视图的样式（2026-10-18）。
  *
  * 走报告页那套安静读数风格：中性底 + 发丝线，只有"撞了"这件事用红。
- * 塔的颜色沿用参数页那套（塔身琥珀 #fcd34d / 描边 #d97706，辅助结构绿）
- * —— 那是这台程序里塔的既定长相，不在这一稿重新设计。
+ * 塔的颜色沿用参数页那套（塔身琥珀 #fcd34d / 描边 #d97706，辅助结构绿）——
+ * 那是这台程序里塔的既定长相，不在这一稿重新设计。板轮廓也是参数页同一份
+ * `Plate` 数据，观感（绿底 + 描边）照 `TowerMap` 走。
  */
 
 .wrap {
@@ -13,25 +14,107 @@
   padding: 2px 0 0;
 }
 
-/* 画布：宽度跟着容器，高度按热床比例（aspectRatio 由组件按 mm 给） */
+/* 画布：宽度跟着容器，高度按比例（aspectRatio 由组件按尺寸写到 style 上）
+   ★ 缩着显示（2026-10-18 作者：「现在显示太大了我希望小一点，可以点击放大查看」；
+   再压一档：「原本的再小一点」）—— 报告页里只当缩略图，看细节走放大层那一套 */
 .map {
   position: relative;
   width: 100%;
-  max-width: 420px;
+  max-width: 240px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface-sunken);
   overflow: hidden;
 }
 
+/* 有板规格：只当定位壳 —— 轮廓、底色、描边都由板 path 出（照 TowerMap 的分工） */
+.mapPlate {
+  position: relative;
+  width: 100%;
+  max-width: 240px;
+  overflow: visible; /* 板描边比 viewBox 大半根，裁了会一粗一细 */
+}
+
+/* 小图那颗"能点"的按钮：皮扒干净，只留"能点"这件事（与图片引导的 `.figBtn` 同一条） */
+.mapBtn {
+  display: block;
+  padding: 0;
+  background: none;
+  border: 0;
+  cursor: zoom-in;
+}
+
+/*
+ * 放大层里**同一份**俯视图照大档画（宽由组件按纵横比内联给 —— 见 .tsx 那条注释）。
+ * ★★ 2026-10-18 作者：「你看这些的颜色就很好呀……不要动这些的，要改的是放大的」
+ *   —— 放大档**没有任何自己的配色**：不挂 `data-theme`（跟主题走）、不叠绿罩、
+ *   不垫裁剪实底，就是行内小图那份；唯一多的东西是**垫一块不透明的页面底**
+ *   （`--bg-1`），让图和它的背景一起渲染、不从深色遮罩里透出卡舌缺口。
+ */
+.zoomed .map,
+.zoomed .mapPlate {
+  max-width: 100%;
+}
+
+/*
+ * 放大档那块**不透明底**：色 = 页面底 `--bg-1`（跟主题走），形状 = 板轮廓（裁剪在
+ * svg 里做，见 .tsx 的 `collision-bed-clip`）。★ 外壳自己**不铺矩形底** —— 铺了就是
+ * 方块套板形，卡舌缺口外面那圈会露出来（作者要的是"包括舌"的一整块板形底）。
+ * 没板规格的退回档：画布本身就是圆角矩形床，直接给同一色。
+ */
+.bedSolid {
+  fill: var(--bg-1);
+}
+
+.zoomed .map {
+  background: var(--bg-1);
+}
+
+/*
+ * 建议挪动的箭头：**白**（2026-10-18 作者：「用白色，和塔区分开」，红与冲突点撞色
+ * 不用）；深描边让它在浅色 inline 小图上也立得住。粗箭身 + 三角镞，一层单独的
+ * svg（z-index 3 压过塔图 —— 上一版箭头被塔压住）。
+ */
+.arrow {
+  fill: #fff;
+  stroke: rgb(0 0 0 / 38%);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 真板轮廓：铺满画布，描边 non-scaling 固定像素宽（缩放之间粗细一致） */
+.plate {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  fill: rgba(32, 178, 90, 0.07);
+  stroke: rgba(32, 178, 90, 0.45);
+}
+
+.plate path {
+  vector-effect: non-scaling-stroke;
+  stroke-width: 1.25px;
+}
+
+/* 板缘 → 可打印区之间的余量圈（与参数页同色相，融成连续的一条） */
+.ring {
+  fill: var(--hairline);
+  stroke: none;
+}
+
 .svg {
   position: absolute;
   inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
 }
 
-/* 热床（可打印区） */
+/* 热床（可打印区）—— 只有"没板规格"的退回档才画这一层 */
 .bed {
   fill: var(--surface-solid);
   stroke: var(--line-strong);
@@ -76,9 +159,10 @@
   fill: var(--danger);
 }
 
-/* 塔的真实形状：绝对定位盖在判据框上（百分比由组件按 mm 算） */
+/* 塔的真实形状：绝对定位盖在判据框上（百分比由组件按尺寸算） */
 .tower {
   position: absolute;
+  z-index: 2;
   pointer-events: none;
 }
 

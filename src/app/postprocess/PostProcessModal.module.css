@@ -265,6 +265,108 @@
   color: var(--warn-ink);
 }
 
+/*
+ * **挪塔那一问的那一屏**（2026-10-18 作者：「把画布居中显示或者左侧显示，右侧显示
+ * 文字内容，坐标之类的」）—— **左图右文**，不走 104px 那口 hero（三行字答不了
+ * "塔挪到哪"这种问题）。配色跟着"流程选择"那一档（绿，不是警告橙）：
+ * 这不是出错，是"这一盘怎么跑"的选择。
+ */
+.relocateHero {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 18px;
+  box-sizing: border-box;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+  background: var(--ask-surface);
+  border: 1px solid var(--ask-line);
+  color: var(--ask-ink);
+}
+
+/* 左：两幅俯视图（现在 / 挪后），窄屏时上下排 */
+.relocateMaps {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 14px;
+  flex-shrink: 0;
+}
+
+.relocateMap {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.relocateMapTag {
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+
+/* 「挪后」那一枚：跟着绿，一眼分出新旧 */
+.relocateMapTagNew {
+  color: var(--ask-ink);
+}
+
+/* 右：话 + 坐标 + 倒计时 */
+.relocateCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.relocateTitle {
+  font-size: var(--fs-title);
+  font-weight: 600;
+}
+
+.relocateLine {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+}
+
+/* 坐标表：三行（现在 / 自动摆放 / 冲突点），数字不取整（作者点名） */
+.relocateCoords {
+  margin: 2px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.relocateCoord {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  font-size: var(--fs-label);
+}
+
+.relocateCoord dt {
+  min-width: 72px;
+  color: var(--ink-2);
+}
+
+.relocateCoord dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.relocateHint {
+  font-size: var(--fs-label);
+  opacity: 0.75;
+}
+
+/* 窄窗（<720px）：图在上、字在下 —— 挤成两栏谁都看不清 */
+@media (max-width: 720px) {
+  .relocateHero {
+    flex-direction: column;
+  }
+}
+
 .warnGlyph {
   flex-shrink: 0;
   display: flex;

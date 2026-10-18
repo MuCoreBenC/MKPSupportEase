@@ -379,6 +379,11 @@ pub struct PrefsIr {
     pub bed_glue_enabled: bool,
     /// 热床涂胶是只涂擦料塔位置（false）还是所有模型首层（true）。
     pub bed_glue_all_models: bool,
+    /// **自动摆塔**（2026-10-18 作者定的口径）：模型与塔相撞时问一句
+    /// "自动把塔挪到不撞的地方 / 你自己去挪模型"；选前者才按自动摆出来的位置跑完
+    /// 这一趟（**只改这一趟，不落盘**）。出厂关 —— 塔摆哪儿是用户 / 套餐定的，
+    /// 没有用户点头，内核不自作主张挪。
+    pub auto_tower_position: bool,
 }
 
 impl Default for PrefsIr {
@@ -397,6 +402,7 @@ impl Default for PrefsIr {
             xy_calibration_dwell_sec: 3,
             bed_glue_enabled: false,
             bed_glue_all_models: false,
+            auto_tower_position: false,
         }
     }
 }

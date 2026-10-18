@@ -42,8 +42,10 @@ const COLLISION = `{
       [46.2, 38.4], [47.1, 39.2], [45.8, 37.6], [48.4, 40.1], [46.9, 38.9],
       [50.2, 41.3], [45.1, 37.1], [49.6, 40.8], [47.7, 39.6], [46.4, 38.6],
     ],
-    towerBBox: { xMin: 40, xMax: 57.04, yMin: 20, yMax: 37.04 },
-    modelBBox: { xMin: 44, xMax: 96, yMin: 26, yMax: 88 },
+    /* 键名照真机：towerBbox（Rust tower_bbox 的 camelCase），不是 towerBBox
+       —— 第一稿写反了，俯视图整块退掉（2026-10-18 真机踩的），这条探针顺带钉住它 */
+    towerBbox: { xMin: 40, xMax: 57.04, yMin: 20, yMax: 37.04 },
+    modelBbox: { xMin: 44, xMax: 96, yMin: 26, yMax: 88 },
     printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
     tower: {
       outerStructure: 'brim',
@@ -54,6 +56,9 @@ const COLLISION = `{
       sheathBaseExpand: 5,
     },
     forbiddenZones: [],
+    /* 建议挪动的箭头（2026-10-18）：起点 = 模型框中心，位移 = 方向 × 距离（右上） */
+    arrowFrom: [70, 57],
+    arrowVec: [12.5, 8],
     adviceCode: 'E_GCODE_COLLISION_002',
     adviceText: '建议：把模型往右上挪 —— X 至少 12.5mm，Y 至少 8.0mm',
   }`
@@ -112,7 +117,10 @@ try {
     const dashed = svgs.flatMap((v) => [
       ...v.querySelectorAll('rect[class*="model"], rect[class*="towerBox"]'),
     ])
+    /* 建议挪动的箭头（白色粗箭，单独一层） */
+    const arrows = svgs.filter((v) => v.querySelector('path[class*="arrow"]')).length
     return {
+      arrowDrawn: arrows >= 1,
       tabs,
       hasAdviceTab: (tabs ?? []).includes('建议'),
       hasMapTab: (tabs ?? []).includes('碰撞位置'),
@@ -120,12 +128,46 @@ try {
       adviceMmShown: /12\.5 mm/.test(body) && /8\.0 mm/.test(body),
       codeShown: /E_GCODE_COLLISION_002/.test(body),
       towerDrawn: towerSvg !== undefined,
+      /* 板轮廓（有机型板规格才画真板形状 —— 卡舌 / 把手 / 圆角） */
+      plateDrawn:
+        [...document.querySelectorAll('svg[class*="plate"] path')].length > 0,
       dots: dots.length,
       dashedRects: dashed.length,
     }
   })
 
   await page.screenshot({ path: `${SHOTS}/collision-map.png`, fullPage: false })
+
+  /* 点开放大（2026-10-18 第二刀）：通用放大层里同一份俯视图要**真的变大**，
+     且塔 / 模型框 / 冲突点一个不少 —— SVG 本身无损，壳塌了就是"放大了个寂寞" */
+  const smallPlate = await page
+    .locator('button[aria-label="放大查看碰撞俯视图"] svg[class*="plate"]')
+    .first()
+    .boundingBox()
+  await page.locator('button[aria-label="放大查看碰撞俯视图"]').click()
+  await page.waitForTimeout(1500)
+  const zoom = await page.evaluate(() => {
+    const layer = [...document.querySelectorAll('body > *')]
+      .map((el) => (el.tagName === 'DIV' && el !== document.body ? el : null))
+      .filter(Boolean)
+      .at(-1)
+    const svgs = [...(layer?.querySelectorAll('svg') ?? [])]
+    const dots = svgs.flatMap((v) => [...v.querySelectorAll('circle')])
+    const dashed = svgs.flatMap((v) => [
+      ...v.querySelectorAll('rect[class*="model"], rect[class*="towerBox"]'),
+    ])
+    const plate = layer?.querySelector('svg[class*="plate"]')
+    const r = plate?.getBoundingClientRect()
+    return {
+      hasLayer: layer != null,
+      zoomedPlateWidth: r?.width ?? 0,
+      zoomedDots: dots.length,
+      zoomedDashed: dashed.length,
+    }
+  })
+  await page.screenshot({ path: `${SHOTS}/collision-map-zoom.png`, fullPage: false })
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(600)
 
   /* 成功那一行：两块都必须消失 */
   await page.locator('button[data-ok="true"]').first().click()
@@ -141,12 +183,19 @@ try {
     got.adviceMmShown === true &&
     got.codeShown === true &&
     got.towerDrawn === true &&
+    got.plateDrawn === true &&
     got.dots >= 5 &&
     got.dashedRects >= 2 &&
+    got.arrowDrawn === true &&
     !(afterOk.tabs ?? []).includes('碰撞位置') &&
+    /* 放大层：壳真的长大（≥ 小图两倍），内容一个不少 */
+    zoom.hasLayer === true &&
+    zoom.zoomedPlateWidth >= (smallPlate?.width ?? 0) * 2 &&
+    zoom.zoomedDots >= 5 &&
+    zoom.zoomedDashed >= 2 &&
     errs.length === 0
 
-  console.log(JSON.stringify({ ok, ...got, afterOkTabs: afterOk.tabs, errs }, null, 2))
+  console.log(JSON.stringify({ ok, ...got, zoom, afterOkTabs: afterOk.tabs, errs }, null, 2))
   process.exitCode = ok ? 0 : 1
 } finally {
   fs.writeFileSync(FIXTURE, backup)

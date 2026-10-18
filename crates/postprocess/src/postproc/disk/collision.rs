@@ -5,7 +5,7 @@ use crate::ir::Ir;
 use crate::postproc::geom::{self, BBox as GBBox, MoveDirection, Polygon};
 use crate::postproc::tower::calculate_tower_bbox;
 use crate::postproc::tower::constants::{TOWER_INNER_BOUND, TOWER_OUTER_BOUND};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// **给记录用的冲突点上限**（2026-10-18）。
 ///
@@ -15,7 +15,7 @@ use serde::Serialize;
 const CONFLICT_POINT_CAP: usize = 200;
 
 /// 轴对齐框（mm）—— 事实里的几何一律用它（camelCase 进 `_meta.json`）。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Box4 {
     pub x_min: f64,
@@ -39,7 +39,7 @@ impl Box4 {
 ///
 /// 报告页拿它按参数页同一套算法画出塔的真实形状（塔身 / 斜肋 / 护套），
 /// 于是"图上这块"与"判据按这块算"是同一件事实的两个说法。
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TowerShape {
     /// `brim` / `rib` / `sheath`（`ir.wiping.outer_structure`）
@@ -57,13 +57,19 @@ pub struct TowerShape {
 /// 只装**数据**与**已经渲染好的那句建议**（建议正文从 `messages.toml` 来，码在
 /// `advice_code`）—— 内核不认识"界面"，也不拼别的句子。上层（`src-tauri`）原样
 /// 落进 `_meta.json` 的 `collision` 一格。
-#[derive(Debug, Clone, Default, Serialize)]
+/*
+ * ★ `Deserialize` 是**后来才要的**（2026-10-18 挪塔那一问要把这一整份几何随问句
+ * 发给界面、界面那份契约也要能读回来）；所以 `kind` / `target` 用 `String` 而不是
+ * `&'static str`（借来的字符串借不进反序列化）。**JSON 一字不变** —— 它们本来就是
+ * 写出去的字符串。
+ */
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollisionFacts {
     /// 撞的是谁：`model` / `prime-tower` / `both` / `forbidden` / `wipe-tower-needed`
-    pub kind: &'static str,
+    pub kind: String,
     /// 建议挪谁：`model` / `wipe-tower`
-    pub target: &'static str,
+    pub target: String,
     /// 方向（中文；算不出方向时是空串 —— 那时看 `target` 走"挪塔"那句）
     pub direction: String,
     pub required_move_x: f64,
@@ -75,7 +81,8 @@ pub struct CollisionFacts {
     pub tower_bbox: Box4,
     /// 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0 框，界面按 `kind` 判）
     pub model_bbox: Box4,
-    /// 可打印区（机型 `min_x/max_x/min_y/max_y`）
+    /// 可打印区外接框（mm，机器坐标）：**gcode 里切片器写下的 `; printable_area` 优先**
+    /// （[`printable_area_of`]），gcode 没写才退回机型 toml 的 `min_x…max_y`
     pub printable: Box4,
     pub tower: Option<TowerShape>,
     /// 机型额外禁区（通常为空）
@@ -84,6 +91,11 @@ pub struct CollisionFacts {
     pub advice_code: String,
     /// 建议那句的**正文**（表里渲染好的，一个字都不在这里拼）
     pub advice_text: String,
+    /// **建议挪动的箭头**（俯视图画"往哪边、挪多少"）：起点 = 挪谁的中心（机器坐标），
+    /// 位移 = **带符号** mm（沿 `MoveDirection::delta()` × 距离；禁区档的 MTV 本来就带符号）。
+    /// 位移为零 = 没有方向可画（"挪不开"那一档）。
+    pub arrow_from: [f64; 2],
+    pub arrow_vec: [f64; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -132,6 +144,10 @@ pub struct CollisionResult {
     pub tower_bbox: Option<GBBox>,
     /// 模型挤出点的整体包围盒（禁区那一档没有）
     pub model_bbox: Option<GBBox>,
+    /// **热床按 gcode 判**（2026-10-18 作者定的口径）：切片器在 CONFIG_BLOCK 里写下的
+    /// `; printable_area` 多边形的外接框。`None` = 这份 gcode 没写（老文件 / 其它切片器）
+    /// ⇒ `facts` 退回机型 toml 的维度。
+    pub printable: Option<Box4>,
 }
 
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
@@ -142,6 +158,10 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
     if !ir_data.tower.use_towers {
         return result;
     }
+
+    /* 热床按 gcode 判（见 [`printable_area_of`]）—— 放在所有早退之前，
+    禁区那一档的事实同样要带得出门 */
+    result.printable = printable_area_of(content);
 
     let tower_bbox = calculate_tower_collision_bbox(ir_data);
 
@@ -166,7 +186,7 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
         }
     }
 
-    detect_tower_collision_all_layers(content, &tower_bbox, ir_data)
+    detect_tower_collision_all_layers(content, &tower_bbox, ir_data, result.printable)
 }
 
 impl CollisionResult {
@@ -188,9 +208,35 @@ impl CollisionResult {
             AdjustmentTarget::WipeTower => "wipe-tower",
         };
         let (advice_code, advice_text) = self.advice();
+        /*
+         * **箭头**（2026-10-18 作者：「图片能不能做上引导移动的箭头呢」）：
+         * 起点画在"挪谁"的中心 —— 挪模型 = 模型框中心，挪塔（禁区 / 挪不开）= 塔框中心；
+         * 位移沿 `MoveDirection::delta()` 的单位分量 × 距离（禁区档的 MTV 本来就带符号）。
+         * 位移为零 = 没有方向（挪不开那一档），前端就不画。
+         */
+        let center_of = |b: Option<GBBox>| match b {
+            Some(b) => [(b.x_min + b.x_max) / 2.0, (b.y_min + b.y_max) / 2.0],
+            None => [0.0, 0.0],
+        };
+        let (arrow_from, arrow_vec) = match self.collision_type {
+            CollisionType::Forbidden => (
+                center_of(self.tower_bbox),
+                [self.required_move_x, self.required_move_y],
+            ),
+            CollisionType::None | CollisionType::WipeTowerNeeded => {
+                (center_of(self.model_bbox), [0.0, 0.0])
+            }
+            _ => {
+                let (dx, dy) = self.direction.delta();
+                (
+                    center_of(self.model_bbox),
+                    [dx * self.required_move_x, dy * self.required_move_y],
+                )
+            }
+        };
         CollisionFacts {
-            kind,
-            target,
+            kind: kind.to_owned(),
+            target: target.to_owned(),
             direction: self.direction_cn.clone(),
             required_move_x: self.required_move_x,
             required_move_y: self.required_move_y,
@@ -203,12 +249,12 @@ impl CollisionResult {
                 .collect(),
             tower_bbox: self.tower_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
             model_bbox: self.model_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
-            printable: Box4 {
+            printable: self.printable.unwrap_or(Box4 {
                 x_min: ir.machine.min_x,
                 x_max: ir.machine.max_x,
                 y_min: ir.machine.min_y,
                 y_max: ir.machine.max_y,
-            },
+            }),
             tower: Some(TowerShape {
                 outer_structure: ir.wiping.outer_structure.clone(),
                 body_mm: TOWER_OUTER_BOUND - TOWER_INNER_BOUND,
@@ -225,6 +271,8 @@ impl CollisionResult {
                 .collect(),
             advice_code,
             advice_text,
+            arrow_from,
+            arrow_vec,
         }
     }
 
@@ -265,6 +313,49 @@ impl CollisionResult {
         let refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         (code.to_string(), crate::diag::messages::text(code, &refs))
     }
+}
+
+/// **热床（可打印区）按 gcode 判**（2026-10-18 作者定的口径）。
+///
+/// 切片器在 CONFIG_BLOCK 里亲手写下了热床多边形（A1 mini：
+/// `; printable_area = 0x0,180x0,180x180,0x180`）。它是"这一趟 gcode 到底认为床多大"
+/// 的**当事人**，比机型 toml 更贴这一份文件 —— 取它的外接框。gcode 没写才退回 toml。
+///
+/// ★ 只读声明、不改判据：检测里"挪塔出界"的床框仍取 `ir.machine`（两者都来自同一个
+/// 机型定义，通常恒等；改判据是另一件事，不趁这一刀）。
+pub fn printable_area_of(content: &[String]) -> Option<Box4> {
+    for line in content {
+        let Some(rest) = line.trim().strip_prefix("; printable_area") else {
+            continue;
+        };
+        let Some(value) = rest.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        let mut bbox: Option<Box4> = None;
+        for pt in value.trim().split(',') {
+            let (x, y) = pt.trim().split_once('x')?;
+            let x: f64 = x.trim().parse().ok()?;
+            let y: f64 = y.trim().parse().ok()?;
+            bbox = Some(match bbox {
+                Some(mut b) => {
+                    b.x_min = b.x_min.min(x);
+                    b.x_max = b.x_max.max(x);
+                    b.y_min = b.y_min.min(y);
+                    b.y_max = b.y_max.max(y);
+                    b
+                }
+                None => Box4 {
+                    x_min: x,
+                    x_max: x,
+                    y_min: y,
+                    y_max: y,
+                },
+            });
+        }
+        /* 只有一个 CONFIG_BLOCK：读到（无论解析成没成）就收手 */
+        return bbox;
+    }
+    None
 }
 
 /// `isExtrusionMove`：G0/G1/G2/G3 行含 " E" 且 rest 有 X/Y，NumStrip 取 [1]/[2]。
@@ -330,14 +421,141 @@ fn num_strip(line: &str) -> Vec<f64> {
     result
 }
 
+/* ---------- 自动摆塔（2026-10-18 作者定的口径） ---------- */
+
+/// `wiper_x` / `wiper_y` 的**内核量程**（照 `preset/validate.rs` 那一栏：WiperX
+/// `-40..260`、WiperY `0..265`）。按机型的注册表更严，但自动摆放那一步还要与
+/// **打印范围**（板子）取交集，交集通常比注册表还紧 ⇒ 用这一档就够，也不必在
+/// 内核这一层回头去读注册表。
+const WIPER_X_MIN: f64 = -40.0;
+const WIPER_X_MAX: f64 = 260.0;
+const WIPER_Y_MIN: f64 = 0.0;
+const WIPER_Y_MAX: f64 = 265.0;
+
+/// **自动摆塔**（2026-10-18 作者定的口径：模型与塔相撞时，自动挑一个不撞的塔位置，
+/// 画出来给用户确认；**只改这一趟的 `wiper_x` / `wiper_y`，不落盘**）。
+///
+/// 算法（作者选的"区间内网格搜索"）：在允许的 `wiper_x` / `wiper_y` 区间里按网格扫，
+/// 挑**离原位最近**、且 ① 塔框整个落在打印范围（板子）内 ② 不与模型包围盒相交
+/// ③ 不与机型禁区相交 的那一个。
+/// `None` = 整块板都摆不下 —— 那就只剩"自己挪模型 / 改工艺"两条路，由上层说。
+pub fn auto_tower_position(
+    ir_data: &Ir,
+    bed: &Box4,
+    model: &GBBox,
+    forbidden: &[Vec<Vec<f64>>],
+) -> Option<[f64; 2]> {
+    let cur = calculate_tower_collision_bbox(ir_data);
+    let w = cur.x_max - cur.x_min;
+    let h = cur.y_max - cur.y_min;
+    if w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let lo_x = bed.x_min.max(WIPER_X_MIN);
+    let hi_x = bed.x_max.min(WIPER_X_MAX) - w;
+    let lo_y = bed.y_min.max(WIPER_Y_MIN);
+    let hi_y = bed.y_max.min(WIPER_Y_MAX) - h;
+    if hi_x < lo_x || hi_y < lo_y {
+        return None;
+    }
+    /* 步长取塔短边的四分之一：细到不会漏掉一条缝，粗到不至于把整块板扫成几万次 */
+    let step = (w.min(h) / 4.0).max(0.5);
+    let orig = [ir_data.wiping.wiper_x, ir_data.wiping.wiper_y];
+    let mut best: Option<(f64, [f64; 2])> = None;
+    let mut x = lo_x;
+    while x <= hi_x + 1e-9 {
+        let mut y = lo_y;
+        while y <= hi_y + 1e-9 {
+            if tower_fits(x, y, w, h, bed, model, forbidden) {
+                let d = (x - orig[0]).powi(2) + (y - orig[1]).powi(2);
+                /* 显式 match：MSRV 1.77 没有 `Option::is_none_or`，
+                `map_or(true, …)` 又要挨 clippy 那一刀 */
+                let nearer = match best {
+                    Some((bd, _)) => d < bd - 1e-9,
+                    None => true,
+                };
+                if nearer {
+                    best = Some((d, [x, y]))
+                }
+            }
+            y += step;
+        }
+        x += step;
+    }
+    best.map(|(_, p)| p)
+}
+
+/// [`auto_tower_position`] 的"照事实那一档"（钩子那一侧用这个）：床取 `facts.printable`
+/// （就是俯视图画的那块板 —— 与图上看到的是同一件事实），禁区取 IR 上那份，
+/// 模型框取 `model`（`None` = 这一趟没有模型包围盒，比如禁区那一档 ⇒ 只避禁区）。
+pub fn auto_tower_position_for_facts(
+    ir_data: &Ir,
+    facts: &CollisionFacts,
+    model: Option<GBBox>,
+) -> Option<[f64; 2]> {
+    let empty = GBBox {
+        x_min: 0.0,
+        x_max: 0.0,
+        y_min: 0.0,
+        y_max: 0.0,
+    };
+    auto_tower_position(
+        ir_data,
+        &facts.printable,
+        &model.unwrap_or(empty),
+        &ir_data.machine.forbidden_zones,
+    )
+}
+
+/// 塔摆在 `(x, y)`（**左下角**）行不行：整个在打印范围内、不碰模型、不在禁区。
+fn tower_fits(
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    bed: &Box4,
+    model: &GBBox,
+    forbidden: &[Vec<Vec<f64>>],
+) -> bool {
+    let b = GBBox {
+        x_min: x,
+        x_max: x + w,
+        y_min: y,
+        y_max: y + h,
+    };
+    if b.x_min < bed.x_min || b.x_max > bed.x_max || b.y_min < bed.y_min || b.y_max > bed.y_max {
+        return false;
+    }
+    /* 相交 = 两条轴上都有重叠（贴边不算撞） */
+    if b.x_min < model.x_max
+        && b.x_max > model.x_min
+        && b.y_min < model.y_max
+        && b.y_max > model.y_min
+    {
+        return false;
+    }
+    let poly = vec![
+        vec![b.x_min, b.y_min],
+        vec![b.x_max, b.y_min],
+        vec![b.x_max, b.y_max],
+        vec![b.x_min, b.y_max],
+    ];
+    !forbidden
+        .iter()
+        .any(|zone| geom::polygons_intersect(&poly, zone))
+}
+
 fn detect_tower_collision_all_layers(
     content: &[String],
     tower_bbox: &GBBox,
     ir_data: &Ir,
+    printable: Option<Box4>,
 ) -> CollisionResult {
-    /* 判据用的塔框跟着结论一起出门（报告页画俯视图要它） */
+    /* 判据用的塔框跟着结论一起出门（报告页画俯视图要它）；热床框同样带上
+    （gcode 里写了 `; printable_area` 就听 gcode 的，见 [`printable_area_of`]） */
     let mut result = CollisionResult {
         tower_bbox: Some(*tower_bbox),
+        printable,
         ..CollisionResult::default()
     };
 
@@ -351,6 +569,22 @@ fn detect_tower_collision_all_layers(
     let (mut model_min_x, mut model_max_x, mut model_min_y, mut model_max_y) = (0.0, 0.0, 0.0, 0.0);
     let mut prime_tower_bbox_tracking = false;
     let (mut pt_min_x, mut pt_max_x, mut pt_min_y, mut pt_max_y) = (0.0, 0.0, 0.0, 0.0);
+
+    /*
+     * ★★★ **"床"有两个，别混**（2026-10-18 作者定的口径）：
+     * **运动范围** = 机型 toml 的维度（A1 是 300×255）—— 那是喷头能到哪；
+     * **打印范围** = 板子（gcode 的 `; printable_area`，见 [`printable_area_of`]，
+     * 没写才退回机型维度）—— 那是模型能待哪。
+     * ★ 模型包围盒的统计闸和"挪出去出界"的判据**都按打印范围**：喷头能跑到板外
+     * 不代表模型可以摆到板外（作者：「再往左上岂不是都到板子外面了吗？你要判断
+     * 移动后的模型，会不会超过板子的范围」）。
+     */
+    let bed = printable.unwrap_or(Box4 {
+        x_min: ir_data.machine.min_x,
+        x_max: ir_data.machine.max_x,
+        y_min: ir_data.machine.min_y,
+        y_max: ir_data.machine.max_y,
+    });
 
     let total_lines = content.len();
     let (sample_interval, max_conflict_points) = if total_lines > 10000 {
@@ -397,6 +631,20 @@ fn detect_tower_collision_all_layers(
 
         if in_collision && conflict_points.len() < max_conflict_points {
             conflict_points.push([x_coord, y_coord]);
+        }
+
+        /*
+         * ★ **板外的挤出不算"模型"**（2026-10-18 真机：A1 的清料 / 擦拭在 X<0 那段
+         * 也带挤出 ⇒ 包围盒被拽出板外，俯视图上模型框伸到板子外面，用户看不懂）。
+         * 包围盒只统计**打印范围之内**的挤出点（板子，见上面的 `bed` —— 不是运动
+         * 范围）；冲突判定（上面那段）不动 —— 塔在板内，板外的点本来也进不了塔框。
+         */
+        let in_bed = x_coord >= bed.x_min
+            && x_coord <= bed.x_max
+            && y_coord >= bed.y_min
+            && y_coord <= bed.y_max;
+        if !in_bed {
+            continue;
         }
 
         if in_prime_tower {
@@ -479,11 +727,12 @@ fn detect_tower_collision_all_layers(
             }
         }
 
+        /* ★ 出界判据按**打印范围**（板子）判，不是运动范围 —— 见上面的 `bed` */
         let bed_bbox = GBBox {
-            x_min: ir_data.machine.min_x,
-            x_max: ir_data.machine.max_x,
-            y_min: ir_data.machine.min_y,
-            y_max: ir_data.machine.max_y,
+            x_min: bed.x_min,
+            x_max: bed.x_max,
+            y_min: bed.y_min,
+            y_max: bed.y_max,
         };
         result.conflict_points = conflict_points.clone();
         result =
@@ -755,12 +1004,176 @@ mod tests {
             "写进记录的冲突点要封顶：{}",
             facts.conflict_points.len()
         );
-        let tower = facts.tower.expect("画塔要的参数");
+        let tower = facts.tower.as_ref().expect("画塔要的参数");
         assert_eq!(tower.outer_structure, "brim");
         assert!(
             (tower.body_mm - 19.58).abs() < 1e-6,
             "塔身边长：{}",
             tower.body_mm
+        );
+
+        /* **键名钉死**（2026-10-18 真机踩的）：序列化后是 `towerBbox`（`tower_bbox`
+        的 camelCase），前端契约照这个写 —— 写成 `towerBBox` 大小写对不上，
+        那边按"没给就不摆"整块退掉，屏上就是空的。 */
+        let wire = serde_json::to_value(&facts).expect("事实可序列化");
+        assert!(
+            wire.get("towerBbox").is_some(),
+            "键名必须是 towerBbox：{wire:?}"
+        );
+        assert!(
+            wire.get("modelBbox").is_some(),
+            "键名必须是 modelBbox：{wire:?}"
+        );
+        assert!(wire.get("conflictPoints").is_some());
+    }
+
+    /// **热床按 gcode 判**（2026-10-18）：gcode 写了 `; printable_area` 就听 gcode 的，
+    /// 没写才退回机型 toml 的维度。
+    #[test]
+    fn printable_bed_comes_from_the_gcode_when_declared() {
+        let ir = tower_ir();
+        let mut content = lines(&[
+            "; CONFIG_BLOCK_START",
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "; printable_height = 180",
+            "; printer_model = Bambu Lab A1 mini",
+            "; CONFIG_BLOCK_END",
+        ]);
+        content.extend(lines(&["G1 X30 Y30 E0.6", "G1 X120 Y120 E0.7"]));
+        let facts = detect_tower_collision(&content, &ir).facts(&ir);
+        assert_eq!(
+            facts.printable,
+            Box4 {
+                x_min: 0.0,
+                x_max: 180.0,
+                y_min: 0.0,
+                y_max: 180.0
+            },
+            "gcode 写了热床 ⇒ 不是 toml 那个 256"
+        );
+
+        /* 没写 ⇒ 退回机型 toml（tower_ir 里是 0..256） */
+        let fallback =
+            detect_tower_collision(&lines(&["G1 X30 Y30 E0.6", "G1 X120 Y120 E0.7"]), &ir)
+                .facts(&ir);
+        assert_eq!(fallback.printable.x_max, 256.0);
+        assert_eq!(fallback.printable.x_min, 0.0);
+    }
+
+    /// **板外的挤出不算"模型"**（2026-10-18 真机：A1 清料在 X<0 也带挤出 ⇒
+    /// 模型框被拽出板外，俯视图上模型伸到板子外面）。
+    #[test]
+    fn the_model_bbox_stays_inside_the_bed() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "G1 X-13.5 Y10 E0.5 ; 板外的清料挤出",
+            "G1 X30 Y30 E0.6",
+            "G1 X120 Y120 E0.7",
+        ]);
+        let facts = detect_tower_collision(&content, &ir).facts(&ir);
+        assert!(
+            facts.model_bbox.x_min >= ir.machine.min_x
+                && facts.model_bbox.y_min >= ir.machine.min_y,
+            "模型框不许伸出板外：{:?}",
+            facts.model_bbox
+        );
+        assert_eq!(facts.model_bbox.x_min, 30.0, "板外那一段不计入包围盒");
+    }
+
+    /// **建议挪动带得出箭头**（2026-10-18 作者：「图片能不能做上引导移动的箭头呢」）：
+    /// 起点在模型框中心，位移 = 方向单位分量 × 距离（模长与建议挪的距离一致）。
+    #[test]
+    fn the_move_advice_carries_an_arrow() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "G1 X100 Y100 E0.5 ; 远离塔",
+            "G1 X30 Y30 E0.6 ; 塔内冲突点",
+            "G1 X120 Y120 E0.7",
+        ]);
+        let r = detect_tower_collision(&content, &ir);
+        let facts = r.facts(&ir);
+        assert_eq!(facts.arrow_from, [75.0, 75.0], "起点 = 模型框中心");
+        let vec_len = (facts.arrow_vec[0] * facts.arrow_vec[0]
+            + facts.arrow_vec[1] * facts.arrow_vec[1])
+            .sqrt();
+        let move_len =
+            (r.required_move_x * r.required_move_x + r.required_move_y * r.required_move_y).sqrt();
+        assert!(
+            move_len > 0.0 && (vec_len - move_len).abs() < 1e-6,
+            "箭头长度 = 建议挪的距离：vec {vec_len} vs move {move_len}"
+        );
+    }
+
+    /// **挪出去的判据 = 板子（打印范围），不是运动范围**（2026-10-18 作者：
+    /// 「再往左上岂不是都到板子外面了吗？你要判断移动后的模型，会不会超过板子的范围」）。
+    ///
+    /// 场景：运动范围给得很宽（A1 的 300×255 那种，喷头能跑到板外），板子只有 180；
+    /// 模型贴着板缘 —— 往左 / 往上挪都在**运动范围**之内，但挪完模型出板 ⇒ 不许选；
+    /// 四个对角方向全出板 ⇒ 建议换成"挪不开，调塔"（不是硬指一个出板的方向）。
+    #[test]
+    fn the_advised_move_judges_the_plate_not_the_motion_range() {
+        let mut ir = tower_ir();
+        /* 运动范围故意给宽（A1：喷头能出板） */
+        ir.machine.min_x = -40.0;
+        ir.machine.max_x = 280.0;
+        ir.machine.min_y = -40.0;
+        ir.machine.max_y = 255.0;
+
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180", // 板子只有 180
+            "G1 X30 Y30 E0.5 ; 与塔相撞",
+            "G1 X50 Y30 E0.6 ; 与塔相撞",
+            "G1 X179 Y0.5 E0.7 ; 模型伸到板右下角",
+            "G1 X25 Y60 E0.8",
+        ]);
+        let facts = detect_tower_collision(&content, &ir).facts(&ir);
+
+        /* 四个对角方向挪完模型都会出板（x<0 或 x>180）⇒ 没有一个方向可选 ⇒
+        建议换成"调塔"，而不是硬指一个出板的方向 */
+        assert_eq!(
+            facts.kind, "wipe-tower-needed",
+            "挪不出板就该让用户调塔，方向：{}",
+            facts.direction
+        );
+        assert_eq!(facts.arrow_vec, [0.0, 0.0], "调塔没有方向可画");
+    }
+
+    /// 同一条口径的另一面：**有能留在板内的方向时，建议挪完的模型必须还在板内**
+    /// （贴板左缘的模型，向左出板的候选被否，选仍然在板内的那个）。
+    #[test]
+    fn the_advised_move_never_pushes_the_model_off_the_plate() {
+        let mut ir = tower_ir();
+        ir.machine.min_x = -40.0;
+        ir.machine.max_x = 280.0;
+        ir.machine.min_y = -40.0;
+        ir.machine.max_y = 255.0;
+
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 X30 Y30 E0.5",
+            "G1 X50 Y30 E0.6",
+            "G1 X30 Y55 E0.7",
+            "G1 X50 Y55 E0.8",
+        ]);
+        let facts = detect_tower_collision(&content, &ir).facts(&ir);
+        assert!(facts.kind == "model" || facts.kind == "both");
+
+        /* 建议挪完的模型框必须还在板内（本场景：向左挪 2.91 就出板，被否） */
+        let dx = facts.arrow_vec[0];
+        let dy = facts.arrow_vec[1];
+        let moved = (
+            facts.model_bbox.x_min + dx.min(0.0),
+            facts.model_bbox.x_max + dx.max(0.0),
+            facts.model_bbox.y_min + dy.min(0.0),
+            facts.model_bbox.y_max + dy.max(0.0),
+        );
+        assert!(
+            moved.0 >= facts.printable.x_min
+                && moved.1 <= facts.printable.x_max
+                && moved.2 >= facts.printable.y_min
+                && moved.3 <= facts.printable.y_max,
+            "建议挪完的模型必须还在板内：{moved:?}（板 {:?}）",
+            facts.printable
         );
     }
 
@@ -784,6 +1197,88 @@ mod tests {
             facts.advice_text
         );
         assert_eq!(facts.forbidden_zones.len(), 1);
+    }
+
+    /// **自动摆塔**（2026-10-18 作者定的口径）：挑一个不撞的塔位置，离原位最近。
+    #[test]
+    fn the_tower_is_relocated_to_the_nearest_free_place() {
+        let ir = tower_ir();
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        /* 模型堵住左下那一带（塔原位 20..57 完全被压住） */
+        let model = GBBox {
+            x_min: 0.0,
+            x_max: 120.0,
+            y_min: 0.0,
+            y_max: 120.0,
+        };
+        let at = auto_tower_position(&ir, &bed, &model, &[]).expect("板这么大，摆得下");
+        let w = 57.04 - 22.96;
+        assert!(
+            at[0] >= 0.0 && at[0] + w <= 256.0 && at[1] >= 0.0 && at[1] + w <= 256.0,
+            "新位置必须整个在板内：{at:?}"
+        );
+        assert!(at[0] >= 120.0 || at[1] >= 120.0, "不许压在模型上：{at:?}");
+        /*
+         * 离原位最近：原位 (20,20) 在模型左下角里 —— 往右挪要动 ~108mm，往上挪只动
+         * ~108mm 但**X 几乎不用动**（17.04 ≈ 原位那条网格线）。所以挑出来的是
+         * "沿 Y 挪出去"，不是"沿 X 挪出去"（两个的平方距离差就在这条 X 上）。
+         */
+        assert!(
+            at[1] >= 120.0 && at[1] <= 120.0 + w && at[0] < 60.0,
+            "挑的是离原位最近的那一个（沿 Y 出去，X 几乎不动）：{at:?}"
+        );
+    }
+
+    /// 板子被模型占满 ⇒ 摆不下 ⇒ 明确说"没有"（由上层改口让用户自己动手）。
+    #[test]
+    fn relocation_gives_up_when_the_plate_has_no_room() {
+        let ir = tower_ir();
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        let model = GBBox {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        assert!(auto_tower_position(&ir, &bed, &model, &[]).is_none());
+    }
+
+    /// 禁区里不许摆 —— 自动摆出来的位置若落在禁区，等于把"塔在禁区"这个错换了个地方犯。
+    #[test]
+    fn relocation_skips_forbidden_zones() {
+        let ir = tower_ir();
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        let model = GBBox {
+            x_min: 0.0,
+            x_max: 60.0,
+            y_min: 0.0,
+            y_max: 60.0,
+        };
+        /* 下半张板全是禁区 */
+        let zone = vec![
+            vec![0.0, 0.0],
+            vec![256.0, 0.0],
+            vec![256.0, 60.0],
+            vec![0.0, 60.0],
+        ];
+        let at = auto_tower_position(&ir, &bed, &model, std::slice::from_ref(&zone))
+            .expect("上半区还有地方");
+        assert!(at[1] >= 60.0, "禁区里不能摆：{at:?}");
     }
 
     /// 禁区命中：塔多边形与 ForbiddenZones 相交 → Forbidden 类型 + MTV 位移。

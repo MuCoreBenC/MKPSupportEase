@@ -88,6 +88,8 @@ mod keys {
     pub const MISMATCH_REFUSE: &str = "hook.mismatch_refuse";
     pub const CALIB_MODE_QUESTION: &str = "hook.calib_mode_question";
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
+    /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
+    pub const TOWER_RELOCATION_QUESTION: &str = "hook.tower_relocation_question";
     /* 校准件那一趟的两种成功结论（`print` = 打印件保留 / `direct` = 去掉打印件）——
      * 界面与报告读同一组键，见 `hook::calib_done_line` */
     pub const CALIB_DONE_PRINT: &str = "hook.calib_done_print";
@@ -387,6 +389,32 @@ pub trait Asker {
     /// 默认实现给"没有界面"那一档用：不会替用户决定，一律 `None`。
     fn ask_calibration(&mut self, _question: &str) -> Option<String> {
         None
+    }
+
+    /// **挪塔那一问**（2026-10-18）：模型与塔相撞，自动把塔挪到 `candidate`
+    /// 还是用户自己去挪模型。
+    ///
+    /// 返回被选中的 id（`relocate` / `model`）；`None` = 没有界面 / 超时 / 按了停止
+    /// ⇒ 由调用方收场（**停下**，与机型、校准两问同一条）。
+    fn ask_tower_relocation(
+        &mut self,
+        _question: &str,
+        _geo: crate::hook_ipc::RelocateGeoPayload,
+    ) -> Option<String> {
+        None
+    }
+}
+
+/// **挪塔那一问的分派**（2026-10-18）：答 `relocate` 且摆得下 ⇒ 新的塔左下角；
+/// 别的（`model` / 超时 / 按了停止 / 没有界面 / 摆不下）⇒ `None`
+/// ⇒ 调用方**什么都不改**，让管线第 6 步照旧撞、照旧收场。
+///
+/// ★ 比的是**选项 id**（`hook_ipc::CHOICE_RELOCATE`），不是别的任何字 ——
+/// 2026-10-17 校准那一问就是"拿选项 id 去比管线常量"踩的（见 `ask_calibration` 那段）。
+fn tower_relocation_of(answer: Option<&str>, candidate: Option<[f64; 2]>) -> Option<[f64; 2]> {
+    match answer {
+        Some(id) if id == crate::hook_ipc::CHOICE_RELOCATE => candidate,
+        _ => None,
     }
 }
 
@@ -732,6 +760,56 @@ pub fn run(
                         None,
                     );
                     return Err(err);
+                }
+            }
+        }
+    }
+
+    /*
+     * **碰撞预检 + 挪塔那一问**（2026-10-18 作者定的口径：一撞就问
+     * 「自动把塔挪到不撞的位置 / 我自己去挪模型」，把选择权交给用户）。
+     *
+     * ★ 为什么在这里**预检一趟**、而不让管线第 6 步自己去问：管线是算法层，
+     *   **不持问句通道**（机型那一问、校准件那一问也都住在这一层）。于是这里拿同一个
+     *   `detect_tower_collision` 先扫一遍 —— 判据仍只有一份，代价是多扫一遍 G-code。
+     *
+     * · 答 `relocate` ⇒ 把 `wiper_x` / `wiper_y` 改成自动摆出来的位置（**只改这一趟**，
+     *   预设文件一字不动），再进管线（第 6 步复检就是干净的，一路跑完）；
+     * · 答 `model` / 超时 / 没界面 ⇒ 什么都不改，让管线第 6 步照旧撞、照旧报错归档 ——
+     *   "停下 + 建议 + 俯视图"那一条路一个字都不用重写。
+     *
+     * ★ 开关在 `ir.prefs.auto_tower_position`（设置页「智能塔位置」）—— 关着就完全不预检，
+     *   行为与今天一字不差。
+     */
+    if ir.prefs.auto_tower_position && ir.tower.use_towers {
+        let content: Vec<String> = raw
+            .lines()
+            .map(|l| l.trim_end_matches('\r').to_string())
+            .collect();
+        let collision = postprocess::postproc::disk::detect_tower_collision(&content, &ir);
+        if collision.has_collision {
+            let facts = collision.facts(&ir);
+            let candidate = postprocess::postproc::disk::auto_tower_position_for_facts(
+                &ir,
+                &facts,
+                collision.model_bbox,
+            );
+            if let Some(client) = ui.client() {
+                let mut asker = ChannelAsker { client };
+                let geo = crate::hook_ipc::RelocateGeoPayload {
+                    collision: Some(facts.clone()),
+                    candidate,
+                    current: [ir.wiping.wiper_x, ir.wiping.wiper_y],
+                };
+                let question = Reason::new(keys::TOWER_RELOCATION_QUESTION)
+                    .with("count", facts.conflict_count.to_string())
+                    .text();
+                if let Some([x, y]) = tower_relocation_of(
+                    asker.ask_tower_relocation(&question, geo).as_deref(),
+                    candidate,
+                ) {
+                    ir.wiping.wiper_x = x;
+                    ir.wiping.wiper_y = y;
                 }
             }
         }
@@ -1443,6 +1521,41 @@ impl Asker for ChannelAsker<'_> {
         )
     }
 
+    /// **挪塔那一问**（2026-10-18）：两颗按钮 + 画布（坐标在这一屏上给），超时 = `stop`
+    /// ⇒ 由调用方按"停下"收场（与机型那一问同一条：不替用户决定）。
+    fn ask_tower_relocation(
+        &mut self,
+        question: &str,
+        geo: crate::hook_ipc::RelocateGeoPayload,
+    ) -> Option<String> {
+        use crate::hook_ipc::{
+            QuestionChoice, CHOICE_MODEL, CHOICE_RELOCATE, CHOICE_STOP, QKIND_TOWER_RELOCATION,
+        };
+        /* 摆得下才给"自动挪塔"这颗按钮；摆不下 ⇒ 只给"自己去挪模型" */
+        let mut choices = Vec::new();
+        if geo.candidate.is_some() {
+            choices.push(QuestionChoice {
+                id: CHOICE_RELOCATE.to_owned(),
+                label: "把塔挪到不撞的位置".to_owned(),
+                hint: Some("只改这一趟，预设文件不动".to_owned()),
+                accent: true,
+            });
+        }
+        choices.push(QuestionChoice {
+            id: CHOICE_MODEL.to_owned(),
+            label: "我自己去挪模型".to_owned(),
+            hint: Some("这一趟停下，原文件不动".to_owned()),
+            accent: false,
+        });
+        self.client.ask_with_geo(
+            QKIND_TOWER_RELOCATION,
+            question,
+            choices,
+            CHOICE_STOP,
+            Some(geo),
+        )
+    }
+
     /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。
     fn ask_calibration(&mut self, question: &str) -> Option<String> {
         use crate::hook_ipc::{
@@ -1900,7 +2013,25 @@ mod tests {
         std::fs::copy(&src, dest).expect("拷一份夹具预设");
     }
 
+    /// **测试不许往真数据根写执行记录**（2026-10-18：报告页冒出 tmp 路径的假"失败"记录，
+    /// `调用` 那格是测试二进制 —— 就是这批测试写的）。
+    ///
+    /// 这一层进程内的 `run` 会归档（失败 / 取消**也留记录**，不许瞒 —— 见 `archive`
+    /// 模块头），归档根 = `internal_root_headless()`。于是每个要跑管线的测试先过这里，
+    /// 把数据根整个盖到本进程私有的临时目录（`MKP_SUPPORT_EASE_DATA`，探针同一把钥匙）。
+    /// 进程级只设一次（测试多线程，`Once` 保不竞态）；临时目录故意 `forget` ——
+    /// drop 会在别的测试还在用时删根，进程退出时由 OS 收拾。
+    fn isolate_data_root() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            let dir = tempfile::tempdir().expect("测试数据根临时目录");
+            std::env::set_var(crate::fsx::paths::DATA_ROOT_ENV, dir.path());
+            std::mem::forget(dir);
+        });
+    }
+
     fn run_headless(toml: &std::path::Path, gcode: &std::path::Path) -> Result<Outcome, HookError> {
+        isolate_data_root();
         let mut sink = NoProgress;
         run(
             &job(toml, gcode),
@@ -2007,6 +2138,7 @@ mod tests {
                 true
             }
         }
+        isolate_data_root();
         let mut sink = NoProgress;
         let out = run(
             &job(&toml, &gcode),
@@ -2031,6 +2163,7 @@ mod tests {
 
         let cancel = CancelToken::new();
         cancel.cancel(); // 先置位：管线第一步就该吐出来
+        isolate_data_root();
         let mut sink = NoProgress;
         let err = run(
             &job(&toml, &gcode),
@@ -2276,6 +2409,7 @@ mod tests {
             flag.store(true, std::sync::atomic::Ordering::SeqCst)
         };
         let started = Instant::now();
+        isolate_data_root();
         let done = run(
             &job(&toml, &gcode),
             &mut sink,
@@ -2340,6 +2474,38 @@ mod tests {
             ),
             WatchdogVerdict::Overrun,
             "超过整趟上限：哪怕刚刚还有进度也收手"
+        );
+    }
+
+    /// **挪塔那一问的分派**（2026-10-18）：只有"答了 relocate 且摆得下"才挪；
+    /// 答自己去挪模型 / 超时 / 没答 / 摆不下 ⇒ 一律不挪（管线照旧收场）。
+    #[test]
+    fn the_relocation_answer_only_moves_the_tower_when_it_was_chosen() {
+        let at = [120.0, 40.0];
+        assert_eq!(
+            tower_relocation_of(Some(crate::hook_ipc::CHOICE_RELOCATE), Some(at)),
+            Some(at),
+            "答了 relocate ⇒ 挪到算出来的那个位置"
+        );
+        assert_eq!(
+            tower_relocation_of(Some(crate::hook_ipc::CHOICE_RELOCATE), None),
+            None,
+            "摆不下 ⇒ 没有位置可挪"
+        );
+        assert_eq!(
+            tower_relocation_of(Some(crate::hook_ipc::CHOICE_MODEL), Some(at)),
+            None,
+            "答「我自己去挪模型」⇒ 塔不动"
+        );
+        assert_eq!(
+            tower_relocation_of(Some(crate::hook_ipc::CHOICE_STOP), Some(at)),
+            None,
+            "超时 / 停下 ⇒ 塔不动"
+        );
+        assert_eq!(
+            tower_relocation_of(None, Some(at)),
+            None,
+            "没有界面 ⇒ 塔不动"
         );
     }
 

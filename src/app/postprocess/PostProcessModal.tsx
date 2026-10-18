@@ -48,6 +48,7 @@ import { useDevPreviewNonce } from '../dev/useDevPreview'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
+import RelocatePanel from './RelocatePanel'
 import s from './PostProcessModal.module.css'
 
 /* 顶栏那一条的高度按平台来（与 `TopTabs` 同一对 token）：拖窗带要正好铺在它上面 */
@@ -973,13 +974,26 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    */
   let lead: ReactNode = null
   if (asking && run.question !== null) {
-    lead = (
-      <AskHero
-        questionKind={run.question.questionKind}
-        text={run.question.text}
-        deadlineUnixMs={run.question.deadlineUnixMs}
-      />
-    )
+    /*
+     * **挪塔那一问**（2026-10-18）：撞了要看图才敢决定 ⇒ 走"左图右文"那一屏，
+     * 不塞进那口 104px 的警告 hero（作者：「这个页面…把画布居中显示或者左侧显示，
+     * 右侧显示文字内容，坐标之类的」）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
+     */
+    const isRelocate = run.question.questionKind === 'tower-relocation'
+    lead =
+      isRelocate && run.question.geo?.collision != null ? (
+        <RelocatePanel
+          question={run.question}
+          machineType={run.facts?.presetMachine ?? null}
+          countdown={countdownText(run.question.deadlineUnixMs)}
+        />
+      ) : (
+        <AskHero
+          questionKind={run.question.questionKind}
+          text={run.question.text}
+          deadlineUnixMs={run.question.deadlineUnixMs}
+        />
+      )
   } else if (showProgress) {
     lead = (
       /*

@@ -209,6 +209,10 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
+    /// **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才按算出来的
+    /// 位置跑完这一趟（只改这一趟，不动预设文件）。`None` = 出厂关。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_tower_position: Option<bool>,
 }
 
 /// 「跑完这一趟界面怎么摆」。
@@ -264,6 +268,7 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
+            auto_tower_position: self.auto_tower_position.unwrap_or(false),
         }
     }
 }
@@ -297,6 +302,7 @@ pub struct ResolvedPostprocPrefs {
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
+    pub auto_tower_position: bool,
 }
 
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。

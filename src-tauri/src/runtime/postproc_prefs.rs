@@ -43,6 +43,7 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.xy_calibration_dwell_sec = prefs.xy_calibration_dwell_sec;
     ir.prefs.bed_glue_enabled = prefs.bed_glue_enabled;
     ir.prefs.bed_glue_all_models = prefs.bed_glue_all_models;
+    ir.prefs.auto_tower_position = prefs.auto_tower_position;
 
     /* 底面涂胶实际生效的那一格在 `state`（见模块头那条"特例"） */
     ir.state.glue_bottom_enabled = prefs.glue_bottom_enabled;
@@ -89,6 +90,7 @@ mod tests {
         );
         assert_eq!(kernel.bed_glue_enabled, client.bed_glue_enabled);
         assert_eq!(kernel.bed_glue_all_models, client.bed_glue_all_models);
+        assert_eq!(kernel.auto_tower_position, client.auto_tower_position);
 
         /* 顺带把常量也咬住：改了默认值却忘了改 `PrefsIr::default()` 同样是红的 */
         assert_eq!(
@@ -119,6 +121,7 @@ mod tests {
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
             bed_glue_all_models: true,
+            auto_tower_position: true,
         };
         let mut ir = Ir::default();
         apply_to_ir(&mut ir, &prefs);
@@ -135,6 +138,10 @@ mod tests {
         assert_eq!(ir.prefs.xy_calibration_dwell_sec, 9);
         assert!(ir.prefs.bed_glue_enabled);
         assert!(ir.prefs.bed_glue_all_models);
+        assert!(
+            ir.prefs.auto_tower_position,
+            "自动摆塔那一档必须真的落到 IR —— 管线读的就是它"
+        );
     }
 
     /// 量程夹住：界面上万一传了越界值，管线拿到的一定是合法值。

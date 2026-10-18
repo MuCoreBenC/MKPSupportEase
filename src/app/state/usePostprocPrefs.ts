@@ -100,6 +100,7 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           xyCalibrationDwellSec: wire.xyCalibrationDwellSec ?? before.resolved.xyCalibrationDwellSec,
           bedGlueEnabled: wire.bedGlueEnabled ?? before.resolved.bedGlueEnabled,
           bedGlueAllModels: wire.bedGlueAllModels ?? before.resolved.bedGlueAllModels,
+          autoTowerPosition: wire.autoTowerPosition ?? before.resolved.autoTowerPosition,
         },
       }
       view = optimistic

@@ -1382,7 +1382,10 @@ export default function PageReport() {
                             ) : g.id === 'collision' ? (
                               /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
                               detail.collision !== null ? (
-                                <CollisionMap collision={detail.collision} />
+                                <CollisionMap
+                                  collision={detail.collision}
+                                  machineType={detail.summary.machineType}
+                                />
                               ) : null
                             ) : (
                               <dl className={s.kv}>

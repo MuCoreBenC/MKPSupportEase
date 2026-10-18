@@ -118,6 +118,24 @@ pub async fn locate_bed_type_control() -> Result<GuideTargetDto, AppError> {
 #[tauri::command]
 pub async fn guide_show(app: AppHandle) -> Result<GuideTargetDto, AppError> {
     traced("guideShow", |_| {
+        /*
+         * ★★★ **先把切片器抬起来，再建卡片**（2026-10-18 作者报"MKP 在桌面2，
+         * 就找不到桌面1的 BBS"）：
+         *
+         * 卡片这扇窗**建在哪个桌面，跟着"建它那一刻哪个桌面在最前"走** ——
+         * 旧顺序是"先建卡片（落在 MKP 所在的桌面2）→ 再抬切片器（系统切去
+         * BBS 那个桌面1）"，结果人被带过去了、卡片留在桌面2，两边都见不着。
+         *
+         * 反过来：**先 `AXRaise` + `AXFrontmost` 把 BBS 抬到最前**（macOS 顺着
+         * 切到 BBS 那个桌面），**等切换落定**（[`SPACE_SETTLE`]，盖过切空间的
+         * 动画）**再定位、建卡片** —— 卡片就建在 BBS 旁边那个桌面，人也在那儿。
+         *
+         * ★ 定位仍读全局坐标（AX 坐标不分桌面），这里等一下主要是给"建窗"
+         * 一个已经落定的空间，别让卡片建在切换动画的半路上。
+         */
+        raise_slicer_window();
+        std::thread::sleep(SPACE_SETTLE);
+
         let target = ax::locate_bed_type();
         let Some(t) = target.target.filter(|_| target.ready) else {
             /* 指不了：原样把 reason 递上去，界面显示原因、不画箭头 */
@@ -569,6 +587,8 @@ fn show_at(app: &AppHandle, x: f64, y: f64, side: &'static str) {
         /*
          * ★★ **建完再把切片器抬回最前**（顺序不能颠倒，理由见 `guide_show`）：
          * 建窗那一下把我们 App 激活了，切片器被压到后面 —— 这里把它抬回来。
+         * ★★ 桌面（Space）同理（2026-10-18）：建窗那一下的激活可能把系统拽回
+         * **我们窗口所在的那个桌面**，这一下把人带回 BBS 那个桌面 —— 卡片就建在那儿。
          * ★ 抬**两次**：`build()` 返回时那次激活可能还没落定（它是异步的），
          * 隔一个事件循环再补一次。两次都是**一次性**的，不是定时器。
          */
@@ -592,6 +612,12 @@ fn show_at(app: &AppHandle, x: f64, y: f64, side: &'static str) {
 ///
 /// ★ 这是**防抖**，不是轮询：只在卡片刚摆出去时用一次。
 const SETTLE: std::time::Duration = std::time::Duration::from_millis(700);
+
+/// 抬起切片器之后、"建卡片之前"等的那段时间（见 [`guide_show`]）。
+///
+/// ★ 一次性的等待，不是轮询：macOS 切桌面（Space）的动画约半秒，等它走完再建窗，
+/// 卡片才稳稳落在 BBS 那个桌面上。
+const SPACE_SETTLE: std::time::Duration = std::time::Duration::from_millis(900);
 
 /// 上一次见到的切片器状态（"变没变"就比它）。
 ///

@@ -375,7 +375,7 @@ impl HookView {
             FromHook::Question(question) => {
                 {
                     let mut g = self.shared.lock().expect("锁没坏");
-                    g.question = Some(question.clone());
+                    g.question = Some((*question).clone());
                     g.question_emitted = true;
                 }
                 /* 这一条是用户"答不答"的唯一入口：推过没有要留痕（见 `question_emitted`） */
@@ -930,22 +930,25 @@ impl crate::devsim::Sink for PreviewSink {
         let deadline_unix_ms = self.ask_wait.map_or(0, |w| {
             crate::hook_ipc::unix_ms_now() + u64::try_from(w.as_millis()).unwrap_or(u64::MAX)
         });
-        self.send(&FromHook::Question(crate::hook_ipc::QuestionPayload {
-            question_kind: crate::hook_ipc::QKIND_CALIBRATION_MODE.to_owned(),
-            text: question.to_owned(),
-            deadline_unix_ms,
-            choices: choices
-                .iter()
-                .enumerate()
-                .map(|(i, (id, label, hint))| crate::hook_ipc::QuestionChoice {
-                    id: (*id).to_owned(),
-                    label: (*label).to_owned(),
-                    hint: Some((*hint).to_owned()),
-                    /* 第一颗是主按钮（与真钩子那一侧同一套摆法） */
-                    accent: i == 0,
-                })
-                .collect(),
-        }));
+        self.send(&FromHook::Question(Box::new(
+            crate::hook_ipc::QuestionPayload {
+                question_kind: crate::hook_ipc::QKIND_CALIBRATION_MODE.to_owned(),
+                text: question.to_owned(),
+                deadline_unix_ms,
+                choices: choices
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (id, label, hint))| crate::hook_ipc::QuestionChoice {
+                        id: (*id).to_owned(),
+                        label: (*label).to_owned(),
+                        hint: Some((*hint).to_owned()),
+                        /* 第一颗是主按钮（与真钩子那一侧同一套摆法） */
+                        accent: i == 0,
+                    })
+                    .collect(),
+                geo: None, /* 开发台这两问没有画布几何（挪塔那一问才有） */
+            },
+        )));
         let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
         loop {
             if self
@@ -970,12 +973,15 @@ impl crate::devsim::Sink for PreviewSink {
         let deadline_unix_ms = self.ask_wait.map_or(0, |w| {
             crate::hook_ipc::unix_ms_now() + u64::try_from(w.as_millis()).unwrap_or(u64::MAX)
         });
-        self.send(&FromHook::Question(crate::hook_ipc::QuestionPayload {
-            question_kind: crate::hook_ipc::QKIND_MACHINE_MISMATCH.to_owned(),
-            text: question.to_owned(),
-            deadline_unix_ms,
-            choices: Vec::new(),
-        }));
+        self.send(&FromHook::Question(Box::new(
+            crate::hook_ipc::QuestionPayload {
+                question_kind: crate::hook_ipc::QKIND_MACHINE_MISMATCH.to_owned(),
+                text: question.to_owned(),
+                deadline_unix_ms,
+                choices: Vec::new(),
+                geo: None,
+            },
+        )));
         let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
         loop {
             if self
@@ -1148,6 +1154,7 @@ mod tests {
                     text: "还继续吗？".to_owned(),
                     deadline_unix_ms: 1_763_000_000_000,
                     choices: Vec::new(),
+                    geo: None,
                 }),
                 finished: None,
                 preview: false,
@@ -1261,6 +1268,7 @@ mod tests {
                     text: "还继续吗？".to_owned(),
                     deadline_unix_ms: 1_763_000_000_000,
                     choices: Vec::new(),
+                    geo: None,
                 }),
                 ..Shared::default()
             };

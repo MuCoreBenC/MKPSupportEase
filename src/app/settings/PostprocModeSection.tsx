@@ -126,6 +126,21 @@ export default function PostprocModeSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
+          <div className={s.fieldTitle}>智能塔位置</div>
+          <p className={s.fieldNote}>
+            模型与擦料塔相撞时问一句：自动把塔挪到不撞的位置，还是你自己回切片器挪模型。
+            选自动挪塔只改这一趟，预设文件不动。
+          </p>
+        </div>
+        <Switch
+          checked={r.autoTowerPosition}
+          ariaLabel="智能塔位置"
+          onChange={(next) => void set({ autoTowerPosition: next }, on)}
+        />
+      </div>
+
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
           <div className={s.fieldTitle}>重置后处理状态</div>
           <p className={s.fieldNote}>
             钩子卡在等答复、界面这一屏还是上次的时点这里。已经跑完的处理不会被改。

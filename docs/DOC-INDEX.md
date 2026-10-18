@@ -38,6 +38,7 @@
 | [`docs/RESOURCE-ADDRESSING-ROADMAP.md`](RESOURCE-ADDRESSING-ROADMAP.md) | 寻址改造总纲（长期大纲） | 半现行：自标"大纲已批准 2026-10-05，施工进度以 §8 台账为准" |
 | [`docs/PROJECT-AUDIT.md`](PROJECT-AUDIT.md) | 项目总盘点：已定义但未落地（四类） | 参考：2026-10-02 的对账，时效以日期计 |
 | [`docs/DATA-INVENTORY.md`](DATA-INVENTORY.md) | 总纲的对账单（43 件归位 + 收口日志） | 对账单：基准 2026-10-01 `58f4295`，收口一条勾一条（是否勾完没终检） |
+| [`docs/SMART-TOWER-RELOCATION-HANDOFF.md`](SMART-TOWER-RELOCATION-HANDOFF.md) | **智能塔位置**（2026-10-18）：碰撞时自动摆塔那一问的全链路交接（口径 / 数据流 / 文件 / 判据 / 还差什么 / 坑） | 现行：代码全绿，差「答 relocate 后跑完」一条真机验收 |
 
 ## 2. 记录与计划（docs/ 顶层带日期的那些）
 
