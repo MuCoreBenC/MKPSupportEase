@@ -2455,3 +2455,47 @@ BBS 显示什么不显示什么」。之前那一轮的结论（"切片器不吃
 
 - `cargo check --no-default-features`（Windows）：绿。仅剩 8 条 macOS-only 死代码 warning
   （`ax.rs` / `guide.rs` 里那几张表和函数在别的平台上本来就编不出来，非本次引入）。
+
+## 增量之三十九 · 校准模型档：几何搬进 `presets/calibration_models.toml`，旧版/加长版并存（2026-10-18，分支 `feat/dark-mode`）
+
+**病根：作者把自己那套 Z 校准模型的打印区加长了，后处理直接把正常模型拦下来**
+
+- 改动：低沿往下延长 1mm、高沿往上延长 2mm（中间圆点没动）⇒ 打印区网格 120.000 × 13.484 → **16.484**，
+  切片后实测外形 119.58 × 13.063 → **119.58 × 16.063**（宽不变）。实测证据：旧模型 `presets/assets/models/ZOffset_Calibration.3mf`
+  打印区相对模型 bbox 低沿 11.417..24.901，作者那份 STL 是 10.417..26.901（低沿 −1、高沿 +2），X 区间逐位相同。
+- 后处理报 `E_CAL_MISMATCH_002`「检测到校准模型尺寸已变化」：标称外形与图案基准原来**写死在
+  `disk/calibration.rs` 的常量里**（`Z_PATTERN_MODEL_WIDTH/HEIGHT`、`Z_PATTERN_OFFSET_X/Y`、`Z_SQUARE_*`、`XY_PATTERN_*`）
+  —— 也就是说「同一台机器换一块校准板」= 改代码重发版。
+
+**治法：一档一条数据；认档按实测外形尺寸自动匹配**
+
+- 新数据文件 **`presets/calibration_models.toml`**（① 开发源层，单文件 `[[models]]` 多档）：每档写标称外形 + 容差、
+  图案基准（`datumX/datumY`）、方块间距/数量、XY 模板七个偏移、质心旋转判据的期望。首批四条：
+  `precise`（XY 50.5×50.5，数值逐字照搬旧常量）、`zoffset`（119.58×13.063）、**`zoffset-ext`（119.58×16.063）**、
+  `repetition`（只给基准，L 形件不做尺寸校验）。
+- 读取并进 `machine_dims`：`MachineTables.calibration_models` + `load_presets_dir` 顺手读它，
+  **与机型表同一条逃生链**（显式 `install` → `MKPSE_PRESETS_DIR` → 仓库相对 `presets/`）。
+  `calib_models::load` 把坏表挡在装载期：`deny_unknown_fields`、逐档点名缺键（ZOffset 缺 `datumY`、XY 缺 `pattern`）、id 撞名。
+- `disk/calibration.rs`：删掉那一组常量，改为 `resolve_profile(mode, bbox)` 认档 —— 同一朝向命中就用该档；
+  宽高互换命中 ⇒ `E_CAL_MISMATCH_001`（旋转）；都不命中 ⇒ `E_CAL_MISMATCH_002`，**正文把已知档位的外形尺寸列出来**
+  （缩放还是换档，用户自己就能看出来）。基准/间距/数量/质心期望全部读档。
+- 新档的基准：`datumX` 不变（0.079）；**`datumY = 3.755 + 1 = 4.755`** —— 包围盒低沿往下移了 1mm，而图案要落在
+  同一个物理点上；方块间距 11.0 / 数量 11 / 质心期望不变。写成 3.755 的话模型照样认得出、图案却整体印偏 1mm，
+  所以判据 `z_new_breaks_the_extended_model_into_its_own_datum` 专门钉这一点。
+- 资产与前端：`presets/assets.toml` 加 `zoffset-calibration-ext` —— **正式 3mf 已入库**
+  （159132 字节、sha256 `b22822cb…`；实测打印区网格 120.000 × 16.484 ⇒ 切片预期 119.579 × 16.063，
+  与 `zoffset-ext` 档的 119.58 × 16.063 一致，占位那次已换成真字节）。
+  重算 catalog（`cargo run --bin gen-catalog`：随包 25 份文件；交付面 revision `6374b7c4…`）；IPC `MODEL_DEFS` 加 `z-ext`；
+  校准页「打开模型」模态框加「模型版本」（旧版 / 加长版）两颗 —— 选版本只换要打开的那份 3mf，
+  板面预览两版共用一张（版式相同、只差 3mm 深）。mock 同步补一条。
+- **登记的边界**：① 这两份档位的 3mf 是同一块板的两个尺寸版本，后处理**只按外形尺寸认档** ——
+  旧模型整体放大 3mm 会被认成加长版（作者 2026-10-18 认可，记为已知局限）；
+  ② 校准模型档走的是机型表那条读取链，`machine_dims::install()` 在发布物里的接线（M5 欠账）也是它的前置。
+
+**验证**
+
+- `cargo test -p mkpse-postprocess`：**全绿**（208 lib + 各集成套件，含 `tests/reference_calibration.rs` 的
+  逐字节判据 —— 旧档数值逐字照搬，所以「迁移零变」有据）；新增档位用例：加长版认档 + 基准生效、认不出时列清单。
+- `npm run build`（`tsc -b` + vite）、`npm run lint`（eslint + stylelint）、`cargo check -p mkp-support-ease`：绿。
+- 剩一条**真机验收**：拿作者那份 `.44432.0.gcode` 跑一遍后处理 —— 应不再报 `E_CAL_MISMATCH_002`，
+  且插入的 11 个方块相对旧版同参数**只在 Y 基准上平移 1mm**。

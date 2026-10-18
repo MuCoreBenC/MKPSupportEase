@@ -46,7 +46,7 @@
 
 | 路径 | 是什么 | 入库 |
 | --- | --- | --- |
-| `presets/*.toml` | 源定义：`brands` / `machines/`×5 / `forbidden_zones/`×3 / `assets` / `bundles` / `layout_schema` / `registry/` | 是 |
+| `presets/*.toml` | 源定义：`brands` / `machines/`×5 / `forbidden_zones/`×3 / `assets` / `bundles` / `layout_schema` / `calibration_models` / `registry/` | 是 |
 | `presets/delivery/` | 交付目录（源与交付同树是 `workbench/paths.rs` 的刻意决定）。**入库**（2026-10-02 第十八刀改判）——main 上的正式远端交付面 | 是 |
 | `crates/preset/assets/presets/` | **入库产物目录**：9 份交付预设的真字节，`BUILTIN_PRESETS` 编进二进制的就是它，判据测试锚着它 | 是 |
 | `crates/preset` + 判据测试 | `BUILTIN_PRESETS` 与命名函数，判据保证与 `dist` 一份不差 | 是 |
@@ -356,6 +356,7 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | 界面展示素材（品牌 logo / 机型整机图 / 测试模型合影） | `src/app/assets/`（整机图与合影 2026-10-01 起搬来） | **随程序本体**（它就是界面的一部分） | 无副本 | — |
 | **标注源稿**（图片引导图上那几块框，`presets/assets/<同类目录>/<对>.anno.json`，2026-10-16） | 工作台「标注台」（`wb_anno_read` / `wb_anno_write`；作者要的是「像 PS 一样能再编辑、而且**跟着仓库走**」） | **跟资产一起入库**（换设备 clone 下来接着编）；**不进交付**（它不是 `[[assets]]` 条目、也不进 catalog 的 `files[]`） | 无副本（客户端读的是源码里导出的那段 `marks`） | — |
 | 校准偏移（三轴） | `presets/*.toml` 的官方默认值 | 算进 catalog（参数注册表） | **用户工作副本 TOML 的 `offset_x/y/z`**（2026-10-08 改判；`index/offsets.json` 退役） | — |
+| **校准模型档**（每块校准板的外形 / 容差 / 图案基准，`calibration_models.toml`，2026-10-18） | `presets/`（人） | 不进 catalog —— 它不是交付件（**模型本体**才是 catalog 里那份 `type = 'model'` 资产） | 无副本：后处理按 `machine_dims` 那条读取链读它（**与 M5 同一笔欠账**：发布物里"从运行时数据根读"的接线还没做，见 `crates/preset/src/lib.rs` 的注记） | — |
 | 运行状态 | — | — | `run/app-state.json`（程序替用户管） | — |
 | **数据源地址**（当前用哪个云端） | 用户填（界面里）或构建方注入默认值 | 可选的随包默认值（`MKPSE_PRESET_SOURCE`） | `run/preset-source.json`（程序写，用户可删=回到未配置） | 被寻址的一方，不拥有这份设置 |
 | 导出 / 报告 | — | — | `exports/` `reports/`（用户） | — |

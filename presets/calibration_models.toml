@@ -1,0 +1,112 @@
+# 校准模型档 —— 每个校准模型一条 [[models]]。
+#
+# 【为什么有这份文件】校准图案的落点与尺寸校验口径，原来写死在
+# crates/postprocess/src/postproc/disk/calibration.rs 的常量里（`Z_PATTERN_*` /
+# `XY_PATTERN_*` / `Z_SQUARE_*`）。想做第二个、第三个模型就得改代码。
+# 现在改成「一档一条数据」：**加模型 = 往这里加一条，代码不动**。
+#
+# 【谁读它】后处理那一趟（crates/postprocess，见 postproc/calib_models.rs）：
+#   ① 尺寸校验：切片实测的挤出包围盒 vs `footprintW/H`，容差 `tolerance`；
+#   ② 图案基准：`datumX/datumY`（相对包围盒左下角）+ `squareSpacing/squareCount`；
+#   ③ XY 图案模板的七个偏移（`[models.pattern]`）；
+#   ④ 质心旋转判据的期望（`[models.centroid]`）。
+# 读取走机型表同一条链（显式 install → MKPSE_PRESETS_DIR → 仓库相对 presets/）——
+# 见 postproc/machine_dims.rs 的模块头，不另造一份路径依赖。
+#
+# 【切片进来时选哪一档】按实测包围盒**自动匹配**：同一 mode 的档里挑偏差最小、
+# 且两轴都在 `tolerance` 内的一档。都不命中 = 不是我们认识的模型（或模型被缩放），
+# 报 E_CAL_MISMATCH_002 并把已知档位的外形尺寸列出来。
+# 【已知局限】只按外形尺寸认档：把旧档模型整体放大 3mm，会被认成恰好同尺寸的新档。
+#
+# 【footprint 口径】写的是**切片后实测**的挤出包围盒宽高（打印区网格尺寸 − 一个挤出宽度
+# 的内缩），网格尺寸写在旁边的注释里，方便对账。`0.0` = 这一档不参与尺寸校验（Repetition）。
+#
+# 【datum 口径】相对**打印区包围盒左下角**的毫米偏移。拼的是「图案落在板上哪个物理点」，
+# 所以模型哪条边被延长/缩短时，这个数要跟着那条边的位移改（见 zoffset-ext 的注释）。
+
+# ---------------- Z 偏移校准（ZOffset） ----------------
+
+[[models]]
+id = 'zoffset'
+mode = 'ZOffset'
+asset = 'zoffset-calibration'
+# 现行出厂那一版：打印区网格 120.000 × 13.484 ⇒ 切片实测 119.58 × 13.063
+footprintW = 119.58
+footprintH = 13.063
+tolerance = 0.5
+datumX = 0.079
+datumY = 3.755
+squareSpacing = 11.0
+squareCount = 11
+
+[models.centroid]
+dxSign = 1
+dySign = 0
+minRatio = 0.01
+square = false
+
+[[models]]
+id = 'zoffset-ext'
+mode = 'ZOffset'
+asset = 'zoffset-calibration-ext'
+# 2026-10-18 新版：打印区低沿往下延长 1mm、高沿往上延长 2mm（中间圆点未动）
+# ⇒ 网格 120.000 × 16.484 ⇒ 切片实测 119.58 × 16.063。
+# 图案要落在同一个物理点上，而包围盒低沿往下移了 1mm ⇒ datumY = 3.755 + 1 = 4.755；
+# X 区间逐位未动 ⇒ datumX 不变；方块间距/数量不变。
+footprintW = 119.58
+footprintH = 16.063
+tolerance = 0.5
+datumX = 0.079
+datumY = 4.755
+squareSpacing = 11.0
+squareCount = 11
+
+[models.centroid]
+dxSign = 1
+dySign = 0
+minRatio = 0.01
+square = false
+
+# ---------------- XY 偏移校准（Precise / Rough 共用一张板） ----------------
+
+[[models]]
+id = 'precise'
+mode = 'XY'
+asset = 'precise-calibration'
+# 正方形板 50.5 × 50.5：转 90° 与转 180° 的 BBox 一模一样，所以只靠质心判方向
+# （见 `[models.centroid]` 的 `square = true` 那一路）。
+footprintW = 50.5
+footprintH = 50.5
+tolerance = 0.5
+
+[models.pattern]
+lineSpacing = 4.0
+hLineOffsetY = 10.49
+hLineStartX = 0.5
+hLineEndX = 10.5
+vLineOffsetX = 10.5
+vLineStartY = 0.49
+vLineEndY = 10.49
+
+[models.centroid]
+dxSign = -1
+dySign = -1
+minRatio = 0.02
+square = true
+
+# ---------------- 重复性校准（Repetition） ----------------
+#
+# 这一档**不做尺寸校验**（L 形件没有标称外形），只提供图案基准 —— 它原来跟 ZOffset
+# 共用 `Z_PATTERN_OFFSET_*` 那两个常量，现在单列一条，数值逐字照搬。
+
+[[models]]
+id = 'repetition'
+mode = 'Repetition'
+datumX = 0.079
+datumY = 3.755
+
+[models.centroid]
+dxSign = 0
+dySign = 0
+minRatio = 0.0
+square = false

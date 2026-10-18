@@ -234,6 +234,17 @@ type = 'model'
 name = 'Z 轴偏移校准模型'
 path = 'models/ZOffset_Calibration.3mf'
 
+# 2026-10-18：新版 Z 校准模型（打印区低沿 −1mm / 高沿 +2mm ⇒ 深 13.063 → 16.063，宽不变）。
+# 字节是作者导出的正式件（159132 字节，sha256 `b22822cb…`）；实测打印区网格 120.000 × 16.484
+# ⇒ 切片预期 119.579 × 16.063，与后处理侧那一档对得上。
+# 后处理侧认它就靠 `presets/calibration_models.toml` 里 `id = 'zoffset-ext'` 那一档的
+# footprintW/H = 119.58 × 16.063 —— 两边要一起改（换字节后 `cargo run --bin gen-catalog` 重算 SHA）。
+[[assets]]
+id = 'zoffset-calibration-ext'
+type = 'model'
+name = 'Z 轴偏移校准模型（加长版）'
+path = 'models/ZOffset_Calibration_ext.3mf'
+
 # ---------------- 切片器预设（BBS） ----------------
 #
 # 路径沿用旧仓那套目录与文件名（`Process/0.2mm/…`）—— **文件名没改**：

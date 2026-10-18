@@ -29,6 +29,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
+use crate::postproc::calib_models::{self, ModelProfile};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BedSize {
@@ -120,7 +122,7 @@ pub struct MachineDimensions {
     pub flags: Flags,
 }
 
-/// 一份完整的机型表：尺寸 + 别名 + 禁区。
+/// 一份完整的机型表：尺寸 + 别名 + 禁区 + 校准模型档。
 ///
 /// 它**只是数据的容器**，不含任何规则 —— 规则在下面的查询函数里。
 #[derive(Debug, Default)]
@@ -134,6 +136,10 @@ pub struct MachineTables {
     alias_map: HashMap<String, String>,
     /// 规范机型 id → 禁区多边形（键是**原样的 id**，不做大小写归一）
     forbidden_zones: HashMap<String, Vec<ZonePolygon>>,
+    /// 校准模型档（`calibration_models.toml`）。`None` = 这份文件不存在 ——
+    /// fixture 目录里没有它是正常的；真要用校准档的人（`disk/calibration.rs`）
+    /// 自己把 `None` 报成"配置坏了"，不在这里退化成空表。
+    calibration_models: Option<Vec<ModelProfile>>,
 }
 
 impl MachineTables {
@@ -145,6 +151,9 @@ impl MachineTables {
     }
     pub fn forbidden_zones(&self) -> &HashMap<String, Vec<ZonePolygon>> {
         &self.forbidden_zones
+    }
+    pub fn calibration_models(&self) -> Option<&[ModelProfile]> {
+        self.calibration_models.as_deref()
     }
 }
 
@@ -160,8 +169,9 @@ pub fn install(tables: MachineTables) -> Result<(), String> {
 }
 
 /// 从 `presets/` 目录读一份机型表：
-/// `machines/*.toml` 的 `[dimensions]` 与 `externalAliases`，以及
-/// `forbidden_zones/*.toml` 的 `[[zones]]`。
+/// `machines/*.toml` 的 `[dimensions]` 与 `externalAliases`，
+/// `forbidden_zones/*.toml` 的 `[[zones]]`，以及 `calibration_models.toml`
+/// 的 `[[models]]`（最后这份**可选** —— 判据 fixtures 里没有它是正常的）。
 pub fn load_presets_dir(dir: &Path) -> Result<MachineTables, String> {
     let mut tables = MachineTables::default();
 
@@ -213,6 +223,14 @@ pub fn load_presets_dir(dir: &Path) -> Result<MachineTables, String> {
                 tables.forbidden_zones.insert(id.to_string(), file.zones);
             }
         }
+    }
+
+    /* 校准模型档：文件在就必须自证站得住（解析 / 逐档校验 / id 唯一都由
+    `calib_models::load` 硬把关）；不在就留 `None`，由消费方（校准图案那一趟）
+    自己把它报成"配置坏了" —— 这里不悄悄给空表。 */
+    let models_path = dir.join("calibration_models.toml");
+    if models_path.is_file() {
+        tables.calibration_models = Some(calib_models::load(&models_path)?);
     }
 
     Ok(tables)

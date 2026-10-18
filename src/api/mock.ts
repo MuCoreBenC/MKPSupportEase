@@ -241,6 +241,14 @@ const calibModels: CalibModel[] = [
     ready: true,
   },
   {
+    id: 'z-ext',
+    name: 'Z 轴校准（加长版）',
+    desc: '打印区加长 3mm 的那一版，校准流程与旧版完全一样',
+    fileName: 'ZOffset_Calibration_ext.3mf',
+    size: '284 KB',
+    ready: true,
+  },
+  {
     id: 'xy',
     name: 'XY 校准',
     desc: '校准平面内的偏移，Z 轴之后打',

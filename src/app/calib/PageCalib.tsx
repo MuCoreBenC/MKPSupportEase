@@ -84,6 +84,16 @@ const PLATE = {
     model: 'zoffset',
     title: 'Z 偏移校准板',
     calibId: 'z',
+    /*
+     * 2026-10-18：Z 板有两版 —— 旧版（打印区深 13.063）与加长版（16.063）。
+     * 版式一样，板面预览共用现有那张（`src/calib/zoffset-calibration.generated.ts`），
+     * 选哪版只换**要打开的那份 3mf**（id → 交付文件名在 Rust 的 `MODEL_DEFS` 里），
+     * 校准流程与读数完全不变。后处理侧认这两版靠 `presets/calibration_models.toml`。
+     */
+    versions: [
+      { id: 'z', label: '旧版' },
+      { id: 'z-ext', label: '加长版' },
+    ],
     hitLabel: zHitLabel,
     mm: { w: Z_VIEW_BOX[2], h: Z_VIEW_BOX[3] },
   },
@@ -92,10 +102,18 @@ const PLATE = {
     model: 'precise',
     title: 'XY 偏移校准板',
     calibId: 'xy',
+    versions: [{ id: 'xy', label: '标准' }],
     hitLabel: xyHitLabel,
     mm: { w: XY_VIEW_BOX[2], h: XY_VIEW_BOX[3] },
   },
 } as const
+
+/** 「打开模型」要开的那一份：`versions` 至少一条 —— 多于一条时模态框里给版本选择。 */
+type OpeningModel = {
+  id: string
+  name: string
+  versions: readonly { id: string; label: string }[]
+}
 
 const TEST_MODEL_ID = 'test-models'
 
@@ -342,7 +360,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
   const pillFileName = activeForSel?.fileName ?? currentFileName
 
-  const [opening, setOpening] = useState<{ id: string; name: string } | null>(null)
+  const [opening, setOpening] = useState<OpeningModel | null>(null)
   /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
   const [defaultSlicer, setDefaultSlicer] = useSlicerPref()
   /* 设置页「其他应用…」指定的那个 —— 选着它时随 openModel 把路径带给壳（见 slicerArgsOf） */
@@ -386,6 +404,21 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       alive = false
     }
   }, [opening])
+
+  /*
+   * 模态框里那句文案用的名字：多版时带上当前选中的那一版（「Z 偏移校准板 · 加长版」），
+   * 单版就只是标题本身。选版本 = 改 `opening.id`，上面那个 effect 会跟着重查缓存。
+   */
+  const openingVersion =
+    opening !== null && opening.versions.length > 1
+      ? opening.versions.find((v) => v.id === opening.id)
+      : undefined
+  const openingLabel =
+    opening === null
+      ? ''
+      : openingVersion === undefined
+        ? opening.name
+        : `${opening.name} · ${openingVersion.label}`
 
   /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
   const openCachedModel = () => {
@@ -492,7 +525,10 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
   const actions = plate ? (
     <span className={s.actions}>
       {/* 打开模型是这一步的主入口（作者 10-03：绿底给打开模型，预设 pill 退暗） */}
-      <Btn variant="accent" onClick={() => setOpening({ id: plate.calibId, name: plate.title })}>
+      <Btn
+        variant="accent"
+        onClick={() => setOpening({ id: plate.calibId, name: plate.title, versions: plate.versions })}
+      >
         打开模型
       </Btn>
     </span>
@@ -831,7 +867,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             <span className={s.actions}>
               <Btn
                 variant="accent"
-                onClick={() => setOpening({ id: TEST_MODEL_ID, name: '测试模型' })}
+                onClick={() => setOpening({ id: TEST_MODEL_ID, name: '测试模型', versions: [] })}
               >
                 打开模型
               </Btn>
@@ -889,6 +925,23 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             </>
           }
         >
+          {/* 模型版本（只有 Z 板有两版）：选它 = 换要打开的那份 3mf */}
+          {opening.versions.length > 1 && (
+            <div className={s.versionRow}>
+              <span className={s.versionLabel}>模型版本</span>
+              <span className={s.versionBtns}>
+                {opening.versions.map((v) => (
+                  <Btn
+                    key={v.id}
+                    variant={v.id === opening.id ? 'accent' : 'default'}
+                    onClick={() => setOpening({ ...opening, id: v.id })}
+                  >
+                    {v.label}
+                  </Btn>
+                ))}
+              </span>
+            </div>
+          )}
           {/* 用哪个打开（默认在设置页「切片」那格；勾「仅这一次」就不写回） */}
           <SlicerPickView
             value={slicerPick.value}
@@ -900,12 +953,12 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             {modelErr !== null
               ? modelErr
               : modelBusy
-                ? `${opening.name} · 正在处理，请稍候…`
+                ? `${openingLabel} · 正在处理，请稍候…`
                 : modelInfo === null
-                  ? `${opening.name} · 正在看本机有没有缓存…`
+                  ? `${openingLabel} · 正在看本机有没有缓存…`
                   : modelInfo.ready
-                    ? `${opening.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
-                    : `${opening.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
+                    ? `${openingLabel} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
+                    : `${openingLabel} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
           </p>
         </Modal>
       )}

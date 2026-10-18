@@ -888,8 +888,8 @@ mod tests {
             "下载区没有 images 这一类：整机图不进 Delivery"
         );
         // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
-        // 今天 31 条 = 9 MKP 预设 + 4 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
-        //              + 3 模型 + 2 引导图（bundled，2026-10-16）
+        // 今天 32 条 = 9 MKP 预设 + 4 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
+        //              + 4 模型（2026-10-18 起：Z 校准多一版「加长版」）+ 2 引导图（bundled，2026-10-16）
         assert_eq!(
             catalog.assets.len(),
             source.assets.items().len(),
@@ -897,10 +897,11 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            31,
-            "实测 31 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型 + 2 引导图）——
+            32,
+            "实测 32 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 4 模型 + 2 引导图）——
              2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
-             （`type = 'guide'`，bundled）——条数变了要核对台账再改这里的期望"
+             （`type = 'guide'`，bundled）、2026-10-18 加了 Z 校准加长版
+             （`zoffset-calibration-ext`，type = 'model'）——条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -1144,11 +1145,12 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            31,
-            "实测 31 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型
+            32,
+            "实测 32 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 4 模型
              + 2 引导图）——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
-             登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）"
+             登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）；
+             2026-10-18：Z 校准加长版进台账（model 类）"
         );
         assert_eq!(
             catalog.bundles.len(),

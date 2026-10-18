@@ -253,6 +253,26 @@
   color: var(--text-3);
 }
 
+/* 「模型版本」那一行（2026-10-18：Z 板旧版 / 加长版）—— 与下面那句说明同一档字号、
+   同一档颜色，两颗胶囊并排。**只有多版的板才渲染整行**（单版由 TSX 那一侧判断）。 */
+.versionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.versionLabel {
+  font-size: calc(var(--fs-label) + 1px);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.versionBtns {
+  display: flex;
+  gap: 6px;
+}
+
 /* ---------- 测试模型那一步（作者第四轮定稿：不要背景，两侧留白） ---------- */
 
 /*

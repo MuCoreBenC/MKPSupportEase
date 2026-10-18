@@ -140,18 +140,28 @@ pub(crate) fn traced<T>(
     }
 }
 
-/* ---------- 校准模型（三个 3mf） ---------- */
+/* ---------- 校准模型（四份 3mf） ---------- */
 
-/// 界面里的模型 id → 交付文件名。**id 是契约**（首页 / 校准页发的就是这三个），
+/// 界面里的模型 id → 交付文件名。**id 是契约**（首页 / 校准页发的就是这几个），
 /// 文件名是 catalog 的口径（「取回」走下载管道、「打开」找盘上那份，都认它）。
 ///
 /// 映射只有这一处。id 对不上就报"没这个模型"，不猜、不静默少一项。
-const MODEL_DEFS: [(&str, &str, &str, &str); 3] = [
+///
+/// 2026-10-18：Z 板多了一版（作者把校准模型打印区加长了 3mm ⇒ 深 13.063 → 16.063），
+/// 于是 `z-ext` 与 `z` 并列 —— 校准页「打开模型」那个模态框里选版本。后处理侧认这两版
+/// 靠 `presets/calibration_models.toml`（`zoffset` / `zoffset-ext` 两档）。
+const MODEL_DEFS: [(&str, &str, &str, &str); 4] = [
     (
         "z",
         "Z 轴校准",
         "校准喷嘴高度与第一层，先打这个",
         "ZOffset_Calibration.3mf",
+    ),
+    (
+        "z-ext",
+        "Z 轴校准（加长版）",
+        "打印区加长 3mm 的那一版，校准流程与旧版完全一样",
+        "ZOffset_Calibration_ext.3mf",
     ),
     (
         "xy",
@@ -510,15 +520,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calib_models_have_three_entries() {
-        assert_eq!(MODEL_DEFS.len(), 3);
+    fn calib_models_have_four_entries() {
+        assert_eq!(MODEL_DEFS.len(), 4);
     }
 
-    /// 界面发的三个 id 就是契约 —— 换名字要两处一起改，判据钉在这里
+    /// 界面发的四个 id 就是契约 —— 换名字要两处一起改，判据钉在这里
+    /// （`z-ext` 是 2026-10-18 起 Z 板的第二版，校准页那个「模型版本」选的就是它）
     #[test]
     fn model_ids_match_the_pages() {
         let ids: Vec<&str> = MODEL_DEFS.iter().map(|(id, ..)| *id).collect();
-        assert_eq!(ids, ["z", "xy", "test-models"]);
+        assert_eq!(ids, ["z", "z-ext", "xy", "test-models"]);
     }
 
     #[test]

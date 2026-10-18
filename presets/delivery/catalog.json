@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "4f4aa3378c5e689a",
+  "revision": "6374b7c4729e5a5d",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -690,6 +690,13 @@
       "type": "model",
       "name": "Z 轴偏移校准模型",
       "path": "models/ZOffset_Calibration.3mf",
+      "delivery": "download"
+    },
+    {
+      "id": "zoffset-calibration-ext",
+      "type": "model",
+      "name": "Z 轴偏移校准模型（加长版）",
+      "path": "models/ZOffset_Calibration_ext.3mf",
       "delivery": "download"
     },
     {
@@ -5000,6 +5007,15 @@
       "versionId": "",
       "sha256": "773b65b0dcdf09472c013bd4eec0edff94372e795dd50d1db99d9cef85f9490c",
       "size": 290327
+    },
+    {
+      "kind": "model",
+      "fileName": "ZOffset_Calibration_ext.3mf",
+      "path": "assets/models/ZOffset_Calibration_ext.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "b22822cbf3446a9af3b8358b8e094a55b788dc11022ec78d87a12909253263e5",
+      "size": 159132
     },
     {
       "kind": "bbs_config",
