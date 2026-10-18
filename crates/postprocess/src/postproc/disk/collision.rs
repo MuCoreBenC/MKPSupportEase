@@ -144,10 +144,114 @@ pub struct CollisionResult {
     pub tower_bbox: Option<GBBox>,
     /// 模型挤出点的整体包围盒（禁区那一档没有）
     pub model_bbox: Option<GBBox>,
+    /// 避让用的**占用格**（板内挤出点，2mm 一格）—— 自动摆塔按它判"会不会压到东西"。
+    /// 不进 `facts`（那是对外形状），只在这一层用。
+    pub occupancy: Occupancy,
+    /// 这一趟的**塔高**（= gcode 里最高的 Z，mm）。斜肋外墙的"最小底深随高度涨"
+    /// 就靠它（见 `MIN_DEPTH_PER_HEIGHT`）—— 少了它，高塔的底座会被算小（2026-10-18 真机。
+    /// 作者：「挪动后的还是碰撞了，因为斜肋外墙随着高度会变大，下面会比较大」）。
+    pub tower_height: f64,
     /// **热床按 gcode 判**（2026-10-18 作者定的口径）：切片器在 CONFIG_BLOCK 里写下的
     /// `; printable_area` 多边形的外接框。`None` = 这份 gcode 没写（老文件 / 其它切片器）
     /// ⇒ `facts` 退回机型 toml 的维度。
     pub printable: Option<Box4>,
+}
+
+/// 塔避让用的**占用格**（2026-10-18）。
+///
+/// 为什么不是包围盒：真机上「撞没撞」是**逐个挤出点**判的，而自动摆塔过去只避
+/// `model_bbox`（板内点的 AABB）—— 两套样本，于是"挪完还撞"（作者真机，
+/// `.5926.1.gcode`：冲突 149351 个点、建议向右挪 40.4mm，挪了还撞）。
+///
+/// 现在把**同一批挤出点**（板内那些，塔框本来也不许出板）打进 2mm 的格子里，
+/// 自动摆塔按格子判"这个位置会不会压到东西"：与 detect 同一份样本、比 AABB 精确，
+/// 而且原擦料塔 / 支撑 / 清料段的点天然都在里面（它们也是挤出点）。
+#[derive(Debug, Clone)]
+pub struct Occupancy {
+    cell: f64,
+    origin_x: f64,
+    origin_y: f64,
+    cols: usize,
+    rows: usize,
+    bits: Vec<bool>,
+}
+
+impl Default for Occupancy {
+    fn default() -> Self {
+        Self {
+            cell: 2.0,
+            origin_x: 0.0,
+            origin_y: 0.0,
+            cols: 0,
+            rows: 0,
+            bits: Vec::new(),
+        }
+    }
+}
+
+impl Occupancy {
+    /// 按打印范围（板子）开一张格网；`cell` 是格边长（mm，<=0 时取 2.0）。
+    pub fn new(bed: &Box4, cell: f64) -> Self {
+        let cell = if cell > 0.0 { cell } else { 2.0 };
+        let cols = (((bed.x_max - bed.x_min) / cell).ceil() as usize).max(1);
+        let rows = (((bed.y_max - bed.y_min) / cell).ceil() as usize).max(1);
+        Self {
+            cell,
+            origin_x: bed.x_min,
+            origin_y: bed.y_min,
+            cols,
+            rows,
+            bits: vec![false; cols * rows],
+        }
+    }
+
+    /// 打一个点（板外的点直接忽略 —— 塔框也不许出板，永远碰不到它们）。
+    pub fn mark(&mut self, x: f64, y: f64) {
+        if self.cols == 0 || self.rows == 0 {
+            return;
+        }
+        let cx = ((x - self.origin_x) / self.cell).floor();
+        let cy = ((y - self.origin_y) / self.cell).floor();
+        if cx < 0.0 || cy < 0.0 {
+            return;
+        }
+        let (cx, cy) = (cx as usize, cy as usize);
+        if cx >= self.cols || cy >= self.rows {
+            return;
+        }
+        self.bits[cy * self.cols + cx] = true;
+    }
+
+    /// 这个框碰到任何一个被占的格子 ⇒ `true`。
+    /// 上界按"框盖到的最后一个格子"取（`floor`），下界同理 —— 与打点用的同一套取整，
+    /// 不会出现"点打进去了、框却查不到"。
+    pub fn overlaps(&self, b: &GBBox) -> bool {
+        if self.bits.is_empty() {
+            return false;
+        }
+        let clamp = |v: f64, hi: usize| -> usize {
+            if v <= 0.0 {
+                0
+            } else if v >= hi as f64 {
+                hi - 1
+            } else {
+                v as usize
+            }
+        };
+        let x0 = clamp(((b.x_min - self.origin_x) / self.cell).floor(), self.cols);
+        let x1 = clamp(((b.x_max - self.origin_x) / self.cell).floor(), self.cols);
+        let y0 = clamp(((b.y_min - self.origin_y) / self.cell).floor(), self.rows);
+        let y1 = clamp(((b.y_max - self.origin_y) / self.cell).floor(), self.rows);
+        for y in y0..=y1 {
+            let row = y * self.cols;
+            for x in x0..=x1 {
+                if self.bits[row + x] {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
@@ -163,7 +267,18 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
     禁区那一档的事实同样要带得出门 */
     result.printable = printable_area_of(content);
 
-    let tower_bbox = calculate_tower_collision_bbox(ir_data);
+    /*
+     * ★★ **塔高 = 这份 gcode 最高的 Z**（2026-10-18）。斜肋外墙的底座随高度变大
+     * （`MIN_DEPTH_PER_HEIGHT` 那张表），少了这个数，碰撞框会按"最矮的塔"算 ——
+     * 于是自动摆出来的位置看着不撞、真印起来底座压模型。作者真机踩到过。
+     */
+    result.tower_height = max_z_of(content);
+    /*
+     * 避让用的占用格：**与"撞没撞"同一批挤出点**（板内），见 [`Occupancy`]。
+     * 单独扫一遍（几十毫秒）—— 比把它塞进下面那条多层循环清楚得多。
+     */
+    result.occupancy = occupancy_of(content, &bed_of(ir_data, result.printable));
+    let tower_bbox = calculate_tower_collision_bbox(ir_data, result.tower_height);
 
     result.tower_bbox = Some(tower_bbox);
     let tower_poly: Polygon = vec![
@@ -186,7 +301,14 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
         }
     }
 
-    detect_tower_collision_all_layers(content, &tower_bbox, ir_data, result.printable)
+    detect_tower_collision_all_layers(
+        content,
+        &tower_bbox,
+        ir_data,
+        result.printable,
+        result.tower_height,
+        &result.occupancy,
+    )
 }
 
 impl CollisionResult {
@@ -338,6 +460,103 @@ impl CollisionResult {
     }
 }
 
+/// 打印范围（板子）：gcode 的 `; printable_area` 优先，没写退回机型维度。
+/// （`detect` 与自动摆塔必须用同一份 —— 两处各算一次就是"两套床"。）
+fn bed_of(ir_data: &Ir, printable: Option<Box4>) -> Box4 {
+    printable.unwrap_or(Box4 {
+        x_min: ir_data.machine.min_x,
+        x_max: ir_data.machine.max_x,
+        y_min: ir_data.machine.min_y,
+        y_max: ir_data.machine.max_y,
+    })
+}
+
+/// 把所有**板内挤出点**打进占用格（[`Occupancy`]）。
+/// 与 `detect_tower_collision_all_layers` 里"算不算一个点"同一套判据：
+/// G0/G1 + 带 `E` + 有 X/Y。
+pub fn occupancy_of(content: &[String], bed: &Box4) -> Occupancy {
+    let mut occ = Occupancy::new(bed, 2.0);
+    for line in content {
+        let mut it = line.split_whitespace();
+        let Some(cmd) = it.next() else { continue };
+        if cmd != "G0" && cmd != "G1" {
+            continue;
+        }
+        let (mut x, mut y, mut has_e, mut has_x, mut has_y) = (0.0f64, 0.0f64, false, false, false);
+        for tok in it {
+            if tok == ";" {
+                break;
+            }
+            let mut chars = tok.chars();
+            let Some(axis) = chars.next() else { continue };
+            let rest = chars.as_str();
+            match axis {
+                'X' => {
+                    if let Ok(v) = rest.parse::<f64>() {
+                        x = v;
+                        has_x = true;
+                    }
+                }
+                'Y' => {
+                    if let Ok(v) = rest.parse::<f64>() {
+                        y = v;
+                        has_y = true;
+                    }
+                }
+                'E' => has_e = true,
+                _ => {}
+            }
+        }
+        if !(has_e && has_x && has_y) {
+            continue;
+        }
+        if x < bed.x_min || x > bed.x_max || y < bed.y_min || y > bed.y_max {
+            continue;
+        }
+        occ.mark(x, y);
+    }
+    occ
+}
+
+/// 这份 gcode 里**最高的 Z**（mm）= 这一趟的塔高（塔跟模型一样高）。
+/// 只认 G0/G1 行里以 `Z` 开头的那个数；读不到 ⇒ 0（退回"最矮的塔"，与旧行为一致）。
+pub fn max_z_of(content: &[String]) -> f64 {
+    /*
+     * ★ 先认切片器自报的那一行（`; max_z_height: 245.60`）—— 它是**模型的真实最高层**，
+     * 比扫 G0/G1 稳：弧线（G2/G3）抬 Z、只写 `G1 F…` 换层的写法都会漏。
+     * 读不到才退回逐行扫。
+     */
+    for line in content {
+        let Some(rest) = line.trim().strip_prefix("; max_z_height:") else {
+            continue;
+        };
+        if let Ok(z) = rest.trim().parse::<f64>() {
+            return z;
+        }
+    }
+    let mut top = 0.0f64;
+    for line in content {
+        let mut it = line.split_whitespace();
+        let Some(cmd) = it.next() else { continue };
+        if cmd != "G0" && cmd != "G1" {
+            continue;
+        }
+        for tok in it {
+            if tok == ";" {
+                break;
+            }
+            /* MSRV 1.77 没有 let-chains ⇒ 拆成 `let … else` + `max`（也别招 clippy） */
+            let Some(rest) = tok.strip_prefix('Z') else {
+                continue;
+            };
+            if let Ok(z) = rest.parse::<f64>() {
+                top = top.max(z);
+            }
+        }
+    }
+    top
+}
+
 /// **热床（可打印区）按 gcode 判**（2026-10-18 作者定的口径）。
 ///
 /// 切片器在 CONFIG_BLOCK 里亲手写下了热床多边形（A1 mini：
@@ -465,10 +684,12 @@ const WIPER_Y_MAX: f64 = 265.0;
 pub fn auto_tower_position(
     ir_data: &Ir,
     bed: &Box4,
-    model: &GBBox,
+    occupancy: &Occupancy,
     forbidden: &[Vec<Vec<f64>>],
+    tower_height: f64,
 ) -> Option<[f64; 2]> {
-    let cur = calculate_tower_collision_bbox(ir_data);
+    /* 塔框按**这一趟的塔高**算（斜肋底座会随高度变大，见 `tower_height` 的注释） */
+    let cur = calculate_tower_collision_bbox(ir_data, tower_height);
     let w = cur.x_max - cur.x_min;
     let h = cur.y_max - cur.y_min;
     if w <= 0.0 || h <= 0.0 {
@@ -489,7 +710,7 @@ pub fn auto_tower_position(
     while x <= hi_x + 1e-9 {
         let mut y = lo_y;
         while y <= hi_y + 1e-9 {
-            if tower_fits(x, y, w, h, bed, model, forbidden) {
+            if tower_fits(x, y, w, h, bed, occupancy, forbidden) {
                 let d = (x - orig[0]).powi(2) + (y - orig[1]).powi(2);
                 /* 显式 match：MSRV 1.77 没有 `Option::is_none_or`，
                 `map_or(true, …)` 又要挨 clippy 那一刀 */
@@ -514,19 +735,15 @@ pub fn auto_tower_position(
 pub fn auto_tower_position_for_facts(
     ir_data: &Ir,
     facts: &CollisionFacts,
-    model: Option<GBBox>,
+    occupancy: &Occupancy,
+    tower_height: f64,
 ) -> Option<[f64; 2]> {
-    let empty = GBBox {
-        x_min: 0.0,
-        x_max: 0.0,
-        y_min: 0.0,
-        y_max: 0.0,
-    };
     auto_tower_position(
         ir_data,
         &facts.printable,
-        &model.unwrap_or(empty),
+        occupancy,
         &ir_data.machine.forbidden_zones,
+        tower_height,
     )
 }
 
@@ -537,7 +754,7 @@ fn tower_fits(
     w: f64,
     h: f64,
     bed: &Box4,
-    model: &GBBox,
+    occupancy: &Occupancy,
     forbidden: &[Vec<Vec<f64>>],
 ) -> bool {
     let b = GBBox {
@@ -549,12 +766,11 @@ fn tower_fits(
     if b.x_min < bed.x_min || b.x_max > bed.x_max || b.y_min < bed.y_min || b.y_max > bed.y_max {
         return false;
     }
-    /* 相交 = 两条轴上都有重叠（贴边不算撞） */
-    if b.x_min < model.x_max
-        && b.x_max > model.x_min
-        && b.y_min < model.y_max
-        && b.y_max > model.y_min
-    {
+    /*
+     * 与 detect **同一批点**：占一格就算撞 —— 不再拿"板内点的 AABB"当替身
+     * （包围盒看不见模型轮廓、原擦料塔、支撑；挪完照撞就是这么来的）。
+     */
+    if occupancy.overlaps(&b) {
         return false;
     }
     let poly = vec![
@@ -573,12 +789,16 @@ fn detect_tower_collision_all_layers(
     tower_bbox: &GBBox,
     ir_data: &Ir,
     printable: Option<Box4>,
+    tower_height: f64,
+    occupancy: &Occupancy,
 ) -> CollisionResult {
     /* 判据用的塔框跟着结论一起出门（报告页画俯视图要它）；热床框同样带上
     （gcode 里写了 `; printable_area` 就听 gcode 的，见 [`printable_area_of`]） */
     let mut result = CollisionResult {
         tower_bbox: Some(*tower_bbox),
         printable,
+        tower_height,
+        occupancy: occupancy.clone(),
         ..CollisionResult::default()
     };
 
@@ -943,13 +1163,13 @@ fn min_exit_distance(conflict_points: &[[f64; 2]], tower_bbox: &GBBox, dx: f64, 
 
 /// `calculateTowerCollisionBBox`：塔碰撞 BBox（wiperXY 为左下角）。
 /// towerHeight=0 跳过 minDepth 限制（碰撞用保守估计）。
-fn calculate_tower_collision_bbox(ir_data: &Ir) -> GBBox {
+fn calculate_tower_collision_bbox(ir_data: &Ir, tower_height: f64) -> GBBox {
     let local = calculate_tower_bbox(
         &ir_data.wiping.outer_structure,
         ir_data.sheath.base_expand,
         ir_data.rib.extra_length,
         ir_data.rib.width,
-        0.0,
+        tower_height,
         ir_data.machine.nozzle_diameter,
         ir_data.machine.first_layer_height,
     );
@@ -1304,6 +1524,21 @@ mod tests {
         assert_eq!(facts.forbidden_zones.len(), 1);
     }
 
+    /// 把一块矩形区域按 2mm 格打成"有东西"（模拟模型 / 支撑的挤出点云）
+    fn solid(bed: &Box4, x0: f64, x1: f64, y0: f64, y1: f64) -> Occupancy {
+        let mut occ = Occupancy::new(bed, 2.0);
+        let mut y = y0;
+        while y <= y1 {
+            let mut x = x0;
+            while x <= x1 {
+                occ.mark(x, y);
+                x += 2.0;
+            }
+            y += 2.0;
+        }
+        occ
+    }
+
     /// **自动摆塔**（2026-10-18 作者定的口径）：挑一个不撞的塔位置，离原位最近。
     #[test]
     fn the_tower_is_relocated_to_the_nearest_free_place() {
@@ -1314,14 +1549,12 @@ mod tests {
             y_min: 0.0,
             y_max: 256.0,
         };
-        /* 模型堵住左下那一带（塔原位 20..57 完全被压住） */
-        let model = GBBox {
-            x_min: 0.0,
-            x_max: 120.0,
-            y_min: 0.0,
-            y_max: 120.0,
-        };
-        let at = auto_tower_position(&ir, &bed, &model, &[]).expect("板这么大，摆得下");
+        /*
+         * 模型堵住左下那一带（塔原位 20..57 完全被压住）—— 现在避让对象是**占用格**
+         * （与 detect 同一批挤出点），这里把那一片按 2mm 打成"有东西"。
+         */
+        let occ = solid(&bed, 0.0, 120.0, 0.0, 120.0);
+        let at = auto_tower_position(&ir, &bed, &occ, &[], 0.0).expect("板这么大，摆得下");
         let w = 57.04 - 22.96;
         assert!(
             at[0] >= 0.0 && at[0] + w <= 256.0 && at[1] >= 0.0 && at[1] + w <= 256.0,
@@ -1339,6 +1572,71 @@ mod tests {
         );
     }
 
+    /// **真实样例**（`tests/fixtures/real/rib-tall-min.gcode`，从作者的
+    /// `.5926.1.gcode` 裁出来的最小复现）：斜肋外墙 + 245.6mm 塔高 ——
+    /// 塔高要从 header 的 `; max_z_height` 认，自动摆位不许压到模型点上。
+    #[test]
+    fn the_real_rib_sample_moves_the_tower_off_the_points() {
+        let raw = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/real/rib-tall-min.gcode"
+        ))
+        .expect("样例文件应当在库里");
+        let content = lines(&raw.lines().collect::<Vec<_>>());
+        let mut ir = tower_ir();
+        ir.wiping.outer_structure = "rib".to_owned();
+
+        let r = detect_tower_collision(&content, &ir);
+        assert!(r.has_collision, "样例应当撞（否则这条判据没有意义）");
+        assert!(
+            (r.tower_height - 245.6).abs() < 0.01,
+            "塔高要认 header 的 ; max_z_height：{}",
+            r.tower_height
+        );
+
+        let facts = r.facts(&ir);
+        let at = auto_tower_position_for_facts(&ir, &facts, &r.occupancy, r.tower_height)
+            .expect("板上还有地方");
+        let w = {
+            let b = calculate_tower_collision_bbox(&ir, r.tower_height);
+            b.x_max - b.x_min
+        };
+        let boxed = GBBox {
+            x_min: at[0],
+            x_max: at[0] + w,
+            y_min: at[1],
+            y_max: at[1] + w,
+        };
+        assert!(
+            !r.occupancy.overlaps(&boxed),
+            "自动摆出来的位置仍然压着模型点：{at:?}"
+        );
+    }
+
+    /// **挪完还撞的真凶**：过去避让用的是 `model_bbox`（板内点的 AABB），
+    /// 而"撞没撞"是逐点判的 —— 只有原擦料塔撞上时 `model_bbox` 根本没被算出来，
+    /// 于是自动摆塔"避开一个空框"，挪完照撞。占用格装的是**全部挤出点**，
+    /// 原塔那片点也在里面 ⇒ 它必须被避开。
+    #[test]
+    fn relocation_avoids_points_even_when_the_model_box_is_empty() {
+        let ir = tower_ir();
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        /* 只有"原擦料塔"那一小片（模型框压根没有），正好压在当前的塔位上 */
+        let occ = solid(&bed, 30.0, 45.0, 30.0, 45.0);
+        let at = auto_tower_position(&ir, &bed, &occ, &[], 0.0).expect("板上还有地方");
+        let w = 57.04 - 22.96;
+        let (x0, x1, y0, y1) = (at[0], at[0] + w, at[1], at[1] + w);
+        assert!(
+            !(x0 < 45.0 && x1 > 30.0 && y0 < 45.0 && y1 > 30.0),
+            "新塔框不许压到那片挤出点：{at:?}"
+        );
+    }
+
     /// 板子被模型占满 ⇒ 摆不下 ⇒ 明确说"没有"（由上层改口让用户自己动手）。
     #[test]
     fn relocation_gives_up_when_the_plate_has_no_room() {
@@ -1349,13 +1647,8 @@ mod tests {
             y_min: 0.0,
             y_max: 256.0,
         };
-        let model = GBBox {
-            x_min: 0.0,
-            x_max: 256.0,
-            y_min: 0.0,
-            y_max: 256.0,
-        };
-        assert!(auto_tower_position(&ir, &bed, &model, &[]).is_none());
+        let occ = solid(&bed, 0.0, 256.0, 0.0, 256.0);
+        assert!(auto_tower_position(&ir, &bed, &occ, &[], 0.0).is_none());
     }
 
     /// 禁区里不许摆 —— 自动摆出来的位置若落在禁区，等于把"塔在禁区"这个错换了个地方犯。
@@ -1368,12 +1661,7 @@ mod tests {
             y_min: 0.0,
             y_max: 256.0,
         };
-        let model = GBBox {
-            x_min: 0.0,
-            x_max: 60.0,
-            y_min: 0.0,
-            y_max: 60.0,
-        };
+        let occ = solid(&bed, 0.0, 60.0, 0.0, 60.0);
         /* 下半张板全是禁区 */
         let zone = vec![
             vec![0.0, 0.0],
@@ -1381,9 +1669,41 @@ mod tests {
             vec![256.0, 60.0],
             vec![0.0, 60.0],
         ];
-        let at = auto_tower_position(&ir, &bed, &model, std::slice::from_ref(&zone))
+        let at = auto_tower_position(&ir, &bed, &occ, std::slice::from_ref(&zone), 0.0)
             .expect("上半区还有地方");
         assert!(at[1] >= 60.0, "禁区里不能摆：{at:?}");
+    }
+
+    /// **斜肋外墙的底座随高度变大**（2026-10-18 作者真机：「挪动后的还是碰撞了，
+    /// 因为斜肋外墙随着高度会变大，下面会比较大」）。
+    ///
+    /// 碰撞框（也就自动摆塔的候选框）必须按**这一趟的塔高**算：高塔比矮塔宽。
+    #[test]
+    fn a_tall_rib_tower_gets_a_wider_footprint() {
+        let mut ir = tower_ir();
+        ir.wiping.outer_structure = "rib".to_owned();
+        let low = calculate_tower_collision_bbox(&ir, 0.0);
+        let tall = calculate_tower_collision_bbox(&ir, 240.0);
+        assert!(
+            tall.x_max - tall.x_min > (low.x_max - low.x_min) + 0.5,
+            "高塔的框必须更宽：矮 {:?} / 高 {:?}",
+            low.x_max - low.x_min,
+            tall.x_max - tall.x_min
+        );
+    }
+
+    /// 塔高从 gcode 里最高的那个 Z 读出来（读不到 ⇒ 0，退回旧行为）。
+    #[test]
+    fn the_tower_height_is_the_tallest_z() {
+        let content = lines(&[
+            "G1 X10 Y10 E0.2",
+            "G1 Z0.2",
+            "G1 Z12.4 ; 半截",
+            "G0 Z48.6 ; 跳空",
+            "G1 Z3.0",
+        ]);
+        assert_eq!(max_z_of(&content), 48.6);
+        assert_eq!(max_z_of(&lines(&["G1 X1 Y1 E0.1"])), 0.0);
     }
 
     /// 禁区命中：塔多边形与 ForbiddenZones 相交 → Forbidden 类型 + MTV 位移。

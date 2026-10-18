@@ -33,6 +33,29 @@ interface Props {
   collision: ReportCollision
   /** 报告行的机型（`A1_MINI` 这种规范形，与 catalog 的 machine.id 同一形状）—— 选板用 */
   machineType: string | null
+  /**
+   * **换一支箭头**（2026-10-18）：报告页那支默认画"建议挪**模型**"；挪塔那一屏要画
+   * "塔从 A 到 B"——同一张画布，两件事必须分得开（作者：「这个示意图不对，因为他显示的
+   * 箭头是移动模型，实际这个的是移动擦料塔」）。
+   *
+   * 给了就**按它如实画**（长度 = |vec|，镞尖正好落在目标处），不再做"探出空白"那套
+   * 自适应；`vec` 为零 = 不画。
+   */
+  arrow?: { from: [number, number]; vec: [number, number] } | null
+  /**
+   * **一支都不画**（2026-10-18）：`arrow: null` 只是"没有覆盖"、会回落到事实里那支
+   * 报告页箭头（挪模型）—— 挪塔那一屏的「挪后」那幅要的是**干净**，用这个。
+   */
+  hideArrow?: boolean
+  /** **塔的目标位置虚框**（机器坐标）：箭头指过去时，落点得看得见（挪塔那一屏用） */
+  ghost?: ReportBox4 | null
+  /** 不摆下面那行图例（两幅并排的紧凑用法里，两条图例各占一行太吵） */
+  hideLegend?: boolean
+  /**
+   * **按高度定尺**（px，2026-10-18）：给了就把画布高度钉死、宽度按板子纵横比反算
+   * —— 两幅并排要比"同高"时用它。不给 = 原来的"宽度跟着容器走"。
+   */
+  height?: number
 }
 
 /** 塔身固定画成 44px（与参数页同一个数 —— 两边比例一致，形状才是同一个形状） */
@@ -73,7 +96,15 @@ function boxOf(b: ReportBox4 | undefined): { x: number; y: number; w: number; h:
   return { x: xMin, y: yMin, w, h }
 }
 
-export default function CollisionMap({ collision, machineType }: Props) {
+export default function CollisionMap({
+  collision,
+  machineType,
+  arrow: arrowOverride = null,
+  hideArrow = false,
+  ghost = null,
+  hideLegend = false,
+  height,
+}: Props) {
   const bed = boxOf(collision.printable)
   const tower = boxOf(collision.towerBbox)
   const model = boxOf(collision.modelBbox)
@@ -141,58 +172,72 @@ export default function CollisionMap({ collision, machineType }: Props) {
    * 空白处**，压在框上的箭头没有信息量。长度同时夹在 [最小可见长度, 板内边界]
    * 之间 —— 短了看不清，长了戳出板。旧记录没这两格 / 挪不开那一档 ⇒ 不画。
    */
-  const arrowFrom = collision.arrowFrom
-  const arrowVec = collision.arrowVec
+  const arrowFrom = arrowOverride?.from ?? collision.arrowFrom
+  const arrowVec = arrowOverride?.vec ?? collision.arrowVec
   let arrow: { path: string; transform: string } | null = null
-  if (arrowFrom != null && arrowVec != null && (arrowVec[0] !== 0 || arrowVec[1] !== 0)) {
-    const du = { x: Math.sign(arrowVec[0]), y: -Math.sign(arrowVec[1]) }
-    const n = Math.hypot(du.x, du.y)
-    du.x /= n
-    du.y /= n
+  if (
+    !hideArrow &&
+    arrowFrom != null &&
+    arrowVec != null &&
+    (arrowVec[0] !== 0 || arrowVec[1] !== 0)
+  ) {
     const [ox, oy] = bedPt(arrowFrom[0], arrowFrom[1])
-    const pad = canvasW * 0.045
-    const boxes: Array<[number, number, number, number]> = []
-    for (const b of [model, { x: tower.x, y: tower.y, w: tower.w, h: tower.h }]) {
-      if (b === null) continue
-      const [ax, ay] = bedPt(b.x, b.y + b.h)
-      const [bx, by] = bedPt(b.x + b.w, b.y)
-      boxes.push([
-        Math.min(ax, bx) - pad,
-        Math.min(ay, by) - pad,
-        Math.max(ax, bx) + pad,
-        Math.max(ay, by) + pad,
-      ])
-    }
-    /* 射线从原点出这个框（沿方向）走多远 —— 原点在框里时就是"探出头"的距离 */
-    const exitOf = (b: [number, number, number, number]) => {
-      const tx =
-        du.x > 0 ? (b[2] - ox) / du.x : du.x < 0 ? (b[0] - ox) / du.x : Number.POSITIVE_INFINITY
-      const ty =
-        du.y > 0 ? (b[3] - oy) / du.y : du.y < 0 ? (b[1] - oy) / du.y : Number.POSITIVE_INFINITY
-      return Math.max(0, Math.min(tx, ty))
-    }
+    const [gx, gy] = bedPt(arrowFrom[0] + arrowVec[0], arrowFrom[1] + arrowVec[1])
     const head = Math.max(5, canvasW * 0.05)
-    const clearLen = boxes.length > 0 ? Math.max(...boxes.map(exitOf)) : 0
-    const margin = head * 0.7
-    const tMax = Math.max(
-      0,
-      Math.min(
-        du.x > 0 ? (canvasW - margin - ox) / du.x : du.x < 0 ? (margin - ox) / du.x : Infinity,
-        du.y > 0 ? (canvasH - margin - oy) / du.y : du.y < 0 ? (margin - oy) / du.y : Infinity,
-      ),
-    )
-    const len = Math.max(head * 1.5, Math.min(Math.max(clearLen, head * 1.8), tMax))
+    const w0 = Math.max(3, canvasW * 0.02)
+    const w1 = w0 * 0.55
+    const hw = head * 1.15
+    let len: number
+    let ang: number
+    if (arrowOverride != null) {
+      /* **如实一支**（挪塔那一屏）：起点 → 目标中心的真实位移，镞尖正好落在目标上 */
+      len = Math.hypot(gx - ox, gy - oy)
+      ang = Math.atan2(gy - oy, gx - ox)
+    } else {
+      const du = { x: Math.sign(arrowVec[0]), y: -Math.sign(arrowVec[1]) }
+      const n = Math.hypot(du.x, du.y)
+      du.x /= n
+      du.y /= n
+      const pad = canvasW * 0.045
+      const boxes: Array<[number, number, number, number]> = []
+      for (const b of [model, { x: tower.x, y: tower.y, w: tower.w, h: tower.h }]) {
+        if (b === null) continue
+        const [ax, ay] = bedPt(b.x, b.y + b.h)
+        const [bx, by] = bedPt(b.x + b.w, b.y)
+        boxes.push([
+          Math.min(ax, bx) - pad,
+          Math.min(ay, by) - pad,
+          Math.max(ax, bx) + pad,
+          Math.max(ay, by) + pad,
+        ])
+      }
+      /* 射线从原点出这个框（沿方向）走多远 —— 原点在框里时就是"探出头"的距离 */
+      const exitOf = (b: [number, number, number, number]) => {
+        const tx =
+          du.x > 0 ? (b[2] - ox) / du.x : du.x < 0 ? (b[0] - ox) / du.x : Number.POSITIVE_INFINITY
+        const ty =
+          du.y > 0 ? (b[3] - oy) / du.y : du.y < 0 ? (b[1] - oy) / du.y : Number.POSITIVE_INFINITY
+        return Math.max(0, Math.min(tx, ty))
+      }
+      const clearLen = boxes.length > 0 ? Math.max(...boxes.map(exitOf)) : 0
+      const margin = head * 0.7
+      const tMax = Math.max(
+        0,
+        Math.min(
+          du.x > 0 ? (canvasW - margin - ox) / du.x : du.x < 0 ? (margin - ox) / du.x : Infinity,
+          du.y > 0 ? (canvasH - margin - oy) / du.y : du.y < 0 ? (margin - oy) / du.y : Infinity,
+        ),
+      )
+      len = Math.max(head * 1.5, Math.min(Math.max(clearLen, head * 1.8), tMax))
+      ang = Math.atan2(du.y, du.x)
+    }
     if (len > head * 1.4) {
-      const ang = (Math.atan2(du.y, du.x) * 180) / Math.PI
-      const w0 = Math.max(3, canvasW * 0.02)
-      const w1 = w0 * 0.55
-      const hw = head * 1.15
       const body = len - head
       arrow = {
         path:
           `M 0 ${-w0 / 2} L ${body} ${-w1 / 2} L ${body} ${-hw / 2} L ${len} 0` +
           ` L ${body} ${hw / 2} L ${body} ${w1 / 2} L 0 ${w0 / 2} Z`,
-        transform: `translate(${ox} ${oy}) rotate(${ang})`,
+        transform: `translate(${ox} ${oy}) rotate(${(ang * 180) / Math.PI})`,
       }
     }
   }
@@ -274,6 +319,21 @@ export default function CollisionMap({ collision, machineType }: Props) {
         height={tower.h}
       />
 
+      {/* **塔的目标位置虚框**（挪塔那一屏）：箭头指过去时落点看得见 */}
+      {ghost != null &&
+        ghost.xMin !== undefined &&
+        ghost.xMax !== undefined &&
+        ghost.yMin !== undefined &&
+        ghost.yMax !== undefined && (
+          <rect
+            className={s.ghost}
+            x={bedPt(ghost.xMin, ghost.yMax)[0]}
+            y={bedPt(ghost.xMin, ghost.yMax)[1]}
+            width={ghost.xMax - ghost.xMin}
+            height={ghost.yMax - ghost.yMin}
+          />
+        )}
+
       {/* 冲突点 */}
       <g className={s.points}>
         {points.map(([x, y], i) => {
@@ -293,7 +353,14 @@ export default function CollisionMap({ collision, machineType }: Props) {
   const renderMap = (zoomed: boolean) =>
     plate !== null ? (
         /* 有板规格：板轮廓（含卡舌 / 把手）+ 余量灰圈 + 事实层，全在一张板坐标 svg 里 */
-        <div className={s.mapPlate} style={{ aspectRatio: `${plate.w} / ${plate.d}` }}>
+        <div
+          className={s.mapPlate}
+          style={{
+            aspectRatio: `${plate.w} / ${plate.d}`,
+            /* `height` 给了就**按高度定尺**（宽度反算）—— 两幅并排要比同高时用 */
+            ...(height !== undefined ? { height: `${height}px`, width: 'auto' } : null),
+          }}
+        >
           <svg
             className={s.plate}
             viewBox={`0 0 ${plate.w} ${plate.d}`}
@@ -362,7 +429,13 @@ export default function CollisionMap({ collision, machineType }: Props) {
         </div>
       ) : (
         /* 没板规格：退回圆角矩形热床（事实照画 —— 不因为装饰缺席吞掉整块图） */
-        <div className={s.map} style={{ aspectRatio: `${bed.w} / ${bed.h}` }}>
+        <div
+          className={s.map}
+          style={{
+            aspectRatio: `${bed.w} / ${bed.h}`,
+            ...(height !== undefined ? { height: `${height}px`, width: 'auto' } : null),
+          }}
+        >
           {factSvg}
           {towerShape !== null && (
             <div
@@ -415,7 +488,9 @@ export default function CollisionMap({ collision, machineType }: Props) {
         {renderMap(false)}
       </button>
 
-      {/* 图例：三个色块 + 名字（不标数字 —— 数字在「建议」那组里） */}
+      {/* 图例：三个色块 + 名字（不标数字 —— 数字在「建议」那组里）。
+          挪塔那一屏两幅并排，图例各占一行太吵 ⇒ `hideLegend` */}
+      {!hideLegend && (
       <ul className={s.legend}>
         <li>
           <span className={s.swTower} aria-hidden="true" />
@@ -433,6 +508,7 @@ export default function CollisionMap({ collision, machineType }: Props) {
           )}
         </li>
       </ul>
+      )}
 
       {/* 点开看大：报告页不在模态框 ⇒ portal 到 body；点任意处 / Esc 收起，滚轮 / 捏合缩放 */}
       {zoom &&

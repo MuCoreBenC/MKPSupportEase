@@ -278,34 +278,56 @@
  * "塔挪到哪"这种问题）。配色跟着"流程选择"那一档（绿，不是警告橙）：
  * 这不是出错，是"这一盘怎么跑"的选择。
  */
-.relocateHero {
-  display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 18px;
-  box-sizing: border-box;
-  padding: 14px 18px;
-  border-radius: var(--r-md);
-  background: var(--ask-surface);
-  border: 1px solid var(--ask-line);
-  color: var(--ask-ink);
-}
-
-/* 左：两幅俯视图（现在 / 挪后），窄屏时上下排 */
+/*
+ * **挪塔那一屏的上半**（2026-10-18 第二版）：两幅俯视图并排，**不套外圈容器**
+ * （作者：「板子也不需要用 hero 或者外圈容器装起来，就可以大一点」）。
+ * `--map-h` 是板子的目标高度（跟 hero 那一带对齐，稍大一点）—— 图框宽度按
+ * 板子纵横比由组件内联折算（`width: calc(var(--map-h) * ratio)`），于是两幅一样高、
+ * 板子不被裁，整扇模态框也不用变大。
+ */
 .relocateMaps {
+  /* 高度由组件把 `height={104}` 钉在画布上（= 别的 hero 那口高），这里只负责排。
+     不摆「现在 / 挪后」小标题（作者：「上面的现在挪后不需要」）—— 省掉那 18px，
+     整扇模态框才和"结果"那一屏一样大。 */
   display: flex;
   flex-direction: row;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: center;
   gap: 14px;
-  flex-shrink: 0;
 }
 
-.relocateMap {
-  margin: 0;
+/*
+ * **板与板之间那支箭头**（作者 2026-10-18：「还需要第一个板子指向第二个板子的」）。
+ * 与画布内那支白色箭头各管一件事：
+ *   板间这支 = "从这一幅看到下一幅"（现在 → 挪后）；
+ *   画布内白箭 = "塔从哪挪到哪"（首尾 + 目标虚框，长度是真实位移）。
+ * 实线 + 粗头，跟这一屏的字同色；只在缝里，不占高度。
+ */
+.relocateArrow {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-items: flex-start;
+  align-items: center;
+  /* 绿 = 主色（"接下来这么做"），与画布内那支白箭分开 */
+  color: var(--accent-deep);
+}
+
+[data-theme='dark'] .relocateArrow {
+  color: var(--accent);
+}
+
+
+/*
+ * 一幅图：宽度由画布自己按"高度 × 板纵横比"反算（`CollisionMap height={104}`）——
+ * 两幅**一定同高**，板子不被裁（作者 2026-10-18：「板子可以一样的大小」）。
+ * 图例与标题都不摆（`hideLegend` + 上面那条）。
+ */
+.relocateFig {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.relocateMapBox {
+  width: 100%;
 }
 
 .relocateMapTag {
@@ -318,13 +340,68 @@
   color: var(--ask-ink);
 }
 
-/* 右：话 + 坐标 + 倒计时 */
-.relocateCopy {
+/*
+ * **原来两栏事实那一格**（2026-10-18）：挪塔那一问时它变成可翻页的槽 ——
+ * 「挪塔说明」/「原始信息」两页，**定高**（`--facts-slot-h`，与两栏事实同高），
+ * 于是两页占同一块地方、模态框不跟着变大小（作者：「他们占用的高度可以一致」）。
+ * 内容多了就在这块里滚（作者：「内容多的时候就显示」）。
+ */
+/*
+ * 翻页槽 = **一格叠两页**（2026-10-18）：槽高由较高的那一页决定 —— 就是两栏事实。
+ * 于是"信息页不留空 / 翻页不跳"两件同时成立；不再写死高度（写死会跟主题字体
+ * 打架：作者真机那片留空就是这么来的）。
+ */
+.relocateSlot {
+  display: grid;
+}
+
+.relocatePage {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+/* 藏起来的那一页仍然占格（高度不被抽走），只是看不见也点不到 */
+.relocatePageOff {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+ * 说明那一页：问句 + 坐标小表 + 倒计时。
+ * ★ 排版（2026-10-18 作者：「这些也没视觉对齐，没有视觉优化」）：
+ *   问句整行、行高 1.55；坐标**两列网格**（标签定宽 76、值等宽数字），
+ *   标签与值各自左对齐；倒计时缩一号、压暗。全部从同一条左基线起。
+ */
+.relocateNote {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 0;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--ask-ink);
+}
+
+/*
+ * 左下角那颗**很小的翻页钮**（作者 2026-10-18：「我点击很小的切换信息按钮，
+ * 这个按钮可以放在左下角空白的位置」）——`margin-right: auto` 把它顶到最左，
+ * 动作按钮照旧靠右。
+ */
+.slotToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.slotToggle:hover {
+  color: var(--ink-1);
+  border-color: var(--ink-3);
 }
 
 .relocateTitle {
@@ -337,41 +414,57 @@
   line-height: 1.5;
 }
 
-/* 坐标表：三行（现在 / 自动摆放 / 冲突点），数字不取整（作者点名） */
+/*
+ * 坐标小表：**两列网格**（现在塔位置 / 自动摆放 并排，冲突点独占一行），
+ * 数字不取整（作者点名）、等宽（`tabular-nums`）—— 换值时不跳。
+ */
 .relocateCoords {
-  margin: 2px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 24px;
+  width: 100%;
+}
+
+/* 冲突点那一格独占一行（它是"撞了多少"，不是坐标） */
+.relocateCoord:nth-child(3) {
+  grid-column: 1 / -1;
 }
 
 .relocateCoord {
   display: flex;
   flex-direction: row;
-  gap: 8px;
+  align-items: baseline;
+  gap: 10px;
   font-size: var(--fs-label);
 }
 
+/* 标签定宽 ⇒ 两列的值从同一条竖线起（原来长短不一，看着散） */
 .relocateCoord dt {
-  min-width: 72px;
+  flex: 0 0 76px;
   color: var(--ink-2);
 }
 
 .relocateCoord dd {
   margin: 0;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 轴字母压暗一号，数字才是眼睛要找的 */
+.relocateAxis {
+  opacity: 0.55;
+}
+
+/* X / Y 之间的分隔 */
+.relocateSep {
+  margin: 0 2px;
+  opacity: 0.4;
 }
 
 .relocateHint {
   font-size: var(--fs-label);
-  opacity: 0.75;
-}
-
-/* 窄窗（<720px）：图在上、字在下 —— 挤成两栏谁都看不清 */
-@media (width <= 720px) {
-  .relocateHero {
-    flex-direction: column;
-  }
+  opacity: 0.7;
 }
 
 .warnGlyph {
@@ -894,14 +987,28 @@
   font-size: var(--fs-label);
   color: var(--text-3);
   white-space: nowrap;
+  /* 装不下时**标签**先让位（省略号），不许把右边的值挤成三行 */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
+/*
+ * ★★ **值不折行**（2026-10-18 作者：「为什么窗口尺寸大的时候反而要换行呢？修好它，
+ *   不要突变，字体也不用变大」）。
+ *
+ * 上一版这里是 `overflow-wrap: anywhere` —— 于是 `BambuStudio 02.08.02.60`
+ * 会被拆成三行、`118.54 秒 / 0.72 MB` 被拆成两行，行高跟着变（就是"突变"）。
+ * 现在：值恒一行（`nowrap`），挤不下时由**标签**收省略号；字号一点不动。
+ */
 .factValue {
   font-size: var(--fs-label);
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
   text-align: right;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 /* 灰字行（切片软件这类「看一眼就行」的读数） */
@@ -1017,3 +1124,4 @@
 
 /* （深色里也不给这一屏的按钮另换一副面：按钮皮肤是全站那一套，深浅由 token 管 ——
    见文件上半段那条"不再有自己的按钮皮肤"。） */
+

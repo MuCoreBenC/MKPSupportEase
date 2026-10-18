@@ -217,6 +217,34 @@ text = "擦料塔与模型撞上了（{count} 个冲突点）—— 要我把塔
 params = ["count"]
 note = "2026-10-18：挪塔那一问。开关（设置页「智能塔位置」）开着才问；答 relocate ⇒ 只改这一趟的 wiper_x/wiper_y 继续跑完；答 model / 超时 ⇒ 停下（与机型那一问同一条）。画布几何走 QuestionPayload.geo"
 
+# ---- 挪塔那一问的三种收场 + 一种"挪不动"（2026-10-18）----
+# 码不复用：Q_ 是问句、N_ 是成了、W_ 是"停下了/降级了"（不是故障）。
+["hook.tower_relocated_ok"]
+code = "N_COLLISION_RELOCATE_001"
+text = "擦料塔已从 X {fromX} / Y {fromY} 挪到 X {toX} / Y {toY}（{moved} mm），复检没有冲突"
+slicer = "擦料塔位置已自动调整（{moved} mm），这一盘照常后处理"
+params = ["fromX", "fromY", "toX", "toY", "moved"]
+note = "2026-10-18：答「自动挪塔」并复检通过时的成功句（也是报告页/执行记录那一格的结论句）。只改这一趟，预设文件不动"
+
+["hook.tower_relocated_still"]
+code = "W_COLLISION_RELOCATE_001"
+text = "擦料塔已从 X {fromX} / Y {fromY} 挪到 X {toX} / Y {toY}（{moved} mm），但这个位置仍然有 {count} 个冲突点 —— 这一趟停下了，原文件没有被改动"
+slicer = "自动挪塔之后仍然有冲突 —— 回切片器把模型挪开一点再切"
+params = ["fromX", "fromY", "toX", "toY", "moved", "count"]
+note = "2026-10-18：**第二道闸**。挪完必须复检（同一个 detect_tower_collision），仍撞就不静默继续 —— 作者真机「点了自动挪塔还是碰撞」就是缺这道闸"
+
+["hook.tower_relocate_declined"]
+code = "W_COLLISION_RELOCATE_002"
+text = "你选了自己去挪模型，这一趟没有做后处理，原文件没有被改动；模型往哪边挪多少见「建议」那一栏"
+slicer = "这一盘没做后处理：回切片器按建议挪开模型再切"
+note = "2026-10-18：答「我自己去挪模型」（或那一问超时）时停下那一句"
+
+["hook.tower_relocate_unavailable"]
+code = "W_COLLISION_RELOCATE_003"
+text = "板子上找不到不与模型相撞的塔位 —— 这一趟停下了；建议在切片器里把模型挪开一点再导出"
+slicer = "板子上没有空位摆擦料塔 —— 回切片器把模型挪开一点再切"
+note = "2026-10-18：自动摆塔返回 None（整块板都摆不下）那一档。不给方向，因为没有一个能用的位置"
+
 ["hook.mismatch_refuse"]
 code = "E_CFG_MISMATCH_001"
 text = "机型不匹配：G-code 是 {gcode}，预设是 {preset} —— 换一份对应机型的预设再跑"

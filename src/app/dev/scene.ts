@@ -43,6 +43,8 @@ const SLOT_OF: Record<string, DevSlot> = {
   /* 那一问的两种收场：仍是同一扇窗（'full'），只是 hero / 标题栏换一档 */
   'postprocess-question-timeout': 'full',
   'postprocess-answer-stale': 'full',
+  /* 碰撞时那一问（两幅俯视图 + 翻页说明，2026-10-18） */
+  'postprocess-relocate-question': 'full',
   'postprocess-backgrounded': 'full',
   'postprocess-success-no-metrics': 'full',
   'postprocess-success-long-warning': 'full',

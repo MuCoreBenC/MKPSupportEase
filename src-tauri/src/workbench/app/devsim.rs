@@ -189,6 +189,20 @@ fn scenes() -> Vec<DevScene> {
         ready: true,
         slot_label: "后处理".to_owned(),
     });
+    /* 挪塔那一问（2026-10-18）：模型与擦料塔撞上时那一屏 —— 两幅俯视图 + 坐标 +
+    左下角翻页钮。平时要真撞一次才看得到，这里点一下就能看。 */
+    out.push(DevScene {
+        id: "postprocess-relocate-question".to_owned(),
+        group: "postprocess".to_owned(),
+        group_label: "后处理界面".to_owned(),
+        label: "碰撞 · 问要不要挪塔".to_owned(),
+        note: "模型与擦料塔撞上了那一问：左「现在」右「挪后」两幅俯视图、两板之间一支箭头，\
+              下面是坐标与倒计时；左下角那颗小钮在「说明 / 原始信息」之间翻页。\
+              平时要真撞一次才看得到"
+            .to_owned(),
+        ready: true,
+        slot_label: "后处理".to_owned(),
+    });
     out.push(DevScene {
         id: "postprocess-success-no-metrics".to_owned(),
         group: "postprocess".to_owned(),
@@ -312,6 +326,7 @@ fn slot_label_of(id: &str) -> &'static str {
         | "postprocess-question"
         | "postprocess-question-timeout"
         | "postprocess-answer-stale"
+        | "postprocess-relocate-question"
         | "postprocess-backgrounded"
         | "postprocess-success-no-metrics"
         | "postprocess-success-long-warning"

@@ -48,7 +48,7 @@ import { useDevPreviewNonce } from '../dev/useDevPreview'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
-import RelocatePanel from './RelocatePanel'
+import { RelocateMaps, RelocateNote } from './RelocatePanel'
 import s from './PostProcessModal.module.css'
 
 /* 顶栏那一条的高度按平台来（与 `TopTabs` 同一对 token）：拖窗带要正好铺在它上面 */
@@ -649,6 +649,19 @@ function SquareMark() {
  *
  * 形状 = 四条内凹的边（每边一个控制点拉向圆心），比正菱形更像"闪光"，与 `✦` 同一种感觉。
  */
+/**
+ * 翻页那颗钮上的记号：一个 i（"信息"）—— 画成 SVG，与全站「圈里记号一律 SVG」同一条。
+ */
+function InfoGlyph() {
+  return (
+    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
+      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
+      <path d="M6 5.4v3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+      <circle cx="6" cy="3.7" r="0.62" fill="currentColor" />
+    </svg>
+  )
+}
+
 function SparkMark() {
   return (
     <svg viewBox="0 0 20 20" aria-hidden="true">
@@ -720,6 +733,25 @@ function ResultHero({
 export default function PostProcessModal({ view, onOpenReport }: PostProcessModalProps) {
   const { run, dismiss } = view
   const [busy, setBusy] = useState(false)
+  /*
+   * **已经点过答复、钩子还没把问句收掉**（2026-10-18 作者：「点击把塔挪到不撞的位置之后
+   * 出来问题了……这个时候应该显示原本的 hero 进度条那些，但是现在是按钮在一闪一闪的，
+   * 还能一直点击，这不对」）。
+   *
+   * 病根：`answer_post_process` 是**投递即返回**（把答复写进那条回写线就 Ok 了），而钩子
+   * 那边要等它自己接着跑完剩下的步骤、到 `Finished` 才把 `question` 清掉 —— 中间这十几秒
+   * 问句一直挂着，于是问句那一屏（含按钮）也一直挂着；而 `busy` 在 IPC 回来的那一下就被
+   * 清成 false ⇒ 按钮复活 ⇒ 再点一下又闪一下。
+   *
+   * 所以这里记的不只是 id，还有**这一问的身份**（kind + 截止毫秒）：问句换了人（钩子又问了
+   * 第二问）、或者问句被收掉，effect 才松手；这期间问句那一屏整个让位给 hero。
+   */
+  const [answering, setAnswering] = useState<{
+    kind: string
+    deadline: number
+    /** 点下去那一刻进度条停在的百分比（见下面 `shownPercent`） */
+    from: number
+  } | null>(null)
   const [err, setErr] = useState<string | null>(null)
   /* 「预计还需」每秒重算一次（这个表只在跑着的时候挂着） */
   const [, setTick] = useState(0)
@@ -763,6 +795,28 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    */
   const asking = running && run.question !== null
   /*
+   * 问句那一屏只在"还没答"的时候摆。答完到钩子收掉问句之间，这一屏让位给 hero
+   * （不然按钮会一直立在那儿给人点 —— 见上面 `answering` 那段）。
+   */
+  const showAsk = asking && answering === null
+
+  useEffect(() => {
+    if (answering === null) return
+    const q = run?.question ?? null
+    const same =
+      q !== null &&
+      q.questionKind === answering.kind &&
+      q.deadlineUnixMs === answering.deadline
+    /* 问句换了人 / 已经收掉 / 这一次答复报错了 ⇒ 松手（按钮回来，红字照旧） */
+    if (!same || err !== null) {
+      setAnswering(null)
+      return
+    }
+    /* 兜底：那一问的自动终止是 118 秒，走完必然换屏；这里只是防"永远" */
+    const t = window.setTimeout(() => setAnswering(null), 130_000)
+    return () => window.clearTimeout(t)
+  }, [answering, run?.question, err])
+  /*
    * 收尾窗口：跑完那一刻**先让条子把最后几个点走完**（95% → 100%），再切结果态。
    * 作者 2026-10-14：「最后 95% 的时候就直接结束消失了，出现了结果页面」—— 太突兀。
    * 同日晚又定了一条：「我希望他处理快，但是动画慢，起码要 3 秒」——
@@ -786,8 +840,15 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    * 「我双击切换的时候，那个新的应该也弹上来的感觉」）。收尾那一路仍是纯淡入（`.leadIn`）。
    */
   const [flipBack, setFlipBack] = useState(false)
+  /*
+   * 这两格标量是下面那条 effect 的依赖 —— **不许直接把 `finished` 对象写进依赖**：
+   * 「预估打印时间」是后补的，补进来时 `usePostProcessRun` 会把同一个结论换成新对象，
+   * 拿对象当键就会把它当成"结果变了"（2026-10-18 作者：「最后这个还会闪一下」）。
+   */
+  const finishedNull = finished === null
+  const finishedOk = finished !== null && finished.ok
   useEffect(() => {
-    if (finished === null) {
+    if (finishedNull) {
       setBarDone(false)
       setSettled(false)
       setSwapped(false)
@@ -795,7 +856,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       setFlipBack(false)
       return
     }
-    if (!finished.ok) {
+    if (!finishedOk) {
       const id = window.setTimeout(() => setSettled(true), SETTLE_MS)
       return () => window.clearTimeout(id)
     }
@@ -808,7 +869,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     const wait = Math.max(MIN_SHOW_MS - elapsed, 0) + SETTLE_MS
     const id = window.setTimeout(() => setSettled(true), wait)
     return () => window.clearTimeout(id)
-  }, [finished, barDone, view.sinceMs])
+  }, [finishedNull, finishedOk, barDone, view.sinceMs])
 
   /*
    * 渐隐渐现（作者：「感觉 100% 的时候消失得太突然了，没有渐隐渐现」）：
@@ -877,7 +938,17 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     window.setTimeout(() => {
       if (fade.playState !== 'finished') fade.cancel()
     }, 400)
-  }, [showProgress, flipBack, finished])
+    /*
+     * ★★ **不许把 `finished` 整个对象写进依赖**（2026-10-18 作者：「最后这个还会闪一下，
+     * 不是这个碰撞的问题，没碰撞他也会闪一下」）。
+     *
+     * 「预估打印时间」是**后补的**：钩子跑完先给一份结论（那一格空着），常驻进程算完再推
+     * `postprocess-print-time`，`usePostProcessRun` 那里会 `{...prev.finished, result:{...}}`
+     * —— **同一个结论换了个新对象**。依赖写 `finished` 就会当成"结果变了"重跑这条 effect：
+     * 先把正在跑的淡入 `cancel()` 掉，再从 0 重新淡入一遍 ⇒ 屏上就是那一下闪。
+     * 真正该重播的时机只有两个：`showProgress` 翻过来（`swapped`）与翻面回来（`flipBack`）。
+     */
+  }, [showProgress, flipBack])
 
   /**
    * 翻面（**轮播感**）——作者 2026-10-15：「切换的时候上一个往上消失，下一个从下弹出来；
@@ -952,48 +1023,74 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     return () => window.clearInterval(id)
   }, [running])
 
+  /*
+   * **挪塔那一问的两页**（2026-10-18）：上面是示意图，下面那块位置在
+   * 「挪塔说明」与「原始两栏信息」之间翻页 —— 左下角那颗很小的按钮切。
+   * 两页占**同一块高度**（`.relocateSlot` 定高），所以模态框不跟着变大小。
+   */
+  const [relocateTab, setRelocateTab] = useState<'note' | 'facts'>('note')
+  const questionKind = run?.question?.questionKind
+  useEffect(() => {
+    /* 换一问（或这一问结束）就翻回"说明"那页 —— 别把上一问的翻页状态带过来 */
+    setRelocateTab('note')
+  }, [questionKind])
+
   if (run === null || view.dismissed) return null
 
   const percent =
     run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
+  /*
+   * **条子不往回跳**（2026-10-18 作者：「我点击之后它又从 0% 开始了，没有从中断的
+   * 百分比继续」）。
+   *
+   * 那一问是**管线开跑之前**的预检（钩子在 `process_with_ir` 之前先算一遍擦料塔会不会撞，
+   * 见 `hook.rs` 那段"闸门必须与管线同一套判据"），所以答复之后主线是从 0% 起跑的 ——
+   * 数值本身没错，可**看上去就是"又重来了一遍"**。这里把答复那一刻的百分比记成下限：
+   * 新一段真实进度追上来之前，条子停在那儿不倒车；追上之后就跟着真实值走（下限只是
+   * `max`，不是伪造）。
+   */
+  const shownPercent = answering === null ? percent : Math.max(percent, answering.from)
   const eta = running ? etaText(view.sinceMs, percent) : null
   const facts = run.facts
+
+  /** 挪塔那一问、且几何真带出来了 —— 这一屏的版式与别处不同（见上面的翻页状态） */
+  const isRelocate =
+    showAsk &&
+    run.question !== null &&
+    run.question.questionKind === 'tower-relocation' &&
+    run.question.geo?.collision != null
 
   /** 两条命令（停止 / 答复）都要等后端，失败要说出来 —— 界面不许"点了没反应" */
   const act = (fn: () => Promise<void>) => {
     setBusy(true)
     setErr(null)
-    void fn()
+    /* 返回 promise：调用方要接一句"这颗按钮正在办"（`answering`），见下面的选项按钮 */
+    return fn()
       .catch((e: unknown) => setErr(errorText(e)))
       .finally(() => setBusy(false))
   }
+
 
   /*
    * 顶部那一块（跑着 hero / 问句警告 / 结果 hero）——四种长相收成一个变量，
    * 下面那句 facts 与警告行是它们**共用**的尾巴。
    */
   let lead: ReactNode = null
-  if (asking && run.question !== null) {
+  if (showAsk && run.question !== null) {
     /*
-     * **挪塔那一问**（2026-10-18）：撞了要看图才敢决定 ⇒ 走"左图右文"那一屏，
-     * 不塞进那口 104px 的警告 hero（作者：「这个页面…把画布居中显示或者左侧显示，
-     * 右侧显示文字内容，坐标之类的」）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
+     * **挪塔那一问**（2026-10-18）：撞了要看图才敢决定 ⇒ 上摆放两幅俯视图（不套外圈
+     * 容器、高度跟 hero 那一带对齐），文案挪到下面"原本两栏事实"的位置（可翻页，
+     * 见下面的 `relocateTab`）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
      */
-    const isRelocate = run.question.questionKind === 'tower-relocation'
-    lead =
-      isRelocate && run.question.geo?.collision != null ? (
-        <RelocatePanel
-          question={run.question}
-          machineType={run.facts?.presetMachine ?? null}
-          countdown={countdownText(run.question.deadlineUnixMs)}
-        />
-      ) : (
-        <AskHero
-          questionKind={run.question.questionKind}
-          text={run.question.text}
-          deadlineUnixMs={run.question.deadlineUnixMs}
-        />
-      )
+    lead = isRelocate ? (
+      <RelocateMaps question={run.question} machineType={run.facts?.presetMachine ?? null} />
+    ) : (
+      <AskHero
+        questionKind={run.question.questionKind}
+        text={run.question.text}
+        deadlineUnixMs={run.question.deadlineUnixMs}
+      />
+    )
   } else if (showProgress) {
     lead = (
       /*
@@ -1005,7 +1102,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       <div ref={heroBoxRef} key="heroBox">
         <ProgressHero
           /* 收尾窗口里目标直接给 100：让条子走完那最后几个点，而不是停在 95% 被切走 */
-          percent={running ? percent : 100}
+          percent={running ? shownPercent : 100}
           step={run.progress === null ? '准备中' : stepName(run.progress.step)}
           stepId={run.progress?.step ?? null}
           sizeBytes={run.facts?.fileSizeBytes ?? null}
@@ -1086,20 +1183,48 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
               关闭预览
             </Btn>
           </>
-        ) : asking && run.question !== null ? (
+        ) : showAsk && run.question !== null ? (
           /*
            * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
            * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
            * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
            */
-          run.question.choices !== undefined && run.question.choices.length > 0 ? (
+          <>
+            {/*
+             * 挪塔那一问：右下是动作按钮，**左下这片空白**摆一颗很小的翻页钮
+             * （作者 2026-10-18：「我点击很小的切换信息按钮，这个按钮可以放在左下角空白的位置」）。
+             * `margin-right: auto` 把它顶到最左，动作按钮仍靠右。
+             */}
+            {isRelocate && (
+              <button
+                type="button"
+                className={s.slotToggle}
+                onClick={() => setRelocateTab((t) => (t === 'note' ? 'facts' : 'note'))}
+                aria-label={
+                  relocateTab === 'note' ? '切换：显示原始信息' : '切换：显示挪塔说明与坐标'
+                }
+                title={relocateTab === 'note' ? '查看原始信息' : '回到挪塔说明'}
+              >
+                <InfoGlyph />
+                {relocateTab === 'note' ? '信息' : '说明'}
+              </button>
+            )}
+          {run.question.choices !== undefined && run.question.choices.length > 0 ? (
             /* `data-choices` = 「问句自带选项」那一档：页脚**允许折行**（见 `.footChoices`）。
                ★ 原来的样子（作者 2026-10-17 截图）：两颗长按钮都不许收缩（全局
                `button { white-space: nowrap }`），中号框装不下 ⇒ 第二颗被推出框外看不见。
                `hint` 只是补充说明，**不再塞进按钮里**：按钮的字 = `label`，
                后果交给 `title`（悬停可读），按钮本身短了才排得下。 */
             <span className={s.footChoices} data-choices>
-              {run.question.choices.map((c) => (
+              {/*
+               * ★★ **主按钮恒在右**（2026-10-18 作者：「一般来说有颜色的都在右侧的…
+               *   左边的按钮优先级低，右边的高，有背景颜色的」）。
+               * 后端给的是"主在前"（主 = `accent`），这里**稳定排序**把 accent 挪到最后
+               * ⇒ 绿按钮永远是最右那颗，别处（校准件那一问）同一份规则。
+               */}
+              {[...run.question.choices]
+                .sort((a, b) => Number(a.accent === true) - Number(b.accent === true))
+                .map((c) => (
                 /* 外观 = 全站那颗 `Btn`（深浅两套都在 `ui.module.css` 里，
                    深色下 accent 是实心绿白字）；这里只**借**一个布局类让它能折行收缩。
                    `hint` 挂 `title`：后果说明不该挤在按钮上（按钮越长越排不下）。 */
@@ -1109,9 +1234,16 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                   className={s.choiceBtn}
                   disabled={busy}
                   title={c.hint}
-                  onClick={() =>
-                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', c.id))
-                  }
+                  onClick={() => {
+                    setAnswering({
+                      kind: run.question?.questionKind ?? '',
+                      deadline: run.question?.deadlineUnixMs ?? 0,
+                      from: percent,
+                    })
+                    void act(() =>
+                      api.answerPostProcess(run.question?.questionKind ?? '', c.id),
+                    )
+                  }}
                 >
                   {c.label}
                 </Btn>
@@ -1137,7 +1269,8 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                 终止
               </Btn>
             </>
-          )
+          )}
+          </>
         ) : running ? (
           <>
             <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
@@ -1175,13 +1308,41 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
          * 口径反过来：**框一打开就是完整的**，没到手的值一律 `—`（两组里每一格都有固定标签，
          * 所以不会"少一格"，只会有"暂时是 —"），值到了原地换掉。
          */}
-        <FactsGroups
-          groups={
-            asking || running
-              ? [baseGroup(facts), runGroup(facts)]
-              : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
-          }
-        />
+        {isRelocate && run.question !== null ? (
+          /*
+           * 挪塔那一问：这一格在「说明」与「原始两栏信息」之间**翻页**（左下角那颗小钮切）。
+           *
+           * ★★ **两页都挂着、叠在同一格里**（2026-10-18 第三次修）：前一版给槽写死一个
+           *   高度，可"四行两栏"的真实高度随主题/字体变 ⇒ 要么底下留一大片空、要么
+           *   撑高框。叠起来之后槽高 = **较高的那一页**（就是两栏事实），于是：
+           *     · 信息页零留空（它就是定高的那一页）；
+           *     · 翻页不跳（另一页被 `visibility: hidden` 藏住，但**仍占格**）。
+           */
+          <div className={s.relocateSlot}>
+            <div
+              className={`${s.relocatePage} ${relocateTab === 'note' ? '' : s.relocatePageOff}`}
+            >
+              <RelocateNote
+                question={run.question}
+                countdown={countdownText(run.question.deadlineUnixMs)}
+              />
+            </div>
+            <div
+              className={`${s.relocatePage} ${relocateTab === 'facts' ? '' : s.relocatePageOff}`}
+              aria-hidden={relocateTab !== 'facts'}
+            >
+              <FactsGroups groups={[baseGroup(facts), runGroup(facts)]} />
+            </div>
+          </div>
+        ) : (
+          <FactsGroups
+            groups={
+              asking || running
+                ? [baseGroup(facts), runGroup(facts)]
+                : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
+            }
+          />
+        )}
         {/*
           内核那几条警告（"这一盘没有支撑"之类）：
             · **标题右边那一格**（`HeadNote`）= 汇总一句话「警告 N 条 · 首条…」，
@@ -1235,6 +1396,9 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         <div
           className={s.dragShield}
           data-platform={PLATFORM}
+          /* 探针认它：标题栏被这一层接管时，**它就是窗口把手**（拖窗照旧）
+             —— `scripts/probes/pp-modal-height.mjs` 的命中测试认这两个之一 */
+          data-drag-handle="true"
           aria-hidden="true"
           onMouseDown={drag.onMouseDown}
           onDoubleClick={drag.onDoubleClick}

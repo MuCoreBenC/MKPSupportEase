@@ -112,7 +112,64 @@ impl Mode {
     }
 }
 
+/// 挪塔那一问的假几何（2026-10-18，开发台演那一屏用）—— 数值照真归档那一份的形状编，
+/// 键名一个不错（前端读的就是 `CollisionFacts` 的 camelCase）。
+fn relocate_geo() -> crate::hook_ipc::RelocateGeoPayload {
+    use postprocess::postproc::disk::collision::{Box4, CollisionFacts, TowerShape};
+    crate::hook_ipc::RelocateGeoPayload {
+        current: [78.0, 91.0],
+        candidate: Some([16.4, 90.0]),
+        collision: Some(CollisionFacts {
+            kind: "model".to_owned(),
+            target: "model".to_owned(),
+            direction: "右上".to_owned(),
+            required_move_x: 32.6,
+            required_move_y: 32.6,
+            conflict_count: 97,
+            conflict_points: vec![
+                [74.2, 88.4],
+                [75.1, 89.2],
+                [73.8, 87.6],
+                [76.4, 90.1],
+                [74.9, 88.9],
+            ],
+            tower_bbox: Box4 {
+                x_min: 70.0,
+                x_max: 87.04,
+                y_min: 84.0,
+                y_max: 101.04,
+            },
+            model_bbox: Box4 {
+                x_min: 40.0,
+                x_max: 96.0,
+                y_min: 26.0,
+                y_max: 88.0,
+            },
+            printable: Box4 {
+                x_min: 0.0,
+                x_max: 256.0,
+                y_min: 0.0,
+                y_max: 256.0,
+            },
+            tower: Some(TowerShape {
+                outer_structure: "brim".to_owned(),
+                body_mm: 19.58,
+                rib_width: 3.0,
+                rib_extra_length: 4.0,
+                rib_fillet_wall: false,
+                sheath_base_expand: 5.0,
+            }),
+            forbidden_zones: Vec::new(),
+            advice_code: "E_GCODE_COLLISION_002".to_owned(),
+            advice_text: "建议：把模型往左上挪 —— X 至少 32.6mm，Y 至少 32.6mm".to_owned(),
+            arrow_from: [68.0, 57.0],
+            arrow_vec: [32.6, 32.6],
+        }),
+    }
+}
+
 /// 一次演出的参数（命令行与界面两处共用同一份）。
+
 #[derive(Debug, Clone)]
 pub struct Options {
     pub mode: Mode,
@@ -138,6 +195,10 @@ pub struct Options {
     /// 成功那一档要不要演**好几条**警告（2026-10-17 开发台「成功 · 好几行警告」）：
     /// `true` = 摆四条警告，验框身被撑高时下面那张事实表不被挤坏。
     pub many_warnings: bool,
+
+    /// **挪塔那一问**（2026-10-18）：演出"模型与擦料塔撞上了"那一屏 ——
+    /// 带画布几何（两幅图 / 坐标 / 候选塔位）。`true` = 问，没人答就收成已停止。
+    pub tower_relocate: bool,
 }
 
 impl Default for Options {
@@ -150,6 +211,7 @@ impl Default for Options {
             calib_choice: None,
             metrics: true,
             many_warnings: false,
+            tower_relocate: false,
         }
     }
 }
@@ -167,6 +229,16 @@ pub trait Sink {
     ///
     /// 默认 `None`：只有实现了"真的一问"的那一侧才需要它。
     fn ask_calibration(&self, _question: &str, _choices: &[(&str, &str, &str)]) -> Option<String> {
+        None
+    }
+
+    /// **挪塔那一问**（2026-10-18）：与校准件那一问同一条路，只是**带画布几何**。
+    /// 默认 `None` = 没人答（演出里按"停下"收场）。
+    fn ask_relocate(
+        &self,
+        _question: &str,
+        _geo: crate::hook_ipc::RelocateGeoPayload,
+    ) -> Option<String> {
         None
     }
 }
@@ -250,6 +322,28 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
                     None,
                 )
             }
+        }
+    }
+
+    /*
+     * **挪塔那一问**（2026-10-18）：真钩子里排在管线之前的碰撞预检那一档 ——
+     * 这里同一个位置。答 `relocate` 就往下演（塔挪了），别的收成已停止。
+     */
+    if opts.tower_relocate {
+        let asked = sink.ask_relocate(
+            "擦料塔与模型撞上了（97 个冲突点）—— 要我把塔挪到不撞的位置，还是你自己去挪模型？",
+            relocate_geo(),
+        );
+        if asked.as_deref() != Some("relocate") {
+            return finish(
+                sink,
+                opts.mode,
+                true,
+                120,
+                opts.metrics,
+                opts.many_warnings,
+                None,
+            );
         }
     }
 

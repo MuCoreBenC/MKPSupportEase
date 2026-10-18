@@ -513,6 +513,8 @@ impl HookView {
         let metrics = tail != Some("success-no-metrics");
         /* 「成功 · 好几行警告」：框身被警告撑高那一档（验下面那张事实表） */
         let many_warnings = tail == Some("success-long-warning");
+        /* 挪塔那一问（2026-10-18）：演在"那一问"那一屏，带画布几何 */
+        let tower_relocate = tail == Some("relocate-question");
         /*
          * 校准件那几档（2026-10-17）：
          *   · `calib-question`   —— 那一问停着（倒计时在 hero 里），选了哪个都等下一档；
@@ -541,6 +543,7 @@ impl HookView {
                 Some(crate::devsim::Mode::Success)
             }
             Some("question-timeout" | "answer-stale") => Some(crate::devsim::Mode::Question),
+            Some("relocate-question") => Some(crate::devsim::Mode::Success),
             /* 校准件那几档都用「那一问」的骨架演（机型两边给成一样的，免得先弹机型那一问） */
             Some("calib-question" | "calib-timeout" | "calib-print-done" | "calib-direct-done") => {
                 Some(crate::devsim::Mode::Success)
@@ -587,6 +590,7 @@ impl HookView {
                     calib_choice,
                     metrics,
                     many_warnings,
+                    tower_relocate,
                 },
                 &postprocess::diag::CancelToken::new(),
             );
@@ -965,6 +969,57 @@ impl crate::devsim::Sink for PreviewSink {
                 return None;
             }
             std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+
+    /// **挪塔那一问**（2026-10-18）：与校准件那一问同一条路（推上去、等下一档顶替），
+    /// 只是**带画布几何** —— 界面照它画两幅俯视图与坐标。
+    fn ask_relocate(
+        &self,
+        question: &str,
+        geo: crate::hook_ipc::RelocateGeoPayload,
+    ) -> Option<String> {
+        let deadline_unix_ms = self.ask_wait.map_or(0, |w| {
+            crate::hook_ipc::unix_ms_now() + u64::try_from(w.as_millis()).unwrap_or(u64::MAX)
+        });
+        self.send(&FromHook::Question(Box::new(
+            crate::hook_ipc::QuestionPayload {
+                question_kind: crate::hook_ipc::QKIND_TOWER_RELOCATION.to_owned(),
+                text: question.to_owned(),
+                deadline_unix_ms,
+                choices: vec![
+                    crate::hook_ipc::QuestionChoice {
+                        id: crate::hook_ipc::CHOICE_RELOCATE.to_owned(),
+                        label: "把塔挪到不撞的位置".to_owned(),
+                        hint: Some("只改这一趟，预设文件不动".to_owned()),
+                        accent: true,
+                    },
+                    crate::hook_ipc::QuestionChoice {
+                        id: crate::hook_ipc::CHOICE_MODEL.to_owned(),
+                        label: "我自己去挪模型".to_owned(),
+                        hint: Some("这一趟停下，原文件不动".to_owned()),
+                        accent: false,
+                    },
+                ],
+                geo: Some(geo),
+            },
+        )));
+        let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
+        loop {
+            if self
+                .view
+                .preview_gen
+                .load(std::sync::atomic::Ordering::SeqCst)
+                != self.generation
+            {
+                return None;
+            }
+            if let Some(deadline) = until {
+                if std::time::Instant::now() >= deadline {
+                    return None;
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(120));
         }
     }
 

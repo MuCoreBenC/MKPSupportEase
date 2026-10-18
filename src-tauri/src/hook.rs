@@ -90,6 +90,14 @@ mod keys {
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
     /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
     pub const TOWER_RELOCATION_QUESTION: &str = "hook.tower_relocation_question";
+    /// 挪完了、复检通过（成功句）
+    pub const TOWER_RELOCATED_OK: &str = "hook.tower_relocated_ok";
+    /// 挪完了、复检**仍然撞** ⇒ 停下（第二道闸）
+    pub const TOWER_RELOCATED_STILL: &str = "hook.tower_relocated_still";
+    /// 用户选了自己挪模型 / 那一问超时 ⇒ 停下
+    pub const TOWER_RELOCATE_DECLINED: &str = "hook.tower_relocate_declined";
+    /// 板上根本没有不撞的塔位 ⇒ 停下
+    pub const TOWER_RELOCATE_UNAVAILABLE: &str = "hook.tower_relocate_unavailable";
     /* 校准件那一趟的两种成功结论（`print` = 打印件保留 / `direct` = 去掉打印件）——
      * 界面与报告读同一组键，见 `hook::calib_done_line` */
     pub const CALIB_DONE_PRINT: &str = "hook.calib_done_print";
@@ -362,6 +370,9 @@ pub struct Outcome {
     /// 校准件那一趟选了哪种跑法（`print` / `direct`）；不是校准件 = `None`。
     /// 结论里带上它，界面与报告才能把两种成功分开说。
     pub calib_choice: Option<String>,
+    /// **挪塔记录**（2026-10-18）：这一趟挪过塔就是 `Some`（`verified` 一定是 `true` ——
+    /// 挪完仍撞那一趟走的是错误出口）。结论句与归档都读它。
+    pub relocation: Option<crate::archive::RelocationRecord>,
 }
 
 /// 一条"待补全的打印时间"。
@@ -529,6 +540,9 @@ pub fn run(
     ui: UiLine<'_>,
 ) -> Result<Outcome, HookError> {
     let started = Instant::now();
+    /* 挪塔这一趟的记录（2026-10-18）：走到那一问才填；成功 / 失败都随归档落盘。
+    声明放最前面 —— 早退的那几处（预设错 / 机型不匹配 / 校准超时）也要能传它。 */
+    let mut relocation: Option<crate::archive::RelocationRecord> = None;
 
     /* ★ **开场那一条 `Hello` 连事实一起发**（作者 2026-10-14：「需要一起带过来」）——
     所以它不能像原来那样在 [`run_with_channel`] 一进门就发（那时还没读文件、没有事实），
@@ -608,6 +622,7 @@ pub fn run(
                 started,
                 Vec::new(),
                 None,
+                relocation.as_ref(),
             );
             return Err(err);
         }
@@ -669,6 +684,7 @@ pub fn run(
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
                         None,
+                        relocation.as_ref(),
                     );
                     return Err(err);
                 }
@@ -687,6 +703,7 @@ pub fn run(
                     /* 管线还没进（停在机型那一问），没有步骤账 */
                     Vec::new(),
                     None,
+                    relocation.as_ref(),
                 );
                 return Err(err);
             }
@@ -758,6 +775,7 @@ pub fn run(
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
                         None,
+                        relocation.as_ref(),
                     );
                     return Err(err);
                 }
@@ -805,27 +823,147 @@ pub fn run(
             let collision = postprocess::postproc::disk::detect_tower_collision(&content, &probe);
             if probe.tower.use_towers && collision.has_collision {
                 let facts = collision.facts(&probe);
+                /* 事实是 `probe`（擦料方式已经定过）算出来的 ⇒ 摆塔也按 `probe` 算，
+                否则框宽用的是旧擦料方式那份 */
                 let candidate = postprocess::postproc::disk::auto_tower_position_for_facts(
-                    &ir,
+                    &probe,
                     &facts,
-                    collision.model_bbox,
+                    &collision.occupancy,
+                    collision.tower_height,
                 );
+                let from = [ir.wiping.wiper_x, ir.wiping.wiper_y];
                 if let Some(client) = ui.client() {
                     let mut asker = ChannelAsker { client };
                     let geo = crate::hook_ipc::RelocateGeoPayload {
                         collision: Some(facts.clone()),
                         candidate,
-                        current: [ir.wiping.wiper_x, ir.wiping.wiper_y],
+                        current: from,
                     };
                     let question = Reason::new(keys::TOWER_RELOCATION_QUESTION)
                         .with("count", facts.conflict_count.to_string())
                         .text();
-                    if let Some([x, y]) = tower_relocation_of(
-                        asker.ask_tower_relocation(&question, geo).as_deref(),
-                        candidate,
-                    ) {
-                        ir.wiping.wiper_x = x;
-                        ir.wiping.wiper_y = y;
+                    let answer = asker.ask_tower_relocation(&question, geo);
+                    match tower_relocation_of(answer.as_deref(), candidate) {
+                        Some([x, y]) => {
+                            let to = [x, y];
+                            ir.wiping.wiper_x = x;
+                            ir.wiping.wiper_y = y;
+                            let moved = ((x - from[0]).powi(2) + (y - from[1]).powi(2)).sqrt();
+                            /*
+                             * ★★ **第二道闸：挪完必须复检**（2026-10-18 作者真机：
+                             * 「点了自动移动塔位置了，但是还是碰撞了」）。同一个
+                             * `detect_tower_collision`、改完之后的 IR —— 仍撞就**不静默
+                             * 继续**：停下并如实报（报告里照样有俯视图，位置是挪后的）。
+                             */
+                            let after =
+                                postprocess::postproc::disk::detect_tower_collision(&content, &ir);
+                            let after_count = if after.has_collision {
+                                after.facts(&ir).conflict_count
+                            } else {
+                                0
+                            };
+                            let verified = !after.has_collision;
+                            relocation = Some(crate::archive::RelocationRecord {
+                                choice: "relocate".to_owned(),
+                                from,
+                                to: Some(to),
+                                moved_mm: Some(moved),
+                                before_conflict_count: facts.conflict_count,
+                                after_conflict_count: Some(after_count),
+                                verified: Some(verified),
+                                tower_height_mm: collision.tower_height,
+                                before: Some(facts.clone()),
+                            });
+                            if !verified {
+                                tracing::warn!(
+                                    from_x = from[0],
+                                    from_y = from[1],
+                                    to_x = x,
+                                    to_y = y,
+                                    moved_mm = moved,
+                                    conflicts_after = after_count,
+                                    "自动挪塔之后仍然有冲突（复检没过）"
+                                );
+                                let after_facts = after.facts(&ir);
+                                let reason = Reason::new(keys::TOWER_RELOCATED_STILL)
+                                    .with("fromX", format!("{:.1}", from[0]))
+                                    .with("fromY", format!("{:.1}", from[1]))
+                                    .with("toX", format!("{:.1}", x))
+                                    .with("toY", format!("{:.1}", y))
+                                    .with("moved", format!("{moved:.1}"))
+                                    .with("count", after_count.to_string());
+                                let mut err = HookError::failed(reason);
+                                err.collision = Some(Box::new(after_facts.clone()));
+                                /* 这一趟不再进管线（步骤账为空）—— 记录与事实就在这里落盘，
+                                不能只 return（run 的调用方不替它归档） */
+                                archive_failure(
+                                    &archived,
+                                    job,
+                                    &preset_machine,
+                                    &conclusion_line(&err),
+                                    false,
+                                    raw.len() as u64,
+                                    started_at,
+                                    started,
+                                    Vec::new(),
+                                    Some(after_facts),
+                                    relocation.as_ref(),
+                                );
+                                return Err(err);
+                            }
+                        }
+                        None => {
+                            /*
+                             * 用户选了自己挪模型 / 那一问没人答 ⇒ **停下**（不静默进管线再撞一次：
+                             * 那样用户读到的是一句没头没尾的"冲突"，而不是他自己刚做过的选择）。
+                             * 板上根本没有不撞的塔位 ⇒ 另一句（不给方向，因为没有能用的位置）。
+                             */
+                            let unavailable = candidate.is_none();
+                            let choice = match answer.as_deref() {
+                                Some(crate::hook_ipc::CHOICE_MODEL) => "model",
+                                Some(_) => "model",
+                                None => "timeout",
+                            };
+                            relocation = Some(crate::archive::RelocationRecord {
+                                choice: if unavailable {
+                                    "unavailable".to_owned()
+                                } else {
+                                    choice.to_owned()
+                                },
+                                from,
+                                to: None,
+                                moved_mm: None,
+                                before_conflict_count: facts.conflict_count,
+                                after_conflict_count: None,
+                                verified: None,
+                                tower_height_mm: collision.tower_height,
+                                before: Some(facts.clone()),
+                            });
+                            let key = if unavailable {
+                                keys::TOWER_RELOCATE_UNAVAILABLE
+                            } else {
+                                keys::TOWER_RELOCATE_DECLINED
+                            };
+                            let mut err = HookError::failed(
+                                Reason::new(key).with("count", facts.conflict_count.to_string()),
+                            );
+                            err.collision = Some(Box::new(facts.clone()));
+                            /* 停在这一问上：如实落一条记录（用户选了什么 + 原位置的碰撞事实） */
+                            archive_failure(
+                                &archived,
+                                job,
+                                &preset_machine,
+                                &conclusion_line(&err),
+                                false,
+                                raw.len() as u64,
+                                started_at,
+                                started,
+                                Vec::new(),
+                                Some(facts),
+                                relocation.as_ref(),
+                            );
+                            return Err(err);
+                        }
                     }
                 }
             }
@@ -884,6 +1022,7 @@ pub fn run(
                 started,
                 failed_pipeline,
                 collision,
+                relocation.as_ref(),
             );
             return Err(e);
         }
@@ -901,6 +1040,7 @@ pub fn run(
             started_at,
             started,
             &mut archive_warnings,
+            relocation.as_ref(),
         );
     }
 
@@ -952,6 +1092,7 @@ pub fn run(
         deferred_print_time,
         result,
         calib_choice,
+        relocation,
     })
 }
 
@@ -1007,6 +1148,7 @@ fn archive_success(
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
     warnings: &mut Vec<String>,
+    relocation: Option<&crate::archive::RelocationRecord>,
 ) {
     // 延后模式下：输出的复制与 sha 都交给界面进程 —— 这条路上只写记录，不碰那 26MB。
     let deferred = done.print_time.is_none();
@@ -1105,6 +1247,8 @@ fn archive_success(
         pipeline,
         /* 成功那一趟没有碰撞事实（撞了就走不到这里）—— 这一格恒 `null` */
         collision: None,
+        /* 挪过塔就记一笔（成功那趟也可能挪过 —— 那正是"挪完复检通过"） */
+        relocation: relocation.cloned(),
         detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
@@ -1133,6 +1277,8 @@ fn archive_failure(
     pipeline: Vec<PipelineStep>,
     // 碰撞那一趟的事实（`HookError::collision()`）—— 不是碰撞就是 `None`。
     collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+    // 挪塔那一趟的记录（2026-10-18）—— 没走到那一问就是 `None`。
+    relocation: Option<&crate::archive::RelocationRecord>,
 ) {
     let Some(paths) = archived else { return };
     let meta = Meta {
@@ -1153,6 +1299,7 @@ fn archive_failure(
         cancelled,
         pipeline,
         collision,
+        relocation: relocation.cloned(),
         detail: Detail {
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,
@@ -1729,7 +1876,30 @@ fn finished_payload(
         Ok(out) => crate::hook_ipc::FinishedPayload {
             ok: true,
             cancelled: false,
-            message: success_line(&out.output, out.elapsed_ms),
+            /*
+             * 成功那一句：**挪过塔就说挪塔**（2026-10-18 作者：「怎么移动，多少距离」）——
+             * 用户读到的结论必须提到"塔被挪了"，否则他只会记得自己点过一颗按钮。
+             * 挪完仍撞那一趟走的是错误出口（另一个码），到不了这里。
+             */
+            message: match out.relocation.as_ref().filter(|r| r.verified == Some(true)) {
+                Some(r) => messages::text(
+                    keys::TOWER_RELOCATED_OK,
+                    &[
+                        ("fromX", &format!("{:.1}", r.from[0])),
+                        ("fromY", &format!("{:.1}", r.from[1])),
+                        (
+                            "toX",
+                            &format!("{:.1}", r.to.map(|t| t[0]).unwrap_or(r.from[0])),
+                        ),
+                        (
+                            "toY",
+                            &format!("{:.1}", r.to.map(|t| t[1]).unwrap_or(r.from[1])),
+                        ),
+                        ("moved", &format!("{:.1}", r.moved_mm.unwrap_or(0.0))),
+                    ],
+                ),
+                None => success_line(&out.output, out.elapsed_ms),
+            },
             code: None,
             stage,
             exit_code: EXIT_OK,

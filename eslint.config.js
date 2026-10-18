@@ -48,6 +48,30 @@ const NATIVE_CHOICE = [
   },
 ]
 
+/*
+ * **后处理模态框：这一带的定高只许有两个数**（2026-10-18）。
+ *
+ * 作者连着两轮说「模态框尺寸变化了」，两次都是同一个坏法：板子 / 翻页槽各自内联
+ * 写死一个高度数字（板子还按宽度算，实际画出 160 ⇒ 框长高 56）。eslint **量不了
+ * 渲染高度**（那是探针的活），但能挡住"又在这里手写一个数"这个动作：
+ *   · 结构都从 `src/app/postprocess/metrics.ts` 取（`HERO_H` / `FACTS_SLOT_H`）；
+ *   · 内联 `height` 的**数字字面量**在这一带一律报错（变量、CSS 变量、字符串宽高不限）。
+ *
+ * ★ 只匹配**数字字面量**（`raw` 是纯数字）：`<svg height="12">` 这种字符串
+ *   （图标尺寸）是另一类东西，不该被这条误伤。
+ */
+const POSTPROC_FIXED_HEIGHTS = [
+  {
+    selector: "JSXAttribute[name.name='style'] Property[key.name='height'] > Literal[raw=/^\\d+(\\.\\d+)?$/]",
+    message:
+      '这一带的高度只许从 `metrics.ts`（HERO_H）取 —— 内联写死会撑着模态框变大（2026-10-18 三轮踩过）',
+  },
+  {
+    selector: "JSXAttribute[name.name='height'] > Literal[raw=/^\\d+(\\.\\d+)?$/]",
+    message: '数值高度只许从 `metrics.ts`（HERO_H）取 —— 见该文件头注释',
+  },
+]
+
 export default tseslint.config(
   /* 构建产物一律不扫。
      target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
@@ -95,6 +119,21 @@ export default tseslint.config(
     files: ['src/app/**/*.{ts,tsx}', 'src/components/**/*.{ts,tsx}'],
     rules: {
       'no-restricted-syntax': ['error', ...INLINE_OVERFLOW, ...NATIVE_CHOICE],
+    },
+  },
+  /*
+   * 后处理模态框那一带多一条：定高只许来自 `metrics.ts`（见 `POSTPROC_FIXED_HEIGHTS`）。
+   * ★ 同样要把前两组**一起带上**（flat config 后一块整条覆盖同一条规则）。
+   */
+  {
+    files: ['src/app/postprocess/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...INLINE_OVERFLOW,
+        ...NATIVE_CHOICE,
+        ...POSTPROC_FIXED_HEIGHTS,
+      ],
     },
   }
 )

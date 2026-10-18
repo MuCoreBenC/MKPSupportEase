@@ -70,6 +70,16 @@
   background: var(--bg-1);
 }
 
+/* 塔的**目标位置**虚框（挪塔那一屏）：虚线灰、比判据框轻 —— 它是"将会在哪"，不是"现在在哪" */
+.ghost {
+  fill: none;
+  stroke: var(--ink-2);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  opacity: 0.6;
+  vector-effect: non-scaling-stroke;
+}
+
 /*
  * 建议挪动的箭头：**白**（2026-10-18 作者：「用白色，和塔区分开」，红与冲突点撞色
  * 不用）；深描边让它在浅色 inline 小图上也立得住。粗箭身 + 三角镞，一层单独的

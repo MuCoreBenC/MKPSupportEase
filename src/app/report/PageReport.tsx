@@ -101,6 +101,7 @@ import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
 import ExportModal from './ExportModal'
 import CollisionMap from './CollisionMap'
+import RelocationBoards from './RelocationBoards'
 import { useDevPreview } from '../dev/useDevPreview'
 import s from './PageReport.module.css'
 
@@ -202,6 +203,24 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     <>
       <path d="M12 4l9 15.5H3z" />
       <path d="M12 10v4.5M12 17v.5" />
+    </>
+  ),
+  /*
+   * 「挪塔」（2026-10-18 作者：「可以加上图标」）：一把擦料塔 + 一支指向右边的箭头
+   * ——"这座塔被挪到别处去了"，与下面「塔位变化」那两幅板子同一个语汇。
+   */
+  relocation: (
+    <>
+      <rect x="3.5" y="6.5" width="6.5" height="11" rx="1.2" />
+      <path d="M13.5 12h5.8M17 9.7l2.4 2.3-2.4 2.3" />
+    </>
+  ),
+  /* 「塔位变化」：两幅板子 + 中间那一小段箭头（就是这一组自己画的东西） */
+  'relocation-map': (
+    <>
+      <rect x="2.5" y="7" width="7" height="10" rx="1.4" />
+      <rect x="14.5" y="7" width="7" height="10" rx="1.4" />
+      <path d="M10.3 12h3.2M11.9 10.6l1.5 1.4-1.5 1.4" />
     </>
   ),
   pipeline: (
@@ -607,6 +626,63 @@ function buildGroups(detail: ReportDetail): Group[] {
       sum: '热床俯视',
       cells: [],
     })
+  }
+
+  /*
+   * **挪塔那一块**（2026-10-18）：作者要「怎么移动，多少距离，用户选择自动移动吗？
+   * 还是选了自己去移动模型停止了」。数据说了算 —— `relocation` 是 `null` 就整块不摆。
+   *
+   * 四行：你的选择 / 塔位置（从 → 到）/ 复检 / 塔高。数字**不取整**（与挪塔那一屏同一口径）。
+   */
+  if (detail.relocation != null) {
+    const r = detail.relocation
+    const choiceText =
+      r.choice === 'relocate'
+        ? '自动挪塔'
+        : r.choice === 'model'
+          ? '自己挪模型'
+          : r.choice === 'timeout'
+            ? '没等到回答（超时）'
+            : '板上没有空位'
+    const cells: [string, string][] = [['你的选择', choiceText]]
+    const mm = (v: number | null | undefined): string =>
+      v === null || v === undefined ? '—' : v.toFixed(1)
+    if (r.to != null) {
+      cells.push([
+        '塔位置',
+        `X ${mm(r.from[0])} / Y ${mm(r.from[1])} → X ${mm(r.to[0])} / Y ${mm(r.to[1])}`,
+      ])
+      cells.push(['挪动距离', `${mm(r.movedMm)} mm`])
+    } else {
+      cells.push(['塔位置', `X ${mm(r.from[0])} / Y ${mm(r.from[1])}（没有挪）`])
+    }
+    if (r.verified === true) {
+      cells.push(['复检', `没有冲突（挪前 ${r.beforeConflictCount} 个冲突点）`])
+    } else if (r.verified === false) {
+      cells.push([
+        '复检',
+        `仍然有 ${r.afterConflictCount ?? 0} 个冲突点（挪前 ${r.beforeConflictCount} 个）`,
+      ])
+    }
+    cells.push(['塔高', `${mm(r.towerHeightMm)} mm`])
+    groups.push({
+      id: 'relocation',
+      title: '挪塔',
+      sum: r.to != null ? '自动调整' : '没有调整',
+      cells,
+    })
+    /*
+     * 两幅板子（2026-10-18 作者：「成功挪塔的也可以显示，画出来碰撞位置，就是把后处理的
+     * 那两个板子也做进报告页面」）—— 事实跟着 `relocation.before` 走，所以成功那趟也画得出。
+     */
+    if (r.before != null) {
+      groups.push({
+        id: 'relocation-map',
+        title: '塔位变化',
+        sum: r.to != null ? '现在 / 挪后' : '现在',
+        cells: [],
+      })
+    }
   }
 
   /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
@@ -1379,6 +1455,15 @@ export default function PageReport() {
                                   </li>
                                 ))}
                               </ol>
+                            ) : g.id === 'relocation-map' ? (
+                              detail.relocation?.before != null ? (
+                                <RelocationBoards
+                                  before={detail.relocation.before}
+                                  from={detail.relocation.from}
+                                  to={detail.relocation.to ?? null}
+                                  machineType={detail.summary.machineType}
+                                />
+                              ) : null
                             ) : g.id === 'collision' ? (
                               /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
                               detail.collision !== null ? (

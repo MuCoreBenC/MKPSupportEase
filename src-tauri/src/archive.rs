@@ -326,6 +326,39 @@ pub struct Detail {
     pub slicer: Option<SlicerFacts>,
 }
 
+/// **挪塔这件事的记录**（2026-10-18）。
+///
+/// 报告页 / 执行记录照着它回答四件事：**用户当时选了什么**、塔从哪挪到哪、
+/// 挪了多少毫米、挪完复检过没过。作者原话：「我需要你把塔移动的记录进报告里面，
+/// 就是怎么移动，多少距离，用户选择自动移动吗？还是选了自己去移动模型停止了」。
+///
+/// 只有真的走到那一问时才落；别的记录 `null`（旧记录读到 `null` ⇒ 整块不摆）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocationRecord {
+    /// 用户选了什么：`relocate`（自动挪塔）/ `model`（自己挪模型）/ `timeout`（没答）/ `unavailable`（板上没位）
+    pub choice: String,
+    /// 塔左下角，挪之前（mm，**不取整**）
+    pub from: [f64; 2],
+    /// 塔左下角，挪之后；没挪 = `null`
+    pub to: Option<[f64; 2]>,
+    /// 直线位移（mm）；没挪 = `null`
+    pub moved_mm: Option<f64>,
+    /// 挪之前的冲突点数
+    pub before_conflict_count: i64,
+    /// 挪完复检的冲突点数（没挪 = `null`）
+    pub after_conflict_count: Option<i64>,
+    /// 挪完复检过没过（`null` = 没挪，谈不上复检）
+    pub verified: Option<bool>,
+    /// 这一趟用的塔高（mm）—— 斜肋塔的底座随它变大，记下来免得下次复盘时对不上
+    pub tower_height_mm: f64,
+    /// **挪之前那一份碰撞事实**（2026-10-18）：报告页拿它 + `to` 画"现在 / 挪后"两幅
+    /// 俯视图（作者：「成功挪塔的也可以显示，画出来碰撞位置，就是把后处理的那两个板子
+    /// 也做进报告页面」）。成功那趟 `Meta.collision` 是 `null`（撞了就走不到成功出口），
+    /// 所以事实必须跟着记录走，不能只靠 `collision` 那一格。
+    pub before: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+}
+
 /// 一份执行记录（`_meta.json`）。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -361,6 +394,8 @@ pub struct Meta {
      * 键是**新增**的（旧记录没有 ⇒ 读到 `null` ⇒ 整组不摆），不碰任何旧键。
      */
     pub collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+    /// **挪塔记录**（2026-10-18）：走到了那一问才有，别的一律 `null`。
+    pub relocation: Option<RelocationRecord>,
     pub detail: Detail,
 }
 
@@ -1112,6 +1147,7 @@ mod tests {
             }],
             /* 成功记录没有碰撞事实 */
             collision: None,
+            relocation: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
@@ -1199,6 +1235,7 @@ mod tests {
             pipeline: Vec::new(),
             /* 越界失败不是碰撞 —— 那一格必须是 null（判据里钉住键名即可） */
             collision: None,
+            relocation: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),

@@ -272,6 +272,13 @@ export interface ReportDetail {
    * 别的记录（含成功记录与旧记录）一律 `null` ⇒ 报告页那两块整组不摆。
    */
   collision: ReportCollision | null
+  /**
+   * **挪塔记录**（2026-10-18，`_meta.json` 顶层 `relocation`）。
+   *
+   * 走到了"自动挪塔 / 自己挪模型"那一问才有；别的记录与旧记录一律 `null` ⇒ 整块不摆。
+   * 与 `collision` 同一套判空口径（`!= null`）。
+   */
+  relocation?: RelocationRecord | null
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
   invocation: { exe?: string; args?: string[] } | null
@@ -1897,10 +1904,42 @@ export interface PostProcessQuestion {
 export interface RelocateGeo {
   /** 碰撞那一整套事实（与报告页俯视图同一份结构 ⇒ 界面复用同一个画布） */
   collision?: ReportCollision | null
+  /** **挪塔记录**（2026-10-18）：走到了那一问才有；旧记录读到 `null` ⇒ 整块不摆 */
+  relocation?: RelocationRecord | null
   /** 自动摆塔算出来的塔**左下角**；`null` = 板子摆不下（那就没有"自动挪塔"这颗按钮） */
   candidate?: [number, number] | null
   /** 现在塔的左下角（`wiper_x` / `wiper_y`） */
   current: [number, number]
+}
+
+/**
+ * **挪塔记录**（2026-10-18）：报告页 / 执行记录照着它说"塔怎么挪的"。
+ *
+ * 与 `_meta.json` 的 `relocation` 逐字段对齐（Rust `#[serde(rename_all = "camelCase")]`）。
+ * 只有真的走到"挪塔那一问"时才有这一格；别的记录读到 `null` ⇒ 整块不摆。
+ */
+export interface RelocationRecord {
+  /** 用户当时选了什么：自动挪塔 / 自己挪模型 / 没答（超时）/ 板上没位 */
+  choice: 'relocate' | 'model' | 'timeout' | 'unavailable'
+  /** 塔左下角，挪之前（mm，**不取整**） */
+  from: [number, number]
+  /** 塔左下角，挪之后；没挪 = `null` */
+  to?: [number, number] | null
+  /** 直线位移（mm）；没挪 = `null` */
+  movedMm?: number | null
+  /** 挪之前的冲突点数 */
+  beforeConflictCount: number
+  /** 挪完复检的冲突点数（没挪 = `null`） */
+  afterConflictCount?: number | null
+  /** 挪完复检过没过（`null` = 没挪） */
+  verified?: boolean | null
+  /** 这一趟用的塔高（mm）—— 斜肋塔的底座随它变大 */
+  towerHeightMm: number
+  /**
+   * **挪之前那一份碰撞事实**（2026-10-18）：报告页拿它画「现在 / 挪后」两幅俯视图。
+   * 成功那趟 `collision` 是 `null`（撞了就走不到成功出口），所以事实跟着记录走。
+   */
+  before?: ReportCollision | null
 }
 
 /** 那一趟的结论 */

@@ -1,4 +1,127 @@
 import { NotImplementedError } from './errors'
+
+/*
+ * **探针用的假后处理快照**（2026-10-18）。
+ *
+ * 为什么要有：作者连着两轮说「模态框尺寸变化了」，而那一屏在浏览器里**根本到不了**
+ * （钩子那一趟是切片器带参数把桌面版拉起来的）。于是给 dev 开一个口子：
+ * 打开 `/?pp=result` 或 `/?pp=relocate`，快照就返回一份假的那一趟 —— 探针据此
+ * 量两屏的 `.box` 高度，判"换一屏框就长大"（`scripts/probes/pp-modal-height.mjs`）。
+ *
+ * ★ 只在 `import.meta.env.DEV` 下生效；生产构建里整段被摇掉，`getPostProcessRun`
+ *   仍如实答 `null`。快照 `preview: true` ⇒ 业务按钮禁用、标题标「预览模式」。
+ */
+function devPostProcessRun(): PostProcessRun | null {
+  if (!import.meta.env.DEV) return null
+  const which = new URLSearchParams(window.location.search).get('pp')
+  if (which === null) return null
+
+  const facts = {
+    gcodeMachine: 'A1',
+    presetMachine: 'A1',
+    filamentType: 'PETG',
+    fileSizeBytes: 754_000,
+    nozzleDiameter: 0.4,
+    layerHeight: 0.2,
+    glueSpeed: 70,
+    slicer: 'BambuStudio 02.08.02.60',
+    slicerPrintTimeSeconds: 7800,
+  }
+  const base = {
+    presetName: 'A1-standard.toml',
+    gcodeName: '.5926.0.gcode',
+    facts,
+    progress: null,
+    preview: true,
+    /* 假快照里那句问话算"已经推过"（界面据此不再补推一次） */
+    questionEmitted: true,
+  }
+
+  if (which === 'result') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: '处理完成：已覆盖原文件',
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [],
+        result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  if (which === 'mismatch') {
+    return {
+      ...base,
+      finished: null,
+      question: {
+        questionKind: 'machine-mismatch',
+        text: 'G-code 是 A1_MINI，预设是 A1 —— 机型对不上，结果可能出错。还继续吗？',
+        deadlineUnixMs: Date.now() + 110_000,
+        choices: [],
+      },
+    }
+  }
+
+  /* 默认 = 挪塔那一问 */
+  return {
+    ...base,
+    finished: null,
+    question: {
+      questionKind: 'tower-relocation',
+      text: '擦料塔与模型撞上了（97 个冲突点）—— 要我把塔挪到不撞的位置，还是你自己去挪模型？',
+      deadlineUnixMs: Date.now() + 110_000,
+      choices: [
+        {
+          id: 'relocate',
+          label: '把塔挪到不撞的位置',
+          hint: '只改这一趟，预设文件不动',
+          accent: true,
+        },
+        { id: 'model', label: '我自己去挪模型', hint: '这一趟停下，原文件不动', accent: false },
+      ],
+      geo: {
+        current: [78, 91],
+        candidate: [16.4, 90],
+        collision: {
+          kind: 'model',
+          target: 'model',
+          direction: '',
+          requiredMoveX: 0,
+          requiredMoveY: 0,
+          conflictCount: 97,
+          conflictPoints: [
+            [74.2, 88.4],
+            [75.1, 89.2],
+            [73.8, 87.6],
+            [76.4, 90.1],
+            [74.9, 88.9],
+          ],
+          towerBbox: { xMin: 70, xMax: 87.04, yMin: 84, yMax: 101.04 },
+          modelBbox: { xMin: 40, xMax: 96, yMin: 26, yMax: 88 },
+          printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
+          tower: {
+            outerStructure: 'brim',
+            bodyMm: 19.58,
+            ribWidth: 3,
+            ribExtraLength: 4,
+            ribFilletWall: false,
+            sheathBaseExpand: 5,
+          },
+          forbiddenZones: [],
+          adviceCode: 'E_GCODE_COLLISION_002',
+          adviceText: '建议：把模型往左上挪 —— X 至少 32.6mm，Y 至少 32.6mm',
+        },
+      },
+    },
+  }
+}
 import type {
   ActiveOrigin,
   ActivePreset,
@@ -20,6 +143,7 @@ import type {
   PresetHistory,
   PresetSource,
   PinPref,
+  PostProcessRun,
   PostprocPrefsWire,
   ResolvedPostprocPrefs,
   SoftwareUpdate,
@@ -1093,12 +1217,16 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 钩子那一趟：浏览器里不可能有 —— 那一趟是**切片器带参数把本程序拉起来**的那一次
-   * （`--Toml/--Gcode`），浏览器根本没有这个进程。所以快照如实答 `null`
-   * （界面那屏模态框就不出现），另两条点不到、真被调也只报"没有在跑"。
+   * 钩子那一趟：浏览器里**没有进程** —— 真快照如实答 `null`（模态框不出现），
+   * 另两条点不到、真被调也只报"没有在跑"。
+   *
+   * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
+   *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
+   *   `?pp=result` / `?pp=relocate` / `?pp=mismatch`。生产构建里这函数直接 `null`
+   *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
-  async getPostProcessRun() {
-    return null
+  async getPostProcessRun(): Promise<PostProcessRun | null> {
+    return devPostProcessRun()
   },
 
   async cancelPostProcess() {

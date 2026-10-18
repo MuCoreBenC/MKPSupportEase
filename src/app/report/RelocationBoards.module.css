@@ -1,0 +1,35 @@
+/*
+ * 报告页「挪塔」那两幅板子（2026-10-18）。
+ * 沿用报告页安静的样子：不套卡片、不加底纹，只有画布 + 一行小字标签。
+ */
+
+.pair {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 0 2px;
+}
+
+.fig {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* 「现在 / 挪后」：小字、弱化色（与后处理那一屏同一个词，但这里更安静） */
+.tag {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 两幅之间那支虚线绿箭 —— 与后处理那一屏同一条口径（"接下来看这一幅"） */
+.arrow {
+  display: flex;
+  align-items: center;
+  color: var(--accent-deep);
+}
+
+[data-theme='dark'] .arrow {
+  color: var(--accent);
+}
