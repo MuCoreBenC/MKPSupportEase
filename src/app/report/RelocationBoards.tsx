@@ -10,7 +10,11 @@
  *   · 两幅之间一支**虚线绿色箭头**（"接下来这一幅"，与后处理那一屏同一条口径）。
  *
  * ★ 事实从 `relocation.before` 来（成功那趟 `collision` 是 `null` —— 撞了就走不到成功
- *   出口，事实必须跟着记录走）。`to == null`（没挪）就只画左幅、不画箭头与虚框。
+ *   出口，事实必须跟着记录走）。
+ *
+ * ★ 报告页**只在真的挪过时**才摆这一组（2026-10-18 作者：「没有移动的，就不要显示
+ *   塔位变化了」）—— 所以 `to` 在报告页这条路上总是不为 `null`；下面 `to == null`
+ *   那一支只是组件自己的兜底（只画左幅），别拿它去表达"没挪"。
  */
 import type { ReportCollision, ReportBox4 } from '../../api/contract'
 import CollisionMap from './CollisionMap'

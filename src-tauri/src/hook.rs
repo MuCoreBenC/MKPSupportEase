@@ -63,6 +63,7 @@ use std::time::{Duration, Instant};
 
 use postprocess::diag::{messages, CancelToken, PostprocError};
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressEvent, ProgressSink};
+use postprocess::postproc::disk::{CollisionFacts, TowerAsk, TowerAskOutcome};
 
 use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
 use crate::args::HookJob;
@@ -401,32 +402,36 @@ pub trait Asker {
     fn ask_calibration(&mut self, _question: &str) -> Option<String> {
         None
     }
-
-    /// **挪塔那一问**（2026-10-18）：模型与塔相撞，自动把塔挪到 `candidate`
-    /// 还是用户自己去挪模型。
-    ///
-    /// 返回被选中的 id（`relocate` / `model`）；`None` = 没有界面 / 超时 / 按了停止
-    /// ⇒ 由调用方收场（**停下**，与机型、校准两问同一条）。
-    fn ask_tower_relocation(
-        &mut self,
-        _question: &str,
-        _geo: crate::hook_ipc::RelocateGeoPayload,
-    ) -> Option<String> {
-        None
-    }
 }
 
-/// **挪塔那一问的分派**（2026-10-18）：答 `relocate` 且摆得下 ⇒ 新的塔左下角；
-/// 别的（`model` / 超时 / 按了停止 / 没有界面 / 摆不下）⇒ `None`
-/// ⇒ 调用方**什么都不改**，让管线第 6 步照旧撞、照旧收场。
+/// **把内核那条"撞了"换成这一问的三句话之一**（2026-10-18 方案 B）。
 ///
-/// ★ 比的是**选项 id**（`hook_ipc::CHOICE_RELOCATE`），不是别的任何字 ——
-/// 2026-10-17 校准那一问就是"拿选项 id 去比管线常量"踩的（见 `ask_calibration` 那段）。
-fn tower_relocation_of(answer: Option<&str>, candidate: Option<[f64; 2]>) -> Option<[f64; 2]> {
-    match answer {
-        Some(id) if id == crate::hook_ipc::CHOICE_RELOCATE => candidate,
-        _ => None,
-    }
+/// 内核只回 `Collision`，它不知道用户答了什么 —— 而"自己挪 / 摆不下 / 挪了还撞"
+/// 这三句的分派依据正是**这一趟落下的记录**（交互侧知识），所以留在这里。
+/// ★ 句子与参数与改造前一字不差（码在 `messages.toml`，这里只挑键）。
+fn tower_failure_error(
+    record: &crate::archive::RelocationRecord,
+    facts: CollisionFacts,
+) -> HookError {
+    let reason = if record.verified == Some(false) {
+        /* 挪了还撞：把这趟的四个数如实说出来（与改造前同一串参数） */
+        let to = record.to.unwrap_or(record.from);
+        Reason::new(keys::TOWER_RELOCATED_STILL)
+            .with("fromX", format!("{:.1}", record.from[0]))
+            .with("fromY", format!("{:.1}", record.from[1]))
+            .with("toX", format!("{:.1}", to[0]))
+            .with("toY", format!("{:.1}", to[1]))
+            .with("moved", format!("{:.1}", record.moved_mm.unwrap_or(0.0)))
+            .with("count", facts.conflict_count.to_string())
+    } else if record.choice == "unavailable" {
+        Reason::new(keys::TOWER_RELOCATE_UNAVAILABLE)
+            .with("count", facts.conflict_count.to_string())
+    } else {
+        Reason::new(keys::TOWER_RELOCATE_DECLINED).with("count", facts.conflict_count.to_string())
+    };
+    let mut err = HookError::failed(reason);
+    err.collision = Some(Box::new(facts));
+    err
 }
 
 /// 机型不匹配时怎么处置。
@@ -784,191 +789,25 @@ pub fn run(
     }
 
     /*
-     * **碰撞预检 + 挪塔那一问**（2026-10-18 作者定的口径：一撞就问
-     * 「自动把塔挪到不撞的位置 / 我自己去挪模型」，把选择权交给用户）。
+     * **第 6 步那一问的钩子侧**（2026-10-18 方案 B）：内核在 `Step::Collision` 撞了会
+     * 回调它 —— 界面交互、选择记账都留在这边，内核只认 `TowerAsk` 那条缝。
      *
-     * ★ 为什么在这里**预检一趟**、而不让管线第 6 步自己去问：管线是算法层，
-     *   **不持问句通道**（机型那一问、校准件那一问也都住在这一层）。于是这里拿同一个
-     *   `detect_tower_collision` 先扫一遍 —— 判据仍只有一份，代价是多扫一遍 G-code。
+     * 只在**装了界面 + 设置页开关开着**时才递进去：
+     *   · 没界面（无头 / 静默档）/ 开关关着 ⇒ `None` ⇒ 内核走"没人问"那条短路，
+     *     行为与改造前一字不差；
+     *   · 递进去之后，等不到答复由这边收成 `Declined`（超时）或 `Cancelled`（按了停止）。
      *
-     * · 答 `relocate` ⇒ 把 `wiper_x` / `wiper_y` 改成自动摆出来的位置（**只改这一趟**，
-     *   预设文件一字不动），再进管线（第 6 步复检就是干净的，一路跑完）；
-     * · 答 `model` / 超时 / 没界面 ⇒ 什么都不改，让管线第 6 步照旧撞、照旧报错归档 ——
-     *   "停下 + 建议 + 俯视图"那一条路一个字都不用重写。
-     *
-     * ★ 开关在 `ir.prefs.auto_tower_position`（设置页「智能塔位置」）—— 关着就完全不预检，
-     *   行为与今天一字不差。
-     *
-     * ★ **闸门必须与管线同一套判据**（2026-10-18 真机：开关打开了却一次都不问）。
-     *   `ir.tower.use_towers` 不是预设里的一格 —— IR 里默认 `false`，它由管线第 5 步
-     *   `apply_wiping_decision` 按**这一份 G-code** 现算（有支撑 ⇒ 开塔；`disk` 档 ⇒ 关）。
-     *   预检发生在第 5 步之前，拿默认值当闸门 ⇒ 永远不进这一块。
-     *   这里在**克隆**上跑同一条 decision（管线之后还会再跑一次，幂等），
-     *   既不改变这一趟进管线的 IR，也保证"预检说会撞"与"第 6 步真撞"是同一份输入。
+     * ★ 这里**不再**预检：`detect_mode` / 擦料决策 / 碰撞扫描都只由管线各跑一次。
      */
-    if ir.prefs.auto_tower_position {
-        let content: Vec<String> = raw
-            .lines()
-            .map(|l| l.trim_end_matches('\r').to_string())
-            .collect();
-        /* 第 6 步的另一个闸门：只有非校准件那一趟才查碰撞，预检跟着它走 */
-        let calib_mode = postprocess::postproc::calibration::detect_mode(&content);
-        if postprocess::postproc::calibration::need_collision_check(calib_mode) {
-            let mut probe = ir.clone();
-            let decision = postprocess::postproc::support::decide_wiping(
-                &probe.wiping.preferred_mode,
-                &content,
-            );
-            postprocess::postproc::support::apply_wiping_decision(&mut probe, &decision);
-            let collision = postprocess::postproc::disk::detect_tower_collision(&content, &probe);
-            if probe.tower.use_towers && collision.has_collision {
-                let facts = collision.facts(&probe);
-                /* 事实是 `probe`（擦料方式已经定过）算出来的 ⇒ 摆塔也按 `probe` 算，
-                否则框宽用的是旧擦料方式那份 */
-                let candidate = postprocess::postproc::disk::auto_tower_position_for_facts(
-                    &probe,
-                    &facts,
-                    &collision.occupancy,
-                    collision.tower_height,
-                );
-                let from = [ir.wiping.wiper_x, ir.wiping.wiper_y];
-                if let Some(client) = ui.client() {
-                    let mut asker = ChannelAsker { client };
-                    let geo = crate::hook_ipc::RelocateGeoPayload {
-                        collision: Some(facts.clone()),
-                        candidate,
-                        current: from,
-                    };
-                    let question = Reason::new(keys::TOWER_RELOCATION_QUESTION)
-                        .with("count", facts.conflict_count.to_string())
-                        .text();
-                    let answer = asker.ask_tower_relocation(&question, geo);
-                    match tower_relocation_of(answer.as_deref(), candidate) {
-                        Some([x, y]) => {
-                            let to = [x, y];
-                            ir.wiping.wiper_x = x;
-                            ir.wiping.wiper_y = y;
-                            let moved = ((x - from[0]).powi(2) + (y - from[1]).powi(2)).sqrt();
-                            /*
-                             * ★★ **第二道闸：挪完必须复检**（2026-10-18 作者真机：
-                             * 「点了自动移动塔位置了，但是还是碰撞了」）。同一个
-                             * `detect_tower_collision`、改完之后的 IR —— 仍撞就**不静默
-                             * 继续**：停下并如实报（报告里照样有俯视图，位置是挪后的）。
-                             */
-                            let after =
-                                postprocess::postproc::disk::detect_tower_collision(&content, &ir);
-                            let after_count = if after.has_collision {
-                                after.facts(&ir).conflict_count
-                            } else {
-                                0
-                            };
-                            let verified = !after.has_collision;
-                            relocation = Some(crate::archive::RelocationRecord {
-                                choice: "relocate".to_owned(),
-                                from,
-                                to: Some(to),
-                                moved_mm: Some(moved),
-                                before_conflict_count: facts.conflict_count,
-                                after_conflict_count: Some(after_count),
-                                verified: Some(verified),
-                                tower_height_mm: collision.tower_height,
-                                before: Some(facts.clone()),
-                            });
-                            if !verified {
-                                tracing::warn!(
-                                    from_x = from[0],
-                                    from_y = from[1],
-                                    to_x = x,
-                                    to_y = y,
-                                    moved_mm = moved,
-                                    conflicts_after = after_count,
-                                    "自动挪塔之后仍然有冲突（复检没过）"
-                                );
-                                let after_facts = after.facts(&ir);
-                                let reason = Reason::new(keys::TOWER_RELOCATED_STILL)
-                                    .with("fromX", format!("{:.1}", from[0]))
-                                    .with("fromY", format!("{:.1}", from[1]))
-                                    .with("toX", format!("{:.1}", x))
-                                    .with("toY", format!("{:.1}", y))
-                                    .with("moved", format!("{moved:.1}"))
-                                    .with("count", after_count.to_string());
-                                let mut err = HookError::failed(reason);
-                                err.collision = Some(Box::new(after_facts.clone()));
-                                /* 这一趟不再进管线（步骤账为空）—— 记录与事实就在这里落盘，
-                                不能只 return（run 的调用方不替它归档） */
-                                archive_failure(
-                                    &archived,
-                                    job,
-                                    &preset_machine,
-                                    &conclusion_line(&err),
-                                    false,
-                                    raw.len() as u64,
-                                    started_at,
-                                    started,
-                                    Vec::new(),
-                                    Some(after_facts),
-                                    relocation.as_ref(),
-                                );
-                                return Err(err);
-                            }
-                        }
-                        None => {
-                            /*
-                             * 用户选了自己挪模型 / 那一问没人答 ⇒ **停下**（不静默进管线再撞一次：
-                             * 那样用户读到的是一句没头没尾的"冲突"，而不是他自己刚做过的选择）。
-                             * 板上根本没有不撞的塔位 ⇒ 另一句（不给方向，因为没有能用的位置）。
-                             */
-                            let unavailable = candidate.is_none();
-                            let choice = match answer.as_deref() {
-                                Some(crate::hook_ipc::CHOICE_MODEL) => "model",
-                                Some(_) => "model",
-                                None => "timeout",
-                            };
-                            relocation = Some(crate::archive::RelocationRecord {
-                                choice: if unavailable {
-                                    "unavailable".to_owned()
-                                } else {
-                                    choice.to_owned()
-                                },
-                                from,
-                                to: None,
-                                moved_mm: None,
-                                before_conflict_count: facts.conflict_count,
-                                after_conflict_count: None,
-                                verified: None,
-                                tower_height_mm: collision.tower_height,
-                                before: Some(facts.clone()),
-                            });
-                            let key = if unavailable {
-                                keys::TOWER_RELOCATE_UNAVAILABLE
-                            } else {
-                                keys::TOWER_RELOCATE_DECLINED
-                            };
-                            let mut err = HookError::failed(
-                                Reason::new(key).with("count", facts.conflict_count.to_string()),
-                            );
-                            err.collision = Some(Box::new(facts.clone()));
-                            /* 停在这一问上：如实落一条记录（用户选了什么 + 原位置的碰撞事实） */
-                            archive_failure(
-                                &archived,
-                                job,
-                                &preset_machine,
-                                &conclusion_line(&err),
-                                false,
-                                raw.len() as u64,
-                                started_at,
-                                started,
-                                Vec::new(),
-                                Some(facts),
-                                relocation.as_ref(),
-                            );
-                            return Err(err);
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let mut tower_ask = if ir.prefs.auto_tower_position {
+        ui.client().map(|client| ChannelTowerAsk {
+            client,
+            cancel,
+            record: None,
+        })
+    } else {
+        None
+    };
 
     // 12 步管线。`output_path: None` = 原地覆盖（`.part` + rename，见内核 pipeline 文档）
     /* 步骤记账包在真正的进度出口外面：失败 / 取消时把"跑到哪一步"写进记录
@@ -978,31 +817,46 @@ pub fn run(
         current: None,
         done: Vec::new(),
     };
+    let ask: Option<&mut dyn TowerAsk> = tower_ask.as_mut().map(|a| a as &mut dyn TowerAsk);
     let outcome = if defer_print_time {
-        pipeline::process_with_ir_deferred_print_time(
+        pipeline::process_with_ir_deferred_print_time_with_tower_ask(
             IrProcessRequest {
                 gcode_path: job.gcode.clone(),
                 ir,
                 output_path: None,
             },
+            ask,
             &mut steps,
             cancel,
         )
     } else {
-        pipeline::process_with_ir(
+        pipeline::process_with_ir_with_tower_ask(
             IrProcessRequest {
                 gcode_path: job.gcode.clone(),
                 ir,
                 output_path: None,
             },
+            ask,
             &mut steps,
             cancel,
         )
     };
+    /* 问句那一侧的记账**先取出来**：下面失败 / 成功两条路都要用它（挑句子、写归档） */
+    relocation = tower_ask.as_mut().and_then(ChannelTowerAsk::take_record);
     let done = match outcome {
         Ok(done) => done,
         Err(err) => {
-            let e = HookError::from(err);
+            let mut e = HookError::from(err);
+            /*
+             * **撞塔那一问落下的三种收场**（2026-10-18 方案 B）：内核统一回 `Collision`，
+             * 但它不知道用户答了什么 —— "自己挪 / 板上摆不下 / 挪了还撞"这三句的挑法
+             * 只能看这一趟落下的记录。事实（撞在哪、建议）仍用错误里那份。
+             */
+            if let Some(record) = relocation.as_ref() {
+                if let Some(facts) = e.collision().cloned() {
+                    e = tower_failure_error(record, facts);
+                }
+            }
             let failed_pipeline = steps.finish(if e.cancelled() {
                 PipelineStatus::Cancelled
             } else {
@@ -1685,41 +1539,6 @@ impl Asker for ChannelAsker<'_> {
         )
     }
 
-    /// **挪塔那一问**（2026-10-18）：两颗按钮 + 画布（坐标在这一屏上给），超时 = `stop`
-    /// ⇒ 由调用方按"停下"收场（与机型那一问同一条：不替用户决定）。
-    fn ask_tower_relocation(
-        &mut self,
-        question: &str,
-        geo: crate::hook_ipc::RelocateGeoPayload,
-    ) -> Option<String> {
-        use crate::hook_ipc::{
-            QuestionChoice, CHOICE_MODEL, CHOICE_RELOCATE, CHOICE_STOP, QKIND_TOWER_RELOCATION,
-        };
-        /* 摆得下才给"自动挪塔"这颗按钮；摆不下 ⇒ 只给"自己去挪模型" */
-        let mut choices = Vec::new();
-        if geo.candidate.is_some() {
-            choices.push(QuestionChoice {
-                id: CHOICE_RELOCATE.to_owned(),
-                label: "把塔挪到不撞的位置".to_owned(),
-                hint: Some("只改这一趟，预设文件不动".to_owned()),
-                accent: true,
-            });
-        }
-        choices.push(QuestionChoice {
-            id: CHOICE_MODEL.to_owned(),
-            label: "我自己去挪模型".to_owned(),
-            hint: Some("这一趟停下，原文件不动".to_owned()),
-            accent: false,
-        });
-        self.client.ask_with_geo(
-            QKIND_TOWER_RELOCATION,
-            question,
-            choices,
-            CHOICE_STOP,
-            Some(geo),
-        )
-    }
-
     /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。
     fn ask_calibration(&mut self, question: &str) -> Option<String> {
         use crate::hook_ipc::{
@@ -1747,6 +1566,117 @@ impl Asker for ChannelAsker<'_> {
         )?;
         /* 超时回的是 `stop`（不是选项之一）⇒ 当成"没答" */
         (answer != CHOICE_STOP).then_some(answer)
+    }
+}
+
+/// **第 6 步那一问的钩子侧实现**（2026-10-18 方案 B）。
+///
+/// 内核在 `Step::Collision` 撞了会调 [`TowerAsk::ask`]；这一份负责把问句推给界面、
+/// 等答复、并把**这一趟的选择记成 `RelocationRecord`**（内核不认识归档类型）。
+///
+/// 为什么记账在这边而不是内核：`relocation.before` 是"调整前的位置与事实"，
+/// 它属于"用户做了什么选择"这件事 —— 那是交互侧的知识，内核手上只有几何。
+struct ChannelTowerAsk<'a> {
+    client: &'a crate::hook_ipc::Client,
+    /// 取消线：按了停止就别再把问句推上去；等待期间它是唯一的打断手段。
+    cancel: &'a CancelToken,
+    /// 这一趟的选择与几何 —— `run` 在管线返回后 `take_record()` 走归档。
+    record: Option<crate::archive::RelocationRecord>,
+}
+
+impl ChannelTowerAsk<'_> {
+    /// 把这一趟的记录取走（归档只认一份）
+    fn take_record(&mut self) -> Option<crate::archive::RelocationRecord> {
+        self.record.take()
+    }
+}
+
+impl TowerAsk for ChannelTowerAsk<'_> {
+    fn ask(
+        &mut self,
+        facts: &CollisionFacts,
+        candidate: Option<[f64; 2]>,
+        current: [f64; 2],
+        tower_height_mm: f64,
+    ) -> TowerAskOutcome {
+        use crate::hook_ipc::{
+            QuestionChoice, CHOICE_MODEL, CHOICE_RELOCATE, CHOICE_STOP, QKIND_TOWER_RELOCATION,
+        };
+        /* 摆得下才给"自动挪塔"这颗按钮；摆不下 ⇒ 只给"自己去挪模型" */
+        let mut choices = Vec::new();
+        if candidate.is_some() {
+            choices.push(QuestionChoice {
+                id: CHOICE_RELOCATE.to_owned(),
+                label: "自动调整塔位置".to_owned(),
+                hint: Some("只改这一趟，预设文件不动".to_owned()),
+                accent: true,
+            });
+        }
+        choices.push(QuestionChoice {
+            id: CHOICE_MODEL.to_owned(),
+            label: "停止并自己挪模型".to_owned(),
+            hint: Some("这一趟停下，原文件不动".to_owned()),
+            accent: false,
+        });
+        let geo = crate::hook_ipc::RelocateGeoPayload {
+            collision: Some(facts.clone()),
+            candidate,
+            current,
+        };
+        /* 问句只说"要不要挪" —— 冲突点数由界面上那一行单独说 */
+        let question = Reason::new(keys::TOWER_RELOCATION_QUESTION).text();
+        let answer = self.client.ask_with_geo(
+            QKIND_TOWER_RELOCATION,
+            &question,
+            choices,
+            CHOICE_STOP,
+            Some(geo),
+        );
+        /*
+         * ★ **取消与超时必须分开**（作者 2026-10-18）：`ask_with_geo` 两种情形都返回
+         * `None`，但按了停止是"这一趟被用户掐掉"，超时是"没人答"——后者照样按碰撞收场，
+         * 前者要变成 `Cancelled`（归档不得记成成功）。
+         */
+        if self.cancel.is_cancelled() {
+            return TowerAskOutcome::Cancelled;
+        }
+
+        let unavailable = candidate.is_none();
+        let relocated = answer.as_deref() == Some(CHOICE_RELOCATE) && candidate.is_some();
+        let choice = if unavailable {
+            "unavailable"
+        } else if relocated {
+            "relocate"
+        } else if answer.is_some() {
+            "model"
+        } else {
+            "timeout"
+        };
+        let to = if relocated { candidate } else { None };
+        self.record = Some(crate::archive::RelocationRecord {
+            choice: choice.to_owned(),
+            from: current,
+            to,
+            moved_mm: to
+                .map(|p| ((p[0] - current[0]).powi(2) + (p[1] - current[1]).powi(2)).sqrt()),
+            before_conflict_count: facts.conflict_count,
+            after_conflict_count: None,
+            verified: None,
+            tower_height_mm,
+            before: Some(facts.clone()),
+        });
+        match to {
+            Some(pos) => TowerAskOutcome::Moved(pos),
+            None => TowerAskOutcome::Declined,
+        }
+    }
+
+    /// 复检回告：内核拿改完之后的 IR 又跑了一遍检测。判据在内核，这里只记账。
+    fn verified(&mut self, after: Option<&CollisionFacts>) {
+        if let Some(record) = self.record.as_mut() {
+            record.verified = Some(after.is_none());
+            record.after_conflict_count = Some(after.map_or(0, |f| f.conflict_count));
+        }
     }
 }
 
@@ -2664,35 +2594,54 @@ mod tests {
         );
     }
 
-    /// **挪塔那一问的分派**（2026-10-18）：只有"答了 relocate 且摆得下"才挪；
-    /// 答自己去挪模型 / 超时 / 没答 / 摆不下 ⇒ 一律不挪（管线照旧收场）。
+    /// 造一条挪塔记录（只给这三句的判据用）
+    fn relocation_record(choice: &str, verified: Option<bool>) -> crate::archive::RelocationRecord {
+        crate::archive::RelocationRecord {
+            choice: choice.to_owned(),
+            from: [78.0, 91.0],
+            to: verified.map(|_| [16.4, 90.0]),
+            moved_mm: verified.map(|_| 61.6),
+            before_conflict_count: 97,
+            after_conflict_count: verified.map(|v| if v { 12 } else { 0 }),
+            verified,
+            tower_height_mm: 245.6,
+            before: None,
+        }
+    }
+
+    /// **撞塔那三种收场各挑各的句子**（2026-10-18 方案 B）。
+    ///
+    /// 内核统一回 `Collision`（它不知道用户答了什么），"自己挪 / 板上摆不下 / 挪了还撞"
+    /// 这三句只能看这一趟落下的记录 —— 码与改造前逐字一致。
     #[test]
-    fn the_relocation_answer_only_moves_the_tower_when_it_was_chosen() {
-        let at = [120.0, 40.0];
+    fn tower_failures_keep_their_three_sentences() {
+        let facts = CollisionFacts {
+            conflict_count: 97,
+            ..CollisionFacts::default()
+        };
         assert_eq!(
-            tower_relocation_of(Some(crate::hook_ipc::CHOICE_RELOCATE), Some(at)),
-            Some(at),
-            "答了 relocate ⇒ 挪到算出来的那个位置"
+            tower_failure_error(&relocation_record("model", None), facts.clone())
+                .reason()
+                .code(),
+            Some("W_COLLISION_RELOCATE_002".to_string()),
+            "答「自己挪模型」/ 超时那一句"
         );
         assert_eq!(
-            tower_relocation_of(Some(crate::hook_ipc::CHOICE_RELOCATE), None),
-            None,
-            "摆不下 ⇒ 没有位置可挪"
+            tower_failure_error(&relocation_record("unavailable", None), facts.clone())
+                .reason()
+                .code(),
+            Some("W_COLLISION_RELOCATE_003".to_string()),
+            "板上摆不下那一句"
         );
+        let still = tower_failure_error(&relocation_record("relocate", Some(false)), facts);
         assert_eq!(
-            tower_relocation_of(Some(crate::hook_ipc::CHOICE_MODEL), Some(at)),
-            None,
-            "答「我自己去挪模型」⇒ 塔不动"
+            still.reason().code(),
+            Some("W_COLLISION_RELOCATE_001".to_string()),
+            "挪了还撞那一句"
         );
-        assert_eq!(
-            tower_relocation_of(Some(crate::hook_ipc::CHOICE_STOP), Some(at)),
-            None,
-            "超时 / 停下 ⇒ 塔不动"
-        );
-        assert_eq!(
-            tower_relocation_of(None, Some(at)),
-            None,
-            "没有界面 ⇒ 塔不动"
+        assert!(
+            still.collision().is_some(),
+            "事实要跟着错误一起出门（报告页据此画图）"
         );
     }
 

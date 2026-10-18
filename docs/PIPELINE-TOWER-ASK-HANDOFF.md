@@ -1,7 +1,24 @@
-# 把「挪塔那一问」挪进内核第 6 步 —— 交接文档（方案 B，待拍板）
+# 把「挪塔那一问」挪进内核第 6 步 —— 交接文档（方案 B，**已落地**）
 
-> 状态：**只写了设计，一行代码没动**。作者 2026-10-18「先做交接文档吧，我等会认真考虑一下」。
-> 配套阅读：`docs/SMART-TOWER-RELOCATION-HANDOFF.md`（那一问现在的实现、报告页、归档字段）。
+> 状态：**2026-10-18 夜落地并全绿**。作者拍板「开方向 B」，另加两条硬要求：
+> ① 回调结果必须能区分继续 / 取消 / 失败（不许都压成 `None`）；② 复检不过必须明确失败。
+> 配套阅读：`docs/SMART-TOWER-RELOCATION-HANDOFF.md`（那一问的由头、报告页、归档字段）。
+
+## 落地记录（与下面设计的差异，以这里为准）
+
+1. **`TowerAsk` 在 `postproc/disk/collision.rs`**：`ask` 多一个 `tower_height_mm`（归档要登记塔高，
+   内核不复算）；`verified` 收 `Option<&CollisionFacts>` 而不是 `bool` —— 记录里的
+   `afterConflictCount` 与"挪了还撞"那句话都要那个数。
+2. **答复是四值枚举** `TowerAskOutcome`：`Moved` / `Declined` / `Cancelled` / `Failed`。
+   `Cancelled` ⇒ `Err(Cancelled)`（**不是碰撞**，归档不得记成成功）；`Failed` ⇒ `Err(Processing)`。
+3. **入口**：`process_with_ir_with_tower_ask` / `process_with_ir_deferred_print_time_with_tower_ask`，
+   `IrProcessRequest` 一字未动；两个老入口照旧（内部 `ask = None`）。
+4. **钩子**：`ChannelTowerAsk` 记账（`before` = 问句前那份事实）；删掉整块预检、
+   `Asker::ask_tower_relocation`、`tower_relocation_of` 及其单测；三句话由
+   `tower_failure_error(record, facts)` 挑（`W_COLLISION_RELOCATE_001/002/003`）。
+5. **判据**：`crates/postprocess/tests/pipeline_tower_ask.rs` 七条 —— 没人问逐字段相等 /
+   挪了跑完且复检净 / 挪了还撞报碰撞 / 不挪报碰撞 / 取消报取消 / 交互失败报明确错 /
+   进度单调不减且第 6 步在步骤账上。
 
 ---
 

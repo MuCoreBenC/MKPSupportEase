@@ -159,13 +159,88 @@ export function RelocateMaps({
 }
 
 /**
- * 下：原来两栏事实的**位置**上摆的那段挪塔文案（精简版 —— 作者：「文案有点多」）。
+ * 下：原来两栏事实的**位置**上摆的那段挪塔文案（2026-10-18 第七版，作者定稿）。
  *
- * 排版按"一张小表"来（作者：「这些也没视觉对齐，没有视觉优化」）：
- *   第一行 = 问句正文（换行对齐左边）；
- *   下面 = 两行两列的坐标（标签定宽、数字等宽），冲突点与倒计时各占一行。
- * 数值**不取整**（作者点名）。
+ * 作者这一版的口径是「**横向关系 + 信息的轻重**」，不添装饰：
+ *   ① 问句（主色、加粗、居中）；
+ *   ② **一组**横向坐标：`当前塔位置  X … / Y …  →  自动摆放位置  X … / Y …`
+ *      —— 中间那支箭头说的是"从这里挪到那里"，两栏因此是一个整体（不再是一道竖线分栏）；
+ *   ③ **并排**的一句底：左边冲突点数（橙三角 + 数字 + 「个冲突点」）、右边倒计时
+ *      —— 两件事同属"现在什么状况"，共用一段，不再用横线把内容切碎。
+ *
+ * 轻重的分配（作者原话）：冲突数量是"要不要处理"的关键事实 ⇒ **深色粗体** + 橙色图标；
+ * 倒计时只是"不管会怎样"的兜底 ⇒ 灰字 + 绿时钟。**不用**大橙色数字（橙只留给警告）。
+ *
+ * 其余口径不变：数值不取整、等宽数字；问句里不塞数字；整页仍装进翻页槽，
+ * 模态框不跟着变高（判据 `scripts/probes/pp-modal-height.mjs`）。
  */
+
+/** 冲突点那枚三角叹号（**画成 SVG** —— 字形自带基线偏移，圈里/行里对不齐） */
+function WarnTriangle() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M8 2 14.6 13.6H1.4L8 2Z"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path d="M8 6.2v3.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="8" cy="11.4" r="0.72" fill="currentColor" />
+    </svg>
+  )
+}
+
+/** 倒计时那一枚时钟（同上：几何坐标画，不摆文本符号） */
+function ClockMark() {
+  return (
+    <svg viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.3" />
+      <path
+        d="M7 3.9V7l2.1 1.4"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/**
+ * 两栏坐标之间那支箭头（作者 2026-10-18：「用箭头表达『当前位置 → 建议位置』，
+ * 比单纯竖线分栏更有含义」）。
+ *
+ * ★ 与"两幅板之间那支"分工不同：那一支说的是"**塔**从这挪到那"（实心、主色）；
+ *   这一支说的是"**这两组读数**是同一个东西的前后"（细、灰，只做关系提示）。
+ */
+function SwapArrow() {
+  return (
+    <svg viewBox="0 0 20 14" fill="none" aria-hidden="true">
+      <path d="M1 7h14.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+      <path
+        d="M11.8 2.9 16.6 7l-4.8 4.1"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+/** 一组坐标（`X 78.0 / Y 91.0`）—— 轴字母压小压暗，数字大一号等宽 */
+function CoordPair({ pair }: { pair: [number, number] | null }) {
+  /* 空格写实（`{' '}`）：JSX 里跨行的空白会被吃掉，斜杠两边不留空就成了 `78.0/Y` */
+  return (
+    <>
+      <span className={s.relocateAxis}>X</span> {pair?.[0].toFixed(1) ?? '—'}{' '}
+      <span className={s.relocateSep}>/</span>{' '}
+      <span className={s.relocateAxis}>Y</span> {pair?.[1].toFixed(1) ?? '—'}
+    </>
+  )
+}
+
 export function RelocateNote({
   question,
   countdown,
@@ -176,37 +251,44 @@ export function RelocateNote({
 }) {
   const { c, candidate, current } = parts(question)
   return (
-    <div className={s.relocateNote} role="status">
-      <p className={s.relocateLine}>{question.text}</p>
-      <dl className={s.relocateCoords}>
-        <div className={s.relocateCoord}>
-          <dt>现在塔位置</dt>
-          <dd>
-            <span className={s.relocateAxis}>X</span> {current?.[0].toFixed(1) ?? '—'}
-            <span className={s.relocateSep}>/</span>
-            <span className={s.relocateAxis}>Y</span> {current?.[1].toFixed(1) ?? '—'}
-          </dd>
+    <div className={s.relocateNote}>
+      <p className={s.relocateAsk}>{question.text}</p>
+      {/* ② 一组坐标：现在 → 建议（箭头只讲"这两组是同一个东西的前后"） */}
+      <div className={s.relocateCols}>
+        <div className={s.relocateCol}>
+          <span className={s.relocateColLabel}>当前塔位置</span>
+          <span className={s.relocateValue}>
+            <CoordPair pair={current} />
+          </span>
         </div>
-        <div className={s.relocateCoord}>
-          <dt>自动摆放</dt>
-          <dd>
-            {candidate !== null ? (
-              <>
-                <span className={s.relocateAxis}>X</span> {candidate[0].toFixed(1)}
-                <span className={s.relocateSep}>/</span>
-                <span className={s.relocateAxis}>Y</span> {candidate[1].toFixed(1)}
-              </>
-            ) : (
-              '板子上摆不下'
-            )}
-          </dd>
+        <span className={s.relocateSwap} aria-hidden="true">
+          <SwapArrow />
+        </span>
+        <div className={`${s.relocateCol} ${s.relocateColNew}`}>
+          <span className={s.relocateColLabel}>自动摆放位置</span>
+          <span className={s.relocateValue}>
+            {candidate !== null ? <CoordPair pair={candidate} /> : '板子上摆不下'}
+          </span>
         </div>
-        <div className={s.relocateCoord}>
-          <dt>冲突点</dt>
-          <dd>{c !== null ? `${c.conflictCount ?? 0} 个` : '—'}</dd>
-        </div>
-      </dl>
-      {countdown !== null && <span className={s.relocateHint}>{countdown}</span>}
+      </div>
+      {/* ③ 句底并排：左 = 冲突点数（关键事实，深色粗体），右 = 倒计时（兜底，灰字） */}
+      <div className={s.relocateMeta}>
+        <span className={s.relocateHit}>
+          <span className={s.relocateIcon}>
+            <WarnTriangle />
+          </span>
+          <span className={s.relocateHitValue}>{c !== null ? (c.conflictCount ?? 0) : '—'}</span>
+          <span className={s.relocateHitUnit}>个冲突点</span>
+        </span>
+        {countdown !== null && (
+          <span className={s.relocateTimer}>
+            <span className={`${s.relocateIcon} ${s.relocateIconCalm}`}>
+              <ClockMark />
+            </span>
+            {countdown}
+          </span>
+        )}
+      </div>
     </div>
   )
 }

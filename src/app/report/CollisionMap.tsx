@@ -108,6 +108,18 @@ export default function CollisionMap({
   const bed = boxOf(collision.printable)
   const tower = boxOf(collision.towerBbox)
   const model = boxOf(collision.modelBbox)
+  /*
+   * 画图用的模型框：**一个模型一个**（内核按占用格连通块切好的 `modelBoxes`）。
+   * 旧记录没有这一格 ⇒ 退回整体那一个框（`modelBbox`）——至少还能看出"东西大概在哪"。
+   * ★ `model` 本身留着：箭头"探出模型框"那段逻辑仍按**整体**算（挪模型是一条整体建议）。
+   */
+  const modelRects = (() => {
+    const each = (collision.modelBoxes ?? [])
+      .map(boxOf)
+      .filter((b): b is { x: number; y: number; w: number; h: number } => b !== null)
+    if (each.length > 0) return each
+    return model !== null ? [model] : []
+  })()
 
   const [plate, setPlate] = useState<Plate | null>(null)
   useEffect(() => {
@@ -299,16 +311,15 @@ export default function CollisionMap({
         )
       })}
 
-      {/* 模型整体包围盒（另一种颜色 + 虚线：一眼和塔分开） */}
-      {model !== null && (
-        <rect
-          className={s.model}
-          {...(() => {
-            const [lx, ty] = bedPt(model.x, model.y + model.h)
-            return { x: lx, y: ty, width: model.w, height: model.h }
-          })()}
-        />
-      )}
+      {/* 模型包围盒（另一种颜色 + 虚线：一眼和塔分开）。
+          ★ 一个模型一个框（2026-10-18 作者：「做出来，分开的独立的包围盒」）——
+            内核按占用格的连通块切好了；旧记录没有这一格 ⇒ 退回整体那一个框。 */}
+      {modelRects.map((b, i) => {
+        const [lx, ty] = bedPt(b.x, b.y + b.h)
+        return (
+          <rect key={`m${i}`} className={s.model} x={lx} y={ty} width={b.w} height={b.h} />
+        )
+      })}
 
       {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上） */}
       <rect
@@ -357,8 +368,13 @@ export default function CollisionMap({
           className={s.mapPlate}
           style={{
             aspectRatio: `${plate.w} / ${plate.d}`,
-            /* `height` 给了就**按高度定尺**（宽度反算）—— 两幅并排要比同高时用 */
-            ...(height !== undefined ? { height: `${height}px`, width: 'auto' } : null),
+            /* `height` 给了就**按高度定尺**（宽度反算）—— 两幅并排要比同高时用。
+               ★ 放大档不认它（2026-10-18 真机）：放大层给的是"确定宽 + 高度上限"，
+                 行内那个 104/132px 若照带进来，放大的仍是一张缩略图 ——
+                 于是大壳子里躺着一张小图，FLIP 又从小图飞到大壳子（位置和大小都不对）。 */
+            ...(height !== undefined && !zoomed
+              ? { height: `${height}px`, width: 'auto' }
+              : null),
           }}
         >
           <svg
@@ -433,7 +449,10 @@ export default function CollisionMap({
           className={s.map}
           style={{
             aspectRatio: `${bed.w} / ${bed.h}`,
-            ...(height !== undefined ? { height: `${height}px`, width: 'auto' } : null),
+            /* 同 `.mapPlate`：放大档按宽度铺满（行内才用固定高度） */
+            ...(height !== undefined && !zoomed
+              ? { height: `${height}px`, width: 'auto' }
+              : null),
           }}
         >
           {factSvg}

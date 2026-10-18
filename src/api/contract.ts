@@ -141,8 +141,16 @@ export interface ReportCollision {
    *  ★ 键名是 `Bbox` 不是 `BBox`：Rust 侧 `tower_bbox` 走 camelCase 就长这样 ——
    *  第一稿写成 `towerBBox`，大小写对不上 ⇒ 俯视图整块退掉（2026-10-18 真机踩的）。 */
   towerBbox?: ReportBox4
-  /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0） */
+  /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0）。**只给"挪模型"建议方向用**——
+   *  画图请用下面的 `modelBoxes`（每个模型各一个框）。 */
   modelBbox?: ReportBox4
+  /**
+   * **每个模型各自的包围盒**（2026-10-18 作者：「做出来，分开的独立的包围盒」）。
+   *
+   * 内核按占用格的连通块切（`Occupancy::boxes`），两个模型中间隔着空 ⇒ 两个框。
+   * 旧记录 / 没算这一档 ⇒ `undefined` 或空数组，界面退回 `modelBbox` 那一个框。
+   */
+  modelBoxes?: ReportBox4[]
   /** 可打印区 */
   printable?: ReportBox4
   /** 画塔真实形状要的参数（与参数页同一套算法） */

@@ -145,6 +145,21 @@ fn relocate_geo() -> crate::hook_ipc::RelocateGeoPayload {
                 y_min: 26.0,
                 y_max: 88.0,
             },
+            /* 一个模型一个框（真机那趟是内核按占用格切出来的，这里演两件） */
+            model_boxes: vec![
+                Box4 {
+                    x_min: 40.0,
+                    x_max: 96.0,
+                    y_min: 26.0,
+                    y_max: 58.0,
+                },
+                Box4 {
+                    x_min: 52.0,
+                    x_max: 90.0,
+                    y_min: 62.0,
+                    y_max: 88.0,
+                },
+            ],
             printable: Box4 {
                 x_min: 0.0,
                 x_max: 256.0,
@@ -326,12 +341,13 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
     }
 
     /*
-     * **挪塔那一问**（2026-10-18）：真钩子里排在管线之前的碰撞预检那一档 ——
-     * 这里同一个位置。答 `relocate` 就往下演（塔挪了），别的收成已停止。
+     * **挪塔那一问**（2026-10-18）：真钩子里它住内核第 6 步（`Step::Collision`）——
+     * 开发台是"不跑管线、只演那一屏"，所以顺序仍按演示走。答 `relocate` 就往下演
+     * （塔挪了），别的收成已停止。
      */
     if opts.tower_relocate {
         let asked = sink.ask_relocate(
-            "擦料塔与模型撞上了（97 个冲突点）—— 要我把塔挪到不撞的位置，还是你自己去挪模型？",
+            "擦料塔与模型发生碰撞，是否自动调整擦料塔位置？",
             relocate_geo(),
         );
         if asked.as_deref() != Some("relocate") {

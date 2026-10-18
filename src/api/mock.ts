@@ -75,16 +75,16 @@ function devPostProcessRun(): PostProcessRun | null {
     finished: null,
     question: {
       questionKind: 'tower-relocation',
-      text: '擦料塔与模型撞上了（97 个冲突点）—— 要我把塔挪到不撞的位置，还是你自己去挪模型？',
+      text: '擦料塔与模型发生碰撞，是否自动调整擦料塔位置？',
       deadlineUnixMs: Date.now() + 110_000,
       choices: [
         {
           id: 'relocate',
-          label: '把塔挪到不撞的位置',
+          label: '自动调整塔位置',
           hint: '只改这一趟，预设文件不动',
           accent: true,
         },
-        { id: 'model', label: '我自己去挪模型', hint: '这一趟停下，原文件不动', accent: false },
+        { id: 'model', label: '停止并自己挪模型', hint: '这一趟停下，原文件不动', accent: false },
       ],
       geo: {
         current: [78, 91],
@@ -105,6 +105,11 @@ function devPostProcessRun(): PostProcessRun | null {
           ],
           towerBbox: { xMin: 70, xMax: 87.04, yMin: 84, yMax: 101.04 },
           modelBbox: { xMin: 40, xMax: 96, yMin: 26, yMax: 88 },
+          /* 一个模型一个框（真机那趟是内核按占用格切出来的，这里给预览两件） */
+          modelBoxes: [
+            { xMin: 40, xMax: 96, yMin: 26, yMax: 58 },
+            { xMin: 52, xMax: 90, yMin: 62, yMax: 88 },
+          ],
           printable: { xMin: 0, xMax: 256, yMin: 0, yMax: 256 },
           tower: {
             outerStructure: 'brim',

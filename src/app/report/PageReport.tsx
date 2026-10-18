@@ -674,12 +674,18 @@ function buildGroups(detail: ReportDetail): Group[] {
     /*
      * 两幅板子（2026-10-18 作者：「成功挪塔的也可以显示，画出来碰撞位置，就是把后处理的
      * 那两个板子也做进报告页面」）—— 事实跟着 `relocation.before` 走，所以成功那趟也画得出。
+     *
+     * ★ 只在**真的挪过**时才摆（作者 2026-10-18：「这个失败的，就是没有移动的，就不要
+     *   显示塔位变化了」）：答「自己挪模型」/ 超时 / 板上没有空位时 `to` 是 `null`，
+     *   图里只剩一幅「现在」加一支没有终点的箭头 —— 等于凭空说"塔要过去"。
+     *   那种记录看上面「挪塔」那一组（你的选择 / 塔位置（没有挪）/ 塔高）就够了。
      */
-    if (r.before != null) {
+    const moved = r.to != null && (r.to[0] !== r.from[0] || r.to[1] !== r.from[1])
+    if (r.before != null && moved) {
       groups.push({
         id: 'relocation-map',
         title: '塔位变化',
-        sum: r.to != null ? '现在 / 挪后' : '现在',
+        sum: '现在 / 挪后',
         cells: [],
       })
     }

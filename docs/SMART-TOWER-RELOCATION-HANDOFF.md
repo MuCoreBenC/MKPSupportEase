@@ -3,6 +3,10 @@
 > 日期：2026-10-18 ｜ 分支：`feat/dark-mode`（工作区未提交）
 > 范围：碰撞检测 → 「自动挪塔 / 自己挪模型」那一问 → 两幅俯视图 + 坐标 → 设置页开关
 > 状态：**代码全部落地并全绿**；「答 relocate 之后管线真的跑完」这一条**只差真机验收**
+>
+> ★ **2026-10-18 晚更新**：那一问已按**方案 B** 挪进内核第 6 步（`Step::Collision`）——
+> `hook.rs` 里那块**碰撞预检已删除**，本文 §2 的链路图与 §9 的"0% 查证"是**改造前**的记录，
+> 保留作沿革。改造后的设计与落地清单见 `docs/PIPELINE-TOWER-ASK-HANDOFF.md`。
 
 ---
 
@@ -27,19 +31,21 @@ gcode + 预设 toml
    ↓ preset::load_ir                       crates/preset
    ↓ postproc_prefs::apply_to_ir           src-tauri/src/runtime/postproc_prefs.rs
        └─ ir.prefs.auto_tower_position ← 设置页开关（PostprocModeSection「智能塔位置」）
-   ↓ hook::run 的「碰撞预检」                 src-tauri/src/hook.rs
-       ├─ detect_tower_collision（与管线第 6 步**同一个函数**）
-       ├─ auto_tower_position_for_facts（内核算法）
-       ├─ Client::ask_with_geo(QKIND_TOWER_RELOCATION, …, geo)
-       │     geo = { collision: CollisionFacts, candidate: [x,y]|null, current: [x,y] }
-       └─ 答 relocate ⇒ 改 ir.wiping.wiper_x/y，**继续进管线**
-          答 model / 超时 / 没界面 ⇒ 什么都不改 ⇒ 管线第 6 步照旧撞、照旧报错归档
-   ↓ pipeline 12 步（第 6 步 collision 复检：干净就一路跑完）
+   ↓ hook::run                             src-tauri/src/hook.rs
+       └─ 装了界面 + 开关开着 ⇒ 递一个 `ChannelTowerAsk` 进管线（否则 `ask = None`）
+   ↓ pipeline 12 步（**2026-10-18 晚：问句已挪进第 6 步**）
+       第 6 步 collision：
+         ├─ detect_tower_collision（判据只此一份）
+         ├─ 撞了 ⇒ `TowerAsk::ask`（钩子那一份：Client::ask_with_geo + 几何）
+         │     geo = { collision: CollisionFacts, candidate: [x,y]|null, current: [x,y] }
+         ├─ 答 relocate ⇒ 改 ir.wiping.wiper_x/y（只这一趟）⇒ **复检**
+         │     干净 ⇒ 继续跑完；仍撞 ⇒ Err(Collision)（记录 verified=false）
+         └─ 答 model / 超时 ⇒ Err(Collision)；按了停止 ⇒ Err(Cancelled)
 ```
 
-**为什么预检而不在管线里问**：管线是算法层，**不持问句通道**（机型那一问、校准件那一问
-也都住 `hook.rs`）。预检用同一个 `detect_tower_collision` ⇒ **判据仍只有一份**，代价是
-多扫一遍 G-code（几十毫秒）。
+**为什么在管线里问（方案 B）**：那一问本来就该发生在"真的判到撞"的那一刻 —— 放在开跑之前，
+既让进度条从 0% 起（预检一条事件都不发），又把 `detect_mode` / 擦料决策 / 碰撞扫描各跑两遍。
+内核只认一条窄缝（`TowerAsk`），界面与归档仍在钩子层，所以"算法层不持通道"这条没被破坏。
 
 **问句通道复用**：`Client::ask_with_geo` 走现成的两段倒计时（8s 宽限 + 110s 答题 ≈ 118s，
 作者要的"120 秒自动停"），超时 = `stop` ⇒ 管线照旧撞、照旧报错。

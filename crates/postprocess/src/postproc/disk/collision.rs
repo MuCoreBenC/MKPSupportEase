@@ -79,8 +79,12 @@ pub struct CollisionFacts {
     pub conflict_points: Vec<[f64; 2]>,
     /// **判据用的塔包围盒**（含外围结构扩展；左下角 = `wiper_x` / `wiper_y`）
     pub tower_bbox: Box4,
-    /// 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0 框，界面按 `kind` 判）
+    /// 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0 框，界面按 `kind` 判）。
+    /// **"挪模型"的建议方向按它算**；画图用下面的 `model_boxes`。
     pub model_bbox: Box4,
+    /// **每个模型各自的包围盒**（2026-10-18）：按占用格连通块切出来的，图上画成
+    /// 一个个框。空数组 = 旧记录 / 这一档没算（界面退回 `model_bbox`）。
+    pub model_boxes: Vec<Box4>,
     /// 可打印区外接框（mm，机器坐标）：**gcode 里切片器写下的 `; printable_area` 优先**
     /// （[`printable_area_of`]），gcode 没写才退回机型 toml 的 `min_x…max_y`
     pub printable: Box4,
@@ -96,6 +100,47 @@ pub struct CollisionFacts {
     /// 位移为零 = 没有方向可画（"挪不开"那一档）。
     pub arrow_from: [f64; 2],
     pub arrow_vec: [f64; 2],
+}
+
+/// 第 6 步撞了之后"要不要问人"的那条缝 —— **内核只认这一条**。
+///
+/// 内核不知道界面、通道、归档这些东西的存在：谁想在 `Step::Collision` 停下来问人，
+/// 就实现这个 trait，从 `pipeline::process_with_ir_with_tower_ask` 递进来。
+/// **没人递 = 原行为一字不差**（直接 `Err(Collision)`）。
+pub trait TowerAsk {
+    /// 问一次。
+    ///
+    /// - `facts`：这一趟的碰撞事实（撞了多少、建议往哪、几何）；
+    /// - `candidate`：内核自动摆出来的位置（`None` = 板上没有不撞的地方）；
+    /// - `current`：现在的塔框左下角（机器坐标）；
+    /// - `tower_height_mm`：这一趟的塔高（登记用，内核不复算）。
+    fn ask(
+        &mut self,
+        facts: &CollisionFacts,
+        candidate: Option<[f64; 2]>,
+        current: [f64; 2],
+        tower_height_mm: f64,
+    ) -> TowerAskOutcome;
+
+    /// **复检回告**：内核拿改完之后的 IR 又跑了一遍 `detect_tower_collision`。
+    ///
+    /// `after = None` = 干净（可以继续）；`Some(facts)` = 仍然撞（连"撞了多少"一起给）。
+    /// ★ 判据由内核算，回调说了不算。默认空实现 —— 只想知道"要不要挪"的实现方不必覆写。
+    fn verified(&mut self, _after: Option<&CollisionFacts>) {}
+}
+
+/// 那一问的答复 —— **三条路必须分开**（作者 2026-10-18：`Option<[f64; 2]>` 分不清
+/// "用户取消 / 没有可用位置 / 交互失败"，混成一个 `None` 会让取消被当成碰撞、被记成成功）。
+#[derive(Debug, Clone, PartialEq)]
+pub enum TowerAskOutcome {
+    /// 挪到这儿（塔框左下角，机器坐标）—— 内核会复检，通过才继续
+    Moved([f64; 2]),
+    /// 用户不挪（自己去挪模型）/ 超时没人答 / 界面上没有这一问 ⇒ 这一趟按"撞了"收场
+    Declined,
+    /// 用户按了停止 ⇒ **取消**（不是碰撞失败；外层的归档不得记成成功）
+    Cancelled,
+    /// 交互本身坏了（通道断了 / 界面退回）⇒ 明确失败，不假装没事
+    Failed { message: String },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -144,6 +189,9 @@ pub struct CollisionResult {
     pub tower_bbox: Option<GBBox>,
     /// 模型挤出点的整体包围盒（禁区那一档没有）
     pub model_bbox: Option<GBBox>,
+    /// **每个模型各自的包围盒**（按占用格的连通块算；报告页画成一个个框）。
+    /// `model_bbox` 仍然保留：它是"整体一块"，给"挪模型"的建议方向用。
+    pub model_boxes: Vec<GBBox>,
     /// 避让用的**占用格**（板内挤出点，2mm 一格）—— 自动摆塔按它判"会不会压到东西"。
     /// 不进 `facts`（那是对外形状），只在这一层用。
     pub occupancy: Occupancy,
@@ -252,6 +300,65 @@ impl Occupancy {
         }
         false
     }
+
+    /// **每个模型各自的包围盒**（2026-10-18 作者：「看起来确实不是大包围盒，那你需要
+    /// 做出来，分开的独立的包围盒」）。
+    ///
+    /// 按占用格的**四连通块**算：一个模型哪怕分成很多层，它的挤出点在 2mm 格上连成
+    /// 一片 ⇒ 一块；两个模型中间隔着空 ⇒ 两块。于是图上画出来的是一台台模型，
+    /// 而不是把它们兜在一起的大方框。
+    ///
+    /// 单格也算一块（一个孤立的挤出点仍是板上的一件东西；真实切片里基本见不到 ——
+    /// 一份 gcode 的点密到"每个模型一大片连通"，这里不额外过滤，宁可多画一个 2mm 小框，
+    /// 也不许把"稀疏但真实"的样例切成零个框）。
+    pub fn boxes(&self) -> Vec<GBBox> {
+        let mut out = Vec::new();
+        if self.bits.is_empty() {
+            return out;
+        }
+        let mut seen = vec![false; self.bits.len()];
+        let mut stack: Vec<(usize, usize)> = Vec::new();
+        for cy in 0..self.rows {
+            for cx in 0..self.cols {
+                let idx = cy * self.cols + cx;
+                if !self.bits[idx] || seen[idx] {
+                    continue;
+                }
+                seen[idx] = true;
+                stack.push((cx, cy));
+                let (mut x0, mut x1, mut y0, mut y1) = (cx, cx, cy, cy);
+                while let Some((x, y)) = stack.pop() {
+                    x0 = x0.min(x);
+                    x1 = x1.max(x);
+                    y0 = y0.min(y);
+                    y1 = y1.max(y);
+                    let neighbours = [
+                        (x.wrapping_sub(1), y),
+                        (x + 1, y),
+                        (x, y.wrapping_sub(1)),
+                        (x, y + 1),
+                    ];
+                    for (nx, ny) in neighbours {
+                        if nx >= self.cols || ny >= self.rows {
+                            continue;
+                        }
+                        let i = ny * self.cols + nx;
+                        if self.bits[i] && !seen[i] {
+                            seen[i] = true;
+                            stack.push((nx, ny));
+                        }
+                    }
+                }
+                out.push(GBBox {
+                    x_min: self.origin_x + x0 as f64 * self.cell,
+                    x_max: self.origin_x + (x1 as f64 + 1.0) * self.cell,
+                    y_min: self.origin_y + y0 as f64 * self.cell,
+                    y_max: self.origin_y + (y1 as f64 + 1.0) * self.cell,
+                });
+            }
+        }
+        out
+    }
 }
 
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
@@ -277,7 +384,8 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
      * 避让用的占用格：**与"撞没撞"同一批挤出点**（板内），见 [`Occupancy`]。
      * 单独扫一遍（几十毫秒）—— 比把它塞进下面那条多层循环清楚得多。
      */
-    result.occupancy = occupancy_of(content, &bed_of(ir_data, result.printable));
+    let bed = bed_of(ir_data, result.printable);
+    result.occupancy = occupancy_of(content, &bed);
     let tower_bbox = calculate_tower_collision_bbox(ir_data, result.tower_height);
 
     result.tower_bbox = Some(tower_bbox);
@@ -299,6 +407,37 @@ pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResu
             result.required_move_y = dy;
             return result;
         }
+    }
+
+    /*
+     * ★★★ **边缘带**（机型表 `edgeZone`，A1 = 10mm）：塔整块要落在"往里收一圈"的
+     * 可摆放区里。与 [`auto_tower_position`] 共用 [`placement_bed`] —— 判的和摆的
+     * 是同一条边。（2026-10-18 作者真机：「y 怎么可能为 0」—— 以前只有摆的算法，
+     * 而且只按打印范围。）
+     *
+     * 归到 `Forbidden` 那一档：它和"机型额外禁区"是同一类事（板上一片不能放东西的
+     * 区域），建议句与自动挪塔都走现成那条路。
+     */
+    let place = placement_bed(ir_data, &bed);
+    let push = |min: f64, max: f64, lo: f64, hi: f64| -> f64 {
+        if min < lo {
+            lo - min
+        } else if max > hi {
+            hi - max
+        } else {
+            0.0
+        }
+    };
+    let push_x = push(tower_bbox.x_min, tower_bbox.x_max, place.x_min, place.x_max);
+    let push_y = push(tower_bbox.y_min, tower_bbox.y_max, place.y_min, place.y_max);
+    if push_x != 0.0 || push_y != 0.0 {
+        result.has_collision = true;
+        result.collision_type = CollisionType::Forbidden;
+        result.conflict_count = 1;
+        result.direction_cn = "擦料塔压在板子边缘带上".to_string();
+        result.required_move_x = push_x;
+        result.required_move_y = push_y;
+        return result;
     }
 
     detect_tower_collision_all_layers(
@@ -371,6 +510,7 @@ impl CollisionResult {
                 .collect(),
             tower_bbox: self.tower_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
             model_bbox: self.model_bbox.map(|b| Box4::of(&b)).unwrap_or_default(),
+            model_boxes: self.model_boxes.iter().map(Box4::of).collect(),
             printable: self.printable.unwrap_or(Box4 {
                 x_min: ir.machine.min_x,
                 x_max: ir.machine.max_x,
@@ -674,12 +814,49 @@ const WIPER_X_MAX: f64 = 260.0;
 const WIPER_Y_MIN: f64 = 0.0;
 const WIPER_Y_MAX: f64 = 265.0;
 
+/// 机型表的 `[dimensions] edgeZone`：板子最外面这一圈**不放擦料塔**。
+///
+/// 为什么读机型表而不是 IR 上的字段：IR 只抄了运动范围 / 涂胶区那几格，`edgeZone`
+/// 没有对应字段；机型表是这一格的**唯一真值**（与 `fill_machine_dims_from_toml`
+/// 同一个来源）。机型名为空 / 表里没有这台机器 ⇒ 0（= 不做这一道）。
+fn edge_zone_of(ir_data: &Ir) -> f64 {
+    if ir_data.machine.machine_type.is_empty() {
+        return 0.0;
+    }
+    crate::postproc::machine_dims::get_machine_dimensions(&ir_data.machine.machine_type).edge_zone
+}
+
+/// **可摆放区** = 打印范围往里收一圈 `edgeZone`。
+///
+/// ★★★ 这是"塔能放哪"的**唯一**出口：自动摆塔（挑位置）与碰撞检测（判要不要挪）
+/// 都走它。以前只有前者、而且只按打印范围 —— 于是自动摆出来的位置能贴在板边上
+/// （作者真机看到「Y 怎么可能为 0」）。两个入口共用一条边，才不会出现
+/// "判的是一套、摆的是另一套"。
+fn placement_bed(ir_data: &Ir, bed: &Box4) -> Box4 {
+    let e = edge_zone_of(ir_data);
+    /* `is_nan` 单独写：`e <= 0.0` 对 NaN 是 false，不能拿它当"没有边缘带" */
+    if e.is_nan() || e <= 0.0 {
+        return *bed;
+    }
+    let mut b = *bed;
+    /* 板子比两圈还小就整块不动（那种机器配的 edgeZone 本身就不成立） */
+    if b.x_max - b.x_min > 2.0 * e {
+        b.x_min += e;
+        b.x_max -= e;
+    }
+    if b.y_max - b.y_min > 2.0 * e {
+        b.y_min += e;
+        b.y_max -= e;
+    }
+    b
+}
+
 /// **自动摆塔**（2026-10-18 作者定的口径：模型与塔相撞时，自动挑一个不撞的塔位置，
 /// 画出来给用户确认；**只改这一趟的 `wiper_x` / `wiper_y`，不落盘**）。
 ///
 /// 算法（作者选的"区间内网格搜索"）：在允许的 `wiper_x` / `wiper_y` 区间里按网格扫，
-/// 挑**离原位最近**、且 ① 塔框整个落在打印范围（板子）内 ② 不与模型包围盒相交
-/// ③ 不与机型禁区相交 的那一个。
+/// 挑**离原位最近**、且 ① 塔框整个落在**可摆放区**（打印范围扣掉 `edgeZone`）内
+/// ② 不与占用格（模型 / 支撑 / 原塔的挤出点）相交 ③ 不与机型禁区相交 的那一个。
 /// `None` = 整块板都摆不下 —— 那就只剩"自己挪模型 / 改工艺"两条路，由上层说。
 pub fn auto_tower_position(
     ir_data: &Ir,
@@ -695,6 +872,8 @@ pub fn auto_tower_position(
     if w <= 0.0 || h <= 0.0 {
         return None;
     }
+    /* 边缘带先扣掉（检测那边用的是同一个函数 —— 摆出来的位置必然过得了复检） */
+    let bed = &placement_bed(ir_data, bed);
     let lo_x = bed.x_min.max(WIPER_X_MIN);
     let hi_x = bed.x_max.min(WIPER_X_MAX) - w;
     let lo_y = bed.y_min.max(WIPER_Y_MIN);
@@ -829,6 +1008,9 @@ fn detect_tower_collision_all_layers(
         y_max: ir_data.machine.max_y,
     });
 
+    /* 只装**模型**的占用格（不含切片器的 prime tower）—— 扫完按连通块切成一个个框 */
+    let mut model_occ = Occupancy::new(&bed, 2.0);
+
     let total_lines = content.len();
     let (sample_interval, max_conflict_points) = if total_lines > 10000 {
         (500i64, 500usize)
@@ -907,6 +1089,8 @@ fn detect_tower_collision_all_layers(
                 prime_tower_conflict_count += 1;
             }
         } else {
+            /* 一个个模型的框靠这片点云切（见 `Occupancy::boxes`） */
+            model_occ.mark(x_coord, y_coord);
             if !model_bbox_tracking {
                 model_bbox_tracking = true;
                 model_min_x = x_coord;
@@ -982,6 +1166,9 @@ fn detect_tower_collision_all_layers(
             resolve_model_adjustment(result, &ref_bbox, tower_bbox, &bed_bbox, &conflict_points);
     }
 
+    /* 每个模型各自的框（2026-10-18 作者：「做出来，分开的独立的包围盒」）——
+    与"有没有撞"无关：只要板上有模型点，就切出来，报告页照它画。 */
+    result.model_boxes = model_occ.boxes();
     result
 }
 
@@ -1593,6 +1780,10 @@ mod tests {
             "塔高要认 header 的 ; max_z_height：{}",
             r.tower_height
         );
+        assert!(
+            !r.model_boxes.is_empty(),
+            "真实样例应当按连通块切出模型框（作者要的\"分开的\"那几个框）"
+        );
 
         let facts = r.facts(&ir);
         let at = auto_tower_position_for_facts(&ir, &facts, &r.occupancy, r.tower_height)
@@ -1634,6 +1825,94 @@ mod tests {
         assert!(
             !(x0 < 45.0 && x1 > 30.0 && y0 < 45.0 && y1 > 30.0),
             "新塔框不许压到那片挤出点：{at:?}"
+        );
+    }
+
+    /// 分开的独立包围盒（2026-10-18 作者：「做出来，分开的独立的包围盒」）：
+    /// 两坨点中间隔着空 ⇒ 两个框；一个孤点自己一个小框。
+    #[test]
+    fn models_get_their_own_boxes() {
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 64.0,
+            y_min: 0.0,
+            y_max: 64.0,
+        };
+        let mut occ = Occupancy::new(&bed, 2.0);
+        for x in [10.0, 12.0, 14.0] {
+            for y in [10.0, 12.0] {
+                occ.mark(x, y);
+            }
+        }
+        for x in [40.0, 42.0] {
+            for y in [40.0, 42.0, 44.0] {
+                occ.mark(x, y);
+            }
+        }
+        occ.mark(60.0, 4.0);
+        let boxes = occ.boxes();
+        assert_eq!(boxes.len(), 3, "两坨点 + 一个孤点 ⇒ 三个框：{boxes:?}");
+        let has = |x0: f64, x1: f64, y0: f64, y1: f64| {
+            boxes.iter().any(|b| {
+                (b.x_min - x0).abs() < 1e-9
+                    && (b.x_max - x1).abs() < 1e-9
+                    && (b.y_min - y0).abs() < 1e-9
+                    && (b.y_max - y1).abs() < 1e-9
+            })
+        };
+        assert!(has(10.0, 16.0, 10.0, 14.0), "第一坨：{boxes:?}");
+        assert!(has(40.0, 44.0, 40.0, 46.0), "第二坨：{boxes:?}");
+        assert!(
+            has(60.0, 62.0, 4.0, 6.0),
+            "孤点自己一个 2mm 小框：{boxes:?}"
+        );
+    }
+
+    /// **边缘带不许放塔**（2026-10-18 作者真机：自动摆出来的位置 `Y = 0.0` —— 贴在板边）。
+    ///
+    /// 机型表的 `edgeZone`（A1 = 10mm）是"最外面这一圈不放东西"。自动摆塔与碰撞检测
+    /// 共用 `placement_bed`：摆出来的位置整个在圈内，复检也按同一条边判。
+    #[test]
+    fn the_edge_band_keeps_the_tower_off_the_border() {
+        let mut ir = tower_ir();
+        ir.machine.machine_type = "A1".to_owned();
+        let bed = Box4 {
+            x_min: 0.0,
+            x_max: 256.0,
+            y_min: 0.0,
+            y_max: 256.0,
+        };
+        let w = 57.04 - 22.96;
+        let at = auto_tower_position(&ir, &bed, &Occupancy::new(&bed, 2.0), &[], 0.0)
+            .expect("空板摆得下");
+        assert!(
+            at[0] >= 10.0 - 1e-9 && at[1] >= 10.0 - 1e-9,
+            "塔框不许压进边缘带（A1 edgeZone=10）：{at:?}"
+        );
+        assert!(
+            at[0] + w <= 246.0 + 1e-9 && at[1] + w <= 246.0 + 1e-9,
+            "另一侧同样不许贴边：{at:?}"
+        );
+    }
+
+    /// 塔已经压在边缘带上 ⇒ 报 `forbidden`（= 改塔位置那一档），并给出往里推多少。
+    #[test]
+    fn a_tower_on_the_edge_band_is_pushed_inward() {
+        let mut ir = tower_ir();
+        ir.machine.machine_type = "A1".to_owned();
+        /* 原位 (0,0) ⇒ 塔框从 2.96 起，压进 10mm 边缘带 */
+        ir.wiping.wiper_x = 0.0;
+        ir.wiping.wiper_y = 0.0;
+        let r = detect_tower_collision(&lines(&["G1 X200 Y200 E0.5"]), &ir);
+        assert!(r.has_collision, "贴边的塔要报出来");
+        assert_eq!(r.conflict_count, 1);
+        let facts = r.facts(&ir);
+        assert_eq!(facts.kind, "forbidden");
+        assert!(
+            facts.required_move_x > 0.0 && facts.required_move_y > 0.0,
+            "要往里推：x={} y={}",
+            facts.required_move_x,
+            facts.required_move_y
         );
     }
 

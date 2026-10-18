@@ -19,6 +19,13 @@
    再压一档：「原本的再小一点」）—— 报告页里只当缩略图，看细节走放大层那一套 */
 .map {
   position: relative;
+  /*
+   * ★★ **自成层叠上下文**（2026-10-18 修）：里面塔图 `z-index: 2`、箭头 `z-index: 3`，
+   *   而这一层自己不建上下文时，那两个层级会一路浮到页面根上 —— 于是报告页左栏
+   *   展开（`.side` z 2）时，**塔和箭头从面板里钻出来**压在列表上（作者截图）。
+   *   `isolation: isolate` 只建上下文、不改布局，也不裁掉板描边。
+   */
+  isolation: isolate;
   width: 100%;
   max-width: 240px;
   border: 1px solid var(--line);
@@ -30,6 +37,8 @@
 /* 有板规格：只当定位壳 —— 轮廓、底色、描边都由板 path 出（照 TowerMap 的分工） */
 .mapPlate {
   position: relative;
+  /* 同 `.map`：把塔图 / 箭头那两档层级关在这一层里（理由见上面） */
+  isolation: isolate;
   width: 100%;
   max-width: 240px;
   overflow: visible; /* 板描边比 viewBox 大半根，裁了会一粗一细 */

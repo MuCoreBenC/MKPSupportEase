@@ -213,8 +213,7 @@ note = "2026-10-17：校准件那一问答「直接校准」的成功结论（�
 
 ["hook.tower_relocation_question"]
 code = "Q_COLLISION_RELOCATE_001"
-text = "擦料塔与模型撞上了（{count} 个冲突点）—— 要我把塔挪到不撞的位置，还是你自己去挪模型？"
-params = ["count"]
+text = "擦料塔与模型发生碰撞，是否自动调整擦料塔位置？"
 note = "2026-10-18：挪塔那一问。开关（设置页「智能塔位置」）开着才问；答 relocate ⇒ 只改这一趟的 wiper_x/wiper_y 继续跑完；答 model / 超时 ⇒ 停下（与机型那一问同一条）。画布几何走 QuestionPayload.geo"
 
 # ---- 挪塔那一问的三种收场 + 一种"挪不动"（2026-10-18）----

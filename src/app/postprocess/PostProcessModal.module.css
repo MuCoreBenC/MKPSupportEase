@@ -367,16 +367,169 @@
 }
 
 /*
- * 说明那一页：问句 + 坐标小表 + 倒计时。
- * ★ 排版（2026-10-18 作者：「这些也没视觉对齐，没有视觉优化」）：
- *   问句整行、行高 1.55；坐标**两列网格**（标签定宽 76、值等宽数字），
- *   标签与值各自左对齐；倒计时缩一号、压暗。全部从同一条左基线起。
+ * 说明那一页（2026-10-18 第七版，作者定稿）：
+ *   问句（居中）→ **一组**横向坐标（现在 → 建议）→ **并排**的一句底（冲突点数 / 倒计时）。
+ * 三段共享一条中轴；**不用卡片、不用横线**，层次只靠字号、字重、间距。
  */
 .relocateNote {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  color: var(--text-1);
+}
+
+/* 问句：这一屏唯一一句"要你决定"的话 —— 主色 + 加粗，比正文大一号 */
+.relocateAsk {
+  margin: 0;
+  font-size: calc(var(--fs-body) + 2px);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.2px;
+  color: var(--ask-ink);
+}
+
+/*
+ * ★ 居中要**压过** `Modal.module.css` 的 `.body p { text-align: justify }`
+ *   （那条给全站正文段落上两端对齐，特异度 0,1,1 > 这里单类 0,1,0）。
+ *   这一句是"问题"，不是一段正文 —— 它跟上面两幅板共用同一条中轴。
+ */
+.relocateNote .relocateAsk {
+  text-align: center;
+}
+
+/*
+ * 一组坐标：`[当前塔位置] → [自动摆放位置]`。
+ * 网格只占内容宽（祖先 `align-items: center` 已把它摆在模态框中轴上），
+ * 两栏各自左对齐 —— 标签与它下面的值起于同一条线，读起来才是一个整体。
+ */
+.relocateCols {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  column-gap: 22px;
+}
+
+/* 每栏：标签在上、值在下，左对齐（上下两行同一条起线） */
+.relocateCol {
+  display: flex;
+  flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.relocateColLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * 两栏之间那支箭头：**与"值"那一行同高**，不是整块的几何中点。
+ * `align-self: end` 落到格底，再用半行高把它抬回值的基线上（值行高 1.25 ≈ 24）。
+ */
+.relocateSwap {
+  align-self: end;
+  display: flex;
+  margin-bottom: 5px;
+  color: var(--text-3);
+}
+
+.relocateSwap svg {
+  display: block;
+  width: 22px;
+  height: 15px;
+}
+
+/* 坐标值：大一号、等宽（换值时不跳）；目标那栏用主色 —— "要我挪到这儿" */
+.relocateValue {
+  font-size: calc(var(--fs-body) + 6px);
+  font-weight: 600;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+.relocateColNew .relocateValue {
+  color: var(--ask-ink);
+}
+
+/* X / Y 压小压暗，数字才是眼睛要找的 */
+.relocateAxis {
+  font-size: 0.7em;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.relocateSep {
+  margin: 0 4px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+/*
+ * 那句话的底：**两件事并排**（作者：「它们共同组成一个信息区，不需要再用多条横线
+ * 把内容切碎」）—— 左 = 冲突点数，右 = 倒计时，中间只留一道竖发丝线。
+ */
+.relocateMeta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  /* 与上面那组坐标再拉开一点（26 + 8）：这一句是"状况"，不是坐标的注解 */
+  margin-top: 8px;
+}
+
+/* 冲突点点数：**关键事实** ⇒ 深色 + 加粗，比标签大一号（橙只给旁边那枚警告记号） */
+.relocateHit {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.relocateHitValue {
+  font-size: calc(var(--fs-body) + 6px);
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.relocateHitUnit {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 行里那枚小图标（三角 / 时钟）：15px 方盒，颜色跟所在那一件事的语义走 */
+.relocateIcon {
+  display: flex;
+  flex: none;
+  color: var(--warn);
+}
+
+.relocateIcon svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+/* 倒计时：只是"不管会怎样"的兜底 ⇒ 灰字（浅一档），竖发丝线把它与左边分开 */
+.relocateTimer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 时钟跟着绿（同一枚 `.relocateIcon`，只换颜色） */
+.relocateIconCalm {
   color: var(--ask-ink);
 }
 
@@ -402,69 +555,6 @@
 .slotToggle:hover {
   color: var(--ink-1);
   border-color: var(--ink-3);
-}
-
-.relocateTitle {
-  font-size: var(--fs-title);
-  font-weight: 600;
-}
-
-.relocateLine {
-  font-size: var(--fs-body);
-  line-height: 1.5;
-}
-
-/*
- * 坐标小表：**两列网格**（现在塔位置 / 自动摆放 并排，冲突点独占一行），
- * 数字不取整（作者点名）、等宽（`tabular-nums`）—— 换值时不跳。
- */
-.relocateCoords {
-  margin: 0;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 4px 24px;
-  width: 100%;
-}
-
-/* 冲突点那一格独占一行（它是"撞了多少"，不是坐标） */
-.relocateCoord:nth-child(3) {
-  grid-column: 1 / -1;
-}
-
-.relocateCoord {
-  display: flex;
-  flex-direction: row;
-  align-items: baseline;
-  gap: 10px;
-  font-size: var(--fs-label);
-}
-
-/* 标签定宽 ⇒ 两列的值从同一条竖线起（原来长短不一，看着散） */
-.relocateCoord dt {
-  flex: 0 0 76px;
-  color: var(--ink-2);
-}
-
-.relocateCoord dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* 轴字母压暗一号，数字才是眼睛要找的 */
-.relocateAxis {
-  opacity: 0.55;
-}
-
-/* X / Y 之间的分隔 */
-.relocateSep {
-  margin: 0 2px;
-  opacity: 0.4;
-}
-
-.relocateHint {
-  font-size: var(--fs-label);
-  opacity: 0.7;
 }
 
 .warnGlyph {

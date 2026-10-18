@@ -990,13 +990,13 @@ impl crate::devsim::Sink for PreviewSink {
                 choices: vec![
                     crate::hook_ipc::QuestionChoice {
                         id: crate::hook_ipc::CHOICE_RELOCATE.to_owned(),
-                        label: "把塔挪到不撞的位置".to_owned(),
+                        label: "自动调整塔位置".to_owned(),
                         hint: Some("只改这一趟，预设文件不动".to_owned()),
                         accent: true,
                     },
                     crate::hook_ipc::QuestionChoice {
                         id: crate::hook_ipc::CHOICE_MODEL.to_owned(),
-                        label: "我自己去挪模型".to_owned(),
+                        label: "停止并自己挪模型".to_owned(),
                         hint: Some("这一趟停下，原文件不动".to_owned()),
                         accent: false,
                     },

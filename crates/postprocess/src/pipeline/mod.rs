@@ -46,6 +46,7 @@ use sha2::{Digest, Sha256};
 use crate::config;
 use crate::diag::{CancelToken, PostprocError};
 use crate::ir::Ir;
+use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 
 /// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
 pub const DEFAULT_SKIP_VIBRATION: bool = true;
@@ -110,8 +111,8 @@ enum IrSource {
     Prebuilt(Box<Ir>),
 }
 
-/// 管线的内部作业单：两张公开脸都归一到这里。
-struct Job {
+/// 管线的内部作业单：几张公开脸都归一到这里。
+struct Job<'a> {
     gcode_path: PathBuf,
     output_path: Option<PathBuf>,
     ir_source: IrSource,
@@ -121,6 +122,11 @@ struct Job {
     /// 打印时间是纯报告数据，内核零读取，所以可以让常驻进程接手，钩子先退。
     /// 输出 G-code 与算了的那一版**逐字节相同** —— 延后的只是"填字段"。
     compute_print_time: bool,
+    /// 第 6 步撞了之后问谁（`None` = 没人问，直接 `Err(Collision)` —— 原行为）。
+    ///
+    /// 生命周期只活在本文件里：几张嘴（CLI / 钩子 / 判据）都是**并列入口**，
+    /// `IrProcessRequest` 那个按值传的公开结构体一个字都不用动。
+    tower_ask: Option<&'a mut dyn TowerAsk>,
 }
 
 /// 处理产物（printtime 只填字段，不作为 transform）。
@@ -311,10 +317,42 @@ pub fn process_with_ir_and_cancel_interval(
             output_path: request.output_path,
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: true,
+            tower_ask: None,
         },
         sink,
         cancel,
         cancel_check_interval,
+    )
+}
+
+/// 同 [`process_with_ir`]，但**第 6 步撞了可以停下来问人**（2026-10-18 方案 B）。
+///
+/// 存在理由：那一问要发生在**真实进度 ~55%**（`Step::Collision` 入口），而且撞塔这件事
+/// 本来就在第 6 步判 —— 在管线之前再预检一遍等于把 `detect_mode` / 擦料决策 / 碰撞扫描
+/// 各跑两次，还让用户看到"0% 就停住了"。
+///
+/// **为什么不往 `IrProcessRequest` 里塞这个回调**：那个结构体是按值传的，加一个
+/// `&mut dyn TowerAsk` 就得给它挂生命周期参数 ⇒ 所有构造点跟着改，而且以后每加一条缝
+/// 都要再来一次。**并列入口**只多一个函数，老入口一字不动。
+///
+/// `ask = None` ⇒ 与 [`process_with_ir`] **完全等价**（同一份 `run`，同一个短路分支）。
+pub fn process_with_ir_with_tower_ask(
+    request: IrProcessRequest,
+    ask: Option<&mut dyn TowerAsk>,
+    sink: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<ProcessResult, PostprocError> {
+    run(
+        Job {
+            gcode_path: request.gcode_path,
+            output_path: request.output_path,
+            ir_source: IrSource::Prebuilt(Box::new(request.ir)),
+            compute_print_time: true,
+            tower_ask: ask,
+        },
+        sink,
+        cancel,
+        DEFAULT_CANCEL_CHECK_INTERVAL,
     )
 }
 
@@ -338,6 +376,29 @@ pub fn process_with_ir_deferred_print_time(
             output_path: request.output_path,
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: false,
+            tower_ask: None,
+        },
+        sink,
+        cancel,
+        DEFAULT_CANCEL_CHECK_INTERVAL,
+    )
+}
+
+/// 同 [`process_with_ir_deferred_print_time`]，但带上第 6 步那一问
+/// （理由与"并列入口"的取舍见 [`process_with_ir_with_tower_ask`]）。
+pub fn process_with_ir_deferred_print_time_with_tower_ask(
+    request: IrProcessRequest,
+    ask: Option<&mut dyn TowerAsk>,
+    sink: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<ProcessResult, PostprocError> {
+    run(
+        Job {
+            gcode_path: request.gcode_path,
+            output_path: request.output_path,
+            ir_source: IrSource::Prebuilt(Box::new(request.ir)),
+            compute_print_time: false,
+            tower_ask: ask,
         },
         sink,
         cancel,
@@ -368,6 +429,7 @@ pub fn process_with_cancel_interval(
                 overrides: request.overrides,
             },
             compute_print_time: true,
+            tower_ask: None,
         },
         sink,
         cancel,
@@ -379,7 +441,7 @@ pub fn process_with_cancel_interval(
 /// 差别只在第 2 步的 IR 从哪来；其余 11 步一个字都不分叉 ——
 /// 分叉了就等于有两条会各自漂移的产品路径。
 fn run(
-    job: Job,
+    job: Job<'_>,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
     cancel_check_interval: std::time::Duration,
@@ -389,6 +451,7 @@ fn run(
         output_path,
         ir_source,
         compute_print_time,
+        mut tower_ask,
     } = job;
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
     /// （原地模式的原文件因此保证不动）。
@@ -491,9 +554,66 @@ fn run(
             用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`）。
             **2026-10-18**：这一支带上"撞在哪 + 建议挪多少 + 俯视图几何"，
             让报告页能回答"挪多少、撞在哪"，不再只有"撞了"两个字。 */
-            return Err(PostprocError::Collision {
-                facts: Box::new(collision.facts(&ir)),
-            });
+            let Some(ask) = tower_ask.as_mut() else {
+                /* **没人问**（CLI / 没装界面 / 设置页开关关着）⇒ 一字不差的原行为 */
+                return Err(PostprocError::Collision {
+                    facts: Box::new(collision.facts(&ir)),
+                });
+            };
+            let ask: &mut dyn TowerAsk = *ask;
+            /*
+             * ★★ **停下来问人**（方案 B 的落点，2026-10-18）：进度条此刻停在第 6 步
+             * 入口那一帧（`timer.begin` 已经发过事件），等待期间**一条事件都不发** ——
+             * "停在这里等人"就是它该有的样子，前端不需要任何改动。
+             *
+             * 取消先看一眼：按了停止就别把问句推上去了。
+             */
+            checkpoint(cancel)?;
+            let facts = collision.facts(&ir);
+            let current = [ir.wiping.wiper_x, ir.wiping.wiper_y];
+            /* 候选位置与预检时代用的是同一个函数（同一份 occupancy / 塔高） */
+            let candidate = crate::postproc::disk::auto_tower_position_for_facts(
+                &ir,
+                &facts,
+                &collision.occupancy,
+                collision.tower_height,
+            );
+            match ask.ask(&facts, candidate, current, collision.tower_height) {
+                /* 用户按了停止 ⇒ 取消，**不是**碰撞失败（外层按 `Cancelled` 归档） */
+                TowerAskOutcome::Cancelled => {
+                    return Err(PostprocError::Cancelled {
+                        message: "用户已取消后处理".to_string(),
+                    });
+                }
+                /* 自己挪模型 / 超时 / 界面上没有这一问 ⇒ 这一趟按"撞了"收场 */
+                TowerAskOutcome::Declined => {
+                    return Err(PostprocError::Collision {
+                        facts: Box::new(facts),
+                    });
+                }
+                /* 交互本身坏了 ⇒ 明确失败，不拿"撞了"顶替 */
+                TowerAskOutcome::Failed { message } => {
+                    return Err(PostprocError::Processing { message });
+                }
+                TowerAskOutcome::Moved([x, y]) => {
+                    ir.wiping.wiper_x = x;
+                    ir.wiping.wiper_y = y;
+                    /*
+                     * ★★ **复检**（作者真机：「点了自动移动塔位置了，但是还是碰撞了」）：
+                     * 同一个 `detect_tower_collision`、改完之后的 IR。仍撞就**不静默继续** ——
+                     * 把"挪后的事实"交出去，外层按"挪了还撞"那句收场（并如实归档）。
+                     */
+                    let after = crate::postproc::disk::detect_tower_collision(&content, &ir);
+                    if after.has_collision {
+                        let after_facts = after.facts(&ir);
+                        ask.verified(Some(&after_facts));
+                        return Err(PostprocError::Collision {
+                            facts: Box::new(after_facts),
+                        });
+                    }
+                    ask.verified(None);
+                }
+            }
         }
     }
 
