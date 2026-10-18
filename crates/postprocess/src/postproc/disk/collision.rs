@@ -364,27 +364,30 @@ impl Occupancy {
         ]
     }
 
+    /// 一块格子的外接框（机器坐标）
+    fn bbox_of(&self, cells: &[(usize, usize)]) -> GBBox {
+        let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0usize, usize::MAX, 0usize);
+        for &(x, y) in cells {
+            x0 = x0.min(x);
+            x1 = x1.max(x);
+            y0 = y0.min(y);
+            y1 = y1.max(y);
+        }
+        GBBox {
+            x_min: self.origin_x + x0 as f64 * self.cell,
+            x_max: self.origin_x + (x1 as f64 + 1.0) * self.cell,
+            y_min: self.origin_y + y0 as f64 * self.cell,
+            y_max: self.origin_y + (y1 as f64 + 1.0) * self.cell,
+        }
+    }
+
     /// **每个模型各自的包围盒**（2026-10-18 作者：「看起来确实不是大包围盒，那你需要
     /// 做出来，分开的独立的包围盒」）。图上优先画 [`Self::polygons`]；这个是兜底与
     /// "整块在不在板内"那类判据用。
     pub fn boxes(&self) -> Vec<GBBox> {
         self.components()
             .iter()
-            .map(|cells| {
-                let (mut x0, mut x1, mut y0, mut y1) = (usize::MAX, 0usize, usize::MAX, 0usize);
-                for &(x, y) in cells {
-                    x0 = x0.min(x);
-                    x1 = x1.max(x);
-                    y0 = y0.min(y);
-                    y1 = y1.max(y);
-                }
-                GBBox {
-                    x_min: self.origin_x + x0 as f64 * self.cell,
-                    x_max: self.origin_x + (x1 as f64 + 1.0) * self.cell,
-                    y_min: self.origin_y + y0 as f64 * self.cell,
-                    y_max: self.origin_y + (y1 as f64 + 1.0) * self.cell,
-                }
-            })
+            .map(|cells| self.bbox_of(cells))
             .collect()
     }
 
@@ -395,15 +398,25 @@ impl Occupancy {
     /// 这里交的是这一块点的**凸包**（保证包住全部点：碰撞示意图不许比真实占地小），
     /// 顶点超过 [`MODEL_POLY_MAX_POINTS`] 时按"最没信息量的那个角"逐个削掉。
     ///
-    /// 少于 3 个顶点的块（一两个孤点）不画多边形 —— 交给 `boxes()` 那个小矩形。
+    /// ★ **一块都不丢**：点稀到凸包只有一两个顶点（稀疏 G-code / 孤点）时，退回这一块
+    /// 自己的小矩形 —— 界面上"少一个模型"比"多一个方角"更容易被当成 bug。
     pub fn polygons(&self) -> Vec<Vec<[f64; 2]>> {
         self.components()
             .iter()
             .map(|cells| {
                 let points: Vec<[f64; 2]> = cells.iter().map(|&c| self.cell_center(c)).collect();
-                simplify_polygon(crate::postproc::disk::wipe::convex_hull(&points))
+                let hull = crate::postproc::disk::wipe::convex_hull(&points);
+                if hull.len() >= 3 {
+                    return simplify_polygon(hull);
+                }
+                let b = self.bbox_of(cells);
+                vec![
+                    [b.x_min, b.y_min],
+                    [b.x_max, b.y_min],
+                    [b.x_max, b.y_max],
+                    [b.x_min, b.y_max],
+                ]
             })
-            .filter(|poly| poly.len() >= 3)
             .collect()
     }
 }
@@ -1242,9 +1255,10 @@ fn detect_tower_collision_all_layers(
             resolve_model_adjustment(result, &ref_bbox, tower_bbox, &bed_bbox, &conflict_points);
     }
 
-    /* 每个模型各自的框（2026-10-18 作者：「做出来，分开的独立的包围盒」）——
-    与"有没有撞"无关：只要板上有模型点，就切出来，报告页照它画。 */
+    /* 每个模型各自的框与轮廓（2026-10-18 作者：「做出来，分开的独立的包围盒」／
+    「真的做成俯视图，多边形的」）—— 与"有没有撞"无关：只要板上有模型点就切。 */
     result.model_boxes = model_occ.boxes();
+    result.model_polygons = model_occ.polygons();
     result
 }
 
@@ -1859,6 +1873,17 @@ mod tests {
         assert!(
             !r.model_boxes.is_empty(),
             "真实样例应当按连通块切出模型框（作者要的\"分开的\"那几个框）"
+        );
+        assert!(
+            !r.model_polygons.is_empty(),
+            "真实样例也要交出轮廓（俯视图画的是它，不是矩形）"
+        );
+        assert!(
+            r.model_polygons
+                .iter()
+                .all(|poly| (3..=MODEL_POLY_MAX_POINTS).contains(&poly.len())),
+            "轮廓顶点数要落在 3..=24：{:?}",
+            r.model_polygons.iter().map(Vec::len).collect::<Vec<_>>()
         );
 
         let facts = r.facts(&ir);
