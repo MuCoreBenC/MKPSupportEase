@@ -32,8 +32,9 @@
 //!
 //! 拿不到窗口列表（系统不给 / 以后收紧了这个接口）时返回 `None`，调用方
 //! （`ipc::guide::decide`）会**退回 AX 那套口径**，而不是瞎猜。
-
-#![cfg(target_os = "macos")]
+//!
+//! ★ **非 macOS 也走这条兜底**：CoreGraphics 只有 macOS 有，其它平台 `slicer_window`
+//! 恒 `None` —— 于是那边一切照旧按 AX 口径走（本就没有"层序"这一说）。
 
 /// 切片器窗口在系统层序里的处境。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -52,9 +53,20 @@ pub struct SlicerWindow {
 
 /// 切片器窗口的层级处境。`None` = 问不到（调用方退回 AX 口径）。
 pub fn slicer_window(bbs_pid: i32) -> Option<SlicerWindow> {
-    mac::slicer_window(bbs_pid)
+    #[cfg(target_os = "macos")]
+    {
+        mac::slicer_window(bbs_pid)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        /* ★ CoreGraphics 的窗口列表只有 macOS 有 —— 别处恒 `None`，
+           调用方（`ipc::guide::decide`）会退回 AX 那条口径。 */
+        let _ = bbs_pid;
+        None
+    }
 }
 
+#[cfg(target_os = "macos")]
 mod mac {
     use std::ffi::c_void;
 

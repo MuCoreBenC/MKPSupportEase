@@ -73,7 +73,8 @@ pub mod retention;
 pub mod runtime;
 /// **切片器窗口被谁盖住了**：问 CoreGraphics 的窗口列表（**按层序从前往后**）。
 /// 用来判"别的软件压上来了 ⇒ 卡片该收起来" —— 用**层级**而不是 AX 的"焦点"。
-/// ★ 只有 macOS 有（`#![cfg(target_os = "macos")]` 在文件里）；调用点见 `ipc::guide`。
+/// ★ 底下的窗口列表 API 只有 macOS 有（`mod mac` 在文件里 cfg 掉了）；
+/// 其它平台 `slicer_window` 恒 `None`，调用点见 `ipc::guide`。
 pub mod zorder;
 
 // 工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译

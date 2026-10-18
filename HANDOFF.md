@@ -2431,3 +2431,27 @@ BBS 显示什么不显示什么」。之前那一轮的结论（"切片器不吃
   命令注册两份清单都加了（`lib.rs`）；mock 照实拒（浏览器没有系统设置）。
 - 验证：`tsc -b` / 双 feature clippy / `cargo test --lib`（558）/ `--features workbench`（934）/
   `npm run lint` / `npm run build` + 三道 check。全绿。
+
+## 增量之三十八 · Windows 构建补平台兜底：`zorder` 跨平台 + `slicer` 名字类型归位（2026-10-18，分支 `feat/dark-mode`）
+
+**病根：拉取最新（`b97f4e7`）后 Windows 上 `npm run tauri dev` 编译不过（5 错）**
+
+- `error[E0433] cannot find zorder` ×3（`ipc/guide.rs` 218 / 631 / 640）：`zorder.rs` 整文件挂着
+  `#![cfg(target_os = "macos")]`，Windows 上这个模块是**空的**，而 `ipc::guide` 无条件引用
+  `crate::zorder::SlicerWindow` / `slicer_window` —— 文件级 cfg 没给别处留兜底。
+- `error[E0308]` ×2（`ipc/slicer.rs:282`）：`known_label` 回 `Option<&'static str>`、
+  `app_stem` 回 `String`，`unwrap_or_else` 两侧不同型；下游 `SlicerApp.name` 要 `String`。
+
+**治法（沿用仓里既有的「平台兜底」双 cfg，见 `ax.rs` / `ipc::guide`）**
+
+- `zorder.rs`：删掉文件级 `#![cfg(target_os = "macos")]`，改为只把 `mod mac`（CoreGraphics 那半）
+  挂 `#[cfg(target_os = "macos")]`；`slicer_window` 拆双 cfg，非 macOS **恒 `None`**
+  —— 调用方自然退回 AX 口径（本就没有"层序"这一说）。文件头「兜底」节补一句非 macOS 说明。
+- `lib.rs`（`pub mod zorder` 旁注）：口径同步改成「窗口列表 API 只有 macOS 有（`mod mac` cfg 掉了）；
+  其它平台 `slicer_window` 恒 `None`」。
+- `ipc/slicer.rs`：`known_label(&path).map(str::to_string).unwrap_or_else(|| app_stem(&path))`。
+
+**验证**
+
+- `cargo check --no-default-features`（Windows）：绿。仅剩 8 条 macOS-only 死代码 warning
+  （`ax.rs` / `guide.rs` 里那几张表和函数在别的平台上本来就编不出来，非本次引入）。
