@@ -265,7 +265,7 @@ export default function TopTabs({
       {!isMac && (
         <div className={s.controls}>
           <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
-            <Icon name="min" size={11} strokeWidth={1.5} />
+            <Icon name="min" size={15} strokeWidth={1.5} />
           </button>
           <button
             type="button"
@@ -273,10 +273,10 @@ export default function TopTabs({
             aria-label={maximized ? '还原' : '最大化'}
             onClick={winToggleMaximize}
           >
-            <Icon name={maximized ? 'restore' : 'max'} size={11} strokeWidth={1.5} />
+            <Icon name={maximized ? 'restore' : 'max'} size={15} strokeWidth={1.5} />
           </button>
           <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭" onClick={winClose}>
-            <Icon name="close" size={11} strokeWidth={1.5} />
+            <Icon name="close" size={15} strokeWidth={1.5} />
           </button>
         </div>
       )}

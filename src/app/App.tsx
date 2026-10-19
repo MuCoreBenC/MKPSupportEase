@@ -88,14 +88,125 @@ const PLATFORM = detectPlatform()
  * 与 `home/Skeleton` 同一条规矩：**灰条就是灰条，不预先填字**。它只在"第一次点开
  * 某一页、那一页的模块还在下载/编译"时出现；模块到了整棵换成真页面。
  */
-function PageLoading() {
+type PageLayout = 'list' | 'wizard' | 'split' | 'form'
+
+/**
+ * 每种页型一具轮廓 —— 点开「预设」看到的是一张表的形状，点开「校准」看到的是
+ * 向导的形状，而不是统一的五根条子。
+ *
+ * 只在**模块还没下载/编译完**的那一瞬出现（见文件头那几条 `lazy`）；数据加载
+ * 各页有自己的加载态，与这一层无关。仍然是灰条就是灰条，不预填任何字。
+ */
+function PageLoading({ layout }: { layout: PageLayout }) {
   return (
-    <div className={s.pageLoading} role="status" aria-label="页面正在加载">
-      <Skeleton width="9em" />
-      <Skeleton width="16em" />
-      <Skeleton width="100%" />
-      <Skeleton width="100%" />
-      <Skeleton width="72%" />
+    <div className={s.pageLoading} data-layout={layout} role="status" aria-label="页面正在加载">
+      {layout === 'list' && (
+        <>
+          <div className={s.skRow}>
+            <Skeleton width="5.4em" />
+            <Skeleton width="5.4em" />
+            <span className={s.skGrow} />
+            <Skeleton width="3.6em" />
+            <Skeleton width="3.6em" />
+            <Skeleton width="13em" />
+          </div>
+          <div className={s.skRow}>
+            <Skeleton width="12em" />
+            <span className={s.skGrow} />
+            <Skeleton width="9em" />
+          </div>
+          <div className={s.skTable}>
+            <div className={s.skTableRow}>
+              <Skeleton width="70%" />
+              <Skeleton width="55%" />
+              <Skeleton width="60%" />
+              <Skeleton width="50%" />
+              <Skeleton width="58%" />
+            </div>
+            {[0, 1, 2].map((i) => (
+              <div key={i} className={s.skTableRow}>
+                <Skeleton width={i === 1 ? '84%' : '66%'} />
+                <Skeleton width="52%" />
+                <Skeleton width="70%" />
+                <Skeleton width="48%" />
+                <Skeleton width="56%" />
+              </div>
+            ))}
+          </div>
+          <div className={s.skFoot}>
+            <Skeleton width="55%" />
+          </div>
+        </>
+      )}
+      {layout === 'wizard' && (
+        <>
+          <div className={s.skRow}>
+            <Skeleton width="4.2em" />
+            <Skeleton width="4.2em" />
+            <Skeleton width="4.2em" />
+            <span className={s.skGrow} />
+            <Skeleton width="7em" />
+          </div>
+          <div className={s.skWizard}>
+            <div className={s.skFigure} />
+            <div className={s.skWizardSide}>
+              <Skeleton width="80%" />
+              <Skeleton width="55%" />
+              <Skeleton width="70%" />
+              <Skeleton width="64%" />
+            </div>
+          </div>
+          <div className={s.skRow}>
+            <span className={s.skGrow} />
+            <Skeleton width="5.4em" />
+            <Skeleton width="5.4em" />
+          </div>
+        </>
+      )}
+      {layout === 'split' && (
+        <>
+          <div className={s.skRow}>
+            <Skeleton width="8em" />
+            <span className={s.skGrow} />
+            <Skeleton width="10em" />
+          </div>
+          <div className={s.skSplit}>
+            <div className={s.skList}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <div key={i} className={s.skRow}>
+                  <Skeleton width={i === 1 ? '86%' : '68%'} />
+                  <span className={s.skGrow} />
+                  <Skeleton width="2.4em" />
+                </div>
+              ))}
+            </div>
+            <div className={s.skDetail}>
+              <Skeleton width="45%" />
+              <Skeleton width="72%" />
+              <div className={s.skFigure} />
+              <Skeleton width="90%" />
+              <Skeleton width="58%" />
+            </div>
+          </div>
+        </>
+      )}
+      {layout === 'form' && (
+        <>
+          <div className={s.skRow}>
+            <Skeleton width="6em" />
+          </div>
+          {[0, 1, 2].map((i) => (
+            <div key={i} className={s.skGroup}>
+              <Skeleton width="5em" />
+              <div className={s.skRow}>
+                <Skeleton width={i === 1 ? '32%' : '48%'} />
+                <span className={s.skGrow} />
+                <Skeleton width="5em" />
+              </div>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   )
 }
@@ -111,6 +222,7 @@ function PageLoading() {
 function PageSlot({
   hidden,
   page,
+  layout = 'list',
   children,
 }: {
   hidden: boolean
@@ -119,12 +231,14 @@ function PageSlot({
    * 只作用在带标记的槽里，首页槽（含它的弹窗）保持原样。
    */
   page?: string
+  /** 懒加载占位用哪种轮廓（见 `PageLoading`）；不传按列表页画 */
+  layout?: PageLayout
   children: ReactNode
 }) {
   return (
     <div className={s.pageSlot} data-hidden={hidden || undefined} data-page={page}>
       {/* 懒加载页第一次挂载时会 suspend —— 这一层兜住那一瞬（见 `PageLoading`） */}
-      <Suspense fallback={<PageLoading />}>{children}</Suspense>
+      <Suspense fallback={<PageLoading layout={layout} />}>{children}</Suspense>
     </div>
   )
 }
@@ -244,7 +358,7 @@ export default function App() {
             <PageSlot hidden={tab !== 'machine'}>
               <PageHome density={density} />
             </PageSlot>
-            <PageSlot hidden={tab !== 'preset'} page="presets">
+            <PageSlot hidden={tab !== 'preset'} page="presets" layout="list">
               <PagePresets
                 density={density}
                 onOpenBbs={openBbs}
@@ -252,20 +366,20 @@ export default function App() {
                 pending={pendingPresets}
               />
             </PageSlot>
-            <PageSlot hidden={tab !== 'calib'} page="calib">
+            <PageSlot hidden={tab !== 'calib'} page="calib" layout="wizard">
               <PageCalib />
             </PageSlot>
-            <PageSlot hidden={tab !== 'bbs'} page="bbs">
+            <PageSlot hidden={tab !== 'bbs'} page="bbs" layout="split">
               <PageBbs
                 density={density}
                 pending={pendingBbs}
                 onNeedDownload={openPresetsForSlicer}
               />
             </PageSlot>
-            <PageSlot hidden={tab !== 'report'} page="report">
+            <PageSlot hidden={tab !== 'report'} page="report" layout="list">
               <PageReport />
             </PageSlot>
-            <PageSlot hidden={tab !== 'settings'} page="settings">
+            <PageSlot hidden={tab !== 'settings'} page="settings" layout="form">
               <PageSettings />
             </PageSlot>
           </main>

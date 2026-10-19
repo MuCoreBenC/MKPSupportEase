@@ -156,16 +156,109 @@
  * 懒加载页第一帧的占位（见 `App.tsx` 的 `PageLoading`）。
  *
  * 条子自己会呼吸（`home/Skeleton`），这里只管把它们排成"一页"的样子：
- * 撑满槽位、左对齐、间距一致。别加背景 —— 底下就是窗底，多一层色会与真页面跳色。
+ * 列表页给工具条 + 表头 + 三行，向导页给步骤条 + 图 + 侧栏，分栏页给左列表 + 右详情，
+ * 设置页给三组卡片。别加背景 —— 底下就是窗底，多一层色会与真页面跳色。
  */
 .pageLoading {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: 14px;
-  padding: 24px 28px;
+  gap: 18px;
+  padding: 22px 26px 26px;
+  overflow: hidden;
+}
+
+.skRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: none;
+}
+
+.skGrow {
+  flex: 1;
+  min-width: 0;
+}
+
+.skTable {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+/* 表格行：列宽固定成同一套网格，表头与三行才对得齐（散条子不像一张表） */
+.skTableRow {
+  display: grid;
+  grid-template-columns: 1.9fr 0.7fr 1fr 0.7fr 0.8fr;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.skTableRow > :last-child {
+  justify-self: end;
+}
+
+.skFoot {
+  margin-top: auto;
+}
+
+.skWizard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 24px;
+}
+
+.skWizardSide {
+  width: 30%;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+}
+
+.skFigure {
+  flex: 1;
+  min-height: 120px;
+  border-radius: 12px;
+  background: var(--hover-1);
+  opacity: 0.55;
+}
+
+.skSplit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 26px;
+}
+
+.skList {
+  width: 38%;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.skDetail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.skGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
 }
 
 @keyframes page-in {
