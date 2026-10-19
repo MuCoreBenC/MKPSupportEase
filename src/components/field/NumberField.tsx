@@ -99,6 +99,8 @@ export default function NumberField({
   const fmt = useCallback((n: number) => formatNum(String(n), showDigits), [showDigits])
   const [text, setText] = useState(() => formatNum(String(value), showDigits))
   const inputRef = useRef<HTMLInputElement>(null)
+  /** 整个控件（框 + 单位 + 箭头）—— 「点框外」判据用 */
+  const boxRef = useRef<HTMLSpanElement>(null)
   /*
    * 校验气泡的**出现时机**（2026-10-20 作者改）：只在编辑中或悬停时浮出来，
    * 平时只留红描边 —— 否则一个没在编辑的空框头顶常年挂着一串红字，
@@ -281,6 +283,26 @@ export default function NumberField({
   }
 
   /*
+   * **点框外先落账**（2026-10-20）：底栏的「保存」在"没有改动"时是 disabled 的 ——
+   * 点它既不抢焦点、也不触发 click，输入框永远收不到 blur，打进去的整数就一直
+   * 悬在框里（作者实测：输 `1` 点保存，没补小数、底栏也没有"1 处未保存"）。
+   * 所以聚焦期间在 document 捕获阶段挂一次 pointerdown：点在框外、且框里是一个
+   * **能落账的数**，当场 commitTyped（补零 / 进草稿 / 撤销栈都照常走）；
+   * 空 / 不是数 / 超范围不在这里动 —— 那是失焦闸的活（拉回焦点，见 onBlur）。
+   */
+  useEffect(() => {
+    if (!fieldFocused || disabled) return
+    const onDown = (e: PointerEvent) => {
+      const t = e.target
+      if (t instanceof Node && boxRef.current?.contains(t) === true) return
+      if (rawTyping === '' || !Number.isFinite(typed) || outOfRange) return
+      commitTyped()
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [commitTyped, disabled, fieldFocused, outOfRange, rawTyping, typed])
+
+  /*
    * 宽度按能出现的字符数算，不写死一个 px：
    * 整数位（看 min/max 的量级）+ 小数点与小数位 + 负号。
    * ★ 占位串（`-50 ~ 50`）也比进去（2026-10-20）：否则空框的灰字被压成
@@ -329,6 +351,7 @@ export default function NumberField({
 
   const box = (
     <span
+      ref={boxRef}
       className={disabled ? s.boxOff : s.box}
       data-size={size}
       data-invalid={bad}
@@ -421,24 +444,24 @@ export default function NumberField({
   )
 
   /*
-   * 有问题才包提示层：外层 relative 的 span，提示**绝对定位**悬浮在框正上方 ——
-   * 不挤动任何一行的布局（共用件铁律：没有提示的稿一个像素不动）。
-   * 出不出由 data-show 管（编辑中 / 悬停才显，见上面的 state 注），结构恒在，
-   * 悬停才有的话结构就得跟着 hover 抖 —— 现在只是透明度切换。
+   * **提示层恒在**（2026-10-20 真机 + 浏览器双重复现出来的那个 bug 的正解）：
+   * 原来是"有问题才包一层"—— 框里第一个不合法字符出现的瞬间，React 会把
+   * `<span class=box>` 整个子树换掉（父节点类型变了），**输入框被重建**：
+   * 焦点当场丢、blur 事件根本不来（连提交都没发生），打进去的整数跟着消失。
+   * 所以外层 relative 的 span 与气泡都**永远渲染**，只切 `data-show` 的可见性 ——
+   * 结构不动，输入框就不动。气泡绝对定位悬浮在框正上方，不占布局。
    */
-  return hint !== null ? (
+  return (
     <span
       className={s.withHint}
-      data-show={fieldFocused || fieldHovered || undefined}
+      data-show={(hint !== null && (fieldFocused || fieldHovered)) || undefined}
       onMouseEnter={() => setFieldHovered(true)}
       onMouseLeave={() => setFieldHovered(false)}
     >
       {box}
       <span className={s.hint} role="status">
-        {hint}
+        {hint ?? ''}
       </span>
     </span>
-  ) : (
-    box
   )
 }

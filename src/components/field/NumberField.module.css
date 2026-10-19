@@ -90,6 +90,16 @@
   display: inline-flex;
 }
 
+/*
+ * 壳（框）在包装层里继续**撑满**宿主给的宽度：参数行 `.edNum` 是 132px 定宽，
+ * 原来框是它的直接子元素（`width:100%`）；包了一层之后由这一条接住，
+ * 框宽一个像素不变（2026-10-20 作者：「文本框不要被挤压」）。
+ */
+.withHint > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .hint {
   position: absolute;
   bottom: calc(100% + 4px);
