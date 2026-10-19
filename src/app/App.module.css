@@ -152,6 +152,22 @@
   visibility: hidden !important;
 }
 
+/*
+ * 懒加载页第一帧的占位（见 `App.tsx` 的 `PageLoading`）。
+ *
+ * 条子自己会呼吸（`home/Skeleton`），这里只管把它们排成"一页"的样子：
+ * 撑满槽位、左对齐、间距一致。别加背景 —— 底下就是窗底，多一层色会与真页面跳色。
+ */
+.pageLoading {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 24px 28px;
+}
+
 @keyframes page-in {
   from {
     opacity: 0;

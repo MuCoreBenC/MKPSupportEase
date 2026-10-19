@@ -3,7 +3,7 @@
   "productName": "SupportEase Workbench",
   "identifier": "SupportEase-Workbench",
   "build": {
-    "devUrl": "http://localhost:5322",
+    "devUrl": "http://[::1]:5322",
     "beforeDevCommand": "npm run dev:workbench",
     "beforeBuildCommand": "npm run build:workbench"
   },

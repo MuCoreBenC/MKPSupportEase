@@ -1,19 +1,45 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 
 import { api } from '../api'
 import { FieldLayer } from '../components/field'
 import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
-import PageReport from './report/PageReport'
 import ResizeEdges from './components/ResizeEdges'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
-import PageBbs from './bbs/PageBbs'
-import PageCalib from './calib/PageCalib'
 import PageHome from './home/PageHome'
-import PagePresets from './presets/PagePresets'
-import PageSettings from './settings/PageSettings'
+import Skeleton from './home/Skeleton'
+
+/*
+ * ★★ **首屏只装首页，其余五页在第一次点开时才取**（2026-10-19，Windows 白屏那一刀）。
+ *
+ * 这六个页面原来是**静态 import** —— dev 模式下意味着浏览器要先把这五页的整棵依赖树
+ * 都请求并 transform 完，`App` 才挂得上第一帧。哪怕用户只看首页，PagePresets /
+ * PageCalib / PageBbs 那几棵子树也得先编一遍（Windows 上单模块 transform 比 Mac
+ * 慢一截，几百个模块叠起来就是用户看到的白屏）。
+ *
+ * 改成 `lazy` 之后：首屏 = 外壳 + 首页那一棵；点开别的页签时再取那一页的模块，
+ * 取的过程中由 `PageSlot` 里那具 `PageLoading` 顶着（与工作台"先给骨架、数据后到"
+ * 是同一条口径：**点了立刻有反馈**）。生产构建也跟着受益 —— 五页各自成 chunk，
+ * 首包不必背它们。
+ *
+ * ★ 首页**保持静态**：它是落地页，拆出去只会多一次串行请求。
+ * ★ 动态 import 的路径必须是字面量（Vite 要在构建期静态分析出 chunk）。
+ */
+const PagePresets = lazy(() => import('./presets/PagePresets'))
+const PageCalib = lazy(() => import('./calib/PageCalib'))
+const PageBbs = lazy(() => import('./bbs/PageBbs'))
+const PageReport = lazy(() => import('./report/PageReport'))
+const PageSettings = lazy(() => import('./settings/PageSettings'))
 /* 通用文件导入入口（第十二层）：住在 App 层，不属于任何一页 ——
    拖拽进窗口 / 文件选择器都从这里走；预设页只是第一个消费者（见那一页的按钮） */
 import { FileImportProvider, ImportBanner } from './import/FileImport'
@@ -56,6 +82,24 @@ const PLATFORM = detectPlatform()
  * 变得看不见）；P2–P5 把预设 / 参数 / BBS 预设接成真页面，2026-10-02 设置接上最小版
  * （高级设置 → 预设数据源）；报告仍是空态。
  */
+/**
+ * 懒加载页那一瞬的占位（见文件头 `PagePresets` 那几条 `lazy`）。
+ *
+ * 与 `home/Skeleton` 同一条规矩：**灰条就是灰条，不预先填字**。它只在"第一次点开
+ * 某一页、那一页的模块还在下载/编译"时出现；模块到了整棵换成真页面。
+ */
+function PageLoading() {
+  return (
+    <div className={s.pageLoading} role="status" aria-label="页面正在加载">
+      <Skeleton width="9em" />
+      <Skeleton width="16em" />
+      <Skeleton width="100%" />
+      <Skeleton width="100%" />
+      <Skeleton width="72%" />
+    </div>
+  )
+}
+
 /*
  * 页签槽（2026-10-05）：页签从卸载重挂改成**常驻 + 切显示**（作者：「所有页面我都
  * 希望保持我之前点击的状态」）。每页常驻挂一次，槽只切 data-hidden —— 滚动位置、
@@ -79,7 +123,8 @@ function PageSlot({
 }) {
   return (
     <div className={s.pageSlot} data-hidden={hidden || undefined} data-page={page}>
-      {children}
+      {/* 懒加载页第一次挂载时会 suspend —— 这一层兜住那一瞬（见 `PageLoading`） */}
+      <Suspense fallback={<PageLoading />}>{children}</Suspense>
     </div>
   )
 }
