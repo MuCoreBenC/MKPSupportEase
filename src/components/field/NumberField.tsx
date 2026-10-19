@@ -264,6 +264,21 @@ export default function NumberField({
   })()
 
   /*
+   * **失焦闸**（2026-10-20 作者：「空着的时候，或者超出限制的时候，不要失去焦点」）：
+   * 打出来的东西不合法就不放焦点走 —— 点空白 / 点别的框都把焦点拉回本框，
+   * 改到合法、或按 Esc 还原为止。
+   * 放行条件：改成了合法值；或**原文一个字没动**（外部值本身就不合法的历史脏数据
+   * —— 再不放行就把人锁死在这个框里了，Esc 也出不去）。
+   */
+  const blurBlocked = (): boolean => {
+    if (disabled) return false
+    if (rawTyping === '') return true
+    if (!Number.isFinite(typed)) return true
+    if (outOfRange) return Number.isFinite(value) ? typed !== value : true
+    return false
+  }
+
+  /*
    * 宽度按能出现的字符数算，不写死一个 px：
    * 整数位（看 min/max 的量级）+ 小数点与小数位 + 负号。
    * ★ 占位串（`-50 ~ 50`）也比进去（2026-10-20）：否则空框的灰字被压成
@@ -351,7 +366,16 @@ export default function NumberField({
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onFocus={() => setFieldFocused(true)}
-        onBlur={() => {
+        onBlur={(e) => {
+          /*
+           * 失焦闸（见 blurBlocked）：不合法就不放走。blur 没法可靠地 preventDefault
+           * 取消，focus() 把焦点抢回来 —— 气泡与原文都原样留着，等改合法或 Esc。
+           */
+          if (blurBlocked()) {
+            e.preventDefault()
+            e.currentTarget.focus()
+            return
+          }
           setFieldFocused(false)
           commitTyped()
         }}

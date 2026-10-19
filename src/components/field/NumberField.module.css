@@ -56,6 +56,8 @@
 
 .input {
   min-width: 40px;
+  /* 右内衬：值/占位串与右侧的 mm、步进箭头之间永远留一口气（2026-10-20 作者改） */
+  padding-right: 4px;
   border: 0;
   background: transparent;
   text-align: right;
