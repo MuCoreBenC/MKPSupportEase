@@ -2332,6 +2332,14 @@
   font-size: var(--fs-body);
 }
 
+/* 检查卡的长描述默认只留两行（2026-10-19 文案瘦身）—— 条目上的「展开」看全文 */
+.issueDetailClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .issueTxt span {
   font-size: var(--fs-label);
   line-height: 1.7;
@@ -4159,6 +4167,45 @@
   flex: none;
   width: 18px;
   height: 18px;
+}
+
+/*
+ * 橙色「改之前的值」chip（2026-10-19）。
+ *
+ * 抄客户端 `ParamRow.module.css` 的 `.restore`：同一套 warn 三件套
+ * （`--warn-line` 边框 / `--warn-surface` 底 / `--warn-ink` 字，两边的 token
+ * 本来就是同一份），只是工作台这一档行更密 —— 高度收到 20px。
+ *
+ * **只在这一格真的改过时才画**（判据在 `ParamsPage` / `ParamDetail`：`cell.dirty`
+ * + `cell.rest !== null`）。它是"退回我原来的值"，与右边那枚 `↶`（挂回继承）
+ * 不是一回事。
+ */
+.pRevert {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--warn-line);
+  border-radius: 4px;
+  background: var(--warn-surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--warn-ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pRevert:hover {
+  border-color: var(--warn-ink);
+}
+
+.pRevert:focus-visible {
+  outline: none;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
 /* 技术信息：最底部、最弱的一档 —— 开发信息从主阅读路径里拿走 */

@@ -161,10 +161,18 @@
 /* ---------- 右：详情（行级 diff） ---------- */
 
 .detail {
+  position: relative;
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  /* 滚的是里面那层 `.detailScroll` —— 概览条要固定在这一层右侧（不跟着内容滚） */
+  overflow: hidden;
+}
+
+.detailScroll {
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   overscroll-behavior: contain;
 }
@@ -195,79 +203,7 @@
   font-size: 11px;
 }
 
-.diff {
-  padding: 6px 0;
-  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
-  font-size: 12px;
-  line-height: 1.7;
-}
 
-/* 一行：行号槽 + 内容槽。三档行只差底色与行号槽的字色 */
-.lineAdd,
-.lineDel,
-.lineCtx {
-  display: flex;
-  gap: 0;
-  min-width: 0;
-}
-
-/* 增 / 删行的底：取 `--w-diff-add` / `--w-diff-del`（深色那边是 18% / 16% 的
-   深绿深红 —— 10% 那两档压在深底上等于没画） */
-.lineAdd {
-  background: var(--w-diff-add);
-}
-
-.lineDel {
-  background: var(--w-diff-del);
-}
-
-.lineCtx {
-  color: var(--w-t2);
-}
-
-/* 行号槽定宽、右对齐、等宽数字 —— 一列对齐才读得出"第几行" */
-.lineNo {
-  flex: none;
-  width: 44px;
-  padding-right: 10px;
-  color: var(--w-t3);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.gutter {
-  flex: none;
-  width: 18px;
-  color: var(--w-t3);
-  text-align: center;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.lineAdd .gutter {
-  color: var(--w-diff-add-ink);
-}
-
-.lineDel .gutter {
-  color: var(--w-diff-del-ink);
-}
-
-.lineTxt {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding-right: 14px;
-  /*
-   * **长行折行，不横向滚**（作者 2026-10-07 改口）。
-   *
-   * 原来是 `white-space: pre`：长行让整个详情栏长出横向滚动条 —— 而那条滚动条
-   * 会**把详情头与行号槽一起拖走**（横滚的是整栏不是那一行），人看到的是
-   * "文件名不见了、第几行也不见了"。折行没有这个问题：行号槽与内容起点始终对齐。
-   */
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 
 /* ---------- 头部：「完整 / 对比」切换 ---------- */
 

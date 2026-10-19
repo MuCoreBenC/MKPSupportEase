@@ -759,6 +759,7 @@ function mockSha(id: string): string {
 const MOCK_CALIBRATION: Record<string, string | null> = {
   'zoffset-calibration': 'ZOffset',
   'precise-calibration': null,
+  'precise-calibration-ext': 'Precise',
 }
 
 /** 与后端 `calibration_status_of` 同一套判定（预期 vs 实值） */
@@ -777,6 +778,9 @@ function mockCalibrationOf(a: FixtureRef) {
 
 function assetInspectOf(a: FixtureRef) {
   const toWin = (p: string) => p.replace(/\//g, '\\')
+  // 演示时间戳：同一份固定值（浏览器里没有盘可 stat，不去编"现在"）
+  const modified = '2026-10-19T11:48:41Z'
+  const created = '2026-10-18T01:12:03Z'
   if (a.kind === 'mkPreset') {
     const versionId = a.id.endsWith('-fast') ? 'FAST' : 'STANDARD'
     const fileName = `A1-${versionId.toLowerCase()}.toml`
@@ -787,20 +791,41 @@ function assetInspectOf(a: FixtureRef) {
       id: a.id, fileName, absPath: `C:\\dev\\${toWin(productPath)}`, exists,
       bytes: exists ? 4312 : null, sha256: exists ? mockSha(a.id) : null,
       width: null, height: null, format: 'toml', productPath, calibration: null,
+      created: exists ? created : null, modified: exists ? modified : null,
+      // 目录登记的就是演示哈希；产物不在 ⇒ 没得比
+      registeredSha256: mockSha(a.id), registeredSize: 4312,
+      hashCheck: exists ? 'match' : 'missing',
     }
   }
   const fileName = a.path.split('/').pop() ?? a.path
   const format = fileName.includes('.') ? (fileName.split('.').pop() ?? '').toLowerCase() : null
   const image = a.kind === 'image'
   const icon = a.kind === 'icon'
+  const sha = mockSha(a.id)
+  const size = image ? 95232 : icon ? 1824 : a.kind === 'model' ? 3355443 : 12048
+  /*
+   * 核对演示：随包（整机图）不进目录 ⇒ notInDelivery；3MF 加长版演示"文件改过、
+   * 目录还是旧的"（作者 2026-10-19 问的那个场景）；其余按一致演。
+   */
+  const hashCheck =
+    image || a.kind === 'guide'
+      ? 'notInDelivery'
+      : a.id === 'zoffset-calibration-ext'
+        ? 'mismatch'
+        : 'match'
   return {
     id: a.id, fileName, absPath: `C:\\dev\\presets\\assets\\${toWin(a.path)}`, exists: true,
-    bytes: image ? 95232 : icon ? 1824 : a.kind === 'model' ? 3355443 : 12048,
-    sha256: mockSha(a.id), format,
+    bytes: size,
+    sha256: sha, format,
     width: image ? 1024 : icon ? 24 : null,
     height: image ? 768 : icon ? 24 : null,
     productPath: null,
     calibration: mockCalibrationOf(a),
+    created, modified,
+    // 不一致那一条让登记值看起来是"上一版"（大小也不同），其余照当前值登记
+    registeredSha256: hashCheck === 'mismatch' ? mockSha(`${a.id}-old`) : hashCheck === 'notInDelivery' ? null : sha,
+    registeredSize: hashCheck === 'mismatch' ? size - 319 : hashCheck === 'notInDelivery' ? null : size,
+    hashCheck,
   }
 }
 
@@ -1734,14 +1759,36 @@ export function installMockBackend() {
             skipped.push([uid, '这台机型还没配尺寸（占位），不参与交付'])
             continue
           }
-          const fileName = `${uid.replace('/', '-')}.toml`
+          // 与真机同一处命名规则（`A1-standard.toml`）—— 明细右侧按 rel 匹配产物名
+          const [machineId, versionId] = uid.split('/')
+          const fileName = presetFileNameOf(machineId, versionId)
           const text = [
             '# 开发桩渲染的演示产物 —— 真产物由 Rust 的 build::render() 出',
             `# machine: ${uid.split('/')[0]}`,
             '',
             '[demo]',
           ]
-          if (builtRecords.has(uid)) {
+          if (uid === 'A1/FAST' && builtRecords.has(uid)) {
+            /*
+             * 演示「模板变化」：配方没变、目录也登记着，但重新渲染的文本少一行
+             * `#胶笔配置` —— 真机由 `delivery_status` 的渲染比对判成待更新。
+             */
+            toWrite += 1
+            files.push({
+              uid,
+              fileName,
+              state: 'modified',
+              lines: [
+                { kind: 'context', text: '# 开发桩渲染的演示产物', no: 1 },
+                { kind: 'context', text: '# machine: A1', no: 2 },
+                { kind: 'removed', text: '#胶笔配置', no: 4 },
+                { kind: 'context', text: '[toolhead]', no: 6 },
+              ],
+              added: 0,
+              removed: 1,
+              stage: 'generate',
+            })
+          } else if (builtRecords.has(uid)) {
             unchangedN += 1
             /*
              * 无变化也带回整份正文（真机 `preview_one` 同款，作者 2026-10-07）：
@@ -1754,6 +1801,7 @@ export function installMockBackend() {
               lines: text.map((t, i) => ({ kind: 'context', text: t, no: i + 1 })),
               added: 0,
               removed: 0,
+              stage: 'generate',
             })
           } else {
             toWrite += 1
@@ -1764,6 +1812,7 @@ export function installMockBackend() {
               lines: text.map((t, i) => ({ kind: 'added', text: t, no: i + 1 })),
               added: text.length,
               removed: 0,
+              stage: 'generate',
             })
           }
         }
@@ -2089,19 +2138,81 @@ export function installMockBackend() {
        * 能验收。产物按 `builtRecords` 判在不在，附属文件按下表。
        */
       case 'wb_delivery_files': {
-        const rows = buildBook().buildRows as { mkpFile: string | null }[]
+        const rows = buildBook().buildRows as {
+          uid: string
+          mkpFile: string | null
+          state: 'built' | 'stale' | 'neverBuilt' | 'noResources'
+        }[]
+        /*
+         * 演示「模板变化」：`A1/FAST` 在版本树上还是 built（配方没改），但渲染器
+         * 的输出与盘上那份差一行 —— 与作者截图里的 `A1-fast.toml` 同一个形状。
+         */
+        const templateStale = (uid: string) => uid === 'A1/FAST'
         const presets = rows
           .filter((r) => r.mkpFile !== null)
-          .map((r) => ({ rel: `mkp/presets/${r.mkpFile}`, exist: true, size: 2048, stage: 'generate' }))
-        const others = [
-          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate' },
-          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate' },
-          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate' },
-          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate' },
-          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish' },
-          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish' },
+          .map((r) => ({
+            rel: `mkp/presets/${r.mkpFile}`,
+            exist: r.state !== 'neverBuilt',
+            size: 2048,
+            stage: 'generate',
+            // 与版本行同一套演示事实：已生成 / 待更新 / 还没生成
+            state:
+              templateStale(r.uid)
+                ? 'pending'
+                : r.state === 'built'
+                  ? 'upToDate'
+                  : r.state === 'stale'
+                    ? 'pending'
+                    : 'missing',
+            registeredSize: r.state === 'neverBuilt' ? null : 2048,
+          }))
+        const pendingUids = rows
+          .filter(
+            (r) =>
+              r.mkpFile !== null &&
+              (templateStale(r.uid) || r.state === 'stale' || r.state === 'neverBuilt'),
+          )
+          .map((r) => r.uid)
+        /*
+         * 演示漂移：作者 2026-10-19 改过的那三份 3MF（与真机上 `audit_catalog` 报的
+         * 三处一一对应）—— 让「N 份资产字节变了」在浏览器里也看得到。
+         */
+        const drift = [
+          {
+            path: 'assets/models/Precise_Calibration.3mf',
+            registeredSize: 385735,
+            actualSize: 387352,
+            reason: 'size',
+          },
+          {
+            path: 'assets/models/ZOffset_Calibration.3mf',
+            registeredSize: 290079,
+            actualSize: 290340,
+            reason: 'size',
+          },
+          {
+            path: 'assets/models/ZOffset_Calibration_ext.3mf',
+            registeredSize: 158883,
+            actualSize: 159202,
+            reason: 'size',
+          },
         ]
-        return Promise.resolve([...presets, ...others])
+        const others = [
+          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate', state: 'upToDate', registeredSize: null },
+          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate', state: 'upToDate', registeredSize: null },
+          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate', state: 'upToDate', registeredSize: null },
+          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate', state: 'pending', registeredSize: null },
+          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish', state: builtRecords.size > 1 ? 'upToDate' : 'missing', registeredSize: null },
+          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish', state: builtRecords.size > 1 ? 'upToDate' : 'missing', registeredSize: null },
+        ]
+        return Promise.resolve({
+          files: [...presets, ...others],
+          drift,
+          pendingUids,
+          catalogModified: '2026-10-06T03:34:00Z',
+          manifestModified: builtRecords.size > 1 ? '2026-10-06T03:41:00Z' : null,
+          catalogError: null,
+        })
       }
       case 'wb_delivery_file': {
         const rel = String(args?.rel ?? '')
@@ -2113,7 +2224,12 @@ export function installMockBackend() {
           'manifest.json': '{\n  "manifestSchema": 3,\n  "assets": []\n}\n',
           'source.json': '{\n  "sourceSchema": 1,\n  "catalog": "catalog.json"\n}\n',
         }
-        const text = demos[rel]
+        // 预设产物也给一段演示正文 —— 交付明细里每一份的「查看」都能点开
+        const text =
+          demos[rel] ??
+          (rel.startsWith('mkp/presets/')
+            ? '# 演示产物（mock）\nrelease_time = "2026-10-19 00:00:00"\n'
+            : undefined)
         if (text === undefined) {
           return Promise.reject({
             code: 'NOT_FOUND',

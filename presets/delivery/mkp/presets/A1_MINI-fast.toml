@@ -1,7 +1,6 @@
-# release_time: 2026-10-06 03:34:17
+# release_time: 2026-10-19 14:12:29
 # machine: A1_MINI
 # variant: fast
-#胶笔配置
 
 [toolhead]
 # 自定义工具头获取 G-code

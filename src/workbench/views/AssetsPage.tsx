@@ -51,8 +51,18 @@ interface Props {
   /** 身份筛选的预选（检查报告的「孤儿文件」跳过来就替人筛好「可选」，C14 第二十七轮） */
   initialAssign?: string | null
   onGoto: (view: string, focus?: GotoFocus) => void
-  /** 草稿写入口（改交付身份走它 —— 可见性是唯一进参数草稿的动作，带撤销） */
-  onApply: (label: string, patches: import('../api').Patch[]) => Promise<void>
+  /**
+   * 草稿写入口（改交付身份走它 —— 可见性是唯一进参数草稿的动作，带撤销）。
+   *
+   * `opts.quiet` = **值写入那一路**（见 `editQueue` 头注）：外壳不拨 `tick`。
+   * 这一页写完自己就 `load(kind, …)`，再吃一次 `tick` 只是把同一份清单读两遍
+   * —— 白多一遍扫盘。结构写（建 / 删 / 改版本）仍然走非 quiet 那条。
+   */
+  onApply: (
+    label: string,
+    patches: import('../api').Patch[],
+    opts?: { quiet?: boolean },
+  ) => Promise<void>
 }
 
 const KIND_LABEL: Record<string, string> = {
@@ -70,6 +80,45 @@ function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
   return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * 文件时间戳给人看的写法（`2026-10-19 19:48:41`，本机时区）。
+ *
+ * 后端给的是 RFC3339 / UTC（交换格式，不带时区猜测）；显示这一步交给 `Date` ——
+ * 界面一定知道用户在哪个时区，后端不必去猜（猜不出来时那次回落会静默差几小时）。
+ */
+function formatStamp(iso: string | null): string | null {
+  if (iso === null) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+/**
+ * 「哈希核对」那一行的一句话（2026-10-19）。
+ *
+ * 报的是**交付目录** `catalog.json` 里登记的那份哈希与盘上字节的关系 ——
+ * 不一致不是错误，是"文件改过了、目录还没重算"这个事实：修法是重新生成 / 发布，
+ * 所以文案要把它说出来，别只给一个红点。
+ */
+function hashCheckNote(v: AssetInspectView): string {
+  switch (v.hashCheck) {
+    case 'match':
+      return '一致 —— 目录记的就是盘上这份'
+    case 'mismatch': {
+      const was = v.registeredSize !== null ? formatBytes(v.registeredSize) : '—'
+      const now = v.bytes !== null ? formatBytes(v.bytes) : '—'
+      return `不一致 —— 目录记 ${was}，盘上现在 ${now}；重新生成 / 发布会改写登记`
+    }
+    case 'notRegistered':
+      return '目录里还没这一条 —— 生成或发布后才有'
+    case 'notInDelivery':
+      return '不进交付目录（随包 / 图片类），目录不登记哈希'
+    case 'missing':
+      return '文件不在，无从比对'
+  }
 }
 
 /** 筛选轴的类型化包装 —— 全部走命令参数，本地不复算。
@@ -183,24 +232,46 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
     }
   }, [sel, list])
 
-  /** 检查面板读数（第四刀）。**只依赖选中** —— 搜索框逐键重取清单时不再重读字节
-   *  （重的是 SHA-256 / 3.2 MB 的模型）；换选中才重新问 */
+  /**
+   * 检查面板读数（第四刀）。**只依赖选中** —— 搜索框逐键重取清单时不再重读字节
+   * （重的是 SHA-256 / 3.2 MB 的模型）；换选中才重新问。
+   *
+   * 2026-10-19 起加两条「重读」的时机（作者改了 3MF 之后问"哈希变没变"）：
+   * 窗口重新获得焦点时自动重读当前这一条（从编辑器保存完切回来就看得见新哈希），
+   * 以及标题旁那颗「重读」按钮。**只重读选中的这一条**，不重扫清单。
+   */
   useEffect(() => {
     if (!sel) {
       setInspect(null)
       return
     }
     let alive = true
-    setInspect(null)
-    wb.assetInspect(sel)
-      .then((v) => {
-        if (alive) setInspect(v)
-      })
-      .catch(() => undefined)
+    const read = (clear: boolean) => {
+      if (clear) setInspect(null)
+      wb.assetInspect(sel)
+        .then((v) => {
+          if (alive) setInspect(v)
+        })
+        .catch(() => undefined)
+    }
+    read(true)
+    const onFocus = () => read(false)
+    window.addEventListener('focus', onFocus)
     return () => {
       alive = false
+      window.removeEventListener('focus', onFocus)
     }
   }, [sel])
+
+  /** 手动重读当前选中（改了盘上文件之后点它）—— 失败保留上一次读数，不清成空白 */
+  const rereadInspect = async () => {
+    if (!sel) return
+    try {
+      setInspect(await wb.assetInspect(sel))
+    } catch {
+      /* 读失败（文件被占用等）保留旧读数：界面不闪成"正在读" */
+    }
+  }
 
   const cur: AssetView | undefined = list?.assets.find((a) => a.id === sel)
   /** 读数对着当前选中吗（换选中 / 读失败时那一块说「正在读……」，不摆旧数据） */
@@ -231,9 +302,11 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
 
   /** 写可见性（草稿入口 + 刷新）。入口闸在 setVis：有人引用的「仅归档」先过确认框 */
   const applyVis = async (id: string, v: 'menu' | 'archiveOnly') => {
-    await onApply(`把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}`, [
-      { kind: 'setVisibility', fileId: id, visibility: v },
-    ])
+    await onApply(
+      `把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}`,
+      [{ kind: 'setVisibility', fileId: id, visibility: v }],
+      { quiet: true },
+    )
     toasts.push(`已把 ${id} 设为${v === 'menu' ? '可选' : '仅归档'}（改了先进草稿，保存才落盘）`)
     /* 可见性连着四态与页脚计数 —— 重新读一遍（草稿态在会话里，重取就看得见） */
     load(kind, assign, slicer, nozzle, layer, q, group)
@@ -765,8 +838,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   </span>
                 </div>
                 <p className={s.note} style={{ margin: 0 }}>
-                  版本不直接引用资产 —— 它经由套餐拿到（一版一套），所以「被谁当 MKP 用」
-                  在套餐那一份上看。
+                  版本经套餐引用资产；「被谁当 MKP 用」在套餐页看。
                 </p>
               </div>
 
@@ -777,7 +849,18 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                * 真实字节，模型 3.2 MB —— 并进列表就是每敲一个字读几 MB）。
                */}
               <div className={s.group}>
-                <div className={s.groupHead}>资产检查</div>
+                <div className={s.groupHead}>
+                  <span className={s.grow}>资产检查</span>
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnSm}`}
+                    onClick={() => void rereadInspect()}
+                    disabled={sel === null}
+                    title="改了盘上那个文件之后点它重读 —— 大小 / 时间 / SHA-256 都按现在的文件重算，并与交付目录登记的值核对"
+                  >
+                    重读
+                  </button>
+                </div>
                 {insp === null ? (
                   <p className={s.note} style={{ marginTop: 0 }}>
                     正在读盘上那个文件……
@@ -829,17 +912,41 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                     <span className={`${s.kvVal} ${s.mono}`}>
                       {insp.sha256 ?? <span className={s.kvDim}>—</span>}
                     </span>
+                    <span className={s.kvKey}>修改时间</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {formatStamp(insp.modified) ?? <span className={s.kvDim}>读不出</span>}
+                    </span>
+                    <span className={s.kvKey}>创建时间</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {formatStamp(insp.created) ?? <span className={s.kvDim}>读不出</span>}
+                    </span>
+                    <span className={s.kvKey}>登记 SHA-256</span>
+                    <span className={`${s.kvVal} ${s.mono}`}>
+                      {insp.registeredSha256 ?? <span className={s.kvDim}>—</span>}
+                    </span>
+                    <span className={s.kvKey}>哈希核对</span>
+                    <span className={s.kvVal}>
+                      {insp.hashCheck === 'mismatch' ? (
+                        <span className={s.tagDanger}>{hashCheckNote(insp)}</span>
+                      ) : (
+                        <span
+                          className={insp.hashCheck === 'match' ? undefined : s.kvDim}
+                        >
+                          {hashCheckNote(insp)}
+                        </span>
+                      )}
+                    </span>
                     <span className={s.kvKey}>状态</span>
                     <span className={s.kvVal}>
                       {cur.kind === 'mkPreset' && cur.buildState !== null
                         ? `${words.build[cur.buildState]?.label ?? cur.buildState} · 产物文件${insp.exists ? '在' : '不在'}`
-                        : `登记着 · 文件${insp.exists ? '在' : '不在'}`}
+                        : `台账登记着 · 文件${insp.exists ? '在' : '不在'}`}
                     </span>
                   </div>
                 )}
                 <p className={s.note}>
-                  这几格是盘上那个文件的读数（SHA-256 与大小要读真实字节，所以选中才问一次）。
-                  台账里不存这些 —— 不存第二份真相。
+                  盘上读数；改了文件点「重读」或切回窗口重算。登记值来自{' '}
+                  <code>catalog.json</code>。
                 </p>
               </div>
 
@@ -928,9 +1035,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                     )}
                   </div>
                   <p className={s.note}>
-                    标记住在 3MF 内部（`3D/3dmodel.model` 的 `MKPSE:Calibration`），
-                    写的是盘上那份真文件，改前会留一份 `.bak`。
-                    后处理只认这份标记 —— 没有它，这盘会被当普通模型跑。
+                    写的是盘上 3MF（改前留 `.bak`）；后处理只认这份标记。
                   </p>
                 </div>
               )}
@@ -997,8 +1102,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   </button>
                 </div>
                 <p className={s.note}>
-                  「仅归档」= 客户端完全不知道这个文件存在；「随包」= 构建期把文件带进客户端，
-                  不下载不更新、页面也不出现；「进套餐」在套餐页管 —— 那是「哪一版配发什么」的事。
+                  「仅归档」客户端看不到；「随包」随安装包走、不下载；「进套餐」在套餐页管。
                 </p>
               </div>
             </div>

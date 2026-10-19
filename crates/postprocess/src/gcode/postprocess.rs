@@ -45,35 +45,14 @@ pub(crate) fn extract_code_part(line: &str) -> &str {
     }
 }
 
-/// `HasEParam`：运动指令且参数字段以 E<数字|-> 形式存在。
-/// 注意它扫描的是**原始 codePart 字节**（含前导空格判断），不是拆分后的字段。
+/// `HasEParam`：运动指令且参数里有一个**可解析的 E 值**。
+///
+/// 2026-10-19：旧实现只认 `E-` / `E<数字>`，把 `E.5` / `E.8` 这种省略整数位
+/// 的写法漏掉了（切片器经常这么写）。直接校准的 `filter_e_moves` 因此会漏删
+/// 纯 E 行；挂载/卸载/涂胶的「跳过带 E 的行」也会漏判。现在与
+/// [`get_e_value`] 同一口径：拆字段 + `parse_float_go`。
 pub fn has_e_param(line: &str) -> bool {
-    let trimmed = line.trim();
-    let code_part = match trimmed.find(';') {
-        Some(idx) => &trimmed[..idx],
-        None => trimmed,
-    };
-    let code_part = code_part.trim();
-    if code_part.is_empty() {
-        return false;
-    }
-    let Some(first) = code_part.split_whitespace().next() else {
-        return false;
-    };
-    let code = first.to_uppercase();
-    if !is_motion_command(&code) {
-        return false;
-    }
-    let bytes = code_part.as_bytes();
-    for i in 0..bytes.len().saturating_sub(1) {
-        if bytes[i] == b'E'
-            && (bytes[i + 1] == b'-' || bytes[i + 1].is_ascii_digit())
-            && (i == 0 || bytes[i - 1] == b' ')
-        {
-            return true;
-        }
-    }
-    false
+    get_e_value(line).is_some()
 }
 
 /// `GetEValue`：运动指令的 E 参数值（区分回抽负值与挤出正值）。
@@ -379,10 +358,15 @@ mod tests {
         assert!(has_e_param("G1 E-5 F1800"));
         assert!(has_e_param("G1 X1 E0.4"));
         assert!(has_e_param("G01 E1"));
+        // 2026-10-19：省略整数位的小数也是 E 值（切片器常写 E.5 / E.8）
+        assert!(has_e_param("G1 E.5 F1800"));
+        assert!(has_e_param("G1 E-.5 F1800"));
+        assert!(has_e_param("G1 E+5 F1800"));
         // E 前必须是空格或行首（EX 不算）；且必须在注释剥离后的指令部分
         assert!(!has_e_param("G1 X10 ; E5"));
         assert!(!has_e_param("M106 E1")); // 非运动指令
         assert!(!has_e_param("G1 X1 Y2"));
+        assert!(!has_e_param("G1 E.")); // 孤点不是数值
     }
 
     #[test]
@@ -390,6 +374,7 @@ mod tests {
         let lines: Vec<String> = [
             "G1 X1 Y1",
             "G1 X2 Y2 E0.5",
+            "G1 E.8 F1800",
             "G1 X3 Y3 E0.5 ; virtual extrusion",
             "; comment",
         ]

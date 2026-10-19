@@ -911,8 +911,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   )}
                 </div>
                 <p className={s.note}>
-                  机型的「品牌」那一格写着这个品牌的 id —— 反查在后端算，这里只摆结果。
-                  改归属去机型的身份卡。
+                  机型引用品牌 id；改归属去身份卡。
                 </p>
               </div>
             </div>
@@ -1086,7 +1085,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <div className={s.cardBody}>
             {m.dimensions === null ? (
               <p className={s.note} style={{ margin: 0 }}>
-                {placeholderText.noDimensions} —— 占位机型不参与交付，检查与生成页会给一条说明而不是报错。
+                {placeholderText.noDimensions}。占位机型不参与交付。
               </p>
             ) : (
               <>

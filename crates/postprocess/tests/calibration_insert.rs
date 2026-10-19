@@ -120,6 +120,55 @@ fn direct_calibrate_filters_model_paths() {
     );
 }
 
+/// 直接校准：A1 启动段里带缩进的 `M109 S245` 必须变成**不阻塞**的 `M104 S30`。
+/// 只改温度不改命令会留下 `M109 S30`，机器会停在那里等喷嘴降温（2026-10-19 真机）。
+#[test]
+fn direct_mode_never_leaves_a_blocking_m109_cooldown() {
+    let mut ir = fixture_ir();
+    ir.safety.calibration_execution_mode = "direct_calibrate".to_string();
+    let content = lines(&[
+        ";===== machine: A1 mini =====",
+        ";===== extrude cali test ===============================",
+        "M400",
+        "    M900 S",
+        "    M900 C",
+        "    G90",
+        "    M83",
+        "    M109 S220",
+        "    G91",
+        "    G90",
+        "    M400",
+        "M900 R",
+        "; MACHINE_START_GCODE_END",
+        // 纯 E 行（省略整数位）：direct 模式必须被 filter_e_moves 删掉
+        "G1 E.8 F1800",
+        "; filament end gcode",
+    ]);
+    let out = insert_calibration_gcode(
+        content,
+        Mode::ZOffset,
+        &mut ir,
+        sample_bbox(),
+        centroid(),
+        2,
+        3,
+    )
+    .expect("插入失败");
+
+    assert!(
+        out.iter().any(|l| l == "    M104 S30"),
+        "带缩进的 M109 应改成不阻塞的 M104 S30"
+    );
+    assert!(
+        !out.iter().any(|l| l.trim() == "M109 S30"),
+        "不许留下阻塞式 M109 S30"
+    );
+    assert!(
+        !out.iter().any(|l| l.trim() == "G1 E.8 F1800"),
+        "纯 E 行（E.8）应被 filter_e_moves 删掉"
+    );
+}
+
 /// 空串 exec_mode 与 print_then_calibrate 同路（回退归一在 ir::build，此处验证行为一致）。
 #[test]
 fn empty_exec_mode_behaves_like_print_then() {

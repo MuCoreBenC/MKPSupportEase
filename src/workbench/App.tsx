@@ -33,6 +33,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
 import { modalShortcutGate } from './components/modal'
+import { editQueue, settleAll } from './editQueue'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -114,18 +115,6 @@ const NAV: NavItem[] = [
       </>
     ),
   },
-  /* 盾牌 + 勾：检查 → 生成 → 发布按顺序走的一页（C14 合并了发布中心） */
-  {
-    id: 'build',
-    label: '生成与发布',
-    badge: 'build',
-    icon: (
-      <>
-        <path d="M12 3l8 3.5v6c0 4.2-3.4 7.4-8 8.5-4.6-1.1-8-4.3-8-8.5v-6z" />
-        <path d="m9 12 2.2 2.2L15.5 10" />
-      </>
-    ),
-  },
   /* 一张图 = 素材文件 */
   {
     id: 'assets',
@@ -145,6 +134,20 @@ const NAV: NavItem[] = [
       <>
         <path d="M4 8.5V6.5A2.5 2.5 0 0 1 6.5 4h2M15.5 4h2A2.5 2.5 0 0 1 20 6.5v2M20 15.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M8.5 20h-2A2.5 2.5 0 0 1 4 17.5v-2" />
         <rect x="9" y="9" width="6" height="6" rx="1" />
+      </>
+    ),
+  },
+  /* 盾牌 + 勾：检查 → 生成 → 发布按顺序走的一页（C14 合并了发布中心）。
+     2026-10-19：作者把它挪到资产库 / 标注台之后、设置之前 —— 日常是"改数据"，
+     生成发布是最后一站；跟设置那种低频页挨着更顺。 */
+  {
+    id: 'build',
+    label: '生成与发布',
+    badge: 'build',
+    icon: (
+      <>
+        <path d="M12 3l8 3.5v6c0 4.2-3.4 7.4-8 8.5-4.6-1.1-8-4.3-8-8.5v-6z" />
+        <path d="m9 12 2.2 2.2L15.5 10" />
       </>
     ),
   },
@@ -238,6 +241,15 @@ export function WorkbenchApp() {
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null)
   const [words, setWords] = useState<Words | null>(null)
   const [book, setBook] = useState<BookView | null>(null)
+  /**
+   * 最新那一份整本（**只给回调读**）。
+   *
+   * `save` / `discard` 先 `await settleAll()` 把飞在空中的值写落完，再判
+   * "草稿脏不脏" —— 而 settleAll 落地带来的 `setBook` 是异步的，这次调用的闭包
+   * 里读不到它。`dirtyCount` 判错会让"刚点完步进器马上点保存"变成一次**静默丢弃**。
+   */
+  const bookRef = useRef<BookView | null>(null)
+  bookRef.current = book
   const [report, setReport] = useState<IssueReport | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -315,6 +327,65 @@ export function WorkbenchApp() {
       .catch(() => undefined)
   }, [])
 
+  /**
+   * **外面的文件改过了**（2026-10-19，作者：「我直接改了那些模型，它这里面能不能知道」）。
+   *
+   * 工作台读的是盘上的真字节，但读数只在写操作 / 进页时取 —— 作者在编辑器里改完
+   * 3MF 再切回来，屏幕还是旧的。这里在窗口重新获得焦点时重取一遍「会变的那几样」：
+   * 检查报告（交付目录对不对得上、导航徽标）+ `tick`（生成页交付清单 / 资产库列表）。
+   *
+   * 300ms 去抖：切窗常带一串 focus / blur（拖窗口、系统弹窗），不必每次都扫盘。
+   * **不做轮询、不引入文件监视** —— 作者要的是"切回来就能看到"，不是秒级同步。
+   */
+  useEffect(() => {
+    let t: number | null = null
+    const onFocus = () => {
+      if (t !== null) window.clearTimeout(t)
+      t = window.setTimeout(() => {
+        t = null
+        refreshReport()
+        setTick((n) => n + 1)
+      }, 300)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      if (t !== null) window.clearTimeout(t)
+    }
+  }, [refreshReport])
+
+  /**
+   * 进这两页时也重取一次：它们是「盘上现在是什么样」的读数页
+   * （生成与发布看交付目录，资产库看载荷字节）。
+   */
+  useEffect(() => {
+    if (page !== 'build' && page !== 'assets') return
+    refreshReport()
+    setTick((n) => n + 1)
+  }, [page, refreshReport])
+
+  /**
+   * 值写入那一路的检查报告**尾随去抖**（700ms）—— 见 `run` 的 `quiet`。
+   *
+   * `wb_preflight` 是这一串里最重的一条（parse recipes + 摸盘建 catalog）；
+   * 连点步进器时每笔都跑它一次，正是"主线程被占死、数字不跟手"的主要来源。
+   * 合到最后一笔之后跑一次就够：页头徽标最多迟 700ms（低频读数，可接受）。
+   */
+  const reportSoon = useRef<number | null>(null)
+  const refreshReportSoon = useCallback(() => {
+    if (reportSoon.current !== null) window.clearTimeout(reportSoon.current)
+    reportSoon.current = window.setTimeout(() => {
+      reportSoon.current = null
+      refreshReport()
+    }, 700)
+  }, [refreshReport])
+  useEffect(
+    () => () => {
+      if (reportSoon.current !== null) window.clearTimeout(reportSoon.current)
+    },
+    [],
+  )
+
   /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
   const refreshBook = useCallback(() => {
     wb.book()
@@ -355,13 +426,31 @@ export function WorkbenchApp() {
    * —— 三种情形一条路径，分三份写「能不能重做」就会有三种写法。
    */
   const run = useCallback(
-    async (label: string, patches: Patch[], where: 'undo' | 'redo', refresh?: Refresh) => {
-      setBusy(true)
+    async (
+      label: string,
+      patches: Patch[],
+      where: 'undo' | 'redo',
+      refresh?: Refresh,
+      opts?: { quiet?: boolean },
+    ) => {
+      /*
+       * `quiet` = 值写入那一路（见 `editQueue` 头注）。**不拨 `tick`、不置 `busy`**：
+       *
+       *  · 拨一次 `tick`，参数台会把 `wb_registry` / 整页 `wb_desk` / `wb_matrix`
+       *    再各问一遍 —— 连点步进器时那正是"数字不跟手、停下才追账"的主因；
+       *  · `busy` 一动整壳重渲染、页头那排按钮一起闪。
+       *
+       * 页要跟着走的那一份派生，由 `wb_apply_draft` **顺带返回**（`out.desk` /
+       * `out.matrix`，后端按 `refresh` 现算）—— 不必事后再问一次。
+       */
+      const quiet = opts?.quiet === true
+      if (!quiet) setBusy(true)
       try {
         const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
-        setTick((n) => n + 1)
-        refreshReport()
+        if (!quiet) setTick((n) => n + 1)
+        if (quiet) refreshReportSoon()
+        else refreshReport()
         // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
           const entry: UndoEntry = { kind: 'patches', label, patches: out.inverse }
@@ -373,10 +462,10 @@ export function WorkbenchApp() {
         fail(e)
         return null
       } finally {
-        setBusy(false)
+        if (!quiet) setBusy(false)
       }
     },
-    [fail, refreshReport],
+    [fail, refreshReport, refreshReportSoon],
   )
 
   /*
@@ -416,6 +505,10 @@ export function WorkbenchApp() {
   }, [])
 
   const undo = useCallback(async () => {
+    /* 飞在空中的值写先落完 —— 否则撤销撤的是"落库前的那一半"，栈与页面会对不上 */
+    await settleAll()
+    /* 本地草稿层整层丢掉：撤销之后的真相在后端那份 desk 里（下一条 tick 会把它取回来） */
+    editQueue.clear()
     const top = undoStack[undoStack.length - 1]
     if (!top) return
     if (top.kind === 'meta') {
@@ -427,6 +520,9 @@ export function WorkbenchApp() {
   }, [undoStack, run, runMeta])
 
   const redo = useCallback(async () => {
+    /* 同 `undo`：先把在飞的写落完、把本地草稿层丢干净，再读栈 */
+    await settleAll()
+    editQueue.clear()
     const top = redoStack[redoStack.length - 1]
     if (!top) return
     if (top.kind === 'meta') {
@@ -438,7 +534,14 @@ export function WorkbenchApp() {
   }, [redoStack, run, runMeta])
 
   const save = useCallback(async (): Promise<boolean> => {
-    if (!book || book.dirtyCount === 0 || busy) return false
+    if (busy) return false
+    /* 飞在空中的值写先落完：`dirtyCount` 得是落完之后的账 ——
+       否则"刚点完步进器马上点保存"会静默丢掉那一笔（读的是旧整本） */
+    await settleAll()
+    const cur = bookRef.current
+    if (!cur || cur.dirtyCount === 0) return false
+    /* 保存 = 提交点：本地草稿层整层丢掉，显示交回写进仓库的那份 */
+    editQueue.clear()
     setBusy(true)
     try {
       const out = await wb.save()
@@ -455,10 +558,16 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [book, busy, fail, refreshReport])
+  }, [busy, fail, refreshReport])
 
   const discard = useCallback(async () => {
-    if (!book || book.dirtyCount === 0 || busy) return
+    if (busy) return
+    /* 同 `save`：先把在飞的写落完再判脏 —— 跳到一半的改动也得算进来 */
+    await settleAll()
+    const cur = bookRef.current
+    if (!cur || cur.dirtyCount === 0) return
+    /* 放弃 = 整条草稿丢：本地草稿层跟着一起丢 */
+    editQueue.clear()
     setBusy(true)
     try {
       setBook(await wb.discard())
@@ -471,7 +580,7 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [book, busy, fail, refreshReport])
+  }, [busy, fail, refreshReport])
 
   /** 跨页定位（C14 语义）：跳过去并落上主选中；那一页重挂一次去读它 */
   const goto = useCallback((view: string, foc?: GotoFocus) => {
@@ -675,9 +784,10 @@ export function WorkbenchApp() {
             initialFocus={focus}
             tick={tick}
             dirty={dirty}
-            onApply={async (label, patches, refresh) => {
-              const out = await run(label, patches, 'undo', refresh)
-              return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
+            onApply={async (label, patches, refresh, opts) => {
+              const out = await run(label, patches, 'undo', refresh, opts)
+              /* `ok` 让参数台那一层知道这笔到底写进去没有（失败时 overlay 要回落） */
+              return { ok: out !== null, desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
             onMetaApplied={pushMeta}
             onSave={() => void save()}
@@ -704,8 +814,8 @@ export function WorkbenchApp() {
             initialSel={assetSel}
             initialAssign={assetAssign}
             onGoto={goto}
-            onApply={async (label, patches) => {
-              await run(label, patches, 'undo')
+            onApply={async (label, patches, opts) => {
+              await run(label, patches, 'undo', undefined, opts)
             }}
           />
         )

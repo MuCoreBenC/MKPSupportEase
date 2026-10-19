@@ -1233,8 +1233,9 @@ mod tests {
             x.toml_key, offset_x.toml_key,
             "配方通道与元信息通道的 toml_key 必须是同一个值（不是两份真相）"
         );
-        // 真数据里 A1:FASTV3.3 把这一项钉在 0.1（版本层）——三层取值要读出覆盖
-        assert_eq!(x.value, "0.1");
+        // 真数据里 A1:FASTV3.3 把这一项钉在 -0.7（版本层，2026-10-19 作者改的
+        // 笔尖偏移）——三层取值要读出覆盖
+        assert_eq!(x.value, "-0.7");
         assert_eq!(x.origin, "variant");
         // 机型层没写 → 「还原成」给的是出厂默认 0
         assert_eq!(x.base_value.as_deref(), Some("0"));

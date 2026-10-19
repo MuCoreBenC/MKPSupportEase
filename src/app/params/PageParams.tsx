@@ -401,6 +401,24 @@ export default function PageParams({
    * 是白拦一道（那屏里的采用 / 保持本来就是写操作）。
    */
   const [editMode, setEditMode] = useState(gateEdit !== true || openSyncOnStart)
+  /*
+   * **带着没保存的草稿重开 → 直接进编辑模式**（2026-10-19）。
+   *
+   * `useParams.draftOnDisk` = 后端摘要说"盘上这份草稿真跟那份文件不一样"。
+   * 作者 2026-10-19：「我没保存的时候关闭它应该是记住着，然后下次我再进来的时候，
+   * 它一样还是保留着那个编辑模式的」。与兄弟链「编辑文件」抽屉的
+   * `unsaved = draft.reused && draft.dirty` 同一条口径（那边在 `PagePresets` 里
+   * 直接 `setEditMode(unsaved)`）。
+   *
+   * **只自动进一次**：用户点了「放弃并退出」（作废）之后就不再替他进 —— 那时他要的是只读。
+   */
+  const autoEditConsumedRef = useRef(false)
+  useEffect(() => {
+    if (autoEditConsumedRef.current) return
+    if (gateEdit !== true || u.draftOnDisk !== true) return
+    autoEditConsumedRef.current = true
+    setEditMode(true)
+  }, [gateEdit, u.draftOnDisk])
   /** 只读 = 有闸且还没进编辑模式 */
   const ro = gateEdit && !editMode
 

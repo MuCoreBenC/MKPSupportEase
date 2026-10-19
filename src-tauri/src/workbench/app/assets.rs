@@ -208,6 +208,31 @@ pub struct AssetUsageView {
 /// - `mkPreset`（没有源文件，是生成产物）：`fileName` = **产物名**（命名规则算出）、
 ///   `absPath` = 产物文件、`productPath` = 产物相对仓库根的一段。
 ///
+/// **盘上字节与交付目录登记的核对**（2026-10-19）。
+///
+/// 作者改了 3MF 之后问的那件事：「注册表里记的哈希和盘上这份现在一样吗？」
+/// —— 不一样不是错误，是"文件改过了、目录还是旧的"这个事实，下一步是重新生成 / 发布。
+///
+/// 登记值的**唯一来源**是交付目录 `presets/delivery/catalog.json` 的 `files[]`
+/// （发布 / 生成时对真字节算的那一份）。台账 `presets/assets.toml` 刻意不存哈希
+/// （那是交付物的属性，见文件头），所以这里不去第二处找。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum HashCheck {
+    /// 这一份**不进交付集合**（`bundled` 随包 / 图片类没有下载落点）——
+    /// 目录不会登记它，没有"该不该一致"这回事
+    NotInDelivery,
+    /// 进交付集合，但目录里还没有这一条（还没生成过 / 目录不在）——
+    /// 如实说"没登记"，不拿空值当"一致"
+    NotRegistered,
+    /// 目录登记着，且与实际字节一致
+    Match,
+    /// 目录登记着，但实际字节已经变了（改了文件、目录还没重算）
+    Mismatch,
+    /// 文件不在，没得比
+    Missing,
+}
+
 /// **文件不存在时 `absPath` 同时就是"期望路径"** —— 界面按 `exists` 换标题，
 /// 不去猜第二个落点。
 #[derive(Debug, Clone, Serialize)]
@@ -241,6 +266,16 @@ pub struct AssetInspectView {
     /// 与列表里那一格同一份判据（[`calibration_status_of`]），详情卡的「校准身份」段
     /// 读它；写完身份后前端会重新拉一次 inspect，看到的就是盘上最新的值。
     pub calibration: Option<CalibrationStatus>,
+    /// 文件**创建时间**（RFC3339 / UTC，界面按本机时区显示）。文件系统给不出 = `None`
+    pub created: Option<String>,
+    /// 文件**最后修改时间**（同上）。改了文件这一格会变，`sha256` 也跟着变
+    pub modified: Option<String>,
+    /// 交付目录（`presets/delivery/catalog.json`）登记的那份 SHA-256。没登记 = `None`
+    pub registered_sha256: Option<String>,
+    /// 同上：登记的大小（字节）
+    pub registered_size: Option<u64>,
+    /// 盘上字节与登记值的核对结果（见 [`HashCheck`]）
+    pub hash_check: HashCheck,
 }
 
 /// 切片器三根轴之二三（C14 `derive.slicerMetaOf` 同一条判据，搬进后端）：
@@ -886,6 +921,18 @@ fn inspect_of(
     } else {
         (None, None, None, None)
     };
+    /* 时间戳与字节同一次 stat 拿：文件不在就都没有（不拿"现在"冒充） */
+    let meta = std::fs::metadata(&abs).ok();
+    let created = meta
+        .as_ref()
+        .and_then(|m| m.created().ok())
+        .map(crate::workbench::clock::iso8601_of);
+    let modified = meta
+        .as_ref()
+        .and_then(|m| m.modified().ok())
+        .map(crate::workbench::clock::iso8601_of);
+    let (registered_sha256, registered_size, hash_check) =
+        registration_of(asset, &file_name, sha256.as_deref(), bytes);
     Ok(AssetInspectView {
         id: asset.id.clone(),
         file_name,
@@ -898,7 +945,66 @@ fn inspect_of(
         format,
         product_path,
         calibration: calibration_status_of(presets, asset),
+        created,
+        modified,
+        registered_sha256,
+        registered_size,
+        hash_check,
     })
+}
+
+/// 一条资产在**交付目录**（`catalog.json` 的 `files[]`）里登记的那一份哈希，以及
+/// 它与盘上字节的核对结果（[`HashCheck`]）。文件不在 / 目录不在时不报错 ——
+/// 那都是读数，不是失败。
+///
+/// 条目**按落点找**：普通资产用 [`crate::runtime::catalog::dest_of_asset`] 那一处
+/// 算法（`assets/<台账 path>`，客户端拼 URL 与下载校验用的同一个），`mkPreset` 用它
+/// 的产物落点（`delivery/mkp/presets/<产物名>`）—— 与发布侧写目录时同一套路径语义。
+/// 落点算不出来（随包 / 图片类）= 目录根本不会登记它。
+fn registration_of(
+    asset: &crate::workbench::presets::Asset,
+    file_name: &str,
+    sha256: Option<&str>,
+    bytes: Option<u64>,
+) -> (Option<String>, Option<u64>, HashCheck) {
+    let Some(dest) = delivery_dest_of(asset, file_name) else {
+        return (None, None, HashCheck::NotInDelivery);
+    };
+    // 交付目录还没立起来 / 读不出 / 坏 JSON ⇒ 当"没登记"（不把一次读盘失败说成"一致"）
+    let Ok(raw) =
+        std::fs::read(paths::delivery_root_path().join(crate::runtime::source::CATALOG_FILE))
+    else {
+        return (None, None, HashCheck::NotRegistered);
+    };
+    let Ok(catalog) = serde_json::from_slice::<crate::runtime::catalog::Catalog>(&raw) else {
+        return (None, None, HashCheck::NotRegistered);
+    };
+    let Some(entry) = catalog.files.iter().find(|f| f.path == dest) else {
+        return (None, None, HashCheck::NotRegistered);
+    };
+    let check = match (sha256, bytes) {
+        // 登记缺 SHA / 大小（这一侧不该背书的那一档）也不冒充"一致"
+        (Some(sha), Some(size))
+            if entry.sha256.as_deref() == Some(sha) && entry.size == Some(size) =>
+        {
+            HashCheck::Match
+        }
+        (Some(_), Some(_)) => HashCheck::Mismatch,
+        _ => HashCheck::Missing,
+    };
+    (entry.sha256.clone(), entry.size, check)
+}
+
+/// 这份资产在**发布根**下的落点（`catalog.path` 的基准）。算不出来 = 不进交付集合。
+fn delivery_dest_of(asset: &crate::workbench::presets::Asset, file_name: &str) -> Option<String> {
+    if asset.kind == AssetKind::MkPreset {
+        return Some(format!(
+            "{}/{}",
+            crate::runtime::catalog::PRESET_DEST_DIR,
+            file_name
+        ));
+    }
+    crate::runtime::catalog::dest_of_asset(asset)
 }
 
 /// 字节的 SHA-256（小写 hex）—— 与交付侧（`app::dist`）同一套写法，
@@ -1100,12 +1206,13 @@ mod tests {
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            32,
-            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 4 + BBS 9 + 引导图 2 ——
+            33,
+            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 5 + BBS 9 + 引导图 2 ——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
              品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
              2026-10-16：引导图进台账（`type = 'guide'`，bundled —— 图片引导那两张）。
              2026-10-18：模型 3 → 4（`zoffset-calibration-ext`，Z 校准加长版进台账）。
+             2026-10-19：模型 4 → 5（`precise-calibration-ext`，XY 校准加长版进台账）。
              条数变了要说清为什么"
         );
 
@@ -1198,8 +1305,9 @@ mod tests {
             // image 档 5 = 整机图 4 + 品牌字标 1（2026-10-03 品牌图正式进台账）
             (AssetKind::Image, 5usize),
             (AssetKind::Icon, 3),
-            // 模型 4 = Z 旧版 / Z 加长版（2026-10-18 进台账）/ XY / 支撑测试
-            (AssetKind::Model, 4),
+            // 模型 5 = Z 旧版 / Z 加长版（2026-10-18 进台账）/ XY 旧版 /
+            // XY 加长版（2026-10-19 进台账）/ 支撑测试
+            (AssetKind::Model, 5),
             (AssetKind::SlicerProfile, 9),
             (AssetKind::MkPreset, 9),
             // 引导图 2 = 「改 .3mf 默认打开方式」那一处的浅 / 深两张（2026-10-16 进台账）
@@ -1243,7 +1351,7 @@ mod tests {
 
     /// **四态身份在真数据上的分布**（作者 2026-10-03 定的模型）：
     /// 进套餐 14（9 条 mkPreset + 5 条被套餐引用的 BBS）、随包 7（整机图 4 + 品牌字标 1 +
-    /// 引导图 2）、仅归档 0（没人动过可见性）、其余可选 11（2026-10-18 加长版模型也是可选）
+    /// 引导图 2）、仅归档 0（没人动过可见性）、其余可选 12（两版加长模型也是可选）
     #[test]
     fn the_real_identity_states_match_the_model() {
         use AssetIdentity::{ArchiveOnly, Bundled, InBundle, Optional};
@@ -1276,8 +1384,8 @@ mod tests {
         assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
         assert_eq!(
             count(Optional).len(),
-            11,
-            "30 - 14 进套餐 - 5 随包 = 11 可选（图标 3 + 模型 4 + 没进套餐的 BBS 4）"
+            12,
+            "33 - 14 进套餐 - 7 随包 = 12 可选（图标 3 + 模型 5 + 没进套餐的 BBS 4）"
         );
 
         // 身份轴筛选：每一档筛出来都恰好是那一档
@@ -1369,6 +1477,56 @@ mod tests {
         assert_eq!((v.width, v.height), (None, None), "toml 不是图片");
         assert!(v.exists, "交付根里那份产物在（dist 是入库的）");
         assert!(v.bytes.is_some_and(|b| b > 0), "产物大小读得出");
+    }
+
+    /// **盘上字节 vs 交付目录登记**（2026-10-19）：改过文件之后面板要说的那件事。
+    ///
+    /// 这条不钉"一致"或"不一致"（那是数据状态，改了文件 / 重跑了生成就会变），
+    /// 钉的是**判据本身**：登记值来自目录，结论与两边实际值逐位对得上。
+    #[test]
+    fn the_inspection_panel_compares_bytes_with_the_delivery_catalog() {
+        let presets = load_presets().expect("真 presets 读得通");
+
+        // 随包的整机图不进交付集合 —— 目录不会登记它，不能报成"没登记"
+        let image = presets.assets.get("a1-image").expect("a1-image");
+        let v = inspect_of(&presets, image).expect("读得出");
+        assert_eq!(v.hash_check, HashCheck::NotInDelivery);
+        assert!(v.registered_sha256.is_none());
+        assert!(v.registered_size.is_none());
+
+        // 3MF 模型进交付集合：目录里必须有这一条，结论按两边实际值算
+        let model = presets
+            .assets
+            .get("zoffset-calibration-ext")
+            .expect("zoffset-calibration-ext");
+        let v = inspect_of(&presets, model).expect("读得出");
+        assert!(v.exists, "这条测试要在文件存不存在都说得通的前提下跑");
+        assert!(v.modified.is_some(), "真文件读得出修改时间");
+
+        let raw =
+            std::fs::read(paths::delivery_root_path().join(crate::runtime::source::CATALOG_FILE))
+                .expect("交付目录 catalog.json 在");
+        let catalog: crate::runtime::catalog::Catalog =
+            serde_json::from_slice(&raw).expect("catalog.json 合法");
+        let entry = catalog
+            .files
+            .iter()
+            .find(|f| f.path == "assets/models/ZOffset_Calibration_ext.3mf")
+            .expect("3MF 在交付目录里登记着");
+        assert_eq!(v.registered_sha256, entry.sha256, "登记值来自目录，不另算");
+        assert_eq!(v.registered_size, entry.size);
+        let same = v.sha256 == entry.sha256 && v.bytes == entry.size;
+        assert_eq!(
+            v.hash_check,
+            if same {
+                HashCheck::Match
+            } else {
+                HashCheck::Mismatch
+            },
+            "改了文件还没重算目录 ⇒ 必须明确报不一致（实际 {} 字节 / 登记 {:?} 字节）",
+            v.bytes.unwrap_or(0),
+            entry.size
+        );
     }
 
     /// 不存在的 id 如实拒绝（命令这一层，不是空面板）

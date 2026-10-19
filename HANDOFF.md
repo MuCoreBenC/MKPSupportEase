@@ -667,3 +667,108 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 **验证**：fmt / 双档 `clippy -D warnings` / `cargo test` /
 `cargo test -p mkp-support-ease --lib --features workbench` **989 全绿** /
 `npx tsc -b --force` / `npm run lint` / `npm run build` ×2 全绿。
+
+## 增量之四十六 · 补 `tauri:workbench` 入口：`npm run tauri:workbench dev` 现在能用了（2026-10-19，分支 `feat/dark-mode`）
+
+**症状**：`npm run tauri:workbench dev` 报 `npm error Missing script: "tauri:workbench"`。
+
+**根因**（不是设备问题，任何机器一样）：npm 的 `npm run <script> [args]` 里，
+**脚本名之后的一律当参数透传**（本次已用 `npm run tauri info` 实证 —— 跑的就是 `tauri info`）。
+仓库里 `tauri` 这个名字**存在**（`"tauri": "tauri"`），所以 `npm run tauri dev` 能用；
+但工作台**从来没有** `tauri:workbench` 这个脚本 —— 它的入口一直叫 `tauri:workbench:dev`
+（`npm run tauri:workbench:dev`）。即"照 `npm run tauri dev` 的形状写"少写了一位。
+
+**修法**（只加、不动既有）：`package.json` 补一条
+`"tauri:workbench": "node scripts/tauri-workbench.mjs"`。此后两种写法都成立 ——
+`npm run tauri:workbench dev` / `npm run tauri:workbench build`（与 `npm run tauri dev` 对称）
+和原有的 `npm run tauri:workbench:dev` / `:build` 都照旧，既有习惯不受影响。
+
+**验证**：`npm run tauri:workbench` 命中脚本并打印用法（退出码 2，符合脚本预期）；
+参数透传已由 `npm run tauri info` 实证，故 `... dev` / `... build` 会分别转发 `dev` / `build`。
+
+## 增量之四十七 · 参数编辑「跟手化」：本地即时 + 单飞合批 + 橙色「改之前的值」（2026-10-19，分支 `feat/dark-mode`）
+
+**症状**（作者实测）：「改个参数它一直在跳 —— 很慢很卡；我连续点击，停下之后它才慢慢追上我点击的次数。」
+
+**根因**：一次值写入 = `ParamsPage.writeValue` → 外壳 `run()` → `await wb.applyDraft(...)`，紧接着 `setTick(n + 1)` 与 `refreshReport()`。
+`tick` 又让 `ParamsPage` 三个 effect 各再发一条 IPC（`wb_registry` / **整页 `wb_desk`** / `wb_matrix`），而 Rust 侧这些 `#[tauri::command]`
+**全是同步的（跑主线程）**，`wb_preflight` 更重（parse recipes + 摸盘建 catalog）。
+连点步进器时主线程被这一串命令占死 ⇒ 数字不跟手、停下才"追账"。
+
+**改法**（前端为主，**后端草稿那条架构一行没动**）：
+
+1. **`src/workbench/editQueue.ts`（新）** —— 值写入的单飞合批队列 + 乐观覆盖层。
+   同一格 latest-wins；**真尾随 120ms**（每次 push 重新计时，人还在连点就一条都不发）；**单飞**（同一时刻只有一条 `applyDraft` 在飞）；
+   响应**只写 base**、overlay 永远最后叠；回来先比 `refreshKey`，对不上（切了机型 / 改了搜索）就是过期派生，丢弃。
+2. **外壳 `run(..., { quiet: true })`**（`App.tsx`）—— 值写入那一路**不拨 `tick`、不置 `busy`**；`refreshReport` 改 `refreshReportSoon`（700ms 尾随去抖）。
+   `undo` / `redo` / `save` / `discard` 仍是低频结构操作、照旧拨 `tick`，但动手前先 `await settleAll()` 把飞在空中的写落完
+   （`save` / `discard` 另读 `bookRef` 判脏 —— 否则"刚点完步进器马上点保存"会**静默丢一笔**）。
+3. **参数台吃 `out.desk` / `out.matrix`** —— 后端 `wb_apply_draft` 本来就按 `refresh` 顺带返回（以前只吃了 matrix），省掉事后再问一次。
+4. **`NumberField`** 两条：手势进行中不回写 prop（`gestureRef`）；本地跑在 prop 前面时也不回写（`aheadRef`）。
+   少了这两条，**连点 10 下只进 8**（被动的 `[value]` 回写 effect 会晚一步落在两次点击之间，把 `numRef` 拽回上一步 ⇒ 下一次 `commit()` 当"没变"不提交）。
+5. **橙色「改之前的值」** —— `cell.dirty && cell.rest !== null` 时，中间行与右栏「各版本取值」各画一枚 `↩ <改前那个数>`（新增 `.pRevert`，
+   复用两边同源的 `--warn-*` token），点了写回 `Cell.rest`（盘上钉着的那个）。与右栏那枚 `↶`（挂回继承、写 `null` 删键）**语义不同**，title 里说清。
+6. **其余页** —— `AssetsPage.applyVis` 改走 quiet（它写完自己就 `load()`，再吃一次 `tick` 只是白读第二遍）；
+   `BundlesPage` / `BuildPage` / `MachinesPage` 的 `tick` 只在生成 / 保存 / 放弃 / 建删版本等**结构操作**上动，语义正确 —— **不动**。
+
+**验证**（全绿）：
+- `npx tsc -b --force` / `npm run lint`（eslint + stylelint）/ `npm run build` / `npm run build:workbench` / `npm run check:bundle` / `cargo fmt --check`；
+  Rust 一行没改，故 clippy / cargo test 不受影响（照旧口径仍应各跑一遍）。
+- **新探针 `scripts/probes/params-lag.mjs`**（连点 10 下，起 `npm run dev:workbench` 后 `node scripts/probes/params-lag.mjs`）：
+  **跟手 +10** · `wb_apply_draft = 1` · `wb_desk = 0` · `wb_registry = 0` · `wb_preflight = 0` · 橙色 chip `↩ 45` 出现 · 点它回 45 且 chip 消失 —— **7 条全 PASS**。
+- 手动（`npm run tauri:workbench:dev`）：连点步进器跟手不回跳、长按松手只进 1 条撤销、Ctrl+Z 一次退一格、chip 点一下回干净态。
+
+## 增量之四十八 · 跟手化补修（真机回跳）+ 客户端草稿「圆点不亮 / 重开记不住」（2026-10-19，分支 `feat/dark-mode`）
+
+### 一、工作台：显示在"在飞那一趟"里掉回旧值（增量之四十七的第二刀）
+
+**症状**（作者录屏 + 文字）：「最后跳到的是正确的值，只不过过程不好看、不跟手 —— 从 0.1 点一下该变 0.05，可它先像是 0.15 才变成 0.05。」
+
+**根因**（已定位到行）：`editQueue.pump()` **在发出之前就把这一批从队列里删掉** ⇒ 乐观覆盖层消失 ⇒
+IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ 屏上数字先跳回旧值、响应回来才跳到正确值。
+假后端的 `wb_apply_draft` 几乎瞬时返回，所以第一版探针漏掉了这个窗口。
+
+**第一刀**：`pump` 只挑不删；批次**落地之后**才收（否则 IPC 在飞的那几十~几百毫秒里显示就退回旧值）。
+
+**第二刀（作者 18:43 录屏抓到的那一帧）**：把数值框单独抽帧看（12 帧 @ 1/60s）抓到
+**`0.2 → 0.15 → 0.2`** —— 数字只在中间**一帧**变成别的值。根因：**显示值仍然被后端返回值牵着走**。
+第一刀只是把"收"挪到落地之后，落地那一刻本地层照样消失 ⇒ 显示落回后端那份 desk（手上还是上一次的值）。
+**客户端不闪的真正原因**：它的显示**只认自己那份本地 `draft` 层，后端往返从不回写显示**
+（`useParams` 的 `valueOf = draft[key] ?? savedValueOf(key)`）。
+→ 改成同一套模型：`EditEntry` 加 `sent` 标记，**落地之后也不撤**（它本身就是这一屏的草稿层）；
+`settleAll` 的循环条件改成"还有没发的 / 还有在飞的"（按 `queue.size` 判会死循环）；
+新增 `editQueue.clear()`，由外壳在 **undo / redo / save / discard** 时整层丢掉（那几刻后端那份 desk 才是真相）；
+失败也**不回落显示**（与客户端 `patchDraft` 同一条口径：失败只记 `draftError`，不回滚界面值）。
+
+**判据**：`scripts/probes/params-lag.mjs` —— 跟手 +10 / **全程单调不回跳** / **到最终值之后一帧都不许再动** /
+`apply_draft=1` / `desk=registry=preflight=0` / 橙 chip / chip 回退；给 `wb_apply_draft` 人为加
+**300ms 延迟**（真机量级）才照得出来 —— **9 条全绿**。
+
+### 二、客户端：改了不保存关掉之后，草稿"看不见 / 圆点点不亮"
+
+三处都已定位到行：
+
+1. **广播根本没接上（主因）**：`state/draftState.ts` 的头注写着「发：参数页（`useParams`：改值 / 保存 / 取消 / 采用云端新值）」，
+   可 `git grep draftMutated` 只有 `usePresetData` 那两处（正文链）—— 参数链**一次都不发** ⇒
+   预设列表行上那枚橙色「未保存」圆点（`PresetTable` 的 `unsavedDot`）只能等整表重读才可能亮（作者：「那个橙色的点也不显示了」）。
+   → `useParams` 在 **改值（`patchDraft`）/ 保存（`commitDraft`）/ 取消（`discardAll`）** 三处广播；改值走 150ms 尾随合并，保存 / 取消当场发。
+2. **判据漏了 `dirty`**：两处 `setDraftPath(d?.path ?? null)` 没看 `dirty`，而 `begin_preset_edit` 一打开就写出草稿文件
+   ⇒「只打开过、一个字没改」也会亮圆点。契约与头注写的都是「**真改过才算**」→ 两处都加 `d && d.dirty`。
+3. **重开看不到改动、也回不到编辑模式**：`useParams` 拿 `beginPresetEdit` 的返回值时把 `reused` 丢了、
+   把 `d.text`（含没保存改动的草稿正文）**一次都没用**；内存 `draft` 从 `{}` 起、**从不 seed**
+   ⇒ 重开显示的是盘上那份文件的旧值（而草稿还在盘上，点保存会把它一起存下去）。
+   → ① **`src/app/params/paramSessionCache.ts`（新）** —— 照 `PagePresets` 的 `textHistCache` 抄：按"编辑目标"记住
+   **草稿层 + 撤销/重做栈**，卸载时写、`reused` 时读回来（**不存** 修改历史 `log`/`seq` —— 那两样后端按文件自己持久化，
+   存了会打架）；② `useParams` 新增 **`draftOnDisk`**（读一眼 `get_preset_draft_summary().dirty`），
+   `PageParams` 据此**只自动进一次编辑模式**（与兄弟链「编辑文件」的 `reused && dirty` 同一条口径）。
+
+**附带修一处假后端与真机口径不一致**：`src/api/mock.ts` 的 `getPresetDraftSummary` 用户线原来拿
+「带血统三行的盘上正文」直接比草稿（草稿是去血统的）⇒ **恒判脏**，"只打开没改"也会亮圆点。
+改成与真机同一条比法（`withoutLineage(base)`）—— 不修这条，预览会一直骗人，第 2 条改动看着像坏的。
+
+**判据**：新增 `scripts/probes/params-draft-dot.mjs`（`npm run build` + `npx vite preview --port 4173` 后跑）——
+本地那份行右键「修改参数」→ 只打开不改（**不亮**）→ 进编辑模式改一个值 → Esc 关掉（**亮**）→
+重开（**直接编辑模式 + 改动还在**）→ 保存（**灭**）—— **10 条全 PASS**。
+
+**验证总账**：`npx tsc -b --force` / `npm run lint`（eslint + stylelint）/ `npm run build` / `npm run build:workbench` /
+`npm run check:bundle` / `cargo fmt --check` 全绿；**Rust 一行未改**（照旧口径仍应各跑一遍 clippy / cargo test）。

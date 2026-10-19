@@ -156,8 +156,11 @@ pub struct Rendered {
     pub snapshot: BTreeMap<String, Value>,
 }
 
-/// 把一个版本的有效配方渲染成 MKP TOML
-fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
+/// 把一个版本的有效配方渲染成 MKP TOML。
+///
+/// `pub(super)`：`delivery_status` 用它判「盘上这份是不是当前渲染器的产物」——
+/// 配方指纹看不出的模板变化（例如删掉一行注释），只有这样才抓得到。
+pub(super) fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
     let v = book
         .version(uid)
         .ok_or_else(|| AppError::not_found(format!("版本 {uid} 不存在")))?;
@@ -375,7 +378,7 @@ fn gcode_body(v: &Value) -> String {
 ///
 /// 这条判据存在的唯一理由：产物头里有时间戳，不跳过它「字节没变不重写」永远不生效，
 /// 而那条规则本身是为了不让同步工具误判有更新
-fn same_payload(a: &str, b: &str) -> bool {
+pub(super) fn same_payload(a: &str, b: &str) -> bool {
     let strip = |s: &str| {
         s.lines()
             .filter(|l| !l.starts_with("# release_time:"))
@@ -595,7 +598,13 @@ pub(super) fn generate_with(
     std::fs::create_dir_all(&asset_root)
         .map_err(|e| AppError::io("建不出资产目录").with_detail(e.to_string()))?;
     super::delivery::write_content(&dist_root, &asset_root, &book)?;
-    super::delivery::write_catalog_json(&dist_root, &book, &stamp)?;
+    /*
+     * **生成不盖发布戳**（2026-10-19）：沿用目录里已有的 `publishedAt`。
+     * 生成不是发布事件；只有 `publish_into` 才盖新时间。这样"只看了一眼就生成"
+     * 不会把目录时间顶新，也不会让预演永远显示 catalog 被修改。
+     */
+    let published = super::delivery::published_at_of(&dist_root);
+    super::delivery::write_catalog_json(&dist_root, &book, published.as_deref())?;
 
     tracing::info!(
         written = written.len(),
@@ -757,18 +766,18 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     // 生成不只写 toml —— 它同时重算目录与清单（content 那三份 + `catalog.json`）。
     // 那几份也在确认框里列出来，比法与产物同一处（`preview_text`）。
     //
-    // 正文由 `delivery` 那两台**纯函数**给出（与真生成同一处构造）；
-    // 时间戳就用当下这一个（真生成也在这一刻取，预演不另编一个）。
-    // ⚠ `catalog.json` 头里有 `publishedAt`：它每次生成都会换，所以它**每次都会显示"修改"**
-    // —— 那是实话（`atomic_write` 比的是整份字节，时间戳变了就重写），不是误报。
-    let stamp = clock::now_iso8601();
+    // 正文由 `delivery` 那两台**纯函数**给出（与真生成同一处构造）。
+    // `catalog.json` 的 `publishedAt` **沿用旧目录的戳**（生成不盖发布戳，见真生成
+    // 那一段）—— 没有实质变化时它不会再显示"修改"。
     let mut aux: Vec<PreviewFile> = Vec::new();
     for (rel, text) in super::delivery::content_json_texts(&book)? {
         let old = std::fs::read_to_string(delivery.join(rel)).ok();
         aux.push(preview_text(rel, rel, &text, old.as_deref()));
     }
+    // 与真生成同一处构造：沿用旧目录的发布戳（生成不盖新时间）
+    let published = super::delivery::published_at_of(&delivery);
     let catalog_text =
-        super::delivery::built_catalog(&delivery, &book, &stamp)?.to_pretty_json()?;
+        super::delivery::built_catalog(&delivery, &book, published.as_deref())?.to_pretty_json()?;
     let catalog_rel = super::delivery::NEW_CATALOG_FILE;
     let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
     aux.push(preview_text(
@@ -1320,19 +1329,20 @@ pub fn wb_clean_dist_strays() -> Result<usize, AppError> {
 
 /* ---------- 交付文件清单（「交付预设」卡看这次都会写出什么） ---------- */
 
-/// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
+/// **交付读数**（只读）：本次交付集合里都有哪些文件、盘上处于哪一档、目录登记有没有漂移。
 ///
 /// 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，我不知道这些其他的……
 /// 还有什么文件需要生成的，我也想看到」。名单就是交付集合（与残留审计同一份），
-/// 分类见 [`super::delivery::DeliveryStage`]。
+/// 分类见 [`super::delivery::DeliveryStage`]；2026-10-19 起连同 `catalog.json`
+/// 的登记漂移（改了 3MF 之后的那条提示）一起给。
 #[tauri::command(async)]
-pub fn wb_delivery_files() -> Result<Vec<super::delivery::DeliveryFile>, AppError> {
+pub fn wb_delivery_files() -> Result<super::delivery::DeliveryStatus, AppError> {
     traced("wb_delivery_files", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
             let book = Book::new(&ctx.presets, &c, &d);
             // 只读定位，不顺手建交付目录（和 `wb_dist_strays` 的读侧一样）
-            Ok(super::delivery::delivery_files(
+            Ok(super::delivery::delivery_status(
                 &paths::delivery_root_path(),
                 &book,
             ))

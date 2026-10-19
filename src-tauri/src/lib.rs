@@ -323,6 +323,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::put_preset_draft,
         ipc::local::discard_preset_draft,
         ipc::local::commit_preset_draft,
+        // 冷启动接回草稿层：后端只存正文，"改了哪几项"要从正文与来源比出来
+        ipc::local::read_preset_draft_changes,
         // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
         ipc::local::begin_text_edit,
         ipc::local::put_text_draft,
@@ -488,6 +490,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::local::put_preset_draft,
         ipc::local::discard_preset_draft,
         ipc::local::commit_preset_draft,
+        // 冷启动接回草稿层：后端只存正文，"改了哪几项"要从正文与来源比出来
+        ipc::local::read_preset_draft_changes,
         // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
         ipc::local::begin_text_edit,
         ipc::local::put_text_draft,

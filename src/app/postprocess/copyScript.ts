@@ -55,6 +55,15 @@ export interface CopyScriptTarget {
   machineId: string
   versionId: string
   /**
+   * **被点名的那一份**在用户根里的相对落点（`presets-local/…`）—— 预设页右键那一行传它。
+   *
+   * ★ 为什么必须传（2026-10-19）：只按 (机型, 版本) 寻址时，同一组合下有几份副本
+   *   （`A1-fast.toml` / `A1-fastv3.3 copy.toml` …）后端会优先挑「正在使用」的那份
+   *   ⇒ 右键 A 抄到 B，通知里却写着 A（作者实测）。给了落点就**点名**，不再猜。
+   * 不传 = "当前使用的那一套"（首页 / 标题栏字标那一侧）。
+   */
+  path?: string
+  /**
    * 这一份预设文件的名字（通知里要说"哪一份"）。
    * 不给就从命令带回的绝对路径末段取（`cmd.toml`）—— 两条路都能落到同一个名字。
    */
@@ -76,8 +85,9 @@ function baseName(p: string): string {
 export function postProcessCommand(
   machineId: string,
   versionId: string,
+  path?: string,
 ): Promise<PostProcessCommand> {
-  return api.getPostProcessCommand(machineId, versionId)
+  return api.getPostProcessCommand(machineId, versionId, path)
 }
 
 /**
@@ -87,7 +97,13 @@ export function postProcessCommand(
  * 不是一条跑不通的命令）—— 贴进切片器只会得到 `Error code: 2`，那比不复制更糟。
  */
 export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolean> {
-  if (t.machineId === '' || t.versionId === '') {
+  /*
+   * 两条寻址方式，有一条能指到东西就行：
+   * - 点名（`path`）：右键那一行，落点自己就说明是哪一份 ⇒ 不需要归属；
+   * - 不点名：首页 / 字标按 (机型, 版本) —— 那两样缺一个就指不出来。
+   */
+  const named = t.path !== undefined && t.path !== ''
+  if (!named && (t.machineId === '' || t.versionId === '')) {
     notify({
       kind: 'warn',
       title: '复制不了',
@@ -99,7 +115,7 @@ export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolea
 
   let cmd: PostProcessCommand
   try {
-    cmd = await postProcessCommand(t.machineId, t.versionId)
+    cmd = await postProcessCommand(t.machineId, t.versionId, t.path)
   } catch (err: unknown) {
     /* 错误唯一入口是 `errorText`，不许静默"什么都没发生" */
     notify({ kind: 'bad', title: '复制失败', text: errorText(err), ttl: COPY_TTL_MS })

@@ -257,6 +257,14 @@ const calibModels: CalibModel[] = [
     ready: true,
   },
   {
+    id: 'xy-ext',
+    name: 'XY 校准（加长版）',
+    desc: '板子右侧 / 上侧各多 5mm 留白的那一版，校准流程与旧版完全一样',
+    fileName: 'Precise_Calibration_ext.3mf',
+    size: '178 KB',
+    ready: true,
+  },
+  {
     id: 'test-models',
     name: '支撑测试',
     desc: '校准完打这个看支撑效果',
@@ -1453,6 +1461,27 @@ export const mockApi: MkpApi = {
     mockDraft = null
   },
 
+  /**
+   * 草稿里改过的那几项（**冷启动接回草稿层**，2026-10-19）。
+   *
+   * 与真机 `ipc::local::read_preset_draft_changes` 同一条判据：按注册表把来源与草稿
+   * 各抽一份参数值，**值不同才算改动**（注释 / 空行不算）。演示里"重启"就是刷新页面 ——
+   * 内存全没了，这条路径正好走得通。
+   */
+  async readPresetDraftChanges() {
+    if (mockDraft === null) return {}
+    const base =
+      mockDraft.origin === 'preset'
+        ? MOCK_PRESET_TEXT
+        : withoutLineage(mockLocalText.get(mockDraft.path ?? '') ?? '')
+    const before = readMockParams(base)
+    const out: Record<string, string> = {}
+    for (const [key, value] of Object.entries(readMockParams(mockDraft.text))) {
+      if (before[key] !== value) out[key] = value
+    }
+    return out
+  },
+
   /*
    * **修改历史账本**（2026-10-17）：浏览器预览里用内存顶替 —— 一份文件一本（钥匙同真机：
    * 哪条线 + 身份），于是"改过 → 关掉 → 再打开还在"这条在预览里也走得通，
@@ -1580,13 +1609,25 @@ export const mockApi: MkpApi = {
   /** 参数草稿的**摘要** —— 预设列表行上的「未保存」标记用。没有草稿就是 `null` */
   async getPresetDraftSummary() {
     if (mockDraft === null) return null
-    const base = mockDraft.origin === 'local' ? mockLocalText.get(mockDraft.path ?? '') : undefined
-    const clean = mockDraft.origin === 'preset' ? mockDraft.text === MOCK_PRESET_TEXT : base === mockDraft.text
+    /*
+     * 「真改过才算」的比法**与真机同一口径**（`ipc/local.rs` 的 `get_preset_draft_summary`）：
+     *
+     *   用户线：草稿正文 vs **去掉血统三行之后**的盘上正文。
+     *     ★ 直接拿盘上那份（带着 `# based_on…`）去比会**恒判脏** —— `beginPresetEdit`
+     *       给编辑器的就是去血统的正文（`withoutLineage`，与真机 `strip_lineage_lines` 同义），
+     *       于是"只打开过、一个字没改"也会报未保存，行上那枚橙点当场误亮
+     *       （2026-10-19 探针 `params-draft-dot.mjs` 抓到的就是这个）。
+     *   云端线：草稿正文 vs 云端原件字节。
+     */
+    const clean =
+      mockDraft.origin === 'preset'
+        ? mockDraft.text === MOCK_PRESET_TEXT
+        : withoutLineage(mockLocalText.get(mockDraft.path ?? '') ?? '') === mockDraft.text
     return {
       origin: mockDraft.origin,
       sourceFileName: mockDraft.sourceFileName,
       path: mockDraft.path,
-      /* 「真改过才算」：比不出来（演示里读不到这一份）时保守算脏 */
+      /* 比不出来（演示里读不到这一份）时保守算脏 */
       dirty: !clean,
       updatedUnix: mockDraft.updatedUnix,
     }

@@ -2239,52 +2239,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             onSelect: () => runUse(row),
           }
       /*
-       * # 这一档的**顺序**是给"图标交替"排的（2026-10-16 作者：「置顶的还是加上图标吧，
-       *   重新排一下顺序」；同一天又定：「复制脚本的也需要图标，复制文件的不需要图标」）
+       * **「复制后处理脚本」**：抄的是**这一行**那一份（作者排它第二）。
        *
-       * 挂图标的六项：复制后处理脚本 · 使用 · 修改参数 · 在访达中显示 · 置顶 · 删除；
-       * 空着的四项：编辑文件 · 参数对比 · 复制 · 重命名。
+       * # 寻址：点名这一行的落点（`row.path`），不再按 (机型, 版本) 找
        *
-       * ★★ 六比四 ⇒ 光"给常用的挂"排不出交替，必须**让空着的四项插进挂的六项之间** ——
-       *   所以下面这张表的顺序就是"一个挂、一个不挂"这么串起来的：
+       * 2026-10-19 作者实测：右键 `A1-fast.toml`，抄到的却是"正在使用"的
+       * `A1-fastv3.3 copy.toml` —— 因为从前只把 `(ownMachineId, ownVersionId)` 交给后端，
+       * 后端按这组值在 `presets-local/` 里挑"我那一份"（优先挑底账里**正在使用**的那份）。
+       * 同一版本下有几份副本时，这就必然可能落到别人身上。
+       * ⇒ 现在把 `row.path`（相对用户根）一起交过去：后端只认这一份，**不再猜**。
        *
-       *     复制后处理脚本● 编辑文件○ 使用● 参数对比○ 修改参数●
-       *     复制○ 在访达中显示● 重命名○ 置顶● ── 删除●
+       * # 不再需要"归属"
        *
-       *   唯一一处相邻是「置顶 / 删除」，而**分隔线**把它俩隔开了 ⇒ 视觉上没有二连。
-       *
-       * ★ 「编辑文件」与「参数对比」的条件**完全相同**（本地 + MKP 预设 + 读得出），
-       *   所以它们**同进同出**，排布只有两种模样 —— 上面的排法两种都不出三连
-       *   （两者都不在时：脚本● 使用● 参数对比不在 修改参数● 复制○ 显示● 重命名○ 置顶● ── 删除●）。
-       *
-       * ★ 两件都叫"复制"，**挂图标的是"复制脚本"那一项**（作者点名的），
-       *   「复制」（复制出一份文件）**空着** —— 不要因为名字像就把图标安回文件那一项。
-       */
-      /*
-       * **「复制后处理脚本」排第一**（2026-10-16 作者：「本地的 mkp 的还要加一个复制
-       * 后处理脚本，需要排在第一」）。
-       *
-       * 为什么是第一：它是这一行上**唯一一个"把你这份拿去用"**的动作 ——
-       * 其余九项都是"改我这一份 / 整理这张表"。作者从右键进来多半就是为了抄这条命令。
-       *
-       * # 判据：这一份**自己的归属**（文件头 `# machine:` / `# variant:`）
-       *
-       * 命令按 (机型, 版本) 寻址（`getPostProcessCommand`），所以要有归属才抄得了；
-       * 导入的裸文件没有那两行 ⇒ `ownMachineId / ownVersionId` 是 null ⇒ **灰着并说原因**
-       * （灰一项不说为什么，用户只会以为坏了）。
-       * ★ 注意与行上那个 `machineId` 分开：那是**筛选档**（这一行挂在哪个机型分栏下），
-       *   归属是**文件自己的**（`presetTree` 里那两个字段就是为这件事存在的）。
-       *
-       * # 不挂图标
-       *
-       * 排第一且**不挂**正好把整张菜单的交替排出来（●使用 ○编辑文件 ●修改参数 …）；
-       * 挂了就是开头两个图标连排。
+       * 命令的 `--Toml` 就是这一份的绝对落点，所以"文件头有没有 # machine:"不再决定
+       * 能不能抄（从前缺归属就灰着 —— 那是按组合寻址时的限制）。
+       * 仍然灰着的是**用不了的那几种**：认不出是 MKP 预设的 `.json`、读不出来的。
+       * ★ 行上那个 `machineId` 是**筛选档**（这一行挂在哪个机型分栏下），与归属是两回事。
        */
       const scriptWhyNot =
-        row.ownMachineId === null || row.ownMachineId === undefined
-          ? '这一份没标归属（文件头没有 # machine: / # variant:），指不到要给哪台机型的脚本'
-          : row.ownVersionId === null || row.ownVersionId === undefined
-            ? '这一份没标版本（文件头没有 # variant:），指不到要给哪一版的脚本'
+        row.kind !== 'mkp_preset'
+          ? LOCAL_NOT_PRESET_WHY
+          : row.localState === 'unreadable'
+            ? localUnreadableWhy(row.localStateDetail)
             : undefined
       const scriptEntry: ContextMenuEntry = {
         id: 'script',
@@ -2297,25 +2273,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           void copyPostProcessScript({
             machineId: row.ownMachineId ?? '',
             versionId: row.ownVersionId ?? '',
+            /* ★ 关键：点名这一行（相对用户根）—— 后端据此只指这一份 */
+            path: row.path,
             fileName: row.fileName,
           }),
       }
 
+      /*
+       * # 这一档的**顺序**（2026-10-19 作者定：「三段 + 两条分隔线」）
+       *
+       *   ① 用它    使用 / 取消使用 · 复制后处理脚本
+       *   ② 改它    修改参数 · 编辑文件 · 参数对比 · 复制 · 重命名 · 显示所在文件夹 · 置顶
+       *   ③ 删它    删除
+       *
+       * 作者原话：「首先使用排在第一个……后处理脚本放第二个，修改参数放第三个」，
+       * 另有「其他的那一些没图标的就往后放」；看过三种排法后挑了这一版（分段 + 基本全图标）。
+       *
+       * ★ **图标**：除「编辑文件」「参数对比」外都挂（作者 2026-10-19：
+       *   「有一些就是不应该加图标，就比如那个编辑文件参数对比就不需要」）——
+       *   这两项都是"进另一屏去看 / 去改"的入口，一条文字已经说清了，挂图标反而抢眼睛。
+       * ★ 两件都叫"复制"，**字形必须分得开**：「复制后处理脚本」= `copy`（两份纸）；
+       *   「复制」（复制出一份文件）= `fileCopy`（一份文件 + 加号）。别把它们画成一个样。
+       * ★ 「编辑文件」与「参数对比」的条件**完全相同**（本地 + MKP 预设 + 读得出），
+       *   所以它们**同进同出**，第二段里不会出现"只剩一个"的空位。
+       */
       return [
+        useEntry,
         scriptEntry,
         /*
-         * 「编辑文件」在第二位：它不挂图标，正好隔开首项「复制后处理脚本」与「使用」。
-         * 改的是**正文**。
-         * `satisfies` 不能省：条件表达式的两个分支拿不到外层的上下文类型，
-         * `icon: 'doc'` 会被推成 `string`，整个数组就配不上 `ContextMenuEntry`。
+         * 第一条线：上面两项是"把这一份拿去用"，下面全是"改这一份 / 整理这张表"。
+         * ★ 云端表与切片器档不加这条线（那两张表本来就短，线只会把菜单切碎）。
          */
-        ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
-          ? ([{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
-          : []),
-        useEntry,
-        /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry`。
-           不挂图标 —— 它在这里的作用就是隔开「使用」与「修改参数」那两个图标 */
-        ...(canCompare(row) ? [compareEntry(row)] : []),
+        { separator: true },
         /*
          * 参数表那一屏（2026-10-09）：改的是参数本身。
          * ★ 「选择要跟随的云端更新」2026-10-10 按作者裁决**从菜单里去掉**了
@@ -2340,14 +2329,33 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           disabled: paramsWhyNot(row),
           onSelect: () => openParams(row, false),
         },
+        /*
+         * 「编辑文件」：改的是**正文**。**不挂图标**（作者 2026-10-19 点名）——
+         * 与下面「参数对比」同为"进另一屏"的入口，就让它俩并排空着。
+         * `satisfies` 不能省：条件表达式的两个分支拿不到外层的上下文类型。
+         */
+        ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
+          ? ([{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
+          : []),
+        /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry`。**不挂图标** */
+        ...(canCompare(row) ? [compareEntry(row)] : []),
         {
           id: 'copy',
           /* 「复制」（2026-10-10 作者：文案太长 → 短词，点了就自动出一份）。
-             ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）——
-             上面「复制后处理脚本」那一项挂着 `copy`，这一项空着，两边各归各位 */
+             ★ 2026-10-19 起挂 `fileCopy`（一份文件 + 加号）—— 与上面「复制后处理脚本」
+             的 `copy`（两份纸）分开：两行都叫"复制"，字形要一眼认得出来 */
+          icon: 'fileCopy',
           label: LOCAL_COPY.cell,
           disabled: copyWhyNot(row),
           onSelect: () => runDuplicate(row),
+        },
+        {
+          id: 'rename',
+          /* 2026-10-19 挂 `pencil`（这枚 2026-10-16 撤过一次 —— 那时这一项不挂图标） */
+          icon: 'pencil',
+          label: '重命名',
+          disabled: renameWhyNot(row),
+          onSelect: () => openRename(row),
         },
         {
           id: 'reveal',
@@ -2356,18 +2364,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           disabled: revealWhyNot(row),
           onSelect: () => runReveal(row),
         },
-        /* 不挂图标 —— 隔开「在访达中显示」与「置顶」 */
-        {
-          id: 'rename',
-          label: '重命名',
-          disabled: renameWhyNot(row),
-          onSelect: () => openRename(row),
-        },
         /*
          * **「置顶」的图标加回来了**（2026-10-16 作者：「置顶的还是加上图标吧」）——
          * 上一轮为了跟「在访达中显示」「删除」错开把它摘了，作者要回来。
-         * 代价是与上面「在访达中显示」相邻两个图标；可接受：它俩同属"位置与整理"，
-         * 且再下面就是分隔线，不会连成三排。
+         * 它俩同属"位置与整理"，排在第二段末尾。
          *
          * ★ **两态两枚图标**（同一天作者：「置顶，取消置顶的图标要有变化」）：
          *   已置顶 ⇒ `pinOff`（图钉带斜杠）、未置顶 ⇒ `pin`。
@@ -3368,7 +3368,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   {page.kind === 'mkp'
                     ? page.scope === 'cloud'
                       ? '右键任意一行还有下载 / 更新 / 复制链接（没有鼠标就 Shift+F10 或菜单键）'
-                      : '右键任意一行还有使用 / 修改参数 / 参数对比 / 编辑文件 / 复制 / 重命名 / 置顶（没有鼠标就 Shift+F10 或菜单键）'
+                      : '右键任意一行还有使用 / 复制后处理脚本 / 修改参数 / 编辑文件 / 参数对比 / 复制 / 重命名 / 显示所在文件夹 / 置顶（没有鼠标就 Shift+F10 或菜单键）'
                     : '右键任意一行还有置顶 / 参数对比 / 复制 / 重命名 / 删除（没有鼠标就 Shift+F10 或菜单键）'}
                 </span>
               )}

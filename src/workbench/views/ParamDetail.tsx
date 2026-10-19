@@ -233,6 +233,21 @@ export default function ParamDetail({
         <span className={s.pEdEditor}>
           {on ? (
             <span className={s.pEdCtl}>
+              {/*
+                橙色「改之前的值」（2026-10-19）—— 与中间列表那一枚同款。
+                点它 = 把这层写回**盘上钉着的值**（`cell.rest`）；右边那枚 `↶`
+                是"挂回继承"（写 null 删键）—— 两条语义不同，两枚并存。
+              */}
+              {cell.dirty && cell.rest !== null && (
+                <button
+                  type="button"
+                  className={s.pRevert}
+                  title={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复默认」）`}
+                  onClick={() => onWriteLayer(layerUid, String(cell.rest))}
+                >
+                  ↩ {String(cell.rest)}
+                </button>
+              )}
               {/* form="row"：与中间列表**同一个控件形态**（步进器、分段、开关长相一致） */}
               <CellEditor
                 param={param}

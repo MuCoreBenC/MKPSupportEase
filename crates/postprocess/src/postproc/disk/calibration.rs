@@ -1403,6 +1403,80 @@ mod tests {
         assert_eq!(out[14], "G1 X66.523 Y78.83"); // +4.0 −0.5 ⇒ +3.5
     }
 
+    /// **XY 板有两档了**（2026-10-19：加长版把打印区右侧 / 上侧各加 5mm，50.5 → 55.5）。
+    ///
+    /// 钉三件事：
+    /// 1. 两块板各自按包围盒认到对的那一档（差 5mm、容差 0.5 ⇒ 不会互相串），
+    ///    且回执里写的就是命中的档 id；
+    /// 2. 两档的**梯子几何**一致（`lineSpacing`；刻度槽相对板子左下角逐位未动）；
+    /// 3. 唯一的差异是加长版的 **+0.05 / +0.05 打印形貌补偿**（实心板上的凹槽，肉眼
+    ///    中心比几何中心偏左偏下，作者 2026-10-19 打出来比对后加的）—— 谁要再动这
+    ///    一组数，这条判据会把差额算给你看。
+    #[test]
+    fn xy_extended_board_hits_its_own_profile_with_the_same_ladder() {
+        let narrow = profile_of("xy-square-50");
+        let wide = profile_of("xy-square-55");
+        assert_eq!((narrow.footprint_w, narrow.footprint_h), (50.5, 50.5));
+        assert_eq!((wide.footprint_w, wide.footprint_h), (55.5, 55.5));
+        assert_eq!(narrow.centroid, wide.centroid, "两档的质心期望必须一致");
+        assert!(wide.serves("Precise") && wide.serves("Rough"));
+
+        let n = narrow.pattern.as_ref().expect("50 档要有 pattern");
+        let w = wide.pattern.as_ref().expect("55 档要有 pattern");
+        assert_eq!(n.line_spacing, w.line_spacing, "槽间距不能跟着补偿变");
+        const TRIM: f64 = 0.05;
+        let near = |got: f64, want: f64| {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "补偿额应是 {want}，实测差额 {got}"
+            );
+        };
+        near(w.h_line_offset_y - n.h_line_offset_y, TRIM);
+        near(w.h_line_start_x - n.h_line_start_x, TRIM);
+        near(w.h_line_end_x - n.h_line_end_x, TRIM);
+        near(w.v_line_offset_x - n.v_line_offset_x, TRIM);
+        near(w.v_line_start_y - n.v_line_start_y, TRIM);
+        near(w.v_line_end_y - n.v_line_end_y, TRIM);
+
+        // 同一个左下角：50 档按老数走，55 档整体右/上 0.05
+        let ir = test_ir();
+        let small = BBox {
+            x_min: 66.023,
+            x_max: 66.023 + 50.5,
+            y_min: 66.340,
+            y_max: 66.340 + 50.5,
+        };
+        let big = BBox {
+            x_min: 66.023,
+            x_max: 66.023 + 55.5,
+            y_min: 66.340,
+            y_max: 66.340 + 55.5,
+        };
+        let out_small = xy_new("Precise", "P1S", &ir, &small);
+        let out_big = xy_new("Precise", "P1S", &ir, &big);
+        assert_eq!(out_small[7], "G1 X66.523 Y75.83", "旧档的落点不许动");
+        assert_eq!(out_small[84], "G1 X75.523 Y66.83", "旧档的落点不许动");
+        assert_eq!(
+            out_big[7], "G1 X66.573 Y75.88",
+            "加长版 = 旧档 + 0.05 / +0.05"
+        );
+        assert_eq!(out_big[84], "G1 X75.573 Y66.88");
+
+        let mut receipt = CalibrationReceipt::default();
+        generate_xy_calibration_new(
+            "Precise",
+            "P1S",
+            &ir,
+            &big,
+            CentroidResult::default(),
+            3000,
+            Some(&mut receipt),
+        )
+        .expect("生成失败")
+        .expect("New 变体不该返回空");
+        assert_eq!(receipt.profile_id.as_deref(), Some("xy-square-55"));
+    }
+
     /// **交叉验证**：真机样例正好摆在机型默认校准位（bbox.x_min + 0.5 = A1_MINI 的
     /// `y_line_x`），所以 New 分支的输出应当与经典分支**逐行相同，只多出 G4 停留行**。
     ///
@@ -1655,12 +1729,49 @@ mod tests {
         assert_eq!(out[out.len() - 1], "G1 X100 Y100 Z100");
     }
 
-    /// **交叉验证**：A1_MINI 的 `zStartX/zStartY` 恰好是 30.21 / 88.373，
-    /// 而真机样例的 `bbox.x_min + 0.079` / `bbox.y_min + 3.755` 也正是这两个数。
-    /// 于是 Z New 分支的输出应与经典分支**逐行完全相同**（Z 经典分支本来就有 G4，
-    /// 不像 XY 那样差停留行）。
+    /// 把一行里的 X / Y 数值各整体平移 `dx` / `dy`（其余字符原样）——
+    /// 让"两个分支只差 datum 实调量"这件事可以逐行断言。
+    fn shift_xy(line: &str, dx: f64, dy: f64) -> String {
+        let shift = |tok: &str, axis: char, delta: f64| -> String {
+            match tok.strip_prefix(axis).and_then(|v| v.parse::<f64>().ok()) {
+                Some(v) => format!("{axis}{}", format_float(round3(v + delta))),
+                None => tok.to_string(),
+            }
+        };
+        line.split(' ')
+            .map(|tok| {
+                if tok.starts_with('X') {
+                    shift(tok, 'X', dx)
+                } else if tok.starts_with('Y') {
+                    shift(tok, 'Y', dy)
+                } else {
+                    tok.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// **交叉验证**：真机样例正好摆在机型默认校准位 —— A1_MINI 的 `zStartX/zStartY` 是
+    /// 30.21 / 88.373，而 `bbox.x_min + 0.079` / `bbox.y_min + 3.755` 也正是这两个数。
+    ///
+    /// ★ 2026-10-19 起这一档的 datum 被作者实调了（X −0.35 → −0.271、Y −0.5 → 3.255），
+    ///   所以 New 与经典分支不再逐行相同：**图案整体平移，固定坐标行（home / 回原点）
+    ///   一个字不变**。判据就按这个口径比：每行要么原样相同，要么正好等于把经典那行
+    ///   平移实调量。
     #[test]
-    fn z_new_equals_classic_when_model_sits_at_default_spot() {
+    fn z_new_matches_classic_up_to_the_datum_trim() {
+        let trim_x = z_profile().datum_x - 0.079; // 现行档相对 Go 常量的实调量（X）
+        let trim_y = z_profile().datum_y - 3.755; // 同上（Y）
+        assert!(
+            (trim_x + 0.35).abs() < 1e-9,
+            "这条判据是按 X −0.35 的实调写的；表里改成别的数就一起改这里"
+        );
+        assert!(
+            (trim_y + 0.5).abs() < 1e-9,
+            "这条判据是按 Y −0.5 的实调写的；表里改成别的数就一起改这里"
+        );
+
         let mut ir = test_ir();
         let new_out = z_new("A1_MINI", &ir, &z_sample_bbox());
 
@@ -1679,7 +1790,11 @@ mod tests {
 
         assert_eq!(new_out.len(), classic.len(), "行数应与经典分支一致");
         for (i, (n, c)) in new_out.iter().zip(classic.iter()).enumerate() {
-            assert_eq!(n.as_str(), c.as_str(), "第 {} 行不一致", i + 1);
+            assert!(
+                n == c || *n == shift_xy(c, trim_x, trim_y),
+                "第 {} 行既不是原样、也不是整体平移实调量（X {trim_x} / Y {trim_y}）\n  new: {n}\n  cls: {c}",
+                i + 1
+            );
         }
     }
 
@@ -1746,10 +1861,10 @@ mod tests {
             y_max: 84.0 + 16.0630,
         };
         let out = z_new("P1S", &ir, &ext);
-        // `Z_OFFSET_SING_LINES[1]` = `G1 X8.224 Y9.583`，加原点 (30.079, 88.755)
+        // `Z_OFFSET_SING_LINES[1]` = `G1 X8.224 Y9.583`，加原点 (30 − 0.271, 84 + 4.255)
         assert!(
-            out.iter().any(|l| l == "G1 X38.303 Y98.338"),
-            "延长版档的基准没生效（该是 30 + 0.079 + 8.224 / 84 + 4.755 + 9.583）"
+            out.iter().any(|l| l == "G1 X37.953 Y97.838"),
+            "延长版档的基准没生效（该是 30 − 0.271 + 8.224 / 84 + 4.255 + 9.583）"
         );
     }
 
@@ -1790,8 +1905,8 @@ mod tests {
             .iter()
             .position(|l| l == ";Floating Z Calibration")
             .expect("A1 应有 Floating Z");
-        // 原点 (30.21, 88.373) + 5 ⇒ (35.21, 93.373)
-        assert_eq!(a1[idx + 2], "G1 X35.21 Y93.373");
+        // 原点 (30.131 − 0.271, 84.618 + 3.255) + 5 ⇒ (34.86, 92.873)
+        assert_eq!(a1[idx + 2], "G1 X34.86 Y92.873");
         assert_eq!(
             a1.iter().filter(|l| l.as_str() == "G1 Z3.4").count(),
             5,

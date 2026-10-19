@@ -86,8 +86,29 @@ export default function NumberField({
   const tickRef = useRef<number | null>(null)
   const wheelRef = useRef<number | null>(null)
   const holdingRef = useRef(false)
+  /**
+   * 连发 / 滚轮手势**进行中**。期间不从 prop 回写本地值（见下）。
+   *
+   * 为什么必须挡：连点/长按时，队列里前几次落库的响应会陆续回来把 `value`
+   * 拽回旧值 —— 一写就把连发的基点打乱（"手滑改了"就是这么来的）。
+   * 手势一结束，乐观覆盖层已经把最新那格顶上 prop 了，回写也就无害。
+   */
+  const gestureRef = useRef(false)
+  /**
+   * **本地那个值跑到 prop 前面去了**（改了、还没被后端确认回来）。
+   *
+   * 为什么必须有：`[value]` 那个回写 effect 是**被动**的（paint 之后才跑），
+   * 连点时它会晚一步落在两次点击之间，把 `numRef` 拽回上一步 ——
+   * 下一次点击的 `commit()` 看到 `numRef === value` 就当"没变"**不提交**，
+   * 于是**点一下丢一下**（实测 10 下只进 8）。
+   * 本地跑在前面时**不回写**；prop 追上来（相等）就自动收工。
+   */
+  const aheadRef = useRef(false)
 
   useEffect(() => {
+    if (gestureRef.current) return
+    if (aheadRef.current && numRef.current !== value) return
+    aheadRef.current = false
     setText(String(value))
     numRef.current = value
   }, [value])
@@ -118,6 +139,7 @@ export default function NumberField({
       const next = clamp(numRef.current + dir * step)
       numRef.current = next
       setText(String(next))
+      aheadRef.current = true
       return next
     },
     [clamp, step],
@@ -137,6 +159,7 @@ export default function NumberField({
   const startHold = useCallback(
     (dir: 1 | -1) => {
       holdingRef.current = true
+      gestureRef.current = true
       nudge(dir) // 第一步立刻走，不等 400ms
       stopHold()
       delayRef.current = window.setTimeout(() => {
@@ -154,6 +177,8 @@ export default function NumberField({
     holdingRef.current = false
     stopHold()
     commit()
+    /* 手势收尾：之后的响应可以正常回写了（乐观覆盖层已经顶上最新那格） */
+    gestureRef.current = false
   }, [commit, stopHold])
 
   /* 松手可能发生在按钮外面（按住拖出去再放），所以监听在 window 上 */
@@ -178,14 +203,20 @@ export default function NumberField({
     const onWheel = (e: WheelEvent) => {
       if (document.activeElement !== el) return
       e.preventDefault()
+      gestureRef.current = true
       nudge(e.deltaY < 0 ? 1 : -1)
       if (wheelRef.current !== null) window.clearTimeout(wheelRef.current)
-      wheelRef.current = window.setTimeout(commit, WHEEL_IDLE)
+      wheelRef.current = window.setTimeout(() => {
+        wheelRef.current = null
+        commit()
+        gestureRef.current = false
+      }, WHEEL_IDLE)
     }
     el.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       el.removeEventListener('wheel', onWheel)
       if (wheelRef.current !== null) window.clearTimeout(wheelRef.current)
+      gestureRef.current = false
     }
   }, [commit, disabled, nudge])
 
@@ -193,13 +224,16 @@ export default function NumberField({
   const commitTyped = () => {
     const n = Number(text)
     if (text.trim() === '' || !Number.isFinite(n)) {
+      /* 根本不是数字：退回外部值，顺手清掉"本地跑在前面"那条状态 */
       setText(String(value))
       numRef.current = value
+      aheadRef.current = false
       return
     }
     const next = round(n)
     numRef.current = next
     setText(String(next))
+    aheadRef.current = next !== value
     if (next !== value) onChange(next)
   }
 
@@ -296,6 +330,7 @@ export default function NumberField({
             /* 还原：回到外部值，什么都不提交 */
             setText(String(value))
             numRef.current = value
+            aheadRef.current = false
           } else if (e.key === 'ArrowUp') {
             e.preventDefault()
             nudge(1)

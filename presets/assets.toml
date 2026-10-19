@@ -231,6 +231,17 @@ path = 'models/Precise_Calibration.3mf'
 # 真源是模型文件自己；这一格是**验收用的预期**，`npm run check:calibration-assets` 拿它比对。
 calibration = 'Precise'
 
+# 2026-10-19：新版 XY 校准模型（打印区右侧 / 上侧各加 5mm 留白 ⇒ 51 × 51 → 56 × 56，
+# 切片实测 50.5 × 50.5 → 55.5 × 55.5；刻度槽相对左下角的位置没动）。
+# 后处理侧认它靠 `presets/calibration_models.toml` 里 `id = 'xy-square-55'` 那一档的
+# footprintW/H = 55.5 × 55.5 —— 两边要一起改（换字节后 `cargo run --bin gen-catalog` 重算 SHA）。
+[[assets]]
+id = 'precise-calibration-ext'
+type = 'model'
+name = '精密校准模型（加长版）'
+path = 'models/Precise_Calibration_ext.3mf'
+calibration = 'Precise'
+
 [[assets]]
 id = 'zoffset-calibration'
 type = 'model'

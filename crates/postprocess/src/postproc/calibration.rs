@@ -1002,10 +1002,17 @@ fn should_preserve_nozzle_load_line_line(line: &str) -> (String, bool) {
     (line.to_string(), true)
 }
 
-/// 行首 M109 → M104（大小写不敏感；Go `(?i)^M109` 锚在原始行首）。
+/// 行首（允许前导空白）M109 → M104（大小写不敏感）。
+///
+/// 2026-10-19：原来只匹配第 0 个字符，A1 的 `;===== extrude cali test` 段里
+/// M109 带 4 个空格缩进 ⇒ 命令没改掉、却仍被 `replace_s_numbers` 把 S245
+/// 改成 S30，输出成**阻塞式** `M109 S30`，直接校准会停在那里等喷嘴降温。
+/// 缩进必须一起看待，替换后原缩进保留。
 fn replace_cmd_prefix(line: &str, from: &str, to: &str) -> String {
-    if line.len() >= from.len() && line[..from.len()].eq_ignore_ascii_case(from) {
-        format!("{to}{}", &line[from.len()..])
+    let body = line.trim_start();
+    let indent = &line[..line.len() - body.len()];
+    if body.len() >= from.len() && body[..from.len()].eq_ignore_ascii_case(from) {
+        format!("{indent}{to}{}", &body[from.len()..])
     } else {
         line.to_string()
     }
@@ -1129,5 +1136,28 @@ fn split_g_code(code_part: &str, upper: &str, digit: u8) -> (String, usize) {
         (format!("G{}", &upper[1..3]), 3)
     } else {
         (format!("G{ch}"), 2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A1 的 `;===== extrude cali test` 段里 M109 带 4 个空格缩进。
+    /// 最小化必须把它改成**不阻塞**的 `M104 S30`；只改 S 不改命令会留下
+    /// `M109 S30`，机器会停在那里等喷嘴降到 30°C（2026-10-19 真机）。
+    #[test]
+    fn indented_m109_in_extrude_cali_becomes_non_blocking_m104() {
+        let (line, keep) = should_preserve_nozzle_load_line_line("    M109 S245");
+        assert!(keep);
+        assert_eq!(line, "    M104 S30");
+    }
+
+    /// 缩进要保留，温度照旧改 30。
+    #[test]
+    fn indented_m104_is_normalized_without_losing_indent() {
+        let (line, keep) = should_preserve_nozzle_load_line_line("\tM104 S220");
+        assert!(keep);
+        assert_eq!(line, "\tM104 S30");
     }
 }

@@ -2332,8 +2332,17 @@ export interface MkpApi {
    * 给不出来（还没下载 / 目录里没有这个组合 / 拿不到自己的路径）时不抛错：
    * `ready: false` + `reason` —— 界面照摆按钮、照说原因，**不抄一条假命令**
    * （贴进切片器就是 `Error code: 2`）。
+   *
+   * `path`（可选）= **被点名的那一份**在用户根里的相对落点（`presets-local/…`）。
+   * 预设页右键某一行要抄的就是**那一行**：同一机型版本下可能有好几份副本，
+   * 只按 `(machineId, versionId)` 寻址会落到「正在使用」的那份上（2026-10-19 修）。
+   * 首页 / 标题栏字标不传它 —— 它们指的是"当前使用的那一套"，由后端按归属挑。
    */
-  getPostProcessCommand(machineId: string, versionId: string): Promise<PostProcessCommand>
+  getPostProcessCommand(
+    machineId: string,
+    versionId: string,
+    path?: string,
+  ): Promise<PostProcessCommand>
 
   /* ——— 后处理钩子那一趟：看它 / 停它 / 答它那一问（切在 `app/postprocess/`）——— */
 
@@ -2467,6 +2476,18 @@ export interface MkpApi {
 
   /** 放弃这次编辑：丢掉临时文件（幂等；云端原件与下载区全程没被碰过，所以它天生安全） */
   discardPresetDraft(): Promise<void>
+
+  /**
+   * **草稿里改过的那几项参数**（`param_key → 草稿现在的值`，控件形态；没有草稿 = 空表）。
+   *
+   * 给**冷启动**接回草稿层用（2026-10-19）。后端那份草稿活在 `run/app-state.json`，
+   * 而界面那一层（`useParams` 的 `draft`）是进程内存 —— 关掉软件再打开，
+   * `beginPresetEdit` 虽然答 `reused`（还是这一份的草稿），但"改了哪几项"没有别的来源：
+   * 不补这一条，参数弹窗就会"盘上有草稿、摘要说脏，界面一个改动都看不见"。
+   *
+   * 判据是**参数值**，不是字节：注释 / 空行 / 血统那几行不算改动。
+   */
+  readPresetDraftChanges(): Promise<Record<string, string>>
 
   /**
    * **读这一份的修改历史**（一份文件一本；没改过 = 空本，不是错误）。

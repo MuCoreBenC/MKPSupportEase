@@ -1658,6 +1658,24 @@ export interface AssetUsageView {
 }
 
 /**
+ * `assets::HashCheck` —— 盘上字节与**交付目录登记**的核对结果。
+ *
+ * 登记值只有一处：`presets/delivery/catalog.json` 的 `files[]`（发布 / 生成时对真字节
+ * 算的那一份）。台账 `presets/assets.toml` 不存哈希 —— 那不是第二份真相，是没有。
+ *
+ * - `notInDelivery`：随包 / 图片类，目录不会登记它；
+ * - `notRegistered`：进交付集合，但目录里还没这一条（没生成过 / 目录不在）；
+ * - `match` / `mismatch`：登记值与实际字节一致 / 已漂移（改了文件、目录还没重算）；
+ * - `missing`：文件不在，没得比。
+ */
+export type HashCheck =
+  | 'notInDelivery'
+  | 'notRegistered'
+  | 'match'
+  | 'mismatch'
+  | 'missing'
+
+/**
  * `assets::AssetInspectView` —— **资产检查面板**（第四刀，选中一条才问）。
  *
  * 它不并进 [`AssetView`]（列表里那一条）：最贵的两格（`sha256` / `bytes`）要读真实
@@ -1670,6 +1688,16 @@ export interface AssetUsageView {
  */
 export interface AssetInspectView {
   id: string
+  /** 文件创建时间（RFC3339 / UTC，界面按本机时区显示）；文件系统给不出 = null */
+  created: string | null
+  /** 文件最后修改时间（同上）。改了文件这一格会变，sha256 也跟着变 */
+  modified: string | null
+  /** 交付目录 `presets/delivery/catalog.json` 登记的 SHA-256；没登记 = null */
+  registeredSha256: string | null
+  /** 同上：登记的大小（字节） */
+  registeredSize: number | null
+  /** 盘上字节与交付目录登记的核对结果 */
+  hashCheck: HashCheck
   /** 真实文件名（盘上那个名字）。普通资产 = `path` 的文件名；`mkPreset` = 产物名 */
   fileName: string
   /** 盘上绝对路径（普通 = 源文件；`mkPreset` = 产物文件）。**文件不存在时它是期望路径** */
@@ -1761,6 +1789,15 @@ export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 /** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
 export type DeliveryStage = 'generate' | 'publish' | 'software'
 
+/**
+ * `delivery::DeliveryState` —— 一份交付文件现在的状态。
+ *
+ * 与 `BuildState`（参数快照指纹）是两件事：那个判"配方改完还没重新生成"；
+ * 这个判"盘上字节与交付目录登记的对不对得上" —— 改 3MF 不会动任何版本的
+ * `BuildState`，但会让对应条目变 `pending`。
+ */
+export type DeliveryState = 'missing' | 'upToDate' | 'pending'
+
 /** `delivery::DeliveryFile` —— 交付集合里的一份（「交付预设」卡展出用） */
 export interface DeliveryFile {
   /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
@@ -1771,6 +1808,51 @@ export interface DeliveryFile {
   size: number
   /** 谁写的：生成时重算 / 发布时定稿 / 软件发布链 */
   stage: DeliveryStage
+  /** 与目录登记的关系（见 [`DeliveryState`]） */
+  state: DeliveryState
+  /** 目录里登记的大小（没登记 = null） */
+  registeredSize: number | null
+}
+
+/**
+ * `delivery::DeliveryDrift` —— 目录登记与盘上真字节对不上的一条（A 类载荷，
+ * 如 `assets/models/*.3mf`）。改了 3MF 之后生成页那句提示就是数它。
+ */
+export interface DeliveryDrift {
+  /** `catalog.path`（发布根相对，如 `assets/models/ZOffset_Calibration_ext.3mf`） */
+  path: string
+  /** 目录登记的大小（没登记 = null） */
+  registeredSize: number | null
+  /** 盘上实际大小（取不到 = null） */
+  actualSize: number | null
+  /** 为什么算漂移 */
+  reason: 'missing' | 'size' | 'bytes' | 'noExpectation'
+}
+
+/**
+ * `delivery::DeliveryStatus` —— 「生成与发布」页的一整套交付读数。
+ *
+ * 页面外只摆汇总，点开明细才看全部 —— 作者 2026-10-19：「后续预设会越来越多，
+ * 不可能都显示出来」。
+ */
+export interface DeliveryStatus {
+  /** 交付集合里的每一份（含全部 `mkp/presets/*.toml` 与附属 JSON） */
+  files: DeliveryFile[]
+  /** 与目录登记不一致的每一条 —— 非空 ⇒ `catalog.json` 待重新生成 */
+  drift: DeliveryDrift[]
+  /**
+   * **待更新 / 未生成**的版本 uid（TOML 里 state !== 'upToDate'）。
+   *
+   * 包含两类：配方指纹对不上的（`BuildState::Stale`）、以及**重新渲染后字节
+   * 与盘上不同**的（模板/注释变化）——后者是 `BuildState` 看不见的。
+   */
+  pendingUids: string[]
+  /** `catalog.json` 的盘上修改时间（RFC3339 / UTC；没有 = null） */
+  catalogModified: string | null
+  /** `manifest.json` 的盘上修改时间（同上） */
+  manifestModified: string | null
+  /** `catalog.json` 读不出来时的原话（正常 = null） */
+  catalogError: string | null
 }
 
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
@@ -2311,12 +2393,12 @@ export const wb = {
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
   /**
-   * **交付文件清单**（2026-10-07，只读）：本次交付集合里都有哪些文件、盘上有没有、
-   * 谁写的（生成时重算 / 发布时定稿 / 软件发布链）。
+   * **交付读数**（只读）：交付集合里每一份的现况（已生成 / 待更新 / 未生成）、
+   * 目录登记漂移（改了 3MF 之后的那条提示）与两份清单的时间。
    *
    * 名单就是发布闸判残留用的那份集合 —— 界面不另拼一份"大概有这些"
    */
-  deliveryFiles: () => invoke<DeliveryFile[]>('wb_delivery_files'),
+  deliveryFiles: () => invoke<DeliveryStatus>('wb_delivery_files'),
   /**
    * 看一份交付文件的**盘上原文**（只读）。只认交付集合里的路径；
    * 盘上还没有（还没生成 / 还没发布）时如实报错

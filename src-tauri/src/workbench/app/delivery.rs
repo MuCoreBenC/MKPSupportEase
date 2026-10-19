@@ -601,6 +601,22 @@ pub enum DeliveryStage {
     Software,
 }
 
+/// 一份交付文件**现在处于哪一档**（2026-10-19）。
+///
+/// 与 [`BuildState`]（参数快照指纹）是两件事：那个判"配方改完还没重新生成"，
+/// 这个判"盘上的字节与交付目录登记的对不对得上" —— 改了 3MF / 手改了 TOML
+/// 不会动任何版本的 `BuildState`，但会让对应的目录条目变成 `Pending`。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeliveryState {
+    /// 还没有这一份（还没生成 / 还没发布）
+    Missing,
+    /// 已生成 / 已发布，且与目录登记一致
+    UpToDate,
+    /// 盘上有，但它和目录登记对不上（或目录里还没登记它）—— 需要重新生成一次
+    Pending,
+}
+
 /// 「交付预设」卡里的一份交付文件。
 ///
 /// 名单就是 [`delivery_expected_set`]（= 发布闸判残留用的**同一份集合**）——
@@ -616,6 +632,63 @@ pub struct DeliveryFile {
     pub size: u64,
     /// 谁写的（见 [`DeliveryStage`]）
     pub stage: DeliveryStage,
+    /// 与目录登记的关系（见 [`DeliveryState`]）
+    pub state: DeliveryState,
+    /// 目录里登记的大小（没登记 = `None`）
+    pub registered_size: Option<u64>,
+}
+
+/// 一条**资产字节漂移**：`catalog.json` 里登记的某一份文件，与盘上真字节对不上。
+///
+/// 与 [`DeliveryFile`] 分开：这些是 A 类载荷（3MF / BBS / 图标），原地住在
+/// `presets/assets/`，**不在交付目录里** —— 它们进的是目录的 `files[]`，
+/// 不进 `delivery_expected_set`。作者改了 3MF 之后该看到的提示就在这里。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryDrift {
+    /// `catalog.path`（**发布根相对**，如 `assets/models/ZOffset_Calibration_ext.3mf`）
+    pub path: String,
+    /// 目录登记的大小（没登记 = `None`）
+    pub registered_size: Option<u64>,
+    /// 盘上实际大小（取不到 = `None`）
+    pub actual_size: Option<u64>,
+    /// 为什么算漂移
+    pub reason: DriftReason,
+}
+
+/// 漂移的四种原因（与 [`audit_catalog`] 的原话一一对应，界面按它给一句话）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DriftReason {
+    /// 登记了，发布根里取不到
+    Missing,
+    /// 大小不同（改了字节 / 换了一版）
+    Size,
+    /// 大小相同、字节不同（内容动过）
+    Bytes,
+    /// 目录没登记 SHA / 大小 —— 这一条本身就该重算目录
+    NoExpectation,
+}
+
+/// 「生成与发布」页要的一整套交付读数（2026-10-19）。
+///
+/// 页面外只摆汇总，点开才看明细 —— 作者：「后续预设会越来越多，不可能都显示出来」。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryStatus {
+    /// 交付集合里的每一份（含全部 `mkp/presets/*.toml` 与附属 JSON）
+    pub files: Vec<DeliveryFile>,
+    /// 与目录登记不一致的每一条（含 A 类资产，如 3MF）—— 非空 ⇒ `catalog.json` 待重新生成
+    pub drift: Vec<DeliveryDrift>,
+    /// **待更新 / 未生成**的版本 uid（TOML 里 state != upToDate）——
+    /// 明细底部的「生成待更新项」直接拿它当队列，不再由前端从 `BuildState` 推一遍
+    pub pending_uids: Vec<String>,
+    /// `catalog.json` 的盘上修改时间（RFC3339 / UTC；没有 = `None`）
+    pub catalog_modified: Option<String>,
+    /// `manifest.json` 的盘上修改时间（同上）
+    pub manifest_modified: Option<String>,
+    /// `catalog.json` 读不出来时的原话（正常 = `None`）
+    pub catalog_error: Option<String>,
 }
 
 /// 交付文件的分类：只认那几个**固定名**，其余都算生成写的（含 `mkp/presets/*.toml`）。
@@ -629,25 +702,272 @@ fn stage_of(rel: &str) -> DeliveryStage {
     }
 }
 
-/// **交付文件清单**（只读）：本次交付集合里都有哪些文件、盘上有没有、谁写的。
+/// **交付读数**（只读）：交付集合里每一份的现况 + 目录登记漂移 + 两份清单的时间。
 ///
 /// 供「交付预设」卡展出 —— 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，
-/// 我不知道这些其他的……还有什么文件需要生成的，我也想看到」。
-pub fn delivery_files(delivery_root: &Path, book: &Book<'_>) -> Vec<DeliveryFile> {
-    delivery_expected_set(book)
+/// 我不知道这些其他的……还有什么文件需要生成的，我也想看到」；2026-10-19 起
+/// 页面只摆汇总，明细在模态框里看。
+pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus {
+    let catalog_path = delivery_root.join(NEW_CATALOG_FILE);
+    let (catalog, catalog_error) = match std::fs::read(&catalog_path) {
+        // 目录还没立起来（没生成过也没发布过）—— 没有漂移可言
+        Err(_) => (None, None),
+        Ok(raw) => match serde_json::from_slice::<crate::runtime::catalog::Catalog>(&raw) {
+            Ok(c) => (Some(c), None),
+            Err(e) => (
+                None,
+                Some(format!(
+                    "catalog.json 读不出来（{e}）—— 客户端按它做下载校验，坏了要重算"
+                )),
+            ),
+        },
+    };
+
+    let drift: Vec<DeliveryDrift> = match (catalog.as_ref(), delivery_root.parent()) {
+        (Some(c), Some(publish_root)) => drift_of(c, publish_root)
+            .into_iter()
+            .map(|(d, _)| d)
+            .collect(),
+        // 交付根没有父目录（布局不对）/ 目录不在：都给空漂移，由 catalog_error 说
+        _ => Vec::new(),
+    };
+    /*
+     * **版本产物要看三件事**：配方快照、目录登记、以及**重新渲染的字节**。
+     *
+     * 2026-10-19 作者截图：`A1-fast.toml` 右侧 diff 有 `+1 −2`（模板删了一行
+     * `#胶笔配置`），左边却显示「已生成」。原因是 `BuildState` 只比配方指纹 ——
+     * 模板/注释变化它看不见，而预演用 `render` 重算能看见。这里把预演的同一条
+     * 判据接进来：`same_payload(盘上, 重新渲染)` 为假 ⇒ 待更新。
+     */
+    let build_of: std::collections::HashMap<String, (String, BuildState)> = book
+        .build_rows()
+        .into_iter()
+        .filter_map(|r| r.mkp_file.map(|f| (f, (r.uid, r.state))))
+        .collect();
+
+    let expected = delivery_expected_set(book);
+    /*
+     * **第一遍只算 TOML**：`catalog.json` 自己的状态依赖"有没有产物待更新"，
+     * 不能在同一遍里边算边用。最多渲染 9 份 TOML，只在 focus / 进页时跑一次。
+     */
+    let mut toml_state: std::collections::HashMap<String, (DeliveryState, Option<u64>)> =
+        std::collections::HashMap::new();
+    let mut pending: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for rel in expected.iter() {
+        if !rel.starts_with(&format!("{MKP_PRESETS_DIR}/")) {
+            continue;
+        }
+        let path = delivery_root.join(rel);
+        let bytes = std::fs::read(&path).ok();
+        let entry = catalog.as_ref().and_then(|c| registered_entry(c, rel));
+        let file = rel.rsplit('/').next().unwrap_or(rel.as_str());
+        let build = build_of.get(file);
+        let state = toml_state_of(book, build, bytes.as_deref(), entry);
+        if state != DeliveryState::UpToDate {
+            if let Some((uid, _)) = build {
+                pending.insert(uid.clone());
+            }
+        }
+        toml_state.insert(rel.clone(), (state, entry.and_then(|e| e.size)));
+    }
+    // 有产物待更新 / 未生成 ⇒ 重新生成会改目录，`catalog.json` 也该重算
+    let catalog_stale = !drift.is_empty() || !pending.is_empty();
+    // 按生成页的顺序给版本 uid（前端底部按钮直接拿去当队列）
+    let pending_uids: Vec<String> = book
+        .build_rows()
+        .into_iter()
+        .map(|r| r.uid)
+        .filter(|uid| pending.contains(uid))
+        .collect();
+
+    let files = expected
         .into_iter()
         .map(|rel| {
             let path = delivery_root.join(&rel);
-            let exist = path.is_file();
-            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            let bytes = std::fs::read(&path).ok();
+            let exist = bytes.is_some();
+            let size = bytes.as_ref().map_or(0, |b| b.len() as u64);
+            if let Some((state, registered_size)) = toml_state.get(&rel) {
+                return DeliveryFile {
+                    stage: stage_of(&rel),
+                    rel,
+                    exist,
+                    size,
+                    state: *state,
+                    registered_size: *registered_size,
+                };
+            }
+            // 目录不登记自产 JSON / manifest / source：只看在不在（目录自己看有没有待更新）
+            let state = if rel == NEW_CATALOG_FILE {
+                if !exist {
+                    DeliveryState::Missing
+                } else if catalog_stale {
+                    DeliveryState::Pending
+                } else {
+                    DeliveryState::UpToDate
+                }
+            } else if exist {
+                DeliveryState::UpToDate
+            } else {
+                DeliveryState::Missing
+            };
             DeliveryFile {
                 stage: stage_of(&rel),
                 rel,
                 exist,
                 size,
+                state,
+                registered_size: None,
             }
         })
-        .collect()
+        .collect();
+
+    DeliveryStatus {
+        files,
+        drift,
+        pending_uids,
+        catalog_modified: mtime_of(&catalog_path),
+        manifest_modified: mtime_of(&delivery_root.join(MANIFEST_FILE)),
+        catalog_error,
+    }
+}
+
+/// 一份 `mkp/presets/*.toml` 的状态（配方快照 + 目录登记 + **重新渲染**）。
+///
+/// `build` 是 `(uid, BuildState)`；`None` = 交付集合里有这一份、但树上找不到对应版本
+/// （孤儿产物）—— 那种情况没有渲染依据，按字节判定，不硬报「待更新」。
+fn toml_state_of(
+    book: &Book<'_>,
+    build: Option<&(String, BuildState)>,
+    bytes: Option<&[u8]>,
+    entry: Option<&crate::runtime::catalog::CatalogFile>,
+) -> DeliveryState {
+    let build_state = build.map(|(_, s)| *s);
+    match build_state {
+        // 配方还没生成过 / 没有可产出的东西：盘上有旧文件也仍是「未生成」
+        Some(BuildState::NeverBuilt) | Some(BuildState::NoResources) => DeliveryState::Missing,
+        // 配方改过、还没重新生成 —— 与①卡同一句话：「待更新」
+        Some(BuildState::Stale) => DeliveryState::Pending,
+        Some(BuildState::Built) | None => {
+            let Some(b) = bytes else {
+                return DeliveryState::Missing;
+            };
+            // 目录里登记的那份与盘上对不上（或没登记）—— 生成一次才会重算登记
+            let registered = entry.is_some_and(|e| {
+                e.size == Some(b.len() as u64) && e.sha256.as_deref() == Some(sha256_of(b).as_str())
+            });
+            if !registered {
+                return DeliveryState::Pending;
+            }
+            // 配方与登记都跟上了，再看**重新渲染**：模板/注释变化也算待更新
+            let Some((uid, _)) = build else {
+                return DeliveryState::UpToDate;
+            };
+            match super::build::render(book, uid) {
+                Ok(r) => match std::str::from_utf8(b) {
+                    Ok(text) if super::build::same_payload(text, &r.text) => {
+                        DeliveryState::UpToDate
+                    }
+                    // 字节不是 UTF-8 / 渲染结果不同：不冒充「已生成」
+                    _ => DeliveryState::Pending,
+                },
+                // 渲染不出来（配方/注册表坏了）：保守判待更新，等预演给阻断原因
+                Err(_) => DeliveryState::Pending,
+            }
+        }
+    }
+}
+
+/// 目录里登记这一份交付文件的那一条（`catalog.path` 以**发布根**为基准，
+/// 交付目录是它的 `delivery/` 子目录 —— 前缀只有这一处补）。
+fn registered_entry<'a>(
+    catalog: &'a crate::runtime::catalog::Catalog,
+    rel: &str,
+) -> Option<&'a crate::runtime::catalog::CatalogFile> {
+    let want = format!("delivery/{rel}");
+    catalog.files.iter().find(|f| f.path == want)
+}
+
+/// 盘上一份文件的修改时间（RFC3339 / UTC）。文件不在 = `None`
+fn mtime_of(path: &Path) -> Option<String> {
+    std::fs::metadata(path)
+        .ok()?
+        .modified()
+        .ok()
+        .map(crate::workbench::clock::iso8601_of)
+}
+
+/// **登记面 vs 真字节**：`catalog.files[]` 里每一条按 `发布根 + path` 读盘比对。
+///
+/// 返回 `(结构化漂移, 人话消息)` 一一对应 —— 消息给 [`audit_catalog`]（预检那条待办），
+/// 结构给 [`delivery_status`]（生成页的提示）。判据只有这一处。
+fn drift_of(
+    catalog: &crate::runtime::catalog::Catalog,
+    publish_root: &Path,
+) -> Vec<(DeliveryDrift, String)> {
+    let mut out = Vec::new();
+    for f in catalog.files.iter() {
+        let on_disk = publish_root.join(&f.path);
+        let Some(size) = f.expected_size() else {
+            out.push((
+                DeliveryDrift {
+                    path: f.path.clone(),
+                    registered_size: f.size,
+                    actual_size: std::fs::metadata(&on_disk).ok().map(|m| m.len()),
+                    reason: DriftReason::NoExpectation,
+                },
+                format!("{}（目录没登记 SHA / 大小）", f.path),
+            ));
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&on_disk) else {
+            out.push((
+                DeliveryDrift {
+                    path: f.path.clone(),
+                    registered_size: f.size,
+                    actual_size: None,
+                    reason: DriftReason::Missing,
+                },
+                format!(
+                    "{}（登记了，发布根里取不到：{}）",
+                    f.path,
+                    on_disk.display()
+                ),
+            ));
+            continue;
+        };
+        if let Some(expected_sha) = f.expected_sha() {
+            if bytes.len() as u64 != size {
+                out.push((
+                    DeliveryDrift {
+                        path: f.path.clone(),
+                        registered_size: f.size,
+                        actual_size: Some(bytes.len() as u64),
+                        reason: DriftReason::Size,
+                    },
+                    format!(
+                        "{}（目录记 {:?} 字节，实际 {} 字节）",
+                        f.path,
+                        f.size,
+                        bytes.len()
+                    ),
+                ));
+                continue;
+            }
+            if sha256_of(&bytes) != expected_sha {
+                out.push((
+                    DeliveryDrift {
+                        path: f.path.clone(),
+                        registered_size: f.size,
+                        actual_size: Some(bytes.len() as u64),
+                        reason: DriftReason::Bytes,
+                    },
+                    format!("{}（大小相同，字节不同）", f.path),
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// 递归收集 `dir` 下的全部文件，返回**以 `/` 分隔**的相对路径。
@@ -1001,7 +1321,7 @@ pub fn publish_into(
      * 一次发布事件只有一个时间，目录与清单不许各说一个。客户端把它显示在
      * 云端表的「时间」列（`catalog.publishedAt` → 这次发布的时刻）。
      */
-    write_catalog_json(delivery_root, book, &meta.stamp)?;
+    write_catalog_json(delivery_root, book, Some(&meta.stamp))?;
     /* Bootstrap：客户端"云端内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
     crate::fsx::atomic::atomic_write_json(&delivery_root.join(SOURCE_FILE), &bootstrap_json())?;
 
@@ -1022,8 +1342,13 @@ pub fn publish_into(
 /// 渠道，发布台账）仍归发布写 —— 生成不替发布定稿。
 ///
 /// `published_at` 由**调用方给**（clock 不属于交付层，与 `PublishMeta` 同一条规矩）：
-/// 发布传 `meta.stamp`（与 manifest.updated 同一个戳）、生成传当下。写进
-/// `catalog.publishedAt`，客户端云端表的「时间」列显示的就是它。
+/// 发布传 `Some(meta.stamp)`（与 manifest.updated 同一个戳）；**生成 / 预演传旧目录的戳**
+/// （[`published_at_of`]）—— 生成不是发布事件，不许盖一个新时间。
+///
+/// 2026-10-19：客户端**确实消费** `publishedAt`（预设页「时间」列、版本出身反查）。
+/// 以前生成每次盖新戳，等于把"生成时刻"冒充成"发布时间"；而且只改时间戳会让
+/// 预演永远显示 `catalog.json` 被修改（作者：「我只是浏览了一下」）。改成生成沿用旧戳后，
+/// 无改动时字节完全相同、不重写；发布才盖新戳。
 ///
 /// 目录里的资产条目**按源字节算 SHA**（[`Catalog::build_from_presets_lenient`] 的
 /// 口径）—— 所以调用方要先把引用资产补进交付根（`write_content`），否则就是
@@ -1031,13 +1356,23 @@ pub fn publish_into(
 pub fn write_catalog_json(
     delivery_root: &Path,
     book: &Book<'_>,
-    published_at: &str,
+    published_at: Option<&str>,
 ) -> Result<usize, AppError> {
     let catalog = built_catalog(delivery_root, book, published_at)?;
     let count = catalog.files.len();
     let text = catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
     Ok(count)
+}
+
+/// 交付目录里那份 `catalog.json` 的**发布时刻**（没有目录 / 读不出来 / 没有这一格 = `None`）。
+///
+/// 生成与预演拿它**沿用**旧戳：生成不盖新时间，只有发布（`publish_into`）才盖。
+pub fn published_at_of(delivery_root: &Path) -> Option<String> {
+    let raw = std::fs::read(delivery_root.join(NEW_CATALOG_FILE)).ok()?;
+    crate::runtime::catalog::Catalog::parse(&raw)
+        .ok()?
+        .published_at
 }
 
 /// **这一代要写出的目录**（纯函数，不落盘）。
@@ -1048,7 +1383,7 @@ pub fn write_catalog_json(
 pub fn built_catalog(
     delivery_root: &Path,
     book: &Book<'_>,
-    published_at: &str,
+    published_at: Option<&str>,
 ) -> Result<crate::runtime::catalog::Catalog, AppError> {
     let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
@@ -1060,7 +1395,7 @@ pub fn built_catalog(
         let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
         catalog.apply_min_client(&rules);
     }
-    catalog.published_at = Some(published_at.to_owned());
+    catalog.published_at = published_at.map(str::to_owned);
     Ok(catalog)
 }
 
@@ -1105,30 +1440,8 @@ pub fn audit_catalog(delivery_root: &Path, book: &Book<'_>) -> Result<(), String
         }
     }
     // ② **登记的每一条**：按 `发布根 + path` 定位（A 类在 presets/，B 类在 presets/delivery/）
-    for f in catalog.files.iter() {
-        let on_disk = publish_root.join(&f.path);
-        match std::fs::read(&on_disk) {
-            Err(_) => bad.push(format!(
-                "{}（登记了，发布根里取不到：{}）",
-                f.path,
-                on_disk.display()
-            )),
-            Ok(b) => {
-                if f.expected_sha().is_none() || f.expected_size().is_none() {
-                    bad.push(format!("{}（目录没登记 SHA / 大小）", f.path));
-                } else if Some(b.len() as u64) != f.expected_size() {
-                    bad.push(format!(
-                        "{}（目录记 {:?} 字节，实际 {} 字节）",
-                        f.path,
-                        f.expected_size(),
-                        b.len()
-                    ));
-                } else if Some(sha256_of(&b).as_str()) != f.expected_sha() {
-                    bad.push(format!("{}（大小相同，字节不同）", f.path));
-                }
-            }
-        }
-    }
+    //    判据在 `drift_of` —— 生成页的漂移提示与这里同一条，不养第二套
+    bad.extend(drift_of(&catalog, publish_root).into_iter().map(|(_, m)| m));
     // ③ delivery 残留：`delivery/` 里有、本次发布会发的东西里没有的（delivery 面，不含 A 类）
     for rel in scan_strays(delivery_root, &delivery_expected_set(book)) {
         if publish_only.contains(rel.as_str()) {
@@ -1159,7 +1472,7 @@ pub(crate) fn sha256_of(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
     use crate::workbench::app::build::preset_file_name;
-    use crate::workbench::domain::patch::{Committed, CommittedVersion};
+    use crate::workbench::domain::patch::{BuiltRecord, Committed, CommittedVersion};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
 
@@ -1489,7 +1802,7 @@ mod tests {
             )
             .unwrap();
         }
-        write_catalog_json(&delivery, &book, "2026-10-06T00:00:00Z").expect("目录重算");
+        write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:00Z")).expect("目录重算");
 
         // A 类「实体」在发布根里 —— 把载荷根的内容摆过去（它就是原地交付的那份）
         let assets_on_publish_root = publish_root.path().join("assets");
@@ -1522,6 +1835,279 @@ mod tests {
         assert!(
             err.contains(&victim) && err.contains("取不到"),
             "登记了却取不到必须报出来：{err}"
+        );
+    }
+
+    /// **漂移的四种原因各报各的**（2026-10-19）：大小不同 / 字节不同 / 取不到 / 没登记期望值。
+    ///
+    /// 纯字节输入 + 临时目录 —— 不依赖真数据恰好改过哪一份。生成页那句
+    /// 「N 份资产字节变了」就是数这个 `drift`。
+    #[test]
+    fn drift_reports_the_four_reasons() {
+        use crate::runtime::catalog::{Catalog, CatalogFile};
+
+        let file = |path: &str, size: Option<u64>, sha: Option<String>| CatalogFile {
+            kind: "model".to_owned(),
+            file_name: path.rsplit('/').next().unwrap_or(path).to_owned(),
+            path: path.to_owned(),
+            machine_id: String::new(),
+            version_id: String::new(),
+            sha256: sha,
+            size,
+        };
+        let catalog = Catalog {
+            files: vec![
+                file("assets/size.bin", Some(4), Some(sha256_of(b"good"))),
+                file("assets/bytes.bin", Some(4), Some(sha256_of(b"same"))),
+                file("assets/gone.bin", Some(4), Some(sha256_of(b"gone"))),
+                file("assets/noexp.bin", None, None),
+            ],
+            ..Default::default()
+        };
+
+        let root = tempfile::tempdir().unwrap();
+        crate::fsx::atomic::atomic_write(&root.path().join("assets/size.bin"), b"toolong").unwrap();
+        crate::fsx::atomic::atomic_write(&root.path().join("assets/bytes.bin"), b"diff").unwrap();
+        crate::fsx::atomic::atomic_write(&root.path().join("assets/noexp.bin"), b"x").unwrap();
+
+        let got = drift_of(&catalog, root.path());
+        let reason = |path: &str| {
+            got.iter()
+                .find(|(d, _)| d.path == path)
+                .map(|(d, _)| d.reason)
+        };
+        assert_eq!(reason("assets/size.bin"), Some(DriftReason::Size));
+        assert_eq!(reason("assets/bytes.bin"), Some(DriftReason::Bytes));
+        assert_eq!(reason("assets/gone.bin"), Some(DriftReason::Missing));
+        assert_eq!(
+            reason("assets/noexp.bin"),
+            Some(DriftReason::NoExpectation),
+            "目录没登记 SHA / 大小本身就该重算"
+        );
+        assert_eq!(got.len(), 4, "四条各报一条：{:?}", got);
+    }
+
+    /// **交付读数三态**（2026-10-19）：产物在且与目录一致 = UpToDate；被改过 = Pending；
+    /// 删掉 = Missing；目录里有一条漂了 ⇒ `catalog.json` 也该重算。
+    #[test]
+    fn delivery_status_classifies_up_to_date_pending_and_missing() {
+        let mut f = Fixture::load();
+        let mut c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        f.presets.set_asset_root(asset_root.path());
+        /*
+         * 每个可生成版本都记一条「按当前配方生成过」的台账 —— 否则 `build_state`
+         * 是 NeverBuilt，产物一律显示「未生成」，字节/渲染那一层就测不到。
+         */
+        let mut records: Vec<(String, String)> = Vec::new();
+        {
+            let probe = Book::new(&f.presets, &c, &d);
+            for r in probe.build_rows() {
+                // 不能用 `buildable`（它只含 stale / neverBuilt）；这里要给**已生成**
+                // 的版本也记台账，否则写得进产品、判不出 Built。
+                if r.state == BuildState::NoResources {
+                    continue;
+                }
+                let fp = probe
+                    .version_layers(&r.uid)
+                    .expect("可生成版本取得到层")
+                    .fingerprint()
+                    .to_owned();
+                records.push((r.uid, fp));
+            }
+        }
+        for (uid, fp) in records {
+            c.built.insert(
+                uid,
+                BuiltRecord {
+                    stamp: "2026-10-06T00:00:00Z".to_owned(),
+                    fingerprint: fp,
+                },
+            );
+        }
+        let book = Book::new(&f.presets, &c, &d);
+
+        let publish_root = tempfile::tempdir().unwrap();
+        let delivery = publish_root.path().join("delivery");
+        std::fs::create_dir_all(&delivery).unwrap();
+        write_content(&delivery, asset_root.path(), &book).expect("三份 JSON");
+        /*
+         * 产物写成**真渲染器**的输出：引入渲染比对之后，假文本 `# preset …` 会被判
+         * 「待更新」，初始 UpToDate 就测不到了。
+         */
+        let mut a1_text = String::new();
+        for r in book.build_rows() {
+            if r.state == BuildState::NoResources {
+                continue;
+            }
+            let Some(name) = r.mkp_file.clone() else {
+                continue;
+            };
+            let rendered =
+                super::super::build::render(&book, &r.uid).expect("可生成版本渲染得出来");
+            if r.uid == "A1/STANDARD" {
+                a1_text = rendered.text.clone();
+            }
+            crate::fsx::atomic::atomic_write(
+                &delivery.join(format!("mkp/presets/{name}")),
+                rendered.text.as_bytes(),
+            )
+            .unwrap();
+        }
+        write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:00Z")).expect("目录重算");
+        // A 类「实体」摆到发布根（它就是原地交付的那份）
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            let dst = publish_root.path().join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+        }
+
+        let state_of = |s: &DeliveryStatus, rel: &str| {
+            s.files
+                .iter()
+                .find(|x| x.rel == rel)
+                .map(|x| x.state)
+                .unwrap_or_else(|| panic!("交付集合里没有 {rel}"))
+        };
+
+        let a1 = preset_file_name("A1", "STANDARD");
+        let rel = format!("mkp/presets/{a1}");
+
+        let status = delivery_status(&delivery, &book);
+        assert!(status.catalog_error.is_none(), "目录读得出来");
+        assert!(
+            status.drift.is_empty(),
+            "全齐时没有漂移：{:?}",
+            status.drift
+        );
+        assert!(status.catalog_modified.is_some(), "目录重算时间读得出");
+        assert_eq!(state_of(&status, "catalog.json"), DeliveryState::UpToDate);
+        assert_eq!(state_of(&status, CONTENT_FILES[0]), DeliveryState::UpToDate);
+        assert_eq!(state_of(&status, MANIFEST_FILE), DeliveryState::Missing);
+        assert_eq!(state_of(&status, &rel), DeliveryState::UpToDate);
+        assert!(
+            status.pending_uids.is_empty(),
+            "全齐时没有待更新：{:?}",
+            status.pending_uids
+        );
+
+        /*
+         * **模板变化**（作者 2026-10-19 截图里的 `A1-fast`）：产物少一行注释，
+         * 目录也登记这份字节 —— 配方与登记都对得上，只有重新渲染能看出不同。
+         * 必须报「待更新」，并且进生成队列。
+         */
+        let aged = a1_text.replacen("# machine: A1\n", "", 1);
+        assert_ne!(aged, a1_text, "模板行要真的删掉一行");
+        crate::fsx::atomic::atomic_write(&delivery.join(&rel), aged.as_bytes()).unwrap();
+        write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:01Z")).expect("目录重算");
+        let status = delivery_status(&delivery, &book);
+        assert_eq!(
+            state_of(&status, &rel),
+            DeliveryState::Pending,
+            "模板变了必须待更新（不能只信配方指纹）"
+        );
+        assert!(
+            status.pending_uids.iter().any(|u| u == "A1/STANDARD"),
+            "生成队列要带上它：{:?}",
+            status.pending_uids
+        );
+        assert_eq!(
+            state_of(&status, "catalog.json"),
+            DeliveryState::Pending,
+            "有产物待更新，目录也该重算"
+        );
+
+        // 写回当前渲染器的那份 → 回到已生成
+        crate::fsx::atomic::atomic_write(&delivery.join(&rel), a1_text.as_bytes()).unwrap();
+        write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:02Z")).expect("目录重算");
+        assert_eq!(
+            state_of(&delivery_status(&delivery, &book), &rel),
+            DeliveryState::UpToDate
+        );
+
+        // 改一份产物（大小也变）→ 它 Pending、目录也 Pending、漂移指着它
+        crate::fsx::atomic::atomic_write(&delivery.join(&rel), b"# changed payload").unwrap();
+        let status = delivery_status(&delivery, &book);
+        assert_eq!(state_of(&status, &rel), DeliveryState::Pending);
+        assert_eq!(
+            state_of(&status, "catalog.json"),
+            DeliveryState::Pending,
+            "有一条漂了，目录本身也该重算"
+        );
+        assert!(
+            status
+                .drift
+                .iter()
+                .any(|x| x.path == format!("delivery/{rel}") && x.reason == DriftReason::Size),
+            "漂移要指着那一份：{:?}",
+            status.drift
+        );
+
+        // 恢复内容再判：配方这一侧跟上时，字节一致 = 已生成
+        crate::fsx::atomic::atomic_write(&delivery.join(&rel), a1_text.as_bytes()).unwrap();
+        assert_eq!(
+            state_of(&delivery_status(&delivery, &book), &rel),
+            DeliveryState::UpToDate
+        );
+
+        // **配方改过（台账指纹对不上）** → 即使字节与目录一致，也必须是「待更新」
+        // （2026-10-19，作者：`A1/FASTV3.3` 在①卡说待更新、明细里却显示已生成）
+        let mut stale = committed();
+        stale.built.insert(
+            "A1/STANDARD".to_owned(),
+            BuiltRecord {
+                stamp: "2026-10-06T00:00:00Z".to_owned(),
+                fingerprint: "old-fingerprint".to_owned(),
+            },
+        );
+        let stale_book = Book::new(&f.presets, &stale, &d);
+        let status = delivery_status(&delivery, &stale_book);
+        assert_eq!(
+            state_of(&status, &rel),
+            DeliveryState::Pending,
+            "配方待更新不能显示已生成"
+        );
+        assert_eq!(
+            state_of(&status, "catalog.json"),
+            DeliveryState::Pending,
+            "有配方待更新，目录也该重算"
+        );
+
+        // **没有生成记录** → 未生成（哪怕盘上还躺着旧产物）
+        let never = committed();
+        let never_book = Book::new(&f.presets, &never, &d);
+        let status = delivery_status(&delivery, &never_book);
+        assert_eq!(
+            state_of(&status, &rel),
+            DeliveryState::Missing,
+            "没有生成记录就是未生成"
+        );
+
+        // 删掉 → Missing（未生成），目录仍然 Pending（登记了却取不到）
+        std::fs::remove_file(delivery.join(&rel)).unwrap();
+        let status = delivery_status(&delivery, &book);
+        assert_eq!(state_of(&status, &rel), DeliveryState::Missing);
+        assert!(
+            status
+                .drift
+                .iter()
+                .any(|x| x.path == format!("delivery/{rel}") && x.reason == DriftReason::Missing),
+            "取不到也要说：{:?}",
+            status.drift
         );
     }
 
@@ -1927,8 +2513,8 @@ mod tests {
         // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
         assert_eq!(
             catalog.files.len(),
-            16,
-            "反空转：说明书登记台账全部 16 条（9 BBS + 3 图标 + 4 模型）；\
+            17,
+            "反空转：说明书登记台账全部 17 条（9 BBS + 3 图标 + 5 模型）；\
              没跑 wb_generate 所以没有 mkp 产物条目（宽松构建跳过）"
         );
         for f in &catalog.files {

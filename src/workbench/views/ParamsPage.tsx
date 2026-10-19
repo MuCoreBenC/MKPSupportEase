@@ -50,7 +50,7 @@
  *   · 单行被关着仍是「看得见、改不动」：藏起来的后果是用户以为这个参数不存在。
  *     收起来的那几行留一个 「仍然展开看」（词从后端来：`words.relate.showAnyway`）。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties } from 'react'
 
 import {
@@ -78,6 +78,15 @@ import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
 import { useSplitWidth } from '../c14/useSplitWidth'
 import { usePaintSelectC14 as usePaintSelect } from '../c14/usePaintSelect'
+import {
+  cellKeyOf,
+  editQueue,
+  overlayOf,
+  patchDesk,
+  patchMatrix,
+  refreshKeyOf,
+  type EditEntry,
+} from '../editQueue'
 import type { ParamView } from '../api'
 import BatchEdit from './BatchEdit'
 import type { BatchTarget } from './BatchEdit'
@@ -115,12 +124,19 @@ interface Props {
   tick: number
   /** 草稿脏不脏（放弃 / 保存按钮） */
   dirty: boolean
-  /** 唯一写入口（外壳的 run）。refresh 让后端顺带把那一页带回来 */
+  /**
+   * 唯一写入口（外壳的 run）。`refresh` 让后端顺带把那一页带回来 —— 不必事后再问一次。
+   *
+   * `opts.quiet` = **值写入那一路**（见 `editQueue` 头注）：外壳不拨 `tick`、
+   * 不置 `busy`，这一页要的那份派生改吃返回值里的 `desk` / `matrix`。
+   * `ok` 说这笔到底写进去没有（`false` 时队列要把乐观值回落掉）。
+   */
   onApply: (
     label: string,
     patches: Patch[],
     refresh?: Refresh,
-  ) => Promise<{ desk: Desk | null; matrix: Matrix | null }>
+    opts?: { quiet?: boolean },
+  ) => Promise<{ ok: boolean; desk: Desk | null; matrix: Matrix | null }>
   /** 「编辑定义」保存成功后交一条给外壳 —— 压进撤销栈（改前/改后整包） */
   onMetaApplied: (m: MetaApplied) => void
   /** 外壳的保存 / 撤销（「放弃」也归外壳那对按钮 —— 这一页不再画自己的一对） */
@@ -255,6 +271,47 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     [machineId, target, tabSel, q],
   )
 
+  /** 当前这一页 refresh 的记号 —— 判断"回来的派生还是不是这一页的"（切机型 / 改搜索就作废） */
+  const refreshKeyRef = useRef('')
+  refreshKeyRef.current = refreshKeyOf(refresh)
+
+  /*
+   * 乐观覆盖层（`editQueue` 头注第 1 条）：还没落库的那几格，用队列里的值盖在 base
+   * 上显示 —— 点下去就看得见，不等后端往返。队列空时 `patchDesk` 原样返回旧引用
+   * ⇒ 不额外重渲染。
+   *
+   * `queued` 只喂这一处派生；`shown*` 是**只画不改**的副本，base 仍由响应与 effect 写。
+   */
+  const queued = useSyncExternalStore(editQueue.subscribe, editQueue.snapshot)
+  const overlay = useMemo(() => overlayOf(queued), [queued])
+  const shownDesk = useMemo(() => patchDesk(desk, overlay), [desk, overlay])
+  const shownDrawerDesk = useMemo(() => patchDesk(drawerDesk, overlay), [drawerDesk, overlay])
+  const matrixOv = useMemo(() => patchMatrix(matrix, overlay), [matrix, overlay])
+
+  /**
+   * 队列把一批排好的改动交到这里 —— **一次 `apply_draft` 落完**，回来顺手把那一页
+   * 派生收下（后端按 `refresh` 现算，省掉事后再问一次）。
+   */
+  const sendEdits = useCallback(
+    async (batch: EditEntry[]): Promise<boolean> => {
+      const first = batch[0]
+      const label = batch.length === 1 ? first.label : `${first.label} 等 ${batch.length} 处`
+      const out = await onApply(
+        label,
+        batch.map((e) => e.patch),
+        first.refresh,
+        { quiet: true },
+      )
+      if (!out.ok) return false
+      /* 回来的得是**当前这一页**的派生：切了机型 / 改了搜索，旧的那份不能顶上来 */
+      if (refreshKeyOf(first.refresh) !== refreshKeyRef.current) return true
+      if (first.refresh.page === 'desk' && out.desk !== null) setDesk(out.desk)
+      else if (first.refresh.page === 'matrix' && out.matrix !== null) setMatrix(out.matrix)
+      return true
+    },
+    [onApply],
+  )
+
   const compareColRefs: ColRef[] = useMemo(
     () =>
       compareCols.map((id) => {
@@ -344,8 +401,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     toasts.push(`定义已写回 param_registry.toml · ${edit.label}`, { label: '撤销', run: onUndo })
   }
 
-  /** 写值的统一入口：手势前拦弃用、按 valueType 归位，然后走外壳的 apply */
-  const writeValue = async (
+  /**
+   * 写值的统一入口：手势前拦弃用、按 `valueType` 归位，然后**排进 `editQueue`**。
+   *
+   * 这里**不再 `await onApply`** —— 那是"点一下就同步等一次 IPC"，连点步进器时
+   * 会串成一队、落后于点击（作者 2026-10-19 的原话：「停了之后它才慢慢追上我点击的
+   * 次数」）。改成：翻成 `Patch` 排进队列，乐观值**立刻显示**；真正落库由队列
+   * 120ms 尾随合批、单飞发出去（连点 20 下 = 1 条 `apply_draft`、1 条撤销）。
+   */
+  const writeValue = (
     row: Row,
     param: ParamView,
     ownerMachineId: string,
@@ -380,20 +444,33 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         value = Number(next)
     }
 
-    const level = layerUid !== null ? 'version' : 'machine'
     const owner = layerUid ?? ownerMachineId
     /*
      * 矩阵的刷新同样取全量（tab 过滤在前端）—— 写一笔回来要是带着旧 tab，
      * 页签条立刻又塌回「全部 + 当前」两个了。
      */
-    const applyRefresh: Refresh =
+    const pageRefresh: Refresh =
       refreshKind === 'matrix'
         ? { page: 'matrix', cols: compareColRefs, tab: null, query: q }
         : refresh
-    const out = await onApply(`${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`, [
-      { kind: 'setValue', level, owner, key: row.key, value },
-    ], applyRefresh)
-    if (refreshKind === 'matrix' && out.matrix) setMatrix(out.matrix)
+    editQueue.push(
+      {
+        cellKey: cellKeyOf(ownerMachineId, layerUid, row.key),
+        label: `${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`,
+        patch: {
+          kind: 'setValue',
+          level: layerUid !== null ? 'version' : 'machine',
+          owner,
+          key: row.key,
+          value,
+        },
+        /* 乐观显示值：TOML 原文（`null` = 挂回继承，框里就是空的） */
+        raw: next ?? '',
+        refresh: pageRefresh,
+        refreshKey: refreshKeyOf(pageRefresh),
+      },
+      sendEdits,
+    )
 
     /*
      * 一次点击 = 一次改动的提示（开关与枚举手滑改错是重灾区）；给一条能撤回的。
@@ -540,7 +617,11 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     }
   }, [defEditKey])
   const selRow =
-    sel !== null ? (mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)) : null
+    sel !== null
+      ? mode === 'single'
+        ? rowOf(shownDesk, sel)
+        : rowOf(shownDrawerDesk, sel)
+      : null
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
   const asideShown =
     sel !== null &&
@@ -555,7 +636,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   const batchTargets: BatchTarget[] = useMemo(() => {
     /* 抽屉要那一行在这一项上的格子：预填「设置新值」、判「有没有变化」，
        以及「恢复修改前的」该写回什么。行还没到（矩阵在拉）就是空态 */
-    const row = sel !== null ? (matrix?.rows.find((r) => r.key === sel) ?? null) : null
+    const row = sel !== null ? (matrixOv?.rows.find((r) => r.key === sel) ?? null) : null
     return compareCols
       .filter((id) => colSplit(id).uid !== '')
       .map((id) => {
@@ -563,7 +644,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         const machine = book.machines.find((x) => x.id === m)
         const v = machine?.versions.find((x) => x.uid === uid)
         /* 后端重排后的列记号就是版本 uid（见下 id 注） */
-        const ci = matrix?.cols.findIndex((c) => c.key === uid) ?? -1
+        const ci = matrixOv?.cols.findIndex((c) => c.key === uid) ?? -1
         const cell = row !== null && ci >= 0 ? (row.cells[ci] ?? null) : null
         return {
           /* id = 后端 BatchEffect.col 的记号（机型 id 或版本 uid = patch 的 owner），
@@ -577,17 +658,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           dirty: cell?.dirty ?? false,
         }
       })
-  }, [compareCols, book.machines, matrix, sel])
+  }, [compareCols, book.machines, matrixOv, sel])
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
   const gcodeCell = useMemo(() => {
     if (gcodeOpen === null) return null
     if (mode === 'single') {
-      const row = rowOf(desk, gcodeOpen.key)
-      return row?.cells[cellIndexOf(desk, gcodeOpen.uid)] ?? null
+      const row = rowOf(shownDesk, gcodeOpen.key)
+      return row?.cells[cellIndexOf(shownDesk, gcodeOpen.uid)] ?? null
     }
-    const m = matrix
+    const m = matrixOv
     if (m === null) return null
     const row = m.rows.find((r) => r.key === gcodeOpen.key)
     if (!row) return null
@@ -595,7 +676,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
       (c) => c.machineId === gcodeOpen.mid && (c.versionUid ?? null) === gcodeOpen.uid,
     )
     return ci >= 0 ? (row.cells[ci] ?? null) : null
-  }, [gcodeOpen, mode, desk, matrix])
+  }, [gcodeOpen, mode, shownDesk, matrixOv])
 
   /*
    * 左树刷选（C14 第七轮）：按住拖过去、经过哪行改哪行。对照模式里所有机型的
@@ -712,12 +793,12 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
    * 是同一处版面决定。搜索态不按领域收窄（后端的规矩就是搜索跨全部分类，
    * doc §8.1），跟后端那份过滤对齐。
    */
-  const shownMatrix = matrix
+  const shownMatrix = matrixOv
     ? {
-        ...matrix,
-        rows: matrix.rows
+        ...matrixOv,
+        rows: matrixOv.rows
           .filter((r) => searching || tabSel === null || r.tabId === tabSel)
-          .filter((r) => !diffOnly || matrix.diffKeys.includes(r.key)),
+          .filter((r) => !diffOnly || matrixOv.diffKeys.includes(r.key)),
       }
     : null
   /*
@@ -726,10 +807,10 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
    * 后的行里被数成 0，整条页签只剩「全部 + 当前」（作者：「必须返回到全部
    * 才能看到其他」）。
    */
-  const tabCountRows = matrix
+  const tabCountRows = matrixOv
     ? diffOnly
-      ? matrix.rows.filter((r) => matrix.diffKeys.includes(r.key))
-      : matrix.rows
+      ? matrixOv.rows.filter((r) => matrixOv.diffKeys.includes(r.key))
+      : matrixOv.rows
     : []
 
   return (
@@ -921,7 +1002,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
             才是实话。
           */}
           {bodyReady ? (
-            mode === 'single' && desk !== null ? (
+            mode === 'single' && shownDesk !== null ? (
               <>
                 {/* 工具行：搜索收短（180px）放最左 —— 搜索不是这个页面的主操作 */}
                 <div className={s.pOps}>
@@ -933,7 +1014,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                     onChange={(e) => setQ(e.target.value)}
                   />
                   <span className={s.cardNote}>
-                    {countRows(desk)} 条
+                    {countRows(shownDesk)} 条
                     {q.trim() ? ` · 搜索「${q.trim()}」跨全部分类` : ''}
                   </span>
                   <span className={s.grow} />
@@ -957,9 +1038,9 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                     className={`${s.pTab} ${tabSel === null ? s.pTabOn : ''}`}
                     onClick={() => setTabSel(null)}
                   >
-                    全部 <em>{desk.total}</em>
+                    全部 <em>{shownDesk.total}</em>
                   </button>
-                  {desk.nav.map((t) => (
+                  {shownDesk.nav.map((t) => (
                     <button
                       key={t.id}
                       type="button"
@@ -974,17 +1055,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                 </div>
 
                 <div className={s.pScroll} ref={scrollRef}>
-                  {desk.groups.length > 0 ? (
+                  {shownDesk.groups.length > 0 ? (
                     /* 分组卡最多两列：这是参数工作区，不是仪表盘（作者对五列的判语） */
                     <div className={s.pGrid2}>
-                      {desk.groups.map((g) => {
+                      {shownDesk.groups.map((g) => {
                         /*
                          * 模式开关整卡收起（C15 A2）：整卡现在一行都改不动就收起行，
                          * 只留后端那句 + 「仍然展开看」。判据见文件头那一节 ——
                          * 一句话说：**判据全在后端给的字段里**（`offNote` / `blockedHint`）。
                          * 摊开之后卡头长一颗「收起来」（2026-10-03）—— 出口与入口是一对。
                          */
-                        const note = collapseNoteOf(g, desk.cur, q.trim() !== '')
+                        const note = collapseNoteOf(g, shownDesk.cur, q.trim() !== '')
                         if (note !== null && !openedCards.includes(g.sectionId)) {
                           return (
                             <CollapsedCard
@@ -1000,7 +1081,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                           <GroupCard
                             key={g.sectionId}
                             group={g}
-                            cur={desk.cur}
+                            cur={shownDesk.cur}
                             uid={target === BASE ? null : target}
                             ownerMachineId={machineId ?? ''}
                             words={words}
@@ -1100,7 +1181,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                       setBatchTab(true)
                     }}
                     onWriteCell={(col, row, param, next) => {
-                      void writeValue(
+                      writeValue(
                         row,
                         param,
                         col.machineId,
@@ -1174,12 +1255,12 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
               </div>
             )}
             {sel !== null && (mode === 'single' || !batchTab || !batchable) && selRow !== null &&
-              (mode === 'single' ? desk : drawerDesk) !== null && (
+              (mode === 'single' ? shownDesk : shownDrawerDesk) !== null && (
                 <ParamDetail
                   uid={target === BASE ? null : target}
                   paramKey={sel}
-                  cols={(mode === 'single' ? desk : drawerDesk)!.cols}
-                  cur={(mode === 'single' ? desk : drawerDesk)!.cur}
+                  cols={(mode === 'single' ? shownDesk : shownDrawerDesk)!.cols}
+                  cur={(mode === 'single' ? shownDesk : shownDrawerDesk)!.cur}
                   row={selRow}
                   param={selParam}
                   machine={
@@ -1210,9 +1291,9 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                         ? (machineId ?? '')
                         : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
                           baseMachineId)
-                    const row = mode === 'single' ? rowOf(desk, sel) : rowOf(drawerDesk, sel)
-                    const idx = cellIndexOf(mode === 'single' ? desk : drawerDesk, layerUid)
-                    void writeValue(
+                    const row = mode === 'single' ? rowOf(shownDesk, sel) : rowOf(shownDrawerDesk, sel)
+                    const idx = cellIndexOf(mode === 'single' ? shownDesk : shownDrawerDesk, layerUid)
+                    writeValue(
                       row ?? selRow,
                       selParam,
                       ownerMid,
@@ -1230,7 +1311,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                 words={words}
                 targets={batchTargets}
                 onApply={async (label, patches) => {
-                  await onApply(label, patches)
+                  /*
+                   * 批量是**一整块手势**（一次 apply、一次撤销）—— 走 quiet：
+                   * 不再让外壳拨 `tick` 去把整页 desk / matrix 重取一遍，
+                   * 要的那份派生由 `refresh` 顺带带回来（回来的是不是当前这一页，
+                   * 与单格写值同一条判据）。
+                   */
+                  const r: Refresh = { page: 'matrix', cols: compareColRefs, tab: null, query: q }
+                  const out = await onApply(label, patches, r, { quiet: true })
+                  if (out.ok && out.matrix !== null && refreshKeyOf(r) === refreshKeyRef.current) {
+                    setMatrix(out.matrix)
+                  }
                 }}
               />
             )}
@@ -1283,9 +1374,11 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           dirty={dirty}
           write={(next) => {
             const row =
-              mode === 'single' ? rowOf(desk, gcodeOpen.key) : (matrix?.rows.find((r) => r.key === gcodeOpen.key) ?? null)
+              mode === 'single'
+                ? rowOf(shownDesk, gcodeOpen.key)
+                : (matrixOv?.rows.find((r) => r.key === gcodeOpen.key) ?? null)
             if (row) {
-              void writeValue(
+              writeValue(
                 row,
                 gcodeParam,
                 gcodeOpen.mid,
@@ -1514,6 +1607,34 @@ function ParamLine({
         className={`${s.pRowCtl} ${param.uiComponent === 'gcode' ? s.pRowCtlG : ''}`}
         onClick={(e) => e.stopPropagation()}
       >
+        {/*
+          橙色「改之前的值」（2026-10-19）—— 抄客户端 `ParamRow` 那枚 `↩ 已保存值`。
+          **这一格改了才出来**（`cell.dirty`，含还没落库的乐观那几格）；点它 = 把这层
+          写回**盘上钉着的那个值**（`Cell.rest`，草稿不算）。
+
+          与右栏那枚 `↶`（挂回继承、写 `null` 删键）**不是一回事**：那枚是"跟随别人"，
+          这枚是"退回我原来的"。title 里把这条差别说清。
+        */}
+        {cell.dirty && cell.rest !== null && cell.editable && !dep && (
+          <button
+            type="button"
+            className={s.pRevert}
+            title={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复出厂默认」）`}
+            onClick={() =>
+              onWrite(
+                row,
+                param,
+                ownerMachineId,
+                uid,
+                String(cell.rest),
+                undefined,
+                String(cell.raw ?? ''),
+              )
+            }
+          >
+            ↩ {String(cell.rest)}
+          </button>
+        )}
         <CellEditor
           param={param}
           cell={cell}

@@ -175,9 +175,10 @@ export const bridgeApi: MkpApi = {
   openDefaultAppSettings: () => call('openDefaultAppSettings', 'open_default_app_settings'),
   /* 「自动化」授权被拒后的反悔入口：直达系统设置那一页（macOS 拒过一次就不再弹框） */
   openAutomationSettings: () => call('openAutomationSettings', 'open_automation_settings'),
-  /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点） */
-  getPostProcessCommand: (machineId, versionId) =>
-    call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId }),
+  /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点）。
+     `path` = 被点名的那一份（预设页右键那一行）—— 不传就是"当前使用的那一套" */
+  getPostProcessCommand: (machineId, versionId, path) =>
+    call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId, path }),
   /* 钩子那一趟：切片器导出时本程序被带参数拉起来的那一次（快照 / 停 / 答一问） */
   getPostProcessRun: () => call('getPostProcessRun', 'get_post_process_run'),
   cancelPostProcess: () => call('cancelPostProcess', 'cancel_post_process'),
@@ -215,6 +216,8 @@ export const bridgeApi: MkpApi = {
   patchPresetDraft: (paramKey, value) =>
     call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
+  /* 冷启动接回草稿层：后端草稿还在，界面那一层（内存）没了 —— 差异由后端按参数算 */
+  readPresetDraftChanges: () => call('readPresetDraftChanges', 'read_preset_draft_changes'),
   /* 修改历史账本（2026-10-17）：一份文件一本，盘上留着、重开软件还在 */
   getPresetHistory: (origin, id) => call('getPresetHistory', 'get_preset_history', { origin, id }),
   /* 「哪份用得最多」：只读；写在后端"应用预设"那一步（2026-10-17） */

@@ -104,7 +104,17 @@ const PLATE = {
     model: 'precise',
     title: 'XY 偏移校准板',
     calibId: 'xy',
-    versions: [{ id: 'xy', label: '标准' }],
+    /*
+     * 2026-10-19：XY 板也有两版 —— 标准（打印区 50.5）与加长版（右侧 / 上侧各多 5mm ⇒ 55.5）。
+     * 刻度槽相对板子左下角的位置没动，所以板面预览仍共用这一张
+     * （`src/calib/precise-calibration.generated.ts`），选哪版只换要打开的那份 3mf
+     * （id → 交付文件名在 Rust 的 `MODEL_DEFS` 里）。后处理侧认这两版靠
+     * `presets/calibration_models.toml` 的 `xy-square-50` / `xy-square-55`。
+     */
+    versions: [
+      { id: 'xy', label: '标准' },
+      { id: 'xy-ext', label: '加长版' },
+    ],
     hitLabel: xyHitLabel,
     mm: { w: XY_VIEW_BOX[2], h: XY_VIEW_BOX[3] },
   },

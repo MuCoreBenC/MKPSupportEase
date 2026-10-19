@@ -161,7 +161,10 @@ pub(crate) fn traced<T>(
 /// 2026-10-18：Z 板多了一版（作者把校准模型打印区加长了 3mm ⇒ 深 13.063 → 16.063），
 /// 于是 `z-ext` 与 `z` 并列 —— 校准页「打开模型」那个模态框里选版本。后处理侧认这两版
 /// 靠 `presets/calibration_models.toml`（`zoffset` / `zoffset-ext` 两档）。
-const MODEL_DEFS: [(&str, &str, &str, &str); 4] = [
+///
+/// 2026-10-19：XY 板同样多了一版（打印区右侧 / 上侧各加 5mm 留白 ⇒ 50.5 → 55.5），
+/// `xy-ext` 与 `xy` 并列；后处理侧认这两版靠同一份表里的 `xy-square-50` / `xy-square-55`。
+const MODEL_DEFS: [(&str, &str, &str, &str); 5] = [
     (
         "z",
         "Z 轴校准",
@@ -179,6 +182,12 @@ const MODEL_DEFS: [(&str, &str, &str, &str); 4] = [
         "XY 校准",
         "校准平面内的偏移，Z 轴之后打",
         "Precise_Calibration.3mf",
+    ),
+    (
+        "xy-ext",
+        "XY 校准（加长版）",
+        "板子右侧 / 上侧各多 5mm 留白的那一版，校准流程与旧版完全一样",
+        "Precise_Calibration_ext.3mf",
     ),
     (
         "test-models",
@@ -452,9 +461,14 @@ fn post_process_refused(reason: impl Into<String>) -> PostProcessCommandDto {
 
 /// 组装那一条命令（**纯函数**：喂假 exe 与临时根就能判 —— 见下面的判据）。
 ///
-/// 预设那一份的先后：**本地那份**（用户工作副本，匹配口径在
-/// [`local::local_copy_for`]）> 交付预设那份，且**必须真在盘上**
-/// （相对落点 / 不存在的文件贴进切片器都是同一种事故）。
+/// 预设那一份的先后：
+///
+/// 1. `local_path` = 界面**点名**的那一份（相对用户根，右键某一行的「复制后处理脚本」）——
+///    只认它；不在盘上就报原因，**不悄悄换成同机型版本的另一份**；
+/// 2. 没点名时（首页 / 标题栏字标那一侧）：**本地那份**（用户工作副本，匹配口径在
+///    [`local::local_copy_for`]）> 交付预设那份。
+///
+/// 两条路都**必须真在盘上**（相对落点 / 不存在的文件贴进切片器都是同一种事故）。
 fn post_process_dto(
     exe: Option<&std::path::Path>,
     catalog: &crate::runtime::Catalog,
@@ -462,12 +476,40 @@ fn post_process_dto(
     user_root: &std::path::Path,
     machine_id: &str,
     version_id: &str,
+    local_path: Option<&str>,
 ) -> Result<PostProcessCommandDto, AppError> {
     let Some(exe) = exe else {
         return Ok(post_process_refused(
             "取不到本程序自己的路径（current_exe 失败），这一台上暂时拼不出命令",
         ));
     };
+
+    /*
+     * **点名的那一份优先**（2026-10-19）：右键某一行的意思是"把**我点的这一份**抄给我"。
+     *
+     * 从前这里只拿 (机型, 版本) 去反查 —— 同一组合下有几份副本时，
+     * `local_copy_for` 会优先挑「正在使用」的那份 ⇒ 右键 `A1-fast.toml`，
+     * 命令里的 `--Toml` 却是 `A1-fastv3.3 copy.toml`（作者实测）。
+     * 一行本来就有自己的 `path`（相对用户根）⇒ 拿到它就**不猜**。
+     *
+     * 越界写法（绝对路径 / `..` / 指向根外的符号链接）由 [`crate::fsx::paths::resolve_in`]
+     * 那三道闸拦下 —— 与读正文、编辑、应用同一道。
+     */
+    if let Some(rel) = local_path {
+        let at = crate::fsx::paths::resolve_in(user_root, rel)?;
+        if !at.is_file() {
+            return Ok(post_process_refused(format!(
+                "「{}」不在盘上了 —— 刷新一下列表再试",
+                rel.rsplit('/').next().unwrap_or(rel)
+            )));
+        }
+        return Ok(PostProcessCommandDto {
+            ready: true,
+            command: Some(post_process_command(exe, &at)),
+            toml: Some(at.display().to_string()),
+            reason: None,
+        });
+    }
 
     let at = match local::local_copy_for(internal_root, user_root, catalog, machine_id, version_id)?
     {
@@ -500,15 +542,20 @@ fn post_process_dto(
     })
 }
 
-/// 首页「复制后处理脚本」要的**那一整条命令**（当前平台现拼）。
+/// 「复制后处理脚本」要的**那一整条命令**（当前平台现拼）。
 ///
 /// 前端点一下要一次、状态一变再要一次（投递面 / AppState 广播）—— **不缓存路径**：
 /// 下载、应用、换份都可能把 `--Toml` 指的落点换掉。
+///
+/// `path`（可选）是**被点名的那一份**在用户根里的相对落点（`presets-local/…`）：
+/// 预设页右键某一行时传它 —— 抄到的必须是**这一行**，不是同机型版本的另一份。
+/// 首页 / 标题栏字标不传（它们指的是"当前使用的那一套"，由后端按归属挑）。
 #[tauri::command]
 pub async fn get_post_process_command(
     app: AppHandle,
     machine_id: String,
     version_id: String,
+    path: Option<String>,
 ) -> Result<PostProcessCommandDto, AppError> {
     traced("getPostProcessCommand", |_| {
         let internal = crate::fsx::paths::internal_root(&app)?;
@@ -522,6 +569,7 @@ pub async fn get_post_process_command(
             &user_root,
             &machine_id,
             &version_id,
+            path.as_deref(),
         )
     })
 }
@@ -531,16 +579,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn calib_models_have_four_entries() {
-        assert_eq!(MODEL_DEFS.len(), 4);
+    fn calib_models_have_five_entries() {
+        assert_eq!(MODEL_DEFS.len(), 5);
     }
 
-    /// 界面发的四个 id 就是契约 —— 换名字要两处一起改，判据钉在这里
-    /// （`z-ext` 是 2026-10-18 起 Z 板的第二版，校准页那个「模型版本」选的就是它）
+    /// 界面发的五个 id 就是契约 —— 换名字要两处一起改，判据钉在这里
+    /// （`z-ext` 是 2026-10-18 起 Z 板的第二版、`xy-ext` 是 2026-10-19 起 XY 板的第二版，
+    /// 校准页那个「模型版本」选的就是它们）
     #[test]
     fn model_ids_match_the_pages() {
         let ids: Vec<&str> = MODEL_DEFS.iter().map(|(id, ..)| *id).collect();
-        assert_eq!(ids, ["z", "z-ext", "xy", "test-models"]);
+        assert_eq!(ids, ["z", "z-ext", "xy", "xy-ext", "test-models"]);
     }
 
     #[test]
@@ -622,6 +671,7 @@ mod tests {
             user.path(),
             "A1_MINI",
             "FASTV3.3",
+            None,
         )
         .unwrap();
         assert!(!dto.ready);
@@ -647,6 +697,7 @@ mod tests {
             user.path(),
             "A1_MINI",
             "FASTV3.3",
+            None,
         )
         .unwrap();
         assert!(!dto.ready, "新数据根里还没有这一份");
@@ -683,6 +734,7 @@ mod tests {
             user.path(),
             "A1_MINI",
             "FASTV3.3",
+            None,
         )
         .unwrap();
         assert!(dto.ready);
@@ -722,6 +774,7 @@ mod tests {
             user.path(),
             "A1_MINI",
             "FASTV3.3",
+            None,
         )
         .unwrap();
         assert!(dto.ready);
@@ -746,6 +799,7 @@ mod tests {
             user.path(),
             "NOPE",
             "NOPE",
+            None,
         )
         .unwrap();
         assert!(!dto.ready);
@@ -754,5 +808,95 @@ mod tests {
             dto.reason.unwrap_or_default().contains("NOPE"),
             "原因要把是哪个组合带出来"
         );
+    }
+
+    /// **点名的那一份就是命令指的那一份**（2026-10-19 作者实测的那个 bug）：
+    /// 同一机型 / 版本下有两份副本、底账正用着其中一份 ⇒ 右键**另一份**时，
+    /// `--Toml` 必须是**被点的那一份**，不能是"正在使用"的那份。
+    #[test]
+    fn the_named_file_wins_over_the_one_in_use() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+
+        let in_use = "presets-local/A1_MINI-fastv3.3.toml";
+        let pointed = "presets-local/A1_MINI-fastv3.3 copy.toml";
+        let head = "# machine: A1_MINI\n# variant: fastv3.3\n[toolhead]\n";
+        crate::fsx::atomic::atomic_write(&user.path().join(in_use), head.as_bytes()).unwrap();
+        let pointed_at = user.path().join(pointed);
+        crate::fsx::atomic::atomic_write(&pointed_at, head.as_bytes()).unwrap();
+        /* 底账正用着第一份 —— 老实现会跟着底账走 */
+        crate::runtime::app_state::set_active_local(internal.path(), in_use, "sha").unwrap();
+
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+            Some(pointed),
+        )
+        .unwrap();
+        assert!(dto.ready, "点名的那份在盘上，就该给命令");
+        assert_eq!(
+            dto.toml.expect("ready 就该有 toml"),
+            pointed_at.display().to_string(),
+            "抄的是被点的那一行，不是正在使用的那一份"
+        );
+    }
+
+    /// 点名的那份**不在盘上** ⇒ 报原因，**不悄悄换成同机型版本的另一份**
+    #[test]
+    fn a_named_file_that_is_gone_is_refused_not_replaced() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+
+        let other = "presets-local/A1_MINI-fastv3.3.toml";
+        crate::fsx::atomic::atomic_write(
+            &user.path().join(other),
+            b"# machine: A1_MINI\n# variant: fastv3.3\n",
+        )
+        .unwrap();
+
+        let dto = post_process_dto(
+            Some(exe),
+            &catalog,
+            internal.path(),
+            user.path(),
+            "A1_MINI",
+            "FASTV3.3",
+            Some("presets-local/gone.toml"),
+        )
+        .unwrap();
+        assert!(!dto.ready, "点名的那份不在了就不给命令");
+        assert!(dto.command.is_none() && dto.toml.is_none());
+        let reason = dto.reason.expect("要有原因");
+        assert!(reason.contains("gone.toml"), "原因要说清是哪一份：{reason}");
+    }
+
+    /// 越过用户根的写法（`..` / 绝对路径）一律拒 —— 与读正文、编辑同一道闸
+    #[test]
+    fn a_named_path_escaping_the_user_root_is_an_error() {
+        let catalog = catalog();
+        let internal = tempfile::tempdir().unwrap();
+        let user = tempfile::tempdir().unwrap();
+        let exe = std::path::Path::new("dev/mkp-support-ease");
+
+        for bad in ["../../etc/passwd", "/etc/passwd"] {
+            let outcome = post_process_dto(
+                Some(exe),
+                &catalog,
+                internal.path(),
+                user.path(),
+                "A1_MINI",
+                "FASTV3.3",
+                Some(bad),
+            );
+            assert!(outcome.is_err(), "越界路径要报错：{bad}");
+        }
     }
 }

@@ -56,6 +56,27 @@ pub fn read_param_values(
     Ok(out)
 }
 
+/// 两份正文之间的**参数级差异**：后者（草稿）现在写着、与前者（来源）不一样的那几项。
+///
+/// 判据是**值**（与 [`read_param_values`] 同一套形态），不是字节 —— 注释、空行、
+/// 键序、血统那三行都不进账。参数页那条链用它把"盘上草稿改了什么"交回给刚冷启动的界面
+/// （内存里的草稿层随进程没了，见 `ipc::local::read_preset_draft_changes`）。
+///
+/// 前者没有、后者有的键**算差异**（`patch_preset_toml` 会补写缺的键）；
+/// 两份都没有的键自然不在结果里。
+pub fn diff_param_values(
+    before: &str,
+    after: &str,
+    defs: &[ParamDef],
+) -> Result<BTreeMap<String, String>, AppError> {
+    let base = read_param_values(before, defs)?;
+    let now = read_param_values(after, defs)?;
+    Ok(now
+        .into_iter()
+        .filter(|(key, value)| base.get(key) != Some(value))
+        .collect())
+}
+
 /// 一批改动**一次算完**：逐项结构保真地改，**任何一项失败就整批不落地**
 /// （返回 `Err`，调用方手里的旧正文还是好的）。
 pub fn apply_param_edits(
@@ -187,6 +208,37 @@ mode = \"tower\"
             .filter(|(a, b)| a != b)
             .collect();
         assert_eq!(changed.len(), 2, "只该有两行变化，实际：{changed:?}");
+    }
+
+    /// 差异只认**值**：改过的那几项回来，没动的不回来；注释 / 空行不同不算改动
+    #[test]
+    fn only_params_whose_value_changed_come_back() {
+        let edited = DOC
+            .replace("offset_x = -1.5", "offset_x = -2.25")
+            .replace("# 速度上限(mm/s)", "# 速度上限（改个注释，值没动）");
+        let got = diff_param_values(DOC, &edited, reg().params()).expect("算差异");
+        assert_eq!(
+            got.get("toolhead.offset.x").map(String::as_str),
+            Some("-2.25"),
+            "{got:?}"
+        );
+        assert!(
+            !got.contains_key("toolhead.speed_limit"),
+            "值没动（只换了注释）就不该算改动：{got:?}"
+        );
+        assert_eq!(got.len(), 1, "只该有一项：{got:?}");
+    }
+
+    /// 原稿没有、草稿补上的键也算（`patch_preset_toml` 会补写缺的键）
+    #[test]
+    fn a_key_the_source_lacks_counts_as_changed() {
+        let with_z = DOC.replace("offset_x = -1.5", "offset_x = -1.5\noffset_z = 4");
+        let got = diff_param_values(DOC, &with_z, reg().params()).expect("算差异");
+        assert_eq!(
+            got.get("toolhead.offset.z").map(String::as_str),
+            Some("4"),
+            "{got:?}"
+        );
     }
 
     /// 任何一项失败 → 整批不落地（调用方手里的旧正文还是好的）

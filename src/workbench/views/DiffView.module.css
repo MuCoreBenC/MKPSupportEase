@@ -1,0 +1,128 @@
+/*
+ * 行级 diff 与右侧概览条（2026-10-19 从 GenerateDiffModal 抽出，两个框共用）。
+ *
+ * 一行：行号槽 + 标记槽 + 内容槽；三档只差底色与标记槽字色。
+ * 长行折行、不横向滚（见 `.lineTxt` 的注释）—— 行号与内容起点始终对齐。
+ */
+
+.diff {
+  /* 概览条按行的 offsetTop 算比例 —— 行的定位基准必须是这个内容框 */
+  position: relative;
+  padding: 6px 0;
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* 一行：行号槽 + 内容槽。三档行只差底色与行号槽的字色 */
+.lineAdd,
+.lineDel,
+.lineCtx {
+  display: flex;
+  gap: 0;
+  min-width: 0;
+}
+
+/* 增 / 删行的底：取 `--w-diff-add` / `--w-diff-del`（深色那边是 18% / 16% 的
+   深绿深红 —— 10% 那两档压在深底上等于没画） */
+.lineAdd {
+  background: var(--w-diff-add);
+}
+
+.lineDel {
+  background: var(--w-diff-del);
+}
+
+.lineCtx {
+  color: var(--w-t2);
+}
+
+/* 行号槽定宽、右对齐、等宽数字 —— 一列对齐才读得出"第几行" */
+.lineNo {
+  flex: none;
+  width: 44px;
+  padding-right: 10px;
+  color: var(--w-t3);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.gutter {
+  flex: none;
+  width: 18px;
+  color: var(--w-t3);
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lineAdd .gutter {
+  color: var(--w-diff-add-ink);
+}
+
+.lineDel .gutter {
+  color: var(--w-diff-del-ink);
+}
+
+.lineTxt {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-right: 14px;
+  /*
+   * **长行折行，不横向滚**（作者 2026-10-07 改口）。
+   *
+   * 原来是 `white-space: pre`：长行让整个详情栏长出横向滚动条 —— 而那条滚动条
+   * 会**把详情头与行号槽一起拖走**（横滚的是整栏不是那一行），人看到的是
+   * "文件名不见了、第几行也不见了"。折行没有这个问题：行号槽与内容起点始终对齐。
+   */
+  white-space: pre-wrap;
+  /*
+   * 按**词**换行，不是逐字符断（2026-10-19，作者截图里 `catalogSchema` 被拆成
+   * `"cat / alog / Sche / ma"`）。超长 token（64 位 sha）仍会在必要时断开 ——
+   * 只是普通英文单词 / 驼峰字段名不再被拆。
+   */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+/* ---------- 右侧差异概览条（2026-10-19，VSCode 的 overview ruler） ---------- */
+
+.ruler {
+  position: absolute;
+  top: 44px;
+  right: 3px;
+  bottom: 8px;
+  width: 10px;
+  border-radius: 5px;
+  background: var(--w-card-inner);
+  /* 只有标记处能点，空白处不挡正文的选择 / 点击 */
+  pointer-events: none;
+}
+
+.rulerMark {
+  position: absolute;
+  left: 1px;
+  width: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  /* 标记本身是按钮 —— 点它跳行 */
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.rulerAdd {
+  background: var(--w-diff-add-ink);
+}
+
+.rulerDel {
+  background: var(--w-diff-del-ink);
+}
+
+.rulerMark:hover,
+.rulerMark:focus-visible {
+  outline: 1px solid var(--w-t1);
+  outline-offset: 0;
+}

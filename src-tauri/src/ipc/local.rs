@@ -677,6 +677,62 @@ pub async fn discard_preset_draft(app: AppHandle) -> Result<(), AppError> {
     })
 }
 
+/// **草稿里改过的那几项参数**（参数 key → 草稿现在的值，控件形态）。
+///
+/// 给界面的**冷启动接草稿层**用（2026-10-19 作者实测的那条）：
+///
+/// ```text
+/// 改了两项 → 直接关掉软件 → 再打开：行上那枚橙点亮着（后端摘要说脏）
+///                              ↓ 打开「修改参数」
+///                          一个改动都看不见、保存灰着、「放弃并退出」也退不掉
+/// ```
+///
+/// 根因在两头各自都没错：后端那份草稿（`run/app-state.json` 的 `draft` 格）好好躺着，
+/// 而界面那一层（`useParams` 的 `draft`）是**进程内存**，关掉就没了 —— `begin_preset_edit`
+/// 答 `reused` 只说"还是这一份的草稿"，没说"改了哪几项"。这条命令把参数级差异补上：
+/// 判据与参数页的显示层同一套（[`crate::presetdata::params::diff_param_values`]），
+/// **值不同才算**，注释 / 空行 / 血统那几行都不进账。
+///
+/// 没有草稿 ⇒ 空表（不是错误）。来源读不出来（云端那份已经不在下载区 / 本地那份被移走）
+/// 照实报错：这时"改了什么都算不清"，编一份差异出来比空着更坏。
+#[tauri::command]
+pub async fn read_preset_draft_changes(
+    app: AppHandle,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    traced("readPresetDraftChanges", |_| {
+        let root = internal_root(&app)?;
+        let user_root = crate::fsx::paths::user_root(&app)?;
+        let Some(draft) = runtime::app_state::draft(&root)? else {
+            return Ok(std::collections::BTreeMap::new());
+        };
+        let catalog = runtime::load_released_catalog(&root)?;
+
+        /* 来源正文：与 `begin_preset_edit` 开场那一刻给草稿的那一份**同一副样子** ——
+        云端线是下载区的字节，用户线是去掉血统三行之后的正文 */
+        let base = match draft.origin {
+            runtime::state::ActiveOrigin::Preset => {
+                let file = catalog
+                    .files
+                    .iter()
+                    .find(|f| f.file_name == draft.source_file_name)
+                    .ok_or_else(|| {
+                        AppError::not_found(format!(
+                            "目录里已经没有 {} 了 —— 这份草稿的原文读不出来，改了什么算不清",
+                            draft.source_file_name
+                        ))
+                    })?;
+                runtime::delivery::cloud_text(&root, file)?
+            }
+            runtime::state::ActiveOrigin::Local => {
+                let rel = draft.path.as_deref().unwrap_or_default();
+                runtime::lineage::strip_lineage_lines(&runtime::local::read_text(&user_root, rel)?)
+            }
+        };
+
+        crate::presetdata::params::diff_param_values(&base, &draft.text, &catalog.registry.params)
+    })
+}
+
 /// **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
 ///
 /// ```text

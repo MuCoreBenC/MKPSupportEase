@@ -48,6 +48,7 @@ import { api, errorText } from '../../api'
 /* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
+import { draftMutated } from '../state/draftState'
 import { useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
@@ -68,6 +69,13 @@ import type {
 import type { FieldSchema } from '../../components/field'
 /* 显示精度唯一出口（`mm` 两位、其余原样）—— 与 `FieldControl` / `NumberField` 同一套 */
 import { displayDecimals, formatNum } from '../../components/field/value'
+/* 关掉模态框再进来的会话缓存（草稿层 + 撤销重做 + 修改历史），见它头注 */
+import {
+  clearParamSession,
+  paramTargetKey,
+  readParamSession,
+  writeParamSession,
+} from './paramSessionCache'
 
 /**
  * 参数编辑器的两种打开方式。
@@ -228,7 +236,8 @@ export interface Patch {
  */
 export type ApplyResult = 'applied' | 'noop' | 'blocked'
 
-interface EditStep {
+/** 一条撤销记录（导出是给 `paramSessionCache` 存会话快照用的） */
+export interface EditStep {
   patch: Record<string, string | undefined>
   before: Record<string, string | undefined>
   logId: number
@@ -557,6 +566,12 @@ export interface Params {
   editingPreset: { fileName: string; origin: ActiveOrigin; path: string | null } | null
   /** 草稿没落盘时的原因（一行话）；正常是 `null` */
   draftError: string | null
+  /**
+   * **盘上这份草稿真改过**没有（后端摘要的 `dirty`，2026-10-19）——
+   * 打开时页面据此**直接进编辑模式**（与「编辑文件」抽屉 `reused && dirty` 同一条口径）：
+   * 作者：「我没保存的时候关闭它应该是记住着……它一样还是保留着那个编辑模式的」。
+   */
+  draftOnDisk: boolean
   /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   saveResult: string | null
   /**
@@ -744,6 +759,65 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   } | null>(null)
   /** 编辑目标的草稿有没有真的落到盘上（后端 `run/draft-preset.json`） */
   const [draftError, setDraftError] = useState<string | null>(null)
+  /**
+   * 盘上这份草稿**真改过**没有（后端摘要的 `dirty`）—— 2026-10-19。
+   *
+   * 页面拿它决定"重开时要不要直接进编辑模式"：与兄弟链「编辑文件」抽屉
+   * （`PagePresets.tsx` 的 `unsaved = draft.reused && draft.dirty`）同一条口径，
+   * 也是作者 2026-10-16 的原话「下次打开这个模态框，它里面还是显示编辑模式……好的提示、
+   * 或者通知，就是说刚才那些修改还没保存、没生效」。
+   */
+  const [draftOnDisk, setDraftOnDisk] = useState(false)
+  /** 当前编辑目标的记号（会话缓存的钥匙）；`beginPresetEdit` 回来才落 */
+  const sessionKeyRef = useRef<string | null>(null)
+  /**
+   * 这个编辑目标的**草稿层已经接回来过**（同一个钥匙只接一次）。
+   *
+   * 目录刷新（`catalog` 换了引用）会让下面那个 `beginPresetEdit` 的 effect 重跑：
+   * 每次都往 `draft` 里灌一遍，会把用户这一屏刚改的值按旧快照盖回去、顺手清掉撤销栈。
+   * 接回来本身也不是"每次都要"的动作 —— 只在换目标 / 冷启动那一次有意义。
+   */
+  const draftRestoredRef = useRef<string | null>(null)
+  /** 离开（模态框关闭）时要写进会话缓存的那一份 —— 用 ref 免去闭包过期 */
+  const sessionRef = useRef<{
+    draft: Record<string, string>
+    past: EditStep[]
+    future: EditStep[]
+  } | null>(null)
+  /** 「未保存圆点」那条广播的尾随计时器（见 `broadcastDraftSoon`） */
+  const draftSoonRef = useRef<number | null>(null)
+
+  /**
+   * 广播"草稿变了"（预设列表行上那枚橙色「未保存」小圆点按它重读轻摘要）。
+   *
+   * ★ 2026-10-19 补修：`state/draftState.ts` 的头注一直写着"发：参数页（`useParams`：
+   * 改值 / 保存 / 取消 / 采用云端新值）"，可**实际调用者只有预设页那两处（正文链）** ——
+   * 参数链一次都不发，于是那枚圆点只有等整表重读才可能亮（作者："那个橙色的点也不显示了"）。
+   * 这里把它接上。
+   *
+   * 尾随 150ms 合并：连改几处只让对面读一次轻摘要（`get_preset_draft_summary`）。
+   */
+  const broadcastDraftSoon = useCallback(() => {
+    if (draftSoonRef.current !== null) window.clearTimeout(draftSoonRef.current)
+    draftSoonRef.current = window.setTimeout(() => {
+      draftSoonRef.current = null
+      draftMutated()
+    }, 150)
+  }, [])
+  /** 保存 / 作废这种"一锤子"的时刻：当场发，别让圆点晚灭 */
+  const broadcastDraftNow = useCallback(() => {
+    if (draftSoonRef.current !== null) {
+      window.clearTimeout(draftSoonRef.current)
+      draftSoonRef.current = null
+    }
+    draftMutated()
+  }, [])
+  useEffect(
+    () => () => {
+      if (draftSoonRef.current !== null) window.clearTimeout(draftSoonRef.current)
+    },
+    [],
+  )
   /** 保存后那份用户文件的路径（`presets-local/…`），用来在页面提示"存到哪了" */
   const [saveResult, setSaveResult] = useState<string | null>(null)
   /** 保存成功 ⇒ 问一句"要不要回切片器重切"（理由见返回类型那一格） */
@@ -809,6 +883,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           )
           setSaveResult(done.path)
           /*
+           * 保存 = 提交点：草稿被后端清掉了（契约），所以
+           *   ① 会话缓存**当场作废**（再进来该是一台干净的台；见 `paramSessionCache` 头注）；
+           *   ② 广播一声"草稿变了"—— 预设列表行上那枚橙色圆点**立刻灭**（不能等 150ms 尾随）。
+           */
+          if (sessionKeyRef.current !== null) clearParamSession(sessionKeyRef.current)
+          broadcastDraftNow()
+          /* 存完了 ⇒ 这一份盘上不再有"改过没保存"的草稿（重开不该再自动进编辑模式） */
+          setDraftOnDisk(false)
+          /*
            * ★ **存完要重开草稿**（2026-10-17 真机那两条红字的正解）。
            *
            * 后端契约是「存完丢草稿」（`commit_preset_draft` 成功后 `clear_draft`）——
@@ -846,7 +929,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       )
       return cur
     })
-  }, [])
+  }, [broadcastDraftNow])
 
   /*
    * **改一个值就写进草稿**（字段级 patch，参数页底座 ③，不重生成整份）。
@@ -862,11 +945,19 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const patchDraft = useCallback(
     (key: string, value: string) => {
       void api.patchPresetDraft(key, value).then(
-        () => setDraftError(null),
-        (e: unknown) => setDraftError(errorText(e)),
+        () => {
+          setDraftError(null)
+          /* 草稿真变过了 ⇒ 广播一声，预设列表行上那枚橙点当场亮（见 `broadcastDraftSoon`） */
+          broadcastDraftSoon()
+        },
+        (e: unknown) => {
+          setDraftError(errorText(e))
+          /* 失败也发（`draftState` 头注的规矩：上一次成功写的值还挂着，重读一次没有代价） */
+          broadcastDraftSoon()
+        },
       )
     },
-    [],
+    [broadcastDraftSoon],
   )
 
   /*
@@ -1669,14 +1760,35 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 全部未保存的改动**一次退回已保存值**。`apply` 的既有语义正好接住——
    * 「改成与已保存值相同 = 撤掉草稿」——所以这只是一次普通的批量 apply：
    * 一次撤销能整个回来、草稿 TOML 逐键回写、日志记一条「取消改动」。
+   *
+   * ★ **内存里一项都没有时兜底**（2026-10-19）：那一颗按"内存里那几项"回写，可冷启动
+   *   （关掉软件再打开）时草稿层是空的 —— 盘上那份草稿却可能还是脏的（橙点亮着、
+   *   自动进了编辑模式）。这时回写没有对象，旧版直接 `return`，于是「放弃并退出」按下去
+   *   什么都不发生，草稿也永远丢不掉。没有可回写的项 ⇒ **直接把盘上那份草稿丢掉**，
+   *   那正是这一颗字面上的意思。
    */
   const discardAll = useCallback(() => {
-    if (dirtyKeys.length === 0) return
+    if (dirtyKeys.length === 0) {
+      if (!draftOnDisk) return
+      void api.discardPresetDraft().then(
+        () => {
+          setDraftOnDisk(false)
+          setSavedNote('已放弃这次没保存的改动')
+          broadcastDraftNow()
+        },
+        (e: unknown) => setDraftError(errorText(e)),
+      )
+      return
+    }
     apply(
       '取消改动',
       dirtyKeys.map((key) => ({ key, value: savedValueOf(key) })),
     )
-  }, [apply, dirtyKeys, savedValueOf])
+    /* 回写干净了 ⇒ 盘上那份草稿也不再算脏（重开这一屏不该再自动进编辑模式） */
+    setDraftOnDisk(false)
+    /* 「取消」是"一锤子"：当场广播 —— 全退回已保存值之后那枚橙点该立刻灭 */
+    broadcastDraftNow()
+  }, [apply, broadcastDraftNow, dirtyKeys, draftOnDisk, savedValueOf])
 
   const requestCombo = useCallback(
     (nextMachine: string, nextVersion: string) => {
@@ -1887,6 +1999,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   useEffect(() => {
     if (editingTarget === null) {
       setEditingPreset(null)
+      setDraftOnDisk(false)
       return
     }
     let alive = true
@@ -1901,17 +2014,118 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             origin: d.origin,
             path: d.path,
           })
+          const key = paramTargetKey(d.origin, d.path, d.sourceFileName)
+          sessionKeyRef.current = key
+          /*
+           * ★ **会话缓存**（2026-10-19）：`reused` = 后端按"同一份"认到了上次那份草稿。
+           * 认到了才把"这一屏的内存状态"接回来 —— 草稿层（改了没保存的那几项）、
+           * 撤销 / 重做栈、修改历史。作者：「我没保存的时候关闭它应该是记住着，然后下次
+           * 我再进来的时候，它一样还是保留着那个编辑模式的」。
+           *
+           * 认不到（这趟是新建的 / 已被别处作废，正文链保存会把参数草稿作废）就整条丢掉 ——
+           * 与 `PagePresets` 的 `textHistCache`「对不上就丢掉」同一条纪律。
+           */
+          if (d.reused) {
+            /* 同一个目标已经接回来过了（目录刷新让 effect 重跑）：别拿旧快照盖掉这一屏的改动 */
+            if (draftRestoredRef.current !== key) {
+              const kept = readParamSession(key)
+              if (kept !== null) {
+                draftRestoredRef.current = key
+                setDraft(kept.draft)
+                setPast(kept.past)
+                setFuture(kept.future)
+              } else {
+                /*
+                 * ★ **冷启动接回草稿层**（2026-10-19 作者实测的那条）。
+                 *
+                 * 会话缓存是**进程内存**，关掉软件就没了；盘上那份草稿（`run/app-state.json`）
+                 * 却还在，摘要也如实说脏 —— 行上那枚橙点亮着。这一屏的 `draft` 从 `{}` 起，
+                 * `valueOf` 于是全落回盘上那份文件的旧值：改了什么一个都看不见、
+                 * 底栏写着「没有未保存的改动」（保存灰着）、「放弃并退出」也退不掉
+                 * （那一颗只按内存里那几项回写，内存里一项都没有）。
+                 *
+                 * 后端按参数值把"草稿 vs 来源"的差异算好了（`readPresetDraftChanges`），
+                 * 这里接上就是那次没保存的改动。撤销栈接不回来（那是操作序列，后端不存）——
+                 * 这一层只能恢复"改成了什么"，恢复不了"一步步怎么改的"。
+                 */
+                void api.readPresetDraftChanges().then(
+                  (changes) => {
+                    if (!alive) return
+                    draftRestoredRef.current = key
+                    setDraft(changes)
+                    setPast([])
+                    setFuture([])
+                    /* 接回来的是"已经改过"的状态 ⇒ 让列表那枚橙点按后端摘要再对一次 */
+                    broadcastDraftSoon()
+                  },
+                  (e: unknown) => {
+                    if (alive) setDraftError(errorText(e))
+                  },
+                )
+              }
+            }
+          } else {
+            clearParamSession(key)
+            /*
+             * 这一趟是**新建**草稿：正文就是盘上那份，这一屏的 `draft` 天然对得上
+             * （空表 = 没有未保存的改动）。记下"这个目标不需要接"，免得目录刷新让
+             * effect 重跑时又去后端要一次差异、把这一屏的撤销栈清掉。
+             */
+            draftRestoredRef.current = key
+          }
+          /* 草稿刚被新建 / 替换过 ⇒ 让预设列表那枚橙色圆点重读一眼轻摘要 */
+          broadcastDraftSoon()
+          /*
+           * **重开要不要直接进编辑模式**：`beginPresetEdit` 的 DTO 只有 `reused`，
+           * "脏不脏"在**摘要**那条路（`get_preset_draft_summary` 的 `dirty`）——
+           * 与兄弟链 `PagePresets` 的 `unsaved = draft.reused && draft.dirty` 同一口径
+           * （作者 2026-10-16：「下次打开这个模态框，它里面还是显示编辑模式……」）。
+           */
+          void api.getPresetDraftSummary().then(
+            (s) => {
+              if (!alive) return
+              setDraftOnDisk(
+                d.reused === true &&
+                  s !== null &&
+                  s.dirty &&
+                  s.origin === d.origin &&
+                  (d.origin === 'local'
+                    ? s.path === d.path
+                    : s.sourceFileName === d.sourceFileName),
+              )
+            },
+            () => {
+              if (alive) setDraftOnDisk(false)
+            },
+          )
         },
         (e: unknown) => {
           if (!alive) return
           setEditingPreset(null)
           setDraftError(errorText(e))
+          setDraftOnDisk(false)
         },
       )
     return () => {
       alive = false
     }
-  }, [editingTarget])
+  }, [editingTarget, broadcastDraftSoon])
+
+  /*
+   * **离开时把这一屏的内存状态落进会话缓存**（2026-10-19）。
+   *
+   * "离开"= 这个 hook 卸载（模态框被关掉）。渲染期把当前那几样记进 ref（免去闭包过期），
+   * 卸载那一下按当时的钥匙写进去；再进来时由上面那个 effect 按 `reused` 认回来。
+   */
+  sessionRef.current = { draft, past, future }
+  useEffect(
+    () => () => {
+      const key = sessionKeyRef.current
+      const s = sessionRef.current
+      if (key !== null && s !== null) writeParamSession(key, s)
+    },
+    [],
+  )
 
   /*
    * **我那份文件里真实写着的参数值**（只在编辑对象是「本地预设」时读）。
@@ -2049,6 +2263,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     edit,
     editingPreset,
     draftError,
+    draftOnDisk,
     saveResult,
     resliceAsk,
     /* `useCallback` 包一下：这个数组会被页面塞进依赖，每次渲染都新建会白重渲 */

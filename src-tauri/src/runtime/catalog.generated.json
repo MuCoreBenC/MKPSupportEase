@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "86f181a215256874",
+  "revision": "9b676a2385bf80d8",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -683,6 +683,14 @@
       "type": "model",
       "name": "精密校准模型",
       "path": "models/Precise_Calibration.3mf",
+      "delivery": "download",
+      "calibration": "Precise"
+    },
+    {
+      "id": "precise-calibration-ext",
+      "type": "model",
+      "name": "精密校准模型（加长版）",
+      "path": "models/Precise_Calibration_ext.3mf",
       "delivery": "download",
       "calibration": "Precise"
     },
@@ -2450,7 +2458,7 @@
         "deprecated": false,
         "machineVariants": {
           "A1:FAST": -0.7,
-          "A1:FASTV3.3": 0.1,
+          "A1:FASTV3.3": -0.7,
           "A1:STANDARD": -1.0,
           "A1_MINI:FAST": -0.5,
           "A1_MINI:FASTV3.3": -0.9,
@@ -2571,6 +2579,7 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1:FASTV3.3": 3.7,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -4971,6 +4980,13 @@
       "kind": "model",
       "fileName": "Precise_Calibration.3mf",
       "path": "assets/models/Precise_Calibration.3mf",
+      "machineId": "",
+      "versionId": ""
+    },
+    {
+      "kind": "model",
+      "fileName": "Precise_Calibration_ext.3mf",
+      "path": "assets/models/Precise_Calibration_ext.3mf",
       "machineId": "",
       "versionId": ""
     },
