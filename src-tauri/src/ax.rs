@@ -138,9 +138,19 @@ pub fn slicer_state(pid: i32) -> SlicerState {
 
 /// 切片器进程号（没在跑就是 `None`）。装 AX 通知要用它认进程。
 ///
-/// Windows 上按**进程名**认（`bambu-studio.exe`，Toolhelp 快照，只读）；
-/// 多开时取第一个"有主窗口"的那个 —— 引导卡片只能跟着一扇窗走。
+/// ★★ **先问"我上次处理用的是哪一份"**：BBS 会多开，而"改完参数要回哪一份重切"
+/// 只有**记录**答得准 —— 钩子那一趟把自己的父进程（= 那一趟切片的 BBS）记进了
+/// `archive::Meta::slicer_pid`（见 [`crate::parent`]）。那份还在跑 ⇒ 用它；
+/// 不在了（切片器重启 / 关掉）⇒ 退回平台那套"挑一个在跑的"。
+///
+/// Windows 那套按**进程名**认（`bambu-studio.exe`，Toolhelp 快照，只读），
+/// 多开时取 **z 序最前**的那个（用户眼前那份）。
 pub fn slicer_pid() -> Option<i32> {
+    remembered_slicer_pid().or_else(platform_slicer_pid)
+}
+
+/// 平台那套"挑一个在跑的切片器"（[`slicer_pid`] 的兜底）。
+fn platform_slicer_pid() -> Option<i32> {
     #[cfg(target_os = "macos")]
     {
         mac::running_pid()
@@ -152,6 +162,58 @@ pub fn slicer_pid() -> Option<i32> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         None
+    }
+}
+
+/// **记住的那一份**：最近一次处理用的是哪个切片器（见 [`slicer_pid`]）。
+///
+/// ★ 只在"它**这会儿还是**一个在跑的切片器"时才算数 —— 进程号会失效，
+/// 一个不存在的号比"没有记住"更糟（会把引导指空）。判据交给 [`is_live_slicer`]。
+pub(crate) fn remembered_slicer_pid() -> Option<i32> {
+    let pid = cached_latest_slicer_pid()?;
+    is_live_slicer(pid).then_some(pid)
+}
+
+/// "最近一次处理用的切片器"读一次要扫最近几十份记录 —— **不能每跳都扫**
+/// （引导的回读是 700ms 一次）。缓存一会儿就够了：这个值只在"又切了一刀"时才会变。
+fn cached_latest_slicer_pid() -> Option<i32> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, Option<i32>)>> =
+        std::sync::Mutex::new(None);
+    const TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+    let read = |g: &std::sync::MutexGuard<'_, Option<(std::time::Instant, Option<i32>)>>| {
+        g.as_ref()
+            .filter(|(at, _)| at.elapsed() < TTL)
+            .and_then(|(_, pid)| *pid)
+    };
+    let mut guard = match CACHE.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if let Some(pid) = read(&guard) {
+        return Some(pid);
+    }
+    let now = std::time::Instant::now();
+    let fresh = crate::archive::history_root()
+        .and_then(|root| crate::archive::latest_slicer_pid(&root, is_live_slicer));
+    *guard = Some((now, fresh));
+    fresh
+}
+
+/// 这个进程号**这会儿**是不是一个在跑的切片器（有主窗才算）。
+fn is_live_slicer(pid: i32) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        win::slicer_pids().contains(&(pid as u32)) && win::main_window_of(pid as u32).is_some()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        /* 进程活着 + 读得到它那扇窗（AX 那半） */
+        crate::ax::with_top_window(pid, |_| true).unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
     }
 }
 
@@ -1191,7 +1253,7 @@ mod win {
     /* ---------- 进程 ---------- */
 
     /// 进程名对得上的**全部**切片器进程（见 [`BBS_IMAGES`]，顺序无意义）。
-    fn slicer_pids() -> Vec<u32> {
+    pub(super) fn slicer_pids() -> Vec<u32> {
         let snapshot = unsafe { CreateToolhelp32Snapshot(SNAP_PROCESS, 0) };
         if snapshot == -1 {
             return Vec::new();
@@ -1321,7 +1383,12 @@ mod win {
 
     pub(super) fn locate() -> GuideTargetDto {
         ensure_dpi_aware();
-        let Some(pid) = running_pid() else {
+        /*
+         * ★★ 用**根上那个 `slicer_pid()`**（会先问"记住的那一份"），不是这里的
+         * `running_pid()` —— 摆卡片与后面每一跳的回读必须认**同一份**，
+         * 否则摆出去指 A、下一跳去盯 B，卡片照样会被收掉。
+         */
+        let Some(pid) = super::slicer_pid() else {
             /*
              * ★★ **进程在跑、但一扇看得见的工程窗都没有** —— 多半是**全部最小化了**
              * （作者 2026-10-20 问的就是这一档）。这时**没有东西可指**（板型控件根本
@@ -1417,7 +1484,8 @@ mod win {
     /* ---------- 抬窗（本模块唯一的"写"，写的只是层序） ---------- */
 
     pub(super) fn raise() -> bool {
-        let Some(hwnd) = running_pid().and_then(|pid| main_window_of(pid as u32)) else {
+        /* 与 [`locate`] 同一个理：认**同一份**（先问记住的那一份） */
+        let Some(hwnd) = super::slicer_pid().and_then(|pid| main_window_of(pid as u32)) else {
             return false;
         };
         unsafe {
@@ -1618,6 +1686,19 @@ mod win {
                 z.on_screen, z.covered
             );
             assert!(z.on_screen, "切片器该在屏上（没在跑？最小化了？）");
+        }
+
+        /// **实机诊断（认哪一份）**：把"记住的那一份"与"最前那份"都打出来 ——
+        /// 多开时这两者常常不是同一个，正是这次要解决的问题。
+        #[test]
+        #[ignore = "实机诊断：要本机在跑 Bambu Studio"]
+        fn live_which_slicer_is_picked() {
+            eprintln!(
+                "[live] 记住的那份={:?}  最前那份={:?}  最终挑的={:?}",
+                crate::ax::remembered_slicer_pid(),
+                crate::ax::platform_slicer_pid(),
+                crate::ax::slicer_pid()
+            );
         }
 
         /// **实机验证（状态）**：状态要答得上来 —— 窗口矩形在、可见性不是 Gone
