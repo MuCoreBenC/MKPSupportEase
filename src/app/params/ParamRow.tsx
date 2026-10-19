@@ -38,6 +38,7 @@
  * 判据只有一处：`def.deprecated`（定义通道带出来的原词），落到 `data-dep`。
  */
 
+import { useCallback, useState } from 'react'
 import type { ParamSyncEntry } from '../../api'
 import FieldControl from '../../components/field/FieldControl'
 import Highlight from './highlight'
@@ -157,6 +158,18 @@ export default function ParamRow({
   const factoryText = valueText(def, factoryValue)
 
   /*
+   * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
+   * 恢复的了呀」）：失焦闸把人困在框里之后，那个状态本来只有按 Esc 一条暗路。
+   * 未提交的打字不进草稿（`dirty` 不知道它），所以这一层自己记：
+   * 数字控件报"正在打一个不合法的值"时，chip 照常显示。
+   * 点它 = 草稿有改动就退回已保存值（老路），框里没提交的原文一并清掉
+   * （`resetSignal` 那一拍 —— 宿主"还原"一个没进草稿的值是 noop，`value` 不变）。
+   */
+  const [badTyping, setBadTyping] = useState(false)
+  const [resetNonce, setResetNonce] = useState(0)
+  const onInvalidTyping = useCallback((v: boolean) => setBadTyping(v), [])
+
+  /*
    * 云端更新：三方都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
    *
    *   待处理   云端 18.6 → 19.0   [用新值] [保持本地]
@@ -259,13 +272,18 @@ export default function ParamRow({
               保持原样
             </button>
           )}
-          {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值） */}
-          {dirty && !locked && !readonly && (
+          {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
+              打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
+          {(dirty || badTyping) && !locked && !readonly && (
             <button
               type="button"
               className={s.restore}
               title={`还原为已保存的 ${savedText}（数据包里是 ${factoryText}）`}
-              onClick={() => onRevertToSaved(def.key)}
+              onClick={() => {
+                onRevertToSaved(def.key)
+                setResetNonce((n) => n + 1)
+                setBadTyping(false)
+              }}
             >
               ↩ {savedText}
             </button>
@@ -295,6 +313,8 @@ export default function ParamRow({
                 form="row"
                 disabled={locked}
                 focusOnBoxClick
+                onInvalidTyping={onInvalidTyping}
+                resetSignal={resetNonce}
                 onChange={(next) => onEdit(def.key, next)}
               />
             </span>
@@ -304,6 +324,8 @@ export default function ParamRow({
               raw={value}
               form="row"
               disabled={locked}
+              onInvalidTyping={onInvalidTyping}
+              resetSignal={resetNonce}
               onChange={(next) => onEdit(def.key, next)}
             />
           )}

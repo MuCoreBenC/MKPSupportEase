@@ -44,6 +44,10 @@ interface Props {
   form: FieldForm
   /** 被父项条件关掉、或这一屏只读：看得见、改不动 */
   disabled?: boolean
+  /** 数字控件：打字不合法且正在编辑（透传 `NumberField`，宿主用它显示「还原」出口） */
+  onInvalidTyping?: (invalid: boolean) => void
+  /** 数字控件：宿主点了「还原」的那一拍（透传 `NumberField`，见它的 Props 注） */
+  resetSignal?: number
   /** 数字控件：点框内任何一处都进编辑态（透传给 `NumberField`，见它那里的说明） */
   focusOnBoxClick?: boolean
   /**
@@ -64,6 +68,8 @@ export default function FieldControl({
   onChange,
   form,
   disabled = false,
+  onInvalidTyping,
+  resetSignal,
   focusOnBoxClick = false,
   renderBlock,
 }: Props): ReactNode {
@@ -130,6 +136,8 @@ export default function FieldControl({
           unit={cell ? undefined : field.unit}
           disabled={disabled}
           invalid={!isNum(raw)}
+          onInvalidTyping={onInvalidTyping}
+          resetSignal={resetSignal}
           size={cell ? 'sm' : 'md'}
           focusOnBoxClick={focusOnBoxClick}
           onChange={(n) => onChange(rawOfNum(n, field.step))}

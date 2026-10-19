@@ -52,6 +52,20 @@ interface Props {
   disabled?: boolean
   /** 宿主认定这个值不合法（例如原文根本不是数字）—— 与本地的越界判定一起标红 */
   invalid?: boolean
+  /**
+   * **打字处于不合法状态**（空 / 不是数 / 超范围）且正在编辑时回调。
+   *
+   * 失焦闸把人困在框里之后（2026-10-20），宿主需要给一个看得见的出口 ——
+   * 参数行拿它在**未提交**的状态下也显示「↩ 还原」chip（否则那个状态只有
+   * 按 Esc 一条暗路）。回到合法值 / 失焦时回调 `false`。
+   */
+  onInvalidTyping?: (invalid: boolean) => void
+  /**
+   * 宿主点了「还原」的那一拍（数字一变就重置显示）。为什么需要它：
+   * 未提交的打字不经过宿主的值模型 —— 宿主"还原"一个没进草稿的值是 noop，
+   * `value` prop 不会变，框里的原文就得靠这一拍自己清。
+   */
+  resetSignal?: number
   /** cell 档用 sm：矮一点、窄一点 */
   size?: 'sm' | 'md'
   /**
@@ -83,6 +97,8 @@ export default function NumberField({
   decimals,
   disabled = false,
   invalid = false,
+  onInvalidTyping,
+  resetSignal,
   size = 'md',
   focusOnBoxClick = false,
   onChange,
@@ -282,6 +298,19 @@ export default function NumberField({
     return false
   }
 
+  /* 打字不合法且正在编辑 —— 宿主的「还原」出口按它显示（见 Props.onInvalidTyping） */
+  const invalidTyping = hint !== null && fieldFocused
+  useEffect(() => {
+    onInvalidTyping?.(invalidTyping)
+  }, [invalidTyping, onInvalidTyping])
+
+  /* 宿主点「还原」的那一拍：把框里没提交的原文清掉，回到外部值（见 Props.resetSignal） */
+  useEffect(() => {
+    if (resetSignal === undefined) return
+    setText(fmt(value))
+    numRef.current = value
+  }, [fmt, resetSignal, value])
+
   /*
    * **点框外先落账**（2026-10-20）：底栏的「保存」在"没有改动"时是 disabled 的 ——
    * 点它既不抢焦点、也不触发 click，输入框永远收不到 blur，打进去的整数就一直
@@ -416,8 +445,16 @@ export default function NumberField({
           if (e.key === 'Enter') {
             commitTyped()
           } else if (e.key === 'Escape') {
-            /* 还原：回到外部值，什么都不提交 */
-            setText(fmt(value))
+            /*
+             * Esc 分两层（2026-10-20 作者：「别用 Esc 了，Esc 是关闭模态框的」）：
+             * 框里有没落账的原文 → 这一次**只**退回外部值，并且 stopPropagation
+             * 把这一下吃掉（不让它冒泡去关模态框 / 关弹层）；已经和外面一致了 →
+             * 什么都不改，交给外层（第二下 Esc 才关）—— 一层 Esc 一件事。
+             */
+            const shown = fmt(value)
+            if (text === shown) return
+            e.stopPropagation()
+            setText(shown)
             numRef.current = value
           } else if (e.key === 'ArrowUp') {
             e.preventDefault()
