@@ -25,9 +25,12 @@
       React 的 `createRoot(...).render()` 第一次提交会清空容器里的东西，骨架随真实界面
       一起退场，不需要任何卸载代码。
 
+      版式照**首页**来（2026-10-19 第二版）：左边机型信息与四行参数、中间产品图、
+      右边那具抽屉、顶栏页签 + 窗口按钮。灰条就是灰条，不写任何假数据/假文案 ——
+      与 `app/home/Skeleton` 同一条规矩。
+
       样式全内联、颜色只跟随**系统**深浅：这一屏比 `tokens.css` 到得早，读不到用户
       在应用里选的那一档（"深色主题 + 浅色系统"时骨架会浅一档，属于可接受的过渡）。
-      不写任何假数据/假文案：灰条就是灰条，与 `app/home/Skeleton` 同一条规矩。
     -->
     <style>
       html,
@@ -37,22 +40,26 @@
         margin: 0;
       }
 
-      html {
+      html,
+      body {
         background: linear-gradient(135deg, #f7f9fa 0%, #eceff1 100%);
       }
 
       body {
         font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
           'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;
-        background: linear-gradient(135deg, #f7f9fa 0%, #eceff1 100%);
         overflow: hidden;
       }
 
       #boot {
-        --boot-surface: #fbfcfd;
+        --boot-card: #fff;
+        --boot-figure: rgba(16, 24, 32, 0.04);
         --boot-line: rgba(16, 24, 32, 0.09);
-        --boot-line-strong: rgba(16, 24, 32, 0.16);
+        --boot-line-strong: rgba(16, 24, 32, 0.17);
+        --boot-divider: rgba(16, 24, 32, 0.06);
         --boot-text: #1a2128;
+        --boot-icon: rgba(16, 24, 32, 0.55);
+        --boot-accent: #2f9e6e;
 
         height: 100%;
         display: flex;
@@ -61,14 +68,33 @@
         overflow: hidden;
       }
 
+      /* ---- 通用的条与胶囊 ----
+       * 放最前面：后面那些具体类（机型条、chip 的 999px 圆角）要能覆盖这里的默认值。
+       */
+      #boot .boot-pill {
+        display: block;
+        border-radius: 999px;
+        background: var(--boot-line);
+      }
+
+      #boot .boot-pill.is-dark {
+        background: var(--boot-line-strong);
+      }
+
+      #boot .boot-line {
+        display: block;
+        border-radius: 4px;
+        background: var(--boot-line);
+      }
+
       /* ---- 顶栏：与 TopTabs 同高（--titlebar-h = 38px）---- */
       #boot .boot-bar {
         height: 38px;
         flex: none;
         display: flex;
         align-items: center;
-        gap: 18px;
-        padding: 0 16px;
+        /* 右边不留白：窗口键要贴到窗沿（与 TopTabs 的 `.controls` 一样） */
+        padding: 0 0 0 16px;
         border-bottom: 1px solid var(--boot-line);
         box-sizing: border-box;
       }
@@ -86,105 +112,240 @@
       #boot .boot-tabs {
         display: flex;
         align-items: center;
-        gap: 16px;
-        margin-left: 8px;
+        gap: 17px;
+        margin-left: 28px;
+        height: 100%;
       }
 
       #boot .boot-tab {
+        position: relative;
         display: block;
-        width: 30px;
+        width: 28px;
         height: 10px;
         border-radius: 3px;
         background: var(--boot-line);
+        flex: none;
       }
 
-      /* 当前页那一枚（首页）略实一点，页签条看起来才有"当前选中" */
+      /* 当前页那一枚（首页）：条子实一点 + 栏底一条品牌色短线 */
       #boot .boot-tab.is-on {
-        width: 38px;
+        width: 32px;
         background: var(--boot-line-strong);
       }
 
-      /* ---- 正文：一叠卡的占位 ---- */
+      #boot .boot-tab.is-on::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: 22px;
+        height: 2px;
+        border-radius: 1px;
+        background: var(--boot-accent);
+      }
+
+      /*
+       * 右侧窗口按钮：**照 TopTabs 的 `.controls` 画**（46 宽、撑满标题栏、按钮之间
+       * 无缝、负 margin 盖住底线），图标照 `components/Icon.tsx` 里那三条 path 与
+       * 11px / stroke 1.5 的参数 —— 这样骨架上的三个键与真实窗口按键位置一样、
+       * 形状一样（横线 / 方框 / 叉），不会在切换时"跳一下"。
+       */
+      #boot .boot-wins {
+        margin-left: auto;
+        align-self: stretch;
+        display: flex;
+        margin-bottom: -1px;
+      }
+
+      #boot .boot-win {
+        width: 46px;
+        height: 100%;
+        display: grid;
+        place-items: center;
+        color: var(--boot-icon);
+      }
+
+      #boot .boot-win svg {
+        display: block;
+      }
+
+      /* ---- 正文：左信息 / 中产品图 / 右抽屉 ---- */
       #boot .boot-body {
         flex: 1;
         min-height: 0;
         display: flex;
         align-items: stretch;
-        justify-content: center;
-        padding: clamp(16px, 3vh, 28px) clamp(16px, 4vw, 44px);
+        padding: 0 0 14px;
         box-sizing: border-box;
       }
 
-      #boot .boot-card {
-        flex: 1;
-        max-width: 1040px;
-        display: grid;
-        grid-template-columns: minmax(180px, 240px) 1fr;
-        gap: 20px;
-        padding: 20px;
-        border-radius: 16px;
-        background: var(--boot-surface);
-        box-shadow: 0 1px 2px rgba(16, 24, 32, 0.05);
+      #boot .boot-left {
+        width: clamp(270px, 38vw, 420px);
+        flex: none;
+        display: flex;
+        flex-direction: column;
+        /* 顶部留白跟着窗口高度走：A1 那行落在上方约五分之一处（照真首页的呼吸） */
+        padding: clamp(64px, 18vh, 132px) 26px 22px 34px;
         box-sizing: border-box;
       }
 
-      /* 左列 = 机型 / 版本那一栏 */
-      #boot .boot-side {
-        display: flex;
-        flex-direction: column;
-        gap: 12px;
-        padding-right: 16px;
-        border-right: 1px solid var(--boot-line);
-      }
-
-      /* 右列 = 向导卡：标题 + 内容块 + 底部两颗按钮 */
-      #boot .boot-main {
-        display: flex;
-        flex-direction: column;
-        gap: 14px;
-        min-width: 0;
-      }
-
-      #boot .boot-plate {
-        flex: 1;
-        min-height: 120px;
-        border-radius: 12px;
-        background: var(--boot-line);
-        opacity: 0.55;
-      }
-
-      #boot .boot-foot {
-        display: flex;
-        gap: 10px;
-        justify-content: flex-end;
-      }
-
-      #boot .boot-pill {
-        width: 82px;
-        height: 28px;
-        border-radius: 999px;
-        background: var(--boot-line);
-      }
-
-      #boot .boot-pill.is-primary {
+      /* 机型名（截图里那枚 `A1`）：粗一号，占位比正文条高 */
+      #boot .boot-model {
+        width: 56px;
+        height: 26px;
+        border-radius: 3px;
         background: var(--boot-line-strong);
       }
 
-      #boot .boot-line {
+      #boot .boot-picker {
+        width: 124px;
+        height: 30px;
+        margin-top: 18px;
+      }
+
+      #boot .boot-file {
+        width: 98px;
+        height: 8px;
+        margin-top: 13px;
+      }
+
+      #boot .boot-action {
+        width: 152px;
+        height: 34px;
+        margin-top: 28px;
+      }
+
+      /* 四行参数：左右各一条，行间一条发丝线 */
+      #boot .boot-params {
+        margin-top: 36px;
+        display: flex;
+        flex-direction: column;
+      }
+
+      #boot .boot-param {
+        height: 39px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--boot-divider);
+      }
+
+      #boot .boot-param i {
         display: block;
-        height: 10px;
-        border-radius: 4px;
+        height: 8px;
+        border-radius: 3px;
         background: var(--boot-line);
       }
 
-      #boot .boot-line.h14 {
-        height: 14px;
+      #boot .boot-param i:first-child {
+        width: 54px;
       }
 
-      #boot .boot-line.w40 { width: 40%; }
-      #boot .boot-line.w55 { width: 55%; }
-      #boot .boot-line.w70 { width: 70%; }
-      #boot .boot-line.w86 { width: 86%; }
+      #boot .boot-param i:last-child {
+        width: 82px;
+        height: 8px;
+      }
+
+      /* 左下角「更换机型」 */
+      #boot .boot-switch {
+        width: 96px;
+        height: 30px;
+        margin-top: auto;
+      }
+
+      /* 中间产品图：很淡的一整块，不描边，免得看起来像"坏掉的卡片" */
+      #boot .boot-stage {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px 14px;
+        box-sizing: border-box;
+      }
+
+      #boot .boot-printer {
+        width: min(92%, 380px);
+        height: min(84%, 480px);
+        border-radius: 26px;
+        background: var(--boot-figure);
+      }
+
+      /* 右侧抽屉：**故意露出窗边** —— 照真首页，它比窗口宽，右半边在窗外 */
+      #boot .boot-drawer {
+        width: clamp(260px, 30vw, 320px);
+        flex: none;
+        margin: 28px -13vw 0 0;
+        padding: 24px 20px 18px;
+        display: flex;
+        flex-direction: column;
+        gap: 28px;
+        border-radius: 14px;
+        background: var(--boot-card);
+        box-shadow: 0 1px 2px rgba(16, 24, 32, 0.04), 0 14px 34px rgba(16, 24, 32, 0.06);
+        box-sizing: border-box;
+      }
+
+      #boot .boot-group {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+
+      #boot .boot-group-title {
+        width: 40px;
+        height: 8px;
+      }
+
+      #boot .boot-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      #boot .boot-chip {
+        display: block;
+        height: 27px;
+        border-radius: 999px;
+      }
+
+      #boot .boot-chip.w74 { width: 74px; }
+      #boot .boot-chip.w92 { width: 92px; }
+      #boot .boot-chip.w126 { width: 126px; }
+      #boot .boot-chip.w104 { width: 104px; }
+
+      /* 预设文件 / 我的副本：一个点 + 一条 */
+      #boot .boot-file-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      #boot .boot-file-row::before {
+        content: '';
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--boot-line-strong);
+        flex: none;
+      }
+
+      #boot .boot-file-row i {
+        width: 72%;
+        height: 8px;
+      }
+
+      #boot .boot-drawer-foot {
+        margin-top: auto;
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+      }
+
+      #boot .boot-drawer-foot .boot-pill {
+        width: 62px;
+        height: 28px;
+      }
 
       /* 呼吸：与两处骨架屏同一个节奏（1.4s 起落），别闪 —— 闪烁比静止更累眼 */
       @keyframes boot-pulse {
@@ -193,33 +354,36 @@
         50% { opacity: 0.45; }
       }
 
+      /* 产品图那块面积太大、窗口按钮又不该动 —— 只让条子和胶囊呼吸 */
       #boot .boot-tab,
       #boot .boot-line,
-      #boot .boot-plate,
-      #boot .boot-pill {
+      #boot .boot-pill,
+      #boot .boot-param i,
+      #boot .boot-file-row i,
+      #boot .boot-model {
         animation: boot-pulse 1.4s ease-in-out infinite;
       }
 
       @media (prefers-reduced-motion: reduce) {
         #boot .boot-tab,
         #boot .boot-line,
-        #boot .boot-plate,
-        #boot .boot-pill {
+        #boot .boot-pill,
+        #boot .boot-param i,
+        #boot .boot-file-row i,
+        #boot .boot-model {
           animation: none;
           opacity: 0.7;
         }
       }
 
-      @media (max-width: 640px) {
-        #boot .boot-card {
-          grid-template-columns: 1fr;
+      @media (max-width: 780px) {
+        #boot .boot-drawer {
+          display: none;
         }
 
-        #boot .boot-side {
-          border-right: 0;
-          padding-right: 0;
-          border-bottom: 1px solid var(--boot-line);
-          padding-bottom: 14px;
+        #boot .boot-left {
+          width: clamp(220px, 42vw, 320px);
+          padding-left: 24px;
         }
       }
 
@@ -235,13 +399,17 @@
         }
 
         #boot {
-          --boot-surface: #232323;
+          --boot-card: #232323;
+          --boot-figure: rgba(255, 255, 255, 0.045);
           --boot-line: rgba(255, 255, 255, 0.09);
           --boot-line-strong: rgba(255, 255, 255, 0.16);
+          --boot-divider: rgba(255, 255, 255, 0.06);
           --boot-text: #e8eaec;
+          --boot-icon: rgba(255, 255, 255, 0.62);
+          --boot-accent: #3fbf8f;
         }
 
-        #boot .boot-card {
+        #boot .boot-drawer {
           box-shadow: none;
         }
       }
@@ -260,23 +428,77 @@
             <i class="boot-tab"></i>
             <i class="boot-tab"></i>
           </span>
+          <span class="boot-wins" aria-hidden="true">
+            <span class="boot-win">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M5 12h14"></path>
+              </svg>
+            </span>
+            <span class="boot-win">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 6h12v12H6z"></path>
+              </svg>
+            </span>
+            <span class="boot-win">
+              <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 6l12 12M18 6 6 18"></path>
+              </svg>
+            </span>
+          </span>
         </div>
+
         <div class="boot-body" aria-hidden="true">
-          <div class="boot-card">
-            <div class="boot-side">
-              <i class="boot-line w70 h14"></i>
-              <i class="boot-line w86"></i>
-              <i class="boot-line w86"></i>
-              <i class="boot-line w55"></i>
+          <!-- 左：机型 / 版本 / 四行参数 / 更换机型 -->
+          <div class="boot-left">
+            <i class="boot-line boot-model"></i>
+            <i class="boot-pill boot-picker"></i>
+            <i class="boot-line boot-file"></i>
+            <i class="boot-pill boot-action"></i>
+            <div class="boot-params">
+              <div class="boot-param"><i></i><i></i></div>
+              <div class="boot-param"><i></i><i></i></div>
+              <div class="boot-param"><i></i><i></i></div>
+              <div class="boot-param"><i></i><i></i></div>
             </div>
-            <div class="boot-main">
-              <i class="boot-line w40 h14"></i>
-              <i class="boot-line w70"></i>
-              <div class="boot-plate"></div>
-              <div class="boot-foot">
-                <i class="boot-pill"></i>
-                <i class="boot-pill is-primary"></i>
+            <i class="boot-pill boot-switch"></i>
+          </div>
+
+          <!-- 中：产品图占位 -->
+          <div class="boot-stage">
+            <div class="boot-printer"></div>
+          </div>
+
+          <!-- 右：抽屉（品牌 / 机型 / 打印件版本 / 预设文件 / 我的副本） -->
+          <div class="boot-drawer">
+            <div class="boot-group">
+              <i class="boot-line boot-group-title"></i>
+              <div class="boot-chips"><i class="boot-line boot-chip w126"></i></div>
+            </div>
+            <div class="boot-group">
+              <i class="boot-line boot-group-title"></i>
+              <div class="boot-chips">
+                <i class="boot-line boot-chip w74"></i>
+                <i class="boot-line boot-chip w104"></i>
               </div>
+            </div>
+            <div class="boot-group">
+              <i class="boot-line boot-group-title"></i>
+              <div class="boot-chips">
+                <i class="boot-line boot-chip w92"></i>
+                <i class="boot-line boot-chip w74"></i>
+              </div>
+            </div>
+            <div class="boot-group">
+              <i class="boot-line boot-group-title"></i>
+              <div class="boot-file-row"><i class="boot-line"></i></div>
+            </div>
+            <div class="boot-group">
+              <i class="boot-line boot-group-title"></i>
+              <div class="boot-file-row"><i class="boot-line"></i></div>
+            </div>
+            <div class="boot-drawer-foot">
+              <i class="boot-pill"></i>
+              <i class="boot-pill is-dark"></i>
             </div>
           </div>
         </div>
