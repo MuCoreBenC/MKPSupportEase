@@ -485,6 +485,56 @@ macOS 还是浅色时，卡片是白的。
 A06/A07 两刀还收过各页覆盖）。**唯一没有深色的是工作台**（`src/workbench/`：独立入口
 + 自己两份只有浅色的 token）。
 
+### 8.6 ★★ Windows 落地：**能做，而且比 macOS 还省**（2026-10-19 实测）
+
+作者：「接下来做这一个，看看 Windows 的能不能做」。结论：**能**——窗口层三件事
+（定位 / 层序 / 最小化）Win32 全有公开只读 API，**不需要任何授权**（macOS 的
+辅助功能那一关在 Windows 上不存在）；「板子类型」控件**也找得到**，而且比 macOS
+那边干净：**它是真实子窗口，`EnumChildWindows` 直接枚举到，连 UIA / COM 都不用**。
+
+实测环境：BBS `02.08.02.60` @ Windows，**125% 缩放**（DPI 120），主窗 class
+**`wxWindowNR`**（wxWidgets），标题 `* <工程名> - BambuStudio`。
+
+| 能力 | 结果 | 证据 |
+| --- | --- | --- |
+| 按 pid 找主窗 | ✅ | `EnumWindows` + `GetWindowThreadProcessId`（探针 `scripts/probes/uia-probe.ps1`） |
+| 读窗口矩形 / 可见 / 最小化 | ✅ | `GetWindowRect` / `IsWindowVisible` / `IsIconic`（★ 本进程要先 `SetProcessDPIAware`，否则坐标被虚拟化） |
+| 找到「板子类型」缩略图 | ✅ | 两个 **60×60**（物理）的子窗口，class **`Static`**，相对窗口 y = **150 / 154**（`scripts/probes/childwin-probe.ps1`） |
+| 读子窗屏幕坐标 | ✅ | `GetWindowRect` 对子窗直接给屏幕坐标 |
+| 层序 / 被谁盖住 | ✅ | `EnumWindows` 本来就按 **z 序从前往后**返回，判据与 §8.5 的 CG 版逐条对应（见 `zorder.rs` 的 `mod win` 头注释） |
+| 抬窗 | ⚠️ 有限制 | `SetForegroundWindow` 有前台限制，失败时照实 warn、不硬来（与 macOS「抬不动就静静过去」同口径） |
+
+**判据换算（别用 macOS 那组数）**：DPI 120 ÷ 96 = 1.25，物理 60×60 / y 150~154
+折算成逻辑 = **48×48 / y 120~123** —— 与 macOS（50×50 / y 115~117）同族但数值不同。
+⇒ Windows 的挑选判据单独一套（`ax.rs` 的 `mod win`）：**class `Static` + 正方形 +
+边长 48±6 + y ∈ [100,145]，命中取 x 较大**。多出的 class 过滤是必须的：窗口里还有
+class `wxWindowNR` 的方形子窗口（50×50 @ y=510、63×63 @ y=374），不过滤必指错。
+
+**踩到的坑（实机验证抓出来的，下次别再踩）**：
+1. ★★ **同 pid 下有别的"有标题"的顶层窗**：实测一扇 **20×20** 的小窗在 z 序里排在
+   主框前面 —— 主窗挑选不能"z 序第一个有标题的就当"，要**可见 + class `wxWindowNR`
+   + 面积最大**（见 `ax.rs` `win::main_window_of` 的注释）。
+2. ★ **DPI 感知是进程级的**：给用户的 exe 靠 tauri 清单没问题；cargo test 那种裸进程
+   默认不感知，`GetWindowRect` 会给虚拟化坐标 ⇒ `ax.rs` / `zorder.rs` 的入口都有
+   `SetProcessDPIAware` 的 `Once` 兜底。
+3. **多开**：BBS 会起多个同名进程（实测三份）——认进程要挑"真有主窗"的那个；
+   层序判定里**别的实例（另一个 pid）照算"盖住"**，那是真实处境。
+
+**实现落点**（与 macOS 侧逐层对称，前端零改动）：
+- `ax.rs` `mod win`：`slicer_pid`（Toolhelp 快照按进程名 `bambu-studio.exe` 认）、
+  `locate` / `state` / `raise`；
+- `zorder.rs` `mod win`：`EnumWindows` 的 z 序算遮挡比（同一个 `COVERED_ENOUGH`，
+  提成了 `zorder::COVERED_ENOUGH` 公共常量）；
+- `win_watch.rs`（新）：跟随信号 = **700ms 一次本地回读**，没有 `SetWinEventHook` ——
+  `decide` 的闸门本来每跳只比一个本地键（`EnumWindows` 全在本地，不打给切片器进程），
+  换推送只快几百毫秒，不值多养一条消息泵线程（省电口径是作者 2026-10-15 定的）；
+- `ipc/guide.rs`：四处 `cfg` 分派放开 Windows；
+- 实机验证：`cargo test -- --ignored`（`ax::win::tests::live_*`，本机跑着 BBS 才有意义）。
+
+**还没在真界面里点过一遍**（Rust 侧单测与实机探针都绿了，但「查看引导 → 卡片贴着
+板型控件」这条端到端要开着 tauri 应用人工看一眼 —— 透明窗口在 Windows 上的表现
+（阴影 / 点击穿透）是 §8.5.3 那四层坑的 Windows 版，没有实测过）。
+
 ## 9. 待办 / 未查证
 
 - `Plater::update(flags)` 带 `FORCE_BACKGROUND_PROCESSING_UPDATE` 的触发源未逐一排查

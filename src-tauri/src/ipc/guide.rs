@@ -40,6 +40,9 @@ use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindowBuilder};
 
 use crate::ax::{self, GuideTargetDto, RectDto, SlicerVisibility};
 use crate::error::AppError;
+/* "被盖住多少才算看不见"是全平台一个数，真值住在 [`crate::zorder`]（Windows 的
+`ax::win::state` 也比它），这里只引用 —— 改一处就够。 */
+use crate::zorder::COVERED_ENOUGH;
 
 use super::traced;
 
@@ -536,7 +539,16 @@ fn ensure_watcher(app: &AppHandle) {
         tracing::info!("AX 通知没挂满 —— 重挂一次");
         crate::ax_watch::start(app, sync);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        /* Windows 那边没有"挂满没挂满"：watcher 活着就够，死了按同一个节流补装 */
+        if crate::win_watch::is_complete() || !remount_due() {
+            return;
+        }
+        tracing::info!("跟随回读没在跑 —— 补装一次");
+        crate::win_watch::start(app, sync);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
     }
@@ -650,12 +662,6 @@ fn changed(z: Option<crate::zorder::SlicerWindow>, ax: Option<ax::SlicerState>) 
     true
 }
 
-/// 被别的 App 盖住多少才算"看不见了"（见 [`crate::zorder`]）。
-///
-/// ★ 为什么不是"压到一点就算"：一个小浮窗、一条通知压到角上，那块板型控件照样看得见
-/// —— 那种时候把卡片收掉反而莫名其妙。两成是个保守的界。
-const COVERED_ENOUGH: f64 = 0.2;
-
 /// 卡片是**什么时候**摆出去的（`None` = 从没摆过）。
 static SHOWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
 
@@ -731,7 +737,12 @@ fn mount_watcher(app: &AppHandle) {
         真结果走日志与 `is_complete()` —— 见 `ax_watch` 模块头 */
         crate::ax_watch::start(app, sync);
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        /* Windows：装的是细定时回读（无推送），见 `win_watch` 模块头 */
+        crate::win_watch::start(app, sync);
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
     }
@@ -741,7 +752,9 @@ fn mount_watcher(app: &AppHandle) {
 fn unmount_watcher(app: &AppHandle) {
     #[cfg(target_os = "macos")]
     crate::ax_watch::stop(app);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    crate::win_watch::stop(app);
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = app;
     }
@@ -749,13 +762,17 @@ fn unmount_watcher(app: &AppHandle) {
 
 /// 正在盯着哪个切片器进程（给 [`sync`] 用）。
 ///
-/// ★ 别处恒 `None`：没有 AX 这一层就没有"跟随"可言，`sync` 会直接返回。
+/// ★ 别处恒 `None`：没有取数层就没有"跟随"可言，`sync` 会直接返回。
 fn watched_pid() -> Option<i32> {
     #[cfg(target_os = "macos")]
     {
         crate::ax_watch::watched_pid()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        crate::win_watch::watched_pid()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         None
     }
@@ -831,8 +848,24 @@ fn raise_slicer_window() {
             );
         }
     }
-    #[cfg(not(target_os = "macos"))]
-    { /* 别处本来就没有 AX 这一层（`locate` 会回"指不了"），无从抬 */ }
+    #[cfg(target_os = "windows")]
+    {
+        /*
+         * Windows 没有窗 / App 那层区分，`raise` 与 `activate` 是同一件事
+         * （还原 + `SetForegroundWindow`）。★ 系统对 `SetForegroundWindow` 有限制
+         * （前台进程才准换前台），失败时**照实 warn**、不硬来 —— 与 macOS 同一条
+         * "抬不动就静静过去"的口径，卡片仍会摆出去。
+         */
+        let raised = crate::ax::raise_slicer();
+        let activated = crate::ax::activate_slicer();
+        if !raised && !activated {
+            tracing::warn!(
+                "抬不动切片器（系统不准换前台？）—— 卡片仍会摆出去，但可能被我们自己的窗口压住"
+            );
+        }
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    { /* 别处本来就没有这一层（`locate` 会回"指不了"），无从抬 */ }
 }
 
 /// 屏幕有多宽（逻辑点）。拿不到时给一个常见值 —— 这只用来决定卡片往左还是往右放，

@@ -42,6 +42,15 @@
 //!
 //! macOS 上读别的进程的控件要**辅助功能授权**。没授权时这里**照实报**
 //! （`ready: false` + 一句人话），**不编坐标** —— 指错位置比不指更糟。
+//!
+//! # 平台
+//!
+//! - **macOS**：Accessibility（`mod mac`），如上；
+//! - **Windows**（2026-10-19，`mod win`）：不需要任何授权 —— 主窗按 pid
+//!   `EnumWindows` 找，「板子类型」缩略图是**真实子窗口**（class `Static`），
+//!   `EnumChildWindows` 直接枚举到，判据是 Windows 自己实测的一组数
+//!   （48×48 @ y=120/123 逻辑像素，与 macOS 的 50×50 @ y=115/117 同族不同值）；
+//! - 别的平台没有这一层：照实说"这一台上没有"，不给假坐标。
 
 use serde::Serialize;
 
@@ -112,7 +121,11 @@ pub fn slicer_state(pid: i32) -> SlicerState {
     {
         mac::state(pid)
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        win::state(pid)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         /* 别处没有这一层：照实说"看不见"，让卡片收起来，而不是假装它在最前 */
         let _ = pid;
@@ -124,12 +137,19 @@ pub fn slicer_state(pid: i32) -> SlicerState {
 }
 
 /// 切片器进程号（没在跑就是 `None`）。装 AX 通知要用它认进程。
+///
+/// Windows 上按**进程名**认（`bambu-studio.exe`，Toolhelp 快照，只读）；
+/// 多开时取第一个"有主窗口"的那个 —— 引导卡片只能跟着一扇窗走。
 pub fn slicer_pid() -> Option<i32> {
     #[cfg(target_os = "macos")]
     {
         mac::running_pid()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        win::running_pid()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         None
     }
@@ -185,7 +205,11 @@ pub fn activate_slicer() -> bool {
     {
         mac::activate()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        win::activate()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         false
     }
@@ -209,21 +233,29 @@ pub fn raise_slicer() -> bool {
     {
         mac::raise()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        win::raise()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         /* 别处没有 AX：抬不动就照实说，卡片仍会摆出去（用户自己切一下窗口） */
         false
     }
 }
 
-/* ---------- 挑选规则（纯函数，两侧共用，判据落在测试里） ---------- */
+/* ---------- 挑选规则（macOS 的判据；Windows 那组在 `mod win` 里另有一套） ---------- */
 
 /// 缩略图的边长：板型与耗材色块都是 50×50 这一族。
+#[cfg(target_os = "macos")]
 const THUMB_SIDE: f64 = 50.0;
 /// 缩略图相对窗口顶部的 y 落在这一段内（实测 115 / 117，留一点余量）。
+#[cfg(target_os = "macos")]
 const THUMB_Y_MIN: f64 = 100.0;
+#[cfg(target_os = "macos")]
 const THUMB_Y_MAX: f64 = 140.0;
 /// 边长与这个数差多少还算"是 50"（坐标是浮点，别用严格相等）。
+#[cfg(target_os = "macos")]
 const SIDE_EPS: f64 = 1.0;
 
 /// 从窗口的直系子元素里挑出「板子类型」那一个。
@@ -232,6 +264,8 @@ const SIDE_EPS: f64 = 1.0;
 /// 相对位置（稳定），而给回界面的是绝对坐标（能直接画）。
 ///
 /// 命中多个时取 **x 较大**的那个。
+/// ★ 只有 macOS 的挑选用它（Windows 的判据不同，见 `mod win` 的 `pick_bed_type_win`）。
+#[cfg(target_os = "macos")]
 fn pick_bed_type(candidates: &[(RectDto, f64)]) -> Option<f64> {
     let mut best: Option<f64> = None;
     for (r, abs_x) in candidates {
@@ -254,15 +288,19 @@ pub fn locate_bed_type() -> GuideTargetDto {
     {
         mac::locate()
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        win::locate()
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         GuideTargetDto {
             ready: false,
             window: None,
             target: None,
-            /* 屏幕引导走的是 macOS 的 Accessibility；别处没有这一层，
-            照实说"这一台上没有"，而不是给一组假的坐标 */
-            reason: Some("屏幕引导只在 macOS 上有（要读切片器的窗口坐标）".to_owned()),
+            /* 屏幕引导走的是 macOS 的 Accessibility 与 Windows 的 Win32 窗口枚举；
+            别处没有这一层，照实说"这一台上没有"，而不是给一组假的坐标 */
+            reason: Some("屏幕引导只在 macOS / Windows 上有（要读切片器的窗口坐标）".to_owned()),
         }
     }
 }
@@ -805,7 +843,9 @@ mod mac {
     }
 }
 
-#[cfg(test)]
+/* 这些测试钉的是 **macOS** 的判据（50×50 / y 落段）；Windows 那组的判据测试在
+`mod win::tests` 里（48×48 / class 过滤），两边判据不同，别混。 */
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
@@ -855,5 +895,558 @@ mod tests {
     #[test]
     fn nothing_found_is_none_not_a_guess() {
         assert_eq!(pick_bed_type(&[]), None);
+    }
+}
+
+/*
+ * ★★★ **Windows 那一半**（2026-10-19）：`#[cfg(windows)]`，与 `mod mac` 完全对称。
+ *
+ * 可行性是**实测出来的**（探针 `scripts/probes/uia-probe.ps1` / `childwin-probe.ps1`，
+ * 2026-10-19，BBS `02.08.02.60` @ Windows 125% 缩放）：
+ *
+ * - 主窗口 class `wxWindowNR`（wxWidgets），`EnumWindows` 按 pid 就能找到，
+ *   **不需要任何权限**（macOS 的辅助功能授权那一关在 Windows 上不存在）；
+ * - 「板子类型」缩略图是**真实子窗口**（class `Static`），`EnumChildWindows` 直接枚举到，
+ *   连 UIA / COM 都不用引 —— 实测两个 60×60（物理像素），相对窗口 y = 150 / 154；
+ * - 折算逻辑像素（DPI 120 ÷ 96 = 1.25）：**48×48，y = 120 / 123** ——
+ *   与 macOS（50×50，y = 115 / 117）同族但数值不同 ⇒ 判据**单独定常数**（见下），
+ *   不复用 `pick_bed_type`（那边 50±1 会把 48 挡在门外）；
+ * - 窗口里还有**别的**方形子窗口（class `wxWindowNR` 的 50×50 / 63×63），
+ *   所以 Windows 判据比 macOS 多一条：**class 必须是 `Static`**。
+ */
+#[cfg(target_os = "windows")]
+mod win {
+    use super::{GuideTargetDto, RectDto, SlicerState, SlicerVisibility};
+    use std::sync::Once;
+
+    /* ---------- 判据（逻辑像素；实测 48×48 @ y=120/123，别再用 macOS 那组数） ---------- */
+
+    /// 缩略图边长（逻辑像素）。实测 48（物理 60 @ 125%）；给 ±6 容差盖住 DPI 取整的毛边。
+    const THUMB_SIDE: f64 = 48.0;
+    /// 边长容差。
+    const SIDE_EPS: f64 = 6.0;
+    /// 相对窗口顶部的 y 落在这一段（逻辑像素）。实测 120 / 123（macOS 是 115 / 117）。
+    const THUMB_Y_MIN: f64 = 100.0;
+    const THUMB_Y_MAX: f64 = 145.0;
+    /// 正方形的判定毛边（逻辑像素）。
+    const SQUARE_EPS: f64 = 4.0;
+    /// 缩略图的子窗口 class。**必须过滤**：窗口里还有 `wxWindowNR` 的方形子窗口
+    /// （50×50 @ y=510、63×63 @ y=374），不过滤就会指错。
+    const THUMB_CLASS: &str = "Static";
+
+    /// 切片器进程名（小写比较）。实测 `bambu-studio.exe`；Beta 与旧版命名一并列上。
+    const BBS_IMAGES: [&str; 3] = [
+        "bambu-studio.exe",
+        "bambu-studio-beta.exe",
+        "bambustudio.exe",
+    ];
+
+    /* ---------- Win32 FFI（手工声明，与 mac 侧手工声明 CF 同一风格） ---------- */
+
+    type Hwnd = isize;
+
+    #[repr(C)]
+    #[derive(Default, Clone, Copy, Debug)]
+    struct RectPx {
+        left: i32,
+        top: i32,
+        right: i32,
+        bottom: i32,
+    }
+
+    impl RectPx {
+        fn width(&self) -> i32 {
+            self.right - self.left
+        }
+        fn height(&self) -> i32 {
+            self.bottom - self.top
+        }
+    }
+
+    #[repr(C)]
+    struct ProcessEntry {
+        dw_size: u32,
+        cnt_usage: u32,
+        th32_process_id: u32,
+        th32_default_heap_id: usize,
+        th32_module_id: u32,
+        cnt_threads: u32,
+        th32_parent_process_id: u32,
+        pc_pri_class_base: i32,
+        dw_flags: u32,
+        sz_exe_file: [u16; 260],
+    }
+
+    /* 全零对这块 POD 是合法初值（Toolhelp 要求调用方先把 dw_size 填成 sizeof）；
+    `[u16; 260]` 没有 Default，只能自己写。 */
+    impl Default for ProcessEntry {
+        fn default() -> Self {
+            unsafe { std::mem::zeroed() }
+        }
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateToolhelp32Snapshot(flags: u32, pid: u32) -> isize;
+        fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry) -> i32;
+        fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry) -> i32;
+        fn CloseHandle(handle: isize) -> i32;
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumWindows(cb: Option<extern "system" fn(Hwnd, isize) -> i32>, lparam: isize) -> i32;
+        fn EnumChildWindows(
+            parent: Hwnd,
+            cb: Option<extern "system" fn(Hwnd, isize) -> i32>,
+            lparam: isize,
+        ) -> i32;
+        fn GetWindowThreadProcessId(hwnd: Hwnd, out_pid: *mut u32) -> u32;
+        fn IsWindowVisible(hwnd: Hwnd) -> i32;
+        fn IsIconic(hwnd: Hwnd) -> i32;
+        fn GetWindowRect(hwnd: Hwnd, out: *mut RectPx) -> i32;
+        fn GetClassNameW(hwnd: Hwnd, buf: *mut u16, max: i32) -> i32;
+        fn GetWindowTextLengthW(hwnd: Hwnd) -> i32;
+        fn GetDpiForWindow(hwnd: Hwnd) -> u32;
+        fn SetForegroundWindow(hwnd: Hwnd) -> i32;
+        fn ShowWindow(hwnd: Hwnd, cmd: i32) -> i32;
+        fn SetProcessDPIAware() -> i32;
+    }
+
+    /// `CreateToolhelp32Snapshot` 的 `TH32CS_SNAPPROCESS`。
+    const SNAP_PROCESS: u32 = 0x2;
+    /// `ShowWindow` 的 `SW_RESTORE`。
+    const SW_RESTORE: i32 = 9;
+
+    /*
+     * ★★ **本进程必须 DPI 感知**，`GetWindowRect` 才给物理像素：
+     * - 给用户的 exe：tauri 的清单里已经声明了 per-monitor 感知，这一下是 no-op；
+     * - cargo test / 探针那种裸进程：默认不感知，坐标会被虚拟化 ⇒ 判据全歪。
+     * 进程级设置，`Once` 保证只设一次；已设过时系统返回 0，无害。
+     */
+    fn ensure_dpi_aware() {
+        static ONCE: Once = Once::new();
+        ONCE.call_once(|| unsafe {
+            SetProcessDPIAware();
+        });
+    }
+
+    /* ---------- 基础读取 ---------- */
+
+    /// 窗口属于哪个进程。
+    fn pid_of(hwnd: Hwnd) -> u32 {
+        let mut pid: u32 = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+        pid
+    }
+
+    /// 窗口矩形（物理像素）。读不到给 `None`。
+    fn rect_of(hwnd: Hwnd) -> Option<RectPx> {
+        let mut r = RectPx::default();
+        let ok = unsafe { GetWindowRect(hwnd, &mut r) };
+        (ok != 0).then_some(r)
+    }
+
+    /// 窗口有没有标题（主窗口的判据之一：工具窗 / 隐藏窗大多没标题）。
+    fn has_title(hwnd: Hwnd) -> bool {
+        unsafe { GetWindowTextLengthW(hwnd) > 0 }
+    }
+
+    fn class_of(hwnd: Hwnd) -> Option<String> {
+        let mut buf = [0u16; 256];
+        let n = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), 256) };
+        (n > 0).then(|| String::from_utf16_lossy(&buf[..n as usize]))
+    }
+
+    /// 这扇窗的 DPI（缩放 = dpi / 96）。读不到按 96 处理（当 1.0 用，别除零）。
+    fn scale_of(hwnd: Hwnd) -> f64 {
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        if dpi == 0 {
+            1.0
+        } else {
+            f64::from(dpi) / 96.0
+        }
+    }
+
+    /// 物理像素矩形 → 逻辑像素矩形（除以窗口的缩放）。
+    fn to_logical(r: RectPx, scale: f64) -> RectDto {
+        RectDto {
+            x: f64::from(r.left) / scale,
+            y: f64::from(r.top) / scale,
+            width: f64::from(r.width()) / scale,
+            height: f64::from(r.height()) / scale,
+        }
+    }
+
+    /// `EnumWindows` 的过场：pid 的每一扇顶层窗（有标题、rect 读得到的）。
+    struct MainWinCtx {
+        want: u32,
+        found: Vec<(Hwnd, bool, f64)>,
+    }
+
+    /// 一个 pid 的**主窗口**。
+    ///
+    /// ★★ **不能"z 序第一个有标题的就当主窗"**（实机验证踩到的坑，2026-10-19）：
+    /// BBS 同一个 pid 下还有**别的**有标题的顶层窗（实测一扇 20×20 的小窗排在最前），
+    /// 按层序先碰到的就是它 ⇒ 定位全部落空。判据三层收紧：
+    ///
+    /// 1. **可见**（`IsWindowVisible`）；
+    /// 2. **有标题**；
+    /// 3. 在里面挑**面积最大**的、且优先 class `wxWindowNR`（BBS 主框是 wxWidgets
+    ///    的窗；面积兜住"多开时另一份 BBS 的最小化窗"之类的杂项）。
+    ///
+    /// ★ 多开时每个进程各有一扇主框；**最小化的也算**（还原后就是它）——
+    /// 卡片这时本来就该收起来，但"窗口在哪"还是要答得上来。
+    fn main_window_of(pid: u32) -> Option<Hwnd> {
+        ensure_dpi_aware();
+        let mut ctx = MainWinCtx {
+            want: pid,
+            found: Vec::new(),
+        };
+        unsafe {
+            EnumWindows(
+                Some(enum_main_window_cb),
+                std::ptr::addr_of_mut!(ctx) as isize,
+            );
+        }
+        /* 优先 wxWindowNR（BBS 主框），里面再取面积最大的；没有才退到"面积最大的有标题窗" */
+        let best = |wx_only: bool| {
+            ctx.found
+                .iter()
+                .filter(|(_, is_wx, _)| !wx_only || *is_wx)
+                .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(h, _, _)| *h)
+        };
+        best(true).or_else(|| best(false))
+    }
+
+    extern "system" fn enum_main_window_cb(hwnd: Hwnd, lparam: isize) -> i32 {
+        let Some(ctx) = (unsafe { (lparam as *mut MainWinCtx).as_mut() }) else {
+            return 0;
+        };
+        if pid_of(hwnd) != ctx.want || !has_title(hwnd) || unsafe { IsWindowVisible(hwnd) } == 0 {
+            return 1;
+        }
+        let Some(r) = rect_of(hwnd) else {
+            return 1;
+        };
+        let is_wx = class_of(hwnd).is_some_and(|c| c.eq_ignore_ascii_case("wxWindowNR"));
+        let area = f64::from(r.width()) * f64::from(r.height());
+        ctx.found.push((hwnd, is_wx, area));
+        1
+    }
+
+    /* ---------- 进程 ---------- */
+
+    /// 在跑的切片器进程（按进程名认，见 [`BBS_IMAGES`]）。
+    ///
+    /// ★ **必须挑"有主窗口"的那个**：BBS 会起好几个同名进程（实测三份），
+    /// 其中只有带工程窗口的才是用户看着的那个；没有窗口的挑了也定位不了。
+    pub(super) fn running_pid() -> Option<i32> {
+        ensure_dpi_aware();
+        let snapshot = unsafe { CreateToolhelp32Snapshot(SNAP_PROCESS, 0) };
+        if snapshot == -1 {
+            return None;
+        }
+        let mut entry = ProcessEntry {
+            dw_size: std::mem::size_of::<ProcessEntry>() as u32,
+            ..Default::default()
+        };
+        let mut found: Option<i32> = None;
+        unsafe {
+            if Process32FirstW(snapshot, &mut entry) != 0 {
+                loop {
+                    let len = entry
+                        .sz_exe_file
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.sz_exe_file.len());
+                    let name = String::from_utf16_lossy(&entry.sz_exe_file[..len]);
+                    if BBS_IMAGES.iter().any(|b| name.eq_ignore_ascii_case(b))
+                        && main_window_of(entry.th32_process_id).is_some()
+                    {
+                        found = Some(entry.th32_process_id as i32);
+                        break;
+                    }
+                    if Process32NextW(snapshot, &mut entry) == 0 {
+                        break;
+                    }
+                }
+            }
+            CloseHandle(snapshot);
+        }
+        found
+    }
+
+    /* ---------- 状态（卡片该不该露脸） ---------- */
+
+    pub(super) fn state(pid: i32) -> SlicerState {
+        ensure_dpi_aware();
+        let Some(hwnd) = main_window_of(pid as u32) else {
+            return SlicerState {
+                rect: None,
+                visibility: SlicerVisibility::Gone,
+            };
+        };
+        let rect = rect_of(hwnd).map(|r| to_logical(r, scale_of(hwnd)));
+        let visible = unsafe { IsWindowVisible(hwnd) != 0 && IsIconic(hwnd) == 0 };
+        /*
+         * ★ "被压住了"与 macOS 同一条口径：问 [`crate::zorder`]（Windows 那半是
+         * `EnumWindows` 的 z 序，全在本地，比 macOS 的 CG 还轻）。问不到就 fail-open
+         * 当作露脸 —— 这是一张"指路"的卡，判断不了别让它凭空消失。
+         */
+        let visibility = if !visible {
+            SlicerVisibility::Behind
+        } else {
+            match crate::zorder::slicer_window(pid) {
+                Some(z) if z.covered >= crate::zorder::COVERED_ENOUGH => SlicerVisibility::Behind,
+                Some(z) if !z.on_screen => SlicerVisibility::Behind,
+                _ => SlicerVisibility::Front,
+            }
+        };
+        SlicerState { rect, visibility }
+    }
+
+    /* ---------- 定位 ---------- */
+
+    /// 一条子窗口候选：class 是不是 `Static`、相对窗口的矩形（**逻辑像素**）、绝对逻辑 x。
+    struct Candidate {
+        is_static: bool,
+        rel: RectDto,
+        abs_x: f64,
+    }
+
+    /// 挑「板子类型」：class `Static` + 正方形 + 边长 48 一族 + y 落段，命中取 x 较大。
+    ///
+    /// ★ 与 macOS 的 [`super::pick_bed_type`] 同一个思路（**遍历找特征，不记偏移**），
+    /// 但判据是 Windows 自己的（48 不是 50；多一条 class 过滤）。
+    fn pick_bed_type_win(candidates: &[Candidate]) -> Option<&Candidate> {
+        candidates
+            .iter()
+            .filter(|c| {
+                c.is_static
+                    && (c.rel.width - c.rel.height).abs() <= SQUARE_EPS
+                    && (c.rel.width - THUMB_SIDE).abs() <= SIDE_EPS
+                    && c.rel.y >= THUMB_Y_MIN
+                    && c.rel.y <= THUMB_Y_MAX
+            })
+            .max_by(|a, b| {
+                a.abs_x
+                    .partial_cmp(&b.abs_x)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    }
+
+    /// `EnumChildWindows` 的过场：候选收集器 + 窗口矩形（物理）+ 缩放。
+    struct ChildCtx {
+        candidates: Vec<Candidate>,
+        win_px: RectPx,
+        scale: f64,
+    }
+
+    pub(super) fn locate() -> GuideTargetDto {
+        ensure_dpi_aware();
+        let Some(pid) = running_pid() else {
+            return refused("没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」");
+        };
+        let Some(hwnd) = main_window_of(pid as u32) else {
+            return refused("切片器没有打开的工程窗口");
+        };
+        let Some(win_px) = rect_of(hwnd) else {
+            return refused("读不到窗口位置");
+        };
+        let scale = scale_of(hwnd);
+        let window = to_logical(win_px, scale);
+
+        let mut ctx = ChildCtx {
+            candidates: Vec::new(),
+            win_px,
+            scale,
+        };
+        unsafe {
+            EnumChildWindows(
+                hwnd,
+                Some(enum_child_cb),
+                std::ptr::addr_of_mut!(ctx) as isize,
+            );
+        }
+
+        match pick_bed_type_win(&ctx.candidates) {
+            None => refused(
+                "在窗口里没找到板子类型的位置（切片器界面换过了？）—— 这一版的引导暂时指不了",
+            ),
+            Some(c) => GuideTargetDto {
+                ready: true,
+                window: Some(window),
+                target: Some(RectDto {
+                    x: c.abs_x,
+                    y: window.y + c.rel.y,
+                    width: c.rel.width,
+                    height: c.rel.height,
+                }),
+                reason: None,
+            },
+        }
+    }
+
+    extern "system" fn enum_child_cb(hwnd: Hwnd, lparam: isize) -> i32 {
+        let Some(ctx) = (unsafe { (lparam as *mut ChildCtx).as_mut() }) else {
+            return 0;
+        };
+        let Some(child_px) = rect_of(hwnd) else {
+            return 1;
+        };
+        let is_static = class_of(hwnd).is_some_and(|c| c.eq_ignore_ascii_case(THUMB_CLASS));
+        ctx.candidates.push(Candidate {
+            is_static,
+            abs_x: f64::from(child_px.left) / ctx.scale,
+            rel: RectDto {
+                x: f64::from(child_px.left - ctx.win_px.left) / ctx.scale,
+                y: f64::from(child_px.top - ctx.win_px.top) / ctx.scale,
+                width: f64::from(child_px.width()) / ctx.scale,
+                height: f64::from(child_px.height()) / ctx.scale,
+            },
+        });
+        1
+    }
+
+    /// 指不了时的那句人话（与 mac 侧同一个形状：不编坐标）。
+    fn refused(reason: &str) -> GuideTargetDto {
+        GuideTargetDto {
+            ready: false,
+            window: None,
+            target: None,
+            reason: Some(reason.to_owned()),
+        }
+    }
+
+    /* ---------- 抬窗（本模块唯一的"写"，写的只是层序） ---------- */
+
+    pub(super) fn raise() -> bool {
+        let Some(hwnd) = running_pid().and_then(|pid| main_window_of(pid as u32)) else {
+            return false;
+        };
+        unsafe {
+            /* 最小化着就先还原 —— 还原那一下通常顺带把窗抬起来 */
+            if IsIconic(hwnd) != 0 {
+                ShowWindow(hwnd, SW_RESTORE);
+            }
+            SetForegroundWindow(hwnd) != 0
+        }
+    }
+
+    /// Windows 没有"窗 / 整个 App"那层区分（macOS 的 `AXRaise` vs `AXFrontmost`），
+    /// 与 [`raise`] 同一件事 —— 保留两个名字是为了让 `ipc::guide` 的两处调用各取所需。
+    pub(super) fn activate() -> bool {
+        raise()
+    }
+
+    /* ---------- 测试：判据落在探针实测的那组数上 ---------- */
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn cand(is_static: bool, x: f64, y: f64, side: f64) -> Candidate {
+            Candidate {
+                is_static,
+                rel: RectDto {
+                    x,
+                    y,
+                    width: side,
+                    height: side,
+                },
+                abs_x: x,
+            }
+        }
+
+        /// 实测那一对（125% 缩放折算：48×48 @ y=120/123）⇒ 取 x 较大的那个
+        #[test]
+        fn it_picks_the_right_hand_thumb() {
+            let cands = [
+                cand(true, 98.4, 120.0, 48.0),
+                cand(true, 268.8, 123.2, 48.0),
+            ];
+            let got = pick_bed_type_win(&cands).map(|c| c.abs_x);
+            assert_eq!(got, Some(268.8));
+        }
+
+        /// class 不是 `Static` 的不算 —— 窗口里真有 `wxWindowNR` 的方形子窗口
+        /// （50×50 @ y=510、63×63 @ y=374，见 childwin-probe 的读数）
+        #[test]
+        fn non_static_squares_are_not_candidates() {
+            let cands = [cand(false, 228.0, 408.0, 50.0)];
+            assert!(pick_bed_type_win(&cands).is_none());
+        }
+
+        /// y 不在落段的也不算
+        #[test]
+        fn thumbs_outside_the_band_are_not_candidates() {
+            let cands = [cand(true, 98.4, 400.0, 48.0)];
+            assert!(pick_bed_type_win(&cands).is_none());
+        }
+
+        /// 物理像素 → 逻辑像素的换算要与 125% 实测对上（60 phys → 48）
+        #[test]
+        fn physical_to_logical_matches_the_probe() {
+            let scale = 1.25;
+            assert!((THUMB_SIDE - f64::from(60) / scale).abs() <= SIDE_EPS);
+        }
+
+        /// `THUMB_CLASS` 的大小写比较要吃得住系统报回来的任意大小写
+        #[test]
+        fn class_comparison_is_case_insensitive() {
+            assert!("STATIC".eq_ignore_ascii_case(THUMB_CLASS));
+            assert!("static".eq_ignore_ascii_case(THUMB_CLASS));
+        }
+
+        /// **实机验证**（`#[ignore]`，本机正跑着 Bambu Studio 时用
+        /// `cargo test -- --ignored` 跑）：定位要指得上，且命中的是
+        /// 「边长 48 一族 + y 落段」的那个缩略图。判据一变这里先红。
+        #[test]
+        #[ignore = "要本机在跑 Bambu Studio（实机验证，CI 上没有切片器）"]
+        fn live_locate_hits_the_bed_type_thumb() {
+            let got = locate();
+            assert!(got.ready, "实机定位失败：{:?}", got.reason);
+            let (w, t) = (got.window.expect("窗口矩形"), got.target.expect("目标"));
+            assert!(
+                (t.width - THUMB_SIDE).abs() <= SIDE_EPS,
+                "命中宽度 {} 不是 {} 一族（判据歪了）",
+                t.width,
+                THUMB_SIDE
+            );
+            assert!(
+                t.y >= THUMB_Y_MIN && t.y <= THUMB_Y_MAX,
+                "命中 y={} 不在落段 [{}, {}]",
+                t.y,
+                THUMB_Y_MIN,
+                THUMB_Y_MAX
+            );
+            assert!(
+                t.x > w.x && t.y > w.y,
+                "目标 ({},{}) 应落在窗口 ({},{}) 之内",
+                t.x,
+                t.y,
+                w.x,
+                w.y
+            );
+        }
+
+        /// **实机验证（状态）**：状态要答得上来 —— 窗口矩形在、可见性不是 Gone
+        /// （三个 BBS 实例叠着时可能是 Behind，那是真实处境，不算失败）。
+        #[test]
+        #[ignore = "要本机在跑 Bambu Studio（实机验证，CI 上没有切片器）"]
+        fn live_state_answers_rect_and_visibility() {
+            let Some(pid) = running_pid() else {
+                panic!("没找到在跑的 Bambu Studio");
+            };
+            let st = state(pid);
+            assert!(st.rect.is_some(), "窗口矩形读不到");
+            assert_ne!(
+                st.visibility,
+                SlicerVisibility::Gone,
+                "进程在跑、主窗找到了，可见性不该是 Gone"
+            );
+        }
     }
 }

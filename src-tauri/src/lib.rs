@@ -75,10 +75,19 @@ pub mod retention;
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
+/// **切片器窗口的跟随信号**（Windows）：细定时回读（700ms 一次本地窗口列表查询 +
+/// 键比较，没变就返回）—— macOS 是"AX 推送 + 兜底回读"，这里没有等价的轻量推送，
+/// 直接用同一频率的回读当唯一信号（为什么这不算"频繁的轮询"，见模块头）。
+///
+/// ★ 只有 Windows 有这一份（`#![cfg(target_os = "windows")]`）；调用点要用
+/// `cfg` 挡一下（见 `ipc::guide`）。
+#[cfg(target_os = "windows")]
+pub mod win_watch;
 /// **切片器窗口被谁盖住了**：问 CoreGraphics 的窗口列表（**按层序从前往后**）。
 /// 用来判"别的软件压上来了 ⇒ 卡片该收起来" —— 用**层级**而不是 AX 的"焦点"。
-/// ★ 底下的窗口列表 API 只有 macOS 有（`mod mac` 在文件里 cfg 掉了）；
-/// 其它平台 `slicer_window` 恒 `None`，调用点见 `ipc::guide`。
+/// ★ 底下的窗口列表 API：macOS 是 CoreGraphics，Windows 是 `EnumWindows` 的 z 序
+/// （`mod mac` / `mod win` 在文件里各自 cfg）；其它平台 `slicer_window` 恒 `None`，
+/// 调用点见 `ipc::guide`。
 pub mod zorder;
 
 // 工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
