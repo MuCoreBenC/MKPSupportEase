@@ -69,6 +69,10 @@ const HOLD_DELAY = 400
 const HOLD_TICK = 100
 const WHEEL_IDLE = 350
 
+/** 串的宽度估算（单位 ch，与输入框的 `widthCh` 同一口径）：CJK 一个算两格，其余一格 */
+const textCh = (t: string) =>
+  Array.from(t).reduce((w, c) => w + (c.charCodeAt(0) > 0x2e80 ? 2 : 1), 0)
+
 export default function NumberField({
   value,
   label,
@@ -255,13 +259,21 @@ export default function NumberField({
   /*
    * 宽度按能出现的字符数算，不写死一个 px：
    * 整数位（看 min/max 的量级）+ 小数点与小数位 + 负号。
+   * ★ 占位串（`-50 ~ 50`）也比进去（2026-10-20）：否则空框的灰字被压成
+   *   `-50 ~ 5`，看起来像注册表写错了范围。
    */
   const intDigits = Math.max(
     String(Math.trunc(Math.abs(max ?? 100))).length,
     String(Math.trunc(Math.abs(min ?? 0))).length,
   )
   const negative = (min ?? 0) < 0
-  const widthCh = Math.max(4, intDigits + (digits > 0 ? digits + 1 : 0) + (negative ? 1 : 0) + 1)
+  const rangePlaceholder =
+    min !== undefined || max !== undefined ? `${min ?? '不限'} ~ ${max ?? '不限'}` : undefined
+  const widthCh = Math.max(
+    4,
+    intDigits + (digits > 0 ? digits + 1 : 0) + (negative ? 1 : 0) + 1,
+    rangePlaceholder !== undefined ? textCh(rangePlaceholder) : 0,
+  )
 
   const range =
     min !== undefined || max !== undefined ? `范围 ${min ?? '—'} ~ ${max ?? '—'}` : undefined
@@ -328,7 +340,7 @@ export default function NumberField({
         aria-label={label}
         aria-invalid={bad || undefined}
         title={bad && range !== undefined ? `超出${range}` : range}
-        placeholder={min !== undefined || max !== undefined ? `${min ?? '不限'} ~ ${max ?? '不限'}` : undefined}
+        placeholder={rangePlaceholder}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onBlur={commitTyped}

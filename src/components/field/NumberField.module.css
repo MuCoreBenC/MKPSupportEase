@@ -79,7 +79,8 @@
 
 /*
  * 即时校验提示（只有出问题才包这一层 —— 没问题的稿一个像素不动）：
- * 相对定位的外层 + 绝对定位的提示，提示**不占布局**，压在下一行上面也只是一小截。
+ * 相对定位的外层 + 绝对定位的气泡，**悬浮在框正上方**（2026-10-20 作者改：
+ * 原来挂下方会压住展开的说明区）。不占布局，纯悬浮。
  */
 .withHint {
   position: relative;
@@ -88,13 +89,14 @@
 
 .hint {
   position: absolute;
-  top: calc(100% + 3px);
+  bottom: calc(100% + 4px);
   right: 0;
-  z-index: 2;
-  padding: 2px 8px;
+  z-index: 3;
+  padding: 3px 9px;
   border: 1px solid rgb(229 72 77 / 45%);
   border-radius: var(--r-sm);
   background: var(--surface-solid);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
   color: #e5484d;
   font-size: var(--fs-label);
   white-space: nowrap;
