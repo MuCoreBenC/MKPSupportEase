@@ -1121,6 +1121,63 @@ export interface DevScene {
 }
 
 /**
+ * **开发台 · 运行真实后处理**的回执（`app::devreal::DevRunAck`，2026-10-19）。
+ *
+ * ★ `gcode` 是**副本**的落点，不是你选的那一份：真后处理是原地覆盖输入的，
+ * 所以后端先复制一份再跑 —— 源文件一个字节不动，于是"能反复跑"成立。
+ * 想看产物就去这个路径（或客户端「最近处理」那条记录）。
+ */
+export interface DevRunAck {
+  /** 真被处理的那一份（副本，在客户端内部根的 `run/dev-run/` 下） */
+  gcode: string
+  /** 用的预设（原样，不复制 —— 预设是只读输入） */
+  preset: string
+}
+
+/**
+ * **开发台 · 真实后处理测试矩阵**的一档（`app::devmatrix::MatrixCase`，2026-10-19）。
+ *
+ * 六档 = 小文件成功 / 大文件成功 / 硬失败 / 机型不匹配 / 挪塔碰撞 / 取消。
+ * `expect` 是这一档**期望的真结局**（稳定串），判定由后端按 `_meta.json` 的真凭据做。
+ */
+export interface MatrixCase {
+  id: string
+  label: string
+  /** 这一档"凭什么触发什么" */
+  note: string
+  /** `success` / `hard-fail` / `collision` / `mismatch` / `cancelled` */
+  expect: string
+  /** 需要人在客户端窗口里真操作（不代答） */
+  human: boolean
+  /** 夹具都在（false = 点了只报"夹具不在"） */
+  ready: boolean
+  /** 输入说明（预设名 + 件名） */
+  input: string
+}
+
+/** 一档跑完的判定（该档目录里的 `verdict.json`）。 */
+export interface MatrixVerdict {
+  caseId: string
+  /** `passed` / `failed` */
+  status: string
+  /** 一句话结论 —— 里面带的是**判据本身**（哪个字段说明通过） */
+  note: string
+  /** 这一档的临时根（产物与执行记录都在里面） */
+  dir: string
+  startedAt: string
+  elapsedMs: number
+}
+
+/** 矩阵一次拿到的全貌。 */
+export interface MatrixState {
+  cases: MatrixCase[]
+  /** 最近 10 个档目录的判定（新的在前） */
+  runs: MatrixVerdict[]
+  /** 现在正在跑哪一档（空闲 = null） */
+  current: string | null
+}
+
+/**
  * `dev_source::DevSourceStatus` —— 工作台「本地测试源（开发）」那颗按钮的读数。
  *
  * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
@@ -2170,6 +2227,46 @@ export const wb = {
   devFaults: () => invoke<DevFault[]>('wb_dev_faults'),
   devFaultArm: (id: string) => invoke<void>('wb_dev_fault_arm', { id }),
   devFaultClear: () => invoke<void>('wb_dev_fault_clear'),
+
+  /**
+   * **开发台 · 运行真实后处理**（`app::devreal`，2026-10-19）—— 与上面两块**都不重叠**：
+   * 场景表是"打开一格界面"（不动后端），故障注入是"让后端失一次真"（不动界面），
+   * 这一条是**真的跑一趟管线**。
+   *
+   * 选一份预设 + 一份测试 G-code ⇒ 起一个**真的钩子子进程**（`--Toml` + `--Gcode`，
+   * 与切片器注册的那一行同形）⇒ **客户端窗口**跑真预检、真进度、真问句、真落盘、真归档。
+   * 界面上**没有任何预览标记**（`preview` 恒 false），那几颗真业务按钮（停止 / 后台运行 /
+   * 强制继续 / 终止）**点了真的有用** —— 真有一条钩子进程连着。
+   *
+   * ★ **不加协议变体、不改产品逻辑**：复用真机那条入口即可（见 `app::devreal` 模块头）。
+   * ★ 命令**立刻返回**，不等那一趟跑完 —— 进度看客户端窗口。
+   * ★ 返回的 `gcode` 是**副本**落点（真后处理原地覆盖，源文件不动）。
+   * ★ 客户端没开 / 文件不对：如实报错，不替你拉进程、不替你猜文件。
+   *
+   * 只在 workbench 构建里存在。
+   */
+  devRunReal: (toml: string, gcode: string) => invoke<DevRunAck>('wb_dev_run_real', { toml, gcode }),
+
+  /**
+   * **开发台 · 真实后处理测试矩阵**（`app::devmatrix`，2026-10-19）。
+   *
+   * 与上面「单趟」是同一件事的两种用法：单趟 = 你自己挑两份文件跑一次；
+   * 矩阵 = **六档确定性输入**，一键串行跑，每档一个**独立临时根**，跑完按真凭据判定。
+   *
+   * ★ 判定只读该档目录里那条执行记录（`user/gcode_history/<日期>/<id>_meta.json`）的
+   * `error` / `cancelled` / `relocation` —— 不看退出码猜、不由界面"认为"成功。
+   * 尤其是**碰撞档**：没有 `relocation` 就判失败（撞没撞由记录说话）。
+   * ★ **问句档不代答**：机型不匹配 / 挪塔碰撞 / 取消要你在客户端窗口里真操作，
+   * `current` 会一直指着那一档，直到你答完或它超时。
+   * ★ 数据全落 `<repo>/target/dev-run/matrix/`，正式数据目录一个字节不动；
+   * 代价是这一趟**不进报告页/历史**（客户端在自己那棵树找不到记录）。
+   */
+  devMatrixCases: () => invoke<MatrixCase[]>('wb_dev_matrix_cases'),
+  devMatrixState: () => invoke<MatrixState>('wb_dev_matrix_state'),
+  /** 传空数组 = 跑全部；立刻返回，进度轮询 `devMatrixState` */
+  devMatrixStart: (ids: string[]) => invoke<void>('wb_dev_matrix_start', { ids }),
+  /** 清空矩阵临时根（有任务在跑会拒绝）；返回删掉几个目录 */
+  devMatrixClear: () => invoke<number>('wb_dev_matrix_clear'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——

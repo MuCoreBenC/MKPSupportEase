@@ -82,149 +82,41 @@ pub struct DevScene {
 fn scenes() -> Vec<DevScene> {
     let mut out = Vec::new();
 
-    // ---- 后处理那一组（★ 现在就能点）----
-    let note = "切片器导出 G-code 时客户端弹出的那一屏 —— 平时要真去切一次片才看得到。\
-                点一下把它演给**客户端窗口**看（客户端窗口会置顶；不读 G-code、不落记录）";
-    /* ★ 「处理中」排最前（作者 2026-10-14：「不只是成功啊，还有处理中的也要显示」）——
-    它演到第二遍扫描就**停住不动**，把跑着那一屏定在屏上（改样式 / 截图都用它）。 */
-    out.push(DevScene {
-        id: "postprocess-running".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "处理中（停住不动）".to_owned(),
-        note: "跑着的那一屏（大百分比 + 步骤 + 预计还需 + 两组 facts）—— \
-               演到第二遍扫描就**定住**，改样式 / 截图用它。再点别的格子它会自己让位"
-            .to_owned(),
-        ready: true,
-        slot_label: slot_label_of("postprocess-running").to_owned(),
-    });
-    for m in Mode::ALL {
-        out.push(DevScene {
-            id: format!("postprocess-{}", m.id()),
-            group: "postprocess".to_owned(),
-            group_label: "后处理界面".to_owned(),
-            label: m.label().to_owned(),
-            note: note.to_owned(),
-            ready: true,
-            slot_label: "后处理".to_owned(),
-        });
-    }
-    /* ★★ 2026-10-17：那一问的两种**收场**（作者：「帮我在工作台加上更多的触发按钮…
-    比如触发红字的」「没必要的就不要显示，而是显示在 hero 里面」）。
-    它们不是"另一屏"，而是**同一扇窗里 hero / 标题栏的另一档** —— 所以挨着那一问摆，
-    名字也照"那一问 · …"起（排在 `Mode::ALL` 之后，读的人先看到四档主干）。 */
-    out.push(DevScene {
-        id: "postprocess-question-timeout".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "那一问 · 等超时".to_owned(),
-        note: "机型不匹配那一问停着，倒计时走完（这里压成 12 秒）自己收成「已停止」—— \
-               真机上要干等满两分钟才看得到的那一屏"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-answer-stale".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "那一问 · 点下去已经晚了".to_owned(),
-        note: "那一问还挂在屏上、钩子已经没了：真机上这时点「强制继续 / 终止」，\
-               答案会落在**标题右边**那一行（开发台直接把那一行注入，看位置与省略号）"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-backgrounded".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "跑着 · 收进后台".to_owned(),
-        note: "跑着的时候点一下「后台运行」：这一屏收走，标题栏换成那枚「有事在跑」的胶囊 \
-               （点胶囊能重新打开）。这一步是界面自己点，所以开发台只把场景推过去"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    /* 校准件那一问（2026-10-17）：后处理认出这是校准件时才出现 —— 平时要真切一张校准件
-    才看得到。四档都是**同一扇窗**（hero 换一档），不另开屏。 */
-    out.push(DevScene {
-        id: "postprocess-calib-question".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "校准件 · 问怎么跑".to_owned(),
-        note: "后处理认出这是一份校准件时那一问：先打印再校准 / 直接校准（hero 里带倒计时）。\
-               平时要真导一张校准件才看得到"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-calib-print-done".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "校准件 · 先打印（成功）".to_owned(),
-        note: "答「先打印，再校准」跑完的那一屏：**模型原样**，成功结论说打印件保留".to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-calib-direct-done".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "校准件 · 直接校准（成功）".to_owned(),
-        note: "答「直接校准」跑完的那一屏：**去掉打印件、只留校准路径**，成功结论也这么说"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-calib-timeout".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "校准件 · 等超时".to_owned(),
-        note: "那一问没人答，倒计时走完（这里压成 12 秒）自己收成「已停止」—— \
-               真机上要干等满两分钟才看得到的那一屏"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    /* 挪塔那一问（2026-10-18）：模型与擦料塔撞上时那一屏 —— 两幅俯视图 + 坐标 +
-    左下角翻页钮。平时要真撞一次才看得到，这里点一下就能看。 */
-    out.push(DevScene {
-        id: "postprocess-relocate-question".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "碰撞 · 问要不要挪塔".to_owned(),
-        note: "模型与擦料塔撞上了那一问：左「现在」右「挪后」两幅俯视图、两板之间一支箭头，\
-              下面是坐标与倒计时；左下角那颗小钮在「说明 / 原始信息」之间翻页。\
-              平时要真撞一次才看得到"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-success-no-metrics".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "成功 · 没有结果读数".to_owned(),
-        note: "老记录那种成功（迁移前跑的那几次）：跑成了，但结果屏上**没有**指标条与 \
-               「擦料与胶水消耗」那几格 —— 看那一版排版用的"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
-    out.push(DevScene {
-        id: "postprocess-success-long-warning".to_owned(),
-        group: "postprocess".to_owned(),
-        group_label: "后处理界面".to_owned(),
-        label: "成功 · 好几行警告".to_owned(),
-        note: "跑成了但内核报了好几条警告（这一盘没有支撑之类）：框身被警告行撑高，\
-               验下面那张事实表会不会被挤坏"
-            .to_owned(),
-        ready: true,
-        slot_label: "后处理".to_owned(),
-    });
+    /*
+     * ★★ 2026-10-19：**后处理那一组整个撤掉了**（含最后一格「处理中（停住不动）」）。
+     *
+     * 作者先一句「把预览全部取消吧」，再指着这最后一格说「这个不需要了吧」——
+     * 于是这一页里**一档演出都不剩**，剩下的全是真入口：
+     * 「运行真实后处理」（单趟）与「真实后处理测试矩阵」（八档，只按 `_meta.json` 真凭据判）。
+     *
+     * 为什么这格也能撤：当初留它的理由是"真跑那一屏会自己往前跑，要定格得靠演"。
+     * 现在这个需求有别的办法 —— **小件跑得慢/大件跑得快都不是问题**，
+     * 真要定格，用矩阵的 `big-ok` 档（8.5 MB，8 秒）或直接对真跑那一屏截图，
+     * 比维护一条只为了"停住"的演出路径划算。
+     */
+    let _ = &Mode::ALL; /* 演出引擎（`Mode` / `Options` / `drive`）照旧可用，只是不再上架 */
+    /*
+     * ★★ 2026-10-19：**后处理这一组整个撤掉了**（作者：「把预览全部取消吧」→
+     * 指着最后一格「处理中（停住不动）」说「这个不需要了吧」）。
+     *
+     * 撤掉的十格，以及它们的真入口（同一件事，结局是真的）：
+     *
+     * | 撤掉的格 | 真入口里怎么触发 |
+     * | --- | --- |
+     * | 处理中（停住不动） | 矩阵 `big-ok`（8.5 MB，约 8 秒，够看清） |
+     * | 成功 / 失败 / 已停止 / 机型不匹配那一问 | 矩阵 `small-ok` / `big-ok` / `hard-fail` / `mismatch` |
+     * | 那一问 · 等超时 | 矩阵 `mismatch` 不理它，两分钟自己收场 |
+     * | 那一问 · 点下去已经晚了 | 真机就会遇到；报错那一屏现在有「停止并关闭」 |
+     * | 跑着 · 收进后台 | 真跑起来点那颗「后台运行」 |
+     * | 校准件 · 问怎么跑 / 等超时 / 先打印成功 / 直接校准成功 | 矩阵 `calib-ok` / `calib-question` |
+     * | 碰撞 · 问要不要挪塔 | 矩阵 `collision` 档（真撞） |
+     *
+     * （更早还删过 `success-no-metrics` / `success-long-warning` 两格：
+     *  前者是真跑不可能出现的形态，后者是排版问题不是流程。）
+     *
+     * ★ **演出引擎（`crate::devsim` 的 `Mode` / `Options` / `drive`）一行没拆** ——
+     *   假钩子 CLI（`src/bin/hook-sim.rs`）还在用它。撤掉的只是"开发台上架的那份清单"。
+     */
 
     // ---- 其余界面格：id 是**稳定 slug**（前端 Provider 按它认领），label 才是人话 ----
     //
@@ -400,16 +292,23 @@ pub fn wb_dev_trigger(scene: String) -> Result<(), AppError> {
 mod tests {
     use super::*;
 
-    /// 后处理那一组**都 ready**，且四档都在（id 是 `postprocess-<mode>`）
+    /// **后处理那一组整个没了**（2026-10-19 撤预览；最后那格「处理中」作者也说不要了）。
+    ///
+    /// 这条判据是**反向**的：以前它咬"四档都在"，现在咬"**一格都不在**"。
+    /// 为什么值得反过来钉死 —— 撤预览是作者的裁定，后来的人（包括下个月的我）
+    /// 很容易顺手把某一格加回来"方便调试"，而加回来的那一刻，开发台就又变回了
+    /// "真功能只有演的那些"那个样子。
+    ///
+    /// 后处理这一页现在只剩两件真事：**「运行真实后处理」（单趟）与「测试矩阵」（八档）**。
+    /// 若确实需要一格演出，请先想清楚"它的真入口为什么做不到"，再改这条判据。
     #[test]
-    fn the_postprocess_group_is_ready_and_complete() {
+    fn the_postprocess_group_is_gone_from_the_dev_desk() {
         let rows = scenes();
         let pp: Vec<&DevScene> = rows.iter().filter(|r| r.group == "postprocess").collect();
-        assert!(pp.iter().all(|r| r.ready), "后处理那一组该都能点");
-        for m in Mode::ALL {
-            let id = format!("postprocess-{}", m.id());
-            assert!(pp.iter().any(|r| r.id == id), "少了 {id}");
-        }
+        assert!(
+            pp.is_empty(),
+            "后处理那一组该一格都不剩（真入口在矩阵里）：{pp:#?}"
+        );
     }
 
     /// 场景 id **必须唯一**（命令按它分发；重了会发错格子）

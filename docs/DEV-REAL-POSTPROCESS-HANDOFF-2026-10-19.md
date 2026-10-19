@@ -7,6 +7,10 @@
 > **请重新核一遍再开工**，不要照着 §4 的路径直接改。核完请把这一节刷新（或删掉重写）。
 >
 > 这一份不施工，只交接。对应 `HANDOFF.md` 增量之四十一。
+>
+> **2026-10-19 当日后续：② 已落地**（工作台「开发台」的第二块）—— 见 **§4.4**（代码落点 +
+> 实测数据 + 判据逐条销账）。§4.3 那三件事**已核完**，§6 那个假设**验证成立**，
+> §7 只剩一条待拍板（"够不够慢"）。对应 `HANDOFF.md` 增量之四十二。
 
 ---
 
@@ -105,13 +109,100 @@
 **处置方向**（作者已选 A 的**前提判断**）：撤掉整个后处理预览档，前提是你确认这些演示场景已经没有保留价值 —— 保留价值取决于 ② 做出来之后它还有没有用。
 **顺序建议：先把 ② 做出来，再回来撤预览档。** 先撤了就没有对照物了。
 
-### 4.3 待核的三件事（我这次**没**查完，动手第一步就是查这些）
+### 4.3 那三件事 —— **已核完**（2026-10-19 当日）
 
-作者点名要先确认的：
+> 以下三条是当日对着代码逐条查的，结论都落在代码上，路径以本小节为准。
 
-1. **真实 G-code 后处理入口在哪、怎么调。** 内核二进制（`mkpse-pp`？）的子命令与参数（印象里有 `run` / `init` / `dump-ir` / `check`，钩子 exe 两角色 `--Toml` / `--Gcode`）—— **必须重查**，`Cargo.toml` 的 `[[bin]]` 与参数解析那处为准。
-2. **那份 A1 基准 G-code（约 23.8 MB）在哪。** 作者说项目里应该有、之前用过 —— **我这次没找到，也没验证大小**。优先复用已有文件，别新造测试数据。
-3. **现有 hook 协议能不能让工作台起一趟真任务。** `FromHook` / `ToHook` 的全部变体逐个看一遍（当时只有 `Hello` / `Progress` / `Question` / `DeferPrintTime` / `Finished` / `DevScene` / `DevFault`），判断要不要新增变体。
+**① 真实 G-code 后处理入口在哪、怎么调 —— 入口就是"本程序带参数起一个子进程"。**
+
+```text
+"<本程序>" --Toml "<预设.toml>" --Gcode <输入.gcode>
+```
+
+- `src-tauri/src/main.rs`：`args::parse` 认出这两个开关 ⇒ `Mode::Hook` ⇒ `hook::run_with_channel(&job)`
+  —— 真跑 `pipeline::process_with_ir_with_tower_ask`，产物**原地覆盖**输入，归档真写
+  `<用户根>/user/gcode_history/<日期>/`，退出码 0/1/2。
+- `src-tauri/src/args.rs`：**精确匹配且大小写敏感**（`--toml` 不认）；三种取值形态都认
+  （`--Gcode <path>` / `--Gcode on file <path>` / 兜底取末参）；只给一半 = 参数错、退出码 2，**不退化成界面**。
+- ★ **内核 `mkpse-pp` 不是这条路**：它只留作诊断 CLI（`run` / `init` / `dump-ir` / `check`），
+  **钩子不 spawn 它** —— 管线是进程内调用的（`src-tauri/Cargo.toml` 第 16-17 行有这句话）。
+
+**② 那份 A1 基准 G-code（约 23.8 MB）—— 没找到；本机最大真件是 8.5 MB。**
+
+- 全仓 `.gcode` 扫下来：`crates/postprocess/tests/fixtures/real/.5926.1.gcode` **8.5 MB**
+  （BambuStudio 切的 A1 件，3h32m，916 层；被 `.gitignore` 掉，但本机在）；
+  `tests/golden/` 那几份 548K / 653K；`tests/reference/printtime/input.gcode` 557K。
+- `~/Downloads` 里另有 `裙子_PLA_1h18m.gcode` / `书包_PLA_52m37s.gcode`（>5M）。
+- ★ 没新造测试数据 —— 直接拿 `.5926.1.gcode` 跑的，实测见 §4.4。
+
+**③ 现有 hook 协议够不够让工作台起一趟真任务 —— 够，不用加变体。**
+
+- `FromHook` = `Hello` / `Progress` / `Question` / `DeferPrintTime` / `Finished` / `DevScene` / `DevFault`；
+  `ToHook` = `Cancel` / `Answer`。**一个都没加。**
+- 理由：真钩子本来就是**独立进程**（`src/bin/hook-sim.rs` 那个假钩子就是"起一个钩子进程"的现成先例），
+  它靠 `internal_root_headless()` 认客户端那棵 `SupportEase` 树去连 loopback。
+  ⇒ 工作台只要 spawn 一个带 `--Toml` / `--Gcode` 的**子进程**，那个子进程就是真钩子，
+  客户端收到的是真 `Hello/Progress/Question/Finished`，`preview` 恒为 `false`。
+- ⇒ §6 那个假设**验证成立**，所以 **客户端侧一行没改、产品逻辑一行没改**。
+
+### 4.4 本轮落地：② 运行真实后处理（2026-10-19 当日）
+
+```text
+工作台「开发台」──invoke──► wb_dev_run_real(toml, gcode)
+                              │ ① 校验两个文件（在不在 / 后缀对不对）
+                              │ ② 复制一份 gcode 副本到 <客户端内部根>/run/dev-run/
+                              │ ③ connect_or_headless 探客户端在不在（不在就如实报错）
+                              │ ④ spawn current_exe() --Toml <toml> --Gcode <副本>（不等）
+                              ▼
+                    真钩子进程 ──loopback 真消息──► 客户端窗口（真界面、真按钮、真进度）
+```
+
+**代码落点**（全是工作台这一侧的一层薄壳）：
+
+| 文件 | 干什么 |
+| --- | --- |
+| `src-tauri/src/workbench/app/devreal.rs` | **新**。校验 / 复制副本 / 探活 / spawn。含 5 条单测（argv 逐字、副本不动源文件、连跑两趟两个副本、缺文件与错后缀、落点属内部根） |
+| `src-tauri/src/workbench/app/mod.rs` | 挂模块声明（`devfault` 与 `devsim` 之间） |
+| `src-tauri/src/lib.rs` | 工作台命令清单加 `wb_dev_run_real`（`command_list_parity` 那道闸盯着） |
+| `src/workbench/api.ts` | `DevRunAck` 类型 + `devRunReal()` 封装 |
+| `src/workbench/views/DevPage.tsx` | 新增「运行真实后处理」区块（两行路径 + 系统选择器 + 主按钮 + 四条如实说明） |
+| `src-tauri/capabilities/workbench.json` | 补 `dialog:allow-open`（工作台窗口要能开文件选择器） |
+
+**四个设计取舍**（都写在 `devreal.rs` 的模块头里）：
+
+- **spawn 谁**：`current_exe()`。工作台与客户端是同一个 crate 的两种 feature 构建、产物同名；
+  无论当前跑的是哪一档，`--Toml/--Gcode` 都走 `main.rs` 的 Hook 分支，执行的是**同一份**
+  `hook::run_with_channel` —— 与真机形态一致（真机也是切片器 spawn 同一个 exe）。
+- **必须先复制副本**：真后处理**原地覆盖**输入；不复制的话第二趟跑的是已处理的产物，
+  「可重复跑」这条判据当场失效。副本带毫秒时间戳，源文件一个字节不动。
+- **先探客户端再 spawn**：照 `devfault::to_client()` 的形状。钩子自己也有 `connect_or_spawn`，
+  但那个拉起的是 `current_exe()` —— 在工作台语境下就是工作台自己（作者明确不要替用户拉进程）。
+- **stdio 全接 null**：与 `hook_ipc::spawn_display` 同一条理由（钩子那几行结论本来就落 `logs/`）。
+
+**实测**（当日，客户端 dev 在跑，8.5 MB 那份真件 + `A1-fastv3.3.toml`）：
+
+```text
+处理完成：…/run/dev-run/1792355145-5926-real.gcode（8435 ms）      ← 钩子 stdout
+钩子来了：这一趟开始 gcode=1792355145-5926-real.gcode preset=A1-fastv3.3.toml  ← 客户端 hook_ui（真路径）
+接手这一趟的打印时间估算 record=1792355145-5926-real_20261019_042545
+钩子那一趟结束 exit_code=0 ok=true cancelled=false
+归档：user/gcode_history/2026-10-19/1792355145-5926-real_20261019_042545{,_meta.json,_original.gcode}
+```
+
+**判据逐条销账**：
+
+| # | 判据 | 结果 | 凭据 |
+| --- | --- | --- | --- |
+| 1 | 真任务 | ✅ | 管线真跑 8435 ms、退出码 0、产物真落盘、归档三件套真写、用量账更新 |
+| 2 | 真界面 | ✅ | 客户端日志走的是 `hook_ui` 的**真路径**（不是 `run_preview` 演出），`preview` 恒 false |
+| 3 | 真按钮 | ⚠️ 链路已成立，**点一下待人工确认** | 真有一条钩子进程连着 ⇒ `Handle.connected()` 为真 ⇒ `cancel()` 不再走"没有正在跑的处理"那条分支。最后一步要在客户端点一次「停止」亲眼看它真停 |
+| 4 | 够慢 | ❌ **不够慢** | 8.5 MB 只要 **8.4 s**（预检约 6 s）。进度一闪而过，截不下来 → §7 待拍板 |
+| 5 | 可重复 | ✅ | 副本机制（源文件不动）+ 能换文件 |
+| 6 | 不进正式包 | ✅ | 命令只挂在工作台清单里（`workbench` feature） |
+
+★ 顺带确认一件事：**工作台的测试模式（沙箱）管不到这一趟** —— 沙箱是模块级 `AtomicBool`
+（`workbench::paths::set_sandbox`），不写环境变量，子进程不继承 ⇒ 钩子进程走的是**客户端正式
+那棵数据树**，会真的写执行记录与归档。界面上已如实写明"别拿正式数据试"。
 
 ---
 
@@ -147,7 +238,7 @@
 
 ---
 
-## 6. 我未验证的一个假设（写完就停在这里了，供你参考）
+## 6. 那个假设 —— **2026-10-19 已验证成立**（原文保留，结论在末尾）
 
 > **假设**：最干净的做法**不是加新协议**，而是**工作台直接 spawn 一个真的钩子子进程去跑那份真的 G-code**。
 > 那个子进程连 `hook_ipc` 端点把真进度发给客户端窗口 —— 客户端收到的就是**真钩子消息**、
@@ -162,10 +253,240 @@
 > 那就要走"工作台发指令 → 客户端 spawn"这一条，需要新增一个 `FromHook` 变体。
 > 这一步我没查到底，**动手第 3 件事（§4.3）查的就是它**。
 
+> ### ★ 结论（2026-10-19）：**假设成立，反例没出现**
+>
+> 真钩子**不需要**客户端的 app handle / 窗口上下文 —— 它就是个普通子进程，靠
+> `internal_root_headless()` 找到端点、连 loopback 而已。所以走的是**假设那条**（工作台直接 spawn），
+> **一个 `FromHook` 变体都没加**，客户端侧与产品逻辑一行没改。已按这条落地（见 §4.4）并真跑通。
+
 ---
 
-## 7. 待你拍板
+## 7. 待你拍板（2026-10-19 当日销账）
 
-1. **§4.3 那三件事的核查结果** —— 决定了要不要加 hook 协议变体。
-2. **什么时候撤后处理预览档** —— 我建议等 ② 做完再撤（有对照物，也便于逐屏比）。
-3. **减速开关要不要做** —— 如果大文件已经够慢，第 3 步可以整个跳过。
+1. ✅ **§4.3 那三件事的核查结果** —— 已核完，见 §4.3。**结论：不加 hook 协议变体**
+   （真钩子是独立进程，工作台 spawn 一个即可）。
+2. ⏳ **什么时候撤后处理预览档** —— ② 已落地，**可以撤了**，但我建议**先不撤**：
+   留着当对照物（真 vs 演，一眼看出"预览"标记与那几颗按钮的差别），等下面第 3 条拍完板、
+   顺手确认过一次真机之后再一起撤。
+3. ❌ **减速开关要不要做** —— **要讨论**：实测 8.5 MB 只跑 **8.4 s**（预检约 6 s），
+   **不够慢**，进度一闪而过、截不下来；而正式构建是 release（会比 debug 更快），只会更不够看。
+   三条路，请你挑一条（我倾向 ②）：
+   - ① **换更大的件**：不改代码。要 30 s+ 大约得 30 MB 以上的件 —— 作者说的那份 23.8 MB
+     没找到，得另找或自己切一份大的（切一次要几十分钟，且仓库里放不下，只能本机存）。
+   - ② **开发专用减速**（`#[cfg(feature = "workbench")]` 的一个参数，比如 `--dev-slow-ms`，
+     只在进度事件之间加 sleep）：**只改时序不改状态**，符合 §3 那条纪律，正式包编不到。
+     代价是要在 `args.rs` / `hook.rs` 里开一个 workbench-only 的分支 —— 与 `DevScene` /
+     `DevFault` 那两个变体住在产品文件里是同一类格局（已有先例），但不算零成本。
+   - ③ **不做**：承认"真的一趟就是这么快"，把"看得清"这件事交给更大的件或截图连拍。
+
+> 附带一条：**判据 3 最后一步要人工点一次**（在客户端点「停止」，看它是不是真的停）。
+> 链路已经成立（真有一条连接，`Handle.connected()` 为真，不会再报"没有正在跑的处理"），
+> 但那一"点"我没法替你点。
+
+---
+
+## 8. 往"自动化矩阵"走：探查结论 + 方案（2026-10-19 深夜，待拍板）
+
+作者原话：「不只是选择，你给我一个自动化的方案呀 —— 我怎么触发它成功、怎么触发它失败、
+怎么触发它碰撞检测？模拟出来的真实可以做到吗？落盘的话，也到时候是用临时文件。」
+
+### 8.1 三条已**实测**的硬结论
+
+**① 临时根隔离成立，且零污染。** 做法（不加任何协议、不改产品代码）：
+
+```text
+临时根 T = target/dev-run/<档>-<时间戳>/
+  T/run/hook.port      ← 从客户端正式根抄过来的那个端口号（一行）★关键
+  T/run/app-state.json ← 从正式根抄（偏好跟着走，如 autoTowerPosition）
+  T/in.gcode           ← 夹具的副本
+spawn:  env MKP_SUPPORT_EASE_DATA=T  本程序 --Toml <预设> --Gcode T/in.gcode
+```
+
+为什么成立：`internal_root_headless` / `user_root_headless` 都认 `MKP_SUPPORT_EASE_DATA`（整个盖掉），
+而**端点只是一个读出端口号的普通文件**（`hook_ipc::PORT_FILE`）—— 所以"数据落临时、消息照旧发到客户端"两全。
+
+实测：临时根里留下了真记录 `T/user/gcode_history/2026-10-19/plate_*.{gcode,_meta.json,_original.gcode}`，
+**正式根 `user/gcode_history/2026-10-19/` 一条没多**；客户端窗口照样收到真 `Hello`
+（`hook_ui: 钩子来了：这一趟开始 gcode=…`）。
+副作用一条：客户端 `complete_archive` 去自己（正式）树找那条记录 ⇒ **找不到 ⇒ 放弃补全**（一条 warn），
+所以这一趟不会出现在报告页/历史里 —— 这正合"临时文件"的意，但要在界面上写明。
+
+**② 串行多档稳定。** 连跑 3 趟同一份夹具，客户端 3 条 `钩子来了` 全收到，互不干扰。
+
+**③ 碰撞那一问：现有夹具**不**触发，原因是硬的。**
+`rib-tall-min.gcode` 跑真钩子 ⇒ 54 ms 直接成功，**没问**。原因链：
+`decide_wiping` 判这一趟**不需要擦料**（G-code 里没有支撑/多材料特征）⇒ `wiping.needed=false`
+⇒ `tower.use_towers=false` ⇒ `detect_tower_collision` 第一行就 `return`（`collision.rs:599`）。
+而 `pipeline_tower_ask.rs` 那组测试之所以撞，是因为它**手搭 IR**（`ir.tower.use_towers = true`）
+绕过了擦料决策 —— 真钩子入口做不到这一点。
+⇒ **要真触发碰撞，夹具必须带"要擦料"的特征**（`; FEATURE: Support` 那一行是关键），
+即把 `pipeline_tower_ask.rs` 里的最小 GCODE **加上机型头**做成夹具。
+
+### 8.2 方案：一档一临时根 + 一键全跑 + 自动判定
+
+| 档 | 夹具 | 预设 | 真触发什么 | 自动判定依据 |
+| --- | --- | --- | --- | --- |
+| 1 成功（大） | `.5926.1.gcode` 8.5 MB | A1-fastv3.3 | 全流程 + 进度 + 结论 | 退出码 0 + `_meta.json` 无 `error` |
+| 2 成功（小） | 小件 | A1-fastv3.3 | 快速回归（60 ms） | 同上 |
+| 3 机型不匹配 | `.5926.1.gcode` | P1S-lite | 那一问（`hook.mismatch_question`） | 客户端出现 `question` + 结局 |
+| 4 挪塔碰撞 | **新造**：机型头 + `; FEATURE: Support` + 塔框内模型点 | A1-fastv3.3 | 第 6 步问句（`hook.tower_relocation_question`） | 同上 + `_meta.json` 的 `relocation` |
+| 5 硬失败 | 删掉机型头的件 | A1-fastv3.3 | `E_*` 硬错 | 退出码 1 + `_meta.json.error` |
+| 6 取消 | 8.5 MB | A1 | 用户按停止 | `_meta.json.cancelled` + `W_SYS_CANCELLED_001` |
+
+**"模拟出来的真实可以做到吗？"—— 可以。** 因为"触发条件"只来自输入（G-code + 预设），
+结局由真管线决定：进度、问句、错误码、产物都是真的。唯一"人造"的是夹具本身（与单元测试的
+fixture 同性质）。区别在于：**夹具只提供条件，不提供结论**。
+
+**自动化的诚实边界**（这是要拍板的）：
+
+- 1 / 2 / 5 可以**全自动**（跑 + 判定）。
+- 3 / 4 会停在问句上等答复（`ANSWER_TIMEOUT` = 120 s）。两条路：
+  - (a) 人点一下（客户端窗口本来就要给你看那一问，"够时间看"这条判据也靠它）；
+  - (b) 开发台**代答** —— 需要新增一条 workbench-only 的消息（工作台 → 客户端 → `HookView::answer`）。
+    这与 `DevScene` / `DevFault` 同一类格局，但确实要动一次协议。
+- 6 取消同理：要么人点「停止」，要么开发台加"跑 N 秒后自动取消"。
+
+### 8.3 待拍板
+
+1. **3/4/6 要不要代答（自动点）？** 不代答 = 每档需要人点一次，其余全自动；
+   代答 = 全自动，但要加一条 workbench-only 的协议消息。
+2. **夹具放哪**：建议 `crates/postprocess/tests/fixtures/dev/`（与测试夹具同族，只给开发台用；
+   不进正式包 —— 夹具是数据，不影响二进制）。
+3. **临时根保留几个**：建议留最近 10 个 + 界面上「清空」，跑完把路径给你（产物/记录都在那儿）。
+
+### 8.4 已实施（2026-10-19 当日，作者拍板后）
+
+作者拍板：**问句档先不代答**（不匹配 / 碰撞 / 取消都要人在客户端真操作）、**留最近 10 个临时根 + 清空**、
+**碰撞档必须有 `relocation` 否则判失败**、**取消档只认真取消**、**每档独立临时根串行**。
+
+**代码落点**（全在工作台这一侧，产品代码一行没改）：
+
+| 文件 | 干什么 |
+| --- | --- |
+| `src-tauri/src/workbench/app/devmatrix.rs` | **新**。六档表 / 临时根准备 / 串行 worker / 判定（`judge`）/ 最近 10 个 / 清空。含 6 条单测 |
+| `src-tauri/src/workbench/app/devreal.rs` | 抽出 `spawn_hook(toml, gcode, data_root)`（单趟入口也改用它，行为不变） |
+| `src/workbench/api.ts` / `views/DevPage.tsx` | `MatrixCase`/`MatrixVerdict`/`MatrixState` + 四条封装；「真实后处理测试矩阵」区块（2 秒轮询） |
+| `crates/postprocess/tests/fixtures/dev/` | **新**。`small-ok.gcode` / `collide-tower.gcode` / `broken-preset.toml` / `README.md` |
+
+**判定只读真凭据**（`_meta.json`），不看退出码猜：
+
+| 档 | 判据 | 实测结局 |
+| --- | --- | --- |
+| 小文件成功 | `error=null && !cancelled` | ✅ 101 ms，9 步全 complete |
+| 大文件成功 | 同上 | ✅ 8435 ms |
+| 硬失败 | `error` 含 `E_` | ✅ 退出码 2 + `E_TOML_PARSE_001` |
+| 挪塔碰撞 | **`relocation != null`**（否则判失败） | ✅ `relocation.choice=timeout` + 冲突点 `[30,30]` + 建议 X 挪 22.8mm + `W_COLLISION_RELOCATE_002` |
+| 机型不匹配 | 人工档：不是 `E_` 就算"问了"；`E_` 判失败 | ⏳ 见下面那条坑 |
+| 取消 | `cancelled && error` 含 `W_SYS_CANCELLED_001` | ⏳ 要人在客户端点一次 |
+
+**两个坑（都写进夹具 README 了）**：
+
+1. **缺 `printer_model` 不是硬失败** —— 管线很宽容，照常跑完判成功（实测 111 ms）。
+   所以"硬失败"档改用**坏 TOML**（`E_TOML_PARSE_001`）。
+2. **`rib-tall-min.gcode` 单独跑不会撞** —— 没有 `; FEATURE: Support` ⇒ 擦料决策判"不需要"
+   ⇒ `tower.use_towers=false` ⇒ `detect_tower_collision` 首行 return。
+   新夹具 `collide-tower.gcode` 补上那一行才真撞。
+
+**第三条坑（实施时才暴露）**：客户端窗口**没在听**时，机型不匹配走的是
+`MismatchPolicy::Refuse` ⇒ 直接 `E_CFG_MISMATCH_001`，**没有问句**。
+矩阵的判定会把它正确判成失败（"期望机型那一问，实际是硬错"），
+所以跑矩阵前**客户端必须真在听**（`run/hook.port` 存在且接得上）。
+这也说明"判定只读 `_meta.json`"这条口径是必要的 —— 换成"退出码非 0 就算问过了"就会撒谎。
+
+### 8.5 校准件接进矩阵 + 问句屏「停止并关闭」（2026-10-19 当日第二刀）
+
+作者拍板（这一刀的范围）：
+
+- 校准件**用仓库里现成的 3MF**，不用另造文件（"你就直接用我仓库里面的文件去跑"）；
+- 「那一问点下去已经晚了」按**加一颗「停止并关闭」**解决，不做多问句排队
+  （"这样就不用管多的操作了"）；
+- **预览档这一轮不删**（"等校准件到位再撤"）；顺手删掉 `成功·没有结果读数` 与
+  `成功·好几行警告` 两格（"历史残留的就不需要了"/"不能做就算了"）。
+
+#### 校准件这一档怎么真跑起来的（三段，全部走产品代码）
+
+1. **身份**：临时根里摆成切片器的形状 ——
+   `<根>/input/plate.gcode` + `<根>/origin.txt`（一行 = 3MF 绝对路径）。
+   `temp_root()` 取的是 **gcode 的上一级**，所以 `origin.txt` 必须放 `input/` 的**上一级**。
+   实测记录：`detail.calibration.identity3mf = "ZOffset"`、`verdict = "from_3mf"`。
+2. **切片件哪来的**：本机 Bambu Studio **有 CLI**，直接切仓库那份 3MF ——
+   `BambuStudio --slice 0 --outputdir /tmp/x presets/assets/models/ZOffset_Calibration_ext.3mf`
+   ⇒ `plate_1.gcode`，挤出包围盒 **119.511 × 16.063**，正好落在 `calibration_models.toml`
+   的 `zoffset-ext`（119.58 × 16.063，容差 0.5）里。已落仓为
+   `crates/postprocess/tests/fixtures/dev/calib-zoffset-ext.gcode`（121 KB），
+   **运行时不再依赖 Bambu Studio**（重生成方法写在夹具 README）。
+3. **判定**（两档，因为结局不同）：
+   - `calib-ok`：`error == null` **且** `detail.calibration.mode != null` **且** `profileId != null`
+     —— 认成校准件**并认到档**才算跑完；缺一项就判失败并说清缺哪项。
+   - `calib-question`：`error` 含 `W_` **且** `cancelled == true`（实测 `W_CALIB_MODE_001`）。
+
+★ 实测到的反直觉：**「问了没答」这种停下，`cancelled` 也是 `true`**（原文件没动、这一趟没跑）。
+所以这一档的判据不能写成"cancelled 为真就失败"——那是取消档的语义。
+
+★ 顺手修掉一个真 bug：判定里原本用 `err.contains("E_")` 认硬错，而
+**`W_CALIB_MODE_001` 里就含 `E_`**（"MOD**E_**001"），会把"停下"误判成硬失败。
+现在改成连着括号认：`is_hard_error` = `［E_` / `[E_`。
+
+#### 「那一问点下去已经晚了」：从死局到一键收场
+
+病根（不是缺排队，是**报错之后没有出路**）：
+
+1. 选项一点就 `setAnswering(...)`，问句屏随即让位给 hero（防连点，作者定的）；
+2. 这一答晚了一步（钩子已退 / 超时收场）⇒ 后端如实回「这一趟已经结束了」，
+   红字落在**标题右边**；
+3. 可问句屏已经让位 ⇒ **既没按钮、也关不掉框**。
+
+改法（`src/app/postprocess/questionUi.ts` 是纯判据，组件只照它渲染）：
+
+- **报错时把问句屏放回来**（`showAsk = asking && (!answering || err !== null)`）；
+- **报错且还在跑 ⇒ 只摆一颗「停止并关闭」**：先 `cancelPostProcess()`（**吞掉失败**：
+  钩子可能已经没了，那颗按钮的语义是"收场"不是"保证停成功"）→ 再 `dismiss()`；
+- `answering` **不再因为 `err` 松手**（以前一松手按钮就闪回来、人接着点接着错）。
+
+★ 正常问句（有问句、还没答）**不**给这颗 —— 那一屏本来就有「终止」，多一颗同义按钮只会让人犹豫。
+
+#### 本轮验证
+
+| 项 | 结果 |
+| --- | --- |
+| 校准件身份（3MF → `ZOffset`） | ✅ 记录里 `identity3mf=ZOffset` / `verdict=from_3mf` |
+| 校准件问句推到界面 | ✅ 客户端日志 `kind=calibration-mode` |
+| 「问了没答」收场 | ✅ `W_CALIB_MODE_001` + `cancelled:true` ⇒ `calib-question` 判通过 |
+| 校准件**跑完**（`calib-ok`） | ⏳ 要在客户端真答一次（「直接校准」或「先打印」）—— 这一"答"没法自动化 |
+| 「停止并关闭」 | 逻辑已落地（纯判据 + 逃生按钮）；真机验需在客户端制造一次"答晚了" |
+| 删两格预览场景 | ✅ `devsim::scenes()` / `scene.ts` / `hook_ui.rs` 三处同步 |
+
+### 8.6 撤掉后处理「预览」整组（2026-10-19 当日第三刀）
+
+作者：「把预览全部取消吧」。前置条件是 8.5 那两档（校准件）真入口跑通了。
+
+**撤掉的九格 → 真入口里同一件事在哪**：
+
+| 撤掉的预览格 | 真入口 |
+| --- | --- |
+| 成功 / 失败 / 已停止 / 机型不匹配那一问 | 矩阵 `small-ok` / `big-ok` / `hard-fail` / `mismatch` |
+| 那一问 · 等超时 | 矩阵 `mismatch` 不理它（两分钟自己收场） |
+| 那一问 · 点下去已经晚了 | 真机就会遇到；报错那一屏有「停止并关闭」（见 8.5） |
+| 跑着 · 收进后台 | 真跑起来点那颗「后台运行」 |
+| 校准件 · 问怎么跑 / 等超时 / 先打印成功 / 直接校准成功 | 矩阵 `calib-ok` / `calib-question` |
+| 碰撞 · 问要不要挪塔 | 矩阵 `collision` |
+
+**唯一留下**（当时）：`postprocess-running`（处理中·停住不动）—— 真跑那一屏会自己往前跑，
+要**定格**下来改样式 / 截图，只能靠演。
+
+**同日追加：这一格也撤了**（作者指着截图：「这个不需要了吧」）⇒ **后处理那一组一格都不剩**。
+定格的需求改由矩阵 `big-ok`（8.5 MB / 约 8 秒）或直接对真跑那一屏截图承担。
+判据再次反转：`the_postprocess_group_is_gone_from_the_dev_desk`（`pp.is_empty()`）。
+★ 演出引擎（`crate::devsim` 的 `Mode` / `Options` / `drive`）**一行没拆** ——
+假钩子 CLI（`src/bin/hook-sim.rs`）还在用；撤的只是"开发台上架的那份清单"。
+
+配套：`scene.ts` 层类表只剩那一格；`PostProcessModal` 里两处
+`useDevPreviewNonce('postprocess-answer-stale' | 'postprocess-backgrounded')` 撤掉
+（`setErr` / `dismiss` 是产品行为，没动）。
+
+★ **判据反过来了**（`the_postprocess_group_keeps_only_the_frozen_running_frame`）：
+从"四档都在"改成"四档都不在、只剩一格" —— 防止以后有人顺手加回来"方便调试"，
+那样开发台又会变回"真功能只有演的那些"。
+
+★ **给用户的一句**：改完开发台**要重启工作台**才看得见（工作台走 `target-workbench/`，
+不随客户端的 `target/debug/` 更新）。截图上"没看到校准两档"就是这个原因，代码里已经有了。

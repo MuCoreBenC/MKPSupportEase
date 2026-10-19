@@ -526,16 +526,15 @@ impl HookView {
          *     除了演出，还要把 slug 推给前端，由弹窗自己认领；
          *   · `backgrounded`   —— 跑着的时候被踢到后台（标题栏那枚胶囊 + 详情面板）。
          *     这一步是**界面自己点**「后台运行」，所以也只推 slug；
-         *   · `success-no-metrics` —— 老记录那种成功：结果屏上没有读数那条。
+         * ★ 2026-10-19：「成功 · 没有结果读数」「成功 · 好几行警告」两格**已从场景表删掉**
+         *   （作者：「历史残留的就不需要那一个了」/「不能做就算了」）。
+         *   `devsim::Options` 里那两档能力**留着** —— 它是演出引擎，
+         *   不因开发台少两格就把能力也拆了。
          */
         let ask_wait =
             (tail == Some("question-timeout")).then(|| std::time::Duration::from_secs(12));
         /* 这两档要额外通知前端（红字 / 踢后台都是界面本地状态） */
         let tell_ui = matches!(tail, Some("answer-stale" | "backgrounded"));
-        /* 老记录那种成功：跑成了，但没有那包读数 */
-        let metrics = tail != Some("success-no-metrics");
-        /* 「成功 · 好几行警告」：框身被警告撑高那一档（验下面那张事实表） */
-        let many_warnings = tail == Some("success-long-warning");
         /* 挪塔那一问（2026-10-18）：演在"那一问"那一屏，带画布几何 */
         let tower_relocate = tail == Some("relocate-question");
         /*
@@ -562,9 +561,7 @@ impl HookView {
             ask_wait
         };
         let mode = match tail {
-            Some("running" | "backgrounded" | "success-no-metrics" | "success-long-warning") => {
-                Some(crate::devsim::Mode::Success)
-            }
+            Some("running" | "backgrounded") => Some(crate::devsim::Mode::Success),
             Some("question-timeout" | "answer-stale") => Some(crate::devsim::Mode::Question),
             Some("relocate-question") => Some(crate::devsim::Mode::Success),
             /* 校准件那几档都用「那一问」的骨架演（机型两边给成一样的，免得先弹机型那一问） */
@@ -611,9 +608,8 @@ impl HookView {
                     `calib_choice` / 超时判，不看它 */
                     calib_question: calib_question.then_some(calib_choice == Some("direct")),
                     calib_choice,
-                    metrics,
-                    many_warnings,
                     tower_relocate,
+                    ..crate::devsim::Options::default()
                 },
                 &postprocess::diag::CancelToken::new(),
             );

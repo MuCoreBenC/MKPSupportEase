@@ -753,6 +753,17 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::devfault::wb_dev_faults,
         app::devfault::wb_dev_fault_arm,
         app::devfault::wb_dev_fault_clear,
+        // **开发台 · 运行真实后处理**（2026-10-19）：起一个**真的钩子子进程**跑真 G-code
+        // （`--Toml` + `--Gcode`，与切片器注册的那一行同形）⇒ 客户端窗口显示的是真进度、
+        // 真问句、真结论，那几颗真业务按钮也真的能停。**不加协议变体、不改产品逻辑**
+        // （见 `app::devreal` 模块头）。
+        app::devreal::wb_dev_run_real,
+        // **开发台 · 真实后处理测试矩阵**（2026-10-19）：六档各跑一个独立临时根，
+        // 串行、只按真凭据判定。问句档 / 取消档要人在客户端窗口真操作。
+        app::devmatrix::wb_dev_matrix_cases,
+        app::devmatrix::wb_dev_matrix_state,
+        app::devmatrix::wb_dev_matrix_start,
+        app::devmatrix::wb_dev_matrix_clear,
     ])
 }
 

@@ -34,25 +34,16 @@ export type DevSlot = 'full' | 'titlebar' | 'field' | 'modal' | 'note'
 
 /** 现存场景 → 层类。**加一格就在这儿加一行**（认不出时按 `modal` 兜底）。 */
 const SLOT_OF: Record<string, DevSlot> = {
-  /* 后处理那一组（演出，不走本 Provider —— 但留在这儿好让层类表完整） */
-  'postprocess-running': 'full',
-  'postprocess-success': 'full',
-  'postprocess-fail': 'full',
-  'postprocess-cancel': 'full',
-  'postprocess-question': 'full',
-  /* 那一问的两种收场：仍是同一扇窗（'full'），只是 hero / 标题栏换一档 */
-  'postprocess-question-timeout': 'full',
-  'postprocess-answer-stale': 'full',
-  /* 碰撞时那一问（两幅俯视图 + 翻页说明，2026-10-18） */
-  'postprocess-relocate-question': 'full',
-  'postprocess-backgrounded': 'full',
-  'postprocess-success-no-metrics': 'full',
-  'postprocess-success-long-warning': 'full',
-  /* 校准件那一问（同一扇窗，hero 换一档） */
-  'postprocess-calib-question': 'full',
-  'postprocess-calib-print-done': 'full',
-  'postprocess-calib-direct-done': 'full',
-  'postprocess-calib-timeout': 'full',
+  /*
+   * 后处理那一组（演出）**整组没了**（2026-10-19）。
+   *
+   * 作者先「把预览全部取消吧」，再指着最后一格「处理中（停住不动）」说「这个不需要了吧」。
+   * 于是这里没有 `postprocess-*` 的条目 —— 后处理那一页只剩两件真事：
+   * 「运行真实后处理」（单趟）与「真实后处理测试矩阵」（八档，只按 `_meta.json` 真凭据判）。
+   *
+   * 层级表里 `full` 这一档照旧留着：它是"跑着时整扇窗都归它"的**产品**层类
+   * （`PostProcessModal` 在跑着的时候本来就用它），不是开发台专用的。
+   */
   /* 菜单 / 弹层 */
   'delete-confirm': 'field',
   /* 标题栏 */

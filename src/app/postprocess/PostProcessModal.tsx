@@ -44,7 +44,7 @@ import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
 import { HeadNote, Modal, summarizeNotes } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
-import { useDevPreviewNonce } from '../dev/useDevPreview'
+import { questionUiState } from './questionUi'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
@@ -759,31 +759,20 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   const drag = useTitlebarDrag()
 
   /*
-   * **开发台**：`postprocess-answer-stale`（那一问还挂着、钩子已经没了）。
+   * ★★ 2026-10-19：**撤掉两处开发台钩子**（作者：「把预览全部取消吧」）。
    *
-   * 那一行红字是"点按钮那一下才产生"的本地状态，后端造不出来 —— 所以这一档由开发台
-   * 把场景推过来，这里自己把同一句话摆上去（八秒后自己收），看的正是**位置与省略号**
-   * （作者 2026-10-17：「比如触发红字的」）。正式包里收不到这个事件，恒为 0。
-   */
-  const staleNonce = useDevPreviewNonce('postprocess-answer-stale')
-  useEffect(() => {
-    if (staleNonce === 0) return
-    setErr('刚才那个问题已经结束了，不用再回答')
-    const timer = window.setTimeout(() => setErr(null), 8000)
-    return () => window.clearTimeout(timer)
-  }, [staleNonce])
-
-  /*
-   * **开发台**：`postprocess-backgrounded`（跑着的时候点了「后台运行」）。
+   * 以前这里有 `/dev/preview.tsx` 的 `useDevPreviewNonce(...)` 两个分支：
    *
-   * 那一步是这一屏自己的动作（`dismiss`），开发台替用户点一下 —— 于是标题栏那枚
-   * 「有事在跑」的胶囊与它的详情面板才看得见（跑着才有的状态）。
+   * | 撤掉的戳 | 以前演的是什么 | 现在怎么看到 |
+   * | --- | --- | --- |
+   * | `postprocess-answer-stale` | 那一问还挂着、钩子已经没了时点一下，红字落在标题右边 | **真跑就能遇到**：矩阵 `collision` 档不答、等它超时后再点，红字会真出现 —— 而且现在报错那一屏有「停止并关闭」（见 `questionUi.ts`） |
+   * | `postprocess-backgrounded` | 跑着的时候点「后台运行」 | 真跑起来点那颗按钮 —— 真的会收走，标题栏那枚胶囊是真的 |
+   *
+   * 两处都是"界面本地动作"，`dismiss` 与 `setErr` 本身都是产品行为，**没动**；
+   * 撤的只是"由开发台替你点"这两条入口。`devTrigger` 收到这两个 slug 时
+   * 客户端还会把 slug 推给前端（`hook_ui` 那条 `tell_ui` 分支），但没有组件再接它 ——
+   * 无害，且留着能说明"这一格曾经存在过"。
    */
-  const backNonce = useDevPreviewNonce('postprocess-backgrounded')
-  useEffect(() => {
-    if (backNonce === 0) return
-    dismiss()
-  }, [backNonce, dismiss])
 
   const finished = run?.finished ?? null
   const running = run !== null && finished === null
@@ -798,7 +787,18 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    * 问句那一屏只在"还没答"的时候摆。答完到钩子收掉问句之间，这一屏让位给 hero
    * （不然按钮会一直立在那儿给人点 —— 见上面 `answering` 那段）。
    */
-  const showAsk = asking && answering === null
+  /**
+   * 摆不摆问句屏 / 要不要给逃生按钮 —— 判据住在 `questionUi.ts`（纯函数）。
+   *
+   * ★ 2026-10-19：**报错时问句屏要回来**。以前 `err` 一出就把按钮收走，
+   * 于是"答晚了一步"变成死局（既没按钮也关不掉框）—— 作者真机踩到的就是这个。
+   */
+  const { showAsk, offerStopAndClose } = questionUiState({
+    running,
+    asking,
+    answering: answering !== null,
+    err,
+  })
 
   useEffect(() => {
     if (answering === null) return
@@ -807,15 +807,18 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       q !== null &&
       q.questionKind === answering.kind &&
       q.deadlineUnixMs === answering.deadline
-    /* 问句换了人 / 已经收掉 / 这一次答复报错了 ⇒ 松手（按钮回来，红字照旧） */
-    if (!same || err !== null) {
+    /* 问句换了人 / 已经收掉 ⇒ 松手。
+       ★ 报错**不再**松手（2026-10-19）：一松手按钮就闪回来、而那一答其实没成功，
+       人接着点接着错。留着 `answering` 让「停止并关闭」这条逃生通道明确
+       —— 见 `questionUi.ts` 那段。 */
+    if (!same) {
       setAnswering(null)
       return
     }
     /* 兜底：那一问的自动终止是 118 秒，走完必然换屏；这里只是防"永远" */
     const t = window.setTimeout(() => setAnswering(null), 130_000)
     return () => window.clearTimeout(t)
-  }, [answering, run?.question, err])
+  }, [answering, run?.question])
   /*
    * 收尾窗口：跑完那一刻**先让条子把最后几个点走完**（95% → 100%），再切结果态。
    * 作者 2026-10-14：「最后 95% 的时候就直接结束消失了，出现了结果页面」—— 太突兀。
@@ -1070,6 +1073,24 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       .finally(() => setBusy(false))
   }
 
+  /**
+   * **逃生：先请求停止、再收窗**（2026-10-19，作者：「出错的时候加一个停止并关闭的按钮，
+   * 这样就不用管多的操作了」）。
+   *
+   * `cancelPostProcess` 在这一刻**可能失败**（钩子已经退了 ⇒ 后端如实回
+   * 「这一趟已经结束了，没有正在跑的处理」）。那句错在这里**故意吞掉**：
+   * 这颗按钮的语义是"把这一屏收场"，不是"保证停成功"——
+   * 吞掉之后 `dismiss()`，人回到主界面，不用再跟红字纠缠。
+   */
+  const stopAndClose = () => {
+    void api
+      .cancelPostProcess()
+      .catch(() => {
+        /* 钩子已经不在了 —— 正是这一颗按钮要处理的那种局面，不往界面上抛 */
+      })
+      .finally(() => dismiss())
+  }
+
 
   /*
    * 顶部那一块（跑着 hero / 问句警告 / 结果 hero）——四种长相收成一个变量，
@@ -1181,6 +1202,18 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
             <span className={s.previewTag}>预览模式 · 不接真实后处理</span>
             <Btn variant="accent" onClick={dismiss}>
               关闭预览
+            </Btn>
+          </>
+        ) : offerStopAndClose ? (
+          /*
+           * **逃生通道**（2026-10-19，作者：「出错的时候加一个停止并关闭的按钮，
+           * 这样就不用管多的操作了」）。只摆这一颗 —— 报错之后那些正常按钮
+           * （强制继续 / 终止 / 停止）都已经没意义，多摆一颗只会让人以为还能继续答。
+           */
+          <>
+            <span className={s.previewTag}>这一趟对不上了</span>
+            <Btn variant="accent" onClick={stopAndClose}>
+              停止并关闭
             </Btn>
           </>
         ) : showAsk && run.question !== null ? (
