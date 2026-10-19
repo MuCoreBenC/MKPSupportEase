@@ -106,6 +106,8 @@ export default function NumberField({
    */
   const [fieldFocused, setFieldFocused] = useState(false)
   const [fieldHovered, setFieldHovered] = useState(false)
+  /** 失焦闸正在拉焦点回来的标记：别重复排队，也别让气泡闪一下 */
+  const recaptureRef = useRef(false)
 
   /** 连发期间的当前值放 ref 里：interval 里读 state 会读到旧值 */
   const numRef = useRef(value)
@@ -368,12 +370,20 @@ export default function NumberField({
         onFocus={() => setFieldFocused(true)}
         onBlur={(e) => {
           /*
-           * 失焦闸（见 blurBlocked）：不合法就不放走。blur 没法可靠地 preventDefault
-           * 取消，focus() 把焦点抢回来 —— 气泡与原文都原样留着，等改合法或 Esc。
+           * 失焦闸（见 blurBlocked）：不合法就不放走。同步 focus() 会被这次
+           * mousedown 的默认焦点落点盖掉（实测焦点照样丢、光标没了）——
+           * 所以异步补一枪：等浏览器把这次点击的焦点安置完，再把焦点抢回来。
+           * 抢回期间 fieldFocused 保持 true，气泡不闪；元素都没了（模态框关了）
+           * 就自然跳过，不会有循环。
            */
           if (blurBlocked()) {
             e.preventDefault()
-            e.currentTarget.focus()
+            if (recaptureRef.current) return
+            recaptureRef.current = true
+            window.setTimeout(() => {
+              recaptureRef.current = false
+              inputRef.current?.focus()
+            }, 0)
             return
           }
           setFieldFocused(false)
