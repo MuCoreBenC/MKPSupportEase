@@ -313,6 +313,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     saved,
     draft,
     view,
+    limits,
     dirty,
     dirtyAxes,
     savedNote,
@@ -849,6 +850,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               saved={saved}
               draft={draft}
               view={view}
+              limits={limits}
               activeAxis={plate.axis}
               canType={canPick}
               onType={typeAxis}

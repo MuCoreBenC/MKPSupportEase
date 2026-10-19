@@ -24,7 +24,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { isAppError } from '../../api/contract'
-import type { AppError, Axes, Preset } from '../../api/contract'
+import type { AppError, Axes, Preset, AxisLimit, AxisLimits } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
 import { useDeliveryRevision } from '../state/deliveryState'
 
@@ -134,6 +134,21 @@ export function usePreset(sel: Selection): PresetState {
           const n = Number(row.value)
           return Number.isFinite(n) ? n : null
         }
+        /*
+         * 三轴的**注册表范围**（同一份配方行本来就带着 min/max，不多花一趟 IPC）：
+         * 校准的读数框、Z 板 / XY 板的点选都按它夹 —— 与参数页同一套限制
+         * （作者 2026-10-20：「校准的也要消费注册表的限制，z 就不能为负数」）。
+         * 哪一轴没在注册表里登记（行缺席）就整项不设限。
+         */
+        const limitOf = (paramKey: string): AxisLimit => {
+          const row = params.find((p) => p.key === paramKey)
+          return { min: row?.min, max: row?.max }
+        }
+        const axisLimits: AxisLimits = {
+          x: limitOf(OFFSET_KEYS.x),
+          y: limitOf(OFFSET_KEYS.y),
+          z: limitOf(OFFSET_KEYS.z),
+        }
         /* 云端默认那一套：你那份里读不出来的那几格回落到它 */
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
@@ -160,6 +175,7 @@ export function usePreset(sel: Selection): PresetState {
           bundlePath: file.path,
           path: copy?.path ?? file.path,
           axes,
+          axisLimits,
           speed,
           /* 保存校准写它；null = 还没有本地这份（先另存为本地预设才有得存）
              ★ 本仓术语是 `preset / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */

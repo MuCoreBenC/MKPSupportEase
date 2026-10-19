@@ -238,6 +238,21 @@ export default function NumberField({
   const bad = invalid || outOfRange
 
   /*
+   * 即时校验提示（2026-10-20，作者：「只有红色描边还不够」）：框下面**用文字**当场说清
+   * 为什么不行。判据全在本地 `text` 上，所以打字过程中就出、不用等 blur 提交。
+   * 正在打到一半的符号（`-` / `+` / `.`）不出，免得每敲一个符号闪一次红字。
+   */
+  const rawTyping = text.trim()
+  const hint = ((): string | null => {
+    if (disabled) return null
+    if (rawTyping === '') return '数值不能为空'
+    if (rawTyping === '-' || rawTyping === '+' || rawTyping === '.') return null
+    if (!Number.isFinite(typed)) return '不是有效的数字'
+    if (outOfRange) return `超出范围 ${min ?? '不限'} ~ ${max ?? '不限'}`
+    return invalid ? '不是有效的数字' : null
+  })()
+
+  /*
    * 宽度按能出现的字符数算，不写死一个 px：
    * 整数位（看 min/max 的量级）+ 小数点与小数位 + 负号。
    */
@@ -276,7 +291,7 @@ export default function NumberField({
     </button>
   )
 
-  return (
+  const box = (
     <span
       className={disabled ? s.boxOff : s.box}
       data-size={size}
@@ -313,6 +328,7 @@ export default function NumberField({
         aria-label={label}
         aria-invalid={bad || undefined}
         title={bad && range !== undefined ? `超出${range}` : range}
+        placeholder={min !== undefined || max !== undefined ? `${min ?? '不限'} ~ ${max ?? '不限'}` : undefined}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onBlur={commitTyped}
@@ -345,5 +361,20 @@ export default function NumberField({
         </span>
       )}
     </span>
+  )
+
+  /*
+   * 有问题才包提示层：外层 relative 的 span，提示**绝对定位**挂在框正下方 ——
+   * 不挤动任何一行的布局（共用件铁律：没有提示的稿一个像素不动）。
+   */
+  return hint !== null ? (
+    <span className={s.withHint}>
+      {box}
+      <span className={s.hint} role="status">
+        {hint}
+      </span>
+    </span>
+  ) : (
+    box
   )
 }

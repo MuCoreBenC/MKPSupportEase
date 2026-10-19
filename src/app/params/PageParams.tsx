@@ -48,7 +48,7 @@ import SearchField from './SearchField'
 import Icon from '../shell/icons'
 import TowerMap from './TowerMap'
 import type { TowerCoreProps } from './TowerCoreSvg'
-import { useParams, valueText } from './useParams'
+import { invalidNumberText, useParams, valueText } from './useParams'
 import type { HistoryEntry, ParamDef } from './useParams'
 /* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
 import { EDIT_TEXT } from '../presets/presetTree'
@@ -648,7 +648,7 @@ export default function PageParams({
 
   /** 保存确认弹层要显示的改动列表。from = 已保存值，to = 草稿值 */
   const changedEntries = useMemo(() => {
-    const entries: { key: string; label: string; from: string; to: string }[] = []
+    const entries: { key: string; label: string; from: string; to: string; bad: string | null }[] = []
     for (const def of u.defs) {
       if (!u.dirtyOf(def.key)) continue
       entries.push({
@@ -656,10 +656,14 @@ export default function PageParams({
         label: def.label,
         from: valueText(def, u.savedValueOf(def.key)),
         to: valueText(def, u.valueOf(def.key)),
+        /* 即时校验的同一份判据（见 invalidNumberText）：超范围的项不许保存 */
+        bad: invalidNumberText(def, u.valueOf(def.key)),
       })
     }
     return entries
   }, [u])
+  /* 超出取值范围的改动 —— 弹层里列出来、把「确认保存」灰掉（作者 2026-10-20） */
+  const invalidEntries = changedEntries.filter((e) => e.bad !== null)
 
   const confirmSave = () => {
     u.save()
@@ -1576,11 +1580,36 @@ export default function PageParams({
                   </li>
                 )}
               </ul>
+              {/*
+                **范围闸的提示**（2026-10-20，作者：「超出范围了还允许我保存」）：
+                有超范围项就把这一块摆出来、把「确认保存」灰掉 —— 后端的 patch 不做
+                范围校验，落盘前唯一的闸在这里（`save` 里还有一道兜底）。
+              */}
+              {invalidEntries.length > 0 && (
+                <div className={s.sheetWarn} role="alert">
+                  <p className={s.sheetWarnTitle}>
+                    有 <b>{invalidEntries.length}</b> 处超出取值范围，不能保存：
+                  </p>
+                  <ul className={s.sheetWarnList}>
+                    {invalidEntries.map((e) => (
+                      <li key={e.key}>
+                        {e.label} —— {e.bad}（当前 {e.to}）
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskSave(false)}>
                   取消
                 </button>
-                <button type="button" className={s.primary} onClick={confirmSave}>
+                <button
+                  type="button"
+                  className={s.primary}
+                  disabled={invalidEntries.length > 0}
+                  title={invalidEntries.length > 0 ? '先把超范围的值改回范围内再保存' : undefined}
+                  onClick={confirmSave}
+                >
                   确认保存
                 </button>
               </div>

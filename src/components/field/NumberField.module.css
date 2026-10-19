@@ -71,6 +71,36 @@
   outline: none;
 }
 
+/* 输入为空时的灰色区间占位（作者 2026-10-20：「空着的时候怎么没有灰色字显示区间」） */
+.input::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/*
+ * 即时校验提示（只有出问题才包这一层 —— 没问题的稿一个像素不动）：
+ * 相对定位的外层 + 绝对定位的提示，提示**不占布局**，压在下一行上面也只是一小截。
+ */
+.withHint {
+  position: relative;
+  display: inline-flex;
+}
+
+.hint {
+  position: absolute;
+  top: calc(100% + 3px);
+  right: 0;
+  z-index: 2;
+  padding: 2px 8px;
+  border: 1px solid rgb(229 72 77 / 45%);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: #e5484d;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 .unit {
   display: flex;
   align-items: center;

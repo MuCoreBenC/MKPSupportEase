@@ -441,6 +441,29 @@ export function valueText(def: ParamDef | undefined, raw: string): string {
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`
 
+/**
+ * 数字字段的**即时校验**：返回一句人话原因，`null` = 合法（非数字控件恒 `null`）。
+ *
+ * 两处消费：
+ *   · 参数行 / 步进器边上那行红字（打字过程中就出，见 `NumberField` 的 hint ——
+ *     它自己有一份本地判据，两边口径一致：空 / 不是数 / 超出 min~max）；
+ *   · **保存闸**：后端 `commit_preset_draft` 的 patch 只换值、不做范围校验
+ *     （`patch_preset_toml` 头注），所以"超范围不许保存"只能设在界面 ——
+ *     保存确认弹层把超范围项列出来、灰掉「确认保存」，`save` 里再拦一道兜底。
+ */
+export function invalidNumberText(def: ParamDef, raw: string): string | null {
+  if (def.field.control !== 'number') return null
+  const t = raw.trim()
+  if (t === '') return '数值不能为空'
+  const n = Number(t)
+  if (!Number.isFinite(n)) return '不是有效的数字'
+  const { min, max } = def.field
+  if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
+    return `超出范围 ${min ?? '不限'} ~ ${max ?? '不限'}`
+  }
+  return null
+}
+
 /** 现在（UTC epoch 秒）—— 历史条目落盘时刻用（与后端 `ts_unix` 同一口径） */
 function nowSec(): number {
   return Math.floor(Date.now() / 1000)
@@ -1676,6 +1699,21 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const save = useCallback(() => {
     if (combo === null) return
     /*
+     * **范围闸**（2026-10-20）：超出注册表 min/max 的草稿不许落盘 —— 后端的 patch
+     * 不做范围校验，这一道只能设在界面。正常路径到不了这里：保存确认弹层会先列出
+     * 超范围项、把「确认保存」灰掉（见 PageParams）；这里是 Ctrl+S / 直调的兜底。
+     */
+    const badKeys = Object.keys(draft).filter((key) => {
+      const def = defOf(key)
+      return def !== undefined && invalidNumberText(def, draft[key]) !== null
+    })
+    if (badKeys.length > 0) {
+      setSavedNote(
+        `保存失败：${badKeys.map((k) => defOf(k)?.label ?? k).join('、')} 超出取值范围，改回来再保存`,
+      )
+      return
+    }
+    /*
      * **先落盘**：把草稿提交成"本地预设"（云端线另存 / 用户线写回，后端 `commit_preset_draft`）。
      * 本地这一层只是"这一屏看得到的已保存值"，真值在用户根 —— 两句状态由 `commitDraft` 写。
      */
@@ -1691,7 +1729,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setPast([])
     setFuture([])
     setLog(log.map((e) => (e.state === 'draft' ? { ...e, state: 'saved', batch } : e)))
-  }, [at, batchesByCombo, commitDraft, combo, draft, log, saved, savedBatches])
+  }, [at, batchesByCombo, commitDraft, combo, defOf, draft, log, saved, savedBatches])
 
   /**
    * 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销）。
