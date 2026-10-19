@@ -306,6 +306,7 @@ mod win {
         visible: bool,
         iconic: bool,
         topmost: bool,
+        cloaked: bool,
         has_title: bool,
     }
 
@@ -320,6 +321,30 @@ mod win {
         fn GetWindowLongW(hwnd: Hwnd, index: i32) -> i32;
         fn GetDpiForWindow(hwnd: Hwnd) -> u32;
         fn SetProcessDPIAware() -> i32;
+    }
+
+    #[link(name = "dwmapi")]
+    extern "system" {
+        fn DwmGetWindowAttribute(hwnd: Hwnd, attr: u32, out: *mut i32, size: u32) -> i32;
+    }
+
+    /// `DwmGetWindowAttribute` 的 `DWMWA_CLOAKED`。
+    const DWMWA_CLOAKED: u32 = 14;
+
+    /*
+     * ★★ **DWM 的"隐形窗"必须排除**（2026-10-20）：
+     * `IsWindowVisible` 对下面这两类窗**都说是可见的**，而它们用户根本看不见：
+     *
+     * - **另一个虚拟桌面**上的窗（Windows 的虚拟桌面就是把窗"cloak"掉）；
+     * - UWP / 系统组件那些留着句柄但内容不显示的窗（实测就有一扇全屏的这类窗压在
+     *   最前面，于是"切片器被盖住 100%" —— 卡片因此一摆出去就被收掉）。
+     *
+     * ⇒ 拿 `DWMWA_CLOAKED` 问一次；被 cloak 的窗不算"盖住"。
+     */
+    fn is_cloaked(hwnd: Hwnd) -> bool {
+        let mut v: i32 = 0;
+        let ok = unsafe { DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut v, 4) };
+        ok == 0 && v != 0
     }
 
     /// `GetWindowLongW` 的 `GWL_EXSTYLE` 与其中 `WS_EX_TOPMOST` 那一位。
@@ -342,10 +367,14 @@ mod win {
             EnumWindows(Some(collect_cb), std::ptr::addr_of_mut!(entries) as isize);
         }
 
-        /* ② 切片器那扇主窗：它的 pid、它有标题、rect 读得到 */
-        let bbs_index = entries.iter().position(|e| {
-            e.pid == bbs_pid as u32 && e.has_title && e.rect.width() > 0 && e.rect.height() > 0
-        });
+        /*
+         * ② 切片器那扇主窗 —— ★★ **判据问 `ax` 要，这里不自作主张**（2026-10-20）：
+         * BBS 一个进程有好几扇**有标题**的顶层窗，排在最前的常常是隐藏的那扇；
+         * 这里要是自己"取第一个 pid 对得上的"，就会挑到一扇看不见的窗 ⇒ 判成
+         * "不在屏上" ⇒ 卡片刚摆出去就被收掉（作者报的"几秒钟就消失"）。
+         */
+        let main_hwnd = crate::ax::main_window_of(bbs_pid as u32);
+        let bbs_index = main_hwnd.and_then(|h| entries.iter().position(|e| e.hwnd == h));
         let Some(idx) = bbs_index else {
             /* 一个都找不到 = 最小化 / 隐藏 / 已经退了 */
             return Some(super::SlicerWindow {
@@ -368,17 +397,38 @@ mod win {
         /* ③ 看它**前面**那些窗：别的进程、非浮层、真在屏上的，与它重叠了多少 */
         let area = bbs.rect.area();
         let mut covered = 0.0_f64;
+        /* 盖得最多的那一个（pid, 占比）—— 只为了日志里能说出"是谁" */
+        let mut worst: (Option<u32>, f64) = (None, 0.0);
         if area > 0.0 {
             for e in &entries[..idx] {
-                if !e.visible || e.iconic || e.topmost || e.pid == bbs.pid {
+                if !e.visible || e.iconic || e.topmost || e.cloaked || e.pid == bbs.pid {
                     continue;
                 }
                 let w = (e.rect.right).min(bbs.rect.right) - (e.rect.left).max(bbs.rect.left);
                 let h = (e.rect.bottom).min(bbs.rect.bottom) - (e.rect.top).max(bbs.rect.top);
                 if w > 0 && h > 0 {
-                    covered += f64::from(w) * f64::from(h) / area;
+                    let share = f64::from(w) * f64::from(h) / area;
+                    covered += share;
+                    /* 记住盖得最多的那一个 —— 卡片被收掉时日志要能说出"是谁盖的" */
+                    if share > worst.1 {
+                        worst = (Some(e.pid), share);
+                    }
                 }
             }
+        }
+        /*
+         * ★ **被收掉要说清是谁压的**（2026-10-20 作者报"卡片几秒钟就消失"）：
+         * 光有 `covered` 一个数看不出该怪谁（实测就有过"最前面那份 BBS 上方压着
+         * 编辑器的全屏窗"这种真·被盖住的情况）。带上 pid，日志一查就知道是
+         * 抬窗没抬动（多半是我们自己那扇），还是用户真的切到别的软件去了。
+         */
+        if covered >= super::COVERED_ENOUGH {
+            tracing::info!(
+                slicer = bbs_pid,
+                covered_by = worst.0,
+                covered,
+                "切片器窗口被别的窗压住"
+            );
         }
         /*
          * ★ 与 mac 侧同一条：**量化成 1/20 步长**再交出去 —— 这个值会被拿去当
@@ -429,6 +479,7 @@ mod win {
             visible: unsafe { IsWindowVisible(hwnd) != 0 },
             iconic: unsafe { IsIconic(hwnd) != 0 },
             topmost: style & WS_EX_TOPMOST != 0,
+            cloaked: is_cloaked(hwnd),
             has_title: unsafe { GetWindowTextLengthW(hwnd) > 0 },
         });
         1
