@@ -6,10 +6,12 @@
  * 没有你的一份（还没在资源库里「另存为本地预设」）时保存被拦（按钮灰着 + 这里第二道）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
 /* 「保存后的重切引导」共用开关（与参数页同一个键，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
+/* 校准落盘 = 本机文件面变了 ⇒ 广播，别的页（参数弹窗的 fileValues 那层）按代次重读 */
+import { deliveryMutated } from '../state/deliveryState'
 import { LADDER } from './plateLadder'
 import {
   matchXY,
@@ -98,19 +100,30 @@ export function useCalibration(preset: PresetState): Calibration {
 
   /* 预设就位即新的真相：偏移换成它带来的那一份，草稿一并作废
      —— 草稿是"相对上一份预设点出来的增量"，换了预设就没有意义了。
-     没就位（没选齐 / 正在取 / 失败）就把值清掉：宁可显示「—」，不拿旧数字冒充 */
+     没就位（没选齐 / 正在取 / 失败）就把值清掉：宁可显示「—」，不拿旧数字冒充。
+     ★ 但"重读回来轴值没变"不算换基准（2026-10-20）：参数弹窗保存会触发这一支
+       重读（delivery 代次，见 usePreset 的 effect 依赖），轴值相同就不清草稿 ——
+       否则在参数页保存一次，这页没保存的校准草稿就被静默擦掉。 */
+  const lastAxesRef = useRef<Axes | null>(null)
   useEffect(() => {
     if (preset.status !== 'ready') {
+      lastAxesRef.current = null
       setSaved(null)
       setZPick(null)
       setXyPick({ x: null, y: null })
       setTyped({})
       return
     }
-    setSaved(preset.preset.axes)
-    setZPick(null)
-    setXyPick({ x: null, y: null })
-    setTyped({})
+    const next = preset.preset.axes
+    const cur = lastAxesRef.current
+    const same = cur !== null && cur.x === next.x && cur.y === next.y && cur.z === next.z
+    lastAxesRef.current = next
+    setSaved(next)
+    if (!same) {
+      setZPick(null)
+      setXyPick({ x: null, y: null })
+      setTyped({})
+    }
   }, [preset])
 
   /** 数值位怎么显示：有值 / 正在取 / 没有。整页只认这一个判断 */
@@ -260,6 +273,7 @@ export function useCalibration(preset: PresetState): Calibration {
     const copy = preset.status === 'ready' ? preset.preset.local : null
     if (copy === null) return
     setSaved(draft)
+    lastAxesRef.current = draft
     setZPick(null)
     setXyPick({ x: null, y: null })
     setTyped({})
@@ -269,6 +283,13 @@ export function useCalibration(preset: PresetState): Calibration {
          理由与参数页那一处同一条，见 `app/guide/ResliceNotice.tsx` 模块头。
          ★ 只有共用开关开着（`guidesEnabled()`，与参数页同一个键）才问 —— 关过就不再打扰 */
       () => {
+        /*
+         * 落盘成功 ⇒ 广播一声"文件面变了"（2026-10-20）：参数页「我那份文件里真实
+         * 写着的」那一层（`useParams` 的 fileValues）按代次重读 —— 不然校准存完，
+         * 参数弹窗还显示它打开时的旧值（作者实测：校准 -0.1 → 参数页改成 0，
+         * 校准页不知道；反向同样）。`deliveryState` 头注的规矩：写完就发。
+         */
+        deliveryMutated()
         if (guidesEnabled()) setResliceAsk(true)
       },
       () => {

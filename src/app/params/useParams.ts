@@ -49,7 +49,7 @@ import { api, errorText } from '../../api'
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
 import { draftMutated } from '../state/draftState'
-import { useDeliveryRevision } from '../state/deliveryState'
+import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
   CatalogParamDef,
@@ -889,6 +889,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
            */
           if (sessionKeyRef.current !== null) clearParamSession(sessionKeyRef.current)
           broadcastDraftNow()
+          /*
+           * 落盘成功 ⇒ 也广播一声"文件面变了"（2026-10-20）：校准页（usePreset →
+           * getLocalCopyFor）按 delivery 代次重读这份 `presets-local/…` —— 不然
+           * 参数存完校准页还显示打开时的旧值（作者实测的那条 bug）。
+           */
+          deliveryMutated()
           /* 存完了 ⇒ 这一份盘上不再有"改过没保存"的草稿（重开不该再自动进编辑模式） */
           setDraftOnDisk(false)
           /*
@@ -2133,6 +2139,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 读不出来**不报错**：那是"这一屏退回配方值显示"（下一层兜底），不是整页失败 ——
    * 用户看的是参数，不该为一次读盘失败丢掉整张表。
    * 采用云端新值之后这里要重读一次（值已经落进文件了，见 `decideSync`）。
+   * ★ 跟着 `deliveryRevision` 走（2026-10-20）：校准页 `save_preset_calibration`
+   *   直接写同一份文件、成功就广播（`deliveryMutated`）—— 不跟的话这一屏的
+   *   fileValues 还停在打开时的旧值，校准存完参数行照旧显示改前的数。
    */
   useEffect(() => {
     if (localPath === null) {
@@ -2151,7 +2160,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [localPath, fileReload])
+  }, [localPath, fileReload, deliveryRevision])
 
   /*
    * **云端更新账**（三方：我 / 云端旧值 / 云端新值）。
@@ -2207,6 +2216,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               const next = v.entries.find((e) => e.key === key)?.local
               if (next !== null && next !== undefined) patchDraft(key, next)
             }
+            /* 采用 = 后端把云端新值写进了同一份文件 ⇒ 文件面变了，广播一声
+               （校准页按代次重读，见 commitDraft 里那一处） */
+            deliveryMutated()
           }
           setFileReload((n) => n + 1)
         },

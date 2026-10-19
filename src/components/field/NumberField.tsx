@@ -144,6 +144,28 @@ export default function NumberField({
     if (numRef.current !== value) onChange(numRef.current)
   }, [onChange, value])
 
+  /*
+   * 键入的提交：不夹取越界值，只挡「不是数字」。
+   *
+   * ★ 步进入口（箭头 / 滚轮 / 方向键）也要先走这一步（2026-10-20）：箭头
+   *   onPointerDown preventDefault 让输入框**不失焦**，blur 那次提交不会跑 ——
+   *   框里打完 `-0.2` 不回车直接点箭头，`numRef` 还停在上一次的值（比如 0），
+   *   一步就从 0 算、显示当场被拽回 `0.00`，刚打的数无声丢失（作者实测）。
+   *   所以任何步进都先把手输原文落进 `numRef`，再从它算步。
+   */
+  const commitTyped = useCallback(() => {
+    const n = Number(text)
+    if (text.trim() === '' || !Number.isFinite(n)) {
+      setText(fmt(value))
+      numRef.current = value
+      return
+    }
+    const next = round(n)
+    numRef.current = next
+    setText(fmt(next))
+    if (next !== value) onChange(next)
+  }, [fmt, onChange, round, text, value])
+
   const stopHold = useCallback(() => {
     if (delayRef.current !== null) window.clearTimeout(delayRef.current)
     if (tickRef.current !== null) window.clearInterval(tickRef.current)
@@ -154,6 +176,7 @@ export default function NumberField({
   const startHold = useCallback(
     (dir: 1 | -1) => {
       holdingRef.current = true
+      commitTyped() // 框里有没落账的手输值就先落账，第一步从它算（见 commitTyped 注）
       nudge(dir) // 第一步立刻走，不等 400ms
       stopHold()
       delayRef.current = window.setTimeout(() => {
@@ -163,7 +186,7 @@ export default function NumberField({
         }, HOLD_TICK)
       }, HOLD_DELAY)
     },
-    [nudge, stopHold],
+    [commitTyped, nudge, stopHold],
   )
 
   const endHold = useCallback(() => {
@@ -195,6 +218,7 @@ export default function NumberField({
     const onWheel = (e: WheelEvent) => {
       if (document.activeElement !== el) return
       e.preventDefault()
+      commitTyped() // 同箭头：聚焦着打完的数还没 blur，先落账再步进
       nudge(e.deltaY < 0 ? 1 : -1)
       if (wheelRef.current !== null) window.clearTimeout(wheelRef.current)
       wheelRef.current = window.setTimeout(commit, WHEEL_IDLE)
@@ -204,21 +228,7 @@ export default function NumberField({
       el.removeEventListener('wheel', onWheel)
       if (wheelRef.current !== null) window.clearTimeout(wheelRef.current)
     }
-  }, [commit, disabled, nudge])
-
-  /** 键入的提交：不夹取越界值，只挡「不是数字」 */
-  const commitTyped = () => {
-    const n = Number(text)
-    if (text.trim() === '' || !Number.isFinite(n)) {
-      setText(fmt(value))
-      numRef.current = value
-      return
-    }
-    const next = round(n)
-    numRef.current = next
-    setText(fmt(next))
-    if (next !== value) onChange(next)
-  }
+  }, [commit, commitTyped, disabled, nudge])
 
   const typed = Number(text)
   const outOfRange =
@@ -315,10 +325,12 @@ export default function NumberField({
             numRef.current = value
           } else if (e.key === 'ArrowUp') {
             e.preventDefault()
+            commitTyped()
             nudge(1)
             commit()
           } else if (e.key === 'ArrowDown') {
             e.preventDefault()
+            commitTyped()
             nudge(-1)
             commit()
           }
