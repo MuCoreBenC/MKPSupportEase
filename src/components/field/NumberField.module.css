@@ -79,8 +79,9 @@
 
 /*
  * 即时校验提示（只有出问题才包这一层 —— 没问题的稿一个像素不动）：
- * 相对定位的外层 + 绝对定位的气泡，**悬浮在框正上方**（2026-10-20 作者改：
- * 原来挂下方会压住展开的说明区）。不占布局，纯悬浮。
+ * 相对定位的外层 + 绝对定位的气泡，**悬浮在框正上方**，不占布局。
+ * 出现时机由 data-show 管（编辑中 / 悬停），平时透明 —— 常驻的只有红描边
+ * （2026-10-20 作者改：没在编辑的框头顶不该常年挂着一串红字）。
  */
 .withHint {
   position: relative;
@@ -101,6 +102,16 @@
   font-size: var(--fs-label);
   white-space: nowrap;
   pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s ease,
+    visibility 0.12s ease;
+}
+
+.withHint[data-show='true'] .hint {
+  opacity: 1;
+  visibility: visible;
 }
 
 .unit {

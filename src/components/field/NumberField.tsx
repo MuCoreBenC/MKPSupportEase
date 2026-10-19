@@ -99,6 +99,13 @@ export default function NumberField({
   const fmt = useCallback((n: number) => formatNum(String(n), showDigits), [showDigits])
   const [text, setText] = useState(() => formatNum(String(value), showDigits))
   const inputRef = useRef<HTMLInputElement>(null)
+  /*
+   * 校验气泡的**出现时机**（2026-10-20 作者改）：只在编辑中或悬停时浮出来，
+   * 平时只留红描边 —— 否则一个没在编辑的空框头顶常年挂着一串红字，
+   * 压在上一行下面，看着像版式坏了。
+   */
+  const [fieldFocused, setFieldFocused] = useState(false)
+  const [fieldHovered, setFieldHovered] = useState(false)
 
   /** 连发期间的当前值放 ref 里：interval 里读 state 会读到旧值 */
   const numRef = useRef(value)
@@ -343,7 +350,11 @@ export default function NumberField({
         placeholder={rangePlaceholder}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
-        onBlur={commitTyped}
+        onFocus={() => setFieldFocused(true)}
+        onBlur={() => {
+          setFieldFocused(false)
+          commitTyped()
+        }}
         onKeyDown={(e) => {
           if (e.key === 'Enter') {
             commitTyped()
@@ -376,11 +387,18 @@ export default function NumberField({
   )
 
   /*
-   * 有问题才包提示层：外层 relative 的 span，提示**绝对定位**挂在框正下方 ——
+   * 有问题才包提示层：外层 relative 的 span，提示**绝对定位**悬浮在框正上方 ——
    * 不挤动任何一行的布局（共用件铁律：没有提示的稿一个像素不动）。
+   * 出不出由 data-show 管（编辑中 / 悬停才显，见上面的 state 注），结构恒在，
+   * 悬停才有的话结构就得跟着 hover 抖 —— 现在只是透明度切换。
    */
   return hint !== null ? (
-    <span className={s.withHint}>
+    <span
+      className={s.withHint}
+      data-show={fieldFocused || fieldHovered || undefined}
+      onMouseEnter={() => setFieldHovered(true)}
+      onMouseLeave={() => setFieldHovered(false)}
+    >
       {box}
       <span className={s.hint} role="status">
         {hint}
