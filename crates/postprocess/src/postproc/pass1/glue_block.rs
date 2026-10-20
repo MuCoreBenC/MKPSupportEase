@@ -548,9 +548,9 @@ pub(crate) fn emit_glue_block(
         ));
     }
 
-    // 1) 小螺旋只做 z-hop：抬到「层顶 + 1.0」脱离层顶。尺度与切片器自己的
-    //    `G3 Z.8 I.706 J.991 P1` 一致（只脱层 0.2~1.0）；I/J 分量照抄切片器
-    //    （`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
+    // 1) 小螺旋只做 z-hop：抬到「层顶 + swap_hop_height」脱离层顶（默认 1.0，面板可调）。
+    //    尺度与切片器自己的 `G3 Z.8 I.706 J.991 P1` 一致（只脱层 0.2~1.0）；
+    //    I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
     let spiral_retract = if custom_mount_gcode_has_retract(ir_data) {
@@ -560,7 +560,7 @@ pub(crate) fn emit_glue_block(
     };
     sink.push_str(&format!(
         "G3 Z{} I.706 J.991 P1{} F{}",
-        format_z(current_layer_height + 1.0),
+        format_z(current_layer_height + ir_data.glue.swap_hop_height),
         spiral_retract,
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));

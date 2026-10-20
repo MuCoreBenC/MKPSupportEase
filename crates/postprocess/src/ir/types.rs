@@ -169,6 +169,12 @@ pub struct ZCompCorners {
     pub back_right: f64,
 }
 
+/// 旧 IR / TOML 里没有 `SwapHopHeight` 时按 1.0 处理 —— 与加参数之前的硬编码一致，
+/// 这样用户手上那些老预设文件不会被判成 Corrupted。
+fn default_swap_hop_height() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct GlueIr {
@@ -178,6 +184,9 @@ pub struct GlueIr {
     pub z_lift_height: f64,
     pub z_lift_height_first_layers: f64,
     pub inter_model_lift_height: f64,
+    /// 换笔脱层（z-hop）高度：只负责「离开刚打完的表面」，不是抬笔高度。
+    #[serde(default = "default_swap_hop_height")]
+    pub swap_hop_height: f64,
     pub z_comp_enabled: bool,
     pub z_comp_mode: String,
     pub z_comp_bed: ZCompCorners,

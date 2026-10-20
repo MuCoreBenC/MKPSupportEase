@@ -120,6 +120,7 @@ pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("wiping", "glue_z_lift_height"),
     ("wiping", "glue_z_lift_height_first_layers"),
     ("wiping", "glue_inter_model_lift_height"),
+    ("wiping", "swap_hop_height"),
     ("wiping", "outer_structure"),
     ("wiping", "rib_extra_length"),
     ("wiping", "rib_width"),

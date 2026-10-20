@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "b8d86e219278984b",
+  "revision": "475f6a0bcd5bc0f9",
   "publishedAt": "2026-10-19T14:12:29Z",
   "brands": [
     {
@@ -2034,6 +2034,40 @@
           "op": "gt",
           "value": "0"
         },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "wiping.swap_hop_height",
+        "configKey": "SwapHopHeight",
+        "tomlKey": "swap_hop_height",
+        "jsonKey": "swap_hop_height",
+        "label": "换笔脱层高度",
+        "desc": "换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度",
+        "tomlComment": "换笔脱层高度(mm) 范围:0.2~3",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "z_lift"
+        },
+        "min": 0.2,
+        "max": 3.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
         "choices": [],
         "variantMode": null,
         "machineFilter": [],
@@ -4693,6 +4727,10 @@
               {
                 "id": "item_5_2_2",
                 "paramKey": "wiping.glue_inter_model_lift_height"
+              },
+              {
+                "id": "item_5_2_3",
+                "paramKey": "wiping.swap_hop_height"
               }
             ],
             "component": null,
@@ -4881,8 +4919,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "14e18b956edf9b20b5ef1d905b057422b2449ee25312cbe2b927ec8345bea5c7",
-      "size": 4278
+      "sha256": "b8b84188f6a4fdbf24f1d057a8cdb07e04a5209ef2fe7b67d792372471f5a71d",
+      "size": 4336
     },
     {
       "kind": "mkp_preset",
@@ -4890,8 +4928,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "5dd1fc05fe549b69db02892019521e11f9a3f2529323540132a6d977065ce837",
-      "size": 4276
+      "sha256": "e7e8dad3b3f833763ef1a0b5d43941ff7518b3c0fb2cff06dba7aef04c44a6fc",
+      "size": 4334
     },
     {
       "kind": "mkp_preset",
@@ -4899,8 +4937,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "779fd6f79f47dd610f4689660d88d1b2274a236b208d7b3e0e608307ca8de26f",
-      "size": 4283
+      "sha256": "b4bbb6a416faf029f80b870ca5eb9802fb7362c1a83dde70753111b23c25b5aa",
+      "size": 4341
     },
     {
       "kind": "mkp_preset",
@@ -4908,8 +4946,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "bc924c282cde2f5b6198e5ce674a10ad8e55440c7e75045784a55e2fac976739",
-      "size": 4285
+      "sha256": "29052b3583b09e2f35b1950dac7ab2d46ce9672c00c47f3addffe0c97a3272d6",
+      "size": 4343
     },
     {
       "kind": "mkp_preset",
@@ -4917,8 +4955,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "240418bb81eedc39ce72c7635f8fb183df8057734c079c56504f146f726687cb",
-      "size": 4279
+      "sha256": "375c755c3185c6441f619d5f937f55aa5c3363dd9147db0063b4b94045706d1f",
+      "size": 4337
     },
     {
       "kind": "mkp_preset",
@@ -4926,8 +4964,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "bc2fb42de35b1140418e57866b846a027b8381d0e860d20012ac9c88d57a6cc2",
-      "size": 4286
+      "sha256": "9ccd6f2b37fb7fbaabce8f1c03b1b333174bc80d05cab7dedb0afc0181cfac4b",
+      "size": 4344
     },
     {
       "kind": "mkp_preset",
@@ -4935,8 +4973,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "102aba4153e98dcf761ab5cc5ca7e55769c2671a438fd0e395b99af3a5059f6a",
-      "size": 4417
+      "sha256": "235f49c7826c914140d1a2919bf26f006ef69466e946ddaa651f526b2aa29be1",
+      "size": 4475
     },
     {
       "kind": "mkp_preset",
@@ -4944,8 +4982,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "551527317f60b9315d3b04e15822372b21bf88e3737cad3110671b03ba6f28f3",
-      "size": 4421
+      "sha256": "0ae1234730406af9257f660bc1faad29e2b8ef9ecd3a9f1b6efbf71509c737fa",
+      "size": 4479
     },
     {
       "kind": "mkp_preset",
@@ -4953,8 +4991,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "23a81e7ddc2dc94d2c316eaf644c8cde82ab5bf7d946bf9bdfa767bec813a3d3",
-      "size": 4417
+      "sha256": "500db1d57d5e2079c458f2aec2e0dcd75258c174da6cc4c41f90bfa794683935",
+      "size": 4475
     },
     {
       "kind": "icon",

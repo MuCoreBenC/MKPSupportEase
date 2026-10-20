@@ -810,6 +810,30 @@
       "valueType": "float"
     },
     {
+      "configKey": "SwapHopHeight",
+      "defaultValue": 1,
+      "desc": "换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度",
+      "jsonKey": "swap_hop_height",
+      "key": "wiping.swap_hop_height",
+      "label": "换笔脱层高度",
+      "layout": {
+        "order": 2,
+        "sectionId": "z_lift"
+      },
+      "max": 3,
+      "mergeable": true,
+      "min": 0.2,
+      "scope": "universal",
+      "section": "wiping",
+      "selectable": true,
+      "step": 0.1,
+      "tomlComment": "换笔脱层高度(mm) 范围:0.2~3",
+      "tomlKey": "swap_hop_height",
+      "uiComponent": "number",
+      "unit": "mm",
+      "valueType": "float"
+    },
+    {
       "configKey": "GlueZOffset",
       "defaultValue": -0.05,
       "desc": "涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面",

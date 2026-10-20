@@ -114,6 +114,9 @@ pub struct WipingConfig {
     pub glue_z_lift_height_first_layers: f64,
     #[serde(default)]
     pub glue_inter_model_lift_height: f64,
+    /// 换笔脱层（z-hop）高度；0 时由 `build.rs` 回落到注册表默认 1.0。
+    #[serde(default)]
+    pub swap_hop_height: f64,
     #[serde(default)]
     pub outer_structure: String,
     #[serde(default)]

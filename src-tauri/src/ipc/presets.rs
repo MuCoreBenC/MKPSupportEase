@@ -1212,9 +1212,9 @@ mod tests {
             "bundled 档不进客户端菜单"
         );
 
-        // —— 参数元信息：全部 74 条，含废弃 ——
+        // —— 参数元信息：全部 75 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 74, "实测 74 条字段定义，一条不少");
+        assert_eq!(meta.len(), 75, "实测 75 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")

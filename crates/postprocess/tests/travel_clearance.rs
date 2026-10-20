@@ -72,6 +72,8 @@ struct LiftParams {
     z_offset: f64,
     lift: f64,
     lift_first_layers: f64,
+    /// 换笔脱层高度（`swap_hop_height`），螺旋 z-hop 的目标增量。
+    hop: f64,
 }
 
 impl LiftParams {
@@ -98,10 +100,16 @@ fn load_params() -> LiftParams {
         "反空转：IR 里 z_lift_height = {}，判据会退化成永真",
         ir.glue.z_lift_height
     );
+    assert!(
+        ir.glue.swap_hop_height > 0.0,
+        "反空转：IR 里 swap_hop_height = {}，判据会退化成永真",
+        ir.glue.swap_hop_height
+    );
     LiftParams {
         z_offset: ir.toolhead.z_offset,
         lift: ir.glue.z_lift_height,
         lift_first_layers: ir.glue.z_lift_height_first_layers,
+        hop: ir.glue.swap_hop_height,
     }
 }
 
@@ -229,11 +237,12 @@ fn swap_travel_keeps_pen_clearance() {
                 line.starts_with("G1 ") && z.is_some() && x.is_none() && y.is_none();
             if is_spiral {
                 // 小螺旋只做 z-hop：此时笔收着，管的对象是喷嘴，不用抬到笔尖净空高度
-                let need = layer_z + 1.0;
+                let need = layer_z + params.hop;
                 let got = z.unwrap_or_default();
                 assert!(
                     (got - need).abs() < EPS,
-                    "第 {ln} 行 {line:?}：螺旋 z-hop 高度 Z={got} 不等于 {need}（层顶 + 1.0）"
+                    "第 {ln} 行 {line:?}：螺旋 z-hop 高度 Z={got} 不等于 {need}\
+                     （层顶 + swap_hop_height）"
                 );
                 spiral_seen = true;
                 spiral_blocks += 1;

@@ -343,6 +343,10 @@ paramKey = 'wiping.glue_z_lift_height_first_layers'
 id = 'item_5_2_2'
 paramKey = 'wiping.glue_inter_model_lift_height'
 
+[[tabs.sections.items]]
+id = 'item_5_2_3'
+paramKey = 'wiping.swap_hop_height'
+
 [[tabs.sections]]
 id = 'calibration'
 

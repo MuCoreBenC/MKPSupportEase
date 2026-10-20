@@ -137,6 +137,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "GlueZLiftHeight" => ConfigVal::F64(w.glue_z_lift_height),
         "GlueZLiftHeightFirstLayers" => ConfigVal::F64(w.glue_z_lift_height_first_layers),
         "GlueInterModelLiftHeight" => ConfigVal::F64(w.glue_inter_model_lift_height),
+        "SwapHopHeight" => ConfigVal::F64(w.swap_hop_height),
         "PrimeMinPathLength" => ConfigVal::F64(w.prime_min_path_length),
         "PrimePerModel" => ConfigVal::Bool(w.prime_per_model),
         "PrimeEveryLayer" => ConfigVal::Bool(w.prime_every_layer),
