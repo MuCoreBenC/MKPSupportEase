@@ -49,7 +49,7 @@ import { api, errorText } from '../../api'
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
 import { draftMutated } from '../state/draftState'
-import { useDeliveryRevision } from '../state/deliveryState'
+import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import type {
   ActiveOrigin,
   CatalogParamDef,
@@ -441,6 +441,29 @@ export function valueText(def: ParamDef | undefined, raw: string): string {
 
 const cellKey = (machineId: string, versionId: string, key: string) =>
   `${machineId}:${versionId}:${key}`
+
+/**
+ * 数字字段的**即时校验**：返回一句人话原因，`null` = 合法（非数字控件恒 `null`）。
+ *
+ * 两处消费：
+ *   · 参数行 / 步进器边上那行红字（打字过程中就出，见 `NumberField` 的 hint ——
+ *     它自己有一份本地判据，两边口径一致：空 / 不是数 / 超出 min~max）；
+ *   · **保存闸**：后端 `commit_preset_draft` 的 patch 只换值、不做范围校验
+ *     （`patch_preset_toml` 头注），所以"超范围不许保存"只能设在界面 ——
+ *     保存确认弹层把超范围项列出来、灰掉「确认保存」，`save` 里再拦一道兜底。
+ */
+export function invalidNumberText(def: ParamDef, raw: string): string | null {
+  if (def.field.control !== 'number') return null
+  const t = raw.trim()
+  if (t === '') return '数值不能为空'
+  const n = Number(t)
+  if (!Number.isFinite(n)) return '不是有效的数字'
+  const { min, max } = def.field
+  if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
+    return `超出范围 ${min ?? '不限'} ~ ${max ?? '不限'}`
+  }
+  return null
+}
 
 /** 现在（UTC epoch 秒）—— 历史条目落盘时刻用（与后端 `ts_unix` 同一口径） */
 function nowSec(): number {
@@ -913,6 +936,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
            */
           if (sessionKeyRef.current !== null) clearParamSession(sessionKeyRef.current)
           broadcastDraftNow()
+          /*
+           * 落盘成功 ⇒ 也广播一声"文件面变了"（2026-10-20）：校准页（usePreset →
+           * getLocalCopyFor）按 delivery 代次重读这份 `presets-local/…` —— 不然
+           * 参数存完校准页还显示打开时的旧值（作者实测的那条 bug）。
+           */
+          deliveryMutated()
           /* 存完了 ⇒ 这一份盘上不再有"改过没保存"的草稿（重开不该再自动进编辑模式） */
           setDraftOnDisk(false)
           /*
@@ -1694,6 +1723,21 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const save = useCallback(() => {
     if (combo === null) return
     /*
+     * **范围闸**（2026-10-20）：超出注册表 min/max 的草稿不许落盘 —— 后端的 patch
+     * 不做范围校验，这一道只能设在界面。正常路径到不了这里：保存确认弹层会先列出
+     * 超范围项、把「确认保存」灰掉（见 PageParams）；这里是 Ctrl+S / 直调的兜底。
+     */
+    const badKeys = Object.keys(draft).filter((key) => {
+      const def = defOf(key)
+      return def !== undefined && invalidNumberText(def, draft[key]) !== null
+    })
+    if (badKeys.length > 0) {
+      setSavedNote(
+        `保存失败：${badKeys.map((k) => defOf(k)?.label ?? k).join('、')} 超出取值范围，改回来再保存`,
+      )
+      return
+    }
+    /*
      * **先落盘**：把草稿提交成"本地预设"（云端线另存 / 用户线写回，后端 `commit_preset_draft`）。
      * 本地这一层只是"这一屏看得到的已保存值"，真值在用户根 —— 两句状态由 `commitDraft` 写。
      */
@@ -1709,7 +1753,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setPast([])
     setFuture([])
     setLog(log.map((e) => (e.state === 'draft' ? { ...e, state: 'saved', batch } : e)))
-  }, [at, batchesByCombo, commitDraft, combo, draft, log, saved, savedBatches])
+  }, [at, batchesByCombo, commitDraft, combo, defOf, draft, log, saved, savedBatches])
 
   /**
    * 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销）。
@@ -2157,6 +2201,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 读不出来**不报错**：那是"这一屏退回配方值显示"（下一层兜底），不是整页失败 ——
    * 用户看的是参数，不该为一次读盘失败丢掉整张表。
    * 采用云端新值之后这里要重读一次（值已经落进文件了，见 `decideSync`）。
+   * ★ 跟着 `deliveryRevision` 走（2026-10-20）：校准页 `save_preset_calibration`
+   *   直接写同一份文件、成功就广播（`deliveryMutated`）—— 不跟的话这一屏的
+   *   fileValues 还停在打开时的旧值，校准存完参数行照旧显示改前的数。
    */
   useEffect(() => {
     if (localPath === null) {
@@ -2175,7 +2222,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [localPath, fileReload])
+  }, [localPath, fileReload, deliveryRevision])
 
   /*
    * **云端更新账**（三方：我 / 云端旧值 / 云端新值）。
@@ -2256,12 +2303,23 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         (v) => {
           setSyncBusy(false)
           setSync(v)
-          /* 采用会把文件里那几项改掉 —— 草稿那一层要跟着改（见上面那段注释） */
+          /*
+           * 采用会把文件里那几项改掉 —— 草稿那一层要跟着改（见上面那段注释）。
+           * ★ 合并（2026-10-20）：`decisions` 是可混合 adopt / hold 的一批，
+           *   所以这里按**每一项自己的 kind** 判，不再看外面那个 `kind`。
+           */
+          let adopted = false
           for (const d of decisions) {
             if (d.kind !== 'adopt') continue
+            adopted = true
             const next = v.entries.find((e) => e.key === d.paramKey)?.local
             if (next !== null && next !== undefined) patchDraft(d.paramKey, next)
           }
+          /* 采用 = 后端把云端新值写进了同一份文件 ⇒ 文件面变了，广播一声
+             （校准页按代次重读，见 commitDraft 里那一处）。
+             ★ 「应用 0 项」也真写（注释 / 时间戳 / 血统），所以只要这一批落过盘就广播 ——
+               `decisions` 为空时 Adopt 一个都没有，但文件确实更新了，仍要通知。 */
+          if (adopted || decisions.length === 0) deliveryMutated()
           setFileReload((n) => n + 1)
         },
         (e: unknown) => {

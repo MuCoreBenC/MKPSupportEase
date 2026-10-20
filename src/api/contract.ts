@@ -15,6 +15,25 @@ export interface Axes {
   z: number
 }
 
+/**
+ * 一根轴的取值范围 —— **注册表口径**（`RecipeParam.min/max` 原样透传）。
+ *
+ * 校准页（读数输入框 / Z 板与 XY 板的点选增量）与参数页吃同一套限制：
+ * `toolhead.offset.z` 注册表写的是 `[0, 20]`，所以校准里 z 也不许为负 ——
+ * 点了负刻度 / 手输负数都夹回边界（`undefined` = 该方向不限）。
+ */
+export interface AxisLimit {
+  min?: number
+  max?: number
+}
+
+/** 三轴各自的取值范围（哪一轴没在注册表里登记就整项不设限） */
+export interface AxisLimits {
+  x: AxisLimit
+  y: AxisLimit
+  z: AxisLimit
+}
+
 /** 一份预设 = 某机型某打印件版本对应的那个 toml，外加它带来的偏移基准 */
 /**
  * 一份预设的用量（`getPresetUsage` 的一行）。
@@ -56,6 +75,8 @@ export interface Preset {
    */
   path: string
   axes: Axes
+  /** 三轴的注册表范围（校准页消费；与参数页同一套 min/max，见 `AxisLimits`） */
+  axisLimits: AxisLimits
   speed: number
   /**
    * **「我那一份」的落点** —— 校准保存写它（2026-10-08 资源库改判：偏移随「我的预设」走）。

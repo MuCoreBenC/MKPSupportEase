@@ -186,6 +186,7 @@ export default function PageHome({ density }: PageHomeProps) {
   const {
     saved,
     draft,
+    limits,
     dirty,
     dirtyAxes,
     savedNote,
@@ -1119,6 +1120,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 saved={saved}
                 draft={draft}
                 view={axisView}
+                limits={limits}
                 activeAxis="z"
                 canEdit={canPick}
                 onType={typeAxis}
@@ -1204,6 +1206,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 saved={saved}
                 draft={draft}
                 view={axisView}
+                limits={limits}
                 activeAxis="xy"
                 canEdit={canPick}
                 onType={typeAxis}
@@ -1293,6 +1296,7 @@ export default function PageHome({ density }: PageHomeProps) {
       fadeMs,
       inUseNote,
       layers,
+      limits,
       loadCommand,
       modelName,
       modelOptions,

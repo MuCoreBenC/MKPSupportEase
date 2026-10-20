@@ -138,9 +138,19 @@ pub fn slicer_state(pid: i32) -> SlicerState {
 
 /// 切片器进程号（没在跑就是 `None`）。装 AX 通知要用它认进程。
 ///
-/// Windows 上按**进程名**认（`bambu-studio.exe`，Toolhelp 快照，只读）；
-/// 多开时取第一个"有主窗口"的那个 —— 引导卡片只能跟着一扇窗走。
+/// ★★ **先问"我上次处理用的是哪一份"**：BBS 会多开，而"改完参数要回哪一份重切"
+/// 只有**记录**答得准 —— 钩子那一趟把自己的父进程（= 那一趟切片的 BBS）记进了
+/// `archive::Meta::slicer_pid`（见 [`crate::parent`]）。那份还在跑 ⇒ 用它；
+/// 不在了（切片器重启 / 关掉）⇒ 退回平台那套"挑一个在跑的"。
+///
+/// Windows 那套按**进程名**认（`bambu-studio.exe`，Toolhelp 快照，只读），
+/// 多开时取 **z 序最前**的那个（用户眼前那份）。
 pub fn slicer_pid() -> Option<i32> {
+    remembered_slicer_pid().or_else(platform_slicer_pid)
+}
+
+/// 平台那套"挑一个在跑的切片器"（[`slicer_pid`] 的兜底）。
+fn platform_slicer_pid() -> Option<i32> {
     #[cfg(target_os = "macos")]
     {
         mac::running_pid()
@@ -152,6 +162,58 @@ pub fn slicer_pid() -> Option<i32> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         None
+    }
+}
+
+/// **记住的那一份**：最近一次处理用的是哪个切片器（见 [`slicer_pid`]）。
+///
+/// ★ 只在"它**这会儿还是**一个在跑的切片器"时才算数 —— 进程号会失效，
+/// 一个不存在的号比"没有记住"更糟（会把引导指空）。判据交给 [`is_live_slicer`]。
+pub(crate) fn remembered_slicer_pid() -> Option<i32> {
+    let pid = cached_latest_slicer_pid()?;
+    is_live_slicer(pid).then_some(pid)
+}
+
+/// "最近一次处理用的切片器"读一次要扫最近几十份记录 —— **不能每跳都扫**
+/// （引导的回读是 700ms 一次）。缓存一会儿就够了：这个值只在"又切了一刀"时才会变。
+fn cached_latest_slicer_pid() -> Option<i32> {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, Option<i32>)>> =
+        std::sync::Mutex::new(None);
+    const TTL: std::time::Duration = std::time::Duration::from_secs(30);
+
+    let read = |g: &std::sync::MutexGuard<'_, Option<(std::time::Instant, Option<i32>)>>| {
+        g.as_ref()
+            .filter(|(at, _)| at.elapsed() < TTL)
+            .and_then(|(_, pid)| *pid)
+    };
+    let mut guard = match CACHE.lock() {
+        Ok(g) => g,
+        Err(e) => e.into_inner(),
+    };
+    if let Some(pid) = read(&guard) {
+        return Some(pid);
+    }
+    let now = std::time::Instant::now();
+    let fresh = crate::archive::history_root()
+        .and_then(|root| crate::archive::latest_slicer_pid(&root, is_live_slicer));
+    *guard = Some((now, fresh));
+    fresh
+}
+
+/// 这个进程号**这会儿**是不是一个在跑的切片器（有主窗才算）。
+fn is_live_slicer(pid: i32) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        win::slicer_pids().contains(&(pid as u32)) && win::main_window_of(pid as u32).is_some()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        /* 进程活着 + 读得到它那扇窗（AX 那半） */
+        crate::ax::with_top_window(pid, |_| true).unwrap_or(false)
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        false
     }
 }
 
@@ -228,6 +290,15 @@ pub fn activate_slicer() -> bool {
 /// 上面，用户点了「查看引导」看到的反而是我们这一屏。
 ///
 /// `kAXRaiseAction` 只抬**这一扇窗**，别的应用、别的窗口一律不动。
+/// **Windows**：某个 pid 的主窗（选主窗的判据只有一份，在 [`win::main_window_of`]）。
+///
+/// ★ 给 [`crate::zorder`] 用：它自己只管"谁压着谁"，"哪扇窗算切片器那扇"要问这里，
+/// 两边各写一套必然走偏（2026-10-20 那次"卡片几秒就消失"就是这么来的）。
+#[cfg(target_os = "windows")]
+pub(crate) fn main_window_of(pid: u32) -> Option<isize> {
+    win::main_window_of(pid)
+}
+
 pub fn raise_slicer() -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -933,6 +1004,9 @@ mod win {
     /// 缩略图的子窗口 class。**必须过滤**：窗口里还有 `wxWindowNR` 的方形子窗口
     /// （50×50 @ y=510、63×63 @ y=374），不过滤就会指错。
     const THUMB_CLASS: &str = "Static";
+    /// BBS 主框的窗口 class（wxWidgets）。**认进程的主窗时优先挑它**（同一个 pid 下
+    /// 还有别的"有标题"的顶层窗，实测一扇 20×20 的小窗排在 z 序最前）。
+    const MAIN_FRAME_CLASS: &str = "wxWindowNR";
 
     /// 切片器进程名（小写比较）。实测 `bambu-studio.exe`；Beta 与旧版命名一并列上。
     const BBS_IMAGES: [&str; 3] = [
@@ -991,6 +1065,7 @@ mod win {
         fn Process32FirstW(snapshot: isize, entry: *mut ProcessEntry) -> i32;
         fn Process32NextW(snapshot: isize, entry: *mut ProcessEntry) -> i32;
         fn CloseHandle(handle: isize) -> i32;
+        fn GetCurrentThreadId() -> u32;
     }
 
     #[link(name = "user32")]
@@ -1009,7 +1084,18 @@ mod win {
         fn GetWindowTextLengthW(hwnd: Hwnd) -> i32;
         fn GetDpiForWindow(hwnd: Hwnd) -> u32;
         fn SetForegroundWindow(hwnd: Hwnd) -> i32;
+        fn GetForegroundWindow() -> Hwnd;
+        fn AttachThreadInput(attach: u32, attach_to: u32, f_attach: i32) -> i32;
         fn ShowWindow(hwnd: Hwnd, cmd: i32) -> i32;
+        fn SetWindowPos(
+            hwnd: Hwnd,
+            after: Hwnd,
+            x: i32,
+            y: i32,
+            cx: i32,
+            cy: i32,
+            flags: u32,
+        ) -> i32;
         fn SetProcessDPIAware() -> i32;
     }
 
@@ -1017,6 +1103,20 @@ mod win {
     const SNAP_PROCESS: u32 = 0x2;
     /// `ShowWindow` 的 `SW_RESTORE`。
     const SW_RESTORE: i32 = 9;
+    /*
+     * `SetWindowPos` 的几个量：
+     * - `HWND_TOP`：把它排到**同一层（普通窗）的最前** —— 不动浮层，我们自己的卡片
+     *   （`always_on_top`）因此仍浮在它上面，正好是想要的；
+     * - `SWP_NOACTIVATE`：**不抢前台**。★ 这正是它比 `SetForegroundWindow` 可靠的地方：
+     *   后者受"只有前台进程才能换前台"那条规则限制（我们刚建完卡片、系统不一定认我们
+     *   是前台进程 ⇒ 常常抬不动 ⇒ 我们自己的主窗一直压在切片器上面 ⇒ 层序判"被盖住"
+     *   ⇒ 卡片摆出去就被收掉，作者 2026-10-20 报的"几秒钟就消失"）。
+     * - `SWP_NOMOVE` / `SWP_NOSIZE`：只改顺序，不挪不动。
+     */
+    const HWND_TOP: isize = 0;
+    const SWP_NOSIZE: u32 = 0x1;
+    const SWP_NOMOVE: u32 = 0x2;
+    const SWP_NOACTIVATE: u32 = 0x10;
 
     /*
      * ★★ **本进程必须 DPI 感知**，`GetWindowRect` 才给物理像素：
@@ -1032,13 +1132,6 @@ mod win {
     }
 
     /* ---------- 基础读取 ---------- */
-
-    /// 窗口属于哪个进程。
-    fn pid_of(hwnd: Hwnd) -> u32 {
-        let mut pid: u32 = 0;
-        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
-        pid
-    }
 
     /// 窗口矩形（物理像素）。读不到给 `None`。
     fn rect_of(hwnd: Hwnd) -> Option<RectPx> {
@@ -1078,12 +1171,6 @@ mod win {
         }
     }
 
-    /// `EnumWindows` 的过场：pid 的每一扇顶层窗（有标题、rect 读得到的）。
-    struct MainWinCtx {
-        want: u32,
-        found: Vec<(Hwnd, bool, f64)>,
-    }
-
     /// 一个 pid 的**主窗口**。
     ///
     /// ★★ **不能"z 序第一个有标题的就当主窗"**（实机验证踩到的坑，2026-10-19）：
@@ -1097,62 +1184,85 @@ mod win {
     ///
     /// ★ 多开时每个进程各有一扇主框；**最小化的也算**（还原后就是它）——
     /// 卡片这时本来就该收起来，但"窗口在哪"还是要答得上来。
-    fn main_window_of(pid: u32) -> Option<Hwnd> {
+    ///
+    /// ★★ 判据**只有这一份**：`zorder` 那半也要用它认"切片器那扇窗" —— 不然它会挑到
+    /// 同一 pid 下的**隐藏**窗（BBS 一个进程有好几扇有标题的顶层窗，排在最前的常常是
+    /// 隐藏的那扇）⇒ 判成"不在屏上" ⇒ 卡片一摆出去就被收掉（2026-10-20 作者报的
+    /// "几秒钟就消失"）。所以这里开一个 `pub(crate)` 出口给它。
+    pub(super) fn main_window_of(pid: u32) -> Option<Hwnd> {
+        let tops = top_windows();
+        pick_main_of(&tops, pid)
+    }
+
+    /// 一份顶层窗（**z 序：最前在前**）。
+    struct TopEntry {
+        hwnd: Hwnd,
+        pid: u32,
+        visible: bool,
+        has_title: bool,
+        is_wx: bool,
+        area: f64,
+    }
+
+    /// 一次 `EnumWindows` 把顶层窗按 z 序收进来 —— [`main_window_of`] 与
+    /// [`slicer_pids_front_first`] 共用，别一遍遍枚举。
+    fn top_windows() -> Vec<TopEntry> {
         ensure_dpi_aware();
-        let mut ctx = MainWinCtx {
-            want: pid,
-            found: Vec::new(),
-        };
+        let mut out: Vec<TopEntry> = Vec::new();
         unsafe {
-            EnumWindows(
-                Some(enum_main_window_cb),
-                std::ptr::addr_of_mut!(ctx) as isize,
-            );
+            EnumWindows(Some(collect_top_cb), std::ptr::addr_of_mut!(out) as isize);
         }
-        /* 优先 wxWindowNR（BBS 主框），里面再取面积最大的；没有才退到"面积最大的有标题窗" */
+        out
+    }
+
+    /// 从一份 z 序列表里挑某个 pid 的主窗（判据见 [`main_window_of`]）。
+    fn pick_main_of(list: &[TopEntry], pid: u32) -> Option<Hwnd> {
         let best = |wx_only: bool| {
-            ctx.found
-                .iter()
-                .filter(|(_, is_wx, _)| !wx_only || *is_wx)
-                .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
-                .map(|(h, _, _)| *h)
+            list.iter()
+                .filter(|t| t.pid == pid && t.visible && t.has_title && (!wx_only || t.is_wx))
+                .max_by(|a, b| {
+                    a.area
+                        .partial_cmp(&b.area)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .map(|t| t.hwnd)
         };
         best(true).or_else(|| best(false))
     }
 
-    extern "system" fn enum_main_window_cb(hwnd: Hwnd, lparam: isize) -> i32 {
-        let Some(ctx) = (unsafe { (lparam as *mut MainWinCtx).as_mut() }) else {
+    extern "system" fn collect_top_cb(hwnd: Hwnd, lparam: isize) -> i32 {
+        let Some(out) = (unsafe { (lparam as *mut Vec<TopEntry>).as_mut() }) else {
             return 0;
         };
-        if pid_of(hwnd) != ctx.want || !has_title(hwnd) || unsafe { IsWindowVisible(hwnd) } == 0 {
-            return 1;
-        }
+        let mut pid: u32 = 0;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
         let Some(r) = rect_of(hwnd) else {
             return 1;
         };
-        let is_wx = class_of(hwnd).is_some_and(|c| c.eq_ignore_ascii_case("wxWindowNR"));
-        let area = f64::from(r.width()) * f64::from(r.height());
-        ctx.found.push((hwnd, is_wx, area));
+        out.push(TopEntry {
+            hwnd,
+            pid,
+            visible: unsafe { IsWindowVisible(hwnd) != 0 },
+            has_title: has_title(hwnd),
+            is_wx: class_of(hwnd).is_some_and(|c| c.eq_ignore_ascii_case(MAIN_FRAME_CLASS)),
+            area: f64::from(r.width()) * f64::from(r.height()),
+        });
         1
     }
 
     /* ---------- 进程 ---------- */
 
-    /// 在跑的切片器进程（按进程名认，见 [`BBS_IMAGES`]）。
-    ///
-    /// ★ **必须挑"有主窗口"的那个**：BBS 会起好几个同名进程（实测三份），
-    /// 其中只有带工程窗口的才是用户看着的那个；没有窗口的挑了也定位不了。
-    pub(super) fn running_pid() -> Option<i32> {
-        ensure_dpi_aware();
+    /// 进程名对得上的**全部**切片器进程（见 [`BBS_IMAGES`]，顺序无意义）。
+    pub(super) fn slicer_pids() -> Vec<u32> {
         let snapshot = unsafe { CreateToolhelp32Snapshot(SNAP_PROCESS, 0) };
         if snapshot == -1 {
-            return None;
+            return Vec::new();
         }
         let mut entry = ProcessEntry {
             dw_size: std::mem::size_of::<ProcessEntry>() as u32,
             ..Default::default()
         };
-        let mut found: Option<i32> = None;
+        let mut pids = Vec::new();
         unsafe {
             if Process32FirstW(snapshot, &mut entry) != 0 {
                 loop {
@@ -1162,11 +1272,8 @@ mod win {
                         .position(|&c| c == 0)
                         .unwrap_or(entry.sz_exe_file.len());
                     let name = String::from_utf16_lossy(&entry.sz_exe_file[..len]);
-                    if BBS_IMAGES.iter().any(|b| name.eq_ignore_ascii_case(b))
-                        && main_window_of(entry.th32_process_id).is_some()
-                    {
-                        found = Some(entry.th32_process_id as i32);
-                        break;
+                    if BBS_IMAGES.iter().any(|b| name.eq_ignore_ascii_case(b)) {
+                        pids.push(entry.th32_process_id);
                     }
                     if Process32NextW(snapshot, &mut entry) == 0 {
                         break;
@@ -1175,7 +1282,37 @@ mod win {
             }
             CloseHandle(snapshot);
         }
-        found
+        pids
+    }
+
+    /// 在跑的切片器进程号，**按 z 序排：用户眼前那一份在前**。
+    ///
+    /// ★★★ 为什么必须按 z 序挑（作者 2026-10-20 报"卡片几秒钟就消失了"）：
+    /// BBS 会**多开**（实测三份），而那块板型控件只在**最前面那一份**的窗口里看得见。
+    /// 按 Toolhelp 快照顺序挑（原来就是这么写的）挑到的可能是**后面**那一份 ——
+    /// 它的窗被前面那一份压住 ⇒ 层序判"被盖住" ⇒ 卡片刚摆出去就被收掉
+    /// （观感正是"出来了又马上没了"）。
+    /// ⇒ 认进程要认"**用户正看着的**那一份"：主窗在 z 序里最靠前的那一个。
+    ///
+    /// ★ 进程名对得上但**没有主窗**的不算（BBS 会起好几个不带工程窗的进程）。
+    pub(super) fn slicer_pids_front_first() -> Vec<i32> {
+        let tops = top_windows();
+        let mut scored: Vec<(usize, i32)> = Vec::new();
+        for pid in slicer_pids() {
+            let Some(hwnd) = pick_main_of(&tops, pid) else {
+                continue;
+            };
+            if let Some(z) = tops.iter().position(|t| t.hwnd == hwnd) {
+                scored.push((z, pid as i32));
+            }
+        }
+        scored.sort_by_key(|(z, _)| *z);
+        scored.into_iter().map(|(_, pid)| pid).collect()
+    }
+
+    /// 在跑的切片器进程 —— 用户眼前那一份（见 [`slicer_pids_front_first`]）。
+    pub(super) fn running_pid() -> Option<i32> {
+        slicer_pids_front_first().first().copied()
     }
 
     /* ---------- 状态（卡片该不该露脸） ---------- */
@@ -1246,12 +1383,36 @@ mod win {
 
     pub(super) fn locate() -> GuideTargetDto {
         ensure_dpi_aware();
-        let Some(pid) = running_pid() else {
-            return refused("没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」");
+        /*
+         * ★★ 用**根上那个 `slicer_pid()`**（会先问"记住的那一份"），不是这里的
+         * `running_pid()` —— 摆卡片与后面每一跳的回读必须认**同一份**，
+         * 否则摆出去指 A、下一跳去盯 B，卡片照样会被收掉。
+         */
+        let Some(pid) = super::slicer_pid() else {
+            /*
+             * ★★ **进程在跑、但一扇看得见的工程窗都没有** —— 多半是**全部最小化了**
+             * （作者 2026-10-20 问的就是这一档）。这时**没有东西可指**（板型控件根本
+             * 不在屏幕上），要照实说"先还原"，而不是摆一张随即被收掉的卡片。
+             */
+            return if slicer_pids().is_empty() {
+                refused("没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」")
+            } else {
+                refused("切片器在跑，但它的窗口都最小化了 —— 先还原 Bambu Studio 的窗口，再点「查看引导」")
+            };
         };
         let Some(hwnd) = main_window_of(pid as u32) else {
-            return refused("切片器没有打开的工程窗口");
+            return refused("切片器没有打开的工程窗口 —— 先打开一个工程，再点「查看引导」");
         };
+        /*
+         * ★★ **最小化 / 隐藏着的窗口不给坐标**（2026-10-20）：
+         * 最小化的窗口 `GetWindowRect` 报的是屏幕外的坐标（-32000 那一族），
+         * 拿它去摆卡片＝把卡片摆到屏幕外 ⇒ 界面上就是"点了没反应"。
+         * 这一档与"被别的窗压住"不同：那是**看得见但被挡**，照旧给坐标、卡片照旧露脸
+         * （由 `decide` 那半去判）；这一档是**根本看不见**，直接给一句人话。
+         */
+        if unsafe { IsIconic(hwnd) != 0 || IsWindowVisible(hwnd) == 0 } {
+            return refused("切片器窗口最小化了 —— 先还原它，再点「查看引导」");
+        }
         let Some(win_px) = rect_of(hwnd) else {
             return refused("读不到窗口位置");
         };
@@ -1323,7 +1484,8 @@ mod win {
     /* ---------- 抬窗（本模块唯一的"写"，写的只是层序） ---------- */
 
     pub(super) fn raise() -> bool {
-        let Some(hwnd) = running_pid().and_then(|pid| main_window_of(pid as u32)) else {
+        /* 与 [`locate`] 同一个理：认**同一份**（先问记住的那一份） */
+        let Some(hwnd) = super::slicer_pid().and_then(|pid| main_window_of(pid as u32)) else {
             return false;
         };
         unsafe {
@@ -1331,7 +1493,43 @@ mod win {
             if IsIconic(hwnd) != 0 {
                 ShowWindow(hwnd, SW_RESTORE);
             }
-            SetForegroundWindow(hwnd) != 0
+            /*
+             * ★★ **三下都上**（2026-10-20 作者报"卡片几秒钟就消失"）：
+             *
+             * - ① `SetWindowPos(HWND_TOP, …SWP_NOACTIVATE)`：**只改 z 序、不抢前台**。
+             *   它把切片器排到普通窗那一层的最前，我们自己的主窗自然落到它后面；
+             *   而我们那张卡片是浮层（`always_on_top`），照旧浮在切片器上面。
+             *   ★ 但它也**会**被"不许后台进程动前台那一片"的规则挡回来 —— 实测时灵时不灵。
+             *
+             * - ② `AttachThreadInput` + ③ `SetForegroundWindow`：**换前台**（我们要的观感：
+             *   人跟着走到切片器那边）。`SetForegroundWindow` 受"只有前台进程才能换前台"
+             *   限制 ⇒ 常常返回 0 ⇒ **我们自己的主窗一直压在切片器上面** ⇒ 层序判"被盖住"
+             *   ⇒ 卡片刚摆出去就被收掉（界面上就是"出来一下就没了"）。
+             *   绕开它的老办法：把**我们的线程贴到前台线程的输入队列**上再换
+             *   （`AttachThreadInput`），换完立刻摘掉。
+             *
+             * ⇒ 三下里成一下就算抬动了；都不成也**只是抬不动**（照实返回 false，
+             * 卡片照样摆出去），不去硬抢。
+             */
+            let reordered = SetWindowPos(
+                hwnd,
+                HWND_TOP,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            ) != 0;
+
+            let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), std::ptr::null_mut());
+            let mine = GetCurrentThreadId();
+            let attached =
+                fg_thread != 0 && fg_thread != mine && AttachThreadInput(mine, fg_thread, 1) != 0;
+            let foreground = SetForegroundWindow(hwnd) != 0;
+            if attached {
+                AttachThreadInput(mine, fg_thread, 0);
+            }
+            reordered || foreground
         }
     }
 
@@ -1357,6 +1555,27 @@ mod win {
                     height: side,
                 },
                 abs_x: x,
+            }
+        }
+
+        /// **诊断**：把层序那半的实际读数打出来（卡片"几秒就消失"时先看这个 ——
+        /// 谁盖住了切片器、盖了多少）。`cargo test live_ -- --ignored --nocapture`
+        #[test]
+        #[ignore = "实机诊断：要本机在跑 Bambu Studio"]
+        fn live_zorder_reading() {
+            let chosen = running_pid();
+            eprintln!(
+                "running_pid = {chosen:?}  front_first = {:?}",
+                slicer_pids_front_first()
+            );
+            for pid in slicer_pids_front_first() {
+                match crate::zorder::slicer_window(pid) {
+                    Some(z) => eprintln!(
+                        "pid {pid}: on_screen={} covered={} rect={:?}",
+                        z.on_screen, z.covered, z.rect
+                    ),
+                    None => eprintln!("pid {pid}: zorder 返回 None"),
+                }
             }
         }
 
@@ -1409,6 +1628,15 @@ mod win {
             let got = locate();
             assert!(got.ready, "实机定位失败：{:?}", got.reason);
             let (w, t) = (got.window.expect("窗口矩形"), got.target.expect("目标"));
+            /*
+             * ★ 把这一台的量数打出来 —— **换缩放 / 换分辨率**后跑这一条，对着下面这几个
+             * 数就能判判据还成不成立（判据是**逻辑像素**，所以不同 DPI 下这几个数
+             * 应当基本不变；变了就说明 BBS 那块布局不是按 DPI 等比缩放的，要重新定常数）。
+             */
+            eprintln!(
+                "[live] 窗口 {}x{}  缩略图 {}x{} @ 相对窗口 y={:.1}（判据：边长 {}±{}，y ∈ [{},{}]）",
+                w.width, w.height, t.width, t.height, t.y, THUMB_SIDE, SIDE_EPS, THUMB_Y_MIN, THUMB_Y_MAX
+            );
             assert!(
                 (t.width - THUMB_SIDE).abs() <= SIDE_EPS,
                 "命中宽度 {} 不是 {} 一族（判据歪了）",
@@ -1429,6 +1657,47 @@ mod win {
                 t.y,
                 w.x,
                 w.y
+            );
+        }
+
+        /// **实机验证（抬窗）**：`raise()` 之后切片器必须真的排到我们前面 ——
+        /// 抬不动的话，我们自己的主窗一直压着它 ⇒ 层序判"被盖住" ⇒ 卡片摆出去就被收掉
+        /// （2026-10-20 作者报的"几秒钟就消失"，根子就在这里）。
+        ///
+        /// ★ 跑这条会把 Bambu Studio **带到最前**（这就是它要验的事）。
+        #[test]
+        #[ignore = "实机诊断：要本机在跑 Bambu Studio（跑它会把切片器带到最前）"]
+        fn live_raise_reading() {
+            let Some(pid) = running_pid() else {
+                panic!("没找到在跑的 Bambu Studio");
+            };
+            /*
+             * ★ **只打读数，不断言"抬完一定没被盖住"**：Windows 有权**拒绝**后台进程
+             * 抢前台（实测同一段代码时灵时不灵），那时 `covered` 就该是 1.0 ——
+             * 那是系统的真实答复，不是我们的 bug。这里要的是"看得到读数"。
+             */
+            let ok = raise();
+            /* ★ 换前台 / 改 z 序是**异步**的（要等对方进程那边的消息泵走一轮），
+            立刻读会读到旧的顺序 ⇒ 等一小会儿再量。 */
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            let z = crate::zorder::slicer_window(pid).expect("层序该答得上来");
+            eprintln!(
+                "[live] raise()={ok}  抬完 on_screen={} covered={:.2}",
+                z.on_screen, z.covered
+            );
+            assert!(z.on_screen, "切片器该在屏上（没在跑？最小化了？）");
+        }
+
+        /// **实机诊断（认哪一份）**：把"记住的那一份"与"最前那份"都打出来 ——
+        /// 多开时这两者常常不是同一个，正是这次要解决的问题。
+        #[test]
+        #[ignore = "实机诊断：要本机在跑 Bambu Studio"]
+        fn live_which_slicer_is_picked() {
+            eprintln!(
+                "[live] 记住的那份={:?}  最前那份={:?}  最终挑的={:?}",
+                crate::ax::remembered_slicer_pid(),
+                crate::ax::platform_slicer_pid(),
+                crate::ax::slicer_pid()
             );
         }
 

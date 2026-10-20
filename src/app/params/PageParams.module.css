@@ -808,6 +808,30 @@
   color: var(--text-3);
 }
 
+/* ---------- 保存确认里的「超范围拦截」块（2026-10-20） ---------- */
+
+.sheetWarn {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid rgb(229 72 77 / 45%);
+  border-radius: var(--r-md);
+  background: rgb(229 72 77 / 6%);
+}
+
+.sheetWarnTitle {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  color: #e5484d;
+}
+
+.sheetWarnList {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
+}
+
 .ghost {
   height: 28px;
   padding: 0 14px;

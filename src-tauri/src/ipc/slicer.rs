@@ -137,6 +137,35 @@ pub fn launch(kind: SlicerKind, file: &Path) -> Result<(), AppError> {
     launch_with(&target, kind.label(), file)
 }
 
+/// Windows 上起那个应用时要给 `CreateProcessW` 的 `dwCreationFlags`（2026-10-20）。
+///
+/// # 为什么一个位都不能省
+///
+/// 不给时子进程**继承我们的控制台与进程组**（`CreateProcessW` 的默认行为）。
+/// 开发构建是 console 子系统（`src/main.rs` 那条 `windows_subsystem` 只对 release 生效），
+/// 从终端 `npm run tauri dev` 起 MKP 时那个控制台就是终端那一个 —— 关掉它、或者在里头
+/// 按 Ctrl+C，控制事件会发给**挂在同一个控制台上的每一个进程**，于是"从这个 MKP 打开的
+/// BBS 跟着 MKP 一起关闭"（作者 2026-10-20 报的那一处）。
+///
+/// # 这两位各自管什么
+///
+/// - `DETACHED_PROCESS`（0x8）：**不继承控制台** —— 没有那一层附着，控制台关不关都
+///   落不到它身上；
+/// - `CREATE_NEW_PROCESS_GROUP`（0x200）：自成一组，Ctrl+C 那一路广播也落不到它头上
+///   （这两位可以同时给；互斥的是 `DETACHED_PROCESS` 与 `CREATE_NEW_CONSOLE`）。
+///
+/// 切片软件是**别人的窗口**、有它自己的生命周期：我们只是"把这份文件交给它"，
+/// 交出去之后 MKP 关不关与它无关。
+///
+/// ★ 挂 `any(windows, test)`：值本身与运行平台无关，这样"这两位必须是哪两位"这条判据
+/// 在三个 CI job 上都跑得到，不必等哪天有人在 Windows 上真开一次 BBS。
+#[cfg(any(target_os = "windows", test))]
+fn windows_creation_flags() -> u32 {
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+}
+
 /// 把一份模型交给**一个明说了在哪**的应用打开（2026-10-13 第二刀的 `custom` 档走这里）。
 ///
 /// 路径是前端从系统对话框挑的（macOS 是 `.app` 包、Windows 是 `.exe`），这一侧**不猜、
@@ -149,7 +178,16 @@ pub fn launch_with(target: &Path, label: &str, file: &Path) -> Result<(), AppErr
         .arg(file)
         .spawn();
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    let spawned = {
+        use std::os::windows::process::CommandExt as _;
+        std::process::Command::new(target)
+            .arg(file)
+            .creation_flags(windows_creation_flags())
+            .spawn()
+    };
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     let spawned = std::process::Command::new(target).arg(file).spawn();
 
     spawned.map(|_| ()).map_err(|e| {
@@ -592,6 +630,24 @@ mod tests {
         for bad in ["prusa", "Bambu", "bamboo", "orcaslicer"] {
             assert!(SlicerKind::parse(Some(bad)).is_err(), "{bad} 该被拒");
         }
+    }
+
+    /// 起切片软件那两位的**位值**（2026-10-20）：少一位就是"MKP 一关 BBS 跟着没"。
+    #[test]
+    fn the_slicer_is_started_outside_our_console_and_process_group() {
+        let flags = windows_creation_flags();
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        assert_eq!(
+            flags & DETACHED_PROCESS,
+            DETACHED_PROCESS,
+            "不继承控制台（关终端 / 关控制台不该带走它）"
+        );
+        assert_eq!(
+            flags & CREATE_NEW_PROCESS_GROUP,
+            CREATE_NEW_PROCESS_GROUP,
+            "自成一组（Ctrl+C 的广播不该落到它头上）"
+        );
     }
 
     #[test]

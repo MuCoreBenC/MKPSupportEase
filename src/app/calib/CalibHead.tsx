@@ -15,6 +15,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { useDeckLayer } from '../home/DeckLayerContext'
 import Skeleton from '../home/Skeleton'
 import { GLIDE_MS } from '../home/devDefaults'
+import type { AxisLimits } from '../../api/contract'
 import { AXIS_ROWS, type Axes, type Axis, type AxisView } from './calibAxes'
 import { flipTo, layoutPos, type Pos } from './flip'
 /*
@@ -51,6 +52,7 @@ export function AxisBar({
   orient,
   view,
   fromLastRow,
+  limits = { x: {}, y: {}, z: {} },
   activeAxis,
   canType = false,
   onType,
@@ -63,6 +65,8 @@ export function AxisBar({
   view: AxisView
   /** 允许拿 LAST_ROW_POS 当起点。只有退出层给 true */
   fromLastRow: boolean
+  /** 三轴的注册表范围（输入框 min/max 与滚轮步进夹取都按它；不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   /** 这一页正在校哪一轴。给了就把另外那两（一）轴压小；不给则三轴一样大 */
   activeAxis?: 'z' | 'xy'
   /**
@@ -129,12 +133,14 @@ export function AxisBar({
       e.preventDefault()
       const cur = Number(input.value)
       if (!Number.isFinite(cur)) return
-      const next = Math.min(50, Math.max(-50, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
+      /* 夹取按注册表范围（原来硬编码 ±50，与注册表的 z ∈ [0,20] 打架） */
+      const l = limits[k]
+      const next = Math.min(l.max ?? Infinity, Math.max(l.min ?? -Infinity, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
       onType(k, next.toFixed(2))
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [canType, onType])
+  }, [canType, onType, limits])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -245,8 +251,8 @@ export function AxisBar({
                       className={p.axisInput}
                       type="number"
                       step="0.05"
-                      min={-50}
-                      max={50}
+                      min={limits[k].min}
+                      max={limits[k].max}
                       inputMode="decimal"
                       aria-label={`${label}（毫米）`}
                       data-axis={k}
@@ -342,6 +348,7 @@ export default function CalibHead({
   saved,
   draft,
   view,
+  limits,
   activeAxis,
   canEdit,
   onType,
@@ -351,6 +358,8 @@ export default function CalibHead({
   saved: Axes | null
   draft: Axes | null
   view: AxisView
+  /** 三轴的注册表范围（透传给 AxisBar；不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   activeAxis: 'z' | 'xy'
   /** 取到预设才有基准可改（与"点板子不产生读数"同一条规则） */
   canEdit: boolean
@@ -379,6 +388,7 @@ export default function CalibHead({
         view={view}
         orient={peek ? 'col' : 'row'}
         fromLastRow={layer === 'exit'}
+        limits={limits}
         activeAxis={activeAxis}
         canType={canType}
         onType={onType}

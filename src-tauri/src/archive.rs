@@ -162,6 +162,64 @@ pub fn write_meta(paths: &ArchivePaths, meta: &Meta) -> Result<(), AppError> {
     crate::fsx::atomic::atomic_write_json(&paths.meta, meta)
 }
 
+/// **最近一次处理用的是哪个切片器进程**（2026-10-20）—— 引导层认"我刚才切的那一份"
+/// 的取数口（见 [`Meta::slicer_pid`]）。
+///
+/// # 怎么找"最近"
+///
+/// - 日期目录名是 `YYYY-MM-DD`，**字典序 = 时间序** ⇒ 倒着排即可；
+/// - 同一天里按文件名倒序（名字尾巴是 `YYYYMMDD_HHMMSS`，同样是字典序）；
+/// - ★ **只认 `accept` 认下的 pid**：进程号会失效（切片器重启 / 关掉），
+///   旧记录里那个号可能已经不属于任何切片器了 —— 判"它还是不是切片器"是**调用方**
+///   的事（那半在 `crate::ax`），这里只负责按时间倒序把它递过去。
+///   ⇒ 于是"最近那条记录的号已经死了"时会自然落到**上一条还活着**的记录上。
+///
+/// # 代价
+///
+/// 只翻最近 [`SCAN_LIMIT`] 份记录（再多就没有意义了：越旧越不可能还在跑），
+/// 每份只读一个 JSON 的 `slicer_pid` 一格。
+pub fn latest_slicer_pid(history_root: &Path, accept: impl Fn(i32) -> bool) -> Option<i32> {
+    let mut days: Vec<_> = std::fs::read_dir(history_root)
+        .ok()?
+        .flatten()
+        .filter(|d| d.path().is_dir())
+        .map(|d| d.file_name().to_string_lossy().into_owned())
+        .collect();
+    days.sort_unstable();
+    days.reverse();
+
+    let mut seen = 0usize;
+    for day in days {
+        let mut metas: Vec<_> = std::fs::read_dir(history_root.join(&day))
+            .ok()?
+            .flatten()
+            .filter(|f| f.file_name().to_string_lossy().ends_with(META_SUFFIX))
+            .map(|f| f.file_name().to_string_lossy().into_owned())
+            .collect();
+        metas.sort_unstable();
+        metas.reverse();
+        for name in metas {
+            if seen >= SCAN_LIMIT {
+                return None;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(history_root.join(&day).join(&name)).ok()?;
+            let pid = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()?
+                .get("slicerPid")
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i32::try_from(v).ok());
+            if let Some(pid) = pid.filter(|p| accept(*p)) {
+                return Some(pid);
+            }
+        }
+    }
+    None
+}
+
+/// 认"最近那份"时最多翻几条记录（见 [`latest_slicer_pid`]）。
+const SCAN_LIMIT: usize = 30;
+
 /// 一份文件的事实（`detail.inputFile` / `detail.outputFile`）。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -429,6 +487,16 @@ pub struct Meta {
     /// 与 `error` 同一档：**落 `null` 而不是缺键** —— 这一格是报告页的契约（列表行与
     /// 「结论 → 文件」都读它），"没有名字"与"老记录里没有这个键"是两件事。
     pub model_name: Option<String>,
+    /// **这一趟是**哪个切片器进程**拉起来的**（2026-10-20）—— 钩子模式下父进程就是
+    /// 那一趟切片的 Bambu Studio（见 [`crate::parent`]）。
+    ///
+    /// 为什么要记它：BBS 会**多开**，而"改完参数要回哪一份去重新切片"只有它答得准 ——
+    /// "窗口排在最前那份"会挑错（用户可能切着 A 份、手上点着 B 份）。
+    /// 引导层读最近一条记录的这一格 ⇒ 认出"最后处理用的是哪个 BBS"。
+    ///
+    /// ★ **只加不改**：旧记录没有这个键 ⇒ 读到 `null` ⇒ 引导退回"最前那份"，
+    /// 与 `collision` / `relocation` 同一套习惯。**拿不到就落 `null`，不编数**。
+    pub slicer_pid: Option<i32>,
     pub invocation: Invocation,
     pub warnings: Vec<String>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
@@ -1214,6 +1282,57 @@ mod tests {
         assert!(detail.contains("容差 0.5"), "实际：{detail}");
     }
 
+    /// ★★ **最近一次处理用的是哪个切片器**（2026-10-20）：按时间倒序挑，且只认
+    /// `accept` 认下的号 —— 切片器重启后旧号就废了，那时该落到**上一条还活着**的记录。
+    #[test]
+    fn latest_slicer_pid_picks_the_newest_live_one() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-19")).unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-20")).unwrap();
+        let write = |day: &str, name: &str, pid: Option<i32>| {
+            let pid = pid.map(|p| p.to_string()).unwrap_or("null".to_owned());
+            std::fs::write(
+                d.path().join(day).join(name),
+                format!(r#"{{"schemaVersion":2,"startedAt":"","slicerPid":{pid}}}"#),
+            )
+            .unwrap();
+        };
+        write("2026-10-19", "a_20261019_100000_meta.json", Some(111));
+        write("2026-10-20", "b_20261020_090000_meta.json", Some(222));
+        /* 最新的一条（同一天里名字最大） */
+        write("2026-10-20", "c_20261020_093000_meta.json", Some(333));
+
+        /* 全都认 ⇒ 拿最新的 333 */
+        assert_eq!(latest_slicer_pid(d.path(), |_| true), Some(333));
+        /* 最新那条号已经"不是切片器了" ⇒ 落到上一条还活着的 222 */
+        assert_eq!(latest_slicer_pid(d.path(), |p| p != 333), Some(222));
+        /* 一条都不认 ⇒ None（不是随便挑一个） */
+        assert_eq!(latest_slicer_pid(d.path(), |_| false), None);
+    }
+
+    /// **旧记录没有 `slicerPid` 这个键**（只加不改那一档）⇒ 读到 `null`，
+    /// 跳过它继续往前找，而不是报错、也不是编一个号。
+    #[test]
+    fn records_without_the_key_are_skipped_not_faked() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-20")).unwrap();
+        std::fs::write(
+            d.path()
+                .join("2026-10-20")
+                .join("new_20261020_093000_meta.json"),
+            r#"{"schemaVersion":2,"startedAt":""}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.path()
+                .join("2026-10-20")
+                .join("old_20261020_090000_meta.json"),
+            r#"{"schemaVersion":2,"startedAt":"","slicerPid":777}"#,
+        )
+        .unwrap();
+        assert_eq!(latest_slicer_pid(d.path(), |_| true), Some(777));
+    }
+
     /// 校准模式没跑过碰撞检测（`need_collision_check`）—— 细节**不许**写"无碰撞"，
     /// 那是编的结论；类型与位置两行照写。
     #[test]
@@ -1242,6 +1361,7 @@ mod tests {
             preset_path: "/p/A1-fastv3.3.toml".into(),
             gcode_path: "/tmp/.63288.1.gcode".into(),
             model_name: Some("帕姆".into()),
+            slicer_pid: Some(4242),
             invocation: Invocation {
                 exe: "SupportEase.exe".into(),
                 args: vec!["--Gcode".into()],
@@ -1340,6 +1460,7 @@ mod tests {
             gcode_path: "/tmp/x.gcode".into(),
             // 三级兜底都没拿到 ⇒ 落 null（**不是缺键**：报告页读口按同一把尺子取它）
             model_name: None,
+            slicer_pid: Some(99),
             invocation: invocation(),
             warnings: Vec::new(),
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),

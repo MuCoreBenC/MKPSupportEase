@@ -26,13 +26,18 @@
 
 import { useEffect, useRef, useState } from 'react'
 import SkeletonA44 from '../home/Skeleton'
+import type { AxisLimits } from '../../api/contract'
 import { AXIS_ROWS, type Axes, type Axis, type AxisView } from './calibAxes'
 import s from './CalibReadings.module.css'
+
+/** 没传范围（不该发生，调用方都从 useCalibration 拿）时不设限 */
+const NO_LIMITS: AxisLimits = { x: {}, y: {}, z: {} }
 
 export default function CalibReadings({
   saved,
   draft,
   view,
+  limits = NO_LIMITS,
   activeAxis,
   canType = false,
   onType,
@@ -42,6 +47,8 @@ export default function CalibReadings({
   saved: Axes | null
   draft: Axes | null
   view: AxisView
+  /** 三轴的注册表范围（输入框 min/max 与滚轮步进夹取都按它；2026-10-20 起不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   /** 这一页正在校哪一轴：当前轴的轴名转绿，另外两轴保持灰（三个数一样大） */
   activeAxis?: 'z' | 'xy'
   /** 取到预设才有基准可改；只读时框不变灰（ disabled 会是第三种长相），只是不亮 */
@@ -94,12 +101,14 @@ export default function CalibReadings({
       e.preventDefault()
       const cur = Number(input.value)
       if (!Number.isFinite(cur)) return
-      const next = Math.min(50, Math.max(-50, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
+      /* 夹取按注册表范围（原来硬编码 ±50，与注册表的 z ∈ [0,20] 打架） */
+      const l = limits[k]
+      const next = Math.min(l.max ?? Infinity, Math.max(l.min ?? -Infinity, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
       onType(k, next.toFixed(2))
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [canType, onType])
+  }, [canType, onType, limits])
 
   return (
     <dl className={s.readings} ref={rootRef}>
@@ -139,8 +148,8 @@ export default function CalibReadings({
                     className={s.fieldInput}
                     type="number"
                     step="0.05"
-                    min={-50}
-                    max={50}
+                    min={limits[k].min}
+                    max={limits[k].max}
                     inputMode="decimal"
                     aria-label={`${label}（毫米）`}
                     data-axis={k}

@@ -56,6 +56,8 @@
 
 .input {
   min-width: 40px;
+  /* 右内衬：值/占位串与右侧的 mm、步进箭头之间永远留一口气（2026-10-20 作者改） */
+  padding-right: 4px;
   border: 0;
   background: transparent;
   text-align: right;
@@ -69,6 +71,59 @@
 .input:focus,
 .input:focus-visible {
   outline: none;
+}
+
+/* 输入为空时的灰色区间占位（作者 2026-10-20：「空着的时候怎么没有灰色字显示区间」） */
+.input::placeholder {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/*
+ * 即时校验提示（只有出问题才包这一层 —— 没问题的稿一个像素不动）：
+ * 相对定位的外层 + 绝对定位的气泡，**悬浮在框正上方**，不占布局。
+ * 出现时机由 data-show 管（编辑中 / 悬停），平时透明 —— 常驻的只有红描边
+ * （2026-10-20 作者改：没在编辑的框头顶不该常年挂着一串红字）。
+ */
+.withHint {
+  position: relative;
+  display: inline-flex;
+}
+
+/*
+ * 壳（框）在包装层里继续**撑满**宿主给的宽度：参数行 `.edNum` 是 132px 定宽，
+ * 原来框是它的直接子元素（`width:100%`）；包了一层之后由这一条接住，
+ * 框宽一个像素不变（2026-10-20 作者：「文本框不要被挤压」）。
+ */
+.withHint > span:first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.hint {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  z-index: 3;
+  padding: 3px 9px;
+  border: 1px solid rgb(229 72 77 / 45%);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  color: #e5484d;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity 0.12s ease,
+    visibility 0.12s ease;
+}
+
+.withHint[data-show='true'] .hint {
+  opacity: 1;
+  visibility: visible;
 }
 
 .unit {

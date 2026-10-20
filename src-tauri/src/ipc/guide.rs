@@ -154,7 +154,7 @@ pub async fn guide_show(app: AppHandle) -> Result<GuideTargetDto, AppError> {
          * **先建卡片 → 再把切片器抬回最前**（卡片自己是 `always_on_top`，
          * 抬完仍浮在切片器上面）。
          */
-        let (x, y, side) = place_card(&t, screen_width(&app));
+        let (x, y, side) = place_card(&app, &t);
         show_at(&app, x, y, side);
         mount_watcher(&app);
 
@@ -285,6 +285,20 @@ fn decide(app: &AppHandle) -> Option<Action> {
          */
         None => st.map_or(SlicerVisibility::Front, |s| s.visibility),
     };
+    /*
+     * ★ **收起来要说清为什么**（2026-10-20 作者报"卡片几秒钟就消失了"）：
+     * 光看现象分不清是"被压住 / 最小化 / 退了"哪一种，日志里带上层序那两个数
+     * （`covered` / `on_screen`）—— 下一次一眼就能定位。
+     */
+    if visibility != SlicerVisibility::Front {
+        tracing::info!(
+            gone = visibility == SlicerVisibility::Gone,
+            covered = z.map(|z| z.covered),
+            on_screen = z.map(|z| z.on_screen),
+            pid,
+            "引导卡片收起来：切片器此刻不该露脸"
+        );
+    }
     if visibility == SlicerVisibility::Behind && just_shown() {
         /*
          * ★★★ **刚摆出去的这一小段里，"切片器不在最前"多半不是用户干的，是我们的回声**：
@@ -327,6 +341,7 @@ fn decide(app: &AppHandle) -> Option<Action> {
          * 不记就再也没人把它接回来（作者："切换回来，它就没出现"）。
          */
         mark_target_lost(true);
+        tracing::info!(pid, "引导卡片收起来：窗口里找不到板子类型那个控件");
         return Some(Action::Hide { gone: false });
     };
     /* 又指得上了 —— 标记清掉 */
@@ -335,7 +350,7 @@ fn decide(app: &AppHandle) -> Option<Action> {
     /* 通知没挂满 ⇒ 趁它现在看得见，重挂一次（幂等，且带节流） */
     ensure_watcher(app);
 
-    let (x, y, side) = place_card(&t, screen_width(app));
+    let (x, y, side) = place_card(app, &t);
     if app.get_webview_window(GUIDE_LABEL).is_some() {
         Some(Action::Move { x, y, side })
     } else {
@@ -791,21 +806,53 @@ fn watched_pid() -> Option<i32> {
 /// 返回的 x 是**窗口**的左边（不是卡片的）—— 卡片那一侧要往窗口里让出
 /// [`SHADOW_PAD`]（或 [`ARROW_PAD`]），窗口整体再相应朝外挪，卡片本体才正好落在
 /// `target ± GAP` 上。
-fn place_card(target: &RectDto, screen_w: f64) -> (f64, f64, &'static str) {
-    let top = sane(target.y - SHADOW_PAD, 0.0);
+fn place_card(app: &AppHandle, target: &RectDto) -> (f64, f64, &'static str) {
+    /*
+     * ★★ **按"目标所在那块屏"算，不按主屏**（2026-10-20 作者问"不同分辨率怎么做"）：
+     * 切片器常常开在副屏上，而副屏可能在主屏**左边**（逻辑坐标是负的），也可能
+     * 尺寸与主屏不同。原来拿主屏宽度去判"右边放得下吗" ⇒ 副屏窄一点就被判成
+     * 放不下 ⇒ 卡片翻到左边、甚至翻出屏幕。现在问"目标中心落在哪块屏"。
+     */
+    let (min_x, max_x, min_y) = monitor_bounds(app, target);
+    let top = sane(target.y - SHADOW_PAD, min_y).max(min_y);
     /* 卡片在右：窗口左边 = 卡片左边再往左让一条箭头竖条 */
-    let right = sane(target.x + target.width + CARD_GAP - ARROW_PAD, 0.0);
-    let screen_w = sane(screen_w, 1920.0);
-    if right + WINDOW_W <= screen_w {
+    let right = sane(target.x + target.width + CARD_GAP - ARROW_PAD, min_x);
+    if right + WINDOW_W <= max_x {
         (right, top, "right")
     } else {
         /* 卡片在左：窗口左边再往左让出卡片与右侧那圈阴影空 */
         (
-            sane(target.x - CARD_GAP - CARD_W - SHADOW_PAD, 0.0),
+            sane(target.x - CARD_GAP - CARD_W - SHADOW_PAD, min_x),
             top,
             "left",
         )
     }
+}
+
+/// **目标所在那块屏**的逻辑边界 `(min_x, max_x, min_y)`。
+///
+/// 问不到（Tauri 不给）就退回一个常见值 —— 这只用来决定卡片往左还是往右放，
+/// 差一点不影响"指得准不准"。
+fn monitor_bounds(app: &AppHandle, target: &RectDto) -> (f64, f64, f64) {
+    let cx = target.x + target.width / 2.0;
+    let cy = target.y + target.height / 2.0;
+    let m = app
+        .monitor_from_point(cx, cy)
+        .ok()
+        .flatten()
+        .or_else(|| app.primary_monitor().ok().flatten());
+    let Some(m) = m else {
+        return (0.0, 1920.0, 0.0);
+    };
+    /* 位置与尺寸都是物理像素，要除回缩放才与卡片那套逻辑坐标同一坐标系 */
+    let s = m.scale_factor();
+    let pos = m.position().to_logical::<f64>(s);
+    let size = m.size().to_logical::<f64>(s);
+    (
+        sane(pos.x, 0.0),
+        sane(pos.x + size.width, 1920.0),
+        sane(pos.y, 0.0),
+    )
 }
 
 /// 把非有限数（NaN / ±Inf）换成兜底值。
@@ -866,14 +913,4 @@ fn raise_slicer_window() {
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     { /* 别处本来就没有这一层（`locate` 会回"指不了"），无从抬 */ }
-}
-
-/// 屏幕有多宽（逻辑点）。拿不到时给一个常见值 —— 这只用来决定卡片往左还是往右放，
-/// 差一点不影响"指得准不准"。
-fn screen_width(app: &AppHandle) -> f64 {
-    app.primary_monitor()
-        .ok()
-        .flatten()
-        .map(|m| m.size().width as f64 / m.scale_factor())
-        .unwrap_or(1920.0)
 }
