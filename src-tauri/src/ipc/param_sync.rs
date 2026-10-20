@@ -524,6 +524,40 @@ fn apply_at(
     let next = runtime::lineage::rewrite_keeping_lineage(&skeleton, Some(&lineage));
 
     /*
+     * **参数草稿层要跟着这一趟走**（2026-10-20 实测出来的那条）。
+     *
+     * 打开过「修改参数」就会留一份草稿（正文 = 打开时盘上那份，哪怕一个字没改）。
+     * 这一趟重写了文件（注释 / 时间戳 / 血统，采用时还有值），草稿若原样不动，
+     * 它跟新文件就只差注释 —— 列表上亮一枚「未保存」的橙点，点进参数页却写着
+     * "没有未保存的改动"；更糟的是再点保存会把云端带进来的注释改回去。
+     *
+     * 所以分两档：
+     *   · 草稿**没改过**（仍是打开时那份正文）⇒ 换成新正文，橙点自然灭；
+     *   · 草稿**真改过** ⇒ 不许从它脚下换文件 —— 如实拒绝，先去参数页保存 / 放弃。
+     *     （悄悄换掉会把用户的字与云端新版揉成一份谁也说不清的中间态。）
+     */
+    let draft_before = runtime::app_state::draft(root)?;
+    let clean_draft = match &draft_before {
+        Some(d)
+            if d.origin == runtime::state::ActiveOrigin::Local
+                && d.path.as_deref() == Some(path) =>
+        {
+            d.text == runtime::lineage::strip_lineage_lines(&local_text)
+        }
+        _ => false,
+    };
+    if let Some(d) = &draft_before {
+        if d.origin == runtime::state::ActiveOrigin::Local
+            && d.path.as_deref() == Some(path)
+            && !clean_draft
+        {
+            return Err(AppError::invalid_argument(
+                "这份预设还有没保存的修改（在「修改参数」里）—— 先保存或放弃那些修改，再处理云端更新",
+            ));
+        }
+    }
+
+    /*
      * 算出来与原文一样就**不写盘**：一次空操作不该刷新 mtime
      * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
      */
@@ -531,6 +565,17 @@ fn apply_at(
         /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
         let _ = runtime::baseline::ensure_origin_copy(root, user, path);
         runtime::local::write_text(user, path, &next)?;
+    }
+
+    if clean_draft {
+        if let Some(d) = draft_before {
+            runtime::app_state::set_draft(
+                root,
+                &d.subject(),
+                &d.source_sha256,
+                &runtime::lineage::strip_lineage_lines(&next),
+            )?;
+        }
     }
 
     let record: Vec<(String, ParamDecision)> = kinds
@@ -1141,5 +1186,49 @@ offset_x = -1
         )
         .unwrap_err();
         assert_eq!(bad_key.code, crate::error::ErrorCode::InvalidArgument);
+    }
+
+    /// **打开过参数页留下的干净草稿要跟着重写走**（2026-10-20 实测那条）：
+    /// 这一趟把文件换成云端骨架之后，草稿也该是新正文 —— 否则列表亮"未保存"、
+    /// 再点保存还会把云端带进来的注释改回去。
+    #[test]
+    fn a_clean_draft_follows_the_rewrite() {
+        let w = World::new();
+        let clean = runtime::lineage::strip_lineage_lines(&w.local_text());
+        let subject = runtime::state::DraftSubject::local("本地 A1.toml", LOCAL);
+        runtime::app_state::set_draft(&w.root, &subject, "旧水位", &clean).unwrap();
+
+        /* 「应用 0 项」：值一个不动，但骨架与血统换成云端当前版 */
+        apply_at(&w.root, &w.user, LOCAL, &[]).unwrap();
+
+        let after = runtime::app_state::draft(&w.root)
+            .unwrap()
+            .expect("草稿该还在");
+        assert_eq!(
+            after.text,
+            runtime::lineage::strip_lineage_lines(&w.local_text()),
+            "草稿正文要跟着新文件走"
+        );
+    }
+
+    /// **真改过的草稿不许被踩**：这一趟如实拒绝，文件一个字节不动 ——
+    /// 悄悄换掉就成了"用户的字 + 云端新版"揉出来的中间态。
+    #[test]
+    fn a_dirty_draft_blocks_the_rewrite() {
+        let w = World::new();
+        let before = w.local_text();
+        let mut dirty = runtime::lineage::strip_lineage_lines(&before);
+        dirty.push_str("\n# 用户自己敲的一行\n");
+        let subject = runtime::state::DraftSubject::local("本地 A1.toml", LOCAL);
+        runtime::app_state::set_draft(&w.root, &subject, "旧水位", &dirty).unwrap();
+
+        let err = apply_at(&w.root, &w.user, LOCAL, &[]).unwrap_err();
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+        assert_eq!(w.local_text(), before, "文件不许被换掉");
+        assert_eq!(
+            runtime::app_state::draft(&w.root).unwrap().unwrap().text,
+            dirty,
+            "草稿也不许被动"
+        );
     }
 }
