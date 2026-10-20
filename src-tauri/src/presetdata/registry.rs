@@ -282,6 +282,12 @@ pub struct ParamMetaEdit {
     /// `None` = 不动 —— 旧载荷没有这一格时，不能把它读成「搬回某个默认组」
     #[serde(default)]
     pub section_id: Option<String>,
+    /// **组内顺序**（`[params.layout].order`）。`None` = 不动。
+    ///
+    /// 界面上是「第 n / m 位」那对上下箭头；客户端按同一个值排同一组里的参数，
+    /// 所以它是数据，不是界面状态。搬组时不给就落到目标组末尾
+    #[serde(default)]
+    pub order: Option<f64>,
 }
 
 /* ---------- 分组元数据（中文名与顺序的唯一权威） ---------- */
@@ -1228,6 +1234,14 @@ impl ParamRegistry {
             Some(s) if !s.is_empty() && s != current_section => Some(s.to_owned()),
             _ => None,
         };
+        let requested_order = match edit.order {
+            Some(o) if !o.is_finite() => {
+                return Err(AppError::invalid_argument(format!(
+                    "顺序值得是个有限数字，见到 {o}"
+                )));
+            }
+            other => other,
+        };
         let moved_order = match &target_section {
             Some(target) => {
                 let section = self
@@ -1243,18 +1257,38 @@ impl ParamRegistry {
                         "分组 {target} 是整块自定义组件，收不了参数"
                     )));
                 }
-                // 放到组末：目标组当前最大 order + 1（空组从 1 开始）
-                let max = self
-                    .params
-                    .iter()
-                    .filter(|p| p.layout.section_id == *target && p.key != key)
-                    .map(|p| p.layout.order)
-                    .fold(None, |acc: Option<f64>, o| {
-                        Some(acc.map_or(o, |a| a.max(o)))
-                    });
-                Some(max.map_or(1.0, |m| m + 1.0))
+                // 目标顺序：给了就照给的（界面会按目标组算好）；没给就放到组末
+                match requested_order {
+                    Some(o) => Some(o),
+                    None => {
+                        let max = self
+                            .params
+                            .iter()
+                            .filter(|p| p.layout.section_id == *target && p.key != key)
+                            .map(|p| p.layout.order)
+                            .fold(None, |acc: Option<f64>, o| {
+                                Some(acc.map_or(o, |a| a.max(o)))
+                            });
+                        Some(max.map_or(1.0, |m| m + 1.0))
+                    }
+                }
             }
             None => None,
+        };
+        /*
+         * 要写进 `[params.layout].order` 的新值：
+         *   · 搬组 → 目标组算好的那个；
+         *   · 没搬组、但给的顺序与现值不同 → 就用它（上下箭头走这一条）；
+         *   · 其余 = 不动（旧载荷不带 `order`，不许被动重排）。
+         */
+        let new_order = match target_section.as_ref() {
+            /* 搬组：目标组算好的那个（显式给的顺序 / 组末） */
+            Some(_) => moved_order,
+            /* 没搬组、只是上下移 */
+            None => match requested_order {
+                Some(o) if o != self.params[at].layout.order => Some(o),
+                _ => None,
+            },
         };
         let moved_item_id = target_section
             .as_ref()
@@ -1344,22 +1378,22 @@ impl ParamRegistry {
         } else {
             t["machineFilter"] = toml_edit::value(machine_filter.join(","));
         }
-        // 搬组：参数自己的 `[params.layout]` 跟着走（布局文件那一半在下面）
-        if let (Some(target), Some(order)) = (&target_section, moved_order) {
+        // 搬组 / 调顺序：参数自己的 `[params.layout]` 跟着走（布局文件那一半在下面）
+        if let Some(order) = new_order {
             let lt = t
                 .get_mut("layout")
                 .and_then(toml_edit::Item::as_table_mut)
                 .ok_or_else(|| {
                     AppError::corrupted(format!("{key} 的 [params.layout] 不是一个表"))
                 })?;
-            lt["sectionId"] = toml_edit::value(target.as_str());
+            if let Some(target) = &target_section {
+                lt["sectionId"] = toml_edit::value(target.as_str());
+            }
             lt["order"] = toml_edit::value(order);
         }
 
         /* ---------- 布局文件：把条目从旧组搬到新组 ---------- */
-        if let (Some(target), Some(order), Some(item_id)) =
-            (&target_section, moved_order, moved_item_id)
-        {
+        if let (Some(target), Some(item_id)) = (&target_section, moved_item_id) {
             layout_take_item(&mut self.layout_doc, &current_section, key)?;
             layout_push_item(&mut self.layout_doc, target, &item_id, key)?;
             for section in self.layout.iter_mut().flat_map(|t| t.sections.iter_mut()) {
@@ -1374,7 +1408,22 @@ impl ParamRegistry {
             }
             let p = &mut self.params[at];
             p.layout.section_id = target.clone();
-            p.layout.order = order;
+            if let Some(order) = moved_order {
+                p.layout.order = order;
+            }
+        } else if let Some(order) = new_order {
+            self.params[at].layout.order = order;
+        }
+
+        /*
+         * 顺序变了（搬组或上下移）：`items[]` 得跟着重排。
+         * `check_consistency` 第③条要求两边一致 —— 不重排的话，下一次加载整份数据起不来。
+         */
+        if new_order.is_some() {
+            let section = target_section
+                .clone()
+                .unwrap_or_else(|| self.params[at].layout.section_id.clone());
+            self.layout_reorder_section(&section)?;
         }
 
         /* ---------- 内存 ---------- */
@@ -1394,6 +1443,39 @@ impl ParamRegistry {
         p.deprecated_machines = deprecated_machines;
         p.choices = choices;
         p.machine_filter = machine_filter;
+        Ok(())
+    }
+
+    /// 把一个 section 的 `items[]` 重排成与 `[params.layout].order` 一致（文件 + 内存两半）。
+    ///
+    /// 改顺序、搬组之后都要过这一道：`check_consistency` 第③条要求
+    /// 「items 顺序 == 按 order 升序」，漏了它下一次加载整份数据就起不来。
+    /// 同 order 时保持注册表里的原有次序（稳定排序）。
+    fn layout_reorder_section(&mut self, section_id: &str) -> Result<(), AppError> {
+        let mut pairs: Vec<(&str, f64)> = self
+            .params
+            .iter()
+            .filter(|p| p.layout.section_id == section_id)
+            .map(|p| (p.key.as_str(), p.layout.order))
+            .collect();
+        pairs.sort_by(|a, b| a.1.total_cmp(&b.1));
+        let want: Vec<String> = pairs.iter().map(|(k, _)| (*k).to_owned()).collect();
+
+        layout_reorder_items(&mut self.layout_doc, section_id, &want);
+
+        // 内存那一半：按 want 里的位次排，不在表里的（理论上没有）沉到最后
+        let pos: BTreeMap<&str, usize> = want
+            .iter()
+            .enumerate()
+            .map(|(i, k)| (k.as_str(), i))
+            .collect();
+        for section in self.layout.iter_mut().flat_map(|t| t.sections.iter_mut()) {
+            if section.id == section_id {
+                section
+                    .items
+                    .sort_by_key(|i| pos.get(i.param_key.as_str()).copied().unwrap_or(usize::MAX));
+            }
+        }
         Ok(())
     }
 
@@ -1618,6 +1700,48 @@ fn layout_push_item(
         }
     }
     Ok(())
+}
+
+/// 按 `want` 给的 key 顺序重排某个 section 的 `items[]`。
+///
+/// **只改每格里的 `paramKey`，不搬动表格本身**。
+///
+/// 为什么不整组重建：`toml_edit` 的表数组条目带着**文档位置**，把克隆出来的表塞回
+/// 一个新建的数组会让同一条被印两遍（2026-10-20 实测：`insert("items", …)` 之后
+/// 文件里出现 6 条）。逐格换 key 既不改结构、也不动排版 —— `id` 只是唯一标识，
+/// 谁配谁没有语义，换个配对不违反任何判据。
+fn layout_reorder_items(doc: &mut DocumentMut, section_id: &str, want: &[String]) {
+    let Some(section) = layout_section_mut(doc, section_id) else {
+        return;
+    };
+    /* 真数据是 `[[tabs.sections.items]]`（表数组）；手写源可能是内联数组 —— 两种都认 */
+    if let Some(items) = section
+        .get_mut("items")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    {
+        /* 数量对不上说明数据已经漂了：宁可不动，也不要把条目改成对不上号的 */
+        if items.len() != want.len() {
+            return;
+        }
+        for (i, tbl) in items.iter_mut().enumerate() {
+            tbl["paramKey"] = toml_edit::value(want[i].as_str());
+        }
+        return;
+    }
+    if let Some(arr) = section
+        .get_mut("items")
+        .and_then(toml_edit::Item::as_array_mut)
+    {
+        if arr.len() != want.len() {
+            return;
+        }
+        for (i, v) in arr.iter_mut().enumerate() {
+            if let Some(t) = v.as_inline_table_mut() {
+                t.insert("paramKey", toml_edit::Value::from(want[i].as_str()));
+            }
+        }
+    }
+    /* `items = []`（组件占位那种内联空数组）没有可排的，什么都不做 */
 }
 
 /// 校验 owner 的形状 —— 非空、不含空白
@@ -2859,6 +2983,7 @@ mod tests {
             choices: Vec::new(),
             machine_filter: Vec::new(),
             section_id: None,
+            order: None,
         }
     }
 
@@ -3177,6 +3302,43 @@ mod tests {
         };
         assert_eq!(section_of("s2"), ["a.x"]);
         assert_eq!(section_of("s1"), ["a.mode", "a.y"], "旧组没摘干净");
+    }
+
+    /// 组内顺序：给一个新的 `order` 就换位置，**两份文件一起动**
+    /// （`items` 顺序必须 == 按 order 升序，否则下次加载起不来）
+    #[test]
+    fn reordering_within_a_section_moves_the_layout_item_too() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // a.y 本来在最后（3.0）—— 给它 0.5，排到最前
+        r.set_param_meta(
+            "a.y",
+            ParamMetaEdit {
+                order: Some(0.5),
+                ..meta_edit("a.y")
+            },
+        )
+        .expect("排得动");
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("排完还得读得通");
+        let keys: Vec<&str> = again
+            .layout()
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == "s1")
+            .unwrap()
+            .items
+            .iter()
+            .map(|i| i.param_key.as_str())
+            .collect();
+        assert_eq!(keys, ["a.y", "a.mode", "a.x"]);
+        assert_eq!(again.param("a.y").unwrap().layout.order, 0.5);
+        // 别人的顺序一个都不许被顺手改掉
+        assert_eq!(again.param("a.mode").unwrap().layout.order, 1.0);
+        assert_eq!(again.param("a.x").unwrap().layout.order, 2.0);
     }
 
     #[test]

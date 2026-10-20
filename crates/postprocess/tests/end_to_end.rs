@@ -44,6 +44,15 @@
 //! 直接拿本侧输出覆盖它等于把判据变成自比自（彻底空转）。所以改成比对前剔除标记行：
 //! 判据由「逐字节相同」变成「**除新增标记行外**逐字节相同」——
 //! 这比原判据更强，因为它同时证明了标记是纯增量，没有顺带移动或改写任何一行原有输出。
+//!
+//! ## 2026-10-20：再收窄为「除标记行与换笔块外逐字节相同」
+//!
+//! 换笔前后两段的移动高度是**有意偏离**来源实现的（原因见
+//! `docs/GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`：原写法让喷嘴从零净空贴面滑行 120mm、
+//! 装好笔后笔尖只剩 2.8mm 净空，高层会撞倒模型）。这段必然与旧参考不同，
+//! 所以比对前用 `strip_swap_travel_blocks` 把「`;Pre-glue preparation` →
+//! `;Glueing Started`」整段剔除。**不用本侧输出覆盖参考物**——那会让整链判据退化成自比自。
+//! 换笔段改由 `tests/travel_clearance.rs`（净空不等式）+ G1/G2 golden（逐字节）看守。
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -125,11 +134,47 @@ fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
+/// 剔除「换笔块」（`;Pre-glue preparation` → `;Glueing Started` 之前）后再比对。
+///
+/// 2026-10-20 起这一段是**有意偏离**来源实现的（见
+/// `docs/GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`）：原来把去切笔位的横移写成
+/// `G1 X.. Z{层顶+1.0}` 的 XY+Z 斜插（喷嘴从零净空起步、贴面滑行 120mm），
+/// 装好笔又落回 `last+offset_z+3.0`（笔尖净空只剩 2.8mm），高层会撞倒模型。
+/// 改成「先抬后走 + 与收笔同一净空」后，该段的结构与 Z 值必然与参考物不同。
+///
+/// 这里选择**剔除整段**而不是用本侧输出覆盖参考物：覆盖等于把整链判据变成自比自
+/// （2026-09-12 那段已踩过一次）。剔除后仍能证明「换笔段之外的所有输出逐字节一致」；
+/// 换笔段本身由 `tests/travel_clearance.rs`（净空不等式）与 G1/G2 golden（逐字节）
+/// 两条判据分别守着，不是无人看守。
+fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_end();
+        if !skipping && t == ";Pre-glue preparation" {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if t == ";Glueing Started" {
+                skipping = false;
+                out.push_str(line);
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out.into_bytes()
+}
+
 /// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。
 #[test]
 fn output_is_byte_identical_to_the_mkp_sr_reference() {
-    let got = strip_mkp_marks(&run_and_read("same", &[]));
-    let want = std::fs::read(reference_output()).expect("参考输出 fixture 应当存在");
+    let got = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read("same", &[])));
+    let want = strip_swap_travel_blocks(
+        &std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"),
+    );
 
     // 先报长度，再逐字节定位——直接 assert_eq! 两个 668KB 的 Vec 会刷屏。
     assert_eq!(
@@ -170,9 +215,14 @@ fn the_reference_is_not_just_a_copy_of_the_input() {
 /// 上一条判据就只是在比较「两个固定文件」。
 #[test]
 fn the_byte_comparison_is_sensitive_to_the_config() {
-    let baseline = strip_mkp_marks(&run_and_read("baseline", &[]));
-    let perturbed = strip_mkp_marks(&run_and_read("perturbed", &["--set", "Glue.PassCount=2"]));
-    let want = std::fs::read(reference_output()).expect("参考输出 fixture 应当存在");
+    let baseline = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read("baseline", &[])));
+    let perturbed = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read(
+        "perturbed",
+        &["--set", "Glue.PassCount=2"],
+    )));
+    let want = strip_swap_travel_blocks(
+        &std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"),
+    );
 
     // 用 assert!(a == b) 而不是 assert_eq!：后者失败时会把两个 668KB 的 Vec 原样打出来
     // （实测 5.2MB 输出，真正的原因反而被埋了）。

@@ -153,9 +153,53 @@
 /* 可选项一行：值 / 显示名 / 全局弃用 / 弃用机型 / 删。值是等宽短词 —— 窄列对得齐 */
 .choiceRow {
   display: grid;
-  grid-template-columns: 120px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 120px minmax(0, 1fr) auto auto auto auto;
   gap: 8px;
   align-items: center;
+}
+
+/* 可选项的上/下移：两枚小箭头挤在一格里，别把「值 / 显示名」两列挤窄 */
+.choiceMove {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+/* 组内顺序：▲ 第 n / m 位 ▼ */
+.orderRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.orderBtn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-2);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.orderBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  border-color: var(--line-strong);
+}
+
+.orderBtn:disabled {
+  opacity: 0.35;
+}
+
+.orderText {
+  min-width: 72px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: center;
+  white-space: nowrap;
 }
 
 /* 每一条可选项的「弃用机型…」：窄，只报台数 —— 点开才是那棵树 */

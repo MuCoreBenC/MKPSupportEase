@@ -1,4 +1,4 @@
-# release_time: 2026-10-19 14:12:29
+# release_time: 2026-10-20 15:29:04
 # machine: A1
 # variant: fast
 
@@ -95,5 +95,5 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)

@@ -2449,6 +2449,9 @@ export function installMockBackend() {
       }
       case 'wb_reload':
         return Promise.resolve(mockBoot())
+      /* 演示桩没有"盘"可看：永远说没变 */
+      case 'wb_presets_changed':
+        return Promise.resolve(false)
       default:
         return Promise.reject({ code: 'NOT_IMPLEMENTED', message: `开发桩没有实现 ${cmd}`, traceId: 'mock' })
     }

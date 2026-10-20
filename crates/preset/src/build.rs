@@ -934,16 +934,22 @@ pub(crate) fn normalize_ironing_suppress_expand_mode(v: &str) -> &str {
     if v.is_empty() { "bbox" } else { v }
 }
 
+/// 注册表把「原版」写成 `original`（2026-10-20 从 `default` 改名）；IR 里的正统字面量
+/// 仍是 `default` —— 后处理只认 `== "new"` 分新老路径，所以这里归一到 `default`，
+/// 旧数据里写着 `default` 的一并认。
 pub(crate) fn normalize_xy_calibration_mode(v: &str) -> &str {
     match v {
-        "default" | "new" => v,
+        "original" | "default" => "default",
+        "new" => "new",
         _ => "default",
     }
 }
 
+/// 同 [`normalize_xy_calibration_mode`]：`original` / `default` 都是「原版」。
 pub(crate) fn normalize_z_calibration_mode(v: &str) -> &str {
     match v {
-        "default" | "new" => v,
+        "original" | "default" => "default",
+        "new" => "new",
         _ => "default",
     }
 }

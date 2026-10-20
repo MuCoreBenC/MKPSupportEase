@@ -19,6 +19,33 @@ use std::path::Path;
 
 use crate::error::AppError;
 
+/// Windows 上把目标路径转成 `\\?\` 前缀的 verbatim 形式。
+///
+/// 解决什么：文件名上限按**字节**算（`runtime::local::NAME_MAX_BYTES = 255`），
+/// 而 Windows 默认的 `MAX_PATH` 是 **260 字符**的整条路径 —— 用户目录一长，
+/// `presets-local/<255 字节的名字>` 就整体越界，`rename` 报
+/// “系统找不到指定的路径 (os error 3)”，复制/改名直接失败。
+/// 加 verbatim 前缀后这条路径不再受 260 限制（NT 命名空间本身支持 32K）。
+///
+/// 只对**父目录**做 `canonicalize`（目标文件还不存在，不能对它做），
+/// 拿到的已经是 verbatim 形式，直接拼文件名即可。任何一步失败就退回原路径 ——
+/// 长路径这次写不成，但不会让原本能成的短路径变坏。
+#[cfg(windows)]
+fn verbatim(path: &Path) -> std::path::PathBuf {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return path.to_path_buf();
+    };
+    match parent.canonicalize() {
+        Ok(dir) => dir.join(name),
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+#[cfg(not(windows))]
+fn verbatim(path: &Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
 /// 原子写。目标目录不存在会自动建。
 ///
 /// ★ **内容没变就不落盘**（2026-10-05 作者裁定：只读不写，连修改时间都不许动）。
@@ -26,7 +53,7 @@ use crate::error::AppError;
 /// 跳过是安全的：写盘的唯一目的是让目标等于这串字节，它已经相等了。
 #[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
-    if let Ok(old) = std::fs::read(path) {
+    if let Ok(old) = std::fs::read(verbatim(path)) {
         if old == bytes {
             return Ok(());
         }
@@ -50,7 +77,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
         .sync_all()
         .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
 
-    tmp.persist(path)?;
+    tmp.persist(verbatim(path))?;
 
     /* 父目录也要 fsync：rename 之后"这个名字指向哪个 inode"还可能只在缓存里。
     目录打不开（罕见）不算写失败 —— 数据已经在盘上了，只是这一步保证弱一点。 */
@@ -90,7 +117,7 @@ pub fn atomic_write_stream(
     tmp.as_file()
         .sync_all()
         .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
-    tmp.persist(path)?;
+    tmp.persist(verbatim(path))?;
 
     if let Ok(dir) = File::open(parent) {
         let _ = dir.sync_all();

@@ -335,6 +335,21 @@ export function WorkbenchApp() {
     refreshReport()
   }, [refreshReport])
 
+  /**
+   * 盘上的 `presets/` 被外部改过没有（2026-10-20，作者：「像你这种外部改的，
+   * 我这个软件完全没有看到改的呀」）。
+   *
+   * 会话把预设**只读一次**（`wb_reload` 才重读），所以外部改完切回来，界面还是旧的。
+   * 这里只**发现并提示**，不自动重载：正开着的草稿是按旧定义起稿的，悄悄换掉
+   * 定义再存回去，会把 `sectionId` / 弃用这些格写错。
+   */
+  const [sourceStale, setSourceStale] = useState(false)
+  const checkSourceStale = useCallback(() => {
+    wb.presetsChanged()
+      .then(setSourceStale)
+      .catch(() => undefined)
+  }, [])
+
   /** 当前页面的 ref：focus 那条监听只装一次，不能跟着每次切页重挂 */
   const pageRef = useRef(page)
   pageRef.current = page
@@ -361,6 +376,7 @@ export function WorkbenchApp() {
         t = null
         if (pageRef.current === 'build') refreshBook()
         else refreshReport()
+        checkSourceStale()
         setTick((n) => n + 1)
       }, 300)
     }
@@ -369,7 +385,7 @@ export function WorkbenchApp() {
       window.removeEventListener('focus', onFocus)
       if (t !== null) window.clearTimeout(t)
     }
-  }, [refreshBook, refreshReport])
+  }, [checkSourceStale, refreshBook, refreshReport])
 
   /**
    * 进这两页时也重取一次：它们是「盘上现在是什么样」的读数页
@@ -380,14 +396,16 @@ export function WorkbenchApp() {
   useEffect(() => {
     if (page === 'build') {
       refreshBook()
+      checkSourceStale()
       setTick((n) => n + 1)
       return
     }
     if (page === 'assets') {
       refreshReport()
+      checkSourceStale()
       setTick((n) => n + 1)
     }
-  }, [page, refreshBook, refreshReport])
+  }, [checkSourceStale, page, refreshBook, refreshReport])
 
   /**
    * 值写入那一路的检查报告**尾随去抖**（700ms）—— 见 `run` 的 `quiet`。
@@ -418,6 +436,7 @@ export function WorkbenchApp() {
   const reloadBoot = useCallback(
     (b: Boot) => {
       setBoot(b)
+      setSourceStale(false)
       refreshBook()
     },
     [refreshBook],
@@ -1177,6 +1196,29 @@ export function WorkbenchApp() {
                       设置页
                     </button>
                     看数据根。
+                  </div>
+                )}
+
+                {/*
+                  数据被外部改过（2026-10-20）。会话只读一次 `presets/`，所以要有一条路
+                  让人知道"屏幕这份不是盘上那份"—— 重载仍然是人的动作，见 checkSourceStale。
+                */}
+                {sourceStale && (
+                  <div className="wb-banner" data-tone="warn" style={{ margin: '0 12px' }}>
+                    盘上的
+                    <span className="wb-mono"> presets/ </span>
+                    在这个窗口外面改过了 —— 现在显示的仍是打开时读进来的那一份（参数名、可选项、
+                    分组都可能是旧的）。点
+                    <button
+                      type="button"
+                      className="wb-link"
+                      onClick={() => {
+                        wb.reload().then(reloadBoot).catch(fail)
+                      }}
+                    >
+                      重新加载
+                    </button>
+                    读进来，不用重启；未保存的草稿不会丢。
                   </div>
                 )}
 

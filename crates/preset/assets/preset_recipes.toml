@@ -129,8 +129,8 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)
 '''
 
 [[machines]]
@@ -236,8 +236,8 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)
 '''
 
 [[machines]]
@@ -293,6 +293,7 @@ MKP_retract = 0 # 回抽长度(mm)
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 
 [wiping]
+disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
 disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
@@ -346,8 +347,8 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)
 '''
 
 [[machines]]
@@ -403,6 +404,7 @@ MKP_retract = 0 # 回抽长度(mm)
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 
 [wiping]
+disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
 disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
@@ -456,8 +458,8 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)
 '''
 
 [[machines]]
@@ -513,6 +515,7 @@ MKP_retract = 0 # 回抽长度(mm)
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 
 [wiping]
+disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
 disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
@@ -566,8 +569,8 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)
 '''
 
 [overrides."A1:fast"]
@@ -591,8 +594,10 @@ G1 E5.5 F1000
 G92 E0
 G1 F30000
 '''
-"toolhead.offset_x" = 0.1
+"toolhead.offset_x" = -0.7
 "toolhead.offset_y" = 24.4
+"toolhead.offset_z" = 3.7
+"wiping.ironing_mode" = "auto"
 
 [overrides."A1:standard"]
 "uuid" = 'f444aeaf-d447-453f-8871-cf7645c2d5df'
@@ -606,6 +611,8 @@ G1 F30000
 "uuid" = 'f3c0a6d7-2cf4-447e-93f8-822f97b35bc6'
 "toolhead.offset_x" = -0.9
 "toolhead.offset_y" = 23
+"toolhead.offset_z" = 3.9
+"wiping.ironing_mode" = "auto"
 
 [overrides."A1_MINI:standard"]
 "uuid" = '0fcddc38-55e9-4528-a3a9-898dbe1eb555'

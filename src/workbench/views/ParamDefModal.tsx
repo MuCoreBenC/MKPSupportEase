@@ -151,6 +151,8 @@ interface Draft {
   machineFilter: string[]
   /** 所属分组（`layout_schema` 的 section id）。同组 = 后端不动 */
   sectionId: string
+  /** 组内顺序（`[params.layout].order`）—— 上下箭头改它，客户端按它排 */
+  order: number
 }
 
 /** 草稿连同它自己的历史 —— 撤销/重做是框里的事，不出这个框 */
@@ -161,6 +163,26 @@ interface FormState {
   /** 同一个 tag 的连续改动（往一个框里打字）并成一步撤销 */
   lastTag: string | null
   lastAt: number
+}
+
+/**
+ * 草稿的**深拷贝**。
+ *
+ * ★ 2026-10-20 修的真 Bug：原来 `edit` 只做 `{ ...prev.draft }`，而 `choices` 是
+ * 数组、每条是对象 —— 浅拷贝之后 `d.choices[i].value = …` 改的是**历史里每一份
+ * 草稿共用的那个对象**。于是「改个选项的值 → 按撤销」看起来毫无反应：撤销确实
+ * 换回了上一份 draft，可那一份里的选项已经被同一笔改动改掉了。
+ * （截图实测：把「默认」的值改成「原」，撤销后还是「原」。）
+ *
+ * 目录里的可变结构只有这两处：`choices[]`（含它自己的 `deprecatedMachines`）与
+ * `machineFilter[]`。其余全是标量，浅拷即安全。
+ */
+function cloneDraft(d: Draft): Draft {
+  return {
+    ...d,
+    choices: d.choices.map((c) => ({ ...c, deprecatedMachines: [...c.deprecatedMachines] })),
+    machineFilter: [...d.machineFilter],
+  }
 }
 
 const numOf = (t: string): number | null => {
@@ -195,6 +217,7 @@ const initOf = (p: ParamView): Draft => ({
   })),
   machineFilter: [...p.machineFilter],
   sectionId: p.sectionId,
+  order: p.order,
 })
 
 /** 草稿 → 后端载荷。归位口径与 `writeValue` 同一套：bool 归 bool、数字归数字 */
@@ -246,6 +269,8 @@ function payloadOf(d: Draft, param: ParamView, params: ParamView[]): ParamMetaEd
         : param.choices,
     machineFilter: [...d.machineFilter],
     sectionId: d.sectionId,
+    /* 顺序是**数据**（客户端按它排同一组），所以整包带上；后端见值没变就不动 */
+    order: d.order,
   }
 }
 
@@ -361,11 +386,16 @@ export default function ParamDefModal({
 
   const draft = form.draft
 
-  /** 改一格。tag 相同且连续（400ms 内）的改动并成一步撤销； redo 链作废 */
+  /**
+   * 改一格。tag 相同且连续（400ms 内）的改动并成一步撤销； redo 链作废。
+   *
+   * **必须深拷**（见 [`cloneDraft`]）：浅拷的话 `fn` 里改嵌套对象会顺手把历史
+   * 里每一份草稿一起改掉，撤销就成了空动作。
+   */
   const edit = (tag: string, fn: (d: Draft) => void) =>
     setForm((prev) => {
       if (prev === null) return prev
-      const next = { ...prev.draft }
+      const next = cloneDraft(prev.draft)
       fn(next)
       const now = Date.now()
       const merge = prev.lastTag === tag && now - prev.lastAt < COALESCE_MS
@@ -427,6 +457,57 @@ export default function ParamDefModal({
     return out
   })()
   const hereSection = sections.find((x) => x.id === draft.sectionId) ?? null
+
+  /*
+   * 组内顺序（2026-10-20 作者：「客户端到时候也要消费到这个排序」）——
+   * 它不是界面状态：同一把尺子还决定客户端那一列从上到下的先后，所以存进
+   * `[params.layout].order`，并让后端把 `layout_schema` 的 items 一起重排。
+   *
+   * 排序时用**草稿里的 order**（不是注册表那份）：连按两次箭头，第二次要基于刚挪过的位置。
+   */
+  const siblings = [
+    ...params
+      .filter((p) => p.sectionId === draft.sectionId && p.key !== param.key)
+      .map((p) => ({ key: p.key, order: p.order })),
+    /* 自己那一条用**草稿**里的顺序：判的是「马上要存成什么样」，不是盘上那份 */
+    { key: param.key, order: draft.order },
+  ].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+  const myAt = siblings.findIndex((p) => p.key === param.key)
+
+  /** 上/下移一位：取两个邻居之间的中点（到头就往外扩 1），不动别人的 order */
+  const moveOrder = (dir: -1 | 1) => {
+    if (myAt < 0) return
+    const other = dir < 0 ? siblings[myAt - 1] : siblings[myAt + 1]
+    if (other === undefined) return
+    const outer = dir < 0 ? siblings[myAt - 2] : siblings[myAt + 2]
+    edit('order', (d) => {
+      d.order =
+        outer === undefined
+          ? other.order + dir /* 到头：往外扩一格 */
+          : (other.order + outer.order) / 2
+    })
+  }
+
+  /** 换分组：顺序跟着落到目标组末尾（与后端「不给顺序就放末尾」同一条口径） */
+  const onSection = (id: string) =>
+    edit('sectionId', (d) => {
+      d.sectionId = id
+      let max: number | null = null
+      for (const p of params) {
+        if (p.sectionId !== id || p.key === param.key) continue
+        max = max === null ? p.order : Math.max(max, p.order)
+      }
+      d.order = max === null ? 1 : max + 1
+    })
+
+  /** 可选项上/下移一位：数组顺序就是分段控件的先后，后端整表照写 */
+  const moveChoice = (i: number, dir: -1 | 1) =>
+    edit('choices-move', (d) => {
+      const j = i + dir
+      if (j < 0 || j >= d.choices.length) return
+      const [moved] = d.choices.splice(i, 1)
+      if (moved !== undefined) d.choices.splice(j, 0, moved)
+    })
 
   const onValueType = (vt: ValueType) =>
     edit('valueType', (d) => {
@@ -669,7 +750,7 @@ export default function ParamDefModal({
     <ModalC14
       open
       title={`编辑定义 · ${param.label}`}
-      subtitle={`写回 presets/registry/param_registry.toml 的 [[params]] —— 即时落盘；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
+      subtitle={`写回 presets/registry/param_registry.toml 的 [[params]] —— 确认保存才落盘；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
       size="lg"
       closeOnScrim={false}
       onClose={onClose}
@@ -873,6 +954,28 @@ export default function ParamDefModal({
                   })
                 }
               />
+              <span className={s.choiceMove}>
+                <button
+                  type="button"
+                  className={s.orderBtn}
+                  disabled={i === 0}
+                  aria-label={`第 ${i + 1} 条可选项上移`}
+                  title="上移一位（分段按钮的先后）"
+                  onClick={() => moveChoice(i, -1)}
+                >
+                  ▲
+                </button>
+                <button
+                  type="button"
+                  className={s.orderBtn}
+                  disabled={i >= draft.choices.length - 1}
+                  aria-label={`第 ${i + 1} 条可选项下移`}
+                  title="下移一位（分段按钮的先后）"
+                  onClick={() => moveChoice(i, 1)}
+                >
+                  ▼
+                </button>
+              </span>
               <label className={s.choiceDep} title="所有机型、所有版本都不许再写这一档">
                 <input
                   type="checkbox"
@@ -955,7 +1058,7 @@ export default function ParamDefModal({
               className={s.sel}
               value={draft.sectionId}
               aria-label="所属分组 (sectionId)"
-              onChange={(e) => edit('sectionId', (d) => (d.sectionId = e.target.value))}
+              onChange={(e) => onSection(e.target.value)}
             >
               {sectionGroups.map((g) => (
                 <optgroup key={g.tabId} label={g.tabLabel}>
@@ -967,6 +1070,40 @@ export default function ParamDefModal({
                 </optgroup>
               ))}
             </select>
+          </label>
+          {/*
+            组内顺序：客户端按同一个 `layout.order` 排同一组里的参数 ——
+            所以这不是「界面上的小偏好」，而是数据。后端保存时会把 items 一起重排。
+          */}
+          <label className={s.field}>
+            <span className={s.fieldLabel}>
+              组内顺序<em className={s.fieldKey}>layout.order</em>
+            </span>
+            <span className={s.orderRow}>
+              <button
+                type="button"
+                className={s.orderBtn}
+                disabled={myAt <= 0}
+                aria-label="上移一位"
+                title="上移一位"
+                onClick={() => moveOrder(-1)}
+              >
+                ▲
+              </button>
+              <span className={s.orderText}>
+                {myAt < 0 ? '—' : `第 ${myAt + 1} / ${siblings.length} 位`}
+              </span>
+              <button
+                type="button"
+                className={s.orderBtn}
+                disabled={myAt < 0 || myAt >= siblings.length - 1}
+                aria-label="下移一位"
+                title="下移一位"
+                onClick={() => moveOrder(1)}
+              >
+                ▼
+              </button>
+            </span>
           </label>
           <label className={`${s.field} ${s.wide}`}>
             <span className={s.fieldLabel}>

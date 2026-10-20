@@ -620,6 +620,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_open,
         app::wb_boot,
         app::wb_reload,
+        app::wb_presets_changed,
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,

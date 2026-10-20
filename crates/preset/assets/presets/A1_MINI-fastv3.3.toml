@@ -7,7 +7,7 @@
 [toolhead]
 offset_x = -0.9 # 笔尖偏移
 offset_y = 23 # 笔尖偏移
-offset_z = 4 # 笔尖偏移
+offset_z = 3.9 # 笔尖偏移
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 # 自定义工具头获取 G-code
 custom_mount_gcode = """
@@ -67,7 +67,7 @@ glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
 glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
 ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
 ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
-ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_mode = "auto" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
 ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
 ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
 min_support_interface_enabled = true # 最小支撑涂胶面过滤
@@ -97,5 +97,5 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)

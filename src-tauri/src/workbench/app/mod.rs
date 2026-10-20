@@ -114,6 +114,7 @@ pub mod version;
 pub mod words;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -163,6 +164,12 @@ pub struct Ctx {
     last_edit: Instant,
     /// 上一次快照写失败的原因。**不阻断编辑**，只报出来
     flush_error: Option<String>,
+    /// 这个会话读进来时，`presets/` 源文件的盘上戳（见 [`presets_source_stamp`]）。
+    ///
+    /// 拿来回答一个问题：**盘上现在跟界面手里的是不是同一份**。外部改过要能在
+    /// 窗口切回来时被发现（作者 2026-10-20：「我这个软件完全没有看到改的呀」），
+    /// 但**不自己重载** —— 会话里可能正开着一个草稿，换掉定义会把旧值按新定义存回去
+    source_stamp: String,
 }
 
 impl Ctx {
@@ -191,6 +198,7 @@ impl Ctx {
             flushed_seq: 0,
             last_edit: Instant::now(),
             flush_error: None,
+            source_stamp: String::new(),
         };
         ctx.reload_from_disk()?;
         Ok(ctx)
@@ -215,6 +223,8 @@ impl Ctx {
         self.committed = loaded.committed;
         self.draft = draft;
         self.notices = notices;
+        /* 刚读的那一份就是"界面手里这份"——盘上戳跟着记下来 */
+        self.source_stamp = presets_source_stamp(self.presets.root());
         // 清理过的话快照就过期了，但**不在这里写** —— 交给懒写
         self.flushed_seq = self.dirty_seq;
         if dirty {
@@ -304,7 +314,76 @@ pub(super) fn with_ctx_mut<T>(
     if guard.is_none() {
         *guard = Some(Ctx::open()?);
     }
-    f(guard.as_mut().expect("刚刚放进去的"))
+    let ctx = guard.as_mut().expect("刚刚放进去的");
+    /*
+     * 盘上戳的两处用途，一次 stat 走完：
+     *
+     *   · 这一条命令自己写了 `presets/`（before != after）→ 界面手里那份就是新的，
+     *     把戳推到这一代（否则下一次 focus 会误报"外部改过"）；
+     *   · 此前已经有外部改动待发现（before != 记着的戳）→ **不覆盖**，
+     *     否则自己随手改一格就把那条提示吃掉了。
+     */
+    let before = presets_source_stamp(ctx.presets.root());
+    let out = f(ctx);
+    let after = presets_source_stamp(ctx.presets.root());
+    if before != after && before == ctx.source_stamp {
+        ctx.source_stamp = after;
+    }
+    out
+}
+
+/// `presets/` 源文件的盘上戳：`相对路径 | 字节数 | mtime(ns)` 的 sha256。
+///
+/// **只 stat，不读内容**：这条链路每个命令都要看一眼，几十个小文件的修改时间
+/// 足够判「变没变」—— 定义文件被改一个字节，mtime 一定动（`atomic_write` 换 inode）。
+///
+/// 跳过两处：`delivery/`（生成写的产物，不是"源定义"）与 `assets/`（二进制载荷）。
+/// 漏掉它们的话，点一次生成就会让界面误报"外部改过定义"。
+fn presets_source_stamp(root: &Path) -> String {
+    use sha2::{Digest, Sha256};
+
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                let name = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default();
+                if name == paths::DELIVERY_SUBDIR || name == "assets" {
+                    continue;
+                }
+                walk(&path, base, out);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let meta = e.metadata().ok();
+            let len = meta.as_ref().map_or(0, |m| m.len());
+            let mtime = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            out.push(format!("{rel}|{len}|{mtime}"));
+        }
+    }
+
+    let mut rows: Vec<String> = Vec::new();
+    walk(root, root, &mut rows);
+    rows.sort();
+    let mut h = Sha256::new();
+    h.update(rows.join("\n").as_bytes());
+    format!("{:x}", h.finalize())
 }
 
 /// 空闲多久算「停手了」。写得太短等于没省，太长丢的就多
@@ -505,6 +584,18 @@ pub fn wb_boot() -> Result<Boot, AppError> {
 pub fn wb_reload() -> Result<Boot, AppError> {
     drop_ctx();
     boot_inner()
+}
+
+/// 盘上的 `presets/` 与这个会话手里的那一份**不一样**吗（外部改过 / 别处写过）。
+///
+/// 只回答"要不要重新加载"，**不自己重载** —— 会话里可能正开着一个草稿，
+/// 悄悄换掉定义会把那份草稿按旧定义存回去（`sectionId` / 弃用这些格尤其危险）。
+/// 界面拿它画一条提示 + 「重新加载」那颗按钮，动作仍然是人的。
+#[tauri::command]
+pub fn wb_presets_changed() -> Result<bool, AppError> {
+    traced("wb_presets_changed", |_| {
+        with_ctx(|ctx| Ok(presets_source_stamp(ctx.presets.root()) != ctx.source_stamp))
+    })
 }
 
 /// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
@@ -1286,6 +1377,45 @@ mod tests {
         let (fx_dir, presets) = Fixture::load().into_parts();
         let ctx = Ctx::with(presets, store).unwrap();
         ((dir, fx_dir), f, ctx)
+    }
+
+    /* ---------- 外部改动的发现（2026-10-20） ---------- */
+
+    /// 盘上戳：**源定义改了要变；生成写的产物与资产载荷不算**。
+    ///
+    /// 这条判据是"外部改过 presets/ 就提示重新加载"的唯一依据 —— 它要是把
+    /// `delivery/` 算进去，点一次生成就会让界面误报"外部改过定义"。
+    #[test]
+    fn source_stamp_tracks_definitions_not_products() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("registry")).unwrap();
+        std::fs::create_dir_all(root.join("delivery/mkp/presets")).unwrap();
+        std::fs::create_dir_all(root.join("assets/models")).unwrap();
+        let registry = root.join("registry/param_registry.toml");
+        crate::fsx::atomic::atomic_write(&registry, b"a = 1\n").unwrap();
+        let before = presets_source_stamp(root);
+
+        // 生成写的产物 + 二进制载荷：都不该动这个戳
+        crate::fsx::atomic::atomic_write(
+            &root.join("delivery/mkp/presets/A1-standard.toml"),
+            b"x = 1\n",
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&root.join("assets/models/a.3mf"), b"binary").unwrap();
+        assert_eq!(
+            before,
+            presets_source_stamp(root),
+            "产物 / 载荷不该算进「源定义」"
+        );
+
+        // 改一个源定义：必须变（顺手改长度，避开 mtime 粒度）
+        crate::fsx::atomic::atomic_write(&registry, b"a = 1234\n").unwrap();
+        assert_ne!(
+            before,
+            presets_source_stamp(root),
+            "源定义改了这个戳必须跟着变，否则外部改动永远发现不了"
+        );
     }
 
     /* ---------- 参数正文复制（b05 Task 14.5，裁决 A：独立快照） ---------- */

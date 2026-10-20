@@ -47,6 +47,16 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  /*
+   * **行名可拖选**（2026-10-20 作者：「这个标题我要可以选」）。
+   *
+   * 这一块整个住在一个 `<button>` 里，而 global.css 那条 `button { user-select: none }`
+   * 把它压住了 —— 这里显式打开（类选择器压过元素选择器）。名字下面的橙字提示与
+   * 云端差异也是给人看的字，跟着一起可选；`?` 是装饰（`.info`，aria-hidden），仍关着。
+   * 前缀与标准成对写，理由见 global.css 的「拖选（selection）的划分」。
+   */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .left:hover .label {
@@ -282,6 +292,9 @@
   font-size: 10px;
   line-height: 1;
   color: var(--text-3);
+  /* 装饰性问号（aria-hidden）—— 行名开了可拖选，它不跟着进选区 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .right {
@@ -378,6 +391,31 @@
   margin: 0;
   padding: 2px 18px 14px;
   font-size: var(--fs-label);
+}
+
+/*
+ * **展开详情里的字可以拖选**（2026-10-20 作者：「我希望这些内容可以拖选」）。
+ *
+ * 全局那层 `body { user-select: none }` 是为了去掉"网页感"（判据见 global.css 的
+ * 「拖选（selection）的划分」），而这一块恰好全是给人抄的东西：说明、取值范围、
+ * 类型、字段名、已保存值、数据包里的值、作用域。
+ *
+ * 写法照本仓库的「选区边界」口径（PresetTable.module.css 末尾那段真机取证）：
+ * **容器与文本层逐格点名，不指望继承** —— Safari 把 `user-select` 当非继承属性，
+ * 只写一层在真机上会漏。这一块里没有"点它 / 拖它"的件（按钮由全局那条 none 管住），
+ * 拖出来就是一段连续文本，可以整段复制。
+ */
+.detail,
+.dt,
+.dd,
+.ddDep,
+.ddKey,
+.cloudPane,
+.cloudList dt,
+.cloudList dd,
+.cloudState {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* 右栏：云端这一项的三方对照 + 用回我的值 */

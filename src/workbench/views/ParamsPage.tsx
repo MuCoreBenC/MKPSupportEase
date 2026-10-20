@@ -1715,6 +1715,8 @@ function metaOf(p: ParamView): ParamMetaEdit {
     machineFilter: [...p.machineFilter],
     /* 改前它就在这一组 —— 撤销一次「搬组」就是把它搬回去（同组 = 后端不动） */
     sectionId: p.sectionId,
+    /* 改前的位置也要带上：撤销一次「上移」要能回到原位 */
+    order: p.order,
   }
 }
 

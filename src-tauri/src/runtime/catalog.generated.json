@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "a63f50f76c87b1f4",
+  "revision": "b354ad43f292d327",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -2254,7 +2254,10 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1:FASTV3.3": "auto",
+          "A1_MINI:FASTV3.3": "auto"
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -2580,6 +2583,7 @@
         "deprecated": false,
         "machineVariants": {
           "A1:FASTV3.3": 3.7,
+          "A1_MINI:FASTV3.3": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -3925,8 +3929,8 @@
         "tomlKey": "xy_calibration_mode",
         "jsonKey": "xy_calibration_mode",
         "label": "XY校准模式",
-        "desc": "XY校准模式：默认或新型",
-        "tomlComment": "XY校准模式(default=默认,new=新型)",
+        "desc": "XY校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "tomlComment": "XY校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3944,14 +3948,14 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "新版",
+            "value": "new",
             "deprecated": false
           },
           {
-            "label": "新型",
-            "value": "new",
-            "deprecated": false
+            "label": "原版",
+            "value": "original",
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -3970,8 +3974,8 @@
         "tomlKey": "z_calibration_mode",
         "jsonKey": "z_calibration_mode",
         "label": "Z校准模式",
-        "desc": "Z校准模式：默认或新型",
-        "tomlComment": "Z校准模式(default=默认,new=新型)",
+        "desc": "Z校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "tomlComment": "Z校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3989,12 +3993,12 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "原版",
+            "value": "original",
             "deprecated": false
           },
           {
-            "label": "新型",
+            "label": "新版",
             "value": "new",
             "deprecated": false
           }

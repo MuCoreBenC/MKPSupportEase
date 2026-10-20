@@ -226,7 +226,24 @@ export default function ParamRow({
           type="button"
           className={s.left}
           aria-expanded={expanded}
-          onClick={() => onToggleExpand?.(def.key)}
+          /*
+           * 行名可以拖选（2026-10-20 作者：「这个标题我要可以选」）—— 样式见 module.css。
+           *
+           * 拖选的松手会落在这个按钮上，不能顺手把行收起来：**选区还在按钮里
+           * （anchorNode 在按钮内部）就不切展开态**。点在别处 / 没有选区时照旧开合。
+           */
+          onClick={(e) => {
+            const sel = window.getSelection()
+            if (
+              sel !== null &&
+              !sel.isCollapsed &&
+              sel.anchorNode !== null &&
+              e.currentTarget.contains(sel.anchorNode)
+            ) {
+              return
+            }
+            onToggleExpand?.(def.key)
+          }}
         >
           <span className={s.labelWrap}>
             <span className={s.label}>

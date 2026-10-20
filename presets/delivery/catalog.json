@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "fc2ab9c4568e91f3",
+  "revision": "b8d86e219278984b",
   "publishedAt": "2026-10-19T14:12:29Z",
   "brands": [
     {
@@ -2255,7 +2255,10 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1:FASTV3.3": "auto",
+          "A1_MINI:FASTV3.3": "auto"
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -2581,6 +2584,7 @@
         "deprecated": false,
         "machineVariants": {
           "A1:FASTV3.3": 3.7,
+          "A1_MINI:FASTV3.3": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -3926,8 +3930,8 @@
         "tomlKey": "xy_calibration_mode",
         "jsonKey": "xy_calibration_mode",
         "label": "XY校准模式",
-        "desc": "XY校准模式：默认或新型",
-        "tomlComment": "XY校准模式(default=默认,new=新型)",
+        "desc": "XY校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "tomlComment": "XY校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3945,14 +3949,14 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "新版",
+            "value": "new",
             "deprecated": false
           },
           {
-            "label": "新型",
-            "value": "new",
-            "deprecated": false
+            "label": "原版",
+            "value": "original",
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -3971,8 +3975,8 @@
         "tomlKey": "z_calibration_mode",
         "jsonKey": "z_calibration_mode",
         "label": "Z校准模式",
-        "desc": "Z校准模式：默认或新型",
-        "tomlComment": "Z校准模式(default=默认,new=新型)",
+        "desc": "Z校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "tomlComment": "Z校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3990,12 +3994,12 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "原版",
+            "value": "original",
             "deprecated": false
           },
           {
-            "label": "新型",
+            "label": "新版",
             "value": "new",
             "deprecated": false
           }
@@ -4877,8 +4881,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "c2bdeccf4ded68189fd20af9fc1ffc92107ad7ad8624467d3c17de5610576a25",
-      "size": 4276
+      "sha256": "14e18b956edf9b20b5ef1d905b057422b2449ee25312cbe2b927ec8345bea5c7",
+      "size": 4278
     },
     {
       "kind": "mkp_preset",
@@ -4886,8 +4890,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "d3d6c69de00d77f6086f4bfea126f2f782bbaa428baf3c9c3bf9ecd73d739ed9",
-      "size": 4274
+      "sha256": "5dd1fc05fe549b69db02892019521e11f9a3f2529323540132a6d977065ce837",
+      "size": 4276
     },
     {
       "kind": "mkp_preset",
@@ -4895,8 +4899,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "24b13f6fa5508c9b073693152de0036aa1c6266b448b4295b19d0b4ac9932b76",
-      "size": 4280
+      "sha256": "779fd6f79f47dd610f4689660d88d1b2274a236b208d7b3e0e608307ca8de26f",
+      "size": 4283
     },
     {
       "kind": "mkp_preset",
@@ -4904,8 +4908,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "4964192ed84d1cfde56c631e4b17c42e97bcf943e79a5100ccd60336aa6a52ef",
-      "size": 4283
+      "sha256": "bc924c282cde2f5b6198e5ce674a10ad8e55440c7e75045784a55e2fac976739",
+      "size": 4285
     },
     {
       "kind": "mkp_preset",
@@ -4913,8 +4917,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "3400aa2a21534317fc6d54143366df17b8bffe6e76e683ba700a0f3ba0c4e7b4",
-      "size": 4277
+      "sha256": "240418bb81eedc39ce72c7635f8fb183df8057734c079c56504f146f726687cb",
+      "size": 4279
     },
     {
       "kind": "mkp_preset",
@@ -4922,8 +4926,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "4ea33d7e735e096bf52c405a440b98a8f298410dd5a7f024b81101728ade7565",
-      "size": 4281
+      "sha256": "bc2fb42de35b1140418e57866b846a027b8381d0e860d20012ac9c88d57a6cc2",
+      "size": 4286
     },
     {
       "kind": "mkp_preset",
@@ -4931,8 +4935,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "b9c68d68f286b4e09b477107756013a06ab538df9fbf7545aac2ef878bda7c04",
-      "size": 4415
+      "sha256": "102aba4153e98dcf761ab5cc5ca7e55769c2671a438fd0e395b99af3a5059f6a",
+      "size": 4417
     },
     {
       "kind": "mkp_preset",
@@ -4940,8 +4944,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "942f5ac404efb6cbacd138263f15588831bc797fa69380c628b570b23f7423a7",
-      "size": 4419
+      "sha256": "551527317f60b9315d3b04e15822372b21bf88e3737cad3110671b03ba6f28f3",
+      "size": 4421
     },
     {
       "kind": "mkp_preset",
@@ -4949,8 +4953,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "ef8c3a133c89020be4a32559ce01b3dc3cfa37b414095c3a38c41f7c3c1e95f7",
-      "size": 4415
+      "sha256": "23a81e7ddc2dc94d2c316eaf644c8cde82ab5bf7d946bf9bdfa767bec813a3d3",
+      "size": 4417
     },
     {
       "kind": "icon",

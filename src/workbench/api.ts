@@ -302,6 +302,13 @@ export interface ParamMetaEdit {
    * 后端把它读成「保持原位」，不是「搬回默认组」
    */
   sectionId: string | null
+  /**
+   * 组内顺序（`[params.layout].order`）。`null` = 不动。
+   *
+   * 客户端按同一个值排同一组里的参数，所以它是**数据**：上下箭头改的是它，
+   * 后端还会顺带把 `layout_schema` 的 `items[]` 重排成同一顺序
+   */
+  order: number | null
 }
 
 /**
@@ -1912,6 +1919,11 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
+  /**
+   * 盘上的 `presets/` 跟这个会话手里那一份对不上了吗（外部改过 / 别处写过）。
+   * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
+   */
+  presetsChanged: () => invoke<boolean>('wb_presets_changed'),
   /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
   appVersion: () => invoke<string>('wb_app_version'),
   /**
