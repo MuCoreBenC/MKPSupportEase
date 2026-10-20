@@ -164,6 +164,37 @@
   color: var(--warn-ink);
 }
 
+/* 已采用（还在草稿里）：绿色那档 —— 与"这一版我收了"同一语气，但比"待处理"安静 */
+.syncBadgeAdopted {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: #2f7d59;
+  font-weight: 500;
+}
+
+[data-theme='dark'] .syncBadgeAdopted {
+  color: var(--accent);
+}
+
+/* 已保持：灰章 —— 它没有改任何东西，不该有颜色 */
+.syncBadgeHold {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-weight: 500;
+}
+
 /* 处理过的那一项：一枚极淡的章，说明云端这一版已经不是"待处理"了 */
 .syncDecided {
   font-size: calc(var(--fs-label) - 0.5px);
@@ -327,13 +358,88 @@
 
 /* ---------- 展开的详情 ---------- */
 
+/*
+ * **两栏**（2026-10-20）：左边照旧是"这一项是什么"，右边那块空白给"云端改成什么"
+ * （作者：「你在右边这个有空白的地方啊……就在这里显示我原本的值，云端的值是多少」）。
+ * 没有云端更新时右下那一栏不渲染，版面与以前一样。
+ */
+.detailWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
 .detail {
+  flex: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: 64px 1fr;
   gap: 4px 12px;
   margin: 0;
   padding: 2px 18px 14px;
   font-size: var(--fs-label);
+}
+
+/* 右栏：云端这一项的三方对照 + 用回我的值 */
+.cloudPane {
+  flex: 0 0 232px;
+  margin: 2px 18px 14px 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+  font-size: var(--fs-label);
+}
+
+.cloudTitle {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.cloudList {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.cloudList dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.cloudState {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.cloudState[data-state='adopt'] {
+  color: #2f7d59;
+}
+
+[data-theme='dark'] .cloudState[data-state='adopt'] {
+  color: var(--accent);
+}
+
+.cloudRevert {
+  margin-top: 8px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.cloudRevert:hover {
+  border-color: var(--warn-ink);
+  color: var(--warn-ink);
 }
 
 .dt {
@@ -363,6 +469,17 @@
 [data-density='mini'] .detail {
   grid-template-columns: 56px 1fr;
   padding: 2px 12px 12px;
+}
+
+/* mini 档窄：右栏收一档，别把左边那七格挤成一条缝 */
+[data-density='mini'] .detailWrap {
+  gap: 12px;
+}
+
+[data-density='mini'] .cloudPane {
+  flex-basis: 188px;
+  margin: 2px 12px 12px 0;
+  padding-left: 12px;
 }
 
 /*

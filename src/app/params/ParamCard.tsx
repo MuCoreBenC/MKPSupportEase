@@ -76,8 +76,15 @@ interface Props {
    * 行上一律不画，页面的长相与以前完全一样。
    */
   syncOf?: (key: string) => ParamSyncEntry | undefined
+  /**
+   * 这一项在**草稿层**表过什么态（2026-10-20）：`adopt` / `hold` / `null`。
+   * 与 `syncOf` 一起用 —— 「待选择 / 已采用 / 已保持」三态由它细分。
+   */
+  syncDraftOf?: (key: string) => 'adopt' | 'hold' | null
   onAdoptSync?: (key: string) => void
   onHoldSync?: (key: string) => void
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持 */
+  onUseMyValue?: (key: string) => void
   syncBusy?: boolean
   /** G-code 这种整块的控件由调用方画 */
   renderBlock?: (def: ParamDef) => ReactNode
@@ -211,8 +218,10 @@ export default function ParamCard({
   onRevertToSaved,
   readonly = false,
   syncOf,
+  syncDraftOf,
   onAdoptSync,
   onHoldSync,
+  onUseMyValue,
   syncBusy = false,
   renderBlock,
   tower,
@@ -294,8 +303,10 @@ export default function ParamCard({
             factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}
             sync={syncOf?.(node.def.key)}
+            syncDraft={syncDraftOf?.(node.def.key) ?? null}
             onAdoptSync={onAdoptSync}
             onHoldSync={onHoldSync}
+            onUseMyValue={onUseMyValue}
             syncBusy={syncBusy}
             blockedBy={blockedByOf(node.def.key)}
             sep={i > 0}

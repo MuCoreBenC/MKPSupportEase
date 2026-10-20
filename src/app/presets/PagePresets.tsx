@@ -1144,6 +1144,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * ③b **有要改值的项** ⇒ 顺势打开「修改参数」并把「选择要更新的参数」那一屏带开
      *    （`syncFirst`）：那一屏里逐项勾，勾上的采用、没勾的保持 —— 用户看着定，
      *    不再替他静默采用任何一项。
+     *
+     * ★ 2026-10-20：那一屏的「应用」**只写进草稿**（一次撤销能整批退回来），
+     *   真正落盘要用户在那张参数页上点「保存」—— 作者：「应该保存的时候才算真的用，
+     *   跟编辑一样」。所以这里放人进去就够了，不再有"点一下当场改写文件"的路径。
      */
     const machineId = behind.machineId ?? behind.basedOnMachineId
     const versionId = behind.versionId ?? behind.basedOnVersionId

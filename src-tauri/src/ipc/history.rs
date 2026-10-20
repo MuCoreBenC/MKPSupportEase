@@ -54,6 +54,10 @@ pub struct HistoryEntryDto {
     pub state: String,
     #[serde(default)]
     pub batch: Option<u32>,
+    /// 这一条是「云端更新」落下来的（2026-10-20）—— 界面挂「更新」徽章。
+    /// 旧前端 / 旧账本没有这一格：`default` 让它们照读，按普通改值处理。
+    #[serde(default)]
+    pub from_sync: bool,
     pub items: Vec<HistoryItemDto>,
 }
 
@@ -104,6 +108,7 @@ impl From<HistoryEntry> for HistoryEntryDto {
             ts_unix: v.ts_unix,
             state: v.state,
             batch: v.batch,
+            from_sync: v.from_sync,
             items: v.items.into_iter().map(HistoryItemDto::from).collect(),
         }
     }
@@ -118,6 +123,7 @@ impl From<HistoryEntryDto> for HistoryEntry {
             ts_unix: v.ts_unix,
             state: v.state,
             batch: v.batch,
+            from_sync: v.from_sync,
             items: v.items.into_iter().map(HistoryItem::from).collect(),
         }
     }
@@ -233,6 +239,7 @@ mod tests {
             ts_unix: 1_700_000_000,
             state: "saved".to_owned(),
             batch: Some(2),
+            from_sync: true,
             items: vec![HistoryItemDto {
                 key: "toolhead.offset_y".to_owned(),
                 from: "22.4".to_owned(),

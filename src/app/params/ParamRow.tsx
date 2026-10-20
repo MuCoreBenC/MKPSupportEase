@@ -62,10 +62,22 @@ interface Props {
    * 那时行上什么都不画，与以前长得一模一样。
    */
   sync?: ParamSyncEntry
+  /**
+   * 这一项在**草稿层**表过什么态（2026-10-20）：
+   *
+   *   `adopt` 已经「用新值」了（草稿值 = 云端新值，还没保存）
+   *   `hold`  已经「保持原样」了（值没动）
+   *   `null`  还没表态 —— 右边给那两颗按钮
+   *
+   * 与 `sync.decided` 分开：那个是**上一次保存**落下的账，这个是这一屏还没保存的那一笔。
+   */
+  syncDraft?: 'adopt' | 'hold' | null
   /** 这一项「用新值」；不传就画不出那两颗按钮（比如只读视图） */
   onAdoptSync?: (key: string) => void
-  /** 这一项「保持本地值」 */
+  /** 这一项「保持原样」 */
   onHoldSync?: (key: string) => void
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持，退回已保存值 */
+  onUseMyValue?: (key: string) => void
   /** 云端当前版的字节还没取回来 —— 那时只画"云端已更新"，不画差异 */
   syncBusy?: boolean
   /** 被条件参数关掉：看得见、改不动 */
@@ -137,8 +149,10 @@ export default function ParamRow({
   factoryValue,
   dirty,
   sync,
+  syncDraft = null,
   onAdoptSync,
   onHoldSync,
+  onUseMyValue,
   syncBusy = false,
   blockedBy = null,
   sep = false,
@@ -170,17 +184,27 @@ export default function ParamRow({
   const onInvalidTyping = useCallback((v: boolean) => setBadTyping(v), [])
 
   /*
-   * 云端更新：三方都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
+   * 云端更新：三态都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
    *
-   *   待处理   云端 18.6 → 19.0   [用新值] [保持本地]
-   *   处理过了 已采用云端新值 / 保持了本地值（一枚淡徽章，说明云端这一版已经处理过）
+   *   还没表态   云端已更新 · 云端 18.6 → 19.0          [用新值] [保持原样]
+   *   已采用     已采用云端新值 · 我的 18.6 → 云端 19.0   （点这一行展开，右栏能「用回我的值」）
+   *   已保持     保持原样 · 云端 18.6 → 19.0            [改用新值]
+   *   保存过了   已采用云端新值 / 保持原样（一枚淡徽章，说明云端这一版已经处理过）
    */
   const syncPending = sync?.pending === true
+  /** 草稿层的表态只对**还在待处理**的项有意义（保存过之后归 `sync.decided` 管） */
+  const syncDraftKind = syncPending ? syncDraft : null
   const syncDecided = sync?.decided ?? null
+  /** 「云端 18.6 → 19.0」 */
   const diffText =
     sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
       ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.cloudNew)}`
       : null
+  /** 「我的 18.6 → 云端 19.0」—— 采用之后要说得清"换掉的是我哪个值" */
+  const mineToCloud =
+    sync !== undefined && sync.local !== null && sync.cloudNew !== null
+      ? `我的 ${valueText(def, sync.local)} → 云端 ${valueText(def, sync.cloudNew)}`
+      : diffText
 
   return (
     <div
@@ -221,7 +245,19 @@ export default function ParamRow({
              * 云端更新那两行**只放文字**：这一段整个包在一个 `<button>` 里
              * （点它展开行详情），里面再嵌按钮就是非法结构 —— 两个动作住右边那一格。
              */}
-            {syncPending && (
+            {syncPending && syncDraftKind === 'adopt' && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadgeAdopted}>已采用云端新值</span>
+                {mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>}
+              </span>
+            )}
+            {syncPending && syncDraftKind === 'hold' && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadgeHold}>保持原样</span>
+                {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
+              </span>
+            )}
+            {syncPending && syncDraftKind === null && (
               <span className={s.syncNote}>
                 <span className={s.syncBadge}>云端已更新</span>
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
@@ -246,7 +282,7 @@ export default function ParamRow({
            * 「用新值」在云端当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
            * 只会得到一个错），原因写在 title 里 —— 灰一颗按钮不说为什么，用户只会以为坏了。
            */}
-          {syncPending && onAdoptSync !== undefined && (
+          {syncPending && syncDraftKind === null && onAdoptSync !== undefined && (
             <button
               type="button"
               className={s.syncBtn}
@@ -254,22 +290,34 @@ export default function ParamRow({
               title={
                 sync?.cloudNew === null
                   ? '云端当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
-                  : `采用云端新值：把这一项写成 ${diffText ?? '云端当前值'}（写进本地这份文件）`
+                  : `采用云端新值：把这一项写成 ${diffText ?? '云端当前值'}（先写进草稿，保存才落盘）`
               }
               onClick={() => onAdoptSync(def.key)}
             >
               用新值
             </button>
           )}
-          {syncPending && onHoldSync !== undefined && (
+          {syncPending && syncDraftKind === null && onHoldSync !== undefined && (
             <button
               type="button"
               className={s.syncBtnGhost}
               disabled={syncBusy}
-              title={`保持原样：这一项写着的 ${savedText} 一个字不动（云端以后再改它还能再问你一次）`}
+              title={`保持原样：这一项写着的 ${savedText} 一个字不动（保存时一并记下"这一版不跟"）`}
               onClick={() => onHoldSync(def.key)}
             >
               保持原样
+            </button>
+          )}
+          {/* 已保持还想改用云端新值：给一条回头路，不用先撤销再重来 */}
+          {syncPending && syncDraftKind === 'hold' && onAdoptSync !== undefined && (
+            <button
+              type="button"
+              className={s.syncBtn}
+              disabled={syncBusy || sync?.cloudNew === null}
+              title="改用云端新值（先写进草稿，保存才落盘）"
+              onClick={() => onAdoptSync(def.key)}
+            >
+              改用新值
             </button>
           )}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
@@ -339,7 +387,8 @@ export default function ParamRow({
          * 不展开就看不见它为什么被搜出来；「如果是数字也可以」落在已保存值 / 出厂值 /
          * 取值范围上，走的是同一段代码。
          */
-        <dl className={s.detail}>
+        <div className={s.detailWrap}>
+          <dl className={s.detail}>
           {/*
             弃用的行，展开后第一格就说清「它到底是什么」：上游标了弃用 —— 显示但只读，
             不再写入新预设。用户看到「为什么这个改不动」的答案在第一步。
@@ -408,7 +457,53 @@ export default function ParamRow({
               query={query}
             />
           </dd>
-        </dl>
+          </dl>
+
+          {/*
+           * **右栏：云端这一项的三方对照**（2026-10-20 作者：「你在右边这个有空白的地方啊，
+           * 这刚好右边有空白地方可以显示」）。
+           *
+           * 左栏那七格说的是"这一项是什么"，与云端无关；采用 / 保持之后用户想知道的是
+           * "我原来的值是什么、云端改成什么"—— 那些数字塞进左栏会把说明挤成两列小字，
+           * 右栏这块空白正好。
+           */}
+          {sync !== undefined && (sync.pending || sync.decided !== null) && (
+            <aside className={s.cloudPane}>
+              <h5 className={s.cloudTitle}>云端更新</h5>
+              <dl className={s.cloudList}>
+                <dt>我的值</dt>
+                <dd>
+                  {sync.local === null ? '文件里没有这一项' : valueText(def, sync.local)}
+                </dd>
+                <dt>云端旧值</dt>
+                <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld)}</dd>
+                <dt>云端新值</dt>
+                <dd>{sync.cloudNew === null ? '还没取回' : valueText(def, sync.cloudNew)}</dd>
+              </dl>
+              <p className={s.cloudState} data-state={syncDraftKind ?? sync.decided ?? 'pending'}>
+                {syncDraftKind === 'adopt'
+                  ? '这次改动里已采用云端新值（保存才落盘）'
+                  : syncDraftKind === 'hold'
+                    ? '这次改动里保持原样（保存时记下这一版不跟）'
+                    : syncDraftKind === null && sync.pending
+                      ? '还没选：用新值 / 保持原样'
+                      : sync.decided === 'adopt'
+                        ? '上一次保存已采用云端新值'
+                        : '上一次保存保持了原样'}
+              </p>
+              {syncDraftKind === 'adopt' && onUseMyValue !== undefined && (
+                <button
+                  type="button"
+                  className={s.cloudRevert}
+                  title={`把这一项退回你原来的 ${sync.local === null ? '值' : valueText(def, sync.local)}`}
+                  onClick={() => onUseMyValue(def.key)}
+                >
+                  用回我的值
+                </button>
+              )}
+            </aside>
+          )}
+        </div>
       )}
     </div>
   )

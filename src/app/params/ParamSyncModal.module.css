@@ -69,7 +69,24 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 一组（普通项 / 「机器自己的数」末尾那一组） */
+/*
+ * **列表区**：框身不再定高（见上面 `.syncBox` 那段），高矮由这里说了算。
+ *
+ * 下限 220px：一两项的时候不至于塌成薄薄一条；上限 `min(34vh, 320px)`：
+ * 十几项也不会把框拉成半屏（原来 52vh/460 太高）。超了中间自己滚，底栏不动。
+ *
+ * ★ 2026-10-20：滚动归**这一层**（三组共用），`.rows` 只是组内的列 ——
+ *   原来每组各带一个滚动框，三组就是三个 220px 的洞，弹窗直接被撑成半屏。
+ */
+.list {
+  display: flex;
+  flex-direction: column;
+  min-height: 220px;
+  max-height: min(34vh, 320px);
+  overflow-y: auto;
+}
+
+/* 一组（没冲突 / 有冲突 / 「机器自己的数」末尾那一组） */
 .group {
   display: flex;
   flex-direction: column;
@@ -82,18 +99,20 @@
   color: var(--text-3);
 }
 
-/*
- * **列表区**：框身不再定高（见上面 `.syncBox` 那段），高矮由这里说了算。
- *
- * 下限 220px：一两项的时候不至于塌成薄薄一条；上限 `min(34vh, 320px)`：
- * 十几项也不会把框拉成半屏（原来 52vh/460 太高）。超了中间自己滚，底栏不动。
- */
+/* 第一组（没冲突）不需要上方留白 —— 它紧接「全选」那一条 */
+.group:first-child .groupLabel {
+  padding-top: 6px;
+  color: var(--text-2);
+}
+
+/* 「有冲突」那一组：琥珀 —— 这一组要自己拿主意，别让它跟没冲突的混在一起 */
+.groupLabel[data-group='conflict'] {
+  color: var(--warn);
+}
+
 .rows {
   display: flex;
   flex-direction: column;
-  min-height: 220px;
-  max-height: min(34vh, 320px);
-  overflow-y: auto;
 }
 
 .row {

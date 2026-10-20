@@ -92,7 +92,9 @@
   z-index: 1;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  /* 2026-10-20：段名 / 条数靠左，**时间靠右单独一列**（作者：「靠右显示」） */
+  justify-content: flex-start;
+  gap: 8px;
   margin: 0;
   padding: 8px 16px;
   background: var(--surface-solid);
@@ -107,6 +109,19 @@
   font-weight: 400;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 段头右侧那一列时间（2026-10-20）：`margin-left: auto` 把它顶到最右，
+ * 等宽数字让每一段的时间**竖着对齐** —— 扫一列的时候不用重新找小数点。
+ */
+.when {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .list {
@@ -230,6 +245,23 @@
 .badgeSaved {
   background: var(--accent-soft);
   color: var(--accent-deep);
+}
+
+/*
+ * 「更新」徽章（2026-10-20）：这一条是云端新版带进来的。
+ * 与「未保存 / 已保存」那两枚**不同色**（那两枚说状态，这枚说来路）——
+ * 用墨色描边、不铺底，混在一排时读得出是另一个维度。
+ */
+.syncTag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-2);
 }
 
 .revert,

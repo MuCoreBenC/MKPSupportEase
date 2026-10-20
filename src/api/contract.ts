@@ -986,6 +986,11 @@ export interface HistoryRecord {
   state: 'draft' | 'saved' | 'undone'
   /** 第几次保存把它落地的；`null` = 还没保存过 */
   batch: number | null
+  /**
+   * 这一条是**「云端更新」落下来的**（2026-10-20）—— 修改历史里挂一枚「更新」徽章。
+   * 旧账本里没有这一格 ⇒ 按 `false` 读（Rust 侧 `#[serde(default)]`）。
+   */
+  fromSync?: boolean
   items: HistoryRecordItem[]
 }
 

@@ -80,6 +80,10 @@ pub struct HistoryEntry {
     /// 第几次保存把它落地的；`null` = 还没保存过
     #[serde(default)]
     pub batch: Option<u32>,
+    /// 这一条是**「云端更新」落下来的**（2026-10-20）—— 修改历史里挂一枚「更新」徽章。
+    /// 旧账本没有这一格：`default` 让它们照读，按 `false`（普通改值）处理，不编来路。
+    #[serde(default)]
+    pub from_sync: bool,
     pub items: Vec<HistoryItem>,
 }
 
@@ -196,6 +200,7 @@ mod tests {
             ts_unix: 1,
             state: "draft".to_owned(),
             batch: None,
+            from_sync: false,
             items: vec![item()],
         });
         write(d.path(), &a, &fa).unwrap();
@@ -225,6 +230,7 @@ mod tests {
                 ts_unix: 1_700_000_000,
                 state: "saved".to_owned(),
                 batch: Some(2),
+                from_sync: false,
                 items: vec![item()],
             }],
             ..HistoryFile::default()
@@ -236,6 +242,23 @@ mod tests {
         assert_eq!(again.entries.len(), 1);
         assert_eq!(again.entries[0].items[0].to, "1.23");
         assert_eq!(again.entries[0].batch, Some(2));
+    }
+
+    /// **旧账本没有 `fromSync` 也能读**（2026-10-20 新加的那一格）：
+    /// 按 `false`（普通改值）处理，不把整本账判成坏档 ——
+    /// 用户攒了几周的历史不该因为一版多了一个字段就消失。
+    #[test]
+    fn a_ledger_without_from_sync_still_reads() {
+        let d = tempfile::tempdir().unwrap();
+        let key = key_of("local", "presets-local/A1.toml");
+        let at = file_of(d.path(), &key);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let raw = r#"{"schema":1,"batches":1,"entries":[{"id":1,"no":1,"action":"改 X","tsUnix":1700000000,"state":"saved","batch":1,"items":[]}]}"#;
+        crate::fsx::atomic::atomic_write(&at, raw.as_bytes()).unwrap();
+
+        let book = read(d.path(), &key).unwrap();
+        assert_eq!(book.entries.len(), 1);
+        assert!(!book.entries[0].from_sync, "旧账没有来路，按普通改值读");
     }
 
     /// 清空 = 盘上真的没了（界面上"没有改动记录"与"没有这一本"是同一件事）
@@ -251,6 +274,7 @@ mod tests {
             ts_unix: 1,
             state: "draft".to_owned(),
             batch: None,
+            from_sync: false,
             items: vec![item()],
         });
         write(d.path(), &key, &file).unwrap();

@@ -713,23 +713,14 @@ export default function PageParams({
     u.activeUse?.onIt === true && u.activeFileName !== null ? u.activeFileName : fileLabel
 
   /*
-   * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀，副标题行尾给一句
-   * **可点的**「切换回已应用」。作者把点名砍了：「不用显示那么清楚……
-   * 因为有时候是用户他自己的，你都不知道他是什么版本」——所以提示不含机型 / 版本。
-   * 底账空（activeUse === null）时不提示：没有已应用的就没有可对比的对象（见 useParams）。
+   * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀（作者：「我切换到不是正在用的时候，
+   * 就不要用绿色，用琥珀色」）。只改这一颗 pill 的颜色，不再另给"切回去"的按钮：
+   * 作者 2026-10-20 裁定「没有这个回到已应用的这个功能了」—— 现在都从预设行的右键
+   * 进「修改参数」，切哪一份也由那条右键决定，标题栏再摆一颗只会跟它抢动作。
+   *
+   * 底账空（activeUse === null）时不比较：没有已应用的就没有可对比的对象（见 useParams）。
    */
-  const au = u.activeUse
-  const inactive = au !== null && !au.onIt
-
-  /*
-   * 「切换回已应用」的动作。跳之前**现读一次底账**，不依赖渲染期的收窄 ——
-   * 有未保存改动时 `requestCombo` 自会先问一句（那条路是现成的，不在这里另写）。
-   */
-  const backToActive = () => {
-    const back = u.activeUse
-    if (back === null || back.machineId === null || back.versionId === null) return
-    u.requestCombo(back.machineId, back.versionId)
-  }
+  const inactive = u.activeUse !== null && !u.activeUse.onIt
 
   /*
    * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是云端底稿，
@@ -740,16 +731,27 @@ export default function PageParams({
    * 完整的落点说明在保存确认弹层里，这里挂了 title，悬停看全。
    */
   const savingToLocal = u.editingPreset?.origin === 'local'
+  /** 云端更新里**还没表态**的项数（0 = 都选好了，只差保存） */
+  const syncUndecided = Math.max(0, u.pendingCount - u.syncDirty)
+  /*
+   * 底栏那句状态：值改动与**云端更新的表态**分开数（2026-10-20）。
+   * 只点了「用新值 / 保持原样」而没手改任何值时，`dirtyCount` 是 0 —— 但那一笔
+   * 同样没保存，底栏必须说出来，否则「保存」亮着而左边写着"没有未保存的改动"。
+   */
   const stateText =
-    u.dirtyCount === 0
+    u.dirtyCount === 0 && u.syncDirty === 0
       ? density === 'mini'
         ? '没有改动'
         : '没有未保存的改动'
-      : density === 'mini'
-        ? `${u.dirtyCount} 处未保存`
-        : savingToLocal
-          ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
-          : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
+      : u.dirtyCount === 0
+        ? density === 'mini'
+          ? `${u.syncDirty} 项更新待保存`
+          : `${u.syncDirty} 项云端更新待保存 · 保存才生效`
+        : density === 'mini'
+          ? `${u.dirtyCount} 处未保存`
+          : savingToLocal
+            ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
+            : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
 
   const closeHistory = () => setHistoryOpen(false)
 
@@ -861,8 +863,11 @@ export default function PageParams({
          * 「云端已更新 · 云端 x → y」那两行说明照常显示。
          */
         syncOf={u.sync === null ? undefined : u.syncOf}
-        onAdoptSync={ro ? undefined : (key) => u.decideSync([key], 'adopt')}
-        onHoldSync={ro ? undefined : (key) => u.decideSync([key], 'hold')}
+        /* 三态由草稿层那张表态表细分（待选择 / 已采用 / 已保持）—— 只读也能看，只是不给按钮 */
+        syncDraftOf={u.syncDraftOf}
+        onAdoptSync={ro ? undefined : u.adoptSync}
+        onHoldSync={ro ? undefined : u.holdSync}
+        onUseMyValue={ro ? undefined : u.useMyValue}
         syncBusy={u.syncBusy}
         renderBlock={(def) => (
           <GcodeBlock
@@ -919,7 +924,7 @@ export default function PageParams({
    * 管着重做），加一层 `if (loading) return` 只会让「守卫用的还是挂载时那个值」这种
    * 陈旧判断混进来。
    */
-  const { undo, redo, pendingCombo, cancelPending, dirtyCount } = u
+  const { undo, redo, pendingCombo, cancelPending, dirtyCount, syncDirty, save } = u
   useEffect(() => {
     const sheetOpen = askSave || askRestore || pendingCombo !== null
     const onKey = (e: KeyboardEvent) => {
@@ -946,7 +951,9 @@ export default function PageParams({
       /* 只读态（编辑模式之外）：s / z / y 到此为止 —— 没有可保存、可撤销的东西 */
       if (ro) return
       if (k === 's') {
+        /* 只表了态、没改值 ⇒ 没有可确认的值改动，直接存（弹层列的是"改了什么值"） */
         if (dirtyCount > 0) setAskSave(true)
+        else if (syncDirty > 0) save()
         return
       }
       if (k === 'y' || e.shiftKey) redo()
@@ -955,7 +962,7 @@ export default function PageParams({
     /* 捕获阶段：Esc 要抢在 `document` 上那些抽屉监听之前（见注释） */
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, askSave, askRestore, ro])
+  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, syncDirty, save, askSave, askRestore, ro])
 
   if (u.loading) {
     return (
@@ -1050,38 +1057,17 @@ export default function PageParams({
   )
 
   /*
-   * **「回到已应用」**（只在「看的那份不是已应用那份」时出现）。
+   * ★ **标题栏动作槽里那一簇**（照 a05）：这里只剩「修改历史」一颗。
    *
-   * 原来它缀在内容区顶上那一行「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」
-   * 的尾巴上；那一行退役之后（作者：「没有意义的这一行就可以去掉」），
-   * 这颗**动作**留下来、搬进**标题栏动作槽**，与「修改历史」并排。
-   *
-   * 它**能点** —— 名字都很像，一键回到已应用的那份，不靠认名字；
-   * 也**不点名**（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标，
-   * 见 useParams 的 ActiveUse）。已应用那份不在包里就没有动作，只陈述。
-   */
-  const backToActiveNode =
-    au === null || au.onIt ? null : au.canJump ? (
-      <button type="button" className={s.headBtn} onClick={backToActive}>
-        回到已应用
-      </button>
-    ) : (
-      <span className={s.headHint}>已应用的是另一份</span>
-    )
-
-  /*
-   * ★ **标题栏动作槽里那一簇**（照 a05）：左 → 右 = 回到已应用 · 修改历史。
+   * 原来与它并排的「回到已应用」**已退役**（作者 2026-10-20：「没有这个回到已应用
+   * 的这个功能了」）：那一份现在是从预设行右键「修改参数」进来的，编辑对象由那一下
+   * 定死，标题栏再多一颗"跳到已应用那份"只会跟右键抢动作。
    *
    * 撤销 / 重做 / 保存那些属于**这一页的编辑框架**（MKP 那一套：只读 → 进编辑模式 →
    * 撤销 / 重做 / 放弃并退出 / 保存，见 `editMode` 与底栏），不在这一簇里 ——
-   * 「修改历史」与「回到已应用」是**参数这一页自己的**两个出口，才搬进标题栏。
+   * 「修改历史」是参数这一页自己的出口，才在标题栏。
    */
-  const headActions = (
-    <>
-      {backToActiveNode}
-      {historyButton}
-    </>
-  )
+  const headActions = historyButton
 
   /*
    * 有动作槽（住在模态框里 / `embedded`）→ portal 进去，与 `×` 同一排；
@@ -1181,13 +1167,12 @@ export default function PageParams({
                 )}
 
                 {/*
-                 * 右上角那一簇（照 a05）：**回到已应用 · 修改历史** —— 见 `headActions`。
-                 * 在模态框里它们 portal 到标题栏那颗动作槽（`×` 左边，`margin-left:auto`
+                 * 右上角那一簇（照 a05）：现在只有**修改历史** —— 见 `headActions`。
+                 * 在模态框里它 portal 到标题栏那颗动作槽（`×` 左边，`margin-left:auto`
                  * 顶到最右）；单独当页用时落在这一行右端。
                  *
-                 * 原来还有一行副标题「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」：
-                 * 作者圈出那一行说「没有意义的这一行就可以去掉」（机型版本副标题本来就在说、
-                 * 参数卡自己会讲）—— 整行退役，尾巴上那颗「回到已应用」搬进了这一簇。
+                 * 原来这一簇还有一颗「回到已应用」，2026-10-20 整颗退役（作者：
+                 * 「没有这个回到已应用的这个功能了」）—— 进哪一份由预设行右键决定。
                  */}
                 {headActionsNode}
               </div>
@@ -1249,15 +1234,38 @@ export default function PageParams({
                 · 还没取回 ⇒ 只说"云端发了新版"这个**事实**，差异要用户点了才去取。
                   不自动取的理由：自动取会让"没点更新，本地怎么知道参数变了"成立，
                   而取回之后的「更新」会把我没改过的项悄悄改成云端新值。
+
+              ★ 又说清**选了几项**（同日）：表态只进草稿，不点保存一个字节都不写 ——
+                横幅必须让人知道"选完了还要保存"，否则他会以为已经生效了。
             */}
             {u.pendingCount > 0 && (
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
-                  云端更新待选择 <b>{u.pendingCount}</b> 项
-                  {u.sync?.currentReleaseTime != null ? `（云端 ${u.sync.currentReleaseTime}）` : ''}
-                  <span className={s.syncBarHint}>
-                    —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
-                  </span>
+                  {syncUndecided === 0 ? (
+                    <>
+                      云端更新已选 <b>{u.syncDirty}</b> 项 —— 点「保存」才写进这份文件
+                      {u.sync?.currentReleaseTime != null
+                        ? `（云端 ${u.sync.currentReleaseTime}）`
+                        : ''}
+                    </>
+                  ) : (
+                    <>
+                      云端更新待选择 <b>{syncUndecided}</b> 项
+                      {u.sync?.currentReleaseTime != null
+                        ? `（云端 ${u.sync.currentReleaseTime}）`
+                        : ''}
+                      {u.syncDirty > 0 && (
+                        <span className={s.syncBarHint}>
+                          （另有 {u.syncDirty} 项已选好、等保存）
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {syncUndecided > 0 && (
+                    <span className={s.syncBarHint}>
+                      —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
+                    </span>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -1472,10 +1480,10 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.primary}
-                  disabled={u.dirtyCount === 0}
+                  disabled={u.dirtyCount === 0 && u.syncDirty === 0}
                   title="保存（Ctrl+S）"
                   aria-keyshortcuts="Control+S"
-                  onClick={() => setAskSave(true)}
+                  onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >
                   保存
                 </button>
@@ -1684,9 +1692,9 @@ export default function PageParams({
             <ParamSyncModal
               open={syncOpen}
               sync={u.sync}
-              busy={u.syncBusy}
               defOf={u.defOf}
-              onDecide={u.decideSyncMany}
+              draftOf={u.syncDraftOf}
+              onDecide={u.applySyncDecisions}
               onClose={() => setSyncOpen(false)}
             />,
             syncLayer,

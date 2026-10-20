@@ -56,7 +56,6 @@ import type {
   Machine,
   MachineVersion,
   ParamDecision,
-  ParamDecisionKind,
   ParamMeta,
   ParamSection,
   ParamSyncEntry,
@@ -161,6 +160,8 @@ export interface HistoryItem {
   section: string
   /** 单位（如 `mm`）；没有就是 `null` */
   unit: string | null
+  /** 这一项最后那一次改动是「云端更新」带来的 —— 修改历史里挂「更新」徽章 */
+  fromSync?: boolean
 }
 
 export interface HistoryEntry {
@@ -174,10 +175,19 @@ export interface HistoryEntry {
   batch: number | null
   /**
    * 发生那一刻（UTC epoch 秒）。**落盘之后才有的字段**（2026-10-17）：
-   * 内存日志时代"什么时候改的"没处去，持久化之后它跟着这一条一起留着 ——
-   * 界面上暂时不显示它，但账本里不能没有（将来"这一条是上周改的"要靠它）。
+   * 内存日志时代"什么时候改的"没处去，持久化之后它跟着这一条一起留着。
+   * 2026-10-20 起界面上真的用它了：修改历史的段头右侧那一列时间就是段内最大值
+   * （作者：「就在这个第几次保存后面显示一个时间呢？」）。
    */
   tsUnix?: number
+  /**
+   * 这一条是不是**「云端更新」落下来的**（2026-10-20）—— 修改历史里挂一枚「更新」徽章。
+   *
+   * 与普通改值分开记：两者在账本里长得一样（`改 X 轴偏移` / `0.1 → 0.7`），
+   * 但用户想知道"这条是新版带来的，还是我自己调的"。判据只能存下来，不能事后从
+   * action 文案里猜（文案会改，猜错就成了骗人的标注）。
+   */
+  fromSync?: boolean
 }
 
 export interface HistoryGroup {
@@ -185,6 +195,11 @@ export interface HistoryGroup {
   batch: number | null
   title: string
   items: HistoryEntry[]
+  /**
+   * 这一段的**时间**（UTC epoch 秒；取段内条目 `tsUnix` 的最大值 = 这一批最后落笔那一刻）。
+   * `null` = 未保存那一段（还没有"落盘时刻"可言）。
+   */
+  atUnix: number | null
 }
 
 /**
@@ -202,18 +217,26 @@ export interface HistoryGroup {
 export function netOf(entries: HistoryEntry[]): HistoryItem[] {
   const head = new Map<string, HistoryItem>()
   const tail = new Map<string, HistoryItem>()
+  /** 这一项最后一次改动是不是云端更新带来的（跟随 `tail` 取最后一条） */
+  const fromSync = new Map<string, boolean>()
   for (const e of entries) {
     if (e.state === 'undone') continue
     for (const it of e.items) {
       if (!head.has(it.key)) head.set(it.key, it)
       tail.set(it.key, it)
+      fromSync.set(it.key, e.fromSync === true)
     }
   }
   const out: HistoryItem[] = []
   for (const [key, first] of head) {
     const last = tail.get(key)
     if (last === undefined || first.from === last.to) continue
-    out.push({ ...last, from: first.from, to: last.to })
+    out.push({
+      ...last,
+      from: first.from,
+      to: last.to,
+      ...(fromSync.get(key) === true ? { fromSync: true } : {}),
+    })
   }
   return out
 }
@@ -242,6 +265,32 @@ export interface EditStep {
   patch: Record<string, string | undefined>
   before: Record<string, string | undefined>
   logId: number
+  /**
+   * 这一步**之前 / 之后**的云端表态表（2026-10-20）。整份快照，不是增量 ——
+   * 撤销要把"已采用 / 已保持"一起退回去，否则值退了、徽章还挂着。
+   * 旧会话快照里没有这两格（`undefined`）⇒ 退回空表，不按缺省值编。
+   */
+  syncBefore?: Record<string, SyncDraftKind>
+  syncAfter?: Record<string, SyncDraftKind>
+}
+
+/** 草稿层对某一项云端更新的表态 */
+export type SyncDraftKind = 'adopt' | 'hold'
+
+/** `apply` 的可选交代（只有云端更新那一批用得上） */
+export interface ApplyOptions {
+  /**
+   * 这一批是**「云端更新」落下来的** —— 修改历史给整条挂一枚「更新」徽章。
+   * 值怎么变、怎么撤销与普通编辑完全一样，只有"来路"这一个标注不同。
+   */
+  fromSync?: boolean
+  /**
+   * 这一步要写进表态表的项（`null` = 撤掉那一项的表态）。
+   *
+   * 由调用方一次交代全：采用项即使这次 no-op（值本来就等于云端新值）也要记下来，
+   * 保持项则根本不会进 `patch`。
+   */
+  sync?: Record<string, SyncDraftKind | null>
 }
 
 interface Catalog {
@@ -473,25 +522,16 @@ function nowSec(): number {
 /**
  * 「已应用的那一份 × 当前在看的那一份」。
  *
- * 顶部文件名 pill 用它定颜色与指示：在看的就是已应用的 → 绿（原样）；看的不是
- * → 琥珀 + 副标题行尾给一句**可点的**「切换回已应用」。
+ * 只剩一个判据：**当前看的这份是不是已应用的那份** —— 顶部文件名 pill 用它定颜色
+ * （是 → 绿；不是 → 琥珀）。
  *
- * 作者把点名砍了（提示只说动作，不写目标是谁）：
- *
- *   「不用显示那么清楚，切换回已应用的后面不用东西，就『切换回已应用』就行了。
- *     为什么呢？因为有时候是用户他自己的，他自己的，你都不知道他是什么版本」
- *
- * 所以这里**不输出机型 / 版本名**——已应用的那份可能是用户自己的文件，没有可靠的
- * 「机型 · 版本」可标；要能切回只需要它的组合（machineId / versionId）。
+ * 曾经它还要支撑一颗「回到已应用」的按钮（所以带着 `machineId` / `versionId` /
+ * `canJump`）；作者 2026-10-20 把那整个功能砍了（「没有这个回到已应用的这个功能了」），
+ * 那些字段跟着退役 —— 留着就是一份没人读的坐标，下一个人还得猜它为什么在。
  */
 export interface ActiveUse {
   /** 当前看的这份就是已应用的那份 */
   onIt: boolean
-  /** 已应用那份的组合 —— 切回动作要用 */
-  machineId: string | null
-  versionId: string | null
-  /** 已应用那份在当前这份包里找得到（找不到就没有切回动作，提示只陈述、不可点） */
-  canJump: boolean
 }
 
 export interface Params {
@@ -710,18 +750,29 @@ export interface Params {
   /** 待处理条数（`sync === null` 时是 0） */
   pendingCount: number
   /**
-   * **落一批决定**：`adopt` = 采用云端新值（写进我那份文件），
-   * `hold` = 保持本地值（文件一个字不动）。两者都把水位推到云端当前版。
-   */
-  decideSync: (keys: string[], kind: ParamDecisionKind) => void
-  /**
-   * **一次落一批、可混合 adopt / hold**（2026-10-20「选择要更新的参数」那一屏用）。
+   * 这一项在**草稿层**的处理状态（2026-10-20：决定不再当场写盘）：
    *
-   * 与 `decideSync` 是同一个写口，只是**一次写完**：分两趟写的话，头一趟写完还有
-   * 没表态的项 ⇒ 血统不推进，得等第二趟才收场 —— 一趟写完就没有这个中间态。
-   * `decisions` 可以是空的（「应用这 0 项」）。
+   *   `adopt`  草稿值已经等于云端新值（"用新值"了，保存才落盘）
+   *   `hold`   明确保持原样（值一个字没动，只记一条待落决定）
+   *   `null`   还没表态（行上照旧给那两颗按钮）
+   *
+   * 采用由**草稿值**判定（`draft[key] === cloudNew`）而不是第二套状态：撤销把值退回去，
+   * 决定就跟着没了 —— 否则"撤销了值、账上还写着已采用"这种自相矛盾要另写一套同步。
    */
-  decideSyncMany: (decisions: ParamDecision[]) => void
+  syncDraftOf: (key: string) => 'adopt' | 'hold' | null
+  /** 已表态但还没保存的项数（底栏据此让「保存」可点、状态栏据此说"N 项待保存"） */
+  syncDirty: number
+  /**
+   * **弹窗「应用」**：勾上的采用、未勾的保持 —— 勾上的拼成**一次** `apply`，
+   * 于是一次撤销能把整批退回来（作者：「就像批量修改，只算一次撤销一批」）。
+   */
+  applySyncDecisions: (decisions: ParamDecision[]) => void
+  /** 行上「用新值」：采用这一项（只改草稿值，进撤销栈；保存才落盘） */
+  adoptSync: (key: string) => void
+  /** 行上「保持原样」：只记一条待落决定，值一个字不动 */
+  holdSync: (key: string) => void
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持，退回已保存值 */
+  useMyValue: (key: string) => void
   /**
    * **把云端当前版的字节取回来**（2026-10-20）—— 只有用户明确点了「更新 /
    * 选择要更新的参数」才走它。取回来才有逐项差异与那两颗按钮。
@@ -802,6 +853,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     origin: ActiveOrigin
     path: string | null
   } | null>(null)
+  /**
+   * 编辑目标的**当前值**（渲染期同步一份）。
+   *
+   * 保存这条链要读它（`commitDraft`），但不能再把它塞进 `setEditingPreset` 的 updater
+   * 里去拿 —— updater 在 StrictMode 下会跑两遍，副作用（真写盘）就跟着做两遍。
+   * ref 只在渲染期赋值，没有这个毛病。
+   */
+  const editingPresetRef = useRef(editingPreset)
+  editingPresetRef.current = editingPreset
   /** 编辑目标的草稿有没有真的落到盘上（后端 `run/draft-preset.json`） */
   const [draftError, setDraftError] = useState<string | null>(null)
   /**
@@ -892,6 +952,20 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [syncBusy, setSyncBusy] = useState(false)
   /** 正在为看逐项差异**取回云端当前版的字节**（2026-10-20）—— 那一颗按钮据此转圈 */
   const [syncFetching, setSyncFetching] = useState(false)
+  /**
+   * **草稿层已经表过态的云端更新**（2026-10-20）：`key → 'adopt' | 'hold'`。
+   *
+   * 为什么是一张显式的表，而不是"从草稿值反推"：
+   *
+   *   · 保持原样**没有值可改**，反推不出来；
+   *   · 采用也可能一次 no-op（云端新值恰好等于你现在的值），照样要记下"这一版处理过了"；
+   *   · 反推要靠 `cloudNew` 比字符串，云端改一次格式（`0.7` / `0.70`）就会认错。
+   *
+   * 它跟着 `apply` 走：改值顺手删掉这一项的表态、撤销 / 重做整份快照还原 ——
+   * 于是"撤销了值、账上还写着已采用"这种自相矛盾不会出现。**不落盘**：
+   * 真账（水位）在保存那一步交给后端，这里只是"还没保存的那一笔"。
+   */
+  const [syncDecisions, setSyncDecisions] = useState<Record<string, 'adopt' | 'hold'>>({})
 
   /**
    * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
@@ -912,11 +986,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *
    * 定义在这里（早于 `save`）是为了让 `save` 在渲染期就能引用到它。
    */
-  const commitDraft = useCallback(() => {
-    setEditingPreset((cur) => {
+  const commitDraft = useCallback(
+    (decisions: ParamDecision[] = [], path: string | null = null) => {
+      const cur = editingPresetRef.current
       if (cur === null) {
         setSavedNote('这份没有可保存的目标（没配 MKP 文件或还没选）')
-        return cur
+        return
       }
       void api.commitPresetDraft().then(
         (done) => {
@@ -944,6 +1019,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           deliveryMutated()
           /* 存完了 ⇒ 这一份盘上不再有"改过没保存"的草稿（重开不该再自动进编辑模式） */
           setDraftOnDisk(false)
+
           /*
            * ★ **存完要重开草稿**（2026-10-17 真机那两条红字的正解）。
            *
@@ -955,34 +1031,71 @@ export function useParams(opts: UseParamsOptions = {}): Params {
            * 重开的对象 = **刚落盘的那一份**（云端线另存出来的现在就在用户根，
            * 用户线写的还是它自己），于是"保存 → 接着改 → 再保存"是一条不断的链。
            */
-          const next: { fileName: string; origin: ActiveOrigin; path: string | null } = {
-            fileName: done.fileName,
-            origin: 'local',
-            path: done.path,
+          const reopen = () => {
+            const next: { fileName: string; origin: ActiveOrigin; path: string | null } = {
+              fileName: done.fileName,
+              origin: 'local',
+              path: done.path,
+            }
+            setEditingPreset(next)
+            /*
+             * 存完之后这一份的身份可能换了（云端线另存出来的那一份现在是**用户线**的了）
+             * ⇒ 历史账本跟着换到新钥匙上：**先认下新钥匙**，别让"读那一本"的 effect
+             * 再去读一次（那会把刚保存的这批记录从界面上冲掉）。
+             */
+            const nextKey = `local:${next.path ?? next.fileName}`
+            lastHistoryKeyRef.current = nextKey
+            setHistoryReady({ key: nextKey, writable: true })
+            void api.beginPresetEdit(next.fileName, next.origin, next.path ?? undefined).then(
+              () => setDraftError(null),
+              (err: unknown) => setDraftError(errorText(err)),
+            )
+            /* 存下了 ⇒ 问一次"要不要回切片器重切" —— 切片器自己不会知道参数变了。
+               ★ 只有共用开关开着（`guidesEnabled()`）才问：用户在提示里勾过「不再显示」
+               或去设置页关过这一格，就不再打扰（那个开关与校准页共用同一个键）。 */
+            if (guidesEnabled()) setResliceAsk(true)
           }
-          setEditingPreset(next)
+
           /*
-           * 存完之后这一份的身份可能换了（云端线另存出来的那一份现在是**用户线**的了）
-           * ⇒ 历史账本跟着换到新钥匙上：**先认下新钥匙**，别让"读那一本"的 effect
-           * 再去读一次（那会把刚保存的这批记录从界面上冲掉）。
+           * **云端更新的表态在这里落盘**（2026-10-20）。
+           *
+           * 顺序不能反：先把草稿正文写回（adopt 的值已经在里面了），后端再按"盘上现值"
+           * 重写骨架（云端新版的注释 / 新字段跟着进来）、把水位推到当前版并记账。
+           * 反过来的话，`apply_preset_param_decisions` 读到的是**旧正文** ——
+           * 用户这一屏手改的其它值会被它顶回旧值。
+           *
+           * 失败要分得开：值已经存好了，只是"云端更新处理过没有"这一笔没落上 ——
+           * 如实说，不回滚、不假装成功。表态表**留着**，让用户再点一次保存重试。
            */
-          const nextKey = `local:${next.path ?? next.fileName}`
-          lastHistoryKeyRef.current = nextKey
-          setHistoryReady({ key: nextKey, writable: true })
-          void api.beginPresetEdit(next.fileName, next.origin, next.path ?? undefined).then(
-            () => setDraftError(null),
-            (err: unknown) => setDraftError(errorText(err)),
-          )
-          /* 存下了 ⇒ 问一次"要不要回切片器重切" —— 切片器自己不会知道参数变了。
-             ★ 只有共用开关开着（`guidesEnabled()`）才问：用户在提示里勾过「不再显示」
-             或去设置页关过这一格，就不再打扰（那个开关与校准页共用同一个键）。 */
-          if (guidesEnabled()) setResliceAsk(true)
+          if (decisions.length > 0 && path !== null) {
+            setSyncBusy(true)
+            void api.applyPresetParamDecisions(path, decisions).then(
+              (v) => {
+                setSyncBusy(false)
+                setSync(v)
+                setSyncDecisions({})
+                setFileReload((n) => n + 1)
+                deliveryMutated()
+                reopen()
+              },
+              (e: unknown) => {
+                setSyncBusy(false)
+                setSavedNote(
+                  `已写回 ${done.fileName}，但云端更新那几项没落上：${errorText(e)}` +
+                    '（再点一次保存可以重试）',
+                )
+                reopen()
+              },
+            )
+            return
+          }
+          reopen()
         },
         (e: unknown) => setSavedNote(`保存失败：${errorText(e)}`),
       )
-      return cur
-    })
-  }, [broadcastDraftNow])
+    },
+    [broadcastDraftNow],
+  )
 
   /*
    * **改一个值就写进草稿**（字段级 patch，参数页底座 ③，不重生成整份）。
@@ -1449,9 +1562,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *
    * 「改成与已保存值相同」= 撤掉草稿，而不是记一条「改成一样」的假改动；
    * 值没变的项不占一格撤销。
+   *
+   * ★ 云端更新的「用新值」走的也是这里（2026-10-20）：它只是一次普通的批量改值，
+   *   于是撤销 / 重做 / 放弃并退出全都天然成立 —— 不再另开一条绕过草稿的写盘路。
+   *   被改掉的那几项顺手撤掉「保持原样」的标记（值已经动了，那条待落决定就不再成立）。
    */
   const apply = useCallback(
-    (label: string, patches: Patch[]): ApplyResult => {
+    (label: string, patches: Patch[], opts: ApplyOptions = {}): ApplyResult => {
       /*
        * **写值闸**（2026-10-02，作者裁决）：弃用字段 / 弃用选项不许写新值。
        *
@@ -1511,8 +1628,24 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         })
       }
 
-      /* 逐项都等于现值 ⇒ 没有要写的东西（历史「还原」最常见的一下）：如实回答，不装作写了 */
-      if (items.length === 0) return 'noop'
+      /*
+       * 这一步之后的**云端表态表**：改过值的项先撤掉表态（值都动了，那条判断不再成立），
+       * 再按 `opts.sync` 写回这一批明确交代的项 —— 采用即使 no-op（值本来就等于云端新值）
+       * 也要记下来，保持则根本不会出现在 `patch` 里。
+       */
+      const nextSync: Record<string, SyncDraftKind> = { ...syncDecisions }
+      for (const key of Object.keys(patch)) delete nextSync[key]
+      for (const [key, kind] of Object.entries(opts.sync ?? {})) {
+        if (kind === null) delete nextSync[key]
+        else nextSync[key] = kind
+      }
+
+      /* 逐项都等于现值 ⇒ 没有值要写（历史「还原」最常见的一下）：如实回答，不装作写了。
+         但表态表可能变了（点「保持原样」/ 采用一个相同的值）—— 那一格照写，不吞掉。 */
+      if (items.length === 0) {
+        if (opts.sync !== undefined) setSyncDecisions(nextSync)
+        return 'noop'
+      }
 
       const id = seq + 1
       const next = { ...draft }
@@ -1523,11 +1656,24 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
       setSeq(id)
       setDraft(next)
-      setPast([...past, { patch, before, logId: id }])
+      setSyncDecisions(nextSync)
+      setPast([
+        ...past,
+        { patch, before, logId: id, syncBefore: syncDecisions, syncAfter: nextSync },
+      ])
       setFuture([]) // 新动作把「重做」那一支剪掉，撤销栈的通例
       setLog([
         ...log,
-        { id, no: id, action: label, items, state: 'draft', batch: null, tsUnix: nowSec() },
+        {
+          id,
+          no: id,
+          action: label,
+          items,
+          state: 'draft',
+          batch: null,
+          tsUnix: nowSec(),
+          ...(opts.fromSync === true ? { fromSync: true } : {}),
+        },
       ])
       setSavedNote(null)
       /* 这次写成功 → 上一次的拦截提示收掉 */
@@ -1546,7 +1692,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       }
       return 'applied'
     },
-    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq],
+    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions],
   )
 
   const edit = useCallback(
@@ -1592,6 +1738,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       else next[key] = value
     }
     setDraft(next)
+    /* 云端表态跟着退回去：采用撤掉了，那一项就该回到"待选择"，而不是还挂着「已采用」 */
+    setSyncDecisions(step.syncBefore ?? {})
     setPast(past.slice(0, -1))
     setFuture([...future, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'undone' } : e)))
@@ -1611,6 +1759,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       else next[key] = value
     }
     setDraft(next)
+    setSyncDecisions(step.syncAfter ?? {})
     setFuture(future.slice(0, -1))
     setPast([...past, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'draft' } : e)))
@@ -1665,6 +1814,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             state: e.state,
             batch: e.batch,
             tsUnix: e.tsUnix,
+            ...(e.fromSync === true ? { fromSync: true } : {}),
             items: e.items.map((i) => ({
               key: i.key,
               from: i.from,
@@ -1704,6 +1854,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             state: e.state,
             batch: e.batch,
             tsUnix: e.tsUnix ?? nowSec(),
+            fromSync: e.fromSync === true,
             items: e.items,
           })),
         })
@@ -1738,10 +1889,29 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       return
     }
     /*
+     * **这一批云端更新的表态**（2026-10-20）：只交还"还在待处理、而且表过态"的那几项。
+     * 没表态的项不能捎带（那等于替用户做了决定），保存完它仍然挂着。
+     *
+     * ★ 表态表只活在内存里（关掉这一屏就没了）；草稿却会跟到下一次打开。
+     *   所以这里补一条**从草稿反推**：某一项还没表态，可草稿里的值已经就是云端新值
+     *   ——那等于"用过了"，只是那一笔表态在关窗时丢了。不补的话值已经改了、
+     *   水位却没推进，云端更新会一直挂着，逼用户再点一次「用新值」（还是 noop）。
+     *   保持原样推不出来（没有值线索），丢了就丢了 —— 那一版下次再问一遍，不算错。
+     */
+    const decisions: ParamDecision[] = []
+    for (const e of sync?.entries ?? []) {
+      if (!e.pending) continue
+      const kind =
+        syncDecisions[e.key] ??
+        (e.cloudNew !== null && draft[e.key] === e.cloudNew ? 'adopt' : undefined)
+      if (kind !== undefined) decisions.push({ paramKey: e.key, kind })
+    }
+    /*
      * **先落盘**：把草稿提交成"本地预设"（云端线另存 / 用户线写回，后端 `commit_preset_draft`）。
      * 本地这一层只是"这一屏看得到的已保存值"，真值在用户根 —— 两句状态由 `commitDraft` 写。
+     * 云端表态跟着这一趟走（`commitDraft` 里先提交正文、再落决定）。
      */
-    commitDraft()
+    commitDraft(decisions, localPath)
     const nextSaved = new Map(saved)
     for (const [key, value] of Object.entries(draft)) {
       nextSaved.set(cellKey(combo.machineId, combo.versionId, key), value)
@@ -1753,7 +1923,20 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setPast([])
     setFuture([])
     setLog(log.map((e) => (e.state === 'draft' ? { ...e, state: 'saved', batch } : e)))
-  }, [at, batchesByCombo, commitDraft, combo, defOf, draft, log, saved, savedBatches])
+  }, [
+    at,
+    batchesByCombo,
+    commitDraft,
+    combo,
+    defOf,
+    draft,
+    localPath,
+    log,
+    saved,
+    savedBatches,
+    sync,
+    syncDecisions,
+  ])
 
   /**
    * 历史面板里的「还原」：把那一条改动的值退回去，本身也算一次新编辑（可以再撤销）。
@@ -1811,6 +1994,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       setLog([])
       setSeq(0)
       setSavedNote(null)
+      /* 换目标 = 另一份文件，上一份的云端表态留在这边没有意义（还会认错文件） */
+      setSyncDecisions({})
       activateCombo(
         next.machineId,
         next.versionId,
@@ -1837,6 +2022,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    */
   const discardAll = useCallback(() => {
     if (dirtyKeys.length === 0) {
+      /* 「放弃并退出」= 这一屏的表态一个都不算数（云端更新仍然挂着） */
+      setSyncDecisions({})
       if (!draftOnDisk) return
       void api.discardPresetDraft().then(
         () => {
@@ -1852,6 +2039,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       '取消改动',
       dirtyKeys.map((key) => ({ key, value: savedValueOf(key) })),
     )
+    /*
+     * 清表态要放在 `apply` **之后**：`apply` 自己会按"这一步之后的表态表"覆盖一次
+     * （它是从闭包里那份旧表算的），先清会被它当成没清 —— 只剩"保持原样"那几项会漏回来。
+     */
+    setSyncDecisions({})
     /* 回写干净了 ⇒ 盘上那份草稿也不再算脏（重开这一屏不该再自动进编辑模式） */
     setDraftOnDisk(false)
     /* 「取消」是"一锤子"：当场广播 —— 全退回已保存值之后那枚橙点该立刻灭 */
@@ -1968,9 +2160,18 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     const push = (batch: number | null, title: string, src: HistoryEntry[]) => {
       const items = netOf(src)
       if (items.length === 0) return
+      /*
+       * 段头右侧那一列时间：取这一段里**最后落笔**的 `tsUnix`（保存那一刻就在它附近）。
+       * 未保存那一段没有"落盘时刻"可言，给 `null`（界面不摆时间）。
+       */
+      const atUnix =
+        batch === null
+          ? null
+          : src.reduce<number>((n, e) => Math.max(n, e.tsUnix ?? 0), 0) || null
       groups.push({
         batch,
         title,
+        atUnix,
         items: items.map((it) => {
           id -= 1
           no += 1
@@ -1982,6 +2183,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             /* 未保存那一段标「未保存」，落过盘的标「已保存」 —— 与旧版同一套词 */
             state: batch === null ? 'draft' : 'saved',
             batch,
+            ...(it.fromSync === true ? { fromSync: true } : {}),
           }
         }),
       })
@@ -2002,7 +2204,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   )
 
   /*
-   * 「正在使用」与当前 combo 的关系（onIt / canJump）。
+   * 「正在使用」与当前 combo 的关系（只剩 onIt：pill 画绿还是琥珀）。
    * **不再被回页签弹回**（2026-10-06 架构决策）：第一轮的"回页签把 combo 拉回底账"
    * 是同步补丁，它把「正在使用」与「正在编辑」绑死了。现在 active 只喂"正在使用"
    * 的显示，用户自选的 combo（编辑目标）独立存在 —— 离开再回来，
@@ -2010,15 +2212,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    */
   const activeUse = useMemo<ActiveUse | null>(() => {
     if (active === null) return null
-    const liveMachine = catalog?.machines.find((m) => m.id === active.machineId)
-    const liveVersion = liveMachine?.versions.find((v) => v.id === active.versionId)
-    return {
-      onIt: active.machineId === machineId && active.versionId === versionId,
-      machineId: active.machineId,
-      versionId: active.versionId,
-      canJump: liveMachine !== undefined && liveVersion !== undefined,
-    }
-  }, [active, catalog, machineId, versionId])
+    return { onIt: active.machineId === machineId && active.versionId === versionId }
+  }, [active, machineId, versionId])
 
   /*
    * 「应用的状态」跟到参数页（作者 2026-10-06：点了应用，所有其他页就是应用的状态）——
@@ -2237,6 +2432,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 所以界面不会编出"待选择 N 项"。
    */
   useEffect(() => {
+    /* 换了文件：上一份的云端表态不带过来（它认的是那一份的参数与那一版云端） */
+    setSyncDecisions({})
     if (localPath === null) {
       setSync(null)
       setSyncError(null)
@@ -2285,66 +2482,107 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     }
   }, [localPath])
 
-  /**
-   * 落一批决定（采用 / 保持）。
-   *
-   * 采用会把文件里那几项结构保真地改掉 —— 于是**草稿那一层也要跟着改**
-   * （`patchDraft`），否则用户在这之后点「保存修改」会把刚采用的云端新值覆盖回旧值。
-   *
-   * ★ `keys` 可以是空的（2026-10-20「应用这 0 项」）：那一样是一次真写 ——
-   * 值一个不动，云端的注释 / 新字段 / 时间戳与血统跟着新版推进（「有新版」就此收场）。
-   */
-  const decideSyncMany = useCallback(
-    (decisions: ParamDecision[]) => {
-      if (localPath === null) return
-      setSyncBusy(true)
-      setSyncError(null)
-      void api.applyPresetParamDecisions(localPath, decisions).then(
-        (v) => {
-          setSyncBusy(false)
-          setSync(v)
-          /*
-           * 采用会把文件里那几项改掉 —— 草稿那一层要跟着改（见上面那段注释）。
-           * ★ 合并（2026-10-20）：`decisions` 是可混合 adopt / hold 的一批，
-           *   所以这里按**每一项自己的 kind** 判，不再看外面那个 `kind`。
-           */
-          let adopted = false
-          for (const d of decisions) {
-            if (d.kind !== 'adopt') continue
-            adopted = true
-            const next = v.entries.find((e) => e.key === d.paramKey)?.local
-            if (next !== null && next !== undefined) patchDraft(d.paramKey, next)
-          }
-          /* 采用 = 后端把云端新值写进了同一份文件 ⇒ 文件面变了，广播一声
-             （校准页按代次重读，见 commitDraft 里那一处）。
-             ★ 「应用 0 项」也真写（注释 / 时间戳 / 血统），所以只要这一批落过盘就广播 ——
-               `decisions` 为空时 Adopt 一个都没有，但文件确实更新了，仍要通知。 */
-          if (adopted || decisions.length === 0) deliveryMutated()
-          setFileReload((n) => n + 1)
-        },
-        (e: unknown) => {
-          setSyncBusy(false)
-          setSyncError(errorText(e))
-        },
-      )
-    },
-    [localPath, patchDraft],
-  )
-
-  /** 同一批都是一种处理（行上那两颗按钮走它） */
-  const decideSync = useCallback(
-    (keys: string[], kind: ParamDecisionKind) => {
-      decideSyncMany(keys.map((paramKey) => ({ paramKey, kind })))
-    },
-    [decideSyncMany],
-  )
-
   /** 逐项的账，按 key 索引（行上直接取；没有这一项就是 `undefined`） */
   const syncByKey = useMemo(
     () => new Map((sync?.entries ?? []).map((e) => [e.key, e] as const)),
     [sync],
   )
   const syncOf = useCallback((key: string) => syncByKey.get(key), [syncByKey])
+
+  /**
+   * 这一项在**草稿层**表过什么态（`null` = 还没表态；非待处理项一律 `null`）。
+   *
+   * 判据只看那张表态表，不再从草稿值反推 —— 理由见 `syncDecisions` 的注释。
+   */
+  const syncDraftOf = useCallback(
+    (key: string): SyncDraftKind | null => {
+      const entry = syncByKey.get(key)
+      if (entry === undefined || !entry.pending) return null
+      return syncDecisions[key] ?? null
+    },
+    [syncByKey, syncDecisions],
+  )
+
+  /**
+   * 只改表态、不动值的那些动作（「保持原样」）走这里 —— 不占一格撤销：
+   * 它没有值变化，撤销栈里多一格"什么都没变"的步骤只会让人多按一次撤销。
+   * 真改了值的动作一律走 `apply`，由它把表态和值一起记进同一步。
+   */
+  const markSync = useCallback((key: string, kind: SyncDraftKind | null) => {
+    setSyncDecisions((prev) => {
+      if (kind === null) {
+        if (!(key in prev)) return prev
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      if (prev[key] === kind) return prev
+      return { ...prev, [key]: kind }
+    })
+  }, [])
+
+  /** 行上「用新值」：把这一项写成云端新值（一次普通改值，进撤销栈；保存才落盘） */
+  const adoptSync = useCallback(
+    (key: string) => {
+      const cloudNew = syncByKey.get(key)?.cloudNew ?? null
+      if (cloudNew === null) return
+      apply('采用云端新值', [{ key, value: cloudNew }], {
+        fromSync: true,
+        sync: { [key]: 'adopt' },
+      })
+    },
+    [apply, syncByKey],
+  )
+
+  /** 行上「保持原样」：只记一条待落决定，值一个字不动 */
+  const holdSync = useCallback((key: string) => markSync(key, 'hold'), [markSync])
+
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持，退回已保存值 */
+  const useMyValue = useCallback(
+    (key: string) => {
+      apply(`用回 ${defOf(key)?.label ?? key} 原来的值`, [{ key, value: savedValueOf(key) }], {
+        sync: { [key]: null },
+      })
+    },
+    [apply, defOf, savedValueOf],
+  )
+
+  /**
+   * **弹窗「应用」**（2026-10-20）：勾上的采用、没勾的保持 —— 全进草稿，保存才落盘。
+   *
+   * 勾上的那些拼成**一次** `apply`：一次撤销能把整批退回来（作者：「就像批量修改，
+   * 只算一次撤销一批」）。一项都没勾时 `apply` 会命中 `noop`，但表态表照写 ——
+   * 「保持原样」本来就没有值可改。
+   */
+  const applySyncDecisions = useCallback(
+    (decisions: ParamDecision[]) => {
+      const patches: Patch[] = []
+      const sync: Record<string, SyncDraftKind | null> = {}
+      for (const d of decisions) {
+        if (d.kind === 'adopt') {
+          sync[d.paramKey] = 'adopt'
+          const cloudNew = syncByKey.get(d.paramKey)?.cloudNew ?? null
+          if (cloudNew !== null) patches.push({ key: d.paramKey, value: cloudNew })
+        } else {
+          sync[d.paramKey] = 'hold'
+        }
+      }
+      apply(patches.length > 0 ? '采用云端新值' : '保持原样', patches, {
+        fromSync: patches.length > 0,
+        sync,
+      })
+    },
+    [apply, syncByKey],
+  )
+
+  /** 已表态、还没保存的项数（底栏 / 横幅那句「N 项待保存」） */
+  const syncDirty = useMemo(() => {
+    let n = 0
+    for (const key of Object.keys(syncDecisions)) {
+      if (syncDraftOf(key) !== null) n += 1
+    }
+    return n
+  }, [syncDecisions, syncDraftOf])
 
   return {
     loading: error === null && (catalog === null || combo === null),
@@ -2430,8 +2668,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     syncFetching,
     syncOf,
     pendingCount: sync?.pendingCount ?? 0,
-    decideSync,
-    decideSyncMany,
+    syncDraftOf,
+    syncDirty,
+    applySyncDecisions,
+    adoptSync,
+    holdSync,
+    useMyValue,
     fetchSync,
   }
 }

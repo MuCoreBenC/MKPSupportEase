@@ -74,46 +74,12 @@
 }
 
 /*
- * ★ 副标题那一行「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」整个退役
+ * ★ 副标题那一行「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」早已退役
  * （照 a05，作者圈出那一行说「没有意义的这一行就可以去掉」—— 机型版本副标题本来
- * 就在说、参数卡自己会讲）：尾巴上那颗「回到已应用」搬进了**标题栏的动作槽**
- * （`×` 左边，见 PageParams 的 `headActions`），样式就是下面这两条。
+ * 就在说、参数卡自己会讲）。它尾巴上那颗「回到已应用」也在 2026-10-20 一起退役
+ * （作者：「没有这个回到已应用的这个功能了」）—— 标题栏动作槽现在只剩「修改历史」，
+ * 样式见下面的 `.historyBtn`。
  */
-
-/*
- * 标题栏里那颗「回到已应用」：与「修改历史」同族（28px、圆角随 token），
- * 但它是**琥珀**的 —— 「你在看的不是正在生效的那份」是一句提醒，不是错误。
- */
-.headBtn {
-  display: inline-flex;
-  flex-shrink: 0;
-  align-items: center;
-  height: 28px;
-  padding: 0 11px;
-  border: 1px solid rgb(194 121 11 / 35%);
-  border-radius: var(--r-sm);
-  background: var(--warn-soft);
-  font: inherit;
-  font-size: var(--fs-label);
-  color: var(--warn);
-  white-space: nowrap;
-  cursor: pointer;
-}
-
-.headBtn:hover {
-  border-color: var(--warn);
-}
-
-.headBtn:focus-visible {
-  outline: none;
-}
-
-/* 退成纯文字的那一档（已应用那份不在包里，没有动作可给，只陈述）—— 恒琥珀 */
-.headHint {
-  font-size: var(--fs-label);
-  color: var(--warn);
-  white-space: nowrap;
-}
 
 /*
  * 没有动作槽可挂时（这一页单独当页用）那一簇的位置：头部标题行的右端
@@ -166,7 +132,7 @@
 /*
  * 看的那份**不是**正在使用的那份 —— 不画绿，换琥珀
  * （作者：「我切换到不是正在用的时候，就不要用绿色，用琥珀色」）。
- * 底 / 「切换」字 / hover 边框三处一起换；标题栏那颗「回到已应用」（.headBtn）指路一句。
+ * 底 / 「切换」字 / hover 边框三处一起换。
  * 绿 = 在看的就是在用的（或还没应用过任何一份，没有可对比的对象）。
  */
 .presetPillOff {
@@ -203,13 +169,12 @@
  */
 
 /*
- * 「修改历史」入口：它住**标题栏的动作槽**（`×` 左边，与「回到已应用」并排；
- * 见 PageParams 的 `headActions`）。原来入口是页脚那条「查看修改详情」下划线链接
- * （.detailLink，已删）—— 参考布局把它放进标题栏。同 presetPill 一族：
- * 28px、1px --line 边框、圆角随页面 token（作者：圆角不动）。
+ * 「修改历史」入口：它住**标题栏的动作槽**（`×` 左边；见 PageParams 的 `headActions`）。
+ * 原来入口是页脚那条「查看修改详情」下划线链接（.detailLink，已删）—— 参考布局把它
+ * 放进标题栏。同 presetPill 一族：28px、1px --line 边框、圆角随页面 token（作者：圆角不动）。
  *
- * **不再 `margin-left: auto`**：它现在跟「回到已应用」作伴，由那一簇自己定位
- * （槽内 `gap: 8px`），单颗按钮自己顶右会把同伴甩开。
+ * 它曾经与「回到已应用」并排；那一颗 2026-10-20 退役之后这一簇只剩它自己，
+ * 定宽与位置都由槽的 `gap` / `margin-left: auto` 负责，这里不自己顶右。
  */
 .historyBtn {
   display: inline-flex;
@@ -443,7 +408,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 calc(var(--pad) + 10px) 10px;
+  /*
+   * 上下留白**一样大**（2026-10-20 作者：「橙色可以稍微往下一点，它有点太靠上，
+   * 太靠近上面那个tab了……上下间距留一样大就好」）。
+   * 原来只有下边 10px、上边 0 —— 它紧贴着页签条，读起来像页签的一部分。
+   */
+  margin: 10px calc(var(--pad) + 10px);
   padding: 8px 12px;
   /* 琥珀的面 / 边 / 墨整套走 token（2026-10-12 深色第二遍）——
      原来这四笔写死，深色里是一条横贯页面的发亮米色条 */

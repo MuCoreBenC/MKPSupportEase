@@ -9,20 +9,23 @@
  *
  * 云端持续发布新默认值，但它**不许直接顶掉本地参数**。于是每一版发布之后，
  * 云端改过的那几项先是**待处理**：我这里列出来，用户勾选（采用云端新值）
- * 或者不勾（保持我现在用的值），一次落下去。
+ * 或者不勾（保持我现在用的值），一次交回去。
  *
- * 与行上那两个动作（「用新值」/「保持本地」）是**同一件事的两条路**：
- * 一屏能全看完时走这里，只想改一行时就地在那一行上改。两条路落的是同一个写口。
+ * ★ **这一屏不再写盘**（2026-10-20 作者：「应该保存的时候才算真的用，跟编辑一样」）：
+ *   点「应用」只是把勾上的项写进**草稿**（一次撤销能整批退回来）、没勾的记成
+ *   「保持原样」；真正的落盘在「保存」那一下。点「暂不修改」则什么都不记，
+ *   回到修改参数里逐项照旧能选。
  *
- * # 默认勾选：我改过的默认不勾；**XYZ 偏移与涂胶速度一律不替他勾**（2026-10-20）
+ * 与行上那两个动作（「用新值」/「保持原样」）是**同一件事的两条路**：
+ * 一屏能全看完时走这里，只想改一行时就地在那一行上改。两条路落的是同一张草稿。
  *
- * 判据是**这一项我动过没有** —— `local`（我那份文件里写着的）与 `baselineOld`
- * （云端旧值）一样 = 我没动过 → 默认勾上（本来就该跟云端走）；不一样 = 我改过
- * → 默认不勾（不替用户放弃他自己的值）。
+ * # 三组 + 默认勾选（2026-10-20 作者定的顺序）
  *
- * 那两类（[`NEVER_PRESET_KEYS`]）额外一律不勾、**全选也跳过它们**，并且单独一组
- * 排在末尾：笔尖偏移是逐台机器标定出来的、涂胶速度是自己调出来的手感 ——
- * 云端改了默认值也不该顺手把机器自己的值换掉。要跟就自己勾。
+ *   ① **没冲突**（云端改了、我没动过）—— **排最上、默认勾上**，这是"本来就该跟走"的一批；
+ *   ② **有冲突**（我也改过，两边值还不一样）—— 排中间、默认不勾，必须我自己选；
+ *   ③ [`NEVER_PRESET_KEYS`]（XYZ 偏移 / 涂胶速度）—— 排最下、一律不勾、**全选也跳过**：
+ *      笔尖偏移是逐台机器标定出来的、涂胶速度是自己调出来的手感，云端换默认值
+ *      不等于"这台也该换"。
  *
  * # 三方怎么显示
  *
@@ -59,13 +62,15 @@ const NEVER_PRESET_KEYS: readonly string[] = [
 
 /** 这一组的小标题（单独分组排末尾，让人一眼看出它们为什么要分开） */
 const NEVER_GROUP_LABEL = '机器自己的数（不替你勾）'
+/** 「没冲突」那一组的小标题 —— 排最上，默认勾上 */
+const CLEAN_GROUP_LABEL = '没冲突 —— 云端改了、你没动过'
+/** 「有冲突」那一组的小标题 —— 排中间，必须自己选 */
+const CONFLICT_GROUP_LABEL = '有冲突 —— 你也改过这一项，选一边'
 
 interface Props {
   open: boolean
   /** 这一份的云端更新账（`null` = 还没读到） */
   sync: PresetParamSync | null
-  /** 正在落决定 —— 两颗底栏按钮据此禁用 */
-  busy: boolean
   /** 参数定义：把值翻成人话（`18.6` → `18.6 mm`、`true` → `开启`） */
   defOf: (key: string) => ParamDef | undefined
   /** 遮罩挂哪一层；不给就原地渲染 */
@@ -73,16 +78,19 @@ interface Props {
   /** 底栏**左侧**那句提示（不写就给「暂不修改」那句常驻说明） */
   hint?: string | null
   /**
-   * 落一批决定（勾选的采用、没勾的保持）—— **一次写完**（可混合 adopt / hold）。
-   * 空数组 = 「应用这 0 项」（值一个不动，把新版的注释 / 新字段 / 时间戳收进来）。
+   * 这一项在草稿层已经表过什么态（可选）。
+   *
+   * 打开时按它打勾：已经在行上点过「用新值」的项不能被这一屏的默认勾选逻辑
+   * 当成"没表态"再问一遍 —— 用户一点「应用」，没勾的那些会被写成"保持原样"，
+   * 反而把他刚做的采用推翻。
+   */
+  draftOf?: (key: string) => 'adopt' | 'hold' | null
+  /**
+   * 把这一批勾选交回去（勾上的采用、没勾的保持）—— **只写进草稿**，
+   * 「保存」才落盘。空数组 = 一项都没勾。
    */
   onDecide: (decisions: ParamDecision[]) => void
   onClose: () => void
-}
-
-/** 这一项"我动过没有"：我那份文件里写着的与云端旧值一样就是没动过 */
-function untouched(entry: ParamSyncEntry): boolean {
-  return entry.local === null || entry.local === entry.baselineOld
 }
 
 /** 这一项是不是"不替用户勾"的那一类 */
@@ -90,23 +98,38 @@ function neverPreset(key: string): boolean {
   return NEVER_PRESET_KEYS.includes(key)
 }
 
-/** 一批待处理项分成两组：普通项在前，**机器自己的那几项**在末尾 */
-function groupOf(pending: ParamSyncEntry[]): { label: string | null; items: ParamSyncEntry[] }[] {
-  const normal = pending.filter((e) => !neverPreset(e.key))
-  const held = pending.filter((e) => neverPreset(e.key))
-  const groups: { label: string | null; items: ParamSyncEntry[] }[] = []
-  if (normal.length > 0) groups.push({ label: null, items: normal })
-  if (held.length > 0) groups.push({ label: NEVER_GROUP_LABEL, items: held })
+/**
+ * 一批待处理项分三组（顺序就是界面顺序）：
+ *   ① 没冲突（默认勾上）② 有冲突（自己选）③ 机器自己的那几项（不替你勾）
+ *
+ * "有没有冲突"由后端算好放在 `conflict` 上，这一层不再自己比三方值 ——
+ * 判据只有一处（`param_sync::ParamSyncEntry::is_conflict`），两边各算一套必漂。
+ */
+function groupOf(pending: ParamSyncEntry[]): {
+  key: string
+  label: string
+  items: ParamSyncEntry[]
+}[] {
+  const machine = pending.filter((e) => neverPreset(e.key))
+  const rest = pending.filter((e) => !neverPreset(e.key))
+  const clean = rest.filter((e) => !e.conflict)
+  const conflict = rest.filter((e) => e.conflict)
+  const groups: { key: string; label: string; items: ParamSyncEntry[] }[] = []
+  if (clean.length > 0) groups.push({ key: 'clean', label: CLEAN_GROUP_LABEL, items: clean })
+  if (conflict.length > 0) {
+    groups.push({ key: 'conflict', label: CONFLICT_GROUP_LABEL, items: conflict })
+  }
+  if (machine.length > 0) groups.push({ key: 'machine', label: NEVER_GROUP_LABEL, items: machine })
   return groups
 }
 
 export default function ParamSyncModal({
   open,
   sync,
-  busy,
   defOf,
   host = null,
   hint = null,
+  draftOf,
   onDecide,
   onClose,
 }: Props) {
@@ -115,16 +138,21 @@ export default function ParamSyncModal({
   const [checked, setChecked] = useState<Record<string, boolean>>({})
 
   /*
-   * 每次打开（或账本身换了）按默认规矩重来一遍：**我动过的默认不勾**、
-   * **机器自己的那几项（偏移 / 涂胶速度）一律不勾**。
-   * 不沿用上一次的选择 —— 那是上一批待处理项的事，套到新的一批上就是个静默的错误决定。
+   * 每次打开（或账本身换了）按默认规矩重来一遍：**已经表过态的照旧**（行上点过
+   * 「用新值 / 保持原样」不能被这一屏推翻），其余**没冲突的默认勾上**，
+   * 冲突与机器自己的那几项一律不勾。
+   * 不沿用上一次弹窗里的勾选 —— 那是上一批待处理项的事，套到新的一批上就是个
+   * 静默的错误决定；这里沿用的是**这一屏之外的草稿表态**，那是用户刚做的决定。
    */
   useEffect(() => {
     if (!open) return
     const next: Record<string, boolean> = {}
-    for (const e of pending) next[e.key] = untouched(e) && !neverPreset(e.key)
+    for (const e of pending) {
+      const decided = draftOf?.(e.key) ?? null
+      next[e.key] = decided === 'adopt' ? true : decided === 'hold' ? false : !e.conflict && !neverPreset(e.key)
+    }
     setChecked(next)
-  }, [open, pending])
+  }, [open, pending, draftOf])
 
   const chosen = pending.filter((e) => checked[e.key] === true).length
   const all = pending.length
@@ -134,8 +162,15 @@ export default function ParamSyncModal({
    * 那不是"这一版没有要改值的参数"，不许拿它显示「应用这 0 项」。
    */
   const fetching = sync !== null && sync.versionAdvanced && !sync.cloudReady
-  /* 「全选」能勾到的那几项（偏移 / 涂胶速度那一组不算在内 —— 它们从不替用户勾） */
-  const selectable = pending.filter((e) => !neverPreset(e.key)).length
+  /* 「全选」只覆盖**没冲突**那一组（冲突要自己选、机器自己的数从不替用户勾） */
+  const selectable = pending.filter((e) => !e.conflict && !neverPreset(e.key)).length
+  /*
+   * 全选框的三种状态只看**它能勾的那一批**：用户手动勾了某个冲突项之后，
+   * 全选框不该变成"没勾"（那会让人以为自己勾的东西又没了）。
+   */
+  const cleanChosen = pending.filter(
+    (e) => checked[e.key] === true && !e.conflict && !neverPreset(e.key),
+  ).length
   const text = (key: string, raw: string): string => valueText(defOf(key), raw)
   const afterOf = (e: ParamSyncEntry): string => {
     if (checked[e.key] === true) {
@@ -144,15 +179,19 @@ export default function ParamSyncModal({
     return e.local === null ? '—' : text(e.key, e.local)
   }
 
-  /* 全选**跳过**偏移与涂胶速度：那一组不替用户勾（要跟自己勾那几项） */
+  /* 全选**只动没冲突那一组**：冲突与机器自己的数不替用户勾，也不因为全选被清掉 */
   const toggleAll = () => {
-    const target = !(chosen > 0 && chosen === selectable)
-    const next: Record<string, boolean> = {}
-    for (const e of pending) next[e.key] = target && !neverPreset(e.key)
-    setChecked(next)
+    const target = cleanChosen < selectable
+    setChecked((cur) => {
+      const next = { ...cur }
+      for (const e of pending) {
+        if (!e.conflict && !neverPreset(e.key)) next[e.key] = target
+      }
+      return next
+    })
   }
 
-  /* 一次写完：勾上的采用、没勾的保持 —— 一趟写完血统才好收场（分两趟会有中间态） */
+  /* 交回一批决定：勾上的采用、没勾的保持 —— 只写进草稿，「保存」才落盘 */
   const confirm = () => {
     onDecide(
       pending.map((e) => ({
@@ -201,17 +240,12 @@ export default function ParamSyncModal({
            * 「暂不修改」是什么意思、0 项应用会发生什么，都写在这里 ——
            * 不再靠页面底部那条一次性 toast（关了就看不到了）。
            */}
-          <span className={s.hint}>{hint ?? '关闭后仍可继续修改'}</span>
+          <span className={s.hint}>{hint ?? '勾上的采用、没勾的保持 —— 点「保存」才写进这份文件'}</span>
           <button type="button" className={s.ghost} onClick={onClose}>
             暂不修改
           </button>
-          <button
-            type="button"
-            className={s.primary}
-            disabled={busy || fetching}
-            onClick={confirm}
-          >
-            {busy ? '正在落…' : `应用这 ${chosen} 项`}
+          <button type="button" className={s.primary} disabled={fetching} onClick={confirm}>
+            应用这 {chosen} 项
           </button>
         </>
       }
@@ -220,8 +254,7 @@ export default function ParamSyncModal({
         <p className={s.empty}>正在取回云端这一版 —— 拿到才知道改了哪几项。</p>
       ) : all === 0 ? (
         <p className={s.empty}>
-          这一版没有要改值的参数 —— 点「应用这 0 项」把云端的注释、新字段与时间戳收进来，
-          「有新版」就此收场。
+          这一版没有要改值的参数（云端只改了注释 / 新增字段）—— 关掉这一屏就行。
         </p>
       ) : (
         <>
@@ -229,8 +262,8 @@ export default function ParamSyncModal({
             <Check
               ariaLabel="全选"
               className={s.checkLabel}
-              checked={selectable > 0 && chosen === selectable}
-              indeterminate={chosen > 0 && chosen < selectable}
+              checked={selectable > 0 && cleanChosen === selectable}
+              indeterminate={cleanChosen > 0 && cleanChosen < selectable}
               onChange={toggleAll}
             >
               全选
@@ -240,49 +273,54 @@ export default function ParamSyncModal({
             </span>
           </div>
 
-          {groups.map((g) => (
-            <div key={g.label ?? 'normal'} className={s.group}>
-              {g.label !== null && <div className={s.groupLabel}>{g.label}</div>}
-              <div className={s.rows}>
-                {g.items.map((e) => {
-                  const def = defOf(e.key)
-                  const on = checked[e.key] === true
-                  const localText = e.local === null ? null : text(e.key, e.local)
-                  const diff =
-                    e.baselineOld !== null && e.cloudNew !== null
-                      ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.cloudNew)}`
-                      : '云端这一项的值还没拿到'
-                  return (
-                    <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
-                      <Check
-                        ariaLabel={def?.label ?? e.key}
-                        checked={on}
-                        onChange={() => setChecked((cur) => ({ ...cur, [e.key]: !on }))}
-                      />
-                      <div className={s.what}>
-                        <div className={s.name}>
-                          {def?.label ?? e.key}
-                          {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
+          {/* 三组共用一个滚动区（一组一个滚动框的话，三项就能把弹窗撑成半屏） */}
+          <div className={s.list}>
+            {groups.map((g) => (
+              <div key={g.key} className={s.group}>
+                <div className={s.groupLabel} data-group={g.key}>
+                  {g.label}
+                </div>
+                <div className={s.rows}>
+                  {g.items.map((e) => {
+                    const def = defOf(e.key)
+                    const on = checked[e.key] === true
+                    const localText = e.local === null ? null : text(e.key, e.local)
+                    const diff =
+                      e.baselineOld !== null && e.cloudNew !== null
+                        ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.cloudNew)}`
+                        : '云端这一项的值还没拿到'
+                    return (
+                      <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
+                        <Check
+                          ariaLabel={def?.label ?? e.key}
+                          checked={on}
+                          onChange={() => setChecked((cur) => ({ ...cur, [e.key]: !on }))}
+                        />
+                        <div className={s.what}>
+                          <div className={s.name}>
+                            {def?.label ?? e.key}
+                            {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
+                          </div>
+                          <div className={s.vals}>
+                            {localText !== null && e.local !== e.baselineOld && (
+                              <>
+                                本地 <span className={s.local}>{localText}</span>
+                                {' · '}
+                              </>
+                            )}
+                            云端 {diff}
+                          </div>
                         </div>
-                        <div className={s.vals}>
-                          {localText !== null && e.local !== e.baselineOld && (
-                            <>
-                              本地 <span className={s.local}>{localText}</span>
-                              {' · '}
-                            </>
-                          )}
-                          云端 {diff}
+                        <div className={s.after}>
+                          确认后：<span className={s.afterVal}>{afterOf(e)}</span>
                         </div>
                       </div>
-                      <div className={s.after}>
-                        确认后：<span className={s.afterVal}>{afterOf(e)}</span>
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </>
       )}
     </Modal>

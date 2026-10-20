@@ -130,6 +130,20 @@ const STATE_TEXT: Record<HistoryEntry['state'], string> = {
   undone: '已撤销',
 }
 
+/**
+ * epoch 秒 → 本机时区的 `2026-10-20 10:08`。
+ *
+ * 只给段头右侧那一列用（作者 2026-10-20：「就在这个第几次保存后面显示一个时间呢？」
+ * 「对呀，我觉得可以靠右吧」）。不写"今天 / 昨天"：历史是跨天翻的，
+ * 一个绝对时间比"昨天"更经得起回看。
+ */
+function whenText(unix: number): string {
+  const d = new Date(unix * 1000)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 const VIEWS = [
   { value: 'item', label: '逐项' },
   { value: 'batch', label: '整批' },
@@ -218,6 +232,16 @@ export default function HistoryDrawer({
           <span className={s.line}>{head ?? ctx}</span>
           <span className={s.meta}>{meta ?? `${line} · ${entry.action}`}</span>
         </span>
+        {/*
+          「更新」徽章（2026-10-20 作者：「如果那个修改历史有位置的话，你甚至可以给他
+          加一个小徽章。更新」）：这一条是云端新版带进来的，还是我自己调的 ——
+          光看"改 X 轴偏移 0.1 → 0.7"分不出来。
+        */}
+        {entry.fromSync === true && (
+          <span className={s.syncTag} title="这一条是「云端更新」带进来的">
+            更新
+          </span>
+        )}
         <span className={entry.state === 'saved' ? s.badgeSaved : s.badge}>
           {STATE_TEXT[entry.state]}
         </span>
@@ -272,7 +296,8 @@ export default function HistoryDrawer({
           {rowInner(
             entry,
             g.title,
-            line,
+            /* 整批这一屏没有段头那一列，时间就并进这一行的说明里 */
+            g.atUnix === null ? line : `${line} · ${whenText(g.atUnix)}`,
             /* 未保存那一段没有批号，摆一道横杠而不是 `#0` */
             g.batch === null ? '—' : `#${g.batch}`,
             { open: openBatch, label: g.title, onToggle: () => toggleBatch(key) },
@@ -396,6 +421,12 @@ export default function HistoryDrawer({
                 <h4 className={s.groupHead}>
                   <span>{g.title}</span>
                   <span className={s.count}>{g.items.length} 条</span>
+                  {/* 段头右侧那一列时间：未保存那一段没有落盘时刻，不摆 */}
+                  {g.atUnix !== null && (
+                    <time className={s.when} dateTime={new Date(g.atUnix * 1000).toISOString()}>
+                      {whenText(g.atUnix)}
+                    </time>
+                  )}
                 </h4>
                 <ul className={s.list}>{g.items.map(itemRow)}</ul>
               </section>
