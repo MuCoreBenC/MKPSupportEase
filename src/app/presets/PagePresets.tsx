@@ -529,16 +529,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   useEffect(() => {
     if (devCompare.on) setCompareOpen(true)
   }, [devCompare.on])
-  /* 删除确认的认领：把右键菜单开在一条**能删的行**上、并一开就停到「删除」那一项的确认层
-     （见 `ContextMenu` 的 `startConfirming`）。挑不到能删的行就什么都不做。
+  /* 删除确认的认领（2026-10-20 起那个框是**居中的模态框**，不再长在菜单里）：
+     挑一条**能删的行**把框摆出来，挑不到就什么都不做。
      ★ 拿 `page.local.rows`（= 下面的 `table`）—— 它在上面的 early return 之前就有了。 */
   const devDelete = useDevPreview('delete-confirm')
   useEffect(() => {
     if (!devDelete.on) return
     const row = page.local.rows.find((r) => removeWhyNot(r) === undefined)
-    if (row === undefined) return
-    menu.open(row, { x: 420, y: 260 })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (row !== undefined) setRemoveAsk(row)
+    return () => setRemoveAsk(null)
   }, [devDelete.on, page.local.rows])
   /*
    * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要更新的参数」
@@ -555,6 +554,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 不做全表遮罩：一行的动作不该把整张表锁住。
    */
   const [busyKey, setBusyKey] = useState<string | null>(null)
+  /*
+   * **行内动作的同步在途闸**（2026-10-20）。
+   *
+   * `busyKey` 要等下一次渲染才把按钮 `disabled` 掉 —— 手快连点（或回车连按）时，
+   * 第二下仍会进到处理函数里，后端就真的落两份（作者：「下载的时候我点得很快，
+   * 它好像就重复了」）。所以再记一份**同步**的账：进入时先占住 `动作:行键`，
+   * 占不到就**静默丢掉这一下**（按钮本来就该是灰的，不需要再解释一句）。
+   *
+   * 键带动作名：同一行上「下载」与「使用」互不相干，不该互相挡住。
+   */
+  const inflightRef = useRef(new Set<string>())
+  const enter = (key: string): boolean => {
+    if (inflightRef.current.has(key)) return false
+    inflightRef.current.add(key)
+    return true
+  }
+  const leave = (key: string) => {
+    inflightRef.current.delete(key)
+  }
   /*
    * 批量入口 2026-10-10 退役（作者：「这个可以去掉的……跟本地的一样就可以」）：
    * 云端表的呈现与本地表一致，只在行上逐份下载 / 更新，不再有整批按钮。
@@ -577,7 +595,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     | null
   >(null)
   /*
-   * 归档删除的**两段式确认**（抽屉里没有菜单那套 confirm 机制）：
+   * 归档删除的**两段式确认**（抽屉里不弹居中模态框：这里就一份一份地删，两段式更轻）：
    * 记"哪一份的删除按钮已经点过第一下"。点到别的份 / 关抽屉都退回。
    */
   const [confirmingArchive, setConfirmingArchive] = useState<string | null>(null)
@@ -659,6 +677,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     suggestedName: string
     busy: boolean
   } | null>(null)
+
+  /*
+   * **删除确认（居中模态框）**—— 2026-10-20 作者：「我不喜欢这种……这个点开了之后，
+   * 我右键在哪里，它就跟随在哪里了，就点不出右键菜单了」。
+   *
+   * 原来那个确认层是右键菜单的**内部态**：框就摆在鼠标落点、替换掉菜单列表，
+   * 而且"点外面不关"（不可逆的事必须显式选）⇒ 它压着鼠标，用户想右键别处也点不出菜单。
+   * 现在改成与「撞名导入」同一个居中模态框：位置固定、遮罩盖住内容区、Esc / 取消可退，
+   * 右键菜单点完就关。`null` = 没有在问。
+   */
+  const [removeAsk, setRemoveAsk] = useState<PresetTableRow | null>(null)
 
   /*
    * ★ 2026-10-11（a04）：**「更新」不再弹确认层**。
@@ -1180,12 +1209,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       setNote({ text: `${row.fileName} 已经不在本地了 —— 列表刚变过，再看一眼`, bad: true })
       return
     }
+    /* 连点的第二下丢掉（见 `inflightRef`）—— 两次更新会各写一遍盘 */
+    const key = `update:${row.rowKey}`
+    if (!enter(key)) return
     const cloudName = row.basedOnCloud ?? row.fileName
     setNote({ text: `正在更新 ${row.fileName}…`, bad: false })
-    void applyCloudUpdate(local, row, cloudName).catch((e: unknown) => {
-      setBusyKey(null)
-      setNote({ text: `更新失败：${errorText(e)}`, bad: true })
-    })
+    void applyCloudUpdate(local, row, cloudName)
+      .catch((e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `更新失败：${errorText(e)}`, bad: true })
+      })
+      .finally(() => leave(key))
   }
 
   /**
@@ -1199,6 +1233,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runUpdate = (row: PresetTableRow) => {
     if (row.scope !== 'cloud') return
+    /* 与本地行那颗「更新」共用一把锁：同一行上两条入口都是"更新这一份" */
+    const key = `update:${row.rowKey}`
+    if (!enter(key)) return
     const fileName = row.fileName
     void (async () => {
       setBusyKey(row.rowKey)
@@ -1229,10 +1266,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         return
       }
       await applyCloudUpdate(behind, row, fileName)
-    })().catch((e: unknown) => {
-      setBusyKey(null)
-      setNote({ text: `更新失败：${errorText(e)}`, bad: true })
-    })
+    })()
+      .catch((e: unknown) => {
+        setBusyKey(null)
+        setNote({ text: `更新失败：${errorText(e)}`, bad: true })
+      })
+      .finally(() => leave(key))
   }
 
   /**
@@ -1240,11 +1279,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 落一份新的（`A1-fast-2.toml`），原来那份一个字节不动，两份都留着。
    */
   const confirmTakenImport = () => {
-    if (takenAsk === null) return
+    if (takenAsk === null || takenAsk.busy) return
+    /* 这颗按钮的 `disabled` 也要等一帧 —— 连点两下会导入两份（自动改名的第二份） */
+    const key = `import:${takenAsk.fileName}`
+    if (!enter(key)) return
     const ask = takenAsk
     setTakenAsk({ ...ask, busy: true })
     data.fetchCloud(ask.fileName, true).then(
       (done) => {
+        leave(key)
         setTakenAsk(null)
         setNote({
           text: `已导入 ${done.fileName} —— 原来那份没动，两份都留着（本地表里现在有它）`,
@@ -1252,6 +1295,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         })
       },
       (e: unknown) => {
+        leave(key)
         setTakenAsk((cur) => (cur === null ? cur : { ...cur, busy: false }))
         setNote({ text: `导入没成：${errorText(e)}`, bad: true })
       },
@@ -1270,9 +1314,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *     —— 不许整页白屏，也不许静默吞掉（吞掉就等于把「哪个口子没接」藏起来）
    */
   const download = (row: PresetTableRow) => {
+    /*
+     * **连点的第二下丢掉**（见 `inflightRef`）。作者 2026-10-20：
+     * 「下载的时候，我点得很快，就会出现这个情况，它好像就重复了」——
+     * 第一下已经把本地那份落下来了，第二下就变成"撞名、再导入一份"。
+     */
+    const key = `download:${row.rowKey}`
+    if (!enter(key)) return
     if (row.scope === 'cloud' && row.localState !== undefined) {
       /* 「更新」≠ 只把云端取回来：要把差异处理到本地这份上（见 runUpdate） */
       if (row.localState === 'stale') {
+        /* 交给更新那把锁（它自己也防连点），这一把先放掉 */
+        leave(key)
         runUpdate(row)
         return
       }
@@ -1281,6 +1334,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       setNote({ text: `正在下载 ${row.fileName}…`, bad: false })
       data.fetchCloud(row.fileName).then(
         (done) => {
+          leave(key)
           setBusyKey(null)
           /*
            * ★ a04：**同名已经有一份了** —— 不覆盖、也不静默：问用户
@@ -1304,6 +1358,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           })
         },
         (e: unknown) => {
+          leave(key)
           setBusyKey(null)
           /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
           setNote({ text: `下载失败：${errorText(e)}`, bad: true })
@@ -1327,6 +1382,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         .downloadPreset(row.fileName, (t) => setNote({ text: tickText(t), bad: t.stage === 'failed' }))
         .then(
           () => {
+            leave(key)
             setBusyKey(null)
             setNote({
               text: updating
@@ -1343,6 +1399,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             })
           },
           (e: unknown) => {
+            leave(key)
             setBusyKey(null)
             setNote({ text: `${verb}失败：${errorText(e)}`, bad: true })
           },
@@ -1354,6 +1411,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 它的「下载」残支 2026-10-09 按用户裁断**连入口一起撤了**（`downloadFiles`
      * 从契约里删掉）—— 界面上这类行不再给下载按钮，走到这里说明按钮闸漏了。
      */
+    leave(key)
     setNote({ text: `${row.fileName}：这一份不走「下载」—— 只有登记过的交付文件能取`, bad: true })
   }
 
@@ -1786,13 +1844,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runDuplicate = (row: PresetTableRow) => {
     menu.close()
+    /* 连点两下 = 复制出两份（`copy`、`copy 2`）—— 第二下丢掉（见 `inflightRef`） */
+    const key = `duplicate:${row.rowKey}`
+    if (!enter(key)) return
     const name = duplicateNameOf(
       row.fileName,
       data.local.map((f) => f.fileName),
     )
     setNote({ text: `正在复制 ${row.fileName}…`, bad: false })
     data.copyAsNew(row.path, name).then(
-      (done) =>
+      (done) => {
+        leave(key)
         setNote({
           /*
            * 名字有上限（255 字节）：原名本来就长的时候 `<原名> copy.toml` 会超 ——
@@ -1802,8 +1864,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             ? `已复制出一份：${done.fileName}（名字到了上限，截短了一点）—— 原文件一个字节没动`
             : `已复制出一份：${done.fileName} —— 原文件一个字节没动`,
           bad: false,
-        }),
-      (e: unknown) => setNote({ text: `没复制成：${errorText(e)}`, bad: true }),
+        })
+      },
+      (e: unknown) => {
+        leave(key)
+        setNote({ text: `没复制成：${errorText(e)}`, bad: true })
+      },
     )
   }
 
@@ -1861,8 +1927,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **删除**（2026-10-06 一切皆可删）：我的文件走本地文件（**真删除**）；
    * 切片器交付行走交付线（删了回「未下载」，随时可从云端重下）。
-   * 二次确认长在菜单里（`danger` + `confirm`）；正在使用 / 有草稿不再拦 ——
-   * 后端把属于这一份的状态一并清掉（确认框讲清了）。
+   * 二次确认是**居中的模态框**（`removeAsk`，2026-10-20 从右键菜单里搬出来）；
+   * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
     setNote({ text: `正在删除 ${row.fileName}…`, bad: false })
@@ -1882,9 +1948,29 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
+   * 右键「删除」：**先把菜单关掉**，再把居中的确认框摆出来。
+   *
+   * 作者 2026-10-20 的原话：「我不喜欢这种……这个点开了之后，我右键在哪里，
+   * 它就跟随在哪里了，就点不出右键菜单了」—— 所以确认框不再跟着鼠标，
+   * 走与「撞名导入」同一个模态框（遮罩铺满内容区、Esc / 取消能退）。
+   */
+  const askRemove = (row: PresetTableRow) => {
+    menu.close()
+    setRemoveAsk(row)
+  }
+
+  /** 删除确认框里那颗「删除」：关框，照旧走 [`runRemove`] */
+  const confirmRemove = () => {
+    const row = removeAsk
+    if (row === null) return
+    setRemoveAsk(null)
+    runRemove(row)
+  }
+
+  /**
    * **删除归档里的一份旧版本**（旧版本抽屉里那颗按钮）。
    *
-   * 抽屉里没有菜单那套 confirm 机制，用**两段式**：第一下把按钮变成「确认删除」，
+   * 抽屉里不弹居中模态框，用**两段式**：第一下把按钮变成「确认删除」，
    * 再点一下才真删（点到别处 / 换一份 / 关抽屉都退回）。代价在确认那一下的按钮上
    * 说清 —— 云端只有最新版，删了就找不回。
    */
@@ -2020,9 +2106,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * （`PresetTable` 里 MKP 本地行走的是 `onUse`），那个 `if` 恒真，后半段一行都执行不到
      * （兜底那句注释自己都写着"正常到不了"）。
      */
+    /* 连点两下会往切片器目录写两遍 —— 第二下丢掉（见 `inflightRef`） */
+    const key = `live:${row.rowKey}`
+    if (!enter(key)) return
     setBusyKey(row.rowKey)
     data.copy(row.fileName).then(
       (outcome) => {
+        leave(key)
         setBusyKey(null)
         /*
          * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
@@ -2041,6 +2131,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         })
       },
       (e: unknown) => {
+        leave(key)
         setBusyKey(null)
         setNote({ text: `复制失败：${errorText(e)}`, bad: true })
       },
@@ -2055,13 +2146,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * **不用发网络**：字节在你盘上（要拿云端新版是云端表「更新」那件事）。
    */
   const runUse = (row: PresetLocalRow) => {
+    const key = `use:${row.rowKey}`
+    if (!enter(key)) return
     setBusyKey(row.rowKey)
     data.apply(row.fileName, row.path).then(
       () => {
+        leave(key)
         setBusyKey(null)
         setNote({ text: `已使用 ${row.fileName}`, bad: false })
       },
       (e: unknown) => {
+        leave(key)
         setBusyKey(null)
         setNote({ text: `使用失败：${errorText(e)}`, bad: true })
       },
@@ -2577,11 +2672,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           label: '删除',
           danger: true,
           disabled: removeWhyNot(row),
-          confirm: {
-            question: `删除 ${row.fileName}？`,
-            detail: removeConfirmDetail(row),
-          },
-          onSelect: () => runRemove(row),
+          /* 确认框在页面层（`removeAsk` 那个居中模态框）—— 菜单里不再自带一层 */
+          onSelect: () => askRemove(row),
         },
       ]
     }
@@ -2661,13 +2753,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         label: '删除',
         danger: true,
         /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
-           —— 代价在确认框里说清 */
+           —— 代价在确认框里说清（框在页面层：`askRemove` → `removeAsk`） */
         disabled: removeWhyNot(row),
-        confirm: {
-          question: `删除 ${row.fileName}？`,
-          detail: removeConfirmDetail(row),
-        },
-        onSelect: () => runRemove(row),
+        onSelect: () => askRemove(row),
       },
     ]
   }
@@ -3232,6 +3320,32 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             )}
           </Modal>
 
+          {/*
+           * **删除确认**（2026-10-20 从右键菜单里搬出来）：居中、遮罩铺满内容区，
+           * 与「撞名导入」同一个框。原来那一层贴在鼠标落点上、还"点外面不关"，
+           * 于是它压着右键菜单的位置 —— 作者：「点不出右键菜单了」。
+           * 代价（真删 / 可重下）原样从 `removeConfirmDetail` 来，话术没改。
+           */}
+          <Modal
+            open={removeAsk !== null}
+            size="sm"
+            host={pageEl}
+            title={removeAsk === null ? '删除这一份？' : `删除 ${removeAsk.fileName}？`}
+            footer={
+              <>
+                <button type="button" className={s.editGhost} onClick={() => setRemoveAsk(null)}>
+                  取消
+                </button>
+                <button type="button" className={s.editDanger} onClick={confirmRemove}>
+                  删除
+                </button>
+              </>
+            }
+            onClose={() => setRemoveAsk(null)}
+          >
+            {removeAsk !== null && <p className={s.editNote}>{removeConfirmDetail(removeAsk)}</p>}
+          </Modal>
+
           <Modal
             open={editing !== null}
             /* 整块工作区那一档：正文要撑满，正文区自己管滚（`bodyFill` 不套外层滚动容器） */
@@ -3603,7 +3717,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         <ContextMenu
           at={menu.at}
           entries={entriesOf(menu.target)}
-          startConfirming={devDelete.on ? 'remove' : undefined}
           onClose={() => {
             if (devDelete.on) devDelete.close()
             menu.close()

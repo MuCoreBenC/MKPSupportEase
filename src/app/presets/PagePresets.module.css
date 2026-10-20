@@ -1104,9 +1104,10 @@
   font-size: var(--fs-label);
 }
 
-/* footer 里那两颗：放弃是次要动作，保存是这一屏的正事。a02 胶囊化 */
+/* footer 里那几颗：放弃是次要动作，保存是这一屏的正事。a02 胶囊化 */
 .editGhost,
-.editPrimary {
+.editPrimary,
+.editDanger {
   height: 32px;
   padding: 0 18px;
   border-radius: 999px;
@@ -1137,16 +1138,32 @@
   filter: brightness(1.05);
 }
 
-/* 正在提交（改名那一下）时两颗都点不动：灰下去，别只靠浏览器的默认样子 */
+/*
+ * 删除确认（2026-10-20）：红 —— **不可逆的动作才用这个颜色**（与右键菜单里
+ * 「删除」那一项、归档抽屉里那颗第二下同一个色）。别的地方别拿它当"主要动作"。
+ */
+.editDanger {
+  border: 1px solid var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.editDanger:hover {
+  filter: brightness(1.05);
+}
+
+/* 正在提交（改名 / 导入那一下）时两颗都点不动：灰下去，别只靠浏览器的默认样子 */
 .editGhost:disabled,
-.editPrimary:disabled {
+.editPrimary:disabled,
+.editDanger:disabled {
   opacity: 0.55;
   cursor: default;
   filter: none;
 }
 
 .editGhost:focus-visible,
-.editPrimary:focus-visible {
+.editPrimary:focus-visible,
+.editDanger:focus-visible {
   outline: none;
 }
 

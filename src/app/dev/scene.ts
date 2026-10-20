@@ -44,11 +44,10 @@ const SLOT_OF: Record<string, DevSlot> = {
    * 层级表里 `full` 这一档照旧留着：它是"跑着时整扇窗都归它"的**产品**层类
    * （`PostProcessModal` 在跑着的时候本来就用它），不是开发台专用的。
    */
-  /* 菜单 / 弹层 */
-  'delete-confirm': 'field',
   /* 标题栏 */
   'update-prompt': 'titlebar',
   /* 居中模态框 / 抽屉 */
+  'delete-confirm': 'modal',
   'import-collision': 'modal',
   'import-result': 'modal',
   rename: 'modal',

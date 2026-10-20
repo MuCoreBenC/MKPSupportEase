@@ -18,11 +18,14 @@
  *
  * 翻边要先知道菜单自己多高，所以第一帧画在 (0,0) 且 visibility: hidden，量完再定位。
  *
- * # 二次确认长在菜单里
+ * # 二次确认**不**长在菜单里（2026-10-20 改判）
  *
- * 不另开一个对话框：确认层就在菜单的位置上，替换掉列表。理由是删除这件事发生在**某一行**上，
- * 把问句抬到屏幕正中会丢掉「问的是哪一行」这个上下文。
- * 确认层上**点外面不关** —— 不可逆的事必须显式选一个。
+ * 原来确认层替换掉列表、就摆在鼠标落点上，理由是"删除发生在某一行上"。
+ * 作者用下来否掉了：「这个点开了之后，我右键在哪里，它就跟随在哪里了，
+ * 就点不出右键菜单了」—— 那个位置恰好压着鼠标，而它又"点外面不关"。
+ * 现在不可逆的确认由**调用方用居中模态框**问（预设页的 `removeAsk`）：
+ * 位置固定、遮罩铺满内容区、Esc / 取消能退；菜单点完就关，不再挡路。
+ * 这一层只负责"列动作 + 交出去"，不替调用方留任何确认态。
  *
  * # 图标悬停放大（2026-10-16 作者：「要那种悬停缩放 103% 的那种」→ 之后「放大一点」）
  *
@@ -52,16 +55,6 @@ interface Props {
   at: ContextMenuPoint | null
   entries: ContextMenuEntry[]
   onClose: () => void
-  /**
-   * 开发台：一开就停在某一项的**二次确认层**上（作者 2026-10-14）。
-   *
-   * 删除确认那个框**不是一个独立组件** —— 它是菜单的一个内部态（`confirming`）。
-   * 要单独把它摆出来看，就得能一开菜单就进那一态。给的是那一项的 `id`
-   * （`'remove'` 之类），匹配不上就照常显示列表（不编一个确认层出来）。
-   *
-   * 正式代码不传它 ⇒ 行为一字不变。
-   */
-  startConfirming?: string
 }
 
 /** 贴边的安全边距。和 FieldPopover 用同一个数 */
@@ -92,11 +85,10 @@ function scaleIcon(row: HTMLElement | null, to: number): void {
   })
 }
 
-export default function ContextMenu({ at, entries, onClose, startConfirming }: Props) {
+export default function ContextMenu({ at, entries, onClose }: Props) {
   const layer = useFieldLayer()
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ left: number; top: number } | null>(null)
-  const [confirming, setConfirming] = useState<ContextMenuItem | null>(null)
 
   /* onClose 每帧都是新函数，登记/卸载不该跟着重跑 */
   const closeRef = useRef(onClose)
@@ -114,18 +106,7 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
   }, [layer, open])
 
   useEffect(() => {
-    /* 开发台：一开就停在某一项的确认层（见 `Props.startConfirming`）。
-       只在"那一项真有 confirm"时才进 —— 没有就照常显示列表（不编一屏确认出来） */
-    if (!open || startConfirming === undefined) return
-    const item = entries.find(
-      (e) => !isSeparator(e) && e.id === startConfirming && e.confirm !== undefined,
-    )
-    if (item !== undefined && !isSeparator(item)) setConfirming(item)
-  }, [open, startConfirming, entries])
-
-  useEffect(() => {
     if (!open) {
-      setConfirming(null)
       setBox(null)
       const back = returnTo.current
       returnTo.current = null
@@ -158,21 +139,16 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
     top = Math.max(EDGE, Math.min(top, Math.max(EDGE, l.height - EDGE - h)))
 
     setBox({ left, top })
-  }, [at, layer.el, confirming, entries])
+  }, [at, layer.el, entries])
 
-  /* 开着的时候滚动就关掉（跟着走要每帧重算，而停在错的位置是撒谎）。确认层不受滚动影响 */
+  /* 开着的时候滚动就关掉（跟着走要每帧重算，而停在错的位置是撒谎） */
   useEffect(() => {
     if (!open) return
     const onDown = (e: globalThis.MouseEvent) => {
       if (ref.current?.contains(e.target as Node) === true) return
-      /* 确认层上点外面不关 —— 不可逆的事要显式选 */
-      if (confirming !== null) return
       closeRef.current()
     }
-    const onScroll = () => {
-      if (confirming !== null) return
-      closeRef.current()
-    }
+    const onScroll = () => closeRef.current()
     window.addEventListener('mousedown', onDown)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
@@ -181,23 +157,19 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
-  }, [confirming, open])
+  }, [open])
 
   /* 开了就把焦点放到第一个能点的项上 —— 键盘用户打开菜单是为了马上用键盘选 */
   useEffect(() => {
     if (!open || box === null) return
     const first = ref.current?.querySelector<HTMLButtonElement>('button[data-on="1"]')
     first?.focus()
-  }, [box, open, confirming])
+  }, [box, open])
 
   if (!open || layer.el === null) return null
 
   const pick = (item: ContextMenuItem) => {
     if (item.disabled !== undefined) return
-    if (item.confirm !== undefined) {
-      setConfirming(item)
-      return
-    }
     onClose()
     item.onSelect()
   }
@@ -219,8 +191,18 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
     btns[next]?.focus()
   }
 
-  const body =
-    confirming === null ? (
+  return createPortal(
+    <div
+      ref={ref}
+      className={s.pop}
+      data-ready={box !== null}
+      style={box === null ? undefined : { left: box.left, top: box.top }}
+      onKeyDown={onKeyDown}
+    >
+      {/* 一个能点的都没有时说一句，别给一个空框 */}
+      {enabled.length === 0 && items.length > 0 && (
+        <p className={s.none}>这一行没有可用的操作</p>
+      )}
       <ul className={s.list} role="menu">
         {entries.map((entry, i) =>
           isSeparator(entry) ? (
@@ -256,46 +238,6 @@ export default function ContextMenu({ at, entries, onClose, startConfirming }: P
           ),
         )}
       </ul>
-    ) : (
-      <div className={s.ask} role="dialog" aria-label={confirming.confirm?.question ?? '确认'}>
-        <p className={s.askHead}>{confirming.confirm?.question}</p>
-        {confirming.confirm?.detail !== undefined && (
-          <p className={s.askBody}>{confirming.confirm.detail}</p>
-        )}
-        <div className={s.askActs}>
-          <button type="button" className={s.cancel} data-on="1" tabIndex={-1} onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className={s.ok}
-            data-on="1"
-            tabIndex={-1}
-            onClick={() => {
-              const go = confirming.onSelect
-              onClose()
-              go()
-            }}
-          >
-            {confirming.confirm?.ok ?? '删除'}
-          </button>
-        </div>
-      </div>
-    )
-
-  return createPortal(
-    <div
-      ref={ref}
-      className={s.pop}
-      data-ready={box !== null}
-      style={box === null ? undefined : { left: box.left, top: box.top }}
-      onKeyDown={onKeyDown}
-    >
-      {/* 一个能点的都没有时说一句，别给一个空框 */}
-      {confirming === null && enabled.length === 0 && items.length > 0 && (
-        <p className={s.none}>这一行没有可用的操作</p>
-      )}
-      {body}
     </div>,
     layer.el,
   )
