@@ -417,6 +417,16 @@ fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
     layer_z + ir_data.toolhead.z_offset + lift_height
 }
 
+/// 装笔动作（`L801`）的机械高度：笔尖离层顶 3.0（`层顶 < 3.0` 时 4.0）。
+///
+/// 它同时是「去切笔位之后原位抬到哪里」—— 两处共用一个值，装笔那行就不会在抬升之后
+/// 再降一次（历史遗留的 `21.1 → 19.1` 往返）。此时笔还没伸出，约束对象是喷嘴：
+/// 喷嘴离层顶 = 3.0 + `offset_z`。
+fn mount_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
+    let lift = if layer_z < 3.0 { 4.0 } else { 3.0 };
+    layer_z + ir_data.toolhead.z_offset + lift
+}
+
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
@@ -432,10 +442,7 @@ pub(crate) fn mount_toolhead(
             continue;
         }
         if ml.contains("L801") {
-            let mut l801_z = current_layer_height + ir_data.toolhead.z_offset + 3.0;
-            if current_layer_height < 3.0 {
-                l801_z = current_layer_height + ir_data.toolhead.z_offset + 4.0;
-            }
+            let l801_z = mount_travel_z(ir_data, current_layer_height);
             sink.push_str(&format!("G1 Z{};L801", format_z(l801_z)));
         } else if !ir_data.gcode.custom_gcode_e_ownership && has_e_param(ml) {
             sink.push_str(&replace_e_value(ml, ir_data.gcode.mkp_retract));
@@ -549,9 +556,9 @@ pub(crate) fn emit_glue_block(
         ));
     }
 
-    // 小螺旋只做 z-hop：抬到「层顶 + 1.0」就够 —— 此时笔还收着，约束对象是喷嘴，
-    // 与切片器自己的 `G3 Z.8 I.706 J.991 P1` 是同一个尺度（脱离层顶 0.2~1.0）。
-    // I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
+    // 1) 小螺旋只做 z-hop：抬到「层顶 + 1.0」脱离层顶。尺度与切片器自己的
+    //    `G3 Z.8 I.706 J.991 P1` 一致（只脱层 0.2~1.0）；I/J 分量照抄切片器
+    //    （`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
     let spiral_retract = if custom_mount_gcode_has_retract(ir_data) {
@@ -565,18 +572,20 @@ pub(crate) fn emit_glue_block(
         spiral_retract,
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
+
+    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
+    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
+    // 2) 脱层之后**先**原位抬到装笔高度（= L801 的机械高度），
+    //    3) **再**平飞到切笔位 —— 平飞高度就是装笔高度，装笔那行不会再降一次。
+    //    只抬 1mm 就平飞会贴着同层的其它模型走，这里必须抬到位再走。
+    sink.push_str(&format!(
+        "G1 Z{}",
+        format_z(mount_travel_z(ir_data, current_layer_height))
+    ));
     sink.push_str(&format!(
         "G1 X{} F{}",
         format_float(wipe_x),
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
-    ));
-
-    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
-    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
-    // 切笔位正上方没有模型，原位抬到装笔高度（这里原本就是一句 G1 Z）。
-    sink.push_str(&format!(
-        "G1 Z{}",
-        format_z(extended_travel_z(ir_data, current_layer_height))
     ));
 
     mount_toolhead(sink, ir_data, current_layer_height, false);

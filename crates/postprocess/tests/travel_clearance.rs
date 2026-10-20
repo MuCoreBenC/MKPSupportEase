@@ -12,9 +12,9 @@
 //! 0. `swap#1`（`to=pen`）在 `;Mounting Toolhead` 之前必须先出现 `G3` 小螺旋（z-hop 1mm）——
 //!    禁止把脱层动作写成原地 `G1 Z`（会把料拉成丝），也不允许全程斜插（起点净空为 0）；
 //!    螺旋之后才允许长距离横移；
-//! 1. `swap#1` 在 `;Mounting Toolhead` 之前的任何 >20mm 横移，当前 Z 必须 ≥ `层顶 + 1.0`
-//!    （此时笔收着，管的对象是喷嘴）；飞回涂胶点那段则必须 ≥ `层顶 + offset_z + lift`
-//!    （笔已伸出，管的对象是笔尖）；
+//! 1. `swap#1` 在 `;Mounting Toolhead` 之前的任何 >20mm 横移，当前 Z 必须 ≥ **装笔高度**
+//!    （`层顶 + offset_z + 3.0`，`< 3.0` 时 `+4.0`）—— 只脱离层顶 1mm 就平飞会贴着同层的
+//!    其它模型走；飞回涂胶点那段则必须 ≥ `层顶 + offset_z + lift`（笔已伸出，管笔尖）；
 //! 2. `;Toolhead Mounted` 之后的第一条 Z 必须满足同一不等式；
 //! 3. `paint` 块里**落笔那条 Z 之前**的 >20mm 横移（即飞回涂胶点那段）同样必须满足。
 //!
@@ -82,6 +82,12 @@ impl LiftParams {
         } else {
             self.lift
         };
+        layer_z + self.z_offset + lift
+    }
+
+    /// 装笔高度（`L801`）= 去切笔位那段的平飞高度：笔尖离层顶 3.0（`< 3.0` 时 4.0）。
+    fn mount_z(&self, layer_z: f64) -> f64 {
+        let lift = if layer_z < 3.0 { 4.0 } else { 3.0 };
         layer_z + self.z_offset + lift
     }
 }
@@ -272,7 +278,7 @@ fn swap_travel_keeps_pen_clearance() {
             // 去切笔位：笔还收着 → 约束对象是喷嘴，脱离层顶 1.0 即可；
             // 飞回涂胶点：笔已伸出 → 约束对象是笔尖，必须到 层顶 + offset_z + lift。
             let need = if go_to_swap {
-                layer_z + 1.0
+                params.mount_z(layer_z)
             } else {
                 params.clearance(layer_z)
             };
