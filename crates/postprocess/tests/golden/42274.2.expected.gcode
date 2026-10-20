@@ -1685,7 +1685,7 @@ G17
 G3 Z1.7 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z4.7
+G1 Z6.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -2246,7 +2246,7 @@ G17
 G3 Z1.9 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z4.9
+G1 Z6.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -2823,7 +2823,7 @@ G17
 G3 Z2.1 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z5.1
+G1 Z7.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -3516,7 +3516,7 @@ G17
 G3 Z2.3 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z5.3
+G1 Z7.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -4154,7 +4154,7 @@ G17
 G3 Z2.5 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z5.5
+G1 Z7.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -5031,7 +5031,7 @@ G17
 G3 Z2.7 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z5.7
+G1 Z7.7
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -5918,7 +5918,7 @@ G17
 G3 Z2.9 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z5.9
+G1 Z7.9
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -6804,7 +6804,7 @@ G17
 G3 Z3.1 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z6.1
+G1 Z8.1
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -7745,7 +7745,7 @@ G17
 G3 Z3.3 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z6.3
+G1 Z8.3
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
@@ -8535,7 +8535,7 @@ G17
 G3 Z3.5 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
-G1 Z6.5
+G1 Z8.5
 G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头

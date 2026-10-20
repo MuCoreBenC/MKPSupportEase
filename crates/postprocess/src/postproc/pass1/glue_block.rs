@@ -417,16 +417,6 @@ fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
     layer_z + ir_data.toolhead.z_offset + lift_height
 }
 
-/// 装笔动作（`L801`）的机械高度：笔尖离层顶 3.0（`层顶 < 3.0` 时 4.0）。
-///
-/// 它同时是「去切笔位之后原位抬到哪里」—— 两处共用一个值，装笔那行就不会在抬升之后
-/// 再降一次（历史遗留的 `21.1 → 19.1` 往返）。此时笔还没伸出，约束对象是喷嘴：
-/// 喷嘴离层顶 = 3.0 + `offset_z`。
-fn mount_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
-    let lift = if layer_z < 3.0 { 4.0 } else { 3.0 };
-    layer_z + ir_data.toolhead.z_offset + lift
-}
-
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
@@ -442,7 +432,9 @@ pub(crate) fn mount_toolhead(
             continue;
         }
         if ml.contains("L801") {
-            let l801_z = mount_travel_z(ir_data, current_layer_height);
+            // 与平飞/飞回同一个高度：装笔是机构动作，垂直位置不影响能否装上，
+            // 让它跟着 `glue_z_lift_height` 走，整段只有一个可调参数。
+            let l801_z = extended_travel_z(ir_data, current_layer_height);
             sink.push_str(&format!("G1 Z{};L801", format_z(l801_z)));
         } else if !ir_data.gcode.custom_gcode_e_ownership && has_e_param(ml) {
             sink.push_str(&replace_e_value(ml, ir_data.gcode.mkp_retract));
@@ -575,12 +567,13 @@ pub(crate) fn emit_glue_block(
 
     sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
     sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
-    // 2) 脱层之后**先**原位抬到装笔高度（= L801 的机械高度），
-    //    3) **再**平飞到切笔位 —— 平飞高度就是装笔高度，装笔那行不会再降一次。
+    // 2) 脱层之后**先**原位抬到净空高度（`层顶 + offset_z + lift`，也就是
+    //    `glue_z_lift_height` —— 面板上那一个值说了算），
+    //    3) **再**平飞到切笔位 —— 平飞 / 装笔 / 飞回同一个高度，全程不升降往返。
     //    只抬 1mm 就平飞会贴着同层的其它模型走，这里必须抬到位再走。
     sink.push_str(&format!(
         "G1 Z{}",
-        format_z(mount_travel_z(ir_data, current_layer_height))
+        format_z(extended_travel_z(ir_data, current_layer_height))
     ));
     sink.push_str(&format!(
         "G1 X{} F{}",
