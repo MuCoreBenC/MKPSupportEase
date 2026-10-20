@@ -175,10 +175,9 @@ id = 'post_process'
 label = '后处理'
 order = 500.0
 
-[[tabs.sections]]
-id = 'calibration'
-label = '校准'
-order = 600.0
+# 2026-10-20：`calibration` 原本在这里又声明了一次（与「更多」下那一个同 id），
+# 于是同一组参数有两个页签归属 —— 工作台「软件设置」显示成空组、客户端却把它
+# 单列成页签。作者定：只留「更多 → 校准」，设置页那张卡片不再重复摆一份。
 
 [[tabs.sections]]
 id = 'bed_glue'
@@ -319,11 +318,11 @@ order = 1.0
 
 [[params]]
 key = 'wiping.disable_front_cover_alarm'
-label = '强制关闭前盖脱落报警'
-desc = '开启后将强制关闭前盖脱落报警。仅对P1系列机型有效'
+label = "强制关闭前盖脱落报警"
+desc = "开启后将强制关闭前盖脱落报警。仅对P1系列机型有效"
 tomlKey = 'disable_front_cover_alarm'
-valueType = 'bool'
-uiComponent = 'switch'
+valueType = "bool"
+uiComponent = "switch"
 defaultValue = false
 section = 'wiping'
 configKey = 'DisableFrontCoverAlarm'
@@ -333,8 +332,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '关闭第三层裹头检测(A1/A1 mini)'
-machineFilter = 'P1S,P2S,X1C'
-deprecated = true
+machineFilter = "P1S,P2S,X1C"
 
 [params.layout]
 sectionId = 'machine_specific'
@@ -1030,11 +1028,11 @@ order = 1.0
 
 [[params]]
 key = 'wiping.have_wiping_components'
-label = '擦料方式'
-desc = '选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘'
+label = "擦料方式"
+desc = "选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘"
 tomlKey = 'have_wiping_components'
-valueType = 'string'
-uiComponent = 'segmented'
+valueType = "string"
+uiComponent = "segmented"
 defaultValue = 'tower'
 section = 'wiping'
 configKey = 'UseWipingTowers'
@@ -1047,11 +1045,12 @@ pinned = true
 
 [[params.choices]]
 value = 'tower'
-label = '擦料塔'
+label = "擦料塔"
 
 [[params.choices]]
 value = 'disk'
-label = '圆盘擦拭'
+label = "圆盘擦拭"
+deprecated = true
 
 [params.layout]
 sectionId = 'wiping_method'

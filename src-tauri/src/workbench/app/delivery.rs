@@ -636,6 +636,24 @@ pub struct DeliveryFile {
     pub state: DeliveryState,
     /// 目录里登记的大小（没登记 = `None`）
     pub registered_size: Option<u64>,
+    /// `pending` 的**原因**（`None` = 不是 pending）。
+    ///
+    /// 2026-10-20：同一屏上「已生成 / 待更新」互相打架，根因是三把尺子混在一句话里。
+    /// 拆开之后界面能说实话：配方快照旧 → 「待更新」；台账跟上了但目录登记没跟上 →
+    /// 「待重算目录」；重新渲染的字节不同 → 「待更新（模板改过）」
+    pub pending_reason: Option<DeliveryPendingReason>,
+}
+
+/// 一份交付文件为什么 `pending`
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DeliveryPendingReason {
+    /// 配方快照旧 —— 生成记录（台账指纹）对不上
+    Build,
+    /// 台账跟上了，但 `catalog.json` 里登记的 size/sha 对不上（目录没重算）
+    Registry,
+    /// 盘上的字节与**重新渲染**的结果不同（模板 / 注释改过）
+    Content,
 }
 
 /// 一条**资产字节漂移**：`catalog.json` 里登记的某一份文件，与盘上真字节对不上。
@@ -750,8 +768,10 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
      * **第一遍只算 TOML**：`catalog.json` 自己的状态依赖"有没有产物待更新"，
      * 不能在同一遍里边算边用。最多渲染 9 份 TOML，只在 focus / 进页时跑一次。
      */
-    let mut toml_state: std::collections::HashMap<String, (DeliveryState, Option<u64>)> =
-        std::collections::HashMap::new();
+    let mut toml_state: std::collections::HashMap<
+        String,
+        (DeliveryState, Option<u64>, Option<DeliveryPendingReason>),
+    > = std::collections::HashMap::new();
     let mut pending: std::collections::HashSet<String> = std::collections::HashSet::new();
     for rel in expected.iter() {
         if !rel.starts_with(&format!("{MKP_PRESETS_DIR}/")) {
@@ -762,13 +782,13 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
         let entry = catalog.as_ref().and_then(|c| registered_entry(c, rel));
         let file = rel.rsplit('/').next().unwrap_or(rel.as_str());
         let build = build_of.get(file);
-        let state = toml_state_of(book, build, bytes.as_deref(), entry);
+        let (state, why) = toml_state_of(book, build, bytes.as_deref(), entry);
         if state != DeliveryState::UpToDate {
             if let Some((uid, _)) = build {
                 pending.insert(uid.clone());
             }
         }
-        toml_state.insert(rel.clone(), (state, entry.and_then(|e| e.size)));
+        toml_state.insert(rel.clone(), (state, entry.and_then(|e| e.size), why));
     }
     // 有产物待更新 / 未生成 ⇒ 重新生成会改目录，`catalog.json` 也该重算
     let catalog_stale = !drift.is_empty() || !pending.is_empty();
@@ -787,7 +807,7 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
             let bytes = std::fs::read(&path).ok();
             let exist = bytes.is_some();
             let size = bytes.as_ref().map_or(0, |b| b.len() as u64);
-            if let Some((state, registered_size)) = toml_state.get(&rel) {
+            if let Some((state, registered_size, why)) = toml_state.get(&rel) {
                 return DeliveryFile {
                     stage: stage_of(&rel),
                     rel,
@@ -795,6 +815,7 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
                     size,
                     state: *state,
                     registered_size: *registered_size,
+                    pending_reason: *why,
                 };
             }
             // 目录不登记自产 JSON / manifest / source：只看在不在（目录自己看有没有待更新）
@@ -818,6 +839,9 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
                 size,
                 state,
                 registered_size: None,
+                /* catalog.json 自己是「有没有别的待更新」推出来的，不是三把尺子之一 */
+                pending_reason: (state == DeliveryState::Pending)
+                    .then_some(DeliveryPendingReason::Build),
             }
         })
         .collect();
@@ -841,38 +865,41 @@ fn toml_state_of(
     build: Option<&(String, BuildState)>,
     bytes: Option<&[u8]>,
     entry: Option<&crate::runtime::catalog::CatalogFile>,
-) -> DeliveryState {
+) -> (DeliveryState, Option<DeliveryPendingReason>) {
+    use DeliveryPendingReason as Why;
     let build_state = build.map(|(_, s)| *s);
     match build_state {
         // 配方还没生成过 / 没有可产出的东西：盘上有旧文件也仍是「未生成」
-        Some(BuildState::NeverBuilt) | Some(BuildState::NoResources) => DeliveryState::Missing,
+        Some(BuildState::NeverBuilt) | Some(BuildState::NoResources) => {
+            (DeliveryState::Missing, None)
+        }
         // 配方改过、还没重新生成 —— 与①卡同一句话：「待更新」
-        Some(BuildState::Stale) => DeliveryState::Pending,
+        Some(BuildState::Stale) => (DeliveryState::Pending, Some(Why::Build)),
         Some(BuildState::Built) | None => {
             let Some(b) = bytes else {
-                return DeliveryState::Missing;
+                return (DeliveryState::Missing, None);
             };
             // 目录里登记的那份与盘上对不上（或没登记）—— 生成一次才会重算登记
             let registered = entry.is_some_and(|e| {
                 e.size == Some(b.len() as u64) && e.sha256.as_deref() == Some(sha256_of(b).as_str())
             });
             if !registered {
-                return DeliveryState::Pending;
+                return (DeliveryState::Pending, Some(Why::Registry));
             }
             // 配方与登记都跟上了，再看**重新渲染**：模板/注释变化也算待更新
             let Some((uid, _)) = build else {
-                return DeliveryState::UpToDate;
+                return (DeliveryState::UpToDate, None);
             };
             match super::build::render(book, uid) {
                 Ok(r) => match std::str::from_utf8(b) {
                     Ok(text) if super::build::same_payload(text, &r.text) => {
-                        DeliveryState::UpToDate
+                        (DeliveryState::UpToDate, None)
                     }
                     // 字节不是 UTF-8 / 渲染结果不同：不冒充「已生成」
-                    _ => DeliveryState::Pending,
+                    _ => (DeliveryState::Pending, Some(Why::Content)),
                 },
                 // 渲染不出来（配方/注册表坏了）：保守判待更新，等预演给阻断原因
-                Err(_) => DeliveryState::Pending,
+                Err(_) => (DeliveryState::Pending, Some(Why::Content)),
             }
         }
     }

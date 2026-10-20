@@ -417,7 +417,7 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
                     return Err(AppError::invalid_argument(format!("字段定义里没有 {key}"))
                         .with_detail("整批改动已拒绝，草稿没有变"));
                 }
-                deprecated_write_gate(registry, key, p)?;
+                deprecated_write_gate(committed, registry, key, p)?;
                 match level {
                     Level::Machine => known_machine(owner)?,
                     Level::Version => known_uid(owner)?,
@@ -442,14 +442,29 @@ fn non_blank(s: &str, what: &str) -> Result<(), AppError> {
 /// 行上的控件、右栏各层、以后的批量，谁想写都得从这儿过。
 ///
 /// 两档：
-/// 1. 参数自己被弃用 —— 值照旧读得到，但「不要再改它」（`null` = 挂回继承不拦：
+/// 1. 参数自己在这台机型上被弃用 —— 值照旧读得到，但「不要再改它」（`null` = 挂回继承不拦：
 ///    删键不是写值，老配方里钉着的弃用值也得有一条退路）；
-/// 2. 写进来的值是一个已弃用的选项（「外围结构 = 护套」那一档 —— 选项点得动，
-///    作者要的正是「我可以选择但是不能保存」）。
+/// 2. 写进来的值是一个**在这台机型上**已弃用的选项（「外围结构 = 护套」那一档 ——
+///    选项点得动，作者要的正是「我可以选择但是不能保存」）。
+///
+/// 「在哪台机型上」由 patch 的目标层决定：机型层直接就是 owner；
+/// 版本层查清单一遍拿所属机型。版本 uid 不存在时这里放行 —— 随后 `known_uid`
+/// 会报「版本不存在」，那才是这一笔真正的问题。
 ///
 /// 界面在手势前就拦了（toast 一句人话）；这里是后端的闸，拦的是绕过界面的路。
-fn deprecated_write_gate(registry: &Registry, key: &str, patch: &Patch) -> Result<(), AppError> {
-    let Patch::SetValue { value, .. } = patch else {
+fn deprecated_write_gate(
+    committed: &Committed,
+    registry: &Registry,
+    key: &str,
+    patch: &Patch,
+) -> Result<(), AppError> {
+    let Patch::SetValue {
+        level,
+        owner,
+        value,
+        ..
+    } = patch
+    else {
         return Ok(());
     };
     // `None`（或显式 null）= 删键 = 挂回继承：删键不是写值，不拦
@@ -462,14 +477,23 @@ fn deprecated_write_gate(registry: &Registry, key: &str, patch: &Patch) -> Resul
     let Some(p) = registry.param(key) else {
         return Ok(());
     };
+    let machine = match level {
+        Level::Machine => owner.as_str(),
+        Level::Version => match committed.version(owner) {
+            Some(v) => v.machine_id.as_str(),
+            None => return Ok(()),
+        },
+    };
     let refused = |what: &str| {
         AppError::invalid_argument(format!("{what}{}", w::disabled::DEPRECATED_WRITE_BLOCKED))
-            .with_detail("整批改动已拒绝，草稿没有变")
+            .with_detail(format!(
+                "整批改动已拒绝，草稿没有变 —— 「{machine}」上这一项已弃用"
+            ))
     };
-    if p.deprecated {
+    if p.deprecated_for(machine) {
         return Err(refused(&p.label));
     }
-    if let Some(choice) = registry.deprecated_choice_hit(key, value) {
+    if let Some(choice) = registry.deprecated_choice_hit(key, value, machine) {
         return Err(refused(&format!("{0} 的「{choice}」", p.label)));
     }
     Ok(())
@@ -1339,6 +1363,93 @@ mod tests {
             ],
         )
         .expect_err("第一批里有弃用写值，整批照旧要拒");
+    }
+
+    /// 弃用**按机型**：只点名的机型被拦，没点名的照写；
+    /// 版本层先把 uid 换成机型再判（别把「A1 上退场」当成「所有机型都退场」）
+    #[test]
+    fn deprecated_machines_block_only_the_named_machines() {
+        let d = tempfile::tempdir().unwrap();
+        let params = serde_json::json!({
+            "params": [{
+                "key": "wiping.mode", "configKey": "Mode", "tomlKey": "mode",
+                "jsonKey": "mode", "label": "擦拭部件", "desc": "", "tomlComment": "",
+                "valueType": "string", "uiComponent": "segmented", "defaultValue": "tower",
+                "scope": "universal", "section": "toolhead",
+                "layout": { "order": 1, "sectionId": "s1" },
+                "deprecatedMachines": "A1",
+                "choices": [
+                    { "label": "擦料塔", "value": "tower" },
+                    { "label": "圆盘擦拭", "value": "disk", "deprecatedMachines": "A1" }
+                ]
+            }],
+            "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
+                       "sections": [{ "id": "s1", "label": "空间偏移", "order": 0 }] }],
+            "updated": "2026-01-01 00:00:00"
+        });
+        let layout = serde_json::json!({
+            "tabs": [{ "id": "t1", "sections": [{ "id": "s1", "items": [
+                { "id": "i0", "paramKey": "wiping.mode" }
+            ] }] }]
+        });
+        let reg =
+            crate::workbench::presets::registry::load_from_json_fixture(d.path(), &params, &layout)
+                .unwrap();
+        let c = committed();
+
+        // A1 机型层：这条在 A1 上点名弃用 → 拒，且这句话里要念得出机型
+        let mut draft = Draft::default();
+        let err = apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "A1",
+                "wiping.mode",
+                Some(serde_json::json!("tower")),
+            )],
+        )
+        .unwrap_err();
+        assert!(err.message.contains("已弃用"), "{}", err.message);
+        assert!(
+            err.detail.as_deref().is_some_and(|d| d.contains("A1")),
+            "错句里没说是哪台机型：{:?}",
+            err.detail
+        );
+        assert_eq!(draft.dirty_count(), 0, "整批拒绝就不许留下前半截");
+
+        // P1S 机型层：没点名 → 照写；连「圆盘擦拭」这一档也能写
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Machine,
+                "P1S",
+                "wiping.mode",
+                Some(serde_json::json!("disk")),
+            )],
+        )
+        .expect("P1S 上这一项还能写");
+
+        // 版本层：A1/STANDARD 的 uid 要先换成机型 A1，判据才落得上
+        let mut draft = Draft::default();
+        let err = apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "wiping.mode",
+                Some(serde_json::json!("disk")),
+            )],
+        )
+        .unwrap_err();
+        assert!(err.message.contains("已弃用"), "{}", err.message);
+        assert_eq!(draft.dirty_count(), 0);
     }
 
     /// **apply 反向能回到原状**：机型层与版本层的值、脏计数都回。

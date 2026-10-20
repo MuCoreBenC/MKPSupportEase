@@ -267,8 +267,10 @@ pub fn get_calib_models(app: AppHandle) -> Result<Vec<CalibModel>, AppError> {
 
 /// 打开一份模型文件：**交给哪个切片软件由 `slicer` 说了算**（2026-10-13 起）。
 ///
-/// - 不传 / `"system"`：**系统默认程序**（`.3mf` 关联的那个）—— 与这一条命令原来的
-///   行为一字不差，旧调用一个都不用改；
+/// - 不传 / `"system"`：**系统默认程序**（`.3mf` 关联的那个）。2026-10-20 起这一档
+///   **先自己起**（按注册表解析出那个 exe，用脱离控制台的参数起它 —— 终端一关不会把
+///   别人的窗口带走），只有 Shell 唤得起来的那类关联（AppX / DDE）才退回 opener
+///   （见 [`slicer::launch_system`]）。
 /// - `"bambu"` / `"orca"`：**指定的那个应用**（见 [`slicer::launch`]）。用户明确点了
 ///   哪一档才走这里，所以"没装那个应用"照实报 `NOT_FOUND`，**不静默回落**成系统关联；
 /// - `"custom"`（2026-10-13 第二刀）：**用户从磁盘指定的那个** —— 路径随 `slicer_app`
@@ -299,10 +301,20 @@ pub fn open_model(
         };
         let kind = slicer::SlicerKind::parse(slicer.as_deref())?;
         if kind == slicer::SlicerKind::System {
-            use tauri_plugin_opener::OpenerExt as _;
-            app.opener()
-                .open_path(path.to_string_lossy().into_owned(), None::<&str>)
-                .map_err(|e| AppError::io("系统打不开这个模型文件").with_detail(e.to_string()))?;
+            /* ★ 2026-10-20：这一档原来**只**走 opener（Windows 上就是 ShellExecute），
+            起出来的进程挂在我们的控制台上 —— 终端一关就把别人的窗口带走了。
+            现在先问注册表：关联写的是"exe + 参数模板"就自己起（脱离控制台），
+            只有 Shell 唤得起来的（AppX / DDE）才落到下面那条老路（见 `launch_system`）。 */
+            if let Some(launched) = slicer::launch_system(&path) {
+                launched?;
+            } else {
+                use tauri_plugin_opener::OpenerExt as _;
+                app.opener()
+                    .open_path(path.to_string_lossy().into_owned(), None::<&str>)
+                    .map_err(|e| {
+                        AppError::io("系统打不开这个模型文件").with_detail(e.to_string())
+                    })?;
+            }
         } else if kind == slicer::SlicerKind::Custom {
             /* 「从磁盘指定的那个」：路径由前端给，盘上没有就照实说（不静默回落） */
             let raw = slicer_app.as_deref().map(str::trim).unwrap_or_default();

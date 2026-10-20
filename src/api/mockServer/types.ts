@@ -163,8 +163,10 @@ export interface RawParamLayout {
 export interface RawChoice {
   value: string
   label: string
-  /** 选项级弃用（实测 1 条：`wiping.outer_structure` 的 `sheath` = 护套） */
+  /** 选项级**全局**弃用（`wiping.outer_structure` 的 `sheath` = 护套） */
   deprecated?: boolean
+  /** **只在这些机型上**弃用（逗号串，与 `deprecated` 叠加）；缺省 = 不按机型弃用 */
+  deprecatedMachines?: string
 }
 
 /**
@@ -217,8 +219,10 @@ export interface RawParam {
   tomlComment?: string
   mergeGroup?: string
   pinned?: boolean
-  /** 实测 7 个字段已废弃，界面默认不显示 */
+  /** **全局**弃用：所有机型都不显示、不进产物 */
   deprecated?: boolean
+  /** **只在这些机型上**弃用（逗号串）；缺省 = 不按机型弃用 */
+  deprecatedMachines?: string
   hidden?: boolean
 }
 

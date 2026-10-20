@@ -613,6 +613,9 @@ pub struct ParamMetaDto {
     pub pinned: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub deprecated: bool,
+    /// **只在这些机型上**弃用（与 `deprecated` 叠加，空/缺省 = 不按机型弃用）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_machines: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub machine_filter: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -641,6 +644,8 @@ fn param_meta_dto(catalog: &runtime::Catalog) -> Vec<ParamMetaDto> {
             merge_group: p.merge_group.as_deref().and_then(non_empty),
             pinned: p.pinned,
             deprecated: p.deprecated,
+            deprecated_machines: (!p.deprecated_machines.is_empty())
+                .then(|| p.deprecated_machines.clone()),
             machine_filter: (!p.machine_filter.is_empty()).then(|| p.machine_filter.clone()),
             show_when: p.show_when.as_ref().map(|s| ShowWhenDto {
                 key: s.key.clone(),
@@ -673,6 +678,9 @@ pub struct ChoiceDto {
     /// 所以两者不能合成一个布尔。
     #[serde(skip_serializing_if = "is_false")]
     pub deprecated: bool,
+    /// **只在这些机型上**弃用（空/缺省 = 不按机型弃用，与 `deprecated` 叠加）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_machines: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -794,6 +802,8 @@ fn machine_params_dto(
                         value: to_text(&c.value),
                         label: c.label.clone(),
                         deprecated: c.deprecated,
+                        deprecated_machines: (!c.deprecated_machines.is_empty())
+                            .then(|| c.deprecated_machines.clone()),
                     })
                     .collect()
             }),
@@ -1247,11 +1257,12 @@ mod tests {
 
     /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。
     ///
-    /// 真上游 `param_registry.toml` 里 8 处：7 字段级 + 1 选项级（`wiping.outer_structure`
-    /// 的 `sheath` = 护套）。作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为
-    /// 三件分开的事，于是这里的期望形状是：
+    /// 真上游 `param_registry.toml` 里 8 处：6 字段级 + 2 选项级（`wiping.have_wiping_components`
+    /// 的 `disk` = 圆盘擦拭，`wiping.outer_structure` 的 `sheath` = 护套）。
+    /// 作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为三件分开的事，
+    /// 于是这里的期望形状是：
     ///
-    /// - **definition 通道**（`ParamMetaDto`）：带 7 条字段级弃用 —— 参数页靠它列字段、
+    /// - **definition 通道**（`ParamMetaDto`）：带 6 条字段级弃用 —— 参数页靠它列字段、
     ///   画红线徽章（「显示」）；
     /// - **配方通道**（`RecipeParamDto`）：**一条字段级弃用都不下发** —— `visible_keys_of`
     ///   的排除语义不许被偷改（不进入新产物）；配方里出现的每一条只能是被排除后剩下的活字段，
@@ -1262,7 +1273,7 @@ mod tests {
     fn deprecated_flags_travel_through_definition_channel_only() {
         let catalog = catalog();
 
-        // —— 字段级：definition 通道带 7 条（真注册表口径）——
+        // —— 字段级：definition 通道带 6 条（真注册表口径）——
         let meta = param_meta_dto(&catalog);
         let meta_deprecated: Vec<&str> = meta
             .iter()
@@ -1271,8 +1282,8 @@ mod tests {
             .collect();
         assert_eq!(
             meta_deprecated.len(),
-            7,
-            "真注册表 7 条字段级弃用：{meta_deprecated:?}"
+            6,
+            "真注册表 6 条字段级弃用：{meta_deprecated:?}"
         );
 
         // —— 配方通道：一条字段级弃用都不许有（排除语义没被偷改）——
@@ -1293,7 +1304,7 @@ mod tests {
                 assert!(!p.deprecated, "{} 配方侧也不许带弃用标记", p.key);
             }
         }
-        // 反向钉子：定义侧那 7 条，一条都不许出现在配方里
+        // 反向钉子：定义侧那 6 条，一条都不许出现在配方里
         for key in &meta_deprecated {
             assert!(
                 !params.iter().any(|p| p.key == *key),

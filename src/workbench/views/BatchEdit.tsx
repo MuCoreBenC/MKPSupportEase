@@ -147,8 +147,18 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
       return
     }
     const value = coerce(param, raw)
-    /* 手势前的那道弃用闸：写弃用的选项档，后端也会拒——这里先说人话 */
-    const dead = param.choices.find((c) => c.deprecated && String(c.value) === raw)
+    /*
+     * 手势前的那道弃用闸（后端也会拒，这里先说人话）。
+     * 判据**按目标机型**：一条定义可以只在 A1 上退场 —— 选中的机器里只要有一台
+     * 不能写，这一批就不能整批发（后端是整批拒绝，不是跳过那一台）。
+     */
+    const dead = param.choices.find((c) => {
+      if (String(c.value) !== raw) return false
+      if (c.deprecated) return true
+      return targets.some(
+        (t) => t.machineId !== '' && c.deprecatedMachines.includes(t.machineId),
+      )
+    })
     if (dead) {
       toasts.push(`${param.label} 的「${dead.label}」${words.disabled.deprecatedWriteBlocked}`)
       return

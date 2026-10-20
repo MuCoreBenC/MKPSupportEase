@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "2c647c2d234599da",
+  "revision": "fc2ab9c4568e91f3",
   "publishedAt": "2026-10-19T14:12:29Z",
   "brands": [
     {
@@ -1127,7 +1127,7 @@
           "P2S",
           "X1C"
         ],
-        "deprecated": true,
+        "deprecated": false,
         "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -2111,7 +2111,7 @@
           {
             "label": "圆盘擦拭",
             "value": "disk",
-            "deprecated": false
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -4206,12 +4206,6 @@
             "order": 500.0
           },
           {
-            "id": "calibration",
-            "label": "校准",
-            "description": null,
-            "order": 600.0
-          },
-          {
             "id": "bed_glue",
             "label": "热床预涂胶",
             "description": null,
@@ -4798,15 +4792,6 @@
             "visible": null
           },
           {
-            "id": "calibration",
-            "items": [],
-            "component": "calibration-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
             "id": "bed_glue",
             "items": [],
             "component": "bed-glue-card",
@@ -4946,8 +4931,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "9b63ebfce1c2489a2d8fc443721022ed931d33b73213c4a59e3113ea49efc70e",
-      "size": 4339
+      "sha256": "b9c68d68f286b4e09b477107756013a06ab538df9fbf7545aac2ef878bda7c04",
+      "size": 4415
     },
     {
       "kind": "mkp_preset",
@@ -4955,8 +4940,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "f9136b8d22163d1a009e7a7361389ea0743e741cc5c35c97bd2d8ea291300fee",
-      "size": 4343
+      "sha256": "942f5ac404efb6cbacd138263f15588831bc797fa69380c628b570b23f7423a7",
+      "size": 4419
     },
     {
       "kind": "mkp_preset",
@@ -4964,8 +4949,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "d5dc56e7a3084622d76f041c663deb16da35c7288001dbb0357bf2acccd1c9d5",
-      "size": 4339
+      "sha256": "ef8c3a133c89020be4a32559ce01b3dc3cfa37b414095c3a38c41f7c3c1e95f7",
+      "size": 4415
     },
     {
       "kind": "icon",
@@ -5000,8 +4985,8 @@
       "path": "assets/models/MKP_support_test_models.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "8486199771d639a0e761707a216b204073a9f267d8c37b29dce6bf115ff029aa",
-      "size": 3317913
+      "sha256": "2fd5eec666ebd4b9194ac03b7d8fdc6056ec326249645eb3b5e7c6fc82627522",
+      "size": 2975059
     },
     {
       "kind": "model",
@@ -5036,8 +5021,8 @@
       "path": "assets/models/ZOffset_Calibration_ext.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "0ec617c2c1bd4fa731d087233ba1c7ab7f09c36566efe0c063d44fd4e992343f",
-      "size": 159202
+      "sha256": "1320c3725b879f64217053bc4d3079e6bfb76395b1acc83f0ee1bc416ad79b2a",
+      "size": 160242
     },
     {
       "kind": "bbs_config",

@@ -203,7 +203,15 @@ export interface TabMeta {
 export interface ChoiceView {
   label: string
   value: unknown
+  /**
+   * **显式全局弃用**（所有机型都不许写）—— 定义框那颗勾的状态。
+   * 回写只认这一格与 `deprecatedMachines`，推定值不进载荷
+   */
   deprecated: boolean
+  /** **只在这些机型上**弃用（与 `deprecated` 叠加，空 = 不按机型弃用） */
+  deprecatedMachines: string[]
+  /** 推出来的弃用（选这一档放开的子参数全弃用）。**只显示、不回写** */
+  derived: boolean
 }
 
 /** `registry::ShowOp` —— 实测只有三种 */
@@ -239,7 +247,18 @@ export interface ParamView {
   parentKey: string | null
   /** 空 = 不限机型 */
   machineFilter: string[]
+  /** **全局弃用**（所有机型、所有版本都不许写） */
   deprecated: boolean
+  /** **只在这些机型上**弃用（与 `deprecated` 叠加） */
+  deprecatedMachines: string[]
+}
+
+/** `app::SectionTarget` —— 「所属分组」下拉的一行 */
+export interface SectionTarget {
+  id: string
+  label: string
+  tabId: string
+  tabLabel: string
 }
 
 /** `app::RegistryView` */
@@ -247,6 +266,11 @@ export interface RegistryView {
   updated: string
   tabs: TabMeta[]
   params: ParamView[]
+  /**
+   * 能装参数的分组（含暂时空掉的），按页签顺序。
+   * 「所属分组」下拉用它，**不拿 params 反推** —— 空组搬空之后还得能搬回去
+   */
+  sections: SectionTarget[]
 }
 
 /**
@@ -267,10 +291,17 @@ export interface ParamMetaEdit {
   parentKey: string | null
   showWhen: ShowWhen | null
   deprecated: boolean
+  /** 只在这些机型上弃用（与 `deprecated` 叠加） */
+  deprecatedMachines: string[]
   /** 可选项整表 —— 字符串枚举在这里编辑；其他类型原样带回（预设档不丢） */
   choices: ChoiceView[]
   /** 适用机型。空 = 不限机型 */
   machineFilter: string[]
+  /**
+   * 搬到哪个分组（`layout_schema` 的 section id）。`null` = 不动 ——
+   * 后端把它读成「保持原位」，不是「搬回默认组」
+   */
+  sectionId: string | null
 }
 
 /**
@@ -343,6 +374,10 @@ export interface Cell {
    * 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
    */
   rest: unknown
+  /** 这条参数**在这一列这台机型上**已弃用。`Row.deprecated` 是全机型口径 */
+  deprecated: boolean
+  /** 这台机型上不能写的选项值（后端算好的，含推定）。控件划线、手势前拦人都读它 */
+  deadChoices: string[]
 }
 
 /** `derive::Row` */
@@ -1798,6 +1833,14 @@ export type DeliveryStage = 'generate' | 'publish' | 'software'
  */
 export type DeliveryState = 'missing' | 'upToDate' | 'pending'
 
+/**
+ * `delivery::DeliveryPendingReason` —— pending 的**原因**。
+ *
+ * 三把尺子分开说：`build` 配方快照旧（①卡那句「待更新」）、`registry` 目录登记
+ * 没跟上（生成一次才重算目录）、`content` 重新渲染的字节不同（模板 / 注释改过）。
+ */
+export type DeliveryPendingReason = 'build' | 'registry' | 'content'
+
 /** `delivery::DeliveryFile` —— 交付集合里的一份（「交付预设」卡展出用） */
 export interface DeliveryFile {
   /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
@@ -1812,6 +1855,8 @@ export interface DeliveryFile {
   state: DeliveryState
   /** 目录里登记的大小（没登记 = null） */
   registeredSize: number | null
+  /** pending 的原因（null = 不是 pending） */
+  pendingReason: DeliveryPendingReason | null
 }
 
 /**

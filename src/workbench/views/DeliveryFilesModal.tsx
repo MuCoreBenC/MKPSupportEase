@@ -66,7 +66,13 @@ function baseName(rel: string): string {
   return rel.split('/').pop() ?? rel
 }
 
-/** 一行交付文件的状态文案：按“谁写的”换词，别让发布定稿的那几份说「已生成」 */
+/**
+ * 一行交付文件的状态文案：按“谁写的”换词，别让发布定稿的那几份说「已生成」。
+ *
+ * **`pending` 要分三种原因说**（2026-10-20）：配方快照旧 / 目录登记没跟上 /
+ * 重新渲染的字节不同。混成一句「待更新」时，同一屏上会出现「左边待更新、
+ * 右边说一模一样不会重写」—— 那不是矛盾，是两把尺子。
+ */
 function stateText(f: DeliveryFile): string {
   if (f.state === 'missing') {
     return f.stage === 'publish' || f.stage === 'software' ? '还没发布' : '还没生成'
@@ -74,6 +80,7 @@ function stateText(f: DeliveryFile): string {
   if (f.state === 'pending') {
     if (f.rel === 'catalog.json') return '待重新生成'
     if (f.stage === 'publish') return '待重新发布'
+    if (f.pendingReason === 'registry') return '待重算目录'
     return '待更新'
   }
   return f.stage === 'publish' || f.stage === 'software' ? '已发布' : '已生成'
@@ -413,7 +420,11 @@ export default function DeliveryFilesModal({
                       : '这一份这次不在生成队列里（已经生成过，本次不重写）。'}
                   </p>
                 ) : view === 'diff' && curPreview.state === 'unchanged' ? (
-                  <p className={s.empty}>这一份和磁盘上的一模一样，不会重写。</p>
+                  <p className={s.empty}>
+                    {curFile.pendingReason === 'registry'
+                      ? '文件内容与重新渲染的一模一样，不会重写；只是目录登记（catalog.json）还停在旧哈希 —— 生成一次才会重算。'
+                      : '这一份和磁盘上的一模一样，不会重写。'}
+                  </p>
                 ) : (
                   <DiffLines
                     lines={curPreview.lines}

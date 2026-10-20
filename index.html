@@ -45,6 +45,22 @@
         background: linear-gradient(135deg, #f7f9fa 0%, #eceff1 100%);
       }
 
+      /*
+       * ★★★ 引导窗口（`?guide=1`）**整扇窗必须透明** —— 上面那条把 `html` 也铺满了，
+       * 而 `html` 的底色是画在**整块画布**上的：只把 `body` 那条收掉（`global.css` 里
+       * 原来只写了 `html[data-guide] body`）照样看得见一片灰。
+       *
+       * 症状（2026-10-20 作者截图）：卡片旁边那圈"灰底"其实就是这层渐变
+       * （#f7f9fa → #eceff1），箭头是白的，压在上面等于没有。
+       *
+       * 判据在 head 里那段脚本已经挂好了（先于这行样式），所以这里直接按它收口；
+       * 选择器比下面的 `@media (prefers-color-scheme: dark)` 那条更具体，深色也一起管住。
+       */
+      html[data-guide],
+      html[data-guide] body {
+        background: none;
+      }
+
       body {
         font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
           'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;

@@ -513,20 +513,21 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
                 });
             }
 
-            // 当前值正好是废弃选项：**提示**。它还能用，只是不该继续用
+            // 当前值正好是**这台机型上**已弃用的选项：提示。它还能用，只是不该继续用。
+            // 判据按机型 —— 别把「A1 上退场」说成「所有机型都退场」
             if let Some(c) = p
                 .choices
                 .iter()
-                .find(|c| c.deprecated && &c.value == hit.value)
+                .find(|c| c.deprecated_for(&v.machine_id) && &c.value == hit.value)
             {
                 out.push(Issue {
                     id: format!("deprecated.{}.{}", v.uid, key),
                     severity: Severity::Hint,
                     title: format!("{} 用的是已废弃的选项", p.label),
                     detail: format!(
-                        "当前选的是「{}」，上游把它标成了废弃。现在还能用，\
+                        "当前选的是「{}」，上游把它标成了废弃（{}）。现在还能用，\
                          但上游下一次清理可能就把它删了 —— 那时这一版会变成阻断。",
-                        c.label
+                        c.label, v.machine_id
                     ),
                     at: Where::field(&v.uid, &v.machine_id, key),
                 });

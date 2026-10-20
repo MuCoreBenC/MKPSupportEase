@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "9b676a2385bf80d8",
+  "revision": "a63f50f76c87b1f4",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1126,7 +1126,7 @@
           "P2S",
           "X1C"
         ],
-        "deprecated": true,
+        "deprecated": false,
         "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -2110,7 +2110,7 @@
           {
             "label": "圆盘擦拭",
             "value": "disk",
-            "deprecated": false
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -4205,12 +4205,6 @@
             "order": 500.0
           },
           {
-            "id": "calibration",
-            "label": "校准",
-            "description": null,
-            "order": 600.0
-          },
-          {
             "id": "bed_glue",
             "label": "热床预涂胶",
             "description": null,
@@ -4791,15 +4785,6 @@
             "id": "post_process",
             "items": [],
             "component": "post-process-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "calibration",
-            "items": [],
-            "component": "calibration-card",
             "showWhen": null,
             "layout": "component",
             "width": "half",

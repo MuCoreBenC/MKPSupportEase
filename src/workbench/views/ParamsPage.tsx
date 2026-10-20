@@ -66,6 +66,7 @@ import {
   type MetaApplied,
   type ParamMetaEdit,
   type Patch,
+  type Cell,
   type Refresh,
   type RegistryView,
   type Row,
@@ -417,21 +418,38 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     next: string | null,
     refreshKind: 'desk' | 'matrix' = 'desk',
     beforeRaw?: string,
+    cell?: Cell | null,
   ) => {
     const before = beforeRaw ?? String(row.cells[0]?.raw ?? '')
     /*
-     * 已弃用的不许写（C14 §五）。判据读的是后端字段：参数级 `param.deprecated`、
-     * 选项级 `ChoiceView.deprecated`（推出来的并集）。闸本身在后端 patch 校验 ——
-     * 这里拦在前面的意义只是「一句人话的 toast」，不是第二道判定。
+     * 已弃用的不许写（C14 §五）。判据**按机型**：优先读这一格的后端派生态
+     * （`cell.deprecated` / `cell.deadChoices`，后者含推定），没有格子时退到
+     * 定义上的显式清单（全局 + 点名这台机型）。
+     *
+     * 闸本身在后端 patch 校验 —— 这里拦在前面的意义只是「一句人话的 toast」，
+     * 不是第二道判定。
      */
     if (next !== null) {
-      if (param.deprecated) {
+      const deadHere =
+        cell !== undefined && cell !== null
+          ? cell.deprecated
+          : param.deprecated || param.deprecatedMachines.includes(ownerMachineId)
+      if (deadHere) {
         toasts.push(`${param.label} ${words.disabled.deprecatedWriteBlocked}`)
         return
       }
-      const dead = param.choices.find((c) => c.deprecated && String(c.value) === next)
-      if (dead) {
-        toasts.push(`${param.label} 的「${dead.label}」${words.disabled.deprecatedWriteBlocked}`)
+      const deadValue =
+        cell !== undefined && cell !== null
+          ? cell.deadChoices.includes(next)
+          : param.choices.some(
+              (c) =>
+                String(c.value) === next &&
+                (c.deprecated || c.deprecatedMachines.includes(ownerMachineId)),
+            )
+      if (deadValue) {
+        const hit = param.choices.find((c) => String(c.value) === next)
+        const name = hit !== undefined ? `「${hit.label}」` : ''
+        toasts.push(`${param.label} 的${name}${words.disabled.deprecatedWriteBlocked}`)
         return
       }
     }
@@ -1181,6 +1199,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                       setBatchTab(true)
                     }}
                     onWriteCell={(col, row, param, next) => {
+                      const cell = cellAtCol(shownMatrix, col, row.key)
                       writeValue(
                         row,
                         param,
@@ -1188,7 +1207,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                         col.level === 'version' ? (col.versionUid ?? null) : null,
                         next,
                         'matrix',
-                        String(cellAtCol(shownMatrix, col, row.key)?.raw ?? ''),
+                        String(cell?.raw ?? ''),
+                        cell,
                       )
                     }}
                   />
@@ -1293,6 +1313,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                           baseMachineId)
                     const row = mode === 'single' ? rowOf(shownDesk, sel) : rowOf(shownDrawerDesk, sel)
                     const idx = cellIndexOf(mode === 'single' ? shownDesk : shownDrawerDesk, layerUid)
+                    const cell = row?.cells[idx] ?? null
                     writeValue(
                       row ?? selRow,
                       selParam,
@@ -1300,7 +1321,8 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                       layerUid,
                       next,
                       'desk',
-                      String(row?.cells[idx]?.raw ?? ''),
+                      String(cell?.raw ?? ''),
+                      cell,
                     )
                   }}
                 />
@@ -1386,6 +1408,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                 next,
                 mode === 'compare' ? 'matrix' : 'desk',
                 String(gcodeCell.raw ?? ''),
+                gcodeCell,
               )
             }
           }}
@@ -1406,6 +1429,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           param={defParam}
           params={registry?.params ?? []}
           machineList={machineList}
+          sections={registry?.sections ?? []}
           onClose={() => setDefEditKey(null)}
           onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
         />
@@ -1575,7 +1599,8 @@ function ParamLine({
 }) {
   const cell = row.cells[cur]
   if (!cell || !param) return null
-  const dep = row.deprecated
+  /* 弃用按**这一列的机型**判（`Row.deprecated` 是全机型口径，答不了这一格） */
+  const dep = cell.deprecated
   const off = !cell.editable && !dep
 
   return (
@@ -1685,8 +1710,11 @@ function metaOf(p: ParamView): ParamMetaEdit {
     parentKey: p.parentKey,
     showWhen: p.showWhen,
     deprecated: p.deprecated,
+    deprecatedMachines: [...p.deprecatedMachines],
     choices: p.choices,
     machineFilter: [...p.machineFilter],
+    /* 改前它就在这一组 —— 撤销一次「搬组」就是把它搬回去（同组 = 后端不动） */
+    sectionId: p.sectionId,
   }
 }
 

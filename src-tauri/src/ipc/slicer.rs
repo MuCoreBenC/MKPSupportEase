@@ -19,6 +19,12 @@
 //! `%LOCALAPPDATA%\Programs` 两种安装位（OrcaSlicer 的安装器两种都提供）。
 //! 逐个 `exists()`，第一个命中的说了算；一个都没命中就是"没装"，不挑一个最近的猜。
 //!
+//! ★ **Windows 上"通常装在哪"不够用**（2026-10-20 作者报的那一处：Bambu Studio 装在
+//! `D:\01_MySoftware\…`，三个固定安装位一个都不命中，界面照实说"没找到"，用户以为
+//! 这条功能没做 Windows）。安装器把它装哪儿会**登记在系统里**，所以固定安装位之后
+//! 还要问系统自己（`App Paths` / `HKCR\Applications` / 卸载登记，见
+//! [`windows_registered_paths`]）—— 它说的话比我们猜的准。
+//!
 //! 认不出的 id **整次拒绝**（`INVALID_ARGUMENT`），理由同上：宁可报错也不悄悄换一档。
 
 use std::path::{Path, PathBuf};
@@ -111,7 +117,217 @@ fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
     if let Some(local) = std::env::var_os("LOCALAPPDATA") {
         out.push(PathBuf::from(local).join("Programs").join(dir).join(exe));
     }
+    /*
+     * 装在别处（2026-10-20）：上面那几个只是"通常在哪"，装哪儿由**安装器**说了算 ——
+     * 作者那台机器上 Bambu Studio 装在 `D:\01_MySoftware\Bambu Studio2\Bambu Studio\`，
+     * 三个固定安装位一个都不命中，界面就照实说"没找到"（截图里那条）。
+     * 装在哪安装器自己登记过，去问它（见 [`windows_registered_paths`]）。
+     */
+    out.extend(windows_registered_paths(kind.label(), exe));
     out
+}
+
+/// 系统**自己登记**的那个可执行物在哪儿（2026-10-20）：三个来源，从最准到最绕。
+///
+/// 1. `App Paths\<exe>` 的默认值（`HKLM` / `HKCU` / `WOW6432Node` 三处）—— 应用自己登记的
+///    "我这个 exe 在这儿"；
+/// 2. `HKCR\Applications\<exe>\shell\open\command` —— 出现在过「打开方式」里的应用
+///    （这台机器上 OrcaSlicer 只有这一处登记可认）；
+/// 3. **卸载登记**（`…\CurrentVersion\Uninstall\*`）里 `DisplayName` 认得上的那一条 ——
+///    这台机器上 Bambu Studio 只有这一处（`DisplayIcon` 正是那个 exe 的绝对路径）。
+///
+/// # 每一条都要按**文件名**核对
+///
+/// 这些值不由我们定，写坏了也得认得出：同一台机器上 OrcaSlicer 的 `DisplayIcon` 是
+/// `C:\Program Files\OrcaSlicer\C:\Program Files\OrcaSlicer\orca-slicer.exe`（目录重复了
+/// 一遍，盘上没这个文件），而它的 `UninstallString` 目录是对的。所以这里只**产候选**、
+/// 末段必须是那个 exe 名；"到底在不在"由 [`locate`] 的 `exists()` 统一问，不猜。
+#[cfg(target_os = "windows")]
+fn windows_registered_paths(display_name: &str, exe: &str) -> Vec<PathBuf> {
+    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+
+    /// `App Paths` 与卸载登记都在这两种视图下（64 位与 32 位安装器各写各的）
+    const VIEWS: [&str; 2] = [
+        r"SOFTWARE\Microsoft\Windows\CurrentVersion",
+        r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion",
+    ];
+
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    /* 1. App Paths */
+    for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let root = RegKey::predef(hive);
+        for view in VIEWS {
+            let Ok(key) = root.open_subkey(format!(r"{view}\App Paths\{exe}")) else {
+                continue;
+            };
+            let Ok(value) = key.get_value::<String, _>("") else {
+                continue;
+            };
+            if let Some(found) = exe_in(&value, exe) {
+                push_candidate(&mut out, found);
+            }
+        }
+    }
+
+    /* 2. 「打开方式」登记（`orca-slicer.exe` 这类） */
+    if let Ok(key) = RegKey::predef(HKEY_CLASSES_ROOT)
+        .open_subkey(format!(r"Applications\{exe}\shell\open\command"))
+    {
+        if let Ok(command) = key.get_value::<String, _>("") {
+            if let Some(found) = exe_from_command_line(&command).and_then(|p| exe_in(&p, exe)) {
+                push_candidate(&mut out, found);
+            }
+        }
+    }
+
+    /* 3. 卸载登记：按 `DisplayName` 认那一条，再从它的三行值里取目录 */
+    for hive in [HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let root = RegKey::predef(hive);
+        for view in VIEWS {
+            let Ok(parent) = root.open_subkey(format!(r"{view}\Uninstall")) else {
+                continue;
+            };
+            for entry_name in parent.enum_keys().filter_map(Result::ok) {
+                let Ok(entry) = parent.open_subkey(&entry_name) else {
+                    continue;
+                };
+                let shown: String = entry.get_value("DisplayName").unwrap_or_default();
+                if !shown.to_lowercase().contains(&display_name.to_lowercase()) {
+                    continue;
+                }
+                let read = |name: &str| -> String { entry.get_value(name).unwrap_or_default() };
+                for candidate in uninstall_exe_candidates(
+                    &read("InstallLocation"),
+                    &read("UninstallString"),
+                    &read("DisplayIcon"),
+                    exe,
+                ) {
+                    push_candidate(&mut out, candidate.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// 从卸载登记那三行值里推出**可执行物的候选**（顺序即优先级）。
+///
+/// - `DisplayIcon`：可能正是那个 exe（这台机器上的 Bambu Studio 就是），也可能是它所在目录
+///   里的图标资源 —— 末尾那个 `,0` 是图标序号，不是路径的一部分；
+/// - `InstallLocation`：安装器自己说的"我这套文件装在这个目录"；
+/// - `UninstallString`：卸载器就在安装目录里（`…\Uninstall.exe`）—— 拿它所在目录。
+///
+/// ★ 挂 `any(target_os = "windows", test)`：这些值全是**字符串**，判据与运行平台无关，
+/// 所以三个 CI job 都跑得到（Windows 路径在 macOS 上不能借 `Path` 切，见 [`last_segment`]）。
+#[cfg(any(target_os = "windows", test))]
+fn uninstall_exe_candidates(
+    install_location: &str,
+    uninstall_string: &str,
+    display_icon: &str,
+    exe: &str,
+) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    if let Some(icon) = icon_path(display_icon) {
+        if let Some(found) = exe_in(&icon, exe) {
+            push_candidate(&mut out, found);
+        }
+    }
+    let location = install_location.trim().trim_matches('"');
+    if let Some(found) = exe_under(location, exe) {
+        push_candidate(&mut out, found);
+    }
+    if let Some(quoted) = exe_from_command_line(uninstall_string) {
+        if let Some(found) = exe_in(&quoted, exe) {
+            push_candidate(&mut out, found);
+        }
+    }
+    out
+}
+
+/// `DisplayIcon` 里的**那个路径**（`"C:\…\app.exe",0` → `C:\…\app.exe`；空 = `None`）。
+///
+/// 只砍**逗号后面全是数字**的那一种：路径里出现逗号是合法的（用户名、目录名都可能带），
+/// 而图标序号一定长这样。
+#[cfg(any(target_os = "windows", test))]
+fn icon_path(raw: &str) -> Option<String> {
+    let text = match raw.trim().trim_matches('"').rsplit_once(',') {
+        Some((head, tail)) if !tail.is_empty() && tail.chars().all(|c| c.is_ascii_digit()) => {
+            head.trim().trim_matches('"')
+        }
+        _ => raw.trim().trim_matches('"'),
+    };
+    (!text.is_empty()).then(|| text.to_string())
+}
+
+/// 末段（`C:\a b\app.exe` → `app.exe`）。
+///
+/// 不用 `Path::file_name`：Windows 路径在 macOS/Linux 上跑单测时 `\` 不是分隔符，
+/// 整串会原样当成一个文件名（CI 的另外两个 job 也要跑这些判据）。
+#[cfg(any(target_os = "windows", test))]
+fn last_segment(raw: &str) -> &str {
+    match raw.rfind(is_separator) {
+        Some(at) => &raw[at + 1..],
+        None => raw,
+    }
+}
+
+/// 它所在的那一层目录：文件路径 ⇒ 去掉末段；**本身以分隔符结尾**（就是个目录）⇒ 原样。
+#[cfg(any(target_os = "windows", test))]
+fn parent_dir(raw: &str) -> Option<&str> {
+    let trimmed = raw.trim_end_matches(is_separator);
+    if trimmed.is_empty() {
+        return None;
+    }
+    /* 以分隔符结尾 ⇒ 它自己就是目录（`C:\a b\` 别再往前退一层） */
+    if trimmed.len() != raw.len() {
+        return Some(trimmed);
+    }
+    let at = trimmed.rfind(is_separator)?;
+    let dir = &trimmed[..at];
+    (!dir.trim_end_matches(is_separator).is_empty()).then_some(dir)
+}
+
+/// Windows 路径的两种分隔符都认（`/` 在 Windows 上同样合法）
+#[cfg(any(target_os = "windows", test))]
+fn is_separator(c: char) -> bool {
+    c == '\\' || c == '/'
+}
+
+/// 某个**目录**下的那个 exe（`C:\a b` + `app.exe` → `C:\a b\app.exe`）
+#[cfg(any(target_os = "windows", test))]
+fn exe_under(dir: &str, exe: &str) -> Option<String> {
+    let dir = dir.trim().trim_matches('"').trim_end_matches(is_separator);
+    (!dir.is_empty()).then(|| format!("{dir}\\{exe}"))
+}
+
+/// 一个**文件路径**上的那个 exe：末段就是它 ⇒ 原样；否则当它是同目录下的别的文件
+/// （`…\Uninstall.exe`、`…\icon.ico`）⇒ 换成它所在目录 + exe。
+#[cfg(any(target_os = "windows", test))]
+fn exe_in(path: &str, exe: &str) -> Option<String> {
+    let path = path.trim().trim_matches('"');
+    if path.is_empty() {
+        return None;
+    }
+    if last_segment(path).eq_ignore_ascii_case(exe) {
+        return Some(path.to_string());
+    }
+    exe_under(parent_dir(path)?, exe)
+}
+
+/// 收进候选：同一处只留一份（大小写不敏感 —— Windows 的路径不分大小写）
+#[cfg(any(target_os = "windows", test))]
+fn push_candidate(out: &mut Vec<PathBuf>, candidate: String) {
+    let lower = candidate.to_lowercase();
+    if out
+        .iter()
+        .any(|p| p.to_string_lossy().to_lowercase() == lower)
+    {
+        return;
+    }
+    out.push(PathBuf::from(candidate));
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -130,7 +346,8 @@ pub fn locate(kind: SlicerKind) -> Option<PathBuf> {
 pub fn launch(kind: SlicerKind, file: &Path) -> Result<(), AppError> {
     let Some(target) = locate(kind) else {
         return Err(AppError::not_found(format!(
-            "这台机器上没找到 {} —— 装好它，或者在设置里改回「跟随系统默认」",
+            "这台机器上没找到 {} —— 装好它，或者在设置里改回「跟随系统默认」，\
+             或者用「其他应用…」从磁盘把它指出来",
             kind.label()
         )));
     };
@@ -171,32 +388,97 @@ fn windows_creation_flags() -> u32 {
 /// 路径是前端从系统对话框挑的（macOS 是 `.app` 包、Windows 是 `.exe`），这一侧**不猜、
 /// 不补后缀**：不在盘上就是不在，照实报 `NOT_FOUND`（让人回设置页重挑）。
 pub fn launch_with(target: &Path, label: &str, file: &Path) -> Result<(), AppError> {
+    spawn_detached(target, vec![file.as_os_str().to_owned()])
+        .map(|_| ())
+        .map_err(|e| {
+            AppError::io(format!(
+                "{label} 没打开这个文件（应用在 {}）",
+                target.display()
+            ))
+            .with_detail(e.to_string())
+        })
+}
+
+/// 起一个**别的应用**的进程，并且**不挂在我们身上**（2026-10-20）。
+///
+/// macOS 走 `/usr/bin/open -a`：LaunchServices 那边本来就另起一个实例，与我们无关；
+/// Windows 挂上那两位 creation flags（见 [`windows_creation_flags`]）。
+fn spawn_detached(
+    target: &Path,
+    args: Vec<std::ffi::OsString>,
+) -> std::io::Result<std::process::Child> {
     #[cfg(target_os = "macos")]
-    let spawned = std::process::Command::new("/usr/bin/open")
-        .arg("-a")
-        .arg(target)
-        .arg(file)
-        .spawn();
+    {
+        std::process::Command::new("/usr/bin/open")
+            .arg("-a")
+            .arg(target)
+            .args(args)
+            .spawn()
+    }
 
     #[cfg(target_os = "windows")]
-    let spawned = {
+    {
         use std::os::windows::process::CommandExt as _;
         std::process::Command::new(target)
-            .arg(file)
+            .args(args)
             .creation_flags(windows_creation_flags())
             .spawn()
-    };
+    }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let spawned = std::process::Command::new(target).arg(file).spawn();
+    {
+        std::process::Command::new(target).args(args).spawn()
+    }
+}
 
-    spawned.map(|_| ()).map_err(|e| {
-        AppError::io(format!(
-            "{label} 没打开这个文件（应用在 {}）",
-            target.display()
-        ))
-        .with_detail(e.to_string())
-    })
+/// 「跟随系统默认」那一档：**先自己起**（脱离控制台），起不了才交回系统 Shell（2026-10-20）。
+///
+/// # 为什么要抢这一档
+///
+/// 这一档原来走 opener 插件（Windows 上就是 `ShellExecuteW`）：起出来的进程**挂在我们的
+/// 控制台上**，终端一关 / 里头按 Ctrl+C，那条事件就落到它头上 —— 作者反复遇到的那一处
+/// （「我那个一停，我的 BBS 就消失」）。而 `.3mf` 的关联十有八九就是一句
+/// `"…\bambu-studio.exe" "%1"`，那种关联我们自己起得了，起的时候还能挂上那两位。
+///
+/// # 怎么知道"系统默认"是谁
+///
+/// 与 Explorer 同一条路，见 [`windows_open_command`]：`UserChoice`（「打开方式 → 总是」）
+/// 优先，其次 `HKCR\.3mf` 的默认值。**凡是不是一条"exe + 参数模板"的关联都不抢**：
+/// AppX（商店应用）与 DDE 只有 Shell 唤得起来 —— 那种情况返回 `None`，调用方照旧走
+/// opener，行为一个字节都不变。
+///
+/// 返回值：`None` = "我起不了 / 问不出来"；`Some(..)` = 我们起的（成没成照实报）。
+#[cfg(target_os = "windows")]
+pub fn launch_system(file: &Path) -> Option<Result<(), AppError>> {
+    windows_launch_system(file)
+}
+
+/// 其余平台没有这一步：macOS 的关联本来就走 LaunchServices，交给 opener 即可。
+#[cfg(not(target_os = "windows"))]
+pub fn launch_system(_file: &Path) -> Option<Result<(), AppError>> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn windows_launch_system(file: &Path) -> Option<Result<(), AppError>> {
+    let command = windows_open_command("3mf")?;
+    let (exe, template) = split_command_line(&command)?;
+    let target = PathBuf::from(&exe);
+    /* 关联指向的东西得**真在盘上**：AppX / DDE 那类关联在这条路上没有可执行物 */
+    if !target.exists() {
+        return None;
+    }
+    Some(
+        spawn_detached(&target, association_args(&template, file))
+            .map(|_| ())
+            .map_err(|e| {
+                AppError::io(format!(
+                    "系统默认程序没打开这个文件（关联的是 {}）",
+                    target.display()
+                ))
+                .with_detail(e.to_string())
+            }),
+    )
 }
 
 /* ---------- 「跟随系统默认」到底是哪个程序（2026-10-16） ---------- */
@@ -326,28 +608,60 @@ fn windows_system_default_app() -> Option<SlicerApp> {
     })
 }
 
-/// 注册表两跳：`HKCR\.3mf` → ProgID → 那一支的 `shell\open\command` 命令行。
+/// `.3mf` 双击时真要跑的那句命令行 —— 按 **Explorer 自己的优先级**问。
 ///
-/// `HKCR` 是 `HKLM\Software\Classes` 与 `HKCU\Software\Classes` 的**合并视图**
-/// （用户那半优先），所以问它就等于问"双击会发生什么"，不必自己拼优先级。
+/// 1. `HKCU\…\Explorer\FileExts\.3mf\UserChoice`（「打开方式 → 总是」按过之后的主体，
+///    Win11 24H2 起还有一格 `UserChoiceLatest`）—— **这是最权威的一处**：它压过
+///    `HKCR` 里登记的一切；
+/// 2. `HKCR\.3mf` 的默认值（安装器写的那种）；
+/// 3. `OpenWithProgids` 里第一个（扩展名那格默认值是空的时候，只能这样认一个）。
+///
+/// ★ 2026-10-20 补上第 1 条：作者这台机器上 `HKCR\.3mf` 指着 `Bambu.Studio.1`，
+///   而那个 ProgID **根本不存在**（应用被搬到 `D:\` 之后留下的空壳），真正生效的是
+///   `UserChoice`。只问 `HKCR` 等于问了个过期的旧账。
+///
+/// 认出来的 ProgID 没有 `shell\open\command`（AppX 商店应用、DDE 那种）⇒ `None`：
+/// 那种关联只有 Shell 唤得起来，不硬猜。
 #[cfg(target_os = "windows")]
 fn windows_open_command(ext: &str) -> Option<String> {
-    use winreg::enums::HKEY_CLASSES_ROOT;
+    use winreg::enums::{HKEY_CLASSES_ROOT, HKEY_CURRENT_USER};
     use winreg::RegKey;
 
+    let user_choice = || -> Option<String> {
+        let root = RegKey::predef(HKEY_CURRENT_USER);
+        let base = format!(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.{ext}");
+        ["UserChoice", r"UserChoiceLatest\ProgId"]
+            .iter()
+            .find_map(|sub| {
+                let value: String = root
+                    .open_subkey(format!("{base}\\{sub}"))
+                    .ok()?
+                    .get_value("ProgId")
+                    .ok()?;
+                let value = value.trim().to_string();
+                (!value.is_empty()).then_some(value)
+            })
+    };
+
     let hkcr = RegKey::predef(HKEY_CLASSES_ROOT);
-    let ext_key = hkcr.open_subkey(format!(".{ext}")).ok()?;
-    let mut prog_id: String = ext_key.get_value("").unwrap_or_default();
-    if prog_id.is_empty() {
-        /* 「打开方式 → 总是用这个」记的是这一支（扩展名那格自己的默认值仍是空的） */
-        prog_id = ext_key
-            .open_subkey("OpenWithProgids")
-            .ok()?
-            .enum_values()
-            .filter_map(Result::ok)
-            .map(|(name, _)| name)
-            .next()?;
-    }
+    /* 扩展名那一格可能压根不在（关联只记在 `UserChoice` 里的那种）—— 不当成"问不出来" */
+    let ext_key = hkcr.open_subkey(format!(".{ext}")).ok();
+    let prog_id = user_choice()
+        .or_else(|| {
+            let from_ext: String = ext_key.as_ref()?.get_value("").ok()?;
+            let from_ext = from_ext.trim().to_string();
+            (!from_ext.is_empty()).then_some(from_ext)
+        })
+        .or_else(|| {
+            ext_key
+                .as_ref()?
+                .open_subkey("OpenWithProgids")
+                .ok()?
+                .enum_values()
+                .filter_map(Result::ok)
+                .map(|(name, _)| name)
+                .next()
+        })?;
     let command: String = hkcr
         .open_subkey(format!("{prog_id}\\shell\\open\\command"))
         .ok()?
@@ -372,7 +686,7 @@ fn known_label(path: &Path) -> Option<&'static str> {
     None
 }
 
-/// 从注册表那句命令行里取出**可执行物**。
+/// 从注册表那句命令行里取出**可执行物**（参数那一截见 [`split_command_line`]）。
 ///
 /// 两种写法都要认：
 /// - 引号包住的（`"C:\Program Files\…\app.exe" "%1"`）—— 系统自己的写法，闭引号即终点；
@@ -383,20 +697,101 @@ fn known_label(path: &Path) -> Option<&'static str> {
 /// 测试里编出来 —— 这段解析逻辑不该因为"我们此刻在 macOS 上"就没单测（它最终跑在 Windows 上）。
 #[cfg(any(target_os = "windows", test))]
 fn exe_from_command_line(command: &str) -> Option<String> {
+    split_command_line(command).map(|(exe, _)| exe)
+}
+
+/// 那句命令行拆成 **(可执行物, 参数模板)** —— 关联程序那条路要把模板里的 `%1` 换成真路径。
+#[cfg(any(target_os = "windows", test))]
+fn split_command_line(command: &str) -> Option<(String, String)> {
     let text = command.trim();
     if let Some(rest) = text.strip_prefix('"') {
         let end = rest.find('"')?;
         let exe = rest[..end].trim();
-        return (!exe.is_empty()).then(|| exe.to_string());
+        if exe.is_empty() {
+            return None;
+        }
+        return Some((exe.to_string(), rest[end + 1..].trim().to_string()));
     }
     let lower = text.to_ascii_lowercase();
     for suffix in [".exe", ".bat", ".cmd"] {
         if let Some(at) = lower.find(suffix) {
-            let exe = text[..at + suffix.len()].trim();
-            return (!exe.is_empty()).then(|| exe.to_string());
+            let end = at + suffix.len();
+            let exe = text[..end].trim();
+            if exe.is_empty() {
+                return None;
+            }
+            return Some((exe.to_string(), text[end..].trim().to_string()));
         }
     }
     None
+}
+
+/// 关联命令行里的**文件占位符**（Shell 那一套；`%1` 之外，装得"给长文件名 / 全部参数"
+/// 的模板用的就是这几位）。
+#[cfg(any(target_os = "windows", test))]
+const FILE_PLACEHOLDERS: [&str; 6] = ["%1", "%L", "%l", "%*", "%U", "%u"];
+
+/// 从参数模板算出真参数：占位符换成本次那份文件的路径。
+///
+/// - 模板是空的 ⇒ 只有那份路径；
+/// - 一个占位符都没有 ⇒ **追加**一份路径（Shell 对没有 `%1` 的模板也是把文件给它）；
+/// - 占位符在实参中间（`--file=%1`）也认。
+#[cfg(any(target_os = "windows", test))]
+fn association_args(template: &str, file: &Path) -> Vec<std::ffi::OsString> {
+    let path = file.to_string_lossy().into_owned();
+    let mut out: Vec<std::ffi::OsString> = Vec::new();
+    let mut placed = false;
+    for token in split_arguments(template) {
+        if token.is_empty() {
+            continue;
+        }
+        let mut filled = token.clone();
+        let mut hit = false;
+        for placeholder in FILE_PLACEHOLDERS {
+            if filled.contains(placeholder) {
+                filled = filled.replace(placeholder, &path);
+                hit = true;
+            }
+        }
+        placed |= hit;
+        out.push(filled.into());
+    }
+    if !placed {
+        out.push(file.as_os_str().to_owned());
+    }
+    out
+}
+
+/// 把一截命令行切成实参：**引号归组**（`"C:\a b\x.3mf" %2` 是两个实参），不处理
+/// 反斜杠转义 —— 注册表里那几句没人写转义。
+#[cfg(any(target_os = "windows", test))]
+fn split_arguments(rest: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quoted = false;
+    for c in rest.chars() {
+        match c {
+            '"' => {
+                quoted = !quoted;
+                in_token = true;
+            }
+            c if c.is_whitespace() && !quoted => {
+                if in_token {
+                    out.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            c => {
+                current.push(c);
+                in_token = true;
+            }
+        }
+    }
+    if in_token {
+        out.push(current);
+    }
+    out
 }
 
 /// 路径末段锯掉 `.app` / `.exe` 那层壳（`/Applications/PrusaSlicer.app` → `PrusaSlicer`）——
@@ -677,6 +1072,89 @@ mod tests {
         }
     }
 
+    /// 装在 `Program Files` 之外的（作者 2026-10-20 那台机器：Bambu Studio 在 `D:\`）——
+    /// 卸载登记里那两行是**真值**，按它们拼出来的就是盘上那一个。
+    #[test]
+    fn an_app_installed_outside_program_files_is_found_through_its_uninstall_entry() {
+        let got = uninstall_exe_candidates(
+            "",
+            r"D:\01_MySoftware\Bambu Studio2\Bambu Studio\Uninstall.exe",
+            r"D:\01_MySoftware\Bambu Studio2\Bambu Studio\bambu-studio.exe",
+            "bambu-studio.exe",
+        );
+        /* `DisplayIcon` 与 `UninstallString` 指向同一处 ⇒ 只该留一份 */
+        assert_eq!(
+            got,
+            vec![PathBuf::from(
+                r"D:\01_MySoftware\Bambu Studio2\Bambu Studio\bambu-studio.exe"
+            )]
+        );
+    }
+
+    /// 同一台机器上 OrcaSlicer 的 `DisplayIcon` 是写坏的（目录重复了一遍，盘上没这个文件）。
+    /// 坏的那条留着也无害（[`locate`] 会拿 `exists()` 问掉它），但**好的那条必须在**，
+    /// 且每一条的末段都得是那个 exe 名 —— 不认"像那么回事"的目录。
+    #[test]
+    fn a_mangled_display_icon_does_not_hide_the_good_candidate() {
+        let got = uninstall_exe_candidates(
+            "",
+            r#""C:\Program Files\OrcaSlicer\Uninstall.exe""#,
+            r"C:\Program Files\OrcaSlicer\C:\Program Files\OrcaSlicer\orca-slicer.exe",
+            "orca-slicer.exe",
+        );
+        assert!(
+            got.contains(&PathBuf::from(
+                r"C:\Program Files\OrcaSlicer\orca-slicer.exe"
+            )),
+            "{got:?}"
+        );
+        for path in &got {
+            assert!(
+                path.to_string_lossy()
+                    .to_lowercase()
+                    .ends_with("orca-slicer.exe"),
+                "{path:?}"
+            );
+        }
+    }
+
+    /// `DisplayIcon` 末尾那个 `,0` 是图标序号，不是路径的一部分；路径里本来就有逗号的要留全。
+    #[test]
+    fn an_icon_index_is_not_part_of_the_path() {
+        assert_eq!(
+            icon_path(r#""C:\Program Files\a\app.exe",0"#).as_deref(),
+            Some(r"C:\Program Files\a\app.exe")
+        );
+        assert_eq!(
+            icon_path(r"C:\a,b\app.exe").as_deref(),
+            Some(r"C:\a,b\app.exe")
+        );
+        assert_eq!(icon_path("   "), None);
+    }
+
+    /// 切目录那几刀不借 `Path`：Windows 路径在 macOS/Linux 上的单测里 `\` 不是分隔符，
+    /// 这三个 job 都得按同一套判据跑。
+    #[test]
+    fn windows_paths_are_cut_by_hand() {
+        assert_eq!(last_segment(r"C:\a b\app.exe"), "app.exe");
+        assert_eq!(last_segment("app.exe"), "app.exe");
+        /* `/` 在 Windows 上同样合法 */
+        assert_eq!(last_segment("C:/a/app.exe"), "app.exe");
+        assert_eq!(parent_dir(r"C:\a b\app.exe"), Some(r"C:\a b"));
+        assert_eq!(parent_dir(r"C:\a b\"), Some(r"C:\a b"));
+        assert_eq!(parent_dir("app.exe"), None);
+        /* 末段就是那个 exe ⇒ 原样；否则换成同目录下的它 */
+        assert_eq!(
+            exe_in(r"C:\a b\app.exe", "app.exe").as_deref(),
+            Some(r"C:\a b\app.exe")
+        );
+        assert_eq!(
+            exe_in(r"C:\a b\Uninstall.exe", "app.exe").as_deref(),
+            Some(r"C:\a b\app.exe")
+        );
+        assert_eq!(exe_in("   ", "app.exe"), None);
+    }
+
     #[test]
     fn a_quoted_command_line_gives_the_exe_untouched() {
         /* 系统自己写的形状：引号里的才是可执行物，后面那些是参数 */
@@ -702,6 +1180,63 @@ mod tests {
             exe_from_command_line(r"C:\tools\launch.cmd --file %1").as_deref(),
             Some(r"C:\tools\launch.cmd")
         );
+    }
+
+    /// 关联命令行要拆成**两截**：exe 给 `Command::new`，参数那一截里还有 `%1` 要换。
+    #[test]
+    fn an_association_command_line_splits_into_exe_and_arguments() {
+        assert_eq!(
+            split_command_line(r#""C:\Program Files\Bambu Studio\bambu-studio.exe" "%1""#),
+            Some((
+                r"C:\Program Files\Bambu Studio\bambu-studio.exe".to_string(),
+                r#""%1""#.to_string()
+            ))
+        );
+        assert_eq!(
+            split_command_line(r"C:\tools\orca-slicer.exe %1"),
+            Some((r"C:\tools\orca-slicer.exe".to_string(), "%1".to_string()))
+        );
+        /* 没有参数的那一句：模板是空的（[`association_args`] 会自己把路径补上） */
+        assert_eq!(
+            split_command_line(r#""C:\a\app.exe""#),
+            Some((r"C:\a\app.exe".to_string(), String::new()))
+        );
+        assert_eq!(split_command_line(""), None);
+    }
+
+    /// 模板里的 `%1` / `%L` / `%*` 换成本次那份文件；一个占位符都没有就把路径**追加**上去
+    /// （否则那个应用会"起来了但什么都没打开"）。
+    #[test]
+    fn the_file_takes_the_place_holder_and_is_appended_when_there_is_none() {
+        let file = Path::new(r"D:\缓存\x.3mf");
+        let want = vec![std::ffi::OsString::from(r"D:\缓存\x.3mf")];
+        for template in [r#""%1""#, "%1", "%L", "%*", ""] {
+            assert_eq!(association_args(template, file), want, "{template:?}");
+        }
+        /* 没有占位符 ⇒ 追加；别的实参一个不动 */
+        assert_eq!(
+            association_args("--silent", file),
+            vec![
+                std::ffi::OsString::from("--silent"),
+                std::ffi::OsString::from(r"D:\缓存\x.3mf")
+            ]
+        );
+        /* 占位符在实参中间也认 */
+        assert_eq!(
+            association_args(r#"--file="%1""#, file),
+            vec![std::ffi::OsString::from(r"--file=D:\缓存\x.3mf")]
+        );
+    }
+
+    /// 带空格的路径不许被劈成两个实参（引号归组）。
+    #[test]
+    fn arguments_are_grouped_by_quotes() {
+        assert_eq!(
+            split_arguments(r#""C:\a b\x.3mf" --wait "#),
+            vec![r"C:\a b\x.3mf".to_string(), "--wait".to_string()]
+        );
+        assert_eq!(split_arguments("   "), Vec::<String>::new());
+        assert_eq!(split_arguments("%1"), vec!["%1".to_string()]);
     }
 
     #[test]
@@ -784,6 +1319,44 @@ mod tests {
                 "路径必须是绝对的：{}",
                 app.path
             );
+        }
+    }
+
+    /// 真机冒烟（Windows）：装了就找得到，没装就 `None` —— 判据不是"必须找得到"
+    /// （各机器装的东西不一样），而是**找到的那一个必须真的在盘上、而且是它自己**。
+    ///
+    /// ★ 2026-10-20 加这条：Bambu Studio 装在 `D:\` 时，只查三个固定安装位会把
+    /// "装着"说成"没找到"（截图里那一句）。这条在本机（装着、且在 D:）上是真判据，
+    /// 在没装的机器上（CI）只跑候选的形状。
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn a_located_slicer_is_really_on_disk() {
+        /* 「跟随系统默认」那一档答出来的应用，同样得在盘上（答不出来是常态，不算失败） */
+        if let Some(app) = system_default_app() {
+            assert!(
+                Path::new(&app.path).is_file(),
+                "关联程序给的路径盘上没有：{}",
+                app.path
+            );
+        }
+        for kind in [SlicerKind::Bambu, SlicerKind::Orca] {
+            let candidates = slicer_candidates(kind);
+            for path in &candidates {
+                assert!(
+                    path.to_string_lossy().to_lowercase().contains(kind.id()),
+                    "{:?} 的候选里混进了别人：{}",
+                    kind,
+                    path.display()
+                );
+            }
+            if let Some(found) = locate(kind) {
+                assert!(
+                    found.is_file(),
+                    "{:?} 给了一个盘上没有的路径：{}",
+                    kind,
+                    found.display()
+                );
+            }
         }
     }
 }

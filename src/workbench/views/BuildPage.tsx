@@ -536,6 +536,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
               勾版本、按已保存的配方生成；字节没变的产物不重写。
+              <br />
+              这一列的「已生成」只比<strong>配方快照</strong>；交付文件与盘上 / 目录登记是否一致，
+              看「交付明细…」—— 两处判据不同，不是同一件事。
             </p>
             {dirty && (
               <p className={s.note} style={{ marginTop: 0 }}>

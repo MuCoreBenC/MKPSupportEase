@@ -6,7 +6,7 @@
 //! 三种 exec_mode 各一条（13.5）。
 
 use postprocess::ir::Ir;
-use postprocess::postproc::calibration::{Mode, insert_calibration_gcode};
+use postprocess::postproc::calibration::{Mode, insert_calibration_gcode, minimize_startup_gcode};
 use postprocess::postproc::disk::{BBox, CentroidResult};
 
 fn fixture_ir() -> Ir {
@@ -92,8 +92,15 @@ fn direct_calibrate_filters_model_paths() {
         "M104 S220",
         ";===== prepare print temperature and material end =====",
         "; MACHINE_START_GCODE_END",
+        "G1 F9000",
+        "; CUSTOM_GCODE",
+        "G1 X127.693 Y124.368 F42000",
+        "G1 Z.4",
+        "G1 Z.2",
         "; FEATURE: Outer wall",
+        "G1 F3000",
         "G1 X80.0 Y80.0 E0.5",
+        "G1 F10342.643",
         "; filament end gcode",
     ]);
     let out = insert_calibration_gcode(
@@ -108,6 +115,23 @@ fn direct_calibrate_filters_model_paths() {
     .expect("插入失败");
     // 模型挤出移动被删（direct 模式）
     assert!(!out.iter().any(|l| l == "G1 X80.0 Y80.0 E0.5"));
+    // 模型区里「只改速度、不动位置」的 F-only 行一并清掉（移动没了，速度提示就是垃圾）
+    assert!(
+        !out.iter().any(|l| l == "G1 F3000" || l == "G1 F10342.643"),
+        "模型区里不该留下 F-only 行：{out:?}"
+    );
+    // 区外的 F-only 行**必须留着**：它改的是后续移动的模态进给，删了就是改了真机速度
+    assert!(
+        out.iter().any(|l| l == "G1 F9000"),
+        "模型区外的 G1 F9000 被误删：{out:?}"
+    );
+    // `; CUSTOM_GCODE` 之后的「对象起点空驶 + 把 Z 压到首层高」也要清：
+    // 模型路径删光之后它就是「跑到板子正中点一下」，真机上笔/喷嘴会蹭板
+    assert!(
+        !out.iter()
+            .any(|l| l.contains("X127.693") || l == "G1 Z.4" || l == "G1 Z.2"),
+        "对象起点空驶没被清掉：{out:?}"
+    );
     // M190 被删、M140 降温到 S1（A1_MINI 启动段最小化）
     assert!(!out.iter().any(|l| l.starts_with("M190")));
     assert!(out.iter().any(|l| l.starts_with("M140 S1")));
@@ -117,6 +141,220 @@ fn direct_calibrate_filters_model_paths() {
     assert!(
         out.iter()
             .any(|l| l == "; Calibration Runtime: retract and cool down")
+    );
+}
+
+/// A1 直接校准：`G28` 抬 Z 保命，归零之后那一整段「去清洗位 + 落 Z + 升温」全部删掉。
+///
+/// 原样跑的话：归零结束时 Z 就在 0（喷嘴贴板），紧接着 `G1 X108 Y-0.5` 从板中心横穿
+/// 到前缘 —— 真机上喷嘴（和笔架）直接刮过去；而那段清洗线在模板里本来就是注释掉的，
+/// 所以"走到位"之后什么也不做。直接校准不打印，这一整段没有存在意义。
+#[test]
+fn a1_direct_mode_drops_the_pre_purge_block_and_keeps_the_lift() {
+    let content = lines(&[
+        ";===== machine: A1",
+        ";===== wipe nozzle",
+        ";===== wipe nozzle end",
+        "M104 S1",
+        ";===== home after wipe mouth=====",
+        "    M1002 gcode_claim_action : 13",
+        "    G28",
+        ";===== home after wipe mouth end =====",
+        "G1 X108.000 Y-0.500 F30000",
+        "G1 Z0.300 F1200",
+        "M400",
+        "G2814 Z0.32",
+        "M104 S245 ; prepare to print",
+        ";===== nozzle load line",
+        ";G1 X88 Y-0.5 F20000",
+        ";===== nozzle load line end",
+        ";===== extrude cali test",
+        "    M109 S245",
+    ]);
+
+    let a1 = minimize_startup_gcode(content.clone(), "A1");
+    let pos = |needle: &str| a1.iter().position(|l| l.trim() == needle);
+    let g28 = pos("G28").expect("G28 应保留");
+    let lift = pos("G1 Z10 F1200").expect("G28 之后应插入抬 Z");
+    assert!(g28 < lift, "抬 Z 必须在 G28 之后：{a1:?}");
+
+    for gone in [
+        "G1 X108.000 Y-0.500 F30000",
+        "G1 Z0.300 F1200",
+        "G2814 Z0.32",
+    ] {
+        assert!(
+            !a1.iter().any(|l| l.trim() == gone),
+            "直接校准不该保留 {gone}：{a1:?}"
+        );
+    }
+    assert!(
+        !a1.iter().any(|l| l.contains("M104 S245")),
+        "直接校准不该升到打印温度：{a1:?}"
+    );
+    // 后段标记必须还在，否则下游的 load line / extrude cali 处理会整段失联
+    assert!(a1.iter().any(|l| l.contains(";===== nozzle load line")));
+    assert!(a1.iter().any(|l| l.contains(";===== extrude cali test")));
+
+    // P1 走的是另一条裁剪路径：同样不吃这段准备动作，但不该拿到 A1 那条抬 Z
+    let p1 = minimize_startup_gcode(content, "P1S");
+    assert!(
+        !p1.iter().any(|l| l.trim() == "G1 X108.000 Y-0.500 F30000"),
+        "P1S 也不该保留这段准备动作：{p1:?}"
+    );
+    assert!(
+        !p1.iter().any(|l| l.trim() == "G1 Z10 F1200"),
+        "P1S 不该借用 A1 那条抬 Z：{p1:?}"
+    );
+}
+
+/// 振动补偿被删之后，为它摆位的那些移动必须一起走 —— 否则真机上就是「跑到中间干等」。
+/// 但 `G0 X25 Y175 ; find a soft place to home` 与 `G28 Z` 是给 Z 归零找软地的，留着。
+#[test]
+fn mech_mode_moves_leave_together_with_the_vibration_commands() {
+    let content = lines(&[
+        ";===== machine: A1 mini",
+        ";===== mech mode fast check============================",
+        "M1002 gcode_claim_action : 3",
+        "G0 X25 Y175 F20000 ; find a soft place to home",
+        "G28 Z P0 T300; home z with low precision,permit 300deg temperature",
+        "G29.2 S0 ; turn off ABL",
+        "M104 S170",
+        "G1 Z5 F3000",
+        "G1 X90 Y-1 F30000",
+        "M400 P200",
+        "M970.3 Q1 A7 K0 O2",
+        "M974 Q1 S2 P0",
+        "G1 X90 Y0 Z5 F30000",
+        "M970 Q0 A10 B50 C90 H15 K0 M20 O3",
+        "M974 Q0 S2 P0",
+        "M975 S1",
+        "G1 F30000",
+        "G1 X-1 Y10",
+        "G28 X ; re-home XY",
+        ";===== bed leveling ==================================",
+        "G29 A1 X21 Y72 I136 J34",
+        ";===== bed leveling end ================================",
+        "; TAIL_MARK",
+    ]);
+
+    let out = minimize_startup_gcode(content, "A1_MINI");
+    assert!(
+        out.iter().any(|l| l.contains("G0 X25 Y175")),
+        "找软地的定位要留：{out:?}"
+    );
+    assert!(
+        out.iter().any(|l| l.contains("G28 Z P0 T300")),
+        "Z 归零要留：{out:?}"
+    );
+    for gone in ["G1 Z5 F3000", "G1 X-1 Y10"] {
+        assert!(
+            !out.iter().any(|l| l.trim() == gone),
+            "振动测量摆位 {gone} 该删：{out:?}"
+        );
+    }
+    assert!(!out.iter().any(|l| l.contains("X90 Y-1")));
+    assert!(!out.iter().any(|l| l.contains("X90 Y0 Z5")));
+    assert!(
+        !out.iter()
+            .any(|l| l.starts_with("M970") || l.starts_with("M974")),
+        "M970/M974 本来就不该留：{out:?}"
+    );
+    // 区间边界要正确收口：后面的内容既不被卷进 mech 段，也不被整段吞掉
+    assert!(
+        out.iter().any(|l| l.contains("TAIL_MARK")),
+        "mech 段之后的尾巴被吞了：{out:?}"
+    );
+}
+
+/// P1 直接校准：擦嘴之后的自检空跑与"提前升温"整块不要，但清洗线段落必须接住。
+#[test]
+fn p1_direct_mode_drops_the_mech_check_and_print_preheat() {
+    let content = lines(&[
+        ";===== machine: P1S-0.4",
+        ";===== wipe nozzle =====",
+        "M109 S225",
+        ";===== wipe nozzle end =====",
+        "M104 S1",
+        ";===== home after wipe mouth=====",
+        ";===== home after wipe mouth end =====",
+        "M106 P2 S100 ; turn on big fan",
+        "M104 S245 ; set extrude temp earlier, to reduce wait time",
+        "G1 X128 Y128 Z10 F20000",
+        "G1 X128 Y128 Z10 F20000",
+        "G28 X ; re-home XY",
+        ";===== nozzle load line ===============================",
+        "M104 S30",
+        "M400",
+        "; MACHINE_START_GCODE_END",
+    ]);
+
+    let p1 = minimize_startup_gcode(content, "P1S");
+    assert!(
+        p1.iter().any(|l| l.contains(";===== nozzle load line")),
+        "清洗线段落标记必须保留：{p1:?}"
+    );
+    assert!(
+        !p1.iter().any(|l| l.contains("M104 S245")),
+        "直接校准不该提前升到打印温度：{p1:?}"
+    );
+    assert!(
+        !p1.iter().any(|l| l.contains("X128 Y128 Z10")),
+        "mech mode 自检的两次空跑该删：{p1:?}"
+    );
+    assert!(
+        !p1.iter().any(|l| l.trim().starts_with("G28 X")),
+        "自检之后的 re-home 一并删：{p1:?}"
+    );
+    assert!(
+        p1.iter().any(|l| l.trim() == "M104 S30"),
+        "清洗线段的降温要留下：{p1:?}"
+    );
+}
+
+/// X1C 与 P1S 共用同一条起始段裁剪（来源仓库 helpers.go:991 就是这么分的）。
+/// 差别只在 `preserve_nozzle_load_line`：X1C 不在那个白名单里，清洗线段落连标记
+/// 都会被更早删掉 —— 所以这里的出口判据不能只认 `;===== nozzle load line`。
+#[test]
+fn x1c_shares_the_p1_cut_without_leaking_past_the_boundary() {
+    let content = lines(&[
+        ";===== machine: X1C-0.4",
+        ";===== wipe nozzle =====",
+        ";===== wipe nozzle end =====",
+        "M104 S1",
+        ";===== home after wipe mouth=====",
+        ";===== home after wipe mouth end =====",
+        "M104 S245 ; set extrude temp earlier",
+        "G1 X128 Y128 Z10 F20000",
+        "G28 X ; re-home XY",
+        ";========turn off light and wait extrude temperature =============",
+        "M106 S0 ; turn off fan",
+        "; MACHINE_START_GCODE_END",
+        "; filament start gcode",
+    ]);
+
+    let out = minimize_startup_gcode(content, "X1C");
+    assert!(
+        !out.iter().any(|l| l.contains("M104 S245")),
+        "X1C 也要砍掉提前升温：{out:?}"
+    );
+    assert!(
+        !out.iter().any(|l| l.contains("X128 Y128 Z10")),
+        "X1C 也要砍掉自检空跑：{out:?}"
+    );
+    // 边界之后的内容不许被吞掉
+    assert!(
+        out.iter()
+            .any(|l| l.contains("turn off light and wait extrude temperature")),
+        "边界标记被吞了：{out:?}"
+    );
+    assert!(
+        out.iter().any(|l| l.trim() == "M106 S0 ; turn off fan"),
+        "边界之后的关风扇被吞了：{out:?}"
+    );
+    assert!(
+        out.iter().any(|l| l.contains("; filament start gcode")),
+        "启动段之外的内容被吞了：{out:?}"
     );
 }
 

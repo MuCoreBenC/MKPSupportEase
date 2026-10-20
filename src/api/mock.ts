@@ -1864,13 +1864,21 @@ export const mockApi: MkpApi = {
    * 血统指向 `A1-fast` 的那一份，所以选 A1/快拆版能读到它。
    */
   async getLocalCopyFor(machineId, versionId) {
-    const hit = mockLocal.find(
-      (f) =>
-        f.kind === 'mkp_preset' &&
-        f.state === 'ok' &&
-        (f.machineId ?? f.basedOnMachineId) === machineId &&
-        (f.versionId ?? f.basedOnVersionId) === versionId,
-    )
+    const owned = (f: LocalPresetFile) =>
+      f.kind === 'mkp_preset' &&
+      f.state === 'ok' &&
+      (f.machineId ?? f.basedOnMachineId) === machineId &&
+      (f.versionId ?? f.basedOnVersionId) === versionId
+    /*
+     * 与真机 `local_copy_for` 同一条次序（2026-10-20）：**底账正用着的那份**优先，
+     * 其次才是第一份匹配的。同一版下有两份（原件 + 复制出来的那份）时，"哪一份在用"
+     * 决定校准页读谁 —— 只按 combo 取第一份，切换过去数字不会跟着换。
+     */
+    const active = mockActive
+    const hit =
+      mockLocal.find(
+        (f) => owned(f) && active !== null && active.origin === 'local' && active.path === f.path,
+      ) ?? mockLocal.find(owned)
     if (hit === undefined) return null
     /* 浏览器里没有盘 —— 绝对路径那一件事不在这份数据里（真机上是
        `<appDataDir>/user/presets-local/…`，由 `getPostProcessCommand` 现拼）。 */

@@ -171,10 +171,15 @@ export default function ParamDetail({
   /*
    * 已弃用（C14 §五）：抽屉是「这东西到底是什么」的地方，所以它必须在这里说清楚 ——
    * 作者：「我打开右侧的抽屉，里面它也应该显示弃用 什么什么呀」。
-   * 判据只有一处（后端的 `Row.deprecated` / `ChoiceView.deprecated`）。
+   * 判据只有一处，且**按当前这一层的机型**：`Cell.deprecated` / `Cell.deadChoices`
+   * （含推定）。`Row.deprecated` 是全机型口径，只在拿不到格子时兜底。
    */
-  const deprecated = row.deprecated
-  const deadChoices = param.choices.filter((c) => c.deprecated)
+  const curCell = cellAt(uid)
+  const deprecated = curCell?.deprecated ?? row.deprecated
+  const deadSet = new Set(curCell?.deadChoices ?? [])
+  const deadChoices = param.choices.filter(
+    (c) => deadSet.has(String(c.value)) || c.deprecated || c.deprecatedMachines.includes(machine.id),
+  )
 
   /**
    * 这一条参数是不是**枚举**：`choices` 只有在 string 档才是取值域 ——
@@ -395,7 +400,9 @@ export default function ParamDetail({
                     <span
                       key={String(c.value)}
                       className={s.pDepStrike}
-                      data-dep={c.deprecated ? '' : undefined}
+                      data-dep={
+                        deadSet.has(String(c.value)) || c.deprecated ? '' : undefined
+                      }
                     >
                       {c.label}
                     </span>,

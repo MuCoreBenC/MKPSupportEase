@@ -165,13 +165,21 @@ interface FixtureParam {
   max: number | null
   step: number | null
   unit: string | null
-  choices: { label: string; value: string; deprecated: boolean }[]
+  choices: {
+    label: string
+    value: string
+    deprecated: boolean
+    deprecatedMachines?: string[]
+  }[]
   showWhen: { key: string; op: 'eq' | 'neq' | 'gt'; value: unknown } | null
   parentKey: string | null
   /** 空 = 不限机型（真源里是逗号串，这里按拆好的数组存） */
   machineFilter: string[]
   depth: number
+  /** 全局弃用（所有机型） */
   deprecated: boolean
+  /** 只在这些机型上弃用（与 `deprecated` 叠加） */
+  deprecatedMachines?: string[]
 }
 
 const p = (over: Partial<FixtureParam> & { key: string; label: string }): FixtureParam => ({
@@ -1076,7 +1084,12 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
   const hit = effective(machineId, uid, pdef.key)
   const raw = hit?.value
   const blocked = blockedOf(machineId, uid, pdef)
-  const deprecated = pdef.deprecated
+  /* 弃用按**这一列这台机型**判（与后端 `ParamDef::deprecated_for` 同一口径） */
+  const deprecated =
+    pdef.deprecated || (pdef.deprecatedMachines ?? []).includes(machineId)
+  const deadChoices = pdef.choices
+    .filter((c) => c.deprecated || (c.deprecatedMachines ?? []).includes(machineId))
+    .map((c) => String(c.value))
   const editable = blocked.length === 0 && !deprecated
   const originExplain =
     hit ? ((WORDS.origin as Json)[hit.origin] as Json | undefined)?.explain ?? null : null
@@ -1100,6 +1113,8 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
     raw: raw ?? null,
     /* 盘上钉着的那个值（草稿不算）—— 「恢复修改前的」据此写回，没钉着就写 null 删键 */
     rest: atRestOf(uid !== null ? 'version' : 'machine', uid ?? machineId, pdef.key),
+    deprecated,
+    deadChoices,
   }
 }
 
@@ -1380,9 +1395,26 @@ function buildRegistry(): Json {
       valueType: pdef.valueType, uiComponent: pdef.uiComponent,
       defaultValue: pdef.defaultValue, defaultText: valueText(pdef, pdef.defaultValue),
       min: pdef.min, max: pdef.max, step: pdef.step, unit: pdef.unit,
-      choices: pdef.choices, showWhen: pdef.showWhen, parentKey: pdef.parentKey,
-      machineFilter: pdef.machineFilter ?? [], deprecated: pdef.deprecated,
+      choices: pdef.choices.map((c) => ({
+        label: c.label,
+        value: c.value,
+        deprecated: c.deprecated,
+        deprecatedMachines: c.deprecatedMachines ?? [],
+        derived: false,
+      })),
+      showWhen: pdef.showWhen, parentKey: pdef.parentKey,
+      machineFilter: pdef.machineFilter ?? [],
+      deprecated: pdef.deprecated,
+      deprecatedMachines: pdef.deprecatedMachines ?? [],
     })),
+    sections: TABS.flatMap((t) =>
+      t.sections.map((sec) => ({
+        id: sec.id,
+        label: sec.label,
+        tabId: t.id,
+        tabLabel: t.label,
+      })),
+    ),
   }
 }
 

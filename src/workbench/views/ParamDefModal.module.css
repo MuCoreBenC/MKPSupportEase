@@ -126,16 +126,52 @@
   opacity: 0.55;
 }
 
+/* 确认框里那颗：全局弃用是**不可逆的影响面**（撤销栈还留着一条退路） */
+.btnDanger {
+  color: var(--surface-solid);
+  background: var(--danger);
+  border-color: var(--danger);
+}
+
+/* 确认框正文：一条一行，别把三件事挤成一段 */
+.confirmList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-body);
+  line-height: 1.7;
+  color: var(--text-1);
+}
+
+.confirmList li + li {
+  margin-top: 6px;
+}
+
 .btn:disabled {
   opacity: 0.45;
 }
 
-/* 可选项一行：值 / 显示名 / 弃用 / 删。值是等宽短词 —— 窄列对得齐 */
+/* 可选项一行：值 / 显示名 / 全局弃用 / 弃用机型 / 删。值是等宽短词 —— 窄列对得齐 */
 .choiceRow {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr) auto auto;
+  grid-template-columns: 120px minmax(0, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
+}
+
+/* 每一条可选项的「弃用机型…」：窄，只报台数 —— 点开才是那棵树 */
+.choiceMachines {
+  padding: 3px 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.choiceMachines:hover {
+  color: var(--text-1);
+  border-color: var(--line-strong);
 }
 
 .choiceRow + .choiceRow {

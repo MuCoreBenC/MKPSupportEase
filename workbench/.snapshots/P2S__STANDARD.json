@@ -9,6 +9,7 @@
   "toolhead.offset.z": 1.1,
   "toolhead.prime_length": 100.0,
   "toolhead.speed_limit": 70.0,
+  "wiping.disable_front_cover_alarm": false,
   "wiping.disk_stagger_angle": 5.0,
   "wiping.disk_stagger_max_angle": 45.0,
   "wiping.disk_stagger_mode": "off",

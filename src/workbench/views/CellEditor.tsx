@@ -52,9 +52,12 @@ export default function CellEditor({
   const focusOnBoxClick = form === 'row'
 
   /*
-   * 哪几档选项已经弃用（C14 §五）：**判据在后端**（`ChoiceView.deprecated`，
-   * 上游标的与推出来的并集），这里只把它转成共用件认的 `FieldOption.deprecated`
-   * —— 分段选择器与下拉都给那一档划线，两处不用各写一遍。
+   * 哪几档选项**在这台机型上**已经弃用（C14 §五）：判据在后端
+   * （`Cell.deadChoices`，显式 ∪ 推定），这里只把它转成共用件认的
+   * `FieldOption.deprecated` —— 分段选择器与下拉都给那一档划线，两处不用各写一遍。
+   *
+   * **不能读 `ChoiceView.deprecated`**：那是「全局弃用」，一条定义可以只在
+   * A1 上退场、在 P1S 上还能写；把全局旗子当划线状会把能点的档也划掉。
    */
   /*
    * 控件分派（2026-10-03 收紧）：`uiComponent` 说了算，但**值类型得配得上** ——
@@ -105,7 +108,7 @@ export default function CellEditor({
     choices: param.choices.map((o) => ({
       value: String(o.value),
       label: o.label,
-      deprecated: o.deprecated || undefined,
+      deprecated: cell.deadChoices.includes(String(o.value)) || undefined,
     })),
   }
 

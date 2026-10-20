@@ -127,6 +127,20 @@ pub fn mode_to_calibration_string(m: Mode) -> &'static str {
 
 const CALIBRATION_RETRACT_MM: f64 = 2.0;
 
+/// A1 启动段里 `G28` 之后、第一次平移之前插入的抬 Z。
+///
+/// 真机口径：归零结束时 Z 就在 0（喷嘴贴着板），而下一条 `G1 X108 Y-0.5 F30000`
+/// 是从板中心横穿到前缘 —— 在 Z0 上做这段平移，喷嘴（以及本项目的笔架）会直接刮板。
+/// 用户 2026-10-20 的录像里那一道擦痕就是它，预览逐帧也对得上。
+/// 抬到 10mm 之后紧跟着的 `G1 Z0.300` 会立刻落回去，不影响后续任何动作。
+const HOME_AFTER_G28_LIFT: &str = "G1 Z10 F1200";
+
+/// 这一行是不是 `G28`（含 `G28 X` / `G28 Z P0 T140` 这类带参数的写法）。
+fn is_g28_command(trimmed: &str) -> bool {
+    let code = code_before_comment(trimmed);
+    code.len() >= 3 && code.as_bytes()[..3].eq_ignore_ascii_case(b"G28")
+}
+
 fn is_new_calibration_mode(mode_str: &str, model_bbox: Option<&BBox>) -> bool {
     if model_bbox.is_none() {
         return false;
@@ -408,6 +422,18 @@ pub fn filter_model_motion_paths(
             in_model_region = false;
         }
 
+        /* `; CUSTOM_GCODE` 也是模型区的起点 —— 两个理由是同一件事的两半：
+         *   1) Bambu 把它发在**对象几何之前**（每个对象一段自己的 custom gcode），
+         *      所以从这里到下一个 `; FEATURE: Custom` 之间就是那个对象的全部内容；
+         *   2) 本仓实拍的 ZOffset 校准件里，这一段只剩对象起点空驶
+         *      （`G1 X127.693 Y124.368 F42000` → `G1 Z.4` → `G1 Z.2`）：模型路径被删光之后，
+         *      它变成「跑到板子正中、把喷嘴压到 0.2」的一次空点。用户 2026-10-20 报的
+         *      「切换前后在中间点点点、Z 太低刮板」就是它。
+         * 只进不出：出口仍然是上面那条 `; FEATURE: Custom`。 */
+        if has_slicer_comment_prefix(trimmed, "CUSTOM_GCODE") {
+            in_model_region = true;
+        }
+
         if in_glue_region || in_gluepen_region || in_wipe_region || in_end_region {
             filtered.push(line.clone());
             continue;
@@ -422,6 +448,9 @@ pub fn filter_model_motion_paths(
             }
             if !in_skippable_region {
                 if is_model_skeleton_line(trimmed) {
+                    continue;
+                }
+                if is_speed_only_line(trimmed) {
                     continue;
                 }
                 if is_model_motion_line(line) {
@@ -440,12 +469,18 @@ pub fn filter_model_motion_paths(
 pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(lines.len());
     let mut in_mech_mode = false;
+    /* 振动测量用的定位移动：`M970`/`M974` 被删之后，这些 `G0`/`G1` 就只剩「跑到中间空等」
+     * （用户 2026-10-20 在 A1 mini 的预览里看到的那几条居中路径）。
+     * 判据用「第一次 G28 之后」：`G0 X25 Y175 ; find a soft place to home` 与 `G28 Z` 本身
+     * 是**给 Z 归零找一块软地**，必须留；`G28 Z` 之后的一切移动都只是给测量摆位。 */
+    let mut after_home = false;
 
     for line in lines {
         let trimmed = line.trim();
 
         if trimmed.contains(";===== mech mode fast check") {
             in_mech_mode = true;
+            after_home = false;
             result.push(line.clone());
             continue;
         }
@@ -463,6 +498,16 @@ pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String
                 if let Some(cmd) = fields.next() {
                     let cmd = cmd.to_uppercase();
                     if cmd.starts_with("M970") || cmd == "M974" {
+                        continue;
+                    }
+                    if cmd.starts_with("G28") {
+                        after_home = true;
+                    } else if after_home
+                        && matches!(
+                            cmd.as_str(),
+                            "G0" | "G1" | "G00" | "G01" | "G2" | "G3" | "G02" | "G03"
+                        )
+                    {
                         continue;
                     }
                 }
@@ -492,6 +537,7 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
     let mut in_wipe_region = false;
     let mut in_bed_leveling_region = false;
     let mut in_home_after_wipe_region = false;
+    let mut in_post_home_region = false;
     let mut in_config_block = false;
 
     for line in lines {
@@ -584,8 +630,30 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
             || trimmed.contains(";===== home after wipe mouth end=====")
         {
             in_home_after_wipe_region = false;
+            in_post_home_region = true;
             result.push(line.clone());
             continue;
+        }
+
+        if in_post_home_region {
+            /* P1 的擦嘴后这一段在**直接校准**下同样没有意义，而且比 A1 更"空"：
+             *   `M106 P2 S100`                 开大风扇（只是给工具头降温）
+             *   `M104 S245`                    提前升到打印温度 —— 我们根本不打印
+             *   `G1 X128 Y128 Z10` ×2          mech mode 自检的两次空跑
+             *   `G28 X ; re-home XY`           自检之后的重回零
+             * 一直到 `;===== nozzle load line` 才是后面真正要处理的段（清洗线已经被
+             * 启动段最小化削成 `M104 S30`）。这一段整块跳过，别让机器白热、白跑。 */
+            /* 出口给三个标记：X1C 走的是同一条 P1 分支，但它的
+             * `preserve_nozzle_load_line` 是 false（见 `insert_calibration_gcode_with_receipt`
+             * 里那一串机型判断），清洗线那一段连**标记本身**都会被更早删掉 ——
+             * 只认一个标记的话，跳过区会一路吃到 `MACHINE_START_GCODE_END`。 */
+            let boundary = trimmed.contains(";===== nozzle load line")
+                || trimmed.contains("turn off light and wait extrude temperature")
+                || trimmed.contains("; MACHINE_START_GCODE_END");
+            if !boundary {
+                continue;
+            }
+            in_post_home_region = false;
         }
         if in_home_after_wipe_region {
             if is_judge_flag_line(trimmed) || is_m622_line(trimmed) || is_m623_line(trimmed) {
@@ -611,6 +679,7 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
     let mut in_wipe_region = false;
     let mut in_bed_leveling_region = false;
     let mut in_home_after_wipe_region = false;
+    let mut in_post_home_region = false;
     let mut in_extrude_cali_region = false;
     let mut in_config_block = false;
 
@@ -714,6 +783,7 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
 
         if trimmed.contains(";===== home after wipe mouth end") {
             in_home_after_wipe_region = false;
+            in_post_home_region = true;
             result.push(line.clone());
             continue;
         }
@@ -727,7 +797,31 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
                 continue;
             }
             result.push(line.clone());
+            /* `G28` 之后紧跟的那条 `G1 X108 Y-0.5 F30000` 是**在 Z0 上平移**：
+             * 归零把 Z 压到 0（喷嘴贴板），这一段横穿板面 → 真机上直接刮过去
+             * （用户 2026-10-20 的录像与预览逐帧对上）。先抬 Z 再让它走。 */
+            if is_g28_command(trimmed) {
+                result.push(HOME_AFTER_G28_LIFT.to_string());
+            }
             continue;
+        }
+
+        if in_post_home_region {
+            /* 直接校准**不打印模型**，归零之后这一整段就没有意义：
+             *   `G1 X108.000 Y-0.500 F30000`  去板前沿的「清洗线入口」
+             *   `G1 Z0.300 F1200`             落到首层高度
+             *   `M400` / `G2814 Z0.32`        等运动 + Z 微调
+             *   `M104 S245 ; prepare to print` 升到打印温度
+             * 原厂是靠紧接着的 nozzle load line 吐料把喷嘴清干净的，而那一整段在模板里
+             * 本来就是注释掉的（用户 2026-10-20 确认：直接校准不需要吐料/升温）。
+             * 于是这些行只剩下「跑到板前沿再干等」的作用，一并删掉。
+             * 交界处交给下面的 nozzle load line / extrude cali test 分支继续处理。 */
+            if !(trimmed.contains(";===== nozzle load line")
+                || trimmed.contains(";===== extrude cali test"))
+            {
+                continue;
+            }
+            in_post_home_region = false;
         }
 
         if trimmed.contains(";===== extrude cali test")
@@ -1084,6 +1178,41 @@ fn is_model_skeleton_line(trimmed: &str) -> bool {
         }
     }
     false
+}
+
+/// 「只改速度、不动位置」的 G 行：`G1 F10342.643`、`G0 F15000`、`G1 F3000`。
+///
+/// 它们在模型区里是**被删掉的移动**留下的速度提示：移动没了，速度提示就是纯垃圾
+/// （2026-10-20 用户报障：直接校准的成品里 1167-1211 行全是 `G1 F10342.643` 这种行）。
+/// `is_model_motion_line` 抓不住它们 —— 那个谓词要「带轴参数」才算运动，而 F 不是轴。
+///
+/// 只在**模型区**调用：区外的 `G1 F…` 会改后续移动的模态进给，删掉就改了真机速度。
+/// 判据：G0/G1/G2/G3 + 有 F + **没有**任何轴参数（X/Y/Z/E，弧的 I/J，以及 R）。
+fn is_speed_only_line(trimmed: &str) -> bool {
+    let code_part = code_before_comment(trimmed);
+    if code_part.is_empty() {
+        return false;
+    }
+    let upper = code_part.to_uppercase();
+    if !(upper.starts_with("G0")
+        || upper.starts_with("G1")
+        || upper.starts_with("G2")
+        || upper.starts_with("G3"))
+    {
+        return false;
+    }
+    let mut has_feed = false;
+    for f in code_part.split_whitespace().skip(1) {
+        let Some(b) = f.as_bytes().first() else {
+            continue;
+        };
+        match b.to_ascii_uppercase() {
+            b'F' => has_feed = true,
+            b'X' | b'Y' | b'Z' | b'E' | b'I' | b'J' | b'R' => return false,
+            _ => {}
+        }
+    }
+    has_feed
 }
 
 /// `isModelMotionLine`（helpers.go:317）：G0-G3 且带 X/Y/Z/E(/I/J) 数值参数。

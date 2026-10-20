@@ -26,6 +26,7 @@ import { api } from '../../api'
 import { isAppError } from '../../api/contract'
 import type { AppError, Axes, Preset, AxisLimit, AxisLimits } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
+import { useActivePreset } from '../state/appState'
 import { useDeliveryRevision } from '../state/deliveryState'
 
 export type { Preset }
@@ -67,10 +68,14 @@ const OFFSET_KEYS = {
 const SPEED_KEY = 'toolhead.speed_limit'
 
 /*
- * 跨页缓存（2026-10-05）：key = `机型/版本`。tab 切换会重挂，没有这份缓存时每次进
- * 校准页读数都要从「—」等一趟 IPC 才长出数字 —— 页脚在进场后当着用户的面再变一次。
+ * 跨页缓存（2026-10-05）：key = `机型/版本|在用的那一份`。tab 切换会重挂，没有这份缓存时
+ * 每次进校准页读数都要从「—」等一趟 IPC 才长出数字 —— 页脚在进场后当着用户的面再变一次。
  * 重挂先吃上一份 ready 结果渲染、照旧重拉（文件可能换过），回来后覆盖。
  * 只缓存 ready：waiting/failed 是过程态，缓存它们会把「失败」钉在页面上。
+ *
+ * ★★ 2026-10-20：键里补上「在用的那一份」（见 [`usePreset`] 里那段）。
+ *   只按 `机型/版本` 分家时，同一个 combo 下的副本与原件的读数挤在同一个格子里 ——
+ *   切过去先亮出另一份的旧值，回来的新值也可能被当成"同一件事"盖不掉。
  */
 const presetCache = new Map<string, Preset>()
 
@@ -83,7 +88,28 @@ export function usePreset(sel: Selection): PresetState {
   const deliveryRevision = useDeliveryRevision()
 
   /*
-   * ★★ 状态**跟着"哪一版"走**（2026-10-17 第六轮）。
+   * ★★ **"同一版、两份文件"要读出各自的数**（2026-10-20 作者实测）。
+   *
+   * 校准页读数那一支走 `getLocalCopyFor(机型, 版本)` —— 入参里没有"哪一份"，后端只能按
+   * **底账正用着的那份**挑（`local_copy_for` 的第一条：`origin == local` 且 path 命中）。
+   * 所以这里**必须跟着底账重读**：原来只依赖投递面代次，而"在同一版的两份之间点使用"
+   * 盘上一个字节都没动，代次不变 ⇒ 永远不重读。作者那张截图正是：抽屉里已经切到
+   * `A1-fastv3.3.toml`（在用），页脚还挂着 `A1-fastv3.3 copy.toml` 的旧值。
+   *
+   * 只有**用户线 + 属于当前 combo** 的那份才进键：云端线不参与那份挑选
+   * （后端只在 `origin == Local` 时按 path 命中），别的 combo 的那份更与本页无关。
+   */
+  const active = useActivePreset()
+  const activePath =
+    active !== null &&
+    active.origin === 'local' &&
+    active.machineId === machine &&
+    active.versionId === version
+      ? (active.path ?? '')
+      : ''
+
+  /*
+   * ★★ 状态**跟着"哪一份"走**（2026-10-17 第六轮）。
    *
    * 原来是裸 `useState`：换一版时 effect 里才 `setState(waiting)`，于是**中间有一帧**
    * 是"旧的 ready + 新的选择" —— 选机型页那一格就拿着旧名字配新副本画出来，看起来
@@ -91,8 +117,13 @@ export function usePreset(sel: Selection): PresetState {
    *
    * 现在状态带钥匙：渲染时发现钥匙对不上，**当帧**就换成新版的（缓存命中直接 ready），
    * 不会出现混合态。`useMemo` 保证对象身份稳定（`useCalibration` 那条 effect 依赖它）。
+   *
+   * 钥匙 = `机型/版本|在用的那一份`（2026-10-20 补后半截）：同一版下换成另一份时要按
+   * 另一份重读，不能拿上一份的 ready 冒充（那正是"切了还是旧值"）。
    */
-  const key = complete && machine !== null && version !== null ? `${machine}/${version}` : null
+  const comboKey =
+    complete && machine !== null && version !== null ? `${machine}/${version}` : null
+  const key = comboKey === null ? null : `${comboKey}|${activePath}`
   const [entry, setEntry] = useState<{ key: string; state: PresetState } | null>(null)
   const state = useMemo<PresetState>(() => {
     if (key === null) return { status: 'idle' }
@@ -208,6 +239,9 @@ export function usePreset(sel: Selection): PresetState {
      * （预设页下载 / 另存 / 改归属）。不跟着投递面代次重读的话，首页与校准页会拿
      * 一个陈旧的 `local`（比如你刚在预设页另存了一份，这里还以为"还没有本地这份"，
      * 校准就没地方写）。同一条口径见 `../state/deliveryState.ts` 文件头。
+     *
+     * ★★ 2026-10-20：`key` 的后半截是**在用的那一份**（见 [`usePreset`] 里那段）——
+     * 「使用」只动底账、不动投递面，它必须走这条键，光靠 `deliveryRevision` 收不到。
      */
   }, [complete, machine, version, key, deliveryRevision])
 

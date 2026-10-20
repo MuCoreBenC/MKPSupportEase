@@ -1367,7 +1367,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
            */
           const label = p?.label ?? rd.label
           const desc = p?.desc ?? rd.desc
-          const isDeprecated = p === undefined || p.deprecated === true || meta?.deprecated === true
+          /*
+           * 弃用**按这台机型**判：定义侧可以只点名一部分机型（`deprecatedMachines`），
+           * 那种情况在这台机器上照旧能改。全局 `deprecated` 仍然压过一切。
+           */
+          const isDeprecated =
+            p === undefined ||
+            p.deprecated === true ||
+            meta?.deprecated === true ||
+            rd.deprecatedMachines?.includes(machineId) === true
           const def: ParamDef = {
             key,
             label,
@@ -1393,7 +1401,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               choices: (p?.choices ?? rd.choices)?.map((c) => ({
                 value: c.value,
                 label: c.label,
-                deprecated: c.deprecated === true ? true : undefined,
+                /* 全局弃用 ∪ 点名这台机型 —— 与后端 `Choice::deprecated_for` 同一条 */
+                deprecated:
+                  c.deprecated === true || c.deprecatedMachines?.includes(machineId) === true
+                    ? true
+                    : undefined,
               })),
             },
           }

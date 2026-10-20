@@ -327,12 +327,28 @@ export function WorkbenchApp() {
       .catch(() => undefined)
   }, [])
 
+  /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
+  const refreshBook = useCallback(() => {
+    wb.book()
+      .then(setBook)
+      .catch(() => undefined)
+    refreshReport()
+  }, [refreshReport])
+
+  /** 当前页面的 ref：focus 那条监听只装一次，不能跟着每次切页重挂 */
+  const pageRef = useRef(page)
+  pageRef.current = page
+
   /**
    * **外面的文件改过了**（2026-10-19，作者：「我直接改了那些模型，它这里面能不能知道」）。
    *
    * 工作台读的是盘上的真字节，但读数只在写操作 / 进页时取 —— 作者在编辑器里改完
    * 3MF 再切回来，屏幕还是旧的。这里在窗口重新获得焦点时重取一遍「会变的那几样」：
    * 检查报告（交付目录对不对得上、导航徽标）+ `tick`（生成页交付清单 / 资产库列表）。
+   *
+   * ★ 2026-10-20 补上 `wb_book()`：生成与发布页那 9 行状态来自 `book.buildRows`，
+   *   它以前**不在**这条刷新链里 —— 于是外面显示「已生成」、明细显示「待更新」，
+   *   要重启才对齐。现在停在生成页时一起重取（别的页仍然只取报告，省一次全本推导）。
    *
    * 300ms 去抖：切窗常带一串 focus / blur（拖窗口、系统弹窗），不必每次都扫盘。
    * **不做轮询、不引入文件监视** —— 作者要的是"切回来就能看到"，不是秒级同步。
@@ -343,7 +359,8 @@ export function WorkbenchApp() {
       if (t !== null) window.clearTimeout(t)
       t = window.setTimeout(() => {
         t = null
-        refreshReport()
+        if (pageRef.current === 'build') refreshBook()
+        else refreshReport()
         setTick((n) => n + 1)
       }, 300)
     }
@@ -352,17 +369,25 @@ export function WorkbenchApp() {
       window.removeEventListener('focus', onFocus)
       if (t !== null) window.clearTimeout(t)
     }
-  }, [refreshReport])
+  }, [refreshBook, refreshReport])
 
   /**
    * 进这两页时也重取一次：它们是「盘上现在是什么样」的读数页
    * （生成与发布看交付目录，资产库看载荷字节）。
+   *
+   * 生成页还要**整本**：那 9 行的 `BuildState` 不住在交付清单里。
    */
   useEffect(() => {
-    if (page !== 'build' && page !== 'assets') return
-    refreshReport()
-    setTick((n) => n + 1)
-  }, [page, refreshReport])
+    if (page === 'build') {
+      refreshBook()
+      setTick((n) => n + 1)
+      return
+    }
+    if (page === 'assets') {
+      refreshReport()
+      setTick((n) => n + 1)
+    }
+  }, [page, refreshBook, refreshReport])
 
   /**
    * 值写入那一路的检查报告**尾随去抖**（700ms）—— 见 `run` 的 `quiet`。
@@ -385,14 +410,6 @@ export function WorkbenchApp() {
     },
     [],
   )
-
-  /** 整本重取。机型页的结构性写（建 / 删 / 复制版本）之后徽章的机型版本数要跟上 */
-  const refreshBook = useCallback(() => {
-    wb.book()
-      .then(setBook)
-      .catch(() => undefined)
-    refreshReport()
-  }, [refreshReport])
 
   /**
    * `presets/` 改过之后（「重新加载」= 后端重开一次会话）：换 `Boot`，并把

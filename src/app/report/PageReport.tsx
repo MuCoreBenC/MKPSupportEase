@@ -55,9 +55,18 @@
  * # 动作只有三件
  *
  *   刷新   重读一遍磁盘（钩子随时可能又跑了一次）—— **后处理一跑完会自己重读一次**
- *          （订阅 `postprocess-finished`，见下面那条 effect），这颗按钮是手动补一刀
+ *          （订阅 `postprocess-finished`，见下面那条 effect），这颗按钮是手动补一刀；
+ *          **右栏详情一起重读**（列表重读了、详情还停在旧值，是最容易看出来的不一致）
  *   导出   把选中的那一条的三件套复制到用户点名的目录（`ExportModal.tsx`）
  *   选一条 看这一条的详情（结论 / 打印 / 管线 / 文件）—— 左栏点一下就是选中
+ *
+ * # 打印时间是**延后**算的（2026-10-20）
+ *
+ * 钩子不等估算：先落 `printTimeStatus = computing` 就退（切片器在等退出码），常驻
+ * 进程算完再回填 `detail.printTime` 并补成 `ready`。于是「选中不变」的时候右栏也
+ * 必须能再读一遍（`detailNonce`）：补算完成的事件一到就拨、按「刷新」也拨，
+ * `computing` 期间再兜底轮询几秒。**只按 `selId` 读一次的老写法**会让那一格
+ * 永远停在「—」，非得换一条记录再切回来才亮（作者点的那一版）。
  *
  * 「清理缓存」那些**没有真实实现的动作不摆**（纪律：没有实现不给入口）。
  *
@@ -88,6 +97,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
 import type {
+  PostProcessPrintTime,
   ReportDetail,
   ReportExportPlan,
   ReportGlueFacts,
@@ -96,7 +106,7 @@ import type {
   ReportSummary,
   ReportTowerFacts,
 } from '../../api'
-import { POSTPROCESS_FINISHED } from '../postprocess/events'
+import { POSTPROCESS_FINISHED, POSTPROCESS_PRINT_TIME } from '../postprocess/events'
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
@@ -124,6 +134,15 @@ const NARROW_W = 880
 const PEEK = 44
 /** 拖动超过这个距离才吸边，否则回弹 */
 const SNAP = 40
+/**
+ * 打印时间还在补算（`printTimeStatus === 'computing'`）时再看一眼的间隔 / 上限。
+ *
+ * 补算完成的那个事件（`postprocess-print-time`）是主路；轮询只是兜底 ——
+ * 事件正好落在"页面还没订阅上"或"这一屏刚被打开"的那一瞬，就不该永远横着。
+ * 上限之后就停手：真算不出来由后端标 `failed`，页面不替它转圈。
+ */
+const PRINT_TIME_POLL_MS = 800
+const PRINT_TIME_POLL_MAX_MS = 30_000
 
 /** 「正在重读…」那条提示的原文；读完（成或败）按原文收掉，不误伤别的提示 */
 const READING_NOTE = '正在重读执行记录…'
@@ -851,6 +870,18 @@ export default function PageReport() {
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [detailErr, setDetailErr] = useState<string | null>(null)
+  /**
+   * 详情**再读一遍**的触发计数（`selId` 没变时也要读）。
+   *
+   * 打印时间是**延后**算的：钩子先落 `printTimeStatus = computing` 就退，常驻进程
+   * 算完才回填 `detail.printTime`。若只看 `selId`，这次回填永远进不了这一屏 ——
+   * 表现就是「打印时间」一格一直是「—」，非得换一条记录再切回来才亮（作者 2026-10-20 点的）。
+   * 所以补算完成的事件一到、按了「刷新」，都拨一下这个数。
+   */
+  const [detailNonce, setDetailNonce] = useState(0)
+  const reloadDetail = useCallback(() => setDetailNonce((n) => n + 1), [])
+  /** 右栏现在这份 `detail` 是给哪一条读的（换记录才清空，同一条补读不闪） */
+  const detailFor = useRef<string | null>(null)
   const [tab, setTab] = useState<string>(TAB_ALL)
   const [sideOpen, setSideOpen] = useState(false)
   /*
@@ -953,9 +984,28 @@ export default function PageReport() {
     let alive = true
     const offs: (() => void)[] = []
     void listen(POSTPROCESS_FINISHED, () => {
-      if (alive) read(true)
+      if (!alive) return
+      read(true)
+      /*
+       * 列表挑到最新那条之后详情也得跟着换。`read(true)` 里那句 `setSelId` 在
+       * 「最新那条本来就是选中的」时是同值赋值 ⇒ 详情 effect 不会重跑，所以这里
+       * 显式再拨一次（那一趟刚落下时打印时间多半还是 `computing`）。
+       */
+      reloadDetail()
     }).then((off) => {
       /* 订阅回执比卸载晚到时就地退订（否则监听器留在后端没人收） */
+      if (alive) offs.push(off)
+      else off()
+    })
+    /*
+     * 延后的打印时间**补算完了** —— 右栏正看着的那条把它补上。
+     *
+     * 这一条事件只带秒数、不带记录 id（`hook_ui::PrintTimeDto`），所以只是**再读一次
+     * 当前选中的那条**：读错了也只多一次读盘，读对了那一格就从「—」跳到真实时间。
+     */
+    void listen<PostProcessPrintTime>(POSTPROCESS_PRINT_TIME, () => {
+      if (alive) reloadDetail()
+    }).then((off) => {
       if (alive) offs.push(off)
       else off()
     })
@@ -963,7 +1013,7 @@ export default function PageReport() {
       alive = false
       for (const off of offs) off()
     }
-  }, [read])
+  }, [read, reloadDetail])
 
   /*
    * 导出计划**在选中那一条时就读**（不是等按了「导出」才读）。
@@ -995,25 +1045,57 @@ export default function PageReport() {
   /* 展开一条：详情按需读（列表只带摘要，选中才读整份 meta） */
   useEffect(() => {
     if (selId === null) {
+      detailFor.current = null
       setDetail(null)
       setDetailErr(null)
       return
     }
-    setDetail(null)
-    setDetailErr(null)
+    /*
+     * 换一条才清空右栏（先摆"正在读这一条的详情…"）；同一条的补读（打印时间刚补上 /
+     * 按了刷新）**静默换值** —— 清一下再长回来，看着就是整页闪了一下。
+     */
+    const first = detailFor.current !== selId
+    if (first) {
+      detailFor.current = selId
+      setDetail(null)
+      setDetailErr(null)
+    }
     let alive = true
     api.getReportDetail(selId).then(
       (got) => {
         if (alive) setDetail(got)
       },
       (e: unknown) => {
-        if (alive) setDetailErr(errorText(e))
+        if (!alive) return
+        /* 补读失败时已经摆着的那份不动（旧值比一句红字有用）；换记录后读不到才报 */
+        if (first) setDetailErr(errorText(e))
       },
     )
     return () => {
       alive = false
     }
-  }, [selId])
+  }, [selId, detailNonce])
+
+  /*
+   * 打印时间还在补算（`printTimeStatus === 'computing'`）时的兜底：隔一会儿再看一眼。
+   *
+   * 主路是 `postprocess-print-time` 那条事件；这一条只补"事件落在缝里"的那种情形
+   * （订阅刚挂上 / 这一屏刚被打开那一刻正好算完）。状态一变 `ready` / `failed`
+   * 这里自然停下；上限到了也停 —— 真算不出来后端会自己标 `failed`，页面不替它转圈。
+   */
+  const printTimePollFrom = useRef<number | null>(null)
+  useEffect(() => {
+    if (detail === null || detail.printTimeStatus !== 'computing') {
+      printTimePollFrom.current = null
+      return
+    }
+    const now = Date.now()
+    if (printTimePollFrom.current === null) printTimePollFrom.current = now
+    const left = PRINT_TIME_POLL_MAX_MS - (now - printTimePollFrom.current)
+    if (left <= 0) return
+    const id = setTimeout(reloadDetail, Math.min(PRINT_TIME_POLL_MS, left))
+    return () => clearTimeout(id)
+  }, [detail, reloadDetail])
 
   /*
    * 窄档判断：CSS 里的容器查询管布局，JS 只要一个布尔值来决定"点了是滑开还是选中"。
@@ -1391,6 +1473,8 @@ export default function PageReport() {
           <Btn
             onClick={() => {
               read()
+              /* 列表重读之外，右栏那条也重读 —— 打印时间可能刚从 `computing` 变成 `ready` */
+              reloadDetail()
               setNote({ text: READING_NOTE, bad: false })
             }}
           >

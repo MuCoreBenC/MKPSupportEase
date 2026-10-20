@@ -96,7 +96,16 @@ function toRecipeParam(param: RawParam, machineId: string, versionId: string | n
     group: sectionLabel.get(param.layout.sectionId) ?? param.layout.sectionId,
     unit: param.unit,
     control: CONTROL[param.uiComponent] ?? 'text',
-    choices: param.choices,
+    /* 上游的 `deprecatedMachines` 是逗号串，契约那边是数组 —— 形状在这道口上换 */
+    choices: param.choices?.map((c) => ({
+      value: c.value,
+      label: c.label,
+      deprecated: c.deprecated,
+      deprecatedMachines: c.deprecatedMachines
+        ?.split(',')
+        .map((s) => s.trim())
+        .filter((s) => s !== ''),
+    })),
     min: param.min,
     max: param.max,
     step: param.step,
@@ -110,9 +119,10 @@ function toRecipeParam(param: RawParam, machineId: string, versionId: string | n
 /**
  * 某一张配方的全部参数。`versionId` 传 `null` = 只看机型基底，那时每条都是 `origin: 'base'`。
  *
- * 默认排除 `deprecated` 与 `hidden`：实测 7 个字段已废弃，它们还在数据里是为了兼容旧文件，
- * 不是给人改的。被 `machineFilter` 排除的字段也不出现在这台机型上 ——
- * 那是后端的事实，界面不该自己在客户端筛。
+ * 默认排除 `deprecated` 与 `hidden`：已废弃的字段还在数据里是为了兼容旧文件，
+ * 不是给人改的。`deprecatedMachines` 只排除点名的机型 —— 与后端
+ * `ParamDef::deprecated_for` 同一条口径。被 `machineFilter` 排除的字段也不出现在
+ * 这台机型上 —— 那是后端的事实，界面不该自己在客户端筛。
  */
 export function resolveParams(machineId: string, versionId: string | null): RecipeParam[] {
   const out: RecipeParam[] = []
@@ -120,6 +130,9 @@ export function resolveParams(machineId: string, versionId: string | null): Reci
     const param = paramByKey.get(key)
     if (!param) continue
     if (param.deprecated || param.hidden) continue
+    if (param.deprecatedMachines?.split(',').map((s) => s.trim()).includes(machineId) === true) {
+      continue
+    }
     if (!appliesTo(param, machineId)) continue
     out.push(toRecipeParam(param, machineId, versionId))
   }
@@ -156,6 +169,9 @@ export function paramMeta(): ParamMeta[] {
       mergeGroup: p.mergeGroup,
       pinned: p.pinned,
       deprecated: p.deprecated,
+      deprecatedMachines: p.deprecatedMachines
+        ? p.deprecatedMachines.split(',').map((s) => s.trim())
+        : undefined,
     }
     if (p.variantMode === 'shared' || p.variantMode === 'per_variant') {
       meta.variantMode = p.variantMode
@@ -199,7 +215,14 @@ export function catalogRegistry(): CatalogRegistry {
         value: toText(c.value),
         label: c.label,
         deprecated: c.deprecated === true ? true : undefined,
+        deprecatedMachines: c.deprecatedMachines
+          ?.split(',')
+          .map((s) => s.trim())
+          .filter((s) => s !== ''),
       })),
+      deprecatedMachines: p.deprecatedMachines
+        ? p.deprecatedMachines.split(',').map((s) => s.trim())
+        : undefined,
       min: p.min,
       max: p.max,
       step: p.step,

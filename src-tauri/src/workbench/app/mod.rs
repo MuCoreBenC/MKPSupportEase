@@ -632,6 +632,19 @@ pub struct RegistryView {
     pub updated: String,
     pub tabs: Vec<TabMeta>,
     pub params: Vec<ParamView>,
+    /// 能装参数的分组（含暂时空掉的），按页签顺序 —— 定义框「所属分组」下拉用。
+    /// **不过滤空组**：把一个组搬空之后还得能搬回去
+    pub sections: Vec<SectionTarget>,
+}
+
+/// 「所属分组」下拉的一行：参数落在哪个页签的哪个分组
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionTarget {
+    pub id: String,
+    pub label: String,
+    pub tab_id: String,
+    pub tab_label: String,
 }
 
 /// 一个参数在界面上要用到的那些。
@@ -661,7 +674,10 @@ pub struct ParamView {
     pub parent_key: Option<String>,
     /// 空 = 不限机型
     pub machine_filter: Vec<String>,
+    /// **全局弃用**（所有机型）
     pub deprecated: bool,
+    /// **只在这些机型上弃用**（与 `deprecated` 叠加）
+    pub deprecated_machines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -669,7 +685,13 @@ pub struct ParamView {
 pub struct ChoiceView {
     pub label: String,
     pub value: Value,
+    /// **显式全局弃用** —— 定义框那颗勾的状态，回写只认这一格。
+    /// 之前这里是「显式 ∪ 推定」的并集，打开框再保存会把推定值固化成 `deprecated = true`
     pub deprecated: bool,
+    /// **点名弃用**的机型（回写用这一格）
+    pub deprecated_machines: Vec<String>,
+    /// 推出来的弃用（选这一档放开的子参数全弃用），**只显示、不回写**
+    pub derived: bool,
 }
 
 #[tauri::command(async)]
@@ -685,6 +707,16 @@ fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView
         updated: reg.updated().to_owned(),
         tabs: reg.param_tabs(),
         params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
+        sections: reg
+            .layout_sections()
+            .into_iter()
+            .map(|(tab_id, tab_label, id, label)| SectionTarget {
+                id,
+                label,
+                tab_id,
+                tab_label,
+            })
+            .collect(),
     }
 }
 
@@ -717,8 +749,9 @@ pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryVie
 }
 
 fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
-    // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集，
-    // 与 choices 一一对齐
+    // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集。
+    // **并集只用来标"推定"**：显式那两格（全局 / 点名机型）单独下发，回写只认它们，
+    // 否则「打开定义框 → 保存」会把推定值固化成一条手写的 `deprecated = true`
     let dead = reg.choice_deprecated(&p.key);
     ParamView {
         key: p.key.clone(),
@@ -744,13 +777,16 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
             .map(|(c, dead)| ChoiceView {
                 label: c.label.clone(),
                 value: c.value.clone(),
-                deprecated: c.deprecated || dead,
+                derived: dead && !c.deprecated && c.deprecated_machines.is_empty(),
+                deprecated: c.deprecated,
+                deprecated_machines: c.deprecated_machines.clone(),
             })
             .collect(),
         show_when: p.show_when.clone(),
         parent_key: p.parent_key.clone(),
         machine_filter: p.machine_filter.clone(),
         deprecated: p.deprecated,
+        deprecated_machines: p.deprecated_machines.clone(),
     }
 }
 

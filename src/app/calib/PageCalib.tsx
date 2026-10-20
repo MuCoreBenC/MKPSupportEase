@@ -85,16 +85,18 @@ const PLATE = {
     axis: 'z',
     model: 'zoffset',
     title: 'Z 偏移校准板',
-    calibId: 'z',
+    /* 2026-10-20 作者口径：现在只有「原版」与「加长版」两块，加长版是默认那块，
+     * 所以它排第一、也是打开时预选的那一版。 */
+    calibId: 'z-ext',
     /*
-     * 2026-10-18：Z 板有两版 —— 旧版（打印区深 13.063）与加长版（16.063）。
+     * Z 板有两版 —— 原版（打印区深 13.063）与加长版（v2，实测 15.272）。
      * 版式一样，板面预览共用现有那张（`src/calib/zoffset-calibration.generated.ts`），
      * 选哪版只换**要打开的那份 3mf**（id → 交付文件名在 Rust 的 `MODEL_DEFS` 里），
      * 校准流程与读数完全不变。后处理侧认这两版靠 `presets/calibration_models.toml`。
      */
     versions: [
-      { id: 'z', label: '旧版' },
       { id: 'z-ext', label: '加长版' },
+      { id: 'z', label: '原版' },
     ],
     hitLabel: zHitLabel,
     mm: { w: Z_VIEW_BOX[2], h: Z_VIEW_BOX[3] },
@@ -103,17 +105,18 @@ const PLATE = {
     axis: 'xy',
     model: 'precise',
     title: 'XY 偏移校准板',
-    calibId: 'xy',
+    /* 与 Z 板同一口径（作者 2026-10-20）：加长版排第一、打开时预选它。 */
+    calibId: 'xy-ext',
     /*
-     * 2026-10-19：XY 板也有两版 —— 标准（打印区 50.5）与加长版（右侧 / 上侧各多 5mm ⇒ 55.5）。
+     * XY 板也有两版 —— 原版（打印区 50.5）与加长版（右侧 / 上侧各多 5mm ⇒ 55.5）。
      * 刻度槽相对板子左下角的位置没动，所以板面预览仍共用这一张
      * （`src/calib/precise-calibration.generated.ts`），选哪版只换要打开的那份 3mf
      * （id → 交付文件名在 Rust 的 `MODEL_DEFS` 里）。后处理侧认这两版靠
      * `presets/calibration_models.toml` 的 `xy-square-50` / `xy-square-55`。
      */
     versions: [
-      { id: 'xy', label: '标准' },
       { id: 'xy-ext', label: '加长版' },
+      { id: 'xy', label: '原版' },
     ],
     hitLabel: xyHitLabel,
     mm: { w: XY_VIEW_BOX[2], h: XY_VIEW_BOX[3] },

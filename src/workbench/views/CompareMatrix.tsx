@@ -37,7 +37,10 @@ interface Props {
 
 /**
  * 能不能拿这个参数去批量（C14 第十五轮）：gcode 没有「设成同一个值」这回事；
- * 已弃用的**不给批量入口**——没有的入口好过灰掉的入口。
+ * **全局**弃用的不给批量入口 —— 没有的入口好过灰掉的入口。
+ *
+ * 只点名了部分机型的那种仍然给入口：勾的列里只有那几台会被后端拒，
+ * 换一批机器照样能批量（拦在 `BatchEdit` 的手势前那一道，说得出是哪一档）。
  */
 const canBatch = (param: ParamView | null): boolean =>
   param !== null && param.uiComponent !== 'gcode' && !param.deprecated

@@ -1,0 +1,38 @@
+/*
+ * 机型多选器的容器样式（2026-10-20）。
+ *
+ * 行本身的画法住在 `c14.module.css`（`pVrow` / `pVmark` / `pVtext`…）：与参数台
+ * 左树、套餐选版是同一副长相，这里**不许再写第二套**。这个文件只管三件小事：
+ * 树的排布、框里的说明句、框脚那两颗按钮。
+ */
+
+.pickTree {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 280px;
+}
+
+.note {
+  margin: 6px 0 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.grow {
+  flex: 1;
+}
+
+.btn {
+  padding: 5px 12px;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.btn:hover {
+  border-color: var(--line-strong);
+}

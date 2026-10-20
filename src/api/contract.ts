@@ -435,7 +435,13 @@ export interface RecipeParam {
    * —— 参数本身还是活的，只是这一个取值不许再被写成新值（老文件里存着的照旧读得到、能还原）。
    * 客户端把它映射到共用的 `FieldOption.deprecated`（划线），不自己造第二个弃用信号。
    */
-  choices?: { value: string; label: string; deprecated?: boolean }[]
+  choices?: {
+    value: string
+    label: string
+    deprecated?: boolean
+    /** 只在这些机型上弃用（与 `deprecated` 叠加） */
+    deprecatedMachines?: string[]
+  }[]
   min?: number
   max?: number
   step?: number
@@ -733,6 +739,8 @@ export interface ParamMeta {
   mergeGroup?: string
   pinned?: boolean
   deprecated?: boolean
+  /** 只在这些机型上弃用（与 `deprecated` 叠加）；不限机型时不给这个字段 */
+  deprecatedMachines?: string[]
   /** 只对这些机型生效。上游是逗号字符串，这里已拆成数组；不限机型时不给这个字段 */
   machineFilter?: string[]
   /**
@@ -1299,12 +1307,19 @@ export interface CatalogParamDef {
   /** `number` / `switch` / `segmented` / `select` / `gcode` —— 控件形态的原词 */
   uiComponent: string
   valueType: 'float' | 'int' | 'bool' | 'string'
-  /** 选项级弃用在 `Choice.deprecated` 上（那一档正在退场） */
-  choices?: { value: string; label: string; deprecated?: boolean }[]
+  /** 选项级弃用在 `Choice.deprecated`（全局）与 `Choice.deprecatedMachines`（点名机型）上 */
+  choices?: {
+    value: string
+    label: string
+    deprecated?: boolean
+    deprecatedMachines?: string[]
+  }[]
   min?: number
   max?: number
   step?: number
   deprecated?: boolean
+  /** 只在这些机型上弃用（与 `deprecated` 叠加） */
+  deprecatedMachines?: string[]
   /** 只对这些机型生效；空数组 = 不限机型 */
   machineFilter?: string[]
   showWhen?: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }

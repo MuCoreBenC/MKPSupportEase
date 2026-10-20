@@ -1,4 +1,5 @@
 ; ZOffset Calibration
+G1 Z10 F1200
 G1 X100 Y100 Z10 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility
 ;Rising nozzle to avoid collision
 G1 Z6.2

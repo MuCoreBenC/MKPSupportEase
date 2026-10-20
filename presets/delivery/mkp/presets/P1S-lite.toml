@@ -1,50 +1,9 @@
-# release_time: 2026-10-19 14:12:29
+# release_time: 2026-10-20 12:38:40
 # machine: P1S
 # variant: lite
 
-[toolhead]
-# 自定义工具头获取 G-code
-custom_mount_gcode = """
-L803;此处使喷嘴降温
-G92 E0;挤出机归零
-G1 E-10;长回抽
-G92 E0
-L801
-M204 S10000
-G1 X20 Y7 F30000;到驻点
-G1 X1 F300;推到X0，笔尖下落
-G1 X20 Y7 F30000;向左离开
-G1 F30000
-"""
-# 自定义工具头收起 G-code
-custom_unmount_gcode = """
-G92 E0
-G1 F30000
-G1 X246 Y0 ;到驻点
-G1 X256 F6000 ; 收笔
-G1 F30000
-L802
-G1 F1500
-G1 E10.7;填充回抽
-G1 F30000
-M106 P1 S[AUTO] ; 风扇
-;M106 P2 S100
-G1 X70 Y265 F30000;Wipe
-G1 E6;Wipe
-G1 X90 F30000;Wipe
-G1 X120 F30000;Wipe
-G1 X90 F30000;Wipe
-"""
-first_pen_revitalization_flag = false # 首笔活化标志
-glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
-MKP_retract = 0 # 回抽长度(mm)
-offset_x = -25.9 # 笔尖偏移
-offset_y = 14 # 笔尖偏移
-offset_z = 1.1 # 笔尖偏移
-prime_length = 100 # 预涂长度(mm) 范围:0~500
-speed_limit = 70 # 涂胶速度限制 (mm/s)
-
 [wiping]
+disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)
 disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
 disk_stagger_max_angle = 45 # 圆盘最大偏移角度(度) 范围:10~90
 disk_stagger_mode = "off" # 圆盘错开模式(off/on/auto)
@@ -100,3 +59,45 @@ wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
 xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
 z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+
+[toolhead]
+# 自定义工具头获取 G-code
+custom_mount_gcode = """
+L803;此处使喷嘴降温
+G92 E0;挤出机归零
+G1 E-10;长回抽
+G92 E0
+L801
+M204 S10000
+G1 X20 Y7 F30000;到驻点
+G1 X1 F300;推到X0，笔尖下落
+G1 X20 Y7 F30000;向左离开
+G1 F30000
+"""
+# 自定义工具头收起 G-code
+custom_unmount_gcode = """
+G92 E0
+G1 F30000
+G1 X246 Y0 ;到驻点
+G1 X256 F6000 ; 收笔
+G1 F30000
+L802
+G1 F1500
+G1 E10.7;填充回抽
+G1 F30000
+M106 P1 S[AUTO] ; 风扇
+;M106 P2 S100
+G1 X70 Y265 F30000;Wipe
+G1 E6;Wipe
+G1 X90 F30000;Wipe
+G1 X120 F30000;Wipe
+G1 X90 F30000;Wipe
+"""
+first_pen_revitalization_flag = false # 首笔活化标志
+glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_retract = 0 # 回抽长度(mm)
+offset_x = -25.9 # 笔尖偏移
+offset_y = 14 # 笔尖偏移
+offset_z = 1.1 # 笔尖偏移
+prime_length = 100 # 预涂长度(mm) 范围:0~500
+speed_limit = 70 # 涂胶速度限制 (mm/s)
