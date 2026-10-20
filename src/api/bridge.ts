@@ -324,6 +324,11 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」—— 落 presets 格。
+     关（出厂）⇒ 复制件不认云端：账本与逐参数更新账两个出口都把它滤掉 */
+  getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),
+  setCopiesFollowCloud: (enabled) =>
+    call('setCopiesFollowCloud', 'set_copies_follow_cloud', { enabled }),
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
@@ -353,7 +358,9 @@ export const bridgeApi: MkpApi = {
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
   /* ——— 逐参数「云端更新」（2026-10-09）———
      读三方账（我 / 云端旧值 / 云端新值）+ 落采用·保持的决定。
-     `fetchMissing` 只在打开某一份预设时给 true（允许为取云端新版发一次网络）。 */
+     ★ `fetchMissing` 只有用户明确点「更新 / 选择要更新的参数」那一刻才给 true
+     （2026-10-20 作者裁定：没点之前不替他去取云端新版字节）。
+     `null` = 这一份不认云端（复制出来的，且那个开关关着）。 */
   getPresetParamSync: (path, fetchMissing) =>
     call('getPresetParamSync', 'get_preset_param_sync', {
       path,

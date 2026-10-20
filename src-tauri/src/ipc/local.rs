@@ -21,6 +21,8 @@
 //! 今天真机上这两条读多半返回空 —— **空是合法状态，不是错误**（用户一份都没另存过）。
 //! 它在界面上就是本地表里那一半「本地文件」：看得见、认得出、看得了、也能改。
 
+use std::collections::HashSet;
+
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -217,8 +219,11 @@ pub struct CommittedDraftDto {
 pub struct LocalFileIdentityDto {
     /// 落点（相对**用户根**，`presets-local/…`）
     pub path: String,
-    /// 文件名
+    /// 文件名（**落盘的就是这一串**）
     pub file_name: String,
+    /// 这个名字被程序**修过了**（剔了不合规的字符 / 名字太长截到上限）。
+    /// 界面据此照实说一句 —— 用户起的是另一个名字，不说就等于骗他。
+    pub adjusted: bool,
 }
 
 /// **开始改一份预设**：把正文复制进临时文件账（AppState 的 draft 格），**原件一动不动**。
@@ -636,6 +641,19 @@ pub async fn get_preset_draft_summary(
 /// **派生视图，不设持久化账本**（有一条纪律：期望值只来自当前目录）。所以：
 /// 只有**现在目录里还活着**的那一版才进账 —— 那一版已被移出版次的（用户文件自己
 /// 还能用，只是"跟不上更新"了）不进；没有血统的（手工拷的 / 自己写的）也不进。
+///
+/// # 复制出来的那一份不进（2026-10-20）
+///
+/// 第十一层「另存为一份新的」是**按字节**复制，那三行 `# based_on*` 血统
+/// **原样带过去** —— 于是副本光看血统与原件一模一样、必然进账，云端行的
+/// 「有新版 / 更新」与参数页那整段「云端更新」就落到副本身上了（那些副本
+/// 其实跟云端没关系）。
+///
+/// ⇒ 出口这里按**出处账**（[`runtime::provenance`]，复制那一刻记的一条 `copy`）
+/// 把复制件滤掉。**不按名字猜**：名字改了就失效，而出处账的 `to` 跟着改名走。
+///
+/// 开关「复制出来的也跟着云端更新」打开时不滤（作者：「保留显示也挺方便的」）——
+/// 那一档由 [`runtime::app_state::copies_follow_cloud`] 一句话决定，别处没有第二份判据。
 #[tauri::command]
 pub async fn get_local_preset_index(
     app: AppHandle,
@@ -645,6 +663,12 @@ pub async fn get_local_preset_index(
         let user_root = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&internal)?;
         let files = runtime::local::local_files(&user_root);
+        /* 开关开着 ⇒ 不做排除，连出处账都不必读（省一次读） */
+        let copies = if runtime::app_state::copies_follow_cloud(&internal)? {
+            HashSet::new()
+        } else {
+            runtime::provenance::copy_targets(&user_root)
+        };
 
         Ok(files
             .into_iter()
@@ -652,6 +676,10 @@ pub async fn get_local_preset_index(
                 let lineage = f.lineage.as_ref()?;
                 /* 那一版还在目录里才认这个关系（否则这笔关系已经无处对账） */
                 let source = runtime::local::source_of(&catalog, Some(lineage))?;
+                /* 复制出来的那一份不认领：它是独立的一份，跟云端没关系 */
+                if copies.contains(&f.path) {
+                    return None;
+                }
                 Some(LocalPresetIdentityDto {
                     id: f.path.clone(),
                     file_name: f.file_name.clone(),
@@ -854,6 +882,7 @@ pub async fn rename_local_preset(
         Ok(LocalFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
+            adjusted: done.adjusted,
         })
     })
 }
@@ -891,6 +920,7 @@ pub async fn copy_local_preset(
         Ok(LocalFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
+            adjusted: done.adjusted,
         })
     })
 }

@@ -19,7 +19,7 @@
 //! - **不校验 TOML 内容**：能不能当 Preset 用是后面 Preset 语义入口的事 ——
 //!   导入只是"把外部文件纳入本地文件所有权范围"，**不是"安装 Preset"**；
 //! - **不覆盖**：重名进改名流程，名字的门槛与第十层改名 / 第十一层另存为
-//!   **同一套**（[`super::local::check_new_name`]），`new_name` 由用户在界面上给；
+//!   **同一套**（[`super::local::normalize_new_name`]），`new_name` 由用户在界面上给；
 //! - **一个状态都不碰**：不改使用中指针、不迁移 / 不创建草稿、不进 archive。
 //!
 //! 安全检查全部走现有用户文件边界（[`super::local::check_local_prefix`] 与
@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use crate::fsx::paths::{resolve_in, LOCAL_DIR};
 
-use super::local::{check_local_prefix, check_new_name};
+use super::local::{check_local_prefix, normalize_new_name};
 
 /// 认领这一份的导入器。**现在只有一个**：Preset（`.toml`）。
 ///
@@ -206,8 +206,13 @@ fn commit_one(user_root: &Path, item: &ImportItem) -> ImportOutcome {
         );
     }
     let name = match item.new_name.as_deref() {
-        Some(raw) => match check_new_name(&file_name, raw) {
-            Ok(name) => name,
+        /*
+         * 与第十层改名 / 第十一层另存为**同一套门槛**（能修的修好，不因名字太长失败）。
+         * ★ 这一路不报 `adjusted`：导入自己会在结局里把落点（那个名字）说清楚，
+         * 用户一眼看到的就是修好之后的那一串。
+         */
+        Some(raw) => match normalize_new_name(&file_name, raw) {
+            Ok((name, _adjusted)) => name,
             Err(e) => return fail(file_name, e.message),
         },
         None => file_name.clone(),
@@ -430,14 +435,18 @@ mod tests {
         );
     }
 
-    /// 重名改名走**同一套名字门槛**（空 / 路径 / 后缀），改对了就落那个名字
+    /*
+     * 重名改名走**同一套名字门槛**（空 / 后缀），改对了就落那个名字。
+     * ★ 带路径分隔符 2026-10-20 起**不再拒**（剔掉照落）—— 与改名 / 复制 / 第八层
+     * 另存同一道门槛、同一个改判。
+     */
     #[test]
     fn importing_uses_the_same_name_gate_for_a_new_name() {
         let user = tempfile::tempdir().unwrap();
         let ext = tempfile::tempdir().unwrap();
         write(ext.path(), "源.toml", VALID_TOML);
 
-        for bad in ["换.json", "子目录/源.toml", "..", "   "] {
+        for bad in ["换.json", "..", "   "] {
             let outcomes = commit(
                 user.path(),
                 &[ImportItem {

@@ -38,7 +38,9 @@
  *                                  首页「复制后处理脚本」（`--Toml` 的候选）
  */
 
-import { useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+
+import { api } from '../../api'
 
 let revision = 0
 const listeners = new Set<() => void>()
@@ -98,4 +100,78 @@ export function useSourceRevision(): number {
     },
     () => sourceRevision,
   )
+}
+
+/* ---------- 预设页偏好代次（2026-10-20） ---------- */
+
+let presetPrefsRevision = 0
+const presetPrefsListeners = new Set<() => void>()
+
+/**
+ * 上一次读回来的那一档（进程内存镜像）：几个组件同时订阅时不必各读一遍，
+ * 后挂载的也不至于先闪一下"关"。**真值仍在后端那一格**（`presets.copiesFollowCloud`）。
+ */
+let presetPrefsValue = false
+
+/**
+ * **预设页那一格偏好改过了**（设置页写完「复制出来的也跟着云端更新」就调）。
+ *
+ * # 为什么单开一条，不并进 `deliveryMutated`
+ *
+ * 那一条是"盘上摆布变了"，会引着预设页把**整个目录那一路都重读一遍**（那一路里
+ * 有网络）；而这一格改的只是"账本怎么算" —— 重读的范围只有**本机文件 + 身份账本**
+ * （都是扫盘，不发网络）。拿那一条代次就为重读一句话多付一次目录往返。
+ *
+ * 与它们同一条边界：只广播一个代次，不存任何数据。
+ */
+export function presetPrefsMutated(): void {
+  presetPrefsRevision += 1
+  for (const listener of presetPrefsListeners) listener()
+}
+
+/**
+ * 预设页偏好代次。放进 effect 依赖里：变了就把"本地文件 + 身份账本"重新读一遍
+ * （代次 0 = 还没有人动过这一格）。
+ */
+export function usePresetPrefsRevision(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      presetPrefsListeners.add(listener)
+      return () => {
+        presetPrefsListeners.delete(listener)
+      }
+    },
+    () => presetPrefsRevision,
+  )
+}
+
+/**
+ * 「复制出来的也跟着云端更新」**当前那一档**（2026-10-20；进设置页读一次，改了就广播）。
+ *
+ * 出厂（还没读回来）按**关**算 —— 与后端 `copies_follow_cloud` 解析 `None` 的那一档一致：
+ * 复制件是独立的一份，不认云端。这一格只决定界面**画不画那枚「有新版」**；
+ * 真正的排除在后端（身份账本 / 逐参数更新账两个出口），两边判据同一个来源。
+ *
+ * 代次一变就重读（`usePresetPrefsRevision`），所以设置页改完不必再叫预设页做什么。
+ */
+export function useCopiesFollowCloud(): boolean {
+  const revision = usePresetPrefsRevision()
+  const [on, setOn] = useState(() => presetPrefsValue)
+  useEffect(() => {
+    let alive = true
+    void api.getCopiesFollowCloud().then(
+      (v) => {
+        presetPrefsValue = v
+        if (alive) setOn(v)
+      },
+      (e: unknown) => {
+        /* 读不出来就保持上一次那一档（出厂 = 关）—— 不抛、不挡页面 */
+        console.error('读「复制出来的也跟着云端更新」失败', e)
+      },
+    )
+    return () => {
+      alive = false
+    }
+  }, [revision])
+  return on
 }

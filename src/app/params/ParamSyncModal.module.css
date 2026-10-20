@@ -1,9 +1,33 @@
 /*
- * 「选择要跟随的更新」那一屏的样式。
+ * 「选择要更新的参数」那一屏的样式（原名「选择要跟随的更新」，2026-10-20 改）。
  *
  * 与原型（`docs/supportease-preset-v3.html` 的模态框）同一套版面：三列一行 ——
  * 勾选框 / 参数名与三方值 / 确认后那一格。用项目自己的令牌上色，不照抄原型的调色板。
  */
+
+/*
+ * **这一屏的框**（2026-10-20 作者：「不要这么夸张呀。这个模太宽，搞这么大干嘛？
+ * 而且，我说的不是把下面变大，是把中间内容呀……这个高度再缩减一半吧，
+ * 或者缩减 1/3，就留 2/3 的高度」）。
+ *
+ * 两条：
+ *
+ *   ① **宽度收窄**：走 `md` 那一档 480px（原来 `lg` 的 680px 太横 —— 一行三项
+ *      本来用不了那么宽，左右全是空白）。
+ *   ② **高度给中间**：框本身**不再撑高**（`min-height` 撤了），保持"内容多高就多高"；
+ *      真正变化的是**列表区**（`.rows`）的上下限 —— 一两项时不空出半屏，
+ *      十几项时中间那段自己滚，底栏永远贴着框底。
+ *
+ * `syncBox` 这个类名留着：框身那条内衬规则还挂在它身上（见下）。
+ */
+
+/*
+ * 框身顶部内衬收一点：全选那一条**往上贴**（作者：「这个全选有没有说可以再往上一点呀？」）。
+ * `:global` 那一截是共用件 `.body` 的类名（同一个构建里它自己也加了哈希，所以用包含匹配）。
+ */
+.syncBox > :global([class*='body']) {
+  padding-top: 0;
+}
 
 .empty {
   margin: 0;
@@ -12,14 +36,20 @@
   color: var(--text-3);
 }
 
-/* 全选那一条：钉在列表上方（列表自己滚） */
+/*
+ * 全选那一条：钉在列表上方（列表自己滚）。
+ *
+ * ★ 2026-10-20：**不再铺底色**（作者：「全选那个黑色背景也不好看」）——
+ *   原来是 `--bg-1`，深色主题下那几乎就是黑的，整条像被挖掉一块。
+ *   现在只有一条细线分隔，与框身同一个底，安静得多。
+ */
 .selectbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 8px 2px;
+  /* 上下留一点就好：框身上内衬已经收了，这一条就贴到副标题下面 */
+  padding: 6px 2px 8px;
   border-bottom: 1px solid var(--line);
-  background: var(--bg-1);
 }
 
 /*
@@ -39,10 +69,30 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* 一组（普通项 / 「机器自己的数」末尾那一组） */
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 小组标题：把那一组**为什么分开**说一句，不是装饰 */
+.groupLabel {
+  padding: 10px 2px 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * **列表区**：框身不再定高（见上面 `.syncBox` 那段），高矮由这里说了算。
+ *
+ * 下限 220px：一两项的时候不至于塌成薄薄一条；上限 `min(34vh, 320px)`：
+ * 十几项也不会把框拉成半屏（原来 52vh/460 太高）。超了中间自己滚，底栏不动。
+ */
 .rows {
   display: flex;
   flex-direction: column;
-  max-height: min(52vh, 460px);
+  min-height: 220px;
+  max-height: min(34vh, 320px);
   overflow-y: auto;
 }
 
@@ -51,17 +101,31 @@
   grid-template-columns: 24px minmax(0, 1fr) 150px;
   gap: 12px;
   align-items: center;
-  padding: 9px 2px;
+  padding: 9px 8px;
   border-bottom: 1px solid var(--line);
+  /* 圆角只在"勾上"那一档看得见（见 `.rowOn`）—— 底色不铺满整行宽，两侧留一点缝 */
+  border-radius: 8px;
 }
 
 .row:last-child {
   border-bottom: none;
 }
 
-/* 勾上的行给一层极淡的底：一排勾里，"哪几行会被采用"一眼看得出来 */
+/*
+ * 勾上的行：**一层很淡的绿**（2026-10-20 作者：「他现在这一个被选中的背景不太好看吧？
+ * 他这一条这个黑色不好看，改一下」，随后又：「我不是说要左侧加一个那个东西，
+ * 你不用加那个左侧的那一束」—— 去掉了原来那道左缘竖条）。
+ *
+ * 原来这里是 `--bg-1`：深色主题下那几乎是黑的，整行像被挖掉一块。
+ * 现在用 `--accent-soft`（与勾选框同一套绿），淡到不影响读字，也不抢眼。
+ */
 .rowOn {
-  background: var(--bg-1);
+  background: var(--accent-soft);
+}
+
+/* 勾上的行不画分隔线（底色块下面挂一条线会显得断掉） */
+.rowOn:not(:last-child) {
+  border-bottom-color: transparent;
 }
 
 .what {
@@ -107,6 +171,16 @@
   color: var(--text-1);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 底栏**左侧**那句提示（2026-10-20）：`margin-right: auto` 把它推到左边、
+ * 两颗按钮留在右边（底栏本身是 flex 右对齐，见 `components/modal`）。
+ */
+.hint {
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 /* 底栏两颗：与全稿一致的「次动作 / 主动作」 */

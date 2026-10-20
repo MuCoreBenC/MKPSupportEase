@@ -152,6 +152,39 @@ pub async fn set_auto_clean_history(app: AppHandle, enabled: bool) -> Result<boo
     })
 }
 
+/* ---------- 预设页偏好（2026-10-20）：设置页「预设」那一块 ---------- */
+
+/// **复制出来的那一份跟不跟云端**（出厂 = 关）。
+///
+/// ★ 回的是**解析后的 `bool`**：盘上"没选过"是 `None`，由后端解释成出厂档 ——
+/// 界面不自己拿 `null` 去猜（与自动清理那条同一条口径）。
+///
+/// 读者有两处（**同一格、两条路、一个判据**）：身份账本出口
+/// （[`super::local::get_local_preset_index`]）与逐参数更新账的出口
+/// （[`super::param_sync::get_preset_param_sync`]）。
+#[tauri::command]
+pub async fn get_copies_follow_cloud(app: AppHandle) -> Result<bool, AppError> {
+    traced("getCopiesFollowCloud", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::copies_follow_cloud(&root)
+    })
+}
+
+/// 开关「复制出来的也跟着云端更新」。
+///
+/// 落盘后要广播：这一档**立刻改变**预设页云端行的三态（未获取 / 本地已有 / 有新版）
+/// 与操作列那颗「更新」—— 那一态由身份账本算，而账本的出口正看这一格。
+/// 不广播的话，用户切回预设页看到的还是旧账。
+#[tauri::command]
+pub async fn set_copies_follow_cloud(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    traced("setCopiesFollowCloud", |_| {
+        let root = internal_root(&app)?;
+        let got = runtime::app_state::set_copies_follow_cloud(&root, enabled)?;
+        notify_app_state(&app);
+        Ok(got)
+    })
+}
+
 /* ---------- 后处理偏好（2026-10-17）：设置页那一整块 ---------- */
 
 /// 读后处理偏好 —— 回的是**解析后**的值（`None` 已经解成出厂档、量程已经夹住）。

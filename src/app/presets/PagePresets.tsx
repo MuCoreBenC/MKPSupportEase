@@ -153,7 +153,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
-import type { ArchivedFile, ParamDecision } from '../../api'
+import type { ArchivedFile, LocalPresetFile } from '../../api'
 import { longStatText } from '../store/package'
 /*
  * 这一页那几个框**统一用居中模态框**（作者 2026-10-10：「他全部都用这个右侧的抽屉，
@@ -165,6 +165,8 @@ import { Modal } from '../../components/modal'
 import { useFileImport } from '../import/useFileImport'
 import { useDevPreview } from '../dev/useDevPreview'
 import { usePresetUsage } from '../state/usePresetUsage'
+/* 设置页那一格「复制出来的也跟着云端更新」：本地行画不画「有新版」看它（2026-10-20） */
+import { useCopiesFollowCloud } from '../state/deliveryState'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
@@ -204,7 +206,12 @@ import {
   LOCAL_DRAWER,
   LOCAL_NOT_PRESET_WHY,
   LOCAL_RENAME,
+  PARAMS_TEXT,
+  RESTORE_DEFAULT_NAME,
+  defaultNameAvoiding,
+  defaultNameOf,
   duplicateNameOf,
+  isDetachedCopy,
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
@@ -467,6 +474,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 会一直显示旧的；每开一行重读一遍 —— 刚跑完一趟后处理回来，展开就看见新数。
    */
   const usage = usePresetUsage(expandedKey)
+  /*
+   * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂关）：
+   * 关着时复制 / 导入出来的那几份**不挂「有新版」** —— 作者：
+   * 「我设置里面没开，它就不应该把那些复制出来的也显示……它就只显示那一个」。
+   */
+  const copiesFollowCloud = useCopiesFollowCloud()
   const [note, setNote] = useState<Note | null>(null)
   /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"云端版本"或"更新"上，
@@ -528,8 +541,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [devDelete.on, page.local.rows])
   /*
-   * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要跟随的更新」
-   * 那一屏打开（用户点的是那条直路：他已经知道有云端更新等着处理）。
+   * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要更新的参数」
+   * 那一屏打开（用户点的是那条直路：他已经知道有云端更新等着处理 ——
+   * 所以那条路进页面时就把云端新版取回来了，见 `PageParams` 里那个 effect）。
    */
   const [paramModal, setParamModal] = useState<{
     target: { path: string; fileName: string; machineId: string; versionId: string }
@@ -1064,35 +1078,136 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * 云端行的「更新」：**把云端新版处理到本地这份上**（2026-10-10 作者规格）。
+   * **把云端这一版落到「behind 这一份本地文件」上**（两条入口共用的一段）。
    *
-   * 三步，**不弹任何框**：
-   *   ① 取回云端当前版字节（本地那份一个字节不动 —— 只是取来比较）；
-   *   ② 读逐参数三方账（`presetSync`）：云端改了哪些、其中哪些**我也改过**（= 冲突）；
-   *   ③ **我没改过的项静默跟上**（一次性写进本地文件）；**我改过的项一个字节不动** ——
-   *      留给「修改参数」逐项处理（那边的杠与行内按钮就是为这件事做的）。
+   * 云端行那颗「更新」与本地行那颗「更新」都走这里 —— 区别只在"更新谁"由调用方定。
+   *
+   * 三步：
+   *   ① 读逐参数三方账（`presetSync`，允许后端顺手把云端新版字节取回来）；
+   *   ② **没有要改值的项** ⇒ 直接「应用 0 项」：值一个不动，云端的注释 / 新字段 /
+   *      时间戳与血统跟着新版走 —— 「有新版」就此消失（原来这一步什么都不写，
+   *      于是注释级换版永远挂着「有新版」）；
+   *   ③ **有要改值的项** ⇒ 顺势打开「修改参数 → 选择要更新的参数」那一屏，
+   *      由用户勾（采用云端新值）/ 不勾（保持我的值）后一次落下去。
+   *
+   * `behind` = 要更新的那一份本地文件；`row` = 发起它的那一行（忙的那一颗按钮认它）；
+   * `fileName` = 它对应的云端文件名（文案用）。
+   *
+   * ★ 定义写在两个调用方**前面**（`const` 有暂时性死区：写在后面调用方拿不到）。
+   */
+  const applyCloudUpdate = async (
+    behind: LocalPresetFile,
+    row: PresetTableRow,
+    fileName: string,
+  ): Promise<void> => {
+    setBusyKey(row.rowKey)
+    /*
+     * ② 读逐参数三方账。`fetchMissing: true` 允许后端**顺手把云端新版字节取回来**
+     * （内部基准，**不动本地这份文件**）—— 所以这里不需要先「下载」一遍。
+     *
+     * ★ 这一处是"全应用为看差异发网络"的**两个入口之一**（另一个是参数页那颗按钮），
+     * 因为用户到这一步已经点了「更新」（作者 2026-10-20：不点就别替他去取）。
+     */
+    const sync = await data.presetSync(behind.path, true)
+    setBusyKey(null)
+    /*
+     * `null` = 这一份不认云端（复制出来的那一份）。账本已经把它滤掉了，
+     * 正常走不到这里 —— 万一走到（数据刚被别处改过），也**不许当成"零项待处理"**，
+     * 那样会让人以为云端这一版没动过任何一项。
+     */
+    if (sync === null) {
+      setNote({
+        text: `更新 ${fileName} 没成：你机器上没有跟这个云端条目对得上的那一份`,
+        bad: true,
+      })
+      return
+    }
+    if (!sync.cloudReady) {
+      setNote({
+        text: `更新 ${fileName} 没成：云端新版的字节还没取回来（网络或数据源的问题）`,
+        bad: true,
+      })
+      return
+    }
+    const pending = sync.entries.filter((e) => e.pending)
+    /*
+     * ③a **没有要改值的项** ⇒ 直接「应用 0 项」（= 把这一版收进来）：
+     *    值一个不动，云端的注释 / 新字段 / 时间戳与血统跟着新版走 ——
+     *    「有新版」就此消失（原来这一步什么都不写，于是它永远挂着）。
+     */
+    if (pending.length === 0) {
+      await data.applyParamDecisions(behind.path, [])
+      setNote({ text: `已更新 ${behind.fileName} —— 已经是云端最新版了`, bad: false })
+      return
+    }
+    /*
+     * ③b **有要改值的项** ⇒ 顺势打开「修改参数」并把「选择要更新的参数」那一屏带开
+     *    （`syncFirst`）：那一屏里逐项勾，勾上的采用、没勾的保持 —— 用户看着定，
+     *    不再替他静默采用任何一项。
+     */
+    const machineId = behind.machineId ?? behind.basedOnMachineId
+    const versionId = behind.versionId ?? behind.basedOnVersionId
+    if (machineId === null || versionId === null) {
+      setNote({
+        text: `更新 ${behind.fileName} 没成：认不出这一份属于哪台机型的哪一版`,
+        bad: true,
+      })
+      return
+    }
+    setParamModal({
+      target: { path: behind.path, fileName: behind.fileName, machineId, versionId },
+      syncFirst: true,
+    })
+    setNote({ text: `${behind.fileName} 有 ${pending.length} 项云端改过的参数等你挑`, bad: false })
+  }
+
+  /**
+   * **本地行那颗「更新」**（2026-10-20 作者：「这个下面应该加一个更新按钮，就是说有新的时候
+   * 就出现一个更新按钮。我点了之后，它就跟云端一样更新了，就不用跳转到云端那边去更新」）。
+   *
+   * 与云端行那颗走**同一段落地逻辑**（[`applyCloudUpdate`]）—— 区别只在"更新谁"由这一行
+   * 自己说了算：就是**这一份**（不再按云端文件名去账本里找"第一份落后的"）。
+   * 于是同一云端条目下有好几份时，从哪个行点就更新哪个行。
+   */
+  const runUpdateLocal = (row: PresetLocalRow) => {
+    if (row.basedOn !== 'outdated') return
+    const local = data.local.find((f) => f.path === row.path)
+    if (local === undefined) {
+      setNote({ text: `${row.fileName} 已经不在本地了 —— 列表刚变过，再看一眼`, bad: true })
+      return
+    }
+    const cloudName = row.basedOnCloud ?? row.fileName
+    setNote({ text: `正在更新 ${row.fileName}…`, bad: false })
+    void applyCloudUpdate(local, row, cloudName).catch((e: unknown) => {
+      setBusyKey(null)
+      setNote({ text: `更新失败：${errorText(e)}`, bad: true })
+    })
+  }
+
+  /**
+   * **云端行的「更新」**（2026-10-10 作者规格；2026-10-20 改过一遍走法）。
+   *
+   * 「更新谁」：**血统指向这个云端条目、还没跟上当前版的那一份本地文件**
+   * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的；复制件不在账本里，
+   * 永远不会被当成"要更新的那一份"）。找到之后交给 [`applyCloudUpdate`] 落地。
+   *
+   * ★ 定义写在 [`applyCloudUpdate`] **后面**：`const` 有暂时性死区，反过来拿不到。
    */
   const runUpdate = (row: PresetTableRow) => {
     if (row.scope !== 'cloud') return
     const fileName = row.fileName
-    setBusyKey(row.rowKey)
-    setNote({ text: `正在更新 ${fileName}…`, bad: false })
     void (async () => {
+      setBusyKey(row.rowKey)
+      setNote({ text: `正在更新 ${fileName}…`, bad: false })
       /*
-       * ① 更新的是**本地那一份**：血统指向这个云端条目、而且还没跟上当前版的
-       * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的）。
+       * ① 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
+       * （`cloudSource` 对上它），而且还没跟上当前版（`basedOn !== 'current'`）。
        * **先读一遍本地列表**：更新对象要在动手之前定下来。
        */
       const [localPresets, index] = await Promise.all([
         api.getLocalPresetFiles(),
         api.getLocalPresetIndex(),
       ])
-      /*
-       * 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
-       * （`cloudSource` 对上它），而且还没跟上当前版（`basedOn !== 'current'`）。
-       * 同一云端条目下我可能有好几份（比如下载过两次、各改各的）—— 取列表里第一份落后的。
-       * **复制出来的副本不在账本里**，所以永远不会被当成"要更新的那一份"。
-       */
       const indexByPath = new Map(index.map((e) => [e.path, e]))
       const behind =
         localPresets.find((f) => {
@@ -1109,38 +1224,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         setNote({ text: `云端 ${fileName} 这一版没有要处理的（你机器上那几份都跟得上）`, bad: false })
         return
       }
-      /*
-       * ② 读逐参数三方账。`fetchMissing: true` 允许后端**顺手把云端新版字节取回来**
-       * （内部基准，**不动本地这份文件**）—— 所以这里不需要先「下载」一遍。
-       */
-      const sync = await data.presetSync(behind.path, true)
-      setBusyKey(null)
-      if (!sync.cloudReady) {
-        setNote({
-          text: `更新 ${fileName} 没成：云端新版的字节还没取回来（网络或数据源的问题）`,
-          bad: true,
-        })
-        return
-      }
-      const pending = sync.entries.filter((e) => e.pending)
-      const conflicts = pending.filter((e) => e.conflict)
-      const auto: ParamDecision[] = pending
-        .filter((e) => !e.conflict)
-        .map((e) => ({ paramKey: e.key, kind: 'adopt' }))
-      if (pending.length === 0) {
-        setNote({ text: `已更新 ${behind.fileName} —— 云端这一版没有要处理的参数差异`, bad: false })
-        return
-      }
-      /*
-       * ③ 写盘：**只写"我没改过"的那些项**（静默跟上新版）；我改过的一项都不写 ——
-       *    它们留给「修改参数」逐项处理（那边看得到"云端 X → Y"与「用新值 / 保持本地」）。
-       *    没有可跟的项时**一个字节都不动**（不必白写一遍）。
-       */
-      if (auto.length > 0) await data.applyParamDecisions(behind.path, auto)
-      const parts: string[] = []
-      if (auto.length > 0) parts.push(`${auto.length} 项跟上了新版`)
-      if (conflicts.length > 0) parts.push(`${conflicts.length} 项你改过 —— 去「修改参数」处理`)
-      setNote({ text: `已更新 ${behind.fileName} —— ${parts.join('；')}`, bad: false })
+      await applyCloudUpdate(behind, row, fileName)
     })().catch((e: unknown) => {
       setBusyKey(null)
       setNote({ text: `更新失败：${errorText(e)}`, bad: true })
@@ -1635,6 +1719,60 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
+   * **恢复默认名**（2026-10-20 作者：「我希望他的这个名字可以恢复默认的名字」）。
+   *
+   * 默认名认的是**这一份当初从哪来**（[`defaultNameOf`]）：复制件 ⇒ 来源那一份现在的名字，
+   * 从云端下来的 ⇒ 云端那份的名字。撞名时按 `A1-standard 2.toml` 依次让开，不报错
+   * （用户要的是"改回正常名字"这件事本身）。
+   *
+   * 走的是**与重命名同一条路**（`data.rename`）：只换名字，内容与血统一个字节不动。
+   */
+  const runRestoreDefaultName = (row: PresetTableRow) => {
+    menu.close()
+    const want = defaultNameOf(row)
+    if (want === null) {
+      setNote({ text: `${row.fileName} 没有默认名可恢复（它本来就不叫这个名字）`, bad: true })
+      return
+    }
+    const name = defaultNameAvoiding(
+      want,
+      data.local.filter((f) => f.path !== row.path).map((f) => f.fileName),
+    )
+    if (name === row.fileName) {
+      setNote({ text: `${row.fileName} 已经是默认名了`, bad: false })
+      return
+    }
+    setNote({ text: `正在恢复默认名：${row.fileName} → ${name}…`, bad: false })
+    data.rename(row.path, name).then(
+      (done) =>
+        setNote({
+          text: done.fileName === want
+            ? `已恢复默认名：${row.fileName} → ${done.fileName}`
+            : `已恢复默认名：${row.fileName} → ${done.fileName}（默认名已被占用，让开了编号）`,
+          bad: false,
+        }),
+      (e: unknown) => setNote({ text: `没改成：${errorText(e)}`, bad: true }),
+    )
+  }
+
+  /**
+   * 重命名框里那颗「恢复默认名」：**不是直接改名** —— 它只把输入框填成默认名，
+   * 用户还能看着改两笔再按「改名」。和菜单里那一项共用同一个默认名判据。
+   */
+  const fillDefaultName = () => {
+    const row = renaming?.row
+    if (row === undefined) return
+    const want = defaultNameOf(row)
+    if (want === null) {
+      setRenaming((cur) => cur === null ? cur : { ...cur, error: '这一份没有默认名可恢复' })
+      return
+    }
+    /* 后缀跟着默认名走（复制件的来源后缀不一定是 `.toml`，但这一档都是） */
+    const { stem, ext } = splitFileName(want)
+    setRenaming((cur) => (cur === null ? cur : { ...cur, name: stem, ext, error: null }))
+  }
+
+  /**
    * **复制出一份新的**（第十一层，2026-10-10 改判）：我的文件 → 我的文件，按字节复制。
    *
    * 名字**由程序起**（`duplicateNameOf`：`<原名> copy.toml`，重名依次 `copy 2`…）——
@@ -1652,7 +1790,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     data.copyAsNew(row.path, name).then(
       (done) =>
         setNote({
-          text: `已复制出一份：${done.fileName} —— 原文件一个字节没动`,
+          /*
+           * 名字有上限（255 字节）：原名本来就长的时候 `<原名> copy.toml` 会超 ——
+           ★ 也不让复制失败（作者 2026-10-20 那条裁定的另一半），截到上限并照实说一句。
+           */
+          text: done.adjusted
+            ? `已复制出一份：${done.fileName}（名字到了上限，截短了一点）—— 原文件一个字节没动`
+            : `已复制出一份：${done.fileName} —— 原文件一个字节没动`,
           bad: false,
         }),
       (e: unknown) => setNote({ text: `没复制成：${errorText(e)}`, bad: true }),
@@ -1692,7 +1836,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       (done) => {
         setRenaming(null)
         setNote({
-          text: `已改名：${renaming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`,
+          /*
+           * ★ 名字不合规**不再失败**（作者 2026-10-20：「改名有限制就显示出来……
+           * 不要失败，可以自动截断」）：超长截到上限、不合规的字符剔掉，
+           * 落盘的就是回执里那一串 —— 这里照实说"被截短了"，不说就等于骗他。
+           */
+          text: done.adjusted
+            ? `已改名：${renaming.row.fileName} → ${done.fileName}（名字超过了上限，已截短）`
+            : `已改名：${renaming.row.fileName} → ${done.fileName} —— 只换了名字，内容与血统一个字节没动`,
           bad: false,
         })
       },
@@ -2207,7 +2358,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      *                                     正在用的那一格是「取消使用」（2026-10-10 恢复的入口）
      *   修改参数 / 编辑文件 / 复制 / 改名 / 显示 / 删除   原「本地文件」那一套
      *   （「查看详情」2026-10-10 删掉：**点行就是展开**，那一项重复）
-     *   （「选择要跟随的云端更新」2026-10-10 从菜单里去掉 —— 参数表里照旧能处理更新）
+     *   （「选择要更新的参数」（当时叫「选择要跟随的云端更新」）2026-10-10 从菜单里去掉
+     *     —— 参数表里照旧能处理更新）
      *
      * （云端那一行**不在这张表里** —— 云端原件是内部数据，它的取用在云端表「下载 / 更新」。）
      */
@@ -2307,9 +2459,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         { separator: true },
         /*
          * 参数表那一屏（2026-10-09）：改的是参数本身。
-         * ★ 「选择要跟随的云端更新」2026-10-10 按作者裁决**从菜单里去掉**了
-         *   （原入口是 `openParams(row, true)` 那条直路）—— 参数表里照旧能处理云端更新，
-         *   菜单只留一个「打开参数」。
+         * ★ 「选择要更新的参数」（当时叫「选择要跟随的云端更新」）2026-10-10 按作者裁决
+         *   **从菜单里去掉**了（原入口是 `openParams(row, true)` 那条直路）——
+         *   参数表里照旧能处理云端更新，菜单只留一个「打开参数」。
          */
         {
           id: 'params',
@@ -2325,7 +2477,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            *   菜单里才有的说法。
            * 与旁边「编辑文件」的分工照旧：这条进**参数表**、那条改**正文**。
            */
-          label: '修改参数',
+          label: PARAMS_TEXT.open,
           disabled: paramsWhyNot(row),
           onSelect: () => openParams(row, false),
         },
@@ -2336,6 +2488,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
          */
         ...(row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
           ? ([{ id: 'edit', label: EDIT_TEXT.cell, onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
+          : []),
+        /*
+         * **「更新」**（2026-10-20）：与行上那颗、详情「快捷操作」那颗同一个动作 ——
+         * 只在**有新版**时出现，点了就地更新（不切到云端表）。
+         * 复制件跟云端无关（设置页那一格关着时）就不给这一项。
+         */
+        ...(row.basedOn === 'outdated' && !isDetachedCopy(row, copiesFollowCloud)
+          ? ([
+              {
+                id: 'update',
+                icon: 'download',
+                label: UPDATE_ACTION_TEXT.update,
+                onSelect: () => runUpdateLocal(row),
+              },
+            ] satisfies ContextMenuEntry[])
           : []),
         /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry`。**不挂图标** */
         ...(canCompare(row) ? [compareEntry(row)] : []),
@@ -2357,6 +2524,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           disabled: renameWhyNot(row),
           onSelect: () => openRename(row),
         },
+        /*
+         * **恢复默认名**（2026-10-20 作者：「我希望他的这个名字可以恢复默认的名字」）。
+         * 只在**真有一个默认名、而且现在不叫它**的时候出现 —— 没来路的那份（导入的裸文件）
+         * 这一项不摆出来（摆了点了只能报一句"没有默认名"，那是废话）。
+         */
+        ...(() => {
+          const want = defaultNameOf(row)
+          if (want === null || want === row.fileName) return []
+          const entry: ContextMenuEntry = {
+            id: 'restoreName',
+            icon: 'pencil',
+            label: RESTORE_DEFAULT_NAME,
+            disabled: renameWhyNot(row),
+            onSelect: () => runRestoreDefaultName(row),
+          }
+          return [entry]
+        })(),
         {
           id: 'reveal',
           icon: 'folder',
@@ -2806,12 +2990,23 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}
-                onEdit={openEdit}
+                /*
+                 * 展开详情「快捷操作」那颗「修改参数」（2026-10-20）——
+                 * 与右键菜单里那一项同一个动作、同一个词（`PARAMS_TEXT`）。
+                 */
+                onParams={(tableRow) => openParams(tableRow, false)}
                 usage={usage}
                 onLive={runLive}
                 /* MKP 本地行唯一的按钮（2026-10-09）：这一档只有你自己那份本地文件 */
                 onUse={runUse}
                 onDownload={download}
+                /*
+                 * 本地行那颗「更新」（2026-10-20）：「有新版」时出现 —— 点了就地更新，
+                 * 不用切到云端表（作者：「就不用跳转到云端那边去更新」）。
+                 */
+                onUpdateLocal={(localRow) => {
+                  void runUpdateLocal(localRow)
+                }}
                 /* 来源格「复制自 X」的定位落点；sourceLabel 决定交付预设行来源列显示 GitHub / Gitee */
                 onLocate={locateRow}
                 sourceLabel={data.sourceLabel}
@@ -2820,6 +3015,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 remarks={data.remarks}
                 onSetRemark={runSetRemark}
                 onSetAttribution={runSetAttribution}
+                /*
+                 * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂关）：
+                 * 关着时复制 / 导入出来的那几份**不挂「有新版」** —— 它们跟云端没关系。
+                 * 这一格由 `usePresetPrefs` 读（后端唯一出口），表那边只照着画。
+                 */
+                copiesFollow={copiesFollowCloud}
               />
             </>
           )}
@@ -3291,6 +3492,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             subtitle={renaming?.row.fileName}
             footer={
               <>
+                {/*
+                  **恢复默认名住底栏左侧**（2026-10-20 作者：「恢复默认名应该加到这个左下角呀，
+                  做成那种幽灵按钮吧」）—— 原来它贴在输入框下面，把框撑高一格；
+                  现在与「取消 / 改名」同一行、靠左，样式是幽灵按钮。
+                  它只把输入框填成默认名，按「改名」才落盘。
+                */}
+                <button
+                  type="button"
+                  className={s.renameReset}
+                  title={`填成默认名（${renaming?.row === undefined ? '' : (defaultNameOf(renaming.row) ?? '这一份没有默认名')}）`}
+                  disabled={
+                    renaming === null ||
+                    renaming.busy ||
+                    defaultNameOf(renaming.row) === null
+                  }
+                  onClick={fillDefaultName}
+                >
+                  {RESTORE_DEFAULT_NAME}
+                </button>
                 <button
                   type="button"
                   className={s.editGhost}

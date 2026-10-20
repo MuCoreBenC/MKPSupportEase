@@ -146,6 +146,16 @@
   transform: rotate(180deg);
 }
 
+/*
+ * 名称列**默认那一档（族优先）没有方向** —— 箭头整个藏起来，连 hover 也不露
+ * （那一档点一下才是 a-z；现在就画一颗朝上的箭头，等于谎报"现在按 a-z 排"）。
+ * 藏在最后一条，压住上面那两条。
+ */
+.sortBtn[data-dir='family'] .caret,
+.sortBtn[data-on='1'][data-dir='family'] .caret {
+  opacity: 0;
+}
+
 /* 名称列唯一左对齐；其余列居中 —— 箭头都内联跟在文字后，与对齐方式无关 */
 
 /* 机型：「A1 mini」是最长的一个（7 个字符） */
@@ -1218,6 +1228,35 @@
   background: var(--hover-1);
   color: var(--text-3);
   box-shadow: none;
+  cursor: default;
+}
+
+/*
+ * 「快捷操作」里那颗**绿色「更新」**（2026-10-20 作者：「那里面的下载两个字改成更新两个字，
+ * 并且加上背景颜色吧，绿色吧」「更新的话，就跟那本地的那个快捷操作里面的一样，用绿色背景吧」）。
+ *
+ * 与旁边的 `ghostBtn`（编辑）并排：那颗是安静描边，这颗是实心绿 ——
+ * 「有新版」是这一屏唯一值得动手的事，一眼要看得出来。
+ */
+.updateBtn {
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.updateBtn:hover:not(:disabled) {
+  background: var(--accent-deep);
+}
+
+.updateBtn:disabled {
+  background: var(--hover-1);
+  color: var(--text-3);
   cursor: default;
 }
 

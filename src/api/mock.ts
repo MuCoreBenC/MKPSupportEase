@@ -308,6 +308,19 @@ let mockAutoClean = true
 let mockPostproc: PostprocPrefsWire = {}
 
 /*
+ * 「复制出来的也跟着云端更新」那一档（2026-10-20）：内存镜像，出厂 = 关
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.copiesFollowCloud`）。
+ */
+let mockCopiesFollowCloud = false
+
+/*
+ * **出处账**（2026-10-20）：真机那一本在用户根 `provenance.json`（`runtime::provenance`），
+ * 这里用内存里的一个集合代替 —— 只记"哪几份是复制出来的"（`kind: copy` 的 `to` 那一头）。
+ * 演示也要能看出"复制件不认云端"，否则浏览器里看到的样子与真机不同。
+ */
+const mockCopyTargets = new Set<string>()
+
+/*
  * 浏览器演示用的窗口两格（**内存态，刷新即还原**；真数据在 Rust 侧 run/app-state.json）。
  * 与真机同一个出厂默认：不置顶、不在窄窗。
  *
@@ -501,25 +514,76 @@ function rewriteMockMachineVariant(text: string, machineId: string, versionId: s
   return out.join('\n')
 }
 
+/** 文件名的字节上限（与 Rust 侧 `local::NAME_MAX_BYTES` 同一个数：APFS / NTFS 都是 255） */
+const NAME_MAX_BYTES = 255
+
+const mockUtf8 = new TextEncoder()
+
+/** 一串字的 UTF-8 字节数（中文一个字 3 字节 —— 上限是按字节算的，不是按"几个字"） */
+function mockUtf8Len(text: string): number {
+  return mockUtf8.encode(text).length
+}
+
+/** 掰成「主名 + 后缀」（后缀**含点**，保留用户写的那个大小写）—— 与 Rust 侧 `split_ext` 同形 */
+function mockSplitExt(name: string): [string, string] {
+  const i = name.lastIndexOf('.')
+  return i > 0 ? [name.slice(0, i), name.slice(i)] : [name, '']
+}
+
 /**
- * 用户文件新名字的门槛（与 Rust 侧 `local::check_new_name` 同一套）：
- * 给一口人话原因，没有就是过。改名（第十层）与另存为一份新的（第十一层）共用这一处。
+ * 用户文件新名字的门槛（与 Rust 侧 `local::normalize_new_name` 同一套）：
+ * **能修的修好**，修不了的才给一句人话原因。改名（第十层）与另存为一份新的（第十一层）
+ * 共用这一处。
+ *
+ * ★ 与真机同一条口径（2026-10-20 作者：「改名有限制…… 不要失败，可以自动截断」）：
+ *   名字太长**不是问题** —— 截到上限是唯一有答案的那一档（真的报了，用户就得自己数字节）。
+ *   · 修好：剔掉路径分隔符与控制字符；超过 [`NAME_MAX_BYTES`] 就按**字符边界**截主名，
+ *     后缀一个字节不动（后缀决定它是哪一类）。
+ *   · 仍拒：空名字、`.` / `..`、后缀与原来不一致（那两档没有可修的东西）。
  */
-function mockNameProblem(oldName: string, newName: string): string | null {
-  const name = newName.trim()
-  if (name === '') return '新名字不能是空的'
-  if (name.includes('/') || name.includes('\\')) {
-    return '新名字不能带路径 —— 这一层只改名字，不搬文件夹'
+function mockNormalizeName(
+  oldName: string,
+  newName: string,
+): { ok: true; name: string; adjusted: boolean } | { ok: false; problem: string } {
+  const trimmed = newName.trim()
+  if (trimmed === '') return { ok: false, problem: '新名字不能是空的' }
+  const cleaned = Array.from(trimmed)
+    .filter((c) => {
+      const code = c.charCodeAt(0)
+      return c !== '/' && c !== '\\' && code >= 0x20 && code !== 0x7f
+    })
+    .join('')
+    .trim()
+  if (cleaned === '') return { ok: false, problem: '新名字不能是空的' }
+  if (cleaned === '.' || cleaned === '..') return { ok: false, problem: '这个名字不是一个文件名' }
+  const ext = (n: string): string => mockSplitExt(n)[1].toLowerCase()
+  if (ext(cleaned) !== ext(oldName)) {
+    return {
+      ok: false,
+      problem: '后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）',
+    }
   }
-  if (name === '.' || name === '..') return '这个名字不是一个文件名'
-  const ext = (n: string): string => {
-    const i = n.lastIndexOf('.')
-    return i <= 0 ? '' : n.slice(i).toLowerCase()
+  if (mockUtf8Len(cleaned) <= NAME_MAX_BYTES) {
+    return { ok: true, name: cleaned, adjusted: cleaned !== trimmed }
   }
-  if (ext(name) !== ext(oldName)) {
-    return '后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）'
+  const [stem, extText] = mockSplitExt(cleaned)
+  const budget = NAME_MAX_BYTES - mockUtf8Len(extText)
+  let keep = ''
+  let used = 0
+  for (const ch of stem) {
+    const w = mockUtf8Len(ch)
+    if (used + w > budget) break
+    keep += ch
+    used += w
   }
-  return null
+  keep = keep.trimEnd()
+  if (keep === '') {
+    return {
+      ok: false,
+      problem: '名字太长了 —— 光是后缀就把上限占满了（换一个短点的后缀再来）',
+    }
+  }
+  return { ok: true, name: `${keep}${extText}`, adjusted: true }
 }
 
 /** 外部路径取文件名（与 Rust 侧 `runtime::import::base_name` 同一件事） */
@@ -647,7 +711,10 @@ mockLocalText.set(
     '# variant: fast',
     '# based_on: delivery/mkp/presets/A1-fast.toml',
     '# based_on_release_time: 2026-05-29 04:26:12',
-    `# based_on_sha256: ${'1'.repeat(64)}`,
+    /* ★ 基于**旧版**那一档（`SHA_BASED_OLD`）：云端当前版（基准那版改过两项）比它新 ——
+       于是这一份真的挂两条待处理（上面「真有两条待处理」那一句就是它），
+       演示里才能看见「选择要更新的参数」那一屏 */
+    `# based_on_sha256: ${'0'.repeat(64)}`,
     '[toolhead]',
     'offset_y = 22.4 # 笔尖偏移',
     'speed_limit = 64 # 涂胶速度限制 (mm/s)',
@@ -1691,6 +1758,8 @@ export const mockApi: MkpApi = {
     return mockLocal
       /* 只有**血统还指着目录里活着的那一版**的那几份才进账 */
       .filter((f) => f.basedOn === 'current' || f.basedOn === 'outdated')
+      /* 复制出来的那一份不认领（开关开着时才让它进 —— 与真机同一道闸） */
+      .filter((f) => mockCopiesFollowCloud || !mockCopyTargets.has(f.path))
       .map((f) => ({
         id: f.path,
         path: f.path,
@@ -1706,9 +1775,9 @@ export const mockApi: MkpApi = {
   async renameLocalPreset(path, newName) {
     const hit = mockLocal.find((f) => f.path === path)
     if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
-    const problem = mockNameProblem(hit.fileName, newName)
-    if (problem !== null) throw new Error(problem)
-    const name = newName.trim()
+    const got = mockNormalizeName(hit.fileName, newName)
+    if (!got.ok) throw new Error(got.problem)
+    const name = got.name
     const dir = path.slice(0, path.length - hit.fileName.length)
     const newPath = `${dir}${name}`
     if (newPath !== path && mockLocal.some((f) => f.path === newPath)) {
@@ -1742,8 +1811,11 @@ export const mockApi: MkpApi = {
         mockParamDecisions.delete(path)
         mockParamDecisions.set(newPath, book)
       }
+      /* 出处账那一条跟着改名（`to` 那一头；真机 `provenance::repath`）——
+         不跟的话，"这一份是复制来的"这件事改个名就丢了 */
+      if (mockCopyTargets.delete(path)) mockCopyTargets.add(newPath)
     }
-    return { path: newPath, fileName: name }
+    return { path: newPath, fileName: name, adjusted: got.adjusted }
   },
 
   /*
@@ -1755,9 +1827,10 @@ export const mockApi: MkpApi = {
   async copyLocalPreset(path, newName) {
     const hit = mockLocal.find((f) => f.path === path)
     if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
-    const problem = mockNameProblem(hit.fileName, newName)
-    if (problem !== null) throw new Error(problem)
-    const name = newName.trim()
+    /* 名字太长也照样复制（截断到上限）—— 与真机同一套门槛（不再因长度失败） */
+    const got = mockNormalizeName(hit.fileName, newName)
+    if (!got.ok) throw new Error(got.problem)
+    const name = got.name
     const dir = path.slice(0, path.length - hit.fileName.length)
     const newPath = `${dir}${name}`
     if (newPath === path) throw new Error('新名字和原来一样 —— 复制要起个不同的名字')
@@ -1780,7 +1853,9 @@ export const mockApi: MkpApi = {
       copiedFromName: hit.fileName,
       provenance: 'copy' as const,
     })
-    return { path: newPath, fileName: name }
+    /* 出处账那一条：这份是复制出来的（真机 `copy_local_preset` 里 `provenance::record`） */
+    mockCopyTargets.add(newPath)
+    return { path: newPath, fileName: name, adjusted: got.adjusted }
   },
 
   /*
@@ -1869,12 +1944,19 @@ export const mockApi: MkpApi = {
       }
       let name = fileName
       if (item.newName !== undefined) {
-        const problem = mockNameProblem(fileName, item.newName)
-        if (problem !== null) {
-          outcomes.push({ source: item.source, ok: false, path: '', fileName, message: problem })
+        /* 与真机同形：名字能修的修好（超长截断），不在导入这里因长度失败 */
+        const got = mockNormalizeName(fileName, item.newName)
+        if (!got.ok) {
+          outcomes.push({
+            source: item.source,
+            ok: false,
+            path: '',
+            fileName,
+            message: got.problem,
+          })
           continue
         }
-        name = item.newName.trim()
+        name = got.name
       }
       const path = `presets-local/${name}`
       if (mockLocal.some((f) => f.path === path)) {
@@ -2336,6 +2418,19 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 「复制出来的也跟着云端更新」（2026-10-20）：与自动清理同一套口径 —— 内存镜像，
+   * 回解析后的 boolean。演示里照抄真机的出厂档（关）。
+   */
+  async getCopiesFollowCloud() {
+    return mockCopiesFollowCloud
+  },
+
+  async setCopiesFollowCloud(enabled) {
+    mockCopiesFollowCloud = enabled
+    return mockCopiesFollowCloud
+  },
+
+  /*
    * 后处理偏好（2026-10-17）：与主题同一套口径 —— 内存镜像。
    * 出厂档**照抄后端那一份**（`runtime::app_state::PostprocPrefs::resolved`），
    * 量程也照抄；这里不另发明一套默认值，否则浏览器里看到的样子会与真机不同。
@@ -2464,6 +2559,8 @@ export const mockApi: MkpApi = {
   async getPresetParamSync(path: string, fetchMissing?: boolean) {
     /* 假后端没有网络可发：`fetchMissing` 在这里没有对应的动作，形状照留（真机上有） */
     void fetchMissing
+    /* 复制件不认云端 ⇒ 整本账都不给它（与真机同一道闸、同一个开关） */
+    if (!mockCopiesFollowCloud && mockCopyTargets.has(path)) return null
     return mockSyncOf(path)
   },
 
@@ -2476,24 +2573,65 @@ export const mockApi: MkpApi = {
     if (current === undefined) {
       throw new Error('云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一项')
     }
-    let next = text
+    /*
+     * 与真机同一条写规矩（2026-10-20）：**以云端当前版正文为骨架**重写这一份 ——
+     * 注释 / 时间戳 / 云端新增的字段跟着新版进来，值按决定填（采用 = 云端新值，
+     * 其余 = 我这份现在写着的值）。于是"应用 0 项"也真写：值一个不动，血统推进。
+     */
+    const kinds = new Map<string, ParamDecisionKind>()
     const book = mockParamDecisions.get(path) ?? new Map()
     for (const d of decisions) {
+      if (d.kind !== 'adopt' && d.kind !== 'hold') {
+        throw new Error(`不认得这种处理方式：${d.kind}（只有 adopt / hold）`)
+      }
       if (d.kind === 'adopt') {
-        const def = rawParamDefs().find((x) => x.key === d.paramKey)
-        if (def === undefined) throw new Error(`不认识这个参数：${d.paramKey}`)
         const value = before.entries.find((e) => e.key === d.paramKey)?.cloudNew
         if (value === null || value === undefined) {
           throw new Error(`云端当前版里没有 ${d.paramKey} 的新值 —— 采用不了`)
         }
-        next = patchMockParam(next, def, value)
       }
+      kinds.set(d.paramKey, d.kind)
       book.set(d.paramKey, { sha256: current.sha256, kind: d.kind })
     }
+    const localValues = readMockParams(text)
+    const cloudValues = readMockParams(current.text)
+    let skeleton = current.text
+    for (const def of rawParamDefs()) {
+      const want = kinds.get(def.key) === 'adopt' ? cloudValues[def.key] : localValues[def.key]
+      if (want === undefined || cloudValues[def.key] === undefined) continue
+      if (cloudValues[def.key] === want) continue
+      skeleton = patchMockParam(skeleton, def, want)
+    }
+    /*
+     * 血统：这一批之后**还有落下的待处理项**就不推（那几项还得挂着）；
+     * 都处理了（包括"一项都没有"）⇒ 出处换成云端当前版，「有新版」收场。
+     */
+    const remaining = before.entries.filter((e) => e.pending && !kinds.has(e.key)).length
+    const lineage =
+      remaining === 0
+        ? [
+            `# based_on: delivery/mkp/presets/${before.cloudFileName ?? ''}`,
+            `# based_on_release_time: ${mockHeaderOf(current.text, 'release_time') ?? ''}`,
+            `# based_on_sha256: ${current.sha256}`,
+          ].filter((line) => !line.endsWith(': '))
+        : lineageLinesOf(text)
+    const next = [...lineage, withoutLineage(skeleton)].join('\n')
+    const at = mockLocal.findIndex((f) => f.path === path)
     if (next !== text) {
       mockLocalText.set(path, next)
-      const at = mockLocal.findIndex((f) => f.path === path)
       if (at >= 0) mockLocal[at] = { ...mockLocal[at]!, size: next.length, modifiedUnix: nowSec() }
+    }
+    /* 清单上那一格「基于哪一版」跟着走（真机上它就是从文件头血统算出来的） */
+    if (at >= 0 && remaining === 0) {
+      mockLocal[at] = {
+        ...mockLocal[at]!,
+        basedOn: 'current',
+        basedOnLabel:
+          before.cloudFileName === null
+            ? mockLocal[at]!.basedOnLabel
+            : `delivery/mkp/presets/${before.cloudFileName}`,
+        basedOnRelease: mockHeaderOf(current.text, 'release_time'),
+      }
     }
     mockParamDecisions.set(path, book)
     return mockSyncOf(path)

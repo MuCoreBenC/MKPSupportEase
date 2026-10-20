@@ -137,9 +137,9 @@ import {
   CLOUD_LOCAL_TEXT,
   CLOUD_STATE_TEXT,
   DASH_,
-  EDIT_TEXT,
   LOCAL_DRAWER,
   LOCAL_UNREADABLE_TEXT,
+  PARAMS_TEXT,
   PRESET_UNTRUSTED_NOTE,
   UPDATE_ACTION_TEXT,
   UPDATE_STATE_TEXT,
@@ -148,6 +148,7 @@ import {
   USAGE_HINT,
   USAGE_KEY,
   usageCellText,
+  isDetachedCopy,
   originCellOf,
   updateStateOf,
   UNKNOWN,
@@ -192,12 +193,20 @@ function CloudLocalAction({
       </span>
     )
   }
+  /*
+   * **「下载」与「更新」要分得开**（2026-10-20 作者：「我希望区分一下下载和更新啊，
+   * 更新的话，就跟那本地的那个快捷操作里面的一样，用绿色背景吧」）。
+   *
+   * 判据是**这一份是不是"第一次取回来"**：`localState === 'missing'` 才是「下载」
+   * （白底、与原来一样）；「有新版」那一档是「更新」—— 绿底，与本地行
+   * 「快捷操作」里那颗绿色「更新」同一副样子（同一个 `.updateBtn`）。
+   */
+  const isUpdate = state === 'stale'
   return (
     <button
       type="button"
-      className={s.actBtn}
+      className={isUpdate ? s.updateBtn : s.actBtn}
       disabled={busy}
-     
       onClick={() => onDownload(row)}
     >
       {action}
@@ -240,17 +249,42 @@ function SortTh({
   onSort: (key: PresetSortKey) => void
 }) {
   const on = sort.key === colKey
+  /*
+   * 名称列**三循环**（2026-10-20），别的列两态 —— 提示要说清"点一下会变成什么"：
+   * 默认档（族优先）没有方向，那一档不画箭头（CSS 按 `data-dir` 收起来）。
+   */
+  const next =
+    !on
+      ? `按${label}排`
+      : colKey === 'name'
+        ? sort.dir === 'family'
+          ? `按${label}的 a-z 排`
+          : sort.dir === 'asc'
+            ? `按${label}倒序排`
+            : `回到默认（原件在前、复制出来的跟在后面）`
+        : `按${label}${sort.dir === 'asc' ? '降序' : '升序'}排`
   return (
-    <th className={cls} scope="col" aria-sort={on ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
+    <th
+      className={cls}
+      scope="col"
+      aria-sort={
+        !on
+          ? 'none'
+          : sort.dir === 'asc'
+            ? 'ascending'
+            : sort.dir === 'desc'
+              ? 'descending'
+              : 'other'
+      }
+    >
       <button
         type="button"
         className={s.sortBtn}
         data-on={on ? '1' : '0'}
-        /* 降序时 CSS 把那颗箭头转 180° */
+        /* 降序时 CSS 把那颗箭头转 180°；默认（族优先）那一档没有方向，不画箭头 */
         data-dir={on ? sort.dir : undefined}
         onClick={() => onSort(colKey)}
-        /* 名字带上方向 —— 读屏与 hover 提示都要说清"点了会变成什么" */
-        title={on ? `按${label}${sort.dir === 'asc' ? '降序' : '升序'}排` : `按${label}排`}
+        title={next}
       >
         <span className={s.sortText}>{label}</span>
         {/* 常驻渲染、由 CSS 管显隐 —— 非当前列 hover 才淡淡露出（见上面那段） */}
@@ -319,7 +353,14 @@ interface Props {
    * 开始改这一份（临时编辑那条链）。两边共一个入口：
    * 交付行只给"与目录一致"的那一份；我自己那份都能改（认不出是哪一类的不给）。
    */
-  onEdit: (row: PresetTableRow) => void
+  /**
+   * **展开详情「快捷操作」里的「修改参数」**（2026-10-20 作者：「我希望是那个修改参数作为
+   * 快捷操作……打开的是修改参数的模态框」）。
+   *
+   * 打开的是**参数表那一屏**（页面层 `openParams(row, false)`），与右键菜单里
+   * 「修改参数」同一个动作 —— 「编辑」（改 TOML 正文）仍留在右键菜单里。
+   */
+  onParams: (row: PresetTableRow) => void
   /** 本地表那一颗按钮：MKP 是「应用」，切片器是「复制」。两件事一个入口，由 `kind` 分 */
   onLive: (row: PresetLocalRow) => void
   /**
@@ -330,6 +371,14 @@ interface Props {
   onUse: (row: PresetLocalRow) => void
   /** 云端表那一颗按钮。**真调 `downloadFiles`，照抛未实现** —— 不编假进度条 */
   onDownload: (row: PresetTableRow) => void
+  /**
+   * **本地行那颗「更新」**（2026-10-20 作者：「这个下面应该加一个更新按钮，就是说有新的时候
+   * 就出现一个更新按钮。我点了之后，它就跟云端一样更新了，就不用跳转到云端那边去更新」）。
+   *
+   * 走的是**与云端行同一个入口**（`PagePresets.runUpdate`）—— 只是行从本地那一份来：
+   * 「有新版」时给，点了就地消化（0 项直接落盘刷血统、有改动项顺势开「选择要更新的参数」）。
+   */
+  onUpdateLocal: (row: PresetLocalRow) => void
   /**
    * **机型目录**（`data.machines`）：详情面板「归属」编辑格的两个下拉的数据源
    * （机型 → 它的版本）。
@@ -357,6 +406,16 @@ interface Props {
    * 钥匙在行上（`row.usageKey`），表这边不拿 `path` 现拼（口径两张表不同）。
    */
   usage: Map<string, number>
+  /**
+   * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂 = 关）。
+   *
+   * **关**时复制 / 导入出来的那几份是**独立的一份**：它们不认云端 —— 云端换版时
+   * 本地行不许挂「有新版」（作者：「我设置里面没开，它就不应该把那些复制出来的也显示，
+   * 它就只显示那一个」）。**开**时与原件同权，照挂。
+   *
+   * 判据只有这一格（后端 `presets.copiesFollowCloud`）：这里不按名字、不按血统自己猜。
+   */
+  copiesFollow: boolean
 }
 
 export default function PresetTable({
@@ -379,15 +438,17 @@ export default function PresetTable({
   archiveCountOf,
   onOpenArchive,
   onOpenLocal,
-  onEdit,
+  onParams,
   onLive,
   onUse,
   onDownload,
+  onUpdateLocal,
   machines,
   remarks,
   onSetRemark,
   onSetAttribution,
   usage,
+  copiesFollow,
 }: Props) {
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
@@ -560,6 +621,12 @@ export default function PresetTable({
                * 不跨函数边界），先落一个本地的量。
                */
               const locateTarget = origin.locate ?? null
+              /*
+               * **这一行是"跟云端没关系的一份"**（2026-10-20）：复制 / 导入出来的，
+               * 而设置页「复制出来的也跟着云端更新」关着 ⇒ 云端换版不该在它身上报「有新版」。
+               * 判据只看后端那一格 + 出处账给出的 `provenance`（不按名字猜）。
+               */
+              const detached = isDetachedCopy(row, copiesFollow)
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               /*
@@ -637,6 +704,26 @@ export default function PresetTable({
                          
                         >
                           旧版 ×{row.olderVersions}
+                        </span>
+                      )}
+                      {/*
+                        **本地行也有「有新版」**（2026-10-20 作者：「这种有新版的在本地也需要出现呀」）。
+                        判据就是这一份的血统（`basedOn === 'outdated'` = 它基于的那一版云端已经换代）——
+                        与云端行那枚徽章同一句话、同一个样式，紧跟文件名。
+
+                        ★ **复制 / 导入出来的那几份不挂这一枚**（作者当天第二张图：
+                          「我设置里面没开，它就不应该把那些复制出来的也显示……它就只显示那一个」）。
+                          设置页「复制出来的也跟着云端更新」关着时，复制件是**独立的一份**：
+                          它跟云端没关系，云端换版也不该在它身上报更新 —— 判据走后端那一格
+                          （`copiesFollow === false` 且 `provenance` 是 copy / import），别处不许再写第二份。
+                      */}
+                      {row.scope === 'local' && row.basedOn === 'outdated' && !detached && (
+                        <span
+                          className={s.localState}
+                          data-state="stale"
+                          title="云端这一份出了新版 —— 右键这一行 →「选择要更新的参数」"
+                        >
+                          有新版
                         </span>
                       )}
                       {/*
@@ -755,6 +842,14 @@ export default function PresetTable({
                        * 云端原件不进这张表。使用 = 把它设为当前生效的那一份。
                        * 两处不给按钮（不给点了必被拒的按钮）：认不出是 MKP 预设的（`.json`），
                        * 以及第九层读不出来的。
+                       *
+                       * ★★ **这一格只有「使用 / 在用」两态，永远不换词**（2026-10-20 作者：
+                       *   「他云端有更新的时候，只在那个快捷操作里面显示更新，右侧的那个按钮
+                       *   始终都是显示使用……本地的按钮就只有使用和在用两种状态，
+                       *   没有下载、更新那些。那些是云端的按钮」）。
+                       *   「有新版」是**展开详情「快捷操作」**里那颗绿色「更新」的事，
+                       *   这里不许跟着变 —— 本地行与云端行复用的是同一套组件，
+                       *   但两边的按钮语义必须分得干净：下载 / 更新是云端那一侧的词。
                        */
                       row.live ? (
                         /*
@@ -801,12 +896,14 @@ export default function PresetTable({
                          * **正在用的那一份也照给**：正在用的东西一样会有更新 —— 它已经在
                          * 名称列转绿、展开详情里写「· 正在用」，这里再画一个灰字反而把
                          * 修它的入口藏掉了（作者实测那份"正在用的旧版"就是这样没地方点）。
+                         *
+                         * ★ 这一档是**云端按钮**（切片器交付行的本地那份与目录不符），
+                         *   所以绿底「更新」—— 与「下载」分得开（2026-10-20）。
                          */
                         <button
                           type="button"
-                          className={s.actBtn}
+                          className={s.updateBtn}
                           disabled={busy}
-                         
                           onClick={() => onDownload(row)}
                         >
                           {UPDATE_ACTION_TEXT.update}
@@ -890,11 +987,15 @@ export default function PresetTable({
                         {CLOUD_STATE_TEXT.downloaded}
                       </span>
                     ) : row.presetUid !== undefined ? (
+                      /*
+                       * 云端交付行：**未获取 →「下载」白底**，**有更新 →「更新」绿底**
+                       * （2026-10-20 作者：「区分一下下载和更新啊……更新的话，
+                       * 跟本地那个快捷操作里面的一样，用绿色背景」）。
+                       */
                       <button
                         type="button"
-                        className={s.actBtn}
+                        className={needsUpdate ? s.updateBtn : s.actBtn}
                         disabled={busy}
-                       
                         onClick={() => onDownload(row)}
                       >
                         {needsUpdate ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing}
@@ -1113,15 +1214,49 @@ export default function PresetTable({
                                     {LOCAL_DRAWER.open}
                                   </button>
                                 )}
+                                {/*
+                                  * **更新**（2026-10-20 作者：「他云端有更新的时候，只在那个
+                                  * 快捷操作里面显示更新」「那里面的下载两个字改成更新两个字，
+                                  * 并且加上背景颜色吧，绿色吧」）。
+                                  *
+                                  * 所以：**只有这里**因为「有新版」长出一颗「更新」，
+                                  * 而且是绿底（`.updateBtn`）—— 与旁边安静的「编辑」一眼分得开；
+                                  * 表格右侧那一格**照旧只写「使用 / 在用」**，不许跟着变。
+                                  */}
+                                {row.origin === 'local' &&
+                                  row.basedOn === 'outdated' &&
+                                  !detached &&
+                                  row.localState !== 'unreadable' && (
+                                    <button
+                                      type="button"
+                                      className={s.updateBtn}
+                                      disabled={busy}
+                                      title="把云端新版收进来 —— 你改过的那几项会先问过你"
+                                      onClick={() => onUpdateLocal(row)}
+                                    >
+                                      {UPDATE_ACTION_TEXT.update}
+                                    </button>
+                                  )}
+                                {/*
+                                  * **「快捷操作」里那颗从「编辑」换成「修改参数」**（2026-10-20 作者：
+                                  * 「我不希望它是编辑作为快捷操作，我希望是那个修改参数作为快捷操作。
+                                  * 你要把它改成修改的文案，然后打开的是修改参数的模态框」）。
+                                  *
+                                  * 所以这一颗打开的是**参数表那一屏**（`onParams` → 页面层
+                                  * `openParams(row, false)`），不是改正文的「编辑文件」——
+                                  * 日常要动的基本都是参数，正文那一档仍在右键菜单里（`EDIT_TEXT.cell`）。
+                                  * 词与菜单里那一项同一个出处（`PARAMS_TEXT.open`），不各写一个。
+                                  */}
                                 {row.origin === 'local' &&
                                   row.kind === 'mkp_preset' &&
                                   row.localState !== 'unreadable' && (
                                     <button
                                       type="button"
                                       className={s.ghostBtn}
-                                      onClick={() => onEdit(row)}
+                                      title={PARAMS_TEXT.why}
+                                      onClick={() => onParams(row)}
                                     >
-                                      {EDIT_TEXT.open}
+                                      {PARAMS_TEXT.open}
                                     </button>
                                   )}
                               </div>

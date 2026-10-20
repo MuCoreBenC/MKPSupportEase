@@ -19,6 +19,7 @@
 //! 这个事实盘上不存在，不记就永远丢了。它记的是**历史事件**，不是文件的现在：
 //! 文件被改名、被删除之后账上的条目要跟着改（[`repath`]）、可以悬空（界面照实退回）。
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,21 @@ pub fn record(
         schema: 1,
     });
     save(user_root, &ledger)
+}
+
+/// **哪几份是复制出来的**（`to` 那一头的路径集合，`kind == copy`）。
+///
+/// 给"复制件不认云端"那道闸用（2026-10-20）：身份账本与逐参数更新账在出口前
+/// 拿它滤一遍。**一次读、进集合**，别对每个文件各读一遍账本。
+///
+/// 账本读不出来 / 还没记过 ⇒ **空集**（于是"没有一份是复制件"）—— 出处是附加信息，
+/// 缺了不许凭空多排除一批（那时的结果与这个功能存在之前一模一样）。
+pub fn copy_targets(user_root: &Path) -> HashSet<String> {
+    load(user_root)
+        .into_iter()
+        .filter(|e| e.kind == ProvenanceKind::Copy.as_str())
+        .map(|e| e.to)
+        .collect()
 }
 
 /// 文件改名之后账跟着走（第十层）：副本改了名 ⇒ `to` 跟着改；**来源**改了名 ⇒ `from` 跟着改

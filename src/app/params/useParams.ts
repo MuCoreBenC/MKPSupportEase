@@ -55,6 +55,7 @@ import type {
   CatalogParamDef,
   Machine,
   MachineVersion,
+  ParamDecision,
   ParamDecisionKind,
   ParamMeta,
   ParamSection,
@@ -675,6 +676,12 @@ export interface Params {
   syncNeedsFetch: boolean
   /** 正在落决定（采用 / 保持）—— 那一行的两颗按钮据此禁用 */
   syncBusy: boolean
+  /**
+   * 正在为看逐项差异**取回云端当前版的字节**（2026-10-20）。
+   *
+   * ★ 与 `syncBusy` 是两件事：这一档是"去取"（可能发网络），那一档是"在写"（动本地文件）。
+   */
+  syncFetching: boolean
   /** 某一项上的云端更新账（没有这一项就是 `undefined`） */
   syncOf: (key: string) => ParamSyncEntry | undefined
   /** 待处理条数（`sync === null` 时是 0） */
@@ -684,6 +691,21 @@ export interface Params {
    * `hold` = 保持本地值（文件一个字不动）。两者都把水位推到云端当前版。
    */
   decideSync: (keys: string[], kind: ParamDecisionKind) => void
+  /**
+   * **一次落一批、可混合 adopt / hold**（2026-10-20「选择要更新的参数」那一屏用）。
+   *
+   * 与 `decideSync` 是同一个写口，只是**一次写完**：分两趟写的话，头一趟写完还有
+   * 没表态的项 ⇒ 血统不推进，得等第二趟才收场 —— 一趟写完就没有这个中间态。
+   * `decisions` 可以是空的（「应用这 0 项」）。
+   */
+  decideSyncMany: (decisions: ParamDecision[]) => void
+  /**
+   * **把云端当前版的字节取回来**（2026-10-20）—— 只有用户明确点了「更新 /
+   * 选择要更新的参数」才走它。取回来才有逐项差异与那两颗按钮。
+   *
+   * 返回取回来之后的那一份总账；取失败 / 这一份不认云端 ⇒ `null`（问题进 `syncError`）。
+   */
+  fetchSync: () => Promise<PresetParamSync | null>
 }
 
 export function useParams(opts: UseParamsOptions = {}): Params {
@@ -845,6 +867,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [sync, setSync] = useState<PresetParamSync | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
   const [syncBusy, setSyncBusy] = useState(false)
+  /** 正在为看逐项差异**取回云端当前版的字节**（2026-10-20）—— 那一颗按钮据此转圈 */
+  const [syncFetching, setSyncFetching] = useState(false)
 
   /**
    * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
@@ -2156,9 +2180,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   /*
    * **云端更新账**（三方：我 / 云端旧值 / 云端新值）。
    *
-   * `fetchMissing: true` —— 打开这一份（或这一页）时允许为拿到云端当前版的字节发一次
-   * 请求；取不回来不算失败（后端照实给 `cloudReady: false`），界面说清"有新版本、
-   * 还没取回来"，逐项差异等取回来再看。
+   * ★ `fetchMissing: false`（2026-10-20 作者裁定）：**打开这一份不发网络**。
+   * 原来这里给 `true`，于是"我都没点更新，本地怎么知道有参数变化的" —— 那些逐项差异
+   * 是打开弹窗时替用户取回来的（还有些项会因为后来的「更新」被悄悄改写）。
+   * 现在这一读只回答"云端有没有新版"（`versionAdvanced`），逐项差异等用户
+   * 明确点了「更新 / 选择要更新的参数」再取（见 [`fetchSync`]）。
+   *
+   * 后端没有云端字节时 `pendingCount` 天然是 0（`param_sync::diff` 缺新值不报待处理），
+   * 所以界面不会编出"待选择 N 项"。
    */
   useEffect(() => {
     if (localPath === null) {
@@ -2168,7 +2197,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     }
     let alive = true
     setSyncError(null)
-    void api.getPresetParamSync(localPath, true).then(
+    void api.getPresetParamSync(localPath, false).then(
       (v) => {
         if (alive) setSync(v)
       },
@@ -2185,28 +2214,53 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   }, [localPath])
 
   /**
+   * **把云端当前版的字节取回来**（2026-10-20）—— 全应用**唯一**会为看差异发网络的那一处。
+   *
+   * 触发它的只有两个用户动作：预设页云端行的「更新」、参数页那颗「选择要更新的参数」。
+   * 取回之后才有逐项差异（旧值 → 新值）与「采用 / 保持」那两颗按钮。
+   * 取不回来不算失败：界面照实说"还没取回来看不到差异"。
+   *
+   * `null` = 这一份不认云端（复制出来的那一份）。
+   */
+  const fetchSync = useCallback(async (): Promise<PresetParamSync | null> => {
+    if (localPath === null) return null
+    setSyncFetching(true)
+    setSyncError(null)
+    try {
+      const v = await api.getPresetParamSync(localPath, true)
+      setSync(v)
+      return v
+    } catch (e: unknown) {
+      setSyncError(errorText(e))
+      return null
+    } finally {
+      setSyncFetching(false)
+    }
+  }, [localPath])
+
+  /**
    * 落一批决定（采用 / 保持）。
    *
    * 采用会把文件里那几项结构保真地改掉 —— 于是**草稿那一层也要跟着改**
    * （`patchDraft`），否则用户在这之后点「保存修改」会把刚采用的云端新值覆盖回旧值。
+   *
+   * ★ `keys` 可以是空的（2026-10-20「应用这 0 项」）：那一样是一次真写 ——
+   * 值一个不动，云端的注释 / 新字段 / 时间戳与血统跟着新版推进（「有新版」就此收场）。
    */
-  const decideSync = useCallback(
-    (keys: string[], kind: ParamDecisionKind) => {
-      if (localPath === null || keys.length === 0) return
+  const decideSyncMany = useCallback(
+    (decisions: ParamDecision[]) => {
+      if (localPath === null) return
       setSyncBusy(true)
       setSyncError(null)
-      void api.applyPresetParamDecisions(
-        localPath,
-        keys.map((paramKey) => ({ paramKey, kind })),
-      ).then(
+      void api.applyPresetParamDecisions(localPath, decisions).then(
         (v) => {
           setSyncBusy(false)
           setSync(v)
-          if (kind === 'adopt') {
-            for (const key of keys) {
-              const next = v.entries.find((e) => e.key === key)?.local
-              if (next !== null && next !== undefined) patchDraft(key, next)
-            }
+          /* 采用会把文件里那几项改掉 —— 草稿那一层要跟着改（见上面那段注释） */
+          for (const d of decisions) {
+            if (d.kind !== 'adopt') continue
+            const next = v.entries.find((e) => e.key === d.paramKey)?.local
+            if (next !== null && next !== undefined) patchDraft(d.paramKey, next)
           }
           setFileReload((n) => n + 1)
         },
@@ -2217,6 +2271,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       )
     },
     [localPath, patchDraft],
+  )
+
+  /** 同一批都是一种处理（行上那两颗按钮走它） */
+  const decideSync = useCallback(
+    (keys: string[], kind: ParamDecisionKind) => {
+      decideSyncMany(keys.map((paramKey) => ({ paramKey, kind })))
+    },
+    [decideSyncMany],
   )
 
   /** 逐项的账，按 key 索引（行上直接取；没有这一项就是 `undefined`） */
@@ -2307,8 +2369,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     syncNeedsFetch:
       sync !== null && sync.versionAdvanced && sync.cloudFileName !== null && !sync.cloudReady,
     syncBusy,
+    syncFetching,
     syncOf,
     pendingCount: sync?.pendingCount ?? 0,
     decideSync,
+    decideSyncMany,
+    fetchSync,
   }
 }

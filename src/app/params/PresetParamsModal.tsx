@@ -30,7 +30,11 @@ interface Props {
   density: Density
   /** 改哪一份（`path` 是相对用户根的 `presets-local/…`） */
   target: { path: string; fileName: string; machineId: string; versionId: string }
-  /** 一进来就把「选择要跟随的更新」那一屏打开（右键菜单那条直路用） */
+  /**
+   * 一进来就把「选择要更新的参数」那一屏打开（右键菜单那条直路用）。
+   * ★ 那条路进页面时**顺手把云端新版字节取回来了**（见 `PageParams`）—— 用户已经
+   * 传递了"我来处理更新"这个意图。
+   */
   openSyncOnStart?: boolean
   host?: HTMLElement | null
   onClose: () => void
