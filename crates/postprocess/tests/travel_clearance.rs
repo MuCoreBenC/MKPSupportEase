@@ -9,11 +9,12 @@
 //!
 //! 本测试用真实 fixture 跑完整 pass1 + pass2，逐行跟踪 Z，断言这四条：
 //!
-//! 0. `swap#1`（`to=pen`）在 `;Mounting Toolhead` 之前的抬升**必须**是 `G3` 小螺旋，
-//!    且其目标 Z 等于净空高度 —— 禁止原地 `G1 Z`（垂直原地抬会把料拉成丝；
-//!    也不允许全程斜插，那样起点净空为 0）；
-//! 1. `swap#1` 在 `;Mounting Toolhead` 之前的任何 >20mm 横移，
-//!    其当前 Z 必须已抬到 `层顶 + offset_z + lift`；
+//! 0. `swap#1`（`to=pen`）在 `;Mounting Toolhead` 之前必须先出现 `G3` 小螺旋（z-hop 1mm）——
+//!    禁止把脱层动作写成原地 `G1 Z`（会把料拉成丝），也不允许全程斜插（起点净空为 0）；
+//!    螺旋之后才允许长距离横移；
+//! 1. `swap#1` 在 `;Mounting Toolhead` 之前的任何 >20mm 横移，当前 Z 必须 ≥ `层顶 + 1.0`
+//!    （此时笔收着，管的对象是喷嘴）；飞回涂胶点那段则必须 ≥ `层顶 + offset_z + lift`
+//!    （笔已伸出，管的对象是笔尖）；
 //! 2. `;Toolhead Mounted` 之后的第一条 Z 必须满足同一不等式；
 //! 3. `paint` 块里**落笔那条 Z 之前**的 >20mm 横移（即飞回涂胶点那段）同样必须满足。
 //!
@@ -227,19 +228,19 @@ fn swap_travel_keeps_pen_clearance() {
             let is_vertical_lift =
                 line.starts_with("G1 ") && z.is_some() && x.is_none() && y.is_none();
             if is_spiral {
-                let need = params.clearance(layer_z);
+                // 小螺旋只做 z-hop：此时笔收着，管的对象是喷嘴，不用抬到笔尖净空高度
+                let need = layer_z + 1.0;
                 let got = z.unwrap_or_default();
                 assert!(
                     (got - need).abs() < EPS,
-                    "第 {ln} 行 {line:?}：螺旋抬升高度 Z={got} 不等于安全高度 {need}"
+                    "第 {ln} 行 {line:?}：螺旋 z-hop 高度 Z={got} 不等于 {need}（层顶 + 1.0）"
                 );
                 spiral_seen = true;
                 spiral_blocks += 1;
-            } else if is_vertical_lift {
+            } else if is_vertical_lift && !spiral_seen {
                 panic!(
-                    "第 {ln} 行 {line:?}：换笔块里出现原地 G1 Z 抬升 —— 会拉丝，\
-                     必须改用 G3 小螺旋（I{r} J0 P1）",
-                    r = 1.217
+                    "第 {ln} 行 {line:?}：换笔块在脱离层顶前出现原地 G1 Z 抬升 —— \
+                     会拉丝，必须先用 G3 小螺旋（I.706 J.991 P1）脱层"
                 );
             }
         }
@@ -264,16 +265,22 @@ fn swap_travel_keeps_pen_clearance() {
             ((nx - pos.x).powi(2) + (ny - pos.y).powi(2)).sqrt()
         };
 
-        // ① 去切笔位 / ③ 飞回涂胶点：长距离横移必须在净空高度上
-        let clearance_phase = (in_swap_pen && pre_mount) || (in_paint && !paint_landed);
-        if clearance_phase && dxy > LONG_TRAVEL_MM {
-            let need = params.clearance(layer_z);
+        // ① 去切笔位 / ③ 飞回涂胶点：长距离横移必须在各自的高度基准上
+        let go_to_swap = in_swap_pen && pre_mount;
+        let go_to_glue = in_paint && !paint_landed;
+        if (go_to_swap || go_to_glue) && dxy > LONG_TRAVEL_MM {
+            // 去切笔位：笔还收着 → 约束对象是喷嘴，脱离层顶 1.0 即可；
+            // 飞回涂胶点：笔已伸出 → 约束对象是笔尖，必须到 层顶 + offset_z + lift。
+            let need = if go_to_swap {
+                layer_z + 1.0
+            } else {
+                params.clearance(layer_z)
+            };
             assert!(
                 pos.z + EPS >= need,
-                "第 {ln} 行 {line:?}：横移 {dxy:.1}mm 时 Z={} 低于安全高度 {need}\
-                 （层顶 {layer_z} + offset_z {} + lift）；换笔横移必须「先抬后走」",
-                pos.z,
-                params.z_offset
+                "第 {ln} 行 {line:?}：横移 {dxy:.1}mm 时 Z={} 低于安全高度 {need}；\
+                 换笔横移必须「先抬后走」",
+                pos.z
             );
             checked_travels += 1;
         }

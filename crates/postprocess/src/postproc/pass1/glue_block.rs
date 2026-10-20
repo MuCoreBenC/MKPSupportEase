@@ -549,12 +549,9 @@ pub(crate) fn emit_glue_block(
         ));
     }
 
-    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
-    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
-    // 小螺旋抬升：照抄切片器与 tower 的同款形态（`G3 ... I{半径} J0 P1`）。
-    // 水平半径只有 SPIRAL_LIFT_RADIUS，且 XY 一直在动 —— 既不会像原地 `G1 Z`
-    // 那样把料拉成丝柱，也不会像全程斜插那样从层顶零净空起步贴着模型飞。
-    // 抬到位之后再平飞到切笔位，横移全程净空 = lift_height。
+    // 小螺旋只做 z-hop：抬到「层顶 + 1.0」就够 —— 此时笔还收着，约束对象是喷嘴，
+    // 与切片器自己的 `G3 Z.8 I.706 J.991 P1` 是同一个尺度（脱离层顶 0.2~1.0）。
+    // I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
     sink.push_str("M204 S10000");
     sink.push_str("G17");
     let spiral_retract = if custom_mount_gcode_has_retract(ir_data) {
@@ -563,9 +560,8 @@ pub(crate) fn emit_glue_block(
         format!(" E{}", format_e(ir_data.gcode.mkp_retract))
     };
     sink.push_str(&format!(
-        "G3 Z{} I{} J0 P1{} F{}",
-        format_z(extended_travel_z(ir_data, current_layer_height)),
-        format_float(crate::postproc::tower::SPIRAL_LIFT_RADIUS),
+        "G3 Z{} I.706 J.991 P1{} F{}",
+        format_z(current_layer_height + 1.0),
         spiral_retract,
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
@@ -573,6 +569,14 @@ pub(crate) fn emit_glue_block(
         "G1 X{} F{}",
         format_float(wipe_x),
         format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
+    ));
+
+    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
+    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
+    // 切笔位正上方没有模型，原位抬到装笔高度（这里原本就是一句 G1 Z）。
+    sink.push_str(&format!(
+        "G1 Z{}",
+        format_z(extended_travel_z(ir_data, current_layer_height))
     ));
 
     mount_toolhead(sink, ir_data, current_layer_height, false);
