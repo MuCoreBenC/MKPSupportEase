@@ -9,8 +9,23 @@
 //! 读（get_preset_param_sync）    我这份文件 / 云端旧值（baseline） / 云端当前值（目录那一版）
 //! 写（apply_preset_param_decisions）
 //!     采用(adopt)  把我那份文件里这一项写成云端新值 + 水位推到当前版
-//!     保持(hold)   我那份文件一个字不动             + 水位推到当前版
+//!     保持(hold)   我那份文件这一项还是我原来的值   + 水位推到当前版
 //! ```
+//!
+//! # 写 = **以云端当前版为底重写这一份**（2026-10-20）
+//!
+//! 「处理云端更新」这件事要带走的不止是那几项值：**云端新版改过的注释、
+//! 换过的时间戳、新增的字段**都要跟着进来，否则"注释级变更"会永远挂着
+//! 「有新版」（血统摘要比的是全文）。所以写那一趟的形状是：
+//!
+//! ```text
+//!   骨架 = 云端当前版正文（注释 / 时间戳 / 新字段都在里面）
+//!   值    采用(adopt) → 云端新值；其余 → **我这份文件里现在写着的值**（一个不许被顶掉）
+//!   血统  换成云端当前版：based_on / based_on_release_time / based_on_sha256
+//! ```
+//!
+//! 于是 **0 项也是一次真写**（"自动应用 0 项"）：值一个不动，注释 / 时间戳 /
+//! 新字段 / 血统跟着新版走 —— 点「更新」之后「有新版」自然消失。
 //!
 //! 「水位」= [`crate::runtime::app_state`] 里的逐参数决定账。它是
 //! 「这一项我处理到哪一版了」的唯一记录 —— 云端连着发几版也不需要在本地存历史
@@ -102,19 +117,30 @@ pub struct ParamDecisionDto {
 }
 
 /// 某一份用户预设现在是什么情况：逐项三方账 + 待处理条数。
+///
+/// ★ `null`（2026-10-20）：**这一份不认云端** —— 它是复制出来的那一份，而开关
+/// 「复制出来的也跟着云端更新」关着（出厂档）。界面据此**整段「云端更新」都不画**
+/// （不是"零项待处理"：那会让用户以为云端这一版没动过任何一项）。
+/// 判据与身份账本那一道闸同源（出处账 + 同一格开关），两处不许各说一套。
 #[tauri::command]
 pub async fn get_preset_param_sync(
     app: AppHandle,
     path: String,
     fetch_missing: Option<bool>,
-) -> Result<PresetParamSyncDto, AppError> {
+) -> Result<Option<PresetParamSyncDto>, AppError> {
     let handle = app.clone();
     let fetch = fetch_missing.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
         traced("getPresetParamSync", |_| {
             let root = internal_root(&handle)?;
             let user = user_root(&handle)?;
-            sync_at(&root, &user, &path, fetch)
+            /* 复制件不认云端 ⇒ 整本账都不给它（连目录都不必读） */
+            if !runtime::app_state::copies_follow_cloud(&root)?
+                && runtime::provenance::copy_targets(&user).contains(&path)
+            {
+                return Ok(None);
+            }
+            sync_at(&root, &user, &path, fetch).map(Some)
         })
     })
     .await
@@ -389,8 +415,11 @@ fn local_cloud_text(root: &std::path::Path, file: &CatalogFile) -> Option<String
 
 /* ---------- 写 ---------- */
 
-/// 落一批决定：采用的那几项写进文件（结构保真），保持的一个字节不动；
-/// 所有项的水位都推到云端当前版。
+/// 落一批决定：**以云端当前版为底重写这一份**（注释 / 时间戳 / 新字段跟着新版走），
+/// 采用的那几项写成云端新值、其余**保持我这份现在写着的值**，血统换成当前版。
+///
+/// `decisions` 为空 = 「应用 0 项」：值一个不动，骨架与血统照样推进 —— 于是云端
+/// 只改了注释 / 时间戳那种换版也会被消化掉，「有新版」不再一直挂着。
 fn apply_at(
     root: &std::path::Path,
     user: &std::path::Path,
@@ -398,9 +427,6 @@ fn apply_at(
     decisions: &[ParamDecisionDto],
 ) -> Result<PresetParamSyncDto, AppError> {
     runtime::local::check_local_prefix(path)?;
-    if decisions.is_empty() {
-        return sync_at(root, user, path, false);
-    }
 
     /* 先读一份总账：采用需要"云端新值"，水位需要"云端当前版是谁" —— 两者都在里面 */
     let before = sync_at(root, user, path, false)?;
@@ -410,8 +436,20 @@ fn apply_at(
         ));
     };
 
-    let mut edits: Vec<FieldEdit> = Vec::new();
-    let mut record: Vec<(String, ParamDecision)> = Vec::new();
+    /* 骨架要用云端当前版正文：拿不到就如实报错（不许"记了水位、文件却没跟上新版"） */
+    let Some((cloud_text, cloud_path)) = current_cloud_at(root, user, path)? else {
+        return Err(AppError::invalid_argument(
+            "云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一份",
+        ));
+    };
+    let catalog = runtime::load_released_catalog(root)?;
+    let defs = &catalog.registry.params;
+    let local_text = runtime::local::read_text(user, path)?;
+    let local = param_alg::read_param_values(&local_text, defs)?;
+    let cloud = param_alg::read_param_values(&cloud_text, defs)?;
+
+    /* 这一批决定：key → 怎么处理。同一项给两次以后一次为准（界面不会这么发） */
+    let mut kinds: BTreeMap<&str, ParamDecisionKind> = BTreeMap::new();
     for d in decisions {
         let kind = match d.kind.as_str() {
             "adopt" => ParamDecisionKind::Adopt,
@@ -430,41 +468,106 @@ fn apply_at(
                 .ok_or_else(|| {
                     AppError::invalid_argument(format!("这份预设里没有参数 {}", d.param_key))
                 })?;
-            let new = entry.cloud_new.clone().ok_or_else(|| {
-                AppError::invalid_argument(format!(
+            if entry.cloud_new.is_none() {
+                return Err(AppError::invalid_argument(format!(
                     "云端当前版的正文还不在本机 —— 先把云端新版取回来，再采用 {} 的新值",
                     d.param_key
-                ))
-            })?;
-            edits.push(FieldEdit::new(d.param_key.clone(), new));
+                )));
+            }
         }
-        record.push((
-            d.param_key.clone(),
-            ParamDecision {
-                sha256: current_sha.clone(),
-                kind,
-            },
-        ));
+        kinds.insert(d.param_key.as_str(), kind);
     }
 
-    if !edits.is_empty() {
-        let text = runtime::local::read_text(user, path)?;
-        let catalog = runtime::load_released_catalog(root)?;
-        let next = param_alg::apply_param_edits(&text, &catalog.registry.params, &edits)?;
+    /*
+     * 骨架上的值：采用 ⇒ 云端新值（= 骨架本来就写着它，不用改）；
+     * 其余（保持 / 没决定）⇒ **我这份现在写着的值**（云端不许顶掉它）。
+     * 我这份里没有、云端有的（云端新增的字段）⇒ 跟着骨架进来。
+     */
+    let mut edits: Vec<FieldEdit> = Vec::new();
+    for def in defs {
+        let key = def.key.as_str();
+        let want = match kinds.get(key) {
+            Some(ParamDecisionKind::Adopt) => cloud.get(key),
+            Some(ParamDecisionKind::Hold) | None => local.get(key),
+        };
+        let Some(want) = want else { continue };
         /*
-         * 算出来与原文一样就**不写盘**：一次空操作不该刷新 mtime
-         * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
+         * 保真写口只改**已存在的键**：云端新版里没有这一项（云端把它删了）就跳过去，
+         * 不凭空造一个 —— 那种字段随新版走。
          */
-        if next != text {
-            /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
-            let _ = runtime::baseline::ensure_origin_copy(root, user, path);
-            runtime::local::write_text(user, path, &next)?;
+        if !cloud.contains_key(key) || cloud.get(key) == Some(want) {
+            continue;
         }
+        edits.push(FieldEdit::new(key.to_owned(), want.clone()));
+    }
+    let skeleton = param_alg::apply_param_edits(&cloud_text, defs, &edits)?;
+
+    /*
+     * 血统推不推到云端当前版，看**这一批之后还有没有落下的待处理项**：
+     *   都处理了（含"一项都没有"）⇒ 出处换成当前版 —— 「有新版」就此收场；
+     *   还剩几项没表态        ⇒ 出处照旧 —— 那几项仍然挂在那儿，不该被这一趟悄悄抹掉。
+     */
+    let remaining = before
+        .entries
+        .iter()
+        .filter(|e| e.pending && !kinds.contains_key(e.key.as_str()))
+        .count();
+    let lineage = if remaining == 0 {
+        runtime::lineage::Lineage {
+            based_on: Some(cloud_path),
+            based_on_release_time: runtime::lineage::parse_release_time(&cloud_text),
+            based_on_sha256: Some(current_sha.clone()),
+        }
+    } else {
+        runtime::lineage::parse_lineage_from_content(&local_text).unwrap_or_default()
+    };
+    let next = runtime::lineage::rewrite_keeping_lineage(&skeleton, Some(&lineage));
+
+    /*
+     * 算出来与原文一样就**不写盘**：一次空操作不该刷新 mtime
+     * （与 [`super::preset_params::save_preset_params`] 同一条规矩）。
+     */
+    if next != local_text {
+        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
+        let _ = runtime::baseline::ensure_origin_copy(root, user, path);
+        runtime::local::write_text(user, path, &next)?;
     }
 
-    runtime::app_state::record_param_decisions(root, path, &record)?;
+    let record: Vec<(String, ParamDecision)> = kinds
+        .iter()
+        .map(|(key, kind)| {
+            (
+                (*key).to_owned(),
+                ParamDecision {
+                    sha256: current_sha.clone(),
+                    kind: *kind,
+                },
+            )
+        })
+        .collect();
+    if !record.is_empty() {
+        runtime::app_state::record_param_decisions(root, path, &record)?;
+    }
 
     sync_at(root, user, path, false)
+}
+
+/// 云端当前版的正文 + 它在目录里的路径（血统那行 `based_on` 写它）。
+///
+/// 只在本机找（与 [`sync_at`] 同一条：读命令不发网络）。
+fn current_cloud_at(
+    root: &std::path::Path,
+    user: &std::path::Path,
+    path: &str,
+) -> Result<Option<(String, String)>, AppError> {
+    let catalog = runtime::load_released_catalog(root)?;
+    let text = runtime::local::read_text(user, path)?;
+    let lineage = runtime::lineage::parse_lineage_from_content(&text);
+    let Some(file) = cloud_file_of(&catalog, &text, lineage.as_ref()) else {
+        return Ok(None);
+    };
+    let cloud_path = file.path.clone();
+    Ok(cloud_text_for(root, file, false)?.map(|t| (t, cloud_path)))
 }
 
 fn kind_text(kind: ParamDecisionKind) -> &'static str {
@@ -713,6 +816,11 @@ offset_x = -1
                 &[FieldEdit::new(KEY, next)],
             )
             .unwrap();
+            self.publish_text(text);
+        }
+
+        /// 云端发一版**任意正文**（注释级变更那种：值一项都没动，摘要照样变）
+        fn publish_text(&self, text: String) {
             let sha = runtime::lineage::sha256_hex(&text);
             runtime::baseline::ensure_baseline(&self.root, &sha, text.as_bytes()).unwrap();
             let mut catalog = catalog_with_shas();
@@ -778,11 +886,13 @@ offset_x = -1
         );
     }
 
-    /// 场景 C：保持 = 文件一个字不动 + 水位推到当前版；之后同一版不再待处理
+    /// 场景 C：保持 = **这一项还是我原来的值** + 水位推到当前版；之后同一版不再待处理
+    ///
+    /// （2026-10-20：写那一趟改成「以云端当前版为底重写」，所以文件不再是"一个字节都不动" ——
+    /// 动的只有注释 / 时间戳 / 新字段 / 血统，**值**必须还是我原来那个。）
     #[test]
-    fn scenario_c_holding_keeps_the_file_byte_identical() {
+    fn scenario_c_holding_keeps_my_value() {
         let w = World::new();
-        let before = w.local_text();
         let after = w.decide(KEY, "hold");
 
         assert_eq!(after.pending_count, 0);
@@ -790,7 +900,90 @@ offset_x = -1
             after.entries.iter().find(|e| e.key == KEY).unwrap().decided,
             Some("hold")
         );
-        assert_eq!(w.local_text(), before, "保持 = 一个字节都不动");
+        assert_eq!(
+            param_alg::read_param_values(&w.local_text(), &defs()).unwrap()[KEY],
+            "-5",
+            "保持 = 这一项还是我原来的值"
+        );
+    }
+
+    /// **应用 0 项**（云端只改了注释 / 时间戳）：新注释与新的血统进来、
+    /// 我的值一个都不动 —— 「有新版」就此收场
+    #[test]
+    fn applying_zero_items_digests_a_comment_only_release() {
+        let w = World::new();
+        /* 先把那一项处理掉（保持我的值）—— 于是"云端换版"只剩注释那点差别 */
+        assert_eq!(w.decide(KEY, "hold").pending_count, 0);
+        /* 值一项都没有变，只多了一行注释 —— 摘要照样变（血统比的是全文） */
+        w.publish_text(format!("# 这一版只改了注释\n{}", w.current_text));
+
+        let before = w.sync();
+        assert_eq!(before.pending_count, 0, "值一项都没动：{before:?}");
+        assert!(before.version_advanced, "摘要变了 ⇒ 云端换版了");
+
+        let after = apply_at(&w.root, &w.user, LOCAL, &[]).unwrap();
+        assert!(
+            !after.version_advanced,
+            "应用 0 项之后不再挂着「有新版」：{after:?}"
+        );
+        assert_eq!(after.pending_count, 0);
+
+        let local = w.local_text();
+        assert!(
+            local.contains("# 这一版只改了注释"),
+            "新注释进来了\n{local}"
+        );
+        assert_eq!(
+            param_alg::read_param_values(&local, &defs()).unwrap()[KEY],
+            "-5",
+            "我的值一个都没被顶掉"
+        );
+        let lineage = runtime::lineage::parse_lineage_from_content(&local).expect("血统还在");
+        assert_eq!(
+            lineage.based_on_sha256.as_deref(),
+            after.current_sha256.as_deref(),
+            "血统推到云端当前版 —— 这就是「有新版」消失的根据"
+        );
+    }
+
+    /// **云端新增的字段**跟着新版进来（本地那份里本来没有它）
+    #[test]
+    fn a_brand_new_cloud_field_comes_in_with_the_new_version() {
+        let w = World::new();
+        let defs = defs();
+        /* 我这份里本来没有这一项（先删掉），云端新版里有它 */
+        let local = w.local_text();
+        let without = remove_line(&local, "offset_y");
+        crate::fsx::atomic::atomic_write(&w.user.join(LOCAL), without.as_bytes()).unwrap();
+        assert!(
+            !param_alg::read_param_values(&w.local_text(), &defs)
+                .unwrap()
+                .contains_key(K2),
+            "这一项现在不在我这份里"
+        );
+
+        let after = apply_at(&w.root, &w.user, LOCAL, &[]).unwrap();
+        let values = param_alg::read_param_values(&w.local_text(), &defs).unwrap();
+        assert_eq!(
+            values.get(K2).map(String::as_str),
+            after
+                .entries
+                .iter()
+                .find(|e| e.key == K2)
+                .and_then(|e| e.cloud_new.as_deref()),
+            "云端新增的字段照云端的值进来"
+        );
+    }
+
+    /** 另一项参数（"云端新增字段"那条要用） */
+    const K2: &str = "toolhead.offset.y";
+
+    /// 删掉含这个片段的那一行（摆"我这份里没有这一项"用）
+    fn remove_line(text: &str, needle: &str) -> String {
+        text.lines()
+            .filter(|l| !l.contains(needle))
+            .map(|l| format!("{l}\n"))
+            .collect()
     }
 
     /// 场景 C（续）/ E：云端又发一版 —— 旧值取「我处理到的那一版」，本地值还是我保持的那个

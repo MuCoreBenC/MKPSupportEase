@@ -1065,7 +1065,16 @@ export interface LocalPresetIdentity {
 export interface LocalFileIdentity {
   /** 落点（相对**用户根**，`presets-local/…`） */
   path: string
+  /** 文件名 —— **落盘的就是这一串** */
   fileName: string
+  /**
+   * 这个名字被程序**修过了**（剔掉了不合规的字符 / 名字太长被截到上限）——
+   * 界面据此照实说一句"名字太长，已截断为 X"。
+   *
+   * ★ 名字不合规**不算失败**（2026-10-20 作者：「改名有限制…… 不要失败，
+   * 可以自动截断显示出来被截断了」）：只有空的、后缀变了的那两档才拒。
+   */
+  adjusted: boolean
 }
 
 /**
@@ -2923,6 +2932,26 @@ export interface MkpApi {
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
 
   /**
+   * **复制出来的那一份跟不跟云端**（2026-10-20；出厂 = 关）。
+   *
+   * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，"没选过怎么解释"
+   * 是后端的事 —— 界面不自己拿 null 去猜（与自动清理那一条同一条口径）。
+   *
+   * 关 ⇒ 复制件是独立的一份：预设页云端行不因它显示「有新版 / 更新」，
+   * 参数页打开它时整段「云端更新」不画。
+   */
+  getCopiesFollowCloud(): Promise<boolean>
+
+  /**
+   * 开关「复制出来的也跟着云端更新」：**立即生效并落盘**
+   * （写 `run/app-state.json` 的 `presets.copiesFollowCloud` 格）。
+   *
+   * 开 / 关会**立刻改变**云端行的三态与那颗「更新」—— 那一态由身份账本算，
+   * 而账本的出口正看这一格，所以写完后端广播一次 AppState 变更。
+   */
+  setCopiesFollowCloud(enabled: boolean): Promise<boolean>
+
+  /**
    * 设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块的当前值（2026-10-17）。
    *
    * 回的是**解析后**的值（盘上 `null` 已经解成出厂档、量程已经夹住）——
@@ -3247,10 +3276,17 @@ export interface MkpApi {
    * 「我处理到的那一版 → 当前版」，不需要云端提供中间版本）。
    *
    * `fetchMissing` = 允许为了拿到**云端当前版**的正文发一次网络请求。
-   * 打开某一份预设时可以给 `true`；列表那种一屏几十行的读一律 `false`（启动零网络）。
+   * ★ 2026-10-20：**打开某一份也不给 `true`** —— 作者裁定「没点更新之前不该知道
+   * 逐项差异」。只有用户明确点了「更新 / 选择要更新的参数」那一刻才发这一次；
+   * 其余时候 `cloudReady: false`，界面只说"云端有新版本"，不说改了哪几项。
+   * 列表那种一屏几十行的读一律 `false`（启动零网络）。
    * 拿不到云端当前版正文时**不报错**：`cloudReady: false`，逐项新值给 `null`。
+   *
+   * **`null` = 这一份不认云端**（复制出来的那一份，且上面那个开关关着）——
+   * 界面据此整段「云端更新」都不画，而不是画一个"零项待处理"
+   * （那会让用户以为云端这一版没动过任何一项）。
    */
-  getPresetParamSync(path: string, fetchMissing?: boolean): Promise<PresetParamSync>
+  getPresetParamSync(path: string, fetchMissing?: boolean): Promise<PresetParamSync | null>
 
   /**
    * **落一批决定**（采用 / 保持），回来的是落完之后的那一份总账。

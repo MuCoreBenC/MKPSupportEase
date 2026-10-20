@@ -273,6 +273,26 @@ impl PostprocPrefs {
     }
 }
 
+/// **预设这一页怎么算**（2026-10-20）：这一格里都是"界面该怎么算"的偏好，
+/// 与后处理那一格同族（用户点出来的、不改业务数据），但服务的是预设页。
+///
+/// 与 [`PostprocPrefs`] 同一套写法：整格 `None` = 一项都没动过 ⇒ 全部出厂档；
+/// 每一项自己也是 `Option`（"没动过"与"明确选了出厂档"分得开）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetPrefs {
+    /// **复制出来的那一份跟不跟云端**（出厂 = 关）。
+    ///
+    /// 关 ⇒ 复制件是独立的一份：它不认领任何云端条目（预设页不出「有新版 / 更新」），
+    /// 参数页打开它时整段「云端更新」不画，点「更新」也永远不会动它。
+    /// 开 ⇒ 复制件与原件同权（血统照旧指向那个云端条目）。
+    ///
+    /// ★ 判据落在身份账本那一道闸上（[`crate::ipc::local::get_local_preset_index`]），
+    ///   **前端不按名字猜**（名字改了就失效）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copies_follow_cloud: Option<bool>,
+}
+
 /// Z 轴校准停留时间的出厂值与量程（秒）。
 pub const Z_DWELL_DEFAULT: i64 = 2;
 pub const Z_DWELL_MIN: i64 = 1;
@@ -410,6 +430,12 @@ pub struct AppStateFile {
     /// 这一格里每一项自己也是 `Option`（"没动过"与"明确选了出厂档"要分得开）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub postproc: Option<PostprocPrefs>,
+    /// **预设这一页的偏好**（2026-10-20，见 [`PresetPrefs`]）。
+    ///
+    /// 与后处理那一格同族：用户点出来的、不是业务数据，住在这里；
+    /// 整格 `None` = 一项都没动过 ⇒ 全按出厂档。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presets: Option<PresetPrefs>,
 }
 
 impl Default for AppStateFile {
@@ -428,6 +454,7 @@ impl Default for AppStateFile {
             last_window_box: None,
             pin_before_compact: None,
             postproc: None,
+            presets: None,
         }
     }
 }
@@ -586,6 +613,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         pin_before_compact: None,
         /* 后处理偏好这一格是 2026-10-17 才有的：旧档里本来就没有它（没动过 = 出厂档） */
         postproc: None,
+        /* 预设页偏好这一格是 2026-10-20 才有的：旧档里本来就没有它（没动过 = 出厂档） */
+        presets: None,
     };
     retire_legacy_paths(&mut snapshot);
     Ok(snapshot)
@@ -947,6 +976,32 @@ pub fn set_postproc_prefs(root: &Path, prefs: PostprocPrefs) -> Result<PostprocP
     with_state(root, |state| {
         state.postproc = Some(prefs.clone());
         Ok(prefs)
+    })
+}
+
+/* ---------- presets：预设这一页的偏好（2026-10-20） ---------- */
+
+/// 读预设页偏好。整格 `None` = 一项都没动过 ⇒ [`PresetPrefs::default`]（全出厂档）。
+pub fn preset_prefs(root: &Path) -> Result<PresetPrefs, AppError> {
+    Ok(load(root)?.presets.unwrap_or_default())
+}
+
+/// **复制出来的那一份跟不跟云端**（出厂 = 关）。
+///
+/// ★ 回的是**解析后的 `bool`**：盘上"没选过"是 `None`，而"没选过"该怎么解释是
+/// **后端的事** —— 界面不自己拿 `null` 去猜（猜出来的那一档迟早与真正执行排除的
+/// 那一侧漂开）。与 [`auto_clean_history`] 同一条口径。
+pub fn copies_follow_cloud(root: &Path) -> Result<bool, AppError> {
+    Ok(preset_prefs(root)?.copies_follow_cloud.unwrap_or(false))
+}
+
+/// 记下「复制出来的也跟着云端更新」（整份状态原子替换，别的格一个不动）。
+pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        let mut prefs = state.presets.clone().unwrap_or_default();
+        prefs.copies_follow_cloud = Some(enabled);
+        state.presets = Some(prefs);
+        Ok(enabled)
     })
 }
 

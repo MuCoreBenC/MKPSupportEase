@@ -1066,6 +1066,35 @@
   -webkit-user-select: none;
 }
 
+/*
+ * 「恢复默认名」（2026-10-20）：住在**底栏左侧**的幽灵按钮（作者：「应该加到这个左下角呀，
+ * 做成那种幽灵按钮吧」）。`margin-right: auto` 把它推到左边、两根按钮留在右边。
+ * 它只填名字、不改盘 —— 按「改名」才落盘，所以不长得像主按钮。
+ */
+.renameReset {
+  margin-right: auto;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.renameReset:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+.renameReset:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
+
 .editErr {
   margin: 0;
   padding: 6px 10px;

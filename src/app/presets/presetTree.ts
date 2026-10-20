@@ -422,15 +422,18 @@ export const PRESET_UNTRUSTED_NOTE =
 /**
  * preset 行操作列那颗按钮：三态各一个字。
  *
- * ★ **「有更新」那一档的按钮也叫「下载」**（2026-10-08 作者：「那颗按钮就叫下载吧」）。
- * 动作本来就只有一个 —— 从云端取一份落下来；`安装 / 更新 / 重新下载` 都是**同一个管道**
- * （见 `runtime/delivery.rs`：旧份自动归档，没有第二条路）。**状态词才是"为什么"**
- * （状态列那句「有更新」照旧说），按钮只该说"点它会发生什么"。
+ * ★ **「有更新」那一档叫「更新」**（2026-10-20 作者改判：「你怎么把它做成了下载按钮啊？
+ *   我要更新按钮」）。2026-10-08 那天定的是"动作只有一个、就叫下载"，但用户看的是
+ *   **状态**：明明写着「有新版」，按钮却叫「下载」，第一眼像是在重新下载一份。
+ *   两档的词分开：
+ *     `missing`（本机没有）→「下载」  第一次取回来
+ *     `update` （本机是旧的）→「更新」换掉旧的
+ *   **管道仍然只有一条**（`runtime/delivery.rs`：旧份自动归档），只是按钮说实话。
  */
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, string> = {
   missing: '下载',
   latest: '已下载',
-  update: '下载',
+  update: '更新',
 }
 
 /**
@@ -631,6 +634,82 @@ export function splitFileName(fileName: string): { stem: string; ext: string } {
     : { stem: fileName, ext: '' }
 }
 
+/** 「恢复默认名」四个字（菜单项与重命名框里那颗按钮共用一处，别各写一个） */
+export const RESTORE_DEFAULT_NAME = '恢复默认名'
+
+/**
+ * 「修改参数」那个词（**全站用语**，2026-10-16 作者：别再动它）。
+ *
+ * 2026-10-20 起展开详情「快捷操作」里那颗也从「编辑」换成它（原来那颗打开的是
+ * **改 TOML 正文**的「编辑文件」）—— 两处（右键菜单 / 快捷操作）共用这一份字，
+ * 不许各写一个；改正文那一档仍叫「编辑文件」（[`EDIT_TEXT`]）。
+ */
+export const PARAMS_TEXT = {
+  open: '修改参数',
+  why: '改这一份的参数（打开参数表，就是参数页本身）；要改 TOML 正文走右键菜单的「编辑文件」',
+} as const
+
+/**
+ * **这一行跟云端没关系**（2026-10-20）：复制 / 导入出来的，而设置页那一格
+ * 「复制出来的也跟着云端更新」关着 ⇒ 不挂「有新版」、不给「更新」入口。
+ *
+ * 判据只有一个来源：后端那一格（`copiesFollow`）+ 出处账给出的 `provenance`。
+ * 行上那几处（名称列徽章 / 操作列 / 详情快捷操作 / 右键菜单）**都读它**，
+ * 不许各写一遍 —— 写两遍就会漂成"徽章不挂、菜单还让点"那种样子。
+ */
+export function isDetachedCopy(row: PresetTableRow, copiesFollow: boolean): boolean {
+  if (copiesFollow || row.scope !== 'local') return false
+  return row.provenance === 'copy' || row.provenance === 'import'
+}
+
+/**
+ * **这一份的「默认名」**（2026-10-20 作者：「我希望他的这个名字可以恢复默认的名字」）。
+ *
+ * 判据只有一条 —— **它当初从哪来**，出处账那一头记着的文件名：
+ *
+ *   复制件（`provenance === 'copy'`）     ⇒ 来源那一份现在的文件名
+ *                                          （`A1-fast copy 2.toml` → `A1-fast.toml`）
+ *   导入的（`provenance === 'import'`）   ⇒ 没有默认名（`null`：它本来就不叫这个名字）
+ *   从云端另存 / 下载出来的（血统指云端） ⇒ 云端那一份的文件名（`A1-standard.toml`）
+ *
+ * 三样都没有就 `null` —— **不猜**（拿当前名字当默认名是自欺：那等于"恢复"什么都不做）。
+ *
+ * 后缀跟着**来路**走：复制件的后缀与来源一致；血统那一档取血统路径的尾段。
+ * 名字撞了怎么办由后端那道「不覆盖」闸回答（这里不替它改名）。
+ */
+export function defaultNameOf(row: PresetTableRow): string | null {
+  if (row.origin !== 'local') return null
+  if (row.provenance === 'import') return null
+  if (row.provenance === 'copy') {
+    return row.copiedFromName !== null && row.copiedFromName !== undefined
+      ? row.copiedFromName
+      : null
+  }
+  const source = row.basedOnSource
+  if (source === null || source === undefined || source === '') return null
+  const tail = source.split('/').pop()
+  return tail !== undefined && tail !== '' ? tail : null
+}
+
+/**
+ * **恢复默认名要落到哪个名字**：默认名没被占用就用它；**占了就按复制那一套依次让开**
+ * （`A1-standard.toml` → `A1-standard 2.toml`…）。
+ *
+ * 为什么不报错让用户自己改：后端那道闸是"不覆盖"，用户点「恢复默认名」要的是
+ * 「把它改回正常名字」这件事本身 —— 撞名时停下来问"要不要叫别的"是把活儿推回给他。
+ * ★ 不叫 `copy`：它跟本来的默认名是一回事，只是重了一份（`copy` 这个词留给「复制」）。
+ */
+export function defaultNameAvoiding(defaultName: string, taken: ReadonlyArray<string>): string {
+  const used = new Set(taken)
+  if (!used.has(defaultName)) return defaultName
+  const { stem, ext } = splitFileName(defaultName)
+  for (let n = 2; n < 1000; n += 1) {
+    const candidate = `${stem} ${n}${ext}`
+    if (!used.has(candidate)) return candidate
+  }
+  return `${stem} ${Date.now()}${ext}`
+}
+
 /**
  * **第十一层**：复制出一份新的（2026-10-10 作者改判 —— 菜单里就叫「复制」）。
  *
@@ -666,33 +745,62 @@ export const LOCAL_COPY = {
  *
  * # 怎么认
  *
- * 按 `duplicateNameOf` 起的名反解：`<base> copy<ext>` ⇒ 第 1 份副本；
- * `<base> copy 2<ext>` ⇒ 第 2 份；原件本身 ⇒ `n = 0`。
- * ⇒ 先比 `base`（原件名），base 相同再比 `n` —— 于是
+ * 按 `duplicateNameOf` 起的名**从尾巴上一层一层**反解：`<base> copy<ext>` ⇒ 第 1 份副本；
+ * `<base> copy 2<ext>` ⇒ 第 2 份；原件本身 ⇒ 空链。
+ * ⇒ 先比 `base`（原件名），base 相同再比那条链 —— 于是
  *   `A1-fast.toml` < `A1-fast copy.toml` < `A1-fast copy 2.toml`，**三份挨在一起、原件在最前**。
  *
- * ★ 认不出的（用户自己改名把 ` copy` 改掉了、或本来就叫这个名字）⇒ `n = 0`、
- *   `base` = 整个主名 —— 退化成"按文件名排"，不会把谁排丢。
+ * ★★ **剥到只剩原件名为止**（2026-10-20）。只剥一层是不够的：
+ *   `A1-fastv3.3 copy copy.toml` 那一层剥完得到 base = `A1-fastv3.3 copy.toml`，
+ *   与原件 `A1-fastv3.3.toml` **不是同一族** ⇒ 退化成整串文件名比较 ⇒
+ *   副本跑到原件上面去（作者图里那一条）。副本的副本也是副本，得一直剥下去。
+ *
+ * # 那条链的方向：靠近原件的在**前**（外 → 内）
+ *
+ *   `A1 copy.toml`         ⇒ base `A1`  链 `[1]`
+ *   `A1 copy 2.toml`       ⇒ base `A1`  链 `[2]`
+ *   `A1 copy copy.toml`    ⇒ base `A1`  链 `[1, 1]`
+ *   `A1 copy 2 copy.toml`  ⇒ base `A1`  链 `[2, 1]`（`copy 2` 的那一份副本）
+ *
+ * 剥是从右往左的，所以剥完要**倒过来** —— 倒过来之后按字典序比（短的在前），
+ * 从某一层复制出来的那一份就**紧跟在它下面**（`[2]` 后面才是 `[2, 1]`）。
+ *
+ * ★ 认不出的（用户自己改名把 ` copy` 改掉了、或本来就叫这个名字）⇒ 空链、
+ *   `base` = 整个文件名 —— 退化成"按文件名排"，不会把谁排丢。
  */
 export interface CopyRank {
-  /** 去掉副本后缀之后的主名（同一族的名字都一样） */
+  /** 去掉**所有**副本后缀之后的主名（同一族的名字都一样） */
   base: string
-  /** 0 = 原件，1 = `copy`，2 = `copy 2`… */
-  n: number
+  /**
+   * 副本链，**靠近原件的在前**。空 = 原件。
+   *
+   * `[1]` = 原件的第 1 份副本；`[2, 1]` = 第 2 份副本再复制出来的那一份。
+   */
+  chain: number[]
 }
 
 export function copyRankOf(fileName: string): CopyRank {
   const { stem, ext } = splitFileName(fileName)
   /* ★ `base` 一律**带后缀**：原件与它那几份副本必须落到**同一个** base 上才归得了一族；
      带上后缀也顺带把 `A1-fast.toml` 与 `A1-fast.json` 分成两族（后缀保持原样是硬规则）。 */
-  const m = /^(.*?) copy(?: (\d+))?$/.exec(stem)
-  /* 只认**行尾**那个 ` copy` / ` copy 2` —— 名字里本来就有的空格照旧是名字的一部分
-     （`A1 涂胶.toml` 不能被误判成 `A1` 的副本） */
-  if (m === null) return { base: fileName, n: 0 }
-  const n = m[2] === undefined ? 1 : Number.parseInt(m[2], 10)
-  /* 数字解析不出来（`copy abc`）就当它是名字的一部分，不是副本 */
-  if (!Number.isFinite(n)) return { base: fileName, n: 0 }
-  return { base: `${m[1]}${ext}`, n }
+  const chain: number[] = []
+  let base = stem
+  for (;;) {
+    /* 只认**行尾**那个 ` copy` / ` copy 2` —— 名字里本来就有的空格照旧是名字的一部分
+       （`A1 涂胶.toml` 不能被误判成 `A1` 的副本） */
+    const m = /^(.*?) copy(?: (\d+))?$/.exec(base)
+    if (m === null) break
+    const n = m[2] === undefined ? 1 : Number.parseInt(m[2], 10)
+    /* 数字解析不出来（`copy abc`）就当它是名字的一部分，不是副本 ——
+       已经剥掉的几层一起退回去，整串当名字（不许拿半个链去排序） */
+    if (!Number.isFinite(n)) return { base: fileName, chain: [] }
+    chain.push(n)
+    base = m[1]
+  }
+  if (chain.length === 0) return { base: fileName, chain }
+  /* 剥是从右往左的（先剥最里层）⇒ 倒过来，让靠近原件的那一层排在前面 */
+  chain.reverse()
+  return { base: `${base}${ext}`, chain }
 }
 
 export function duplicateNameOf(fileName: string, taken: ReadonlyArray<string>): string {
@@ -1808,14 +1916,29 @@ export function localCountOfAxis(local: LocalPresetFile[], axis: PresetKindAxis)
  *
  * 每一列都能点，点同一列在升 / 降之间换。**置顶永远压在最上面**（那是另一件事的判据，
  * 不参与列排序）—— 列排序只决定"同一堆里谁在前"。
+ *
+ * # 名称列是**三循环**，别的列仍是两态（2026-10-20 作者：「名称那个应该是三循环的
+ * 点击切换排序，就是默认，a-z，倒序」）
+ *
+ *   family（默认）→ asc（a-z）→ desc（z-a）→ 回到 family
+ *
+ * `family` = **族优先**：原件当锚，它那几份副本紧跟着（见 [`copyRankOf`]），
+ * 副本序号不随方向翻面；asc / desc 是**纯文件名文本序**（那一刻副本按文本排到原件
+ * 上面，正是用户点 a-z 要的结果）。别的列没有"族"这回事 —— 它们只有升 / 降两态。
  */
 
 /** 能拿來排的列。★ 与表头那几格一一对应，加一列要同时改两处 */
 export type PresetSortKey = 'name' | 'machine' | 'version' | 'nozzle' | 'layer' | 'time'
 
+/**
+ * 名称列那三档；别的列只在 `asc` / `desc` 之间换 —— 它们拿到 `family` 时按 `asc` 处理
+ * （见 [`sortRows`] 里 `dirOf` 那一句：那一档对它们没有意义，不值得分叉）。
+ */
+export type PresetSortDir = 'family' | 'asc' | 'desc'
+
 export interface PresetSort {
   key: PresetSortKey
-  dir: 'asc' | 'desc'
+  dir: PresetSortDir
 }
 
 /**
@@ -1867,7 +1990,12 @@ function byNumber(key: PresetSortKey): boolean {
  * ★ 同一族（`A1-fast.toml` 与它的 `copy` / `copy 2`）**原件在最前**，见 `copyRankOf`。
  */
 function sortRows<R extends PresetRowBase>(rows: R[], sort: PresetSort): R[] {
-  const dir = sort.dir === 'asc' ? 1 : -1
+  /*
+   * 名称列三档（2026-10-20）：`family` 与 `asc` 都当升序，只有 `desc` 翻面 ——
+   * `family` 若落到别的列（它们只有两态）上，也是升序，不用分叉。
+   */
+  const dir: 1 | -1 = sort.dir === 'desc' ? -1 : 1
+  const family = sort.key === 'name' && sort.dir === 'family'
   const num = byNumber(sort.key)
   const rank = new Map<string, CopyRank>()
   const rankOf = (fileName: string): CopyRank => {
@@ -1878,27 +2006,41 @@ function sortRows<R extends PresetRowBase>(rows: R[], sort: PresetSort): R[] {
     return r
   }
 
+  /** 副本链：逐层比，**短的在前**（`[1]` 在 `[1, 1]` 前面） */
+  const byChain = (a: number[], b: number[]): number => {
+    const len = Math.min(a.length, b.length)
+    for (let i = 0; i < len; i += 1) {
+      const d = (a[i] ?? 0) - (b[i] ?? 0)
+      if (d !== 0) return d
+    }
+    return a.length - b.length
+  }
+
   /*
-   * **按名字比**（`dir` 只作用在"族"上）。
+   * **族优先**（`dir` 只作用在"族"上）。
    *
-   * 先按"族"（原件名）比，同族再按副本序号 ⇒ 复制出来的那一份就躺在原件下面
+   * 先按"族"（原件名）比，同族再按副本链 ⇒ 复制出来的那一份就躺在原件下面
    * （`A1-fast copy.toml` 若按整串文件名比会跑到 `A1-fast.toml` **上面**，因为空格比点小）。
-   * ★★ 副本序号**不乘 `dir`**："原件在前、副本在后"是一条**稳定的**规矩，
+   * ★★ 副本链**不乘 `dir`**："原件在前、副本在后"是一条**稳定的**规矩，
    *    不该因为用户点了降序就把 `copy 2` 翻到原件上面去。
    */
   const byName = (a: R, b: R, d: 1 | -1): number => {
     const ra = rankOf(a.fileName)
     const rb = rankOf(b.fileName)
     if (ra.base !== rb.base) return ra.base.localeCompare(rb.base) * d
-    if (ra.n !== rb.n) return ra.n - rb.n
+    const c = byChain(ra.chain, rb.chain)
+    if (c !== 0) return c
     return a.fileName.localeCompare(b.fileName) * d
   }
 
   return [...rows].sort((a, b) => {
     if (a.pinOrder !== b.pinOrder) return b.pinOrder - a.pinOrder
 
-    /* 名字那一列就是按名字比 */
-    if (sort.key === 'name') return byName(a, b, dir)
+    /* 名字那一列：默认档族优先；a-z / z-a 那两档是**纯文件名文本序** */
+    if (sort.key === 'name') {
+      if (!family) return a.fileName.localeCompare(b.fileName) * dir
+      return byName(a, b, dir)
+    }
 
     const va = sortValueOf(a, sort.key)
     const vb = sortValueOf(b, sort.key)

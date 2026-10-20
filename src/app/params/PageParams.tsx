@@ -396,7 +396,7 @@ export default function PageParams({
    * 退出编辑模式就是作废，那些改的都作废，保存了才有」）—— 走 `u.discardAll()`：
    * 全部未保存的改动一次退回已保存值；要留住改动只有「保存」一条路。
    *
-   * ★ 例外：`openSyncOnStart`（右键「选择要跟随的更新」那条直路）**直接进编辑模式**
+   * ★ 例外：`openSyncOnStart`（右键「选择要更新的参数」那条直路）**直接进编辑模式**
    * —— 用户是带着"来处理更新"的意图点进来的，再让他先点一下「进入编辑模式」
    * 是白拦一道（那屏里的采用 / 保持本来就是写操作）。
    */
@@ -433,10 +433,35 @@ export default function PageParams({
   const [askSave, setAskSave] = useState(false)
   const [attachBody, bodyWidth] = useWidth()
   /**
-   * 「选择要跟随的更新」那一屏的开合。`openSyncOnStart` 是右键菜单那条直路
-   * （用户点「选择要跟随的云端更新」＝他已经知道有更新等着处理）。
+   * 「选择要更新的参数」那一屏的开合。**文案 2026-10-20 改过**：原来叫「选择要跟随的
+   * 更新」（"跟随"讲的是机制，用户点它时想的是"哪几项要改成云端的新值"）。
+   * `openSyncOnStart` 是右键菜单那条直路（＝他已经知道有更新等着处理）。
    */
   const [syncOpen, setSyncOpen] = useState(openSyncOnStart)
+  /**
+   * 「选择要更新的参数」那一屏的宿主层（2026-10-20）。
+   *
+   * 点 `.page` 的**父节点**（在「修改参数」模态框里就是 `.paramsLayer`）——
+   * 遮罩挂在那儿才铺满整块内容区、不被框的圆角裁掉；`fallback` 是独立页那一档
+   * （没有父层时退回 `.page` 自己，与原来是同一处）。
+   */
+  const [syncLayer, setSyncLayer] = useState<HTMLElement | null>(null)
+  const mountSyncLayer = useCallback((el: HTMLDivElement | null) => {
+    /* `el === null` 时**不改**：卸载那一刻换宿主会凭空重挂一次遮罩 */
+    if (el !== null) setSyncLayer(el.parentElement ?? el)
+  }, [])
+  /*
+   * 走那条直路进来 ⇒ **进来就把云端新版取回来**（2026-10-20）。
+   *
+   * 用户是带着"来处理更新"的意图点进来的，他自己已经传递了"我愿意等这一次网络"；
+   * 而普通打开参数页是不取的（那时只说"云端发了新版"）。
+   */
+  useEffect(() => {
+    if (openSyncOnStart !== true) return
+    void u.fetchSync()
+    /* 只在进来时跑这一次（`u` 每次渲染都是新的，跟它走会反复取） */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSyncOnStart])
   /** 预设抽屉的开合 + pill 的 ref（关抽屉后焦点要还回去） */
   const [pickerOpen, setPickerOpen] = useState(false)
   const pillRef = useRef<HTMLButtonElement>(null)
@@ -1103,7 +1128,7 @@ export default function PageParams({
     )
 
   return (
-    <div className={s.page} data-density={density}>
+    <div ref={mountSyncLayer} className={s.page} data-density={density}>
       {/* 那一句状态 → 模态框标题栏（标题右边）；没有槽时它渲染在内容区顶上（见下面那段） */}
       {headNoteSlot !== null && headNoteNode !== null
         ? createPortal(headNoteNode, headNoteSlot)
@@ -1217,16 +1242,19 @@ export default function PageParams({
 
             {/*
               云端更新（2026-10-09）：云端改过的项**不直接顶掉本地值**，
-              它们先在这里等着 —— 一屏一条，动作只有一个去处（那一个弹层）。
-              行上也能逐项处理（见 ParamRow 的两个按钮），这条路是"一次看完"的那条。
+              它们先在这里等着 —— 一条，动作只有一个去处（那一个弹层）。
+
+              ★ **两档**（2026-10-20）：
+                · 取回了云端字节 ⇒ 「待选择 N 项」+ 逐项差异（点它直接进那一屏）；
+                · 还没取回 ⇒ 只说"云端发了新版"这个**事实**，差异要用户点了才去取。
+                  不自动取的理由：自动取会让"没点更新，本地怎么知道参数变了"成立，
+                  而取回之后的「更新」会把我没改过的项悄悄改成云端新值。
             */}
             {u.pendingCount > 0 && (
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
                   云端更新待选择 <b>{u.pendingCount}</b> 项
-                  {u.sync?.currentReleaseTime !== null && u.sync?.currentReleaseTime !== undefined
-                    ? `（云端 ${u.sync.currentReleaseTime}）`
-                    : ''}
+                  {u.sync?.currentReleaseTime != null ? `（云端 ${u.sync.currentReleaseTime}）` : ''}
                   <span className={s.syncBarHint}>
                     —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
                   </span>
@@ -1243,19 +1271,37 @@ export default function PageParams({
                     setSyncOpen(true)
                   }}
                 >
-                  选择要跟随的更新
+                  选择要更新的参数
                 </button>
               </div>
             )}
             {/*
-              「云端换版了，但新版正文还没取回来」：一条陈**述**，不是错误 ——
-              拿不到云端那一版的字节就逐项比不出来（不编一个差异出来）。
+              「云端换了新版，但它的正文还没取回来」：一条**陈述**，不是错误。
+              两件事分得开：云端有新版本（血统说的，本机就知道）与
+              逐项改了什么（要拿到云端新版字节才比得出来）—— 后者要用户点了才去取。
             */}
             {u.pendingCount === 0 && u.syncNeedsFetch && (
-              <p className={s.warn}>
-                云端发了新版，但这一版的正文还没取回来 —— 取回之后这里会列出它改了哪几项
-                {u.sync?.basedOnReleaseTime != null ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）` : ''}
-              </p>
+              <div className={s.syncBar} role="status">
+                <span className={s.syncBarText}>
+                  云端发了新版
+                  {u.sync?.basedOnReleaseTime != null
+                    ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）`
+                    : ''}
+                  <span className={s.syncBarHint}>—— 点右边先看看它改了哪几项</span>
+                </span>
+                <button
+                  type="button"
+                  className={s.syncBarBtn}
+                  disabled={u.syncFetching}
+                  onClick={() => {
+                    if (ro) setEditMode(true)
+                    /* 这一下才是"拿云端新版字节"那个动作：取回来再开那一屏 */
+                    void u.fetchSync().then(() => setSyncOpen(true))
+                  }}
+                >
+                  {u.syncFetching ? '正在取回…' : '选择要更新的参数'}
+                </button>
+              </div>
             )}
             {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
 
@@ -1617,17 +1663,34 @@ export default function PageParams({
           </div>
         )}
         {/*
-          「选择要跟随的更新」那一屏。挂在**这一页里**（`.page` 是定位祖先）——
-          遮罩只盖参数区（在模态框里就是只盖那个框），与这一页别的弹层同一条规矩。
+          「选择要更新的参数」那一屏（原「选择要跟随的更新」）。
+
+          ★★ **挂到参数模态框的宿主层，不再嵌在它的内容里**（2026-10-20 作者：
+             「我不希望它嵌套在这个修改参数的模态框里面，它能不能在外面呢？」）。
+
+             `.page` 本身在「修改参数」模态框里就是框里的一块，所以原来它的遮罩
+             只能盖住那个框、看起来像框里又套了一层。现在是 **portal 到宿主那一层**
+             （`.paramsLayer`，`z-index: 70`）的**兄弟节点**：遮罩铺满整个内容区、
+             它成为独立的一屏，参数框压在它下面；处理完 / 暂不修改回到参数框。
+
+             ★ 为什么 portal 到这一层而不是 `document.body`：Modal 的遮罩是
+               `position: absolute`（`Modal.tsx` 硬约定②，绝不用 fixed）。`body`
+               不是定位祖先 ⇒ 遮罩会被定位到**文档最底下**，而外壳 `.shell` 是
+               `overflow: hidden` —— 那就是"点了没任何反应"（2026-10-20 踩过）。
+               这一层是定位祖先，遮罩正好铺满内容区。
         */}
-        <ParamSyncModal
-          open={syncOpen}
-          sync={u.sync}
-          busy={u.syncBusy}
-          defOf={u.defOf}
-          onDecide={u.decideSync}
-          onClose={() => setSyncOpen(false)}
-        />
+        {syncLayer !== null &&
+          createPortal(
+            <ParamSyncModal
+              open={syncOpen}
+              sync={u.sync}
+              busy={u.syncBusy}
+              defOf={u.defOf}
+              onDecide={u.decideSyncMany}
+              onClose={() => setSyncOpen(false)}
+            />,
+            syncLayer,
+          )}
 
         {/*
          预设抽屉。挂在 FieldLayer 里、`.main` 之后 —— absolute 的定位父级是 `.main`，

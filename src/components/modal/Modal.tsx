@@ -72,6 +72,12 @@ export interface ModalProps {
    */
   host?: HTMLElement | null
   /**
+   * 额外挂在框上的类名（可选）：给"这一屏要比同尺寸档更高一点"的场合用
+   * （例如「选择要更新的参数」要一个固定高度，不能跟着 1 项内容塌成一小条）。
+   * 只管框身尺寸 —— 宽度档仍由 `size` 决定。
+   */
+  boxClass?: string
+  /**
    * **连标题栏那颗 × 都不摆**（2026-10-11 加，只有跑着那一屏用）。
    *
    * 与 `closeOnScrim={false}` 是配套的一对：那一刻"把这一屏收起来"只有一条明路
@@ -111,6 +117,7 @@ export default function Modal({
   bodyFill = false,
   closeOnScrim = false,
   host = null,
+  boxClass,
   closeTitle,
   hideClose = false,
   closeOnEsc = true,
@@ -198,7 +205,7 @@ export default function Modal({
     >
       <div
         ref={boxRef}
-        className={s.box}
+        className={boxClass === undefined ? s.box : `${s.box} ${boxClass}`}
         data-size={size}
         role="dialog"
         aria-modal="true"

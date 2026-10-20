@@ -57,7 +57,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
-import { deliveryMutated, useDeliveryRevision, useSourceRevision } from '../state/deliveryState'
+import {
+  deliveryMutated,
+  useDeliveryRevision,
+  usePresetPrefsRevision,
+  useSourceRevision,
+} from '../state/deliveryState'
 import { draftMutated, useDraftRevision } from '../state/draftState'
 import type {
   ActivePreset,
@@ -98,6 +103,7 @@ import type {
   PresetRowsInput,
   PresetScopeAxis,
   PresetSort,
+  PresetSortDir,
   PresetSortKey,
   PresetTableData,
   PresetTree,
@@ -218,6 +224,12 @@ export interface PresetData {
    * 假后端同样是固定演示集合（实测 1 个）。
    */
   slicerCopied: string[]
+  /**
+   * **重读本地文件 + 身份账本**（2026-10-20）。切进「云端」那一页时对着它刷新那三态。
+   *
+   * ★ 只读**本机**（扫盘 + 账本），**不发网络** —— 切页签不该顺手发一次网络请求。
+   */
+  refreshLocal: () => Promise<void>
   pick: (machineId: string, versionId: string) => void
   /**
    * 只换机型（预设页那个下拉）。版本跟着落到这台机型的第一个 —— 版本 id 在机型之间
@@ -323,10 +335,13 @@ export interface PresetData {
 
   /**
    * **一份本地文件现在的「云端更新」账**（逐参数三方：本地值 / 云端旧值 / 云端新值）。
-   * 点「更新」时给 `fetchMissing: true` —— 允许为拿到云端当前版字节发一次请求。
+   * 点「更新」时给 `fetchMissing: true` —— 允许为拿到云端当前版字节发一次请求
+   * （★ 那是**唯一**为看差异发网络的两个入口之一，2026-10-20）。
    * 判定（哪几项待处理、哪几项是冲突）都在后端，前端只读这份账。
+   *
+   * `null` = 这一份不认云端（复制出来的那一份，且那个开关关着）。
    */
-  presetSync: (path: string, fetchMissing?: boolean) => Promise<PresetParamSync>
+  presetSync: (path: string, fetchMissing?: boolean) => Promise<PresetParamSync | null>
   /**
    * **把逐参数的处理结果一次性写进本地文件**：`adopt` = 用云端新版值、`hold` = 保持本地值。
    * 结构保真地改那几项，写完**重读本地文件**。
@@ -749,6 +764,20 @@ export function usePresetData(importRevision = 0): PresetData {
           if (boot.changed) {
             /* 目录换过了，重读一遍（同一条出口，代次守卫管着先后） */
             await readPresetFeedInto().catch(() => {})
+            /*
+             * ★★ **身份账本也跟着重读**（2026-10-20）。
+             *
+             * 云端那一表每行的三态（未获取 / 本地已有 / 有新版）是
+             * "本地文件 × 身份账本"算出来的，而账本**按当前目录**判
+             * （血统指的那一版还在目录里才算数）。原来这里只重读"机型树 + 交付"，
+             * 账本还拿着换版之前那一套 ⇒ 用户第一次切进云端页看到的是旧判定，
+             * 直到别处碰巧重读一次才对上（作者图 7：「一开始的时候都没看到有更新按钮，
+             * 第二次点开才有」）。
+             *
+             * 这一路只读本机（扫盘 + 账本），**不发网络** —— 那一趟网络在
+             * `checkBootstrapOnce` 里已经付过了。
+             */
+            await readLocalPresets().catch(() => {})
           }
         })
         .catch(() => {
@@ -765,7 +794,7 @@ export function usePresetData(importRevision = 0): PresetData {
     return () => {
       alive = false
     }
-  }, [readPresetFeedInto, importRevision])
+  }, [readPresetFeedInto, readLocalPresets, importRevision])
 
   /*
    * **跨页再同步**（2026-10-07 真机两刀挣来的）：
@@ -797,6 +826,22 @@ export function usePresetData(importRevision = 0): PresetData {
       /* 读不到就保持旧列表 —— 与上面同一条纪律 */
     })
   }, [deliveryRevision, ready, readPresetFeedInto, readLocalPresets])
+
+  /*
+   * **设置页那一格偏好改过了**（2026-10-20）：「复制出来的也跟着云端更新」开 / 关，
+   * 直接改变**身份账本**的出口（那一格是账本判"复制件认不认云端"的唯一依据），
+   * 于是云端那一表每行的三态与那颗「更新」跟着变。
+   *
+   * 这里只重读**本地文件 + 身份账本**（都是本机扫盘，**不发网络**）—— 目录那一路
+   * 没动过，为一句偏好去重读它是白跑一趟（更别说那一路里可能有网络）。
+   */
+  const presetPrefsRevision = usePresetPrefsRevision()
+  useEffect(() => {
+    if (presetPrefsRevision === 0) return
+    void readLocalPresets().catch(() => {
+      /* 读不到就保持旧列表 —— 与首屏同一条纪律 */
+    })
+  }, [presetPrefsRevision, readLocalPresets])
 
   /*
    * **草稿代次也听**（`draftState`）：参数页改了值 / 保存了 / 取消了（含预设页上
@@ -849,6 +894,14 @@ export function usePresetData(importRevision = 0): PresetData {
       alive = false
     }
   }, [sourceRevision, readPresetFeedInto])
+
+  /*
+   * **对外只说"重读本地那一侧"**（2026-10-20）：切进「云端」那一页时要它刷新那三态，
+   * 但那一侧不需要文件列表（它自己会进快照），所以这里把返回值收掉。
+   */
+  const refreshLocal = useCallback(async (): Promise<void> => {
+    await readLocalPresets()
+  }, [readLocalPresets])
 
   const pick = useCallback((machineId: string, versionId: string) => {
     setAt({ machineId, versionId })
@@ -970,12 +1023,21 @@ export function usePresetData(importRevision = 0): PresetData {
     [],
   )
 
-  const applyParamDecisions = useCallback(async (path: string, decisions: ParamDecision[]) => {
-    await api.applyPresetParamDecisions(path, decisions)
-    await readLocalPresets()
-    /* 盘上那份刚被改过（大小与时刻变了）—— 列表标记顺手对一眼 */
-    draftMutated()
-  }, [readLocalPresets])
+  const applyParamDecisions = useCallback(
+    async (path: string, decisions: ParamDecision[]) => {
+      /*
+       * `decisions` 可以是空的（2026-10-20「应用 0 项」）—— 那一样是写：
+       * 值一个不动，云端的注释 / 新字段 / 时间戳与血统推进（「有新版」就此收场）。
+       */
+      await api.applyPresetParamDecisions(path, decisions)
+      await readLocalPresets()
+      /* 盘上那份刚被改过（大小与时刻变了）—— 列表标记顺手对一眼 */
+      draftMutated()
+      /* 决定账（状态账）也动了 —— 云端更新那一段的读法跟着刷新 */
+      appStateMutated()
+    },
+    [readLocalPresets],
+  )
 
   /*
    * 第十层：用户文件管理。同一条路子 —— 写完 AppState 客户端重读广播：
@@ -1118,6 +1180,7 @@ export function usePresetData(importRevision = 0): PresetData {
     draftPath,
     active,
     slicerCopied,
+    refreshLocal,
     pick,
     pickMachine,
     apply,
@@ -1277,8 +1340,9 @@ export interface PresetPage {
    */
   sort: PresetSort
   /**
-   * 点表头：同一列在升 / 降之间换，换列则**从升序重新起**
-   * （★ 时间那一列除外 —— 先看最新的更符合直觉，所以换到时间列时默认**降序**）。
+   * 点表头。**名称列是三循环**（默认 → a-z → 倒序 → 默认），别的列在升 / 降之间换；
+   * 换列则**从升序重新起**（★ 时间那一列除外 —— 先看最新的更符合直觉，
+   * 所以换到时间列时默认**降序**）。
    */
   toggleSort: (key: PresetSortKey) => void
 
@@ -1351,22 +1415,48 @@ export function usePresetPage(data: PresetData): PresetPage {
   const [pinned, setPinned] = useState<string[]>(readPinned)
 
   /*
-   * 表头排序（2026-10-16）。默认按名称升序 —— 与加排序之前一模一样，不是新行为。
+   * **切进「云端」那一页时，把那三态的账对一眼**（2026-10-20 作者要求"两条都兜住"）。
+   *
+   * 上面那条（目录换版后重读）收拾的是"懒加载那一趟换过目录"；这一条收拾的是
+   * **用户切进来的时机**：账本与本地文件都可能在那之后又被别处动过（别页另存了、
+   * 参数页落了决定），而首屏那一条链只在页面第一次挂载时跑。
+   *
+   * 只读**本地文件 + 身份账本**（`readLocalPresets`）—— 都是本机扫盘，**不发网络**：
+   * 用户切页签不该顺手发一次网络请求（"启动零网络"那条纪律的另一半）。
+   */
+  /* 先取出来再进依赖数组（直接写 `data.refreshLocal` 会让那条规则认不出它是稳定的） */
+  const refreshLocal = data.refreshLocal
+  useEffect(() => {
+    if (scope !== 'cloud') return
+    void refreshLocal().catch(() => {
+      /* 读不到就保持旧列表 —— 与首屏同一条纪律 */
+    })
+  }, [scope, refreshLocal])
+
+  /*
+   * 表头排序（2026-10-16）。
+   *
+   * ★ 2026-10-20 名称列改**三循环**（作者：「名称那个应该是三循环的点击切换排序，
+   *   就是默认，a-z，倒序」）：默认 = 族优先（`family`，复制出来的躺在原件下面），
+   *   点一下 = a-z，再点 = 倒序，第三下回到默认。别的列仍是两态（升 / 降）。
    * ★ 换到「时间」那一列时默认**降序**（最新的在最上），其余从升序起 ——
    *   按时间asc 看到的是"最老的在前"，没人是要这个。
    */
   const [sort, setSort] = useSessionState<PresetSort>('presets.sort', {
     key: 'name',
-    dir: 'asc',
+    dir: 'family',
   })
   /* ★ `useSessionState` 的 setter 只收值（不收 updater），所以这里读当前 `sort` 现算 */
   const toggleSort = useCallback(
     (key: PresetSortKey) => {
-      setSort(
-        sort.key === key
-          ? { key, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
-          : { key, dir: key === 'time' ? 'desc' : 'asc' },
-      )
+      const next = ((): PresetSortDir => {
+        if (sort.key !== key) return key === 'time' ? 'desc' : 'asc'
+        /* 同一列再点：名称列走三循环，别的列只在升 / 降之间换 */
+        if (key !== 'name') return sort.dir === 'asc' ? 'desc' : 'asc'
+        if (sort.dir === 'family') return 'asc'
+        return sort.dir === 'asc' ? 'desc' : 'family'
+      })()
+      setSort({ key, dir: next })
     },
     [sort, setSort],
   )

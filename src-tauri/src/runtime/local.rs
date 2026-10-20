@@ -593,38 +593,86 @@ pub fn check_local_prefix(rel: &str) -> Result<(), AppError> {
 pub struct FileIdentity {
     pub path: String,
     pub file_name: String,
+    /// **这个名字被程序修过了**（剔了不合规的字符 / 截到字节上限）—— 落盘的就是
+    /// `file_name` 这一串，界面据此照实说一句"名字太长，已截断为 X"。
+    pub adjusted: bool,
 }
 
-/// 新文件名的门槛：只在这层管"是不是一个像样的名字"。
+/// 文件名的**字节上限**（APFS / NTFS 都是 255；按 UTF-8 算，一个汉字 3 字节）。
 ///
-/// - 空白去掉后不许空；不许带路径分隔符（**只改名字，不换目录** —— 跨文件夹搬动是
-///   "文件夹管理"，不在这层）；不许 `.` / `..`；
-/// - **后缀保持原样**（`.toml` 还是 `.toml`）—— 改名 / 复制都不该改变它算哪一类
-///   （类别的判据是 [`kind_of`]，它只看后缀）。
-pub(crate) fn check_new_name(old_name: &str, new_name: &str) -> Result<String, AppError> {
-    let name = new_name.trim();
-    if name.is_empty() {
+/// 名字超了**不许报错** —— 报了用户就得自己数字节（作者 2026-10-20：「改名有限制……
+/// 不要失败，可以自动截断显示出来被截断了」）。截到上限是唯一有答案的那一档。
+pub(crate) const NAME_MAX_BYTES: usize = 255;
+
+/// 掰成「主名 + 后缀」（后缀**含点**，保留用户写的那个大小写）。
+///
+/// `A1-fast.toml` ⇒ `("A1-fast", ".toml")`；没有点 / 点在开头（`..`）⇒ 整个是主名。
+fn split_ext(name: &str) -> (&str, &str) {
+    match name.rfind('.') {
+        Some(i) if i > 0 => name.split_at(i),
+        _ => (name, ""),
+    }
+}
+
+/// **新名字的门槛：能修的就修好，修不了的才拒**（2026-10-20 改判）。
+///
+/// 原来那些不合规一律拒绝 —— 名字长一点改名就整个失败，而在文件系统上"截到上限"
+/// 才是唯一有答案的那一档（作者要的正是这一条）。所以现在分两类：
+///
+/// - **修好**（并把"修过了"报出去，见返回的 `bool`）：
+///   带路径分隔符 / 控制字符 ⇒ **剔掉这些字符**（这一层只改名字，不搬文件夹）；
+///   超过 [`NAME_MAX_BYTES`] ⇒ 按**字符边界**截主名，**后缀一个字节都不动**
+///   （后缀决定它是哪一类，见 [`kind_of`]）；
+/// - **仍然拒绝**（这两档没有可修的东西，修了就是另一个名字 / 另一类文件）：
+///   空名字；`.` / `..`；**后缀与原来不一致**（`.toml` 还是 `.toml`）。
+pub(crate) fn normalize_new_name(
+    old_name: &str,
+    new_name: &str,
+) -> Result<(String, bool), AppError> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
         return Err(AppError::invalid_argument("新名字不能是空的"));
     }
-    if name.contains('/') || name.contains('\\') {
-        return Err(AppError::invalid_argument(
-            "新名字不能带路径 —— 这一层只改名字，不搬文件夹",
-        ));
+    let cleaned: String = trimmed
+        .chars()
+        .filter(|c| !(c.is_control() || *c == '/' || *c == '\\'))
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return Err(AppError::invalid_argument("新名字不能是空的"));
     }
-    if name == "." || name == ".." {
+    if cleaned == "." || cleaned == ".." {
         return Err(AppError::invalid_argument("这个名字不是一个文件名"));
     }
-    let ext = |n: &str| {
-        Path::new(n)
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-    };
-    if ext(name) != ext(old_name) {
+    let (_, want_ext) = split_ext(cleaned);
+    let (_, old_ext) = split_ext(old_name);
+    /* 后缀**大小写无关**地比（用户写了 `.TOML` 也是同一类），但落盘用它自己那一串 */
+    if !want_ext.eq_ignore_ascii_case(old_ext) {
         return Err(AppError::invalid_argument(
             "后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）",
         ));
     }
-    Ok(name.to_owned())
+    if cleaned.len() <= NAME_MAX_BYTES {
+        return Ok((cleaned.to_owned(), cleaned != trimmed));
+    }
+    let (stem, ext) = split_ext(cleaned);
+    let budget = NAME_MAX_BYTES.saturating_sub(ext.len());
+    let mut keep = String::new();
+    for ch in stem.chars() {
+        if keep.len() + ch.len_utf8() > budget {
+            break;
+        }
+        keep.push(ch);
+    }
+    /* 截尾可能留个空格（那会被系统当成名字的一部分，看着像没截干净） */
+    let keep = keep.trim_end();
+    if keep.is_empty() {
+        return Err(AppError::invalid_argument(
+            "名字太长了 —— 光是后缀就把上限占满了（换一个短点的后缀再来）",
+        ));
+    }
+    let out = format!("{keep}{ext}");
+    Ok((out, true))
 }
 
 /// 两个路径是不是同一个文件。只用来放行"大小写只差一档的改名"（见 [`rename_file`]）；
@@ -746,6 +794,10 @@ pub enum LegacyOutcome {
 /// **重命名**一份用户文件（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
 /// TOML 都不重写（判据逐字节盯着）。改完还是同一份 Preset、还是同一类。
 ///
+/// ★ 名字**先被修好**（[`normalize_new_name`]：剔不合规字符、超长截到上限），
+/// 落盘的就是回执里那一串 —— 于是"名字太长"不会让改名整个失败（作者 2026-10-20）。
+/// 回执里的 `adjusted` 就是"修过了没有"，界面照实说一句。
+///
 /// 使用中指针与草稿的跟改名不在这里做（那是 [`super::state`] 那两条 repoint 的事）——
 /// 这一层只碰用户根里的文件。
 pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
@@ -757,7 +809,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
         )));
     }
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
-    let new_name = check_new_name(old_name, new_name)?;
+    let (new_name, adjusted) = normalize_new_name(old_name, new_name)?;
     /* 只换名字，不换目录：`presets-local/本地/x.toml` 改完还在 `本地/` 里 */
     let dir = rel.strip_suffix(old_name).unwrap_or("presets-local/");
     let new_rel = format!("{dir}{new_name}");
@@ -766,6 +818,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
         return Ok(FileIdentity {
             path: new_rel,
             file_name: new_name,
+            adjusted,
         });
     }
     let new_path = crate::fsx::paths::resolve_in(user_root, &new_rel)?;
@@ -783,6 +836,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     Ok(FileIdentity {
         path: new_rel,
         file_name: new_name,
+        adjusted,
     })
 }
 
@@ -793,7 +847,7 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 ///
 /// - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算
 ///   （来源已经是用户文件，重算会把"从哪一版云端派生"说错）；原文件一个字节不动；
-/// - 新名字过[同一套门槛](check_new_name)（不许空 / 不许带路径 / 后缀保持原样）；
+/// - 新名字过[同一套门槛](normalize_new_name)（能修的修好、后缀保持原样）；
 ///   落点已有东西就**拒绝**（不覆盖、也**不自动改名** —— 名字由用户自己换）；
 /// - **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
 ///   新文件从诞生起就是独立的一份（之后能独立编辑 / 改名 / 删除 / 应用）。
@@ -809,7 +863,7 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
         )));
     }
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
-    let new_name = check_new_name(old_name, new_name)?;
+    let (new_name, adjusted) = normalize_new_name(old_name, new_name)?;
     /* 只换名字，不换目录：新的一份落在原来那一格（与改名同一条规矩） */
     let dir = rel.strip_suffix(old_name).unwrap_or("presets-local/");
     let new_rel = format!("{dir}{new_name}");
@@ -832,6 +886,7 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     Ok(FileIdentity {
         path: new_rel,
         file_name: new_name,
+        adjusted,
     })
 }
 
@@ -843,7 +898,7 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 /// 取回云端时落一份工作副本（已经在了就一个字节都不碰）。
 ///
 /// - **名字**：传什么写什么，只过"是不是一个像样的名字"那道门槛
-///   （[`check_new_name`]：不许空 / 不许带路径 / 后缀保持原样）；**撞名就拒** ——
+///   （[`normalize_new_name`]：能修的修好、后缀保持原样）；**撞名就拒** ——
 ///   不覆盖、也不自动改名（调用方先看盘上有没有，有就一个字节都不碰）；
 /// - 写下去的是**副本的形状**：云端原文 + 头注释块里三行血统
 ///   （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`，
@@ -865,7 +920,8 @@ pub fn save_cloud_as_new(
             file.file_name
         )));
     }
-    let name = check_new_name(&file.file_name, new_name)?;
+    /* 这一路的名字一般是调用方照云端原名起的，与改名 / 复制同一套门槛（能修的修好） */
+    let (name, adjusted) = normalize_new_name(&file.file_name, new_name)?;
     let rel = format!("{LOCAL_DIR}/{name}");
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
@@ -878,6 +934,7 @@ pub fn save_cloud_as_new(
     Ok(FileIdentity {
         path: rel,
         file_name: name,
+        adjusted,
     })
 }
 
@@ -955,6 +1012,61 @@ mod tests {
             files,
             ..Catalog::default()
         }
+    }
+
+    /* ---------- 新名字：能修的修好，修不了的才拒（2026-10-20） ---------- */
+
+    #[test]
+    fn a_good_new_name_goes_through_untouched() {
+        let (name, adjusted) = normalize_new_name("A1.toml", "B2.toml").unwrap();
+        assert_eq!(name, "B2.toml");
+        assert!(!adjusted, "没动过就不许报修过");
+    }
+
+    #[test]
+    fn trimming_the_edges_is_not_adjusted() {
+        /* 前后的空白根本不是名字的一部分 —— 剔掉它不算"把用户的名字改了" */
+        let (name, adjusted) = normalize_new_name("A1.toml", " B2.toml ").unwrap();
+        assert_eq!(name, "B2.toml");
+        assert!(!adjusted);
+    }
+
+    #[test]
+    fn path_separators_are_stripped_not_rejected() {
+        /* 作者 2026-10-20：「改名有限制…… 不要失败」 —— 这一档只有"剔掉"一个答案 */
+        let (name, adjusted) = normalize_new_name("A1.toml", "本\\地/name.toml").unwrap();
+        assert_eq!(name, "本地name.toml");
+        assert!(adjusted);
+    }
+
+    #[test]
+    fn a_too_long_name_is_cut_at_the_limit_with_its_ext_kept() {
+        let long = format!("{}.toml", "a".repeat(300));
+        let (name, adjusted) = normalize_new_name("A1.toml", &long).unwrap();
+        assert!(adjusted, "截过了要照实报 —— 界面靠它说一句");
+        assert_eq!(name.len(), NAME_MAX_BYTES, "正好卡在上限，不多不少");
+        assert!(name.ends_with(".toml"), "后缀一个字节都不动");
+    }
+
+    #[test]
+    fn the_limit_is_bytes_so_cutting_never_splits_a_character() {
+        /* 一个汉字 3 字节：250 字节装不下 84 个字（252），只能装 83 个（249） */
+        let long = format!("{}.toml", "中".repeat(100));
+        let (name, adjusted) = normalize_new_name("中.toml", &long).unwrap();
+        assert!(adjusted);
+        assert!(name.len() <= NAME_MAX_BYTES, "不许溢出");
+        assert!(name.ends_with(".toml"));
+        let stem = &name[..name.len() - 5];
+        assert_eq!(stem.chars().count(), 83, "按字符边界截，不许截出半个字");
+    }
+
+    #[test]
+    fn an_empty_name_and_a_changed_ext_are_still_rejected() {
+        /* 那两档没有可修的东西：空就是没有名字，后缀变了就是另一类文件 */
+        assert!(normalize_new_name("A1.toml", "   ").is_err());
+        assert!(normalize_new_name("A1.toml", "///").is_err());
+        assert!(normalize_new_name("A1.toml", "..").is_err());
+        assert!(normalize_new_name("A1.toml", "A1.json").is_err());
     }
 
     /* ---------- 旧目录接管（presets-mine → presets-local） ---------- */
@@ -1570,25 +1682,39 @@ mod tests {
         assert_eq!(done.path, "presets-local/另存-2.toml");
     }
 
-    /// 改名不改类别：换后缀被拒；带路径分隔符 / `.` / `..` / 空名字被拒；拒了之后原文件原地不动
+    /*
+     * 改名不改类别：换后缀被拒；`.` / `..` / 空名字被拒；拒了之后原文件原地不动。
+     * ★ 带路径分隔符 2026-10-20 起**不再拒** —— 剔掉那些字符照落
+     *   （作者：「改名有限制…… 不要失败，可以自动截断」）。
+     */
     #[test]
-    fn renaming_refuses_a_name_that_changes_the_kind_or_has_a_path() {
+    fn renaming_refuses_a_name_that_changes_the_kind_but_strips_a_path() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-local/A1.toml", VALID_TOML);
 
-        for bad in ["A1.json", "A1", "A1.TOMLX"] {
+        for bad in ["A1.json", "A1", "A1.TOMLX", "..", "  "] {
             let e = rename_file(root.path(), "presets-local/A1.toml", bad).unwrap_err();
             assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument, "{bad}");
-        }
-        for bad in ["子目录/A1.toml", "..", "  ", "A1\\x.toml"] {
-            assert!(
-                rename_file(root.path(), "presets-local/A1.toml", bad).is_err(),
-                "{bad} 这种名字该被拒"
-            );
         }
         assert!(
             root.path().join("presets-local/A1.toml").exists(),
             "拒了之后原文件必须还在原地"
+        );
+
+        /*
+         * 名字里的路径分隔符**剔掉**（它是非法字符，不是目录）——
+         * "只换名字、不换目录"那条规矩一条没动。
+         */
+        let done = rename_file(root.path(), "presets-local/A1.toml", "子目录/A1.toml").unwrap();
+        assert_eq!(
+            done.file_name, "子目录A1.toml",
+            "剔掉分隔符，剩下的还是名字"
+        );
+        assert!(done.adjusted, "修过了要照实报 —— 界面那一句话靠它");
+        assert!(root.path().join("presets-local/子目录A1.toml").is_file());
+        assert!(
+            !root.path().join("presets-local/A1.toml").exists(),
+            "原文件已经改名（改名不复制）"
         );
     }
 
@@ -1726,17 +1852,29 @@ mod tests {
         assert_eq!(done.path, "presets-local/另存-副本.toml");
     }
 
-    /// 复制与改名同一套名字门槛：换后缀 / 带路径 / `.` / `..` / 空全拒
+    /*
+     * 复制与改名同一套名字门槛：**换后缀 / `.` / `..` / 空**全拒（那几档没有可修的东西）。
+     * ★ 带路径分隔符与超长 2026-10-20 起**不再拒** —— 剔字符 / 截到上限照落。
+     */
     #[test]
     fn copying_uses_the_same_name_gate() {
         let root = tempfile::tempdir().unwrap();
         write(root.path(), "presets-local/A1.toml", VALID_TOML);
-        for bad in ["A1.json", "子目录/A1.toml", "..", "  "] {
+        for bad in ["A1.json", "..", "  "] {
             assert!(
                 copy_as_new(root.path(), "presets-local/A1.toml", bad).is_err(),
                 "{bad} 这种名字该被拒"
             );
         }
+        /*
+         * 原件名本来就长的时候 `<原名> copy.toml` 会超过 255 字节 —— 那一档
+         * **不许让复制失败**（界面照 `adjusted` 说一句"截短了一点"）。
+         */
+        let long = format!("{}.toml", "a".repeat(300));
+        let done = copy_as_new(root.path(), "presets-local/A1.toml", &long).unwrap();
+        assert_eq!(done.file_name.len(), NAME_MAX_BYTES, "卡在上限");
+        assert!(done.file_name.ends_with(".toml"), "后缀一个字节都不动");
+        assert!(done.adjusted, "截过了要照实报");
     }
 
     /// **不覆盖**（目标已有就拒，被撞的那份与源都一个字节没动）；
@@ -1892,7 +2030,10 @@ mod tests {
         );
     }
 
-    /// 名字过的是与改名 / 另存同一道门槛：不许空、后缀保持原样、不许带路径
+    /*
+     * 名字过的是与改名 / 另存同一道门槛：**不许空、后缀保持原样**（那两档真的没有
+     * 可修的东西）。★ 带路径分隔符 2026-10-20 起**不再拒** —— 剔掉照落。
+     */
     #[test]
     fn saving_official_as_new_checks_the_new_name() {
         let user = tempfile::tempdir().unwrap();
@@ -1902,10 +2043,11 @@ mod tests {
             save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "别的.txt").is_err(),
             "后缀不许换"
         );
-        assert!(
-            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml").is_err(),
-            "不许带路径"
-        );
+        /* 路径分隔符剔掉照落 —— 落点仍在 presets-local/ 里（那些字符不是目录） */
+        let done =
+            save_cloud_as_new(user.path(), &file, "涂胶宽度 = 1.0\n", "../外面.toml").unwrap();
+        assert_eq!(done.file_name, "..外面.toml", "剔掉那两个分隔符");
+        assert!(done.adjusted);
     }
 
     /// 只有 MKP 预设能另存成本地这份：切片器 profile（json）那类拒

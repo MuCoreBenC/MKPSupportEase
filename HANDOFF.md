@@ -772,3 +772,142 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 
 **验证总账**：`npx tsc -b --force` / `npm run lint`（eslint + stylelint）/ `npm run build` / `npm run build:workbench` /
 `npm run check:bundle` / `cargo fmt --check` 全绿；**Rust 一行未改**（照旧口径仍应各跑一遍 clippy / cargo test）。
+
+---
+
+## 增量之四十九 · 预设页六件事：复制件不认云端 / 副本族排序 / 三循环 / 改名不失败 / 参数页不自动取字节 / 云端页首帧（2026-10-20，分支 `fix/preset-copy-cloud`）
+
+> 起因：作者六张图 —— 复制出来的那一份也显示「有新版」并在参数页显示逐项差异（图 1 / 图 3）、
+> `A1-fastv3.3 copy copy.toml` 排到原件上面（图 2）、原名改名受长度限制直接失败（图 5）、
+> 原件改名后徽章要照旧（图 6）、云端页第一次进去没有「更新」按钮（图 7）。
+> 作者另起两条口径：**排序三循环的"默认"那档 = 族优先**；
+> **参数页不自动把云端新版字节取回来做比较**（理由见下）。
+
+### 一、四条根因（都已定位到行）
+
+| 现象 | 根因 |
+| --- | --- |
+| 复制件有更新徽章 | `ipc/local.rs` 的 `get_local_preset_index` **只按血统认亲**，而 `runtime::local::copy_as_new` 是**按字节复制、三行 `# based_on*` 血统原样带过去** ⇒ 复制件必然进账本。`presetTree.ts` 那段注释声称「只认账本、复制件不在里面」，**与实现不符** |
+| 副本排到原件上面 | `presetTree.ts` 的 `copyRankOf` 正则**只剥一层** ` copy`：`A copy copy.toml` 反解出 base = `A copy.toml`，与原件 `A.toml` **不同族** ⇒ 退化成整串文件名比较 |
+| 云端页首帧陈旧 | 目录换版后只重读 `readPresetFeedInto()`（机型树 + 交付），**没有重读身份账本**；而云端行三态正是「账本 × 当前目录」算出来的 |
+| 参数页自动取字节 | `useParams` 打开时传了 `fetchMissing: true` |
+
+### 二、改了什么
+
+1. **复制件独立（判定沉到后端，不在前端按名字猜）**：账本出口 `get_local_preset_index` 与
+   逐参数账 `get_preset_param_sync` **共一道闸** —— 查 `runtime::provenance`（出处账，本来就有，
+   `copy_local_preset` 在写、`rename` 时 `repath` 改两端）里有 `kind: copy` 的那一份 ⇒ 排除。
+   契约侧两处跟着变：`getPresetParamSync` 返回 `Promise<PresetParamSync \| null>`（null = 这一份不认云端，
+   界面整段不画 —— **不许当成"零项待处理"**，那会让人以为云端这一版没动过）。
+2. **开关**（作者：「复制出来的也保留显示？我突然感觉挺方便的」→ 设置页「预设」块，出厂 = 关）：
+   `AppStateFile` 新开 `presets` 格（`copies_follow_cloud: Option<bool>`），两条命令
+   `get_copies_follow_cloud` / `set_copies_follow_cloud`；**"没选过"（null）由后端解释成出厂档**，
+   前端不拿 null 猜（与自动清理那条同一条口径）。改完广播新的 `presetPrefsMutated()` 代次 ——
+   只用 `readLocalPresets()` 重读（**不发网络**），不并进 `deliveryMutated`（那条会引着整条目录链重读）。
+3. **排序**：`copyRankOf` 递归剥到只剩原件名（链按**靠近原件的在前**存 ⇒ 剥完要 `reverse()`，
+   否则 `copy 2 copy` 会排到 `copy 2` 前面）；名称列三循环 **`family`(默认) → `asc` → `desc`**，
+   `PresetSortDir` 加 `'family'`，`SortTh` 那档不画方向箭头（`aria-sort='other'`）。
+4. **改名不再失败**：`check_new_name` → `normalize_new_name` 返回 `(名字, adjusted)`：
+   剔路径分隔符与控制字符、按 **255 字节**上限按 UTF-8 字符边界截断（后缀一个字节不动）；
+   **空 / 后缀不一致仍旧拒绝**（那两档没有可修的东西）。改名 / 复制 / 第八层另存 / 导入改名
+   四处共用这一道门槛，回执带 `adjusted` 供界面照实说一句。四个老测试跟着改判。
+5. **参数页按需取字节**（作者裁定）：打开时 `fetchMissing: false`；`syncNeedsFetch`
+   （`versionAdvanced && !cloudReady`）时不画逐项「云端 旧 → 新」与两颗按钮，只说「云端有新版本」。
+   ★ 作者的原话理由：「有些本地的没改过的参数会因为自动更新就变了，这个是不好的体验」。
+6. **云端页首帧**（作者要"两条都兜住"）：首屏 `boot.changed` 后补 `readLocalPresets()`（命中根因）；
+   **外加**切进云端页时 `data.refreshLocal()` 对一眼（只扫盘、不发网络）。
+   没有新增"目录代次"：经核，那两处是本地扫盘即可，再挂一条代次只是为同一个目的多跑一次。
+7. **文案**：参数页「选择要跟随的更新」→ **「选择要更新的参数」**（作者：「选择要更新的参数的意思吧」）。
+
+### 三、网络请求总账（作者问"我都没点更新，本地怎么知道参数变了"）
+
+**静默（用户什么都没点，程序自己发）**
+
+| 请求 | 位置 | 时机 | 次数 / 拉什么 |
+| --- | --- | --- | --- |
+| 远端目录指纹检查 `check_remote_update` | `ipc/catalog.rs` → `usePresetData.ts` 的 `checkBootstrapOnce` | 预设页挂载（页签常驻 ⇒ **打开软件就跑**），本次运行只一次 | 1 次 HTTP，拉 1 份 `catalog.json` |
+| 应用远端目录 `apply_remote_update` | 同上 | 上一步发现目录换了才发 | 1 次 HTTP，拉 1 份 `catalog.json` |
+| 软件更新 `update_info` | `ipc/update.rs` → `UpdateIndicator.tsx`（挂载后 **1.2s**） | 打开软件 1.2 秒后 | 1 次 HTTP，拉 1 份 `release.json` |
+
+**主动（用户点了才发）**
+
+| 请求 | 位置 | 用户点了什么 | 次数 / 拉什么 |
+| --- | --- | --- | --- |
+| 取回云端当前版 `ensure_cloud_bytes`（全应用只有两个调用者，见下） | `ipc/catalog.rs:586` | 云端行的「下载 / 更新」（含首页「下载并应用」）；点「更新」/「选择要更新的参数」（= `get_preset_param_sync` 的 `fetchMissing=true`） | 每份 1 次 HTTP；**本机已有当前版就 0 次** |
+| 交付文件下载 `download_runtime_file(s)` | `ipc/catalog.rs:255 / 359` | 下载 / 批量下载 | 1 份 1 次（批量并发 N 次） |
+| 下载安装包 `start_update` | `ipc/update.rs` + `runtime/updater.rs`（`stream_get`） | 「更新 SupportEase」 | 1 次流式，拉 1 个安装包 |
+| 数据源探通 `probe_current` + 形状判定 `real_fetch` | `runtime/source.rs:706 / 383` | 设置页保存数据源地址 | 1～数次（形状判定依次试几个 URL） |
+
+**本轮摘掉的那一条**：参数页打开时的 `getPresetParamSync(path, true)` → `false` ——
+作者问的那句「我都没点更新，本地怎么知道参数变了」就是它。现在**打开参数页 0 次网络**。
+
+**不联网的（别被名字骗了）**：本地行的「使用」（`applyActivePreset`）、「复制」（`copy_as_new` 按字节复制）、
+改名 / 删除 / 编辑草稿 —— 都在 `presets-local/` 里做，0 次网络。
+★ 旧词「另存为本地预设」2026-10-13 已整条退役（作者：「这些字都去掉」），
+它对应的动作今天就是云端行的「下载 / 更新」（`fetch_cloud_preset` 内部会 `save_cloud_as_new`）——
+走的是上面那条，**本机已有当前版时 0 次**。
+`save_cloud_as_new` 自己**不取字节**（它收的是调用方给的 `cloud_text`），联网那一步在 `ensure_cloud_bytes`。
+
+不算网络：`get_file_url`（复制链接，只算地址、不发请求）。
+
+### 四、验证
+
+- Rust：`cargo fmt` / 双 feature `cargo clippy --all-targets -D warnings` / `cargo test` **全绿**（610 通过）。
+  新名门槛补 6 条单测（含中文字符边界截断那一条）；带路径那四个老测试按新行为改判。
+- 前端：`npx tsc -b --force` / `npm run build` / `npm run lint`（eslint + stylelint）全绿；
+  四道 check（bundle / zero-network / channel-args / release-source）全绿。
+- 排序行为用临时脚本对着真模块验过一遍（副本链 + 三档全对），验完即删 —— 仓库没有前端测试框架，
+  本轮不为了它引入 vitest。
+- **分支上另有两处预先存在的红**（与本轮无关，本轮没碰 `presets/` 与 `workbench/`）：
+  `workbench::app::build::tests::our_render_matches_the_machine_verified_baseline` 与
+  `workbench::domain::variants::tests::real_data_matches_the_documented_split`
+  （盘上 `A1-fastv3.3.toml` 已是 `offset_x = -0.7`，机器核过的基线还是 `0.1` —— 数据待同步）。
+
+---
+
+## 增量之五十 · 云端更新链路重做：点「更新」= 应用（0 项也真写）+ 弹窗默认不勾机器自己的数（2026-10-20，分支 `fix/preset-copy-cloud`）
+
+> 起因：作者多张图 —— 云端只改了注释 / 时间戳（值一项没动），客户端却长期挂着「有新版 / 更新」，
+> 点「更新」只吐一句底部文案什么也没写；点「更新」应该顺势出现「选择要更新的参数」那一屏；
+> 那一屏 0 项时也该能「应用这 0 项」，应用之后「有新版」就看不到；
+> XYZ 偏移与涂胶速度**不要替用户勾**（全选也要跳过、单独一组排末尾）；
+> 「取消」改叫「暂不修改」，提示放在**底栏左侧**（不是页面级 toast）；
+> 本地表那一行也要看到「有新版」。
+
+### 一、根因
+
+| 现象 | 根因 |
+| --- | --- |
+| 注释级换版永远挂「有新版」 | 血统比的是**全文**摘要（`lineage::sha256_hex`，含注释），换版就 `version_advanced`；而 `PagePresets.runUpdate` 在 `pending === 0` 时**提前 return**：不写盘、不推进血统 ⇒ 下一次读还是「有新版」 |
+| 点「更新」只出 toast | `runUpdate` 三步里写盘那一步只写"我没改过"的项，且**从不弹框**；`ParamSyncModal` 只活在参数页 |
+| 0 项不能应用 | 弹窗 `disabled={all === 0}`，且 `decideSync` 在 `keys.length === 0` 时直接 return |
+
+### 二、改了什么
+
+1. **写那一趟换形状（后端 `ipc::param_sync::apply_at`，2026-10-20 定的规矩）**：
+   **骨架 = 云端当前版正文**（注释 / `# release_time` / 云端新增字段都在里面），
+   值按决定填 —— `adopt` 写云端新值，其余（hold / 没决定）**写我这份现在写着的值**；
+   血统三行换成当前版（`based_on` = 目录里那份路径、`based_on_sha256` = 当前版摘要）。
+   于是 **0 项 = 一次真写**（"自动应用 0 项"）：值一个不动，注释 / 新字段 / 时间戳 / 血统跟着新版走。
+   写之前留原文镜像、与原文相同不落盘（与参数页保存同一条规矩）。
+2. **血统推不推进看"有没有落下的项"**：这一批之后还剩未表态的待处理项 ⇒ 血统照旧
+   （那几项仍然挂着，不许被这一趟悄悄抹掉）；都处理了（含 0 项）⇒ 推到当前版，「有新版」收场。
+3. **预设页「更新」顺势**：`pending === 0` ⇒ 直接 `applyParamDecisions(path, [])`；
+   `pending > 0` ⇒ 打开「修改参数」并带开「选择要更新的参数」（`syncFirst`），**不再静默采用任何一项**。
+   删掉原来那两句 toast（「没有要处理的参数差异」「N 项你改过 —— 去「修改参数」处理」）。
+4. **弹窗**：`NEVER_PRESET_KEYS`（`toolhead.offset.x/y/z` + `toolhead.speed_limit`）默认不勾、
+   **全选跳过**、单独一组（标题「机器自己的数（不替你勾）」）排在末尾；
+   按钮「取消」→「暂不修改」，0 项可应用；底栏**左侧**新增常驻提示位（`hint` 可覆盖）；
+   字节还没取回来时不显示「应用这 0 项」（那时 `pendingCount` 天然是 0，不是"没有要改的"）。
+5. **一次写完**：新增 `useParams.decideSyncMany(decisions)`（可混合 adopt / hold，一趟写完）——
+   分两趟写会出现"头一趟还有没表态的项 ⇒ 血统不推进"的中间态。`decideSync` 退化为它的同批薄封装。
+6. **本地行也画「有新版」**（判据 = 这一份的 `basedOn === 'outdated'`），紧跟文件名，与云端行同一枚样式。
+7. 假后端（`src/api/mock.ts`）同一条写规矩；演示那份 `A1 涂胶.toml` 的 `# based_on_sha256` 落到**旧版**那一档，
+   于是它真挂着两条待处理（与那段注释说的一致），点「更新」才看得到那一屏。
+
+### 三、验证
+
+- Rust：`cargo fmt` / 双 feature `cargo clippy --all-targets -- -D warnings` / `cargo test --lib` **全绿（612）**；
+  新增 2 条（注释级换版被 0 项应用消化 / 云端新增字段跟着进来），场景 C 按新规矩改判
+  （保持 = **值还是我原来的**，不再是"文件一个字节不动"）。
+- 前端：`npx tsc -b --force` / `npm run build` / `npm run lint` / 四道 check 全绿。

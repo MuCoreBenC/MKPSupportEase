@@ -429,6 +429,10 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」——
+        // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
+        ipc::prefs::get_copies_follow_cloud,
+        ipc::prefs::set_copies_follow_cloud,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
         ipc::app::uninstall,
@@ -591,6 +595,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 预设页偏好（2026-10-20）：与上面那份清单一字不差
+        ipc::prefs::get_copies_follow_cloud,
+        ipc::prefs::set_copies_follow_cloud,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
         ipc::app::uninstall,
