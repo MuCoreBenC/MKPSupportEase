@@ -228,6 +228,7 @@ export const bridgeApi: MkpApi = {
       id,
       batches: history.batches,
       entries: history.entries,
+      prevSaved: history.prevSaved,
     }),
   clearPresetHistory: (origin, id) =>
     call('clearPresetHistory', 'clear_preset_history', { origin, id }),

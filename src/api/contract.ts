@@ -967,6 +967,12 @@ export interface CommittedDraft {
 export interface PresetHistory {
   /** 这一份保存过几次（批号的水位，与条目的 `batch` 同一套数） */
   batches: number
+  /**
+   * 每个参数**「上一次保存之前的值」**（2026-10-21，作者：「保存之后还是那样显示，
+   * 还需要一个我的旧值；不只是更新才有，所有的都能记录下来」）。
+   * 跟账本走（一份文件一本、清空历史一并清）；旧账本没有这一格 ⇒ 按空读。
+   */
+  prevSaved: Record<string, string>
   entries: HistoryRecord[]
 }
 

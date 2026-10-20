@@ -33,6 +33,7 @@
 //! 3. 写走 [`crate::fsx::atomic::atomic_write_json`]（全仓唯一写盘出口）；
 //! 4. 坏档不静默 —— 解析不了报 `CORRUPTED`，不清空、不猜。
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,12 @@ pub struct HistoryFile {
     pub batches: u32,
     #[serde(default)]
     pub entries: Vec<HistoryEntry>,
+    /// 每个参数**「上一次保存之前的值」**（2026-10-21，作者：「保存之后还是那样显示，
+    /// 还需要一个我的旧值；不只是更新才有，所有的都能记录下来」）。
+    /// 保存时把"保存前的已保存值"记下（key = 参数 key），云端更新的行靠它
+    /// 在保存后仍能摆出「我的旧值 → 云端新值」；跟着账本走（清空历史一并清）。
+    #[serde(default)]
+    pub prev_saved: BTreeMap<String, String>,
 }
 
 fn default_schema() -> u32 {
@@ -143,7 +150,7 @@ pub fn read(root: &Path, key: &str) -> Result<HistoryFile, AppError> {
 ///   留一个 0 条的文件只是让人以为清掉了还有残留。
 pub fn write(root: &Path, key: &str, file: &HistoryFile) -> Result<(), AppError> {
     let at = file_of(root, key);
-    if file.entries.is_empty() && file.batches == 0 {
+    if file.entries.is_empty() && file.batches == 0 && file.prev_saved.is_empty() {
         if at.is_file() {
             std::fs::remove_file(&at)
                 .map_err(|e| AppError::io("清不掉这本历史").with_detail(e.to_string()))?;
@@ -259,6 +266,36 @@ mod tests {
         let book = read(d.path(), &key).unwrap();
         assert_eq!(book.entries.len(), 1);
         assert!(!book.entries[0].from_sync, "旧账没有来路，按普通改值读");
+    }
+
+    /// **旧账本没有 `prevSaved` 也能读**（2026-10-21 新加的那一格），写了能原样读回。
+    #[test]
+    fn prev_saved_round_trips_and_old_ledgers_still_read() {
+        let d = tempfile::tempdir().unwrap();
+        let key = key_of("local", "presets-local/A1.toml");
+        let at = file_of(d.path(), &key);
+        std::fs::create_dir_all(at.parent().unwrap()).unwrap();
+        let raw = r#"{"schema":1,"batches":1,"entries":[]}"#;
+        crate::fsx::atomic::atomic_write(&at, raw.as_bytes()).unwrap();
+        let old = read(d.path(), &key).unwrap();
+        assert!(old.prev_saved.is_empty(), "旧账没有这一格，按空读");
+
+        let mut prev_saved = BTreeMap::new();
+        prev_saved.insert("toolhead.offset_z".to_owned(), "3.8".to_owned());
+        let file = HistoryFile {
+            batches: 1,
+            prev_saved,
+            ..HistoryFile::default()
+        };
+        write(d.path(), &key, &file).unwrap();
+        let again = read(d.path(), &key).unwrap();
+        assert_eq!(
+            again
+                .prev_saved
+                .get("toolhead.offset_z")
+                .map(String::as_str),
+            Some("3.8")
+        );
     }
 
     /// 清空 = 盘上真的没了（界面上"没有改动记录"与"没有这一本"是同一件事）

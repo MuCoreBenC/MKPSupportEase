@@ -1555,14 +1555,20 @@ export const mockApi: MkpApi = {
    * 只是**退出浏览器就没了**（真机那份在盘上）。
    */
   async getPresetHistory(origin, id) {
-    return mockHistory.get(historyKeyOf(origin, id)) ?? { batches: 0, entries: [] }
+    return mockHistory.get(historyKeyOf(origin, id)) ?? { batches: 0, prevSaved: {}, entries: [] }
   },
 
   async putPresetHistory(origin, id, history) {
     const key = historyKeyOf(origin, id)
     /* 空本 = 没有这一本（与后端"清空就删掉文件"同一条规矩） */
-    if (history.entries.length === 0 && history.batches === 0) mockHistory.delete(key)
-    else mockHistory.set(key, { batches: history.batches, entries: [...history.entries] })
+    if (history.entries.length === 0 && history.batches === 0)
+      mockHistory.delete(key)
+    else
+      mockHistory.set(key, {
+        batches: history.batches,
+        prevSaved: history.prevSaved,
+        entries: [...history.entries],
+      })
   },
 
   async clearPresetHistory(origin, id) {

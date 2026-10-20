@@ -79,6 +79,14 @@
   min-width: 0;
 }
 
+/* 第一行：行名 + `?`（见 `.info` 的注）—— 后面那几行注记各占满一行 */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .label {
   color: var(--text-1);
   font-weight: 500;
@@ -280,13 +288,19 @@
   border-color: var(--line-strong);
 }
 
+/*
+ * `?` 是**行名的后缀**，不是右边那一列的件（2026-10-21 作者：「tooltip 跟着标题后面，
+ * 可以适当缩小」）：它住进 `.labelWrap` 的第一行（`.head`），紧贴名字 6px，
+ * 不跟名字下面的橙字 / 云端差异挤成第二列；名字换行 / 省略时它跟着走。
+ * 尺寸从 15px 收到 13px —— 它只是「点这一行看说明」的记号，不该和正文同重。
+ */
 .info {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   border: 1px solid var(--line-strong);
   border-radius: 50%;
   font-size: 10px;
@@ -386,7 +400,8 @@
   flex: 1;
   min-width: 0;
   display: grid;
-  grid-template-columns: 64px 1fr;
+  /* 72px：标签列要盛得下「上次保存前」五个字 —— 64px 会挤成两行（作者 2026-10-21） */
+  grid-template-columns: 72px 1fr;
   gap: 4px 12px;
   margin: 0;
   padding: 2px 18px 14px;
@@ -482,6 +497,7 @@
 
 .dt {
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 .dd {

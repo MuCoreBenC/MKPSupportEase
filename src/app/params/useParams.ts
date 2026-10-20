@@ -593,6 +593,8 @@ export interface Params {
   valueOf: (key: string) => string
   /** 已保存的那一层。行上的「↩」chip 与保存确认都要它 */
   savedValueOf: (key: string) => string
+  /** 这一项上一次保存之前的值（2026-10-21；没记录过 = null） */
+  prevSavedOf: (key: string) => string | null
   /** 出厂值。「恢复默认值」与行详情要它 */
   factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
@@ -827,6 +829,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [saved, setSaved] = useState<Map<string, string>>(() => new Map())
   /** 每个组合保存过几次 */
   const [batchesByCombo, setBatchesByCombo] = useState<Map<string, number>>(() => new Map())
+  /*
+   * **「上一次保存之前的值」**（2026-10-21，作者：「保存之后还是那样显示，
+   * 还需要一个我的旧值；不只是更新才有，所有的都能记录下来」）。
+   * 一份文件一页（钥匙 = historyKeyText），保存时把"保存前的已保存值"记下；
+   * 跟着修改历史账本一起落盘（`PresetHistory.prevSaved`），清空历史一并清。
+   */
+  const [prevSavedByFile, setPrevSavedByFile] = useState<
+    Record<string, Record<string, string>>
+  >({})
 
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [past, setPast] = useState<EditStep[]>([])
@@ -1618,7 +1629,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
       for (const p of patches) {
         const savedValue = savedValueOf(p.key)
-        const target = p.value !== undefined && p.value === savedValue ? undefined : p.value
+        /*
+         * **浮点尾闸**（2026-10-21，作者：「文件里面记录的就是两位小数的才对」）：
+         * 任何来路的值（步进器算数 / 云端 JSON 的 `3.8000000000000003` / 旧账原文）
+         * 进草稿、进历史之前先收一次 IEEE754 的尾巴（修尾**不补零** ——
+         * `3.8` 不许变成 `3.80`，那会无谓制造一处"看起来改过了"）。
+         * 后端 `patch_preset_toml` 的写盘出口还有同一道闸兜底。
+         */
+        const wanted = p.value === undefined ? undefined : formatNum(p.value, null)
+        const target = wanted !== undefined && wanted === savedValue ? undefined : wanted
         const current = draft[p.key]
         if (current === target) continue
         patch[p.key] = target
@@ -1631,8 +1650,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         const place = placeOf(p.key)
         items.push({
           key: p.key,
-          from: current ?? savedValue,
-          to: target ?? savedValue,
+          from: formatNum(current ?? savedValue, null),
+          to: formatNum(target ?? savedValue, null),
           label: def?.label ?? p.key,
           tab: place?.tabLabel ?? '',
           section: place?.sectionLabel ?? def?.group ?? '',
@@ -1803,6 +1822,18 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const historyKeyText: string | null =
     historyOrigin === null || historyId === null ? null : `${historyOrigin}:${historyId}`
 
+  /** 当前这一份文件的「上一次保存之前的值」表（参数 key → 保存前的已保存值） */
+  const prevSaved: Record<string, string> = useMemo(
+    () => (historyKeyText === null ? {} : (prevSavedByFile[historyKeyText] ?? {})),
+    [historyKeyText, prevSavedByFile],
+  )
+
+  /** 这一项上一次保存之前是什么（没记录过 = null，比如从来没保存过它的改动） */
+  const prevSavedOf = useCallback(
+    (key: string): string | null => prevSaved[key] ?? null,
+    [prevSaved],
+  )
+
   /** 读完了哪一本（`writable: false` = 读不出来 ⇒ **一个字都不许写回去**，免得把盘上那本冲了） */
   const [historyReady, setHistoryReady] = useState<{ key: string; writable: boolean } | null>(null)
   /** 上一次读的是哪一本（同 key 不重读 —— 重读会把刚改的冲掉） */
@@ -1829,8 +1860,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             ...(e.fromSync === true ? { fromSync: true } : {}),
             items: e.items.map((i) => ({
               key: i.key,
-              from: i.from,
-              to: i.to,
+              /* 读回也过一次修尾闸：旧账本里已经有 `3.8000000000000003` 那种值（2026-10-21），
+                 显示、历史「还原」、下次整本写回都从这儿干净 */
+              from: formatNum(i.from, null),
+              to: formatNum(i.to, null),
               label: i.label,
               tab: i.tab,
               section: i.section,
@@ -1838,6 +1871,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             })),
           })),
         )
+        setPrevSavedByFile((p) => ({ ...p, [historyKeyText]: book.prevSaved ?? {} }))
         setSeq(book.entries.reduce((n, e) => Math.max(n, e.id), 0))
         setBatchesByCombo((prev) => new Map(prev).set(at, book.batches))
         setHistoryReady({ key: historyKeyText, writable: true })
@@ -1859,6 +1893,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       void api
         .putPresetHistory(historyOrigin, historyId, {
           batches: savedBatches,
+          prevSaved,
           entries: log.map((e) => ({
             id: e.id,
             no: e.no,
@@ -1875,7 +1910,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         })
     }, 600)
     return () => window.clearTimeout(timer)
-  }, [historyId, historyKeyText, historyOrigin, historyReady, log, savedBatches])
+  }, [historyId, historyKeyText, historyOrigin, historyReady, log, prevSaved, savedBatches])
 
   /**
    * 保存：草稿并进已保存层、清撤销栈、日志里那批草稿条目转成「已保存」。
@@ -1925,9 +1960,19 @@ export function useParams(opts: UseParamsOptions = {}): Params {
      */
     commitDraft(decisions, localPath)
     const nextSaved = new Map(saved)
+    /*
+     * **记下「上一次保存之前的值」**（2026-10-21）：这一批真的动了值的项，
+     * 把保存前的已保存值记进账（跟历史账本一起落盘）。保存后行上、
+     * 云端对照栏里都还能摆出"我的旧值 → 新值"，不只是还没保存时才看得到。
+     */
+    const nextPrev: Record<string, string> = { ...prevSaved }
     for (const [key, value] of Object.entries(draft)) {
       nextSaved.set(cellKey(combo.machineId, combo.versionId, key), value)
+      const before = savedValueOf(key)
+      if (value !== before) nextPrev[key] = formatNum(before, null)
     }
+    if (historyKeyText !== null)
+      setPrevSavedByFile((p) => ({ ...p, [historyKeyText]: nextPrev }))
     const batch = savedBatches + 1
     setSaved(nextSaved)
     setBatchesByCombo(new Map(batchesByCombo).set(at, batch))
@@ -1942,9 +1987,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     combo,
     defOf,
     draft,
+    historyKeyText,
     localPath,
     log,
+    prevSaved,
     saved,
+    savedValueOf,
     savedBatches,
     sync,
     syncDecisions,
@@ -2655,13 +2703,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       setLog([])
       setSeq(0)
       setBatchesByCombo((prev) => new Map(prev).set(at, 0))
+      /* 「上一次保存之前的值」跟着账本走 —— 清历史一并清 */
+      if (historyKeyText !== null) setPrevSavedByFile((p) => ({ ...p, [historyKeyText]: {} }))
       /* 盘上那本也要清（作者口径：历史是一直留着的，只有这一颗按钮能清掉它） */
       if (historyOrigin !== null && historyId !== null) {
         void api.clearPresetHistory(historyOrigin, historyId).catch(() => {
           /* 清不掉就照界面上的"已清空"走 —— 下一次写回会再试一次 */
         })
       }
-    }, [at, historyId, historyOrigin]),
+    }, [at, historyId, historyKeyText, historyOrigin]),
     savedBatches,
     revertEntry,
     requestCombo,
@@ -2686,6 +2736,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     adoptSync,
     holdSync,
     useMyValue,
+    prevSavedOf,
     fetchSync,
   }
 }

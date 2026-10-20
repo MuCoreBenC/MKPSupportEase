@@ -52,6 +52,12 @@ interface Props {
   value: string
   /** 已保存的那一层 —— 还原 chip 指向的就是它 */
   savedValue: string
+  /**
+   * **上一次保存之前的值**（2026-10-21，作者：「保存之后还是那样显示，
+   * 还需要一个我的旧值；不只是更新才有，所有的都能记录下来」）。
+   * `null` = 没记录过（从没保存过它的改动 / 清过历史）—— 那就什么也不画。
+   */
+  prevSavedValue?: string | null
   /** 出厂值 —— 只在展开的行详情里显示 */
   factoryValue: string
   dirty: boolean
@@ -82,6 +88,12 @@ interface Props {
   syncBusy?: boolean
   /** 被条件参数关掉：看得见、改不动 */
   blockedBy?: BlockedBy | null
+  /**
+   * 收拢支里的行**不画**「需先让…」副标题（2026-10-21）：收拢的支本来就收进 0fr，
+   * 但收起动画那 240ms 里行还看得见 —— 那一刻副标题会瞬间多一行闪出来（作者截图）。
+   * 收拢的支里行本来不可见，这一格藏掉没有别的代价。
+   */
+  suppressNote?: boolean
   /**
    * 上面要不要那条分隔线。原来是 `.wrap + .wrap` 相邻选择器画的，但树把行隔进了
    * 各自的分支容器里，相邻链到处断；改成由 ParamCard 摆行时显式给
@@ -146,6 +158,7 @@ export default function ParamRow({
   def,
   value,
   savedValue,
+  prevSavedValue = null,
   factoryValue,
   dirty,
   sync,
@@ -155,6 +168,7 @@ export default function ParamRow({
   onUseMyValue,
   syncBusy = false,
   blockedBy = null,
+  suppressNote = false,
   sep = false,
   expanded = false,
   onToggleExpand,
@@ -200,10 +214,16 @@ export default function ParamRow({
     sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
       ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.cloudNew)}`
       : null
-  /** 「我的 18.6 → 云端 19.0」—— 采用之后要说得清"换掉的是我哪个值" */
+  /*
+   * 「我的 18.6 → 云端 19.0」—— 采用之后要说得清"换掉的是我哪个值"。
+   * **保存之后**（decided）`sync.local` 已经是新值了，"我的哪个值"就换
+   * **上一次保存之前的那个**（`prevSavedValue`）—— 作者 2026-10-21：
+   * 「保存之后还是那样显示的，不是这样都变成新的」。
+   */
+  const prevOrLocal = prevSavedValue ?? sync?.local ?? null
   const mineToCloud =
-    sync !== undefined && sync.local !== null && sync.cloudNew !== null
-      ? `我的 ${valueText(def, sync.local)} → 云端 ${valueText(def, sync.cloudNew)}`
+    sync !== undefined && prevOrLocal !== null && sync.cloudNew !== null
+      ? `我的 ${valueText(def, prevOrLocal)} → 云端 ${valueText(def, sync.cloudNew)}`
       : diffText
 
   return (
@@ -246,14 +266,28 @@ export default function ParamRow({
           }}
         >
           <span className={s.labelWrap}>
-            <span className={s.label}>
-              <Highlight text={def.label} query={query} />
+            <span className={s.head}>
+              <span className={s.label}>
+                <Highlight text={def.label} query={query} />
+              </span>
+              {/*
+               * `?` 是行名的后缀，紧贴名字（2026-10-21 作者：「跟着标题后面，可以适当缩小」）；
+               * 悬停（`title`）说的是**这一项是什么**（注册表的 desc），不是「点它展开」——
+               * 作者点名要的就是那句说明。说明为空时退回一句「点这一行看详情」，不摆空泡。
+               */}
+              <span
+                className={s.info}
+                aria-hidden
+                title={def.desc === '' ? '点这一行看参数详情' : def.desc}
+              >
+                ?
+              </span>
             </span>
             {/*
              * 那句橙字只给「换个条件就能用」的行。弃用的行说它就是假话 —— 它正在退场，
              * 跟条件满不满足无关，原因由徽章说。
              */}
-            {blocked && !dep && (
+            {blocked && !dep && !suppressNote && (
               <span className={s.note}>
                 需先让「{blockedBy.label}」{blockedBy.need}
               </span>
@@ -283,11 +317,13 @@ export default function ParamRow({
             {!syncPending && syncDecided !== null && (
               <span className={s.syncDecided}>
                 {syncDecided === 'adopt' ? '已采用云端新值' : '保持原样'}
+                {/* 保存过的那一版也把数字留着（2026-10-21）：
+                    采用 =「我的旧值 → 云端新值」，保持 =「云端旧值 → 云端新值」 */}
+                {syncDecided === 'adopt'
+                  ? mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>
+                  : diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
-          </span>
-          <span className={s.info} aria-hidden>
-            ?
           </span>
         </button>
 
@@ -458,12 +494,22 @@ export default function ParamRow({
           <dd className={s.dd}>
             <Highlight text={savedText} query={query} />
           </dd>
+          {/* 上一次保存之前的值（2026-10-21）：所有参数都记，存过它的改动就能看到。
+              标签要短 —— dt 列窄，「上一次保存前」「数据包里的值」都会挤成两行（作者 2026-10-21） */}
+          {prevSavedValue !== null && prevSavedValue !== savedValue && (
+            <>
+              <dt className={s.dt}>上次保存前</dt>
+              <dd className={s.dd}>
+                <Highlight text={valueText(def, prevSavedValue)} query={query} />
+              </dd>
+            </>
+          )}
           {/*
             这一格原来叫「出厂值」。这一版的值只有一层：**包里的那一份**（下载来的
             `values`）—— 客户端不做继承推导，包里也没有「出厂 / 机型 / 版本」这三层。
             所以标签照实改成「数据包里的值」：它和「已保存值」比，正好说明本机改没改过。
           */}
-          <dt className={s.dt}>数据包里的值</dt>
+          <dt className={s.dt}>包里的值</dt>
           <dd className={s.dd}>
             <Highlight text={factoryText} query={query} />
           </dd>
@@ -492,6 +538,13 @@ export default function ParamRow({
                 <dd>
                   {sync.local === null ? '文件里没有这一项' : valueText(def, sync.local)}
                 </dd>
+                {/* 保存过后「我的值」已经是新值了 —— 旧值单摆一行，别让它消失（2026-10-21） */}
+                {!sync.pending && prevSavedValue !== null && prevSavedValue !== sync.local && (
+                  <>
+                    <dt>保存前</dt>
+                    <dd>{valueText(def, prevSavedValue)}</dd>
+                  </>
+                )}
                 <dt>云端旧值</dt>
                 <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld)}</dd>
                 <dt>云端新值</dt>

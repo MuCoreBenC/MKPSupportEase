@@ -83,7 +83,16 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
             let n: f64 = t.parse().map_err(|_| {
                 AppError::invalid_argument(format!("`{raw}` 不是个数 —— 这一项要浮点数"))
             })?;
-            Ok(Value::from(n))
+            /*
+             * **浮点尾闸**（2026-10-21，作者：「文件里面记录的就是两位小数的才对，
+             * 做一道统一的闸门给所有动文件的用」）：任何来路的值进 TOML 前都按
+             * 1e6 收一次 IEEE754 的尾巴 —— `3.8000000000000003` 落盘就是 `3.8`，
+             * 而真正的人写精度（最小步长 0.01，比 1e-6 大四个数量级）一个不动。
+             * 闸设在**这一处唯一出口**：参数页所有写值（步进器 / 下拉 / 云端采用 /
+             * 撤销重做 / 历史「还原」）最后都从这条过。
+             */
+            let trimmed = (n * 1e6).round() / 1e6;
+            Ok(Value::from(if n == trimmed { n } else { trimmed }))
         }
         ValueType::Int => {
             let n: i64 = t.parse().map_err(|_| {
@@ -264,6 +273,29 @@ mode = \"tower\"
         )
         .expect("改浮点");
         assert!(out.contains("offset_x = -1.5"), "\n{out}");
+    }
+
+    /// **浮点尾闸**（2026-10-21）：任何来路的浮点值落盘前收掉 IEEE754 的尾巴 ——
+    /// `3.8000000000000003` 进文件就是 `3.8`；人写精度一个不动。
+    #[test]
+    fn float_noise_is_trimmed_before_writing() {
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.y", "3.8000000000000003"),
+        )
+        .expect("改 offset_y");
+        assert!(out.contains("offset_y = 3.8 "), "\n{out}");
+        assert!(!out.contains("8000000000000003"), "\n{out}");
+
+        /* 正常精度原样保留（不补零、不改字） */
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.y", "18.6"),
+        )
+        .expect("改 offset_y");
+        assert!(out.contains("offset_y = 18.6 "), "\n{out}");
     }
 
     /// 值里有换行 → 渲染成多行字面量 `"""…"""`（与产出侧同一套规则）。

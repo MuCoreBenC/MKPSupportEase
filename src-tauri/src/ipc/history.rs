@@ -19,7 +19,7 @@
 //! 照实报（不静默当成某一种，猜错了就是把 A 的历史接到 B 上）。
 
 use serde::{Deserialize, Serialize};
-
+use std::collections::BTreeMap;
 use tauri::AppHandle;
 
 use crate::error::AppError;
@@ -69,6 +69,9 @@ pub struct PresetHistoryDto {
     /// 这一份保存过几次（批号的水位）
     pub batches: u32,
     pub entries: Vec<HistoryEntryDto>,
+    /// 每个参数「上一次保存之前的值」（2026-10-21）。旧账本没有这一格：`default` 按空读。
+    #[serde(default)]
+    pub prev_saved: BTreeMap<String, String>,
 }
 
 impl From<HistoryItem> for HistoryItemDto {
@@ -162,6 +165,7 @@ pub fn get_preset_history(
         Ok(PresetHistoryDto {
             schema: file.schema,
             batches: file.batches,
+            prev_saved: file.prev_saved,
             entries: file
                 .entries
                 .into_iter()
@@ -182,6 +186,7 @@ pub fn put_preset_history(
     id: String,
     batches: u32,
     entries: Vec<HistoryEntryDto>,
+    prev_saved: BTreeMap<String, String>,
 ) -> Result<(), AppError> {
     crate::ipc::traced("putPresetHistory", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
@@ -192,6 +197,7 @@ pub fn put_preset_history(
             &HistoryFile {
                 schema: HISTORY_SCHEMA,
                 batches,
+                prev_saved,
                 entries: entries.into_iter().map(HistoryEntry::from).collect(),
             },
         )

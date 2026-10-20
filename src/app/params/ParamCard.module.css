@@ -58,8 +58,11 @@
   background: var(--accent-soft);
 }
 
-/* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管 */
+/* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管。
+   ★ margin-top 也要归零（2026-10-21）：树没有顶内衬，4px 会**穿透**树（margin collapsing）
+   把整棵树推下去 —— 详情绿面与缝绿之间露出一条 body 深灰横条。 */
 .tree[data-seam='true'] > .branch {
+  margin-top: 0;
   margin-left: 4px;
   margin-right: 4px;
   margin-bottom: 0;
@@ -97,15 +100,11 @@
   transition: background-color 0.24s cubic-bezier(0.32, 0.68, 0.12, 1);
 }
 
-/* 收拢态的支：虚线灰卡 */
+/* 收拢态的支：虚线灰卡。**实底**（作者 2026-10-21：「这种时候也不要透明」）——
+   原来那层 2.4% 的白压在绿缝里等于没垫，卡面整个透掉；虚线边框照留 */
 .grpOff {
   border-style: dashed;
-  background: rgba(16, 24, 32, 0.018);
-}
-
-/* 深色：那格"墨压一层"等于没画（收拢态与展开态完全同色），换成白压一层 */
-[data-theme='dark'] .grpOff {
-  background: rgb(255 255 255 / 2.4%);
+  background: var(--card-face);
 }
 
 /*

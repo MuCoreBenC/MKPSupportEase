@@ -841,6 +841,7 @@ export default function PageParams({
         query={query}
         valueOf={u.valueOf}
         savedValueOf={u.savedValueOf}
+        prevSavedOf={u.prevSavedOf}
         factoryOf={u.factoryOf}
         dirtyOf={u.dirtyOf}
         blockedByOf={u.blockedBy}

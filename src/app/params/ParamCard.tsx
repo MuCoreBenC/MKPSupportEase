@@ -53,6 +53,8 @@ interface Props {
   mode?: 'normal' | 'search'
   valueOf: (key: string) => string
   savedValueOf: (key: string) => string
+  /** 这一项「上一次保存之前的值」（2026-10-21）；不传就不画那一格 */
+  prevSavedOf?: (key: string) => string | null
   factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
   blockedByOf: (key: string) => BlockedBy | null
@@ -208,6 +210,7 @@ export default function ParamCard({
   mode = 'normal',
   valueOf,
   savedValueOf,
+  prevSavedOf,
   factoryOf,
   dirtyOf,
   blockedByOf,
@@ -283,7 +286,7 @@ export default function ParamCard({
   /*
    * 递归摆树。`sep` = 上面画不画分隔线：排在一个**先行内容**后面才有。
    */
-  const renderList = (items: TreeNode[]): ReactNode[] =>
+  const renderList = (items: TreeNode[], suppressNote = false): ReactNode[] =>
     items.map((node, i) => {
       if (node.kind === 'row') {
         /*
@@ -300,6 +303,7 @@ export default function ParamCard({
             def={node.def}
             value={shownValueOf(node.def.key)}
             savedValue={savedValueOf(node.def.key)}
+            prevSavedValue={prevSavedOf?.(node.def.key) ?? null}
             factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}
             sync={syncOf?.(node.def.key)}
@@ -309,6 +313,7 @@ export default function ParamCard({
             onUseMyValue={onUseMyValue}
             syncBusy={syncBusy}
             blockedBy={blockedByOf(node.def.key)}
+            suppressNote={suppressNote}
             sep={i > 0}
             expanded={expandedKey === node.def.key}
             onToggleExpand={onToggleExpand}
@@ -366,7 +371,7 @@ export default function ParamCard({
                 <span className={s.foldHint}>{directRows.map((r) => r.def.label).join(' / ')}</span>
               </button>
               <div className={open ? `${s.accBody} ${s.accBodyOpen}` : s.accBody}>
-                <div className={s.accBodyIn}>{renderList(node.items)}</div>
+                <div className={s.accBodyIn}>{renderList(node.items, !open)}</div>
               </div>
             </div>
           </div>
