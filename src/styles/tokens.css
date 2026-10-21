@@ -73,6 +73,21 @@
   --text-2: #56626e;
   --text-3: #6f7b87;
 
+  /*
+   * **代码正文**那几种颜色（「编辑文件」的 TOML 着色，2026-10-21）。
+   *
+   * 为什么单列一族、不做成"正文用 --text-*、关键字硬编码"：深浅两套主题下
+   * 同一条 `#2f74dd` 放在 `#2b2b2b` 深底上只有 3 点几的对比度，作者的话是
+   * 「这些字看不清」；而语法色一旦按主题各给一档，就只能是变量。
+   * 口径与 `--axis-*` 同一套：浅色深一号、深色亮一号，**色相不变**（还是蓝/绿/橙/紫）。
+   */
+  --code-comment: #6b7784; /* 注释：比三级字再实一点，它是要读的，不是装饰 */
+  --code-table: #6f3fd6;
+  --code-key: #1e63c8;
+  --code-str: #1a7f43;
+  --code-num: #a2560f;
+  --code-bool: #6f3fd6;
+
   /* 强调色（取自打印机绿色件） */
   --accent: #20b25a;
   --accent-deep: #17924a;
@@ -232,7 +247,23 @@
   /* stylelint-disable value-keyword-case -- 字体名要保原大小写 */
   --font-label: 'MKP Label', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'Microsoft YaHei', 'PingFang SC', Roboto, sans-serif;
+  /*
+   * **代码正文**的字族（「编辑文件」那两层 + 行号，2026-10-21）。
+   *
+   * ★ 中文回退必须在 `monospace` 之前、并显式点名：generic 的 `monospace` 在
+   *   Windows 上会落到**宋体**（细、带衬线、小字号发虚），中英混排看着就脏 ——
+   *   作者说的「这些字看不清」有一半是这个。雅黑 / 苹方是无衬线，与拉丁等宽并排干净。
+   * ★ 三处（着色层 / textarea / 行号）**必须用同一个变量**：差一档字号，行号就错位。
+   */
+  --font-code: ui-monospace, 'Cascadia Mono', SFMono-Regular, Menlo, Consolas,
+    'Microsoft YaHei UI', 'PingFang SC', monospace;
   /* stylelint-enable value-keyword-case */
+  /*
+   * 代码的正文字号。原来借的是 `--fs-label`（10~12.5px）—— 那是**标签**的号，
+   * 拿去排一整页 TOML 就小了一档（作者 2026-10-21：「这个注释啊，这些字啊，看不清」）。
+   * 单独给一档 12~14px：比 `--fs-body` 略小（代码本来就该紧一点），但不再往 10px 掉。
+   */
+  --fs-code: clamp(12px, 11px + 0.26vw, 14px);
 
   /* 结构性的两样仍按档位给：导航宽（试验场在用）与卡片圆角 */
   --nav-w: 216px;
@@ -335,6 +366,14 @@
   --text-1: #d6d8db;
   --text-2: #b4b8bf;
   --text-3: #8f949b;
+
+  /* 代码着色（浅色那格的同一族，深底上各提亮一档 —— 见那一段的说明） */
+  --code-comment: #9ba7b3;
+  --code-table: #c39bf5;
+  --code-key: #6ea8ff;
+  --code-str: #74d68c;
+  --code-num: #e8a765;
+  --code-bool: #c39bf5;
 
   /* 强调色（压暗一档） */
   --accent: #2f9e5b;
