@@ -448,3 +448,34 @@ pub fn apply_native_corners<R: Runtime>(_win: &WebviewWindow<R>, _dark: bool) {}
 
 #[cfg(not(target_os = "macos"))]
 pub fn repaint_corner_fill<R: Runtime>(_win: &WebviewWindow<R>, _dark: bool) {}
+
+/// **窗底填色**（Windows，2026-10-21）—— 拖窗改尺寸时那几帧露出来的地方。
+///
+/// WebView2 的重绘是**异步**的：窗口边框已经拉到新位置、内容还没画过去，
+/// 中间那一条会露出**窗口自己的底色**。不设的话它就是系统给的深色，
+/// 看起来是一道黑边 / 黑影（作者 2026-10-21：「拖动…会出现那种黑色的边，黑色的阴影」）。
+///
+/// 设成与应用同一套底（按已存的主题档算，见 `ipc::prefs::resolved_dark`），
+/// 那一条就只是"内容慢半拍"，不再是一道黑框。窗口层与 webview 层一起设
+/// （`WebviewWindow::set_background_color` 两件事都做）。
+///
+/// ★ 它**不能让拖动变快** —— 那是 WebView2 的合成节奏（VSCode / Electron 一样不跟手，
+///   原生和 Flutter 才跟手）。这一手只是把"没赶上那几帧"的颜色收干净。
+///
+/// macOS 不需要：那边是 `transparent: true` + [`apply_native_corners`] 自己上的底色。
+#[cfg(target_os = "windows")]
+pub fn paint_window_background<R: Runtime>(win: &WebviewWindow<R>, dark: bool) {
+    use tauri::window::Color;
+    /* 两个色值取自 `tokens.css` / `App.module.css` 的窗底：浅 `#f7f9fa`、深 `#1c1c1c` */
+    let (r, g, b) = if dark {
+        (0x1c, 0x1c, 0x1c)
+    } else {
+        (0xf7, 0xf9, 0xfa)
+    };
+    if let Err(e) = win.set_background_color(Some(Color(r, g, b, 255))) {
+        tracing::warn!(detail = %e, "窗底填色没设上（拖动时可能看到黑边）");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn paint_window_background<R: Runtime>(_win: &WebviewWindow<R>, _dark: bool) {}

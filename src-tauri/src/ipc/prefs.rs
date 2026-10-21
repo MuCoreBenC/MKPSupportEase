@@ -58,7 +58,10 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
         runtime::app_state::set_theme(&root, pref)?;
         notify_app_state(&app);
         if let Some(win) = app.get_webview_window("main") {
-            crate::chrome::repaint_corner_fill(&win, resolved_dark(Some(pref), &win));
+            let dark = resolved_dark(Some(pref), &win);
+            crate::chrome::repaint_corner_fill(&win, dark);
+            /* Windows 的窗底填色（拖动时露出来的那一条）也要跟着换 —— 见那一支的注释 */
+            crate::chrome::paint_window_background(&win, dark);
         }
         /*
          * ★ 工作台那扇窗（只在 `workbench` feature 下存在）也要跟着翻（2026-10-16）。

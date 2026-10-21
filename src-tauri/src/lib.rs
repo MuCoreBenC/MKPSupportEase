@@ -172,6 +172,9 @@ pub fn run() {
                 那样读会画错。 */
                 let dark = ipc::prefs::resolved_dark(ipc::prefs::theme_pref(app.handle()), &win);
                 chrome::apply_native_corners(&win, dark);
+                /* 窗底填色（Windows）：拖动改尺寸那几帧露出来的地方要跟应用同色，
+                不然是一道黑边（见 `chrome::paint_window_background` 的注释） */
+                chrome::paint_window_background(&win, dark);
                 /* 红绿灯：装了统一工具栏之后 AppKit 摆的是 (26,26) 那组默认坐标，
                 我们用 Auto Layout 约束钉到作者要的位置（2026-10-17 起 —— 补摆 frame
                 的老路在拖窗过程中一帧错一下，约束是布局的一部分，没有这个问题）。 */
@@ -891,5 +894,74 @@ mod command_list_parity {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod window_conf_parity {
+    //! **窗口配置的平台覆盖不许漏项**（2026-10-21）。
+    //!
+    //! Tauri 合并平台配置用的是 **JSON Merge Patch（RFC 7396）**（`json_patch::merge`，
+    //! 见 tauri-utils `config::parse::read_from`）—— **数组是整段替换**，不是逐项合并。
+    //!
+    //! 于是 `tauri.windows.conf.json` 里只要写了 `app.windows`，基座那份
+    //! `tauri.conf.json` 的 width / height / **minWidth / minHeight** / title 就一起没了：
+    //! Windows 上窗口能拉到比最小尺寸还小（macOS 这边有 `NSWindow.minSize`，照旧管着）。
+    //! 作者 2026-10-21 报的「macOS 上有最小尺寸限制，Windows 上怎么没限制」就是这一条。
+    //!
+    //! 所以 Windows 那份必须**把那一扇窗口写全**；这个测试盯着两份不许漂。
+    //! 平台专有的那几个键（macOS 的 `titleBarStyle` / `hiddenTitle`）不要求抄过去。
+
+    use serde_json::{Map, Value};
+
+    /// 读一份配置里 `app.windows` 的第一扇窗（这两份都只声明一扇）
+    fn first_window(file: &'static str) -> Map<String, Value> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file);
+        let text = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("读不到 {}：{e}", path.display()));
+        let value: Value = serde_json::from_str(&text)
+            .unwrap_or_else(|e| panic!("{file} 不是合法 JSON（平台配置合并就在这一层做）：{e}"));
+        let windows = value["app"]["windows"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{file} 的 app.windows 不是数组"));
+        assert_eq!(windows.len(), 1, "{file} 应该只声明一扇客户端窗口");
+        windows[0]
+            .as_object()
+            .unwrap_or_else(|| panic!("{file} 的 app.windows[0] 不是对象"))
+            .clone()
+    }
+
+    #[test]
+    fn the_windows_override_keeps_every_key_of_the_base_window() {
+        let base = first_window("tauri.conf.json");
+        let win = first_window("tauri.windows.conf.json");
+
+        for (key, want) in &base {
+            /* 这两个是 macOS 专有（Overlay 标题栏 / 藏起标题），Windows 那份不写 */
+            if key == "titleBarStyle" || key == "hiddenTitle" {
+                continue;
+            }
+            let got = win.get(key);
+            assert!(
+                got.is_some(),
+                "tauri.windows.conf.json 少了 `{key}` —— 合并补丁会把整个 windows 数组替换掉，\
+                 缺一项就是缺那一项的行为（minWidth / minHeight 就是这么丢的）"
+            );
+            assert_eq!(
+                got,
+                Some(want),
+                "tauri.windows.conf.json 的 `{key}` 与基座不一致"
+            );
+        }
+
+        assert_eq!(
+            win.get("decorations"),
+            Some(&Value::Bool(false)),
+            "Windows 上是自绘标题栏的无边框窗"
+        );
+        assert!(
+            win.get("minWidth").is_some() && win.get("minHeight").is_some(),
+            "最小尺寸必须显式写着 —— 这扇窗没有系统标题栏，靠的就是这两个数"
+        );
     }
 }

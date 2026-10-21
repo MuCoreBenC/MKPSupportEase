@@ -2,7 +2,15 @@
   "app": {
     "windows": [
       {
-        "decorations": false
+        "title": "SupportEase",
+        "width": 900,
+        "height": 640,
+        "minWidth": 600,
+        "minHeight": 500,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": false,
+        "transparent": false
       }
     ]
   }
