@@ -333,6 +333,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
         ipc::local::begin_preset_edit,
         ipc::local::patch_preset_draft,
+        ipc::local::patch_preset_draft_batch,
         ipc::local::put_preset_draft,
         ipc::local::discard_preset_draft,
         ipc::local::commit_preset_draft,
@@ -504,6 +505,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
         ipc::local::begin_preset_edit,
         ipc::local::patch_preset_draft,
+        ipc::local::patch_preset_draft_batch,
         ipc::local::put_preset_draft,
         ipc::local::discard_preset_draft,
         ipc::local::commit_preset_draft,

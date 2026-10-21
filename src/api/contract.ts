@@ -2530,6 +2530,19 @@ export interface MkpApi {
    */
   patchPresetDraft(paramKey: string, value: string): Promise<void>
 
+  /**
+   * **一次手势里的多项改动，一次落地**（2026-10-21）。
+   *
+   * 拖一下擦料塔会同时改 X 与 Y。分两条 `patchPresetDraft` 发的话，后端每条都是
+   * 「读草稿 → 只改自己那一项 → 写回」，两条交错时后写的那条基于旧正文，把前一条冲掉
+   * —— 真机踩过：拖到 (101, 85)，保存后重进只剩 Y=85、X 还是出厂 20
+   * （修改历史里两项都记着，因为内存里是对的，盘上丢了一半）。
+   *
+   * 所以**一次手势 = 一条命令**：读一次正文、叠完所有项、写一次。
+   * 后端是"任何一项失败整批不落"，与 `apply` 一次一条撤销同一条语义。
+   */
+  patchPresetDraftBatch(edits: ParamEdit[]): Promise<void>
+
   /** 放弃这次编辑：丢掉临时文件（幂等；云端原件与下载区全程没被碰过，所以它天生安全） */
   discardPresetDraft(): Promise<void>
 

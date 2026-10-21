@@ -787,6 +787,36 @@ pub fn set_draft(
     })
 }
 
+/// **一次性读改写草稿**（2026-10-21）：闭包拿到的永远是**此刻**的正文，返回 `Err` 整次不写。
+///
+/// # 为什么必须有这一条
+///
+/// `draft()` 与 `set_draft()` 各自加锁（[`state_lock`]），中间那一段**不设防**。
+/// 而参数页一次手势会连发多条字段改动（拖一下擦料塔 = X + Y 两条），两条命令交错时
+/// 都是"读旧正文 → 改一项 → 写回"，后写的那条把先写的那条冲掉。
+/// 真机症状（2026-10-21 作者报的）：把塔拖到 (101, 85)，保存后重进只剩 Y=85、X 还是 20；
+/// 修改历史里两项都记着 —— 内存里对、盘上丢了一半。
+///
+/// 所以凡是"读出来算一下再写回去"的路径，一律走这一条（锁内完成）。
+pub fn update_draft<T>(
+    root: &Path,
+    f: impl FnOnce(&PresetDraft) -> Result<(String, T), AppError>,
+) -> Result<T, AppError> {
+    with_state(root, |state| {
+        let draft = state
+            .draft
+            .as_ref()
+            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，改不了参数"))?;
+        let (text, out) = f(draft)?;
+        /* 只换正文：来源与打开那一刻的指纹保持不动（与 `put_preset_draft` 同一条规矩） */
+        if let Some(d) = state.draft.as_mut() {
+            d.text = text;
+            d.updated_unix = now_unix();
+        }
+        Ok(out)
+    })
+}
+
 /// 丢掉草稿（放弃 / 保存完之后）。没有草稿也不算错（幂等）
 pub fn clear_draft(root: &Path) -> Result<(), AppError> {
     with_state(root, |state| {
@@ -1123,6 +1153,58 @@ mod tests {
         std::fs::create_dir_all(d.path().join("run")).unwrap();
         atomic_write(&state_file(d.path()), "{ 不是 JSON }".as_bytes()).unwrap();
         assert_eq!(load(d.path()).unwrap_err().code, ErrorCode::Corrupted);
+    }
+
+    /* ---------- update_draft：一次锁里的读改写（2026-10-21） ---------- */
+
+    /// ★ 参数页那个 bug 的机制：一次手势带多项（拖擦料塔 = X + Y），
+    /// 分两条命令各发一次"读草稿 → 只改一项 → 写回"会互相冲掉。
+    /// `update_draft` 把读改写收进同一把锁 ⇒ 两个线程各加一行，两行都必须在。
+    #[test]
+    fn update_draft_never_loses_a_concurrent_edit() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().to_path_buf();
+        let subject = DraftSubject::local("x.toml", "presets-local/x.toml");
+        set_draft(&root, &subject, "sha", "a = 1\n").unwrap();
+
+        let mut handles = Vec::new();
+        for tag in ["x", "y"] {
+            let root = root.clone();
+            handles.push(std::thread::spawn(move || {
+                update_draft(&root, |draft| {
+                    Ok((format!("{}{tag} = 1\n", draft.text), ()))
+                })
+                .unwrap();
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let text = draft(&root).unwrap().unwrap().text;
+        assert!(text.contains("x = 1"), "丢了 x：{text}");
+        assert!(text.contains("y = 1"), "丢了 y：{text}");
+    }
+
+    /// 闭包返回 `Err` ⇒ 正文一个字节都不动（与 [`with_state`] 同一条规矩）
+    #[test]
+    fn update_draft_leaves_the_text_alone_on_error() {
+        let d = tempfile::tempdir().unwrap();
+        let subject = DraftSubject::local("x.toml", "presets-local/x.toml");
+        set_draft(d.path(), &subject, "sha", "a = 1\n").unwrap();
+        let err: Result<(), AppError> = update_draft(d.path(), |_| {
+            Err(AppError::invalid_argument("这一项改不动"))
+        });
+        assert!(err.is_err());
+        assert_eq!(draft(d.path()).unwrap().unwrap().text, "a = 1\n");
+    }
+
+    /// 没有草稿 ⇒ 如实说"没有正在改的那一份"，不造一份空白的出来
+    #[test]
+    fn update_draft_without_a_draft_is_an_error() {
+        let d = tempfile::tempdir().unwrap();
+        let err: Result<(), AppError> = update_draft(d.path(), |_| Ok(("不会用到".to_owned(), ())));
+        assert_eq!(err.unwrap_err().code, ErrorCode::InvalidArgument);
     }
 
     /// `1 → 2`：老盘那份（本地线落点还是 `presets-mine/…`）读进来**自动升代次、换前缀**，

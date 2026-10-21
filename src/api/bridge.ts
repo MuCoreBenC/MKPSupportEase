@@ -215,6 +215,9 @@ export const bridgeApi: MkpApi = {
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
   patchPresetDraft: (paramKey, value) =>
     call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
+  /* 一次手势的多项改动：一条命令、一次写盘（见 contract 里那段"为什么不能分两条发"） */
+  patchPresetDraftBatch: (edits) =>
+    call('patchPresetDraftBatch', 'patch_preset_draft_batch', { edits }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
   /* 冷启动接回草稿层：后端草稿还在，界面那一层（内存）没了 —— 差异由后端按参数算 */
   readPresetDraftChanges: () => call('readPresetDraftChanges', 'read_preset_draft_changes'),

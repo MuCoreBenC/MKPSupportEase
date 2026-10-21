@@ -1092,6 +1092,45 @@ function literalFor(raw: string, valueType: string): string {
   }
 }
 
+/**
+ * 按参数 key 改草稿里的一个值（假后端版；真机在 `ipc::local::patch_preset_draft_batch`）。
+ *
+ * 与真后端**同一件事**：查字段定义拿 `(section, toml_key)`，把那一行换掉。
+ * 但**不做保真**（注释 / 键序）—— 那是 `toml_edit` 的活，浏览器里没有；
+ * 这里按行替换已经很够探针用（探针量的是"改值这条路通不通"，不是格式保真）。
+ *
+ * ★ 单条与批量共用这一份（2026-10-21）：两条路径的语义必须一致，分开写迟早漂。
+ */
+function patchMockDraft(paramKey: string, value: string): void {
+  if (mockDraft === null) throw new Error('现在没有正在改的那一份，改不了参数')
+  const def = paramMeta().find((p) => p.key === paramKey)
+  if (def === undefined) throw new Error(`不认识这个参数：${paramKey}`)
+  const { section, tomlKey, valueType } = def
+  const literal = literalFor(value, valueType)
+  /* 找 `[section]` 那一段，在段内替换 `<tomlKey> = …` 那一行 */
+  const lines = mockDraft.text.split('\n')
+  let inSection = false
+  let done = false
+  for (let i = 0; i < lines.length; i++) {
+    const t = lines[i].trim()
+    if (t.startsWith('[')) {
+      inSection = t === `[${section}]`
+      continue
+    }
+    if (inSection && t.startsWith(`${tomlKey} =`)) {
+      const hash = lines[i].indexOf('#')
+      const comment = hash >= 0 ? ` ${lines[i].slice(hash).trim()}` : ''
+      lines[i] = `${tomlKey} = ${literal}${comment}`
+      done = true
+      break
+    }
+  }
+  if (!done) {
+    throw new Error(`草稿的 [${section}] 里没有 ${tomlKey}`)
+  }
+  mockDraft = { ...mockDraft, text: lines.join('\n'), updatedUnix: nowSec() }
+}
+
 /*
  * 浏览器里的「下载区」：四份，**固定演示集合**（真机上是盘 `mkp/` + `assets/`，盘就是底账）。
  *
@@ -1495,33 +1534,12 @@ export const mockApi: MkpApi = {
    * 真机上的保真由 `presetdata::patch` 的 7 条单测钉着。
    */
   async patchPresetDraft(paramKey, value) {
-    if (mockDraft === null) throw new Error('现在没有正在改的那一份，改不了参数')
-    const def = paramMeta().find((p) => p.key === paramKey)
-    if (def === undefined) throw new Error(`不认识这个参数：${paramKey}`)
-    const { section, tomlKey, valueType } = def
-    const literal = literalFor(value, valueType)
-    /* 找 `[section]` 那一段，在段内替换 `<tomlKey> = …` 那一行 */
-    const lines = mockDraft.text.split('\n')
-    let inSection = false
-    let done = false
-    for (let i = 0; i < lines.length; i++) {
-      const t = lines[i].trim()
-      if (t.startsWith('[')) {
-        inSection = t === `[${section}]`
-        continue
-      }
-      if (inSection && t.startsWith(`${tomlKey} =`)) {
-        const hash = lines[i].indexOf('#')
-        const comment = hash >= 0 ? ` ${lines[i].slice(hash).trim()}` : ''
-        lines[i] = `${tomlKey} = ${literal}${comment}`
-        done = true
-        break
-      }
-    }
-    if (!done) {
-      throw new Error(`草稿的 [${section}] 里没有 ${tomlKey}`)
-    }
-    mockDraft = { ...mockDraft, text: lines.join('\n'), updatedUnix: nowSec() }
+    patchMockDraft(paramKey, value)
+  },
+
+  /* 一次手势的多项改动：逐项改同一份草稿（真后端也是"读一次、叠完、写一次"） */
+  async patchPresetDraftBatch(edits) {
+    for (const e of edits) patchMockDraft(e.paramKey, e.value)
   },
 
   async discardPresetDraft() {

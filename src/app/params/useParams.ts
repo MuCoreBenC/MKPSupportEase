@@ -1109,10 +1109,17 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   )
 
   /*
-   * **改一个值就写进草稿**（字段级 patch，参数页底座 ③，不重生成整份）。
+   * **一次手势的改动整批发进草稿**（字段级 patch，参数页底座 ③，不重生成整份）。
    *
-   * 每次改动直接调一次 `patch_preset_draft` —— 不做防抖：参数页的控件是
-   * 步进器 / 下拉 / 开关（一次点击 = 一次确定的值），不像文本编辑器要按字节流。
+   * ★ 2026-10-21 修的那个 bug：原来这里收单个 key、逐条发 `patch_preset_draft`，
+   *   而一次手势可能带多项（拖一下擦料塔 = X + Y）。后端每条命令都是
+   *   「读草稿 → 只改自己那一项 → 写回」，两条并发时后写的基于旧正文，
+   *   把前一条冲掉 —— 真机上塔拖到 (101, 85)，保存后重进只剩 Y=85、X 还是 20，
+   *   而修改历史里两项都记着（内存里对、盘上丢一半）。
+   *   现在一次手势 = 一条 `patch_preset_draft_batch` = 一次写盘。
+   *
+   * 不做防抖：参数页的控件是步进器 / 下拉 / 开关（一次点击 = 一次确定的值），
+   * 不像文本编辑器要按字节流。
    * 失败只记进 `draftError`（页面显示一行），**不回滚界面值** —— 用户看到的仍是他刚改的；
    * "真机上草稿没写进去"这件事要看得见，而不是悄悄弹回去。
    *
@@ -1120,8 +1127,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * `useCallback` 依赖的是**运行时**的绑定，而下面的 `apply` 在渲染期就建好了。
    */
   const patchDraft = useCallback(
-    (key: string, value: string) => {
-      void api.patchPresetDraft(key, value).then(
+    (patch: Record<string, string>) => {
+      const edits = Object.entries(patch).map(([paramKey, value]) => ({ paramKey, value }))
+      if (edits.length === 0) return
+      void api.patchPresetDraftBatch(edits).then(
         () => {
           setDraftError(null)
           /* 草稿真变过了 ⇒ 广播一声，预设列表行上那枚橙点当场亮（见 `broadcastDraftSoon`） */
@@ -1715,13 +1724,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
        * 的正文，于是切页 / 关掉软件再回来都还在。`value === undefined`（撤回保存值）
        * 用「已保存值」回写 —— 草稿里该是这个值，不是"没有这一项"。
        *
-       * 一次 `apply` 可能带多项（如"恢复默认值"几十项）→ 逐项 patch。
-       * 后端只改那一处、不重生成整份，所以多次调用是叠加的，不会互相冲掉。
+       * 一次 `apply` 可能带多项（如"恢复默认值"几十项）→ **一条批量命令一次落地**。
+       * 后端只改那几处、不重生成整份；分成 N 条发会互相冲掉（见 `patchDraft` 头注里那个 bug）。
        */
-      for (const [key, value] of Object.entries(patch)) {
-        patchDraft(key, value ?? savedValueOf(key))
-      }
-      return 'applied'
+    const toDraft: Record<string, string> = {}
+    for (const [key, value] of Object.entries(patch)) {
+      toDraft[key] = value ?? savedValueOf(key)
+    }
+    patchDraft(toDraft)
+    return 'applied'
     },
     [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions],
   )
@@ -1775,10 +1786,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setFuture([...future, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'undone' } : e)))
     setSavedNote(null)
-    /* 撤销也要落进草稿 TOML（否则关掉再回来，"撤了的那一步"又回来了） */
+    /* 撤销也要落进草稿 TOML（否则关掉再回来，"撤了的那一步"又回来了）—— 一次批量 */
+    const toDraft: Record<string, string> = {}
     for (const [key, value] of Object.entries(step.before)) {
-      patchDraft(key, value ?? savedValueOf(key))
+      toDraft[key] = value ?? savedValueOf(key)
     }
+    patchDraft(toDraft)
   }, [draft, future, log, past, patchDraft, savedValueOf])
 
   const redo = useCallback(() => {
@@ -1795,10 +1808,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setPast([...past, step])
     setLog(log.map((e) => (e.id === step.logId ? { ...e, state: 'draft' } : e)))
     setSavedNote(null)
-    /* 重做同样要落进草稿 TOML */
+    /* 重做同样要落进草稿 TOML —— 同样一次批量 */
+    const toDraft: Record<string, string> = {}
     for (const [key, value] of Object.entries(step.patch)) {
-      patchDraft(key, value ?? savedValueOf(key))
+      toDraft[key] = value ?? savedValueOf(key)
     }
+    patchDraft(toDraft)
   }, [draft, future, log, past, patchDraft, savedValueOf])
 
   const at = `${machineId}:${versionId}`

@@ -428,19 +428,47 @@ pub async fn patch_preset_draft(
     param_key: String,
     value: String,
 ) -> Result<(), AppError> {
-    traced("patchPresetDraft", |_| {
-        let root = internal_root(&app)?;
-        let draft = runtime::app_state::draft(&root)?
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，改不了参数"))?;
-        let catalog = runtime::load_released_catalog(&root)?;
+    patch_preset_draft_batch(
+        app,
+        vec![crate::ipc::preset_params::ParamEditDto { param_key, value }],
+    )
+    .await
+}
 
-        let patched = crate::presetdata::patch::patch_preset_toml(
-            &draft.text,
-            &catalog.registry.params,
-            &crate::presetdata::patch::FieldEdit::new(param_key, value),
-        )?;
-        /* 只换正文 —— 来源与打开那一刻的指纹保持不动（与 put 同一条规矩） */
-        runtime::app_state::set_draft(&root, &draft.subject(), &draft.source_sha256, &patched)?;
+/// **一次手势里的多项改动，一次落地**（2026-10-21）。
+///
+/// 参数页拖一下擦料塔会同时改 X 与 Y。原来前端对两项各发一条
+/// [`patch_preset_draft`]，两条命令交错执行时都是"读草稿 → 只改自己那一项 → 写回"，
+/// 后写的那条基于旧正文，把前一条的改动冲掉 —— 真机症状：拖到 (101, 85)，
+/// 保存后重进只剩 Y=85，X 还是出厂 20（修改历史里两项都记着，因为内存里是对的）。
+///
+/// 所以：**一次手势 = 一条命令 = 一次写盘**（读一次正文、叠完所有项、写一次）。
+/// 后端 `apply_param_edits` 本来就是"任何一项失败整批不落"，正好对应这个语义。
+#[tauri::command]
+pub async fn patch_preset_draft_batch(
+    app: AppHandle,
+    edits: Vec<crate::ipc::preset_params::ParamEditDto>,
+) -> Result<(), AppError> {
+    if edits.is_empty() {
+        return Ok(());
+    }
+    traced("patchPresetDraftBatch", |_| {
+        let root = internal_root(&app)?;
+        let catalog = runtime::load_released_catalog(&root)?;
+        let field_edits: Vec<crate::presetdata::patch::FieldEdit> = edits
+            .into_iter()
+            .map(|e| crate::presetdata::patch::FieldEdit::new(e.param_key, e.value))
+            .collect();
+
+        /* ★ 读改写在同一把锁里（`update_draft`）—— 见它的注释：两次加锁之间就是丢更新的窗口 */
+        runtime::app_state::update_draft(&root, |draft| {
+            let patched = crate::presetdata::params::apply_param_edits(
+                &draft.text,
+                &catalog.registry.params,
+                &field_edits,
+            )?;
+            Ok((patched, ()))
+        })?;
         super::notify_app_state(&app);
         Ok(())
     })
