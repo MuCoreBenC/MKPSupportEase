@@ -113,6 +113,24 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
     }
 }
 
+/// **写盘前的最后一道闸**（2026-10-21）：这份正文能不能当 TOML 读。
+///
+/// # 为什么要它
+///
+/// 编辑器那条链（`commit_text_draft`）是"逐字保存"：用户在框里手滑多打一个字符
+/// （真机踩过：`custom_unmount_gcode` 里被敲进一串 `1`），原来的行为是**照样写盘** ——
+/// 坏文件落到盘上，等切片器拉起钩子才报"预设解析失败（TOML 语法）"，
+/// 那一刻离"为什么坏的、哪一行"已经很远了，而且这一盘直接切不成。
+///
+/// 错要犯在编辑这一步，并且把行号说出来。参数页那条链本来就走 `toml_edit`（不合法就改不动），
+/// 这里补的是"整份正文直接落盘"的那条。
+pub fn ensure_toml_parses(text: &str) -> Result<(), AppError> {
+    text.parse::<DocumentMut>().map_err(|e| {
+        AppError::invalid_argument("这份 TOML 有语法错，没有保存").with_detail(e.to_string())
+    })?;
+    Ok(())
+}
+
 /// 改一个字段，返回**新的整份正文**。
 ///
 /// `defs` 是字段定义表（工作台的 `ParamRegistry::params()` 或客户端 catalog 的

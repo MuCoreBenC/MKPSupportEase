@@ -561,6 +561,13 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
         let user_root = crate::fsx::paths::user_root(&app)?;
         let draft = runtime::app_state::text_draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文，没得存"))?;
+        /*
+         * ★ **先过语法闸再写盘**（2026-10-21）：手滑敲坏一个键名/引号时，
+         * 原来的行为是照样写进盘，等钩子跑起来才报"预设解析失败"——
+         * 那时这一盘已经切不成了，而且用户不知道错在"我编辑时多打了个字符"。
+         * 坏在这一步、并且带上行号，文件一个字节都不动。
+         */
+        crate::presetdata::patch::ensure_toml_parses(&draft.text)?;
         /* ★ 原文镜像：编辑器保存**写盘之前**存 —— 此刻盘上还是原文
         （保存之后就再也见不到它了）。新文件那一路在落盘时就存过，这里是幂等的空转 */
         let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &draft.path);
@@ -806,6 +813,9 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
         let user_root = crate::fsx::paths::user_root(&app)?;
         let draft = runtime::app_state::draft(&root)?
             .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，没得存"))?;
+
+        /* 同一道语法闸（见 `commit_text_draft`）：草稿坏了就别往盘上落 */
+        crate::presetdata::patch::ensure_toml_parses(&draft.text)?;
 
         let done = match draft.origin {
             runtime::state::ActiveOrigin::Preset => {
