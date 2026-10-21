@@ -164,7 +164,7 @@ export default function TextDiffModal({
             </span>
             <button
               type="button"
-              className={ps.editGhost}
+              className={s.pill}
               onClick={onRestore}
               disabled={left === right}
             >
@@ -179,7 +179,7 @@ export default function TextDiffModal({
               <>
                 <button
                   type="button"
-                  className={ps.editGhost}
+                  className={s.pill}
                   onClick={shell.onUndo}
                   disabled={!shell.canUndo}
                   title="撤销"
@@ -188,19 +188,19 @@ export default function TextDiffModal({
                 </button>
                 <button
                   type="button"
-                  className={ps.editGhost}
+                  className={s.pill}
                   onClick={shell.onRedo}
                   disabled={!shell.canRedo}
                   title="重做"
                 >
                   重做
                 </button>
-                <button type="button" className={ps.editGhost} onClick={shell.onExit}>
+                <button type="button" className={s.pill} onClick={shell.onExit}>
                   放弃并退出
                 </button>
                 <button
                   type="button"
-                  className={ps.editPrimary}
+                  className={s.pillPrimary}
                   onClick={shell.onSave}
                   disabled={shell.saveDisabled}
                 >
@@ -209,10 +209,10 @@ export default function TextDiffModal({
               </>
             ) : (
               <>
-                <button type="button" className={ps.editGhost} onClick={onClose}>
+                <button type="button" className={s.pill} onClick={onClose}>
                   关闭
                 </button>
-                <button type="button" className={ps.editPrimary} onClick={shell.onEnter}>
+                <button type="button" className={s.pillPrimary} onClick={shell.onEnter}>
                   进入编辑模式
                 </button>
               </>

@@ -37,12 +37,60 @@
   margin-right: auto;
 }
 
-/* 右侧那一簇：只管排间距，尺寸交给 ps.editGhost / ps.editPrimary */
+/* 右侧那一簇：只管排间距 */
 .footActs {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+/*
+ * 底栏按钮：**高度与「左右 / 上下」那颗同一个数**（2026-10-21 作者：
+ * 「你就不能把这些恢复默认值、撤销重做这些按钮的高度做得跟那个左右上下按钮一样吗」）。
+ *
+ * 那个分段控件的外高 = 24（内按钮）+ 2×2（圈）= **28**，所以这里也 28 ——
+ * 比编辑框那套 32 矮一点是**故意的**：这一屏底栏里站着一颗 28 的分段控件，
+ * 旁边放 32 的按钮，那一行就会像是"没对齐"。底栏总高仍由 `.foot` 的 min-height 钉住，
+ * 所以和编辑框那一屏的底栏框还是同一条高度线。
+ */
+.pill,
+.pillPrimary {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+.pill:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.pillPrimary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pillPrimary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+.pill:disabled,
+.pillPrimary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
 }
 
 .layoutSwitch button {
@@ -92,16 +140,30 @@
   background: color-mix(in srgb, var(--warn) 16%, transparent);
 }
 
-/* 就地编辑那一行：输入框铺满那一格 */
+/*
+ * 就地编辑那一行：输入框铺满那一格。
+ *
+ * ★ 2026-10-21 作者：「我点一下，感觉每一行的高度会变化，有一点点微小的几个像素的变化」。
+ *   原因不是高度写错，是 `<input>` 默认是 **inline-block**：它坐在行盒里要留基线以下那段
+ *   空隙（descender），于是这一行的盒高比旁边的 `<span>` 多两三像素，点进去整行就"跳"一下。
+ *   ⇒ `display: block` + `vertical-align: top` + `box-sizing: border-box`，高度与 `.code`
+ *   的 `line-height` 算出来的是同一个数；`outline-offset: -2px` 让那圈描边**画在盒内**，
+ *   不再压到上下邻居身上（压上去看着也像行变高了）。
+ */
 .lineInput {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
   height: 1.55em;
+  margin: 0;
   padding: 0;
   border: 0;
   outline: 2px solid var(--accent);
-  outline-offset: 0;
+  outline-offset: -2px;
   background: var(--surface-solid);
   font: inherit;
+  line-height: inherit;
+  vertical-align: top;
   color: var(--text-1);
 }
 
@@ -120,12 +182,20 @@
   cursor: text;
 }
 
-/* 正文区：**方角**（作者 2026-10-21：「这些小圆角，不要吧」） */
+/*
+ * 正文区：**方角**（作者 2026-10-21：「这些小圆角，不要吧」）。
+ *
+ * ★ 底边不画（2026-10-21 作者：「我明显的能看出它里面深一点……我感觉是因为里面有一条线」）：
+ *   这一块是撑满框身的，它的 1px 底边正好叠在底栏的 `border-top` 上 —— 两条线贴在一起
+ *   变成一条 2px 的深色带，看起来就是"底栏比编辑框那屏深一点/多一条边"。
+ *   底边框交给 `.foot` 那条，这里只画上、左、右。
+ */
 .diff {
   flex: 1;
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--line);
+  border-bottom: 0;
   border-radius: 0;
   background: var(--surface-sunken);
 }
