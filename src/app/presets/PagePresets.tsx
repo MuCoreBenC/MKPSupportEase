@@ -3987,10 +3987,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 commitEdit()
               },
             }}
-            onRestore={() => {
-              doRestore()
-              setDiffOpen(false)
-            }}
+            /* 「恢复默认值」留在这一屏（作者 2026-10-21）：恢复后左右两栏当场一致，
+               想接着改、或按撤销退回来，都还在原地 */
+            onRestore={() => doRestore()}
             onEditLine={(lineNo, next) => {
               /* 就地改一行 = 换整份正文的那一行（草稿 / 撤销 / 实时校验都照常走） */
               setEditing((cur) => {
