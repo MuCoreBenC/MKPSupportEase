@@ -173,6 +173,11 @@
  *   （改任何一条，这一行就会和邻居不一样，或者把绿底盖掉）。
  */
 .lineEdit {
+  /* ★ **`outline: none` 必须写**（2026-10-21 作者：「编辑模式下还是有框框」）：
+     把上一条自己的 `outline: 2px solid` 删掉之后，浏览器会回落到**它自己的 focus ring**
+     （`-webkit-focus-ring-color auto`，Windows 上就是那个 2px 黑框）。
+     "不加框"= 明说 `none`，不是"不写" —— 不写等于把画框的活交回给 UA。 */
+  outline: none;
   caret-color: var(--text-1);
   cursor: text;
 }

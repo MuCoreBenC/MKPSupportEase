@@ -179,6 +179,13 @@ export default function TextDiffModal({
       <span
         className={cls}
         role="cell"
+        /*
+         * ★ 右侧这一格**也要** `data-side`（2026-10-21 作者第二次说绿底没出来）：
+         * 上一版只给了"正在编辑的那一格"，普通行仍然是光秃秃的 `<span>` ——
+         * 而 `.row[data-kind] .code[data-side='right']` 那条绿底规则认的就是这个属性。
+         * 左栏从头到尾都有 `data-side="left"`，所以屏幕上一直是"左边红、右边白"。
+         */
+        data-side="right"
         data-editable={editable || undefined}
         title={text ?? undefined}
         onClick={() => {
