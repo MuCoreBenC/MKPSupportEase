@@ -164,7 +164,7 @@ export default function TextDiffModal({
             </span>
             <button
               type="button"
-              className={s.pill}
+              className={`${s.pill} ${s.pillDanger}`}
               onClick={onRestore}
               disabled={left === right}
             >

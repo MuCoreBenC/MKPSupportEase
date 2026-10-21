@@ -86,6 +86,22 @@
   filter: brightness(1.05);
 }
 
+/*
+ * 「恢复默认值」：**危险动作穿危险色**（2026-10-21 作者：「我的恢复默认值按钮颜色丢了，加回来」）。
+ * 换成 28px 那套胶囊时把红丢了 —— 它会把整份文件打回出厂，这一颗不能看着跟「关闭」一样。
+ * 仍然是 28px：颜色回来说的是"这动作危险"，不是"这颗更大"。
+ */
+.pillDanger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.pillDanger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
 .pill:disabled,
 .pillPrimary:disabled {
   opacity: 0.55;

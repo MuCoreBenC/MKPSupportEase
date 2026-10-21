@@ -36,6 +36,18 @@ import Icon from '../Icon'
 import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
+/*
+ * **打开着的模态框**（后开的在最后）。Esc 只关**最上面那一层**（2026-10-21）。
+ *
+ * 作者：「我按 ESC 的时候，好像把整个模态框都退了 —— 你应该先退这一个，
+ * 然后把外面那个显示出来」。原来每个 Modal 各挂一个 document keydown，
+ * 两层同时开着（编辑文件 + 与默认值对比）时同一个 Esc 两个都收到，于是两层一起关。
+ *
+ * 栈只有这一处，判据只有一条：**不是栈顶就不响应**。
+ * 栈顶关掉之后自己出栈，下一次 Esc 才轮到下面那一层 —— 正是"先退这一个、再退外面"。
+ */
+const openLayers: symbol[] = []
+
 export interface ModalProps {
   open: boolean
   title: string
@@ -142,6 +154,9 @@ export default function Modal({
   const closeRef = useRef(onClose)
   closeRef.current = onClose
 
+  /* 这一层在 Esc 栈里的身份（见文件头 `openLayers`）：一个实例一个，重渲染不换 */
+  const layerId = useRef(Symbol('modal-layer'))
+
   useEffect(() => {
     if (!open) {
       const back = returnTo.current
@@ -157,12 +172,23 @@ export default function Modal({
   }, [open])
 
   useEffect(() => {
-    if (!open || !closeOnEsc) return
+    /* 开着就入栈 —— 就算这一层不吃 Esc（`closeOnEsc=false`），它也该**挡住**下面那层 */
+    if (!open) return
+    const id = layerId.current
+    openLayers.push(id)
     const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === 'Escape') closeRef.current()
+      if (e.key !== 'Escape') return
+      /* 不是最上面那一层：让给上面那层（它关掉之后自己出栈，下一次才轮到这里） */
+      if (openLayers[openLayers.length - 1] !== id) return
+      if (!closeOnEsc) return
+      closeRef.current()
     }
     document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      const at = openLayers.indexOf(id)
+      if (at >= 0) openLayers.splice(at, 1)
+    }
   }, [open, closeOnEsc])
 
   if (!open) return null
