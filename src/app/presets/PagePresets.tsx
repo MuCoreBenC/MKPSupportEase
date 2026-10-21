@@ -1038,6 +1038,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *     就落在眼前，第一轮那个坑也没回来。
    */
   const editAreaOpen = editMode && editing !== null
+  /*
+   * **手上那份正文的镜像**（给下面那个每帧对齐用）。在渲染时就同步，不用 effect——
+   * 差值必须"当前"，晚一帧就会把刚同步过的那一次再判一次。
+   */
+  const textMirrorRef = useRef('')
+  textMirrorRef.current = editing === null ? '' : editing.text
   useEffect(() => {
     if (!editAreaOpen) return
     const el = areaRef.current
@@ -1064,6 +1070,63 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     }
     const nums = numsRef.current
     if (nums !== null) nums.scrollTop = top
+  }, [editAreaOpen])
+
+  /**
+   * **每帧对一次：手上的正文必须等于 textarea 里那一份**（2026-10-21）。
+   *
+   * 作者报的是「我换行了，它这个前端没有实时刷新吧……显示的和实际内容位置错了」：
+   * 光标下去了（textarea 里真有那个换行），可画字的 `<pre>` 还是上一份 —— 因为
+   * 那一层的字是 `color: transparent` 的，**用户看不到 textarea 里的字**，只能看到
+   * pre 画的旧内容，于是就"错位"。
+   *
+   * 为什么不能只靠 `onChange`：它是**唯一**回写点，但并不是每条编辑路径都会响 ——
+   * 输入法合成、某些 WebView 的原生编辑、拖放、扩展改值，都可能把字塞进 DOM 而不
+   * 经过它。漏一次，state 就与 DOM 分叉，pre 从此画的是旧的（而光标按新的走）。
+   *
+   * ⇒ 编辑态开着一帧对一次（`requestAnimationFrame`）。一致时**什么都不做**
+   * （不 setState、不重渲染）；不一致就按 `keepHead` 的规矩补一次。
+   * 比"再挂一个事件"可靠：不管从哪个空子进来，下一帧都对上。
+   */
+  useEffect(() => {
+    if (!editAreaOpen) return
+    let raf = 0
+    const tick = () => {
+      const el = areaRef.current
+      if (el !== null) {
+        /*
+         * ① 滚动也一起对。`scroll` 事件是**合成器滚完之后**才派发的，差的那一帧
+         *    正好是"字与光标错位"最显眼的时刻（拖滚动条 / 触控板快划时）。
+         *    每帧比两个数字，不等才写 —— 不相等才写就不会引起额外布局。
+         */
+        const paint = paintRef.current
+        if (paint !== null) {
+          if (paint.scrollTop !== el.scrollTop) paint.scrollTop = el.scrollTop
+          if (paint.scrollLeft !== el.scrollLeft) paint.scrollLeft = el.scrollLeft
+        }
+        const nums = numsRef.current
+        if (nums !== null && nums.scrollTop !== el.scrollTop) nums.scrollTop = el.scrollTop
+        /*
+         * ② 正文：与 `onChange` 同一个口径（`keepHead` 保头）。
+         * ★ 比在 **setState 之前**（拿镜像比），不能在 updater 里比：updater 里返回
+         *   同一个对象虽然语义上"没变"，但只要这一帧还有别的待处理更新，React 就
+         *   照样排一次渲染 —— 每帧排一次就是 60 次/秒的常驻重渲染（实测会撞
+         *   「Maximum update depth exceeded」）。先比后 set，稳定时是真的什么都不做。
+         */
+        const dom = el.value
+        const held = textMirrorRef.current
+        if (dom !== held) {
+          const fixed = keepHead(held, dom)
+          if (fixed !== held) {
+            textMirrorRef.current = fixed
+            setEditing((cur) => (cur === null ? cur : { ...cur, text: fixed }))
+          }
+        }
+      }
+      raf = window.requestAnimationFrame(tick)
+    }
+    raf = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(raf)
   }, [editAreaOpen])
 
   /**
