@@ -25,6 +25,7 @@ import { HeadNote, Modal } from '../../components/modal'
 /* 底栏按钮**直接用编辑文件那一套类**：两边高度必须是同一个数（见 `.footLeft` 那段注释） */
 import ps from './PagePresets.module.css'
 import s from './TextDiffModal.module.css'
+import { EDIT_TEXT } from './presetTree'
 import { diffSummary, lineDiff } from './textDiff'
 
 /** 与「编辑文件」共用的一套底栏状态（词与行为都由调用方给，这一屏只管摆） */
@@ -117,7 +118,11 @@ export default function TextDiffModal({
   const commitLine = () => {
     const el = editRef.current
     if (editingLine === null || el === null) return
-    const next = el.textContent ?? ''
+    /*
+     * 粘贴进来的东西可能带换行（复制两三行再粘）—— 一行就是一行，
+     * 折成空格交给它，别把这一行撑成两行（那会让右栏行号整片错位）。
+     */
+    const next = (el.textContent ?? '').replace(/\s*[\r\n]+\s*/g, ' ')
     editRef.current = null
     setEditingLine(null)
     if (next !== draftRef.current) onEditLine(editingLine, next)
@@ -142,12 +147,17 @@ export default function TextDiffModal({
         <span
           className={`${cls} ${s.lineEdit}`}
           role="cell"
+          /* ★ 右侧这一格必须带 `data-side="right"`（2026-10-21 作者的绿底一直没出现）：
+             绿 / 红底是 `.row[data-kind] .code[data-side='right']` 那条规则画的，
+             这里原来没这个属性 —— 于是右侧改过的行从来没有底色，
+             反倒只有左栏（本来就有 `data-side="left"`）是红的。 */
+          data-side="right"
+          data-editing="true"
           ref={attachEditor}
           contentEditable
           suppressContentEditableWarning
           spellCheck={false}
           onBlur={commitLine}
-          onPaste={(e) => e.preventDefault()}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
               e.preventDefault()
@@ -243,8 +253,13 @@ export default function TextDiffModal({
                 >
                   重做
                 </button>
-                <button type="button" className={s.pill} onClick={shell.onExit}>
-                  放弃并退出
+                <button
+                  type="button"
+                  className={s.pill}
+                  onClick={shell.onExit}
+                  title={EDIT_TEXT.exitTitle}
+                >
+                  {EDIT_TEXT.exitMode}
                 </button>
                 <button
                   type="button"
