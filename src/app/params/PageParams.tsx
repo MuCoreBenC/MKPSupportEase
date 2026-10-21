@@ -1118,7 +1118,10 @@ export default function PageParams({
    */
   const noteBad =
     u.savedNote !== null &&
-    (u.savedNote.startsWith('保存失败') || u.savedNote.startsWith('这份没有可保存'))
+    (u.savedNote.startsWith('保存失败') ||
+      u.savedNote.startsWith('这份没有可保存') ||
+      /* 「应用 0 项」那一颗没落上（2026-10-21）—— 同一格、同一套红字 */
+      u.savedNote.startsWith('收下云端这一版没成'))
   const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
     if (u.draftError !== null) return { text: `草稿没写进磁盘：${u.draftError}`, tone: 'bad' }
     if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
@@ -1303,33 +1306,69 @@ export default function PageParams({
               </div>
             )}
             {/*
-              「云端换了新版，但它的正文还没取回来」：一条**陈述**，不是错误。
-              两件事分得开：云端有新版本（血统说的，本机就知道）与
-              逐项改了什么（要拿到云端新版字节才比得出来）—— 后者要用户点了才去取。
+              「云端发了新版，但一项要改值的都没有 / 正文还没取回来」—— 一条**陈述**，不是错误。
+
+              ★ 两档（2026-10-21 修）：
+                · `syncNeedsFetch`：字节还没取回来，逐项差异要比了才知道 —— 点右边去取；
+                · 取回来发现 **0 项要改值**（云端只改了注释 / 新字段）⇒ 那时
+                  `syncNeedsFetch` 已经是 false，原来这一条**整块消失**，用户再没有入口
+                  把这一版收掉（作者实测：「有新版」一直挂着）。所以这一档留着一条
+                  「收下这一版」—— 与「修改参数」里那一屏的 0 项按钮同一件事。
             */}
-            {u.pendingCount === 0 && u.syncNeedsFetch && (
-              <div className={s.syncBar} role="status">
-                <span className={s.syncBarText}>
-                  云端发了新版
-                  {u.sync?.basedOnReleaseTime != null
-                    ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）`
-                    : ''}
-                  <span className={s.syncBarHint}>—— 点右边先看看它改了哪几项</span>
-                </span>
-                <button
-                  type="button"
-                  className={s.syncBarBtn}
-                  disabled={u.syncFetching}
-                  onClick={() => {
-                    if (ro) setEditMode(true)
-                    /* 这一下才是"拿云端新版字节"那个动作：取回来再开那一屏 */
-                    void u.fetchSync().then(() => setSyncOpen(true))
-                  }}
-                >
-                  {u.syncFetching ? '正在取回…' : '选择要更新的参数'}
-                </button>
-              </div>
-            )}
+            {u.pendingCount === 0 &&
+              u.sync !== null &&
+              u.sync.versionAdvanced &&
+              u.sync.cloudFileName !== null && (
+                <div className={s.syncBar} role="status">
+                  {u.syncNeedsFetch ? (
+                    <>
+                      <span className={s.syncBarText}>
+                        云端发了新版
+                        {u.sync.basedOnReleaseTime != null
+                          ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）`
+                          : ''}
+                        <span className={s.syncBarHint}>—— 点右边先看看它改了哪几项</span>
+                      </span>
+                      <button
+                        type="button"
+                        className={s.syncBarBtn}
+                        disabled={u.syncFetching}
+                        onClick={() => {
+                          if (ro) setEditMode(true)
+                          /* 这一下才是"拿云端新版字节"那个动作：取回来再开那一屏 */
+                          void u.fetchSync().then(() => setSyncOpen(true))
+                        }}
+                      >
+                        {u.syncFetching ? '正在取回…' : '选择要更新的参数'}
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span className={s.syncBarText}>
+                        云端发了新版
+                        {u.sync.currentReleaseTime != null
+                          ? `（${u.sync.currentReleaseTime}）`
+                          : ''}
+                        <span className={s.syncBarHint}>
+                          —— 这一版没有要改值的参数，只是注释 / 新字段变了
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        className={s.syncBarBtn}
+                        disabled={u.syncBusy}
+                        onClick={() => {
+                          if (ro) setEditMode(true)
+                          /* 值一个不动，注释 / 新字段 / 时间戳与血统推到当前版：「有新版」收场 */
+                          void u.digestSyncRelease()
+                        }}
+                      >
+                        {u.syncBusy ? '正在收下…' : '收下这一版'}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
 
             {/*
@@ -1714,6 +1753,9 @@ export default function PageParams({
               defOf={u.defOf}
               draftOf={u.syncDraftOf}
               onDecide={u.applySyncDecisions}
+              /* 0 项 = 没有草稿可写 ⇒ 这一颗当场落盘（「有新版」随之收掉） */
+              onDigestZero={u.digestSyncRelease}
+              digesting={u.syncBusy}
               onClose={() => setSyncOpen(false)}
             />,
             syncLayer,

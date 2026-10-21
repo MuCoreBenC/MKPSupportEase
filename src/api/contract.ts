@@ -2948,7 +2948,7 @@ export interface MkpApi {
   getFileUrl(fileName: string): Promise<string>
 
   /**
-   * **后处理执行报告与历史**（报告页）：`mkp-ssr` 钩子每跑一次落一份 `_meta.json`，
+   * **后处理执行报告与历史**（报告页）：后处理钩子每跑一次落一份 `_meta.json`，
    * 这里把它们读成摘要列表（新在前）。空列表 = 还没有执行记录（不是错误）；
    * 读不出来的那几条**照进列表**（`ok=false` + 原因），不许消失。
    */

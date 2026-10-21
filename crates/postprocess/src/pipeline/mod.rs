@@ -26,7 +26,7 @@
 //!    输出是垃圾但退出码是 0。这里改成 `MissingMachine` 并点名那个写错的值。
 //! 5. **`progress_file` 不搬**（跨进程进度状态文件只服务 GUI attach），
 //!    `DetailFacts` 精简到 4 个字段（见该结构体的文档，逐个写明搬去哪了）。
-//! 6. **多出一张公开脸 `process_with_ir`**（mkp-ssr 加的，`mkpse-pp` 时期没有）。
+//! 6. **多出一张公开脸 `process_with_ir`**（钩子路径专用）。
 //!    钩子路径的 IR 来自预设映射（`mkp-preset`）而不是 TOML 配置文件，所以第 2 步
 //!    需要一个「IR 已经在手上」的入口。**12 步实现只有一份**（私有 `run`），
 //!    两张脸的差别仅在 [`IrSource`] 这一个枚举上 —— 复制一条管线出来就等于
@@ -81,7 +81,7 @@ pub struct ProcessRequest {
 
 /// 处理请求的另一张脸：**IR 已经在调用方手里**。
 ///
-/// 存在理由（mkp-ssr 的钩子路径）：用户的预设 TOML 是 snake_case 的用户参数
+/// 存在理由（钩子路径）：用户的预设 TOML 是 snake_case 的用户参数
 /// （`[toolhead]` / `[wiping]`），不是 IR；它先经 `mkp-preset` 的映射变成 `Ir`，
 /// 再进这条管线。让调用方把 IR 序列化成临时 TOML 再喂 [`ProcessRequest`] 是**错的**：
 /// 那等于让同一个换算在两处发生（AGENTS.md §1.1），还平白多一次 IR→TOML→IR 往返。

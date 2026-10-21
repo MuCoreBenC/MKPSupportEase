@@ -419,7 +419,7 @@ fn app_settings_sample(internal_root: &std::path::Path) -> Result<std::path::Pat
 ///
 /// 后处理不是别人的事：内核就在本仓库（`crates/postprocess`），这条命令由**本程序自己**
 /// 跑 —— 一个可执行物两种角色：**带 `--Toml/--Gcode` 时是切片器的后处理钩子，不带参数就是
-/// 界面**（旧世代 `mkp-ssr` 也是这个形状）。这段路径没有第二种真值：开发态是
+/// 界面**（一直是这个形状）。这段路径没有第二种真值：开发态是
 /// `target/debug/…`、装好了就是安装位置，只有 `current_exe()` 知道。前端**不许再写死一串**：
 /// 2026-10-09 之前首页写死的是**另一个仓库**的 exe（`G:\project\mkp-ssr\…`），
 /// 照着复制出来的命令贴进切片器必然报 `Error code: 2`（实测）。

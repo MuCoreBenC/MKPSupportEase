@@ -12,7 +12,7 @@
 //!   手写 arm；无 arm 的 key 视同「反射找不到 → 跳过」（旧实现 对无此字段的
 //!   configKey 同样 continue）。
 //!
-//! 搬入 mkp-ssr 时的改动**恰好两处**（其余逐字不动）：
+//! 与内核那份的差别**恰好两处**（其余逐字相同）：
 //! - 下面那段 use：来源 crate 名 → 本仓库的模块路径。
 //! - 删掉本文件里的 `fill_defaults` 与 `num_strip`：内核
 //!   `crates/postprocess/src/ir/defaults.rs` 已有**逐字相同**的两份（搬入时实测 `diff` 退 0，
@@ -978,7 +978,7 @@ pub(crate) fn split_gcode_lines(s: &str) -> Vec<String> {
         .collect()
 }
 
-// `num_strip` **在这里被删掉了**（搬入 mkp-ssr 的第 2 处改动）：内核
+// `num_strip` **在这里被删掉了**（第 2 处差别）：内核
 // `crates/postprocess/src/ir/defaults.rs` 里有逐字相同的一份（实测 `diff` 退 0、各 30 行），
 // 且 postproc 的元数据扫描本来就调那一份。本文件顶部 `use postprocess::ir::num_strip`。
 

@@ -799,6 +799,12 @@ export interface Params {
    * 于是一次撤销能把整批退回来（作者：「就像批量修改，只算一次撤销一批」）。
    */
   applySyncDecisions: (decisions: ParamDecision[]) => void
+  /**
+   * **「收下这一版」**（云端这一版一项都不用改值时）：没有草稿可写，
+   * 这一下直接落盘（值一个不动，注释 / 新字段 / 时间戳与血统推到当前版）。
+   * 返回 `false` = 没落上（错误话在 `savedNote` 里）。
+   */
+  digestSyncRelease: () => Promise<boolean>
   /** 行上「用新值」：采用这一项（只改草稿值，进撤销栈；保存才落盘） */
   adoptSync: (key: string) => void
   /** 行上「保持原样」：只记一条待落决定，值一个字不动 */
@@ -2715,6 +2721,44 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     [apply, syncByKey],
   )
 
+  /**
+   * **「应用这 0 项」= 收下这一版**（2026-10-21 修）：云端只改了注释 / 新增字段，
+   * 一项要改值的都没有 —— 于是**没有草稿可写**，这一下只能直接落盘。
+   *
+   * ★ 为什么不能只走"写草稿 → 保存"：一条表态都没有 ⇒ 草稿不脏 ⇒ 底栏那颗
+   *   「保存」是灰的，那一笔永远落不上，列表上「有新版」就永远挂着（作者实测：
+   *   同一个弹层里点「应用这 0 项」什么都没发生，而预设页行上那颗「更新」是好的
+   *   —— 差别就在"更新"遇到 0 项时直接调了 `apply_preset_param_decisions`）。
+   *
+   * 落的是**同一条后端路径**（空决定）：值一个不动，云端的注释 / 新字段 / 时间戳
+   * 与血统推进到当前版，「有新版」就此收场（见 `param_sync::apply_at` 头注）。
+   *
+   * 返回 `false` = 没落上（错误已经落进 `syncError`，弹层不退，让用户看得到）。
+   */
+  const digestSyncRelease = useCallback(async (): Promise<boolean> => {
+    if (localPath === null) return false
+    setSyncBusy(true)
+    setSyncError(null)
+    try {
+      const v = await api.applyPresetParamDecisions(localPath, [])
+      setSync(v)
+      setSyncDecisions({})
+      setFileReload((n) => n + 1)
+      /* 文件被重写过（注释 / 时间戳 / 血统，草稿若干净也跟着换）⇒ 两路都得广播 */
+      broadcastDraftNow()
+      deliveryMutated()
+      setSavedNote('云端这一版收下了 —— 参数值一个没动，注释与血统跟到了新版')
+      return true
+    } catch (e: unknown) {
+      /* 走「保存失败」那条红字（`savedNote`，参数页标题右边那一格）——
+         塞进 `syncError` 会被念成"云端更新这一条读不出来"，那不是这里发生的事 */
+      setSavedNote(`收下云端这一版没成：${errorText(e)}`)
+      return false
+    } finally {
+      setSyncBusy(false)
+    }
+  }, [localPath, broadcastDraftNow])
+
   /** 已表态、还没保存的项数（底栏 / 横幅那句「N 项待保存」） */
   const syncDirty = useMemo(() => {
     let n = 0
@@ -2814,6 +2858,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     syncDraftOf,
     syncDirty,
     applySyncDecisions,
+    digestSyncRelease,
     adoptSync,
     holdSync,
     useMyValue,

@@ -501,7 +501,7 @@ pub struct RelocationRecord {
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Meta {
-    /// schema 版本：与旧世代（`mkp-ssr` 的 `history.rs`）同口径的 v2。
+    /// schema 版本：与旧版本的 `history.rs` 同口径的 v2。
     pub schema_version: u32,
     pub started_at: String,
     pub finished_at: String,

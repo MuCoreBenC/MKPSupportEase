@@ -22,7 +22,7 @@ use crate::gcode::format_z;
 pub const VERSION: i64 = 1;
 
 /// `tool=` 的值：出现在 `;MKP_INFO` 里，纯排查用。
-const TOOL: &str = "mkp-ssr";
+const TOOL: &str = "mkpse";
 
 const BEGIN_PREFIX: &str = ";MKP_BEGIN ";
 const END_PREFIX: &str = ";MKP_END ";
@@ -315,7 +315,7 @@ mod tests {
             ]),
             "A1MF",
         );
-        assert_eq!(out[2], ";MKP_INFO version=1 tool=mkp-ssr preset=A1MF");
+        assert_eq!(out[2], ";MKP_INFO version=1 tool=mkpse preset=A1MF");
         assert_eq!(
             out[out.len() - 1],
             ";MKP_STATS events=1 swaps=2 paints=1 towers=0"
@@ -325,7 +325,7 @@ mod tests {
     #[test]
     fn finalize_falls_back_to_file_head() {
         let out = finalize(v(&["G1 X0 Y0", "G1 X1 Y1"]), "");
-        assert_eq!(out[0], ";MKP_INFO version=1 tool=mkp-ssr");
+        assert_eq!(out[0], ";MKP_INFO version=1 tool=mkpse");
         assert_eq!(
             out[out.len() - 1],
             ";MKP_STATS events=0 swaps=0 paints=0 towers=0"
@@ -380,7 +380,7 @@ mod tests {
     fn strip_mark_lines_removes_only_protocol_marks() {
         let src = concat!(
             "; CONFIG_BLOCK_END\n",
-            ";MKP_INFO version=1 tool=mkp-ssr\n",
+            ";MKP_INFO version=1 tool=mkpse\n",
             "G1 X0 Y0\n",
             ";Pre-glue preparation\n",
             ";MKP_BEGIN swap ev=1 to=pen z=0.6\n",

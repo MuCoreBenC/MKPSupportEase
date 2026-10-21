@@ -1,7 +1,7 @@
 //! 读取面 —— 头注释正则、CRLF 两段式、错误码（对照）。
 
 use crate::model::{PresetFile, TomlConfig};
-// 搬入 mkp-ssr 的唯一改动：mkp_diag → postprocess::diag（错误码本身一个字没动，
+// 与内核那份的唯一差别：错误类型换成 postprocess::diag（错误码本身一个字没动，
 // 它们是对外契约：E_CFG_PARSE_001 / E_TOML_PARSE_001 …）。
 use postprocess::diag::PostprocError;
 use std::path::Path;

@@ -16,6 +16,12 @@
  *   「保持原样」；真正的落盘在「保存」那一下。点「暂不修改」则什么都不记，
  *   回到修改参数里逐项照旧能选。
  *
+ * ★ **唯一的例外：0 项**（2026-10-21）。云端只改了注释 / 新增字段时一项都不用改值
+ *   ⇒ 没有草稿可写 ⇒ 「保存」是灰的，那一笔**永远落不上**，「有新版」就一直挂着
+ *   （作者实测：点「应用这 0 项」什么都没发生，而预设页行上的「更新」是好的）。
+ *   所以这一屏在 0 项时改成「收下这一版」：直接落盘（值一个不动，注释 / 新字段 /
+ *   时间戳 / 血统推到当前版），与预设页「更新」遇到 0 项走的是同一条后端路径。
+ *
  * 与行上那两个动作（「用新值」/「保持原样」）是**同一件事的两条路**：
  * 一屏能全看完时走这里，只想改一行时就地在那一行上改。两条路落的是同一张草稿。
  *
@@ -90,6 +96,14 @@ interface Props {
    * 「保存」才落盘。空数组 = 一项都没勾。
    */
   onDecide: (decisions: ParamDecision[]) => void
+  /**
+   * **「收下这一版」那一颗**（0 项时）：没有草稿可写，这一下**直接落盘** ——
+   * 值一个不动，云端的注释 / 新字段 / 时间戳与血统推到当前版。
+   * 返回 `false` = 没落上（错误由参数页那边说出来），弹层不退。
+   */
+  onDigestZero: () => Promise<boolean>
+  /** 上面那一颗正在跑（连点不会发第二次） */
+  digesting?: boolean
   onClose: () => void
 }
 
@@ -131,6 +145,8 @@ export default function ParamSyncModal({
   hint = null,
   draftOf,
   onDecide,
+  onDigestZero,
+  digesting = false,
   onClose,
 }: Props) {
   const pending = useMemo(() => (sync?.entries ?? []).filter((e) => e.pending), [sync])
@@ -202,6 +218,19 @@ export default function ParamSyncModal({
     onClose()
   }
 
+  /*
+   * **这一版一项都不用改值**（且云端字节已经取回来了）= 「收下这一版」那一档。
+   * 与 `fetching` 分得开：字节还没取回来时也数得出 0 项，那不是"没有要改的"。
+   */
+  const zero = !fetching && sync !== null && all === 0
+
+  /** 收下这一版：直接落盘，成功后关窗（失败留着，错误由参数页那边说） */
+  const digest = () => {
+    void onDigestZero().then((ok) => {
+      if (ok) onClose()
+    })
+  }
+
   return (
     <Modal
       open={open}
@@ -237,24 +266,42 @@ export default function ParamSyncModal({
         <>
           {/*
            * **底栏左侧那句提示**（2026-10-20）：原来这一格是空的。
-           * 「暂不修改」是什么意思、0 项应用会发生什么，都写在这里 ——
+           * 「暂不修改」是什么意思、0 项收下会发生什么，都写在这里 ——
            * 不再靠页面底部那条一次性 toast（关了就看不到了）。
            */}
-          <span className={s.hint}>{hint ?? '勾上的采用、没勾的保持 —— 点「保存」才写进这份文件'}</span>
+          <span className={s.hint}>
+            {hint ??
+              (zero
+                ? '收下之后参数值一个字不动 —— 只有注释 / 新字段 / 时间戳跟到新版'
+                : '勾上的采用、没勾的保持 —— 点「保存」才写进这份文件')}
+          </span>
           <button type="button" className={s.ghost} onClick={onClose}>
             暂不修改
           </button>
-          <button type="button" className={s.primary} disabled={fetching} onClick={confirm}>
-            应用这 {chosen} 项
-          </button>
+          {/*
+           * **0 项 ⇒ 这一颗当场落盘**（2026-10-21）。没有草稿可写，
+           * 走「保存」那条路的话那颗按钮是灰的，这一版永远消化不掉。
+           */}
+          {zero ? (
+            <button type="button" className={s.primary} disabled={digesting} onClick={digest}>
+              {digesting ? '正在收下…' : '收下这一版'}
+            </button>
+          ) : (
+            <button type="button" className={s.primary} disabled={fetching} onClick={confirm}>
+              应用这 {chosen} 项
+            </button>
+          )}
         </>
       }
     >
       {fetching ? (
         <p className={s.empty}>正在取回云端这一版 —— 拿到才知道改了哪几项。</p>
       ) : all === 0 ? (
+        /* 原来这里写「关掉这一屏就行」—— 关掉之后「有新版」还挂着（2026-10-21 作者实测）。
+           现在这一档真有动作：收下这一版（值一个不动，注释 / 新字段 / 时间戳与血统跟上）。 */
         <p className={s.empty}>
-          这一版没有要改值的参数（云端只改了注释 / 新增字段）—— 关掉这一屏就行。
+          这一版没有要改值的参数（云端只改了注释 / 新增字段）—— 点「收下这一版」把新版收进来，
+          参数值一个字不动。
         </p>
       ) : (
         <>
