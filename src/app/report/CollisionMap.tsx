@@ -111,7 +111,6 @@ export default function CollisionMap({
   height,
   label = '放大查看碰撞俯视图',
 }: Props) {
-  const bed = boxOf(collision.printable)
   const tower = boxOf(collision.towerBbox)
   const model = boxOf(collision.modelBbox)
   /*
@@ -148,7 +147,20 @@ export default function CollisionMap({
   const fromRef = useRef<DOMRect | null>(null)
   const mapBtnRef = useRef<HTMLButtonElement>(null)
 
-  /* 热床都没有（老记录 / 几何缺）⇒ 整块不画，交给上一层的空白态 */
+  /*
+   * **可打印区**（映射的基准）：
+   *   · 事实里给了就用它（碰撞 / 挪塔那两屏的几何自带，且与板 frame 同一块区域）；
+   *   · 没给（擦料塔那栏只有塔坐标）就用**板规格里的可打印区**，原点即机器坐标原点。
+   *
+   * ★ 不许拿机型的 `movementRange` 顶替（2026-10-21 真机踩到）：A1 mini 是
+   *   `-10..180`（喷嘴能悬出床 10mm），比板上那块 180 宽的可打印区大一圈 ——
+   *   `bedPt` 只平移不缩放，塔会被整体往右推 10mm，判据框直接压出板外。
+   */
+  const bed =
+    boxOf(collision.printable) ??
+    (plate !== null ? { x: 0, y: 0, w: plate.frame.w, h: plate.frame.h } : null)
+
+  /* 热床都没有（老记录 / 几何缺 / 板规格也查不到）⇒ 整块不画，交给上一层的空白态 */
   if (bed === null || tower === null) return null
 
   /* 有板：画布是板坐标系（可打印区在板上的 frame 是机器坐标的落点）；

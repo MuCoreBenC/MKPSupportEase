@@ -1027,12 +1027,14 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
  *     `wiping.wiper_x/wiper_y`）—— 两处一致时只有一个；
  *   · 不一致时补一支箭头（预设 → 实际）；位移小到看不见就不画（`CollisionMap` 自己判）。
  *
- * 塔身 24mm 与内核 `TOWER_OUTER_BOUND - TOWER_INNER_BOUND` 同一个数；判据框每边多
- * 4mm 的外围余量（brim / 斜肋那一圈）—— **快照里没有内核算的那份框**（成功那趟不产
- * `collision`），这里按同一套常量估。外围结构种类 / 参数照 IR 的 `Wiping` / `Rib` /
- * `Sheath` 原值给，形状与参数页是同一套算法。
+ * 塔身 19.58mm 与内核 `TOWER_OUTER_BOUND - TOWER_INNER_BOUND`（29.79 - 10.21）同一个数；
+ * 判据框每边再让 2.21mm 给外围结构（brim 那几圈 / 斜肋伸出去的那截）—— **快照里没有
+ * 内核算的那份框**（成功那趟不产 `collision`），这里按同一套常量估。外围结构种类 /
+ * 参数照 IR 的 `Wiping` / `Rib` / `Sheath` 原值给，形状与参数页是同一套算法。
  *
- * 可打印区取 IR 的 `Machine.MinX/MaxX/MinY/MaxY`：拿不到就不画（不编一个 256×256 出来）。
+ * ★ **可打印区不在这里给**（2026-10-21 修）：`CollisionMap` 拿不到事实里的 `printable`
+ *   时会用板规格的可打印区（原点 = 机器坐标原点）。机型的 `Machine.MinX..MaxX` 是
+ *   **运动范围**（A1 mini 的 -10..180），比板宽一圈，拿来映射会把塔推出板外。
  */
 function TowerPlate({
   snap,
@@ -1044,29 +1046,21 @@ function TowerPlate({
 }) {
   const ir = snap.ir
   const wiping = objOf(ir.Wiping)
-  const machine = objOf(ir.Machine)
   const rib = objOf(ir.Rib)
   const sheath = objOf(ir.Sheath)
-  const minX = numOf(machine.MinX)
-  const maxX = numOf(machine.MaxX)
-  const minY = numOf(machine.MinY)
-  const maxY = numOf(machine.MaxY)
   const presetX = Number(snap.params['wiping.wiper_x'])
   const presetY = Number(snap.params['wiping.wiper_y'])
   const irX = numOf(wiping.WiperX)
   const irY = numOf(wiping.WiperY)
 
-  if (minX === null || maxX === null || minY === null || maxY === null) return null
-  if (maxX <= minX || maxY <= minY) return null
   const hasPreset = Number.isFinite(presetX) && Number.isFinite(presetY)
   const hasIr = irX !== null && irY !== null
   if (!hasPreset && !hasIr) return null
 
-  /* 塔身 24mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）；判据框每边再让 4mm
-     给外围结构（brim 那几圈 / 斜肋伸出去的那截）。 */
-  const BODY_MM = 24
-  const BOX_PAD_MM = 4
-  const BOX_MM = BODY_MM + BOX_PAD_MM * 2
+  /* 塔身 19.58mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）；判据框每边再让
+     2.21mm 给外围结构（brim 那几圈 / 斜肋伸出去的那截）—— 框共 24mm。 */
+  const BODY_MM = 19.58
+  const BOX_MM = 24
 
   /** 以塔左下角为角的判据框（机器坐标；内核同一个约定） */
   const boxAt = (x: number, y: number): ReportBox4 => ({
@@ -1086,9 +1080,9 @@ function TowerPlate({
   /*
    * 一份"只有塔、没有碰撞"的事实：`CollisionMap` 拿到它就照常画板轮廓 / 网格 /
    * 塔形状 / 判据框 / 放大层 —— 擦料塔这一栏不另写一套画法。
+   * `printable` 故意不给：让画布按板规格的可打印区定（理由见上面那条）。
    */
   const collision: ReportCollision = {
-    printable: { xMin: minX, xMax: maxX, yMin: minY, yMax: maxY },
     towerBbox: boxAt(at.x, at.y),
     tower: {
       outerStructure:
