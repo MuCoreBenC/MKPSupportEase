@@ -3,10 +3,10 @@
 //! 12 步：input / config / machine-detect / parse / support / collision /
 //! calib-check / pass1 / pass2 / calibration / write / printtime。
 //!
-//! 来源：`来源实现` 的 `crates/engine/src/lib.rs`（498 行）。**只有第 2 步换了**，
+//! 整链在这一层编排：12 步，**只有第 2 步是本项目自己的**，
 //! 其余 11 步逐行照搬（路径前缀 `mkp_postproc::` → `crate::postproc::` 等）。
 //!
-//! 与来源的差异，逐条登记（不写在提交信息里就会被忘掉，所以钉在代码里）：
+//! 与旧链路的差异，逐条登记（不写在提交信息里就会被忘掉，所以钉在代码里）：
 //!
 //! 1. **第 2 步整段换成 `config::load_with_overrides`**。来源那 6 个动作
 //!    （`read_preset` / `validate_config` / `load_param_registry` /
@@ -183,10 +183,10 @@ pub struct ProcessResult {
 
 /// 出口事实集 —— **只搬运，不新算**。
 ///
-/// 来源仓库这里有 11 个字段，其中 7 个是 GUI 详情面板专用。本项目没有那个面板，
+/// 这一层原本有 11 个字段，其中 7 个是 GUI 详情面板专用。本项目没有那个面板，
 /// **逐个写明搬去哪了**（删掉不写等于让下一个人以为它从来不存在）：
 ///
-/// | 来源字段 | 现在在哪 |
+/// | 原字段 | 现在在哪 |
 /// |---|---|
 /// | `glue_speed_mm_per_s` | 删。它是 `Toolhead.MaxSpeed / 60` 的纯派生值，`dump-ir` 的输出里有 `MaxSpeed`，除一下就是 |
 /// | `machine_preset_name` | 移到 [`header_facts`]（`dump-ir --gcode <in>` 用它） |
@@ -211,7 +211,7 @@ pub struct DetailFacts {
 ///
 /// 这些**只读输入、不碰 IR**，所以从管线里提出来单独成函数：`dump-ir --gcode <in>`
 /// 复用它；管线在 parse 步取一次、搭 [`ProcessResult`] 出门（执行记录要），
-/// 但不进 IR、不参与任何变换（来源仓库把它们塞进 `DetailFacts` 是因为 GUI 要）。
+/// 但不进 IR、不参与任何变换（把它们塞进 `DetailFacts` 是因为 GUI 要）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct HeaderFacts {
     pub machine_preset_name: String,
@@ -408,7 +408,7 @@ pub fn process_with_ir_deferred_print_time_with_tower_ask(
 
 /// 判据缝：显式指定 pass 循环内协作检查的节流间隔。
 ///
-/// 存在理由（照搬来源的教训，不许删）：「取消停在循环内、而不是跑完在下一个步骤边界
+/// 存在理由（教训，不许删）：「取消停在循环内、而不是跑完在下一个步骤边界
 /// 被截住」这条判据，用 100ms 时间窗去测一条墙钟可能只有几十毫秒的 pass，结果由
 /// **机器速度**决定 ⇒ 判据确定性假红。判据传 `Duration::ZERO` ⇒ 每轮都真查 ⇒
 /// 断言恢复成机器无关的确定性事实，且阈值一个字不用放宽。
@@ -484,7 +484,7 @@ fn run(
         .collect();
 
     // ---- step 2: config —— 读 TOML（结构 = Ir）+ 覆盖项 + 机型归一 ----
-    // 与来源的唯一结构性差异：这里**没有**预设读取、两层校验与 1,130 行映射。
+    // 唯一的结构性差异：这里**没有**预设读取、两层校验与 1,130 行映射。
     // 「缺键即错」由 serde（无 `#[serde(default)]`）承担，判据在 `config.rs`。
     checkpoint(cancel)?;
     executed.push(Step::Config);
@@ -523,7 +523,7 @@ fn run(
     // 并行的墙钟时间记在 parse 步上 —— support 步只剩 ApplyWipingDecision 那一笔，
     // 两步相加仍等于真实总耗时。
     //
-    // preferred 的来源：来源仓库取 `preset.config.wiping.have_wiping_components`，
+    // preferred 的来源：取 `preset.config.wiping.have_wiping_components`，
     // 而 `ir::build.rs:74` 是 `ir.wiping.preferred_mode = cfg.…have_wiping_components`
     // 的**纯恒等拷贝**（无归一化，Task 8 实测确认）⇒ 从 IR 取同一个值，
     // 而不是把 TOML 结构重新拉进来。钉住这条恒等的判据在

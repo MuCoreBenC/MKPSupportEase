@@ -62,7 +62,7 @@ pub fn analyze_need_wiping(
 ///
 /// **`preferred_mode` 该从哪里取（本项目的抽取结论，已实测确认）**：
 ///
-/// 来源仓库 来源实现 的 engine 在 `lib.rs:242` 传的是
+/// 传进来的是
 /// `preset.config.wiping.have_wiping_components`，也就是**直接读预设**、不经 IR。
 /// 本项目没有预设了，只能从 `ir.wiping.preferred_mode` 取。这一步换源**必须先证明两者恒等**，
 /// 否则会静默改变擦拭决策（tower / disk / 强制 tower 三条分支）。
@@ -70,7 +70,7 @@ pub fn analyze_need_wiping(
 /// 实测证据：`crates/ir/src/build.rs:74` 是
 /// `ir.wiping.preferred_mode = cfg.wiping.have_wiping_components.clone();`
 /// —— **纯恒等复制，无归一化、无 trim、无小写化、无默认值兜底**。
-/// 所以 `ir.wiping.preferred_mode` 就是来源仓库传给本函数的那个字符串，换源安全。
+/// 所以 `ir.wiping.preferred_mode` 就是本函数真正吃到的那个字符串，换源安全。
 ///
 /// 顺带确认：本函数**自己不做归一化**（:61 只 `to_string()`），
 /// 非法值走 `apply_wiping_decision` 的 `_` 臂强制 tower（:98-103）。

@@ -6,7 +6,7 @@
 //! 它不知道 TOML / MKP / machine / wiping / tower / calibration / 编排层的存在。
 //! 需要诊断就把信息返回给上层（`check_xy_range` 返回 `Vec<RangeViolation>` 就是这个形状）。
 //!
-//! **判据形态的降级要说清**：来源仓库这条边界由 gatecheck 读 Cargo.toml 实现
+//! **判据形态的降级要说清**：这条边界原来由 gatecheck 读 Cargo.toml 实现
 //! （反向依赖会被 Cargo 自己拦成 cyclic package dependency）。改成模块后 Cargo 不再兜底，
 //! 换成文本扫描 —— 能力更弱（绕得过：换个写法引用），登记在 spec doc.md §3.1。
 //!

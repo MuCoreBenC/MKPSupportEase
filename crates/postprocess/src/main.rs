@@ -12,7 +12,7 @@
 //! 于是 `out=$(mkpse-pp run a.gcode -c c.toml)` 拿到的一定是路径，不掺一个字。
 //!
 //! 退出码：`0` 成功 / `1` 处理失败 / `2` 输入或配置错 / `130` 用户取消
-//! （128+SIGINT 的 shell 惯例；来源仓库同款，理由是让脚本区分「用户按了 Ctrl-C」
+//! （128+SIGINT 的 shell 惯例，让脚本区分「用户按了 Ctrl-C」
 //! 与「跑失败了」）。
 //!
 //! **1 与 2 怎么分 —— 这里刻意不按错误变体分类**：`PostprocError::InvalidConfig`
@@ -35,8 +35,8 @@ use postprocess::pipeline::{self, ProcessRequest, ProgressEvent};
 mod logging {
     //! 日志装配。**subscriber 只在这里装一次**，库里任何地方都不装。
     //!
-    //! 只有 stderr 一条通道：来源仓库那套文件日志（`tracing-appender` + 非阻塞 writer +
-    //! `_guard` 生命周期）**刻意不搬** —— 这是个终端程序，要留档 `2> mkpse-pp.log` 就够了，
+    //! 只有 stderr 一条通道：文件日志（`tracing-appender` + 非阻塞 writer +
+    //! `_guard` 生命周期）**刻意不做** —— 这是个终端程序，要留档 `2> mkpse-pp.log` 就够了，
     //! 多一条落盘通道就多一处「日志到底写哪去了」的问题。
 
     use tracing_subscriber::EnvFilter;

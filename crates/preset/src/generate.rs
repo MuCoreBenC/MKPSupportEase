@@ -12,9 +12,8 @@
 //! 这里不许出现 `uuid::new_v4()` / `now()` / `SystemTime` —— `uuid` 与发布时间只能来自配方。
 //!
 //! 门禁是 `tests/write_discipline_scan.rs` 的 `the_generator_stays_pure`。
-//! 来源仓库那边是 `scripts/check_generator_purity.py`，**那个脚本没有跟着搬进来**，
-//! 所以这句话从 M4a 到现在一直指向一个不存在的文件 —— 指向空气的门禁比没有门禁更糟，
-//! 因为它让人以为有东西在看着。
+//! 这条以前指向一个外部仓库的脚本（从没在本仓存在过）—— 指向空气的门禁比没有门禁更糟，
+//! 因为它让人以为有东西在看着。现在它指向上面这条判据，跑 cargo test 就会执行。
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

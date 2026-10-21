@@ -1,9 +1,7 @@
-//! 从来源仓库 `crates/ir/src/build.rs`（1,186 行）里**只摘两个函数**。
+//! 这一层只放两个函数：零值兜底（`fill_defaults`）与数字扫描（`num_strip`）。
 //!
-//! **没搬的是什么**：那 1,186 行里约 1,130 行是 `TomlConfig → Ir` 的映射
-//! （`build()` 从 :44 到 :354，加 `new_default_ir()` 等辅助）。它的唯一输入类型是
-//! `mkp_preset::TomlConfig` —— 本项目**不要预设文件**，所以那段连同整个 `preset` crate
-//! 一起消失。配置从此直接反序列化成 [`crate::ir::Ir`]（spec doc.md §4 方案 C）。
+//! **这里没有映射层**：`TomlConfig → Ir` 那一步在本项目里不存在，
+//! 配置直接反序列化成 [`crate::ir::Ir`]（spec doc.md §4 方案 C），中间不需要任何翻译函数。
 //!
 //! **搬进来的两个是 postproc 对 ir 的全部函数依赖**（实测 grep：postproc 只用
 //! `Ir` 类型 + 这两个函数，共 3 样）：
@@ -19,7 +17,7 @@ use crate::ir::Ir;
 ///
 /// 本项目里没有 `build()` 了，所以这条时序约束变成：**配置反序列化之后、pass1 之前**
 /// 由 pipeline 的 config 步调用一次。调用点还有一个在
-/// `postproc::calibration::insert_calibration_gcode` 首行（来源仓库同样如此）。
+/// `postproc::calibration::insert_calibration_gcode` 首行。
 ///
 /// 一共 8 条规则，逐条核对过：6 个「== 0.0 才填」的零值兜底、1 个 tree_support 强制、
 /// 1 个**无条件**覆写 `filament.slicer`。最后那条不是兜底 —— 它无论原值是什么都会被冲掉。
@@ -50,7 +48,7 @@ pub fn fill_defaults(ir: &mut Ir) {
 
 /// NumStrip：从字符串提取全部数字（可负、可小数；孤立 `-` / `.` 不算）。
 ///
-/// pub 的理由（来源仓库原话）：旧实现 `ir.NumStrip` 是导出符号，pass1 的元数据扫描直接
+/// pub 的理由：pass1 的元数据扫描直接
 /// 调它（等 12 处）。本项目里消费方是 `postproc::pass1` 与 `postproc::pass2`。
 pub fn num_strip(line: &str) -> Vec<f64> {
     let mut result = Vec::with_capacity(8);
