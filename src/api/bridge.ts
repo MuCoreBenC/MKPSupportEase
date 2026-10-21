@@ -249,6 +249,9 @@ export const bridgeApi: MkpApi = {
     call('readLocalOriginText', 'read_local_origin_text', { path }),
   putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
   commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
+  /* 编辑框实时自检：语法 + 相对最初那份缺了哪些参数（红条跟着字走） */
+  checkPresetText: (path, text) =>
+    call('checkPresetText', 'check_preset_text', { path, text }),
   discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
   /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
   getLocalPresetIndex: () => call('getLocalPresetIndex', 'get_local_preset_index'),

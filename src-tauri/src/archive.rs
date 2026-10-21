@@ -366,6 +366,12 @@ pub struct ParamSnapshot {
     /// 不逐项映射到注册表 key：那需要一张 70 多项的对照表，写一份就多一份会漂的东西；
     /// 报告页把这份 JSON 摆成可折叠的原文，排查时直接比对即可。
     pub ir: serde_json::Value,
+    /// **这一份预设里读不出来的参数**（中文名）—— 相对它最初的原文镜像比的。
+    ///
+    /// 空 = 一项不缺。非空时报告页要说清"这一盘有 N 项用了默认值"（2026-10-21 作者：
+    /// 「报告页面能看到这些对应的错误」）—— 缺项不报错，但结果一定不是用户想的那样。
+    #[serde(default)]
+    pub missing: Vec<String>,
 }
 
 /// 文件事实 + 统计 + 打印时间（报告页详情区的那几块）。
@@ -573,6 +579,8 @@ pub struct ReportFacts<'a> {
     /// 由调用方读文本 + 注册表算好交进来（archive 只搬运，不碰 catalog）——
     /// 拿不到（读不出文本 / 注册表缺失 / 失败路径）就是 `None` ⇒ 快照整组不摆。
     pub preset_params: Option<&'a std::collections::BTreeMap<String, String>>,
+    /// 这一份预设里**读不出来的参数**（中文名，相对最初的原文镜像比；空 = 一项不缺）。
+    pub preset_missing: &'a [String],
     /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
     pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
 }
@@ -594,7 +602,11 @@ impl ReportFacts<'_> {
     pub fn snapshot(&self) -> Option<ParamSnapshot> {
         let params = self.preset_params?.clone();
         let ir = serde_json::to_value(self.ir).ok()?;
-        Some(ParamSnapshot { params, ir })
+        Some(ParamSnapshot {
+            params,
+            ir,
+            missing: self.preset_missing.to_vec(),
+        })
     }
 
     /// 涂胶组。
@@ -1144,6 +1156,7 @@ mod tests {
                 calibration_receipt: None,
                 /* 判据不摆快照（要摆的那条专门测，见 `snapshot_carries_toml_and_ir`） */
                 preset_params: None,
+                preset_missing: &[],
             }
         }
     }

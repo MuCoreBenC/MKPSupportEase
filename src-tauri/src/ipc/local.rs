@@ -365,13 +365,38 @@ pub struct PresetTextDraftDto {
     /// 才报"预设解析失败"，而那时离错误已经几分钟、也看不出是哪一行。
     /// 打开编辑器就把它摆出来（含行号），再指路「恢复默认值」（退回最初那份）。
     pub problem: Option<String>,
-    /// **相对最初那份少了哪些参数**（2026-10-21）：`key（中文名）`，按参数页顺序。
+    /// **相对最初那份少了哪些参数**（2026-10-21）：按参数页顺序。
     ///
     /// 与 `problem` 是两件事：`problem` 说的是"这份 TOML 读不动"，
     /// 这里说的是"读得动、但某一项不见了" —— 粘行最典型的样子
     /// （`z_calibration_mode = "new"` 被粘进上一行行尾注释，TOML 仍然合法）。
     /// 空数组 = 一项都没缺；没有原文镜像时不检查（不编）。
-    pub missing: Vec<String>,
+    pub missing: Vec<MissingParamDto>,
+}
+
+/// 少掉的一项参数（**给用户看的**）。
+///
+/// `key` 只在排查时有用（日志 / 报告里的原始标识），界面上说的是 `label`
+/// 和"它现在在第几行" —— 作者 2026-10-21：「用用户的那种面向用户的那种文案口吻
+/// 去告诉他哪里错了，不要写得这么技术」。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingParamDto {
+    /// 参数主键（`wiping.z_calibration_mode`）
+    pub key: String,
+    /// 中文名（`Z校准模式`）—— 界面只说这个
+    pub label: String,
+    /// 这个键在正文里**出现在第几行**（1 起）。粘行时它就在"上一行"里，
+    /// 于是界面能说"第 102 行"而不是"某处不见了"。找不到就是 `None`。
+    pub line: Option<usize>,
+}
+
+/// 校验一份**还没有保存**的正文：语法 + 相对最初那份缺了哪些参数（编辑框实时用）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresetTextCheckDto {
+    pub problem: Option<String>,
+    pub missing: Vec<MissingParamDto>,
 }
 
 /// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
@@ -498,7 +523,7 @@ pub async fn patch_preset_draft_batch(
 ///
 /// 基线 = `baseline-local/` 的原文镜像（复制 / 下载 / 导入 / 另存 / 第一次被改写之前存过）。
 /// 没有镜像、读不出来、注册表缺失 ⇒ **空**（不检查，不编一个"应该有哪些键"出来）。
-fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<String> {
+fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<MissingParamDto> {
     let Ok(Some(origin)) = crate::runtime::baseline::read_origin_copy(root, path) else {
         return Vec::new();
     };
@@ -508,8 +533,49 @@ fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<Stri
     crate::presetdata::params::missing_param_keys(&origin, text, &catalog.registry.params)
         .unwrap_or_default()
         .into_iter()
-        .map(|(key, label)| format!("{key}（{label}）"))
+        .map(|(key, label)| {
+            let toml_key = catalog
+                .registry
+                .params
+                .iter()
+                .find(|p| p.key == key)
+                .map(|p| p.toml_key.clone())
+                .unwrap_or_default();
+            let line = if toml_key.is_empty() {
+                None
+            } else {
+                line_of(text, &toml_key)
+            };
+            MissingParamDto { key, label, line }
+        })
         .collect()
+}
+
+/// 这个 TOML 键在正文里**出现在第几行**（1 起；找不到就是 `None`）。
+///
+/// 只看"这一串在不在这一行"：粘行时它落在上一行里（被 `#` 吃掉），
+/// 于是界面能说"第 102 行"—— 那正是要把两行拆开的那一处。
+fn line_of(text: &str, toml_key: &str) -> Option<usize> {
+    text.lines()
+        .position(|l| l.contains(toml_key))
+        .map(|i| i + 1)
+}
+
+/// **实时校验一份还没保存的正文**（2026-10-21，作者：「它是实时的吗？……我希望它
+/// 那种是比较实时的检测」）。编辑框每停一下打一次，红条跟着文字走。
+#[tauri::command]
+pub async fn check_preset_text(
+    app: AppHandle,
+    path: String,
+    text: String,
+) -> Result<PresetTextCheckDto, AppError> {
+    traced("checkPresetText", |_| {
+        let root = internal_root(&app)?;
+        Ok(PresetTextCheckDto {
+            problem: crate::presetdata::patch::toml_problem(&text),
+            missing: missing_params_of(&root, &path, &text),
+        })
+    })
 }
 
 /// **开始改一份用户预设的正文**（预设页「编辑文件」）：把当前字节复制进 AppState 的
@@ -621,7 +687,10 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
             ))
             .with_detail(format!(
                 "缺的是：{} —— 它们被注释掉了或整行不见了（切片时会静默退回默认值）。补回来再存，或按底栏「恢复默认值」退回最初那份。",
-                lost.join("、")
+                lost.iter()
+                    .map(|m| m.label.clone())
+                    .collect::<Vec<_>>()
+                    .join("、")
             )));
         }
         /* ★ 原文镜像：编辑器保存**写盘之前**存 —— 此刻盘上还是原文

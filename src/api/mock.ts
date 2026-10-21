@@ -1758,6 +1758,14 @@ export const mockApi: MkpApi = {
     mockTextDraft = { ...mockTextDraft, text, updatedUnix: nowSec() }
   },
 
+  /**
+   * 实时自检（真机由 Rust 算）：
+   * 浏览器里没有 TOML 解析器，也没有原文镜像 ⇒ 一项都报不出来（如实：不是"检查通过"）。
+   */
+  async checkPresetText() {
+    return { problem: null, missing: [] }
+  },
+
   /** 保存：正文原子写回同一份用户文件，然后丢草稿 + 作废另一侧 */
   async commitTextDraft() {
     if (mockTextDraft === null) throw new Error('现在没有正在改的那一份正文，没得存')

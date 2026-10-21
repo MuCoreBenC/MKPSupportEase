@@ -319,6 +319,14 @@ export interface ReportSnapshot {
   params: Record<string, string>
   /** **IR 终态原样**（内核 `Ir` 的 JSON，PascalCase 键）—— "程序实际认成了什么" */
   ir: Record<string, unknown>
+  /**
+   * **这一份预设里读不出来的参数**（中文名，相对它最初的原文镜像比）。
+   *
+   * 空 = 一项不缺。非空时报告页要说清"这一盘有 N 项用了默认值"—— 缺项不报错，
+   * 但结果一定不是用户想的那样（2026-10-21 作者：「报告页面能看到这些对应的错误」）。
+   * 旧记录没有这个键 ⇒ `undefined` ⇒ 那一行不摆。
+   */
+  missing?: string[]
 }
 
 /** 一条执行记录的详情（展开那一屏） */
@@ -1087,7 +1095,33 @@ export interface PresetTextDraft {
    * TOML 仍然合法，切片时那一项静默退回默认值）。空数组 = 一项都没缺；
    * 没有原文镜像时不检查（不编）。
    */
-  missing: string[]
+  missing: PresetTextMissing[]
+}
+
+/**
+ * 少掉的一项参数（**给用户看的**）。
+ *
+ * `key` 只在排查 / 报告里有意义，界面上说的是 `label` 和"它现在在第几行" ——
+ * 作者 2026-10-21：「用用户的那种面向用户的那种文案口吻去告诉他哪里错了，不要写得这么技术」。
+ */
+export interface PresetTextMissing {
+  /** 参数主键（`wiping.z_calibration_mode`） */
+  key: string
+  /** 中文名（`Z校准模式`） */
+  label: string
+  /**
+   * 这个键在正文里**出现在第几行**（1 起）。粘行时它就在"上一行"里，
+   * 于是界面能说"第 102 行"而不是"某处不见了"。找不到就是 `null`。
+   */
+  line: number | null
+}
+
+/** 一份**还没有保存**的正文的校验结果（编辑器每停一下问一次，红条跟着字走） */
+export interface PresetTextCheck {
+  /** TOML 语法错（`null` = 能解析） */
+  problem: string | null
+  /** 相对最初那份少了哪些参数 */
+  missing: PresetTextMissing[]
 }
 
 /*
@@ -2701,6 +2735,15 @@ export interface MkpApi {
    * （它基于的旧字节已经不在）。
    */
   commitTextDraft(): Promise<CommittedDraft>
+
+  /**
+   * **实时校验一份还没保存的正文**（2026-10-21，作者：「它是实时的吗？……我希望它
+   * 那种是比较实时的检测」）。
+   *
+   * 编辑框每停一下打一次：红条跟着字走 —— 改回合法、把被粘的行拆开，红条立刻消失。
+   * `path` 用来找它最初的原文镜像（缺参数是相对那份比的）。
+   */
+  checkPresetText(path: string, text: string): Promise<PresetTextCheck>
 
   /** 放弃这次编辑：丢掉临时文件。**天然幂等**（有没有草稿都不会报错） */
   discardTextDraft(): Promise<void>

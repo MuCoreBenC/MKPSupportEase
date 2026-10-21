@@ -153,7 +153,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
-import type { ArchivedFile, LocalPresetFile } from '../../api'
+import type { ArchivedFile, LocalPresetFile, PresetTextMissing } from '../../api'
 import { longStatText } from '../store/package'
 /*
  * 这一页那几个框**统一用居中模态框**（作者 2026-10-10：「他全部都用这个右侧的抽屉，
@@ -291,6 +291,17 @@ const REVEAL_LABEL =
  * `Alt+Z`（键帽上印的就是这个），macOS 仍是 `⌥Z`（那边字体有这一格，也是苹果的印法）。
  */
 const WRAP_KEY = detectPlatform() === 'windows' ? 'Alt+Z' : '⌥Z'
+
+/**
+ * 从 `TOML parse error at line 23, column 1` 里挑出**行号**（界面只说"第 23 行附近"）。
+ *
+ * 作者 2026-10-21：「不要写得这么技术」—— 原文一句太长、还带 column / expected，
+ * 塞进 `title` 里留给要排查的人，屏幕上只留行号。
+ */
+function problemLineOf(problem: string): number | null {
+  const m = /line (\d+)/i.exec(problem)
+  return m === null ? null : Number(m[1])
+}
 
 /**
  * 着色 token → 类名。**一处映射**：词法在 `tomlPaint.ts`、颜色在这一页的 CSS，
@@ -662,7 +673,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 与 `problem` 是两件事：语法合法、但某一项被粘进了行尾注释（真机那次
      * `z_calibration_mode` 就是这样）—— 切片时静默退回默认值，不提示就没人发现。
      */
-    missing: string[]
+    missing: PresetTextMissing[]
   } | null>(null)
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
@@ -1669,12 +1680,51 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setEditing((cur) =>
             cur === null
               ? cur
-              : { ...cur, draftError: errorText(e) },
+              : { ...cur, draftError: `草稿没写进去：${errorText(e)}` },
           ),
       )
     }, 700)
     return () => window.clearTimeout(timer)
   }, [data, editing])
+
+  /*
+   * **实时自检**（2026-10-21 作者：「它那个红色也没有立马消失……我希望它那种是
+   * 比较实时的检测」）。正文一变就（防抖 400ms）问后端一次：两条红条跟着字走 ——
+   * 把粘在一起的行拆开，红条当场消失，不用保存、不用重开。
+   *
+   * 与落草稿那条（700ms）分开：红条不该等落盘。
+   * 依赖只写 `editText` / `editPath`（不写 `editing` 整个对象）：否则自己
+   * `setEditing` 出新的 problem 会再把这条 effect 叫一遍，查同一份文本、空转。
+   */
+  const editText = editing === null ? '' : editing.text
+  const editPath = editing === null ? '' : editing.path
+  const checkedSeq = useRef(0)
+  useEffect(() => {
+    if (!editMode || editText === '' || editPath === '') return
+    const seq = (checkedSeq.current += 1)
+    const timer = window.setTimeout(() => {
+      void api.checkPresetText(editPath, editText).then(
+        (res) => {
+          /* 只认最后一次：打字快时前面的请求后到，不许把新结果盖掉 */
+          if (checkedSeq.current !== seq) return
+          setEditing((cur) => {
+            if (cur === null || cur.text !== editText) return cur
+            const same =
+              cur.problem === res.problem &&
+              cur.missing.length === res.missing.length &&
+              cur.missing.every(
+                (m, i) => m.key === res.missing[i].key && m.line === res.missing[i].line,
+              )
+            return same ? cur : { ...cur, problem: res.problem, missing: res.missing }
+          })
+        },
+        () => {
+          /* 查不动就别动红条：保留上一次的结论，比"悄悄清空"诚实 */
+        },
+      )
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [editMode, editPath, editText])
 
   /*
    * 编辑中随时把两份栈镜像进模块级缓存（见 `textHistCache`）——关掉模态框那一下
@@ -1771,12 +1821,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           clearUnsavedNotice()
           setNote({ text: EDIT_TEXT.savedBack(done.fileName, done.path), bad: false })
         },
-        (e: unknown) =>
-          setNote({
-            /* 说清"文件没被动" + 两条自救路（2026-10-21：作者手滑改坏后不知道怎么办） */
-            text: `没存上，文件一个字没动：${errorText(e)}。改回合法 TOML 再存；不想改就按底栏「恢复默认值」退回最初那份，或「放弃并退出」回到上次保存的版本`,
-            bad: true,
-          }),
+        (e: unknown) => {
+          /*
+           * **留在框里说**（2026-10-21 作者：「你在关闭了模态框之后在外面提示是效果最差的」）：
+           * 这句话归这一屏，底栏那行红字就在用户眼睛底下，关掉模态框才出现等于换个地方说。
+           */
+          setEditing((cur) =>
+            cur === null
+              ? cur
+              : { ...cur, draftError: `没存上，文件一个字没动：${errorText(e)}` },
+          )
+        },
       )
   }
 
@@ -3500,10 +3555,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     </button>
                   )}
                   {editing.draftError !== null && (
-                    <span className={s.editorStateBad}>
-                      {EDIT_TEXT.draftFailed}
-                      {editing.draftError}
-                    </span>
+                    <span className={s.editorStateBad}>{editing.draftError}</span>
                   )}
                   <span className={s.editorActs}>
                     {editMode ? (
@@ -3537,7 +3589,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                         >
                           {EDIT_TEXT.exitMode}
                         </button>
-                        <button type="button" className={s.primary} onClick={commitEdit}>
+                        {/* 红条没清掉就不给存（2026-10-21 作者：「甚至都不应该让用户可以保存」） */}
+                        <button
+                          type="button"
+                          className={s.primary}
+                          onClick={commitEdit}
+                          disabled={editing.problem !== null || editing.missing.length > 0}
+                          title={
+                            editing.problem !== null || editing.missing.length > 0
+                              ? '先把红条里那几处改好 —— 现在的正文切不了，或者会丢设置'
+                              : undefined
+                          }
+                        >
                           {EDIT_TEXT.commit}
                         </button>
                       </>
@@ -3586,18 +3649,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  */}
                 {editing.problem !== null && (
                   <div className={s.editProblem} role="alert">
-                    <b>这份文件打开时有语法错</b> —— 切片器在后处理那一步会拒绝它。
-                    <code className={s.editProblemWhy}>{editing.problem}</code>
-                    自己改回来，或按底栏「恢复默认值」退回它最初那份（落盘时存过一份），再按「保存」。
+                    <b>这份文件的写法读不懂</b>
+                    {problemLineOf(editing.problem) !== null &&
+                      `（第 ${problemLineOf(editing.problem)} 行附近）`}
+                    {' '}—— 这样切不了，导出会被拦下。常见原因是引号少了一半、括号没配对，
+                    或者两行被粘到了一起。改对就会消失；改不动就按底栏「恢复默认值」退回它最初那份。
+                    <span className={s.editProblemWhy} title={editing.problem}>
+                      出错细节
+                    </span>
                   </div>
                 )}
                 {/* 读得动、但少了参数（2026-10-21）：粘行会让某一项落进行尾注释，TOML 仍合法 */}
                 {editing.missing.length > 0 && (
                   <div className={s.editProblem} role="alert">
-                    <b>这份文件少了 {editing.missing.length} 项参数</b> ——
-                    切片时会静默退回默认值，导出后你会发现不是你要的那份。
-                    <span className={s.editProblemList}>{editing.missing.join('、')}</span>
-                    多半是被粘进了上一行的注释里或整行不见了：补回来再存，或按底栏「恢复默认值」退回它最初那份。
+                    <b>这份文件少了 {editing.missing.length} 项设置</b> ——
+                    切片时会拿默认值顶上，导出来不是你要的那份。
+                    <span className={s.editProblemList}>
+                      {editing.missing
+                        .map((m) => (m.line === null ? m.label : `${m.label}（第 ${m.line} 行）`))
+                        .join('、')}
+                    </span>
+                    多半是被挤进了上一行的注释里（那行开头的 # 把它整段吃掉了）。
+                    把它单独放回一行，或按底栏「恢复默认值」退回它最初那份。
                   </div>
                 )}
                 {/*

@@ -1081,11 +1081,36 @@ fn archive_success(
      *
      * 读不出来不算错：快照整组不摆，记录其余部分照写（与 `detail.glue/tower` 同一口径）。
      */
-    let preset_params = crate::fsx::paths::internal_root_headless().and_then(|root| {
-        let text = std::fs::read_to_string(&job.toml).ok()?;
-        let catalog = crate::runtime::load_released_catalog(&root).ok()?;
-        crate::presetdata::params::read_param_values(&text, &catalog.registry.params).ok()
-    });
+    let preset_text = std::fs::read_to_string(&job.toml).ok();
+    let preset_catalog = crate::fsx::paths::internal_root_headless()
+        .and_then(|root| crate::runtime::load_released_catalog(&root).ok());
+    let preset_params = preset_text
+        .as_deref()
+        .zip(preset_catalog.as_ref())
+        .and_then(|(text, catalog)| {
+            crate::presetdata::params::read_param_values(text, &catalog.registry.params).ok()
+        });
+
+    /*
+     * **这一份预设里读不出来的参数**（2026-10-21 作者：「报告页面能看到这些对应的错误」）：
+     * 与它最初的原文镜像比，缺的项列出来 —— 缺项不报错，但那一项会退回默认值，
+     * 结果一定不是用户想的那样。读不到镜像 / 不在用户根 ⇒ 空（不编）。
+     */
+    let preset_missing: Vec<String> = (|| {
+        let root = crate::fsx::paths::internal_root_headless()?;
+        let user = crate::fsx::paths::user_root_headless()?;
+        let rel = crate::runtime::usage::key_of_path(&root, &user, &job.toml)?
+            .strip_prefix("local:")
+            .map(str::to_owned)?;
+        let origin = crate::runtime::baseline::read_origin_copy(&root, &rel).ok()??;
+        let catalog = preset_catalog.as_ref()?;
+        let text = preset_text.as_deref()?;
+        let lost =
+            crate::presetdata::params::missing_param_keys(&origin, text, &catalog.registry.params)
+                .ok()?;
+        Some(lost.into_iter().map(|(_, label)| label).collect())
+    })()
+    .unwrap_or_default();
 
     // 报告字段面（`detail.glue/tower/slicer` + `pipeline[].detail`）的素材 ——
     // 全部是已经在手的事实，报告组装只做搬运（见 `archive::ReportFacts`）。
@@ -1093,6 +1118,7 @@ fn archive_success(
     let output_bytes = std::fs::metadata(&done.output_path).map(|m| m.len()).ok();
     let facts = crate::archive::ReportFacts {
         preset_params: preset_params.as_ref(),
+        preset_missing: &preset_missing,
         preset_name: &preset_name,
         input_lines,
         input_bytes: input_size_bytes,

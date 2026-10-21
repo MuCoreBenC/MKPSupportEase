@@ -932,6 +932,17 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
 
   return (
     <div className={s.snap}>
+      {/*
+       * **这一盘有设置没读到**（2026-10-21 作者：「报告页面能看到这些对应的错误」）：
+       * 缺项不报错、切片照跑，但那一项会退回默认值 —— 结果不是用户想的那样，
+       * 所以摆在最上面、用红字，而不是埋在几十行参数里让他自己发现。
+       */}
+      {snap.missing !== undefined && snap.missing.length > 0 && (
+        <p className={s.snapBad} role="alert">
+          这一盘有 {snap.missing.length} 项设置没读到，用的是默认值：
+          {snap.missing.join('、')}
+        </p>
+      )}
       <div className={s.snapTools}>
         <input
           className={s.snapSearch}

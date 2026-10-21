@@ -969,6 +969,18 @@
   color: var(--text-3);
 }
 
+/* 这一盘有设置没读到（用了默认值）：红字，摆在参数快照最上面 */
+.snapBad {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-label);
+  line-height: 1.65;
+}
+
 .snapSec {
   border-top: 1px solid var(--line);
 }
