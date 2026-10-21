@@ -125,10 +125,16 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
 /// 错要犯在编辑这一步，并且把行号说出来。参数页那条链本来就走 `toml_edit`（不合法就改不动），
 /// 这里补的是"整份正文直接落盘"的那条。
 pub fn ensure_toml_parses(text: &str) -> Result<(), AppError> {
-    text.parse::<DocumentMut>().map_err(|e| {
-        AppError::invalid_argument("这份 TOML 有语法错，没有保存").with_detail(e.to_string())
-    })?;
-    Ok(())
+    toml_problem(text).map_or(Ok(()), |why| {
+        Err(AppError::invalid_argument("这份 TOML 有语法错，没有保存").with_detail(why))
+    })
+}
+
+/// 这份正文的语法错（`None` = 能解析）。**只说事实、不改任何东西** ——
+/// 编辑器打开时拿它把"这份文件现在是坏的"提前摆出来（2026-10-21），
+/// 而不是等切片器拉起钩子才报错。
+pub fn toml_problem(text: &str) -> Option<String> {
+    text.parse::<DocumentMut>().err().map(|e| e.to_string())
 }
 
 /// 改一个字段，返回**新的整份正文**。
@@ -218,6 +224,19 @@ custom_mount_gcode = \"\"
 [wiping]
 mode = \"tower\"
 ";
+
+    /// **打开时的语法自检**（2026-10-21）：坏在哪儿要说得出（带行号），好的不吭声。
+    ///
+    /// 这条钉的是"用户手滑敲坏之后，打开编辑器当场就知道"那条路 ——
+    /// 以前只有切片器拉起钩子时才炸，用户既不知道原因、也不知道错在第几行。
+    #[test]
+    fn toml_problem_says_where_and_stays_quiet_when_fine() {
+        assert!(toml_problem(DOC).is_none(), "合法正文不该报错");
+
+        /* 未闭合的三引号：真机上把 `"""` 敲掉一半就是这个样子 */
+        let why = toml_problem("[toolhead]\nbad = \"\"\"\nM106 S[AUTO]\n").expect("该报错");
+        assert!(why.contains("line"), "要带行号：{why}");
+    }
 
     /// **保真**：换了值，注释 / 键序 / 其它行一个字节不动。
     #[test]

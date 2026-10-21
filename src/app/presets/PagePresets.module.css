@@ -688,8 +688,8 @@
   padding: 14px 16px calc(14px + var(--scrollbar-pad, 0px)) 62px;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--fs-label);
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
   line-height: 1.7;
   /*
    * ★★ **不折行**（2026-10-16 作者，小窗口截图：「它换行了，我感觉它不像注释的感觉」）：
@@ -834,8 +834,9 @@
 
 .editNumsInner {
   margin: 0;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: var(--fs-label);
+  /* 字族 / 字号 / 行高与正文那两层**必须同一个变量**（差一点，第 1 行就错位） */
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
   line-height: 1.7;
   color: var(--text-3);
   text-align: right;
@@ -975,30 +976,38 @@
 
 /* ---------- 着色 token（`tomlPaint.ts` 的那几种） ---------- */
 
+/*
+ * ★★ 2026-10-21：颜色全部改成 `--code-*` 变量（深浅两套各一档），注释**去掉斜体**。
+ *
+ * 作者当时的原话是「这个注释啊，这些字啊，看不清，你需要做成那种好看一点的字」。
+ * 这里原来有三条合起来让注释糊成一片：`--text-3`（深色 #8f949b 已经是"三级字"那档）+
+ * `font-style: italic` + 10~12.5px 的标签字号。斜体对拉丁文是"注释感"，对中文只是
+ * **把汉字压扁**（Windows 上是合成斜体，笔画互相蹭），小字号下最难读的正是它。
+ * ⇒ 注释靠颜色区分就够了：不斜、用 `--code-comment`（比三级字实一点），字号见 `--fs-code`。
+ */
 .tCmt {
-  color: var(--text-3);
-  font-style: italic;
+  color: var(--code-comment);
 }
 
 .tTable {
   font-weight: 600;
-  color: #7c4dff;
+  color: var(--code-table);
 }
 
 .tKey {
-  color: #2f74dd;
+  color: var(--code-key);
 }
 
 .tStr {
-  color: #17924a;
+  color: var(--code-str);
 }
 
 .tNum {
-  color: #b5651d;
+  color: var(--code-num);
 }
 
 .tBool {
-  color: #7c4dff;
+  color: var(--code-bool);
 }
 
 .tPunct {
@@ -1277,3 +1286,37 @@
  * 机型筛选搬进筛选区之后，第一排只剩 类型 / 位置(右) / 搜索，与 MKP 档一模一样，
  * 搜索不再被挤到下一排，也就没有需要 order 去搬的东西。
  */
+
+/* ---------- 「这份文件现在有语法错」那条（2026-10-21） ---------- */
+
+/*
+ * 编辑框顶上那一块：红底 + 一行说清"错在哪、怎么退回去"。
+ * 以前这个错只在切片器拉起钩子时才炸出来，用户既不知道是我敲坏的、
+ * 也不知道错在第几行 —— 这里当场说，并指路底栏那颗「恢复默认值」。
+ */
+.editProblem {
+  flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin-bottom: 8px;
+  padding: 9px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-label);
+  line-height: 1.65;
+}
+
+.editProblemWhy {
+  margin: 0 2px;
+  padding: 1px 6px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.95);
+  overflow-wrap: anywhere;
+}

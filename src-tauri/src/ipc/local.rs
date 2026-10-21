@@ -359,6 +359,12 @@ pub struct PresetTextDraftDto {
     /// 界面拿它决定"重开时要不要直接进编辑模式 + 提醒还没保存"；
     /// **比不了（读不出来）时保守算脏** —— 宁可多提醒一句，不要漏报。
     pub dirty: bool,
+    /// **这份正文现在的 TOML 语法错**（`None` = 能解析，2026-10-21）。
+    ///
+    /// 为什么放在"打开"这一刻：用户手滑敲坏一个键名后完全无感，直到切片器拉起钩子
+    /// 才报"预设解析失败"，而那时离错误已经几分钟、也看不出是哪一行。
+    /// 打开编辑器就把它摆出来（含行号），再指路「恢复默认值」（退回最初那份）。
+    pub problem: Option<String>,
 }
 
 /// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
@@ -510,6 +516,7 @@ pub async fn begin_text_edit(
                 let dirty = runtime::local::read_preset_text(&user_root, &path)
                     .map(|raw| raw != draft.text)
                     .unwrap_or(true);
+                let problem = crate::presetdata::patch::toml_problem(&draft.text);
                 return Ok(PresetTextDraftDto {
                     file_name: draft.file_name,
                     path: draft.path,
@@ -517,6 +524,7 @@ pub async fn begin_text_edit(
                     updated_unix: draft.updated_unix,
                     reused: true,
                     dirty,
+                    problem,
                 });
             }
         }
@@ -525,6 +533,7 @@ pub async fn begin_text_edit(
         let raw = runtime::local::read_preset_text(&user_root, &path)?;
         let draft = runtime::app_state::set_text_draft(&root, &file_name, &path, &raw)?;
         super::notify_app_state(&app);
+        let problem = crate::presetdata::patch::toml_problem(&draft.text);
         Ok(PresetTextDraftDto {
             file_name: draft.file_name,
             path: draft.path,
@@ -533,6 +542,7 @@ pub async fn begin_text_edit(
             reused: false,
             /* 新建的草稿 = 盘上字节本身，不脏 */
             dirty: false,
+            problem,
         })
     })
 }

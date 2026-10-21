@@ -621,6 +621,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     path: string
     text: string
     draftError: string | null
+    /**
+     * **这份正文现在的 TOML 语法错**（2026-10-21，`null` = 能解析）。
+     *
+     * 打开那一刻后端校一遍：手滑敲坏一个键名时，用户在这里**当场**看见"第几行错了"，
+     * 而不是等切片器拉起钩子才收到一句"预设解析失败"。文案指路「恢复默认值」。
+     */
+    problem: string | null
   } | null>(null)
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
@@ -896,6 +903,35 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     () => (editing === null ? 0 : splitHeader(editing.text).head.length),
     [editing],
   )
+
+  /*
+   * **进编辑模式那一下，光标落在正文开头**（2026-10-21 作者：「我编辑它的这个前端看着
+   * 没有任何反应……我只看到我的输入的光标在动，但是那些文字内容完全没动」）。
+   *
+   * 根因：`<textarea autoFocus>` 把 caret 放在索引 0，而索引 0 正落在**锁住的文件头**里
+   * （`splitHeader` 把开头那连续几行注释整段算头，几百个字符）。于是进了编辑模式以后
+   * 第一下打字 / Backspace 全被 `headLockedAt` 挡掉 —— 屏幕上只剩一个在闪的光标，
+   * 字一个不出来，看着就是"编辑器坏了"。
+   * 头是程序写的、用户永远不该在这儿改，那 cursor 就不该停在那儿：直接放到正文第一行，
+   * 并把这一段滚进视野（头长的时候正文本来还在视野外）。
+   */
+  const editAreaOpen = editMode && editing !== null
+  useEffect(() => {
+    if (!editAreaOpen) return
+    const el = areaRef.current
+    if (el === null) return
+    const { head } = splitHeader(el.value)
+    const at = head.length
+    el.focus()
+    el.setSelectionRange(at, at)
+    /*
+     * caret 设完浏览器不保证跟着滚（头很长时正文还在视野外）—— 按行高自己搬一次。
+     * `scrollTop` 一改就派发 `scroll`，`onScroll` 那条链照旧把着色层与行号带上。
+     */
+    const lh = Number.parseFloat(window.getComputedStyle(el).lineHeight)
+    const lines = head === '' ? 0 : head.split('\n').length - 1
+    if (Number.isFinite(lh) && lh > 0 && lines > 0) el.scrollTop = lines * lh
+  }, [editAreaOpen])
 
   /**
    * **这次动作会不会动到文件头**（`from` = 这次要改写的区间在正文里的起点）——
@@ -1514,6 +1550,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           path: draft.path,
           text: draft.text,
           draftError: null,
+          /* 打开时后端已经校过一遍（`PresetTextDraft.problem`）—— 坏文件当场就得说 */
+          problem: draft.problem,
         })
         /* 「恢复默认值」的原文预读（读到什么算什么；读不到 = 按钮禁用） */
         data.readLocalOriginText(draft.path).then(
@@ -1674,7 +1712,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         },
         (e: unknown) =>
           setNote({
-            text: `没存上：${errorText(e)}`,
+            /* 说清"文件没被动" + 两条自救路（2026-10-21：作者手滑改坏后不知道怎么办） */
+            text: `没存上，文件一个字没动：${errorText(e)}。改回合法 TOML 再存；不想改就按底栏「恢复默认值」退回最初那份，或「放弃并退出」回到上次保存的版本`,
             bad: true,
           }),
       )
@@ -3387,7 +3426,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                       }
                       onClick={() => {
                         if (originText === null) return
-                        setEditing((cur) => (cur === null ? cur : { ...cur, text: originText }))
+                        /* 换回合法正文 ⇒ 顶上那条"有语法错"跟着收掉（`problem: null`） */
+                        setEditing((cur) =>
+                          cur === null ? cur : { ...cur, text: originText, problem: null },
+                        )
                         setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
                       }}
                     >
@@ -3465,6 +3507,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                */
               <div className={s.editWrap}>
                 {/*
+                 * **这份文件现在是坏的**（2026-10-21）：打开那一刻后端就校过 TOML。
+                 * 以前它只在切片器拉起钩子时才炸（"预设解析失败"），用户既不知道是我
+                 * 随手敲坏的、也不知道错在哪一行 —— 这里当场说清并指路。
+                 */}
+                {editing.problem !== null && (
+                  <div className={s.editProblem} role="alert">
+                    <b>这份文件打开时有语法错</b> —— 切片器在后处理那一步会拒绝它。
+                    <code className={s.editProblemWhy}>{editing.problem}</code>
+                    自己改回来，或按底栏「恢复默认值」退回它最初那份（落盘时存过一份），再按「保存」。
+                  </div>
+                )}
+                {/*
                  * 正文那块 = **一个面板**（`.editBody`）：里面是绝对定位铺满的着色层 + textarea，
                  * 以及**左边那一列行号**（`.editNumsGutter`，也是绝对定位的一条刻度）。
                  *
@@ -3521,7 +3575,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     value={editing.text}
                     spellCheck={false}
                     aria-label="预设正文"
-                    autoFocus
+                    /*
+                     * **不写 `autoFocus`**（2026-10-21）：它把 caret 钉在索引 0，也就是
+                     * 锁住的文件头里 —— 进编辑模式后第一下打字全被挡掉。聚焦与落点
+                     * 统一由上面那个 effect 管（放正文第一行）。
+                     */
                     /*
                      * ★ `wrap="off"` = **不软折行**（与那两层 CSS 的 `white-space: pre` 是一件事）。
                      * 只写 CSS 也能让 Chrome/Safari 不折，但 `wrap` 属性才是这条规矩的本源
@@ -3557,6 +3615,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     onCut={(e) => {
                       const el = e.currentTarget
                       headLockedAt(e, Math.min(el.selectionStart, el.selectionEnd))
+                    }}
+                    /*
+                     * **输入法合成那条路也要挡**。`keydown` 挡不住它：中文合成时
+                     * `e.key` 是 `'Process'`（长度不是 1），压根进不了上面那三个分支；
+                     * 不挡就是"字先进去、再被 `keepHead` 原样塞回去"—— 用户看到闪一下又没了。
+                     * `beforeinput` 是合成落到 DOM 之前的最后一次机会（keydown 已
+                     * `preventDefault` 的那些走不到这里，不会重复说一句）。
+                     */
+                    onBeforeInput={(e) => {
+                      const el = e.currentTarget
+                      const a = Math.min(el.selectionStart, el.selectionEnd)
+                      const type = (e.nativeEvent as InputEvent).inputType ?? ''
+                      const from =
+                        type.startsWith('delete') && el.selectionStart === el.selectionEnd ? a - 1 : a
+                      headLockedAt(e, from)
                     }}
                     onChange={(e) => {
                       /* 用户敲的（不是撤销/重做造的）—— 下一拍落盘要进撤销栈 */
