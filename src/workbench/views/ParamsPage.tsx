@@ -692,12 +692,20 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
    * 多套方案（2026-10-21）：同上，判据全在注册表里，这里不认硬编码 key ——
    * `slotOf === 卡片 key` 的是组员，`uiComponent === 'select'` 的那条记「当前用哪套」。
    * 槽 1 是卡片自己（老字段），所以总在第一位。
+   *
+   * 这张表只回答两件事：**这一族有哪几套**、**当前选的是哪一套**。
+   * 它**不决定编辑哪一条** —— 从哪一行点开的就编辑哪一行（见 `gcodeKey`）：
+   * 点「方案 2」却写进「当前选中的方案 3」是另一件事（2026-10-21 修的那条）。
    */
   const gcodeSlot = useMemo(() => {
     if (gcodeOpen === null) return null
     const all = registry?.params ?? []
-    const base = all.find((p) => p.key === gcodeOpen.key)
-    const group = all.filter((p) => p.slotOf === gcodeOpen.key)
+    const self = all.find((p) => p.key === gcodeOpen.key)
+    if (self === undefined) return null
+    /* 槽位 1 的 `slotOf` 是空的（它就是那张卡自己），别家的 `slotOf` 指着卡 */
+    const ownerKey = self.slotOf !== '' ? self.slotOf : self.key
+    const base = all.find((p) => p.key === ownerKey)
+    const group = all.filter((p) => p.slotOf === ownerKey)
     if (base === undefined || group.length === 0) return null
     const selector = group.find((p) => p.uiComponent === 'select')
     if (selector === undefined) return null
@@ -719,11 +727,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     }))
     /* 空 / 越界 → 槽 1，与 `crates/preset/src/build.rs::resolve_gcode_slot` 同一口径 */
     const picked = options.find((o) => o.position === raw) ?? options[0]
-    return { options, activeKey: picked.key, selectorKey: selector.key, activePosition: picked.position }
+    return { options, selectorKey: selector.key, activePosition: picked.position }
   }, [gcodeOpen, registry, gcodeRowOf, mode, shownDesk, matrixOv])
 
-  /** 模态框读写落在哪条参数上：多套方案时是当前槽位 */
-  const gcodeKey = gcodeSlot?.activeKey ?? gcodeOpen?.key ?? ''
+  /**
+   * 模态框读写落在哪条参数上：**就是点开的那一条**（含槽位 2 / 3 与槽位 1）。
+   *
+   * 以前这里是 `gcodeSlot.activeKey` —— 于是点「方案 2」弹出来的却是「当前选中的方案 3」。
+   * 卡片上那枚 ↻ 按钮（点的是卡本身 = 槽位 1）同理：它编辑的是槽位 1，
+   * 至于现在到底用哪套，由下面那条「当前使用」的参数说，不靠改写这一格来表达。
+   */
+  const gcodeKey = gcodeOpen?.key ?? ''
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeKey) ?? null) : null
@@ -1744,22 +1758,37 @@ function ParamLine({
           onOpenGcode={() => onOpenGcode(row.key)}
         />
       </span>
-      {cell.editable ? (
-        <StatusTag cell={cell} words={words} />
-      ) : dep ? (
-        /* 「已弃用」借用状态徽章那副长相 —— 与「出厂默认 / 机型默认 / 本版修改 /
-           已修改」占同一列，行尾的竖线不会因为它参差 */
-        <span
-          className={`${s.pStatus} ${s.pStatusDep}`}
-          title={words.paramDeprecated.explain ?? undefined}
-        >
-          {words.paramDeprecated.label}
-        </span>
-      ) : (
-        <span className={s.pRowBlock} title={cell.blockedNote ?? undefined}>
-          {cell.blockedHint ?? words.placeholder.notApplicable}
-        </span>
-      )}
+      <span className={s.pRowTags}>
+        {/*
+          多套方案的槽位（2026-10-21）：这一行是某张 gcode 卡里的第 2/3 套方案。
+          **与状态徽章并排**而不是顶替它 —— 「已修改」说的是「手上还没交出去」，
+          那是最要紧的一条，不能因为这一行是槽位就看不见了。
+        */}
+        {row.slot && !dep && (
+          <span
+            className={`${s.pStatus} ${s.pStatusSlot}`}
+            title={words.paramSlot.explain ?? undefined}
+          >
+            {words.paramSlot.label}
+          </span>
+        )}
+        {cell.editable ? (
+          <StatusTag cell={cell} words={words} />
+        ) : dep ? (
+          /* 「已弃用」借用状态徽章那副长相 —— 与「出厂默认 / 机型默认 / 本版修改 /
+             已修改」占同一列，行尾的竖线不会因为它参差 */
+          <span
+            className={`${s.pStatus} ${s.pStatusDep}`}
+            title={words.paramDeprecated.explain ?? undefined}
+          >
+            {words.paramDeprecated.label}
+          </span>
+        ) : (
+          <span className={s.pRowBlock} title={cell.blockedNote ?? undefined}>
+            {cell.blockedHint ?? words.placeholder.notApplicable}
+          </span>
+        )}
+      </span>
     </div>
   )
 }

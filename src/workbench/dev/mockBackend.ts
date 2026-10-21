@@ -142,6 +142,10 @@ const WORDS: Json = {
     label: '已弃用',
     explain: '这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西',
   },
+  paramSlot: {
+    label: '槽位',
+    explain: '这是某张 G-code 卡里的一套方案 —— 哪一套进产物，由同组的「当前使用的…」那一行决定',
+  },
   matrixRow: {
     notOwn: { label: '本机无此项', explain: '这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比' },
     diff: { label: '差异', explain: '有勾选列的值与机型基底不同 —— 绿底的那几格就是' },
@@ -1156,6 +1160,8 @@ function rowOf(machineId: string, uid: string | null, pdef: FixtureParam): Json 
     controlNote: pdef.showWhen ? `受「${PARAMS.find((x) => x.key === pdef.showWhen?.key)?.label}」控制` : null,
     gcode: pdef.uiComponent === 'gcode',
     deprecated: pdef.deprecated,
+    /* 夹具里没有多套方案（`slotOf` 是后加的那一列），所以这里恒 false —— 形状要对齐 */
+    slot: false,
     impact: impactOf(machineId, uid, pdef.key),
     cells: [null, 'A1/STANDARD', 'A1/FAST'].map((u) => cellOf(machineId, u, pdef)),
   }

@@ -1,6 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "058664894806b5e0",
+  "revision": "0ffefc3346beba7e",
+  "dataVersion": 6,
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1114,7 +1115,7 @@
         "configKey": "MountGcodeActive",
         "tomlKey": "mount_gcode_active",
         "jsonKey": "mount_gcode_active",
-        "label": "装载胶箱当前方案",
+        "label": "当前使用的装载方案",
         "desc": "导出时实际使用哪一套装载方案（1=现状 2=稳 3=标准）",
         "tomlComment": "当前生效的装载方案(1=现状 2=稳 3=标准)",
         "valueType": "string",
@@ -1132,7 +1133,23 @@
         "unit": null,
         "parentKey": null,
         "showWhen": null,
-        "choices": [],
+        "choices": [
+          {
+            "label": "方案 1（现状）",
+            "value": "1",
+            "deprecated": false
+          },
+          {
+            "label": "方案 2（稳）",
+            "value": "2",
+            "deprecated": false
+          },
+          {
+            "label": "方案 3（标准）",
+            "value": "3",
+            "deprecated": false
+          }
+        ],
         "variantMode": "per_variant",
         "machineFilter": [
           "A1",
@@ -1308,7 +1325,7 @@
         "configKey": "UnmountGcodeActive",
         "tomlKey": "unmount_gcode_active",
         "jsonKey": "unmount_gcode_active",
-        "label": "卸载胶箱当前方案",
+        "label": "当前使用的卸载方案",
         "desc": "导出时实际使用哪一套卸载方案（1=现状 2=稳 3=标准）",
         "tomlComment": "当前生效的卸载方案(1=现状 2=稳 3=标准)",
         "valueType": "string",
@@ -1326,7 +1343,23 @@
         "unit": null,
         "parentKey": null,
         "showWhen": null,
-        "choices": [],
+        "choices": [
+          {
+            "label": "方案 1（现状）",
+            "value": "1",
+            "deprecated": false
+          },
+          {
+            "label": "方案 2（稳）",
+            "value": "2",
+            "deprecated": false
+          },
+          {
+            "label": "方案 3（标准）",
+            "value": "3",
+            "deprecated": false
+          }
+        ],
         "variantMode": "per_variant",
         "machineFilter": [
           "A1",

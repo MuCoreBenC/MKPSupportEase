@@ -3686,6 +3686,31 @@
   border-color: var(--dep-red-line);
 }
 
+/*
+ * 行尾那一列可能同时挂两枚（「槽位」+ 状态徽章），所以外面再包一层。
+ * `flex: none` + `gap: 4px`：不与名字抢宽度，两枚之间的缝比行内主间距（10px）窄一档，
+ * 读起来是「一组」而不是「两列」。
+ */
+.pRowTags {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
+}
+
+/*
+ * 「槽位」（多套方案，2026-10-21）：与 `.pStatusDep` 同一副骨架，只换一身主色 ——
+ * 它说的不是「坏了 / 别动」，是「这一行属于哪一类」。**两字宽**（不走 `.pStatus`
+ * 那条四字地板）：它常常与状态徽章并排，占满四字会把名字挤走。
+ */
+.pStatusSlot {
+  min-width: 0;
+  padding: 0 5px;
+  color: var(--wb-primary-deep);
+  background: var(--wb-primary-soft);
+  border-color: var(--wb-primary-line);
+}
+
 /* 抽屉头 h3 上那条线 */
 .pDHeadT h3[data-dep] {
   color: var(--text-3);

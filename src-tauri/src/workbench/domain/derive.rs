@@ -558,17 +558,15 @@ impl<'a> Book<'a> {
 
         // 行取并集：任意一列的机型有这个字段，这一行就在。
         // **走 `desk_keys` 不走 `visible_keys`**：这一屏是给人看的，弃用的参数
-        // 要划线 + 禁用地摆着（C14 §五），不进产物是生成侧（`visible_keys`）的事
+        // 要划线 + 禁用地摆着（C14 §五），不进产物是生成侧（`visible_keys`）的事。
+        //
+        // 多套方案的槽位 / 选择器**也是行**（2026-10-21 修）：左栏「切换 N」的 N 来自
+        // `desk_nav` 的同一条 `desk_keys`，行表少一行、数字就多一个 —— 界面上是
+        // 「切换 8」点进去只有 2 行。它们由 `Row.slot` 标出来、行名用槽位名，
+        // 不再靠"藏起来"表达「这是同一张卡里的几套方案」
         let mut keys: Vec<&str> = Vec::new();
         for c in &cols {
             for k in self.presets.registry.desk_keys(&c.machine_id) {
-                /*
-                 * 多套方案的槽位 / 选择器**不成行**（2026-10-21）：它们是 gcode 卡
-                 * 标题栏那条下拉的背后数据。留在注册表里（编辑要用），但不进这张行表。
-                 */
-                if self.presets.registry.is_hidden(k) {
-                    continue;
-                }
                 if !keys.contains(&k) {
                     keys.push(k);
                 }
@@ -667,7 +665,13 @@ impl<'a> Book<'a> {
 
             rows.push(Row {
                 key: key.to_owned(),
-                label: p.label.clone(),
+                // 槽位行（多套方案的第 2/3 套）用槽位名（「方案 2（稳）」）：
+                // 卡片自己的名字是「装载胶箱 G-code」，三行长得一样的话分不出谁是谁
+                label: if p.slot_of.is_empty() || p.slot_label.is_empty() {
+                    p.label.clone()
+                } else {
+                    p.slot_label.clone()
+                },
                 desc: p.desc.clone(),
                 unit: p.unit.clone(),
                 section_id: p.layout.section_id.clone(),
@@ -681,6 +685,9 @@ impl<'a> Book<'a> {
                 control_note: self.control_note(p),
                 gcode: w::is_gcode(p),
                 deprecated: p.deprecated,
+                // 「这是某张 gcode 卡里的一套方案」—— 界面据此给一枚「槽位」徽章。
+                // 选择器（「当前使用」）的 `slot_of` 是空的，所以它不是槽位行
+                slot: !p.slot_of.is_empty(),
                 // 矩阵的行跨多台机型，「改了影响谁」不知道该答哪一台 —— 那是
                 // 配方台（desk）的事，那边填 [`DeskImpact`]
                 impact: None,
@@ -1484,6 +1491,12 @@ pub struct Row {
     /// G-code 行**拒绝批量**（doc §8.4）
     pub gcode: bool,
     pub deprecated: bool,
+    /// **多套方案的槽位**（`slotOf` 非空）—— 这一行是某张 gcode 卡里的第 2/3 套方案。
+    ///
+    /// 它照常占一行（页签上的条数也把它算进去了），但界面要标出来：
+    /// 行名是槽位名（「方案 2（稳）」），值是一段完整 G-code，改它改的就是那一套。
+    /// 「当前用哪套」那条选择器**不是**槽位（它的 `slotOf` 为空）
+    pub slot: bool,
     /// 「改了影响谁」（C14 抽屉的作用域栏）。**配方台逐行填**；矩阵的行跨多台
     /// 机型、答不出「哪一台」，是 `None`
     pub impact: Option<DeskImpact>,
@@ -1658,6 +1671,117 @@ mod tests {
                 version_uid: v.map(str::to_owned),
             })
             .collect()
+    }
+
+    /* ---------- 真源（`<repo>/presets`）上的判据 ---------- */
+
+    /// 真 `presets.catalog` → [`Committed.catalog`] 的形状。
+    /// 与 `app::storage::load` 同一步转换 —— 这里只需要清单，值都在注册表里
+    fn real_catalog(p: &Presets) -> Vec<CatalogMachine> {
+        p.catalog
+            .machines()
+            .iter()
+            .map(|m| CatalogMachine {
+                id: m.id.clone(),
+                display: m.display.clone(),
+                icon: m.icon.clone(),
+                default_bundle: m.default_bundle.clone(),
+                has_dimensions: m.has_dimensions,
+                version_ids: m.versions.iter().map(|v| v.id.clone()).collect(),
+            })
+            .collect()
+    }
+
+    /// **页签上写的条数 == 这个页签真渲染出来的行数**（2026-10-21）。
+    ///
+    /// 事故形状：左栏写「切换 8」，点进去只有 2 行 —— 计数从 `desk_keys` 数，
+    /// 行表里却把 6 个「多套方案的槽位 / 选择器」滤掉了。数字对不上时改的是
+    /// **行为什么没了**，不许把数字改小来掩盖。
+    #[test]
+    fn switch_tab_count_equals_rendered_rows() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let presets = Presets::load_from(&root).expect("真 presets 必须读得通");
+        let committed = Committed {
+            catalog: real_catalog(&presets),
+            ..Default::default()
+        };
+        let draft = Draft::default();
+        let b = Book::new(&presets, &committed, &draft);
+
+        let mut checked = 0usize;
+        for m in b.machines().to_vec() {
+            let nav = b.desk(&m.id, None, None, "").nav;
+            for t in nav {
+                let desk = b.desk(&m.id, None, Some(t.id.as_str()), "");
+                let rows: usize = desk
+                    .groups
+                    .iter()
+                    .map(|g| g.items.iter().map(|i| 1 + i.children.len()).sum::<usize>())
+                    .sum();
+                assert_eq!(
+                    rows, t.count,
+                    "{}({}) 的页签「{}」写着 {} 条，实际渲染 {} 条 —— \
+                     计数与行表读的不是同一份键，或者有键被滤掉了",
+                    m.id, m.display, t.label, t.count, rows
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "一个页签都没比到，这条判据等于没跑");
+    }
+
+    /// 多套方案的槽位**占行**、行名用槽位名；「当前使用」那条选择器也在行表里 ——
+    /// 它正是行上那个下拉（值 1/2/3），不是另一张卡
+    #[test]
+    fn slot_rows_carry_their_slot_label() {
+        let Some(root) = crate::workbench::paths::presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let presets = Presets::load_from(&root).expect("真 presets 必须读得通");
+        let committed = Committed {
+            catalog: real_catalog(&presets),
+            ..Default::default()
+        };
+        let draft = Draft::default();
+        let b = Book::new(&presets, &committed, &draft);
+
+        let desk = b.desk("A1", None, None, "");
+        let row = |key: &str| {
+            desk.groups
+                .iter()
+                .flat_map(|g| g.items.iter())
+                .flat_map(|i| std::iter::once(&i.row).chain(i.children.iter()))
+                .find(|r| r.key == key)
+                .unwrap_or_else(|| panic!("{key} 不在 A1 的行表里"))
+        };
+
+        let slot2 = row("toolhead.custom_mount_gcode_2");
+        assert_eq!(slot2.label, "方案 2（稳）", "行名要用槽位名，不是定义名");
+        assert!(slot2.slot, "「方案 2」是槽位，界面要标出来");
+        assert_eq!(slot2.section_id, "custom_gcode", "仍归自定义 G-code 分组");
+        let slot3 = row("toolhead.custom_mount_gcode_3");
+        assert_eq!(slot3.label, "方案 3（标准）");
+        assert!(slot3.slot);
+
+        let card = row("toolhead.custom_mount_gcode");
+        assert!(
+            !card.slot,
+            "槽位 1 就是这张卡自己（原始字段），不算「另一套」"
+        );
+        assert_eq!(card.label, "装载胶箱 G-code");
+
+        let sel = row("toolhead.mount_gcode_active");
+        assert!(!sel.slot, "「当前使用」是选择器，不是槽位");
+        assert_eq!(sel.label, "当前使用的装载方案");
+        assert_eq!(
+            sel.cells[desk.cur].kind,
+            CellKind::Value,
+            "它是一条普通参数（值是 1/2/3），行上就是一个下拉"
+        );
     }
 
     /* ---------- 整本 ---------- */

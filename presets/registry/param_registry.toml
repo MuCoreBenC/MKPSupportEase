@@ -334,7 +334,7 @@ order = 0.7
 
 [[params]]
 key = 'toolhead.mount_gcode_active'
-label = '装载胶箱当前方案'
+label = '当前使用的装载方案'
 desc = '导出时实际使用哪一套装载方案（1=现状 2=稳 3=标准）'
 tomlKey = 'mount_gcode_active'
 valueType = 'string'
@@ -350,6 +350,21 @@ variantMode = 'per_variant'
 machineFilter = 'A1,A1_MINI'
 hidden = true
 tomlComment = '当前生效的装载方案(1=现状 2=稳 3=标准)'
+
+# 取值域就是「三套方案」的序号 —— 有 choices 才会被画成下拉（`CellEditor` 的判据），
+# 否则这条 `select` 会落回一个文本框。值是字符串（'1'），与 `resolve_gcode_slot` 同口径。
+# **放在标量键之后**：TOML 里 `[[params.choices]]` 一开，后面写的键就归进那张子表了
+[[params.choices]]
+value = '1'
+label = '方案 1（现状）'
+
+[[params.choices]]
+value = '2'
+label = '方案 2（稳）'
+
+[[params.choices]]
+value = '3'
+label = '方案 3（标准）'
 
 [params.machineVariants]
 'A1:FAST' = '1'
@@ -466,7 +481,7 @@ order = 1.2
 
 [[params]]
 key = 'toolhead.unmount_gcode_active'
-label = '卸载胶箱当前方案'
+label = '当前使用的卸载方案'
 desc = '导出时实际使用哪一套卸载方案（1=现状 2=稳 3=标准）'
 tomlKey = 'unmount_gcode_active'
 valueType = 'string'
@@ -482,6 +497,19 @@ variantMode = 'per_variant'
 machineFilter = 'A1,A1_MINI'
 hidden = true
 tomlComment = '当前生效的卸载方案(1=现状 2=稳 3=标准)'
+
+# 同「当前使用的装载方案」：三套方案的序号，有 choices 才是下拉
+[[params.choices]]
+value = '1'
+label = '方案 1（现状）'
+
+[[params.choices]]
+value = '2'
+label = '方案 2（稳）'
+
+[[params.choices]]
+value = '3'
+label = '方案 3（标准）'
 
 [params.machineVariants]
 'A1:FAST' = '1'

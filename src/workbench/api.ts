@@ -417,6 +417,12 @@ export interface Row {
   gcode: boolean
   deprecated: boolean
   /**
+   * **多套方案的槽位**（`slotOf` 非空）：这一行是某张 gcode 卡里的第 2/3 套方案。
+   * 行名已是槽位名（「方案 2（稳）」），行尾给一枚「槽位」徽章。
+   * 「当前使用」那条选择器不是槽位（它的 `slotOf` 为空）
+   */
+  slot: boolean
+  /**
    * 「改了影响谁」（C14 抽屉的作用域栏）。**配方台逐行给**；
    * 矩阵的行跨多台机型、答不出「哪一台」，是 null
    */
@@ -1356,6 +1362,8 @@ export interface Words {
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
   paramDeprecatedChoice: Word
+  /** 「槽位」那一枚：多套方案里的一行（`Row.slot`） */
+  paramSlot: Word
   /** 对照矩阵状态列三档（C14 第四轮） */
   matrixRow: Record<'notOwn' | 'diff' | 'same', Word>
 }

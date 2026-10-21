@@ -591,15 +591,6 @@ impl ParamRegistry {
         &self.params
     }
 
-    /// 这一条是不是「藏在背后」的参数（多套方案的槽位 / 选择器）。
-    ///
-    /// 它们照常留在 [`params`](Self::params) 里（槽位要能被编辑、选择器要能被写），
-    /// 但**不进工作台的行表** —— 界面上它们的形态是 gcode 卡标题栏里的一条下拉，
-    /// 不是六行独立的参数。未知 key 一律返回 false（视作普通参数）。
-    pub fn is_hidden(&self, key: &str) -> bool {
-        self.index.get(key).is_some_and(|i| self.params[*i].hidden)
-    }
-
     /// **这个版本有没有自己的参数正文**（b05 Task 14.4 / doc §4.3 第 6 步）。
     ///
     /// 判据：`machineVariants` 里存在 `{机型}:{版本}` 形状的键。

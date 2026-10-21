@@ -62,6 +62,20 @@ pub struct Catalog {
     /// 界面对那种目录照实说「未知」
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published_at: Option<String>,
+    /// 数据版本：**单调的整数**，由**应用版本号**算出来（`0.0.6` → `6`，`1.2.3` → `1002003`）。
+    ///
+    /// 启动时拿它比大小，决定「随包这份」要不要盖掉「盘上那份」（见
+    /// [`crate::runtime::release::ensure_released`]）。三条都是刻意的：
+    ///
+    /// - **不是构建时刻**：`embedded_matches_rebuild` 要求「重新构建的字节与嵌进二进制的
+    ///   那份逐字节一致」，取 `now()` 会让那条判据永远红；而且每次编译都跳一版，
+    ///   白白触发一次升级 + 归档。
+    /// - **不是内容指纹**：`revision` 干那件事（相等 = 内容一样），但指纹不可比大小。
+    /// - **不靠手填**：发版时本来就要动 `tauri.conf.json` 的 `version`，构建期读它就够。
+    ///
+    /// 缺省 0 = 版本化之前的老文件，判为「更旧」⇒ 会被升级（正是想要的，无需迁移代码）。
+    #[serde(default)]
+    pub data_version: u64,
     /// 品牌清单（机型文件里写的是 id，给人看的名字在这里）
     #[serde(default)]
     pub brands: Vec<crate::presetdata::Brand>,
@@ -596,6 +610,9 @@ impl Catalog {
                 revision: String::new(),
                 // 发布时刻只归发布侧盖 —— 构建出来的目录（随包 / 预检）一律不带
                 published_at: None,
+                // 与 `structure_signature` 一样由 `finalize` 收口：那里从
+                // `tauri.conf.json` 读出版本号算出来，**不在这里另算一遍**
+                data_version: 0,
                 brands: presets.catalog.brands().to_vec(),
                 machines,
                 assets: presets.assets.items().to_vec(),
@@ -623,6 +640,7 @@ impl Catalog {
     /// 产物，拿它算出来的是上一代的结构 —— 那正好会漏掉"这一次改了结构"。
     /// 自指没问题：`structureSignature` 有 `#[serde(default)]`，它进不了必填清单。
     pub(crate) fn finalize(mut self) -> Catalog {
+        self.data_version = app_version_code();
         self.structure_signature = crate::runtime::structure::signature_of_catalog(&self);
         self.revision = revision_of(&self);
         self
@@ -713,6 +731,34 @@ impl Catalog {
 
 /// 对 definition + files 的稳定序列化取摘要。`revision` 本身不在输入里，没有自指问题。
 /// definition 在输入里：改字段定义、挪布局、换套餐，检查更新都看得见
+/// 应用版本（`tauri.conf.json` 的 `version`）→ 单调整数：`0.0.6` → `6`。
+///
+/// 读的是**安装包版本**而不是 crate 版本：用户看到、升级判定要用的都是前者。
+/// 解析不出来（文件被改坏）就返回 0 —— 那等于「比谁都旧」，会让随包那份去升级盘上那份，
+/// 比悄悄用上一版的数据安全。
+pub fn app_version_code() -> u64 {
+    let raw = include_str!("../../tauri.conf.json");
+    let doc: serde_json::Value = serde_json::from_str(raw).unwrap_or_default();
+    parse_version_code(doc.get("version").and_then(|v| v.as_str()).unwrap_or(""))
+}
+
+/// `major.minor.patch` → `major*1_000_000 + minor*1_000 + patch`。
+///
+/// 进位留得足够宽（每段三位），所以 `0.0.6 → 0.0.10` 是**变大**，不会像字符串比较那样
+/// 把 `0.0.10` 判成比 `0.0.9` 旧。
+fn parse_version_code(text: &str) -> u64 {
+    let mut code = 0u64;
+    for (i, part) in text.trim().split('.').take(3).enumerate() {
+        let n: u64 = part.trim().parse().unwrap_or(0);
+        code += n * match i {
+            0 => 1_000_000,
+            1 => 1_000,
+            _ => 1,
+        };
+    }
+    code
+}
+
 fn revision_of(catalog: &Catalog) -> String {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -788,6 +834,83 @@ mod tests {
             .parent()
             .unwrap()
             .to_path_buf()
+    }
+
+    /* ---------- 数据版本（2026-10-21） ---------- */
+
+    /// `major.minor.patch` → 单调整数。进位留三位，所以 `0.0.10 > 0.0.9`
+    #[test]
+    fn parse_version_code_is_monotonic_across_patch_digits() {
+        // 三段各占三位（补零不改变数值），所以 `0.0.6` 就是 6、`1.2.3` 是 1002003
+        assert_eq!(parse_version_code("0.0.6"), 6);
+        assert_eq!(parse_version_code("0.1.0"), 1_000);
+        assert_eq!(parse_version_code("1.2.3"), 1_002_003);
+        assert!(
+            parse_version_code("0.0.10") > parse_version_code("0.0.9"),
+            "按字符串比会把 0.0.10 判成比 0.0.9 旧 —— 这一格必须是整数比"
+        );
+        // 解析不出来 = 「比谁都旧」：那会让随包那份去升级盘上那份，比悄悄沿用错的数安全
+        assert_eq!(parse_version_code(""), 0);
+        assert_eq!(parse_version_code("坏的"), 0);
+        assert_eq!(parse_version_code("0.0"), 0);
+    }
+
+    /// 三处版本号必须一致 —— 它们说的是同一个安装包版本，`dataVersion` 只认其中一处
+    #[test]
+    fn manifests_agree_on_the_app_version() {
+        let repo = repo_root();
+        let tauri: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.join("src-tauri").join("tauri.conf.json"))
+                .expect("读不到 tauri.conf.json"),
+        )
+        .expect("tauri.conf.json 要是合法 JSON");
+        let pkg: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(repo.join("package.json")).expect("读不到 package.json"),
+        )
+        .expect("package.json 要是合法 JSON");
+        let version = tauri["version"]
+            .as_str()
+            .expect("tauri.conf.json 要有 version —— dataVersion 由它算出来");
+        assert_eq!(
+            pkg["version"].as_str(),
+            Some(version),
+            "package.json 的版本要与安装包一致（发版时改一处忘了另一处，这里就红）"
+        );
+
+        // Cargo.toml：本仓没有 toml 解析依赖，`[package]` 段里那一行按行取
+        let cargo = std::fs::read_to_string(repo.join("src-tauri").join("Cargo.toml"))
+            .expect("读不到 Cargo.toml");
+        let cargo_version = cargo
+            .lines()
+            .find_map(|l| l.trim().strip_prefix("version = "))
+            .map(|v| v.trim().trim_matches('"').to_owned())
+            .expect("Cargo.toml 的 [package] 段要有 version");
+        assert_eq!(
+            cargo_version, version,
+            "Cargo.toml 的版本要与安装包一致（三处对齐）"
+        );
+
+        assert_eq!(
+            app_version_code(),
+            parse_version_code(version),
+            "随包目录里的 dataVersion 必须由这一版号算出来"
+        );
+    }
+
+    /// 随包那份**带着**数据版本，且不带发布戳（它是 bootstrap，不是一次发布）
+    #[test]
+    fn the_bundled_catalog_carries_the_app_version() {
+        let embedded =
+            Catalog::parse(crate::runtime::EMBEDDED_CATALOG).expect("随包那份要解析得出");
+        assert!(
+            embedded.data_version > 0,
+            "0 会被判成「比谁都旧」，那是老文件的值"
+        );
+        assert_eq!(embedded.data_version, app_version_code());
+        assert!(
+            embedded.published_at.is_none(),
+            "随包那份由 `gen-catalog` 逐字节重算，编一个发布戳就永远对不上"
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 {
   "catalogSchema": 1,
-  "revision": "a618f4c1113cf6d3",
+  "revision": "22d969028a2b8431",
   "publishedAt": "2026-10-19T14:12:29Z",
+  "dataVersion": 6,
   "brands": [
     {
       "id": "Bambu Lab",
@@ -958,7 +959,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.custom_mount_gcode",
@@ -1008,7 +1012,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "方案 1（现状）",
+        "hidden": false
       },
       {
         "key": "toolhead.custom_mount_gcode_2",
@@ -1052,7 +1059,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "toolhead.custom_mount_gcode",
+        "slotLabel": "方案 2（稳）",
+        "hidden": true
       },
       {
         "key": "toolhead.custom_mount_gcode_3",
@@ -1096,14 +1106,17 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "toolhead.custom_mount_gcode",
+        "slotLabel": "方案 3（标准）",
+        "hidden": true
       },
       {
         "key": "toolhead.mount_gcode_active",
         "configKey": "MountGcodeActive",
         "tomlKey": "mount_gcode_active",
         "jsonKey": "mount_gcode_active",
-        "label": "装载胶箱当前方案",
+        "label": "当前使用的装载方案",
         "desc": "导出时实际使用哪一套装载方案（1=现状 2=稳 3=标准）",
         "tomlComment": "当前生效的装载方案(1=现状 2=稳 3=标准)",
         "valueType": "string",
@@ -1121,7 +1134,23 @@
         "unit": null,
         "parentKey": null,
         "showWhen": null,
-        "choices": [],
+        "choices": [
+          {
+            "label": "方案 1（现状）",
+            "value": "1",
+            "deprecated": false
+          },
+          {
+            "label": "方案 2（稳）",
+            "value": "2",
+            "deprecated": false
+          },
+          {
+            "label": "方案 3（标准）",
+            "value": "3",
+            "deprecated": false
+          }
+        ],
         "variantMode": "per_variant",
         "machineFilter": [
           "A1",
@@ -1140,7 +1169,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": true
       },
       {
         "key": "toolhead.custom_unmount_gcode",
@@ -1190,7 +1222,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "方案 1（现状）",
+        "hidden": false
       },
       {
         "key": "toolhead.custom_unmount_gcode_2",
@@ -1234,7 +1269,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "toolhead.custom_unmount_gcode",
+        "slotLabel": "方案 2（稳）",
+        "hidden": true
       },
       {
         "key": "toolhead.custom_unmount_gcode_3",
@@ -1278,14 +1316,17 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "toolhead.custom_unmount_gcode",
+        "slotLabel": "方案 3（标准）",
+        "hidden": true
       },
       {
         "key": "toolhead.unmount_gcode_active",
         "configKey": "UnmountGcodeActive",
         "tomlKey": "unmount_gcode_active",
         "jsonKey": "unmount_gcode_active",
-        "label": "卸载胶箱当前方案",
+        "label": "当前使用的卸载方案",
         "desc": "导出时实际使用哪一套卸载方案（1=现状 2=稳 3=标准）",
         "tomlComment": "当前生效的卸载方案(1=现状 2=稳 3=标准)",
         "valueType": "string",
@@ -1303,7 +1344,23 @@
         "unit": null,
         "parentKey": null,
         "showWhen": null,
-        "choices": [],
+        "choices": [
+          {
+            "label": "方案 1（现状）",
+            "value": "1",
+            "deprecated": false
+          },
+          {
+            "label": "方案 2（稳）",
+            "value": "2",
+            "deprecated": false
+          },
+          {
+            "label": "方案 3（标准）",
+            "value": "3",
+            "deprecated": false
+          }
+        ],
         "variantMode": "per_variant",
         "machineFilter": [
           "A1",
@@ -1322,7 +1379,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": true
       },
       {
         "key": "wiping.disable_3rd_layer_clog_detect",
@@ -1359,7 +1419,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disable_front_cover_alarm",
@@ -1397,7 +1460,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disable_timelapse",
@@ -1434,7 +1500,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disk_stagger_angle",
@@ -1472,7 +1541,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disk_stagger_max_angle",
@@ -1510,7 +1582,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disk_stagger_mode",
@@ -1564,7 +1639,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.disk_stagger_swing_mode",
@@ -1613,7 +1691,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.fan_speed",
@@ -1647,7 +1728,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.fast_tower_mode",
@@ -1701,7 +1785,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.first_pen_revitalization_flag",
@@ -1746,7 +1833,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_inter_model_lift_height",
@@ -1780,7 +1870,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_pass_count",
@@ -1814,7 +1907,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_sparse_ratio",
@@ -1848,7 +1944,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_bed_bl",
@@ -1886,7 +1985,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_bed_br",
@@ -1924,7 +2026,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_bed_fl",
@@ -1962,7 +2067,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_bed_fr",
@@ -2000,7 +2108,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_enabled",
@@ -2034,7 +2145,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_mode",
@@ -2083,7 +2197,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_patch_bl",
@@ -2121,7 +2238,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_patch_br",
@@ -2159,7 +2279,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_patch_fl",
@@ -2197,7 +2320,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_compensation_patch_fr",
@@ -2235,7 +2361,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_lift_height",
@@ -2269,7 +2398,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.glue_z_lift_height_first_layers",
@@ -2307,7 +2439,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.swap_hop_height",
@@ -2341,7 +2476,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.glue_z_offset",
@@ -2375,7 +2513,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.have_wiping_components",
@@ -2420,7 +2561,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": true,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.ironing_coverage_threshold",
@@ -2470,7 +2614,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.ironing_e_sum_threshold",
@@ -2508,7 +2655,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.ironing_mode",
@@ -2561,7 +2711,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.ironing_suppress_expand",
@@ -2595,7 +2748,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.ironing_suppress_expand_mode",
@@ -2644,7 +2800,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.min_support_interface_enabled",
@@ -2689,7 +2848,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.nozzle_cooling_flag",
@@ -2723,7 +2885,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.offset.x",
@@ -2787,7 +2952,10 @@
             "y",
             "z"
           ]
-        }
+        },
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.offset.y",
@@ -2845,7 +3013,10 @@
         },
         "mergeGroup": "offset",
         "pinned": true,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.offset.z",
@@ -2902,7 +3073,10 @@
         },
         "mergeGroup": "offset",
         "pinned": true,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.outer_structure",
@@ -2956,7 +3130,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.prime_enabled",
@@ -2990,7 +3167,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.prime_every_layer",
@@ -3039,7 +3219,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.prime_length",
@@ -3077,7 +3260,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.prime_min_path_length",
@@ -3115,7 +3301,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.prime_per_model",
@@ -3164,7 +3353,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.prime_trigger_layers",
@@ -3202,7 +3394,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.rib_extra_length",
@@ -3240,7 +3435,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.rib_fillet_wall",
@@ -3278,7 +3476,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.rib_width",
@@ -3316,7 +3517,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.sheath_base_expand",
@@ -3354,7 +3558,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.sheath_converge_layers",
@@ -3392,7 +3599,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.sheath_enable_height",
@@ -3430,7 +3640,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.sheath_wall_width",
@@ -3468,7 +3681,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.small_feature_factor",
@@ -3502,7 +3718,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "toolhead.speed_limit",
@@ -3536,7 +3755,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": true,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.support_extrusion_multiplier",
@@ -3570,7 +3792,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_custom_layer_height",
@@ -3624,7 +3849,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_extrude_ratio",
@@ -3662,7 +3890,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_first_layer_flow",
@@ -3700,7 +3931,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_glue_layer_speed",
@@ -3738,7 +3972,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_rib_speed",
@@ -3787,7 +4024,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_rib_speed_value",
@@ -3825,7 +4065,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_safe_z_offset",
@@ -3863,7 +4106,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_sheath_speed",
@@ -3901,7 +4147,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_travel_speed",
@@ -3939,7 +4188,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.tower_wipe_mode",
@@ -3993,7 +4245,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.use_ironing_path",
@@ -4038,7 +4293,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.user_dry_time",
@@ -4072,7 +4330,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.wiper_x",
@@ -4128,7 +4389,10 @@
         },
         "mergeGroup": "wiper",
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.wiper_y",
@@ -4182,7 +4446,10 @@
         },
         "mergeGroup": "wiper",
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.wipetower_speed",
@@ -4220,7 +4487,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.xy_calibration_mode",
@@ -4265,7 +4535,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       },
       {
         "key": "wiping.z_calibration_mode",
@@ -4310,7 +4583,10 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
-        "serialization": null
+        "serialization": null,
+        "slotOf": "",
+        "slotLabel": "",
+        "hidden": false
       }
     ],
     "tabs": [

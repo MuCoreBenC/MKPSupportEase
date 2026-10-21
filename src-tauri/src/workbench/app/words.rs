@@ -86,6 +86,8 @@ pub struct Words {
     pub param_deprecated: Word,
     /// 「已弃用」选项级那一枚。判据是推出来的（见 `registry::deprecated_choice_values`）
     pub param_deprecated_choice: Word,
+    /// 「槽位」那一枚（多套方案）：`Row.slot` 为真的行
+    pub param_slot: Word,
     /// 对照矩阵状态列三档（C14 第四轮）
     pub matrix_row: Table,
 }
@@ -278,6 +280,7 @@ fn words() -> Words {
             w::deprecated::CHOICE_LABEL,
             w::deprecated::CHOICE_EXPLAIN,
         ),
+        param_slot: Word::new(w::slot::LABEL, w::slot::EXPLAIN),
 
         matrix_row: [
             (
@@ -431,6 +434,9 @@ mod tests {
         assert_eq!(v["paramDeprecated"]["label"], "已弃用");
         assert!(v["paramDeprecated"]["explain"].is_string());
         assert_eq!(v["paramDeprecatedChoice"]["label"], "已弃用");
+        // 「槽位」说的是第三件事：这一行是同一张卡里的另一套方案（不是弃用、也不是禁用）
+        assert_eq!(v["paramSlot"]["label"], "槽位");
+        assert!(v["paramSlot"]["explain"].is_string());
         assert_ne!(
             v["paramDeprecated"]["explain"], v["paramDeprecatedChoice"]["explain"],
             "两档说的是两件事，解释句不该相同"

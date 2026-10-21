@@ -125,12 +125,25 @@ pub fn load_released_catalog(root: &std::path::Path) -> Result<Catalog, crate::e
 /// 换代归档、检查更新）要的就是它原样 —— 只在这里多走一步，是因为**只有界面**
 /// 需要"随包的东西不依赖云端那份目录"。
 ///
-/// ★ 这与「启动绝不覆盖 ②」是同一条纪律的两面：**盘上的字节一个都不动**，
+/// ★ 这与「启动不覆盖更新的 ②」是同一条纪律的两面：**盘上的字节一个都不动**，
 ///   这一步只在内存里补几条给界面看。
+///
+/// 2026-10-21 加的第二个兜底：盘上那份**读不懂**时（坏文件，或降级装回旧版时遇到
+/// 比自己新的 `catalogSchema`）界面用**随包整份**渲染，不崩、也不去改/删那份文件 ——
+/// 它是新版程序的数据，等下次装回新版自然接管。缺文件仍照旧报错（那是"还没释放"，
+/// 由 [`release::ensure_released`] 负责，不属于"读不懂"）。
 pub fn catalog_for_ui(root: &std::path::Path) -> Result<Catalog, crate::error::AppError> {
-    let released = load_released_catalog(root)?;
     let embedded = Catalog::parse(EMBEDDED_CATALOG)?;
-    Ok(released.with_missing_bundled_from(&embedded))
+    match load_released_catalog(root) {
+        Ok(released) => Ok(released.with_missing_bundled_from(&embedded)),
+        Err(e) => {
+            if paths::catalog_file(root).exists() {
+                Ok(embedded)
+            } else {
+                Err(e)
+            }
+        }
+    }
 }
 
 /// 随安装包走的那份 catalog —— 发布构建（`cargo run --bin gen-catalog`）的产物。
@@ -210,5 +223,45 @@ mod tests {
             ui.files.is_empty(),
             "② 说没有交付文件，这一步不许给它编出文件来"
         );
+    }
+
+    /// **降级装回旧版：格式比本程序新时「不动文件、用随包那份渲染」**（2026-10-21）。
+    ///
+    /// 事故形状：用户装过新版（盘上目录是新一代格式），又装回旧版。旧程序读不懂那份，
+    /// 但它是**新版的数据**——删掉 / 换掉等于把人家的东西扔了，再装回新版也回不去。
+    /// 所以两件事必须同时成立：
+    ///   ① `ensure_released` 一个字节都不动；
+    ///   ② 界面拿到的是**随包整份**（参数条数与随包一致），不崩、也不空白。
+    #[test]
+    fn older_exe_with_newer_schema_reads_embedded_and_keeps_disk() {
+        use crate::fsx::atomic::atomic_write;
+
+        let d = tempfile::tempdir().unwrap();
+        // 格式代次比本程序认得的新：`Catalog::parse` 会拒，`schema_of` 只看这一个数
+        let newer = format!(
+            r#"{{ "catalogSchema": {}, "revision": "新版铺的", "dataVersion": 999999, "machines": [], "files": [], "assets": [] }}"#,
+            catalog::CATALOG_SCHEMA + 1
+        );
+        atomic_write(&paths::catalog_file(d.path()), newer.as_bytes()).unwrap();
+
+        let report = release::ensure_released(d.path()).expect("启动这一步不该报错");
+        assert!(
+            !report.written && !report.archived,
+            "新版数据一个字节都不许动"
+        );
+        assert_eq!(
+            std::fs::read(paths::catalog_file(d.path())).unwrap(),
+            newer.as_bytes(),
+            "文件原样留着 —— 等下次装回新版自然接管"
+        );
+
+        let ui = catalog_for_ui(d.path()).expect("读不懂时用随包那份，不报错");
+        let embedded = Catalog::parse(EMBEDDED_CATALOG).expect("随包那份读得出来");
+        assert_eq!(
+            ui.registry.params.len(),
+            embedded.registry.params.len(),
+            "界面拿到的是随包整份：参数条数应当与随包一致"
+        );
+        assert_eq!(ui.machines.len(), embedded.machines.len());
     }
 }
