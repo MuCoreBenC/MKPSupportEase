@@ -345,6 +345,14 @@
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+  /*
+   * ★ **底栏高度是同一个数**（2026-10-21 作者：「是不是不一样高」）：
+   * 底栏高 == 14 + 32 + 14。里面的按钮一律 32px 高（`editGhost` / `editPrimary` 那套），
+   * 于是只要内容还是一行，任何两屏的底栏就一样高。
+   * `min-height` 兜的是"这一屏底栏只有小控件"的情况（比如只有一颗 24px 的分段开关）——
+   * 没有它，那一屏底栏会比别处矮 8px，肉眼一眼就看得出来。
+   */
+  min-height: 60px;
   /* 与 `.head` 同一条等宽槽 —— 三段的左右缘必须落在同一条线上（见 `.body` 那段） */
   padding: 14px var(--box-inset);
   border-top: 1px solid var(--line);

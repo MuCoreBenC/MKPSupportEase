@@ -22,6 +22,8 @@
 import { useMemo, useState } from 'react'
 
 import { HeadNote, Modal } from '../../components/modal'
+/* 底栏按钮**直接用编辑文件那一套类**：两边高度必须是同一个数（见 `.footLeft` 那段注释） */
+import ps from './PagePresets.module.css'
 import s from './TextDiffModal.module.css'
 import { diffSummary, lineDiff } from './textDiff'
 
@@ -142,60 +144,63 @@ export default function TextDiffModal({
       onClose={onClose}
       footer={
         <>
-          <span className={s.layoutSwitch} role="group" aria-label="对比布局">
+          {/* 左簇：布局切换 + 「恢复默认值」（作者：别都堆在右边） */}
+          <span className={s.footLeft}>
+            <span className={s.layoutSwitch} role="group" aria-label="对比布局">
+              <button
+                type="button"
+                data-on={layout === 'split' || undefined}
+                onClick={() => setLayout('split')}
+              >
+                左右
+              </button>
+              <button
+                type="button"
+                data-on={layout === 'unified' || undefined}
+                onClick={() => setLayout('unified')}
+              >
+                上下
+              </button>
+            </span>
             <button
               type="button"
-              data-on={layout === 'split' || undefined}
-              onClick={() => setLayout('split')}
-            >
-              左右
-            </button>
-            <button
-              type="button"
-              data-on={layout === 'unified' || undefined}
-              onClick={() => setLayout('unified')}
-            >
-              上下
-            </button>
-          </span>
-
-          {shell.error !== null && <span className={s.footErr}>{shell.error}</span>}
-
-          <span className={s.footActs}>
-            <button
-              type="button"
-              className={`${s.footBtn} ${s.footDanger}`}
+              className={ps.editGhost}
               onClick={onRestore}
               disabled={left === right}
             >
               恢复默认值
             </button>
+          </span>
+
+          {shell.error !== null && <span className={ps.editorStateBad}>{shell.error}</span>}
+
+          <span className={s.footActs}>
             {editable ? (
               <>
                 <button
                   type="button"
-                  className={`${s.footBtn} ${s.footIcon}`}
+                  className={ps.editGhost}
                   onClick={shell.onUndo}
                   disabled={!shell.canUndo}
-                  title="撤销（一次打字停顿回退一格）"
+                  title="撤销"
                 >
                   撤销
                 </button>
                 <button
                   type="button"
-                  className={`${s.footBtn} ${s.footIcon}`}
+                  className={ps.editGhost}
                   onClick={shell.onRedo}
                   disabled={!shell.canRedo}
                   title="重做"
                 >
                   重做
                 </button>
-                <button type="button" className={s.footBtn} onClick={shell.onExit}>
+                <button type="button" className={ps.editGhost} onClick={shell.onExit}>
                   放弃并退出
                 </button>
                 <button
                   type="button"
-                  className={`${s.footBtn} ${s.footPrimary}`}
+                  className={ps.editPrimary}
                   onClick={shell.onSave}
                   disabled={shell.saveDisabled}
                 >
@@ -204,14 +209,10 @@ export default function TextDiffModal({
               </>
             ) : (
               <>
-                <button type="button" className={s.footBtn} onClick={onClose}>
+                <button type="button" className={ps.editGhost} onClick={onClose}>
                   关闭
                 </button>
-                <button
-                  type="button"
-                  className={`${s.footBtn} ${s.footPrimary}`}
-                  onClick={shell.onEnter}
-                >
+                <button type="button" className={ps.editPrimary} onClick={shell.onEnter}>
                   进入编辑模式
                 </button>
               </>
