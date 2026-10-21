@@ -666,14 +666,61 @@
  * 它不进"正文那两层"的对齐体系（那两层的字体 / 行高 / 内衬是逐像素绑死的）——
  * 它是普通说明文字，用全局的字号与色号，放在正文块底下、右对齐。
  */
+/*
+ * 2026-10-21：这行说明从"正文下面"搬到了**底栏**（作者：「这下面这行字，我希望也放到下面」）。
+ * 底栏是一条 flex（右收），它拿 `margin-right: auto` 顶到左边 —— 与「恢复默认值」并排时
+ * 后面那颗按钮仍然贴在右边。窄了可以折行（`.editorFoot` 已允许 wrap）。
+ */
 .editHint {
-  /* 不参与 flex 伸缩：它在本行就那点高度，绝不被上面那块挤走、也绝不挤别人 */
-  flex: none;
-  margin: 8px 2px 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
   font-size: var(--fs-label);
   color: var(--text-3);
-  text-align: right;
+  text-align: left;
   line-height: 1.5;
+}
+
+/*
+ * **出错的那一行**（2026-10-21 作者：「比如说这种换行了呀，你可以把它标成红色啊」）：
+ * 淡红底 + 左侧一条红竖线 —— 着色层每个逻辑行就是一个 span，正好一行一块。
+ */
+.editLineBad {
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  box-shadow: inset 3px 0 var(--danger);
+}
+
+/*
+ * 底栏那条「与最初那份对比」：独占一行（`flex: 1 0 100%` 把它挤到最上面那条），
+ * 收起时只占一行摘要，展开才铺开 —— 没出问题时它是"改了 N 项"的入口，
+ * 出问题时它是"到底哪几项不一样"的账单。
+ */
+.editDiff {
+  flex: 1 0 100%;
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.editDiff summary {
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.editDiff ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  max-height: 132px;
+  overflow: auto;
+}
+
+.editDiff li {
+  overflow-wrap: anywhere;
+}
+
+.editDiff s {
+  color: var(--text-3);
 }
 
 .editArea,
@@ -881,6 +928,8 @@
   justify-content: flex-end;
   gap: 16px;
   min-width: 0;
+  /* 2026-10-21：那一行常驻说明与"与最初那份对比"都搬进来了 —— 允许折行 */
+  flex-wrap: wrap;
 }
 
 /* 草稿没存上：这一行是"要你知道"的，用警示色（不是错误红） */

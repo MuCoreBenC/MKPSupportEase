@@ -372,6 +372,8 @@ pub struct PresetTextDraftDto {
     /// （`z_calibration_mode = "new"` 被粘进上一行行尾注释，TOML 仍然合法）。
     /// 空数组 = 一项都没缺；没有原文镜像时不检查（不编）。
     pub missing: Vec<MissingParamDto>,
+    /// **与最初那份相比值变了的参数**（空 = 一致）。界面按"改了 N 项"说话。
+    pub changed: Vec<ChangedParamDto>,
 }
 
 /// 少掉的一项参数（**给用户看的**）。
@@ -391,12 +393,28 @@ pub struct MissingParamDto {
     pub line: Option<usize>,
 }
 
-/// 校验一份**还没有保存**的正文：语法 + 相对最初那份缺了哪些参数（编辑框实时用）。
+/// **与最初那份不一样的一项**（2026-10-21 作者：「你可以让他和默认值对比一下，
+/// 这样子用户很容易就知道改错了哪里」「没出问题的时候也可以和默认值对比」）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangedParamDto {
+    /// 参数主键（排查用；界面只说中文名）
+    pub key: String,
+    /// 中文名（`擦料塔X坐标`）
+    pub label: String,
+    /// 最初那份里写的值（控件形态的字符串）
+    pub from: String,
+    /// 现在写的值
+    pub to: String,
+}
+
+/// 校验一份**还没有保存**的正文：语法 + 缺参数 + 与最初那份的差异（编辑框实时用）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetTextCheckDto {
     pub problem: Option<String>,
     pub missing: Vec<MissingParamDto>,
+    pub changed: Vec<ChangedParamDto>,
 }
 
 /// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
@@ -551,6 +569,45 @@ fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<Miss
         .collect()
 }
 
+/// 与**最初那份**相比，哪些参数的值变了（按参数页顺序）。
+///
+/// 只认值，不认注释 / 空行 / 键序（与 `diff_param_values` 同一条判据）——
+/// 界面上"改了 3 项"说的就是这三项，点开能看见 `旧 → 新`。
+fn changed_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<ChangedParamDto> {
+    let Ok(Some(origin)) = crate::runtime::baseline::read_origin_copy(root, path) else {
+        return Vec::new();
+    };
+    let Ok(catalog) = crate::runtime::load_released_catalog(root) else {
+        return Vec::new();
+    };
+    let Ok(base) = crate::presetdata::params::read_param_values(&origin, &catalog.registry.params)
+    else {
+        return Vec::new();
+    };
+    let Ok(now) = crate::presetdata::params::read_param_values(text, &catalog.registry.params)
+    else {
+        return Vec::new();
+    };
+    catalog
+        .registry
+        .params
+        .iter()
+        .filter_map(|def| {
+            let cur = now.get(&def.key)?;
+            let old = base.get(&def.key)?;
+            if old == cur {
+                return None;
+            }
+            Some(ChangedParamDto {
+                key: def.key.clone(),
+                label: def.label.clone(),
+                from: old.clone(),
+                to: cur.clone(),
+            })
+        })
+        .collect()
+}
+
 /// 这个 TOML 键在正文里**出现在第几行**（1 起；找不到就是 `None`）。
 ///
 /// 只看"这一串在不在这一行"：粘行时它落在上一行里（被 `#` 吃掉），
@@ -574,6 +631,7 @@ pub async fn check_preset_text(
         Ok(PresetTextCheckDto {
             problem: crate::presetdata::patch::toml_problem(&text),
             missing: missing_params_of(&root, &path, &text),
+            changed: changed_params_of(&root, &path, &text),
         })
     })
 }
@@ -609,6 +667,7 @@ pub async fn begin_text_edit(
                     .unwrap_or(true);
                 let problem = crate::presetdata::patch::toml_problem(&draft.text);
                 let missing = missing_params_of(&root, &draft.path, &draft.text);
+                let changed = changed_params_of(&root, &draft.path, &draft.text);
                 return Ok(PresetTextDraftDto {
                     file_name: draft.file_name,
                     path: draft.path,
@@ -618,6 +677,7 @@ pub async fn begin_text_edit(
                     dirty,
                     problem,
                     missing,
+                    changed,
                 });
             }
         }
@@ -628,6 +688,7 @@ pub async fn begin_text_edit(
         super::notify_app_state(&app);
         let problem = crate::presetdata::patch::toml_problem(&draft.text);
         let missing = missing_params_of(&root, &draft.path, &draft.text);
+        let changed = changed_params_of(&root, &draft.path, &draft.text);
         Ok(PresetTextDraftDto {
             file_name: draft.file_name,
             path: draft.path,
@@ -638,6 +699,7 @@ pub async fn begin_text_edit(
             dirty: false,
             problem,
             missing,
+            changed,
         })
     })
 }

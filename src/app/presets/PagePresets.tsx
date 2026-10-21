@@ -153,14 +153,19 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
-import type { ArchivedFile, LocalPresetFile, PresetTextMissing } from '../../api'
+import type {
+  ArchivedFile,
+  LocalPresetFile,
+  PresetTextChanged,
+  PresetTextMissing,
+} from '../../api'
 import { longStatText } from '../store/package'
 /*
  * 这一页那几个框**统一用居中模态框**（作者 2026-10-10：「他全部都用这个右侧的抽屉，
  * 这完全不对，改成模态框」）。挂载点不变 —— 仍挂在 `.main` 里，遮罩只盖内容区，
  * 底栏与窗口右下角的 resize 手柄照旧点得着（Modal 自己那条约定）。
  */
-import { Modal } from '../../components/modal'
+import { HeadNote, Modal } from '../../components/modal'
 /* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
 import { useDevPreview } from '../dev/useDevPreview'
@@ -301,6 +306,34 @@ const WRAP_KEY = detectPlatform() === 'windows' ? 'Alt+Z' : '⌥Z'
 function problemLineOf(problem: string): number | null {
   const m = /line (\d+)/i.exec(problem)
   return m === null ? null : Number(m[1])
+}
+
+/**
+ * 标题格那句话（`HeadNote`）：只说**一句短的**、给用户看的。
+ *
+ * 三种状态共用这一格（2026-10-17 的规矩：提示一律进标题右边），只换颜色与措辞：
+ *   读不动（第 N 行）> 少了设置（用默认值）> 与最初那份不同 > 一致。
+ * 长的说明（缺哪几项、改了哪几项）在底栏那条「与最初那份对比」里展开，不进这一格。
+ */
+function headNoteOf(e: {
+  problem: string | null
+  missing: PresetTextMissing[]
+  changed: PresetTextChanged[]
+}): { text: string; tone: "error" | "note" | "ok" } {
+  if (e.problem !== null) {
+    const at = problemLineOf(e.problem)
+    return { text: at === null ? '这份文件的写法读不懂，切不了' : `第 ${at} 行的写法读不懂，切不了`, tone: 'error' }
+  }
+  if (e.missing.length > 0) {
+    const first = e.missing[0]
+    const at = first.line === null ? '' : `（第 ${first.line} 行）`
+    const more = e.missing.length > 1 ? ` 等 ${e.missing.length} 项` : ''
+    return { text: `少了「${first.label}」${at}${more}，切片会用默认值`, tone: 'error' }
+  }
+  if (e.changed.length > 0) {
+    return { text: `与最初那份比：改了 ${e.changed.length} 项`, tone: 'note' }
+  }
+  return { text: '与最初那份一致', tone: 'ok' }
 }
 
 /**
@@ -674,6 +707,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * `z_calibration_mode` 就是这样）—— 切片时静默退回默认值，不提示就没人发现。
      */
     missing: PresetTextMissing[]
+    /** 与最初那份相比变了值的参数（空 = 一致） */
+    changed: PresetTextChanged[]
   } | null>(null)
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
@@ -951,6 +986,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 只读态与编辑态是**两个不同的滚动元素**，光靠 CSS 接不过来。
    */
   const readScrollRef = useRef({ top: 0, left: 0 })
+
+  /*
+   * **哪几行有问题**（2026-10-21 作者：「比如说这种换行了呀，你可以把它标成红色啊」）：
+   * 语法错那一行 + 每一项缺参数所在的行（粘行时就是"上一行"）—— 正文里直接标出，
+   * 不用用户自己数行号。
+   */
+  const badLines = useMemo(() => {
+    const set = new Set<number>()
+    if (editing === null) return set
+    const at = editing.problem === null ? null : problemLineOf(editing.problem)
+    if (at !== null) set.add(at)
+    for (const m of editing.missing) if (m.line !== null) set.add(m.line)
+    return set
+  }, [editing])
+
+  /*
+   * 标题格那一句（`HeadNote`，2026-10-17 定的：所有提示都进标题右边那一格）。
+   * 只放一句短的，长说明在底栏那条「与最初那份对比」里展开。
+   */
+  const editNote = editing === null ? null : headNoteOf(editing)
 
   const headLen = useMemo(
     () => (editing === null ? 0 : splitHeader(editing.text).head.length),
@@ -1624,6 +1679,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           /* 打开时后端已经校过一遍（`PresetTextDraft.problem` / `.missing`）—— 当场就得说 */
           problem: draft.problem,
           missing: draft.missing,
+          changed: draft.changed,
         })
         /* 「恢复默认值」的原文预读（读到什么算什么；读不到 = 按钮禁用） */
         data.readLocalOriginText(draft.path).then(
@@ -1714,8 +1770,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               cur.missing.length === res.missing.length &&
               cur.missing.every(
                 (m, i) => m.key === res.missing[i].key && m.line === res.missing[i].line,
-              )
-            return same ? cur : { ...cur, problem: res.problem, missing: res.missing }
+              ) &&
+              cur.changed.length === res.changed.length &&
+              cur.changed.every((c, i) => c.key === res.changed[i].key && c.to === res.changed[i].to)
+            return same
+              ? cur
+              : {
+                  ...cur,
+                  problem: res.problem,
+                  missing: res.missing,
+                  changed: res.changed,
+                }
           })
         },
         () => {
@@ -3523,6 +3588,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             footer={
               editing !== null && (
                 <div className={s.editorFoot}>
+                  {/* 与最初那份的差异：**没出问题也摆**（作者：「没出问题的时候也可以和默认值对比」） */}
+                  {editing.changed.length > 0 && (
+                    <details className={s.editDiff}>
+                      <summary>与最初那份比：{editing.changed.length} 项不同</summary>
+                      <ul>
+                        {editing.changed.map((c) => (
+                          <li key={c.key}>
+                            {c.label}：<s>{c.from}</s> → <b>{c.to}</b>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                  <p className={s.editHint}>
+                    文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · {WRAP_KEY} 切换自动换行
+                  </p>
                   {/*
                    * **恢复默认值**（2026-10-16 作者：「就是左侧那个修改参数里面有按钮是恢复
                    * 默认值，那这个也可以有个按钮编辑文件的恢复默认值」）——与参数弹窗那颗
@@ -3546,7 +3627,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                         setEditing((cur) =>
                           cur === null
                             ? cur
-                            : { ...cur, text: originText, problem: null, missing: [] },
+                            : {
+                                ...cur,
+                                text: originText,
+                                problem: null,
+                                missing: [],
+                                changed: [],
+                              },
                         )
                         setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
                       }}
@@ -3647,32 +3734,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  * 以前它只在切片器拉起钩子时才炸（"预设解析失败"），用户既不知道是我
                  * 随手敲坏的、也不知道错在哪一行 —— 这里当场说清并指路。
                  */}
-                {editing.problem !== null && (
-                  <div className={s.editProblem} role="alert">
-                    <b>这份文件的写法读不懂</b>
-                    {problemLineOf(editing.problem) !== null &&
-                      `（第 ${problemLineOf(editing.problem)} 行附近）`}
-                    {' '}—— 这样切不了，导出会被拦下。常见原因是引号少了一半、括号没配对，
-                    或者两行被粘到了一起。改对就会消失；改不动就按底栏「恢复默认值」退回它最初那份。
-                    <span className={s.editProblemWhy} title={editing.problem}>
-                      出错细节
-                    </span>
-                  </div>
-                )}
-                {/* 读得动、但少了参数（2026-10-21）：粘行会让某一项落进行尾注释，TOML 仍合法 */}
-                {editing.missing.length > 0 && (
-                  <div className={s.editProblem} role="alert">
-                    <b>这份文件少了 {editing.missing.length} 项设置</b> ——
-                    切片时会拿默认值顶上，导出来不是你要的那份。
-                    <span className={s.editProblemList}>
-                      {editing.missing
-                        .map((m) => (m.line === null ? m.label : `${m.label}（第 ${m.line} 行）`))
-                        .join('、')}
-                    </span>
-                    多半是被挤进了上一行的注释里（那行开头的 # 把它整段吃掉了）。
-                    把它单独放回一行，或按底栏「恢复默认值」退回它最初那份。
-                  </div>
-                )}
+                {/* 提示一律进标题右边那一格（`HeadNote`，2026-10-17 定死的那一处） */}
+                {editNote !== null && <HeadNote text={editNote.text} tone={editNote.tone} />}
+
                 {/*
                  * 正文那块 = **一个面板**（`.editBody`）：里面是绝对定位铺满的着色层 + textarea，
                  * 以及**左边那一列行号**（`.editNumsGutter`，也是绝对定位的一条刻度）。
@@ -3709,7 +3773,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     onScroll={(e) => syncScroll(e.currentTarget)}
                   >
                     {paintedLines.map((line, i) => (
-                      <span key={i}>
+                      <span
+                        key={i}
+                        className={badLines.has(i + 1) ? s.editLineBad : undefined}
+                      >
                         {line.map((t, j) =>
                           t.kind === 'plain' ? (
                             t.text
@@ -3811,9 +3878,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  *   的字体里没有，会掉成 `~`（作者截图里那句 "~z 切换自动换行"）。
                  * ⚠️ 它在 `.editBody` **外面**（面板那块的下一条）—— 进面板就是压在代码上。
                  */}
-                <p className={s.editHint}>
-                  文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · {WRAP_KEY} 切换自动换行
-                </p>
+
               </div>
             )}
           </Modal>

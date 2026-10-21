@@ -1096,6 +1096,8 @@ export interface PresetTextDraft {
    * 没有原文镜像时不检查（不编）。
    */
   missing: PresetTextMissing[]
+  /** 与最初那份相比值变了的参数（空 = 一致；界面按"改了 N 项"说话） */
+  changed: PresetTextChanged[]
 }
 
 /**
@@ -1116,12 +1118,29 @@ export interface PresetTextMissing {
   line: number | null
 }
 
-/** 一份**还没有保存**的正文的校验结果（编辑器每停一下问一次，红条跟着字走） */
+/**
+ * 与**最初那份**不一样的一项（2026-10-21 作者：「你可以让他和默认值对比一下，
+ * 这样子用户很容易就知道改错了哪里」「没出问题的时候也可以和默认值对比」）。
+ */
+export interface PresetTextChanged {
+  /** 参数主键（排查用；界面只说中文名） */
+  key: string
+  /** 中文名（`擦料塔X坐标`） */
+  label: string
+  /** 最初那份里写的值 */
+  from: string
+  /** 现在写的值 */
+  to: string
+}
+
+/** 一份**还没有保存**的正文的校验结果（编辑器每停一下问一次，提示跟着字走） */
 export interface PresetTextCheck {
   /** TOML 语法错（`null` = 能解析） */
   problem: string | null
   /** 相对最初那份少了哪些参数 */
   missing: PresetTextMissing[]
+  /** 与最初那份相比值变了的参数（没变就是空数组，界面说"与最初一致"） */
+  changed: PresetTextChanged[]
 }
 
 /*
