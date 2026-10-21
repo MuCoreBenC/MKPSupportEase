@@ -54,7 +54,7 @@ fn ir_at(wiper: [f64; 2]) -> Ir {
 }
 
 fn write_input(tag: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("mkpse-pp-tower-ask-{tag}.gcode"));
+    let path = std::env::temp_dir().join(format!("mkpse-postproc-tower-ask-{tag}.gcode"));
     std::fs::write(&path, GCODE).expect("写临时输入");
     path
 }

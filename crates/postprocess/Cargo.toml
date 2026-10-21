@@ -2,7 +2,7 @@
 #
 # 搬入是**两笔**：M2a（`47436e4`）先原样复制、连包名都不改，拿「122 个文件逐文件 sha256
 # 与源一致」当搬运证据；M2b（`d3f542b`）再单独一笔改名 —— 包 `mkpse-postprocess`、
-# lib `postprocess`、bin `mkpse-pp`。拆开是因为改名要动 24 个文件（含 3 个测试文件），
+# lib `postprocess`、bin `mkpse-postproc`。拆开是因为改名要动 24 个文件（含 3 个测试文件），
 # 机械改动与搬运错误混进同一条 diff 的话，「那 20 个测试文件全绿」就不再是搬运证据了。
 #
 # 源仓库那份清单顶上写着「包名刻意仍叫 mkp-pp……等 K1..K7 全绿之后再考虑改名」——
@@ -13,7 +13,7 @@
 # cli → pipeline → postproc → ir → gcode/diag 一条直线，
 # 代价（丢掉 Cargo 强制的分层判据）由 tests/boundaries.rs 的文本判据接手。
 #
-# bin `mkpse-pp` **保留但不进 .app 包**：check / dump-ir 是诊断预设与 IR 的唯一手段，
+# bin `mkpse-postproc` **保留但不进 .app 包**：check / dump-ir 是诊断预设与 IR 的唯一手段，
 # 且 tests/cli.rs 依赖它（删掉等于删判据）。分发物只有 src-tauri 那一个可执行物。
 [package]
 name = "mkpse-postprocess"
@@ -28,7 +28,7 @@ name = "postprocess"
 path = "src/lib.rs"
 
 [[bin]]
-name = "mkpse-pp"
+name = "mkpse-postproc"
 path = "src/main.rs"
 
 [dependencies]

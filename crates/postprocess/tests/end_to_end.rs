@@ -62,7 +62,7 @@ fn repo_root() -> PathBuf {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_mkpse-pp")
+    env!("CARGO_BIN_EXE_mkpse-postproc")
 }
 
 fn golden_input() -> PathBuf {
@@ -86,7 +86,7 @@ fn run_cli(args: &[&str]) -> Output {
 
 /// 跑一次 `run`，返回输出文件的字节。
 fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
-    let out_path = std::env::temp_dir().join(format!("mkpse-pp-e2e-{tag}.gcode"));
+    let out_path = std::env::temp_dir().join(format!("mkpse-postproc-e2e-{tag}.gcode"));
     let _ = std::fs::remove_file(&out_path);
     let input = golden_input();
     let config = config_a1();

@@ -49,8 +49,6 @@ pub mod hook_ipc;
 /// **通道的显示那一半**：进度模态框的数据（事件 + 全量快照）、那颗「停止」、机型那一问。
 pub mod hook_ui;
 pub mod ipc;
-/// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
-pub mod legacy;
 /// 系统通知（2026-10-17）：设置页「处理完成发送系统通知」那一格的真实现。
 pub mod notify;
 pub mod obs;

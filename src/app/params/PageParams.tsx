@@ -1120,8 +1120,8 @@ export default function PageParams({
     u.savedNote !== null &&
     (u.savedNote.startsWith('保存失败') ||
       u.savedNote.startsWith('这份没有可保存') ||
-      /* 「应用 0 项」那一颗没落上（2026-10-21）—— 同一格、同一套红字 */
-      u.savedNote.startsWith('收下云端这一版没成'))
+      /* 「更新」那一颗没落上（2026-10-21）—— 同一格、同一套红字 */
+      u.savedNote.startsWith('更新没成'))
   const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
     if (u.draftError !== null) return { text: `草稿没写进磁盘：${u.draftError}`, tone: 'bad' }
     if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
@@ -1312,8 +1312,8 @@ export default function PageParams({
                 · `syncNeedsFetch`：字节还没取回来，逐项差异要比了才知道 —— 点右边去取；
                 · 取回来发现 **0 项要改值**（云端只改了注释 / 新字段）⇒ 那时
                   `syncNeedsFetch` 已经是 false，原来这一条**整块消失**，用户再没有入口
-                  把这一版收掉（作者实测：「有新版」一直挂着）。所以这一档留着一条
-                  「收下这一版」—— 与「修改参数」里那一屏的 0 项按钮同一件事。
+                  把这一版吃掉（作者实测：「有新版」一直挂着）。所以这一档留着一条
+                  「更新」—— 与「修改参数」里那一屏的 0 项按钮同一件事、同一个字。
             */}
             {u.pendingCount === 0 &&
               u.sync !== null &&
@@ -1363,7 +1363,7 @@ export default function PageParams({
                           void u.digestSyncRelease()
                         }}
                       >
-                        {u.syncBusy ? '正在收下…' : '收下这一版'}
+                        {u.syncBusy ? '正在更新…' : '更新'}
                       </button>
                     </>
                   )}

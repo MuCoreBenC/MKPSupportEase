@@ -14,7 +14,7 @@
  * 作者定的分工：**检查脚本负责自动验收，工作台负责查看和管理，规则只有一套**。
  * 读 3MF 的代码只住在 Rust 的 `calibration_asset`（工作台与这里共用），
  * 这里再写一份 zip 解析就迟早两边对不上（"脚本说合格、工作台说没标记"）。
- * 所以本脚本只做一件事：调 `mkpse-pp check-assets`，把输出整理给人看。
+ * 所以本脚本只做一件事：调 `mkpse-postproc check-assets`，把输出整理给人看。
  *
  * # 只读
  *
@@ -33,7 +33,7 @@ const ROOT = process.cwd()
 const MANIFEST = join(ROOT, 'presets', 'assets.toml')
 const cratesDir = join(ROOT, 'crates', 'postprocess')
 
-/** 调内核：`cargo run -q -p mkpse-postprocess --bin mkpse-pp -- check-assets …`
+/** 调内核：`cargo run -q -p mkpse-postprocess --bin mkpse-postproc -- check-assets …`
  *
  * 用 `cargo run` 而不是找现成二进制：判据要跟着源码走（改了没重编也能测出真结果），
  * 代价是一次增量编译（几秒）。
@@ -50,7 +50,7 @@ function runCheck(extraArgs) {
     '-p',
     'mkpse-postprocess',
     '--bin',
-    'mkpse-pp',
+    'mkpse-postproc',
     '--',
     'check-assets',
     '--manifest',

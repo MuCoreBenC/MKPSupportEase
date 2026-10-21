@@ -68,7 +68,7 @@ impl TriggerSink {
 
 /// 原地模式的输入副本 + 其原始字节（取消后必须逐字节相同）。
 fn inplace_copy(tag: &str) -> (PathBuf, Vec<u8>) {
-    let path = std::env::temp_dir().join(format!("mkpse-pp-cancel-{tag}.gcode"));
+    let path = std::env::temp_dir().join(format!("mkpse-postproc-cancel-{tag}.gcode"));
     std::fs::copy(golden_input(), &path).expect("复制输入失败");
     let pristine = std::fs::read(&path).expect("读副本失败");
     (path, pristine)
@@ -228,7 +228,7 @@ fn step_boundary_checkpoint_is_the_only_thing_that_can_stop_it_when_loops_are_th
 #[test]
 fn cancel_with_explicit_out_writes_neither_out_nor_part() {
     let token = CancelToken::new();
-    let out = std::env::temp_dir().join("mkpse-pp-cancel-explicit-out.gcode");
+    let out = std::env::temp_dir().join("mkpse-postproc-cancel-explicit-out.gcode");
     let _ = std::fs::remove_file(&out);
     let mut sink = TriggerSink {
         events: Vec::new(),

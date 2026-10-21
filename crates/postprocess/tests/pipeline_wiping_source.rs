@@ -146,7 +146,7 @@ fn the_field_really_drives_the_decision() {
 fn pipeline_decision_matches_independent_recomputation() {
     let config_path = repo_root().join("tests/fixtures/config/A1.toml");
     let input = repo_root().join("tests/golden/42274.2.gcode");
-    let out_path = std::env::temp_dir().join("mkpse-pp-wiping-source.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-postproc-wiping-source.gcode");
 
     // 独立重算：直接从配置文件读 preferred，再对同一份输入跑 decide + apply。
     let cfg_ir = config::load(&config_path).expect("配置 fixture 必须能读");

@@ -9,7 +9,7 @@
 //! 未命中时返回 zero-value（M017「禁止机型回退」的语义，要保留），于是修之前：
 //!
 //! ```text
-//! mkpse-pp check -c … --set Machine.MachineType=<缺尺寸的那台>
+//! mkpse-postproc check -c … --set Machine.MachineType=<缺尺寸的那台>
 //! → 退出码 0，「配置可用」，机型 X 0.0..0.0 / Y 0.0..0.0，禁区 0 处
 //! ```
 //!
@@ -49,7 +49,7 @@ fn fixture_presets_dir() -> PathBuf {
 }
 
 fn bin() -> &'static str {
-    env!("CARGO_BIN_EXE_mkpse-pp")
+    env!("CARGO_BIN_EXE_mkpse-postproc")
 }
 
 fn config_a1() -> PathBuf {
@@ -198,9 +198,9 @@ fn dump_ir_rejects_a_machine_that_has_no_dimensions() {
 #[test]
 fn run_rejects_it_at_preflight_with_exit_two() {
     let machine = a_canonical_name_without_dimensions();
-    let input = std::env::temp_dir().join("mkpse-pp-nodims.gcode");
+    let input = std::env::temp_dir().join("mkpse-postproc-nodims.gcode");
     std::fs::copy(golden_input(), &input).expect("复制输入失败");
-    let out_path = std::env::temp_dir().join("mkpse-pp-nodims.out.gcode");
+    let out_path = std::env::temp_dir().join("mkpse-postproc-nodims.out.gcode");
     let _ = std::fs::remove_file(&out_path);
 
     let out = run_cli(&[

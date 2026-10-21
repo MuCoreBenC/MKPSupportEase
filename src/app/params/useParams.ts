@@ -800,7 +800,7 @@ export interface Params {
    */
   applySyncDecisions: (decisions: ParamDecision[]) => void
   /**
-   * **「收下这一版」**（云端这一版一项都不用改值时）：没有草稿可写，
+   * **0 项时那颗「更新」**（云端这一版一项都不用改值时）：没有草稿可写，
    * 这一下直接落盘（值一个不动，注释 / 新字段 / 时间戳与血统推到当前版）。
    * 返回 `false` = 没落上（错误话在 `savedNote` 里）。
    */
@@ -2722,7 +2722,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   )
 
   /**
-   * **「应用这 0 项」= 收下这一版**（2026-10-21 修）：云端只改了注释 / 新增字段，
+   * **0 项时那颗「更新」**（2026-10-21 修）：云端只改了注释 / 新增字段，
    * 一项要改值的都没有 —— 于是**没有草稿可写**，这一下只能直接落盘。
    *
    * ★ 为什么不能只走"写草稿 → 保存"：一条表态都没有 ⇒ 草稿不脏 ⇒ 底栏那颗
@@ -2733,7 +2733,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 落的是**同一条后端路径**（空决定）：值一个不动，云端的注释 / 新字段 / 时间戳
    * 与血统推进到当前版，「有新版」就此收场（见 `param_sync::apply_at` 头注）。
    *
-   * 返回 `false` = 没落上（错误已经落进 `syncError`，弹层不退，让用户看得到）。
+   * 返回 `false` = 没落上（错误话落进 `savedNote`，弹层不退，让用户看得到）。
    */
   const digestSyncRelease = useCallback(async (): Promise<boolean> => {
     if (localPath === null) return false
@@ -2747,12 +2747,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       /* 文件被重写过（注释 / 时间戳 / 血统，草稿若干净也跟着换）⇒ 两路都得广播 */
       broadcastDraftNow()
       deliveryMutated()
-      setSavedNote('云端这一版收下了 —— 参数值一个没动，注释与血统跟到了新版')
+      setSavedNote('已更新到云端最新版 —— 参数值一个没动，注释与血统跟到了新版')
       return true
     } catch (e: unknown) {
       /* 走「保存失败」那条红字（`savedNote`，参数页标题右边那一格）——
          塞进 `syncError` 会被念成"云端更新这一条读不出来"，那不是这里发生的事 */
-      setSavedNote(`收下云端这一版没成：${errorText(e)}`)
+      setSavedNote(`更新没成：${errorText(e)}`)
       return false
     } finally {
       setSyncBusy(false)

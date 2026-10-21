@@ -1,15 +1,15 @@
-//! `mkpse-pp` —— 唯一可执行产物，纯终端，无前端。
+//! `mkpse-postproc` —— 唯一可执行产物，纯终端，无前端。
 //!
 //! ```text
-//! mkpse-pp run <in.gcode> -c <config.toml> [-o out.gcode] [--set K=V]...
-//! mkpse-pp init [-o config.toml]
-//! mkpse-pp dump-ir -c <config.toml> [--set K=V]... [--gcode <in.gcode>]
-//! mkpse-pp check -c <config.toml> [--set K=V]...
+//! mkpse-postproc run <in.gcode> -c <config.toml> [-o out.gcode] [--set K=V]...
+//! mkpse-postproc init [-o config.toml]
+//! mkpse-postproc dump-ir -c <config.toml> [--set K=V]... [--gcode <in.gcode>]
+//! mkpse-postproc check -c <config.toml> [--set K=V]...
 //! ```
 //!
 //! **两条通道分得很死**：进度 / 摘要 / 警告 / 日志 → **stderr**；
 //! 机器要消费的东西（`run` 的结果路径、`init` 的配置、`dump-ir` 的 JSON）→ **stdout**。
-//! 于是 `out=$(mkpse-pp run a.gcode -c c.toml)` 拿到的一定是路径，不掺一个字。
+//! 于是 `out=$(mkpse-postproc run a.gcode -c c.toml)` 拿到的一定是路径，不掺一个字。
 //!
 //! 退出码：`0` 成功 / `1` 处理失败 / `2` 输入或配置错 / `130` 用户取消
 //! （128+SIGINT 的 shell 惯例，让脚本区分「用户按了 Ctrl-C」
@@ -36,7 +36,7 @@ mod logging {
     //! 日志装配。**subscriber 只在这里装一次**，库里任何地方都不装。
     //!
     //! 只有 stderr 一条通道：文件日志（`tracing-appender` + 非阻塞 writer +
-    //! `_guard` 生命周期）**刻意不做** —— 这是个终端程序，要留档 `2> mkpse-pp.log` 就够了，
+    //! `_guard` 生命周期）**刻意不做** —— 这是个终端程序，要留档 `2> mkpse-postproc.log` 就够了，
     //! 多一条落盘通道就多一处「日志到底写哪去了」的问题。
 
     use tracing_subscriber::EnvFilter;
@@ -62,7 +62,7 @@ const EXIT_CANCELLED: u8 = 130;
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "mkpse-pp",
+    name = "mkpse-postproc",
     version,
     about = "MKP 后处理内核（G-code + 配置 → 处理后 G-code）",
     long_about = "输入一份 G-code 与一份配置文件（结构就是内核的 IR 本身），输出处理后的 G-code。\n\
@@ -550,7 +550,7 @@ fn cmd_check(config: &Path, set: &[String]) -> ExitCode {
                 ir.machine.forbidden_zones.len()
             );
             eprintln!(
-                "完整生效值（含全部字段）：mkpse-pp dump-ir -c {}",
+                "完整生效值（含全部字段）：mkpse-postproc dump-ir -c {}",
                 config.display()
             );
             ExitCode::SUCCESS

@@ -197,17 +197,17 @@ const MODEL_DEFS: [(&str, &str, &str, &str); 5] = [
     ),
 ];
 
-/// 本机那份模型文件在哪：**下载区**（catalog `path` 的落点）优先 —— 那是交付管道的
-/// 口径；没有就退**旧世代缓存**（`<MKPSupportSSR>/models/`，用户机器上早就有的那三个，
-/// 见 [`crate::legacy`]）。两处都没有 → `None`（"还没取回"，不是错误）。
+/// 本机那份模型文件在哪：**下载区**（catalog `path` 的落点）—— 那是交付管道的口径。
+/// 没有 → `None`（"还没取回"，不是错误）。
 ///
-/// catalog 里没有这个文件的登记时**不猜落点**：下载区那一半直接没有，只剩旧缓存可查。
+/// catalog 里没有这个文件的登记时**不猜落点**：猜出来的路径指向的可能是别的程序留下的
+/// 文件，用它盖上「已取回」的章，比没有更糟。
 fn locate_model_file(
     app: &AppHandle,
     file_name: &str,
 ) -> Result<Option<std::path::PathBuf>, AppError> {
     let internal = crate::fsx::paths::internal_root(app)?;
-    let in_delivery = crate::runtime::load_released_catalog(&internal)
+    let found = crate::runtime::load_released_catalog(&internal)
         .ok()
         .and_then(|catalog| {
             catalog
@@ -217,13 +217,7 @@ fn locate_model_file(
                 .map(|f| internal.join(&f.path))
         })
         .filter(|p| p.is_file());
-    if in_delivery.is_some() {
-        return Ok(in_delivery);
-    }
-    let legacy = crate::legacy::data_root(app)
-        .map(|root| crate::legacy::models_dir(&root).join(file_name))
-        .filter(|p| p.is_file());
-    Ok(legacy)
+    Ok(found)
 }
 
 /// 字节数 → 界面上的大小。只在**盘上真有那份文件**时给 —— 没有就 `None`，不编数。
