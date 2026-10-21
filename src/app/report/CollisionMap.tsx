@@ -483,7 +483,9 @@ export default function CollisionMap({
                 vbSize={vbSize}
                 vm={vm}
                 brimLoopCount={BRIM_LOOP_COUNT}
-                showLabel={false}
+                /* 缩略图里塔只有 20px 上下，字按 0.34 只有 7px（糊）—— 小图放大一档，
+                   进放大层再回到正常比例（2026-10-21 作者：「字不见了」） */
+                labelScale={zoomed ? 0.34 : 0.42}
                 className={s.core}
               />
             </div>
@@ -527,7 +529,9 @@ export default function CollisionMap({
                 vbSize={vbSize}
                 vm={vm}
                 brimLoopCount={BRIM_LOOP_COUNT}
-                showLabel={false}
+                /* 缩略图里塔只有 20px 上下，字按 0.34 只有 7px（糊）—— 小图放大一档，
+                   进放大层再回到正常比例（2026-10-21 作者：「字不见了」） */
+                labelScale={zoomed ? 0.34 : 0.42}
                 className={s.core}
               />
             </div>
