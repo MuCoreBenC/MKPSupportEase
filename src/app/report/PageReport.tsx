@@ -99,6 +99,8 @@ import { api, errorText, listen } from '../../api'
 import type {
   CatalogParamDef,
   PostProcessPrintTime,
+  ReportBox4,
+  ReportCollision,
   ReportDetail,
   ReportExportPlan,
   ReportGlueFacts,
@@ -1010,19 +1012,41 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
 }
 
 /**
- * **擦料塔俯视图**（2026-10-21，作者：「擦料塔的，我希望也有可视化的显示出来」）。
+ * **擦料塔俯视图**（2026-10-21；同日改：复用「塔位变化」那份板子图）。
  *
- * 一张图说清两件事：
- *   · **预设里写的**坐标（快照 `params` 里的 `wiping.wiper_x/wiper_y`）—— 实线方框
- *   · **IR 实际认到的**坐标（`ir.Wiping.WiperX/WiperY`）—— 虚线方框；两者一致时只画一个
+ * 作者：「擦料塔的完全可以复用那一个…… 他要把那个板子形状画出来…… 也同样可以点击
+ * 放大查看」「那个小虚线要保留下来」。
  *
- * 板尺寸取 IR 的 `Machine.MinX/MaxX/MinY/MaxY`：拿不到就不画（不编一个 256×256 出来）。
- * 机器坐标 y 向上、SVG y 向下 —— 这里翻一次，图上的"上"就是床的"里"。
+ * 于是不再自己画一张 100×100 的示意图，而是**直接摆一份 `CollisionMap`** —— 与
+ * 「塔位变化」两幅同一块板（真板轮廓 + 网格）、同一个塔长相（`TowerCoreSvg`）、
+ * 同一个放大层（点图看大、Esc 收起）：
+ *
+ *   · **判据框**（红虚线；塔框）= 这一盘**实际跑的**那个位置 —— IR 的
+ *     `Wiping.WiperX/WiperY` 优先，只有预设坐标时退回预设；
+ *   · **目标虚框**（灰虚线）= 预设 TOML 里写的那个位置（`params` 的
+ *     `wiping.wiper_x/wiper_y`）—— 两处一致时只有一个；
+ *   · 不一致时补一支箭头（预设 → 实际）；位移小到看不见就不画（`CollisionMap` 自己判）。
+ *
+ * 塔身 24mm 与内核 `TOWER_OUTER_BOUND - TOWER_INNER_BOUND` 同一个数；判据框每边多
+ * 4mm 的外围余量（brim / 斜肋那一圈）—— **快照里没有内核算的那份框**（成功那趟不产
+ * `collision`），这里按同一套常量估。外围结构种类 / 参数照 IR 的 `Wiping` / `Rib` /
+ * `Sheath` 原值给，形状与参数页是同一套算法。
+ *
+ * 可打印区取 IR 的 `Machine.MinX/MaxX/MinY/MaxY`：拿不到就不画（不编一个 256×256 出来）。
  */
-function TowerPlate({ snap }: { snap: ReportSnapshot }) {
+function TowerPlate({
+  snap,
+  machineType,
+}: {
+  snap: ReportSnapshot
+  /** 报告行的机型 —— `CollisionMap` 按它查板规格（`A1_MINI` 这种） */
+  machineType: string | null
+}) {
   const ir = snap.ir
   const wiping = objOf(ir.Wiping)
   const machine = objOf(ir.Machine)
+  const rib = objOf(ir.Rib)
+  const sheath = objOf(ir.Sheath)
   const minX = numOf(machine.MinX)
   const maxX = numOf(machine.MaxX)
   const minY = numOf(machine.MinY)
@@ -1038,53 +1062,66 @@ function TowerPlate({ snap }: { snap: ReportSnapshot }) {
   const hasIr = irX !== null && irY !== null
   if (!hasPreset && !hasIr) return null
 
-  /* 图框：100×100，留 6 的边距（塔块与文字不出界） */
-  const PAD = 6
-  const span = 100 - PAD * 2
-  const sx = (x: number) => PAD + ((x - minX) / (maxX - minX)) * span
-  const sy = (y: number) => 100 - PAD - ((y - minY) / (maxY - minY)) * span
-  /* 塔体宽度按板宽比例（24mm 是塔本体，不含外围结构） */
-  const TOWER_MM = 24
-  const side = (TOWER_MM / (maxX - minX)) * span
+  /* 塔身 24mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）；判据框每边再让 4mm
+     给外围结构（brim 那几圈 / 斜肋伸出去的那截）。 */
+  const BODY_MM = 24
+  const BOX_PAD_MM = 4
+  const BOX_MM = BODY_MM + BOX_PAD_MM * 2
 
-  const same = hasPreset && hasIr && Math.abs(presetX - irX) < 0.01 && Math.abs(presetY - irY) < 0.01
-  const ref = hasPreset ? { x: presetX, y: presetY } : { x: irX as number, y: irY as number }
+  /** 以塔左下角为角的判据框（机器坐标；内核同一个约定） */
+  const boxAt = (x: number, y: number): ReportBox4 => ({
+    xMin: x,
+    xMax: x + BOX_MM,
+    yMin: y,
+    yMax: y + BOX_MM,
+  })
+
+  const same =
+    hasPreset && hasIr && Math.abs(presetX - irX) < 0.01 && Math.abs(presetY - irY) < 0.01
+  /* 实际用的那个位置：程序认到的优先（报告页那句"按程序认到的那个跑"就是这张图） */
+  const at = hasIr
+    ? { x: irX as number, y: irY as number }
+    : { x: presetX, y: presetY }
+
+  /*
+   * 一份"只有塔、没有碰撞"的事实：`CollisionMap` 拿到它就照常画板轮廓 / 网格 /
+   * 塔形状 / 判据框 / 放大层 —— 擦料塔这一栏不另写一套画法。
+   */
+  const collision: ReportCollision = {
+    printable: { xMin: minX, xMax: maxX, yMin: minY, yMax: maxY },
+    towerBbox: boxAt(at.x, at.y),
+    tower: {
+      outerStructure:
+        typeof wiping.OuterStructure === 'string' ? wiping.OuterStructure : 'brim',
+      bodyMm: BODY_MM,
+      ribWidth: numOf(rib.Width) ?? 0,
+      ribExtraLength: numOf(rib.ExtraLength) ?? 0,
+      ribFilletWall: rib.FilletWall === true,
+      sheathBaseExpand: numOf(sheath.BaseExpand) ?? 0,
+    },
+  }
+  /* 预设写的位置单独画一个虚框（两处一致时只有一个） */
+  const ghost = hasPreset && !same ? boxAt(presetX, presetY) : null
+  /* 不一致时：从预设那个位置指到实际这个位置（塔框中心之间，与「塔位变化」同一支箭头） */
+  const arrow =
+    ghost !== null
+      ? {
+          from: [presetX + BOX_MM / 2, presetY + BOX_MM / 2] as [number, number],
+          vec: [at.x - presetX, at.y - presetY] as [number, number],
+        }
+      : null
 
   return (
     <div className={s.plate}>
-      <svg className={s.plateSvg} viewBox="0 0 100 100" role="img" aria-label="擦料塔位置">
-        <rect x="0.5" y="0.5" width="99" height="99" rx="3" className={s.plateBed} />
-        {/* 板内可打印区（IR 的 min/max 就是它） */}
-        <rect
-          x={PAD}
-          y={PAD}
-          width={span}
-          height={span}
-          rx="1.5"
-          className={s.plateZone}
-        />
-        {hasPreset && (
-          <rect
-            x={sx(presetX)}
-            y={sy(presetY) - side}
-            width={side}
-            height={side}
-            rx="1"
-            className={s.plateTower}
-          />
-        )}
-        {hasIr && !same && (
-          <rect
-            x={sx(irX)}
-            y={sy(irY) - side}
-            width={side}
-            height={side}
-            rx="1"
-            className={s.plateTowerIr}
-          />
-        )}
-        <circle cx={sx(ref.x)} cy={sy(ref.y) - side / 2} r="0.9" className={s.plateDot} />
-      </svg>
+      <CollisionMap
+        collision={collision}
+        machineType={machineType}
+        arrow={arrow}
+        ghost={ghost}
+        hideLegend
+        height={132}
+        label="放大查看擦料塔位置"
+      />
       <p className={same || !hasIr ? s.plateNote : `${s.plateNote} ${s.plateBad}`}>
         {hasPreset && `预设写 (${fmtNum(presetX)}, ${fmtNum(presetY)})`}
         {hasPreset && hasIr && ' · '}
@@ -1906,7 +1943,10 @@ export default function PageReport() {
                                 </dl>
                                 {/* 擦料塔那一组多一张俯视图：预设写的坐标 vs 程序认到的坐标 */}
                                 {g.id === 'tower' && detail.snapshot != null && (
-                                  <TowerPlate snap={detail.snapshot} />
+                                  <TowerPlate
+                                    snap={detail.snapshot}
+                                    machineType={detail.summary.machineType}
+                                  />
                                 )}
                               </>
                             )}

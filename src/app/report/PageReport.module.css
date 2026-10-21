@@ -1068,7 +1068,9 @@
   white-space: pre;
 }
 
-/* ---- 擦料塔俯视图（擦料塔那一组下面那张图） ---- */
+/* ---- 擦料塔俯视图（擦料塔那一组下面那张图） ----
+   图本身是 `CollisionMap`（与「塔位变化」两幅同一份画布，样式在
+   `CollisionMap.module.css`）—— 这里只管"图 + 一句说明"的排布。 */
 
 .plate {
   display: flex;
@@ -1076,40 +1078,6 @@
   gap: 16px;
   margin-top: 14px;
   flex-wrap: wrap;
-}
-
-.plateSvg {
-  flex: 0 0 auto;
-  width: 132px;
-  height: 132px;
-}
-
-.plateBed {
-  fill: none;
-  stroke: var(--line-strong);
-}
-
-.plateZone {
-  fill: none;
-  stroke: var(--line);
-  stroke-dasharray: 2 2;
-}
-
-.plateTower {
-  fill: color-mix(in srgb, var(--accent) 22%, transparent);
-  stroke: var(--accent);
-  stroke-width: 0.8;
-}
-
-.plateTowerIr {
-  fill: none;
-  stroke: var(--danger);
-  stroke-width: 0.8;
-  stroke-dasharray: 2 1.4;
-}
-
-.plateDot {
-  fill: var(--accent);
 }
 
 .plateNote {

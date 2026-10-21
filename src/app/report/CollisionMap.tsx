@@ -56,6 +56,11 @@ interface Props {
    * —— 两幅并排要比"同高"时用它。不给 = 原来的"宽度跟着容器走"。
    */
   height?: number
+  /**
+   * 小图按钮的无障碍名字（2026-10-21）。默认是碰撞俯视图；擦料塔那一栏借这张画布
+   * 画"塔在哪"，说成"碰撞"会误导 —— 那边自己给一句。
+   */
+  label?: string
 }
 
 /** 塔身固定画成 44px（与参数页同一个数 —— 两边比例一致，形状才是同一个形状） */
@@ -104,6 +109,7 @@ export default function CollisionMap({
   ghost = null,
   hideLegend = false,
   height,
+  label = '放大查看碰撞俯视图',
 }: Props) {
   const bed = boxOf(collision.printable)
   const tower = boxOf(collision.towerBbox)
@@ -524,7 +530,7 @@ export default function CollisionMap({
             mapBtnRef.current?.firstElementChild?.getBoundingClientRect() ?? null
           setZoom(true)
         }}
-        aria-label="放大查看碰撞俯视图"
+        aria-label={label}
       >
         {renderMap(false)}
       </button>
