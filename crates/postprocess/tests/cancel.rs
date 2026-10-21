@@ -1,4 +1,4 @@
-//! 用户取消语义（端到端，真跑不纸面）。来源：`mkp-sr` 的 `crates/engine/tests/cancel.rs`。
+//! 用户取消语义（端到端，真跑不纸面）。来源：`来源实现` 的 `crates/engine/tests/cancel.rs`。
 //!
 //! - a) 预取消：第一个 checkpoint 即 Cancelled，原地输入字节不变、无输出、无 `.part`
 //! - b) pass1 中途取消：Err(Cancelled) 且 Pass1 进度事件停在触发点附近

@@ -1,4 +1,4 @@
-//! `LineBuilder` —— 可复用的行装配缓冲（对照 line_builder.go）。
+//! `LineBuilder` —— 可复用的行装配缓冲（对照）。
 //!
 //! 语义与自由函数 [`crate::gcode::format`] 的对应成员**字节级等价**（等价性由测试钉住，
 //! 对应旧侧 `processor.TestLineBuilderEquivalence` 的意图）。Rust 侧保留它：

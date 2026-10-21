@@ -1,10 +1,10 @@
 //! 擦料塔几何生成（对照旧仓库 `internal/tower`，按语义分模块、非文件级翻译）。
 //!
 //! - `constants`：常量表（逐字）
-//! - `geometry`：多边形/肋截面/圆角/限深插值（逐行，浮点顺序与 Go 一字不差）
+//! - `geometry`：多边形/肋截面/圆角/限深插值（逐行，浮点顺序与 旧实现 一字不差）
 //! - `sheath` / `rib` / `spiral`：三个生成入口（G3 golden 的被测对象）
 //! - `bbox`：碰撞用包围盒
-//! - 刻意**不移植** `arcfit.go`：实测全仓零消费（死代码），登记于提交信息。
+//! - 刻意**不移植** ：实测全仓零消费（死代码），登记于提交信息。
 
 pub mod bbox;
 pub mod constants;
@@ -90,7 +90,7 @@ mod tests {
         }
     }
 
-    /// 8.1：模板嵌入与切分语义（对照 embed_templates.go 的 splitTemplate）。
+    /// 8.1：模板嵌入与切分语义（对照  的 splitTemplate）。
     #[test]
     fn tower_layer_template_is_embedded() {
         let lines = get_wiping_gcode_lines();
@@ -105,7 +105,7 @@ mod tests {
         assert!(lines.contains(&";START_HERE".to_string()));
     }
 
-    /// bbox：rib 分支是保守正方形且 Min/Max 关系成立（对照 bbox_test.go 的判法）。
+    /// bbox：rib 分支是保守正方形且 Min/Max 关系成立（对照  的判法）。
     #[test]
     fn tower_bbox_rib_is_conservative_square() {
         let bbox = calculate_tower_bbox("rib", 0.0, 10.0, 2.0, 100.0, 0.4, 0.2);

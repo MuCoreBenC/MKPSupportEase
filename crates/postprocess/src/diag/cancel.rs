@@ -1,6 +1,6 @@
 //! `CancelToken` —— 用户取消的信号线（Task 17，Phase 2）。
 //!
-//! 旧 Go 侧规格（实测）：`RunContext{Ctx, cancel}`（context.go:39-64）——一根
+//! 旧实现规格（实测）：`RunContext{Ctx, cancel}`——一根
 //! `context.WithCancel` 信号线，旁路（UI 按钮 / watchdog）只能 `RequestCancel`，
 //! 主流程在阶段边界与长循环内协作检查。取消**不是错误码**（全仓没有
 //! `E_*_CANCELLED_*`，唯一 CANCELLED 码在下载模块），Rust 侧用
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// 取消信号。`Clone` 共享同一根线（等价 Go 侧把 `rc.Ctx` 递给各协程）。
+/// 取消信号。`Clone` 共享同一根线（等价 旧实现把 `rc.Ctx` 递给各协程）。
 #[derive(Debug, Default, Clone)]
 pub struct CancelToken(Arc<AtomicBool>);
 
@@ -24,12 +24,12 @@ impl CancelToken {
         Self::default()
     }
 
-    /// 请求取消（幂等；等价 Go `RequestCancel`，旁路只许调这个）。
+    /// 请求取消（幂等；等价 旧实现 `RequestCancel`，旁路只许调这个）。
     pub fn cancel(&self) {
         self.0.store(true, Ordering::SeqCst);
     }
 
-    /// 是否已请求取消（等价 Go `IsCancelled` = `rc.Ctx.Err() != nil`）。
+    /// 是否已请求取消（等价 旧实现 `IsCancelled` = `rc.Ctx.Err() != nil`）。
     pub fn is_cancelled(&self) -> bool {
         self.0.load(Ordering::SeqCst)
     }

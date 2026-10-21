@@ -14,8 +14,8 @@
 
 use crate::ir::Ir;
 
-/// `FillDefaults`（Go build.go:526）：`build()` 刻意**不含** FillDefaults ——
-/// 它要在 G-code 元数据提取之后同一时机调用（保持与 Go `ConfigToParams` 的等价边界）。
+/// `FillDefaults`：`build()` 刻意**不含** FillDefaults ——
+/// 它要在 G-code 元数据提取之后同一时机调用（保持与 旧实现 `ConfigToParams` 的等价边界）。
 ///
 /// 本项目里没有 `build()` 了，所以这条时序约束变成：**配置反序列化之后、pass1 之前**
 /// 由 pipeline 的 config 步调用一次。调用点还有一个在
@@ -50,8 +50,8 @@ pub fn fill_defaults(ir: &mut Ir) {
 
 /// NumStrip：从字符串提取全部数字（可负、可小数；孤立 `-` / `.` 不算）。
 ///
-/// pub 的理由（来源仓库原话）：Go 侧 `ir.NumStrip` 是导出符号，pass1 的元数据扫描直接
-/// 调它（`pass1.go:215` 等 12 处）。本项目里消费方是 `postproc::pass1` 与 `postproc::pass2`。
+/// pub 的理由（来源仓库原话）：旧实现 `ir.NumStrip` 是导出符号，pass1 的元数据扫描直接
+/// 调它（等 12 处）。本项目里消费方是 `postproc::pass1` 与 `postproc::pass2`。
 pub fn num_strip(line: &str) -> Vec<f64> {
     let mut result = Vec::with_capacity(8);
     let mut buf = String::with_capacity(64);

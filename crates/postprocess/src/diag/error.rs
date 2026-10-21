@@ -1,19 +1,16 @@
-//! `PostprocError` —— 后处理内核的唯一错误类型，错误码保持旧 Go 侧字符串。
+//! `PostprocError` —— 后处理内核的唯一错误类型，错误码保持旧实现字符串。
 //!
-//! 旧码对照（全部实测自旧仓库）：
-//! - `E_FILE_READ_001`  —— `engine/pipeline_failure.go:62`（read_gcode）与 `:132`
-//!   （write_output；`codes.go:195` 注文明说 filesystem 模块复用它表示读写失败）
-//! - `E_FS_NOT_FOUND_001` —— `codes.go:204`，预设/输入文件不存在
-//! - `E_TOML_PARSE_001` —— `config/read.go:259` CRLF 归一重试仍失败
-//! - `E_CFG_PARSE_001` —— `pipeline_failure.go:51`（ConfigError 包裹，含
-//!   `process.go:242` 的「预设文件缺少 # machine: 声明」）
-//! - `E_CFG_INVALID_001` —— `pipeline_failure.go:76`
-//! - `E_GCODE_COLLISION_001` —— `pipeline_failure.go:87`
-//! - `E_GCODE_FAILED_001` —— `pipeline_failure.go:98/:109`（first_pass/second_pass）
-//! - `E_CAL_FAILED_001` —— `pipeline_failure.go:120`
-//! - `E_CAL_MISMATCH_001` —— `internal/disk/generator_new.go:54`（宽高互换）、`:245`、
-//!   `:432`（质心判 180°）、`:503`（质心判 90°），校准模型被旋转
-//! - `E_CAL_MISMATCH_002` —— `internal/disk/generator_new.go:69`、`:260`，校准模型被缩放
+//! 错误码是本程序**对外的稳定契约**（界面与日志都认它），所以码值不随实现变化：
+//!
+//! - `E_FILE_READ_001` —— 读输入 / 写输出失败（同一个码，读写都归它）
+//! - `E_FS_NOT_FOUND_001` —— 预设或输入文件不存在
+//! - `E_TOML_PARSE_001` —— TOML 解析失败（含 CRLF 归一重试后仍失败）
+//! - `E_CFG_PARSE_001` —— 配置结构对不上，含「预设文件缺少 `# machine:` 声明」
+//! - `E_CFG_INVALID_001` —— 配置取值不合法
+//! - `E_GCODE_COLLISION_001` —— 输入不是本程序能处理的 G-code
+//! - `E_GCODE_FAILED_001` —— 一 / 二遍处理失败
+//! - `E_CAL_FAILED_001` —— 校准失败
+//! - `E_CAL_MISMATCH_001` / `_002` —— 校准模型被旋转 / 被缩放（与预期不符）
 //! - `E_GCODE_BOUNDARY_001` / `_002` —— `calibrationfmt` 那两条边界（打印边界 / 涂胶范围）。
 //!   ★ 它们以前**只活在字符串里**（`offset.rs` 把码拼进 message，外面套 `InvalidConfig`），
 //!   2026-10-11 起升成结构化码（[`PostprocError::Boundary`]）—— 那正是「外层码在说假话」
@@ -65,7 +62,7 @@ pub enum PostprocError {
     /// 机型名不可用（空或不是已知机型），硬错误，`E_CFG_PARSE_001`。
     ///
     /// **文案与来源仓库不同，是有意改的**：那边写「预设文件缺少 `# machine:` 声明」
-    /// （`process.go:242` 的对位），而本项目没有预设文件、也没有头部注释 ——
+    /// 而本项目没有预设文件、也没有头部注释 ——
     /// 机型名是配置里的一个普通字段。照抄那句话会让用户去找一个不存在的东西。
     /// 错误码保持 `E_CFG_PARSE_001` 不变（对外契约）。
     MissingMachine { path: String },
@@ -88,8 +85,8 @@ pub enum PostprocError {
     Calibration { message: String },
 
     /// 校准模型形变检测命中（New 变体专属），码由 `code` 字段携带：
-    /// `E_CAL_MISMATCH_001`（旋转，`generator_new.go:54/245/432/503`）与
-    /// `E_CAL_MISMATCH_002`（缩放，`generator_new.go:69/260`）。
+    /// `E_CAL_MISMATCH_001`（旋转，）与
+    /// `E_CAL_MISMATCH_002`（缩放，）。
     ///
     /// **为什么不复用 `Calibration`**：那个码是「校准代码没生成出来」，
     /// 而这两个是「你的校准模型摆得不对」—— 一个让人去看日志，
@@ -127,7 +124,7 @@ pub enum PostprocError {
 }
 
 impl PostprocError {
-    /// 稳定错误码（旧 Go 侧对外契约字符串）。
+    /// 稳定错误码（旧实现对外契约字符串）。
     ///
     /// 穷尽性保障：本 match **刻意不写通配臂** —— 新增变体忘了给码是编译错误，
     /// 这就是 tasks.md 2.3 要求的「编译或测试失败」中的编译分支；

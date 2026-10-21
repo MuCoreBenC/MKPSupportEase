@@ -1,17 +1,17 @@
 //! config 步两层强校验（Task 23，补 Task 14 的漏移植）。
 //!
 //! 契约来源（逐字对照）：
-//! - `config.ValidateConfig`（config.go:54）：6 条硬检查，先跑；
-//! - `preset.ValidateAgainstRegistry`（validate_registry.go:30）：按 param_registry
-//!   全参数强校验，后跑。Go 侧 CLI 与 GUI 两条装配路径都生效（main.go:152-156 /
+//! - `config.ValidateConfig`：6 条硬检查，先跑；
+//! - `preset.ValidateAgainstRegistry`：按 param_registry
+//!   全参数强校验，后跑。旧实现 CLI 与 GUI 两条装配路径都生效（/
 //!   app_lifecycle startup()）；Rust 侧 registry 是嵌入快照**恒就绪**，不存在
-//!   Go 的「registry 未就绪跳过」分支（登记差异，非缺口）。
+//!   旧实现的「registry 未就绪跳过」分支（登记差异，非缺口）。
 //!
 //! 两层是**双层关系**，不许合并：与已移植的 `ir::build::validateRanges` 也是双层
-//! （Go 同样双层）——本层吃 TOML 原值（速度是 mm/s、无单位换算），IR 层吃换算后
+//! （旧实现 同样双层）——本层吃 TOML 原值（速度是 mm/s、无单位换算），IR 层吃换算后
 //! 值；bounds 数值不同（如 WiperX 这里 [-40,260]，registry [10,226]，IR 层不查）。
 //!
-//! 刻意复刻的谓词细节（validate_registry.go:72-108）：
+//! 刻意复刻的谓词细节：
 //! - 只有 `valueType=="string" && choices 非空` 才查枚举——**bool 带 choices 不校验**
 //!   （快照里 FirstPenRevitalizationFlag/PrimeEveryLayer 等 bool 均带 choices，
 //!   若错查枚举，全部真实预设会因 "false" ∉ {off,on} 而误报）；
@@ -23,8 +23,8 @@
 //!   缺端格式化为空串——formatBound 的 nil 分支）。
 //!
 //! **bug-compatible 键名漂移（实测登记）**：registry 侧 10 个 `GlueZCompensation*`
-//! 参数的 configKey 是全拼，而 Go `DtoToConfigMap` 里的键是缩写（`GlueZCompBedFL`
-//! 等）⇒ Go 的强校验**从未真正校验过这 10 个参数**（map 查不到即 continue）。
+//! 参数的 configKey 是全拼，而 旧实现 `DtoToConfigMap` 里的键是缩写（`GlueZCompBedFL`
+//! 等）⇒ 旧实现的强校验**从未真正校验过这 10 个参数**（map 查不到即 continue）。
 //! 本模块的 arm 表按 DtoToConfigMap 命名、查不到返回 None ⇒ 行为逐字一致。
 //! 用例 `registry_skips_glue_z_compensation_family_like_go` 锁住该行为。
 
@@ -32,7 +32,7 @@ use crate::model::TomlConfig;
 use crate::registry::{EffectiveRange, ParamEntry, Registry};
 use postprocess::diag::PostprocError;
 
-/// Go fmt `%v`/`%g` 对 float64 的最短定点形式（值域内与 Rust `{}` 逐字一致；
+/// 旧实现 fmt `%v`/`%g` 对 float64 的最短定点形式（值域内与 Rust `{}` 逐字一致；
 /// 与 ir::build 的 go_float_str 同一约定——本 crate 不依赖 ir，各自持有）。
 fn go_float(v: f64) -> String {
     format!("{v}")
@@ -42,7 +42,7 @@ fn invalid(message: String) -> PostprocError {
     PostprocError::InvalidConfig { message }
 }
 
-/// `DtoToConfigMap`（dto_mapper.go:16）的值形态——Go 侧 map[string]any 的类型面。
+/// `DtoToConfigMap`的值形态——旧实现 map[string]any 的类型面。
 #[derive(Debug, Clone, PartialEq)]
 pub enum ConfigVal {
     F64(f64),
@@ -51,7 +51,7 @@ pub enum ConfigVal {
     Bool(bool),
 }
 
-/// Go `fmt.Sprint(val)`：枚举校验时把 cfg 值与 choice 值拉到同一字符串面。
+/// 旧实现 `fmt.Sprint(val)`：枚举校验时把 cfg 值与 choice 值拉到同一字符串面。
 fn sprint(v: &ConfigVal) -> String {
     match v {
         ConfigVal::F64(f) => go_float(*f),
@@ -61,7 +61,7 @@ fn sprint(v: &ConfigVal) -> String {
     }
 }
 
-/// Go `choiceValueToString`：choice.Value 的字符串面（nil → ""，Rust 无 nil 面）。
+/// 旧实现 `choiceValueToString`：choice.Value 的字符串面（nil → ""，Rust 无 nil 面）。
 fn choice_value_to_string(v: &toml::Value) -> String {
     match v {
         toml::Value::String(s) => s.clone(),
@@ -72,7 +72,7 @@ fn choice_value_to_string(v: &toml::Value) -> String {
     }
 }
 
-/// Go `asFloat64`：非数值面返回 None ⇒ 范围分支跳过。
+/// 旧实现 `asFloat64`：非数值面返回 None ⇒ 范围分支跳过。
 fn as_f64(v: &ConfigVal) -> Option<f64> {
     match v {
         ConfigVal::F64(f) => Some(*f),
@@ -81,14 +81,14 @@ fn as_f64(v: &ConfigVal) -> Option<f64> {
     }
 }
 
-/// Go `formatBound`：nil → ""（开放端在消息里显示为空串）。
+/// 旧实现 `formatBound`：nil → ""（开放端在消息里显示为空串）。
 fn format_bound(b: Option<f64>) -> String {
     b.map_or_else(String::new, go_float)
 }
 
 /// dto.TomlConfig → configKey 值（`DtoToConfigMap` 逐键对照，77 键）。
-/// 未知 configKey 返回 None = Go map 查不到 ⇒ 该参数跳过。
-/// `TowerFirstLayerFlow` 的 ADR-007 零值替换（0→1.0）与 Go 同在此发生。
+/// 未知 configKey 返回 None = 旧实现 map 查不到 ⇒ 该参数跳过。
+/// `TowerFirstLayerFlow` 的 ADR-007 零值替换（0→1.0）与 旧实现 同在此发生。
 pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     let t = &cfg.toolhead;
     let w = &cfg.wiping;
@@ -168,7 +168,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "GlueZCompPatchFR" => ConfigVal::F64(w.glue_z_comp_patch_fr),
         "GlueZCompPatchBL" => ConfigVal::F64(w.glue_z_comp_patch_bl),
         "GlueZCompPatchBR" => ConfigVal::F64(w.glue_z_comp_patch_br),
-        // Go 侧经 FastTowerModeToString：string 输入原样返回（bool 分支 dto 不触达）
+        // 旧实现经 FastTowerModeToString：string 输入原样返回（bool 分支 dto 不触达）
         "FastTowerMode" => ConfigVal::Str(w.fast_tower_mode.clone()),
         "TowerGlueLayerSpeed" => ConfigVal::F64(w.tower_glue_layer_speed),
         "TowerSheathSpeed" => ConfigVal::F64(w.tower_sheath_speed),
@@ -178,7 +178,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "TowerWipeMode" => ConfigVal::Str(w.tower_wipe_mode.clone()),
         "TowerSafeZOffset" => ConfigVal::F64(w.tower_safe_z_offset),
         "TowerTravelSpeed" => ConfigVal::F64(w.tower_travel_speed),
-        // ADR-007：0 视为未设置，进校验面的值是 registry 默认 1.0（Go 在 map 构造时替换）
+        // ADR-007：0 视为未设置，进校验面的值是 registry 默认 1.0（旧实现 在 map 构造时替换）
         "TowerFirstLayerFlow" => ConfigVal::F64(if w.tower_first_layer_flow == 0.0 {
             1.0
         } else {
@@ -189,7 +189,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     })
 }
 
-/// 第一层：`ValidateConfig`（config.go:54）——6 条硬检查，消息逐字。
+/// 第一层：`ValidateConfig`——6 条硬检查，消息逐字。
 pub fn validate_config(cfg: &TomlConfig) -> Result<(), PostprocError> {
     let t = &cfg.toolhead;
     let w = &cfg.wiping;
@@ -230,8 +230,8 @@ pub fn validate_config(cfg: &TomlConfig) -> Result<(), PostprocError> {
     Ok(())
 }
 
-/// 第二层：`ValidateAgainstRegistry`（validate_registry.go:30）——按 registry
-/// 参数序迭代（Go 遍历 reg.Params 数组，确定性序），Key/ConfigKey 空壳跳过，
+/// 第二层：`ValidateAgainstRegistry`——按 registry
+/// 参数序迭代（旧实现 遍历 reg.Params 数组，确定性序），Key/ConfigKey 空壳跳过，
 /// dto 未映射的 configKey 跳过（不报错）。
 ///
 /// **区间来自注册表的「有效区间」**（spec `ranges-from-registry`）：
@@ -304,7 +304,7 @@ fn validate_registry_entry(
             return Ok(()); // 非数值面不校验（Go asFloat64 !ok）
         };
         if f == 0.0 {
-            return Ok(()); // 零值=未设置，跳过（Go 语义，本轮不改；补集由 validate_config 守）
+            return Ok(()); // 零值=未设置，跳过（本轮不改；补集由 validate_config 守）
         }
         if r.min.is_some_and(|m| f < m) || r.max.is_some_and(|m| f > m) {
             return Err(invalid(format!(
@@ -355,7 +355,7 @@ mod tests {
 
     /// **K-R6：零值豁免的补集。**
     ///
-    /// 注册表那道范围检查在 `f == 0.0` 时直接放过（Go 语义，本轮不改），
+    /// 注册表那道范围检查在 `f == 0.0` 时直接放过（旧实现语义，本轮不改），
     /// 所以 `speed_limit = 0` 只有第一层拦得住 —— 这就是那条硬规则**留下来的全部理由**。
     /// 反过来 `wiper_x = 0` 今天是被放过的（豁免），删掉第一层的区间也不改变这一点。
     #[test]
@@ -371,7 +371,7 @@ mod tests {
         );
         // 而第二层**放过它**（零值豁免）—— 这正是第一层不能删的证据
         validate_against_registry(&zero_speed, &reg, "A1", None)
-            .expect("零值豁免：第二层放过 speed_limit = 0（Go 语义）");
+            .expect("零值豁免：第二层放过 speed_limit = 0");
 
         // wiper_x = 0：两层都放过（与删除硬编码之前一致）
         let mut zero_wiper = cfg_from("");
@@ -462,9 +462,9 @@ mod tests {
     }
 
     /// **bug-compatible 跳过（响亮登记，不是我们的 bug）**：registry 侧 10 个
-    /// `GlueZCompensation*` 参数的 configKey（全拼）在 Go 的 DtoToConfigMap 里
+    /// `GlueZCompensation*` 参数的 configKey（全拼）在 旧实现的 DtoToConfigMap 里
     /// 是缩写形态（`GlueZCompBedFL`…）⇒ `values[entry.ConfigKey]` 查不到 ⇒
-    /// **Go 的强校验从未真正校验过这 10 个参数**。本移植逐字复刻（arm 表按
+    /// **旧实现的强校验从未真正校验过这 10 个参数**。本移植逐字复刻（arm 表按
     /// DtoToConfigMap 命名，查不到返回 None ⇒ 跳过）。若哪天旧侧修了键名漂移，
     /// 这里同步——不许先于旧侧「修好」。
     #[test]
@@ -498,7 +498,7 @@ mod tests {
         validate_against_registry(&cfg, &load_param_registry(), "A1", None).expect("零值应豁免");
     }
 
-    /// bool 带 choices 刻意不校验（Go 谓词 string&&choices 的复刻）：
+    /// bool 带 choices 刻意不校验（旧实现 谓词 string&&choices 的复刻）：
     /// FirstPenRevitalizationFlag=false 且 choices={off,on}——若错查枚举，
     /// 这里会因 "false" ∉ {off, on} 而误报。
     #[test]

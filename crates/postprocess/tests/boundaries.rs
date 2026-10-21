@@ -1,6 +1,6 @@
 //! 架构边界的机械门禁。
 //!
-//! 来源仓库 mkp-sr 有 **12** 条这样的断言（靠 `crates/gatecheck` 读 Cargo.toml 实现），
+//! 来源仓库 来源实现 有 **12** 条这样的断言（靠 `crates/gatecheck` 读 Cargo.toml 实现），
 //! 本项目只有**恰好 2** 条。这是**证据等级的真实下降，不是清理**：
 //! 文本扫描比 Cargo 的依赖图弱（换个写法就绕过去了）。
 //!
@@ -177,13 +177,13 @@ fn fma_pattern() -> String {
 
 /// 禁止 `f64::mul_add`。
 ///
-/// **这是实测事实，不是洁癖**：旧 Go 侧 rib 圆角的 epsilon 比较（`polygon.go:23` 排序 /
-/// `removeDuplicatePoints` / `rib.go:351` 的 `math.Abs(cosangle) < cosAngleTol`）撞上
+/// **这是实测事实，不是洁癖**：旧实现 rib 圆角的 epsilon 比较（排序 /
+/// `removeDuplicatePoints` /  的 `math.Abs(cosangle) < cosAngleTol`）撞上
 /// **arm64 允许 FMA 融合、amd64 不融合** ⇒ 阈值一翻就**换几何分支**。
-/// `rib/mid_tower_h250` 实测 1201 vs 1195 行、坐标 X/Y 转置，**在同一份 Go 代码上就已经
+/// `rib/mid_tower_h250` 实测 1201 vs 1195 行、坐标 X/Y 转置，**在同一份 旧实现 代码上就已经
 /// 不可复现**，那条用例已被移出字节 golden（vendored 的 23 块里没有它）。
 ///
-/// 所以几何层必须按 Go 源码的运算顺序逐字复刻，禁止 `mul_add` 与任何可被编译器自由融合的
+/// 所以几何层必须按 旧实现 源码的运算顺序逐字复刻，禁止 `mul_add` 与任何可被编译器自由融合的
 /// 写法。clippy 的 `suboptimal_flops` 给的建议正是 mul_add，因此 Cargo.toml 里**刻意不
 /// deny 它** —— 真守卫就是这条文本扫描。
 ///

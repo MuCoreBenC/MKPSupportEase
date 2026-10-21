@@ -1,4 +1,4 @@
-//! G-code 元数据单行提取（对照 gcodebiz/metadata.go 的 FilamentTypeFromLine）。
+//! G-code 元数据单行提取（对照  的 FilamentTypeFromLine）。
 
 /// `FilamentTypeFromLine`：从 "; filament_type = PLA;PETG" 类注释提取第一个
 /// 非空 token 并大写；兼容 "= PLA" / "=PLA" / "= \"PLA\"" 写法。不匹配返回 ""。

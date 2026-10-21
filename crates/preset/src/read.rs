@@ -1,4 +1,4 @@
-//! 读取面 —— 头注释正则、CRLF 两段式、错误码（对照 config/read.go）。
+//! 读取面 —— 头注释正则、CRLF 两段式、错误码（对照）。
 
 use crate::model::{PresetFile, TomlConfig};
 // 搬入 mkp-ssr 的唯一改动：mkp_diag → postprocess::diag（错误码本身一个字没动，
@@ -87,14 +87,14 @@ fn unknown_field_name(message: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// `^#\s*release_time\s*:\s*(.+)$`（read.go:205 的正则，trim 后逐行匹配）。
+/// `^#\s*release_time\s*:\s*(.+)$`（trim 后逐行匹配）。
 /// 手写匹配器（无 regex 依赖）：'#'、任意空白、字面量、任意空白、':'、
 /// 任意空白、至少一个字符的捕获（TrimSpace 后为空视同未命中）。
 pub fn parse_release_time_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "release_time")
 }
 
-/// `^#\s*machine\s*:\s*(.+)$`（read.go:219；actualMachine 的 SSOT 数据源）。
+/// `^#\s*machine\s*:\s*(.+)$`（；actualMachine 的 SSOT 数据源）。
 pub fn parse_machine_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "machine")
 }
@@ -149,7 +149,7 @@ fn parse_header_value(content: &str, key: &str) -> Option<String> {
 fn match_header_key<'a>(line: &'a str, key: &str) -> Option<&'a str> {
     let after_hash = line.strip_prefix('#')?;
     let after_ws1 = after_hash.trim_start();
-    // trim_start 会剥所有 Unicode 空白；Go 的 \s 是 [\t\n\f\r ]——头部注释
+    // trim_start 会剥所有 Unicode 空白；旧实现的 \s 是 [\t\n\f\r ]——头部注释
     // 实际只有空格/制表，两者在此值域等价。
     let after_key = after_ws1.strip_prefix(key)?;
     // 键后必须是可选空白 + 冒号（防 "machine_x:" 误命中）
@@ -227,9 +227,9 @@ glue_z_compensation_enabled = false
         assert_eq!(err.code(), "E_TOML_PARSE_001");
     }
 
-    /// CRLF 兜底两形态，与 Go 语义逐字对齐：
+    /// CRLF 兜底两形态，与 旧实现语义逐字对齐：
     /// - `\r\n` 文件：首轮可解析（或归一后可解析），头注释照常命中；
-    /// - 裸 `\r` 文件：TOML 归一后**能**解析，但 Go 的 bufio.Scanner 同样
+    /// - 裸 `\r` 文件：TOML 归一后**能**解析，但 旧实现的 bufio.Scanner 同样
     ///   不按裸 \r 分行 ⇒ machine 头提取不到 ⇒ 引擎层硬错误。Rust 在读取点
     ///   报 MissingMachine，失败层级不同、终态一致，如实登记。
     #[test]

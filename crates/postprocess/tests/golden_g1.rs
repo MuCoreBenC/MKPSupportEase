@@ -1,6 +1,6 @@
 //! G1 —— FirstPass 输出逐字节 golden（Task 3.3 落判据，Task 11 转绿）。
 //!
-//! 输入 `42274.2.gcode` + Task 4.2 导出的 IR fixture（golden_test.go:38-46 的
+//! 输入 `42274.2.gcode` + Task 4.2 导出的 IR fixture（
 //! 7 项覆写已含在导出里）。判据：先比行数再逐行，零容差、不许 Skip。
 //! 附 11.7 哨兵：`M1031 S1` 出现次数 ≤ 20（RISK-002 回归锚）。
 

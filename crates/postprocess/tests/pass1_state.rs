@@ -1,7 +1,7 @@
-//! pass1 状态机行为测试（对照 processor/pass1_state_test.go 逐条移植）。
+//! pass1 状态机行为测试（对照  逐条移植）。
 //!
 //! 这些测试是「行为规格」而非字节判据：钉住熨平移除标志的置位/清除/泄漏/残留、
-//! copyFlag/actFlag 闭环、风扇状态跟踪与恢复。含 4 个 Go 侧已登记的 KNOWN BUG
+//! copyFlag/actFlag 闭环、风扇状态跟踪与恢复。含 4 个 旧实现已登记的 KNOWN BUG
 //! （RISK-003/004/005/011）——Rust 逐字复刻，同样以测试钉住其行为。
 //!
 //! helper 直测的 3 条（findPrevPositionCmd 索引 0、stripSkippableBlocks 两形态）
@@ -16,7 +16,7 @@ fn fixture_ir() -> Ir {
     )
     .expect("读不到 IR fixture");
     let mut ir: Ir = serde_json::from_str(&json).expect("IR 反序列化失败");
-    // Go 的 newTestIR 不设 MachineType（runFirstPass 传空 tomlMachine → 跳过维度
+    // 旧实现的 newTestIR 不设 MachineType（runFirstPass 传空 tomlMachine → 跳过维度
     // 填充、±999 边界）。fixture 带 golden 覆写 A1_MINI，这里抹平对齐 newTestIR。
     ir.machine.machine_type = String::new();
     ir
@@ -26,7 +26,7 @@ fn lines(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// runFirstPass（pass1_state_test.go:161）：跑 first_pass，返回 (输出行, 突变后 IR)。
+/// runFirstPass：跑 first_pass，返回 (输出行, 突变后 IR)。
 fn run_first_pass(gcode: &[String], ir_data: Ir) -> (Vec<String>, Ir) {
     let mut ir = ir_data;
     let toml_machine = ir.machine.machine_type.clone();

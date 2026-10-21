@@ -28,7 +28,7 @@ use crate::ir::{Ir, fill_defaults};
 /// 读配置文件 → [`Ir`]，并就地跑一次 [`fill_defaults`]。
 ///
 /// **为什么 `fill_defaults` 在这里调**：来源仓库的 `ir::build()` 刻意不含它，要求
-/// 「G-code 元数据提取之后同一时机」调用（对齐 Go `ConfigToParams` 的等价边界）。
+/// 「G-code 元数据提取之后同一时机」调用（对齐 旧实现 `ConfigToParams` 的等价边界）。
 /// 本项目没有 `build()` 了，这条时序落在 pipeline 的 config 步 —— 也就是这个函数。
 /// 机型表填充（`fill_machine_dims_from_toml`）在**下一步**才跑，顺序与来源一致。
 pub fn load(path: &Path) -> Result<Ir, PostprocError> {

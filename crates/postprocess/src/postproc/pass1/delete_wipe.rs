@@ -1,6 +1,6 @@
-//! 擦拭段删除与特征跳转插入（对照 processor/delete_wipe.go / delete_wipe_continuous.go）。
+//! 擦拭段删除与特征跳转插入（对照  /）。
 
-// 结构逐字对照 delete_wipe.go：嵌套 if / 手工索引循环与 Go 同形，不改写。
+// 结构逐字对照 ：嵌套 if / 手工索引循环与 旧实现 同形，不改写。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -12,7 +12,7 @@ use crate::gcode::{
     is_glue_continuous_feature, match_slicer_comment,
 };
 
-/// `isTransferLine`（delete_wipe.go:8）。
+/// `isTransferLine`。
 fn is_transfer_line(trimmed: &str) -> bool {
     if trimmed.starts_with("G3 ") {
         return true;
@@ -32,7 +32,7 @@ fn is_transfer_line(trimmed: &str) -> bool {
     false
 }
 
-/// `isTransferLineContinuous`（delete_wipe_continuous.go:8）：与 is_transfer_line
+/// `isTransferLineContinuous`：与 is_transfer_line
 /// 相同但**不含 M204**（M204 在连续模式下保留）。
 fn is_transfer_line_continuous(trimmed: &str) -> bool {
     if trimmed.starts_with("G3 ") {
@@ -50,7 +50,7 @@ fn is_transfer_line_continuous(trimmed: &str) -> bool {
     false
 }
 
-/// `stripZFromLine`（delete_wipe.go:24）：剥掉 " Z<val>" 参数（仅当前导空格存在时）。
+/// `stripZFromLine`：剥掉 " Z<val>" 参数（仅当前导空格存在时）。
 fn strip_z_from_line(line: &str) -> String {
     if let Some(z_idx) = line.find('Z') {
         if z_idx > 0 && line.as_bytes()[z_idx - 1] == b' ' {
@@ -68,7 +68,7 @@ fn strip_z_from_line(line: &str) -> String {
     line.to_string()
 }
 
-/// `stripSkippableBlocks`（pass1.go:1123）：移除 "; SKIPPABLE_START" 到
+/// `stripSkippableBlocks`：移除 "; SKIPPABLE_START" 到
 /// "; SKIPPABLE_END"（含）之间的行（延时摄影 / head_wrap_detect 等检测段）。
 pub(crate) fn strip_skippable_blocks(lines: &[String]) -> Vec<String> {
     let mut result = Vec::new();
@@ -90,7 +90,7 @@ pub(crate) fn strip_skippable_blocks(lines: &[String]) -> Vec<String> {
     result
 }
 
-/// `DeleteWipe`（delete_wipe.go:38）。
+/// `DeleteWipe`。
 pub(crate) fn delete_wipe(iface: &[String]) -> Vec<String> {
     let iface = strip_skippable_blocks(iface);
 
@@ -191,7 +191,7 @@ pub(crate) fn delete_wipe(iface: &[String]) -> Vec<String> {
     iface
 }
 
-/// `DeleteWipeContinuous`（delete_wipe_continuous.go:25）：保留 M204、
+/// `DeleteWipeContinuous`：保留 M204、
 /// 插入 MICRO_LIFT 标记的连续变体。
 pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
     let iface = strip_skippable_blocks(iface);
@@ -301,7 +301,7 @@ pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
     iface
 }
 
-/// `insertFeatureTransitionJumps`（delete_wipe.go:118）：在「非打印移动的间隙」
+/// `insertFeatureTransitionJumps`：在「非打印移动的间隙」
 /// 处插入 `;ZJUMP_INTERNAL[ ; FEATURE: ...]`，压缩特征过渡段。
 fn insert_feature_transition_jumps(lines: Vec<String>) -> Vec<String> {
     let is_print_move = |line: &str| -> bool {
@@ -428,7 +428,7 @@ fn insert_feature_transition_jumps(lines: Vec<String>) -> Vec<String> {
     result
 }
 
-/// `insertMicroLiftMarkers`（delete_wipe_continuous.go:112）：M204 S10000 之后
+/// `insertMicroLiftMarkers`：M204 S10000 之后
 /// 若下一条加速度是 S6000（且中间无挤出移动），插入 MICRO_LIFT 标记。
 fn insert_micro_lift_markers(iface: Vec<String>) -> Vec<String> {
     let mut result: Vec<String> = Vec::new();
@@ -533,10 +533,10 @@ mod tests {
 
     #[test]
     fn strip_z_from_line_variants() {
-        // Go 语义：line[:zIdx] 的尾随空格 + rest[spaceIdx:] 的前导空格 = 双空格
+        // 旧实现语义：line[:zIdx] 的尾随空格 + rest[spaceIdx:] 的前导空格 = 双空格
         assert_eq!(strip_z_from_line("G1 X10 Y20 Z0.5 E1"), "G1 X10 Y20  E1");
         assert_eq!(strip_z_from_line("G1 X10 Z0.5"), "G1 X10");
-        // Z 前无空格（词中 Z）不剥 —— Go 原样
+        // Z 前无空格（词中 Z）不剥 —— 旧实现 原样
         assert_eq!(strip_z_from_line("G1 X10Y20Z5"), "G1 X10Y20Z5");
     }
 }

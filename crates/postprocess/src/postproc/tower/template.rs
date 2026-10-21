@@ -1,4 +1,4 @@
-//! 层模板嵌入（对照 embed_templates.go：go:embed 的 include_str! 等价物）。
+//! 层模板嵌入（对照 ：go:embed 的 include_str! 等价物）。
 
 const TOWER_LAYER_GCODE: &str = include_str!("../../../templates/tower_layer.gcode");
 

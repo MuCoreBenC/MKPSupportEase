@@ -1,5 +1,5 @@
-//! 校准 G-code 生成（对照 disk/generator.go 的经典三生成器 + calibeSing +
-//! zOffsetSingLines，以及 generator_new.go 的两个 New 变体）。
+//! 校准 G-code 生成（对照  的经典三生成器 + calibeSing +
+//! zOffsetSingLines，以及  的两个 New 变体）。
 //!
 //! 经典分支拿机型固定坐标（`machine_dims` 的 `calibration.*`）；New 变体拿
 //! 模型 BBox 左下角 + 图案基准偏移，即「固定模板 + 动态原点」，图案跟着模型走。
@@ -739,7 +739,7 @@ fn generate_repetition_calibration(
 
 /// mount / unmount 行：trim、去空行，然后**逐行过 `filter_e_moves`**。
 ///
-/// 与经典分支的 `mount_unmount_lines` 差一步过滤（generator_new.go:107-116 /
+/// 与经典分支的 `mount_unmount_lines` 差一步过滤（/
 /// :205-214）：New 变体不许挂载脚本里的真实挤出动作混进校准图案。
 fn filtered_mount_unmount_lines(ir_data: &Ir) -> (Vec<String>, Vec<String>) {
     let keep = |lines: &[String]| -> Vec<String> {
@@ -760,7 +760,7 @@ fn filtered_mount_unmount_lines(ir_data: &Ir) -> (Vec<String>, Vec<String>) {
     )
 }
 
-/// 按实测包围盒**认档** —— `generator_new.go:50-84` 与 `:241-275` 那两道尺寸检测
+/// 按实测包围盒**认档** ——  与 `:241-275` 那两道尺寸检测
 /// （宽高互换 / 尺寸不符）的泛化版：不再对着**一个**写死的标称尺寸比，而是在
 /// **已知档位**里找一档（档来自 `presets/calibration_models.toml`）。
 ///
@@ -857,7 +857,7 @@ fn pattern_missing(profile: &ModelProfile, keys: &str) -> PostprocError {
     }
 }
 
-/// `generateXYCalibrationNew`（generator_new.go:47-220）：BBox 感知的 XY 校准。
+/// `generateXYCalibrationNew`：BBox 感知的 XY 校准。
 ///
 /// 与经典 `generate_xy_calibration` 的差异（四处，都容易漏）：
 /// 1. 坐标相对 `model_bbox` 左下角，**不读机型固定坐标**，因此也没有
@@ -1064,7 +1064,7 @@ fn generate_xy_calibration_new(
     Ok(Some(output))
 }
 
-/// `generateZOffsetCalibrationNew`（generator_new.go:233-372）：BBox 感知的 Z 偏移校准。
+/// `generateZOffsetCalibrationNew`：BBox 感知的 Z 偏移校准。
 ///
 /// 与经典 `generate_z_offset_calibration` 只差原点：经典读机型 `z_start_x/y`，
 /// 这里用 `bbox` 左下角 + 档里的 `datumX/datumY`（现行档 0.079 / 3.755，
@@ -1072,7 +1072,7 @@ fn generate_xy_calibration_new(
 /// 其余（`z_accumulate` 每轮 −0.1、A1 家族的 Floating Z、每轮尾部停留）逐行一致。
 ///
 /// `loadCalibrationTemplate(template_dir, "z_offset_path_new.gcode")` 无 Rust 对位：
-/// 本项目没有运行时模板目录，Go 侧 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
+/// 本项目没有运行时模板目录，旧实现 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
 /// 所以这里直接用 `Z_OFFSET_SING_LINES`，与经典分支同源。
 #[allow(clippy::too_many_arguments)]
 fn generate_z_offset_calibration_new(
@@ -1202,7 +1202,7 @@ fn generate_z_offset_calibration_new(
     Ok(Some(output))
 }
 
-/// `checkRotationByCentroid`（generator_new.go:374-529）：拿挤出质心相对 BBox 中心的
+/// `checkRotationByCentroid`：拿挤出质心相对 BBox 中心的
 /// 偏移方向判断校准模型是否被旋转。
 ///
 /// 为什么需要它：BBox 只能看出「尺寸变了」。正方形模型（XY 图案 50.5×50.5）转 90°、
@@ -1212,7 +1212,7 @@ fn generate_z_offset_calibration_new(
 /// 长条 180°、正方形 90°。把「放过」挪到后面会让退化输入走进除法；把 90° 挪到
 /// 180° 前面会把双轴反向误报成 90°。
 ///
-/// Go 侧用 `errdiag.WithContext` 挂了 ~20 个结构化字段。Rust 侧没有 errdiag 这一层，
+/// 旧实现用 `errdiag.WithContext` 挂了 ~20 个结构化字段。Rust 侧没有 errdiag 这一层，
 /// **登记偏差**：上下文拼进 message 文本 —— 消费方只有弹窗一行和日志一行，
 /// 没有读结构化字段的人。
 #[allow(clippy::too_many_arguments)]
@@ -1225,7 +1225,7 @@ fn check_rotation_by_centroid(
     min_offset_ratio: f64,
     error_source: &str,
     is_square_model: bool,
-    // Go 侧两个调用方都传 0，此时 `magnitude_ok` 恒为 true。参数保留是为了与
+    // 旧实现两个调用方都传 0，此时 `magnitude_ok` 恒为 true。参数保留是为了与
     // 参考实现同形，不是为了将来某个假想需求。
     expected_relative_magnitude: i32,
 ) -> Result<(), PostprocError> {
@@ -2012,7 +2012,7 @@ mod tests {
         );
     }
 
-    /// 宽或高 ≤ 0 直接放过（generator_new.go:390-392）——退化 BBox 上判方向没有意义。
+    /// 宽或高 ≤ 0 直接放过——退化 BBox 上判方向没有意义。
     #[test]
     fn degenerate_bbox_passes() {
         let b = bbox_at(10.0, 10.0, 0.0, 50.0);
@@ -2024,7 +2024,7 @@ mod tests {
         assert!(xy_check(&b, c).is_ok());
     }
 
-    /// 两轴偏移比都不够大 ⇒ 放过（generator_new.go:426-429）。
+    /// 两轴偏移比都不够大 ⇒ 放过。
     /// 立场是「判不出来就不判」：宁可漏报，也不因为模型本身对称就拦住用户。
     #[test]
     fn tiny_offsets_pass_even_when_reversed() {
@@ -2034,7 +2034,7 @@ mod tests {
         assert!(xy_check(&b, c).is_ok());
     }
 
-    /// 双轴都反向且都够大 ⇒ 180°（generator_new.go:461-465）。
+    /// 双轴都反向且都够大 ⇒ 180°。
     #[test]
     fn both_axes_reversed_is_180() {
         let b = bbox_at(0.0, 0.0, 50.5, 50.5);
@@ -2048,7 +2048,7 @@ mod tests {
         );
     }
 
-    /// 长条模型（长宽比 ≥ 3.0）只看长轴（generator_new.go:467-482）。
+    /// 长条模型（长宽比 ≥ 3.0）只看长轴。
     /// Z 校准模型 119.58×13.063 长宽比 9.15，短轴的方向噪声很大，不能拿来判。
     #[test]
     fn long_strip_judges_only_the_long_axis() {
@@ -2063,7 +2063,7 @@ mod tests {
         );
     }
 
-    /// 正方形模型的单轴反向 ⇒ 90°（generator_new.go:484-526）。
+    /// 正方形模型的单轴反向 ⇒ 90°。
     /// XY 图案是 50.5×50.5，转 90° 后 BBox 一模一样，只有质心方向能看出来。
     #[test]
     fn square_model_single_axis_reversed_is_90() {
@@ -2076,7 +2076,7 @@ mod tests {
     }
 
     /// 非正方形、非长条模型的单轴反向**不判** —— `is_square_model` 为 false
-    /// 时那条支路整块跳过（generator_new.go:484）。
+    /// 时那条支路整块跳过。
     #[test]
     fn non_square_single_axis_reversed_passes() {
         let b = bbox_at(0.0, 0.0, 40.0, 30.0);

@@ -48,7 +48,7 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     /* 底面涂胶实际生效的那一格在 `state`（见模块头那条"特例"） */
     ir.state.glue_bottom_enabled = prefs.glue_bottom_enabled;
 
-    /* 热床预涂胶同理：`bed_glue.go` 那一套的开关也住在 `state` 这一带，
+    /* 热床预涂胶同理： 那一套的开关也住在 `state` 这一带，
     这里先只写 `prefs`（生成器读的是它）。等 `state` 那边加了字段再一并写。 */
 }
 

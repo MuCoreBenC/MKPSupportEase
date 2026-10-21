@@ -1,7 +1,7 @@
-//! 支撑面接口有效性判定（对照 processor/validity.go）。
+//! 支撑面接口有效性判定（对照）。
 
 /// `CheckValidityInterfaceSet`：iface 里存在正挤出量（E > 0.001）的 G1 行即有效。
-/// 负 E（回抽）跳过；E 后紧跟 '-' 时直接 continue（Go 原样，含 '-' 分支不置位）。
+/// 负 E（回抽）跳过；E 后紧跟 '-' 时直接 continue（旧实现 原样，含 '-' 分支不置位）。
 pub(crate) fn check_validity_interface_set(iface: &[String]) -> bool {
     for line in iface {
         let trimmed = line.trim();

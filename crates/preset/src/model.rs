@@ -1,12 +1,12 @@
-//! serde 读面 —— 键名与 `dto/config.go` 的 toml 标签逐字一致。
+//! serde 读面 —— 键名与  的 toml 标签逐字一致。
 //!
 //! `deny_unknown_fields`：真实预设里出现结构体没有的键 = 解析失败。
 //! 这把 tasks.md 6.1 的「键名逐字对照」从人工核对变成机械判据。
 
 use serde::Deserialize;
 
-/// `tower_wipe_speed` 的 Go 类型是 `any`（弃用字段，int 或 float 都要接受，
-/// 迁移逻辑在 ir/build.go:976-992，Rust 侧由 Task 7 处理）。
+/// `tower_wipe_speed` 的 旧实现 类型是 `any`（弃用字段，int 或 float 都要接受，
+/// 迁移逻辑在 ，Rust 侧由 Task 7 处理）。
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
 #[serde(untagged)]
 pub enum IntOrFloat {

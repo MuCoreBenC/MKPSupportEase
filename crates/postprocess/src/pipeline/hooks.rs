@@ -1,18 +1,18 @@
-//! write 步的三个收尾 Hooks（对照 gcodesvc 的 startup_common.go /
-//! begin_stage_retract*.go / bed_glue.go 的调用面）。
+//! write 步的三个收尾 Hooks（对照 gcodesvc 的  /
+//! begin_stage_retract*.go /  的调用面）。
 //!
-//! 偏好默认值与 Go preferences/service.go:165-180 逐字一致：
+//! 偏好默认值与 旧实现  逐字一致：
 //! `SkipVibrationCalibration=true / BeginStageRetractEnabled=true /
 //! BeginStageRetractZLiftMm=20 / BedGlueEnabled=false / GlueBottomEnabled=false`。
 //! Phase 1 CLI 无 preferences 通道， hooks 恒按默认值执行。
 //!
-//! bed_glue.go（607 行生成器）默认关且无任何字节参考 —— 刻意未移植本体，
+//! （607 行生成器）默认关且无任何字节参考 —— 刻意未移植本体，
 //! 钩子点保留为 no-op（登记于 HONEST-BOUNDARIES）。
 
 use crate::gcode::{format_python_float, has_e_param};
 use crate::ir::Ir;
 
-/// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
+/// `applySkipVibrationCalibration`：删除 M970*/M974 行。
 ///
 /// TODO（2026-10-18 作者）：这个开关目前只在 **A1 / A1 mini** 上验证过 —— 只有
 /// 这两家机器的切片器会往 G-code 里写 M970/M974 震动补偿校准序列。别的机型
@@ -54,7 +54,7 @@ fn starts_with_ascii_ci(s: &str, prefix: &str) -> bool {
         .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
-/// P1/X1 共用收笔 G-code（begin_stage_retract_custom.go:8，从 p1mkp 样本提取）。
+/// P1/X1 共用收笔 G-code（，从 p1mkp 样本提取）。
 const BEGIN_STAGE_RETRACT_P1X1: &[&str] = &[
     "M290 X40 Y40 Z2.6666666",
     "G90",
@@ -86,7 +86,7 @@ fn custom_begin_stage_retract_gcode(machine_type: &str) -> Option<&'static [&'st
     }
 }
 
-/// `filterUnmountGcodeLines`（startup_common.go:253，pass1 规则复用）。
+/// `filterUnmountGcodeLines`（，pass1 规则复用）。
 fn filter_unmount_gcode_lines(unmount_lines: &[&str], fan_speed: f64) -> Vec<String> {
     let mut result = Vec::with_capacity(unmount_lines.len());
     for ul in unmount_lines {
@@ -110,7 +110,7 @@ fn filter_unmount_gcode_lines(unmount_lines: &[&str], fan_speed: f64) -> Vec<Str
     result
 }
 
-/// `extractZHomingSequence`（startup_common.go:309）：动态提取 Z 归零前置序列。
+/// `extractZHomingSequence`：动态提取 Z 归零前置序列。
 fn extract_z_homing_sequence(lines: &[String]) -> Option<Vec<String>> {
     let z_home_idx = lines
         .iter()
@@ -150,14 +150,14 @@ fn extract_z_homing_sequence(lines: &[String]) -> Option<Vec<String>> {
 
 /// 收笔抬升高度的合法区间（mm，**绝对 Z**）。
 ///
-/// 原厂口径（`startup_common.go:366`）：越界**不夹取，而是回落到下限** ——
+/// 原厂口径：越界**不夹取，而是回落到下限** ——
 /// 所以这里只提供区间，判据仍在 [`build_begin_stage_retract_block`] 里写"回落下限"。
 /// 客户端那一份量程（`runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_*`）必须与这两个数
 /// 一致，由 `runtime::postproc_prefs` 的测试咬住。
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM: i64 = 20;
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM: i64 = 100;
 
-/// `buildBeginStageRetractBlock`（startup_common.go:366）。
+/// `buildBeginStageRetractBlock`。
 fn build_begin_stage_retract_block(
     unmount_lines: &[&str],
     fan_speed: f64,
@@ -193,7 +193,7 @@ fn build_begin_stage_retract_block(
     block
 }
 
-/// `applyBeginStageRetractToFile`（service.go:456，内存行版）：
+/// `applyBeginStageRetractToFile`（，内存行版）：
 /// 第一个 "; FEATURE: Custom" 前插入收笔块；机型未定义则跳过。
 pub fn apply_begin_stage_retract(
     lines: Vec<String>,

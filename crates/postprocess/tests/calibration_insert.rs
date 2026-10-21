@@ -312,7 +312,7 @@ fn p1_direct_mode_drops_the_mech_check_and_print_preheat() {
     );
 }
 
-/// X1C 与 P1S 共用同一条起始段裁剪（来源仓库 helpers.go:991 就是这么分的）。
+/// X1C 与 P1S 共用同一条起始段裁剪（来源仓库  就是这么分的）。
 /// 差别只在 `preserve_nozzle_load_line`：X1C 不在那个白名单里，清洗线段落连标记
 /// 都会被更早删掉 —— 所以这里的出口判据不能只认 `;===== nozzle load line`。
 #[test]

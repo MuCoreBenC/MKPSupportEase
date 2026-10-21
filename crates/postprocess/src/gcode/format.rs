@@ -1,13 +1,13 @@
-//! 数值格式化与伪随机序列 —— 逐字节等价的判定基础（对照 offset_fmt.go）。
+//! 数值格式化与伪随机序列 —— 逐字节等价的判定基础（对照）。
 //!
 //! 这组函数是 pass1/pass2 输出的**字节面**：`FormatSpeed` 在旧侧有 71 个调用点，
-//! 这里差一个字符，G1/G2 golden 就全红。所有函数按 Go 语义逐字复刻。
+//! 这里差一个字符，G1/G2 golden 就全红。所有函数按 旧实现语义逐字复刻。
 //!
 //! Go↔Rust 语义对照（实测锁定，见 tests）：
 //! - `strconv.FormatFloat(v,'f',-1,64)`（最短可往返十进制、定点）≡ Rust `{}`：
 //!   两侧都用最短数字串 + 定点展开（无指数记法），对 G-code 值域逐字节一致。
 //! - `fmt.Sprintf("%.3f")` ≡ Rust `{:.3}`：两侧定点舍入都是**精确十进制转换 +
-//!   ties-to-even**（Go strconv/decimal.go shouldRoundUp；Rust flt2dec format_exact）。
+//!   ties-to-even**。
 //!   tests 里放了 0.0625/0.1875 两个真 tie 值锁这个行为。
 
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -81,7 +81,7 @@ pub fn format_python_float(v: f64) -> String {
 }
 
 /// `FormatEValue`：最短十进制，**严格** 0<v<1 时去前导 "0"（0.5→".5"，
-/// -0.5→"-0.5"，0→"0"）。Go 条件是 `v < 1.0 && v > 0`——半开区间 `(0.0..1.0)`
+/// -0.5→"-0.5"，0→"0"）。旧实现 条件是 `v < 1.0 && v > 0`——半开区间 `(0.0..1.0)`
 /// 在 Rust 里**包含** 0.0，必须显式写 `v > 0.0`。
 pub fn format_e_value(v: f64) -> String {
     let s = shortest_fixed(v);
@@ -117,7 +117,7 @@ pub fn reset_pseudo_random() {
     PSEUDO_RANDOM_INDEX.store(1, Ordering::Relaxed);
 }
 
-/// `MathRound`：按 n 位小数四舍五入（Go `math.Round` = half away from zero，
+/// `MathRound`：按 n 位小数四舍五入（旧实现 `math.Round` = half away from zero，
 /// 与 Rust `f64::round` 相同；`10^n` 用 powi，n 在 G-code 值域内精确可表示）。
 pub fn math_round(x: f64, n: i32) -> f64 {
     let pow = 10f64.powi(n);
@@ -128,8 +128,8 @@ pub fn math_round(x: f64, n: i32) -> f64 {
 mod tests {
     use super::*;
 
-    /// 5.2 要求「先写格式化单元测试再写别的」——本表是 Go 侧
-    /// line_builder_test.go 各 EdgeCase 表的并集，期望值按 Go 语义手推。
+    /// 5.2 要求「先写格式化单元测试再写别的」——本表是 旧实现
+    ///  各 EdgeCase 表的并集，期望值按 旧实现语义手推。
     #[test]
     fn format_float_table() {
         // (输入, 期望)
@@ -169,7 +169,7 @@ mod tests {
     #[test]
     fn format_float_ties_to_even_matches_go() {
         // 0.0625 与 0.1875 是二进制精确值的真 tie（第 4 位小数是 5 且其后无尾数）：
-        // Go 与 Rust 都按 ties-to-even 处理 → "0.062" / "0.188"。
+        // 旧实现与 Rust 都按 ties-to-even 处理 → "0.062" / "0.188"。
         assert_eq!(format_float(0.0625), "0.062");
         assert_eq!(format_float(0.1875), "0.188");
         assert_eq!(format_float(1.0625), "1.062");

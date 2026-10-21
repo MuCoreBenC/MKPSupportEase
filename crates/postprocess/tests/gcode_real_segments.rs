@@ -1,6 +1,6 @@
 //! 真实 G-code 片段作为固定输入（tasks.md 5.7）。
 //!
-//! 两个片段逐字复制自旧仓库 `mkp-core/gcode/state_audit_test.go:20-69`，
+//! 两个片段逐字复制自旧仓库 ，
 //! 来源是真实后处理产物 42274.6_20260713_122939.gcode：
 //! - `MKP_DIAGONAL_RIB_SEGMENT`：斜肋过渡段的 MKP 版本（L4221-4240）
 //! - `BBS_UNMODIFIED_SEGMENT`：未被修改的 BBS 风格过渡段（L4967-4986）

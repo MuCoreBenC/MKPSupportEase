@@ -1,6 +1,6 @@
 //! 几何原语（对照 internal/geometry 包：SAT 相交 / MTV / BBox / 移动方向）。
 
-/// Go `CeilTo01`：向上取到 0.1 精度。
+/// 旧实现 `CeilTo01`：向上取到 0.1 精度。
 pub fn ceil_to_01(v: f64) -> f64 {
     (v * 10.0).ceil() / 10.0
 }
@@ -195,7 +195,7 @@ pub fn polygon_to_bbox(poly: &Polygon) -> BBox {
     }
 }
 
-/// 移动方向（对照 direction.go；中文名是 UI 消息的一部分，保真保留）。
+/// 移动方向（对照 ；中文名是 UI 消息的一部分，保真保留）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MoveDirection {
     #[default]

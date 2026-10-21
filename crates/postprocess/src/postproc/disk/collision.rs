@@ -1,4 +1,4 @@
-//! 碰撞检测（对照 disk/collision.go 逐行）。诊断（logInfo）在旧侧是旁路输出，
+//! 碰撞检测（对照  逐行）。诊断（logInfo）在旧侧是旁路输出，
 //! Rust 侧结果结构体已经携带全部字段，调用方自取。
 
 use crate::ir::Ir;

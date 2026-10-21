@@ -1,16 +1,16 @@
-//! 切片器头部注释的刮取（纯函数，行为规格 = 旧 Go `engine/process.go` 与
-//! `engine/helpers.go`）。
+//! 切片器头部注释的刮取（纯函数，行为规格 = 旧 旧实现  与
+//!）。
 //!
-//! 这四条在 Go 侧都发生在 `machine-detect` / `parse` 之间、纯读 `content`，与
+//! 这四条在 旧实现都发生在 `machine-detect` / `parse` 之间、纯读 `content`，与
 //! MKP 预设无关，故落在 rank 0 而不是 engine 里内联——engine 只编排。
 //!
 //! 移植对照：
-//! - `machine_preset_name`     ← process.go:364-366（`; printer_settings_id = `）
-//! - `process_preset_name`     ← process.go:367-369（`; default_print_profile = `）
-//! - `slicer_ironing_enabled`  ← process.go:358-363（`; enable_support_ironing = ` 且首数 == 1）
-//! - `three_mf_file_name`      ← helpers.go:114-139（`; filename_format` 占位符展开）
+//! - `machine_preset_name`     ← （`; printer_settings_id = `）
+//! - `process_preset_name`     ← （`; default_print_profile = `）
+//! - `slicer_ironing_enabled`  ← （`; enable_support_ironing = ` 且首数 == 1）
+//! - `three_mf_file_name`      ← （`; filename_format` 占位符展开）
 //!
-//! **Go 的两处形态被逐字保留，不"顺手修正"**：
+//! **旧实现的两处形态被逐字保留，不"顺手修正"**：
 //! 1. 判定用 `Contains` 而取值用 `TrimPrefix` —— 标记不在行首时 `TrimPrefix`
 //!    什么也不去，整行被当成值。此处用 `strip_prefix().unwrap_or(该行)` 复刻。
 //! 2. 循环不 break ⇒ **最后一次命中生效**（不是第一次）。
@@ -22,7 +22,7 @@ const PREFIX_DEFAULT_PRINT_PROFILE: &str = "; default_print_profile = ";
 const PREFIX_ENABLE_SUPPORT_IRONING: &str = "; enable_support_ironing = ";
 const MARKER_FILENAME_FORMAT: &str = "; filename_format";
 
-/// 按 Go 的「Contains 判定 + TrimPrefix 取值 + 不 break」刮一个头部键。
+/// 按 旧实现的「Contains 判定 + TrimPrefix 取值 + 不 break」刮一个头部键。
 fn scrape_last(content: &[String], prefix: &str) -> String {
     let mut found = String::new();
     for line in content {
@@ -50,7 +50,7 @@ pub fn process_preset_name(content: &[String]) -> String {
 
 /// 切片器自身是否开了支撑熨平：`; enable_support_ironing = 1`。
 ///
-/// Go 取的是 `ir.NumStrip(trimmed)` 的**首个数字**是否 `== 1`，且一旦为 true
+/// 旧实现 取的是 `ir.NumStrip(trimmed)` 的**首个数字**是否 `== 1`，且一旦为 true
 /// 后续行不会把它改回 false。`NumStrip` 在 rank 2（`mkp-ir`）不可用于本层，
 /// 这里只需要"首个数字"，故就地扫一遍（语义与 `NumStrip` 的首元素一致：
 /// 负号只在数字起始处生效、最多一个小数点）。
@@ -65,7 +65,7 @@ pub fn slicer_ironing_enabled(content: &[String]) -> bool {
     enabled
 }
 
-/// `NumStrip` 的首元素：按 Go `ir.NumStrip`（build.go:816）的扫描规则取第一个数。
+/// `NumStrip` 的首元素：按 旧实现 `ir.NumStrip`的扫描规则取第一个数。
 fn first_number(line: &str) -> Option<f64> {
     let mut buf = String::new();
     let mut has_dot = false;
@@ -78,7 +78,7 @@ fn first_number(line: &str) -> Option<f64> {
             buf.push('.');
             has_dot = true;
         } else {
-            // Go 侧遇到分隔符时才收束一个数；只有 "-" 不算数。
+            // 旧实现遇到分隔符时才收束一个数；只有 "-" 不算数。
             if buf.len() > 1 || (buf.len() == 1 && buf != "-") {
                 return buf.parse().ok();
             }
@@ -94,11 +94,11 @@ fn first_number(line: &str) -> Option<f64> {
 
 /// 从 `; filename_format = ...` 推 3MF 文件名；没有该行时退回「输入名 + .3mf」。
 ///
-/// Go 侧占位符只处理三个（`{input_filename_base}` / `{filament_type[0]}` /
-/// `{print_time}`），其余占位符**原样留在结果里**——这是 Go 的现状，照抄。
+/// 旧实现占位符只处理三个（`{input_filename_base}` / `{filament_type[0]}` /
+/// `{print_time}`），其余占位符**原样留在结果里**——这是 旧实现的现状，照抄。
 ///
-/// 边界（Go 用 `filepath.Ext` + `TrimSuffix`，这里用 `file_stem`）：对
-/// `".gcode"` 这种纯扩展名文件，Go 得 `""` 而 `file_stem` 得 `".gcode"`。
+/// 边界（旧实现 用 `filepath.Ext` + `TrimSuffix`，这里用 `file_stem`）：对
+/// `".gcode"` 这种纯扩展名文件，旧实现 得 `""` 而 `file_stem` 得 `".gcode"`。
 /// 真实输入总有名字部分，故该角落在本链上不可达，登记而不绕。
 pub fn three_mf_file_name(content: &[String], gcode_path: &str) -> String {
     let name_without_ext = Path::new(gcode_path)
@@ -106,7 +106,7 @@ pub fn three_mf_file_name(content: &[String], gcode_path: &str) -> String {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
     for line in content {
-        // Go 这里读的是**未 trim** 的原行（helpers.go:116）。
+        // 旧实现 这里读的是**未 trim** 的原行。
         if !line.contains(MARKER_FILENAME_FORMAT) {
             continue;
         }
@@ -141,7 +141,7 @@ mod tests {
             "; default_print_profile = 0.20mm Standard @BBL A1M",
             "; printer_settings_id = Bambu Lab A1 mini 0.4 nozzle",
         ]);
-        // 不 break ⇒ 最后一次命中生效（Go 形态）。
+        // 不 break ⇒ 最后一次命中生效（旧实现 形态）。
         assert_eq!(machine_preset_name(&c), "Bambu Lab A1 mini 0.4 nozzle");
         assert_eq!(process_preset_name(&c), "0.20mm Standard @BBL A1M");
         assert_eq!(machine_preset_name(&[]), "");
@@ -172,7 +172,7 @@ mod tests {
         );
         // 无 filename_format 行 ⇒ 退回输入名。
         assert_eq!(three_mf_file_name(&[], "/tmp/42274.2.gcode"), "42274.2.3mf");
-        // 占位符展开后全空 ⇒ 退回输入名（Go helpers.go:128-130）。
+        // 占位符展开后全空 ⇒ 退回输入名。
         let empty = lines(&["; filename_format = {filament_type[0]}{print_time}"]);
         assert_eq!(three_mf_file_name(&empty, "/tmp/m.gcode"), "m.3mf");
     }
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(first_number("; a = 1"), Some(1.0));
         assert_eq!(first_number("x-2.5y3"), Some(-2.5));
         assert_eq!(first_number("no digits"), None);
-        // Go 侧第二个 '-' 落进 else 分支 ⇒ 只含 "-" 的 buf 被丢弃后重新起数 ⇒ 是 7 不是 -7。
+        // 旧实现第二个 '-' 落进 else 分支 ⇒ 只含 "-" 的 buf 被丢弃后重新起数 ⇒ 是 7 不是 -7。
         assert_eq!(first_number("--7"), Some(7.0));
     }
 }

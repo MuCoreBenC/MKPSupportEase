@@ -1,18 +1,18 @@
-// 校准检测与插入（对照 internal/calibration/mode.go + engine/helpers.go 的
+// 校准检测与插入（对照  +  的
 // InsertCalibrationGcode / filterModelMotionPaths / MinimizeStartupGcode 家族）。
 //
-// 偏离登记（tasks.md 13.3）：Go 侧 InsertCalibrationGcode 会**再读一次输出文件**
+// 偏离登记（tasks.md 13.3）：旧实现 InsertCalibrationGcode 会**再读一次输出文件**
 // 再原子写回；Rust 改为在内存行序列上插入后返回，落盘由 engine write 步统一
 // 执行 —— 行为等价、少两次 IO。
 //
-// Go 里这些函数挂在 Engine（helpers.go），但它们是纯内容变换、无编排逻辑，
+// 旧实现 里这些函数挂在 Engine，但它们是纯内容变换、无编排逻辑，
 // 按「算法全下沉 postproc」原则落在本模块；engine 只调用。
 //
 // **校准身份从哪来（2026-10-18 定案）**：只有一个地方 —— 原始 3MF 的
 // `MKPSE:Calibration`（`gcode::model_identity`），由钩子顺着 `origin.txt` 读出来，
 // 经 [`crate::pipeline::IrProcessRequest::calibration`] 传进管线。
 //
-// 那条 `DetectMode`（mode.go:23，按 G-code 里的标记串认校准模式）**已整条删除**。
+// 那条 `DetectMode`（，按 G-code 里的标记串认校准模式）**已整条删除**。
 // 删的理由不是简化，是**它会给出错答案**：标记住在 `Metadata/custom_gcode_per_layer.xml`
 // 里，某些版本的 Bambu Studio 存一次就把这个条目丢掉（真机核对：原件
 // `BambuStudio-02.05.00.66` 有、被 `02.08.02.60` 存过一遍的那份没有）。于是同一份模型
@@ -36,7 +36,7 @@ use crate::ir::{CALIBRATION_EXEC_DIRECT_CALIBRATE, Ir};
 
 use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid_rec};
 
-/// `Mode`（calibration/mode.go:11）。
+/// `Mode`。
 ///
 /// 缺省是 `None`（普通模型）—— 与"没查到身份"是同一件事，所以让 `Default` 取它，
 /// 调用点不用写 `Mode::None` 这种重复。
@@ -50,7 +50,7 @@ pub enum Mode {
     Repetition,
 }
 
-/// Z 校准的涂胶总长常量（mode.go:21）。
+/// Z 校准的涂胶总长常量。
 pub const Z_CALIBRATION_GLUE_TOTAL_LENGTH: f64 = 2431.32;
 
 /// 身份串 → `Mode`。**全仓唯一的解析出口**。
@@ -104,7 +104,7 @@ pub fn need_glue_boundary(m: Mode) -> bool {
     m == Mode::None
 }
 
-/// `IsDynamic`（mode.go:47）：动态校准（PresetExec 路径）判定。
+/// `IsDynamic`：动态校准（PresetExec 路径）判定。
 pub fn is_dynamic(m: Mode, ir_data: &Ir) -> bool {
     match m {
         Mode::ZOffset => ir_data.safety.z_calibration == "new",
@@ -114,7 +114,7 @@ pub fn is_dynamic(m: Mode, ir_data: &Ir) -> bool {
     }
 }
 
-/// `ModeToCalibrationString`（helpers.go:57）。
+/// `ModeToCalibrationString`。
 pub fn mode_to_calibration_string(m: Mode) -> &'static str {
     match m {
         Mode::ZOffset => "ZOffset",
@@ -184,7 +184,7 @@ impl CalibrationReceipt {
     }
 }
 
-/// `InsertCalibrationGcode`（helpers.go:162）——内存行序列版（13.3 偏离）。
+/// `InsertCalibrationGcode`——内存行序列版（13.3 偏离）。
 /// 返回插入后的行序列；落盘（.part + rename）由 engine write 步执行。
 ///
 /// 不关心回执的调用方（CLI / 判据）走这一张脸：与
@@ -319,7 +319,7 @@ pub fn insert_calibration_gcode_with_receipt(
     Ok(output)
 }
 
-// ---- filterModelMotionPaths（helpers.go:526） ----
+// ---- filterModelMotionPaths ----
 
 /// 删除模型区域的移动命令（direct_calibrate 模式），保留涂胶/活化/擦拭/收尾段。
 pub fn filter_model_motion_paths(
@@ -464,7 +464,7 @@ pub fn filter_model_motion_paths(
     filtered
 }
 
-// ---- removeVibrationDetectionFromMechMode（helpers.go:645） ----
+// ---- removeVibrationDetectionFromMechMode ----
 
 pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(lines.len());
@@ -519,7 +519,7 @@ pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String
     result
 }
 
-// ---- 启动段最小化（helpers.go:684-1000） ----
+// ---- 启动段最小化 ----
 
 pub fn minimize_startup_gcode(lines: Vec<String>, machine_type: &str) -> Vec<String> {
     match machine_type {
@@ -856,7 +856,7 @@ fn minimize_startup_line(line: &str, trimmed: &str, in_prepare_region: bool) -> 
     Some(line.to_string())
 }
 
-// ---- 小工具（helpers.go:996-1177 + 317-524） ----
+// ---- 小工具 ----
 
 fn code_before_comment(trimmed: &str) -> &str {
     match trimmed.find(';') {
@@ -1048,7 +1048,7 @@ fn replace_m140_temp(line: &str, new_temp: i64) -> String {
     out
 }
 
-/// `ShouldPreserveNozzleLoadLineLine`（helpers.go:474）。
+/// `ShouldPreserveNozzleLoadLineLine`。
 fn should_preserve_nozzle_load_line_line(line: &str) -> (String, bool) {
     let trimmed = line.trim();
     if trimmed.starts_with(';') {
@@ -1215,7 +1215,7 @@ fn is_speed_only_line(trimmed: &str) -> bool {
     has_feed
 }
 
-/// `isModelMotionLine`（helpers.go:317）：G0-G3 且带 X/Y/Z/E(/I/J) 数值参数。
+/// `isModelMotionLine`：G0-G3 且带 X/Y/Z/E(/I/J) 数值参数。
 fn is_model_motion_line(line: &str) -> bool {
     let trimmed = line.trim();
     let code_part = code_before_comment(trimmed);

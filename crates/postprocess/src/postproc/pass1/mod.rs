@@ -1,13 +1,13 @@
-//! `postproc::pass1` —— 第一遍扫描（对照 processor/pass1.go 逐行移植）。
+//! `postproc::pass1` —— 第一遍扫描（对照  逐行移植）。
 //!
-//! 设计偏离（design.md §3.2 已拍板）：Go 把输出写 temp 文件再由 pass2 读回；
+//! 设计偏离（design.md §3.2 已拍板）：旧实现 把输出写 temp 文件再由 pass2 读回；
 //! Rust 端 pass1 把行序列留在内存（`Pass1Output::lines`）按值交给 pass2，
-//! 不落 temp。Go 已写好但生产未接线的 passIR 零拷贝路径即此意。
+//! 不落 temp。旧实现 已写好但生产未接线的 passIR 零拷贝路径即此意。
 //!
-//! 行为规格：pass1.go 的单循环状态机（熨平移除 / 支撑面收集 / 涂胶块发射 /
+//! 行为规格： 的单循环状态机（熨平移除 / 支撑面收集 / 涂胶块发射 /
 //! 元数据提取 / 风扇状态跟踪）。字节判据 G1（21,837 行）。
 
-// 状态机逐字对照 pass1.go：嵌套 if 与手工索引保持与 Go 同形，便于逐段核对。
+// 状态机逐字对照 ：嵌套 if 与手工索引保持与 旧实现 同形，便于逐段核对。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -46,10 +46,10 @@ use validity::check_validity_interface_set;
 /// 速度发射点的 mm/s→mm/min 换算（offset.rs MM_PER_MINUTE 同一登记）。
 pub(crate) const MM_PER_MINUTE: f64 = crate::postproc::offset::MM_PER_MINUTE;
 
-/// pendingLines 刷新阈值（pass1.go:106）。
+/// pendingLines 刷新阈值。
 const PENDING_FLUSH_THRESHOLD: usize = 32;
 
-/// 行收集器：Go 的 bufio.Writer + '\n' 在此等价为按行累积。
+/// 行收集器：旧实现的 bufio.Writer + '\n' 在此等价为按行累积。
 /// 直接写（涂胶块 / 回抽）与 flushPending 的相对顺序即输出顺序，逐调用保持。
 #[derive(Default)]
 pub(crate) struct LineSink {
@@ -65,7 +65,7 @@ impl LineSink {
     }
 }
 
-/// f64 键的哈希包装（Go 侧是 map[float64]；Rust 的 f64 无 Eq 不能直接作键）。
+/// f64 键的哈希包装（旧实现是 map[float64]；Rust 的 f64 无 Eq 不能直接作键）。
 /// -0.0 归一为 0.0，保证 Hash 与 Eq 一致；层高域不出现 NaN。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ZKey(pub f64);
@@ -89,7 +89,7 @@ impl PartialOrd for ZKey {
     }
 }
 
-/// `LayerHeightIndex`（state.go）：每层涂胶上下文（pass2 消费）。
+/// `LayerHeightIndex`：每层涂胶上下文（pass2 消费）。
 #[derive(Debug, Clone, PartialEq)]
 pub struct LayerHeightIndex {
     pub last_layer_height: f64,
@@ -98,7 +98,7 @@ pub struct LayerHeightIndex {
     pub layer_thickness: f64,
 }
 
-/// 塔层高警告（state.go TowerLayerHeightWarning）。
+/// 塔层高警告。
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TowerLayerHeightWarning {
     pub z: f64,
@@ -108,7 +108,7 @@ pub struct TowerLayerHeightWarning {
     pub max_lh: f64,
 }
 
-/// `ProcessStats`（state.go）。
+/// `ProcessStats`。
 #[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessStats {
     #[serde(rename = "interfacesFound")]
@@ -152,13 +152,13 @@ pub struct Pass1Output {
     pub layer_index: HashMap<ZKey, LayerHeightIndex>,
 }
 
-/// `FirstPass`：第一遍扫描（pass1.go:41）。
+/// `FirstPass`：第一遍扫描。
 ///
 /// `ir_data` 会被就地修改（机型维度填充 / 元数据提取 / State 运行态 /
-/// FillDefaults）——与 Go 共享单个 `*ir.IR` 的语义一致。
-/// `progress` 收到 (0..100 百分比, 消息)，Go 每 500 行且整数百分比变化时触发。
+/// FillDefaults）——与 旧实现 共享单个 `*ir.IR` 的语义一致。
+/// `progress` 收到 (0..100 百分比, 消息)，旧实现 每 500 行且整数百分比变化时触发。
 /// `cancel` 协作取消：主循环顶部时间基检查（Task 17.2，对照
-/// pass1.go:167-180 每轮调 cancelChecker.Check），未取消路径零行为变化。
+///  每轮调 cancelChecker.Check），未取消路径零行为变化。
 /// `cancel_check_interval` 由调用方注入：产品默认 100ms（engine 的
 /// `DEFAULT_CANCEL_CHECK_INTERVAL`），判据注入极小值以摆脱墙钟依赖。
 #[allow(clippy::too_many_lines)]
@@ -221,7 +221,7 @@ pub fn first_pass(
 
     ir_data.filament.slicer = "BambuStudio".to_string();
 
-    // toml 机型校验 + 维度填充（pass1.go:150）：未命中 zero-value 跳过（M017）
+    // toml 机型校验 + 维度填充：未命中 zero-value 跳过（M017）
     if toml_machine.is_empty() || toml_machine == "UNKNOWN" {
         tracing::warn!(
             machine = toml_machine,
@@ -771,7 +771,7 @@ pub fn first_pass(
             if is_support_ironing && ir_data.ironing.mode == "off" {
                 drop_pending_after_last_wipe_end(&mut pending_lines);
                 ironing_removal_flag = true;
-                // 跳过当前 M1031 S1 行（不进 pendingLines；Go 的 continue 同时
+                // 跳过当前 M1031 S1 行（不进 pendingLines；旧实现的 continue 同时
                 // 跳过本行末尾的刷新阈值检查，这里以真实 continue 复刻）
                 continue;
             }
@@ -1285,7 +1285,7 @@ pub fn first_pass(
     })
 }
 
-/// 回溯上一条 G1 X/Y 行、剥 E 后追加进 pending（pass1.go 四处重复的小段）。
+/// 回溯上一条 G1 X/Y 行、剥 E 后追加进 pending（四处重复的小段）。
 fn append_prev_xy(content: &[String], i: usize, pending: &mut Vec<String>) {
     let mut k = i as isize - 1;
     while k >= 0 {
@@ -1299,15 +1299,15 @@ fn append_prev_xy(content: &[String], i: usize, pending: &mut Vec<String>) {
     }
 }
 
-/// State.SupportLayerZSet 的 f64 键序列化（Go map[float64] 的 JSON 键形态，
+/// State.SupportLayerZSet 的 f64 键序列化（旧实现 map[float64] 的 JSON 键形态，
 /// 'g' 最短表示）。写读同源，键相等 ⇔ 字符串相等（±0 除外，层高不为 -0）。
 fn layer_key(z: f64) -> String {
     format_g_shortest(z)
 }
 
-/// Go `strconv.FormatFloat(v, 'g', -1, 64)` 的等价输出（覆盖层高量级）。
+/// 旧实现 `strconv.FormatFloat(v, 'g', -1, 64)` 的等价输出（覆盖层高量级）。
 fn format_g_shortest(v: f64) -> String {
-    // Rust {} 对 f64 就是最短往返表示；'g' 风格的指数阈值与 Go 不同
+    // Rust {} 对 f64 就是最短往返表示；'g' 风格的指数阈值与 旧实现 不同
     // （Go：exponent < -4 || exponent >= 21 才用科学计数法），层高量级
     // （0~1000）两种表示一致，直接用十进制最短表示。
     let s = format!("{v}");

@@ -3,7 +3,7 @@
 //! 12 步：input / config / machine-detect / parse / support / collision /
 //! calib-check / pass1 / pass2 / calibration / write / printtime。
 //!
-//! 来源：`mkp-sr` 的 `crates/engine/src/lib.rs`（498 行）。**只有第 2 步换了**，
+//! 来源：`来源实现` 的 `crates/engine/src/lib.rs`（498 行）。**只有第 2 步换了**，
 //! 其余 11 步逐行照搬（路径前缀 `mkp_postproc::` → `crate::postproc::` 等）。
 //!
 //! 与来源的差异，逐条登记（不写在提交信息里就会被忘掉，所以钉在代码里）：
@@ -32,7 +32,7 @@
 //!    两张脸的差别仅在 [`IrSource`] 这一个枚举上 —— 复制一条管线出来就等于
 //!    有两条会各自漂移的产品路径。判据：拆之前拆之后 G2 与整链参考仍字节相等。
 
-/// 热床预涂胶（`bed_glue.go` 那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
+/// 热床预涂胶（那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
 pub mod bed_glue;
 pub mod hooks;
 pub mod progress;
@@ -49,7 +49,7 @@ use crate::ir::Ir;
 use crate::postproc::calibration::Mode;
 use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 
-/// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
+/// write hooks 的偏好默认值（旧实现 ；CLI 无偏好通道）。
 pub const DEFAULT_SKIP_VIBRATION: bool = true;
 pub const DEFAULT_BEGIN_STAGE_RETRACT: bool = true;
 pub const DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM: i64 = 20;

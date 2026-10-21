@@ -1,15 +1,15 @@
-//! IR 数据结构 —— 对照 `ir/types.go`（15 个子结构 + 顶层 IR）。
+//! IR 数据结构 —— 对照 （15 个子结构 + 顶层 IR）。
 //!
-//! JSON 键 = Go 字段名（PascalCase，无 json tag 的 MarshalIndent 输出）。
-//! 刻意**不加 serde default**：Task 7.2 的闸门要求「Go 侧 IR JSON 的每个字段
-//! 都必须能被这组结构吃下，缺一个即失败」。唯一的宽松点是 Go 的 nil 切片/
+//! JSON 键 = 旧实现 字段名（PascalCase，无 json tag 的 MarshalIndent 输出）。
+//! 刻意**不加 serde default**：Task 7.2 的闸门要求「旧实现 IR JSON 的每个字段
+//! 都必须能被这组结构吃下，缺一个即失败」。唯一的宽松点是 旧实现的 nil 切片/
 //! map 会序列化成 `null`——`null_to_empty` 只接受**存在但为 null** 的字段，
 //! 字段缺失依旧报错。
 
 use crate::diag::Diagnostic;
 use serde::{Deserialize, Serialize};
 
-/// Go 的 nil 切片/map 序列化为 `null`；Rust 侧收成空集合（字段缺失仍报错）。
+/// 旧实现的 nil 切片/map 序列化为 `null`；Rust 侧收成空集合（字段缺失仍报错）。
 fn null_to_empty<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -319,7 +319,7 @@ pub struct StateIr {
     pub glue_bottom_dedup_mode: String,
     #[serde(deserialize_with = "null_to_empty")]
     pub bottom_glue_entries: Vec<BottomGlueEntry>,
-    /// Go 侧 map[float64]bool（JSON 字符串键）；导出时刻必为空，见
+    /// 旧实现 map[float64]bool（JSON 字符串键）；导出时刻必为空，见
     /// tests/reference/README.md 的影子结构说明。
     #[serde(deserialize_with = "null_to_empty_map")]
     pub support_layer_z_set: std::collections::BTreeMap<String, bool>,

@@ -1,11 +1,11 @@
-//! iface 的按模型分组与熨平/支撑面混合（对照 processor/model_z_map.go）。
+//! iface 的按模型分组与熨平/支撑面混合（对照）。
 
-// 逐字对照 model_z_map.go：索引循环与 Go 同形。
+// 逐字对照 ：索引循环与 旧实现 同形。
 #![allow(clippy::needless_range_loop)]
 
 use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START, extract_coord};
 
-/// 私有 bbox（Go 小写 bbox；与 geom::BBox 不同，仅本模块与 glue_block 用）。
+/// 私有 bbox（旧实现 小写 bbox；与 geom::BBox 不同，仅本模块与 glue_block 用）。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct IfaceBbox {
     pub(crate) min_x: f64,
@@ -25,7 +25,7 @@ impl IfaceBbox {
     }
 }
 
-/// `bboxOfLines`：所有 "G1 " 行的 X/Y 极值（model_z_map.go:14）。
+/// `bboxOfLines`：所有 "G1 " 行的 X/Y 极值。
 pub(crate) fn bbox_of_lines(lines: &[String]) -> IfaceBbox {
     let mut b = IfaceBbox {
         min_x: f64::MAX,
@@ -55,7 +55,7 @@ pub(crate) fn bbox_of_lines(lines: &[String]) -> IfaceBbox {
     b
 }
 
-/// `calcBBoxIoU`（model_z_map.go:60）。
+/// `calcBBoxIoU`。
 fn calc_bbox_iou(a: IfaceBbox, b: IfaceBbox) -> f64 {
     if a.min_x > a.max_x || b.min_x > b.max_x {
         return 0.0;
@@ -127,7 +127,7 @@ fn merge_bbox(a: IfaceBbox, b: IfaceBbox) -> IfaceBbox {
     }
 }
 
-/// `totalPathLength`（model_z_map.go:110）：带 E 的 G1 移动总长（跳转标记重置基点）。
+/// `totalPathLength`：带 E 的 G1 移动总长（跳转标记重置基点）。
 pub(crate) fn total_path_length(lines: &[String]) -> f64 {
     let mut last_x = 0.0;
     let mut last_y = 0.0;
@@ -177,7 +177,7 @@ pub(crate) fn total_path_length(lines: &[String]) -> f64 {
     total
 }
 
-/// `splitIfaceByModel`（model_z_map.go:148）：按 ZJUMP_START 切段。
+/// `splitIfaceByModel`：按 ZJUMP_START 切段。
 pub(crate) fn split_iface_by_model(iface: &[String]) -> Vec<Vec<String>> {
     let mut segments: Vec<Vec<String>> = Vec::new();
     let mut current: Vec<String> = Vec::new();
@@ -211,7 +211,7 @@ fn merge_group_segments(segs: Vec<Vec<String>>) -> Vec<String> {
     result
 }
 
-/// `groupConsecutiveSegments`（model_z_map.go:186）：IoU>0 或间距<2 的相邻段合并。
+/// `groupConsecutiveSegments`：IoU>0 或间距<2 的相邻段合并。
 fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
     if segments.is_empty() {
         return Vec::new();
@@ -241,7 +241,7 @@ fn group_consecutive_segments(segments: Vec<Vec<String>>) -> Vec<Vec<String>> {
     groups
 }
 
-/// `convertInternalJumps`（model_z_map.go:171）：把 INTERNAL 跳转按分组升级为 START。
+/// `convertInternalJumps`：把 INTERNAL 跳转按分组升级为 START。
 pub(crate) fn convert_internal_jumps(iface: &[String]) -> Vec<String> {
     let segments = split_iface_by_model(iface);
     let groups = group_consecutive_segments(segments);
@@ -258,7 +258,7 @@ pub(crate) fn convert_internal_jumps(iface: &[String]) -> Vec<String> {
     result
 }
 
-/// `BuildPerModelIface`（model_z_map.go:210）：按区域混合熨烫面 / 支撑面。
+/// `BuildPerModelIface`：按区域混合熨烫面 / 支撑面。
 /// threshold=0 时重叠即判覆盖；否则按路径长度覆盖率判。
 pub(crate) fn build_per_model_iface(
     iface_ironing: &[String],
@@ -408,7 +408,7 @@ pub(crate) fn build_per_model_iface(
     result
 }
 
-// parseFloat（model_z_map.go:140）在 Go 侧无消费者，未移植。
+// parseFloat在 旧实现无消费者，未移植。
 
 #[cfg(test)]
 mod tests {

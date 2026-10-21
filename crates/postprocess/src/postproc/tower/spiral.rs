@@ -1,4 +1,4 @@
-//! 小螺旋（第二层 4 象限不挤出润笔）生成（对照 tower/mini_spiral.go 逐行复刻）。
+//! 小螺旋（第二层 4 象限不挤出润笔）生成（对照  逐行复刻）。
 
 use super::constants::*;
 use crate::gcode::{format_float, format_speed, format_z};
@@ -39,7 +39,7 @@ fn mini_spiral_quadrant_bounds() -> [[f64; 4]; 4] {
 }
 
 /// `GenerateMiniSpiralGCode`：quadrant 0=左下 1=右下 2=右上 3=左上；越界返回 None。
-// Go 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（Go 编译器不警告）。
+// 旧实现 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（旧实现 编译器不警告）。
 // 逐行复刻保留它们以维持与旧实现的行级对应，不做「顺手清理」。
 #[allow(unused_assignments, clippy::let_and_return)]
 #[allow(clippy::too_many_arguments)]

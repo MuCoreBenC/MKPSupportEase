@@ -1,10 +1,10 @@
 //! golden 比对 harness 的公共件。
 //!
-//! 消费的数据在仓库根 `tests/golden/`（vendored 自 mkp-sr，脱钩代价见 spec doc.md §7③）。
+//! 消费的数据在仓库根 `tests/golden/`（vendored 自 来源实现，脱钩代价见 spec doc.md §7③）。
 //! 本模块只做机械比对，不含任何算法。
 //!
-//! 判据语义与旧 Go 侧逐字对齐：
-//! - 行切分 = `processor/golden_test.go:301 splitLines`：
+//! 判据语义与旧实现逐字对齐：
+//! - 行切分 = `processor/ splitLines`：
 //!   `TrimRight(s, "\n")` 后按 `\n` 切（LF-only，golden 实测无 CR）；
 //! - G1/G2 先比行数再逐行 `!=`（零容差）；
 //! - G3 按 `=== CASE <name> ===` 分块**点名**比对（不整文件逐行——级联错位
@@ -38,7 +38,7 @@ pub fn golden_path(name: &str) -> PathBuf {
     repo_root().join("tests").join("golden").join(name)
 }
 
-/// Go `splitLines` 语义：掐掉全部尾部 `\n` 后按 `\n` 切；全空 → 空向量。
+/// 旧实现 `splitLines` 语义：掐掉全部尾部 `\n` 后按 `\n` 切；全空 → 空向量。
 pub fn split_lines(s: &str) -> Vec<String> {
     let s = s.trim_end_matches('\n');
     if s.is_empty() {
@@ -103,14 +103,14 @@ pub fn compare_line_wise(label: &str, expected: &[String], actual: &[String]) {
 }
 
 // ---------------------------------------------------------------------------
-// G3：tower_matrix.golden 的分块判据
+// G3：lden 的分块判据
 // ---------------------------------------------------------------------------
 
 const CASE_PREFIX: &str = "=== CASE ";
 
 /// 判据档位（design.md §2.4 处置② / tasks.md 3.5）。
 ///
-/// 所有 23 个 CASE **起步全是 ByteExact**：旧 Go 侧的金字塔里唯一跨架构不稳的
+/// 所有 23 个 CASE **起步全是 ByteExact**：旧实现的金字塔里唯一跨架构不稳的
 /// `rib/mid_tower_h250` 已被移出字节 golden（vendored 的这份就没有它）。
 /// 降档通道存在但只能走 Task 8.8 的证明流程（先打印中间 cos 值证明是 FMA 类
 /// 差异，写进 HONEST-BOUNDARIES），**不允许悄悄降**。

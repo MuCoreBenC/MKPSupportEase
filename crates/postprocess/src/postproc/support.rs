@@ -1,7 +1,7 @@
-//! 擦拭决策（对照 gcodebiz/wiping_decision.go + ir/wiping_decision.go）。
+//! 擦拭决策（对照  +）。
 //!
-//! 偏离登记：Go 的 ApplyWipingDecision 经 fallback sink 做 L1 放行/留痕，
-//! sink 未注入时硬错误；Rust Phase 1 无 GUI 回退通道 —— 语义取 Go 的
+//! 偏离登记：旧实现的 ApplyWipingDecision 经 fallback sink 做 L1 放行/留痕，
+//! sink 未注入时硬错误；Rust Phase 1 无 GUI 回退通道 —— 语义取 旧实现的
 //! 「permissive sink」分支（放行 + 不留痕），nil-sink 硬错误路径不存在。
 //! 留痕（detail.fallbacks[]）随 sink 系统一并丢弃（GUI 面）。
 
@@ -10,7 +10,7 @@ use crate::ir::Ir;
 
 use crate::postproc::calibration::Mode;
 
-/// WipingReason（ir/types.go 的字符串形态）。
+/// WipingReason（字符串形态）。
 pub const REASON_NOT_NEEDED: &str = "not_needed";
 pub const REASON_NEEDED_CALIBRATION: &str = "needed_calibration";
 pub const REASON_NEEDED_SUPPORT: &str = "needed_support";
@@ -34,7 +34,7 @@ fn has_any_support_feature(content: &[String]) -> bool {
     content.iter().any(|line| line.contains("FEATURE: Support"))
 }
 
-/// `AnalyzeNeedWiping`（gcodebiz/wiping_decision.go:14）：纯模型特征分析。
+/// `AnalyzeNeedWiping`：纯模型特征分析。
 ///
 /// `calibration` 是调用方**定案好的身份**（见 [`crate::pipeline::IrProcessRequest::calibration`]）。
 /// 这里不再自己扫 G-code：身份只有原始 3MF 一处真值，正文里那一行（若有）一律忽略。
@@ -54,15 +54,15 @@ pub fn analyze_need_wiping(
         }
         return (true, REASON_NEEDED_SUPPORT, Vec::new());
     }
-    // 3. 多色检测（Go 侧 TODO，同现状）
+    // 3. 多色检测（旧实现 TODO，同现状）
     (false, REASON_NOT_NEEDED, Vec::new())
 }
 
-/// `DecideWiping`（gcodebiz/wiping_decision.go:47）。
+/// `DecideWiping`。
 ///
 /// **`preferred_mode` 该从哪里取（本项目的抽取结论，已实测确认）**：
 ///
-/// 来源仓库 mkp-sr 的 engine 在 `lib.rs:242` 传的是
+/// 来源仓库 来源实现 的 engine 在 `lib.rs:242` 传的是
 /// `preset.config.wiping.have_wiping_components`，也就是**直接读预设**、不经 IR。
 /// 本项目没有预设了，只能从 `ir.wiping.preferred_mode` 取。这一步换源**必须先证明两者恒等**，
 /// 否则会静默改变擦拭决策（tower / disk / 强制 tower 三条分支）。
@@ -97,7 +97,7 @@ fn is_unset_preferred_mode(mode: &str) -> bool {
     mode.is_empty() || mode == "none" || mode == "false"
 }
 
-/// `ApplyWipingDecision`（ir/wiping_decision.go:101）。
+/// `ApplyWipingDecision`。
 pub fn apply_wiping_decision(ir_data: &mut Ir, decision: &WipingDecision) -> WipingApplyResult {
     // 分支 2：支撑面回退（唯一先于通用赋值的路径）
     if decision.needed && decision.reason == REASON_SUPPORT_FALLBACK {

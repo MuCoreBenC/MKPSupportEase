@@ -1,11 +1,11 @@
-//! 碰撞检测 + 校准几何（对照 internal/disk 的 collision.go / generator.go /
-//! generator_new.go）。
+//! 碰撞检测 + 校准几何（对照 internal/disk 的  /  /
+//!）。
 //!
-//! wipe.go（圆盘擦拭）+ sdk.go 的段拆分已随 Task 12 pass2 落地（见 wipe.rs）。
-//! generator_new.go 的两个 *New 变体（XY / ZOffset 的 BBox 动态定位）已于
+//! （圆盘擦拭）+  的段拆分已随 Task 12 pass2 落地（见 wipe.rs）。
+//!  的两个 *New 变体（XY / ZOffset 的 BBox 动态定位）已于
 //! 2026-09-08 移植，字节级参考见 tests/reference/calibration/*.new.*。
 //! 刻意不移植（登记于提交信息）：
-//! - connection.go——GUI 装配层。
+//! - ——GUI 装配层。
 
 pub mod calibration;
 pub mod collision;
@@ -20,7 +20,7 @@ pub use collision::{
     TowerAskOutcome, auto_tower_position_for_facts, detect_tower_collision,
 };
 
-/// processor.ComputeBBox（对照 bbox_compute.go / model_z_map.go:59）：
+/// processor.ComputeBBox（对照  /）：
 /// 绝对定位模式下挤出移动（G1 带 E）的 2D 包围盒；找不到有效坐标报错。
 pub fn compute_bbox(lines: &[String]) -> Result<BBox, crate::diag::PostprocError> {
     let mut min_x = f64::MAX;

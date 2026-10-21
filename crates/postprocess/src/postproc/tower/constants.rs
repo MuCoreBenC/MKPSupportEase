@@ -1,4 +1,4 @@
-//! 塔几何常量表（对照 tower/constants.go，逐字一致）。
+//! 塔几何常量表（对照 ，逐字一致）。
 
 pub const TOWER_OFFSET: f64 = 5.0;
 pub const TOWER_INNER_BOUND: f64 = 10.21;

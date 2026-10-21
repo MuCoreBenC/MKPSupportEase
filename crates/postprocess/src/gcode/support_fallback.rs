@@ -1,8 +1,8 @@
-//! 「仅有支撑面、无支撑体」对象的回退检测（对照 support_fallback.go）。
+//! 「仅有支撑面、无支撑体」对象的回退检测（对照）。
 //!
-//! 消费方：`gcodebiz/wiping_decision.go`（DecideWiping 的输入之一）。
+//! 消费方：（DecideWiping 的输入之一）。
 //!
-//! 与旧侧的等价性说明：Go 用 `map[string]*objectSupportInfo`，遍历序不确定，
+//! 与旧侧的等价性说明：旧实现 用 `map[string]*objectSupportInfo`，遍历序不确定，
 //! 返回的 objIDs 顺序因而不稳定；Rust 侧用 BTreeMap 使顺序确定。
 //! 布尔结果（消费方真正依赖的面）两侧一致。
 

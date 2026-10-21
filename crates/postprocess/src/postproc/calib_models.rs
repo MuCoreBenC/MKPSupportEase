@@ -28,7 +28,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 /// 默认容差（mm）。切片器的挤出宽度会让包围盒有零点几毫米抖动，
-/// 卡太死会把正常模型拦下来 —— 与 `generator_new.go` 的两道检测同值。
+/// 卡太死会把正常模型拦下来 —— 与  的两道检测同值。
 const DEFAULT_TOLERANCE: f64 = 0.5;
 
 fn default_tolerance() -> f64 {
@@ -149,7 +149,7 @@ pub enum ProfileMatch<'a> {
     Swapped(&'a ModelProfile),
 }
 
-/// 按实测包围盒认档 —— 把 `generator_new.go` 那两道尺寸检测（宽高互换 / 尺寸不符）
+/// 按实测包围盒认档 —— 把  那两道尺寸检测（宽高互换 / 尺寸不符）
 /// 泛化成「在已知档位里找一档」。
 ///
 /// 判定顺序**不可重排**：先试同一朝向（命中就用它），再试宽高互换（命中即旋转）。
@@ -388,7 +388,7 @@ mod tests {
     }
 
     /// 正方形板（XY 50.5×50.5）看不出互换 —— 两条检测都不能命中，
-    /// 方向只能靠质心（与 `generator_new.go` 同口径）。
+    /// 方向只能靠质心（与  同口径）。
     #[test]
     fn square_profile_never_matches_swapped() {
         let ps = vec![profile("xy-square-50", &["Precise", "Rough"], 50.5, 50.5)];

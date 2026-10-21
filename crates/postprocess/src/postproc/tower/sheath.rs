@@ -1,4 +1,4 @@
-//! 护套（Trapezoidal Sheath）生成（对照 tower/sheath.go 逐行复刻）。
+//! 护套（Trapezoidal Sheath）生成（对照  逐行复刻）。
 
 use super::constants::*;
 use super::geometry::{Point, polygon_walk};
@@ -43,7 +43,7 @@ pub fn calculate_sheath_expansion(
     expansion
 }
 
-// Go 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（Go 编译器不警告）。
+// 旧实现 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（旧实现 编译器不警告）。
 // 逐行复刻保留它们以维持与旧实现的行级对应，不做「顺手清理」。
 #[allow(unused_assignments, clippy::let_and_return)]
 #[allow(clippy::too_many_arguments)]

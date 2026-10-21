@@ -1,6 +1,6 @@
-//! 行分类器（对照 processor/line_classifier.go 逐行）。
+//! 行分类器（对照  逐行）。
 //!
-//! 单次字节级扫描取代主循环里 30+ 个 Contains/HasPrefix —— 语义与 Go 完全一致：
+//! 单次字节级扫描取代主循环里 30+ 个 Contains/HasPrefix —— 语义与 旧实现 完全一致：
 //! ';' 行优先级 Feature > ZHeight > LayerNum > Comment；代码行 Motion > MCode > Other。
 
 /// LineClass —— G-code 行的分类。

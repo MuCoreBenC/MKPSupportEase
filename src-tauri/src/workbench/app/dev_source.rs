@@ -40,7 +40,7 @@
 //!   ★ 判据是**端口**，不是命令行：进程的命令行 / 工作目录在某些环境里读不到
 //!   （本机实测 `sysinfo` 对所有进程都返回空），拿它做判据会变成"按钮点了没反应"；
 //!   而端口是硬事实 —— 谁在听，`netstat` / `lsof` 说得出来，`taskkill` 停得掉。
-//!   （旧项目 `mkppanel/presets_server.go` 的 `ListOccupiedPorts` / `StopPortProcess`
+//!   （旧项目  的 `ListOccupiedPorts` / `StopPortProcess`
 //!   就是这一套，这里按同一个形状。）
 
 use std::collections::HashMap;
@@ -388,7 +388,7 @@ fn port_of_addr(addr: &str) -> Option<u16> {
     addr.rsplit_once(':')?.1.parse().ok()
 }
 
-/// 谁在听这个端口。**平台各一套**，与旧项目 `mkppanel/presets_server.go` 的
+/// 谁在听这个端口。**平台各一套**，与旧项目  的
 /// `findListenPid` 同一个思路：Windows 用 `netstat -ano`，类 Unix 用 `lsof`。
 fn listen_pid(port: u16) -> Option<u32> {
     if cfg!(windows) {

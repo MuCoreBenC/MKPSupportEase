@@ -26,12 +26,12 @@ mod gate_tests {
         .expect("读不到 IR fixture（tests/fixtures/ir/golden_42274_2.json）")
     }
 
-    /// 闸门：Go 侧导出的 IR JSON 必须能被本结构**完整**反序列化。
+    /// 闸门：旧实现导出的 IR JSON 必须能被本结构**完整**反序列化。
     /// 字段缺一个即失败 —— 这是 IR 结构完整性的机械判据。
     #[test]
     fn golden_ir_json_deserializes_fully() {
         let ir: Ir = serde_json::from_str(&fixture()).expect("IR JSON 反序列化失败");
-        // 抽查 7 项覆写确实到位（来源 golden_test.go:38-46）
+        // 抽查 7 项覆写确实到位（来源）
         assert_eq!(ir.schema_version, 1);
         assert_eq!(ir.machine.machine_type, "A1_MINI");
         assert_eq!(ir.filament.filament_type, "PETG");

@@ -1,6 +1,6 @@
 //! Task 18.1/18.2 性能探针（手动跑，具名 ignore——不进常规判据面）。
 //!
-//! 与旧仓库 `processor/bench_test.go` 的 BenchmarkProcessInPlace 同型对照：
+//! 与旧仓库  的 BenchmarkProcessInPlace 同型对照：
 //! 同一输入文件、同一 fixture IR（golden_42274_2.json）、每轮 fresh IR、
 //! first_pass + second_pass 全链。**不含** write hooks / printtime / 塔模式
 //! （fixture IR 单色）——那是 CLI 全链数字的面（tasks.md 18.1）。
@@ -18,7 +18,7 @@ use std::time::Instant;
 mod golden_common;
 use golden_common as gc;
 
-/// 迭代数：与 Go 侧 `-benchtime 10x` 对齐。
+/// 迭代数：与 旧实现 `-benchtime 10x` 对齐。
 const ITERS: usize = 10;
 
 fn fixture_ir() -> postprocess::ir::Ir {

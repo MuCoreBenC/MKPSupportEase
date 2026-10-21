@@ -14,21 +14,21 @@
 //! 因为 `crate::` 的含义从「gcode crate 根」变成了「postprocess crate 根」）；除此之外零改动。
 //!
 //! 移植对照（行为规格 = 旧仓库 `mkp-core/gcode`，不做文件级翻译，按语义重组）：
-//! - `format`      ← offset_fmt.go（Format* / 伪随机 / MathRound）
-//! - `line_builder`← line_builder.go（LineBuilder，字节级等价的追加式格式化）
-//! - `parser`      ← parser.go（行级识别：FEATURE / layer num / Z_HEIGHT）
-//! - `postprocess` ← postprocess.go（E 值读写 / filter_e_moves / remove_final_lower_z）
-//! - `coord`       ← coord_extract.go / offset_byte.go / offset_replace.go
-//! - `markers`     ← markers.go / mkp_markers.go
-//! - `range_check` ← range_check.go
-//! - `support_fallback` ← support_fallback.go
+//! - `format`      ← （Format* / 伪随机 / MathRound）
+//! - `line_builder`← （LineBuilder，字节级等价的追加式格式化）
+//! - `parser`      ← （行级识别：FEATURE / layer num / Z_HEIGHT）
+//! - `postprocess` ← （E 值读写 / filter_e_moves / remove_final_lower_z）
+//! - `coord`       ←  /  /
+//! - `markers`     ←  /
+//! - `range_check` ←
+//! - `support_fallback` ←
 //! - `model_name` **新增**（无 Go 对照）：3MF 模型名三级兜底链。它与上面那些不一样 ——
 //!   **要读盘**（G-code 旁边的 `origin.txt` / 同名 zip / `_temp_1.config`），是本模块
 //!   唯一一处 IO，理由与形态见该文件头。
 //!
 //! 刻意**不移植**（属 audit/诊断面，后处理管线零消费，实测 grep 确认）：
-//! invariants.go / state_audit.go / explain.go / risk.go / segment_explain.go /
-//! stage_extract.go / operation_replay.go / transition_diff.go。
+//!  /  /  /  /  /
+//!  /  / 。
 
 pub mod coord;
 pub mod format;
@@ -64,17 +64,17 @@ pub use postprocess::{
 pub use range_check::{MachineMovementRange, RangeViolation, check_xy_range};
 pub use support_fallback::detect_support_fallback;
 
-/// Go `strconv.ParseFloat` 的接受面镜像。
+/// 旧实现 `strconv.ParseFloat` 的接受面镜像。
 ///
 /// 为什么不直接用 `str::parse::<f64>()`：两者在真实 G-code 里可分叉——
-/// Go 接受尾部小数点（"5."、"+5.e2"），Rust 拒绝。`Z.` / `E5.` 这类写法
+/// 旧实现 接受尾部小数点（"5."、"+5.e2"），Rust 拒绝。`Z.` / `E5.` 这类写法
 /// 在旧实现的扫描语义下是合法命中，直接 parse 会把「找到」变成「没找到」。
 pub(crate) fn parse_float_go(s: &str) -> Option<f64> {
     if let Ok(v) = s.parse::<f64>() {
         return Some(v);
     }
     // 尾随小数点：在小数点后补一个 '0' 再试（覆盖 "5." 与 "5.e2" 两形态）。
-    // 前提：点前必须有至少一个数字——孤点 "." / "-." 在 Go 里同样非法。
+    // 前提：点前必须有至少一个数字——孤点 "." / "-." 在 旧实现 里同样非法。
     if let Some(dot) = s.rfind('.') {
         let after = &s[dot + 1..];
         let boundary_ok = after.is_empty() || after.starts_with('e') || after.starts_with('E');
@@ -96,7 +96,7 @@ pub(crate) fn parse_float_go(s: &str) -> Option<f64> {
 mod tests {
     use super::*;
 
-    /// Go/Rust 接受面差异的锁定用例：尾部小数点 Go 接受、Rust 原生拒绝。
+    /// Go/Rust 接受面差异的锁定用例：尾部小数点 旧实现 接受、Rust 原生拒绝。
     #[test]
     fn parse_float_go_accepts_go_forms() {
         assert_eq!(parse_float_go("5."), Some(5.0));

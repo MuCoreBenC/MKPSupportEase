@@ -1,4 +1,4 @@
-//! 首笔活化（对照 processor/revitalization_block.go 逐行移植）。
+//! 首笔活化（对照  逐行移植）。
 //!
 //! pass2 第二个 CHANGE_LAYER 触发（首层全部 feature 打完后）；
 //! 校准模式强制禁用。四象限小螺旋复用 tower::generate_mini_spiral_gcode。
@@ -11,7 +11,7 @@ use crate::postproc::pass1::{LineSink, MM_PER_MINUTE, ProcessStats};
 use crate::postproc::pass1::{calc_glue_z, mount_toolhead, restore_fan_state, unmount_toolhead};
 use crate::postproc::tower;
 
-/// `emitFirstPenRevitalization`（revitalization_block.go:32）。
+/// `emitFirstPenRevitalization`。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_first_pen_revitalization(
     sink: &mut LineSink,
@@ -139,7 +139,7 @@ pub(crate) fn emit_first_pen_revitalization(
     Ok(())
 }
 
-/// `checkTowerPathRange`（revitalization_block.go:135）。
+/// `checkTowerPathRange`。
 fn check_tower_path_range(
     ir_data: &mut Ir,
     gcode_lines: &[String],
@@ -182,7 +182,7 @@ fn check_tower_path_range(
     }
 }
 
-/// `formatRangeWarningMessage`（revitalization_block.go:170）。
+/// `formatRangeWarningMessage`。
 fn format_range_warning_message(v: &crate::gcode::RangeViolation, source_label: &str) -> String {
     let (dir_cn, limit_label, axis) = match v.direction {
         "X+" => ("X+", "机型最大 X", "X"),
@@ -191,7 +191,7 @@ fn format_range_warning_message(v: &crate::gcode::RangeViolation, source_label: 
         "Y-" => ("Y-", "机型最小 Y", "Y"),
         _ => ("X+", "机型最大 X", "X"),
     };
-    // 坐标量级下 Rust `{}` 与 Go `%g` 输出一致（最短往返表示、无尾零）
+    // 坐标量级下 Rust `{}` 与 旧实现 `%g` 输出一致（最短往返表示、无尾零）
     format!(
         "{source_label}，向 {dir_cn} 方向移动（实际 {axis}={}，{limit_label}={}）",
         v.actual_value, v.machine_limit

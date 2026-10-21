@@ -1,12 +1,12 @@
 //! 步骤词汇与进度事件 —— tracing 与 progress 是**两条独立通道**。
 //!
-//! - 步骤 `id` 字符串与旧 Go 侧 `pipeline_spec.go:19-35` 的常量逐字一致
+//! - 步骤 `id` 字符串与旧实现  的常量逐字一致
 //!   （11 个继承 + Rust 侧新增的 `printtime`）。
 //!   这是前后端/新旧实现互认的稳定标识，不是显示名。
 //! - **显示名刻意不在这里**：中文步骤名（「输入 G-code」等）是 UI 边界的事，
 //!   全局百分比/名称映射表只允许存在于 UI 一处（spec design.md §九.2）。
 //! - `ProgressEvent` **不带全局百分比**：`EndProgress` 在旧侧就只用于失败时的
-//!   前端进度估算（`pipeline_spec.go:41`），把它放进事件会造出第二个真相源。
+//!   前端进度估算，把它放进事件会造出第二个真相源。
 
 /// 管线步骤。12 项，顺序即 [`STEPS`] 中的编排顺序。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -42,7 +42,7 @@ pub const STEPS: [Step; 12] = [
 ];
 
 impl Step {
-    /// 稳定步骤 ID（与旧 Go 侧 `PipelineStepIDs` 常量集逐字一致，`printtime` 除外）。
+    /// 稳定步骤 ID（与旧实现 `PipelineStepIDs` 常量集逐字一致，`printtime` 除外）。
     ///
     /// 无通配臂：新增步骤忘了给 ID 是编译错误。
     pub fn id(self) -> &'static str {
@@ -135,7 +135,7 @@ pub fn event(
 mod tests {
     use super::*;
 
-    /// 步骤 ID 与旧 Go 侧常量集逐字一致（`printtime` 为 Rust 侧新增，登记在册）。
+    /// 步骤 ID 与旧实现常量集逐字一致（`printtime` 为 Rust 侧新增，登记在册）。
     #[test]
     fn step_ids_match_go_vocabulary() {
         let expected = [

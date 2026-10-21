@@ -1,11 +1,11 @@
-//! 阶段标记注释（对照 processor/stages.go）。
+//! 阶段标记注释（对照）。
 //!
 //! 旧格式 `;MKP_STAGE: Name ; 中文说明` 冻结保留（Deprecated 但 pass1 仍在用）；
 //! 新 GCodeWriter 格式属 pass2 面，随需再落。
 
 /// MKPStage —— 后处理插入阶段标识。
 /// LeaveTower/PressureRestore/ReturnModel/LayerProgress/M991Notify 由 pass2
-/// 消费（Task 12 接线），枚举面与 Go stages.go 对齐保持完整。
+/// 消费（Task 12 接线），枚举面与 旧实现  对齐保持完整。
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MkpStage {
@@ -41,7 +41,7 @@ impl MkpStage {
         }
     }
 
-    /// 阶段标记对应的中文说明（stages.go stageChineseDesc）。
+    /// 阶段标记对应的中文说明。
     fn chinese_desc(self) -> &'static str {
         match self {
             MkpStage::LeaveTower => "离开擦料塔",

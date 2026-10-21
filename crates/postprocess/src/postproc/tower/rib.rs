@@ -1,4 +1,4 @@
-//! 斜肋（Diagonal Rib）生成（对照 tower/rib.go 逐行复刻）。
+//! 斜肋（Diagonal Rib）生成（对照  逐行复刻）。
 
 use super::constants::*;
 use super::geometry::{
@@ -101,7 +101,7 @@ pub fn calc_brim_loops(spacing: f64, is_first_layer: bool, layer_count: i64) -> 
     brim_loops
 }
 
-// Go 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（Go 编译器不警告）。
+// 旧实现 源码原样带着若干「赋值后未读」的 last_x/last_y 写回（旧实现 编译器不警告）。
 // 逐行复刻保留它们以维持与旧实现的行级对应，不做「顺手清理」。
 #[allow(unused_assignments, clippy::let_and_return)]
 #[allow(clippy::too_many_arguments)]
@@ -325,6 +325,6 @@ fn generate_rib_paths(
         format_speed(travel_speed)
     ));
 
-    let _ = start_pt; // Go 侧 startPt 后续未再读取（保持变量存在以对照）
+    let _ = start_pt; // startPt 后续未再读取（保持变量存在）
     Some(lines)
 }

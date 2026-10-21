@@ -1,6 +1,6 @@
 //! `mkpse-preset` —— 预设 TOML（snake_case 用户参数）→ 内核 IR（PascalCase）的**唯一**映射点。
 //!
-//! 来源：`/Users/wzy/projects/mkp-rust/mkp-sr` 的 `crates/preset`（model / read /
+//! 来源：`/Users/wzy/projects/mkp-rust/来源实现` 的 `crates/preset`（model / read /
 //! registry / validate）与 `crates/ir/src/build.rs`。IR 类型**不搬**，直接吃
 //! `postprocess::ir` 那份（内核已有，且被 A 档字节判据守着）。
 //!
@@ -140,7 +140,7 @@ pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
 ///
 /// # 顺序照抄，不许重排
 ///
-/// 逐步对应 `mkp-sr/crates/engine/src/lib.rs:187..215`（那 11 行是行为规格）：
+/// 逐步对应 `来源实现/crates/engine/src/lib.rs:187..215`（那 11 行是行为规格）：
 ///
 /// | 步 | 做什么 | 为什么在这个位置 |
 /// |---|---|---|

@@ -1,6 +1,6 @@
-// 圆盘擦拭生成器（对照 internal/disk/wipe.go + sdk.go 逐行移植）。
+// 圆盘擦拭生成器（对照  +  逐行移植）。
 //
-// 结构：geometry 子块（ConvexHull/ComputeNormals，对照 internal/geometry/convex_hull.go）
+// 结构：geometry 子块（ConvexHull/ComputeNormals，对照）
 // → 选位与评分（GenerateDiskWipe 主体）→ 三种连接线 → Complex Wipe → SDK 段拆分。
 // pass2 对本模块的调用点：;Pre-glue preparation（连接线提前）与
 // ;Prepare for next tower（handlePrepareNextTower，绘制+退出段延后）。
@@ -9,7 +9,7 @@
     clippy::collapsible_if,
     clippy::question_mark,
     clippy::ptr_arg
-)] // Go 同形结构，不改写（let-else 与 Go 的 early-return 同形）
+)] // 同形结构，不改写（let-else 与 early-return 同形）
 
 use crate::gcode::{format_e, format_python_float, format_speed, format_speed_int, math_round};
 use crate::ir::{Ir, num_strip};
@@ -19,7 +19,7 @@ use crate::postproc::tower::FILAMENT_DIAMETER;
 
 pub(crate) const MM_PER_MINUTE: f64 = crate::postproc::offset::MM_PER_MINUTE;
 
-// ---- 常量表（wipe.go:15-78） ----
+// ---- 常量表 ----
 pub const DISK_DIAMETER: f64 = 4.5;
 pub const DISK_RADIUS: f64 = DISK_DIAMETER / 2.0;
 pub const CHECK_RADIUS: f64 = DISK_RADIUS + 1.0;
@@ -71,7 +71,7 @@ pub const SPIRAL_ON_STRAIGHT_CONNECTION: bool = false;
 
 pub const ANGLE_OFFSETS: [f64; 3] = [0.0, 30.0, -30.0];
 
-// ---- 几何（internal/geometry/convex_hull.go） ----
+// ---- 几何 ----
 
 fn cross(o: &[f64], a: &[f64], b: &[f64]) -> f64 {
     (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
@@ -212,7 +212,7 @@ pub struct DiskHistoryEntry {
     pub is_first_layer: bool,
 }
 
-/// 碰撞层（wipe.go:241）：HullPoly 惰性计算缓存（geom::Polygon 形态）。
+/// 碰撞层：HullPoly 惰性计算缓存（geom::Polygon 形态）。
 pub struct CollisionLayer {
     pub wall_lines: Vec<String>,
     pub hull_poly: Option<crate::postproc::geom::Polygon>,
@@ -291,9 +291,9 @@ fn last_extrude_xy_in_output(lines: &[String]) -> Option<(f64, f64)> {
     None
 }
 
-// computeLastExtrudeDirInOutput（wipe.go:301）在 Go 侧无消费者，未移植。
+// computeLastExtrudeDirInOutput在 旧实现无消费者，未移植。
 
-// ---- stagger 角计算（wipe.go:129） ----
+// ---- stagger 角计算 ----
 
 fn compute_stagger_angle(
     disk_history: &[DiskHistoryEntry],
@@ -476,8 +476,8 @@ fn build_disk_positions(supports: &[String]) -> Option<Vec<DiskPosition>> {
     Some(disk_positions)
 }
 
-/// `PredictDiskPlacement`（wipe.go:334）：只做选位+评分，不生成 G-code、
-/// 不追加 diskHistory（HullPoly 缓存仍会填充，与 Go 一致）。
+/// `PredictDiskPlacement`：只做选位+评分，不生成 G-code、
+/// 不追加 diskHistory（HullPoly 缓存仍会填充，与 旧实现 一致）。
 pub fn predict_disk_placement(
     supports: &[String],
     collision_check: &mut [CollisionLayer],
@@ -558,7 +558,7 @@ fn ensure_hull(layer: &mut CollisionLayer) -> bool {
     }
 }
 
-/// `GenerateDiskWipe`（wipe.go:489）：圆盘选位 + 绘制 + 连接线。
+/// `GenerateDiskWipe`：圆盘选位 + 绘制 + 连接线。
 #[allow(clippy::too_many_arguments)]
 pub fn generate_disk_wipe(
     supports: &[String],
@@ -1170,7 +1170,7 @@ pub fn generate_disk_wipe(
     })
 }
 
-// ---- Complex Wipe（wipe.go:1075） ----
+// ---- Complex Wipe ----
 
 fn generate_complex_wipe(
     recent_lines: &[String],
@@ -1307,7 +1307,7 @@ fn find_next_extrude_position(recent_lines: &[String], preglue_index: usize) -> 
     (0.0, 0.0)
 }
 
-// ---- 三种连接线（wipe.go:1212-1529） ----
+// ---- 三种连接线 ----
 
 #[allow(clippy::too_many_arguments)]
 fn generate_connection_lines_score_positive(
@@ -1693,9 +1693,9 @@ fn generate_reinforcement_connection(
     ]
 }
 
-// ---- SDK 段拆分（sdk.go:29-263） ----
+// ---- SDK 段拆分 ----
 
-/// `DiskWipeRequest`（sdk.go:29）。
+/// `DiskWipeRequest`。
 pub struct DiskWipeRequest<'a> {
     pub supports: &'a [String],
     pub collision_check: &'a mut Vec<CollisionLayer>,
@@ -1709,7 +1709,7 @@ pub struct DiskWipeRequest<'a> {
     pub future_layer_count: usize,
 }
 
-/// `DiskWipeOptions`（sdk.go:75）：零值不保证语义，用 `default_disk_wipe_options`。
+/// `DiskWipeOptions`：零值不保证语义，用 `default_disk_wipe_options`。
 #[derive(Debug, Clone, Copy)]
 pub struct DiskWipeOptions {
     pub pre_extrude_compensation: f64,
@@ -1725,7 +1725,7 @@ pub fn default_disk_wipe_options() -> DiskWipeOptions {
     }
 }
 
-/// `DiskWipeSegment`（sdk.go:110）：Connection/Paint/Finish 拆分 + 兼容拼接。
+/// `DiskWipeSegment`：Connection/Paint/Finish 拆分 + 兼容拼接。
 pub struct DiskWipeSegment {
     pub segment_lines: Vec<String>,
     pub connection_lines: Vec<String>,
@@ -1739,8 +1739,8 @@ pub struct DiskWipeSegment {
     pub disk_history: Vec<DiskHistoryEntry>,
 }
 
-/// `GenerateDiskWipeSegment`（sdk.go:175）：SDK 入口。
-/// opts 零值回退默认（wipe_distance/wipe_retract_ratio 与 Go 同样只回退不消费）。
+/// `GenerateDiskWipeSegment`：SDK 入口。
+/// opts 零值回退默认（wipe_distance/wipe_retract_ratio 与 旧实现 同样只回退不消费）。
 pub fn generate_disk_wipe_segment(
     req: DiskWipeRequest,
     opts: DiskWipeOptions,
@@ -1802,7 +1802,7 @@ pub fn generate_disk_wipe_segment(
     })
 }
 
-/// `applyPreExtrudeCompensation`（sdk.go:250）：首段挤出行的 E×factor。
+/// `applyPreExtrudeCompensation`：首段挤出行的 E×factor。
 fn apply_pre_extrude_compensation(lines: &[String], factor: f64) -> Vec<String> {
     let mut out = lines.to_vec();
     for line in out.iter_mut() {

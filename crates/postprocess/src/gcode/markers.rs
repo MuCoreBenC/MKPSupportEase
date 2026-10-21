@@ -1,4 +1,4 @@
-//! 切片器注释标记与 MKP 注释前缀（对照 markers.go / mkp_markers.go）。
+//! 切片器注释标记与 MKP 注释前缀（对照  /）。
 
 /// 结构性标记（`;WIPE_START` 家族等，值含前导 `;`，与旧侧常量逐字一致）。
 pub const MARKER_WIPE_START: &str = ";WIPE_START";
@@ -170,7 +170,7 @@ pub const ALL_FEATURE_TYPES: &[FeatureInfo] = &[
 
 /// `;FEATURE: <name>` 前缀命中的零分配形态：语义等价于
 /// `has_slicer_comment_prefix(line, &format!("FEATURE: {name}"))`（前缀允许
-/// name 之后有任意内容——旧侧 Go 的 HasPrefix 语义如此）。
+/// name 之后有任意内容——旧侧 旧实现的 HasPrefix 语义如此）。
 fn has_feature(line: &str, name: &str) -> bool {
     let trimmed = line.trim();
     let Some(rest) = trimmed.strip_prefix(';') else {
@@ -215,7 +215,7 @@ mod tests {
     fn slicer_comment_prefix_forms() {
         assert!(has_slicer_comment_prefix(";WIPE_START", "WIPE_START"));
         assert!(has_slicer_comment_prefix("  ; WIPE_START  ", "WIPE_START"));
-        // Go 的 HasPrefix 是纯前缀判定：";WIPE_STARTER" 也以 ";WIPE_START" 开头 → 命中。
+        // 旧实现的 HasPrefix 是纯前缀判定：";WIPE_STARTER" 也以 ";WIPE_START" 开头 → 命中。
         // （旧侧语义如此——已知宽松，靠调用方传完整标记名兜住。）
         assert!(has_slicer_comment_prefix(";WIPE_STARTER", "WIPE_START"));
         assert!(!has_slicer_comment_prefix("X;WIPE_START", "WIPE_START"));

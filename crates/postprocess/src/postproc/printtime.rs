@@ -1,8 +1,8 @@
 //! printtime —— 独立算法，不知道 Engine（doc.md §8.1 钉死）。
 //!
 //! 对照 packages/go-printtime 全量移植（parse/planner/kinematics/clamp/limits/
-//! meta/classify）。与 Go 的接口差异（登记）：
-//! - Go 的 Estimate(path) 读文件；Rust 吃**内容行**（engine 全程持内容在内存，
+//! meta/classify）。与 旧实现的接口差异（登记）：
+//! - 旧实现的 Estimate(path) 读文件；Rust 吃**内容行**（engine 全程持内容在内存，
 //!   design.md §3.2）。ComputeDelta 的 `_original` 兄弟文件检查属路径域，
 //!   留给 CLI 层（Task 15），本模块不支持 delta（参考输出该项为 null，一致）。
 //! - Axes 固定 x,y,z,e：map 换 [f64; 4] 数组（同序遍历，语义等价、无分配）。
@@ -57,7 +57,7 @@ pub fn generic_limits() -> Limits {
     )
 }
 
-/// Z 轴加速度基准（limits.go 实测调参结论，数值逐字）。
+/// Z 轴加速度基准（实测调参结论，数值逐字）。
 /// 时长解析的单位换算（分钟/小时 → 秒）。
 ///
 /// 与速度换算（mm/s→mm/min，gatecheck `speed_unit_conversion_only_in_ir` 的
@@ -164,7 +164,7 @@ fn csv_floats(val: &str) -> Vec<f64> {
         .collect()
 }
 
-// ---- 运动学（kinematics.go 逐行） ----
+// ---- 运动学（逐行） ----
 
 fn estimated_acceleration_distance(initial: f64, target: f64, accel: f64) -> f64 {
     if accel == 0.0 {
@@ -305,7 +305,7 @@ fn arc_tangent(px: f64, py: f64, cx: f64, cy: f64, ccw: bool) -> [f64; 3] {
     unit3([tx, ty, 0.0])
 }
 
-// ---- 逐轴钳制（clamp.go） ----
+// ---- 逐轴钳制 ----
 
 fn clamp_feedrate_by_axis(
     target: f64,
@@ -367,7 +367,7 @@ fn clamp_safe_feedrate_by_jerk(
     sf
 }
 
-// ---- 解析器（parse.go） ----
+// ---- 解析器 ----
 
 #[derive(Debug, Clone, Default)]
 pub struct Block {
@@ -815,7 +815,7 @@ impl ParamBuf {
 
 /// 参数扫描 `([A-Za-z])(-?(?:\d+\.?\d*|\.\d+))`（手写字符扫描，无 regex 依赖）。
 /// 接受面必须含无整数部分形态（"-.02" / ".4"）——G-code 的回抽/复位行大量使用，
-/// 拒绝它们会让纯 E 移动行整体丢块（实测 segments 16265 vs Go 16668）。
+/// 拒绝它们会让纯 E 移动行整体丢块（实测 segments 16265 vs 旧实现 16668）。
 ///
 /// 写进调用方的 [`ParamBuf`]（零分配）。`G`/`M` 不进参数表 —— 与旧实现调用点的
 /// `if c == b'G' || c == b'M' { continue; }` 同义，只是把过滤前移到这里。
@@ -1168,7 +1168,7 @@ fn scan_params_sp(line: &str) -> Vec<(u8, f64)> {
     out
 }
 
-// ---- 规划器（planner.go） ----
+// ---- 规划器 ----
 
 fn planner_forward_pass(blocks: &mut [Block]) {
     let n = blocks.len();
@@ -1231,14 +1231,14 @@ fn recalculate_trapezoids(blocks: &mut [Block]) {
     }
 }
 
-// ---- 分类（classify.go） ----
+// ---- 分类 ----
 
-/// `type:` 值 → 类名（Go 表逐条；`None` = 没命中）。
+/// `type:` 值 → 类名（旧实现 表逐条；`None` = 没命中）。
 ///
 /// 在 parse 阶段对**每一行 `type:`** 调用一次（几千次），而不是在逐段求和里
 /// 对每个 block 调用（几十万次）。判定面与原 `classify` 的前半段一字不差。
 fn classify_type(type_tag: &str) -> Option<&'static str> {
-    // Go 表逐条（大小写不敏感：原实现是 `to_lowercase` 后全等 match，对 ASCII 值等价）
+    // 旧实现 表逐条（大小写不敏感：原实现是 `to_lowercase` 后全等 match，对 ASCII 值等价）
     let t = type_tag.trim();
     let c = if t.eq_ignore_ascii_case("wall-outer")
         || t.eq_ignore_ascii_case("externalperimeter")
@@ -1272,7 +1272,7 @@ fn classify_type(type_tag: &str) -> Option<&'static str> {
     } else if t.eq_ignore_ascii_case("gapfill") || t.eq_ignore_ascii_case("gap fill") {
         "缝隙填充"
     } else if t.eq_ignore_ascii_case("priming") {
-        // Go 表里 priming → "清洗/ priming"
+        // 旧实现 表里 priming → "清洗/ priming"
         "清洗/ priming"
     } else if t.eq_ignore_ascii_case("wipe")
         || t.eq_ignore_ascii_case("wipe tower")
@@ -1285,7 +1285,7 @@ fn classify_type(type_tag: &str) -> Option<&'static str> {
     Some(c)
 }
 
-/// type 表没命中时按运动类别分类（原 `classify` 的后半段，逐条同 Go 表）。
+/// type 表没命中时按运动类别分类（原 `classify` 的后半段，逐条同 旧实现 表）。
 fn classify_kind(kind: &str) -> &'static str {
     match kind {
         "retract" => "回抽/换料",
@@ -1295,7 +1295,7 @@ fn classify_kind(kind: &str) -> &'static str {
     }
 }
 
-// ---- 头部元数据（meta.go，内容版） ----
+// ---- 头部元数据（，内容版） ----
 
 const PREP_OVERHEAD_KEYS: &[&str] = &[
     "machine_prepare_compensation_time",
@@ -1374,7 +1374,7 @@ fn parse_hms(s: &str) -> f64 {
     seconds
 }
 
-// ---- 结果与入口（estimate.go） ----
+// ---- 结果与入口 ----
 
 /// 为什么带 `Serialize`：这份估算要原样进历史档案（`gcode_history/*_meta.json`
 /// 的 `detail.printTime`）。让 `src-tauri` 手写一遍字段映射等于把同一组键名写两处，
@@ -1391,7 +1391,7 @@ pub struct CategoryStat {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Options {
-    /// Go 的 ComputeDelta 需要路径域的 `_original` 兄弟文件检查，留给 CLI 层；
+    /// 旧实现的 ComputeDelta 需要路径域的 `_original` 兄弟文件检查，留给 CLI 层；
     /// 本模块恒不计算 delta（参考输出该项为 null）。
     pub compute_delta: bool,
     pub startup_overhead_seconds: f64,

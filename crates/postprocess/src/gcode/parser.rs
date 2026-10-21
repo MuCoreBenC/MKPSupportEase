@@ -1,4 +1,4 @@
-//! 行级识别工具（对照 parser.go）。
+//! 行级识别工具（对照）。
 
 /// `TrimLine`：去掉行尾 `\r` / `\n`。
 pub fn trim_line(line: &str) -> &str {
@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn z_height_line_variants() {
         assert_eq!(is_z_height_line("; Z_HEIGHT: 0.2"), Some(0.2));
-        // 标记含尾随空格：冒号后无空格的 ";Z_HEIGHT:0.25mm" **不命中**（Go 同）
+        // 标记含尾随空格：冒号后无空格的 ";Z_HEIGHT:0.25mm" **不命中**（旧实现 同）
         assert_eq!(is_z_height_line(";Z_HEIGHT:0.25mm"), None);
         assert_eq!(is_z_height_line("; Z_HEIGHT: 0.25 mm"), Some(0.25));
         assert_eq!(is_z_height_line("  ; Z_HEIGHT: 1.2 mm "), Some(1.2));

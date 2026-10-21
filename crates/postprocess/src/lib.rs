@@ -2,7 +2,7 @@
 //!
 //! **输入**一份 G-code + 一份配置文件（结构就是 [`ir::Ir`] 本身），**输出**处理后的 G-code。
 //!
-//! 来源：`/Users/wzy/projects/mkp-rust/mkp-sr`（冻结 tag `freeze/before-postproc-extract`）。
+//! 来源：`/Users/wzy/projects/mkp-rust/来源实现`（冻结 tag `freeze/before-postproc-extract`）。
 //! 那个仓库有 9 个 crate、一个 Tauri 前端、预设文件体系、云端下载与同步共约 14.2 万行；
 //! 本项目只搬**后处理语义**那部分。
 //!

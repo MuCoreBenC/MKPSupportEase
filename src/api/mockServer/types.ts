@@ -88,7 +88,7 @@ export interface RawFlags {
 }
 
 /**
- * 上游 Go 侧这是 `map[string]any`，叶子字段没有任何约束。
+ * 上游 旧实现这是 `map[string]any`，叶子字段没有任何约束。
  * 实测五台机型（A1 / A1_MINI / P1S / P2S / X1C）的字段集完全一致，所以这里定死。
  * 哪天上游多给一个字段，这里会静默忽略；少给一个，界面上会露出 `undefined`。
  */

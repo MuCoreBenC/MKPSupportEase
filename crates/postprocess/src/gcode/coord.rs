@@ -1,4 +1,4 @@
-//! 坐标提取 / 解析 / 替换（对照 coord_extract.go / offset_byte.go / offset_replace.go）。
+//! 坐标提取 / 解析 / 替换（对照  /  /）。
 //!
 //! 三个函数分别复刻三个**正则语义**（旧侧已把它们改写成字节扫描以省分配，
 //! Rust 侧直接按字节扫描移植——语义描述全部保留在各自文档里）：
@@ -10,7 +10,7 @@
 /// `ExtractCoord`：轴字母后最长的 `[\d\.-]+` 串，ParseFloat 失败即「未找到」。
 ///
 /// 注意首个匹配若不可解析是**终止扫描**（返回 false），不是跳过找下一个——
-/// 这是旧实现的真实行为（对照 coord_extract.go:47-50）。
+/// 这是旧实现的真实行为（对照）。
 pub fn extract_coord(line: &[u8], axis: u8) -> Option<f64> {
     let mut i = 0;
     while i < line.len() {
@@ -278,7 +278,7 @@ fn match_axis_coord(s: &[u8], start: usize, axis: u8) -> Option<usize> {
 mod tests {
     use super::*;
 
-    /// 旧侧 coord_extract_test.go 的行集 × {X,Y,E} 轴（期望值按正则语义手推）。
+    /// 旧侧  的行集 × {X,Y,E} 轴（期望值按正则语义手推）。
     #[test]
     fn extract_coord_matches_regex_semantics() {
         let cases: &[(&str, u8, Option<f64>)] = &[

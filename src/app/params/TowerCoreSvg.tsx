@@ -2,8 +2,8 @@
  * 塔身绘制（A43 移植）—— 从参考程序 mkpsupporte 逐字移植（参数页「擦料塔位置」的塔块）。
  *
  * 原件在共享包 @mkp/param-layout 的 TowerCoreSVG（它自己又是从 Supporte 抽的，
- * 底层的 ribSection / roundingPolygon / offsetPolygon 三个算法则是从 Go 后端
- * internal/tower/polygon.go 移植到前端的）。算法一行没动 —— 画出来的形状必须和
+ * 底层的 ribSection / roundingPolygon / offsetPolygon 三个算法是前端自己的实现。
+ * 算法一行没动 —— 画出来的形状必须和
  * 真程序一致。
  *
  * 颜色也照原样保留（塔身 #fcd34d / 外围绿 #10b981）：那是那台程序里塔的既定长相，
@@ -32,7 +32,7 @@ function removeDuplicatePoints(points: Pt[], epsilon: number): Pt[] {
   return result
 }
 
-/** 等距偏移（miter）：Go 后端 polygonOffset 的移植。向内偏移非凸多边形不会自相交 */
+/** 等距偏移（miter）：polygonOffset 的实现。向内偏移非凸多边形不会自相交 */
 function offsetPolygon(polygon: Pt[], offset: number): Pt[] {
   const n = polygon.length
   if (n < 3 || offset === 0) return polygon
@@ -81,7 +81,7 @@ function offsetPolygon(polygon: Pt[], offset: number): Pt[] {
 }
 
 /**
- * 圆角多边形：Go 后端 roundingPolygon 的移植。不分内外凸凹统一 roundingDistance，
+ * 圆角多边形：roundingPolygon 的实现。不分内外凸凹统一 roundingDistance，
  * 角度阈值 angleTolDeg 以下的拐角才做圆角。
  */
 function roundingPolygon(polygon: Pt[], roundingDistance: number, angleTolDeg: number): Pt[] {
@@ -180,7 +180,7 @@ function roundingPolygon(polygon: Pt[], roundingDistance: number, angleTolDeg: n
   return result
 }
 
-/** 纯净的基础直角多边形：Go 后端 ribSection 的移植（filletWall=false 版本） */
+/** 纯净的基础直角多边形：旧实现 后端 ribSection 的移植（filletWall=false 版本） */
 function ribSectionPointsRaw(width: number, depth: number, ribLength: number, ribWidth: number): Pt[] {
   const theta = Math.atan(width / depth)
   const costheta = Math.cos(theta)
@@ -278,7 +278,7 @@ export default function TowerCoreSvg({
     const loopCount = 5
 
     /*
-     * 对齐 Go 后端 rounding 的思路，方向改成从内往外：
+     * 对齐 旧实现 后端 rounding 的思路，方向改成从内往外：
      * 最内层先做一次圆角，再向外逐层偏移 —— 偏移天然同心，相邻线圈无缝隙。
      */
     const innerFilletPts = ribFilletWall ? roundingPolygon(rawBasePts, 2.0, 30.0) : rawBasePts

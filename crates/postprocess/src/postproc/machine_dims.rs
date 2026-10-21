@@ -293,14 +293,14 @@ pub struct ZonePoint {
     pub y: f64,
 }
 
-/// `lookupAlias`（machine/normalize.go）：大写 alias → Canonical Machine ID。
+/// `lookupAlias`：大写 alias → Canonical Machine ID。
 fn lookup_alias(raw: &str) -> Option<String> {
     let upper = raw.trim().to_uppercase();
     tables().alias_map.get(&upper).cloned()
 }
 
-/// `NormalizeToCanonical`（machine/normalize.go:308）：alias 归一；未命中返回空串
-/// （Go ResolveModelID 语义；preset 按约定填 Canonical ID）。
+/// `NormalizeToCanonical`：alias 归一；未命中返回空串
+/// （旧实现 ResolveModelID 语义；preset 按约定填 Canonical ID）。
 pub fn normalize_to_canonical(raw: &str) -> String {
     if raw.is_empty() {
         return String::new();
@@ -308,7 +308,7 @@ pub fn normalize_to_canonical(raw: &str) -> String {
     lookup_alias(raw).unwrap_or_default()
 }
 
-/// `PopulateForbiddenZones`（ir/forbidden_zones.go:12）：从机型表的禁区段填充 IR；
+/// `PopulateForbiddenZones`：从机型表的禁区段填充 IR；
 /// 未命中/空 → 保留空（警告记日志，不阻塞）。数据来自 `presets/forbidden_zones/*.toml`。
 pub fn populate_forbidden_zones(ir: &mut crate::ir::Ir, machine_type: &str) {
     if machine_type.is_empty() {
@@ -342,7 +342,7 @@ pub fn populate_forbidden_zones(ir: &mut crate::ir::Ir, machine_type: &str) {
     ir.machine.forbidden_zones = result;
 }
 
-/// `DetectFromGcode`（machine/normalize.go:134）四优先级：
+/// `DetectFromGcode`四优先级：
 /// 长标记(带 label) → 长标记(无 label) → printer_model 后缀匹配 → 短注释
 /// （最长到最短）。全不命中返回空串（调用方按 UNKNOWN 展示）。
 pub fn detect_machine_from_gcode(content: &str) -> String {
@@ -463,7 +463,7 @@ fn parse_short_machine_comment(line: &str) -> Option<String> {
     None
 }
 
-/// `FillMachineDimsFromToml`（engine/helpers.go:103）：维度填充（含涂胶区）。
+/// `FillMachineDimsFromToml`：维度填充（含涂胶区）。
 pub fn fill_machine_dims_from_toml(toml_machine: &str, ir: &mut crate::ir::Ir) {
     if toml_machine.is_empty() {
         tracing::error!("fill_machine_dims_from_toml 收到空 tomlMachine（防御性处理）");

@@ -1,4 +1,4 @@
-//! E 值读写与行级后处理原语（对照 postprocess.go）。
+//! E 值读写与行级后处理原语（对照）。
 //!
 //! 这些函数只按「运动指令 + 参数字段」的字节语义工作，不理解 MKP 业务。
 
@@ -36,7 +36,7 @@ pub(crate) fn parse_g_code(line: &str) -> (String, std::collections::HashMap<Str
     (code, params)
 }
 
-/// 注释剥离后的指令部分（Go `extractCodePart`）。
+/// 注释剥离后的指令部分（旧实现 `extractCodePart`）。
 pub(crate) fn extract_code_part(line: &str) -> &str {
     let trimmed = line.trim();
     match trimmed.find(';') {
@@ -181,7 +181,7 @@ fn is_safety_raise_line(line: &str, home_z: f64) -> Option<f64> {
     Some(z)
 }
 
-/// `RemoveFinalLowerZ`：校准流程尾部「降 Z」行的清除（对照 postprocess.go:236）。
+/// `RemoveFinalLowerZ`：校准流程尾部「降 Z」行的清除（对照）。
 /// 两个分支：有/无 safety-raise 锚点行，阈值分别为 safetyRaiseZ / homeZ；
 /// 危险区（"; lower z aittle" 注释后）内带 XY 的降 Z 行只剥 Z 参数。
 pub fn remove_final_lower_z(lines: &[String]) -> Vec<String> {
@@ -216,7 +216,7 @@ pub fn remove_final_lower_z(lines: &[String]) -> Vec<String> {
     result
 }
 
-/// postprocess.go 两段共享的尾部过滤循环（原文是两份近乎复制的循环，此处合并；
+///  两段共享的尾部过滤循环（原文是两份近乎复制的循环，此处合并；
 /// 行为逐字对照：空行/注释行原样、"; lower z a little" 进危险区、非运动行原样、
 /// 降 Z 行按 hasXY 剥 Z 或整行丢弃）。
 fn filter_lower_z_tail(lines: &[String], from: usize, threshold_z: f64, out: &mut Vec<String>) {
@@ -298,7 +298,7 @@ pub fn remove_param_from_line(line: &str, param: &str) -> String {
 mod tests {
     use super::*;
 
-    /// 旧侧 get_evalue_test.go 全表移植。
+    /// 旧侧  全表移植。
     #[test]
     fn get_e_value_table() {
         let cases: &[(&str, Option<f64>)] = &[
@@ -326,7 +326,7 @@ mod tests {
         }
     }
 
-    /// 旧侧 replace_e_value_test.go 全表移植。
+    /// 旧侧  全表移植。
     #[test]
     fn replace_e_value_table() {
         let cases: &[(&str, f64, &str)] = &[
@@ -388,7 +388,7 @@ mod tests {
         );
     }
 
-    /// 旧侧 postprocess.go RemoveFinalLowerZ 的关键分支（home 行 100,100 容差 ±1）。
+    /// 旧侧  RemoveFinalLowerZ 的关键分支（home 行 100,100 容差 ±1）。
     #[test]
     fn remove_final_lower_z_drops_lower_moves_after_home() {
         let lines: Vec<String> = [
@@ -430,7 +430,7 @@ mod tests {
             remove_param_from_line("G1 X1 Y2 Z0.2 ; c", "Z"),
             "G1 X1 Y2 ; c"
         );
-        // Go 语义：字段级剔除，指令码 "G1" 保留
+        // 旧实现语义：字段级剔除，指令码 "G1" 保留
         assert_eq!(remove_param_from_line("G1 Z0.2", "Z"), "G1");
     }
 }

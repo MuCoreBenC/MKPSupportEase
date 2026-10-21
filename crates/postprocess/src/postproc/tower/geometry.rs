@@ -1,7 +1,7 @@
-//! 多边形几何原语（对照 tower/polygon.go + rib.go 的几何 helpers，逐行复刻）。
+//! 多边形几何原语（对照  +  的几何 helpers，逐行复刻）。
 //!
-//! 浮点纪律：运算顺序与 Go 一字不差，禁 FMA（gatecheck `no_fma_in_any_crate`）。
-//! 比较用的是 Go 同款 epsilon（1e-10 / 0.001 / 0.01），**不许**顺手改成「更合理」。
+//! 浮点纪律：运算顺序与 旧实现 一字不差，禁 FMA（gatecheck `no_fma_in_any_crate`）。
+//! 比较用的是 旧实现 同款 epsilon（1e-10 / 0.001 / 0.01），**不许**顺手改成「更合理」。
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Point {
@@ -172,7 +172,7 @@ pub(crate) fn polygon_offset(poly: &[Point], offset: f64) -> Vec<Point> {
     new_points
 }
 
-// 16 个顶点按 Go 侧 append 顺序逐个压入（行级对应，不合并成 vec![] 字面量）。
+// 16 个顶点按 旧实现 append 顺序逐个压入（行级对应，不合并成 vec![] 字面量）。
 #[allow(clippy::vec_init_then_push)]
 pub(crate) fn rib_section(
     width: f64,

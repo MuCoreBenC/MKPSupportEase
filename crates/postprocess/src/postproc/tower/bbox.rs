@@ -1,4 +1,4 @@
-//! 塔包围盒（对照 tower/bbox.go 逐行复刻）。碰撞检测宁可误报不漏报。
+//! 塔包围盒（对照  逐行复刻）。碰撞检测宁可误报不漏报。
 
 use super::constants::*;
 use super::geometry::{get_limit_depth_by_height, rib_section};

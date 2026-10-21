@@ -1,11 +1,11 @@
-// pass2 —— 第二遍扫描（对照 processor/pass2.go 逐行移植）。
+// pass2 —— 第二遍扫描（对照  逐行移植）。
 //
 // 消耗式：`second_pass(p1: Pass1Output, ...)` 按值吃 pass1 产物（12.1，无 Option）。
 // 输出为内存行序列；`.part` + rename 的落盘属 engine write 步（design §3.2/§八），
 // 行为等价、少一层文件往返 —— 该偏离写入收口报告。
 //
 // 依赖 disk::wipe（圆盘擦拭，Task 12 随 pass2 落地，design §3.2 的
-// 「wipe.go 随 pass2 落地」决定）。
+// 「 随 pass2 落地」决定）。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -42,7 +42,7 @@ pub const TOWER_COLLISION_MAX_KEEP_LAYERS: i64 = 20;
 pub(crate) const TOWER_COLLISION_TARGET_Z_RANGE: f64 = 0.8;
 pub(crate) const TOWER_HEIGHT_COMP_OFFSET: f64 = 2.0;
 
-/// `towerCollisionKeepLayers`（pass2.go:39）：按层高自适应碰撞窗口容量。
+/// `towerCollisionKeepLayers`：按层高自适应碰撞窗口容量。
 pub(crate) fn tower_collision_keep_layers(typical_layer_height: f64) -> usize {
     if typical_layer_height <= 0.0 {
         return TOWER_COLLISION_KEEP_LAYERS as usize;
@@ -57,7 +57,7 @@ pub(crate) fn tower_collision_keep_layers(typical_layer_height: f64) -> usize {
     }
 }
 
-/// `CalcSuggestedLH`（extrusion.go）：塔层高建议值（fast/custom/follow 三模式）。
+/// `CalcSuggestedLH`：塔层高建议值（fast/custom/follow 三模式）。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calc_suggested_lh(
     current_z: f64,
@@ -96,7 +96,7 @@ pub(crate) fn calc_suggested_lh(
     }
 }
 
-/// `cachedLine`（pass2.go:60）：塔层模板行的预计算形态。
+/// `cachedLine`：塔层模板行的预计算形态。
 #[derive(Default, Clone)]
 struct CachedLine {
     is_placeholder: bool,
@@ -117,7 +117,7 @@ struct CachedLine {
     raw_line: String,
 }
 
-/// `precomputeTowerLayer`（pass2.go:79）。
+/// `precomputeTowerLayer`。
 fn precompute_tower_layer(
     ir_data: &Ir,
     final_tower_height: f64,
@@ -208,7 +208,7 @@ fn precompute_tower_layer(
     Ok(result)
 }
 
-/// `scaleCachedEValue`（pass2.go:148）。
+/// `scaleCachedEValue`。
 fn scale_cached_e_value(line: &str, template_e: f64, ratio: f64) -> String {
     let Some(e_idx) = line.rfind('E') else {
         return line.to_string();
@@ -218,7 +218,7 @@ fn scale_cached_e_value(line: &str, template_e: f64, ratio: f64) -> String {
     format!("{}{}", &line[..e_idx + 1], e_str)
 }
 
-/// 未来碰撞层（pass2.go:55）：预扫描收集的单层碰撞墙体。
+/// 未来碰撞层：预扫描收集的单层碰撞墙体。
 struct FutureCollisionLayer {
     z_height: f64,
     wall_lines: Vec<String>,
@@ -230,7 +230,7 @@ pub struct Pass2Output {
     pub tower_height: f64,
 }
 
-/// pass2 全部可变状态的载体（Go 用闭包共享，Rust 用结构体方法）。
+/// pass2 全部可变状态的载体（旧实现 用闭包共享，Rust 用结构体方法）。
 struct Ctx<'a> {
     sink: LineSink,
     recent_lines: VecDeque<String>,
@@ -329,7 +329,7 @@ impl<'a> Ctx<'a> {
         self.ir_data.wiping.wiper_y - self.tower_bbox.min_y
     }
 
-    /// `handlePrepareNextTower`（pass2.go:447）。
+    /// `handlePrepareNextTower`。
     fn handle_prepare_next_tower(&mut self) -> Result<(), PostprocError> {
         self.remove_g3_flag = true;
         self.more_extrude_flag = true;
@@ -528,11 +528,11 @@ impl<'a> Ctx<'a> {
     }
 }
 
-/// `SecondPass`（pass2.go:165）：第二遍扫描。
+/// `SecondPass`：第二遍扫描。
 ///
 /// 消耗式吃 `Pass1Output`；`final_tower_height` = pass1 stats.MaxZHeight。
 /// `cancel` 协作取消：主循环顶部时间基检查（Task 17.2，对照
-/// pass2.go:624-640），未取消路径零行为变化。
+///），未取消路径零行为变化。
 /// `cancel_check_interval` 由调用方注入：产品默认 100ms（engine 的
 /// `DEFAULT_CANCEL_CHECK_INTERVAL`），判据注入极小值以摆脱墙钟依赖。
 #[allow(clippy::too_many_arguments)]
@@ -685,7 +685,7 @@ pub fn second_pass(
     ctx.curr_max_tower_height = ctx.ir_data.machine.first_layer_height;
     ctx.suggested_lh = TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter;
 
-    // 读队列（Go 的 scanner + peekBuffer 合并成一条队列）：
+    // 读队列（旧实现的 scanner + peekBuffer 合并成一条队列）：
     // `read_next` = 队头弹出（**移动**，不再每行 `clone`）；`peek_lines` = 看队头 n 行。
     // 旧实现把「读游标 + 预读缓冲」拆成两段，于是每行都要 `pass1_lines[pos].clone()`
     // 才能交给主循环 —— 一份 90 万行的中间产物就是 90 万次堆分配。peek 只克隆
@@ -710,7 +710,7 @@ pub fn second_pass(
         |q: &VecDeque<String>, n: usize| -> Vec<String> { q.iter().take(n).cloned().collect() };
 
     while let Some(line) = read_next(&mut remaining, &mut pos) {
-        // 协作取消（Task 17.2）：循环顶部（pass2.go:624-640 同位——所有含
+        // 协作取消（Task 17.2）：循环顶部（同位——所有含
         // continue 的分支都会经过这里），100ms 时间基节流
         cancel_checker.check(cancel, std::time::Instant::now())?;
         // 改写位：`;Adjust as support` 那一支**不再就地改 `line`**（那会锁死下面
@@ -885,7 +885,7 @@ pub fn second_pass(
             ctx.bottom_glue_inserted_this_layer = false;
             ctx.skip_slicer_wipe = false;
 
-            // Go 此处对 layerHeightIndex 命中有一个空语句块（pass2.go:810），无行为。
+            // 旧实现 此处对 layerHeightIndex 命中有一个空语句块，无行为。
 
             if ctx.ir_data.tower.use_towers
                 && ctx.first_layer_flag
@@ -943,7 +943,7 @@ pub fn second_pass(
             }
 
             // 底面涂胶块插入（pass1 预生成于 State.BottomGlueEntries）。
-            // 先按值取出命中条目再写（避免与 ctx 的可变借用冲突；Go 语义不变）。
+            // 先按值取出命中条目再写（避免与 ctx 的可变借用冲突；旧实现语义不变）。
             if !ctx.ir_data.state.bottom_glue_entries.is_empty() {
                 let mut hit: Option<(usize, Vec<String>)> = None;
                 for (i, entry) in ctx.ir_data.state.bottom_glue_entries.iter().enumerate() {
@@ -1522,7 +1522,7 @@ pub fn second_pass(
         let out_line = adjusted.unwrap_or(line);
 
         if ctx.allow_print_flag {
-            // Go 的 m630Inserted 是每轮循环内新建的局部量，检查处恒为 false —— 逐字保持
+            // 旧实现的 m630Inserted 是每轮循环内新建的局部量，检查处恒为 false —— 逐字保持
             if ctx.ir_data.safety.disable_front_cover_alarm
                 && ctx.toml_machine == "P1S"
                 && h_reset_status

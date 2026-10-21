@@ -1,6 +1,6 @@
-//! `build()` —— TomlConfig → Ir 的唯一翻译点（对照 ir/build.go 逐段移植）。
+//! `build()` —— TomlConfig → Ir 的唯一翻译点（对照  逐段移植）。
 //!
-//! 顺序与 Go 一字不差：弃用检查 → 零值→注册表默认 → 逐字段映射 → 兼容迁移 →
+//! 顺序与 旧实现 一字不差：弃用检查 → 零值→注册表默认 → 逐字段映射 → 兼容迁移 →
 //! 派生/回退 → 范围校验（fail fast）→ 零值兜底 clamp → 枚举归一化。
 //!
 //! 与旧侧的刻意差异（逐条登记）：
@@ -9,7 +9,7 @@
 //!   语义分支已在旧源码锁定。
 //! - **单位换算 `* 60.0` 只发生在此文件**（gatecheck `speed_unit_conversion_only_in_ir`）。
 //! - 弃用检查的 cfg 取值不走反射：快照里 deprecated 的 8 个 configKey 逐一
-//!   手写 arm；无 arm 的 key 视同「反射找不到 → 跳过」（Go 对无此字段的
+//!   手写 arm；无 arm 的 key 视同「反射找不到 → 跳过」（旧实现 对无此字段的
 //!   configKey 同样 continue）。
 //!
 //! 搬入 mkp-ssr 时的改动**恰好两处**（其余逐字不动）：
@@ -30,7 +30,7 @@ use postprocess::ir::types::*;
 use postprocess::ir::num_strip;
 use std::collections::HashMap;
 
-/// exec_mode 三值（`""` = CLI 回退读 TOML，process.go:219 语义）。
+/// exec_mode 三值（`""` = CLI 回退读 TOML， 语义）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CalibrationExecMode {
     /// `""`：回退读 TOML 的 calibration_execution_mode。
@@ -51,7 +51,7 @@ impl CalibrationExecMode {
     }
 }
 
-/// 单一翻译点。`registry` 传 [`None`] 时退回硬编码默认（与 Go nil registry
+/// 单一翻译点。`registry` 传 [`None`] 时退回硬编码默认（与 旧实现 nil registry
 /// 分支逐字一致）；Phase 1 的 CLI 恒传 [`Some`]（嵌入快照）。
 pub fn build(
     cfg: &TomlConfig,
@@ -61,7 +61,7 @@ pub fn build(
     if let Some(reg) = registry {
         check_deprecated_params(reg, cfg)?;
     }
-    // checkZeroDefaults：Go 在 sink==nil 时直接返回 nil —— 本实现无 sink，等价跳过。
+    // checkZeroDefaults：旧实现 在 sink==nil 时直接返回 nil —— 本实现无 sink，等价跳过。
     let defaults: Option<HashMap<String, toml::Value>> = registry.map(|r| r.defaults_index());
 
     let mut ir = new_default_ir();
@@ -382,7 +382,7 @@ pub fn build(
 
     validate_ranges(&ir, registry)?;
 
-    // B 类零值兜底 clamp（仅 2 处，见 build.go 尾部分类注释）
+    // B 类零值兜底 clamp（仅 2 处，见  尾部分类注释）
     ir.wiping.tower_extrude_ratio = clamp_float(ir.wiping.tower_extrude_ratio, 0.1, 3.0);
     ir.glue.z_lift_height = clamp_float(ir.glue.z_lift_height, 5.0, 10.0);
     ir.safety.xy_calibration = normalize_xy_calibration_mode(&ir.safety.xy_calibration).to_string();
@@ -566,7 +566,7 @@ fn go_sprint(cfg: &TomlConfig, config_key: &str) -> Option<String> {
     })
 }
 
-/// Go fmt 的 %v 对 float64 用 'g' 最短形式：5.0→"5"、0.8→"0.8"。
+/// 旧实现 fmt 的 %v 对 float64 用 'g' 最短形式：5.0→"5"、0.8→"0.8"。
 /// Rust `{}` 对 f64 同为最短定点（无指数），值域内逐字一致。
 fn go_float_str(v: f64) -> String {
     format!("{v}")
@@ -970,7 +970,7 @@ fn range_error(key: &str, value: f64, min_v: f64, max_v: f64) -> PostprocError {
     }
 }
 
-// ---- 纯 helpers（逐字对照 build.go 尾部） ----
+// ---- 纯 helpers（逐字对照  尾部） ----
 
 pub(crate) fn split_gcode_lines(s: &str) -> Vec<String> {
     s.split('\n')
@@ -1125,7 +1125,7 @@ mod tests {
         assert_eq!(split_gcode_lines(""), vec![""]);
     }
 
-    /// 7.5：零值→注册表默认（nil registry 走硬编码兜底，与 Go 同分支）。
+    /// 7.5：零值→注册表默认（nil registry 走硬编码兜底，与 旧实现 同分支）。
     #[test]
     fn zero_values_get_defaults() {
         let ir = build(&minimal_cfg(), None, CalibrationExecMode::Fallback).unwrap();
@@ -1208,7 +1208,7 @@ mod tests {
     }
 
     /// 弃用检查：outer_structure="sheath"（弃用选项）→ E_CFG_INVALID_001。
-    /// 注意 registry=None 时检查整体跳过（Go nil registry 同）——必须传注册表。
+    /// 注意 registry=None 时检查整体跳过（旧实现 nil registry 同）——必须传注册表。
     #[test]
     fn deprecated_choice_fails_loudly() {
         let reg = crate::load_param_registry();

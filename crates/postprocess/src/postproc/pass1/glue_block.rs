@@ -1,6 +1,6 @@
-//! 涂胶块发射（对照 processor/glue_block.go + pass1_emit.go 的 Z 补偿与微抬）。
+//! 涂胶块发射（对照  +  的 Z 补偿与微抬）。
 
-// 逐字对照 glue_block.go：嵌套 if 与 Go 同形（涂胶块的分支链本身就近百行）。
+// 逐字对照 ：嵌套 if 与 旧实现 同形（涂胶块的分支链本身就近百行）。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -25,7 +25,7 @@ use super::model_iface::{IfaceBbox, split_iface_by_model, total_path_length};
 use super::scan::{find_seg_start_cmd, parse_xy_from_g1, strip_z_and_e};
 use super::stages::{MkpStage, stage_comment_line};
 
-/// Z 补偿包围盒每侧外扩量（pass1_emit.go ZCompExpandMM，±2mm/侧）。
+/// Z 补偿包围盒每侧外扩量（ZCompExpandMM，±2mm/侧）。
 const Z_COMP_EXPAND_MM: f64 = 2.0;
 
 /// `calcGlueZ`：按 4 角双线性插值计算 (x, y) 处的涂胶 Z 补偿量。
@@ -101,7 +101,7 @@ pub(crate) fn calc_glue_z(
     base_z + comp
 }
 
-/// `applyMicroLift`：段间跳转 / 支撑面微抬（pass1_emit.go:88）。
+/// `applyMicroLift`：段间跳转 / 支撑面微抬。
 fn apply_micro_lift(
     sink: &mut LineSink,
     jump_cmd: &str,
@@ -138,8 +138,8 @@ fn apply_micro_lift(
     Ok(())
 }
 
-/// `writeGlueLines`（pass1_emit.go:120）：发射一个段的涂胶移动。
-/// 注意：稀疏化分支会**修改** `lines`（Go 同名行为，调用方负责传拷贝）。
+/// `writeGlueLines`：发射一个段的涂胶移动。
+/// 注意：稀疏化分支会**修改** `lines`（旧实现 同名行为，调用方负责传拷贝）。
 fn write_glue_lines(
     sink: &mut LineSink,
     lines: &mut Vec<String>,
@@ -385,7 +385,7 @@ fn write_glue_lines(
     Ok(())
 }
 
-/// `customMountGcodeHasRetract`（glue_block.go:471）：custom_mount_gcode 含负 E 指令。
+/// `customMountGcodeHasRetract`：custom_mount_gcode 含负 E 指令。
 pub(crate) fn custom_mount_gcode_has_retract(ir_data: &Ir) -> bool {
     ir_data
         .toolhead
@@ -394,7 +394,7 @@ pub(crate) fn custom_mount_gcode_has_retract(ir_data: &Ir) -> bool {
         .any(|line| get_e_value(line).is_some_and(|v| v < 0.0))
 }
 
-/// `customUnmountGcodeHasExtrude`（glue_block.go:483；pass2 的 prepare-next-tower 消费）。
+/// `customUnmountGcodeHasExtrude`（；pass2 的 prepare-next-tower 消费）。
 pub(crate) fn custom_unmount_gcode_has_extrude(ir_data: &Ir) -> bool {
     ir_data
         .toolhead
@@ -417,7 +417,7 @@ fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
     layer_z + ir_data.toolhead.z_offset + lift_height
 }
 
-/// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
+/// `mountToolhead`：custom_mount_gcode 切换下笔。
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
     ir_data: &Ir,
@@ -453,7 +453,7 @@ pub(crate) fn mount_toolhead(
     }
 }
 
-/// `unmountToolhead`（glue_block.go:413）：;Wipe/;Brush 跳过 + [AUTO] 风扇替换。
+/// `unmountToolhead`：;Wipe/;Brush 跳过 + [AUTO] 风扇替换。
 pub(crate) fn unmount_toolhead(sink: &mut LineSink, ir_data: &Ir) {
     sink.push_str(";Unmounting Toolhead");
     for unmount_line in &ir_data.toolhead.custom_unmount_gcode {
@@ -484,7 +484,7 @@ pub(crate) fn unmount_toolhead(sink: &mut LineSink, ir_data: &Ir) {
     sink.push_str(";Toolhead Unmounted");
 }
 
-/// `restoreFanState`（glue_block.go:455）：恢复 MKP 插入前的原始风扇状态。
+/// `restoreFanState`：恢复 MKP 插入前的原始风扇状态。
 pub(crate) fn restore_fan_state(sink: &mut LineSink, ir_data: &Ir, machine_type: &str) {
     if !ir_data.state.current_fan_speed_set {
         return;
@@ -501,10 +501,10 @@ pub(crate) fn restore_fan_state(sink: &mut LineSink, ir_data: &Ir, machine_type:
     }
 }
 
-/// `emitGlueBlock`（glue_block.go:27）：生成完整涂胶块（换笔→涂胶→擦料→准备下一塔）。
+/// `emitGlueBlock`：生成完整涂胶块（换笔→涂胶→擦料→准备下一塔）。
 ///
 /// 副作用：修改 ir_data.state.this_layer_revitalization 与 stats 计数字段；
-/// write_glue_lines 可能修改传入的 iface（稀疏化），调用方按 Go 语义传拷贝。
+/// write_glue_lines 可能修改传入的 iface（稀疏化），调用方按 旧实现语义传拷贝。
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn emit_glue_block(
     sink: &mut LineSink,
@@ -596,7 +596,7 @@ pub(crate) fn emit_glue_block(
     }
 
     for (seg_idx, seg) in segments.iter().enumerate() {
-        // Go 侧此处先累计 segESum，但该值从未被消费（死存储），未移植。
+        // 旧实现此处先累计 segESum，但该值从未被消费（死存储），未移植。
 
         let seg_start_cmd = find_seg_start_cmd(seg);
 

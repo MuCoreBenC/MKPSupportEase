@@ -1,4 +1,4 @@
-//! 12 步编排的判据（来源：`mkp-sr` 的 `crates/engine/tests/pipeline.rs`）。
+//! 12 步编排的判据（来源：`来源实现` 的 `crates/engine/tests/pipeline.rs`）。
 //!
 //! **判据资产的来路必须说清**，否则下一个人会以为这份 TOML 是手写的：
 //! `tests/fixtures/config/A1.toml` 是从**既有的** IR JSON 判据资产

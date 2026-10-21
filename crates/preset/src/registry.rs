@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ChoiceEntry {
-    /// Go 侧是 any：字符串/布尔/数字都真实存在（快照实测：true / 0.0 / 50.0 / 90.0）。
+    /// 旧实现是 any：字符串/布尔/数字都真实存在（快照实测：true / 0.0 / 50.0 / 90.0）。
     #[serde(default = "choice_value_default")]
     pub value: toml::Value,
     #[serde(default)]

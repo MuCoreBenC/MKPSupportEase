@@ -1,6 +1,6 @@
 //! G3 —— 擦料塔三入口的参数矩阵 golden（Task 3.3 落判据，Task 8 转绿）。
 //!
-//! 用例矩阵逐条译自旧 `tower_matrix_golden_test.go`（含共用常量与 23 条用例的
+//! 用例矩阵逐条译自旧 （含共用常量与 23 条用例的
 //! 全部标量入参）；块渲染 / `<nil>` vs `<empty>` 语义见 `golden_common`。
 //! 浮点纪律：所有入参与旧侧逐字相同；实现侧禁止 FMA 融合写法（gatecheck 已钉）。
 
@@ -26,7 +26,7 @@ const TM_WALL_WIDTH: f64 = 1.0;
 const TM_CONVERGE_LAYERS: i64 = 5;
 const TM_ENABLE_HEIGHT: f64 = 20.0;
 const TM_MODEL_TALL_HEIGHT: f64 = 50.0;
-/// tower/constants.go:7-8（rib 用例把塔心作为入参传入）
+/// （rib 用例把塔心作为入参传入）
 const TOWER_CENTER_X: f64 = 20.0;
 const TOWER_CENTER_Y: f64 = 20.0;
 

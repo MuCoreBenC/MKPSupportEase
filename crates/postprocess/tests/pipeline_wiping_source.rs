@@ -1,6 +1,6 @@
 //! `preferred_mode` 的**来源**判据（spec tasks.md Task 8.4 推迟到 Task 10.3 的那条）。
 //!
-//! 背景：来源仓库 mkp-sr 的 engine 在 `crates/engine/src/lib.rs:242` 传给
+//! 背景：来源仓库 来源实现 的 engine 在 `crates/engine/src/lib.rs:242` 传给
 //! `decide_wiping` 的是 `preset.config.wiping.have_wiping_components` —— **直接读预设**。
 //! 本项目没有预设了，改从 `ir.wiping.preferred_mode` 取。这是一次**换源**，
 //! 而换源如果错了，表现是「擦拭决策静默变了」：tower / disk / 强制 tower 三条分支，
