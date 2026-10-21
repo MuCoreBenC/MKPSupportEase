@@ -349,6 +349,25 @@ pub struct SlicerFacts {
     pub use_disk_wipe: bool,
 }
 
+/// **这一趟的参数快照**（2026-10-21，作者：「做那种快照机制 —— 我当时切片的时候的 TOML
+/// 和 IR 识别到的这种，对照一下看有没有错误的」）。
+///
+/// 为什么必须落在记录里、而不是"回头读当前预设"：用户切完往往会接着改预设
+/// （真机就是这样把擦料塔从 20 改到 101 的）。"当时用的是哪一份、程序认成了什么"
+/// 过了那一刻就再也查不到了。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamSnapshot {
+    /// 切片那一刻**预设 TOML 里读到的全量参数**（注册表 key → 控件看得懂的字符串）。
+    /// 顺序天然稳定（`BTreeMap`），于是两份记录可以逐行 diff。
+    pub params: std::collections::BTreeMap<String, String>,
+    /// **IR 终态原样**（内核 `Ir` 的 JSON）—— "程序实际认成了什么"。
+    ///
+    /// 不逐项映射到注册表 key：那需要一张 70 多项的对照表，写一份就多一份会漂的东西；
+    /// 报告页把这份 JSON 摆成可折叠的原文，排查时直接比对即可。
+    pub ir: serde_json::Value,
+}
+
 /// 文件事实 + 统计 + 打印时间（报告页详情区的那几块）。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -388,6 +407,11 @@ pub struct Detail {
     /// 同一套习惯）。普通模型那一趟恒为 `null`。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calibration: Option<CalibrationFacts>,
+    /// **参数快照**（`detail.snapshot`，2026-10-21）：预设 TOML 读到的全量参数 + IR 终态。
+    ///
+    /// 只加不改：旧记录没有这个键 ⇒ 报告页整组不摆（不编）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<ParamSnapshot>,
 }
 
 /// **校准件这一趟的证据链**（2026-10-18）。
@@ -544,6 +568,11 @@ pub struct ReportFacts<'a> {
     pub header: &'a postprocess::pipeline::HeaderFacts,
     /// 校准模式串（非校准模式是空串）。
     pub calibration_mode: &'a str,
+    /// **切片那一刻预设 TOML 里的全量参数**（注册表 key → 值）。
+    ///
+    /// 由调用方读文本 + 注册表算好交进来（archive 只搬运，不碰 catalog）——
+    /// 拿不到（读不出文本 / 注册表缺失 / 失败路径）就是 `None` ⇒ 快照整组不摆。
+    pub preset_params: Option<&'a std::collections::BTreeMap<String, String>>,
     /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
     pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
 }
@@ -558,6 +587,16 @@ pub fn glue_speed_of(ir: &postprocess::ir::Ir) -> f64 {
 }
 
 impl ReportFacts<'_> {
+    /// **参数快照**（2026-10-21）：预设 TOML 那一份 + IR 终态那一份。
+    ///
+    /// 缺任何一半都不摆 —— 只有 IR 没有 TOML 就谈不上"对照"，
+    /// 而 IR 又序列化不了（不该发生）时给个空对象也不如不给。
+    pub fn snapshot(&self) -> Option<ParamSnapshot> {
+        let params = self.preset_params?.clone();
+        let ir = serde_json::to_value(self.ir).ok()?;
+        Some(ParamSnapshot { params, ir })
+    }
+
     /// 涂胶组。
     pub fn glue(&self) -> GlueFacts {
         let ir = self.ir;
@@ -1103,6 +1142,8 @@ mod tests {
                 header: &self.header,
                 calibration_mode: "",
                 calibration_receipt: None,
+                /* 判据不摆快照（要摆的那条专门测，见 `snapshot_carries_toml_and_ir`） */
+                preset_params: None,
             }
         }
     }
@@ -1345,6 +1386,30 @@ mod tests {
         assert!(collision.contains("擦料塔类型: 圆盘擦拭"));
     }
 
+    /// **参数快照**（2026-10-21）：预设 TOML 那一份 + IR 终态那一份，缺一不摆。
+    #[test]
+    fn snapshot_carries_toml_and_ir() {
+        let s = sample();
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("wiping.wiper_x".to_owned(), "101".to_owned());
+        let mut facts = s.facts();
+        facts.preset_params = Some(&params);
+
+        let snap = facts.snapshot().expect("有 TOML 就应有快照");
+        assert_eq!(
+            snap.params.get("wiping.wiper_x").map(String::as_str),
+            Some("101")
+        );
+        assert!(
+            snap.ir.get("Wiping").is_some(),
+            "IR 终态要原样带上（键是 PascalCase）：{:?}",
+            snap.ir
+        );
+
+        /* 没有 TOML ⇒ 不摆：只有 IR 谈不上"对照" */
+        assert!(s.facts().snapshot().is_none());
+    }
+
     /// `_meta.json` 的键**咬住**报告页读口与前端消费面（camelCase）。
     /// 改键名等于撕契约 —— 这条判据就是拦这个的。
     #[test]
@@ -1395,6 +1460,7 @@ mod tests {
                 tower: Some(facts.tower()),
                 slicer: Some(facts.slicer()),
                 calibration: None,
+                snapshot: None,
             },
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -1485,6 +1551,7 @@ mod tests {
                 tower: None,
                 slicer: None,
                 calibration: None,
+                snapshot: None,
             },
         };
         write_meta(&paths, &meta).expect("写记录");

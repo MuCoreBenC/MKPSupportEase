@@ -97,12 +97,14 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
 import type {
+  CatalogParamDef,
   PostProcessPrintTime,
   ReportDetail,
   ReportExportPlan,
   ReportGlueFacts,
   ReportCalibrationFacts,
   ReportSlicerFacts,
+  ReportSnapshot,
   ReportSummary,
   ReportTowerFacts,
 } from '../../api'
@@ -260,6 +262,13 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
     <>
       <path d="M4 12h11" />
       <path d="M11.5 8.5l4 3.5-4 3.5" />
+    </>
+  ),
+  /* 参数快照（2026-10-21）：一摞横线（一份清单）—— "当时那一份的全部参数" */
+  snapshot: (
+    <>
+      <path d="M5 5h14M5 10h14M5 15h10" />
+      <circle cx="18" cy="18" r="3" />
     </>
   ),
   /* 碰撞位置：热床俯视 —— 外框 + 里面两块相撞 */
@@ -830,7 +839,249 @@ function buildGroups(detail: ReportDetail): Group[] {
     cells: fileCells,
   })
 
+  /*
+   * **参数快照**（2026-10-21）：切片那一刻的两份原文 —— 预设 TOML 读到的全量参数
+   * 与 IR 终态。放在最后、默认收起（面板里一级分区点开才铺）：它回答的是
+   * "当时那一盘到底用的是哪些值、程序认成了什么"，不是一眼要看的结论。
+   */
+  if (detail.snapshot != null) {
+    const n = Object.keys(detail.snapshot.params).length
+    groups.push({
+      id: 'snapshot',
+      title: '参数快照',
+      sum: n === 0 ? '这一份读不出参数' : `${n} 项 · 当时那一份`,
+      cells: [],
+    })
+  }
+
   return groups
+}
+
+/* ---------- 参数快照（2026-10-21） ---------- */
+
+/** IR 的 JSON 里取一个对象（不是对象就给空表，绝不抛） */
+function objOf(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {}
+}
+
+/** IR 的 JSON 里取一个数（不是有限数就是 `null`） */
+function numOf(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+/** 参数快照里的一行 */
+interface SnapRow {
+  key: string
+  label: string
+  value: string
+}
+
+/**
+ * **参数快照**（2026-10-21，作者：「按修改参数里的那些参数尽量都能显示出来，
+ * 只是不展开；我要看的时候可以展开看」）。
+ *
+ * 两级折叠：
+ *   · 按 TOML 节（`toolhead` / `wiping` …）收成折叠条，**默认全部收起** ——
+ *     70 多项一次铺开会把这一屏顶到几屏高，而平时只要"当时是这一份、这些值在"；
+ *   · 顶部一个搜索框（中文名 / key / 值都能命中），有搜索时**自动展开命中分区**。
+ *
+ * 中文名从 catalog 的字段定义来（`getParamMeta`），**不在这里手抄**：
+ * 注册表改名这里跟着变。摘不到（浏览器没 mock / 老版本）就退回显示 key。
+ */
+function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
+  /* 字段定义（中文名 + 数据域分区）从 catalog 来 —— 与参数页同一份，不手抄 */
+  const [defList, setDefList] = useState<CatalogParamDef[] | null>(null)
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    void api.getRuntimeCatalog().then(
+      (cat) => setDefList(cat.registry.params),
+      () => setDefList([]),
+    )
+  }, [])
+
+  const defs = new Map((defList ?? []).map((m) => [m.key, m]))
+  const all: SnapRow[] = Object.entries(snap.params).map(([key, value]) => {
+    const def = defs.get(key)
+    return { key, label: def?.label ?? key, value }
+  })
+
+  const q = query.trim().toLowerCase()
+  const rows =
+    q === ''
+      ? all
+      : all.filter(
+          (r) =>
+            r.label.toLowerCase().includes(q) ||
+            r.key.toLowerCase().includes(q) ||
+            r.value.toLowerCase().includes(q),
+        )
+
+  /* 分区：按 TOML 节（字段定义里有就用它的 `section`，没有就取 key 的第一段） */
+  const sections: { id: string; rows: SnapRow[] }[] = []
+  for (const row of rows) {
+    const id = defs.get(row.key)?.section ?? row.key.split('.')[0]
+    const hit = sections.find((x) => x.id === id)
+    if (hit === undefined) sections.push({ id, rows: [row] })
+    else hit.rows.push(row)
+  }
+
+  const searching = q !== ''
+  const allOpen = sections.length > 0 && sections.every((sec) => open[sec.id] === true)
+
+  return (
+    <div className={s.snap}>
+      <div className={s.snapTools}>
+        <input
+          className={s.snapSearch}
+          type="text"
+          value={query}
+          placeholder="搜参数名 / 字段 / 值…"
+          aria-label="搜索参数快照"
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <span className={s.snapCount}>
+          {rows.length === all.length ? `${all.length} 项` : `${rows.length} / ${all.length} 项`}
+        </span>
+        <button
+          type="button"
+          className={s.snapToggle}
+          onClick={() => {
+            /* 搜索时"展开"没有意义（命中的本来就铺开），这颗只管清空后的全展开 */
+            if (allOpen) setOpen({})
+            else setOpen(Object.fromEntries(sections.map((sec) => [sec.id, true])))
+          }}
+        >
+          {allOpen ? '全部收起' : '全部展开'}
+        </button>
+      </div>
+
+      {sections.length === 0 && <p className={s.snapEmpty}>没有命中「{query}」的参数。</p>}
+
+      {sections.map((sec) => {
+        const shown = searching || open[sec.id] === true
+        return (
+          <div className={s.snapSec} key={sec.id}>
+            <button
+              type="button"
+              className={s.snapSecHead}
+              aria-expanded={shown}
+              onClick={() => setOpen((cur) => ({ ...cur, [sec.id]: !shown }))}
+            >
+              <span className={s.snapCaret} data-on={shown} aria-hidden="true">
+                ▸
+              </span>
+              <b>{sec.id}</b>
+              <span className={s.snapSecCount}>{sec.rows.length}</span>
+            </button>
+            {shown && (
+              <dl className={s.snapRows}>
+                {sec.rows.map((row) => (
+                  <div className={s.snapRow} key={row.key}>
+                    <dt title={row.key}>{row.label}</dt>
+                    <dd>{row.value === '' ? '（空）' : row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+        )
+      })}
+
+      {/* IR 终态原文：排查"程序到底认成了什么"的最后一份材料（折叠，不倒一堆 JSON） */}
+      <details className={s.snapIr}>
+        <summary>IR 终态（程序实际认到的，原样 JSON）</summary>
+        <pre className={s.snapJson}>{JSON.stringify(snap.ir, null, 2)}</pre>
+      </details>
+    </div>
+  )
+}
+
+/**
+ * **擦料塔俯视图**（2026-10-21，作者：「擦料塔的，我希望也有可视化的显示出来」）。
+ *
+ * 一张图说清两件事：
+ *   · **预设里写的**坐标（快照 `params` 里的 `wiping.wiper_x/wiper_y`）—— 实线方框
+ *   · **IR 实际认到的**坐标（`ir.Wiping.WiperX/WiperY`）—— 虚线方框；两者一致时只画一个
+ *
+ * 板尺寸取 IR 的 `Machine.MinX/MaxX/MinY/MaxY`：拿不到就不画（不编一个 256×256 出来）。
+ * 机器坐标 y 向上、SVG y 向下 —— 这里翻一次，图上的"上"就是床的"里"。
+ */
+function TowerPlate({ snap }: { snap: ReportSnapshot }) {
+  const ir = snap.ir
+  const wiping = objOf(ir.Wiping)
+  const machine = objOf(ir.Machine)
+  const minX = numOf(machine.MinX)
+  const maxX = numOf(machine.MaxX)
+  const minY = numOf(machine.MinY)
+  const maxY = numOf(machine.MaxY)
+  const presetX = Number(snap.params['wiping.wiper_x'])
+  const presetY = Number(snap.params['wiping.wiper_y'])
+  const irX = numOf(wiping.WiperX)
+  const irY = numOf(wiping.WiperY)
+
+  if (minX === null || maxX === null || minY === null || maxY === null) return null
+  if (maxX <= minX || maxY <= minY) return null
+  const hasPreset = Number.isFinite(presetX) && Number.isFinite(presetY)
+  const hasIr = irX !== null && irY !== null
+  if (!hasPreset && !hasIr) return null
+
+  /* 图框：100×100，留 6 的边距（塔块与文字不出界） */
+  const PAD = 6
+  const span = 100 - PAD * 2
+  const sx = (x: number) => PAD + ((x - minX) / (maxX - minX)) * span
+  const sy = (y: number) => 100 - PAD - ((y - minY) / (maxY - minY)) * span
+  /* 塔体宽度按板宽比例（24mm 是塔本体，不含外围结构） */
+  const TOWER_MM = 24
+  const side = (TOWER_MM / (maxX - minX)) * span
+
+  const same = hasPreset && hasIr && Math.abs(presetX - irX) < 0.01 && Math.abs(presetY - irY) < 0.01
+  const ref = hasPreset ? { x: presetX, y: presetY } : { x: irX as number, y: irY as number }
+
+  return (
+    <div className={s.plate}>
+      <svg className={s.plateSvg} viewBox="0 0 100 100" role="img" aria-label="擦料塔位置">
+        <rect x="0.5" y="0.5" width="99" height="99" rx="3" className={s.plateBed} />
+        {/* 板内可打印区（IR 的 min/max 就是它） */}
+        <rect
+          x={PAD}
+          y={PAD}
+          width={span}
+          height={span}
+          rx="1.5"
+          className={s.plateZone}
+        />
+        {hasPreset && (
+          <rect
+            x={sx(presetX)}
+            y={sy(presetY) - side}
+            width={side}
+            height={side}
+            rx="1"
+            className={s.plateTower}
+          />
+        )}
+        {hasIr && !same && (
+          <rect
+            x={sx(irX)}
+            y={sy(irY) - side}
+            width={side}
+            height={side}
+            rx="1"
+            className={s.plateTowerIr}
+          />
+        )}
+        <circle cx={sx(ref.x)} cy={sy(ref.y) - side / 2} r="0.9" className={s.plateDot} />
+      </svg>
+      <p className={same || !hasIr ? s.plateNote : `${s.plateNote} ${s.plateBad}`}>
+        {hasPreset && `预设写 (${fmtNum(presetX)}, ${fmtNum(presetY)})`}
+        {hasPreset && hasIr && ' · '}
+        {hasIr && `程序认到 (${fmtNum(irX as number)}, ${fmtNum(irY as number)})`}
+        {hasPreset && hasIr && (same ? ' —— 一致' : ' —— 两处不一致，这一盘按程序认到的那个跑')}
+      </p>
+    </div>
+  )
 }
 
 /**
@@ -1613,6 +1864,11 @@ export default function PageReport() {
                                   machineType={detail.summary.machineType}
                                 />
                               ) : null
+                            ) : g.id === 'snapshot' ? (
+                              /* 参数快照（2026-10-21）：分区默认收起，点开才铺；下面附 IR 原文 */
+                              detail.snapshot != null ? (
+                                <ParamSnapshotPanel snap={detail.snapshot} />
+                              ) : null
                             ) : g.id === 'collision' ? (
                               /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
                               detail.collision !== null ? (
@@ -1622,20 +1878,26 @@ export default function PageReport() {
                                 />
                               ) : null
                             ) : (
-                              <dl className={s.kv}>
-                                {g.cells.map(([k, v], i) => (
-                                  <div className={s.kvRow} key={`${k}-${i}`}>
-                                    <dt>{k}</dt>
-                                    <dd
-                                      className={
-                                        k === '调用' || k === '码' ? s.mono : undefined
-                                      }
-                                    >
-                                      {v}
-                                    </dd>
-                                  </div>
-                                ))}
-                              </dl>
+                              <>
+                                <dl className={s.kv}>
+                                  {g.cells.map(([k, v], i) => (
+                                    <div className={s.kvRow} key={`${k}-${i}`}>
+                                      <dt>{k}</dt>
+                                      <dd
+                                        className={
+                                          k === '调用' || k === '码' ? s.mono : undefined
+                                        }
+                                      >
+                                        {v}
+                                      </dd>
+                                    </div>
+                                  ))}
+                                </dl>
+                                {/* 擦料塔那一组多一张俯视图：预设写的坐标 vs 程序认到的坐标 */}
+                                {g.id === 'tower' && detail.snapshot != null && (
+                                  <TowerPlate snap={detail.snapshot} />
+                                )}
+                              </>
                             )}
                           </div>
                         ))}

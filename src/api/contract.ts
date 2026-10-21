@@ -307,6 +307,20 @@ export interface ReportSummary {
   warningCount: number
 }
 
+/**
+ * **这一趟的参数快照**（2026-10-21，作者：「我当时切片的时候的 TOML 和 IR 识别到的
+ * 对照一下看有没有错误的」）。
+ *
+ * 为什么必须落在记录里：用户切完往往接着改预设（真机就是这样把擦料塔从 20 改到 101 的），
+ * 回头再读那份 TOML 已经读不到"当时那一盘用的是哪个值"了。
+ */
+export interface ReportSnapshot {
+  /** 预设 TOML 里读到的全量参数（注册表 key → 控件看得懂的字符串），顺序稳定 */
+  params: Record<string, string>
+  /** **IR 终态原样**（内核 `Ir` 的 JSON，PascalCase 键）—— "程序实际认成了什么" */
+  ir: Record<string, unknown>
+}
+
 /** 一条执行记录的详情（展开那一屏） */
 export interface ReportDetail {
   summary: ReportSummary
@@ -343,6 +357,13 @@ export interface ReportDetail {
    * 判空一律 `!= null`（Rust 的 `Option` 线上是显式 `null`）。
    */
   calibration?: ReportCalibrationFacts | null
+  /**
+   * **参数快照**（2026-10-21，`_meta.json` 的 `detail.snapshot`）。
+   *
+   * 切片那一刻的两份原文：预设 TOML 里读到的全量参数 + IR 终态。
+   * 旧记录、失败 / 取消记录都没有这一格 ⇒ `null` ⇒ 整组不摆（不编）。
+   */
+  snapshot?: ReportSnapshot | null
   pipeline: ReportPipelineStep[]
   /**
    * **碰撞那一趟的事实**（2026-10-18，`_meta.json` 顶层 `collision`）。

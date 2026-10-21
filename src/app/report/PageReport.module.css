@@ -901,3 +901,214 @@
     opacity: 0.55;
   }
 }
+
+/* ============ 参数快照（2026-10-21） ============ */
+
+/*
+ * 参数快照那一组：顶部一条工具栏（搜索 + 计数 + 全展开），下面按 TOML 节折叠。
+ * 默认全收起 —— 70 多项一次铺开会把这一屏顶到几屏高（作者要的是"不展开、能展开"）。
+ */
+.snap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snapTools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.snapSearch {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-label);
+}
+
+.snapSearch:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.snapCount {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.snapToggle {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.snapToggle:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+.snapEmpty {
+  margin: 0;
+  padding: 10px 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.snapSec {
+  border-top: 1px solid var(--line);
+}
+
+.snapSecHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  text-align: left;
+  cursor: pointer;
+}
+
+.snapCaret {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-3);
+  transition: transform 120ms ease;
+}
+
+.snapCaret[data-on='true'] {
+  transform: rotate(90deg);
+}
+
+.snapSecCount {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.snapRows {
+  display: grid;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  column-gap: 18px;
+  row-gap: 5px;
+  margin: 0;
+  padding: 0 2px 10px 20px;
+}
+
+.snapRow {
+  display: contents;
+}
+
+.snapRow dt {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+.snapRow dd {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.snapIr {
+  margin-top: 12px;
+}
+
+.snapIr summary {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.snapJson {
+  max-height: 280px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text-2);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.92);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ---- 擦料塔俯视图（擦料塔那一组下面那张图） ---- */
+
+.plate {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.plateSvg {
+  flex: 0 0 auto;
+  width: 132px;
+  height: 132px;
+}
+
+.plateBed {
+  fill: none;
+  stroke: var(--line-strong);
+}
+
+.plateZone {
+  fill: none;
+  stroke: var(--line);
+  stroke-dasharray: 2 2;
+}
+
+.plateTower {
+  fill: color-mix(in srgb, var(--accent) 22%, transparent);
+  stroke: var(--accent);
+  stroke-width: 0.8;
+}
+
+.plateTowerIr {
+  fill: none;
+  stroke: var(--danger);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 1.4;
+}
+
+.plateDot {
+  fill: var(--accent);
+}
+
+.plateNote {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.plateBad {
+  color: var(--danger);
+}

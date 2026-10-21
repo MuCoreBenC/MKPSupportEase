@@ -1072,11 +1072,27 @@ fn archive_success(
         }
     };
 
+    /*
+     * **参数快照**（2026-10-21）：把"这一刻预设 TOML 里写着什么"读出来存进记录。
+     *
+     * 为什么不留着"回头再读"：用户切完往往接着改预设（真机就是这样把擦料塔从 20 改到
+     * 101 的），过了这一刻，那份 TOML 已经不在了 —— 报告里显示的就会是"现在的值"，
+     * 而用户问的恰恰是"当时那一盘用的是哪个值"。
+     *
+     * 读不出来不算错：快照整组不摆，记录其余部分照写（与 `detail.glue/tower` 同一口径）。
+     */
+    let preset_params = crate::fsx::paths::internal_root_headless().and_then(|root| {
+        let text = std::fs::read_to_string(&job.toml).ok()?;
+        let catalog = crate::runtime::load_released_catalog(&root).ok()?;
+        crate::presetdata::params::read_param_values(&text, &catalog.registry.params).ok()
+    });
+
     // 报告字段面（`detail.glue/tower/slicer` + `pipeline[].detail`）的素材 ——
     // 全部是已经在手的事实，报告组装只做搬运（见 `archive::ReportFacts`）。
     let preset_name = file_name_of(&job.toml);
     let output_bytes = std::fs::metadata(&done.output_path).map(|m| m.len()).ok();
     let facts = crate::archive::ReportFacts {
+        preset_params: preset_params.as_ref(),
         preset_name: &preset_name,
         input_lines,
         input_bytes: input_size_bytes,
@@ -1121,6 +1137,8 @@ fn archive_success(
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
         // 成功时一个字都不留 —— "为什么这次用了加长版的基准"永远无法解释）。
         calibration: calibration_facts(identity, done),
+        /* 参数快照：预设 TOML 那一刻的值 + IR 终态（见 `archive::ParamSnapshot`） */
+        snapshot: facts.snapshot(),
     };
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
@@ -1213,6 +1231,8 @@ fn archive_failure(
             tower: None,
             slicer: None,
             calibration: calibration_facts_failed(identity),
+            /* 失败 / 取消没有 IR 终态 ⇒ 快照整组不摆（不编） */
+            snapshot: None,
         },
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
