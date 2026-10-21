@@ -1,0 +1,105 @@
+/*
+ * 「与最初那份对比」那一屏（2026-10-21）：左边最初、右边现在，红绿行级标记。
+ *
+ * 两列固定（行号 + 代码）各占一半 —— 作者要的是 IDE 那种 side-by-side；
+ * 窄了也不改成上下堆叠：堆起来就分不清"哪一行对应哪一行"了，宁可长行截断
+ * （全文在 `title` 上）。
+ */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  gap: 8px;
+}
+
+.sum {
+  flex-shrink: 0;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.sum b {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-sunken);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px minmax(0, 1fr);
+  align-items: start;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.95);
+  line-height: 1.55;
+}
+
+.no {
+  padding: 0 6px;
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.code {
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--text-1);
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+
+/* 改过的一行：左红（它原本的样子）、右绿（现在） */
+.row[data-kind='change'] .code[data-side='left'],
+.row[data-kind='del'] .code[data-side='left'] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.row[data-kind='change'] .code[data-side='right'],
+.row[data-kind='add'] .code[data-side='right'] {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* 只剩一侧的行：另一侧那一格留白（不要画成"空行改成了它"） */
+.row[data-kind='del'] .code[data-side='right'],
+.row[data-kind='add'] .code[data-side='left'] {
+  background: transparent;
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.dotOld,
+.dotNow {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.dotOld {
+  background: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.dotNow {
+  margin-left: 10px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}

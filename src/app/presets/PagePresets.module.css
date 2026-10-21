@@ -723,6 +723,34 @@
   color: var(--text-3);
 }
 
+/*
+ * 底栏那颗「与最初那份比：N 项不同」（2026-10-21）：幽灵小按钮，点开才是左右红绿对比。
+ * 原来这里是一条 `<details>` 在底栏里展开参数列表 —— 作者要的是 IDE 那种左右并排。
+ */
+.editDiffBtn {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.editDiffBtn:hover:not(:disabled) {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+.editDiffBtn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 /* 「默认值」对比框里那张账单：现在 → 默认（长了自己滚） */
 .restoreList {
   max-height: 240px;

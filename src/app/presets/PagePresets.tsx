@@ -191,6 +191,7 @@ import { dismiss, notify } from '../notify/notify'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
+import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
 import PresetTable from './PresetTable'
@@ -710,6 +711,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     /** 与最初那份相比变了值的参数（空 = 一致） */
     changed: PresetTextChanged[]
   } | null>(null)
+
+  /** 「与最初那份对比」那一屏开着没有（2026-10-21：IDE 那种左右红绿） */
+  const [diffOpen, setDiffOpen] = useState(false)
+
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
    * 打开先只读（`<pre>` 画着色，textarea 不出现），底栏只有「进入编辑模式」；
@@ -3681,23 +3686,26 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             footer={
               editing !== null && (
                 <div className={s.editorFoot}>
-                  {/* 与最初那份的差异：**常态显示**（作者：「没出问题的时候也应该有这个对比」） */}
-                  <details className={s.editDiff}>
-                    <summary>
-                      {editing.changed.length > 0
-                        ? `与最初那份比：${editing.changed.length} 项不同`
-                        : '与最初那份一致'}
-                    </summary>
-                    {editing.changed.length > 0 && (
-                      <ul>
-                        {editing.changed.map((c) => (
-                          <li key={c.key}>
-                            {c.label}：<s>{c.from}</s> → <b>{c.to}</b>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </details>
+                  {/*
+                   * 与最初那份的对比：**常态显示的一颗小按钮**（作者 2026-10-21：
+                   * 「他这个对比的话，我不希望是在这下面这样子对比啊，我希望像那个 IDE
+                   * 那些软件一样，就这种红的绿的这种对比」）——点开是左右并排的红绿 diff。
+                   */}
+                  <button
+                    type="button"
+                    className={s.editDiffBtn}
+                    disabled={originText === null}
+                    title={
+                      originText === null
+                        ? '这份还没有原始备份 —— 没法对比'
+                        : '打开左右对比：左边是它最初落盘时的样子，右边是现在'
+                    }
+                    onClick={() => setDiffOpen(true)}
+                  >
+                    {editing.changed.length > 0
+                      ? `与最初那份比：${editing.changed.length} 项不同`
+                      : '与最初那份一致'}
+                  </button>
                   <p className={s.editHint}>
                     文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · {WRAP_KEY} 切换自动换行
                   </p>
@@ -4029,6 +4037,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               </>
             )}
           </Modal>
+
+          {/* **与最初那份对比**（2026-10-21）：左右并排，改过的行左红右绿 —— 实时跟着正文走 */}
+          <TextDiffModal
+            open={diffOpen}
+            host={pageEl}
+            fileName={editing?.fileName}
+            left={originText ?? ''}
+            right={editing?.text ?? ''}
+            onClose={() => setDiffOpen(false)}
+          />
 
           {/*
            * **重命名那一口框**（第十层）。2026-10-10 起这里只剩它一件事 ——
