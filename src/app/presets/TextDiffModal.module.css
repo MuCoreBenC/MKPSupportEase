@@ -8,10 +8,9 @@
 
 .wrap {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  height: 100%;
   min-height: 0;
-  gap: 8px;
 }
 
 /* 布局切换（左右 / 上下）：两颗小胶囊，与底栏别的东西同一行 */
@@ -84,11 +83,19 @@
   color: var(--text-1);
 }
 
-.tip {
-  flex-shrink: 0;
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
+/*
+ * 「恢复默认值」那颗（2026-10-21 作者：「悬停的时候我希望它有颜色，不是这个黑色的描边」）：
+ * `variant="danger"` 本体是红字红边，这里补 hover —— 淡红底 + 实红边，不再是"黑描边白底"。
+ */
+.restoreBtn:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* 右侧那一列点一下就能改：给个文本光标的暗示 */
+.code[data-side='right'] {
+  cursor: text;
 }
 
 .diff {

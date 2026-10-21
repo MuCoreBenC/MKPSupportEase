@@ -3739,7 +3739,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.primary}
                           onClick={commitEdit}
-                          disabled={editing.problem !== null || editing.missing.length > 0}
+                          disabled={
+                            editing.problem !== null ||
+                            editing.missing.length > 0 ||
+                            /* 一个字没改就不用存（作者 2026-10-21：「不希望这样子」）——
+                               打开时就带着未保存草稿的那一份除外 */
+                            (!openDirtyRef.current && editing.text === openTextRef.current)
+                          }
                           title={
                             editing.problem !== null || editing.missing.length > 0
                               ? '先把红条里那几处改好 —— 现在的正文切不了，或者会丢设置'
@@ -3955,6 +3961,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             }}
             onEditLine={(lineNo, next) => {
               /* 就地改一行 = 换整份正文的那一行（草稿 / 撤销 / 实时校验都照常走） */
+              if (!editMode) setEditMode(true)
               setEditing((cur) => {
                 if (cur === null) return cur
                 const lines = cur.text.split('\n')

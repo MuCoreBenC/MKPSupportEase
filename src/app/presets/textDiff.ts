@@ -92,37 +92,51 @@ export function lineDiff(leftText: string, rightText: string): DiffRow[] {
   }
 
   /*
-   * 相邻的 del + add 合成一条 `change`：并排看时"这一行被改成了那一行"，
-   * 比左边一整块红、右边一整块绿更好读（IDE 的 side-by-side 也是这么配对的）。
+   * **连续的删块 + 紧随的增块按顺序一一配对**成 `change`（2026-10-21 修：原来只配紧邻的
+   * 一对，连着改两行时会剩下"两删两增"四条，统一视图看起来像把行叠在一起了）。
+   *
+   * 配不上的那几个照旧单独成行 —— del 只有左边、add 只有右边。
    */
+  const row = (r: (typeof raw)[number]): DiffRow => ({
+    kind: r.kind,
+    leftNo: r.leftNo,
+    rightNo: r.rightNo,
+    left: r.leftNo === null ? null : a[r.leftNo - 1],
+    right: r.rightNo === null ? null : b[r.rightNo - 1],
+  })
+
   const out: DiffRow[] = []
-  for (let k = 0; k < raw.length; k += 1) {
-    const cur = raw[k]
-    const next = raw[k + 1]
-    if (
-      cur.kind === 'del' &&
-      next !== undefined &&
-      next.kind === 'add' &&
-      cur.leftNo !== null &&
-      next.rightNo !== null
-    ) {
-      out.push({
-        kind: 'change',
-        leftNo: cur.leftNo,
-        rightNo: next.rightNo,
-        left: a[cur.leftNo - 1],
-        right: b[next.rightNo - 1],
-      })
+  let k = 0
+  while (k < raw.length) {
+    if (raw[k].kind !== 'del') {
+      out.push(row(raw[k]))
       k += 1
       continue
     }
-    out.push({
-      kind: cur.kind,
-      leftNo: cur.leftNo,
-      rightNo: cur.rightNo,
-      left: cur.leftNo === null ? null : a[cur.leftNo - 1],
-      right: cur.rightNo === null ? null : b[cur.rightNo - 1],
-    })
+    const dels: (typeof raw)[number][] = []
+    while (k < raw.length && raw[k].kind === 'del') {
+      dels.push(raw[k])
+      k += 1
+    }
+    const adds: (typeof raw)[number][] = []
+    while (k < raw.length && raw[k].kind === 'add') {
+      adds.push(raw[k])
+      k += 1
+    }
+    const paired = Math.min(dels.length, adds.length)
+    for (let i = 0; i < paired; i += 1) {
+      const d = dels[i]
+      const ad = adds[i]
+      out.push({
+        kind: 'change',
+        leftNo: d.leftNo,
+        rightNo: ad.rightNo,
+        left: d.leftNo === null ? null : a[d.leftNo - 1],
+        right: ad.rightNo === null ? null : b[ad.rightNo - 1],
+      })
+    }
+    for (let i = paired; i < dels.length; i += 1) out.push(row(dels[i]))
+    for (let i = paired; i < adds.length; i += 1) out.push(row(adds[i]))
   }
   return out
 }
