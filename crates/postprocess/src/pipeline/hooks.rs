@@ -148,6 +148,15 @@ fn extract_z_homing_sequence(lines: &[String]) -> Option<Vec<String>> {
     Some(seq)
 }
 
+/// 收笔抬升高度的合法区间（mm，**绝对 Z**）。
+///
+/// 原厂口径（`startup_common.go:366`）：越界**不夹取，而是回落到下限** ——
+/// 所以这里只提供区间，判据仍在 [`build_begin_stage_retract_block`] 里写"回落下限"。
+/// 客户端那一份量程（`runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_*`）必须与这两个数
+/// 一致，由 `runtime::postproc_prefs` 的测试咬住。
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM: i64 = 20;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM: i64 = 100;
+
 /// `buildBeginStageRetractBlock`（startup_common.go:366）。
 fn build_begin_stage_retract_block(
     unmount_lines: &[&str],
@@ -166,8 +175,10 @@ fn build_begin_stage_retract_block(
     if let Some(seq) = homing_seq {
         block.extend(seq);
     }
-    let z_lift = if !(20..=100).contains(&z_lift) {
-        20
+    let z_lift = if !(BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM..=BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM)
+        .contains(&z_lift)
+    {
+        BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM
     } else {
         z_lift
     };

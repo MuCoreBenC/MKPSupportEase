@@ -56,7 +56,8 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
 mod tests {
     use super::*;
     use crate::runtime::app_state::{
-        PostprocPrefs, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, XY_DWELL_DEFAULT, Z_DWELL_DEFAULT,
+        PostprocPrefs, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+        BEGIN_STAGE_RETRACT_Z_LIFT_MIN, XY_DWELL_DEFAULT, Z_DWELL_DEFAULT,
     };
 
     /// ★★★ **两份出厂档必须一致**：`PrefsIr::default()`（内核那份）与
@@ -104,6 +105,30 @@ mod tests {
         assert_eq!(
             kernel.begin_stage_retract_z_lift_mm, BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT,
             "收笔抬升出厂值两端不一致"
+        );
+    }
+
+    /// ★★★ **收笔抬升的量程也必须两端一致**（2026-10-21 加）：管线对越界值是
+    /// **回落到 20**（原厂口径），而设置页画数字框用的是客户端这一份。
+    /// 两边一旦不同，就会出现"界面允许 300、填 150 切出来是 20"那种静默偏差。
+    #[test]
+    fn the_z_lift_range_agrees_with_the_kernel() {
+        use postprocess::pipeline::hooks::{
+            BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM, BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM,
+        };
+
+        assert_eq!(
+            BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM, BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
+            "收笔抬升下限两端不一致"
+        );
+        assert_eq!(
+            BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM, BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+            "收笔抬升上限两端不一致"
+        );
+        assert!(
+            (BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM..=BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM)
+                .contains(&BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT),
+            "出厂值必须落在量程里"
         );
     }
 
@@ -156,6 +181,19 @@ mod tests {
         .resolved();
         assert_eq!(p.z_calibration_dwell_sec, 20);
         assert_eq!(p.xy_calibration_dwell_sec, 1);
-        assert_eq!(p.begin_stage_retract_z_lift_mm, 1);
+        assert_eq!(
+            p.begin_stage_retract_z_lift_mm,
+            BEGIN_STAGE_RETRACT_Z_LIFT_MIN
+        );
+
+        let high = PostprocPrefs {
+            begin_stage_retract_z_lift_mm: Some(999),
+            ..PostprocPrefs::default()
+        }
+        .resolved();
+        assert_eq!(
+            high.begin_stage_retract_z_lift_mm,
+            BEGIN_STAGE_RETRACT_Z_LIFT_MAX
+        );
     }
 }

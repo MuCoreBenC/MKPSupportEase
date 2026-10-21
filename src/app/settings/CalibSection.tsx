@@ -1,14 +1,16 @@
 /*
  * 设置页「校准与补偿」那一块（2026-10-17）。
  *
- * 四行：跳过震动校准检测 / 开始阶段收笔 / Z 轴停留时间 / XY 轴停留时间。
+ * 五行：跳过震动校准检测 / 开始阶段收笔 / 收笔抬升高度 / Z 轴停留时间 / XY 轴停留时间。
  *
- * ★★ 这四行**真的改变切出来的 G-code**（2026-10-17 之前它们是写死在管线里的常量，
+ * ★★ 这几行**真的改变切出来的 G-code**（2026-10-17 之前它们是写死在管线里的常量，
  * 设置页改不动）。现在它们经 `runtime::postproc_prefs::apply_to_ir` 写进 `ir.prefs`，
  * 由管线读。所以这里的说明文字必须**说清后果** —— 用户要知道打开它会发生什么。
  *
  * ★ 数字框的量程来自后端（`prefs.limits`），**不在这里另写一份**：
  * 两处各写一份的话，迟早会出现"界面允许 30 秒、管线只认到 20 秒"这种漂移。
+ * 收笔抬升高度（2026-10-21 作者：「抬得有点高，给个设置」）同理 ——
+ * 管线对越界值是回落到 20 而不是夹取，量程对不上就是静默偏差。
  */
 
 import { useState } from 'react'
@@ -34,7 +36,7 @@ export default function CalibSection() {
   }
 
   const r = prefs.resolved
-  const { zDwell, xyDwell } = prefs.limits
+  const { zDwell, xyDwell, zLift } = prefs.limits
 
   return (
     <section className={s.section} aria-label="校准与补偿">
@@ -59,8 +61,8 @@ export default function CalibSection() {
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>开始阶段收笔</div>
           <p className={s.fieldNote}>
-            在 G-code 处理后开头插入工具头收起序列（抬升 Z{' '}
-            {r.beginStageRetractZLiftMm}mm 并收笔），确保打印开始前工具头已卸载
+            在 G-code 处理后开头插入工具头收起序列（先 Z 归位、抬到设定高度、再收笔），
+            确保打印开始前工具头已卸载
           </p>
         </div>
         <Switch
@@ -69,6 +71,31 @@ export default function CalibSection() {
           onChange={(next) => void set({ beginStageRetractEnabled: next }, on)}
         />
       </div>
+
+      {/* 只在收笔开着时才问抬多高：关着的时候配一个不生效的数等于骗人
+          （与热床涂胶那一块"只在开着时才问涂哪儿"同一条规矩） */}
+      {r.beginStageRetractEnabled && (
+        <div className={`${s.field} ${s.fieldRow}`}>
+          <div className={s.fieldText}>
+            <div className={s.fieldTitle}>收笔抬升高度</div>
+            <p className={s.fieldNote}>
+              「开始阶段收笔」把工具头抬到的绝对 Z 高度（{zLift.min}-{zLift.max} mm）。
+              太高只是一段白跑的空行程，太低则可能与模型或夹具相碰
+            </p>
+          </div>
+          <span className={s.numBox}>
+            <NumberField
+              label="收笔抬升高度"
+              unit="mm"
+              value={r.beginStageRetractZLiftMm}
+              min={zLift.min}
+              max={zLift.max}
+              step={1}
+              onChange={(next) => void set({ beginStageRetractZLiftMm: next }, on)}
+            />
+          </span>
+        </div>
+      )}
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>

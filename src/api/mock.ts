@@ -2469,7 +2469,7 @@ export const mockApi: MkpApi = {
       limits: {
         zDwell: { min: 1, max: 20 },
         xyDwell: { min: 1, max: 10 },
-        zLift: { min: 1, max: 300 },
+        zLift: { min: 20, max: 100 },
       },
     }
   },

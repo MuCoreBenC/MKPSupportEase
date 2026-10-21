@@ -217,7 +217,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
             "limits": {
                 "zDwell": { "min": runtime::app_state::Z_DWELL_MIN, "max": runtime::app_state::Z_DWELL_MAX },
                 "xyDwell": { "min": runtime::app_state::XY_DWELL_MIN, "max": runtime::app_state::XY_DWELL_MAX },
-                "zLift": { "min": 1, "max": 300 },
+                "zLift": {
+                    "min": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
+                    "max": runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+                },
             },
         }))
     })

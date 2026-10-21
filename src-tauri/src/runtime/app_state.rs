@@ -257,7 +257,10 @@ impl PostprocPrefs {
             begin_stage_retract_z_lift_mm: self
                 .begin_stage_retract_z_lift_mm
                 .unwrap_or(BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT)
-                .clamp(1, 300),
+                .clamp(
+                    BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
+                    BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
+                ),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
                 .unwrap_or(Z_DWELL_DEFAULT)
@@ -303,8 +306,14 @@ pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
 
-/// 开始阶段收笔抬升高度（mm）的出厂值。
+/// 开始阶段收笔抬升高度（mm，**绝对 Z**）的出厂值与量程。
+///
+/// ★ 量程必须与内核那一份（`postprocess::pipeline::hooks::BEGIN_STAGE_RETRACT_Z_LIFT_*_MM`）
+///   一致：管线对越界值不是夹取、而是**回落到 20**（原厂口径）。界面这边要是宽容到 300，
+///   用户填 150 就会看到"设置里写着 150、切出来却是 20" —— 由 `postproc_prefs` 的测试咬住。
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 100;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 20;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 100;
 
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///
