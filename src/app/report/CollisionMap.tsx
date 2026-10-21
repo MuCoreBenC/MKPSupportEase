@@ -194,8 +194,14 @@ export default function CollisionMap({
    */
   const expand = Math.max(0, (Math.min(tower.w, tower.h) - bodyMm) / 2)
   const vm = TOWER_CORE_PX / (bodyMm > 0 ? bodyMm : 1)
-  const vbOffset = -expand * vm
-  const vbSize = TOWER_CORE_PX + expand * vm * 2
+  /*
+   * viewBox 比判据框再多 2px 的描边余量（2026-10-21 作者：「我这一个塔不要被裁剪掉」）：
+   * brim / 护套那几圈正好画到 viewBox 边缘，stroke 有一半落在框外 —— 不留这圈
+   * 就会被 SVG 自己裁掉（截图里绿边缺一截、塔身像被削了角）。
+   */
+  const VB_GUARD_PX = 2
+  const vbOffset = -expand * vm - VB_GUARD_PX
+  const vbSize = TOWER_CORE_PX + expand * vm * 2 + VB_GUARD_PX * 2
 
   /* 冲突点：落进可打印区才画（框外的点画出来只会误导 —— 那不是撞的地方） */
   const points = (collision.conflictPoints ?? []).filter(
@@ -477,6 +483,7 @@ export default function CollisionMap({
                 vbSize={vbSize}
                 vm={vm}
                 brimLoopCount={BRIM_LOOP_COUNT}
+                showLabel={false}
                 className={s.core}
               />
             </div>
@@ -520,6 +527,7 @@ export default function CollisionMap({
                 vbSize={vbSize}
                 vm={vm}
                 brimLoopCount={BRIM_LOOP_COUNT}
+                showLabel={false}
                 className={s.core}
               />
             </div>

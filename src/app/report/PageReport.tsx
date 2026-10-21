@@ -1057,10 +1057,23 @@ function TowerPlate({
   const hasIr = irX !== null && irY !== null
   if (!hasPreset && !hasIr) return null
 
-  /* 塔身 19.58mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）；判据框每边再让
-     2.21mm 给外围结构（brim 那几圈 / 斜肋伸出去的那截）—— 框共 24mm。 */
+  /* 塔身 19.58mm（内核的 TOWER_OUTER_BOUND - TOWER_INNER_BOUND）。
+     判据框 = 塔身 + **外围结构那一圈**：brim 是 5 圈 × 0.8mm，斜肋按伸出的那截，
+     护套按 IR 的 `Sheath.BaseExpand`。★ 框给足（塔位变化那张就是这么个大框）——
+     给少了，`TowerCoreSvg` 画在框沿上的外围结构会被 viewBox 裁掉（2026-10-21 真机：
+     塔的绿边缺一截、像被削了角）。 */
   const BODY_MM = 19.58
-  const BOX_MM = 24
+  const outer =
+    typeof wiping.OuterStructure === 'string' && wiping.OuterStructure !== ''
+      ? wiping.OuterStructure
+      : 'brim'
+  const padMm =
+    outer === 'sheath'
+      ? Math.max(4, numOf(sheath.BaseExpand) ?? 0)
+      : outer === 'rib'
+        ? 6
+        : 4
+  const BOX_MM = BODY_MM + padMm * 2
 
   /** 以塔左下角为角的判据框（机器坐标；内核同一个约定） */
   const boxAt = (x: number, y: number): ReportBox4 => ({
@@ -1085,8 +1098,7 @@ function TowerPlate({
   const collision: ReportCollision = {
     towerBbox: boxAt(at.x, at.y),
     tower: {
-      outerStructure:
-        typeof wiping.OuterStructure === 'string' ? wiping.OuterStructure : 'brim',
+      outerStructure: outer,
       bodyMm: BODY_MM,
       ribWidth: numOf(rib.Width) ?? 0,
       ribExtraLength: numOf(rib.ExtraLength) ?? 0,

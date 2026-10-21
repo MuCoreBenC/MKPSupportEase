@@ -236,6 +236,12 @@ export interface TowerCoreProps {
   brimLoopCount: number
   /** 宿主给 svg 定尺寸用（module class 不能跨文件猜名字） */
   className?: string
+  /**
+   * 塔身上那个「塔」字（2026-10-21）。参数页要它；报告页的俯视图不要 ——
+   * 那是**照比例缩的几何图**，字跟着缩放会在小图上糊成一团、与塔位变化那张
+   * 也不一致（作者：「这个字…… 有时候会对不齐」）。
+   */
+  showLabel?: boolean
 }
 
 export default function TowerCoreSvg({
@@ -249,6 +255,7 @@ export default function TowerCoreSvg({
   vm,
   brimLoopCount,
   className,
+  showLabel = true,
 }: TowerCoreProps) {
   const coreSize = 44
   const center = coreSize / 2
@@ -364,9 +371,24 @@ export default function TowerCoreSvg({
         <line x1={center} y1={0} x2={center} y2={coreSize} />
         <line x1={0} y1={center} x2={coreSize} y2={center} />
       </g>
-      <text x={center} y={center + 5} fontSize="15" fontWeight="bold" fill="#92400e" textAnchor="middle">
-        塔
-      </text>
+      {/* 字：**按字体度量居中**（`dominantBaseline=central`），不再手工 `y + 5` ——
+          手工那个数只对某一款字体的 ascent 成立，换台机器/换字号就偏。字体也点名，
+          免得 fallback 到没有中文字形的字体（那就是"有时候会出错"）。 */}
+      {showLabel && (
+        <text
+          x={center}
+          y={center}
+          fontSize={coreSize * 0.34}
+          fontWeight="bold"
+          fill="#92400e"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontFamily={`system-ui, "Microsoft YaHei", "PingFang SC", sans-serif`}
+          pointerEvents="none"
+        >
+          塔
+        </text>
+      )}
     </svg>
   )
 }
