@@ -37,8 +37,37 @@ pub struct ToolheadConfig {
     pub mkp_retract: f64,
     #[serde(default)]
     pub custom_mount_gcode: String,
+    /*
+     * 换笔指令的**多套方案**（2026-10-21）。
+     *
+     * 一套文本不够用：同一台机器上「稳 / 标准 / 现状」三档的速度、停顿、加速度
+     * 只能是三段不同的文本，而作者要能随手切换对比，不想每次都手改再改回来。
+     *
+     * 形状刻意选「平铺的字符串字段」而不是数组/子表：
+     *   - `write.rs` 的 `EDITABLE_KEYS` 是「一个键 = 一个值」的有序表，
+     *   - `recipe_edit` 的覆盖表按 `段.键` 寻址，
+     *   - `toml_edit` 的多行 `"""` 形态也只对字符串成立。
+     * 加第 4 槽 = 这里加一个 `String` + 注册表加一段默认值，结构上不写死 3。
+     *
+     * 旧预设没有这三个键 ⇒ `default` 空串 ⇒ 等价于「只有槽 1」，
+     * 不需要任何迁移步骤（`active` 空 = 用槽 1）。
+     */
+    #[serde(default)]
+    pub custom_mount_gcode_2: String,
+    #[serde(default)]
+    pub custom_mount_gcode_3: String,
+    /// 当前生效的装载方案槽位：`"1"` / `"2"` / `"3"`，空 = 槽 1。
+    #[serde(default)]
+    pub mount_gcode_active: String,
     #[serde(default)]
     pub custom_unmount_gcode: String,
+    #[serde(default)]
+    pub custom_unmount_gcode_2: String,
+    #[serde(default)]
+    pub custom_unmount_gcode_3: String,
+    /// 当前生效的卸载方案槽位，语义同上。
+    #[serde(default)]
+    pub unmount_gcode_active: String,
     #[serde(default)]
     pub first_pen_revitalization_flag: bool,
     #[serde(default)]

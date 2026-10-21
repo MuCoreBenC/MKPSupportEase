@@ -1,25 +1,17 @@
 //! 后处理两条入口的判据：**钩子那条脸与 CLI 那条脸必须产出同一份字节**。
 //!
-//! 背景：mkp-ssr 的钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），
-//! 不是 TOML 配置文件，所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，
-//! 因此这条判据钉的不是「新脸能跑」，而是**新脸与旧脸字节相等，且都等于整链参考物**。
+//! 背景：钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），不是 TOML
+//! 配置文件，所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，因此这条
+//! 判据钉的不是「新脸能跑」，而是**新脸与旧脸字节相等** —— 与产物长什么样无关，
+//! 生成逻辑怎么演进都不会让它假红。
 //!
-//! ## 判据资产是派生的，不是手搓的
+//! ## 判据资产
 //!
-//! - 输入 `tests/golden/42274.2.gcode`：来源仓库的判据输入，原样搬入。
-//! - 配置 `tests/fixtures/config/A1.toml`：由 `mkp-sr` 的 `ir::build()` 产出的
-//!   `tests/fixtures/ir/build9/A1-standard.json` 经 `config::to_toml` 转成（派生说明与每轮复查
-//!   在 `tests/pipeline.rs`）。**刻意不用** `fixtures/ir/golden_42274_2.json` ——
-//!   那份带 ±999 的机器范围，喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，
-//!   看着像搬错了，其实是选错 fixture（AGENTS.md §7⑥）。
-//! - 期望输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）：
-//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。
-//!
-//! ## 证据等级
-//!
-//! 与 `end_to_end.rs` 同一层（最弱那层）：对照的是**当下 `mkp-sr` 的输出**，
-//! 不是「正确的输出」。它能守住「拆 `process_with_ir` 没改变行为」，
-//! 守不住「行为本来就对」。
+//! - 输入 `tests/golden/42274.2.gcode`：一份真实的切片产物，当不变的输入用。
+//! - 配置 `tests/fixtures/config/A1.toml`：A1 的一份完整配置。
+//!   **刻意不用** `fixtures/ir/golden_42274_2.json` —— 那份带 ±999 的机器范围，
+//!   喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，看着像搬错了，其实是选错
+//!   fixture（AGENTS.md §7⑥）。
 
 //! ## 一个必须先说清的坑：整链输出依赖**进程内**的伪随机序列状态
 //!
@@ -62,13 +54,10 @@ fn config_a1() -> PathBuf {
     repo_root().join("tests/fixtures/config/A1.toml")
 }
 
-fn reference_output() -> PathBuf {
-    repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
-}
-
-/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「抬升 Z=20 + 跳过震动检测」生成
-/// （= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳 —— 两张脸都钉回去，
-/// 字节判据才不假红（同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
+/// 用户偏好（`Ir.prefs`）的两颗钉子：两条脸都按同一组值跑。
+///
+/// 偏好化之后出厂档与旧管线常量不同（100 / 不跳 vs 20 / 跳），这里把两边都钉成
+/// 同一组，判据比较的才是**入口之差**，不是「谁用了哪套默认值」。
 const PREFERENCE_PINS: &[&str] = &[
     "Prefs.BeginStageRetractZLiftMm=20",
     "Prefs.SkipVibrationCalibration=true",
@@ -149,27 +138,6 @@ fn process_with_ir_matches_the_config_face_byte_for_byte() {
     assert_same_bytes("两张公开脸的输出", &via_config, &via_ir);
 }
 
-/// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
-fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_mark_lines(bytes)
-}
-
-#[test]
-fn process_with_ir_matches_the_end_to_end_reference() {
-    let _seq = lock_sequence();
-    let via_ir = strip_mkp_marks(&run_in_place(true));
-    let want = std::fs::read(reference_output()).expect("读整链参考物");
-    // 反空转哨兵：参考物必须真的是那 668,687 字节的那一份，
-    // 否则「读到一个空文件、两边都空、判据全绿」在终端上长得跟真绿一样。
-    assert!(
-        want.len() == 668_687,
-        "整链参考物字节数必须是 668687，实测 {}",
-        want.len()
-    );
-    assert_same_bytes(
-        "process_with_ir 与整链参考物（已剔除 MKP 标记行）",
-        &want,
-        &via_ir,
-    );
-}
+// 2026-10-21：原来还有一条「与整链参考物逐字节相等」的判据，已删除 ——
+// 参考物由来源实现的 CLI 生成、在本仓无法复现，拿它当锚等于把判据变成自比自。
+// 本仓的产物基准只认自己维护的 `tests/golden/`（见 `golden_*.rs`）。

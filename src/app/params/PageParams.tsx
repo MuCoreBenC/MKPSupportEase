@@ -593,7 +593,9 @@ export default function PageParams({
       return currentTab.sections.map((sec) => ({
         id: `${currentTab.id}-${sec.id}`,
         title: sec.label,
-        fields: u.defsOfSection(sec.id),
+        /* `hidden` 的参数不出行：它们是某张卡的**槽位**或「当前用哪套」，
+           界面上的样子是那张卡标题栏里的一条下拉（见 GcodeBlock） */
+        fields: u.defsOfSection(sec.id).filter((d) => d.meta?.hidden !== true),
       }))
     }
 
@@ -615,7 +617,8 @@ export default function PageParams({
     const cards: ShownCard[] = []
     for (const tab of u.tabs) {
       for (const sec of tab.sections) {
-        const defs = u.defsOfSection(sec.id)
+        /* 同非搜索态：槽位 / 选择器不参与搜索，也不成行 */
+        const defs = u.defsOfSection(sec.id).filter((d) => d.meta?.hidden !== true)
         const hit = new Set(defs.filter(isMatch).map((d) => d.key))
         /*
          * 分组名命中 = 这一整张卡都算命中（他搜的是这张卡的名字）。
@@ -870,17 +873,32 @@ export default function PageParams({
         onHoldSync={ro ? undefined : u.holdSync}
         onUseMyValue={ro ? undefined : u.useMyValue}
         syncBusy={u.syncBusy}
-        renderBlock={(def) => (
-          <GcodeBlock
-            def={def}
-            value={u.valueOf(def.key)}
-            dirty={u.dirtyOf(def.key)}
-            disabled={u.blockedBy(def.key) !== null}
-            savedValue={u.savedValueOf(def.key)}
-            onEdit={u.edit}
-            onRevertToSaved={u.revertToSaved}
-          />
-        )}
+        renderBlock={(def) => {
+          /*
+           * 多套方案（2026-10-21）：卡片还是那一张，读写落在**当前选中那套**上。
+           * 没有槽位（或本机没配）时 `group` 为 null，走的完全是老样子。
+           */
+          const group = u.slotsOf(def.key)
+          const slotKey = group?.activeKey ?? def.key
+          return (
+            <GcodeBlock
+              def={def}
+              editKey={slotKey}
+              slots={group?.options}
+              activePosition={group?.options.find((o) => o.key === slotKey)?.position}
+              onSelectSlot={(position) => {
+                if (group === null) return
+                u.edit(group.selectorKey, position)
+              }}
+              value={u.valueOf(slotKey)}
+              dirty={u.dirtyOf(slotKey)}
+              disabled={u.blockedBy(slotKey) !== null}
+              savedValue={u.savedValueOf(slotKey)}
+              onEdit={u.edit}
+              onRevertToSaved={u.revertToSaved}
+            />
+          )
+        }}
       />
     ))
 

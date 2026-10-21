@@ -275,9 +275,36 @@ id = 'custom_gcode'
 id = 'item_4_0_0'
 paramKey = 'toolhead.custom_mount_gcode'
 
+# 2026-10-21 换笔多套方案：槽位与「当前用哪套」都挂在这一节里（`hidden = true`，
+# 界面上不单独成行，只给那张卡的标题栏多一条下拉）。布局侧要求**每个参数都有归属**，
+# 所以它们必须出现在这里，哪怕不渲染。
+[[tabs.sections.items]]
+id = 'item_4_0_2'
+paramKey = 'toolhead.custom_mount_gcode_2'
+
+[[tabs.sections.items]]
+id = 'item_4_0_3'
+paramKey = 'toolhead.custom_mount_gcode_3'
+
+[[tabs.sections.items]]
+id = 'item_4_0_4'
+paramKey = 'toolhead.mount_gcode_active'
+
 [[tabs.sections.items]]
 id = 'item_4_0_1'
 paramKey = 'toolhead.custom_unmount_gcode'
+
+[[tabs.sections.items]]
+id = 'item_4_0_5'
+paramKey = 'toolhead.custom_unmount_gcode_2'
+
+[[tabs.sections.items]]
+id = 'item_4_0_6'
+paramKey = 'toolhead.custom_unmount_gcode_3'
+
+[[tabs.sections.items]]
+id = 'item_4_0_7'
+paramKey = 'toolhead.unmount_gcode_active'
 
 [[tabs]]
 id = 'advanced'

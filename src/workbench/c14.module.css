@@ -4533,6 +4533,36 @@
   font-weight: 600;
 }
 
+/* 多套方案的下拉条（2026-10-21）：编辑器上方一行，与框里的密表同一套字级 */
+.pGmSlots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.pGmSlotsLabel {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.pGmSlotSelect {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.pGmSlotsNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
 /* ---------- 批量修改 ---------- */
 
 .pBatchRow {

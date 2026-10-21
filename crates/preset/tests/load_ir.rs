@@ -1,125 +1,20 @@
-//! `load_ir` 的判据（Task 5）。
+//! `load_ir` 的判据：预设文件读不进来时，错误要说话。
 //!
-//! 三层，从强到弱：
+//! 这里只留**硬错误**那两条（机型别名不认识 / 预设头缺 `# machine:`）：
+//! 这两条守的是「读错了要立刻停下」，与产物内容无关，所以不会随生成逻辑演进变红。
 //!
-//! 1. **整链字节判据**：`load_ir(预设 A1-standard.toml)` → `process_with_ir` 的输出与
-//!    `crates/postprocess/tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）
-//!    **除 MKP 标记行外逐字节相等**。这条把「预设 → IR → 12 步 → 输出」整条链一次钉住
-//!    —— 参考物正是 `mkp-sr` 的 CLI 用**同一份预设**生成的（命令记在
-//!    `crates/postprocess/tests/end_to_end.rs` 头部）。
-//!    注意它比 `end_to_end.rs` 更强一档：那条走的是**已经转好的 IR TOML**，
-//!    这条走的是**真正的预设文件**，中间那 2,242 行映射也在覆盖面里。
-//!
-//!    2026-09-12 起判据里剔除 `;MKP_*` 标记行：本仓开始按 MKP 标记协议 v1 往产物里插
-//!    `MKP_BEGIN/END/INFO/STATS`，参考物里没有这些行。参考物由**来源仓库的 CLI** 生成、
-//!    在本仓无法复现，拿本侧输出覆盖它等于把判据变成自比自（彻底空转）。
-//!    收窄成「除新增标记行外逐字节相同」比原判据更强 —— 它同时证明了标记是纯增量，
-//!    没有顺带移动或改写任何一行原有输出。处置与 `end_to_end.rs` / `process_with_ir.rs` 一致。
-//! 2. **硬错误判据**：机型别名不认识 / 预设头缺 `# machine:` 各自报什么码。
-//!
-//! 2026-10-02：原来还有第 3 条「仓库外那份真实预设（`~/Documents/MKPSupportSSR/…/A1MF.toml`）
-//! 能过 `load_ir`」—— 已删除。那是**旧格式**（`offset = { x, y, z }` 内联表）的兼容性判据，
-//! 而内联表已拆成 `offset_x/y/z` 三个独立字段，程序**刻意不兼容旧文件**（新项目、无存量用户、
-//! 不引兼容层）。留着它只会把"新程序读不了旧文件"当成回归红。
-//!
-//! 伪随机序列是**进程级**状态（见 `crates/postprocess/tests/process_with_ir.rs` 的文件头），
-//! 所以整链那条在跑之前 reset，且用一把锁串行。
+//! 2026-10-21：原来的「整链逐字节等于参考物」那条已删除 —— 本仓不再对照来源实现
+//! 的产物，判据只认我们自己的基准（见 `crates/postprocess/tests/golden_*.rs`）。
+//! 拿一份在我们这边无法复现的产物当锚，等于把判据变成自比自。
 
 // 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard};
-
-use postprocess::diag::CancelToken;
-use postprocess::pipeline::{self, IrProcessRequest, NoProgress};
-
-static SEQUENCE: Mutex<()> = Mutex::new(());
-
-fn lock_sequence() -> MutexGuard<'static, ()> {
-    match SEQUENCE.lock() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    }
-}
 
 fn core_path(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../postprocess/{rel}"))
-}
-
-/// 剔除 MKP 标记协议 v1 的标记行 —— 判据侧只有
-/// `postprocess::postproc::marks::strip_mark_lines` 这一份实现（见那边的注释）。
-fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
-    postprocess::postproc::marks::strip_mark_lines(bytes)
-}
-
-#[test]
-fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
-    let _seq = lock_sequence();
-    postprocess::gcode::reset_pseudo_random();
-
-    let dir = tempfile::tempdir().expect("临时目录");
-    let work = dir.path().join("input.gcode");
-    std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
-
-    let raw = std::fs::read_to_string(&work).expect("读输入");
-    let mut ir = preset::load_ir(
-        &core_path("tests/fixtures/presets/A1-standard.toml"),
-        Some(&raw),
-    )
-    .expect("预设 → IR 必须成功");
-
-    // 用户偏好（`Ir.prefs`，2026-10-17 落地）的两颗钉子：参考输出按「抬升 Z=20 +
-    // 跳过震动检测」生成（= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳。
-    // 预设文件不带 prefs ⇒ 出厂档兜底，这里手动钉回参考档，字节判据才不假红
-    // （同 `crates/postprocess/tests/end_to_end.rs` 的同名注释）。
-    ir.prefs.begin_stage_retract_z_lift_mm = 20;
-    ir.prefs.skip_vibration_calibration = true;
-
-    // 顺手把「第 7、8 步真的发生了」钉住：文件名带扩展名、机型已归一。
-    // 名字跟着夹具一起改了（b05 Task 5）：`preset_name` 取的是**实际路径**的文件名。
-    assert_eq!(
-        ir.meta.preset_name, "A1-standard.toml",
-        "preset_name 必须是带扩展名的文件名"
-    );
-    assert_eq!(ir.machine.machine_type, "A1", "机型必须归一成 Canonical ID");
-
-    pipeline::process_with_ir_with_tower_ask(
-        IrProcessRequest {
-            gcode_path: work.clone(),
-            ir,
-            output_path: None,
-            calibration: Default::default(),
-        },
-        None,
-        &mut NoProgress,
-        &CancelToken::new(),
-    )
-    .expect("整链必须成功");
-
-    let got = strip_mkp_marks(&std::fs::read(&work).expect("读回原地输出"));
-    let want = std::fs::read(core_path("tests/golden/42274.2.e2e-A1.reference.gcode"))
-        .expect("读整链参考物");
-    // 反空转哨兵（字面量，不插值）。
-    assert!(
-        want.len() == 668_687,
-        "整链参考物字节数必须是 668687，实测 {}",
-        want.len()
-    );
-    // 大对象不整体 assert_eq!。
-    assert!(
-        got.len() == want.len(),
-        "剔除 MKP 标记行后长度不同 本侧={} 参考={}",
-        got.len(),
-        want.len()
-    );
-    if let Some(i) = got.iter().zip(want.iter()).position(|(a, b)| a != b) {
-        panic!(
-            "首个不同字节在 offset {i}（本侧=0x{:02x} 参考=0x{:02x}）",
-            got[i], want[i]
-        );
-    }
 }
 
 /// 写一份最小可解析的预设到临时目录，`machine` 头由调用方给。

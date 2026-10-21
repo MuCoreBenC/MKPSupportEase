@@ -49,6 +49,14 @@ interface Props {
   /** 外壳的保存（落盘） */
   onSave: () => void
   onClose: () => void
+  /*
+   * 多套方案（2026-10-21）：装载 / 卸载胶箱各有几份 G-code。
+   * 没有槽位（或本机没配）时不传，框里与以前一模一样。
+   */
+  slots?: { key: string; label: string; position: string }[]
+  /** 当前生效那套的序号 */
+  activePosition?: string
+  onSelectSlot?: (position: string) => void
 }
 
 export default function GcodeModal({
@@ -60,6 +68,9 @@ export default function GcodeModal({
   write,
   onSave,
   onClose,
+  slots,
+  activePosition,
+  onSelectSlot,
 }: Props) {
   const before = String(cell.raw ?? '')
   /*
@@ -126,6 +137,29 @@ export default function GcodeModal({
         </>
       }
     >
+      {slots !== undefined && slots.length > 1 && (
+        /*
+         * 方案下拉：与用户端同一套语义（写「当前用哪套」那条参数），
+         * 只是位置在框内、编辑器上方 —— 工作台的标题栏由 ModalC14 管，塞不进去。
+         */
+        <div className={s.pGmSlots}>
+          <span className={s.pGmSlotsLabel}>方案</span>
+          <select
+            className={s.pGmSlotSelect}
+            value={activePosition ?? '1'}
+            disabled={disabled}
+            aria-label={`${param.label} 方案`}
+            onChange={(e) => onSelectSlot?.(e.target.value)}
+          >
+            {slots.map((o) => (
+              <option key={o.key} value={o.position}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <span className={s.pGmSlotsNote}>改哪套就只写哪套；导出用「当前」那一套</span>
+        </div>
+      )}
       <GcodeEditor
         value={before}
         onChange={write}

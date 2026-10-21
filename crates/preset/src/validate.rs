@@ -102,7 +102,13 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "FirstPenRevitalizationFlag" => ConfigVal::Bool(t.first_pen_revitalization_flag),
         "L803LeakPreventFlag" => ConfigVal::Bool(t.l803_leak_prevent_flag),
         "CustomMountGcode" => ConfigVal::Str(t.custom_mount_gcode.clone()),
+        "CustomMountGcode2" => ConfigVal::Str(t.custom_mount_gcode_2.clone()),
+        "CustomMountGcode3" => ConfigVal::Str(t.custom_mount_gcode_3.clone()),
+        "MountGcodeActive" => ConfigVal::Str(t.mount_gcode_active.clone()),
         "CustomUnmountGcode" => ConfigVal::Str(t.custom_unmount_gcode.clone()),
+        "CustomUnmountGcode2" => ConfigVal::Str(t.custom_unmount_gcode_2.clone()),
+        "CustomUnmountGcode3" => ConfigVal::Str(t.custom_unmount_gcode_3.clone()),
+        "UnmountGcodeActive" => ConfigVal::Str(t.unmount_gcode_active.clone()),
         "GlueZOffset" => ConfigVal::F64(t.glue_z_offset),
         "PrimeLength" => ConfigVal::F64(t.prime_length),
         // ---- wiping（66 键）----

@@ -678,23 +678,70 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
       })
   }, [compareCols, book.machines, matrixOv, sel])
 
+  /* 当前这一列在当前模式下的行（单版本走 desk、对照走矩阵） */
+  const gcodeRowOf = useCallback(
+    (key: string) => {
+      if (gcodeOpen === null) return null
+      if (mode === 'single') return rowOf(shownDesk, key)
+      return matrixOv?.rows.find((r) => r.key === key) ?? null
+    },
+    [gcodeOpen, mode, shownDesk, matrixOv],
+  )
+
+  /*
+   * 多套方案（2026-10-21）：同上，判据全在注册表里，这里不认硬编码 key ——
+   * `slotOf === 卡片 key` 的是组员，`uiComponent === 'select'` 的那条记「当前用哪套」。
+   * 槽 1 是卡片自己（老字段），所以总在第一位。
+   */
+  const gcodeSlot = useMemo(() => {
+    if (gcodeOpen === null) return null
+    const all = registry?.params ?? []
+    const base = all.find((p) => p.key === gcodeOpen.key)
+    const group = all.filter((p) => p.slotOf === gcodeOpen.key)
+    if (base === undefined || group.length === 0) return null
+    const selector = group.find((p) => p.uiComponent === 'select')
+    if (selector === undefined) return null
+    const slots = [base, ...group.filter((p) => p.uiComponent === 'gcode')]
+    const selRow = gcodeRowOf(selector.key)
+    const raw = String(
+      selRow?.cells[
+        mode === 'single'
+          ? cellIndexOf(shownDesk, gcodeOpen.uid)
+          : (matrixOv?.cols.findIndex(
+              (c) => c.machineId === gcodeOpen.mid && (c.versionUid ?? null) === gcodeOpen.uid,
+            ) ?? -1)
+      ]?.raw ?? '',
+    ).trim()
+    const options = slots.map((p, i) => ({
+      key: p.key,
+      label: p.slotLabel !== '' ? p.slotLabel : p.label,
+      position: String(i + 1),
+    }))
+    /* 空 / 越界 → 槽 1，与 `crates/preset/src/build.rs::resolve_gcode_slot` 同一口径 */
+    const picked = options.find((o) => o.position === raw) ?? options[0]
+    return { options, activeKey: picked.key, selectorKey: selector.key, activePosition: picked.position }
+  }, [gcodeOpen, registry, gcodeRowOf, mode, shownDesk, matrixOv])
+
+  /** 模态框读写落在哪条参数上：多套方案时是当前槽位 */
+  const gcodeKey = gcodeSlot?.activeKey ?? gcodeOpen?.key ?? ''
+
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
-  const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
+  const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeKey) ?? null) : null
   const gcodeCell = useMemo(() => {
     if (gcodeOpen === null) return null
     if (mode === 'single') {
-      const row = rowOf(shownDesk, gcodeOpen.key)
+      const row = rowOf(shownDesk, gcodeKey)
       return row?.cells[cellIndexOf(shownDesk, gcodeOpen.uid)] ?? null
     }
     const m = matrixOv
     if (m === null) return null
-    const row = m.rows.find((r) => r.key === gcodeOpen.key)
+    const row = m.rows.find((r) => r.key === gcodeKey)
     if (!row) return null
     const ci = m.cols.findIndex(
       (c) => c.machineId === gcodeOpen.mid && (c.versionUid ?? null) === gcodeOpen.uid,
     )
     return ci >= 0 ? (row.cells[ci] ?? null) : null
-  }, [gcodeOpen, mode, shownDesk, matrixOv])
+  }, [gcodeOpen, gcodeKey, mode, shownDesk, matrixOv])
 
   /*
    * 左树刷选（C14 第七轮）：按住拖过去、经过哪行改哪行。对照模式里所有机型的
@@ -1389,16 +1436,44 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
       */}
       {gcodeOpen !== null && gcodeParam !== null && gcodeCell !== null && (
         <GcodeModal
+          /* 换一套 = 换一条参数：让框重挂，`openValue`（「取消」回到的那一点）跟着换 */
+          key={gcodeKey}
           param={gcodeParam}
           cell={gcodeCell}
           layerLabel={layerLabelOf(gcodeOpen.mid, gcodeOpen.uid)}
           disabled={!gcodeCell.editable}
           dirty={dirty}
-          write={(next) => {
-            const row =
+          slots={gcodeSlot?.options}
+          activePosition={gcodeSlot?.activePosition}
+          onSelectSlot={(position) => {
+            /* 切换方案 = 写「当前用哪套」那条参数（进草稿、进历史，与其它选择器同一条路） */
+            const sel = gcodeSlot
+            if (sel === null) return
+            const row = gcodeRowOf(sel.selectorKey)
+            const param = paramOf(sel.selectorKey)
+            if (row === null || param === null) return
+            const ci =
               mode === 'single'
-                ? rowOf(shownDesk, gcodeOpen.key)
-                : (matrixOv?.rows.find((r) => r.key === gcodeOpen.key) ?? null)
+                ? cellIndexOf(shownDesk, gcodeOpen.uid)
+                : (matrixOv?.cols.findIndex(
+                    (c) =>
+                      c.machineId === gcodeOpen.mid && (c.versionUid ?? null) === gcodeOpen.uid,
+                  ) ?? -1)
+            const cell = ci >= 0 ? (row.cells[ci] ?? null) : null
+            if (cell === null) return
+            writeValue(
+              row,
+              param,
+              gcodeOpen.mid,
+              gcodeOpen.uid,
+              position,
+              mode === 'compare' ? 'matrix' : 'desk',
+              String(cell.raw ?? ''),
+              cell,
+            )
+          }}
+          write={(next) => {
+            const row = gcodeRowOf(gcodeKey)
             if (row) {
               writeValue(
                 row,

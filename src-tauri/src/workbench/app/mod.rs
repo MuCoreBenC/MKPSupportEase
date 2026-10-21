@@ -769,6 +769,12 @@ pub struct ParamView {
     pub deprecated: bool,
     /// **只在这些机型上弃用**（与 `deprecated` 叠加）
     pub deprecated_machines: Vec<String>,
+    /// 多套方案：本参数是 `slot_of` 那张卡的一套方案（空 = 普通参数）
+    pub slot_of: String,
+    /// 槽位在下拉里的名字（「方案 2（稳）」）
+    pub slot_label: String,
+    /// 藏在背后、界面不渲染（槽位本身与「当前用哪套」）
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -878,6 +884,9 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
         machine_filter: p.machine_filter.clone(),
         deprecated: p.deprecated,
         deprecated_machines: p.deprecated_machines.clone(),
+        slot_of: p.slot_of.clone(),
+        slot_label: p.slot_label.clone(),
+        hidden: p.hidden,
     }
 }
 

@@ -620,6 +620,15 @@ pub struct ParamMetaDto {
     pub machine_filter: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_when: Option<ShowWhenDto>,
+    /// 多套方案：本参数是 `slot_of` 那张卡的一套方案（空 = 普通参数）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_of: Option<String>,
+    /// 槽位在下拉里的名字（「方案 2（稳）」）；空 = 用 label
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slot_label: Option<String>,
+    /// 藏在背后、界面不渲染（槽位本身与「当前用哪套」）
+    #[serde(skip_serializing_if = "is_false")]
+    pub hidden: bool,
 }
 
 /// 全部参数的元信息。**不过滤** —— 界面要能看到废弃的参数为什么不显示
@@ -652,6 +661,9 @@ fn param_meta_dto(catalog: &runtime::Catalog) -> Vec<ParamMetaDto> {
                 op: s.op,
                 value: to_text(&s.value),
             }),
+            slot_of: non_empty(&p.slot_of),
+            slot_label: non_empty(&p.slot_label),
+            hidden: p.hidden,
         })
         .collect()
 }
@@ -1212,9 +1224,10 @@ mod tests {
             "bundled 档不进客户端菜单"
         );
 
-        // —— 参数元信息：全部 75 条，含废弃 ——
+        // —— 参数元信息：全部 81 条，含废弃 ——
+        // （2026-10-21：74 → 80 是换笔多套方案的 6 条，另有 1 条不落 TOML 的字段）
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 75, "实测 75 条字段定义，一条不少");
+        assert_eq!(meta.len(), 81, "实测 81 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")

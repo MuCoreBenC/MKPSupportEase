@@ -52,6 +52,42 @@
   color: var(--accent-deep);
 }
 
+/*
+ * 方案下拉（2026-10-21）：作者圈的就是这块地方 —— 「已填写」右边、「代码 / 视图」左边。
+ * 尺寸与同一排的 `.restore` / 分段控件同高（24px），不做胶囊。
+ */
+.slotPick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 2px 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+
+.slotLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.slotSelect {
+  height: 22px;
+  max-width: 160px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  cursor: pointer;
+}
+
+.slotSelect:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
 .restore {
   height: 24px;
   padding: 0 9px;

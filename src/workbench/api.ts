@@ -251,6 +251,15 @@ export interface ParamView {
   deprecated: boolean
   /** **只在这些机型上**弃用（与 `deprecated` 叠加） */
   deprecatedMachines: string[]
+  /**
+   * 多套方案（2026-10-21）：本参数是 `slotOf` 那张 gcode 卡的一套方案。
+   * 选择器（「当前用哪套」）也带它，但 `uiComponent` 是 `select`、没有 `slotLabel`。
+   */
+  slotOf: string
+  /** 槽位在下拉里的名字（「方案 2（稳）」） */
+  slotLabel: string
+  /** 藏在背后、界面不渲染 */
+  hidden: boolean
 }
 
 /** `app::SectionTarget` —— 「所属分组」下拉的一行 */

@@ -70,8 +70,10 @@ fn invalid(message: String) -> PostprocError {
 /// 而 `model.rs` 的 serde 键才是「程序到底能读回什么」的事实
 /// （全体 `deny_unknown_fields`）。注册表只提供元数据（类型/量程/中文名）。
 ///
-/// 计数：**79 个 serde 键**（2026-10-02：`offset = { x, y, z }` 拆成三个独立字段
-/// `offset_x/y/z` 之后，一行对一个键，不再有"一个键展成三行"这回事）。
+/// 计数：**85 个 serde 键**（2026-10-02：`offset = { x, y, z }` 拆成三个独立字段
+/// `offset_x/y/z` 之后，一行对一个键，不再有"一个键展成三行"这回事；
+/// 2026-10-21：换笔指令多套方案带来 6 个键 —— `custom_mount_gcode_2/_3`、
+/// `custom_unmount_gcode_2/_3` 与两个 `*_gcode_active`）。
 /// 判据 K-P6 用**双向差集**把这份清单与 `model.rs` 咬住：任一边加了字段都会红。
 pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("toolhead", "speed_limit"),
@@ -80,7 +82,13 @@ pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("toolhead", "offset_z"),
     ("toolhead", "MKP_retract"),
     ("toolhead", "custom_mount_gcode"),
+    ("toolhead", "custom_mount_gcode_2"),
+    ("toolhead", "custom_mount_gcode_3"),
+    ("toolhead", "mount_gcode_active"),
     ("toolhead", "custom_unmount_gcode"),
+    ("toolhead", "custom_unmount_gcode_2"),
+    ("toolhead", "custom_unmount_gcode_3"),
+    ("toolhead", "unmount_gcode_active"),
     ("toolhead", "first_pen_revitalization_flag"),
     ("toolhead", "l803_leak_prevent_flag"),
     ("toolhead", "glue_z_offset"),

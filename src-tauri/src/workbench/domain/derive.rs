@@ -562,6 +562,13 @@ impl<'a> Book<'a> {
         let mut keys: Vec<&str> = Vec::new();
         for c in &cols {
             for k in self.presets.registry.desk_keys(&c.machine_id) {
+                /*
+                 * 多套方案的槽位 / 选择器**不成行**（2026-10-21）：它们是 gcode 卡
+                 * 标题栏那条下拉的背后数据。留在注册表里（编辑要用），但不进这张行表。
+                 */
+                if self.presets.registry.is_hidden(k) {
+                    continue;
+                }
                 if !keys.contains(&k) {
                     keys.push(k);
                 }

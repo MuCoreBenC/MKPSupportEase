@@ -245,6 +245,7 @@ scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '自定义工具头获取 G-code'
 machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
+slotLabel = '方案 1（现状）'
 
 [params.machineVariants]
 'A1:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000"
@@ -260,6 +261,107 @@ machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 [params.layout]
 sectionId = 'custom_gcode'
 order = 0.5
+
+# ---- 装载胶箱的方案 2 / 3 与「当前用哪套」（2026-10-21）----
+# 三个键都不是独立的卡：`slotOf` 把它们挂回上面那张卡，`hidden` 让界面不渲染它们，
+# 卡片上只多一条下拉。槽 1 就是 `toolhead.custom_mount_gcode` 本身（原字段，语义不变），
+# 所以旧预设（没有这三个键）读进来 = 只有槽 1，不需要任何转换。
+[[params]]
+key = 'toolhead.custom_mount_gcode_2'
+label = '装载胶箱 G-code（方案 2）'
+desc = '换笔方案 2「稳」：碰挡片段 F3000、到位停 0.2s、段内加速度 S1500'
+tomlKey = 'custom_mount_gcode_2'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomMountGcode2'
+jsonKey = 'custom_mount_gcode_2'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+slotOf = 'toolhead.custom_mount_gcode'
+slotLabel = '方案 2（稳）'
+hidden = true
+tomlComment = '装载胶箱 G-code（方案 2 稳）'
+
+[params.machineVariants]
+'A1:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000"
+'A1:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000"
+'A1:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000"
+'A1_MINI:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000"
+'A1_MINI:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000"
+'A1_MINI:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 0.6
+
+[[params]]
+key = 'toolhead.custom_mount_gcode_3'
+label = '装载胶箱 G-code（方案 3）'
+desc = '换笔方案 3「标准」（默认）：碰挡片段 F5000、到位停 0.2s、段内加速度 S2000'
+tomlKey = 'custom_mount_gcode_3'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomMountGcode3'
+jsonKey = 'custom_mount_gcode_3'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+slotOf = 'toolhead.custom_mount_gcode'
+slotLabel = '方案 3（标准）'
+hidden = true
+tomlComment = '装载胶箱 G-code（方案 3 标准）'
+
+[params.machineVariants]
+'A1:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000"
+'A1:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000"
+'A1:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000"
+'A1_MINI:FAST' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000"
+'A1_MINI:FASTV3.3' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000"
+'A1_MINI:STANDARD' = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 0.7
+
+[[params]]
+key = 'toolhead.mount_gcode_active'
+label = '装载胶箱当前方案'
+desc = '导出时实际使用哪一套装载方案（1=现状 2=稳 3=标准）'
+tomlKey = 'mount_gcode_active'
+valueType = 'string'
+uiComponent = 'select'
+defaultValue = '1'
+section = 'toolhead'
+configKey = 'MountGcodeActive'
+jsonKey = 'mount_gcode_active'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+hidden = true
+tomlComment = '当前生效的装载方案(1=现状 2=稳 3=标准)'
+
+[params.machineVariants]
+'A1:FAST' = '1'
+'A1:FASTV3.3' = '1'
+'A1:STANDARD' = '1'
+'A1_MINI:FAST' = '1'
+'A1_MINI:FASTV3.3' = '1'
+'A1_MINI:STANDARD' = '1'
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 0.8
 
 [[params]]
 key = 'toolhead.custom_unmount_gcode'
@@ -278,6 +380,7 @@ scope = 'machine_specific'
 variantMode = 'per_variant'
 tomlComment = '自定义工具头收起 G-code'
 machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
+slotLabel = '方案 1（现状）'
 
 [params.machineVariants]
 'A1:FAST' = "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
@@ -293,6 +396,104 @@ machineFilter = 'A1,A1_MINI,P1S,P2S,X1C'
 [params.layout]
 sectionId = 'custom_gcode'
 order = 1.0
+
+# ---- 卸载胶箱的方案 2 / 3 与「当前用哪套」（语义同装载那三块）----
+[[params]]
+key = 'toolhead.custom_unmount_gcode_2'
+label = '卸载胶箱 G-code（方案 2）'
+desc = '换笔方案 2「稳」：碰挡片段 F3000、到位停 0.2s、段内加速度 S1500'
+tomlKey = 'custom_unmount_gcode_2'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomUnmountGcode2'
+jsonKey = 'custom_unmount_gcode_2'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+slotOf = 'toolhead.custom_unmount_gcode'
+slotLabel = '方案 2（稳）'
+hidden = true
+tomlComment = '卸载胶箱 G-code（方案 2 稳）'
+
+[params.machineVariants]
+'A1:FAST' = "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X271 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:FASTV3.3' = "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X273 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:STANDARD' = "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X271 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1_MINI:FAST' = "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:FASTV3.3' = "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:STANDARD' = "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 1.1
+
+[[params]]
+key = 'toolhead.custom_unmount_gcode_3'
+label = '卸载胶箱 G-code（方案 3）'
+desc = '换笔方案 3「标准」（默认）：碰挡片段 F5000、到位停 0.2s、段内加速度 S2000'
+tomlKey = 'custom_unmount_gcode_3'
+valueType = 'string'
+uiComponent = 'gcode'
+defaultValue = ''
+section = 'toolhead'
+configKey = 'CustomUnmountGcode3'
+jsonKey = 'custom_unmount_gcode_3'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+slotOf = 'toolhead.custom_unmount_gcode'
+slotLabel = '方案 3（标准）'
+hidden = true
+tomlComment = '卸载胶箱 G-code（方案 3 标准）'
+
+[params.machineVariants]
+'A1:FAST' = "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X271 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:FASTV3.3' = "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X273 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1:STANDARD' = "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X271 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
+'A1_MINI:FAST' = "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:FASTV3.3' = "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+'A1_MINI:STANDARD' = "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 1.2
+
+[[params]]
+key = 'toolhead.unmount_gcode_active'
+label = '卸载胶箱当前方案'
+desc = '导出时实际使用哪一套卸载方案（1=现状 2=稳 3=标准）'
+tomlKey = 'unmount_gcode_active'
+valueType = 'string'
+uiComponent = 'select'
+defaultValue = '1'
+section = 'toolhead'
+configKey = 'UnmountGcodeActive'
+jsonKey = 'unmount_gcode_active'
+selectable = false
+mergeable = true
+scope = 'machine_specific'
+variantMode = 'per_variant'
+machineFilter = 'A1,A1_MINI'
+hidden = true
+tomlComment = '当前生效的卸载方案(1=现状 2=稳 3=标准)'
+
+[params.machineVariants]
+'A1:FAST' = '1'
+'A1:FASTV3.3' = '1'
+'A1:STANDARD' = '1'
+'A1_MINI:FAST' = '1'
+'A1_MINI:FASTV3.3' = '1'
+'A1_MINI:STANDARD' = '1'
+
+[params.layout]
+sectionId = 'custom_gcode'
+order = 1.3
 
 [[params]]
 key = 'wiping.disable_3rd_layer_clog_detect'

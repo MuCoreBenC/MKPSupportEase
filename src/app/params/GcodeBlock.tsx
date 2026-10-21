@@ -21,7 +21,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
-import type { ParamDef } from './useParams'
+import type { ParamDef, SlotOption } from './useParams'
 import s from './GcodeBlock.module.css'
 
 interface Props {
@@ -34,6 +34,19 @@ interface Props {
   savedValue: string
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
+  /*
+   * 多套方案（2026-10-21）：装载 / 卸载胶箱各有几份 G-code，标题栏多一条下拉。
+   * 没有槽位的参数不传 `slots`，界面与以前**一模一样**（作者：「没什么变化」）。
+   */
+  slots?: SlotOption[]
+  /** 当前生效那套的序号，与 `slots[].position` 对齐 */
+  activePosition?: string
+  onSelectSlot?: (position: string) => void
+  /**
+   * 读写落在哪个参数上。默认 `def.key`；多套方案时是**当前槽位**的 key ——
+   * 编辑内容只写当前那套，别的方案原样留着。
+   */
+  editKey?: string
 }
 
 const MODES = [
@@ -66,9 +79,15 @@ export default function GcodeBlock({
   savedValue,
   onEdit,
   onRevertToSaved,
+  slots,
+  activePosition,
+  onSelectSlot,
+  editKey,
 }: Props) {
   const [mode, setMode] = useState('view')
   const lines = parse(value)
+  /* 写值落在哪一条参数上：多套方案时是当前槽位，否则就是卡片自己 */
+  const writeKey = editKey ?? def.key
 
   /*
    * 代码模式的三层：行号槽 + 着色层 + 透明输入框（A43 移植，工作台 C15 那套）。
@@ -107,7 +126,7 @@ export default function GcodeBlock({
       params[paramAt] = next
       return [l.command, ...params.filter((p) => p !== '')].join(' ')
     })
-    onEdit(def.key, copy.join('\n'))
+    onEdit(writeKey, copy.join('\n'))
   }
 
   return (
@@ -121,12 +140,34 @@ export default function GcodeBlock({
           {value.trim() !== '' && <span className={s.filled}>已填写</span>}
         </span>
         <span className={s.headRight}>
+          {slots !== undefined && slots.length > 1 && (
+            /*
+             * 方案下拉：就是作者圈出来的那个位置（「已填写」与「代码 / 视图」之间）。
+             * 用原生 select —— 套数不写死，以后加第 4 套只是注册表多一条参数。
+             */
+            <label className={s.slotPick}>
+              <span className={s.slotLabel}>方案</span>
+              <select
+                className={s.slotSelect}
+                value={activePosition ?? '1'}
+                disabled={disabled}
+                aria-label={`${def.label} 方案`}
+                onChange={(e) => onSelectSlot?.(e.target.value)}
+              >
+                {slots.map((o) => (
+                  <option key={o.key} value={o.position}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           {dirty && !disabled && (
             <button
               type="button"
               className={s.restore}
               title={`还原为已保存的那一段（${savedValue.split('\n').length} 行）`}
-              onClick={() => onRevertToSaved(def.key)}
+              onClick={() => onRevertToSaved(writeKey)}
             >
               ↩ 已保存的 {savedValue.split('\n').length} 行
             </button>
@@ -175,7 +216,7 @@ export default function GcodeBlock({
               disabled={disabled}
               aria-label={`${def.label} 代码`}
               onScroll={syncScroll}
-              onChange={(e) => onEdit(def.key, e.target.value)}
+              onChange={(e) => onEdit(writeKey, e.target.value)}
             />
           </div>
         </div>

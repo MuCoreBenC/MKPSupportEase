@@ -104,6 +104,20 @@ pub struct ParamEntry {
     pub selectable: bool,
     #[serde(default)]
     pub mergeable: bool,
+    /// 多套方案：非空 = 本参数是 `slot_of` 那张卡的一套方案，**不单独成卡**。
+    ///
+    /// 2026-10-21（装载/卸载胶箱三档）：三份 G-code 在参数体系里是三个独立键
+    /// （`write.rs` 的清单只认「一个键 = 一个值」），但界面上它们必须收在**同一条**
+    /// 下拉里 —— 于是用这个字段把槽位挂回它所属的那张卡。空串 = 普通参数。
+    #[serde(rename = "slotOf", default)]
+    pub slot_of: String,
+    /// 槽位在下拉里显示的名字（`方案 2`）；空 = 用 `label`。
+    #[serde(rename = "slotLabel", default)]
+    pub slot_label: String,
+    /// 只在背后存在、界面不渲染：槽位本身与「当前用哪套」的选择器都靠它藏起来，
+    /// 卡片上只留下那条下拉（作者：「跟以前的界面几乎没什么变化」）。
+    #[serde(default)]
+    pub hidden: bool,
     #[serde(default)]
     pub layout: LayoutEntry,
     #[serde(rename = "machineVariants", default)]

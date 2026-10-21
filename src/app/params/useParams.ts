@@ -118,6 +118,31 @@ export interface ParamDef {
   deprecated: boolean
 }
 
+/** 多套方案里的一套 */
+export interface SlotOption {
+  /** 这一套自己的参数 key（槽 1 就是卡片自己） */
+  key: string
+  /** 下拉里显示的名字 */
+  label: string
+  /** 「当前用哪套」里它对应的序号（`"1"` / `"2"` …）—— 写值写的是它 */
+  position: string
+}
+
+/**
+ * 一张 G-code 卡的多套方案。
+ *
+ * 数据形状：槽位是**平铺的独立参数**（`write.rs` 的可编辑面只认「一个键 = 一个值」），
+ * 用 `meta.slotOf` 挂回这张卡；「当前用哪套」是另一条 hidden 参数（`select`）。
+ * 这里把两者合成一次查询，界面只管 `options` + `activeKey` + `select()`。
+ */
+export interface SlotGroup {
+  /** 「当前用哪套」那条参数的 key（切下拉时写它） */
+  selectorKey: string
+  /** 现在生效的那一套的 key —— 编辑器读写的就是它 */
+  activeKey: string
+  options: SlotOption[]
+}
+
 /** 一个字段在分类 / 分组结构里的位置。搜索结果要写清命中项属于哪一组 */
 export interface Place {
   tabId: string
@@ -585,6 +610,11 @@ export interface Params {
   defs: ParamDef[]
   defsOfSection: (sectionId: string) => ParamDef[]
   defOf: (key: string) => ParamDef | undefined
+  /**
+   * 多套方案（2026-10-21）：某张 G-code 卡的槽位与「当前用哪套」。
+   * 没有槽位（绝大多数参数）返回 `null`，界面上就不会多出那条下拉。
+   */
+  slotsOf: (baseKey: string) => SlotGroup | null
   placeOf: (key: string) => Place | undefined
   /** 这台机型这个版本一共几条 —— 不是写死的 67 */
   total: number
@@ -2213,6 +2243,41 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     [combo],
   )
 
+  /**
+   * 多套方案：把「槽位们 + 当前用哪套」合成一次查询。
+   *
+   * 判据全在注册表里，这里不认任何硬编码 key：
+   *   · `meta.slotOf === baseKey` 的才是这张卡的组员；
+   *   · `uiComponent === 'select'` 的那条是**选择器**（槽序号写在它的值里）；
+   *   · `uiComponent === 'gcode'` 的才是**槽位**（名字取 `slotLabel`）。
+   * 槽 1 就是卡片本身（老字段、老预设里唯一存在的那一份），所以它总在列表第一位。
+   */
+  const slotsOf = useCallback(
+    (baseKey: string): SlotGroup | null => {
+      const defs = combo?.defs ?? []
+      const base = defs.find((d) => d.key === baseKey)
+      const group = defs.filter((d) => d.meta?.slotOf === baseKey)
+      if (base === undefined || group.length === 0) return null
+      const selector = group.find((d) => d.meta?.uiComponent === 'select')
+      if (selector === undefined) return null
+      const slots = [base, ...group.filter((d) => d.meta?.uiComponent === 'gcode')]
+      const options: SlotOption[] = slots.map((d, i) => ({
+        key: d.key,
+        label: d.meta?.slotLabel ?? d.label,
+        position: String(i + 1),
+      }))
+      /*
+       * 当前用哪套：值不在 `options` 里（空 / 越界 / 被别处写成怪值）时**回落到槽 1** ——
+       * 与 `crates/preset/src/build.rs` 的 `resolve_gcode_slot` 同一口径。
+       * 两边不一致的话，界面显示的和导出用的会是两套，那是最难查的一种错。
+       */
+      const raw = valueOf(selector.key).trim()
+      const picked = options.find((o) => o.position === raw) ?? options[0]
+      return { selectorKey: selector.key, activeKey: picked.key, options }
+    },
+    [combo, valueOf],
+  )
+
   const history = useMemo(() => [...log].reverse(), [log])
 
   /**
@@ -2678,6 +2743,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     sectionsOf,
     defs: combo?.defs ?? [],
     defsOfSection,
+    slotsOf,
     defOf,
     placeOf,
     total: combo?.defs.length ?? 0,

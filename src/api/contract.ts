@@ -777,6 +777,18 @@ export interface ParamMeta {
    * 只有一层，但被指向的字段自己也可能有条件，所以要顺着 key 往上递归。
    */
   showWhen?: { key: string; op: 'eq' | 'neq' | 'gt'; value: string }
+  /**
+   * 多套方案（2026-10-21）：本参数是 `slotOf` 那张卡的一套方案。
+   *
+   * 装载 / 卸载胶箱各有三份 G-code，它们在参数表里是三个独立键，界面上必须收在
+   * 同一条下拉里 —— 这个字段就是「我属于哪张卡」。选择器（「当前用哪套」）也带它，
+   * 但 `uiComponent` 是 `select`、没有 `slotLabel`，靠这两点与槽位区分。
+   */
+  slotOf?: string
+  /** 槽位在下拉里的名字（「方案 2（稳）」） */
+  slotLabel?: string
+  /** 藏在背后、界面不渲染（槽位本身与选择器都是） */
+  hidden?: boolean
 }
 
 /** 一处「机型:版本」。倒查结果里到处要用它，所以单独一个名字 */

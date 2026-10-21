@@ -71,8 +71,30 @@ pub fn build(
     ir.toolhead.x_offset = cfg.toolhead.offset_x;
     ir.toolhead.y_offset = cfg.toolhead.offset_y;
     ir.toolhead.z_offset = cfg.toolhead.offset_z;
-    ir.toolhead.custom_mount_gcode = split_gcode_lines(&cfg.toolhead.custom_mount_gcode);
-    ir.toolhead.custom_unmount_gcode = split_gcode_lines(&cfg.toolhead.custom_unmount_gcode);
+    /*
+     * 换笔指令的多套方案在这里**解析成一套**，下游一行都不用改。
+     *
+     * `Ir` 里的 `custom_mount_gcode` / `custom_unmount_gcode` 语义保持
+     * 「本次导出真正要发的那一段」，于是 `glue_block` 的逐行透传、
+     * `L801` 改写、`has_retract` 判定、`mkp_retract` / `mkp_extrude` 派生、
+     * `L803` 嗅探全都天然只看选中那套 —— 想加第 N 槽也不用再动任何一处。
+     */
+    ir.toolhead.custom_mount_gcode = split_gcode_lines(resolve_gcode_slot(
+        &cfg.toolhead.custom_mount_gcode,
+        [
+            &cfg.toolhead.custom_mount_gcode_2,
+            &cfg.toolhead.custom_mount_gcode_3,
+        ],
+        &cfg.toolhead.mount_gcode_active,
+    ));
+    ir.toolhead.custom_unmount_gcode = split_gcode_lines(resolve_gcode_slot(
+        &cfg.toolhead.custom_unmount_gcode,
+        [
+            &cfg.toolhead.custom_unmount_gcode_2,
+            &cfg.toolhead.custom_unmount_gcode_3,
+        ],
+        &cfg.toolhead.unmount_gcode_active,
+    ));
     ir.toolhead.nozzle_switch_temperature = 0.0;
     ir.toolhead.glue_z_offset = cfg.toolhead.glue_z_offset;
     ir.toolhead.prime_length = cfg.toolhead.prime_length;
@@ -311,7 +333,7 @@ pub fn build(
         ir.safety.l803_leak_prevent = true;
     }
     for line in &ir.toolhead.custom_unmount_gcode {
-        if line.contains("G4") {
+        if is_drying_wait_command(line) {
             ir.gcode.wait_for_drying_command = line.trim().to_string();
             break;
         }
@@ -370,6 +392,59 @@ pub fn build(
     ir.tower.extrude_ratio = ir.wiping.tower_extrude_ratio;
 
     Ok(ir)
+}
+
+/// 多套换笔指令的**唯一一处分派**：按 `active` 选出这次要发的那一段。
+///
+/// 回退规则（刻意宽松，替代任何形式的「数据迁移」）：
+/// - `active` 空 / 不是 `"1"|"2"|"3"` / 指向的槽是空串 ⇒ 一律用槽 1（`base`）；
+/// - 槽 1 本身也是空 ⇒ 返回空串（下游按「没有自定义指令」处理，与今天一致）。
+///
+/// 之所以「指向空槽就回退槽 1」而不是发一段空指令：空槽在界面上就是「这套还没填」，
+/// 发空指令会让打印机在取笔位一动不动 —— 那是最难查的一类故障。
+fn resolve_gcode_slot<'a>(base: &'a str, slots: [&'a str; 2], active: &str) -> &'a str {
+    let idx = match active.trim() {
+        "2" => 1,
+        "3" => 2,
+        _ => 0,
+    };
+    if idx == 0 {
+        return base;
+    }
+    let picked = slots[idx - 1];
+    if picked.trim().is_empty() {
+        base
+    } else {
+        picked
+    }
+}
+
+/// 卸载段里「等胶干」那种 `G4` 才算 `wait_for_drying_command`。
+///
+/// 2026-10-21 之前这里只判 `contains("G4")`：换笔降速方案里加的 `G4 P200`
+/// （到位后停 0.2s 让磁铁把笔吸到位）会把它顶掉。时间量级是硬判据 ——
+/// `P` 是毫秒、`S` 是秒，0.2s 的机械停顿不可能是「等胶干」。
+fn is_drying_wait_command(line: &str) -> bool {
+    let Some(pos) = line.find("G4") else {
+        return false;
+    };
+    let rest = &line[pos + 2..];
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            'S' | 's' => return true,
+            'P' | 'p' => {
+                let digits: String = rest[i + 1..]
+                    .trim_start()
+                    .chars()
+                    .take_while(|c| c.is_ascii_digit() || *c == '.')
+                    .collect();
+                return digits.parse::<f64>().is_ok_and(|ms| ms >= 1000.0);
+            }
+            c if c.is_ascii_alphabetic() => return false,
+            _ => {}
+        }
+    }
+    false
 }
 
 // `fill_defaults` **在这里被删掉了**（同上）：内核 `crates/postprocess/src/ir/defaults.rs`
@@ -991,6 +1066,53 @@ mod tests {
         cfg.toolhead.speed_limit = 70.0;
         let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
         assert_eq!(ir.toolhead.max_speed, 4200.0);
+    }
+
+    /// 多套换笔指令：`active` 指哪套就用哪套，指不到就回退槽 1。
+    ///
+    /// 这条判据守两件事：① 旧预设（没有 `_2/_3/active`）行为**一个字不变**；
+    /// ② 界面显示的那套与导出用的那套是同一套（两边回退规则必须一致）。
+    #[test]
+    fn gcode_slots_resolve_by_active_with_fallback_to_first() {
+        let mut cfg = minimal_cfg();
+        cfg.toolhead.custom_mount_gcode = "SLOT1".into();
+        cfg.toolhead.custom_mount_gcode_2 = "SLOT2".into();
+        cfg.toolhead.custom_mount_gcode_3 = String::new(); // 空 = 这套还没填
+        cfg.toolhead.custom_unmount_gcode = "U1".into();
+        cfg.toolhead.custom_unmount_gcode_2 = "U2".into();
+
+        let cases: &[(&str, &[&str])] = &[
+            // 旧预设：active 是空串 ⇒ 槽 1
+            ("", &["SLOT1", "U1"]),
+            // 正常切换
+            ("2", &["SLOT2", "U2"]),
+            // 指向空槽 ⇒ 回退槽 1（发一段空指令会让打印机在取笔位一动不动）
+            ("3", &["SLOT1", "U1"]),
+            // 越界 / 怪值 ⇒ 回退槽 1
+            ("9", &["SLOT1", "U1"]),
+            ("abc", &["SLOT1", "U1"]),
+        ];
+        for (active, want) in cases {
+            cfg.toolhead.mount_gcode_active = (*active).to_string();
+            cfg.toolhead.unmount_gcode_active = (*active).to_string();
+            let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+            assert_eq!(
+                ir.toolhead.custom_mount_gcode,
+                vec![want[0]],
+                "active={active:?} 时装笔段选错了"
+            );
+            assert_eq!(
+                ir.toolhead.custom_unmount_gcode,
+                vec![want[1]],
+                "active={active:?} 时收笔段选错了"
+            );
+        }
+
+        // 槽 1 也空（真的什么都没填）⇒ 空指令，与今天一致
+        cfg.toolhead.custom_mount_gcode = String::new();
+        cfg.toolhead.mount_gcode_active = "1".into();
+        let ir = build(&cfg, None, CalibrationExecMode::Fallback).unwrap();
+        assert_eq!(ir.toolhead.custom_mount_gcode, vec![""]);
     }
 
     /// 7.4：splitGcodeLines —— 按 \n 切、去尾 \r、保留空行（尾串产生尾部空元素）。

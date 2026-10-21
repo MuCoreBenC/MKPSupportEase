@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "475f6a0bcd5bc0f9",
+  "revision": "a618f4c1113cf6d3",
   "publishedAt": "2026-10-19T14:12:29Z",
   "brands": [
     {
@@ -1011,6 +1011,138 @@
         "serialization": null
       },
       {
+        "key": "toolhead.custom_mount_gcode_2",
+        "configKey": "CustomMountGcode2",
+        "tomlKey": "custom_mount_gcode_2",
+        "jsonKey": "custom_mount_gcode_2",
+        "label": "装载胶箱 G-code（方案 2）",
+        "desc": "换笔方案 2「稳」：碰挡片段 F3000、到位停 0.2s、段内加速度 S1500",
+        "tomlComment": "装载胶箱 G-code（方案 2 稳）",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.6,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000",
+          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000",
+          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X267 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000",
+          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000",
+          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000",
+          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X185 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.custom_mount_gcode_3",
+        "configKey": "CustomMountGcode3",
+        "tomlKey": "custom_mount_gcode_3",
+        "jsonKey": "custom_mount_gcode_3",
+        "label": "装载胶箱 G-code（方案 3）",
+        "desc": "换笔方案 3「标准」（默认）：碰挡片段 F5000、到位停 0.2s、段内加速度 S2000",
+        "tomlComment": "装载胶箱 G-code（方案 3 标准）",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.7,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000",
+          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000",
+          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X267 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000",
+          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000",
+          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000",
+          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X185 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.mount_gcode_active",
+        "configKey": "MountGcodeActive",
+        "tomlKey": "mount_gcode_active",
+        "jsonKey": "mount_gcode_active",
+        "label": "装载胶箱当前方案",
+        "desc": "导出时实际使用哪一套装载方案（1=现状 2=稳 3=标准）",
+        "tomlComment": "当前生效的装载方案(1=现状 2=稳 3=标准)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "1",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.8,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "1",
+          "A1:FASTV3.3": "1",
+          "A1:STANDARD": "1",
+          "A1_MINI:FAST": "1",
+          "A1_MINI:FASTV3.3": "1",
+          "A1_MINI:STANDARD": "1"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
         "key": "toolhead.custom_unmount_gcode",
         "configKey": "CustomUnmountGcode",
         "tomlKey": "custom_unmount_gcode",
@@ -1053,6 +1185,138 @@
           "P1S:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
           "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
           "X1C:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.custom_unmount_gcode_2",
+        "configKey": "CustomUnmountGcode2",
+        "tomlKey": "custom_unmount_gcode_2",
+        "jsonKey": "custom_unmount_gcode_2",
+        "label": "卸载胶箱 G-code（方案 2）",
+        "desc": "换笔方案 2「稳」：碰挡片段 F3000、到位停 0.2s、段内加速度 S1500",
+        "tomlComment": "卸载胶箱 G-code（方案 2 稳）",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.1,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X271 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:FASTV3.3": "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X273 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:STANDARD": "M106 S[AUTO]\nM204 S1500\nG1 X256 F42000\nG1 X261 F3000\nG1 X271 F3000\nG4 P200\nG1 X256 F3000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST": "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:STANDARD": "M106 S[AUTO]\nM204 S1500\nG1 X168 F30000\nG1 X175 F3000\nG1 X189 F3000\nG4 P200\nG1 X168 F3000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.custom_unmount_gcode_3",
+        "configKey": "CustomUnmountGcode3",
+        "tomlKey": "custom_unmount_gcode_3",
+        "jsonKey": "custom_unmount_gcode_3",
+        "label": "卸载胶箱 G-code（方案 3）",
+        "desc": "换笔方案 3「标准」（默认）：碰挡片段 F5000、到位停 0.2s、段内加速度 S2000",
+        "tomlComment": "卸载胶箱 G-code（方案 3 标准）",
+        "valueType": "string",
+        "uiComponent": "gcode",
+        "defaultValue": "",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.2,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X271 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:FASTV3.3": "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X273 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:STANDARD": "M106 S[AUTO]\nM204 S2000\nG1 X256 F42000\nG1 X261 F5000\nG1 X271 F5000\nG4 P200\nG1 X256 F5000\nM204 S10000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST": "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:STANDARD": "M106 S[AUTO]\nM204 S2000\nG1 X168 F30000\nG1 X175 F5000\nG1 X189 F5000\nG4 P200\nG1 X168 F5000\nM204 S10000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.unmount_gcode_active",
+        "configKey": "UnmountGcodeActive",
+        "tomlKey": "unmount_gcode_active",
+        "jsonKey": "unmount_gcode_active",
+        "label": "卸载胶箱当前方案",
+        "desc": "导出时实际使用哪一套卸载方案（1=现状 2=稳 3=标准）",
+        "tomlComment": "当前生效的卸载方案(1=现状 2=稳 3=标准)",
+        "valueType": "string",
+        "uiComponent": "select",
+        "defaultValue": "1",
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.3,
+          "sectionId": "custom_gcode"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": "1",
+          "A1:FASTV3.3": "1",
+          "A1:STANDARD": "1",
+          "A1_MINI:FAST": "1",
+          "A1_MINI:FASTV3.3": "1",
+          "A1_MINI:STANDARD": "1"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4638,8 +4902,32 @@
                 "paramKey": "toolhead.custom_mount_gcode"
               },
               {
+                "id": "item_4_0_2",
+                "paramKey": "toolhead.custom_mount_gcode_2"
+              },
+              {
+                "id": "item_4_0_3",
+                "paramKey": "toolhead.custom_mount_gcode_3"
+              },
+              {
+                "id": "item_4_0_4",
+                "paramKey": "toolhead.mount_gcode_active"
+              },
+              {
                 "id": "item_4_0_1",
                 "paramKey": "toolhead.custom_unmount_gcode"
+              },
+              {
+                "id": "item_4_0_5",
+                "paramKey": "toolhead.custom_unmount_gcode_2"
+              },
+              {
+                "id": "item_4_0_6",
+                "paramKey": "toolhead.custom_unmount_gcode_3"
+              },
+              {
+                "id": "item_4_0_7",
+                "paramKey": "toolhead.unmount_gcode_active"
               }
             ],
             "component": null,
@@ -4919,8 +5207,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "b8b84188f6a4fdbf24f1d057a8cdb07e04a5209ef2fe7b67d792372471f5a71d",
-      "size": 4336
+      "sha256": "3049e5c6a74a05e8d86fa2ec3271ef307c7a7321b7f76101bd851d4255adab04",
+      "size": 5360
     },
     {
       "kind": "mkp_preset",
@@ -4928,8 +5216,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "e7e8dad3b3f833763ef1a0b5d43941ff7518b3c0fb2cff06dba7aef04c44a6fc",
-      "size": 4334
+      "sha256": "241724837f3010412bef206c5c50e3ae4caab9e689724d6d4600790ca5c6b78d",
+      "size": 5358
     },
     {
       "kind": "mkp_preset",
@@ -4937,8 +5225,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "b4bbb6a416faf029f80b870ca5eb9802fb7362c1a83dde70753111b23c25b5aa",
-      "size": 4341
+      "sha256": "9b1b1dce962803e8643cb89791886b5777cfd856a467b1ffb700d37cede0940f",
+      "size": 5365
     },
     {
       "kind": "mkp_preset",
@@ -4946,8 +5234,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "29052b3583b09e2f35b1950dac7ab2d46ce9672c00c47f3addffe0c97a3272d6",
-      "size": 4343
+      "sha256": "6a03d37086b7599a8eaf6cddc459102218bb6452d90d6b02ecdfc08c5b8e2adc",
+      "size": 5367
     },
     {
       "kind": "mkp_preset",
@@ -4955,8 +5243,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "375c755c3185c6441f619d5f937f55aa5c3363dd9147db0063b4b94045706d1f",
-      "size": 4337
+      "sha256": "192efec0d278b414cc583e71626ab452f99482d169472ab1095a2763ea97187d",
+      "size": 5361
     },
     {
       "kind": "mkp_preset",
@@ -4964,8 +5252,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "9ccd6f2b37fb7fbaabce8f1c03b1b333174bc80d05cab7dedb0afc0181cfac4b",
-      "size": 4344
+      "sha256": "3e0a0ac0be7095fd5218eff43f3ed35c64de7a5919d719f930cbb82169d5c097",
+      "size": 5368
     },
     {
       "kind": "mkp_preset",
@@ -4973,7 +5261,7 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "235f49c7826c914140d1a2919bf26f006ef69466e946ddaa651f526b2aa29be1",
+      "sha256": "cb739ae8ef4b5c0a4342d28dc6fe035fbf4f20cd2da7bce7702e3eadca4b4885",
       "size": 4475
     },
     {
@@ -4982,7 +5270,7 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "0ae1234730406af9257f660bc1faad29e2b8ef9ecd3a9f1b6efbf71509c737fa",
+      "sha256": "5379fae938a8265e4229eb41943ee885ad69889d625f15b6ff3e49360085186a",
       "size": 4479
     },
     {
@@ -4991,7 +5279,7 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "500db1d57d5e2079c458f2aec2e0dcd75258c174da6cc4c41f90bfa794683935",
+      "sha256": "7a0cd05f4fd73b80339408584c763ad06785ea4b31e59122aaadde3105db4c7f",
       "size": 4475
     },
     {

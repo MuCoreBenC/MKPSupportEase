@@ -1,4 +1,4 @@
-# release_time: 2026-10-20 15:29:04
+# release_time: 2026-10-21 06:49:47
 # machine: A1
 # variant: fast
 
@@ -16,6 +16,36 @@ G1 X267 F10000
 G1 X256 F42000
 G1 F42000
 """
+# 装载胶箱 G-code（方案 2 稳）
+custom_mount_gcode_2 = """
+G92 E0
+G1 E-5 F1800
+G92 E0
+L801
+M204 S1500
+G1 X256 F42000
+G1 X261 F3000
+G1 X267 F3000
+G4 P200
+G1 X256 F3000
+M204 S10000
+G1 F42000
+"""
+# 装载胶箱 G-code（方案 3 标准）
+custom_mount_gcode_3 = """
+G92 E0
+G1 E-5 F1800
+G92 E0
+L801
+M204 S2000
+G1 X256 F42000
+G1 X261 F5000
+G1 X267 F5000
+G4 P200
+G1 X256 F5000
+M204 S10000
+G1 F42000
+"""
 # 自定义工具头收起 G-code
 custom_unmount_gcode = """
 M106 S[AUTO]
@@ -30,14 +60,50 @@ G1 E5.5 F1000
 G92 E0
 G1 F30000
 """
+# 卸载胶箱 G-code（方案 2 稳）
+custom_unmount_gcode_2 = """
+M106 S[AUTO]
+M204 S1500
+G1 X256 F42000
+G1 X261 F3000
+G1 X271 F3000
+G4 P200
+G1 X256 F3000
+M204 S10000
+G1 F42000
+L802
+G92 E0
+G1 E5.5 F1000
+G92 E0
+G1 F30000
+"""
+# 卸载胶箱 G-code（方案 3 标准）
+custom_unmount_gcode_3 = """
+M106 S[AUTO]
+M204 S2000
+G1 X256 F42000
+G1 X261 F5000
+G1 X271 F5000
+G4 P200
+G1 X256 F5000
+M204 S10000
+G1 F42000
+L802
+G92 E0
+G1 E5.5 F1000
+G92 E0
+G1 F30000
+"""
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_retract = 0 # 回抽长度(mm)
+mount_gcode_active = "1" # 当前生效的装载方案(1=现状 2=稳 3=标准)
 offset_x = -0.7 # 笔尖偏移
 offset_y = 26.3 # 笔尖偏移
 offset_z = 4 # 笔尖偏移
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
+unmount_gcode_active = "1" # 当前生效的卸载方案(1=现状 2=稳 3=标准)
 
 [wiping]
 disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)
@@ -62,7 +128,6 @@ glue_z_compensation_patch_fl = 0 # 涂胶面前左角Z补偿 范围:-0.1~0.1
 glue_z_compensation_patch_fr = 0 # 涂胶面前右角Z补偿 范围:-0.1~0.1
 glue_z_lift_height = 5 # 涂胶Z抬升高度(mm) 范围:5~10
 glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
-swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 have_wiping_components = "tower" # 使用擦嘴塔而非擦嘴组件
 ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
 ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
@@ -82,6 +147,7 @@ rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
 support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2

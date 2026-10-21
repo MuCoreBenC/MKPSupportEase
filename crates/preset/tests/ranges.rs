@@ -43,12 +43,16 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
     "machineVariants",
     "machineMinVariants",
     "machineMaxVariants",
+    // 2026-10-21：换笔多套方案（槽位挂回所属卡片 + 选择器藏在背后）
+    "slotOf",
+    "slotLabel",
+    "hidden",
 ];
 
 /// 注册表里出现过、但 `ParamEntry` 不认识的键 → 出现次数。
 /// **快照**：今天是这 5 个。多出新键说明云端加了东西，得有人看一眼是不是该读。
 const UNKNOWN_SNAPSHOT: &[(&str, usize)] = &[
-    ("jsonKey", 74),
+    ("jsonKey", 80),
     ("mergeGroup", 5),
     ("parentKey", 43),
     ("serialization", 1),
