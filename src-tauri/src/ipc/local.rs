@@ -573,8 +573,22 @@ fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<Miss
 ///
 /// 只认值，不认注释 / 空行 / 键序（与 `diff_param_values` 同一条判据）——
 /// 界面上"改了 3 项"说的就是这三项，点开能看见 `旧 → 新`。
-fn changed_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<ChangedParamDto> {
-    let Ok(Some(origin)) = crate::runtime::baseline::read_origin_copy(root, path) else {
+fn changed_params_of(
+    root: &std::path::Path,
+    user: &std::path::Path,
+    path: &str,
+    text: &str,
+) -> Vec<ChangedParamDto> {
+    /*
+     * 基准 = **最初那份**（`baseline-local/`）；没有镜像的老文件退回**盘上那份**
+     * （= 上次保存的版本）—— 否则"与最初那份对比"永远是空的，
+     * 而用户恰恰要靠它看"我到底改了哪几项"（2026-10-21 作者截图里那条没出现）。
+     */
+    let origin = crate::runtime::baseline::read_origin_copy(root, path)
+        .ok()
+        .flatten()
+        .or_else(|| crate::runtime::local::read_preset_text(user, path).ok());
+    let Some(origin) = origin else {
         return Vec::new();
     };
     let Ok(catalog) = crate::runtime::load_released_catalog(root) else {
@@ -628,10 +642,11 @@ pub async fn check_preset_text(
 ) -> Result<PresetTextCheckDto, AppError> {
     traced("checkPresetText", |_| {
         let root = internal_root(&app)?;
+        let user = crate::fsx::paths::user_root(&app)?;
         Ok(PresetTextCheckDto {
             problem: crate::presetdata::patch::toml_problem(&text),
             missing: missing_params_of(&root, &path, &text),
-            changed: changed_params_of(&root, &path, &text),
+            changed: changed_params_of(&root, &user, &path, &text),
         })
     })
 }
@@ -667,7 +682,7 @@ pub async fn begin_text_edit(
                     .unwrap_or(true);
                 let problem = crate::presetdata::patch::toml_problem(&draft.text);
                 let missing = missing_params_of(&root, &draft.path, &draft.text);
-                let changed = changed_params_of(&root, &draft.path, &draft.text);
+                let changed = changed_params_of(&root, &user_root, &draft.path, &draft.text);
                 return Ok(PresetTextDraftDto {
                     file_name: draft.file_name,
                     path: draft.path,
@@ -688,7 +703,7 @@ pub async fn begin_text_edit(
         super::notify_app_state(&app);
         let problem = crate::presetdata::patch::toml_problem(&draft.text);
         let missing = missing_params_of(&root, &draft.path, &draft.text);
-        let changed = changed_params_of(&root, &draft.path, &draft.text);
+        let changed = changed_params_of(&root, &user_root, &draft.path, &draft.text);
         Ok(PresetTextDraftDto {
             file_name: draft.file_name,
             path: draft.path,

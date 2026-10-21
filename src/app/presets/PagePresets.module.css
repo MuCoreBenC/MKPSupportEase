@@ -723,6 +723,21 @@
   color: var(--text-3);
 }
 
+/* 「默认值」对比框里那张账单：现在 → 默认（长了自己滚） */
+.restoreList {
+  max-height: 240px;
+  margin: 8px 0 0;
+  padding-left: 18px;
+  overflow: auto;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.8;
+}
+
+.restoreList s {
+  color: var(--text-3);
+}
+
 .editArea,
 .editPaint {
   margin: 0;

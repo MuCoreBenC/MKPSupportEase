@@ -719,6 +719,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const [editMode, setEditMode] = useState(false)
   /**
+   * 点「默认值」时**先比一遍**再把"会变回什么"摆出来（2026-10-21 作者：
+   * 「我点了之后，它就是对比，我觉得没问题，然后才点确认恢复」）。
+   * `null` = 没在问。
+   */
+  const [restoreAsk, setRestoreAsk] = useState<{
+    changed: PresetTextChanged[]
+    missing: PresetTextMissing[]
+  } | null>(null)
+  /**
    * **撤销 / 重做**（本地文本快照栈）。粒度 = 一次「打字停顿」（就是草稿落盘那一拍，
    * 700ms）——不按每击键分格：撤销回退的是"一段字"，不是一个个字母。
    * 与参数对比台的本地栈同一个路数（那边编辑的是一份、这里一份正文）。
@@ -1957,6 +1966,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         },
         (e: unknown) => setNote({ text: `退回没成：${errorText(e)}`, bad: true }),
       )
+  }
+
+  /**
+   * **确认恢复**（对比框里那颗）—— 换回最初那份，并把两条提示一起收掉。
+   * 算一次改动：按「撤销」能整个退回来（与以前那颗按钮同一条口径）。
+   */
+  const doRestore = () => {
+    if (originText === null) return
+    setEditing((cur) =>
+      cur === null
+        ? cur
+        : {
+            ...cur,
+            text: originText,
+            problem: null,
+            missing: [],
+            changed: [],
+          },
+    )
+    setRestoreAsk(null)
+    setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
   }
 
   /**
@@ -3588,10 +3618,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             footer={
               editing !== null && (
                 <div className={s.editorFoot}>
-                  {/* 与最初那份的差异：**没出问题也摆**（作者：「没出问题的时候也可以和默认值对比」） */}
-                  {editing.changed.length > 0 && (
-                    <details className={s.editDiff}>
-                      <summary>与最初那份比：{editing.changed.length} 项不同</summary>
+                  {/* 与最初那份的差异：**常态显示**（作者：「没出问题的时候也应该有这个对比」） */}
+                  <details className={s.editDiff}>
+                    <summary>
+                      {editing.changed.length > 0
+                        ? `与最初那份比：${editing.changed.length} 项不同`
+                        : '与最初那份一致'}
+                    </summary>
+                    {editing.changed.length > 0 && (
                       <ul>
                         {editing.changed.map((c) => (
                           <li key={c.key}>
@@ -3599,46 +3633,38 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           </li>
                         ))}
                       </ul>
-                    </details>
-                  )}
+                    )}
+                  </details>
                   <p className={s.editHint}>
                     文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · {WRAP_KEY} 切换自动换行
                   </p>
                   {/*
-                   * **恢复默认值**（2026-10-16 作者：「就是左侧那个修改参数里面有按钮是恢复
-                   * 默认值，那这个也可以有个按钮编辑文件的恢复默认值」）——与参数弹窗那颗
-                   * **同一个位置**（底栏左下）、同一个词。退的是这份文件**最初落到盘上时**
-                   * 那一份（`originText`，来自 `baseline-local/` 的原文镜像）。
-                   * 算**一次改动**：按「撤销」能整个退回来；要落地还得按「保存」。
+                   * **「默认值」**（2026-10-21 作者：「不要用恢复默认值，而它就是用一个默认值的
+                   * 按钮。我点了之后，它就是对比，我觉得没问题，然后才点确认恢复」）：
+                   * 幽灵按钮（与改名框那颗「恢复默认名」同一套），点了**先摆差异**，
+                   * 确认后才换正文 —— 恢复是一次改动，按「撤销」仍能退回来。
                    */}
                   {editMode && (
                     <button
                       type="button"
-                      className={`${s.textBtn} ${s.editorRestore}`}
+                      className={`${s.renameReset} ${s.editorRestore}`}
                       disabled={originText === null}
                       title={
                         originText === null
-                          ? '这份还没有原始备份 —— 退回不了最初那份'
-                          : '把正文退回它最初落到你盘上时的那一份 —— 算一次改动，按「撤销」能整个退回来'
+                          ? '这份还没有原始备份 —— 退不回默认值'
+                          : '先看与默认值差在哪，确认了再恢复'
                       }
                       onClick={() => {
-                        if (originText === null) return
-                        /* 换回合法正文 ⇒ 顶上那条"有语法错"跟着收掉（`problem: null`） */
-                        setEditing((cur) =>
-                          cur === null
-                            ? cur
-                            : {
-                                ...cur,
-                                text: originText,
-                                problem: null,
-                                missing: [],
-                                changed: [],
-                              },
+                        if (originText === null || editing === null) return
+                        void api.checkPresetText(editing.path, editing.text).then(
+                          (res) =>
+                            setRestoreAsk({ changed: res.changed, missing: res.missing }),
+                          (e: unknown) =>
+                            setNote({ text: `没法比对：${errorText(e)}`, bad: true }),
                         )
-                        setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
                       }}
                     >
-                      恢复默认值
+                      默认值
                     </button>
                   )}
                   {editing.draftError !== null && (
@@ -3880,6 +3906,64 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  */}
 
               </div>
+            )}
+          </Modal>
+
+          {/*
+           * **「默认值」的对比框**（2026-10-21）：点了按钮先摆差异，确认才换正文。
+           * 方向与底栏那条相反 —— 这里说的是"恢复后**会变回**什么"，所以是 `现在 → 默认`。
+           */}
+          <Modal
+            open={restoreAsk !== null}
+            size="sm"
+            host={pageEl}
+            title="恢复默认值"
+            subtitle={editing === null ? undefined : editing.fileName}
+            onClose={() => setRestoreAsk(null)}
+            footer={
+              <>
+                <button
+                  type="button"
+                  className={s.editGhost}
+                  onClick={() => setRestoreAsk(null)}
+                >
+                  取消
+                </button>
+                <button type="button" className={s.editDanger} onClick={doRestore}>
+                  确认恢复
+                </button>
+              </>
+            }
+          >
+            {restoreAsk !== null && (
+              <>
+                {restoreAsk.changed.length === 0 && restoreAsk.missing.length === 0 ? (
+                  <p className={s.editNote}>现在的正文与默认值一致，不需要恢复。</p>
+                ) : (
+                  <>
+                    {restoreAsk.changed.length > 0 && (
+                      <>
+                        <p className={s.editNote}>
+                          恢复后这 {restoreAsk.changed.length} 项会变回默认值：
+                        </p>
+                        <ul className={s.restoreList}>
+                          {restoreAsk.changed.map((c) => (
+                            <li key={c.key}>
+                              {c.label}：<s>{c.to}</s> → <b>{c.from}</b>
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                    {restoreAsk.missing.length > 0 && (
+                      <p className={s.editNote}>
+                        另外这 {restoreAsk.missing.length} 项现在读不出来，恢复后会一起补回来：
+                        {restoreAsk.missing.map((m) => m.label).join('、')}
+                      </p>
+                    )}
+                  </>
+                )}
+              </>
             )}
           </Modal>
 
