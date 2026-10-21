@@ -196,7 +196,7 @@ fn kr1_all_presets_still_load_after_switching_the_source_of_truth() {
     let fixtures = targets.len();
 
     /*
-     * 2026-10-02：原来这里还会把 `~/Documents/MKPSupportSSR/presets/mkp` 下那 5 份
+     * 2026-10-02：原来这里还会把数据根下 `presets/mkp` 那 5 份
      * **真实用户预设**也一起 load_ir。已删除 —— 那些是**旧格式**（`offset = { x, y, z }`
      * 内联表），而内联表已拆成 `offset_x/y/z`；程序刻意不兼容旧文件（新项目、无存量用户、
      * 不引兼容层），把它们扫进来只会让判据在"新程序读不了旧文件"上变红。

@@ -5,7 +5,7 @@
 //! `postprocess::ir` 那份（内核已有，且被 A 档字节判据守着）。
 //!
 //! 为什么这条链必须存在：用户手上的预设长这样
-//! （`/Users/wzy/Documents/MKPSupportSSR/presets/mkp/A1MF.toml`）
+//! （形如 `<数据根>/presets/mkp/A1MF.toml`）
 //!
 //! ```text
 //! # machine: A1_MINI

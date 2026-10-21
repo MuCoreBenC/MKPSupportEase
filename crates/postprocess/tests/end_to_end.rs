@@ -7,7 +7,7 @@
 //! ## 参考物怎么来的（可复现，不是手搓）
 //!
 //! 参考输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668687 字节）由来源仓库
-//! 自己的 CLI 生成，命令原样记录如下（在 `/Users/wzy/projects/mkp-rust/来源实现` 下执行）：
+//! 自己的 CLI 生成，当时的生成命令记录如下：
 //!
 //! ```text
 //! cargo run -q -p mkp-cli --bin 来源实现 -- \
