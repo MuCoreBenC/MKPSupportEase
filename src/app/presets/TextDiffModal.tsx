@@ -19,7 +19,7 @@
  * 摘要进标题右边那一格（`HeadNote`）。
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import { HeadNote, Modal } from '../../components/modal'
 /* 底栏按钮**直接用编辑文件那一套类**：两边高度必须是同一个数（见 `.footLeft` 那段注释） */
@@ -73,7 +73,60 @@ export default function TextDiffModal({
   const total = sum.changed + sum.added + sum.removed
   const [layout, setLayout] = useState<'split' | 'unified'>('split')
   const [editingLine, setEditingLine] = useState<number | null>(null)
-  const [draft, setDraft] = useState('')
+
+  const editable = shell.active
+
+  /*
+   * 就地改一行：**用 contentEditable 的 span，不用 `<input>`**（2026-10-21 第三版）。
+   *
+   * 前两版都栽在同一件事上 —— 作者：「我点击了之后，我的文字是不是有上下一点点几个像素的移动」
+   * 「我右侧的绿色背景，你不要把它搞丢」：
+   *   · `<input>` 是替换元素：字体 / 行高 / 基线都是它自己那套，即便尺寸算对了，
+   *     字仍然比旁边的 `<span>` 偏上或偏下一两像素；白色输入底还会把这一行的红/绿底盖掉。
+   *   · contentEditable 的 span **就是那一行本身** —— 同一套 class、同一个行盒、
+   *     同一个 `line-height`，字的落点一个像素都不动，行的底色（红/绿/黄）原样透出来。
+   *
+   * 所以这里只管"把字放进去、让它可编辑、结束时把内容交出去"，
+   * 颜色 / 内衬 / 字号全部交给 `.code` 那一层，不再另写一套排版。
+   */
+  const draftRef = useRef('')
+  const editRef = useRef<HTMLSpanElement | null>(null)
+
+  const beginEdit = (lineNo: number, text: string) => {
+    if (!editable) return
+    draftRef.current = text
+    setEditingLine(lineNo)
+  }
+
+  /* 挂上即用：填字、聚焦、光标落到末尾。**不走 state** —— 每敲一个字重渲染会跳光标 */
+  const attachEditor = useCallback((el: HTMLSpanElement | null) => {
+    editRef.current = el
+    if (el === null) return
+    el.textContent = draftRef.current
+    el.focus()
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    range.collapse(false)
+    const sel = window.getSelection()
+    if (sel !== null) {
+      sel.removeAllRanges()
+      sel.addRange(range)
+    }
+  }, [])
+
+  const commitLine = () => {
+    const el = editRef.current
+    if (editingLine === null || el === null) return
+    const next = el.textContent ?? ''
+    editRef.current = null
+    setEditingLine(null)
+    if (next !== draftRef.current) onEditLine(editingLine, next)
+  }
+
+  const cancelLine = () => {
+    editRef.current = null
+    setEditingLine(null)
+  }
 
   const note =
     total === 0
@@ -82,39 +135,34 @@ export default function TextDiffModal({
         (sum.added > 0 ? `，多了 ${sum.added} 行` : '') +
         (sum.removed > 0 ? `，少了 ${sum.removed} 行` : '')
 
-  const editable = shell.active
-  const beginEdit = (lineNo: number, text: string) => {
-    if (!editable) return
-    setEditingLine(lineNo)
-    setDraft(text)
-  }
-  const commitEdit = () => {
-    if (editingLine === null) return
-    onEditLine(editingLine, draft)
-    setEditingLine(null)
-  }
-
-  const editor = (
-    <input
-      className={s.lineInput}
-      value={draft}
-      autoFocus
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commitEdit}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter') commitEdit()
-        else if (e.key === 'Escape') setEditingLine(null)
-      }}
-    />
-  )
-
   /** 一行的右侧格子：编辑态才能点开改；只读态就是一个 `<span>` */
   const rightCell = (lineNo: number | null, text: string | null, cls: string) => {
     if (editingLine !== null && lineNo === editingLine) {
       return (
-        <span className={cls} role="cell">
-          {editor}
-        </span>
+        <span
+          className={`${cls} ${s.lineEdit}`}
+          role="cell"
+          ref={attachEditor}
+          contentEditable
+          suppressContentEditableWarning
+          spellCheck={false}
+          onBlur={commitLine}
+          onPaste={(e) => e.preventDefault()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitLine()
+            } else if (e.key === 'Escape') {
+              /*
+               * 这一层先吃 Esc：退出"改这一行"，而不是把整个对比屏关掉
+               * （`stopPropagation` 挡住冒泡到 document 的那个 Modal 监听）。
+               */
+              e.preventDefault()
+              e.stopPropagation()
+              cancelLine()
+            }
+          }}
+        />
       )
     }
     return (

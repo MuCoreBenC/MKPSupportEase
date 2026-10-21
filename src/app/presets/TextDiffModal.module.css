@@ -157,30 +157,26 @@
 }
 
 /*
- * 就地编辑那一行：输入框铺满那一格。
+ * 就地编辑那一行（**contentEditable 的 `<span>`，不是 `<input>`**）。
  *
- * ★ 2026-10-21 作者：「我点一下，感觉每一行的高度会变化，有一点点微小的几个像素的变化」。
- *   原因不是高度写错，是 `<input>` 默认是 **inline-block**：它坐在行盒里要留基线以下那段
- *   空隙（descender），于是这一行的盒高比旁边的 `<span>` 多两三像素，点进去整行就"跳"一下。
- *   ⇒ `display: block` + `vertical-align: top` + `box-sizing: border-box`，高度与 `.code`
- *   的 `line-height` 算出来的是同一个数；`outline-offset: -2px` 让那圈描边**画在盒内**，
- *   不再压到上下邻居身上（压上去看着也像行变高了）。
+ * ★★ 2026-10-21 作者两轮连着说：
+ *   「我点击了之后，我的文字是不是有上下一点点几个像素的移动」
+ *   「我右侧的绿色背景，你不要把它搞丢」。
+ *
+ *   `<input>` 是替换元素 —— 字在它自己那套行盒里排，怎么算都会跟旁边的 `<span>` 差一两像素；
+ *   而且它的白底会把这一行的红/绿/黄底整块盖掉。
+ *   换成 contentEditable 的 span 之后，它**就是原来那一行**：同一个 class、同一个行盒、
+ *   同一个 `line-height`、同一个内衬 —— 字不动，底色也不动。
+ *
+ *   所以这一条**只管描边**：字号 / 内衬 / 行高 / 底色全都不许在这里改
+ *   （改任何一条，这一行就会和邻居不一样高）。
  */
-.lineInput {
-  display: block;
-  box-sizing: border-box;
-  width: 100%;
-  height: 1.55em;
-  margin: 0;
-  padding: 0;
-  border: 0;
+.lineEdit {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
-  background: var(--surface-solid);
-  font: inherit;
-  line-height: inherit;
-  vertical-align: top;
-  color: var(--text-1);
+  /* 背景不填：这一行的红 / 绿 / 黄底要透出来 */
+  background: transparent;
+  cursor: text;
 }
 
 /*
