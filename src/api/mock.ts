@@ -1735,8 +1735,9 @@ export const mockApi: MkpApi = {
         ...mockTextDraft,
         reused: true,
         dirty: raw === undefined ? true : raw !== mockTextDraft.text,
-        /* 浏览器里没有 TOML 解析器 ⇒ problem 恒 null（真机由 Rust 校） */
+        /* 浏览器里没有 TOML 解析器 ⇒ problem / missing 恒空（真机由 Rust 校） */
         problem: null,
+        missing: [],
       }
     }
     const raw = mockLocalText.get(path)
@@ -1748,8 +1749,8 @@ export const mockApi: MkpApi = {
     }
     /* 编辑器里这份**带着它自己的血统三行**（在这一份上有效，保存时照写回） */
     mockTextDraft = { fileName, path, text: raw, updatedUnix: nowSec() }
-    /* 新建的草稿 = 盘上字节本身，不脏；浏览器里没有 TOML 解析器 ⇒ problem 恒 null */
-    return { ...mockTextDraft, reused: false, dirty: false, problem: null }
+    /* 新建的草稿 = 盘上字节本身，不脏；浏览器里没有 TOML 解析器 ⇒ problem / missing 恒空 */
+    return { ...mockTextDraft, reused: false, dirty: false, problem: null, missing: [] }
   },
 
   async putTextDraft(text) {

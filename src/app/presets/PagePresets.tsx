@@ -283,6 +283,16 @@ const REVEAL_LABEL =
   detectPlatform() === 'windows' ? '显示所在文件夹' : '在访达中显示'
 
 /**
+ * **「切换自动换行」那个键怎么写**（2026-10-21 作者：「Windows 下就用 ALT 啊，
+ * macOS 它会有自己的字体，就可以用呀」）。
+ *
+ * `⌥` 这个字形 Windows 的界面字体里没有，会掉成 `~` —— 作者两轮截图里那句
+ * "~z 切换自动换行" 就是它，看着像个错字。那就按平台给各自的键名：Windows 写
+ * `Alt+Z`（键帽上印的就是这个），macOS 仍是 `⌥Z`（那边字体有这一格，也是苹果的印法）。
+ */
+const WRAP_KEY = detectPlatform() === 'windows' ? 'Alt+Z' : '⌥Z'
+
+/**
  * 着色 token → 类名。**一处映射**：词法在 `tomlPaint.ts`、颜色在这一页的 CSS，
  * 中间就这一张表（加一种 token 只动这三个地方）。
  */
@@ -399,6 +409,24 @@ function keepHead(cur: string, next: string): string {
   const first = before.body.split('\n')[0]
   const at = first === '' ? -1 : next.indexOf(first)
   return before.head + (at >= 0 ? next.slice(at) : splitHeader(next).body)
+}
+
+/**
+ * 第 `lines` 行（从 0 数）在文本里的**起始字符下标**；超出末尾就给 `text.length`。
+ *
+ * 「进编辑模式时光标落在眼下这一屏的第一行」用它（见 `editAreaOpen` 那个 effect）：
+ * 滚动位置是**像素**、caret 是**字符下标**，中间得靠行号换算一次。
+ * 软折行视图里一个逻辑行占好几屏行 —— 换算会偏，但那只影响 caret 落点（视图位置
+ * 不靠它，靠 `scrollTop` 原样搬），偏一点也就是光标在附近。
+ */
+function offsetOfLine(text: string, lines: number): number {
+  let at = 0
+  for (let i = 0; i < lines; i += 1) {
+    const nl = text.indexOf('\n', at)
+    if (nl === -1) return text.length
+    at = nl + 1
+  }
+  return at
 }
 
 export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
@@ -628,6 +656,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 而不是等切片器拉起钩子才收到一句"预设解析失败"。文案指路「恢复默认值」。
      */
     problem: string | null
+    /**
+     * **相对最初那份少了哪些参数**（2026-10-21）：`key（中文名）`。
+     *
+     * 与 `problem` 是两件事：语法合法、但某一项被粘进了行尾注释（真机那次
+     * `z_calibration_mode` 就是这样）—— 切片时静默退回默认值，不提示就没人发现。
+     */
+    missing: string[]
   } | null>(null)
   /**
    * **编辑模式**（2026-10-16，作者：「点进去之后，它一开始只是显示……点了之后才出现」）：
@@ -899,38 +934,61 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * ★ 跟着**当前文本**算，不记"打开时那一份的头"：`恢复默认值` 会把正文整份换成最初那份
    *   （头可能不一样），锁要跟着换过去。
    */
+  /*
+   * **只读态读到哪**（`top` / `left`，像素）—— 点「进入编辑模式」那一刻从下面那层
+   * `<pre>` 上抄下来，编辑态开场照它摆回去（见下面那个 effect）。
+   * 只读态与编辑态是**两个不同的滚动元素**，光靠 CSS 接不过来。
+   */
+  const readScrollRef = useRef({ top: 0, left: 0 })
+
   const headLen = useMemo(
     () => (editing === null ? 0 : splitHeader(editing.text).head.length),
     [editing],
   )
 
   /*
-   * **进编辑模式那一下，光标落在正文开头**（2026-10-21 作者：「我编辑它的这个前端看着
-   * 没有任何反应……我只看到我的输入的光标在动，但是那些文字内容完全没动」）。
+   * **进编辑模式那一下**（2026-10-21 两轮）。
    *
-   * 根因：`<textarea autoFocus>` 把 caret 放在索引 0，而索引 0 正落在**锁住的文件头**里
-   * （`splitHeader` 把开头那连续几行注释整段算头，几百个字符）。于是进了编辑模式以后
-   * 第一下打字 / Backspace 全被 `headLockedAt` 挡掉 —— 屏幕上只剩一个在闪的光标，
-   * 字一个不出来，看着就是"编辑器坏了"。
-   * 头是程序写的、用户永远不该在这儿改，那 cursor 就不该停在那儿：直接放到正文第一行，
-   * 并把这一段滚进视野（头长的时候正文本来还在视野外）。
+   * 第一轮（「我只看到我的输入的光标在动，但是那些文字内容完全没动」）：
+   * `<textarea autoFocus>` 把 caret 钉在索引 0，而索引 0 正落在**锁住的文件头**里
+   * （`splitHeader` 把开头那连续几行注释整段算头，几百个字符）—— 进了编辑模式以后
+   * 第一下打字 / Backspace 全被 `headLockedAt` 挡掉，屏幕上只剩一个在闪的光标。
+   *
+   * 第二轮（「它会帮我滚动到最上面，不是很喜欢」）：第一版把 caret 摆在正文第一行、
+   * 还顺手把头滚出视野 —— 于是**在只读态滚到第 81 行的人，一点进编辑模式就被拉回顶部**。
+   * 现在改成"接着看"：
+   *   · 视图位置由 `readScrollRef` 从只读态那层 `<pre>` 接过来（按钮上记，见 JSX），
+   *     一个字都不动；
+   *   · caret 落在**眼下这一屏的第一行**（且不早于正文起点）—— 视野不动，但直接打字
+   *     就落在眼前，第一轮那个坑也没回来。
    */
   const editAreaOpen = editMode && editing !== null
   useEffect(() => {
     if (!editAreaOpen) return
     const el = areaRef.current
     if (el === null) return
+    const lh = Number.parseFloat(window.getComputedStyle(el).lineHeight)
     const { head } = splitHeader(el.value)
-    const at = head.length
-    el.focus()
+    const { top, left } = readScrollRef.current
+    /* 滚动位置是像素、caret 是字符下标：先按行高折成行号，再折成那一行的起点 */
+    const firstLine = Number.isFinite(lh) && lh > 0 ? Math.floor(top / lh) : 0
+    const at = Math.max(head.length, offsetOfLine(el.value, firstLine))
+    /* `preventScroll`：聚焦本身别把视图拽走（落点由下面那几行摆） */
+    el.focus({ preventScroll: true })
     el.setSelectionRange(at, at)
     /*
-     * caret 设完浏览器不保证跟着滚（头很长时正文还在视野外）—— 按行高自己搬一次。
-     * `scrollTop` 一改就派发 `scroll`，`onScroll` 那条链照旧把着色层与行号带上。
+     * `setSelectionRange` 在 caret 落于视口外时仍会滚一下 —— 摆完再把这四个数字按回去；
+     * 着色层与行号自己搬（不调 `syncScroll`：那会把 effect 的依赖拉进一个每帧新函数）。
      */
-    const lh = Number.parseFloat(window.getComputedStyle(el).lineHeight)
-    const lines = head === '' ? 0 : head.split('\n').length - 1
-    if (Number.isFinite(lh) && lh > 0 && lines > 0) el.scrollTop = lines * lh
+    el.scrollTop = top
+    el.scrollLeft = left
+    const paint = paintRef.current
+    if (paint !== null) {
+      paint.scrollTop = top
+      paint.scrollLeft = left
+    }
+    const nums = numsRef.current
+    if (nums !== null) nums.scrollTop = top
   }, [editAreaOpen])
 
   /**
@@ -1545,13 +1603,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setRedoStack([])
         }
         histJumpRef.current = false
+        /* 新开的那一份从顶上开始看（`readScrollRef` 是上一份 / 上一次的读数，别带过来） */
+        readScrollRef.current = { top: 0, left: 0 }
         setEditing({
           fileName: draft.fileName,
           path: draft.path,
           text: draft.text,
           draftError: null,
-          /* 打开时后端已经校过一遍（`PresetTextDraft.problem`）—— 坏文件当场就得说 */
+          /* 打开时后端已经校过一遍（`PresetTextDraft.problem` / `.missing`）—— 当场就得说 */
           problem: draft.problem,
+          missing: draft.missing,
         })
         /* 「恢复默认值」的原文预读（读到什么算什么；读不到 = 按钮禁用） */
         data.readLocalOriginText(draft.path).then(
@@ -3428,7 +3489,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                         if (originText === null) return
                         /* 换回合法正文 ⇒ 顶上那条"有语法错"跟着收掉（`problem: null`） */
                         setEditing((cur) =>
-                          cur === null ? cur : { ...cur, text: originText, problem: null },
+                          cur === null
+                            ? cur
+                            : { ...cur, text: originText, problem: null, missing: [] },
                         )
                         setNote({ text: '已恢复成最初那份 —— 这一步按「撤销」能退回来', bad: false })
                       }}
@@ -3483,7 +3546,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                         type="button"
                         className={s.primary}
                         title="进编辑模式：正文就可以改了"
-                        onClick={() => setEditMode(true)}
+                        /*
+                         * 进编辑模式**接着看**：把只读态读到哪抄下来（编辑态是另一个滚动
+                         * 元素，CSS 接不过来），见 `editAreaOpen` 那个 effect。
+                         */
+                        onClick={() => {
+                          const paint = paintRef.current
+                          if (paint !== null) {
+                            readScrollRef.current = { top: paint.scrollTop, left: paint.scrollLeft }
+                          }
+                          setEditMode(true)
+                        }}
                       >
                         {EDIT_TEXT.enterMode}
                       </button>
@@ -3516,6 +3589,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     <b>这份文件打开时有语法错</b> —— 切片器在后处理那一步会拒绝它。
                     <code className={s.editProblemWhy}>{editing.problem}</code>
                     自己改回来，或按底栏「恢复默认值」退回它最初那份（落盘时存过一份），再按「保存」。
+                  </div>
+                )}
+                {/* 读得动、但少了参数（2026-10-21）：粘行会让某一项落进行尾注释，TOML 仍合法 */}
+                {editing.missing.length > 0 && (
+                  <div className={s.editProblem} role="alert">
+                    <b>这份文件少了 {editing.missing.length} 项参数</b> ——
+                    切片时会静默退回默认值，导出后你会发现不是你要的那份。
+                    <span className={s.editProblemList}>{editing.missing.join('、')}</span>
+                    多半是被粘进了上一行的注释里或整行不见了：补回来再存，或按底栏「恢复默认值」退回它最初那份。
                   </div>
                 )}
                 {/*
@@ -3652,10 +3734,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  * ★ 词跟着做法走：横向**用「⇧滚轮 / 两指划」**（不是"⇧ 滚轮左右看"那种
                  *   把两件事混成一句），自动换行**用「⌥Z 切换自动换行」**（不写"软折行"——
                  *   那是我们内部的说法，作者问的就是"怎么换行"）。
+                 * ★ 键名按平台写（`WRAP_KEY`）：Windows 上是 `Alt+Z` —— `⌥` 那个字在这边
+                 *   的字体里没有，会掉成 `~`（作者截图里那句 "~z 切换自动换行"）。
                  * ⚠️ 它在 `.editBody` **外面**（面板那块的下一条）—— 进面板就是压在代码上。
                  */}
                 <p className={s.editHint}>
-                  文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · ⌥Z 切换自动换行
+                  文件头几行锁定不可改 · 两指左右划 / ⇧滚轮看长行 · {WRAP_KEY} 切换自动换行
                 </p>
               </div>
             )}

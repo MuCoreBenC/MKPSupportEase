@@ -365,6 +365,13 @@ pub struct PresetTextDraftDto {
     /// 才报"预设解析失败"，而那时离错误已经几分钟、也看不出是哪一行。
     /// 打开编辑器就把它摆出来（含行号），再指路「恢复默认值」（退回最初那份）。
     pub problem: Option<String>,
+    /// **相对最初那份少了哪些参数**（2026-10-21）：`key（中文名）`，按参数页顺序。
+    ///
+    /// 与 `problem` 是两件事：`problem` 说的是"这份 TOML 读不动"，
+    /// 这里说的是"读得动、但某一项不见了" —— 粘行最典型的样子
+    /// （`z_calibration_mode = "new"` 被粘进上一行行尾注释，TOML 仍然合法）。
+    /// 空数组 = 一项都没缺；没有原文镜像时不检查（不编）。
+    pub missing: Vec<String>,
 }
 
 /// 参数草稿的**摘要**（预设列表行上的「未保存」标记用；没有草稿就是 `null`）
@@ -487,6 +494,24 @@ pub async fn patch_preset_draft_batch(
  * [`begin_preset_edit`]），这一条只认**用户线的路径** —— 编辑器只改用户自己的文件。
  */
 
+/// 这份正文相对**它最初那份**少了哪些参数（`key（中文名）`）。
+///
+/// 基线 = `baseline-local/` 的原文镜像（复制 / 下载 / 导入 / 另存 / 第一次被改写之前存过）。
+/// 没有镜像、读不出来、注册表缺失 ⇒ **空**（不检查，不编一个"应该有哪些键"出来）。
+fn missing_params_of(root: &std::path::Path, path: &str, text: &str) -> Vec<String> {
+    let Ok(Some(origin)) = crate::runtime::baseline::read_origin_copy(root, path) else {
+        return Vec::new();
+    };
+    let Ok(catalog) = crate::runtime::load_released_catalog(root) else {
+        return Vec::new();
+    };
+    crate::presetdata::params::missing_param_keys(&origin, text, &catalog.registry.params)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(key, label)| format!("{key}（{label}）"))
+        .collect()
+}
+
 /// **开始改一份用户预设的正文**（预设页「编辑文件」）：把当前字节复制进 AppState 的
 /// `text_draft` 格，**盘上那份一动不动**。已经有同一份（同路径）的草稿就**接着改**。
 ///
@@ -517,6 +542,7 @@ pub async fn begin_text_edit(
                     .map(|raw| raw != draft.text)
                     .unwrap_or(true);
                 let problem = crate::presetdata::patch::toml_problem(&draft.text);
+                let missing = missing_params_of(&root, &draft.path, &draft.text);
                 return Ok(PresetTextDraftDto {
                     file_name: draft.file_name,
                     path: draft.path,
@@ -525,6 +551,7 @@ pub async fn begin_text_edit(
                     reused: true,
                     dirty,
                     problem,
+                    missing,
                 });
             }
         }
@@ -534,6 +561,7 @@ pub async fn begin_text_edit(
         let draft = runtime::app_state::set_text_draft(&root, &file_name, &path, &raw)?;
         super::notify_app_state(&app);
         let problem = crate::presetdata::patch::toml_problem(&draft.text);
+        let missing = missing_params_of(&root, &draft.path, &draft.text);
         Ok(PresetTextDraftDto {
             file_name: draft.file_name,
             path: draft.path,
@@ -543,6 +571,7 @@ pub async fn begin_text_edit(
             /* 新建的草稿 = 盘上字节本身，不脏 */
             dirty: false,
             problem,
+            missing,
         })
     })
 }
@@ -578,6 +607,23 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
          * 坏在这一步、并且带上行号，文件一个字节都不动。
          */
         crate::presetdata::patch::ensure_toml_parses(&draft.text)?;
+        /*
+         * **语法合法 ≠ 参数还在**（2026-10-21 作者截图：`z_calibration_mode` 被粘进
+         * `xy_calibration_mode` 的行尾注释）。那种正文 TOML 读得动，这一项却从参数表里
+         * 消失了 —— 切片时静默退回默认值，用户完全无感。
+         * 与语法闸同一层：**不许静默丢参数**。
+         */
+        let lost = missing_params_of(&root, &draft.path, &draft.text);
+        if !lost.is_empty() {
+            return Err(AppError::invalid_argument(format!(
+                "这份正文比最初那份少了 {} 项参数，没有保存",
+                lost.len()
+            ))
+            .with_detail(format!(
+                "缺的是：{} —— 它们被注释掉了或整行不见了（切片时会静默退回默认值）。补回来再存，或按底栏「恢复默认值」退回最初那份。",
+                lost.join("、")
+            )));
+        }
         /* ★ 原文镜像：编辑器保存**写盘之前**存 —— 此刻盘上还是原文
         （保存之后就再也见不到它了）。新文件那一路在落盘时就存过，这里是幂等的空转 */
         let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &draft.path);

@@ -1079,6 +1079,15 @@ export interface PresetTextDraft {
    * 文案指路：底栏「恢复默认值」退回最初那份（`baseline-local` 的原文镜像）。
    */
   problem: string | null
+  /**
+   * **相对最初那份少了哪些参数**（2026-10-21）：`key（中文名）`，按参数页顺序。
+   *
+   * 与 `problem` 是两件事：那个说"TOML 读不动"，这个说"读得动、但某一项不见了" ——
+   * 粘行最典型的样子（`z_calibration_mode = "new"` 被粘进上一行行尾注释，
+   * TOML 仍然合法，切片时那一项静默退回默认值）。空数组 = 一项都没缺；
+   * 没有原文镜像时不检查（不编）。
+   */
+  missing: string[]
 }
 
 /*

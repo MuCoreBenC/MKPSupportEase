@@ -1320,3 +1320,12 @@
   font-size: calc(var(--fs-label) * 0.95);
   overflow-wrap: anywhere;
 }
+
+/* 少了哪几项（`key（中文名）` 一串）：等宽、可折行，看得出是哪几格 */
+.editProblemList {
+  margin: 0 2px;
+  color: var(--danger);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.95);
+  overflow-wrap: anywhere;
+}

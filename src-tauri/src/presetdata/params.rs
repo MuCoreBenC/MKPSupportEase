@@ -77,6 +77,30 @@ pub fn diff_param_values(
         .collect())
 }
 
+/// **相对基线少了哪些参数**（2026-10-21，作者：「我改成了这样子，它都没有提示我」）。
+///
+/// `want` = 基线（通常是 `baseline-local/` 的原文镜像），`got` = 现在这份正文。
+/// 判据是**参数值表**，不是字节 —— 所以"被粘进上一行注释里""整行删掉"都算丢。
+///
+/// 真机踩过：`z_calibration_mode = "new"` 被粘到 `xy_calibration_mode` 的行尾注释后面，
+/// TOML **仍然合法**、语法闸一声不吭，但这一项从参数表里消失了 ——
+/// 切片时会静默退回默认值，用户完全无感。
+///
+/// 返回 `(key, label)`，按 `defs` 的顺序（就是界面上参数页的顺序）。
+pub fn missing_param_keys(
+    want: &str,
+    got: &str,
+    defs: &[ParamDef],
+) -> Result<Vec<(String, String)>, AppError> {
+    let base = read_param_values(want, defs)?;
+    let now = read_param_values(got, defs)?;
+    Ok(defs
+        .iter()
+        .filter(|d| base.contains_key(&d.key) && !now.contains_key(&d.key))
+        .map(|d| (d.key.clone(), d.label.clone()))
+        .collect())
+}
+
 /// 一批改动**一次算完**：逐项结构保真地改，**任何一项失败就整批不落地**
 /// （返回 `Err`，调用方手里的旧正文还是好的）。
 pub fn apply_param_edits(
@@ -227,6 +251,33 @@ mode = \"tower\"
             "值没动（只换了注释）就不该算改动：{got:?}"
         );
         assert_eq!(got.len(), 1, "只该有一项：{got:?}");
+    }
+
+    /// **少了参数要说得出**（2026-10-21）：真机那次是 `z_calibration_mode` 被粘进了
+    /// `xy_calibration_mode` 的行尾注释 —— TOML 仍然合法，只有按参数表比才看得见。
+    #[test]
+    fn params_swallowed_by_a_comment_are_reported_as_missing() {
+        let want = DOC.replace("offset_x = -1.5", "offset_x = -1.5\noffset_z = 4");
+
+        /* 整行被删 */
+        let lost = missing_param_keys(&want, DOC, reg().params()).expect("算缺项");
+        assert!(
+            lost.iter().any(|(k, _)| k == "toolhead.offset.z"),
+            "整行不见了要报：{lost:?}"
+        );
+
+        /* 被 `#` 吃掉（真机那种粘行） */
+        let glued = want.replace("offset_z = 4", "# 笔尖偏移 offset_z = 4");
+        let lost = missing_param_keys(&want, &glued, reg().params()).expect("算缺项");
+        assert!(
+            lost.iter().any(|(k, _)| k == "toolhead.offset.z"),
+            "被注释掉也要报：{lost:?}"
+        );
+
+        /* 同一份：一个都不缺 */
+        assert!(missing_param_keys(&want, &want, reg().params())
+            .unwrap()
+            .is_empty());
     }
 
     /// 原稿没有、草稿补上的键也算（`patch_preset_toml` 会补写缺的键）
