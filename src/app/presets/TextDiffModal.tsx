@@ -1,27 +1,46 @@
 /*
  * **与默认值对比**（2026-10-21）。
  *
- * 作者这一轮的七条：
- *   ① 摘要那行小字放**标题右侧**（`HeadNote`，字数不影响框的尺寸）；
- *   ② 「可以切换成像 IDE 一样，直接就在下面或者左右两侧这样对比」→ 左右 / 上下 两档；
- *   ③ 「希望它可以编辑，不只是查看」→ **点右边任意一行就地改**（回车生效）；
- *   ④ 「进到这个页面的时候，不只是一个关闭按钮，也可以选择恢复默认」→ 底栏「恢复默认值」；
- *   ⑤ 不叫「与最初那份一致」——那明明是"与默认值"比；
- *   ⑥ 底栏那颗「默认值」小按钮撤掉，恢复只在对比这一屏里决定；
- *   ⑦ 「这下面为什么做这么大」「这一行字可以不要」「默认值和现在这个提示也可以不要」
- *      → 删掉提示行与图例，正文区铺满到底。
+ * # 编辑模式是**同一套外壳**
  *
- * 左右并排时左边是默认值、右边是现在；上下（统一视图）时每行前面带 `-` / `+` / `~`，
- * 一条 `change` 在统一视图里铺成"删一行 + 加一行"（IDE 的老规矩）。
- * `lineDiff` 是前端纯函数，开着这一屏接着改，红绿块跟着变。
+ * 作者：「我不想直接就能编辑啊，你还是得给我一个按钮，就像外面的一样，进入编辑模式这种按钮」
+ *     「我希望你把这个编辑模式做成一个那种后壳，就是大家都是一样的……撤销重做之类的都一样，
+ *       甚至包括那个警告啊、那些出错啊，那些都一样」。
+ *
+ * 所以这一屏和「编辑文件」共用同一套两态：
+ *   只读   底栏右侧「进入编辑模式」；右侧正文**点不动**（只看）
+ *   编辑   底栏右侧 撤销 / 重做 / 放弃并退出 / 保存 —— 与编辑文件同一批 handler
+ *          （`onUndo` / `onRedo` / `onExit` / `onSave` 就是那边那四个函数），
+ *          红字错误也在底栏左侧同一位置（`shell.error`）。
+ *
+ * 差别只有一处：这里右侧每一行**点一下就改**（编辑态才有），因为这一屏就是拿来看差异的。
+ *
+ * 其余（2026-10-21 前几轮定的）：左右 / 上下 两档；`lineDiff` 是前端纯函数，开着改实时变；
+ * 摘要进标题右边那一格（`HeadNote`）。
  */
 
 import { useMemo, useState } from 'react'
 
 import { HeadNote, Modal } from '../../components/modal'
-import { Btn } from '../ui/Controls'
 import s from './TextDiffModal.module.css'
 import { diffSummary, lineDiff } from './textDiff'
+
+/** 与「编辑文件」共用的一套底栏状态（词与行为都由调用方给，这一屏只管摆） */
+export interface DiffShell {
+  /** 在编辑模式里没有 */
+  active: boolean
+  canUndo: boolean
+  canRedo: boolean
+  saveDisabled: boolean
+  /** 底栏左侧那行红字（草稿没写进去 / 没存上）—— 与编辑文件同一个位置 */
+  error: string | null
+  onEnter: () => void
+  onUndo: () => void
+  onRedo: () => void
+  /** 放弃并退出 (= 作废这次改动) */
+  onExit: () => void
+  onSave: () => void
+}
 
 export default function TextDiffModal({
   open,
@@ -29,19 +48,19 @@ export default function TextDiffModal({
   fileName,
   left,
   right,
+  shell,
   onRestore,
   onEditLine,
   onClose,
 }: {
   open: boolean
-  /** 宿主的整块页面元素（与别的模态框同一条：框要算出可用宽度） */
   host: HTMLElement | null
   fileName: string | undefined
   /** 默认值（基准） */
   left: string
   /** 现在这份 */
   right: string
-  /** 恢复成默认值（底栏那颗；算一次改动，撤销能退回来） */
+  shell: DiffShell
   onRestore: () => void
   /** 现在这份的某一行被就地改掉（`lineNo` 1 起） */
   onEditLine: (lineNo: number, next: string) => void
@@ -50,9 +69,7 @@ export default function TextDiffModal({
   const rows = useMemo(() => lineDiff(left, right), [left, right])
   const sum = useMemo(() => diffSummary(rows), [rows])
   const total = sum.changed + sum.added + sum.removed
-  /** 布局：左右并排 / 上下（统一视图，带 -/+） */
   const [layout, setLayout] = useState<'split' | 'unified'>('split')
-  /** 正在就地编辑的那一行（**现在这份**的行号，1 起）；`null` = 没有 */
   const [editingLine, setEditingLine] = useState<number | null>(null)
   const [draft, setDraft] = useState('')
 
@@ -63,7 +80,9 @@ export default function TextDiffModal({
         (sum.added > 0 ? `，多了 ${sum.added} 行` : '') +
         (sum.removed > 0 ? `，少了 ${sum.removed} 行` : '')
 
+  const editable = shell.active
   const beginEdit = (lineNo: number, text: string) => {
+    if (!editable) return
     setEditingLine(lineNo)
     setDraft(text)
   }
@@ -86,6 +105,31 @@ export default function TextDiffModal({
       }}
     />
   )
+
+  /** 一行的右侧格子：编辑态才能点开改；只读态就是一个 `<span>` */
+  const rightCell = (lineNo: number | null, text: string | null, cls: string) => {
+    if (editingLine !== null && lineNo === editingLine) {
+      return (
+        <span className={cls} role="cell">
+          {editor}
+        </span>
+      )
+    }
+    return (
+      <span
+        className={cls}
+        role="cell"
+        data-editable={editable || undefined}
+        title={text ?? undefined}
+        onClick={() => {
+          if (!editable || lineNo === null) return
+          beginEdit(lineNo, text ?? '')
+        }}
+      >
+        {text ?? ''}
+      </span>
+    )
+  }
 
   return (
     <Modal
@@ -114,17 +158,65 @@ export default function TextDiffModal({
               上下
             </button>
           </span>
-          <Btn variant="ghost" onClick={onClose}>
-            关闭
-          </Btn>
-          <Btn
-            variant="danger"
-            className={s.restoreBtn}
-            onClick={onRestore}
-            disabled={left === right}
-          >
-            恢复默认值
-          </Btn>
+
+          {shell.error !== null && <span className={s.footErr}>{shell.error}</span>}
+
+          <span className={s.footActs}>
+            <button
+              type="button"
+              className={`${s.footBtn} ${s.footDanger}`}
+              onClick={onRestore}
+              disabled={left === right}
+            >
+              恢复默认值
+            </button>
+            {editable ? (
+              <>
+                <button
+                  type="button"
+                  className={`${s.footBtn} ${s.footIcon}`}
+                  onClick={shell.onUndo}
+                  disabled={!shell.canUndo}
+                  title="撤销（一次打字停顿回退一格）"
+                >
+                  撤销
+                </button>
+                <button
+                  type="button"
+                  className={`${s.footBtn} ${s.footIcon}`}
+                  onClick={shell.onRedo}
+                  disabled={!shell.canRedo}
+                  title="重做"
+                >
+                  重做
+                </button>
+                <button type="button" className={s.footBtn} onClick={shell.onExit}>
+                  放弃并退出
+                </button>
+                <button
+                  type="button"
+                  className={`${s.footBtn} ${s.footPrimary}`}
+                  onClick={shell.onSave}
+                  disabled={shell.saveDisabled}
+                >
+                  保存
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className={s.footBtn} onClick={onClose}>
+                  关闭
+                </button>
+                <button
+                  type="button"
+                  className={`${s.footBtn} ${s.footPrimary}`}
+                  onClick={shell.onEnter}
+                >
+                  进入编辑模式
+                </button>
+              </>
+            )}
+          </span>
         </>
       }
     >
@@ -145,24 +237,7 @@ export default function TextDiffModal({
                   <span className={s.no} role="cell">
                     {r.rightNo ?? ''}
                   </span>
-                  {editingLine !== null && r.rightNo === editingLine ? (
-                    <span className={s.code} data-side="right" role="cell">
-                      {editor}
-                    </span>
-                  ) : (
-                    <span
-                      className={s.code}
-                      data-side="right"
-                      role="cell"
-                      title={r.right ?? '（这一行现在没有）'}
-                      onClick={() => {
-                        if (r.rightNo === null) return
-                        beginEdit(r.rightNo, r.right ?? '')
-                      }}
-                    >
-                      {r.right ?? ''}
-                    </span>
-                  )}
+                  {rightCell(r.rightNo, r.right, s.code)}
                 </div>
               ))
             : rows.map((r, i) => {
@@ -187,23 +262,7 @@ export default function TextDiffModal({
                         <span className={s.no} role="cell">
                           {r.rightNo ?? ''}
                         </span>
-                        {editingLine !== null && r.rightNo === editingLine ? (
-                          <span className={s.code} role="cell">
-                            {editor}
-                          </span>
-                        ) : (
-                          <span
-                            className={s.code}
-                            role="cell"
-                            title={r.right ?? undefined}
-                            onClick={() => {
-                              if (r.rightNo === null) return
-                              beginEdit(r.rightNo, r.right ?? '')
-                            }}
-                          >
-                            {r.right ?? ''}
-                          </span>
-                        )}
+                        {rightCell(r.rightNo, r.right, s.code)}
                       </div>
                     </div>
                   )
@@ -217,23 +276,7 @@ export default function TextDiffModal({
                     <span className={s.no} role="cell">
                       {r.rightNo ?? r.leftNo ?? ''}
                     </span>
-                    {editingLine !== null && r.rightNo === editingLine ? (
-                      <span className={s.code} role="cell">
-                        {editor}
-                      </span>
-                    ) : (
-                      <span
-                        className={s.code}
-                        role="cell"
-                        title={text}
-                        onClick={() => {
-                          if (r.rightNo === null) return
-                          beginEdit(r.rightNo, text)
-                        }}
-                      >
-                        {text}
-                      </span>
-                    )}
+                    {rightCell(r.rightNo, text, s.code)}
                   </div>
                 )
               })}

@@ -17,10 +17,85 @@
 .layoutSwitch {
   display: inline-flex;
   gap: 2px;
-  margin-right: auto;
+  margin-right: 12px;
   padding: 2px;
   border-radius: 999px;
   background: var(--surface-sunken);
+}
+
+/*
+ * 底栏右侧那一簇：**与「编辑文件」同一套尺寸**（32px 高、999 圆角、18 内衬）——
+ * 作者 2026-10-21：「外面这一个底部的高度跟那里面的不一样，自己量一下就知道了」
+ * 「恢复默认值的按钮没必要做这么大」。
+ */
+.footActs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.footBtn {
+  height: 32px;
+  padding: 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.footBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.footBtn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* 撤销 / 重做：窄一点（两个字），不占主按钮那种宽度 */
+.footIcon {
+  padding: 0 12px;
+}
+
+.footPrimary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.footPrimary:hover:not(:disabled) {
+  border-color: var(--accent-deep);
+  color: #fff;
+  filter: brightness(1.05);
+}
+
+/* 「恢复默认值」：危险色但**不放大**（红字红边，悬停淡红底） */
+.footDanger {
+  border-color: rgb(229 72 77 / 45%);
+  color: var(--danger);
+}
+
+.footDanger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* 底栏左侧那行红字（草稿没写进去 / 没存上）—— 与编辑文件同一个位置 */
+.footErr {
+  min-width: 0;
+  margin-right: auto;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--warn);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .layoutSwitch button {
@@ -93,17 +168,18 @@
   color: var(--danger);
 }
 
-/* 右侧那一列点一下就能改：给个文本光标的暗示 */
-.code[data-side='right'] {
+/* 只有**编辑模式**下右侧才可点：只读态是一个普通的只读视图（作者：「不想直接就能编辑」） */
+.code[data-editable] {
   cursor: text;
 }
 
+/* 正文区：**方角**（作者 2026-10-21：「这些小圆角，不要吧」） */
 .diff {
   flex: 1;
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: var(--r-md);
+  border-radius: 0;
   background: var(--surface-sunken);
 }
 

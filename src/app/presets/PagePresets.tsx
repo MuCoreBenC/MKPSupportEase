@@ -2028,6 +2028,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       )
   }
 
+  /* 保存成功 / 退出编辑后 `editing` 变 null ⇒ 对比屏跟着关掉（它没有可比的正文了） */
+  useEffect(() => {
+    if (diffOpen && editing === null) setDiffOpen(false)
+  }, [diffOpen, editing])
+
   /**
    * **确认恢复**（对比框里那颗）—— 换回最初那份，并把两条提示一起收掉。
    * 算一次改动：按「撤销」能整个退回来（与以前那颗按钮同一条口径）。
@@ -3955,13 +3960,39 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             fileName={editing?.fileName}
             left={originText ?? ''}
             right={editing?.text ?? ''}
+            /*
+             * **同一套编辑外壳**（2026-10-21 作者：「把这个编辑模式做成一个那种后壳……
+             * 撤销重做之类的都一样，甚至包括那些警告、出错」）：只读态只有「进入编辑模式」，
+             * 编辑态是撤销 / 重做 / 放弃并退出 / 保存 —— handler 就是上面那四个函数，
+             * 不做第二套语义。
+             */
+            shell={{
+              active: editMode,
+              canUndo: undoStack.length > 0,
+              canRedo: redoStack.length > 0,
+              saveDisabled:
+                editing === null ||
+                editing.problem !== null ||
+                editing.missing.length > 0 ||
+                (!openDirtyRef.current && editing.text === openTextRef.current),
+              error: editing === null ? null : editing.draftError,
+              onEnter: () => setEditMode(true),
+              onUndo: undoEdit,
+              onRedo: redoEdit,
+              onExit: () => {
+                exitEdit()
+                setDiffOpen(false)
+              },
+              onSave: () => {
+                commitEdit()
+              },
+            }}
             onRestore={() => {
               doRestore()
               setDiffOpen(false)
             }}
             onEditLine={(lineNo, next) => {
               /* 就地改一行 = 换整份正文的那一行（草稿 / 撤销 / 实时校验都照常走） */
-              if (!editMode) setEditMode(true)
               setEditing((cur) => {
                 if (cur === null) return cur
                 const lines = cur.text.split('\n')
