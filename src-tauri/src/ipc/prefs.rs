@@ -74,6 +74,59 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
     })
 }
 
+/// 主窗的**原生背景色** = 界面底（2026-10-22，`--bg-2` 由前端报上来）。
+///
+/// ★★★ 治的是什么：**macOS 上拖拽改窗口大小时，右侧/底部会露出白边**。
+///
+/// 这不是我们的代码问题 —— 是 WebKit 的已知呈现 bug（`WebKit#323132`，
+/// 下游 `tauri-apps/tauri#14288`）。live resize 时 AppKit 同步推进 WKWebView 的
+/// bounds，而 WebContent 进程的远程图层树是**异步提交**的：新图层到达前，
+/// 屏幕上还是上一次提交的、旧尺寸的页面表面，盖不满新 bounds 的边就露出来了
+/// （上游量到 20~60px）。Tauri 维护者已表态这个场景 **wontfix**。
+///
+/// 报告里列过一串"已验证无效"的手段（别再试）：`Resized` 里强推 webview frame、
+/// `preservesContentDuringLiveResize`、`NSViewLayerContentsRedrawPolicy::DuringViewResize`、
+/// 在 `html`/`body` 反复设背景色 —— **都没有实质改善**。
+///
+/// 唯一现实可行的是「**把露出来的那条边变成同色**」：设原生背景色，让白边变成界面底。
+///
+/// ★★ 为什么之前只设 `NSWindow.backgroundColor` 没用：露出来的那一层是
+/// **WKWebView 自己的白**（`drawsBackground` 默认 true），不是窗口底。
+/// Tauri 的 [`WebviewWindow::set_background_color`] 恰好两件事一起做 ——
+/// ① `window.set_background_color`（窗口底）；② wry 侧把 webview 的
+/// `drawsBackground` 关掉并设 `underPageBackgroundColor`。两层都盖住才没有白。
+///
+/// ★ 颜色**不在 Rust 里写死**：前端在 `<html data-theme>` 落地之后读 `--bg-2` 报上来，
+/// 真值仍然只有 `tokens.css` 一处。
+///
+/// ★ 同步命令（不是 `async`）：这个 API 要碰 AppKit，Tauri 的同步命令就在主线程跑。
+#[tauri::command]
+pub fn set_window_backdrop(app: AppHandle, color: String) -> Result<(), AppError> {
+    traced("setWindowBackdrop", |_| {
+        let Some(win) = app.get_webview_window("main") else {
+            return Ok(());
+        };
+        let Some((r, g, b)) = parse_hex(&color) else {
+            tracing::warn!("窗口底色只认 #rrggbb，收到 {color:?}，跳过");
+            return Ok(());
+        };
+        win.set_background_color(Some(tauri::window::Color(r, g, b, 255)))
+            .map_err(|e| AppError::internal("窗口底色没设成").with_detail(e.to_string()))?;
+        Ok(())
+    })
+}
+
+/// `#rrggbb` → (r, g, b)。只认这一种形状 —— 调用方给的是 `getComputedStyle`
+/// 读出来的 `--bg-2`，本来就是六个十六进制位；别的形状当"没给"（宁可不刷，也不猜）。
+fn parse_hex(hex: &str) -> Option<(u8, u8, u8)> {
+    let s = hex.trim().trim_start_matches('#');
+    if s.len() != 6 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let at = |i: usize| u8::from_str_radix(&s[i..i + 2], 16).ok();
+    Some((at(0)?, at(2)?, at(4)?))
+}
+
 /// **现在到底是不是深色** —— 原生那一层与 CSS 用的是同一条规则：
 /// 先看**用户选的那一档**，只有 `system`（或"还没选过"）才去问**原生外观**。
 ///

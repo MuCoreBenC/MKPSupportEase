@@ -427,6 +427,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 theme 格，读一次写一次，不联网
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        // 窗口外观（2026-10-22）：原生背景色 = 界面底（`--bg-2` 由前端报上来）——
+        // 治 macOS 拖拽 resize 露白边（WebKit#323132，见 `ipc::prefs::set_window_backdrop`）
+        ipc::prefs::set_window_backdrop,
         // 界面偏好第二格（2026-10-13）：执行记录的自动清理开关 ——
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
@@ -596,6 +599,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好（2026-10-12）：主题 —— 与客户端那份清单一字不差
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        // 窗口外观（2026-10-22）：与客户端那份清单一字不差
+        ipc::prefs::set_window_backdrop,
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,

@@ -57,9 +57,28 @@ function notify(): void {
   for (const listener of listeners) listener()
 }
 
+/**
+ * 主题落地：先落 `<html data-theme>`，再把界面底报给原生当**原生背景色**（2026-10-22）。
+ *
+ * 后一步治的是 macOS 拖拽改窗口大小时右侧/底部露出的那条白边 ——
+ * 那是 WebKit 的已知呈现 bug（`WebKit#323132` / `tauri#14288`），修不了，
+ * 只能把露出来的那层染成同色（完整来由见 `src-tauri/src/ipc/prefs.rs` 的
+ * `set_window_backdrop`）。**露的是 WKWebView 自己的白**，所以必须走后端的
+ * `set_background_color`，光设窗口底色不够。
+ *
+ * ★ 颜色**不在这儿写死**：读的就是 `--bg-2`。`applyTheme` 刚改完 `data-theme`，
+ *   同一次里 `getComputedStyle` 会强制重算，拿到的是新档位的值。
+ * ★ 失败吞掉 —— 它是外观的一层兜底，不该让换主题/首帧读取报错（浏览器 mock 里也一样）。
+ */
+function landTheme(pref: ThemePref | null): void {
+  applyTheme(pref)
+  const color = getComputedStyle(document.documentElement).getPropertyValue('--bg-2').trim()
+  if (color !== '') void api.setWindowBackdrop(color).catch(() => {})
+}
+
 /* 跟随系统那一档：系统深浅变了要跟着翻 —— 用户点了浅 / 深则不理会（真值在他那一档里） */
 prefersDark.addEventListener('change', () => {
-  if (snapshot.theme === null || snapshot.theme === 'system') applyTheme(snapshot.theme)
+  if (snapshot.theme === null || snapshot.theme === 'system') landTheme(snapshot.theme)
 })
 
 /** 重读 AppState（唯一的那次 IPC 读），落地后广播给订阅者 */
@@ -85,7 +104,7 @@ export function appStateMutated(): void {
         pin: win?.pin ?? 'off',
         compact: win?.compact ?? false,
       }
-      applyTheme(theme)
+      landTheme(theme)
     })
     .finally(() => {
       loaded = true

@@ -584,3 +584,53 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 - Rust：`cargo fmt --all --check`（本机 + `+1.99.0`）/ 双 feature `cargo clippy --all-targets -- -D warnings` /
   `cargo test --lib` **全绿（634）**；新增 3 条（patch 浮点尾闸 / prev_saved 往返与旧档兼容）。
 - 前端：`npx tsc -b --force` / `npm run build` / `npm run lint` / 四道 check + `check:calibration-assets` 全绿。
+
+## 增量之五十二 · 拖拽改窗口大小时露白：原生背景色随界面底（2026-10-22，分支 `feat/dark-mode`）
+
+### 一、作者报的现象
+
+「改窗口大小的时候，右边和底部会拖出一条白色，而且内容明显慢半拍」——
+鼠标、触控板一样；`npm run tauri dev` 与打包版一样（**与构建模式无关**，这一点先排掉了）。
+对照物：QQ / 微信 / 网易云 / Trae / Blender 都跟手；**EcoPaste 同为 Tauri，也有、只是轻**
+（作者原话：「有的有一点，没我的这么迟缓」）。
+
+### 二、根因（不是我们的代码，也不是拖动实现）
+
+- `useTitlebarDrag` 走的是系统 `startDragging` → `performWindowDragWithEvent:`，与 QQ 同一条；
+  且现象只在**改尺寸**时出现（拖动窗口位置时窗口 bounds 不变，不需要重新布局）。
+- 真因是 **WebKit 的 live resize 呈现 bug**：`WebKit#323132`
+  （`[macOS] WKWebView content lags behind its bounds during live window resize`），
+  下游 **`tauri-apps/tauri#14288`**。机制：AppKit **同步**推进 WKWebView 的 bounds，
+  而 WebContent 进程的远程图层树是**异步提交**的 —— 新图层到达前，屏幕上仍是上一次提交的
+  旧尺寸页面表面，盖不满新 bounds 的边就露出来（上游量到 20~60px）。
+  **Tauri 维护者已表态这个场景 wontfix。**
+- issue 里"已验证无效、别再试"的清单（本次也逐条排掉了）：
+  `Resized` 里强推 webview / superview 的 frame、`preservesContentDuringLiveResize`、
+  `NSViewLayerContentsRedrawPolicy::DuringViewResize`、在 `html`/`body` 反复设背景色、
+  在 webview 下面垫一层同色原生视图。
+- 本地另排掉三条：**窗口拖动实现**（系统拖动）、**`contentView.layer.masksToBounds` 圆角裁切**
+  （关掉无效，四角也不受影响）、**透明标题栏 + 空 `NSToolbar`**（撤掉无效）。
+- **试金石实验**（已撤）：监听 `NSWindowWillStartLiveResize` / `DidEndLiveResize`，
+  resize 期间把 `contentView` 挪出可见区 —— 作者看到的是一整块**纯色界面底 + 圆角完好、
+  严格跟着窗口边长** ⇒ **窗口层完全正常，慢的只有 WKWebView 的页面内容**。结论闭环。
+- 为什么做不到 Trae 那样：Chromium 自己有合成器，live resize 时会把**上一帧拉伸**顶住；
+  WKWebView 的画面在另一个进程，AppKit 的 `cacheDisplay` 截不到，想截只能走
+  `CGWindowList` + **屏幕录制权限** —— 为了拖窗口手感让用户授权录屏，不做。
+
+### 三、改了什么（只治"白"，不治"慢"）
+
+1. **`ipc::prefs::set_window_backdrop`**（同步命令 —— 碰 AppKit 必须在主线程）：
+   走 `WebviewWindow::set_background_color`，它一次做三件：
+   ① 窗口底色；② wry 侧关掉 webview 的 `drawsBackground`（**这才是露出来的那一层白**）；
+   ③ `underPageBackgroundColor`。只设 `NSWindow.backgroundColor` 是上一版的弯路 ——
+   露的是 WKWebView 自己的白，不是窗口底，所以"没效果"。
+2. **颜色不存第二个源**：前端 `landTheme()`（`appState.ts`，替换两处 `applyTheme`）在
+   `<html data-theme>` 落地之后读 `--bg-2` 报上来，真值仍然只在 `tokens.css`。
+3. `contract` / `bridge` / `mock` 各一条；浏览器 mock 是空实现。
+
+### 四、验证
+
+- Rust：`cargo fmt --all --check` / 双 feature `cargo clippy --all-targets -- -D warnings` /
+  `cargo test` **641 全绿** / `cargo test --features workbench --lib` **1036 全绿**。
+- 前端：`npx tsc -b --force` / `npm run build` / `npm run lint` / 四道 check + `check:calibration-assets` 全绿。
+- 真机：`setWindowBackdrop` 调用成功（日志 `ok`，无 `[chrome]` 告警），快拖时不再闪白。

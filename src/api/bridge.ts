@@ -327,6 +327,10 @@ export const bridgeApi: MkpApi = {
   /* 界面偏好（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 theme 格 */
   getTheme: () => call('getTheme', 'get_theme'),
   setTheme: (theme) => call('setTheme', 'set_theme', { theme }),
+  /* 窗口外观（2026-10-22）：原生背景色 = 界面底（`--bg-2`，由调用方算好传上来）——
+     治 macOS 拖拽 resize 露白边（WebKit#323132）；不落盘、不联网、失败不挡事 */
+  setWindowBackdrop: (color) =>
+    call<void>('setWindowBackdrop', 'set_window_backdrop', { color }),
   /* 界面偏好第二格（2026-10-13）：执行记录的自动清理开关 —— 落 autoCleanHistory 格 */
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>

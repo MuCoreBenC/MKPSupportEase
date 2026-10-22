@@ -2448,6 +2448,11 @@ export const mockApi: MkpApi = {
     return mockTheme
   },
 
+  /* 原生窗口底色是**真窗口**的事，浏览器里没有这一层（演示后端照收不误、什么也不做） */
+  async setWindowBackdrop() {
+    return undefined
+  },
+
   /*
    * 自动清理（2026-10-13）：与主题同一套口径 —— 内存镜像、回解析后的 boolean。
    * 演示后端不真清盘（浏览器里没有那棵 `gcode_history`），只把这一档记下来。

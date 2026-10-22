@@ -3054,6 +3054,23 @@ export interface MkpApi {
   setTheme(theme: ThemePref): Promise<ThemePref>
 
   /**
+   * 把**主窗的原生背景色**报给原生（2026-10-22）—— 参数是 CSS 颜色（`#rrggbb`）。
+   *
+   * 治的是 **macOS 上拖拽改窗口大小（live resize）时，右侧/底部露出一条白边**：
+   *
+   * - 这是 WebKit 的已知呈现 bug（`WebKit#323132` / `tauri#14288`）：窗口 bounds 先变，
+   *   WebContent 进程的图层树后提交，中间那几帧盖不满新 bounds 的边；
+   *   Tauri 官方已表态这个场景 wontfix，报告里那批"强推 frame / 保留内容"的手段实测都无效。
+   * - 唯一可行的是**把露出的那层染成同色**。露的是 WKWebView 自己的白
+   *   （`drawsBackground` 默认 true），所以必须走 `set_background_color`
+   *   （它同时关掉 webview 的白底、设 `underPageBackgroundColor`、设窗口底色）。
+   *
+   * ★ 颜色**不存第二个源**：调用方读 `--bg-2` 传上来，真值仍然只有 `tokens.css`。
+   * 失败不该挡任何事（外观兜底），调用方吞掉即可。
+   */
+  setWindowBackdrop(color: string): Promise<void>
+
+  /**
    * 后处理记录的**自动清理**开着吗（2026-10-13）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`（真机上等于开着），
