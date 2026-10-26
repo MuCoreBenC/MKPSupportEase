@@ -754,3 +754,58 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 前端参数页整页、`PageCalib` 7 处、`PageBbs` 2 处、`BbsTabs`/`Drawer`/`NoteBar`/
 `NotifyHost`/`Modal`/`TraceTag` 各 1 处（见增量之五十三第五节）。
 `src/workbench/**` 仍全中文 —— 开发台只有作者看，不进这条线。
+
+## 增量之五十五 · i18n 第四刀：参数页整页 / 校准页 / 工艺页与共用件（2026-10-26，分支 `feat/dark-mode`）
+
+### 一、先修掉一个"打不开"
+
+作者截图：设置页切语言报「没换成：这个功能还没接好（setLocale）」。
+
+根因不是命令没注册，而是**这一刀之前那批改动根本编译不过**：
+`AppStateFile` 新增了 `locale` 格，但 `Default::default()` 与 `legacy_snapshot()`
+两处初始化没补上 ⇒ `cargo build` 直接 E0063 ⇒ `tauri dev` 一直在跑**旧二进制**，
+旧二进制里没有 `set_locale` ⇒ 前端桥把 `Command set_locale not found` 翻成那句
+「这个功能还没接好（setLocale）」。补两行 `locale: None` 后编译通过，
+新二进制里 `get_locale` / `set_locale` 都在（`strings` 可验证）。
+
+**教训**：加 AppState 的格 = 同时改三处（字段 / Default / legacy_snapshot），
+漏一处不会红在测试里，只会红在"用户点了没反应"。
+
+### 二、迁完的那一批（字典 1274 → 1430 条）
+
+`PageParams` / `ParamRow` / `ParamCard` / `ParamSyncModal` / `PresetParamsModal` /
+`PageCalib` / `PageBbs` / `BbsTabs` / `Drawer` / `NoteBar` / `NotifyHost` /
+`Modal` / `TraceTag` / `useParams` —— 逐句进字典，`check:i18n` 1430 条两语一致。
+
+两处结构性改动（不是换字符串）：
+
+1. **`valueText` / `invalidNumberText` 收 `tr` 首参**。它们是模块级函数，
+   原先自己调 `t()`（模块级那一格，语言换了组件不重渲染）。现在与
+   `presetTree` / `steps` 那批同一条规矩：谁调谁把 `tr` 传进来。
+2. **保存回执的语气由产出方给**：`useParams` 新增 `savedTone: 'ok' | 'warn' | 'bad'`，
+   `PageParams` 不再用 `savedNote.startsWith('保存失败')` 猜红绿 —— 文案进字典之后
+   那个前缀在英文界面里根本不存在，一猜就全绿。
+
+条件三档（`等于/不等于/大于`）与「N 行」「开启/关闭」「空」也一并进表（`params.op.*` /
+`params.value.*` / `params.invalid.*`）。
+
+### 三、这一步仍然做不到的（要作者裁）
+
+1. **参数名与说明**：`presets/registry/param_registry.toml` 是**中文数据**
+   （136 个参数 + 15 个页签 + 40 个分组），随 `presets/delivery/catalog.json` 发布。
+   要随语言变，得给它加可选 `label_en` / `desc_en` 并重发 catalog —— 那是**数据形状**
+   的改动，还会牵到工作台的参数定义编辑器（它要能编第二种语言，否则一保存就抹掉）。
+   另一条路是英文名只住前端字典（`param.label.<paramKey>`），registry 一个字不动。
+2. **历史条目**：`run/preset-history/<hash>.json` 里存的是**当时那句话**（`action`）。
+   现在按当前语言生成，但**老条目不会复译** —— 要复译得把 `action` 从句子改成
+   记号（`actionKey` + 参数），是账本形状的改动。
+3. **`src/workbench/**`**：2147 行含中文（剥注释后），且**一行 i18n 都还没接**。
+   它是另一个应用（`workbench.html` + 自己那套视图），不在这一条线上。
+
+### 四、验证
+
+- `cargo fmt --all --check` ✓；双 feature `clippy --all-targets -- -D warnings` 0 条；
+  客户端 **641**、内核 **235** 全绿（`process_with_ir` 那条既有红不在本刀范围）。
+- 前端：`check:i18n` **1430 条**、`tsc -b --force`、`eslint src` 0 error
+  （仅既有 `PagePresets` 621 行那条 warning）、`npm run build`、五道 check 全绿。
+- 探针 `i18n` **13/13**（切 English 后设置页 / 页签 / 窗口胶囊逐项断言）。
