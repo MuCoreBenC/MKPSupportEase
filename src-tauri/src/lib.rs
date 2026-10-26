@@ -140,7 +140,9 @@ pub fn run() {
                     /* 界面语言先落地：后端这一侧的话术（`messages::text`）从这一句起
                     才跟界面同一种语言。读不出来就按"跟随系统"（`apply_lang(None)`），
                     不挡启动 —— 一句英文/中文不该让程序起不来 */
-                    runtime::app_state::apply_lang(runtime::app_state::locale(&root).ok().flatten());
+                    runtime::app_state::apply_lang(
+                        runtime::app_state::locale(&root).ok().flatten(),
+                    );
                     match fsx::paths::user_root(&handle) {
                         Ok(user) => tracing::info!(root = %user.display(), "用户数据根就位"),
                         Err(e) => tracing::warn!("用户数据根建不出来：{e}"),
