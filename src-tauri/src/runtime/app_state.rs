@@ -118,6 +118,69 @@ impl ThemePref {
     }
 }
 
+/// **界面语言档位**（2026-10-25「全站 i18n」）。
+///
+/// 三档，与前端 `src/api/contract.ts` 的 `LocalePref` 一一对应 —— **id 是契约**
+/// （盘上 / 界面 / 前端都认它，换名字要三处一起改）：
+///
+/// - `zh-cn` / `en`：用户点名的那一档；
+/// - `system`：跟随系统 —— 与主题同一套读法：**程序不猜**，由
+///   [`messages::resolve_system_lang`] 在需要的那一处翻译一次。
+///
+/// ★ `None`（还没选过）与 `Some(System)` 意思不同，与 `theme` 那一格同理：
+///   前者是"从没选过"，后者是"用户明确点了跟随系统"。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LocalePref {
+    #[serde(rename = "system")]
+    System,
+    /// ★ 大写 `CN`：BCP 47 的写法，**不是** serde 默认会生成的那个小写
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+    #[serde(rename = "en")]
+    En,
+}
+
+impl LocalePref {
+    /// 线上字符串 → 枚举；认不出给 `None`（调用方如实报错，**不静默回落成中文**）
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "system" => Some(Self::System),
+            "zh-CN" => Some(Self::ZhCn),
+            "en" => Some(Self::En),
+            _ => None,
+        }
+    }
+
+    /// 枚举 → 线上字符串。只写这一处（盘上 / DTO / 前端共用同一个字面量）
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::ZhCn => "zh-CN",
+            Self::En => "en",
+        }
+    }
+
+    /// 这一档**此刻**是哪种语言。`system` 问一次系统语言（只在真正要翻的时候问）。
+    ///
+    /// 这是"语言档 → 真语言"的**唯一**落地点（后端这一侧）：界面那一条同构的规则
+    /// 住 `src/i18n/index.ts` 的 `resolveLocale`，两边都在"跟随系统"这一档上分叉，
+    /// 但各自只回答自己那一侧（前端要 `zh-CN`/`en` 的字面量，后端要 `Lang`）。
+    pub fn lang(self) -> messages::Lang {
+        match self {
+            Self::ZhCn => messages::Lang::Zh,
+            Self::En => messages::Lang::En,
+            Self::System => messages::resolve_system_lang(),
+        }
+    }
+}
+
+/// 「还没选过」在语言这一格上的落地 = **跟随系统**（与主题那一格同一个口径）。
+///
+/// 于是新装的机器上，后端那几句提示跟着系统语言走；用户点过一次之后照他点的来。
+pub fn apply_lang(pref: Option<LocalePref>) {
+    messages::set_lang(pref.unwrap_or(LocalePref::System).lang());
+}
+
 /// **主窗置顶档位**（2026-10-17「工艺页加一颗置顶开关」那一刀）。
 ///
 /// 三档，与前端 `src/api/contract.ts` 的 `PinPref` 一一对应 —— **id 是契约**：
@@ -401,6 +464,12 @@ pub struct AppStateFile {
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,
+    /// **界面语言**（2026-10-25）。`None` = 还没选过 ⇒ 跟随系统。
+    ///
+    /// 与 `theme` 同一族（"用户点出来的界面状态"）：它记在盘上是因为**重启后还要生效**，
+    /// 而且后端那几句提示（`messages::text`）用的是同一个值 —— 语言只有一个真值。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locale: Option<LocalePref>,
     /// **后处理记录自动清理**（2026-10-13）：开着时按「条数 + 空间」双限静默清掉最旧的
     /// 执行记录（见 [`crate::retention`]）。
     ///
@@ -992,6 +1061,24 @@ pub fn theme(root: &Path) -> Result<Option<ThemePref>, AppError> {
 pub fn set_theme(root: &Path, pref: ThemePref) -> Result<ThemePref, AppError> {
     with_state(root, |state| {
         state.theme = Some(pref);
+        Ok(pref)
+    })
+}
+
+/* ---------- locale：界面语言 ---------- */
+
+/// 界面语言偏好。`None` = **还没选过** ⇒ 跟随系统。
+pub fn locale(root: &Path) -> Result<Option<LocalePref>, AppError> {
+    Ok(load(root)?.locale)
+}
+
+/// 记下界面语言（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+///
+/// ★ 这一层只落盘、**不翻进程内的语言** —— 那一步在 `ipc::prefs::set_locale` 里
+/// （写成功之后才翻，否则盘上写失败、界面却已经换了一套字，两处就不一致了）。
+pub fn set_locale(root: &Path, pref: LocalePref) -> Result<LocalePref, AppError> {
+    with_state(root, |state| {
+        state.locale = Some(pref);
         Ok(pref)
     })
 }

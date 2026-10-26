@@ -70,6 +70,13 @@ fn main() -> ExitCode {
 
     match mkp_support_ease_lib::args::parse(std::env::args_os()) {
         Ok(mkp_support_ease_lib::args::Mode::Hook(job)) => {
+            /* 钩子这一趟也要按用户的界面语言说话：切片器那一框里显示的就是 stderr，
+               「机型不匹配」那几句既进日志也进用户眼前。没有 `AppHandle`，走无头的根。 */
+            mkp_support_ease_lib::runtime::app_state::apply_lang(
+                mkp_support_ease_lib::fsx::paths::internal_root_headless()
+                    .and_then(|root| mkp_support_ease_lib::runtime::app_state::locale(&root).ok())
+                    .flatten(),
+            );
             mkp_support_ease_lib::hook::run_with_channel(&job)
         }
         Ok(mkp_support_ease_lib::args::Mode::Gui) => {

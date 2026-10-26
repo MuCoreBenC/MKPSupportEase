@@ -3222,3 +3222,8 @@ params = ["code", "detail"]
 text = "处理失败 [{code}]：{detail}"
 text_en = "Processing failed [{code}]: {detail}"
 params = ["code", "detail"]
+
+["ui.ipc.prefs.492"]
+text = "认不出的界面语言：{locale}（只能是 system / zh-CN / en）"
+text_en = "Unknown interface language: {locale} (must be system / zh-CN / en)"
+params = ["locale"]

@@ -137,6 +137,10 @@ pub fn run() {
                 Ok(root) => {
                     obs::tracing::init_tracing(&root.join("logs"));
                     tracing::info!(root = %root.display(), "内部数据根就位");
+                    /* 界面语言先落地：后端这一侧的话术（`messages::text`）从这一句起
+                    才跟界面同一种语言。读不出来就按"跟随系统"（`apply_lang(None)`），
+                    不挡启动 —— 一句英文/中文不该让程序起不来 */
+                    runtime::app_state::apply_lang(runtime::app_state::locale(&root).ok().flatten());
                     match fsx::paths::user_root(&handle) {
                         Ok(user) => tracing::info!(root = %user.display(), "用户数据根就位"),
                         Err(e) => tracing::warn!("用户数据根建不出来：{e}"),
@@ -427,6 +431,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 theme 格，读一次写一次，不联网
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        ipc::prefs::get_locale,
+        ipc::prefs::set_locale,
         // 窗口外观（2026-10-22）：原生背景色 = 界面底（`--bg-2` 由前端报上来）——
         // 治 macOS 拖拽 resize 露白边（WebKit#323132，见 `ipc::prefs::set_window_backdrop`）
         ipc::prefs::set_window_backdrop,
@@ -599,6 +605,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好（2026-10-12）：主题 —— 与客户端那份清单一字不差
         ipc::prefs::get_theme,
         ipc::prefs::set_theme,
+        ipc::prefs::get_locale,
+        ipc::prefs::set_locale,
         // 窗口外观（2026-10-22）：与客户端那份清单一字不差
         ipc::prefs::set_window_backdrop,
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差

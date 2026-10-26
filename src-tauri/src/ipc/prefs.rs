@@ -23,7 +23,7 @@ use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 use crate::fsx::paths::internal_root;
 use crate::runtime;
-use crate::runtime::app_state::ThemePref;
+use crate::runtime::app_state::{LocalePref, ThemePref};
 
 use super::{notify_app_state, traced};
 
@@ -208,6 +208,48 @@ pub async fn set_auto_clean_history(app: AppHandle, enabled: bool) -> Result<boo
         let got = runtime::app_state::set_auto_clean_history(&root, enabled)?;
         notify_app_state(&app);
         Ok(got)
+    })
+}
+
+/* ---------- 界面语言（2026-10-25）：设置页「界面语言」那一块 ---------- */
+
+/// 当前界面语言。`null` = **还没选过** ⇒ 界面按"跟随系统"（与 `get_theme` 同一口径）。
+#[tauri::command]
+pub async fn get_locale(app: AppHandle) -> Result<Option<String>, AppError> {
+    traced("getLocale", |_| {
+        let root = internal_root(&app)?;
+        Ok(runtime::app_state::locale(&root)?
+            .map(LocalePref::wire)
+            .map(str::to_owned))
+    })
+}
+
+/// 换界面语言：`system` / `zh-CN` / `en`。**先认字符串再落盘** ——
+/// 认不出就整次拒绝（不静默写成中文：那会让人以为自己点没反应）。
+///
+/// ★ 落盘成功之后有两件事要跟着做，顺序不能反：
+///
+///   ① **本进程内后端那几句提示换语言**（`messages::set_lang`）——
+///      界面上「这次检查失败了：<后端那一句>」里的后半句就是它，不翻的话
+///      英文界面上会冒出一段中文（正是 2026-10-26 那张截图里的样子）。
+///   ② 广播一次 AppState：前端字典据此换一套文案，不用重启。
+///
+/// 翻语言这一步**只在写成功之后**：写失败却已经换了字，盘上与界面就不一致了。
+#[tauri::command]
+pub async fn set_locale(app: AppHandle, locale: String) -> Result<String, AppError> {
+    traced("setLocale", |_| {
+        let root = internal_root(&app)?;
+        let pref = LocalePref::parse(&locale).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.ipc.prefs.492",
+                &[("locale", &locale.to_string())],
+            ))
+        })?;
+
+        runtime::app_state::set_locale(&root, pref)?;
+        runtime::app_state::apply_lang(Some(pref));
+        notify_app_state(&app);
+        Ok(pref.wire().to_owned())
     })
 }
 
