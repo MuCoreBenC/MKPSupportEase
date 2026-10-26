@@ -329,6 +329,7 @@ export const en: Record<StringKey, string> = {
   'home.picker.modelHint': 'Sets the calibration plate size',
   'home.picker.variant': 'Print profile',
   'home.picker.variantHint': 'Maps to a different preset file',
+  'home.unapply.failed': 'Could not clear “in use” — the ledger is unchanged',
   'home.picker.deselect': 'Click again to clear the choice',
   'home.picker.collapse': 'Show less',
   'home.picker.rest': '{count} more',

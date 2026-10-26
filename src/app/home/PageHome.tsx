@@ -27,6 +27,7 @@ import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
 import { useT, type StringKey } from '../../i18n'
 import { activeForSelection, selectionFromActive } from './activeSelection'
+import { notify } from '../notify/notify'
 import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { usePresetUsage } from '../state/usePresetUsage'
@@ -285,15 +286,40 @@ export default function PageHome({ density }: PageHomeProps) {
     deckRef.current?.jumpTo(target)
   }, [])
 
-  // 再点一次已选项 = 取消该级；取消或改选都清空下游
-  const pick = useCallback((level: keyof Selection, id: string) => {
-    setSel((prev) => {
-      const next = prev[level] === id ? null : id
-      if (level === 'brand') return { brand: next, model: null, variant: null }
-      if (level === 'model') return { ...prev, model: next, variant: null }
-      return { ...prev, variant: next }
-    })
-  }, [])
+  /**
+   * 再点一次已选项 = 取消该级；取消或改选都清空下游。
+   *
+   * ★ 2026-10-26（作者：「我希望能真的取消在用的状态，现在还是在用的」）：
+   *   取消**不只是**把这一级的选择清掉 —— 三级不齐就没有「正在使用」这回事，
+   *   底账里那条也得真的撤掉（`clear_active_preset`，与预设页那颗「撤销应用」同一条）。
+   *   只撤「底账正指着当前这台」的那一条：底账指着别处时（还在浏览），不动人家的账。
+   */
+  const pick = useCallback(
+    (level: keyof Selection, id: string) => {
+      const clearing = sel[level] === id
+      setSel((prev) => {
+        const next = prev[level] === id ? null : id
+        if (level === 'brand') return { brand: next, model: null, variant: null }
+        if (level === 'model') return { ...prev, model: next, variant: null }
+        return { ...prev, variant: next }
+      })
+      if (clearing && activeForSel !== null) {
+        void api
+          .clearActivePreset()
+          .then(() => appStateMutated())
+          .catch((e: unknown) => {
+            /* 撤不掉就如实说，不留一个「以为撤了」的界面 */
+            notify({
+              kind: 'bad',
+              title: tr('home.unapply.failed'),
+              text: errorText(e),
+              ttl: 6000,
+            })
+          })
+      }
+    },
+    [sel, activeForSel, tr],
+  )
 
   /* ---------- 三级的清单：数据源是契约（getMachines），不再是手编表 ---------- */
   const brandOptions = useMemo<Option[]>(() => {

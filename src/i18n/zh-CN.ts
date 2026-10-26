@@ -353,6 +353,7 @@ export const zhCN = {
   'home.picker.modelHint': '决定校准板尺寸',
   'home.picker.variant': '打印件版本',
   'home.picker.variantHint': '对应不同预设文件',
+  'home.unapply.failed': '撤不掉「正在使用」，底账没动',
   'home.picker.deselect': '再点一次取消选择',
   'home.picker.collapse': '收起',
   'home.picker.rest': '其余 {count} 项',
