@@ -272,6 +272,20 @@ pub struct PipelineStep {
     /// 报告页在步骤名下铺小字）。没有素材的步不写这个键。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// 同样的几行事实，**按字典键 + 参数**存（2026-10-26）。
+    ///
+    /// 记录里不该存某一刻的句子：同一份 `_meta.json` 现在既能给中文界面读，也能给英文界面读。
+    /// `detail` 留着只为老记录（那时只存了句子），新记录一律 `detail_lines`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail_lines: Option<Vec<StepLine>>,
+}
+
+/// 步骤明细里的一行：一个键 + 它的参数。渲染在界面（`tr(key, args)`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct StepLine {
+    pub key: &'static str,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
 }
 
 /// 步骤状态：成功跑完 / 在这一步失败 / 在这一步被取消。
@@ -289,6 +303,7 @@ impl PipelineStep {
         t: &postprocess::pipeline::StepTiming,
         status: PipelineStatus,
         detail: Option<String>,
+        detail_lines: Option<Vec<StepLine>>,
     ) -> Self {
         Self {
             id: t.step.id(),
@@ -296,6 +311,7 @@ impl PipelineStep {
             elapsed_ms: t.elapsed_ms,
             status,
             detail,
+            detail_lines,
         }
     }
 }
@@ -677,77 +693,130 @@ impl ReportFacts<'_> {
         self.ir.wiping.mode == postprocess::ir::WIPING_MODE_DISK
     }
 
-    /// 擦料塔类型（旧版三档：无 / 普通擦料塔 / 圆盘擦拭）。
-    fn tower_type(&self) -> &'static str {
-        if self.use_disk_wipe() {
-            "圆盘擦拭"
-        } else if self.ir.tower.use_towers {
-            "普通擦料塔"
-        } else {
-            "无"
-        }
-    }
-
-    /// 一条步骤的多行事实（`pipeline[].detail`，照旧版 `\n` 分行的形状）。
+    /// 一条步骤的多行事实，**每行一个字典键 + 参数**（2026-10-26）。
+    ///
+    /// 记录里存事实，不存句子：同一份 `_meta.json` 中文界面、英文界面各读各的。
+    /// 老记录只有 `detail`（当年那句中文），界面那边回落。
+    ///
+    /// 参数值是**原始事实**（`disk` / `true` / `0.70`），不是任何语言里的词 ——
+    /// 词的映射在界面上（`PageReport` 的 `argText`）。
     ///
     /// 没有素材的步返回 `None`（键直接不写）：
     /// - `calib-check`：包围盒 / 质心是管线局部量、没出过门，不编；
     /// - `printtime`：只有一段耗时，报告页的「打印」组已经摆了它的结果。
-    pub fn step_detail(&self, step: Step) -> Option<String> {
+    pub fn step_detail_lines(&self, step: Step) -> Option<Vec<StepLine>> {
+        let line = |key: &'static str, args: &[(&str, &str)]| StepLine {
+            key,
+            args: args
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        };
+        let plain = |key: &'static str| StepLine {
+            key,
+            args: std::collections::BTreeMap::new(),
+        };
         match step {
-            Step::Input => Some(format!(
-                "读取 {} 行\n文件大小: {:.2} MB\nSHA256: {}",
-                self.input_lines,
-                mib(self.input_bytes),
-                self.input_sha256.chars().take(8).collect::<String>(),
-            )),
-            Step::Config => (!self.preset_name.is_empty()).then(|| {
-                ::postprocess::diag::messages::text(
-                    "ui.archive.meta.preset",
-                    &[("v1", self.preset_name)],
-                )
-            }),
-            Step::MachineDetect => Some(format!(
-                "G-code 机型: {}\n预设机型: {}\n机型维度: {:.0}×{:.0}mm\n禁区数量: {}",
-                non_empty(&self.ir.machine.gcode_machine_type),
-                self.ir.machine.machine_type,
-                self.ir.machine.max_x - self.ir.machine.min_x,
-                self.ir.machine.max_y - self.ir.machine.min_y,
-                self.ir.machine.forbidden_zones.len(),
-            )),
-            Step::Parse => Some(format!(
-                "机型: {}\n耗材类型: {}\n切片软件: {}",
-                non_empty(&self.ir.machine.gcode_machine_type),
-                self.ir.filament.filament_type,
-                self.ir.filament.slicer,
-            )),
-            Step::Support => Some(format!(
-                "支撑类型: {}\n熨烫模式: {}\n熨烫覆盖率阈值: {:.1}%",
-                if self.ir.machine.tree_support {
-                    "树状支撑"
+            Step::Input => Some(vec![
+                line(
+                    "report.line.readLines",
+                    &[("lines", &self.input_lines.to_string())],
+                ),
+                line(
+                    "report.line.fileSize",
+                    &[("size", &format!("{:.2}", mib(self.input_bytes)))],
+                ),
+                line(
+                    "report.line.sha",
+                    &[(
+                        "sha",
+                        &self.input_sha256.chars().take(8).collect::<String>(),
+                    )],
+                ),
+            ]),
+            Step::Config => (!self.preset_name.is_empty())
+                .then(|| vec![line("report.line.preset", &[("name", self.preset_name)])]),
+            Step::MachineDetect => Some(vec![
+                line(
+                    "report.line.gcodeMachine",
+                    &[("name", non_empty(&self.ir.machine.gcode_machine_type))],
+                ),
+                line(
+                    "report.line.presetMachine",
+                    &[("name", &self.ir.machine.machine_type)],
+                ),
+                line(
+                    "report.line.bed",
+                    &[
+                        (
+                            "w",
+                            &format!("{:.0}", self.ir.machine.max_x - self.ir.machine.min_x),
+                        ),
+                        (
+                            "h",
+                            &format!("{:.0}", self.ir.machine.max_y - self.ir.machine.min_y),
+                        ),
+                    ],
+                ),
+                line(
+                    "report.line.zones",
+                    &[("count", &self.ir.machine.forbidden_zones.len().to_string())],
+                ),
+            ]),
+            Step::Parse => Some(vec![
+                line(
+                    "report.line.machine",
+                    &[("name", non_empty(&self.ir.machine.gcode_machine_type))],
+                ),
+                line(
+                    "report.line.filament",
+                    &[("name", &self.ir.filament.filament_type)],
+                ),
+                line("report.line.slicer", &[("name", &self.ir.filament.slicer)]),
+            ]),
+            Step::Support => Some(vec![
+                plain(if self.ir.machine.tree_support {
+                    "report.line.supportTree"
                 } else {
-                    "普通支撑"
-                },
-                ironing_mode_cn(&self.ir.ironing.mode),
-                self.ir.ironing.coverage_threshold,
-            )),
+                    "report.line.supportNormal"
+                }),
+                plain(match self.ir.ironing.mode.as_str() {
+                    "off" => "report.line.ironingOff",
+                    "on" => "report.line.ironingOn",
+                    _ => "report.line.ironingAuto",
+                }),
+                line(
+                    "report.line.ironingThreshold",
+                    &[("pct", &format!("{:.1}", self.ir.ironing.coverage_threshold))],
+                ),
+            ]),
             Step::Collision => {
-                let mut lines: Vec<String> = Vec::new();
+                let mut lines: Vec<StepLine> = Vec::new();
                 // 只有非校准模式这一步真跑碰撞检测（`need_collision_check`）；
                 // 过到这儿就是没碰撞 —— 校准模式没跑过，不许写这句结论。
                 if self.calibration_mode.is_empty() {
-                    lines.push("无碰撞，擦料塔位置安全".to_string());
-                    lines.push("模型坐标均在打印范围内".to_string());
+                    lines.push(plain("report.line.collisionOk"));
+                    lines.push(plain("report.line.inRange"));
                 }
-                lines.push(::postprocess::diag::messages::text(
-                    "ui.archive.meta.tower_type",
-                    &[("v1", self.tower_type())],
+                lines.push(line(
+                    "report.line.towerType",
+                    &[(
+                        "type",
+                        if self.use_disk_wipe() {
+                            "disk"
+                        } else {
+                            "tower"
+                        },
+                    )],
                 ));
-                lines.push(format!(
-                    "擦料塔位置: ({:.1}, {:.1})",
-                    self.ir.wiping.wiper_x, self.ir.wiping.wiper_y
+                lines.push(line(
+                    "report.line.towerPos",
+                    &[
+                        ("x", &format!("{:.1}", self.ir.wiping.wiper_x)),
+                        ("y", &format!("{:.1}", self.ir.wiping.wiper_y)),
+                    ],
                 ));
-                Some(lines.join("\n"))
+                Some(lines)
             }
             Step::CalibCheck => {
                 /* 这一步原来恒为 `None`（只跑 dry-run、什么事实都不留）。现在把认档结果
@@ -756,94 +825,115 @@ impl ReportFacts<'_> {
                 let r = self.calibration_receipt?;
                 let mut lines = Vec::new();
                 if let Some(b) = r.measured {
-                    lines.push(format!(
-                        "实测包围盒: {:.4} × {:.4} mm\nX[{:.4}, {:.4}]  Y[{:.4}, {:.4}]",
-                        b.x_max - b.x_min,
-                        b.y_max - b.y_min,
-                        b.x_min,
-                        b.x_max,
-                        b.y_min,
-                        b.y_max
+                    lines.push(line(
+                        "report.line.calibBox",
+                        &[
+                            ("w", &format!("{:.4}", b.x_max - b.x_min)),
+                            ("h", &format!("{:.4}", b.y_max - b.y_min)),
+                            ("x0", &format!("{:.4}", b.x_min)),
+                            ("x1", &format!("{:.4}", b.x_max)),
+                            ("y0", &format!("{:.4}", b.y_min)),
+                            ("y1", &format!("{:.4}", b.y_max)),
+                        ],
                     ));
                 }
                 match (&r.profile_id, r.footprint, r.tolerance) {
-                    (Some(id), Some((w, h)), Some(tol)) => {
-                        lines.push(::postprocess::diag::messages::text(
-                            "ui.archive.meta.hit_spec",
-                            &[
-                                ("id", &id.to_string()),
-                                ("w", &w.to_string()),
-                                ("h", &h.to_string()),
-                                ("tol", &tol.to_string()),
-                            ],
-                        ))
-                    }
-                    (Some(id), _, _) => lines.push(::postprocess::diag::messages::text(
-                        "ui.archive.meta.hit",
-                        &[("v1", id)],
+                    (Some(id), Some((w, h)), Some(tol)) => lines.push(line(
+                        "report.line.calibHitSpec",
+                        &[
+                            ("id", &id.to_string()),
+                            ("w", &w.to_string()),
+                            ("h", &h.to_string()),
+                            ("tol", &tol.to_string()),
+                        ],
                     )),
-                    _ => lines.push("档位: 按机型固定坐标（经典分支，未认档）".to_string()),
+                    (Some(id), _, _) => lines.push(line("report.line.calibHit", &[("id", id)])),
+                    _ => lines.push(plain("report.line.calibClassic")),
                 }
-                Some(lines.join("\n"))
+                Some(lines)
             }
-            Step::Pass1 => Some(format!(
-                "收集 {} 层高索引\n涂胶遍数: {}\n润笔: {}",
-                self.stats.total_layer_number,
-                self.ir.glue.pass_count,
-                if self.ir.toolhead.first_pen_revitalization_flag {
-                    format!(
-                        "是（每模型: {}, 每层: {}）",
-                        yes_no(self.ir.prime.per_model),
-                        yes_no(self.ir.prime.every_layer),
+            Step::Pass1 => {
+                let mut lines = vec![
+                    line(
+                        "report.line.layersIndexed",
+                        &[("count", &self.stats.total_layer_number.to_string())],
+                    ),
+                    line(
+                        "report.line.passes",
+                        &[("count", &self.ir.glue.pass_count.to_string())],
+                    ),
+                ];
+                lines.push(if self.ir.toolhead.first_pen_revitalization_flag {
+                    line(
+                        "report.line.primeOn",
+                        &[
+                            ("perModel", yes_no_raw(self.ir.prime.per_model)),
+                            ("everyLayer", yes_no_raw(self.ir.prime.every_layer)),
+                        ],
                     )
                 } else {
-                    "否".to_string()
-                },
-            )),
-            Step::Pass2 => Some(format!(
-                "擦料塔层数: {}\n擦料塔高度: {:.2}mm\n擦料塔类型: {}\n\
-                 从擦料塔到模型的抬笔高度: {:.1}mm\n斜肋外墙: {}\n圆盘擦拭: {}\n写入完成",
-                self.ir.tower.layer_count,
-                self.tower_height,
-                self.tower_type(),
-                self.ir.tower.safe_z_offset,
-                yes_no(self.ir.wiping.outer_structure == "rib"),
-                yes_no(self.use_disk_wipe()),
-            )),
+                    plain("report.line.primeOff")
+                });
+                Some(lines)
+            }
+            Step::Pass2 => Some(vec![
+                line(
+                    "report.line.towerLayers",
+                    &[("count", &self.ir.tower.layer_count.to_string())],
+                ),
+                line(
+                    "report.line.towerHeight",
+                    &[("v", &format!("{:.2}", self.tower_height))],
+                ),
+                line(
+                    "report.line.towerType",
+                    &[(
+                        "type",
+                        if self.use_disk_wipe() {
+                            "disk"
+                        } else {
+                            "tower"
+                        },
+                    )],
+                ),
+                line(
+                    "report.line.lift",
+                    &[("v", &format!("{:.1}", self.ir.tower.safe_z_offset))],
+                ),
+                line(
+                    "report.line.rib",
+                    &[("on", yes_no_raw(self.ir.wiping.outer_structure == "rib"))],
+                ),
+                line(
+                    "report.line.disc",
+                    &[("on", yes_no_raw(self.use_disk_wipe()))],
+                ),
+                plain("report.line.writeDone"),
+            ]),
             Step::Calibration => {
-                let mut text = ::postprocess::diag::messages::text(
-                    "ui.archive.meta.calib_mode",
-                    &[("v1", self.calibration_mode)],
-                );
+                let mut lines = vec![line(
+                    "report.line.calibMode",
+                    &[("v", self.calibration_mode)],
+                )];
                 match self.ir.safety.calibration_execution_mode.as_str() {
-                    "direct_calibrate" => text.push_str("\n执行方式: 直接校准（跳过模型打印）"),
-                    "print_then_calibrate" => text.push_str("\n执行方式: 打印后校准"),
+                    "direct_calibrate" => lines.push(plain("report.line.execDirect")),
+                    "print_then_calibrate" => lines.push(plain("report.line.execPrintThen")),
                     _ => {}
                 }
-                text.push_str("\n校准 G-code 已插入");
-                Some(text)
+                lines.push(plain("report.line.calibInserted"));
+                Some(lines)
             }
-            Step::Write => Some(match self.output_bytes {
-                Some(bytes) => ::postprocess::diag::messages::text(
-                    "ui.archive.meta.write_with_size",
-                    &[
-                        ("v1", self.write_result_text()),
-                        ("v2", &format!("{:.2}", mib(bytes))),
-                    ],
-                ),
-                // 大小还没量到（stat 不到）就不写那行 —— 不编 0.00 MB。
-                None => self.write_result_text().to_string(),
-            }),
+            Step::Write => Some(vec![line(
+                "report.line.write",
+                &[
+                    ("how", if self.in_place { "inPlace" } else { "newFile" }),
+                    (
+                        "size",
+                        &format!("{:.2}", mib(self.output_bytes.unwrap_or(0))),
+                    ),
+                ],
+            )]),
             Step::PrintTime => None,
-        }
-    }
-
-    /// 写入那一步的结论句（旧版两个说法）。
-    fn write_result_text(&self) -> &'static str {
-        if self.in_place {
-            "原地覆盖完成"
-        } else {
-            "写入独立文件完成"
         }
     }
 }
@@ -853,7 +943,17 @@ fn mib(bytes: u64) -> f64 {
     bytes as f64 / 1024.0 / 1024.0
 }
 
+/// 原始布尔（记录里不存"是/否"这种词，词的映射在界面）。
+fn yes_no_raw(v: bool) -> &'static str {
+    if v {
+        "true"
+    } else {
+        "false"
+    }
+}
+
 /// 是 / 否（旧版 `BoolToCN`）。
+#[allow(dead_code)]
 fn yes_no(v: bool) -> &'static str {
     if v {
         "是"
@@ -868,16 +968,6 @@ fn non_empty(s: &str) -> &str {
         "UNKNOWN"
     } else {
         s
-    }
-}
-
-/// 熨烫模式的中文（照旧版 `_meta.json` 的说法：off=关 / auto=自动 / on=开）。
-fn ironing_mode_cn(mode: &str) -> &str {
-    match mode {
-        "off" => "关",
-        "auto" => "自动",
-        "on" => "开",
-        other => other,
     }
 }
 
@@ -1333,27 +1423,53 @@ mod tests {
         let s = sample();
         let facts = s.facts();
 
-        let input = facts.step_detail(Step::Input).unwrap();
-        assert!(input.starts_with("读取 909465 行\n"), "实际：{input}");
-        assert!(input.contains("SHA256: dea41762"), "sha 取前 8 位");
+        /* 明细现在是「键 + 原始事实」，不是句子（2026-10-26）——
+        断言也从比中文改成**比键与事实**：换了字典也不会红，漏了行才会红。 */
+        let keys = |step: Step| {
+            facts
+                .step_detail_lines(step)
+                .unwrap()
+                .iter()
+                .map(|l| l.key)
+                .collect::<Vec<_>>()
+        };
 
-        let collision = facts.step_detail(Step::Collision).unwrap();
-        assert!(collision.contains("无碰撞，擦料塔位置安全"));
-        assert!(collision.contains("擦料塔位置: (20.0, 20.0)"));
+        let input = facts.step_detail_lines(Step::Input).unwrap();
+        assert_eq!(
+            input[0].args.get("lines").map(String::as_str),
+            Some("909465"),
+            "行数要原样给出来"
+        );
+        assert_eq!(
+            input[2].args.get("sha").map(String::as_str),
+            Some("dea41762")
+        );
 
-        let pass2 = facts.step_detail(Step::Pass2).unwrap();
-        assert!(pass2.contains("擦料塔层数: 536"));
-        assert!(pass2.contains("斜肋外墙: 否"));
+        let collision = keys(Step::Collision);
+        assert!(collision.contains(&"report.line.collisionOk"));
+        assert!(collision.contains(&"report.line.towerPos"));
 
-        let write = facts.step_detail(Step::Write).unwrap();
-        assert!(write.contains("原地覆盖完成"));
-        assert!(write.contains("输出 22.89 MB"), "实际：{write}");
+        let pass2 = keys(Step::Pass2);
+        assert!(pass2.contains(&"report.line.towerLayers"));
+        let rib = facts
+            .step_detail_lines(Step::Pass2)
+            .unwrap()
+            .into_iter()
+            .find(|l| l.key == "report.line.rib")
+            .unwrap();
+        assert_eq!(rib.args.get("on").map(String::as_str), Some("false"));
+
+        let write = facts.step_detail_lines(Step::Write).unwrap();
+        assert_eq!(
+            write[0].args.get("how").map(String::as_str),
+            Some("inPlace")
+        );
 
         // 没有素材的步：键直接不写（页面口径：没给就不摆）。
         // `CalibCheck` 在**非校准件**那一趟没有回执 ⇒ 整格不写（校准件那趟见
         // `calib_check_step_reports_the_profile_it_used`）。
-        assert!(facts.step_detail(Step::CalibCheck).is_none());
-        assert!(facts.step_detail(Step::PrintTime).is_none());
+        assert!(facts.step_detail_lines(Step::CalibCheck).is_none());
+        assert!(facts.step_detail_lines(Step::PrintTime).is_none());
     }
 
     /// 第 7 步认档**成功那趟也要留事实**（2026-10-18 补的证据链）：
@@ -1378,13 +1494,19 @@ mod tests {
         };
         facts.calibration_receipt = Some(&receipt);
 
-        let detail = facts.step_detail(Step::CalibCheck).unwrap();
-        assert!(
-            detail.contains("119.5111 × 16.0630"),
-            "实测尺寸要在，实际：{detail}"
-        );
-        assert!(detail.contains("命中档位: zoffset-ext"), "实际：{detail}");
-        assert!(detail.contains("容差 0.5"), "实际：{detail}");
+        let lines = facts.step_detail_lines(Step::CalibCheck).unwrap();
+        let box_line = lines
+            .iter()
+            .find(|l| l.key == "report.line.calibBox")
+            .expect("实测包围盒那一行要在");
+        assert_eq!(box_line.args.get("w").map(String::as_str), Some("119.5111"));
+        assert_eq!(box_line.args.get("h").map(String::as_str), Some("16.0630"));
+        let hit = lines
+            .iter()
+            .find(|l| l.key == "report.line.calibHitSpec")
+            .expect("命中档位那一行要在");
+        assert_eq!(hit.args.get("id").map(String::as_str), Some("zoffset-ext"));
+        assert_eq!(hit.args.get("tol").map(String::as_str), Some("0.5"));
     }
 
     /// ★★ **最近一次处理用的是哪个切片器**（2026-10-20）：按时间倒序挑，且只认
@@ -1445,9 +1567,16 @@ mod tests {
         let s = sample();
         let mut facts = s.facts();
         facts.calibration_mode = "ZOffset";
-        let collision = facts.step_detail(Step::Collision).unwrap();
-        assert!(!collision.contains("无碰撞"), "实际：{collision}");
-        assert!(collision.contains("擦料塔类型: 圆盘擦拭"));
+        let lines = facts.step_detail_lines(Step::Collision).unwrap();
+        assert!(
+            lines.iter().all(|l| l.key != "report.line.collisionOk"),
+            "校准模式没跑过碰撞检测，不许写那句结论"
+        );
+        let t = lines
+            .iter()
+            .find(|l| l.key == "report.line.towerType")
+            .expect("类型那一行照写");
+        assert_eq!(t.args.get("type").map(String::as_str), Some("disk"));
     }
 
     /// **参数快照**（2026-10-21）：预设 TOML 那一份 + IR 终态那一份，缺一不摆。
@@ -1504,6 +1633,12 @@ mod tests {
                 elapsed_ms: 96,
                 status: PipelineStatus::Complete,
                 detail: Some("读取 909465 行".into()),
+                detail_lines: Some(vec![StepLine {
+                    key: "report.line.readLines",
+                    args: [("lines".to_owned(), "909465".to_owned())]
+                        .into_iter()
+                        .collect(),
+                }]),
             }],
             /* 成功记录没有碰撞事实 */
             collision: None,

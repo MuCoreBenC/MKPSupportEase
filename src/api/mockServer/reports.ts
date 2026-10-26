@@ -175,33 +175,77 @@ const PIPELINE_META: { id: string; msg: string; frac: number }[] = [
   { id: 'write', msg: '正在写入文件…', frac: 0.049 },
 ]
 
-/** 各步的多行事实（与首条同形状；数字随本行变，展开任何一条都不空） */
-function stepDetailOf(
+/**
+ * 各步的多行事实 —— **按字典键 + 原始参数**给（2026-10-26）。
+ *
+ * 真机现在也是这么存的（`archive.rs::step_detail_lines`）：记录里存事实不存句子，
+ * 假后端要是继续给中文句子，浏览器预览里就永远看不到英文那一套。
+ */
+function stepLinesOf(
   id: string,
   r: FixtureRow,
   lines: number,
   inputMb: number,
-): string | undefined {
+): { key: string; args?: Record<string, string> }[] | undefined {
   const towerLayers = (r.seq % 3) * 20
   switch (id) {
     case 'input':
-      return `读取 ${lines} 行\n文件大小: ${inputMb.toFixed(2)} MB\nSHA256: ${fakeSha(r.seq, r.gcode).slice(0, 8)}`
+      return [
+        { key: 'report.line.readLines', args: { lines: String(lines) } },
+        { key: 'report.line.fileSize', args: { size: inputMb.toFixed(2) } },
+        { key: 'report.line.sha', args: { sha: fakeSha(r.seq, r.gcode).slice(0, 8) } },
+      ]
     case 'config':
-      return `预设: ${r.preset}`
+      return [{ key: 'report.line.preset', args: { name: r.preset } }]
     case 'machine-detect':
-      return `G-code 机型: ${r.machine}\n预设机型: ${r.machine}\n机型维度: 180×180mm\n禁区数量: 0`
+      return [
+        { key: 'report.line.gcodeMachine', args: { name: r.machine } },
+        { key: 'report.line.presetMachine', args: { name: r.machine } },
+        { key: 'report.line.bed', args: { w: '180', h: '180' } },
+        { key: 'report.line.zones', args: { count: '0' } },
+      ]
     case 'parse':
-      return `机型: ${r.machine}\n耗材类型: PETG\n切片软件: BambuStudio`
+      return [
+        { key: 'report.line.machine', args: { name: r.machine } },
+        { key: 'report.line.filament', args: { name: 'PETG' } },
+        { key: 'report.line.slicer', args: { name: 'BambuStudio' } },
+      ]
     case 'support':
-      return '支撑类型: 普通支撑\n熨烫模式: 自动\n熨烫覆盖率阈值: 20.0%'
+      return [
+        { key: 'report.line.supportNormal' },
+        { key: 'report.line.ironingAuto' },
+        { key: 'report.line.ironingThreshold', args: { pct: '20.0' } },
+      ]
     case 'collision':
-      return '无碰撞，擦料塔位置安全\n模型坐标均在打印范围内\n擦料塔类型: 圆盘擦拭\n擦料塔位置: (20.0, 20.0)'
+      return [
+        { key: 'report.line.collisionOk' },
+        { key: 'report.line.inRange' },
+        { key: 'report.line.towerType', args: { type: 'disk' } },
+        { key: 'report.line.towerPos', args: { x: '20.0', y: '20.0' } },
+      ]
     case 'pass1':
-      return `收集 ${30 + ((r.seq * 13) % 600)} 层高索引\n涂胶遍数: 1\n润笔: 否`
+      return [
+        { key: 'report.line.layersIndexed', args: { count: String(30 + ((r.seq * 13) % 600)) } },
+        { key: 'report.line.passes', args: { count: '1' } },
+        { key: 'report.line.primeOff' },
+      ]
     case 'pass2':
-      return `擦料塔层数: ${towerLayers}\n擦料塔高度: ${(r.seq % 3).toFixed(2)}mm\n擦料塔类型: 圆盘擦拭\n从擦料塔到模型的抬笔高度: 0.6mm\n斜肋外墙: 否\n圆盘擦拭: 是\n写入完成`
+      return [
+        { key: 'report.line.towerLayers', args: { count: String(towerLayers) } },
+        { key: 'report.line.towerHeight', args: { v: (r.seq % 3).toFixed(2) } },
+        { key: 'report.line.towerType', args: { type: 'disk' } },
+        { key: 'report.line.lift', args: { v: '0.6' } },
+        { key: 'report.line.rib', args: { on: 'false' } },
+        { key: 'report.line.disc', args: { on: 'true' } },
+        { key: 'report.line.writeDone' },
+      ]
     case 'write':
-      return `原地覆盖完成\n输出 ${(inputMb * 1.02).toFixed(2)} MB`
+      return [
+        {
+          key: 'report.line.write',
+          args: { how: 'inPlace', size: (inputMb * 1.02).toFixed(2) },
+        },
+      ]
     default:
       return undefined
   }
@@ -216,7 +260,7 @@ function pipelineFor(r: FixtureRow): ReportPipelineStep[] {
     message: p.msg,
     status: 'ok',
     elapsedMs: Math.round(r.elapsedMs * p.frac),
-    detail: stepDetailOf(p.id, r, lines, inputMb),
+    detailLines: stepLinesOf(p.id, r, lines, inputMb),
   }))
 }
 
@@ -265,64 +309,63 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
         message: '正在读取文件…',
         status: 'ok',
         elapsedMs: 1800,
-        detail: '读取 1241690 行\n文件大小: 27.30 MB\nSHA256: 6a2398db',
+        detailLines: stepLinesOf('input', r, 1241690, 27.3),
       },
       {
         id: 'config',
         message: '配置已就绪（IR 由调用方给出）',
         status: 'ok',
         elapsedMs: 0,
-        detail: '预设: A1_MINI-fastv3.3.toml',
+        detailLines: stepLinesOf('config', r, 1241690, 27.3),
       },
       {
         id: 'machine-detect',
         message: '识别机型…',
         status: 'ok',
         elapsedMs: 255,
-        detail: 'G-code 机型: A1_MINI\n预设机型: A1_MINI\n机型维度: 180×180mm\n禁区数量: 0',
+        detailLines: stepLinesOf('machine-detect', r, 1241690, 27.3),
       },
       {
         id: 'parse',
         message: '解析 G-code…',
         status: 'ok',
         elapsedMs: 1300,
-        detail: '机型: A1_MINI\n耗材类型: PETG\n切片软件: BambuStudio',
+        detailLines: stepLinesOf('parse', r, 1241690, 27.3),
       },
       {
         id: 'support',
         message: '支撑面检测…',
         status: 'ok',
         elapsedMs: 0,
-        detail: '支撑类型: 普通支撑\n熨烫模式: 自动\n熨烫覆盖率阈值: 20.0%',
+        detailLines: stepLinesOf('support', r, 1241690, 27.3),
       },
       {
         id: 'collision',
         message: '碰撞检测…',
         status: 'ok',
         elapsedMs: 1300,
-        detail: '无碰撞，擦料塔位置安全\n模型坐标均在打印范围内\n擦料塔类型: 圆盘擦拭\n擦料塔位置: (20.0, 20.0)',
+        detailLines: stepLinesOf('collision', r, 1241690, 27.3),
       },
       {
         id: 'pass1',
         message: '第一遍扫描: 99%',
         status: 'ok',
         elapsedMs: 5200,
-        detail: '收集 633 层高索引\n涂胶遍数: 1\n润笔: 否',
+        detailLines: stepLinesOf('pass1', r, 1241690, 27.3),
       },
       {
         id: 'pass2',
         message: '第二遍扫描: 99%',
         status: 'ok',
         elapsedMs: 7800,
-        detail:
-          '擦料塔层数: 38\n擦料塔高度: 6.46mm\n擦料塔类型: 圆盘擦拭\n从擦料塔到模型的抬笔高度: 0.7mm\n斜肋外墙: 否\n圆盘擦拭: 是\n写入完成',
+        detailLines: stepLinesOf('pass2', r, 1241690, 27.3),
       },
       {
         id: 'write',
         message: '正在写入文件…',
         status: 'ok',
         elapsedMs: 933,
-        detail: '原地覆盖完成\n输出 27.90 MB',
+        detailLines: stepLinesOf('write', r, 1241690, 27.3),
       },
     ],
     glue: {

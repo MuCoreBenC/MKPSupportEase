@@ -103,6 +103,7 @@ import type {
   ReportBox4,
   ReportCollision,
   ReportDetail,
+  ReportPipelineStep,
   ReportExportPlan,
   ReportGlueFacts,
   ReportCalibrationFacts,
@@ -192,6 +193,54 @@ const STEP_NAMES: Record<string, StringKey> = {
   printtime: 'report.step.printtime',
 }
 
+
+/** 进度句：内核那句（中文）按步骤 id 换成本地的 —— 认不出的 id 原样摆 */
+const MSG_KEYS: Record<string, StringKey> = {
+  input: 'report.msg.input',
+  config: 'report.msg.config',
+  'machine-detect': 'report.msg.machine',
+  parse: 'report.msg.parse',
+  support: 'report.msg.support',
+  collision: 'report.msg.collision',
+  'calib-check': 'report.msg.calib',
+  pass1: 'report.msg.pass1',
+  pass2: 'report.msg.pass2',
+  calibration: 'report.msg.calibInsert',
+  write: 'report.msg.write',
+  printtime: 'report.msg.printtime',
+}
+
+/**
+ * 明细里那些**原始事实**（`disk` / `true` / `inPlace`）翻成人话。
+ *
+ * 记录里刻意不存"是/否"这种词（那是某一刻的语言），所以这一步在界面上做。
+ * 认不出的值原样返回 —— 不猜、不吞。
+ */
+function argText(name: string, value: string, tr: Tr): string {
+  if (value === 'true') return tr('report.value.yes')
+  if (value === 'false') return tr('report.value.no')
+  if (name === 'type' && (value === 'disk' || value === 'tower')) {
+    return tr(value === 'disk' ? 'report.value.disk' : 'report.value.tower')
+  }
+  if (name === 'how' && (value === 'inPlace' || value === 'newFile')) {
+    return tr(value === 'inPlace' ? 'report.value.inPlace' : 'report.value.newFile')
+  }
+  return value
+}
+
+/** 一步的小字：新记录按字典渲染，老记录原样摆当年那句话 */
+function stepDetailText(step: ReportPipelineStep, tr: Tr): string | null {
+  if (step.detailLines !== undefined && step.detailLines.length > 0) {
+    return step.detailLines
+      .map((l) => {
+        const args: Record<string, string> = {}
+        for (const [k, v] of Object.entries(l.args ?? {})) args[k] = argText(k, v, tr)
+        return tr(l.key as StringKey, args)
+      })
+      .join('\n')
+  }
+  return step.detail === undefined || step.detail === '' ? null : step.detail
+}
 
 /**
  * 组小图标（跟组名一排，扫一眼找得到组）—— 只留形状，壳由 `GrpIcon` 给。
@@ -1968,11 +2017,17 @@ export default function PageReport() {
                                         </span>
                                       )}
                                     </span>
-                                    {step.message !== undefined && step.message !== '' && (
-                                      <span className={s.stepMsg}>{step.message}</span>
+                                    {(MSG_KEYS[step.id ?? ''] ?? step.message) !== undefined && (
+                                      <span className={s.stepMsg}>
+                                        {MSG_KEYS[step.id ?? '']
+                                          ? tr(MSG_KEYS[step.id ?? ''])
+                                          : step.message}
+                                      </span>
                                     )}
-                                    {step.detail !== undefined && step.detail !== '' && (
-                                      <span className={s.stepDetail}>{step.detail}</span>
+                                    {stepDetailText(step, tr) !== null && (
+                                      <span className={s.stepDetail}>
+                                        {stepDetailText(step, tr)}
+                                      </span>
                                     )}
                                   </li>
                                 ))}

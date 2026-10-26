@@ -125,8 +125,19 @@ export interface ReportPipelineStep {
   elapsedMs?: number
   message?: string
   status?: string
-  /** 这一步自报的多行事实（`\n` 分行）—— 步骤名下面铺小字，排查时最值钱的一段 */
+  /**
+   * 这一步自报的多行事实，`\n` 分行 —— 步骤名下面铺小字，排查时最值钱的一段。
+   *
+   * **只有老记录才有**（那时记录里存的就是句子）。新记录用 `detailLines`。
+   */
   detail?: string
+  /**
+   * 同样的几行事实，按**字典键 + 原始参数**存（2026-10-26）。
+   *
+   * 记录里存事实不存句子：同一份 `_meta.json` 中英两界面各读各的。缺 = 老记录，
+   * 回落 `detail`（当年那句中文，**不会复译**）。
+   */
+  detailLines?: { key: string; args?: Record<string, string> }[]
 }
 
 /** 一个轴对齐框（mm，机器坐标） */

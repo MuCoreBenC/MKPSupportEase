@@ -178,7 +178,9 @@ export default function BbsControl({
   const isInt = /^coInts?$/.test(co)
   let shown = /^coPercents?$/.test(co) ? text.replace(/%$/, '') : text
   if (/^-?\d+\.\d+$/.test(shown)) shown = String(Number(shown))
-  const unit = meta.unit?.zh || meta.unit?.en || ''
+  /* 单位也是双语数据（`mm 或 %` / `mm or %`）—— 按当前语言挑，别硬取 zh */
+  const unit =
+    (locale === 'en' ? meta.unit?.en || meta.unit?.zh : meta.unit?.zh || meta.unit?.en) ?? ''
 
   return (
     <span className={s.val}>

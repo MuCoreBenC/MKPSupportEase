@@ -38,7 +38,7 @@
 .groupHead {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 7px;
   margin-bottom: 8px;
 }
 
@@ -46,7 +46,13 @@
   margin: 0;
   font-size: 11px;
   font-weight: 600;
+  /*
+   * 疏排是给中文标题的；`letter-spacing` 在**最后一个字母后面**也会加一格，
+   * 英文标题后面就凭空多出一个空格，再叠上 flex 的 gap 就成了「Machine   Sets …」。
+   * 用等量的负右边距抵掉，中文那边看不出来（中文本来就窄）。
+   */
   letter-spacing: 0.18em;
+  margin-right: -0.18em;
   color: var(--text-3);
 }
 

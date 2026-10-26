@@ -1145,7 +1145,14 @@ fn archive_success(
     let pipeline: Vec<PipelineStep> = done
         .step_timings
         .iter()
-        .map(|t| PipelineStep::from_timing(t, PipelineStatus::Complete, facts.step_detail(t.step)))
+        .map(|t| {
+            PipelineStep::from_timing(
+                t,
+                PipelineStatus::Complete,
+                None,
+                facts.step_detail_lines(t.step),
+            )
+        })
         .collect();
     let detail = Detail {
         input_file: input_fact(
@@ -1668,6 +1675,7 @@ impl StepRecorder<'_> {
                 /* 失败路径没有 `DetailFacts`（那要等整链成功），小字整组不写
                 —— 页面口径「没给就不摆」 */
                 detail: None,
+                detail_lines: None,
             });
         }
     }
