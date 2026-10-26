@@ -45,7 +45,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import { useT, type StringKey, type Tr } from '../../i18n'
+import { useLocale, useT, type Locale, type StringKey, type Tr } from '../../i18n'
 /* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
@@ -98,7 +98,11 @@ export interface UseParamsOptions {
 export interface ParamDef {
   key: string
   label: string
+  /** 英文显示名（双语注册表）。空 = 这条还没译；`localizeDef` 按界面语言挑 */
+  labelEn?: string
   desc: string
+  /** 英文说明（空 = 回落 `desc`） */
+  descEn?: string
   /** 中文分组名（注册表的 section 名，'空间偏移' 这种） */
   group: string
   sectionId: string
@@ -341,6 +345,54 @@ interface ComboData {
   fileLabel: string | null
 }
 
+/**
+ * 双语数据显示哪一册（2026-10-26 双语注册表）。
+ *
+ * 英文界面优先英文、缺了就回落中文 —— 数据可能还没译完，**回落永远不算错**，
+ * 空着才是错（那会让一行参数没有名字）。中文界面不碰英文那一格。
+ */
+function bi(zh: string, en: string | undefined, locale: Locale): string {
+  return locale === 'en' && en !== undefined && en !== '' ? en : zh
+}
+
+/**
+ * 一条定义按界面语言挑好显示名。
+ *
+ * **不放在数据加载那一刻**：`catalog` 只在 combo 变化时重拉，语言切换不该再拉一次
+ * （`setPick` 会把用户选的机型顶回"正在用的那一份"）。所以原文两册都留着，
+ * 每次读定义（`defOf` / `defs`）时按当前语言摊开。
+ */
+function localizeDef(d: ParamDef, locale: Locale): ParamDef {
+  if (locale !== 'en') return d
+  const label = bi(d.label, d.labelEn, locale)
+  const desc = bi(d.desc, d.descEn, locale)
+  return {
+    ...d,
+    label,
+    desc,
+    field: {
+      ...d.field,
+      label,
+      desc,
+      choices: d.field.choices?.map((c) => ({ ...c, label: bi(c.label, c.labelEn, locale) })),
+    },
+  }
+}
+
+/** 页签 / 分组同一条规矩（卡片标题与页签条都读它） */
+function localizeTab(t: ParamTab, locale: Locale): ParamTab {
+  if (locale !== 'en') return t
+  return {
+    ...t,
+    label: bi(t.label, t.labelEn, locale),
+    sections: t.sections.map((s) => ({
+      ...s,
+      label: bi(s.label, s.labelEn, locale),
+      desc: s.desc === undefined ? undefined : bi(s.desc, s.descEn, locale),
+    })),
+  }
+}
+
 /** 条件三档的说法住字典（`params.op.*`）—— 这一层只存键，取字交给调用方传进来的 `tr` */
 const OP_KEYS: Record<'eq' | 'neq' | 'gt', StringKey> = {
   eq: 'params.op.eq',
@@ -373,13 +425,21 @@ function tabsOf(registry: RuntimeCatalog['registry']): ParamTab[] {
   const out: { tab: ParamTab; order: number }[] = []
   for (const meta of registry.tabs) {
     const sections: ParamSection[] = meta.sections
-      .map((s) => ({ id: s.id, label: s.label, desc: s.description, count: itemsBySection.get(s.id) ?? 0 }))
+      .map((s) => ({
+        id: s.id,
+        label: s.label,
+        labelEn: s.labelEn,
+        desc: s.description,
+        descEn: s.descriptionEn,
+        count: itemsBySection.get(s.id) ?? 0,
+      }))
       .filter((s) => s.count > 0)
     if (sections.length === 0) continue
     out.push({
       tab: {
         id: meta.id,
         label: meta.label,
+        labelEn: meta.labelEn,
         count: sections.reduce((n, s) => n + s.count, 0),
         sections,
       },
@@ -802,6 +862,8 @@ export interface Params {
 export function useParams(opts: UseParamsOptions = {}): Params {
   /* 这一屏的话术入口：所有会显示给用户的句子都从这里出（语言一换整套跟着换） */
   const tr = useT()
+  /* 数据（参数名/说明/分组）那一册 —— 双语注册表按它挑 */
+  const locale = useLocale()
   /*
    * 钉住的那一份（右键预设进来）。摊成几个原始值再用 —— 对象每次渲染都是新的，
    * 拿它当 effect 依赖会让所有效果每帧重跑一遍。
@@ -1415,6 +1477,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
            * 活字段（配方带了）用配方的显示信息与值；弃用字段（配方没带）退到定义侧。
            * `unit` 一律过 `unitOf`（风扇速度那条把 min/max 塞进了 unit 位）。
            */
+          /* 两册都留：显示哪一册由 `localizeDef` 在读的时候决定（见那里的注释） */
+          const labelEn = p?.labelEn ?? rd.labelEn
+          const descEn = p?.descEn ?? rd.descEn
           const label = p?.label ?? rd.label
           const desc = p?.desc ?? rd.desc
           /*
@@ -1429,7 +1494,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           const def: ParamDef = {
             key,
             label,
-            desc,
+            labelEn,
+            desc: desc,
+            descEn,
             group: p?.group ?? rd.layout.sectionId,
             sectionId,
             unit: unitOf(p?.unit ?? rd.unit),
@@ -1451,6 +1518,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               choices: (p?.choices ?? rd.choices)?.map((c) => ({
                 value: c.value,
                 label: c.label,
+                labelEn: c.labelEn,
                 /* 全局弃用 ∪ 点名这台机型 —— 与后端 `Choice::deprecated_for` 同一条 */
                 deprecated:
                   c.deprecated === true || c.deprecatedMachines?.includes(machineId) === true
@@ -1506,7 +1574,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const machineId = combo?.machineId ?? pick?.machineId ?? ''
   const versionId = combo?.versionId ?? pick?.versionId ?? ''
 
-  const defOf = useCallback((key: string) => combo?.defByKey.get(key), [combo])
+  /* 读定义的两个出口都按当前语言摊（页面与卡片只认这两个，不碰 `combo.defByKey`） */
+  const defOf = useCallback(
+    (key: string) => {
+      const d = combo?.defByKey.get(key)
+      return d === undefined ? undefined : localizeDef(d, locale)
+    },
+    [combo, locale],
+  )
   const placeOf = useCallback((key: string) => combo?.placeByKey.get(key), [combo])
 
   /**
@@ -2236,6 +2311,19 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return set
   }, [combo, dirtyKeys])
 
+  /*
+   * 界面语言一变，这两个目录就按新语言摊一次 —— 数据本身（`combo`）一个字不动，
+   * 所以机型/版本、草稿、撤销栈全都不受影响。
+   */
+  const localizedDefs = useMemo(
+    () => (combo?.defs ?? []).map((d) => localizeDef(d, locale)),
+    [combo, locale],
+  )
+  const localizedTabs = useMemo(
+    () => (combo?.tabs ?? []).map((t) => localizeTab(t, locale)),
+    [combo, locale],
+  )
+
   /** 与出厂不同的条数 —— 按当前机型实算，不是写死的 67 */
   const changedCount = useMemo(() => {
     if (combo === null) return 0
@@ -2243,13 +2331,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   }, [combo, valueOf])
 
   const sectionsOf = useCallback(
-    (tabId: string) => combo?.tabs.find((t) => t.id === tabId)?.sections ?? [],
-    [combo],
+    (tabId: string) => localizedTabs.find((t) => t.id === tabId)?.sections ?? [],
+    [localizedTabs],
   )
 
   const defsOfSection = useCallback(
-    (sectionId: string) => combo?.defs.filter((d) => d.sectionId === sectionId) ?? [],
-    [combo],
+    (sectionId: string) => localizedDefs.filter((d) => d.sectionId === sectionId),
+    [localizedDefs],
   )
 
   const history = useMemo(() => [...log].reverse(), [log])
@@ -2715,9 +2803,9 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     activeFileName: active?.fileName ?? null,
     fileOf,
     activeUse,
-    tabs: combo?.tabs ?? [],
+    tabs: localizedTabs,
     sectionsOf,
-    defs: combo?.defs ?? [],
+    defs: localizedDefs,
     defsOfSection,
     defOf,
     placeOf,

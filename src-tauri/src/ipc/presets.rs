@@ -676,6 +676,9 @@ pub async fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppErro
 pub struct ChoiceDto {
     pub value: String,
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 界面回落 `label`。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub label_en: String,
     /// **选项级弃用**（`Choice.deprecated`）：参数没废、某个选项废了。
     ///
     /// 真上游里就有这一档（`wiping.outer_structure` 的 `sheath` = 护套），不是为界面硬造的。
@@ -703,8 +706,17 @@ pub struct RecipeParamDto {
     /// `offset_x/y/z`），不再有"多条参数共享一个 tomlKey"那种形状。
     pub toml_key: String,
     pub label: String,
+    /// 英文显示名（空 = 界面回落 `label`）。语言由界面挑，后端两份都给 —— 切语言不必重拉。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub label_en: String,
     pub desc: String,
+    /// 英文说明（空 = 回落 `desc`）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub desc_en: String,
     pub group: String,
+    /// 英文分组名（空 = 回落 `group`）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub group_en: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     pub control: &'static str,
@@ -799,11 +811,17 @@ fn machine_params_dto(
             key: p.key.clone(),
             toml_key: p.toml_key.clone(),
             label: p.label.clone(),
+            label_en: p.label_en.clone(),
             desc: p.desc.clone(),
+            desc_en: p.desc_en.clone(),
             group: catalog
                 .section_meta(&p.layout.section_id)
                 .map(|s| s.label.clone())
                 .unwrap_or_else(|| p.layout.section_id.clone()),
+            group_en: catalog
+                .section_meta(&p.layout.section_id)
+                .map(|s| s.label_en.clone())
+                .unwrap_or_default(),
             unit: p.unit.as_deref().and_then(non_empty),
             control: control_of(p.ui_component),
             choices: (!p.choices.is_empty()).then(|| {
@@ -812,6 +830,7 @@ fn machine_params_dto(
                     .map(|c| ChoiceDto {
                         value: to_text(&c.value),
                         label: c.label.clone(),
+                        label_en: c.label_en.clone(),
                         deprecated: c.deprecated,
                         deprecated_machines: (!c.deprecated_machines.is_empty())
                             .then(|| c.deprecated_machines.clone()),

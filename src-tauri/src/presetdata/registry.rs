@@ -119,6 +119,9 @@ pub enum ShowOp {
 #[serde(rename_all = "camelCase")]
 pub struct Choice {
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`
+    #[serde(default)]
+    pub label_en: String,
     pub value: Value,
     /// 全局弃用：所有机型、所有版本都不许再写这一档
     #[serde(default)]
@@ -164,7 +167,13 @@ pub struct ParamDef {
     pub toml_key: String,
     pub json_key: String,
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 回落 `label`
+    #[serde(default)]
+    pub label_en: String,
     pub desc: String,
+    /// 英文说明。空 = 回落 `desc`
+    #[serde(default)]
+    pub desc_en: String,
     /// 生成 TOML 时写的行内注释
     pub toml_comment: String,
     pub value_type: ValueType,
@@ -258,7 +267,14 @@ impl ParamDef {
 #[serde(rename_all = "camelCase")]
 pub struct ParamMetaEdit {
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。**`None` = 不动**（工作台的参数编辑器
+    /// 还没编这一格，它也读不到这一格）；`Some("")` = 清掉这条的英文。
+    #[serde(default)]
+    pub label_en: Option<String>,
     pub desc: String,
+    /// 英文说明，语义同上。
+    #[serde(default)]
+    pub desc_en: Option<String>,
     pub unit: Option<String>,
     pub value_type: ValueType,
     pub ui_component: UiComponent,
@@ -299,8 +315,14 @@ pub struct ParamMetaEdit {
 pub struct SectionMeta {
     pub id: String,
     pub label: String,
+    /// 英文显示名（空 = 回落 `label`）
+    #[serde(default)]
+    pub label_en: String,
     #[serde(default)]
     pub description: Option<String>,
+    /// 英文说明（空 = 回落 `description`）
+    #[serde(default)]
+    pub description_en: Option<String>,
     pub order: f64,
 }
 
@@ -309,6 +331,9 @@ pub struct SectionMeta {
 pub struct TabMeta {
     pub id: String,
     pub label: String,
+    /// 英文显示名（空 = 回落 `label`）
+    #[serde(default)]
+    pub label_en: String,
     pub order: f64,
     #[serde(default)]
     pub icon: Option<String>,
@@ -1253,6 +1278,18 @@ impl ParamRegistry {
             .iter()
             .map(|c| Choice {
                 label: c.label.clone(),
+                /* 载荷里没带英文就沿用文件里同一档的英文（同一个 value 对得上）——
+                否则工作台保存一次，这一组选项的英文全丢 */
+                label_en: if c.label_en.trim().is_empty() {
+                    self.params[at]
+                        .choices
+                        .iter()
+                        .find(|old| json_key(&old.value) == json_key(&c.value))
+                        .map(|old| old.label_en.clone())
+                        .unwrap_or_default()
+                } else {
+                    c.label_en.clone()
+                },
                 value: c.value.clone(),
                 deprecated: c.deprecated,
                 deprecated_machines: normalize_machines(&c.deprecated_machines),
@@ -1266,6 +1303,9 @@ impl ParamRegistry {
                 let mut tbl = toml_edit::Table::new();
                 tbl["value"] = choice_value_item(&c.value, key, i + 1)?;
                 tbl["label"] = toml_edit::value(c.label.trim());
+                if !c.label_en.trim().is_empty() {
+                    tbl["labelEn"] = toml_edit::value(c.label_en.trim());
+                }
                 if c.deprecated {
                     tbl["deprecated"] = toml_edit::value(true);
                 }
@@ -1384,6 +1424,21 @@ impl ParamRegistry {
         let t = self.param_table_mut(at, key)?;
         t["label"] = toml_edit::value(label);
         t["desc"] = toml_edit::value(edit.desc.as_str());
+        /* 英文两格：载荷没给就原样留着（工作台编辑器还编不到它们，别让保存把它们抹掉） */
+        if let Some(v) = &edit.label_en {
+            if v.trim().is_empty() {
+                t.remove("labelEn");
+            } else {
+                t["labelEn"] = toml_edit::value(v.trim());
+            }
+        }
+        if let Some(v) = &edit.desc_en {
+            if v.trim().is_empty() {
+                t.remove("descEn");
+            } else {
+                t["descEn"] = toml_edit::value(v.trim());
+            }
+        }
         match &unit {
             Some(u) => t["unit"] = toml_edit::value(u.as_str()),
             None => {
@@ -2569,6 +2624,8 @@ mod tests {
             "tomlKey",
             "jsonKey",
             "label",
+            "labelEn",
+            "descEn",
             "desc",
             "tomlComment",
             "valueType",
@@ -2619,6 +2676,51 @@ mod tests {
     }
 
     /* ---------- 写回（b04 Task 10） ---------- */
+
+    /// **双语注册表的覆盖闸**（2026-10-26）。
+    ///
+    /// 参数名/说明/选项/页签/分组现在各带一份英文（`labelEn` / `descEn`）。界面在英文
+    /// 下拿不到英文会**回落中文** —— 那是安全网，不是可以长期缺着的理由：漏一条，英文
+    /// 界面上就冒一个中文。所以这里钉住：真数据里一条都不许空。
+    ///
+    /// 新增参数时这条会红 —— 补上英文再提交（翻译就写在 `[[params]]` 里 `label` 下面）。
+    #[test]
+    fn every_entry_has_english() {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let r = ParamRegistry::load_from(&root).expect("真注册表读得通");
+
+        let mut missing: Vec<String> = Vec::new();
+        for p in &r.params {
+            if p.label_en.trim().is_empty() {
+                missing.push(format!("{}.labelEn", p.key));
+            }
+            if p.desc_en.trim().is_empty() {
+                missing.push(format!("{}.descEn", p.key));
+            }
+            for c in &p.choices {
+                if c.label_en.trim().is_empty() {
+                    missing.push(format!("{}.choices[{}].labelEn", p.key, c.label.trim()));
+                }
+            }
+        }
+        for t in r.tabs() {
+            if t.label_en.trim().is_empty() {
+                missing.push(format!("tab {}.labelEn", t.id));
+            }
+            for s in &t.sections {
+                if s.label_en.trim().is_empty() {
+                    missing.push(format!("section {}.labelEn", s.id));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些条目还没有英文（英文界面会冒出中文）：{missing:#?}"
+        );
+    }
 
     /// 把两个文件复制到临时目录，**在副本上改**，不碰真数据
     fn copy_of_real() -> Option<(tempfile::TempDir, ParamRegistry)> {
@@ -3094,7 +3196,9 @@ mod tests {
     fn meta_edit(label: &str) -> ParamMetaEdit {
         ParamMetaEdit {
             label: label.to_owned(),
+            label_en: None,
             desc: String::new(),
+            desc_en: None,
             unit: None,
             value_type: ValueType::Float,
             ui_component: UiComponent::Number,
@@ -3117,6 +3221,7 @@ mod tests {
     fn choice(label: &str, value: Value, deprecated: bool) -> Choice {
         Choice {
             label: label.to_owned(),
+            label_en: String::new(),
             value,
             deprecated,
             deprecated_machines: Vec::new(),

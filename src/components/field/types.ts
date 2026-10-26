@@ -21,6 +21,11 @@ export type FieldControlType = 'number' | 'switch' | 'choice' | 'text' | 'gcode'
 export interface FieldOption {
   value: string
   label: string
+  /**
+   * 英文显示名（2026-10-26 双语注册表）。**共用件不挑语言** —— 它只画 `label`；
+   * 上游（参数页）在把数据递给控件之前，按当前语言把 `label` 换成该显示的那一册。
+   */
+  labelEn?: string
   /** 选项右边那一列小字（「3 个版本共用」/「2 处自有」）。下拉与分段都支持 */
   note?: string
   /**

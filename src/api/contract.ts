@@ -451,10 +451,16 @@ export interface RecipeParam {
    */
   tomlKey: string
   label: string
+  /** 英文显示名（2026-10-26 双语注册表）。缺省 = 回落 `label` */
+  labelEn?: string
   /** 一句话说明，鼠标悬停时显示。注册表本来就有这份数据 */
   desc: string
+  /** 英文说明。缺省 = 回落 `desc` */
+  descEn?: string
   /** 分组名，来自注册表的 section —— 界面不自己造分类 */
   group: string
+  /** 英文分组名。缺省 = 回落 `group` */
+  groupEn?: string
   unit?: string
   control: 'number' | 'switch' | 'choice' | 'text'
   /**
@@ -467,6 +473,8 @@ export interface RecipeParam {
   choices?: {
     value: string
     label: string
+    /** 英文显示名。缺省 = 回落 `label` */
+    labelEn?: string
     deprecated?: boolean
     /** 只在这些机型上弃用（与 `deprecated` 叠加） */
     deprecatedMachines?: string[]
@@ -723,7 +731,11 @@ export interface ParamSection {
   id: string
   /** 中文名，'空间偏移' / '圆盘动作控制'。这个名字只在注册表里有，布局表那边没有 */
   label: string
+  /** 英文名（空 = 回落 `label`） */
+  labelEn?: string
   desc?: string
+  /** 英文说明（空 = 回落 `desc`） */
+  descEn?: string
   /** 这一组里有几条。**已按 machineFilter 与废弃过滤**，所以是这台机型真实看得到的条数 */
   count: number
 }
@@ -733,6 +745,8 @@ export interface ParamTab {
   id: string
   /** '偏移' | '擦料' | '风扇' | '涂胶' | '切换' | '更多' */
   label: string
+  /** 英文名（空 = 回落 `label`） */
+  labelEn?: string
   /** 这个分类下有几条（= 各 section 的 count 之和） */
   count: number
   sections: ParamSection[]
@@ -1399,7 +1413,11 @@ export interface CatalogParamDef {
   /** 参数自己声明的界面归属（组内顺序 + 属于哪个分组） */
   layout: { order: number; sectionId: string }
   label: string
+  /** 英文显示名（2026-10-26 双语注册表）。缺省 = 回落 `label` */
+  labelEn?: string
   desc: string
+  /** 英文说明。缺省 = 回落 `desc` */
+  descEn?: string
   unit?: string
   /** `number` / `switch` / `segmented` / `select` / `gcode` —— 控件形态的原词 */
   uiComponent: string
@@ -1408,6 +1426,8 @@ export interface CatalogParamDef {
   choices?: {
     value: string
     label: string
+    /** 英文显示名。缺省 = 回落 `label` */
+    labelEn?: string
     deprecated?: boolean
     deprecatedMachines?: string[]
   }[]
@@ -1426,9 +1446,18 @@ export interface CatalogParamDef {
 export interface CatalogTabMeta {
   id: string
   label: string
+  /** 英文显示名（缺省 = 回落 `label`） */
+  labelEn?: string
   order: number
   icon?: string
-  sections: { id: string; label: string; order: number; description?: string }[]
+  sections: {
+    id: string
+    label: string
+    labelEn?: string
+    order: number
+    description?: string
+    descriptionEn?: string
+  }[]
 }
 
 /** 参数摆放（`layout_schema`：哪个参数落在哪个 section） */
