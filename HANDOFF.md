@@ -839,3 +839,74 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 
 **已知的、故意留着的一处**：搜索只匹配**当前语言**的名字（英文界面搜不到中文名、
 中文界面搜不到英文名）。要做双语搜索就在 `PageParams` 的匹配里把两册都喂进去。
+
+## 增量之五十六 · 英文界面清扫：三条读取路径收口 + 工艺页转英文 + 复述型 tooltip 退场（2026-10-26）
+
+作者拿 6 张英文界面截图点名：参数弹窗的分类/卡片/参数名、对比台的页签与「一致」、工艺页的组名与
+字段名、报告页的管线明细、塔冲突那两颗按钮。裁定三件事：截图放 `tmp-shots/i18n-screens/{before,after}/`、
+只删「复述型」tooltip、字典按页分段 + 出一张对照表。
+
+### 一、根因是「同一份数据有两条读取路径」
+
+上一刀把双语挑一册做进了 `useParams`（`localizeDef` / `localizeTab`），**对比台不经过它** ——
+它自己从 `getRuntimeCatalog` 摊一遍（`CompareModal.rowsOf`），于是英文界面上整片中文。
+工艺页同理（`BbsRow` 硬取 `meta.label.zh`）。
+
+修法不是补第二份挑选逻辑，而是**收口成一个工具**：`src/app/shared/dataLabel.ts`
+（`bi` / `localizeParamDef` / `localizeTab` / `localizeParamMeta`）。现在三条路共用它，
+`useParams` 里那两个只是改了 import。**以后谁再读这层数据，也走这里。**
+
+另：假后端的 `param_registry.json` 与 `params.ts` 同步补了 `labelEn` / `descEn` / `name_en`
+透传 —— 它是真 IPC 的镜像，缺了这层，界面上看着「修好了」而真机没修（或反过来）。
+
+### 二、工艺页（BBS）
+
+- 五组标题（MKP 工艺 / 导入的 / 用户配置 / 系统配置 / 其他机型 / 读不了的）从模块级中文字面量
+  改成**字典键**（`bbs.group.*`），`BbsMenuGroup.titleKey`。
+- 页签名与分组名读 `layout.json` 的 `name_en`（数据本来就有两册）。
+- 参数名 / 选项名按 `locale` 挑 `label.zh|en`（`BbsRow` / `BbsControl`）。
+- 灰着的原因改成 `reasonKey` + `reasonArgs`：**数据层只说事实，取字在渲染处**
+  （`bbsSource.reasonText(it, tr)`）—— 模块级函数拿不到 hook，也不该把某一刻的语言冻进数据。
+- 支撑样式、孤儿组、导入/取数失败、抽屉与详情栏的名字，一并进字典（`bbs.*` 新增 ~35 条）。
+
+### 三、提问按钮
+
+`hook.rs` 的两张 `QuestionChoice` 表（挪塔 / 校准）原先写死中文，英文界面下**按钮本身是中文**。
+现在走 `messages::text`，新增 8 条（`hook.choice_*`，各带 `Q_*` 码，`every_entry_has_every_language` 钉着）。
+
+### 四、复述型 tooltip 退场（作者口径：只删「把可见文字再说一遍」的）
+
+删了 5 处：分类胶囊的「名字 · 条数」、BBS 值文本与下拉的 `title`、详情栏预设名、
+`Switch` 那个**没人传**的 `title` 口子（整个 prop 删掉）。补充型（完整文件名、快捷键、
+被截断的全称）与关键解释（采用/保持/还原的后果、脏态关闭、参数键+模式+不可用原因）**全留**。
+清单：`tmp-shots/i18n-screens/tooltip-inventory.md`。
+
+### 五、字典分段与对照表
+
+`zh-CN.ts` / `en.ts` 按页插了 **36 段**分节注释（`// ---- 工艺页（BBS） ----`）。文件是逐刀追加长的，
+**没有重排键**（重排会让以后每处 diff 对不上行号），所以同一页可能出现好几段，带「（续）」。新增
+`docs/I18N-MAP.md`：四类「名字」各住哪（句子 / 后端句子 / 参数名 / 数据名）+ 前缀→页面→文件→条数。
+
+### 六、取证工具
+
+- `scripts/probes/i18n-shots.mjs <before|after>`：9 个页面 × zh/en，视口 + 整页各一张，
+  落 `tmp-shots/i18n-screens/<阶段>/<页>/`（不入库）。比对台与参数弹窗是真点开的（右键两下那条老入口）。
+- `scripts/probes/i18n-cjk.mjs`：英文模式下扫 `document.body.innerText` 里含中文的行 +
+  它所在的 class。**这是截图看漏时的兜底**，当前结果：**29 行**，其中 27 行是报告页管线明细
+  （见下）、1 行是语言选项「简体中文」本身、1 行是假后端的「演示：…」注释。
+
+### 七、这一刀**没做**的（都记在案）
+
+1. **报告页管线明细**（`archive.rs::step_detail`）：那是写进 `_meta.json` 的**归档记录**。
+   要双语得像「结构化事实 + 前端渲染」那样改归档契约（老记录仍保持原样），单独一轮 —— 不能
+   在拼接处换 `messages::text` 了事：那样记录的语言就被写它那一刻的界面语言冻住了。
+2. `usePreset.ts` 的 `PENDING_NAME`、`useBundleFiles` 的三句套餐提示、`openWithGuide` 的 `alt`
+   —— 都是低频/失败态，且 `alt` 描述的是中文系统截图（译了反而对不上图）。
+3. `src/workbench/**`：作者裁定单排一轮。
+
+### 八、验证
+
+`cargo fmt --all --check` ✓ · 双 feature `clippy --all-targets -- -D warnings` 0 ·
+客户端 **642** / 内核 **235** 全绿 · `tsc -b --force` ✓ · `eslint src` 0 error
+（仅既有 `PagePresets` 621 行 warning）· `npm run build` ✓ · 六道 check 全绿 ·
+探针 `i18n` **13/13**、`i18n-cjk` 29 行（逐条见清单）。
