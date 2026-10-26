@@ -596,7 +596,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           </>
         ) : (
           <>
-            <span>已保存</span>
+            <span>{tr('calib.saved')}</span>
             <span className={s.changeDot}>·</span>
             {/* 2026-10-13：原来是「改动已写进『本地预设』」—— 「本地预设」那套说法
                 整条退役（作者：「本地这份、云端一份这些相关的都去掉」），只说结果 */}
@@ -847,7 +847,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               className={s.modelsImg}
               src={pile.src}
               srcSet={pile.srcSet}
-              alt="测试模型"
+              alt={tr('calib.tab.models')}
               draggable={false}
             />
           </div>
@@ -936,15 +936,15 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         <Modal
           open
           size="sm"
-          title="打开模型"
+          title={tr('calib.openModel')}
           onClose={() => setOpening(null)}
           footer={
             <>
               <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
-                从缓存打开
+                {tr('calib.openCached')}
               </Btn>
               <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
-                从云端获取
+                {tr('calib.fetchCloud')}
               </Btn>
             </>
           }
@@ -984,12 +984,18 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={s.note}>
             {modelBusy
-              ? `${openingLabel} · 正在处理，请稍候…`
+              ? tr('calib.cache.busy', { label: openingLabel })
               : modelInfo === null
-                ? `${openingLabel} · 正在看本机有没有缓存…`
+                ? tr('calib.cache.checking', { label: openingLabel })
                 : modelInfo.ready
-                  ? `${openingLabel} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
-                  : `${openingLabel} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
+                  ? tr('calib.cache.ready', {
+                    label: openingLabel,
+                    size: modelInfo.size ?? tr('calib.cache.sizeUnknown'),
+                  })
+                  : tr('calib.cache.none', {
+                    label: openingLabel,
+                    fetch: tr('calib.fetchCloud'),
+                  })}
           </p>
           {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
               下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}
@@ -1001,11 +1007,11 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         <Modal
           open
           size="sm"
-          title="有未保存的改动"
+          title={tr('calib.unsavedTitle')}
           onClose={() => setPending(null)}
           footer={
             <>
-              <Btn onClick={() => setPending(null)}>取消</Btn>
+              <Btn onClick={() => setPending(null)}>{tr('common.cancel')}</Btn>
               <Btn
                 onClick={() => {
                   clearAll()
@@ -1013,7 +1019,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                   setPending(null)
                 }}
               >
-                不保存并离开
+                {tr('calib.leaveDiscard')}
               </Btn>
               <Btn
                 variant="primary"
@@ -1023,19 +1029,22 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                   setPending(null)
                 }}
               >
-                保存并离开
+                {tr('calib.leaveSave')}
               </Btn>
             </>
           }
         >
           <p className={s.note}>
-            偏移改动还没保存：
-            {saved && draft
-              ? AXIS_ROWS.filter(([, k]) => dirtyAxes.includes(k))
-                  .map(([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`)
-                  .join('，')
-              : ''}
-            。离开前要保存吗？
+            {tr('calib.leaveBody', {
+              changes:
+                saved && draft
+                  ? AXIS_ROWS.filter(([, k]) => dirtyAxes.includes(k))
+                      .map(
+                        ([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`,
+                      )
+                      .join(tr('common.clauseSep'))
+                  : '',
+            })}
           </p>
         </Modal>
       )}
@@ -1044,11 +1053,11 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
         <Modal
           open
           size="sm"
-          title="有未保存的改动"
+          title={tr('calib.unsavedTitle')}
           onClose={() => setPresetAsk(null)}
           footer={
             <>
-              <Btn onClick={() => setPresetAsk(null)}>取消</Btn>
+              <Btn onClick={() => setPresetAsk(null)}>{tr('common.cancel')}</Btn>
               <Btn
                 variant="primary"
                 onClick={() => {
@@ -1058,14 +1067,13 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                   setPresetAsk(null)
                 }}
               >
-                不保存并切换
+                {tr('calib.switchDiscard')}
               </Btn>
             </>
           }
         >
           <p className={s.note}>
-            换成 {presetAsk.fileName} 之后，点出来的偏移草稿会作废 ——
-            草稿是相对上一份预设点出来的增量，换了基准就没有意义了。
+            {tr('calib.switchBody', { file: presetAsk.fileName })}
           </p>
         </Modal>
       )}

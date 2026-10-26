@@ -45,6 +45,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
+import { useT, type StringKey, type Tr } from '../../i18n'
 /* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
@@ -340,7 +341,12 @@ interface ComboData {
   fileLabel: string | null
 }
 
-const OP_TEXT: Record<'eq' | 'neq' | 'gt', string> = { eq: '等于', neq: '不等于', gt: '大于' }
+/** 条件三档的说法住字典（`params.op.*`）—— 这一层只存键，取字交给调用方传进来的 `tr` */
+const OP_KEYS: Record<'eq' | 'neq' | 'gt', StringKey> = {
+  eq: 'params.op.eq',
+  neq: 'params.op.neq',
+  gt: 'params.op.gt',
+}
 
 /* ---------- catalog → 这一页要的形状（唯一数据源 = catalog，总纲判据 4） ---------- */
 
@@ -475,14 +481,18 @@ function unitOf(raw: string | null | undefined): string | undefined {
  *   2. **数字按显示精度渲染**（`formatNum`）：`mm` 固定两位（`-0.50` / `24.00` / `3.70`），
  *      其余单位原样、只修浮点尾巴。盘上的原文一个字都不改 —— 这里只管"给我看的字"。
  */
-export function valueText(def: ParamDef | undefined, raw: string): string {
-  if (raw === '') return '空'
+export function valueText(def: ParamDef | undefined, raw: string, tr: Tr): string {
+  if (raw === '') return tr('params.value.empty')
   if (def === undefined) return raw
-  if (def.field.control === 'switch') return raw === 'true' ? '开启' : '关闭'
+  if (def.field.control === 'switch') {
+    return raw === 'true' ? tr('params.value.on') : tr('params.value.off')
+  }
   if (def.field.control === 'choice') {
     return def.field.choices?.find((c) => c.value === raw)?.label ?? raw
   }
-  if (def.field.control === 'gcode') return `${raw.split('\n').length} 行`
+  if (def.field.control === 'gcode') {
+    return tr('params.value.lines', { count: raw.split('\n').length })
+  }
   /* 数字按显示精度走；非数字（`tower` / G-code 之类）`formatNum` 原样退回 */
   const text = formatNum(raw, displayDecimals(def.unit, def.field.step))
   return def.unit != null ? `${text} ${def.unit}` : text
@@ -501,15 +511,18 @@ const cellKey = (machineId: string, versionId: string, key: string) =>
  *     （`patch_preset_toml` 头注），所以"超范围不许保存"只能设在界面 ——
  *     保存确认弹层把超范围项列出来、灰掉「确认保存」，`save` 里再拦一道兜底。
  */
-export function invalidNumberText(def: ParamDef, raw: string): string | null {
+export function invalidNumberText(def: ParamDef, raw: string, tr: Tr): string | null {
   if (def.field.control !== 'number') return null
   const t = raw.trim()
-  if (t === '') return '数值不能为空'
+  if (t === '') return tr('params.invalid.empty')
   const n = Number(t)
-  if (!Number.isFinite(n)) return '不是有效的数字'
+  if (!Number.isFinite(n)) return tr('params.invalid.number')
   const { min, max } = def.field
   if ((min !== undefined && n < min) || (max !== undefined && n > max)) {
-    return `超出范围 ${min ?? '不限'} ~ ${max ?? '不限'}`
+    return tr('params.invalid.range', {
+      min: min ?? tr('params.unbounded'),
+      max: max ?? tr('params.unbounded'),
+    })
   }
   return null
 }
@@ -667,8 +680,10 @@ export interface Params {
    */
   discardAll: () => void
   save: () => void
-  /** 保存成功后的那一行绿字；null = 不显示 */
+  /** 保存之后那一行回执（成功绿 / 部分失败琥珀 / 失败红）；null = 不显示 */
   savedNote: string | null
+  /** 上面那句的语气。**由产出方定** —— 页面不许从文案里猜（一翻语言就猜错） */
+  savedTone: 'ok' | 'warn' | 'bad'
   /** 写值闸拦下一次改动时那句人话（弃用字段 / 弃用选项）；`null` = 不显示 */
   gateNote: string | null
   undo: () => void
@@ -785,6 +800,8 @@ export interface Params {
 }
 
 export function useParams(opts: UseParamsOptions = {}): Params {
+  /* 这一屏的话术入口：所有会显示给用户的句子都从这里出（语言一换整套跟着换） */
+  const tr = useT()
   /*
    * 钉住的那一份（右键预设进来）。摊成几个原始值再用 —— 对象每次渲染都是新的，
    * 拿它当 effect 依赖会让所有效果每帧重跑一遍。
@@ -845,6 +862,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [log, setLog] = useState<HistoryEntry[]>([])
   const [seq, setSeq] = useState(0)
   const [savedNote, setSavedNote] = useState<string | null>(null)
+  /*
+   * 那一句回执的**语气**（`ok` / `warn` / `bad`）。从前是页面拿 `startsWith('保存失败')`
+   * 反推颜色 —— 文案进了字典就再也猜不准（英文里没有那个开头），所以由产出方定。
+   */
+  const [savedTone, setSavedTone] = useState<'ok' | 'warn' | 'bad'>('ok')
 
   /*
    * **正在编辑的那一份预设**（参数页底座 ③；作者 2026-10-02 定的语义）。
@@ -1001,18 +1023,20 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     (decisions: ParamDecision[] = [], path: string | null = null) => {
       const cur = editingPresetRef.current
       if (cur === null) {
-        setSavedNote('这份没有可保存的目标（没配 MKP 文件或还没选）')
+        setSavedTone('bad')
+        setSavedNote(tr('params.saved.noTarget'))
         return
       }
       void api.commitPresetDraft().then(
         (done) => {
           setDraftError(null)
+          setSavedTone('ok')
           setSavedNote(
             cur.origin === 'local'
-              ? `已写回 ${done.fileName}`
+              ? tr('params.saved.writtenBack', { file: done.fileName })
               : done.replaced
-                ? `已保存成 ${done.fileName}（覆盖了上一份）`
-                : `已另存为 ${done.fileName}`,
+                ? tr('params.saved.overwrote', { file: done.fileName })
+                : tr('params.saved.savedAs', { file: done.fileName }),
           )
           setSaveResult(done.path)
           /*
@@ -1091,9 +1115,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
               },
               (e: unknown) => {
                 setSyncBusy(false)
+                setSavedTone('warn')
                 setSavedNote(
-                  `已写回 ${done.fileName}，但云端更新那几项没落上：${errorText(e)}` +
-                    '（再点一次保存可以重试）',
+                  tr('params.saved.syncFailed', {
+                    file: done.fileName,
+                    detail: errorText(e),
+                  }),
                 )
                 reopen()
               },
@@ -1102,10 +1129,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           }
           reopen()
         },
-        (e: unknown) => setSavedNote(`保存失败：${errorText(e)}`),
+        (e: unknown) => {
+          setSavedTone('bad')
+          setSavedNote(tr('params.saved.failed', { detail: errorText(e) }))
+        },
       )
     },
-    [broadcastDraftNow],
+    [broadcastDraftNow, tr],
   )
 
   /*
@@ -1190,7 +1220,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       ])
       if (!alive) return
       if (world === null) {
-        setError('读不到目录（catalog）—— 参数页的全部数据都从它出，先确认安装包完整。')
+        setError(tr('params.error.noCatalog'))
         return
       }
       const metaByKey = new Map<string, ParamMeta>(meta.map((m) => [m.key, m]))
@@ -1274,7 +1304,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [pinnedAtMount])
+  }, [pinnedAtMount, tr])
 
   /*
    * 换组合就**重拉**布局、参数、文件清单 —— 不吃缓存。
@@ -1546,14 +1576,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           return {
             key: cond.key,
             label: parent?.label ?? cond.key,
-            need: `${OP_TEXT[cond.op]} ${valueText(parent, expected)}`,
+            need: `${tr(OP_KEYS[cond.op])} ${valueText(parent, expected, tr)}`,
           }
         }
         at = cond.key
       }
       return null
     },
-    [catalog, defOf, valueOf],
+    [catalog, defOf, valueOf, tr],
   )
 
   const isVisible = useCallback((key: string) => findBlocked(key) === null, [findBlocked])
@@ -1626,8 +1656,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         )
         setGateNote(
           choice !== undefined
-            ? `${def?.label ?? dep.key} 的「${choice.label}」已弃用，不能改（上游已标记）`
-            : `${def?.label ?? dep.key} 已弃用，不能改（上游已标记）`,
+            ? tr('params.gate.deprecatedChoice', {
+              label: def?.label ?? dep.key,
+              choice: choice.label,
+            })
+            : tr('params.gate.deprecated', { label: def?.label ?? dep.key }),
         )
         return 'blocked'
       }
@@ -1734,22 +1767,24 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     patchDraft(toDraft)
     return 'applied'
     },
-    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions],
+    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions, tr],
   )
 
   const edit = useCallback(
     (key: string, value: string) => {
-      apply(`改 ${defOf(key)?.label ?? key}`, [{ key, value }])
+      apply(tr('params.act.change', { label: defOf(key)?.label ?? key }), [{ key, value }])
     },
-    [apply, defOf],
+    [apply, defOf, tr],
   )
 
   /** 行上那个 chip：退回已保存值 */
   const revertToSaved = useCallback(
     (key: string) => {
-      apply(`还原 ${defOf(key)?.label ?? key}`, [{ key, value: savedValueOf(key) }])
+      apply(tr('params.act.revert', { label: defOf(key)?.label ?? key }), [
+        { key, value: savedValueOf(key) },
+      ])
     },
-    [apply, defOf, savedValueOf],
+    [apply, defOf, savedValueOf, tr],
   )
 
   /**
@@ -1762,13 +1797,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const restoreDefaults = useCallback(() => {
     if (combo === null) return
     apply(
-      '恢复默认值',
+      tr('params.act.restoreDefaults'),
       combo.defs.map((d) => ({
         key: d.key,
         value: combo.factoryByKey.get(d.key) ?? '',
       })),
     )
-  }, [apply, combo])
+  }, [apply, combo, tr])
 
   /* 撤销 / 重做在**回调体里**读栈算完再 set —— StrictMode 会把 updater 跑两次 */
   const undo = useCallback(() => {
@@ -1942,11 +1977,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
      */
     const badKeys = Object.keys(draft).filter((key) => {
       const def = defOf(key)
-      return def !== undefined && invalidNumberText(def, draft[key]) !== null
+      return def !== undefined && invalidNumberText(def, draft[key], tr) !== null
     })
     if (badKeys.length > 0) {
       setSavedNote(
-        `保存失败：${badKeys.map((k) => defOf(k)?.label ?? k).join('、')} 超出取值范围，改回来再保存`,
+        tr('params.save.invalidKeys', {
+          keys: badKeys.map((k) => defOf(k)?.label ?? k).join(tr('params.listSep')),
+        }),
       )
       return
     }
@@ -2011,6 +2048,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     savedBatches,
     sync,
     syncDecisions,
+    tr,
   ])
 
   /**
@@ -2030,11 +2068,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
        * （这几天你已经手动改回那个值了），那时界面上不会有一丝变化。
        */
       return apply(
-        `回退 ${entry.action}`,
+        tr('params.act.undo', { action: entry.action }),
         entry.items.map((item) => ({ key: item.key, value: item.from })),
       )
     },
-    [apply],
+    [apply, tr],
   )
 
   /*
@@ -2103,7 +2141,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       void api.discardPresetDraft().then(
         () => {
           setDraftOnDisk(false)
-          setSavedNote('已放弃这次没保存的改动')
+          setSavedTone('ok')
+          setSavedNote(tr('params.saved.discarded'))
           broadcastDraftNow()
         },
         (e: unknown) => setDraftError(errorText(e)),
@@ -2111,7 +2150,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       return
     }
     apply(
-      '取消改动',
+      tr('params.act.discardAll'),
       dirtyKeys.map((key) => ({ key, value: savedValueOf(key) })),
     )
     /*
@@ -2123,7 +2162,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     setDraftOnDisk(false)
     /* 「取消」是"一锤子"：当场广播 —— 全退回已保存值之后那枚橙点该立刻灭 */
     broadcastDraftNow()
-  }, [apply, broadcastDraftNow, dirtyKeys, draftOnDisk, savedValueOf])
+  }, [apply, broadcastDraftNow, dirtyKeys, draftOnDisk, savedValueOf, tr])
 
   const requestCombo = useCallback(
     (nextMachine: string, nextVersion: string) => {
@@ -2263,12 +2302,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         }),
       })
     }
-    push(null, '未保存', log.filter((e) => e.batch === null))
+    push(null, tr('params.history.draft'), log.filter((e) => e.batch === null))
     for (let b = savedBatches; b >= 1; b -= 1) {
-      push(b, `第 ${b} 次保存`, log.filter((e) => e.batch === b))
+      push(b, tr('params.history.batchTitle', { n: b }), log.filter((e) => e.batch === b))
     }
     return groups
-  }, [log, savedBatches])
+  }, [log, savedBatches, tr])
 
   const machine = catalog?.machines.find((m) => m.id === machineId)
   const version = machine?.versions.find((v) => v.id === versionId)
@@ -2601,12 +2640,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     (key: string) => {
       const cloudNew = syncByKey.get(key)?.cloudNew ?? null
       if (cloudNew === null) return
-      apply('采用云端新值', [{ key, value: cloudNew }], {
+      apply(tr('params.act.adoptSync'), [{ key, value: cloudNew }], {
         fromSync: true,
         sync: { [key]: 'adopt' },
       })
     },
-    [apply, syncByKey],
+    [apply, syncByKey, tr],
   )
 
   /** 行上「保持原样」：只记一条待落决定，值一个字不动 */
@@ -2615,11 +2654,13 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持，退回已保存值 */
   const useMyValue = useCallback(
     (key: string) => {
-      apply(`用回 ${defOf(key)?.label ?? key} 原来的值`, [{ key, value: savedValueOf(key) }], {
-        sync: { [key]: null },
-      })
+      apply(
+        tr('params.act.useMine', { label: defOf(key)?.label ?? key }),
+        [{ key, value: savedValueOf(key) }],
+        { sync: { [key]: null } },
+      )
     },
-    [apply, defOf, savedValueOf],
+    [apply, defOf, savedValueOf, tr],
   )
 
   /**
@@ -2642,12 +2683,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           sync[d.paramKey] = 'hold'
         }
       }
-      apply(patches.length > 0 ? '采用云端新值' : '保持原样', patches, {
+      apply(patches.length > 0 ? tr('params.act.adoptSync') : tr('params.act.holdSync'), patches, {
         fromSync: patches.length > 0,
         sync,
       })
     },
-    [apply, syncByKey],
+    [apply, syncByKey, tr],
   )
 
   /** 已表态、还没保存的项数（底栏 / 横幅那句「N 项待保存」） */
@@ -2706,6 +2747,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     discardAll,
     save,
     savedNote,
+    savedTone,
     gateNote,
     undo,
     redo,

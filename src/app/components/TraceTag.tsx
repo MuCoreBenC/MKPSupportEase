@@ -1,5 +1,6 @@
 import { useState } from 'react'
 
+import { useT } from '../../i18n'
 import s from './TraceTag.module.css'
 
 interface TraceTagProps {
@@ -16,6 +17,7 @@ interface TraceTagProps {
  */
 export default function TraceTag({ traceId }: TraceTagProps) {
   const [copied, setCopied] = useState(false)
+  const tr = useT()
 
   if (!traceId || traceId === '-') return null
 
@@ -30,8 +32,8 @@ export default function TraceTag({ traceId }: TraceTagProps) {
   }
 
   return (
-    <button type="button" className={s.tag} onClick={copy} title="点击复制 traceId（查日志用）">
-      {copied ? '已复制' : `#${traceId.slice(0, 8)}`}
+    <button type="button" className={s.tag} onClick={copy} title={tr('trace.copy')}>
+      {copied ? tr('trace.copied') : `#${traceId.slice(0, 8)}`}
     </button>
   )
 }

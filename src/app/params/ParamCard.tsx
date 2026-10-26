@@ -38,6 +38,7 @@
 
 import type { ReactNode } from 'react'
 import type { ParamSyncEntry } from '../../api'
+import { useT } from '../../i18n'
 import Highlight from './highlight'
 import { valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
@@ -231,6 +232,7 @@ export default function ParamCard({
   query = '',
   valueOverrides,
 }: Props) {
+  const tr = useT()
   /** 行上的显示值：拖动中的临时值优先（见 Props.valueOverrides） */
   const shownValueOf = (key: string): string => valueOverrides?.[key] ?? valueOf(key)
   /*
@@ -280,7 +282,7 @@ export default function ParamCard({
   const condTagOf = (cond: NonNullable<ShowWhen>): string => {
     const def = defByKey.get(cond.key)
     if (def === undefined) return `${cond.key} ${TAG_OP[cond.op]} ${String(cond.value)}`
-    return `${def.label} ${TAG_OP[cond.op]} ${valueText(def, cond.value)}`
+    return `${def.label} ${TAG_OP[cond.op]} ${valueText(def, cond.value, tr)}`
   }
 
   /*
@@ -339,7 +341,7 @@ export default function ParamCard({
       const tagText = condTagOf(node.cond)
       const condDef = defByKey.get(node.cond.key)
       const valueLabel =
-        condDef !== undefined ? valueText(condDef, node.cond.value) : String(node.cond.value)
+        condDef !== undefined ? valueText(condDef, node.cond.value, tr) : String(node.cond.value)
       const directRows = node.items.filter((it): it is RowNode => it.kind === 'row')
       const switchable =
         node.cond.op === 'eq' &&

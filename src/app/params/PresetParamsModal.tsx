@@ -23,6 +23,7 @@
 
 import { Modal } from '../../components/modal'
 import type { Density } from '../../hooks/useDensity'
+import { useT } from '../../i18n'
 import PageParams from './PageParams'
 
 interface Props {
@@ -48,10 +49,11 @@ export default function PresetParamsModal({
   host = null,
   onClose,
 }: Props) {
+  const tr = useT()
   return (
     <Modal
       open={open}
-      title="修改参数"
+      title={tr('params.modal.title')}
       /*
        * 副标题 = **文件名**（照 a05 那一版：大标题是「修改参数」，文件名摆在它下面）。
        * 原来那句 38 字的长文在窄屏上要占两行。
@@ -62,7 +64,7 @@ export default function PresetParamsModal({
       host={host}
       /* 框里有没保存的改动（草稿在盘上）—— 手滑点一下遮罩不该把关掉变成丢东西 */
       closeOnScrim={false}
-      closeTitle="关掉（没保存的改动还在草稿里，回来接着改）"
+      closeTitle={tr('params.modal.closeTitle')}
       onClose={onClose}
     >
       {/*

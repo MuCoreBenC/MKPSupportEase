@@ -40,7 +40,7 @@
 
 import { useCallback, useState } from 'react'
 import type { ParamSyncEntry } from '../../api'
-import { t, type StringKey } from '../../i18n'
+import { t, useT, type StringKey } from '../../i18n'
 import FieldControl from '../../components/field/FieldControl'
 import Highlight from './highlight'
 import { valueText } from './useParams'
@@ -178,13 +178,15 @@ export default function ParamRow({
   readonly = false,
   query = '',
 }: Props) {
+  /* 这一行的话术入口：语言一变整行重渲染（`t` 那个模块级出口不订阅语言） */
+  const tr = useT()
   const blocked = blockedBy !== null
   /* 已弃用：第三档，不并进 blocked —— 见文件头。判据只有这一处（定义通道带的原词） */
   const dep = def.deprecated
   /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
   const locked = blocked || dep
-  const savedText = valueText(def, savedValue)
-  const factoryText = valueText(def, factoryValue)
+  const savedText = valueText(def, savedValue, tr)
+  const factoryText = valueText(def, factoryValue, tr)
 
   /*
    * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
@@ -214,8 +216,8 @@ export default function ParamRow({
   const diffText =
     sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
       ? t('params.cloudArrow', {
-          before: valueText(def, sync.baselineOld),
-          after: valueText(def, sync.cloudNew),
+          before: valueText(def, sync.baselineOld, tr),
+          after: valueText(def, sync.cloudNew, tr),
         })
       : null
   /*
@@ -228,8 +230,8 @@ export default function ParamRow({
   const mineToCloud =
     sync !== undefined && prevOrLocal !== null && sync.cloudNew !== null
       ? t('params.mineArrow', {
-          before: valueText(def, prevOrLocal),
-          after: valueText(def, sync.cloudNew),
+          before: valueText(def, prevOrLocal, tr),
+          after: valueText(def, sync.cloudNew, tr),
         })
       : diffText
 
@@ -349,12 +351,14 @@ export default function ParamRow({
               disabled={syncBusy || sync?.cloudNew === null}
               title={
                 sync?.cloudNew === null
-                  ? '云端当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
-                  : `采用云端新值：把这一项写成 ${diffText ?? '云端当前值'}（先写进草稿，保存才落盘）`
+                  ? tr('params.row.adoptTitleNoCloud')
+                  : tr('params.row.adoptTitle', {
+                    value: diffText ?? tr('params.row.cloudCurrent'),
+                  })
               }
               onClick={() => onAdoptSync(def.key)}
             >
-              用新值
+              {tr('params.row.adopt')}
             </button>
           )}
           {syncPending && syncDraftKind === null && onHoldSync !== undefined && (
@@ -362,10 +366,10 @@ export default function ParamRow({
               type="button"
               className={s.syncBtnGhost}
               disabled={syncBusy}
-              title={`保持原样：这一项写着的 ${savedText} 一个字不动（保存时一并记下"这一版不跟"）`}
+              title={tr('params.row.holdTitle', { value: savedText })}
               onClick={() => onHoldSync(def.key)}
             >
-              保持原样
+              {tr('params.row.hold')}
             </button>
           )}
           {/* 已保持还想改用云端新值：给一条回头路，不用先撤销再重来 */}
@@ -374,10 +378,10 @@ export default function ParamRow({
               type="button"
               className={s.syncBtn}
               disabled={syncBusy || sync?.cloudNew === null}
-              title="改用云端新值（先写进草稿，保存才落盘）"
+              title={tr('params.row.adoptShortTitle')}
               onClick={() => onAdoptSync(def.key)}
             >
-              改用新值
+              {tr('params.row.adoptShort')}
             </button>
           )}
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
@@ -386,7 +390,7 @@ export default function ParamRow({
             <button
               type="button"
               className={s.restore}
-              title={`还原为已保存的 ${savedText}（数据包里是 ${factoryText}）`}
+              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
               onClick={() => {
                 onRevertToSaved(def.key)
                 setResetNonce((n) => n + 1)
@@ -397,13 +401,13 @@ export default function ParamRow({
             </button>
           )}
           {dep && (
-            <span className={s.depBadge} title="该参数已弃用，不再写入新预设">
-              已弃用
+            <span className={s.depBadge} title={tr('params.row.deprecatedBadgeTitle')}>
+              {tr('params.row.deprecatedBadge')}
             </span>
           )}
           {readonly ? (
             /* 只读态：纯文本值（编辑模式之外的那一态，见 Props.readonly） */
-            <span className={s.roVal}>{valueText(def, value)}</span>
+            <span className={s.roVal}>{valueText(def, value, tr)}</span>
           ) : def.field.control === 'number' ? (
             /*
              * 数字步进器包一层同款的 `.edNum`（作者：「我专门调整过的，应该可以复用」）：
@@ -455,20 +459,20 @@ export default function ParamRow({
           */}
           {dep && (
             <>
-              <dt className={s.dt}>状态</dt>
+              <dt className={s.dt}>{tr('params.row.dt.status')}</dt>
               <dd className={s.ddDep}>
-                已弃用 —— 该参数不再写入新预设，此处仅供查看（上游注册表已标记）
+                {tr('params.row.deprecatedNote')}
               </dd>
             </>
           )}
-          <dt className={s.dt}>说明</dt>
+          <dt className={s.dt}>{tr('params.row.dt.desc')}</dt>
           <dd className={s.dd}>
             <Highlight
-              text={def.desc === '' ? '注册表里没写说明' : def.desc}
+              text={def.desc === '' ? tr('params.row.noDesc') : def.desc}
               query={query}
             />
           </dd>
-          <dt className={s.dt}>取值范围</dt>
+          <dt className={s.dt}>{tr('params.row.dt.range')}</dt>
           <dd className={s.dd}>
             <Highlight text={choicesText(def)} query={query} />
           </dd>
@@ -478,7 +482,7 @@ export default function ParamRow({
             控件（开关 / 分段 / 步进器）说的是「画成什么」，类型说的是「值是什么」，
             两者不是一回事（开关是 bool，下拉是 string）。
           */}
-          <dt className={s.dt}>类型</dt>
+          <dt className={s.dt}>{tr('params.row.dt.type')}</dt>
           <dd className={s.dd}>
             {t(TYPE_TEXT[def.meta?.valueType ?? 'string'])}
             <span className={s.typeKey}> {def.meta?.valueType ?? 'string'}</span>
@@ -486,18 +490,21 @@ export default function ParamRow({
           {/* 条件：这条什么条件下才显示 —— 同样来自包里的 showWhen */}
           {def.meta?.showWhen !== undefined && (
             <>
-              <dt className={s.dt}>显示条件</dt>
+              <dt className={s.dt}>{tr('params.row.dt.showWhen')}</dt>
               <dd className={s.dd}>
-                要「{def.meta.showWhen.key}」{OP_TEXT[def.meta.showWhen.op]}{' '}
-                {String(def.meta.showWhen.value)} 才显示
+                {tr('params.row.showWhen', {
+                  key: def.meta.showWhen.key,
+                  op: OP_TEXT[def.meta.showWhen.op],
+                  value: String(def.meta.showWhen.value),
+                })}
               </dd>
             </>
           )}
-          <dt className={s.dt}>字段名</dt>
+          <dt className={s.dt}>{tr('params.row.dt.field')}</dt>
           <dd className={s.ddKey}>
             <Highlight text={def.meta?.tomlKey ?? def.key} query={query} />
           </dd>
-          <dt className={s.dt}>已保存值</dt>
+          <dt className={s.dt}>{tr('params.row.dt.saved')}</dt>
           <dd className={s.dd}>
             <Highlight text={savedText} query={query} />
           </dd>
@@ -505,9 +512,9 @@ export default function ParamRow({
               标签要短 —— dt 列窄，「上一次保存前」「数据包里的值」都会挤成两行（作者 2026-10-21） */}
           {prevSavedValue !== null && prevSavedValue !== savedValue && (
             <>
-              <dt className={s.dt}>上次保存前</dt>
+              <dt className={s.dt}>{tr('params.row.dt.prevSaved')}</dt>
               <dd className={s.dd}>
-                <Highlight text={valueText(def, prevSavedValue)} query={query} />
+                <Highlight text={valueText(def, prevSavedValue, tr)} query={query} />
               </dd>
             </>
           )}
@@ -516,14 +523,18 @@ export default function ParamRow({
             `values`）—— 客户端不做继承推导，包里也没有「出厂 / 机型 / 版本」这三层。
             所以标签照实改成「数据包里的值」：它和「已保存值」比，正好说明本机改没改过。
           */}
-          <dt className={s.dt}>包里的值</dt>
+          <dt className={s.dt}>{tr('params.row.dt.package')}</dt>
           <dd className={s.dd}>
             <Highlight text={factoryText} query={query} />
           </dd>
-          <dt className={s.dt}>作用域</dt>
+          <dt className={s.dt}>{tr('params.row.dt.scope')}</dt>
           <dd className={s.dd}>
             <Highlight
-              text={def.meta?.scope === 'machine_specific' ? '机型专属' : '全机型通用'}
+              text={
+                def.meta?.scope === 'machine_specific'
+                  ? tr('params.row.scopeMachine')
+                  : tr('params.row.scopeAll')
+              }
               query={query}
             />
           </dd>
@@ -539,43 +550,54 @@ export default function ParamRow({
            */}
           {sync !== undefined && (sync.pending || sync.decided !== null) && (
             <aside className={s.cloudPane}>
-              <h5 className={s.cloudTitle}>云端更新</h5>
+              <h5 className={s.cloudTitle}>{tr('params.row.cloud')}</h5>
               <dl className={s.cloudList}>
-                <dt>我的值</dt>
+                <dt>{tr('params.row.cloudMine')}</dt>
                 <dd>
-                  {sync.local === null ? '文件里没有这一项' : valueText(def, sync.local)}
+                  {sync.local === null
+                    ? tr('params.row.cloudMissing')
+                    : valueText(def, sync.local, tr)}
                 </dd>
                 {/* 保存过后「我的值」已经是新值了 —— 旧值单摆一行，别让它消失（2026-10-21） */}
                 {!sync.pending && prevSavedValue !== null && prevSavedValue !== sync.local && (
                   <>
-                    <dt>保存前</dt>
-                    <dd>{valueText(def, prevSavedValue)}</dd>
+                    <dt>{tr('params.row.cloudPrev')}</dt>
+                    <dd>{valueText(def, prevSavedValue, tr)}</dd>
                   </>
                 )}
-                <dt>云端旧值</dt>
-                <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld)}</dd>
-                <dt>云端新值</dt>
-                <dd>{sync.cloudNew === null ? '还没取回' : valueText(def, sync.cloudNew)}</dd>
+                <dt>{tr('params.row.cloudOld')}</dt>
+                <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld, tr)}</dd>
+                <dt>{tr('params.row.cloudNew')}</dt>
+                <dd>
+                  {sync.cloudNew === null
+                    ? tr('params.row.cloudNotFetched')
+                    : valueText(def, sync.cloudNew, tr)}
+                </dd>
               </dl>
               <p className={s.cloudState} data-state={syncDraftKind ?? sync.decided ?? 'pending'}>
                 {syncDraftKind === 'adopt'
-                  ? '这次改动里已采用云端新值（保存才落盘）'
+                  ? tr('params.row.stateAdopt')
                   : syncDraftKind === 'hold'
-                    ? '这次改动里保持原样（保存时记下这一版不跟）'
+                    ? tr('params.row.stateHold')
                     : syncDraftKind === null && sync.pending
-                      ? '还没选：用新值 / 保持原样'
+                      ? tr('params.row.stateUndecided')
                       : sync.decided === 'adopt'
-                        ? '上一次保存已采用云端新值'
-                        : '上一次保存保持了原样'}
+                        ? tr('params.row.stateSavedAdopt')
+                        : tr('params.row.stateSavedHold')}
               </p>
               {syncDraftKind === 'adopt' && onUseMyValue !== undefined && (
                 <button
                   type="button"
                   className={s.cloudRevert}
-                  title={`把这一项退回你原来的 ${sync.local === null ? '值' : valueText(def, sync.local)}`}
+                  title={tr('params.row.useMineTitle', {
+                    value:
+                      sync.local === null
+                        ? tr('params.row.useMineValue')
+                        : valueText(def, sync.local, tr),
+                  })}
                   onClick={() => onUseMyValue(def.key)}
                 >
-                  用回我的值
+                  {tr('params.row.useMine')}
                 </button>
               )}
             </aside>

@@ -6,10 +6,12 @@
  */
 
 import { createPortal } from 'react-dom'
+import { useT } from '../../i18n'
 import { dismiss, useNotices, type Notice } from './notify'
 import s from './NotifyHost.module.css'
 
 function NoticeCard({ n }: { n: Notice }) {
+  const tr = useT()
   return (
     <div className={s.card} data-kind={n.kind} role="status" aria-live="polite">
       <span className={s.dot} aria-hidden="true" />
@@ -46,7 +48,7 @@ function NoticeCard({ n }: { n: Notice }) {
       </div>
 
       {n.closable !== false && (
-        <button type="button" className={s.close} aria-label="关闭" onClick={() => dismiss(n.id)}>
+        <button type="button" className={s.close} aria-label={tr('common.close')} onClick={() => dismiss(n.id)}>
           ×
         </button>
       )}

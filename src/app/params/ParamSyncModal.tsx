@@ -173,7 +173,7 @@ export default function ParamSyncModal({
   const cleanChosen = pending.filter(
     (e) => checked[e.key] === true && !e.conflict && !neverPreset(e.key),
   ).length
-  const text = (key: string, raw: string): string => valueText(defOf(key), raw)
+  const text = (key: string, raw: string): string => valueText(defOf(key), raw, tr)
   const afterOf = (e: ParamSyncEntry): string => {
     if (checked[e.key] === true) {
       return e.cloudNew === null ? '—' : text(e.key, e.cloudNew)

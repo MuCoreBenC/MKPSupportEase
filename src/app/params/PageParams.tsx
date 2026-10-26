@@ -126,6 +126,9 @@ function towerNumOf(raw: string, fallback: number): number {
 function towerSlotOf(
   u: ReturnType<typeof useParams>,
   disabled: boolean,
+  /* 拖动落定那一下进撤销栈的名字（修改历史里显示的那一条）——
+     由组件按当前语言取好传进来，这一层不碰字典 */
+  moveLabel: string,
   onDrag?: (pos: { x: number; y: number } | null) => void,
 ): TowerSlot | undefined {
   const dims = u.machine?.dimensions ?? null
@@ -187,7 +190,7 @@ function towerSlotOf(
         /* 拖动中的位置往上抛：页面拿它喂右侧 X/Y 两格的显示（草稿不动） */
         onDrag={onDrag}
         onCommit={(nx, ny) =>
-          u.apply('移动擦料塔', [
+          u.apply(moveLabel, [
             { key: xDef.key, value: String(nx) },
             { key: yDef.key, value: String(ny) },
           ])
@@ -681,14 +684,14 @@ export default function PageParams({
       entries.push({
         key: def.key,
         label: def.label,
-        from: valueText(def, u.savedValueOf(def.key)),
-        to: valueText(def, u.valueOf(def.key)),
+        from: valueText(def, u.savedValueOf(def.key), tr),
+        to: valueText(def, u.valueOf(def.key), tr),
         /* 即时校验的同一份判据（见 invalidNumberText）：超范围的项不许保存 */
-        bad: invalidNumberText(def, u.valueOf(def.key)),
+        bad: invalidNumberText(def, u.valueOf(def.key), tr),
       })
     }
     return entries
-  }, [u])
+  }, [u, tr])
   /* 超出取值范围的改动 —— 弹层里列出来、把「确认保存」灰掉（作者 2026-10-20） */
   const invalidEntries = changedEntries.filter((e) => e.bad !== null)
 
@@ -783,7 +786,7 @@ export default function PageParams({
       const result = u.revertEntry(entry)
       const first = entry.items[0]
       const many = entry.items.length > 1
-      const target = first === undefined ? '' : valueText(u.defOf(first.key), first.from)
+      const target = first === undefined ? '' : valueText(u.defOf(first.key), first.from, tr)
       const label = first?.label ?? tr('params.thisItem')
 
       const next =
@@ -826,7 +829,7 @@ export default function PageParams({
   const onTowerDrag = useCallback((pos: { x: number; y: number } | null) => setTowerDrag(pos), [])
 
   /** 擦料塔地图的供数（见 towerSlotOf）：坐标字段不在 / 没配尺寸时是 undefined，坐标行照旧 */
-  const tower = towerSlotOf(u, ro, onTowerDrag)
+  const tower = towerSlotOf(u, ro, tr('params.moveTower'), onTowerDrag)
   /**
    * 拖动期间那一卡里 X/Y 两行该显示什么：**临时值优先**。
    *
@@ -997,11 +1000,8 @@ export default function PageParams({
     return (
       <div className={s.page} data-density={density}>
         <div className={s.emptyBox}>
-          <h2 className={s.emptyTitle}>读不到参数目录</h2>
-          <p className={s.emptyText}>
-            参数页画什么（页签、分组、每条的控件与类型、什么条件下显示）全部来自随安装包
-            走的那份目录（catalog）—— 读不到它时，这一页没有东西可画，也不编一份假的。
-          </p>
+          <h2 className={s.emptyTitle}>{tr('params.noCatalog.title')}</h2>
+          <p className={s.emptyText}>{tr('params.noCatalog.body')}</p>
           <p className={s.emptyText}>{u.error}</p>
         </div>
       </div>
@@ -1027,10 +1027,10 @@ export default function PageParams({
       className={s.historyBtn}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
-      title={historyOpen ? '收起修改历史' : '修改历史'}
+      title={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
       onClick={() => setHistoryOpen((v) => !v)}
     >
-      修改历史
+      {tr('params.historyDrawer')}
       {u.historyItemCount > 0 && <span className={s.detailCount}>{u.historyItemCount}</span>}
     </button>
   )
@@ -1108,14 +1108,15 @@ export default function PageParams({
    *
    * 单独当页用（没有槽）时同一份落回内容区顶上 —— 一套代码两种住处。
    */
-  const noteBad =
-    u.savedNote !== null &&
-    (u.savedNote.startsWith('保存失败') || u.savedNote.startsWith('这份没有可保存'))
+  /* 语气由 `useParams` 给（`savedTone`），**不再从文案前缀猜** —— 文案随语言走，
+     拿「保存失败」开头去判红绿，一翻英文就全绿了 */
   const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
-    if (u.draftError !== null) return { text: `草稿没写进磁盘：${u.draftError}`, tone: 'bad' }
+    if (u.draftError !== null) {
+      return { text: tr('params.draftError', { detail: u.draftError }), tone: 'bad' }
+    }
     if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
     if (u.savedNote === null) return null
-    return { text: u.savedNote, tone: noteBad ? 'bad' : 'ok' }
+    return { text: u.savedNote, tone: u.savedTone }
   })()
   const headNoteNode =
     headNote === null ? null : (
@@ -1136,7 +1137,7 @@ export default function PageParams({
             <header className={s.head}>
               <div className={s.headTop}>
                 {/* 嵌在模态框里时不画页面大标题 —— 外面那个框的标题就是这一份的名字 */}
-                {!embedded && <h2 className={s.pageTitle}>修改参数</h2>}
+                {!embedded && <h2 className={s.pageTitle}>{tr('params.modal.title')}</h2>}
 
                 {/*
                  * 预设选择器：一个文件名 pill + 「切换」小字，点开抽屉。
@@ -1157,13 +1158,13 @@ export default function PageParams({
                     ref={pillRef}
                     title={
                       inactive
-                        ? `当前预设 ${pillLabel}（未应用）· 点击切换`
-                        : `当前预设 ${pillLabel} · 点击切换`
+                        ? tr('params.pill.inactive', { name: pillLabel })
+                        : tr('params.pill.active', { name: pillLabel })
                     }
                     onClick={() => setPickerOpen((v) => !v)}
                   >
                     <span className={s.presetName}>{pillLabel}</span>
-                    <span className={s.presetSwitch}>切换</span>
+                    <span className={s.presetSwitch}>{tr('params.pill.switch')}</span>
                   </button>
                 )}
 
@@ -1220,7 +1221,7 @@ export default function PageParams({
                     /* 收起来的时候筛选**还在生效**（`query` 没清）—— 这件事要说出来，
                        否则"怎么只剩三条"会没头没脑 */
                     data-on={query !== ''}
-                    aria-label="搜索参数"
+                    aria-label={tr('params.search.aria')}
                     aria-expanded={false}
                     onClick={() => {
                       wantSearchFocus.current = true
@@ -1254,27 +1255,27 @@ export default function PageParams({
                 <span className={s.syncBarText}>
                   {syncUndecided === 0 ? (
                     <>
-                      云端更新已选 <b>{u.syncDirty}</b> 项 —— 点「保存」才写进这份文件
+                      {tr('params.sync.noticeDirty', { count: u.syncDirty })}
                       {u.sync?.currentReleaseTime != null
-                        ? `（云端 ${u.sync.currentReleaseTime}）`
+                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
                         : ''}
                     </>
                   ) : (
                     <>
-                      云端更新待选择 <b>{syncUndecided}</b> 项
+                      {tr('params.sync.noticePending', { count: syncUndecided })}
                       {u.sync?.currentReleaseTime != null
-                        ? `（云端 ${u.sync.currentReleaseTime}）`
+                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
                         : ''}
                       {u.syncDirty > 0 && (
                         <span className={s.syncBarHint}>
-                          （另有 {u.syncDirty} 项已选好、等保存）
+                          {tr('params.sync.noticeChosen', { count: u.syncDirty })}
                         </span>
                       )}
                     </>
                   )}
                   {syncUndecided > 0 && (
                     <span className={s.syncBarHint}>
-                      —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
+                      {tr('params.sync.noticeHint')}
                     </span>
                   )}
                 </span>
@@ -1290,7 +1291,7 @@ export default function PageParams({
                     setSyncOpen(true)
                   }}
                 >
-                  选择要更新的参数
+                  {tr('params.sync.title')}
                 </button>
               </div>
             )}
@@ -1302,11 +1303,11 @@ export default function PageParams({
             {u.pendingCount === 0 && u.syncNeedsFetch && (
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
-                  云端发了新版
+                  {tr('params.sync.newVersion')}
                   {u.sync?.basedOnReleaseTime != null
-                    ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）`
+                    ? tr('params.sync.basedOn', { time: u.sync.basedOnReleaseTime })
                     : ''}
-                  <span className={s.syncBarHint}>—— 点右边先看看它改了哪几项</span>
+                  <span className={s.syncBarHint}>{tr('params.sync.peekHint')}</span>
                 </span>
                 <button
                   type="button"
@@ -1318,11 +1319,13 @@ export default function PageParams({
                     void u.fetchSync().then(() => setSyncOpen(true))
                   }}
                 >
-                  {u.syncFetching ? '正在取回…' : '选择要更新的参数'}
+                  {u.syncFetching ? tr('params.sync.fetching') : tr('params.sync.title')}
                 </button>
               </div>
             )}
-            {u.syncError !== null && <p className={s.warn}>云端更新这一条读不出来：{u.syncError}</p>}
+            {u.syncError !== null && (
+              <p className={s.warn}>{tr('params.sync.error', { detail: u.syncError })}</p>
+            )}
 
             {/*
               那一句状态：嵌入模态框时它住在**标题右边**（见 `headNoteNode` 那段）；
@@ -1334,9 +1337,7 @@ export default function PageParams({
               </p>
             )}
             {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (
-              <p className={s.warn}>
-                这个版本没配 MKP 预设文件 —— 改动不会保存在任何文件里（只在这一屏）
-              </p>
+              <p className={s.warn}>{tr('params.noMkpFile')}</p>
             )}
 
             {/*
@@ -1360,7 +1361,7 @@ export default function PageParams({
                   <>
                     {renderCards(shown)}
                     {searching && shown.length === 0 && (
-                      <p className={s.empty}>没有匹配的参数，换个词试试</p>
+                      <p className={s.empty}>{tr('params.noMatch')}</p>
                     )}
                   </>
                 )}
@@ -1435,7 +1436,7 @@ export default function PageParams({
                  * 全部参数回出厂值，虽然在撤销栈里、也不该挨着保存键）。
                  */}
                 <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
-                  恢复默认值
+                  {tr('params.restoreDefaults')}
                 </button>
                 <span className={s.state} title={stateText}>
                   {stateText}
@@ -1454,8 +1455,8 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canUndo}
                   onClick={u.undo}
-                  title="撤销（Ctrl+Z）"
-                  aria-label="撤销"
+                  title={tr('params.undoTitle')}
+                  aria-label={tr('params.undo')}
                   aria-keyshortcuts="Control+Z"
                 >
                   <Icon name="undo" size={15} />
@@ -1465,8 +1466,8 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canRedo}
                   onClick={u.redo}
-                  title="重做（Ctrl+Y）"
-                  aria-label="重做"
+                  title={tr('params.redoTitle')}
+                  aria-label={tr('params.redo')}
                   aria-keyshortcuts="Control+Y"
                 >
                   <Icon name="redo" size={15} />
@@ -1496,7 +1497,7 @@ export default function PageParams({
                   aria-keyshortcuts="Control+S"
                   onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >
-                  保存
+                  {tr('common.save')}
                 </button>
               </div>
             </>
@@ -1509,21 +1510,26 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="丢弃改动"
+              aria-label={tr('params.discard')}
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className={s.sheetTitle}>
-                切换到 {u.pendingCombo.machineId} · {u.pendingCombo.versionId}？
+                {tr('params.switchCombo.title', {
+                  machine: u.pendingCombo.machineId,
+                  version: u.pendingCombo.versionId,
+                })}
               </h3>
               <p className={s.sheetText}>
-                当前有 <b>{u.dirtyCount} 处未保存的改动</b>，切过去就丢了（修改历史也会清空）。
+                {tr('params.switchCombo.bodyPre')}
+                <b>{tr('params.switchCombo.bodyCount', { count: u.dirtyCount })}</b>
+                {tr('params.switchCombo.bodyPost')}
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={u.cancelPending}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button type="button" className={s.danger} onClick={u.confirmPending}>
-                  丢弃并切换
+                  {tr('params.switchCombo.discard')}
                 </button>
               </div>
             </div>
@@ -1540,19 +1546,23 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="丢弃改动"
+              aria-label={tr('params.discard')}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className={s.sheetTitle}>切换到 {u.pendingFile.fileName}？</h3>
+              <h3 className={s.sheetTitle}>
+                {tr('params.switchFile.title', { file: u.pendingFile.fileName })}
+              </h3>
               <p className={s.sheetText}>
-                当前有 <b>{u.dirtyCount} 处未保存的改动</b>，切过去就丢了（修改历史也会清空）。
+                {tr('params.switchCombo.bodyPre')}
+                <b>{tr('params.switchCombo.bodyCount', { count: u.dirtyCount })}</b>
+                {tr('params.switchCombo.bodyPost')}
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={u.cancelPending}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button type="button" className={s.danger} onClick={u.confirmPendingFile}>
-                  丢弃并切换
+                  {tr('params.switchCombo.discard')}
                 </button>
               </div>
             </div>
@@ -1564,22 +1574,21 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="恢复默认值"
+              aria-label={tr('params.restoreDefaults')}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className={s.sheetTitle}>恢复默认值</h3>
+              <h3 className={s.sheetTitle}>{tr('params.restoreDefaults')}</h3>
               <p className={s.sheetText}>
                 {/*
                  * 退回的是**目录里的出厂值**（2026-10-08 资源库改判）：那套"退到这份预设
                  * 当初那版云端的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
                  * 都要按「保存修改」才落地。
                  */}
-                会把全部参数改回出厂设置。
-                它算<b>一次</b>改动，<b>按「撤销」可以整个退回来</b>；要落地还得按「保存修改」。
+                {tr('params.restore.body')}
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskRestore(false)}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -1589,7 +1598,7 @@ export default function PageParams({
                     setAskRestore(false)
                   }}
                 >
-                  恢复默认值
+                  {tr('params.restoreDefaults')}
                 </button>
               </div>
             </div>
@@ -1601,10 +1610,10 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="保存确认"
+              aria-label={tr('params.save.aria')}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className={s.sheetTitle}>确认保存？</h3>
+              <h3 className={s.sheetTitle}>{tr('params.save.title')}</h3>
               {/*
                 落点按**编辑目标**说（A1 统一口径，与 Rust 侧 `commit_preset_draft` 的两条
                 落点一一对应）：云端底稿 → 另存成你自己的一份（原件一个字不动）；
@@ -1614,19 +1623,28 @@ export default function PageParams({
               <p className={s.sheetText}>
                 {u.editingPreset?.origin === 'local' ? (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会写回你自己那一份{' '}
-                    <b>{fileLabel}</b>：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.writeBackMid')}
+                    <b>{fileLabel}</b>
+                    {tr('params.save.colon')}
                   </>
                 ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
-                    presets-local/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
-                    （云端原件一个字不动）：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.saveAsMid')}
+                    {tr('params.save.colon')}
+                    presets-local/
+                    <b>{fileLabel.replace(/\.([a-z0-9]+)$/i, `${tr('params.save.modifiedSuffix')}.$1`)}</b>
+                    {tr('params.save.untouchedTail')}
                   </>
                 ) : (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
-                    （presets-local/，云端原件一个字不动）：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.saveAsMid')}
+                    {tr('params.save.saveAsLocalTail')}
                   </>
                 )}
               </p>
@@ -1641,7 +1659,7 @@ export default function PageParams({
                 ))}
                 {changedEntries.length > MAX_CONFIRM_ITEMS && (
                   <li className={s.changeMore}>
-                    …… 还有 {changedEntries.length - MAX_CONFIRM_ITEMS} 项
+                    {tr('params.save.more', { count: changedEntries.length - MAX_CONFIRM_ITEMS })}
                   </li>
                 )}
               </ul>
@@ -1653,12 +1671,18 @@ export default function PageParams({
               {invalidEntries.length > 0 && (
                 <div className={s.sheetWarn} role="alert">
                   <p className={s.sheetWarnTitle}>
-                    有 <b>{invalidEntries.length}</b> 处超出取值范围，不能保存：
+                    {tr('params.save.invalidLead')}
+                    <b>{invalidEntries.length}</b>
+                    {tr('params.save.invalidTail')}
                   </p>
                   <ul className={s.sheetWarnList}>
                     {invalidEntries.map((e) => (
                       <li key={e.key}>
-                        {e.label} —— {e.bad}（当前 {e.to}）
+                        {tr('params.save.invalidRow', {
+                          label: e.label,
+                          bad: e.bad ?? '',
+                          to: e.to,
+                        })}
                       </li>
                     ))}
                   </ul>
@@ -1666,16 +1690,16 @@ export default function PageParams({
               )}
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskSave(false)}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button
                   type="button"
                   className={s.primary}
                   disabled={invalidEntries.length > 0}
-                  title={invalidEntries.length > 0 ? '先把超范围的值改回范围内再保存' : undefined}
+                  title={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
                   onClick={confirmSave}
                 >
-                  确认保存
+                  {tr('params.save.confirm')}
                 </button>
               </div>
             </div>

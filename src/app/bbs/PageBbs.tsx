@@ -573,7 +573,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           <button
             type="button"
             className={s.scrim}
-            aria-label="关闭预设列表"
+            aria-label={tr('bbs.closeList')}
             onClick={() => setDrawerOpen(false)}
           />
         )}
@@ -603,9 +603,9 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
                 className={s.iconBtn}
                 onClick={openRail}
                 title={preset.error !== ''
-                  ? `详情：统计 · 继承链 · 说明（有一条错误：${preset.error}）`
-                  : '详情：统计 · 继承链 · 说明'}
-                aria-label="详情"
+                  ? tr('bbs.detailTitleError', { error: preset.error })
+                  : tr('bbs.detailTitle')}
+                aria-label={tr('bbs.detail')}
               >
                 <Icon name="doc" size={16} />
                 {preset.error !== '' && <span className={s.iconDot} />}
@@ -616,7 +616,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           {/* 命中全在别的页：列出来，**点了才切**（你说的不自动跳） */}
           {searching && panel.stats.hits > 0 && active?.hitCount === 0 && (
             <p className={s.hintBar}>
-              这一页没有命中，命中在：
+              {tr('bbs.hitsElsewhere')}
               {panel.pages.filter((p) => p.hitCount > 0).map((p) => (
                 <button
                   key={p.id}
@@ -633,9 +633,12 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           {/* 一个都没命中：照常显示全部行，不清空 —— 清空了你就没法确认「是真没有」 */}
           {searching && panel.stats.hits === 0 && (
             <p className={s.hintBar}>
-              没有匹配「{paramQuery.trim()}」的参数
+              {tr('bbs.noMatch', { query: paramQuery.trim() })}
               {panel.stats.hiddenHits > 0
-                && `（有 ${panel.stats.hiddenHits} 个在「跟 BBS 一样」收起的行里）`}
+                && tr('bbs.hiddenHitsNote', {
+                  count: panel.stats.hiddenHits,
+                  same: tr('bbs.rail.sameAsBbs'),
+                })}
             </p>
           )}
 
@@ -661,16 +664,16 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
             */}
             {data.sourceMode === 'none' && source === 'bbs' && (
               <p className={s.blank}>
-                没读到本机 BBS 预设目录：{data.sourceNote}
+                {tr('bbs.noSource', { note: data.sourceNote })}
                 <br />
-                这一页列的是你本机 Bambu Studio 里的工艺预设 —— 本版不打包预设快照。
+                {tr('bbs.noSourceDesc')}
                 <br />
-                装好 Bambu Studio（或它的 Beta），本页就能读到它的工艺预设。
+                {tr('bbs.noSourceHow')}
               </p>
             )}
             {(data.sourceMode === 'live' || source === 'mkp') && !active && (
               <p className={s.blank}>
-                这一档下没有可显示的参数。切回「全部参数」看看。
+                {tr('bbs.emptyScope', { all: tr('bbs.rail.allParams') })}
               </p>
             )}
             {/*
@@ -724,7 +727,11 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
             systemCount={systemCount}
             sync={data.sync}
             search={searching
-              ? `搜「${paramQuery.trim()}」· 命中 ${panel.stats.hits} 项（这一页 ${active?.hitCount ?? 0}）`
+              ? tr('bbs.rail.searchLine', {
+                query: paramQuery.trim(),
+                hits: panel.stats.hits,
+                page: active?.hitCount ?? 0,
+              })
               : null}
             note={[
               preset.note,
@@ -732,7 +739,11 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
               preset.importError,
               /* 被规则收起的行里也有命中 —— 闷着不说会让人以为搜索漏了 */
               searching && panel.stats.hiddenHits > 0
-                ? `另有 ${panel.stats.hiddenHits} 个命中在「跟 BBS 一样」收起的行里，切到「全部参数」能看到`
+                ? tr('bbs.rail.hiddenHitsLine', {
+                  count: panel.stats.hiddenHits,
+                  same: tr('bbs.rail.sameAsBbs'),
+                  all: tr('bbs.rail.allParams'),
+                })
                 : '',
             ].filter(Boolean).join(' · ')}
             error={preset.error}

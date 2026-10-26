@@ -528,6 +528,7 @@ impl Default for AppStateFile {
             preset_source: None,
             param_decisions: BTreeMap::new(),
             theme: None,
+            locale: None,
             auto_clean_history: None,
             pin: None,
             compact: None,
@@ -697,6 +698,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         param_decisions: BTreeMap::new(),
         /* 主题这一格是 2026-10-12 才有的：旧档里本来就没有它（没选过 = None） */
         theme: None,
+        /* 界面语言这一格是 2026-10-25 才有的：旧档里本来就没有它（没选过 = 跟随系统） */
+        locale: None,
         /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_clean_history: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */

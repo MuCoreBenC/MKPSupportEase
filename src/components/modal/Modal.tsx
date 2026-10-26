@@ -33,6 +33,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon'
+import { useT } from '../../i18n'
 import { ModalHeadNoteSlotContext, ModalHeadSlotContext } from './modalHeadSlot'
 import s from './Modal.module.css'
 
@@ -137,6 +138,7 @@ export default function Modal({
   onClose,
   children,
 }: ModalProps) {
+  const tr = useT()
   const boxRef = useRef<HTMLDivElement>(null)
   /*
    * 标题栏那颗**动作槽**的落点（`<span>` 元素）。框里的内容可以 portal 到这儿 ——
@@ -266,8 +268,8 @@ export default function Modal({
               <button
                 type="button"
                 className={s.close}
-                title={closeTitle ?? '关闭'}
-                aria-label="关闭"
+                title={closeTitle ?? tr('common.close')}
+                aria-label={tr('common.close')}
                 onClick={onClose}
               >
                 <Icon name="close" size={16} />
