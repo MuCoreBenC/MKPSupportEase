@@ -19,6 +19,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
 import type { ParamDef } from './useParams'
@@ -36,9 +37,9 @@ interface Props {
   onRevertToSaved: (key: string) => void
 }
 
-const MODES = [
-  { value: 'code', label: '代码' },
-  { value: 'view', label: '视图' },
+const MODES: { value: string; label: StringKey }[] = [
+  { value: 'code', label: 'params.gcode.code' },
+  { value: 'view', label: 'params.gcode.view' },
 ]
 
 const IS_COMMAND = /^[A-Za-z]\d+$/
@@ -67,6 +68,7 @@ export default function GcodeBlock({
   onEdit,
   onRevertToSaved,
 }: Props) {
+  const tr = useT()
   const [mode, setMode] = useState('view')
   const lines = parse(value)
 
@@ -118,23 +120,23 @@ export default function GcodeBlock({
           <span className={s.info} title={`${def.desc}\n${def.meta?.tomlKey ?? def.key}`} aria-hidden>
             ?
           </span>
-          {value.trim() !== '' && <span className={s.filled}>已填写</span>}
+          {value.trim() !== '' && <span className={s.filled}>{tr('params.gcode.filled')}</span>}
         </span>
         <span className={s.headRight}>
           {dirty && !disabled && (
             <button
               type="button"
               className={s.restore}
-              title={`还原为已保存的那一段（${savedValue.split('\n').length} 行）`}
+              title={tr('params.gcode.revertTitle', { lines: savedValue.split('\n').length })}
               onClick={() => onRevertToSaved(def.key)}
             >
-              ↩ 已保存的 {savedValue.split('\n').length} 行
+              {tr('params.gcode.revertLabel', { lines: savedValue.split('\n').length })}
             </button>
           )}
           <SegmentedField
             variant="segmented"
-            label={`${def.label} 显示方式`}
-            options={MODES}
+            label={tr('params.gcode.displayMode', { label: def.label })}
+            options={MODES.map((m) => ({ value: m.value, label: tr(m.label) }))}
             value={mode}
             onChange={setMode}
           />
@@ -173,7 +175,7 @@ export default function GcodeBlock({
               value={value}
               spellCheck={false}
               disabled={disabled}
-              aria-label={`${def.label} 代码`}
+              aria-label={tr('params.gcode.codeAria', { label: def.label })}
               onScroll={syncScroll}
               onChange={(e) => onEdit(def.key, e.target.value)}
             />
@@ -196,7 +198,7 @@ export default function GcodeBlock({
                       value={p}
                       spellCheck={false}
                       disabled={disabled}
-                      aria-label={`第 ${i + 1} 行参数 ${j + 1}`}
+                      aria-label={tr('params.gcode.argAria', { row: i + 1, col: j + 1 })}
                       onChange={(e) => replaceParam(i, j, e.target.value)}
                     />
                   ))}

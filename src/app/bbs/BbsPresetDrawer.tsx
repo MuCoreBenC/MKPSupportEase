@@ -14,6 +14,7 @@
  */
 
 import { useEffect, useMemo } from 'react'
+import { useT } from '../../i18n'
 import Icon from '../../components/Icon'
 import { SelectField } from '../../components/field'
 import BbsSearchBox from './BbsSearchBox'
@@ -114,6 +115,7 @@ export default function BbsPresetDrawer({
   loading,
   slicer,
 }: Props) {
+  const tr = useT()
   /*
    * 这一档里的项：列表分组与**机型下拉的选项**都从这儿来 —— 切到 MKP 之后下拉里就只剩
    * 那几台机。作者 2026-10-13：「这个下拉菜单它就不是说显示这么多的，要我们切换到了
@@ -153,13 +155,17 @@ export default function BbsPresetDrawer({
    */
   const targetOptions = useMemo(
     () => [
-      { value: MODEL_ALL, label: `全部（${liveCount}）` },
+      { value: MODEL_ALL, label: tr('bbs.drawer.allTargets', { count: liveCount }) },
       ...targets.map((t) => ({
         value: t.key,
-        label: t.level === 'nozzle' ? `\u3000${t.label}（${t.count}）` : `${t.label}（${t.count}）`,
+        /* 喷嘴那一档缩进一格：选项是 nowrap 的一行，普通空格会被折掉，所以用全角空格 */
+        label:
+          t.level === 'nozzle'
+            ? `\u3000${tr('bbs.drawer.target', { label: t.label, count: t.count })}`
+            : tr('bbs.drawer.target', { label: t.label, count: t.count }),
       })),
     ],
-    [targets, liveCount],
+    [targets, liveCount, tr],
   )
 
   return (
@@ -168,7 +174,7 @@ export default function BbsPresetDrawer({
       data-open={open}
       data-mode={mode}
       data-dragging={sizing.dragging ? 'true' : undefined}
-      aria-label="预设列表"
+      aria-label={tr('bbs.drawer.list')}
     >
       {/* `data-loading` 给头部那条扫动细线用（见 css）—— 读清单时它扫起来 */}
       <div className={s.head} data-loading={loading ? 'true' : undefined}>
@@ -188,17 +194,17 @@ export default function BbsPresetDrawer({
             定的是：左「MKP 工艺」、右「本机工艺」（两边都落在"工艺"这个词上，
             这一页的页签本来也叫「工艺」）。
         */}
-        <div className={s.sourceTabs} role="tablist" aria-label="预设来源">
+        <div className={s.sourceTabs} role="tablist" aria-label={tr('bbs.drawer.source')}>
           <button
             type="button"
             role="tab"
             className={s.sourceTab}
             data-on={source === 'mkp'}
             aria-selected={source === 'mkp'}
-            title="我们发的那几份工艺：预设页「切片器配置 → 云端」下载到本机的"
+            title={tr('bbs.drawer.mkpTitle')}
             onClick={() => onSource('mkp')}
           >
-            MKP 工艺
+            {tr('bbs.drawer.mkp')}
           </button>
           <button
             type="button"
@@ -206,17 +212,17 @@ export default function BbsPresetDrawer({
             className={s.sourceTab}
             data-on={source === 'bbs'}
             aria-selected={source === 'bbs'}
-            title="你这台机器上原有的：本机 Bambu Studio 里的预设（你自己存的 + 软件自带的）"
+            title={tr('bbs.drawer.localTitle')}
             onClick={() => onSource('bbs')}
           >
-            本机工艺
+            {tr('bbs.drawer.local')}
           </button>
         </div>
 
         <div className={s.headRow}>
           <span className={s.pickWrap}>
             <SelectField
-              label="按机型与喷嘴筛选"
+              label={tr('bbs.drawer.targetFilter')}
               value={targetValue}
               options={targetOptions}
               onChange={onTarget}
@@ -233,8 +239,8 @@ export default function BbsPresetDrawer({
               className={s.iconBtn}
               /* 读清单时它转起来 —— 这是"正在刷新这个列表"唯一的动效，不占一格位置 */
               data-loading={loading ? 'true' : undefined}
-              title="重扫本机：重新读一遍本机 Bambu Studio 的预设目录（刚在 BBS 里新建的工艺预设会出现在这个列表里）"
-              aria-label="重扫本机"
+              title={tr('bbs.drawer.rescanTitle')}
+              aria-label={tr('bbs.drawer.rescan')}
               onClick={rescan}
             >
               <Icon name="refresh" size={15} />
@@ -244,8 +250,8 @@ export default function BbsPresetDrawer({
 
         <BbsSearchBox
           value={query}
-          placeholder="搜索预设名…"
-          label="搜索预设名"
+          placeholder={tr('bbs.drawer.searchPlaceholder')}
+          label={tr('bbs.drawer.searchLabel')}
           variant="fill"
           onChange={onQuery}
         />
@@ -277,27 +283,26 @@ export default function BbsPresetDrawer({
         {!groups.length && (
           <p className={s.empty}>
             {loading
-              ? '正在读清单…'
+              ? tr('bbs.drawer.loading')
               : query
-                ? `没有名字含「${query}」的预设`
+                ? tr('bbs.drawer.noMatch', { query })
                 : source === 'mkp'
                   ? (slicer.ready > 0
                     /* 盘上有、却一份都没进清单 —— 只有"正文读不出来"这一种可能，
                        别把话说成"还没下载"（那是在撒谎）。
                        浏览器预览里就是这一档：MKP 的切片器配置在演示里能读（见
                        mockServer/slicerPreset.ts），MKP 的 toml 则照旧读不到。 */
-                    ? '这几份工艺读不出正文（浏览器预览里没有下载区）—— 用桌面版能看到它们'
+                    ? tr('bbs.drawer.readFailed')
                     : slicer.listed > 0
-                      ? `MKP 的工艺还没下载（资源区里有 ${slicer.listed} 份）—— `
-                        + '去「预设」页 → 切片器配置 → 云端，下载对应机型的那几份，回来就在这儿'
-                      : '产品资源区里没有 MKP 的工艺')
-                  : '这个机型下没有预设'}
+                      ? tr('bbs.drawer.notDownloaded', { count: slicer.listed })
+                      : tr('bbs.drawer.noneInAssets'))
+                  : tr('bbs.drawer.noneForMachine')}
           </p>
         )}
         {groups.map((g) => (
           <div key={g.title}>
             <div className={s.group} data-weak={g.weak ? 'true' : undefined}>
-              {g.title}（{g.items.length}）
+              {tr('bbs.drawer.group', { title: g.title, count: g.items.length })}
             </div>
             {g.items.map((it) => (
               <button
@@ -313,7 +318,7 @@ export default function BbsPresetDrawer({
                     ? (it.reason ?? '')
                     : it.notDownloaded
                       ? `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
-                        + ' —— 还没下载，点了去「预设」页 → 切片器配置 → 云端 取回来'
+                        + tr('bbs.drawer.needDownloadHint')
                       : `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
                 }
                 /* 还没下载的那一份：点了不是切预设，是去把它取回来（见 Props.onNeedDownload） */
@@ -323,8 +328,12 @@ export default function BbsPresetDrawer({
                 {it.star && <span className={s.star}>*</span>}
                 <span className={s.name}>{it.label}</span>
                 {/* 行尾那两颗小标签：都是"这一份是什么来路"，不参与选中 */}
-                {it.notDownloaded && <span className={s.tag}>还没下载</span>}
-                {source === 'bbs' && copied.has(it.file) && <span className={s.tag}>我们发的</span>}
+                {it.notDownloaded && (
+                  <span className={s.tag}>{tr('bbs.drawer.tagNotDownloaded')}</span>
+                )}
+                {source === 'bbs' && copied.has(it.file) && (
+                  <span className={s.tag}>{tr('bbs.drawer.tagOurs')}</span>
+                )}
               </button>
             ))}
           </div>

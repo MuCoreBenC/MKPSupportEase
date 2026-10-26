@@ -30,6 +30,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { api, errorText } from '../../api'
+import { t, useT } from '../../i18n'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
 import { FieldControl } from '../../components/field'
 import type { FieldSchema } from '../../components/field'
@@ -119,11 +120,13 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
 function roTextOf(row: CompareRow, raw: string): string {
   switch (row.field.control) {
     case 'switch':
-      return boolOf(raw) ? '开启' : '关闭'
+      return boolOf(raw) ? t('presets.cmp.on') : t('presets.cmp.off')
     case 'choice':
       return row.field.choices?.find((c) => c.value === raw)?.label ?? raw
     case 'gcode':
-      return `${raw.split('\n').filter((l) => l.trim() !== '').length} 行`
+      return t('presets.cmp.lines', {
+        count: raw.split('\n').filter((l) => l.trim() !== '').length,
+      })
     default:
       return raw
   }
@@ -153,6 +156,7 @@ export default function CompareModal({
   onClose,
   onSaved,
 }: Props) {
+  const tr = useT()
   const [picked, setPicked] = useState<string[]>([])
   const [loaded, setLoaded] = useState<Record<string, PresetParamValues>>({})
   const [draft, setDraft] = useState<Record<string, Record<string, string>>>({})
@@ -185,7 +189,7 @@ export default function CompareModal({
         if (alive) setRegistry(c.registry)
       },
       () => {
-        if (alive) setProblem('读不到参数注册表 —— 对比台起不来')
+        if (alive) setProblem(t('presets.cmp.registryFailed'))
       },
     )
     return () => {
@@ -396,7 +400,7 @@ export default function CompareModal({
               path,
               fileName: nameOf(path),
               values: {},
-              problem: '保存后重读失败 —— 关掉重开一次看盘上的真实值',
+              problem: t('presets.cmp.savedReloadFailed'),
             }),
           ),
         ),
@@ -411,10 +415,19 @@ export default function CompareModal({
       })
       setBusy(false)
       if (failed.length === 0) {
-        onSaved(`已保存 ${targets.map(nameOf).join('、')} 的参数改动`)
+        onSaved(
+          t('presets.cmp.savedOk', {
+            names: targets.map(nameOf).join(t('presets.cmp.savedSep')),
+          }),
+        )
         onClose()
       } else {
-        setProblem(`有 ${failed.length} 份没保存成：${failed.join('；')}`)
+        setProblem(
+          t('presets.cmp.savedFailed', {
+            count: failed.length,
+            names: failed.join(t('presets.cmp.savedFailSep')),
+          }),
+        )
       }
     })()
   }
@@ -480,10 +493,10 @@ export default function CompareModal({
         <>
           <span className={s.footNote}>
             {dirtyTotal === 0 ? (
-              '没有未保存的改动'
+              tr('presets.cmp.noDirty')
             ) : (
               <>
-                未保存的改动（<b>{dirtyTotal}</b>）
+                {tr('presets.cmp.dirtyCount', { count: dirtyTotal })}
               </>
             )}
           </span>
@@ -492,8 +505,8 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={past.length === 0 || busy}
-              title="撤销（一次手势一条）"
-              aria-label="撤销"
+              title={tr('presets.cmp.undoTitle')}
+              aria-label={tr('presets.cmp.undo')}
               onClick={undo}
             >
               <Icon name="undo" size={15} />
@@ -502,8 +515,8 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={future.length === 0 || busy}
-              title="重做"
-              aria-label="重做"
+              title={tr('presets.cmp.redo')}
+              aria-label={tr('presets.cmp.redo')}
               onClick={redo}
             >
               <Icon name="redo" size={15} />
@@ -512,7 +525,7 @@ export default function CompareModal({
               type="button"
               className={s.textBtn}
               disabled={busy}
-              title={EDIT_TEXT.exitTitle}
+              title={tr(EDIT_TEXT.exitTitle)}
               onClick={() => {
                 /*
                  * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -526,7 +539,7 @@ export default function CompareModal({
                 setEditing(false)
               }}
             >
-              {EDIT_TEXT.exitMode}
+              {tr(EDIT_TEXT.exitMode)}
             </button>
             <button
               type="button"
@@ -534,21 +547,21 @@ export default function CompareModal({
               onClick={save}
               disabled={busy || dirtyTotal === 0}
             >
-              {busy ? '保存中…' : '保存'}
+              {busy ? tr('presets.cmp.saving') : tr('presets.cmp.save')}
             </button>
           </span>
         </>
       ) : (
         <>
-          <span className={s.footNote}>只读对照 —— 要改值，点右下「进入编辑模式」</span>
+          <span className={s.footNote}>{tr('presets.cmp.readonlyNote')}</span>
           <button
             type="button"
             className={s.primary}
             disabled={busy || picked.length < 2}
-            title="进编辑模式：这一台的值就可以改了"
+            title={tr('presets.cmp.enterTitle')}
             onClick={() => setEditing(true)}
           >
-            {EDIT_TEXT.enterMode}
+            {tr(EDIT_TEXT.enterMode)}
           </button>
         </>
       )}
@@ -562,14 +575,14 @@ export default function CompareModal({
       {problem !== null && <p className={s.problem}>{problem}</p>}
 
       {picked.length < 2 ? (
-        <p className={s.note}>至少选两份才能对比。</p>
+        <p className={s.note}>{tr('presets.cmp.needTwo')}</p>
       ) : (
         <>
           {/* 工具行：搜索 + 仅显示差异 + 计数 + 加一份（候选只在弹层里） */}
           <div className={s.tools}>
             <input
               className={s.search}
-              placeholder="搜索参数名或 toolhead.*"
+              placeholder={tr('presets.cmp.searchPlaceholder')}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -577,13 +590,13 @@ export default function CompareModal({
               type="button"
               className={onlyDiff ? `${s.onlyDiff} ${s.on}` : s.onlyDiff}
               onClick={() => setOnlyDiff((v) => !v)}
-              title="只看两份值不一样的参数"
+              title={tr('presets.cmp.onlyDiffTitle')}
             >
               <span className={s.sw} />
-              仅显示差异 <span className={s.cnt}>{tabCounts.all}</span>
+              {tr('presets.cmp.onlyDiff')} <span className={s.cnt}>{tabCounts.all}</span>
             </button>
             <span className={s.toolsCnt}>
-              共 <b>{tabCounts.all}</b> 条
+              {tr('presets.cmp.total', { count: tabCounts.all })}
             </span>
             <span className={s.toolsGap} />
             <div className={s.addWrap} ref={addRef}>
@@ -591,10 +604,14 @@ export default function CompareModal({
                 type="button"
                 className={s.addBtn}
                 disabled={picked.length >= MAX_PICKED || candidates.length === 0}
-                title={picked.length >= MAX_PICKED ? '最多同时比三份' : '再加一份进来比'}
+                title={
+                  picked.length >= MAX_PICKED
+                    ? tr('presets.cmp.maxPicked')
+                    : tr('presets.cmp.addPick')
+                }
                 onClick={() => setAddOpen((v) => !v)}
               >
-                ＋ 加一份对比
+                {tr('presets.cmp.add')}
               </button>
               {addOpen && (
                 <div className={s.addMenu}>
@@ -609,7 +626,7 @@ export default function CompareModal({
                   ))}
                   {candidates.length === 0 && (
                     <button type="button" disabled>
-                      <span>没有别的可加的了</span>
+                      <span>{tr('presets.cmp.noMore')}</span>
                     </button>
                   )}
                 </div>
@@ -624,7 +641,7 @@ export default function CompareModal({
               className={groupTab === 'all' ? `${s.tab} ${s.on}` : s.tab}
               onClick={() => setGroupTab('all')}
             >
-              全部 <span className={s.n}>{tabCounts.all}</span>
+              {tr('presets.cmp.allTab')} <span className={s.n}>{tabCounts.all}</span>
             </button>
             {groups.map((g) => (
               <button
@@ -641,7 +658,7 @@ export default function CompareModal({
           <div className={s.grid} style={gridStyle}>
             {/* 列头 = 槽位：色点 + 文件名 + ✕（两份时钉死，✕ 不出） */}
             <div className={s.thead}>
-              <span className={s.hkey}>参数</span>
+              <span className={s.hkey}>{tr('presets.cmp.keyHeader')}</span>
               {picked.map((path, i) => (
                 <span key={path} className={s.hcol}>
                   <i className={s.dot} style={{ background: COL_COLORS[i] }} />
@@ -653,7 +670,11 @@ export default function CompareModal({
                       type="button"
                       className={s.op}
                       disabled={picked.length <= 2}
-                      title={picked.length <= 2 ? '至少要两份才能对比' : '把这份移出对比'}
+                      title={
+                        picked.length <= 2
+                          ? tr('presets.cmp.removeMin')
+                          : tr('presets.cmp.removeTitle')
+                      }
                       onClick={() => removePick(path)}
                     >
                       ✕
@@ -666,7 +687,7 @@ export default function CompareModal({
                   )}
                 </span>
               ))}
-              <span className={s.hst}>状态</span>
+              <span className={s.hst}>{tr('presets.cmp.statusHeader')}</span>
             </div>
 
             {groups.map((g) => {
@@ -702,7 +723,7 @@ export default function CompareModal({
                           return (
                             <span key={path} className={s.cell}>
                               {value === undefined ? (
-                                <span className={s.absent}>不适用</span>
+                                <span className={s.absent}>{tr('presets.cmp.na')}</span>
                               ) : !editing ? (
                                 <span className={s.ro}>
                                   <span className={row.field.control === 'number' ? s.ro : s.ro}>
@@ -719,7 +740,7 @@ export default function CompareModal({
                                 </span>
                               ) : row.field.control === 'gcode' ? (
                                 <span className={s.gcode}>
-                                  {value.split('\n')[0] || '（空）'}
+                                  {value.split('\n')[0] || tr('presets.cmp.empty')}
                                   {value.includes('\n') && <span className={s.absent}>…</span>}
                                 </span>
                               ) : (
@@ -736,7 +757,7 @@ export default function CompareModal({
                                   className={s.adopt}
                                   onClick={() => adopt(row.key, path, value)}
                                 >
-                                  采用此值
+                                  {tr('presets.cmp.adopt')}
                                 </button>
                               )}
                             </span>
@@ -762,11 +783,11 @@ export default function CompareModal({
   return (
     <Modal
       open={open}
-      title="参数对比"
+      title={tr('presets.cmp.title')}
       subtitle={
         editing
-          ? '正在编辑 —— 改完按「保存」写回各自那份文件'
-          : '并排看 2~3 份（只读）；要改值点右下「进入编辑模式」'
+          ? tr('presets.cmp.subtitleEditing')
+          : tr('presets.cmp.subtitleReadonly')
       }
       size="lg"
       host={host}

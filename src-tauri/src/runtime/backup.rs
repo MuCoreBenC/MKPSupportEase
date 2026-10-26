@@ -41,6 +41,8 @@
 //! 后续更新照常：更新判据走的是血统与目录对齐那条正路（`local.revision != remote.revision`、
 //! 随包资产兜底），恢复回来的文件带着自己的血统与 SHA，进预设页照常参与对齐。
 
+use postprocess::diag::messages;
+
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -114,16 +116,18 @@ fn backup_name(created: i64) -> String {
 fn safe_rel(name: &str) -> Result<&str, AppError> {
     let path = Path::new(name);
     if path.is_absolute() {
-        return Err(AppError::invalid_argument(format!(
-            "备份里有一条绝对路径：{name}"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.backup.352",
+            &[("name", name)],
         )));
     }
     for part in path.components() {
         match part {
             Component::Normal(_) => {}
             _ => {
-                return Err(AppError::invalid_argument(format!(
-                    "备份里有一条不老实的路径：{name}"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.runtime.backup.353",
+                    &[("name", name)],
                 )))
             }
         }
@@ -142,7 +146,7 @@ fn files_under(internal: &Path, rel_dir: &str, out: &mut Vec<String>) -> Result<
         if at.is_file() {
             let rel = at
                 .strip_prefix(internal)
-                .map_err(|_| AppError::internal("备份时算不出相对路径"))?;
+                .map_err(|_| AppError::internal(messages::text("ui.runtime.backup.354", &[])))?;
             out.push(rel.display().to_string().replace('\\', "/"));
         }
     }
@@ -155,10 +159,17 @@ fn walk(dir: &Path) -> Result<Vec<std::io::Result<PathBuf>>, AppError> {
     let mut stack: Vec<PathBuf> = vec![dir.to_path_buf()];
     while let Some(at) = stack.pop() {
         let entries = std::fs::read_dir(&at).map_err(|e| {
-            AppError::io(format!("读不了目录：{}", at.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.runtime.backup.355",
+                &[("v1", &at.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
         for entry in entries {
-            let entry = entry.map_err(|e| AppError::io("列目录失败").with_detail(e.to_string()))?;
+            let entry = entry.map_err(|e| {
+                AppError::io(messages::text("ui.runtime.backup.356", &[]))
+                    .with_detail(e.to_string())
+            })?;
             let at = entry.path();
             if at.is_dir() {
                 stack.push(at);
@@ -211,10 +222,18 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
             safe_rel(name)?;
             zip.start_file(name.as_str(), opts).map_err(zip_err)?;
             let mut reader = std::fs::File::open(internal.join(name)).map_err(|e| {
-                AppError::io(format!("读不了要备份的文件：{name}")).with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.backup.357",
+                    &[("name", &name.to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
             std::io::copy(&mut reader, &mut zip).map_err(|e| {
-                AppError::io(format!("写不进备份：{name}")).with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.backup.358",
+                    &[("name", &name.to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
         }
         zip.finish().map_err(zip_err)?;
@@ -238,8 +257,11 @@ pub fn create(internal: &Path, dest_dir: &Path) -> Result<BackupSummary, AppErro
 /// ★ 先认说明书再动手 —— 中途报错会留下"恢复了一半"的现场，越早拒越好。
 pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppError> {
     let file = std::fs::File::open(zip_path).map_err(|e| {
-        AppError::not_found(format!("读不到这份备份：{}", zip_path.display()))
-            .with_detail(e.to_string())
+        AppError::not_found(messages::text(
+            "ui.runtime.backup.359",
+            &[("v1", &zip_path.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     let mut archive = zip::ZipArchive::new(file).map_err(zip_err)?;
 
@@ -247,17 +269,18 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
     let info_text = {
         let mut f = archive
             .by_name(INFO_FILE)
-            .map_err(|_| AppError::corrupted("这不是一份 SupportEase 备份（里面没有说明书）"))?;
+            .map_err(|_| AppError::corrupted(messages::text("ui.runtime.backup.360", &[])))?;
         let mut s = String::new();
         f.read_to_string(&mut s).map_err(io_err)?;
         s
     };
-    let info: BackupInfo = serde_json::from_str(&info_text)
-        .map_err(|e| AppError::corrupted("这份备份的说明书读不出来").with_detail(e.to_string()))?;
+    let info: BackupInfo = serde_json::from_str(&info_text).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.backup.361", &[])).with_detail(e.to_string())
+    })?;
     if info.schema != BACKUP_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "这份备份是第 {} 代的格式，这个版本读不懂（先升级 SupportEase）",
-            info.schema
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.backup.362",
+            &[("v1", &info.schema.to_string())],
         )));
     }
 
@@ -266,7 +289,8 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
         let at = internal.join(d);
         if at.is_dir() {
             std::fs::remove_dir_all(&at).map_err(|e| {
-                AppError::io(format!("清不掉旧的那棵：{d}")).with_detail(e.to_string())
+                AppError::io(messages::text("ui.runtime.backup.363", &[("d", d)]))
+                    .with_detail(e.to_string())
             })?;
         }
     }
@@ -283,7 +307,11 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
         let target = internal.join(rel);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| {
-                AppError::io(format!("建不了目录：{}", parent.display())).with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.backup.364",
+                    &[("v1", &parent.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
         }
         let mut bytes = Vec::new();
@@ -303,13 +331,16 @@ pub fn restore(internal: &Path, zip_path: &Path) -> Result<BackupSummary, AppErr
 /// 读写出错（zip 里的条目也是普通 IO）—— 与下面的"格式读不动"分开：
 /// 前者是"这份盘 / 这次写入有问题"，后者是"这根本不是一份能读的 zip"
 fn io_err(e: std::io::Error) -> AppError {
-    AppError::io("备份读写出错").with_detail(e.to_string())
+    AppError::io(messages::text("ui.runtime.backup.365", &[])).with_detail(e.to_string())
 }
 
 fn zip_err(e: zip::result::ZipError) -> AppError {
     match e {
-        zip::result::ZipError::Io(e) => AppError::io("备份文件读写出错").with_detail(e.to_string()),
-        other => AppError::corrupted("这份 zip 读不动").with_detail(other.to_string()),
+        zip::result::ZipError::Io(e) => {
+            AppError::io(messages::text("ui.runtime.backup.366", &[])).with_detail(e.to_string())
+        }
+        other => AppError::corrupted(messages::text("ui.runtime.backup.367", &[]))
+            .with_detail(other.to_string()),
     }
 }
 

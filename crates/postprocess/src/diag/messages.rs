@@ -27,6 +27,107 @@
 
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU8, Ordering};
+
+/// 文案语言（2026-10-25「全站 i18n」那一刀）。
+///
+/// 今天两种：中文（源语言）/ 英文。加语言时：① 这里加一档；② `Entry` 加
+/// `text_xx` 字段；③ `pick_text` / `pick_slicer` 各加一条分支；④ 判据会逼着把
+/// 每一条都补齐（见 `every_entry_has_every_language`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Lang {
+    /// 简体中文 —— **源语言**，也是"什么都没设置时"的那一档（与今天的行为一致）
+    #[default]
+    Zh,
+    /// English
+    En,
+}
+
+impl Lang {
+    /// 线上 / CLI 的字面量 → 语言。宽松认（`zh` / `en-US` 这类系统语言直传也收）。
+    pub fn parse(raw: &str) -> Option<Self> {
+        let raw = raw.trim().to_ascii_lowercase();
+        if raw == "zh" || raw.starts_with("zh-") || raw.starts_with("zh_") {
+            Some(Self::Zh)
+        } else if raw == "en" || raw.starts_with("en-") || raw.starts_with("en_") {
+            Some(Self::En)
+        } else {
+            None
+        }
+    }
+
+    /// 线上字符串（IPC / 日志共用同一个字面量）。
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Zh => "zh-CN",
+            Self::En => "en",
+        }
+    }
+}
+
+/// 当前语言的活值（0 = 中文，1 = 英文）。
+///
+/// 为什么是**进程级**而不是每调用点传参：这张表的读者散在管线、钩子、CLI 三层，
+/// 五十来个调用点。语言是"这一趟执行的口径"，不是每句话的属性 —— 传参会把
+/// 每个签名都污染一遍，还会漏。
+///
+/// 写入方**只有两处**：`main.rs`（CLI `--lang`）与 `hook.rs`（按 AppState 的语言格）。
+static CURRENT: AtomicU8 = AtomicU8::new(0);
+
+/// 设这一趟的语言。幂等；并发安全（单字节原子）。
+pub fn set_lang(lang: Lang) {
+    CURRENT.store(
+        match lang {
+            Lang::Zh => 0,
+            Lang::En => 1,
+        },
+        Ordering::Relaxed,
+    );
+}
+
+/// 现在用的是哪种语言。
+pub fn current() -> Lang {
+    match CURRENT.load(Ordering::Relaxed) {
+        1 => Lang::En,
+        _ => Lang::Zh,
+    }
+}
+
+/// 「跟随系统」在**没有前端**的进程里怎么落地。
+///
+/// 顺序：
+///   ① **macOS**：读用户偏好 `AppleLanguages` 的第一语言（GUI 拉起的子进程里
+///      `LC_*`/`LANG` 常常是空的，环境变量那一套在 mac 上基本失灵 —— 这正是
+///      2026-10-25 登记的局限，今天补上）。`defaults` 读不到 / 输出怪异就跳过；
+///   ② 其余平台（macOS 读不到时也一样）：`LC_ALL` / `LC_MESSAGES` / `LANG`；
+///   ③ 全都空 ⇒ **中文**（与"今天全是中文"一致，宁可选保守 —— 不会把中文用户翻成英文）。
+pub fn resolve_system_lang() -> Lang {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("defaults")
+            .args(["read", "-g", "AppleLanguages"])
+            .output()
+        {
+            /* 输出形如 `(\n    "zh-Hans-CN",\n    "en-US",\n)` —— 取第一对引号里的语言段 */
+            let s = String::from_utf8_lossy(&out.stdout);
+            if let Some(lang) = s.split('"').nth(1).and_then(Lang::parse) {
+                return lang;
+            }
+        }
+    }
+    for name in ["LC_ALL", "LC_MESSAGES", "LANG"] {
+        let Some(raw) = std::env::var_os(name) else {
+            continue;
+        };
+        let raw = raw.to_string_lossy();
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        return Lang::parse(raw).unwrap_or(Lang::En);
+    }
+    Lang::Zh
+}
 
 /// 表本体（`crates/postprocess/messages.toml`）。
 ///
@@ -43,9 +144,18 @@ struct Entry {
     code: Option<String>,
     /// 本程序里给用户看的那一句（界面、记录、日志）。
     text: String,
+    /// 英文正文（2026-10-25）。**每一条都要有** —— 用 `Option` 而不是必填，
+    /// 是为了让"漏写"表现为**判据失败并指名哪一条**（`every_entry_has_every_language`），
+    /// 而不是整张表解析 panic、所有测试连坐。
+    /// 运行期缺了会掉回中文（宁可夹一句中文，也不要空着）。
+    #[serde(default)]
+    text_en: Option<String>,
     /// 给切片器那一行的口径；缺省 = `text`。
     #[serde(default)]
     slicer: Option<String>,
+    /// 英文的切片器口径；缺省 = `text_en`。
+    #[serde(default)]
+    slicer_en: Option<String>,
     /// 本条用到的占位符名字（**只给判据看**，运行时零消费，见 crate 文档的字段说明）。
     ///
     /// `allow(dead_code)` 的理由：它跟 `note` 一样是**声明式**字段 —— 判据读它
@@ -74,13 +184,45 @@ fn table() -> &'static BTreeMap<String, Entry> {
 
 /// 键没登记时长什么样。**刻意的丑**：它会出现在用户眼前的框里。
 fn missing_key(key: &str) -> String {
-    format!("［未登记的文案 {key}］")
+    match current() {
+        Lang::Zh => format!("［未登记的文案 {key}］"),
+        Lang::En => format!("[missing message {key}]"),
+    }
+}
+
+/// 这一条在**这一种语言**下的正文（英文缺了掉回中文 —— 宁可夹一句中文，也不要空着）。
+fn pick_text(lang: Lang, entry: &Entry) -> &str {
+    match lang {
+        Lang::Zh => &entry.text,
+        Lang::En => entry.text_en.as_deref().unwrap_or(&entry.text),
+    }
+}
+
+/// 这一条在**这一种语言**下的切片器口径。
+///
+/// 缺省链：`slicer_xx` → `text_xx` → 中文 `text`（最后那一步只为"永远有话说"）。
+fn pick_slicer(lang: Lang, entry: &Entry) -> &str {
+    match lang {
+        Lang::Zh => entry.slicer.as_deref().unwrap_or(&entry.text),
+        Lang::En => entry
+            .slicer_en
+            .as_deref()
+            .or(entry.text_en.as_deref())
+            .unwrap_or(&entry.text),
+    }
 }
 
 /// `text` 字段：本程序里给用户看的那一句（界面模态框、执行记录、日志）。
+///
+/// 读**当前语言**（[`set_lang`]）。调用点不用改、也不该自己传语言。
 pub fn text(key: &str, params: &[(&str, &str)]) -> String {
+    text_in(current(), key, params)
+}
+
+/// 显式指定语言的 `text`。给 CLI / 判据 / 跨语言对比用。
+pub fn text_in(lang: Lang, key: &str, params: &[(&str, &str)]) -> String {
     match table().get(key) {
-        Some(entry) => render(&entry.text, params),
+        Some(entry) => render(pick_text(lang, entry), params),
         None => missing_key(key),
     }
 }
@@ -89,8 +231,13 @@ pub fn text(key: &str, params: &[(&str, &str)]) -> String {
 ///
 /// 「让切片器少看 / 别看 / 换个说法」= 在表里给这条加 / 改 `slicer`。
 pub fn slicer(key: &str, params: &[(&str, &str)]) -> String {
+    slicer_in(current(), key, params)
+}
+
+/// 显式指定语言的 `slicer`。
+pub fn slicer_in(lang: Lang, key: &str, params: &[(&str, &str)]) -> String {
     match table().get(key) {
-        Some(entry) => render(entry.slicer.as_ref().unwrap_or(&entry.text), params),
+        Some(entry) => render(pick_slicer(lang, entry), params),
         None => missing_key(key),
     }
 }
@@ -172,7 +319,59 @@ mod tests {
                     "{key} 的 slicer 是空的（不写就整条省掉）"
                 );
             }
+            /* 空串与"没写"一样坏：都会让英文界面掉回中文，判据要抓得住 */
+            if let Some(en) = &entry.text_en {
+                assert!(
+                    !en.trim().is_empty(),
+                    "{key} 的 text_en 是空的（漏翻就整条省掉，别留空串）"
+                );
+            }
         }
+    }
+
+    /// **每一条都必须有英文**（2026-10-25「全站 i18n」）。
+    ///
+    /// 这条红了 = 有一条会在英文界面 / 英文切片器框里掉回中文。
+    /// 加新条目时忘了补 `text_en`，就是这里先红，而不是用户先看见。
+    #[test]
+    fn every_entry_has_every_language() {
+        let mut missing = Vec::new();
+        for (key, entry) in table() {
+            let filled = entry
+                .text_en
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty());
+            if !filled {
+                missing.push(key.as_str());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些条目没有英文（text_en）：{missing:?}"
+        );
+    }
+
+    /// 英文那几栏里**不许有中文**（分隔符也换过：`，` → `, `）。
+    ///
+    /// 漏翻的典型长相就是"英文表里夹着中文"，肉眼容易漏，判据不会。
+    #[test]
+    fn english_lines_have_no_chinese() {
+        fn has_cjk(s: &str) -> bool {
+            s.chars().any(|c| ('\u{3400}'..='\u{9fff}').contains(&c))
+        }
+        let mut bad = Vec::new();
+        for (key, entry) in table() {
+            for (what, value) in [
+                ("text_en", entry.text_en.as_deref()),
+                ("slicer_en", entry.slicer_en.as_deref()),
+            ] {
+                let Some(v) = value else { continue };
+                if has_cjk(v) {
+                    bad.push(format!("{key}.{what} = {v}"));
+                }
+            }
+        }
+        assert!(bad.is_empty(), "英文栏里还有中文：{bad:#?}");
     }
 
     /// 每个条目的占位符与 `params` **两边对齐**：用了的必须登记，登记的必须真用。
@@ -183,7 +382,12 @@ mod tests {
     fn placeholders_and_declared_params_agree() {
         for (key, entry) in table() {
             let mut used: Vec<String> = Vec::new();
-            for template in std::iter::once(&entry.text).chain(entry.slicer.iter()) {
+            /* 四种语言栏一起扫：英文模板漏一个占位符，用户在英文下就看不见那个数了 */
+            for template in std::iter::once(&entry.text)
+                .chain(entry.text_en.iter())
+                .chain(entry.slicer.iter())
+                .chain(entry.slicer_en.iter())
+            {
                 for name in placeholders(template) {
                     if !used.contains(&name) {
                         used.push(name);
@@ -208,15 +412,41 @@ mod tests {
     /// 表里的每一条都能**不带残留**地渲染出来（判据自检用的假值）。
     #[test]
     fn every_entry_renders_clean() {
-        for (key, entry) in table() {
-            let owned: Vec<(&str, &str)> = entry.params.iter().map(|p| (p.as_str(), "×")).collect();
-            let t = text(key, &owned);
-            let s = slicer(key, &owned);
-            assert!(!t.contains('{'), "{key} 的 text 渲染后还有 {t}");
-            assert!(!t.contains('}'), "{key} 的 text 渲染后还有 {t}");
-            assert!(!s.contains('{'), "{key} 的 slicer 渲染后还有 {s}");
-            assert!(!t.contains("未登记的文案"), "{key} 取不到");
+        for lang in [Lang::Zh, Lang::En] {
+            for (key, entry) in table() {
+                let owned: Vec<(&str, &str)> =
+                    entry.params.iter().map(|p| (p.as_str(), "×")).collect();
+                let t = text_in(lang, key, &owned);
+                let s = slicer_in(lang, key, &owned);
+                assert!(!t.contains('{'), "{key} 的 {:?} text 渲染后还有 {t}", lang);
+                assert!(!t.contains('}'), "{key} 的 {:?} text 渲染后还有 {t}", lang);
+                assert!(
+                    !s.contains('{'),
+                    "{key} 的 {:?} slicer 渲染后还有 {s}",
+                    lang
+                );
+                assert!(!t.contains("未登记的文案"), "{key} 取不到");
+                assert!(!t.contains("missing message"), "{key} 取不到");
+            }
         }
+    }
+
+    /// 语言是**进程级活值**：设了 English，后面所有 `text()` 都跟着换，
+    /// 而且切回中文能复原（钩子一趟一个进程，但测试同一个进程里要能来回开）。
+    #[test]
+    fn the_language_switch_is_process_wide_and_reversible() {
+        let before = current();
+        set_lang(Lang::En);
+        assert_eq!(current(), Lang::En);
+        assert!(
+            text("E_FS_NOT_FOUND_001", &[("target", "f"), ("detail", "d")])
+                .to_ascii_lowercase()
+                .contains("not found")
+        );
+        set_lang(Lang::Zh);
+        assert_eq!(current(), Lang::Zh);
+        assert!(text("E_FS_NOT_FOUND_001", &[("target", "f"), ("detail", "d")]).contains("找不到"));
+        set_lang(before);
     }
 
     /// 没登记的键要**响亮**，不能返回空串（空串在界面上等于"这里本来没话"）。

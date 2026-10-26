@@ -22,7 +22,8 @@
 import { useSyncExternalStore } from 'react'
 
 import { api, listen } from '../../api'
-import type { ActiveOrigin, ActivePreset, PinPref, ThemePref } from '../../api/contract'
+import type { ActiveOrigin, ActivePreset, LocalePref, PinPref, ThemePref } from '../../api/contract'
+import { resolveLocale, setActiveLocale } from '../../i18n'
 import { inTauri } from '../window'
 /*
  * 主题那一句（档位 + 系统深浅 ⇒ 是不是深色 ⇒ 落 `<html data-theme>`）住在
@@ -42,13 +43,26 @@ interface AppStateSnapshot {
   active: ActivePreset | null
   /** 主题档位（null = 还没选过 ⇒ 按"跟随系统"） */
   theme: ThemePref | null
+  /**
+   * 界面语言档（2026-10-25；null = 还没选过 ⇒ 按"跟随系统"）。
+   *
+   * ★ 这里存的是**用户选的那一档**，不是解析后的语言 —— "跟随系统"什么时候变成
+   *   具体语言是 `i18n.resolveLocale` 的事（判据不许两个源）。
+   */
+  locale: LocalePref | null
   /** 置顶档位（2026-10-17；`off` = 没选过，与后端同一个出厂默认） */
   pin: PinPref
   /** 主窗在不在窄窗态（同上） */
   compact: boolean
 }
 
-let snapshot: AppStateSnapshot = { active: null, theme: null, pin: 'off', compact: false }
+let snapshot: AppStateSnapshot = {
+  active: null,
+  theme: null,
+  locale: null,
+  pin: 'off',
+  compact: false,
+}
 let loaded = false
 let inflight: Promise<void> | null = null
 const listeners = new Set<() => void>()
@@ -96,15 +110,20 @@ export function appStateMutated(): void {
      * （不置顶 / 不在窄窗）—— 与主题那条"失败当没有"同一个口径。
      */
     api.getWindowPrefs().catch(() => null),
+    /* 界面语言（2026-10-25）：读不到当"没选过" ⇒ 跟随系统，与后端同一个出厂档 */
+    api.getLocale().catch(() => null),
   ])
-    .then(([active, theme, win]) => {
+    .then(([active, theme, win, locale]) => {
       snapshot = {
         active,
         theme,
+        locale,
         pin: win?.pin ?? 'off',
         compact: win?.compact ?? false,
       }
       landTheme(theme)
+      /* 语言落地：解析"跟随系统"，再通知所有 `useT()` 的组件重渲染 */
+      setActiveLocale(resolveLocale(locale))
     })
     .finally(() => {
       loaded = true
@@ -155,6 +174,21 @@ export function useThemePref(): ThemePref | null {
 
 function getThemePref(): ThemePref | null {
   return snapshot.theme
+}
+
+/**
+ * 界面语言档（AppState 的 `locale` 格，2026-10-25）。`null` = 还没选过 ⇒ 跟随系统。
+ *
+ * 读者只有设置页那一行单选（显示当前档 / 发写命令）。
+ * **界面文案不读它**：文案读 `i18n` 的 `useT()` —— 那一层已经把"跟随系统"解析成
+ * 真语言了，判据只有一个源。
+ */
+export function useLocalePref(): LocalePref | null {
+  return useSyncExternalStore(subscribe, getLocalePref)
+}
+
+function getLocalePref(): LocalePref | null {
+  return snapshot.locale
 }
 
 /**

@@ -14,6 +14,8 @@
 //! [`runtime::source`]（AppState 的 presetSource 格，或构建期注入的默认值），
 //! 不知道就**诚实报没配**——不猜一个 URL、不假装下载成功。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use serde::Serialize;
@@ -139,8 +141,9 @@ pub async fn set_preset_source(
 ) -> Result<PresetSourceDto, AppError> {
     let root = internal_root(&app)?;
     let mode = runtime::source::SourceMode::parse(mode.trim()).ok_or_else(|| {
-        AppError::invalid_argument(format!(
-            "认不出的源：{mode}（只能是 github / gitee / custom）"
+        AppError::invalid_argument(messages::text(
+            "ui.ipc.catalog.052",
+            &[("mode", &mode.to_string())],
         ))
     })?;
     if mode == runtime::source::SourceMode::Custom {
@@ -156,12 +159,13 @@ pub async fn set_preset_source(
                 let source = runtime::source::make_source(mode, Some(&raw), probed.shape)?
                     .with_resolved(&probed.bootstrap_url)?;
                 runtime::app_state::set_preset_source(&root, source)?;
-                source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
+                source_dto(&root)?
+                    .ok_or_else(|| AppError::internal(messages::text("ui.ipc.catalog.053", &[])))
             })
         });
-        let dto = task
-            .await
-            .map_err(|e| AppError::internal("换数据源没跑到终局").with_detail(e.to_string()))?;
+        let dto = task.await.map_err(|e| {
+            AppError::internal(messages::text("ui.ipc.catalog.054", &[])).with_detail(e.to_string())
+        })?;
         super::notify_app_state(&app);
         return dto;
     }
@@ -169,7 +173,8 @@ pub async fn set_preset_source(
         let source = runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
         runtime::app_state::set_preset_source(&root, source)?;
         super::notify_app_state(&app);
-        source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
+        source_dto(&root)?
+            .ok_or_else(|| AppError::internal(messages::text("ui.ipc.catalog.055", &[])))
     })
 }
 
@@ -227,21 +232,31 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.056",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
 
             let target = crate::fsx::paths::resolve_in(&root, &file.path)?;
             let bytes = std::fs::read(&target).map_err(|_| {
-                AppError::not_found(format!(
-                    "{file_name} 还不在本机——先下载，再读它（下载区初始是空的）"
+                AppError::not_found(messages::text(
+                    "ui.ipc.catalog.057",
+                    &[("file_name", &file_name.to_string())],
                 ))
             })?;
             String::from_utf8(bytes).map_err(|_| {
-                AppError::corrupted(format!("{file_name} 不是 UTF-8 文本，这一条读不出来"))
+                AppError::corrupted(messages::text(
+                    "ui.ipc.catalog.058",
+                    &[("file_name", &file_name.to_string())],
+                ))
             })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("读文件没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.059", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 把 catalog 里登记的一份文件从数据源拉进**它自己的落点**。
@@ -265,7 +280,12 @@ pub async fn download_runtime_file(
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.060",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
 
             // 目录给了期望大小就用它当水位总量；没给（随包 bootstrap 目录）就照实
             // 不报百分比 —— `total: None` 在界面上是"不知道还有多少"，不是 0
@@ -310,8 +330,9 @@ pub async fn download_runtime_file(
                 .unwrap_or_else(|| file_name.clone()))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("下载任务没能跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.061", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 一份目录文件的**云端下载链接**（用户「复制链接」复制的就是它）。
@@ -329,7 +350,12 @@ pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, A
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.062",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
             let resolved = runtime::source::resolve_source(&root)?;
             resolved
                 .resolver
@@ -337,8 +363,9 @@ pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, A
                 .and_then(|addr| addr.remote_or("这份文件"))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("取链接的任务没能跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.063", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 多份下载里某一份的结局。**来自 [`runtime::delivery::FileOutcome`]**，
@@ -374,7 +401,12 @@ pub async fn download_runtime_files(
                     .files
                     .iter()
                     .find(|f| f.file_name == *name)
-                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {name}")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found(messages::text(
+                            "ui.ipc.catalog.064",
+                            &[("name", &name.to_string())],
+                        ))
+                    })?;
                 wanted.push(file.clone());
             }
 
@@ -428,8 +460,9 @@ pub async fn download_runtime_files(
                 .collect())
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.065", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 「取回云端预设」的结果：这次取回没有 / 落成本地这份没有 / 我那份在哪
@@ -520,7 +553,12 @@ pub async fn fetch_cloud_preset(
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.066",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
             let fetched = ensure_cloud_bytes(&root, file)?;
 
             /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
@@ -566,9 +604,9 @@ pub async fn fetch_cloud_preset(
             })
         })
     });
-    let dto = task
-        .await
-        .map_err(|e| AppError::internal("取回预设没跑到终局").with_detail(e.to_string()))??;
+    let dto = task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.067", &[])).with_detail(e.to_string())
+    })??;
     /*
      * **一条广播都不发**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）——
      * 变的只有盘上的字节。前端的「投递面」那一格由调用方在成功后自行广播
@@ -820,20 +858,29 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
             let rel = path.trim_start_matches('/').to_owned();
             let prefix = format!("{}/", runtime::paths::ARCHIVE_DIR);
             if !rel.starts_with(&prefix) {
-                return Err(AppError::invalid_argument(format!(
-                    "只读归档区里的文件（要 {prefix}… 开头，给的是 {rel}）"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.catalog.068",
+                    &[("prefix", &prefix.to_string()), ("rel", &rel.to_string())],
                 )));
             }
             let target = crate::fsx::paths::resolve_in(&root, &rel)?;
             let bytes = std::fs::read(&target).map_err(|_| {
-                AppError::not_found(format!("归档里没有 {rel} —— 它可能已经被清掉了"))
+                AppError::not_found(messages::text(
+                    "ui.ipc.catalog.069",
+                    &[("rel", &rel.to_string())],
+                ))
             })?;
-            String::from_utf8(bytes)
-                .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+            String::from_utf8(bytes).map_err(|_| {
+                AppError::corrupted(messages::text(
+                    "ui.ipc.catalog.070",
+                    &[("rel", &rel.to_string())],
+                ))
+            })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("读归档没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.071", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
@@ -1010,20 +1057,28 @@ pub async fn apply_active_preset(
                     .files
                     .iter()
                     .find(|f| f.file_name == file_name)
-                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found(messages::text(
+                            "ui.ipc.catalog.072",
+                            &[("file_name", &file_name.to_string())],
+                        ))
+                    })?;
 
                 // 应用的是盘上那份：字节得真的在；**目录给了期望值**的还要与它对得上
                 // （没下载/被删/漂了都不许应用）。随包 bootstrap 目录没登记 SHA ——
                 // 那种情况下盘上有就允许应用（字节的权威判定归 OTA 目录生效后那次下载）
                 let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
-                    AppError::not_found(format!("{file_name} 还不在本机——先下载，再使用"))
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.073",
+                        &[("file_name", &file_name.to_string())],
+                    ))
                 })?;
                 if let Some(want) = file.expected_sha() {
                     let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
                     if digest != want {
-                        return Err(AppError::sha_mismatch(format!(
-                            "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— \
-                             先「更新」或「重新下载」换一份干净的"
+                        return Err(AppError::sha_mismatch(messages::text(
+                            "ui.ipc.catalog.074",
+                            &[("file_name", &file_name.to_string())],
                         )));
                     }
                 }
@@ -1031,15 +1086,14 @@ pub async fn apply_active_preset(
             }
             ActiveOrigin::Local => {
                 let rel = path.ok_or_else(|| {
-                    AppError::invalid_argument(
-                        "用自己那份要给出它在用户根里的路径（presets-local/…）",
-                    )
+                    AppError::invalid_argument(messages::text("ui.ipc.catalog.075", &[]))
                 })?;
                 /* 两道闸都在读盘之前：只认用户根那一格，而且得是一份 MKP 预设（.toml） */
                 runtime::local::check_local_prefix(&rel)?;
                 if runtime::local::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
-                    return Err(AppError::invalid_argument(format!(
-                        "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.ipc.catalog.076",
+                        &[("file_name", &file_name.to_string())],
                     )));
                 }
                 /*
@@ -1104,8 +1158,9 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
             })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("检查更新没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
@@ -1130,10 +1185,12 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
                 remote.min_client_version.as_deref(),
             ) {
                 return Err(
-                    AppError::not_supported("此预设需要更新版 SupportEase").with_detail(format!(
-                        "远端目录结构签名 {} 本构建读不了（minClient={:?}）",
-                        remote.structure_signature, remote.min_client_version
-                    )),
+                    AppError::not_supported(messages::text("ui.ipc.catalog.078", &[])).with_detail(
+                        format!(
+                            "远端目录结构签名 {} 本构建读不了（minClient={:?}）",
+                            remote.structure_signature, remote.min_client_version
+                        ),
+                    ),
                 );
             }
 
@@ -1141,8 +1198,9 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
             Ok(report.summary())
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("应用远端目录没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.079", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 软件更新（`release.json`）—— 与预设数据**两条链** ---------- */
@@ -1182,8 +1240,9 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
             )))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("检查软件更新没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.080", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 给界面的软件更新状态（与 `runtime::release_info::SoftwareUpdate` 同形，camelCase）。

@@ -19,6 +19,8 @@
 //! 这个事实盘上不存在，不记就永远丢了。它记的是**历史事件**，不是文件的现在：
 //! 文件被改名、被删除之后账上的条目要跟着改（[`repath`]）、可以悬空（界面照实退回）。
 
+use postprocess::diag::messages;
+
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -145,8 +147,10 @@ pub fn repath(user_root: &Path, old_rel: &str, new_rel: &str) -> Result<(), AppE
 }
 
 fn save(user_root: &Path, ledger: &Ledger) -> Result<(), AppError> {
-    let body = serde_json::to_vec_pretty(ledger)
-        .map_err(|e| AppError::internal("出处账本序列化不了").with_detail(e.to_string()))?;
+    let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
+        AppError::internal(messages::text("ui.runtime.provenance.426", &[]))
+            .with_detail(e.to_string())
+    })?;
     atomic_write(&ledger_path(user_root), &body)
 }
 

@@ -45,6 +45,8 @@
 //! `<appDataDir>/baseline-local/presets-local/<原文件名>`，谁在"第一次落到盘上"那一刻存一次，
 //! 谁就永远答得出"它最初的样子"。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -72,8 +74,9 @@ fn check_sha(sha256: &str) -> Result<&str, AppError> {
     let s = sha256.trim();
     let ok = s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit());
     if !ok {
-        return Err(AppError::invalid_argument(format!(
-            "血统里的摘要不是一个 sha256：{sha256}"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.baseline.368",
+            &[("sha256", sha256)],
         )));
     }
     Ok(s)
@@ -99,7 +102,11 @@ pub fn ensure_baseline(internal_root: &Path, sha256: &str, bytes: &[u8]) -> Resu
     }
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::io(format!("建不出基准目录：{}", parent.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.runtime.baseline.369",
+                &[("v1", &parent.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     crate::fsx::atomic::atomic_write(&target, bytes)?;
@@ -118,9 +125,11 @@ pub fn read_baseline(internal_root: &Path, sha256: &str) -> Result<Option<String
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(
-                AppError::io(format!("读不到基准 {}", path.display())).with_detail(e.to_string())
-            )
+            return Err(AppError::io(messages::text(
+                "ui.runtime.baseline.370",
+                &[("v1", &path.display().to_string())],
+            ))
+            .with_detail(e.to_string()))
         }
     };
     let got = super::catalog::hex(&Sha256::digest(&bytes));
@@ -199,13 +208,19 @@ pub fn ensure_origin_copy(
     }
     let src = crate::fsx::paths::resolve_in(user_root, rel)?;
     let bytes = std::fs::read(&src).map_err(|e| {
-        AppError::io(format!("读不到 {}（原始副本没存上）", src.display()))
-            .with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.runtime.baseline.371",
+            &[("v1", &src.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::io(format!("建不出原文镜像目录：{}", parent.display()))
-                .with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.runtime.baseline.372",
+                &[("v1", &parent.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     crate::fsx::atomic::atomic_write(&target, &bytes)?;
@@ -219,8 +234,11 @@ pub fn read_origin_copy(internal_root: &Path, rel: &str) -> Result<Option<String
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(AppError::io(format!("读不到原文镜像 {}", path.display()))
-                .with_detail(e.to_string()))
+            return Err(AppError::io(messages::text(
+                "ui.runtime.baseline.373",
+                &[("v1", &path.display().to_string())],
+            ))
+            .with_detail(e.to_string()))
         }
     };
     Ok(String::from_utf8(bytes).ok())
@@ -239,12 +257,19 @@ pub fn move_origin_copy(
     let to = origin_path(internal_root, to_rel)?;
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            AppError::io(format!("建不出原文镜像目录：{}", parent.display()))
-                .with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.runtime.baseline.374",
+                &[("v1", &parent.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     std::fs::rename(&from, &to).map_err(|e| {
-        AppError::io(format!("原文镜像搬不了家：{}", from.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.runtime.baseline.375",
+            &[("v1", &from.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     Ok(true)
 }
@@ -255,10 +280,11 @@ pub fn remove_origin_copy(internal_root: &Path, rel: &str) -> Result<bool, AppEr
     match std::fs::remove_file(&path) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(e) => {
-            Err(AppError::io(format!("原文镜像删不掉 {}", path.display()))
-                .with_detail(e.to_string()))
-        }
+        Err(e) => Err(AppError::io(messages::text(
+            "ui.runtime.baseline.376",
+            &[("v1", &path.display().to_string())],
+        ))
+        .with_detail(e.to_string())),
     }
 }
 

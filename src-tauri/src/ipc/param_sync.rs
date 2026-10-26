@@ -45,6 +45,8 @@
 //! （"我愿意等一下，把云端新版取回来看个清楚"），列表页那种一屏几十行的读一律
 //! `false` —— 铁律是**启动零网络**，读命令不许偷偷发请求。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -144,7 +146,9 @@ pub async fn get_preset_param_sync(
         })
     })
     .await
-    .map_err(|e| AppError::internal("读云端更新账没跑到终局").with_detail(e.to_string()))?
+    .map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.param_sync.106", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 把一批决定落下去（采用 / 保持），回来的是**落完之后的**那一份总账。
@@ -169,7 +173,9 @@ pub async fn apply_preset_param_decisions(
         })
     })
     .await
-    .map_err(|e| AppError::internal("落云端更新决定没跑到终局").with_detail(e.to_string()))?
+    .map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.param_sync.107", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 读 ---------- */
@@ -431,16 +437,18 @@ fn apply_at(
     /* 先读一份总账：采用需要"云端新值"，水位需要"云端当前版是谁" —— 两者都在里面 */
     let before = sync_at(root, user, path, false)?;
     let Some(current_sha) = before.current_sha256.clone() else {
-        return Err(AppError::invalid_argument(
-            "认不出这份预设对应哪一版云端 —— 现在没法处理云端更新",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.param_sync.108",
+            &[],
+        )));
     };
 
     /* 骨架要用云端当前版正文：拿不到就如实报错（不许"记了水位、文件却没跟上新版"） */
     let Some((cloud_text, cloud_path)) = current_cloud_at(root, user, path)? else {
-        return Err(AppError::invalid_argument(
-            "云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一份",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.param_sync.109",
+            &[],
+        )));
     };
     let catalog = runtime::load_released_catalog(root)?;
     let defs = &catalog.registry.params;
@@ -455,8 +463,9 @@ fn apply_at(
             "adopt" => ParamDecisionKind::Adopt,
             "hold" => ParamDecisionKind::Hold,
             other => {
-                return Err(AppError::invalid_argument(format!(
-                    "不认得这种处理方式：{other}（只有 adopt / hold）"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.param_sync.110",
+                    &[("other", other)],
                 )))
             }
         };
@@ -466,12 +475,15 @@ fn apply_at(
                 .iter()
                 .find(|e| e.key == d.param_key)
                 .ok_or_else(|| {
-                    AppError::invalid_argument(format!("这份预设里没有参数 {}", d.param_key))
+                    AppError::invalid_argument(messages::text(
+                        "ui.ipc.param_sync.111",
+                        &[("v1", &d.param_key.to_string())],
+                    ))
                 })?;
             if entry.cloud_new.is_none() {
-                return Err(AppError::invalid_argument(format!(
-                    "云端当前版的正文还不在本机 —— 先把云端新版取回来，再采用 {} 的新值",
-                    d.param_key
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.param_sync.112",
+                    &[("v1", &d.param_key.to_string())],
                 )));
             }
         }
@@ -551,9 +563,10 @@ fn apply_at(
             && d.path.as_deref() == Some(path)
             && !clean_draft
         {
-            return Err(AppError::invalid_argument(
-                "这份预设还有没保存的修改（在「修改参数」里）—— 先保存或放弃那些修改，再处理云端更新",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.param_sync.113",
+                &[],
+            )));
         }
     }
 

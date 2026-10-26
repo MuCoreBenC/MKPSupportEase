@@ -46,6 +46,8 @@
 //! 后者是 [`super::update::check`] 的事（比目录指纹）。混成一句"需更新"，用户既不知道
 //! 自己的文件是不是被改过，也不知道该不该等更新 —— 所以这一段单独给 [`trust_entries`]。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -83,8 +85,11 @@ impl<'a> LocalDirSource<'a> {
 impl Source for LocalDirSource<'_> {
     fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
         std::fs::read(self.root.join(&file.file_name)).map_err(|e| {
-            AppError::not_found(format!("下载源里没有 {}", file.file_name))
-                .with_detail(e.to_string())
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.382",
+                &[("v1", &file.file_name.to_string())],
+            ))
+            .with_detail(e.to_string())
         })
     }
 }
@@ -190,7 +195,7 @@ pub(crate) const SIZE_MISMATCH_CODE: &str = "E_DELIVERY_SIZE_001";
 
 /// 「大小对不上」那句话本身 —— 与 [`sha_mismatch_sentence`] 同一个拆法（给开发台故障注入用）
 pub(crate) fn size_mismatch_sentence(name: &str) -> String {
-    format!("{name} 的大小对不上 —— 不是目录登记的那一版，重下一遍；还不行就找我们要一份")
+    ::postprocess::diag::messages::text("ui.runtime.delivery.size_mismatch", &[("name", name)])
 }
 
 /// 本机 registry 里那份 catalog 的 revision（读不到就 `None`）
@@ -262,8 +267,11 @@ pub fn deliver(
         let archive_target = archive_dir(internal_root).join(&file.path);
         std::fs::create_dir_all(archive_target.parent().expect("归档路径必有父目录")).map_err(
             |e| {
-                AppError::io(format!("建不出归档目录：{}", archive_target.display()))
-                    .with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.delivery.383",
+                    &[("v1", &archive_target.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             },
         )?;
         if !archive_target.exists() {
@@ -587,7 +595,12 @@ pub fn delete_downloaded(
         .files
         .iter()
         .find(|f| f.file_name == file_name)
-        .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+        .ok_or_else(|| {
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.384",
+                &[("file_name", file_name)],
+            ))
+        })?;
     let target = resolve_in(internal_root, &file.path)?;
     remove_file_idempotent(&target, file_name)
 }
@@ -601,8 +614,9 @@ pub fn delete_downloaded(
 pub fn delete_archived(internal_root: &Path, path: &str) -> Result<(), AppError> {
     let prefix = format!("{}/", super::paths::ARCHIVE_DIR);
     if !path.starts_with(&prefix) {
-        return Err(AppError::invalid_argument(format!(
-            "只认归档区（{prefix}…）里的路径，别的不是旧版本"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.delivery.385",
+            &[("prefix", &prefix.to_string())],
         )));
     }
     let target = resolve_in(internal_root, path)?;
@@ -614,7 +628,10 @@ fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
     match std::fs::remove_file(target) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io(format!("{what} 删不掉")).with_detail(e.to_string())),
+        Err(e) => Err(
+            AppError::io(messages::text("ui.runtime.delivery.386", &[("what", what)]))
+                .with_detail(e.to_string()),
+        ),
     }
 }
 
@@ -777,19 +794,26 @@ pub fn trust_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<File
 /// 不许拿它当原文去改（改完另存成用户文件，等于把可疑内容洗成"我改过的那一份"）。
 pub fn cloud_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
     let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
-        AppError::not_found(format!("{} 还没下载到本机 —— 先下载，再改", file.file_name))
+        AppError::not_found(messages::text(
+            "ui.runtime.delivery.387",
+            &[("v1", &file.file_name.to_string())],
+        ))
     })?;
     // 只有目录登记了期望值才比对：随包 bootstrap 目录不登记它，读得出来的正文就是可用正文
     if let Some(want) = file.expected_sha() {
         if hex(&Sha256::digest(&bytes)) != want {
-            return Err(AppError::sha_mismatch(format!(
-                "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的云端版，再改",
-                file.file_name
+            return Err(AppError::sha_mismatch(messages::text(
+                "ui.runtime.delivery.388",
+                &[("v1", &file.file_name.to_string())],
             )));
         }
     }
-    String::from_utf8(bytes)
-        .map_err(|_| AppError::corrupted(format!("{} 不是 UTF-8 文本，改不了", file.file_name)))
+    String::from_utf8(bytes).map_err(|_| {
+        AppError::corrupted(messages::text(
+            "ui.runtime.delivery.389",
+            &[("v1", &file.file_name.to_string())],
+        ))
+    })
 }
 
 /* ---------- 一次多份（第二圈：并发） ---------- */

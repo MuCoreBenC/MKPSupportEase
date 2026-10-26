@@ -102,7 +102,9 @@ const hit = entries.filter((e) => {
     e.key.toLowerCase().includes(q) ||
     code.toLowerCase().includes(q) ||
     (e.fields.text ?? '').toLowerCase().includes(q) ||
-    (e.fields.slicer ?? '').toLowerCase().includes(q)
+    (e.fields.text_en ?? '').toLowerCase().includes(q) ||
+    (e.fields.slicer ?? '').toLowerCase().includes(q) ||
+    (e.fields.slicer_en ?? '').toLowerCase().includes(q)
   )
 })
 
@@ -119,7 +121,9 @@ for (const e of hit) {
   console.log(code ? `${code}   ${cls ?? ''}` : '（无码）')
   console.log(`键      ${e.key}`)
   console.log(`本程序  ${e.fields.text ?? '—'}`)
+  if (e.fields.text_en !== undefined) console.log(`English ${e.fields.text_en}`)
   if (e.fields.slicer !== undefined) console.log(`切片器  ${e.fields.slicer}`)
+  if (e.fields.slicer_en !== undefined) console.log(`切片器英 ${e.fields.slicer_en}`)
   if (e.fields.params) console.log(`参数    ${e.fields.params}`)
   if (e.fields.note) console.log(`说明    ${e.fields.note}`)
 }

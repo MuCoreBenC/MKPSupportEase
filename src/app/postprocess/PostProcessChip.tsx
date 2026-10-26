@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 import TitlebarChip from '../components/TitlebarChip'
+import { useT } from '../../i18n'
 import { percentOf, stepName } from './steps'
 import type { PostProcessRunView } from './usePostProcessRun'
 import s from './PostProcessChip.module.css'
@@ -77,6 +78,7 @@ function Dots() {
 }
 
 export default function PostProcessChip({ view }: { view: PostProcessRunView }) {
+  const tr = useT()
   const { run, dismissed, reopen, quietUntil } = view
   /*
    * 「这枚胶囊在不在」—— **两档同一套逻辑**（2026-10-17 作者：
@@ -109,15 +111,16 @@ export default function PostProcessChip({ view }: { view: PostProcessRunView }) 
     const percent =
       run.progress === null ? 0 : percentOf(run.progress.step, run.progress.fractionInStep)
     const pct = Math.round(percent)
-    const phase = run.progress === null ? '准备中' : stepName(run.progress.step)
+    const phase =
+      run.progress === null ? tr('postproc.step.preparing') : stepName(tr, run.progress.step)
 
     return (
       <TitlebarChip
         testId="postprocess-chip"
         icon={<Dots />}
         label={`${pct}%`}
-        title={`后处理在后台跑：${phase} · ${pct}%（点击看进度）`}
-        ariaLabel={`后处理在后台跑：${phase}，${pct}%，点击看进度`}
+        title={tr('postproc.chip.runningTitle', { phase, pct })}
+        ariaLabel={tr('postproc.chip.runningAria', { phase, pct })}
         onClick={reopen}
       />
     )
@@ -129,10 +132,14 @@ export default function PostProcessChip({ view }: { view: PostProcessRunView }) 
     <TitlebarChip
       testId="postprocess-chip"
       icon={<OutcomeGlyph ok={ok} />}
-      label={ok ? '已完成' : '没成'}
+      label={ok ? tr('postproc.chip.done') : tr('postproc.chip.notDone')}
       tone={ok ? 'accent' : 'danger'}
-      title={`后处理${ok ? '完成' : '没成'}：${run.finished.message}（点击看详情）`}
-      ariaLabel={`后处理${ok ? '完成' : '没成'}：${run.finished.message}，点击看详情`}
+      title={tr(ok ? 'postproc.chip.okTitle' : 'postproc.chip.notOkTitle', {
+        message: run.finished.message,
+      })}
+      ariaLabel={tr(ok ? 'postproc.chip.okAria' : 'postproc.chip.notOkAria', {
+        message: run.finished.message,
+      })}
       onClick={reopen}
     />
   )

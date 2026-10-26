@@ -156,6 +156,7 @@ import type {
   DownloadOutcome,
   DownloadTick,
   GuideTarget,
+  LocalePref,
   OnDiskFile,
   ParamDecision,
   ParamDecisionKind,
@@ -329,6 +330,8 @@ const mockCopyTargets = new Set<string>()
  */
 let mockPin: PinPref = 'off'
 let mockCompact = false
+/* 界面语言（2026-10-25）：`null` = 还没选过 ⇒ 跟随系统，与真后端同一个出厂档 */
+let mockLocale: LocalePref | null = null
 /* 进小窗之前用户自己选的那一档（退出时还原）—— 与 Rust 侧 `pinBeforeCompact` 同一格 */
 let mockPinBeforeCompact: PinPref | null = null
 
@@ -2534,6 +2537,22 @@ export const mockApi: MkpApi = {
 
   async uninstall() {
     throw new NotImplementedError('浏览器预览里不能卸载应用')
+  },
+
+  /*
+   * 界面语言（2026-10-25）：与主题同一套口径 —— 内存镜像、认档才收。
+   * 浏览器演示里它也真的生效（字典是前端的，换档即换字），所以这一条不是空转。
+   */
+  async getLocale() {
+    return mockLocale
+  },
+
+  async setLocale(locale: LocalePref) {
+    if (locale !== 'system' && locale !== 'zh-CN' && locale !== 'en') {
+      throw new Error(`认不出的界面语言：${locale}（只能是 system / zh-CN / en）`)
+    }
+    mockLocale = locale
+    return mockLocale
   },
 
   /*

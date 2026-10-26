@@ -34,6 +34,8 @@
 //! 这两条坏掉的表现都**不是报错**，而是"某个地方少了一张图"。所以它们在加载期就拦，
 //! 而不是等某个页面渲染时才发现。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -273,8 +275,11 @@ impl Assets {
         let text = super::read(&file)?;
         let doc = super::parse_text(&text, &file)?;
         let parsed: AssetsFile = toml_edit::de::from_str(&text).map_err(|e| {
-            AppError::corrupted(format!("{} 读不成资产定义", file.display()))
-                .with_detail(e.to_string())
+            AppError::corrupted(messages::text(
+                "ui.presetdata.assets.168",
+                &[("v1", &file.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
 
         let out = Self {
@@ -359,7 +364,7 @@ impl Assets {
     /// 没有载荷根时报错而不是猜一个 —— 猜出来的路径要么查不到文件、要么查到别人的文件。
     pub fn resolve(&self, asset: &Asset) -> Result<PathBuf, AppError> {
         let root = self.asset_root.as_ref().ok_or_else(|| {
-            AppError::not_found("这一侧没有资产载荷根").with_detail(
+            AppError::not_found(messages::text("ui.presetdata.assets.169", &[])).with_detail(
                 "资产文件本体与定义分家：定义在 presets/assets.toml，载荷在 \
                  presets/assets/（2026-10-03 前是 public/assets/，资产链第一刀搬的）。\
                  没有载荷根时按「文件还没到」处理，不要猜路径"
@@ -367,11 +372,17 @@ impl Assets {
             )
         })?;
         resolve_in(root, asset.path.trim()).map_err(|e| {
-            AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", asset.id, asset.path))
-                .with_detail(format!(
-                    "path 必须落在资产载荷根（{}）之内，且只能是相对路径；原错误：{e}",
-                    root.display()
-                ))
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.assets.170",
+                &[
+                    ("v1", &asset.id.to_string()),
+                    ("v2", &asset.path.to_string()),
+                ],
+            ))
+            .with_detail(format!(
+                "path 必须落在资产载荷根（{}）之内，且只能是相对路径；原错误：{e}",
+                root.display()
+            ))
         })
     }
 
@@ -406,11 +417,14 @@ impl Assets {
             ..asset
         };
         if let Some(prev) = self.get(&candidate.id) {
-            return Err(
-                AppError::invalid_argument(format!("资产 id 已经存在：{}", prev.id)).with_detail(
-                    "id 是主键，且大小写不敏感 —— 换一个 id，或先删掉原来那条".to_owned(),
-                ),
-            );
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.assets.171",
+                &[("v1", &prev.id.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.why.id_is_key",
+                &[],
+            )));
         }
         self.check_one(&candidate)?;
 
@@ -437,7 +451,10 @@ impl Assets {
                 toml_edit::ArrayOfTables::new(),
             ));
         let arr = entry.as_array_of_tables_mut().ok_or_else(|| {
-            AppError::corrupted(format!("{} 的 assets 不是表数组", self.file.display()))
+            AppError::corrupted(messages::text(
+                "ui.presetdata.assets.172",
+                &[("v1", &self.file.display().to_string())],
+            ))
         })?;
         arr.push(t);
 
@@ -452,7 +469,10 @@ impl Assets {
     pub fn remove(&mut self, id: &str) -> Result<Asset, AppError> {
         let want = id.trim().to_lowercase();
         let Some(pos) = self.items.iter().position(|a| a.id.to_lowercase() == want) else {
-            return Err(AppError::not_found(format!("没有资产 {id}")));
+            return Err(AppError::not_found(messages::text(
+                "ui.presetdata.assets.173",
+                &[("id", id)],
+            )));
         };
         let removed = self.items.remove(pos);
 
@@ -462,7 +482,10 @@ impl Assets {
             .get_mut("assets")
             .and_then(|i| i.as_array_of_tables_mut())
             .ok_or_else(|| {
-                AppError::corrupted(format!("{} 的 assets 不是表数组", self.file.display()))
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.174",
+                    &[("v1", &self.file.display().to_string())],
+                ))
             })?;
         let idx = arr
             .iter()
@@ -472,9 +495,9 @@ impl Assets {
                     .is_some_and(|s| s.to_lowercase() == want)
             })
             .ok_or_else(|| {
-                AppError::corrupted(format!(
-                    "内存里有 {}，文档里却找不到那一段 —— 别删，先查加载逻辑",
-                    removed.id
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.175",
+                    &[("v1", &removed.id.to_string())],
                 ))
             })?;
         arr.remove(idx);
@@ -498,12 +521,15 @@ impl Assets {
             .items
             .iter_mut()
             .find(|a| a.id.to_lowercase() == want)
-            .ok_or_else(|| AppError::not_found(format!("没有资产 {id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.assets.176", &[("id", id)]))
+            })?;
         if asset.kind == AssetKind::MkPreset
             && delivery == crate::presetdata::assets::Delivery::Bundled
         {
-            return Err(AppError::invalid_argument(format!(
-                "资产 {id} 是 MKP 预设登记，不能设成随包"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.assets.177",
+                &[("id", id)],
             ))
             .with_detail(
                 "MKP 预设的文件是生成产物（mkp/presets/…），没有随包复制这条路径；\
@@ -522,7 +548,10 @@ impl Assets {
             .get_mut("assets")
             .and_then(|i| i.as_array_of_tables_mut())
             .ok_or_else(|| {
-                AppError::corrupted(format!("{} 的 assets 不是表数组", self.file.display()))
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.178",
+                    &[("v1", &self.file.display().to_string())],
+                ))
             })?;
         let table = arr
             .iter_mut()
@@ -532,9 +561,7 @@ impl Assets {
                     .is_some_and(|s| s.to_lowercase() == want)
             })
             .ok_or_else(|| {
-                AppError::corrupted(format!(
-                    "内存里有 {id}，文档里却找不到那一段 —— 别改，先查加载逻辑"
-                ))
+                AppError::corrupted(messages::text("ui.presetdata.assets.179", &[("id", id)]))
             })?;
         if delivery == crate::presetdata::assets::Delivery::Download {
             table.remove("delivery");
@@ -588,7 +615,10 @@ impl Assets {
     pub fn remove_group(&mut self, id: &str) -> Result<Group, AppError> {
         let want = id.trim().to_lowercase();
         let Some(pos) = self.groups.iter().position(|g| g.id.to_lowercase() == want) else {
-            return Err(AppError::not_found(format!("没有分组 {id}")));
+            return Err(AppError::not_found(messages::text(
+                "ui.presetdata.assets.180",
+                &[("id", id)],
+            )));
         };
         let removed = self.groups.remove(pos);
         self.write_groups_doc();
@@ -635,9 +665,9 @@ impl Assets {
     fn check(&self) -> Result<(), AppError> {
         for a in &self.items {
             if a.id.trim().is_empty() {
-                return Err(AppError::corrupted(format!(
-                    "{} 里有一条资产没有 id",
-                    self.file.display()
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.181",
+                    &[("v1", &self.file.display().to_string())],
                 )));
             }
             self.check_one(a)?;
@@ -650,12 +680,14 @@ impl Assets {
         for a in &self.items {
             let lower = a.id.to_lowercase();
             if let Some(prev) = seen.insert(lower, a.id.clone()) {
-                return Err(
-                    AppError::corrupted(format!("资产 id 撞了：{} 与 {}", prev, a.id)).with_detail(
-                        "id 是主键，且**大小写不敏感** —— 只差大小写的两条会让查表结果取决于顺序"
-                            .to_owned(),
-                    ),
-                );
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.182",
+                    &[("v1", &prev.to_string()), ("v2", &a.id.to_string())],
+                ))
+                .with_detail(
+                    "id 是主键，且**大小写不敏感** —— 只差大小写的两条会让查表结果取决于顺序"
+                        .to_owned(),
+                ));
             }
         }
 
@@ -688,43 +720,61 @@ impl Assets {
             let id = g.id.trim();
             let lower = id.to_lowercase();
             if id.is_empty() {
-                return Err(AppError::corrupted(format!(
-                    "{} 里有一个分组没有 id",
-                    self.file.display()
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.183",
+                    &[("v1", &self.file.display().to_string())],
                 )));
             }
             /* 安全文件名（它同时是那份源稿的文件名）：借 path 那两道与根无关的闸 */
             check_relative(&format!("{id}.anno.json")).map_err(|e| {
-                AppError::corrupted(format!("分组 id 不能当文件名用：{id}")).with_detail(format!(
-                    "组 id 同时就是那份标注源稿的文件名（`<目录>/<组 id>.anno.json`）—— \
+                AppError::corrupted(messages::text("ui.presetdata.assets.184", &[("id", id)]))
+                    .with_detail(format!(
+                        "组 id 同时就是那份标注源稿的文件名（`<目录>/<组 id>.anno.json`）—— \
                      得是个安全的名字。{e}"
-                ))
+                    ))
             })?;
             if let Some(prev) = seen_ids.insert(lower.clone(), id.to_owned()) {
-                return Err(AppError::corrupted(format!("分组 id 撞了：{prev} 与 {id}"))
-                    .with_detail("id 是主键，且**大小写不敏感**".to_owned()));
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.185",
+                    &[("prev", &prev.to_string()), ("id", id)],
+                ))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.why.id_is_key",
+                    &[],
+                )));
             }
             if g.name.trim().is_empty() {
-                return Err(AppError::corrupted(format!("分组 {id} 没有 name"))
-                    .with_detail("界面上要显示的就是它（作者要的「套装感」）".to_owned()));
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.186",
+                    &[("id", id)],
+                ))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.why.display_is_face",
+                    &[],
+                )));
             }
             if g.members.is_empty() {
-                return Err(
-                    AppError::corrupted(format!("分组 {id} 一个成员都没有")).with_detail(
-                        "分组就是「哪几张图共用一份标注」—— 没有成员的组没有意义，删掉它"
-                            .to_owned(),
-                    ),
-                );
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.187",
+                    &[("id", id)],
+                ))
+                .with_detail(
+                    "分组就是「哪几张图共用一份标注」—— 没有成员的组没有意义，删掉它".to_owned(),
+                ));
             }
 
             let mut dirs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
             for m in &g.members {
                 let mid = m.asset.trim();
                 let Some(a) = self.get(mid) else {
-                    return Err(AppError::corrupted(format!(
-                        "分组 {id} 的成员 {mid} 不是一条资产"
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.assets.188",
+                        &[("id", id), ("mid", mid)],
                     ))
-                    .with_detail("成员要写资产 id（`presets/assets.toml` 的 id）".to_owned()));
+                    .with_detail(::postprocess::diag::messages::text(
+                        "ui.presetdata.why.member_is_asset_id",
+                        &[],
+                    )));
                 };
                 let dir = Path::new(a.path.trim())
                     .parent()
@@ -732,9 +782,13 @@ impl Assets {
                     .unwrap_or_default();
                 dirs.insert(dir);
                 if let Some(prev) = owned.insert(a.id.to_lowercase(), id.to_owned()) {
-                    return Err(AppError::corrupted(format!(
-                        "资产 {} 同时属于两个组：{prev} 与 {id}",
-                        a.id
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.assets.189",
+                        &[
+                            ("v1", &a.id.to_string()),
+                            ("prev", &prev.to_string()),
+                            ("id", id),
+                        ],
                     ))
                     .with_detail(
                         "一张图只能跟一伙人共用一份标注 —— 它属于谁，那份 `.anno.json` 就只有一个"
@@ -744,14 +798,14 @@ impl Assets {
             }
             if dirs.len() > 1 {
                 let which: Vec<String> = dirs.iter().cloned().collect();
-                return Err(
-                    AppError::corrupted(format!("分组 {id} 的成员不在同一个目录")).with_detail(
-                        format!(
-                        "分别在：{}。一份标注源稿只能落在一个目录里（`<目录>/<组 id>.anno.json`）",
-                        which.join("、")
-                    ),
-                    ),
-                );
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.190",
+                    &[("id", id)],
+                ))
+                .with_detail(format!(
+                    "分别在：{}。一份标注源稿只能落在一个目录里（`<目录>/<组 id>.anno.json`）",
+                    which.join("、")
+                )));
             }
             group_dirs.insert(
                 lower,
@@ -780,9 +834,9 @@ impl Assets {
                 .unwrap_or_default();
             if let Some(g) = group_dirs.get(&derived.to_lowercase()) {
                 if g.to_string_lossy().replace('\\', "/") == dir {
-                    return Err(AppError::corrupted(format!(
-                        "资产 {} 的旧口径干名 `{derived}` 与同目录的分组 id 撞了",
-                        a.id
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.assets.191",
+                        &[("v1", &a.id.to_string()), ("derived", derived)],
                     ))
                     .with_detail(
                         "那样两份源稿会抢同一份文件。把这张图收进那个组，或者给它单独建一个组"
@@ -798,12 +852,15 @@ impl Assets {
     /// 免得"手写的能过、程序加的过不了"或者反过来
     fn check_one(&self, a: &Asset) -> Result<(), AppError> {
         if a.id.trim().is_empty() {
-            return Err(AppError::invalid_argument("资产 id 不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.assets.192",
+                &[],
+            )));
         }
         if a.name.trim().is_empty() {
-            return Err(AppError::invalid_argument(format!(
-                "资产 {} 没有 name —— 界面上要显示的就是它",
-                a.id
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.assets.193",
+                &[("v1", &a.id.to_string())],
             )));
         }
         // 路径：走那两道不需要根的闸（非空 / 非绝对 / 无 `..`，顺带证明它不是空的）。
@@ -815,9 +872,9 @@ impl Assets {
         // 算出，台账里**不写 path** —— 写的就是第二份会过期的真相
         if a.kind == AssetKind::MkPreset {
             if !a.path.trim().is_empty() {
-                return Err(AppError::invalid_argument(format!(
-                    "资产 {} 是 MKP 预设，却写了 path",
-                    a.id
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.assets.194",
+                    &[("v1", &a.id.to_string())],
                 ))
                 .with_detail(
                     "MKP 预设的文件是生成产物（落点由命名规则算出，doc §12.5）—— \
@@ -828,9 +885,9 @@ impl Assets {
             if a.machine_id.as_deref().unwrap_or("").trim().is_empty()
                 || a.version_id.as_deref().unwrap_or("").trim().is_empty()
             {
-                return Err(AppError::invalid_argument(format!(
-                    "资产 {} 是 MKP 预设，却没有 machineId + versionId",
-                    a.id
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.assets.195",
+                    &[("v1", &a.id.to_string())],
                 ))
                 .with_detail(
                     "这一类靠「机型 + 版本」定位那一版的产物（两个字段都必填）—— \
@@ -840,17 +897,20 @@ impl Assets {
             }
         } else {
             check_relative(a.path.trim()).map_err(|e| {
-                AppError::invalid_argument(format!("资产 {} 的 path 越界：{}", a.id, a.path))
-                    .with_detail(e.to_string())
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.assets.196",
+                    &[("v1", &a.id.to_string()), ("v2", &a.path.to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
         }
 
         match a.kind {
             AssetKind::SlicerProfile => {
                 if a.slicer.as_deref().unwrap_or("").trim().is_empty() {
-                    return Err(AppError::invalid_argument(format!(
-                        "资产 {} 是切片器预设，但没有写 slicer",
-                        a.id
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.assets.197",
+                        &[("v1", &a.id.to_string())],
                     ))
                     .with_detail(
                         "slicer 是 G-3 留的开放维度（今天只有 `bbs`）—— 缺了它这份预设\
@@ -862,20 +922,26 @@ impl Assets {
             AssetKind::MkPreset => {
                 // 专有字段是 machineId + versionId（上面查过了），slicer/profile 一律不写
                 if a.slicer.is_some() || a.profile.is_some() {
-                    return Err(AppError::invalid_argument(format!(
-                        "资产 {} 是 MKP 预设，却写了 slicer / profile",
-                        a.id
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.assets.198",
+                        &[("v1", &a.id.to_string())],
                     ))
-                    .with_detail("这两项只对 `type = 'slicerProfile'` 有意义".to_owned()));
+                    .with_detail(::postprocess::diag::messages::text(
+                        "ui.presetdata.why.slicer_only",
+                        &[],
+                    )));
                 }
             }
             _ => {
                 if a.slicer.is_some() || a.profile.is_some() {
-                    return Err(AppError::invalid_argument(format!(
-                        "资产 {} 不是切片器预设，却写了 slicer / profile",
-                        a.id
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.assets.199",
+                        &[("v1", &a.id.to_string())],
                     ))
-                    .with_detail("这两项只对 `type = 'slicerProfile'` 有意义".to_owned()));
+                    .with_detail(::postprocess::diag::messages::text(
+                        "ui.presetdata.why.slicer_only",
+                        &[],
+                    )));
                 }
             }
         }
@@ -892,11 +958,14 @@ impl Assets {
                 continue;
             };
             if !machines.contains(&m) {
-                return Err(AppError::corrupted(format!(
-                    "资产 {} 归属机型 {m}，但没有这台机型",
-                    a.id
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.assets.200",
+                    &[("v1", &a.id.to_string()), ("m", m)],
                 ))
-                .with_detail("机型清单在 presets/machines/*.toml".to_owned()));
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.why.machine_list",
+                    &[],
+                )));
             }
         }
         Ok(())

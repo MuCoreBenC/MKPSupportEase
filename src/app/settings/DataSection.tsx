@@ -11,11 +11,15 @@
  *
  * 不做：导出数据 / 导入数据 / 分类清理（备份恢复已有、自动清理已有）。
  * 那两块**故意不摆占位** —— 摆一个点了没用的按钮比不摆更糟。
+ *
+ * ★ 文案走字典（2026-10-25）。风险那一段里"您的数据会保留"原本是 `<strong>`，
+ *   现在拆成前 / 中 / 后三个键，中间那段仍包在 `<strong>` 里（英文也一样加粗）。
  */
 
 import { useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
+import { useT } from '../../i18n'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -23,6 +27,7 @@ import s from './PageSettings.module.css'
 const CONFIRM_MS = 3000
 
 export default function DataSection() {
+  const tr = useT()
   const [folderBusy, setFolderBusy] = useState(false)
   const [folderNote, setFolderNote] = useState<string | null>(null)
 
@@ -46,7 +51,7 @@ export default function DataSection() {
         setFolderBusy(false)
       },
       (e: unknown) => {
-        setFolderNote(`打不开：${errorText(e)}`)
+        setFolderNote(tr('settings.data.openFailed', { detail: errorText(e) }))
         setFolderBusy(false)
       },
     )
@@ -65,51 +70,53 @@ export default function DataSection() {
       () => setUninstallBusy(false),
       (e: unknown) => {
         setUninstallBusy(false)
-        setUninstallNote(`没卸成：${errorText(e)}`)
+        setUninstallNote(tr('settings.data.uninstallFailed', { detail: errorText(e) }))
       },
     )
   }
 
   return (
     <>
-      <section className={s.section} aria-label="数据与维护">
-        <h2 className={s.secTitle}>数据与维护</h2>
+      <section className={s.section} aria-label={tr('settings.data.title')}>
+        <h2 className={s.secTitle}>{tr('settings.data.title')}</h2>
 
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>预设位置</div>
-            <p className={s.fieldNote}>打开预设配置文件所在目录</p>
+            <div className={s.fieldTitle}>{tr('settings.data.folder')}</div>
+            <p className={s.fieldNote}>{tr('settings.data.folderNote')}</p>
             {folderNote !== null && <p className={s.fieldNote}>{folderNote}</p>}
           </div>
           <Btn disabled={folderBusy} onClick={openFolder}>
-            {folderBusy ? '正在打开…' : '打开'}
+            {folderBusy ? tr('settings.data.opening') : tr('settings.data.open')}
           </Btn>
         </div>
 
-        <p className={s.noteHint}>
-          MKP SupportEase 不会读取、保存、导出或修改您的 3MF 文件
-        </p>
+        <p className={s.noteHint}>{tr('settings.data.privacy')}</p>
       </section>
 
-      <section className={`${s.section} ${s.dangerBlock}`} aria-label="清理与卸载">
-        <h2 className={`${s.secTitle} ${s.dangerTitle}`}>清理与卸载</h2>
+      <section className={`${s.section} ${s.dangerBlock}`} aria-label={tr('settings.data.uninstallTitle')}>
+        <h2 className={`${s.secTitle} ${s.dangerTitle}`}>{tr('settings.data.uninstallTitle')}</h2>
 
         <p className={s.dangerNote}>
-          <span className={s.dangerNoteHead}>危险操作</span>
-          「卸载应用」会退出程序并删除程序本体，<strong>您的数据会保留</strong> ——
-          预设、执行记录、备份都留在原来的位置，重装回来还在。
+          <span className={s.dangerNoteHead}>{tr('common.danger')}</span>
+          {tr('settings.data.uninstallRiskPre')}
+          <strong>{tr('settings.data.uninstallRiskKeep')}</strong>
+          {tr('settings.data.uninstallRiskPost')}
         </p>
 
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
-            <div className={`${s.fieldTitle} ${s.dangerTitle}`}>卸载应用</div>
-            <p className={s.fieldNote}>
-              删掉程序本体之后就打不开了。切片器里那条后处理命令也要自己清掉，
-              否则下次切片会报"脚本不存在"。
-            </p>
+            <div className={`${s.fieldTitle} ${s.dangerTitle}`}>
+              {tr('settings.data.uninstall')}
+            </div>
+            <p className={s.fieldNote}>{tr('settings.data.uninstallNote')}</p>
           </div>
           <Btn variant="danger" disabled={uninstallBusy} onClick={doUninstall}>
-            {uninstallBusy ? '正在卸载…' : armed ? '确认卸载' : '卸载'}
+            {uninstallBusy
+              ? tr('settings.data.uninstalling')
+              : armed
+                ? tr('settings.data.uninstallConfirm')
+                : tr('settings.data.uninstallAction')}
           </Btn>
         </div>
 

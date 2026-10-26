@@ -284,26 +284,25 @@ fn raise_main_window(app: &AppHandle) {
 /// ★ 这里**不编码表条目**：通知是"界面之外的一句提示"，不是错误，也不是记录；
 /// 真正要查的细节在界面与 `_meta.json` 里。正文仍带 G-code 名，便于对上是哪一盘。
 fn notify_lines(finished: &FinishedDto, gcode_name: Option<&str>) -> (String, String) {
-    const TITLE_OK: &str = "后处理完成";
-    const TITLE_BAD: &str = "后处理没成";
+    let title_ok = ::postprocess::diag::messages::text("ui.hook_ui.notify.title_ok", &[]);
+    let title_bad = ::postprocess::diag::messages::text("ui.hook_ui.notify.title_bad", &[]);
 
     /* 名字从**共享状态**里取（`FinishedPayload` 本身不带文件名 —— 那一份在开场那一条里）。
     取不到就说"这一盘"，不编一个名字出来 */
     let name = match gcode_name {
         Some(n) if !n.is_empty() => n.to_owned(),
-        _ => "这一盘".to_owned(),
+        _ => ::postprocess::diag::messages::text("ui.hook_ui.notify.this_plate", &[]),
     };
 
     if finished.ok {
         /* 校准件那趟：两种跑法的结论不一样（打印件留没留），与界面读同一组键 */
-        let body = crate::hook::calib_done_line(finished.calib_choice.as_deref())
-            .unwrap_or_else(|| format!("{name} 已经处理好了"));
-        (TITLE_OK.to_owned(), body)
+        let body =
+            crate::hook::calib_done_line(finished.calib_choice.as_deref()).unwrap_or_else(|| {
+                ::postprocess::diag::messages::text("ui.hook_ui.notify.done", &[("name", &name)])
+            });
+        (title_ok, body)
     } else {
-        (
-            TITLE_BAD.to_owned(),
-            format!("{name}：{}", finished.message),
-        )
+        (title_bad, format!("{name}：{}", finished.message))
     }
 }
 
@@ -672,7 +671,10 @@ impl HookView {
     /// 一起清掉）—— 唯一差别是这一趟带着 `preview: true`。
     fn begin_preview(&self, app: &AppHandle, mode: crate::devsim::Mode) {
         let preset_name = "（开发台预览）A1_MINI-fast.toml".to_owned();
-        let gcode_name = format!("（开发台预览）{}.gcode", mode.id());
+        let gcode_name = ::postprocess::diag::messages::text(
+            "ui.hook_ui.preview.gcode",
+            &[("detail", mode.id())],
+        );
         {
             let mut g = self.shared.lock().expect("锁没坏");
             *g = Shared {
@@ -870,7 +872,7 @@ impl HookView {
                 /* 这一行只在"设置页按了重置、还开着的窗口要收掉自己那屏"时出现，
                 不是钩子那条线上的结论 —— 所以句子直接写在这里，不进码表。
                 ★ 码仍然给：排查时照着它能在日志里认出"是重置收的场"。 */
-                message: "后处理状态已被重置（由设置页触发）".to_owned(),
+                message: ::postprocess::diag::messages::text("ui.hook_ui.notify.reset", &[]),
                 code: Some("W_SYS_RESET_001".to_owned()),
                 stage: None,
                 exit_code: 0,
@@ -910,7 +912,10 @@ impl HookView {
         let current = self.shared.lock().expect("锁没坏").question.clone();
         let same = current.is_some_and(|q| q.question_kind == question_kind);
         if !same {
-            return Err(AppError::not_found("刚才那个问题已经结束了，不用再回答"));
+            return Err(AppError::not_found(::postprocess::diag::messages::text(
+                "ui.ipc.hook_ui.question_over",
+                &[],
+            )));
         }
         self.write(
             ToHook::Answer {

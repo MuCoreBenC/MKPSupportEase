@@ -46,7 +46,12 @@ fn try_notify(title: &str, body: &str) -> Result<(), String> {
             .arg("-e")
             .arg(script)
             .output()
-            .map_err(|e| format!("osascript 起不来：{e}"))?;
+            .map_err(|e| {
+                ::postprocess::diag::messages::text(
+                    "ui.notify.why_osascript",
+                    &[("detail", &e.to_string())],
+                )
+            })?;
         if out.status.success() {
             Ok(())
         } else {
@@ -71,7 +76,12 @@ fn try_notify(title: &str, body: &str) -> Result<(), String> {
         let out = std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .output()
-            .map_err(|e| format!("powershell 起不来：{e}"))?;
+            .map_err(|e| {
+                ::postprocess::diag::messages::text(
+                    "ui.notify.why_powershell",
+                    &[("detail", &e.to_string())],
+                )
+            })?;
         if out.status.success() {
             Ok(())
         } else {
@@ -82,7 +92,10 @@ fn try_notify(title: &str, body: &str) -> Result<(), String> {
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = (title, body);
-        Err("这个平台上没有实现系统通知".to_owned())
+        Err(::postprocess::diag::messages::text(
+            "ui.notify.unimplemented",
+            &[],
+        ))
     }
 }
 

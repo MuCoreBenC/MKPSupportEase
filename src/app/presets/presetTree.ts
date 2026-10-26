@@ -99,6 +99,7 @@ import type {
   LocalPresetIdentity,
   VersionFiles,
 } from '../../api'
+import type { StringKey, Tr } from '../../i18n'
 
 /**
  * 用户自己的一份文件（本地文件，`presets-local/`）。
@@ -109,7 +110,7 @@ import type {
 export type { LocalPresetFile }
 
 /** 取不到真值时的统一说法，与工作台那边用的是同一个词 */
-export const UNKNOWN = '未知'
+export const UNKNOWN: StringKey = 'presets.tree.unknown'
 
 /** 大小那一栏的 title。为什么是「未知」得说清，否则看的人只会觉得界面没做完 */
 
@@ -127,14 +128,14 @@ export const UNKNOWN = '未知'
 export type PresetKindAxis = 'mkp' | 'slicer'
 export type PresetScopeAxis = 'local' | 'cloud'
 
-export const KIND_AXIS_TEXT: Record<PresetKindAxis, string> = {
-  mkp: 'MKP 配置',
-  slicer: '切片器配置',
+export const KIND_AXIS_TEXT: Record<PresetKindAxis, StringKey> = {
+  mkp: 'presets.tree.kind.mkp',
+  slicer: 'presets.tree.kind.slicer',
 }
 
-export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, string> = {
-  local: '本地',
-  cloud: '云端',
+export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, StringKey> = {
+  local: 'presets.tree.scope.local',
+  cloud: 'presets.tree.scope.cloud',
 }
 
 /**
@@ -152,26 +153,17 @@ export const SCOPE_AXIS_TEXT: Record<PresetScopeAxis, string> = {
  *   同一屏上「已应用」和「使用」并排出现，读的人要自己判断这俩是不是一回事。
  *   切片器那一套（已复制 / 未复制）不动：它的动作本来就是「复制」。
  */
-export const LIVE_TEXT: Record<PresetKindAxis, { on: string; off: string }> = {
-  mkp: { on: '在用', off: '未使用' },
-  slicer: { on: '已复制', off: '未复制' },
+export const LIVE_TEXT: Record<PresetKindAxis, { on: StringKey; off: StringKey }> = {
+  mkp: { on: 'presets.tree.live.mkp.on', off: 'presets.tree.live.mkp.off' },
+  slicer: { on: 'presets.tree.live.slicer.on', off: 'presets.tree.live.slicer.off' },
 }
 
 /** 操作列上那个按钮的字。动作用**文字**不用图标 */
-export const ACTION_TEXT: Record<PresetKindAxis, string> = {
-  mkp: '使用',
-  slicer: '复制',
+export const ACTION_TEXT: Record<PresetKindAxis, StringKey> = {
+  mkp: 'presets.tree.action.mkp',
+  slicer: 'presets.tree.action.slicer',
 }
 
-/**
- * 交付身份的两种说法。**只有两种，没有第三种**（见契约 `PresetFileInfo.delivery`）：
- * 默认交付是钦定的最终资源、点下载后台自动下好；可选是仓库里有、没进默认集，用户自己手动下。
- * 「可选」是中性的一档 —— 不带 ⚠、不上警示色。
- */
-export const DELIVERY_TEXT: Record<PresetFileInfo['delivery'], string> = {
-  default: '默认交付',
-  optional: '可选',
-}
 
 /**
  * 旧版本抽屉里那两个时间的标签与「未知」的写法。**两个时间各是各，永不互相顶替**：
@@ -181,11 +173,11 @@ export const DELIVERY_TEXT: Record<PresetFileInfo['delivery'], string> = {
  *   替换时间  它被换下来那一刻（替换事件）—— 你动它的时刻，如实说，但只当下要信息
  */
 export const ARCHIVE_TIME = {
-  published: '云端发布',
-  replaced: '替换时间',
-  publishedUnknown: '未知（早于版本记忆）',
-  replacedUnknown: '未知',
-} as const
+  published: 'presets.tree.archiveTime.published',
+  replaced: 'presets.tree.archiveTime.replaced',
+  publishedUnknown: 'presets.tree.archiveTime.publishedUnknown',
+  replacedUnknown: 'presets.tree.archiveTime.replacedUnknown',
+} as const satisfies Record<string, StringKey>
 
 /**
  * 来源：这个文件是云端的、用户自己的，还是**目录登记的交付预设**。
@@ -194,9 +186,9 @@ export const ARCHIVE_TIME = {
  */
 export type PresetOrigin = 'asset' | 'local' | 'preset'
 
-export const ORIGIN_TEXT: Record<PresetOrigin, string> = {
-  asset: '云端',
-  local: '本地',
+export const ORIGIN_TEXT: Record<PresetOrigin, StringKey> = {
+  asset: 'presets.tree.origin.asset',
+  local: 'presets.tree.origin.local',
   /*
    * ★ `preset` 在界面上**也叫「云端」**（2026-10-14 定的）—— 别再给它造词。
    *
@@ -218,13 +210,13 @@ export const ORIGIN_TEXT: Record<PresetOrigin, string> = {
    * 不回答"从哪来"（三类都从云端来）—— `preset` = 云端发布的 MKP 预设 TOML、
    * `asset` = 云端提供的资源文件（切片器配置 / BBS JSON / 图标 / 模型）。
    */
-  preset: '云端',
+  preset: 'presets.tree.origin.preset',
 }
 
-export const ORIGIN_WHY: Record<PresetOrigin, string> = {
-  asset: '云端：仓库里那份文件下载到本机的副本。不能改名（复制一份再改），删了可以从云端重新下载',
-  local: '本地：你自己放进预设目录的文件，云端没有它。可以改名，但删了没有任何地方能找回来',
-  preset: '云端：发布方写进目录（catalog）、随发布换代的那一版，客户端从下载区取。不能改名（复制一份再改），删了可以从云端重新下载',
+export const ORIGIN_WHY: Record<PresetOrigin, StringKey> = {
+  asset: 'presets.tree.originWhy.asset',
+  local: 'presets.tree.originWhy.local',
+  preset: 'presets.tree.originWhy.preset',
 }
 
 /**
@@ -237,16 +229,16 @@ export const ORIGIN_WHY: Record<PresetOrigin, string> = {
  * 没配源（离线 / 随包）就退回「云端」—— 说不出是从哪一个源下的，
  * 但"它是从云端来的"这件事照样说得准。
  */
-export function sourceTextOf(sourceLabel: string | null): string {
+export function sourceTextOf(tr: Tr, sourceLabel: string | null): string {
   switch (sourceLabel) {
     case 'gitee':
       return 'Gitee'
     case 'github':
       return 'GitHub'
     case 'custom':
-      return '自定义源'
+      return tr('presets.tree.source.custom')
     default:
-      return ORIGIN_TEXT.preset
+      return tr(ORIGIN_TEXT.preset)
   }
 }
 
@@ -275,6 +267,7 @@ export interface LocateTarget {
 }
 
 export function originCellOf(
+  tr: Tr,
   row: PresetTableRow,
   sourceLabel: string | null,
 ): { text: string; title: string; locate?: LocateTarget } {
@@ -287,8 +280,8 @@ export function originCellOf(
     /* 出处账优先（用户文件 → 用户文件、导入），其次血统（云端另存出来的），再退「本地」 */
     if (row.provenance === 'copy' && row.copiedFromName) {
       return {
-        text: `复制自 ${row.copiedFromName}`,
-        title: `复制自 ${row.copiedFromName} —— 点击定位到那一份（你现在这份是它的副本，两边各改各的）`,
+        text: tr('presets.tree.origin.copyFrom', { name: row.copiedFromName }),
+        title: tr('presets.tree.origin.copyFromTitle', { name: row.copiedFromName }),
         locate: {
           scope: 'local',
           kind: row.kind === null ? null : 'mkp',
@@ -300,15 +293,15 @@ export function originCellOf(
     }
     if (row.provenance === 'import') {
       return {
-        text: '导入',
-        title: '导入：这个文件是你从外面导进来的（拖拽 / 文件选择器）—— 云端没有它，删了没有地方能找回来',
+        text: tr('presets.tree.origin.imported'),
+        title: tr('presets.tree.origin.importedTitle'),
       }
     }
     if (row.basedOnSource) {
       const sourceName = row.basedOnSource.split('/').pop() ?? row.basedOnSource
       return {
-        text: `复制自 ${sourceName}`,
-        title: `${basedOnCellText(row)} —— 点击定位到云端那一份（你这份是从它另存/修改出来的）`,
+        text: tr('presets.tree.origin.copyFrom', { name: sourceName }),
+        title: tr('presets.tree.origin.basedOnTitle', { basedOn: basedOnCellText(tr, row) }),
         locate: {
           scope: 'cloud',
           kind: 'mkp',
@@ -317,23 +310,26 @@ export function originCellOf(
         },
       }
     }
-    return { text: ORIGIN_TEXT.local, title: ORIGIN_WHY.local }
+    return { text: tr(ORIGIN_TEXT.local), title: tr(ORIGIN_WHY.local) }
   }
   if (row.origin === 'preset') {
-    const source = sourceTextOf(sourceLabel)
+    const source = sourceTextOf(tr, sourceLabel)
     return {
       text: source,
-      title: `云端：发布方写进目录、从 ${source} 的预设数据源下载（目录指纹 ${row.presetVersion ?? '未知'}）`,
+      title: tr('presets.tree.origin.presetTitle', {
+        source,
+        version: row.presetVersion ?? tr(UNKNOWN),
+      }),
     }
   }
-  return { text: ORIGIN_TEXT.asset, title: ORIGIN_WHY.asset }
+  return { text: tr(ORIGIN_TEXT.asset), title: tr(ORIGIN_WHY.asset) }
 }
 
 /** 云端表那一列：这个云端文件在不在本机。判据与本地表是同一个 `getLocalFiles()` */
 export const CLOUD_STATE_TEXT = {
-  downloaded: '已下载',
-  pending: '未下载',
-}
+  downloaded: 'presets.tree.cloudState.downloaded',
+  pending: 'presets.tree.cloudState.pending',
+} as const satisfies Record<string, StringKey>
 
 /*
  * ★ `VERSION_NEW_TEXT` / `VERSION_NEW_WHY` / `VERSION_TIME_WHY` 三条词随
@@ -363,13 +359,6 @@ export const CLOUD_STATE_TEXT = {
  * 只能重新下载一份干净的 —— 见 [`isSuspectPreset`]。
  */
 export type PresetFileState = 'missing' | 'ok' | 'old' | 'tampered'
-
-export const PRESET_STATE_TEXT: Record<PresetFileState, string> = {
-  missing: '未下载',
-  ok: '已下载',
-  old: '旧版本',
-  tampered: '内容异常',
-}
 
 /** 内容存疑的那两档（旧版本 / 内容异常）—— 它们共用同一条边界 */
 export function isSuspectPreset(state: PresetFileState | undefined): boolean {
@@ -401,10 +390,10 @@ export function updateStateOf(state: PresetFileState): PresetUpdateState {
   }
 }
 
-export const UPDATE_STATE_TEXT: Record<PresetUpdateState, string> = {
-  missing: '未下载',
-  latest: '已下载',
-  update: '有更新',
+export const UPDATE_STATE_TEXT: Record<PresetUpdateState, StringKey> = {
+  missing: 'presets.tree.updateState.missing',
+  latest: 'presets.tree.updateState.latest',
+  update: 'presets.tree.updateState.update',
 }
 
 /**
@@ -415,9 +404,7 @@ export const UPDATE_STATE_TEXT: Record<PresetUpdateState, string> = {
  * 状态主词上是**吓唬人**（实测 7 份全部是正规旧版）。主词改说「有更新」，
  * 这句话作为第二行把实情讲全，动作给「下载」—— 对"旧版"和"真被动过"都是正解。
  */
-export const PRESET_UNTRUSTED_NOTE =
-  '本机这份认不出是云端哪一版 —— 云端连发几版时，更早的版本指纹在客户端留不全，' +
-  '所以认不出不等于被改过（没人动过它的话，多半就是旧版）。点「下载」换一份当前版即可'
+export const PRESET_UNTRUSTED_NOTE: StringKey = 'presets.tree.untrustedNote'
 
 /**
  * preset 行操作列那颗按钮：三态各一个字。
@@ -430,10 +417,10 @@ export const PRESET_UNTRUSTED_NOTE =
  *     `update` （本机是旧的）→「更新」换掉旧的
  *   **管道仍然只有一条**（`runtime/delivery.rs`：旧份自动归档），只是按钮说实话。
  */
-export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, string> = {
-  missing: '下载',
-  latest: '已下载',
-  update: '更新',
+export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
+  missing: 'presets.tree.updateAction.missing',
+  latest: 'presets.tree.updateAction.latest',
+  update: 'presets.tree.updateAction.update',
 }
 
 /**
@@ -462,20 +449,16 @@ export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, string> = {
 export type CloudLocalState = 'none' | 'has' | 'stale'
 
 /** 状态那一列的词（MKP 云端行） */
-export const CLOUD_LOCAL_TEXT: Record<CloudLocalState, string> = {
-  none: '未获取',
-  has: '本地已有',
-  stale: '有新版',
+export const CLOUD_LOCAL_TEXT: Record<CloudLocalState, StringKey> = {
+  none: 'presets.tree.cloudLocal.none',
+  has: 'presets.tree.cloudLocal.has',
+  stale: 'presets.tree.cloudLocal.stale',
 }
 
-export const CLOUD_LOCAL_WHY: Record<CloudLocalState, string> = {
-  none: '云端有这一份，你机器上还没有它 —— 点「下载」把它取到本机（会落一份本地文件，能改能用）',
-  has:
-    '你机器上已经有一份跟上云端当前版的了 —— 这一行没有要你做的事：要改、要用，去「本地」那张表那一行',
-  stale:
-    '你机器上那份当初基于的**不是**云端现在这一版（云端换过版了）。' +
-    '点「更新」会逐项比较：你没改过的按新版更新，你也改过的要你选（使用新版值 / 保留本地值）—— ' +
-    '**确认之前不会动你这份文件**',
+export const CLOUD_LOCAL_WHY: Record<CloudLocalState, StringKey> = {
+  none: 'presets.tree.cloudLocalWhy.none',
+  has: 'presets.tree.cloudLocalWhy.has',
+  stale: 'presets.tree.cloudLocalWhy.stale',
 }
 
 /**
@@ -483,15 +466,14 @@ export const CLOUD_LOCAL_WHY: Record<CloudLocalState, string> = {
  * 「本地已有」那一行点了没有意义（要改要用都在本地那张表上），
  * 摆一颗看起来能点、点了什么也不发生的按钮比不摆糟。
  */
-export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, string | null> = {
-  none: '下载',
+export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, StringKey | null> = {
+  none: 'presets.tree.cloudLocalAction.none',
   has: null,
-  stale: '更新',
+  stale: 'presets.tree.cloudLocalAction.stale',
 }
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
-export const PRESET_SUSPECT_WHY =
-  '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许使用、不许改、不许复制。先「下载」换一份干净的回来'
+export const PRESET_SUSPECT_WHY: StringKey = 'presets.tree.suspectWhy'
 
 /** 「下载」那颗按钮在**盘上那份已经旧了**那一档的说明：它不是"删除重下"，旧份进归档，删除永远不是这件事的一部分 */
 
@@ -520,9 +502,9 @@ export const EDIT_TEXT = {
    * 与旁边那颗「打开参数」（改的是**参数表**）分不清 —— 这一条改的是**文件正文**
    * （TOML），所以改叫「编辑文件」；弹窗标题跟着用同一个词。
    */
-  cell: '编辑文件',
-  open: '编辑',
-  title: '编辑文件',
+  cell: 'presets.edit.cell',
+  open: 'presets.edit.open',
+  title: 'presets.edit.title',
   /*
    * 2026-10-10 第二轮（作者：「它上面什么什么那个布局啊，什么的我都不满意」）：
    * 正文上方那一大段说明**从界面上撤了** —— 它是实现细节（临时文件 / 草稿 / 出处），
@@ -543,7 +525,7 @@ export const EDIT_TEXT = {
    *   直接进编辑模式并给一条"还没保存"的通知（见 `PagePresets` 的 `openEdit`）。
    */
   /** 只读态右下那颗：进编辑模式（三个模态框同一句话） */
-  enterMode: '进入编辑模式',
+  enterMode: 'presets.edit.enterMode',
   /*
    * 编辑态底栏那颗 = **作废这一次没保存的改动**、回只读。
    *
@@ -559,9 +541,9 @@ export const EDIT_TEXT = {
    *    点这个按钮都没有退出模态框」（那颗按钮退的是**编辑模式**，不是模态框 ——
    *    按钮上写"退出"，用户就以为要关窗）。作废那半句仍留在 `exitTitle` 里说。
    */
-  exitMode: '放弃',
+  exitMode: 'presets.edit.exitMode',
   /** 上面那颗的 tooltip —— 三个模态框**同一句**（说的是同一件事） */
-  exitTitle: '放弃 —— 这一次没保存的改动都作废，回只读（要留住就先保存）',
+  exitTitle: 'presets.edit.exitTitle',
   /*
    * ★ 2026-10-16（作者：「我希望这个时候那个通知……他可以给我就是选择那个放弃保存的那种……
    *   因为我发现这个界面用户不知道退出编辑模式就是取消上一次的修改」）：
@@ -570,13 +552,13 @@ export const EDIT_TEXT = {
    * 叫「放弃修改」而不是「放弃保存」：**压根没有"尚未保存的保存动作"这回事**，
    * 作废的是这次改动；而且这个词与底栏那颗的说明是同一件（见 `PagePresets.notifyUnsaved`）。
    */
-  discard: '放弃修改',
-   commit: '保存',
-  /** 草稿自动落盘失败时那一行（安静地写在底栏里，不用提示条） */
-  draftFailed: '草稿没存上：',
+  discard: 'presets.edit.discard',
+  commit: 'presets.edit.commit',
+  /** 草稿自动落盘失败时那一行（安静地写在底栏里，不用提示条）。`{detail}` = 后端给的原因 */
+  draftFailed: 'presets.edit.draftFailed',
   /** 写回之后那句（`path` 说清写回哪去了） */
-  savedBack: (name: string, path: string) => `已保存回我自己那一份：${name}（${path}）`,
-} as const
+  savedBack: 'presets.edit.savedBack',
+} as const satisfies Record<string, StringKey>
 
 /**
  * **文件头那几行不给改**（2026-10-16 作者：「这上面这一些灰色的，有没有可能说不让用户更改
@@ -586,9 +568,9 @@ export const EDIT_TEXT = {
  * `notifyHeadLocked`）。
  */
 export const HEAD_LOCKED = {
-  title: '文件头改不了',
-  text: '这几行是程序写的（机型 / 版本 / 出处）—— 要换机型或版本，用详情里那颗「改归属」',
-} as const
+  title: 'presets.edit.headLocked.title',
+  text: 'presets.edit.headLocked.text',
+} as const satisfies Record<string, StringKey>
 
 /** 「编辑」那颗按钮的说明 */
 
@@ -600,13 +582,11 @@ export const HEAD_LOCKED = {
  * 原来那份一个字节都不动（口径见 `lab/preset-identity-and-update-spec.md` §6½）。
  */
 export const IMPORT_TAKEN_TEXT = {
-  title: '本机已经有一份同名的了',
+  title: 'presets.edit.taken.title',
   /** `name` = 占着名字的那份、`suggested` = 导入这份会自动改成什么 */
-  note: (name: string, suggested: string) =>
-    `本机已经有一份叫「${name}」的文件了。继续导入会**自动改一个名字**（${suggested}），` +
-    `两份都留着 —— 原来那份一个字节都不会动。`,
-  commit: '导入',
-} as const
+  note: 'presets.edit.taken.note',
+  commit: 'presets.edit.taken.commit',
+} as const satisfies Record<string, StringKey>
 
 /**
  * **第十层**：重命名那一口框的话（删除的二次确认在菜单里，话术在菜单项上）。
@@ -621,9 +601,9 @@ export const IMPORT_TAKEN_TEXT = {
  *   用户只打主名，提交时原样拼回去。
  */
 export const LOCAL_RENAME = {
-  title: '重命名',
-  commit: '改名',
-} as const
+  title: 'presets.edit.rename.title',
+  commit: 'presets.edit.rename.commit',
+} as const satisfies Record<string, StringKey>
 
 /**
  * 拆出**主名与后缀**（`A1 涂胶.toml` → `A1 涂胶` + `.toml`）。
@@ -640,7 +620,7 @@ export function splitFileName(fileName: string): { stem: string; ext: string } {
 }
 
 /** 「恢复默认名」四个字（菜单项与重命名框里那颗按钮共用一处，别各写一个） */
-export const RESTORE_DEFAULT_NAME = '恢复默认名'
+export const RESTORE_DEFAULT_NAME: StringKey = 'presets.edit.restoreDefaultName'
 
 /**
  * 「修改参数」那个词（**全站用语**，2026-10-16 作者：别再动它）。
@@ -650,9 +630,9 @@ export const RESTORE_DEFAULT_NAME = '恢复默认名'
  * 不许各写一个；改正文那一档仍叫「编辑文件」（[`EDIT_TEXT`]）。
  */
 export const PARAMS_TEXT = {
-  open: '修改参数',
-  why: '改这一份的参数（打开参数表，就是参数页本身）；要改 TOML 正文走右键菜单的「编辑文件」',
-} as const
+  open: 'presets.edit.params.open',
+  why: 'presets.edit.params.why',
+} as const satisfies Record<string, StringKey>
 
 /**
  * **这一行跟云端没关系**（2026-10-20）：复制 / 导入出来的，而设置页那一格
@@ -728,10 +708,10 @@ export function defaultNameAvoiding(defaultName: string, taken: ReadonlyArray<st
  */
 export const LOCAL_COPY = {
   /** 菜单项上那两个字（作者点名的短文案） */
-  cell: '复制',
-  /** 副本名里那个词：`<原名> copy.toml` */
+  cell: 'presets.edit.localCopy.cell',
+  /** 副本名里那个词：`<原名> copy.toml`。**文件名片段，不进字典**（换语言不改文件名） */
   suffix: 'copy',
-} as const
+} as const satisfies { cell: StringKey; suffix: string }
 
 /**
  * 复制出来的那一份叫什么：`<原名> copy.toml`；这个名字已经被占了就 `copy 2` / `copy 3`……
@@ -826,15 +806,11 @@ export function sizeTextOf(size: number): string {
   return size >= 1024 ? `${(size / 1024).toFixed(1)} KB` : `${size} B`
 }
 
-export const ARCHIVE_WHY =
-  '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖）。' +
-  '它属于云端文件的生命周期，不是你的修改历史 —— 你改出来的东西是另一份文件（另存），永远不回写云端原件。' +
-  '这份留档可以删：但云端只有最新版，删了就找不回（版本链与事件账不受影响）。' +
-  '仍然没有「恢复」、也没有「用这份旧版本」。'
+export const ARCHIVE_WHY: StringKey = 'presets.tree.archiveWhy'
 
 /** 那一格上的字：几份 + 可以点开 */
-export function archiveOpenText(count: number): string {
-  return `${count} 份（点开看）`
+export function archiveOpenText(tr: Tr, count: number): string {
+  return tr('presets.tree.archiveOpen', { count })
 }
 
 /**
@@ -845,24 +821,21 @@ export function archiveOpenText(count: number): string {
  * 所以抽屉里没有任何写入按钮（连"另存为"都没有：那是第 5 步）。
  */
 export const LOCAL_DRAWER = {
-  title: '本地这一份',
+  title: 'presets.tree.localDrawer.title',
   /** 展开详情里那一格的名字与按钮 */
-  cell: '正文',
-  open: '看正文',
-  reading: '正在读…',
-  note:
-    '这是**你自己的文件**（住 ~/Documents/SupportEase/presets-local）：云端没有它，' +
-    '所以没有 SHA、不属于任何版本、也不参与套餐。云端换版本不会动它；' +
-    '改它（同一格里的「改这份」）写回的是它自己，永远不回写云端原件。',
-} as const
+  cell: 'presets.tree.localDrawer.cell',
+  open: 'presets.tree.localDrawer.open',
+  reading: 'presets.tree.localDrawer.reading',
+  note: 'presets.tree.localDrawer.note',
+} as const satisfies Record<string, StringKey>
 
 /** 「看正文」那颗按钮的说明（展开详情里的 title） */
 
 /** 展开详情里那一格的名字 */
-export const BASED_ON_KEY = '基于'
+export const BASED_ON_KEY: StringKey = 'presets.tree.basedOnKey'
 
 /** 展开详情里「后处理」那一格（本机学习账：这一份后处理成功跑过几次） */
-export const USAGE_KEY = '后处理'
+export const USAGE_KEY: StringKey = 'presets.tree.usageKey'
 
 /**
  * 「后处理」那一格写什么。
@@ -871,33 +844,42 @@ export const USAGE_KEY = '后处理'
  * 所以它答的是"真跑成过几次"，不是"点过几次使用"。0 次 = 还没跑成过 ——
  * 写「还没跑过」而不是「0 次」/「—」：前者像计数，后者像"不知道"，这句是事实。
  */
-export function usageCellText(count: number | undefined): string {
-  return count === undefined || count <= 0 ? '还没跑过' : `${count} 次`
+export function usageCellText(tr: Tr, count: number | undefined): string {
+  return count === undefined || count <= 0
+    ? tr('presets.tree.usage.none')
+    : tr('presets.tree.usage.times', { count })
 }
 
 /** 那一格的 tooltip：把"怎么算一次"当场说清，省得用户拿它跟「使用」次数对不上 */
-export const USAGE_HINT = '后处理成功跑完才算一次（机型不符、中途失败的都不算）'
+export const USAGE_HINT: StringKey = 'presets.tree.usageHint'
 
 /**
  * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
  * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
  */
-export function basedOnCellText(row: {
-  basedOn?: BasedOn
-  basedOnSource?: string | null
-  basedOnCloud?: string | null
-}): string {
+export function basedOnCellText(
+  tr: Tr,
+  row: {
+    basedOn?: BasedOn
+    basedOnSource?: string | null
+    basedOnCloud?: string | null
+  },
+): string {
   /* 说得清来源的名字就说它（`A1 · 标准版`），说不清就退回血统里那串原文 */
   const source = row.basedOnCloud ?? row.basedOnSource ?? ''
   switch (row.basedOn) {
     case 'current':
-      return source === '' ? '目录里现在这一版云端' : `${source} · 云端当前版`
+      return source === ''
+        ? tr('presets.tree.basedOn.currentNoSource')
+        : tr('presets.tree.basedOn.current', { source })
     case 'outdated':
-      return source === '' ? '旧版云端（云端已换新版）' : `${source} · 云端已换新版`
+      return source === ''
+        ? tr('presets.tree.basedOn.outdatedNoSource')
+        : tr('presets.tree.basedOn.outdated', { source })
     default:
       return source === ''
-        ? '没有血统（说不清从哪一版改的）'
-        : `${source}（目录里已经没有它了）`
+        ? tr('presets.tree.basedOn.noneNoSource')
+        : tr('presets.tree.basedOn.none', { source })
   }
 }
 
@@ -907,9 +889,7 @@ export function basedOnCellText(row: {
  * `.json` 那几份（bbs / orca 光看扩展名分不出）不是预设 —— 给一个点了必被拒的按钮，
  * 比不给糟（与 NO_ASSET_WHY 同一条口径）。
  */
-export const LOCAL_NOT_PRESET_WHY =
-  '这一份认不出来是 MKP 预设（切片器那两类都是 .json，光看扩展名分不出是 bbs 还是 orca）—— ' +
-  '能被使用的只有 TOML 预设'
+export const LOCAL_NOT_PRESET_WHY: StringKey = 'presets.tree.localNotPresetWhy'
 
 /**
  * **第九层**：读不出来的那一份（行上那一枚角标）。
@@ -919,27 +899,26 @@ export const LOCAL_NOT_PRESET_WHY =
  * 照常能用，**不因 SHA 报警**。"是不是一份合法 MKP Preset"（结构 / 参数）不在客户端判：
  * 那要真正的 Preset 解析能力，留给"应用 / 编辑"这类真正要解析的入口。
  */
-export const LOCAL_UNREADABLE_TEXT = '文件无法读取'
+export const LOCAL_UNREADABLE_TEXT: StringKey = 'presets.tree.localUnreadable'
 
 /** 那一枚角标 / 灰掉的动作格的 title。`detail` 是后端给的人话原因（比如语法错在第几行） */
-export function localUnreadableWhy(detail: string | null | undefined): string {
-  return (
-    `${LOCAL_UNREADABLE_TEXT}${detail == null ? '' : `：${detail}`} —— ` +
-    '这一份现在不能使用、也不能改（先把它改回一份能读的 TOML，或者删掉它）。' +
-    '它还是你自己的文件：程序只如实说读不出来，不动它'
-  )
+export function localUnreadableWhy(tr: Tr, detail: string | null | undefined): string {
+  const text = tr(LOCAL_UNREADABLE_TEXT)
+  return detail == null
+    ? tr('presets.tree.localUnreadableWhy', { text })
+    : tr('presets.tree.localUnreadableWhyDetail', { text, detail })
 }
 
 /** 归档抽屉里的那几句话 */
 export const ARCHIVE_DRAWER = {
-  title: '旧版本',
+  title: 'presets.tree.archiveDrawer.title',
   /** 每条上那颗按钮 */
-  open: '看正文',
-  reading: '正在读…',
-  bodyTitle: '正文',
+  open: 'presets.tree.archiveDrawer.open',
+  reading: 'presets.tree.archiveDrawer.reading',
+  bodyTitle: 'presets.tree.archiveDrawer.bodyTitle',
   /** 认不出机型版本时那一格写什么 */
-  unknown: '认不出是哪台机型的哪一版（目录里已经没有这一份了）',
-} as const
+  unknown: 'presets.tree.archiveDrawer.unknown',
+} as const satisfies Record<string, StringKey>
 
 /**
  * 批量那一行的字：**这一批里有什么，决定它是"下载"还是"更新"**。
@@ -950,6 +929,7 @@ export const ARCHIVE_DRAWER = {
  * `已下载的不进这一批`：这一层只解决"多份一起处理"，不解决"再下一遍已经对了的东西"。
  */
 export function presetBatchText(
+  tr: Tr,
   missing: number,
   stale: number,
   tampered: number,
@@ -957,23 +937,19 @@ export function presetBatchText(
   const total = missing + stale + tampered
   const label =
     missing === 0
-      ? `更新 ${total} 份`
+      ? tr('presets.tree.batch.label.update', { count: total })
       : stale + tampered === 0
-        ? `下载 ${total} 份`
-        : `下载并更新 ${total} 份`
+        ? tr('presets.tree.batch.label.download', { count: total })
+        : tr('presets.tree.batch.label.both', { count: total })
   const parts = [
-    missing > 0 ? `未下载 ${missing} 份` : '',
-    stale > 0 ? `需更新 ${stale} 份` : '',
-    tampered > 0 ? `内容异常 ${tampered} 份` : '',
+    missing > 0 ? tr('presets.tree.batch.count.missing', { count: missing }) : '',
+    stale > 0 ? tr('presets.tree.batch.count.stale', { count: stale }) : '',
+    tampered > 0 ? tr('presets.tree.batch.count.tampered', { count: tampered }) : '',
   ].filter((s) => s !== '')
   return {
     count: parts.join(' · '),
     label,
-    why:
-      '这一批＝把多份单文件操作合成一次：全程走同一条下载管道（没有第二套），逐份给结局 —— ' +
-      '哪一份没成会单独列出来，绝不压成一句"批量失败"或"批量成功"。' +
-      '已下载的那几份不在这一批里（不重复下）。' +
-      '范围是**当前机型 + 这一档类型**，不受搜索词影响（搜索是"我在找什么"，不该改变"按一下要动几份"）。',
+    why: tr('presets.tree.batch.why'),
   }
 }
 
@@ -996,23 +972,15 @@ export function presetBatchText(
  */
 export type PresetStatus = FilesState
 
-export const STATUS_TEXT: Record<PresetStatus, string> = {
-  applied: '在用',
-  ready: '本地有',
-  missing: '待下载',
-  unavailable: '暂不支持',
-}
-
-export const STATUS_WHY: Record<PresetStatus, string> = {
-  applied:
-    '在用：本机有这个文件，而且唯一底账（使用中指针）说正在使用的就是它。全局唯一 —— 换机型也不会变出第二个',
-  ready: '本地有：getLocalFiles() 说本机已经有这个文件了（假后端给的是固定演示集合），还没使用',
-  missing: '待下载：本机还没有这个文件',
-  unavailable: '暂不支持该机型或版本：后端没有配这个机型的资源 —— 不是你这台机器的问题',
+export const STATUS_TEXT: Record<PresetStatus, StringKey> = {
+  applied: 'presets.tree.status.applied',
+  ready: 'presets.tree.status.ready',
+  missing: 'presets.tree.status.missing',
+  unavailable: 'presets.tree.status.unavailable',
 }
 
 /** 「暂不支持」的正式说法。灰色、中性，和网络失败与「0 个文件」都要分得开 */
-export const UNSUPPORTED_TEXT = '暂不支持该机型或版本'
+export const UNSUPPORTED_TEXT: StringKey = 'presets.tree.unsupported'
 
 // ——————————————————————————————————————————————————————————————
 // 树：机型 → 版本 → 文件
@@ -1154,6 +1122,7 @@ export function archivedIds(menu: MenuEntry[]): Set<string> {
  * 纯函数：给同样的输入永远给同样的树，所以能直接在测试里喂假数据，也不会在 StrictMode 下双跑出岔。
  */
 export function buildPresetTree(
+  tr: Tr,
   machines: Machine[],
   repo: PresetFileInfo[],
   inputs: PresetVersionInput[],
@@ -1212,7 +1181,9 @@ export function buildPresetTree(
         files,
         unavailable: vf === null || vf.incomplete,
         missing:
-          vf === null ? [`后端没有 ${atOf(machine.id, version.id)} 这个组合`] : vf.missing,
+          vf === null
+            ? [tr('presets.tree.noCombo', { at: atOf(machine.id, version.id) })]
+            : vf.missing,
         changed: input?.changed ?? 0,
       }
     })
@@ -1354,20 +1325,17 @@ export const DASH_ = '—'
  *
  * `title` 里永远是全的 —— 截断只影响看得见的宽度，不影响能不能查。
  */
-export function versionsText(versions: string[]): { text: string; why: string } {
+export function versionsText(tr: Tr, versions: string[]): { text: string; why: string } {
   if (versions.length === 0) {
-    return {
-      text: DASH_,
-      why: '这个文件不属于任何打印件版本 —— 它是你自己放进预设目录的，仓库里没有它，也没有交付身份',
-    }
+    return { text: DASH_, why: tr('presets.tree.versions.noneWhy') }
   }
   const text = versions.join(' · ')
   return {
     text,
     why:
       versions.length === 1
-        ? `只有「${text}」用到这个文件`
-        : `${versions.length} 个版本共用这个文件：${text}`,
+        ? tr('presets.tree.versions.oneWhy', { text })
+        : tr('presets.tree.versions.manyWhy', { count: versions.length, text }),
   }
 }
 
@@ -1746,10 +1714,14 @@ export interface PresetRowsInput {
  * 三种话对应 [`PresetFileState`] 的三种"盘上有东西"：一致 / 旧版本 / 内容异常。
  * 它不改任何判定（判定全在 `state` 上）—— 只是让用户在这一行上就能看出该不该信它。
  */
-function presetPathText(p: DeliveryPresetSource): string {
-  const at = `下载区 mkp · ${p.uid}`
+function presetPathText(tr: Tr, p: DeliveryPresetSource): string {
+  const at = tr('presets.tree.path.delivery', { uid: p.uid })
   const note =
-    p.state === 'old' ? '（旧版本）' : p.state === 'tampered' ? '（内容异常）' : ''
+    p.state === 'old'
+      ? tr('presets.tree.path.old')
+      : p.state === 'tampered'
+        ? tr('presets.tree.path.tampered')
+        : ''
   return `${at}${note}`
 }
 
@@ -2292,7 +2264,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
  * 「生效」两种类型两套判据（见 `PresetLocalRow.live`）：MKP 看唯一底账
  * （使用中指针）里那一条，切片器看已复制到切片器目录的那个集合。
  */
-export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRow> {
+export function localRows(tr: Tr, input: PresetRowsInput): PresetTableData<PresetLocalRow> {
   const {
     machines,
     machineId,
@@ -2419,13 +2391,13 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
         /* 第二行小字（`path` 仍是盘上落点，「在文件夹中显示」与 title 用它）：
            副标题 = 备注覆盖账里的 → 那一版工作台写的 → 空着；
            盘上那份不对劲时那件事**必须**还写在原地 —— 覆盖账压不住状态注记 */
-        path: presetPathText(p),
+        path: presetPathText(tr, p),
         subtitle:
           /* 盘上那份不对劲（旧版本 / 内容异常）时那件事**必须**写在副标题原地 ——
              状态注记压过备注；一致的那份才走「覆盖账 → 工作台备注 → 空着」回落 */
           p.state === 'ok'
             ? remarkOr(p.path, versionRemark(p.machineId, p.versionId) ?? '')
-            : presetPathText(p),
+            : presetPathText(tr, p),
         remarkKey: p.path,
         kind: p.kind,
         machineId: p.machineId,
@@ -2484,15 +2456,15 @@ export function localRows(input: PresetRowsInput): PresetTableData<PresetLocalRo
  * `presets-local/` 里那几行 —— 词照旧只有这一个。
  */
 export const ASSET_USE_TEXT = {
-  on: '在用',
-  off: '使用',
+  on: 'presets.tree.assetUse.on',
+  off: 'presets.tree.assetUse.off',
   /**
    * **取消使用**（2026-10-10 作者裁决恢复的入口：「它需要一个取消使用的按钮，
    * 而不是说这个灰色的在用」）。撤下的只是"哪一份在生效"这个指向
    * （唯一底账 `run/active-preset.json`）—— **磁盘上一个字节都不动**。
    */
-  cancel: '取消使用',
-} as const
+  cancel: 'presets.tree.assetUse.cancel',
+} as const satisfies Record<string, StringKey>
 
 /**
  * **这一行生效了没有**（展开详情「状态」那一格）。
@@ -2505,14 +2477,9 @@ export const ASSET_USE_TEXT = {
  * `off` 一边是动作、一边是状态，仍然分开写。
  */
 export const ASSET_STATE_TEXT = {
-  on: '在用',
-  off: '未使用',
-} as const
-
-export const ASSET_USE_WHY = {
-  on: '在用：唯一底账（run/active-preset.json）说正在使用的就是它。**全局唯一** —— 全表最多一条',
-  off: '使用：把它设为当前生效的那一份。改的、用的都是你自己目录里这一份（`presets-local/`）',
-} as const
+  on: 'presets.tree.assetState.on',
+  off: 'presets.tree.assetState.off',
+} as const satisfies Record<string, StringKey>
 
 /**
  * 云端表：**菜单上的云端文件**（已分配 + 可选）。
@@ -2531,7 +2498,7 @@ export const ASSET_USE_WHY = {
  * 见 `cloudRows` 里 `modifiedText` 的说明。留着它就是留一条没人走的路。
  */
 
-export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRow> {
+export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<PresetCloudRow> {
   const {
     machines,
     machineId,
@@ -2713,7 +2680,7 @@ export function cloudRows(input: PresetRowsInput): PresetTableData<PresetCloudRo
         fileName: p.fileName,
         /* 这一行的 `path` 是展示文案（下面那行）—— 真正的落点在 `p.path`，钥匙从它来 */
         usageKey: p.kind === 'mkp_preset' ? `cloud:${p.path}` : undefined,
-        path: `云端 / ${p.machineId} / ${p.versionId}`,
+        path: tr('presets.tree.path.cloud', { machine: p.machineId, version: p.versionId }),
         /*
          * 副标题 = **只读工作台写的那句**（这一版发布时带进目录的 `remark`）。
          * 云端表不读本地覆盖账（2026-10-07 作者三轮：本地的改动不许影响云端显示）——

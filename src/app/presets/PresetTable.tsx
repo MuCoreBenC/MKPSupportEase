@@ -117,6 +117,7 @@ import type { ContextMenuApi } from '../../components/menu'
 import { FieldPopover } from '../../components/field'
 /* 展开详情卡头那一枚文件图标（2026-10-10，参考稿的绿色文档图标 —— 本项目走描边风格） */
 import Icon from '../../components/Icon'
+import { useT } from '../../i18n'
 import type { Machine } from '../../api'
 /*
  * ★ 2026-10-14：原来这里 `import { machineToneKeyOf } from '../ui/machineTone'`，
@@ -182,6 +183,7 @@ function CloudLocalAction({
   busy: boolean
   onDownload: (row: PresetTableRow) => void
 }) {
+  const tr = useT()
   const state = row.localState
   if (state === undefined) return null
   const action = CLOUD_LOCAL_ACTION[state]
@@ -209,7 +211,7 @@ function CloudLocalAction({
       disabled={busy}
       onClick={() => onDownload(row)}
     >
-      {action}
+      {tr(action)}
     </button>
   )
 }
@@ -249,20 +251,23 @@ function SortTh({
   onSort: (key: PresetSortKey) => void
 }) {
   const on = sort.key === colKey
+  const tr = useT()
   /*
    * 名称列**三循环**（2026-10-20），别的列两态 —— 提示要说清"点一下会变成什么"：
    * 默认档（族优先）没有方向，那一档不画箭头（CSS 按 `data-dir` 收起来）。
    */
   const next =
     !on
-      ? `按${label}排`
+      ? tr('presets.table.sort.by', { label })
       : colKey === 'name'
         ? sort.dir === 'family'
-          ? `按${label}的 a-z 排`
+          ? tr('presets.table.sort.az', { label })
           : sort.dir === 'asc'
-            ? `按${label}倒序排`
-            : `回到默认（原件在前、复制出来的跟在后面）`
-        : `按${label}${sort.dir === 'asc' ? '降序' : '升序'}排`
+            ? tr('presets.table.sort.desc', { label })
+            : tr('presets.table.sort.default')
+        : sort.dir === 'asc'
+          ? tr('presets.table.sort.descCol', { label })
+          : tr('presets.table.sort.asc', { label })
   return (
     <th
       className={cls}
@@ -452,6 +457,7 @@ export default function PresetTable({
 }: Props) {
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
+  const tr = useT()
 
   /*
    * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
@@ -488,19 +494,19 @@ export default function PresetTable({
 
   /** 空表三种话，说的是三件不同的事 —— 混成一句「没有数据」就查不出是哪一件 */
   const emptyText = (): string => {
-    if (failure !== null) return `加载失败：${failure}`
+    if (failure !== null) return tr('presets.table.empty.failed', { detail: failure })
     if (total === 0) {
       /* MKP 那一档是一对表（本地 / 云端），空表按表说 —— 本地是你自己那份，云端是云端 */
       if (mkp) {
         return scope === 'local'
-          ? '本地还没有这一档的预设 —— 你自己那份本地文件（presets-local）会出现在这里；从云端「下载」一份就会有'
-          : '云端没有这一档的云端预设 —— 云端目录里没有登记的，就下不到'
+          ? tr('presets.table.empty.mkpLocal')
+          : tr('presets.table.empty.mkpCloud')
       }
       return scope === 'local'
-        ? `本机还没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 云端文件下载之后会出现在这里，你自己放进预设目录的也会`
-        : `云端没有这个组合的「${KIND_AXIS_TEXT[kind]}」—— 菜单上没有，就下不到`
+        ? tr('presets.table.empty.slicerLocal', { kind: tr(KIND_AXIS_TEXT[kind]) })
+        : tr('presets.table.empty.slicerCloud', { kind: tr(KIND_AXIS_TEXT[kind]) })
     }
-    return `这一档的 ${total} 条都被搜索词「${query.trim()}」筛掉了`
+    return tr('presets.table.empty.filtered', { total, query: query.trim() })
   }
 
   /* a03：statWhyOf（时间格悬停 title）已随「去悬停提示」移除。 */
@@ -529,19 +535,19 @@ export default function PresetTable({
                * ★ 置顶**不参与**：置顶的那几份永远压在最上面（那是另一件事的判据），
                *   列排序只决定"同一堆里谁在前"。
                */}
-              <SortTh label="名称" colKey="name" cls={s.thName} sort={sort} onSort={onSort} />
-              <SortTh label="机型" colKey="machine" cls={s.thMachine} sort={sort} onSort={onSort} />
+              <SortTh label={tr('presets.table.col.name')} colKey="name" cls={s.thName} sort={sort} onSort={onSort} />
+              <SortTh label={tr('presets.table.col.machine')} colKey="machine" cls={s.thMachine} sort={sort} onSort={onSort} />
 
               {/*
                * 这里就是「列数真的跟着换」那一下：MKP 只有版本，切片器只有喷嘴 + 层高。
                * 另一种类型的那几列**整个不渲染**，不是渲染成空的 —— 空格子照样占宽度。
                */}
               {mkp ? (
-                <SortTh label="版本" colKey="version" cls={s.thVersion} sort={sort} onSort={onSort} />
+                <SortTh label={tr('presets.table.col.version')} colKey="version" cls={s.thVersion} sort={sort} onSort={onSort} />
               ) : (
                 <>
-                  <SortTh label="喷嘴" colKey="nozzle" cls={s.thNum} sort={sort} onSort={onSort} />
-                  <SortTh label="层高" colKey="layer" cls={s.thNum} sort={sort} onSort={onSort} />
+                  <SortTh label={tr('presets.table.col.nozzle')} colKey="nozzle" cls={s.thNum} sort={sort} onSort={onSort} />
+                  <SortTh label={tr('presets.table.col.layer')} colKey="layer" cls={s.thNum} sort={sort} onSort={onSort} />
                 </>
               )}
 
@@ -555,7 +561,7 @@ export default function PresetTable({
                * 本地表说的是"我这份什么时候改的" —— 两句话又各有主语了。
                */}
               <SortTh
-                label={scope === 'cloud' ? '云端更新' : '时间'}
+                label={scope === 'cloud' ? tr('presets.table.col.cloudTime') : tr('presets.table.col.time')}
                 colKey="time"
                 cls={s.thTime}
                 sort={sort}
@@ -567,14 +573,14 @@ export default function PresetTable({
                * 它还在展开详情的「来源」格里（那里还能点「复制自 X」定位）。
                */}
               <th className={s.thAct} scope="col">
-                操作
+                {tr('presets.table.col.act')}
               </th>
             </tr>
           </thead>
 
           <tbody>
             {rows.map((row) => {
-              const version = versionsText(row.versions)
+              const version = versionsText(tr, row.versions)
               /*
                * 机型识别色（2026-10-08 起、a03「色彩收敛」收掉）：`A1` 与 `A1 mini` 只差
                * 四个字母，作者曾在真机上把 A1 那行看成 A1 mini、点了下载才发现 —— 那一版
@@ -615,7 +621,7 @@ export default function PresetTable({
                 row.scope === 'cloud' &&
                 (row.presetState === undefined ? row.downloaded : row.presetState === 'ok')
               /* 来源那一格（列 + 展开详情共用）：三种来源三种说法，可定位的带 `locate` */
-              const origin = originCellOf(row, sourceLabel)
+              const origin = originCellOf(tr, row, sourceLabel)
               /*
                * 缩窄到手：`origin.locate` 的判空进不了 JSX 回调（TS 对属性访问的收窄
                * 不跨函数边界），先落一个本地的量。
@@ -688,8 +694,8 @@ export default function PresetTable({
                         <span
                           className={s.unsavedDot}
                           role="img"
-                          aria-label="有未保存的参数改动"
-                          title="有未保存的参数改动 —— 打开「修改参数」接着改"
+                          aria-label={tr('presets.table.unsaved.aria')}
+                          title={tr('presets.table.unsaved.title')}
                         />
                       )}
                       {/*
@@ -703,7 +709,7 @@ export default function PresetTable({
                           className={s.olderVersions}
                          
                         >
-                          旧版 ×{row.olderVersions}
+                          {tr('presets.table.olderVersions', { count: row.olderVersions ?? 0 })}
                         </span>
                       )}
                       {/*
@@ -721,9 +727,9 @@ export default function PresetTable({
                         <span
                           className={s.localState}
                           data-state="stale"
-                          title="云端这一份出了新版 —— 右键这一行 →「选择要更新的参数」"
+                          title={tr('presets.table.stale.title')}
                         >
-                          有新版
+                          {tr('presets.table.stale')}
                         </span>
                       )}
                       {/*
@@ -737,7 +743,7 @@ export default function PresetTable({
                           data-state={row.localState}
                          
                         >
-                          {CLOUD_LOCAL_TEXT[row.localState]}
+                          {tr(CLOUD_LOCAL_TEXT[row.localState])}
                         </span>
                       )}
                       {/*
@@ -864,7 +870,7 @@ export default function PresetTable({
                          * 样式：外阴影=凸起（使用）/ 内阴影=凹下（使用中）—— 见 `.useBtn`。
                          */
                         <button type="button" className={s.useBtn} data-live="true" disabled>
-                          {ASSET_USE_TEXT.on}
+                          {tr(ASSET_USE_TEXT.on)}
                         </button>
                       ) : row.origin === 'local' && row.kind !== 'mkp_preset' ? (
                         <span className={s.actNone}>
@@ -883,7 +889,7 @@ export default function PresetTable({
                          
                           onClick={() => onUse(row)}
                         >
-                          {ASSET_USE_TEXT.off}
+                          {tr(ASSET_USE_TEXT.off)}
                         </button>
                       )
                     ) : row.scope === 'local' ? (
@@ -906,11 +912,11 @@ export default function PresetTable({
                           disabled={busy}
                           onClick={() => onDownload(row)}
                         >
-                          {UPDATE_ACTION_TEXT.update}
+                          {tr(UPDATE_ACTION_TEXT.update)}
                         </button>
                       ) : row.live ? (
                         <span className={s.actDone}>
-                          {LIVE_TEXT[kind].on}
+                          {tr(LIVE_TEXT[kind].on)}
                         </span>
                       ) : row.origin === 'local' ? (
                         /*
@@ -936,7 +942,7 @@ export default function PresetTable({
                            
                             onClick={() => onLive(row)}
                           >
-                            {ACTION_TEXT[kind]}
+                            {tr(ACTION_TEXT[kind])}
                           </button>
                         )
                       ) : row.presetUid !== undefined && row.kind !== 'mkp_preset' ? (
@@ -953,7 +959,7 @@ export default function PresetTable({
                          
                           onClick={() => onLive(row)}
                         >
-                          {ACTION_TEXT[kind]}
+                          {tr(ACTION_TEXT[kind])}
                         </button>
                       ) : row.presetUid === undefined && row.kind === 'mkp_preset' ? (
                         /*
@@ -979,12 +985,12 @@ export default function PresetTable({
                          
                           onClick={() => onLive(row)}
                         >
-                          {ACTION_TEXT[kind]}
+                          {tr(ACTION_TEXT[kind])}
                         </button>
                       )
                     ) : gotIt ? (
                       <span className={s.actDone}>
-                        {CLOUD_STATE_TEXT.downloaded}
+                        {tr(CLOUD_STATE_TEXT.downloaded)}
                       </span>
                     ) : row.presetUid !== undefined ? (
                       /*
@@ -998,7 +1004,9 @@ export default function PresetTable({
                         disabled={busy}
                         onClick={() => onDownload(row)}
                       >
-                        {needsUpdate ? UPDATE_ACTION_TEXT.update : UPDATE_ACTION_TEXT.missing}
+                        {needsUpdate
+                          ? tr(UPDATE_ACTION_TEXT.update)
+                          : tr(UPDATE_ACTION_TEXT.missing)}
                       </button>
                     ) : (
                       /*
@@ -1058,16 +1066,16 @@ export default function PresetTable({
                           <span className={s.dHeadMeta}>
                             <span>
                               {row.scope === 'cloud' && row.localState !== undefined
-                                ? CLOUD_LOCAL_TEXT[row.localState]
+                                ? tr(CLOUD_LOCAL_TEXT[row.localState])
                                 : row.presetState !== undefined
-                                  ? UPDATE_STATE_TEXT[updateState ?? 'latest']
+                                  ? tr(UPDATE_STATE_TEXT[updateState ?? 'latest'])
                                   : mkp && row.scope === 'local'
-                                    ? ASSET_STATE_TEXT[row.live ? 'on' : 'off']
+                                    ? tr(ASSET_STATE_TEXT[row.live ? 'on' : 'off'])
                                     : row.scope === 'local'
-                                      ? LIVE_TEXT[kind][row.live ? 'on' : 'off']
+                                      ? tr(LIVE_TEXT[kind][row.live ? 'on' : 'off'])
                                       : row.downloaded
-                                        ? CLOUD_STATE_TEXT.downloaded
-                                        : CLOUD_STATE_TEXT.pending}
+                                        ? tr(CLOUD_STATE_TEXT.downloaded)
+                                        : tr(CLOUD_STATE_TEXT.pending)}
                               {/*
                                * 「正在用」只在状态主词没说这件事时补 —— 主词已经写着
                                * 「在用 / 已复制」的（本地行 live 那一档）不再追加，
@@ -1075,18 +1083,18 @@ export default function PresetTable({
                                * （作者截图点名）；云端行的主词说的是"我这边取到没有"，
                                * 与「正在用」是两件事，照旧都要说。
                                */}
-                              {row.applied && row.scope !== 'local' && ' · 正在用'}
+                              {row.applied && row.scope !== 'local' && tr('presets.table.inUse')}
                             </span>
                             <i className={s.dDot} aria-hidden>·</i>
-                            <span>{row.sizeText ?? UNKNOWN}</span>
+                            <span>{row.sizeText ?? tr(UNKNOWN)}</span>
                             <i className={s.dDot} aria-hidden>·</i>
                             <span>
                               {row.origin === 'preset'
                                 ? row.scope === 'cloud'
-                                  ? '云端更新 '
-                                  : row.arrivalBy === 'replaced' ? '替换于 ' : '下载于 '
-                                : '修改于 '}
-                              {longStatText(row.modifiedText) ?? UNKNOWN}
+                                  ? tr('presets.table.when.cloud')
+                                  : row.arrivalBy === 'replaced' ? tr('presets.table.when.replaced') : tr('presets.table.when.downloaded')
+                                : tr('presets.table.when.modified')}
+                              {longStatText(row.modifiedText) ?? tr(UNKNOWN)}
                             </span>
                           </span>
                           {/*
@@ -1096,10 +1104,10 @@ export default function PresetTable({
                           <button
                             type="button"
                             className={s.dHeadFold}
-                            title="收起详情（与点这一行同一件事）"
+                            title={tr('presets.table.collapse.title')}
                             onClick={() => onToggleExpand(row.rowKey)}
                           >
-                            收起
+                            {tr('presets.table.collapse')}
                           </button>
                         </div>
 
@@ -1111,12 +1119,12 @@ export default function PresetTable({
                          */}
                         <div className={s.dGrid}>
                           <div className={s.dCol}>
-                            <span className={s.dColLabel}>基本信息</span>
+                            <span className={s.dColLabel}>{tr('presets.table.detail.basic')}</span>
                             <div className={s.dGroup}>
                               {mkp ? (
                                 row.versions.length > 0 && (
                                   <div className={s.dRow}>
-                                    <span className={s.dKey}>版本</span>
+                                    <span className={s.dKey}>{tr('presets.table.detail.key.version')}</span>
                                     <span className={s.dVal}>{version.text}</span>
                                   </div>
                                 )
@@ -1124,13 +1132,13 @@ export default function PresetTable({
                                 <>
                                   {row.nozzle != null && (
                                     <div className={s.dRow}>
-                                      <span className={s.dKey}>喷嘴</span>
+                                      <span className={s.dKey}>{tr('presets.table.detail.key.nozzle')}</span>
                                       <span className={s.dVal}>{row.nozzle}</span>
                                     </div>
                                   )}
                                   {row.layerHeight != null && (
                                     <div className={s.dRow}>
-                                      <span className={s.dKey}>层高</span>
+                                      <span className={s.dKey}>{tr('presets.table.detail.key.layer')}</span>
                                       <span className={s.dVal}>{row.layerHeight}</span>
                                     </div>
                                   )}
@@ -1138,7 +1146,7 @@ export default function PresetTable({
                               )}
 
                               <div className={s.dRow}>
-                                <span className={s.dKey}>来源</span>
+                                <span className={s.dKey}>{tr('presets.table.detail.key.source')}</span>
                                 <span className={s.dVal}>
                                   {locateTarget !== null ? (
                                     <button
@@ -1157,8 +1165,8 @@ export default function PresetTable({
                               {/* 血统：我那份从哪一版改出来的 */}
                               {row.origin === 'local' && (
                                 <div className={s.dRow}>
-                                  <span className={s.dKey}>{BASED_ON_KEY}</span>
-                                  <span className={s.dVal}>{basedOnCellText(row)}</span>
+                                  <span className={s.dKey}>{tr(BASED_ON_KEY)}</span>
+                                  <span className={s.dVal}>{basedOnCellText(tr, row)}</span>
                                 </div>
                               )}
 
@@ -1172,10 +1180,10 @@ export default function PresetTable({
                                 0 次照常显示「还没跑过」：这是事实，不是缺数据。
                               */}
                               {row.usageKey !== undefined && (
-                                <div className={s.dRow} title={USAGE_HINT}>
-                                  <span className={s.dKey}>{USAGE_KEY}</span>
+                                <div className={s.dRow} title={tr(USAGE_HINT)}>
+                                  <span className={s.dKey}>{tr(USAGE_KEY)}</span>
                                   <span className={s.dVal}>
-                                    {usageCellText(usage.get(row.usageKey))}
+                                    {usageCellText(tr, usage.get(row.usageKey))}
                                   </span>
                                 </div>
                               )}
@@ -1185,7 +1193,7 @@ export default function PresetTable({
                           {/* 右栏：快捷操作 —— 原「卡底」那三颗按钮搬上来（2026-10-10） */}
                           {(row.origin === 'local' || archiveCount > 0) && (
                             <div className={s.dCol}>
-                              <span className={s.dColLabel}>快捷操作</span>
+                              <span className={s.dColLabel}>{tr('presets.table.detail.quick')}</span>
                               <div className={s.dActs}>
                                 {archiveCount > 0 && (
                                   <button
@@ -1193,7 +1201,7 @@ export default function PresetTable({
                                     className={s.ghostBtn}
                                     onClick={() => onOpenArchive(row)}
                                   >
-                                    {archiveOpenText(archiveCount)}
+                                    {archiveOpenText(tr, archiveCount)}
                                   </button>
                                 )}
                                 {/*
@@ -1211,7 +1219,7 @@ export default function PresetTable({
                                     className={s.ghostBtn}
                                     onClick={() => onOpenLocal(row)}
                                   >
-                                    {LOCAL_DRAWER.open}
+                                    {tr(LOCAL_DRAWER.open)}
                                   </button>
                                 )}
                                 {/*
@@ -1231,10 +1239,10 @@ export default function PresetTable({
                                       type="button"
                                       className={s.updateBtn}
                                       disabled={busy}
-                                      title="把云端新版收进来 —— 你改过的那几项会先问过你"
+                                      title={tr('presets.table.detail.update.title')}
                                       onClick={() => onUpdateLocal(row)}
                                     >
-                                      {UPDATE_ACTION_TEXT.update}
+                                      {tr(UPDATE_ACTION_TEXT.update)}
                                     </button>
                                   )}
                                 {/*
@@ -1253,10 +1261,10 @@ export default function PresetTable({
                                     <button
                                       type="button"
                                       className={s.ghostBtn}
-                                      title={PARAMS_TEXT.why}
+                                      title={tr(PARAMS_TEXT.why)}
                                       onClick={() => onParams(row)}
                                     >
-                                      {PARAMS_TEXT.open}
+                                      {tr(PARAMS_TEXT.open)}
                                     </button>
                                   )}
                               </div>
@@ -1272,7 +1280,9 @@ export default function PresetTable({
                               row.ownPublishedAt !== row.publishedAt && (
                                 <>
                                   <span>
-                                    本机这份发布于 {longStatText(row.ownPublishedAt) ?? UNKNOWN}
+                                    {tr('presets.table.detail.publishedHere', {
+                                      time: longStatText(row.ownPublishedAt) ?? tr(UNKNOWN),
+                                    })}
                                   </span>
                                   <i className={s.dDot} aria-hidden>·</i>
                                 </>
@@ -1280,14 +1290,17 @@ export default function PresetTable({
                             {row.scope === 'local' && (
                               <>
                                 <span>
-                                  云端最新版发布于{' '}
-                                  {longStatText(row.publishedAt ?? undefined) ?? UNKNOWN}
+                                  {tr('presets.table.detail.publishedCloud', {
+                                    time: longStatText(row.publishedAt ?? undefined) ?? tr(UNKNOWN),
+                                  })}
                                 </span>
                                 <i className={s.dDot} aria-hidden>·</i>
                               </>
                             )}
                             <span>
-                              云端最新版本 {row.presetVersion ?? UNKNOWN}
+                              {tr('presets.table.detail.cloudVersion', {
+                                version: row.presetVersion ?? tr(UNKNOWN),
+                              })}
                             </span>
                           </div>
                         )}
@@ -1295,7 +1308,7 @@ export default function PresetTable({
                         {/* 认不出的注记：不顶在主词上，放成讲道理的一行 */}
                         {untrusted && (
                           <p className={s.dNote}>
-                            {PRESET_UNTRUSTED_NOTE}
+                            {tr(PRESET_UNTRUSTED_NOTE)}
                           </p>
                         )}
 
@@ -1310,19 +1323,19 @@ export default function PresetTable({
                           <div className={s.editrows}>
                             {row.remarkKey !== null && (
                               <div className={s.dRow}>
-                                <span className={s.dKey}>备注</span>
+                                <span className={s.dKey}>{tr('presets.table.detail.key.remark')}</span>
                                 <span
                                   className={s.editValue}
                                   data-empty={row.subtitle.trim() === ''}
                                 >
                                   {row.subtitle.trim() === ''
-                                    ? '空着 = 副标题留空'
+                                    ? tr('presets.table.detail.remarkEmpty')
                                     : row.subtitle}
                                 </span>
                                 <button
                                   type="button"
                                   className={s.editTrigger}
-                                  title="编辑备注 —— 列表里文件名下面那行小字"
+                                  title={tr('presets.table.detail.editRemark.title')}
                                   onClick={() =>
                                     setBands((b) => ({
                                       ...b,
@@ -1330,24 +1343,24 @@ export default function PresetTable({
                                     }))
                                   }
                                 >
-                                  编辑
+                                  {tr('presets.table.detail.edit')}
                                 </button>
                               </div>
                             )}
 
                             {localAttr && (
                               <div className={s.dRow}>
-                                <span className={s.dKey}>归属</span>
+                                <span className={s.dKey}>{tr('presets.table.detail.key.attr')}</span>
                                 <span className={s.editValue}>
-                                  <span className={s.editKey}>机型</span>
+                                  <span className={s.editKey}>{tr('presets.table.detail.key.machine')}</span>
                                   <span>{ownMachineId ?? DASH_}</span>
-                                  <span className={s.editKey}>预设类型</span>
+                                  <span className={s.editKey}>{tr('presets.table.detail.key.variant')}</span>
                                   <span>{ownVersionId ?? DASH_}</span>
                                 </span>
                                 <button
                                   type="button"
                                   className={s.editTrigger}
-                                  title="编辑归属 —— 写进文件头的 # machine: / # variant: 两行"
+                                  title={tr('presets.table.detail.editAttr.title')}
                                   onClick={() =>
                                     setBands((b) => ({
                                       ...b,
@@ -1355,7 +1368,7 @@ export default function PresetTable({
                                     }))
                                   }
                                 >
-                                  编辑
+                                  {tr('presets.table.detail.edit')}
                                 </button>
                               </div>
                             )}
@@ -1448,6 +1461,7 @@ function RemarkBand(props: {
   const [text, setText] = useState(props.current)
   const [saving, setSaving] = useState(false)
   const taRef = useRef<HTMLTextAreaElement>(null)
+  const tr = useT()
   /*
    * 下面两件事（复位 / 自增高）的依赖都用局部量：`props.open` / `props.current`
    * 直接进依赖数组会被 react-hooks 的 lint 当成「可变成员」告警。
@@ -1515,13 +1529,13 @@ function RemarkBand(props: {
              * 按钮贴右端 —— 按钮一律 `flex-shrink: 0`，窄了也先挤输入框（CSS）。
              */}
             <div className={s.bandHead}>
-              <span className={s.dKey}>备注</span>
+              <span className={s.dKey}>{tr('presets.table.detail.key.remark')}</span>
               <textarea
                 ref={taRef}
                 className={s.remarkArea}
                 rows={1}
                 value={text}
-                placeholder="空着 = 副标题留空"
+                placeholder={tr('presets.table.detail.remarkEmpty')}
                 disabled={props.busy}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
@@ -1538,10 +1552,10 @@ function RemarkBand(props: {
                   type="button"
                   className={s.bandQuiet}
                   disabled={saving || props.busy}
-                  title="拿掉覆盖，退回工作台写的那句（没有就空着）"
+                  title={tr('presets.table.remark.restoreDefault.title')}
                   onClick={() => void save(null)}
                 >
-                  恢复默认
+                  {tr('presets.table.remark.restoreDefault')}
                 </button>
               )}
               <button
@@ -1550,7 +1564,7 @@ function RemarkBand(props: {
                 disabled={saving || props.busy}
                 onClick={props.onClose}
               >
-                取消
+                {tr('presets.table.common.cancel')}
               </button>
               <button
                 type="button"
@@ -1558,7 +1572,7 @@ function RemarkBand(props: {
                 disabled={saving || props.busy || !dirty}
                 onClick={() => void save(text.trim())}
               >
-                保存
+                {tr('presets.table.common.save')}
               </button>
             </div>
           </div>
@@ -1592,6 +1606,7 @@ function ComboField(props: {
 }) {
   const wrapRef = useRef<HTMLSpanElement>(null)
   const [open, setOpen] = useState(false)
+  const tr = useT()
   const cur = props.value.trim()
   const pick = (v: string) => {
     props.onValue(v)
@@ -1618,7 +1633,7 @@ function ComboField(props: {
         type="button"
         className={s.comboCaret}
         tabIndex={-1}
-        aria-label="展开候选"
+        aria-label={tr('presets.table.combo.expandAria')}
        
         onClick={() => {
           setOpen((v) => !v)
@@ -1635,7 +1650,7 @@ function ComboField(props: {
         >
           <div className={s.comboMenu}>
             {props.options.length === 0 && (
-              <p className={s.comboEmpty}>没有候选，可以直接输入</p>
+              <p className={s.comboEmpty}>{tr('presets.table.combo.empty')}</p>
             )}
             {props.options.map((o) => (
               <button
@@ -1688,6 +1703,7 @@ function AttrBand(props: {
   const [machineId, setMachineId] = useState(props.machineId ?? '')
   const [versionId, setVersionId] = useState(props.versionId ?? '')
   const [saving, setSaving] = useState(false)
+  const tr = useT()
   /* 打开时从当前值重来（首开、重开、数据重读之后都算）——不带上次没存完的草稿 */
   useEffect(() => {
     if (!props.open) return
@@ -1716,7 +1732,7 @@ function AttrBand(props: {
           <div className={s.dBandPane}>
             {/* 一列两行：label 56px + 框占满剩余（与展示行、上面信息行同刻度） */}
             <div className={s.bandRow}>
-              <span className={s.dKey}>机型</span>
+              <span className={s.dKey}>{tr('presets.table.detail.key.machine')}</span>
               <ComboField
                 value={machineId}
                 onValue={(v) => {
@@ -1725,16 +1741,16 @@ function AttrBand(props: {
                   setVersionId('')
                 }}
                 options={machineOptions}
-                placeholder="选择或自己填"
+                placeholder={tr('presets.table.combo.placeholder')}
               />
             </div>
             <div className={s.bandRow}>
-              <span className={s.dKey}>预设类型</span>
+              <span className={s.dKey}>{tr('presets.table.detail.key.variant')}</span>
               <ComboField
                 value={versionId}
                 onValue={setVersionId}
                 options={versionOptions}
-                placeholder="选择或自己填"
+                placeholder={tr('presets.table.combo.placeholder')}
               />
             </div>
             <div className={s.bandFoot}>
@@ -1744,7 +1760,7 @@ function AttrBand(props: {
                 disabled={saving || props.busy}
                 onClick={props.onClose}
               >
-                取消
+                {tr('presets.table.common.cancel')}
               </button>
               <button
                 type="button"
@@ -1761,7 +1777,7 @@ function AttrBand(props: {
                   })()
                 }
               >
-                保存
+                {tr('presets.table.common.save')}
               </button>
             </div>
           </div>

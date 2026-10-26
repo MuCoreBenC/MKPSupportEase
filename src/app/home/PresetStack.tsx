@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import type { PresetState } from '../calib/usePreset'
 import TraceTag from '../components/TraceTag'
 import Skeleton from './Skeleton'
@@ -104,6 +105,7 @@ export default function PresetStack({
   pickedPath = null,
   onPick,
 }: PresetStackProps) {
+  const tr = useT()
   const ready = state.status === 'ready'
   const name = ready
     ? state.preset.bundleName
@@ -164,7 +166,7 @@ export default function PresetStack({
 
   return (
     <div className={s.stack} data-status={state.status}>
-      <p className={s.head}>预设文件</p>
+      <p className={s.head}>{tr('home.stack.head')}</p>
 
       {hasContent ? (
         <>
@@ -179,10 +181,10 @@ export default function PresetStack({
               <span className={s.pickDot} aria-hidden="true" />
               <span className={s.pickName}>{name === '' ? '—' : name}</span>
               <span className={s.pickTail}>
-                {defaultActive && <span className={s.pickTag}>正在使用</span>}
+                {defaultActive && <span className={s.pickTag}>{tr('home.stack.inUse')}</span>}
                 {/* 「默认」而不是「套餐」：这一行就是用户手里那份本体（见上面那段注释） */}
                 <span className={s.pickTag} data-kind="default">
-                  默认
+                  {tr('home.stack.default')}
                 </span>
               </span>
             </button>
@@ -194,7 +196,7 @@ export default function PresetStack({
 
           {selectable && ranked.length > 0 && (
             <div className={s.copies}>
-              <p className={s.copiesHead}>我的副本</p>
+              <p className={s.copiesHead}>{tr('home.stack.copies')}</p>
               {ranked.map((c) => (
                 <button
                   key={c.path}
@@ -207,8 +209,14 @@ export default function PresetStack({
                   <span className={s.pickDot} aria-hidden="true" />
                   <span className={s.pickName}>{c.fileName}</span>
                   <span className={s.pickTail}>
-                    {activePath === c.path && <span className={s.pickTag}>正在使用</span>}
-                    {c.count > 0 && <span className={s.pickCount}>{c.count} 次</span>}
+                    {activePath === c.path && (
+                      <span className={s.pickTag}>{tr('home.stack.inUse')}</span>
+                    )}
+                    {c.count > 0 && (
+                      <span className={s.pickCount}>
+                        {tr('home.stack.count', { count: c.count })}
+                      </span>
+                    )}
                   </span>
                 </button>
               ))}
@@ -217,8 +225,8 @@ export default function PresetStack({
         </>
       ) : showWaiting ? (
         <>
-          <Skeleton width="min(160px, 100%)" label="正在读取预设" />
-          <p className={s.note}>正在读取…</p>
+          <Skeleton width="min(160px, 100%)" label={tr('home.stack.reading')} />
+          <p className={s.note}>{tr('home.stack.loading')}</p>
         </>
       ) : null}
 
@@ -232,7 +240,7 @@ export default function PresetStack({
       )}
 
       {state.status === 'downloading' && (
-        <span className={s.progress} role="img" aria-label="正在下载" />
+        <span className={s.progress} role="img" aria-label={tr('home.stack.downloading')} />
       )}
 
       {/*
@@ -241,7 +249,7 @@ export default function PresetStack({
       */}
       {state.status === 'failed' && (
         <p className={s.note}>
-          读取失败
+          {tr('home.stack.failed')}
           {state.error && <TraceTag traceId={state.error.traceId} />}
         </p>
       )}

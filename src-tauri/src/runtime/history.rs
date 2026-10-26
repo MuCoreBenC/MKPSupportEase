@@ -33,6 +33,8 @@
 //! 3. 写走 [`crate::fsx::atomic::atomic_write_json`]（全仓唯一写盘出口）；
 //! 4. 坏档不静默 —— 解析不了报 `CORRUPTED`，不清空、不猜。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -139,7 +141,7 @@ pub fn read(root: &Path, key: &str) -> Result<HistoryFile, AppError> {
         return Ok(HistoryFile::default());
     };
     serde_json::from_slice::<HistoryFile>(&bytes).map_err(|e| {
-        AppError::corrupted("修改历史那本账读不出来（文件坏了，不是没有）")
+        AppError::corrupted(messages::text("ui.runtime.history.390", &[]))
             .with_detail(e.to_string())
     })
 }
@@ -152,8 +154,10 @@ pub fn write(root: &Path, key: &str, file: &HistoryFile) -> Result<(), AppError>
     let at = file_of(root, key);
     if file.entries.is_empty() && file.batches == 0 && file.prev_saved.is_empty() {
         if at.is_file() {
-            std::fs::remove_file(&at)
-                .map_err(|e| AppError::io("清不掉这本历史").with_detail(e.to_string()))?;
+            std::fs::remove_file(&at).map_err(|e| {
+                AppError::io(messages::text("ui.runtime.history.391", &[]))
+                    .with_detail(e.to_string())
+            })?;
         }
         return Ok(());
     }

@@ -42,7 +42,17 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px clamp(16px, 2vw, 26px) 8px;
+  /*
+   * 高度与工艺页工具条**同一档**（`--head-h` = 41，见 tokens.css 那条注释）：
+   * 作者 2026-10-26：「我希望报告页面和工艺页面的顶部的高度一样」——
+   * 顶条不一样高，切页时下面的内容会整体上下跳一下。
+   *
+   * 这里**不写上下内衬、只钉最小高度**：行里的东西（12.5px 的说明 / 24px 的小胶囊）
+   * 一律由 `align-items: center` 摆到中线，将来改字号不必回来重算内衬；
+   * 真有个更高的东西进来（比如某天加一枚 28px 的图标），让它自己把这一行撑高。
+   */
+  min-height: var(--head-h);
+  padding: 0 clamp(16px, 2vw, 26px);
 }
 
 .sub {

@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STORAGE } from '../../api/storageKeys'
+import { useT } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
 import { FieldLayer } from '../../components/field'
@@ -382,6 +383,7 @@ export default function PageParams({
   openSyncOnStart = false,
   gateEdit = false,
 }: Props) {
+  const tr = useT()
   /* 标题栏两个借位槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
   const headSlot = useModalHeadSlot()
   const headNoteSlot = useModalHeadNoteSlot()
@@ -502,7 +504,7 @@ export default function PageParams({
     snap: 320,
     min: 240,
     max: 560,
-    label: '预设列表',
+    label: tr('params.presetList'),
   })
 
   /**
@@ -549,7 +551,7 @@ export default function PageParams({
     snap: 380,
     min: 280,
     max: 560,
-    label: '修改历史',
+    label: tr('params.historyDrawer'),
   })
 
   /* 当前分类里的 section 列表 */
@@ -741,17 +743,17 @@ export default function PageParams({
   const stateText =
     u.dirtyCount === 0 && u.syncDirty === 0
       ? density === 'mini'
-        ? '没有改动'
-        : '没有未保存的改动'
+        ? tr('params.noChange')
+        : tr('params.noUnsaved')
       : u.dirtyCount === 0
         ? density === 'mini'
-          ? `${u.syncDirty} 项更新待保存`
-          : `${u.syncDirty} 项云端更新待保存 · 保存才生效`
+          ? tr('params.syncDirty', { count: u.syncDirty })
+          : tr('params.syncDirtyCloud', { count: u.syncDirty })
         : density === 'mini'
-          ? `${u.dirtyCount} 处未保存`
+          ? tr('params.dirty', { count: u.dirtyCount })
           : savingToLocal
-            ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
-            : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
+            ? tr('params.dirtyWriteBack', { count: u.dirtyCount, file: fileLabel })
+            : tr('params.dirtySaveAsOwn', { count: u.dirtyCount })
 
   const closeHistory = () => setHistoryOpen(false)
 
@@ -782,18 +784,26 @@ export default function PageParams({
       const first = entry.items[0]
       const many = entry.items.length > 1
       const target = first === undefined ? '' : valueText(u.defOf(first.key), first.from)
-      const label = first?.label ?? '这一项'
+      const label = first?.label ?? tr('params.thisItem')
 
       const next =
         result === 'applied'
           ? {
-              text: many ? `已还原 ${entry.items.length} 项（含 ${label} → ${target}）` : `已还原：${label} → ${target}`,
+              text: many
+                ? tr('params.revertMany', {
+                    count: entry.items.length,
+                    label,
+                    target,
+                  })
+                : tr('params.revertOne', { label, target }),
               tone: 'ok' as const,
             }
           : result === 'blocked'
-            ? { text: `没有还原：${label} 已被上游标记弃用，改不了`, tone: 'muted' as const }
+            ? { text: tr('params.revertBlocked', { label }), tone: 'muted' as const }
             : {
-                text: many ? '没有变化：这几项现在就是当时那个值' : `没有变化：${label} 现在就是 ${target}`,
+                text: many
+                  ? tr('params.noChangeMany')
+                  : tr('params.noChangeOne', { label, target }),
                 tone: 'muted' as const,
               }
 
@@ -801,7 +811,7 @@ export default function PageParams({
       if (revertNoteTimer.current !== null) window.clearTimeout(revertNoteTimer.current)
       revertNoteTimer.current = window.setTimeout(() => setRevertNote(null), 3200)
     },
-    [u],
+    [u, tr],
   )
 
   /**
@@ -968,7 +978,7 @@ export default function PageParams({
   if (u.loading) {
     return (
       <div className={s.page} data-density={density}>
-        <p className={s.loading}>正在打开数据包…</p>
+        <p className={s.loading}>{tr('params.loadingPack')}</p>
       </div>
     )
   }
@@ -1410,10 +1420,10 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.primary}
-                  title="进编辑模式：参数就可以改了"
+                  title={tr('presets.edit.enterParamsTitle')}
                   onClick={() => setEditMode(true)}
                 >
-                  {EDIT_TEXT.enterMode}
+                  {tr(EDIT_TEXT.enterMode)}
                 </button>
               </div>
             </>
@@ -1464,7 +1474,7 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.textBtn}
-                  title={EDIT_TEXT.exitTitle}
+                  title={tr(EDIT_TEXT.exitTitle)}
                   onClick={() => {
                     /*
                      * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -1476,13 +1486,13 @@ export default function PageParams({
                     setEditMode(false)
                   }}
                 >
-                  {EDIT_TEXT.exitMode}
+                  {tr(EDIT_TEXT.exitMode)}
                 </button>
                 <button
                   type="button"
                   className={s.primary}
                   disabled={u.dirtyCount === 0 && u.syncDirty === 0}
-                  title="保存（Ctrl+S）"
+                  title={tr('presets.edit.saveTitle')}
                   aria-keyshortcuts="Control+S"
                   onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >

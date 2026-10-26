@@ -10,6 +10,7 @@ import {
 
 import { api } from '../api'
 import { FieldLayer } from '../components/field'
+import { useT } from '../i18n'
 import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
@@ -98,8 +99,9 @@ type PageLayout = 'list' | 'wizard' | 'split' | 'form'
  * 各页有自己的加载态，与这一层无关。仍然是灰条就是灰条，不预填任何字。
  */
 function PageLoading({ layout }: { layout: PageLayout }) {
+  const tr = useT()
   return (
-    <div className={s.pageLoading} data-layout={layout} role="status" aria-label="页面正在加载">
+    <div className={s.pageLoading} data-layout={layout} role="status" aria-label={tr('app.loading')}>
       {layout === 'list' && (
         <>
           <div className={s.skRow}>

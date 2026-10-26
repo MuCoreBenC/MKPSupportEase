@@ -13,6 +13,7 @@
 import type { CSSProperties, RefObject } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ParamTab } from '../../api'
+import { useT } from '../../i18n'
 import Icon from '../shell/icons'
 import type { IconName } from '../shell/icons'
 import s from './CategoryPills.module.css'
@@ -142,6 +143,7 @@ function useAvailWidth(wrapRef: RefObject<HTMLDivElement>): number | null {
 }
 
 export default function CategoryPills({ tabs, current, dirty, onSelect }: Props) {
+  const tr = useT()
   const at = tabs.findIndex((t) => t.id === current)
   const label = tabs[at]?.label ?? ''
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -162,7 +164,7 @@ export default function CategoryPills({ tabs, current, dirty, onSelect }: Props)
       <div
         className={s.group}
         role="tablist"
-        aria-label="参数分类"
+        aria-label={tr('params.cat')}
         onKeyDown={(e) => {
           if (e.key === 'ArrowRight') {
             e.preventDefault()
@@ -184,13 +186,15 @@ export default function CategoryPills({ tabs, current, dirty, onSelect }: Props)
               aria-current={on ? 'true' : undefined}
               tabIndex={on ? 0 : -1}
               className={on ? s.pillOn : s.pill}
-              title={`${t.label} · ${t.count} 项`}
+              title={tr('params.catCount', { label: t.label, count: t.count })}
               onClick={() => onSelect(t.id)}
             >
               <Icon name={iconOf(t.id, t.label)} size={20} className={s.icon} />
               {/* 条数在最窄的一档会被 CSS 收掉 —— 名字（右边那截）优先级更高，留着 */}
               <span className={s.num}>{t.count}</span>
-              {dirty.has(t.id) && <i className={s.dot} aria-label="这一类有未保存的改动" />}
+              {dirty.has(t.id) && (
+                <i className={s.dot} aria-label={tr('params.catDirty')} />
+              )}
             </button>
           )
         })}

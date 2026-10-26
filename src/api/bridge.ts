@@ -349,6 +349,9 @@ export const bridgeApi: MkpApi = {
   /* 应用本体那两条（2026-10-17）：「预设位置」打开目录；「卸载」删程序本体、数据不动 */
   openPresetFolder: () => call('openPresetFolder', 'open_preset_folder'),
   uninstall: () => call('uninstall', 'uninstall'),
+  /* 界面语言（2026-10-25）：落 locale 格；只换文案，不动任何业务判据 */
+  getLocale: () => call('getLocale', 'get_locale'),
+  setLocale: (locale) => call('setLocale', 'set_locale', { locale }),
   /* 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗 —— 落 pin / compact 两格。
      窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
   getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),

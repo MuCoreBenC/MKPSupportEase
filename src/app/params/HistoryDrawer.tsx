@@ -29,6 +29,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import Drawer from '../shared/Drawer'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
@@ -124,10 +125,10 @@ interface Props {
   onClearHistory?: () => void
 }
 
-const STATE_TEXT: Record<HistoryEntry['state'], string> = {
-  draft: '未保存',
-  saved: '已保存',
-  undone: '已撤销',
+const STATE_TEXT: Record<HistoryEntry['state'], StringKey> = {
+  draft: 'params.history.draft',
+  saved: 'params.history.saved',
+  undone: 'params.history.undone',
 }
 
 /**
@@ -144,9 +145,9 @@ function whenText(unix: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-const VIEWS = [
-  { value: 'item', label: '逐项' },
-  { value: 'batch', label: '整批' },
+const VIEWS: { value: string; label: StringKey }[] = [
+  { value: 'item', label: 'params.history.byItem' },
+  { value: 'batch', label: 'params.history.byBatch' },
 ]
 
 export default function HistoryDrawer({
@@ -168,6 +169,7 @@ export default function HistoryDrawer({
   readonly = false,
   onClearHistory,
 }: Props) {
+  const tr = useT()
   /** 整批那一屏**展开了哪几段**（一段一个键：`draft` / `b<N>`）。只是这一屏的看法定 */
   const [openBatches, setOpenBatches] = useState<ReadonlySet<string>>(() => new Set())
   /**
@@ -194,13 +196,18 @@ export default function HistoryDrawer({
     const many = entry.items.length > 1
     const where = [first.tab, first.section].filter((x) => x !== '').join(' / ')
     const ctx = many
-      ? `${first.label} 等 ${entry.items.length} 项`
+      ? tr('params.history.summaryBatch', { label: first.label, count: entry.items.length })
       : where === ''
         ? first.label
         : `${where} · ${first.label}`
     const unit = first.unit ?? ''
     const line = many
-      ? `共 ${entry.items.length} 项（含 ${first.label} ${first.from} → ${first.to}）`
+      ? tr('params.history.summaryOne', {
+          count: entry.items.length,
+          label: first.label,
+          from: first.from,
+          to: first.to,
+        })
       : `${first.from}${unit} → ${first.to}${unit}`
     return { ctx, line }
   }
@@ -221,7 +228,11 @@ export default function HistoryDrawer({
             type="button"
             className={s.caret}
             aria-expanded={caret.open}
-            aria-label={`${caret.open ? '收起' : '展开'} ${caret.label}的明细`}
+            aria-label={
+              caret.open
+                ? tr('params.history.collapse', { label: caret.label })
+                : tr('params.history.expand', { label: caret.label })
+            }
             onClick={caret.onToggle}
           >
             {caret.open ? '▾' : '▸'}
@@ -238,16 +249,16 @@ export default function HistoryDrawer({
           光看"改 X 轴偏移 0.1 → 0.7"分不出来。
         */}
         {entry.fromSync === true && (
-          <span className={s.syncTag} title="这一条是「云端更新」带进来的">
-            更新
+          <span className={s.syncTag} title={tr('params.history.syncTag')}>
+            {tr('params.history.syncTagShort')}
           </span>
         )}
         <span className={entry.state === 'saved' ? s.badgeSaved : s.badge}>
-          {STATE_TEXT[entry.state]}
+          {tr(STATE_TEXT[entry.state])}
         </span>
         {entry.state !== 'undone' && !readonly && (
           <button type="button" className={s.revert} onClick={() => onRevert(entry)}>
-            还原
+            {tr('params.history.revert')}
           </button>
         )}
       </>
@@ -328,9 +339,9 @@ export default function HistoryDrawer({
   return (
     <Drawer
       open={open}
-      title="修改历史"
+      title={tr('params.history.title')}
       /* 历史跟着**这份文件**走（2026-10-17），不是跟着这一次打开 —— 说"这次打开之后"就成了骗人的表现 */
-      subtitle={`${file} 的改动记录（一直留着）`}
+      subtitle={tr('params.history.subtitle', { file })}
       mode={mode}
       width={mode === 'float' ? width : undefined}
       drag={mode === 'float' ? drag : undefined}
@@ -341,7 +352,7 @@ export default function HistoryDrawer({
             <button
               type="button"
               className={armClear ? s.clearArm : s.ghost}
-              title={armClear ? '再点一下就真的清掉了' : '清空这份文件的修改历史'}
+              title={armClear ? tr('params.history.clearArmTitle') : tr('params.history.clearTitle')}
               onClick={() => {
                 if (armClear) {
                   setArmClear(false)
@@ -353,7 +364,7 @@ export default function HistoryDrawer({
                 }
               }}
             >
-              {armClear ? '确认清空？' : '清空历史'}
+              {armClear ? tr('params.history.clearArm') : tr('params.history.clear')}
             </button>
           )}
           {canPin && (
@@ -362,7 +373,7 @@ export default function HistoryDrawer({
               className={s.ghost}
               onClick={() => onMode(mode === 'pinned' ? 'float' : 'pinned')}
             >
-              {mode === 'pinned' ? '改为悬浮' : '固定在右侧'}
+              {mode === 'pinned' ? tr('params.history.float') : tr('params.history.pin')}
             </button>
           )}
         </>
@@ -377,11 +388,11 @@ export default function HistoryDrawer({
       {note !== null && <RevertNote note={note} />}
 
       <div className={s.views}>
-        <span className={s.viewLabel}>视图</span>
+        <span className={s.viewLabel}>{tr('params.history.viewLabel')}</span>
         <SegmentedField
           variant="segmented"
-          label="修改历史视图"
-          options={VIEWS}
+          label={tr('params.history.viewAria')}
+          options={VIEWS.map((v) => ({ value: v.value, label: tr(v.label) }))}
           value={view}
           onChange={(v) => onView(v as HistoryView)}
         />
@@ -394,33 +405,33 @@ export default function HistoryDrawer({
           <button
             type="button"
             className={s.enterEdit}
-            title="进入编辑模式之后，这里的每一条都能还原"
+            title={tr('params.history.enterEditTitle')}
             onClick={onEnterEdit}
           >
-            {EDIT_TEXT.enterMode}
+            {tr(EDIT_TEXT.enterMode)}
           </button>
         )}
       </div>
 
       {/* 只读态把门槛说清楚（一句话，进编辑模式后自己消失） */}
       {readonly && onEnterEdit !== undefined && history.length > 0 && (
-        <p className={s.readonlyHint}>当前只读：进入编辑模式后，每一条都能还原</p>
+        <p className={s.readonlyHint}>{tr('params.history.readonlyHint')}</p>
       )}
 
       {history.length === 0 ? (
-        <p className={s.empty}>这个文件本次打开还没有改动</p>
+        <p className={s.empty}>{tr('params.history.empty')}</p>
       ) : (
         <div className={s.scroll}>
           {groups.length === 0 ? (
             /* 净变化全为零（改动都被改回原值了）—— 说一句，不摆一个「0 条」的空段 */
-            <p className={s.empty}>改动都改回了原值 —— 按保存批次看，这里没有净变化</p>
+            <p className={s.empty}>{tr('params.history.emptyNet')}</p>
           ) : view === 'item' ? (
             groups.map((g) => (
               <section key={g.batch ?? 'draft'} className={s.group}>
                 {/* 段头 sticky —— 看不见滚动条，靠它知道现在在哪一段 */}
                 <h4 className={s.groupHead}>
                   <span>{g.title}</span>
-                  <span className={s.count}>{g.items.length} 条</span>
+                  <span className={s.count}>{tr('params.history.count', { count: g.items.length })}</span>
                   {/* 段头右侧那一列时间：未保存那一段没有落盘时刻，不摆 */}
                   {g.atUnix !== null && (
                     <time className={s.when} dateTime={new Date(g.atUnix * 1000).toISOString()}>

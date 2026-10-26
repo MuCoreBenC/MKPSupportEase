@@ -28,6 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { STORAGE } from '../../api/storageKeys'
+import { useT } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useIsDark } from '../state/appState'
 import type { Density } from '../../hooks/useDensity'
@@ -101,10 +102,11 @@ const LABEL_SLOPE = (LABEL_MAX - LABEL_MIN) / (LABEL_FULL - 880)
 const labelWidth = (pageW: number) => Math.round(
   Math.max(LABEL_MIN, Math.min(LABEL_MAX, LABEL_MAX - (LABEL_FULL - pageW) * LABEL_SLOPE)),
 )
-const RULES_NOTE = `条件显隐规则 ${RULES.rules} 条、覆盖 ${RULES.keys} 个参数`
-  + '（译自 ConfigManipulation.cpp 的 toggle_print_fff_options）'
+/* 规则说明那句在 2026-10-26 搬进字典（`bbs.rulesNote`）：模块级常量会被求值一次冻住，
+   现在由组件里用 `t(..., {rules, keys})` 现取 */
 
 export default function PageBbs({ density, pending, onNeedDownload }: Props) {
+  const tr = useT()
   const data = useBbsData()
   /*
    * 看哪一边（2026-10-13）：`mkp` = 我们自己的切片器配置，`bbs` = 本机 BBS 目录里的。
@@ -324,8 +326,12 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
       setLocalNote('')
     } else {
       setLocalNote(
-        `清单里没有「${pending.name}」${hit ? '（它不可选：' + (hit.reason ?? '') + '）' : ''}，`
-        + '已停在默认预设。',
+        hit
+          ? tr('bbs.pending.notSelectable', {
+              name: pending.name,
+              reason: hit.reason ?? '',
+            })
+          : tr('bbs.pending.missing', { name: pending.name }),
       )
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -393,7 +399,10 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
   const systemCount = data.presets.filter((p) => p.scope === 'system' && !p.isAbstract).length
   /* 头里那个「 · 」不再带着了 —— 详情栏把它单摆一行（见 BbsRail 的继承那一段） */
   const variantNote = preset.variant.reason === 'ok'
-    ? `变体 ${preset.variant.want}（第 ${preset.variant.index + 1} 个）`
+    ? tr('bbs.variant', {
+        want: preset.variant.want ?? '',
+        index: preset.variant.index + 1,
+      })
     : ''
 
   /*
@@ -486,8 +495,8 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           className={s.iconBtn}
           data-on={showDrawer}
           onClick={toggleDrawer}
-          title="预设列表：本机 BBS 里有哪些工艺预设"
-          aria-label="预设列表"
+          title={tr('bbs.presetListTitle')}
+          aria-label={tr('bbs.presetList')}
         >
           <Icon name="menu" size={16} />
         </button>
@@ -506,8 +515,8 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
         */}
         <BbsSearchBox
           value={paramQuery}
-          placeholder="搜参数（名字 / key / 值）…"
-          label="在当前预设的参数里搜索"
+          placeholder={tr('bbs.searchPlaceholder')}
+          label={tr('bbs.searchLabel')}
           onChange={setParamQuery}
         />
 
@@ -705,7 +714,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
                它与下面那格「行数 · 收起 N 行」本来就在说同一件事 */
             onViewMode={(next) => setViewMode(next)}
             stats={panel.stats}
-            rulesNote={RULES_NOTE}
+            rulesNote={tr('bbs.rulesNote', { rules: RULES.rules, keys: RULES.keys })}
             chain={preset.chainNames}
             variantNote={variantNote}
             sourceMode={data.sourceMode}

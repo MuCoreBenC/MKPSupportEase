@@ -31,6 +31,8 @@
 //! 账是**附加信息**：读不到 / 坏档一律当空表，不许让任何读失败 —— 界面退回「未知」，
 //! 什么都不坏（与 `provenance.json` 同一条口径）。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -195,7 +197,8 @@ pub fn replaced_at_of(events: &[PresetEvent], file: &str, old_sha256: &str) -> O
 
 fn save(internal_root: &Path, ledger: &Ledger) -> Result<(), crate::error::AppError> {
     let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
-        crate::error::AppError::internal("事件账序列化不了").with_detail(e.to_string())
+        crate::error::AppError::internal(messages::text("ui.runtime.preset_events.425", &[]))
+            .with_detail(e.to_string())
     })?;
     atomic_write(&ledger_path(internal_root), &body)
 }

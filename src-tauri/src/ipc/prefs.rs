@@ -16,6 +16,8 @@
 //! 写成功走 [`super::notify_app_state`] 广播 —— 前端不用"切完手动刷新"，
 //! 与 AppState 其它格是同一条通道（`docs/APP-STATE.md` §7）。
 
+use postprocess::diag::messages;
+
 use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
@@ -51,8 +53,9 @@ pub async fn set_theme(app: AppHandle, theme: String) -> Result<String, AppError
     traced("setTheme", |_| {
         let root = internal_root(&app)?;
         let pref = ThemePref::parse(&theme).ok_or_else(|| {
-            AppError::invalid_argument(format!(
-                "认不出的主题：{theme}（只能是 light / dark / system）"
+            AppError::invalid_argument(messages::text(
+                "ui.ipc.prefs.114",
+                &[("theme", &theme.to_string())],
             ))
         })?;
         runtime::app_state::set_theme(&root, pref)?;
@@ -111,7 +114,10 @@ pub fn set_window_backdrop(app: AppHandle, color: String) -> Result<(), AppError
             return Ok(());
         };
         win.set_background_color(Some(tauri::window::Color(r, g, b, 255)))
-            .map_err(|e| AppError::internal("窗口底色没设成").with_detail(e.to_string()))?;
+            .map_err(|e| {
+                AppError::internal(messages::text("ui.ipc.prefs.115", &[]))
+                    .with_detail(e.to_string())
+            })?;
         Ok(())
     })
 }

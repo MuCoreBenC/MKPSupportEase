@@ -26,6 +26,7 @@ import { createPortal } from 'react-dom'
 import TowerCoreSvg from '../params/TowerCoreSvg'
 import { api } from '../../api'
 import type { Machine, Plate, ReportBox4, ReportCollision } from '../../api'
+import { useT } from '../../i18n'
 import ZoomLayer from '../../components/zoom/ZoomLayer'
 import s from './CollisionMap.module.css'
 
@@ -62,7 +63,6 @@ interface Props {
    */
   label?: string
 }
-
 /** 塔身固定画成 44px（与参数页同一个数 —— 两边比例一致，形状才是同一个形状） */
 const TOWER_CORE_PX = 44
 /** 参数页那张塔图的裙边圈数（同一套算法，同一个数） */
@@ -109,8 +109,10 @@ export default function CollisionMap({
   ghost = null,
   hideLegend = false,
   height,
-  label = '放大查看碰撞俯视图',
+  label,
 }: Props) {
+  const tr = useT()
+  const mapLabel = label ?? tr('report.map.label')
   const tower = boxOf(collision.towerBbox)
   const model = boxOf(collision.modelBbox)
   /*
@@ -554,7 +556,7 @@ export default function CollisionMap({
             mapBtnRef.current?.firstElementChild?.getBoundingClientRect() ?? null
           setZoom(true)
         }}
-        aria-label={label}
+        aria-label={mapLabel}
       >
         {renderMap(false)}
       </button>
@@ -565,17 +567,19 @@ export default function CollisionMap({
       <ul className={s.legend}>
         <li>
           <span className={s.swTower} aria-hidden="true" />
-          擦料塔
+          {tr('report.map.legendTower')}
         </li>
         <li>
           <span className={s.swModel} aria-hidden="true" />
-          模型轮廓
+          {tr('report.map.legendModel')}
         </li>
         <li>
           <span className={s.swHit} aria-hidden="true" />
-          冲突点
+          {tr('report.map.legendHit')}
           {collision.conflictCount !== undefined && collision.conflictCount > 0 && (
-            <span className={s.legendNum}>{collision.conflictCount} 个</span>
+            <span className={s.legendNum}>
+              {tr('report.map.hitCount', { n: collision.conflictCount })}
+            </span>
           )}
         </li>
       </ul>
@@ -590,7 +594,7 @@ export default function CollisionMap({
               mapBtnRef.current?.firstElementChild?.getBoundingClientRect() ?? null
             }
             onGone={() => setZoom(false)}
-            label="收起放大俯视图"
+            label={tr('report.map.zoomClose')}
           >
             <div
               className={s.zoomed}

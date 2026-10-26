@@ -14,6 +14,7 @@
  */
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import type {
   CSSProperties,
   MouseEvent as ReactMouseEvent,
@@ -101,6 +102,8 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
   { sheets, density, canLeave },
   ref,
 ) {
+  /* 翻页按钮的可访问名 / 页序（2026-10-26 起走字典） */
+  const tr = useT()
   /* 面板那两个值：翻页时长与热区。面板里点一下立刻生效（产品仓里是常量） */
   const { glideMs, showHit } = useDevDefaults()
 
@@ -521,8 +524,8 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
           data-show={showHit}
           onClick={() => go('next')}
           onMouseDown={noMultiClickSelect}
-          aria-label="下一页"
-          title="下一页（→）"
+          aria-label={tr('home.deck.next')}
+          title={tr('home.deck.nextTitle')}
         />
       )}
 
@@ -533,8 +536,8 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
         disabled={!hasPrev}
         onClick={() => go('prev')}
         onMouseDown={noMultiClickSelect}
-        aria-label="上一页"
-        title="上一页（←）"
+        aria-label={tr('home.deck.prev')}
+        title={tr('home.deck.prevTitle')}
       />
 
       {sheets.length > 1 && (
@@ -556,7 +559,7 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
                 className={s.seg}
                 data-on={i === index}
                 aria-current={i === index ? 'page' : undefined}
-                aria-label={`第 ${i + 1} 页`}
+                aria-label={tr('home.deck.page', { n: i + 1 })}
                 onClick={() => jumpTo(i)}
               />
             ))}

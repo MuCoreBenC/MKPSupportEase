@@ -16,6 +16,7 @@
  *      搜 `[` 不该抛异常。这一页的搜索是「找那一行」，不是 grep。
  */
 
+import { t } from '../../i18n'
 import { norm, truthy } from './bbsMerge'
 import type { BbsParamMeta, BbsValue } from './bbsTypes'
 
@@ -115,8 +116,8 @@ export function sliceLabel(label: string, q: string): [string, string, string] |
 
 /** 命中在哪一栏，写进行的 title 那一句 */
 export function hitNote(hit: BbsHit, key: string, meta?: BbsParamMeta): string {
-  if (hit.where === 'key') return `命中：key ${key}`
-  if (hit.where === 'value') return '命中：值'
-  if (hit.where === 'label_en') return `命中：英文名 ${meta?.label?.en ?? ''}`.trim()
-  return '命中：参数名'
+  if (hit.where === 'key') return t('bbs.hit.key', { key })
+  if (hit.where === 'value') return t('bbs.hit.value')
+  if (hit.where === 'label_en') return t('bbs.hit.labelEn', { name: meta?.label?.en ?? '' }).trim()
+  return t('bbs.hit.label')
 }

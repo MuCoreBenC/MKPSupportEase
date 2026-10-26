@@ -62,6 +62,26 @@
 }
 
 /*
+ * 小号（2026-10-26）：**页头那一行里的小胶囊**的尺寸 —— 与工艺页工具条右端那两枚
+ * 开关（`WindowGadgets` 的 `.pill`）同一组数：24px 高 / 左右 6px / 12px 字。
+ *
+ * ★ 它不是"另一套按钮皮"：圆角、描边、字色照旧由 `.btn`（和各 `variant`）给，
+ *   这里只缩小盒子。作者那天的原话是「改小报告的胶囊按钮和工艺的一样」——
+ *   两个页头顶条是一套壳，右边那两枚就不该一大一小。
+ * ★ 定了高就得自己管行盒居中：`.btn` 原来的观感靠上下 8px 内衬撑，换成 24px 定高后
+ *   字的中线由 flex 负责（同 `.pill` 的 `place-items: center`）。
+ */
+.btnSm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 1;
+}
+
+/*
  * 主按钮（primary）：**反色配对** —— `--text-1` 当底、`--bg-1` 当字。
  *
  * 浅色下就是原来那副（墨底近白字）；深色下**自动**翻成"亮底近黑字"——

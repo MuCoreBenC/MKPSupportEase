@@ -54,19 +54,65 @@ pub fn script() -> Vec<(&'static str, f32, String)> {
     };
 
     let mut out: Vec<(&'static str, f32, String)> = vec![
-        ("input", 1.0, "正在读取文件...".to_owned()),
-        ("config", 1.0, "配置已就绪（IR 由调用方给出）".to_owned()),
-        ("machine-detect", 1.0, "识别机型...".to_owned()),
-        ("parse", 1.0, "解析 G-code...".to_owned()),
-        ("support", 1.0, "支撑面检测...".to_owned()),
-        ("collision", 1.0, "碰撞检测...".to_owned()),
-        ("calib-check", 1.0, "校准模型检测...".to_owned()),
+        (
+            "input",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.input", &[]).to_owned(),
+        ),
+        (
+            "config",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.config", &[]).to_owned(),
+        ),
+        (
+            "machine-detect",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.machine", &[]).to_owned(),
+        ),
+        (
+            "parse",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.parse", &[]).to_owned(),
+        ),
+        (
+            "support",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.support", &[]).to_owned(),
+        ),
+        (
+            "collision",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.collision", &[]).to_owned(),
+        ),
+        (
+            "calib-check",
+            1.0,
+            ::postprocess::diag::messages::text("ui.devsim.step.calib_check", &[]).to_owned(),
+        ),
     ];
-    out.extend(pass("pass1", "第一遍扫描"));
-    out.extend(pass("pass2", "第二遍扫描"));
-    out.push(("calibration", 1.0, "校准 G-code 插入...".to_owned()));
-    out.push(("write", 1.0, "正在写入文件...".to_owned()));
-    out.push(("printtime", 1.0, "打印时间估算...".to_owned()));
+    out.extend(pass(
+        "pass1",
+        &::postprocess::diag::messages::text("ui.devsim.pass.first", &[]),
+    ));
+    out.extend(pass(
+        "pass2",
+        &::postprocess::diag::messages::text("ui.devsim.pass.second", &[]),
+    ));
+    out.push((
+        "calibration",
+        1.0,
+        ::postprocess::diag::messages::text("ui.devsim.step.calibration", &[]).to_owned(),
+    ));
+    out.push((
+        "write",
+        1.0,
+        ::postprocess::diag::messages::text("ui.devsim.step.write", &[]).to_owned(),
+    ));
+    out.push((
+        "printtime",
+        1.0,
+        ::postprocess::diag::messages::text("ui.devsim.step.printtime", &[]).to_owned(),
+    ));
     out
 }
 
@@ -122,7 +168,8 @@ fn relocate_geo() -> crate::hook_ipc::RelocateGeoPayload {
         collision: Some(CollisionFacts {
             kind: "model".to_owned(),
             target: "model".to_owned(),
-            direction: "右上".to_owned(),
+            direction: ::postprocess::diag::messages::text("ui.devsim.geo.direction", &[])
+                .to_owned(),
             required_move_x: 32.6,
             required_move_y: 32.6,
             conflict_count: 97,
@@ -286,7 +333,8 @@ pub fn drive(sink: &dyn Sink, opts: &Options, cancel: &CancelToken) -> bool {
     /* 事实**并进开场那一条**（2026-10-14 起真钩子也这么发，见 [`FromHook::Hello`]）——
     演出与真跑走同一份脚本，界面上"框一出现就是完整形态"的样子两边才一致 */
     sink.send(&FromHook::Hello {
-        preset_name: "（假钩子）A1_MINI-fast.toml".to_owned(),
+        preset_name: ::postprocess::diag::messages::text("ui.devsim.preview.preset", &[])
+            .to_owned(),
         gcode_name: "（假钩子）演示.gcode".to_owned(),
         facts: Some(FactsPayload {
             gcode_machine: gcode_machine.to_owned(),
@@ -471,13 +519,19 @@ fn finish(
             `many_warnings` 那一档摆四条（验框身被撑高时事实表不被挤坏） */
             warnings: if many_warnings {
                 vec![
-                    "这一盘没有支撑，支撑相关的那几步按空跑".to_owned(),
-                    "擦料塔位置被模型占了一半，擦料路径往里挪了 6 mm".to_owned(),
-                    "这一盘的层高与预设里那两档都不一致，按预设值继续".to_owned(),
-                    "涂胶起点比上一盘晚 0.4 mm，末尾可能少一小段".to_owned(),
+                    ::postprocess::diag::messages::text("ui.devsim.warn.no_support", &[])
+                        .to_owned(),
+                    ::postprocess::diag::messages::text("ui.devsim.warn.tower_half", &[])
+                        .to_owned(),
+                    ::postprocess::diag::messages::text("ui.devsim.warn.layer_mismatch", &[])
+                        .to_owned(),
+                    ::postprocess::diag::messages::text("ui.devsim.warn.glue_late", &[]).to_owned(),
                 ]
             } else {
-                vec!["这一盘没有支撑，支撑相关的那几步按空跑".to_owned()]
+                vec![
+                    ::postprocess::diag::messages::text("ui.devsim.warn.no_support", &[])
+                        .to_owned(),
+                ]
             },
             /* 结果读数那一包也演一份（指标条 + 擦料与胶水消耗那几格）——
             值照归档演示那一批给，好把那几格的样子一次试全。

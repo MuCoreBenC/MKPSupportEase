@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import { useDeckLayer } from '../home/DeckLayerContext'
 import Skeleton from '../home/Skeleton'
 import { GLIDE_MS } from '../home/devDefaults'
@@ -81,6 +82,7 @@ export function AxisBar({
   /** 点「原 x.xx」：这一轴整个退回已保存值（手输 + 板上点选一起清） */
   onReset?: (axis: Axis) => void
 }) {
+  const tr = useT()
   const ref = useRef<HTMLDListElement>(null)
   const prev = useRef<{ orient: 'col' | 'row'; pos: Pos[] } | null>(null)
   /*
@@ -218,7 +220,7 @@ export function AxisBar({
                
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
-                原 {saved ? saved[k].toFixed(2) : '0.00'}
+                {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
               </button>
             </dt>
             <dd className={p.axisValue}>
@@ -254,7 +256,7 @@ export function AxisBar({
                       min={limits[k].min}
                       max={limits[k].max}
                       inputMode="decimal"
-                      aria-label={`${label}（毫米）`}
+                      aria-label={tr('calib.axisAria', { label })}
                       data-axis={k}
                       readOnly={!canType}
                       tabIndex={canType ? undefined : -1}
@@ -293,7 +295,7 @@ export function AxisBar({
                  * 不再变高，下面的板子不会被顶开，X / Y 两列也不会挪位。
                  */
                 <span className={p.axisField} data-readonly="true">
-                  <Skeleton width="3.6em" label="正在取预设" />
+                  <Skeleton width="3.6em" label={tr('calib.loadingPreset')} />
                   <span className={p.axisUnit} data-ghost="true">
                     mm
                   </span>

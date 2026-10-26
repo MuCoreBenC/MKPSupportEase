@@ -34,6 +34,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 import { api, errorText } from '../../api'
 import type { ImportItem, ImportOutcome, StagedImport } from '../../api'
+import { useT } from '../../i18n'
 import { Modal } from '../../components/modal'
 import Drawer from '../shared/Drawer'
 import { useDevPreview } from '../dev/useDevPreview'
@@ -48,6 +49,7 @@ import s from './FileImport.module.css'
  * 一个像素的布局都不占，「知道了」关掉）。
  */
 export function ImportBanner() {
+  const tr = useT()
   const entry = useContext(ImportContext)
   /* 开发台那一格（`import-result`）：预览时 `entry.banner` 是 Provider 摆出来的样本，
    * 关掉它要同时告诉 Provider 收工（见 `FileImportProvider` 里那两条 effect） */
@@ -62,12 +64,12 @@ export function ImportBanner() {
     <Modal
       open
       size="sm"
-      title={bad ? '导入：有几份没成' : '导入完成'}
+      title={bad ? tr('import.bad') : tr('import.done')}
       subtitle={text}
       onClose={close}
       footer={
         <button type="button" className={s.primary} onClick={close}>
-          知道了
+          {tr('import.ok')}
         </button>
       }
     >
@@ -93,6 +95,7 @@ interface CollisionRow {
 }
 
 export function FileImportProvider({ children }: { children: ReactNode }) {
+  const tr = useT()
   const [revision, setRevision] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -145,23 +148,38 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       if (done.length > 0) setRevision((r) => r + 1)
       const lines = [
         ...outcomes.map((o) =>
-          o.ok ? `已导入 ${o.fileName} → ${o.path}` : `${o.fileName}：${o.message}`,
+          o.ok
+            ? tr('import.line.done', { name: o.fileName, path: o.path })
+            : tr('import.line.rejected', { name: o.fileName, reason: o.message }),
         ),
-        ...rejected.map((r) => `${r.fileName}：${r.reason ?? '收不了'}`),
+        ...rejected.map((r) =>
+          tr('import.line.rejected', {
+            name: r.fileName,
+            reason: r.reason ?? tr('import.rejectedReason'),
+          }),
+        ),
       ]
       const miss = failed.length + rejected.length
       if (done.length === 0 && failed.length === 0) {
         /* 纯粹是"收不了"（比如一个 ZIP）：不摆"0 份成了"那种读起来别扭的句子 */
-        note({ text: `这 ${rejected.length} 份收不了 —— 明细在下面`, bad: true, lines })
+        note({
+          text: tr('import.allRejected', { count: rejected.length }),
+          bad: true,
+          lines,
+        })
         return
       }
       note(
         miss === 0
-          ? { text: `导入了 ${done.length} 份文件`, bad: false, lines }
-          : { text: `导入：${done.length} 份成了、${miss} 份没成`, bad: true, lines },
+          ? { text: tr('import.count', { count: done.length }), bad: false, lines }
+          : {
+              text: tr('import.partial', { done: done.length, miss }),
+              bad: true,
+              lines,
+            },
       )
     },
-    [note],
+    [note, tr],
   )
 
   /**
@@ -201,13 +219,13 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
           })
         }
       } catch (e) {
-        note({ text: `导入没走成：${errorText(e)}`, bad: true, lines: [] })
+        note({ text: tr('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
       } finally {
         busyRef.current = false
         setBusy(false)
       }
     },
-    [note, report],
+    [note, report, tr],
   )
 
   /** 「继续导入」：把重名的那些（名字已改）提交；没成的留在格子里让继续改 */
@@ -222,7 +240,9 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
     const rows = modal.rows.map((r) => ({ ...r, name: r.name.trim() }))
     if (rows.some((r) => r.name === '')) {
       setModal({
-        rows: rows.map((r) => (r.name === '' ? { ...r, error: '新名字不能是空的' } : r)),
+        rows: rows.map((r) =>
+          r.name === '' ? { ...r, error: tr('import.emptyName') } : r,
+        ),
       })
       return
     }
@@ -240,34 +260,42 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       for (const row of rows) {
         const outcome = bySource.get(row.source)
         if (outcome !== undefined && outcome.ok) continue
-        remaining.push({ ...row, error: outcome?.message ?? '没走成（没有回结局）' })
+        remaining.push({
+          ...row,
+          error: outcome?.message ?? tr('import.noOutcome'),
+        })
       }
 
       if (remaining.length === 0) {
         setModal(null)
         note({
-          text: `导入完成：${done.length} 份重名的都改好名字进来了`,
+          text: tr('import.renamed', { count: done.length }),
           bad: false,
-          lines: done.map((o) => `已导入 ${o.fileName} → ${o.path}`),
+          lines: done.map((o) =>
+            tr('import.line.done', { name: o.fileName, path: o.path }),
+          ),
         })
       } else {
         setModal({ rows: remaining })
         note({
           text:
             done.length > 0
-              ? `其中 ${done.length} 份已经进来了；还有 ${remaining.length} 份没成 —— 在右边那一格里改`
-              : `这 ${remaining.length} 份还没进来 —— 换个名字再试`,
+              ? tr('import.someDone', {
+                  done: done.length,
+                  rest: remaining.length,
+                })
+              : tr('import.noneDone', { count: remaining.length }),
           bad: true,
           lines: [],
         })
       }
     } catch (e) {
-      note({ text: `导入没走成：${errorText(e)}`, bad: true, lines: [] })
+      note({ text: tr('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
     } finally {
       busyRef.current = false
       setBusy(false)
     }
-  }, [modal, note, devCollision])
+  }, [modal, note, devCollision, tr])
 
   /** 取消 = 这些重名的没进来（别的该进的早进了 —— 一份错不拖累别人） */
   const cancelModal = useCallback(() => {
@@ -282,18 +310,23 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
     const names = modal.rows.map((r) => r.fileName)
     setModal(null)
     note({
-      text: `已取消：${names.length} 份重名的没有导入 —— 可以先改个名字再试`,
+      text: tr('import.cancelled', { count: names.length }),
       bad: false,
       lines: names,
     })
-  }, [modal, note, devCollision])
+  }, [modal, note, devCollision, tr])
 
   const pickFiles = useCallback(() => {
     void api.pickImportFiles().then(
       (paths) => void importPaths(paths),
-      (e: unknown) => note({ text: `打不开文件选择器：${errorText(e)}`, bad: true, lines: [] }),
+      (e: unknown) =>
+        note({
+          text: tr('import.pickerFailed', { detail: errorText(e) }),
+          bad: true,
+          lines: [],
+        }),
     )
-  }, [importPaths, note])
+  }, [importPaths, note, tr])
 
   /*
    * 拖拽两套适配器，落到同一段 `importPaths`：
@@ -353,19 +386,19 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       {/* 拖到这里松开就导入。遮罩不吃事件（pointer-events: none）—— drop 要落到窗口上 */}
       {dragging && modal === null && (
         <div className={s.veil} role="presentation">
-          <p className={s.veilText}>松开：把文件导进来（现在收 .toml 预设）</p>
+          <p className={s.veilText}>{tr('import.dropHint')}</p>
         </div>
       )}
 
       {modal !== null && (
         <Drawer
           open
-          title="导入：有同名文件"
-          subtitle={`${modal.rows.length} 份重名的，改好名字才能进来`}
+          title={tr('import.dupTitle')}
+          subtitle={tr('import.dupSubtitle', { count: modal.rows.length })}
           footer={
             <>
               <button type="button" className={s.ghost} onClick={cancelModal}>
-                取消导入
+                {tr('import.cancel')}
               </button>
               <button
                 type="button"
@@ -373,7 +406,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
                 disabled={busy}
                 onClick={() => void submitModal()}
               >
-                继续导入
+                {tr('import.continue')}
               </button>
             </>
           }
@@ -383,13 +416,15 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
             {modal.rows.map((row) => (
               <div key={row.source} className={s.rowCard}>
                 <p className={s.rowHead}>
-                  已存在同名文件 <b>{row.fileName}</b> —— 换个名字（原来那份不会被覆盖）
+                  {tr('import.existsPre')}
+                  <b>{row.fileName}</b>
+                  {tr('import.existsPost')}
                 </p>
                 <input
                   className={s.rowInput}
                   value={row.name}
                   spellCheck={false}
-                  aria-label={`新的文件名：${row.fileName}`}
+                  aria-label={tr('import.newNameAria', { name: row.fileName })}
                   onChange={(e) =>
                     setModal((cur) =>
                       cur === null
@@ -407,9 +442,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
                 {row.error !== null && <p className={s.rowErr}>{row.error}</p>}
               </div>
             ))}
-            <p className={s.hint}>
-              名字的规矩与重命名一致：不许空、不许带路径、后缀保持原样；改完点「继续导入」。
-            </p>
+            <p className={s.hint}>{tr('import.nameRule')}</p>
           </div>
         </Drawer>
       )}

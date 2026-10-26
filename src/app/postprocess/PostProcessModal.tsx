@@ -39,6 +39,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 
 import { api, errorText } from '../../api'
+import { t, useT } from '../../i18n'
 import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
@@ -222,7 +223,7 @@ function printTimeText(sec: number): string {
   if (!Number.isFinite(sec)) return '—'
   const h = Math.floor(sec / 3600)
   const m = Math.round((sec % 3600) / 60)
-  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`
+  return h > 0 ? t('report.dur.hMin', { h, m }) : t('report.dur.m', { n: m })
 }
 
 /**
@@ -236,9 +237,9 @@ function etaText(sinceMs: number | null, percent: number): string | null {
   const left = ((Date.now() - sinceMs) * (100 - percent)) / percent
   if (!Number.isFinite(left) || left <= 0) return null
   const sec = Math.round(left / 1000)
-  if (sec < 60) return `预计还需 ${sec} 秒`
+  if (sec < 60) return t('postproc.eta.sec', { n: sec })
   const m = Math.floor(sec / 60)
-  return `预计还需 ${m} 分 ${sec - m * 60} 秒`
+  return t('postproc.eta.minSec', { m, s: sec - m * 60 })
 }
 
 /* ---- 两组带题 facts（定稿的读数区：题名行 = 色点 + 题 + 发丝线） ---- */
@@ -258,15 +259,15 @@ interface FactGroup {
 /** 左栏「机型与切片基础」—— 六态共用（这一栏几格真机全有） */
 function baseGroup(facts: PostProcessFacts | null): FactGroup {
   return {
-    title: '机型与切片基础',
+    title: t('postproc.facts.baseTitle'),
     rows: [
-      { label: 'G-code 机型', value: facts?.gcodeMachine ?? '—' },
-      { label: '预设机型', value: facts?.presetMachine ?? '—' },
+      { label: t('postproc.facts.gcodeMachine'), value: facts?.gcodeMachine ?? '—' },
+      { label: t('postproc.facts.presetMachine'), value: facts?.presetMachine ?? '—' },
       {
         /* 喷嘴那一格：`0` 是"没有值"的哨兵（内核缺值一律 0）—— 别把它当 0.00 mm 摆出去
            （作者 2026-10-14：「它怎么就不显示那一个喷嘴层高」）。真值现在由内核
            从输入头 `; nozzle_diameter = ` 认（`pass1::adopt_nozzle_and_layer_height`）。 */
-        label: '耗材 / 喷嘴',
+        label: t('postproc.facts.filamentNozzle'),
         value:
           facts === null
             ? '—'
@@ -274,7 +275,10 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
                 facts.nozzleDiameter > 0 ? `${mmText(facts.nozzleDiameter)} mm` : '—'
               }`,
       },
-      { label: '层高', value: facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—' },
+      {
+        label: t('postproc.facts.layerHeight'),
+        value: facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—',
+      },
     ],
   }
 }
@@ -289,14 +293,14 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
 function runGroup(facts: PostProcessFacts | null): FactGroup {
   const rows: FactRow[] = [
     {
-      label: '预估打印时间',
+      label: t('postproc.facts.printTime'),
       value: facts?.slicerPrintTimeSeconds === undefined ? '—' : printTimeText(facts.slicerPrintTimeSeconds),
     },
-    { label: '文件大小', value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
-    { label: '涂胶速度', value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
-    { label: '切片软件', value: facts?.slicer ?? '—', grey: true },
+    { label: t('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
+    { label: t('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
+    { label: t('report.slicer.software'), value: facts?.slicer ?? '—', grey: true },
   ]
-  return { title: '切片与预估', rows }
+  return { title: t('postproc.facts.runTitle'), rows }
 }
 
 /** 跑完：右栏是「擦料与胶水消耗」——结果读数有哪几格就摆哪几格 */
@@ -307,24 +311,25 @@ function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null
    * 失败 / 取消时退回开场那一格（切片器自报的）—— 有就摆，比空着强 */
   const printSec = res?.printTimeSeconds ?? facts?.slicerPrintTimeSeconds
   rows.push({
-    label: '预估打印时间',
+    label: t('postproc.facts.printTime'),
     value: printSec === undefined ? '—' : printTimeText(printSec),
   })
   rows.push({
-    label: '涂胶总长',
+    label: t('report.glue.total'),
     value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
   })
   /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
   rows.push({
-    label: '处理耗时 / 大小',
-    value: `${(finished.elapsedMs / 1000).toFixed(2)} 秒 / ${
-      facts === null ? '—' : sizeText(facts.fileSizeBytes)
-    }`,
+    label: t('postproc.facts.elapsed'),
+    value: t('postproc.facts.elapsedValue', {
+      sec: (finished.elapsedMs / 1000).toFixed(2),
+      size: facts === null ? '—' : sizeText(facts.fileSizeBytes),
+    }),
   })
   /* 切片软件：跑完给带版本的完整串；失败 / 取消时退回开场那个名字（总比空着强） */
   const slicer = res?.slicer ?? facts?.slicer
-  rows.push({ label: '切片软件', value: slicer ?? '—', grey: true })
-  return { title: '擦料与胶水消耗', rows }
+  rows.push({ label: t('report.slicer.software'), value: slicer ?? '—', grey: true })
+  return { title: t('postproc.facts.doneTitle'), rows }
 }
 
 /**
@@ -351,7 +356,7 @@ function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null
  */
 function warningsLine(list: string[]): string {
   const one = summarizeNotes(list)
-  return list.length === 1 ? `警告：${one}` : `警告 ${one}`
+  return list.length === 1 ? t('postproc.warn.line1', { one }) : t('postproc.warn.lineN', { one })
 }
 
 function FactsGroups({ groups }: { groups: FactGroup[] }) {
@@ -432,12 +437,12 @@ function ProgressHero({
       onPointerCancel={press.onPointerCancel}
       onPointerLeave={press.onPointerLeave}
       onClick={press.onClick}
-      title={onDoubleClick === undefined ? undefined : '双击：回到结果'}
+      title={onDoubleClick === undefined ? undefined : t('postproc.dbl.toResult')}
     >
       <span className={s.heroNum} ref={numRef} />
       <div className={s.heroMeta}>
         <span className={s.heroStep}>{step}</span>
-        <span className={s.heroEta}>{done ? '正在收尾…' : (eta ?? '正在估算…')}</span>
+        <span className={s.heroEta}>{done ? t('postproc.settling') : (eta ?? t('report.pt.computing'))}</span>
       </div>
       {/* 进度条是定稿皮（pb1「凹槽条」：绿底上凿出来的一道槽），不是普通白条 */}
       <div className={`${s.heroBar} ${s.heroBarGroove}`}>
@@ -467,9 +472,7 @@ function ProgressHero({
  * ★★ 两边**必须逐字一致**；改文案时 `messages.toml` 与这里一起改。
  */
 function calibDoneLine(choice: 'print' | 'direct'): string {
-  return choice === 'direct'
-    ? '已去掉打印件，只保留校准路径 —— 处理完成'
-    : '打印件保留，只加了涂胶与擦料 —— 处理完成'
+  return t(choice === 'direct' ? 'postproc.calibDone.direct' : 'postproc.calibDone.print')
 }
 
 function countdownText(deadlineUnixMs: number | undefined): string | null {
@@ -479,11 +482,11 @@ function countdownText(deadlineUnixMs: number | undefined): string | null {
   }
   const left = deadlineUnixMs - Date.now()
   if (!Number.isFinite(left)) return null
-  if (left <= 0) return '正在自动终止…'
+  if (left <= 0) return t('postproc.autoStop.now')
   const sec = Math.ceil(left / 1000)
-  if (sec < 60) return `${sec} 秒后自动终止`
+  if (sec < 60) return t('postproc.autoStop.sec', { n: sec })
   const m = Math.floor(sec / 60)
-  return `${m} 分 ${sec - m * 60} 秒后自动终止`
+  return t('postproc.autoStop.minSec', { m, s: sec - m * 60 })
 }
 
 function WarnHero({ text, deadlineUnixMs }: { text: string; deadlineUnixMs?: number }) {
@@ -503,7 +506,7 @@ function WarnHero({ text, deadlineUnixMs }: { text: string; deadlineUnixMs?: num
           原来那两句"维度按预设算 / 怎么答"是内核口径，作者原话：「文案不好，什么纬度？」
         */}
         <div className={s.warnScroll}>
-          <span className={s.warnTitle}>预设与机型不匹配 · 等你决定</span>
+          <span className={s.warnTitle}>{t('postproc.ask.machineTitle')}</span>
           {/* 正文就是后端那一句问话（`question.text`）—— 不另编文案 */}
           <span className={s.warnLine}>{text}</span>
           {left !== null && <span className={s.warnHint}>{left}</span>}
@@ -550,7 +553,7 @@ function AskHero({
         </span>
         <div className={s.warnCopy}>
           <div className={s.warnScroll}>
-            <span className={s.warnTitle}>这是校准件 · 选怎么跑</span>
+            <span className={s.warnTitle}>{t('postproc.ask.calibTitle')}</span>
             <span className={s.warnLine}>{text}</span>
             {left !== null && <span className={s.warnHint}>{left}</span>}
           </div>
@@ -596,10 +599,10 @@ function MetricsStrip({
   onDoubleTap: () => void
 }) {
   const cells: Array<[string, string, boolean?]> = [
-    ['笔偏移 X', mm2(res.penX)],
-    ['笔偏移 Y', mm2(res.penY)],
-    ['笔偏移 Z', mm2(res.penZ)],
-    ['涂胶速度', speedText(res.glueSpeed), true],
+    [t('report.glue.offsetX'), mm2(res.penX)],
+    [t('report.glue.offsetY'), mm2(res.penY)],
+    [t('report.glue.offsetZ'), mm2(res.penZ)],
+    [t('report.glue.speed'), speedText(res.glueSpeed), true],
   ]
   /* 按一下弹一下（等结果时也能解压）+ 双击翻回 hero —— 见 `usePressFlash` */
   const press = usePressFlash<HTMLDivElement>(onDoubleTap)
@@ -618,7 +621,7 @@ function MetricsStrip({
       onPointerCancel={press.onPointerCancel}
       onPointerLeave={press.onPointerLeave}
       onClick={press.onClick}
-      title="双击：回到刚才的进度"
+      title={t('postproc.dbl.toProgress')}
     >
       {cells.map(([label, value, hot]) => (
         <span className={s.stripCell} key={label}>
@@ -731,6 +734,7 @@ function ResultHero({
 /* ---- 主件 ---- */
 
 export default function PostProcessModal({ view, onOpenReport }: PostProcessModalProps) {
+  const tr = useT()
   const { run, dismiss } = view
   const [busy, setBusy] = useState(false)
   /*
@@ -1124,7 +1128,11 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         <ProgressHero
           /* 收尾窗口里目标直接给 100：让条子走完那最后几个点，而不是停在 95% 被切走 */
           percent={running ? shownPercent : 100}
-          step={run.progress === null ? '准备中' : stepName(run.progress.step)}
+          step={
+            run.progress === null
+              ? tr('postproc.step.preparing')
+              : stepName(tr, run.progress.step)
+          }
           stepId={run.progress?.step ?? null}
           sizeBytes={run.facts?.fileSizeBytes ?? null}
           eta={eta}
@@ -1160,19 +1168,20 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       ) : null
     } else {
       const lines = [
-        /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」 */
-        finished.message.replace(/^已停止 —— /, ''),
+        /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」。
+           ★ 后端句子随语言走（2026-10-26）⇒ 两种语言的前缀都要剥 */
+        finished.message.replace(/^(已停止 —— |Stopped — )/, ''),
       ]
       const codes: string[] = []
-      if (finished.code !== null) codes.push(`错误码 ${finished.code}`)
-      if (finished.exitCode !== 0) codes.push(`退出码 ${finished.exitCode}`)
+      if (finished.code !== null) codes.push(tr('postproc.err.code', { code: finished.code }))
+      if (finished.exitCode !== 0) codes.push(tr('postproc.err.exit', { code: finished.exitCode }))
       /* 第 46 轮定的口径：失败**不说"停在哪一步"** —— 只说"失败了"等于让人从头猜，
        * 但那一行用户点名不要；错误码与退出码并成一行，跟切片器那个框对得上号 */
       if (codes.length > 0) lines.push(codes.join(' · '))
       lead = (
         <ResultHero
           cancelled={finished.cancelled}
-          title={finished.cancelled ? '已停止' : '处理失败'}
+          title={finished.cancelled ? tr('postproc.result.stopped') : tr('postproc.result.failed')}
           lines={lines}
         />
       )
@@ -1183,10 +1192,10 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     <Modal
       open
       size="md"
-      title={showProgress ? '后处理进度' : '后处理结果'}
+      title={showProgress ? tr('postproc.title.progress') : tr('postproc.title.result')}
       /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它。
       预览里前面加「预览 ·」—— 一眼看出这不是真跑（页脚那枚小字之外的第二处） */
-      subtitle={preview ? `预览 · ${run.gcodeName}` : run.gcodeName}
+      subtitle={preview ? tr('postproc.preview.subtitle', { name: run.gcodeName }) : run.gcodeName}
       /* 点遮罩不关（全站口径 2026-10-15；跑着的时候更是如此）—— 收起来请按 Esc 或「后台运行」 */
       /* 跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作。
          结果那几扇也不摆（第 16~17 轮定的）：收窗走页脚「关闭」那一条明路 */
@@ -1199,9 +1208,9 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
           /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
              只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
           <>
-            <span className={s.previewTag}>预览模式 · 不接真实后处理</span>
+            <span className={s.previewTag}>{tr('postproc.preview.tag')}</span>
             <Btn variant="accent" onClick={dismiss}>
-              关闭预览
+              {tr('postproc.preview.close')}
             </Btn>
           </>
         ) : offerStopAndClose ? (
@@ -1211,9 +1220,9 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
            * （强制继续 / 终止 / 停止）都已经没意义，多摆一颗只会让人以为还能继续答。
            */
           <>
-            <span className={s.previewTag}>这一趟对不上了</span>
+            <span className={s.previewTag}>{tr('postproc.mismatch.tag')}</span>
             <Btn variant="accent" onClick={stopAndClose}>
-              停止并关闭
+              {tr('postproc.stopClose')}
             </Btn>
           </>
         ) : showAsk && run.question !== null ? (
@@ -1234,12 +1243,14 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                 className={s.slotToggle}
                 onClick={() => setRelocateTab((t) => (t === 'note' ? 'facts' : 'note'))}
                 aria-label={
-                  relocateTab === 'note' ? '切换：显示原始信息' : '切换：显示挪塔说明与坐标'
+                  relocateTab === 'note'
+                    ? tr('postproc.relocate.toFacts')
+                    : tr('postproc.relocate.toNote')
                 }
-                title={relocateTab === 'note' ? '查看原始信息' : '回到挪塔说明'}
+                title={relocateTab === 'note' ? tr('postproc.relocate.toFactsTitle') : tr('postproc.relocate.toNoteTitle')}
               >
                 <InfoGlyph />
-                {relocateTab === 'note' ? '信息' : '说明'}
+                {relocateTab === 'note' ? tr('postproc.relocate.facts') : tr('postproc.relocate.note')}
               </button>
             )}
           {run.question.choices !== undefined && run.question.choices.length > 0 ? (
@@ -1290,7 +1301,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                   act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
                 }
               >
-                强制继续
+                {tr('postproc.choice.keep')}
               </Btn>
               <Btn
                 variant="accent"
@@ -1299,7 +1310,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                   act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
                 }
               >
-                终止
+                {tr('postproc.choice.stop')}
               </Btn>
             </>
           )}
@@ -1307,15 +1318,15 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         ) : running ? (
           <>
             <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
-              停止
+              {tr('postproc.stop')}
             </Btn>
             <Btn variant="accent" onClick={dismiss}>
-              后台运行
+              {tr('postproc.background')}
             </Btn>
           </>
         ) : (
           <>
-            <Btn onClick={dismiss}>关闭</Btn>
+            <Btn onClick={dismiss}>{tr('tabs.close')}</Btn>
             <Btn
               variant="accent"
               onClick={() => {
@@ -1323,7 +1334,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                 onOpenReport()
               }}
             >
-              → 查看详情
+              {tr('postproc.openReport')}
             </Btn>
           </>
         )
@@ -1390,7 +1401,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         {finished !== null &&
           finished.warnings.map((w) => (
             <p className={s.warn} key={w}>
-              警告：{w}
+              {tr('postproc.warn.item', { w })}
             </p>
           ))}
         {err !== null && <HeadNote text={err} tone="error" />}

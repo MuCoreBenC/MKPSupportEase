@@ -25,6 +25,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import SkeletonA44 from '../home/Skeleton'
 import type { AxisLimits } from '../../api/contract'
 import { AXIS_ROWS, type Axes, type Axis, type AxisView } from './calibAxes'
@@ -58,6 +59,7 @@ export default function CalibReadings({
   /** 点「原 x.xx」：这一轴整个退回已保存值（手输 + 板上点选一起清） */
   onReset?: (axis: Axis) => void
 }) {
+  const tr = useT()
   /*
    * 正在打字的那一轴 + 它的原始输入串。
    *
@@ -137,7 +139,7 @@ export default function CalibReadings({
                
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
-                原 {saved ? saved[k].toFixed(2) : '0.00'}
+                {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
               </button>
             </dt>
             <dd className={s.axisValue}>
@@ -151,7 +153,7 @@ export default function CalibReadings({
                     min={limits[k].min}
                     max={limits[k].max}
                     inputMode="decimal"
-                    aria-label={`${label}（毫米）`}
+                    aria-label={tr('calib.axisAria', { label })}
                     data-axis={k}
                     readOnly={!canType}
                     tabIndex={canType ? undefined : -1}
@@ -181,7 +183,7 @@ export default function CalibReadings({
                   <span className={s.unit}>mm</span>
                 </label>
               ) : view === 'loading' ? (
-                <SkeletonA44 label="正在取预设" />
+                <SkeletonA44 label={tr('calib.loadingPreset')} />
               ) : (
                 <span className={s.axisBlank}>—</span>
               )}

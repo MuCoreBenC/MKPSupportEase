@@ -47,14 +47,15 @@ import type { ReportExportKind, ReportExportPlan } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import { HeadNote, Modal } from '../../components/modal'
 import { useStickyState } from '../../hooks/useStickyState'
+import { useT, type StringKey } from '../../i18n'
 import { Btn } from '../ui/Controls'
 import s from './ExportModal.module.css'
 
-/** 三件套的中文说明。后端只给机器名（`kind`），**界面的话住界面这一侧** */
-const KIND_LABEL: Record<ReportExportKind, string> = {
-  original: '原始文件（改动前的备份）',
-  processed: '处理后文件',
-  meta: 'JSON 元数据',
+/** 三件套的说明（键）。后端只给机器名（`kind`），**界面的话住界面这一侧** */
+const KIND_LABEL: Record<ReportExportKind, StringKey> = {
+  original: 'report.export.kindOriginal',
+  processed: 'report.export.kindProcessed',
+  meta: 'report.export.kindMeta',
 }
 
 /** 折角的那张纸（形状与报告页详情里那套同一网格：24×24、currentColor） */
@@ -135,6 +136,7 @@ export interface ExportModalProps {
 }
 
 export default function ExportModal({ open, id, preload, onClose }: ExportModalProps) {
+  const tr = useT()
   const [plan, setPlan] = useState<ReportExportPlan | null>(null)
   const [planErr, setPlanErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -223,22 +225,22 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     <Modal
       open={open}
       size="md"
-      title="导出执行报告"
+      title={tr('report.export.title')}
       onClose={onClose}
       footer={
         exported ? (
           /* 成的那一屏只有一条出口：看完就去干活（页脚左边那句是这一态的主语） */
           <>
-            <span className={s.footNote}>已导出 {done} 个文件</span>
+            <span className={s.footNote}>{tr('report.export.done', { n: done })}</span>
             <Btn variant="accent" onClick={onClose}>
-              完成
+              {tr('report.export.finish')}
             </Btn>
           </>
         ) : (
           <>
-            <Btn onClick={onClose}>取消</Btn>
+            <Btn onClick={onClose}>{tr('report.export.cancel')}</Btn>
             <Btn variant="accent" disabled={busy || plan === null} onClick={confirm}>
-              确认导出
+              {tr('report.export.confirm')}
             </Btn>
           </>
         )
@@ -250,14 +252,18 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
             摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳。
             ★ 2026-10-19：**只留这一处** —— 下面原来还给 `planErr` 摆了一份红字，
             同一条错同一个框里出现两遍（作者看见了那句重复）。 */}
-        {planErr !== null && <HeadNote text={`导出清单读不出来：${planErr}`} tone="error" />}
+        {planErr !== null && (
+          <HeadNote text={tr('report.export.planErr', { err: planErr })} tone="error" />
+        )}
         {fail !== null && (
           <HeadNote
-            text={`${fail.what === 'export' ? '导出没成：' : '打开没成：'}${fail.text}`}
+            text={`${tr(fail.what === 'export' ? 'report.export.failExport' : 'report.export.failOpen')}${fail.text}`}
             tone="error"
           />
         )}
-        {plan === null && planErr === null && <p className={s.filling}>正在读导出清单…</p>}
+        {plan === null && planErr === null && (
+          <p className={s.filling}>{tr('report.export.loading')}</p>
+        )}
 
         {plan !== null && (
           <ul className={s.fileList}>
@@ -280,7 +286,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
                 </span>
                 <span className={s.fileMeta}>
                   <span className={s.fileName}>{f.name}</span>
-                  <span className={s.fileKind}>{KIND_LABEL[f.kind]}</span>
+                  <span className={s.fileKind}>{tr(KIND_LABEL[f.kind])}</span>
                 </span>
               </li>
             ))}
@@ -289,8 +295,9 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
 
         {plan !== null && plan.missing.length > 0 && (
           <p className={s.notFull}>
-            归档里没有{plan.missing.map((k) => `「${KIND_LABEL[k]}」`).join('、')} ——
-            它不会出现在导出清单里。
+            {tr('report.export.missing', {
+              names: plan.missing.map((k) => `「${tr(KIND_LABEL[k])}」`).join('、'),
+            })}
           </p>
         )}
 
@@ -327,7 +334,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
               data-open={exported}
               onClick={exported ? openFolder : changeDir}
             >
-              {exported ? '打开位置' : '更改位置'}
+              {exported ? tr('report.export.open') : tr('report.export.change')}
             </button>
           </div>
         )}

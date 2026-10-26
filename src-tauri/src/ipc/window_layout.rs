@@ -23,6 +23,8 @@
 //! （[`touch_geometry`]，纯内存、不碰盘、不查窗口），最后一次事件之后 400ms
 //! 由后台线程做判定与落盘（[`remember_manual_box`]）。
 
+use postprocess::diag::messages;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
@@ -81,7 +83,7 @@ fn in_silent_window() -> bool {
 
 fn main_window(app: &AppHandle) -> Result<WebviewWindow, AppError> {
     app.get_webview_window(MAIN)
-        .ok_or_else(|| AppError::internal("找不到主窗口（main）"))
+        .ok_or_else(|| AppError::internal(messages::text("ui.ipc.window_layout.162", &[])))
 }
 
 /// 窗口现在的几何，**逻辑点**。宽高取 `inner`（与 [`WebviewWindow::set_size`] 同一个口径），
@@ -266,10 +268,14 @@ fn enter_compact(app: &AppHandle) -> Result<(), AppError> {
      * 直接"放大"回 1100 宽 ⇒ 实际只剩 600）。先挪到目标左上角再改尺寸，两个方向都在
      * 屏幕内，钳不住。
      */
-    win.set_position(LogicalPosition::new(x, y))
-        .map_err(|e| AppError::internal("窄窗位置没设成").with_detail(e.to_string()))?;
-    win.set_size(LogicalSize::new(w, h))
-        .map_err(|e| AppError::internal("窄窗尺寸没设成").with_detail(e.to_string()))?;
+    win.set_position(LogicalPosition::new(x, y)).map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.window_layout.163", &[]))
+            .with_detail(e.to_string())
+    })?;
+    win.set_size(LogicalSize::new(w, h)).map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.window_layout.164", &[]))
+            .with_detail(e.to_string())
+    })?;
     if let Some(got) = read_box(&win) {
         if (got.width - w).abs() > 1.0 || (got.height - h).abs() > 1.0 {
             tracing::warn!(
@@ -294,10 +300,14 @@ fn leave_compact(app: &AppHandle) -> Result<(), AppError> {
     };
     hold_silence();
     /* 同 `enter_compact`：**先位置、后尺寸** —— 贴着右缘的窄窗直接拉大会被屏幕钳住 */
-    win.set_position(LogicalPosition::new(x, y))
-        .map_err(|e| AppError::internal("还原位置没设成").with_detail(e.to_string()))?;
-    win.set_size(LogicalSize::new(w, h))
-        .map_err(|e| AppError::internal("还原尺寸没设成").with_detail(e.to_string()))?;
+    win.set_position(LogicalPosition::new(x, y)).map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.window_layout.165", &[]))
+            .with_detail(e.to_string())
+    })?;
+    win.set_size(LogicalSize::new(w, h)).map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.window_layout.166", &[]))
+            .with_detail(e.to_string())
+    })?;
     if let Some(got) = read_box(&win) {
         if (got.width - w).abs() > 1.0 || (got.height - h).abs() > 1.0 {
             tracing::warn!(
@@ -364,8 +374,9 @@ pub async fn set_pin(app: AppHandle, pin: String, on_bbs: bool) -> Result<String
     traced("setPin", |_| {
         let root = internal_root(&app)?;
         let pref = PinPref::parse(&pin).ok_or_else(|| {
-            AppError::invalid_argument(format!(
-                "认不出的置顶档：{pin}（只能是 off / page / always）"
+            AppError::invalid_argument(messages::text(
+                "ui.ipc.window_layout.167",
+                &[("pin", &pin.to_string())],
             ))
         })?;
         runtime::app_state::set_pin(&root, pref)?;

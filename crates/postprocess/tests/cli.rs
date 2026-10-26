@@ -33,8 +33,16 @@ fn config_a1() -> PathBuf {
 }
 
 /// 跑一次 CLI。**不经管道**取退出码（`Output.status` 就是被测进程自己的）。
+/// 跑一次 CLI。
+///
+/// **语言钉死成中文**：这一组判据说的是"报错点没点名那个东西"，
+/// 下面几条断言的中文原文是**源语言的约定**（见 `messages.toml`）。不钉的话，
+/// 机器上只要有个 `LC_ALL=en` 之类的环境变量（或者哪天默认语言变了），
+/// 断言就会因为措辞换了语言而红 —— 那不是这一组要判的事。
 fn run_cli(args: &[&str]) -> Output {
     Command::new(bin())
+        .arg("--lang")
+        .arg("zh-CN")
         .args(args)
         .output()
         .expect("CLI 二进制必须能起来")

@@ -23,6 +23,8 @@
 /// **应用持久化状态（AppState）**——`run/app-state.json` 的唯一读写入口（2026-10-06
 /// 架构决策，`docs/APP-STATE.md`）：一个应用一个状态文件，整份读-改-写 + 原子替换
 pub mod app_state;
+
+use postprocess::diag::messages;
 /// **备份与恢复**（2026-10-17）：一个 zip = 这台机器的全部家当（设置 / catalog /
 /// toml / 修改历史 / 基准 / 执行归档）；**恢复 = 全量覆盖**（理由见模块头）
 pub mod backup;
@@ -101,7 +103,8 @@ pub fn load_released_catalog_bytes(
         Err(_) => {
             release::ensure_released(root)?;
             std::fs::read(&path).map_err(|e| {
-                crate::error::AppError::io("catalog 释放之后仍然读不到").with_detail(e.to_string())
+                crate::error::AppError::io(messages::text("ui.runtime.mod.416", &[]))
+                    .with_detail(e.to_string())
             })
         }
     }

@@ -11,6 +11,7 @@
  */
 
 import { useMemo } from 'react'
+import { t } from '../../i18n'
 
 interface Pt {
   x: number
@@ -395,7 +396,9 @@ export default function TowerCoreSvg({
         fontFamily={`"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif`}
         pointerEvents="none"
       >
-        塔
+        {/* 塔身上的字（2026-10-26 进字典）：中文是「塔」，英文换成一个字宽相近的字母，
+            免得一串英文把 44×44 的塔身撑满 */}
+        {t('params.tower.coreLabel')}
       </text>
     </svg>
   )

@@ -39,6 +39,8 @@
 //! 预设页一打开会同时发二十多条读，串行的话总耗时就是各条之和 —— 用户看到的正是
 //! "打开先转圈、转完才出来"。这些命令只读缓存里的 catalog，彼此没有共享可变状态。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -395,7 +397,10 @@ fn version_files_dto(
                 for r in &bundle.asset_refs {
                     let a = match catalog.asset(r) {
                         None => {
-                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id));
+                            missing.push(::postprocess::diag::messages::text(
+                                "ui.ipc.presets.why_bundle_asset",
+                                &[("id", &bundle.id), ("r", r)],
+                            ));
                             continue;
                         }
                         Some(a) => a,
@@ -752,12 +757,18 @@ fn machine_params_dto(
     machine_id: &str,
     version_id: Option<&str>,
 ) -> Result<Vec<RecipeParamDto>, AppError> {
-    let machine = catalog
-        .machine(machine_id)
-        .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?;
+    let machine = catalog.machine(machine_id).ok_or_else(|| {
+        AppError::not_found(messages::text(
+            "ui.ipc.presets.116",
+            &[("machine_id", machine_id)],
+        ))
+    })?;
     if let Some(v) = version_id {
         if !machine.versions.iter().any(|x| x.id == v) {
-            return Err(AppError::not_found(format!("{machine_id} 没有版本 {v}")));
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.117",
+                &[("machine_id", machine_id), ("v", v)],
+            )));
         }
     }
 
@@ -847,15 +858,17 @@ pub fn reveal_delivered_file(app: AppHandle, file_name: String) -> Result<(), Ap
     traced("revealDeliveredFile", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
-            return Err(AppError::not_found(format!(
-                "目录里没有这份文件：{file_name}"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.118",
+                &[("file_name", &file_name.to_string())],
             )));
         };
         let internal = internal_root(&app)?;
         let target = crate::fsx::paths::resolve_in(&internal, &file.path)?;
         if !target.is_file() {
-            return Err(AppError::not_found(format!(
-                "本机还没有 {file_name} —— 先「下载」，再来显示它"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.119",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         reveal_in_explorer(&app, &target)
@@ -872,24 +885,24 @@ pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppEr
     traced("revealSlicerFile", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
-            return Err(AppError::not_found(format!(
-                "目录里没有这份文件：{file_name}"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.120",
+                &[("file_name", &file_name.to_string())],
             )));
         };
         if file.kind != "bbs_config" {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 不是切片器配置 —— 它没有「切片器目录里那一份」"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.121",
+                &[("file_name", &file_name.to_string())],
             )));
         }
-        let dir = slicer_process_dir().ok_or_else(|| {
-            AppError::not_found(
-                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
-            )
-        })?;
+        let dir = slicer_process_dir()
+            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.122", &[])))?;
         let target = dir.join(&file.file_name);
         if !target.is_file() {
-            return Err(AppError::not_found(format!(
-                "{file_name} 还没复制进切片器目录 —— 先在行上点「复制」"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.123",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         reveal_in_explorer(&app, &target)
@@ -901,9 +914,9 @@ pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppEr
 /// 打开的是**系统**的文件管理器，不是我们的界面 —— 之后复制 / 压缩 / 发人随用户。
 fn reveal_in_explorer(app: &AppHandle, target: &std::path::Path) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt as _;
-    app.opener()
-        .reveal_item_in_dir(target)
-        .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
+    app.opener().reveal_item_in_dir(target).map_err(|e| {
+        AppError::io(messages::text("ui.ipc.presets.124", &[])).with_detail(e.to_string())
+    })
 }
 
 /* ---------- 切片器目录（复制进去才生效） ---------- */
@@ -993,36 +1006,38 @@ pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, 
     traced("copyToSlicer", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
-            return Err(AppError::not_found(format!(
-                "目录里没有这份文件：{file_name}"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.125",
+                &[("file_name", &file_name.to_string())],
             )));
         };
         if file.kind == "mkp_preset" {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.126",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         if file.kind != "bbs_config" {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 不是切片器配置，复制进切片器目录没有意义"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.127",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         let internal = internal_root(&app)?;
         let source = crate::fsx::paths::resolve_in(&internal, &file.path)?;
         if !source.is_file() {
-            return Err(AppError::not_found(format!(
-                "本机还没有 {file_name} —— 先「下载」再复制"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.128",
+                &[("file_name", &file_name.to_string())],
             )));
         }
-        let dir = slicer_process_dir().ok_or_else(|| {
-            AppError::not_found(
-                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
-            )
-        })?;
+        let dir = slicer_process_dir()
+            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.129", &[])))?;
         let target = dir.join(&file.file_name);
         let replaced = target.is_file();
-        let bytes = std::fs::read(&source)
-            .map_err(|e| AppError::io("读不出这一份的字节").with_detail(e.to_string()))?;
+        let bytes = std::fs::read(&source).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.presets.130", &[])).with_detail(e.to_string())
+        })?;
         /* 原子替换：同目录临时文件 → rename（切片器正开着也不会读到半个） */
         crate::fsx::atomic::atomic_write(&target, &bytes)?;
         tracing::info!(

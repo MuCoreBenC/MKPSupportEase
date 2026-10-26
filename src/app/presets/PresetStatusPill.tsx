@@ -70,6 +70,7 @@
  */
 
 import { useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import { FieldPopover } from '../../components/field'
 import type { ActivePreset, Machine } from '../../api'
 import s from './PresetStatusPill.module.css'
@@ -217,12 +218,13 @@ interface FilterProps {
  * 筛上了（不是「全部机型」）漏斗转绿：筛选在生效这件事要看得见。
  */
 export function PresetMachineFilter({ machines, machineId, onPick, prefix }: FilterProps) {
+  const tr = useT()
   return (
     <PresetFilter
       prefix={prefix}
-      allText="全部"
-      allMenuText="全部机型"
-      allMeta={`${machines.length} 台`}
+      allText={tr('presets.filter.all')}
+      allMenuText={tr('presets.filter.allMachines')}
+      allMeta={tr('presets.filter.machines', { count: machines.length })}
       options={machines.map((m) => ({ value: m.id, label: m.display, meta: m.id }))}
       value={machineId}
       onPick={onPick}
@@ -262,6 +264,7 @@ interface AxisGroupProps {
  * 喷嘴与层高是一对 —— 挑完喷嘴，层高那一组立刻按新喷嘴重算谁可点，接着挑，连选是常态。
  */
 function AxisGroup({ label, values, enabled, value, onPick }: AxisGroupProps) {
+  const tr = useT()
   return (
     <div className={s.axisGroup}>
       <span className={s.axisLabel}>{label}</span>
@@ -272,7 +275,7 @@ function AxisGroup({ label, values, enabled, value, onPick }: AxisGroupProps) {
           data-on={value === ''}
           onClick={() => onPick('')}
         >
-          全部
+          {tr('presets.filter.all')}
         </button>
         {values.map((v) => {
           /* 灰态：这一档当前喷嘴没有 —— 留在原地不给点（见 `enabled` 的说明） */
@@ -286,7 +289,7 @@ function AxisGroup({ label, values, enabled, value, onPick }: AxisGroupProps) {
               data-off={off}
               disabled={off}
               /* 灰一个项不说原因，用户只会以为坏了 —— 悬停给一句人话 */
-              title={off ? `当前喷嘴没有「${label} ${v}」这一档` : undefined}
+              title={off ? tr('presets.filter.chipOff', { label, value: v }) : undefined}
               onClick={() => onPick(v)}
             >
               {v}
@@ -337,6 +340,7 @@ export function PresetSlicerPill({
   layer,
   onPickLayer,
 }: SlicerPillProps) {
+  const tr = useT()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const filtered = nozzle !== '' || layer !== ''
@@ -361,14 +365,17 @@ export function PresetSlicerPill({
         aria-haspopup="true"
         aria-expanded={open}
         /* 窄窗里左拍的值会被省略号吃掉，悬停看全 */
-        title={`喷嘴 ${nozzle === '' ? '全部' : nozzle} · 层高 ${layer === '' ? '全部' : layer}`}
+        title={tr('presets.filter.aria', {
+          nozzle: nozzle === '' ? tr('presets.filter.all') : nozzle,
+          layer: layer === '' ? tr('presets.filter.all') : layer,
+        })}
         onClick={() => setOpen((v) => !v)}
       >
         <FunnelIcon />
         <span className={s.axisText}>
-          {axisItem('喷嘴', nozzle)}
+          {axisItem(tr('presets.filter.nozzle'), nozzle)}
           <i className={s.sep} aria-hidden />
-          {axisItem('层高', layer)}
+          {axisItem(tr('presets.filter.layer'), layer)}
         </span>
         <i className={s.caret} aria-hidden />
       </button>
@@ -377,10 +384,15 @@ export function PresetSlicerPill({
       {open && (
         <FieldPopover anchor={triggerRef.current} align="start" onClose={() => setOpen(false)}>
           <div className={s.axisPanel}>
-            <AxisGroup label="喷嘴" values={nozzles} value={nozzle} onPick={onPickNozzle} />
+            <AxisGroup
+              label={tr('presets.filter.nozzle')}
+              values={nozzles}
+              value={nozzle}
+              onPick={onPickNozzle}
+            />
             {/* 层高画全集、按当前喷嘴给「能点的子集」—— 别的灰着不消失（见 AxisGroup 的 enabled） */}
             <AxisGroup
-              label="层高"
+              label={tr('presets.filter.layer')}
               values={layers}
               enabled={layerOptions}
               value={layer}
@@ -415,6 +427,7 @@ export default function PresetStatusPill({
   machineId,
   onPick,
 }: Props) {
+  const tr = useT()
   return (
     <span className={s.pill} data-empty={applied === null}>
       {applied === null ? (
@@ -425,14 +438,14 @@ export default function PresetStatusPill({
           data-empty="true"
         >
           <i className={s.dotOff} aria-hidden />
-          还没有使用任何预设
+          {tr('presets.filter.noneApplied')}
         </span>
       ) : (
         <button
           type="button"
           className={s.left}
           /* 名字在窄窗里会被省略号吃掉 —— 悬停看全名；「点击定位」这件事也在这句话里 */
-          title={`点击定位：${appliedFileName}`}
+          title={tr('presets.filter.locate', { name: appliedFileName })}
           onClick={onLocate}
         >
           <i className={s.dot} aria-hidden />

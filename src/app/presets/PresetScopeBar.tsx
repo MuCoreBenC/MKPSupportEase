@@ -35,6 +35,7 @@
  * 都得自己补；原生 radio 白送这些，只需要把圆点藏掉、把 label 画成胶囊。
  */
 
+import { useT } from '../../i18n'
 import {
   KIND_AXIS_TEXT,
   SCOPE_AXIS_TEXT,
@@ -70,6 +71,7 @@ function SegText({ text }: { text: string }) {
 }
 
 export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) {
+  const tr = useT()
   return (
     <>
       {/*
@@ -78,7 +80,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * 就是那条分界。尺码同级（都 32px）：作者「让 MKP配置/切片器配置 变小，
        * 跟本地/云端差不多高」，原本 38px 的那一级退回。
        */}
-      <span className={s.seg} role="radiogroup" aria-label="文件类型">
+      <span className={s.seg} role="radiogroup" aria-label={tr('presets.tree.aria.kind')}>
         {/* eslint-disable no-restricted-syntax -- 分段控件的就地例外：原生 radio 只作语义壳（分组 / 方向键 / 读屏），圆点由 `.radio` 刻意藏起来，用户看到的是两块文字底片、不是"勾和框"，不在「统一勾和框」那一刀的范围内 */}
         {KINDS.map((k) => (
           <label key={k} className={s.opt} data-on={k === kind}>
@@ -90,7 +92,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={k === kind}
               onChange={() => onKind(k)}
             />
-            <SegText text={KIND_AXIS_TEXT[k]} />
+            <SegText text={tr(KIND_AXIS_TEXT[k])} />
           </label>
         ))}
         {/* eslint-enable no-restricted-syntax */}
@@ -107,7 +109,11 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * 2026-10-10：切片器的机型筛选**搬去筛选区**（不再夹在这两条分段中间）——
        * 第一排从此两档一致（类型 / 位置(右) / 搜索），窄窗不再把搜索挤出第一排。
        */}
-      <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
+      <span
+        className={`${s.seg} ${s.segPush}`}
+        role="radiogroup"
+        aria-label={tr('presets.tree.aria.scope')}
+      >
         {/* eslint-disable no-restricted-syntax -- 同上：分段控件，原生 radio 只作语义壳（圆点被 `.radio` 藏起来） */}
         {SCOPES.map((sc) => (
           <label
@@ -123,7 +129,7 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={sc === scope}
               onChange={() => onScope(sc)}
             />
-            <SegText text={SCOPE_AXIS_TEXT[sc]} />
+            <SegText text={tr(SCOPE_AXIS_TEXT[sc])} />
           </label>
         ))}
         {/* eslint-enable no-restricted-syntax */}

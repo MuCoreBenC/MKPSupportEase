@@ -46,6 +46,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import Icon from '../Icon'
 import { useFieldLayer } from '../field'
+import { useT } from '../../i18n'
 import { isSeparator } from './types'
 import type { ContextMenuEntry, ContextMenuItem, ContextMenuPoint } from './types'
 import s from './ContextMenu.module.css'
@@ -86,6 +87,7 @@ function scaleIcon(row: HTMLElement | null, to: number): void {
 }
 
 export default function ContextMenu({ at, entries, onClose }: Props) {
+  const tr = useT()
   const layer = useFieldLayer()
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ left: number; top: number } | null>(null)
@@ -201,7 +203,7 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
     >
       {/* 一个能点的都没有时说一句，别给一个空框 */}
       {enabled.length === 0 && items.length > 0 && (
-        <p className={s.none}>这一行没有可用的操作</p>
+        <p className={s.none}>{tr('menu.noActions')}</p>
       )}
       <ul className={s.list} role="menu">
         {entries.map((entry, i) =>

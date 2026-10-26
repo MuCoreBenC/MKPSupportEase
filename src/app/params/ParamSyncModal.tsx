@@ -37,6 +37,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react'
+import { useT, type StringKey } from '../../i18n'
 import { Modal } from '../../components/modal'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：行勾 / 全选那只原生绿勾换成墨色，
    半选（`indeterminate`）也由它现设 —— 见它头注释 */
@@ -61,11 +62,11 @@ const NEVER_PRESET_KEYS: readonly string[] = [
 ]
 
 /** 这一组的小标题（单独分组排末尾，让人一眼看出它们为什么要分开） */
-const NEVER_GROUP_LABEL = '机器自己的数（不替你勾）'
+const NEVER_GROUP_LABEL: StringKey = 'params.sync.neverGroup'
 /** 「没冲突」那一组的小标题 —— 排最上，默认勾上 */
-const CLEAN_GROUP_LABEL = '没冲突 —— 云端改了、你没动过'
+const CLEAN_GROUP_LABEL: StringKey = 'params.sync.cleanGroup'
 /** 「有冲突」那一组的小标题 —— 排中间，必须自己选 */
-const CONFLICT_GROUP_LABEL = '有冲突 —— 你也改过这一项，选一边'
+const CONFLICT_GROUP_LABEL: StringKey = 'params.sync.conflictGroup'
 
 interface Props {
   open: boolean
@@ -107,14 +108,14 @@ function neverPreset(key: string): boolean {
  */
 function groupOf(pending: ParamSyncEntry[]): {
   key: string
-  label: string
+  label: StringKey
   items: ParamSyncEntry[]
 }[] {
   const machine = pending.filter((e) => neverPreset(e.key))
   const rest = pending.filter((e) => !neverPreset(e.key))
   const clean = rest.filter((e) => !e.conflict)
   const conflict = rest.filter((e) => e.conflict)
-  const groups: { key: string; label: string; items: ParamSyncEntry[] }[] = []
+  const groups: { key: string; label: StringKey; items: ParamSyncEntry[] }[] = []
   if (clean.length > 0) groups.push({ key: 'clean', label: CLEAN_GROUP_LABEL, items: clean })
   if (conflict.length > 0) {
     groups.push({ key: 'conflict', label: CONFLICT_GROUP_LABEL, items: conflict })
@@ -133,6 +134,7 @@ export default function ParamSyncModal({
   onDecide,
   onClose,
 }: Props) {
+  const tr = useT()
   const pending = useMemo(() => (sync?.entries ?? []).filter((e) => e.pending), [sync])
   const groups = useMemo(() => groupOf(pending), [pending])
   const [checked, setChecked] = useState<Record<string, boolean>>({})
@@ -205,7 +207,7 @@ export default function ParamSyncModal({
   return (
     <Modal
       open={open}
-      title="选择要更新的参数"
+      title={tr('params.sync.title')}
       subtitle={
         /*
          * 2026-10-13 口径：只有「本地 / 云端」（作者：「没有我的、没有官方这种说法」——
@@ -217,8 +219,11 @@ export default function ParamSyncModal({
          *   「哪一版 + 改了几项」，一行说得完。
          */
         sync === null
-          ? '正在读云端更新账…'
-          : `云端 ${sync.currentReleaseTime ?? '新版'} · ${all} 项有改动`
+          ? tr('params.sync.reading')
+          : tr('params.sync.summary', {
+              release: sync.currentReleaseTime ?? tr('params.sync.newRelease'),
+              count: all,
+            })
       }
       /*
        * **`md`（480px）**：这一屏一行就三项，`lg` 的 680px 太横（2026-10-20 作者：
@@ -231,7 +236,7 @@ export default function ParamSyncModal({
       boxClass={s.syncBox}
       host={host}
       closeOnScrim={false}
-      closeTitle="关掉（一项都还没处理，云端更新仍然等着）"
+      closeTitle={tr('params.sync.closeTitle')}
       onClose={onClose}
       footer={
         <>
@@ -240,36 +245,34 @@ export default function ParamSyncModal({
            * 「暂不修改」是什么意思、0 项应用会发生什么，都写在这里 ——
            * 不再靠页面底部那条一次性 toast（关了就看不到了）。
            */}
-          <span className={s.hint}>{hint ?? '勾上的采用、没勾的保持 —— 点「保存」才写进这份文件'}</span>
+          <span className={s.hint}>{hint ?? tr('params.sync.hint')}</span>
           <button type="button" className={s.ghost} onClick={onClose}>
-            暂不修改
+            {tr('params.sync.later')}
           </button>
           <button type="button" className={s.primary} disabled={fetching} onClick={confirm}>
-            应用这 {chosen} 项
+            {tr('params.sync.apply', { count: chosen })}
           </button>
         </>
       }
     >
       {fetching ? (
-        <p className={s.empty}>正在取回云端这一版 —— 拿到才知道改了哪几项。</p>
+        <p className={s.empty}>{tr('params.sync.loading')}</p>
       ) : all === 0 ? (
-        <p className={s.empty}>
-          这一版没有要改值的参数（云端只改了注释 / 新增字段）—— 关掉这一屏就行。
-        </p>
+        <p className={s.empty}>{tr('params.sync.nothing')}</p>
       ) : (
         <>
           <div className={s.selectbar}>
             <Check
-              ariaLabel="全选"
+              ariaLabel={tr('params.sync.selectAll')}
               className={s.checkLabel}
               checked={selectable > 0 && cleanChosen === selectable}
               indeterminate={cleanChosen > 0 && cleanChosen < selectable}
               onChange={toggleAll}
             >
-              全选
+              {tr('params.sync.selectAll')}
             </Check>
             <span className={s.selHint}>
-              已选 {chosen} / {all} 项
+              {tr('params.sync.chosen', { chosen, all })}
             </span>
           </div>
 
@@ -278,7 +281,7 @@ export default function ParamSyncModal({
             {groups.map((g) => (
               <div key={g.key} className={s.group}>
                 <div className={s.groupLabel} data-group={g.key}>
-                  {g.label}
+                  {tr(g.label)}
                 </div>
                 <div className={s.rows}>
                   {g.items.map((e) => {
@@ -288,7 +291,7 @@ export default function ParamSyncModal({
                     const diff =
                       e.baselineOld !== null && e.cloudNew !== null
                         ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.cloudNew)}`
-                        : '云端这一项的值还没拿到'
+                        : tr('params.sync.unknownCloud')
                     return (
                       <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
                         <Check

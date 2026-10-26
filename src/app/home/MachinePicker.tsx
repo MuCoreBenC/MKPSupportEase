@@ -15,6 +15,7 @@
 
 import { useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
+import { useT } from '../../i18n'
 import { Badge } from '../ui/Controls'
 import { useDevDefaults } from './devDefaults'
 import s from './MachinePicker.module.css'
@@ -69,6 +70,7 @@ function Group({
    *  展开与否是这一组自己的事，父级不需要知道 */
   collapsible?: boolean
 }) {
+  const tr = useT()
   const [expanded, setExpanded] = useState(false)
 
   /* 没选之前折起来等于什么都看不到，所以「选过」是折叠的前提。
@@ -91,7 +93,7 @@ function Group({
               className={s.option}
               data-on={picked}
               aria-pressed={picked}
-              title={picked ? '再点一次取消选择' : undefined}
+              title={picked ? tr('home.picker.deselect') : undefined}
               onClick={() => onPick(o.id)}
             >
               <span className={s.optionLabel}>{o.label}</span>
@@ -109,7 +111,9 @@ function Group({
             aria-expanded={expanded}
             onClick={() => setExpanded((v) => !v)}
           >
-            {expanded ? '收起' : `其余 ${items.length - 1} 项`}
+            {expanded
+              ? tr('home.picker.collapse')
+              : tr('home.picker.rest', { count: items.length - 1 })}
           </button>
         )}
       </div>
@@ -129,6 +133,7 @@ export default function MachinePicker({
   // 可见性是纯派生值：三行都常驻在 DOM 里、位置由布局定死，切的只有 data-on。
   // 所以不需要任何 state / ref 去记「该给哪一组播动画」—— 过渡由 CSS transition 接管，
   // 外部（HeroFade 换图）引发的额外重渲染算出同一个 data-on，什么都不会发生。
+  const tr = useT()
   const { fadeMs } = useDevDefaults()
   const vars = { '--fade-ms': `${fadeMs}ms` } as CSSProperties
 
@@ -139,7 +144,7 @@ export default function MachinePicker({
       {/* 品牌这一组不写说明。原来是「目前仅拓竹」—— 那是开发状态的说法，
           而且下面的选项本来就写着品牌名，再补一句限定词只是在强调「还没做完」 */}
       <Group
-        title="品牌"
+        title={tr('home.picker.brand')}
         items={brands}
         value={sel.brand}
         on
@@ -147,8 +152,8 @@ export default function MachinePicker({
       />
 
       <Group
-        title="机型"
-        hint="决定校准板尺寸"
+        title={tr('home.picker.model')}
+        hint={tr('home.picker.modelHint')}
         items={models}
         value={sel.model}
         on={Boolean(sel.brand)}
@@ -157,8 +162,8 @@ export default function MachinePicker({
       />
 
       <Group
-        title="打印件版本"
-        hint="对应不同预设文件"
+        title={tr('home.picker.variant')}
+        hint={tr('home.picker.variantHint')}
         items={variants}
         value={sel.variant}
         on={Boolean(sel.model)}

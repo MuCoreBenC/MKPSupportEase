@@ -228,7 +228,7 @@ fn commit_one(user_root: &Path, item: &ImportItem) -> ImportOutcome {
     if target.exists() {
         return fail(
             name.clone(),
-            format!("已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"),
+            ::postprocess::diag::messages::text("ui.runtime.local.taken_name", &[("name", &name)]),
         );
     }
     let source = PathBuf::from(&item.source);
@@ -237,10 +237,24 @@ fn commit_one(user_root: &Path, item: &ImportItem) -> ImportOutcome {
     }
     let bytes = match std::fs::read(&source) {
         Ok(bytes) => bytes,
-        Err(e) => return fail(name, format!("源文件读不出来：{e}")),
+        Err(e) => {
+            return fail(
+                name,
+                ::postprocess::diag::messages::text(
+                    "ui.runtime.import.why_unreadable",
+                    &[("detail", &e.to_string())],
+                ),
+            )
+        }
     };
     if let Err(e) = crate::fsx::atomic::atomic_write(&target, &bytes) {
-        return fail(name, format!("写不进用户根：{}", e.message));
+        return fail(
+            name,
+            ::postprocess::diag::messages::text(
+                "ui.runtime.import.why_write",
+                &[("detail", &e.message)],
+            ),
+        );
     }
     ImportOutcome {
         source: item.source.clone(),

@@ -32,6 +32,7 @@
 import { useState } from 'react'
 
 import { api, errorText } from '../../api'
+import { useT } from '../../i18n'
 import { HeadNote, Modal } from '../../components/modal'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：原来是原生绿勾，换成全站同一套墨色 */
 import { Check } from '../../components/check'
@@ -45,6 +46,7 @@ export default function ResliceNotice({
   open: boolean
   onClose: () => void
 }) {
+  const tr = useT()
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   /* 这一趟摆出去成功了没有 —— 只用来给一句回执，不关这一屏 */
@@ -68,7 +70,7 @@ export default function ResliceNotice({
         }
         /* 指不了：把后端的那句人话原样显示，不画箭头 */
         setShown(false)
-        setErr(t.reason ?? '这一台上指不了引导')
+        setErr(t.reason ?? tr('guide.cannotShow'))
       })
       .catch((e: unknown) => {
         setShown(false)
@@ -85,29 +87,32 @@ export default function ResliceNotice({
     <Modal
       open={open}
       size="sm"
-      title="参数已保存"
-      subtitle="切片器不会自己知道参数变了 —— 重新切片后才生效"
+      title={tr('guide.savedTitle')}
+      subtitle={tr('guide.savedSubtitle')}
       /* 收屏工具提示：是否再提示已交给下面那个共用开关决定，不再写死"还会再问" */
-      closeTitle="关闭（以后是否再提示，看下面的「不再显示」或设置页）"
+      closeTitle={tr('guide.closeTitle')}
       onClose={onClose}
       footer={
         <>
           <button type="button" className={s.ghost} onClick={onClose} disabled={busy}>
-            关闭
+            {tr('guide.close')}
           </button>
           <button type="button" className={s.primary} onClick={view} disabled={busy}>
-            {shown ? '重新引导' : '查看引导'}
+            {shown ? tr('guide.reguide') : tr('guide.view')}
           </button>
         </>
       }
     >
       <div className={s.body}>
         <p className={s.text}>
-          请在 Bambu Studio 中<b>重新切片</b>，以生成应用最新参数的 G-code。
+          {tr('guide.body1.pre')}
+          <b>{tr('guide.body1.strong')}</b>
+          {tr('guide.body1.post')}
         </p>
         <p className={s.text}>
-          如果点击「切片」后没有重新切片，或「切片」按钮呈灰色无法点击，请先
-          <b>切换到另一块打印板，再选回原来的打印板</b>，然后重新切片。
+          {tr('guide.body2.pre')}
+          <b>{tr('guide.body2.strong')}</b>
+          {tr('guide.body2.post')}
         </p>
         {/*
          * 回执：引导卡片已经摆到切片器那边了。★ 提示用户"切片器这会儿在最前"，
@@ -118,7 +123,7 @@ export default function ResliceNotice({
          *   作者定死「所有提示都用同一套组件、同一套逻辑复用在标题后面」。
          */}
         {shown && err === null && (
-          <HeadNote text="引导卡片已摆到切片器那边（它这会儿在最前）。" tone="ok" />
+          <HeadNote text={tr('guide.shown')} tone="ok" />
         )}
         {err !== null && <HeadNote text={err} tone="error" />}
         {/*
@@ -132,7 +137,7 @@ export default function ResliceNotice({
           onChange={(v) => setShowGuides(!v)}
           disabled={busy}
         >
-          以后不再显示（可在「设置 → 引导」里重新打开）
+          {tr('guide.dontShow')}
         </Check>
       </div>
     </Modal>

@@ -25,6 +25,7 @@ import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
+import { useT, type StringKey } from '../../i18n'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
@@ -57,8 +58,8 @@ import { pickArt } from './heroArt'
 import { useArtLayers } from './useArtLayers'
 import {
   AXIS_ROWS,
-  Z_LEGEND,
-  Z_TIP,
+  Z_LEGEND_KEY,
+  Z_TIP_KEY,
   axisText,
   xyHitLabel,
   zHitLabel,
@@ -118,6 +119,8 @@ interface PageHomeProps {
 }
 
 export default function PageHome({ density }: PageHomeProps) {
+  /* 这一页所有用户能读到的字都走字典（2026-10-26） */
+  const tr = useT()
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
@@ -341,7 +344,7 @@ export default function PageHome({ density }: PageHomeProps) {
     snap: 320,
     min: 240,
     max: 560,
-    label: '预设列表',
+    label: tr('home.picker.list'),
   })
 
   /* 抽屉每一项自己的文件名（T11）—— 与「校准」tab 同一颗查询 */
@@ -562,19 +565,23 @@ export default function PageHome({ density }: PageHomeProps) {
    * 全站这件事的动词是「使用」（抽屉里那颗也叫「使用」、行上的状态叫「正在使用」），
    * 这里原来叫「应用」，同一个动作两个词。
    */
-  const actionLabel = applying
-    ? '使用中…'
+  /*
+   * ★ 存的是**字典键**而不是句子（2026-10-26）：下面 `actionText` 要拿它跟
+   *   「正在使用」那一档比，比句子会在换语言时失效 —— 比键永远稳。
+   */
+  const actionLabelKey: StringKey = applying
+    ? 'home.action.applying'
     : comboApplied
-      ? '正在使用'
+      ? 'home.action.inUse'
       : bundleState.kind === 'unknown'
         ? bundle.problems.length > 0
-          ? '套餐未配置'
-          : '读取中…'
+          ? 'home.action.planMissing'
+          : 'home.action.loading'
         : bundleState.kind === 'missing'
-          ? '下载并使用'
+          ? 'home.action.downloadUse'
           : bundleState.kind === 'drift'
-            ? '更新并使用'
-            : '使用'
+            ? 'home.action.updateUse'
+            : 'home.action.use'
   /* 主按钮的可用性在下面按「选中的那份文件」算（`actionOff`）——
      combo 级的旧判据（`comboApplied || …`）不再直接使用，留着这一行只会误导。 */
 
@@ -597,10 +604,10 @@ export default function PageHome({ density }: PageHomeProps) {
      */
     const pendingNote =
       bundleState.kind === 'ready'
-        ? '这几份本机都有了 —— 直接设成正在使用的那一份'
+        ? tr('home.note.ready')
         : bundleState.kind === 'drift'
-          ? '本机这份和云端对不上 —— 重新下载，再设成正在使用的那一份'
-          : '这份本机还没有 —— 先下载，再设成正在使用的那一份'
+          ? tr('home.note.drift')
+          : tr('home.note.missing')
     setScriptNote(pendingNote)
     try {
       if (todo.length > 0) {
@@ -609,7 +616,9 @@ export default function PageHome({ density }: PageHomeProps) {
         const failed = outcomes.filter((o) => !o.ok)
         if (failed.length > 0) {
           throw new Error(
-            `套餐没下全，这次不使用：${failed.map((o) => `${o.fileName}（${o.message}）`).join('；')}`,
+            tr('home.note.partial', {
+              detail: failed.map((o) => `${o.fileName} (${o.message})`).join('; '),
+            }),
           )
         }
       }
@@ -638,10 +647,10 @@ export default function PageHome({ density }: PageHomeProps) {
       /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
       setScriptNote(
         bundleState.kind === 'ready'
-          ? '已使用：这份现在就是正在使用的那一份'
+          ? tr('home.note.used')
           : bundleState.kind === 'drift'
-            ? '已更新并使用：这份现在就是正在使用的那一份'
-            : '已下载并使用：这份现在就是正在使用的那一份',
+            ? tr('home.note.updated')
+            : tr('home.note.downloaded'),
       )
     } catch (e) {
       const msg = errorText(e)
@@ -654,7 +663,7 @@ export default function PageHome({ density }: PageHomeProps) {
          BBS 交付面）也收得到 —— 成了一半也是变了，所以放在 finally 里 */
       deliveryMutated()
     }
-  }, [applying, bundleState, presetFile])
+  }, [applying, bundleState, presetFile, tr])
 
   /*
    * **用我选中的那份副本**（2026-10-17 晚）。
@@ -669,7 +678,7 @@ export default function PageHome({ density }: PageHomeProps) {
     try {
       await api.applyActivePreset(pickedCopy.fileName, 'local', pickedCopy.path)
       appStateMutated()
-      setScriptNote('已使用：这份现在就是正在使用的那一份')
+      setScriptNote(tr('home.note.used'))
     } catch (e) {
       const msg = errorText(e)
       setApplyError(msg)
@@ -677,7 +686,7 @@ export default function PageHome({ density }: PageHomeProps) {
     } finally {
       setApplying(false)
     }
-  }, [applying, pickedCopy])
+  }, [applying, pickedCopy, tr])
 
   /*
    * 那颗主按钮的**目标**与**文字**（2026-10-17 晚，两改）：
@@ -688,16 +697,17 @@ export default function PageHome({ density }: PageHomeProps) {
    *   显示「正在使用」并把按钮禁掉（作者截图：「默认那个也要可以应用呀」）。
    */
   const targetActive = pickedCopy !== null ? pickedActive : defaultActive
-  const actionText = applying
-    ? '使用中…'
+  const actionTextKey: StringKey = applying
+    ? 'home.action.applying'
     : targetActive
-      ? '正在使用'
+      ? 'home.action.inUse'
       : pickedCopy !== null
-        ? '使用'
-        : /* 默认那份没在用：`actionLabel` 里那句"正在使用"是 combo 级的，这里换成"使用" */
-          actionLabel === '正在使用'
-          ? '使用'
-          : actionLabel
+        ? 'home.action.use'
+        : /* 默认那份没在用：`actionLabelKey` 里那句"正在使用"是 combo 级的，这里换成"使用" */
+          actionLabelKey === 'home.action.inUse'
+          ? 'home.action.use'
+          : actionLabelKey
+  const actionText = tr(actionTextKey)
   const actionOff =
     applying || targetActive || (pickedCopy === null && bundleState.kind === 'unknown')
   const runAction = pickedCopy === null ? applyCurrent : applyPickedCopy
@@ -750,10 +760,10 @@ export default function PageHome({ density }: PageHomeProps) {
    */
   const loadCommand = useCallback(async (): Promise<PostProcessCommand> => {
     if (sel.model === null || sel.variant === null) {
-      return { ready: false, reason: '先选齐机型与版本，才有可指的预设' }
+      return { ready: false, reason: tr('home.reason.pickFirst') }
     }
     return postProcessCommand(sel.model, sel.variant)
-  }, [sel.model, sel.variant])
+  }, [sel.model, sel.variant, tr])
 
   /*
    * ★ 2026-10-13（作者：「可以加一下那个复制的……他要复制的是那个后处理脚本呀，就跟首页的
@@ -795,7 +805,7 @@ export default function PageHome({ density }: PageHomeProps) {
       (cmd) => {
         if (!cmd.ready || cmd.command === undefined) {
           setScriptCopied(false)
-          setScriptNote(cmd.reason ?? '这条命令现在还抄不了')
+          setScriptNote(cmd.reason ?? tr('home.script.notReady'))
           return
         }
         void navigator.clipboard.writeText(cmd.command).then(
@@ -816,7 +826,7 @@ export default function PageHome({ density }: PageHomeProps) {
         setScriptNote(errorText(e))
       },
     )
-  }, [loadCommand])
+  }, [loadCommand, tr])
 
   /**
    * 四步共用那颗「复制脚本」（住 navs 左侧那一组 —— 作者：「它应该放到左侧吧」）。
@@ -831,12 +841,12 @@ export default function PageHome({ density }: PageHomeProps) {
    */
   const scriptAction = useMemo(
     () => ({
-      label: scriptCopied ? '已复制' : '复制脚本',
+      label: scriptCopied ? tr('home.script.copied') : tr('home.script.copy'),
       on: ready && presetReady && comboApplied,
-      title: '把这一份的后处理脚本复制到剪贴板',
+      title: tr('home.script.copyTitle'),
       onClick: copyScript,
     }),
-    [comboApplied, copyScript, presetReady, ready, scriptCopied],
+    [comboApplied, copyScript, presetReady, ready, scriptCopied, tr],
   )
 
   /*
@@ -844,7 +854,8 @@ export default function PageHome({ density }: PageHomeProps) {
    * 这些相关的都去掉，那是以前的旧版才那么设计的」。命中底账就说「正在使用」，
    * 不再分来源（云端底稿 / 自己那份），这句只回答"是不是正在用的那一份"。
    */
-  const inUseNote = activeForSel === null || !presetReady ? undefined : '正在使用'
+  const inUseNote =
+    activeForSel === null || !presetReady ? undefined : tr('home.action.inUse')
   /* picker sheet 那块卡：名字 / 路径换成底账那份，其余（三轴数值等）保持原样。
      useMemo 包一层：sheets 那张 useMemo 拿它当依赖，引用得稳 */
   const presetView = useMemo(
@@ -861,8 +872,9 @@ export default function PageHome({ density }: PageHomeProps) {
         : preset,
     [activeForSel, presetReady, preset],
   )
-  const entryLabel = modelName ? '选择版本' : '选择机型'
-  const artAlt = [brandName, modelName].filter(Boolean).join(' ') || '未选择机型'
+  const entryLabel = modelName ? tr('home.entry.pickVersion') : tr('home.entry.pickMachine')
+  const artAlt =
+    [brandName, modelName].filter(Boolean).join(' ') || tr('home.entry.noMachine')
 
   const sheets: Sheet[] = useMemo(
     () => [
@@ -873,7 +885,11 @@ export default function PageHome({ density }: PageHomeProps) {
              写两遍是复读。去掉之后 data-bare-top 生效，整块内容还往上抬了一截 */
           <CardFrame
             navs={[
-              { label: '更换机型', arrow: true, onClick: () => deckRef.current?.jumpTo(1) },
+              {
+                label: tr('home.entry.change'),
+                arrow: true,
+                onClick: () => deckRef.current?.jumpTo(1),
+              },
             ]}
           >
             <div className={p.info} data-scroll>
@@ -884,7 +900,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   type="button"
                   className={p.variant}
                   onClick={() => deckRef.current?.jumpTo(1)}
-                  title="点击更换品牌 / 机型 / 版本"
+                  title={tr('home.entry.changeTitle')}
                 >
                   {variantName ?? entryLabel}
                   <span aria-hidden="true">›</span>
@@ -899,7 +915,11 @@ export default function PageHome({ density }: PageHomeProps) {
                         说（本程序自己 + 预设真在盘上），点它才向后端现要命令。
                         抄不了时的原因由**页面底部那颗气泡**说 —— 不给 `onNote` 的话，
                         气泡就永远出不来（`CopyAction` 自己不再渲染任何提示，2026-10-13） */}
-                    <CopyAction label="复制后处理脚本" load={loadCommand} onNote={setScriptNote} />
+                    <CopyAction
+                      label={tr('home.copy.action')}
+                      load={loadCommand}
+                      onNote={setScriptNote}
+                    />
                   </>
                 )}
               </div>
@@ -907,10 +927,10 @@ export default function PageHome({ density }: PageHomeProps) {
               {ready && (
                 <Rows
                   items={[
-                    ['X 偏移', axisText(saved, 'x')],
-                    ['Y 偏移', axisText(saved, 'y')],
-                    ['Z 偏移', axisText(saved, 'z')],
-                    ['涂胶速度', presetInfo ? `${presetInfo.speed} mm/s` : '—'],
+                    [tr('calib.axis.x'), axisText(saved, 'x')],
+                    [tr('calib.axis.y'), axisText(saved, 'y')],
+                    [tr('calib.axis.z'), axisText(saved, 'z')],
+                    [tr('home.rows.glueSpeed'), presetInfo ? `${presetInfo.speed} mm/s` : '—'],
                   ]}
                 />
               )}
@@ -929,15 +949,15 @@ export default function PageHome({ density }: PageHomeProps) {
             <div className={p.welcome} data-scroll>
               <div className={p.welcomeTop}>
                 <div className={p.welcomeCopy}>
-                  <h1 className={p.heroTitle}>快速上手 MKP</h1>
-                  <p className={p.heroLead}>选择机型，完成基础配置与校准。</p>
+                  <h1 className={p.heroTitle}>{tr('home.hero.title')}</h1>
+                  <p className={p.heroLead}>{tr('home.hero.lead')}</p>
                   <button
                     type="button"
                     className={p.cta}
                     onMouseDown={noFocus}
                     onClick={() => deckRef.current?.jumpTo(1)}
                   >
-                    现在开始
+                    {tr('home.hero.start')}
                     <span aria-hidden="true">→</span>
                   </button>
                 </div>
@@ -967,7 +987,7 @@ export default function PageHome({ density }: PageHomeProps) {
             style={{ '--fade-ms': `${fadeMs}ms` } as CSSProperties}
             peekSafe
             navs={[
-              { label: '回主页', onClick: () => deckRef.current?.jumpTo(0) },
+              { label: tr('home.nav.home'), onClick: () => deckRef.current?.jumpTo(0) },
               /* 复制脚本住左侧那一组（作者：「它应该放到左侧吧」） */
               scriptAction,
             ]}
@@ -997,7 +1017,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 /* `on` 里带 `comboApplied`：这一份真的应用了才亮。
                    用 on: false 而不是把这一项从数组里删掉 —— 胶囊照旧占位、只隐去，
                    于是它出现时一个像素都不推动前面那颗应用按钮（CardFrame 的老规矩）。 */
-                label: '下一步',
+                label: tr('home.next'),
                 arrow: true,
                 primary: true,
                 on: ready && comboApplied,
@@ -1063,15 +1083,15 @@ export default function PageHome({ density }: PageHomeProps) {
         id: 'calib-z',
         node: (
           <CardFrame
-            eyebrow="第三步 · Z 偏移校准"
+            eyebrow={tr('home.calib.zEyebrow')}
             peekSafe
-            tag={dirty ? '未保存' : savedNote ? '已保存' : undefined}
+            tag={dirty ? tr('home.calib.unsaved') : savedNote ? tr('home.calib.saved') : undefined}
             tagTone={dirty ? 'accent' : 'muted'}
             /* 打开模型是这一步的主入口（作者 10-03：绿底给打开模型，预设 pill 退暗） */
             topAction={{
-              label: '打开模型',
+              label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'z', name: 'Z 偏移校准板' }),
+              onClick: () => setOpenModel({ id: 'z', name: tr('home.calib.zPlate') }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
@@ -1080,20 +1100,22 @@ export default function PageHome({ density }: PageHomeProps) {
                 type="button"
                 className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
                 onClick={() => setPickerOpen(true)}
-                title="点击选择预设"
+                title={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>{presetName ?? '选择预设'}</span>
-                <span className={p.presetSwitch}>切换</span>
+                <span className={p.presetFileName}>
+                  {presetName ?? tr('home.calib.pickPreset')}
+                </span>
+                <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
               </button>
             }
             navs={[
-              { label: '上一步', back: true, onClick: () => deckRef.current?.jumpTo(1) },
+              { label: tr('home.calib.back'), back: true, onClick: () => deckRef.current?.jumpTo(1) },
               scriptAction,
             ]}
             actions={[
-              { label: '放弃改动', on: dirty, onClick: clearAll },
+              { label: tr('home.calib.discard'), on: dirty, onClick: clearAll },
               {
-                label: '保存',
+                label: tr('home.calib.save'),
                 on: dirty,
                 primary: true,
                 /* 存不动时就灰着 —— 不再挂「本地这份 / 另存为本地预设」那套旧版提示
@@ -1102,7 +1124,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick: commitAll,
               },
               {
-                label: '下一步',
+                label: tr('home.next'),
                 arrow: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_XY_INDEX),
               },
@@ -1136,15 +1158,15 @@ export default function PageHome({ density }: PageHomeProps) {
                   <CalibPlate
                     model="zoffset"
                     theme={plateTheme}
-                    label="Z 偏移校准板"
+                    label={tr('home.calib.zPlate')}
                     onPick={pickZ}
                     picked={zSelected}
                     hitLabel={zHitLabel}
                   />
                 </PlateZoom>
                 {/* G06-8 攒下的两行文案，与「校准」tab 同一句原话（作者 10-03：首页也缺这个） */}
-                <p className={p.legend}>{Z_LEGEND}</p>
-                <p className={p.tip}>{Z_TIP}</p>
+                <p className={p.legend}>{tr(Z_LEGEND_KEY)}</p>
+                <p className={p.tip}>{tr(Z_TIP_KEY)}</p>
               </section>
             </div>
           </CardFrame>
@@ -1154,14 +1176,14 @@ export default function PageHome({ density }: PageHomeProps) {
         id: 'calib-xy',
         node: (
           <CardFrame
-            eyebrow="第四步 · XY 偏移校准"
+            eyebrow={tr('home.calib.xyEyebrow')}
             peekSafe
-            tag={dirty ? '未保存' : savedNote ? '已保存' : undefined}
+            tag={dirty ? tr('home.calib.unsaved') : savedNote ? tr('home.calib.saved') : undefined}
             tagTone={dirty ? 'accent' : 'muted'}
             topAction={{
-              label: '打开模型',
+              label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'xy', name: 'XY 偏移校准板' }),
+              onClick: () => setOpenModel({ id: 'xy', name: tr('home.calib.xyPlate') }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
@@ -1169,24 +1191,26 @@ export default function PageHome({ density }: PageHomeProps) {
                 type="button"
                 className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
                 onClick={() => setPickerOpen(true)}
-                title="点击选择预设"
+                title={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>{presetName ?? '选择预设'}</span>
-                <span className={p.presetSwitch}>切换</span>
+                <span className={p.presetFileName}>
+                  {presetName ?? tr('home.calib.pickPreset')}
+                </span>
+                <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
               </button>
             }
             navs={[
               {
-                label: '上一步',
+                label: tr('home.calib.back'),
                 back: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_Z_INDEX),
               },
               scriptAction,
             ]}
             actions={[
-              { label: '放弃改动', on: dirty, onClick: clearAll },
+              { label: tr('home.calib.discard'), on: dirty, onClick: clearAll },
               {
-                label: '保存',
+                label: tr('home.calib.save'),
                 on: dirty,
                 primary: true,
                 /* 存不动时就灰着 —— 不再挂「本地这份 / 另存为本地预设」那套旧版提示
@@ -1195,7 +1219,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick: commitAll,
               },
               {
-                label: '下一步',
+                label: tr('home.next'),
                 arrow: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_MODEL_INDEX),
               },
@@ -1220,7 +1244,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   <CalibPlate
                     model="precise"
                     theme={plateTheme}
-                    label="XY 偏移校准板"
+                    label={tr('home.calib.xyPlate')}
                     onPick={pickXY}
                     picked={xySelected}
                     hitLabel={xyHitLabel}
@@ -1235,11 +1259,11 @@ export default function PageHome({ density }: PageHomeProps) {
         id: 'models',
         node: (
           <CardFrame
-            eyebrow="第五步 · 测试模型"
+            eyebrow={tr('home.calib.modelEyebrow')}
             peekSafe
             navs={[
               {
-                label: '上一步',
+                label: tr('home.calib.back'),
                 back: true,
                 onClick: () => deckRef.current?.jumpTo(CALIB_XY_INDEX),
               },
@@ -1247,31 +1271,30 @@ export default function PageHome({ density }: PageHomeProps) {
             ]}
             actions={[
               {
-                label: '打开测试模型',
+                label: tr('home.calib.openTest'),
                 primary: true,
-                onClick: () => setOpenModel({ id: TEST_MODEL_ID, name: '测试模型' }),
+                onClick: () =>
+                  setOpenModel({ id: TEST_MODEL_ID, name: tr('home.calib.testModel') }),
               },
-              { label: '回主页', onClick: () => deckRef.current?.jumpTo(0) },
+              { label: tr('home.nav.home'), onClick: () => deckRef.current?.jumpTo(0) },
             ]}
           >
             <div className={`${p.info} ${p.models}`} data-scroll>
               {/* 不给页级大标题：眉标题那行已经写着「第五步 · 测试模型」，
                   再写一遍是复读（首页与选机型页去掉眉标题是同一个道理）。
                   这一行只说"接下来做什么"，不重复页名 */}
-              <p className={p.modelsLead}>打印这套模型，检查校准结果。</p>
+              <p className={p.modelsLead}>{tr('home.calib.modelsLead')}</p>
               <div className={p.modelsHero}>
                 {/* 深浅各一张（白件在深底上要暗一档）：取图见 heroPileSource */}
                 <img
                   className={p.modelsHeroImg}
                   src={pile.src}
                   srcSet={pile.srcSet}
-                  alt="测试模型"
+                  alt={tr('home.calib.testModel')}
                   draggable={false}
                 />
               </div>
-              <p className={p.modelsCaption}>
-                鱼尾曲面 · 支撑涂胶 · 球形 · 方块 — 一套 3mf 覆盖全部校准场景
-              </p>
+              <p className={p.modelsCaption}>{tr('home.calib.modelsFeature')}</p>
             </div>
           </CardFrame>
         ),
@@ -1332,6 +1355,8 @@ export default function PageHome({ density }: PageHomeProps) {
       variantOptions,
       xySelected,
       zSelected,
+      /* 语言换了这张表要重算（里面全是 `tr(...)` 的结果） */
+      tr,
     ],
   )
 
@@ -1405,15 +1430,15 @@ export default function PageHome({ density }: PageHomeProps) {
         <Modal
           open
           size="sm"
-          title="打开模型"
+          title={tr('home.calib.openModel')}
           onClose={() => setOpenModel(null)}
           footer={
             <>
               <Btn disabled={modelBusy || !modelInfo?.ready} onClick={openCachedModel}>
-                从缓存打开
+                {tr('home.openModel.cached')}
               </Btn>
               <Btn variant="primary" disabled={modelBusy || modelInfo === null} onClick={fetchAndOpenModel}>
-                从云端获取
+                {tr('home.openModel.cloud')}
               </Btn>
             </>
           }
@@ -1430,12 +1455,15 @@ export default function PageHome({ density }: PageHomeProps) {
           {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={p.note}>
             {modelBusy
-              ? `${openModel.name} · 正在处理，请稍候…`
+              ? tr('home.openModel.working', { name: openModel.name })
               : modelInfo === null
-                ? `${openModel.name} · 正在看本机有没有缓存…`
+                ? tr('home.openModel.checking', { name: openModel.name })
                 : modelInfo.ready
-                  ? `${openModel.name} · 本机已有缓存（${modelInfo.size ?? '大小未知'}），可以直接打开`
-                  : `${openModel.name} · 本机还没有缓存文件，「从云端获取」会先取回再打开（请耐心等待 3mf 打开）`}
+                  ? tr('home.openModel.hasCache', {
+                      name: openModel.name,
+                      size: modelInfo.size ?? tr('home.openModel.sizeUnknown'),
+                    })
+                  : tr('home.openModel.noCache', { name: openModel.name })}
           </p>
           {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
               下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}
@@ -1447,18 +1475,18 @@ export default function PageHome({ density }: PageHomeProps) {
         <Modal
           open
           size="sm"
-          title="有未保存的改动"
+          title={tr('home.modal.unsavedTitle')}
           onClose={() => setPending(null)}
           footer={
             <>
-              <Btn onClick={() => setPending(null)}>取消</Btn>
+              <Btn onClick={() => setPending(null)}>{tr('home.modal.cancel')}</Btn>
               <Btn
                 onClick={() => {
                   clearAll()
                   leaveTo(pending.to)
                 }}
               >
-                不保存并离开
+                {tr('home.modal.discardLeave')}
               </Btn>
               {canSave && (
                 <Btn
@@ -1468,22 +1496,25 @@ export default function PageHome({ density }: PageHomeProps) {
                     leaveTo(pending.to)
                   }}
                 >
-                  保存并离开
+                  {tr('home.modal.saveLeave')}
                 </Btn>
               )}
             </>
           }
         >
           <p className={p.note}>
-            偏移改动还没保存：
+            {tr('home.modal.pendingNote')}
             {/* 三轴在哪一页都能改，所以这里列的是**全部**脏轴，不再按页筛。
                 走到这个弹窗一定有草稿，也就一定有基准值；saved / draft 的判空只是给类型看 */}
             {saved && draft
               ? AXIS_ROWS.filter(([, k]) => dirtyAxes.includes(k))
-                  .map(([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`)
-                  .join('，')
+                  .map(
+                    ([labelKey, k]) =>
+                      `${tr(labelKey)} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`,
+                  )
+                  .join(tr('home.modal.axisSeparator'))
               : ''}
-            {canSave ? '。离开前要保存吗？' : '。现在离开这些改动会丢掉。'}
+            {canSave ? tr('home.modal.pendingAsk') : tr('home.modal.pendingLose')}
           </p>
         </Modal>
       )}
@@ -1492,11 +1523,11 @@ export default function PageHome({ density }: PageHomeProps) {
         <Modal
           open
           size="sm"
-          title="有未保存的改动"
+          title={tr('home.modal.unsavedTitle')}
           onClose={() => setPresetAsk(null)}
           footer={
             <>
-              <Btn onClick={() => setPresetAsk(null)}>取消</Btn>
+              <Btn onClick={() => setPresetAsk(null)}>{tr('home.modal.cancel')}</Btn>
               <Btn
                 variant="primary"
                 onClick={() => {
@@ -1505,15 +1536,17 @@ export default function PageHome({ density }: PageHomeProps) {
                   setPresetAsk(null)
                 }}
               >
-                不保存并切换
+                {tr('home.modal.discardSwitch')}
               </Btn>
             </>
           }
         >
           <p className={p.note}>
-            换成 {presetOptions.find((o) => o.uid === presetAsk)?.name ?? '另一份预设'} 之后，
-            这一页点出来的偏移草稿会作废 —— 草稿是相对上一份预设点出来的增量，
-            换了基准就没有意义了。
+            {tr('home.modal.presetAskNote', {
+              name:
+                presetOptions.find((o) => o.uid === presetAsk)?.name ??
+                tr('home.modal.otherPreset'),
+            })}
           </p>
         </Modal>
       )}

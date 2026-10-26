@@ -57,6 +57,8 @@
 //! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
 //! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -245,7 +247,10 @@ pub fn toml_syntax_reason(text: &str) -> Option<String> {
         Some((line, col))
     });
     Some(match at {
-        Some((line, col)) => format!("TOML 语法不对（第 {line} 行第 {col} 列）"),
+        Some((line, col)) => ::postprocess::diag::messages::text(
+            "ui.runtime.local.toml_syntax",
+            &[("line", &line.to_string()), ("col", &col.to_string())],
+        ),
         None => "TOML 语法不对".to_owned(),
     })
 }
@@ -370,8 +375,13 @@ pub fn edited_name(source_file_name: &str) -> String {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| source_file_name.to_owned());
     match path.extension() {
-        Some(ext) => format!("{stem}（已修改）.{}", ext.to_string_lossy()),
-        None => format!("{stem}（已修改）"),
+        Some(ext) => ::postprocess::diag::messages::text(
+            "ui.runtime.local.copy_name_with_ext",
+            &[("stem", &stem), ("ext", &ext.to_string_lossy())],
+        ),
+        None => {
+            ::postprocess::diag::messages::text("ui.runtime.local.copy_name", &[("stem", &stem)])
+        }
     }
 }
 
@@ -434,8 +444,9 @@ pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, A
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
-        return Err(AppError::not_found(format!(
-            "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.392",
+            &[("rel", rel)],
         )));
     }
     /* 血统是**这份文件自己的属性**：先读出来再照抄回去（读不出来 = 它本来就没有） */
@@ -469,8 +480,9 @@ pub fn set_machine_variant(
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
-        return Err(AppError::not_found(format!(
-            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.393",
+            &[("rel", rel)],
         )));
     }
     let text = read_text(user_root, rel)?;
@@ -484,10 +496,11 @@ pub fn set_machine_variant(
 pub fn read_text(user_root: &Path, rel: &str) -> Result<String, AppError> {
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
-    let bytes = std::fs::read(&target)
-        .map_err(|_| AppError::not_found(format!("找不到 {rel} —— 它可能已经被移走或删掉了")))?;
+    let bytes = std::fs::read(&target).map_err(|_| {
+        AppError::not_found(messages::text("ui.runtime.local.394", &[("rel", rel)]))
+    })?;
     String::from_utf8(bytes)
-        .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+        .map_err(|_| AppError::corrupted(messages::text("ui.runtime.local.395", &[("rel", rel)])))
 }
 
 /// 第九层：读一份用户预设，并过**文件级**检查（能读 + UTF-8 + TOML 语法）。
@@ -499,9 +512,7 @@ pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError>
     let text = read_text(user_root, rel)?;
     if let Some(err) = text.parse::<toml_edit::DocumentMut>().err() {
         let reason = toml_syntax_reason(&text).unwrap_or_else(|| "TOML 语法不对".to_owned());
-        return Err(AppError::corrupted(format!(
-            "{rel} 读不出来：{reason} —— 这一份现在不能应用、也不能改；先把它改回一份能读的 TOML"
-        ))
+        return Err(AppError::corrupted(messages::text("ui.runtime.local.396", &[("rel", rel), ("reason", &reason.to_string())]))
         .with_detail(format!(
             "第九层（文件级检查）：能读 + UTF-8 + TOML 语法；不判\"是不是合法 MKP Preset\"（语义）。\
              解析器原文：{err}"
@@ -520,8 +531,9 @@ pub fn write_text(user_root: &Path, rel: &str, text: &str) -> Result<(), AppErro
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
-        return Err(AppError::not_found(format!(
-            "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.397",
+            &[("rel", rel)],
         )));
     }
     crate::fsx::atomic::atomic_write(&target, text.as_bytes())
@@ -579,8 +591,9 @@ pub fn calibration_of(catalog: &Catalog, text: &str) -> Calibration {
 pub fn check_local_prefix(rel: &str) -> Result<(), AppError> {
     let prefix = format!("{LOCAL_DIR}/");
     if !rel.starts_with(&prefix) {
-        return Err(AppError::invalid_argument(format!(
-            "只读用户自己的预设（要 {prefix}… 开头，给的是 {rel}）"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.398",
+            &[("prefix", &prefix.to_string()), ("rel", rel)],
         )));
     }
     crate::fsx::paths::check_relative(rel)
@@ -631,7 +644,10 @@ pub(crate) fn normalize_new_name(
 ) -> Result<(String, bool), AppError> {
     let trimmed = new_name.trim();
     if trimmed.is_empty() {
-        return Err(AppError::invalid_argument("新名字不能是空的"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.399",
+            &[],
+        )));
     }
     let cleaned: String = trimmed
         .chars()
@@ -639,18 +655,25 @@ pub(crate) fn normalize_new_name(
         .collect();
     let cleaned = cleaned.trim();
     if cleaned.is_empty() {
-        return Err(AppError::invalid_argument("新名字不能是空的"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.400",
+            &[],
+        )));
     }
     if cleaned == "." || cleaned == ".." {
-        return Err(AppError::invalid_argument("这个名字不是一个文件名"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.401",
+            &[],
+        )));
     }
     let (_, want_ext) = split_ext(cleaned);
     let (_, old_ext) = split_ext(old_name);
     /* 后缀**大小写无关**地比（用户写了 `.TOML` 也是同一类），但落盘用它自己那一串 */
     if !want_ext.eq_ignore_ascii_case(old_ext) {
-        return Err(AppError::invalid_argument(
-            "后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.402",
+            &[],
+        )));
     }
     if cleaned.len() <= NAME_MAX_BYTES {
         return Ok((cleaned.to_owned(), cleaned != trimmed));
@@ -667,9 +690,10 @@ pub(crate) fn normalize_new_name(
     /* 截尾可能留个空格（那会被系统当成名字的一部分，看着像没截干净） */
     let keep = keep.trim_end();
     if keep.is_empty() {
-        return Err(AppError::invalid_argument(
-            "名字太长了 —— 光是后缀就把上限占满了（换一个短点的后缀再来）",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.403",
+            &[],
+        )));
     }
     let out = format!("{keep}{ext}");
     Ok((out, true))
@@ -804,8 +828,9 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     check_local_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
-        return Err(AppError::not_found(format!(
-            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.404",
+            &[("rel", rel)],
         )));
     }
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
@@ -827,12 +852,15 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
      * 在大小写不敏感的文件系统（macOS 默认）上"落点已存在"指的正是它自己。
      */
     if new_path.exists() && !same_file(&old, &new_path) {
-        return Err(AppError::invalid_argument(format!(
-            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.405",
+            &[("new_name", &new_name.to_string())],
         )));
     }
-    std::fs::rename(&old, &new_path)
-        .map_err(|e| AppError::io(format!("{rel} 改名没成")).with_detail(e.to_string()))?;
+    std::fs::rename(&old, &new_path).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.local.406", &[("rel", rel)]))
+            .with_detail(e.to_string())
+    })?;
     Ok(FileIdentity {
         path: new_rel,
         file_name: new_name,
@@ -858,8 +886,9 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     check_local_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
-        return Err(AppError::not_found(format!(
-            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.407",
+            &[("rel", rel)],
         )));
     }
     let old_name = rel.rsplit('/').next().unwrap_or(rel);
@@ -869,18 +898,22 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
     let new_rel = format!("{dir}{new_name}");
     check_local_prefix(&new_rel)?;
     if new_rel == rel {
-        return Err(AppError::invalid_argument(
-            "新名字和原来一样 —— 复制要起个不同的名字",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.408",
+            &[],
+        )));
     }
     let new_path = crate::fsx::paths::resolve_in(user_root, &new_rel)?;
     if new_path.exists() {
-        return Err(AppError::invalid_argument(format!(
-            "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.409",
+            &[("new_name", &new_name.to_string())],
         )));
     }
-    let bytes = std::fs::read(&old)
-        .map_err(|e| AppError::io(format!("{rel} 读不出来")).with_detail(e.to_string()))?;
+    let bytes = std::fs::read(&old).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.local.410", &[("rel", rel)]))
+            .with_detail(e.to_string())
+    })?;
     /* 写盘走全仓唯一那个出口（`clippy.toml` 禁 `std::fs::write`） */
     crate::fsx::atomic::atomic_write(&new_path, &bytes)?;
     Ok(FileIdentity {
@@ -915,9 +948,9 @@ pub fn save_cloud_as_new(
     new_name: &str,
 ) -> Result<FileIdentity, AppError> {
     if file.kind != PRESET {
-        return Err(AppError::invalid_argument(format!(
-            "{} 不是 MKP 预设 —— 只有 MKP 预设能另存成你的一份",
-            file.file_name
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.411",
+            &[("v1", &file.file_name.to_string())],
         )));
     }
     /* 这一路的名字一般是调用方照云端原名起的，与改名 / 复制同一套门槛（能修的修好） */
@@ -925,8 +958,9 @@ pub fn save_cloud_as_new(
     let rel = format!("{LOCAL_DIR}/{name}");
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     if target.exists() {
-        return Err(AppError::invalid_argument(format!(
-            "已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.local.412",
+            &[("name", &name.to_string())],
         )));
     }
     let body = super::lineage::make_copy(cloud_text, &file.path);
@@ -949,12 +983,15 @@ pub fn delete_file(user_root: &Path, rel: &str) -> Result<(), AppError> {
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
-        return Err(AppError::not_found(format!(
-            "找不到 {rel} —— 它可能已经被移走或删掉了"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.413",
+            &[("rel", rel)],
         )));
     }
-    std::fs::remove_file(&target)
-        .map_err(|e| AppError::io(format!("{rel} 删不掉")).with_detail(e.to_string()))?;
+    std::fs::remove_file(&target).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.local.414", &[("rel", rel)]))
+            .with_detail(e.to_string())
+    })?;
     Ok(())
 }
 
@@ -971,8 +1008,9 @@ pub fn reveal_target(user_root: &Path, rel: &str) -> Result<PathBuf, AppError> {
     check_local_prefix(rel)?;
     let target = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !target.is_file() {
-        return Err(AppError::not_found(format!(
-            "找不到 {rel} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）"
+        return Err(AppError::not_found(messages::text(
+            "ui.runtime.local.415",
+            &[("rel", rel)],
         )));
     }
     Ok(target)

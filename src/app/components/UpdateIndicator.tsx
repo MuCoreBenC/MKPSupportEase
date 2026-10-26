@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, errorText, listen } from '../../api'
+import { t, useT } from '../../i18n'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateInfo, UpdateState } from '../../api/contract'
 import TitlebarChip from './TitlebarChip'
@@ -83,9 +84,9 @@ function progressLabel(state: UpdateState): string {
         ? `${Math.round((state.received / state.total) * 100)}%`
         : mb(state.received)
     case 'ready':
-      return '可安装'
+      return t('update.ready')
     case 'failed':
-      return '失败'
+      return t('update.failed')
     default:
       return ''
   }
@@ -140,24 +141,29 @@ function buildActions(
   switch (shown.state) {
     case 'downloading':
       return [
-        { label: '暂停', onClick: d.pause, disabled: busy },
-        { label: '取消', onClick: d.cancel, disabled: busy },
+        { label: t('update.pause'), onClick: d.pause, disabled: busy },
+        { label: t('update.cancel'), onClick: d.cancel, disabled: busy },
       ]
     case 'paused':
       return [
-        { label: '继续', onClick: d.resume, disabled: busy },
-        { label: '取消', onClick: d.cancel, disabled: busy },
+        { label: t('update.resume'), onClick: d.resume, disabled: busy },
+        { label: t('update.cancel'), onClick: d.cancel, disabled: busy },
       ]
     case 'ready':
-      return [{ label: '重启并安装', onClick: d.install, disabled: busy, primary: true }]
+      return [
+        { label: t('update.install'), onClick: d.install, disabled: busy, primary: true },
+      ]
     case 'failed':
-      return [{ label: '重试', onClick: d.retry, disabled: busy }]
+      return [{ label: t('update.retry'), onClick: d.retry, disabled: busy }]
     case 'cancelled':
       /* 取消之后还能重来一遍（要真有可下的那一版） */
       return d.download !== null
         ? [
             {
-              label: `下载 ${d.latestVersion}（${mb(d.assetSize)}）`,
+              label: t('update.download', {
+                version: d.latestVersion,
+                size: mb(d.assetSize),
+              }),
               onClick: d.download,
               disabled: busy,
             },
@@ -168,7 +174,10 @@ function buildActions(
       return d.download !== null
         ? [
             {
-              label: `下载 ${d.latestVersion}（${mb(d.assetSize)}）`,
+              label: t('update.download', {
+                version: d.latestVersion,
+                size: mb(d.assetSize),
+              }),
               onClick: d.download,
               disabled: busy,
             },
@@ -178,6 +187,8 @@ function buildActions(
 }
 
 export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
+  /* 订阅语言（2026-10-26）：下面那些 `t(...)` 是模块级取词，重渲由这一行触发 */
+  const tr = useT()
   const [state, setState] = useState<UpdateState>({ state: 'idle' })
   /** 有新版吗 + 那个安装包（`null` = 还没问 / 问不到） */
   const [info, setInfo] = useState<UpdateInfo | null>(null)
@@ -272,22 +283,27 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
 
     const body: Omit<Notice, 'id'> = {
       kind: error !== null ? 'bad' : shown.state === 'failed' ? 'bad' : shown.state === 'ready' ? 'ok' : 'info',
-      title: '软件更新',
+      title: tr('update.title'),
       /* ★ 操作失败（`error`，如点"暂停"时后端报错）**优先于**状态文案 ——
          原来它显示在面板底部，现在并入正文，不许静默吞掉。 */
       text:
         error !== null
           ? error
           : shown.state === 'downloading'
-            ? `正在下载 ${mb(shown.received)}${shown.total > 0 ? ` / ${mb(shown.total)}` : ''}`
+            ? shown.total > 0
+              ? tr('update.downloadingOf', {
+                  received: mb(shown.received),
+                  total: mb(shown.total),
+                })
+              : tr('update.downloading', { received: mb(shown.received) })
             : shown.state === 'paused'
-              ? `已暂停（${mb(shown.received)}）`
+              ? tr('update.paused', { received: mb(shown.received) })
               : shown.state === 'ready'
-                ? '下载完成，可以重启安装。'
+                ? tr('update.done')
                 : shown.state === 'failed'
-                  ? `下载失败：${shown.reason}`
+                  ? tr('update.downloadFailed', { detail: shown.reason })
                   : shown.state === 'cancelled'
-                    ? '已取消。'
+                    ? tr('update.cancelled')
                     : '',
       progress: pct,
       /* 不自动走（有按钮）。用户点 × 收掉 */
@@ -336,8 +352,8 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
             ? 'muted'
             : 'accent'
       }
-      title={`软件更新：${progressLabel(shown)}（点击查看详情）`}
-      ariaLabel={`软件更新：${progressLabel(shown)}`}
+      title={tr('update.tip', { label: progressLabel(shown) })}
+      ariaLabel={tr('update.aria', { label: progressLabel(shown) })}
       onClick={() => setOpen((v) => !v)}
       disabled={busy}
     />

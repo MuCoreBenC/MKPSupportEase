@@ -36,6 +36,8 @@
 //! 判据是窗口右上角那个下拉箭头 —— 它报的坐标落在窗口顶部那一带，而不是屏幕底部。
 //! 所以这里**不做上下翻转**，直接把 AX 的读数交给窗口定位。
 
+use postprocess::diag::messages;
+
 use tauri::{AppHandle, Manager as _, WebviewUrl, WebviewWindowBuilder};
 
 use crate::ax::{self, GuideTargetDto, RectDto, SlicerVisibility};
@@ -718,7 +720,9 @@ fn build_card(app: &AppHandle, x: f64, y: f64, side: &str) -> Result<(), AppErro
         .skip_taskbar(true)
         .focused(false)
         .build()
-        .map_err(|e| AppError::internal("建不出引导窗口").with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppError::internal(messages::text("ui.ipc.guide.081", &[])).with_detail(e.to_string())
+        })?;
     let _ = win.show();
     Ok(())
 }

@@ -96,6 +96,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
+import { useT, type StringKey, type Tr } from '../../i18n'
 import type {
   CatalogParamDef,
   PostProcessPrintTime,
@@ -124,12 +125,12 @@ import s from './PageReport.module.css'
  * 统计里挑给用户看的几格（键与 `_meta.json` 的 `detail.stats` 同名）。
  * 第三格是**值的单位** —— 单位跟着值印（`0 mm`），不挂在字段名上。
  */
-const STAT_CELLS: [string, string, string][] = [
-  ['towerHeight', '塔高', 'mm'],
-  ['glueLayerCount', '涂胶层', ''],
-  ['totalLayerNumber', '总层数', ''],
-  ['maxZHeight', '最高 Z', 'mm'],
-  ['originalPrintTime', '切片器预估', ''],
+const STAT_CELLS: [string, StringKey, string][] = [
+  ['towerHeight', 'report.stat.towerHeight', 'mm'],
+  ['glueLayerCount', 'report.stat.glueLayers', ''],
+  ['totalLayerNumber', 'report.stat.totalLayers', ''],
+  ['maxZHeight', 'report.stat.maxZ', 'mm'],
+  ['originalPrintTime', 'report.stat.slicerEstimate', ''],
 ]
 
 /** 列表滑盖的临界宽度：与 CSS 里 `@container (width < 880px)` 同一个数 */
@@ -148,8 +149,8 @@ const SNAP = 40
 const PRINT_TIME_POLL_MS = 800
 const PRINT_TIME_POLL_MAX_MS = 30_000
 
-/** 「正在重读…」那条提示的原文；读完（成或败）按原文收掉，不误伤别的提示 */
-const READING_NOTE = '正在重读执行记录…'
+/** 「正在重读…」那条提示的键；读完（成或败）按原文收掉，不误伤别的提示 */
+const READING_NOTE: StringKey = 'report.note.reading'
 
 const TAB_ALL = 'all'
 
@@ -157,10 +158,10 @@ const TAB_ALL = 'all'
 type StatusFilter = 'all' | 'ok' | 'bad'
 
 /** 三颗筛选胶囊（顺序就是摆放顺序）；计数按 id 从 `counts` 取 */
-const FILTERS: [StatusFilter, string][] = [
-  ['all', '全部'],
-  ['ok', '成功'],
-  ['bad', '失败'],
+const FILTERS: [StatusFilter, StringKey][] = [
+  ['all', 'report.filter.all'],
+  ['ok', 'report.filter.ok'],
+  ['bad', 'report.filter.bad'],
 ]
 
 /** 文件名短于这个长度就整条铺开，不拆头尾 */
@@ -176,20 +177,21 @@ const FILE_TAIL_LEN = 12
  * 去掉「正在…」与省略号 —— 内核那边写着「中文显示名仍只许住 UI 一处」，
  * 这张表就是那一处。认不出来的 id 原样摆（新步骤忘了登记也不会显示成空白）。
  */
-const STEP_NAMES: Record<string, string> = {
-  input: '读取文件',
-  config: '加载配置',
-  'machine-detect': '机型识别',
-  parse: '解析 G-code',
-  support: '支撑面检测',
-  collision: '碰撞检测',
-  'calib-check': '校准模型检测',
-  pass1: '第一遍扫描',
-  pass2: '第二遍扫描',
-  calibration: '校准 G-code 插入',
-  write: '写入文件',
-  printtime: '打印时间估算',
+const STEP_NAMES: Record<string, StringKey> = {
+  input: 'report.step.input',
+  config: 'report.step.config',
+  'machine-detect': 'report.step.machine',
+  parse: 'report.step.parse',
+  support: 'report.step.support',
+  collision: 'report.step.collision',
+  'calib-check': 'report.step.calib',
+  pass1: 'report.step.pass1',
+  pass2: 'report.step.pass2',
+  calibration: 'report.step.calibInsert',
+  write: 'report.step.write',
+  printtime: 'report.step.printtime',
 }
+
 
 /**
  * 组小图标（跟组名一排，扫一眼找得到组）—— 只留形状，壳由 `GrpIcon` 给。
@@ -289,13 +291,17 @@ const GROUP_SHAPES: Record<string, ReactNode> = {
  * 目录名不一定是日期（有人手动往 `gcode_history/` 里丢过一个文件夹就会这样），
  * 那时 `diff` 是 `NaN` / 负数 —— 与其摆一句「NaN 天前」，不如原样把那串名字印出来。
  */
-function dayLabel(day: string): string {
+function dayLabel(tr: Tr, day: string): string {
   const d = new Date(`${day}T00:00:00`)
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const diff = Math.round((today.getTime() - d.getTime()) / 86400000)
   if (!Number.isFinite(diff) || diff < 0) return day
-  return diff === 0 ? '今天' : diff === 1 ? '昨天' : `${diff} 天前`
+  return diff === 0
+    ? tr('report.day.today')
+    : diff === 1
+      ? tr('report.day.yesterday')
+      : tr('report.day.daysAgo', { n: diff })
 }
 
 /**
@@ -313,9 +319,10 @@ function rowMeta(row: ReportSummary): string {
 }
 
 /** 管线一步的名字：认得出来的换中文，认不出来原样摆（没有 id 就按序号） */
-function stepName(id: string | undefined, i: number): string {
-  if (id === undefined || id === '') return `第 ${i + 1} 步`
-  return STEP_NAMES[id] ?? id
+function stepName(tr: Tr, id: string | undefined, i: number): string {
+  if (id === undefined || id === '') return tr('report.step.nth', { n: i + 1 })
+  const key = STEP_NAMES[id]
+  return key === undefined ? id : tr(key)
 }
 
 /** 详情里的一组（页签的一项） */
@@ -327,26 +334,26 @@ interface Group {
   cells: [string, string][]
 }
 
-function elapsedText(ms: number | null): string {
+function elapsedText(tr: Tr, ms: number | null): string {
   if (ms === null) return '—'
-  if (ms < 1000) return `${ms} 毫秒`
+  if (ms < 1000) return tr('report.dur.ms', { n: ms })
   const sec = ms / 1000
-  if (sec < 60) return `${sec.toFixed(1)} 秒`
+  if (sec < 60) return tr('report.dur.s', { n: sec.toFixed(1) })
   const m = Math.floor(sec / 60)
-  return `${m} 分 ${Math.round(sec - m * 60)} 秒`
+  return tr('report.dur.mSec', { m, s: Math.round(sec - m * 60) })
 }
 
-function printTimeText(sec: number | undefined): string {
+function printTimeText(tr: Tr, sec: number | undefined): string {
   if (sec === undefined || !Number.isFinite(sec)) return '—'
   const h = Math.floor(sec / 3600)
   const m = Math.round((sec % 3600) / 60)
-  return h > 0 ? `${h} 小时 ${m} 分` : `${m} 分`
+  return h > 0 ? tr('report.dur.hMin', { h, m }) : tr('report.dur.m', { n: m })
 }
 
 /** 打印时间还没补上时的说法 —— 不许拿 0 凑数（延后估算的那几百毫秒里它是 null） */
-function printTimeStatusText(status: string | null | undefined): string {
-  if (status === 'computing') return '正在估算…'
-  if (status === 'failed') return '估算失败'
+function printTimeStatusText(tr: Tr, status: string | null | undefined): string {
+  if (status === 'computing') return tr('report.pt.computing')
+  if (status === 'failed') return tr('report.pt.failed')
   return '—'
 }
 
@@ -402,62 +409,82 @@ function slicerEstimateSeconds(original: string | undefined): number | null {
 }
 
 /** 涂胶组（键与 `detail.glue` 同名；全格都空就整组不摆） */
-function glueGroup(glue: ReportGlueFacts): Group | null {
+function glueGroup(tr: Tr, glue: ReportGlueFacts): Group | null {
   const cells: [string, string][] = [
-    ['涂胶总长', mmText(glue.glueTotalLength) ?? '—'],
-    ['换笔', numCell(glue.gluePenSwitches, ' 次')],
-    ['涂胶遍数', numCell(glue.gluePassCount, ' 遍')],
-    ['涂胶速度', numCell(glue.glueSpeed, ' mm/s')],
-    /* 笔偏移拆 X / Y / Z 三行：逗号串在一格里，三个数谁是谁看不出来 */
-    ['笔偏移 X', mmText(glue.penOffsetX) ?? '—'],
-    ['笔偏移 Y', mmText(glue.penOffsetY) ?? '—'],
-    ['笔偏移 Z', mmText(glue.penOffsetZ) ?? '—'],
+    [tr('report.glue.total'), mmText(glue.glueTotalLength) ?? '—'],
     [
-      '抬笔高度',
+      tr('report.glue.switches'),
+      glue.gluePenSwitches === undefined
+        ? '—'
+        : tr('report.glue.unit.times', { n: fmtNum(glue.gluePenSwitches) }),
+    ],
+    [
+      tr('report.glue.passes'),
+      glue.gluePassCount === undefined
+        ? '—'
+        : tr('report.glue.unit.passes', { n: fmtNum(glue.gluePassCount) }),
+    ],
+    [tr('report.glue.speed'), numCell(glue.glueSpeed, ' mm/s')],
+    /* 笔偏移拆 X / Y / Z 三行：逗号串在一格里，三个数谁是谁看不出来 */
+    [tr('report.glue.offsetX'), mmText(glue.penOffsetX) ?? '—'],
+    [tr('report.glue.offsetY'), mmText(glue.penOffsetY) ?? '—'],
+    [tr('report.glue.offsetZ'), mmText(glue.penOffsetZ) ?? '—'],
+    [
+      tr('report.glue.liftHeight'),
       glue.glueZLiftHeight === undefined
         ? '—'
         : `${fmtNum(glue.glueZLiftHeight)} mm${
             glue.glueZLiftHeightFirstLayers === undefined
               ? ''
-              : `（首层 ${fmtNum(glue.glueZLiftHeightFirstLayers)}）`
+              : tr('report.glue.firstLayer', { n: fmtNum(glue.glueZLiftHeightFirstLayers) })
           }`,
     ],
-    ['模型间抬笔', mmText(glue.glueInterModelLiftHeight) ?? '—'],
-    ['Z 偏移', glue.glueZOffset === undefined ? '—' : `${fmtNum(glue.glueZOffset)} mm`],
+    [tr('report.glue.interLift'), mmText(glue.glueInterModelLiftHeight) ?? '—'],
+    [tr('report.glue.zOffset'), glue.glueZOffset === undefined ? '—' : `${fmtNum(glue.glueZOffset)} mm`],
     [
-      '润笔',
+      tr('report.glue.prime'),
       glue.primeTriggerLayers === undefined && glue.primeTotalLength === undefined
         ? '—'
-        : `${numCell(glue.primeTriggerLayers, ' 层')} · ${
+        : `${
+            glue.primeTriggerLayers === undefined
+              ? '—'
+              : tr('report.glue.unit.layers', { n: fmtNum(glue.primeTriggerLayers) })
+          } · ${
             glue.primeTotalLength === undefined ? '—' : `${glue.primeTotalLength.toFixed(1)} mm`
           }`,
     ],
   ]
   if (!hasAnyValue(cells)) return null
   const sum = [
-    glue.primeTriggerLayers === undefined ? null : `${fmtNum(glue.primeTriggerLayers)} 层`,
+    glue.primeTriggerLayers === undefined
+      ? null
+      : tr('report.glue.primeSum', { n: fmtNum(glue.primeTriggerLayers) }),
     mmText(glue.glueTotalLength),
-    glue.gluePenSwitches === undefined ? null : `换笔 ${fmtNum(glue.gluePenSwitches)} 次`,
+    glue.gluePenSwitches === undefined
+      ? null
+      : tr('report.glue.swSum', { n: fmtNum(glue.gluePenSwitches) }),
   ]
     .filter((x): x is string => x !== null)
     .join(' · ')
-  return { id: 'glue', title: '涂胶', sum, cells }
+  return { id: 'glue', title: tr('report.glue.title'), sum, cells }
 }
 
 /** 擦料塔组（键与 `detail.tower` 同名） */
-function towerGroup(tower: ReportTowerFacts): Group | null {
+function towerGroup(tr: Tr, tower: ReportTowerFacts): Group | null {
   const cells: [string, string][] = [
     [
-      '层数 / 高度',
+      tr('report.tower.layersHeight'),
       tower.towerLayers === undefined && tower.towerHeight === undefined
         ? '—'
-        : `${numCell(tower.towerLayers, ' 层')} · ${
-            tower.towerHeight === undefined ? '—' : `${fmtNum(tower.towerHeight)} mm`
-          }`,
+        : `${
+            tower.towerLayers === undefined
+              ? '—'
+              : tr('report.glue.unit.layers', { n: fmtNum(tower.towerLayers) })
+          } · ${tower.towerHeight === undefined ? '—' : `${fmtNum(tower.towerHeight)} mm`}`,
     ],
-    ['挤出比', tower.towerExtrudeRatio === undefined ? '—' : fmtNum(tower.towerExtrudeRatio)],
+    [tr('report.tower.ratio'), tower.towerExtrudeRatio === undefined ? '—' : fmtNum(tower.towerExtrudeRatio)],
     [
-      '抬笔 / 安全 Z',
+      tr('report.tower.liftSafe'),
       tower.towerZLift === undefined && tower.towerSafeZOffset === undefined
         ? '—'
         : `${tower.towerZLift === undefined ? '—' : fmtNum(tower.towerZLift)} / ${
@@ -465,7 +492,7 @@ function towerGroup(tower: ReportTowerFacts): Group | null {
           } mm`,
     ],
     [
-      '移动速度 / 模式',
+      tr('report.tower.travel'),
       tower.towerTravelSpeed === undefined && tower.fastTowerMode === undefined
         ? '—'
         : `${numCell(tower.towerTravelSpeed, ' mm/s')} · ${tower.fastTowerMode ?? '—'}`,
@@ -473,22 +500,26 @@ function towerGroup(tower: ReportTowerFacts): Group | null {
   ]
   if (!hasAnyValue(cells)) return null
   const sum = [
-    tower.towerLayers === undefined ? null : `${fmtNum(tower.towerLayers)} 层`,
+    tower.towerLayers === undefined
+      ? null
+      : tr('report.glue.unit.layers', { n: fmtNum(tower.towerLayers) }),
     tower.towerHeight === undefined ? null : `${fmtNum(tower.towerHeight)} mm`,
   ]
     .filter((x): x is string => x !== null)
     .join(' · ')
-  return { id: 'tower', title: '擦料塔', sum, cells }
+  return { id: 'tower', title: tr('report.tower.title'), sum, cells }
 }
 
 /** 切片工艺组（键与 `detail.slicer` 同名） */
-function slicerGroup(slicer: ReportSlicerFacts): Group | null {
+function slicerGroup(tr: Tr, slicer: ReportSlicerFacts): Group | null {
+  const onOff = (v: boolean | undefined): string =>
+    v === undefined ? '—' : tr(v ? 'report.slicer.on' : 'report.slicer.off')
   const cells: [string, string][] = [
-    ['切片软件', slicer.slicerVersion ?? '—'],
-    ['机型预设', slicer.machinePresetName ?? '—'],
-    ['工艺预设', slicer.processPresetName ?? '—'],
+    [tr('report.slicer.software'), slicer.slicerVersion ?? '—'],
+    [tr('report.slicer.machinePreset'), slicer.machinePresetName ?? '—'],
+    [tr('report.slicer.processPreset'), slicer.processPresetName ?? '—'],
     [
-      '耗材 / 喷嘴',
+      tr('report.slicer.filament'),
       slicer.filamentType === undefined && slicer.nozzleDiameter === undefined
         ? '—'
         : `${slicer.filamentType ?? '—'} · ${
@@ -496,28 +527,30 @@ function slicerGroup(slicer: ReportSlicerFacts): Group | null {
           }`,
     ],
     [
-      '熨平',
+      tr('report.slicer.ironing'),
       slicer.slicerIroningEnabled === undefined &&
       slicer.ironingMode === undefined &&
       slicer.ironingThreshold === undefined
         ? '—'
-        : `${
-            slicer.slicerIroningEnabled === undefined ? '—' : slicer.slicerIroningEnabled ? '开' : '关'
-          } · ${slicer.ironingMode ?? '—'} · 阈值 ${
-            slicer.ironingThreshold === undefined ? '—' : fmtNum(slicer.ironingThreshold)
-          }`,
+        : `${onOff(slicer.slicerIroningEnabled)} · ${slicer.ironingMode ?? '—'} · ${tr(
+            'report.slicer.threshold',
+            {
+              v: slicer.ironingThreshold === undefined ? '—' : fmtNum(slicer.ironingThreshold),
+            },
+          )}`,
     ],
     [
-      '支撑',
+      tr('report.slicer.support'),
       slicer.treeSupport === undefined && slicer.useDiskWipe === undefined
         ? '—'
-        : `树状 ${slicer.treeSupport === undefined ? '—' : slicer.treeSupport ? '开' : '关'} · 圆盘擦拭 ${
-            slicer.useDiskWipe === undefined ? '—' : slicer.useDiskWipe ? '开' : '关'
-          }`,
+        : `${tr('report.slicer.tree', { v: onOff(slicer.treeSupport) })} · ${tr(
+            'report.slicer.diskWipe',
+            { v: onOff(slicer.useDiskWipe) },
+          )}`,
     ],
   ]
   if (!hasAnyValue(cells)) return null
-  return { id: 'slicer', title: '切片工艺', sum: slicer.slicerVersion ?? '', cells }
+  return { id: 'slicer', title: tr('report.slicer.title'), sum: slicer.slicerVersion ?? '', cells }
 }
 
 /**
@@ -530,44 +563,47 @@ function slicerGroup(slicer: ReportSlicerFacts): Group | null {
  * 值一律**照实说话**：读不到就摆 `—`，判定结果翻成人话，不把 `only_3mf` 这种机器串
  * 直接甩给用户。
  */
-function calibrationGroup(c: ReportCalibrationFacts): Group | null {
-  const verdictText: Record<string, string> = {
-    from_3mf: '模型里带校准标记',
-    absent: '没有校准标记',
+function calibrationGroup(tr: Tr, c: ReportCalibrationFacts): Group | null {
+  const verdictText: Record<string, StringKey> = {
+    from_3mf: 'report.calib.verdict3mf',
+    absent: 'report.calib.verdictAbsent',
   }
+  const verdict = verdictText[c.verdict] !== undefined ? tr(verdictText[c.verdict]) : c.verdict
   const modelFile =
     c.model3mf != null
-      ? `${c.model3mf}${c.exists ? '' : '（已不在原路径）'}`
+      ? `${c.model3mf}${c.exists ? '' : tr('report.calib.gone')}`
       : c.originPath != null
-        ? `${c.originPath}（不是 .3mf）`
+        ? `${c.originPath}${tr('report.calib.not3mf')}`
         : '—'
 
   const cells: [string, string][] = [
-    ['原始模型', modelFile],
-    ['校准标记', c.identity3mf ?? '—'],
-    ['判定', verdictText[c.verdict] ?? c.verdict],
+    [tr('report.calib.model'), modelFile],
+    [tr('report.calib.mark'), c.identity3mf ?? '—'],
+    [tr('report.calib.verdict'), verdict],
   ]
-  if (c.note != null && c.note !== '') cells.push(['说明', c.note])
+  if (c.note != null && c.note !== '') cells.push([tr('report.calib.note'), c.note])
 
   if (c.measured != null) {
     const [x0, x1, y0, y1] = c.measured
-    cells.push(['实测尺寸', `${fmtNum(x1 - x0)} × ${fmtNum(y1 - y0)} mm`])
+    cells.push([tr('report.calib.measured'), `${fmtNum(x1 - x0)} × ${fmtNum(y1 - y0)} mm`])
   }
   if (c.profileId != null) {
     const nominal =
-      c.footprint != null ? `标称 ${fmtNum(c.footprint[0])} × ${fmtNum(c.footprint[1])}` : null
-    const tol = c.tolerance != null ? `容差 ${fmtNum(c.tolerance)}` : null
+      c.footprint != null
+        ? tr('report.calib.nominal', { w: fmtNum(c.footprint[0]), h: fmtNum(c.footprint[1]) })
+        : null
+    const tol = c.tolerance != null ? tr('report.calib.tolerance', { n: fmtNum(c.tolerance) }) : null
     const extra = [nominal, tol].filter((x): x is string => x !== null).join('，')
-    cells.push(['命中档位', extra === '' ? c.profileId : `${c.profileId}（${extra}）`])
+    cells.push([tr('report.calib.profile'), extra === '' ? c.profileId : `${c.profileId}（${extra}）`])
   }
-  if (c.mode != null && c.mode !== '') cells.push(['校准身份', c.mode])
+  if (c.mode != null && c.mode !== '') cells.push([tr('report.calib.modeLabel'), c.mode])
 
   /* 只有"没有标记 + 也没认到档"才是真的一无所有（普通模型本不该进这里） */
   if (!hasAnyValue(cells)) return null
   return {
     id: 'calibration',
-    title: '校准身份',
-    sum: c.mode ?? verdictText[c.verdict] ?? '',
+    title: tr('report.calib.title'),
+    sum: c.mode ?? verdict,
     cells,
   }
 }
@@ -578,18 +614,19 @@ function hasAnyValue(cells: [string, string][]): boolean {
 }
 
 /** 把详情摊成几组（键与 `_meta.json` 同名，值一律按"有没有"说话） */
-function buildGroups(detail: ReportDetail): Group[] {
+function buildGroups(tr: Tr, detail: ReportDetail): Group[] {
   const st = detail.summary
   const stats = detail.stats ?? {}
   const groups: Group[] = []
+  const okText = () => tr(st.ok ? 'report.row.ok' : 'report.row.bad')
 
   /* 结论：一眼的答案 */
   const resultCells: [string, string][] = [
-    ['结果', st.ok ? '成功' : '失败'],
-    ['耗时', elapsedText(st.elapsedMs)],
-    ['打印时间', printTimeText(detail.printTime?.totalSeconds)],
+    [tr('report.cell.result'), okText()],
+    [tr('report.cell.elapsed'), elapsedText(tr, st.elapsedMs)],
+    [tr('report.cell.printTime'), printTimeText(tr, detail.printTime?.totalSeconds)],
     [
-      '预设 · 机型',
+      tr('report.cell.presetMachine'),
       [st.presetName, st.machineType].filter((x): x is string => x !== null).join(' · ') || '—',
     ],
     /*
@@ -598,35 +635,35 @@ function buildGroups(detail: ReportDetail): Group[] {
      * 那时退回只显示 G-code 名（`?? null` 是给"后端没这一格"兜底，不编名字）。
      */
     [
-      '文件',
+      tr('report.cell.file'),
       st.modelName != null && st.gcodeName != null
-        ? `${st.modelName}（${st.gcodeName}）`
+        ? tr('report.cell.filePair', { model: st.modelName, gcode: st.gcodeName })
         : (st.gcodeName ?? '—'),
     ],
   ]
-  if (st.error !== null) resultCells.push(['原因', st.error])
+  if (st.error !== null) resultCells.push([tr('report.cell.reason'), st.error])
   groups.push({
     id: 'result',
-    title: '结论',
-    sum: `${st.ok ? '成功' : '失败'} · ${elapsedText(st.elapsedMs)}`,
+    title: tr('report.g.result'),
+    sum: `${okText()} · ${elapsedText(tr, st.elapsedMs)}`,
     cells: resultCells,
   })
 
   /* 打印：切片器给的事实 + 本程序算出来的打印时间 */
   const printCells: [string, string][] = [
     [
-      '打印时间（估算）',
+      tr('report.cell.printTimeEst'),
       detail.printTime?.totalSeconds === undefined
-        ? printTimeStatusText(detail.printTimeStatus)
-        : printTimeText(detail.printTime.totalSeconds),
+        ? printTimeStatusText(tr, detail.printTimeStatus)
+        : printTimeText(tr, detail.printTime.totalSeconds),
     ],
     ...STAT_CELLS.map(([key, label, unit]): [string, string] => [
-      label,
+      tr(label),
       statCell(stats[key], unit),
     ]),
   ]
   if (detail.printTime?.segments !== undefined) {
-    printCells.push(['耗时段数', String(detail.printTime.segments)])
+    printCells.push([tr('report.cell.segments'), String(detail.printTime.segments)])
   }
   /* 本程序估算 vs 切片器原话：两个数都真有才摆（这一段最值钱的信息） */
   const slicerSec = slicerEstimateSeconds(
@@ -635,34 +672,34 @@ function buildGroups(detail: ReportDetail): Group[] {
   const ours = detail.estimatedPrintSeconds ?? detail.printTime?.totalSeconds
   if (slicerSec !== null && slicerSec > 0 && ours !== undefined) {
     const pct = Math.round(((ours - slicerSec) / slicerSec) * 100)
-    printCells.push(['比切片器预估', `${pct >= 0 ? '+' : ''}${pct}%`])
+    printCells.push([tr('report.cell.vsSlicer'), `${pct >= 0 ? '+' : ''}${pct}%`])
   }
   if (hasAnyValue(printCells)) {
     groups.push({
       id: 'print',
-      title: '打印',
-      sum: printTimeText(detail.printTime?.totalSeconds),
+      title: tr('report.g.print'),
+      sum: printTimeText(tr, detail.printTime?.totalSeconds),
       cells: printCells,
     })
   }
 
   /* 涂胶 / 擦料塔 / 切片工艺：旧记录没有这些分包 ⇒ 整组不摆（不编占位值） */
   if (detail.glue !== undefined && detail.glue !== null) {
-    const g = glueGroup(detail.glue)
+    const g = glueGroup(tr, detail.glue)
     if (g !== null) groups.push(g)
   }
   if (detail.tower !== undefined && detail.tower !== null) {
-    const g = towerGroup(detail.tower)
+    const g = towerGroup(tr, detail.tower)
     if (g !== null) groups.push(g)
   }
   if (detail.slicer !== undefined && detail.slicer !== null) {
-    const g = slicerGroup(detail.slicer)
+    const g = slicerGroup(tr, detail.slicer)
     if (g !== null) groups.push(g)
   }
 
   /* 校准件身份证据链：普通模型那一趟后端不写这一格 ⇒ 整组不摆（旧记录同理） */
   if (detail.calibration != null) {
-    const g = calibrationGroup(detail.calibration)
+    const g = calibrationGroup(tr, detail.calibration)
     if (g !== null) groups.push(g)
   }
 
@@ -678,41 +715,45 @@ function buildGroups(detail: ReportDetail): Group[] {
     const c = detail.collision
     const adviceCells: [string, string][] = []
     if (c.adviceText !== undefined && c.adviceText !== '') {
-      adviceCells.push(['建议', c.adviceText])
+      adviceCells.push([tr('report.cell.advice'), c.adviceText])
     }
     /* 方向 / 至少挪多少：**只有"挪模型"那档才有数**（挪塔那档是 0，摆出来是噪音） */
     if (c.target === 'model') {
       if (c.direction !== undefined && c.direction !== '') {
-        adviceCells.push(['方向', `往${c.direction}挪`])
+        adviceCells.push([tr('report.cell.direction'), tr('report.cell.moveDir', { dir: c.direction })])
       }
       const mm = (v: number | undefined): string | null =>
         v === undefined || v <= 0 ? null : `${v.toFixed(1)} mm`
+      const noMove = tr('report.cell.noMove')
       const xs = [mm(c.requiredMoveX), mm(c.requiredMoveY)]
       if (xs[0] !== null || xs[1] !== null) {
         adviceCells.push([
-          '至少移动',
-          [`X ${xs[0] ?? '不用挪'}`, `Y ${xs[1] ?? '不用挪'}`].join(' · '),
+          tr('report.cell.minMove'),
+          [
+            tr('report.cell.axisX', { v: xs[0] ?? noMove }),
+            tr('report.cell.axisY', { v: xs[1] ?? noMove }),
+          ].join(' · '),
         ])
       }
     }
     if (c.conflictCount !== undefined && c.conflictCount > 0) {
-      adviceCells.push(['冲突点', `${c.conflictCount} 个`])
+      adviceCells.push([tr('report.cell.conflicts'), tr('report.cell.conflictCount', { n: c.conflictCount })])
     }
     if (c.adviceCode !== undefined && c.adviceCode !== '') {
-      adviceCells.push(['码', c.adviceCode])
+      adviceCells.push([tr('report.cell.code'), c.adviceCode])
     }
     if (adviceCells.length > 0) {
       groups.push({
         id: 'advice',
-        title: '建议',
-        sum: c.target === 'wipe-tower' ? '挪擦料塔' : '挪模型',
+        title: tr('report.g.advice'),
+        sum: tr(c.target === 'wipe-tower' ? 'report.advice.tower' : 'report.advice.model'),
         cells: adviceCells,
       })
     }
     groups.push({
       id: 'collision',
-      title: '碰撞位置',
-      sum: '热床俯视',
+      title: tr('report.g.collision'),
+      sum: tr('report.collision.sum'),
       cells: [],
     })
   }
@@ -727,37 +768,48 @@ function buildGroups(detail: ReportDetail): Group[] {
     const r = detail.relocation
     const choiceText =
       r.choice === 'relocate'
-        ? '自动挪塔'
+        ? tr('report.reloc.choiceAuto')
         : r.choice === 'model'
-          ? '自己挪模型'
+          ? tr('report.reloc.choiceModel')
           : r.choice === 'timeout'
-            ? '没等到回答（超时）'
-            : '板上没有空位'
-    const cells: [string, string][] = [['你的选择', choiceText]]
+            ? tr('report.reloc.choiceTimeout')
+            : tr('report.reloc.choiceNoRoom')
+    const cells: [string, string][] = [[tr('report.cell.yourChoice'), choiceText]]
     const mm = (v: number | null | undefined): string =>
       v === null || v === undefined ? '—' : v.toFixed(1)
     if (r.to != null) {
       cells.push([
-        '塔位置',
-        `X ${mm(r.from[0])} / Y ${mm(r.from[1])} → X ${mm(r.to[0])} / Y ${mm(r.to[1])}`,
+        tr('report.cell.towerPos'),
+        tr('report.reloc.posFromTo', {
+          fx: mm(r.from[0]),
+          fy: mm(r.from[1]),
+          tx: mm(r.to[0]),
+          ty: mm(r.to[1]),
+        }),
       ])
-      cells.push(['挪动距离', `${mm(r.movedMm)} mm`])
+      cells.push([tr('report.cell.moved'), `${mm(r.movedMm)} mm`])
     } else {
-      cells.push(['塔位置', `X ${mm(r.from[0])} / Y ${mm(r.from[1])}（没有挪）`])
+      cells.push([
+        tr('report.cell.towerPos'),
+        tr('report.reloc.posNoMove', { fx: mm(r.from[0]), fy: mm(r.from[1]) }),
+      ])
     }
     if (r.verified === true) {
-      cells.push(['复检', `没有冲突（挪前 ${r.beforeConflictCount} 个冲突点）`])
+      cells.push([
+        tr('report.cell.recheck'),
+        tr('report.reloc.recheckOk', { n: r.beforeConflictCount }),
+      ])
     } else if (r.verified === false) {
       cells.push([
-        '复检',
-        `仍然有 ${r.afterConflictCount ?? 0} 个冲突点（挪前 ${r.beforeConflictCount} 个）`,
+        tr('report.cell.recheck'),
+        tr('report.reloc.recheckBad', { n: r.afterConflictCount ?? 0, m: r.beforeConflictCount }),
       ])
     }
-    cells.push(['塔高', `${mm(r.towerHeightMm)} mm`])
+    cells.push([tr('report.cell.towerHeight'), `${mm(r.towerHeightMm)} mm`])
     groups.push({
       id: 'relocation',
-      title: '挪塔',
-      sum: r.to != null ? '自动调整' : '没有调整',
+      title: tr('report.g.reloc'),
+      sum: tr(r.to != null ? 'report.reloc.sumAuto' : 'report.reloc.sumNone'),
       cells,
     })
     /*
@@ -773,8 +825,8 @@ function buildGroups(detail: ReportDetail): Group[] {
     if (r.before != null && moved) {
       groups.push({
         id: 'relocation-map',
-        title: '塔位变化',
-        sum: '现在 / 挪后',
+        title: tr('report.g.relocMap'),
+        sum: tr('report.reloc.mapSum'),
         cells: [],
       })
     }
@@ -784,9 +836,12 @@ function buildGroups(detail: ReportDetail): Group[] {
   if (detail.warnings.length > 0) {
     groups.push({
       id: 'warnings',
-      title: '警告',
-      sum: `${detail.warnings.length} 条`,
-      cells: detail.warnings.map((w, i): [string, string] => [`第 ${i + 1} 条`, w]),
+      title: tr('report.g.warnings'),
+      sum: tr('report.warnings.count', { n: detail.warnings.length }),
+      cells: detail.warnings.map((w, i): [string, string] => [
+        tr('report.warnings.item', { n: i + 1 }),
+        w,
+      ]),
     })
   }
 
@@ -794,8 +849,8 @@ function buildGroups(detail: ReportDetail): Group[] {
   const pipeMs = detail.pipeline.reduce((a, p) => a + (p.elapsedMs ?? 0), 0)
   groups.push({
     id: 'pipeline',
-    title: '管线计时',
-    sum: `${detail.pipeline.length} 步 · ${pipeMs.toFixed(0)} 毫秒`,
+    title: tr('report.g.pipeline'),
+    sum: tr('report.pipeline.sum', { n: detail.pipeline.length, ms: pipeMs.toFixed(0) }),
     cells: [],
   })
 
@@ -808,27 +863,29 @@ function buildGroups(detail: ReportDetail): Group[] {
       : null
   const fileCells: [string, string][] = [
     [
-      '输入',
+      tr('report.cell.input'),
       [
         detail.inputFile?.path ?? detail.gcodePath ?? '—',
         inMb,
-        detail.inputFile?.lines === undefined ? null : `${detail.inputFile.lines} 行`,
+        detail.inputFile?.lines === undefined
+          ? null
+          : tr('report.files.lines', { n: detail.inputFile.lines }),
         `sha ${shaShort(detail.inputFile?.sha256)}`,
       ]
         .filter((x): x is string => x !== null)
         .join(' · '),
     ],
     [
-      '输出',
+      tr('report.cell.output'),
       [detail.outputFile?.path ?? '—', outMb, `sha ${shaShort(detail.outputFile?.sha256)}`]
         .filter((x): x is string => x !== null)
         .join(' · '),
     ],
-    ['预设', detail.presetPath ?? st.presetName ?? '—'],
+    [tr('report.cell.preset'), detail.presetPath ?? st.presetName ?? '—'],
   ]
   if (detail.invocation?.exe !== undefined) {
     fileCells.push([
-      '调用',
+      tr('report.cell.invoke'),
       `${detail.invocation.exe}${
         detail.invocation.args !== undefined ? ` ${detail.invocation.args.join(' ')}` : ''
       }`,
@@ -836,8 +893,8 @@ function buildGroups(detail: ReportDetail): Group[] {
   }
   groups.push({
     id: 'files',
-    title: '文件与校验',
-    sum: diff === null ? '' : `改了 ${diff}`,
+    title: tr('report.g.files'),
+    sum: diff === null ? '' : tr('report.files.sumChanged', { diff }),
     cells: fileCells,
   })
 
@@ -850,8 +907,8 @@ function buildGroups(detail: ReportDetail): Group[] {
     const n = Object.keys(detail.snapshot.params).length
     groups.push({
       id: 'snapshot',
-      title: '参数快照',
-      sum: n === 0 ? '这一份读不出参数' : `${n} 项 · 当时那一份`,
+      title: tr('report.g.snapshot'),
+      sum: n === 0 ? tr('report.snapshot.sumEmpty') : tr('report.snapshot.sum', { n }),
       cells: [],
     })
   }
@@ -892,6 +949,7 @@ interface SnapRow {
  */
 function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
   /* 字段定义（中文名 + 数据域分区）从 catalog 来 —— 与参数页同一份，不手抄 */
+  const tr = useT()
   const [defList, setDefList] = useState<CatalogParamDef[] | null>(null)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -941,7 +999,7 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
        */}
       {snap.missing !== undefined && snap.missing.length > 0 && (
         <p className={s.snapBad} role="alert">
-          这一盘有 {snap.missing.length} 项设置没读到，用的是默认值：
+          {tr('report.snapshot.missing', { n: snap.missing.length })}
           {snap.missing.join('、')}
         </p>
       )}
@@ -950,12 +1008,14 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
           className={s.snapSearch}
           type="text"
           value={query}
-          placeholder="搜参数名 / 字段 / 值…"
-          aria-label="搜索参数快照"
+          placeholder={tr('report.snapshot.searchPh')}
+          aria-label={tr('report.snapshot.searchAria')}
           onChange={(e) => setQuery(e.target.value)}
         />
         <span className={s.snapCount}>
-          {rows.length === all.length ? `${all.length} 项` : `${rows.length} / ${all.length} 项`}
+          {rows.length === all.length
+            ? tr('report.snapshot.countAll', { n: all.length })
+            : tr('report.snapshot.countSome', { shown: rows.length, all: all.length })}
         </span>
         <button
           type="button"
@@ -966,11 +1026,13 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
             else setOpen(Object.fromEntries(sections.map((sec) => [sec.id, true])))
           }}
         >
-          {allOpen ? '全部收起' : '全部展开'}
+          {tr(allOpen ? 'report.snapshot.collapseAll' : 'report.snapshot.expandAll')}
         </button>
       </div>
 
-      {sections.length === 0 && <p className={s.snapEmpty}>没有命中「{query}」的参数。</p>}
+      {sections.length === 0 && (
+        <p className={s.snapEmpty}>{tr('report.snapshot.noHit', { q: query })}</p>
+      )}
 
       {sections.map((sec) => {
         const shown = searching || open[sec.id] === true
@@ -993,7 +1055,7 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
                 {sec.rows.map((row) => (
                   <div className={s.snapRow} key={row.key}>
                     <dt title={row.key}>{row.label}</dt>
-                    <dd>{row.value === '' ? '（空）' : row.value}</dd>
+                    <dd>{row.value === '' ? tr('report.snapshot.empty') : row.value}</dd>
                   </div>
                 ))}
               </dl>
@@ -1004,7 +1066,7 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
 
       {/* IR 终态原文：排查"程序到底认成了什么"的最后一份材料（折叠，不倒一堆 JSON） */}
       <details className={s.snapIr}>
-        <summary>IR 终态（程序实际认到的，原样 JSON）</summary>
+        <summary>{tr('report.snapshot.irTitle')}</summary>
         <pre className={s.snapJson}>{JSON.stringify(snap.ir, null, 2)}</pre>
       </details>
     </div>
@@ -1044,6 +1106,7 @@ function TowerPlate({
   /** 报告行的机型 —— `CollisionMap` 按它查板规格（`A1_MINI` 这种） */
   machineType: string | null
 }) {
+  const tr = useT()
   const ir = snap.ir
   const wiping = objOf(ir.Wiping)
   const rib = objOf(ir.Rib)
@@ -1126,13 +1189,15 @@ function TowerPlate({
         ghost={ghost}
         hideLegend
         height={132}
-        label="放大查看擦料塔位置"
+        label={tr('report.towerPlate.label')}
       />
       <p className={same || !hasIr ? s.plateNote : `${s.plateNote} ${s.plateBad}`}>
-        {hasPreset && `预设写 (${fmtNum(presetX)}, ${fmtNum(presetY)})`}
+        {hasPreset && tr('report.towerPlate.preset', { x: fmtNum(presetX), y: fmtNum(presetY) })}
         {hasPreset && hasIr && ' · '}
-        {hasIr && `程序认到 (${fmtNum(irX as number)}, ${fmtNum(irY as number)})`}
-        {hasPreset && hasIr && (same ? ' —— 一致' : ' —— 两处不一致，这一盘按程序认到的那个跑')}
+        {hasIr && tr('report.towerPlate.ir', { x: fmtNum(irX as number), y: fmtNum(irY as number) })}
+        {hasPreset &&
+          hasIr &&
+          tr(same ? 'report.towerPlate.same' : 'report.towerPlate.diff')}
       </p>
     </div>
   )
@@ -1147,7 +1212,8 @@ function TowerPlate({
  * 全被省略号吃掉了。全名挂在调用方的 `title` 上。
  */
 function FileName({ name }: { name: string | null }) {
-  const n = name ?? '（记录里没写文件名）'
+  const tr = useT()
+  const n = name ?? tr('report.row.noName')
   if (n.length <= FILE_SHORT_MAX) return <>{n}</>
   return (
     <>
@@ -1158,6 +1224,7 @@ function FileName({ name }: { name: string | null }) {
 }
 
 export default function PageReport() {
+  const tr = useT()
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -1167,11 +1234,13 @@ export default function PageReport() {
   useEffect(() => {
     if (devNote.on) {
       setNote({
-        text: '已确认导出：3 份文件写到 /Users/wzy/Library/Application Support/SupportEase/exports/',
+        text: tr('report.note.devExport', {
+          path: '/Users/wzy/Library/Application Support/SupportEase/exports/',
+        }),
         bad: false,
       })
     }
-  }, [devNote.on])
+  }, [devNote.on, tr])
   const [selId, setSelId] = useState<string | null>(null)
   const [detail, setDetail] = useState<ReportDetail | null>(null)
   const [detailErr, setDetailErr] = useState<string | null>(null)
@@ -1262,15 +1331,15 @@ export default function PageReport() {
          * 页面早就不在读了，提示还赖在那儿，用户只会当它坏了（提示条本来
          * 就"手动关、不自动消失"，那**读完了**这件事就必须由代码自己说）。
          */
-        setNote((cur) => (cur?.text === READING_NOTE ? null : cur))
+        setNote((cur) => (cur?.text === tr(READING_NOTE) ? null : cur))
       },
       (e: unknown) => {
         setRows([])
         setErr(errorText(e))
-        setNote((cur) => (cur?.text === READING_NOTE ? null : cur))
+        setNote((cur) => (cur?.text === tr(READING_NOTE) ? null : cur))
       },
     )
-  }, [])
+  }, [tr])
 
   useEffect(() => {
     read()
@@ -1602,7 +1671,7 @@ export default function PageReport() {
     })
   }
 
-  const groups = detail === null ? [] : buildGroups(detail)
+  const groups = detail === null ? [] : buildGroups(tr, detail)
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
 
@@ -1617,8 +1686,8 @@ export default function PageReport() {
       onPointerCancel={onUp}
     >
       <div className={s.sideHead}>
-        <span className={s.sideLb}>执行记录</span>
-        <span className={s.sideCnt}>{(rows ?? []).length} 条</span>
+        <span className={s.sideLb}>{tr('report.side.title')}</span>
+        <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
       </div>
 
       <div className={s.sideTools}>
@@ -1639,8 +1708,8 @@ export default function PageReport() {
           <input
             className={s.searchInput}
             type="text"
-            placeholder="搜索文件名…"
-            aria-label="搜索文件名"
+            placeholder={tr('report.side.searchPh')}
+            aria-label={tr('report.side.searchAria')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -1655,7 +1724,7 @@ export default function PageReport() {
               aria-pressed={filter === id}
               onClick={() => setFilter(id)}
             >
-              {label} <b>{counts[id]}</b>
+              {tr(label)} <b>{counts[id]}</b>
             </button>
           ))}
         </div>
@@ -1664,7 +1733,7 @@ export default function PageReport() {
       <ul className={s.sideList}>
         {days.length === 0 && (
           <li>
-            <p className={s.listEmpty}>没有匹配的记录</p>
+            <p className={s.listEmpty}>{tr('report.side.noMatch')}</p>
           </li>
         )}
         {days.map((day) => {
@@ -1692,7 +1761,7 @@ export default function PageReport() {
                   <path d="M8 3v4M16 3v4M3.5 10h17" />
                 </svg>
                 <span className={s.dayName}>
-                  {dayLabel(day)} · {day}
+                  {dayLabel(tr, day)} · {day}
                 </span>
                 <svg
                   className={s.dayChev}
@@ -1716,7 +1785,7 @@ export default function PageReport() {
                         className={s.sideRow}
                         data-ok={row.ok}
                         data-on={row.id === selId}
-                        title={`${row.gcodeName ?? '（记录里没写文件名）'} · ${row.startedAt ?? row.day} · ${elapsedText(row.elapsedMs)}`}
+                        title={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
                         onClick={() => pick(row)}
                       >
                         <span className={s.rowIcon} aria-hidden="true">
@@ -1739,12 +1808,12 @@ export default function PageReport() {
                             </span>
                             <span className={s.rowStatus} data-ok={row.ok}>
                               <span className={s.stDot} aria-hidden="true" />
-                              {row.ok ? '成功' : '失败'}
+                              {row.ok ? tr('report.row.ok') : tr('report.row.bad')}
                             </span>
                           </span>
                           <span className={s.rowSub}>
                             <span className={s.rowMeta}>{rowMeta(row)}</span>
-                            <span className={s.sideDur}>{elapsedText(row.elapsedMs)}</span>
+                            <span className={s.sideDur}>{elapsedText(tr, row.elapsedMs)}</span>
                           </span>
                         </span>
                       </button>
@@ -1761,29 +1830,32 @@ export default function PageReport() {
   )
 
   return (
-    <section className={s.page} ref={pageRef} aria-label="执行报告">
+    <section className={s.page} ref={pageRef} aria-label={tr('report.aria.page')}>
       <header className={s.head}>
-        <p className={s.sub}>
-          后处理每跑一次（切片器导出时按「复制后处理脚本」那条命令跑），这里多一条记录。
-        </p>
+        <p className={s.sub}>{tr('report.head.sub')}</p>
         <div className={s.headActions}>
           {/*
             两颗都是产品那套 `.btn`（`ui/Controls`）—— 槽上的 `[data-page] .btn`
             已经给了胶囊圆角。**不另开一套按钮皮**：全站按钮只许一套（同"模态框只许
             一套"那条），而且动作按钮一律文字、不带图标（见 `shell/icons.tsx` 那条）。
+
+            ★ 2026-10-26 起用 `size="sm"`：这一行要与工艺页工具条同高（41px，见
+              `--head-h`），而那两枚胶囊是 24px 高 —— 它们一大一小的话，两页顶条
+              怎么调都对不齐（作者：「改小报告的胶囊按钮和工艺的一样」）。
           */}
-          <Btn disabled={selId === null} onClick={() => setExportOpen(true)}>
-            导出
+          <Btn size="sm" disabled={selId === null} onClick={() => setExportOpen(true)}>
+            {tr('report.action.export')}
           </Btn>
           <Btn
+            size="sm"
             onClick={() => {
               read()
               /* 列表重读之外，右栏那条也重读 —— 打印时间可能刚从 `computing` 变成 `ready` */
               reloadDetail()
-              setNote({ text: READING_NOTE, bad: false })
+              setNote({ text: tr(READING_NOTE), bad: false })
             }}
           >
-            刷新
+            {tr('report.action.refresh')}
           </Btn>
         </div>
       </header>
@@ -1795,15 +1867,12 @@ export default function PageReport() {
       <div className={s.content}>
         {err !== null ? (
           <p className={s.err} role="alert">
-            执行记录读不出来：{err}
+            {tr('report.err.list', { err })}
           </p>
         ) : rows === null ? (
-          <p className={s.empty}>正在读执行记录…</p>
+          <p className={s.empty}>{tr('report.empty.loading')}</p>
         ) : rows.length === 0 ? (
-          <p className={s.empty}>
-            还没有执行记录 —— 把首页「复制后处理脚本」贴进切片器的后处理脚本栏，
-            导出打印文件时会自动生成第一条。
-          </p>
+          <p className={s.empty}>{tr('report.empty.none')}</p>
         ) : (
           <div className={s.pane}>
             {listHtml}
@@ -1811,21 +1880,18 @@ export default function PageReport() {
 
             <section className={s.main}>
               {sel === null ? (
-                <p className={s.empty}>左边选一条记录看详情。</p>
+                <p className={s.empty}>{tr('report.detail.pick')}</p>
               ) : (
                 <>
                   <div className={s.mainHead}>
-                    <h3
-                      className={s.mainFile}
-                      title={sel.gcodeName ?? '（记录里没写文件名）'}
-                    >
+                    <h3 className={s.mainFile} title={sel.gcodeName ?? tr('report.row.noName')}>
                       <FileName name={sel.gcodeName} />
                     </h3>
                     <span className={sel.ok ? s.chip : `${s.chip} ${s.chipBad}`}>
-                      {sel.ok ? '成功' : '失败'}
+                      {sel.ok ? tr('report.row.ok') : tr('report.row.bad')}
                     </span>
                     <span className={s.mainWhen}>
-                      {sel.startedAt ?? sel.day} · {elapsedText(sel.elapsedMs)}
+                      {sel.startedAt ?? sel.day} · {elapsedText(tr, sel.elapsedMs)}
                     </span>
                   </div>
 
@@ -1840,7 +1906,7 @@ export default function PageReport() {
                           aria-selected={activeTab === TAB_ALL}
                           onClick={() => setTab(TAB_ALL)}
                         >
-                          全部
+                          {tr('report.tab.all')}
                         </button>
                         {groups.map((g) => (
                           <button
@@ -1887,17 +1953,19 @@ export default function PageReport() {
                                 {detail.pipeline.map((step, i) => (
                                   <li key={i} className={s.step}>
                                     <span className={s.stepHead}>
-                                      <b>{stepName(step.id, i)}</b>
+                                      <b>{stepName(tr, step.id, i)}</b>
                                       <span className={s.stepMs}>
-                                        {elapsedText(step.elapsedMs ?? null)}
+                                        {elapsedText(tr, step.elapsedMs ?? null)}
                                       </span>
                                       {/* 失败 / 取消的记录：最后停在的那一步给个记号
                                           （status 由钩子写侧给；旧记录没有就不摆） */}
                                       {step.status === 'error' && (
-                                        <span className={s.stepBad}>停在这一步</span>
+                                        <span className={s.stepBad}>{tr('report.step.stopped')}</span>
                                       )}
                                       {step.status === 'cancelled' && (
-                                        <span className={s.stepStopped}>在这一步取消</span>
+                                        <span className={s.stepStopped}>
+                                          {tr('report.step.cancelled')}
+                                        </span>
                                       )}
                                     </span>
                                     {step.message !== undefined && step.message !== '' && (
@@ -1939,7 +2007,9 @@ export default function PageReport() {
                                       <dt>{k}</dt>
                                       <dd
                                         className={
-                                          k === '调用' || k === '码' ? s.mono : undefined
+                                          k === tr('report.cell.invoke') || k === tr('report.cell.code')
+                                            ? s.mono
+                                            : undefined
                                         }
                                       >
                                         {v}
@@ -1964,11 +2034,11 @@ export default function PageReport() {
 
                   {detailErr !== null && (
                     <p className={s.err} role="alert">
-                      详情读不出来：{detailErr}
+                      {tr('report.detail.err', { err: detailErr })}
                     </p>
                   )}
                   {detail === null && detailErr === null && (
-                    <p className={s.empty}>正在读这一条的详情…</p>
+                    <p className={s.empty}>{tr('report.detail.loading')}</p>
                   )}
                 </>
               )}

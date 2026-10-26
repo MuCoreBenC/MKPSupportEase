@@ -9,6 +9,8 @@
 //! 它们是**进程与安装包自己**的事。混进去会让"这条命令要不要联网/碰文件"这个问题
 //! 又得靠通读代码来回答。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use tauri::AppHandle;
@@ -41,8 +43,9 @@ fn preset_folder(app: &AppHandle) -> Result<PathBuf, AppError> {
     let dir = user_root.join(crate::fsx::paths::LOCAL_DIR);
     if !dir.is_dir() {
         /* 建一个空目录：它是"你那些预设该放这儿"的落点，不存在时建成空的无害 */
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| AppError::io("建不了预设目录").with_detail(e.to_string()))?;
+        std::fs::create_dir_all(&dir).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.app.030", &[])).with_detail(e.to_string())
+        })?;
     }
     Ok(dir)
 }
@@ -52,7 +55,7 @@ fn reveal_dir(app: &AppHandle, dir: &Path) -> Result<(), AppError> {
     use tauri_plugin_opener::OpenerExt as _;
     app.opener()
         .open_path(dir.display().to_string(), None::<&str>)
-        .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
+        .map_err(|e| AppError::io(messages::text("ui.ipc.app.031", &[])).with_detail(e.to_string()))
 }
 
 /// **卸载应用**：删程序本体，然后退出。
@@ -78,15 +81,16 @@ fn reveal_dir(app: &AppHandle, dir: &Path) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn uninstall(app: AppHandle) -> Result<(), AppError> {
     traced("uninstall", |_| {
-        let exe = std::env::current_exe()
-            .map_err(|e| AppError::io("找不到程序本体").with_detail(e.to_string()))?;
+        let exe = std::env::current_exe().map_err(|e| {
+            AppError::io(messages::text("ui.ipc.app.032", &[])).with_detail(e.to_string())
+        })?;
 
         #[cfg(target_os = "macos")]
         {
             let bundle = macos_app_bundle(&exe)?;
             std::fs::remove_dir_all(&bundle).map_err(|e| {
                 /* detail 里带上错误码：卸载是不可逆动作，用户报问题时一个码就能定位 */
-                AppError::io("删不掉程序本体")
+                AppError::io(messages::text("ui.ipc.app.033", &[]))
                     .with_detail(format!("E_SYS_UNINSTALL_001 {}：{e}", bundle.display()))
             })?;
             /* 删完就走：进程留着会让 Dock 上留一个空图标 */
@@ -99,7 +103,7 @@ pub async fn uninstall(app: AppHandle) -> Result<(), AppError> {
             /* 正在跑的 exe 删不掉 ⇒ 交给一个 detach 的 cmd：等两秒、删目录、删自己 */
             let dir = exe
                 .parent()
-                .ok_or_else(|| AppError::io("找不到程序所在目录"))?
+                .ok_or_else(|| AppError::io(messages::text("ui.ipc.app.034", &[])))?
                 .to_path_buf();
             std::process::Command::new("cmd")
                 .args([
@@ -117,7 +121,8 @@ pub async fn uninstall(app: AppHandle) -> Result<(), AppError> {
                 ])
                 .spawn()
                 .map_err(|e| {
-                    AppError::io("起不了卸载进程").with_detail(format!("E_SYS_UNINSTALL_001 {e}"))
+                    AppError::io(messages::text("ui.ipc.app.035", &[]))
+                        .with_detail(format!("E_SYS_UNINSTALL_001 {e}"))
                 })?;
             app.exit(0);
             Ok(())
@@ -126,8 +131,11 @@ pub async fn uninstall(app: AppHandle) -> Result<(), AppError> {
         #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = exe;
-            Err(AppError::io("这个平台上还没做卸载")
-                .with_detail("E_SYS_UNINSTALL_001 目前只支持 macOS 与 Windows".to_owned()))
+            Err(
+                AppError::io(messages::text("ui.ipc.app.036", &[])).with_detail(
+                    ::postprocess::diag::messages::text("ui.ipc.app.why_uninstall_platform", &[]),
+                ),
+            )
         }
     })
 }
@@ -142,7 +150,7 @@ fn macos_app_bundle(exe: &Path) -> Result<PathBuf, AppError> {
         .find(|p| p.extension().is_some_and(|e| e == "app"))
         .map(Path::to_path_buf)
         .ok_or_else(|| {
-            AppError::io("这个程序不是从 .app 里跑的")
+            AppError::io(messages::text("ui.ipc.app.037", &[]))
                 .with_detail(format!("E_SYS_UNINSTALL_001 {}", exe.display()))
         })
 }

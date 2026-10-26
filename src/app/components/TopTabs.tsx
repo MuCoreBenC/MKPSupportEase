@@ -1,6 +1,8 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 import Icon from '../../components/Icon'
+import { useT } from '../../i18n'
+import type { Tab } from '../constants/tabs'
 import UpdateIndicator from './UpdateIndicator'
 import PostProcessChip from '../postprocess/PostProcessChip'
 import { useActivePreset } from '../state/appState'
@@ -14,11 +16,6 @@ import { winClose, winMinimize, winToggleMaximize } from '../window'
 import type { Density } from '../../hooks/useDensity'
 import type { Platform } from '../../hooks/usePlatform'
 import s from './TopTabs.module.css'
-
-interface Tab {
-  id: string
-  label: string
-}
 
 interface TopTabsProps {
   tabs: Tab[]
@@ -88,6 +85,8 @@ export default function TopTabs({
   postProcess,
 }: TopTabsProps) {
 
+  /* 页签 / 按钮的无障碍名都走字典（2026-10-25）：语言一换，这里同帧换字 */
+  const tr = useT()
   const isMac = platform === 'macos'
   const maximized = useWindowMaximized()
   const drag = useTitlebarDrag()
@@ -172,7 +171,7 @@ export default function TopTabs({
   }, [])
 
   const wideStrip = (
-    <nav ref={navRef} className={s.tabs} aria-label="主页签">
+    <nav ref={navRef} className={s.tabs} aria-label={tr('tabs.aria')}>
       {tabs.map((t) => {
         const on = t.id === active
         return (
@@ -188,7 +187,7 @@ export default function TopTabs({
               else tabEls.current.delete(t.id)
             }}
           >
-            {t.label}
+            {tr(t.label)}
           </button>
         )
       })}
@@ -232,7 +231,7 @@ export default function TopTabs({
         type="button"
         className={s.logo}
         data-clickable="true"
-        title="把这一份的后处理脚本复制到剪贴板"
+        title={tr('tabs.copyScript')}
         onClick={copyScript}
       >
         MKP
@@ -264,18 +263,23 @@ export default function TopTabs({
           不会误把点击窗口键当成拖窗或双击缩放 */}
       {!isMac && (
         <div className={s.controls}>
-          <button type="button" className={s.ctrl} aria-label="最小化" onClick={winMinimize}>
+          <button type="button" className={s.ctrl} aria-label={tr('tabs.min')} onClick={winMinimize}>
             <Icon name="min" size={15} strokeWidth={1.5} />
           </button>
           <button
             type="button"
             className={s.ctrl}
-            aria-label={maximized ? '还原' : '最大化'}
+            aria-label={maximized ? tr('tabs.restore') : tr('tabs.max')}
             onClick={winToggleMaximize}
           >
             <Icon name={maximized ? 'restore' : 'max'} size={15} strokeWidth={1.5} />
           </button>
-          <button type="button" className={`${s.ctrl} ${s.close}`} aria-label="关闭" onClick={winClose}>
+          <button
+            type="button"
+            className={`${s.ctrl} ${s.close}`}
+            aria-label={tr('tabs.close')}
+            onClick={winClose}
+          >
             <Icon name="close" size={15} strokeWidth={1.5} />
           </button>
         </div>

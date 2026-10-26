@@ -42,6 +42,7 @@
 
 import { useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
+import { useT, type StringKey } from '../../i18n'
 import type { Density } from '../../hooks/useDensity'
 import FieldPopover from '../../components/field/FieldPopover'
 import Icon from '../shell/icons'
@@ -69,11 +70,11 @@ interface Props {
 }
 
 /** placeholder 随宽度换文案：compact 档的框只有 132px，写全必然切在半个字上 */
-const PLACEHOLDER: Record<Density, string> = {
-  ultra: '搜索参数名称、字段名或 TOML 键名…',
-  wide: '搜索参数名称或字段名…',
-  compact: '搜索参数…',
-  mini: '搜索…',
+const PLACEHOLDER: Record<Density, StringKey> = {
+  ultra: 'params.search.ultra',
+  wide: 'params.search.wide',
+  compact: 'params.search.compact',
+  mini: 'params.search.mini',
 }
 
 export default function SearchField({
@@ -86,6 +87,7 @@ export default function SearchField({
   onPick,
   onForget,
 }: Props) {
+  const tr = useT()
   /* 类型里带上 `| null` 才拿到可写的那个 ref 形态（`useRef<T>(null)` 给的是只读的） */
   const ownRef = useRef<HTMLInputElement | null>(null)
   /** 下拉的锚点：整个框（点图标、点框沿都算在框里，浮层的「点外面」判据要用它） */
@@ -132,10 +134,10 @@ export default function SearchField({
         ref={attach}
         className={s.input}
         value={value}
-        placeholder={PLACEHOLDER[density]}
-        aria-label="搜索参数"
+        placeholder={tr(PLACEHOLDER[density])}
+        aria-label={tr('params.search.aria')}
         aria-keyshortcuts="Control+F"
-        title="搜索参数（Ctrl+F）"
+        title={tr('params.search.title')}
         onFocus={openHist}
         onBlur={() => onCommit?.(value)}
         onChange={(e) => {
@@ -169,7 +171,7 @@ export default function SearchField({
         <button
           type="button"
           className={s.clear}
-          aria-label="清空搜索"
+          aria-label={tr('params.search.clear')}
           onClick={() => {
             onChange('')
             ownRef.current?.focus()
@@ -188,7 +190,7 @@ export default function SearchField({
         <FieldPopover anchor={fieldRef.current} onClose={() => setHistOpen(false)}>
           <ul className={s.hist}>
             <li className={s.histHead} aria-hidden>
-              最近搜索
+              {tr('params.search.recent')}
             </li>
             {history.map((term) => (
               <li key={term} className={s.histRow}>
@@ -210,8 +212,8 @@ export default function SearchField({
                 <button
                   type="button"
                   className={s.histForget}
-                  aria-label={`忘掉「${term}」`}
-                  title="忘掉这一条"
+                  aria-label={tr('params.search.forget', { term })}
+                  title={tr('params.search.forgetTitle')}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onForget?.(term)}
                 >

@@ -51,6 +51,8 @@
 //! `error`、`detail`（文件事实 / 统计 / 打印时间）与 `pipeline`（逐阶段计时）。
 //! 本模块按**界面要显示的**截取 —— 没显示的字段不搬，将来要展示再加，不预造大 DTO。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -170,13 +172,21 @@ fn summarize(path: &std::path::Path, id: &str, day: &str) -> ReportSummary {
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
         Err(e) => {
-            return broken_summary(id, day, format!("这份记录读不出来：{e}"));
+            return broken_summary(
+                id,
+                day,
+                messages::text("ui.ipc.report.broken_read", &[("detail", &e.to_string())]),
+            );
         }
     };
     let meta: serde_json::Value = match serde_json::from_str(&text) {
         Ok(v) => v,
         Err(e) => {
-            return broken_summary(id, day, format!("这份记录不是合法的 JSON：{e}"));
+            return broken_summary(
+                id,
+                day,
+                messages::text("ui.ipc.report.broken_json", &[("detail", &e.to_string())]),
+            );
         }
     };
     let str_at = |key: &str| {
@@ -251,12 +261,17 @@ pub fn get_report_list(app: AppHandle) -> Result<Vec<ReportSummary>, AppError> {
 pub fn get_report_detail(app: AppHandle, id: String) -> Result<ReportDetail, AppError> {
     traced("getReportDetail", |_| {
         let dir = history_root(&app)?;
-        let (path, day) = find_meta(&dir, &id)
-            .ok_or_else(|| AppError::not_found(format!("没有这条执行记录：{id}")))?;
-        let text = std::fs::read_to_string(&path)
-            .map_err(|e| AppError::io("这份记录读不出来").with_detail(e.to_string()))?;
+        let (path, day) = find_meta(&dir, &id).ok_or_else(|| {
+            AppError::not_found(messages::text(
+                "ui.ipc.report.131",
+                &[("id", &id.to_string())],
+            ))
+        })?;
+        let text = std::fs::read_to_string(&path).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.report.132", &[])).with_detail(e.to_string())
+        })?;
         let meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-            AppError::corrupted("这份记录不是合法的 JSON").with_detail(e.to_string())
+            AppError::corrupted(messages::text("ui.ipc.report.133", &[])).with_detail(e.to_string())
         })?;
         let summary = summarize(&path, &id, &day);
         Ok(detail_of(summary, &meta))
@@ -431,8 +446,14 @@ fn sanitize_component(raw: &str) -> String {
 /// 文件就能造出这个 id）。
 fn check_id(id: &str) -> Result<(), AppError> {
     if id.is_empty() || id.contains(['/', '\\']) || id.chars().all(|c| c == '.') {
-        return Err(AppError::invalid_argument("这条记录的 id 不合法")
-            .with_detail(format!("{id:?} 不是一段文件名")));
+        return Err(
+            AppError::invalid_argument(messages::text("ui.ipc.report.134", &[])).with_detail(
+                ::postprocess::diag::messages::text(
+                    "ui.ipc.report.why_not_filename",
+                    &[("id", &format!("{id:?}"))],
+                ),
+            ),
+        );
     }
     Ok(())
 }
@@ -479,9 +500,10 @@ fn model_name_of(meta_path: &Path) -> Option<String> {
 /// 一条记录在归档里的两处落点：**三件套住的那一天** + 它那份 `_meta.json`。
 fn record_paths(root: &Path, id: &str) -> Result<(PathBuf, PathBuf), AppError> {
     let (meta_path, _day) = find_meta(root, id)
-        .ok_or_else(|| AppError::not_found(format!("没有这条执行记录：{id}")))?;
+        .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.report.135", &[("id", id)])))?;
     let day_dir = meta_path.parent().map(Path::to_path_buf).ok_or_else(|| {
-        AppError::internal("归档路径没有父目录").with_detail(meta_path.display().to_string())
+        AppError::internal(messages::text("ui.ipc.report.136", &[]))
+            .with_detail(meta_path.display().to_string())
     })?;
     Ok((day_dir, meta_path))
 }
@@ -501,23 +523,28 @@ fn copy_parts(
     target: &Path,
 ) -> Result<Vec<String>, AppError> {
     std::fs::create_dir_all(target).map_err(|e| {
-        AppError::io(format!("建不出保存位置：{}", target.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.ipc.report.137",
+            &[("v1", &target.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
 
     if let (Ok(dest), Ok(src)) = (target.canonicalize(), src_dir.canonicalize()) {
         if dest == src {
-            return Err(AppError::invalid_argument(
-                "保存位置就是归档自己的目录 —— 换一个地方（在这里会把原件覆盖掉）",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.report.138",
+                &[],
+            )));
         }
     }
 
     for part in parts {
         let dest = target.join(&part.name);
         if dest.exists() {
-            return Err(AppError::invalid_argument(format!(
-                "保存位置里已经有 {} 了 —— 换个位置，或先把那一份挪走",
-                part.name
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.report.139",
+                &[("v1", &part.name.to_string())],
             )));
         }
     }
@@ -529,7 +556,11 @@ fn copy_parts(
             for done in &written {
                 let _ = std::fs::remove_file(done);
             }
-            return Err(AppError::io(format!("写不出 {}", part.name)).with_detail(e.to_string()));
+            return Err(AppError::io(messages::text(
+                "ui.ipc.report.140",
+                &[("v1", &part.name.to_string())],
+            ))
+            .with_detail(e.to_string()));
         }
         written.push(dest.display().to_string());
     }
@@ -586,15 +617,19 @@ pub fn export_report_archive(
         check_id(&id)?;
         let parent = PathBuf::from(&dir);
         if dir.trim().is_empty() || !parent.is_absolute() {
-            return Err(AppError::invalid_argument("保存位置要给一个绝对路径"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.report.141",
+                &[],
+            )));
         }
         let root = history_root(&app)?;
         let (day_dir, meta_path) = record_paths(&root, &id)?;
         let base = export_base(&id, model_name_of(&meta_path).as_deref());
         let parts = parts_of(&day_dir, &id, &base);
         if parts.is_empty() {
-            return Err(AppError::not_found(format!(
-                "这条记录的文件一份都不在盘上：{id}"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.report.142",
+                &[("id", &id.to_string())],
             )));
         }
         copy_parts(&day_dir, &parts, &parent.join(&base))
@@ -620,7 +655,10 @@ pub async fn reveal_report_export(app: AppHandle, id: String, dir: String) -> Re
         check_id(&id)?;
         let parent = PathBuf::from(&dir);
         if dir.trim().is_empty() || !parent.is_absolute() {
-            return Err(AppError::invalid_argument("保存位置要给一个绝对路径"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.report.143",
+                &[],
+            )));
         }
         let root = history_root(&app)?;
         let (_day_dir, meta_path) = record_paths(&root, &id)?;
@@ -628,7 +666,9 @@ pub async fn reveal_report_export(app: AppHandle, id: String, dir: String) -> Re
         let target = export_target(&parent, &base)?;
         tauri_plugin_opener::OpenerExt::opener(&app)
             .open_path(target.to_string_lossy().into_owned(), None::<&str>)
-            .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string()))
+            .map_err(|e| {
+                AppError::io(messages::text("ui.ipc.report.144", &[])).with_detail(e.to_string())
+            })
     })
 }
 
@@ -640,8 +680,13 @@ pub async fn reveal_report_export(app: AppHandle, id: String, dir: String) -> Re
 fn export_target(parent: &Path, base: &str) -> Result<PathBuf, AppError> {
     let target = parent.join(base);
     if !target.is_dir() {
-        return Err(AppError::not_found(format!("这个位置里还没有「{base}」"))
-            .with_detail(format!("期望路径：{}", target.display())));
+        return Err(
+            AppError::not_found(messages::text("ui.ipc.report.145", &[("base", base)]))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.ipc.report.why_expected_path",
+                    &[("path", &target.display().to_string())],
+                )),
+        );
     }
     Ok(target)
 }

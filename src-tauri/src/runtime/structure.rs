@@ -51,6 +51,8 @@
 //! 所以模板写成 `machines[*].zones[*]` 这种**扫描式**路径，判据
 //! `every_probe_template_resolves` 再钉一次"每个模板都真的落到了东西上"。
 
+use postprocess::diag::messages;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -374,9 +376,11 @@ impl RuleTable {
         match std::fs::read_to_string(&file) {
             Ok(text) => Self::parse(&text, &file),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(RuleTable::default()),
-            Err(e) => {
-                Err(AppError::io(format!("读不出 {}", file.display())).with_detail(e.to_string()))
-            }
+            Err(e) => Err(AppError::io(messages::text(
+                "ui.runtime.structure.464",
+                &[("v1", &file.display().to_string())],
+            ))
+            .with_detail(e.to_string())),
         }
     }
 
@@ -387,30 +391,39 @@ impl RuleTable {
 
     pub fn parse(text: &str, path: &Path) -> Result<RuleTable, AppError> {
         let parsed: RulesFile = toml_edit::de::from_str(text).map_err(|e| {
-            AppError::corrupted(format!("{} 读不成结构规则表", path.display()))
-                .with_detail(e.to_string())
+            AppError::corrupted(messages::text(
+                "ui.runtime.structure.465",
+                &[("v1", &path.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
         let mut index = HashMap::new();
         for (i, rule) in parsed.signature.iter().enumerate() {
             if rule.signature.trim().len() != 16 {
-                return Err(AppError::corrupted(format!(
-                    "{} 里有一条签名不是 16 位：{:?}",
-                    path.display(),
-                    rule.signature
+                return Err(AppError::corrupted(messages::text(
+                    "ui.runtime.structure.466",
+                    &[
+                        ("v1", &path.display().to_string()),
+                        ("v2", &rule.signature.to_string()),
+                    ],
                 )));
             }
             if rule.min_client.trim().is_empty() {
-                return Err(AppError::corrupted(format!(
-                    "{} 里签名 {} 没写 minClient —— 没写就是没登记，别用空串糊过去",
-                    path.display(),
-                    rule.signature
+                return Err(AppError::corrupted(messages::text(
+                    "ui.runtime.structure.467",
+                    &[
+                        ("v1", &path.display().to_string()),
+                        ("v2", &rule.signature.to_string()),
+                    ],
                 )));
             }
             if index.insert(rule.signature.clone(), i).is_some() {
-                return Err(AppError::corrupted(format!(
-                    "{} 里签名 {} 登记了两遍 —— 同一个签名只该有一个答案",
-                    path.display(),
-                    rule.signature
+                return Err(AppError::corrupted(messages::text(
+                    "ui.runtime.structure.468",
+                    &[
+                        ("v1", &path.display().to_string()),
+                        ("v2", &rule.signature.to_string()),
+                    ],
                 )));
             }
         }

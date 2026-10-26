@@ -38,6 +38,8 @@
 //! 预设正文仍在交付区 / `presets-local/`。事件账、出处账、下载文件、图片模型
 //! 都不进这里（它们是业务数据 / 历史记录，各有各的落点）。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, OnceLock};
@@ -503,18 +505,27 @@ fn load_locked(root: &Path) -> Result<AppStateFile, AppError> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             return legacy_snapshot(root);
         }
-        Err(e) => return Err(AppError::io("读不到应用状态").with_detail(e.to_string())),
+        Err(e) => {
+            return Err(
+                AppError::io(messages::text("ui.runtime.app_state.345", &[]))
+                    .with_detail(e.to_string()),
+            )
+        }
     };
     /*
      * **先探代次、低代次先迁、迁完再解析**：`1` 代文件里可能有**已经退役的枚举值**
      * （`"origin":"mine"`），直接 `from_slice` 会先失败 ⇒ 迁移就没机会跑。
      * 探不出代次的（坏 JSON / 没有 `appStateSchema`）交给下面如实报错。
      */
-    let mut value = serde_json::from_slice::<serde_json::Value>(&bytes)
-        .map_err(|e| AppError::corrupted("应用状态读不出来").with_detail(e.to_string()))?;
+    let mut value = serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.app_state.346", &[]))
+            .with_detail(e.to_string())
+    })?;
     migrate_state(&mut value)?;
-    serde_json::from_value(value)
-        .map_err(|e| AppError::corrupted("应用状态读不出来").with_detail(e.to_string()))
+    serde_json::from_value(value).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.app_state.347", &[]))
+            .with_detail(e.to_string())
+    })
 }
 
 /// **已知代次 → 当前代次**的升级（就地改 JSON 树，只在内存里转，不落盘）。
@@ -531,14 +542,18 @@ fn migrate_state(value: &mut serde_json::Value) -> Result<(), AppError> {
         .get("appStateSchema")
         .and_then(serde_json::Value::as_u64)
     else {
-        return Err(AppError::corrupted(
-            "应用状态里没有格式代次（appStateSchema）",
-        ));
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.app_state.348",
+            &[],
+        )));
     };
     if schema > u64::from(APP_STATE_SCHEMA) {
-        return Err(AppError::corrupted(format!(
-            "应用状态的格式代次比程序新（文件是 {schema}，程序认到 {APP_STATE_SCHEMA}）—— \
-             这一版程序读不了，换新版再打开"
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.app_state.349",
+            &[
+                ("schema", &schema.to_string()),
+                ("APP_STATE_SCHEMA", &APP_STATE_SCHEMA.to_string()),
+            ],
         )));
     }
     if schema < 2 {
@@ -712,7 +727,10 @@ pub fn set_active_preset(root: &Path, file: &CatalogFile) -> Result<ActivePreset
         Some(want) => want.to_owned(),
         None => {
             let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
-                AppError::not_found(format!("{} 还不在本机 —— 先下载，再使用", file.file_name))
+                AppError::not_found(messages::text(
+                    "ui.runtime.app_state.350",
+                    &[("v1", &file.file_name.to_string())],
+                ))
             })?;
             hex(&Sha256::digest(&bytes))
         }
@@ -803,10 +821,9 @@ pub fn update_draft<T>(
     f: impl FnOnce(&PresetDraft) -> Result<(String, T), AppError>,
 ) -> Result<T, AppError> {
     with_state(root, |state| {
-        let draft = state
-            .draft
-            .as_ref()
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，改不了参数"))?;
+        let draft = state.draft.as_ref().ok_or_else(|| {
+            AppError::invalid_argument(messages::text("ui.runtime.app_state.351", &[]))
+        })?;
         let (text, out) = f(draft)?;
         /* 只换正文：来源与打开那一刻的指纹保持不动（与 `put_preset_draft` 同一条规矩） */
         if let Some(d) = state.draft.as_mut() {

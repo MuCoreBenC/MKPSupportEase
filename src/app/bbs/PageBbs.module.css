@@ -205,6 +205,11 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  /* 这一行就是全站"页头顶条"那一档高度（`--head-h`，见 tokens.css）——
+     报告页的页头照同一个数定高，两页切来切去时下面的内容不会上下跳
+     （作者 2026-10-26：「我希望报告页面和工艺页面的顶部的高度一样」）。
+     折成两行时它自己长高，`min-height` 只兜住"不低于"。 */
+  min-height: var(--head-h);
   padding: 6px 10px;
   border-bottom: 1px solid var(--bbs-line);
   background: var(--bbs-panel);

@@ -23,16 +23,25 @@
  *   里面就是同一个 `PageParams`）。顶栏再留一个"参数"页签，用户点进去还得先挑一份，
  *   与"右键这一份改这一份"是同一条路的两个入口，留一个就够。导航只剩 6 条。
  */
+import type { StringKey } from '../../i18n'
+
+/**
+ * 页签的 `label` 是**字典键**（2026-10-25 起），不是句子。
+ *
+ * ★ 为什么不能直接放句子：这张表是模块级常量，求值一次就冻住 —— 放中文就永远是中文。
+ *   渲染时由 `TopTabs` 用 `useT()` 取当前语言的那一份（语言一换，页签同帧换字）。
+ * ★ `id` 仍是路由真值（`machine` / `preset` / …），**不随语言变**。
+ */
 export interface Tab {
   id: string
-  label: string
+  label: StringKey
 }
 
 export const tabs: Tab[] = [
-  { id: 'machine', label: '首页' },
-  { id: 'preset', label: '预设' },
-  { id: 'calib', label: '校准' },
-  { id: 'bbs', label: '工艺' },
-  { id: 'report', label: '报告' },
-  { id: 'settings', label: '设置' },
+  { id: 'machine', label: 'tabs.home' },
+  { id: 'preset', label: 'tabs.presets' },
+  { id: 'calib', label: 'tabs.calib' },
+  { id: 'bbs', label: 'tabs.bbs' },
+  { id: 'report', label: 'tabs.report' },
+  { id: 'settings', label: 'tabs.settings' },
 ]

@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import s from './TextField.module.css'
 
 interface Props {
@@ -41,6 +42,7 @@ export default function TextField({
   clickToEdit = false,
   onChange,
 }: Props) {
+  const tr = useT()
   const [editing, setEditing] = useState(!clickToEdit)
   const [draft, setDraft] = useState(value)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -82,14 +84,14 @@ export default function TextField({
         className={s.view}
         data-invalid={invalid}
         aria-label={label}
-        title={value === '' ? '空' : value}
+        title={value === '' ? tr('field.emptyValue') : value}
         disabled={disabled}
         onClick={() => {
           setDraft(value)
           setEditing(true)
         }}
       >
-        {value === '' ? <span className={s.empty}>空</span> : value}
+        {value === '' ? <span className={s.empty}>{tr('field.emptyValue')}</span> : value}
       </button>
     )
   }

@@ -106,6 +106,7 @@ export function NumberField({
 export function Btn({
   children,
   variant = 'default',
+  size,
   disabled,
   onClick,
   className,
@@ -113,6 +114,14 @@ export function Btn({
 }: {
   children: ReactNode
   variant?: 'default' | 'accent' | 'primary' | 'ghost' | 'danger'
+  /**
+   * 尺寸（不换皮）。
+   *
+   * `sm` = 页头那种一行小胶囊：24px 高 / 左右 6px / 12px 字 —— 与工艺页工具条右端
+   * 那两枚开关（`WindowGadgets` 的 `.pill`）同一组数（见 `ui.module.css` 的 `.btnSm`）。
+   * 只在"顶条"这种地方用；框里、页脚里那些正经动作仍是不传（默认那一档）。
+   */
+  size?: 'sm'
   disabled?: boolean
   onClick?: () => void
   /**
@@ -130,6 +139,7 @@ export function Btn({
 }) {
   const cls = [
     s.btn,
+    size === 'sm' ? s.btnSm : '',
     variant === 'accent' ? s.btnAccent : '',
     variant === 'primary' ? s.btnPrimary : '',
     variant === 'ghost' ? s.btnGhost : '',

@@ -37,6 +37,8 @@
 //! id 仍被机型文件引用着（`defaultBundle` 五处、每个版本的 `recommendedBundle`
 //! 一处，实测 14 处非空引用；A2L 那处空串不算）—— 改写法时那些引用一起改。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -89,8 +91,11 @@ impl Bundles {
         let text = super::read(&file)?;
         let doc = super::parse_text(&text, &file)?;
         let parsed: BundlesFile = toml_edit::de::from_str(&text).map_err(|e| {
-            AppError::corrupted(format!("{} 读不成套餐定义", file.display()))
-                .with_detail(e.to_string())
+            AppError::corrupted(messages::text(
+                "ui.presetdata.bundles.201",
+                &[("v1", &file.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
 
         let out = Self {
@@ -139,11 +144,14 @@ impl Bundles {
             updated_at: bundle.updated_at,
         };
         if let Some(prev) = self.get(&candidate.id) {
-            return Err(
-                AppError::invalid_argument(format!("套餐 id 已经存在：{}", prev.id)).with_detail(
-                    "id 是主键，且大小写不敏感 —— 换一个 id，或先删掉原来那条".to_owned(),
-                ),
-            );
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.202",
+                &[("v1", &prev.id.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.why.id_is_key",
+                &[],
+            )));
         }
         self.check_one(&candidate)?;
 
@@ -167,7 +175,10 @@ impl Bundles {
                 toml_edit::ArrayOfTables::new(),
             ));
         let arr = entry.as_array_of_tables_mut().ok_or_else(|| {
-            AppError::corrupted(format!("{} 的 bundles 不是表数组", self.file.display()))
+            AppError::corrupted(messages::text(
+                "ui.presetdata.bundles.203",
+                &[("v1", &self.file.display().to_string())],
+            ))
         })?;
         arr.push(t);
 
@@ -204,7 +215,9 @@ impl Bundles {
             .items
             .iter()
             .position(|b| b.id.to_lowercase() == want)
-            .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.bundles.204", &[("id", id)]))
+            })?;
 
         let trimmed: Vec<String> = refs.iter().map(|s| s.trim().to_owned()).collect();
         // 影子条目借 check_one 的同一套判据，免得两条路分岔
@@ -223,12 +236,18 @@ impl Bundles {
                 .get_mut("bundles")
                 .and_then(|i| i.as_array_of_tables_mut())
                 .ok_or_else(|| {
-                    AppError::corrupted(format!("{} 的 bundles 不是表数组", self.file.display()))
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.bundles.205",
+                        &[("v1", &self.file.display().to_string())],
+                    ))
                 })?;
             let table = arr.get_mut(idx).ok_or_else(|| {
-                AppError::corrupted(format!(
-                    "文档里没有第 {idx} 条套餐（内存里有 {}）",
-                    self.items[idx].id
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.bundles.206",
+                    &[
+                        ("idx", &idx.to_string()),
+                        ("v1", &self.items[idx].id.to_string()),
+                    ],
                 ))
             })?;
             let mut list = toml_edit::Array::new();
@@ -264,7 +283,9 @@ impl Bundles {
             .items
             .iter()
             .position(|b| b.id.to_lowercase() == want)
-            .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.bundles.207", &[("id", id)]))
+            })?;
         let new_id = new_id.trim();
         check_bundle_id(new_id)?;
         if self
@@ -272,8 +293,9 @@ impl Bundles {
             .iter()
             .any(|b| b.id.to_lowercase() == new_id.to_lowercase() && b.id.to_lowercase() != want)
         {
-            return Err(AppError::invalid_argument(format!(
-                "套餐 id 已经存在：{new_id}"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.208",
+                &[("new_id", new_id)],
             )));
         }
         let display = display.map(str::trim).filter(|s| !s.is_empty());
@@ -284,12 +306,18 @@ impl Bundles {
                 .get_mut("bundles")
                 .and_then(|i| i.as_array_of_tables_mut())
                 .ok_or_else(|| {
-                    AppError::corrupted(format!("{} 的 bundles 不是表数组", self.file.display()))
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.bundles.209",
+                        &[("v1", &self.file.display().to_string())],
+                    ))
                 })?;
             let table = arr.get_mut(idx).ok_or_else(|| {
-                AppError::corrupted(format!(
-                    "文档里没有第 {idx} 条套餐（内存里有 {}）",
-                    self.items[idx].id
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.bundles.210",
+                    &[
+                        ("idx", &idx.to_string()),
+                        ("v1", &self.items[idx].id.to_string()),
+                    ],
                 ))
             })?;
             table["id"] = super::literal_str(new_id);
@@ -316,7 +344,9 @@ impl Bundles {
             .items
             .iter()
             .position(|b| b.id.to_lowercase() == want)
-            .ok_or_else(|| AppError::not_found(format!("查无此套餐：{id}")))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.bundles.211", &[("id", id)]))
+            })?;
         let removed = self.items.remove(pos);
 
         let arr = self
@@ -324,7 +354,10 @@ impl Bundles {
             .get_mut("bundles")
             .and_then(|i| i.as_array_of_tables_mut())
             .ok_or_else(|| {
-                AppError::corrupted(format!("{} 的 bundles 不是表数组", self.file.display()))
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.bundles.212",
+                    &[("v1", &self.file.display().to_string())],
+                ))
             })?;
         let idx = arr
             .iter()
@@ -334,9 +367,9 @@ impl Bundles {
                     .is_some_and(|s| s.to_lowercase() == want)
             })
             .ok_or_else(|| {
-                AppError::corrupted(format!(
-                    "内存里有 {}，文档里却找不到那一段 —— 别删，先查加载逻辑",
-                    removed.id
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.bundles.213",
+                    &[("v1", &removed.id.to_string())],
                 ))
             })?;
         arr.remove(idx);
@@ -360,9 +393,9 @@ impl Bundles {
                 .filter(|r| r.trim().to_lowercase() != want)
                 .count();
             if has && rest == 0 {
-                return Err(AppError::invalid_argument(format!(
-                    "套餐 {} 的 assetRefs 只剩 {asset_id} 这一条 —— 去掉它套餐就空了",
-                    b.id
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.bundles.214",
+                    &[("v1", &b.id.to_string()), ("asset_id", asset_id)],
                 ))
                 .with_detail(
                     "先把别的 BBS 预设配进来（MKP 与 BBS 必须成套配发，doc §12.4），\
@@ -386,19 +419,25 @@ impl Bundles {
                     .get_mut("bundles")
                     .and_then(|i| i.as_array_of_tables_mut())
                     .ok_or_else(|| {
-                        AppError::corrupted(format!(
-                            "{} 的 bundles 不是表数组",
-                            self.file.display()
+                        AppError::corrupted(messages::text(
+                            "ui.presetdata.bundles.215",
+                            &[("v1", &self.file.display().to_string())],
                         ))
                     })?;
                 let table = arr.get_mut(idx).ok_or_else(|| {
-                    AppError::corrupted(format!("文档里没有第 {idx} 条套餐（内存里有 {id}）"))
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.bundles.216",
+                        &[("idx", &idx.to_string()), ("id", &id.to_string())],
+                    ))
                 })?;
                 let refs = table
                     .get_mut("assetRefs")
                     .and_then(|i| i.as_array_mut())
                     .ok_or_else(|| {
-                        AppError::corrupted(format!("套餐 {id} 的 assetRefs 不是数组"))
+                        AppError::corrupted(messages::text(
+                            "ui.presetdata.bundles.217",
+                            &[("id", &id.to_string())],
+                        ))
                     })?;
                 refs.retain(|v| v.as_str().is_some_and(|s| s.trim().to_lowercase() != want));
             }
@@ -416,10 +455,14 @@ impl Bundles {
         for b in &self.items {
             let lower = b.id.to_lowercase();
             if let Some(prev) = seen.insert(lower, b.id.clone()) {
-                return Err(
-                    AppError::corrupted(format!("套餐 id 撞了：{} 与 {}", prev, b.id))
-                        .with_detail("id 是主键，且**大小写不敏感**".to_owned()),
-                );
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.bundles.218",
+                    &[("v1", &prev.to_string()), ("v2", &b.id.to_string())],
+                ))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.why.id_is_key",
+                    &[],
+                )));
             }
         }
         Ok(())
@@ -428,46 +471,54 @@ impl Bundles {
     /// 单条的形状检查（`add` 与 `check` 共用同一条，免得两条路分岔）
     fn check_one(&self, b: &Bundle) -> Result<(), AppError> {
         if b.id.trim().is_empty() {
-            return Err(AppError::invalid_argument("套餐 id 不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.219",
+                &[],
+            )));
         }
         if b.display.trim().is_empty() {
-            return Err(AppError::invalid_argument(format!(
-                "套餐 {} 没有 display —— 界面上要显示的就是它",
-                b.id
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.220",
+                &[("v1", &b.id.to_string())],
             )));
         }
         if b.machine_id.trim().is_empty() {
-            return Err(
-                AppError::invalid_argument(format!("套餐 {} 没有 machineId", b.id))
-                    .with_detail("套餐是按机型配的，缺了它就没法判断「这份套餐给谁用」".to_owned()),
-            );
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.221",
+                &[("v1", &b.id.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.why.bundle_needs_machine",
+                &[],
+            )));
         }
         if b.asset_refs.is_empty() {
-            return Err(
-                AppError::invalid_argument(format!("套餐 {} 的 assetRefs 是空的", b.id))
-                    .with_detail(
-                        "套餐的内容就是 BBS 引用（doc §12.4）：空的套餐等于交付了一半 —— \
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundles.222",
+                &[("v1", &b.id.to_string())],
+            ))
+            .with_detail(
+                "套餐的内容就是 BBS 引用（doc §12.4）：空的套餐等于交付了一半 —— \
                  MKP 预设与 BBS 预设必须成套配发"
-                            .to_owned(),
-                    ),
-            );
+                    .to_owned(),
+            ));
         }
         let mut seen: Vec<String> = Vec::new();
         for r in &b.asset_refs {
             let key = r.trim().to_lowercase();
             if key.is_empty() {
-                return Err(AppError::invalid_argument(format!(
-                    "套餐 {} 的 assetRefs 里有一项是空的",
-                    b.id
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.bundles.223",
+                    &[("v1", &b.id.to_string())],
                 ))
                 .with_detail(
                     "要「没有」就整条去掉，别留空串 —— 空串读成「填过但填了个空」".to_owned(),
                 ));
             }
             if seen.contains(&key) {
-                return Err(AppError::invalid_argument(format!(
-                    "套餐 {} 的 assetRefs 里有重复项：{r}",
-                    b.id
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.bundles.224",
+                    &[("v1", &b.id.to_string()), ("r", &r.to_string())],
                 )));
             }
             seen.push(key);
@@ -481,11 +532,15 @@ impl Bundles {
 /// 带分隔符或空格只会制造查不到的引用
 pub fn check_bundle_id(id: &str) -> Result<(), AppError> {
     if id.is_empty() {
-        return Err(AppError::invalid_argument("套餐 id 不能为空"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.bundles.225",
+            &[],
+        )));
     }
     if id.chars().any(|c| c.is_whitespace() || c == '/') {
-        return Err(AppError::invalid_argument(format!(
-            "套餐 id 不能含空白或路径分隔符：{id}"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.bundles.226",
+            &[("id", id)],
         )));
     }
     Ok(())

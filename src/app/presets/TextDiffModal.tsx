@@ -21,6 +21,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 
+import { useT } from '../../i18n'
 import { HeadNote, Modal } from '../../components/modal'
 /* 底栏按钮**直接用编辑文件那一套类**：两边高度必须是同一个数（见 `.footLeft` 那段注释） */
 import ps from './PagePresets.module.css'
@@ -69,6 +70,7 @@ export default function TextDiffModal({
   onEditLine: (lineNo: number, next: string) => void
   onClose: () => void
 }) {
+  const tr = useT()
   const rows = useMemo(() => lineDiff(left, right), [left, right])
   const sum = useMemo(() => diffSummary(rows), [rows])
   const total = sum.changed + sum.added + sum.removed
@@ -135,10 +137,10 @@ export default function TextDiffModal({
 
   const note =
     total === 0
-      ? '与默认值完全一致'
-      : `与默认值比：改了 ${sum.changed} 行` +
-        (sum.added > 0 ? `，多了 ${sum.added} 行` : '') +
-        (sum.removed > 0 ? `，少了 ${sum.removed} 行` : '')
+      ? tr('presets.diff.same')
+      : tr('presets.diff.changed', { changed: sum.changed }) +
+        (sum.added > 0 ? tr('presets.diff.added', { count: sum.added }) : '') +
+        (sum.removed > 0 ? tr('presets.diff.removed', { count: sum.removed }) : '')
 
   /** 一行的右侧格子：编辑态才能点开改；只读态就是一个 `<span>` */
   const rightCell = (lineNo: number | null, text: string | null, cls: string) => {
@@ -204,27 +206,27 @@ export default function TextDiffModal({
       size="xl"
       bodyFill
       host={host}
-      title="与默认值对比"
+      title={tr('presets.diff.title')}
       subtitle={fileName}
       onClose={onClose}
       footer={
         <>
           {/* 左簇：布局切换 + 「恢复默认值」（作者：别都堆在右边） */}
           <span className={s.footLeft}>
-            <span className={s.layoutSwitch} role="group" aria-label="对比布局">
+            <span className={s.layoutSwitch} role="group" aria-label={tr('presets.diff.layout')}>
               <button
                 type="button"
                 data-on={layout === 'split' || undefined}
                 onClick={() => setLayout('split')}
               >
-                左右
+                {tr('presets.diff.sideBySide')}
               </button>
               <button
                 type="button"
                 data-on={layout === 'unified' || undefined}
                 onClick={() => setLayout('unified')}
               >
-                上下
+                {tr('presets.diff.stacked')}
               </button>
             </span>
             <button
@@ -233,7 +235,7 @@ export default function TextDiffModal({
               onClick={onRestore}
               disabled={left === right}
             >
-              恢复默认值
+              {tr('presets.diff.restore')}
             </button>
           </span>
 
@@ -247,26 +249,26 @@ export default function TextDiffModal({
                   className={s.pill}
                   onClick={shell.onUndo}
                   disabled={!shell.canUndo}
-                  title="撤销"
+                  title={tr('presets.diff.undo')}
                 >
-                  撤销
+                  {tr('presets.diff.undo')}
                 </button>
                 <button
                   type="button"
                   className={s.pill}
                   onClick={shell.onRedo}
                   disabled={!shell.canRedo}
-                  title="重做"
+                  title={tr('presets.diff.redo')}
                 >
-                  重做
+                  {tr('presets.diff.redo')}
                 </button>
                 <button
                   type="button"
                   className={s.pill}
                   onClick={shell.onExit}
-                  title={EDIT_TEXT.exitTitle}
+                  title={tr(EDIT_TEXT.exitTitle)}
                 >
-                  {EDIT_TEXT.exitMode}
+                  {tr(EDIT_TEXT.exitMode)}
                 </button>
                 <button
                   type="button"
@@ -274,16 +276,16 @@ export default function TextDiffModal({
                   onClick={shell.onSave}
                   disabled={shell.saveDisabled}
                 >
-                  保存
+                  {tr(EDIT_TEXT.commit)}
                 </button>
               </>
             ) : (
               <>
                 <button type="button" className={s.pill} onClick={onClose}>
-                  关闭
+                  {tr('presets.diff.close')}
                 </button>
                 <button type="button" className={s.pillPrimary} onClick={shell.onEnter}>
-                  进入编辑模式
+                  {tr(EDIT_TEXT.enterMode)}
                 </button>
               </>
             )}
@@ -295,7 +297,12 @@ export default function TextDiffModal({
       <HeadNote text={note} tone={total === 0 ? 'ok' : 'note'} />
 
       <div className={s.wrap}>
-        <div className={s.diff} data-layout={layout} role="table" aria-label="与默认值的差异">
+        <div
+          className={s.diff}
+          data-layout={layout}
+          role="table"
+          aria-label={tr('presets.diff.diffAria')}
+        >
           {layout === 'split'
             ? rows.map((r, i) => (
                 <div className={s.row} data-kind={r.kind} role="row" key={i}>

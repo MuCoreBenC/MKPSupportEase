@@ -32,15 +32,16 @@ import { Btn } from '../ui/Controls'
 import { HeadNote, Modal } from '../../components/modal'
 import { api, uiErrorOf } from '../../api'
 import type { CalibModel, UiError } from '../../api'
+import { useT, type StringKey } from '../../i18n'
 import { activeForSelection, selectionFromActive } from '../home/activeSelection'
 import { activateFile, useActivePreset, useActivePresetReady } from '../state/appState'
 import { useCatalog } from '../home/useCatalog'
 import {
   AXIS_ROWS,
-  NEED_PRESET_HOW,
-  NEED_PRESET_TITLE,
-  Z_LEGEND,
-  Z_TIP,
+  NEED_PRESET_HOW_KEY,
+  NEED_PRESET_TITLE_KEY,
+  Z_LEGEND_KEY,
+  Z_TIP_KEY,
   xyHitLabel,
   zHitLabel,
 } from './calibAxes'
@@ -63,6 +64,8 @@ import s from './PageCalib.module.css'
  * `THEMES['浅色' | '深色']`），**读不到 CSS 变量** —— 所以这里要的是解析完的
  * 真值（`useIsDark()` = 用户那一档 + 系统深浅），不能只靠 `<html data-theme>`。
  */
+/* ★ 这两个是**生成器里的键**（`THEMES['浅色' | '深色']`），不是界面上给人看的字 ——
+   它必须原样是中文，换语言也不能动。界面上的说法另走 `calib.theme.*`。 */
 const PLATE_THEME_OF = { dark: '深色', light: '浅色' } as { dark: string; light: string }
 
 const EMPTY: Selection = { brand: null, model: null, variant: null }
@@ -74,17 +77,17 @@ type Step = 'z' | 'xy' | 'models'
  * 短一截是为了**窄窗不折行**：四字的「Z 偏移校准 / XY 偏移校准」在最小窗里
  * 会折成"Z 偏移 / 校准"两行（抽卡页 02 号的窄窗试出来的）。「测试模型」不长，不动。
  */
-const STEPS: { id: Step; label: string }[] = [
-  { id: 'z', label: 'Z 校准' },
-  { id: 'xy', label: 'XY 校准' },
-  { id: 'models', label: '测试模型' },
+const STEPS: { id: Step; label: StringKey }[] = [
+  { id: 'z', label: 'calib.tab.z' },
+  { id: 'xy', label: 'calib.tab.xy' },
+  { id: 'models', label: 'calib.tab.models' },
 ]
 
 const PLATE = {
   z: {
     axis: 'z',
     model: 'zoffset',
-    title: 'Z 偏移校准板',
+    title: 'calib.board.z',
     /* 2026-10-20 作者口径：现在只有「原版」与「加长版」两块，加长版是默认那块，
      * 所以它排第一、也是打开时预选的那一版。 */
     calibId: 'z-ext',
@@ -95,8 +98,8 @@ const PLATE = {
      * 校准流程与读数完全不变。后处理侧认这两版靠 `presets/calibration_models.toml`。
      */
     versions: [
-      { id: 'z-ext', label: '加长版' },
-      { id: 'z', label: '原版' },
+      { id: 'z-ext', label: 'calib.board.ext' },
+      { id: 'z', label: 'calib.board.orig' },
     ],
     hitLabel: zHitLabel,
     mm: { w: Z_VIEW_BOX[2], h: Z_VIEW_BOX[3] },
@@ -104,7 +107,7 @@ const PLATE = {
   xy: {
     axis: 'xy',
     model: 'precise',
-    title: 'XY 偏移校准板',
+    title: 'calib.board.xy',
     /* 与 Z 板同一口径（作者 2026-10-20）：加长版排第一、打开时预选它。 */
     calibId: 'xy-ext',
     /*
@@ -115,8 +118,8 @@ const PLATE = {
      * `presets/calibration_models.toml` 的 `xy-square-50` / `xy-square-55`。
      */
     versions: [
-      { id: 'xy-ext', label: '加长版' },
-      { id: 'xy', label: '原版' },
+      { id: 'xy-ext', label: 'calib.board.ext' },
+      { id: 'xy', label: 'calib.board.orig' },
     ],
     hitLabel: xyHitLabel,
     mm: { w: XY_VIEW_BOX[2], h: XY_VIEW_BOX[3] },
@@ -127,7 +130,7 @@ const PLATE = {
 type OpeningModel = {
   id: string
   name: string
-  versions: readonly { id: string; label: string }[]
+  versions: readonly { id: string; label: StringKey }[]
 }
 
 const TEST_MODEL_ID = 'test-models'
@@ -267,6 +270,8 @@ interface PageCalibProps {
 }
 
 export default function PageCalib({ initialStep }: PageCalibProps) {
+  /* 文案取用口（2026-10-26）：这一页的正文还在逐块迁，先接上共用那两行图例 */
+  const tr = useT()
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
@@ -351,7 +356,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     snap: 320,
     min: 240,
     max: 560,
-    label: '预设列表',
+    label: tr('calib.presetList'),
   })
 
   const fileOf = useCallback(
@@ -436,7 +441,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       ? ''
       : openingVersion === undefined
         ? opening.name
-        : `${opening.name} · ${openingVersion.label}`
+        : opening.name + tr('calib.opening', { version: openingVersion.label })
 
   /** 打开盘上那份（下载区或旧缓存）。没有缓存时按钮是灰的 —— 不给点了必报错的按钮 */
   const openCachedModel = () => {
@@ -533,9 +538,15 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       {/* 打开模型是这一步的主入口（作者 10-03：绿底给打开模型，预设 pill 退暗） */}
       <Btn
         variant="accent"
-        onClick={() => setOpening({ id: plate.calibId, name: plate.title, versions: plate.versions })}
+        onClick={() =>
+          setOpening({
+            id: plate.calibId,
+            name: tr(plate.title),
+            versions: plate.versions,
+          })
+        }
       >
-        打开模型
+        {tr('calib.openModel')}
       </Btn>
     </span>
   ) : null
@@ -555,7 +566,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       <div ref={barRef} className={s.changeBar} data-saved={!dirty}>
         {dirty ? (
           <>
-            <span>未保存的改动</span>
+            <span>{tr('calib.unsaved')}</span>
             <span className={s.changeDot}>·</span>
             {/*
              * 各轴之间不用「，」也不挤成一行（2026-10-11 第五轮，作者：
@@ -577,10 +588,10 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             </span>
             <span className={s.changeSp} />
             <button type="button" className={s.changeGhost} onClick={clearAll}>
-              放弃
+              {tr('calib.discard')}
             </button>
             <button type="button" className={s.changeSave} disabled={!canSave} onClick={commitAll}>
-              保存
+              {tr('calib.save')}
             </button>
           </>
         ) : (
@@ -589,7 +600,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             <span className={s.changeDot}>·</span>
             {/* 2026-10-13：原来是「改动已写进『本地预设』」—— 「本地预设」那套说法
                 整条退役（作者：「本地这份、云端一份这些相关的都去掉」），只说结果 */}
-            <span className={s.changeList}>改动已经写进预设文件</span>
+            <span className={s.changeList}>{tr('calib.savedWritten')}</span>
           </>
         )}
       </div>
@@ -601,12 +612,12 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
        */
       <div ref={barRef} className={s.changeBar} data-tone="hint">
         <span className={s.hintDot} aria-hidden />
-        <span>{NEED_PRESET_TITLE}</span>
+        <span>{tr(NEED_PRESET_TITLE_KEY)}</span>
         <span className={s.changeDot}>·</span>
-        <span className={s.changeList}>{NEED_PRESET_HOW}</span>
+        <span className={s.changeList}>{tr(NEED_PRESET_HOW_KEY)}</span>
         <span className={s.changeSp} />
         <button type="button" className={s.changeAction} onClick={() => setPickerOpen(true)}>
-          选择预设
+          {tr('calib.pickPreset')}
         </button>
       </div>
     ) : null
@@ -731,7 +742,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
       <CalibPlate
         model={plate.model}
         theme={plateTheme}
-        label={plate.title}
+        label={tr(plate.title)}
         onPick={step === 'z' ? pickZ : pickXY}
         picked={step === 'z' ? zSelected : xySelected}
         hitLabel={plate.hitLabel}
@@ -749,7 +760,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
          * 「测试模型」那一步没有预设可挂：轨道照旧三段，右端是它的动作按钮。
          */}
         <div className={s.hudTop}>
-          <div className={s.rail} role="tablist" aria-label="校准步骤">
+          <div className={s.rail} role="tablist" aria-label={tr('calib.stepsAria')}>
             {STEPS.map((it) => (
               <button
                 key={it.id}
@@ -761,7 +772,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                 onMouseDown={noFocus}
                 onClick={() => go(it.id)}
               >
-                {it.label}
+                {tr(it.label)}
               </button>
             ))}
           </div>
@@ -778,11 +789,11 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               type="button"
               className={s.presetSeg}
               data-off={pillFileName === null}
-              title={pillFileName ?? '选择预设'}
+              title={pillFileName ?? tr('calib.pickPreset')}
               onMouseDown={noFocus}
               onClick={() => setPickerOpen(true)}
             >
-              <span className={s.presetName}>{pillFileName ?? '选择预设'}</span>
+              <span className={s.presetName}>{pillFileName ?? tr('calib.pickPreset')}</span>
             </button>
           )}
         </div>
@@ -813,8 +824,8 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
             {plateView}
             {step === 'z' && (
               <>
-                <p className={s.legend}>{Z_LEGEND}</p>
-                <p className={s.tip}>{Z_TIP}</p>
+                <p className={s.legend}>{tr(Z_LEGEND_KEY)}</p>
+                <p className={s.tip}>{tr(Z_TIP_KEY)}</p>
               </>
             )}
           </div>
@@ -870,13 +881,19 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
          */}
         {!plate && (
           <div className={s.hudBottom}>
-            <p className={s.caption}>鱼尾曲面 · 支撑涂胶 · 球形 · 方块 — 一套 3mf 覆盖全部校准场景</p>
+            <p className={s.caption}>{tr('calib.testCaption')}</p>
             <span className={s.actions}>
               <Btn
                 variant="accent"
-                onClick={() => setOpening({ id: TEST_MODEL_ID, name: '测试模型', versions: [] })}
+                onClick={() =>
+                  setOpening({
+                    id: TEST_MODEL_ID,
+                    name: tr('calib.tab.models'),
+                    versions: [],
+                  })
+                }
               >
-                打开模型
+                {tr('calib.openModel')}
               </Btn>
             </span>
           </div>
@@ -935,7 +952,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
           {/* 模型版本（只有 Z 板有两版）：选它 = 换要打开的那份 3mf */}
           {opening.versions.length > 1 && (
             <div className={s.versionRow}>
-              <span className={s.versionLabel}>模型版本</span>
+              <span className={s.versionLabel}>{tr('calib.board.modelVersion')}</span>
               <span className={s.versionBtns}>
                 {opening.versions.map((v) => (
                   <Btn
@@ -943,7 +960,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                     variant={v.id === opening.id ? 'accent' : 'default'}
                     onClick={() => setOpening({ ...opening, id: v.id })}
                   >
-                    {v.label}
+                    {tr(v.label)}
                   </Btn>
                 ))}
               </span>

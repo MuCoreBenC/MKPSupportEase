@@ -21,6 +21,8 @@
 //! 表 / 数组 / 认不出的形态**跳过**（不返回、也不许改）：一个参数对应一个标量字段，
 //! 这是 `patch.rs` 那一侧就定下的边界。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 
 use toml_edit::{DocumentMut, Item};
@@ -39,7 +41,8 @@ pub fn read_param_values(
     defs: &[ParamDef],
 ) -> Result<BTreeMap<String, String>, AppError> {
     let doc: DocumentMut = raw.parse().map_err(|e| {
-        AppError::corrupted("这份预设不是合法 TOML，参数读不出来").with_detail(format!("{e}"))
+        AppError::corrupted(messages::text("ui.presetdata.params.282", &[]))
+            .with_detail(format!("{e}"))
     })?;
     let mut out = BTreeMap::new();
     for def in defs {

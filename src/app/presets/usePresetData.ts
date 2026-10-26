@@ -76,12 +76,14 @@ import type {
   OnDiskFile,
   ParamDecision,
   PresetParamSync,
+  PresetFileInfo,
   PresetTextDraft,
   FetchCloudResult,
   LocalFileIdentity,
   LocalPresetIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
+import { useT } from '../../i18n'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { DeliveryPresetSource } from './presetTree'
@@ -498,17 +500,37 @@ async function checkBootstrapOnce(): Promise<BootstrapResult> {
   }
 }
 
+/** 建树前的四份输入（`usePresetData` 里存着它、按语言重出树） */
+interface TreeSeed {
+  list: Machine[]
+  repo: PresetFileInfo[]
+  inputs: PresetVersionInput[]
+  archived: Set<string>
+}
+
 /**
  * `importRevision` 是"外部导入进来过几批"的钥匙（第十二层）：变了就**整屏重读** ——
  * 导入落进 `presets-local/` 之后，「本地文件」那张表要立刻以磁盘为准，不靠切页刷新。
  * 首页（`PageHome`）不给这个参数：它不看本地文件那张表。
  */
 export function usePresetData(importRevision = 0): PresetData {
+  const tr = useT()
   const [machines, setMachines] = useState<Machine[]>([])
-  const [tree, setTree] = useState<PresetTree>({
-    machines: [],
-    fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 },
-  })
+  /*
+   * 建树那几份读的**原样结果**（不是树本身）。
+   *
+   * 存原样是因为树里有一句给人看的字（`后端没有 … 这个组合`）：语言一变，那句话要跟着换，
+   * 而"重出一棵树"绝不能变成"重发那 20 多个请求" —— 页面是常驻挂的（`App` 的页槽只切
+   * `data-hidden`），切语言时预设页并没有卸载，不重算树就会留着上一种语言的那句。
+   */
+  const [treeSeed, setTreeSeed] = useState<TreeSeed | null>(null)
+  const tree: PresetTree = useMemo(
+    () =>
+      treeSeed === null
+        ? { machines: [], fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 } }
+        : buildPresetTree(tr, treeSeed.list, treeSeed.repo, treeSeed.inputs, treeSeed.archived),
+    [treeSeed, tr],
+  )
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 远端这一代读不懂（NOT_SUPPORTED）：独立于 `error`，不挡列表、只开一句提示 */
   const [needsNewerClient, setNeedsNewerClient] = useState(false)
@@ -717,7 +739,7 @@ export function usePresetData(importRevision = 0): PresetData {
       const entry = await activePresetSnapshot()
       setMachines(list)
       /* 仅归档的文件在这里就被剔掉 —— 用户端一处都不该出现 */
-      setTree(buildPresetTree(list, repo, inputs, archivedIds(menu)))
+      setTreeSeed({ list, repo, inputs, archived: archivedIds(menu) })
       setLocalIds(local)
       setSlicerCopied(copied)
 
@@ -1400,6 +1422,8 @@ export interface PresetPage {
 }
 
 export function usePresetPage(data: PresetData): PresetPage {
+  /* 两张表要措辞（行上的「下载区 mkp · …」那种），所以这一层也要取当前语言 */
+  const tr = useT()
   /*
    * 搜索词与两条分段控件都记在会话里：切到参数页对一眼再回来，不该复位成「MKP / 本地」
    * 并把搜索词清空（见 useSessionState 的理由）。默认落在 MKP + 本地 —— 用户打开这一页
@@ -1516,8 +1540,11 @@ export function usePresetPage(data: PresetData): PresetPage {
    * **两张表，两种类型都算**（2026-10-09 起；MKP 档此前短暂合成过一张资源库表）。
    * 各自的判据在 [`localRows`] / [`cloudRows`] 里，这一层只负责算出来。
    */
-  const localBase = useMemo(() => localRows(input), [input])
-  const cloudBase: PresetTableData<PresetCloudRow> = useMemo(() => cloudRows(input), [input])
+  const localBase = useMemo(() => localRows(tr, input), [tr, input])
+  const cloudBase: PresetTableData<PresetCloudRow> = useMemo(
+    () => cloudRows(tr, input),
+    [tr, input],
+  )
 
   /*
    * 批量那一批。取**云端表筛前**的行，两个理由：

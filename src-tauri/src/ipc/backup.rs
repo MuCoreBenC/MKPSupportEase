@@ -9,6 +9,8 @@
 //! - 二次确认在**界面**那侧做（与「清空历史」同一条规矩：危险动作都要问一句）；
 //! - 后端这一步只做一件事：**照做**，做完把"恢复到哪一份、多少个文件"回给界面。
 
+use postprocess::diag::messages;
+
 use tauri::AppHandle;
 
 use crate::error::AppError;
@@ -23,12 +25,15 @@ pub fn create_backup(app: AppHandle, dest_dir: String) -> Result<BackupSummary, 
         let internal = crate::fsx::paths::internal_root(&app)?;
         let dest = std::path::Path::new(dest_dir.trim());
         if dest_dir.trim().is_empty() {
-            return Err(AppError::invalid_argument("没说备份放哪 —— 先挑一个文件夹"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.backup.038",
+                &[],
+            )));
         }
         if !dest.is_dir() {
-            return Err(AppError::not_found(format!(
-                "那个文件夹不在了（{}）—— 重新挑一个",
-                dest.display()
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.backup.039",
+                &[("v1", &dest.display().to_string())],
             )));
         }
         let sum = crate::runtime::backup::create(&internal, dest)?;
@@ -52,7 +57,10 @@ pub fn restore_backup(app: AppHandle, zip_path: String) -> Result<BackupSummary,
         let internal = crate::fsx::paths::internal_root(&app)?;
         let at = std::path::Path::new(zip_path.trim());
         if zip_path.trim().is_empty() || !at.is_file() {
-            return Err(AppError::not_found("那份备份不在了 —— 重新挑一份"));
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.backup.040",
+                &[],
+            )));
         }
         let sum = crate::runtime::backup::restore(&internal, at)?;
         tracing::info!(

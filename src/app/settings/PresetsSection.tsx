@@ -12,16 +12,20 @@
  * 它改的是**身份账本的出口**：账本按它决定"复制出来的那一份认不认云端"，
  * 于是云端那一表每行的三态（未获取 / 本地已有 / 有新版）与那颗「更新」跟着变 ——
  * 所以写了必须广播（不广播，用户切回预设页看到的还是旧账）。
+ *
+ * ★ 文案走字典（2026-10-25）。读失败 / 保存失败都用 `{detail}` 承接后端原话。
  */
 
 import { useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
+import { useT } from '../../i18n'
 import { presetPrefsMutated } from '../state/deliveryState'
 import { Switch } from '../../components/switch'
 import s from './PageSettings.module.css'
 
 export default function PresetsSection() {
+  const tr = useT()
   const [copiesFollowCloud, setCopiesFollowCloud] = useState<boolean | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -36,13 +40,13 @@ export default function PresetsSection() {
         if (alive) setCopiesFollowCloud(v)
       },
       (e: unknown) => {
-        if (alive) setErr(`这一档读不出来：${errorText(e)}`)
+        if (alive) setErr(tr('settings.presets.readFailed', { detail: errorText(e) }))
       },
     )
     return () => {
       alive = false
     }
-  }, [])
+  }, [tr])
 
   const save = (next: boolean) => {
     /* 乐观更新：开关先跟着手指走 */
@@ -55,7 +59,7 @@ export default function PresetsSection() {
         presetPrefsMutated()
       },
       (e: unknown) => {
-        setErr(`没保存成：${errorText(e)}`)
+        setErr(tr('settings.presets.saveFailed', { detail: errorText(e) }))
         /* 落盘失败就回去问后端现在到底是什么 —— 不许把界面留在与盘上不一致的那一档 */
         void api.getCopiesFollowCloud().then(
           (v) => setCopiesFollowCloud(v),
@@ -66,24 +70,21 @@ export default function PresetsSection() {
   }
 
   return (
-    <section className={s.section} aria-label="预设">
-      <h2 className={s.secTitle}>预设</h2>
+    <section className={s.section} aria-label={tr('settings.presets.title')}>
+      <h2 className={s.secTitle}>{tr('settings.presets.title')}</h2>
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>复制出来的也跟着云端更新</div>
-          <p className={s.fieldNote}>
-            默认关：你复制出来的那一份是独立的一份 —— 它不算「云端有新版」的那一份，
-            点「更新」也不会动它。开着时它与原件一样，一样显示云端更新、一样会被更新到。
-          </p>
+          <div className={s.fieldTitle}>{tr('settings.presets.copies')}</div>
+          <p className={s.fieldNote}>{tr('settings.presets.copiesNote')}</p>
         </div>
         {/* 还没读回来：不画开关（画一个"看起来是关的"开关会骗人） */}
         {copiesFollowCloud === null ? (
-          <p className={s.fieldNote}>正在读取…</p>
+          <p className={s.fieldNote}>{tr('common.loading')}</p>
         ) : (
           <Switch
             checked={copiesFollowCloud}
-            ariaLabel="复制出来的也跟着云端更新"
+            ariaLabel={tr('settings.presets.copies')}
             onChange={save}
           />
         )}

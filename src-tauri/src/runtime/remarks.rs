@@ -15,6 +15,8 @@
 //! 账上有的 = 用户改过 ⇒ 界面用它；没有 ⇒ 回落 catalog 里那一版的 `remark`；
 //! 连版本都没有 ⇒ 回落路径文本。**账本丢了什么都不坏**（退回工作台的备注）。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -56,7 +58,10 @@ pub fn get(user_root: &Path, key: &str) -> Option<String> {
 pub fn set(user_root: &Path, key: &str, remark: Option<&str>) -> Result<(), AppError> {
     let key = key.trim();
     if key.is_empty() {
-        return Err(AppError::invalid_argument("备注要说是哪一份（缺文件身份）"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.remarks.432",
+            &[],
+        )));
     }
     let mut ledger = Ledger {
         remarks: load(user_root),
@@ -79,7 +84,10 @@ pub fn set(user_root: &Path, key: &str, remark: Option<&str>) -> Result<(), AppE
 pub fn remove(user_root: &Path, key: &str) -> Result<(), AppError> {
     let key = key.trim();
     if key.is_empty() {
-        return Err(AppError::invalid_argument("备注要说是哪一份（缺文件身份）"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.remarks.433",
+            &[],
+        )));
     }
     let mut ledger = Ledger {
         remarks: load(user_root),
@@ -89,8 +97,9 @@ pub fn remove(user_root: &Path, key: &str) -> Result<(), AppError> {
 }
 
 fn save(user_root: &Path, ledger: &Ledger) -> Result<(), AppError> {
-    let body = serde_json::to_vec_pretty(ledger)
-        .map_err(|e| AppError::internal("备注账本序列化不了").with_detail(e.to_string()))?;
+    let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
+        AppError::internal(messages::text("ui.runtime.remarks.434", &[])).with_detail(e.to_string())
+    })?;
     atomic_write(&ledger_path(user_root), &body)
 }
 

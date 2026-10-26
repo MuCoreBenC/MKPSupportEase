@@ -164,35 +164,37 @@ pub(crate) fn traced<T>(
 ///
 /// 2026-10-19：XY 板同样多了一版（打印区右侧 / 上侧各加 5mm 留白 ⇒ 50.5 → 55.5），
 /// `xy-ext` 与 `xy` 并列；后处理侧认这两版靠同一份表里的 `xy-square-50` / `xy-square-55`。
+/// 校准模型清单：`(id, 名称键, 说明键, 文件名)` —— 名称与说明是 `messages.toml` 的键，
+/// 因为这两句直接显示在校准页（切片器那一框里也是人话）。
 const MODEL_DEFS: [(&str, &str, &str, &str); 5] = [
     (
         "z",
-        "Z 轴校准",
-        "校准喷嘴高度与第一层，先打这个",
+        "ui.ipc.calib_models.z.name",
+        "ui.ipc.calib_models.z.desc",
         "ZOffset_Calibration.3mf",
     ),
     (
         "z-ext",
-        "Z 轴校准（加长版）",
-        "打印区加长 3mm 的那一版，校准流程与旧版完全一样",
+        "ui.ipc.calib_models.z_ext.name",
+        "ui.ipc.calib_models.z_ext.desc",
         "ZOffset_Calibration_ext.3mf",
     ),
     (
         "xy",
-        "XY 校准",
-        "校准平面内的偏移，Z 轴之后打",
+        "ui.ipc.calib_models.xy.name",
+        "ui.ipc.calib_models.xy.desc",
         "Precise_Calibration.3mf",
     ),
     (
         "xy-ext",
-        "XY 校准（加长版）",
-        "板子右侧 / 上侧各多 5mm 留白的那一版，校准流程与旧版完全一样",
+        "ui.ipc.calib_models.xy_ext.name",
+        "ui.ipc.calib_models.xy_ext.desc",
         "Precise_Calibration_ext.3mf",
     ),
     (
         "test-models",
-        "支撑测试",
-        "校准完打这个看支撑效果",
+        "ui.ipc.calib_models.test.name",
+        "ui.ipc.calib_models.test.desc",
         "MKP_support_test_models.3mf",
     ),
 ];
@@ -254,8 +256,8 @@ pub fn get_calib_models(app: AppHandle) -> Result<Vec<CalibModel>, AppError> {
             };
             out.push(CalibModel {
                 id: id.to_owned(),
-                name: name.to_owned(),
-                desc: desc.to_owned(),
+                name: ::postprocess::diag::messages::text(name, &[]),
+                desc: ::postprocess::diag::messages::text(desc, &[]),
                 file_name: file_name.to_owned(),
                 size,
                 ready: path.is_some(),
@@ -290,13 +292,17 @@ pub fn open_model(
     traced("openModel", |_| {
         let id = model_id.trim();
         let Some((_, _, _, file_name)) = MODEL_DEFS.iter().find(|(mid, ..)| *mid == id) else {
-            return Err(AppError::invalid_argument(format!(
-                "没这个模型：{model_id}"
-            )));
+            return Err(AppError::invalid_argument(
+                ::postprocess::diag::messages::text(
+                    "ui.ipc.mod.101",
+                    &[("model_id", &model_id.to_string())],
+                ),
+            ));
         };
         let Some(path) = locate_model_file(&app, file_name)? else {
-            return Err(AppError::not_found(format!(
-                "本机还没有 {file_name} —— 先在界面上「取回」，再打开"
+            return Err(AppError::not_found(::postprocess::diag::messages::text(
+                "ui.ipc.mod.102",
+                &[("file_name", file_name)],
             )));
         };
         let kind = slicer::SlicerKind::parse(slicer.as_deref())?;
@@ -312,24 +318,27 @@ pub fn open_model(
                 app.opener()
                     .open_path(path.to_string_lossy().into_owned(), None::<&str>)
                     .map_err(|e| {
-                        AppError::io("系统打不开这个模型文件").with_detail(e.to_string())
+                        AppError::io(::postprocess::diag::messages::text("ui.ipc.mod.103", &[]))
+                            .with_detail(e.to_string())
                     })?;
             }
         } else if kind == slicer::SlicerKind::Custom {
             /* 「从磁盘指定的那个」：路径由前端给，盘上没有就照实说（不静默回落） */
             let raw = slicer_app.as_deref().map(str::trim).unwrap_or_default();
             if raw.is_empty() {
-                return Err(AppError::not_found(
-                    "没拿到你指定的那个应用 —— 回设置页的「切片」重新挑一次",
-                ));
+                return Err(AppError::not_found(::postprocess::diag::messages::text(
+                    "ui.ipc.mod.104",
+                    &[],
+                )));
             }
             let target = std::path::Path::new(raw);
             if !target.exists() {
-                return Err(AppError::not_found(format!(
-                    "你指定的那个应用不在了（{raw}）—— 回设置页的「切片」重新挑一次"
+                return Err(AppError::not_found(::postprocess::diag::messages::text(
+                    "ui.ipc.mod.105",
+                    &[("raw", raw)],
                 )));
             }
-            slicer::launch_with(target, kind.label(), &path)?;
+            slicer::launch_with(target, &kind.label(), &path)?;
         } else {
             slicer::launch(kind, &path)?;
         }

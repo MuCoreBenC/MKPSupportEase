@@ -15,6 +15,7 @@
  */
 
 import { SelectField } from '../../components/field'
+import { useT } from '../../i18n'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：那只原生绿勾换成全站同一套墨色 */
 import { Check } from '../../components/check'
 import {
@@ -38,18 +39,19 @@ export function SlicerPickView({
   onOnceChange: (v: boolean) => void
 }) {
   const [app] = useSlicerAppPref()
+  const tr = useT()
   /* 「跟随系统默认」到底指谁（作者 2026-10-16）：问壳要一次，问到就摆出来 */
   const systemApp = useSystemSlicerApp()
   /* 'custom' 但记录不在（清过缓存）：按跟随系统显示 —— 值不在选项里时触发器显示原值，更难懂 */
   const shown = value === 'custom' && app === null ? 'system' : value
   return (
-    <div className={s.wrap} aria-label="用哪个打开">
+    <div className={s.wrap} aria-label={tr('slicer.pickLabel')}>
       <div className={s.row}>
-        <span className={s.label}>用哪个打开</span>
+        <span className={s.label}>{tr('slicer.pickLabel')}</span>
         <SelectField
-          label="用哪个打开"
+          label={tr('slicer.pickLabel')}
           size="sm"
-          options={slicerOptionsOf(app, systemApp)}
+          options={slicerOptionsOf(tr, app, systemApp)}
           value={shown}
           onChange={(v) => onChange(v as SlicerId)}
         />
@@ -63,9 +65,9 @@ export function SlicerPickView({
        * ★ 「去系统里改…」那颗只在设置页有（那里才是"设默认"的地方）—— 这个框是
        *   "这一次用哪个打开"，不摆设置动作。
        */}
-      {shown === 'system' && <p className={s.sysNote}>{systemSlicerLine(systemApp)}</p>}
+      {shown === 'system' && <p className={s.sysNote}>{systemSlicerLine(tr, systemApp)}</p>}
       <Check className={s.check} checked={once} onChange={onOnceChange}>
-        仅这一次用选定的（默认不写回设置）
+        {tr('slicer.onceNote')}
       </Check>
     </div>
   )

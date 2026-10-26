@@ -56,6 +56,8 @@
 //! 见 `src-tauri/build.rs`）—— 注入了才有默认值。正常构建内置的是**云端 Bootstrap**；
 //! "没配"只该发生在开发构建（既没注入也没手动指定）。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -285,19 +287,26 @@ pub(super) fn read_source_file(root: &Path) -> Result<Option<PresetSource>, AppE
     let bytes = match std::fs::read(source_file(root)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(AppError::io("读不到数据源设置").with_detail(e.to_string())),
+        Err(e) => {
+            return Err(AppError::io(messages::text("ui.runtime.source.445", &[]))
+                .with_detail(e.to_string()))
+        }
     };
     // ★ **1 代老档**（2026-10-05 之前只有 `baseUrl`）：它的含义**正好**是"用户手填的
     //   地址" = 新模型里的 `custom`。这不是兼容层、也不猜：那份地址本来就是用户填的。
     if let Some(old) = read_v1(&bytes)? {
         return Ok(Some(old));
     }
-    let source: PresetSource = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::corrupted("数据源设置读不出来").with_detail(e.to_string()))?;
+    let source: PresetSource = serde_json::from_slice(&bytes).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.source.446", &[])).with_detail(e.to_string())
+    })?;
     if source.source_schema != SOURCE_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "数据源设置的格式代次认不了：文件是 {}，程序认 {}",
-            source.source_schema, SOURCE_SCHEMA
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.source.447",
+            &[
+                ("v1", &source.source_schema.to_string()),
+                ("v2", &SOURCE_SCHEMA.to_string()),
+            ],
         )));
     }
     Ok(Some(source))
@@ -312,9 +321,10 @@ fn read_v1(bytes: &[u8]) -> Result<Option<PresetSource>, AppError> {
         return Ok(None);
     }
     let Some(base) = v.get("baseUrl").and_then(|x| x.as_str()) else {
-        return Err(AppError::corrupted(
-            "数据源设置是老格式，但里面没有地址 —— 认不出这一份要连到哪",
-        ));
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.source.448",
+            &[],
+        )));
     };
     Ok(Some(PresetSource {
         source_schema: SOURCE_SCHEMA,
@@ -345,9 +355,10 @@ pub fn make_source(
                 .map(|s| !s.trim().is_empty())
                 .unwrap_or(false)
             {
-                return Err(AppError::invalid_argument(
-                    "选内置源的时候不用给地址 —— 地址是程序自带的",
-                ));
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.runtime.source.449",
+                    &[],
+                )));
             }
             None
         }
@@ -565,10 +576,13 @@ pub fn probe_custom_with(url: &str, fetch: FetchBytes<'_>) -> Result<ProbeOutcom
             Err(e) => reasons.push(format!("{candidate}（{e}）")),
         }
     }
-    Err(AppError::invalid_argument(format!(
-        "这个地址下面读不到寻址规则声明（{SOURCE_FILE_NAME}）—— 试了 {} 处也不通：{}",
-        reasons.len(),
-        reasons.join("；")
+    Err(AppError::invalid_argument(messages::text(
+        "ui.runtime.source.450",
+        &[
+            ("SOURCE_FILE_NAME", SOURCE_FILE_NAME),
+            ("v1", &reasons.len().to_string()),
+            ("v2", &reasons.join("；").to_string()),
+        ],
     )))
 }
 
@@ -579,8 +593,9 @@ fn fetch_and_accept(
 ) -> Result<ResolvedSource, AppError> {
     let catalog_url = resolved.catalog_url()?;
     let bytes = fetch(&catalog_url, CATALOG_FILE)?;
-    crate::runtime::Catalog::parse(&bytes)
-        .map_err(|e| AppError::corrupted("取到的不是一份可用的预设目录").with_detail(e.message))?;
+    crate::runtime::Catalog::parse(&bytes).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.source.451", &[])).with_detail(e.message)
+    })?;
     Ok(resolved.clone())
 }
 
@@ -688,11 +703,8 @@ pub fn resolve_entry(entry: SourceEntry) -> Result<ResolvedSource, AppError> {
 
 /// 这台机器上的远端入口 → 装配好的 Resolver；**没配就报错、并且说清去哪儿配**。
 pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
-    let entry = current_entry(root)?.ok_or_else(|| {
-        AppError::not_implemented(
-            "这个构建没有内置云端源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个",
-        )
-    })?;
+    let entry = current_entry(root)?
+        .ok_or_else(|| AppError::not_implemented(messages::text("ui.runtime.source.452", &[])))?;
     let resolved = resolve_entry(entry)?;
     Ok(resolved.with_internal_root(root))
 }
@@ -704,9 +716,8 @@ pub fn resolve_source(root: &Path) -> Result<ResolvedSource, AppError> {
 /// 自定义源按入口解析（落过盘的读 [`PresetSource::custom_resolved`]，老档按形状重推）
 /// 再取它声明的那份 catalog；内置源探的是它自己在 `source.json` 里说的那个 catalog 地址。
 pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
-    let entry = current_entry(root)?.ok_or_else(|| {
-        AppError::invalid_argument("还没有选数据源 —— 先在上面选一个云端源，或填一个地址")
-    })?;
+    let entry = current_entry(root)?
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.runtime.source.453", &[])))?;
     let resolved = resolve_entry(entry)?;
     let catalog_url = resolved.catalog_url()?;
     let bytes = crate::runtime::net::get_bytes(
@@ -716,7 +727,7 @@ pub fn probe_current(root: &Path) -> Result<ResolvedSource, AppError> {
     )?;
     // 解析一次：能取到但不是合法目录，那也是"这个地址不对"（用户看得懂的话）
     crate::runtime::Catalog::parse(&bytes).map_err(|e| {
-        AppError::corrupted("这个地址下面不是一份可用的预设目录").with_detail(e.message)
+        AppError::corrupted(messages::text("ui.runtime.source.454", &[])).with_detail(e.message)
     })?;
     Ok(resolved)
 }
@@ -750,7 +761,7 @@ pub fn bootstrap_delivery_url(bootstrap_url: &str) -> Result<String, AppError> {
 /// （它不是一个"文件地址"，回退不出目录）
 fn directory_of(url: &str) -> Result<String, AppError> {
     let bad =
-        || AppError::invalid_argument(format!("Bootstrap 地址不像一个 http(s) 文件地址：{url}"));
+        || AppError::invalid_argument(messages::text("ui.runtime.source.455", &[("url", url)]));
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))
@@ -775,12 +786,16 @@ fn directory_of(url: &str) -> Result<String, AppError> {
 pub fn normalize_base_url(raw: &str) -> Result<String, AppError> {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
-        return Err(AppError::invalid_argument("数据源地址是空的"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.source.456",
+            &[],
+        )));
     }
     let ok = trimmed.starts_with("http://") || trimmed.starts_with("https://");
     if !ok {
-        return Err(AppError::invalid_argument(format!(
-            "数据源地址只认 http:// 或 https://，填进来的是 {trimmed}"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.source.457",
+            &[("trimmed", trimmed)],
         )));
     }
     Ok(trimmed.to_owned())

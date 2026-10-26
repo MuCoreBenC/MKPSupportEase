@@ -48,6 +48,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode, Ref } from 'react'
 
+import { useT } from '../../i18n'
 import { useIsDark } from '../state/appState'
 import { Btn } from '../ui/Controls'
 import Modal from '../../components/modal/Modal'
@@ -212,6 +213,7 @@ export default function GuideImageModal({
   /* 点小图 = 在这个模态框里浮起来看大的（放大层住在 `components/zoom/ZoomLayer`）。
      `fromRef` 记的是**点的那一下小图在哪** —— FLIP 的 First，得在开之前量 */
   const [zoom, setZoom] = useState(false)
+  const tr = useT()
   const fromRef = useRef<DOMRect | null>(null)
   const figBtnRef = useRef<HTMLButtonElement>(null)
 
@@ -249,7 +251,7 @@ export default function GuideImageModal({
             from={fromRef.current ?? new DOMRect(0, 0, 0, 0)}
             returnTo={() => figBtnRef.current?.getBoundingClientRect() ?? null}
             onGone={() => setZoom(false)}
-            label="收起放大图"
+            label={tr('guide.zoomClose')}
           >
             <GuideFigure figure={usable} big onBroken={() => setImgBroken(true)} />
           </ZoomLayer>
@@ -257,7 +259,7 @@ export default function GuideImageModal({
       }
       footer={
         <Btn variant="primary" onClick={onClose}>
-          知道了
+          {tr('guide.ok')}
         </Btn>
       }
     >
@@ -280,7 +282,7 @@ export default function GuideImageModal({
               fromRef.current = figBtnRef.current?.getBoundingClientRect() ?? null
               setZoom(true)
             }}
-            aria-label={`放大看：${usable.alt}`}
+            aria-label={tr('guide.zoomAria', { alt: usable.alt })}
           >
             <GuideFigure figure={usable} onBroken={() => setImgBroken(true)} />
           </button>

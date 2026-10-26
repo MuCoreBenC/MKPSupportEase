@@ -8,15 +8,19 @@
  * ★ 这块**真的会往 G-code 里插东西**（`pipeline/bed_glue.rs`，从旧程序移植过来的）：
  *   在自动调平后、检测条前降温到 30°C → 换笔 → 涂胶 → 收笔，然后把热床升回原温度。
  *   校准件那一趟不涂（没有擦料塔，路径会跑出校准区域），这是内核里的硬边界。
+ *
+ * ★ 文案走字典（2026-10-25）：风险那句是全页最该被读懂的一句，英文版逐句对齐。
  */
 
 import { useState } from 'react'
 
+import { useT } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
 import s from './PageSettings.module.css'
 
 export default function BedGlueSection() {
+  const tr = useT()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
 
@@ -24,12 +28,12 @@ export default function BedGlueSection() {
 
   if (prefs === null) {
     return (
-      <section className={`${s.section} ${s.dangerBlock}`} aria-label="热床预涂胶">
+      <section className={`${s.section} ${s.dangerBlock}`} aria-label={tr('settings.glue.title')}>
         <h2 className={`${s.secTitle} ${s.dangerTitle}`}>
           <WarnIcon />
-          热床预涂胶
+          {tr('settings.glue.title')}
         </h2>
-        <p className={s.fieldNote}>正在读取…</p>
+        <p className={s.fieldNote}>{tr('common.loading')}</p>
       </section>
     )
   }
@@ -37,33 +41,29 @@ export default function BedGlueSection() {
   const r = prefs.resolved
 
   return (
-    <section className={`${s.section} ${s.dangerBlock}`} aria-label="热床预涂胶">
+    <section className={`${s.section} ${s.dangerBlock}`} aria-label={tr('settings.glue.title')}>
       <h2 className={`${s.secTitle} ${s.dangerTitle}`}>
         <WarnIcon />
-        热床预涂胶
+        {tr('settings.glue.title')}
       </h2>
 
       {/* 风险提示：与下面那个开关分开摆 —— 先让人看见"这是什么性质的事"，再看见开关 */}
       <p className={s.dangerNote}>
         <span className={s.dangerNoteHead}>
           <WarnIcon />
-          危险操作
+          {tr('common.danger')}
         </span>
-        此功能在打印前于热床执行涂胶操作，可能导致笔尖划伤打印板。
-        建议不要开启，除非您清楚了解风险。
+        {tr('settings.glue.risk')}
       </p>
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={`${s.fieldTitle} ${s.dangerTitle}`}>启用热床预涂胶</div>
-          <p className={s.fieldNote}>
-            在自动调平后、检测条前执行涂胶（降温到 30°C → 换笔 → 涂胶 → 收笔）。
-            校准件那一趟不涂 —— 那边没有擦料塔，涂胶路径会跑到校准区域外面。
-          </p>
+          <div className={`${s.fieldTitle} ${s.dangerTitle}`}>{tr('settings.glue.enable')}</div>
+          <p className={s.fieldNote}>{tr('settings.glue.enableNote')}</p>
         </div>
         <Switch
           checked={r.bedGlueEnabled}
-          ariaLabel="启用热床预涂胶"
+          ariaLabel={tr('settings.glue.enable')}
           onChange={(next) => void set({ bedGlueEnabled: next }, on)}
         />
       </div>
@@ -72,14 +72,12 @@ export default function BedGlueSection() {
       {r.bedGlueEnabled && (
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>所有模型首层也涂</div>
-            <p className={s.fieldNote}>
-              关着只涂擦料塔那一块；打开会把每个模型的首层轮廓也走一遍（更耗时间）。
-            </p>
+            <div className={s.fieldTitle}>{tr('settings.glue.allModels')}</div>
+            <p className={s.fieldNote}>{tr('settings.glue.allModelsNote')}</p>
           </div>
           <Switch
             checked={r.bedGlueAllModels}
-            ariaLabel="所有模型首层也涂"
+            ariaLabel={tr('settings.glue.allModels')}
             onChange={(next) => void set({ bedGlueAllModels: next }, on)}
           />
         </div>

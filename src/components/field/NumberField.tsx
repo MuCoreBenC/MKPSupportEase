@@ -30,6 +30,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import { decimalsOf, formatNum } from './value'
 import s from './NumberField.module.css'
 
@@ -103,6 +104,7 @@ export default function NumberField({
   focusOnBoxClick = false,
   onChange,
 }: Props) {
+  const tr = useT()
   /*
    * `decimals === null` = 不补零（见 Props.decimals）：这时还按 step 推出来的
    * 小数位仍然要用来**四舍五入**（拖动/连发不许留浮点尾巴），
@@ -276,11 +278,15 @@ export default function NumberField({
   const rawTyping = text.trim()
   const hint = ((): string | null => {
     if (disabled) return null
-    if (rawTyping === '') return '数值不能为空'
+    if (rawTyping === '') return tr('field.hint.empty')
     if (rawTyping === '-' || rawTyping === '+' || rawTyping === '.') return null
-    if (!Number.isFinite(typed)) return '不是有效的数字'
-    if (outOfRange) return `超出范围 ${min ?? '不限'} ~ ${max ?? '不限'}`
-    return invalid ? '不是有效的数字' : null
+    if (!Number.isFinite(typed)) return tr('field.hint.notNumber')
+    if (outOfRange)
+      return tr('field.hint.outOfRange', {
+        min: min ?? tr('field.unbounded'),
+        max: max ?? tr('field.unbounded'),
+      })
+    return invalid ? tr('field.hint.notNumber') : null
   })()
 
   /*
@@ -343,7 +349,12 @@ export default function NumberField({
   )
   const negative = (min ?? 0) < 0
   const rangePlaceholder =
-    min !== undefined || max !== undefined ? `${min ?? '不限'} ~ ${max ?? '不限'}` : undefined
+    min !== undefined || max !== undefined
+      ? tr('field.rangePlaceholder', {
+          min: min ?? tr('field.unbounded'),
+          max: max ?? tr('field.unbounded'),
+        })
+      : undefined
   const widthCh = Math.max(
     4,
     intDigits + (digits > 0 ? digits + 1 : 0) + (negative ? 1 : 0) + 1,
@@ -351,13 +362,15 @@ export default function NumberField({
   )
 
   const range =
-    min !== undefined || max !== undefined ? `范围 ${min ?? '—'} ~ ${max ?? '—'}` : undefined
+    min !== undefined || max !== undefined
+      ? tr('field.range', { min: min ?? '—', max: max ?? '—' })
+      : undefined
 
   const arrow = (dir: 1 | -1) => (
     <button
       type="button"
       className={s.arrow}
-      aria-label={`${label} ${dir === 1 ? '增加' : '减少'}`}
+      aria-label={`${label} ${dir === 1 ? tr('field.inc') : tr('field.dec')}`}
       tabIndex={-1}
       onPointerDown={(e) => {
         e.preventDefault() // 不让按钮抢走输入框的焦点
@@ -415,7 +428,7 @@ export default function NumberField({
         inputMode="decimal"
         aria-label={label}
         aria-invalid={bad || undefined}
-        title={bad && range !== undefined ? `超出${range}` : range}
+        title={bad && range !== undefined ? tr('field.exceedsRange', { range }) : range}
         placeholder={rangePlaceholder}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}

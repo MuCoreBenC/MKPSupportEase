@@ -40,6 +40,7 @@
 
 import { useCallback, useState } from 'react'
 import type { ParamSyncEntry } from '../../api'
+import { t, type StringKey } from '../../i18n'
 import FieldControl from '../../components/field/FieldControl'
 import Highlight from './highlight'
 import { valueText } from './useParams'
@@ -124,11 +125,11 @@ interface Props {
  * `valueType`，就该把它说出来：**控件说的是「画成什么」，类型说的是「值是什么」**。
  * 括号里的英文是包里那个原词，作者点名要的就是它（「string，bool 之类的」）。
  */
-const TYPE_TEXT: Record<'float' | 'int' | 'bool' | 'string', string> = {
-  float: '浮点小数',
-  int: '整数',
-  bool: '布尔（开 / 关）',
-  string: '文本',
+const TYPE_TEXT: Record<'float' | 'int' | 'bool' | 'string', StringKey> = {
+  float: 'params.type.float',
+  int: 'params.type.int',
+  bool: 'params.type.bool',
+  string: 'params.type.string',
 }
 
 const OP_TEXT: Record<'eq' | 'neq' | 'gt', string> = { eq: '=', neq: '≠', gt: '>' }
@@ -137,17 +138,17 @@ function rangeText(def: ParamDef): string {
   const f = def.field
   if (f.control !== 'number') return '—'
   const unit = f.unit !== undefined ? ` ${f.unit}` : ''
-  const stepPart = f.step !== undefined ? `步长 ${f.step}${unit}` : ''
+  const stepPart = f.step !== undefined ? t('params.step', { step: f.step, unit }) : ''
   /* 注册表里没写范围的字段不要编一个「不限 ~ 不限」出来 */
   const bounded = f.min !== undefined || f.max !== undefined
-  if (!bounded) return stepPart === '' ? '没有写明范围' : `没有写明范围 · ${stepPart}`
-  const lo = f.min === undefined ? '不限' : String(f.min)
-  const hi = f.max === undefined ? '不限' : String(f.max)
+  if (!bounded) return stepPart === '' ? t('params.noRange') : t('params.noRangeStep', { step: stepPart })
+  const lo = f.min === undefined ? t('params.unbounded') : String(f.min)
+  const hi = f.max === undefined ? t('params.unbounded') : String(f.max)
   return stepPart === '' ? `${lo} ~ ${hi}${unit}` : `${lo} ~ ${hi}${unit} · ${stepPart}`
 }
 
 function choicesText(def: ParamDef): string {
-  if (def.field.control === 'switch') return '关闭 / 开启'
+  if (def.field.control === 'switch') return t('params.switchRange')
   if (def.field.control === 'choice') {
     return (def.field.choices ?? []).map((c) => c.label).join(' / ')
   }
@@ -212,7 +213,10 @@ export default function ParamRow({
   /** 「云端 18.6 → 19.0」 */
   const diffText =
     sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
-      ? `云端 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.cloudNew)}`
+      ? t('params.cloudArrow', {
+          before: valueText(def, sync.baselineOld),
+          after: valueText(def, sync.cloudNew),
+        })
       : null
   /*
    * 「我的 18.6 → 云端 19.0」—— 采用之后要说得清"换掉的是我哪个值"。
@@ -223,7 +227,10 @@ export default function ParamRow({
   const prevOrLocal = prevSavedValue ?? sync?.local ?? null
   const mineToCloud =
     sync !== undefined && prevOrLocal !== null && sync.cloudNew !== null
-      ? `我的 ${valueText(def, prevOrLocal)} → 云端 ${valueText(def, sync.cloudNew)}`
+      ? t('params.mineArrow', {
+          before: valueText(def, prevOrLocal),
+          after: valueText(def, sync.cloudNew),
+        })
       : diffText
 
   return (
@@ -278,7 +285,7 @@ export default function ParamRow({
               <span
                 className={s.info}
                 aria-hidden
-                title={def.desc === '' ? '点这一行看参数详情' : def.desc}
+                title={def.desc === '' ? t('params.rowTitle') : def.desc}
               >
                 ?
               </span>
@@ -289,7 +296,7 @@ export default function ParamRow({
              */}
             {blocked && !dep && !suppressNote && (
               <span className={s.note}>
-                需先让「{blockedBy.label}」{blockedBy.need}
+                {t('params.blockedBy', { label: blockedBy.label, need: blockedBy.need })}
               </span>
             )}
             {/*
@@ -298,25 +305,25 @@ export default function ParamRow({
              */}
             {syncPending && syncDraftKind === 'adopt' && (
               <span className={s.syncNote}>
-                <span className={s.syncBadgeAdopted}>已采用云端新值</span>
+                <span className={s.syncBadgeAdopted}>{t('params.syncAdopted')}</span>
                 {mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>}
               </span>
             )}
             {syncPending && syncDraftKind === 'hold' && (
               <span className={s.syncNote}>
-                <span className={s.syncBadgeHold}>保持原样</span>
+                <span className={s.syncBadgeHold}>{t('params.syncHold')}</span>
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
             {syncPending && syncDraftKind === null && (
               <span className={s.syncNote}>
-                <span className={s.syncBadge}>云端已更新</span>
+                <span className={s.syncBadge}>{t('params.syncUpdated')}</span>
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
             {!syncPending && syncDecided !== null && (
               <span className={s.syncDecided}>
-                {syncDecided === 'adopt' ? '已采用云端新值' : '保持原样'}
+                {syncDecided === 'adopt' ? t('params.syncAdopted') : t('params.syncHold')}
                 {/* 保存过的那一版也把数字留着（2026-10-21）：
                     采用 =「我的旧值 → 云端新值」，保持 =「云端旧值 → 云端新值」 */}
                 {syncDecided === 'adopt'
@@ -473,7 +480,7 @@ export default function ParamRow({
           */}
           <dt className={s.dt}>类型</dt>
           <dd className={s.dd}>
-            {TYPE_TEXT[def.meta?.valueType ?? 'string']}
+            {t(TYPE_TEXT[def.meta?.valueType ?? 'string'])}
             <span className={s.typeKey}> {def.meta?.valueType ?? 'string'}</span>
           </dd>
           {/* 条件：这条什么条件下才显示 —— 同样来自包里的 showWhen */}

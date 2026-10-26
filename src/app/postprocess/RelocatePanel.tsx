@@ -14,6 +14,7 @@
  *   这一屏要表达的是"**塔**从这挪到那"—— 由两幅图和中间那支箭头说，画布里不画箭头。
  */
 import type { PostProcessQuestion, RelocateGeo, ReportCollision } from '../../api/contract'
+import { useT } from '../../i18n'
 import CollisionMap from '../report/CollisionMap'
 import { HERO_H, MAP_CHROME } from './metrics'
 import s from './PostProcessModal.module.css'
@@ -66,6 +67,7 @@ export function RelocateMaps({
   machineType: string | null
 }) {
   const { c, after, candidate, current } = parts(question)
+  const tr = useT()
 
   /*
    * **画布里那支白色箭头**（2026-10-18 作者：「我是说图片里面的塔的首尾指向的箭头，
@@ -93,7 +95,7 @@ export function RelocateMaps({
   }
 
   return (
-    <div className={s.relocateMaps} role="img" aria-label="擦料塔现在的位置与挪动后的位置">
+    <div className={s.relocateMaps} role="img" aria-label={tr('postproc.relocate.mapsAria')}>
       {/*
        * ┌─ 两处箭头，说的是同一件事的两个尺度，**两个都要**（作者 2026-10-18 定）──────┐
        * │ ① **画布里那支白箭头**（在 `CollisionMap` 里，`arrow={towerArrow}`）：      │
@@ -250,13 +252,14 @@ export function RelocateNote({
   countdown: string | null
 }) {
   const { c, candidate, current } = parts(question)
+  const tr = useT()
   return (
     <div className={s.relocateNote}>
       <p className={s.relocateAsk}>{question.text}</p>
       {/* ② 一组坐标：现在 → 建议（箭头只讲"这两组是同一个东西的前后"） */}
       <div className={s.relocateCols}>
         <div className={s.relocateCol}>
-          <span className={s.relocateColLabel}>当前塔位置</span>
+          <span className={s.relocateColLabel}>{tr('postproc.relocate.curLabel')}</span>
           <span className={s.relocateValue}>
             <CoordPair pair={current} />
           </span>
@@ -265,9 +268,9 @@ export function RelocateNote({
           <SwapArrow />
         </span>
         <div className={`${s.relocateCol} ${s.relocateColNew}`}>
-          <span className={s.relocateColLabel}>自动摆放位置</span>
+          <span className={s.relocateColLabel}>{tr('postproc.relocate.newLabel')}</span>
           <span className={s.relocateValue}>
-            {candidate !== null ? <CoordPair pair={candidate} /> : '板子上摆不下'}
+            {candidate !== null ? <CoordPair pair={candidate} /> : tr('postproc.relocate.noRoom')}
           </span>
         </div>
       </div>
@@ -278,7 +281,7 @@ export function RelocateNote({
             <WarnTriangle />
           </span>
           <span className={s.relocateHitValue}>{c !== null ? (c.conflictCount ?? 0) : '—'}</span>
-          <span className={s.relocateHitUnit}>个冲突点</span>
+          <span className={s.relocateHitUnit}>{tr('postproc.relocate.conflictUnit')}</span>
         </span>
         {countdown !== null && (
           <span className={s.relocateTimer}>

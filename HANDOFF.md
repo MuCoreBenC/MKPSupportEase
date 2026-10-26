@@ -634,3 +634,123 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
   `cargo test` **641 全绿** / `cargo test --features workbench --lib` **1036 全绿**。
 - 前端：`npx tsc -b --force` / `npm run build` / `npm run lint` / 四道 check + `check:calibration-assets` 全绿。
 - 真机：`setWindowBackdrop` 调用成功（日志 `ok`，无 `[chrome]` 告警），快拖时不再闪白。
+## 增量之五十三 · i18n 第二刀：`presetTree` 整文件全量迁 + 三个 shared 模块（2026-10-26，分支 `feat/dark-mode`）
+
+### 一、为什么要这一刀
+
+第一刀（1119 条键）只覆盖各子代理名单内的文件，名单外的四个模块仍是中文字面量 ——
+切英文后预设页的分段控件、操作列、展开详情、右键菜单、归档抽屉、下载水位，
+以及后处理 12 步、切片器四档、打开模型框里那句话，全都还是中文。
+
+作者裁定：`presetTree.ts` **整文件全量迁**（含 `ARCHIVE_WHY` 这类长说明），
+带文案的数据管线函数**一起迁、`tr` 一路穿下去**。
+
+### 二、做法（一条型：常量改存 `StringKey`、函数收 `tr` 首参）
+
+- `src/i18n/index.ts` 新增并导出 `type Tr`（`useT()` 的返回）。`PageReport` 里那份
+  本地 `type Tr = ReturnType<typeof useT>` 删掉、改成 import —— 全仓一份定义。
+- `presetTree.ts`：约 40 张词表改存 `StringKey`（`Record<Axis, StringKey>` 形状不变，
+  调用处 `tr(TABLE[x])`）；13 个函数收 `tr` 首参：
+  `sourceTextOf` / `originCellOf` / `archiveOpenText` / `usageCellText` / `basedOnCellText` /
+  `localUnreadableWhy` / `presetBatchText` / `versionsText` / `presetPathText` /
+  `buildPresetTree` / `localRows` / `cloudRows`。
+  `EDIT_TEXT.draftFailed` / `savedBack`、`IMPORT_TAKEN_TEXT.note` 由「前缀拼接」改成
+  整句占位符（`{detail}` / `{name}`+`{path}` / `{name}`+`{suggested}`），调用处同步。
+- `postprocess/steps.ts`：`StepView.name: StringKey`，`stepName(tr, id)`；认不出的 id 仍原样。
+- `shared/slicer.ts`：`SLICER_CHOICES` 的 label/hint 改键（**应用名也进表**，换语言不该
+  让下拉认出另一个应用），`slicerOptionsOf(tr, …)` / `systemSlicerLine(tr, …)`。
+- `shared/download.ts`：`tickText(tr, t)` / `outcomeText(tr, o)`。
+- 词典 1119 → **1274 条**（含 `common.clauseSep` 这一条标点，页面里 `join('；')` 也随语言走）。
+
+### 三、两处不是"换个写法"的决定
+
+1. **`buildPresetTree` 的 `后端没有 X 这个组合`**：它产生在**加载 effect** 里（20+ 个请求）。
+   直接把 `tr` 塞进那个 effect 的依赖 ⇒ 换语言就整屏重读一遍。
+   所以 `usePresetData` 改成存**建树的四份原样输入**（`TreeSeed`）+ `useMemo([treeSeed, tr])`
+   出树：换语言只重出一棵树，不重发请求。
+   这一条与"页面常驻挂、切页只切 `data-hidden`"有关 —— 切语言时预设页并没卸载，
+   若用模块级 `t()` 取那句话，它会一直是上一种语言。
+2. **删死表**（全仓 grep 复核、0 引用）：`DELIVERY_TEXT` / `PRESET_STATE_TEXT` /
+   `STATUS_WHY` / `ASSET_USE_WHY`。`ORIGIN_TEXT` / `ORIGIN_WHY` / `CLOUD_LOCAL_WHY`
+   仍被活路径读，随函数迁成 `StringKey`，不删。
+   目的是不留"同一个词两个出处"（`STATUS_TEXT` vs `LIVE_TEXT` 那种）。
+
+### 四、验证
+
+- `npm run check:i18n` **1274 条键，键集与占位符两语完全一致**。
+- `npx tsc -b --force` / `npm run lint`（0 error，仅 `PagePresets:621` 那条既有 warning）/
+  `npm run build` / 四道 check 全绿。
+- 探针：`i18n` **13/13**、`window-gadgets` **36/36**。
+- 浏览器实测（`vite preview` + playwright，切 English 后逐屏扫 CJK）：
+  预设页本地表 / 展开详情 / 右键菜单（`Use … Delete`）/ 云端表、
+  `TextDiffModal` 的「Enter edit mode」→ 底栏「Discard / Save」—— **界面侧 CJK = 0**，
+  剩下的全是 mock 数据本身（机型/版本名、备注、文件正文）。
+- Rust 四道这一刀没跑：**只改前端**。
+
+### 五、仍未迁完的一批（下一刀，已盘点）
+
+参数页与几处共用组件**整页尚未迁**（不是本刀范围，也不是本刀改出来的）：
+`params/PageParams.tsx` 18 处（`撤销（Ctrl+Z）` / `重做` / `丢弃改动` / `恢复默认值` /
+`确认保存？` 这一整块底栏与两张 sheet、空态标题、搜索框 aria-label）、
+`params/ParamRow.tsx` 17 处（详情 `dt/dd` 那一列 + 云端更新块）、
+`params/PresetParamsModal.tsx` 2 处、`calib/PageCalib.tsx` 7 处、
+`bbs/PageBbs.tsx` 2 处、`bbs/BbsTabs.tsx` 1 处、`shared/Drawer.tsx` 1 处、`shared/NoteBar.tsx` 1 处、`notify/NotifyHost.tsx` 1 处、
+`components/modal/Modal.tsx` 1 处、`app/components/TraceTag.tsx` 1 处，合计约 52 处。
+（`presets/CompareModal.tsx` 那 3 处——标题「参数对比」与两句 subtitle——本刀顺手一起迁了。）
+`src/workbench/**` 仍全中文 —— 那是开发台、只有作者看，不在这条线上。
+
+
+## 增量之五十四 · i18n 第三刀：内核 + 主进程的文案也进表（2026-10-26，分支 `feat/dark-mode`）
+
+### 一、作者的原话
+
+「我不想看到任何一个中文」。截图上是设置页更新卡里那段红框：
+`The check failed: 从远端取字节失败：https://…` —— 后端那句中文原样冒进英文界面。
+
+根因不是漏翻一条，而是**两套字典**：前端住 `src/i18n`（1274 条），
+内核 `mkpse-pp` 那套住 `crates/postprocess/messages.toml`（`Lang` + `--lang` +
+`text()`）。第二刀只迁了前端，**后端整条线还是中文源**。
+
+### 二、做法
+
+1. `crates/postprocess/messages.toml` 补了 **582 条 `ui.*`**（其中 51 条原本连 `text_en` 都没有，
+   也一并补齐），现在全表 **661 条**、两语齐全、占位符与 `params` 逐条对齐。
+2. `src-tauri/src/**` 里所有给用户看的句子改成 `messages::text("…键…", &[…])`：
+   `AppError::*` 的参数、`with_detail(…)` 的说明句、`devsim` 演出脚本、
+   `hook_ui` 的收场通知、归档那本 `_meta.json`、CLI 的 stderr。
+   两个"名字"也进了表：`SlicerKind::label()`（系统默认程序 / 你指定的应用）与
+   校准页那 5 张模型卡的名称与说明（`MODEL_DEFS` 改存键）。
+3. **语言怎么到后端**：前端语言格已经存在（`app-state.locale`），钩子起进程时带 `--lang`；
+   `mkpse-pp` 与 GUI 共用同一个 `Lang` 单值。
+4. `net.rs` 那 8 条盖上了码（`E_NET_READ_001` / `E_NET_DNS_001` / `E_NET_FETCH_001` …），
+   于是错误话术走"人话 + 尾注码"，前端不必自己拼。
+5. **`SlicerKind::label()` 拆成两个**：`label()` 给人看（随语言）、
+   `product_name()` 给 Windows 注册表查 `App Paths`（**产品名，不随语言**）——
+   这两个用途混在一起时，翻成中文就找不到注册表项了。
+
+### 三、两处判据要跟着改（不是"修测试"，是判据本身过时了）
+
+- `presetdata::registry` 的三条单测原来断言 `contains("悬空")` 这类**中文原文**。
+  文案进表后正确写法是断言**那个变量名**（`ghost` / `a.x` / `a.z`），与语言无关。
+- `tests/cli.rs` 的 `run_cli` 钉上 `--lang zh-CN`：那一组判的是"报错点没点名那个东西"，
+  下面几条断言的中文是**源语言约定**；不钉的话，机器上有个 `LC_ALL=en` 就会红。
+
+### 四、验证
+
+- `cargo fmt --all --check` / 双 feature `clippy --all-targets -D warnings` 0 条。
+- `cargo test -p mkpse-postprocess --lib` **235**、`-p mkp-support-ease --lib` **641**、
+  `--features workbench --lib` **1036**。
+- 前端六道：`check:i18n` **1274 条**、`tsc -b --force`、`eslint` 0 error（仅既有 621 行 warning）、
+  `npm run build`、`check:bundle` / `zero-network` / `channel-args` / `release-source` / `calibration-assets`。
+- 探针 `i18n` **13/13**、`window-gadgets` **36/36**。
+- 浏览器实测切 English 后逐屏扫：6 个页签里剩下的 CJK **全是数据**
+  （机型名"拓竹"、版本名"快拆版6月以前"、参数名"层高"/"接缝"、mock 的演示文案、
+  "简体中文"这个语言项本身）。
+- **`process_with_ir_matches_the_end_to_end_reference` 红**：`git stash` 退回本刀全部改动
+  后同一条同样红（长度差 447 字节，值一模一样），是**既有失败**，与本刀无关。
+
+### 五、还没做的一批（已盘点 ≈52 处）
+
+前端参数页整页、`PageCalib` 7 处、`PageBbs` 2 处、`BbsTabs`/`Drawer`/`NoteBar`/
+`NotifyHost`/`Modal`/`TraceTag` 各 1 处（见增量之五十三第五节）。
+`src/workbench/**` 仍全中文 —— 开发台只有作者看，不进这条线。

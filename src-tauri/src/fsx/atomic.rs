@@ -13,6 +13,8 @@
 //! `clippy.toml` 把 `std::fs::write` / `File::create` / `tokio::fs::write` 列进
 //! `disallowed-methods`，全仓只有本文件开一个 `#[allow]` 的洞。
 
+use postprocess::diag::messages;
+
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -61,21 +63,27 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
 
     let parent = path
         .parent()
-        .ok_or_else(|| AppError::invalid_argument("写入路径没有父目录"))?;
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.fsx.atomic.012", &[])))?;
 
     std::fs::create_dir_all(parent).map_err(|e| {
-        AppError::io(format!("建不出目录：{}", parent.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.fsx.atomic.013",
+            &[("v1", &parent.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
 
     let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
-        AppError::io("创建临时文件失败").with_detail(format!("{} / {e}", parent.display()))
+        AppError::io(messages::text("ui.fsx.atomic.014", &[]))
+            .with_detail(format!("{} / {e}", parent.display()))
     })?;
 
-    tmp.write_all(bytes)
-        .map_err(|e| AppError::io("写入临时文件失败").with_detail(e.to_string()))?;
-    tmp.as_file()
-        .sync_all()
-        .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
+    tmp.write_all(bytes).map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.015", &[])).with_detail(e.to_string())
+    })?;
+    tmp.as_file().sync_all().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.016", &[])).with_detail(e.to_string())
+    })?;
 
     tmp.persist(verbatim(path))?;
 
@@ -102,21 +110,26 @@ pub fn atomic_write_stream(
 ) -> Result<(), AppError> {
     let parent = path
         .parent()
-        .ok_or_else(|| AppError::invalid_argument("写入路径没有父目录"))?;
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.fsx.atomic.017", &[])))?;
 
     std::fs::create_dir_all(parent).map_err(|e| {
-        AppError::io(format!("建不出目录：{}", parent.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.fsx.atomic.018",
+            &[("v1", &parent.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
 
     let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
-        AppError::io("创建临时文件失败").with_detail(format!("{} / {e}", parent.display()))
+        AppError::io(messages::text("ui.fsx.atomic.019", &[]))
+            .with_detail(format!("{} / {e}", parent.display()))
     })?;
 
     write(tmp.as_file_mut())?;
 
-    tmp.as_file()
-        .sync_all()
-        .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
+    tmp.as_file().sync_all().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.020", &[])).with_detail(e.to_string())
+    })?;
     tmp.persist(verbatim(path))?;
 
     if let Ok(dir) = File::open(parent) {

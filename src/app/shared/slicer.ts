@@ -21,14 +21,20 @@ import type { SlicerApp } from '../../api/contract'
 import { STORAGE } from '../../api/storageKeys'
 /* 多实例同步的 sticky 偏好：切片这一格与「引导提示」开关共用这一份（见 `hooks/`） */
 import { useSyncedStickyState } from '../../hooks/useSyncedStickyState'
+import type { StringKey, Tr } from '../../i18n'
 
 /** 四档，**id 是给壳的契约**（跟随系统 = 交给系统关联程序，不指定具体应用） */
 export type SlicerId = 'system' | 'bambu' | 'orca' | 'custom'
 
-export const SLICER_CHOICES: { id: SlicerId; label: string; hint: string }[] = [
-  { id: 'system', label: '跟随系统默认', hint: '用 .3mf 关联的程序打开（没选过时就是这个）' },
-  { id: 'bambu', label: 'Bambu Studio', hint: '总是交给 Bambu Studio' },
-  { id: 'orca', label: 'OrcaSlicer', hint: '总是交给 OrcaSlicer' },
+/** 内置三档的词（2026-10-26 起走字典 —— 应用名也进表：换语言不该让下拉认出另一个应用） */
+export const SLICER_CHOICES: { id: SlicerId; label: StringKey; hint: StringKey }[] = [
+  {
+    id: 'system',
+    label: 'slicer.choices.system.label',
+    hint: 'slicer.choices.system.hint',
+  },
+  { id: 'bambu', label: 'slicer.choices.bambu.label', hint: 'slicer.choices.bambu.hint' },
+  { id: 'orca', label: 'slicer.choices.orca.label', hint: 'slicer.choices.orca.hint' },
 ]
 
 /**
@@ -59,16 +65,17 @@ export const SLICER_CHOOSE = '__choose'
  * 那条的 note，问不到（`null`）就用原来那句话 —— 见 [`systemSlicerLine`]。
  */
 export function slicerOptionsOf(
+  tr: Tr,
   app: SlicerApp | null,
   systemApp: SlicerApp | null,
 ): { value: SlicerId; label: string; note: string }[] {
   const base = SLICER_CHOICES.map((c) => ({
     value: c.id,
-    label: c.label,
-    note: c.id === 'system' ? systemSlicerLine(systemApp) : c.hint,
+    label: tr(c.label),
+    note: c.id === 'system' ? systemSlicerLine(tr, systemApp) : tr(c.hint),
   }))
   if (app === null) return base
-  return [...base, { value: 'custom', label: app.name, note: '你指定的' }]
+  return [...base, { value: 'custom', label: app.name, note: tr('slicer.customNote') }]
 }
 
 /**
@@ -79,10 +86,10 @@ export function slicerOptionsOf(
  * 问不到应用名（`null`：这台机器没关联任何程序 / 这一次问不成）就回落**那一档自己的
  * 说明**：界面照旧显示原来那句，**不编一个名字顶上**。
  */
-export function systemSlicerLine(systemApp: SlicerApp | null): string {
+export function systemSlicerLine(tr: Tr, systemApp: SlicerApp | null): string {
   return systemApp === null
-    ? SYSTEM_CHOICE.hint
-    : `用 .3mf 关联的程序打开：${systemApp.name}`
+    ? tr(SYSTEM_CHOICE.hint)
+    : tr('slicer.systemLine', { name: systemApp.name })
 }
 
 /**

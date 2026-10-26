@@ -1786,6 +1786,21 @@ export interface PresetSource {
  */
 export type ThemePref = 'light' | 'dark' | 'system'
 
+/* ---------- 界面语言（2026-10-25） ---------- */
+
+/**
+ * 界面语言档 —— **id 是契约**（与 Rust `runtime::app_state::LocalePref` 一一对应）。
+ *
+ * - `system`：跟随系统（出厂档）；
+ * - `zh-CN`：简体中文；
+ * - `en`：English。
+ *
+ * ★ 线上字面量带大写（`zh-CN`）—— Rust 那一侧是逐个 `serde(rename)`，
+ *   不是 `rename_all`，改这里必须同时改那边。
+ * ★ `null`（还没选过）与 `'system'`（明确点了跟随系统）分得开，与主题同一条口径。
+ */
+export type LocalePref = 'system' | 'zh-CN' | 'en'
+
 /* ---------- 主窗怎么摆（2026-10-17） ---------- */
 
 /**
@@ -3153,6 +3168,21 @@ export interface MkpApi {
    * 界面必须**两段式确认**之后再调它（见设置页那个 3 秒回退的按钮）。
    */
   uninstall(): Promise<void>
+
+  /**
+   * 当前界面语言偏好（2026-10-25）。`null` = **还没选过** ⇒ 按"跟随系统"。
+   *
+   * ★ 只有文案跟着它换；**错误码 `code` 永远不变**（每句话必有码那条纪律）。
+   */
+  getLocale(): Promise<LocalePref | null>
+
+  /**
+   * 换界面语言：`system` / `zh-CN` / `en`。
+   *
+   * 写成功后后端广播一次 AppState，前端字典据此换一套文案 —— 不需要重启。
+   * 认不出的档整次拒绝（不静默回落成中文）。
+   */
+  setLocale(locale: LocalePref): Promise<LocalePref>
 
   /**
    * 窗口这一族的两格账（2026-10-17）：置顶档位 + 在不在窄窗。

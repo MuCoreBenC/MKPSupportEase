@@ -23,6 +23,7 @@
  */
 import { useCallback, useEffect, useRef } from 'react'
 import type { ReactNode } from 'react'
+import { t } from '../../i18n'
 import s from './ZoomLayer.module.css'
 
 /** 缩放范围。大图本身已放大一档，再放到 4 倍足够看清细节 */
@@ -47,8 +48,8 @@ export default function ZoomLayer({
   from,
   returnTo,
   onGone,
-  label = '收起放大视图',
-  hint = '拖动挪位置 · 滚轮 / 捏合缩放 · 点任意处或 Esc 收起',
+  label = t('zoom.closeDefault'),
+  hint = t('zoom.hintDefault'),
 }: {
   /** 要看大的那块内容（`<img>` / canvas / SVG …… 任意节点） */
   children: ReactNode

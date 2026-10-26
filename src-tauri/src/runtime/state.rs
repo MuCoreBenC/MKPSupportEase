@@ -17,6 +17,8 @@
 //! `CORRUPTED`，不把它当"没有"—— 静默吞状态是编数据的近亲：用户明明"使用中"，
 //! 界面却说没在用，那是撒谎）。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -97,15 +99,20 @@ pub(super) fn read_active_file(root: &Path) -> Result<Option<ActivePreset>, AppE
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(AppError::io("读不到使用中状态").with_detail(e.to_string()));
+            return Err(AppError::io(messages::text("ui.runtime.state.458", &[]))
+                .with_detail(e.to_string()));
         }
     };
-    let state: ActivePreset = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::corrupted("使用中状态读不出来").with_detail(e.to_string()))?;
+    let state: ActivePreset = serde_json::from_slice(&bytes).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.state.459", &[])).with_detail(e.to_string())
+    })?;
     if state.active_schema != ACTIVE_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "使用中状态的格式代次认不了：文件是 {}，程序认 {}",
-            state.active_schema, ACTIVE_SCHEMA
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.state.460",
+            &[
+                ("v1", &state.active_schema.to_string()),
+                ("v2", &ACTIVE_SCHEMA.to_string()),
+            ],
         )));
     }
     Ok(Some(state))
@@ -297,14 +304,21 @@ pub(super) fn read_draft_file(root: &Path) -> Result<Option<PresetDraft>, AppErr
     let bytes = match std::fs::read(root.join(DRAFT_FILE)) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(AppError::io("读不到编辑中的那份").with_detail(e.to_string())),
+        Err(e) => {
+            return Err(AppError::io(messages::text("ui.runtime.state.461", &[]))
+                .with_detail(e.to_string()))
+        }
     };
-    let draft: PresetDraft = serde_json::from_slice(&bytes)
-        .map_err(|e| AppError::corrupted("编辑中的那份读不出来").with_detail(e.to_string()))?;
+    let draft: PresetDraft = serde_json::from_slice(&bytes).map_err(|e| {
+        AppError::corrupted(messages::text("ui.runtime.state.462", &[])).with_detail(e.to_string())
+    })?;
     if draft.draft_schema != DRAFT_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "草稿的格式代次认不了：文件是 {}，程序认 {}",
-            draft.draft_schema, DRAFT_SCHEMA
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.state.463",
+            &[
+                ("v1", &draft.draft_schema.to_string()),
+                ("v2", &DRAFT_SCHEMA.to_string()),
+            ],
         )));
     }
     Ok(Some(draft))

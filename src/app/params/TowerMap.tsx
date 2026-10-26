@@ -19,6 +19,7 @@
 
 import { useCallback, useId, useMemo, useRef, useState } from 'react'
 import type { ReactNode, PointerEvent as ReactPointerEvent } from 'react'
+import { useT } from '../../i18n'
 import TowerCoreSvg from './TowerCoreSvg'
 import type { TowerCoreProps } from './TowerCoreSvg'
 import type { Plate } from '../../api'
@@ -87,6 +88,7 @@ export default function TowerMap({
   onDrag,
   disabled = false,
 }: Props) {
+  const tr = useT()
   const mapRef = useRef<HTMLDivElement | null>(null)
   /** 留白带裁剪用的 clipPath id —— useId 带冒号，url(#) 引用里去掉稳妥 */
   const clipId = useId().replace(/:/g, '')
@@ -205,8 +207,8 @@ export default function TowerMap({
           data-ro={disabled || undefined}
           aria-label={
             disabled
-              ? `擦料塔位置：X ${snap(shown.x)}、Y ${snap(shown.y)}（只读）`
-              : `擦料塔位置：X ${snap(shown.x)}、Y ${snap(shown.y)}，点击或拖动调整`
+              ? tr('params.tower.readonly', { x: snap(shown.x), y: snap(shown.y) })
+              : tr('params.tower.editable', { x: snap(shown.x), y: snap(shown.y) })
           }
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -268,7 +270,7 @@ export default function TowerMap({
                   <line x1="22" y1="1" x2="22" y2="43" stroke="#d97706" strokeWidth="1.2" strokeDasharray="3 3" />
                   <line x1="1" y1="22" x2="43" y2="22" stroke="#d97706" strokeWidth="1.2" strokeDasharray="3 3" />
                   <text x="22" y="27" fontSize="14" fill="#d97706" textAnchor="middle" fontWeight="bold">
-                    原位
+                    {tr('params.tower.origin')}
                   </text>
                 </svg>
               </div>
@@ -279,7 +281,7 @@ export default function TowerMap({
             </div>
           </div>
         </div>
-        <p className={s.hint}>在热床上点击或拖动调整位置</p>
+        <p className={s.hint}>{tr('params.tower.hint')}</p>
       </div>
 
       <div className={s.sideCol}>

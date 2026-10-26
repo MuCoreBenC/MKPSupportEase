@@ -28,6 +28,8 @@
 //! `detail.stats` / `detail.printTime` …）。改字段名等于撕一份已经在用的契约 ——
 //! 前端那一屏显示什么，这份文件里就得有什么。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use postprocess::pipeline::Step;
@@ -137,7 +139,11 @@ pub fn begin(
     };
     if let Some(dir) = paths.original.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            AppError::io(format!("建不出归档目录：{}", dir.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.archive.001",
+                &[("v1", &dir.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     crate::fsx::atomic::atomic_write(&paths.original, raw.as_bytes())?;
@@ -151,8 +157,11 @@ pub fn begin(
 /// 记录，用户的信息一个字都没丢（关键的原子性在原件那一笔上）。
 pub fn archive_output(paths: &ArchivePaths, output: &Path) -> Result<(), AppError> {
     std::fs::copy(output, &paths.output).map_err(|e| {
-        AppError::io(format!("复制输出到归档失败：{}", paths.output.display()))
-            .with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.002",
+            &[("v1", &paths.output.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -692,9 +701,12 @@ impl ReportFacts<'_> {
                 mib(self.input_bytes),
                 self.input_sha256.chars().take(8).collect::<String>(),
             )),
-            Step::Config => {
-                (!self.preset_name.is_empty()).then(|| format!("预设: {}", self.preset_name))
-            }
+            Step::Config => (!self.preset_name.is_empty()).then(|| {
+                ::postprocess::diag::messages::text(
+                    "ui.archive.meta.preset",
+                    &[("v1", self.preset_name)],
+                )
+            }),
             Step::MachineDetect => Some(format!(
                 "G-code 机型: {}\n预设机型: {}\n机型维度: {:.0}×{:.0}mm\n禁区数量: {}",
                 non_empty(&self.ir.machine.gcode_machine_type),
@@ -727,7 +739,10 @@ impl ReportFacts<'_> {
                     lines.push("无碰撞，擦料塔位置安全".to_string());
                     lines.push("模型坐标均在打印范围内".to_string());
                 }
-                lines.push(format!("擦料塔类型: {}", self.tower_type()));
+                lines.push(::postprocess::diag::messages::text(
+                    "ui.archive.meta.tower_type",
+                    &[("v1", self.tower_type())],
+                ));
                 lines.push(format!(
                     "擦料塔位置: ({:.1}, {:.1})",
                     self.ir.wiping.wiper_x, self.ir.wiping.wiper_y
@@ -753,9 +768,20 @@ impl ReportFacts<'_> {
                 }
                 match (&r.profile_id, r.footprint, r.tolerance) {
                     (Some(id), Some((w, h)), Some(tol)) => {
-                        lines.push(format!("命中档位: {id}（标称 {w} × {h}，容差 {tol}）"))
+                        lines.push(::postprocess::diag::messages::text(
+                            "ui.archive.meta.hit_spec",
+                            &[
+                                ("id", &id.to_string()),
+                                ("w", &w.to_string()),
+                                ("h", &h.to_string()),
+                                ("tol", &tol.to_string()),
+                            ],
+                        ))
                     }
-                    (Some(id), _, _) => lines.push(format!("命中档位: {id}")),
+                    (Some(id), _, _) => lines.push(::postprocess::diag::messages::text(
+                        "ui.archive.meta.hit",
+                        &[("v1", id)],
+                    )),
                     _ => lines.push("档位: 按机型固定坐标（经典分支，未认档）".to_string()),
                 }
                 Some(lines.join("\n"))
@@ -785,7 +811,10 @@ impl ReportFacts<'_> {
                 yes_no(self.use_disk_wipe()),
             )),
             Step::Calibration => {
-                let mut text = format!("校准模式: {}", self.calibration_mode);
+                let mut text = ::postprocess::diag::messages::text(
+                    "ui.archive.meta.calib_mode",
+                    &[("v1", self.calibration_mode)],
+                );
                 match self.ir.safety.calibration_execution_mode.as_str() {
                     "direct_calibrate" => text.push_str("\n执行方式: 直接校准（跳过模型打印）"),
                     "print_then_calibrate" => text.push_str("\n执行方式: 打印后校准"),
@@ -795,7 +824,13 @@ impl ReportFacts<'_> {
                 Some(text)
             }
             Step::Write => Some(match self.output_bytes {
-                Some(bytes) => format!("{}\n输出 {:.2} MB", self.write_result_text(), mib(bytes)),
+                Some(bytes) => ::postprocess::diag::messages::text(
+                    "ui.archive.meta.write_with_size",
+                    &[
+                        ("v1", self.write_result_text()),
+                        ("v2", &format!("{:.2}", mib(bytes))),
+                    ],
+                ),
                 // 大小还没量到（stat 不到）就不写那行 —— 不编 0.00 MB。
                 None => self.write_result_text().to_string(),
             }),
@@ -849,11 +884,19 @@ fn ironing_mode_cn(mode: &str) -> &str {
 /// 读一份文件的 sha256（输入 / 输出的事实）。
 pub fn sha256_of(path: &Path) -> Result<String, AppError> {
     let mut file = std::fs::File::open(path).map_err(|e| {
-        AppError::io(format!("读不到文件：{}", path.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.003",
+            &[("v1", &path.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     let mut hasher = sha2::Sha256::new();
     std::io::copy(&mut file, &mut hasher).map_err(|e| {
-        AppError::io(format!("读文件失败：{}", path.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.004",
+            &[("v1", &path.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     Ok(format!("{:x}", hasher.finalize()))
 }
@@ -865,7 +908,11 @@ pub fn sha256_of(path: &Path) -> Result<String, AppError> {
 pub fn file_fact(path: &Path, lines: Option<u64>, sha256: String) -> Result<FileFact, AppError> {
     let size_bytes = std::fs::metadata(path)
         .map_err(|e| {
-            AppError::io(format!("读不到文件事实：{}", path.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.archive.005",
+                &[("v1", &path.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?
         .len();
     Ok(FileFact {
@@ -924,19 +971,21 @@ pub fn complete_meta(
     output_file: Option<FileFact>,
     print_time: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
-    let text = std::fs::read_to_string(meta_path)
-        .map_err(|e| AppError::io("这条记录读不出来（补全前）").with_detail(e.to_string()))?;
+    let text = std::fs::read_to_string(meta_path).map_err(|e| {
+        AppError::io(messages::text("ui.archive.006", &[])).with_detail(e.to_string())
+    })?;
     let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        AppError::corrupted("这条记录不是合法的 JSON（补全前）").with_detail(e.to_string())
+        AppError::corrupted(messages::text("ui.archive.007", &[])).with_detail(e.to_string())
     })?;
     {
         let Some(obj) = meta.as_object_mut() else {
-            return Err(AppError::corrupted("这条记录不是 JSON 对象"));
+            return Err(AppError::corrupted(messages::text("ui.archive.008", &[])));
         };
         let detail = obj.entry("detail").or_insert_with(|| serde_json::json!({}));
         if let Some(of) = output_file {
-            detail["outputFile"] = serde_json::to_value(of)
-                .map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
+            detail["outputFile"] = serde_json::to_value(of).map_err(|e| {
+                AppError::io(messages::text("ui.archive.009", &[])).with_detail(e.to_string())
+            })?;
         }
         if let Some(pt) = print_time {
             // 估算秒数与 printTime 同批落：`detail.estimatedPrintSeconds` 是旧版同名的
@@ -957,10 +1006,12 @@ pub fn complete_meta(
 /// 估算失败（或文件已经不在）时把状态标成 `failed` —— **不许留着 `computing`**，
 /// 否则报告页会一直显示"正在估算"。
 pub fn mark_print_time_failed(meta_path: &Path) -> Result<(), AppError> {
-    let text = std::fs::read_to_string(meta_path)
-        .map_err(|e| AppError::io("这条记录读不出来").with_detail(e.to_string()))?;
-    let mut meta: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| AppError::corrupted("这条记录不是合法的 JSON").with_detail(e.to_string()))?;
+    let text = std::fs::read_to_string(meta_path).map_err(|e| {
+        AppError::io(messages::text("ui.archive.010", &[])).with_detail(e.to_string())
+    })?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        AppError::corrupted(messages::text("ui.archive.011", &[])).with_detail(e.to_string())
+    })?;
     if let Some(obj) = meta.as_object_mut() {
         obj.insert(
             "printTimeStatus".to_string(),

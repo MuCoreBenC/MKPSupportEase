@@ -27,6 +27,8 @@
 //!
 //! 认不出的 id **整次拒绝**（`INVALID_ARGUMENT`），理由同上：宁可报错也不悄悄换一档。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
@@ -53,8 +55,9 @@ impl SlicerKind {
             Some("bambu") => Ok(Self::Bambu),
             Some("orca") => Ok(Self::Orca),
             Some("custom") => Ok(Self::Custom),
-            Some(other) => Err(AppError::invalid_argument(format!(
-                "不认识的切片软件：{other}（只有 system / bambu / orca / custom 四档）"
+            Some(other) => Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.slicer.146",
+                &[("other", other)],
             ))),
         }
     }
@@ -69,13 +72,29 @@ impl SlicerKind {
         }
     }
 
-    /// 给人看的名字（错误话术里用）
-    pub fn label(self) -> &'static str {
+    /// Windows 注册表里那种**固定**名字（`App Paths` 的键名）—— 与界面语言无关。
+    ///
+    /// 只有两档已知应用有；其余两档不会有注册表项。
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub fn product_name(self) -> &'static str {
         match self {
-            Self::System => "系统默认程序",
+            Self::System => "system",
             Self::Bambu => "Bambu Studio",
             Self::Orca => "OrcaSlicer",
-            Self::Custom => "你指定的应用",
+            Self::Custom => "custom",
+        }
+    }
+
+    /// 给人看的名字（错误话术里用）。
+    ///
+    /// 两档固定名字（Bambu Studio / OrcaSlicer）是**产品名**，不随语言变 —— 它们同时被
+    /// Windows 那边的注册表查找当成 `App Paths` 的键名（`known_label`），翻成别的字就找不到。
+    pub fn label(self) -> String {
+        match self {
+            Self::System => messages::text("ui.slicer.kind.system", &[]),
+            Self::Bambu => "Bambu Studio".to_owned(),
+            Self::Orca => "OrcaSlicer".to_owned(),
+            Self::Custom => messages::text("ui.slicer.kind.custom", &[]),
         }
     }
 }
@@ -123,7 +142,7 @@ fn slicer_candidates(kind: SlicerKind) -> Vec<PathBuf> {
      * 三个固定安装位一个都不命中，界面就照实说"没找到"（截图里那条）。
      * 装在哪安装器自己登记过，去问它（见 [`windows_registered_paths`]）。
      */
-    out.extend(windows_registered_paths(kind.label(), exe));
+    out.extend(windows_registered_paths(kind.product_name(), exe));
     out
 }
 
@@ -345,13 +364,12 @@ pub fn locate(kind: SlicerKind) -> Option<PathBuf> {
 /// `system` 那一档不走这里（它是"系统关联程序"的事，见 [`crate::ipc::mod::open_model`]）。
 pub fn launch(kind: SlicerKind, file: &Path) -> Result<(), AppError> {
     let Some(target) = locate(kind) else {
-        return Err(AppError::not_found(format!(
-            "这台机器上没找到 {} —— 装好它，或者在设置里改回「跟随系统默认」，\
-             或者用「其他应用…」从磁盘把它指出来",
-            kind.label()
+        return Err(AppError::not_found(messages::text(
+            "ui.ipc.slicer.147",
+            &[("v1", &kind.label().to_string())],
         )));
     };
-    launch_with(&target, kind.label(), file)
+    launch_with(&target, &kind.label(), file)
 }
 
 /// Windows 上起那个应用时要给 `CreateProcessW` 的 `dwCreationFlags`（2026-10-20）。
@@ -391,9 +409,9 @@ pub fn launch_with(target: &Path, label: &str, file: &Path) -> Result<(), AppErr
     spawn_detached(target, vec![file.as_os_str().to_owned()])
         .map(|_| ())
         .map_err(|e| {
-            AppError::io(format!(
-                "{label} 没打开这个文件（应用在 {}）",
-                target.display()
+            AppError::io(messages::text(
+                "ui.ipc.slicer.148",
+                &[("label", label), ("v1", &target.display().to_string())],
             ))
             .with_detail(e.to_string())
         })
@@ -472,9 +490,9 @@ fn windows_launch_system(file: &Path) -> Option<Result<(), AppError>> {
         spawn_detached(&target, association_args(&template, file))
             .map(|_| ())
             .map_err(|e| {
-                AppError::io(format!(
-                    "系统默认程序没打开这个文件（关联的是 {}）",
-                    target.display()
+                AppError::io(messages::text(
+                    "ui.ipc.slicer.149",
+                    &[("v1", &target.display().to_string())],
                 ))
                 .with_detail(e.to_string())
             }),
@@ -674,7 +692,7 @@ fn windows_open_command(ext: &str) -> Option<String> {
 /// 那两个已知应用**在这台机器上的落点**与解析结果完全一致时，用它们自己的名字
 /// （`bambu-studio.exe` 这种文件名不是给人看的）。macOS 走应用包的显示名，用不到这条。
 #[cfg(target_os = "windows")]
-fn known_label(path: &Path) -> Option<&'static str> {
+fn known_label(path: &Path) -> Option<String> {
     let want = path.to_string_lossy();
     for kind in [SlicerKind::Bambu, SlicerKind::Orca] {
         if let Some(found) = locate(kind) {
@@ -848,9 +866,10 @@ pub fn open_default_app_settings(file: &Path) -> Result<String, AppError> {
     #[cfg(target_os = "windows")]
     let out = windows_open_default_app_settings(file);
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    let out = Err(AppError::not_implemented(
-        "这台系统上还没有「去系统里改默认应用」这条入口",
-    ));
+    let out = Err(AppError::not_implemented(messages::text(
+        "ui.ipc.slicer.150",
+        &[],
+    )));
     out
 }
 
@@ -873,11 +892,14 @@ pub fn open_automation_settings() -> Result<(), AppError> {
         .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")
         .spawn()
         .map(|_| ())
-        .map_err(|e| AppError::io("打不开系统设置的「自动化」页").with_detail(e.to_string()));
+        .map_err(|e| {
+            AppError::io(messages::text("ui.ipc.slicer.151", &[])).with_detail(e.to_string())
+        });
     #[cfg(not(target_os = "macos"))]
-    let out: Result<(), AppError> = Err(AppError::not_implemented(
-        "这台系统上没有「自动化授权」这一页（那是 macOS 的东西）",
-    ));
+    let out: Result<(), AppError> = Err(AppError::not_implemented(messages::text(
+        "ui.ipc.slicer.152",
+        &[],
+    )));
     out
 }
 
@@ -961,7 +983,10 @@ fn information_window_failed(file: &Path, why: &str) -> AppError {
     let where_it_is = if located {
         "已经帮你在访达里定位到那份文件".to_string()
     } else {
-        format!("没能在访达里定位它（它在 {}）", file.display())
+        ::postprocess::diag::messages::text(
+            "ui.ipc.slicer.why_not_located",
+            &[("v1", &file.display().to_string())],
+        )
     };
     information_window_failure(why, &where_it_is)
 }
@@ -976,13 +1001,17 @@ fn information_window_failure(why: &str, where_it_is: &str) -> AppError {
                  （不点只对这一个文件生效）";
     /* -1743 = errAEEventNotPermitted：用户点了「不允许」，MKP 控制不了访达 */
     if why.contains("-1743") {
-        AppError::permission_denied(format!(
-            "没能替你打开「显示简介」—— 你点了「不允许」，MKP 操作不了访达。{where_it_is}，{steps}"
+        AppError::permission_denied(messages::text(
+            "ui.ipc.slicer.153",
+            &[("where_it_is", where_it_is), ("steps", steps)],
         ))
         .with_detail(why.to_string())
     } else {
-        AppError::io(format!("没能替你打开「显示简介」。{where_it_is}，{steps}"))
-            .with_detail(why.to_string())
+        AppError::io(messages::text(
+            "ui.ipc.slicer.154",
+            &[("where_it_is", where_it_is), ("steps", steps)],
+        ))
+        .with_detail(why.to_string())
     }
 }
 
@@ -997,7 +1026,9 @@ fn windows_open_default_app_settings(file: &Path) -> Result<String, AppError> {
             "在「你要如何打开这个文件？」里选好应用，再勾上「始终使用此应用打开 .3mf 文件」"
                 .to_string()
         })
-        .map_err(|e| AppError::io("没能打开「打开方式」那个框").with_detail(e.to_string()))
+        .map_err(|e| {
+            AppError::io(messages::text("ui.ipc.slicer.155", &[])).with_detail(e.to_string())
+        })
 }
 
 #[cfg(test)]

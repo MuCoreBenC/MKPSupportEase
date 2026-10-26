@@ -28,6 +28,8 @@
  *     这里只负责"把这一份文件里的这个字段改成这个值"。
  */
 
+use postprocess::diag::messages;
+
 use toml_edit::{DocumentMut, Item, Value};
 
 use crate::error::AppError;
@@ -67,8 +69,14 @@ impl FieldEdit {
 /// 所以这里只要最窄的那一样，不绑定某一个容器。
 fn locate<'a>(defs: &'a [ParamDef], param_key: &str) -> Result<&'a ParamDef, AppError> {
     defs.iter().find(|p| p.key == param_key).ok_or_else(|| {
-        AppError::invalid_argument(format!("不认识这个参数：{param_key}"))
-            .with_detail("它不在参数注册表里 —— 参数页不该发来一个注册表里没有的 key")
+        AppError::invalid_argument(messages::text(
+            "ui.presetdata.patch.283",
+            &[("param_key", param_key)],
+        ))
+        .with_detail(::postprocess::diag::messages::text(
+            "ui.presetdata.patch.why_unknown_key",
+            &[],
+        ))
     })
 }
 
@@ -81,7 +89,10 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
     match ty {
         ValueType::Float => {
             let n: f64 = t.parse().map_err(|_| {
-                AppError::invalid_argument(format!("`{raw}` 不是个数 —— 这一项要浮点数"))
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.patch.284",
+                    &[("raw", raw)],
+                ))
             })?;
             /*
              * **浮点尾闸**（2026-10-21，作者：「文件里面记录的就是两位小数的才对，
@@ -96,15 +107,19 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
         }
         ValueType::Int => {
             let n: i64 = t.parse().map_err(|_| {
-                AppError::invalid_argument(format!("`{raw}` 不是个数 —— 这一项要整数"))
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.patch.285",
+                    &[("raw", raw)],
+                ))
             })?;
             Ok(Value::from(n))
         }
         ValueType::Bool => match t.to_ascii_lowercase().as_str() {
             "true" | "1" | "on" | "yes" => Ok(Value::from(true)),
             "false" | "0" | "off" | "no" => Ok(Value::from(false)),
-            _ => Err(AppError::invalid_argument(format!(
-                "`{raw}` 不是个开关值 —— 这一项要 true / false"
+            _ => Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.286",
+                &[("raw", raw)],
             ))),
         },
         /* 文本与 G-code 都走字符串；**多行由 toml_edit 自己按需渲染**：
@@ -126,7 +141,10 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
 /// 这里补的是"整份正文直接落盘"的那条。
 pub fn ensure_toml_parses(text: &str) -> Result<(), AppError> {
     toml_problem(text).map_or(Ok(()), |why| {
-        Err(AppError::invalid_argument("这份 TOML 有语法错，没有保存").with_detail(why))
+        Err(
+            AppError::invalid_argument(messages::text("ui.presetdata.patch.287", &[]))
+                .with_detail(why),
+        )
     })
 }
 
@@ -152,20 +170,36 @@ pub fn patch_preset_toml(
     let toml_key = def.toml_key.clone();
 
     let mut doc: DocumentMut = raw.parse().map_err(|e| {
-        AppError::invalid_argument("这份草稿不是合法 TOML，改不动").with_detail(format!("{e}"))
+        AppError::invalid_argument(messages::text("ui.presetdata.patch.288", &[]))
+            .with_detail(format!("{e}"))
     })?;
 
     let table = doc
         .get_mut(&section)
         .and_then(Item::as_table_like_mut)
         .ok_or_else(|| {
-            AppError::invalid_argument(format!("草稿里没有 `[{section}]` 这一段"))
-                .with_detail(format!("参数 {} 按定义住在这一段里", edit.param_key))
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.289",
+                &[("section", &section.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.patch.why_section",
+                &[("key", &edit.param_key)],
+            ))
         })?;
 
     let item = table.get_mut(&toml_key).ok_or_else(|| {
-        AppError::invalid_argument(format!("草稿的 `[{section}]` 里没有 `{toml_key}`"))
-            .with_detail("只改已存在的字段：没有它说明这份预设不含这个参数，别凭空造一个")
+        AppError::invalid_argument(messages::text(
+            "ui.presetdata.patch.290",
+            &[
+                ("section", &section.to_string()),
+                ("toml_key", &toml_key.to_string()),
+            ],
+        ))
+        .with_detail(::postprocess::diag::messages::text(
+            "ui.presetdata.patch.why_absent",
+            &[],
+        ))
     })?;
 
     let new_value = to_toml_value(&edit.value, def.value_type)?;
@@ -189,10 +223,17 @@ pub fn patch_preset_toml(
         }
         _ => {
             /* 表 / 数组之类：参数页不该改这种结构（一个参数一个标量字段） */
-            return Err(AppError::invalid_argument(format!(
-                "`[{section}].{toml_key}` 不是个标量值，改不了"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.291",
+                &[
+                    ("section", &section.to_string()),
+                    ("toml_key", &toml_key.to_string()),
+                ],
             ))
-            .with_detail("一个参数对应一个标量字段；表 / 数组不归参数页动"));
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.patch.why_scalar",
+                &[],
+            )));
         }
     }
 

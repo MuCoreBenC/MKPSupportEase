@@ -28,6 +28,7 @@
  */
 
 import { useEffect, useRef } from 'react'
+import { useT } from '../../i18n'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
 import s from './PresetPickerDrawer.module.css'
 
@@ -98,6 +99,7 @@ export default function PresetPickerDrawer({
   side = 'right',
   drag,
 }: Props) {
+  const tr = useT()
   const panelRef = useRef<HTMLDivElement>(null)
 
   /* Esc 关闭。焦点回到 pill 由调用方在 onClose 里做（它才持有 pill 的 ref） */
@@ -131,7 +133,7 @@ export default function PresetPickerDrawer({
   return (
     <>
       {/* 遮罩：点一下关掉。它在抽屉之下（z-index 见 css） */}
-      <button type="button" className={s.scrim} aria-label="关闭预设列表" onClick={onClose} />
+      <button type="button" className={s.scrim} aria-label={tr('params.picker.close')} onClick={onClose} />
 
       <div
         className={s.drawer}
@@ -139,23 +141,25 @@ export default function PresetPickerDrawer({
         data-dragging={drag.dragging}
         ref={panelRef}
         role="dialog"
-        aria-label="选择预设"
+        aria-label={tr('params.picker.title')}
         style={{ width: `${drag.width}px` }}
       >
         {/* 拖宽热区：贴边一条透明带（全仓抽屉同一套，见 `shared/useDrawerWidth`） */}
         <div className={s.grip} data-side={side} {...drag.gripProps} />
 
         <div className={s.head}>
-          <span className={s.title}>选择预设</span>
-          <button type="button" className={s.close} onClick={onClose}>关闭</button>
+          <span className={s.title}>{tr('params.picker.title')}</span>
+          <button type="button" className={s.close} onClick={onClose}>
+            {tr('params.picker.closeAction')}
+          </button>
         </div>
 
         <div className={s.list}>
           {groups.length === 0 && (
             /* 本机一份都没有：说清楚"去哪儿弄一份"，不摆假选项 */
             <p className={s.empty}>
-              这台机器上还没有预设文件 —— 去「预设」页下载一份，或把自己那份放进
-              <code>presets-local/</code>。
+              {tr('params.picker.empty')}
+              <code>presets-local/</code>.
             </p>
           )}
 
@@ -203,7 +207,7 @@ export default function PresetPickerDrawer({
                      */}
                     <span className={s.name}>{row.fileName}</span>
                     {current ? (
-                      <span className={s.inUse}>在用</span>
+                      <span className={s.inUse}>{tr('params.picker.inUse')}</span>
                     ) : (
                       <button
                         type="button"
@@ -211,7 +215,7 @@ export default function PresetPickerDrawer({
                         /* 规则②：只有它会切 */
                         onClick={() => onUse(row)}
                       >
-                        使用
+                        {tr('params.picker.use')}
                       </button>
                     )}
                   </div>

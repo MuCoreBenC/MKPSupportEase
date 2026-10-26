@@ -5,6 +5,7 @@
  */
 
 import { LADDER } from './plateLadder'
+import { t, type StringKey } from '../../i18n'
 import { HOTSPOTS as Z_HOTSPOTS } from '../../calib/zoffset-calibration.generated'
 
 /**
@@ -18,10 +19,14 @@ export type Axis = 'x' | 'y' | 'z'
 export type Axes = Record<Axis, number>
 
 /** 读数条与拦截弹窗里的行顺序：X → Y → Z */
-export const AXIS_ROWS: [string, Axis][] = [
-  ['X 偏移', 'x'],
-  ['Y 偏移', 'y'],
-  ['Z 偏移', 'z'],
+/**
+ * 三条轴的**行名**：第一格是字典键（2026-10-26），不是句子 ——
+ * 这张表是模块级常量，放句子会被求值一次冻住；渲染处用 `tr(label)`。
+ */
+export const AXIS_ROWS: [StringKey, Axis][] = [
+  ['calib.axis.x', 'x'],
+  ['calib.axis.y', 'y'],
+  ['calib.axis.z', 'z'],
 ]
 
 /** 数值位的三种状态：有值 / 正在取 / 没有 */
@@ -54,12 +59,15 @@ export const matchXY = (axis: 'x' | 'y', delta: number) =>
   )?.[0] ?? null
 
 /** Z 板一格的悬浮说明 */
-export const zHitLabel = (id: string) => `刻度 ${Z_SPOT.get(id)?.label ?? ''}`
+export const zHitLabel = (id: string) =>
+  t('calib.hit.z', { label: Z_SPOT.get(id)?.label ?? '' })
 
 /** XY 板一格的悬浮说明 */
 export const xyHitLabel = (id: string) => {
   const it = LADDER[id]
-  return it ? `${it.axis === 'x' ? '横向' : '纵向'} ${signed(it.delta)} mm` : id
+  if (!it) return id
+  const delta = signed(it.delta)
+  return it.axis === 'x' ? t('calib.hit.xyX', { delta }) : t('calib.hit.xyY', { delta })
 }
 
 /*
@@ -69,10 +77,10 @@ export const xyHitLabel = (id: string) => {
  * 与「未保存的改动 · Z 4.00 → 3.70」同一节奏；右端那颗「选择预设」
  * 再把另一头锚住（指路的事交给按钮，不用写在字里）。
  */
-export const NEED_PRESET_TITLE = '点选还没有基准'
+export const NEED_PRESET_TITLE_KEY: StringKey = 'calib.needPreset.title'
 
 /** 主句后面那半句：说清差哪一步 */
-export const NEED_PRESET_HOW = '先选一份预设，取到它之后板上的点选才有依据'
+export const NEED_PRESET_HOW_KEY: StringKey = 'calib.needPreset.how'
 
 /*
  * ★ 2026-10-13：原来还有两条给首页校准卡用的旧提示 ——
@@ -91,6 +99,9 @@ export const axisText = (axes: Axes | null, k: Axis) => (axes ? `${axes[k].toFix
  * Z 步板下的两行文案（G06-8 四轮攒下的原话，一句不改）。
  * 「校准」tab 与首页向导的 Z 卡共用这一份 —— 第二个人要用时只能搬走，不能各写一遍。
  */
-export const Z_LEGEND = '← 抬高笔尖 ｜ 降低笔尖 →'
-export const Z_TIP =
-  '校准的时候感觉都没涂上胶水 → 点最右边的格子（-0.5，降低笔尖），或者手动把上面的 Z 改小一点'
+/**
+ * 首页 Z 步板下那两行（2026-10-26 起存**字典键**，不存句子）。
+ * 渲染处 `tr(Z_LEGEND_KEY)` / `tr(Z_TIP_KEY)` —— 语言一换这两行同帧换字。
+ */
+export const Z_LEGEND_KEY: StringKey = 'calib.z.legend'
+export const Z_TIP_KEY: StringKey = 'calib.z.tip'

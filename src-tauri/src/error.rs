@@ -180,13 +180,16 @@ impl std::error::Error for AppError {}
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                AppError::not_found("文件不存在").with_detail(e.to_string())
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                AppError::permission_denied("没有权限访问这个文件").with_detail(e.to_string())
-            }
-            _ => AppError::io("读写文件失败").with_detail(e.to_string()),
+            std::io::ErrorKind::NotFound => AppError::not_found(
+                ::postprocess::diag::messages::text("ui.error.not_found", &[]),
+            )
+            .with_detail(e.to_string()),
+            std::io::ErrorKind::PermissionDenied => AppError::permission_denied(
+                ::postprocess::diag::messages::text("ui.error.permission", &[]),
+            )
+            .with_detail(e.to_string()),
+            _ => AppError::io(::postprocess::diag::messages::text("ui.error.io", &[]))
+                .with_detail(e.to_string()),
         }
     }
 }
@@ -194,13 +197,15 @@ impl From<std::io::Error> for AppError {
 /// 原子写的最后一步（`persist`）失败
 impl From<tempfile::PersistError> for AppError {
     fn from(e: tempfile::PersistError) -> Self {
-        AppError::io("保存失败：临时文件没能替换目标文件").with_detail(e.to_string())
+        AppError::io(::postprocess::diag::messages::text("ui.error.persist", &[]))
+            .with_detail(e.to_string())
     }
 }
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
-        AppError::corrupted("数据格式不对，解析失败").with_detail(e.to_string())
+        AppError::corrupted(::postprocess::diag::messages::text("ui.error.json", &[]))
+            .with_detail(e.to_string())
     }
 }
 

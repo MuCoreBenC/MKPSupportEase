@@ -16,6 +16,8 @@
 //! **防穿越**：所有相对路径都必须经过 [`resolve_in`]。拒绝绝对路径、拒绝 `..`、拼完还要再确认
 //! 结果仍在根内（符号链接能绕过前两条，所以第三条是必须的）。
 
+use postprocess::diag::messages;
+
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -104,10 +106,9 @@ pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
         ensure_dirs(&root, &INTERNAL_DIRS)?;
         return Ok(root);
     }
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::io("找不到应用数据目录").with_detail(e.to_string()))?;
+    let root = app.path().app_data_dir().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.021", &[])).with_detail(e.to_string())
+    })?;
     ensure_dirs(&root, &INTERNAL_DIRS)?;
     Ok(root)
 }
@@ -173,8 +174,11 @@ pub fn user_root_headless() -> Option<PathBuf> {
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
     for sub in subs {
         std::fs::create_dir_all(root.join(sub)).map_err(|e| {
-            AppError::io(format!("建不出数据目录：{}", root.join(sub).display()))
-                .with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.fsx.paths.022",
+                &[("v1", &root.join(sub).display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     Ok(())
@@ -195,20 +199,24 @@ pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf, AppError> {
     只有存在的那部分能 canonicalize，所以拿"最深的已存在祖先"来比 ——
     目标文件还不存在（第一次写）是正常情况，不能因此判越界。 */
     let anchor = deepest_existing(&joined);
-    let real_anchor = anchor
-        .canonicalize()
-        .map_err(|e| AppError::io("路径解析失败").with_detail(e.to_string()))?;
-    let real_root = root
-        .canonicalize()
-        .map_err(|e| AppError::io("数据目录不可用").with_detail(e.to_string()))?;
+    let real_anchor = anchor.canonicalize().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.023", &[])).with_detail(e.to_string())
+    })?;
+    let real_root = root.canonicalize().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.024", &[])).with_detail(e.to_string())
+    })?;
 
     if !real_anchor.starts_with(&real_root) {
         return Err(
-            AppError::permission_denied("路径不能越过数据目录").with_detail(format!(
-                "{} 实际指向 {}",
-                joined.display(),
-                real_anchor.display()
-            )),
+            AppError::permission_denied(messages::text("ui.fsx.paths.025", &[])).with_detail(
+                ::postprocess::diag::messages::text(
+                    "ui.fsx.paths.why_resolved",
+                    &[
+                        ("a", &joined.display().to_string()),
+                        ("b", &real_anchor.display().to_string()),
+                    ],
+                ),
+            ),
         );
     }
 
@@ -224,24 +232,40 @@ pub fn check_relative(rel: &str) -> Result<(), AppError> {
     let rel_path = Path::new(rel);
 
     if rel.is_empty() {
-        return Err(AppError::invalid_argument("路径不能为空"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.fsx.paths.026",
+            &[],
+        )));
     }
 
     if rel_path.is_absolute() {
-        return Err(AppError::permission_denied("只接受相对路径")
-            .with_detail(format!("拒绝绝对路径：{rel}")));
+        return Err(
+            AppError::permission_denied(messages::text("ui.fsx.paths.027", &[])).with_detail(
+                ::postprocess::diag::messages::text("ui.fsx.paths.why_absolute", &[("rel", rel)]),
+            ),
+        );
     }
 
     for c in rel_path.components() {
         match c {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir => {
-                return Err(AppError::permission_denied("路径不能越过数据目录")
-                    .with_detail(format!("含 .. 分量：{rel}")))
+                return Err(
+                    AppError::permission_denied(messages::text("ui.fsx.paths.028", &[]))
+                        .with_detail(::postprocess::diag::messages::text(
+                            "ui.fsx.paths.why_dotdot",
+                            &[("rel", rel)],
+                        )),
+                )
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(AppError::permission_denied("只接受相对路径")
-                    .with_detail(format!("含根分量：{rel}")))
+                return Err(
+                    AppError::permission_denied(messages::text("ui.fsx.paths.029", &[]))
+                        .with_detail(::postprocess::diag::messages::text(
+                            "ui.fsx.paths.why_root",
+                            &[("rel", rel)],
+                        )),
+                )
             }
         }
     }

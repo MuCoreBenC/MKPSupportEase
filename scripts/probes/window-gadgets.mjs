@@ -13,10 +13,11 @@
  * 真窗口的置顶层级与几何只能真机看（`screencapture -l<winid>` + 系统窗口列表）。
  *
  * 判定：
- *   ① 两枚胶囊都在工具条上，默认是「不置顶」+「窄窗」
- *   ② 置顶点三下：不置顶 → 仅本页置顶 → 始终置顶 → 不置顶（循环闭合）
- *   ③ 每一档**盒子宽度一模一样**（全站铁律：状态不许改变盒子宽度）
- *   ④ 窄窗点两下：窄窗 → 恢复尺寸 → 窄窗
+ *   ① 两枚胶囊都在工具条上，默认是「关闭」+「小窗」
+ *   ② 置顶点三下：关闭 → 本页 → 始终 → 关闭（循环闭合，读的是按钮上**可见**那份字）
+ *   ③ 每一档**盒子宽度一模一样**（全站铁律：状态不许改变盒子宽度
+ *      —— 按钮里叠着所有档的文案，隐形副本负责把盒子撑到最长那档）
+ *   ④ 小窗点两下：小窗 → 还原 → 小窗
  *   ⑤ 900 与 600 两个宽度下，两枚胶囊都完整可见、工具条不横向溢出
  *   ⑥ 0 console error / 0 个 >= 400
  */
@@ -50,6 +51,8 @@ const BENIGN_TEXT = [/未实现的接口: checkRemoteUpdate/]
 const facts = (page) =>
   page.evaluate(() => {
     const flat = (s) => (s ?? '').replace(/\s+/g, ' ').trim()
+    /* 按钮里叠着每一档的文案（隐形副本负责撑宽，见 WindowGadgets.module.css）→ 只读可见那份 */
+    const live = (el) => flat(el?.querySelector('span:not([aria-hidden])')?.textContent)
     const pin = document.querySelector('button[aria-label^="窗口置顶："]')
     const compact = document.querySelector(
       'button[aria-label="把窗口收成小窗"], button[aria-label="还原窗口原本的位置与尺寸"]',
@@ -61,9 +64,9 @@ const facts = (page) =>
       return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right }
     }
     return {
-      pinText: flat(pin?.textContent),
+      pinText: live(pin),
       pinWidth: rect(pin)?.w ?? -1,
-      compactText: flat(compact?.textContent),
+      compactText: live(compact),
       compactWidth: rect(compact)?.w ?? -1,
       compactPressed: compact?.getAttribute('aria-pressed') ?? '',
       pinRect: rect(pin),
@@ -78,7 +81,15 @@ const browser = await chromium.launch({ channel: 'msedge' })
 
 for (const size of SIZES) {
   const tag = size.tag
-  const ctx = await browser.newContext({ viewport: { width: size.width, height: size.height } })
+  /*
+   * ★ 语言口径钉成中文（2026-10-25）：AppState 里默认是"跟随系统"，而 headless
+   *   浏览器报的是 `en-US` —— 不钉的话这两枚胶囊会显示英文，下面那些逐字断言全红。
+   *   英文那条链由 `scripts/probes/i18n.mjs` 专门验。
+   */
+  const ctx = await browser.newContext({
+    viewport: { width: size.width, height: size.height },
+    locale: 'zh-CN',
+  })
   const page = await ctx.newPage()
 
   page.on('console', (m) => {
@@ -100,7 +111,7 @@ for (const size of SIZES) {
 
   /* ---------- ① 两枚都在、默认档 ---------- */
   let f = await facts(page)
-  check(tag, '① 置顶胶囊在，默认「不置顶」', f.pinText === '不置顶', `读作「${f.pinText}」`)
+  check(tag, '① 置顶胶囊在，默认「关闭」', f.pinText === '关闭', `读作「${f.pinText}」`)
   check(tag, '① 小窗胶囊在，默认「小窗」', f.compactText === '小窗', `读作「${f.compactText}」`)
 
   const pinW = f.pinWidth
@@ -108,7 +119,7 @@ for (const size of SIZES) {
 
   /* ---------- ②③ 置顶三档循环，宽度不许跳 ---------- */
   const pinBtn = page.locator('button[aria-label^="窗口置顶："]')
-  const chain = ['仅本页置顶', '始终置顶', '不置顶']
+  const chain = ['本页', '始终', '关闭']
   for (const [i, want] of chain.entries()) {
     await pinBtn.click()
     await page.waitForTimeout(160)
@@ -131,7 +142,7 @@ for (const size of SIZES) {
   f = await facts(page)
   check(tag, '④ 点小窗 →「还原」', f.compactText === '还原', `读作「${f.compactText}」`)
   /* 小窗一开就顺手置顶（作者 2026-10-17 第二轮） */
-  check(tag, '④ 小窗自动置顶 →「始终置顶」', f.pinText === '始终置顶', `读作「${f.pinText}」`)
+  check(tag, '④ 小窗自动置顶 →「始终」', f.pinText === '始终', `读作「${f.pinText}」`)
   check(tag, '④ 开启态对读屏是可读的（aria-pressed）', f.compactPressed === 'true', f.compactPressed)
   check(
     tag,
@@ -145,8 +156,8 @@ for (const size of SIZES) {
   await page.waitForTimeout(160)
   f = await facts(page)
   check(tag, '④ 再点一下 →「小窗」', f.compactText === '小窗', `读作「${f.compactText}」`)
-  /* 还原的同一刻置顶也回到原来那一档（点小窗之前是「不置顶」） */
-  check(tag, '④ 还原后置顶也回原档 →「不置顶」', f.pinText === '不置顶', `读作「${f.pinText}」`)
+  /* 还原的同一刻置顶也回到原来那一档（点小窗之前是「关闭」） */
+  check(tag, '④ 还原后置顶也回原档 →「关闭」', f.pinText === '关闭', `读作「${f.pinText}」`)
 
   /* ---------- ③′ 按下时盒子不许位移（作者：「点击的时候好像有像素位移」） ---------- */
   {

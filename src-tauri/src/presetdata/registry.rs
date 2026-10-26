@@ -39,6 +39,8 @@
 //!
 //! 56 KB 解析两遍的代价可以忽略，换来的是"改一个字段不会重排整个文件"。
 
+use postprocess::diag::messages;
+
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -419,16 +421,22 @@ impl ParamRegistry {
         let text = super::read(&file)?;
         let doc = super::parse_text(&text, &file)?;
         let parsed: RegistryFile = toml_edit::de::from_str(&text).map_err(|e| {
-            AppError::corrupted(format!("{} 的结构对不上字段定义模型", file.display()))
-                .with_detail(e.to_string())
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.292",
+                &[("v1", &file.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
 
         let layout_file = root.join("layout_schema.toml");
         let layout_text = super::read(&layout_file)?;
         let layout_doc = super::parse_text(&layout_text, &layout_file)?;
         let layout: LayoutFile = toml_edit::de::from_str(&layout_text).map_err(|e| {
-            AppError::corrupted(format!("{} 的结构对不上布局模型", layout_file.display()))
-                .with_detail(e.to_string())
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.293",
+                &[("v1", &layout_file.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
 
         let index = parsed
@@ -471,14 +479,14 @@ impl ParamRegistry {
         for t in &self.layout {
             for s in &t.sections {
                 if let Some(prev) = seen_sections.insert(s.id.as_str(), t.id.as_str()) {
-                    return Err(
-                        AppError::corrupted(format!("分组 id {} 被声明了两次", s.id)).with_detail(
-                            format!(
-                                "先出现在 {prev}，又出现在 {} —— 「参数属于哪个页签」会有两个答案",
-                                t.id
-                            ),
-                        ),
-                    );
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.294",
+                        &[("v1", &s.id.to_string())],
+                    ))
+                    .with_detail(format!(
+                        "先出现在 {prev}，又出现在 {} —— 「参数属于哪个页签」会有两个答案",
+                        t.id
+                    )));
                 }
             }
         }
@@ -501,20 +509,36 @@ impl ParamRegistry {
                 .copied()
                 .filter(|k| !seen.insert(*k))
                 .collect();
-            return Err(AppError::corrupted("同一个参数被放进了多个 section")
-                .with_detail(format!("重复的 paramKey：{}", dup.join("、"))));
+            return Err(
+                AppError::corrupted(messages::text("ui.presetdata.registry.295", &[])).with_detail(
+                    ::postprocess::diag::messages::text(
+                        "ui.presetdata.registry.why_dup_key",
+                        &[("list", &dup.join(", "))],
+                    ),
+                ),
+            );
         }
         let missing: Vec<&str> = param_keys.difference(&layout_set).copied().collect();
         if !missing.is_empty() {
             return Err(
-                AppError::corrupted("有参数没有被任何 section 收下（它在界面上不会出现）")
-                    .with_detail(format!("缺席的 key：{}", missing.join("、"))),
+                AppError::corrupted(messages::text("ui.presetdata.registry.296", &[])).with_detail(
+                    ::postprocess::diag::messages::text(
+                        "ui.presetdata.registry.why_missing_key",
+                        &[("list", &missing.join(", "))],
+                    ),
+                ),
             );
         }
         let dangling: Vec<&str> = layout_set.difference(&param_keys).copied().collect();
         if !dangling.is_empty() {
-            return Err(AppError::corrupted("布局里引用了字段定义里没有的参数")
-                .with_detail(format!("悬空的 paramKey：{}", dangling.join("、"))));
+            return Err(
+                AppError::corrupted(messages::text("ui.presetdata.registry.297", &[])).with_detail(
+                    ::postprocess::diag::messages::text(
+                        "ui.presetdata.registry.why_dangling_key",
+                        &[("list", &dangling.join(", "))],
+                    ),
+                ),
+            );
         }
 
         // ② 每个 section 两侧的参数数逐个相等
@@ -529,9 +553,9 @@ impl ParamRegistry {
                 }
                 let declared = by_section.get(s.id.as_str()).copied().unwrap_or(0);
                 if declared != s.items.len() {
-                    return Err(AppError::corrupted(format!(
-                        "section {} 两侧的参数数对不上",
-                        s.id
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.298",
+                        &[("v1", &s.id.to_string())],
                     ))
                     .with_detail(format!(
                         "layout 里 {} 个，params[].layout.sectionId 指过来 {} 个",
@@ -557,9 +581,9 @@ impl ParamRegistry {
                 let by_order: Vec<&str> = expected.iter().map(|p| p.key.as_str()).collect();
                 let by_items: Vec<&str> = s.items.iter().map(|i| i.param_key.as_str()).collect();
                 if by_order != by_items {
-                    return Err(AppError::corrupted(format!(
-                        "section {} 的 items 顺序与 layout.order 不一致",
-                        s.id
+                    return Err(AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.299",
+                        &[("v1", &s.id.to_string())],
                     ))
                     .with_detail(format!(
                         "按 order：{}；按 items：{}",
@@ -911,10 +935,12 @@ impl ParamRegistry {
     /// 写进一个不存在的键的后果很硬 —— 下一次加载会被跨文件断言判成 `Corrupted`，
     /// 整个工作台起不来。
     pub fn set_variant(&mut self, key: &str, owner: &str, value: &Value) -> Result<(), AppError> {
-        let at = *self
-            .index
-            .get(key)
-            .ok_or_else(|| AppError::invalid_argument(format!("字段定义里没有 {key}")))?;
+        let at = *self.index.get(key).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.300",
+                &[("key", key)],
+            ))
+        })?;
         check_owner(owner)?;
         let item = to_toml_value(value, self.params[at].value_type, key)?;
 
@@ -923,7 +949,12 @@ impl ParamRegistry {
             .entry("machineVariants")
             .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
             .as_table_mut()
-            .ok_or_else(|| AppError::corrupted(format!("{key} 的 machineVariants 不是一张表")))?;
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.301",
+                    &[("key", key)],
+                ))
+            })?;
         table[owner] = item;
 
         self.params[at]
@@ -940,10 +971,12 @@ impl ParamRegistry {
     /// 删到这张表为空时，**连表头一起删** —— 留一个空的
     /// `[params.machineVariants]` 在文件里，读起来像"这里有机型差异"，而其实没有
     pub fn clear_variant(&mut self, key: &str, owner: &str) -> Result<(), AppError> {
-        let at = *self
-            .index
-            .get(key)
-            .ok_or_else(|| AppError::invalid_argument(format!("字段定义里没有 {key}")))?;
+        let at = *self.index.get(key).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.302",
+                &[("key", key)],
+            ))
+        })?;
         check_owner(owner)?;
 
         let t = self.param_table_mut(at, key)?;
@@ -992,35 +1025,43 @@ impl ParamRegistry {
     /// 值类型的改动**不迁移**已有的 machineVariants：类型是「它是什么」，
     /// 改了类型旧值就按新类型解释 —— 这是作者自己在模态框里按的按钮。
     pub fn set_param_meta(&mut self, key: &str, edit: ParamMetaEdit) -> Result<(), AppError> {
-        let at = *self
-            .index
-            .get(key)
-            .ok_or_else(|| AppError::invalid_argument(format!("字段定义里没有 {key}")))?;
+        let at = *self.index.get(key).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.303",
+                &[("key", key)],
+            ))
+        })?;
 
         let label = edit.label.trim();
         if label.is_empty() {
-            return Err(AppError::invalid_argument("名称不能是空的"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.304",
+                &[],
+            )));
         }
         for (name, v) in [("最小", edit.min), ("最大", edit.max)] {
             if let Some(v) = v {
                 if !v.is_finite() {
-                    return Err(AppError::invalid_argument(format!(
-                        "{name}值得是个有限数字，见到 {v}"
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.registry.305",
+                        &[("name", name), ("v", &v.to_string())],
                     )));
                 }
             }
         }
         if let (Some(min), Some(max)) = (edit.min, edit.max) {
             if min > max {
-                return Err(AppError::invalid_argument(format!(
-                    "范围反了：最小 {min} 比最大 {max} 还大"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.306",
+                    &[("min", &min.to_string()), ("max", &max.to_string())],
                 )));
             }
         }
         if let Some(s) = edit.step {
             if !s.is_finite() || s <= 0.0 {
-                return Err(AppError::invalid_argument(format!(
-                    "步进得是正数，见到 {s}"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.307",
+                    &[("s", &s.to_string())],
                 )));
             }
         }
@@ -1032,14 +1073,21 @@ impl ParamRegistry {
             (Value::Bool(_), ValueType::Bool) => {}
             (Value::String(_), ValueType::Text) => {}
             (v, t) => {
-                return Err(AppError::invalid_argument(format!(
-                    "{key} 的出厂默认 {v} 与值类型 {}（{}）对不上",
-                    value_type_str(t),
-                    match t {
-                        ValueType::Float | ValueType::Int => "要数字",
-                        ValueType::Bool => "要 true/false",
-                        ValueType::Text => "要字符串",
-                    }
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.308",
+                    &[
+                        ("key", key),
+                        ("v", &v.to_string()),
+                        ("v1", value_type_str(t)),
+                        (
+                            "v2",
+                            match t {
+                                ValueType::Float | ValueType::Int => "要数字",
+                                ValueType::Bool => "要 true/false",
+                                ValueType::Text => "要字符串",
+                            },
+                        ),
+                    ],
                 )));
             }
         }
@@ -1050,52 +1098,55 @@ impl ParamRegistry {
         // 只会弹提示不切换（作者：「它实际上根本没有换一套」），当场拒收
         match edit.ui_component {
             UiComponent::Switch if edit.value_type != ValueType::Bool => {
-                return Err(AppError::invalid_argument(format!(
-                    "开关只认 true/false —— {} 的参数用步进框（数字）",
-                    value_type_str(edit.value_type)
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.309",
+                    &[("v1", value_type_str(edit.value_type))],
                 )));
             }
             UiComponent::Number
                 if !matches!(edit.value_type, ValueType::Float | ValueType::Int) =>
             {
-                return Err(AppError::invalid_argument(format!(
-                    "步进框只配数字（float/int）—— 这条是 {}",
-                    value_type_str(edit.value_type)
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.310",
+                    &[("v1", value_type_str(edit.value_type))],
                 )));
             }
             UiComponent::Segmented | UiComponent::Select if edit.value_type != ValueType::Text => {
-                return Err(AppError::invalid_argument(format!(
-                    "分段/下拉只配字符串枚举 —— 这条是 {}",
-                    value_type_str(edit.value_type)
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.311",
+                    &[("v1", value_type_str(edit.value_type))],
                 )));
             }
             UiComponent::Segmented | UiComponent::Select if edit.choices.is_empty() => {
-                return Err(AppError::invalid_argument(
-                    "分段/下拉得先有可选项 —— 先在「可选项」里加几条",
-                ));
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.312",
+                    &[],
+                )));
             }
             UiComponent::Gcode if edit.value_type != ValueType::Text => {
-                return Err(AppError::invalid_argument(format!(
-                    "G-code 编辑器只配字符串 —— 这条是 {}",
-                    value_type_str(edit.value_type)
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.313",
+                    &[("v1", value_type_str(edit.value_type))],
                 )));
             }
             UiComponent::Gcode if !edit.choices.is_empty() => {
-                return Err(AppError::invalid_argument(
-                    "G-code 是自由代码，不吃可选项 —— 要分段就换分段控件",
-                ));
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.314",
+                    &[],
+                )));
             }
             UiComponent::Text => {
                 if edit.value_type != ValueType::Text {
-                    return Err(AppError::invalid_argument(format!(
-                        "文本框只配字符串 —— 这条是 {}，数字用步进框",
-                        value_type_str(edit.value_type)
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.registry.315",
+                        &[("v1", value_type_str(edit.value_type))],
                     )));
                 }
                 if !edit.choices.is_empty() {
-                    return Err(AppError::invalid_argument(
-                        "文本框不吃可选项 —— 要分段/下拉就换控件，要自由输入就清空可选项",
-                    ));
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.registry.316",
+                        &[],
+                    )));
                 }
             }
             _ => {}
@@ -1106,44 +1157,51 @@ impl ParamRegistry {
         for (i, c) in edit.choices.iter().enumerate() {
             let n = i + 1;
             if c.label.trim().is_empty() {
-                return Err(AppError::invalid_argument(format!(
-                    "第 {n} 条可选项没写名字"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.317",
+                    &[("n", &n.to_string())],
                 )));
             }
             let vkey = json_key(&c.value);
             if c.value.is_null() || vkey.is_empty() {
-                return Err(AppError::invalid_argument(format!(
-                    "第 {n} 条可选项（{}）没有值",
-                    c.label.trim()
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.318",
+                    &[("n", &n.to_string()), ("v1", c.label.trim())],
                 )));
             }
             if !seen.insert(vkey) {
-                return Err(AppError::invalid_argument(format!(
-                    "第 {n} 条可选项（{}）的值跟前面重复了",
-                    c.label.trim()
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.319",
+                    &[("n", &n.to_string()), ("v1", c.label.trim())],
                 )));
             }
         }
         if edit.value_type == ValueType::Text && !edit.choices.is_empty() {
             let want = json_key(&edit.default_value);
             if !edit.choices.iter().any(|c| json_key(&c.value) == want) {
-                return Err(AppError::invalid_argument(format!(
-                    "出厂默认 {want:?} 不在这条参数的可选项里 —— 枚举的默认值得是选项之一"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.320",
+                    &[("want", &want.to_string())],
                 )));
             }
         }
         if let Some(pk) = &edit.parent_key {
             if pk == key {
-                return Err(AppError::invalid_argument(format!(
-                    "{key} 不能自己是自己的父项"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.321",
+                    &[("key", key)],
                 )));
             }
-            let parent = self
-                .param(pk)
-                .ok_or_else(|| AppError::invalid_argument(format!("父项 {pk} 不在字段定义里")))?;
+            let parent = self.param(pk).ok_or_else(|| {
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.322",
+                    &[("pk", &pk.to_string())],
+                ))
+            })?;
             if parent.parent_key.is_some() {
-                return Err(AppError::invalid_argument(format!(
-                    "{pk} 自己就是别人的子项 —— 层级只有两级，不能再往下挂"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.323",
+                    &[("pk", &pk.to_string())],
                 )));
             }
             if self
@@ -1151,21 +1209,23 @@ impl ParamRegistry {
                 .iter()
                 .any(|p| p.parent_key.as_deref() == Some(key))
             {
-                return Err(AppError::invalid_argument(format!(
-                    "{key} 自己已经挂着子项 —— 不能再去当别人的子项"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.324",
+                    &[("key", key)],
                 )));
             }
         }
         if let Some(sw) = &edit.show_when {
             if sw.key == key {
-                return Err(AppError::invalid_argument(format!(
-                    "{key} 的前置条件不能指着自己 —— 那永远不成立"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.325",
+                    &[("key", key)],
                 )));
             }
             if !self.index.contains_key(&sw.key) {
-                return Err(AppError::invalid_argument(format!(
-                    "前置条件指向的 {} 不在字段定义里",
-                    sw.key
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.326",
+                    &[("v1", &sw.key.to_string())],
                 )));
             }
         }
@@ -1236,8 +1296,9 @@ impl ParamRegistry {
         };
         let requested_order = match edit.order {
             Some(o) if !o.is_finite() => {
-                return Err(AppError::invalid_argument(format!(
-                    "顺序值得是个有限数字，见到 {o}"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.327",
+                    &[("o", &o.to_string())],
                 )));
             }
             other => other,
@@ -1250,11 +1311,15 @@ impl ParamRegistry {
                     .flat_map(|t| t.sections.iter())
                     .find(|s| &s.id == target)
                     .ok_or_else(|| {
-                        AppError::invalid_argument(format!("分组 {target} 不在布局里"))
+                        AppError::invalid_argument(messages::text(
+                            "ui.presetdata.registry.328",
+                            &[("target", &target.to_string())],
+                        ))
                     })?;
                 if section.component.is_some() {
-                    return Err(AppError::invalid_argument(format!(
-                        "分组 {target} 是整块自定义组件，收不了参数"
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.presetdata.registry.329",
+                        &[("target", &target.to_string())],
                     )));
                 }
                 // 目标顺序：给了就照给的（界面会按目标组算好）；没给就放到组末
@@ -1302,10 +1367,17 @@ impl ParamRegistry {
                 .find(|s| s.id == current_section)
                 .is_some_and(|s| s.items.iter().any(|i| i.param_key == key))
         {
-            return Err(AppError::corrupted(format!(
-                "布局里 {current_section} 这一组没有 {key} 的条目"
+            return Err(AppError::corrupted(messages::text(
+                "ui.presetdata.registry.330",
+                &[
+                    ("current_section", &current_section.to_string()),
+                    ("key", key),
+                ],
             ))
-            .with_detail("参数与布局已经对不上，这一次写入已放弃"));
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.registry.why_layout_mismatch",
+                &[],
+            )));
         }
 
         /* ---------- 文件。到这里全是不会失败的赋值 ---------- */
@@ -1384,7 +1456,10 @@ impl ParamRegistry {
                 .get_mut("layout")
                 .and_then(toml_edit::Item::as_table_mut)
                 .ok_or_else(|| {
-                    AppError::corrupted(format!("{key} 的 [params.layout] 不是一个表"))
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.331",
+                        &[("key", key)],
+                    ))
                 })?;
             if let Some(target) = &target_section {
                 lt["sectionId"] = toml_edit::value(target.as_str());
@@ -1489,18 +1564,35 @@ impl ParamRegistry {
             .doc
             .get_mut("params")
             .and_then(toml_edit::Item::as_array_of_tables_mut)
-            .ok_or_else(|| AppError::corrupted(format!("{file} 的 params 不是表数组")))?;
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.332",
+                    &[("file", &file.to_string())],
+                ))
+            })?;
         let n = arr.len();
-        let t = arr
-            .get_mut(at)
-            .ok_or_else(|| AppError::corrupted(format!("{file} 只有 {n} 个 params 块")))?;
+        let t = arr.get_mut(at).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.333",
+                &[("file", &file.to_string()), ("n", &n.to_string())],
+            ))
+        })?;
         // 反查一次 key：下标错位的话，值会被写到**另一个字段**上，而那是静默的
         let here = t.get("key").and_then(|v| v.as_str()).unwrap_or_default();
         if here != key {
-            return Err(AppError::corrupted(format!(
-                "{file} 的第 {at} 个 params 块是 {here}，不是 {key}"
+            return Err(AppError::corrupted(messages::text(
+                "ui.presetdata.registry.334",
+                &[
+                    ("file", &file.to_string()),
+                    ("at", &at.to_string()),
+                    ("here", here),
+                    ("key", key),
+                ],
             ))
-            .with_detail("内存里的顺序与文件对不上了，这一次写入已放弃"));
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.registry.why_order_mismatch",
+                &[],
+            )));
         }
         Ok(t)
     }
@@ -1641,14 +1733,19 @@ fn layout_take_item(
     section_id: &str,
     param_key: &str,
 ) -> Result<(), AppError> {
-    let section = layout_section_mut(doc, section_id)
-        .ok_or_else(|| AppError::corrupted(format!("布局里没有 {section_id} 这一组")))?;
+    let section = layout_section_mut(doc, section_id).ok_or_else(|| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.335",
+            &[("section_id", section_id)],
+        ))
+    })?;
     let Some(items) = section
         .get_mut("items")
         .and_then(toml_edit::Item::as_array_of_tables_mut)
     else {
-        return Err(AppError::corrupted(format!(
-            "布局里 {section_id} 的 items 不是表数组"
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.336",
+            &[("section_id", section_id)],
         )));
     };
     let mut kept = toml_edit::ArrayOfTables::new();
@@ -1661,8 +1758,9 @@ fn layout_take_item(
         kept.push(it.clone());
     }
     if !hit {
-        return Err(AppError::corrupted(format!(
-            "布局里 {section_id} 没有 {param_key} 这一条"
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.337",
+            &[("section_id", section_id), ("param_key", param_key)],
         )));
     }
     *items = kept;
@@ -1677,8 +1775,12 @@ fn layout_push_item(
     item_id: &str,
     param_key: &str,
 ) -> Result<(), AppError> {
-    let section = layout_section_mut(doc, section_id)
-        .ok_or_else(|| AppError::corrupted(format!("布局里没有 {section_id} 这一组")))?;
+    let section = layout_section_mut(doc, section_id).ok_or_else(|| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.338",
+            &[("section_id", section_id)],
+        ))
+    })?;
     let mut tbl = toml_edit::Table::new();
     tbl["id"] = toml_edit::value(item_id);
     tbl["paramKey"] = toml_edit::value(param_key);
@@ -1747,8 +1849,9 @@ fn layout_reorder_items(doc: &mut DocumentMut, section_id: &str, want: &[String]
 /// 校验 owner 的形状 —— 非空、不含空白
 fn check_owner(owner: &str) -> Result<(), AppError> {
     if owner.trim().is_empty() || owner.contains(char::is_whitespace) {
-        return Err(AppError::invalid_argument(format!(
-            "owner 不合法：{owner:?} —— 要么是机型 id（A1），要么是机型:版本（A1:FAST）"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.registry.339",
+            &[("owner", owner)],
         )));
     }
     Ok(())
@@ -1767,8 +1870,16 @@ fn to_toml_value(
     vt: ValueType,
     key: &str,
 ) -> Result<toml_edit::Item, AppError> {
-    let bad_type =
-        || AppError::invalid_argument(format!("{key} 的值 {v} 与它的 valueType（{vt:?}）对不上"));
+    let bad_type = || {
+        AppError::invalid_argument(messages::text(
+            "ui.presetdata.registry.340",
+            &[
+                ("key", key),
+                ("v", &v.to_string()),
+                ("vt", &format!("{vt:?}")),
+            ],
+        ))
+    };
     match v {
         serde_json::Value::Bool(b) => Ok(toml_edit::value(*b)),
         serde_json::Value::Number(n) => match vt {
@@ -1820,10 +1931,14 @@ fn scalar_item(v: &Value, key: &str) -> Result<toml_edit::Item, AppError> {
         Value::String(s) => Ok(super::literal_str(s)),
         Value::Bool(b) => Ok(toml_edit::value(*b)),
         Value::Number(n) => n.as_f64().map(toml_edit::value).ok_or_else(|| {
-            AppError::invalid_argument(format!("{key} 的前置条件值 {v} 不是有限数字"))
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.341",
+                &[("key", key), ("v", &v.to_string())],
+            ))
         }),
-        _ => Err(AppError::invalid_argument(format!(
-            "{key} 的前置条件值只能是字符串 / 数字 / 布尔，见到 {v}"
+        _ => Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.registry.342",
+            &[("key", key), ("v", &v.to_string())],
         ))),
     }
 }
@@ -1837,11 +1952,15 @@ fn choice_value_item(v: &Value, key: &str, n: usize) -> Result<toml_edit::Item, 
         Value::Number(num) => match num.as_i64() {
             Some(i) => Ok(toml_edit::value(i)),
             None => num.as_f64().map(toml_edit::value).ok_or_else(|| {
-                AppError::invalid_argument(format!("{key} 第 {n} 条可选项的值 {v} 不是有限数字"))
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.343",
+                    &[("key", key), ("n", &n.to_string()), ("v", &v.to_string())],
+                ))
             }),
         },
-        _ => Err(AppError::invalid_argument(format!(
-            "{key} 第 {n} 条可选项的值只能是字符串 / 数字 / 布尔，见到 {v}"
+        _ => Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.registry.344",
+            &[("key", key), ("n", &n.to_string()), ("v", &v.to_string())],
         ))),
     }
 }
@@ -1984,7 +2103,10 @@ mod tests {
         let (_d, r) = load(p, l);
         let e = r.unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
-        assert!(e.detail.unwrap_or_default().contains("a.z"), "没点名真因");
+        assert!(
+            e.detail.unwrap_or_default().contains("a.z"),
+            "没点名真因 —— 说明句里应当列出那个没被收下的参数"
+        );
     }
 
     /// 悬空：布局引用了字段定义里没有的参数
@@ -1997,7 +2119,11 @@ mod tests {
             .push(serde_json::json!({ "id": "i9", "paramKey": "ghost" }));
         let (_d, r) = load(p, l);
         let e = r.unwrap_err();
-        assert!(e.message.contains("悬空") || e.detail.unwrap_or_default().contains("ghost"));
+        // 判定口径与语言无关：那个悬着的 key 必须出现在说明句里
+        assert!(
+            e.detail.unwrap_or_default().contains("ghost"),
+            "说明句里应当点名那个悬空的 paramKey"
+        );
     }
 
     /// 同一个参数被放进两个 section

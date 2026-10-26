@@ -33,6 +33,7 @@
  * 窄了就跟抽屉一样浮在内容上面（`data-mode='float'`），宽度仍然可以拖。
  */
 import { useEffect, useState } from 'react'
+import { useT } from '../../i18n'
 import type { PanelStats } from './bbsPanel'
 import type { BbsSourceMode, BbsSyncInfo, BbsViewMode } from './bbsTypes'
 import type { BbsRail as RailSizing } from './useBbsRail'
@@ -159,6 +160,7 @@ export default function BbsRail({
    * 刷新那一下的"滚字"。90ms 是手感值：再快看不清那是数字、再慢就不像在滚。
    * 它只在 `refreshing` 期间活着 —— 一落定 interval 就拆掉，不留后台定时器。
    */
+  const tr = useT()
   const [tick, setTick] = useState(0)
   useEffect(() => {
     if (!refreshing) return undefined
@@ -169,22 +171,24 @@ export default function BbsRail({
   const roll = (text: string) => (refreshing ? roulette(text, tick) : text)
 
   const rows = viewMode === 'bbs'
-    ? `${stats.rows} 行 · 收起 ${stats.hiddenByRule}`
-      + (stats.greyed ? ` · 置灰 ${stats.greyed}` : '')
-      + (stats.pagesHidden ? ` · 隐藏 ${stats.pagesHidden} 页` : '')
-    : `全部参数 · ${stats.rows} 行`
+    ? tr('bbs.rail.rows', { rows: stats.rows })
+      + ' · ' + tr('bbs.rail.hidden', { count: stats.hiddenByRule })
+      + (stats.greyed ? ' · ' + tr('bbs.rail.greyed', { count: stats.greyed }) : '')
+      + (stats.pagesHidden ? ' · ' + tr('bbs.rail.pages', { count: stats.pagesHidden }) : '')
+    : tr('bbs.rail.allRows', { rows: stats.rows })
 
   /* 「来源」要说的是**这一份从哪儿来**（不是"清单从哪儿来"）：MKP 档下那一份是交付面给的。
      两个名字与抽屉那两颗胶囊同一个词（MKP 工艺 / 本机工艺）—— 界面上别一会儿一个说法 */
   const source = fromMkp
-    ? 'MKP 工艺 · 预设页「切片器配置」下载到本机的那几份'
+    ? tr('bbs.rail.mkpDesc')
     : sourceMode === 'live'
-      ? `本机工艺 · 用户 ${userCount} / 系统 ${systemCount}`
-      : `本机工艺（目录没读到）· 用户 ${userCount} / 系统 ${systemCount}`
+      ? tr('bbs.rail.localDesc', { user: userCount, system: systemCount })
+      : tr('bbs.rail.localNoCatDesc', { user: userCount, system: systemCount })
 
   const stamp = sync?.bbs_version
-    ? `BBS ${sync.bbs_version}${sync.syncedAt ? ` · 元数据抄于 ${sync.syncedAt.slice(0, 10)}` : ''}`
-    : '没有元数据印章（public/bbs/_sync.json 缺失）'
+    ? tr('bbs.rail.bbs', { version: sync.bbs_version })
+      + (sync.syncedAt ? tr('bbs.rail.synced', { date: sync.syncedAt.slice(0, 10) }) : '')
+    : tr('bbs.rail.noMeta')
 
   return (
     /*
@@ -197,7 +201,7 @@ export default function BbsRail({
     <aside
       className={s.rail}
       data-dragging={sizing.dragging ? 'true' : undefined}
-      aria-label="详情"
+      aria-label={tr('bbs.detail')}
     >
       {/* 热区是贴左缘的一条透明带，唯一的视觉变化是 cursor（共用那套手感） */}
       <span className={s.grip} {...sizing.gripProps} />
@@ -217,83 +221,85 @@ export default function BbsRail({
         type="button"
         className={s.close}
         onClick={onClose}
-        title="收起详情"
-        aria-label="收起详情"
+        title={tr('bbs.closeDetail')}
+        aria-label={tr('bbs.closeDetail')}
       >
         <Icon name="close" size={16} />
       </button>
 
       {/* 滚动挂在里面这层：外面那层得留可见溢出，不然贴边的热区被裁掉一半 */}
       <div className={s.body}>
-        <div className={s.title}>详情</div>
+        <div className={s.title}>{tr('bbs.detail')}</div>
 
         <dl className={s.kv}>
-          <dt>版本</dt>
+          <dt>{tr('bbs.version')}</dt>
           <dd className={s.name} title={title}>{title}</dd>
 
-          <dt>改动</dt>
+          <dt>{tr('bbs.changed')}</dt>
           <dd>
             {roll(
               !hasPreset
-                ? '—（还没选预设）'
+                ? tr('bbs.noPreset')
                 : isSystem
-                  ? '—（系统预设就是基准）'
-                  : `${modifiedCount} / ${storedCount} 项`
-                    + (editedCount > 0 ? `（已改 ${editedCount} 处，只在内存里）` : ''),
+                  ? tr('bbs.systemBase')
+                  : tr('bbs.items', { modified: modifiedCount, stored: storedCount })
+                    + (editedCount > 0
+                      ? tr('bbs.editedInMemory', { count: editedCount })
+                      : ''),
             )}
           </dd>
 
-          <dt>基准</dt>
-          <dd>{roll(hasPreset ? `${baselineCount} 项` : '—')}</dd>
+          <dt>{tr('bbs.rail.baseline')}</dt>
+          <dd>{roll(hasPreset ? tr('bbs.rail.baselineCount', { count: baselineCount }) : '—')}</dd>
 
           {/* 「这些行要不要按 BBS 的规则收起来」—— 与「行数」是同一件事，摆在一起 */}
-          <dt>显示</dt>
+          <dt>{tr('bbs.rail.display')}</dt>
           <dd className={s.chips}>
             <button
               type="button"
               className={s.chip}
               data-on={viewMode === 'bbs'}
-              title={`${rulesNote}；与 BBS 的界面看到的一致`}
+              title={tr('bbs.rail.sameAsBbsTitle', { note: rulesNote })}
               onClick={() => onViewMode('bbs')}
             >
-              跟 BBS 一样
+              {tr('bbs.rail.sameAsBbs')}
             </button>
             <button
               type="button"
               className={s.chip}
               data-on={viewMode === 'all'}
-              title="把基准里有的行全铺出来（249 行那种）"
+              title={tr('bbs.rail.allParamsTitle')}
               onClick={() => onViewMode('all')}
             >
-              全部参数
+              {tr('bbs.rail.allParams')}
             </button>
           </dd>
 
-          <dt>行数</dt>
+          <dt>{tr('bbs.rail.count')}</dt>
           <dd>{roll(rows)}</dd>
 
           {search !== null && (
             <>
-              <dt>搜索</dt>
+              <dt>{tr('bbs.rail.search')}</dt>
               <dd className={s.search}>{search}</dd>
             </>
           )}
 
-          <dt>来源</dt>
+          <dt>{tr('bbs.rail.source')}</dt>
           <dd title={fromMkp
-            ? '这一份是我们发的：预设页 → 切片器配置 → 云端 下载，不在本机 Bambu Studio 的预设目录里'
-            : sourceRoot + (sourceNote ? `（${sourceNote}）` : '')}
+            ? tr('bbs.rail.mkpSourceTitle')
+            : sourceRoot + (sourceNote ? tr('bbs.rail.sourceNote', { note: sourceNote }) : '')}
           >
             {roll(source)}
           </dd>
 
-          <dt>元数据</dt>
-          <dd title="元数据（参数定义 / 版面 / 出厂默认）随本仓分发；清单才是实时读本机 BBS 目录的">
+          <dt>{tr('bbs.rail.meta')}</dt>
+          <dd title={tr('bbs.rail.metaTitle')}>
             {stamp}
           </dd>
         </dl>
 
-        <div className={s.sub}>继承</div>
+        <div className={s.sub}>{tr('bbs.rail.inherit')}</div>
         {/*
           继承链**一行一节**，不再挤成一整串（2026-10-13）。
           原来是一条 `A → B → C` 的长串 + `word-break: break-all`，在这一栏里折成三行，
@@ -311,7 +317,7 @@ export default function BbsRail({
             ))}
           </ul>
         ) : (
-          <span className={s.chain} title={rulesNote}>—（没找到父预设，基准只有出厂默认）</span>
+          <span className={s.chain} title={rulesNote}>{tr('bbs.rail.noParent')}</span>
         )}
 
         {variantNote !== '' && <span className={s.chain} title={rulesNote}>{variantNote}</span>}

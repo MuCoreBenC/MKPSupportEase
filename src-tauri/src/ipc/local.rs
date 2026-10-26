@@ -21,6 +21,8 @@
 //! 今天真机上这两条读多半返回空 —— **空是合法状态，不是错误**（用户一份都没另存过）。
 //! 它在界面上就是本地表里那一半「本地文件」：看得见、认得出、看得了、也能改。
 
+use postprocess::diag::messages;
+
 use std::collections::HashSet;
 
 use serde::Serialize;
@@ -278,10 +280,16 @@ pub async fn begin_preset_edit(
                     .files
                     .iter()
                     .find(|f| f.file_name == file_name)
-                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found(messages::text(
+                            "ui.ipc.local.084",
+                            &[("file_name", &file_name.to_string())],
+                        ))
+                    })?;
                 if file.kind != runtime::catalog::kind::PRESET {
-                    return Err(AppError::invalid_argument(format!(
-                        "{file_name} 不是 MKP 预设 —— 这一层只改 TOML 预设"
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.ipc.local.085",
+                        &[("file_name", &file_name.to_string())],
                     )));
                 }
                 /*
@@ -297,8 +305,9 @@ pub async fn begin_preset_edit(
             runtime::state::ActiveOrigin::Local => {
                 let rel = subject.path.as_deref().unwrap_or_default();
                 if runtime::local::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
-                    return Err(AppError::invalid_argument(format!(
-                        "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.ipc.local.086",
+                        &[("file_name", &file_name.to_string())],
                     )));
                 }
                 /* 第九层：读不出来（编码 / TOML 语法）就不许改 —— 检查在读的那一步里 */
@@ -335,8 +344,9 @@ fn draft_subject(
     match origin.unwrap_or_default() {
         runtime::state::ActiveOrigin::Preset => Ok(runtime::state::DraftSubject::preset(file_name)),
         runtime::state::ActiveOrigin::Local => {
-            let rel = path
-                .ok_or_else(|| AppError::invalid_argument("改我自己那份要说是哪一份（缺 path）"))?;
+            let rel = path.ok_or_else(|| {
+                AppError::invalid_argument(messages::text("ui.ipc.local.087", &[]))
+            })?;
             Ok(runtime::state::DraftSubject::local(file_name, rel))
         }
     }
@@ -460,7 +470,7 @@ pub async fn put_preset_draft(app: AppHandle, text: String) -> Result<(), AppErr
     traced("putPresetDraft", |_| {
         let root = internal_root(&app)?;
         let draft = runtime::app_state::draft(&root)?
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份"))?;
+            .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.local.088", &[])))?;
         runtime::app_state::set_draft(&root, &draft.subject(), &draft.source_sha256, &text)?;
         super::notify_app_state(&app);
         Ok(())
@@ -666,8 +676,9 @@ pub async fn begin_text_edit(
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         if runtime::local::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.local.089",
+                &[("file_name", &file_name.to_string())],
             )));
         }
 
@@ -725,7 +736,7 @@ pub async fn put_text_draft(app: AppHandle, text: String) -> Result<(), AppError
     traced("putTextDraft", |_| {
         let root = internal_root(&app)?;
         let draft = runtime::app_state::text_draft(&root)?
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文"))?;
+            .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.local.090", &[])))?;
         runtime::app_state::set_text_draft(&root, &draft.file_name, &draft.path, &text)?;
         super::notify_app_state(&app);
         Ok(())
@@ -742,7 +753,7 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let draft = runtime::app_state::text_draft(&root)?
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份正文，没得存"))?;
+            .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.local.091", &[])))?;
         /*
          * ★ **先过语法闸再写盘**（2026-10-21）：手滑敲坏一个键名/引号时，
          * 原来的行为是照样写进盘，等钩子跑起来才报"预设解析失败"——
@@ -758,10 +769,7 @@ pub async fn commit_text_draft(app: AppHandle) -> Result<CommittedDraftDto, AppE
          */
         let lost = missing_params_of(&root, &draft.path, &draft.text);
         if !lost.is_empty() {
-            return Err(AppError::invalid_argument(format!(
-                "这份正文比最初那份少了 {} 项参数，没有保存",
-                lost.len()
-            ))
+            return Err(AppError::invalid_argument(messages::text("ui.ipc.local.092", &[("v1", &lost.len().to_string())]))
             .with_detail(format!(
                 "缺的是：{} —— 它们被注释掉了或整行不见了（切片时会静默退回默认值）。补回来再存，或按底栏「恢复默认值」退回最初那份。",
                 lost.iter()
@@ -981,9 +989,9 @@ pub async fn read_preset_draft_changes(
                     .iter()
                     .find(|f| f.file_name == draft.source_file_name)
                     .ok_or_else(|| {
-                        AppError::not_found(format!(
-                            "目录里已经没有 {} 了 —— 这份草稿的原文读不出来，改了什么算不清",
-                            draft.source_file_name
+                        AppError::not_found(messages::text(
+                            "ui.ipc.local.093",
+                            &[("v1", &draft.source_file_name.to_string())],
                         ))
                     })?;
                 runtime::delivery::cloud_text(&root, file)?
@@ -1014,7 +1022,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let draft = runtime::app_state::draft(&root)?
-            .ok_or_else(|| AppError::invalid_argument("现在没有正在改的那一份，没得存"))?;
+            .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.local.094", &[])))?;
 
         /* 同一道语法闸（见 `commit_text_draft`）：草稿坏了就别往盘上落 */
         crate::presetdata::patch::ensure_toml_parses(&draft.text)?;
@@ -1051,9 +1059,10 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
              * 我那份的出处写在它自己身上。
              */
             runtime::state::ActiveOrigin::Local => {
-                let rel = draft.path.clone().ok_or_else(|| {
-                    AppError::corrupted("这份草稿说它是我自己那份，却没记路径 —— 存不回去")
-                })?;
+                let rel = draft
+                    .path
+                    .clone()
+                    .ok_or_else(|| AppError::corrupted(messages::text("ui.ipc.local.095", &[])))?;
                 /* ★ 原文镜像：写回**之前**存 —— 那一刻盘上还是原文（保存改了就补不回来了）。
                 新文件那一路在落盘时就存过，这里是幂等的空转 */
                 let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &rel);
@@ -1108,9 +1117,9 @@ pub async fn rename_local_preset(
         万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
         runtime::app_state::repoint_local(&root, &path, &done.path, &done.file_name).map_err(
             |e| {
-                AppError::internal(format!(
-                    "状态账没跟上（使用中指针 / 草稿）—— 文件其实已经改名为 {}；重新「应用」一次那一份、再点一次「改这份」就能对齐",
-                    done.file_name
+                AppError::internal(messages::text(
+                    "ui.ipc.local.096",
+                    &[("v1", &done.file_name.to_string())],
                 ))
                 .with_detail(e.to_string())
             },
@@ -1363,9 +1372,9 @@ pub async fn reveal_in_folder(app: AppHandle, path: String) -> Result<(), AppErr
     traced("revealInFolder", |_| {
         let user_root = crate::fsx::paths::user_root(&app)?;
         let target = runtime::local::reveal_target(&user_root, &path)?;
-        app.opener()
-            .reveal_item_in_dir(&target)
-            .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))
+        app.opener().reveal_item_in_dir(&target).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.local.097", &[])).with_detail(e.to_string())
+        })
     })
 }
 
@@ -1416,17 +1425,19 @@ pub async fn set_local_preset_machine_version(
         let machine_id = machine_id.trim();
         let version_id = version_id.trim();
         if machine_id.is_empty() || version_id.is_empty() {
-            return Err(AppError::invalid_argument(
-                "机型与版本都要填 —— 归属写的是文件头的那两行，留空就认不出",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.local.098",
+                &[],
+            )));
         }
         let root = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
         let known = catalog.machines.iter().any(|m| m.id == machine_id);
         if !known {
-            return Err(AppError::invalid_argument(format!(
-                "{machine_id} 不是目录里登记的机型 —— 归属的机型要选一台真的机器"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.local.099",
+                &[("machine_id", machine_id)],
             )));
         }
         /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
@@ -1463,6 +1474,7 @@ pub async fn read_local_preset_text(app: AppHandle, path: String) -> Result<Stri
             runtime::local::read_text(&user_root, &rel)
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("读用户文件没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.local.100", &[])).with_detail(e.to_string())
+    })?
 }

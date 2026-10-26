@@ -38,6 +38,8 @@
 //! 单份正文**原文透传**（不校验是不是合法 JSON）：坏文件要由前端照实标出来，
 //! 而不是在这里被吞掉。列表里那份会带 `broken` 的原话。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -354,9 +356,9 @@ pub fn read_bbs_preset(
 ) -> Result<String, AppError> {
     traced("readBbsPreset", |_| {
         let Some(layout) = pick_layout(tree_specs()) else {
-            return Err(AppError::not_found(format!(
-                "{} —— 先在 Bambu Studio 里另存一份工艺预设，再回来重扫",
-                missing_reason()
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.bbs.041",
+                &[("v1", &missing_reason().to_string())],
             )));
         };
         let dir = scope_dir(&layout, &scope, uid.as_deref())?;
@@ -369,30 +371,29 @@ fn scope_dir(layout: &Layout, scope: &str, uid: Option<&str>) -> Result<PathBuf,
     match scope {
         "system" => match &layout.system {
             Some(dir) => Ok(dir.clone()),
-            None => Err(AppError::not_found(
-                "这台机器上没有系统预设那一层（只有用户层）".to_owned(),
-            )),
+            None => Err(AppError::not_found(messages::text("ui.ipc.bbs.042", &[]))),
         },
         "user" => {
             let Some(uid) = uid else {
-                return Err(AppError::invalid_argument(
-                    "读用户预设要给 uid（账号目录名）".to_owned(),
-                ));
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.bbs.043",
+                    &[],
+                )));
             };
             if !layout.uids.iter().any(|u| u == uid) {
-                return Err(AppError::invalid_argument(format!(
-                    "uid 不在扫到的账号目录里：{uid}"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.bbs.044",
+                    &[("uid", uid)],
                 )));
             }
             match &layout.user_base {
                 Some(base) => Ok(base.join(uid).join("process")),
-                None => Err(AppError::not_found(
-                    "这台机器上没有用户预设那一层（只有系统层）".to_owned(),
-                )),
+                None => Err(AppError::not_found(messages::text("ui.ipc.bbs.045", &[]))),
             }
         }
-        other => Err(AppError::invalid_argument(format!(
-            "scope 只能是 user 或 system：{other}"
+        other => Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.bbs.046",
+            &[("other", other)],
         ))),
     }
 }
@@ -406,28 +407,39 @@ fn read_one(dir: &Path, file: &str) -> Result<String, AppError> {
             .map(|n| n.to_string_lossy().into_owned())
             != Some(file.to_owned())
     {
-        return Err(AppError::invalid_argument(format!(
-            "file 必须是单个 .json 文件名，不接受路径：{file}"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.bbs.047",
+            &[("file", file)],
         )));
     }
     // join 完再确认一次：结果必须仍在这一层目录之下
     let full = dir.join(file);
     if !full.starts_with(dir) {
-        return Err(AppError::invalid_argument("路径越界".to_owned()));
+        return Err(AppError::invalid_argument(
+            ::postprocess::diag::messages::text("ui.ipc.bbs.why_path_escape", &[]),
+        ));
     }
     if !full.is_file() {
-        return Err(AppError::not_found(format!("没有这个文件：{file}")));
-    }
-    let meta = std::fs::metadata(&full)
-        .map_err(|e| AppError::io(format!("看不了这份文件：{file}")).with_detail(e.to_string()))?;
-    if meta.len() > MAX_PRESET_BYTES {
-        return Err(AppError::invalid_argument(format!(
-            "文件过大：{} > {MAX_PRESET_BYTES}",
-            meta.len()
+        return Err(AppError::not_found(messages::text(
+            "ui.ipc.bbs.048",
+            &[("file", file)],
         )));
     }
-    std::fs::read_to_string(&full)
-        .map_err(|e| AppError::io(format!("读这份文件失败：{file}")).with_detail(e.to_string()))
+    let meta = std::fs::metadata(&full).map_err(|e| {
+        AppError::io(messages::text("ui.ipc.bbs.049", &[("file", file)])).with_detail(e.to_string())
+    })?;
+    if meta.len() > MAX_PRESET_BYTES {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.bbs.050",
+            &[
+                ("v1", &meta.len().to_string()),
+                ("MAX_PRESET_BYTES", &MAX_PRESET_BYTES.to_string()),
+            ],
+        )));
+    }
+    std::fs::read_to_string(&full).map_err(|e| {
+        AppError::io(messages::text("ui.ipc.bbs.051", &[("file", file)])).with_detail(e.to_string())
+    })
 }
 
 #[cfg(test)]

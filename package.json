@@ -28,7 +28,8 @@
     "check:zero-network": "node scripts/check-zero-network.mjs",
     "check:channel-args": "node scripts/check-channel-args.mjs",
     "check:release-source": "node scripts/check-release-source.mjs",
-    "check:calibration-assets": "node scripts/check-calibration-assets.mjs"
+    "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

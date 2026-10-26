@@ -39,6 +39,8 @@
 //! - **不进 revision 输入**：同内容重发指纹不变，检查更新不该被一次重发惊动；
 //!   `#[serde(default)]` 也进不了结构签名（探针判的就是"删了还能不能解析"）。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -319,12 +321,17 @@ impl CatalogFile {
 
 impl Catalog {
     pub fn parse(bytes: &[u8]) -> Result<Catalog, AppError> {
-        let catalog: Catalog = serde_json::from_slice(bytes)
-            .map_err(|e| AppError::corrupted("catalog 读不出来").with_detail(e.to_string()))?;
+        let catalog: Catalog = serde_json::from_slice(bytes).map_err(|e| {
+            AppError::corrupted(messages::text("ui.runtime.catalog.377", &[]))
+                .with_detail(e.to_string())
+        })?;
         if catalog.catalog_schema != CATALOG_SCHEMA {
-            return Err(AppError::corrupted(format!(
-                "catalog 格式代次认不了：文件是 {}，程序认 {}",
-                catalog.catalog_schema, CATALOG_SCHEMA
+            return Err(AppError::corrupted(messages::text(
+                "ui.runtime.catalog.378",
+                &[
+                    ("v1", &catalog.catalog_schema.to_string()),
+                    ("v2", &CATALOG_SCHEMA.to_string()),
+                ],
             )));
         }
         Ok(catalog)
@@ -332,8 +339,10 @@ impl Catalog {
 
     /// 产物形态：pretty JSON + 结尾换行（进仓库当判据资产，diff 要能看）
     pub fn to_pretty_json(&self) -> Result<String, AppError> {
-        let mut s = serde_json::to_string_pretty(self)
-            .map_err(|e| AppError::internal("catalog 序列化失败").with_detail(e.to_string()))?;
+        let mut s = serde_json::to_string_pretty(self).map_err(|e| {
+            AppError::internal(messages::text("ui.runtime.catalog.379", &[]))
+                .with_detail(e.to_string())
+        })?;
         s.push('\n');
         Ok(s)
     }
@@ -425,8 +434,9 @@ impl Catalog {
          */
         let (catalog, missing) = Self::collect(&presets, &assets, FileHashes::None);
         if let Some(first) = missing.first() {
-            return Err(AppError::not_found(format!(
-                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            return Err(AppError::not_found(messages::text(
+                "ui.runtime.catalog.380",
+                &[("first", &first.to_string())],
             )));
         }
         // 随包那份也要带「最低正式客户端版本」—— 客户端首启释放的就是它。
@@ -450,8 +460,9 @@ impl Catalog {
     ) -> Result<Catalog, AppError> {
         let (catalog, missing) = Self::collect(presets, artifacts_dir, FileHashes::FromArtifacts);
         if let Some(first) = missing.first() {
-            return Err(AppError::not_found(format!(
-                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            return Err(AppError::not_found(messages::text(
+                "ui.runtime.catalog.381",
+                &[("first", &first.to_string())],
             )));
         }
         Ok(catalog.finalize())
@@ -572,7 +583,10 @@ impl Catalog {
                 FileHashes::FromArtifacts => match std::fs::read(&full) {
                     Ok(bytes) => (Some(hex(&Sha256::digest(&bytes))), Some(bytes.len() as u64)),
                     Err(_) => {
-                        missing.push(format!("资产 {}（{}）：载荷文件不在", asset.id, asset.path));
+                        missing.push(::postprocess::diag::messages::text(
+                            "ui.runtime.catalog.asset_payload_missing",
+                            &[("id", &asset.id), ("path", &asset.path)],
+                        ));
                         continue;
                     }
                 },

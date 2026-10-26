@@ -8,8 +8,14 @@
  * 上，这一块是它的后代，变量自然继承）+ 全站的 `--accent` / `--accent-soft`。
  * 不写死任何色值 ⇒ 深色模式跟着翻，不用在这里再写一份。
  *
- * ★ 尺寸是"状态无关"的：`min-width` 按最长那档（「仅本页置顶」）预留，
- *   切换档位只换字，盒子一个像素都不动（全站铁律）。
+ * ★ 尺寸是"状态无关"的：**不写 `min-width`** —— 按钮里把每一档文字各渲染一份
+ *   叠进同一个 grid 格（见 `.pill > span`），可见的只有当前档，其余 `visibility:hidden`
+ *   只负责占宽 ⇒ 盒子宽度 = **当前语言里最长的那一档**。
+ *   切档一个像素不动；哪天接 i18n（英/日长度与中文不同）也不用再改宽度。
+ *
+ * ★ 2026-10-25 作者五轮收窄的落点：内衬 10 → 8 → 6px、
+ *   文案「仅本页置顶」(5) → 「本页置顶」(4) → 关闭 / 本页 / 始终（各 2 字）。
+ *   内衬 6px 已是中文 12px 的可读下限，再窄只剩降字号。
  */
 
 .gadgets {
@@ -20,14 +26,12 @@
 }
 
 .pill {
-  display: inline-flex;
+  /* inline-grid 而不是 inline-flex：所有档文案共用 1/1 那一格，宽的自然撑开盒子 */
+  display: inline-grid;
+  place-items: center;
   flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  /* 最长那档「仅本页置顶」= 5 个字（12px）≈ 60 + 两侧内衬 20 —— 留到 88 不挤 */
-  min-width: 88px;
   height: 24px;
-  padding: 0 10px;
+  padding: 0 6px;
   border: 1px solid var(--bbs-line);
   border-radius: 999px;
   background: transparent;
@@ -38,6 +42,16 @@
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* 每一档都落在同一格：可见的那份与隐形的副本完全重叠 */
+.pill > span {
+  grid-area: 1 / 1;
+}
+
+/* 隐形副本：只撑宽，不显示、也不进读屏（`aria-hidden` 由组件给） */
+.pill > span[aria-hidden='true'] {
+  visibility: hidden;
 }
 
 /* 悬停：底色淡入（描边不动 —— 动描边会让它看起来在"跳"）

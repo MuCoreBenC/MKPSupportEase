@@ -26,12 +26,14 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import { api, errorText, listen } from '../../api'
+import { useT } from '../../i18n'
 import s from './GuideCard.module.css'
 
 /** 与 `ipc::guide::GUIDE_SIDE_EVENT` 同一个名字（那边是唯一真值） */
 const SIDE_EVENT = 'guide-side'
 
 export default function GuideCard() {
+  const tr = useT()
   const q = useMemo(() => new URLSearchParams(window.location.search), [])
   /* 卡片被摆在目标的哪一侧 ⇒ 箭头指向哪边（Rust 那边算的，这里不猜） */
   const initial = q.get('side') === 'left' ? 'left' : 'right'
@@ -84,25 +86,29 @@ export default function GuideCard() {
           {/* 副标题：一句"为什么"，小字灰字 —— 解释不该抢操作步骤的地方 */}
           <p
             className={s.lead}
-            title="切片结果的有效性 = PartPlate::m_slice_result_valid（切片器进程内存里的状态，不在盘上）"
+            title={tr('guide.card.leadTitle')}
           >
-            MKP 预设参数已修改，重新切片后生效
+            {tr('guide.card.lead')}
           </p>
 
           {/* ★ 正文 = 操作步骤。★ 每一段都写成**一整行**：JSX 会把段落中间的换行
               折成一个空格，中文里那个空格会跟着标点一起显示出来（"打印板， 再选回…"）。 */}
           <p className={s.text}>
-            请在 Bambu Studio 中重新切片，以生成应用最新参数的 G-code。
+            {tr('guide.body1.pre')}
+            {tr('guide.body1.strong')}
+            {tr('guide.body1.post')}
           </p>
           <p className={s.text}>
-            如果点击「切片」后没有重新切片，或「切片」按钮呈灰色无法点击，请先切换到另一块打印板，再选回原来的打印板，然后重新切片。
+            {tr('guide.body2.pre')}
+            {tr('guide.body2.strong')}
+            {tr('guide.body2.post')}
           </p>
           {err && <p className={s.err}>{err}</p>}
         </div>
 
         <div className={s.actions}>
           <button type="button" className={s.primary} onClick={close} disabled={busy}>
-            知道了
+            {tr('guide.ok')}
           </button>
         </div>
       </div>

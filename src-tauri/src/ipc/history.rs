@@ -18,6 +18,8 @@
 //! 身份 = 文件名）两种 —— 与参数弹窗正在编辑的目标同源。别的取值一律 `INVALID_ARGUMENT`
 //! 照实报（不静默当成某一种，猜错了就是把 A 的历史接到 B 上）。
 
+use postprocess::diag::messages;
+
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use tauri::AppHandle;
@@ -139,14 +141,16 @@ fn key_for(origin: &str, id: &str) -> Result<String, AppError> {
     let origin = origin.trim();
     let id = id.trim();
     if origin != "local" && origin != "preset" {
-        return Err(AppError::invalid_argument(format!(
-            "历史只认两条线（local / preset），传来的是“{origin}”"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.history.082",
+            &[("origin", origin)],
         )));
     }
     if id.is_empty() {
-        return Err(AppError::invalid_argument(
-            "这份文件的身份是空的，认不出是哪一本历史",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.history.083",
+            &[],
+        )));
     }
     Ok(history::key_of(origin, id))
 }

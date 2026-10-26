@@ -18,6 +18,8 @@
 //! ★ 事件：下载进度用 `software-update-progress` 推（推的就是 [`UpdateState`]，
 //!   **与快照同一个类型** —— 界面只有一种形状要认，不会两套渲染）。
 
+use postprocess::diag::messages;
+
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -93,11 +95,14 @@ pub async fn start_update(app: AppHandle) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
     let update = software_update(&root);
     if !update.has_update {
-        return Err(AppError::invalid_argument("没有新版本，不用下载"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.update.156",
+            &[],
+        )));
     }
-    let asset = update.asset.ok_or_else(|| {
-        AppError::invalid_argument("这一版没有给安装包（release.json 里没有 asset）")
-    })?;
+    let asset = update
+        .asset
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.update.157", &[])))?;
 
     let emit_app = app.clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -138,7 +143,10 @@ pub fn cancel_update() {
 pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
     let UpdateState::Ready { path, .. } = updater::session().state() else {
-        return Err(AppError::invalid_argument("还没有下载好的安装包"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.update.158",
+            &[],
+        )));
     };
     let staged = std::path::PathBuf::from(&path);
     let target = updater::running_app()?;
@@ -153,7 +161,9 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
         .arg("-c")
         .arg(&script)
         .spawn()
-        .map_err(|e| AppError::io("起不了安装脚本").with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppError::io(messages::text("ui.ipc.update.159", &[])).with_detail(e.to_string())
+        })?;
     // 给脚本一点时间把最后一句排进 shell（★ 退出后这一段才真正开始）。
     // 客户端**不带 tokio**：`block_on` 一个"睡 200ms"是这里最省事、也不引依赖的做法。
     tauri::async_runtime::block_on(async {
@@ -172,14 +182,15 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
 pub async fn open_url(app: AppHandle, url: String) -> Result<(), AppError> {
     let u = url.trim().to_owned();
     if !(u.starts_with("https://") || u.starts_with("http://")) {
-        return Err(AppError::invalid_argument(
-            "只让打开 http(s) 链接（这一格是「查看更新」，不是唤起任意程序）",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.ipc.update.160",
+            &[],
+        )));
     }
     traced("openUrl", |_| {
-        app.opener()
-            .open_url(u, None::<&str>)
-            .map_err(|e| AppError::io("叫不动系统浏览器").with_detail(e.to_string()))
+        app.opener().open_url(u, None::<&str>).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.update.161", &[])).with_detail(e.to_string())
+        })
     })
 }
 
