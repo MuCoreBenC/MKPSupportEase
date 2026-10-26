@@ -910,3 +910,50 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 客户端 **642** / 内核 **235** 全绿 · `tsc -b --force` ✓ · `eslint src` 0 error
 （仅既有 `PagePresets` 621 行 warning）· `npm run build` ✓ · 六道 check 全绿 ·
 探针 `i18n` **13/13**、`i18n-cjk` 29 行（逐条见清单）。
+
+## 增量之五十七 · 管线明细存事实、首页文案与字距（2026-10-26）
+
+### 一、管线明细不再存句子
+
+`archive.rs::step_detail()` 那套 `format!("读取 {} 行…")` 全删了，换成
+`step_detail_lines()`：每行一个**字典键 + 原始参数**（`report.line.*`，值全是原始事实
+`disk` / `true` / `0.70`）。`PipelineStep` 加 `detailLines` 字段。
+
+规矩：**记录里存事实，词的映射在界面**（`PageReport` 的 `argText`）。于是同一份
+`_meta.json` 中文界面读中文、英文界面读英文，归档文件本身不再被写它那一刻的语言冻住。
+老记录只有 `detail`（当年那句中文）—— 界面回落，**不復译**，这是记录该有的样子。
+
+顺带：报告页的**进度句**（`pipeline[].message`，内核 `timer.begin` 那 13 句）也按步骤 id
+换成本地文案，内核那边一个字没动（它写的是日志与归档的事实，不是界面）。
+
+三条老测试（`step_details_carry_the_facts_the_report_shows` 等）从比中文改成
+**比键与事实** —— 换字典不会红，漏了行才会红。
+
+假后端同步成同形状，否则浏览器预览永远看不到英文那套。
+
+### 二、首页
+
+- 五步说明精简到 3–4 个词（`Latest reference values` / `Z plate tells which cell` /
+  `XY plate tells which line` / `Confirm the result`）。原来那几句在四列档挤成两三行，
+  还会压到相邻格上。
+- **「看起来像有空格」的真凶**：`.groupTitle` 的 `letter-spacing: 0.18em` —— 字距在
+  **最后一个字母后面也加一格**，英文标题后面凭空多出一个空格，再叠 flex 的 gap 就成了
+  「Machine   Sets …」。用等量的负右边距（`margin-right: -0.18em`）抵掉，中文看不出来。
+
+### 三、顺手两处
+
+- BBS 单位栏原来硬取 `meta.unit.zh`（`mm 或 %`），改成按语言挑（`mm or %`）。
+- Z 轴图例英文那串里的全角竖线 `｜` 换半角。
+
+### 四、现在的残留（`i18n-cjk` 9 行，全是数据）
+
+拓竹 (Bambu Lab) / 两个 `.toml` 文件名 / 三个版本名（快拆版6月以前、标准版）/
+一个模型名（帕姆）/ 语言选项「简体中文」/ 假后端的演示注释。
+
+**其中品牌名与版本名是作者点名要英文的下一刀**：catalog 的 `machines[].brand` 与
+`versions[].name` 加可选 `nameEn`，界面按 locale 挑，工作台里能编。等作者发话再动。
+
+### 五、验证
+
+`fmt` ✓ · 双 clippy 0 · 客户端 **642** / 内核 **235** 全绿 · `tsc` ✓ · eslint 0 error ·
+build ✓ · 六道 check ✓ · 探针 `i18n` 13/13 · `i18n-cjk` **9 行**（29 → 9）。
