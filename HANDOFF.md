@@ -809,3 +809,33 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 - 前端：`check:i18n` **1430 条**、`tsc -b --force`、`eslint src` 0 error
   （仅既有 `PagePresets` 621 行那条 warning）、`npm run build`、五道 check 全绿。
 - 探针 `i18n` **13/13**（切 English 后设置页 / 页签 / 窗口胶囊逐项断言）。
+
+### 五、参数名/说明：改成双语数据（作者裁定：走 registry，不走前端字典）
+
+`presets/registry/param_registry.toml` 现在每条都带英文：
+
+- `labelEn` / `descEn`：75 个参数全覆盖；`[[params.choices]]` 45 条有 `labelEn`；
+  `[[tabs]]` 8 个、`[[tabs.sections]]` 27 个有 `labelEn`（分组还有 `descriptionEn`）。
+- 两套解析结构同步加字段：`crates/preset/src/registry.rs`（内核/CLI 读的那套）
+  与 `src-tauri/src/presetdata/registry.rs`（应用读的那套，另有 `ParamMetaEdit`）。
+- **新的覆盖闸** `presetdata::registry::tests::every_entry_has_english`：真数据里
+  任何一条缺英文就红。以后加参数必须顺手写英文（回落中文是安全网，不是常态）。
+
+**语言在哪一层挑**：界面。IPC 两条通道（`getRuntimeCatalog` 的 `registry` 与
+`getMachineParams`）把两册一起下发，`useParams` 在**读定义时**按 `locale` 摊开
+（`localizeDef` / `localizeTab`，出口是 `defOf` / `defs` / `tabs` / `sectionsOf` /
+`defsOfSection`）。这样切语言不必重拉数据 —— 重拉会把用户选的机型顶回"正在用的那一份"。
+
+**工作台不会被保存抹掉**：`ParamMetaEdit` 的 `label_en` / `desc_en` 是 `Option`
+（`None` = 不动，只有它主动发了才改写），选项那条按 `value` 沿用文件里原有英文。
+工作台的参数编辑器**还没暴露这两格**（界面仍是中文），所以它保存不会破坏英文，
+但也编不了英文 —— 那一格等做工作台 i18n 时一起开。
+
+**代价（已付）**：`catalog.generated.json` 与 `presets/delivery/catalog.json` 都重新生成了
+（`cargo run --bin gen-catalog`），结构签名随之变化（`revision b654d984…` / `5aeab99c…`）。
+**发布预设是另一件事** —— 这两份已提交但没发；下次 `npm run publish:presets`
+或工作台「发布」时才真正出门。在那之前，走 OTA 拿到的是旧目录（`registry` 里没有英文），
+英文界面会回落中文，不会崩。
+
+**已知的、故意留着的一处**：搜索只匹配**当前语言**的名字（英文界面搜不到中文名、
+中文界面搜不到英文名）。要做双语搜索就在 `PageParams` 的匹配里把两册都喂进去。
