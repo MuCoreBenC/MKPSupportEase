@@ -43,8 +43,6 @@ export interface SwitchProps {
   disabled?: boolean
   /** 开关旁边没有可见文字时给读屏一个名字（设置页传那一行的标题） */
   ariaLabel: string
-  /** 悬停提示（把说明文字挂这里，页面上就不用重复一遍） */
-  title?: string
   /** 调用方只微调外距（结构不在这里改） */
   className?: string
 }
@@ -54,7 +52,6 @@ export default function Switch({
   onChange,
   disabled = false,
   ariaLabel,
-  title,
   className,
 }: SwitchProps) {
   const cls = [
@@ -72,7 +69,6 @@ export default function Switch({
       role="switch"
       aria-checked={checked}
       aria-label={ariaLabel}
-      title={title}
       disabled={disabled}
       className={cls}
       onClick={() => onChange(!checked)}

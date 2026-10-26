@@ -186,7 +186,6 @@ export default function CategoryPills({ tabs, current, dirty, onSelect }: Props)
               aria-current={on ? 'true' : undefined}
               tabIndex={on ? 0 : -1}
               className={on ? s.pillOn : s.pill}
-              title={tr('params.catCount', { label: t.label, count: t.count })}
               onClick={() => onSelect(t.id)}
             >
               <Icon name={iconOf(t.id, t.label)} size={20} className={s.icon} />

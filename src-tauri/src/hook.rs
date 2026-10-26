@@ -98,6 +98,16 @@ mod keys {
     pub const TOWER_RELOCATED_STILL: &str = "hook.tower_relocated_still";
     /// 用户选了自己挪模型 / 那一问超时 ⇒ 停下
     pub const TOWER_RELOCATE_DECLINED: &str = "hook.tower_relocate_declined";
+    /* 提问模态框上的按钮（2026-10-26）：按钮上的字同样是「用户读到的一句话」，
+    英文界面下曾经整颗按钮是中文 —— 所以它们也进文案表，不写字面量 */
+    pub const CHOICE_TOWER_RELOCATE: &str = "hook.choice_tower_relocate";
+    pub const CHOICE_TOWER_RELOCATE_HINT: &str = "hook.choice_tower_relocate_hint";
+    pub const CHOICE_TOWER_MODEL: &str = "hook.choice_tower_model";
+    pub const CHOICE_TOWER_MODEL_HINT: &str = "hook.choice_tower_model_hint";
+    pub const CHOICE_CALIB_PRINT: &str = "hook.choice_calib_print";
+    pub const CHOICE_CALIB_PRINT_HINT: &str = "hook.choice_calib_print_hint";
+    pub const CHOICE_CALIB_DIRECT: &str = "hook.choice_calib_direct";
+    pub const CHOICE_CALIB_DIRECT_HINT: &str = "hook.choice_calib_direct_hint";
     /// 板上根本没有不撞的塔位 ⇒ 停下
     pub const TOWER_RELOCATE_UNAVAILABLE: &str = "hook.tower_relocate_unavailable";
     /* 校准件那一趟的两种成功结论（`print` = 打印件保留 / `direct` = 去掉打印件）——
@@ -1713,14 +1723,14 @@ impl Asker for ChannelAsker<'_> {
         let choices = vec![
             QuestionChoice {
                 id: CHOICE_CALIB_PRINT.to_owned(),
-                label: "先打印，再校准".to_owned(),
-                hint: Some("打印件保留".to_owned()),
+                label: Reason::new(keys::CHOICE_CALIB_PRINT).text(),
+                hint: Some(Reason::new(keys::CHOICE_CALIB_PRINT_HINT).text()),
                 accent: true,
             },
             QuestionChoice {
                 id: CHOICE_CALIB_DIRECT.to_owned(),
-                label: "直接校准".to_owned(),
-                hint: Some("去掉打印件，只走校准路径".to_owned()),
+                label: Reason::new(keys::CHOICE_CALIB_DIRECT).text(),
+                hint: Some(Reason::new(keys::CHOICE_CALIB_DIRECT_HINT).text()),
                 accent: false,
             },
         ];
@@ -1773,15 +1783,15 @@ impl TowerAsk for ChannelTowerAsk<'_> {
         if candidate.is_some() {
             choices.push(QuestionChoice {
                 id: CHOICE_RELOCATE.to_owned(),
-                label: "自动调整塔位置".to_owned(),
-                hint: Some("只改这一趟，预设文件不动".to_owned()),
+                label: Reason::new(keys::CHOICE_TOWER_RELOCATE).text(),
+                hint: Some(Reason::new(keys::CHOICE_TOWER_RELOCATE_HINT).text()),
                 accent: true,
             });
         }
         choices.push(QuestionChoice {
             id: CHOICE_MODEL.to_owned(),
-            label: "停止并自己挪模型".to_owned(),
-            hint: Some("这一趟停下，原文件不动".to_owned()),
+            label: Reason::new(keys::CHOICE_TOWER_MODEL).text(),
+            hint: Some(Reason::new(keys::CHOICE_TOWER_MODEL_HINT).text()),
             accent: false,
         });
         let geo = crate::hook_ipc::RelocateGeoPayload {

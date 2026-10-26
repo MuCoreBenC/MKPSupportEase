@@ -10,6 +10,7 @@
  */
 
 import { STORAGE } from '../../api/storageKeys'
+import { t } from '../../i18n'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
 
@@ -27,6 +28,6 @@ export function useBbsRail(): BbsRail {
     snap: RAIL_SNAP,
     min: RAIL_MIN,
     max: RAIL_MAX,
-    label: '详情栏',
+    label: t('bbs.rail.kind.detail'),
   })
 }

@@ -50,6 +50,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { t, type Tr } from '../../i18n'
 import { api, errorText } from '../../api'
 import { PRINTER_BY_MACHINE_ID, normalizeList } from './bbsSource'
 import type {
@@ -80,7 +81,7 @@ const BBS = '/bbs'
  */
 const RESCAN_MIN_MS = 700
 
-async function getJSON<T>(path: string): Promise<T> {
+async function getJSON<T>(path: string, tr: Tr): Promise<T> {
   const res = await fetch(path, { cache: 'no-store' })
   if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`)
   /*
@@ -90,7 +91,7 @@ async function getJSON<T>(path: string): Promise<T> {
    */
   const type = res.headers.get('content-type') ?? ''
   if (!type.includes('json')) {
-    throw new Error(`${path} 返回的不是 JSON（content-type: ${type || '空'}），大概是路径对不上被回退成了页面`)
+    throw new Error(tr('bbs.data.notJson', { path, type: type || tr('common.emptyShort') }))
   }
   return res.json() as Promise<T>
 }
@@ -103,9 +104,9 @@ async function getJSON<T>(path: string): Promise<T> {
  *
  * 只有本机目录那两档要现读 —— 导入的与我们自己的那几份内容就在身上，调用点先一步收下了。
  */
-async function fetchDoc(item: BbsPresetItem): Promise<BbsPresetDoc> {
+async function fetchDoc(item: BbsPresetItem, tr: Tr): Promise<BbsPresetDoc> {
   if (item.scope !== 'user' && item.scope !== 'system') {
-    throw new Error(`这一份不带正文：${item.scope} / ${item.file}`)
+    throw new Error(tr('bbs.data.noBody', { scope: item.scope, file: item.file }))
   }
   return JSON.parse(await api.readBbsPreset(item.scope, item.uid, item.file)) as BbsPresetDoc
 }
@@ -256,12 +257,12 @@ export function useBbsData(): BbsData {
     void (async () => {
       try {
         const [reg, lay, def, ico, syn] = await Promise.all([
-          getJSON<BbsRegistryFile>(`${BBS}/registry.json`),
-          getJSON<BbsLayoutFile>(`${BBS}/layout.json`),
-          getJSON<BbsDefaultsFile>(`${BBS}/defaults.json`),
+          getJSON<BbsRegistryFile>(`${BBS}/registry.json`, t),
+          getJSON<BbsLayoutFile>(`${BBS}/layout.json`, t),
+          getJSON<BbsDefaultsFile>(`${BBS}/defaults.json`, t),
           /* 图标缺了只是没图标，不该拦住整页 */
-          getJSON<BbsIconsFile>(`${BBS}/icons.json`).catch(() => ({ svg: {} })),
-          getJSON<BbsSyncInfo>(`${BBS}/_sync.json`).catch(() => null),
+          getJSON<BbsIconsFile>(`${BBS}/icons.json`, t).catch(() => ({ svg: {} })),
+          getJSON<BbsSyncInfo>(`${BBS}/_sync.json`, t).catch(() => null),
         ])
         if (!alive) return
         setRegistry(reg.params ?? {})
@@ -271,11 +272,7 @@ export function useBbsData(): BbsData {
         setSync(syn)
       } catch (err) {
         if (!alive) return
-        setFatal(
-          `没读到 public/bbs 下的 BBS 元数据（${String(err)}）。`
-          + '那四份 json（registry / layout / defaults / icons）随本仓分发，'
-          + '少了说明产物不全，见 public/bbs/PROVENANCE.md。',
-        )
+        setFatal(t('bbs.data.missingMeta', { error: String(err) }))
       }
     })()
     return () => { alive = false }
@@ -293,7 +290,7 @@ export function useBbsData(): BbsData {
         live = await api.getBbsPresets()
       } catch (err) {
         /* 这一条真出错时（没装 BBS 不是错误，那种情况走 available:false）照实说 */
-        why = `读本机 BBS 目录失败：${errorText(err)}`
+        why = t('bbs.data.liveFailed', { error: errorText(err) })
       }
       if (!alive) return
 
@@ -314,7 +311,7 @@ export function useBbsData(): BbsData {
         setRaw({})
         setSourceMode('none')
         setSourceRoot('')
-        setSourceNote(live?.reason || why || '读不到本机 BBS 目录')
+        setSourceNote(live?.reason || why || t('bbs.data.noDir'))
       }
       /* 换来源之后单份预设的 URL 也变了 —— 靠缓存键上的来源前缀区分，不清缓存（见文件头）。
          重扫时这一句照样执行，但文档缓存没失效（键里没有重扫次数了），重算出来的数一模一样，
@@ -368,7 +365,7 @@ export function useBbsData(): BbsData {
       if (!item) return
       /* 导入进来的那几份内容就在身上，不用现读 */
       if (item.doc) { fresh.set(keyOf(name), item.doc); return }
-      try { fresh.set(keyOf(name), await fetchDoc(item)) }
+      try { fresh.set(keyOf(name), await fetchDoc(item, t)) }
       catch { fresh.set(keyOf(name), null) }
     }))
     for (const [key, doc] of fresh) docs.current.set(key, doc)

@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { STORAGE } from '../../api/storageKeys'
-import { useT } from '../../i18n'
+import { useLocale, useT } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useIsDark } from '../state/appState'
 import type { Density } from '../../hooks/useDensity'
@@ -39,7 +39,7 @@ import BbsSearchBox from './BbsSearchBox'
 import BbsTabs from './BbsTabs'
 import { buildBbsPanel, resolveActivePage } from './bbsPanel'
 import { normalizeQuery } from './bbsSearch'
-import { MODEL_ALL } from './bbsSource'
+import { reasonText, MODEL_ALL } from './bbsSource'
 import type { BbsPickSource } from './bbsSource'
 import { coverage } from './bbsToggleRules'
 import Icon from '../../components/Icon'
@@ -107,6 +107,8 @@ const labelWidth = (pageW: number) => Math.round(
 
 export default function PageBbs({ density, pending, onNeedDownload }: Props) {
   const tr = useT()
+  /* BBS 那几份 json 自带 `name` / `name_en` 与 `label.zh` / `label.en` —— 数据双语，界面挑一册 */
+  const locale = useLocale()
   const data = useBbsData()
   /*
    * 看哪一边（2026-10-13）：`mkp` = 我们自己的切片器配置，`bbs` = 本机 BBS 目录里的。
@@ -329,7 +331,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
         hit
           ? tr('bbs.pending.notSelectable', {
               name: pending.name,
-              reason: hit.reason ?? '',
+              reason: reasonText(hit, tr),
             })
           : tr('bbs.pending.missing', { name: pending.name }),
       )
@@ -357,9 +359,10 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
       data.layout,
       data.registry, preset.values, preset.user, preset.toggles, viewMode,
       paramQuery, preset.variant.index, !hasCurrent,
+      tr, locale,
     ),
     [hasCurrent, data.layout, data.registry, preset.values, preset.user, preset.toggles, viewMode,
-      paramQuery, preset.variant.index],
+      paramQuery, preset.variant.index, tr, locale],
   )
 
   /** 归一化后的搜索词。空串 = 没在搜 */

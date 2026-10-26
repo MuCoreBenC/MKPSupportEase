@@ -45,7 +45,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import { useLocale, useT, type Locale, type StringKey, type Tr } from '../../i18n'
+import { useLocale, useT, type StringKey, type Tr } from '../../i18n'
+import { localizeParamDef as localizeDef, localizeTab } from '../shared/dataLabel'
 /* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
@@ -343,54 +344,6 @@ interface ComboData {
   factoryByKey: Map<string, string>
   /** 这个 combo 的 MKP 文件名（`A1.toml`）。包里这个版本没有 MKP 文件时是 null */
   fileLabel: string | null
-}
-
-/**
- * 双语数据显示哪一册（2026-10-26 双语注册表）。
- *
- * 英文界面优先英文、缺了就回落中文 —— 数据可能还没译完，**回落永远不算错**，
- * 空着才是错（那会让一行参数没有名字）。中文界面不碰英文那一格。
- */
-function bi(zh: string, en: string | undefined, locale: Locale): string {
-  return locale === 'en' && en !== undefined && en !== '' ? en : zh
-}
-
-/**
- * 一条定义按界面语言挑好显示名。
- *
- * **不放在数据加载那一刻**：`catalog` 只在 combo 变化时重拉，语言切换不该再拉一次
- * （`setPick` 会把用户选的机型顶回"正在用的那一份"）。所以原文两册都留着，
- * 每次读定义（`defOf` / `defs`）时按当前语言摊开。
- */
-function localizeDef(d: ParamDef, locale: Locale): ParamDef {
-  if (locale !== 'en') return d
-  const label = bi(d.label, d.labelEn, locale)
-  const desc = bi(d.desc, d.descEn, locale)
-  return {
-    ...d,
-    label,
-    desc,
-    field: {
-      ...d.field,
-      label,
-      desc,
-      choices: d.field.choices?.map((c) => ({ ...c, label: bi(c.label, c.labelEn, locale) })),
-    },
-  }
-}
-
-/** 页签 / 分组同一条规矩（卡片标题与页签条都读它） */
-function localizeTab(t: ParamTab, locale: Locale): ParamTab {
-  if (locale !== 'en') return t
-  return {
-    ...t,
-    label: bi(t.label, t.labelEn, locale),
-    sections: t.sections.map((s) => ({
-      ...s,
-      label: bi(s.label, s.labelEn, locale),
-      desc: s.desc === undefined ? undefined : bi(s.desc, s.descEn, locale),
-    })),
-  }
 }
 
 /** 条件三档的说法住字典（`params.op.*`）—— 这一层只存键，取字交给调用方传进来的 `tr` */

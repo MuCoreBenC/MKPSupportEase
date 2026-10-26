@@ -23,6 +23,8 @@
 
 export const zhCN = {
   /* 工艺页右端那两枚窗口胶囊（2026-10-25 起走字典；按钮上只放短说法） */
+
+  // ---- 工艺页（BBS） ----
   'bbs.gadgets.pin.off': '关闭',
   'bbs.gadgets.pin.page': '本页',
   'bbs.gadgets.pin.always': '始终',
@@ -41,6 +43,8 @@ export const zhCN = {
   'bbs.gadgets.compact.failed': '窗口尺寸没改成',
 
   /* 设置页 —— 外观（2026-10-25） */
+
+  // ---- 设置页 ----
   'settings.appearance.title': '外观',
   'settings.locale.label': '界面语言',
   'settings.locale.note': '换完立刻生效，记在应用状态里 —— 下次打开还是这一档。',
@@ -53,6 +57,8 @@ export const zhCN = {
   'settings.locale.failed': '没换成：{detail}',
 
   /* 外壳：顶部页签、加载态、窗口键（2026-10-25 第二批） */
+
+  // ---- 外壳与页签 ----
   'tabs.home': '首页',
   'tabs.presets': '预设',
   'tabs.calib': '校准',
@@ -65,11 +71,17 @@ export const zhCN = {
   'tabs.max': '最大化',
   'tabs.restore': '还原',
   'tabs.close': '关闭',
+
+  // ---- 外壳 ----
   'app.loading': '页面正在加载',
+
+  // ---- 通用 ----
   'common.loading': '正在读取…',
   'common.danger': '危险操作',
 
   /* 设置页：页头与主题（外观那一块） */
+
+  // ---- 设置页（续） ----
   'settings.title': '设置',
   'settings.subtitle': '软件更新与应用设置。',
   'settings.theme.label': '主题',
@@ -253,6 +265,8 @@ export const zhCN = {
   'settings.guide.step2Note': '从此所有 .3mf 都归它；不点它只对这一个文件生效',
 
   /* 首页（2026-10-26） */
+
+  // ---- 首页 ----
   'home.picker.list': '预设列表',
   'home.action.applying': '使用中…',
   'home.action.inUse': '正在使用',
@@ -323,6 +337,8 @@ export const zhCN = {
   'home.modal.presetAskNote': '换成 {name} 之后，这一页点出来的偏移草稿会作废 —— 草稿是相对上一份预设点出来的增量，换了基准就没有意义了。',
 
   /* 校准共用（首页校准卡与校准页都读这两条轴名 / 图例） */
+
+  // ---- 校准页 ----
   'calib.axis.x': 'X 偏移',
   'calib.axis.y': 'Y 偏移',
   'calib.axis.z': 'Z 偏移',
@@ -330,6 +346,8 @@ export const zhCN = {
   'calib.z.tip': '校准的时候感觉都没涂上胶水 → 点最右边的格子（-0.5，降低笔尖），或者手动把上面的 Z 改小一点',
 
   /* 首页：三级选择 / 翻页 / 预设栈 / 引导卡（2026-10-26） */
+
+  // ---- 首页（续） ----
   'home.picker.brand': '品牌',
   'home.picker.model': '机型',
   'home.picker.modelHint': '决定校准板尺寸',
@@ -368,6 +386,8 @@ export const zhCN = {
   'home.guide.noMachine': '尚未选择机型',
 
   /* 标题栏那颗下载指示器（2026-10-26） */
+
+  // ---- 关于与更新 ----
   'update.ready': '可安装',
   'update.failed': '失败',
   'update.pause': '暂停',
@@ -387,6 +407,8 @@ export const zhCN = {
   'update.cancelled': '已取消。',
 
   /* 通用导入条（拖入 / 选择器）2026-10-26 */
+
+  // ---- 导入 ----
   'import.bad': '导入：有几份没成',
   'import.done': '导入完成',
   'import.ok': '知道了',
@@ -415,6 +437,8 @@ export const zhCN = {
   'import.nameRule': '名字的规矩与重命名一致：不许空、不许带路径、后缀保持原样；改完点「继续导入」。',
 
   /* 工艺页（2026-10-26） */
+
+  // ---- 工艺页（BBS）（续） ----
   'bbs.rulesNote': '条件显隐规则 {rules} 条、覆盖 {keys} 个参数（译自 ConfigManipulation.cpp 的 toggle_print_fff_options）',
   'bbs.presetListTitle': '预设列表：本机 BBS 里有哪些工艺预设',
   'bbs.presetList': '预设列表',
@@ -493,6 +517,8 @@ export const zhCN = {
   'bbs.drawer.tagOurs': '我们发的',
 
   /* 校准页（2026-10-26） */
+
+  // ---- 校准页（续） ----
   'calib.theme.dark': '深色',
   'calib.theme.light': '浅色',
   'calib.tab.z': 'Z 校准',
@@ -525,6 +551,8 @@ export const zhCN = {
   'calib.original': '原 {value}',
 
   /* 参数页（2026-10-26） */
+
+  // ---- 参数页 ----
   'params.presetList': '预设列表',
   'params.historyDrawer': '修改历史',
   'params.loadingPack': '正在打开数据包…',
@@ -620,6 +648,8 @@ export const zhCN = {
   'params.picker.use': '使用',
 
   /* 预设页（2026-10-26） */
+
+  // ---- 预设页（含对比台 / 编辑模式） ----
   'presets.filter.all': '全部',
   'presets.filter.allMachines': '全部机型',
   'presets.filter.machines': '{count} 台',
@@ -678,6 +708,12 @@ export const zhCN = {
   'presets.cmp.na': '不适用',
   'presets.cmp.empty': '（空）',
   'presets.cmp.adopt': '采用此值',
+  'presets.cmp.differs': '差异',
+  'presets.cmp.same': '一致',
+  'presets.cmp.closeClean': '关掉对比台',
+  'presets.cmp.closeDirty': '关掉会丢掉未保存的改动 —— 先保存',
+
+  // ---- 参数页（续） ----
   'params.history.revert': '还原',
   'params.history.title': '修改历史',
   'params.history.subtitle': '{file} 的改动记录（一直留着）',
@@ -694,6 +730,8 @@ export const zhCN = {
   'params.history.count': '{count} 条',
 
   /* 报告页（2026-10-26） */
+
+  // ---- 报告页 ----
   'report.aria.page': '执行报告',
   'report.head.sub': '后处理每跑一次（切片器导出时按「复制后处理脚本」那条命令跑），这里多一条记录。',
   'report.action.export': '导出',
@@ -895,6 +933,8 @@ export const zhCN = {
   'report.export.change': '更改位置',
 
   /* 预设页 PagePresets */
+
+  // ---- 预设页（含对比台 / 编辑模式）（续） ----
   'presets.page.searchPlaceholder': '搜索文件…',
   'presets.page.revealMac': '在访达中显示',
   'presets.page.revealWindows': '显示所在文件夹',
@@ -1104,6 +1144,8 @@ export const zhCN = {
   'presets.table.combo.placeholder': '选择或自己填',
 
   /* 后处理那一屏（进度 / 问句 / 结果）与标题栏胶囊（2026-10-26） */
+
+  // ---- 后处理（通知与开发台） ----
   'postproc.eta.sec': '预计还需 {n} 秒',
   'postproc.eta.minSec': '预计还需 {m} 分 {s} 秒',
   'postproc.facts.baseTitle': '机型与切片基础',
@@ -1168,6 +1210,8 @@ export const zhCN = {
   'postproc.chip.notOkAria': '后处理没成：{message}，点击看详情',
 
   /* 引导（重切片提示 / 图片引导 / 屏幕引导卡）（2026-10-26） */
+
+  // ---- 引导 ----
   'guide.savedTitle': '参数已保存',
   'guide.savedSubtitle': '切片器不会自己知道参数变了 —— 重新切片后才生效',
   'guide.closeTitle': '关闭（以后是否再提示，看下面的「不再显示」或设置页）',
@@ -1191,6 +1235,8 @@ export const zhCN = {
     '切片结果的有效性 = PartPlate::m_slice_result_valid（切片器进程内存里的状态，不在盘上）',
 
   /* 字段共用件（数字 / 文本输入）（2026-10-26） */
+
+  // ---- 参数页（字段控件） ----
   'field.emptyValue': '空',
   'field.hint.empty': '数值不能为空',
   'field.hint.notNumber': '不是有效的数字',
@@ -1203,16 +1249,26 @@ export const zhCN = {
   'field.dec': '减少',
 
   /* 打开模型的切片器选择行（2026-10-26） */
+
+  // ---- 切片器 ----
   'slicer.pickLabel': '用哪个打开',
   'slicer.onceNote': '仅这一次用选定的（默认不写回设置）',
 
   /* 通用右键菜单 / 放大层（2026-10-26） */
+
+  // ---- 外壳与页签 ----
   'menu.noActions': '这一行没有可用的操作',
+
+  // ---- 外壳与页签 ----
   'zoom.closeDefault': '收起放大视图',
   'zoom.hintDefault': '拖动挪位置 · 滚轮 / 捏合缩放 · 点任意处或 Esc 收起',
 
   /* 预设页词表（2026-10-26 第二刀：presetTree.ts 整文件全量迁，中文原文逐字搬） */
+
+  // ---- 通用（续） ----
   'common.clauseSep': '；',
+
+  // ---- 预设页（含对比台 / 编辑模式）（续） ----
   'presets.cmp.title': '参数对比',
   'presets.cmp.subtitleEditing': '正在编辑 —— 改完按「保存」写回各自那份文件',
   'presets.cmp.subtitleReadonly': '并排看 2~3 份（只读）；要改值点右下「进入编辑模式」',
@@ -1343,6 +1399,8 @@ export const zhCN = {
   'presets.edit.localCopy.cell': '复制',
 
   /* 后处理 12 步的显示名（steps.ts；报告页那一套另有 report.step.*，不合并） */
+
+  // ---- 后处理（通知与开发台）（续） ----
   'postproc.steps.input': '读输入',
   'postproc.steps.config': '读预设',
   'postproc.steps.machineDetect': '认机型',
@@ -1357,6 +1415,8 @@ export const zhCN = {
   'postproc.steps.printtime': '估算打印时间',
 
   /* 切片器那四档（设置页下拉 / 打开模型框共用） */
+
+  // ---- 切片器（续） ----
   'slicer.choices.system.label': '跟随系统默认',
   'slicer.choices.system.hint': '用 .3mf 关联的程序打开（没选过时就是这个）',
   'slicer.choices.bambu.label': 'Bambu Studio',
@@ -1367,6 +1427,8 @@ export const zhCN = {
   'slicer.systemLine': '用 .3mf 关联的程序打开：{name}',
 
   /* 下载水位与逐份结局（shared/download.ts） */
+
+  // ---- 下载与资源 ----
   'download.tick.connecting': '{name}：正在连接数据源',
   'download.tick.transferringPct': '{name}：已收 {pct}%（{received} / {total} 字节）',
   'download.tick.transferringBytes': '{name}：已收 {received} 字节',
@@ -1375,12 +1437,19 @@ export const zhCN = {
   'download.tick.failedWhy': '{name}：没成 —— {message}',
   'download.outcome.failed': '{name}：没成，原因没说清',
   'download.outcome.failedWhy': '{name}：{message}',
+
+  // ---- 通用（续） ----
   'common.close': '关闭',
   'common.dismiss': '关闭这条提示',
+  'common.emptyShort': '空',
   'common.cancel': '取消',
   'common.save': '保存',
+
+  // ---- 诊断 ----
   'trace.copy': '点击复制 traceId（查日志用）',
   'trace.copied': '已复制',
+
+  // ---- 工艺页（BBS）（续） ----
   'bbs.tabs.aria': '参数分页',
   'bbs.tabs.title': '{title} · {rows} 行',
   'bbs.tabs.titleHit': '{title} · {rows} 行 · 命中 {hits}',
@@ -1396,6 +1465,8 @@ export const zhCN = {
   'bbs.emptyScope': '这一档下没有可显示的参数。切回「{all}」看看。',
   'bbs.rail.searchLine': '搜「{query}」· 命中 {hits} 项（这一页 {page}）',
   'bbs.rail.hiddenHitsLine': '另有 {count} 个命中在「{same}」收起的行里，切到「{all}」能看到',
+
+  // ---- 校准页（续） ----
   'calib.unsavedTitle': '有未保存的改动',
   'calib.leaveDiscard': '不保存并离开',
   'calib.leaveSave': '保存并离开',
@@ -1409,6 +1480,8 @@ export const zhCN = {
   'calib.cache.ready': '{label} · 本机已有缓存（{size}），可以直接打开',
   'calib.cache.none': '{label} · 本机还没有缓存文件，「{fetch}」会先取回再打开（请耐心等待 3mf 打开）',
   'calib.cache.sizeUnknown': '大小未知',
+
+  // ---- 参数页（续） ----
   'params.modal.title': '修改参数',
   'params.modal.closeTitle': '关掉（没保存的改动还在草稿里，回来接着改）',
   'params.historyDrawerCollapse': '收起修改历史',
@@ -1531,6 +1604,57 @@ export const zhCN = {
   'params.row.useMineTitle': '把这一项退回你原来的 {value}',
   'params.row.useMineValue': '值',
   'params.row.useMine': '用回我的值',
+
+  // ---- 工艺页（BBS）（续） ----
+  'bbs.group.mkp': 'MKP 工艺',
+  'bbs.group.imported': '导入的',
+  'bbs.group.user': '用户配置',
+  'bbs.group.system': '系统配置',
+  'bbs.group.other': '其他机型 / 读不了的',
+  'bbs.panel.orphans': '未在面板上的参数（{count}）',
+  'bbs.reason.notDownloaded': '还没下载',
+  'bbs.reason.broken': '文件解析失败：{error}',
+  'bbs.reason.abstract': '继承链中间层',
+  'bbs.reason.otherTarget': '属于 {printer} · {nozzle}',
+  'bbs.target.allNozzles': '{printer}（全部喷嘴）',
+  'bbs.row.empty': '（空）',
+  'bbs.row.on': '开',
+  'bbs.row.off': '关',
+  'bbs.search.clearAria': '清空{label}',
+  'bbs.support.normalAuto': '普通(自动)',
+  'bbs.support.treeAuto': '树状(自动)',
+  'bbs.support.normalManual': '普通(手动)',
+  'bbs.support.treeManual': '树状(手动)',
+  'bbs.support.badStyle': '支撑样式「{bad}」在「{parent}」下不存在，已按 BBS 的做法改回「默认」',
+  'bbs.drawer.kind.presets': '预设列表',
+  'bbs.rail.kind.detail': '详情栏',
+  'bbs.reason.notSelectable': '不可选',
+  'bbs.preset.readFailed': '读「{name}」失败',
+  'bbs.note.parentMissing': '父预设「{name}」不在清单里：基准只剩出厂默认，改动判定会偏松',
+  'bbs.note.chainLoop': '继承链里有环，已截断',
+  'bbs.note.variantMissing': '变体「{want}」没在系统预设里登记（登记的是 {list}），按第 1 个变体比对',
+  'bbs.note.fewParams': '只识别到 {count} 个工艺参数，确认这是一份工艺预设？',
+  'bbs.note.unknownKeys': '有 {count} 项参数表里没登记（新版 BBS 加的？）',
+  'bbs.note.extruders': '这份预设有 {count} 个挤出头，当前显示第 {index} 个',
+  'bbs.note.droppedEdits': '丢弃了上一份预设里 {count} 处未还原的改动',
+  'bbs.import.notObject': '{file}：顶层不是一个 JSON 对象，整份拒绝',
+  'bbs.import.noProcessParams': '{file}：没有可识别的工艺参数（可能是机器或耗材预设），整份拒绝',
+  'bbs.delivered.failed': '产品资源区读不出来',
+  'bbs.data.notJson': '{path} 返回的不是 JSON（content-type: {type}），大概是路径对不上被回退成了页面',
+  'bbs.data.noBody': '这一份不带正文：{scope} / {file}',
+  'bbs.data.missingMeta': '没读到 public/bbs 下的 BBS 元数据（{error}）：那四份 json（registry / layout / defaults / icons）随本仓分发，少了说明产物不全，见 public/bbs/PROVENANCE.md。',
+  'bbs.data.liveFailed': '读本机 BBS 目录失败：{error}',
+  'bbs.data.noDir': '读不到本机 BBS 目录',
+
+  // ---- 后处理（通知与开发台） ----
+  'copyScript.noTarget.title': '复制不了',
+  'copyScript.noTarget.text': '先下载并应用一份预设，才有可复制的脚本',
+  'copyScript.failed.title': '复制失败',
+  'copyScript.notReady': '这条命令现在还抄不了',
+  'copyScript.ok.title': '已复制后处理脚本',
+  'copyScript.ok.text': '去切片器的后处理栏粘贴',
+  'copyScript.ok.textNamed': '{name} —— 去切片器的后处理栏粘贴',
+  'common.copied': '已复制',
 } as const
 
 /** 全部键（`en.ts` 用 `Record<StringKey, string>` 钉住，漏一条编译期就红） */

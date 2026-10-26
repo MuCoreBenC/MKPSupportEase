@@ -15,6 +15,8 @@
 import type { StringKey } from './zh-CN'
 
 export const en: Record<StringKey, string> = {
+
+  // ---- 工艺页（BBS） ----
   'bbs.gadgets.pin.off': 'Off',
   'bbs.gadgets.pin.page': 'This page',
   'bbs.gadgets.pin.always': 'Always',
@@ -34,6 +36,8 @@ export const en: Record<StringKey, string> = {
   'bbs.gadgets.pin.failed': 'Couldn’t change the pin level',
   'bbs.gadgets.compact.failed': 'Couldn’t resize the window',
 
+
+  // ---- 设置页 ----
   'settings.appearance.title': 'Appearance',
   'settings.locale.label': 'Interface language',
   'settings.locale.note': 'Applies immediately and is saved — this is the language next time.',
@@ -45,6 +49,8 @@ export const en: Record<StringKey, string> = {
   'settings.locale.enHint': 'English interface',
   'settings.locale.failed': 'Couldn’t switch: {detail}',
 
+
+  // ---- 外壳与页签 ----
   'tabs.home': 'Home',
   'tabs.presets': 'Presets',
   'tabs.calib': 'Calibration',
@@ -57,10 +63,16 @@ export const en: Record<StringKey, string> = {
   'tabs.max': 'Maximize',
   'tabs.restore': 'Restore',
   'tabs.close': 'Close',
+
+  // ---- 外壳 ----
   'app.loading': 'Page loading',
+
+  // ---- 通用 ----
   'common.loading': 'Loading…',
   'common.danger': 'Risky operation',
 
+
+  // ---- 设置页（续） ----
   'settings.title': 'Settings',
   'settings.subtitle': 'Software updates and app settings.',
   'settings.theme.label': 'Theme',
@@ -231,6 +243,8 @@ export const en: Record<StringKey, string> = {
   'settings.guide.step2': 'Click “Change All…”',
   'settings.guide.step2Note': 'From then on every .3mf goes to that app; without it only this one file changes',
 
+
+  // ---- 首页 ----
   'home.picker.list': 'Preset list',
   'home.action.applying': 'Using…',
   'home.action.inUse': 'In use',
@@ -300,12 +314,16 @@ export const en: Record<StringKey, string> = {
   'home.modal.otherPreset': 'another preset',
   'home.modal.presetAskNote': 'After switching to {name}, the offset drafts made on this page are discarded — they are deltas against the previous preset, so a new baseline makes them meaningless.',
 
+
+  // ---- 校准页 ----
   'calib.axis.x': 'X offset',
   'calib.axis.y': 'Y offset',
   'calib.axis.z': 'Z offset',
   'calib.z.legend': '← raise the pen ｜ lower the pen →',
   'calib.z.tip': 'If nothing seems to get glued during calibration → click the rightmost cell (-0.5, lower the pen), or make the Z value above a little smaller by hand',
 
+
+  // ---- 首页（续） ----
   'home.picker.brand': 'Brand',
   'home.picker.model': 'Machine',
   'home.picker.modelHint': 'Sets the calibration plate size',
@@ -343,6 +361,8 @@ export const en: Record<StringKey, string> = {
   'home.guide.step5Hint': 'Print one to confirm the final result',
   'home.guide.noMachine': 'No machine selected yet',
 
+
+  // ---- 关于与更新 ----
   'update.ready': 'Ready to install',
   'update.failed': 'Failed',
   'update.pause': 'Pause',
@@ -361,6 +381,8 @@ export const en: Record<StringKey, string> = {
   'update.downloadFailed': 'Download failed: {detail}',
   'update.cancelled': 'Cancelled.',
 
+
+  // ---- 导入 ----
   'import.bad': 'Import: some didn’t make it',
   'import.done': 'Import complete',
   'import.ok': 'Got it',
@@ -388,6 +410,8 @@ export const en: Record<StringKey, string> = {
   'import.newNameAria': 'New file name: {name}',
   'import.nameRule': 'Names follow the same rules as renaming: not empty, no path, keep the extension; then click “Continue import”.',
 
+
+  // ---- 工艺页（BBS）（续） ----
   'bbs.rulesNote': '{rules} conditional visibility rules covering {keys} parameters (ported from toggle_print_fff_options in ConfigManipulation.cpp)',
   'bbs.presetListTitle': 'Preset list: process presets in this machine’s BBS',
   'bbs.presetList': 'Preset list',
@@ -465,6 +489,8 @@ export const en: Record<StringKey, string> = {
   'bbs.drawer.tagNotDownloaded': 'Not downloaded',
   'bbs.drawer.tagOurs': 'From us',
 
+
+  // ---- 校准页（续） ----
   'calib.theme.dark': 'Dark',
   'calib.theme.light': 'Light',
   'calib.tab.z': 'Z calibration',
@@ -496,6 +522,8 @@ export const en: Record<StringKey, string> = {
   'calib.hit.xyY': 'Vertical {delta} mm',
   'calib.original': 'was {value}',
 
+
+  // ---- 参数页 ----
   'params.presetList': 'Preset list',
   'params.historyDrawer': 'Change history',
   'params.loadingPack': 'Opening the data pack…',
@@ -590,6 +618,8 @@ export const en: Record<StringKey, string> = {
   'params.picker.inUse': 'In use',
   'params.picker.use': 'Use',
 
+
+  // ---- 预设页（含对比台 / 编辑模式） ----
   'presets.filter.all': 'All',
   'presets.filter.allMachines': 'All machines',
   'presets.filter.machines': '{count} machines',
@@ -648,6 +678,12 @@ export const en: Record<StringKey, string> = {
   'presets.cmp.na': 'n/a',
   'presets.cmp.empty': '(empty)',
   'presets.cmp.adopt': 'Use this value',
+  'presets.cmp.differs': 'Differs',
+  'presets.cmp.same': 'Same',
+  'presets.cmp.closeClean': 'Close the comparison',
+  'presets.cmp.closeDirty': 'Closing drops the unsaved changes — save first',
+
+  // ---- 参数页（续） ----
   'params.history.revert': 'Restore',
   'params.history.title': 'Change history',
   'params.history.subtitle': 'Change log for {file} (kept forever)',
@@ -663,6 +699,8 @@ export const en: Record<StringKey, string> = {
   'params.history.emptyNet': 'Everything was changed back — no net change by save batch',
   'params.history.count': '{count} entries',
 
+
+  // ---- 报告页 ----
   'report.aria.page': 'Print report',
   'report.head.sub':
     'Every post-process run (triggered by the slicer via “Copy post-process script”) adds one record here.',
@@ -866,6 +904,8 @@ export const en: Record<StringKey, string> = {
   'report.export.change': 'Change location',
 
   /* Presets page (PagePresets) */
+
+  // ---- 预设页（含对比台 / 编辑模式）（续） ----
   'presets.page.searchPlaceholder': 'Search files…',
   'presets.page.revealMac': 'Show in Finder',
   'presets.page.revealWindows': 'Show containing folder',
@@ -1074,6 +1114,8 @@ export const en: Record<StringKey, string> = {
   'presets.table.combo.empty': 'No options — you can type freely',
   'presets.table.combo.placeholder': 'Pick or type your own',
 
+
+  // ---- 后处理（通知与开发台） ----
   'postproc.eta.sec': '{n}s remaining',
   'postproc.eta.minSec': '{m}m {s}s remaining',
   'postproc.facts.baseTitle': 'Machine & slicing basics',
@@ -1137,6 +1179,8 @@ export const en: Record<StringKey, string> = {
   'postproc.chip.okAria': 'Post-processing done: {message}, click for details',
   'postproc.chip.notOkAria': 'Post-processing failed: {message}, click for details',
 
+
+  // ---- 引导 ----
   'guide.savedTitle': 'Parameters saved',
   'guide.savedSubtitle':
     'The slicer won’t notice the change on its own — slice again for it to take effect',
@@ -1162,6 +1206,8 @@ export const en: Record<StringKey, string> = {
   'guide.card.leadTitle':
     'Slice validity = PartPlate::m_slice_result_valid (in the slicer’s memory, not on disk)',
 
+
+  // ---- 参数页（字段控件） ----
   'field.emptyValue': 'Empty',
   'field.hint.empty': 'The value can’t be empty',
   'field.hint.notNumber': 'Not a valid number',
@@ -1173,14 +1219,24 @@ export const en: Record<StringKey, string> = {
   'field.inc': 'Increase',
   'field.dec': 'Decrease',
 
+
+  // ---- 切片器 ----
   'slicer.pickLabel': 'Open with',
   'slicer.onceNote': 'This time only (won’t become the default)',
 
+
+  // ---- 外壳与页签 ----
   'menu.noActions': 'No available actions on this row',
+
+  // ---- 外壳与页签 ----
   'zoom.closeDefault': 'Close zoomed view',
   'zoom.hintDefault': 'Drag to move · scroll or pinch to zoom · click anywhere or press Esc to close',
 
+
+  // ---- 通用（续） ----
   'common.clauseSep': '; ',
+
+  // ---- 预设页（含对比台 / 编辑模式）（续） ----
   'presets.cmp.title': 'Compare parameters',
   'presets.cmp.subtitleEditing': 'Editing — press “Save” to write each change back to its own file',
   'presets.cmp.subtitleReadonly': 'View 2–3 side by side (read-only); to change values, click “Enter edit mode” at the bottom right',
@@ -1309,6 +1365,8 @@ export const en: Record<StringKey, string> = {
   'presets.edit.params.why': 'Edit this preset’s parameters (opens the parameter table — the Parameters page itself); to edit the TOML text, use “Edit file” in the right-click menu',
   'presets.edit.localCopy.cell': 'Copy',
 
+
+  // ---- 后处理（通知与开发台）（续） ----
   'postproc.steps.input': 'Read input',
   'postproc.steps.config': 'Read preset',
   'postproc.steps.machineDetect': 'Detect machine',
@@ -1322,6 +1380,8 @@ export const en: Record<StringKey, string> = {
   'postproc.steps.write': 'Write file',
   'postproc.steps.printtime': 'Estimate print time',
 
+
+  // ---- 切片器（续） ----
   'slicer.choices.system.label': 'Follow the system default',
   'slicer.choices.system.hint': 'Open with the app associated with .3mf (this is the setting until you pick one)',
   'slicer.choices.bambu.label': 'Bambu Studio',
@@ -1331,6 +1391,8 @@ export const en: Record<StringKey, string> = {
   'slicer.customNote': 'you picked it',
   'slicer.systemLine': 'Open with the app associated with .3mf: {name}',
 
+
+  // ---- 下载与资源 ----
   'download.tick.connecting': '{name}: connecting to the source',
   'download.tick.transferringPct': '{name}: {pct}% received ({received} / {total} bytes)',
   'download.tick.transferringBytes': '{name}: {received} bytes received',
@@ -1339,12 +1401,19 @@ export const en: Record<StringKey, string> = {
   'download.tick.failedWhy': '{name}: failed — {message}',
   'download.outcome.failed': '{name}: failed, no reason given',
   'download.outcome.failedWhy': '{name}: {message}',
+
+  // ---- 通用（续） ----
   'common.close': 'Close',
   'common.dismiss': 'Dismiss this message',
+  'common.emptyShort': 'empty',
   'common.cancel': 'Cancel',
   'common.save': 'Save',
+
+  // ---- 诊断 ----
   'trace.copy': 'Click to copy the traceId (for log lookup)',
   'trace.copied': 'Copied',
+
+  // ---- 工艺页（BBS）（续） ----
   'bbs.tabs.aria': 'Parameter pages',
   'bbs.tabs.title': '{title} · {rows} rows',
   'bbs.tabs.titleHit': '{title} · {rows} rows · {hits} matches',
@@ -1360,6 +1429,8 @@ export const en: Record<StringKey, string> = {
   'bbs.emptyScope': 'No parameters to show in this view. Switch back to “{all}”.',
   'bbs.rail.searchLine': 'Search “{query}” · {hits} matches ({page} on this page)',
   'bbs.rail.hiddenHitsLine': '{count} more matches are in the rows collapsed by “{same}” — switch to “{all}” to see them',
+
+  // ---- 校准页（续） ----
   'calib.unsavedTitle': 'Unsaved changes',
   'calib.leaveDiscard': 'Leave without saving',
   'calib.leaveSave': 'Save and leave',
@@ -1373,6 +1444,8 @@ export const en: Record<StringKey, string> = {
   'calib.cache.ready': '{label} · cached locally ({size}) — ready to open',
   'calib.cache.none': '{label} · not cached yet — “{fetch}” downloads it first, then opens (the 3mf may take a while)',
   'calib.cache.sizeUnknown': 'size unknown',
+
+  // ---- 参数页（续） ----
   'params.modal.title': 'Edit parameters',
   'params.modal.closeTitle': 'Close (unsaved changes stay in the draft — come back to finish)',
   'params.historyDrawerCollapse': 'Collapse change history',
@@ -1495,4 +1568,55 @@ export const en: Record<StringKey, string> = {
   'params.row.useMineTitle': 'Put this item back to your own {value}',
   'params.row.useMineValue': 'value',
   'params.row.useMine': 'Use my value',
+
+  // ---- 工艺页（BBS）（续） ----
+  'bbs.group.mkp': 'MKP process',
+  'bbs.group.imported': 'Imported',
+  'bbs.group.user': 'User presets',
+  'bbs.group.system': 'System presets',
+  'bbs.group.other': 'Other machines / unreadable',
+  'bbs.panel.orphans': 'Parameters not on the panel ({count})',
+  'bbs.reason.notDownloaded': 'Not downloaded',
+  'bbs.reason.broken': 'Could not parse the file: {error}',
+  'bbs.reason.abstract': 'Inheritance intermediate',
+  'bbs.reason.otherTarget': 'Belongs to {printer} · {nozzle}',
+  'bbs.target.allNozzles': '{printer} (all nozzles)',
+  'bbs.row.empty': '(empty)',
+  'bbs.row.on': 'On',
+  'bbs.row.off': 'Off',
+  'bbs.search.clearAria': 'Clear {label}',
+  'bbs.support.normalAuto': 'Normal (auto)',
+  'bbs.support.treeAuto': 'Tree (auto)',
+  'bbs.support.normalManual': 'Normal (manual)',
+  'bbs.support.treeManual': 'Tree (manual)',
+  'bbs.support.badStyle': 'Support style “{bad}” does not exist under “{parent}” — reverted to “Default” the way Bambu Studio does',
+  'bbs.drawer.kind.presets': 'Preset list',
+  'bbs.rail.kind.detail': 'Details',
+  'bbs.reason.notSelectable': 'Not selectable',
+  'bbs.preset.readFailed': 'Could not read “{name}”',
+  'bbs.note.parentMissing': 'Parent preset “{name}” is not in the list — the baseline falls back to factory defaults, so change detection is looser',
+  'bbs.note.chainLoop': 'The inheritance chain has a cycle; truncated',
+  'bbs.note.variantMissing': 'Variant “{want}” is not registered in the system preset (registered: {list}); comparing against the first variant',
+  'bbs.note.fewParams': 'Only {count} process parameters recognised — is this really a process preset?',
+  'bbs.note.unknownKeys': '{count} parameters are not in the registry (added by a newer Bambu Studio?)',
+  'bbs.note.extruders': 'This preset has {count} extruders; showing #{index}',
+  'bbs.note.droppedEdits': 'Discarded {count} unrestored changes from the previous preset',
+  'bbs.import.notObject': '{file}: the top level is not a JSON object — rejected',
+  'bbs.import.noProcessParams': '{file}: no recognisable process parameters (maybe a machine or filament preset) — rejected',
+  'bbs.delivered.failed': 'Could not read the product assets area',
+  'bbs.data.notJson': '{path} did not return JSON (content-type: {type}) — the path probably fell back to a page',
+  'bbs.data.noBody': 'This one has no body: {scope} / {file}',
+  'bbs.data.missingMeta': 'Could not read the BBS metadata under public/bbs ({error}). The four JSON files (registry / layout / defaults / icons) ship with this repo; if they are missing the build is incomplete — see public/bbs/PROVENANCE.md.',
+  'bbs.data.liveFailed': 'Could not read the local Bambu Studio folder: {error}',
+  'bbs.data.noDir': 'Could not find the local Bambu Studio folder',
+
+  // ---- 后处理（通知与开发台） ----
+  'copyScript.noTarget.title': 'Cannot copy',
+  'copyScript.noTarget.text': 'Download and apply a preset first — only then is there a script to copy',
+  'copyScript.failed.title': 'Copy failed',
+  'copyScript.notReady': 'This command cannot be copied yet',
+  'copyScript.ok.title': 'Post-processing script copied',
+  'copyScript.ok.text': 'Paste it into the slicer post-processing field',
+  'copyScript.ok.textNamed': '{name} — paste it into the slicer post-processing field',
+  'common.copied': 'Copied',
 }

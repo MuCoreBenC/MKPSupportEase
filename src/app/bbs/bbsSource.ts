@@ -21,6 +21,7 @@
  * 往上走，落到系统预设那一层，名字里才有 @BBL。再不行才退 compatible_printers 原文。
  */
 
+import type { StringKey, Tr } from '../../i18n'
 import type {
   BbsListEntry,
   BbsListRaw,
@@ -31,17 +32,31 @@ import type {
   BbsValue,
 } from './bbsTypes'
 
-export const GROUP_IMPORTED = '导入的'
-export const GROUP_USER = '用户配置'
-export const GROUP_SYSTEM = '系统配置'
+/**
+ * 「这一份为什么灰着」的那句话。
+ *
+ * 数据层只留**事实与键**（`reasonKey` + `reasonArgs`），取字在这里 —— 模块级函数
+ * 拿不到 hook，也不该把某一刻的语言冻进数据里。
+ */
+export function reasonText(
+  it: { reason?: string | null; reasonKey?: StringKey; reasonArgs?: Record<string, string> },
+  tr: Tr,
+): string {
+  if (it.reasonKey !== undefined) return tr(it.reasonKey, it.reasonArgs)
+  return it.reason ?? ''
+}
+
+export const GROUP_IMPORTED: StringKey = 'bbs.group.imported'
+export const GROUP_USER: StringKey = 'bbs.group.user'
+export const GROUP_SYSTEM: StringKey = 'bbs.group.system'
 /* BBS 那一组叫「不支持的配置」（.po 里 Unsupported presets）。这一页语义稍宽：
    坏文件 + 别的机型的用户预设都落这里，所以叫「其他机型 / 读不了的」更准。 */
-export const GROUP_OTHER = '其他机型 / 读不了的'
+export const GROUP_OTHER: StringKey = 'bbs.group.other'
 /* 我们自己的那一组（2026-10-13）：预设页「切片器配置」下载到本机的那几份
    `MKPProcess …json`。它排在最前 —— 这一页默认先给你看我们发的东西。
    组名与抽屉那颗胶囊（「MKP 工艺」）用同一个词：作者定名时特意避开"预设"二字
    （会跟 MKP 自己那份 toml 预设混起来），也避开"BBS"（内部黑话）。 */
-export const GROUP_MKP = 'MKP 工艺'
+export const GROUP_MKP: StringKey = 'bbs.group.mkp'
 export const MODEL_ALL = 'all'
 
 /**
@@ -213,9 +228,20 @@ export function normalizeList(
      *   于是灰着的那几份照样会被默认选中，右侧只剩出厂默认值。
      */
     it.selectable = it.notDownloaded ? false : (!it.broken && !it.isAbstract)
-    it.reason = it.notDownloaded
-      ? '还没下载'
-      : it.broken ? `文件解析失败：${it.broken}` : (it.isAbstract ? '继承链中间层' : null)
+    /* 事实进 `reason`（内部判定照旧读它），话术进 `reasonKey` —— 见 `reasonText` */
+    if (it.notDownloaded) {
+      it.reason = '还没下载'
+      it.reasonKey = 'bbs.reason.notDownloaded'
+    } else if (it.broken) {
+      it.reason = `文件解析失败：${it.broken}`
+      it.reasonKey = 'bbs.reason.broken'
+      it.reasonArgs = { error: it.broken }
+    } else if (it.isAbstract) {
+      it.reason = '继承链中间层'
+      it.reasonKey = 'bbs.reason.abstract'
+    } else {
+      it.reason = null
+    }
   }
   return raw
 }
@@ -327,6 +353,13 @@ export function groupsFor(
     disabled: !it.selectable && !it.notDownloaded,
     offModel: it.selectable && !wanted(it),
     reason: it.reason || (wanted(it) ? null : `属于 ${it.printer} · ${it.nozzle}`),
+    reasonKey: it.reasonKey
+      ?? (wanted(it) ? undefined : ('bbs.reason.otherTarget' as StringKey)),
+    reasonArgs: it.reasonKey !== undefined
+      ? it.reasonArgs
+      : wanted(it)
+        ? undefined
+        : { printer: it.printer, nozzle: it.nozzle },
     notDownloaded: Boolean(it.notDownloaded),
   })
 
@@ -356,10 +389,10 @@ export function groupsFor(
 
   const groups: BbsMenuGroup[] = []
   /* 我们自己那一组排最前 —— 这一页默认先给你看我们发的东西 */
-  if (mkpItems.length) groups.push({ title: GROUP_MKP, items: mkpItems })
-  if (importedItems.length) groups.push({ title: GROUP_IMPORTED, items: importedItems })
-  if (userItems.length) groups.push({ title: GROUP_USER, items: userItems })
-  if (systemItems.length) groups.push({ title: GROUP_SYSTEM, items: systemItems })
-  if (restItems.length) groups.push({ title: GROUP_OTHER, items: restItems, weak: true })
+  if (mkpItems.length) groups.push({ titleKey: GROUP_MKP, items: mkpItems })
+  if (importedItems.length) groups.push({ titleKey: GROUP_IMPORTED, items: importedItems })
+  if (userItems.length) groups.push({ titleKey: GROUP_USER, items: userItems })
+  if (systemItems.length) groups.push({ titleKey: GROUP_SYSTEM, items: systemItems })
+  if (restItems.length) groups.push({ titleKey: GROUP_OTHER, items: restItems, weak: true })
   return groups
 }

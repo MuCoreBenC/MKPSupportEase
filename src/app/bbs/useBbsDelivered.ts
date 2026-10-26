@@ -19,6 +19,7 @@
  * 而不是显示一个空列表让人以为产品本来就不带这个东西。
  */
 
+import { t } from '../../i18n'
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../api'
 import { useDeliveryRevision } from '../state/deliveryState'
@@ -94,7 +95,7 @@ export function useBbsDelivered(): BbsDelivered {
         setNote('')
       } catch (e) {
         if (!alive) return
-        setNote((e as { message?: string }).message ?? '产品资源区读不出来')
+        setNote((e as { message?: string }).message ?? t('bbs.delivered.failed'))
       }
     })()
     return () => {

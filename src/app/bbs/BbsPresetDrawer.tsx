@@ -18,7 +18,7 @@ import { useT } from '../../i18n'
 import Icon from '../../components/Icon'
 import { SelectField } from '../../components/field'
 import BbsSearchBox from './BbsSearchBox'
-import { MODEL_ALL, groupsFor, inPickSource, targetsOf } from './bbsSource'
+import { MODEL_ALL, groupsFor, inPickSource, reasonText, targetsOf } from './bbsSource'
 import type { BbsPickSource } from './bbsSource'
 import type { BbsDrawer } from './useBbsDrawer'
 import type { BbsPresetItem } from './bbsTypes'
@@ -300,9 +300,9 @@ export default function BbsPresetDrawer({
           </p>
         )}
         {groups.map((g) => (
-          <div key={g.title}>
+          <div key={g.titleKey}>
             <div className={s.group} data-weak={g.weak ? 'true' : undefined}>
-              {tr('bbs.drawer.group', { title: g.title, count: g.items.length })}
+              {tr('bbs.drawer.group', { title: tr(g.titleKey), count: g.items.length })}
             </div>
             {g.items.map((it) => (
               <button
@@ -315,7 +315,7 @@ export default function BbsPresetDrawer({
                 disabled={it.disabled}
                 title={
                   it.disabled
-                    ? (it.reason ?? '')
+                    ? reasonText(it, tr)
                     : it.notDownloaded
                       ? `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
                         + tr('bbs.drawer.needDownloadHint')

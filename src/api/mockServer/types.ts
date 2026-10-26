@@ -163,6 +163,8 @@ export interface RawParamLayout {
 export interface RawChoice {
   value: string
   label: string
+  /** 英文显示名（2026-10-26 双语注册表）。缺 = 界面回落 `label` */
+  labelEn?: string
   /** 选项级**全局**弃用（`wiping.outer_structure` 的 `sheath` = 护套） */
   deprecated?: boolean
   /** **只在这些机型上**弃用（逗号串，与 `deprecated` 叠加）；缺省 = 不按机型弃用 */
@@ -182,7 +184,11 @@ export interface RawShowWhen {
 export interface RawParam {
   key: string
   label: string
+  /** 英文显示名（缺 = 回落 `label`） */
+  labelEn?: string
   desc: string
+  /** 英文说明（缺 = 回落 `desc`） */
+  descEn?: string
   unit?: string
   tomlKey: string
   jsonKey: string
@@ -233,13 +239,19 @@ export interface RawParam {
 export interface RawRegistrySection {
   id: string
   label: string
+  /** 英文显示名（缺 = 回落 `label`） */
+  labelEn?: string
   description?: string
+  /** 英文说明（缺 = 回落 `description`） */
+  descriptionEn?: string
   order: number
 }
 
 export interface RawRegistryTab {
   id: string
   label: string
+  /** 英文显示名（缺 = 回落 `label`） */
+  labelEn?: string
   icon?: string
   order?: number
   sections?: RawRegistrySection[]

@@ -13,6 +13,8 @@
  *      BBS 也这么做；当前停的那页被隐藏就落到第一个还有内容的页
  */
 
+import type { Locale, Tr } from '../../i18n'
+import { bi } from '../shared/dataLabel'
 import { matchRow, normalizeQuery } from './bbsSearch'
 import type { BbsHit } from './bbsSearch'
 import type {
@@ -99,6 +101,9 @@ export function buildBbsPanel(
    * 空值不跳、显隐规则不套（规则判的是值，值都空着判出来没意义）。
    */
   skeleton = false,
+  /* 界面语言（页签名/分组名在 layout 里带 `name_en` 两册）与句子入口（孤儿组的组名是句子） */
+  tr: Tr,
+  locale: Locale,
 ): PanelResult {
   const bbsMode = viewMode === 'bbs'
   const q = normalizeQuery(rawQuery)
@@ -146,7 +151,9 @@ export function buildBbsPanel(
         rows.push({ key, meta, greyed, hit })
         stats.rows++
       }
-      if (rows.length) groups.push({ name: group.name, icon: group.icon, rows })
+      if (rows.length) {
+        groups.push({ name: bi(group.name, group.name_en, locale), icon: group.icon, rows })
+      }
     }
 
     /* 预设里有、版面里没有的 key 落到最后一页末尾。
@@ -156,7 +163,7 @@ export function buildBbsPanel(
       if (orphanKeys.length) {
         stats.orphans = orphanKeys.length
         groups.push({
-          name: `未在面板上的参数（${orphanKeys.length}）`,
+          name: tr('bbs.panel.orphans', { count: orphanKeys.length }),
           rows: orphanKeys.map((key) => {
             const meta = registry[key] ?? { label: { zh: key }, type: 'num' as const, unit: {} }
             const hit = hitOf(key, meta)
@@ -170,7 +177,7 @@ export function buildBbsPanel(
 
     return {
       id: TAB_ID[i] ?? `tab${i}`,
-      title: tab.name,
+      title: bi(tab.name, tab.name_en, locale),
       groups,
       rowCount: groups.reduce((n, g) => n + g.rows.length, 0),
       hitCount: groups.reduce((n, g) => n + g.rows.filter((r) => r.hit).length, 0),

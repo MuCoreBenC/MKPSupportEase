@@ -3227,3 +3227,63 @@ params = ["code", "detail"]
 text = "认不出的界面语言：{locale}（只能是 system / zh-CN / en）"
 text_en = "Unknown interface language: {locale} (must be system / zh-CN / en)"
 params = ["locale"]
+
+# ---- 提问模态框的按钮（2026-10-26）----
+# 按钮上的字也是「用户读到的一句话」：原先写在 `hook.rs` 的 `QuestionChoice` 里，
+# 英文界面下整颗按钮是中文。这里给码是为了排查时能从截图里那句话找到这一条。
+
+["hook.choice_tower_relocate"]
+code = "Q_TOWER_CHOICE_RELOCATE_001"
+text = "自动调整塔位置"
+text_en = "Adjust the tower position automatically"
+params = []
+note = "挪塔那一问的主按钮（摆得下才出现）"
+
+["hook.choice_tower_relocate_hint"]
+code = "Q_TOWER_CHOICE_RELOCATE_002"
+text = "只改这一趟，预设文件不动"
+text_en = "This run only — the preset file is untouched"
+params = []
+note = "上面那颗按钮的副标题：说清改动范围"
+
+["hook.choice_tower_model"]
+code = "Q_TOWER_CHOICE_MODEL_001"
+text = "停止并自己挪模型"
+text_en = "Stop and move the model myself"
+params = []
+note = "挪塔那一问的次按钮（一直都有）"
+
+["hook.choice_tower_model_hint"]
+code = "Q_TOWER_CHOICE_MODEL_002"
+text = "这一趟停下，原文件不动"
+text_en = "Stop this run — the original file is untouched"
+params = []
+note = "次按钮的副标题"
+
+["hook.choice_calib_print"]
+code = "Q_CALIB_CHOICE_PRINT_001"
+text = "先打印，再校准"
+text_en = "Print first, then calibrate"
+params = []
+note = "校准件那一问的主按钮"
+
+["hook.choice_calib_print_hint"]
+code = "Q_CALIB_CHOICE_PRINT_002"
+text = "打印件保留"
+text_en = "The print is kept"
+params = []
+note = "主按钮的副标题"
+
+["hook.choice_calib_direct"]
+code = "Q_CALIB_CHOICE_DIRECT_001"
+text = "直接校准"
+text_en = "Calibrate directly"
+params = []
+note = "校准件那一问的次按钮"
+
+["hook.choice_calib_direct_hint"]
+code = "Q_CALIB_CHOICE_DIRECT_002"
+text = "去掉打印件，只走校准路径"
+text_en = "Drop the print, run the calibration path only"
+params = []
+note = "次按钮的副标题"

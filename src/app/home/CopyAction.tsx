@@ -13,6 +13,7 @@
  *   Windows 用 Windows 的，同一份代码、各自的真值（没有写死的路径）。
  */
 
+import { t as i18nT, useT } from '../../i18n'
 import { useEffect, useRef, useState } from 'react'
 import { errorText } from '../../api'
 import type { PostProcessCommand } from '../../api'
@@ -43,6 +44,7 @@ interface CopyActionProps {
  * 后端说还不能给（或读取失败）→ **不复制**，把原因显示在按钮下面。
  */
 export default function CopyAction({ label, load, onNote }: CopyActionProps) {
+  const tr = useT()
   const [copied, setCopied] = useState(false)
   const [busy, setBusy] = useState(false)
   const timer = useRef<number | null>(null)
@@ -62,7 +64,7 @@ export default function CopyAction({ label, load, onNote }: CopyActionProps) {
       if (!cmd.ready || cmd.command === undefined) {
         setCopied(false)
         /* 抄不了：原因交给页面底部那颗气泡说（这里不摆任何常驻文案、也不占位） */
-        onNote(cmd.reason ?? '这条命令现在还抄不了')
+        onNote(cmd.reason ?? i18nT('copyScript.notReady'))
         return
       }
       await navigator.clipboard.writeText(cmd.command)
@@ -86,7 +88,7 @@ export default function CopyAction({ label, load, onNote }: CopyActionProps) {
           <svg className={s.tick} viewBox="0 0 12 12" width="11" height="11" aria-hidden="true">
             <path d="M2.2 6.6 5 9.4 9.8 3.2" pathLength={100} />
           </svg>
-          已复制
+          {tr('common.copied')}
         </span>
       </button>
     </div>

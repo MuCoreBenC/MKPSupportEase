@@ -34,6 +34,7 @@
  * 这个文件负责的是"什么时候要、要到了怎么进剪贴板、然后怎么告诉用户"。
  */
 
+import { t as i18nT } from '../../i18n'
 import { api, errorText } from '../../api'
 import type { PostProcessCommand } from '../../api'
 /* ★ 通知系统没有 index（`src/app/notify/notify.ts`），全站都按这个文件引 */
@@ -106,8 +107,8 @@ export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolea
   if (!named && (t.machineId === '' || t.versionId === '')) {
     notify({
       kind: 'warn',
-      title: '复制不了',
-      text: '先下载并应用一份预设，才有可复制的脚本',
+      title: i18nT('copyScript.noTarget.title'),
+      text: i18nT('copyScript.noTarget.text'),
       ttl: COPY_TTL_MS,
     })
     return false
@@ -118,15 +119,15 @@ export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolea
     cmd = await postProcessCommand(t.machineId, t.versionId, t.path)
   } catch (err: unknown) {
     /* 错误唯一入口是 `errorText`，不许静默"什么都没发生" */
-    notify({ kind: 'bad', title: '复制失败', text: errorText(err), ttl: COPY_TTL_MS })
+    notify({ kind: 'bad', title: i18nT('copyScript.failed.title'), text: errorText(err), ttl: COPY_TTL_MS })
     return false
   }
 
   if (!cmd.ready || cmd.command === undefined) {
     notify({
       kind: 'warn',
-      title: '复制不了',
-      text: cmd.reason ?? '这条命令现在还抄不了',
+      title: i18nT('copyScript.noTarget.title'),
+      text: cmd.reason ?? i18nT('copyScript.notReady'),
       ttl: COPY_TTL_MS,
     })
     return false
@@ -135,16 +136,18 @@ export async function copyPostProcessScript(t: CopyScriptTarget): Promise<boolea
   try {
     await navigator.clipboard.writeText(cmd.command)
   } catch (err: unknown) {
-    notify({ kind: 'bad', title: '复制失败', text: errorText(err), ttl: COPY_TTL_MS })
+    notify({ kind: 'bad', title: i18nT('copyScript.failed.title'), text: errorText(err), ttl: COPY_TTL_MS })
     return false
   }
 
   const name = t.fileName ?? (cmd.toml === undefined ? null : baseName(cmd.toml))
   notify({
     kind: 'ok',
-    title: '已复制后处理脚本',
+    title: i18nT('copyScript.ok.title'),
     /* 文件名在最前面 —— 一眼先看到"哪一份"，后半句才是"去哪儿粘" */
-    text: name === null ? '去切片器的后处理栏粘贴' : `${name} —— 去切片器的后处理栏粘贴`,
+    text: name === null
+      ? i18nT('copyScript.ok.text')
+      : i18nT('copyScript.ok.textNamed', { name }),
     ttl: COPY_TTL_MS,
   })
   return true

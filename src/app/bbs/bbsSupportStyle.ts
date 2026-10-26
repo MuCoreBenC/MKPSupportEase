@@ -14,6 +14,7 @@
  * registry.json 是上游提取器的产物、标了「别手改」，所以裁剪放在渲染层。
  */
 
+import type { StringKey, Tr } from '../../i18n'
 import { norm } from './bbsMerge'
 import type { BbsOpt, BbsParamMeta, BbsValues } from './bbsTypes'
 
@@ -54,15 +55,22 @@ export function illegalSupportStyle(values: BbsValues, variantIdx = 0): string |
   return supportStyleSet(values, variantIdx).includes(cur) ? null : cur
 }
 
-const SUPPORT_TYPE_ZH: Record<string, string> = {
-  'normal(auto)': '普通(自动)',
-  'tree(auto)': '树状(自动)',
-  'normal(manual)': '普通(手动)',
-  'tree(manual)': '树状(手动)',
+/** 支撑类型的四个档，键住字典（`bbs.support.*`）—— 不认识的档露原始值 */
+const SUPPORT_TYPE_KEY: Record<string, StringKey> = {
+  'normal(auto)': 'bbs.support.normalAuto',
+  'tree(auto)': 'bbs.support.treeAuto',
+  'normal(manual)': 'bbs.support.normalManual',
+  'tree(manual)': 'bbs.support.treeManual',
 }
 
 /** 状态条里那一句。`bad` 值是 illegalSupportStyle 返回的那个 */
-export function styleFixNote(bad: string, values: BbsValues, variantIdx = 0): string {
-  const t = String(norm(values.support_type, variantIdx) ?? '')
-  return `支撑样式「${bad}」在「${SUPPORT_TYPE_ZH[t] || t}」下不存在，已按 BBS 的做法改回「默认」`
+export function styleFixNote(
+  bad: string,
+  values: BbsValues,
+  variantIdx: number,
+  tr: Tr,
+): string {
+  const raw = String(norm(values.support_type, variantIdx) ?? '')
+  const key = SUPPORT_TYPE_KEY[raw]
+  return tr('bbs.support.badStyle', { bad, parent: key === undefined ? raw : tr(key) })
 }

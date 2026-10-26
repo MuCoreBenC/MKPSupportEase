@@ -20,6 +20,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useLocale, useT, type Locale } from '../../i18n'
 import BbsIcon from './BbsIcon'
 import { norm, truthy } from './bbsMerge'
 import { optsFor } from './bbsSupportStyle'
@@ -43,6 +44,22 @@ interface Props {
 
 const isLongText = (str: string) => str.length > 24 || str.includes('\n')
 
+/**
+ * 枚举值/输出值在这台机器上的说法。
+ *
+ * 上游给的是 `label_zh` + `label_en` 两册（拓竹原版就带），英文界面先读英文；
+ * 两册都空就露原始值 —— 那是个 enum 字符串，**不猜**。
+ */
+const optionText = (
+  o: { value?: string; label_zh?: string; label_en?: string },
+  locale: Locale,
+): string => {
+  const zh = o.label_zh ?? ''
+  const en = o.label_en ?? ''
+  if (locale === 'en') return en !== '' ? en : zh !== '' ? zh : o.value ?? ''
+  return zh !== '' ? zh : en !== '' ? en : o.value ?? ''
+}
+
 export default function BbsControl({
   paramKey,
   meta,
@@ -54,6 +71,9 @@ export default function BbsControl({
   readOnly,
   onChange,
 }: Props) {
+  /* 选项名是双语数据（`label_zh` / `label_en`）—— 按界面语言挑，写回去的仍是原始值的字符串 */
+  const locale = useLocale()
+  const tr = useT()
   const [open, setOpen] = useState(false)
   const boxRef = useRef<HTMLSpanElement>(null)
 
@@ -85,7 +105,7 @@ export default function BbsControl({
           className={cls}
           disabled={readOnly || greyed}
           aria-pressed={on}
-          aria-label={on ? '开' : '关'}
+          aria-label={on ? tr('bbs.row.on') : tr('bbs.row.off')}
           onClick={() => onChange(paramKey, on ? '0' : '1')}
         >
           <BbsIcon name={svg ? name : null} icons={icons} className={s.chkIco} />
@@ -98,8 +118,8 @@ export default function BbsControl({
   if (isLongText(text)) {
     return (
       <span className={s.val}>
-        <span className={s.textline} title={text}>
-          {text.split('\n')[0] || '（空）'}
+        <span className={s.textline}>
+          {text.split('\n')[0] || tr('bbs.row.empty')}
         </span>
       </span>
     )
@@ -116,7 +136,6 @@ export default function BbsControl({
         <button
           type="button"
           className={`${s.sel}${open ? ` ${s.selOpen}` : ''}`}
-          title={text}
           disabled={!canOpen}
           onClick={() => setOpen((v) => !v)}
         >
@@ -124,7 +143,7 @@ export default function BbsControl({
             ? <BbsIcon name={hit?.icon} icons={icons} className={s.eico} />
             : <BbsIcon name="drop_down" icons={icons} className={s.chev} fallback="∨" />}
           {/* 查不到就露原值，不猜 */}
-          <span className={s.selText}>{hit ? (hit.label_zh ?? hit.value) : text}</span>
+          <span className={s.selText}>{hit ? optionText(hit, locale) : text}</span>
         </button>
         {open && (
           <span className={s.menu} role="listbox">
@@ -145,7 +164,7 @@ export default function BbsControl({
                 {o.icon && icons[o.icon] && (
                   <BbsIcon name={o.icon} icons={icons} className={s.eico} />
                 )}
-                <span>{o.label_zh ?? o.value}</span>
+                <span>{optionText(o, locale)}</span>
               </button>
             ))}
           </span>

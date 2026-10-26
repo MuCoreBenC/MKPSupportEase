@@ -15,6 +15,7 @@
  * 只是那个按钮不要。
  */
 
+import { useT } from '../../i18n'
 import { useRef } from 'react'
 import s from './BbsSearchBox.module.css'
 
@@ -39,6 +40,7 @@ export default function BbsSearchBox({
   variant = 'fixed',
   onChange,
 }: Props) {
+  const tr = useT()
   const inputRef = useRef<HTMLInputElement>(null)
 
   const clear = () => {
@@ -64,7 +66,7 @@ export default function BbsSearchBox({
         }}
       />
       {value && (
-        <button type="button" className={s.clear} aria-label={`清空${label}`} onClick={clear}>
+        <button type="button" className={s.clear} aria-label={tr('bbs.search.clearAria', { label })} onClick={clear}>
           {/* 两条 1.2px 的圆头直线。颜色走 currentColor，由 CSS 给 */}
           <svg viewBox="0 0 12 12" aria-hidden="true">
             <path

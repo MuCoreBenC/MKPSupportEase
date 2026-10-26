@@ -1,3 +1,5 @@
+import type { StringKey } from '../../i18n'
+
 /*
  * BBS 那批 json 的类型。
  *
@@ -150,6 +152,9 @@ export interface BbsPresetItem {
   /** instantiation:"false" 的继承链中间层，BBS 下拉里也不列 */
   isAbstract: boolean
   selectable: boolean
+  /** 灰着的**字典键**与它的参数（见 `reasonText`）：数据层只说事实，取字在渲染处 */
+  reasonKey?: StringKey
+  reasonArgs?: Record<string, string>
   reason: string | null
   /**
    * **我们自己的那一份还没下载**（2026-10-13）：目录里登记着、盘上还没有。
@@ -185,10 +190,20 @@ export interface BbsMenuItem {
    * 所以它不走 `disabled`（那是"真点不动"），由抽屉另给一个动作。
    */
   notDownloaded: boolean
+  /**
+   * 「这一份为什么灰着 / 为什么不在这一档」的**字典键**（2026-10-26）。
+   * 数据层只说事实，取字在渲染处：这一层拿不到 `tr`，也不该拿。
+   */
+  reasonKey?: StringKey
+  reasonArgs?: Record<string, string>
 }
 
 export interface BbsMenuGroup {
-  title: string
+  /**
+   * 组名的**字典键**，不是字面量（2026-10-26）：组名是界面句子，随语言变。
+   * 数据侧只存键，取字在渲染处（`tr(titleKey)`）。
+   */
+  titleKey: StringKey
   items: BbsMenuItem[]
   weak?: boolean
 }

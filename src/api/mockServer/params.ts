@@ -32,11 +32,13 @@ const CONTROL: Record<string, RecipeParam['control']> = {
 
 const paramByKey = new Map(registry.params.map((p) => [p.key, p]))
 
-/** sectionId → 中文分组名 */
+/** sectionId → 中文分组名 / 英文分组名 */
 const sectionLabel = new Map<string, string>()
+const sectionLabelEn = new Map<string, string>()
 for (const tab of registry.tabs) {
   for (const s of tab.sections ?? []) {
     sectionLabel.set(s.id, s.label)
+    if (s.labelEn !== undefined) sectionLabelEn.set(s.id, s.labelEn)
   }
 }
 
@@ -92,14 +94,18 @@ function toRecipeParam(param: RawParam, machineId: string, versionId: string | n
     /* 与 `paramMeta()` 同源（注册表的 tomlKey）—— 形状与真后端 `RecipeParamDto` 一致 */
     tomlKey: param.tomlKey,
     label: param.label,
+    labelEn: param.labelEn,
     desc: param.desc,
+    descEn: param.descEn,
     group: sectionLabel.get(param.layout.sectionId) ?? param.layout.sectionId,
+    groupEn: sectionLabelEn.get(param.layout.sectionId),
     unit: param.unit,
     control: CONTROL[param.uiComponent] ?? 'text',
     /* 上游的 `deprecatedMachines` 是逗号串，契约那边是数组 —— 形状在这道口上换 */
     choices: param.choices?.map((c) => ({
       value: c.value,
       label: c.label,
+      labelEn: c.labelEn,
       deprecated: c.deprecated,
       deprecatedMachines: c.deprecatedMachines
         ?.split(',')
@@ -205,7 +211,9 @@ export function catalogRegistry(): CatalogRegistry {
       /* 定义侧的显示格子（2026-10-02，① deprecated 链路）：参数页的字段清单从这摊，
          弃用字段也在这里 —— 「显示，但只读」。 */
       label: p.label,
+      labelEn: p.labelEn,
       desc: p.desc,
+      descEn: p.descEn,
       unit: p.unit,
       uiComponent: p.uiComponent,
       valueType: VALUE_TYPES.has(p.valueType)
@@ -214,6 +222,7 @@ export function catalogRegistry(): CatalogRegistry {
       choices: (p.choices ?? []).map((c) => ({
         value: toText(c.value),
         label: c.label,
+        labelEn: c.labelEn,
         deprecated: c.deprecated === true ? true : undefined,
         deprecatedMachines: c.deprecatedMachines
           ?.split(',')
@@ -238,13 +247,16 @@ export function catalogRegistry(): CatalogRegistry {
     tabs: registry.tabs.map((t) => ({
       id: t.id,
       label: t.label,
+      labelEn: t.labelEn,
       order: t.order ?? Number.MAX_VALUE,
       icon: t.icon,
       sections: (t.sections ?? []).map((s) => ({
         id: s.id,
         label: s.label,
+        labelEn: s.labelEn,
         order: s.order,
         description: s.description,
+        descriptionEn: s.descriptionEn,
       })),
     })),
     layout: layout.tabs.map((t) => ({

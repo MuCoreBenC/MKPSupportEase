@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useT } from '../../i18n'
 import { mergeChain, norm, resolvePreset, variantIndex } from './bbsMerge'
 import type { VariantPick } from './bbsMerge'
 import { inPickSource } from './bbsSource'
@@ -135,6 +136,8 @@ export interface BbsPreset {
 }
 
 export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
+  /* 这一屏的句子入口：钩子里产出的提示也要随语言换 */
+  const tr = useT()
   const { presets, presetByName, registry, defaults, getDoc, loadDocs, docsVersion } = data
 
   const [currentKey, setCurrentKey] = useState<string | null>(null)
@@ -180,7 +183,9 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
   useEffect(() => {
     if (!current) return
     if (!current.selectable) {
-      setError(`${current.name}：${current.reason ?? '不可选'}`)
+      setError(current.reasonKey !== undefined
+        ? tr(current.reasonKey, current.reasonArgs)
+        : `${current.name}：${current.reason ?? tr('bbs.reason.notSelectable')}`)
       return
     }
     let alive = true
@@ -191,7 +196,7 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
       await loadDocs(Array.from(new Set([current.name, ...names])))
       if (!alive) return
       const doc = getDoc(current.name)
-      if (!doc) { setError(`读「${current.name}」失败`); return }
+      if (!doc) { setError(tr('bbs.preset.readFailed', { name: current.name })); return }
       setError('')
       setDropped(editedKeys.size)
       setBaseDoc(structuredClone(doc))
@@ -240,7 +245,7 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
     if (!isSystem && userDoc) {
       const bad = illegalSupportStyle(r.values, variant.index)
       if (bad) {
-        styleFix = styleFixNote(bad, r.values, variant.index)
+        styleFix = styleFixNote(bad, r.values, variant.index, tr)
         r = run({ ...userDoc, support_style: 'default' })
       }
     }
@@ -252,7 +257,7 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
     })
 
     return { ...r, chainTop, variant, toggles, styleFix }
-  }, [chain.names, getDoc, docsVersion, userDoc, defaults, registry, current])
+  }, [chain.names, getDoc, docsVersion, userDoc, defaults, registry, current, tr])
 
   const dirty = resolved.modifiedKeys.length > 0
 
@@ -261,30 +266,37 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
     /* 「读不到本机目录」不在这里说 —— 那时清单是空的、`current` 是 null，整块参数区都是空的，
        页面另有一块空态把理由说清楚（见 PageBbs）。在这儿再抄一遍只会重复。 */
     if (chain.missing.length) {
-      out.push(`父预设「${chain.missing[0]}」不在清单里：基准只剩出厂默认，改动判定会偏松`)
+      out.push(tr('bbs.note.parentMissing', { name: chain.missing[0] ?? '' }))
     }
-    if (chain.looped) out.push('继承链里有环，已截断')
+    if (chain.looped) out.push(tr('bbs.note.chainLoop'))
     if (resolved.variant.reason === 'not-listed') {
       out.push(
-        `变体「${resolved.variant.want}」没在系统预设里登记`
-        + `（登记的是 ${(resolved.variant.list ?? []).join(' / ')}），按第 1 个变体比对`,
+        tr('bbs.note.variantMissing', {
+          want: resolved.variant.want ?? '',
+          list: (resolved.variant.list ?? []).join(' / '),
+        }),
       )
     }
     const n = Object.keys(resolved.user).length
     if (current?.scope !== 'system' && n > 0 && n < 5) {
-      out.push(`只识别到 ${n} 个工艺参数，确认这是一份工艺预设？`)
+      out.push(tr('bbs.note.fewParams', { count: n }))
     }
     if (resolved.unknownKeys.length) {
-      out.push(`有 ${resolved.unknownKeys.length} 项参数表里没登记（新版 BBS 加的？）`)
+      out.push(tr('bbs.note.unknownKeys', { count: resolved.unknownKeys.length }))
     }
     const extruders = userDoc?.print_extruder_id
     if (Array.isArray(extruders) && extruders.length > 1) {
-      out.push(`这份预设有 ${extruders.length} 个挤出头，当前显示第 ${resolved.variant.index + 1} 个`)
+      out.push(
+        tr('bbs.note.extruders', {
+          count: extruders.length,
+          index: resolved.variant.index + 1,
+        }),
+      )
     }
-    if (dropped) out.push(`丢弃了上一份预设里 ${dropped} 处未还原的改动`)
+    if (dropped) out.push(tr('bbs.note.droppedEdits', { count: dropped }))
     if (resolved.styleFix) out.push(resolved.styleFix)
     return out.join(' · ')
-  }, [chain.missing, chain.looped, resolved, current, userDoc, dropped])
+  }, [chain.missing, chain.looped, resolved, current, userDoc, dropped, tr])
 
   const pick = useCallback((key: string) => {
     setCurrentKey(key)
@@ -375,18 +387,18 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
    */
   const importDoc = useCallback((fileName: string, doc: BbsPresetDoc) => {
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-      setImportError(`${fileName}：顶层不是一个 JSON 对象，整份拒绝`)
+      setImportError(tr('bbs.import.notObject', { file: fileName }))
       return
     }
     const probe = resolvePreset({ userDoc: doc, registry })
     if (Object.keys(probe.user).length === 0) {
-      setImportError(`${fileName}：没有可识别的工艺参数（可能是机器或耗材预设），整份拒绝`)
+      setImportError(tr('bbs.import.noProcessParams', { file: fileName }))
       return
     }
     setImportError('')
     const key = data.addImported(fileName, doc)
     setCurrentKey(key)
-  }, [registry, data])
+  }, [registry, data, tr])
 
   const title = useMemo(() => {
     const name = String(userDoc?.name ?? current?.name ?? '—')

@@ -233,7 +233,7 @@ export default function BbsRail({
 
         <dl className={s.kv}>
           <dt>{tr('bbs.version')}</dt>
-          <dd className={s.name} title={title}>{title}</dd>
+          <dd className={s.name}>{title}</dd>
 
           <dt>{tr('bbs.changed')}</dt>
           <dd>

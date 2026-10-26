@@ -9,7 +9,8 @@
  * 标签的 title 里带 key 与 mode：这一页是拿来对账的，看到一行想知道它在 json 里叫什么。
  */
 
-import { useT } from '../../i18n'
+import { useLocale, useT } from '../../i18n'
+import { localizeParamMeta } from '../shared/dataLabel'
 import BbsControl from './BbsControl'
 import BbsIcon from './BbsIcon'
 import { norm } from './bbsMerge'
@@ -54,7 +55,10 @@ export default function BbsRow({
   onReset,
 }: Props) {
   const tr = useT()
-  const label = meta.label?.zh || meta.label?.en || paramKey
+  /* 数据是双语的（`label.zh` / `label.en`，拓竹原版就带两册）—— 按界面语言挑，
+     缺一册回落另一册，最后才回落到参数键（那行不能没有名字） */
+  const locale = useLocale()
+  const label = localizeParamMeta(meta, locale, paramKey)
   const title = `${paramKey}${meta.mode ? `  [${meta.mode}]` : ''}`
     + `${greyed ? `  ${tr('bbs.row.unavailable')}` : ''}`
     + `${hit ? `  · ${hitNote(hit, paramKey, meta)}` : ''}`

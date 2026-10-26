@@ -7,6 +7,7 @@
  */
 
 import { STORAGE } from '../../api/storageKeys'
+import { t } from '../../i18n'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
 
@@ -24,6 +25,6 @@ export function useBbsDrawer(): BbsDrawer {
     snap: DRAWER_SNAP,
     min: DRAWER_MIN,
     max: DRAWER_MAX,
-    label: '预设列表',
+    label: t('bbs.drawer.kind.presets'),
   })
 }

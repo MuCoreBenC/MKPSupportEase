@@ -30,8 +30,11 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties, ReactNode } from 'react'
 import { api, errorText } from '../../api'
-import { t, useT } from '../../i18n'
+/* `t` 只给**事件回调**用（保存成功/失败的句子在事发那一刻取，语言是对的）；
+   渲染期的字一律走 `tr`，否则切语言不重渲染 */
+import { t, useLocale, useT, type Locale, type Tr } from '../../i18n'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
+import { bi } from '../shared/dataLabel'
 import { FieldControl } from '../../components/field'
 import type { FieldSchema } from '../../components/field'
 import { boolOf } from '../../components/field/value'
@@ -67,13 +70,19 @@ interface CompareRow {
   order: number
 }
 
-/** 注册表 → 这台子要的行（分组中文名与顺序来自 catalog，客户端不排一遍） */
-function rowsOf(registry: CatalogRegistry): CompareRow[] {
+/**
+ * 注册表 → 这台子要的行（分组名与顺序来自 catalog，客户端不排一遍）。
+ *
+ * **第二种读取路径**：对比台不经过 `useParams`，自己从 `getRuntimeCatalog` 摊一遍。
+ * 双语挑一册因此必须走同一个工具（`dataLabel`）—— 2026-10-26 就是这里漏了，
+ * 英文界面上整片中文。
+ */
+function rowsOf(registry: CatalogRegistry, locale: Locale): CompareRow[] {
   const sectionLabel = new Map<string, string>()
   const sectionOrder = new Map<string, number>()
   for (const tab of registry.tabs) {
     for (const sec of tab.sections) {
-      sectionLabel.set(sec.id, sec.label)
+      sectionLabel.set(sec.id, bi(sec.label, sec.labelEn, locale))
       sectionOrder.set(sec.id, sec.order)
     }
   }
@@ -82,15 +91,15 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
       const groupId = p.layout.sectionId
       return {
         key: p.key,
-        label: p.label,
+        label: bi(p.label, p.labelEn, locale),
         unit: p.unit,
         groupId,
         groupLabel: sectionLabel.get(groupId) ?? groupId,
         order: (sectionOrder.get(groupId) ?? 0) * 1000 + p.layout.order,
         field: {
           key: p.key,
-          label: p.label,
-          desc: p.desc,
+          label: bi(p.label, p.labelEn, locale),
+          desc: bi(p.desc, p.descEn, locale),
           control:
             p.uiComponent === 'number'
               ? 'number'
@@ -107,7 +116,7 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
           step: p.step,
           choices: p.choices?.map((c) => ({
             value: c.value,
-            label: c.label,
+            label: bi(c.label, c.labelEn, locale),
             deprecated: c.deprecated === true ? true : undefined,
           })),
         },
@@ -117,14 +126,14 @@ function rowsOf(registry: CatalogRegistry): CompareRow[] {
 }
 
 /** 只读态的纯文本值（编辑态才出现控件 —— 作者：「默认是不能改参数的」） */
-function roTextOf(row: CompareRow, raw: string): string {
+function roTextOf(row: CompareRow, raw: string, tr: Tr): string {
   switch (row.field.control) {
     case 'switch':
-      return boolOf(raw) ? t('presets.cmp.on') : t('presets.cmp.off')
+      return boolOf(raw) ? tr('presets.cmp.on') : tr('presets.cmp.off')
     case 'choice':
       return row.field.choices?.find((c) => c.value === raw)?.label ?? raw
     case 'gcode':
-      return t('presets.cmp.lines', {
+      return tr('presets.cmp.lines', {
         count: raw.split('\n').filter((l) => l.trim() !== '').length,
       })
     default:
@@ -157,6 +166,8 @@ export default function CompareModal({
   onSaved,
 }: Props) {
   const tr = useT()
+  /* 数据（参数名/分组名）那一册 —— 与参数页同一个工具，别在这条路上再抄一遍 */
+  const locale = useLocale()
   const [picked, setPicked] = useState<string[]>([])
   const [loaded, setLoaded] = useState<Record<string, PresetParamValues>>({})
   const [draft, setDraft] = useState<Record<string, Record<string, string>>>({})
@@ -243,7 +254,10 @@ export default function CompareModal({
     })
   }, [open, files, preselect])
 
-  const rows = useMemo(() => (registry === null ? [] : rowsOf(registry)), [registry])
+  const rows = useMemo(
+    () => (registry === null ? [] : rowsOf(registry, locale)),
+    [registry, locale],
+  )
 
   /* 选中的每一列各读一次参数（读不出来的那一列照实存 problem，不打掉整张台子） */
   useEffect(() => {
@@ -734,7 +748,7 @@ export default function CompareModal({
                                           : s.ro
                                       }
                                     >
-                                      {roTextOf(row, value)}
+                                      {roTextOf(row, value, tr)}
                                     </span>
                                   </span>
                                 </span>
@@ -765,7 +779,11 @@ export default function CompareModal({
                         })}
                         <span className={s.cell}>
                           <span className={differs ? `${s.badge} ${s.diff}` : `${s.badge} ${s.same}`}>
-                            {differs ? '差异' : picked.some((p) => valueAt(p, row.key) === undefined) ? '—' : '一致'}
+                            {differs
+                              ? tr('presets.cmp.differs')
+                              : picked.some((p) => valueAt(p, row.key) === undefined)
+                                ? '—'
+                                : tr('presets.cmp.same')}
                           </span>
                         </span>
                       </div>
@@ -792,7 +810,7 @@ export default function CompareModal({
       size="lg"
       host={host}
       /* 点遮罩一律不关（2026-10-15 作者定的全站口径）—— 关走 Esc 或页眉那颗 */
-      closeTitle={dirtyTotal === 0 ? '关掉对比台' : '关掉会丢掉未保存的改动 —— 先保存'}
+      closeTitle={dirtyTotal === 0 ? tr('presets.cmp.closeClean') : tr('presets.cmp.closeDirty')}
       onClose={onClose}
       footer={footer}
     >
