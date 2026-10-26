@@ -1153,6 +1153,23 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+
+  /*
+   * 横向的**裁切盒往右扩到卡片白边**，内容盒一寸不动（2026-10-26 作者第二轮）。
+   *
+   * 上一版是让插图往左躲（`--stack-inset`），作者要的不是躲 —— 是「卡片叠在那块
+   * 露出卡底下、别被腰斩，影子也照常」。所以这里不裁它：`padding-right` 把 padding-box
+   * 撑到 frame 的右内边（= 卡片白边），负右边距把外框宽度抵消回去，于是
+   *   · 内容仍在原来的 845 处排（五步条、标题都不动）；
+   *   · 插图能画进 padding 区，一路钻到露出卡底下；
+   *   · 纵向照旧可滚，`overflow` 一个都没少。
+   *
+   * `content-box` 必须显式写：全局是 border-box，那样 `width: 100%` 会把内容压窄。
+   */
+  box-sizing: content-box;
+  --peek-gutter: calc(var(--chrome-x, 0px) + var(--chrome-peek, 0px));
+  padding-right: var(--peek-gutter);
+  margin-right: calc(-1 * var(--peek-gutter));
 }
 
 .welcome::before {
@@ -1198,16 +1215,6 @@
   display: grid;
   place-items: center;
 
-  /*
-   * 插图整体再往左让一截（2026-10-26 作者：第三张卡的右边被切掉了）。
-   *
-   * 三张卡是 3° / 0° / 3° 旋转着叠的，最下面那张的右沿本来就比舞台宽一点点，
-   * 加上 22px 的投影，贴着 `.welcome` 的横向裁切线时就会少一条边 —— 看起来像被
-   * 右边那块「露出卡」切了。让出这一截之后，卡片无论窗口多窄都落在安全区里。
-   *
-   * 想再左移就调这个值（`0px` = 贴着舞台居中，原来那样）。
-   */
-  padding-right: var(--stack-inset, 34px);
 }
 
 .heroTitle {

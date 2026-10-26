@@ -351,7 +351,7 @@
    * 覆盖的是变量不是 `margin-left` —— 连线（`--link-*`）跟着第 4 步走，一起生效。
    */
   :root[lang='en'] .pair {
-    --pair-shift: 10.5%;
+    --pair-shift: 12%;
   }
 }
 
