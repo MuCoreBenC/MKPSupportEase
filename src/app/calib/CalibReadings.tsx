@@ -123,7 +123,7 @@ export default function CalibReadings({
         return (
           <div className={s.axis} key={k} data-changed={changed} data-minor={minor}>
             <dt className={s.axisLabel}>
-              <label htmlFor={id}>{label}</label>
+              <label htmlFor={id}>{tr(label)}</label>
               <i className={s.dot} data-on={changed} aria-hidden={!changed} />
               {/*
                 「原 x.xx」：有基准就常显（只在改动后才冒出来，等于校准页没有这个角标

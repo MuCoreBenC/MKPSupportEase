@@ -1040,7 +1040,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
                 saved && draft
                   ? AXIS_ROWS.filter(([, k]) => dirtyAxes.includes(k))
                       .map(
-                        ([label, k]) => `${label} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`,
+                        ([label, k]) => `${tr(label)} ${saved[k].toFixed(2)} → ${draft[k].toFixed(2)}`,
                       )
                       .join(tr('common.clauseSep'))
                   : '',
