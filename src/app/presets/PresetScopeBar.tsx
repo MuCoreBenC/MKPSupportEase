@@ -10,7 +10,7 @@
  *   左（类型）  `PresetFileInfo.kind` —— MKP 的涂胶预设 toml，还是切片器的工艺 profile。
  *               **它还决定表头有几列**（MKP 没有喷嘴层高，切片器没有版本）
  *   右（位置）  两张**互不相干的表**，不是同一批数据的筛选 —— 本地的就是本地的、
- *               云端的就是云端的，各自回答一个问题（我有什么 / 官方提供什么）。
+ *               云端的就是云端的，各自回答一个问题（我有什么 / 云端提供什么）。
  *
  * 位置那一轴 2026-10-08 曾在 MKP 档退场（那半天 MKP 只有一张合并的"资源库"表），
  * 2026-10-09 作者改判回来：**桌面软件必须让人一眼看出"我手上有什么、断网能不能用"**，
@@ -35,10 +35,10 @@
  * 都得自己补；原生 radio 白送这些，只需要把圆点藏掉、把 label 画成胶囊。
  */
 
+import { useT } from '../../i18n'
 import {
   KIND_AXIS_TEXT,
   SCOPE_AXIS_TEXT,
-  SCOPE_AXIS_WHY,
 } from './presetTree'
 import type { PresetKindAxis, PresetScopeAxis } from './presetTree'
 import s from './PresetScopeBar.module.css'
@@ -53,7 +53,25 @@ interface Props {
 const KINDS: PresetKindAxis[] = ['mkp', 'slicer']
 const SCOPES: PresetScopeAxis[] = ['local', 'cloud']
 
+/*
+ * 段的文字**恒宽**（作者 2026-10-10：「留一个最小的宽度，足够它变化的冗余」）：
+ * 选中态会加粗，粗字比细字宽一点 —— 直接换字重会让整条分段控件在点击的瞬间变宽，
+ * 把右边所有东西推着走。所以文字放**两层**：可见那份照常，上面盖一份隐形粗体副本，
+ * grid 同格取两者最大宽度 —— 点击前后盒子纹丝不动。
+ */
+function SegText({ text }: { text: string }) {
+  return (
+    <span className={s.optText}>
+      <span>{text}</span>
+      <span className={s.optGhost} aria-hidden>
+        {text}
+      </span>
+    </span>
+  )
+}
+
 export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) {
+  const tr = useT()
   return (
     <>
       {/*
@@ -62,7 +80,8 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * 就是那条分界。尺码同级（都 32px）：作者「让 MKP配置/切片器配置 变小，
        * 跟本地/云端差不多高」，原本 38px 的那一级退回。
        */}
-      <span className={s.seg} role="radiogroup" aria-label="文件类型">
+      <span className={s.seg} role="radiogroup" aria-label={tr('presets.tree.aria.kind')}>
+        {/* eslint-disable no-restricted-syntax -- 分段控件的就地例外：原生 radio 只作语义壳（分组 / 方向键 / 读屏），圆点由 `.radio` 刻意藏起来，用户看到的是两块文字底片、不是"勾和框"，不在「统一勾和框」那一刀的范围内 */}
         {KINDS.map((k) => (
           <label key={k} className={s.opt} data-on={k === kind}>
             <input
@@ -73,25 +92,34 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={k === kind}
               onChange={() => onKind(k)}
             />
-            {KIND_AXIS_TEXT[k]}
+            <SegText text={tr(KIND_AXIS_TEXT[k])} />
           </label>
         ))}
+        {/* eslint-enable no-restricted-syntax */}
       </span>
 
       {/*
        * **位置那一轴两种类型都有**（2026-10-09 起；此前 MKP 档短暂不画它）。
        *
        * 同一对词在两档里是两件事，说明那句跟着类型走（`SCOPE_AXIS_WHY[kind][scope]`）：
-       * MKP 的"本地"= 你自己那份工作副本；切片器的"本地"= 本机真有的文件。
+       * MKP 的"本地"= 你自己那份本地文件；切片器的"本地"= 本机真有的文件。
        * 所以这条控件**两边都画**，但都不解释自己 —— 解释交给悬停那句话。
+       *
+       * auto 边距（`.segPush`）把它推进右簇：右簇 = 位置分段 → 搜索。
+       * 2026-10-10：切片器的机型筛选**搬去筛选区**（不再夹在这两条分段中间）——
+       * 第一排从此两档一致（类型 / 位置(右) / 搜索），窄窗不再把搜索挤出第一排。
        */}
-      <span className={`${s.seg} ${s.segPush}`} role="radiogroup" aria-label="位置">
+      <span
+        className={`${s.seg} ${s.segPush}`}
+        role="radiogroup"
+        aria-label={tr('presets.tree.aria.scope')}
+      >
+        {/* eslint-disable no-restricted-syntax -- 同上：分段控件，原生 radio 只作语义壳（圆点被 `.radio` 藏起来） */}
         {SCOPES.map((sc) => (
           <label
             key={sc}
             className={s.opt}
             data-on={sc === scope}
-            title={SCOPE_AXIS_WHY[kind][sc]}
           >
             <input
               type="radio"
@@ -101,9 +129,10 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
               checked={sc === scope}
               onChange={() => onScope(sc)}
             />
-            {SCOPE_AXIS_TEXT[sc]}
+            <SegText text={tr(SCOPE_AXIS_TEXT[sc])} />
           </label>
         ))}
+        {/* eslint-enable no-restricted-syntax */}
       </span>
     </>
   )

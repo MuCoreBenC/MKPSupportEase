@@ -38,7 +38,7 @@
 .groupHead {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 7px;
   margin-bottom: 8px;
 }
 
@@ -46,7 +46,13 @@
   margin: 0;
   font-size: 11px;
   font-weight: 600;
+  /*
+   * 疏排是给中文标题的；`letter-spacing` 在**最后一个字母后面**也会加一格，
+   * 英文标题后面就凭空多出一个空格，再叠上 flex 的 gap 就成了「Machine   Sets …」。
+   * 用等量的负右边距抵掉，中文那边看不出来（中文本来就窄）。
+   */
   letter-spacing: 0.18em;
+  margin-right: -0.18em;
   color: var(--text-3);
 }
 
@@ -63,6 +69,7 @@
   min-width: 0;
 }
 
+/* 底走 --glass（2026-10-12 深色第二遍）：写死的白在深色里是一颗颗发亮的胶囊 */
 .option {
   display: flex;
   align-items: center;
@@ -70,7 +77,7 @@
   padding: 7px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  background: rgb(255 255 255 / 60%);
+  background: var(--glass);
   color: var(--text-2);
   font-size: 12.5px;
   white-space: nowrap;
@@ -80,7 +87,7 @@
 .option:hover {
   color: var(--text-1);
   border-color: var(--line-strong);
-  background: #fff;
+  background: var(--glass-hover);
 }
 
 .option[data-on='true'] {

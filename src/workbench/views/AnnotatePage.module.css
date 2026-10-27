@@ -1,0 +1,672 @@
+/* 标注台（2026-10-16）—— 见 AnnotatePage.tsx 头注。
+   颜色一律过工作台 token（`src/workbench/tokens.css`），只有"框"那三样取客户端的
+   `GuideImage.module.css` 同值 —— 这一页要画的正是客户端里那个样子。 */
+
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  min-height: 0;
+  outline: none;
+  /*
+   * ★★★ **整页禁选**（2026-10-16 作者：「我要拖这个框框，都拖选成文字的感觉了」）。
+   *   只在 `.board` 上写 `user-select:none` 不够：从图面按下、拖到画布外时，
+   *   浏览器把选择范围落到了**祖先**（`.pad`/`.stage`）上 ⇒ 整块泛蓝。
+   *   这一页里没有一个字是要被选中的（框是靠拖的、坐标格是 input），索性整页禁掉。
+   */
+  user-select: none;
+  /*
+   * ★★ **WKWebView 只认带前缀的**（2026-10-17 作者截图：看效果那档整张图还是被拖成蓝选区）——
+   *   本仓库的 WebKit 对无前缀 `user-select` 不生效，必须补 `-webkit-` 一份。
+   *   图片那一层还要禁**原生拖拽**（按住图一拖，WebKit 起的是"拖走这张图"而不是选择）。
+   */
+  -webkit-user-select: none;
+}
+
+.wrap img {
+  -webkit-user-drag: none;
+}
+
+/* 例外：坐标 / 备注那些格子当然要能选（整页禁选是为了拖框，不是为了不让改字） */
+.wrap input,
+.wrap textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.lbl {
+  font-size: var(--w-fs-base);
+  color: var(--w-t2);
+}
+
+.sel {
+  max-width: 340px;
+  font-size: var(--w-fs-base);
+}
+
+/* 本地文件那颗用的是真 `<input type="file">`，但它不该占位置 —— 按钮在外面点它 */
+.file {
+  display: none;
+}
+
+.sep {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  background: var(--w-line);
+}
+
+.readout {
+  /*
+   * ★ 坐标那条**贴在它所在那一行的右端**（2026-10-17 作者：「这个坐标固定在第二行的右侧吧」）。
+   *   它是工具栏最后一项 + `margin-left:auto` ⇒ 前面的撑开格吃掉所有空位，它自然靠右；
+   *   窄窗口挤成两行时，它落在第二行、也还是贴着那一行的右端。
+   */
+  margin-left: auto;
+  font-size: var(--w-fs-base);
+  color: var(--w-t2);
+  white-space: nowrap;
+}
+
+/*
+ * 视图切换器（编辑 | 看效果 | 客户视角）—— 三段**互斥**，挨着排就是"这一个控件"的意思。
+ * 段本身复用 `c14.module.css` 的 `.btn` / `.btnSm` / `.btnOn`（工具栏那一套词汇），
+ * 所以这里只给盒子，不给按钮皮。
+ */
+.viewSeg {
+  display: flex;
+  gap: 2px;
+  align-items: center;
+}
+
+.zoom {
+  min-width: 40px;
+  font-size: var(--w-fs-base);
+  color: var(--w-t3);
+  text-align: right;
+}
+
+/* ---------- 左边：画布 ---------- */
+
+.body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 10px;
+}
+
+.stage {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  background: var(--w-card-inner);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+}
+
+/* 看效果那一档：底换成"客户端模态框那个面"，才好判断图摆上去够不够分离 */
+.stage[data-preview='on'] {
+  background: var(--w-card);
+}
+
+/*
+ * 深色下画布底**压深一档**（2026-10-16，作者：「深色模式下有点看不出阴影，你必须帮我把
+ * 这个背景和它这个图片的阴影区分一下……我是从苹果系统的截图截出来的，它是自带阴影」）。
+ *
+ * 病根：`--w-card-inner` 在深色是 `#303030`，比周围几层**还亮**，而苹果截图自带的
+ * 那圈投影是**暗色**的 —— 暗影落在亮底上等于没有（两边糊成一片）。
+ * 治法：这一块单独压到比页面还暗（`#161616`），暗影就有了落差，轮廓自然看得出来。
+ * ★ 只改这一处，不动 `--w-card-inner`（它还管着别处好几层）。
+ */
+[data-theme='dark'] .stage {
+  background: #161616;
+}
+
+/* 居中靠 margin:auto（放得下居中、放不下也能滚到左上角 —— 与 place-items 的差别就在这） */
+.pad {
+  margin: auto;
+  padding: 14px;
+}
+
+.hint {
+  margin: auto;
+  font-size: var(--w-fs-md);
+  color: var(--w-t3);
+}
+
+.board {
+  position: relative;
+  user-select: none;
+  cursor: crosshair;
+  touch-action: none;
+  /*
+   * ★ 缩放 / 平移全程只改这一条的 `transform`（`rAF` 每帧直写 DOM）⇒ 提一层合成，
+   *   别让引擎每帧重画整块画布（2026-10-17"缩放不流畅"的配套一条）。
+   */
+  will-change: transform;
+  transform-origin: 50% 50%;
+}
+
+.img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 图的拖动交给框：按住图面是"画一个新框" */
+  pointer-events: none;
+}
+
+/*
+ * 每 50px 一条线。线距跟着缩放走（`background-size` 由 JS 给），所以读数是图的真实像素。
+ * ★ 线**宽**也除掉看图缩放那一层（`--view-k`）：它是工具自己的东西，放大看时不该变粗
+ *   （与手柄同一条；框线是"图上的东西"，反而该跟着放大）。
+ */
+.grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, var(--w-line-strong) 0 calc(1px / var(--view-k, 1)), transparent 0),
+    linear-gradient(to bottom, var(--w-line-strong) 0 calc(1px / var(--view-k, 1)), transparent 0);
+}
+
+/*
+ * 这张图 / 这次预览那一条说明 —— **从画布底下搬到面板顶上**（见 TSX 那条注释）。
+ * 面板这一栏窄、路径又长：让它能折行（`overflow-wrap`）、且别被下面那块挤扁（`flex: none`）。
+ */
+.info {
+  flex: none;
+  font-size: var(--w-fs-base);
+  line-height: 1.5;
+  color: var(--w-t3);
+  font-family: var(--w-mono);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 框 ----------
+ *
+ * ★★ 这一段是**客户端 `GuideImage.module.css` 里 `.mark` / `.badge` 的镜像**：
+ *   工作台 import 不到客户端的 CSS，所以靠"**同名变量 + 同缺省值**"守口径 ——
+ *   `--mark-radius` / `--mark-stroke` / `--badge-size`（由这一页与客户端各自写在元素上，
+ *   缺省 8 / 2 / 18）。**改一边必须改另一边**，否则"这一页看着对、客户端画出来不对"。
+ *
+ * 线画在 `box-shadow` 上而不是 `border`：引擎把非零 `border-width` 钳到最小 1px，
+ *   放大看图那一档要能细到 0.5px（见客户端那条注释）。
+ *
+ * ★★ `--zoom-k` 两边都有值，含义也各是各的，但公式同一条（都是"把屏幕尺寸除回去"）：
+ *   客户端 = "放大看图"的倍率（视觉大小恒定）；这边 = **成品图像素 ÷ 当前缩放**
+ *   （见 `.board` 的 inline style）—— 于是画布上看到的框与编号，就是成品图被放大后的像素。
+ */
+
+.mark {
+  /* 浅色取客户端 `--accent`（#20b25a）；深色那一档在下面 */
+  --acc: #20b25a;
+
+  position: absolute;
+  border-radius: calc(var(--mark-radius, 8px) / var(--zoom-k, 1));
+  box-shadow:
+    0 0 0 calc(var(--mark-stroke, 2px) / var(--zoom-k, 1)) var(--acc),
+    0 0 0 calc((var(--mark-stroke, 2px) + 1px) / var(--zoom-k, 1)) rgb(0 0 0 / 28%);
+  cursor: move;
+}
+
+[data-theme='dark'] .mark {
+  --acc: #2f9e5b;
+}
+
+/* 选中的那个：外面再兜一圈蓝雾（工作台自己的强调色，不进客户端 —— 这只是"我在改它"） */
+.mark[data-on='yes'] {
+  box-shadow:
+    0 0 0 calc(var(--mark-stroke, 2px) / var(--zoom-k, 1)) var(--acc),
+    0 0 0 calc((var(--mark-stroke, 2px) + 1px) / var(--zoom-k, 1)) rgb(0 0 0 / 28%),
+    0 0 0 calc((var(--mark-stroke, 2px) + 5px) / var(--zoom-k, 1)) var(--w-primary-soft);
+}
+
+.badge {
+  position: absolute;
+  --badge: calc(var(--badge-size, 18px) / var(--zoom-k, 1));
+
+  left: calc(var(--badge) / -2);
+  top: calc(var(--badge) / -2);
+  display: grid;
+  place-items: center;
+  width: var(--badge);
+  height: var(--badge);
+  /*
+   * ★★ 字号 = 圆径 × 11/18（2026-10-16）—— 与烧进成品图那条**同一个比例**
+   *   （`render.rs` 的 `BADGE_FONT_RATIO`）。原来写死 `11px`：`--badge-size` 被某条标注
+   *   改大时字不跟着涨，与成品图对不上。字体见 `workbench.css` 的 `@font-face`。
+   */
+  font-family: 'MKP Badge', system-ui, sans-serif;
+  font-size: calc(var(--badge) * 11 / 18);
+  line-height: 1;
+  color: #fff;
+  background: var(--acc);
+  border-radius: 999px;
+}
+
+/*
+ * 手柄 = **工具自己的东西**（不进成品图）⇒ 看图缩放那一层要除回去（`--view-k`），
+ * 视觉大小才恒定（与 `.mark` / `.badge` 吃 `--zoom-k` 是同一条道理，两条各管一层）。
+ */
+.handle {
+  position: absolute;
+  width: calc(9px / var(--view-k, 1));
+  height: calc(9px / var(--view-k, 1));
+  background: var(--w-card);
+  border: calc(1.5px / var(--view-k, 1)) solid var(--acc);
+  border-radius: calc(2px / var(--view-k, 1));
+}
+
+.handle[data-edge='nw'] {
+  left: calc(-5px / var(--view-k, 1));
+  top: calc(-5px / var(--view-k, 1));
+  cursor: nwse-resize;
+}
+
+.handle[data-edge='n'] {
+  left: 50%;
+  top: calc(-5px / var(--view-k, 1));
+  margin-left: calc(-4.5px / var(--view-k, 1));
+  cursor: ns-resize;
+}
+
+.handle[data-edge='ne'] {
+  right: calc(-5px / var(--view-k, 1));
+  top: calc(-5px / var(--view-k, 1));
+  cursor: nesw-resize;
+}
+
+.handle[data-edge='e'] {
+  right: calc(-5px / var(--view-k, 1));
+  top: 50%;
+  margin-top: calc(-4.5px / var(--view-k, 1));
+  cursor: ew-resize;
+}
+
+.handle[data-edge='se'] {
+  right: calc(-5px / var(--view-k, 1));
+  bottom: calc(-5px / var(--view-k, 1));
+  cursor: nwse-resize;
+}
+
+.handle[data-edge='s'] {
+  left: 50%;
+  bottom: calc(-5px / var(--view-k, 1));
+  margin-left: calc(-4.5px / var(--view-k, 1));
+  cursor: ns-resize;
+}
+
+.handle[data-edge='sw'] {
+  left: calc(-5px / var(--view-k, 1));
+  bottom: calc(-5px / var(--view-k, 1));
+  cursor: nesw-resize;
+}
+
+.handle[data-edge='w'] {
+  left: calc(-5px / var(--view-k, 1));
+  top: 50%;
+  margin-top: calc(-4.5px / var(--view-k, 1));
+  cursor: ew-resize;
+}
+
+/* ---------- 冲突对比层（只读：仓库那份 vs 本机那份） ----------
+ * 与正在编辑的实框并排画，两版各一色 + 虚线，纯展示、不可点（`pointer-events: none`）。
+ * 颜色取工作台 token，深浅两套都读得到。 */
+.diffMark {
+  position: absolute;
+  pointer-events: none;
+  border-radius: 4px;
+  border: 1.5px dashed;
+}
+
+.diffMark[data-which='repo'] {
+  border-color: var(--w-primary);
+  background: rgb(59 130 246 / 8%);
+}
+
+.diffMark[data-which='local'] {
+  border-color: var(--w-warn);
+  background: rgb(217 148 43 / 10%);
+}
+
+.diffTag {
+  position: absolute;
+  left: 0;
+  top: -16px;
+  padding: 0 4px;
+  font-size: var(--w-fs-sm);
+  line-height: 16px;
+  color: #fff;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.diffMark[data-which='repo'] .diffTag {
+  background: var(--w-primary);
+}
+
+.diffMark[data-which='local'] .diffTag {
+  background: var(--w-warn);
+}
+
+/* ---------- 右边：图层 / 数值 / 导出 ---------- */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  /* ★ 整块面板可滚（2026-10-16 作者：「这右侧这一个还没办法滚动」）—— 窗口矮到放不下时兜底。
+     平时多半滚不到这儿：图层列表自己先滚（见 `.list` 的 max-height）。 */
+  overflow: auto;
+  padding: 10px;
+  background: var(--w-card);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+}
+
+/* ---------- 源稿那一行（存哪儿 / 写得进写不进，一直摆在眼前） ---------- */
+
+.repoBar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--w-card-inner);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+}
+
+.repoText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--w-fs-base);
+  color: var(--w-t1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.repoText .dim {
+  font-family: var(--w-mono);
+}
+
+/* 那颗小圆点：绿 = 已写进仓库，橙 = 有改动挂着 */
+.repoDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: var(--w-primary);
+  border-radius: 999px;
+}
+
+.repoBar[data-dirty='yes'] .repoDot {
+  background: var(--w-warn);
+}
+
+/* 本机草稿与仓库那份撞上了：不猜、不静默覆盖，摆两颗按钮让作者选 */
+.conflict {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  font-size: var(--w-fs-base);
+  color: var(--w-t2);
+  background: var(--w-warn-soft);
+  border: 1px solid var(--w-warn);
+  border-radius: var(--w-r-input);
+}
+
+.conflictOps {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.pHead {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: var(--w-fs-lg);
+  font-weight: 600;
+}
+
+.dim {
+  font-size: var(--w-fs-base);
+  font-weight: 400;
+  font-style: normal;
+  color: var(--w-t3);
+}
+
+.list {
+  /* ★ 图层列表自己一块高度、超出**自己滚**（2026-10-16 作者：「图层它就显示得比较小了，
+     那个下面的框框还很大」）—— `flex:1` 吃掉面板剩下的高度，给足 `min-height`
+     免得被下面那块固定高的编辑区挤成一条；再多就自己滚，下面的编辑 / 导出区不动。 */
+  flex: 1 1 auto;
+  min-height: 160px;
+  padding: 2px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+}
+
+.empty {
+  margin: 8px;
+  font-size: var(--w-fs-base);
+  line-height: 1.6;
+  color: var(--w-t3);
+}
+
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 6px;
+  border-radius: var(--w-r-input);
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--w-hover);
+}
+
+.row[data-on='yes'] {
+  background: var(--w-primary-soft);
+}
+
+.rowBadge {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  font-size: var(--w-fs-sm);
+  line-height: 1;
+  color: #fff;
+  background: var(--w-primary);
+  border-radius: 999px;
+}
+
+.rowName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--w-fs-base);
+  color: var(--w-t1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rowSize {
+  flex: none;
+  font-size: var(--w-fs-sm);
+  color: var(--w-t3);
+}
+
+/* 行尾那几颗 20px 小方钮（上下挪一位 / 藏起来 / 删）：内容现在是 SVG 箭头 + 两颗字形，
+   一律由 flex 摆中线 —— 字形的行盒中线比盒子略高，靠 text-align 会看着偏 */
+.iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: var(--w-fs-base);
+  line-height: 1;
+  color: var(--w-t2);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--w-r-input);
+}
+
+.iconBtn:hover:not(:disabled) {
+  color: var(--w-t1);
+  background: var(--w-hover);
+  border-color: var(--w-line-strong);
+}
+
+.iconBtn:disabled {
+  color: var(--w-t-off);
+}
+
+.edit {
+  flex: none;
+  padding: 8px;
+  background: var(--w-card-inner);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+}
+
+.editHead {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: var(--w-fs-base);
+  font-weight: 600;
+}
+
+.nums {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.num {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.numLbl {
+  font-size: var(--w-fs-sm);
+  color: var(--w-t3);
+}
+
+/* 数值输入：窄、等宽数字 */
+.nums input {
+  width: 100%;
+  min-width: 0;
+}
+
+/* ★ **数字靠左、光标落在数字右侧**（2026-10-16 作者：「我希望这个数字在左侧，我的那个光标
+   也是在那个数字的右侧，这样方便我去删除呀、更改呀」）—— 右对齐时点进去光标会跳到最左，
+   退格删的是"没见过的空"，很别扭。左对齐 + 聚焦把光标送到末尾（见 `onNumFocus`）就顺手了。 */
+.numInp {
+  text-align: left;
+}
+
+.noteRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* 导出／导入：默认只露一行「导出／导入 · 给开发用」，点开才见那三颗（作者说看不懂） */
+.io {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ioHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  font-size: var(--w-fs-base);
+  color: var(--w-t2);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--w-r-input);
+  cursor: pointer;
+}
+
+.ioHead:hover {
+  background: var(--w-hover-1);
+}
+
+/* 收起 / 展开那颗箭头不在这张表里：它是客户端共享的 `ui.disclosureCaret`
+   （形状 + 闭着朝右 / 摊开朝下的翻转都归那个类，这里不再自己排三角字符） */
+
+.ioRow {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.importBox {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.ta {
+  width: 100%;
+  height: 96px;
+  padding: 6px;
+  font-family: var(--w-mono);
+  font-size: var(--w-fs-base);
+  color: var(--w-t1);
+  background: var(--w-input);
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-input);
+  resize: vertical;
+}
+
+.importOps {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.tips {
+  width: 100%;
+  margin-top: 2px;
+  font-size: var(--w-fs-base);
+  line-height: 1.6;
+  color: var(--w-t3);
+}

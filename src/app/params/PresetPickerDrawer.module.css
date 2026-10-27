@@ -23,12 +23,47 @@
   z-index: 31;
   display: flex;
   flex-direction: column;
+  /* 宽度由 `shared/useDrawerWidth` 给（拖左缘改宽 + 三态吸附，全仓同一套手感）——
+     这里只兜一个下限，别写死宽度 */
   width: 320px;
   /* 窗口窄的时候别把参数区挤没 */
   max-width: 60%;
   border-left: 1px solid var(--line);
   background: var(--surface-solid);
   box-shadow: var(--shadow-lift);
+}
+
+/*
+ * 拖宽热区：贴**内缘**一条 6px 透明带（外观上什么都不加，只有 `col-resize` 光标，
+ * 与文件管理器一样"看不出来、悬停就能拖"）。键盘聚焦时才显一条细线。
+ * 左开抽屉的热区在**右缘**，右开（默认）的在**左缘**。
+ */
+.grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 1;
+  width: 6px;
+  cursor: col-resize;
+}
+
+.grip[data-side='right'] {
+  left: 0;
+}
+
+.grip[data-side='left'] {
+  right: 0;
+}
+
+.grip:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+/* 拖动中禁掉文字选中（不然拖一次会把整页文字刷蓝） */
+.drawer[data-dragging='true'] {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 左开（首页用）：右边常驻露出卡，抽屉没地方 —— 挂左缘，缝换到右边 */
@@ -88,34 +123,25 @@
   margin-top: 4px;
 }
 
+/* 分组标题：只写机型显示名（内部 ID 2026-10-14 撤掉了，见抽屉里那段注释） */
 .groupHead {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
   padding: 8px 14px 4px;
   color: var(--text-3);
   font-size: 11px;
 }
 
-.groupId {
-  font-family: "SF Mono", Consolas, monospace;
-  font-size: 10.5px;
-  opacity: 0.75;
-}
-
+/*
+ * ★★ 2026-10-14：整行**不再是按钮**（点行什么都不做，见抽屉文件头三条规则）——
+ * 它是个普通容器，只有右边那颗「使用」是真的按钮。
+ */
 .item {
   display: flex;
   align-items: center;
   gap: 8px;
   width: 100%;
-  padding: 7px 14px;
-  border: 0;
-  background: transparent;
+  padding: 6px 14px;
   color: var(--text-1);
-  font: inherit;
   font-size: 12.5px;
-  text-align: left;
-  cursor: pointer;
 }
 
 .item:hover {
@@ -124,35 +150,83 @@
 
 .item[data-current='true'] {
   background: var(--accent-soft);
+}
+
+.item[data-current='true'] .name {
   font-weight: 600;
 }
 
-/* 聚焦不再另画一圈：当前项有 accent-soft 底 + 加粗兜着 */
-.item:focus-visible {
-  outline: none;
+/*
+ * ★★ 2026-10-14：`.tick`（那颗勾）**退役了** —— 在用的那一份不再打勾，
+ * 改成像预设页本地表那样写灰字「在用」（见 `.inUse`）。两处同一个词、同一个样子。
+ */
+/*
+ * 「在用」——尺寸与「使用」那颗按钮**完全一致**（作者 2026-10-14：按钮大小要对齐），
+ * 只是不可点（它已经在用了，没有可做的动作）。同一套 padding / 高 / 字号。
+ */
+.inUse {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: 11.5px;
 }
 
-.tick {
+/* 行上的主文字 = 文件名（2026-10-14 起）：占满剩下的一格，装不下就省略号 */
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 版本名右边那截：**这一份自己的**文件名（本机实有，就是盘上那个名字） */
+/*
+ * ★★ 2026-10-14：`.note`（原来写文件名的那枚等宽小字）**退役了** ——
+ * 文件名升成主文字（`.name`），版本名不再另占一格。样式留着给将来可能回来的一列用，
+ * 但现在没有消费者：真要再加一列，先想清楚"窄的时候先牺牲谁"。
+ */
+
+/* 「使用」——**只有它会切预设**（小档按钮，与 `.close` 同尺寸） */
+.use {
   flex-shrink: 0;
-  width: 10px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  color: var(--text-2);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.use:hover {
+  border-color: var(--accent);
   color: var(--accent-deep);
 }
 
-.name {
-  flex: 1;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.use:focus-visible {
+  border-color: var(--accent);
+  outline: none;
 }
 
-/* 版本名右边那截：**这一项自己的** MKP 文件名（包里没配就退成 tag / id） */
-.note {
-  flex-shrink: 0;
-  max-width: 44%;
-  overflow: hidden;
+/* 本机一份都没有时那一句（说去哪儿弄一份，不摆假选项） */
+.empty {
+  margin: 0;
+  padding: 14px;
   color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.empty code {
   font-family: "SF Mono", Consolas, monospace;
-  font-size: 10.5px;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  font-size: 11px;
 }

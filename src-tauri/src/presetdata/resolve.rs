@@ -94,12 +94,13 @@ pub fn no_overrides() -> &'static Overrides {
 
 /// 这台机型**真实看得到**的字段键，按 `layout.order` 升序。
 ///
-/// 两道过滤：`machineFilter` 排除的不属于这台机型；`deprecated` 的不再显示、不进产物。
+/// 两道过滤：`machineFilter` 排除的不属于这台机型；`deprecated_for(机型)` 的
+/// 不再显示、不进产物（全局弃用与点名弃用同一道门，判据只在 `ParamDef`）。
 /// [`ParamRegistry::visible_keys`] 与 [`Layers::keys`] 都从这里出。
 pub fn visible_keys_of<'a>(params: &'a [ParamDef], machine_id: &str) -> Vec<&'a str> {
     let mut hit: Vec<&ParamDef> = params
         .iter()
-        .filter(|p| !p.deprecated && p.applies_to(machine_id))
+        .filter(|p| !p.deprecated_for(machine_id) && p.applies_to(machine_id))
         .collect();
     hit.sort_by(|a, b| a.layout.order.total_cmp(&b.layout.order));
     hit.into_iter().map(|p| p.key.as_str()).collect()
@@ -116,7 +117,7 @@ pub fn effective_of<'a>(
     base: &'a Overrides,
     over: &'a Overrides,
 ) -> Option<ValueOrigin<'a>> {
-    if p.deprecated || !p.applies_to(machine_id) {
+    if p.deprecated_for(machine_id) || !p.applies_to(machine_id) {
         return None;
     }
     for (table, origin) in [(over, Origin::Version), (base, Origin::Machine)] {
@@ -209,7 +210,7 @@ impl<'a> Layers<'a> {
     pub fn applies(&self, key: &str) -> bool {
         self.registry
             .param(key)
-            .is_some_and(|p| !p.deprecated && p.applies_to(self.machine_id))
+            .is_some_and(|p| !p.deprecated_for(self.machine_id) && p.applies_to(self.machine_id))
     }
 
     /// 这台机型上**不适用**的字段（被 `machineFilter` 排除的）。
@@ -218,7 +219,7 @@ impl<'a> Layers<'a> {
         self.registry
             .params()
             .iter()
-            .filter(|p| !p.deprecated && !p.applies_to(self.machine_id))
+            .filter(|p| !p.deprecated_for(self.machine_id) && !p.applies_to(self.machine_id))
             .map(|p| p.key.as_str())
             .collect()
     }

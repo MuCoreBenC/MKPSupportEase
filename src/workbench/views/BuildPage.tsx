@@ -69,7 +69,7 @@ import type {
   BaselineDiffEntry,
   BookView,
   Boot,
-  DeliveryFile,
+  DeliveryStatus,
   GenerateReport,
   Issue,
   IssueReport,
@@ -82,10 +82,10 @@ import type {
 import { toasts } from '../c14/toast'
 import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
-import ModalC14 from '../c14/ModalC14'
-import CodeText from '../c14/CodeText'
-import { deliveryStageText as STAGE_TEXT, releaseStageText as RELEASE_STAGE_TEXT } from '../c14/labels'
+
+import { releaseStageText as RELEASE_STAGE_TEXT } from '../c14/labels'
 import GenerateDiffModal from './GenerateDiffModal'
+import DeliveryFilesModal from './DeliveryFilesModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
 import HistoryModal from './HistoryModal'
@@ -144,6 +144,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const rows = book.buildRows
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)
+  /** 检查卡里展开着长描述的条目（2026-10-19：默认只留两行，按需展开） */
+  const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   const [lastPublish, setLastPublish] = useState<PublishTxReport | null>(null)
   /**
    * 发布闸开着没有（第二刀）。**点「发布」不再直接发** —— 先过这一道：
@@ -156,18 +158,18 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    * 非 null ⇒ 直接进**发布回执**视图，不重跑十五项 —— 那是过去那一刻的快照。
    */
   const [gateReport, setGateReport] = useState<PublishTxReport | null>(null)
-  /** 上一次合并之后「把主线同步到第二个官方源」的结论（重新打开回执时还要用） */
+  /** 上一次合并之后「把主线同步到第二个云端源」的结论（重新打开回执时还要用） */
   const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
   /*
    * **发布软件版本**的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
-   * 「发布预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
+   * 「交付预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
    */
   const [releaseGateOpen, setReleaseGateOpen] = useState(false)
   /*
    * 软件版本的发布历史（2026-10-07 从发布框里挪到这 —— 作者：历史放在外面，不塞模态框）。
-   * 本地回执日志（`release-history.json`），最新在前；与上面「发布预设」那本账
+   * 本地回执日志（`release-history.json`），最新在前；与上面「交付预设」那本账
    * （`publish-history.json`）是**两本账**。进页取一次 + 关掉发布框取一次，不轮询。
    */
   const [releaseHistory, setReleaseHistory] = useState<ReleaseHistory | null>(null)
@@ -189,11 +191,15 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    * 附属文件（`content/*.json`、`catalog.json`、`manifest.json`、`source.json`）。
    * 名单来自后端（与残留审计同一份交付集合），这一页只负责摆出来、点开看原文。
    */
-  const [deliveries, setDeliveries] = useState<DeliveryFile[] | null>(null)
-  /** 打开着的那一份交付文件（**盘上原文**，从 `wb_delivery_file` 直读） */
-  const [deliveryOpen, setDeliveryOpen] = useState<{ rel: string; text: string } | null>(null)
-  /** 正在取哪一份交付文件（同一时刻只会有一次） */
-  const [deliveryBusy, setDeliveryBusy] = useState<string | null>(null)
+  const [deliveries, setDeliveries] = useState<DeliveryStatus | null>(null)
+  /** 交付明细模态框开着没（页面外只摆汇总，作者 2026-10-19） */
+  const [deliveryListOpen, setDeliveryListOpen] = useState(false)
+  /**
+   * 明细框右侧 diff 的**只读预演**（2026-10-19）。与生成确认框的 `genPreview`
+   * 分开存：明细打开一次、确认框开关一次，两者不互相覆盖。
+   */
+  const [deliveryPreview, setDeliveryPreview] = useState<PreviewReport | null>(null)
+  const [deliveryPreviewErr, setDeliveryPreviewErr] = useState<string | null>(null)
   /*
    * 当前安装的 SupportEase 版本号（只读展示）——「软件版本」块用它。
    * `null` = 还没取到 / 取不到（显示"未知"，**不阻塞页面**）。
@@ -232,9 +238,6 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    */
   const pickable = (r: (typeof rows)[number]) => r.state !== 'noResources'
 
-  /* 产物名单：**已经生成出来的那些版本**（与后端交付集合里的 `delivery/mkp/presets/` 同一批） */
-  const artifacts = rows.flatMap((r) => (r.mkpFile === null ? [] : [{ uid: r.uid, fileName: r.mkpFile }]))
-
   /* 基线 / 残留 / 回收站：进页取一次，外壳每写一次（生成会改产物）重取 */
   useEffect(() => {
     void (async () => {
@@ -257,12 +260,13 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       .catch(() => setAppVersion(null))
   }, [])
 
-  /* 交付文件清单：进页取一次；生成 / 发布之后（tick）重取 —— 那时盘上的存在与否会变 */
+  /* 交付读数：进页取一次；生成 / 发布之后（tick）重取 —— 那时盘上的存在与否、目录登记都会变。
+     窗口 focus 那一路由外壳 +1 tick（2026-10-19）：外面改了 3MF，切回来这里就跟着重算。 */
   useEffect(() => {
     void wb
       .deliveryFiles()
       .then(setDeliveries)
-      .catch(() => setDeliveries([]))
+      .catch(() => setDeliveries(null))
   }, [tick])
 
   /*
@@ -292,11 +296,12 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
    * 作者 2026-10-02 定的规矩：点「生成」不许当场覆盖 —— 先看 diff、确认了才写。
    * 预演走 `wb_generate_preview`（后端只算不写），与真生成同一批 `todo`、同一道闸。
    */
-  const openGenerate = async () => {
-    if (!ids.length) return
+  const openGenerate = async (override?: string[]) => {
+    const list = override ?? ids
+    if (!list.length) return
     /* 草稿不干净先落盘 —— 预演读的也是**已保存**的配方（与生成同一条顺序规矩） */
     if (dirty && !(await onSave())) return
-    const picked = [...ids]
+    const picked = [...list]
     setGenPicked(picked)
     setGenPreview(null)
     setGenPreviewErr(null)
@@ -306,6 +311,61 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
     } catch (e) {
       setGenPreviewErr(isAppError(e) ? e.message : String(e))
     }
+  }
+
+  /**
+   * 待更新 / 未生成、可以进这次生成队列的版本（**不看用户勾选**，作者 2026-10-19）。
+   *
+   * 用后端 `pendingUids`，不再从 `BuildState` 推：它已经把「配方改过」与
+   * 「重新渲染的字节变了」（模板/注释变化）都算进去了 —— 后者是①卡看不见的。
+   */
+  const pendingUids = deliveries?.pendingUids ?? []
+  /**
+   * 只剩目录漂移时（改了 3MF、所有产物都跟上了）也允许生成一次：
+   * `generate_with` 即使产物全是 unchanged，也会重算 `content` 与 `catalog.json`。
+   * 这时队列带全部可生成版本 —— 产物不会重写，目录会更新。
+   */
+  const needCatalog = deliveries?.files.some((f) => f.state === 'pending') ?? false
+  const generateTargets =
+    pendingUids.length > 0
+      ? pendingUids
+      : needCatalog
+        ? rows.filter((r) => pickable(r)).map((r) => r.uid)
+        : []
+  const generateLabel =
+    pendingUids.length > 0
+      ? `生成待更新项（${pendingUids.length}）`
+      : needCatalog
+        ? '重新生成目录'
+        : '没有待更新项'
+
+  /**
+   * 打开「本次交付明细」（2026-10-19）。
+   *
+   * 先拉一次**只读预演**（全部可生成版本）—— 右侧 diff 用它，其中
+   * `catalog.json` 那一份就能看到三份 3MF 的 sha / size 新旧行。
+   * 预演与真生成同一台渲染器、同一批 todo（不另算一套）。
+   */
+  const openDeliveryList = async () => {
+    setDeliveryListOpen(true)
+    setDeliveryPreview(null)
+    setDeliveryPreviewErr(null)
+    if (dirty && !(await onSave())) {
+      setDeliveryListOpen(false)
+      return
+    }
+    const all = rows.filter((r) => pickable(r)).map((r) => r.uid)
+    try {
+      setDeliveryPreview(await wb.generatePreview({ picked: all }))
+    } catch (e) {
+      setDeliveryPreviewErr(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /** 明细框底部「生成待更新项…」：只带待更新 / 未生成，走既有的预演 → 确认 → 写盘 */
+  const generateStale = async () => {
+    setDeliveryListOpen(false)
+    await openGenerate(generateTargets)
   }
 
   /** 生成第二步：确认。真写盘，然后把框切成结果页 */
@@ -381,26 +441,16 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
     }
   }
 
-  /**
-   * 看一份交付文件的正文。**直读盘上原文**（`wb_delivery_file`）——
-   * 交付目录里现在就长这样，发布出去的就是它。
-   */
-  const openDelivery = async (rel: string) => {
-    setDeliveryBusy(rel)
-    try {
-      setDeliveryOpen({ rel, text: await wb.deliveryFile(rel) })
-    } catch (e) {
-      toasts.push(isAppError(e) ? e.message : String(e))
-    } finally {
-      setDeliveryBusy(null)
-    }
-  }
-
   /*
-   * 「其他交付文件」= 交付集合里**不带版本概念**的那些（`mkp/presets/*.toml` 之外的）。
-   * 产物那几份在上面的「发布物」组里按版本列，这里列目录 JSON / manifest / source。
+   * **交付汇总**（2026-10-19）：页面上只摆"一共多少个文件、多少待更新"，
+   * 完整清单在 `DeliveryFilesModal` 里看 —— 作者：「后续预设会越来越多，
+   * 不可能都显示出来」。
    */
-  const otherDeliveries = (deliveries ?? []).filter((d) => !d.rel.startsWith('mkp/presets/'))
+  const deliveryFiles = deliveries?.files ?? []
+  const tomlCount = deliveryFiles.filter((d) => d.rel.startsWith('mkp/presets/')).length
+  const jsonCount = deliveryFiles.filter((d) => d.rel.endsWith('.json')).length
+  const deliveryPending = deliveryFiles.filter((d) => d.state === 'pending').length
+  const drift = deliveries?.drift ?? []
 
   const baselineDirty = baseline?.filter((b) => b.status !== 'same').length ?? 0
 
@@ -418,28 +468,50 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         </div>
         <div className={s.cardBody}>
           {report && report.issues.length > 0 ? (
-            report.issues.map((i) => (
-              <div
-                key={i.id}
-                className={`${s.issue} ${i.severity === 'block' ? s.issueBlock : ''}`}
-              >
-                <span className={`${s.tag} ${s[`tagSev${i.severity[0].toUpperCase()}${i.severity.slice(1)}` as keyof typeof s] ?? ''}`}>
-                  {i.severity === 'block' ? '阻断' : i.severity === 'todo' ? '待办' : '提示'}
-                </span>
-                <span className={s.issueTxt}>
-                  <b>{i.title}</b>
-                  <span>{i.detail}</span>
-                </span>
-                {/* 每一条都要说清去哪儿处理（issues.rs 的规矩），所以每一条都有这颗按钮 */}
-                <button
-                  type="button"
-                  className={`${s.btn} ${s.btnSm}`}
-                  onClick={() => issueGoto(i)}
+            report.issues.map((i) => {
+              const long = i.detail.length > 120
+              const open = expandedIssues.has(i.id)
+              return (
+                <div
+                  key={i.id}
+                  className={`${s.issue} ${i.severity === 'block' ? s.issueBlock : ''}`}
                 >
-                  去处理
-                </button>
-              </div>
-            ))
+                  <span className={`${s.tag} ${s[`tagSev${i.severity[0].toUpperCase()}${i.severity.slice(1)}` as keyof typeof s] ?? ''}`}>
+                    {i.severity === 'block' ? '阻断' : i.severity === 'todo' ? '待办' : '提示'}
+                  </span>
+                  <span className={s.issueTxt}>
+                    <b>{i.title}</b>
+                    <span className={long && !open ? s.issueDetailClamp : undefined}>
+                      {i.detail}
+                    </span>
+                  </span>
+                  {long && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() =>
+                        setExpandedIssues((prev) => {
+                          const next = new Set(prev)
+                          if (next.has(i.id)) next.delete(i.id)
+                          else next.add(i.id)
+                          return next
+                        })
+                      }
+                    >
+                      {open ? '收起' : '展开'}
+                    </button>
+                  )}
+                  {/* 每一条都要说清去哪儿处理（issues.rs 的规矩），所以每一条都有这颗按钮 */}
+                  <button
+                    type="button"
+                    className={`${s.btn} ${s.btnSm}`}
+                    onClick={() => issueGoto(i)}
+                  >
+                    去处理
+                  </button>
+                </div>
+              )
+            })
           ) : (
             <div className={s.emptyHint}>{report ? report.emptyHint : '正在读检查报告……'}</div>
           )}
@@ -451,17 +523,26 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         <div id="t-build" className={s.card}>
           <div className={s.cardHead}>
             <h2>① 生成</h2>
-            <span className={s.cardNote}>判据是快照比对，不看文件时间</span>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              disabled={deliveries === null}
+              onClick={() => void openDeliveryList()}
+              title="看交付集合里的每一份：预设产物 / 目录与清单 / 发布时定稿，点一行看 diff"
+            >
+              交付明细…
+            </button>
           </div>
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
-              勾哪几个版本，就按它们<strong>当前已保存的配方</strong>整批生成。
-              后端先全部算完、任一项算不出来则整批不动；字节没变的产物不重写。
+              勾版本、按已保存的配方生成；字节没变的产物不重写。
+              <br />
+              这一列的「已生成」只比<strong>配方快照</strong>；交付文件与盘上 / 目录登记是否一致，
+              看「交付明细…」—— 两处判据不同，不是同一件事。
             </p>
             {dirty && (
               <p className={s.note} style={{ marginTop: 0 }}>
-                有<strong>未保存</strong>的改动 —— 点「生成」会先替你保存，成了才生成
-                （生成读的是落盘的那份，不是屏幕上的这份）。
+                有<strong>未保存</strong>的改动 —— 生成前会先保存。
               </p>
             )}
             {rows.map((r) => (
@@ -568,13 +649,11 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           </div>
         </div>
 
-        {/* —— ② 发布预设 —— */}
+        {/* —— ② 交付预设 —— */}
         <div className={s.card}>
           <div className={s.cardHead}>
-            <h2>② 发布预设</h2>
-            <span className={s.cardNote}>
-              把本次预设与数据变更提交到远端仓库；合并后，客户端即可获取这些更新
-            </span>
+            <h2>② 交付预设</h2>
+            <span className={s.cardNote}>提交到远端仓库，合并后客户端可取</span>
           </div>
           <div className={s.cardBody}>
             {blocked && (
@@ -585,8 +664,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
             )}
             <div className={s.bar} style={{ marginTop: blocked ? 12 : 0 }}>
               <span className={s.cardNote}>
-                发布 = 把产物与清单一起定稿进交付目录。点它是<strong>先开发布闸</strong>
-                （十五项逐项打勾，全绿才给往下走）；带残留时后端一个字节都不写。
+                发布前先过闸（十五项）；有残留不写盘。
               </span>
               <span className={s.grow} />
               {/* 上一次发布的结果还在 —— 一次点击回到那份回执（不是每次都是空的新面板） */}
@@ -630,81 +708,54 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
             </div>
 
             {/*
-              **本次交付文件**（作者 2026-10-07 重定口径）：
-
-              · **产物 toml 不在这里逐份列**了 —— 逐份正文在「生成前确认」那一屏里看得到
-                （点「生成」先过那一屏），这一块不再长出一排「查看 TOML」；作者原话：
-                「这一个我觉得没必要了呀，因为我在生成的地方就可以查看了」。
-              · 这里列的是**不带版本概念**的附属文件（目录 JSON / manifest / source），
-                名单来自后端那**同一份交付集合**（发布闸判残留用的就是它）——
-                界面不另拼一份"大概有这些"。点「查看」读**盘上原文**。
+              **本次交付文件**（2026-10-19 改为汇总 + 明细）：
+              页面外只留一行汇总与漂移提示；完整清单在①生成卡的「交付明细…」里看。
             */}
             <div className={s.group}>
               <div className={s.groupHead}>本次交付文件</div>
-              <div className={s.chips}>
-                <span
-                  className={s.chip}
-                  title="已经生成出来的版本各一份（delivery/mkp/presets/<机型>-<版本>.toml）—— 逐份正文在「生成前确认」里看"
-                >
-                  {artifacts.length === 0
-                    ? 'preset.toml — 未生成'
-                    : `preset.toml × ${artifacts.length} 份`}
-                </span>
-                <span className={s.chip} title={lastPublish?.summary}>
-                  {lastPublish
-                    ? `本次发布落下 ${lastPublish.files} 个文件${lastPublish.commit ? ` · ${lastPublish.commit}` : ''}${lastPublish.review ? ` → PR #${lastPublish.review.number}` : ''}`
-                    : '本会话还没发布过'}
-                </span>
-              </div>
-              <p className={s.note}>
-                下面这些**不带「版本」概念**，跟着生成 / 发布一起落进交付目录：
-                <span className={s.mono}>content/*.json</span> 与{' '}
-                <span className={s.mono}>catalog.json</span> 在<strong>生成时重算</strong>，
-                <span className={s.mono}>manifest.json</span> /{' '}
-                <span className={s.mono}>source.json</span> 由<strong>发布时定稿</strong>。
-                所以改了备注这类不碰参数的数据，<span className={s.mono}>
-                  mkp/presets/*.toml
-                </span>{' '}
-                一个字节都不动（生成时显示「无变化」），但{' '}
-                <span className={s.mono}>catalog.json</span> 会跟着重算 ——
-                客户端预设列表的副标题就是从它来的。
-              </p>
               {deliveries === null ? (
-                <div className={s.emptyHint}>正在读……</div>
+                <div className={s.emptyHint}>正在读交付目录……</div>
               ) : (
-                <div className={s.vstack}>
-                  {otherDeliveries.map((d) => (
-                    <div key={d.rel} className={s.vfield}>
-                      <div className={s.vhead}>
-                        <b className={s.mono}>{d.rel}</b>
-                        <span className={s.vkey}>{STAGE_TEXT[d.stage]}</span>
-                        <span className={s.grow} />
-                        <span className={s.rowMeta}>
-                          {d.stage === 'generate'
-                            ? d.exist
-                              ? `已生成 · ${fmtSize(d.size)}`
-                              : '还没生成'
-                            : d.exist
-                              ? `已发布 · ${fmtSize(d.size)}`
-                              : '还没发布'}
-                        </span>
-                        <button
-                          type="button"
-                          className={`${s.btn} ${s.btnSm}`}
-                          disabled={!d.exist || deliveryBusy === d.rel}
-                          title={
-                            d.exist
-                              ? '看交付目录里这一份的盘上原文（只读）'
-                              : '盘上还没有这一份 —— 先生成 / 发布再看'
-                          }
-                          onClick={() => void openDelivery(d.rel)}
-                        >
-                          {deliveryBusy === d.rel ? '正在取……' : '查看'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div className={s.chips}>
+                    <span className={s.chip}>
+                      本次交付 {deliveryFiles.length} 个文件（TOML {tomlCount} · JSON{' '}
+                      {jsonCount}）
+                    </span>
+                    {deliveryPending > 0 && (
+                      <span className={s.chip}>待更新 {deliveryPending} 份</span>
+                    )}
+                  </div>
+                  {drift.length > 0 ? (
+                    <p className={s.note} style={{ marginTop: 8 }}>
+                      <span className={s.tagDanger}>{drift.length} 份资产字节变了</span>{' '}
+                      <span className={s.mono}>catalog.json</span> 待重新生成
+                      {deliveries.catalogModified !== null &&
+                        `（目录上次重算 ${localStamp(deliveries.catalogModified)}）`}
+                    </p>
+                  ) : (
+                    <p className={s.note} style={{ marginTop: 8 }}>
+                      交付目录与盘上一致
+                      {deliveries.catalogModified !== null &&
+                        `（目录上次重算 ${localStamp(deliveries.catalogModified)}）`}
+                    </p>
+                  )}
+                  {deliveries.catalogError !== null && (
+                    <p className={s.note} style={{ color: 'var(--danger)' }} role="alert">
+                      {deliveries.catalogError}
+                    </p>
+                  )}
+                  <p className={s.note} style={{ marginTop: 0 }}>
+                    生成重算目录；发布才写 manifest / source 并推远端。
+                  </p>
+                </>
+              )}
+              {lastPublish !== null && (
+                <p className={s.note} style={{ marginTop: 4 }}>
+                  上一次发布落下 {lastPublish.files} 个文件
+                  {lastPublish.commit ? ` · ${lastPublish.commit}` : ''}
+                  {lastPublish.review ? ` → PR #${lastPublish.review.number}` : ''}
+                </p>
               )}
             </div>
           </div>
@@ -712,7 +763,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
         {/*
           —— 软件版本（只读）——
-          ★ 与上面的「发布预设」是**两回事**（见 `docs/RELEASE-TRANSACTIONS.md`）：
+          ★ 与上面的「交付预设」是**两回事**（见 `docs/RELEASE-TRANSACTIONS.md`）：
             上面把预设/数据提交进仓库、合并后客户端就能取到；
             这一块说的是"发布一个新的 SupportEase 安装包"——**另一套事务，本轮不实现**。
           所以这里**只读展示**，不摆按钮（摆一个点不动的按钮比不摆更糟）。
@@ -720,7 +771,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         <div className={s.card}>
           <div className={s.cardHead}>
             <h2>软件版本</h2>
-            <span className={s.cardNote}>用于发布新的 SupportEase 安装包（与上面发预设是两回事）</span>
+            <span className={s.cardNote}>发布安装包（与发预设是两回事）</span>
           </div>
           <div className={s.cardBody}>
             <div className={s.bar}>
@@ -738,14 +789,12 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               </button>
             </div>
             <p className={s.note}>
-              预设更新**不需要**新的安装包 —— 走上面的「发布预设」即可。只有改动程序本身
-              （Rust / React / 数据读取能力 / 客户端功能）才需要发布一个软件版本。
-              发完还要**合并 release.json 那个 PR** —— 客户端才看得到新版本。
+              预设更新不需要新安装包；改了程序本身才发。发完记得合并 release.json 的 PR。
             </p>
 
             {/*
               发布历史（2026-10-07 从发布框里挪到这）：本地回执日志，最新在前。
-              ★ 这是「发布软件版本」那本账 —— 上面「发布预设」的回执在另一本里
+              ★ 这是「发布软件版本」那本账 —— 上面「交付预设」的回执在另一本里
                 （②卡顶上那枚「本次发布落下…」chip），两本账不混。
             */}
             <div className={s.bar}>
@@ -800,8 +849,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           </div>
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
-              入库产物 vs 判据基线（14.9）。**人看过这份清单再点同步** —— 内容相同的自动跳过，
-              只有真的变了才会写。
+              人看过再同步；内容相同的自动跳过。
             </p>
             {baseline?.map((b) => (
               <div key={b.fileName} className={s.row}>
@@ -848,7 +896,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
           </div>
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
-              「不在本次交付集合内」的文件 —— 残留会被消费端真的下载到，所以发布被它拦下。
+              不在交付集合内的文件；有残留时发布会被拦下。
             </p>
             {strays && strays.length > 0 ? (
               strays.map((f) => (
@@ -896,8 +944,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               <div className={s.emptyHint}>{words.empty.trashEmpty}</div>
             )}
             <p className={s.note} style={{ marginBottom: 0 }}>
-              删除版本时它的生成快照进这里。**这一页只读** —— 还原与彻底删除的动作
-              还没有命令（待裁决项），条目先列出来让人看得见。
+              删除版本时的生成快照；只读。
             </p>
           </div>
         </div>
@@ -956,7 +1003,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
       {/*
         发布软件版本的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
-        「发布预设」的闸（`gateOpen`）是**两道闸**，各有各的账。
+        「交付预设」的闸（`gateOpen`）是**两道闸**，各有各的账。
         ★ 关框时重取发布历史：发完的那一趟已经记进 `release-history.json`，
           页面这块要跟上（历史摆在这张卡上，不再塞在框里）。
       */}
@@ -970,27 +1017,21 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
         />
       )}
 
-      {/* 交付文件：目录 JSON / manifest / source —— 正文是**盘上原文**（框给到最大那档） */}
-      {deliveryOpen !== null && (
-        <ModalC14
-          open
-          size="xl"
-          title={`交付文件 ${deliveryOpen.rel}`}
-          subtitle="交付目录里的盘上原文（只读）—— 客户端或云端取的就是这一份"
-          onClose={() => setDeliveryOpen(null)}
-        >
-          <div className={s.vstack}>
-            <p className={s.note}>
-              正文是<span className={s.mono}>wb_delivery_file</span>直读的**盘上原文**
-              —— 交付目录里现在就长这样，发布出去的就是它（盘上没有它时按钮是灰的）。
-            </p>
-            <CodeText
-              fileName={deliveryOpen.rel}
-              text={deliveryOpen.text}
-              className={`${s.codeText} ${s.codeTextTall}`}
-            />
-          </div>
-        </ModalC14>
+      {/*
+        交付明细（2026-10-19）：页面上只摆汇总与「待更新」提示，完整清单在这里。
+        作者：「外面就应该显示一个简略的，我点了才显示详细的」——名单与状态都来自
+        后端 `DeliveryStatus`，这一框不推第二份。
+      */}
+      {deliveryListOpen && deliveries !== null && (
+        <DeliveryFilesModal
+          status={deliveries}
+          preview={deliveryPreview}
+          previewError={deliveryPreviewErr}
+          generateTargets={generateTargets}
+          generateLabel={generateLabel}
+          onGenerate={() => void generateStale()}
+          onClose={() => setDeliveryListOpen(false)}
+        />
       )}
     </div>
   )
@@ -1004,9 +1045,3 @@ const STATE_TAG: Record<string, string> = {
   noResources: s.tagBuildNone,
 }
 
-/** 字节数给人看（交付文件那一行） */
-function fmtSize(n: number): string {
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / 1024 / 1024).toFixed(1)} MB`
-}

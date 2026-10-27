@@ -1778,14 +1778,17 @@ G1 X78.795 Y82.749 E-0.400 F1800
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=1 to=pen z=0.7
 M106 S255.0
-G1 X160.0 Z1.7 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z1.7 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z6.7
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z3.5
+G1 Z6.7
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -2500,14 +2503,17 @@ G1 X79.712 Y83.161 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=2 to=pen z=0.9
 M106 S255.0
-G1 X160.0 Z1.9 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z1.9 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z6.9
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z3.7
+G1 Z6.9
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -3170,14 +3176,17 @@ G1 X79.695 Y83.187 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=3 to=pen z=1.1
 M106 S255.0
-G1 X160.0 Z2.1 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z2.1 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.1
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z3.9
+G1 Z7.1
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -3956,14 +3965,17 @@ G1 X79.689 Y83.196 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=4 to=pen z=1.3
 M106 S255.0
-G1 X160.0 Z2.3 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z2.3 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.3
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z4.1
+G1 Z7.3
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -4687,14 +4699,17 @@ G1 X79.707 Y83.167 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=5 to=pen z=1.5
 M106 S255.0
-G1 X160.0 Z2.5 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z2.5 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.5
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z4.3
+G1 Z7.5
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -5657,14 +5672,17 @@ G1 X79.696 Y83.184 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=6 to=pen z=1.7
 M106 S255.0
-G1 X160.0 Z2.7 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z2.7 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.7
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z4.5
+G1 Z7.7
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -6714,14 +6732,17 @@ G1 X78.283 Y86.440 E-0.400 F1800
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=7 to=pen z=1.9
 M106 S255.0
-G1 X160.0 Z2.9 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z2.9 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z7.9
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z4.7
+G1 Z7.9
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -7760,14 +7781,17 @@ G1 X79.620 Y83.315 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=8 to=pen z=2.1
 M106 S255.0
-G1 X160.0 Z3.1 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z3.1 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.1
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z4.9
+G1 Z8.1
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -8794,14 +8818,17 @@ G1 X79.478 Y83.493 E-0.400 F42000.0
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=9 to=pen z=2.3
 M106 S255.0
-G1 X160.0 Z3.3 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z3.3 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.3
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z5.1
+G1 Z8.3
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始
@@ -9754,14 +9781,17 @@ G1 X79.146 Y97.604 E-0.400 F1800
 ;Pre-glue preparation
 ;MKP_BEGIN swap ev=10 to=pen z=2.5
 M106 S255.0
-G1 X160.0 Z3.5 E-0.4 F42000.0
+M204 S10000
+G17
+G3 Z3.5 I.706 J.991 P1 E-0.4 F42000.0
 ;Rising Nozzle a little
 ;MKP_STAGE: RiseNozzle ; 抬升喷嘴
 G1 Z8.5
+G1 X160.0 F42000.0
 ;Mounting Toolhead
 ;MKP_STAGE: MountToolhead ; 挂载工具头
 ;Toolhead Mounted
-G1 Z5.3
+G1 Z8.5
 ;MKP_END swap
 ;Glueing Started
 ;MKP_STAGE: GlueStart ; 涂胶开始

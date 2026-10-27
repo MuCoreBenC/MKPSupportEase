@@ -28,8 +28,11 @@
 //! `detail.stats` / `detail.printTime` …）。改字段名等于撕一份已经在用的契约 ——
 //! 前端那一屏显示什么，这份文件里就得有什么。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
+use postprocess::pipeline::Step;
 use sha2::Digest;
 use time::OffsetDateTime;
 
@@ -95,6 +98,29 @@ fn with_suffix(base: &Path, suffix: &str) -> PathBuf {
     PathBuf::from(s)
 }
 
+/// 三件套的文件名后缀 —— 字面量**只许有这一处**（[`begin`] 拼它，
+/// 自动清理 [`crate::retention`] 按它把散文件归回同一条记录）。
+pub const ORIGINAL_SUFFIX: &str = "_original.gcode";
+/// 见 [`ORIGINAL_SUFFIX`]。判据顺序有讲究：`_original.gcode` 也以 `.gcode` 结尾，
+/// 所以要**先长的后短的**（[`record_base`]）。
+pub const OUTPUT_SUFFIX: &str = ".gcode";
+/// 见 [`ORIGINAL_SUFFIX`]。
+pub const META_SUFFIX: &str = "_meta.json";
+
+/// 三件套里任意一个文件名 → 这条记录的公共前缀（基名）。不是三件套的名字 ⇒ `None`。
+///
+/// 自动清理拿它把同一条记录的几个文件**归回一组**（删就整条删）——
+/// 与 [`base_path`] 拼出来的是同一份后缀，不是第二处自拼的字符串。
+pub fn record_base(file_name: &str) -> Option<&str> {
+    if let Some(base) = file_name.strip_suffix(ORIGINAL_SUFFIX) {
+        return Some(base);
+    }
+    if let Some(base) = file_name.strip_suffix(META_SUFFIX) {
+        return Some(base);
+    }
+    file_name.strip_suffix(OUTPUT_SUFFIX)
+}
+
 /// 处理前：建齐目录并把**原件**写进归档。
 ///
 /// 吃调用方已经读进内存的原文，不再读一次盘 —— 钩子读输入文件是管线第 1 步，
@@ -107,13 +133,17 @@ pub fn begin(
 ) -> Result<ArchivePaths, AppError> {
     let base = base_path(history_root, input, now);
     let paths = ArchivePaths {
-        original: with_suffix(&base, "_original.gcode"),
-        output: with_suffix(&base, ".gcode"),
-        meta: with_suffix(&base, "_meta.json"),
+        original: with_suffix(&base, ORIGINAL_SUFFIX),
+        output: with_suffix(&base, OUTPUT_SUFFIX),
+        meta: with_suffix(&base, META_SUFFIX),
     };
     if let Some(dir) = paths.original.parent() {
         std::fs::create_dir_all(dir).map_err(|e| {
-            AppError::io(format!("建不出归档目录：{}", dir.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.archive.001",
+                &[("v1", &dir.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     crate::fsx::atomic::atomic_write(&paths.original, raw.as_bytes())?;
@@ -127,8 +157,11 @@ pub fn begin(
 /// 记录，用户的信息一个字都没丢（关键的原子性在原件那一笔上）。
 pub fn archive_output(paths: &ArchivePaths, output: &Path) -> Result<(), AppError> {
     std::fs::copy(output, &paths.output).map_err(|e| {
-        AppError::io(format!("复制输出到归档失败：{}", paths.output.display()))
-            .with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.002",
+            &[("v1", &paths.output.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     Ok(())
 }
@@ -137,6 +170,64 @@ pub fn archive_output(paths: &ArchivePaths, output: &Path) -> Result<(), AppErro
 pub fn write_meta(paths: &ArchivePaths, meta: &Meta) -> Result<(), AppError> {
     crate::fsx::atomic::atomic_write_json(&paths.meta, meta)
 }
+
+/// **最近一次处理用的是哪个切片器进程**（2026-10-20）—— 引导层认"我刚才切的那一份"
+/// 的取数口（见 [`Meta::slicer_pid`]）。
+///
+/// # 怎么找"最近"
+///
+/// - 日期目录名是 `YYYY-MM-DD`，**字典序 = 时间序** ⇒ 倒着排即可；
+/// - 同一天里按文件名倒序（名字尾巴是 `YYYYMMDD_HHMMSS`，同样是字典序）；
+/// - ★ **只认 `accept` 认下的 pid**：进程号会失效（切片器重启 / 关掉），
+///   旧记录里那个号可能已经不属于任何切片器了 —— 判"它还是不是切片器"是**调用方**
+///   的事（那半在 `crate::ax`），这里只负责按时间倒序把它递过去。
+///   ⇒ 于是"最近那条记录的号已经死了"时会自然落到**上一条还活着**的记录上。
+///
+/// # 代价
+///
+/// 只翻最近 [`SCAN_LIMIT`] 份记录（再多就没有意义了：越旧越不可能还在跑），
+/// 每份只读一个 JSON 的 `slicer_pid` 一格。
+pub fn latest_slicer_pid(history_root: &Path, accept: impl Fn(i32) -> bool) -> Option<i32> {
+    let mut days: Vec<_> = std::fs::read_dir(history_root)
+        .ok()?
+        .flatten()
+        .filter(|d| d.path().is_dir())
+        .map(|d| d.file_name().to_string_lossy().into_owned())
+        .collect();
+    days.sort_unstable();
+    days.reverse();
+
+    let mut seen = 0usize;
+    for day in days {
+        let mut metas: Vec<_> = std::fs::read_dir(history_root.join(&day))
+            .ok()?
+            .flatten()
+            .filter(|f| f.file_name().to_string_lossy().ends_with(META_SUFFIX))
+            .map(|f| f.file_name().to_string_lossy().into_owned())
+            .collect();
+        metas.sort_unstable();
+        metas.reverse();
+        for name in metas {
+            if seen >= SCAN_LIMIT {
+                return None;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(history_root.join(&day).join(&name)).ok()?;
+            let pid = serde_json::from_str::<serde_json::Value>(&text)
+                .ok()?
+                .get("slicerPid")
+                .and_then(|v| v.as_i64())
+                .and_then(|v| i32::try_from(v).ok());
+            if let Some(pid) = pid.filter(|p| accept(*p)) {
+                return Some(pid);
+            }
+        }
+    }
+    None
+}
+
+/// 认"最近那份"时最多翻几条记录（见 [`latest_slicer_pid`]）。
+const SCAN_LIMIT: usize = 30;
 
 /// 一份文件的事实（`detail.inputFile` / `detail.outputFile`）。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -177,6 +268,24 @@ pub struct PipelineStep {
     pub message: String,
     pub elapsed_ms: u64,
     pub status: PipelineStatus,
+    /// 这一步自报的多行事实（照旧版 `pipeline[].detail` 的形状：`\n` 分行，
+    /// 报告页在步骤名下铺小字）。没有素材的步不写这个键。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    /// 同样的几行事实，**按字典键 + 参数**存（2026-10-26）。
+    ///
+    /// 记录里不该存某一刻的句子：同一份 `_meta.json` 现在既能给中文界面读，也能给英文界面读。
+    /// `detail` 留着只为老记录（那时只存了句子），新记录一律 `detail_lines`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail_lines: Option<Vec<StepLine>>,
+}
+
+/// 步骤明细里的一行：一个键 + 它的参数。渲染在界面（`tr(key, args)`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+pub struct StepLine {
+    pub key: &'static str,
+    #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub args: std::collections::BTreeMap<String, String>,
 }
 
 /// 步骤状态：成功跑完 / 在这一步失败 / 在这一步被取消。
@@ -190,12 +299,19 @@ pub enum PipelineStatus {
 
 impl PipelineStep {
     /// 由内核的逐步耗时（[`postprocess::pipeline::StepTiming`]）构账。
-    pub fn from_timing(t: &postprocess::pipeline::StepTiming, status: PipelineStatus) -> Self {
+    pub fn from_timing(
+        t: &postprocess::pipeline::StepTiming,
+        status: PipelineStatus,
+        detail: Option<String>,
+        detail_lines: Option<Vec<StepLine>>,
+    ) -> Self {
         Self {
             id: t.step.id(),
             message: t.message.clone(),
             elapsed_ms: t.elapsed_ms,
             status,
+            detail,
+            detail_lines,
         }
     }
 }
@@ -207,6 +323,81 @@ impl PipelineStep {
 pub const PRINT_TIME_COMPUTING: &str = "computing";
 pub const PRINT_TIME_READY: &str = "ready";
 pub const PRINT_TIME_FAILED: &str = "failed";
+
+/// 涂胶组（`detail.glue`）—— 键名照旧版 `_meta.json` 的 `detail` 同名搬
+/// （`glueTotalLength` / `penOffsetX` …），报告页按这些键取值。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GlueFacts {
+    pub glue_total_length: f64,
+    pub glue_pen_switches: i64,
+    pub glue_pass_count: i64,
+    /// mm/s（= 内核 `toolhead.max_speed` ÷ 60，全仓唯一的逆换算点）。
+    pub glue_speed: f64,
+    pub pen_offset_x: f64,
+    pub pen_offset_y: f64,
+    pub pen_offset_z: f64,
+    pub glue_z_lift_height: f64,
+    pub glue_z_lift_height_first_layers: f64,
+    pub glue_inter_model_lift_height: f64,
+    pub glue_z_offset: f64,
+    pub prime_trigger_layers: i64,
+    pub prime_total_length: f64,
+}
+
+/// 擦料塔组（`detail.tower`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TowerFacts {
+    pub tower_layers: i64,
+    pub tower_height: f64,
+    pub tower_extrude_ratio: f64,
+    pub tower_z_lift: f64,
+    pub tower_safe_z_offset: f64,
+    pub tower_travel_speed: f64,
+    pub fast_tower_mode: String,
+}
+
+/// 切片工艺组（`detail.slicer`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerFacts {
+    pub slicer_version: String,
+    pub machine_preset_name: String,
+    pub process_preset_name: String,
+    pub filament_type: String,
+    pub nozzle_diameter: f64,
+    pub slicer_ironing_enabled: bool,
+    pub ironing_mode: String,
+    pub ironing_threshold: f64,
+    pub tree_support: bool,
+    pub use_disk_wipe: bool,
+}
+
+/// **这一趟的参数快照**（2026-10-21，作者：「做那种快照机制 —— 我当时切片的时候的 TOML
+/// 和 IR 识别到的这种，对照一下看有没有错误的」）。
+///
+/// 为什么必须落在记录里、而不是"回头读当前预设"：用户切完往往会接着改预设
+/// （真机就是这样把擦料塔从 20 改到 101 的）。"当时用的是哪一份、程序认成了什么"
+/// 过了那一刻就再也查不到了。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamSnapshot {
+    /// 切片那一刻**预设 TOML 里读到的全量参数**（注册表 key → 控件看得懂的字符串）。
+    /// 顺序天然稳定（`BTreeMap`），于是两份记录可以逐行 diff。
+    pub params: std::collections::BTreeMap<String, String>,
+    /// **IR 终态原样**（内核 `Ir` 的 JSON）—— "程序实际认成了什么"。
+    ///
+    /// 不逐项映射到注册表 key：那需要一张 70 多项的对照表，写一份就多一份会漂的东西；
+    /// 报告页把这份 JSON 摆成可折叠的原文，排查时直接比对即可。
+    pub ir: serde_json::Value,
+    /// **这一份预设里读不出来的参数**（中文名）—— 相对它最初的原文镜像比的。
+    ///
+    /// 空 = 一项不缺。非空时报告页要说清"这一盘有 N 项用了默认值"（2026-10-21 作者：
+    /// 「报告页面能看到这些对应的错误」）—— 缺项不报错，但结果一定不是用户想的那样。
+    #[serde(default)]
+    pub missing: Vec<String>,
+}
 
 /// 文件事实 + 统计 + 打印时间（报告页详情区的那几块）。
 #[derive(Debug, Clone, serde::Serialize)]
@@ -221,12 +412,114 @@ pub struct Detail {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<serde_json::Value>,
     /// 打印时间估算（`printtime::Result` 原样序列化）。延后时先为 `None`，
-    /// 由 [`complete_print_time`] 补全。
+    /// 由 [`complete_meta`] 补全。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_time: Option<serde_json::Value>,
     /// 打印时间估算的状态。**不延后时不写这个键**（老记录形态不变）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub print_time_status: Option<String>,
+    /// 估算出的打印秒数（与旧版 `_meta.json` 的 `detail.estimatedPrintSeconds` 同名）——
+    /// 报告页拿它与切片器原话比「多了多久」。延后估算时先缺键，[`complete_meta`] 补。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub estimated_print_seconds: Option<f64>,
+    /// 涂胶组（`detail.glue`）。失败 / 取消没有 IR 终态 ⇒ 不写这一格
+    /// （页面口径：后端没给就不摆，不编占位值）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub glue: Option<GlueFacts>,
+    /// 擦料塔组（`detail.tower`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tower: Option<TowerFacts>,
+    /// 切片工艺组（`detail.slicer`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub slicer: Option<SlicerFacts>,
+    /// 校准件身份证据链（`detail.calibration`，2026-10-18）。
+    ///
+    /// **只加不改**：旧记录读到 `null` ⇒ 前端整块不摆（与 `slicer` / `tower` / `relocation`
+    /// 同一套习惯）。普通模型那一趟恒为 `null`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub calibration: Option<CalibrationFacts>,
+    /// **参数快照**（`detail.snapshot`，2026-10-21）：预设 TOML 读到的全量参数 + IR 终态。
+    ///
+    /// 只加不改：旧记录没有这个键 ⇒ 报告页整组不摆（不编）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<ParamSnapshot>,
+}
+
+/// **校准件这一趟的证据链**（2026-10-18）。
+///
+/// 作者原话：「每次处理拿到了什么、从哪里拿到、怎么判断、最终用了什么，都留下记录。
+/// 以后出现识别错误、模型版本不对、参数不匹配，都能回头查清楚。」
+///
+/// 所以这一组回答五件事，**成功与失败都写**：
+///
+/// | 问题 | 字段 |
+/// | --- | --- |
+/// | 原始模型是哪个文件、还在不在 | [`ModelOrigin`] |
+/// | 3MF 说的是什么 | `identity_3mf` |
+/// | 怎么判的 | `verdict` + `note` |
+/// | 实测多大、命中哪一档、容差多少 | `measured` / `profile_id` / `tolerance` / `footprint` |
+/// | 最终采用什么身份 | `mode` |
+///
+/// 形状注意：`identity_3mf` 存的是**原值**（可能是旧写法
+/// `ZOffset Calibration`），不做归一 —— 排查时要看的就是"它当时到底写了什么"。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalibrationFacts {
+    /// 原始模型路径与存在性（值来自切片器临时目录的 `origin.txt`）。
+    #[serde(flatten)]
+    pub origin: postprocess::gcode::ModelOrigin,
+    /// 3MF `MKPSE:Calibration` 的原值；读不到 = `null`。
+    pub identity_3mf: Option<String>,
+    /// `from_3mf`（3MF 里有身份）/ `absent`（没有、或读不到，原因见 `note`）。
+    ///
+    /// **只有这两种**：G-code 那一路来源已整条删除（2026-10-18），不再有
+    /// `only_gcode` / `conflict` 这些格里解释得通、实际却永远出现不了的值。
+    pub verdict: String,
+    /// 读不到的原因（人可读、一条）。不是错误，只是解释。
+    pub note: Option<String>,
+    /// 实测挤出包围盒 `[xMin, xMax, yMin, yMax]`（mm）；经典分支拿不到 = `null`。
+    pub measured: Option<[f64; 4]>,
+    /// 命中的档 id（`calibration_models.toml` 的 `[[models]] id`）。
+    pub profile_id: Option<String>,
+    /// 该档的尺寸容差（mm）。
+    pub tolerance: Option<f64>,
+    /// 该档声明的标称外形 `[宽, 高]`。
+    pub footprint: Option<[f64; 2]>,
+    /// 最终采用的校准身份（`ZOffset` / `Precise` / `Rough` / `Repetition`；无 = `null`）。
+    pub mode: Option<String>,
+}
+
+/// **挪塔这件事的记录**（2026-10-18）。
+///
+/// 报告页 / 执行记录照着它回答四件事：**用户当时选了什么**、塔从哪挪到哪、
+/// 挪了多少毫米、挪完复检过没过。作者原话：「我需要你把塔移动的记录进报告里面，
+/// 就是怎么移动，多少距离，用户选择自动移动吗？还是选了自己去移动模型停止了」。
+///
+/// 只有真的走到那一问时才落；别的记录 `null`（旧记录读到 `null` ⇒ 整块不摆）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocationRecord {
+    /// 用户选了什么：`relocate`（自动挪塔）/ `model`（自己挪模型）/ `timeout`（没答）/ `unavailable`（板上没位）
+    pub choice: String,
+    /// 塔左下角，挪之前（mm，**不取整**）
+    pub from: [f64; 2],
+    /// 塔左下角，挪之后；没挪 = `null`
+    pub to: Option<[f64; 2]>,
+    /// 直线位移（mm）；没挪 = `null`
+    pub moved_mm: Option<f64>,
+    /// 挪之前的冲突点数
+    pub before_conflict_count: i64,
+    /// 挪完复检的冲突点数（没挪 = `null`）
+    pub after_conflict_count: Option<i64>,
+    /// 挪完复检过没过（`null` = 没挪，谈不上复检）
+    pub verified: Option<bool>,
+    /// 这一趟用的塔高（mm）—— 斜肋塔的底座随它变大，记下来免得下次复盘时对不上
+    pub tower_height_mm: f64,
+    /// **挪之前那一份碰撞事实**（2026-10-18）：报告页拿它 + `to` 画"现在 / 挪后"两幅
+    /// 俯视图（作者：「成功挪塔的也可以显示，画出来碰撞位置，就是把后处理的那两个板子
+    /// 也做进报告页面」）。成功那趟 `Meta.collision` 是 `null`（撞了就走不到成功出口），
+    /// 所以事实必须跟着记录走，不能只靠 `collision` 那一格。
+    pub before: Option<postprocess::postproc::disk::collision::CollisionFacts>,
 }
 
 /// 一份执行记录（`_meta.json`）。
@@ -242,12 +535,53 @@ pub struct Meta {
     pub machine_type: String,
     pub preset_path: String,
     pub gcode_path: String,
+    /// **3MF 模型名**（`帕姆.3mf` → `帕姆`）—— 钩子在 G-code 还在切片器临时目录里时
+    /// 从旁边的 `origin.txt` / 同名 zip / `_temp_1.config` 取（三级兜底，见
+    /// `postprocess::gcode::model_name`），过了那一刻就永远拿不到了。
+    ///
+    /// 与 `error` 同一档：**落 `null` 而不是缺键** —— 这一格是报告页的契约（列表行与
+    /// 「结论 → 文件」都读它），"没有名字"与"老记录里没有这个键"是两件事。
+    pub model_name: Option<String>,
+    /// **这一趟是**哪个切片器进程**拉起来的**（2026-10-20）—— 钩子模式下父进程就是
+    /// 那一趟切片的 Bambu Studio（见 [`crate::parent`]）。
+    ///
+    /// 为什么要记它：BBS 会**多开**，而"改完参数要回哪一份去重新切片"只有它答得准 ——
+    /// "窗口排在最前那份"会挑错（用户可能切着 A 份、手上点着 B 份）。
+    /// 引导层读最近一条记录的这一格 ⇒ 认出"最后处理用的是哪个 BBS"。
+    ///
+    /// ★ **只加不改**：旧记录没有这个键 ⇒ 读到 `null` ⇒ 引导退回"最前那份"，
+    /// 与 `collision` / `relocation` 同一套习惯。**拿不到就落 `null`，不编数**。
+    pub slicer_pid: Option<i32>,
     pub invocation: Invocation,
     pub warnings: Vec<String>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
     pub error: Option<String>,
+    /// 那句"为什么没成"的**字典键**（2026-10-27）。有了它，报告页就能按当前语言
+    /// 重说一遍 —— 记录里不再只剩某一刻的那一句。老记录没有这一格。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_key: Option<String>,
+    /// 上面那条的占位符值（原始事实，不是词）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_args: Option<std::collections::BTreeMap<String, String>>,
     pub cancelled: bool,
     pub pipeline: Vec<PipelineStep>,
+    /**
+     * **碰撞那一趟的额外一格**（2026-10-18；只有 `E_GCODE_COLLISION_001` 会写）。
+     *
+     * 报告页拿它回答"撞在哪、往哪挪多少"（建议那句的码与正文也在里面），并画一张
+     * 俯视图。别的失败 / 成功记录一律 `null` —— 于是"有没有这两块"是数据说了算。
+     *
+     * 键是**新增**的（旧记录没有 ⇒ 读到 `null` ⇒ 整组不摆），不碰任何旧键。
+     */
+    pub collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+    /// **挪塔记录**（2026-10-18）：走到了那一问才有，别的一律 `null`。
+    pub relocation: Option<RelocationRecord>,
+    /// **模型俯视几何**（2026-10-27）：报告页擦料塔那一栏的俯视图拿它画"模型在板上
+    /// 占哪一块"—— 与碰撞那一屏同一套画法、同一个来源（内核 `model_map_facts`）。
+    ///
+    /// 为什么单独一格：成功那趟 `collision` 恒为 `null`，而作者要看的正是成功那趟。
+    /// 也是**新增键**：旧记录读到 `null` ⇒ 那幅图退回"从头算一遍"（见 `ipc::report`）。
+    pub model_map: Option<postprocess::postproc::disk::collision::ModelMapFacts>,
     pub detail: Detail,
 }
 
@@ -255,14 +589,417 @@ impl Meta {
     pub const SCHEMA_VERSION: u32 = 2;
 }
 
+/// 组装「三组分包（glue / tower / slicer）+ 每步细节」要的全部素材 ——
+/// **都是这条链上已经在手的事实**（内核搬出来的 IR 终态 / 统计 / 头部事实，
+/// 加上调用方手上的行数与路径）。这里只做搬运与文案，不新算任何值。
+pub struct ReportFacts<'a> {
+    /// 预设文件名（`job.toml` 的最后一段；拿不到就是空串）。
+    pub preset_name: &'a str,
+    pub input_lines: u64,
+    pub input_bytes: u64,
+    pub input_sha256: &'a str,
+    /// 输出文件大小（盘上 stat 一次；stat 不到就是 `None` —— 文案少一行，不编数）。
+    pub output_bytes: Option<u64>,
+    /// 是不是原地覆盖（输出写回输入那一份）。
+    pub in_place: bool,
+    /// IR 终态（内核 `DetailFacts.ir`）。
+    pub ir: &'a postprocess::ir::Ir,
+    /// pass1 统计（`ProcessStats`）。
+    pub stats: &'a postprocess::postproc::pass1::ProcessStats,
+    /// pass2 口径的塔高（内核 `Stats.tower_height`）。
+    pub tower_height: f64,
+    /// 输入头部刮出来的 5 个事实（内核 `HeaderFacts`）。
+    pub header: &'a postprocess::pipeline::HeaderFacts,
+    /// 校准模式串（非校准模式是空串）。
+    pub calibration_mode: &'a str,
+    /// **切片那一刻预设 TOML 里的全量参数**（注册表 key → 值）。
+    ///
+    /// 由调用方读文本 + 注册表算好交进来（archive 只搬运，不碰 catalog）——
+    /// 拿不到（读不出文本 / 注册表缺失 / 失败路径）就是 `None` ⇒ 快照整组不摆。
+    pub preset_params: Option<&'a std::collections::BTreeMap<String, String>>,
+    /// 这一份预设里**读不出来的参数**（中文名，相对最初的原文镜像比；空 = 一项不缺）。
+    pub preset_missing: &'a [String],
+    /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
+    pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
+}
+
+/// 涂胶速度（mm/s）：内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
+/// 旧版 `glueSpeed` 是 mm/s —— 除回来，不新造数。
+///
+/// ★ **全仓唯一的换算点**：归档这份（[`ReportFacts::glue`]）与钩子一开场报的
+/// `FactsPayload.glue_speed` 都走这里（两处各写一遍迟早会对不上）。
+pub fn glue_speed_of(ir: &postprocess::ir::Ir) -> f64 {
+    ir.toolhead.max_speed / 60.0
+}
+
+impl ReportFacts<'_> {
+    /// **参数快照**（2026-10-21）：预设 TOML 那一份 + IR 终态那一份。
+    ///
+    /// 缺任何一半都不摆 —— 只有 IR 没有 TOML 就谈不上"对照"，
+    /// 而 IR 又序列化不了（不该发生）时给个空对象也不如不给。
+    pub fn snapshot(&self) -> Option<ParamSnapshot> {
+        let params = self.preset_params?.clone();
+        let ir = serde_json::to_value(self.ir).ok()?;
+        Some(ParamSnapshot {
+            params,
+            ir,
+            missing: self.preset_missing.to_vec(),
+        })
+    }
+
+    /// 涂胶组。
+    pub fn glue(&self) -> GlueFacts {
+        let ir = self.ir;
+        GlueFacts {
+            glue_total_length: self.stats.glue_total_length,
+            // 旧版 `gluePenSwitches` ← `GlueCutterChanges`（换笔 = 切刀次数）。
+            glue_pen_switches: self.stats.glue_cutter_changes,
+            glue_pass_count: ir.glue.pass_count,
+            glue_speed: glue_speed_of(ir),
+            pen_offset_x: ir.toolhead.x_offset,
+            pen_offset_y: ir.toolhead.y_offset,
+            pen_offset_z: ir.toolhead.z_offset,
+            glue_z_lift_height: ir.glue.z_lift_height,
+            glue_z_lift_height_first_layers: ir.glue.z_lift_height_first_layers,
+            glue_inter_model_lift_height: ir.glue.inter_model_lift_height,
+            glue_z_offset: ir.glue.z_offset,
+            prime_trigger_layers: ir.prime.trigger_layers,
+            prime_total_length: self.stats.prime_total_length,
+        }
+    }
+
+    /// 擦料塔组。
+    pub fn tower(&self) -> TowerFacts {
+        let ir = self.ir;
+        TowerFacts {
+            // 塔层数只认 IR 终态：pass2 每写一层塔 +1（`ir.tower.layer_count`），
+            // 与旧版 `detail.towerLayers ← irData.Tower.LayerCount` 同一个来源。
+            tower_layers: ir.tower.layer_count,
+            tower_height: self.tower_height,
+            tower_extrude_ratio: ir.tower.extrude_ratio,
+            tower_z_lift: ir.tower.safe_z_offset,
+            tower_safe_z_offset: ir.tower.safe_z_offset,
+            tower_travel_speed: ir.tower.travel_speed,
+            fast_tower_mode: ir.tower.fast_mode.clone(),
+        }
+    }
+
+    /// 切片工艺组。
+    pub fn slicer(&self) -> SlicerFacts {
+        let ir = self.ir;
+        SlicerFacts {
+            slicer_version: self.stats.slicer_version.clone(),
+            machine_preset_name: self.header.machine_preset_name.clone(),
+            process_preset_name: self.header.process_preset_name.clone(),
+            filament_type: ir.filament.filament_type.clone(),
+            nozzle_diameter: ir.machine.nozzle_diameter,
+            slicer_ironing_enabled: self.header.slicer_ironing_enabled,
+            ironing_mode: ir.ironing.mode.clone(),
+            ironing_threshold: ir.ironing.e_sum_threshold,
+            tree_support: ir.machine.tree_support,
+            use_disk_wipe: self.use_disk_wipe(),
+        }
+    }
+
+    /// 这一盘是不是圆盘擦拭（旧版 `detail.useDiskWipe` 的判据）。
+    fn use_disk_wipe(&self) -> bool {
+        self.ir.wiping.mode == postprocess::ir::WIPING_MODE_DISK
+    }
+
+    /// 一条步骤的多行事实，**每行一个字典键 + 参数**（2026-10-26）。
+    ///
+    /// 记录里存事实，不存句子：同一份 `_meta.json` 中文界面、英文界面各读各的。
+    /// 老记录只有 `detail`（当年那句中文），界面那边回落。
+    ///
+    /// 参数值是**原始事实**（`disk` / `true` / `0.70`），不是任何语言里的词 ——
+    /// 词的映射在界面上（`PageReport` 的 `argText`）。
+    ///
+    /// 没有素材的步返回 `None`（键直接不写）：
+    /// - `calib-check`：包围盒 / 质心是管线局部量、没出过门，不编；
+    /// - `printtime`：只有一段耗时，报告页的「打印」组已经摆了它的结果。
+    pub fn step_detail_lines(&self, step: Step) -> Option<Vec<StepLine>> {
+        let line = |key: &'static str, args: &[(&str, &str)]| StepLine {
+            key,
+            args: args
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        };
+        let plain = |key: &'static str| StepLine {
+            key,
+            args: std::collections::BTreeMap::new(),
+        };
+        match step {
+            Step::Input => Some(vec![
+                line(
+                    "report.line.readLines",
+                    &[("lines", &self.input_lines.to_string())],
+                ),
+                line(
+                    "report.line.fileSize",
+                    &[("size", &format!("{:.2}", mib(self.input_bytes)))],
+                ),
+                line(
+                    "report.line.sha",
+                    &[(
+                        "sha",
+                        &self.input_sha256.chars().take(8).collect::<String>(),
+                    )],
+                ),
+            ]),
+            Step::Config => (!self.preset_name.is_empty())
+                .then(|| vec![line("report.line.preset", &[("name", self.preset_name)])]),
+            Step::MachineDetect => Some(vec![
+                line(
+                    "report.line.gcodeMachine",
+                    &[("name", non_empty(&self.ir.machine.gcode_machine_type))],
+                ),
+                line(
+                    "report.line.presetMachine",
+                    &[("name", &self.ir.machine.machine_type)],
+                ),
+                line(
+                    "report.line.bed",
+                    &[
+                        (
+                            "w",
+                            &format!("{:.0}", self.ir.machine.max_x - self.ir.machine.min_x),
+                        ),
+                        (
+                            "h",
+                            &format!("{:.0}", self.ir.machine.max_y - self.ir.machine.min_y),
+                        ),
+                    ],
+                ),
+                line(
+                    "report.line.zones",
+                    &[("count", &self.ir.machine.forbidden_zones.len().to_string())],
+                ),
+            ]),
+            Step::Parse => Some(vec![
+                line(
+                    "report.line.machine",
+                    &[("name", non_empty(&self.ir.machine.gcode_machine_type))],
+                ),
+                line(
+                    "report.line.filament",
+                    &[("name", &self.ir.filament.filament_type)],
+                ),
+                line("report.line.slicer", &[("name", &self.ir.filament.slicer)]),
+            ]),
+            Step::Support => Some(vec![
+                plain(if self.ir.machine.tree_support {
+                    "report.line.supportTree"
+                } else {
+                    "report.line.supportNormal"
+                }),
+                plain(match self.ir.ironing.mode.as_str() {
+                    "off" => "report.line.ironingOff",
+                    "on" => "report.line.ironingOn",
+                    _ => "report.line.ironingAuto",
+                }),
+                line(
+                    "report.line.ironingThreshold",
+                    &[("pct", &format!("{:.1}", self.ir.ironing.coverage_threshold))],
+                ),
+            ]),
+            Step::Collision => {
+                let mut lines: Vec<StepLine> = Vec::new();
+                // 只有非校准模式这一步真跑碰撞检测（`need_collision_check`）；
+                // 过到这儿就是没碰撞 —— 校准模式没跑过，不许写这句结论。
+                if self.calibration_mode.is_empty() {
+                    lines.push(plain("report.line.collisionOk"));
+                    lines.push(plain("report.line.inRange"));
+                }
+                lines.push(line(
+                    "report.line.towerType",
+                    &[(
+                        "type",
+                        if self.use_disk_wipe() {
+                            "disk"
+                        } else {
+                            "tower"
+                        },
+                    )],
+                ));
+                lines.push(line(
+                    "report.line.towerPos",
+                    &[
+                        ("x", &format!("{:.1}", self.ir.wiping.wiper_x)),
+                        ("y", &format!("{:.1}", self.ir.wiping.wiper_y)),
+                    ],
+                ));
+                Some(lines)
+            }
+            Step::CalibCheck => {
+                /* 这一步原来恒为 `None`（只跑 dry-run、什么事实都不留）。现在把认档结果
+                摆出来：**成功那趟也写** —— 否则"为什么这次用了加长版的基准"没法解释。
+                只写事实，不写结论（结论在 `detail.calibration` 那一组里）。 */
+                let r = self.calibration_receipt?;
+                let mut lines = Vec::new();
+                if let Some(b) = r.measured {
+                    lines.push(line(
+                        "report.line.calibBox",
+                        &[
+                            ("w", &format!("{:.4}", b.x_max - b.x_min)),
+                            ("h", &format!("{:.4}", b.y_max - b.y_min)),
+                            ("x0", &format!("{:.4}", b.x_min)),
+                            ("x1", &format!("{:.4}", b.x_max)),
+                            ("y0", &format!("{:.4}", b.y_min)),
+                            ("y1", &format!("{:.4}", b.y_max)),
+                        ],
+                    ));
+                }
+                match (&r.profile_id, r.footprint, r.tolerance) {
+                    (Some(id), Some((w, h)), Some(tol)) => lines.push(line(
+                        "report.line.calibHitSpec",
+                        &[
+                            ("id", &id.to_string()),
+                            ("w", &w.to_string()),
+                            ("h", &h.to_string()),
+                            ("tol", &tol.to_string()),
+                        ],
+                    )),
+                    (Some(id), _, _) => lines.push(line("report.line.calibHit", &[("id", id)])),
+                    _ => lines.push(plain("report.line.calibClassic")),
+                }
+                Some(lines)
+            }
+            Step::Pass1 => {
+                let mut lines = vec![
+                    line(
+                        "report.line.layersIndexed",
+                        &[("count", &self.stats.total_layer_number.to_string())],
+                    ),
+                    line(
+                        "report.line.passes",
+                        &[("count", &self.ir.glue.pass_count.to_string())],
+                    ),
+                ];
+                lines.push(if self.ir.toolhead.first_pen_revitalization_flag {
+                    line(
+                        "report.line.primeOn",
+                        &[
+                            ("perModel", yes_no_raw(self.ir.prime.per_model)),
+                            ("everyLayer", yes_no_raw(self.ir.prime.every_layer)),
+                        ],
+                    )
+                } else {
+                    plain("report.line.primeOff")
+                });
+                Some(lines)
+            }
+            Step::Pass2 => Some(vec![
+                line(
+                    "report.line.towerLayers",
+                    &[("count", &self.ir.tower.layer_count.to_string())],
+                ),
+                line(
+                    "report.line.towerHeight",
+                    &[("v", &format!("{:.2}", self.tower_height))],
+                ),
+                line(
+                    "report.line.towerType",
+                    &[(
+                        "type",
+                        if self.use_disk_wipe() {
+                            "disk"
+                        } else {
+                            "tower"
+                        },
+                    )],
+                ),
+                line(
+                    "report.line.lift",
+                    &[("v", &format!("{:.1}", self.ir.tower.safe_z_offset))],
+                ),
+                line(
+                    "report.line.rib",
+                    &[("on", yes_no_raw(self.ir.wiping.outer_structure == "rib"))],
+                ),
+                line(
+                    "report.line.disc",
+                    &[("on", yes_no_raw(self.use_disk_wipe()))],
+                ),
+                plain("report.line.writeDone"),
+            ]),
+            Step::Calibration => {
+                let mut lines = vec![line(
+                    "report.line.calibMode",
+                    &[("v", self.calibration_mode)],
+                )];
+                match self.ir.safety.calibration_execution_mode.as_str() {
+                    "direct_calibrate" => lines.push(plain("report.line.execDirect")),
+                    "print_then_calibrate" => lines.push(plain("report.line.execPrintThen")),
+                    _ => {}
+                }
+                lines.push(plain("report.line.calibInserted"));
+                Some(lines)
+            }
+            Step::Write => Some(vec![line(
+                "report.line.write",
+                &[
+                    ("how", if self.in_place { "inPlace" } else { "newFile" }),
+                    (
+                        "size",
+                        &format!("{:.2}", mib(self.output_bytes.unwrap_or(0))),
+                    ),
+                ],
+            )]),
+            Step::PrintTime => None,
+        }
+    }
+}
+
+/// 字节 → MB（÷ 1024²，与前端 `mb()` 同一个数）。
+fn mib(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0
+}
+
+/// 原始布尔（记录里不存"是/否"这种词，词的映射在界面）。
+fn yes_no_raw(v: bool) -> &'static str {
+    if v {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+/// 是 / 否（旧版 `BoolToCN`）。
+#[allow(dead_code)]
+fn yes_no(v: bool) -> &'static str {
+    if v {
+        "是"
+    } else {
+        "否"
+    }
+}
+
+/// 空串兜底：机型认不出时内核写 `UNKNOWN`，但空串也要有个说法 —— 文案不留空。
+fn non_empty(s: &str) -> &str {
+    if s.is_empty() {
+        "UNKNOWN"
+    } else {
+        s
+    }
+}
+
 /// 读一份文件的 sha256（输入 / 输出的事实）。
 pub fn sha256_of(path: &Path) -> Result<String, AppError> {
     let mut file = std::fs::File::open(path).map_err(|e| {
-        AppError::io(format!("读不到文件：{}", path.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.003",
+            &[("v1", &path.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     let mut hasher = sha2::Sha256::new();
     std::io::copy(&mut file, &mut hasher).map_err(|e| {
-        AppError::io(format!("读文件失败：{}", path.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.archive.004",
+            &[("v1", &path.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     Ok(format!("{:x}", hasher.finalize()))
 }
@@ -274,7 +1011,11 @@ pub fn sha256_of(path: &Path) -> Result<String, AppError> {
 pub fn file_fact(path: &Path, lines: Option<u64>, sha256: String) -> Result<FileFact, AppError> {
     let size_bytes = std::fs::metadata(path)
         .map_err(|e| {
-            AppError::io(format!("读不到文件事实：{}", path.display())).with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.archive.005",
+                &[("v1", &path.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?
         .len();
     Ok(FileFact {
@@ -333,21 +1074,28 @@ pub fn complete_meta(
     output_file: Option<FileFact>,
     print_time: Option<serde_json::Value>,
 ) -> Result<(), AppError> {
-    let text = std::fs::read_to_string(meta_path)
-        .map_err(|e| AppError::io("这条记录读不出来（补全前）").with_detail(e.to_string()))?;
+    let text = std::fs::read_to_string(meta_path).map_err(|e| {
+        AppError::io(messages::text("ui.archive.006", &[])).with_detail(e.to_string())
+    })?;
     let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
-        AppError::corrupted("这条记录不是合法的 JSON（补全前）").with_detail(e.to_string())
+        AppError::corrupted(messages::text("ui.archive.007", &[])).with_detail(e.to_string())
     })?;
     {
         let Some(obj) = meta.as_object_mut() else {
-            return Err(AppError::corrupted("这条记录不是 JSON 对象"));
+            return Err(AppError::corrupted(messages::text("ui.archive.008", &[])));
         };
         let detail = obj.entry("detail").or_insert_with(|| serde_json::json!({}));
         if let Some(of) = output_file {
-            detail["outputFile"] = serde_json::to_value(of)
-                .map_err(|e| AppError::io("输出事实序列化失败").with_detail(e.to_string()))?;
+            detail["outputFile"] = serde_json::to_value(of).map_err(|e| {
+                AppError::io(messages::text("ui.archive.009", &[])).with_detail(e.to_string())
+            })?;
         }
         if let Some(pt) = print_time {
+            // 估算秒数与 printTime 同批落：`detail.estimatedPrintSeconds` 是旧版同名的
+            // 单列数字（报告页拿它算「比切片器预估多了多久」）。
+            if let Some(total) = pt.get("totalSeconds").and_then(|v| v.as_f64()) {
+                detail["estimatedPrintSeconds"] = serde_json::json!(total);
+            }
             detail["printTime"] = pt;
         }
         obj.insert(
@@ -361,10 +1109,12 @@ pub fn complete_meta(
 /// 估算失败（或文件已经不在）时把状态标成 `failed` —— **不许留着 `computing`**，
 /// 否则报告页会一直显示"正在估算"。
 pub fn mark_print_time_failed(meta_path: &Path) -> Result<(), AppError> {
-    let text = std::fs::read_to_string(meta_path)
-        .map_err(|e| AppError::io("这条记录读不出来").with_detail(e.to_string()))?;
-    let mut meta: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|e| AppError::corrupted("这条记录不是合法的 JSON").with_detail(e.to_string()))?;
+    let text = std::fs::read_to_string(meta_path).map_err(|e| {
+        AppError::io(messages::text("ui.archive.010", &[])).with_detail(e.to_string())
+    })?;
+    let mut meta: serde_json::Value = serde_json::from_str(&text).map_err(|e| {
+        AppError::corrupted(messages::text("ui.archive.011", &[])).with_detail(e.to_string())
+    })?;
     if let Some(obj) = meta.as_object_mut() {
         obj.insert(
             "printTimeStatus".to_string(),
@@ -415,6 +1165,8 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&paths.meta).unwrap()).unwrap();
         assert_eq!(back["printTimeStatus"], "ready");
         assert_eq!(back["detail"]["printTime"]["segments"], 708937);
+        // 估算秒数与 printTime 同批补上（旧版同名的单列数字，报告页拿它比对）
+        assert_eq!(back["detail"]["estimatedPrintSeconds"], 17046.8);
         // 其余字段必须原样保留（读-改-写，不重建整份记录）
         assert_eq!(back["elapsedMs"], 1234);
         assert_eq!(back["detail"]["stats"]["glueLayerCount"], 7);
@@ -509,10 +1261,367 @@ mod tests {
         );
     }
 
+    /// **归组口径**：三件套里任意一个文件名都能还原到同一条记录的基名
+    /// （自动清理按它把散文件归回一组，删就整条删）；不是三件套的东西不认。
+    #[test]
+    fn record_base_groups_the_trio_and_rejects_outsiders() {
+        let base = "63288.1_20261009_220851";
+        for name in [
+            format!("{base}_original.gcode"),
+            format!("{base}.gcode"),
+            format!("{base}_meta.json"),
+        ] {
+            assert_eq!(record_base(&name), Some(base), "{name} 归不回同一条记录");
+        }
+        /* 名前缀自己带 `_original` 的原件：剥的必须是**最后那个后缀**，前缀原样留着 */
+        assert_eq!(
+            record_base("x_original_20261009_220851_original.gcode"),
+            Some("x_original_20261009_220851")
+        );
+        /* 不是三件套的东西（临时文件 / 用户塞进来的）不认 —— 清理一个都不碰 */
+        assert_eq!(record_base("notes.txt"), None);
+        assert_eq!(record_base("readme"), None);
+        assert_eq!(record_base(""), None);
+    }
+
+    /// 造一份「成功记录」的报告素材（判据共用）：IR 只填被读到的那些字段。
+    struct Sample {
+        ir: postprocess::ir::Ir,
+        stats: postprocess::postproc::pass1::ProcessStats,
+        header: postprocess::pipeline::HeaderFacts,
+        preset_name: String,
+        sha: String,
+    }
+
+    impl Sample {
+        fn facts(&self) -> ReportFacts<'_> {
+            ReportFacts {
+                preset_name: &self.preset_name,
+                input_lines: 909_465,
+                input_bytes: 23_758_782,
+                input_sha256: &self.sha,
+                output_bytes: Some(24_000_000),
+                in_place: true,
+                ir: &self.ir,
+                stats: &self.stats,
+                tower_height: 6.46,
+                header: &self.header,
+                calibration_mode: "",
+                calibration_receipt: None,
+                /* 判据不摆快照（要摆的那条专门测，见 `snapshot_carries_toml_and_ir`） */
+                preset_params: None,
+                preset_missing: &[],
+            }
+        }
+    }
+
+    fn sample() -> Sample {
+        let mut ir = postprocess::ir::Ir::default();
+        ir.toolhead.max_speed = 5400.0; // = 90 mm/s × 60
+        ir.glue.pass_count = 1;
+        ir.glue.z_lift_height = 5.0;
+        ir.glue.z_lift_height_first_layers = 6.0;
+        ir.glue.inter_model_lift_height = 2.0;
+        ir.glue.z_offset = -0.05;
+        ir.prime.trigger_layers = 30;
+        ir.tower.layer_count = 536;
+        ir.tower.extrude_ratio = 1.0;
+        ir.tower.safe_z_offset = 0.6;
+        ir.tower.travel_speed = 200.0;
+        ir.tower.fast_mode = "fast".into();
+        ir.wiping.mode = postprocess::ir::WIPING_MODE_DISK.into();
+        ir.wiping.wiper_x = 20.0;
+        ir.wiping.wiper_y = 20.0;
+        ir.ironing.mode = "auto".into();
+        ir.ironing.e_sum_threshold = 7.9;
+        ir.ironing.coverage_threshold = 20.0;
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.gcode_machine_type = "A1Mini".into();
+        ir.machine.machine_type = "A1_MINI".into();
+        ir.machine.max_x = 180.0;
+        ir.machine.max_y = 180.0;
+        ir.filament.filament_type = "PETG".into();
+        ir.filament.slicer = "BambuStudio".into();
+
+        let stats = postprocess::postproc::pass1::ProcessStats {
+            glue_total_length: 344.836_999_999_999_76,
+            glue_cutter_changes: 1,
+            prime_total_length: 35.449,
+            slicer_version: "BambuStudio 02.06.01.55".into(),
+            total_layer_number: 539,
+            ..Default::default()
+        };
+
+        Sample {
+            ir,
+            stats,
+            header: postprocess::pipeline::HeaderFacts {
+                machine_preset_name: "Bambu Lab A1 mini 0.4 nozzle".into(),
+                process_preset_name: "0.20mm Standard @BBL A1M".into(),
+                slicer_ironing_enabled: false,
+                three_mf_file_name: ".65112.2_.gcode.3mf".into(),
+                model_name: Some("帕姆".into()),
+            },
+            preset_name: "A1MF.toml".into(),
+            sha: "dea417626c060af54c11e3613468153148046c81a57f358ea86d63805aacd771".into(),
+        }
+    }
+
+    /// 三组分包（`detail.glue/tower/slicer`）的键名照旧版 `_meta.json` **逐字搬** ——
+    /// 报告页按这些键取值，改一个键等于撕一处契约。
+    #[test]
+    fn glue_tower_slicer_keys_match_the_old_meta() {
+        let s = sample();
+        let facts = s.facts();
+
+        let glue = serde_json::to_value(facts.glue()).unwrap();
+        for key in [
+            "glueTotalLength",
+            "gluePenSwitches",
+            "gluePassCount",
+            "glueSpeed",
+            "penOffsetX",
+            "penOffsetY",
+            "penOffsetZ",
+            "glueZLiftHeight",
+            "glueZLiftHeightFirstLayers",
+            "glueInterModelLiftHeight",
+            "glueZOffset",
+            "primeTriggerLayers",
+            "primeTotalLength",
+        ] {
+            assert!(glue.get(key).is_some(), "涂胶组缺键：{key}");
+        }
+        assert_eq!(glue["glueSpeed"], 90.0, "mm/min ÷ 60 回旧版的 mm/s");
+        assert_eq!(glue["glueZOffset"], -0.05);
+        assert_eq!(glue["gluePenSwitches"], 1, "换笔 ← GlueCutterChanges");
+
+        let tower = serde_json::to_value(facts.tower()).unwrap();
+        for key in [
+            "towerLayers",
+            "towerHeight",
+            "towerExtrudeRatio",
+            "towerZLift",
+            "towerSafeZOffset",
+            "towerTravelSpeed",
+            "fastTowerMode",
+        ] {
+            assert!(tower.get(key).is_some(), "擦料塔组缺键：{key}");
+        }
+        assert_eq!(tower["towerLayers"], 536, "塔层数认 IR 终态");
+        assert_eq!(tower["towerHeight"], 6.46);
+
+        let slicer = serde_json::to_value(facts.slicer()).unwrap();
+        for key in [
+            "slicerVersion",
+            "machinePresetName",
+            "processPresetName",
+            "filamentType",
+            "nozzleDiameter",
+            "slicerIroningEnabled",
+            "ironingMode",
+            "ironingThreshold",
+            "treeSupport",
+            "useDiskWipe",
+        ] {
+            assert!(slicer.get(key).is_some(), "切片工艺组缺键：{key}");
+        }
+        assert_eq!(slicer["machinePresetName"], "Bambu Lab A1 mini 0.4 nozzle");
+        assert_eq!(slicer["useDiskWipe"], true);
+    }
+
+    /// 每步细节：有素材的步写多行事实；没有素材的（calib-check / printtime）不写键。
+    #[test]
+    fn step_details_carry_the_facts_the_report_shows() {
+        let s = sample();
+        let facts = s.facts();
+
+        /* 明细现在是「键 + 原始事实」，不是句子（2026-10-26）——
+        断言也从比中文改成**比键与事实**：换了字典也不会红，漏了行才会红。 */
+        let keys = |step: Step| {
+            facts
+                .step_detail_lines(step)
+                .unwrap()
+                .iter()
+                .map(|l| l.key)
+                .collect::<Vec<_>>()
+        };
+
+        let input = facts.step_detail_lines(Step::Input).unwrap();
+        assert_eq!(
+            input[0].args.get("lines").map(String::as_str),
+            Some("909465"),
+            "行数要原样给出来"
+        );
+        assert_eq!(
+            input[2].args.get("sha").map(String::as_str),
+            Some("dea41762")
+        );
+
+        let collision = keys(Step::Collision);
+        assert!(collision.contains(&"report.line.collisionOk"));
+        assert!(collision.contains(&"report.line.towerPos"));
+
+        let pass2 = keys(Step::Pass2);
+        assert!(pass2.contains(&"report.line.towerLayers"));
+        let rib = facts
+            .step_detail_lines(Step::Pass2)
+            .unwrap()
+            .into_iter()
+            .find(|l| l.key == "report.line.rib")
+            .unwrap();
+        assert_eq!(rib.args.get("on").map(String::as_str), Some("false"));
+
+        let write = facts.step_detail_lines(Step::Write).unwrap();
+        assert_eq!(
+            write[0].args.get("how").map(String::as_str),
+            Some("inPlace")
+        );
+
+        // 没有素材的步：键直接不写（页面口径：没给就不摆）。
+        // `CalibCheck` 在**非校准件**那一趟没有回执 ⇒ 整格不写（校准件那趟见
+        // `calib_check_step_reports_the_profile_it_used`）。
+        assert!(facts.step_detail_lines(Step::CalibCheck).is_none());
+        assert!(facts.step_detail_lines(Step::PrintTime).is_none());
+    }
+
+    /// 第 7 步认档**成功那趟也要留事实**（2026-10-18 补的证据链）：
+    /// 原来这一步恒为 `None`，于是"为什么这次用了加长版的基准"没法解释。
+    #[test]
+    fn calib_check_step_reports_the_profile_it_used() {
+        use postprocess::postproc::calibration::CalibrationReceipt;
+        use postprocess::postproc::disk::BBox;
+
+        let s = sample();
+        let mut facts = s.facts();
+        let receipt = CalibrationReceipt {
+            measured: Some(BBox {
+                x_min: 67.921,
+                x_max: 187.4321,
+                y_min: 121.408,
+                y_max: 137.471,
+            }),
+            profile_id: Some("zoffset-ext".to_string()),
+            tolerance: Some(0.5),
+            footprint: Some((119.58, 16.063)),
+        };
+        facts.calibration_receipt = Some(&receipt);
+
+        let lines = facts.step_detail_lines(Step::CalibCheck).unwrap();
+        let box_line = lines
+            .iter()
+            .find(|l| l.key == "report.line.calibBox")
+            .expect("实测包围盒那一行要在");
+        assert_eq!(box_line.args.get("w").map(String::as_str), Some("119.5111"));
+        assert_eq!(box_line.args.get("h").map(String::as_str), Some("16.0630"));
+        let hit = lines
+            .iter()
+            .find(|l| l.key == "report.line.calibHitSpec")
+            .expect("命中档位那一行要在");
+        assert_eq!(hit.args.get("id").map(String::as_str), Some("zoffset-ext"));
+        assert_eq!(hit.args.get("tol").map(String::as_str), Some("0.5"));
+    }
+
+    /// ★★ **最近一次处理用的是哪个切片器**（2026-10-20）：按时间倒序挑，且只认
+    /// `accept` 认下的号 —— 切片器重启后旧号就废了，那时该落到**上一条还活着**的记录。
+    #[test]
+    fn latest_slicer_pid_picks_the_newest_live_one() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-19")).unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-20")).unwrap();
+        let write = |day: &str, name: &str, pid: Option<i32>| {
+            let pid = pid.map(|p| p.to_string()).unwrap_or("null".to_owned());
+            std::fs::write(
+                d.path().join(day).join(name),
+                format!(r#"{{"schemaVersion":2,"startedAt":"","slicerPid":{pid}}}"#),
+            )
+            .unwrap();
+        };
+        write("2026-10-19", "a_20261019_100000_meta.json", Some(111));
+        write("2026-10-20", "b_20261020_090000_meta.json", Some(222));
+        /* 最新的一条（同一天里名字最大） */
+        write("2026-10-20", "c_20261020_093000_meta.json", Some(333));
+
+        /* 全都认 ⇒ 拿最新的 333 */
+        assert_eq!(latest_slicer_pid(d.path(), |_| true), Some(333));
+        /* 最新那条号已经"不是切片器了" ⇒ 落到上一条还活着的 222 */
+        assert_eq!(latest_slicer_pid(d.path(), |p| p != 333), Some(222));
+        /* 一条都不认 ⇒ None（不是随便挑一个） */
+        assert_eq!(latest_slicer_pid(d.path(), |_| false), None);
+    }
+
+    /// **旧记录没有 `slicerPid` 这个键**（只加不改那一档）⇒ 读到 `null`，
+    /// 跳过它继续往前找，而不是报错、也不是编一个号。
+    #[test]
+    fn records_without_the_key_are_skipped_not_faked() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("2026-10-20")).unwrap();
+        std::fs::write(
+            d.path()
+                .join("2026-10-20")
+                .join("new_20261020_093000_meta.json"),
+            r#"{"schemaVersion":2,"startedAt":""}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            d.path()
+                .join("2026-10-20")
+                .join("old_20261020_090000_meta.json"),
+            r#"{"schemaVersion":2,"startedAt":"","slicerPid":777}"#,
+        )
+        .unwrap();
+        assert_eq!(latest_slicer_pid(d.path(), |_| true), Some(777));
+    }
+
+    /// 校准模式没跑过碰撞检测（`need_collision_check`）—— 细节**不许**写"无碰撞"，
+    /// 那是编的结论；类型与位置两行照写。
+    #[test]
+    fn calibration_mode_collision_detail_does_not_claim_a_check() {
+        let s = sample();
+        let mut facts = s.facts();
+        facts.calibration_mode = "ZOffset";
+        let lines = facts.step_detail_lines(Step::Collision).unwrap();
+        assert!(
+            lines.iter().all(|l| l.key != "report.line.collisionOk"),
+            "校准模式没跑过碰撞检测，不许写那句结论"
+        );
+        let t = lines
+            .iter()
+            .find(|l| l.key == "report.line.towerType")
+            .expect("类型那一行照写");
+        assert_eq!(t.args.get("type").map(String::as_str), Some("disk"));
+    }
+
+    /// **参数快照**（2026-10-21）：预设 TOML 那一份 + IR 终态那一份，缺一不摆。
+    #[test]
+    fn snapshot_carries_toml_and_ir() {
+        let s = sample();
+        let mut params = std::collections::BTreeMap::new();
+        params.insert("wiping.wiper_x".to_owned(), "101".to_owned());
+        let mut facts = s.facts();
+        facts.preset_params = Some(&params);
+
+        let snap = facts.snapshot().expect("有 TOML 就应有快照");
+        assert_eq!(
+            snap.params.get("wiping.wiper_x").map(String::as_str),
+            Some("101")
+        );
+        assert!(
+            snap.ir.get("Wiping").is_some(),
+            "IR 终态要原样带上（键是 PascalCase）：{:?}",
+            snap.ir
+        );
+
+        /* 没有 TOML ⇒ 不摆：只有 IR 谈不上"对照" */
+        assert!(s.facts().snapshot().is_none());
+    }
+
     /// `_meta.json` 的键**咬住**报告页读口与前端消费面（camelCase）。
     /// 改键名等于撕契约 —— 这条判据就是拦这个的。
     #[test]
     fn meta_json_keeps_the_keys_the_report_page_reads() {
+        let s = sample();
+        let facts = s.facts();
         let meta = Meta {
             schema_version: Meta::SCHEMA_VERSION,
             started_at: "2026-10-09 22:08:51".into(),
@@ -522,19 +1631,45 @@ mod tests {
             machine_type: "A1".into(),
             preset_path: "/p/A1-fastv3.3.toml".into(),
             gcode_path: "/tmp/.63288.1.gcode".into(),
+            model_name: Some("帕姆".into()),
+            slicer_pid: Some(4242),
             invocation: Invocation {
                 exe: "SupportEase.exe".into(),
                 args: vec!["--Gcode".into()],
             },
             warnings: vec!["这一盘没有支撑".into()],
             error: None,
+            error_key: None,
+            error_args: None,
             cancelled: false,
             pipeline: vec![PipelineStep {
                 id: "input",
                 message: "正在读取文件...".into(),
                 elapsed_ms: 96,
                 status: PipelineStatus::Complete,
+                detail: Some("读取 909465 行".into()),
+                detail_lines: Some(vec![StepLine {
+                    key: "report.line.readLines",
+                    args: [("lines".to_owned(), "909465".to_owned())]
+                        .into_iter()
+                        .collect(),
+                }]),
             }],
+            /* 成功记录没有碰撞事实 */
+            collision: None,
+            /* 模型俯视几何（2026-10-27）：成功那趟也有 —— 报告页擦料塔那一栏就画它 */
+            model_map: Some(postprocess::postproc::disk::collision::ModelMapFacts {
+                printable: postprocess::postproc::disk::collision::Box4 {
+                    x_min: 0.0,
+                    x_max: 180.0,
+                    y_min: 0.0,
+                    y_max: 180.0,
+                },
+                model_boxes: Vec::new(),
+                model_polygons: Vec::new(),
+                forbidden_zones: Vec::new(),
+            }),
+            relocation: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
@@ -546,6 +1681,12 @@ mod tests {
                 stats: Some(serde_json::json!({ "glueLayerCount": 124 })),
                 print_time: None,
                 print_time_status: None,
+                estimated_print_seconds: Some(2530.5),
+                glue: Some(facts.glue()),
+                tower: Some(facts.tower()),
+                slicer: Some(facts.slicer()),
+                calibration: None,
+                snapshot: None,
             },
         };
         let v = serde_json::to_value(&meta).unwrap();
@@ -558,6 +1699,7 @@ mod tests {
             "machineType",
             "presetPath",
             "gcodePath",
+            "modelName",
             "invocation",
             "warnings",
             "error",
@@ -570,9 +1712,18 @@ mod tests {
         assert_eq!(v["pipeline"][0]["id"], "input");
         assert_eq!(v["pipeline"][0]["elapsedMs"], 96);
         assert_eq!(v["pipeline"][0]["status"], "complete");
+        assert_eq!(v["pipeline"][0]["detail"], "读取 909465 行");
         assert!(v["error"].is_null(), "成功记录落 null，不是缺键");
+        assert_eq!(v["modelName"], "帕姆", "3MF 模型名要进顶层（报告页读它）");
         assert_eq!(v["detail"]["inputFile"]["lines"], 909_465);
         assert_eq!(v["detail"]["inputFile"]["sizeBytes"], 23_758_782);
+        assert_eq!(v["detail"]["estimatedPrintSeconds"], 2530.5);
+        assert!(
+            v["detail"]["glue"]["glueTotalLength"].is_number(),
+            "三组分包落进 detail"
+        );
+        assert!(v["detail"]["tower"]["towerLayers"].is_number());
+        assert!(v["detail"]["slicer"]["nozzleDiameter"].is_number());
     }
 
     /// 时刻格式化：三个口径（日期目录 / 文件名 / 人看）互不串味。
@@ -599,11 +1750,21 @@ mod tests {
             machine_type: String::new(),
             preset_path: String::new(),
             gcode_path: "/tmp/x.gcode".into(),
+            // 三级兜底都没拿到 ⇒ 落 null（**不是缺键**：报告页读口按同一把尺子取它）
+            model_name: None,
+            slicer_pid: Some(99),
             invocation: invocation(),
             warnings: Vec::new(),
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
+            error_key: None,
+            error_args: None,
             cancelled: false,
             pipeline: Vec::new(),
+            /* 越界失败不是碰撞 —— 那一格必须是 null（判据里钉住键名即可） */
+            collision: None,
+            /* 越界失败这一份不画图（这一格同样是 `null`：不编几何） */
+            model_map: None,
+            relocation: None,
             detail: Detail {
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),
@@ -615,6 +1776,12 @@ mod tests {
                 stats: None,
                 print_time: None,
                 print_time_status: None,
+                estimated_print_seconds: None,
+                glue: None,
+                tower: None,
+                slicer: None,
+                calibration: None,
+                snapshot: None,
             },
         };
         write_meta(&paths, &meta).expect("写记录");
@@ -623,8 +1790,16 @@ mod tests {
         assert_eq!(back["elapsedMs"], 1);
         assert_eq!(back["error"], "E_GCODE_BOUNDARY_001: 越界");
         assert!(
+            back["modelName"].is_null(),
+            "没拿到模型名 ⇒ 落 null（不是缺键），报告页那一格退回只显示 gcode 名"
+        );
+        assert!(
             back["detail"].get("outputFile").is_none(),
             "失败记录没有输出件"
         );
+        // 失败记录连三组分包一起缺键（没有 IR 终态 ⇒ 整组不摆，不是摆一排空）
+        assert!(back["detail"].get("glue").is_none());
+        assert!(back["detail"].get("tower").is_none());
+        assert!(back["detail"].get("slicer").is_none());
     }
 }

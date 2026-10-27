@@ -21,6 +21,8 @@
 //! 表 / 数组 / 认不出的形态**跳过**（不返回、也不许改）：一个参数对应一个标量字段，
 //! 这是 `patch.rs` 那一侧就定下的边界。
 
+use postprocess::diag::messages;
+
 use std::collections::BTreeMap;
 
 use toml_edit::{DocumentMut, Item};
@@ -39,7 +41,8 @@ pub fn read_param_values(
     defs: &[ParamDef],
 ) -> Result<BTreeMap<String, String>, AppError> {
     let doc: DocumentMut = raw.parse().map_err(|e| {
-        AppError::corrupted("这份预设不是合法 TOML，参数读不出来").with_detail(format!("{e}"))
+        AppError::corrupted(messages::text("ui.presetdata.params.282", &[]))
+            .with_detail(format!("{e}"))
     })?;
     let mut out = BTreeMap::new();
     for def in defs {
@@ -54,6 +57,51 @@ pub fn read_param_values(
         }
     }
     Ok(out)
+}
+
+/// 两份正文之间的**参数级差异**：后者（草稿）现在写着、与前者（来源）不一样的那几项。
+///
+/// 判据是**值**（与 [`read_param_values`] 同一套形态），不是字节 —— 注释、空行、
+/// 键序、血统那三行都不进账。参数页那条链用它把"盘上草稿改了什么"交回给刚冷启动的界面
+/// （内存里的草稿层随进程没了，见 `ipc::local::read_preset_draft_changes`）。
+///
+/// 前者没有、后者有的键**算差异**（`patch_preset_toml` 会补写缺的键）；
+/// 两份都没有的键自然不在结果里。
+pub fn diff_param_values(
+    before: &str,
+    after: &str,
+    defs: &[ParamDef],
+) -> Result<BTreeMap<String, String>, AppError> {
+    let base = read_param_values(before, defs)?;
+    let now = read_param_values(after, defs)?;
+    Ok(now
+        .into_iter()
+        .filter(|(key, value)| base.get(key) != Some(value))
+        .collect())
+}
+
+/// **相对基线少了哪些参数**（2026-10-21，作者：「我改成了这样子，它都没有提示我」）。
+///
+/// `want` = 基线（通常是 `baseline-local/` 的原文镜像），`got` = 现在这份正文。
+/// 判据是**参数值表**，不是字节 —— 所以"被粘进上一行注释里""整行删掉"都算丢。
+///
+/// 真机踩过：`z_calibration_mode = "new"` 被粘到 `xy_calibration_mode` 的行尾注释后面，
+/// TOML **仍然合法**、语法闸一声不吭，但这一项从参数表里消失了 ——
+/// 切片时会静默退回默认值，用户完全无感。
+///
+/// 返回 `(key, label)`，按 `defs` 的顺序（就是界面上参数页的顺序）。
+pub fn missing_param_keys(
+    want: &str,
+    got: &str,
+    defs: &[ParamDef],
+) -> Result<Vec<(String, String)>, AppError> {
+    let base = read_param_values(want, defs)?;
+    let now = read_param_values(got, defs)?;
+    Ok(defs
+        .iter()
+        .filter(|d| base.contains_key(&d.key) && !now.contains_key(&d.key))
+        .map(|d| (d.key.clone(), d.label.clone()))
+        .collect())
 }
 
 /// 一批改动**一次算完**：逐项结构保真地改，**任何一项失败就整批不落地**
@@ -187,6 +235,64 @@ mode = \"tower\"
             .filter(|(a, b)| a != b)
             .collect();
         assert_eq!(changed.len(), 2, "只该有两行变化，实际：{changed:?}");
+    }
+
+    /// 差异只认**值**：改过的那几项回来，没动的不回来；注释 / 空行不同不算改动
+    #[test]
+    fn only_params_whose_value_changed_come_back() {
+        let edited = DOC
+            .replace("offset_x = -1.5", "offset_x = -2.25")
+            .replace("# 速度上限(mm/s)", "# 速度上限（改个注释，值没动）");
+        let got = diff_param_values(DOC, &edited, reg().params()).expect("算差异");
+        assert_eq!(
+            got.get("toolhead.offset.x").map(String::as_str),
+            Some("-2.25"),
+            "{got:?}"
+        );
+        assert!(
+            !got.contains_key("toolhead.speed_limit"),
+            "值没动（只换了注释）就不该算改动：{got:?}"
+        );
+        assert_eq!(got.len(), 1, "只该有一项：{got:?}");
+    }
+
+    /// **少了参数要说得出**（2026-10-21）：真机那次是 `z_calibration_mode` 被粘进了
+    /// `xy_calibration_mode` 的行尾注释 —— TOML 仍然合法，只有按参数表比才看得见。
+    #[test]
+    fn params_swallowed_by_a_comment_are_reported_as_missing() {
+        let want = DOC.replace("offset_x = -1.5", "offset_x = -1.5\noffset_z = 4");
+
+        /* 整行被删 */
+        let lost = missing_param_keys(&want, DOC, reg().params()).expect("算缺项");
+        assert!(
+            lost.iter().any(|(k, _)| k == "toolhead.offset.z"),
+            "整行不见了要报：{lost:?}"
+        );
+
+        /* 被 `#` 吃掉（真机那种粘行） */
+        let glued = want.replace("offset_z = 4", "# 笔尖偏移 offset_z = 4");
+        let lost = missing_param_keys(&want, &glued, reg().params()).expect("算缺项");
+        assert!(
+            lost.iter().any(|(k, _)| k == "toolhead.offset.z"),
+            "被注释掉也要报：{lost:?}"
+        );
+
+        /* 同一份：一个都不缺 */
+        assert!(missing_param_keys(&want, &want, reg().params())
+            .unwrap()
+            .is_empty());
+    }
+
+    /// 原稿没有、草稿补上的键也算（`patch_preset_toml` 会补写缺的键）
+    #[test]
+    fn a_key_the_source_lacks_counts_as_changed() {
+        let with_z = DOC.replace("offset_x = -1.5", "offset_x = -1.5\noffset_z = 4");
+        let got = diff_param_values(DOC, &with_z, reg().params()).expect("算差异");
+        assert_eq!(
+            got.get("toolhead.offset.z").map(String::as_str),
+            Some("4"),
+            "{got:?}"
+        );
     }
 
     /// 任何一项失败 → 整批不落地（调用方手里的旧正文还是好的）

@@ -29,6 +29,8 @@
 //! 这一层只报两件事：连上了没有、收到了多少字节。"下载还活着"于是成为界面上一句
 //! 能陈述的事实，而不是一个转圈的装饰。
 
+use postprocess::diag::messages;
+
 use std::io::Read as _;
 use std::time::Duration;
 
@@ -324,14 +326,20 @@ fn fetch_once(
                 );
                 if retry {
                     return Err((
-                        AppError::io(format!("读 {} 的响应中断了", plan.file_name))
-                            .with_detail(e.to_string()),
+                        AppError::io(messages::text(
+                            "ui.runtime.net.417",
+                            &[("v1", plan.file_name)],
+                        ))
+                        .with_detail(e.to_string()),
                         true,
                     ));
                 }
                 return Err((
-                    AppError::io(format!("读 {} 的响应失败", plan.file_name))
-                        .with_detail(e.to_string()),
+                    AppError::io(messages::text(
+                        "ui.runtime.net.418",
+                        &[("v1", plan.file_name)],
+                    ))
+                    .with_detail(e.to_string()),
                     false,
                 ));
             }
@@ -342,11 +350,13 @@ fn fetch_once(
         if let Some(expect) = plan.expect_size {
             if bytes.len() as u64 > expect {
                 return Err((
-                    AppError::corrupted(format!(
-                        "{} 的响应比目录登记的大（目录记 {} 字节，远端已经给了 {} 字节以上）",
-                        plan.file_name,
-                        expect,
-                        bytes.len()
+                    AppError::corrupted(messages::text(
+                        "ui.runtime.net.419",
+                        &[
+                            ("v1", plan.file_name),
+                            ("v2", &expect.to_string()),
+                            ("v3", &bytes.len().to_string()),
+                        ],
                     )),
                     false,
                 ));
@@ -520,16 +530,22 @@ fn retryable(e: &ureq::Error) -> bool {
 /// 就是这几个，"HTTP 502"这种细节进 detail，不进 code）
 fn transport_error(url: &str, e: &ureq::Error) -> AppError {
     match e {
-        ureq::Error::StatusCode(404) => AppError::not_found(format!("远端没有这份文件：{url}")),
-        ureq::Error::StatusCode(code) => AppError::io(format!(
-            "远端回了 HTTP {code}（既不是成功也不是没找到）：{url}"
+        ureq::Error::StatusCode(404) => {
+            AppError::not_found(messages::text("ui.runtime.net.420", &[("url", url)]))
+        }
+        ureq::Error::StatusCode(code) => AppError::io(messages::text(
+            "ui.runtime.net.421",
+            &[("code", &code.to_string()), ("url", url)],
         )),
-        ureq::Error::Timeout(_) => AppError::io(format!(
-            "远端没在规定时间内回答（{} 秒）：{url}",
-            FETCH_TIMEOUT.as_secs()
+        ureq::Error::Timeout(_) => AppError::io(messages::text(
+            "ui.runtime.net.422",
+            &[("v1", &FETCH_TIMEOUT.as_secs().to_string()), ("url", url)],
         )),
-        ureq::Error::HostNotFound => AppError::io(format!("数据源的域名解析不了：{url}")),
-        other => AppError::io(format!("从远端取字节失败：{url}")).with_detail(other.to_string()),
+        ureq::Error::HostNotFound => {
+            AppError::io(messages::text("ui.runtime.net.423", &[("url", url)]))
+        }
+        other => AppError::io(messages::text("ui.runtime.net.424", &[("url", url)]))
+            .with_detail(other.to_string()),
     }
 }
 

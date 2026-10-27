@@ -174,7 +174,7 @@ fn write_presets(root: &Path) {
         "bundles.toml",
         "[[bundles]]\n\
          id = 'A1_default'\n\
-         display = '官方推荐'\n\
+         display = '推荐'\n\
          machineId = 'A1'\n\
          assetRefs = ['a1-bbs-04-020']\n\
          updatedAt = '2026-07-12'\n"

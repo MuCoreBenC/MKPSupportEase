@@ -1,134 +1,14 @@
-/* v0.0.5 共享 UI 原语样式：全部扁平，无 box-shadow、无位移 */
-
-.seg {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  border-radius: 7px;
-  background: rgb(16 24 32 / 4%);
-  min-width: 0;
-}
-
-.segBtn {
-  padding: 5px 11px;
-  border-radius: 5px;
-  font-size: 12px;
-  color: var(--text-3);
-  white-space: nowrap;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.segBtn:hover {
-  color: var(--text-2);
-}
-
-.segBtn[data-on='true'] {
-  background: #fff;
-  color: var(--text-1);
-  font-weight: 600;
-}
-
-.field {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 9px 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
-  min-width: 0;
-}
-
-.fieldMain {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.fieldLabel {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--text-1);
-  min-width: 0;
-}
-
-.fieldKey {
-  font-size: 10.5px;
-  color: var(--text-3);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.help {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  border-radius: 50%;
-  border: 1px solid var(--line-strong);
-  color: var(--text-3);
-  font-size: 9px;
-  line-height: 1;
-  display: grid;
-  place-items: center;
-}
-
-.revert {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgb(240 138 40 / 14%);
-  color: #b8651a;
-  font-size: 10.5px;
-  white-space: nowrap;
-}
-
-.num {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.numInput {
-  width: 78px;
-  padding: 5px 7px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  background: #fff;
-  font: inherit;
-  font-size: 12.5px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text-1);
-}
-
-.unit {
-  font-size: 10.5px;
-  color: var(--text-3);
-  min-width: 26px;
-}
-
-.compare {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11.5px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.compareNew {
-  color: var(--accent-deep);
-  font-weight: 600;
-}
-
+/*
+ * 共享 UI 原语样式：全部扁平，无 box-shadow、无位移。
+ *
+ * ★ 2026-10-14：这个文件**只剩两个件** —— `.badge` 与 `.btn`。
+ * 原来这一份是从别处整份搬来的"共享原语"，另外那批（分段控件 `.seg*`、字段 `.field*` /
+ * `.num*` / `.help` / `.revert` / `.compare*`、表格 `.table` / `.rowAction`、
+ * 细进度 `.inlineProgress` / `.bar*`、空态 `.empty`、步骤条 `.step*` / `.stepRail`、
+ * 刻度 `.scaleBar` / `.tick` / `.grid` / `.cell`、稿内弹窗 `.modal`）**从搬进来那天起
+ * 就没有消费者** —— 它们的 `tsx` 侧（`Controls.tsx` 里那五个导出、`ui/Progress.tsx`）
+ * 也一并删了。留着的表现是"看着像界面上还有这些件"。
+ */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -156,150 +36,22 @@
 }
 
 .badge[data-tone='muted'] {
-  background: rgb(16 24 32 / 6%);
+  background: var(--hairline);
   color: var(--text-2);
 }
 
+/* ★ 这一档**当前没有调用点**（`Badge` 的 `tone` 只有 new / rec / hot / muted 被传过），
+   但它是 `tone` 联合类型里明写的一档，留着当"危险徽标"的口子 —— 与上面那批死类不同：
+   那个联合类型是活的，这一档随时可能被用上。 */
 .badge[data-tone='danger'] {
   background: rgb(229 72 77 / 12%);
-  color: #c2373c;
-}
-
-.table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12.5px;
-}
-
-.table th {
-  text-align: left;
-  font-weight: 500;
-  font-size: 11px;
-  color: var(--text-3);
-  padding: 7px 10px;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-
-.table td {
-  padding: 9px 10px;
-  border-bottom: 1px solid rgb(16 24 32 / 4%);
-  color: var(--text-1);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 260px;
-}
-
-.table tbody tr[data-on='true'] {
-  background: rgb(32 178 90 / 7%);
-}
-
-.table tbody tr:hover {
-  background: rgb(16 24 32 / 2.5%);
-}
-
-.rowAction {
-  padding: 3px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 5px;
-  font-size: 11.5px;
-  color: var(--text-1);
-  white-space: nowrap;
-}
-
-.rowAction:hover {
-  border-color: var(--text-3);
-}
-
-.rowAction:disabled {
-  color: var(--text-3);
-  border-color: var(--line);
-  cursor: default;
-}
-
-.inlineProgress {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 10px 10px;
-  font-size: 11.5px;
-  color: var(--text-2);
-}
-
-.bar {
-  flex: 1;
-  height: 3px;
-  border-radius: 3px;
-  background: rgb(16 24 32 / 7%);
-  overflow: hidden;
-  min-width: 40px;
-}
-
-.barFill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-
-.empty {
-  padding: 26px 10px;
-  text-align: center;
-  font-size: 12.5px;
-  color: var(--text-3);
-}
-
-.scrim {
-  position: absolute;
-  inset: 0;
-  z-index: 80;
-  background: rgb(16 24 32 / 26%);
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
-
-.modal {
-  width: min(460px, 100%);
-  max-height: 100%;
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.modalWide {
-  width: min(620px, 100%);
-}
-
-.modalHead {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.modalTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  flex: 1;
-  min-width: 0;
-}
-
-.modalFoot {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
+  /* 字色走 token（同 `.btnDanger`）：写死的那支暗红在深色底上读不出来 */
+  color: var(--danger);
 }
 
 .btn {
-  padding: 7px 14px;
-  border-radius: 5px;
+  padding: 8px 18px;
+  border-radius: 999px;
   border: 1px solid var(--line-strong);
   font-size: 12.5px;
   color: var(--text-1);
@@ -309,10 +61,93 @@
   border-color: var(--text-3);
 }
 
+/*
+ * 小号（2026-10-26）：**页头那一行里的小胶囊**的尺寸 —— 与工艺页工具条右端那两枚
+ * 开关（`WindowGadgets` 的 `.pill`）同一组数：24px 高 / 左右 8px / 12px 字。
+ *
+ * ★ 它不是"另一套按钮皮"：圆角、描边、字色照旧由 `.btn`（和各 `variant`）给，
+ *   这里只缩小盒子。作者那天的原话是「改小报告的胶囊按钮和工艺的一样」——
+ *   两个页头顶条是一套壳，右边那两枚就不该一大一小。
+ * ★ 定了高就得自己管行盒居中：`.btn` 原来的观感靠上下 8px 内衬撑，换成 24px 定高后
+ *   字的中线由 flex 负责（同 `.pill` 的 `place-items: center`）。
+ */
+/*
+ * 展开 / 下拉箭头（2026-10-27 统一）：**形状**是 `shell/icons` 的 `chevronDown`，不是字符。
+ *
+ * 字符 `▸` 的墨迹不按盒子居中（字体右侧留白更大），转 90° 看着像被拉了一下 —— 报告页
+ * 那颗就是这个毛病；换字符（`▸`↔`▾`）的那一路更糟：墨迹位置全变，看着像跳了一下。
+ * 凡是要"转"的箭头都用这三个类（都是同一颗 SVG 绕自己中心转，不换字形）：
+ *   .disclosureCaret  展开指示：闭着 -90° 朝右、开着（`data-on="true"`）0° 朝下
+ *   .selectCaret      下拉指示：闭着 0° 朝下、开着（`data-on="true"`）180° 朝上
+ *   .caretUp          单向朝上（上移这类按钮）：恒 180°、不转
+ *
+ * 尺寸 12px 由调用方给（`<Icon size={12}>`），这里只管定位与旋转。
+ */
+.disclosureCaret {
+  display: block;
+  flex: 0 0 auto;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.disclosureCaret[data-on='true'] {
+  transform: rotate(0deg);
+}
+
+.selectCaret {
+  display: block;
+  flex: 0 0 auto;
+  color: var(--text-3);
+  transform: rotate(0deg);
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.selectCaret[data-on='true'] {
+  transform: rotate(180deg);
+}
+
+.caretUp {
+  display: block;
+  flex: 0 0 auto;
+  transform: rotate(180deg);
+}
+
+.btnSm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  /*
+   * 2026-10-27（作者：「胶囊里的字看着贴左」）：左右内衬 6 → 8，并显式居中。
+   *
+   * 量出来其实是准的（墨迹中心与胶囊中心差 1px 以内），但两个汉字在 6px 的
+   * 内衬里挨得太近，眼睛会觉得它贴着左边 —— 加两像素的呼吸就正了。
+   * `line-height: 1` 会让 CJK 的字面比行盒中线高一点点，改由 `align-items` 摆中线。
+   */
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 1;
+  text-align: center;
+}
+
+/*
+ * 主按钮（primary）：**反色配对** —— `--text-1` 当底、`--bg-1` 当字。
+ *
+ * 浅色下就是原来那副（墨底近白字）；深色下**自动**翻成"亮底近黑字"——
+ * 深色主题里"最重的那一颗"本来就该是亮的（macOS 那一路）。
+ *
+ * 原来写的是"底 `--text-1` + 字 `#fff`"：浅色成立，深色下 `--text-1` 变成浅灰 ⇒
+ * 浅底白字 ≈ 1.2:1（作者截图："深色的时候一些按钮的重点就没了"）。
+ * 换成这一对之后**一条规则两套主题都成立**，文件后面那条
+ * `[data-theme='dark'] .btnPrimary` 覆盖也就删了（不再需要补丁）。
+ */
 .btnPrimary {
   border-color: var(--text-1);
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
 }
 
 /*
@@ -333,14 +168,33 @@
   color: var(--accent-deep);
 }
 
+/*
+ * ★ 深色里的强调按钮 = **实心绿 + 白字**（作者第 49 轮就定过：
+ *   "按钮绿色里面的还是用白色字体吧，你去看一下 macOS 人家的设计风格"）。
+ * 浅色那套（`--accent-soft` 底 + `--accent-deep` 字）在深底上要翻车 ——
+ * 半透明绿压一支压暗的绿字，看着像"没点亮"（作者截图："重点就没了"）。
+ */
+[data-theme='dark'] .btnAccent {
+  border-color: transparent;
+  background: var(--accent);
+  color: #fff;
+}
+
+[data-theme='dark'] .btnAccent:hover {
+  background: var(--accent-deep);
+  color: #fff;
+}
+
 .btnGhost {
   border-color: transparent;
   color: var(--text-2);
 }
 
+/* 危险（危险动作是描边 + 红字，不是红底 —— 红底满屏太吓人）。
+   字色走 token：原来写死 `#c2373c`，深色下那支暗红躺在深底上几乎看不见。 */
 .btnDanger {
   border-color: rgb(229 72 77 / 45%);
-  color: #c2373c;
+  color: var(--danger);
 }
 
 .btn:disabled {
@@ -348,103 +202,4 @@
   border-color: var(--line);
   background: none;
   cursor: default;
-}
-
-.stepRail {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.step {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12.5px;
-  color: var(--text-3);
-  white-space: nowrap;
-}
-
-.stepIndex {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  border: 1px solid var(--line-strong);
-  flex-shrink: 0;
-}
-
-.step[data-on='true'] {
-  color: var(--text-1);
-  font-weight: 600;
-}
-
-.step[data-on='true'] .stepIndex {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-}
-
-.stepLine {
-  width: 26px;
-  height: 1px;
-  background: var(--line-strong);
-  flex-shrink: 0;
-}
-
-.scaleBar {
-  display: flex;
-  gap: 3px;
-  min-width: 0;
-}
-
-.tick {
-  flex: 1;
-  min-width: 0;
-  padding: 12px 0 7px;
-  border-radius: 5px;
-  background: rgb(16 24 32 / 4%);
-  font-size: 10.5px;
-  color: var(--text-3);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  transition: background 0.12s ease, color 0.12s ease;
-}
-
-.tick:hover {
-  background: rgb(16 24 32 / 8%);
-}
-
-.tick[data-on='true'] {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-}
-
-.grid {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.cell {
-  aspect-ratio: 1;
-  border-radius: 4px;
-  background: rgb(16 24 32 / 4%);
-  transition: background 0.12s ease;
-}
-
-.cell:hover {
-  background: rgb(16 24 32 / 9%);
-}
-
-.cell[data-on='true'] {
-  background: var(--accent);
-}
-
-.cell[data-axis='true'] {
-  background: rgb(32 178 90 / 16%);
 }

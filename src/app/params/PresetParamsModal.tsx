@@ -23,14 +23,19 @@
 
 import { Modal } from '../../components/modal'
 import type { Density } from '../../hooks/useDensity'
+import { useT } from '../../i18n'
 import PageParams from './PageParams'
 
 interface Props {
   open: boolean
   density: Density
-  /** 改哪一份（`path` 是相对用户根的 `presets-mine/…`） */
+  /** 改哪一份（`path` 是相对用户根的 `presets-local/…`） */
   target: { path: string; fileName: string; machineId: string; versionId: string }
-  /** 一进来就把「选择要跟随的更新」那一屏打开（右键菜单那条直路用） */
+  /**
+   * 一进来就把「选择要更新的参数」那一屏打开（右键菜单那条直路用）。
+   * ★ 那条路进页面时**顺手把云端新版字节取回来了**（见 `PageParams`）—— 用户已经
+   * 传递了"我来处理更新"这个意图。
+   */
   openSyncOnStart?: boolean
   host?: HTMLElement | null
   onClose: () => void
@@ -44,22 +49,27 @@ export default function PresetParamsModal({
   host = null,
   onClose,
 }: Props) {
+  const tr = useT()
   return (
     <Modal
       open={open}
-      title={target.fileName}
-      subtitle="这一份就是你的预设 —— 改的是它自己；官方那一版只用来标明默认值与有没有更新"
+      title={tr('params.modal.title')}
+      /*
+       * 副标题 = **文件名**（照 a05 那一版：大标题是「修改参数」，文件名摆在它下面）。
+       * 原来那句 38 字的长文在窄屏上要占两行。
+       */
+      subtitle={target.fileName}
       size="full"
       bodyFill
       host={host}
       /* 框里有没保存的改动（草稿在盘上）—— 手滑点一下遮罩不该把关掉变成丢东西 */
       closeOnScrim={false}
-      closeTitle="关掉（没保存的改动还在草稿里，回来点「改这份」接着改）"
+      closeTitle={tr('params.modal.closeTitle')}
       onClose={onClose}
     >
       {/*
        * `key` 钉住这一份：换一份（或关掉再打开另一份）就整块重挂 ——
-       * 草稿链、官方更新账、分类胶囊与搜索全部从这一份重新开始，不留上一条的残留。
+       * 草稿链、云端更新账、分类胶囊与搜索全部从这一份重新开始，不留上一条的残留。
        */}
       <PageParams
         key={target.path}
@@ -67,6 +77,11 @@ export default function PresetParamsModal({
         embedded
         target={target}
         openSyncOnStart={openSyncOnStart}
+        /*
+         * **打开先只读**（2026-10-16）：进编辑模式才动得了 —— 与参数对比台、
+         * 编辑文件模态框同一个框架（只读 → 进编辑 → 撤销/重做/退出/保存）。
+         */
+        gateEdit
       />
     </Modal>
   )

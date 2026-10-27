@@ -105,6 +105,29 @@ AppState 放的是「**应用现在是什么状态**」，不是「应用所有�
 | `useSessionState`（会话态） | **不进** | 不跨重启、无事件、无原子写 —— 恰是 AppState 的反面；它只回答"切 tab 不丢选择" |
 | `run/update-result.json` + `run/update/` | **不进** | 更新机制 / 一过性结果；且现存"Rust 原子写 + 安装脚本 `printf`"**两条写路径**（另刀合并） |
 
+### `postproc` 那一格（2026-10-17 新增）
+
+设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几档住 `run/app-state.json` 的
+`postproc`，形状是 [`runtime::app_state::PostprocPrefs`](../src-tauri/src/runtime/app_state.rs)
+（每一项 `Option`，缺省 = **从没动过** ⇒ 用出厂档）。
+
+**它为什么会同时影响产物**：这是本项目里唯一一档"用户偏好会改变切出来的 G-code"的设置。
+分工说清楚，免得下次有人以为整格都不该进 IR：
+
+| 项 | 谁消费 | 影响产物吗 |
+| --- | --- | --- |
+| `notify_on_finish` | `hook_ui` 的 `Finished` 分支 → `crate::notify` | 否（纯界面行为） |
+| `ui_mode`（静默 / GUI） | `hook_ipc::wants_display` 决定**要不要起那扇窗** | 否 |
+| `glue_bottom_enabled` | 写进 `ir.prefs` **与** `ir.state.glue_bottom_enabled` 两处 | **是** |
+| `skip_vibration_calibration` / `begin_stage_retract_*` / `z_calibration_dwell_sec` / `xy_calibration_dwell_sec` | 写进 `ir.prefs`，由 `pipeline/mod.rs` 读 | **是** |
+| `bed_glue_enabled` / `bed_glue_all_models` | 写进 `ir.prefs`，由 `pipeline/bed_glue.rs` 读 | **是** |
+
+★ 唯一的写入点 = `runtime::postproc_prefs::apply_to_ir`；它在 **`preset::load_ir` 之后**
+调用（早一步会被预设盖掉）。管线里**不许再出现**读死常量的分派。
+
+★★ `notify_on_finish` 与 `ui_mode` 在 2026-10-17 之前只是**存了个值**（跑完不发通知、
+勾了静默照旧起窗）—— 那种开关比没有更糟。现在两处都真接上了，改它们时**别退回"只存值"**。
+
 那轮盘点同时核了一遍写盘纪律：客户端二进制里绕过 `fsx::atomic` 的裸写**唯一例外**仍是
 updater 的下载暂存 `.part`（带逃生口与退役条件）；日志 writer 与安装脚本 `printf`
 两条不受 `fs::write` 禁列射程，已登记在清单里。

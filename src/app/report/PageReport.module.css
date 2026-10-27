@@ -1,49 +1,845 @@
 /*
- * 报告页 —— 照设置页那一份的尺度与配色（.page / .head / .title / .sub 同一套 token）。
- * 列表行是可点的按钮行（展开详情），状态标在行首：绿 ✓ 成功 / 红 ✗ 失败。
+ * 报告页 —— 「左悬浮列表 + 右详情」两块（V13 定稿，2026-10-11）。
+ *
+ * 左栏从"贴着窗口边的灰条"改成**一块独立的白面板**（细边 + 柔影 + 大圆角）：
+ * 眉题 → 搜索框 → 状态筛选胶囊（全部/成功/失败 带计数）→ 按日分组（可折叠），
+ * 每条记录**两层信息**：第一层文件名 + 成功/失败，第二层 时间 · 预设 · 机型 + 耗时。
+ *
+ * 右栏是平面版（下划线页签、组横线、两列键值）—— 详情是给人抄的地方，别给它加壳。
+ * 两块都自己滚（`.content` 不滚），谁都挤不到谁。
+ *
+ * 窄的时候（`.page` 布局宽 < 880px）左栏**滑盖化**：整块 absolute 常驻、收起只露
+ * 44px（抓手那一列），点一下滑过来盖住详情，点遮罩或往左拖滑回去。两档靠**容器查询**
+ * 切 —— 同一个 DOM，不做两套（页面被 `--fit-scale` 缩放时量的还是布局像素，
+ * 跟 `@media` 比不会错位）。
+ *
+ * ★ 窄档**不动 `.head` / `.sub`**：顶部那行小灰字与刷新照旧一行（V13 口径：
+ *   挤窄时该收的是列表，不是这行说明）。
  */
 
 .page {
+  position: relative;
+  container-type: inline-size;
+  container-name: report;
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: var(--pad);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  overflow: hidden;
+  background: var(--card-face);
 }
 
+/* ---- 页头：一行 —— 左边小灰字说明（长了自己收省略号），右边刷新靠右 ---- */
+
+/*
+ * ★ 这一页没有大标题（`--fs-metric` 那行「执行报告」在 V13 里去掉）：
+ *   它是六个页签里唯一一个页面内自带长说明的，标题只是把同一句话说两遍；
+ *   页面的名字由外壳的页签给（`<section aria-label>` 留给读屏）。
+ */
 .head {
+  flex-shrink: 0;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.title {
-  margin: 0;
-  font-size: var(--fs-metric);
-  font-weight: 600;
-  color: var(--text-1);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /*
+   * 高度与工艺页工具条**同一档**（`--head-h` = 41，见 tokens.css 那条注释）：
+   * 作者 2026-10-26：「我希望报告页面和工艺页面的顶部的高度一样」——
+   * 顶条不一样高，切页时下面的内容会整体上下跳一下。
+   *
+   * 这里**不写上下内衬、只钉最小高度**：行里的东西（12.5px 的说明 / 24px 的小胶囊）
+   * 一律由 `align-items: center` 摆到中线，将来改字号不必回来重算内衬；
+   * 真有个更高的东西进来（比如某天加一枚 28px 的图标），让它自己把这一行撑高。
+   */
+  min-height: var(--head-h);
+  padding: 0 clamp(16px, 2vw, 26px);
 }
 
 .sub {
   margin: 0;
-  font-size: var(--fs-body);
+  min-width: 0;
+  font-size: var(--fs-label);
   color: var(--text-2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .headActions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 6px;
+  flex-shrink: 0;
 }
+
+/*
+ * 页头那两颗（导出 / 刷新）用**产品那一套** `.btn`（`ui/Controls`，槽上的
+ * `[data-page] .btn` 已经给了胶囊圆角与内衬）—— 这里一条样式都不写。
+ *
+ * V13 抽卡里给它们另配过一张皮（`rgb(255 255 255 / 60%)` 底 + `text-2` 字），
+ * **没有搬**：全站按钮只许一套（同"模态框只许一套"那条），而这一页再开一套的话，
+ * 下一个页面就会再开一套。要改圆角 / 深浅，改 `ui.module.css` 的 `[data-page] .btn`。
+ */
+
+/*
+ * 提示条自己是一条通栏，得由外面这格给它头部的左右留白 ——
+ * NoteBar 件本身不带 margin（它被设置页那套布局吃在中间），直接摆在 `.head`
+ * 后面就会贴着窗口边与页头左缘对不上（原文：看着像被裁掉了一半）。
+ */
+.noteSlot {
+  flex-shrink: 0;
+  padding: 0 clamp(16px, 2vw, 26px) 4px;
+}
+
+.noteSlot:empty {
+  padding: 0;
+}
+
+/*
+ * 三态（错误 / 空 / 列表 + 详情）的宿主：`flex: 1` 在这一格，三态自己只占自己那一块
+ * （空态与错误态就一条，列表那一态才是双栏）。左右内衬各自带 —— 空态与错误态是通栏的
+ * （一直如此，那两条自己带 padding），双栏那一态的 `.pane` 给 `clamp(16px, 2vw, 26px)`。
+ */
+.content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ============ 左：悬浮面板（搜索 + 筛选 + 日期分组 + 两层行） ============ */
+
+.pane {
+  /* 窄档的滑盖/遮罩锚在内容区（不是整页）—— 顶部那行字与刷新不受它影响 */
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 18px;
+  padding: 0 clamp(16px, 2vw, 26px) 16px;
+  /* 折/展是**瞬时**切换（作者第四次：过程里任何重叠都不接受，见下面折叠段注释） */
+}
+
+/*
+ * 这一页左侧的「悬浮面板」：白底 + 细边 + 柔影。
+ *
+ * ★ z 5（原 2）：窄档里它是**浮在详情之上**的，得压过详情里那些带层级的零件
+ *   （俯视图的塔图 z 2 / 白色箭头 z 3；那两个已经用 `isolation` 关回图里了，
+ *   这里是第二道闸 —— 页面里再出现 z 3/4 的东西也不该钻到列表上面）。
+ *   仍远低于全站浮层（§层表：40 模态框 … 96 通知），不会挡住它们。
+ */
+.side {
+  position: relative;
+  z-index: 5;
+  /* ★ grid 子项默认 `min-width: auto`，会被里面定宽 340 的 `.sideBody` 顶住 ——
+     没有这一条，列宽缩到 44 时盒子还是 340，列表整块溢到详情上面（2026-10-27 实测） */
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sideHead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 18px 10px;
+}
+
+/* 眉题：小字距灰字（CardFrame 的 .eyebrow 语言） */
+.sideLb {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 条数：跟在后面的灰字，不做成签 */
+.sideCnt {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * 栏头那颗「收起」（2026-10-27）：20px 小方钮，灰字档、悬停才上色 ——
+ * 它是这一栏的**结构动作**，不是页头上那两颗业务按钮，所以不套 `.btn`
+ * （同"动作按钮一律文字"那条的反面：这里只有图标，长在眉题那一行里）。
+ */
+.sideFold {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.sideFold:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+/* `chevronDown` 转 90° = 朝左（"往左收起来"）—— 形状只有一颗，转向走 CSS */
+.sideFoldIcon {
+  display: block;
+  transform: rotate(90deg);
+  transform-origin: 50% 50%;
+}
+
+/* ---- 工具区：搜索框 + 状态筛选胶囊 ---- */
+
+.sideTools {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 12px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+.searchBox:focus-within {
+  border-color: var(--accent);
+  /* 聚焦底走 --glass（浅色 = 白玻璃，深色 = 磨砂黑玻璃）——
+     原先写死的 #fff 在深色里是"点进去整条发白"（2026-10-12 深色第二遍） */
+  background: var(--glass);
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  outline: none;
+
+  /* 全局 body 那层 user-select: none 是去"网页感"的，输入框是例外 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.searchInput::placeholder {
+  color: var(--text-3);
+}
+
+/* 状态筛选：三颗胶囊，各带计数；当前那颗绿浅底 */
+.filterBar {
+  display: flex;
+  gap: 6px;
+}
+
+.filterPill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  /* 实的白走 --surface-solid（2026-10-12 深色第二遍）：原先写死 #fff，
+     深色里三颗筛选胶囊是白底 + 浅灰字，既刺眼又读不清 */
+  background: var(--surface-solid);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+  transition:
+    background 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+.filterPill:hover {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+/* 「当前这颗」用描边加粗（global.css 的铁律：状态不许改变盒子尺寸） */
+.filterPill[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  text-shadow: var(--state-bold);
+}
+
+.filterPill b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 日期分组：日历小图标 + 「今天 · 2026-10-11」+ 折叠箭头 ---- */
+
+.sideList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px;
+}
+
+/* 分组头是**按钮**（点一下折叠这一组），不是标题行 */
+.dayRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 12px 18px 6px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dayRow:hover {
+  color: var(--text-2);
+}
+
+.dayIcon {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.dayName {
+  white-space: nowrap;
+}
+
+/* 日期行底下那条横线 */
+.dayRow::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 2px;
+  background: var(--line);
+}
+
+/* 折叠箭头 */
+.dayChev {
+  flex-shrink: 0;
+  margin-left: 8px;
+  color: var(--text-3);
+  transition: transform 0.18s ease;
+}
+
+.dayRow[data-collapsed='true'] .dayChev {
+  transform: rotate(180deg);
+}
+
+.dayList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* ---- 记录行：两层信息 ---- */
+
+.sideRow {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 10px 18px;
+  border: 0;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sideRow:hover {
+  background: var(--surface-sunken);
+}
+
+.sideRow[data-on='true'] {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* 左侧小文件图标：灰底圆角方块 */
+.rowIcon {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin-top: 1px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--text-3);
+}
+
+.rowMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* 第一层：文件名 + 状态 */
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/*
+ * 文件名：长名「尾段保真」—— 尾段（.gcode 与末尾几个字）钉住不缩，
+ * 前段自己收省略号（`.fHead`）。全名在 title 提示里。
+ */
+.sideFile {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  font-size: var(--fs-body);
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.fHead {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fTail {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 状态：小圆点 + 成功/失败 两个字（颜色即语义） */
+.rowStatus {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rowStatus[data-ok='true'] {
+  color: var(--accent-deep);
+}
+
+.rowStatus[data-ok='false'] {
+  color: var(--danger);
+}
+
+.stDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+}
+
+/* 第二层：时间 · 预设 · 机型 + 耗时 */
+.rowSub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.rowMeta {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sideDur {
+  flex-shrink: 0;
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 列表里没有匹配项时的一句话 */
+.listEmpty {
+  margin: 0;
+  padding: 22px 18px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-align: center;
+}
+
+/* ============ 右：详情 ============ */
+
+.scrim {
+  display: none;
+}
+
+/*
+ * 详情的正文**整块可选中**（作者 2026-10-11：「文件名、这些数值，我都要能拖选复制」）。
+ *
+ * 全局那层是关着的（`global.css` 的 `body { user-select: none }`，为的是去掉"网页感"），
+ * 这一屏是给人抄的地方，所以在这里打开 —— 一处打开，文件名 / 分组摘要 / 每个字段的
+ * 值 / 管线每一步的字 / 错误原文全都能拖，而且**各格是分开的**：从哪个值上按下就选哪个，
+ * 不会一带带一片。
+ *
+ * `cursor: text` 一并给上：光标不变的话没人知道这里能拖（下面页签再把它收回 default）。
+ */
+.main {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: text;
+  -webkit-user-select: text;  cursor: text;
+}
+
+.mainHead {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 2px 4px;
+}
+
+/* 详情头的文件名：同列表那套「尾段保真」 */
+.mainFile {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-1);
+  min-width: 0;
+  display: flex;
+}
+
+.mainFile .fHead {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mainFile .fTail {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.chip {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+  font-size: var(--fs-label);
+  font-weight: 500;
+}
+
+.chipBad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* 时间：**文件名下面一行的副标题**（不再吊在最右） */
+.mainWhen {
+  order: 3;
+  flex-basis: 100%;
+  flex-shrink: 0;
+  margin-left: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 页签是**控件**，不跟着正文一起可选中：点一下就是切页，拖出一块蓝只会碍事
+ * （文本光标也从 `.main` 那儿收回来，按在页签上还是手型）。
+ */
+.tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  padding: 6px 2px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-x: auto;
+  user-select: none;
+  -webkit-user-select: none;  cursor: default;
+}
+
+.tab {
+  appearance: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tab[data-on='true'] {
+  color: var(--text-1);
+  font-weight: 500;
+  border-bottom-color: var(--accent);
+}
+
+.panels {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 14px 2px 28px;
+}
+
+.panel {
+  display: none;
+  margin-bottom: 18px;
+}
+
+.panel[data-on='true'] {
+  display: block;
+}
+
+.panel:last-child {
+  margin-bottom: 0;
+}
+
+/*
+ * 组分隔：**横线**（组名 + 摘要坐在一条线上）—— 不是气泡。
+ *
+ * ★ 对齐口径（2026-10-12 作者：「这些图标没有对齐」）：整条**居中**，不用 `baseline`。
+ *   图标是**替换元素**，它的基线就是 svg 盒子底边；文字基线在字墨里偏下，
+ *   两者 `baseline` 一对齐，图标必然相对文字上浮 —— 这就是截图里三个图标
+ *   各自高低不一的那种歪。而且 svg 默认 `inline` 会按行盒算高度，
+ *   图标盒与文字行盒还差一层 leading，`baseline` 下这段差也各算各的。
+ *   改成 `align-items: center` + 图标盒定高（同 `global.css` 里
+ *   「按钮/胶囊字重心」那条思路：几何对齐归几何，别交给基线）：
+ *   图标盒 `--grp-ico` 与图标自身等高，居中后图标中线 = 组名行盒中线，三组一条线。
+ */
+.grpBar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 10px;
+  padding: 2px 0;
+
+  /*
+   * 量尺挂在**这一层**：组名 `b`、摘要、图标盒都读同一条 var。
+   * ★ 定义在 `.grpIcon` 上行不通 —— 那是 `b` 的**兄弟**，自定义属性只沿 DOM 往下走，
+   *   兄弟拿不到 ⇒ `var(--grp-ico)` 落在 `b` 上是未解析的，`line-height` 静默回落。
+   */
+  --grp-ico: 15px;
+}
+
+.grpBar b {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+  /* 组名行盒高度写死成图标盒高：居中才有确定的"中"，不随字体度量漂 */
+  line-height: var(--grp-ico);
+}
+
+/* 组小图标：跟组名一排，扫一眼找得到组 */
+.grpIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: var(--grp-ico);
+  height: var(--grp-ico);
+  margin-right: -2px;
+  color: var(--text-2);
+}
+
+/* 图标按盒子给尺寸，`inline` 的行盒额外高度不参与布局 */
+.grpIcon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.grpSum {
+  /* 摘要是小一号的字，行盒高度也锚到图标盒高：居中时与组名同一条中线 */
+  line-height: var(--grp-ico);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.grpBar::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  align-self: center;
+  background: var(--line-strong);
+}
+
+/*
+ * 键值表（作者 2026-10-11：「左侧是字段，右侧是参数」）—— **一张两列表**：
+ * 字段一列、参数一列，同一组里的值从同一条竖线起排。
+ *
+ * ★ 原来是**每行各自一个 grid**（`max-content 1fr`）：列宽按各自那行的标签算，
+ *   于是每个值的起头 x 都不一样，整块看着歪。现在行盒 `display: contents` 下场，
+ *   dt/dd 直接落进这一张表 —— 字段列只有一条命，组内自然对齐。
+ *
+ * 字段列宽锚在 `--fs-label`（字段那一行的字号，随窗口连续缩放）上：够放最长的那类
+ * 中文标签（8 个全角字，如「打印时间（估算）」），所以**各组**的列宽也是同一把尺子，
+ * 组与组之间那条竖线不跳。`max-content` 是兜底：以后真来个更长的标签，让它那一组
+ * 自己长，不裁字、不叠到值上。
+ */
+.kv {
+  --kv-lb: calc(var(--fs-label) * 8.6 + 2px);
+
+  display: grid;
+  grid-template-columns: minmax(var(--kv-lb), max-content) minmax(0, 1fr);
+  column-gap: 22px;
+  row-gap: 8px;
+  align-items: baseline;
+  margin: 0;
+}
+
+/* 行盒只剩分组的意思（dt/dd 得成对儿）：下场，格子由它俩当 */
+.kvRow {
+  display: contents;
+}
+
+.kvRow dt {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.kvRow dd {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+/* 管线：一步一行，步里的说明跟在下面 */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.step {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.step:last-child {
+  border-bottom: 0;
+}
+
+.stepHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--fs-body);
+}
+
+.stepHead b {
+  font-weight: 500;
+  color: var(--text-1);
+}
+
+.stepMs {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 失败 / 取消记录里「停在这一步」的记号：失败红、取消中性（不是它的错）。
+   排在耗时右边（耗时那条的 `margin-left:auto` 把这一对一起推到行尾） */
+.stepBad {
+  margin-left: 8px;
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--danger);
+}
+
+.stepStopped {
+  margin-left: 8px;
+  flex-shrink: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.stepMsg {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+/* 每步自报的多行事实（`\n` 分行，`pre-line` 原样铺）—— 比 message 深一档 */
+.stepDetail {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.mono {
+  font-family: ui-monospace, Consolas, monospace;
+}
+
+/* ============ 空态 / 错误态（照旧） ============ */
 
 .empty {
   margin: 0;
-  padding: 18px;
-  border: 1px dashed var(--line);
-  border-radius: var(--r-sm);
+  padding: 28px 24px;
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-lg);
   font-size: var(--fs-body);
   color: var(--text-2);
   line-height: 1.7;
@@ -52,198 +848,358 @@
 .err {
   margin: 0;
   padding: 12px 16px;
-  border-radius: var(--r-sm);
-  background: #fdecec;
-  color: #b3261e;
+  border-radius: var(--r-md);
+  background: var(--danger-soft);
+  color: var(--danger);
   font-size: var(--fs-body);
   line-height: 1.7;
 }
 
-.list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* ============ 折叠：同一个面板变窄（2026-10-27 第三版） ============ */
+
+/*
+ * 作者：「不要有两个的感觉，就感觉是一个整体，只是被折到里面了和伸出来这种感觉」。
+ *
+ * 所以**没有第二个元素**：`<nav class="side">` 就是那只盒子，340 → 44 是折起来、
+ * 44 → 340 是伸出来。盒子里的 `.sideBody`（真正的列表）**定宽 340**：外壳收窄时
+ * 它不重排、只被裁 —— 看起来是抽屉被推进去，而不是"列表被挤成一团"。
+ * 折到位时显形的是盒子里那张脸 `.sideFace`（44px、钉在左缘、竖排眉题）。
+ *
+ * 两档共用这一套，差别只在盒子的宽度由谁给：
+ *   · 宽档：grid 第一列（340 / 44）；
+ *   · 窄档：盒子自己的 width（`min(340px, 82%)` / 44）。
+ *
+ * ★★ **不做过渡动画**（2026-10-27 第四版）：宽度动画期间必然存在半展开的一帧，
+ *   那一帧里列表与脊同时在场 —— 作者三次截图说的都是它。现在两态**瞬时切换**，
+ *   折起来时列表直接不画（display:none），任何一帧都只有一个东西。
+ */
+.pane[data-peek='true'] {
+  grid-template-columns: 44px 1fr;
+}
+
+/* 列表本体：**折起来就不画**（不留半截在脊里） */
+.pane[data-peek='true'] .sideBody {
+  display: none;
+}
+
+.sideBody {
+  flex: 1;
+  width: 340px;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
-.row {
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  overflow: hidden;
+/*
+ * 折起来时露出的那张脸：钉在盒子左缘的 44px，只在折叠态现形。
+ *
+ * ★ 宽度钉死 44（不铺满外壳）：折叠那 240ms 里外壳还宽着，脸若铺满，竖排字会
+ *   在宽盒子中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"，随盒子一起收进去。
+ */
+.sideFace {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 44px;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 12px;
+  border: 0;
+  background: var(--surface-solid);
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
 }
 
-.row[data-open='true'] {
+.sideFace:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+/* 竖排的眉题（与 `.sideLb` 同一档字）：44px 只放得下竖字 */
+.sideFaceLb {
+  writing-mode: vertical-rl;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.sideFaceCnt {
+  margin-top: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 宽档：用户按栏头那颗「收起」才折 */
+.pane[data-peek='true'] .sideFace {
+  display: flex;
+}
+
+/* ============ 窄档：列表滑盖化（只盖内容区 —— 顶部那行字与刷新不动） ============ */
+
+/*
+ * ★ 容器查询要指名道姓（`container-name: report`）：WebView 里跨槽位的匿名
+ * `@container (width < …)` 实测不生效（浏览器里同一份 CSS 却是对的），
+ * 而**具名**查询两处都稳 —— 这条档位切不过来，用户看到的就是「浮层盖着、点了不切换」。
+ */
+@container report (width < 880px) {
+  .pane {
+    /* 收起时露出 44px 的窄轨，主区整体让开这一条 */
+    grid-template-columns: 1fr;
+    padding-left: 56px;
+  }
+
+  /*
+   * 手动折叠在窄档里照样认（用户收起来的那一栏，不该因为窗口变窄又自己张开）。
+   */
+  .pane[data-peek='true'] {
+    grid-template-columns: 1fr;
+  }
+
+  /* ★ 不动 `.head` / `.sub`：窄窗里顶部照样一行小灰字 + 刷新靠右 */
+
+  .scrim {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: rgb(16 24 32 / 28%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+
+  /*
+   * 开盖只认 `.side` 自己的状态（相邻兄弟）—— 不靠 JS 同步第二份状态。
+   * DOM 顺序必须是 side → scrim → main。
+   */
+  /* ★ `:not([data-peek])`：手动折起来之后面板只剩 44px，遮罩再留着就是"整页发灰"
+     （2026-10-27 作者截图），所以折起来那一刻遮罩必须一起退场 */
+  .pane:not([data-peek='true']) .side[data-open='true'] + .scrim {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /*
+   * 窄档的盒子（2026-10-27 第四版）：收起 44px 只画那张脊，展开 `min(340px, 82%)`
+   * 盖在详情上。**两态瞬切**，中间不留半展开的帧（列表在收起态直接不画）。
+   */
+  .side {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 44px;
+    border-radius: 0 var(--r-lg) var(--r-lg) 0;
+  }
+
+  .side[data-open='true'] {
+    width: min(340px, 82%);
+  }
+
+  /* 收起态：列表不画，只剩脊 */
+  .side:not([data-open='true']) .sideBody {
+    display: none;
+  }
+
+  /* 手动折叠优先于展开态：折了就是 44，不管 sideOpen 是不是还留着 true */
+  .pane[data-peek='true'] .side {
+    width: 44px;
+  }
+
+  /* 窄档里那张脸：展开就藏（宽档那半套在基础样式里） */
+  .side[data-open='true'] .sideFace {
+    display: none;
+  }
+
+  /* 收起 = 露脸；手动折叠优先（放最后）：折了就一直露，哪怕 sideOpen 还留着 true */
+  .side:not([data-open='true']) .sideFace,
+  .pane[data-peek='true'] .sideFace {
+    display: flex;
+  }
+}
+
+/* ============ 参数快照（2026-10-21） ============ */
+
+/*
+ * 参数快照那一组：顶部一条工具栏（搜索 + 计数 + 全展开），下面按 TOML 节折叠。
+ * 默认全收起 —— 70 多项一次铺开会把这一屏顶到几屏高（作者要的是"不展开、能展开"）。
+ */
+.snap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snapTools {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.snapSearch {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-1);
+  font-size: var(--fs-label);
+}
+
+.snapSearch:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.snapCount {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.snapToggle {
+  flex: 0 0 auto;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.snapToggle:hover {
+  color: var(--text-1);
   border-color: var(--text-3);
 }
 
-.rowHead {
-  width: 100%;
+.snapEmpty {
+  margin: 0;
+  padding: 10px 2px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 这一盘有设置没读到（用了默认值）：红字，摆在参数快照最上面 */
+.snapBad {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--text-1);
+  font-size: var(--fs-label);
+  line-height: 1.65;
+}
+
+.snapSec {
+  border-top: 1px solid var(--line);
+}
+
+.snapSecHead {
   display: flex;
-  align-items: baseline;
-  gap: 10px 14px;
-  flex-wrap: wrap;
-  padding: 10px 16px;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 2px;
   border: 0;
   background: transparent;
-  font: inherit;
+  color: var(--text-1);
+  font-size: var(--fs-body);
   text-align: left;
   cursor: pointer;
 }
 
-.rowHead:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--text-3);
-}
-
-.ok {
-  flex-shrink: 0;
-  font-size: var(--fs-label);
-  color: #1a7f4b;
-}
-
-.bad {
-  flex-shrink: 0;
-  font-size: var(--fs-label);
-  color: #b3261e;
-}
-
-.when {
-  flex-shrink: 0;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-  font-variant-numeric: tabular-nums;
-}
-
-.file {
-  font-size: var(--fs-body);
-  color: var(--text-1);
-  overflow-wrap: anywhere;
-}
-
-.meta {
+.snapSecCount {
   margin-left: auto;
   font-size: var(--fs-label);
-  color: var(--text-2);
-}
-
-.rowErr {
-  margin: 0;
-  padding: 8px 16px 10px;
-  border-top: 1px solid var(--line);
-  background: #fdecec;
-  color: #b3261e;
-  font-size: var(--fs-label);
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-
-.detail {
-  border-top: 1px solid var(--line);
-  padding: 12px 16px 14px;
-  background: var(--surface-sunken);
-}
-
-.detailBody {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.block {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.blockTitle {
-  margin: 0;
-  font-size: var(--fs-label);
-  font-weight: 600;
   color: var(--text-3);
-  letter-spacing: 0.04em;
-}
-
-.cells {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 8px 16px;
-  margin: 0;
-}
-
-.cell dt {
-  font-size: var(--fs-label);
-  color: var(--text-3);
-}
-
-.cell dd {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--text-1);
   font-variant-numeric: tabular-nums;
 }
 
-.warnList {
-  margin: 0;
-  padding-left: 18px;
-  font-size: var(--fs-body);
-  color: var(--text-2);
-  line-height: 1.8;
-}
-
-.steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-}
-
-.steps li {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-
-.stepName {
-  flex-shrink: 0;
-  min-width: 84px;
-  color: var(--text-1);
-}
-
-.stepMsg {
-  flex: 1;
-  overflow-wrap: anywhere;
-}
-
-.stepMs {
-  flex-shrink: 0;
-  font-variant-numeric: tabular-nums;
-}
-
-.facts {
+.snapRows {
   display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 6px 14px;
+  grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
+  column-gap: 18px;
+  row-gap: 5px;
   margin: 0;
+  padding: 0 2px 10px 20px;
+}
+
+.snapRow {
+  display: contents;
+}
+
+.snapRow dt {
   font-size: var(--fs-label);
-}
-
-.facts dt {
   color: var(--text-3);
-}
-
-.facts dd {
-  margin: 0;
-  color: var(--text-1);
   overflow-wrap: anywhere;
 }
 
-.mono {
+.snapRow dd {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.snapIr {
+  margin-top: 12px;
+}
+
+.snapIr summary {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.snapJson {
+  max-height: 280px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  color: var(--text-2);
   font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.92);
+  line-height: 1.5;
+  white-space: pre;
+}
+
+/* ---- 擦料塔俯视图（擦料塔那一组下面那张图） ----
+   图本身是 `CollisionMap`（与「塔位变化」两幅同一份画布，样式在
+   `CollisionMap.module.css`）—— 这里只管"图 + 一句说明"的排布。 */
+
+.plate {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.plateNote {
+  flex: 1;
+  min-width: 160px;
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.7;
+}
+
+.plateBad {
+  color: var(--danger);
 }

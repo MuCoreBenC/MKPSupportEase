@@ -65,7 +65,9 @@ pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
 }
 
 /// 工作台窗口的标签。与客户端的 `main` 分开，`get_webview_window` 拿的是各自那一个
-const WINDOW_LABEL: &str = "workbench";
+///
+/// ★ `pub`：换主题那一档要按它找到这扇窗（见 [`crate::ipc::prefs::set_theme`]）。
+pub const WINDOW_LABEL: &str = "workbench";
 
 /// 窗口标题。**测试模式那一份带前缀** —— 标题栏是唯一一处"切到别的窗口也还看得见"
 /// 的地方（任务栏、Alt+Tab、截图里都在），作者要的"时时刻刻知道我在哪一边"就靠它兜底。
@@ -103,7 +105,9 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
     let win =
         WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("workbench.html".into()))
             .title(window_title())
-            .inner_size(1360.0, 900.0)
+            /* 默认尺寸（作者 2026-10-14「工作台默认窗口不要那么大」）：1360×900 太大 ——
+            改 1080×720（常见的紧凑工作区尺寸）。最小尺寸不变，用户照旧能拉到更大 */
+            .inner_size(1080.0, 720.0)
             .min_inner_size(900.0, 560.0)
             .resizable(true)
             /*
@@ -125,6 +129,18 @@ pub fn open_window(app: &AppHandle) -> Result<(), AppError> {
             let _ = win.show();
         });
     }
+
+    /*
+     * ★★ **原生那一层**（标题栏 / 滚动条 / 原生控件）也要跟着盘上那一档
+     * （2026-10-16「工作台也做深色」）。
+     *
+     * 这扇窗用的是**系统原生装饰** —— CSS 只画得到内容区。开着的时候不设它，
+     * 就是"页面深了、标题栏还浅着"。客户端那扇窗对应的是"圆角那一圈填色"
+     * （`chrome::repaint_corner_fill`），两条路干的是同一件事：**原生那一层不由 CSS 管**。
+     *
+     * 「跟随系统」那一档交给系统自己（`None`）—— 别把系统现在的这一档钉死在窗口上。
+     */
+    crate::ipc::prefs::apply_native_theme(&win, crate::ipc::prefs::theme_pref(app));
 
     /* 草稿在内存里，磁盘上只有崩溃快照。落盘三个时机里的两个挂在窗口事件上：
     失焦（去别的窗口了，这会儿写不碍事）与关闭前（最后一次机会）。

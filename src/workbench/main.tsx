@@ -16,6 +16,7 @@ import './tokens.css'
 import './workbench.css'
 import './c14tokens.css'
 import { WorkbenchApp } from './App'
+import { initTheme } from './theme'
 
 /*
  * 测试桩：**只有显式要求才装**（`?mock=1`），这是 2026-10-02 定的口径。
@@ -41,6 +42,15 @@ const host = document.getElementById('workbench-root')
 if (!host) {
   throw new Error('找不到 #workbench-root —— workbench.html 与本文件对不上了')
 }
+
+/*
+ * ★★ **工作台这扇窗得自己落一次 `data-theme`**（2026-10-16）：它**不跑 appState**
+ * （客户端那条「读 AppState 的 theme 格 → 落 `<html data-theme>`」在这儿根本不会发生）。
+ * 不落的话全窗只认**系统**深浅：人在设置里点了「深色」而系统是浅色，工作台还是白的。
+ *
+ * 解析那一句不在这儿重写 —— 取 `src/app/state/theme` 里那唯一一份（见 `./theme` 头注）。
+ */
+initTheme()
 
 /* 全局 error / unhandledrejection 不再接管 #workbench-root：
    ResizeObserver 的良性回路通知（loop completed with undelivered notifications）

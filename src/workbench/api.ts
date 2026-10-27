@@ -16,6 +16,9 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 
+/* 主题档位的字面量与客户端是同一份契约（三个值的 id 由 Rust 那边的 ThemePref 钉着） */
+import type { ThemePref } from '../api/contract'
+
 /* ---------- 错误 ---------- */
 
 /** `error::AppError`。与客户端共用同一套 —— trace id 也共用一条日志线 */
@@ -91,13 +94,13 @@ export interface Boot {
   /** 工作台子目录的职责（14.7）—— 谁写谁读、能不能当编辑对象，后端一句话说清 */
   storeDirs: { name: string; role: string }[]
   /**
-   * 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+   * 云端源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
    * null = 还没配 —— 客户端构建时就不会注入默认源（见 `src-tauri/build.rs`）。
    * 改了要**重新构建客户端**才生效（编译期注入）；`wb_set_bootstrap` 写它
    */
   bootstrapUrl: string | null
   /**
-   * 第二官方源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
+   * 第二云端源（Gitee 镜像，国内直连）：与 `bootstrapUrl` 指向**同一份交付**的另一个仓库。
    * null = 没配 —— 客户端构建不注入这一档，客户端界面也不出现它。各读各的，互不兜底
    */
   giteeBootstrapUrl: string | null
@@ -200,7 +203,15 @@ export interface TabMeta {
 export interface ChoiceView {
   label: string
   value: unknown
+  /**
+   * **显式全局弃用**（所有机型都不许写）—— 定义框那颗勾的状态。
+   * 回写只认这一格与 `deprecatedMachines`，推定值不进载荷
+   */
   deprecated: boolean
+  /** **只在这些机型上**弃用（与 `deprecated` 叠加，空 = 不按机型弃用） */
+  deprecatedMachines: string[]
+  /** 推出来的弃用（选这一档放开的子参数全弃用）。**只显示、不回写** */
+  derived: boolean
 }
 
 /** `registry::ShowOp` —— 实测只有三种 */
@@ -236,7 +247,18 @@ export interface ParamView {
   parentKey: string | null
   /** 空 = 不限机型 */
   machineFilter: string[]
+  /** **全局弃用**（所有机型、所有版本都不许写） */
   deprecated: boolean
+  /** **只在这些机型上**弃用（与 `deprecated` 叠加） */
+  deprecatedMachines: string[]
+}
+
+/** `app::SectionTarget` —— 「所属分组」下拉的一行 */
+export interface SectionTarget {
+  id: string
+  label: string
+  tabId: string
+  tabLabel: string
 }
 
 /** `app::RegistryView` */
@@ -244,6 +266,11 @@ export interface RegistryView {
   updated: string
   tabs: TabMeta[]
   params: ParamView[]
+  /**
+   * 能装参数的分组（含暂时空掉的），按页签顺序。
+   * 「所属分组」下拉用它，**不拿 params 反推** —— 空组搬空之后还得能搬回去
+   */
+  sections: SectionTarget[]
 }
 
 /**
@@ -264,10 +291,24 @@ export interface ParamMetaEdit {
   parentKey: string | null
   showWhen: ShowWhen | null
   deprecated: boolean
+  /** 只在这些机型上弃用（与 `deprecated` 叠加） */
+  deprecatedMachines: string[]
   /** 可选项整表 —— 字符串枚举在这里编辑；其他类型原样带回（预设档不丢） */
   choices: ChoiceView[]
   /** 适用机型。空 = 不限机型 */
   machineFilter: string[]
+  /**
+   * 搬到哪个分组（`layout_schema` 的 section id）。`null` = 不动 ——
+   * 后端把它读成「保持原位」，不是「搬回默认组」
+   */
+  sectionId: string | null
+  /**
+   * 组内顺序（`[params.layout].order`）。`null` = 不动。
+   *
+   * 客户端按同一个值排同一组里的参数，所以它是**数据**：上下箭头改的是它，
+   * 后端还会顺带把 `layout_schema` 的 `items[]` 重排成同一顺序
+   */
+  order: number | null
 }
 
 /**
@@ -340,6 +381,10 @@ export interface Cell {
    * 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
    */
   rest: unknown
+  /** 这条参数**在这一列这台机型上**已弃用。`Row.deprecated` 是全机型口径 */
+  deprecated: boolean
+  /** 这台机型上不能写的选项值（后端算好的，含推定）。控件划线、手势前拦人都读它 */
+  deadChoices: string[]
 }
 
 /** `derive::Row` */
@@ -789,11 +834,11 @@ export interface FileChange {
   after: string | null
 }
 
-/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个官方源」那一步的结论 */
+/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个云端源」那一步的结论 */
 export type MirrorStatus = 'pushed' | 'upToDate' | 'skipped' | 'failed'
 
 /**
- * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个官方源**的结果。
+ * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个云端源**的结果。
  *
  * ★ 它回答的是「**客户端读的那个源**跟上了没有」—— 与平台上的 PR 状态是两件事。
  * 一次发布只开一条 PR（代码主线仍只走 GitHub），合完由这一步把数据面铺到另一个源上。
@@ -870,7 +915,7 @@ export interface PublishRecord {
   auditFailed: number
   summary: string
   /**
-   * 合并之后「把主线同步到第二个官方源」的结论。
+   * 合并之后「把主线同步到第二个云端源」的结论。
    *
    * `null` = 这一条写下来的时候还没走到合并那一步。★ 它**不由刷新改写** ——
    * 刷新拿到的是平台上的 PR 状态，与"镜像跟没跟上"是两件事。
@@ -884,7 +929,7 @@ export interface PublishHistory {
   records: PublishRecord[]
 }
 
-/* ---------- 第四刀：发布**软件版本**（与「发布预设」两条链，各有各的类型） ---------- */
+/* ---------- 第四刀：发布**软件版本**（与「交付预设」两条链，各有各的类型） ---------- */
 
 /** `release_tx::ReleaseStage` 的线上名（camelCase，与后端 `wire_name()` 逐字一致） */
 export type ReleaseStage =
@@ -1069,6 +1114,109 @@ export interface SandboxStatus {
   realPresetsRoot: string
   /** 上一次动作的结果（"已从正式拷了一份：54 个文件 4.4 MB"） */
   note: string | null
+}
+
+/**
+ * `devsim::DevScene` —— **开发台**上一个可点的场景。
+ *
+ * 清单**由后端给**（`wb_dev_devsim_scenes`）：界面照着它分类摆按钮，不自己维护一份
+ * —— 加一档只改 Rust 那一处。后处理那一组现在就能点；后面几组（导入 / 文件冲突 /
+ * 校验更新 / 浮出的条）先摆出来标 `ready: false`，点了给一句"还没做"。
+ */
+/**
+ * **开发台 · 故障注入**的一档（`app::devfault::DevFault`）。
+ *
+ * 与 [`DevScene`] 的分工：那是"打开一格界面"，这是"让某个 API 方法失一次真"。
+ * ★ `method` 是**客户端那边**的方法名（camelCase，`MkpApiMethod`）——
+ * 装的是方法不是某个框，于是**所有**走它的界面一起中。
+ */
+export interface DevFault {
+  /** 稳定 id（`delivery-stale` 之类） */
+  id: string
+  /** 装在哪个 API 方法上（camelCase，客户端 `MkpApiMethod` 名） */
+  method: string
+  /** 行上的名字 */
+  label: string
+  /** 一句话说清它什么时候真出现 / 装了之后会看到什么 */
+  note: string
+  /** 分组键 */
+  group: string
+  /** 组名（人话） */
+  groupLabel: string
+}
+
+export interface DevScene {
+  /** 稳定 id（`postprocess-success` 之类） */
+  id: string
+  /** 分组键（`postprocess` / `import` / `file` / `trust` / `float`） */
+  group: string
+  /** 组名（人话） */
+  groupLabel: string
+  /** 行上的名字 */
+  label: string
+  /** 一句话说清它会演什么 / 什么时候真出现 */
+  note: string
+  /** 能点吗。`false` = 这一档还没做（不是坏了） */
+  ready: boolean
+  /** 层类（人话）：`后处理` / `标题栏` / `菜单` / `模态框` / `提示条` —— 同类只留最后点的 */
+  slotLabel: string
+}
+
+/**
+ * **开发台 · 运行真实后处理**的回执（`app::devreal::DevRunAck`，2026-10-19）。
+ *
+ * ★ `gcode` 是**副本**的落点，不是你选的那一份：真后处理是原地覆盖输入的，
+ * 所以后端先复制一份再跑 —— 源文件一个字节不动，于是"能反复跑"成立。
+ * 想看产物就去这个路径（或客户端「最近处理」那条记录）。
+ */
+export interface DevRunAck {
+  /** 真被处理的那一份（副本，在客户端内部根的 `run/dev-run/` 下） */
+  gcode: string
+  /** 用的预设（原样，不复制 —— 预设是只读输入） */
+  preset: string
+}
+
+/**
+ * **开发台 · 真实后处理测试矩阵**的一档（`app::devmatrix::MatrixCase`，2026-10-19）。
+ *
+ * 六档 = 小文件成功 / 大文件成功 / 硬失败 / 机型不匹配 / 挪塔碰撞 / 取消。
+ * `expect` 是这一档**期望的真结局**（稳定串），判定由后端按 `_meta.json` 的真凭据做。
+ */
+export interface MatrixCase {
+  id: string
+  label: string
+  /** 这一档"凭什么触发什么" */
+  note: string
+  /** `success` / `hard-fail` / `collision` / `mismatch` / `cancelled` */
+  expect: string
+  /** 需要人在客户端窗口里真操作（不代答） */
+  human: boolean
+  /** 夹具都在（false = 点了只报"夹具不在"） */
+  ready: boolean
+  /** 输入说明（预设名 + 件名） */
+  input: string
+}
+
+/** 一档跑完的判定（该档目录里的 `verdict.json`）。 */
+export interface MatrixVerdict {
+  caseId: string
+  /** `passed` / `failed` */
+  status: string
+  /** 一句话结论 —— 里面带的是**判据本身**（哪个字段说明通过） */
+  note: string
+  /** 这一档的临时根（产物与执行记录都在里面） */
+  dir: string
+  startedAt: string
+  elapsedMs: number
+}
+
+/** 矩阵一次拿到的全貌。 */
+export interface MatrixState {
+  cases: MatrixCase[]
+  /** 最近 10 个档目录的判定（新的在前） */
+  runs: MatrixVerdict[]
+  /** 现在正在跑哪一档（空闲 = null） */
+  current: string | null
 }
 
 /**
@@ -1352,9 +1500,14 @@ export interface MachineList {
  * **没有 `mkpPreset`** —— 那份路径由命名规则算出，不建条目（doc §12.5）。
  *
  * `image`（整机图）2026-10-03 回到台账（第三刀的剥离已作废）：它用
- * `delivery = 'bundled'` 表达「不进云端交付、但工作台可管可换图」。
+ * `delivery = 'bundled'` 表达「不进交付预设那一档、但工作台可管可换图」。
+ *
+ * `guide`（引导图）2026-10-16 进台账（`type = 'guide'`，bundled —— 图片引导那两张：
+ * 「改 .3mf 默认打开方式」的浅 / 深截图）。★ 当天那一刀 Rust 侧（`AssetKind::Guide`）
+ * 与 AssetsPage 都加了，**漏了这里** —— `tsc -b` 撞在 `cur.kind === 'guide'` 上
+ * （TS2367 零交集），顺手补齐。
  */
-export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset'
+export type AssetKind = 'image' | 'icon' | 'model' | 'slicerProfile' | 'mkPreset' | 'guide'
 
 /** `assets::AssetView` —— 资产域①层的一条定义（`presets/assets.toml`） */
 export interface AssetView {
@@ -1369,6 +1522,9 @@ export interface AssetView {
   display: string
   /** 台账登记的名字（不是显示真源，详情卡里作对照） */
   name: string
+  /** **产物文件名**（只 MKP 预设类有，如 `A1-standard.toml`）：后端按命名规则现算，
+   *  台账里不存、前端**不许自己拼**。其余类恒空串（真名走 `path` 末段 / `display`） */
+  productName: string
   /**
    * 相对**资产源根**（`presets/assets/`）的一段 —— 工作台读的是源，与交付档位无关。
    * 它同时就是 `/assets/` 那条 URL 的后半截（`url` 由后端拼，前端只 encode）
@@ -1394,11 +1550,131 @@ export interface AssetView {
   /** **生成状态**（只 `mkPreset` 类有，与生成页同一套判据）：没生成过 = 待生成；
    *  生成过、参数改完还没重新生成 = **待更新**。其余四类恒 null */
   buildState: 'built' | 'stale' | 'neverBuilt' | 'noResources' | null
+  /**
+   * **它属于哪个分组**（2026-10-16）。没进组 = 两个 `null`。
+   *
+   * ★ 由**后端**从台账 `[[groups]]` 算好再发过来 —— 前端不自己推"谁跟谁一组"
+   * （那会让"哪几张共用一份标注"有两套算法）
+   */
+  groupId: string | null
+  groupName: string | null
+  /** 它在这个组里演什么（`light` / `dark` / …）。没进组或没写角色 ⇒ null */
+  role: string | null
+  /**
+   * **校准身份状态**（2026-10-19）。只有模型类、且台账声明了预期或文件里真带标记时才有；
+   * 图 / 图标 / 切片器预设一律 `null`。
+   *
+   * ★ 与上面那个 `identity`（交付身份四态）毫无关系 —— 那是"怎么到客户端手里"，
+   * 这是"这份 3MF 是哪一种校准件"。
+   */
+  calibration: CalibrationStatus | null
+}
+
+/**
+ * 一份校准素材的身份校验（`assets::CalibrationStatus`）。
+ *
+ * 结论来自 Rust 的 `calibration_asset::read_identity` —— 与
+ * `npm run check:calibration-assets` 同一个实现，前端不自己拆 3MF。
+ */
+export interface CalibrationStatus {
+  /** 台账里声明的预期身份；没声明 = null */
+  expected: string | null
+  /** 文件里实际写的原值（照实，不归一）；没有那条 metadata = null */
+  actual: string | null
+  /** 预期与实值一致（或没声明预期但值合法） */
+  ok: boolean
+  /** 读不到 / 值非法 / 与预期不符的原因 */
+  problem: string | null
+}
+
+/** `assets::GroupView` —— 一个分组在界面上的样子（资产库页的分组管理器用） */
+export interface GroupView {
+  id: string
+  name: string
+  members: GroupMemberView[]
+}
+
+/** `assets::GroupMemberView` —— 分组里的一名成员（带显示名，管理器直接画） */
+export interface GroupMemberView {
+  asset: string
+  display: string
+  role: string
+}
+
+/**
+ * 一个框（**百分比**，相对整张图）—— 与客户端 `GuideMark.at` 同形
+ */
+export interface AnnoBox {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** 一条标注画出来什么样（全可选；一个都不写 = 站点缺省：圆角 8 / 线宽 2 / 编号 18） */
+export interface AnnoStyle {
+  radius?: number
+  stroke?: number
+  badge?: number
+}
+
+/** 图上的一块标注（`step` = 框角上那颗编号，一份里不许重号） */
+export interface AnnoMark {
+  step: number
+  at: AnnoBox
+  /** 给自己看的名字（只进导出那行注释，不进客户端契约） */
+  note?: string
+  style?: AnnoStyle
+}
+
+/**
+ * 这份标注画在**哪几张图上**（路径 = **资产根**里的相对路径）＋ 当时的图尺寸。
+ *
+ * ★ 2026-10-16 泛化：原来是 `light` / `dark` 两个字段（浅 / 深一对），改成**一个路径列表** ——
+ * 一份源稿＝一组，`images` 就是这一组的全部成员；浅 / 深那一对只是"现在恰好两个成员"的特例。
+ * 将来一组三张以上（macOS + Windows 同一套引导）不用再动 schema。
+ */
+export interface AnnoSource {
+  /** 这一组图（同一份标注画上去的那些）—— 顺序就是"组内次序" */
+  images: string[]
+  size: { w: number; h: number }
+}
+
+/** 一份标注**源稿**（入库的那一份，`presets/assets/…/<对>.anno.json`） */
+export interface AnnoDoc {
+  annoSchema: number
+  source: AnnoSource
+  marks: AnnoMark[]
+  /** 后端盖的时间（前端不造时间） */
+  updatedAt: string
+}
+
+/** `annotation::AnnoView` —— 读回来的样子：源稿 + 它在资产根里的落点 */
+export interface AnnoView {
+  /** **没有源稿是合法状态**（还没拖过）⇒ `null` */
+  doc: AnnoDoc | null
+  /** 相对资产根的落点，例如 `guides/open-with.anno.json` */
+  path: string
+  /** **标注台该显示的那张图**（相对资产根）= **原图**，不是台账那条成品图。
+   *  台账 `path` 指成品 `.rendered.webp`（框已烧进像素），在它上面再画框就是"框上叠框" */
+  sourceImage: string
+}
+
+/** `annotation::RenderedShot` —— 「生成预览」烘出来的一张（**没落盘**，只回字节） */
+export interface RenderedShot {
+  /** 输入用哪张原图（相对资产根） */
+  original: string
+  /** 成品该落在哪（相对资产根）—— 预览时只当标识（保存时后端照这个写） */
+  out: string
+  /** webp 字节的 base64（前端 `new Blob` 成 `blob:` URL 去预览） */
+  bytesB64: string
 }
 
 /** `assets::AssetList` */
 export interface AssetList {
   assets: AssetView[]
+  /** **分组登记**（2026-10-16）—— 管理器要的那张表，**全量**、不随筛选变 */
+  groups: GroupView[]
   /** 资产根的绝对路径 */
   root: string
   /** 喷嘴轴候选值。从全部切片器条目取，**不随筛选变** —— 选中一个值不能让别的选项消失 */
@@ -1424,6 +1700,24 @@ export interface AssetUsageView {
 }
 
 /**
+ * `assets::HashCheck` —— 盘上字节与**交付目录登记**的核对结果。
+ *
+ * 登记值只有一处：`presets/delivery/catalog.json` 的 `files[]`（发布 / 生成时对真字节
+ * 算的那一份）。台账 `presets/assets.toml` 不存哈希 —— 那不是第二份真相，是没有。
+ *
+ * - `notInDelivery`：随包 / 图片类，目录不会登记它；
+ * - `notRegistered`：进交付集合，但目录里还没这一条（没生成过 / 目录不在）；
+ * - `match` / `mismatch`：登记值与实际字节一致 / 已漂移（改了文件、目录还没重算）；
+ * - `missing`：文件不在，没得比。
+ */
+export type HashCheck =
+  | 'notInDelivery'
+  | 'notRegistered'
+  | 'match'
+  | 'mismatch'
+  | 'missing'
+
+/**
  * `assets::AssetInspectView` —— **资产检查面板**（第四刀，选中一条才问）。
  *
  * 它不并进 [`AssetView`]（列表里那一条）：最贵的两格（`sha256` / `bytes`）要读真实
@@ -1436,6 +1730,16 @@ export interface AssetUsageView {
  */
 export interface AssetInspectView {
   id: string
+  /** 文件创建时间（RFC3339 / UTC，界面按本机时区显示）；文件系统给不出 = null */
+  created: string | null
+  /** 文件最后修改时间（同上）。改了文件这一格会变，sha256 也跟着变 */
+  modified: string | null
+  /** 交付目录 `presets/delivery/catalog.json` 登记的 SHA-256；没登记 = null */
+  registeredSha256: string | null
+  /** 同上：登记的大小（字节） */
+  registeredSize: number | null
+  /** 盘上字节与交付目录登记的核对结果 */
+  hashCheck: HashCheck
   /** 真实文件名（盘上那个名字）。普通资产 = `path` 的文件名；`mkPreset` = 产物名 */
   fileName: string
   /** 盘上绝对路径（普通 = 源文件；`mkPreset` = 产物文件）。**文件不存在时它是期望路径** */
@@ -1453,6 +1757,8 @@ export interface AssetInspectView {
   format: string | null
   /** 产物**相对仓库根**的一段（仅 `mkPreset`）：`presets/delivery/mkp/presets/<产物名>` */
   productPath: string | null
+  /** **校准身份**（2026-10-19）：3MF 才有，其余 null。写完身份后重新拉一次就是最新值 */
+  calibration: CalibrationStatus | null
 }
 
 /** `bundles::BundleRefView` —— 套餐里一个 `assetRef`，join 资产域后的解析结果（P4） */
@@ -1466,6 +1772,9 @@ export interface BundleRefView {
   isBbs: boolean
   /** 资产域登记的名字。解析不到时是空串 */
   name: string
+  /** **产物文件名**（只 MKP 预设类有，如 `A1-standard.toml`）—— 后端按命名规则现算，
+   *  台账里不存、前端**不许自己拼**（那会变成第二份规则）。其余类恒空串 */
+  productName: string
   /** 文件在不在。**MKP 预设按生成状态判**（产物不在资产根里） */
   present: boolean
   /** **生成状态**（只 `mkPreset` 类有，与生成页 / 资产库同一套判据），其余类恒 null */
@@ -1522,7 +1831,24 @@ export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
 /** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
 export type DeliveryStage = 'generate' | 'publish' | 'software'
 
-/** `delivery::DeliveryFile` —— 交付集合里的一份（「发布预设」卡展出用） */
+/**
+ * `delivery::DeliveryState` —— 一份交付文件现在的状态。
+ *
+ * 与 `BuildState`（参数快照指纹）是两件事：那个判"配方改完还没重新生成"；
+ * 这个判"盘上字节与交付目录登记的对不对得上" —— 改 3MF 不会动任何版本的
+ * `BuildState`，但会让对应条目变 `pending`。
+ */
+export type DeliveryState = 'missing' | 'upToDate' | 'pending'
+
+/**
+ * `delivery::DeliveryPendingReason` —— pending 的**原因**。
+ *
+ * 三把尺子分开说：`build` 配方快照旧（①卡那句「待更新」）、`registry` 目录登记
+ * 没跟上（生成一次才重算目录）、`content` 重新渲染的字节不同（模板 / 注释改过）。
+ */
+export type DeliveryPendingReason = 'build' | 'registry' | 'content'
+
+/** `delivery::DeliveryFile` —— 交付集合里的一份（「交付预设」卡展出用） */
 export interface DeliveryFile {
   /** 相对交付根的路径（`mkp/presets/A1-standard.toml`、`content/bundles.json`…） */
   rel: string
@@ -1532,6 +1858,53 @@ export interface DeliveryFile {
   size: number
   /** 谁写的：生成时重算 / 发布时定稿 / 软件发布链 */
   stage: DeliveryStage
+  /** 与目录登记的关系（见 [`DeliveryState`]） */
+  state: DeliveryState
+  /** 目录里登记的大小（没登记 = null） */
+  registeredSize: number | null
+  /** pending 的原因（null = 不是 pending） */
+  pendingReason: DeliveryPendingReason | null
+}
+
+/**
+ * `delivery::DeliveryDrift` —— 目录登记与盘上真字节对不上的一条（A 类载荷，
+ * 如 `assets/models/*.3mf`）。改了 3MF 之后生成页那句提示就是数它。
+ */
+export interface DeliveryDrift {
+  /** `catalog.path`（发布根相对，如 `assets/models/ZOffset_Calibration_ext.3mf`） */
+  path: string
+  /** 目录登记的大小（没登记 = null） */
+  registeredSize: number | null
+  /** 盘上实际大小（取不到 = null） */
+  actualSize: number | null
+  /** 为什么算漂移 */
+  reason: 'missing' | 'size' | 'bytes' | 'noExpectation'
+}
+
+/**
+ * `delivery::DeliveryStatus` —— 「生成与发布」页的一整套交付读数。
+ *
+ * 页面外只摆汇总，点开明细才看全部 —— 作者 2026-10-19：「后续预设会越来越多，
+ * 不可能都显示出来」。
+ */
+export interface DeliveryStatus {
+  /** 交付集合里的每一份（含全部 `mkp/presets/*.toml` 与附属 JSON） */
+  files: DeliveryFile[]
+  /** 与目录登记不一致的每一条 —— 非空 ⇒ `catalog.json` 待重新生成 */
+  drift: DeliveryDrift[]
+  /**
+   * **待更新 / 未生成**的版本 uid（TOML 里 state !== 'upToDate'）。
+   *
+   * 包含两类：配方指纹对不上的（`BuildState::Stale`）、以及**重新渲染后字节
+   * 与盘上不同**的（模板/注释变化）——后者是 `BuildState` 看不见的。
+   */
+  pendingUids: string[]
+  /** `catalog.json` 的盘上修改时间（RFC3339 / UTC；没有 = null） */
+  catalogModified: string | null
+  /** `manifest.json` 的盘上修改时间（同上） */
+  manifestModified: string | null
+  /** `catalog.json` 读不出来时的原话（正常 = null） */
+  catalogError: string | null
 }
 
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
@@ -1546,10 +1919,15 @@ export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
   reload: () => invoke<Boot>('wb_reload'),
+  /**
+   * 盘上的 `presets/` 跟这个会话手里那一份对不上了吗（外部改过 / 别处写过）。
+   * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
+   */
+  presetsChanged: () => invoke<boolean>('wb_presets_changed'),
   /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
   appVersion: () => invoke<string>('wb_app_version'),
   /**
-   * 写官方源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
+   * 写云端源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
    * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。
    * 两格一笔写全 —— 这一笔就是配置的全部真值
    */
@@ -1559,6 +1937,16 @@ export const wb = {
       giteeUrl,
     }),
   words: () => invoke<Words>('wb_words'),
+
+  /**
+   * 界面偏好：**主题档位**（`light` / `dark` / `system`）。`null` = 还没选过 ⇒ 跟随系统。
+   *
+   * ★ 命令就是客户端那两条（`ipc::prefs`），但**落点是工作台自己那棵数据根**
+   * （identifier = `SupportEase-Workbench`）—— 两个应用各记各的一档，不互相读。
+   */
+  theme: () => invoke<ThemePref | null>('get_theme'),
+  /** 换档：立即生效并落盘。返回值是**存下去的那一档**（认不出的字符串会被后端整次拒绝） */
+  setTheme: (theme: ThemePref) => invoke<ThemePref>('set_theme', { theme }),
 
   book: () => invoke<BookView>('wb_book'),
   registry: () => invoke<RegistryView>('wb_registry'),
@@ -1592,14 +1980,81 @@ export const wb = {
     layer: string | null,
     identity: string | null,
     query: string | null,
-  ) => invoke<AssetList>('wb_assets', { kind, slicer, nozzle, layer, identity, query }),
+    /** 只看某一个分组（组 id）。与 `ungrouped` **二选一**，都不给 = 不过滤 */
+    group: string | null,
+    /** 只看没进任何组的那些 */
+    ungrouped: boolean | null,
+  ) =>
+    invoke<AssetList>('wb_assets', {
+      kind,
+      slicer,
+      nozzle,
+      layer,
+      identity,
+      query,
+      group,
+      ungrouped,
+    }),
 
   /** 删一条资产。反查守卫在后端：有人引用整次拒绝（界面把它转成拦截页） */
   removeAsset: (assetId: string) => invoke<AssetList>('wb_remove_asset', { assetId }),
 
   /** 改一条资产的交付档位（download ↔ bundled）。即时落盘；mkPreset 不许随包 */
+  /**
+   * **补标 / 改写 / 移除一份校准 3MF 的身份**（2026-10-19）。
+   *
+   * `value = null` ⇒ 移除那条 `MKPSE:Calibration`。
+   *
+   * 写的是**盘上那份真文件**（后端走 `calibration_asset`，与检查脚本同一个实现），
+   * 写完重新读盘回全新清单 —— 前端拿到的是实测结果，不是乐观更新的界面状态。
+   */
+  setCalibrationIdentity: (assetId: string, value: string | null) =>
+    invoke<AssetList>('wb_set_calibration_identity', { assetId, value }),
+
   setAssetDelivery: (assetId: string, delivery: 'download' | 'bundled') =>
     invoke<AssetList>('wb_set_asset_delivery', { assetId, delivery }),
+
+  /**
+   * **新建或改写一个分组**（2026-10-16）。即时落盘，回一份新清单。
+   *
+   * 分组 = "哪几张图共用同一份标注源稿"，登记在台账 `[[groups]]` 里 ——
+   * 跟资产一起入库、跟仓库走、编进 catalog（客户端按 `role` 挑图，不认文件名）。
+   * 坏值（跨目录 / 一图两组 / id 不能当文件名）后端整次拒绝。
+   */
+  setGroup: (id: string, name: string, members: { asset: string; role: string }[]) =>
+    invoke<AssetList>('wb_set_group', { id, name, members }),
+
+  /** 删掉一个分组。**成员原地变回"未分组"** —— 资产一条不动 */
+  removeGroup: (id: string) => invoke<AssetList>('wb_remove_group', { id }),
+
+  /**
+   * 「标注台」读**源稿**（2026-10-16）—— 图上那些框"能再编辑的那一份"。
+   *
+   * 住在 `presets/assets/<同类目录>/<对>.anno.json`（与图**同层**、随仓库走、**不进交付目录**）。
+   * 浅 / 深两张共用一份 ⇒ 落点抹掉浅深后缀（`open-with-light` / `-dark` ⇒ `open-with`）。
+   * **没有源稿是合法状态**（`doc === null`：第一次打开、或还没拖过）—— 不是错误。
+   */
+  annoRead: (assetId: string) => invoke<AnnoView>('wb_anno_read', { assetId }),
+
+  /**
+   * 「标注台」写**源稿**（入库的那一份）**＋同趟烘成品图**。路径由后端从台账派生（前端只给 id），
+   * `updatedAt` 由后端盖章；坏值（负坐标 / 伸出图外 / 重号 / 样式离谱）**整次拒绝**，
+   * 不写下去 —— 宁可报错，也不在仓库里留一份"看着有、其实读不了"的。
+   *
+   * `displayScale` = **这份成品图的参考显示比例**（客户端把这张图显示多大，即
+   * `314 / 图宽` —— 标注台的 `refScale`）—— 与标注台当前缩放**无关**：
+   * 同一份标注换视角 / 换窗口保存，烧出来一模一样。
+   */
+  annoWrite: (assetId: string, doc: AnnoDoc, displayScale: number) =>
+    invoke<AnnoView>('wb_anno_write', { assetId, doc, displayScale }),
+
+  /**
+   * 「生成预览」—— 按 `displayScale`（**参考显示比例**，同上）烘一张成品图，
+   * **只回字节、一个盘都不写**（作者：「它生成一个预览的，然后我在客户视角下去看没问题了。
+   * 我点保存它就存进去，不然它就只是一个临时的……拍一张照只是不存回我们的相册」）。
+   */
+  annoRender: (assetId: string, doc: AnnoDoc, displayScale: number) =>
+    invoke<RenderedShot[]>('wb_anno_render', { assetId, doc, displayScale }),
 
   /**
    * 套餐清单（P4）。条目来自 `presets/bundles.toml`（唯一真源），refs join 资产域、
@@ -1797,7 +2252,7 @@ export const wb = {
    */
   mergeReview: (number: number, platform?: string | null) =>
     invoke<MergeOutcome>('wb_merge_review', { number, platform: platform ?? null }),
-  /** 发布历史（只读）：最近若干次「发布预设」事务的回执，**最新在前** */
+  /** 发布历史（只读）：最近若干次「交付预设」事务的回执，**最新在前** */
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
@@ -1805,7 +2260,7 @@ export const wb = {
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
    *
-   * ★ 它与「发布预设」的闸（`publishAudit`）是**两道不同的闸**：这道看的是
+   * ★ 它与「交付预设」的闸（`publishAudit`）是**两道不同的闸**：这道看的是
    * 分支 / 工作区 / 版本号一致 / tag 有没有被占 / 平台支不支持软件 Release。
    */
   releasePreflight: (version?: string | null) =>
@@ -1855,7 +2310,7 @@ export const wb = {
    * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
    *
    * ★ 端哪一份：`v1` / `v2` 是两代夹具，`delivery` 是**当前交付** ——
-   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到我的
+   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到本地
    * 新版」这条闭环在本地整条走得通，而且正式那份从头到尾不参与。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
@@ -1884,6 +2339,73 @@ export const wb = {
   sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
   sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
   sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
+
+  /**
+   * **开发台**（`app::devsim`）—— 客户端界面触发器。
+   *
+   * `devSimScenes` 列清单（界面照它分类摆按钮），`devTrigger` 把「显示哪一格」发给
+   * **客户端进程**（走 hook 那条 loopback）—— **真正的客户端窗口**显示那一格并置顶。
+   * 不读 G-code、不跑管线、**不落任何记录**；客户端没开时如实报错（不拉进程）。
+   *
+   * 只在 workbench 构建里存在（正式包编不到）。
+   */
+  devSimScenes: () => invoke<DevScene[]>('wb_dev_devsim_scenes'),
+  devTrigger: (scene: string) => invoke<void>('wb_dev_trigger', { scene }),
+
+  /**
+   * **开发台 · 故障注入**（`app::devfault`，2026-10-19）—— 与上面那两条是
+   * **相反的两件事**：那是"打开一格界面"（不动后端），这是"让后端失一次真"（不动界面）。
+   *
+   * `devFaults` 列清单；`devFaultArm(id)` 把那一档错装到它对应的 **API 方法**上 ——
+   * 客户端进程**按 id 自己造那条错**（真值同一份代码），于是客户端里**所有**走这个
+   * 方法的界面都会真的报错：真组件 / 真按钮 / 真文案 / 真错误码。
+   * `devFaultClear()` 卸下，客户端恢复。
+   *
+   * 只在 workbench 构建里存在。
+   */
+  devFaults: () => invoke<DevFault[]>('wb_dev_faults'),
+  devFaultArm: (id: string) => invoke<void>('wb_dev_fault_arm', { id }),
+  devFaultClear: () => invoke<void>('wb_dev_fault_clear'),
+
+  /**
+   * **开发台 · 运行真实后处理**（`app::devreal`，2026-10-19）—— 与上面两块**都不重叠**：
+   * 场景表是"打开一格界面"（不动后端），故障注入是"让后端失一次真"（不动界面），
+   * 这一条是**真的跑一趟管线**。
+   *
+   * 选一份预设 + 一份测试 G-code ⇒ 起一个**真的钩子子进程**（`--Toml` + `--Gcode`，
+   * 与切片器注册的那一行同形）⇒ **客户端窗口**跑真预检、真进度、真问句、真落盘、真归档。
+   * 界面上**没有任何预览标记**（`preview` 恒 false），那几颗真业务按钮（停止 / 后台运行 /
+   * 强制继续 / 终止）**点了真的有用** —— 真有一条钩子进程连着。
+   *
+   * ★ **不加协议变体、不改产品逻辑**：复用真机那条入口即可（见 `app::devreal` 模块头）。
+   * ★ 命令**立刻返回**，不等那一趟跑完 —— 进度看客户端窗口。
+   * ★ 返回的 `gcode` 是**副本**落点（真后处理原地覆盖，源文件不动）。
+   * ★ 客户端没开 / 文件不对：如实报错，不替你拉进程、不替你猜文件。
+   *
+   * 只在 workbench 构建里存在。
+   */
+  devRunReal: (toml: string, gcode: string) => invoke<DevRunAck>('wb_dev_run_real', { toml, gcode }),
+
+  /**
+   * **开发台 · 真实后处理测试矩阵**（`app::devmatrix`，2026-10-19）。
+   *
+   * 与上面「单趟」是同一件事的两种用法：单趟 = 你自己挑两份文件跑一次；
+   * 矩阵 = **六档确定性输入**，一键串行跑，每档一个**独立临时根**，跑完按真凭据判定。
+   *
+   * ★ 判定只读该档目录里那条执行记录（`user/gcode_history/<日期>/<id>_meta.json`）的
+   * `error` / `cancelled` / `relocation` —— 不看退出码猜、不由界面"认为"成功。
+   * 尤其是**碰撞档**：没有 `relocation` 就判失败（撞没撞由记录说话）。
+   * ★ **问句档不代答**：机型不匹配 / 挪塔碰撞 / 取消要你在客户端窗口里真操作，
+   * `current` 会一直指着那一档，直到你答完或它超时。
+   * ★ 数据全落 `<repo>/target/dev-run/matrix/`，正式数据目录一个字节不动；
+   * 代价是这一趟**不进报告页/历史**（客户端在自己那棵树找不到记录）。
+   */
+  devMatrixCases: () => invoke<MatrixCase[]>('wb_dev_matrix_cases'),
+  devMatrixState: () => invoke<MatrixState>('wb_dev_matrix_state'),
+  /** 传空数组 = 跑全部；立刻返回，进度轮询 `devMatrixState` */
+  devMatrixStart: (ids: string[]) => invoke<void>('wb_dev_matrix_start', { ids }),
+  /** 清空矩阵临时根（有任务在跑会拒绝）；返回删掉几个目录 */
+  devMatrixClear: () => invoke<number>('wb_dev_matrix_clear'),
 
   /**
    * 复制已有版本（b05 Task 14.3 / doc §4.3 第 2–5 步）：**只写版本定义** ——
@@ -1928,12 +2450,12 @@ export const wb = {
    */
   cleanDistStrays: () => invoke<number>('wb_clean_dist_strays'),
   /**
-   * **交付文件清单**（2026-10-07，只读）：本次交付集合里都有哪些文件、盘上有没有、
-   * 谁写的（生成时重算 / 发布时定稿 / 软件发布链）。
+   * **交付读数**（只读）：交付集合里每一份的现况（已生成 / 待更新 / 未生成）、
+   * 目录登记漂移（改了 3MF 之后的那条提示）与两份清单的时间。
    *
    * 名单就是发布闸判残留用的那份集合 —— 界面不另拼一份"大概有这些"
    */
-  deliveryFiles: () => invoke<DeliveryFile[]>('wb_delivery_files'),
+  deliveryFiles: () => invoke<DeliveryStatus>('wb_delivery_files'),
   /**
    * 看一份交付文件的**盘上原文**（只读）。只认交付集合里的路径；
    * 盘上还没有（还没生成 / 还没发布）时如实报错

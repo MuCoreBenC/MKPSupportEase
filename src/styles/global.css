@@ -4,11 +4,57 @@
   box-sizing: border-box;
 }
 
+/*
+ * 编号字体（`public/fonts/badge-digits.ttf`）：Poppins（OFL 1.1）裁到只剩 `0-9`，2 KB。
+ *
+ * ★★ **与 Rust 那边烧进成品图的是同一个文件**（`src-tauri/.../render.rs` 的 `BADGE_FONT`）——
+ *   两处一套字，成品图里那颗编号才和标注台 / 客户端里这颗长得一样。
+ *   2026-10-16 作者点名的病：「为什么编号的数字要用矢量图啊？他不应该用那种开源的免费字体吗」。
+ *   ★ 2026-10-17 由 Inter 换成 Poppins（作者：「这个 1 看起来不在视觉中心」）。
+ *   许可全文在 `public/fonts/OFL.txt`。
+ */
+@font-face {
+  font-family: 'MKP Badge';
+  src: url('/fonts/badge-digits.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 html,
 body,
 #root {
   height: 100%;
   margin: 0;
+}
+
+/*
+ * ★★★ **整扇窗不是网页**（2026-10-16 作者：「我在编辑模式下左右的时候，整个窗口都会左右……
+ *   我希望这整个窗口的话，你能做到它不要像那种网页一样被拖动啊，它就像一个软件一样」）。
+ *
+ * 这是一条**壳级**的规矩，不是某个编辑器的事 —— 任何一处让内容溢出（长行、宽表格、
+ * 拖到边缘的选中），浏览器就会把**整页**当成一张可以左右拉的大纸：
+ * 触控板两指一划、或者选中文字拖到边缘，整扇窗跟着橡皮筋一样左右跑，
+ * 背景渐变露出来一条、连顶栏都跟着挪。成熟桌面软件从不这样。
+ *
+ * 三层一起上（缺一层都会漏）：
+ *   ① `overflow: hidden` 在 `html/body` 上 —— **页面永不横向滚**。
+ *      内部该滚的地方都各自有自己的滚动容器（列表 / 编辑器 / 抽屉），一个都不受影响。
+ *   ② `overscroll-behavior: none` —— 到底了也**不许把滚动"传"给外层**
+ *      （macOS 上就是那条露底的橡皮筋；Windows 上是滚动链）。
+ *   ③ `position: fixed` 不给 —— 那一手（老 iOS 的锁页套路）会毁掉主窗那些
+ *      transform / 圆角裁切，作者 §7.5 那一套窗口外观全在这条链上，别碰。
+ *
+ * ★ 横向：`overflow-x: hidden` 之外还要 `max-width: 100%`（在 `html` 上）——
+ *   有些引擎在"根元素自己溢出"时不认 `overflow-x`，加这一条才真收得住。
+ * ★ 纵向仍用 `overflow: hidden`（不是 `auto`）：整页从来就不该滚，
+ *   各个页面自己管自己的滚动条（这条自 v023 起就是这样）。
+ */
+html,
+body {
+  overflow: hidden;
+  max-width: 100%;
+  overscroll-behavior: none;
 }
 
 body {
@@ -17,14 +63,147 @@ body {
   font-size: 14px;
   color: var(--text-1);
   background: linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 100%);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizelegibility;
+  /*
+   * ★ 这里**故意不写** `-webkit-font-smoothing: antialiased` 与 `text-rendering: optimizelegibility`
+   *   （2026-10-10 作者：Windows 上"所有的粗体字都有点糊"）。
+   *
+   * 这两条是「网页更好看」的常见套路，在 Windows 上却是**减分项**：
+   *   · `antialiased` 让 Chromium 放弃 ClearType 的**亚像素**渲染、改用灰度抗锯齿 ——
+   *     笔画的水平子像素信息全丢，字整体发虚，笔画多的**粗体**最明显；
+   *   · `optimizelegibility` 打开 kerning / 连字，字形落点可能停在非整数像素上，
+   *     低 DPI 屏再糊一层。
+   * 三个平台各自的最优解：Windows 靠默认的 ClearType，macOS 靠它自己的次像素渲染
+   * （Retina 上比强制 antialiased 更饱满）。所以「什么都不写」就是这套界面该走的路。
+   */
 
-  /* 桌面应用里装饰性文字不应被框选——选中一片蓝是网页感的最大来源。
-     真正需要选中的地方（输入框、可复制数值）用 user-select: text 打开 */
+  /*
+   * ============ 拖选（selection）的划分 ============
+   *
+   * 一句话判据：**"点它 / 拖它"的东西不选，"抄它"的东西才选。**
+   *   骨架（窗口标题栏、页签、按钮、图标、状态点、装饰线）→ `none`：选中一片蓝是
+   *   "网页感"最大的来源，顶栏那片蓝还会跟拖窗打架（作者 2026-10-14：
+   *   「这些不要可以拖选，其他地方的拖选也不能碰到这些」）。
+   *   数据（机型名、文件名、路径、参数值、命令、报告正文）→ `text`：这些是给人抄的，
+   *   各页自己按块打开（见 `PageReport.module.css` / `ExportModal.module.css` 那几处）。
+   *
+   * ★ 两套写法都要在：**标准 + `-webkit-` 前缀**。在这个引擎（WKWebView）里它们是
+   *   两套账 —— 只写标准，真机上会"该关的没关"（2026-10-14 截图里那条蓝就是）；
+   *   只写前缀，Chromium 上又会漏。历史坑：Safari 长期把 `user-select` 当**非继承**属性。
+   *
+   * ★ 而且**不靠这一层继承**：骨架里最关键的两处（顶栏 `.bar`、按钮这一族）各自再
+   *   显式点名一次 —— 真机上实测过这一层没管住它们（同上那条历史坑）。
+   */
   user-select: none;
+  -webkit-user-select: none;
 }
 
+/*
+ * ★★ 引导窗口（`?guide=1`）**必须真的透明**（2026-10-15）。
+ *
+ * 上面那条 `background` 是给**主窗口**铺的底 —— 主窗口自己也 `transparent`，
+ * 画面全靠这一层渐变撑着，删不得。
+ *
+ * 但引导窗口走的是**同一个 `index.html`、同一份 global.css**，于是它也白白被铺了一层
+ * **不透明**的渐变：整扇 354×180 的窗口变成一块白底。卡片有圆角和投影还看得见，
+ * 卡片旁边那支**白箭头**画在白底上 ⇒ 用户眼里就是"箭头没有"。
+ * （既不是被谁盖住，也不是画到窗口外面去了 —— 是这一层把整扇窗铺满了。）
+ *
+ * ★★★ **`html` 也得收**（2026-10-20 作者截图里那圈灰底）：`index.html` 首屏骨架那段
+ * 内联样式把渐变同时铺在了 `html` 与 `body` 上（2026-10-19 加的），而 `html` 的底色
+ * 画的是**整块画布** —— 只把 `body` 收成透明，那层渐变照样盖满整扇窗（一片 #f7f9fa →
+ * #eceff1 的灰）。所以这里两处一起收；`index.html` 里那段内联样式也有一条同样的判据
+ * （那条管"样式表到之前"的那一瞬，这一条管之后）。
+ *
+ * 判据挂在 `html` 上（`main.tsx` 认了 `?guide=1` 才打这个标记），**不放进 CSS Module**：
+ * 这是"整扇窗别有底"的规矩，不是卡片自己的样式。
+ */
+html[data-guide],
+html[data-guide] body {
+  background: none;
+}
+
+/*
+ * 不选：一切"点 / 拖"的件 —— 逐个点名，不靠 `body` 继承（见上面那段）。
+ * 这些件上的文字（"使用"、"复制后处理脚本"、页签名）从来不是给人抄的；
+ * `svg` 是图标，选中它也没有意义。
+ */
+button,
+a,
+[role='button'],
+svg {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/*
+ * 选：输入框与可编辑区。地基那层是 `none`，这几个得自己亮出来 ——
+ * 在输入框里拖选是**编辑行为**（选中刚打的字再改），不是"抄网页"。
+ */
+input,
+textarea,
+[contenteditable='true'] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/*
+ * ============ 按钮 / 胶囊里的中文「字重心」============
+ *
+ * 症状（2026-10-11 作者）：「使用、复制这些按钮，文字没居中 —— Windows 居中了，
+ * macOS 就不居中」。
+ *
+ * 根因（实测出来的，见下）：**flex 居中的是「行盒」，不是「字的墨迹」**，而
+ * **行盒的基线由「行里第一支可用的字族」决定** —— 中文字形只是**画在这条基线上**。
+ * 那条基线在 `line-height: 1` 时落在 `0.5em + (升部 − 降部)/2`：
+ *
+ *   macOS   行首字族落在 SF Pro / Inter（升 ≈ 0.97em、降 ≈ 0.22em）→ 基线 0.875em
+ *   Windows 行首字族落在 Segoe UI      （升 ≈ 0.83em、降 ≈ 0.20em）→ 基线 0.82em
+ *
+ * 中文的墨迹（`使用` 实测）中心在基线上方 ≈ 0.38em，于是同一颗按钮里的中文在
+ * macOS 上比正中低 0.06em、在 Windows 上低 0.18em —— 差出来的 ~0.7px 就是
+ * 「win 居中、mac 不居中」。跟"中文用的哪支字体"关系不大，**是拉丁字体的度量在动**。
+ *
+ * 解法：`@font-face` 的度量覆盖，把**驱动行盒的那支字族**换成度量归一化过的一支
+ * （升 88% / 降 12%、无行距 —— 中文的表意 em 框，思源黑体那类 sTypo 值）。
+ * 行盒因此 == 中文的墨迹框，flex 居中在两个平台落在同一像素，补偿值只剩一个（0）。
+ *
+ * ★★ 两个坑，都别踩：
+ *   · **不能加 `unicode-range`** —— 只接管中文的话，行盒又交回拉丁字体，覆盖等于没写
+ *     （实测：带 unicode-range 时基线回到 0.86，与不加 face 一样）；
+ *   · 所以它**会连西文一起接管**（这支持中文字体自带拉丁）→ 只给**文字即全部内容**
+ *     的按钮 / 胶囊用（`--font-label`）；中英混排的正文 / 横幅别用，那里西文字形会变。
+ *   另外它把 `line-height: normal` 从 1.4em 压成 1em，所以用它的地方要么
+ *   `line-height: 1`、要么高度写死。
+ *
+ * 若某台机器上一支 local() 都认不到，这个 face 加载失败，字族顺位落到后面那串
+ * 原 font stack —— 表现是"回到没归一化的样子"，不会变成另一种字体。
+ */
+@font-face {
+  font-family: 'MKP Label';
+  src:
+    local('PingFang SC'),
+    local('PingFang SC Regular'),
+    local('PingFangSC-Regular'),
+    local('Microsoft YaHei'),
+    local('Microsoft YaHei UI'),
+    local('MicrosoftYaHei');
+  ascent-override: 88%;
+  descent-override: 12%;
+  line-gap-override: 0%;
+}
+
+/*
+ * 用哪：字族换 `--font-label`（定义在 `tokens.css`），并把「垫下内衬」的补偿去掉
+ * （上下内衬对称）。前提同上：纯文字、高度固定或 `line-height: 1`。
+ */
+
+/*
+ * ★ 按钮文字**一律不换行**（2026-10-10 作者指着「保存修改」那颗被折成两行的按钮：
+ *   「你看一下这个保存按钮，有时候它居然换行了，不允许换行，知道吧」）。
+ *
+ * 按钮的宽度就是它的字 —— 挤不下时该让位的是旁边那些"可以让位"的东西
+ * （带省略号的状态字那类），不是按钮自己折成两行。一条全局约定，谁都不用再各写一遍。
+ */
 button {
   font: inherit;
   color: inherit;
@@ -32,6 +211,7 @@ button {
   background: none;
   padding: 0;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 button:focus-visible,
@@ -75,17 +255,64 @@ img {
  * 扁窗里那条细条本身就要占宽、还把内容挤得更窄，而卡片里真正需要的提示
  * 是"内容压缩到放得下"，不是"告诉用户下面还有"。预览区外壳（App.module.css
  * 的 .stage）有自己的一套滚动条规则，不受这里影响。
+ *
+ * ★ 2026-10-16 起多**一处例外**（下面那条 `:not()` 里那两层）：见 WebKit 那一段。
  */
 * {
   scrollbar-width: none; /* Firefox */
   -ms-overflow-style: none; /* 老 Edge */
 }
 
-/* WebKit / Blink：Chrome、Edge、Safari、Electron、WebView2 */
-::-webkit-scrollbar {
+/*
+ * WebKit / Blink：Chrome、Edge、Safari、Electron、WebView2
+ *
+ * ★★ 2026-10-16 唯一的例外：「编辑文件」里那个正文编辑器（`.editArea` / `.editPaint`）。
+ *   那里长行**不折行** ⇒ 只能横着滚，而"看不见的条"等于告诉鼠标用户"这东西不能横着看"
+ *   （作者：「别人不是用触摸板的，是怎么左右滑动的？」「你看 VSCode 啊…IDE 啊，都可以的」）。
+ *   VSCode 在 macOS 上用**系统那条覆盖式滚动条**（不滚看不见、一滚就浮出来、零占位）——
+ *   把这两层从"幽灵"里摘出来，它们就自动是这个长相，一个像素都不用自己画。
+ *   别的组件不许学。
+ */
+::-webkit-scrollbar:not(.editArea, .editPaint) {
   width: 0;
   height: 0;
   background: transparent;
+}
+
+/* ============ 铁律：状态不许改变盒子尺寸 ============ */
+/*
+ * 作者（2026-10-10）：「我不管点什么按钮，它都是固定好的 —— 那个字体变粗或者怎么样，
+ * 它这个容器的宽度都不应该再变化了。宽度高度……做成一个全局的、强硬一点的规则」。
+ *
+ * 根因只有一条：**用 `font-weight` 表达「选中」**。600 比 400 的同一串字宽出几个像素，
+ * 胶囊 / 分段 / 页签当场胀一圈 —— 顶栏页签最刺眼：点一下，后面的页签整排跟着挪。
+ *
+ * 下面这条是**兜底网**：元素只要带这些状态属性，字重一律由它的基础样式决定
+ * （`!important` —— 压得住组件里写死的 `font-weight: 600`），所以：
+ *
+ *   · 想「变粗」→ 用 `text-shadow: var(--state-bold)`（同色 0.3px 描边，
+ *     就是半档加粗的样子，**不占任何布局宽度**，高度也不动）；
+ *   · 老代码里忘了删的 `font-weight` 也不会再让容器变宽 —— 这是硬的，不靠自觉。
+ *
+ * `--on-weight`：基础字重不是继承值的控件（例如顶栏页签基础 500），
+ * 在自己规则里写 `--on-weight: 500`，兜底就按那个值钉；不写就按继承值（多数是 400）。
+ *
+ * 只认「状态」；标题类元素常年加粗（写在基础规则里的 font-weight）不受影响。
+ */
+:root {
+  /* 「状态变粗」的统一写法：文字描边。以后要调手感，改这一个值 */
+  --state-bold: 0.3px 0 0 currentcolor;
+}
+
+:is(
+    [data-on='true'],
+    [data-current='true'],
+    [data-filt='true'],
+    [aria-pressed='true'],
+    [aria-selected='true'],
+    [aria-checked='true']
+  ) {
+  font-weight: var(--on-weight, inherit) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

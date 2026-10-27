@@ -1,11 +1,12 @@
 {
   "catalogSchema": 1,
-  "revision": "08e55a3feeef37bc",
-  "publishedAt": "2026-10-07T07:04:53Z",
+  "revision": "48a1517241b6da83",
+  "publishedAt": "2026-10-19T14:12:29Z",
   "brands": [
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
+      "nameEn": "Bambu Lab",
       "logo": "bambu-lab-logo"
     }
   ],
@@ -68,25 +69,34 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置，适合大多数用户",
+          "tagEn": "Recommended",
+          "description": "标准配置，适合大多数用户",
+          "descriptionEn": "Standard configuration for most users",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
+          "nameEn": "Quick-release (before June)",
           "recommendedBundle": "A1_FAST",
           "tag": "热门",
+          "tagEn": "Popular",
           "description": "支持快拆配件的改装配置",
+          "descriptionEn": "Modded setup for quick-release parts",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
+          "nameEn": "Quick-release 260628",
           "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
+          "tagEn": "Newest",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "image": null
         }
       ],
@@ -153,25 +163,34 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
-          "description": "官方标准配置",
+          "tagEn": "Recommended",
+          "description": "标准配置",
+          "descriptionEn": "Standard configuration",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
+          "nameEn": "Quick-release (before June)",
           "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
+          "tagEn": "Popular",
           "description": "支持快拆配件的改装配置",
+          "descriptionEn": "Modded setup for quick-release parts",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
+          "nameEn": "Quick-release 260628",
           "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
+          "tagEn": "Newest",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "image": null
         }
       ],
@@ -237,9 +256,12 @@
         {
           "id": "LITE",
           "name": "lite版",
+          "nameEn": "Lite",
           "recommendedBundle": "P1S_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "群里开源的最新lite",
+          "descriptionEn": "Latest lite released in the group",
           "image": null
         }
       ],
@@ -351,9 +373,12 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "P2S_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "未完成，没有打印机",
+          "descriptionEn": "Unfinished; no printer available",
           "image": null
         }
       ],
@@ -469,9 +494,12 @@
         {
           "id": "LITE",
           "name": "lite版",
+          "nameEn": "Lite",
           "recommendedBundle": "X1C_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "群里开源的最新lite",
+          "descriptionEn": "Latest lite released in the group",
           "image": null
         }
       ],
@@ -684,14 +712,32 @@
       "type": "model",
       "name": "精密校准模型",
       "path": "models/Precise_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "Precise"
+    },
+    {
+      "id": "precise-calibration-ext",
+      "type": "model",
+      "name": "精密校准模型（加长版）",
+      "path": "models/Precise_Calibration_ext.3mf",
+      "delivery": "download",
+      "calibration": "Precise"
     },
     {
       "id": "zoffset-calibration",
       "type": "model",
       "name": "Z 轴偏移校准模型",
       "path": "models/ZOffset_Calibration.3mf",
-      "delivery": "download"
+      "delivery": "download",
+      "calibration": "ZOffset"
+    },
+    {
+      "id": "zoffset-calibration-ext",
+      "type": "model",
+      "name": "Z 轴偏移校准模型（加长版）",
+      "path": "models/ZOffset_Calibration_ext.3mf",
+      "delivery": "download",
+      "calibration": "ZOffset"
     },
     {
       "id": "a1-bbs-02-010",
@@ -782,98 +828,128 @@
       "slicer": "bbs",
       "profile": "process",
       "delivery": "download"
+    },
+    {
+      "id": "guide-open-with-light",
+      "type": "guide",
+      "name": "「改 .3mf 默认打开方式」引导图（浅色）",
+      "path": "guides/open-with-light.rendered.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "guide-open-with-dark",
+      "type": "guide",
+      "name": "「改 .3mf 默认打开方式」引导图（深色）",
+      "path": "guides/open-with-dark.rendered.webp",
+      "delivery": "bundled"
+    }
+  ],
+  "groups": [
+    {
+      "id": "open-with",
+      "name": "「改 .3mf 默认打开方式」引导图",
+      "members": [
+        {
+          "asset": "guide-open-with-light",
+          "role": "light"
+        },
+        {
+          "asset": "guide-open-with-dark",
+          "role": "dark"
+        }
+      ]
     }
   ],
   "bundles": [
     {
       "id": "A1_STANDARD",
-      "display": "官方推荐",
+      "display": "A1 标准版",
       "machineId": "A1",
       "assetRefs": [
         "a1-standard",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_FAST",
-      "display": "官方推荐",
+      "display": "A1 快拆版6月以前",
       "machineId": "A1",
       "assetRefs": [
         "a1-fast",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_FASTV3.3",
-      "display": "官方推荐",
+      "display": "A1 快拆版260628",
       "machineId": "A1",
       "assetRefs": [
         "a1-fastv3.3",
         "a1-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_STANDARD",
-      "display": "官方推荐",
+      "display": "A1 mini 标准版",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-standard",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_FAST",
-      "display": "官方推荐",
+      "display": "A1 mini 快拆版6月以前",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fast",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "A1_MINI_FASTV3.3",
-      "display": "官方推荐",
+      "display": "A1 mini 快拆版260628",
       "machineId": "A1_MINI",
       "assetRefs": [
         "a1_mini-fastv3.3",
         "a1_mini-bbs-04-020"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "P1S_default",
-      "display": "官方推荐",
+      "display": "P1S lite版",
       "machineId": "P1S",
       "assetRefs": [
         "p1s-lite",
         "p1s-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "P2S_default",
-      "display": "官方推荐",
+      "display": "P2S 标准版",
       "machineId": "P2S",
       "assetRefs": [
         "p2s-standard",
         "p2s-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     },
     {
       "id": "X1C_default",
-      "display": "官方推荐",
+      "display": "X1C lite版",
       "machineId": "X1C",
       "assetRefs": [
         "x1c-lite",
         "x1c-bbs-04-024"
       ],
-      "updatedAt": "2026-10-03"
+      "updatedAt": "2026-10-16"
     }
   ],
   "registry": {
@@ -884,7 +960,9 @@
         "tomlKey": "MKP_retract",
         "jsonKey": "MKP_retract",
         "label": "回抽长度",
+        "labelEn": "Retract length",
         "desc": "涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析",
+        "descEn": "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code",
         "tomlComment": "回抽长度(mm)",
         "valueType": "float",
         "uiComponent": "number",
@@ -918,7 +996,9 @@
         "tomlKey": "custom_mount_gcode",
         "jsonKey": "custom_mount_gcode",
         "label": "装载胶箱 G-code",
+        "labelEn": "Load glue box G-code",
         "desc": "用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量",
+        "descEn": "Custom command used to mount the glue pen; supports the [AUTO] variable",
         "tomlComment": "自定义工具头获取 G-code",
         "valueType": "string",
         "uiComponent": "gcode",
@@ -968,7 +1048,9 @@
         "tomlKey": "custom_unmount_gcode",
         "jsonKey": "custom_unmount_gcode",
         "label": "卸载胶箱 G-code",
+        "labelEn": "Unload glue box G-code",
         "desc": "用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量",
+        "descEn": "Custom command used to unmount the glue pen; supports the [AUTO] variable",
         "tomlComment": "自定义工具头收起 G-code",
         "valueType": "string",
         "uiComponent": "gcode",
@@ -1018,7 +1100,9 @@
         "tomlKey": "disable_3rd_layer_clog_detect",
         "jsonKey": "disable_3rd_layer_clog_detect",
         "label": "关闭第三层裹头检测",
+        "labelEn": "Disable third-layer clog detection",
         "desc": "开启后移除第三层裹头检测段。仅对A1/A1 mini机型有效",
+        "descEn": "Removes the third-layer clog detection section. Only applies to A1 / A1 mini",
         "tomlComment": "关闭第三层裹头检测(A1/A1 mini)",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1055,7 +1139,9 @@
         "tomlKey": "disable_front_cover_alarm",
         "jsonKey": "disable_front_cover_alarm",
         "label": "强制关闭前盖脱落报警",
+        "labelEn": "Force-off front cover alarm",
         "desc": "开启后将强制关闭前盖脱落报警。仅对P1系列机型有效",
+        "descEn": "Forces the front cover detached alarm off. Only applies to the P1 series",
         "tomlComment": "关闭第三层裹头检测(A1/A1 mini)",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1079,7 +1165,7 @@
           "P2S",
           "X1C"
         ],
-        "deprecated": true,
+        "deprecated": false,
         "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -1093,7 +1179,9 @@
         "tomlKey": "disable_timelapse",
         "jsonKey": "disable_timelapse",
         "label": "关闭延时摄影",
+        "labelEn": "Disable timelapse",
         "desc": "开启后移除延时摄影段(SKIPTYPE: timelapse)。仅对i3结构的A系列机型有效",
+        "descEn": "Removes the timelapse section (SKIPTYPE: timelapse). Only applies to i3-style A-series machines",
         "tomlComment": "关闭延时摄影(A系列i3结构)",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1130,7 +1218,9 @@
         "tomlKey": "disk_stagger_angle",
         "jsonKey": "disk_stagger_angle",
         "label": "错开角度",
+        "labelEn": "Stagger angle",
         "desc": "每层圆盘旋转偏移的角度（0-30°）",
+        "descEn": "Rotation offset applied to the disc every layer (0-30 deg)",
         "tomlComment": "圆盘错开角度(度) 范围:0~30",
         "valueType": "float",
         "uiComponent": "number",
@@ -1168,7 +1258,9 @@
         "tomlKey": "disk_stagger_max_angle",
         "jsonKey": "disk_stagger_max_angle",
         "label": "最大偏移角度",
+        "labelEn": "Max stagger angle",
         "desc": "摆动的最大偏移角度（10-90°）",
+        "descEn": "Maximum swing offset angle (10-90 deg)",
         "tomlComment": "圆盘最大偏移角度(度) 范围:10~90",
         "valueType": "float",
         "uiComponent": "number",
@@ -1206,7 +1298,9 @@
         "tomlKey": "disk_stagger_mode",
         "jsonKey": "disk_stagger_mode",
         "label": "错开模式",
+        "labelEn": "Stagger mode",
         "desc": "关闭：不旋转 | 开启：始终错开 | 自动：小层高时自动错开",
+        "descEn": "Off: no rotation | On: always stagger | Auto: stagger only at small layer heights",
         "tomlComment": "圆盘错开模式(off/on/auto)",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -1230,16 +1324,19 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           },
           {
             "label": "自动",
+            "labelEn": "Auto",
             "value": "auto",
             "deprecated": false
           }
@@ -1260,7 +1357,9 @@
         "tomlKey": "disk_stagger_swing_mode",
         "jsonKey": "disk_stagger_swing_mode",
         "label": "摆动模式",
+        "labelEn": "Swing mode",
         "desc": "旋转楼梯：单向累加到达最大值后回卷 | 锯齿摆动：到最大值后反向折返",
+        "descEn": "Spiral stairs: accumulate in one direction, then wrap around at the maximum | Sawtooth swing: reverse direction at the maximum",
         "tomlComment": "圆盘摆动模式(spiral/oscillate)",
         "valueType": "string",
         "uiComponent": "select",
@@ -1284,11 +1383,13 @@
         "choices": [
           {
             "label": "旋转楼梯",
+            "labelEn": "Spiral stairs",
             "value": "spiral",
             "deprecated": false
           },
           {
             "label": "锯齿摆动",
+            "labelEn": "Sawtooth swing",
             "value": "oscillate",
             "deprecated": false
           }
@@ -1309,7 +1410,9 @@
         "tomlKey": "fan_speed",
         "jsonKey": "fan_speed",
         "label": "风扇速度",
+        "labelEn": "Fan speed",
         "desc": "风扇 PWM 速度 (0-255)，控制冷却风量",
+        "descEn": "Fan PWM speed (0-255), controls the cooling airflow",
         "tomlComment": "风扇速度 范围:0~255",
         "valueType": "float",
         "uiComponent": "number",
@@ -1343,7 +1446,9 @@
         "tomlKey": "fast_tower_mode",
         "jsonKey": "fast_tower_mode",
         "label": "擦料塔速度与质量",
+        "labelEn": "Tower speed and quality",
         "desc": "快速：最大层高打印，仅涂胶面层慢速擦嘴 | 跟随模型：层高与模型一致 | 自定义：自定义层高和擦嘴策略",
+        "descEn": "Fast: print at the maximum layer height, wipe slowly only on glue layers | Follow model: layer height matches the model | Custom: custom layer height and wipe strategy",
         "tomlComment": "擦料塔模式",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -1367,16 +1472,19 @@
         "choices": [
           {
             "label": "快速",
+            "labelEn": "Fast",
             "value": "fast",
             "deprecated": false
           },
           {
             "label": "跟随模型",
+            "labelEn": "Follow model",
             "value": "follow",
             "deprecated": false
           },
           {
             "label": "自定义",
+            "labelEn": "Custom",
             "value": "custom",
             "deprecated": false
           }
@@ -1397,7 +1505,9 @@
         "tomlKey": "first_pen_revitalization_flag",
         "jsonKey": "first_pen_revitalization_flag",
         "label": "首笔活化",
+        "labelEn": "First-pen priming",
         "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效",
+        "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled",
         "tomlComment": "首笔活化标志",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1417,11 +1527,13 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           }
@@ -1442,7 +1554,9 @@
         "tomlKey": "glue_inter_model_lift_height",
         "jsonKey": "glue_inter_model_lift_height",
         "label": "涂胶区域间Z轴抬升高度",
+        "labelEn": "Z lift between glue areas",
         "desc": "模型间跳转 + 段间跳转微抬合并控制。涂胶区域间移动和段间跳转均使用此高度",
+        "descEn": "Combined hop control for inter-model travel and segment hops. Both use this height",
         "tomlComment": "模型间/段间跳转Z抬升高度(mm) 范围:2~5",
         "valueType": "float",
         "uiComponent": "number",
@@ -1476,7 +1590,9 @@
         "tomlKey": "glue_pass_count",
         "jsonKey": "glue_pass_count",
         "label": "涂胶次数",
+        "labelEn": "Glue passes",
         "desc": "同一区域的涂胶遍数，多次涂胶可增加粘合力但延长打印时间",
+        "descEn": "Number of glue passes over the same area; more passes improve adhesion but take longer",
         "tomlComment": "涂胶次数 范围:1~10",
         "valueType": "int",
         "uiComponent": "number",
@@ -1510,7 +1626,9 @@
         "tomlKey": "glue_sparse_ratio",
         "jsonKey": "glue_sparse_ratio",
         "label": "涂胶稀疏比",
+        "labelEn": "Glue sparsity",
         "desc": "小喷嘴(≤0.3mm)涂胶路径稀疏比例，0=不稀疏，50=隔行删除(默认)，100=仅保留首尾",
+        "descEn": "Sparsity of the glue path with a small nozzle (<=0.3mm): 0 = no sparsity, 50 = drop every other line (default), 100 = keep only the ends",
         "tomlComment": "涂胶稀疏比(%)",
         "valueType": "float",
         "uiComponent": "number",
@@ -1544,7 +1662,9 @@
         "tomlKey": "glue_z_compensation_bed_bl",
         "jsonKey": "glue_z_compensation_bed_bl",
         "label": "热床-后左补偿",
+        "labelEn": "Bed trim - rear left",
         "desc": "热床模式下后左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "descEn": "Z trim at the rear left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
         "tomlComment": "热床后左角Z补偿 范围:-0.2~0.2",
         "valueType": "float",
         "uiComponent": "number",
@@ -1582,7 +1702,9 @@
         "tomlKey": "glue_z_compensation_bed_br",
         "jsonKey": "glue_z_compensation_bed_br",
         "label": "热床-后右补偿",
+        "labelEn": "Bed trim - rear right",
         "desc": "热床模式下后右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "descEn": "Z trim at the rear right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
         "tomlComment": "热床后右角Z补偿 范围:-0.2~0.2",
         "valueType": "float",
         "uiComponent": "number",
@@ -1620,7 +1742,9 @@
         "tomlKey": "glue_z_compensation_bed_fl",
         "jsonKey": "glue_z_compensation_bed_fl",
         "label": "热床-前左补偿",
+        "labelEn": "Bed trim - front left",
         "desc": "热床模式下前左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "descEn": "Z trim at the front left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
         "tomlComment": "热床前左角Z补偿 范围:-0.2~0.2",
         "valueType": "float",
         "uiComponent": "number",
@@ -1658,7 +1782,9 @@
         "tomlKey": "glue_z_compensation_bed_fr",
         "jsonKey": "glue_z_compensation_bed_fr",
         "label": "热床-前右补偿",
+        "labelEn": "Bed trim - front right",
         "desc": "热床模式下前右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变",
+        "descEn": "Z trim at the front right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
         "tomlComment": "热床前右角Z补偿 范围:-0.2~0.2",
         "valueType": "float",
         "uiComponent": "number",
@@ -1696,7 +1822,9 @@
         "tomlKey": "glue_z_compensation_enabled",
         "jsonKey": "glue_z_compensation_enabled",
         "label": "涂胶方向补偿",
+        "labelEn": "Glue Z direction compensation",
         "desc": "开启后涂胶 Z 会根据 X/Y 位置按 4 角补偿值进行双线性插值，解决特定方向涂不上胶的问题。补偿范围自动外扩 2mm 避免边缘突变",
+        "descEn": "When on, the glue Z is interpolated bilinearly from the four corner trims by X/Y position, fixing directions where the glue does not stick. The trim area extends by 2mm automatically to avoid a hard edge",
         "tomlComment": "涂胶方向补偿开关: false=关闭, true=开启(按4角双线性插值)",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1730,7 +1858,9 @@
         "tomlKey": "glue_z_compensation_mode",
         "jsonKey": "glue_z_compensation_mode",
         "label": "补偿范围模式",
+        "labelEn": "Trim range mode",
         "desc": "热床范围：针对整个热床物理面积补偿，适合床面本身倾斜（范围 ±0.2mm，外扩 2mm）；涂胶面范围：针对每层每个连续涂胶区域的包围盒补偿，适合模型局部不平（范围 ±0.1mm，外扩 2mm）",
+        "descEn": "Bed range: compensate over the whole physical bed, for a bed that is itself tilted (range +/-0.2mm, extended 2mm) | Glue-area range: compensate per continuous glue area on each layer, for locally uneven models (range +/-0.1mm, extended 2mm)",
         "tomlComment": "补偿范围模式: bed=热床范围(±0.2mm), patch=涂胶面范围(±0.1mm)",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -1754,11 +1884,13 @@
         "choices": [
           {
             "label": "热床范围",
+            "labelEn": "Bed range",
             "value": "bed",
             "deprecated": false
           },
           {
             "label": "涂胶面范围",
+            "labelEn": "Glue-area range",
             "value": "patch",
             "deprecated": false
           }
@@ -1779,7 +1911,9 @@
         "tomlKey": "glue_z_compensation_patch_bl",
         "jsonKey": "glue_z_compensation_patch_bl",
         "label": "涂胶面-后左补偿",
+        "labelEn": "Glue trim - rear left",
         "desc": "涂胶面模式下后左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "descEn": "Z trim at the rear left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
         "tomlComment": "涂胶面后左角Z补偿 范围:-0.1~0.1",
         "valueType": "float",
         "uiComponent": "number",
@@ -1817,7 +1951,9 @@
         "tomlKey": "glue_z_compensation_patch_br",
         "jsonKey": "glue_z_compensation_patch_br",
         "label": "涂胶面-后右补偿",
+        "labelEn": "Glue trim - rear right",
         "desc": "涂胶面模式下后右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "descEn": "Z trim at the rear right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
         "tomlComment": "涂胶面后右角Z补偿 范围:-0.1~0.1",
         "valueType": "float",
         "uiComponent": "number",
@@ -1855,7 +1991,9 @@
         "tomlKey": "glue_z_compensation_patch_fl",
         "jsonKey": "glue_z_compensation_patch_fl",
         "label": "涂胶面-前左补偿",
+        "labelEn": "Glue trim - front left",
         "desc": "涂胶面模式下前左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "descEn": "Z trim at the front left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
         "tomlComment": "涂胶面前左角Z补偿 范围:-0.1~0.1",
         "valueType": "float",
         "uiComponent": "number",
@@ -1893,7 +2031,9 @@
         "tomlKey": "glue_z_compensation_patch_fr",
         "jsonKey": "glue_z_compensation_patch_fr",
         "label": "涂胶面-前右补偿",
+        "labelEn": "Glue trim - front right",
         "desc": "涂胶面模式下前右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬",
+        "descEn": "Z trim at the front right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
         "tomlComment": "涂胶面前右角Z补偿 范围:-0.1~0.1",
         "valueType": "float",
         "uiComponent": "number",
@@ -1931,7 +2071,9 @@
         "tomlKey": "glue_z_lift_height",
         "jsonKey": "glue_z_lift_height",
         "label": "涂胶Z轴抬升高度",
+        "labelEn": "Glue Z hop height",
         "desc": "涂胶前/后抬笔高度。换笔芯后涂胶前抬笔 + 涂胶结束抬笔使用此高度。前3层使用子参数'前3层抬升高度'",
+        "descEn": "Pen lift before and after gluing. Used for the hop after a pen refill and for the hop at the end of gluing. The first 3 layers use the first-3-layers lift sub-parameter",
         "tomlComment": "涂胶Z抬升高度(mm) 范围:5~10",
         "valueType": "float",
         "uiComponent": "number",
@@ -1965,7 +2107,9 @@
         "tomlKey": "glue_z_lift_height_first_layers",
         "jsonKey": "glue_z_lift_height_first_layers",
         "label": "前3层抬升高度",
+        "labelEn": "First 3 layers lift",
         "desc": "前3层涂胶前/后抬笔的额外高度，用于首层附着稳定。与涂胶Z轴抬升高度叠加使用",
+        "descEn": "Extra pen lift before and after gluing on the first 3 layers, to stabilize first-layer adhesion. Added on top of the glue Z hop height",
         "tomlComment": "前3层抬升高度(mm) 范围:6~10",
         "valueType": "float",
         "uiComponent": "number",
@@ -1998,12 +2142,50 @@
         "serialization": null
       },
       {
+        "key": "wiping.swap_hop_height",
+        "configKey": "SwapHopHeight",
+        "tomlKey": "swap_hop_height",
+        "jsonKey": "swap_hop_height",
+        "label": "换笔脱层高度",
+        "labelEn": "Pen swap hop height",
+        "desc": "换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度",
+        "descEn": "How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height",
+        "tomlComment": "换笔脱层高度(mm) 范围:0.2~3",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 1.0,
+        "scope": "universal",
+        "section": "wiping",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "z_lift"
+        },
+        "min": 0.2,
+        "max": 3.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
         "key": "toolhead.glue_z_offset",
         "configKey": "GlueZOffset",
         "tomlKey": "glue_z_offset",
         "jsonKey": "glue_z_offset",
         "label": "涂胶Z偏移",
+        "labelEn": "Glue Z offset",
         "desc": "涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面",
+        "descEn": "Extra Z offset while gluing; negative brings the pen closer to the model surface",
         "tomlComment": "涂胶Z偏移(mm) 范围:-5~2",
         "valueType": "float",
         "uiComponent": "number",
@@ -2037,7 +2219,9 @@
         "tomlKey": "have_wiping_components",
         "jsonKey": "have_wiping_components",
         "label": "擦料方式",
+        "labelEn": "Wipe method",
         "desc": "选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘",
+        "descEn": "How to wipe: the wipe tower builds a tower at a fixed position; disc wiping uses the printer built-in disc",
         "tomlComment": "使用擦嘴塔而非擦嘴组件",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -2057,13 +2241,15 @@
         "choices": [
           {
             "label": "擦料塔",
+            "labelEn": "Wipe tower",
             "value": "tower",
             "deprecated": false
           },
           {
             "label": "圆盘擦拭",
+            "labelEn": "Disc wipe",
             "value": "disk",
-            "deprecated": false
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -2082,7 +2268,9 @@
         "tomlKey": "ironing_coverage_threshold",
         "jsonKey": "ironing_coverage_threshold",
         "label": "熨烫覆盖阈值",
+        "labelEn": "Ironing coverage threshold",
         "desc": "熨烫面占支撑面的最低路径长度比例，低于此值时回退到支撑面",
+        "descEn": "Minimum share of the ironing surface covered by the support surface; below it the glue falls back to the support surface",
         "tomlComment": "熨烫覆盖率阈值(%) 范围:0~100",
         "valueType": "float",
         "uiComponent": "number",
@@ -2102,16 +2290,19 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": 0.0,
             "deprecated": false
           },
           {
             "label": "稀疏一半",
+            "labelEn": "50% sparse",
             "value": 50.0,
             "deprecated": false
           },
           {
             "label": "稀疏90%",
+            "labelEn": "90% sparse",
             "value": 90.0,
             "deprecated": false
           }
@@ -2132,7 +2323,9 @@
         "tomlKey": "ironing_e_sum_threshold",
         "jsonKey": "ironing_e_sum_threshold",
         "label": "熨烫挤出阈值",
+        "labelEn": "Ironing extrusion threshold",
         "desc": "当熨烫段挤出总量超过此阈值时自动移除熨烫（仅在自动模式下生效）",
+        "descEn": "Ironing is removed automatically when the extruded length of an ironing segment exceeds this threshold (auto mode only)",
         "tomlComment": "熨烫E总和阈值 范围:0~100",
         "valueType": "float",
         "uiComponent": "number",
@@ -2170,7 +2363,9 @@
         "tomlKey": "ironing_mode",
         "jsonKey": "ironing_mode",
         "label": "支撑面熨烫",
+        "labelEn": "Support surface ironing",
         "desc": "控制支撑面上层熨烫的保留/移除：关闭=始终移除熨烫挤出；开启=始终保留；自动=根据挤出量阈值判断",
+        "descEn": "Keep or remove ironing on top of the support surface: off = always remove ironing extrusion; on = always keep; auto = decide by the extrusion threshold",
         "tomlComment": "熨烫模式: off=始终移除, on=始终保留, auto=自动判断",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -2190,16 +2385,19 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           },
           {
             "label": "自动",
+            "labelEn": "Auto",
             "value": "auto",
             "deprecated": false
           }
@@ -2207,7 +2405,10 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1:FASTV3.3": "auto",
+          "A1_MINI:FASTV3.3": "auto"
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -2220,7 +2421,9 @@
         "tomlKey": "ironing_suppress_expand",
         "jsonKey": "ironing_suppress_expand",
         "label": "熨烫抑制扩展范围",
+        "labelEn": "Ironing suppression expansion",
         "desc": "已激活熨烫段包围盒向外扩展的距离，0为关闭扩展",
+        "descEn": "How far the bounding box of an active ironing segment expands outwards; 0 = no expansion",
         "tomlComment": "熨烫抑制扩展(mm) 范围:0~20",
         "valueType": "float",
         "uiComponent": "number",
@@ -2254,7 +2457,9 @@
         "tomlKey": "ironing_suppress_expand_mode",
         "jsonKey": "ironing_suppress_expand_mode",
         "label": "熨烫抑制扩展模式",
+        "labelEn": "Ironing suppression mode",
         "desc": "熨烫抑制区域的扩展方式：包围盒外扩=沿XY轴均匀外扩；质心半径外扩=从质心向外径向扩展",
+        "descEn": "How the suppression area expands: bounding box = evenly along X and Y; centroid radius = radially outwards from the centroid",
         "tomlComment": "熨烫抑制扩展模式(bbox/centroid)",
         "valueType": "string",
         "uiComponent": "select",
@@ -2278,11 +2483,13 @@
         "choices": [
           {
             "label": "包围盒外扩",
+            "labelEn": "Bounding box",
             "value": "bbox",
             "deprecated": false
           },
           {
             "label": "质心半径外扩",
+            "labelEn": "Centroid radius",
             "value": "centroid",
             "deprecated": false
           }
@@ -2303,7 +2510,9 @@
         "tomlKey": "min_support_interface_enabled",
         "jsonKey": "min_support_interface_enabled",
         "label": "最小支撑涂胶面过滤",
+        "labelEn": "Filter tiny support glue areas",
         "desc": "启用后过滤掉过小的支撑涂胶面，避免无效涂胶",
+        "descEn": "Filters out support glue areas that are too small, avoiding wasted glue",
         "tomlComment": "最小支撑涂胶面过滤",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2323,11 +2532,13 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           }
@@ -2348,7 +2559,9 @@
         "tomlKey": "nozzle_cooling_flag",
         "jsonKey": "nozzle_cooling_flag",
         "label": "涂胶期间降温",
+        "labelEn": "Cool nozzle while gluing",
         "desc": "涂胶期间降低喷嘴温度以防止胶水因过热而滴漏",
+        "descEn": "Lowers the nozzle temperature while gluing so the glue does not drip from overheating",
         "tomlComment": "涂胶期间是否降温",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2382,7 +2595,9 @@
         "tomlKey": "offset_x",
         "jsonKey": "x",
         "label": "X 轴偏移",
+        "labelEn": "X offset",
         "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
+        "descEn": "X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right",
         "tomlComment": "笔尖偏移",
         "valueType": "float",
         "uiComponent": "number",
@@ -2411,7 +2626,7 @@
         "deprecated": false,
         "machineVariants": {
           "A1:FAST": -0.7,
-          "A1:FASTV3.3": 0.1,
+          "A1:FASTV3.3": -0.7,
           "A1:STANDARD": -1.0,
           "A1_MINI:FAST": -0.5,
           "A1_MINI:FASTV3.3": -0.9,
@@ -2446,7 +2661,9 @@
         "tomlKey": "offset_y",
         "jsonKey": "y",
         "label": "Y 轴偏移",
+        "labelEn": "Y offset",
         "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准",
+        "descEn": "Y offset of the glue pen tip relative to the nozzle (mm); calibrate against the real hardware",
         "tomlComment": "笔尖偏移",
         "valueType": "float",
         "uiComponent": "number",
@@ -2504,7 +2721,9 @@
         "tomlKey": "offset_z",
         "jsonKey": "z",
         "label": "Z 轴偏移",
+        "labelEn": "Z offset",
         "desc": "涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离",
+        "descEn": "Height offset of the glue pen tip (mm); affects the distance between the pen and the model",
         "tomlComment": "笔尖偏移",
         "valueType": "float",
         "uiComponent": "number",
@@ -2532,6 +2751,8 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1:FASTV3.3": 3.7,
+          "A1_MINI:FASTV3.3": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -2559,7 +2780,9 @@
         "tomlKey": "outer_structure",
         "jsonKey": "outer_structure",
         "label": "外围结构",
+        "labelEn": "Outer structure",
         "desc": "选择擦料塔外围结构类型：无=不生成外围；斜肋外墙=在塔外侧生成斜肋支撑；护套=包裹塔体外围防止倒塌",
+        "descEn": "Outer structure of the wipe tower: none = no outer shell; ribbed wall = angled ribs outside the tower; sheath = wrap the tower to keep it from collapsing",
         "tomlComment": "外围结构(none/rib)",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -2583,16 +2806,19 @@
         "choices": [
           {
             "label": "brim",
+            "labelEn": "Brim",
             "value": "brim",
             "deprecated": false
           },
           {
             "label": "斜肋外墙",
+            "labelEn": "Ribbed wall",
             "value": "rib",
             "deprecated": false
           },
           {
             "label": "护套",
+            "labelEn": "Sheath",
             "value": "sheath",
             "deprecated": true
           }
@@ -2613,7 +2839,9 @@
         "tomlKey": "prime_enabled",
         "jsonKey": "prime_enabled",
         "label": "启用润笔",
+        "labelEn": "Enable priming",
         "desc": "润笔总开关，关闭后所有润笔相关参数不显示且润笔逻辑不执行",
+        "descEn": "Master switch for priming; when off, all priming parameters are hidden and the priming logic is skipped",
         "tomlComment": "润笔总开关",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2647,7 +2875,9 @@
         "tomlKey": "prime_every_layer",
         "jsonKey": "prime_every_layer",
         "label": "每层润笔",
+        "labelEn": "Prime every layer",
         "desc": "开启后每层涂胶前都触发润笔，与润笔触发层数互斥",
+        "descEn": "Primes before gluing on every layer; mutually exclusive with the priming trigger layer count",
         "tomlComment": "每层润笔",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2671,11 +2901,13 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           }
@@ -2696,7 +2928,9 @@
         "tomlKey": "prime_length",
         "jsonKey": "prime_length",
         "label": "润笔路径长度",
+        "labelEn": "Priming path length",
         "desc": "长时间未涂胶后重新润笔的路径长度，确保胶水充分流出",
+        "descEn": "Path length of a re-prime after a long time without gluing, ensuring the glue flows",
         "tomlComment": "预涂长度(mm) 范围:0~500",
         "valueType": "float",
         "uiComponent": "number",
@@ -2734,7 +2968,9 @@
         "tomlKey": "prime_min_path_length",
         "jsonKey": "prime_min_path_length",
         "label": "润笔最小路径长度",
+        "labelEn": "Minimum priming path length",
         "desc": "触发润笔的最小路径长度阈值，路径长度小于此值时不触发润笔",
+        "descEn": "Path lengths below this threshold do not trigger priming",
         "tomlComment": "润笔最小路径长度(mm) 范围:0~100",
         "valueType": "float",
         "uiComponent": "number",
@@ -2772,7 +3008,9 @@
         "tomlKey": "prime_per_model",
         "jsonKey": "prime_per_model",
         "label": "每个模型都润笔",
+        "labelEn": "Prime for every model",
         "desc": "开启后每个模型的涂胶前都执行润笔，关闭则每层只润笔一次",
+        "descEn": "Primes before gluing each model; when off, priming happens only once per layer",
         "tomlComment": "每个模型都润笔",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2796,11 +3034,13 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           }
@@ -2821,7 +3061,9 @@
         "tomlKey": "prime_trigger_layers",
         "jsonKey": "prime_trigger_layers",
         "label": "润笔触发层数",
+        "labelEn": "Priming trigger layers",
         "desc": "超过此层数未涂胶时自动触发润笔",
+        "descEn": "Priming is triggered automatically after this many layers without gluing",
         "tomlComment": "预涂触发层数 范围:0~999",
         "valueType": "int",
         "uiComponent": "number",
@@ -2859,7 +3101,9 @@
         "tomlKey": "rib_extra_length",
         "jsonKey": "rib_extra_length",
         "label": "斜肋额外长度",
+        "labelEn": "Rib extra length",
         "desc": "斜肋外墙的额外延伸长度，0为不延伸",
+        "descEn": "Extra extension length of the ribbed wall; 0 = no extension",
         "tomlComment": "斜肋额外长度(mm) 范围:0~300",
         "valueType": "float",
         "uiComponent": "number",
@@ -2897,7 +3141,9 @@
         "tomlKey": "rib_fillet_wall",
         "jsonKey": "rib_fillet_wall",
         "label": "外墙倒圆角",
+        "labelEn": "Rounded outer wall",
         "desc": "斜肋外墙是否倒圆角",
+        "descEn": "Whether the ribbed outer wall is rounded",
         "tomlComment": "外墙倒圆角",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -2935,7 +3181,9 @@
         "tomlKey": "rib_width",
         "jsonKey": "rib_width",
         "label": "斜肋宽度",
+        "labelEn": "Rib width",
         "desc": "斜肋外墙的宽度",
+        "descEn": "Width of the ribbed outer wall",
         "tomlComment": "斜肋宽度(mm) 范围:0~300",
         "valueType": "float",
         "uiComponent": "number",
@@ -2973,7 +3221,9 @@
         "tomlKey": "sheath_base_expand",
         "jsonKey": "sheath_base_expand",
         "label": "护套底层膨胀量",
+        "labelEn": "Sheath base expansion",
         "desc": "护套底层相对塔体的单边膨胀量",
+        "descEn": "Single-side expansion of the sheath over the tower body on the bottom layer",
         "tomlComment": "鞘底扩展(mm) 范围:0~20",
         "valueType": "float",
         "uiComponent": "number",
@@ -3011,7 +3261,9 @@
         "tomlKey": "sheath_converge_layers",
         "jsonKey": "sheath_converge_layers",
         "label": "护套收敛层数",
+        "labelEn": "Sheath convergence layers",
         "desc": "护套从底层膨胀逐渐收敛到塔体外轮廓的层数",
+        "descEn": "Number of layers over which the sheath converges from the base expansion back to the tower outline",
         "tomlComment": "鞘收敛层数 范围:1~200",
         "valueType": "int",
         "uiComponent": "number",
@@ -3049,7 +3301,9 @@
         "tomlKey": "sheath_enable_height",
         "jsonKey": "sheath_enable_height",
         "label": "护套自动启用高度",
+        "labelEn": "Sheath auto-enable height",
         "desc": "自动模式下，模型高度超过此值时启用护套",
+        "descEn": "In auto mode the sheath is enabled once the model is taller than this",
         "tomlComment": "鞘启用高度(mm) 范围:0~300",
         "valueType": "float",
         "uiComponent": "number",
@@ -3087,7 +3341,9 @@
         "tomlKey": "sheath_wall_width",
         "jsonKey": "sheath_wall_width",
         "label": "护套壁宽",
+        "labelEn": "Sheath wall width",
         "desc": "护套壁的宽度",
+        "descEn": "Wall width of the sheath",
         "tomlComment": "鞘壁宽(mm) 范围:0.2~3",
         "valueType": "float",
         "uiComponent": "number",
@@ -3125,7 +3381,9 @@
         "tomlKey": "small_feature_factor",
         "jsonKey": "small_feature_factor",
         "label": "小特征因子",
+        "labelEn": "Small feature factor",
         "desc": "小特征速度系数 = MaxSpeed × 此值。值越小(如0.5)小特征越精细但更慢",
+        "descEn": "Small-feature speed = MaxSpeed x this value. Lower (e.g. 0.5) is finer but slower",
         "tomlComment": "小特征因子 范围:0~2",
         "valueType": "float",
         "uiComponent": "number",
@@ -3159,7 +3417,9 @@
         "tomlKey": "speed_limit",
         "jsonKey": "speed_limit",
         "label": "涂胶速度限制",
+        "labelEn": "Glue speed limit",
         "desc": "涂胶笔的最大移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步",
+        "descEn": "Maximum travel speed of the glue pen (mm/s); too high may cause uneven glue or lost steps",
         "tomlComment": "涂胶速度限制 (mm/s)",
         "valueType": "float",
         "uiComponent": "number",
@@ -3193,7 +3453,9 @@
         "tomlKey": "support_extrusion_multiplier",
         "jsonKey": "support_extrusion_multiplier",
         "label": "支撑挤出倍率",
+        "labelEn": "Support extrusion multiplier",
         "desc": "支撑材料的挤出倍率，影响支撑密度和拆除难度",
+        "descEn": "Extrusion multiplier for support material; affects support density and how easy it is to remove",
         "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
@@ -3227,7 +3489,9 @@
         "tomlKey": "tower_custom_layer_height",
         "jsonKey": "tower_custom_layer_height",
         "label": "塔层高策略",
+        "labelEn": "Tower layer height",
         "desc": "自定义模式下的擦料塔层高策略",
+        "descEn": "Wipe tower layer height strategy in custom mode",
         "tomlComment": "塔层高策略",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -3251,16 +3515,19 @@
         "choices": [
           {
             "label": "最小层高",
+            "labelEn": "Min layer height",
             "value": "min",
             "deprecated": false
           },
           {
             "label": "最大层高",
+            "labelEn": "Max layer height",
             "value": "max",
             "deprecated": false
           },
           {
             "label": "自适应",
+            "labelEn": "Adaptive",
             "value": "auto",
             "deprecated": false
           }
@@ -3281,7 +3548,9 @@
         "tomlKey": "tower_extrude_ratio",
         "jsonKey": "tower_extrude_ratio",
         "label": "擦料塔挤出倍率",
+        "labelEn": "Tower extrusion ratio",
         "desc": "擦料塔出胶量比例，值越大出胶越多。会被处理器动态计算覆盖",
+        "descEn": "Glue output ratio of the wipe tower; higher means more glue. Overridden by the processor at runtime",
         "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
@@ -3319,7 +3588,9 @@
         "tomlKey": "tower_first_layer_flow",
         "jsonKey": "tower_first_layer_flow",
         "label": "擦料塔首层流量",
+        "labelEn": "Tower first-layer flow",
         "desc": "擦料塔首层护套和斜肋的挤出流量比例，1.0为标准流量",
+        "descEn": "Extrusion flow ratio for the sheath and ribs on the first layer; 1.0 is the standard flow",
         "tomlComment": "擦料塔首层流量 范围:0.5~2",
         "valueType": "float",
         "uiComponent": "number",
@@ -3357,7 +3628,9 @@
         "tomlKey": "tower_glue_layer_speed",
         "jsonKey": "tower_glue_layer_speed",
         "label": "涂胶面层速度",
+        "labelEn": "Glue layer speed",
         "desc": "涂胶面层的塔体打印速度",
+        "descEn": "Tower print speed on glue layers",
         "tomlComment": "涂胶面层速度",
         "valueType": "float",
         "uiComponent": "number",
@@ -3395,7 +3668,9 @@
         "tomlKey": "tower_rib_speed",
         "jsonKey": "tower_rib_speed",
         "label": "斜肋打印速度",
+        "labelEn": "Rib print speed",
         "desc": "跟随塔：使用塔体打印速度 | 自定义：指定斜肋打印速度",
+        "descEn": "Follow tower: use the tower print speed | Custom: use a specific rib print speed",
         "tomlComment": "斜肋打印速度模式",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -3419,11 +3694,13 @@
         "choices": [
           {
             "label": "跟随塔",
+            "labelEn": "Follow tower",
             "value": "follow",
             "deprecated": false
           },
           {
             "label": "自定义",
+            "labelEn": "Custom",
             "value": "custom",
             "deprecated": false
           }
@@ -3444,7 +3721,9 @@
         "tomlKey": "tower_rib_speed_value",
         "jsonKey": "tower_rib_speed_value",
         "label": "自定义速度",
+        "labelEn": "Custom speed",
         "desc": "斜肋外墙的自定义打印速度",
+        "descEn": "Custom print speed for the ribbed outer wall",
         "tomlComment": "斜肋自定义打印速度",
         "valueType": "float",
         "uiComponent": "number",
@@ -3482,7 +3761,9 @@
         "tomlKey": "tower_safe_z_offset",
         "jsonKey": "tower_safe_z_offset",
         "label": "塔安全Z偏移",
+        "labelEn": "Tower safety Z offset",
         "desc": "擦料塔安全Z偏移距离，范围0.3~5.0mm",
+        "descEn": "Safety Z offset for the wipe tower, 0.3-5.0mm",
         "tomlComment": "塔安全Z偏移(0.3~5.0mm)",
         "valueType": "float",
         "uiComponent": "number",
@@ -3520,7 +3801,9 @@
         "tomlKey": "tower_sheath_speed",
         "jsonKey": "tower_sheath_speed",
         "label": "护套打印速度",
+        "labelEn": "Sheath print speed",
         "desc": "护套的打印速度",
+        "descEn": "Print speed of the sheath",
         "tomlComment": "护套打印速度",
         "valueType": "float",
         "uiComponent": "number",
@@ -3558,7 +3841,9 @@
         "tomlKey": "tower_travel_speed",
         "jsonKey": "tower_travel_speed",
         "label": "塔刮擦速度",
+        "labelEn": "Tower wipe speed",
         "desc": "擦料塔刮擦移动速度，范围50~500mm/s",
+        "descEn": "Travel speed of the tower wipe, 50-500mm/s",
         "tomlComment": "塔刮擦速度(50~500mm/s)",
         "valueType": "float",
         "uiComponent": "number",
@@ -3596,7 +3881,9 @@
         "tomlKey": "tower_wipe_mode",
         "jsonKey": "tower_wipe_mode",
         "label": "擦嘴策略",
+        "labelEn": "Nozzle wipe strategy",
         "desc": "开启：每层都擦嘴 | 关闭：包括涂胶面都不擦 | 自动：仅涂胶面层擦嘴",
+        "descEn": "On: wipe every layer | Off: no wipe, not even on glue layers | Auto: wipe only on glue layers",
         "tomlComment": "擦嘴策略",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -3620,16 +3907,19 @@
         "choices": [
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           },
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "自动",
+            "labelEn": "Auto",
             "value": "auto",
             "deprecated": false
           }
@@ -3650,7 +3940,9 @@
         "tomlKey": "use_ironing_path",
         "jsonKey": "use_ironing_path",
         "label": "涂胶面使用熨烫路径",
+        "labelEn": "Glue along ironing path",
         "desc": "开启后，涂胶面优先使用熨烫段的 XY 路径；熨烫覆盖不足的区域自动回退到支撑面路径",
+        "descEn": "When on, glue follows the XY path of the ironing segment first; areas with too little ironing fall back to the support surface path",
         "tomlComment": "使用熨烫路径作为涂胶路径",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -3670,11 +3962,13 @@
         "choices": [
           {
             "label": "关闭",
+            "labelEn": "Off",
             "value": "off",
             "deprecated": false
           },
           {
             "label": "开启",
+            "labelEn": "On",
             "value": "on",
             "deprecated": false
           }
@@ -3695,7 +3989,9 @@
         "tomlKey": "user_dry_time",
         "jsonKey": "user_dry_time",
         "label": "额外干燥时间",
+        "labelEn": "Extra drying time",
         "desc": "涂胶后额外等待干燥的时间 (秒)，让胶水充分固化",
+        "descEn": "Extra drying time after gluing (seconds) so the glue sets",
         "tomlComment": "额外干燥时间",
         "valueType": "int",
         "uiComponent": "number",
@@ -3729,7 +4025,9 @@
         "tomlKey": "wiper_x",
         "jsonKey": "wiper_x",
         "label": "擦料塔X坐标",
+        "labelEn": "Wipe tower X",
         "desc": "擦料塔在热床上的X坐标位置 (mm)",
+        "descEn": "X position of the wipe tower on the bed (mm)",
         "tomlComment": "擦嘴塔X坐标(mm)",
         "valueType": "float",
         "uiComponent": "number",
@@ -3785,7 +4083,9 @@
         "tomlKey": "wiper_y",
         "jsonKey": "wiper_y",
         "label": "擦料塔Y坐标",
+        "labelEn": "Wipe tower Y",
         "desc": "擦料塔在热床上的Y坐标位置 (mm)",
+        "descEn": "Y position of the wipe tower on the bed (mm)",
         "tomlComment": "擦嘴塔Y坐标(mm)",
         "valueType": "float",
         "uiComponent": "number",
@@ -3839,7 +4139,9 @@
         "tomlKey": "wipetower_speed",
         "jsonKey": "wipetower_speed",
         "label": "塔体打印速度",
+        "labelEn": "Tower print speed",
         "desc": "非涂胶面层的塔体打印速度",
+        "descEn": "Tower print speed on non-glue layers",
         "tomlComment": "擦嘴塔打印速度",
         "valueType": "float",
         "uiComponent": "number",
@@ -3877,8 +4179,10 @@
         "tomlKey": "xy_calibration_mode",
         "jsonKey": "xy_calibration_mode",
         "label": "XY校准模式",
-        "desc": "XY校准模式：默认或新型",
-        "tomlComment": "XY校准模式(default=默认,new=新型)",
+        "labelEn": "XY calibration mode",
+        "desc": "XY校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "descEn": "XY calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)",
+        "tomlComment": "XY校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3896,14 +4200,16 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "新版",
+            "labelEn": "New",
+            "value": "new",
             "deprecated": false
           },
           {
-            "label": "新型",
-            "value": "new",
-            "deprecated": false
+            "label": "原版",
+            "labelEn": "Original",
+            "value": "original",
+            "deprecated": true
           }
         ],
         "variantMode": null,
@@ -3922,8 +4228,10 @@
         "tomlKey": "z_calibration_mode",
         "jsonKey": "z_calibration_mode",
         "label": "Z校准模式",
-        "desc": "Z校准模式：默认或新型",
-        "tomlComment": "Z校准模式(default=默认,new=新型)",
+        "labelEn": "Z calibration mode",
+        "desc": "Z校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）",
+        "descEn": "Z calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)",
+        "tomlComment": "Z校准模式(original=原版,new=新版)",
         "valueType": "string",
         "uiComponent": "segmented",
         "defaultValue": "new",
@@ -3941,12 +4249,14 @@
         "showWhen": null,
         "choices": [
           {
-            "label": "默认",
-            "value": "default",
+            "label": "原版",
+            "labelEn": "Original",
+            "value": "original",
             "deprecated": false
           },
           {
-            "label": "新型",
+            "label": "新版",
+            "labelEn": "New",
             "value": "new",
             "deprecated": false
           }
@@ -3966,19 +4276,24 @@
       {
         "id": "offset",
         "label": "偏移",
+        "labelEn": "Offset",
         "order": 10.0,
         "icon": "wrench",
         "sections": [
           {
             "id": "space_offset",
             "label": "空间偏移",
+            "labelEn": "Space offsets",
             "description": "工具头空间偏移参数",
+            "descriptionEn": "Toolhead space offset parameters",
             "order": 100.0
           },
           {
             "id": "motion",
             "label": "运动与挤出",
+            "labelEn": "Motion and extrusion",
             "description": "运动速度与挤出参数",
+            "descriptionEn": "Motion speed and extrusion parameters",
             "order": 200.0
           }
         ]
@@ -3986,37 +4301,48 @@
       {
         "id": "wiping",
         "label": "擦料",
+        "labelEn": "Wiping",
         "order": 20.0,
         "icon": "layers",
         "sections": [
           {
             "id": "wiping_method",
             "label": "擦料方式",
+            "labelEn": "Wipe method",
             "description": "擦料方式选择（擦料塔/圆盘擦拭）",
+            "descriptionEn": "Wipe method selection (tower / disc)",
             "order": 0.0
           },
           {
             "id": "tower_position",
             "label": "擦料塔位置与打印",
+            "labelEn": "Tower position and printing",
             "description": "擦料塔位置与打印参数",
+            "descriptionEn": "Wipe tower position and printing parameters",
             "order": 1.0
           },
           {
             "id": "safety_advanced",
             "label": "安全与高级参数",
+            "labelEn": "Safety and advanced",
             "description": "安全与高级擦料塔参数",
+            "descriptionEn": "Safety and advanced wipe tower parameters",
             "order": 2.0
           },
           {
             "id": "tower_structure",
             "label": "塔结构加强",
+            "labelEn": "Tower structure",
             "description": "擦料塔结构加强参数",
+            "descriptionEn": "Wipe tower structural reinforcement parameters",
             "order": 3.0
           },
           {
             "id": "disk_action",
             "label": "圆盘动作控制",
+            "labelEn": "Disc control",
             "description": "圆盘擦拭动作控制参数",
+            "descriptionEn": "Disc wiping motion control parameters",
             "order": 4.0
           }
         ]
@@ -4024,13 +4350,16 @@
       {
         "id": "fan",
         "label": "风扇",
+        "labelEn": "Fan",
         "order": 30.0,
         "icon": "fan",
         "sections": [
           {
             "id": "fan_control",
             "label": "温控与风扇",
+            "labelEn": "Temperature and fan",
             "description": "温控与风扇参数",
+            "descriptionEn": "Temperature control and fan parameters",
             "order": 0.0
           }
         ]
@@ -4038,25 +4367,32 @@
       {
         "id": "glue",
         "label": "涂胶",
+        "labelEn": "Glue",
         "order": 40.0,
         "icon": "paintbrush",
         "sections": [
           {
             "id": "glue_advanced_motion",
             "label": "高级运动调控",
+            "labelEn": "Advanced motion",
             "description": "涂胶高级运动调控参数",
+            "descriptionEn": "Advanced glue motion parameters",
             "order": 0.0
           },
           {
             "id": "glue_ironing",
             "label": "支撑面熨烫",
+            "labelEn": "Support ironing",
             "description": "支撑面熨烫与稀疏涂胶参数",
+            "descriptionEn": "Support surface ironing and sparse glue parameters",
             "order": 1.0
           },
           {
             "id": "glue_z_compensation",
             "label": "涂胶方向补偿",
+            "labelEn": "Glue Z compensation",
             "description": "涂胶 Z 方向补偿参数",
+            "descriptionEn": "Glue Z directional compensation parameters",
             "order": 2.0
           }
         ]
@@ -4064,13 +4400,16 @@
       {
         "id": "gcode",
         "label": "切换",
+        "labelEn": "Switching",
         "order": 50.0,
         "icon": "terminal",
         "sections": [
           {
             "id": "custom_gcode",
             "label": "自定义G-code",
+            "labelEn": "Custom G-code",
             "description": "自定义 G-code 指令",
+            "descriptionEn": "Custom G-code commands",
             "order": 0.0
           }
         ]
@@ -4078,37 +4417,48 @@
       {
         "id": "advanced",
         "label": "更多",
+        "labelEn": "More",
         "order": 60.0,
         "icon": "sliders",
         "sections": [
           {
             "id": "pen_revitalization",
             "label": "润笔",
+            "labelEn": "Priming",
             "description": "润笔与首笔活化参数",
+            "descriptionEn": "Priming and first-pen activation parameters",
             "order": 0.0
           },
           {
             "id": "glue_params",
             "label": "涂胶参数",
+            "labelEn": "Glue parameters",
             "description": "涂胶基础参数",
+            "descriptionEn": "Basic glue parameters",
             "order": 1.0
           },
           {
             "id": "z_lift",
             "label": "Z轴抬升",
+            "labelEn": "Z lift",
             "description": "Z 轴抬升高度参数",
+            "descriptionEn": "Z lift height parameters",
             "order": 2.0
           },
           {
             "id": "calibration",
             "label": "校准",
+            "labelEn": "Calibration",
             "description": "校准模式选择（不分机型）",
+            "descriptionEn": "Calibration mode selection (machine independent)",
             "order": 3.0
           },
           {
             "id": "machine_specific",
             "label": "机型专属",
+            "labelEn": "Machine specific",
             "description": "机型专属参数",
+            "descriptionEn": "Machine-specific parameters",
             "order": 4.0
           }
         ]
@@ -4116,6 +4466,7 @@
       {
         "id": "internal",
         "label": "内部参数",
+        "labelEn": "Internal",
         "order": 70.0,
         "icon": "settings",
         "sections": []
@@ -4123,73 +4474,88 @@
       {
         "id": "settings",
         "label": "软件设置",
+        "labelEn": "Settings",
         "order": 80.0,
         "icon": null,
         "sections": [
           {
             "id": "appearance",
             "label": "外观",
+            "labelEn": "Appearance",
             "description": null,
+            "descriptionEn": null,
             "order": 100.0
           },
           {
             "id": "update",
             "label": "软件更新",
+            "labelEn": "Software update",
             "description": null,
+            "descriptionEn": null,
             "order": 200.0
           },
           {
             "id": "interaction",
             "label": "辅助交互",
+            "labelEn": "Interaction",
             "description": null,
+            "descriptionEn": null,
             "order": 300.0
           },
           {
             "id": "slicer",
             "label": "切片器",
+            "labelEn": "Slicer",
             "description": null,
+            "descriptionEn": null,
             "order": 400.0
           },
           {
             "id": "post_process",
             "label": "后处理",
+            "labelEn": "Post-processing",
             "description": null,
+            "descriptionEn": null,
             "order": 500.0
-          },
-          {
-            "id": "calibration",
-            "label": "校准",
-            "description": null,
-            "order": 600.0
           },
           {
             "id": "bed_glue",
             "label": "热床预涂胶",
+            "labelEn": "Bed pre-glue",
             "description": null,
+            "descriptionEn": null,
             "order": 700.0
           },
           {
             "id": "cache_management",
             "label": "缓存管理",
+            "labelEn": "Cache management",
             "description": null,
+            "descriptionEn": null,
             "order": 800.0
           },
           {
             "id": "data_maintenance",
             "label": "数据维护",
+            "labelEn": "Data maintenance",
             "description": null,
+            "descriptionEn": null,
             "order": 900.0
           },
           {
             "id": "uninstall_cleanup",
             "label": "卸载清理",
+            "labelEn": "Uninstall cleanup",
             "description": null,
+            "descriptionEn": null,
             "order": 1000.0
           },
           {
             "id": "performance",
             "label": "性能（DEV）",
+            "labelEn": "Performance (DEV)",
             "description": null,
+            "descriptionEn": null,
             "order": 1100.0
           }
         ]
@@ -4646,6 +5012,10 @@
               {
                 "id": "item_5_2_2",
                 "paramKey": "wiping.glue_inter_model_lift_height"
+              },
+              {
+                "id": "item_5_2_3",
+                "paramKey": "wiping.swap_hop_height"
               }
             ],
             "component": null,
@@ -4749,15 +5119,6 @@
             "visible": null
           },
           {
-            "id": "calibration",
-            "items": [],
-            "component": "calibration-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
             "id": "bed_glue",
             "items": [],
             "component": "bed-glue-card",
@@ -4843,8 +5204,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "0f5161bd8700cecf00b5478efe2b4370f67bde8c0a93d459f962d32d9adce7a2",
-      "size": 4290
+      "sha256": "9396e78b31b391672b7f12da537c175334a3c378a1e8105af9c7a909efc67062",
+      "size": 4336
     },
     {
       "kind": "mkp_preset",
@@ -4852,8 +5213,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "579ed7a394e136ea986cc8e8d86a14dda9012fcabcc6f70e0ee5dbe112323485",
-      "size": 4288
+      "sha256": "9bb2e19a863849017283825e6020ef29e237b21c21fd1acb9fe4fef8b7ceb387",
+      "size": 4334
     },
     {
       "kind": "mkp_preset",
@@ -4861,8 +5222,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "3f98f82b42f7576ab0bd24a9efc348477476d5a1719b69fd7c41cc6595cb2d5b",
-      "size": 4291
+      "sha256": "be5c64e2a36a5c6d4f764262b9489cc11ef2b0e76bf0db0de4dd4c4d7e36daf8",
+      "size": 4341
     },
     {
       "kind": "mkp_preset",
@@ -4870,8 +5231,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "d7903229c4e3486483480a049348247bfe4362479b99f5ea3f607ed72afdda6b",
-      "size": 4297
+      "sha256": "7ee0abf809f0a8e6fa35fe924dd518843f6a6976d364a858bd297e4643e52e97",
+      "size": 4343
     },
     {
       "kind": "mkp_preset",
@@ -4879,8 +5240,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "2d245f671178f4eabfb3b06496b2c22e79a2b28474e80380d70ab3d406227f87",
-      "size": 4291
+      "sha256": "12a25c618a7b09f60aa4d499bfcb31a7c83da83da3639c481e7fa10fb15a59d2",
+      "size": 4337
     },
     {
       "kind": "mkp_preset",
@@ -4888,8 +5249,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "17dbf9ece3ff7fcbf61a908c206ef7c0daabc866bb38e39065d2ff2e0fc2bf79",
-      "size": 4295
+      "sha256": "5da29bdf3eb17ce9f63741b694a958ed1be29c35d309af5f37c3341c75c7fe30",
+      "size": 4344
     },
     {
       "kind": "mkp_preset",
@@ -4897,8 +5258,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "f39b50a941bc1019f98f96bc17f6a99c42e3153767c380cd85ed788462a639f3",
-      "size": 4353
+      "sha256": "723d39c3d1795e2fdc2120eeed1b7a7b4ceee1123093fba7d234549dff3890d1",
+      "size": 4475
     },
     {
       "kind": "mkp_preset",
@@ -4906,8 +5267,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "70759d662762cbcec94a8ef55ae843747550e3db8836388a29050e5da110e6b1",
-      "size": 4357
+      "sha256": "eede0d4ed874cdb2df3c5dfb9c4012ef7bfb47be18c09352fb005b4e92015803",
+      "size": 4479
     },
     {
       "kind": "mkp_preset",
@@ -4915,8 +5276,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "8530c0da8f6907b0bb6b95160447166d83f7da0a6f19f680a9ddeef35fc07dd9",
-      "size": 4353
+      "sha256": "69cde252d626753c463ec2f97a5136c51e552802f830031e814d1e1f91eac371",
+      "size": 4475
     },
     {
       "kind": "icon",
@@ -4951,8 +5312,8 @@
       "path": "assets/models/MKP_support_test_models.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "8486199771d639a0e761707a216b204073a9f267d8c37b29dce6bf115ff029aa",
-      "size": 3317913
+      "sha256": "2fd5eec666ebd4b9194ac03b7d8fdc6056ec326249645eb3b5e7c6fc82627522",
+      "size": 2975059
     },
     {
       "kind": "model",
@@ -4960,8 +5321,17 @@
       "path": "assets/models/Precise_Calibration.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "9d7b373d3aa90fe2e68a6760d54e1bbd8d4a9259006959665ac91cdee68b4f32",
-      "size": 385969
+      "sha256": "93862ecd927361b695fea63115288a403d9f562f66c4d4a644a58bbd2308f26a",
+      "size": 387352
+    },
+    {
+      "kind": "model",
+      "fileName": "Precise_Calibration_ext.3mf",
+      "path": "assets/models/Precise_Calibration_ext.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "043e2f5b8c76c94851a3bbcc2523c5911524a9b4d97928d24a0e2c5e3ac73352",
+      "size": 182371
     },
     {
       "kind": "model",
@@ -4969,8 +5339,17 @@
       "path": "assets/models/ZOffset_Calibration.3mf",
       "machineId": "",
       "versionId": "",
-      "sha256": "773b65b0dcdf09472c013bd4eec0edff94372e795dd50d1db99d9cef85f9490c",
-      "size": 290327
+      "sha256": "a7ec8d54e2f9b51fffb73e7ec793882dd84b375d57af918cbb1e2a90f5608fe5",
+      "size": 290340
+    },
+    {
+      "kind": "model",
+      "fileName": "ZOffset_Calibration_ext.3mf",
+      "path": "assets/models/ZOffset_Calibration_ext.3mf",
+      "machineId": "",
+      "versionId": "",
+      "sha256": "1320c3725b879f64217053bc4d3079e6bfb76395b1acc83f0ee1bc416ad79b2a",
+      "size": 160242
     },
     {
       "kind": "bbs_config",

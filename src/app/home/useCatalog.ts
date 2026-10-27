@@ -31,9 +31,17 @@
  * 先旧后新在静态目录上没有一致性风险。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
-import type { CatalogAsset, Machine, PresetFileInfo, RuntimeCatalogBrand } from '../../api/contract'
+import { useLocale } from '../../i18n'
+import { localizeMachines } from '../shared/dataLabel'
+import type {
+  CatalogAsset,
+  CatalogGroup,
+  Machine,
+  PresetFileInfo,
+  RuntimeCatalogBrand,
+} from '../../api/contract'
 
 export interface Catalog {
   /** 机型目录（含品牌与版本），按目录顺序 */
@@ -49,6 +57,12 @@ export interface Catalog {
   assets: CatalogAsset[]
   /** 品牌（含品牌图的资产 id）。同样拉不到就是空 —— 大图再回落内置字标 */
   brands: RuntimeCatalogBrand[]
+  /**
+   * **分组登记**（2026-10-16）：哪几张图共用一份标注、每张演什么角色。
+   * 引导图按它挑哪张（`role = 'light' / 'dark'`）—— 不再写死两个资产 id。
+   * 拉不到就是空数组 ⇒ 那一处引导不出图（缺图一路往下落，不白屏）。
+   */
+  groups: CatalogGroup[]
 }
 
 /** 「文件」这一级的 id：`机型/版本`，与工作台发布 uid 同一形状 */
@@ -57,9 +71,10 @@ export function uidOfFile(file: PresetFileInfo): string | null {
   return ref === undefined ? null : `${ref.machine}/${ref.version}`
 }
 
-let catalogCache: Catalog = { machines: [], presets: [], assets: [], brands: [] }
+let catalogCache: Catalog = { machines: [], presets: [], assets: [], brands: [], groups: [] }
 
 export function useCatalog(): Catalog {
+  const locale = useLocale()
   const [cat, setCat] = useState<Catalog>(catalogCache)
 
   useEffect(() => {
@@ -86,6 +101,7 @@ export function useCatalog(): Catalog {
             ),
           assets: world.assets ?? [],
           brands: world.brands ?? [],
+          groups: world.groups ?? [],
         }
         setCat(catalogCache)
       },
@@ -100,5 +116,10 @@ export function useCatalog(): Catalog {
     }
   }, [])
 
-  return cat
+  /*
+   * 版本显示名按语言摊开（缓存里存原样：缓存在语言切换前就建好了，不能把某一册写死进去）。
+   * `tag` 不摊 —— 它还要给 `TAG_TONE` 当键，显示那一步单独挑。
+   */
+  const machines = useMemo(() => localizeMachines(cat.machines, locale), [cat.machines, locale])
+  return { ...cat, machines }
 }

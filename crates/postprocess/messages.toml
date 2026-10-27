@@ -1,0 +1,3296 @@
+# 「用户读到的那一句话」全住在这里 —— 业务代码里不许再写死文案。
+#
+# # 为什么是一张表
+#
+# 同一条错误，四个读者要的东西不一样：切片器那一框（它只该看到人话，见下）、本程序的
+# 模态框、执行记录（`_meta.json`）、日志。它们以前各拼各的 —— 于是同一件事在四处长得
+# 不一样，改动一次要 grep 五处，还出过「两层错误码糊在一句里」那种噪音
+# （`处理失败 [E_CFG_INVALID_001]：配置无效: E_GCODE_BOUNDARY_001: …`）。
+#
+# 这张表把**码、人话、给谁看**摆在一起：改文案 / 改可见性只动这一处。
+#
+# # 它是编译进去的
+#
+# `include_str!`（见 `src/diag/messages.rs`）—— 不是运行时读的配置文件：没有「用户把表
+# 删了 / 改坏了 / 放了个半截」这种状态，也就没有兜底分支要写。改表 = 重新编译一次。
+#
+# # 字段
+#
+# - 键           —— 条目的名字。**与错误码同名的那几条是内核错误**（`PostprocError` 的每个
+#                  码都必须有一条，判据钉着，见 `diag/error.rs` 的测试）；`hook.*` 那几条是
+#                  **钩子层**（`src-tauri/src/hook.rs`）自己的说法。
+# - code         —— 对外稳定错误码。**键本身就是码时可省**（`E_*` 开头的键按码算）；
+#                  `hook.*` 那几条要给码才写。同一个码允许在两层各有一条（说法不同是常态：
+#                  内核那句给排查，钩子那句给用户）。
+#
+#                  ★★★ **每一条用户能读到的句子都必须有码**（2026-10-17 作者定）：
+#                  「这样就方便我给 AI 去看啊，这样子，就算信息不全，也能通过错误码找到对应的」。
+#                  前三个字母是**类别**，一眼分得出"出故障"还是"你自己让它停的"：
+#
+#                    E_*  故障  —— 系统判定这件事没成（解析失败、写盘失败、内核报错…）
+#                    W_*  停下  —— **不是故障**：用户按了停止 / 在问句里选了停 / 某一步降级了
+#                                  （归档没落成但 G-code 是好的那几条也归这儿）
+#                    N_*  成功  —— 跑完了。几种"都算成功但结果不同"的情形各有各的码
+#                                  （校准件：`N_CALIB_PRINT_001` / `N_CALIB_DIRECT_001`）
+#                    Q_*  提问  —— 钩子停下来问用户的那几句（不是错，也不是结束）
+#
+#                  `*_NNN` 那截是序号，**加新条目就往后排，不要复用/改号** ——
+#                  改了号，用户贴在 issue 里的旧码就搜不到了。
+#
+#                  查码的入口：`python3 scripts/message-codes.mjs <码或键>` 打印这句的
+#                  全部口径（`text` / `slicer` / 参数 / 说明）；不带参数则列出整张码表。
+# - text         —— 本程序里给用户看的那一句（界面模态框、执行记录、日志）。`{名字}` 是占位符。
+# - slicer       —— 给**切片器**那一行的口径，缺省 = 与 `text` 同一句。
+#                  ★ 「让切片器少看 / 别看 / 换个说法」就写在这个字段上。
+#                  （切片器那一框的实际行为、为什么只有 macOS 会显示，见
+#                  `docs/HOOK-ERRORS-AND-MESSAGES.md`。）
+# - params       —— 本条用到的占位符名字。**不是给运行时看的**（渲染时找不到就原样留
+#                  `{名字}`，一眼看得见），是给判据看的：每个占位符都要在这里登记，
+#                  这里登记的每个名字都要真被用到 —— 缺登记与多余登记都算红的。
+# - note         —— 给改表的人看的说明，运行时零消费。
+#
+# 占位符里几个固定名字的含义（内核那几条统一用它们）：
+#   {detail}      —— 内核就地拼出来的**诊断细节**（解析器的报错、参数名与量程…）。
+#                    这一档刻意留白：它们是数据不是文案，形态各异，硬套模板只会失真。
+#   {op}          —— 内核里那个操作名（`read_preset` / `read_gcode` / `write_output`）。
+#                    给排查用，不是给用户读的漂亮话。
+#   {diagnostics} —— 校准形变的机器判据（expected=… actual=…）。**切片器那一面把它去掉**：
+#                    用户要看的是"别转我的校准模型"，不是那串数值。
+
+# ---------------------------------------------------------------- 内核错误（码 = 键）
+
+["E_FILE_READ_001"]
+text = "文件读写失败（{target}）：{detail}"
+text_en = "File read/write failed ({target}): {detail}"
+slicer = "这份文件读不出来 —— 检查它还在不在、是不是被别的程序占着"
+params = ["target", "detail"]
+note = "旧码复用：旧侧 filesystem 模块也拿它表示读写失败（见 diag/error.rs 的码对照）。{target} 两种来源：读侧是操作名（read_gcode…），写侧是落点路径"
+
+["E_FS_NOT_FOUND_001"]
+text = "找不到文件（{target}）：{detail}"
+text_en = "File not found ({target}): {detail}"
+slicer = "找不到这次要处理的那份文件（预设或 G-code）—— 检查路径还在不在"
+params = ["target", "detail"]
+
+["E_TOML_PARSE_001"]
+text = "预设解析失败（TOML 语法）：{path} —— {detail}"
+text_en = "Cannot parse the preset (TOML syntax): {path} — {detail}"
+slicer = "这份预设本程序读不出来（多半是用别的版本导出的）—— 换一份，或把这份发给我们"
+params = ["path", "detail"]
+
+["E_CFG_PARSE_001"]
+text = "这份预设的机型不认识：换一份对应机型的预设（{path}）"
+text_en = "This preset is for an unknown machine: use a preset made for this machine ({path})"
+params = ["path"]
+note = "刻意与旧侧不同：那边写「预设文件缺少 # machine: 声明」，而本项目的机型名是配置里的普通字段"
+
+["E_CFG_INVALID_001"]
+text = "配置无效：{detail}"
+text_en = "Invalid configuration: {detail}"
+params = ["detail"]
+note = "**兜底码**：参数级校验失败都走它。更具体的错走自己的码（如 E_GCODE_BOUNDARY_001）"
+
+["E_GCODE_COLLISION_001"]
+text = "模型与擦料塔的位置冲突：挪开模型或换一个擦料塔位置再切片"
+text_en = "The model collides with the wipe tower: move the model or pick another tower position and slice again"
+slicer = "模型与擦料塔的位置冲突 —— 回切片器挪开模型再切一次"
+
+# 建议那句（2026-10-18）—— **同一件事的三种处置**，码分开排，旧号一个不动。
+# 谁挑这句：`postproc::disk::CollisionResult::advice` 按 `collision_type` 分档。
+# 数字是"至少挪多少"（内核那边已经按 0.1mm 向上取整过）。
+["E_GCODE_COLLISION_002"]
+text = "建议：把模型往{direction}挪 —— {amounts}"
+text_en = "Suggestion: move the model {direction} — {amounts}"
+params = ["direction", "amounts"]
+note = "挪模型的那一档：方向是内核按最小退出距离挑出来的（旧侧 resolveModelAdjustment）；amounts 只列真要动的轴（单轴方向下另一边不写 0）"
+
+["E_GCODE_COLLISION_003"]
+text = "模型这边挪不开了：建议调整擦料塔位置（wiper_x / wiper_y）后再切片"
+text_en = "The model cannot move any further this way: change the wipe tower position (wiper_x / wiper_y) and slice again"
+note = "兜底：三个候选方向都挪不开（越界或挪完还撞），只能动塔"
+
+["E_GCODE_COLLISION_004"]
+text = "擦料塔位置落在机型的额外禁区里：把塔挪开 —— {amounts}（或改机型的禁区配置）"
+text_en = "The wipe tower sits inside a machine exclusion zone: move the tower — {amounts} (or change the machine exclusion settings)"
+params = ["amounts"]
+note = "禁区那一档：挪的是塔不是模型，数字是最小平移向量（MTV）；amounts 只列真要动的轴"
+
+["E_CAL_FAILED_001"]
+text = "校准代码没有生成出来：{detail}"
+text_en = "The calibration code was not generated: {detail}"
+slicer = "校准代码没有生成出来 —— 详见日志，把日志里那一段发给我们"
+params = ["detail"]
+
+["E_CAL_MISMATCH_001"]
+text = "检测到校准模型可能被旋转。请勿旋转校准模型。（{diagnostics}）"
+text_en = "The calibration model may have been rotated. Do not rotate the calibration model. ({diagnostics})"
+slicer = "检测到校准模型可能被旋转 —— 请勿旋转校准模型，只移动位置（详情见日志）"
+params = ["diagnostics"]
+
+["E_CAL_MISMATCH_002"]
+text = "检测到校准模型尺寸已变化。请勿缩放校准模型，仅允许移动位置。（{diagnostics}）"
+text_en = "The calibration model has changed size. Do not scale the calibration model; only moving it is allowed. ({diagnostics})"
+slicer = "检测到校准模型尺寸已变化 —— 请勿缩放校准模型，只移动位置（详情见日志）"
+params = ["diagnostics"]
+
+["E_GCODE_FAILED_001"]
+text = "处理失败：{detail}"
+text_en = "Processing failed: {detail}"
+params = ["detail"]
+
+["E_SYS_CANCELLED_001"]
+text = "已取消：{detail}"
+text_en = "Cancelled: {detail}"
+params = ["detail"]
+note = "内核那一路（Ctrl-C）。用户在界面上按的停止由钩子层的 hook.cancelled 说"
+
+["E_GCODE_BOUNDARY_001"]
+text = "模型超出打印边界，{sides}"
+text_en = "The model exceeds the print boundary, {sides}"
+slicer = "模型超出打印边界，{sides} —— 回切片器挪一下模型再切"
+params = ["sides"]
+
+["E_GCODE_BOUNDARY_002"]
+text = "模型超出涂胶范围，{sides}"
+text_en = "The model exceeds the glue area, {sides}"
+slicer = "模型超出涂胶范围，{sides} —— 回切片器挪一下模型再切"
+params = ["sides"]
+
+# 边界那一句的几个零件（合起来才是上面 `{sides}`）—— 它们同样是文案，所以也住这里
+["boundary.clause"]
+text = "当前{axis}：{current}mm，允许范围：{limit}"
+text_en = "Current {axis}: {current}mm, allowed range: {limit}"
+params = ["axis", "current", "limit"]
+
+["boundary.limit.max"]
+text = "≤{value}mm"
+text_en = "≤{value}mm"
+params = ["value"]
+
+["boundary.limit.min"]
+text = "≥{value}mm"
+text_en = "≥{value}mm"
+params = ["value"]
+
+["boundary.separator"]
+text = "，"
+text_en = ", "
+
+# ---------------------------------------------------------------- 钩子层（切片器 + 界面）
+
+# 前置检查：三句都在「还没碰过用户的文件」阶段，原文件一字未动
+["hook.preset_missing"]
+code = "E_FS_NOT_FOUND_001"
+text = "预设文件不存在：{path}"
+text_en = "The preset file does not exist: {path}"
+slicer = "找不到预设文件：{path} —— 检查切片器「后处理脚本」框里那条命令"
+params = ["path"]
+
+["hook.gcode_missing"]
+code = "E_FS_NOT_FOUND_001"
+text = "输入 G-code 不存在：{path}"
+text_en = "The input G-code does not exist: {path}"
+slicer = "切片器给的 G-code 不在：{path}"
+params = ["path"]
+
+["hook.gcode_unreadable"]
+code = "E_FILE_READ_001"
+text = "读不到输入 G-code：{path}（{detail}）"
+text_en = "Cannot read the input G-code: {path} ({detail})"
+slicer = "读不到切片器给的那份 G-code：{path}"
+params = ["path", "detail"]
+
+["hook.mismatch_question"]
+code = "Q_CFG_MISMATCH_001"
+text = "G-code 是 {gcode}，预设是 {preset} —— 机型对不上，结果可能出错。还继续吗？"
+text_en = "The G-code is {gcode} but the preset is {preset} — the machine does not match and the result may be wrong. Continue anyway?"
+params = ["gcode", "preset"]
+note = "2026-10-17 作者：「文案不好，什么纬度？你就用很简单的文案，简短几行的」—— 原来那句解释「维度与打印边界会按预设算」，是内核口径、不是用户的话"
+
+["hook.mismatch_stopped"]
+code = "W_CFG_MISMATCH_001"
+text = "已停下（机型不匹配：G-code 是 {gcode}，预设是 {preset}）—— 原文件没有被改动"
+text_en = "Stopped (machine mismatch: the G-code is {gcode}, the preset is {preset}) — the original file was not changed"
+slicer = "机型不匹配，按你的选择停下：G-code 是 {gcode}，预设是 {preset}；原文件没有被改动"
+params = ["gcode", "preset"]
+
+["hook.calib_mode_question"]
+code = "Q_CALIB_MODE_001"
+text = "这份 G-code 是{kind}件。保留打印件一起后处理，还是只跑校准？"
+text_en = "This G-code is a {kind} part. Should the printed part be kept and post-processed with it, or only the calibration run?"
+params = ["kind"]
+note = "2026-10-17：后处理认出这是校准件时那一问（作者：「后处理会识别到是校准文件的时候」）。{kind} = Z 偏移校准 / XY 精度校准 / XY 粗校准 / 重复性校准。选项的后果写在按钮上（print / direct），正文**不再重复选项名**——按钮就在下面一行"
+
+["hook.calib_stopped"]
+code = "W_CALIB_MODE_001"
+text = "已停下（{kind}校准件，没有选校准方式）—— 原文件没有被改动"
+text_en = "Stopped ({kind} calibration part, no calibration mode chosen) — the original file was not changed"
+slicer = "校准件没有选校准方式，按你的选择停下：原文件没有被改动"
+params = ["kind"]
+
+["hook.calib_done_print"]
+code = "N_CALIB_PRINT_001"
+text = "打印件保留，只加了涂胶与擦料 —— 处理完成"
+text_en = "The printed part was kept and only glue and wipe passes were added — done"
+note = "2026-10-17：校准件那一问答「先打印，再校准」的成功结论。两种跑法**都是成功**，同一屏，只有这一句不同；界面读 `finished.calibChoice`，报告读 `_meta.json` 的 `calib_choice` —— 同一个键，不许两边各写一份"
+
+["hook.calib_done_direct"]
+code = "N_CALIB_DIRECT_001"
+text = "已去掉打印件，只保留校准路径 —— 处理完成"
+text_en = "The printed part was removed and only the calibration path was kept — done"
+note = "2026-10-17：校准件那一问答「直接校准」的成功结论（口径同 `hook.calib_done_print`）"
+
+["hook.tower_relocation_question"]
+code = "Q_COLLISION_RELOCATE_001"
+text = "擦料塔与模型发生碰撞，是否自动调整擦料塔位置？"
+text_en = "The wipe tower collides with the model. Adjust the wipe tower position automatically?"
+note = "2026-10-18：挪塔那一问。开关（设置页「智能塔位置」）开着才问；答 relocate ⇒ 只改这一趟的 wiper_x/wiper_y 继续跑完；答 model / 超时 ⇒ 停下（与机型那一问同一条）。画布几何走 QuestionPayload.geo"
+
+# ---- 挪塔那一问的三种收场 + 一种"挪不动"（2026-10-18）----
+# 码不复用：Q_ 是问句、N_ 是成了、W_ 是"停下了/降级了"（不是故障）。
+["hook.tower_relocated_ok"]
+code = "N_COLLISION_RELOCATE_001"
+text = "擦料塔已从 X {fromX} / Y {fromY} 挪到 X {toX} / Y {toY}（{moved} mm），复检没有冲突"
+text_en = "The wipe tower moved from X {fromX} / Y {fromY} to X {toX} / Y {toY} ({moved} mm); the re-check found no collisions"
+slicer = "擦料塔位置已自动调整（{moved} mm），这一盘照常后处理"
+params = ["fromX", "fromY", "toX", "toY", "moved"]
+note = "2026-10-18：答「自动挪塔」并复检通过时的成功句（也是报告页/执行记录那一格的结论句）。只改这一趟，预设文件不动"
+
+["hook.tower_relocated_still"]
+code = "W_COLLISION_RELOCATE_001"
+text = "擦料塔已从 X {fromX} / Y {fromY} 挪到 X {toX} / Y {toY}（{moved} mm），但这个位置仍然有 {count} 个冲突点 —— 这一趟停下了，原文件没有被改动"
+text_en = "The wipe tower moved from X {fromX} / Y {fromY} to X {toX} / Y {toY} ({moved} mm), but this position still has {count} collision points — stopping this run"
+slicer = "自动挪塔之后仍然有冲突 —— 回切片器把模型挪开一点再切"
+params = ["fromX", "fromY", "toX", "toY", "moved", "count"]
+note = "2026-10-18：**第二道闸**。挪完必须复检（同一个 detect_tower_collision），仍撞就不静默继续 —— 作者真机「点了自动挪塔还是碰撞」就是缺这道闸"
+
+["hook.tower_relocate_declined"]
+code = "W_COLLISION_RELOCATE_002"
+text = "你选了自己去挪模型，这一趟没有做后处理，原文件没有被改动；模型往哪边挪多少见「建议」那一栏"
+text_en = "You chose to move the model yourself, so nothing was post-processed and the original file was not changed; see Suggestions for how far to move the model"
+slicer = "这一盘没做后处理：回切片器按建议挪开模型再切"
+note = "2026-10-18：答「我自己去挪模型」（或那一问超时）时停下那一句"
+
+["hook.tower_relocate_unavailable"]
+code = "W_COLLISION_RELOCATE_003"
+text = "板子上找不到不与模型相撞的塔位 —— 这一趟停下了；建议在切片器里把模型挪开一点再导出"
+text_en = "No tower position on the plate avoids the model — stopping this run; move the model a little in the slicer and export again"
+slicer = "板子上没有空位摆擦料塔 —— 回切片器把模型挪开一点再切"
+note = "2026-10-18：自动摆塔返回 None（整块板都摆不下）那一档。不给方向，因为没有一个能用的位置"
+
+["hook.mismatch_refuse"]
+code = "E_CFG_MISMATCH_001"
+text = "机型不匹配：G-code 是 {gcode}，预设是 {preset} —— 换一份对应机型的预设再跑"
+text_en = "Machine mismatch: the G-code is {gcode} but the preset is {preset} — use a preset made for this machine"
+slicer = "机型不匹配：这份 G-code 是 {gcode} 切的，而注册的预设是 {preset} 的 —— 换一份对应机型的预设再跑"
+params = ["gcode", "preset"]
+note = "E_CFG_MISMATCH_001 是**新造码**（旧词汇表里没有）：这一档以前无码，报告与日志里搜不到"
+
+["hook.cancelled"]
+code = "W_SYS_CANCELLED_001"
+text = "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）"
+text_en = "Stopped — nothing was post-processed in this run and the original file was not changed (the G-code was not overwritten)"
+slicer = "这一盘没有做后处理，原文件没有被改动"
+
+["hook.stalled"]
+code = "E_SYS_STALLED_001"
+text = "超时停止：{minutes} 分钟没有任何进展（多半是卡住了）—— 原文件没有被改动"
+text_en = "Stopped on timeout: no progress for {minutes} minutes (most likely stuck) — the original file was not changed"
+params = ["minutes"]
+note = "看门狗叫停。与用户自己按的停止分开给码：这一种是**系统替用户停的**，日志与报告里要能搜到"
+
+["hook.overrun"]
+code = "E_SYS_TIMEOUT_001"
+text = "超时停止：这一趟超过 {minutes} 分钟 —— 原文件没有被改动"
+text_en = "Stopped on timeout: this run took more than {minutes} minutes — the original file was not changed"
+params = ["minutes"]
+
+["hook.ok"]
+code = "N_OK_001"
+text = "处理完成：{output}（{ms} ms）"
+text_en = "Done: {output} ({ms} ms)"
+params = ["output", "ms"]
+
+["hook.warning"]
+code = "W_WARNING_001"
+text = "警告：{text}"
+text_en = "Warning: {text}"
+params = ["text"]
+
+# 归档那一路的降级警告（产物优先：这些句子的意思都是"记录没落成，但 G-code 是好的"）
+["hook.archive_unavailable"]
+code = "W_ARCHIVE_UNAVAILABLE_001"
+text = "归档不可用：找不到应用数据目录（这一次不落执行记录）"
+text_en = "Archive unavailable: cannot find the application data folder (no run record was written this time)"
+
+["hook.archive_backup_failed"]
+code = "W_ARCHIVE_BACKUP_001"
+text = "原件备份失败（这一次不落执行记录）：{detail}"
+text_en = "Failed to back up the original (no run record was written this time): {detail}"
+params = ["detail"]
+
+["hook.archive_output_failed"]
+code = "W_ARCHIVE_OUTPUT_001"
+text = "输出归档失败：{detail}"
+text_en = "Failed to archive the output: {detail}"
+params = ["detail"]
+
+["hook.archive_fact_failed"]
+code = "W_ARCHIVE_FACT_001"
+text = "输出文件事实读不出来：{detail}"
+text_en = "Cannot read the output file facts: {detail}"
+params = ["detail"]
+
+["hook.archive_sha_failed"]
+code = "W_ARCHIVE_SHA_001"
+text = "输出文件摘要算不出来：{detail}"
+text_en = "Cannot compute the output file digest: {detail}"
+params = ["detail"]
+
+["hook.archive_meta_failed"]
+code = "W_ARCHIVE_META_001"
+text = "执行记录写入失败：{detail}"
+text_en = "Failed to write the run record: {detail}"
+params = ["detail"]
+
+# ---------------------------------------------------------------- 结论行的框子
+
+# 切片器那一行（stderr）与界面那一屏共用同一个「原因」，但**框子**分开写：
+# 切片器只看到一句结论，界面上有自己的表头，不需要"处理失败："那层皮。
+["hook.line.failed"]
+code = "W_LINE_FAILED_001"
+text = "处理失败：{reason}［{code}］"
+text_en = "Processing failed: {reason} [{code}]"
+params = ["reason", "code"]
+
+# 失败但没有码：理论分支（现在每一条失败都有码，留着是为了"哪天有人加了一条无码的
+# 失败"时，那一行仍然是一句人话，而不是一个空框）
+["hook.line.failed_nocode"]
+code = "W_LINE_FAILED_002"
+text = "处理失败：{reason}"
+text_en = "Processing failed: {reason}"
+params = ["reason"]
+
+["hook.line.stopped"]
+code = "W_LINE_STOPPED_001"
+text = "已停止：{reason}［{code}］"
+text_en = "Stopped: {reason} [{code}]"
+params = ["reason", "code"]
+
+["hook.line.cancelled"]
+code = "W_LINE_CANCELLED_001"
+text = "已取消：{reason}［{code}］"
+text_en = "Cancelled: {reason} [{code}]"
+params = ["reason", "code"]
+note = "2026-10-17：框子里原来**没有 {code}**，于是用户自己按停止时日志那一行是 `code=\"\"` —— 这正是\"信息不全就定位不了\"的那种。现在与另三档一样把码写在句子里"
+
+["hook.log_path"]
+code = "N_LOG_PATH_001"
+text = "完整日志：{path}"
+text_en = "Full log: {path}"
+params = ["path"]
+note = "失败/取消时追加在结论后面那一行 —— 用户报问题时把日志整段给我们"
+
+["ui.archive.001"]
+text = "建不出归档目录：{v1}"
+text_en = "Cannot create the archive folder: {v1}"
+params = ["v1"]
+
+["ui.archive.002"]
+text = "复制输出到归档失败：{v1}"
+text_en = "Failed to copy the output into the archive: {v1}"
+params = ["v1"]
+
+["ui.archive.003"]
+text = "读不到文件：{v1}"
+text_en = "Cannot read the file: {v1}"
+params = ["v1"]
+
+["ui.archive.004"]
+text = "读文件失败：{v1}"
+text_en = "Failed to read the file: {v1}"
+params = ["v1"]
+
+["ui.archive.005"]
+text = "读不到文件事实：{v1}"
+text_en = "Cannot read the file facts: {v1}"
+params = ["v1"]
+
+["ui.archive.006"]
+text = "这条记录读不出来（补全前）"
+text_en = "This record cannot be read (before backfill)"
+
+["ui.archive.007"]
+text = "这条记录不是合法的 JSON（补全前）"
+text_en = "This record is not valid JSON (before backfill)"
+
+["ui.archive.008"]
+text = "这条记录不是 JSON 对象"
+text_en = "This record is not a JSON object"
+
+["ui.archive.009"]
+text = "输出事实序列化失败"
+text_en = "Failed to serialize the output facts"
+
+["ui.archive.010"]
+text = "这条记录读不出来"
+text_en = "This record cannot be read"
+
+["ui.archive.011"]
+text = "这条记录不是合法的 JSON"
+text_en = "This record is not valid JSON"
+
+["ui.fsx.atomic.012"]
+text = "写入路径没有父目录"
+text_en = "The write path has no parent folder"
+
+["ui.fsx.atomic.013"]
+text = "建不出目录：{v1}"
+text_en = "Cannot create the folder: {v1}"
+params = ["v1"]
+
+["ui.fsx.atomic.014"]
+text = "创建临时文件失败"
+text_en = "Failed to create the temporary file"
+
+["ui.fsx.atomic.015"]
+text = "写入临时文件失败"
+text_en = "Failed to write the temporary file"
+
+["ui.fsx.atomic.016"]
+text = "临时文件落盘失败"
+text_en = "Failed to flush the temporary file to disk"
+
+["ui.fsx.atomic.017"]
+text = "写入路径没有父目录"
+text_en = "The write path has no parent folder"
+
+["ui.fsx.atomic.018"]
+text = "建不出目录：{v1}"
+text_en = "Cannot create the folder: {v1}"
+params = ["v1"]
+
+["ui.fsx.atomic.019"]
+text = "创建临时文件失败"
+text_en = "Failed to create the temporary file"
+
+["ui.fsx.atomic.020"]
+text = "临时文件落盘失败"
+text_en = "Failed to flush the temporary file to disk"
+
+["ui.fsx.paths.021"]
+text = "找不到应用数据目录"
+text_en = "Cannot locate the application data folder"
+
+["ui.fsx.paths.022"]
+text = "建不出数据目录：{v1}"
+text_en = "Cannot create the data folder: {v1}"
+params = ["v1"]
+
+["ui.fsx.paths.023"]
+text = "路径解析失败"
+text_en = "Failed to resolve the path"
+
+["ui.fsx.paths.024"]
+text = "数据目录不可用"
+text_en = "The data folder is not usable"
+
+["ui.fsx.paths.025"]
+text = "路径不能越过数据目录"
+text_en = "The path must not escape the data folder"
+
+["ui.fsx.paths.026"]
+text = "路径不能为空"
+text_en = "The path cannot be empty"
+
+["ui.fsx.paths.027"]
+text = "只接受相对路径"
+text_en = "Only relative paths are accepted"
+
+["ui.fsx.paths.028"]
+text = "路径不能越过数据目录"
+text_en = "The path must not escape the data folder"
+
+["ui.fsx.paths.029"]
+text = "只接受相对路径"
+text_en = "Only relative paths are accepted"
+
+["ui.ipc.app.030"]
+text = "建不了预设目录"
+text_en = "Cannot create the preset folder"
+
+["ui.ipc.app.031"]
+text = "打不开文件管理器"
+text_en = "Cannot open the file manager"
+
+["ui.ipc.app.032"]
+text = "找不到程序本体"
+text_en = "Cannot locate the application itself"
+
+["ui.ipc.app.033"]
+text = "删不掉程序本体"
+text_en = "Cannot delete the application itself"
+
+["ui.ipc.app.034"]
+text = "找不到程序所在目录"
+text_en = "Cannot locate the folder the application lives in"
+
+["ui.ipc.app.035"]
+text = "起不了卸载进程"
+text_en = "Cannot start the uninstall process"
+
+["ui.ipc.app.036"]
+text = "这个平台上还没做卸载"
+text_en = "Uninstalling is not implemented on this platform"
+
+["ui.ipc.app.037"]
+text = "这个程序不是从 .app 里跑的"
+text_en = "This build is not running from an .app bundle"
+
+["ui.ipc.backup.038"]
+text = "没说备份放哪 —— 先挑一个文件夹"
+text_en = "No location was given for the backup — pick a folder first"
+
+["ui.ipc.backup.039"]
+text = "那个文件夹不在了（{v1}）—— 重新挑一个"
+text_en = "That folder is gone ({v1}) — pick another one"
+params = ["v1"]
+
+["ui.ipc.backup.040"]
+text = "那份备份不在了 —— 重新挑一份"
+text_en = "That backup is gone — pick another one"
+
+["ui.ipc.bbs.041"]
+text = "{v1} —— 先在 Bambu Studio 里另存一份工艺预设，再回来重扫"
+text_en = "{v1} — save a process preset in Bambu Studio first, then come back and rescan"
+params = ["v1"]
+
+["ui.ipc.bbs.042"]
+text = "这台机器上没有系统预设那一层（只有用户层）"
+text_en = "This machine has no system preset layer (only the user layer)"
+
+["ui.ipc.bbs.043"]
+text = "读用户预设要给 uid（账号目录名）"
+text_en = "Reading user presets needs a uid (the account folder name)"
+
+["ui.ipc.bbs.044"]
+text = "uid 不在扫到的账号目录里：{uid}"
+text_en = "The uid is not among the scanned account folders: {uid}"
+params = ["uid"]
+
+["ui.ipc.bbs.045"]
+text = "这台机器上没有用户预设那一层（只有系统层）"
+text_en = "This machine has no user preset layer (only the system layer)"
+
+["ui.ipc.bbs.046"]
+text = "scope 只能是 user 或 system：{other}"
+text_en = "scope can only be user or system: {other}"
+params = ["other"]
+
+["ui.ipc.bbs.047"]
+text = "file 必须是单个 .json 文件名，不接受路径：{file}"
+text_en = "file must be a bare .json file name, not a path: {file}"
+params = ["file"]
+
+["ui.ipc.bbs.048"]
+text = "没有这个文件：{file}"
+text_en = "No such file: {file}"
+params = ["file"]
+
+["ui.ipc.bbs.049"]
+text = "看不了这份文件：{file}"
+text_en = "Cannot read this file: {file}"
+params = ["file"]
+
+["ui.ipc.bbs.050"]
+text = "文件过大：{v1} > {MAX_PRESET_BYTES}"
+text_en = "File too large: {v1} > {MAX_PRESET_BYTES}"
+params = ["v1", "MAX_PRESET_BYTES"]
+
+["ui.ipc.bbs.051"]
+text = "读这份文件失败：{file}"
+text_en = "Failed to read this file: {file}"
+params = ["file"]
+
+["ui.ipc.catalog.052"]
+text = "认不出的源：{mode}（只能是 github / gitee / custom）"
+text_en = "Unknown source: {mode} (must be github / gitee / custom)"
+params = ["mode"]
+
+["ui.ipc.catalog.053"]
+text = "数据源设置写完读不回来"
+text_en = "Cannot read the source settings back after writing them"
+
+["ui.ipc.catalog.054"]
+text = "换数据源没跑到终局"
+text_en = "Switching the data source did not run to completion"
+
+["ui.ipc.catalog.055"]
+text = "数据源设置写完读不回来"
+text_en = "Cannot read the source settings back after writing them"
+
+["ui.ipc.catalog.056"]
+text = "目录里没有 {file_name}"
+text_en = "The catalog has no {file_name}"
+params = ["file_name"]
+
+["ui.ipc.catalog.057"]
+text = "{file_name} 还不在本机——先下载，再读它（下载区初始是空的）"
+text_en = "{file_name} is not on this machine yet — download it first, then read it (the download area starts empty)"
+params = ["file_name"]
+
+["ui.ipc.catalog.058"]
+text = "{file_name} 不是 UTF-8 文本，这一条读不出来"
+text_en = "{file_name} is not UTF-8 text; this entry cannot be read"
+params = ["file_name"]
+
+["ui.ipc.catalog.059"]
+text = "读文件没跑到终局"
+text_en = "Reading the file did not run to completion"
+
+["ui.ipc.catalog.060"]
+text = "目录里没有 {file_name}"
+text_en = "The catalog has no {file_name}"
+params = ["file_name"]
+
+["ui.ipc.catalog.061"]
+text = "下载任务没能跑到终局"
+text_en = "The download task did not run to completion"
+
+["ui.ipc.catalog.062"]
+text = "目录里没有 {file_name}"
+text_en = "The catalog has no {file_name}"
+params = ["file_name"]
+
+["ui.ipc.catalog.063"]
+text = "取链接的任务没能跑到终局"
+text_en = "The link lookup did not run to completion"
+
+["ui.ipc.catalog.064"]
+text = "目录里没有 {name}"
+text_en = "The catalog has no {name}"
+params = ["name"]
+
+["ui.ipc.catalog.065"]
+text = "批量下载没跑到终局"
+text_en = "The batch download did not run to completion"
+
+["ui.ipc.catalog.066"]
+text = "目录里没有 {file_name} 这一份"
+text_en = "The catalog has no entry named {file_name}"
+params = ["file_name"]
+
+["ui.ipc.catalog.067"]
+text = "取回预设没跑到终局"
+text_en = "Fetching the preset did not run to completion"
+
+["ui.ipc.catalog.068"]
+text = "只读归档区里的文件（要 {prefix}… 开头，给的是 {rel}）"
+text_en = "Only files inside the archive area can be read (they must start with {prefix}…, got {rel})"
+params = ["prefix", "rel"]
+
+["ui.ipc.catalog.069"]
+text = "归档里没有 {rel} —— 它可能已经被清掉了"
+text_en = "The archive has no {rel} — it may already have been cleaned up"
+params = ["rel"]
+
+["ui.ipc.catalog.070"]
+text = "{rel} 不是 UTF-8 文本，这一条读不出来"
+text_en = "{rel} is not UTF-8 text; this entry cannot be read"
+params = ["rel"]
+
+["ui.ipc.catalog.071"]
+text = "读归档没跑到终局"
+text_en = "Reading the archive did not run to completion"
+
+["ui.ipc.catalog.072"]
+text = "目录里没有 {file_name}"
+text_en = "The catalog has no {file_name}"
+params = ["file_name"]
+
+["ui.ipc.catalog.073"]
+text = "{file_name} 还不在本机——先下载，再使用"
+text_en = "{file_name} is not on this machine yet — download it first, then use it"
+params = ["file_name"]
+
+["ui.ipc.catalog.074"]
+text = "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— 先「更新」或「重新下载」换一份干净的"
+text_en = "The copy of {file_name} on disk does not match the current version registered in the catalog, so it was not applied — use Update or Download again to get a clean copy"
+params = ["file_name"]
+
+["ui.ipc.catalog.075"]
+text = "用自己那份要给出它在用户根里的路径（presets-local/…）"
+text_en = "Using your own copy requires its path under the user root (presets-local/…)"
+
+["ui.ipc.catalog.076"]
+text = "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
+text_en = "{file_name} is not an MKP preset (TOML) — only presets among user files can be used"
+params = ["file_name"]
+
+["ui.ipc.catalog.077"]
+text = "检查更新没跑到终局"
+text_en = "The update check did not run to completion"
+
+["ui.ipc.catalog.078"]
+text = "此预设需要更新版 SupportEase"
+text_en = "This preset needs a newer version of SupportEase"
+
+["ui.ipc.catalog.079"]
+text = "应用远端目录没跑到终局"
+text_en = "Applying the remote catalog did not run to completion"
+
+["ui.ipc.catalog.080"]
+text = "检查软件更新没跑到终局"
+text_en = "The update check did not run to completion"
+
+["ui.ipc.guide.081"]
+text = "建不出引导窗口"
+text_en = "Cannot create the guide window"
+
+["ui.ipc.history.082"]
+text = "历史只认两条线（local / preset），传来的是“{origin}”"
+text_en = "History only knows two lanes (local / preset); got “{origin}”"
+params = ["origin"]
+
+["ui.ipc.history.083"]
+text = "这份文件的身份是空的，认不出是哪一本历史"
+text_en = "This file has no identity, so its history cannot be identified"
+
+["ui.ipc.local.084"]
+text = "目录里没有 {file_name} 这一份"
+text_en = "The catalog has no entry named {file_name}"
+params = ["file_name"]
+
+["ui.ipc.local.085"]
+text = "{file_name} 不是 MKP 预设 —— 这一层只改 TOML 预设"
+text_en = "{file_name} is not an MKP preset — this layer only edits TOML presets"
+params = ["file_name"]
+
+["ui.ipc.local.086"]
+text = "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
+text_en = "{file_name} is not an MKP preset (TOML) — this layer only edits TOML presets"
+params = ["file_name"]
+
+["ui.ipc.local.087"]
+text = "改我自己那份要说是哪一份（缺 path）"
+text_en = "Editing your own copy requires naming it (path is missing)"
+
+["ui.ipc.local.088"]
+text = "现在没有正在改的那一份"
+text_en = "There is no copy open for editing right now"
+
+["ui.ipc.local.089"]
+text = "{file_name} 不是 MKP 预设（TOML）—— 这一层只改 TOML 预设"
+text_en = "{file_name} is not an MKP preset (TOML) — this layer only edits TOML presets"
+params = ["file_name"]
+
+["ui.ipc.local.090"]
+text = "现在没有正在改的那一份正文"
+text_en = "There is no body for the copy open for editing"
+
+["ui.ipc.local.091"]
+text = "现在没有正在改的那一份正文，没得存"
+text_en = "There is no body for the copy open for editing, so nothing can be saved"
+
+["ui.ipc.local.092"]
+text = "这份正文比最初那份少了 {v1} 项参数，没有保存"
+text_en = "This body has {v1} fewer parameters than the original, so it was not saved"
+params = ["v1"]
+
+["ui.ipc.local.093"]
+text = "目录里已经没有 {v1} 了 —— 这份草稿的原文读不出来，改了什么算不清"
+text_en = "The catalog no longer has {v1} — the draft’s original cannot be read, so the changes cannot be computed"
+params = ["v1"]
+
+["ui.ipc.local.094"]
+text = "现在没有正在改的那一份，没得存"
+text_en = "Nothing is open for editing, so nothing can be saved"
+
+["ui.ipc.local.095"]
+text = "这份草稿说它是我自己那份，却没记路径 —— 存不回去"
+text_en = "This draft claims to be your own copy but records no path — it cannot be saved back"
+
+["ui.ipc.local.096"]
+text = "状态账没跟上（使用中指针 / 草稿）—— 文件其实已经改名为 {v1}；重新「应用」一次那一份、再点一次「改这份」就能对齐"
+text_en = "The state records are out of step (in-use pointer / draft) — the file was renamed to {v1}; apply that copy again and click Edit this copy once more to bring them back in line"
+params = ["v1"]
+
+["ui.ipc.local.097"]
+text = "打不开文件管理器"
+text_en = "Cannot open the file manager"
+
+["ui.ipc.local.098"]
+text = "机型与版本都要填 —— 归属写的是文件头的那两行，留空就认不出"
+text_en = "Both machine and version are required — ownership comes from those two header lines, and blanks cannot be identified"
+
+["ui.ipc.local.099"]
+text = "{machine_id} 不是目录里登记的机型 —— 归属的机型要选一台真的机器"
+text_en = "{machine_id} is not a machine registered in the catalog — ownership needs a real machine"
+params = ["machine_id"]
+
+["ui.ipc.local.100"]
+text = "读用户文件没跑到终局"
+text_en = "Reading user files did not run to completion"
+
+["ui.ipc.mod.101"]
+text = "没这个模型：{model_id}"
+text_en = "No such model: {model_id}"
+params = ["model_id"]
+
+["ui.ipc.mod.102"]
+text = "本机还没有 {file_name} —— 先在界面上「取回」，再打开"
+text_en = "{file_name} is not on this machine yet — fetch it in the app first, then open it"
+params = ["file_name"]
+
+["ui.ipc.mod.103"]
+text = "系统打不开这个模型文件"
+text_en = "The system cannot open this model file"
+
+["ui.ipc.mod.104"]
+text = "没拿到你指定的那个应用 —— 回设置页的「切片」重新挑一次"
+text_en = "Could not get the application you picked — choose it again under Slicer in Settings"
+
+["ui.ipc.mod.105"]
+text = "你指定的那个应用不在了（{raw}）—— 回设置页的「切片」重新挑一次"
+text_en = "The application you picked is gone ({raw}) — choose it again under Slicer in Settings"
+params = ["raw"]
+
+["ui.ipc.param_sync.106"]
+text = "读云端更新账没跑到终局"
+text_en = "Reading the cloud update records did not run to completion"
+
+["ui.ipc.param_sync.107"]
+text = "落云端更新决定没跑到终局"
+text_en = "Recording the cloud update decision did not run to completion"
+
+["ui.ipc.param_sync.108"]
+text = "认不出这份预设对应哪一版云端 —— 现在没法处理云端更新"
+text_en = "Cannot tell which cloud version this preset corresponds to — cloud updates cannot be handled right now"
+
+["ui.ipc.param_sync.109"]
+text = "云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一份"
+text_en = "The current cloud body is not on this machine yet — fetch the new cloud version first, then handle this copy"
+
+["ui.ipc.param_sync.110"]
+text = "不认得这种处理方式：{other}（只有 adopt / hold）"
+text_en = "Unknown handling mode: {other} (only adopt / hold)"
+params = ["other"]
+
+["ui.ipc.param_sync.111"]
+text = "这份预设里没有参数 {v1}"
+text_en = "This preset has no parameter {v1}"
+params = ["v1"]
+
+["ui.ipc.param_sync.112"]
+text = "云端当前版的正文还不在本机 —— 先把云端新版取回来，再采用 {v1} 的新值"
+text_en = "The current cloud body is not on this machine yet — fetch the new cloud version first, then adopt the new value of {v1}"
+params = ["v1"]
+
+["ui.ipc.param_sync.113"]
+text = "这份预设还有没保存的修改（在「修改参数」里）—— 先保存或放弃那些修改，再处理云端更新"
+text_en = "This preset has unsaved edits (in Edit parameters) — save or discard them before handling the cloud update"
+
+["ui.ipc.prefs.114"]
+text = "认不出的主题：{theme}（只能是 light / dark / system）"
+text_en = "Unknown theme: {theme} (must be light / dark / system)"
+params = ["theme"]
+
+["ui.ipc.prefs.115"]
+text = "窗口底色没设成"
+text_en = "The window background colour was not set"
+
+["ui.ipc.presets.116"]
+text = "没有机型 {machine_id}"
+text_en = "No machine {machine_id}"
+params = ["machine_id"]
+
+["ui.ipc.presets.117"]
+text = "{machine_id} 没有版本 {v}"
+text_en = "{machine_id} has no version {v}"
+params = ["machine_id", "v"]
+
+["ui.ipc.presets.118"]
+text = "目录里没有这份文件：{file_name}"
+text_en = "The catalog has no such file: {file_name}"
+params = ["file_name"]
+
+["ui.ipc.presets.119"]
+text = "本机还没有 {file_name} —— 先「下载」，再来显示它"
+text_en = "{file_name} is not on this machine yet — download it first, then show it"
+params = ["file_name"]
+
+["ui.ipc.presets.120"]
+text = "目录里没有这份文件：{file_name}"
+text_en = "The catalog has no such file: {file_name}"
+params = ["file_name"]
+
+["ui.ipc.presets.121"]
+text = "{file_name} 不是切片器配置 —— 它没有「切片器目录里那一份」"
+text_en = "{file_name} is not a slicer profile — it has no copy in the slicer folder"
+params = ["file_name"]
+
+["ui.ipc.presets.122"]
+text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
+
+["ui.ipc.presets.123"]
+text = "{file_name} 还没复制进切片器目录 —— 先在行上点「复制」"
+text_en = "{file_name} has not been copied into the slicer folder yet — click Copy on its row first"
+params = ["file_name"]
+
+["ui.ipc.presets.124"]
+text = "打不开文件管理器"
+text_en = "Cannot open the file manager"
+
+["ui.ipc.presets.125"]
+text = "目录里没有这份文件：{file_name}"
+text_en = "The catalog has no such file: {file_name}"
+params = ["file_name"]
+
+["ui.ipc.presets.126"]
+text = "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+text_en = "{file_name} is an MKP preset and does not go into the slicer — it is used through Enable"
+params = ["file_name"]
+
+["ui.ipc.presets.127"]
+text = "{file_name} 不是切片器配置，复制进切片器目录没有意义"
+text_en = "{file_name} is not a slicer profile; copying it into the slicer folder would be meaningless"
+params = ["file_name"]
+
+["ui.ipc.presets.128"]
+text = "本机还没有 {file_name} —— 先「下载」再复制"
+text_en = "{file_name} is not on this machine yet — download it, then copy"
+params = ["file_name"]
+
+["ui.ipc.presets.129"]
+text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
+
+["ui.ipc.presets.130"]
+text = "读不出这一份的字节"
+text_en = "Cannot read the bytes of this copy"
+
+["ui.ipc.report.131"]
+text = "没有这条执行记录：{id}"
+text_en = "No such run record: {id}"
+params = ["id"]
+
+["ui.ipc.report.132"]
+text = "这份记录读不出来"
+text_en = "This record cannot be read"
+
+["ui.ipc.report.133"]
+text = "这份记录不是合法的 JSON"
+text_en = "This record is not valid JSON"
+
+["ui.ipc.report.134"]
+text = "这条记录的 id 不合法"
+text_en = "This record has an invalid id"
+
+["ui.ipc.report.135"]
+text = "没有这条执行记录：{id}"
+text_en = "No such run record: {id}"
+params = ["id"]
+
+["ui.ipc.report.136"]
+text = "归档路径没有父目录"
+text_en = "The archive path has no parent folder"
+
+["ui.ipc.report.137"]
+text = "建不出保存位置：{v1}"
+text_en = "Cannot create the save location: {v1}"
+params = ["v1"]
+
+["ui.ipc.report.138"]
+text = "保存位置就是归档自己的目录 —— 换一个地方（在这里会把原件覆盖掉）"
+text_en = "The save location is the archive’s own folder — choose another place (saving here would overwrite the original)"
+
+["ui.ipc.report.139"]
+text = "保存位置里已经有 {v1} 了 —— 换个位置，或先把那一份挪走"
+text_en = "The save location already has {v1} — choose another place, or move that file away first"
+params = ["v1"]
+
+["ui.ipc.report.140"]
+text = "写不出 {v1}"
+text_en = "Cannot write {v1}"
+params = ["v1"]
+
+["ui.ipc.report.141"]
+text = "保存位置要给一个绝对路径"
+text_en = "The save location must be an absolute path"
+
+["ui.ipc.report.142"]
+text = "这条记录的文件一份都不在盘上：{id}"
+text_en = "None of this record’s files are on disk: {id}"
+params = ["id"]
+
+["ui.ipc.report.143"]
+text = "保存位置要给一个绝对路径"
+text_en = "The save location must be an absolute path"
+
+["ui.ipc.report.144"]
+text = "打不开系统文件管理器"
+text_en = "Cannot open the system file manager"
+
+["ui.ipc.report.145"]
+text = "这个位置里还没有「{base}」"
+text_en = "There is no “{base}” in this location yet"
+params = ["base"]
+
+["ui.ipc.slicer.146"]
+text = "不认识的切片软件：{other}（只有 system / bambu / orca / custom 四档）"
+text_en = "Unknown slicer: {other} (only the four options system / bambu / orca / custom)"
+params = ["other"]
+
+["ui.ipc.slicer.147"]
+text = "这台机器上没找到 {v1} —— 装好它，或者在设置里改回「跟随系统默认」，或者用「其他应用…」从磁盘把它指出来"
+text_en = "{v1} was not found on this machine — install it, switch back to Follow system default in Settings, or point at it from disk with Other application…"
+params = ["v1"]
+
+["ui.ipc.slicer.148"]
+text = "{label} 没打开这个文件（应用在 {v1}）"
+text_en = "{label} did not open this file (it is at {v1})"
+params = ["label", "v1"]
+
+["ui.ipc.slicer.149"]
+text = "系统默认程序没打开这个文件（关联的是 {v1}）"
+text_en = "The system default program did not open this file (it is associated with {v1})"
+params = ["v1"]
+
+["ui.ipc.slicer.150"]
+text = "这台系统上还没有「去系统里改默认应用」这条入口"
+text_en = "This system has no shortcut for changing the default application in system settings yet"
+
+["ui.ipc.slicer.151"]
+text = "打不开系统设置的「自动化」页"
+text_en = "Cannot open the Automation page in system settings"
+
+["ui.ipc.slicer.152"]
+text = "这台系统上没有「自动化授权」这一页（那是 macOS 的东西）"
+text_en = "This system has no Automation permission page (that is a macOS feature)"
+
+["ui.ipc.slicer.153"]
+text = "没能替你打开「显示简介」—— 你点了「不允许」，MKP 操作不了访达。{where_it_is}，{steps}"
+text_en = "Could not open Get Info for you — you clicked Do Not Allow, so MKP cannot drive Finder. {where_it_is}, {steps}"
+params = ["where_it_is", "steps"]
+
+["ui.ipc.slicer.154"]
+text = "没能替你打开「显示简介」。{where_it_is}，{steps}"
+text_en = "Could not open Get Info for you. {where_it_is}, {steps}"
+params = ["where_it_is", "steps"]
+
+["ui.ipc.slicer.155"]
+text = "没能打开「打开方式」那个框"
+text_en = "Could not open the Open With dialog"
+
+["ui.ipc.update.156"]
+text = "没有新版本，不用下载"
+text_en = "There is no new version to download"
+
+["ui.ipc.update.157"]
+text = "这一版没有给安装包（release.json 里没有 asset）"
+text_en = "This release has no installer (no asset in release.json)"
+
+["ui.ipc.update.158"]
+text = "还没有下载好的安装包"
+text_en = "There is no downloaded installer yet"
+
+["ui.ipc.update.159"]
+text = "起不了安装脚本"
+text_en = "Cannot start the install script"
+
+["ui.ipc.update.160"]
+text = "只让打开 http(s) 链接（这一格是「查看更新」，不是唤起任意程序）"
+text_en = "Only http(s) links may be opened (this button is View update, not a launcher for arbitrary programs)"
+
+["ui.ipc.update.161"]
+text = "叫不动系统浏览器"
+text_en = "Cannot bring up the system browser"
+
+["ui.ipc.window_layout.162"]
+text = "找不到主窗口（main）"
+text_en = "Cannot find the main window (main)"
+
+["ui.ipc.window_layout.163"]
+text = "窄窗位置没设成"
+text_en = "The narrow-window position was not set"
+
+["ui.ipc.window_layout.164"]
+text = "窄窗尺寸没设成"
+text_en = "The narrow-window size was not set"
+
+["ui.ipc.window_layout.165"]
+text = "还原位置没设成"
+text_en = "The restore position was not set"
+
+["ui.ipc.window_layout.166"]
+text = "还原尺寸没设成"
+text_en = "The restore size was not set"
+
+["ui.ipc.window_layout.167"]
+text = "认不出的置顶档：{pin}（只能是 off / page / always）"
+text_en = "Unknown pin mode: {pin} (must be off / page / always)"
+params = ["pin"]
+
+["ui.presetdata.assets.168"]
+text = "{v1} 读不成资产定义"
+text_en = "Cannot read {v1} as an asset definition"
+params = ["v1"]
+
+["ui.presetdata.assets.169"]
+text = "这一侧没有资产载荷根"
+text_en = "This side has no asset payload root"
+
+["ui.presetdata.assets.170"]
+text = "资产 {v1} 的 path 越界：{v2}"
+text_en = "Asset {v1} has an out-of-bounds path: {v2}"
+params = ["v1", "v2"]
+
+["ui.presetdata.assets.171"]
+text = "资产 id 已经存在：{v1}"
+text_en = "Asset id already exists: {v1}"
+params = ["v1"]
+
+["ui.presetdata.assets.172"]
+text = "{v1} 的 assets 不是表数组"
+text_en = "The assets in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.assets.173"]
+text = "没有资产 {id}"
+text_en = "No asset {id}"
+params = ["id"]
+
+["ui.presetdata.assets.174"]
+text = "{v1} 的 assets 不是表数组"
+text_en = "The assets in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.assets.175"]
+text = "内存里有 {v1}，文档里却找不到那一段 —— 别删，先查加载逻辑"
+text_en = "{v1} is in memory but its entry is missing from the document — do not delete it; check the loading logic first"
+params = ["v1"]
+
+["ui.presetdata.assets.176"]
+text = "没有资产 {id}"
+text_en = "No asset {id}"
+params = ["id"]
+
+["ui.presetdata.assets.177"]
+text = "资产 {id} 是 MKP 预设登记，不能设成随包"
+text_en = "Asset {id} is an MKP preset entry and cannot be marked as bundled"
+params = ["id"]
+
+["ui.presetdata.assets.178"]
+text = "{v1} 的 assets 不是表数组"
+text_en = "The assets in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.assets.179"]
+text = "内存里有 {id}，文档里却找不到那一段 —— 别改，先查加载逻辑"
+text_en = "{id} is in memory but its entry is missing from the document — do not change it; check the loading logic first"
+params = ["id"]
+
+["ui.presetdata.assets.180"]
+text = "没有分组 {id}"
+text_en = "No group {id}"
+params = ["id"]
+
+["ui.presetdata.assets.181"]
+text = "{v1} 里有一条资产没有 id"
+text_en = "An asset in {v1} has no id"
+params = ["v1"]
+
+["ui.presetdata.assets.182"]
+text = "资产 id 撞了：{v1} 与 {v2}"
+text_en = "Asset ids collide: {v1} and {v2}"
+params = ["v1", "v2"]
+
+["ui.presetdata.assets.183"]
+text = "{v1} 里有一个分组没有 id"
+text_en = "A group in {v1} has no id"
+params = ["v1"]
+
+["ui.presetdata.assets.184"]
+text = "分组 id 不能当文件名用：{id}"
+text_en = "Group id cannot be used as a file name: {id}"
+params = ["id"]
+
+["ui.presetdata.assets.185"]
+text = "分组 id 撞了：{prev} 与 {id}"
+text_en = "Group ids collide: {prev} and {id}"
+params = ["prev", "id"]
+
+["ui.presetdata.assets.186"]
+text = "分组 {id} 没有 name"
+text_en = "Group {id} has no name"
+params = ["id"]
+
+["ui.presetdata.assets.187"]
+text = "分组 {id} 一个成员都没有"
+text_en = "Group {id} has no members"
+params = ["id"]
+
+["ui.presetdata.assets.188"]
+text = "分组 {id} 的成员 {mid} 不是一条资产"
+text_en = "Member {mid} of group {id} is not an asset"
+params = ["id", "mid"]
+
+["ui.presetdata.assets.189"]
+text = "资产 {v1} 同时属于两个组：{prev} 与 {id}"
+text_en = "Asset {v1} belongs to two groups: {prev} and {id}"
+params = ["v1", "prev", "id"]
+
+["ui.presetdata.assets.190"]
+text = "分组 {id} 的成员不在同一个目录"
+text_en = "The members of group {id} are not in the same folder"
+params = ["id"]
+
+["ui.presetdata.assets.191"]
+text = "资产 {v1} 的旧口径干名 `{derived}` 与同目录的分组 id 撞了"
+text_en = "The legacy bare name `{derived}` of asset {v1} collides with a group id in the same folder"
+params = ["v1", "derived"]
+
+["ui.presetdata.assets.192"]
+text = "资产 id 不能为空"
+text_en = "Asset id cannot be empty"
+
+["ui.presetdata.assets.193"]
+text = "资产 {v1} 没有 name —— 界面上要显示的就是它"
+text_en = "Asset {v1} has no name — that is exactly what the interface shows"
+params = ["v1"]
+
+["ui.presetdata.assets.194"]
+text = "资产 {v1} 是 MKP 预设，却写了 path"
+text_en = "Asset {v1} is an MKP preset but also has a path"
+params = ["v1"]
+
+["ui.presetdata.assets.195"]
+text = "资产 {v1} 是 MKP 预设，却没有 machineId + versionId"
+text_en = "Asset {v1} is an MKP preset but has no machineId + versionId"
+params = ["v1"]
+
+["ui.presetdata.assets.196"]
+text = "资产 {v1} 的 path 越界：{v2}"
+text_en = "Asset {v1} has an out-of-bounds path: {v2}"
+params = ["v1", "v2"]
+
+["ui.presetdata.assets.197"]
+text = "资产 {v1} 是切片器预设，但没有写 slicer"
+text_en = "Asset {v1} is a slicer preset but does not specify a slicer"
+params = ["v1"]
+
+["ui.presetdata.assets.198"]
+text = "资产 {v1} 是 MKP 预设，却写了 slicer / profile"
+text_en = "Asset {v1} is an MKP preset but also has slicer / profile"
+params = ["v1"]
+
+["ui.presetdata.assets.199"]
+text = "资产 {v1} 不是切片器预设，却写了 slicer / profile"
+text_en = "Asset {v1} is not a slicer preset but has slicer / profile"
+params = ["v1"]
+
+["ui.presetdata.assets.200"]
+text = "资产 {v1} 归属机型 {m}，但没有这台机型"
+text_en = "Asset {v1} is assigned to machine {m}, but that machine does not exist"
+params = ["v1", "m"]
+
+["ui.presetdata.bundles.201"]
+text = "{v1} 读不成套餐定义"
+text_en = "Cannot read {v1} as a bundle definition"
+params = ["v1"]
+
+["ui.presetdata.bundles.202"]
+text = "套餐 id 已经存在：{v1}"
+text_en = "Bundle id already exists: {v1}"
+params = ["v1"]
+
+["ui.presetdata.bundles.203"]
+text = "{v1} 的 bundles 不是表数组"
+text_en = "The bundles in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.bundles.204"]
+text = "查无此套餐：{id}"
+text_en = "No such bundle: {id}"
+params = ["id"]
+
+["ui.presetdata.bundles.205"]
+text = "{v1} 的 bundles 不是表数组"
+text_en = "The bundles in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.bundles.206"]
+text = "文档里没有第 {idx} 条套餐（内存里有 {v1}）"
+text_en = "The document has no bundle at index {idx} (memory has {v1})"
+params = ["idx", "v1"]
+
+["ui.presetdata.bundles.207"]
+text = "查无此套餐：{id}"
+text_en = "No such bundle: {id}"
+params = ["id"]
+
+["ui.presetdata.bundles.208"]
+text = "套餐 id 已经存在：{new_id}"
+text_en = "Bundle id already exists: {new_id}"
+params = ["new_id"]
+
+["ui.presetdata.bundles.209"]
+text = "{v1} 的 bundles 不是表数组"
+text_en = "The bundles in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.bundles.210"]
+text = "文档里没有第 {idx} 条套餐（内存里有 {v1}）"
+text_en = "The document has no bundle at index {idx} (memory has {v1})"
+params = ["idx", "v1"]
+
+["ui.presetdata.bundles.211"]
+text = "查无此套餐：{id}"
+text_en = "No such bundle: {id}"
+params = ["id"]
+
+["ui.presetdata.bundles.212"]
+text = "{v1} 的 bundles 不是表数组"
+text_en = "The bundles in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.bundles.213"]
+text = "内存里有 {v1}，文档里却找不到那一段 —— 别删，先查加载逻辑"
+text_en = "{v1} is in memory but its entry is missing from the document — do not delete it; check the loading logic first"
+params = ["v1"]
+
+["ui.presetdata.bundles.214"]
+text = "套餐 {v1} 的 assetRefs 只剩 {asset_id} 这一条 —— 去掉它套餐就空了"
+text_en = "The assetRefs of bundle {v1} come down to just {asset_id} — removing it would leave the bundle empty"
+params = ["v1", "asset_id"]
+
+["ui.presetdata.bundles.215"]
+text = "{v1} 的 bundles 不是表数组"
+text_en = "The bundles in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.bundles.216"]
+text = "文档里没有第 {idx} 条套餐（内存里有 {id}）"
+text_en = "The document has no bundle at index {idx} (memory has {id})"
+params = ["idx", "id"]
+
+["ui.presetdata.bundles.217"]
+text = "套餐 {id} 的 assetRefs 不是数组"
+text_en = "The assetRefs of bundle {id} are not an array"
+params = ["id"]
+
+["ui.presetdata.bundles.218"]
+text = "套餐 id 撞了：{v1} 与 {v2}"
+text_en = "Bundle ids collide: {v1} and {v2}"
+params = ["v1", "v2"]
+
+["ui.presetdata.bundles.219"]
+text = "套餐 id 不能为空"
+text_en = "Bundle id cannot be empty"
+
+["ui.presetdata.bundles.220"]
+text = "套餐 {v1} 没有 display —— 界面上要显示的就是它"
+text_en = "Bundle {v1} has no display — that is exactly what the interface shows"
+params = ["v1"]
+
+["ui.presetdata.bundles.221"]
+text = "套餐 {v1} 没有 machineId"
+text_en = "Bundle {v1} has no machineId"
+params = ["v1"]
+
+["ui.presetdata.bundles.222"]
+text = "套餐 {v1} 的 assetRefs 是空的"
+text_en = "The assetRefs of bundle {v1} are empty"
+params = ["v1"]
+
+["ui.presetdata.bundles.223"]
+text = "套餐 {v1} 的 assetRefs 里有一项是空的"
+text_en = "The assetRefs of bundle {v1} contain an empty entry"
+params = ["v1"]
+
+["ui.presetdata.bundles.224"]
+text = "套餐 {v1} 的 assetRefs 里有重复项：{r}"
+text_en = "The assetRefs of bundle {v1} contain a duplicate: {r}"
+params = ["v1", "r"]
+
+["ui.presetdata.bundles.225"]
+text = "套餐 id 不能为空"
+text_en = "Bundle id cannot be empty"
+
+["ui.presetdata.bundles.226"]
+text = "套餐 id 不能含空白或路径分隔符：{id}"
+text_en = "Bundle id cannot contain whitespace or path separators: {id}"
+params = ["id"]
+
+["ui.presetdata.catalog.227"]
+text = "{name} 不是有限数（NaN / 无穷大不能写进 TOML）"
+text_en = "{name} is not a finite number (NaN / infinity cannot go into TOML)"
+params = ["name"]
+
+["ui.presetdata.catalog.228"]
+text = "床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图"
+text_en = "Bed width and depth must both be greater than 0 — a machine with no printable area has no bed to draw"
+
+["ui.presetdata.catalog.229"]
+text = "版本名称不能为空"
+text_en = "Version name cannot be empty"
+
+["ui.presetdata.catalog.230"]
+text = "版本名称不能为空"
+text_en = "Version name cannot be empty"
+
+["ui.presetdata.catalog.231"]
+text = "模板版本 {template_id} 不存在"
+text_en = "Template version {template_id} does not exist"
+params = ["template_id"]
+
+["ui.presetdata.catalog.232"]
+text = "{v1} 的 versions 不是表数组"
+text_en = "The versions in {v1} are not an array of tables"
+params = ["v1"]
+
+["ui.presetdata.catalog.233"]
+text = "{v1} 里没有叫 {id} 的版本"
+text_en = "{v1} has no version named {id}"
+params = ["v1", "id"]
+
+["ui.presetdata.catalog.234"]
+text = "{file} 的 versions 不是表数组"
+text_en = "The versions in {file} are not an array of tables"
+params = ["file"]
+
+["ui.presetdata.catalog.235"]
+text = "{file} 的版本数与文件对不上（内存 {mem} 条，文件 {v1} 条）"
+text_en = "The version count in {file} does not match the file (memory has {mem}, file has {v1})"
+params = ["file", "mem", "v1"]
+
+["ui.presetdata.catalog.236"]
+text = "{v1} 里没有叫 {version} 的版本"
+text_en = "{v1} has no version named {version}"
+params = ["v1", "version"]
+
+["ui.presetdata.catalog.237"]
+text = "{v1} 不能清空"
+text_en = "{v1} cannot be emptied"
+params = ["v1"]
+
+["ui.presetdata.catalog.238"]
+text = "{file} 的 versions 不是表数组"
+text_en = "The versions in {file} are not an array of tables"
+params = ["file"]
+
+["ui.presetdata.catalog.239"]
+text = "{file} 的版本数与文件对不上"
+text_en = "The version count in {file} does not match the file"
+params = ["file"]
+
+["ui.presetdata.catalog.240"]
+text = "{v1} 不能清空"
+text_en = "{v1} cannot be emptied"
+params = ["v1"]
+
+["ui.presetdata.catalog.241"]
+text = "没有品牌 {id}"
+text_en = "No brand {id}"
+params = ["id"]
+
+["ui.presetdata.catalog.242"]
+text = "{v1} 不能清空"
+text_en = "{v1} cannot be emptied"
+params = ["v1"]
+
+["ui.presetdata.catalog.243"]
+text = "brands.toml 的 brands 不是表数组"
+text_en = "The brands in brands.toml are not an array of tables"
+
+["ui.presetdata.catalog.244"]
+text = "brands.toml 里找不到品牌 {id}"
+text_en = "Cannot find brand {id} in brands.toml"
+params = ["id"]
+
+["ui.presetdata.catalog.245"]
+text = "品牌 id 不能为空"
+text_en = "Brand id cannot be empty"
+
+["ui.presetdata.catalog.246"]
+text = "显示名不能为空"
+text_en = "Display name cannot be empty"
+
+["ui.presetdata.catalog.247"]
+text = "已经有一个叫 {id} 的品牌"
+text_en = "A brand named {id} already exists"
+params = ["id"]
+
+["ui.presetdata.catalog.248"]
+text = "brands.toml 的 brands 不是表数组"
+text_en = "The brands in brands.toml are not an array of tables"
+
+["ui.presetdata.catalog.249"]
+text = "没有机型 {id}"
+text_en = "No machine {id}"
+params = ["id"]
+
+["ui.presetdata.catalog.250"]
+text = "没有机型 {machine_id}"
+text_en = "No machine {machine_id}"
+params = ["machine_id"]
+
+["ui.presetdata.catalog.251"]
+text = "删不掉 {v1}"
+text_en = "Cannot delete {v1}"
+params = ["v1"]
+
+["ui.presetdata.catalog.252"]
+text = "建不出 {v1}"
+text_en = "Cannot create {v1}"
+params = ["v1"]
+
+["ui.presetdata.catalog.253"]
+text = "没有机型 {id}"
+text_en = "No machine {id}"
+params = ["id"]
+
+["ui.presetdata.catalog.254"]
+text = "机型 ID 不能为空"
+text_en = "Machine ID cannot be empty"
+
+["ui.presetdata.catalog.255"]
+text = "显示名不能为空"
+text_en = "Display name cannot be empty"
+
+["ui.presetdata.catalog.256"]
+text = "品牌不能为空"
+text_en = "Brand cannot be empty"
+
+["ui.presetdata.catalog.257"]
+text = "机型 ID 只能用大写字母、数字和下划线（它会直接变成文件名）"
+text_en = "Machine ID may only use uppercase letters, digits and underscores (it becomes a file name directly)"
+
+["ui.presetdata.catalog.258"]
+text = "已经有一台叫 {id} 的机型"
+text_en = "A machine named {id} already exists"
+params = ["id"]
+
+["ui.presetdata.catalog.259"]
+text = "{id} 已经是 {v1} 的外部别名了，换一个 —— 否则按 ID 找机型会有两个答案"
+text_en = "{id} is already an external alias of {v1}; pick another one — otherwise looking a machine up by ID has two answers"
+params = ["id", "v1"]
+
+["ui.presetdata.catalog.260"]
+text = "建不出 {v1}"
+text_en = "Cannot create {v1}"
+params = ["v1"]
+
+["ui.presetdata.catalog.261"]
+text = "{v1} 已经存在了。**没有覆盖它** —— 如果那是一台你想改的机型，去左边选它"
+text_en = "{v1} already exists. **It was not overwritten** — if that is the machine you meant to edit, select it on the left"
+params = ["v1"]
+
+["ui.presetdata.catalog.262"]
+text = "建不出 {v1}"
+text_en = "Cannot create {v1}"
+params = ["v1"]
+
+["ui.presetdata.catalog.263"]
+text = "版本 ID 不能为空"
+text_en = "Version ID cannot be empty"
+
+["ui.presetdata.catalog.264"]
+text = "版本 ID 只能用大写字母、数字和下划线"
+text_en = "Version ID may only use uppercase letters, digits and underscores"
+
+["ui.presetdata.catalog.265"]
+text = "这台机型已经有一个叫 {id} 的版本了"
+text_en = "This machine already has a version named {id}"
+params = ["id"]
+
+["ui.presetdata.catalog.266"]
+text = "机型 id 撞了：{prev} 与 {id}（仅大小写不同）"
+text_en = "Machine ids collide: {prev} and {id} (differing only in case)"
+params = ["prev", "id"]
+
+["ui.presetdata.catalog.267"]
+text = "机型 {id} 的版本 id 撞了：{prev} 与 {v}（仅大小写不同）"
+text_en = "Version ids of machine {id} collide: {prev} and {v} (differing only in case)"
+params = ["id", "prev", "v"]
+
+["ui.presetdata.catalog.268"]
+text = "读不到机型目录 {v1}"
+text_en = "Cannot read the machine catalog {v1}"
+params = ["v1"]
+
+["ui.presetdata.catalog.269"]
+text = "{v1} 里没有 id"
+text_en = "{v1} has no id"
+params = ["v1"]
+
+["ui.presetdata.catalog.270"]
+text = "{v1} 的 [{ctx}] 缺了 {k}"
+text_en = "{v1} is missing {k} in [{ctx}]"
+params = ["v1", "ctx", "k"]
+
+["ui.presetdata.catalog.271"]
+text = "{v1} 的 [{ctx}].{k} 不是数字：{v2}"
+text_en = "{v1} has a non-numeric [{ctx}].{k}: {v2}"
+params = ["v1", "ctx", "k", "v2"]
+
+["ui.presetdata.catalog.272"]
+text = "{v1} 的 [dimensions] 缺了 {name} 子表"
+text_en = "{v1} is missing the {name} sub-table under [dimensions]"
+params = ["v1", "name"]
+
+["ui.presetdata.catalog.273"]
+text = "{v1} 的 [dimensions.flags].gcodeMarker 不是字符串"
+text_en = "{v1} has a non-string [dimensions.flags].gcodeMarker"
+params = ["v1"]
+
+["ui.presetdata.catalog.274"]
+text = "{v1} 的 [dimensions.flags].hasSecondFan 不是布尔值"
+text_en = "{v1} has a non-boolean [dimensions.flags].hasSecondFan"
+params = ["v1"]
+
+["ui.presetdata.catalog.275"]
+text = "{v1} 里没有 id"
+text_en = "{v1} has no id"
+params = ["v1"]
+
+["ui.presetdata.catalog.276"]
+text = "{v1} 缺了数字 {k}"
+text_en = "{v1} is missing the number {k}"
+params = ["v1", "k"]
+
+["ui.presetdata.catalog.277"]
+text = "{v1} 缺了 [frame]"
+text_en = "{v1} is missing [frame]"
+params = ["v1"]
+
+["ui.presetdata.catalog.278"]
+text = "{v1} 的 [frame] 缺了数字 {k}"
+text_en = "{v1} is missing the number {k} in [frame]"
+params = ["v1", "k"]
+
+["ui.presetdata.catalog.279"]
+text = "{v1} 缺了 bodyPath"
+text_en = "{v1} is missing bodyPath"
+params = ["v1"]
+
+["ui.presetdata.catalog.280"]
+text = "{v1} 缺了 path"
+text_en = "{v1} is missing path"
+params = ["v1"]
+
+["ui.presetdata.catalog.281"]
+text = "板 id 重复：{id}"
+text_en = "Duplicate plate id: {id}"
+params = ["id"]
+
+["ui.presetdata.params.282"]
+text = "这份预设不是合法 TOML，参数读不出来"
+text_en = "This preset is not valid TOML; its parameters cannot be read"
+
+["ui.presetdata.patch.283"]
+text = "不认识这个参数：{param_key}"
+text_en = "Unknown parameter: {param_key}"
+params = ["param_key"]
+
+["ui.presetdata.patch.284"]
+text = "`{raw}` 不是个数 —— 这一项要浮点数"
+text_en = "`{raw}` is not a number — this field takes a float"
+params = ["raw"]
+
+["ui.presetdata.patch.285"]
+text = "`{raw}` 不是个数 —— 这一项要整数"
+text_en = "`{raw}` is not a number — this field takes an integer"
+params = ["raw"]
+
+["ui.presetdata.patch.286"]
+text = "`{raw}` 不是个开关值 —— 这一项要 true / false"
+text_en = "`{raw}` is not a switch value — this field takes true / false"
+params = ["raw"]
+
+["ui.presetdata.patch.287"]
+text = "这份 TOML 有语法错，没有保存"
+text_en = "This TOML has a syntax error, so nothing was saved"
+
+["ui.presetdata.patch.288"]
+text = "这份草稿不是合法 TOML，改不动"
+text_en = "This draft is not valid TOML and cannot be edited"
+
+["ui.presetdata.patch.289"]
+text = "草稿里没有 `[{section}]` 这一段"
+text_en = "The draft has no `[{section}]` section"
+params = ["section"]
+
+["ui.presetdata.patch.290"]
+text = "草稿的 `[{section}]` 里没有 `{toml_key}`"
+text_en = "The draft’s `[{section}]` has no `{toml_key}`"
+params = ["section", "toml_key"]
+
+["ui.presetdata.patch.291"]
+text = "`[{section}].{toml_key}` 不是个标量值，改不了"
+text_en = "`[{section}].{toml_key}` is not a scalar and cannot be edited"
+params = ["section", "toml_key"]
+
+["ui.presetdata.registry.292"]
+text = "{v1} 的结构对不上字段定义模型"
+text_en = "Cannot map the structure of {v1} onto the field definition model"
+params = ["v1"]
+
+["ui.presetdata.registry.293"]
+text = "{v1} 的结构对不上布局模型"
+text_en = "Cannot map the structure of {v1} onto the layout model"
+params = ["v1"]
+
+["ui.presetdata.registry.294"]
+text = "分组 id {v1} 被声明了两次"
+text_en = "Group id {v1} is declared twice"
+params = ["v1"]
+
+["ui.presetdata.registry.295"]
+text = "同一个参数被放进了多个 section"
+text_en = "A parameter ended up in more than one section"
+
+["ui.presetdata.registry.296"]
+text = "有参数没有被任何 section 收下（它在界面上不会出现）"
+text_en = "Some parameters were not taken by any section (they will not show up in the interface)"
+
+["ui.presetdata.registry.297"]
+text = "布局里引用了字段定义里没有的参数"
+text_en = "The layout references a parameter that is not in the field definitions"
+
+["ui.presetdata.registry.298"]
+text = "section {v1} 两侧的参数数对不上"
+text_en = "The parameter counts on either side of section {v1} do not match"
+params = ["v1"]
+
+["ui.presetdata.registry.299"]
+text = "section {v1} 的 items 顺序与 layout.order 不一致"
+text_en = "The items order of section {v1} does not match layout.order"
+params = ["v1"]
+
+["ui.presetdata.registry.300"]
+text = "字段定义里没有 {key}"
+text_en = "No {key} in the field definitions"
+params = ["key"]
+
+["ui.presetdata.registry.301"]
+text = "{key} 的 machineVariants 不是一张表"
+text_en = "The machineVariants of {key} are not a table"
+params = ["key"]
+
+["ui.presetdata.registry.302"]
+text = "字段定义里没有 {key}"
+text_en = "No {key} in the field definitions"
+params = ["key"]
+
+["ui.presetdata.registry.303"]
+text = "字段定义里没有 {key}"
+text_en = "No {key} in the field definitions"
+params = ["key"]
+
+["ui.presetdata.registry.304"]
+text = "名称不能是空的"
+text_en = "The name cannot be empty"
+
+["ui.presetdata.registry.305"]
+text = "{name}值得是个有限数字，见到 {v}"
+text_en = "{name} should be a finite number, got {v}"
+params = ["name", "v"]
+
+["ui.presetdata.registry.306"]
+text = "范围反了：最小 {min} 比最大 {max} 还大"
+text_en = "The range is inverted: the minimum {min} is greater than the maximum {max}"
+params = ["min", "max"]
+
+["ui.presetdata.registry.307"]
+text = "步进得是正数，见到 {s}"
+text_en = "The step must be positive, got {s}"
+params = ["s"]
+
+["ui.presetdata.registry.308"]
+text = "{key} 的出厂默认 {v} 与值类型 {v1}（{v2}）对不上"
+text_en = "The factory default {v} of {key} does not match its value type {v1} ({v2})"
+params = ["key", "v", "v1", "v2"]
+
+["ui.presetdata.registry.309"]
+text = "开关只认 true/false —— {v1} 的参数用步进框（数字）"
+text_en = "A switch only takes true/false — parameters of type {v1} use the stepper (a number)"
+params = ["v1"]
+
+["ui.presetdata.registry.310"]
+text = "步进框只配数字（float/int）—— 这条是 {v1}"
+text_en = "The stepper only fits numbers (float/int) — this one is {v1}"
+params = ["v1"]
+
+["ui.presetdata.registry.311"]
+text = "分段/下拉只配字符串枚举 —— 这条是 {v1}"
+text_en = "Segmented control / dropdown only fits string enums — this one is {v1}"
+params = ["v1"]
+
+["ui.presetdata.registry.312"]
+text = "分段/下拉得先有可选项 —— 先在「可选项」里加几条"
+text_en = "Segmented control / dropdown needs options — add a few under Options first"
+
+["ui.presetdata.registry.313"]
+text = "G-code 编辑器只配字符串 —— 这条是 {v1}"
+text_en = "The G-code editor only fits strings — this one is {v1}"
+params = ["v1"]
+
+["ui.presetdata.registry.314"]
+text = "G-code 是自由代码，不吃可选项 —— 要分段就换分段控件"
+text_en = "G-code is free-form code and does not take options — use the segmented control if you want choices"
+
+["ui.presetdata.registry.315"]
+text = "文本框只配字符串 —— 这条是 {v1}，数字用步进框"
+text_en = "A text box only fits strings — this one is {v1}; use the stepper for numbers"
+params = ["v1"]
+
+["ui.presetdata.registry.316"]
+text = "文本框不吃可选项 —— 要分段/下拉就换控件，要自由输入就清空可选项"
+text_en = "A text box does not take options — switch the control for segmented/dropdown, or clear the options for free input"
+
+["ui.presetdata.registry.317"]
+text = "第 {n} 条可选项没写名字"
+text_en = "Option {n} has no name"
+params = ["n"]
+
+["ui.presetdata.registry.318"]
+text = "第 {n} 条可选项（{v1}）没有值"
+text_en = "Option {n} ({v1}) has no value"
+params = ["n", "v1"]
+
+["ui.presetdata.registry.319"]
+text = "第 {n} 条可选项（{v1}）的值跟前面重复了"
+text_en = "The value of option {n} ({v1}) duplicates an earlier one"
+params = ["n", "v1"]
+
+["ui.presetdata.registry.320"]
+text = "出厂默认 {want} 不在这条参数的可选项里 —— 枚举的默认值得是选项之一"
+text_en = "The factory default {want} is not among this parameter’s options — an enum default must be one of them"
+params = ["want"]
+
+["ui.presetdata.registry.321"]
+text = "{key} 不能自己是自己的父项"
+text_en = "{key} cannot be its own parent"
+params = ["key"]
+
+["ui.presetdata.registry.322"]
+text = "父项 {pk} 不在字段定义里"
+text_en = "The parent {pk} is not in the field definitions"
+params = ["pk"]
+
+["ui.presetdata.registry.323"]
+text = "{pk} 自己就是别人的子项 —— 层级只有两级，不能再往下挂"
+text_en = "{pk} is itself a child of something else — there are only two levels, no deeper nesting"
+params = ["pk"]
+
+["ui.presetdata.registry.324"]
+text = "{key} 自己已经挂着子项 —— 不能再去当别人的子项"
+text_en = "{key} already has children — it cannot become someone else’s child"
+params = ["key"]
+
+["ui.presetdata.registry.325"]
+text = "{key} 的前置条件不能指着自己 —— 那永远不成立"
+text_en = "A condition on {key} cannot point at itself — that would never hold"
+params = ["key"]
+
+["ui.presetdata.registry.326"]
+text = "前置条件指向的 {v1} 不在字段定义里"
+text_en = "The condition points at {v1}, which is not in the field definitions"
+params = ["v1"]
+
+["ui.presetdata.registry.327"]
+text = "顺序值得是个有限数字，见到 {o}"
+text_en = "The order should be a finite number, got {o}"
+params = ["o"]
+
+["ui.presetdata.registry.328"]
+text = "分组 {target} 不在布局里"
+text_en = "Group {target} is not in the layout"
+params = ["target"]
+
+["ui.presetdata.registry.329"]
+text = "分组 {target} 是整块自定义组件，收不了参数"
+text_en = "Group {target} is a whole custom component and cannot take parameters"
+params = ["target"]
+
+["ui.presetdata.registry.330"]
+text = "布局里 {current_section} 这一组没有 {key} 的条目"
+text_en = "The group {current_section} in the layout has no entry for {key}"
+params = ["current_section", "key"]
+
+["ui.presetdata.registry.331"]
+text = "{key} 的 [params.layout] 不是一个表"
+text_en = "The [params.layout] of {key} is not a table"
+params = ["key"]
+
+["ui.presetdata.registry.332"]
+text = "{file} 的 params 不是表数组"
+text_en = "The params in {file} are not an array of tables"
+params = ["file"]
+
+["ui.presetdata.registry.333"]
+text = "{file} 只有 {n} 个 params 块"
+text_en = "{file} has only {n} params blocks"
+params = ["file", "n"]
+
+["ui.presetdata.registry.334"]
+text = "{file} 的第 {at} 个 params 块是 {here}，不是 {key}"
+text_en = "Params block {at} in {file} is {here}, not {key}"
+params = ["file", "at", "here", "key"]
+
+["ui.presetdata.registry.335"]
+text = "布局里没有 {section_id} 这一组"
+text_en = "The layout has no group {section_id}"
+params = ["section_id"]
+
+["ui.presetdata.registry.336"]
+text = "布局里 {section_id} 的 items 不是表数组"
+text_en = "The items of {section_id} in the layout are not an array of tables"
+params = ["section_id"]
+
+["ui.presetdata.registry.337"]
+text = "布局里 {section_id} 没有 {param_key} 这一条"
+text_en = "The layout’s {section_id} has no entry for {param_key}"
+params = ["section_id", "param_key"]
+
+["ui.presetdata.registry.338"]
+text = "布局里没有 {section_id} 这一组"
+text_en = "The layout has no group {section_id}"
+params = ["section_id"]
+
+["ui.presetdata.registry.339"]
+text = "owner 不合法：{owner} —— 要么是机型 id（A1），要么是机型:版本（A1:FAST）"
+text_en = "Invalid owner: {owner} — either a machine id (A1) or a machine:version (A1:FAST)"
+params = ["owner"]
+
+["ui.presetdata.registry.340"]
+text = "{key} 的值 {v} 与它的 valueType（{vt}）对不上"
+text_en = "The value {v} of {key} does not match its valueType ({vt})"
+params = ["key", "v", "vt"]
+
+["ui.presetdata.registry.341"]
+text = "{key} 的前置条件值 {v} 不是有限数字"
+text_en = "The condition value {v} of {key} is not a finite number"
+params = ["key", "v"]
+
+["ui.presetdata.registry.342"]
+text = "{key} 的前置条件值只能是字符串 / 数字 / 布尔，见到 {v}"
+text_en = "The condition value of {key} may only be a string / number / boolean, got {v}"
+params = ["key", "v"]
+
+["ui.presetdata.registry.343"]
+text = "{key} 第 {n} 条可选项的值 {v} 不是有限数字"
+text_en = "The value {v} of option {n} of {key} is not a finite number"
+params = ["key", "n", "v"]
+
+["ui.presetdata.registry.344"]
+text = "{key} 第 {n} 条可选项的值只能是字符串 / 数字 / 布尔，见到 {v}"
+text_en = "The value of option {n} of {key} may only be a string / number / boolean, got {v}"
+params = ["key", "n", "v"]
+
+["ui.runtime.app_state.345"]
+text = "读不到应用状态"
+text_en = "Cannot read the application state"
+
+["ui.runtime.app_state.346"]
+text = "应用状态读不出来"
+text_en = "The application state cannot be read"
+
+["ui.runtime.app_state.347"]
+text = "应用状态读不出来"
+text_en = "The application state cannot be read"
+
+["ui.runtime.app_state.348"]
+text = "应用状态里没有格式代次（appStateSchema）"
+text_en = "The application state has no schema generation (appStateSchema)"
+
+["ui.runtime.app_state.349"]
+text = "应用状态的格式代次比程序新（文件是 {schema}，程序认到 {APP_STATE_SCHEMA}）—— 这一版程序读不了，换新版再打开"
+text_en = "The application state has a newer schema than this build understands (file is {schema}, this build knows {APP_STATE_SCHEMA}) — this build cannot read it; open it with a newer version"
+params = ["schema", "APP_STATE_SCHEMA"]
+
+["ui.runtime.app_state.350"]
+text = "{v1} 还不在本机 —— 先下载，再使用"
+text_en = "{v1} is not on this machine yet — download it first, then use it"
+params = ["v1"]
+
+["ui.runtime.app_state.351"]
+text = "现在没有正在改的那一份，改不了参数"
+text_en = "Nothing is open for editing, so parameters cannot be changed"
+
+["ui.runtime.backup.352"]
+text = "备份里有一条绝对路径：{name}"
+text_en = "The backup contains an absolute path: {name}"
+params = ["name"]
+
+["ui.runtime.backup.353"]
+text = "备份里有一条不老实的路径：{name}"
+text_en = "The backup contains a dishonest path: {name}"
+params = ["name"]
+
+["ui.runtime.backup.354"]
+text = "备份时算不出相对路径"
+text_en = "Cannot compute a relative path while backing up"
+
+["ui.runtime.backup.355"]
+text = "读不了目录：{v1}"
+text_en = "Cannot read the folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.backup.356"]
+text = "列目录失败"
+text_en = "Failed to list the folder"
+
+["ui.runtime.backup.357"]
+text = "读不了要备份的文件：{name}"
+text_en = "Cannot read the file to back up: {name}"
+params = ["name"]
+
+["ui.runtime.backup.358"]
+text = "写不进备份：{name}"
+text_en = "Cannot write into the backup: {name}"
+params = ["name"]
+
+["ui.runtime.backup.359"]
+text = "读不到这份备份：{v1}"
+text_en = "Cannot read this backup: {v1}"
+params = ["v1"]
+
+["ui.runtime.backup.360"]
+text = "这不是一份 SupportEase 备份（里面没有说明书）"
+text_en = "This is not a SupportEase backup (it has no manifest)"
+
+["ui.runtime.backup.361"]
+text = "这份备份的说明书读不出来"
+text_en = "The manifest of this backup cannot be read"
+
+["ui.runtime.backup.362"]
+text = "这份备份是第 {v1} 代的格式，这个版本读不懂（先升级 SupportEase）"
+text_en = "This backup uses format generation {v1}, which this version cannot read (update SupportEase first)"
+params = ["v1"]
+
+["ui.runtime.backup.363"]
+text = "清不掉旧的那棵：{d}"
+text_en = "Cannot clear out the old tree: {d}"
+params = ["d"]
+
+["ui.runtime.backup.364"]
+text = "建不了目录：{v1}"
+text_en = "Cannot create the folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.backup.365"]
+text = "备份读写出错"
+text_en = "Error reading or writing the backup"
+
+["ui.runtime.backup.366"]
+text = "备份文件读写出错"
+text_en = "Error reading or writing the backup file"
+
+["ui.runtime.backup.367"]
+text = "这份 zip 读不动"
+text_en = "This zip cannot be read"
+
+["ui.runtime.baseline.368"]
+text = "血统里的摘要不是一个 sha256：{sha256}"
+text_en = "The digest in the lineage is not a sha256: {sha256}"
+params = ["sha256"]
+
+["ui.runtime.baseline.369"]
+text = "建不出基准目录：{v1}"
+text_en = "Cannot create the baseline folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.370"]
+text = "读不到基准 {v1}"
+text_en = "Cannot read the baseline {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.371"]
+text = "读不到 {v1}（原始副本没存上）"
+text_en = "Cannot read {v1} (the original copy was not stored)"
+params = ["v1"]
+
+["ui.runtime.baseline.372"]
+text = "建不出原文镜像目录：{v1}"
+text_en = "Cannot create the original-mirror folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.373"]
+text = "读不到原文镜像 {v1}"
+text_en = "Cannot read the original mirror {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.374"]
+text = "建不出原文镜像目录：{v1}"
+text_en = "Cannot create the original-mirror folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.375"]
+text = "原文镜像搬不了家：{v1}"
+text_en = "Cannot move the original mirror: {v1}"
+params = ["v1"]
+
+["ui.runtime.baseline.376"]
+text = "原文镜像删不掉 {v1}"
+text_en = "Cannot delete the original mirror {v1}"
+params = ["v1"]
+
+["ui.runtime.catalog.377"]
+text = "catalog 读不出来"
+text_en = "The catalog cannot be read"
+
+["ui.runtime.catalog.378"]
+text = "catalog 格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown catalog schema: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.catalog.379"]
+text = "catalog 序列化失败"
+text_en = "Failed to serialize the catalog"
+
+["ui.runtime.catalog.380"]
+text = "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+text_en = "{first} — the ingest output folder does not have this copy; fill it in before building the catalog"
+params = ["first"]
+
+["ui.runtime.catalog.381"]
+text = "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+text_en = "{first} — the ingest output folder does not have this copy; fill it in before building the catalog"
+params = ["first"]
+
+["ui.runtime.delivery.382"]
+text = "下载源里没有 {v1}"
+text_en = "The download source has no {v1}"
+params = ["v1"]
+
+["ui.runtime.delivery.383"]
+text = "建不出归档目录：{v1}"
+text_en = "Cannot create the archive folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.delivery.384"]
+text = "目录里没有 {file_name}"
+text_en = "The catalog has no {file_name}"
+params = ["file_name"]
+
+["ui.runtime.delivery.385"]
+text = "只认归档区（{prefix}…）里的路径，别的不是旧版本"
+text_en = "Only paths inside the archive area ({prefix}…) are accepted; anything else is not an old version"
+params = ["prefix"]
+
+["ui.runtime.delivery.386"]
+text = "{what} 删不掉"
+text_en = "Cannot delete {what}"
+params = ["what"]
+
+["ui.runtime.delivery.387"]
+text = "{v1} 还没下载到本机 —— 先下载，再改"
+text_en = "{v1} has not been downloaded to this machine yet — download it, then edit"
+params = ["v1"]
+
+["ui.runtime.delivery.388"]
+text = "{v1} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的云端版，再改"
+text_en = "The copy of {v1} on disk does not match the bytes registered in the catalog — download it again to get a clean cloud copy first, then edit"
+params = ["v1"]
+
+["ui.runtime.delivery.389"]
+text = "{v1} 不是 UTF-8 文本，改不了"
+text_en = "{v1} is not UTF-8 text and cannot be edited"
+params = ["v1"]
+
+["ui.runtime.history.390"]
+text = "修改历史那本账读不出来（文件坏了，不是没有）"
+text_en = "The edit history ledger cannot be read (the file is damaged, it is not missing)"
+
+["ui.runtime.history.391"]
+text = "清不掉这本历史"
+text_en = "Cannot clear out this history"
+
+["ui.runtime.local.392"]
+text = "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+text_en = "{rel} is no longer where it was (it may have been moved or deleted) — nothing else was touched"
+params = ["rel"]
+
+["ui.runtime.local.393"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了"
+text_en = "Cannot find {rel} — it may have been moved or deleted"
+params = ["rel"]
+
+["ui.runtime.local.394"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了"
+text_en = "Cannot find {rel} — it may have been moved or deleted"
+params = ["rel"]
+
+["ui.runtime.local.395"]
+text = "{rel} 不是 UTF-8 文本，这一条读不出来"
+text_en = "{rel} is not UTF-8 text; this entry cannot be read"
+params = ["rel"]
+
+["ui.runtime.local.396"]
+text = "{rel} 读不出来：{reason} —— 这一份现在不能应用、也不能改；先把它改回一份能读的 TOML"
+text_en = "{rel} cannot be read: {reason} — this copy can be neither applied nor edited right now; turn it back into readable TOML first"
+params = ["rel", "reason"]
+
+["ui.runtime.local.397"]
+text = "{rel} 已经不在原来的位置了（可能被移走或删掉了）—— 没有动别的地方"
+text_en = "{rel} is no longer where it was (it may have been moved or deleted) — nothing else was touched"
+params = ["rel"]
+
+["ui.runtime.local.398"]
+text = "只读用户自己的预设（要 {prefix}… 开头，给的是 {rel}）"
+text_en = "Only the user’s own presets can be read (they must start with {prefix}…, got {rel})"
+params = ["prefix", "rel"]
+
+["ui.runtime.local.399"]
+text = "新名字不能是空的"
+text_en = "The new name cannot be empty"
+
+["ui.runtime.local.400"]
+text = "新名字不能是空的"
+text_en = "The new name cannot be empty"
+
+["ui.runtime.local.401"]
+text = "这个名字不是一个文件名"
+text_en = "This name is not a file name"
+
+["ui.runtime.local.402"]
+text = "后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）"
+text_en = "The extension must stay as it is — renaming and copying do not change which kind it is"
+
+["ui.runtime.local.403"]
+text = "名字太长了 —— 光是后缀就把上限占满了（换一个短点的后缀再来）"
+text_en = "The name is too long — the extension alone fills the limit (use a shorter extension)"
+
+["ui.runtime.local.404"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了"
+text_en = "Cannot find {rel} — it may have been moved or deleted"
+params = ["rel"]
+
+["ui.runtime.local.405"]
+text = "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+text_en = "There is already a file named {new_name} — choose another name (nothing is overwritten here)"
+params = ["new_name"]
+
+["ui.runtime.local.406"]
+text = "{rel} 改名没成"
+text_en = "Renaming {rel} failed"
+params = ["rel"]
+
+["ui.runtime.local.407"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了"
+text_en = "Cannot find {rel} — it may have been moved or deleted"
+params = ["rel"]
+
+["ui.runtime.local.408"]
+text = "新名字和原来一样 —— 复制要起个不同的名字"
+text_en = "The new name is the same as the old one — a copy needs a different name"
+
+["ui.runtime.local.409"]
+text = "已经有一份叫 {new_name} 的文件了 —— 换个名字（这里不覆盖）"
+text_en = "There is already a file named {new_name} — choose another name (nothing is overwritten here)"
+params = ["new_name"]
+
+["ui.runtime.local.410"]
+text = "{rel} 读不出来"
+text_en = "{rel} cannot be read"
+params = ["rel"]
+
+["ui.runtime.local.411"]
+text = "{v1} 不是 MKP 预设 —— 只有 MKP 预设能另存成你的一份"
+text_en = "{v1} is not an MKP preset — only MKP presets can be saved as your own copy"
+params = ["v1"]
+
+["ui.runtime.local.412"]
+text = "已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"
+text_en = "There is already a file named {name} — choose another name (nothing is overwritten here)"
+params = ["name"]
+
+["ui.runtime.local.413"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了"
+text_en = "Cannot find {rel} — it may have been moved or deleted"
+params = ["rel"]
+
+["ui.runtime.local.414"]
+text = "{rel} 删不掉"
+text_en = "Cannot delete {rel}"
+params = ["rel"]
+
+["ui.runtime.local.415"]
+text = "找不到 {rel} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）"
+text_en = "Cannot find {rel} — it may have been moved or deleted (the list reflects the disk; refresh it)"
+params = ["rel"]
+
+["ui.runtime.mod.416"]
+text = "catalog 释放之后仍然读不到"
+text_en = "Still cannot read the catalog after releasing it"
+
+["ui.runtime.net.417"]
+code = "E_NET_READ_001"
+text = "读 {v1} 的响应中断了"
+text_en = "Reading the response from {v1} was interrupted"
+params = ["v1"]
+
+["ui.runtime.net.418"]
+code = "E_NET_READ_002"
+text = "读 {v1} 的响应失败"
+text_en = "Failed to read the response from {v1}"
+params = ["v1"]
+
+["ui.runtime.net.419"]
+code = "E_NET_OVERSIZE_001"
+text = "{v1} 的响应比目录登记的大（目录记 {v2} 字节，远端已经给了 {v3} 字节以上）"
+text_en = "The response from {v1} is larger than the catalog says (catalog records {v2} bytes, the remote has already given {v3} or more)"
+params = ["v1", "v2", "v3"]
+
+["ui.runtime.net.420"]
+code = "E_NET_NOT_FOUND_001"
+text = "远端没有这份文件：{url}"
+text_en = "The remote has no such file: {url}"
+params = ["url"]
+
+["ui.runtime.net.421"]
+code = "E_NET_HTTP_001"
+text = "远端回了 HTTP {code}（既不是成功也不是没找到）：{url}"
+text_en = "The remote answered HTTP {code} (neither success nor not-found): {url}"
+params = ["code", "url"]
+
+["ui.runtime.net.422"]
+code = "E_NET_TIMEOUT_001"
+text = "远端没在规定时间内回答（{v1} 秒）：{url}"
+text_en = "The remote did not answer within the time limit ({v1}s): {url}"
+params = ["v1", "url"]
+
+["ui.runtime.net.423"]
+code = "E_NET_DNS_001"
+text = "数据源的域名解析不了：{url}"
+text_en = "The download source’s host name does not resolve: {url}"
+params = ["url"]
+
+["ui.runtime.net.424"]
+code = "E_NET_FETCH_001"
+text = "从远端取字节失败：{url}"
+text_en = "Failed to fetch bytes from the remote: {url}"
+params = ["url"]
+
+["ui.runtime.preset_events.425"]
+text = "事件账序列化不了"
+text_en = "Failed to serialize the event log"
+
+["ui.runtime.provenance.426"]
+text = "出处账本序列化不了"
+text_en = "Failed to serialize the provenance ledger"
+
+["ui.runtime.release.427"]
+text = "建不出归档目录：{v1}"
+text_en = "Cannot create the archive folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.release.428"]
+text = "建不出版本链目录：{v1}"
+text_en = "Cannot create the version chain folder: {v1}"
+params = ["v1"]
+
+["ui.runtime.release_info.429"]
+text = "软件发布信息（release.json）解析不了"
+text_en = "Cannot parse the release info (release.json)"
+
+["ui.runtime.release_info.430"]
+text = "软件发布信息的格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown release info schema: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.release_info.431"]
+text = "软件发布信息里没有版本号（version 是空的）"
+text_en = "The release info has no version number (version is empty)"
+
+["ui.runtime.remarks.432"]
+text = "备注要说是哪一份（缺文件身份）"
+text_en = "A remark must name its file (the file identity is missing)"
+
+["ui.runtime.remarks.433"]
+text = "备注要说是哪一份（缺文件身份）"
+text_en = "A remark must name its file (the file identity is missing)"
+
+["ui.runtime.remarks.434"]
+text = "备注账本序列化不了"
+text_en = "Failed to serialize the remarks ledger"
+
+["ui.runtime.resolver.435"]
+text = "Source Manifest（source.json）解析不了"
+text_en = "Cannot parse the Source Manifest (source.json)"
+
+["ui.runtime.resolver.436"]
+text = "Source Manifest 的协议代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown Source Manifest protocol: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.resolver.437"]
+text = "Source Manifest 里 {what} 的引用不合法：{raw}（要相对路径，不许 .. / 绝对 URL / 反斜杠）"
+text_en = "The {what} reference in the Source Manifest is invalid: {raw} (a relative path is required; no .. / absolute URL / backslashes)"
+params = ["what", "raw"]
+
+["ui.runtime.resolver.438"]
+text = "Source Manifest 的 filesRoot 只认 \\\".\\\" 或 \\\"..\\\"，文件里是 {v1}"
+text_en = "The Source Manifest filesRoot only accepts “.” or “..”, the file has {v1}"
+params = ["v1"]
+
+["ui.runtime.resolver.439"]
+text = "数据源没有声明{what}的地址（source.json 里没有这一项）"
+text_en = "The data source does not declare an address for {what} (source.json has no such entry)"
+params = ["what"]
+
+["ui.runtime.resolver.440"]
+text = "catalog.path 不合法：{v1}"
+text_en = "Invalid catalog.path: {v1}"
+params = ["v1"]
+
+["ui.runtime.resolver.441"]
+text = "filesRoot 只认 \\\".\\\" / \\\"..\\\"，这份 Manifest 里是 {other}"
+text_en = "filesRoot only accepts “.” / “..”, this Manifest has {other}"
+params = ["other"]
+
+["ui.runtime.resolver.442"]
+text = "数据源没有声明 {what}（source.json 里没有这一项）"
+text_en = "The data source does not declare {what} (source.json has no such entry)"
+params = ["what"]
+
+["ui.runtime.resolver.443"]
+text = "Source Manifest 里 {what} 的引用不合法：{raw}（要相对路径，不许 .. / 绝对 URL / 反斜杠）"
+text_en = "The {what} reference in the Source Manifest is invalid: {raw} (a relative path is required; no .. / absolute URL / backslashes)"
+params = ["what", "raw"]
+
+["ui.runtime.resolver.444"]
+text = "地址不像一个可退回上一级的 http(s) 地址：{url}"
+text_en = "The address does not look like an http(s) location that can be walked up one level: {url}"
+params = ["url"]
+
+["ui.runtime.source.445"]
+text = "读不到数据源设置"
+text_en = "Cannot read the data source settings"
+
+["ui.runtime.source.446"]
+text = "数据源设置读不出来"
+text_en = "The data source settings cannot be read"
+
+["ui.runtime.source.447"]
+text = "数据源设置的格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown data source schema: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.source.448"]
+text = "数据源设置是老格式，但里面没有地址 —— 认不出这一份要连到哪"
+text_en = "The data source settings use the old format but contain no address — there is no telling where they point"
+
+["ui.runtime.source.449"]
+text = "选内置源的时候不用给地址 —— 地址是程序自带的"
+text_en = "A built-in source needs no address — the address ships with the app"
+
+["ui.runtime.source.450"]
+text = "这个地址下面读不到寻址规则声明（{SOURCE_FILE_NAME}）—— 试了 {v1} 处也不通：{v2}"
+text_en = "Cannot read the addressing-rule declaration below this address ({SOURCE_FILE_NAME}) — {v1} candidates were tried and none worked: {v2}"
+params = ["SOURCE_FILE_NAME", "v1", "v2"]
+
+["ui.runtime.source.451"]
+text = "取到的不是一份可用的预设目录"
+text_en = "What came back is not a usable preset catalog"
+
+["ui.runtime.source.452"]
+text = "这个构建没有内置云端源、你也没手动指定 —— 开发 / 排查时可以到「设置 → 高级设置 → 预设数据源」指定一个"
+text_en = "This build has no built-in cloud source and none was specified — for development or troubleshooting, set one under Settings → Advanced → Preset data source"
+
+["ui.runtime.source.453"]
+text = "还没有选数据源 —— 先在上面选一个云端源，或填一个地址"
+text_en = "No data source is selected yet — pick a cloud source above, or type an address"
+
+["ui.runtime.source.454"]
+text = "这个地址下面不是一份可用的预设目录"
+text_en = "The location behind this address is not a usable preset catalog"
+
+["ui.runtime.source.455"]
+text = "Bootstrap 地址不像一个 http(s) 文件地址：{url}"
+text_en = "The bootstrap address does not look like an http(s) file address: {url}"
+params = ["url"]
+
+["ui.runtime.source.456"]
+text = "数据源地址是空的"
+text_en = "The data source address is empty"
+
+["ui.runtime.source.457"]
+text = "数据源地址只认 http:// 或 https://，填进来的是 {trimmed}"
+text_en = "The data source address must start with http:// or https://, got {trimmed}"
+params = ["trimmed"]
+
+["ui.runtime.state.458"]
+text = "读不到使用中状态"
+text_en = "Cannot read the in-use state"
+
+["ui.runtime.state.459"]
+text = "使用中状态读不出来"
+text_en = "The in-use state cannot be read"
+
+["ui.runtime.state.460"]
+text = "使用中状态的格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown in-use state schema: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.state.461"]
+text = "读不到编辑中的那份"
+text_en = "Cannot read the copy being edited"
+
+["ui.runtime.state.462"]
+text = "编辑中的那份读不出来"
+text_en = "The copy being edited cannot be read"
+
+["ui.runtime.state.463"]
+text = "草稿的格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unknown draft schema: file is {v1}, this build knows {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.structure.464"]
+text = "读不出 {v1}"
+text_en = "Cannot read {v1}"
+params = ["v1"]
+
+["ui.runtime.structure.465"]
+text = "{v1} 读不成结构规则表"
+text_en = "Cannot read {v1} as a structure rule table"
+params = ["v1"]
+
+["ui.runtime.structure.466"]
+text = "{v1} 里有一条签名不是 16 位：{v2}"
+text_en = "{v1} has a signature that is not 16 characters: {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.structure.467"]
+text = "{v1} 里签名 {v2} 没写 minClient —— 没写就是没登记，别用空串糊过去"
+text_en = "Signature {v2} in {v1} has no minClient — absent means unregistered; do not paper over it with an empty string"
+params = ["v1", "v2"]
+
+["ui.runtime.structure.468"]
+text = "{v1} 里签名 {v2} 登记了两遍 —— 同一个签名只该有一个答案"
+text_en = "Signature {v2} is registered twice in {v1} — one signature, one answer"
+params = ["v1", "v2"]
+
+["ui.runtime.updater.469"]
+text = "下载下来的安装包大小不对（收到 {received}，应当 {expected}）—— 这一份坏了，不装"
+text_en = "The downloaded installer has the wrong size (got {received}, expected {expected}) — this copy is broken, not installing"
+params = ["received", "expected"]
+
+["ui.runtime.updater.470"]
+text = "读不到下载好的安装包"
+text_en = "Cannot read the downloaded installer"
+
+["ui.runtime.updater.471"]
+text = "算校验和时读不了文件"
+text_en = "Cannot read the file while computing its checksum"
+
+["ui.runtime.updater.472"]
+text = "下载下来的安装包校验和对不上 —— 不装"
+text_en = "The downloaded installer’s checksum does not match — not installing"
+
+["ui.runtime.updater.473"]
+text = "建不出解压目录"
+text_en = "Cannot create the extraction folder"
+
+["ui.runtime.updater.474"]
+text = "起不了系统 unzip"
+text_en = "Cannot start the system unzip"
+
+["ui.runtime.updater.475"]
+text = "解压安装包失败"
+text_en = "Failed to extract the installer"
+
+["ui.runtime.updater.476"]
+text = "读不了解压目录"
+text_en = "Cannot read the extraction folder"
+
+["ui.runtime.updater.477"]
+text = "解压出来的目录里没有 .app"
+text_en = "The extracted folder has no .app inside"
+
+["ui.runtime.updater.478"]
+text = "解压出来的目录里有 {v1} 个 .app，不知道该用哪一个：{v2}"
+text_en = "The extracted folder has {v1} .app bundles and there is no telling which one to use: {v2}"
+params = ["v1", "v2"]
+
+["ui.runtime.updater.479"]
+text = "读不了上次安装结果"
+text_en = "Cannot read the last install result"
+
+["ui.runtime.updater.480"]
+text = "上次安装结果（update-result.json）解析不了"
+text_en = "Cannot parse the last install result (update-result.json)"
+
+["ui.runtime.updater.481"]
+text = "安装结果序列化失败"
+text_en = "Failed to serialize the install result"
+
+["ui.runtime.updater.482"]
+text = "定位不到自己"
+text_en = "Cannot locate itself"
+
+["ui.runtime.updater.483"]
+text = "这个构建不是从 .app 里跑的（开发构建），没有可替换的目标"
+text_en = "This build does not run from an .app bundle (development build), so there is nothing to replace"
+
+["ui.runtime.updater.484"]
+text = "已经在下载了"
+text_en = "A download is already running"
+
+["ui.runtime.updater.485"]
+text = "建不出更新暂存目录"
+text_en = "Cannot create the update staging folder"
+
+["ui.runtime.updater.486"]
+text = "建不出下载暂存文件"
+text_en = "Cannot create the download staging file"
+
+["ui.runtime.updater.487"]
+text = "下载已取消"
+text_en = "The download was cancelled"
+
+["ui.runtime.updater.488"]
+text = "下载已取消"
+text_en = "The download was cancelled"
+
+["ui.runtime.updater.489"]
+text = "下载中断"
+text_en = "The download was interrupted"
+
+["ui.runtime.updater.490"]
+text = "写不了下载暂存文件"
+text_en = "Cannot write the download staging file"
+
+["ui.runtime.updater.491"]
+text = "下载完成但改名失败"
+text_en = "The download finished but renaming it failed"
+
+# ── 校准页那几张模型卡（`src-tauri/src/ipc/mod.rs` 的 `MODEL_DEFS`）──────────────
+# 名称与说明直接显示在校准页；这三张卡是预设的一部分，不是日志。
+
+["ui.ipc.calib_models.z.name"]
+text = "Z 轴校准"
+text_en = "Z-axis calibration"
+
+["ui.ipc.calib_models.z.desc"]
+text = "校准喷嘴高度与第一层，先打这个"
+text_en = "Calibrates nozzle height and the first layer; print this one first"
+
+["ui.ipc.calib_models.z_ext.name"]
+text = "Z 轴校准（加长版）"
+text_en = "Z-axis calibration (extended)"
+
+["ui.ipc.calib_models.z_ext.desc"]
+text = "打印区加长 3mm 的那一版，校准流程与旧版完全一样"
+text_en = "The version with a 3mm longer print area; the calibration procedure is identical"
+
+["ui.ipc.calib_models.xy.name"]
+text = "XY 校准"
+text_en = "XY calibration"
+
+["ui.ipc.calib_models.xy.desc"]
+text = "校准平面内的偏移，Z 轴之后打"
+text_en = "Calibrates the in-plane offset; print it after the Z-axis one"
+
+["ui.ipc.calib_models.xy_ext.name"]
+text = "XY 校准（加长版）"
+text_en = "XY calibration (extended)"
+
+["ui.ipc.calib_models.xy_ext.desc"]
+text = "板子右侧 / 上侧各多 5mm 留白的那一版，校准流程与旧版完全一样"
+text_en = "The version with an extra 5mm margin on the right and top; the calibration procedure is identical"
+
+["ui.ipc.calib_models.test.name"]
+text = "支撑测试"
+text_en = "Support test"
+
+["ui.ipc.calib_models.test.desc"]
+text = "校准完打这个看支撑效果"
+text_en = "Print this after calibration to judge the supports"
+
+# ── 界面进程的通用 io / 序列化兜底（`src-tauri/src/error.rs`）─────────────────
+# 这几句以前写死在 `impl From<std::io::Error>` 里 —— 它们是用户最常看到的那几句。
+
+["ui.error.not_found"]
+text = "文件不存在"
+text_en = "File not found"
+
+["ui.error.permission"]
+text = "没有权限访问这个文件"
+text_en = "No permission to access this file"
+
+["ui.error.io"]
+text = "读写文件失败"
+text_en = "Failed to read or write the file"
+
+["ui.error.persist"]
+text = "保存失败：临时文件没能替换目标文件"
+text_en = "Save failed: the temporary file could not replace the target"
+
+["ui.error.json"]
+text = "数据格式不对，解析失败"
+text_en = "The data is malformed and could not be parsed"
+
+# ── `with_detail(...)` 那些「为什么」的补充说明（2026-10-26 第二刀）────────────
+# 这些句子跟着 `AppError` 一起到前端，展开详情才看得见 —— 也是用户能读到的话。
+
+["ui.fsx.paths.why_absolute"]
+text = "拒绝绝对路径：{rel}"
+text_en = "Absolute path rejected: {rel}"
+params = ["rel"]
+
+["ui.fsx.paths.why_dotdot"]
+text = "含 .. 分量：{rel}"
+text_en = "Contains a .. component: {rel}"
+params = ["rel"]
+
+["ui.fsx.paths.why_root"]
+text = "含根分量：{rel}"
+text_en = "Contains a root component: {rel}"
+params = ["rel"]
+
+["ui.presetdata.why.id_is_key"]
+text = "id 是主键，且大小写不敏感 —— 换一个 id，或先删掉原来那条"
+text_en = "id is the primary key and is case-insensitive — pick another id, or delete the existing entry first"
+
+["ui.presetdata.why.bundle_needs_machine"]
+text = "套餐是按机型配的，缺了它就没法判断「这份套餐给谁用」"
+text_en = "Bundles are built per machine; without it there is no telling who the bundle is for"
+
+["ui.presetdata.why.display_is_face"]
+text = "界面上要显示的就是它（作者要的「套装感」）"
+text_en = "This is exactly what the interface shows (the whole point of a bundle)"
+
+["ui.presetdata.why.member_is_asset_id"]
+text = "成员要写资产 id（`presets/assets.toml` 的 id）"
+text_en = "Members must be asset ids (the ids in `presets/assets.toml`)"
+
+["ui.presetdata.why.slicer_only"]
+text = "这两项只对 `type = slicerProfile` 有意义"
+text_en = "These two fields only mean something for `type = slicerProfile`"
+
+["ui.presetdata.why.machine_list"]
+text = "机型清单在 presets/machines/*.toml"
+text_en = "The machine list lives in presets/machines/*.toml"
+
+["ui.presetdata.registry.why_dup_key"]
+text = "重复的 paramKey：{list}"
+text_en = "Duplicate paramKey: {list}"
+params = ["list"]
+
+["ui.presetdata.registry.why_missing_key"]
+text = "缺席的 key：{list}"
+text_en = "Missing key: {list}"
+params = ["list"]
+
+["ui.presetdata.registry.why_dangling_key"]
+text = "悬空的 paramKey：{list}"
+text_en = "Dangling paramKey: {list}"
+params = ["list"]
+
+["ui.presetdata.registry.why_layout_mismatch"]
+text = "参数与布局已经对不上，这一次写入已放弃"
+text_en = "Parameters and layout no longer match, so this write was abandoned"
+
+["ui.presetdata.registry.why_order_mismatch"]
+text = "内存里的顺序与文件对不上了，这一次写入已放弃"
+text_en = "The in-memory order no longer matches the file, so this write was abandoned"
+
+["ui.presetdata.patch.why_unknown_key"]
+text = "它不在参数注册表里 —— 参数页不该发来一个注册表里没有的 key"
+text_en = "It is not in the parameter registry — the parameter page should not send a key that the registry does not have"
+
+["ui.presetdata.patch.why_section"]
+text = "参数 {key} 按定义住在这一段里"
+text_en = "By definition, parameter {key} lives in this section"
+params = ["key"]
+
+["ui.presetdata.patch.why_absent"]
+text = "只改已存在的字段：没有它说明这份预设不含这个参数，别凭空造一个"
+text_en = "Only existing fields are changed: its absence means this preset does not carry the parameter, so do not invent one"
+
+["ui.presetdata.patch.why_scalar"]
+text = "一个参数对应一个标量字段；表 / 数组不归参数页动"
+text_en = "One parameter maps to one scalar field; tables and arrays are not the parameter page’s business"
+
+["ui.presetdata.catalog.why_machine_first_line"]
+text = "机型文件的第一行就该是 id = ..."
+text_en = "The first line of a machine file should be id = ..."
+
+["ui.presetdata.catalog.why_plate_first_line"]
+text = "板文件的第一行就该是 id = ..."
+text_en = "The first line of a plate file should be id = ..."
+
+["ui.ipc.report.why_not_filename"]
+text = "{id} 不是一段文件名"
+text_en = "{id} is not a file name"
+params = ["id"]
+
+["ui.ipc.report.why_expected_path"]
+text = "期望路径：{path}"
+text_en = "Expected path: {path}"
+params = ["path"]
+
+["ui.ipc.app.why_uninstall_platform"]
+text = "卸载目前只支持 macOS 与 Windows"
+text_en = "Uninstalling is currently supported on macOS and Windows only"
+
+["ui.ipc.bbs.why_path_escape"]
+text = "路径越界"
+text_en = "The path escapes its root"
+
+["ui.ipc.hook_ui.question_over"]
+text = "刚才那个问题已经结束了，不用再回答"
+text_en = "That question is already closed; there is nothing left to answer"
+
+["ui.slicer.kind.system"]
+text = "系统默认程序"
+text_en = "the system default program"
+
+["ui.slicer.kind.custom"]
+text = "你指定的应用"
+text_en = "the application you picked"
+
+["ui.ipc.report.broken_read"]
+text = "这份记录读不出来：{detail}"
+text_en = "This record cannot be read: {detail}"
+params = ["detail"]
+
+["ui.ipc.report.broken_json"]
+text = "这份记录不是合法的 JSON：{detail}"
+text_en = "This record is not valid JSON: {detail}"
+params = ["detail"]
+
+# ── 开发台的演出脚本（`src-tauri/src/devsim.rs`）──────────────────────────────
+# 这几行在开发台预览里是**真的画在屏幕上**的（进度行、警告行、挪塔建议），
+# 所以和真跑那趟一样要跟着语言走。
+
+["ui.devsim.step.input"]
+text = "正在读取文件..."
+text_en = "Reading the file..."
+
+["ui.devsim.step.config"]
+text = "配置已就绪（IR 由调用方给出）"
+text_en = "Configuration ready (the IR is supplied by the caller)"
+
+["ui.devsim.step.machine"]
+text = "识别机型..."
+text_en = "Identifying the machine..."
+
+["ui.devsim.step.parse"]
+text = "解析 G-code..."
+text_en = "Parsing G-code..."
+
+["ui.devsim.step.support"]
+text = "支撑面检测..."
+text_en = "Detecting support surfaces..."
+
+["ui.devsim.step.collision"]
+text = "碰撞检测..."
+text_en = "Checking collisions..."
+
+["ui.devsim.step.calib_check"]
+text = "校准模型检测..."
+text_en = "Checking the calibration model..."
+
+["ui.devsim.step.calibration"]
+text = "校准 G-code 插入..."
+text_en = "Inserting calibration G-code..."
+
+["ui.devsim.step.write"]
+text = "正在写入文件..."
+text_en = "Writing the file..."
+
+["ui.devsim.step.printtime"]
+text = "打印时间估算..."
+text_en = "Estimating print time..."
+
+["ui.devsim.pass.first"]
+text = "第一遍扫描"
+text_en = "First pass"
+
+["ui.devsim.pass.second"]
+text = "第二遍扫描"
+text_en = "Second pass"
+
+["ui.devsim.geo.direction"]
+text = "右上"
+text_en = "up and to the right"
+
+["ui.devsim.preview.preset"]
+text = "（假钩子）A1_MINI-fast.toml"
+text_en = "(fake hook) A1_MINI-fast.toml"
+
+["ui.devsim.warn.no_support"]
+text = "这一盘没有支撑，支撑相关的那几步按空跑"
+text_en = "This plate has no supports, so the support steps run as no-ops"
+
+["ui.devsim.warn.tower_half"]
+text = "擦料塔位置被模型占了一半，擦料路径往里挪了 6 mm"
+text_en = "The model covers half the wipe tower position, so the wipe path moved inward by 6mm"
+
+["ui.devsim.warn.layer_mismatch"]
+text = "这一盘的层高与预设里那两档都不一致，按预设值继续"
+text_en = "This plate’s layer heights match neither preset option, so the preset values are used"
+
+["ui.devsim.warn.glue_late"]
+text = "涂胶起点比上一盘晚 0.4 mm，末尾可能少一小段"
+text_en = "Glue starts 0.4mm later than on the previous plate, so the tail may be short"
+
+# ── 后处理收场时那条系统通知（`src-tauri/src/hook_ui.rs`）─────────────────────
+
+["ui.hook_ui.notify.title_ok"]
+text = "后处理完成"
+text_en = "Post-processing done"
+
+["ui.hook_ui.notify.title_bad"]
+text = "后处理没成"
+text_en = "Post-processing did not finish"
+
+["ui.hook_ui.notify.this_plate"]
+text = "这一盘"
+text_en = "this plate"
+
+["ui.hook_ui.notify.done"]
+text = "{name} 已经处理好了"
+text_en = "{name} is done"
+params = ["name"]
+
+["ui.hook_ui.notify.reset"]
+text = "后处理状态已被重置（由设置页触发）"
+text_en = "The post-processing state was reset (triggered from Settings)"
+
+# ── 剩下的这一批：通知平台、归档元数据、下载水位、导入/改名、路径说明 ─────────
+# 这些都在 `with_detail` / 日志正文 / 归档那本 `_meta.json` 里 —— 用户能读到。
+
+["ui.notify.why_osascript"]
+text = "osascript 起不来：{detail}"
+text_en = "osascript could not start: {detail}"
+params = ["detail"]
+
+["ui.notify.why_powershell"]
+text = "powershell 起不来：{detail}"
+text_en = "powershell could not start: {detail}"
+params = ["detail"]
+
+["ui.notify.unimplemented"]
+text = "这个平台上没有实现系统通知"
+text_en = "System notifications are not implemented on this platform"
+
+["ui.hook_ui.preview.gcode"]
+text = "（开发台预览）{detail}.gcode"
+text_en = "(dev bench preview) {detail}.gcode"
+params = ["detail"]
+
+["ui.archive.meta.preset"]
+text = "预设: {v1}"
+text_en = "Preset: {v1}"
+params = ["v1"]
+
+["ui.archive.meta.tower_type"]
+text = "擦料塔类型: {v1}"
+text_en = "Wipe tower type: {v1}"
+params = ["v1"]
+
+["ui.archive.meta.hit_spec"]
+text = "命中档位: {id}（标称 {w} × {h}，容差 {tol}）"
+text_en = "Matched option: {id} (nominal {w} × {h}, tolerance {tol})"
+params = ["id", "w", "h", "tol"]
+
+["ui.archive.meta.hit"]
+text = "命中档位: {v1}"
+text_en = "Matched option: {v1}"
+params = ["v1"]
+
+["ui.archive.meta.calib_mode"]
+text = "校准模式: {v1}"
+text_en = "Calibration mode: {v1}"
+params = ["v1"]
+
+["ui.archive.meta.write_with_size"]
+text = "{v1}\n输出 {v2} MB"
+text_en = "{v1}\nOutput {v2} MB"
+params = ["v1", "v2"]
+
+["ui.runtime.updater.downloaded"]
+text = "已下载 {v1}"
+text_en = "Downloaded {v1}"
+params = ["v1"]
+
+["ui.runtime.updater.interrupted_detail"]
+text = "下载中断：{detail}"
+text_en = "The download was interrupted: {detail}"
+params = ["detail"]
+
+["ui.runtime.local.toml_syntax"]
+text = "TOML 语法不对（第 {line} 行第 {col} 列）"
+text_en = "TOML syntax error (line {line}, column {col})"
+params = ["line", "col"]
+
+["ui.runtime.local.copy_name_with_ext"]
+text = "{stem}（已修改）.{ext}"
+text_en = "{stem} (edited).{ext}"
+params = ["stem", "ext"]
+
+["ui.runtime.local.copy_name"]
+text = "{stem}（已修改）"
+text_en = "{stem} (edited)"
+params = ["stem"]
+
+["ui.runtime.local.taken_name"]
+text = "已经有一份叫 {name} 的文件了 —— 换个名字（这里不覆盖）"
+text_en = "There is already a file named {name} — choose another name (nothing is overwritten here)"
+params = ["name"]
+
+["ui.runtime.delivery.size_mismatch"]
+text = "{name} 的大小对不上 —— 不是目录登记的那一版，重下一遍；还不行就找我们要一份"
+text_en = "The size of {name} does not match — this is not the copy the catalog registers, so download it again; if that does not help, ask us for one"
+params = ["name"]
+
+["ui.runtime.import.why_unreadable"]
+text = "源文件读不出来：{detail}"
+text_en = "The source file cannot be read: {detail}"
+params = ["detail"]
+
+["ui.runtime.import.why_write"]
+text = "写不进用户根：{detail}"
+text_en = "Cannot write into the user root: {detail}"
+params = ["detail"]
+
+["ui.runtime.catalog.asset_payload_missing"]
+text = "资产 {id}（{path}）：载荷文件不在"
+text_en = "Asset {id} ({path}): the payload file is missing"
+params = ["id", "path"]
+
+["ui.fsx.paths.why_resolved"]
+text = "{a} 实际指向 {b}"
+text_en = "{a} actually points at {b}"
+params = ["a", "b"]
+
+["ui.presetdata.catalog.why_plate_dup"]
+text = "两块板用了同一个 id —— plateIds 引用会指到哪一块就不确定了"
+text_en = "Two plates share the same id — there is no telling which one a plateIds reference resolves to"
+
+["ui.ipc.presets.why_bundle_asset"]
+text = "套餐 {id} 引用了不存在的资产：{r}"
+text_en = "Bundle {id} references an asset that does not exist: {r}"
+params = ["id", "r"]
+
+["ui.ipc.slicer.why_not_located"]
+text = "没能在访达里定位它（它在 {v1}）"
+text_en = "Could not reveal it in Finder (it is at {v1})"
+params = ["v1"]
+
+# ── `mkpse-pp` 命令行那几句（`crates/postprocess/src/main.rs`）────────────────
+# 它是给脚本 / 排查用的诊断入口，但话是打到 stderr、人会读的。
+
+["cli.lang.unknown"]
+text = "认不出的语言：{lang}（只能是 zh / en）"
+text_en = "Unknown language: {lang} (must be zh / en)"
+params = ["lang"]
+
+["cli.logging.init_failed"]
+text = "日志初始化失败（{detail}），继续以无日志运行"
+text_en = "Logging could not be initialised ({detail}); continuing without logs"
+params = ["detail"]
+
+["cli.assets.not_found"]
+text = "找不到 presets/assets.toml（请在仓库根运行，或用 --manifest 指定）"
+text_en = "Cannot find presets/assets.toml (run from the repository root, or name it with --manifest)"
+
+["cli.assets.unreadable"]
+text = "台账读不出来（{path}）：{detail}"
+text_en = "The manifest cannot be read ({path}): {detail}"
+params = ["path", "detail"]
+
+["cli.assets.malformed"]
+text = "台账格式不对（{path}）：{detail}"
+text_en = "The manifest is malformed ({path}): {detail}"
+params = ["path", "detail"]
+
+["cli.assets.no_section"]
+text = "台账里没有 [[assets]] 段"
+text_en = "The manifest has no [[assets]] section"
+
+["cli.check_assets.summary"]
+text = "校准素材身份检查：{checked} 份声明了预期，{failures} 份不合格"
+text_en = "Calibration asset identity check: {checked} declared expectations, {failures} failed"
+params = ["checked", "failures"]
+
+["cli.check_assets.undeclared"]
+text = "  · 未声明预期（如果不是校准件就不用管）：{u}"
+text_en = "  · No declared expectation (ignore if it is not calibration part): {u}"
+params = ["u"]
+
+["cli.check_assets.unregistered"]
+text = "  · 台账里没登记的 .3mf：{u}"
+text_en = "  · A .3mf not registered in the manifest: {u}"
+params = ["u"]
+
+["cli.check_assets.scan_note"]
+text = "  （--scan 发现的未登记文件不算失败，但请确认它该不该进台账）"
+text_en = "  (files found only by --scan are not failures, but confirm whether they belong in the manifest)"
+
+["cli.check_assets.all_ok"]
+text = "✓ 全部通过"
+text_en = "✓ Everything passed"
+
+["cli.ctrlc.failed"]
+text = "Ctrl-C 处理器装配失败（{detail}），继续但不支持协作取消"
+text_en = "Could not install the Ctrl-C handler ({detail}); continuing without cooperative cancel"
+params = ["detail"]
+
+["cli.write.done"]
+text = "已写入 {path}（{bytes} 字节）"
+text_en = "Wrote {path} ({bytes} bytes)"
+params = ["path", "bytes"]
+
+["cli.write.failed"]
+text = "写入失败：{path}（{detail}）"
+text_en = "Write failed: {path} ({detail})"
+params = ["path", "detail"]
+
+["cli.gcode.unreadable"]
+text = "读不到输入 G-code：{path}（{detail}）"
+text_en = "Cannot read the input G-code: {path} ({detail})"
+params = ["path", "detail"]
+
+["cli.config.unusable"]
+text = "配置不可用 [{code}]：{detail}"
+text_en = "The configuration is not usable [{code}]: {detail}"
+params = ["code", "detail"]
+
+["cli.ir.serialize_failed"]
+text = "IR 序列化失败：{detail}"
+text_en = "Failed to serialize the IR: {detail}"
+params = ["detail"]
+
+["cli.config.not_found"]
+text = "配置文件不存在：{path}"
+text_en = "The configuration file does not exist: {path}"
+params = ["path"]
+
+["cli.config.ok"]
+text = "配置可用：{path}"
+text_en = "The configuration is usable: {path}"
+params = ["path"]
+
+["cli.gcode_missing"]
+text = "输入 G-code 不存在：{path}"
+text_en = "The input G-code does not exist: {path}"
+params = ["path"]
+
+["cli.config_missing"]
+text = "配置文件不存在：{path}"
+text_en = "The configuration file does not exist: {path}"
+params = ["path"]
+
+["cli.config_bad"]
+text = "配置不可用 [{code}]：{detail}"
+text_en = "The configuration is not usable [{code}]: {detail}"
+params = ["code", "detail"]
+
+["cli.elapsed"]
+text = "耗时 {ms} ms"
+text_en = "Took {ms} ms"
+params = ["ms"]
+
+["cli.print_time"]
+text = "预计打印时间：{total}s（tool {tool}s / prep {prep}s / startup {startup}s / segments {segments}）"
+text_en = "Estimated print time: {total}s (tool {tool}s / prep {prep}s / startup {startup}s / segments {segments})"
+params = ["total", "tool", "prep", "startup", "segments"]
+
+["cli.stats"]
+text = "统计：塔高 {tower}mm / 涂胶层 {glue} / 警告 {warnings} 条"
+text_en = "Summary: tower height {tower}mm / glue layers {glue} / warnings {warnings}"
+params = ["tower", "glue", "warnings"]
+
+["cli.warning"]
+text = "警告：{text}"
+text_en = "Warning: {text}"
+params = ["text"]
+
+["cli.cancelled"]
+text = "已取消 [{code}]：{detail}"
+text_en = "Cancelled [{code}]: {detail}"
+params = ["code", "detail"]
+
+["cli.failed"]
+text = "处理失败 [{code}]：{detail}"
+text_en = "Processing failed [{code}]: {detail}"
+params = ["code", "detail"]
+
+["ui.ipc.prefs.492"]
+text = "认不出的界面语言：{locale}（只能是 system / zh-CN / en）"
+text_en = "Unknown interface language: {locale} (must be system / zh-CN / en)"
+params = ["locale"]
+
+# ---- 提问模态框的按钮（2026-10-26）----
+# 按钮上的字也是「用户读到的一句话」：原先写在 `hook.rs` 的 `QuestionChoice` 里，
+# 英文界面下整颗按钮是中文。这里给码是为了排查时能从截图里那句话找到这一条。
+
+["hook.choice_tower_relocate"]
+code = "Q_TOWER_CHOICE_RELOCATE_001"
+text = "自动调整塔位置"
+text_en = "Adjust the tower position automatically"
+params = []
+note = "挪塔那一问的主按钮（摆得下才出现）"
+
+["hook.choice_tower_relocate_hint"]
+code = "Q_TOWER_CHOICE_RELOCATE_002"
+text = "只改这一趟，预设文件不动"
+text_en = "This run only — the preset file is untouched"
+params = []
+note = "上面那颗按钮的副标题：说清改动范围"
+
+["hook.choice_tower_model"]
+code = "Q_TOWER_CHOICE_MODEL_001"
+text = "停止并自己挪模型"
+text_en = "Stop and move the model myself"
+params = []
+note = "挪塔那一问的次按钮（一直都有）"
+
+["hook.choice_tower_model_hint"]
+code = "Q_TOWER_CHOICE_MODEL_002"
+text = "这一趟停下，原文件不动"
+text_en = "Stop this run — the original file is untouched"
+params = []
+note = "次按钮的副标题"
+
+["hook.choice_calib_print"]
+code = "Q_CALIB_CHOICE_PRINT_001"
+text = "先打印，再校准"
+text_en = "Print first, then calibrate"
+params = []
+note = "校准件那一问的主按钮"
+
+["hook.choice_calib_print_hint"]
+code = "Q_CALIB_CHOICE_PRINT_002"
+text = "打印件保留"
+text_en = "The print is kept"
+params = []
+note = "主按钮的副标题"
+
+["hook.choice_calib_direct"]
+code = "Q_CALIB_CHOICE_DIRECT_001"
+text = "直接校准"
+text_en = "Calibrate directly"
+params = []
+note = "校准件那一问的次按钮"
+
+["hook.choice_calib_direct_hint"]
+code = "Q_CALIB_CHOICE_DIRECT_002"
+text = "去掉打印件，只走校准路径"
+text_en = "Drop the print, run the calibration path only"
+params = []
+note = "次按钮的副标题"
+
+["ui.runtime.source_ledger.493"]
+code = "E_FS_SOURCE_LEDGER_001"
+text = "源身份账本写不出来"
+text_en = "Failed to write the preset-source ledger"
+params = []
+note = "run/source-ledger.json / run/lineage-source.json 写失败（附加信息，主流程不受影响）"

@@ -1,5 +1,5 @@
 /*
- * 带清空叉的搜索框。这一页有两个搜索框（tabs 行的「搜参数」、抽屉里的「搜预设名」），
+ * 带清空叉的搜索框。这一页有两个搜索框（工具条上的「搜参数」、抽屉里的「搜预设名」），
  * 抽成一个组件是为了**两个叉长得一样** —— 各写一遍迟早会分叉。
  *
  * # 为什么要自己画那个叉
@@ -15,6 +15,7 @@
  * 只是那个按钮不要。
  */
 
+import { useT } from '../../i18n'
 import { useRef } from 'react'
 import s from './BbsSearchBox.module.css'
 
@@ -23,7 +24,11 @@ interface Props {
   placeholder: string
   /** 无障碍名，两个框各自不同（「搜参数」/「搜预设名」） */
   label: string
-  /** 窄一点的那一档（抽屉里那个是满宽，tabs 行那个固定宽） */
+  /**
+   * 两档宽法（`bar` 那一档 2026-10-13 随"顶条合一行"一起删了，见 PageBbs.tsx 那段注释）：
+   *   `fill`  撑满（抽屉里那个）
+   *   `fixed` 固定 200px（工具条上那个 —— 它挨着预设名，右边本来是一片空位）
+   */
   variant?: 'fill' | 'fixed'
   onChange: (next: string) => void
 }
@@ -35,6 +40,7 @@ export default function BbsSearchBox({
   variant = 'fixed',
   onChange,
 }: Props) {
+  const tr = useT()
   const inputRef = useRef<HTMLInputElement>(null)
 
   const clear = () => {
@@ -60,7 +66,7 @@ export default function BbsSearchBox({
         }}
       />
       {value && (
-        <button type="button" className={s.clear} aria-label={`清空${label}`} onClick={clear}>
+        <button type="button" className={s.clear} aria-label={tr('bbs.search.clearAria', { label })} onClick={clear}>
           {/* 两条 1.2px 的圆头直线。颜色走 currentColor，由 CSS 给 */}
           <svg viewBox="0 0 12 12" aria-hidden="true">
             <path

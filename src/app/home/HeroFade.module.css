@@ -1,4 +1,8 @@
-/* 包围盒：撑满槽位、不参与位移，网格与读数都挂在这一层 */
+/*
+ * 包围盒：撑满槽位、不参与位移。
+ * （2026-10-14：原来这一层还挂着"网格 + 读数"两套东西 —— 各自的规则早已没人用
+ *  （组件也从不设 `data-drag` / `data-always` / `data-snap`），这次删掉了。）
+ */
 .box {
   position: relative;
   width: 100%;
@@ -13,75 +17,6 @@
 }
 
 /* 网格层：1px 线按 --cell 平铺，默认隐藏，拖动时淡入 */
-.grid {
-  --g-line: rgb(16 24 32 / 8%);
-  --g-axis: rgb(16 24 32 / 16%);
-
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-  background-image:
-    linear-gradient(to right, var(--g-line) 0 1px, transparent 1px),
-    linear-gradient(to bottom, var(--g-line) 0 1px, transparent 1px);
-  background-size: var(--cell, 24px) var(--cell, 24px);
-  background-position: center;
-}
-
-/* 中心十字：nudge = 0 的原点参照 */
-.grid::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(
-      to right,
-      transparent calc(50% - 0.5px),
-      var(--g-axis) calc(50% - 0.5px) calc(50% + 0.5px),
-      transparent calc(50% + 0.5px)
-    ),
-    linear-gradient(
-      to bottom,
-      transparent calc(50% - 0.5px),
-      var(--g-axis) calc(50% - 0.5px) calc(50% + 0.5px),
-      transparent calc(50% + 0.5px)
-    );
-}
-
-.box[data-drag='true'] .grid,
-.grid[data-always='true'] {
-  opacity: 1;
-}
-
-/* 吸附生效：线走强调色并加实 */
-.grid[data-snap='true'] {
-  --g-line: rgb(32 178 90 / 26%);
-  --g-axis: rgb(32 178 90 / 45%);
-}
-
-.readout {
-  position: absolute;
-  z-index: 2;
-  top: 0;
-  left: 0;
-  margin: 0;
-  pointer-events: none;
-  font-size: 11px;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/*
- * 定尺盒子：宽高只由曲线决定，与"当前是哪张图"无关，也不再被槽位夹。
- * 基准固定 640px：曲线值 = 最终倍率，曲线值 2.4 屏幕上就是 1536px，读数与所见一致。
- * （旧写法是 clamp(200px, min(38cqw, 76cqh), 640px) × fill —— 基准随容器变，
- *  同一个曲线值在扁窗/方窗给不同像素，再叠上 max-width/height: 100% 直接被砍到槽位大小，
- *  627×420 那次实测目标 570px、实际只有 247px，等于盲调。）
- * 只留一道安全上限：别让极端值把图撑到整页之外。
- */
 .hero {
   position: relative;
   z-index: 1;
@@ -93,6 +28,7 @@
   cursor: grab;
   touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .hero[data-dragging='true'] {

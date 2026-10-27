@@ -20,6 +20,7 @@ use postprocess::config;
 use postprocess::diag::CancelToken;
 use postprocess::ir::Ir;
 use postprocess::pipeline::{ProcessRequest, process};
+use postprocess::postproc::calibration::Mode;
 use postprocess::postproc::support::{apply_wiping_decision, decide_wiping};
 
 fn repo_root() -> PathBuf {
@@ -122,9 +123,9 @@ fn the_field_really_drives_the_decision() {
     .collect();
 
     let mut as_tower = Ir::default();
-    apply_wiping_decision(&mut as_tower, &decide_wiping("tower", &content));
+    apply_wiping_decision(&mut as_tower, &decide_wiping("tower", Mode::None, &content));
     let mut as_disk = Ir::default();
-    apply_wiping_decision(&mut as_disk, &decide_wiping("disk", &content));
+    apply_wiping_decision(&mut as_disk, &decide_wiping("disk", Mode::None, &content));
 
     assert_eq!(as_tower.wiping.mode, "tower");
     assert!(as_tower.tower.use_towers);
@@ -155,7 +156,7 @@ fn pipeline_decision_matches_independent_recomputation() {
         .map(|l| l.trim_end_matches('\r').to_string())
         .collect();
     let mut expected = cfg_ir.clone();
-    let decision = decide_wiping(&cfg_ir.wiping.preferred_mode, &content);
+    let decision = decide_wiping(&cfg_ir.wiping.preferred_mode, Mode::None, &content);
     let applied = apply_wiping_decision(&mut expected, &decision);
 
     let result = process(

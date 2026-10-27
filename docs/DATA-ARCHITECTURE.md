@@ -46,14 +46,14 @@
 
 | 路径 | 是什么 | 入库 |
 | --- | --- | --- |
-| `presets/*.toml` | 源定义：`brands` / `machines/`×5 / `forbidden_zones/`×3 / `assets` / `bundles` / `layout_schema` / `registry/` | 是 |
+| `presets/*.toml` | 源定义：`brands` / `machines/`×5 / `forbidden_zones/`×3 / `assets` / `bundles` / `layout_schema` / `calibration_models` / `registry/` | 是 |
 | `presets/delivery/` | 交付目录（源与交付同树是 `workbench/paths.rs` 的刻意决定）。**入库**（2026-10-02 第十八刀改判）——main 上的正式远端交付面 | 是 |
 | `crates/preset/assets/presets/` | **入库产物目录**：9 份交付预设的真字节，`BUILTIN_PRESETS` 编进二进制的就是它，判据测试锚着它 | 是 |
 | `crates/preset` + 判据测试 | `BUILTIN_PRESETS` 与命名函数，判据保证与 `dist` 一份不差 | 是 |
 | `crates/*/tests/fixtures/` | 判据资产（对照基线等，见 `ARCHITECTURE.md` §10.6） | 是 |
 | `workbench/` | 工作台运行态（快照 / 草稿），是**工具的暂存区**，不是数据源 | 否（不入库、不进包） |
 | `public/assets/` | 我们管的资产（**产品数据资源**）的**载荷源**：`bbs/` `icons/` `models/` —— 三类都已登记进 catalog、客户端按需下载 | 是 |
-| `src/app/assets/` | **界面展示素材**：品牌 logo、机型整机图（`printers/`）、测试模型合影（`hero/`）。判据是"它是不是产品数据资源"而不是"文件是不是图片"—— 这些不进 catalog，随程序本体走（vite 资源管线）。**2026-10-01 起 `public/` 里不再有界面素材**，只剩台账管的载荷根与 BBS 页元数据 | 是 |
+| `src/app/assets/` | **界面展示素材**：品牌 logo、测试模型合影（`hero/`）。判据是"它是不是产品数据资源"而不是"文件是不是图片"—— 这些不进 catalog，随程序本体走（vite 资源管线）。**机型整机图 2026-10-03 搬去 `presets/assets/printers/`、引导图 2026-10-16 直接落 `presets/assets/guides/`** —— 会加会换的图进台账（工作台管），只有"跟着源码走、不用换"的才留这儿。**2026-10-01 起 `public/` 里不再有界面素材**，只剩台账管的载荷根与 BBS 页元数据 | 是 |
 
 ### ② 安装包 —— 把源做成成品
 
@@ -64,7 +64,7 @@
 | 程序本体 + 前端产物 | 二进制与 vite 产物 |
 | **catalog**（说明书） | 发布构建**算出来**的唯一产物：有哪些机型 / 版本 / 参数 / 预设，每个文件的版本与 SHA。运行时只读它。格式另定（叫 catalog.json 只是占位），它是架构的自然产物，不是架构本身。**它不带云端地址** —— 见 §1④ 的分工 |
 | 内置资源 | 图标、3mf 模型、BBS 切片配置——**必须在 catalog 里登记**（版本 / SHA），不许裸放。**登记后不再随前端产物分发**：它是"产品开发出来的资源"，与 MKP 预设一样走 catalog → Source → Delivery → `mkp/<kind>/…`（第三圈已收口：三类全部接进同一条管道） |
-| 界面展示素材 | 品牌 logo、首页 / 校准页的测试模型合影——**随程序本体**（vite 资源管线，产物里带内容哈希）。**机型整机图 2026-10-03 从这里搬回数据侧**：文件在 `presets/assets/printers/`、台账里是 `delivery = 'bundled'` 的条目（工作台可管可换图），到客户端仍**随程序本体**（构建期复制），但**不进 catalog 的 files[]**、客户端不下载。边界由 `runtime::catalog::dest_of_asset` 的判据守着（**按交付档位拦**，不按类型拦） |
+| 界面展示素材 | 品牌 logo、首页 / 校准页的测试模型合影——**随程序本体**（vite 资源管线，产物里带内容哈希）。**机型整机图 2026-10-03 从这里搬回数据侧**：文件在 `presets/assets/printers/`、台账里是 `delivery = 'bundled'` 的条目（工作台可管可换图），到客户端仍**随程序本体**（构建期复制），但**不进 catalog 的 files[]**、客户端不下载。边界由 `runtime::catalog::dest_of_asset` 的判据守着（**按交付档位拦**，不按类型拦）。**引导图 2026-10-16 走同一条路**（作者：「难道我不应该就直接放在 preset 里面吗？这样方便管理呀，到时候工作台也方便管理」）：`presets/assets/guides/` + 台账 `type = 'guide'` + `delivery = 'bundled'`，客户端按**资产 id** 取 `/assets/<path>`（与机型图同一句）。**2026-10-16 补**：查这份台账是**带兜底**的 —— ② 里有的照 ②，② 里没有的 `bundled` 条目从**随包那份**补上（`runtime::catalog_for_ui` + `Catalog::with_missing_bundled_from`；只补 `bundled`、② 里已有的绝不动、下载面一条不补，**盘上的字节一个都不改**）。理由：随包资产的字节就在程序里，它**不该依赖任何一份云端文件** —— ② 可能比程序旧（`ensure_released` 只铺空位；进预设页那次对齐又是"指纹不一样就采用远端"，没有先后概念），那就是 2026-10-16「图片不见了」那次事故的根 |
 | 内置预设 | 随软件发布的成品内容（现 9 份，入库产物目录 `crates/preset/assets/presets`，判据锚定），在 catalog 里标"内置" |
 
 | 禁止 | 理由 |
@@ -86,7 +86,9 @@
 │                  **预设的那份就是官方基线**（2026-10-08 起这么叫）：程序管、用户不可见，
 │                  只用于与云端比对有没有新版
 ├── archive/       更新后旧版本的归档（不删）
-├── logs/          按天滚动日志
+├── logs/          按天滚动日志（**两条流**：`supportease.log.<日期>` = 界面那个常驻进程；
+│                 `hook.log.<日期>` = 后处理那一趟，2026-10-11 起。见
+│                 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4）
 └── run/           运行状态：`app-state.json`（使用中指针 activePreset / 编辑中的那一份 draft /
                    数据源地址 presetSource —— 见 `docs/APP-STATE.md`）。
                    编辑中的那份是**临时文件**：内容从用户工作副本复制出来，点保存才写回用户根
@@ -352,7 +354,9 @@ schema 不为地址再长字段。地址可以有构建期注入的默认值（`
 | MKP 预设（出厂内容） | `crates/preset/assets/presets`（入库产物，判据锚定） | 内置 9 份，catalog 登记 | 官方基线只读（用户不可见）；`presets-mine/` 工作副本可改（**下载即得**） | manifest + 文件 |
 | BBS 切片配置 · 图标 · 3mf 模型 | `public/assets/{bbs,icons,models}`（成品） | catalog 登记（说明书随包），**文件本体不随包**：按需下载（落点 = `<appDataDir>/<catalog.path>`，2026-10-05 寻址改造） | 不改原件 | manifest + 文件本体（地址 = 数据源 baseUrl + catalog 的 `path`） |
 | 界面展示素材（品牌 logo / 机型整机图 / 测试模型合影） | `src/app/assets/`（整机图与合影 2026-10-01 起搬来） | **随程序本体**（它就是界面的一部分） | 无副本 | — |
+| **标注源稿**（图片引导图上那几块框，`presets/assets/<同类目录>/<对>.anno.json`，2026-10-16） | 工作台「标注台」（`wb_anno_read` / `wb_anno_write`；作者要的是「像 PS 一样能再编辑、而且**跟着仓库走**」） | **跟资产一起入库**（换设备 clone 下来接着编）；**不进交付**（它不是 `[[assets]]` 条目、也不进 catalog 的 `files[]`） | 无副本（客户端读的是源码里导出的那段 `marks`） | — |
 | 校准偏移（三轴） | `presets/*.toml` 的官方默认值 | 算进 catalog（参数注册表） | **用户工作副本 TOML 的 `offset_x/y/z`**（2026-10-08 改判；`index/offsets.json` 退役） | — |
+| **校准模型档**（每块校准板的外形 / 容差 / 图案基准，`calibration_models.toml`，2026-10-18） | `presets/`（人） | 不进 catalog —— 它不是交付件（**模型本体**才是 catalog 里那份 `type = 'model'` 资产） | 无副本：后处理按 `machine_dims` 那条读取链读它（**与 M5 同一笔欠账**：发布物里"从运行时数据根读"的接线还没做，见 `crates/preset/src/lib.rs` 的注记） | — |
 | 运行状态 | — | — | `run/app-state.json`（程序替用户管） | — |
 | **数据源地址**（当前用哪个云端） | 用户填（界面里）或构建方注入默认值 | 可选的随包默认值（`MKPSE_PRESET_SOURCE`） | `run/preset-source.json`（程序写，用户可删=回到未配置） | 被寻址的一方，不拥有这份设置 |
 | 导出 / 报告 | — | — | `exports/` `reports/`（用户） | — |

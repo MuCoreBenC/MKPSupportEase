@@ -9,6 +9,7 @@
  * 所以搜索中没命中的页要**压暗**，让「哪几页有货」一眼可见。
  */
 
+import { useT } from '../../i18n'
 import type { PanelPage } from './bbsPanel'
 import s from './BbsTabs.module.css'
 
@@ -21,11 +22,12 @@ interface Props {
 }
 
 export default function BbsTabs({ pages, active, searching, onChange }: Props) {
+  const tr = useT()
   const visible = pages.filter((p) => p.rowCount > 0)
   if (!visible.length) return null
 
   return (
-    <nav className={s.tabs} aria-label="参数分页">
+    <nav className={s.tabs} aria-label={tr('bbs.tabs.aria')}>
       {visible.map((p) => (
         <button
           key={p.id}
@@ -34,7 +36,11 @@ export default function BbsTabs({ pages, active, searching, onChange }: Props) {
           data-on={p.id === active}
           data-dim={searching && p.hitCount === 0 ? 'true' : undefined}
           aria-current={p.id === active ? 'page' : undefined}
-          title={`${p.title} · ${p.rowCount} 行${searching ? ` · 命中 ${p.hitCount}` : ''}`}
+          title={
+            searching
+              ? tr('bbs.tabs.titleHit', { title: p.title, rows: p.rowCount, hits: p.hitCount })
+              : tr('bbs.tabs.title', { title: p.title, rows: p.rowCount })
+          }
           onClick={() => onChange(p.id)}
         >
           {p.title}

@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.6",
+  "version": "0.0.7",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -10,12 +10,14 @@
     "build": "tsc -b && vite build",
     "dev:workbench": "vite --mode workbench",
     "build:workbench": "tsc -b && vite build --mode workbench",
+    "tauri:workbench": "node scripts/tauri-workbench.mjs",
     "tauri:workbench:dev": "node scripts/tauri-workbench.mjs dev",
     "tauri:workbench:build": "node scripts/tauri-workbench.mjs build",
     "preview": "vite preview",
     "lint": "eslint . && stylelint \"src/**/*.css\"",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
     "tauri": "tauri",
+    "icons": "node scripts/gen-icons.mjs",
     "preset-source:make": "node scripts/preset-test-server/make-fixtures.mjs",
     "preset-source:sync": "node scripts/preset-test-server/sync-fixture.mjs",
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
@@ -25,7 +27,9 @@
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",
     "check:channel-args": "node scripts/check-channel-args.mjs",
-    "check:release-source": "node scripts/check-release-source.mjs"
+    "check:release-source": "node scripts/check-release-source.mjs",
+    "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
+    "check:i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

@@ -2,40 +2,40 @@
   "v": 1,
   "records": {
     "A1/FAST": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "3159e89ee5b9659e3da7237ba7cf22ce48026f8df4f110478368e81201a02420"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "cf359447d248f5562207e71a8aad142adf111638dd2f7079d4115edcf7fe2a92"
     },
     "A1/FASTV3.3": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "f70da7c87ca65cd79c38daa0695fd6e7a9ff93a2698a22e28417e7bf003a9c27"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "38549df2656e81e127b1fe8b90158c8d30fc23c0642eb88288f153cab5a0d7e9"
     },
     "A1/STANDARD": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "ecf01ced64c6266f19d89dc6ef46eb07d7ffd4a93a649736c7506da45576729b"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "6cdd09452a59c148c80cbea1fd6e7d8e8e6a76c7baebc5b4d5694dac6e190ec3"
     },
     "A1_MINI/FAST": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "debc0e166004968d79abb243d584eb12779bc4cfafb42bbb6d7e962da7bae26a"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "e9a11a1335215d14f7f8d88fc5181ffa588f49e94fe73d842c68591a4bfbf90b"
     },
     "A1_MINI/FASTV3.3": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "b908045808403b9a725d01fcad876249ce2e1716e78818968634600931d39530"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "660996a66ef1867e27756e1fa6ab390f1becf7c2d2fef690251bdde6287f7a22"
     },
     "A1_MINI/STANDARD": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "7a28a29ad603ac865a295a217b15a4b98fc83b95c55af00dab3fc42067ac60da"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "25d7c054f083c4f710eb56a5c6c47510edb525748ecb0cdf2c6a3a6fd2411d18"
     },
     "P1S/LITE": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "c6b5dfb5fd2adabe2d9af6bd32fc451c0bce5adea3483b348f619afe5fd1fc8c"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "72612152a3de43530a09d4b1677a0cd105f60b02cbbb7ef79e3b8a7d051b71c7"
     },
     "P2S/STANDARD": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "fc3cd849af7af633fb4a2baf9b507b1656b01807180f0dc4d3c9ff080bc242bb"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "e8e7c89f7a380e81c0a41b13581ffc46a94be7cb9d85f808c72c385e26ed76ed"
     },
     "X1C/LITE": {
-      "stamp": "2026-10-06T03:34:17Z",
-      "fingerprint": "d60299630509821b1346d2ad3700c7c577c47b136a04f053c0b1795d38f45ca4"
+      "stamp": "2026-10-27T15:25:50Z",
+      "fingerprint": "692f80e1f4418dbf97be01e9639a2dd6931b26714c6df138dd378fbb2677831e"
     }
   }
 }

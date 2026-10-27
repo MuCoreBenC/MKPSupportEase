@@ -1,7 +1,6 @@
-# release_time: 2026-10-06 03:34:17
+# release_time: 2026-10-27 15:25:50
 # machine: A1
 # variant: standard
-#胶笔配置
 
 [toolhead]
 # 自定义工具头获取 G-code
@@ -82,6 +81,7 @@ rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
 support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
@@ -96,5 +96,5 @@ user_dry_time = 0 # 额外干燥时间
 wiper_x = 20 # 擦嘴塔X坐标(mm)
 wiper_y = 20 # 擦嘴塔Y坐标(mm)
 wipetower_speed = 200 # 擦嘴塔打印速度
-xy_calibration_mode = "new" # XY校准模式(default=默认,new=新型)
-z_calibration_mode = "new" # Z校准模式(default=默认,new=新型)
+xy_calibration_mode = "new" # XY校准模式(original=原版,new=新版)
+z_calibration_mode = "new" # Z校准模式(original=原版,new=新版)

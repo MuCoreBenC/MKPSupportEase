@@ -1,0 +1,255 @@
+/*
+ * 本次交付明细（2026-10-19）。
+ *
+ * 两栏：左清单（状态 · 名字 · 大小）+ 右详情（diff / 漂移说明）。
+ * 窄框下退成一栏（清单在上、详情在下）—— 用容器查询按**框自己**的宽度断，
+ * 与 GenerateDiffModal 同一套写法。diff 行本体住在 `DiffView.module.css`。
+ */
+
+.panes {
+  container-type: inline-size;
+  display: flex;
+  gap: 0;
+  max-height: min(76vh, 760px);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  overflow: hidden;
+}
+
+/* ---------- 左：清单 ---------- */
+
+.list {
+  flex: 0 0 300px;
+  display: flex;
+  flex-direction: column;
+  min-width: 250px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+}
+
+.groupHead {
+  padding: 7px 10px 6px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--w-t3);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--w-line);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--w-hover);
+}
+
+.itemOn,
+.itemOn:hover {
+  background: var(--w-primary-soft);
+  box-shadow: inset 2px 0 0 var(--w-primary);
+}
+
+.itemState {
+  flex: none;
+  min-width: 58px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.itemName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--w-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  flex: none;
+  font-size: 11px;
+  color: var(--w-t3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 状态三档：与 GenerateDiffModal 的「待更新 / 已生成」同一族 token */
+.stateOk {
+  color: var(--w-diff-add-ink);
+}
+
+.statePending {
+  color: var(--w-warn);
+}
+
+.stateMissing {
+  color: var(--w-t3);
+}
+
+/* ---------- 右：详情 ---------- */
+
+.detail {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.detailScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.detailHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.detailName {
+  overflow: hidden;
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12.5px;
+  color: var(--w-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detailMeta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.counts {
+  display: inline-flex;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.add {
+  color: var(--w-diff-add-ink);
+}
+
+.del {
+  color: var(--w-diff-del-ink);
+}
+
+/* 「完整 / 对比」两段切换（与生成前确认同一副长相） */
+.viewToggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn, 6px);
+}
+
+.viewBtn {
+  padding: 3px 10px;
+  border: 0;
+  background: var(--w-card);
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-t2);
+  cursor: pointer;
+}
+
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--w-line);
+}
+
+.viewBtn:hover {
+  color: var(--w-t1);
+}
+
+.viewBtnOn,
+.viewBtnOn:hover {
+  background: var(--w-primary-soft);
+  font-weight: 500;
+  color: var(--w-primary);
+}
+
+/* 漂移详情：目录 / 盘上 / 原因三行 */
+.driftBox {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.kvRow {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--w-t2);
+}
+
+.kvRow > span {
+  width: 64px;
+  flex: none;
+  color: var(--w-t3);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--w-t3);
+}
+
+.empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12.5px;
+  color: var(--w-t3);
+}
+
+.error {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--dep-red-line);
+  border-radius: var(--w-r-card);
+  background: var(--danger-surface);
+  font-size: 12.5px;
+  color: var(--danger-ink);
+}
+
+/* ---------- 窄框：两栏退成一栏 ---------- */
+@container (max-width: 640px) {
+  .panes {
+    flex-direction: column;
+    max-height: none;
+  }
+
+  .list {
+    flex: none;
+    max-height: 200px;
+    border-right: 0;
+    border-bottom: 1px solid var(--w-line);
+  }
+}

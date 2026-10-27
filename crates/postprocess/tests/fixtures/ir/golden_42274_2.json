@@ -65,6 +65,7 @@
     "ZLiftHeight": 5,
     "ZLiftHeightFirstLayers": 6,
     "InterModelLiftHeight": 2,
+    "SwapHopHeight": 1,
     "ZCompEnabled": false,
     "ZCompMode": "",
     "ZCompBed": {

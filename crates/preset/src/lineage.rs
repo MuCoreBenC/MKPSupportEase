@@ -16,7 +16,7 @@
 
 use sha2::{Digest, Sha256};
 
-/// 内容摘要（小写 hex）。**判「官方变了没有」用它** ——
+/// 内容摘要（小写 hex）。**判「云端变了没有」用它** ——
 /// 云端那套系统不会通知我们，只能自己记账。
 ///
 /// 算的是**全文**（含头注释）：`release_time` 改了、注释改了也算变，
@@ -152,24 +152,24 @@ pub fn strip_lineage_for_compare(text: &str) -> String {
     strip_lineage_lines(text)
 }
 
-/// 一个键在「我的副本 / 当初的基线 / 官方现在」三者之间的状态。
+/// 一个键在「本地副本 / 当初的基线 / 云端现在」三者之间的状态。
 ///
-/// **为什么必须有基线这一档**：只比「我的」与「官方的」分不出
-/// 「官方改了而我没动过这项」（可以放心采纳）与「两边都改了」（真冲突，只能人来选）。
+/// **为什么必须有基线这一档**：只比「本地」与「云端的」分不出
+/// 「云端改了而我没动过这项」（可以放心采纳）与「两边都改了」（真冲突，只能人来选）。
 /// 分不出的后果只有两种：要么把用户的值悄悄盖掉，要么每一项都得问一遍。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum DiffState {
-    /// 只有官方变了（我这一项还是当初拷来的值）⇒ 采纳是安全的，允许批量
-    OfficialOnly,
-    /// 只有我改了（官方没动）⇒ 保持，什么都不用做
-    MineOnly,
+    /// 只有云端变了（我这一项还是当初拷来的值）⇒ 采纳是安全的，允许批量
+    CloudOnly,
+    /// 只有我改了（云端没动）⇒ 保持，什么都不用做
+    LocalOnly,
     /// 两边都变了 ⇒ **真冲突**，只能逐项选，界面上不许给批量按钮
     BothChanged,
-    /// 官方新增了这个键，我的副本里没有
-    OfficialAdded,
-    /// 官方移除了这个键，我的副本里还留着
-    OfficialRemoved,
+    /// 云端新增了这个键，本地副本里没有
+    CloudAdded,
+    /// 云端移除了这个键，本地副本里还留着
+    CloudRemoved,
 }
 
 /// 一项差异。三个值都可能缺（键不在那一份里，或者基线不可用）。
@@ -177,10 +177,10 @@ pub enum DiffState {
 pub struct FieldDiff {
     /// `段.键`，与表单的 `path` 同形（`toolhead.offset.x`）
     pub path: String,
-    pub mine: Option<crate::write::EditValue>,
+    pub local: Option<crate::write::EditValue>,
     /// 当初拷来时的值。基线不可用 ⇒ `None`，此时状态一律保守按 `BothChanged` 算
     pub base: Option<crate::write::EditValue>,
-    pub official: Option<crate::write::EditValue>,
+    pub cloud: Option<crate::write::EditValue>,
     pub state: DiffState,
 }
 
@@ -192,9 +192,9 @@ pub struct FieldDiff {
 /// - 键的增删按**键在不在文件里**判，不按值判：`0` 与「没有这一项」不是一回事
 ///   （注册表的零值豁免已经证明过这个坑）。
 pub fn diff(
-    mine_text: &str,
+    local_text: &str,
     base_text: Option<&str>,
-    official_text: &str,
+    cloud_text: &str,
 ) -> Result<Vec<FieldDiff>, postprocess::diag::PostprocError> {
     use std::collections::BTreeMap;
 
@@ -206,40 +206,40 @@ pub fn diff(
             .collect())
     }
 
-    let mine = index(mine_text)?;
-    let official = index(official_text)?;
+    let local = index(local_text)?;
+    let cloud = index(cloud_text)?;
     let base = match base_text {
         Some(t) => Some(index(t)?),
         None => None,
     };
 
     let mut out = Vec::new();
-    for (path, (mine_present, mine_value)) in &mine {
+    for (path, (local_present, local_value)) in &local {
         // 两侧的键集合都来自同一份 `EDITABLE_KEYS`，查不到只可能是那份清单变了
-        let Some((official_present, official_value)) = official.get(path) else {
+        let Some((cloud_present, cloud_value)) = cloud.get(path) else {
             continue;
         };
         let base_row = base.as_ref().and_then(|b| b.get(path));
-        let state = match (mine_present, official_present) {
-            (false, true) => DiffState::OfficialAdded,
-            (true, false) => DiffState::OfficialRemoved,
+        let state = match (local_present, cloud_present) {
+            (false, true) => DiffState::CloudAdded,
+            (true, false) => DiffState::CloudRemoved,
             (false, false) => continue, // 两边都没有这一项
             (true, true) => {
-                if mine_value == official_value {
+                if local_value == cloud_value {
                     continue;
                 }
                 match base_row {
-                    Some((true, base_value)) if base_value == mine_value => DiffState::OfficialOnly,
-                    Some((true, base_value)) if base_value == official_value => DiffState::MineOnly,
+                    Some((true, base_value)) if base_value == local_value => DiffState::CloudOnly,
+                    Some((true, base_value)) if base_value == cloud_value => DiffState::LocalOnly,
                     _ => DiffState::BothChanged,
                 }
             }
         };
         out.push(FieldDiff {
             path: path.clone(),
-            mine: mine_value.clone(),
+            local: local_value.clone(),
             base: base_row.and_then(|(present, v)| if *present { v.clone() } else { None }),
-            official: official_value.clone(),
+            cloud: cloud_value.clone(),
             state,
         });
     }
@@ -281,13 +281,13 @@ offset_z = 4 # 笔尖偏移
     #[test]
     fn copying_a_copy_replaces_the_old_lineage() {
         let first = make_copy(SRC, "mkp/A1.toml");
-        let second = make_copy(&first, "mine/A1.toml");
+        let second = make_copy(&first, "local/A1.toml");
         assert_eq!(
             second.matches("# based_on:").count(),
             1,
             "旧血统必须被换掉而不是叠加 —— 叠加之后解析只看见第一条，血统就成了骗人的"
         );
-        assert!(second.contains("# based_on: mine/A1.toml"));
+        assert!(second.contains("# based_on: local/A1.toml"));
         // 第二次的摘要算的是**第一份副本**的全文，不是原始来源的
         assert!(second.contains(&format!("# based_on_sha256: {}", sha256_hex(&first))));
     }

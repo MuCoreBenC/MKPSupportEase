@@ -21,6 +21,7 @@
  * 而预设页这次不动。
  */
 
+import { useT } from '../../i18n'
 import type { Note } from './note'
 import s from './NoteBar.module.css'
 
@@ -30,12 +31,13 @@ interface Props {
 }
 
 export default function NoteBar({ note, onClose }: Props) {
+  const tr = useT()
   if (note === null) return null
 
   return (
     <p className={note.bad ? s.noteBad : s.note} role="status">
       {note.text}
-      <button type="button" className={s.noteClose} aria-label="关闭这条提示" onClick={onClose}>
+      <button type="button" className={s.noteClose} aria-label={tr('common.dismiss')} onClick={onClose}>
         ×
       </button>
     </p>

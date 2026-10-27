@@ -35,13 +35,7 @@ pub(crate) fn emit_first_pen_revitalization(
     sink.push_str(&format!("G1 Z{}", format_z(safe_z)));
 
     // 2. 切换下笔（skipFinalZ=true：Z 已在安全高度）
-    mount_toolhead(
-        sink,
-        ir_data,
-        current_layer_height,
-        current_layer_height,
-        true,
-    );
+    mount_toolhead(sink, ir_data, current_layer_height, true);
 
     // 3. 坐标转换
     let bbox = tower::calculate_tower_bbox(

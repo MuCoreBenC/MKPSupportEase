@@ -6,9 +6,122 @@
   box-sizing: border-box;
   display: flex;
 
+  /*
+   * ★★★ 机型摘要卡「整体往上一点」的量 —— **手动调的就是这一个数**（2026-10-17 作者：
+   * 「首页的这个能不能整体往上一点？可以让我手动调整吗，告诉我调整哪些参数？」）。
+   *
+   * 正数往上；1vh = 窗口高的 1%（900 高的窗 ≈ 31px）。想回正中就写 0px。
+   * 只有**这一张卡**吃它（左文 `.info` + 右图 `.slot` 只在这一张卡上成对出现）：
+   *   · 底部那颗「更换机型」胶囊是 CardFrame 绝对定位的，**不跟着动**；
+   *   · 欢迎页 / 选机型 / 校准 / 模型那几张卡一个像素都不动；
+   *   · **所有宽度都照旧生效**（窄档也是）—— 2026-10-17 起窄档不再藏图、也不再换版式，
+   *     上下都居中，没有"要不要贴顶"的分叉（见下面 `@container home (max-width: 620px)`）。
+   *
+   * 为什么是 transform 而不是改 CardFrame 的内边距：内边距是**外壳的坐标系**，
+   * 一动所有"没有眉标题"的卡（选机型那一页首当其冲）全跟着往上窜；而这里要动的
+   * 只是这一张卡的内容列，不该去挪公共坐标。
+   */
+  --home-lift: clamp(0px, 3.4vh, 40px);
+
   /* 大图按这个容器的宽高双约束 */
   container-type: size;
   container-name: home;
+
+  /* 结果气泡（.scriptToast）的定位父级 */
+  position: relative;
+}
+
+/*
+ * 复制脚本的结果气泡（2026-10-13）。
+ *
+ * 作者：「你去用这个校准页面的这种提示啊，这种悬浮气泡不占任何位置的提示」——
+ * 绝对定位、浮在卡片下缘之上，**一个像素的布局都不占**（上一版是卡里的一行字，
+ * 把板子与底部按钮都往上挤，被退回）。视觉语言与校准页那条 changeBar 同族：
+ * 实面 + 全圆角 + 柔影，一颗小圆点领着后半句。
+ *
+ * 自动消失（3.6s）由 PageHome 的 effect 管；这里只管长相与不吃点击。
+ */
+.scriptToast {
+  position: absolute;
+  left: 50%;
+  bottom: clamp(20px, 5vh, 72px);
+  transform: translateX(-50%);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* `left: 50%` 时 shrink-to-fit 的可用宽度只有半页 —— 显式要 `max-content`，
+     再由 max-width 封顶（否则长句会折成一条窄柱，2026-10-13） */
+  width: max-content;
+  max-width: min(620px, calc(100% - 96px));
+  padding: 10px 18px;
+  /*
+   * ★ 2026-10-13（作者：「我要用的是这一个……这种有点透明的气泡，你看你给我的这个通知，
+   * 这个气泡效果就不对」—— 指的就是校准页那条「未保存的改动」）：
+   * 照 `.changeBar` 的**液态玻璃处方**来 —— 135° 渐变给厚度、1px 模糊磨掉像素毛刺、
+   * 极细暗边把形状立住、顶光一道当反光。不再是"一块白底实面"。
+   */
+  background: linear-gradient(135deg, rgb(255 255 255 / 45%), rgb(255 255 255 / 22%));
+  -webkit-backdrop-filter: blur(1px) saturate(180%);
+  backdrop-filter: blur(1px) saturate(180%);
+  border: 0.5px solid var(--hover-1);
+  box-shadow:
+    0 0 0 0.5px var(--surface-sunken),
+    inset 0 0.5px 1px rgb(255 255 255 / 50%),
+    0 10px 30px rgb(20 32 45 / 14%),
+    0 1px 3px rgb(20 32 45 / 8%);
+  border-radius: var(--r-lg);
+  color: var(--text-1);
+  font-size: 12.5px;
+  line-height: 1.5;
+  /*
+   * ★ 2026-10-13：「文字能拖选」这条**退役**了（作者：「它的拖选好像是失败的，我只看到
+   * 本地鼠标图标变了，但是拖不了，那我感觉算了，不要了」）。
+   *
+   * 原因：全站那层 `body { user-select: none }`（去"网页感"的）在这里没打开，光写
+   * `cursor: text` 就落成"图标变了、文字选不中"的假承诺。与其为一句 5 秒就走的话
+   * 再打开一处选择，不如让气泡**彻底不吃指针**：
+   *   · `pointer-events: none` —— 它悬在底部按钮那一带上方，穿透过去，底下照样能点；
+   *   · `cursor: default` —— 不再给出"这里能选"的信号。
+   * 随之，PageHome 里"悬停暂停自动消失"那套（hover 不到就永远触发不了）一并删掉。
+   */
+  pointer-events: none;
+  cursor: default;
+  animation: script-toast-in 0.2s ease-out;
+}
+
+.scriptToastDot {
+  flex: none;
+  /*
+   * ★ 2026-10-13（作者：「左边这个绿色的小点，我感觉不够圆，是怎么回事」）：
+   * 6px 直径在 125% 缩放下是 7.5 个物理像素 —— 半个像素落不进像素格，
+   * 圆点的一条边被反锯齿吃掉，于是就"不够圆"（放大看是一边锐、一边糊）。
+   * 抬到 8px = 10 个物理像素（整数），直径与圆心都落在格上。
+   * `border-radius` 也从 999px 改成 `50%`：这颗是正方形，两者等价，
+   * 但 `50%` 把"我要一个正圆"直接写在脸上（与校准页 `.hintDot` 同写法）。
+   */
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+@keyframes script-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scriptToast {
+    animation: none;
+  }
 }
 
 /* 卡片外壳（含 .pane 那一层、眉标题、左下角胶囊）在 CardFrame.module.css 里。
@@ -69,14 +182,22 @@
   gap: clamp(8px, 1.6vh, 20px);
 
   /*
-   * 给底部那一圈胶囊留位置。
+   * ★★ 底部那圈胶囊是**绝对定位浮在内容上**的（`.pills`，bottom 挂在 --chrome-b 上），
+   *    而卡片给内容盒的底内边距只有 --chrome-pad —— 两者差额正好是「胶囊行高 − pad」：
+   *    实测 1080×720 / 620×700 重叠 14px、1280×960 重叠 7px。于是列表最后一行是**从胶囊
+   *    底下穿过去**的（胶囊走 `--glass` 半透明，字在后面糊成一团）。
    *
-   * 胶囊是绝对定位浮在内容上的（right/bottom 挂在 --chrome-x / --chrome-b 上），内容盒
-   * 并不知道它占了地方：内容一直铺到胶囊底下，却又没超过可视高 —— 实测三档窗口
-   * 「还能滚」都是 0，于是最后那块「预设文件 + 三轴」被压住且滚不出来。
-   * 留出「胶囊行高 + --chrome-b + 8px 呼吸」之后内容才真的超高，overflow-y: auto 接得住。
+   *    作者 2026-10-17：「容器应该在按钮上面截断比较好吧」—— 所以让滚动容器的**下缘**
+   *    停在胶囊行之上（margin-bottom 吃掉它的可用高度，`overflow-y: auto` 就在那里截断），
+   *    而不是靠内容盒自己多留空白（那样只是"滚到底时看不见"，中途照样穿过去）。
+   *
+   *    32px = 胶囊行高（7×2 padding + 15 行盒 + 1×2 边框，实测 31）；
+   *    10px = 截断线到胶囊的呼吸。两档一起减掉 --chrome-pad 才是净需让出的高度。
    */
-  padding-bottom: calc(var(--chrome-b, 24px) + 52px);
+  margin-bottom: max(0px, calc(42px - var(--chrome-pad, 20px)));
+
+  /* 滚动容器的截断线已经在胶囊之上了 —— 尾部不再需要让出一整行胶囊的高度 */
+  padding-bottom: 4px;
 }
 
 /*
@@ -179,7 +300,11 @@
    * 为什么不是 250 —— 细扫到 1400×540 那一档会溢出 16px：宽窗里板子是被框内宽截住的
    * （板宽 976 时高度就有 244），高度这一头的余量比窄窗小得多，扣除量得按最紧的那一档定。
    */
-  --plate-w: clamp(240px, calc((100vh - var(--plate-fixed-vh, 270px)) * 4), 1400px);
+  /* fallback 270 → 275：板下那两行文案 2026-10-12 放大了一档（见 .legend / .tip），
+     这一档扣减跟着让 5px（宁可贵一点，也不要扁窗里溢出）。
+     275 → 303（2026-10-13）：三轴读数收进一颗气泡（见下面那条规则），
+     上下多出 14+14 的内衬 —— 板子按同一个量再让一档。 */
+  --plate-w: clamp(240px, calc((100vh - var(--plate-fixed-vh, 303px)) * 4), 1400px);
   --plate-scale: calc(var(--plate-w) / 136.219);
 
   /* 这一列自己的行间距 */
@@ -223,6 +348,13 @@
    没用 auto-fit：它在某些宽度会多排一条塌成 0 的轨道，那条轨道的 gap 还占着，整条会偏左几像素。 */
 .axes {
   /*
+   * 不参与任何弹性分配：列贴顶之后这一行的 y 只由
+   * 「卡片上内边距 + 自己前面那一行」决定 —— 板块框变高变矮、甚至列开始滚动，
+   * 它都钉在那个位置上。（原来还有「预设文件」那一行陪着它钉 —— 那一整块 2026-10-14 删了，
+   * 见 `.presetPill` 那段；`flex: 0 0 auto` 就是从那条共用规则里挪过来的。）
+   */
+  flex: 0 0 auto;
+  /*
    * 三个并列的数：按内容宽排、整行在列里居中。
    * 原来是 width: 100% + 三等分铺满 + 左对齐 —— 这一页 X / Y 根本不会变，
    * 把它们摊到最左、还把当前轴挤到卡片右缘切掉「mm」，是本末倒置。
@@ -231,7 +363,14 @@
   max-width: 100%;
   margin: 4px auto 0;
   display: grid;
-  grid-template-columns: repeat(3, auto);
+  /*
+   * ★ 2026-10-13（作者：「它不均匀呀……X、Y 的就会往左」）：`repeat(3, auto)` →
+   * `repeat(3, 1fr)`。auto 时三列各按自己的内容宽（「原 -1.00 / 18.60 / 4.00」
+   * 三个 chip 长短不一），列与列之间的空当跟着不匀；1fr 在 fit-content 容器里
+   * 三条轨道取**同一个** max-content（= 最宽那列），于是三列等宽、空当等距。
+   * 内容在各自轨道里居中（justify-items: center）。
+   */
+  grid-template-columns: repeat(3, 1fr);
   justify-items: center;
   gap: clamp(10px, 1.6vh, 16px) clamp(14px, 2.4vw, 44px);
 }
@@ -270,12 +409,14 @@
    *
    * 上限 760px 是唯一的"别再长了"（900 高那档函数值 553，还远没到）。
    *
-   * 扣除量拆成变量，两种状态各一档（见下面 data-hint 那条）：
-   *   · 常驻 86px：预设行（挪去卡片右上角）与框头（缩放手柄退场）都撤了之后，
-   *     实测剩余的「框头零行 + 内边距 + gap」—— Mini/Wide/Compact 三档富余 99-111px，
-   *     收 60 留 40 上下做跨机呼吸（0.79 那条斜线原样，只把截距往下移）
-   *   · 没取到预设时再让 43px（提示行实测 39.1 + 框内 gap 8 收整）
+   * 扣除量 = 常驻 86px：预设行（挪去卡片右上角）与框头（缩放手柄退场）都撤了之后，
+   * 实测剩余的「框头零行 + 内边距 + gap」—— Mini/Wide/Compact 三档富余 99-111px，
+   * 收 60 留 40 上下做跨机呼吸（0.79 那条斜线原样，只把截距往下移）。
    * `--xy-fixed-vh` 是 vh 兜底那一支的同一个量（真实视口比容器高一截，所以数值大 38px）。
+   *
+   * ★ 2026-10-13：板下那行「先回『选择机型』…」提示整条退役（作者：「没必要提示给用户，
+   * 这些字都去掉」）—— 提示行那一路的第二档（133/171）一并删掉，这里只剩常驻一档；
+   * 有预设 / 没预设从此同一副版面，板子不再因为提示的出现与消失而变大小。
    */
   --xy-floor: 120px;
   --xy-fixed: 86px;
@@ -321,13 +462,14 @@
    * 富余大就居中，富余归零时两条一起收到 0、整组自动回到 --chrome-x 那条左基线，
    * 中间没有任何阈值（连续，符合"绝不按断点跳"这条）。
    *
-   * 左列上限还带一条 `100% - 190px`：先把读数块要的位置留出来再给板子。190 = 读数块在最大
-   * 字号档的实测需求 146px + 间隙 40px 再取整。窄窗里下限 340 仍然优先（minmax 的规矩），
+   * 左列上限还带一条 `100% - 230px`：先把读数块要的位置留出来再给板子。230 = 读数块在最大
+   * 字号档的实测需求 146px + 读数气泡的内衬 36px + 间隙 40px 再取整（气泡那 36px 是
+   * 2026-10-12 加读数气泡时补进来的）。窄窗里下限 340 仍然优先（minmax 的规矩），
    * 所以这一条只在"列宽不足、板子又想吃满"的中间地带生效。
    */
   grid-template-columns:
     minmax(0, 1fr)
-    minmax(min(100%, 340px), min(calc(var(--xy-plate) + 28px), calc(100% - 190px)))
+    minmax(min(100%, 340px), min(calc(var(--xy-plate) + 28px), calc(100% - 230px)))
     var(--xy-col-gap)
     max-content
     minmax(0, 1fr);
@@ -345,32 +487,52 @@
    * 再吃掉两个 gap 直接把读数夹断。间隙变成轨道之后，空轨道为 0 就是真的 0。
    */
   column-gap: 0;
+
+  /*
+   * ★ 2026-10-13（作者：「这个好像被右边的截断了……能不能不被截断呢？就是说，它那个模糊了，
+   * 不会去截断那个，只是真的到这个白色的那个边缘的时候才被压在下面的那种感觉」）：
+   *
+   * 症状：这一页那颗读数气泡（`.axes` 那块白卡）右端被**一刀切平** —— 切它的不是卡片，
+   * 是 `.info` 自己的 `overflow-x: hidden`（`.info` 与 `.calib` 是同一个 div，见 `.info` 那条）。
+   * 缘由：`.axes` 落在上面第 4 条 `max-content` 轨道上（不可压缩），列一不够宽气泡就往右溢出；
+   * 而"内容盒右缘"被 CardFrame 的「给露出卡让位」推到了**露出卡内缘**，离卡片白边还差
+   * 一整段 `--chrome-peek` —— 于是气泡右边平白多出一道切痕，旁边还空着一条。
+   *
+   * 现在把这一档的裁剪边缘**向右外扩 `--chrome-peek`**：读数可以一路画进让位区，
+   * 而那里站着露出卡（那张模糊的不透明卡，层叠在卡片层之上）—— 于是它被**压在下面**
+   * （钻进卡底下），不再被提前切断；真到卡片白边（`.frame` 那道 overflow: hidden）才被裁。
+   *
+   * 做法：这一档整条 `.info` **不裁**（`overflow: visible`）—— 横向溢出的部分一路画进
+   * 让位区，直到卡片白边才被外面 `.frame` 那道 `overflow: hidden` 收住
+   * （白边正是作者说的"白色的那个边缘"）；画进让位区的那一段被露出卡压在下面。
+   *
+   * ★ 为什么不是 `clip` + `overflow-clip-margin`（看着最贴，实测走不通）：
+   *   · `overflow: clip auto`（横向裁、纵向滚）会被 Chromium 降级回 `hidden`
+   *     —— clip 不能与滚动轴并存，实测 computed 就是 `overflow-x: hidden`；
+   *   · 那就两轴都 `clip`？`overflow-clip-margin` 又**不吃 `calc()/clamp()`**：
+   *     写死 `60px` 生效，写 `var(--chrome-peek, 0)` 或包一层 `calc()` 都回落成 `0px`
+   *     （computed 实测）—— 而让位量恰恰是个 clamp 算出来的动态值。
+   * 于是只剩"整条不裁"这一条路：一轴要滚动、另一轴要能溢出的组合，CSS 里给不出来。
+   *
+   * 代价：这一档纵向**不再滚**（`overflow: visible`）。宽窗里本来就不需要 ——
+   * 板子尺寸由 `--xy-plate` 按窗口高算，内容高跟着它走；真要超（窗口矮到 300px 那种），
+   * 溢出会被卡片裁掉而不是滚出来。极窄档（容器 < 519，单列排布）在文件末尾的
+   * `@container` 里覆盖回 `hidden auto`：那一档读数回到横排、横向不再溢出，
+   * 纵向反而真的需要能滚。
+   */
+  overflow: visible;
 }
 
 
 /*
- * 第三页也有那一行提示。它多数窗口不碍事（Z 板被框内宽截住，列底到胶囊顶还有 96-232px），
- * 只有最扁的一档会顶出来：实测 684×420 未取预设时列溢出 13px、提示压胶囊 −20px。
- * Z 板是 4:1 的横板，扣除量与"板高"是 1:1 —— 270 → 311 正好让出那 41px。
- * 其余窗口这一改看不出来（函数值远大于框内宽，板宽仍由框内宽说话）。
- */
-.calib[data-hint='true']:not([data-plate='xy']) {
-  --plate-fixed: 313px;
-  --plate-fixed-vh: 351px;
-}
-
-/*
- * 没取到预设的那一路：板框里多一行「先回选择机型…」的提示（实测恒定 285.2×39.1）。
- * 它一出现列就溢出 24-37px、提示文字压在底部胶囊上 —— 板子得为它让出 47px（行高 + 框内 gap 8）。
+ * 2026-10-13：板下那行「先回『选择机型』…」提示整条退役（作者：「你把这一行字去掉，
+ * 没必要提示给用户……就算没有预设空的时候，你也要把它位置调整好了，不要让它上下移动」）。
  *
- * 下限一起降到 100px：420 高那档让完之后函数值只有 106.5，还按 160 的下限反而又顶出溢出。
- * 这一路点板子不产生读数（没有基准），板小一点不影响可用性。
+ * 提示行（`.note`）与它带来的让位（Z 页 318/356、XY 页 133/171 两档）一起删 ——
+ * 有预设 / 没预设从此是同一副版面：板子不再因为提示出现与消失而变大小、也不再上下挪位置。
+ * （第四页那条 `--xy-floor: 100px` 是给"提示行 + 板"一起挤在最扁一档时用的，一并退役，
+ *   下限回到常驻的 120px。）
  */
-.calib[data-plate='xy'][data-hint='true'] {
-  --xy-floor: 100px;
-  --xy-fixed: 129px;
-  --xy-fixed-vh: 167px;
-}
 
 /*
  * 左列的框贴着板子：宽度由上面那条轨道定，这里只指位置。
@@ -402,19 +564,47 @@
 }
 
 /*
- * 第四页的主读数放大一档。
+ * ★ 2026-10-13：读数气泡**两页共用**（作者：「还有一个问题，为什么我这个是气泡，
+ * 但是 Z 偏移校准的不是气泡……你看看 Z 轴的有没有说要加一个气泡」）。
  *
- * 原来跟着第三页横排走：实测值字号只有 14px（只有 1400×900 撞到 17px 的上限），
- * 而右边还空着几百像素 —— 没有理由把这一页唯一的读数压这么小。
+ * 第四页那块读数卡是 2026-10-12 定的形状（下面那段原话），第三页的横排读数原来直接
+ * 摊在卡面上 —— 现在也收进**同一颗**：--surface-solid 面 + --r-lg 圆角 + 柔影，
+ * 两页从此一样是"一块读数卡"。
+ *
+ *   · 字号**不动**：第三页是三个数横排，抬到第四页那档（26px）会把最右那个「mm」挤出卡片
+ *   · 缝里 data-orient='col' 不吃（露出卡那条缝只有 20% 宽，放不下内衬）
+ *   · 窄窗单列档（< 520）第四页回到横排、第三页照旧 —— 两页同吃这一条，形状一致
+ *
+ * 高度账：气泡上下多出 14+14 = 28px —— 第三页的板子按同一个量让位
+ * （--plate-fixed(-vh) 275 → 303，见 .calib 里那条注释）。
+ */
+.calib > .axes:not([data-orient='col']) {
+  padding: 14px 18px;
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+}
+
+/*
+ * 第四页的主读数在气泡里再**放大一档**（2026-10-12）。
+ *
+ * 放大这一档的理由照旧（下面那段原文）：实测值字号只有 14px（只有 1400×900 撞到 17px
+ * 的上限），而右边还空着几百像素 —— 没有理由把这一页唯一的读数压这么小。
+ *
+ * ★ 2026-10-12 加的"气泡"：三行数原来直接摊在卡面上（右侧一片空地上孤零零三行字，
+ * 作者：「我其实不是很满意，这是我以前将就的时候做的」）。现在给它们**一个容器** ——
+ * 与校准页下缘 `.hudBottom` 同一副语言（--surface-solid 面 + 大圆角 + 柔影），
+ * 右侧从此是"一块读数卡"，与左边那块板子成对。
+ * （2026-10-13 起气泡本体在上面那条通用规则里，两页共用；这里只剩"放大"这一档。）
  *
  * 只作用在"当前页竖排"这一档：
- *   · 第三页横排不动（三个数并排，放大会把最右那个「mm」挤出卡片）
  *   · 缝里 data-orient='col' 不动（20% 宽的缝里 26px 会折行）
  *   · 窄窗单列档（< 520）也不动 —— 那一档读数回到横排，26px 三个并排必切
  */
 .calib[data-plate='xy'] > .axes:not([data-orient='col']) {
   --axis-value: clamp(18px, 2.4cqw, 26px);
-  --axis-label: 12.5px;
+  /* 2026-10-12 第三遍：轴名跟着默认档一起上抬（12.5 → 13.5） */
+  --axis-label: 13.5px;
 }
 
 /* 露出卡那条缝里的竖排：一列、靠左（不跟着上面那条居中走）。切到 row 的那一下由 AxisBar 的 FLIP 补间，
@@ -438,65 +628,17 @@
 .axes[data-orient='col'] .axis {
   gap: 2px;
 }
-/* 校准页上方那一行「这是哪一份预设」。缝里不显形，所以这里按当前页的宽度排 */
-.calibPreset {
-  width: 100%;
-  min-width: 0;
-}
 
 /*
- * 头两行（预设 + 三轴读数）不参与任何弹性分配：列贴顶之后它们的 y 只由
- * 「卡片上内边距 + 自己前面那一行」决定 —— 板块框变高变矮、甚至列开始滚动，
- * 这两行都钉在预设行那个位置上。
- */
-.calibPreset,
-.axes {
-  flex: 0 0 auto;
-}
-
-.presetLine {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 10px;
-  margin: 0;
-  min-width: 0;
-}
-
-.presetLineLabel {
-  flex: none;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  color: var(--text-3);
-}
-
-/*
- * 预设文件下拉：吃满这一行剩下的宽度，看起来就是一条输入框那样的"可改的位置"。
- * 用原生 select —— 键盘、滚轮、长列表全是系统行为，自造弹层在扁窗里反而更难点。
- * 字号不跟窗口缩：文件名本来就长，再缩就读不清。
- */
-.presetSelect {
-  flex: 1 1 auto;
-  min-width: 0;
-  padding: 7px 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  background: rgb(255 255 255 / 70%);
-  color: var(--text-1);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  cursor: pointer;
-}
-.presetSelect:hover {
-  border-color: var(--text-3);
-  background: #fff;
-}
-
-/*
- * 预设 pill（挂在卡片右上角，CardFrame 的 corner）：文件名 + 切换，实白 4px 直角。
+ * 预设 pill（挂在卡片右上角，CardFrame 的 corner）：文件名 + 切换。
  * 10-03 作者裁决：切换预设不用这么显眼，绿底让给「打开模型」—— 那才是这一步的主入口。
- * 上面的原生下拉不再由首页渲染（PresetLineA44 还在，g06-7 抽卡稿挂着它），样式留着不删。
+ * （原来挂在内容列里的「预设文件」行 + 那个原生下拉 2026-10-14 整块删了 —— 死代码，
+ * 来路见 `CalibHead.tsx` 里那段说明。）
+ *
+ * ★ 2026-10-13（作者：「这个按钮风格不对，要改成胶囊的……为什么我这个是气泡，
+ * 但 Z 偏移校准的不是气泡」）：原来 4px 方角 —— 有名字的那一态（「本地文件.toml」）
+ * 与空态（「选择预设」）都是同一颗，改一次两态一起变；连同两页（Z / XY）一起生效。
+ * 形状与卡片上其余按钮（打开模型 / 上一步 / 下一步）统一成胶囊。
  */
 .presetPill {
   display: inline-flex;
@@ -505,14 +647,19 @@
   min-width: 0;
   max-width: 340px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 999px;
   background: var(--surface-solid);
   color: var(--text-1);
   font: inherit;
   font-size: 12.5px;
   cursor: pointer;
+
+  /* ★ 名字可拖选（2026-10-14 作者：「我希望这一些可以选」）—— 这颗就是"当前是哪一份"，
+     点它是切换（按钮行为），名字本身是给人抄的。 */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .presetPill:hover {
@@ -573,9 +720,16 @@
   background: none;
   font-family: inherit;
   letter-spacing: inherit;
-  font-size: 10.5px;
+  /* 2026-10-12 第三遍：「原 x.xx」太小太浅 —— 10.5 → 11.5（与校准页那一档对齐） */
+  font-size: 11.5px;
   font-weight: 400;
   color: var(--text-3);
+  /*
+   * 2026-10-13：占位宽度**钉死** —— 「原 0.00 / 原 -1.00 / 原 18.60」几种长度
+   * 各占各的宽，会给三列轨道带来几像素的差（等宽轨道取最宽列，整条读数跟着动）。
+   * 5.2em 容得下最长的一档「原 -50.00」（值域 ±50），从此这一格宽窄不变。
+   */
+  min-width: 5.2em;
   font-variant-numeric: tabular-nums;
   visibility: hidden;
   cursor: default;
@@ -618,6 +772,9 @@
   color: inherit;
   font: inherit;
   font-size: var(--axis-value, clamp(14px, 1.6vw, 17px));
+  /* 行高写死（同 CalibReadings 的 .fieldInput）：`.axisValue` 的 min-height 是按
+     它推的，normal 会随平台飘、算式就对不上（2026-10-13 三态同高那一笔） */
+  line-height: 1.35;
   font-variant-numeric: tabular-nums;
   text-align: left;
   outline: none;
@@ -658,7 +815,8 @@
 
 .axisField:not([data-readonly='true']):focus-within {
   border-color: var(--accent);
-  background: rgb(255 255 255 / 70%);
+  /* 聚焦底走 --glass（深色里换磨砂黑玻璃，不再是一块白）：与输入框那族同一个口径 */
+  background: var(--glass);
 }
 
 .axisField[data-readonly='true'] {
@@ -668,6 +826,14 @@
 /* mm 与数字同行同字号（继承）：看着小是 x-height 的错觉；nowrap，不跟数字拆行 */
 .axisUnit {
   white-space: nowrap;
+}
+
+/*
+ * 2026-10-13：空态 / 取数中也要把 mm 的位置留出来（`data-ghost`）—— 光留位置、
+ * 不露脸。这样"还没有值"那一格与"有值"那一格**同宽同高**（作者：不许选中预设后变大）。
+ */
+.axisUnit[data-ghost='true'] {
+  visibility: hidden;
 }
 
 /*
@@ -692,8 +858,9 @@
 
 .axisLabel {
   /* 字号走变量：第四页竖排那一档单独放大（见 .calib[data-plate='xy'] > .axes），
-     横排与缝里竖排用这里的默认值 */
-  font-size: var(--axis-label, 11px);
+     横排与缝里竖排用这里的默认值。2026-10-12 第三遍：默认 11 → 12
+     （与校准页 CalibReadings 那一档对齐） */
+  font-size: var(--axis-label, 12px);
   letter-spacing: 0.06em;
   color: var(--text-3);
   /* 标签行带 .axisFrom 之后要允许折行（缝里那 20% 宽的一列） */
@@ -705,6 +872,17 @@
 
 .axisValue {
   margin: 0;
+  /*
+   * ★ 2026-10-13（作者：「它根本就不是最终的显示……当我选择了一个，它出现了之后，
+   * 它会变大」）：**三态同高**（与 CalibReadings 里那套同一笔账，那边先落地）——
+   * 值（input）/ 正在取（占位条）/ 还没有（横杠）三种长相必须占同一个盒子，
+   * 否则"还没选预设"与"选好预设"来回切的时候整条读数会跳、把下面的板子顶开。
+   * 高度按值态那颗 input 的盒子推：行高 1.35em + `.axisField` 的上下内衬与边框 8px。
+   * align-items: center 顺手把横杠 / 占位条在格里居中。
+   */
+  min-height: calc(1.35em + 8px);
+  display: flex;
+  align-items: center;
   font-size: var(--axis-value, clamp(14px, 1.6vw, 17px));
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
@@ -720,10 +898,11 @@
   color: var(--accent-deep);
 }
 
-/* 还没有值：一条横杠。宽度按数字那一格给，切到有值时不跳 */
+/* 还没有值：一条横杠。宽度按数字那一格给，切到有值时不跳
+   （2026-10-13：3.4em → 3.6em，与 `.axisInput` 的宽度对齐 —— 三态宽度一像素不差） */
 .axisBlank {
   display: inline-block;
-  min-width: 3.4em;
+  min-width: 3.6em;
   color: var(--text-3);
 }
 /* 改过的那一轴：新值换色加粗（字号不变，否则行高会跳；宽度按 em 不随粗细变） */
@@ -814,7 +993,8 @@
 .note {
   margin: 0;
   max-width: 46ch;
-  font-size: 11.5px;
+  /* 2026-10-12 第三遍：与板下那两行一起上抬一档（11.5 → 12.5） */
+  font-size: 12.5px;
   line-height: 1.7;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -833,11 +1013,16 @@
  * Z 步板下的两行文案（10-03 作者：「首页也缺那个文案」—— 与「校准」tab 同一句原话，
  * 字挂在 calibAxesA44 里共用）。居中贴板下；不参与板宽公式的话列会溢出，
  * 扣减量在 .calib 的 --plate-fixed(-vh) 里跟着让（见那条的注释）。
+ *
+ * ★ 2026-10-12 第三遍（作者：「这些字是我们自己做出来的，可以适当去放大」）：
+ *   字号上抬一档（11.5 / 12.5 → 13 / 13.5），与校准页那两行同档。
+ *   两行合计高约 +4px —— 板宽的扣减量跟着从 270 抬到 275（见 .calib 那条）。
+ *   2026-10-13 读数气泡又 +28，扣减量成 303。
  */
 .legend {
   margin: 0;
   text-align: center;
-  font-size: 11.5px;
+  font-size: 13px;
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
@@ -845,7 +1030,7 @@
 .tip {
   margin: 0;
   text-align: center;
-  font-size: 12.5px;
+  font-size: 13.5px;
   line-height: 1.5;
   color: var(--text-2);
 }
@@ -858,6 +1043,22 @@
   display: grid;
   place-items: center;
   padding-left: clamp(16px, 2vw, 32px);
+}
+
+/*
+ * 机型摘要卡整体上移一格（作者 2026-10-17：「整体往上一点」）。
+ *
+ * 两个成员一起走：右图槽 `.slot`（只在这一张卡里有）与它的左列
+ * `.info:has(+ .slot)`（`:has` 的判据就是"右边紧挨着图槽"）。
+ * 用 transform 而不是内边距：**不吃布局** —— 卡片高度、底部胶囊基线、
+ * 别的几张卡全部原样。
+ *
+ * ★ 窄档（容器 ≤ 620）在下面那条 `@container` 里归零：那一档大图收起、
+ *   内容本来就贴着上边，再往上顶会挤到标题栏底下。
+ */
+.slot,
+.info:has(+ .slot) {
+  transform: translateY(calc(-1 * var(--home-lift)));
 }
 
 @supports (width: 1cqw) {
@@ -874,7 +1075,9 @@
   }
 
   .calib {
-    --plate-w: clamp(240px, calc((100cqh - var(--plate-fixed, 270px)) * 4), 1400px);
+    /* fallback 270 → 275（板下两行文案放大一档）→ 303（2026-10-13 读数气泡 +28px）：
+       与上面那条 vh 兜底的账同步 */
+    --plate-w: clamp(240px, calc((100cqh - var(--plate-fixed, 303px)) * 4), 1400px);
     --calib-gap: clamp(10px, 1.8cqh, 16px);
 
     /* width 要一起写：否则会被同特异度、在前面的 .info 那条 34cqw 盖回去 */
@@ -950,6 +1153,23 @@
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+
+  /*
+   * 横向的**裁切盒往右扩到卡片白边**，内容盒一寸不动（2026-10-26 作者第二轮）。
+   *
+   * 上一版是让插图往左躲（`--stack-inset`），作者要的不是躲 —— 是「卡片叠在那块
+   * 露出卡底下、别被腰斩，影子也照常」。所以这里不裁它：`padding-right` 把 padding-box
+   * 撑到 frame 的右内边（= 卡片白边），负右边距把外框宽度抵消回去，于是
+   *   · 内容仍在原来的 845 处排（五步条、标题都不动）；
+   *   · 插图能画进 padding 区，一路钻到露出卡底下；
+   *   · 纵向照旧可滚，`overflow` 一个都没少。
+   *
+   * `content-box` 必须显式写：全局是 border-box，那样 `width: 100%` 会把内容压窄。
+   */
+  box-sizing: content-box;
+  --peek-gutter: calc(var(--chrome-x, 0px) + var(--chrome-peek, 0px));
+  padding-right: var(--peek-gutter);
+  margin-right: calc(-1 * var(--peek-gutter));
 }
 
 .welcome::before {
@@ -986,9 +1206,15 @@
 .welcomeArt {
   flex: 1 1 320px;
   max-width: 460px;
-  min-width: 0;
+  /*
+   * 舞台是 250 宽的定尺（三张卡按绝对坐标叠在它里面，窄了它们不会跟着缩）。
+   * 所以这一列不许被压到比舞台还窄 —— 一压，居中的舞台就朝两边溢出，
+   * 右半边正好撞上 `.welcome` 的横向裁切，最下面那张卡的右沿就被切掉（2026-10-26）。
+   */
+  min-width: 250px;
   display: grid;
   place-items: center;
+
 }
 
 .heroTitle {
@@ -1018,7 +1244,7 @@
   border: 0;
   border-radius: 999px;
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
@@ -1088,19 +1314,23 @@
     --calib-gap: 6px;
   }
 }
-/* 唯一保留的结构断点：窄到放不下大图时收起，信息列占满 */
+/*
+ * 窄档（容器 ≤620；窗口最窄就是 600）：**大图不再收起**（2026-10-17 作者：
+ * 「小尺寸的时候，图片不用消失了，不要突变位置了，我感觉最小尺寸也足够装下了」）。
+ *
+ * 老写法把 `.slot` 整个 `display:none`、`.info` 撑满居中 —— 那正是那一下突变：
+ * 跨过 620 的一瞬图没了、文字列从 300 宽跳到整行居中。实测 600×500 这一档：
+ * 图 409 宽、槽 240 宽，图的透明边压到文字列底下（`.info` 的 z-index 比图高，
+ * 字仍在最上层），打印机本体正好落在右半幅 —— **是装得下的**。
+ *
+ * 所以这一档**不改版式**：两列一起让，窄到哪算哪。跨 620 前后量过
+ * 615/619/621/625 四档：文字列的 x / y / 宽一个像素都不动（181 / 31 / 300）。
+ * `--home-lift` 也照旧 —— 上下都居中，没有"要不要贴顶"的分叉。
+ *
+ * 欢迎页那格插图仍然收掉：它是另一个东西（`HomeGuide` 的插图在窄窗里自身高度
+ * 就是 0，留着只会白占宽），照旧由下面 `.welcomeArt` 那条管。
+ */
 @container home (max-width: 620px) {
-  .slot {
-    display: none;
-  }
-
-  /* 大图收起之后右边没东西了，列本身要居中 —— 否则整页内容贴着左边，
-     右边空一大片。列内的文字仍然左对齐（正文居中更难读） */
-  .info {
-    width: 100%;
-    max-width: 560px;
-    margin-inline: auto;
-  }
 
   /*
    * 欢迎页同一件事（第三十二轮）。
@@ -1163,21 +1393,30 @@
    * 单列之后板子吃满列宽、列跟着变高 —— 实测 520×800 / 480×760 两档列底压到胶囊上
    * −10.9 / −12px（还伴随 16 / 11px 的竖向溢出）。这一档的板子要再让一段：
    * 先试 180（列底到胶囊顶回到 +2.7 / +2.1，还差一点），最后定 190 —— 两档都 ≥8。
-   * 提示行那一路同步 +44（190 + 43 = 233）。
+   * （2026-10-13：原来这里还有「提示行那一路同步 +44」的一档 233/271，
+   *   板下那行提示退役之后一并删掉。）
    */
   .calib[data-plate='xy'] {
     display: flex;
     flex-direction: column;
     --xy-fixed: 190px;
     --xy-fixed-vh: 228px;
+
+    /*
+     * 单列这一档把滚动**收回来**（两列档那边是 `overflow: clip`，见那条的注释）。
+     * 这一档读数回到横排、横向不再溢出，反倒是纵向真的会超（列被挤成一条）；
+     * 于是恢复 `.info` 原样的 `hidden auto` —— 能滚，读数也照旧横排居中。
+     */
+    overflow: hidden auto;
   }
 
-  /* 读数回到横排：三列、按内容宽、整条在列里居中，与第三页同一套 */
+  /* 读数回到横排：三列、按内容宽、整条在列里居中，与第三页同一套
+     （2026-10-13：三列同样走 1fr 等宽，见 .axes 那条） */
   .calib[data-plate='xy'] > .axes {
     width: fit-content;
     max-width: 100%;
     margin: 4px auto 0;
-    grid-template-columns: repeat(3, auto);
+    grid-template-columns: repeat(3, 1fr);
     justify-items: center;
     justify-self: auto;
     align-self: auto;
@@ -1188,23 +1427,12 @@
   /* 字号回到横排那一套：26px 三个数并排在 340 的列里必切 */
   .calib[data-plate='xy'] > .axes:not([data-orient='col']) {
     --axis-value: clamp(14px, 1.6cqw, 17px);
-    --axis-label: 11px;
+    --axis-label: 12px;
   }
 
   /* 单列里板块框吃满列宽（两列档那条 minmax 不再生效），板子仍由高度定尺寸 */
   .calib[data-plate='xy'] > .step {
     width: 100%;
-  }
-
-  /*
-   * 单列之后板子吃满列宽、列跟着变高 —— 实测 520×800 / 480×760 两档列底压到胶囊上
-   * −10.9 / −12px（还伴随 16 / 11px 的竖向溢出）。这一档的板子要再让一段：
-   * 先试 180（列底到胶囊顶回到 +2.7 / +2.1，还差一点），最后定 190 —— 两档都 ≥8。
-   * 提示行那一路同步 +44（190 + 43 = 233）。
-   */
-  .calib[data-plate='xy'][data-hint='true'] {
-    --xy-fixed: 233px;
-    --xy-fixed-vh: 271px;
   }
 }
 
@@ -1381,7 +1609,7 @@
   align-items: baseline;
   gap: 16px;
   padding: 7px 0;
-  border-bottom: 1px solid rgb(16 24 32 / 5%);
+  border-bottom: 1px solid var(--hairline);
   min-width: 0;
 }
 .label {
@@ -1421,3 +1649,5 @@
 
 
 
+/* （`.cta`（首页唯一那颗强按钮）原来也有一条"深色里换中性亮面"的补丁 —— 已删：
+   它现在自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），深浅一条规则全成立。） */

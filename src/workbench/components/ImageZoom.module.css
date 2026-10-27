@@ -1,0 +1,49 @@
+/* 点图放大那一层（见 ImageZoom.tsx）。全走 token，深浅两套都成立。 */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: var(--scrim);
+}
+
+.wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 92vw;
+  max-height: 86vh;
+}
+
+.img {
+  display: block;
+  max-width: 92vw;
+  max-height: 86vh;
+  /* 图自带窗口投影 + 透明边；这里只给一点点圆角，不另加影子（与全站"一像素装饰都不加"一致） */
+  border-radius: 2px;
+  /*
+   * ★ **不许挂 `transition`**（2026-10-16，作者：「滚动滚轮这一个感觉好迟钝，还会闪」）。
+   *   缩放逐帧由 rAF 写内联 `transform`；再叠一层 CSS 过渡 = 每个滚轮事件都从头播一遍
+   *   动画，看着就是抖 / 闪。交给 rAF 就够了。
+   */
+  will-change: transform;
+  transform-origin: center center;
+}
+
+.hint {
+  position: fixed;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 3px 10px;
+  pointer-events: none;
+}

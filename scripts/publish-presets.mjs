@@ -1,5 +1,5 @@
 /**
- * 官方预设数据发布 —— `npm run publish:presets`。
+ * 云端预设数据发布 —— `npm run publish:presets`。
  *
  * ★ **状态：清算中（`docs/RESOURCE-ADDRESSING-ROADMAP.md` M5）** —— 这是 wb_publish
  * 之外的**第二个发布出口**，长期目标是退役或改调 `wb_publish` 内核；在那之前它
@@ -412,7 +412,7 @@ const prUrl = run('gh', [
     `- catalog revision：\`${catalog.revision}\``,
     `- 文件：${files.length} 条（SHA / 大小已逐一核对）`,
     '',
-    '合并后 main 上的 `presets/delivery/` 即为客户端读取的官方交付目录。',
+    '合并后 main 上的 `presets/delivery/` 即为客户端读取的云端交付目录。',
   ].join('\n'),
 ])
 ok(`PR 已开：${prUrl}`)

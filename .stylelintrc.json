@@ -23,6 +23,12 @@
     "number-max-precision": null,
     "shorthand-property-no-redundant-values": null,
     "declaration-block-no-redundant-longhand-properties": null,
+    "selector-pseudo-class-no-unknown": [
+      true,
+      {
+        "ignorePseudoClasses": ["global", "local"]
+      }
+    ],
     "selector-pseudo-element-no-unknown": [
       true,
       {

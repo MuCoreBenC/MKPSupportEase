@@ -3,144 +3,185 @@ updated = '2026-07-05 16:46:54'
 [[tabs]]
 id = 'offset'
 label = '偏移'
+labelEn = 'Offset'
 icon = 'wrench'
 order = 10.0
 
 [[tabs.sections]]
 id = 'space_offset'
 label = '空间偏移'
+labelEn = 'Space offsets'
 description = '工具头空间偏移参数'
+descriptionEn = 'Toolhead space offset parameters'
 order = 100.0
 
 [[tabs.sections]]
 id = 'motion'
 label = '运动与挤出'
+labelEn = 'Motion and extrusion'
 description = '运动速度与挤出参数'
+descriptionEn = 'Motion speed and extrusion parameters'
 order = 200.0
 
 [[tabs]]
 id = 'wiping'
 label = '擦料'
+labelEn = 'Wiping'
 icon = 'layers'
 order = 20.0
 
 [[tabs.sections]]
 id = 'wiping_method'
 label = '擦料方式'
+labelEn = 'Wipe method'
 description = '擦料方式选择（擦料塔/圆盘擦拭）'
+descriptionEn = 'Wipe method selection (tower / disc)'
 order = 0.0
 
 [[tabs.sections]]
 id = 'tower_position'
 label = '擦料塔位置与打印'
+labelEn = 'Tower position and printing'
 description = '擦料塔位置与打印参数'
+descriptionEn = 'Wipe tower position and printing parameters'
 order = 1.0
 
 [[tabs.sections]]
 id = 'safety_advanced'
 label = '安全与高级参数'
+labelEn = 'Safety and advanced'
 description = '安全与高级擦料塔参数'
+descriptionEn = 'Safety and advanced wipe tower parameters'
 order = 2.0
 
 [[tabs.sections]]
 id = 'tower_structure'
 label = '塔结构加强'
+labelEn = 'Tower structure'
 description = '擦料塔结构加强参数'
+descriptionEn = 'Wipe tower structural reinforcement parameters'
 order = 3.0
 
 [[tabs.sections]]
 id = 'disk_action'
 label = '圆盘动作控制'
+labelEn = 'Disc control'
 description = '圆盘擦拭动作控制参数'
+descriptionEn = 'Disc wiping motion control parameters'
 order = 4.0
 
 [[tabs]]
 id = 'fan'
 label = '风扇'
+labelEn = 'Fan'
 icon = 'fan'
 order = 30.0
 
 [[tabs.sections]]
 id = 'fan_control'
 label = '温控与风扇'
+labelEn = 'Temperature and fan'
 description = '温控与风扇参数'
+descriptionEn = 'Temperature control and fan parameters'
 order = 0.0
 
 [[tabs]]
 id = 'glue'
 label = '涂胶'
+labelEn = 'Glue'
 icon = 'paintbrush'
 order = 40.0
 
 [[tabs.sections]]
 id = 'glue_advanced_motion'
 label = '高级运动调控'
+labelEn = 'Advanced motion'
 description = '涂胶高级运动调控参数'
+descriptionEn = 'Advanced glue motion parameters'
 order = 0.0
 
 [[tabs.sections]]
 id = 'glue_ironing'
 label = '支撑面熨烫'
+labelEn = 'Support ironing'
 description = '支撑面熨烫与稀疏涂胶参数'
+descriptionEn = 'Support surface ironing and sparse glue parameters'
 order = 1.0
 
 [[tabs.sections]]
 id = 'glue_z_compensation'
 label = '涂胶方向补偿'
+labelEn = 'Glue Z compensation'
 description = '涂胶 Z 方向补偿参数'
+descriptionEn = 'Glue Z directional compensation parameters'
 order = 2.0
 
 [[tabs]]
 id = 'gcode'
 label = '切换'
+labelEn = 'Switching'
 icon = 'terminal'
 order = 50.0
 
 [[tabs.sections]]
 id = 'custom_gcode'
 label = '自定义G-code'
+labelEn = 'Custom G-code'
 description = '自定义 G-code 指令'
+descriptionEn = 'Custom G-code commands'
 order = 0.0
 
 [[tabs]]
 id = 'advanced'
 label = '更多'
+labelEn = 'More'
 icon = 'sliders'
 order = 60.0
 
 [[tabs.sections]]
 id = 'pen_revitalization'
 label = '润笔'
+labelEn = 'Priming'
 description = '润笔与首笔活化参数'
+descriptionEn = 'Priming and first-pen activation parameters'
 order = 0.0
 
 [[tabs.sections]]
 id = 'glue_params'
 label = '涂胶参数'
+labelEn = 'Glue parameters'
 description = '涂胶基础参数'
+descriptionEn = 'Basic glue parameters'
 order = 1.0
 
 [[tabs.sections]]
 id = 'z_lift'
 label = 'Z轴抬升'
+labelEn = 'Z lift'
 description = 'Z 轴抬升高度参数'
+descriptionEn = 'Z lift height parameters'
 order = 2.0
 
 [[tabs.sections]]
 id = 'calibration'
 label = '校准'
+labelEn = 'Calibration'
 description = '校准模式选择（不分机型）'
+descriptionEn = 'Calibration mode selection (machine independent)'
 order = 3.0
 
 [[tabs.sections]]
 id = 'machine_specific'
 label = '机型专属'
+labelEn = 'Machine specific'
 description = '机型专属参数'
+descriptionEn = 'Machine-specific parameters'
 order = 4.0
 
 [[tabs]]
 id = 'internal'
 label = '内部参数'
+labelEn = 'Internal'
 icon = 'settings'
 order = 70.0
 sections = []
@@ -148,67 +189,79 @@ sections = []
 [[tabs]]
 id = 'settings'
 label = '软件设置'
+labelEn = 'Settings'
 order = 80.0
 
 [[tabs.sections]]
 id = 'appearance'
 label = '外观'
+labelEn = 'Appearance'
 order = 100.0
 
 [[tabs.sections]]
 id = 'update'
 label = '软件更新'
+labelEn = 'Software update'
 order = 200.0
 
 [[tabs.sections]]
 id = 'interaction'
 label = '辅助交互'
+labelEn = 'Interaction'
 order = 300.0
 
 [[tabs.sections]]
 id = 'slicer'
 label = '切片器'
+labelEn = 'Slicer'
 order = 400.0
 
 [[tabs.sections]]
 id = 'post_process'
 label = '后处理'
+labelEn = 'Post-processing'
 order = 500.0
 
-[[tabs.sections]]
-id = 'calibration'
-label = '校准'
-order = 600.0
+# 2026-10-20：`calibration` 原本在这里又声明了一次（与「更多」下那一个同 id），
+# 于是同一组参数有两个页签归属 —— 工作台「软件设置」显示成空组、客户端却把它
+# 单列成页签。作者定：只留「更多 → 校准」，设置页那张卡片不再重复摆一份。
 
 [[tabs.sections]]
 id = 'bed_glue'
 label = '热床预涂胶'
+labelEn = 'Bed pre-glue'
 order = 700.0
 
 [[tabs.sections]]
 id = 'cache_management'
 label = '缓存管理'
+labelEn = 'Cache management'
 order = 800.0
 
 [[tabs.sections]]
 id = 'data_maintenance'
 label = '数据维护'
+labelEn = 'Data maintenance'
 order = 900.0
 
 [[tabs.sections]]
 id = 'uninstall_cleanup'
 label = '卸载清理'
+labelEn = 'Uninstall cleanup'
 order = 1000.0
 
 [[tabs.sections]]
 id = 'performance'
 label = '性能（DEV）'
+labelEn = 'Performance (DEV)'
 order = 1100.0
 
 [[params]]
 key = 'toolhead.MKP_retract'
 label = '回抽长度'
+labelEn = 'Retract length'
 desc = '涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析'
+descEn = 'Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code'
 tomlKey = 'MKP_retract'
 unit = 'mm'
 valueType = 'float'
@@ -232,7 +285,9 @@ order = 200.0
 [[params]]
 key = 'toolhead.custom_mount_gcode'
 label = '装载胶箱 G-code'
+labelEn = 'Load glue box G-code'
 desc = '用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量'
+descEn = 'Custom command used to mount the glue pen; supports the [AUTO] variable'
 tomlKey = 'custom_mount_gcode'
 valueType = 'string'
 uiComponent = 'gcode'
@@ -265,7 +320,9 @@ order = 0.5
 [[params]]
 key = 'toolhead.custom_unmount_gcode'
 label = '卸载胶箱 G-code'
+labelEn = 'Unload glue box G-code'
 desc = '用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量'
+descEn = 'Custom command used to unmount the glue pen; supports the [AUTO] variable'
 tomlKey = 'custom_unmount_gcode'
 valueType = 'string'
 uiComponent = 'gcode'
@@ -298,7 +355,9 @@ order = 1.0
 [[params]]
 key = 'wiping.disable_3rd_layer_clog_detect'
 label = '关闭第三层裹头检测'
+labelEn = 'Disable third-layer clog detection'
 desc = '开启后移除第三层裹头检测段。仅对A1/A1 mini机型有效'
+descEn = 'Removes the third-layer clog detection section. Only applies to A1 / A1 mini'
 tomlKey = 'disable_3rd_layer_clog_detect'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -319,11 +378,13 @@ order = 1.0
 
 [[params]]
 key = 'wiping.disable_front_cover_alarm'
-label = '强制关闭前盖脱落报警'
-desc = '开启后将强制关闭前盖脱落报警。仅对P1系列机型有效'
+label = "强制关闭前盖脱落报警"
+labelEn = 'Force-off front cover alarm'
+desc = "开启后将强制关闭前盖脱落报警。仅对P1系列机型有效"
+descEn = 'Forces the front cover detached alarm off. Only applies to the P1 series'
 tomlKey = 'disable_front_cover_alarm'
-valueType = 'bool'
-uiComponent = 'switch'
+valueType = "bool"
+uiComponent = "switch"
 defaultValue = false
 section = 'wiping'
 configKey = 'DisableFrontCoverAlarm'
@@ -333,8 +394,7 @@ mergeable = true
 scope = 'machine_specific'
 variantMode = 'shared'
 tomlComment = '关闭第三层裹头检测(A1/A1 mini)'
-machineFilter = 'P1S,P2S,X1C'
-deprecated = true
+machineFilter = "P1S,P2S,X1C"
 
 [params.layout]
 sectionId = 'machine_specific'
@@ -343,7 +403,9 @@ order = 0.0
 [[params]]
 key = 'wiping.disable_timelapse'
 label = '关闭延时摄影'
+labelEn = 'Disable timelapse'
 desc = '开启后移除延时摄影段(SKIPTYPE: timelapse)。仅对i3结构的A系列机型有效'
+descEn = 'Removes the timelapse section (SKIPTYPE: timelapse). Only applies to i3-style A-series machines'
 tomlKey = 'disable_timelapse'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -365,7 +427,9 @@ order = 2.0
 [[params]]
 key = 'wiping.disk_stagger_angle'
 label = '错开角度'
+labelEn = 'Stagger angle'
 desc = '每层圆盘旋转偏移的角度（0-30°）'
+descEn = 'Rotation offset applied to the disc every layer (0-30 deg)'
 tomlKey = 'disk_stagger_angle'
 unit = '°'
 valueType = 'float'
@@ -395,7 +459,9 @@ value = 'off'
 [[params]]
 key = 'wiping.disk_stagger_max_angle'
 label = '最大偏移角度'
+labelEn = 'Max stagger angle'
 desc = '摆动的最大偏移角度（10-90°）'
+descEn = 'Maximum swing offset angle (10-90 deg)'
 tomlKey = 'disk_stagger_max_angle'
 unit = '°'
 valueType = 'float'
@@ -425,7 +491,9 @@ value = 'off'
 [[params]]
 key = 'wiping.disk_stagger_mode'
 label = '错开模式'
+labelEn = 'Stagger mode'
 desc = '关闭：不旋转 | 开启：始终错开 | 自动：小层高时自动错开'
+descEn = 'Off: no rotation | On: always stagger | Auto: stagger only at small layer heights'
 tomlKey = 'disk_stagger_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -442,14 +510,17 @@ parentKey = 'wiping.have_wiping_components'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [[params.choices]]
 value = 'auto'
 label = '自动'
+labelEn = 'Auto'
 
 [params.layout]
 sectionId = 'disk_action'
@@ -463,7 +534,9 @@ value = 'disk'
 [[params]]
 key = 'wiping.disk_stagger_swing_mode'
 label = '摆动模式'
+labelEn = 'Swing mode'
 desc = '旋转楼梯：单向累加到达最大值后回卷 | 锯齿摆动：到最大值后反向折返'
+descEn = 'Spiral stairs: accumulate in one direction, then wrap around at the maximum | Sawtooth swing: reverse direction at the maximum'
 tomlKey = 'disk_stagger_swing_mode'
 valueType = 'string'
 uiComponent = 'select'
@@ -480,10 +553,12 @@ parentKey = 'wiping.disk_stagger_mode'
 [[params.choices]]
 value = 'spiral'
 label = '旋转楼梯'
+labelEn = 'Spiral stairs'
 
 [[params.choices]]
 value = 'oscillate'
 label = '锯齿摆动'
+labelEn = 'Sawtooth swing'
 
 [params.layout]
 sectionId = 'disk_action'
@@ -497,7 +572,9 @@ value = 'off'
 [[params]]
 key = 'wiping.fan_speed'
 label = '风扇速度'
+labelEn = 'Fan speed'
 desc = '风扇 PWM 速度 (0-255)，控制冷却风量'
+descEn = 'Fan PWM speed (0-255), controls the cooling airflow'
 tomlKey = 'fan_speed'
 unit = '0-255'
 valueType = 'float'
@@ -521,7 +598,9 @@ order = 1.0
 [[params]]
 key = 'wiping.fast_tower_mode'
 label = '擦料塔速度与质量'
+labelEn = 'Tower speed and quality'
 desc = '快速：最大层高打印，仅涂胶面层慢速擦嘴 | 跟随模型：层高与模型一致 | 自定义：自定义层高和擦嘴策略'
+descEn = 'Fast: print at the maximum layer height, wipe slowly only on glue layers | Follow model: layer height matches the model | Custom: custom layer height and wipe strategy'
 tomlKey = 'fast_tower_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -538,14 +617,17 @@ parentKey = 'wiping.have_wiping_components'
 [[params.choices]]
 value = 'fast'
 label = '快速'
+labelEn = 'Fast'
 
 [[params.choices]]
 value = 'follow'
 label = '跟随模型'
+labelEn = 'Follow model'
 
 [[params.choices]]
 value = 'custom'
 label = '自定义'
+labelEn = 'Custom'
 
 [params.layout]
 sectionId = 'safety_advanced'
@@ -559,7 +641,9 @@ value = 'tower'
 [[params]]
 key = 'toolhead.first_pen_revitalization_flag'
 label = '首笔活化'
+labelEn = 'First-pen priming'
 desc = '在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效'
+descEn = 'Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled'
 tomlKey = 'first_pen_revitalization_flag'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -575,10 +659,12 @@ tomlComment = '首笔活化标志'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [params.layout]
 sectionId = 'pen_revitalization'
@@ -587,7 +673,9 @@ order = 0.0
 [[params]]
 key = 'wiping.glue_inter_model_lift_height'
 label = '涂胶区域间Z轴抬升高度'
+labelEn = 'Z lift between glue areas'
 desc = '模型间跳转 + 段间跳转微抬合并控制。涂胶区域间移动和段间跳转均使用此高度'
+descEn = 'Combined hop control for inter-model travel and segment hops. Both use this height'
 tomlKey = 'glue_inter_model_lift_height'
 unit = 'mm'
 valueType = 'float'
@@ -611,7 +699,9 @@ order = 2.0
 [[params]]
 key = 'wiping.glue_pass_count'
 label = '涂胶次数'
+labelEn = 'Glue passes'
 desc = '同一区域的涂胶遍数，多次涂胶可增加粘合力但延长打印时间'
+descEn = 'Number of glue passes over the same area; more passes improve adhesion but take longer'
 tomlKey = 'glue_pass_count'
 unit = '次'
 valueType = 'int'
@@ -635,7 +725,9 @@ order = 2.0
 [[params]]
 key = 'wiping.glue_sparse_ratio'
 label = '涂胶稀疏比'
+labelEn = 'Glue sparsity'
 desc = '小喷嘴(≤0.3mm)涂胶路径稀疏比例，0=不稀疏，50=隔行删除(默认)，100=仅保留首尾'
+descEn = 'Sparsity of the glue path with a small nozzle (<=0.3mm): 0 = no sparsity, 50 = drop every other line (default), 100 = keep only the ends'
 tomlKey = 'glue_sparse_ratio'
 valueType = 'float'
 uiComponent = 'number'
@@ -658,7 +750,9 @@ order = 9.0
 [[params]]
 key = 'wiping.glue_z_compensation_bed_bl'
 label = '热床-后左补偿'
+labelEn = 'Bed trim - rear left'
 desc = '热床模式下后左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+descEn = 'Z trim at the rear left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge'
 tomlKey = 'glue_z_compensation_bed_bl'
 unit = 'mm'
 valueType = 'float'
@@ -688,7 +782,9 @@ value = 'bed'
 [[params]]
 key = 'wiping.glue_z_compensation_bed_br'
 label = '热床-后右补偿'
+labelEn = 'Bed trim - rear right'
 desc = '热床模式下后右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+descEn = 'Z trim at the rear right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge'
 tomlKey = 'glue_z_compensation_bed_br'
 unit = 'mm'
 valueType = 'float'
@@ -718,7 +814,9 @@ value = 'bed'
 [[params]]
 key = 'wiping.glue_z_compensation_bed_fl'
 label = '热床-前左补偿'
+labelEn = 'Bed trim - front left'
 desc = '热床模式下前左角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+descEn = 'Z trim at the front left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge'
 tomlKey = 'glue_z_compensation_bed_fl'
 unit = 'mm'
 valueType = 'float'
@@ -748,7 +846,9 @@ value = 'bed'
 [[params]]
 key = 'wiping.glue_z_compensation_bed_fr'
 label = '热床-前右补偿'
+labelEn = 'Bed trim - front right'
 desc = '热床模式下前右角的 Z 补偿值。负值=下压（涂胶笔更近床面，胶更多）；正值=上抬。补偿范围自动外扩 2mm 避免边缘突变'
+descEn = 'Z trim at the front right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge'
 tomlKey = 'glue_z_compensation_bed_fr'
 unit = 'mm'
 valueType = 'float'
@@ -778,7 +878,9 @@ value = 'bed'
 [[params]]
 key = 'wiping.glue_z_compensation_enabled'
 label = '涂胶方向补偿'
+labelEn = 'Glue Z direction compensation'
 desc = '开启后涂胶 Z 会根据 X/Y 位置按 4 角补偿值进行双线性插值，解决特定方向涂不上胶的问题。补偿范围自动外扩 2mm 避免边缘突变'
+descEn = 'When on, the glue Z is interpolated bilinearly from the four corner trims by X/Y position, fixing directions where the glue does not stick. The trim area extends by 2mm automatically to avoid a hard edge'
 tomlKey = 'glue_z_compensation_enabled'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -799,7 +901,9 @@ order = 0.0
 [[params]]
 key = 'wiping.glue_z_compensation_mode'
 label = '补偿范围模式'
+labelEn = 'Trim range mode'
 desc = '热床范围：针对整个热床物理面积补偿，适合床面本身倾斜（范围 ±0.2mm，外扩 2mm）；涂胶面范围：针对每层每个连续涂胶区域的包围盒补偿，适合模型局部不平（范围 ±0.1mm，外扩 2mm）'
+descEn = 'Bed range: compensate over the whole physical bed, for a bed that is itself tilted (range +/-0.2mm, extended 2mm) | Glue-area range: compensate per continuous glue area on each layer, for locally uneven models (range +/-0.1mm, extended 2mm)'
 tomlKey = 'glue_z_compensation_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -816,10 +920,12 @@ parentKey = 'wiping.glue_z_compensation_enabled'
 [[params.choices]]
 value = 'bed'
 label = '热床范围'
+labelEn = 'Bed range'
 
 [[params.choices]]
 value = 'patch'
 label = '涂胶面范围'
+labelEn = 'Glue-area range'
 
 [params.layout]
 sectionId = 'glue_z_compensation'
@@ -833,7 +939,9 @@ value = true
 [[params]]
 key = 'wiping.glue_z_compensation_patch_bl'
 label = '涂胶面-后左补偿'
+labelEn = 'Glue trim - rear left'
 desc = '涂胶面模式下后左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+descEn = 'Z trim at the rear left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift'
 tomlKey = 'glue_z_compensation_patch_bl'
 unit = 'mm'
 valueType = 'float'
@@ -863,7 +971,9 @@ value = 'patch'
 [[params]]
 key = 'wiping.glue_z_compensation_patch_br'
 label = '涂胶面-后右补偿'
+labelEn = 'Glue trim - rear right'
 desc = '涂胶面模式下后右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+descEn = 'Z trim at the rear right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift'
 tomlKey = 'glue_z_compensation_patch_br'
 unit = 'mm'
 valueType = 'float'
@@ -893,7 +1003,9 @@ value = 'patch'
 [[params]]
 key = 'wiping.glue_z_compensation_patch_fl'
 label = '涂胶面-前左补偿'
+labelEn = 'Glue trim - front left'
 desc = '涂胶面模式下前左角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+descEn = 'Z trim at the front left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift'
 tomlKey = 'glue_z_compensation_patch_fl'
 unit = 'mm'
 valueType = 'float'
@@ -923,7 +1035,9 @@ value = 'patch'
 [[params]]
 key = 'wiping.glue_z_compensation_patch_fr'
 label = '涂胶面-前右补偿'
+labelEn = 'Glue trim - front right'
 desc = '涂胶面模式下前右角的 Z 补偿值。每块涂胶区域的包围盒自动外扩 2mm 作为补偿范围。负值=下压；正值=上抬'
+descEn = 'Z trim at the front right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift'
 tomlKey = 'glue_z_compensation_patch_fr'
 unit = 'mm'
 valueType = 'float'
@@ -953,7 +1067,9 @@ value = 'patch'
 [[params]]
 key = 'wiping.glue_z_lift_height'
 label = '涂胶Z轴抬升高度'
+labelEn = 'Glue Z hop height'
 desc = "涂胶前/后抬笔高度。换笔芯后涂胶前抬笔 + 涂胶结束抬笔使用此高度。前3层使用子参数'前3层抬升高度'"
+descEn = 'Pen lift before and after gluing. Used for the hop after a pen refill and for the hop at the end of gluing. The first 3 layers use the first-3-layers lift sub-parameter'
 tomlKey = 'glue_z_lift_height'
 unit = 'mm'
 valueType = 'float'
@@ -977,7 +1093,9 @@ order = 0.0
 [[params]]
 key = 'wiping.glue_z_lift_height_first_layers'
 label = '前3层抬升高度'
+labelEn = 'First 3 layers lift'
 desc = '前3层涂胶前/后抬笔的额外高度，用于首层附着稳定。与涂胶Z轴抬升高度叠加使用'
+descEn = 'Extra pen lift before and after gluing on the first 3 layers, to stabilize first-layer adhesion. Added on top of the glue Z hop height'
 tomlKey = 'glue_z_lift_height_first_layers'
 unit = 'mm'
 valueType = 'float'
@@ -1005,9 +1123,37 @@ op = 'gt'
 value = '0'
 
 [[params]]
+key = 'wiping.swap_hop_height'
+label = '换笔脱层高度'
+labelEn = 'Pen swap hop height'
+desc = '换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度'
+descEn = 'How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height'
+tomlKey = 'swap_hop_height'
+unit = 'mm'
+valueType = 'float'
+uiComponent = 'number'
+defaultValue = 1.0
+section = 'wiping'
+configKey = 'SwapHopHeight'
+jsonKey = 'swap_hop_height'
+selectable = true
+mergeable = true
+min = 0.2
+max = 3.0
+step = 0.1
+scope = 'universal'
+tomlComment = '换笔脱层高度(mm) 范围:0.2~3'
+
+[params.layout]
+sectionId = 'z_lift'
+order = 2.0
+
+[[params]]
 key = 'toolhead.glue_z_offset'
 label = '涂胶Z偏移'
+labelEn = 'Glue Z offset'
 desc = '涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面'
+descEn = 'Extra Z offset while gluing; negative brings the pen closer to the model surface'
 tomlKey = 'glue_z_offset'
 unit = 'mm'
 valueType = 'float'
@@ -1030,11 +1176,13 @@ order = 1.0
 
 [[params]]
 key = 'wiping.have_wiping_components'
-label = '擦料方式'
-desc = '选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘'
+label = "擦料方式"
+labelEn = 'Wipe method'
+desc = "选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘"
+descEn = 'How to wipe: the wipe tower builds a tower at a fixed position; disc wiping uses the printer built-in disc'
 tomlKey = 'have_wiping_components'
-valueType = 'string'
-uiComponent = 'segmented'
+valueType = "string"
+uiComponent = "segmented"
 defaultValue = 'tower'
 section = 'wiping'
 configKey = 'UseWipingTowers'
@@ -1047,11 +1195,14 @@ pinned = true
 
 [[params.choices]]
 value = 'tower'
-label = '擦料塔'
+label = "擦料塔"
+labelEn = 'Wipe tower'
 
 [[params.choices]]
 value = 'disk'
-label = '圆盘擦拭'
+label = "圆盘擦拭"
+labelEn = 'Disc wipe'
+deprecated = true
 
 [params.layout]
 sectionId = 'wiping_method'
@@ -1060,7 +1211,9 @@ order = 10.0
 [[params]]
 key = 'wiping.ironing_coverage_threshold'
 label = '熨烫覆盖阈值'
+labelEn = 'Ironing coverage threshold'
 desc = '熨烫面占支撑面的最低路径长度比例，低于此值时回退到支撑面'
+descEn = 'Minimum share of the ironing surface covered by the support surface; below it the glue falls back to the support surface'
 tomlKey = 'ironing_coverage_threshold'
 unit = '%'
 valueType = 'float'
@@ -1080,14 +1233,17 @@ tomlComment = '熨烫覆盖率阈值(%) 范围:0~100'
 [[params.choices]]
 value = 0.0
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 50.0
 label = '稀疏一半'
+labelEn = '50% sparse'
 
 [[params.choices]]
 value = 90.0
 label = '稀疏90%'
+labelEn = '90% sparse'
 
 [params.layout]
 sectionId = 'glue_ironing'
@@ -1096,7 +1252,9 @@ order = 3.0
 [[params]]
 key = 'wiping.ironing_e_sum_threshold'
 label = '熨烫挤出阈值'
+labelEn = 'Ironing extrusion threshold'
 desc = '当熨烫段挤出总量超过此阈值时自动移除熨烫（仅在自动模式下生效）'
+descEn = 'Ironing is removed automatically when the extruded length of an ironing segment exceeds this threshold (auto mode only)'
 tomlKey = 'ironing_e_sum_threshold'
 unit = 'mm'
 valueType = 'float'
@@ -1126,7 +1284,9 @@ value = 'auto'
 [[params]]
 key = 'wiping.ironing_mode'
 label = '支撑面熨烫'
+labelEn = 'Support surface ironing'
 desc = '控制支撑面上层熨烫的保留/移除：关闭=始终移除熨烫挤出；开启=始终保留；自动=根据挤出量阈值判断'
+descEn = 'Keep or remove ironing on top of the support surface: off = always remove ironing extrusion; on = always keep; auto = decide by the extrusion threshold'
 tomlKey = 'ironing_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -1142,23 +1302,32 @@ tomlComment = '熨烫模式: off=始终移除, on=始终保留, auto=自动判�
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [[params.choices]]
 value = 'auto'
 label = '自动'
+labelEn = 'Auto'
 
 [params.layout]
 sectionId = 'glue_ironing'
 order = 0.0
 
+[params.machineVariants]
+"A1:FASTV3.3" = 'auto'
+"A1_MINI:FASTV3.3" = 'auto'
+
 [[params]]
 key = 'wiping.ironing_suppress_expand'
 label = '熨烫抑制扩展范围'
+labelEn = 'Ironing suppression expansion'
 desc = '已激活熨烫段包围盒向外扩展的距离，0为关闭扩展'
+descEn = 'How far the bounding box of an active ironing segment expands outwards; 0 = no expansion'
 tomlKey = 'ironing_suppress_expand'
 unit = 'mm'
 valueType = 'float'
@@ -1182,7 +1351,9 @@ order = 4.0
 [[params]]
 key = 'wiping.ironing_suppress_expand_mode'
 label = '熨烫抑制扩展模式'
+labelEn = 'Ironing suppression mode'
 desc = '熨烫抑制区域的扩展方式：包围盒外扩=沿XY轴均匀外扩；质心半径外扩=从质心向外径向扩展'
+descEn = 'How the suppression area expands: bounding box = evenly along X and Y; centroid radius = radially outwards from the centroid'
 tomlKey = 'ironing_suppress_expand_mode'
 valueType = 'string'
 uiComponent = 'select'
@@ -1199,10 +1370,12 @@ parentKey = 'wiping.ironing_suppress_expand'
 [[params.choices]]
 value = 'bbox'
 label = '包围盒外扩'
+labelEn = 'Bounding box'
 
 [[params.choices]]
 value = 'centroid'
 label = '质心半径外扩'
+labelEn = 'Centroid radius'
 
 [params.layout]
 sectionId = 'glue_ironing'
@@ -1216,7 +1389,9 @@ value = '0'
 [[params]]
 key = 'wiping.min_support_interface_enabled'
 label = '最小支撑涂胶面过滤'
+labelEn = 'Filter tiny support glue areas'
 desc = '启用后过滤掉过小的支撑涂胶面，避免无效涂胶'
+descEn = 'Filters out support glue areas that are too small, avoiding wasted glue'
 tomlKey = 'min_support_interface_enabled'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1232,10 +1407,12 @@ tomlComment = '最小支撑涂胶面过滤'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [params.layout]
 sectionId = 'glue_ironing'
@@ -1244,7 +1421,9 @@ order = 8.0
 [[params]]
 key = 'wiping.nozzle_cooling_flag'
 label = '涂胶期间降温'
+labelEn = 'Cool nozzle while gluing'
 desc = '涂胶期间降低喷嘴温度以防止胶水因过热而滴漏'
+descEn = 'Lowers the nozzle temperature while gluing so the glue does not drip from overheating'
 tomlKey = 'nozzle_cooling_flag'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1264,7 +1443,9 @@ order = 0.0
 [[params]]
 key = 'toolhead.offset.x'
 label = 'X 轴偏移'
+labelEn = 'X offset'
 desc = '涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右'
+descEn = 'X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right'
 tomlKey = 'offset_x'
 unit = 'mm'
 valueType = 'float'
@@ -1287,7 +1468,7 @@ pinned = true
 
 [params.machineVariants]
 'A1:FAST' = -0.7
-'A1:FASTV3.3' = 0.1
+'A1:FASTV3.3' = -0.7
 'A1:STANDARD' = -1.0
 'A1_MINI:FAST' = -0.5
 'A1_MINI:FASTV3.3' = -0.9
@@ -1316,7 +1497,9 @@ subfieldsOrder = ['x', 'y', 'z']
 [[params]]
 key = 'toolhead.offset.y'
 label = 'Y 轴偏移'
+labelEn = 'Y offset'
 desc = '涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准'
+descEn = 'Y offset of the glue pen tip relative to the nozzle (mm); calibrate against the real hardware'
 tomlKey = 'offset_y'
 unit = 'mm'
 valueType = 'float'
@@ -1365,7 +1548,9 @@ order = 150.0
 [[params]]
 key = 'toolhead.offset.z'
 label = 'Z 轴偏移'
+labelEn = 'Z offset'
 desc = '涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离'
+descEn = 'Height offset of the glue pen tip (mm); affects the distance between the pen and the model'
 tomlKey = 'offset_z'
 unit = 'mm'
 valueType = 'float'
@@ -1393,6 +1578,8 @@ P2S = 1.1
 'P2S:STANDARD' = 1.1
 X1C = 1.1
 'X1C:LITE' = 1.1
+"A1:FASTV3.3" = 3.7
+"A1_MINI:FASTV3.3" = 3.9
 
 [params.machineMinVariants]
 'P1S:LITE' = 0.0
@@ -1411,7 +1598,9 @@ order = 200.0
 [[params]]
 key = 'wiping.outer_structure'
 label = '外围结构'
+labelEn = 'Outer structure'
 desc = '选择擦料塔外围结构类型：无=不生成外围；斜肋外墙=在塔外侧生成斜肋支撑；护套=包裹塔体外围防止倒塌'
+descEn = 'Outer structure of the wipe tower: none = no outer shell; ribbed wall = angled ribs outside the tower; sheath = wrap the tower to keep it from collapsing'
 tomlKey = 'outer_structure'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -1428,14 +1617,17 @@ parentKey = 'wiping.have_wiping_components'
 [[params.choices]]
 value = 'brim'
 label = 'brim'
+labelEn = 'Brim'
 
 [[params.choices]]
 value = 'rib'
 label = '斜肋外墙'
+labelEn = 'Ribbed wall'
 
 [[params.choices]]
 value = 'sheath'
 label = '护套'
+labelEn = 'Sheath'
 deprecated = true
 
 [params.layout]
@@ -1450,7 +1642,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.prime_enabled'
 label = '启用润笔'
+labelEn = 'Enable priming'
 desc = '润笔总开关，关闭后所有润笔相关参数不显示且润笔逻辑不执行'
+descEn = 'Master switch for priming; when off, all priming parameters are hidden and the priming logic is skipped'
 tomlKey = 'prime_enabled'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1470,7 +1664,9 @@ order = 1.0
 [[params]]
 key = 'wiping.prime_every_layer'
 label = '每层润笔'
+labelEn = 'Prime every layer'
 desc = '开启后每层涂胶前都触发润笔，与润笔触发层数互斥'
+descEn = 'Primes before gluing on every layer; mutually exclusive with the priming trigger layer count'
 tomlKey = 'prime_every_layer'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1487,10 +1683,12 @@ parentKey = 'wiping.prime_enabled'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [params.layout]
 sectionId = 'pen_revitalization'
@@ -1504,7 +1702,9 @@ value = true
 [[params]]
 key = 'toolhead.prime_length'
 label = '润笔路径长度'
+labelEn = 'Priming path length'
 desc = '长时间未涂胶后重新润笔的路径长度，确保胶水充分流出'
+descEn = 'Path length of a re-prime after a long time without gluing, ensuring the glue flows'
 tomlKey = 'prime_length'
 unit = 'mm'
 valueType = 'float'
@@ -1534,7 +1734,9 @@ value = true
 [[params]]
 key = 'wiping.prime_min_path_length'
 label = '润笔最小路径长度'
+labelEn = 'Minimum priming path length'
 desc = '触发润笔的最小路径长度阈值，路径长度小于此值时不触发润笔'
+descEn = 'Path lengths below this threshold do not trigger priming'
 tomlKey = 'prime_min_path_length'
 unit = 'mm'
 valueType = 'float'
@@ -1564,7 +1766,9 @@ value = true
 [[params]]
 key = 'wiping.prime_per_model'
 label = '每个模型都润笔'
+labelEn = 'Prime for every model'
 desc = '开启后每个模型的涂胶前都执行润笔，关闭则每层只润笔一次'
+descEn = 'Primes before gluing each model; when off, priming happens only once per layer'
 tomlKey = 'prime_per_model'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1581,10 +1785,12 @@ parentKey = 'wiping.prime_enabled'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [params.layout]
 sectionId = 'pen_revitalization'
@@ -1598,7 +1804,9 @@ value = true
 [[params]]
 key = 'wiping.prime_trigger_layers'
 label = '润笔触发层数'
+labelEn = 'Priming trigger layers'
 desc = '超过此层数未涂胶时自动触发润笔'
+descEn = 'Priming is triggered automatically after this many layers without gluing'
 tomlKey = 'prime_trigger_layers'
 unit = '层'
 valueType = 'int'
@@ -1628,7 +1836,9 @@ value = true
 [[params]]
 key = 'wiping.rib_extra_length'
 label = '斜肋额外长度'
+labelEn = 'Rib extra length'
 desc = '斜肋外墙的额外延伸长度，0为不延伸'
+descEn = 'Extra extension length of the ribbed wall; 0 = no extension'
 tomlKey = 'rib_extra_length'
 unit = 'mm'
 valueType = 'float'
@@ -1658,7 +1868,9 @@ value = 'rib'
 [[params]]
 key = 'wiping.rib_fillet_wall'
 label = '外墙倒圆角'
+labelEn = 'Rounded outer wall'
 desc = '斜肋外墙是否倒圆角'
+descEn = 'Whether the ribbed outer wall is rounded'
 tomlKey = 'rib_fillet_wall'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -1684,7 +1896,9 @@ value = 'rib'
 [[params]]
 key = 'wiping.rib_width'
 label = '斜肋宽度'
+labelEn = 'Rib width'
 desc = '斜肋外墙的宽度'
+descEn = 'Width of the ribbed outer wall'
 tomlKey = 'rib_width'
 unit = 'mm'
 valueType = 'float'
@@ -1714,7 +1928,9 @@ value = 'rib'
 [[params]]
 key = 'wiping.sheath_base_expand'
 label = '护套底层膨胀量'
+labelEn = 'Sheath base expansion'
 desc = '护套底层相对塔体的单边膨胀量'
+descEn = 'Single-side expansion of the sheath over the tower body on the bottom layer'
 tomlKey = 'sheath_base_expand'
 unit = 'mm'
 valueType = 'float'
@@ -1745,7 +1961,9 @@ value = 'sheath'
 [[params]]
 key = 'wiping.sheath_converge_layers'
 label = '护套收敛层数'
+labelEn = 'Sheath convergence layers'
 desc = '护套从底层膨胀逐渐收敛到塔体外轮廓的层数'
+descEn = 'Number of layers over which the sheath converges from the base expansion back to the tower outline'
 tomlKey = 'sheath_converge_layers'
 unit = '层'
 valueType = 'int'
@@ -1776,7 +1994,9 @@ value = 'sheath'
 [[params]]
 key = 'wiping.sheath_enable_height'
 label = '护套自动启用高度'
+labelEn = 'Sheath auto-enable height'
 desc = '自动模式下，模型高度超过此值时启用护套'
+descEn = 'In auto mode the sheath is enabled once the model is taller than this'
 tomlKey = 'sheath_enable_height'
 unit = 'mm'
 valueType = 'float'
@@ -1807,7 +2027,9 @@ value = 'sheath'
 [[params]]
 key = 'wiping.sheath_wall_width'
 label = '护套壁宽'
+labelEn = 'Sheath wall width'
 desc = '护套壁的宽度'
+descEn = 'Wall width of the sheath'
 tomlKey = 'sheath_wall_width'
 unit = 'mm'
 valueType = 'float'
@@ -1838,7 +2060,9 @@ value = 'sheath'
 [[params]]
 key = 'wiping.small_feature_factor'
 label = '小特征因子'
+labelEn = 'Small feature factor'
 desc = '小特征速度系数 = MaxSpeed × 此值。值越小(如0.5)小特征越精细但更慢'
+descEn = 'Small-feature speed = MaxSpeed x this value. Lower (e.g. 0.5) is finer but slower'
 tomlKey = 'small_feature_factor'
 valueType = 'float'
 uiComponent = 'number'
@@ -1861,7 +2085,9 @@ order = 0.0
 [[params]]
 key = 'toolhead.speed_limit'
 label = '涂胶速度限制'
+labelEn = 'Glue speed limit'
 desc = '涂胶笔的最大移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步'
+descEn = 'Maximum travel speed of the glue pen (mm/s); too high may cause uneven glue or lost steps'
 tomlKey = 'speed_limit'
 unit = 'mm/s'
 valueType = 'float'
@@ -1893,7 +2119,9 @@ order = 100.0
 [[params]]
 key = 'wiping.support_extrusion_multiplier'
 label = '支撑挤出倍率'
+labelEn = 'Support extrusion multiplier'
 desc = '支撑材料的挤出倍率，影响支撑密度和拆除难度'
+descEn = 'Extrusion multiplier for support material; affects support density and how easy it is to remove'
 tomlKey = 'support_extrusion_multiplier'
 valueType = 'float'
 uiComponent = 'number'
@@ -1916,7 +2144,9 @@ order = 0.0
 [[params]]
 key = 'wiping.tower_custom_layer_height'
 label = '塔层高策略'
+labelEn = 'Tower layer height'
 desc = '自定义模式下的擦料塔层高策略'
+descEn = 'Wipe tower layer height strategy in custom mode'
 tomlKey = 'tower_custom_layer_height'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -1933,14 +2163,17 @@ parentKey = 'wiping.fast_tower_mode'
 [[params.choices]]
 value = 'min'
 label = '最小层高'
+labelEn = 'Min layer height'
 
 [[params.choices]]
 value = 'max'
 label = '最大层高'
+labelEn = 'Max layer height'
 
 [[params.choices]]
 value = 'auto'
 label = '自适应'
+labelEn = 'Adaptive'
 
 [params.layout]
 sectionId = 'safety_advanced'
@@ -1954,7 +2187,9 @@ value = 'custom'
 [[params]]
 key = 'wiping.tower_extrude_ratio'
 label = '擦料塔挤出倍率'
+labelEn = 'Tower extrusion ratio'
 desc = '擦料塔出胶量比例，值越大出胶越多。会被处理器动态计算覆盖'
+descEn = 'Glue output ratio of the wipe tower; higher means more glue. Overridden by the processor at runtime'
 tomlKey = 'tower_extrude_ratio'
 valueType = 'float'
 uiComponent = 'number'
@@ -1983,7 +2218,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.tower_first_layer_flow'
 label = '擦料塔首层流量'
+labelEn = 'Tower first-layer flow'
 desc = '擦料塔首层护套和斜肋的挤出流量比例，1.0为标准流量'
+descEn = 'Extrusion flow ratio for the sheath and ribs on the first layer; 1.0 is the standard flow'
 tomlKey = 'tower_first_layer_flow'
 valueType = 'float'
 uiComponent = 'number'
@@ -2012,7 +2249,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.tower_glue_layer_speed'
 label = '涂胶面层速度'
+labelEn = 'Glue layer speed'
 desc = '涂胶面层的塔体打印速度'
+descEn = 'Tower print speed on glue layers'
 tomlKey = 'tower_glue_layer_speed'
 unit = 'mm/s'
 valueType = 'float'
@@ -2042,7 +2281,9 @@ value = 'custom'
 [[params]]
 key = 'wiping.tower_rib_speed'
 label = '斜肋打印速度'
+labelEn = 'Rib print speed'
 desc = '跟随塔：使用塔体打印速度 | 自定义：指定斜肋打印速度'
+descEn = 'Follow tower: use the tower print speed | Custom: use a specific rib print speed'
 tomlKey = 'tower_rib_speed'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -2059,10 +2300,12 @@ parentKey = 'wiping.outer_structure'
 [[params.choices]]
 value = 'follow'
 label = '跟随塔'
+labelEn = 'Follow tower'
 
 [[params.choices]]
 value = 'custom'
 label = '自定义'
+labelEn = 'Custom'
 
 [params.layout]
 sectionId = 'tower_structure'
@@ -2076,7 +2319,9 @@ value = 'rib'
 [[params]]
 key = 'wiping.tower_rib_speed_value'
 label = '自定义速度'
+labelEn = 'Custom speed'
 desc = '斜肋外墙的自定义打印速度'
+descEn = 'Custom print speed for the ribbed outer wall'
 tomlKey = 'tower_rib_speed_value'
 unit = 'mm/s'
 valueType = 'float'
@@ -2106,7 +2351,9 @@ value = 'custom'
 [[params]]
 key = 'wiping.tower_safe_z_offset'
 label = '塔安全Z偏移'
+labelEn = 'Tower safety Z offset'
 desc = '擦料塔安全Z偏移距离，范围0.3~5.0mm'
+descEn = 'Safety Z offset for the wipe tower, 0.3-5.0mm'
 tomlKey = 'tower_safe_z_offset'
 unit = 'mm'
 valueType = 'float'
@@ -2136,7 +2383,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.tower_sheath_speed'
 label = '护套打印速度'
+labelEn = 'Sheath print speed'
 desc = '护套的打印速度'
+descEn = 'Print speed of the sheath'
 tomlKey = 'tower_sheath_speed'
 unit = 'mm/s'
 valueType = 'float'
@@ -2167,7 +2416,9 @@ value = 'sheath'
 [[params]]
 key = 'wiping.tower_travel_speed'
 label = '塔刮擦速度'
+labelEn = 'Tower wipe speed'
 desc = '擦料塔刮擦移动速度，范围50~500mm/s'
+descEn = 'Travel speed of the tower wipe, 50-500mm/s'
 tomlKey = 'tower_travel_speed'
 unit = 'mm/s'
 valueType = 'float'
@@ -2197,7 +2448,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.tower_wipe_mode'
 label = '擦嘴策略'
+labelEn = 'Nozzle wipe strategy'
 desc = '开启：每层都擦嘴 | 关闭：包括涂胶面都不擦 | 自动：仅涂胶面层擦嘴'
+descEn = 'On: wipe every layer | Off: no wipe, not even on glue layers | Auto: wipe only on glue layers'
 tomlKey = 'tower_wipe_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -2214,14 +2467,17 @@ parentKey = 'wiping.fast_tower_mode'
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'auto'
 label = '自动'
+labelEn = 'Auto'
 
 [params.layout]
 sectionId = 'safety_advanced'
@@ -2235,7 +2491,9 @@ value = 'custom'
 [[params]]
 key = 'wiping.use_ironing_path'
 label = '涂胶面使用熨烫路径'
+labelEn = 'Glue along ironing path'
 desc = '开启后，涂胶面优先使用熨烫段的 XY 路径；熨烫覆盖不足的区域自动回退到支撑面路径'
+descEn = 'When on, glue follows the XY path of the ironing segment first; areas with too little ironing fall back to the support surface path'
 tomlKey = 'use_ironing_path'
 valueType = 'bool'
 uiComponent = 'switch'
@@ -2251,10 +2509,12 @@ tomlComment = '使用熨烫路径作为涂胶路径'
 [[params.choices]]
 value = 'off'
 label = '关闭'
+labelEn = 'Off'
 
 [[params.choices]]
 value = 'on'
 label = '开启'
+labelEn = 'On'
 
 [params.layout]
 sectionId = 'glue_ironing'
@@ -2263,7 +2523,9 @@ order = 2.0
 [[params]]
 key = 'wiping.user_dry_time'
 label = '额外干燥时间'
+labelEn = 'Extra drying time'
 desc = '涂胶后额外等待干燥的时间 (秒)，让胶水充分固化'
+descEn = 'Extra drying time after gluing (seconds) so the glue sets'
 tomlKey = 'user_dry_time'
 unit = '秒'
 valueType = 'int'
@@ -2287,7 +2549,9 @@ order = 2.0
 [[params]]
 key = 'wiping.wiper_x'
 label = "擦料塔X坐标"
+labelEn = 'Wipe tower X'
 desc = "擦料塔在热床上的X坐标位置 (mm)"
+descEn = 'X position of the wipe tower on the bed (mm)'
 tomlKey = 'wiper_x'
 unit = "mm"
 valueType = "float"
@@ -2339,7 +2603,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.wiper_y'
 label = '擦料塔Y坐标'
+labelEn = 'Wipe tower Y'
 desc = '擦料塔在热床上的Y坐标位置 (mm)'
+descEn = 'Y position of the wipe tower on the bed (mm)'
 tomlKey = 'wiper_y'
 unit = 'mm'
 valueType = 'float'
@@ -2389,7 +2655,9 @@ value = 'tower'
 [[params]]
 key = 'wiping.wipetower_speed'
 label = '塔体打印速度'
+labelEn = 'Tower print speed'
 desc = '非涂胶面层的塔体打印速度'
+descEn = 'Tower print speed on non-glue layers'
 tomlKey = 'wipetower_speed'
 unit = 'mm/s'
 valueType = 'float'
@@ -2418,11 +2686,13 @@ value = 'custom'
 
 [[params]]
 key = 'wiping.xy_calibration_mode'
-label = 'XY校准模式'
-desc = 'XY校准模式：默认或新型'
+label = "XY校准模式"
+labelEn = 'XY calibration mode'
+desc = "XY校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）"
+descEn = 'XY calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)'
 tomlKey = 'xy_calibration_mode'
-valueType = 'string'
-uiComponent = 'segmented'
+valueType = "string"
+uiComponent = "segmented"
 defaultValue = 'new'
 section = 'wiping'
 configKey = 'XYCalibrationMode'
@@ -2430,15 +2700,18 @@ jsonKey = 'xy_calibration_mode'
 selectable = true
 mergeable = true
 scope = 'universal'
-tomlComment = 'XY校准模式(default=默认,new=新型)'
-
-[[params.choices]]
-value = 'default'
-label = '默认'
+tomlComment = 'XY校准模式(original=原版,new=新版)'
 
 [[params.choices]]
 value = 'new'
-label = '新型'
+label = "新版"
+labelEn = 'New'
+
+[[params.choices]]
+value = 'original'
+label = "原版"
+labelEn = 'Original'
+deprecated = true
 
 [params.layout]
 sectionId = 'calibration'
@@ -2447,7 +2720,9 @@ order = 1.0
 [[params]]
 key = 'wiping.z_calibration_mode'
 label = 'Z校准模式'
-desc = 'Z校准模式：默认或新型'
+labelEn = 'Z calibration mode'
+desc = 'Z校准模式：原版按机型固定坐标走；新版按模型在板上的实际位置生成（默认）'
+descEn = 'Z calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)'
 tomlKey = 'z_calibration_mode'
 valueType = 'string'
 uiComponent = 'segmented'
@@ -2458,15 +2733,17 @@ jsonKey = 'z_calibration_mode'
 selectable = true
 mergeable = true
 scope = 'universal'
-tomlComment = 'Z校准模式(default=默认,new=新型)'
+tomlComment = 'Z校准模式(original=原版,new=新版)'
 
 [[params.choices]]
-value = 'default'
-label = '默认'
+value = 'original'
+label = '原版'
+labelEn = 'Original'
 
 [[params.choices]]
 value = 'new'
-label = '新型'
+label = '新版'
+labelEn = 'New'
 
 [params.layout]
 sectionId = 'calibration'

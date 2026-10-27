@@ -1,3 +1,5 @@
+import type { StringKey } from '../../i18n'
+
 /*
  * BBS 那批 json 的类型。
  *
@@ -102,27 +104,29 @@ export interface BbsPresetDoc {
   [key: string]: unknown
 }
 
-export type BbsScope = 'user' | 'system' | 'imported'
+/**
+ * 这一项从哪儿来。
+ *
+ *   `user` / `system`  本机 BBS 目录里的两份（`/api/bbs/presets` 读的）
+ *   `imported`         手工拖进来/导入的那几份，内容直接带在身上
+ *   `mkp`              **我们自己的**：预设页「切片器配置」下载到本机的那几份
+ *                      `MKPProcess …json`（2026-10-13 加）—— 它不在 BBS 目录里，
+ *                      是交付面给的东西，所以自成一档（抽屉那个「MKP」入口就是它）
+ */
+export type BbsScope = 'user' | 'system' | 'imported' | 'mkp'
 
-/** 清单里一项的原始形态（本机目录端点与「导入的」都归一成这个） */
-export interface BbsListEntry {
-  name?: string
-  file: string
-  uid?: string | null
-  inherits?: string | null
-  instantiation?: string | boolean | null
-  compatible_printers?: BbsValue | null
-  broken?: string | null
-  mtime?: number
-}
-
-export interface BbsListRaw {
-  user?: BbsListEntry[]
-  system?: BbsListEntry[]
-  available?: boolean
-  reason?: string
-  root?: string
-}
+/*
+ * 清单里一项 / 一份清单的原始形态 —— **定义在 `src/api/contract.ts`**
+ * （那两条 IPC 的返回形状：`BbsLocalEntry` / `BbsLocalTree`）。
+ *
+ * 这里只把名字转出去给页面用：名字照旧（`BbsListEntry` / `BbsListRaw`），
+ * 于是 `bbsSource` 那些解析代码一行都不用改；而"形状只有一处"这件事也守住了 ——
+ * 契约改了这里跟着改，不会出现两份能各自漂的定义。
+ */
+export type {
+  BbsLocalEntry as BbsListEntry,
+  BbsLocalTree as BbsListRaw,
+} from '../../api/contract'
 
 /** normalizeList 的产物：清单里一项，带认出来的机型与可选性 */
 export interface BbsPresetItem {
@@ -148,8 +152,19 @@ export interface BbsPresetItem {
   /** instantiation:"false" 的继承链中间层，BBS 下拉里也不列 */
   isAbstract: boolean
   selectable: boolean
+  /** 灰着的**字典键**与它的参数（见 `reasonText`）：数据层只说事实，取字在渲染处 */
+  reasonKey?: StringKey
+  reasonArgs?: Record<string, string>
   reason: string | null
-  /** 导入进来的那一份，内容直接带在身上（不用再 fetch） */
+  /**
+   * **我们自己的那一份还没下载**（2026-10-13）：目录里登记着、盘上还没有。
+   *
+   * 它照样进清单（灰着列在 MKP 组里，机型与喷嘴按目录登记认），但**不可选** ——
+   * 点了不是切预设，是去预设页把它取回来。原来这几份一份都不列，
+   * 于是"我们其实发过它"这件事在界面上完全看不见。
+   */
+  notDownloaded?: boolean
+  /** 内容直接带在身上的那一份（导入的 / 我们自己的切片器配置）—— 不用再 fetch */
   doc?: BbsPresetDoc
 }
 
@@ -170,10 +185,25 @@ export interface BbsMenuItem {
   disabled: boolean
   offModel: boolean
   reason: string | null
+  /**
+   * 还没下载的我们那几份：**可点，但点了是"去预设页取"**（不是切预设）——
+   * 所以它不走 `disabled`（那是"真点不动"），由抽屉另给一个动作。
+   */
+  notDownloaded: boolean
+  /**
+   * 「这一份为什么灰着 / 为什么不在这一档」的**字典键**（2026-10-26）。
+   * 数据层只说事实，取字在渲染处：这一层拿不到 `tr`，也不该拿。
+   */
+  reasonKey?: StringKey
+  reasonArgs?: Record<string, string>
 }
 
 export interface BbsMenuGroup {
-  title: string
+  /**
+   * 组名的**字典键**，不是字面量（2026-10-26）：组名是界面句子，随语言变。
+   * 数据侧只存键，取字在渲染处（`tr(titleKey)`）。
+   */
+  titleKey: StringKey
   items: BbsMenuItem[]
   weak?: boolean
 }

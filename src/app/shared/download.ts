@@ -13,20 +13,28 @@
  */
 
 import type { DownloadOutcome, DownloadTick } from '../../api/contract'
+import type { Tr } from '../../i18n'
 
 /** 把一次下载的水位说成一句话。五态由后端给（`DownloadTick.stage`），这里只负责措辞 */
-export function tickText(t: DownloadTick): string {
+export function tickText(tr: Tr, t: DownloadTick): string {
   switch (t.stage) {
     case 'connecting':
-      return `${t.fileName}：正在连接数据源`
+      return tr('download.tick.connecting', { name: t.fileName })
     case 'transferring':
       return t.total !== null && t.total > 0
-        ? `${t.fileName}：已收 ${Math.round((t.received / t.total) * 100)}%（${t.received} / ${t.total} 字节）`
-        : `${t.fileName}：已收 ${t.received} 字节`
+        ? tr('download.tick.transferringPct', {
+            name: t.fileName,
+            pct: Math.round((t.received / t.total) * 100),
+            received: t.received,
+            total: t.total,
+          })
+        : tr('download.tick.transferringBytes', { name: t.fileName, received: t.received })
     case 'done':
-      return `${t.fileName}：已落进下载区`
+      return tr('download.tick.done', { name: t.fileName })
     case 'failed':
-      return `${t.fileName}：没成${t.message !== undefined && t.message !== '' ? ` —— ${t.message}` : ''}`
+      return t.message !== undefined && t.message !== ''
+        ? tr('download.tick.failedWhy', { name: t.fileName, message: t.message })
+        : tr('download.tick.failed', { name: t.fileName })
   }
 }
 
@@ -36,6 +44,8 @@ export function tickText(t: DownloadTick): string {
  * 后端约定失败必带原因（`FileOutcome` 的注释：成功了才是空的），所以空原因这一支
  * 是兜底 —— 它出现就说明后端漏说了，界面上宁可写"原因没说清"也不许写"失败"两个字了事。
  */
-export function outcomeText(o: DownloadOutcome): string {
-  return o.message === '' ? `${o.fileName}：没成，原因没说清` : `${o.fileName}：${o.message}`
+export function outcomeText(tr: Tr, o: DownloadOutcome): string {
+  return o.message === ''
+    ? tr('download.outcome.failed', { name: o.fileName })
+    : tr('download.outcome.failedWhy', { name: o.fileName, message: o.message })
 }

@@ -4,7 +4,7 @@
 //!
 //! 1. **整链字节判据**：`load_ir(预设 A1-standard.toml)` → `process_with_ir` 的输出与
 //!    `crates/postprocess/tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）
-//!    **除 MKP 标记行外逐字节相等**。这条把「预设 → IR → 12 步 → 输出」整条链一次钉住
+//!    **除 MKP 标记行与换笔段外逐字节相等**。这条把「预设 → IR → 12 步 → 输出」整条链一次钉住
 //!    —— 参考物正是 `mkp-sr` 的 CLI 用**同一份预设**生成的（命令记在
 //!    `crates/postprocess/tests/end_to_end.rs` 头部）。
 //!    注意它比 `end_to_end.rs` 更强一档：那条走的是**已经转好的 IR TOML**，
@@ -54,6 +54,12 @@ fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
+/// 剔除「换笔块」—— 实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks`
+/// 这一份（2026-10-20 起换笔段有意偏离参考物，见那边的注释）。
+fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
+}
+
 #[test]
 fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     let _seq = lock_sequence();
@@ -64,11 +70,18 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
 
     let raw = std::fs::read_to_string(&work).expect("读输入");
-    let ir = preset::load_ir(
+    let mut ir = preset::load_ir(
         &core_path("tests/fixtures/presets/A1-standard.toml"),
         Some(&raw),
     )
     .expect("预设 → IR 必须成功");
+
+    // 用户偏好（`Ir.prefs`，2026-10-17 落地）的两颗钉子：参考输出按「抬升 Z=20 +
+    // 跳过震动检测」生成（= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳。
+    // 预设文件不带 prefs ⇒ 出厂档兜底，这里手动钉回参考档，字节判据才不假红
+    // （同 `crates/postprocess/tests/end_to_end.rs` 的同名注释）。
+    ir.prefs.begin_stage_retract_z_lift_mm = 20;
+    ir.prefs.skip_vibration_calibration = true;
 
     // 顺手把「第 7、8 步真的发生了」钉住：文件名带扩展名、机型已归一。
     // 名字跟着夹具一起改了（b05 Task 5）：`preset_name` 取的是**实际路径**的文件名。
@@ -78,30 +91,37 @@ fn preset_to_ir_to_output_is_byte_identical_to_the_mkp_sr_reference() {
     );
     assert_eq!(ir.machine.machine_type, "A1", "机型必须归一成 Canonical ID");
 
-    pipeline::process_with_ir(
+    pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
             gcode_path: work.clone(),
             ir,
             output_path: None,
+            calibration: Default::default(),
         },
+        None,
         &mut NoProgress,
         &CancelToken::new(),
     )
     .expect("整链必须成功");
 
-    let got = strip_mkp_marks(&std::fs::read(&work).expect("读回原地输出"));
-    let want = std::fs::read(core_path("tests/golden/42274.2.e2e-A1.reference.gcode"))
+    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除两处**有意偏离**再比：
+    // MKP 标记行（纯增量）与换笔段（2026-10-20 起的净空修正）。
+    let got = strip_swap_travel_blocks(&strip_mkp_marks(
+        &std::fs::read(&work).expect("读回原地输出"),
+    ));
+    let raw = std::fs::read(core_path("tests/golden/42274.2.e2e-A1.reference.gcode"))
         .expect("读整链参考物");
     // 反空转哨兵（字面量，不插值）。
     assert!(
-        want.len() == 668_687,
+        raw.len() == 668_687,
         "整链参考物字节数必须是 668687，实测 {}",
-        want.len()
+        raw.len()
     );
+    let want = strip_swap_travel_blocks(&raw);
     // 大对象不整体 assert_eq!。
     assert!(
         got.len() == want.len(),
-        "剔除 MKP 标记行后长度不同 本侧={} 参考={}",
+        "剔除 MKP 标记行与换笔段后长度不同 本侧={} 参考={}",
         got.len(),
         want.len()
     );

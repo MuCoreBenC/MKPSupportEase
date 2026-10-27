@@ -1,0 +1,3 @@
+# 真实 G-code 只留裁剪过的那一份（rib-tall-min.gcode）；其余本机自己拷，不进库
+*.gcode
+!rib-tall-min.gcode

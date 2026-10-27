@@ -1,15 +1,15 @@
 /*
  * 取预设：选齐「机型 + 版本」后，组装那一份。
  *
- *   文件名 / 落点   有「我那一份」→ 它（`presets-mine/…`，校准保存写它）；
- *                   没有 → 官方那份（`api.getVersionFiles` 里 `kind === 'mkp_preset'` 的条目）
- *   三轴 / 速度     有「我那一份」→ 读它的（`api.getUserCopyFor`，用户自己校准出来的值）；
- *                   没有 → `api.getMachineParams` 的官方默认
+ *   文件名 / 落点   有「本地那份」→ 它（`presets-local/…`，校准保存写它）；
+ *                   没有 → 云端那份（`api.getVersionFiles` 里 `kind === 'mkp_preset'` 的条目）
+ *   三轴 / 速度     有「本地那份」→ 读它的（`api.getLocalCopyFor`，用户自己校准出来的值）；
+ *                   没有 → `api.getMachineParams` 的云端默认
  *                   （`toolhead.offset.x / y / z` + `toolhead.speed_limit`）
  *
- * **校准写在「我的预设」上**（2026-10-08 资源库改判）：官方那一份是模板、只读 ——
- * 要校准它就得先在资源库里「另存为我的预设」，之后读与写都落在那一份 TOML 上。
- * 「没有我的一份」不是错误：校准页照旧显示官方默认值，只是**保存会被拦**
+ * **校准写在「我的预设」上**（2026-10-08 资源库改判）：交付预设那一份是模板、只读 ——
+ * 要校准它就得先在资源库里「另存为本地预设」，之后读与写都落在那一份 TOML 上。
+ * 「没有本地这份」不是错误：校准页照旧显示云端默认值，只是**保存会被拦**
  * （先存一份自己的才有得存）。
  *
  * 为什么走文件体系（作者的原话：「首页也应该是消费那个文件，而不是用硬编码」）：
@@ -21,11 +21,14 @@
  * 的夹具）：文件体系是唯一的路，这里也不会再出现第二份"按版本索引的表"。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { isAppError } from '../../api/contract'
-import type { AppError, Axes, Preset } from '../../api/contract'
+import { t } from '../../i18n'
+import type { AppError, Axes, Preset, AxisLimit, AxisLimits } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
+import { useActivePreset } from '../state/appState'
+import { useDeliveryRevision } from '../state/deliveryState'
 
 export type { Preset }
 
@@ -33,11 +36,12 @@ export type { Preset }
  * 预设的加载态。
  *
  * `idle` 是"还没选齐二级 / 后端没有这一份"，不是"空闲等着下载" —— 没选完就没有"哪一份预设"可谈。
- * 中间态只有 `waiting` 会真的停留：假后端是同进程的同步数据，真后端连接慢时这一步会亮骨架。
+ * 中间态只有 `waiting` 会真的停留：假后端是同进程的同步数据，真机是一次本地 IPC
+ * （**不联网** —— 目录、参数、副本三样都在本机）。
  * `downloading` 这一档**取不到** —— 它原本只由试验场的调试面板扳出来。形状留着不动：
  * 读它的那几个组件是照搬过来的，不为了删一个分支去改它们。
  *
- * `failed` 多带一个 `error`：界面光说一句「连接失败」对排查毫无帮助，日志里那一条才有
+ * `failed` 多带一个 `error`：界面光说一句「读取失败」对排查毫无帮助，日志里那一条才有
  * 上下文，两者之间唯一的桥是 `traceId` —— 所以错误对象要一路带到 `PresetStack` 上
  * （见 `components/TraceTag`）。
  */
@@ -54,7 +58,7 @@ export type PresetState =
  * 等待期间宁可显示一个中性占位，也不猜一个名字出来（PresetStack 在 waiting 态本来就渲染骨架屏，
  * 这个串只在「强制 downloading / failed 且还没拿到响应」这一种情况下露脸）。
  */
-const PENDING_NAME = '预设文件'
+const pendingName = (): string => t('calib.preset.pendingName')
 
 /** 三轴与速度那四个字段 —— 参数注册表里的真名字，别在别处再写一遍 */
 const OFFSET_KEYS = {
@@ -65,10 +69,14 @@ const OFFSET_KEYS = {
 const SPEED_KEY = 'toolhead.speed_limit'
 
 /*
- * 跨页缓存（2026-10-05）：key = `机型/版本`。tab 切换会重挂，没有这份缓存时每次进
- * 校准页读数都要从「—」等一趟 IPC 才长出数字 —— 页脚在进场后当着用户的面再变一次。
+ * 跨页缓存（2026-10-05）：key = `机型/版本|在用的那一份`。tab 切换会重挂，没有这份缓存时
+ * 每次进校准页读数都要从「—」等一趟 IPC 才长出数字 —— 页脚在进场后当着用户的面再变一次。
  * 重挂先吃上一份 ready 结果渲染、照旧重拉（文件可能换过），回来后覆盖。
  * 只缓存 ready：waiting/failed 是过程态，缓存它们会把「失败」钉在页面上。
+ *
+ * ★★ 2026-10-20：键里补上「在用的那一份」（见 [`usePreset`] 里那段）。
+ *   只按 `机型/版本` 分家时，同一个 combo 下的副本与原件的读数挤在同一个格子里 ——
+ *   切过去先亮出另一份的旧值，回来的新值也可能被当成"同一件事"盖不掉。
  */
 const presetCache = new Map<string, Preset>()
 
@@ -77,30 +85,69 @@ export function usePreset(sel: Selection): PresetState {
   const version = sel.variant
   const complete = Boolean(sel.brand && machine && version)
 
-  const [state, setState] = useState<PresetState>(() => {
-    const hit =
-      machine !== null && version !== null ? presetCache.get(`${machine}/${version}`) : undefined
-    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'idle' }
-  })
+  /* 本机文件面代次：别处下载 / 另存 / 删除之后，这一支要重读（见 effect 尾部注释） */
+  const deliveryRevision = useDeliveryRevision()
+
+  /*
+   * ★★ **"同一版、两份文件"要读出各自的数**（2026-10-20 作者实测）。
+   *
+   * 校准页读数那一支走 `getLocalCopyFor(机型, 版本)` —— 入参里没有"哪一份"，后端只能按
+   * **底账正用着的那份**挑（`local_copy_for` 的第一条：`origin == local` 且 path 命中）。
+   * 所以这里**必须跟着底账重读**：原来只依赖投递面代次，而"在同一版的两份之间点使用"
+   * 盘上一个字节都没动，代次不变 ⇒ 永远不重读。作者那张截图正是：抽屉里已经切到
+   * `A1-fastv3.3.toml`（在用），页脚还挂着 `A1-fastv3.3 copy.toml` 的旧值。
+   *
+   * 只有**用户线 + 属于当前 combo** 的那份才进键：云端线不参与那份挑选
+   * （后端只在 `origin == Local` 时按 path 命中），别的 combo 的那份更与本页无关。
+   */
+  const active = useActivePreset()
+  const activePath =
+    active !== null &&
+    active.origin === 'local' &&
+    active.machineId === machine &&
+    active.versionId === version
+      ? (active.path ?? '')
+      : ''
+
+  /*
+   * ★★ 状态**跟着"哪一份"走**（2026-10-17 第六轮）。
+   *
+   * 原来是裸 `useState`：换一版时 effect 里才 `setState(waiting)`，于是**中间有一帧**
+   * 是"旧的 ready + 新的选择" —— 选机型页那一格就拿着旧名字配新副本画出来，看起来
+   * 是"先多出来、再变少、再改名"（作者连拍照到的就是它）。
+   *
+   * 现在状态带钥匙：渲染时发现钥匙对不上，**当帧**就换成新版的（缓存命中直接 ready），
+   * 不会出现混合态。`useMemo` 保证对象身份稳定（`useCalibration` 那条 effect 依赖它）。
+   *
+   * 钥匙 = `机型/版本|在用的那一份`（2026-10-20 补后半截）：同一版下换成另一份时要按
+   * 另一份重读，不能拿上一份的 ready 冒充（那正是"切了还是旧值"）。
+   */
+  const comboKey =
+    complete && machine !== null && version !== null ? `${machine}/${version}` : null
+  const key = comboKey === null ? null : `${comboKey}|${activePath}`
+  const [entry, setEntry] = useState<{ key: string; state: PresetState } | null>(null)
+  const state = useMemo<PresetState>(() => {
+    if (key === null) return { status: 'idle' }
+    if (entry !== null && entry.key === key) return entry.state
+    const hit = presetCache.get(key)
+    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'waiting', name: pendingName() }
+  }, [entry, key])
 
   useEffect(() => {
-    if (!complete || machine === null || version === null) {
-      setState({ status: 'idle' })
-      return
-    }
+    if (!complete || key === null || machine === null || version === null) return
 
     /* 选择在请求回来之前又改了：旧那一份的结果直接丢掉，不许它盖掉新的 */
     let alive = true
     /* 缓存里有上一份就站在它上面刷新，不清成 waiting —— 重挂时读数不许闪「—」 */
-    if (!presetCache.has(`${machine}/${version}`)) {
-      setState({ status: 'waiting', name: PENDING_NAME })
+    if (!presetCache.has(key)) {
+      setEntry({ key, state: { status: 'waiting', name: pendingName() } })
     }
 
     Promise.all([
       api.getVersionFiles(machine, version),
       api.getMachineParams(machine, version),
       /* 「我那一份」在不在（在就用它的校准值 —— 2026-10-08：校准写在「我的预设」上） */
-      api.getUserCopyFor(machine, version),
+      api.getLocalCopyFor(machine, version),
     ]).then(
       ([files, params, copy]) => {
         if (!alive) return
@@ -108,8 +155,8 @@ export function usePreset(sel: Selection): PresetState {
         /* 这个版本没有配 MKP 预设文件（如 A2L）：当没选，别拿半份数据糊弄 */
         const file = files?.files.find((f) => f.kind === 'mkp_preset')
         if (file === undefined) {
-          presetCache.delete(`${machine}/${version}`)
-          setState({ status: 'idle' })
+          presetCache.delete(key)
+          setEntry({ key, state: { status: 'idle' } })
           return
         }
 
@@ -119,47 +166,67 @@ export function usePreset(sel: Selection): PresetState {
           const n = Number(row.value)
           return Number.isFinite(n) ? n : null
         }
-        /* 官方默认那一套：你那份里读不出来的那几格回落到它 */
+        /*
+         * 三轴的**注册表范围**（同一份配方行本来就带着 min/max，不多花一趟 IPC）：
+         * 校准的读数框、Z 板 / XY 板的点选都按它夹 —— 与参数页同一套限制
+         * （作者 2026-10-20：「校准的也要消费注册表的限制，z 就不能为负数」）。
+         * 哪一轴没在注册表里登记（行缺席）就整项不设限。
+         */
+        const limitOf = (paramKey: string): AxisLimit => {
+          const row = params.find((p) => p.key === paramKey)
+          return { min: row?.min, max: row?.max }
+        }
+        const axisLimits: AxisLimits = {
+          x: limitOf(OFFSET_KEYS.x),
+          y: limitOf(OFFSET_KEYS.y),
+          z: limitOf(OFFSET_KEYS.z),
+        }
+        /* 云端默认那一套：你那份里读不出来的那几格回落到它 */
         const x = valueOf(OFFSET_KEYS.x)
         const y = valueOf(OFFSET_KEYS.y)
         const z = valueOf(OFFSET_KEYS.z)
-        const official: Axes | null =
+        const presetAxes: Axes | null =
           x !== null && y !== null && z !== null ? { x, y, z } : null
-        const officialSpeed = valueOf(SPEED_KEY)
+        const cloudSpeed = valueOf(SPEED_KEY)
 
-        /* 我那一份优先：它的三轴是**用户自己校准出来的**（官方那套只是出厂默认） */
-        const axes = copy?.axes ?? official
-        const speed = copy?.speed ?? officialSpeed
+        /* 本地那份优先：它的三轴是**用户自己校准出来的**（云端那套只是出厂默认） */
+        const axes = copy?.axes ?? presetAxes
+        const speed = copy?.speed ?? cloudSpeed
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
         if (axes === null || speed === null) {
-          setState({ status: 'failed', name: PENDING_NAME })
+          setEntry({ key, state: { status: 'failed', name: pendingName() } })
           return
         }
 
         const preset: Preset = {
+          /* 「实际会用的那一份」：有副本就是副本（校准写它） */
           name: copy?.fileName ?? file.fileName,
+          /* 套餐里那份 —— 选机型页的「预设文件」只认它（见 contract 里那段） */
+          bundleName: file.fileName,
+          bundlePath: file.path,
           path: copy?.path ?? file.path,
-          /* 绝对路径跟上面那两格**必须是同一份**：有「我那一份」时就是它那份
-             （后端刚读出正文，所以一定在盘上）；没有时才轮到官方交付那份 ——
-             那份还没「取回」时后端不给绝对路径，界面就不摆复制按钮（见 `Preset.absPath`） */
-          absPath: copy !== null ? copy.absPath : (file.absPath ?? null),
           axes,
+          axisLimits,
           speed,
-          /* 保存校准写它；null = 还没有我的一份（先另存为我的预设才有得存） */
-          mine: copy === null ? null : { path: copy.path, fileName: copy.fileName },
+          /* 保存校准写它；null = 还没有本地这份（先另存为本地预设才有得存）
+             ★ 本仓术语是 `preset / local`（来源只有这两条线，见 contract 的 ActiveOrigin） */
+          local: copy === null ? null : { path: copy.path, fileName: copy.fileName },
         }
-        presetCache.set(`${machine}/${version}`, preset)
-        setState({ status: 'ready', preset })
+        presetCache.set(key, preset)
+        setEntry({ key, state: { status: 'ready', preset } })
       },
       (err: unknown) => {
         if (!alive) return
         console.error('[preset] 取预设失败', err)
         /* 带着 AppError 一起进状态：界面要能显示 traceId，否则日志里那条查不到人 */
-        setState({
-          status: 'failed',
-          name: PENDING_NAME,
-          error: isAppError(err) ? err : undefined,
+        setEntry({
+          key,
+          state: {
+            status: 'failed',
+            name: pendingName(),
+            error: isAppError(err) ? err : undefined,
+          },
         })
       },
     )
@@ -167,10 +234,21 @@ export function usePreset(sel: Selection): PresetState {
     return () => {
       alive = false
     }
-  }, [complete, machine, version])
+    /*
+     * ★★ 2026-10-14 补代次依赖（原来是 `[complete, machine, version]`）：
+     * 这一支读了 `getLocalCopyFor`（"我那份在不在"）—— 而那份文件由**别的页**写
+     * （预设页下载 / 另存 / 改归属）。不跟着投递面代次重读的话，首页与校准页会拿
+     * 一个陈旧的 `local`（比如你刚在预设页另存了一份，这里还以为"还没有本地这份"，
+     * 校准就没地方写）。同一条口径见 `../state/deliveryState.ts` 文件头。
+     *
+     * ★★ 2026-10-20：`key` 的后半截是**在用的那一份**（见 [`usePreset`] 里那段）——
+     * 「使用」只动底账、不动投递面，它必须走这条键，光靠 `deliveryRevision` 收不到。
+     */
+  }, [complete, machine, version, key, deliveryRevision])
 
   /* 直接把 state 交出去。
      身份必须稳定：useCalibration 的「预设换了就作废草稿」那条 effect 依赖的是这个对象本身，
-     每次渲染新造一个会让它反复清空草稿。useState 持有的对象只在 setState 时才换，所以够稳。 */
+     每次渲染新造一个会让它反复清空草稿。`useMemo` + `setEntry` 只在"哪一版"或它那一份状态
+     真的变了时才换引用（同键重读回来的新对象会换 —— 那是新事实，本来该换）。 */
   return state
 }

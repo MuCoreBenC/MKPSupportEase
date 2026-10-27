@@ -74,13 +74,28 @@ BBox / 质心的来源是**真机样例实算**再**刻意平移**：
 ```
 257  78cea51254567b058f77f0aff7b6cf1b44dbb28492a1131f9fa5047d6bb117cf  Precise.new.expected.gcode
 257  8625e9e3ebd2da201d50e5c0b930a6907c9fceaf7ef7764b1d6412a5af420b5e  Rough.new.expected.gcode
-897  3e8f28dff0b93dfdae9e834112a0f621a0373ad6e47606c6eb1fbc382c577990  ZOffset.new.expected.gcode
+897  1999edec799fd982fd8650175e0897e6b5d655267347019f40cd3d724dc26fd6  ZOffset.new.expected.gcode
 ```
 
 XY 的 257 = 经典 235 + 22 条 `G4` 停留（New 每轮都停，经典分支根本不消费 dwell）；
 Z 的 897 与经典同行数（Z 经典本来就有停留），差别只在坐标原点。
 
 证据等级与上面四份相同：**对照当前 Go 实现的输出**，不是正确性背书。
+
+### `ZOffset.new.expected.gcode` 的重切（2026-10-19）
+
+`zoffset` 档的 datum 被作者对着打印件实调了（X：0.079 → −0.271，即 −0.35；
+Y：3.755 → 3.255，即 −0.5 —— 见 `presets/calibration_models.toml` 那一档的注释：
+打出来比对标定线偏右、整排在偏上；X 试过 −0.1、−0.4，最后回调到 −0.35），
+于是这份参考**按新 datum 重切**，其余一律不动：
+
+- 行数 897 不变；
+- 重切分三步做（X −0.1、X −0.3、再 X +0.05 / Y −0.5），每步都逐行核对过差异来源：
+  **170 行逐字节相同**（home / 回原点这类固定坐标）、**727 行只差 X/Y 平移**
+  （图案相关），**没有任何第三种差异**；
+- 也就是说它仍然是「Go 那套结构 + 两个作者实调的常数」，不是照着自家输出重录；
+- 若哪天再调 datum，这条参考要跟着重切，`z_new_matches_classic_up_to_the_datum_trim`
+  也会按新实调量重算差值。
 
 ## detail 参考的导出（Task 6.1，2026-08-29 实测）
 

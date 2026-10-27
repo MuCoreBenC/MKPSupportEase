@@ -1,16 +1,31 @@
 .wrap {
   margin-top: 18px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: flex-start;
   align-self: flex-start;
 }
+
+/*
+ * 2026-10-13：「抄不了」那颗气泡**从这里搬走了**（原来叫 `.toast`，绝对定位挂在
+ * 按钮下方）。
+ *
+ * 原因（作者：「不是啊，首页的那一个也是一样的，它是下面显示。你干嘛要放在这？
+ * 都被截断了」）：这颗按钮住在卡片的 `.info` 列里，而卡片 `.frame` 与 `.info`
+ * 两层都是 overflow: hidden —— 气泡挂在按钮正下方，一头压住读数表、一头被卡片裁掉。
+ *
+ * 现在原因由**页面底部那颗不占位的 `.scriptToast`** 说（与页脚「复制脚本」共用一颗，
+ * 见 PageHome 的 `scriptNote` 与 `.scriptToast`）：落位固定、不挤任何内容、不被子层裁。
+ * 于是这里不再需要 `position: relative` 的定位父级，也不再留 `gap`。
+ */
 
 .btn {
   position: relative;
   flex-shrink: 0;
   padding: 9px 17px;
   border: 1px solid var(--text-1);
-  border-radius: 2px;
+  /* 2026-10-13：与全站按钮统一成**胶囊**（原来这里是 2px 方角，卡里唯一一颗方的） */
+  border-radius: 999px;
   color: var(--text-1);
   font-size: 12.5px;
   transition: background 0.14s ease, color 0.14s ease;
@@ -18,7 +33,7 @@
 
 .btn:hover {
   background: var(--text-1);
-  color: #fff;
+  color: var(--bg-1);
 }
 
 /* 反馈期不吃 hover 反色：「已复制」和勾是 accent-deep，要立在浅底上 */
@@ -81,3 +96,5 @@
     stroke-dashoffset: 0;
   }
 }
+/* （这颗的悬停是"反色成墨底白字" —— 深色里原来有一条补丁把它拉回"白提一层"，
+   已删：悬停的字色跟着基础规则走 `--bg-1`，深浅一条规则全成立。） */

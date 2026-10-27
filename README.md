@@ -8,7 +8,7 @@ Tauri 2 + React 18 + TypeScript。**预设这一条生命周期已经收口**：
 导入 / 在 Finder 中显示）都通了，导入入口与下载管道走同一个数据世界（Catalog + Source +
 Delivery，底账全在 Internal 根，localStorage 不再住任何底账）。首页向导、预设页、校准页、
 参数页、BBS 查看器、设置页（最小版：高级设置 → 预设数据源）都是真数据流；
-**报告页还是空态**（`PagePlaceholder`，明说"本版未接入"）。
+**报告页已接真数据**（执行归档 + 字段面，见 `HANDOFF.md` 增量之三十三 / 三十四）。
 **「同步」页已退役**（2026-10-02 作者裁决）：普通用户不需要"同步"这个概念 ——
 catalog 随包走、更新是内部机制；数据源配置降级成设置页里的开发后门。
 落地现状全景（含还没做的）见 [`docs/PROJECT-AUDIT.md`](docs/PROJECT-AUDIT.md)。
@@ -44,6 +44,7 @@ cd src-tauri && cargo test && cargo clippy -- -D warnings
 | [`docs/DATA-INVENTORY.md`](docs/DATA-INVENTORY.md) | 对账单：现有代码与文件按总纲逐件归位 + 收口进展日志 |
 | [`HANDOFF.md`](HANDOFF.md) | 交接：现在在哪、接下来去哪、纪律与判据清单 |
 | [`docs/GIT-WORKFLOW.md`](docs/GIT-WORKFLOW.md) | 八道本地闸 + 服务端 ruleset + 发版流程 |
+| [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md) | **全仓文档索引**：每份文档的状态 + 冲突 / 重复 / 待合并清单（整理件，不做合并） |
 
 另外两份是从试验场原样搬来的：[`docs/DESIGN-SPACING.md`](docs/DESIGN-SPACING.md)（间距与动画原则）、
 [`docs/3D-ASSET-CONTRACT.md`](docs/3D-ASSET-CONTRACT.md)（上游 3D 资产契约）。

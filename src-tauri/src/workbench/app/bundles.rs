@@ -60,6 +60,12 @@ pub struct BundleRefView {
     pub is_bbs: bool,
     /// 资产域登记的名字。解析不到时是空串（加载期拦过了，真数据上不会出现）
     pub name: String,
+    /// **产物文件名**（只 MKP 预设类有）：`A1-standard.toml`。**由命名规则算出**
+    /// （唯一实现 `build::preset_file_name`，规范 `docs/ARCHITECTURE.md` §10），
+    /// 台账里不存也不许前端自己拼。其余类恒空串 —— 它们的文件名就是 `name` / 源路径。
+    ///
+    /// 作者 2026-10-16：「点 TOML 要显示出来吧……MKP 那一行的完整名字」。
+    pub product_name: String,
     /// 文件在不在。**MKP 预设类按生成状态判**（产物不在资产根里；
     /// 「已生成」= 生成页四档里的 `built`）—— 与资产库列表同一条口径
     pub present: bool,
@@ -157,6 +163,17 @@ fn list_of(
                             a.kind == AssetKind::SlicerProfile && a.slicer.as_deref() == Some("bbs")
                         }),
                         name: a.map_or(String::new(), |a| display_name(presets, a)),
+                        // 产物名只有 MKP 预设才有，且**一律现算**（命名规则唯一实现）。
+                        // 台账里不带这一格 —— 写了就是第二份真源，迟早与规则漂移。
+                        product_name: a
+                            .filter(|a| a.kind == AssetKind::MkPreset)
+                            .map(|a| {
+                                super::build::preset_file_name(
+                                    a.machine_id.as_deref().unwrap_or_default(),
+                                    a.version_id.as_deref().unwrap_or_default(),
+                                )
+                            })
+                            .unwrap_or_default(),
                         present: match (&a, &build_state) {
                             (Some(a), None) => presets.assets.present(a),
                             (_, Some(s)) => *s == crate::workbench::domain::BuildState::Built,
@@ -418,9 +435,11 @@ mod tests {
             .iter()
             .find(|b| b.id == "A1_STANDARD")
             .expect("A1_STANDARD 必须在");
-        assert_eq!(a1.display, "官方推荐");
+        // 显示名 2026-10-16 改口径：从统一的「推荐」改成「机型 + 版本名」的可区分名
+        //（作者：「它的名字怎么都一样，都叫推荐」）。改回来就说清为什么。
+        assert_eq!(a1.display, "A1 标准版");
         assert_eq!(a1.machine_id, "A1");
-        assert_eq!(a1.updated_at.as_deref(), Some("2026-10-03"));
+        assert_eq!(a1.updated_at.as_deref(), Some("2026-10-16"));
         assert_eq!(
             a1.asset_refs
                 .iter()
@@ -438,11 +457,16 @@ mod tests {
             mkp.present,
             "MKP 预设的「在不在」按生成状态判，不该恒 false"
         );
+        // 产物名（2026-10-16 加）：MKP 那行要显示**完整产物文件名**。
+        // 后端按命名规则现算（`{机型}-{版本小写}.toml`），台账里不存 ——
+        // 这条钉住"算得出来且没被谁写死成字面量"
+        assert_eq!(mkp.product_name, "A1-standard.toml");
         // BBS 那条照旧走资产域
         let bbs = &a1.asset_refs[1];
         assert_eq!(bbs.kind, AssetKind::SlicerProfile);
         assert!(bbs.is_bbs && bbs.resolvable && bbs.present);
         assert_eq!(bbs.build_state, None, "只有 MKP 预设类有生成状态");
+        assert_eq!(bbs.product_name, "", "产物名只有 MKP 预设类才有");
         assert_eq!(
             bbs.visibility,
             Visibility::Menu,

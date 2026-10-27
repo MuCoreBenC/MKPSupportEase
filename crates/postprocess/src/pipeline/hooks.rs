@@ -13,6 +13,11 @@ use crate::gcode::{format_python_float, has_e_param};
 use crate::ir::Ir;
 
 /// `applySkipVibrationCalibration`（startup_common.go:218）：删除 M970*/M974 行。
+///
+/// TODO（2026-10-18 作者）：这个开关目前只在 **A1 / A1 mini** 上验证过 —— 只有
+/// 这两家机器的切片器会往 G-code 里写 M970/M974 震动补偿校准序列。别的机型
+/// （P1/X1 系列）用的命令集不一样，还没逐台核对：开关勾了之后该删什么、有没有
+/// 对应的检测序列，以后适配一轮（逐机型实测产物，别只按命令名猜）。
 pub fn apply_skip_vibration_calibration(lines: Vec<String>, skip: bool) -> Vec<String> {
     if !skip {
         return lines;
@@ -143,6 +148,15 @@ fn extract_z_homing_sequence(lines: &[String]) -> Option<Vec<String>> {
     Some(seq)
 }
 
+/// 收笔抬升高度的合法区间（mm，**绝对 Z**）。
+///
+/// 原厂口径（`startup_common.go:366`）：越界**不夹取，而是回落到下限** ——
+/// 所以这里只提供区间，判据仍在 [`build_begin_stage_retract_block`] 里写"回落下限"。
+/// 客户端那一份量程（`runtime::app_state::BEGIN_STAGE_RETRACT_Z_LIFT_*`）必须与这两个数
+/// 一致，由 `runtime::postproc_prefs` 的测试咬住。
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM: i64 = 20;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM: i64 = 100;
+
 /// `buildBeginStageRetractBlock`（startup_common.go:366）。
 fn build_begin_stage_retract_block(
     unmount_lines: &[&str],
@@ -161,8 +175,10 @@ fn build_begin_stage_retract_block(
     if let Some(seq) = homing_seq {
         block.extend(seq);
     }
-    let z_lift = if !(20..=100).contains(&z_lift) {
-        20
+    let z_lift = if !(BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM..=BEGIN_STAGE_RETRACT_Z_LIFT_MAX_MM)
+        .contains(&z_lift)
+    {
+        BEGIN_STAGE_RETRACT_Z_LIFT_MIN_MM
     } else {
         z_lift
     };
@@ -217,11 +233,9 @@ pub fn apply_begin_stage_retract(
     result
 }
 
-/// `ApplyPrePrintBedGlue`：BedGlueEnabled 默认 false —— 钩子点保留，本体未移植
-/// （默认关 + 无字节参考，见模块文档）。
-pub fn apply_pre_print_bed_glue(lines: Vec<String>, _ir_data: &Ir) -> Vec<String> {
-    lines
-}
+/* `apply_pre_print_bed_glue` 那个**空壳已删**（2026-10-17）：它一直"钩子点保留、
+本体未移植"，于是设置页那一档勾了也没有任何效果。真实现现在在
+[`super::bed_glue::apply_bed_glue`]，由 `pipeline/mod.rs` 的写步调用。 */
 
 #[cfg(test)]
 mod tests {

@@ -5,12 +5,12 @@
 //! 参数页那条链是「草稿」（`run/draft-preset.json` 里的整份正文 + 三层取值 + 撤销栈），
 //! 一次只编一份。对比台要的是另一件事：**同时读 2~3 份**做对照，并把用户显式改过的
 //! 那几项写回**各自那份**。混进草稿链会把"编辑目标是哪一份"这个问题重新引进来 ——
-//! 而这一版的产品模型恰恰要把它去掉（每份都是独立的我的预设，谁都不覆盖谁）。
+//! 而这一版的产品模型恰恰要把它去掉（每份都是独立的本地预设，谁都不覆盖谁）。
 //!
 //! # 边界
 //!
-//! - **只认 `presets-mine/`**（[`runtime::mine::read_text`] / [`runtime::mine::write_text`]
-//!   的前缀 + 防穿越两道闸）：baseline 与官方当前版永远不被写；
+//! - **只认 `presets-local/`**（[`runtime::local::read_text`] / [`runtime::local::write_text`]
+//!   的前缀 + 防穿越两道闸）：baseline 与云端当前版永远不被写；
 //! - **结构保真**：一切改动逐项走 [`crate::presetdata::patch::patch_preset_toml`] ——
 //!   注释 / 键序 / inline table / 多行字面量 / 行尾一个字节不动；任何一项失败整批不落；
 //! - **不碰任何状态**：不改使用中指针、不建草稿、不进 archive。
@@ -31,7 +31,7 @@ use crate::runtime;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresetParamValuesDto {
-    /// 相对用户根的路径（`presets-mine/A1-fast-2026-10-15.toml`）
+    /// 相对用户根的路径（`presets-local/A1-fast-2026-10-15.toml`）
     pub path: String,
     pub file_name: String,
     /// 参数 key → **控件看得懂的值**（`-1.5` / `true` / `standard` / 多行 G-code）。
@@ -62,7 +62,7 @@ pub async fn read_preset_params(
     let catalog = runtime::load_released_catalog(&internal_root(&app)?)?;
     let file_name = path.rsplit('/').next().unwrap_or(&path).to_owned();
     traced("readPresetParams", |_| {
-        let text = match runtime::mine::read_text(&user, &path) {
+        let text = match runtime::local::read_text(&user, &path) {
             Ok(t) => t,
             Err(e) => {
                 return Ok(PresetParamValuesDto {
@@ -106,7 +106,7 @@ pub async fn save_preset_params(
     let user = user_root(&app)?;
     let catalog = runtime::load_released_catalog(&root)?;
     traced("savePresetParams", |_| {
-        let text = runtime::mine::read_text(&user, &path)?;
+        let text = runtime::local::read_text(&user, &path)?;
         let field_edits: Vec<FieldEdit> = edits
             .iter()
             .map(|e| FieldEdit::new(e.param_key.clone(), e.value.clone()))
@@ -115,6 +115,8 @@ pub async fn save_preset_params(
         if next == text {
             return Ok(());
         }
-        runtime::mine::write_text(&user, &path, &next)
+        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文；新文件那一路在落盘时就存过） */
+        let _ = runtime::baseline::ensure_origin_copy(&root, &user, &path);
+        runtime::local::write_text(&user, &path, &next)
     })
 }

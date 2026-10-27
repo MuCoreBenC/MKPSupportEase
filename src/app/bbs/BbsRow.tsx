@@ -9,6 +9,8 @@
  * 标签的 title 里带 key 与 mode：这一页是拿来对账的，看到一行想知道它在 json 里叫什么。
  */
 
+import { useLocale, useT } from '../../i18n'
+import { localizeParamMeta } from '../shared/dataLabel'
 import BbsControl from './BbsControl'
 import BbsIcon from './BbsIcon'
 import { norm } from './bbsMerge'
@@ -52,9 +54,13 @@ export default function BbsRow({
   onChange,
   onReset,
 }: Props) {
-  const label = meta.label?.zh || meta.label?.en || paramKey
+  const tr = useT()
+  /* 数据是双语的（`label.zh` / `label.en`，拓竹原版就带两册）—— 按界面语言挑，
+     缺一册回落另一册，最后才回落到参数键（那行不能没有名字） */
+  const locale = useLocale()
+  const label = localizeParamMeta(meta, locale, paramKey)
   const title = `${paramKey}${meta.mode ? `  [${meta.mode}]` : ''}`
-    + `${greyed ? '  · BBS 里此项当前不可用' : ''}`
+    + `${greyed ? `  ${tr('bbs.row.unavailable')}` : ''}`
     + `${hit ? `  · ${hitNote(hit, paramKey, meta)}` : ''}`
   const base = norm(baseline[paramKey], variantIdx)
 
@@ -83,9 +89,10 @@ export default function BbsRow({
           type="button"
           className={s.reset}
           disabled={readOnly}
-          title={`恢复默认值 ${base === undefined ? '（基准缺）' : String(base)}`
-            + (readOnly ? ' · 这一页是只读查看器，改了也不落盘 —— 不可点' : '')}
-          aria-label={`恢复 ${label} 的默认值`}
+          title={tr('bbs.row.resetTitle', {
+            base: base === undefined ? tr('bbs.row.baseMissing') : String(base),
+          }) + (readOnly ? tr('bbs.row.readOnlyHint') : '')}
+          aria-label={tr('bbs.row.resetAria', { label })}
           onClick={() => onReset(paramKey)}
         >
           <BbsIcon name="undo" icons={icons} fallback="↺" />
@@ -109,7 +116,10 @@ export default function BbsRow({
       {Array.isArray(value) && value.length > 1 && (
         <span
           className={s.variant}
-          title={`按挤出头变体取第 ${variantIdx + 1} 个值；完整值 ${JSON.stringify(value)}`}
+          title={tr('bbs.row.variantValue', {
+            index: variantIdx + 1,
+            value: JSON.stringify(value),
+          })}
         >
           [{variantIdx + 1}/{value.length}]
         </span>

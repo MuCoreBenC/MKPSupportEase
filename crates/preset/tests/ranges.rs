@@ -25,7 +25,9 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
     "deprecated",
     "choices",
     "label",
+    "labelEn",
     "desc",
+    "descEn",
     "unit",
     "tomlKey",
     "valueType",
@@ -48,7 +50,7 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
 /// 注册表里出现过、但 `ParamEntry` 不认识的键 → 出现次数。
 /// **快照**：今天是这 5 个。多出新键说明云端加了东西，得有人看一眼是不是该读。
 const UNKNOWN_SNAPSHOT: &[(&str, usize)] = &[
-    ("jsonKey", 74),
+    ("jsonKey", 75),
     ("mergeGroup", 5),
     ("parentKey", 43),
     ("serialization", 1),
@@ -266,7 +268,7 @@ fn kr4_unknown_registry_keys_stay_on_the_snapshot() {
         .get("params")
         .and_then(|v| v.as_array())
         .expect("params 是数组");
-    assert_eq!(params.len(), 74, "反空转：注册表应有 74 条参数");
+    assert_eq!(params.len(), 75, "反空转：注册表应有 75 条参数");
 
     let mut unknown: BTreeMap<String, usize> = BTreeMap::new();
     for p in params {

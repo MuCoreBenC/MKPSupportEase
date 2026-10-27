@@ -20,7 +20,9 @@
   top: 0;
   left: 0;
   min-width: 168px;
-  max-width: 260px;
+  /* 260 + 图标槽那 24px（16 宽 + 8 右距）= 给文字的余量与加图标之前**一模一样**，
+     否则「显示切片器里的那份」这类长项会先撞到上限被截掉尾巴 */
+  max-width: 284px;
   padding: 4px;
   border-radius: 10px;
   background: var(--surface-solid);
@@ -95,6 +97,51 @@
   cursor: not-allowed;
 }
 
+/*
+ * 图标槽（2026-10-16）。
+ *
+ * 16px 见方 + 右距 8px。**不管那一项有没有图标都占着这条宽**
+ * （组件里渲染的是空 `<span>`）—— 作者要的正是"只给高频项挂图标"，
+ * 于是同一张菜单里挂与不挂是混着的，不占位就会参差。
+ *
+ * 颜色不写在这里：让图标继承按钮的 `currentColor`，
+ * 于是普通项是 `--text-1`、危险项自动跟着变红、禁用项自动跟着变灰 —— 一处也不用重写。
+ * 但满黑太压，所以压一档透明度；`transform` 由 WAAPI 管（见 ContextMenu.tsx 文件头）。
+ */
+.ico {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin-right: 8px;
+  opacity: 0.78;
+}
+
+/* 没挂图标的那一项：空槽，只留宽度 */
+.ico:not([data-ico]) {
+  opacity: 0;
+}
+
+/* 危险项（删除）的图标跟着红，别只是文字红 */
+.danger .ico {
+  opacity: 1;
+}
+
+/* 禁用项整行灰，图标也跟着灰（这里只是把透明度交还给颜色本身） */
+.item:disabled .ico,
+.danger:disabled .ico {
+  opacity: 0.55;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sep {
   height: 1px;
   margin: 4px 6px;
@@ -106,65 +153,4 @@
   padding: 6px 10px;
   font-size: var(--fs-label);
   color: var(--text-3);
-}
-
-/* —— 二次确认 —— */
-
-.ask {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 252px;
-  padding: 8px 10px 10px;
-}
-
-.askHead {
-  margin: 0;
-  font-size: var(--fs-body);
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-.askBody {
-  margin: 0;
-  font-size: var(--fs-label);
-  line-height: 1.5;
-  color: var(--text-2);
-}
-
-.askActs {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 2px;
-}
-
-.cancel,
-.ok {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: var(--fs-label);
-  color: var(--text-1);
-  cursor: pointer;
-}
-
-.cancel:focus-visible,
-.ok:focus-visible {
-  outline: none;
-  border-color: var(--text-1);
-}
-
-.ok {
-  border-color: var(--danger);
-  background: var(--danger);
-  color: #fff;
-  font-weight: 600;
-}
-
-.ok:focus-visible {
-  border-color: var(--text-1);
 }

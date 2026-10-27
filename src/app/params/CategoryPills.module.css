@@ -115,8 +115,14 @@
 .pillOn {
   background: var(--surface-solid);
   color: var(--text-1);
-  font-weight: 600;
+  /* 加粗改用描边（照 a05）：分类胶囊宽度不随选中变（见 global.css 的铁律） */
+  text-shadow: var(--state-bold);
   box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
+}
+
+/* 深色（2026-10-12 第二遍）：浅色影在深底上看不见 —— "嵌白浮起"那点层次会丢，换黑影 */
+[data-theme='dark'] .pillOn {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 40%);
 }
 
 /* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」）——
@@ -126,14 +132,24 @@
   outline: none;
 }
 
+/*
+ * 「这一类里还有没保存的改动」的那颗点。
+ *
+ * 照 a05 重做（作者：「这个小红点渲染得很不好」）：
+ *   · 颜色：纯红 → **琥珀**（`--warn`）。红在这个项目里只留给"不可逆 / 真失败"
+ *     （删除、写盘失败），"还有事没完"是琥珀的语气 —— 云端更新那一条也是琥珀；
+ *   · 尺寸：6 → 7px，位置收进 pill 的右上角**内侧**（原来贴边，又被 `.group`
+ *     的 `overflow-x` 裁掉一角，看着像渲染坏了）；
+ *   · 一圈底色描边把它从胶囊底上"抠"出来，压在数字角上也分得清。
+ */
 .dot {
   position: absolute;
-  top: 4px;
-  right: 5px;
-  width: 6px;
-  height: 6px;
+  top: 3px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: #e5484d;
+  background: var(--warn);
   box-shadow: 0 0 0 1.5px var(--surface-solid);
 }
 

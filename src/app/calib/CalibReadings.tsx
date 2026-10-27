@@ -10,17 +10,35 @@
  * 留下的：打字缓冲（打到一半不被 toFixed 改写）、真相变了丢原文、Esc 还原、
  * Enter 失焦、改动绿点与「原 x.xx」chip、当前轴绿标 —— 一条不少。
  * 位置由调用方摆（HUD 台面 = 左下角；向导卡 = 横排）。
+ *
+ * 2026-10-11 第十一轮（作者：「这些很容易出问题……那个闪烁的效果不好看，还有，
+ * 我没有进入编辑态就可以用滚轮或者箭头改变数值，很不好，我决定去掉双击编辑的」）：
+ *
+ *   双击编辑**整个撤掉** —— 回到**单击直进**：点数字（或轴名 / mm / 内衬）即聚焦进
+ *   编辑态，下划线转**绿**（:focus-within），键盘 Tab 照旧。单击不再「闪两下」，
+ *   `hintAt` / `unlocked` 两处状态一并删掉（形态仍是下划线：悬停灰线、聚焦绿线）。
+ *
+ *   滚轮 / 方向键**只在编辑态（聚焦）生效**：滚轮监听里补一道 `activeElement` 判断，
+ *   没聚焦就放行走页面滚动、不 preventDefault、更不改数字 —— 手滑一下不会把已保存的
+ *   值改掉（这正是作者要修的）。聚焦后滚轮仍按 0.05 步进；方向键/箭头自 2026-10-17 起
+ *   也走 `step="0.05"`（原来 0.01，与滚轮两条口径）。
  */
 
 import { useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import SkeletonA44 from '../home/Skeleton'
+import type { AxisLimits } from '../../api/contract'
 import { AXIS_ROWS, type Axes, type Axis, type AxisView } from './calibAxes'
 import s from './CalibReadings.module.css'
+
+/** 没传范围（不该发生，调用方都从 useCalibration 拿）时不设限 */
+const NO_LIMITS: AxisLimits = { x: {}, y: {}, z: {} }
 
 export default function CalibReadings({
   saved,
   draft,
   view,
+  limits = NO_LIMITS,
   activeAxis,
   canType = false,
   onType,
@@ -30,6 +48,8 @@ export default function CalibReadings({
   saved: Axes | null
   draft: Axes | null
   view: AxisView
+  /** 三轴的注册表范围（输入框 min/max 与滚轮步进夹取都按它；2026-10-20 起不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   /** 这一页正在校哪一轴：当前轴的轴名转绿，另外两轴保持灰（三个数一样大） */
   activeAxis?: 'z' | 'xy'
   /** 取到预设才有基准可改；只读时框不变灰（ disabled 会是第三种长相），只是不亮 */
@@ -39,6 +59,7 @@ export default function CalibReadings({
   /** 点「原 x.xx」：这一轴整个退回已保存值（手输 + 板上点选一起清） */
   onReset?: (axis: Axis) => void
 }) {
+  const tr = useT()
   /*
    * 正在打字的那一轴 + 它的原始输入串。
    *
@@ -63,7 +84,12 @@ export default function CalibReadings({
   /*
    * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
    * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
-   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减。
+   * ★ 2026-10-17：`step` 也改成 0.05（见 `data-step` 那一行）—— 滚轮 / 箭头 / 键盘
+   *   三者同一档，不再出现"滚一下 0.05、按一下 0.01"。
+   *
+   * **只在这一格聚焦（编辑态）时才动手**：没聚焦就直接 return，让滚轮照常滚页面 ——
+   * 否则鼠标划过就把已保存的值改了（作者第十一轮要修的正是这个）。
    */
   useEffect(() => {
     const root = rootRef.current
@@ -71,17 +97,20 @@ export default function CalibReadings({
     const onWheel = (e: WheelEvent) => {
       const input = e.target instanceof HTMLInputElement ? e.target : null
       if (!input || input.readOnly || input.type !== 'number') return
+      if (document.activeElement !== input) return
       const k = input.dataset.axis
       if (k !== 'x' && k !== 'y' && k !== 'z') return
       e.preventDefault()
       const cur = Number(input.value)
       if (!Number.isFinite(cur)) return
-      const next = Math.min(50, Math.max(-50, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
+      /* 夹取按注册表范围（原来硬编码 ±50，与注册表的 z ∈ [0,20] 打架） */
+      const l = limits[k]
+      const next = Math.min(l.max ?? Infinity, Math.max(l.min ?? -Infinity, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
       onType(k, next.toFixed(2))
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [canType, onType])
+  }, [canType, onType, limits])
 
   return (
     <dl className={s.readings} ref={rootRef}>
@@ -107,24 +136,24 @@ export default function CalibReadings({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-                title={revertible && saved ? `点一下还原成 ${saved[k].toFixed(2)}` : undefined}
+               
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
-                原 {saved ? saved[k].toFixed(2) : '0.00'}
+                {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
               </button>
             </dt>
             <dd className={s.axisValue}>
               {view === 'value' && draft ? (
-                <label className={s.field} data-readonly={!canType} title={canType ? undefined : '先选一份预设再改'}>
+                <label className={s.field} data-readonly={!canType}>
                   <input
                     id={id}
                     className={s.fieldInput}
                     type="number"
-                    step="0.01"
-                    min={-50}
-                    max={50}
+                    step="0.05"
+                    min={limits[k].min}
+                    max={limits[k].max}
                     inputMode="decimal"
-                    aria-label={`${label}（毫米）`}
+                    aria-label={tr('calib.axisAria', { label })}
                     data-axis={k}
                     readOnly={!canType}
                     tabIndex={canType ? undefined : -1}
@@ -154,7 +183,7 @@ export default function CalibReadings({
                   <span className={s.unit}>mm</span>
                 </label>
               ) : view === 'loading' ? (
-                <SkeletonA44 label="正在取预设" />
+                <SkeletonA44 label={tr('calib.loadingPreset')} />
               ) : (
                 <span className={s.axisBlank}>—</span>
               )}

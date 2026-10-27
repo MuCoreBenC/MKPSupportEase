@@ -38,7 +38,7 @@
  *   .grp    1px 圆角子卡：孩子们装在卡里，条件小签骑在卡沿上 —— 关系不用线说。
  *   .accBody grid-rows 动画壳：摊开 1fr / 收拢 0fr，240ms；收拢时行还挂在 DOM 里
  *           （overflow hidden 裁掉），所以切支是「同一支收起来」，不是卸载再挂一遍。
- *   .fold   折叠条（卡头，「▸ N 项参数 · 行名…」）。点了就是把条件参数改成那一支的值。
+ *   .fold   折叠条（卡头，箭头 +「N 项参数 · 行名…」）。点了就是把条件参数改成那一支的值。
  *
  * 绿缝：条件行展开（ⓘ）时容器铺绿当「缝」，子卡原样嵌在缝里。缝的 12px 从子卡的
  * 16px 边距里挪进来（16 = 12 + 4），行的位置展开前后一像素不动。
@@ -52,8 +52,17 @@
   background: rgb(225 243 233);
 }
 
-/* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管 */
+/* 深色（2026-10-12 第二遍）：上面那格是**实色的薄荷绿**（不是半透明）——
+   深色里是一整片发亮的绿。换成 accent-soft：与浅色那格同一个"绿意"的语义 */
+[data-theme='dark'] .tree[data-seam='true'] {
+  background: var(--accent-soft);
+}
+
+/* 缝态：支的边距挪进 padding（16 = 12 + 4，行一像素不动），底边距归 padding 接管。
+   ★ margin-top 也要归零（2026-10-21）：树没有顶内衬，4px 会**穿透**树（margin collapsing）
+   把整棵树推下去 —— 详情绿面与缝绿之间露出一条 body 深灰横条。 */
 .tree[data-seam='true'] > .branch {
+  margin-top: 0;
   margin-left: 4px;
   margin-right: 4px;
   margin-bottom: 0;
@@ -91,10 +100,11 @@
   transition: background-color 0.24s cubic-bezier(0.32, 0.68, 0.12, 1);
 }
 
-/* 收拢态的支：虚线灰卡 */
+/* 收拢态的支：虚线灰卡。**实底**（作者 2026-10-21：「这种时候也不要透明」）——
+   原来那层 2.4% 的白压在绿缝里等于没垫，卡面整个透掉；虚线边框照留 */
 .grpOff {
   border-style: dashed;
-  background: rgba(16, 24, 32, 0.018);
+  background: var(--card-face);
 }
 
 /*
@@ -125,14 +135,14 @@
   outline-offset: -1px;
 }
 
-/* 摊开时 ▸ 转成 ▾ —— 头自己不动，只有箭头翻身 */
-.foldMark {
-  flex-shrink: 0;
-  transition: transform 0.24s cubic-bezier(0.32, 0.68, 0.12, 1);
-}
-
-.fold[aria-expanded='true'] .foldMark {
-  transform: rotate(90deg);
+/*
+ * 卡头那颗箭头就是 `ui.disclosureCaret`（SVG 形状，闭着 -90° 朝右、摊开 0° 朝下，
+ * 绕自己中心翻身 —— 不换字符，字符转了会被字体度量拉一下）。角度全由那个类给，
+ * 这里只把**拍子**对上卡身：卡身 0.24s 收放，箭头也 0.24s（不然箭头先到位、卡还在长）。
+ */
+.fold svg {
+  transition-duration: 0.24s;
+  transition-timing-function: cubic-bezier(0.32, 0.68, 0.12, 1);
 }
 
 .foldCount {

@@ -11,8 +11,10 @@
  * 图标 2026-10-04 整个退役，`icon` 字段随之撤掉。）
  *
  * 「客户端接发布包」这一轮加了「BBS 预设」一条 —— 顺序照试验场 A40 的顶栏：
- * - **BBS 预设**（`bbs`）：Bambu Studio 工艺预设查看器。它有两个入口，另一个是预设页右键
+ * - **工艺**（`bbs`）：Bambu Studio 工艺预设查看器。它有两个入口，另一个是预设页右键
  *   菜单里那一项（跨页带目标文件名，见 `App.tsx` 的 `pendingBbs`）。
+ *   页签只叫「工艺」（2026-10-13 作者口径）：**路由 id 仍是 `bbs` 不改** —— 它连着
+ *   `App.tsx` 的落地页判断与预设页右键的跨页跳转。
  * - **同步**（`sync`）原来也在这张表里（说明书自动同步 + 「获取预设」）—— 2026-10-02
  *   作者裁决**整页退役**：普通用户完全不需要"同步"这个概念（catalog 随包走、更新是
  *   内部机制），数据源配置降级成设置页里的开发后门。
@@ -21,16 +23,25 @@
  *   里面就是同一个 `PageParams`）。顶栏再留一个"参数"页签，用户点进去还得先挑一份，
  *   与"右键这一份改这一份"是同一条路的两个入口，留一个就够。导航只剩 6 条。
  */
+import type { StringKey } from '../../i18n'
+
+/**
+ * 页签的 `label` 是**字典键**（2026-10-25 起），不是句子。
+ *
+ * ★ 为什么不能直接放句子：这张表是模块级常量，求值一次就冻住 —— 放中文就永远是中文。
+ *   渲染时由 `TopTabs` 用 `useT()` 取当前语言的那一份（语言一换，页签同帧换字）。
+ * ★ `id` 仍是路由真值（`machine` / `preset` / …），**不随语言变**。
+ */
 export interface Tab {
   id: string
-  label: string
+  label: StringKey
 }
 
 export const tabs: Tab[] = [
-  { id: 'machine', label: '首页' },
-  { id: 'preset', label: '预设' },
-  { id: 'calib', label: '校准' },
-  { id: 'bbs', label: 'BBS 预设' },
-  { id: 'report', label: '报告' },
-  { id: 'settings', label: '设置' },
+  { id: 'machine', label: 'tabs.home' },
+  { id: 'preset', label: 'tabs.presets' },
+  { id: 'calib', label: 'tabs.calib' },
+  { id: 'bbs', label: 'tabs.bbs' },
+  { id: 'report', label: 'tabs.report' },
+  { id: 'settings', label: 'tabs.settings' },
 ]

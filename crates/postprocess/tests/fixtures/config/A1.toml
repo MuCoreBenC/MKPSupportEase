@@ -27,6 +27,7 @@ WaitForDryingCommand = ""
 InterModelLiftHeight = 2.0
 PassCount = 1
 SparseRatio = 50.0
+SwapHopHeight = 1.0
 ZCompEnabled = false
 ZCompMode = "bed"
 ZLiftHeight = 5.0
@@ -89,6 +90,17 @@ TempXOffsetCalibr = 0.0
 TempYOffsetCalibr = 0.0
 TempZOffsetCalibr = 0.0
 UpdateDate = ""
+
+[Prefs]
+AutoTowerPosition = false
+BedGlueAllModels = false
+BedGlueEnabled = false
+BeginStageRetractEnabled = true
+BeginStageRetractZLiftMm = 30
+GlueBottomEnabled = false
+SkipVibrationCalibration = false
+XyCalibrationDwellSec = 3
+ZCalibrationDwellSec = 2
 
 [Prime]
 Enabled = true

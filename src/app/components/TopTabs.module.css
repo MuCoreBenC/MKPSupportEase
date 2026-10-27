@@ -5,23 +5,97 @@
   align-items: center;
   gap: 18px;
   padding: 0 12px 0 16px;
-  border-bottom: 1px solid rgb(16 24 32 / 7%);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 80%);
   min-width: 0;
 
-  /* 标题栏是窗口本体，不是可拖走的内容 —— 系统上其它软件这里都是普通箭头。
-     必须显式写 default：不写会落到浏览器的 auto，在「MKP」和页签文字上变 I 形光标。
-     按钮自带 cursor: pointer（global.css）会盖掉它 */
-  cursor: default;
+  /*
+   * 底边那条分隔（2026-10-15 作者：「拐角有个很明显的分割的那个不同的颜色」）。
+   *
+   * 原来写的是 `border-bottom: 1px solid var(--hover-1)` + `box-shadow: 0 1px 0
+   * rgb(255 255 255 / 80%)` —— 深色下那道白影是**80% 的纯白**（不是主题 token），
+   * 压在 `#212121` 的标题栏上 ⇒ 就是那一条亮线；再加上 `--hover-1` 那一层，
+   * 就是作者截图里那条"分割"。
+   *
+   * ★★ 而且它是**直的**：窗口圆角 26 的左上那一小段里，"直线 + 弯角"错开，
+   * 于是圆角那段显得格外突兀（他截图圈的正是那儿）。
+   * ⇒ 两件事一起收：① 两条都换成主题 token（`--hairline` 一档）；
+   *   ② 让它在**两端渐隐**（只在中间实），圆角那段就不再有硬边。
+   *
+   * ★★★ **渐隐不能挂在 `.bar` 自己的 `mask-image` 上**（2026-10-16 修）：
+   * 第一版就是那么写的，结果**把更新面板整个切没了** —— 作者：
+   * 「我点了更新的，它的那个通知气泡触发不出来了」。
+   * 原因是 `mask-image` 会**创建一个裁剪上下文**：`.bar` 的 mask 只覆盖它自己那 38px 高，
+   * 而 `.panel`（`position: absolute; top: calc(100% + 8px)`）落在 38px **之外**
+   * ⇒ 被裁得一点不剩。（同一个坑当时也压掉了 `MKP` 那颗 toast，见 `TitlebarToast` 的头注释。）
+   *
+   * ⇒ 换成**伪元素画那条线**：`::after` 是 `.bar` 的子盒，用 `linear-gradient` 当**背景**
+   * 做两端渐隐 —— 视觉效果一模一样，但 `.bar` 上**没有任何 mask**，
+   * 后代想伸多远就伸多远。
+   * ★★ 教训：给一个容器加 `mask` / `filter` / `transform` / `contain` 之前，
+   * 先问"它里面有没有靠绝对定位往外伸的东西"—— 这四样都会把那些东西一起裁掉。
+   */
+  border-bottom: none;
+  position: relative; /* `::after` 的定位父级 */
+
+  /*
+   * ★★★ **标题栏永远在模态框层之上**（2026-10-18 作者：「模态框会导致窗口拖不动，又回归了，
+   * 必须彻底修好」）。
+   *
+   * 来路：后处理那一屏的 `.layer` 是 `position: absolute; inset: 0; z-index: 92`
+   * ——它**铺满整扇窗**（普通模态框只铺内容区），于是标题栏被它整个盖住：鼠标落在
+   * 标题栏上时命中的是遮罩，`onMouseDown` 的拖窗根本收不到事件。
+   * 之前只在「跑着」那一态补了一条 `dragShield`（95），结果态 / 问句态就漏了 ——
+   * 表现正是作者说的"有时候拖不动"。
+   *
+   * 现在把标题栏抬到 **93**（压过后处理层 92，仍低于窗控键 94 / 拖窗带 95）：
+   *   · 任何后处理状态（跑着 / 问句 / 结果）标题栏都能拖、页签都点得着；
+   *   · 「跑着」那一态仍由 `dragShield`（95）接管整条标题栏（窗控键点不着，只能拖）；
+   *   · 普通模态框（40，portal 到内容区）本来就盖不到标题栏 —— 口径统一。
+   * 层表见 `App.module.css` 头注释。
+   */
+  z-index: 93;
+
+  /*
+   * ★ 顶栏整条**不可选**（2026-10-14 作者：「这些不要可以拖选，其他地方的拖选也不能
+   * 碰到这些」）—— 两个理由，真机上都见过：
+   *   ① 从正文（机型名 / 文件名那种）往上拖，选区会把整条标题栏一起吞进去（截图里那条蓝）；
+   *   ② 这里正是**拖窗的起点**：选区跟着指针长出来的同时窗口也在动，两件事叠在一起。
+   *
+   * **显式写、不靠 `body` 继承**（`global.css` 那层在真机上没管住这一条，原因见
+   * `global.css` 里"拖选（selection）的划分"那段）；前缀与标准同样成对写。
+   */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-/* macOS：高度与默认一致（52，红绿灯要求），仅左上留给红绿灯、tab 靠右 */
+/* 底边那条渐隐分隔线（见上面 .bar 的注释：为什么不用 mask） */
+.bar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0,
+    var(--hairline) 4%,
+    var(--hairline) 96%,
+    transparent 100%
+  );
+}
+
+/* macOS：只左上留给红绿灯、tab 靠右。
+   ★ 2026-10-15：**高度不再单独写** —— `--titlebar-h` 已改成 38（与 Windows 同高），
+   原来那条"52 是红绿灯要求"的约束随"灯由我们自己摆"一起作废（见 tokens.css 那段）。 */
 .bar[data-platform='macos'] {
   gap: 16px;
   padding: 0 16px 0 14px;
 }
 
-/* Windows：标题栏矮一档（38px），窗口键贴到右上角，右内衬归零 */
+/* Windows：标题栏 38px，窗口键贴到右上角，右内衬归零。
+   ★ 高度仍显式写（读 --titlebar-h-win）而不是省掉：两档**值相同但语义不同**，
+   将来哪一边要动时不至于连累另一边 */
 .bar[data-platform='windows'] {
   height: var(--titlebar-h-win);
   padding-right: 0;
@@ -44,12 +118,76 @@
   flex-shrink: 0;
 }
 
+/*
+ * `MKP` 字标 —— 同时是「复制后处理脚本」的快捷入口（2026-10-16）。
+ *
+ * 作者要的观感是「感觉那种可以按压的感觉」，且**不要引导层**（「没必要出提示那种太繁琐了，
+ * 就很简单，让用户自己摸索到就算了。可能一开始它会发光，或者闪一下」）。
+ *
+ * ⇒ 三条一起给，够了就收手：
+ *   ① 悬停：底色浮一层 + 字色提一档（**不换字号/字重**，否则会挤动右边那排页签）；
+ *   ② 按压：`transform: scale(0.96)` —— 这是"可按压"最直接的信号，比换色更本能；
+ *   ③ 入场：首屏轻轻"亮一下"（一次就完，不循环 —— 循环会变成干扰源）。
+ *
+ * ★★★ 绝不能改 `font-size` / `letter-spacing` / `padding` 的任何状态值：
+ * 它是 `.bar` 里参与 flex 的一项，宽度一动，**右边那排页签和那条滑动下划线**全跟着跳
+ * （下划线是 ResizeObserver 量出来的，它会重测，于是"点一下 MKP，页签条抖一下"）。
+ * 所以这里只动"不影响盒模型"的东西：`background` / `color` / `transform`。
+ */
 .logo {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.1em;
   color: var(--text-1);
   flex-shrink: 0;
+
+  /* 用 `<button>` 之后要抹掉浏览器默认那套（边框 / 底色 / 内衬 / 字体） */
+  appearance: none;
+  margin: 0;
+  padding: 3px 7px;
+  border: 0;
+  background: transparent;
+  border-radius: var(--r-sm);
+  font-family: inherit;
+  /* ↑ `padding` 是**唯一**会影响盒模型的属性，但它是**常量**（不随状态变），
+     所以宽度稳定；它只是让"可点区域"比字本身大一圈，好点。 */
+
+  cursor: default; /* 标题栏里几乎所有东西都是 default，突然冒个手型反而突兀 */
+  transition:
+    background-color 0.14s ease,
+    color 0.14s ease,
+    transform 0.09s ease;
+}
+
+/* 只在真正"能按"的时候才给悬停反馈 —— 标题栏别处拖拽时别误亮。
+   ★ 只动 `background`：字色 `--text-1` 已是主文字最亮的一档（没有 `--text-0`），
+   想再"提一档"只能加字重/描边，那会改宽度 ⇒ 挤动右边页签（见上面那段账）。 */
+.logo[data-clickable='true']:hover {
+  background: var(--hover-1);
+}
+
+.logo[data-clickable='true']:active {
+  transform: scale(0.96);
+  background: var(--hover-2);
+}
+
+/* 入场"亮一下"：一次，不循环。`forwards` 把终态按在"完全不着色"上，
+   不留残影（这是全站那条"fill:forwards 会把元素永久按在透明"的相反用法 ——
+   这里终态恰恰就是透明，所以安全）。 */
+@keyframes logo-nudge {
+  0% {
+    background: transparent;
+  }
+  28% {
+    background: var(--hover-1);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.logo[data-clickable='true'] {
+  animation: logo-nudge 1.1s ease-out 0.55s 1 both;
 }
 
 .tabs {
@@ -166,9 +304,14 @@
   /* App.module.css 的 .shell::after 在 z-index 60 上画了一条
      `inset 0 1px 0 rgb(255 255 255 / 90%)` 的顶部高光，它会盖在窗口键上 ——
      表现就是关闭键悬停变红时顶边露出一条 1px 白缝。抬到 60 之上让按钮盖住它，
-     红色才真的贴到窗口最顶一行像素 */
+     红色才真的贴到窗口最顶一行像素。
+
+     94 还多压过一样东西：窗口内侧那圈 resize 命中条（93）—— 正常状态下这三颗键
+     优先于命中条（贴窗口最上沿那一块是"点关闭"而不是"改大小"）。
+     跑着的时候后处理那一屏会铺一条 95 的拖窗带把整条标题栏盖掉，这三颗键
+     自然也就点不着了（见 `postprocess/PostProcessModal.module.css`） */
   position: relative;
-  z-index: 91;
+  z-index: 94;
 
   /* 下边同理：.bar 的 1px border-bottom 吃掉了内容盒最后一行，
      stretch 只能填到 37px。负外边距把 margin box 撑回 38px，
@@ -196,12 +339,12 @@
 }
 
 .ctrl:hover {
-  background: rgb(16 24 32 / 6%);
+  background: var(--hairline);
   color: var(--text-1);
 }
 
 .ctrl:active {
-  background: rgb(16 24 32 / 11%);
+  background: var(--hover-2);
 }
 
 .close:hover {
@@ -212,4 +355,17 @@
 .close:active {
   background: #cf3c41;
   color: #fff;
+}
+
+/*
+ * 深色（2026-10-12）：标题栏这儿只剩**下面那道白高光**要处理。
+ *
+ * 浅色是"一道墨线 + 线下一道白高光"（`.bar` 的 border-bottom 与 box-shadow）——
+ * 深色里前者吃 `--hover-1`（已经是"白 8%"的一道发丝）；后者是给浅底配的 80% 白光，
+ * 深底上留着会是一条扎眼的白线（试验场第 31 轮那条：硬线的量要按底色重配），撤掉。
+ * 窗口键的悬停 / 按下不用再写：`.ctrl:hover` / `.ctrl:active` 已经走变量。
+ * 关闭键那颗红两套共用（macOS / Windows 的关闭键都是红的），不动。
+ */
+[data-theme='dark'] .bar {
+  box-shadow: none;
 }

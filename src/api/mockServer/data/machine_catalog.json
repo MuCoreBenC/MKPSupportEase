@@ -26,7 +26,7 @@
             "presetFile": "A1.toml",
             "recommendedBundle": "A1_STANDARD",
             "tag": "推荐",
-            "description": "官方标准配置，适合大多数用户"
+            "description": "标准配置，适合大多数用户"
           },
           {
             "id": "FAST",
@@ -68,7 +68,7 @@
             "presetFile": "A1M.toml",
             "recommendedBundle": "A1_MINI_STANDARD",
             "tag": "推荐",
-            "description": "官方标准配置"
+            "description": "标准配置"
           },
           {
             "id": "FAST",

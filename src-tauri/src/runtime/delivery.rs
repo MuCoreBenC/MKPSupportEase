@@ -33,7 +33,7 @@
 //!
 //! # 这一份我们认得出吗（第三圈第 6 层）
 //!
-//! 盘上有字节 ≠ 那字节是官方内容。`stale` 只说"与目录不一致"，而那可能是两种完全不同的事：
+//! 盘上有字节 ≠ 那字节是云端内容。`stale` 只说"与目录不一致"，而那可能是两种完全不同的事：
 //!
 //! ```text
 //! 盘上这一份 vs 目录登记的当前版本
@@ -42,9 +42,11 @@
 //!   └─ 哪儿都对不上    → [`FileTrust::Unknown`]   这台机器上查不出它属于哪一版
 //! ```
 //!
-//! **`stale` 与"云端有没有更新"是两件事**：前者问"本机这份是不是我们认可的官方内容"，
+//! **`stale` 与"云端有没有更新"是两件事**：前者问"本机这份是不是我们认可的云端内容"，
 //! 后者是 [`super::update::check`] 的事（比目录指纹）。混成一句"需更新"，用户既不知道
 //! 自己的文件是不是被改过，也不知道该不该等更新 —— 所以这一段单独给 [`trust_entries`]。
+
+use postprocess::diag::messages;
 
 use std::path::{Path, PathBuf};
 
@@ -83,8 +85,11 @@ impl<'a> LocalDirSource<'a> {
 impl Source for LocalDirSource<'_> {
     fn fetch(&self, file: &CatalogFile) -> Result<Vec<u8>, AppError> {
         std::fs::read(self.root.join(&file.file_name)).map_err(|e| {
-            AppError::not_found(format!("下载源里没有 {}", file.file_name))
-                .with_detail(e.to_string())
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.382",
+                &[("v1", &file.file_name.to_string())],
+            ))
+            .with_detail(e.to_string())
         })
     }
 }
@@ -130,27 +135,67 @@ fn sha_mismatch_error(internal_root: &Path, file: &CatalogFile, got: &str) -> Ap
     let stale = remote_revision(internal_root)
         .zip(local_revision(internal_root))
         .filter(|(remote, local)| remote != local);
-    AppError::sha_mismatch(sha_mismatch_message(file, got, stale))
+    /* 技术值下线：两串 SHA + 两个 revision 只有排查时用得上，进 detail（进日志），
+    界面那一句一个技术值都不出现 */
+    let detail = format!(
+        "{} 期望 SHA {}，拿到 {}；stale = {:?}",
+        file.path,
+        file.expected_sha().unwrap_or("<目录未登记>"),
+        got,
+        stale
+    );
+    AppError::sha_mismatch(sha_mismatch_message(file, stale.as_ref()))
+        .with_message_code(sha_mismatch_code(stale.is_some()))
+        .with_detail(detail)
+}
+
+/// 那句话的**码**：两种成因两件事，用户要做的事也不同（刷新目录 vs 找发布方），
+/// 于是两个码 —— 贴给 AI 的时候，"目录过期"与"文件真坏"不该搜到同一行。
+pub(crate) fn sha_mismatch_code(stale: bool) -> &'static str {
+    if stale {
+        "E_DELIVERY_STALE_001"
+    } else {
+        "E_DELIVERY_SHA_001"
+    }
 }
 
 /// 那句话本身 —— 与"怎么拿到两个 revision"分开，于是它能被单测逐字钉住
 /// （取 revision 要联网，这台机器上测不了；说话不该跟着一起测不了）。
-fn sha_mismatch_message(file: &CatalogFile, got: &str, stale: Option<(String, String)>) -> String {
-    let why = match stale {
+///
+/// ★ 2026-10-19（作者：「这段话这么长」）：**只留用户要做的那个动作**。
+///   原来那句把两串 64 位 SHA、两个 revision、外加一段"目录过期时拿旧 SHA 比对必然
+///   对不上"的因果解释全塞进一句话 —— 那是排查时给自己看的，不是给用户的。
+///   SHA 与 revision 从此只在**日志**里（`tracing::warn!` 把 detail 带上），
+///   界面这句话一个技术值都不出现。
+fn sha_mismatch_message(file: &CatalogFile, stale: Option<&(String, String)>) -> String {
+    sha_mismatch_sentence(&file.file_name, stale)
+}
+
+/// 那句话本身，**不依赖 `CatalogFile`**。
+///
+/// 拆这一层是为了**开发台的故障注入**（`workbench/app/devfault`）：那边要造一条
+/// "目录过期"的错给界面演，走这一个函数 ⇒ **演示里那条错与真机上那条错一字不差**。
+/// 抄第二份文案的话，改一处就漂一处，演示出来的反而是错的那句。
+pub(crate) fn sha_mismatch_sentence(name: &str, stale: Option<&(String, String)>) -> String {
+    match stale {
+        // 已定位到目录过期：说清是哪一步，给一个动作
         Some((remote, local)) => format!(
-            "本地目录停在 revision {local}，云端已经是 {remote} —— \
-             先点「检查更新」刷新目录再下载（目录过期时拿旧 SHA 比对，必然对不上）"
+            "{name} 的内容对不上 —— 本机目录停在 {local}，云端已是 {remote}，先点「检查更新」再重试"
         ),
         // 取不到远端（没配源 / 离线）时照保守说：**不拿本机目录当"远端"**，
         // 那会把"没联网"误报成"文件坏了"
-        None => "文件在源头就被改过或传坏了".to_owned(),
-    };
-    format!(
-        "{} 的内容对不上（期望 SHA {}，拿到 {}）—— {why}",
-        file.file_name,
-        file.expected_sha().unwrap_or("<目录未登记>"),
-        got
-    )
+        None => format!(
+            "{name} 的内容对不上（和本机目录登记的那份不是同一版）—— 文件可能在源头被改过或传坏了，先重下一遍；还不行就找我们要一份"
+        ),
+    }
+}
+
+/// 「大小对不上」那句话的**码**（与 [`sha_mismatch_code`] 同一族：交付校验失败）。
+pub(crate) const SIZE_MISMATCH_CODE: &str = "E_DELIVERY_SIZE_001";
+
+/// 「大小对不上」那句话本身 —— 与 [`sha_mismatch_sentence`] 同一个拆法（给开发台故障注入用）
+pub(crate) fn size_mismatch_sentence(name: &str) -> String {
+    ::postprocess::diag::messages::text("ui.runtime.delivery.size_mismatch", &[("name", name)])
 }
 
 /// 本机 registry 里那份 catalog 的 revision（读不到就 `None`）
@@ -197,12 +242,13 @@ pub fn deliver(
     }
     if let Some(want) = file.expected_size() {
         if bytes.len() as u64 != want {
-            return Err(AppError::corrupted(format!(
-                "{} 的大小对不上（目录记 {} 字节，拿到 {} 字节）",
-                file.file_name,
-                want,
-                bytes.len()
-            )));
+            return Err(AppError::corrupted(size_mismatch_sentence(&file.file_name))
+                .with_message_code(SIZE_MISMATCH_CODE)
+                .with_detail(format!(
+                    "{} 目录记 {want} 字节，拿到 {} 字节",
+                    file.path,
+                    bytes.len()
+                )));
         }
     }
 
@@ -221,8 +267,11 @@ pub fn deliver(
         let archive_target = archive_dir(internal_root).join(&file.path);
         std::fs::create_dir_all(archive_target.parent().expect("归档路径必有父目录")).map_err(
             |e| {
-                AppError::io(format!("建不出归档目录：{}", archive_target.display()))
-                    .with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.delivery.383",
+                    &[("v1", &archive_target.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             },
         )?;
         if !archive_target.exists() {
@@ -242,7 +291,7 @@ pub fn deliver(
      * 同字节重放（旧份在、字节一致）：什么都没发生 —— 不记事件。 */
     let new_sha = sha_hex(&bytes);
 
-    /* ★ **隐藏 baseline**（2026-10-08 作者改判）：每一版官方预设都留一份不可见的
+    /* ★ **隐藏 baseline**（2026-10-08 作者改判）：每一版交付预设都留一份不可见的
      * 基准快照（[`super::baseline`]）。按内容摘要寻址 ⇒ 幂等、每版一份、不覆盖；
      * 它是参数页「恢复默认」的取值依据，也是用户那份血统里 `based_on_sha256`
      * 指向的东西。**与归档（`archive/`）是两件事**：归档服务交付四态判定，
@@ -445,9 +494,9 @@ fn bootstrap_events(internal_root: &Path, catalog: &super::Catalog) {
 
 /// 归档区里的一份旧版本。**盘就是底账**（与下载区同一套规矩）：扫盘得到，不记账本。
 ///
-/// 归档是**官方版本生命周期**的一部分（换版本时旧份进 `archive/`，不删），
+/// 归档是**云端版本生命周期**的一部分（换版本时旧份进 `archive/`，不删），
 /// **不是用户修改历史** —— 用户改出来的东西是另一条线（另存成另一份文件），
-/// 永远不回写官方原件。所以这里只有"官方旧版本"，没有"谁在什么时候改了什么"。
+/// 永远不回写云端原件。所以这里只有"云端旧版本"，没有"谁在什么时候改了什么"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArchivedFile {
     /// 相对内部根的路径（`archive/delivery/mkp/presets/A1-fast.toml`）—— 世界里唯一的键
@@ -526,7 +575,7 @@ pub fn archived_files(internal_root: &Path) -> Vec<ArchivedFile> {
 
 /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
 
-/// 删除本机下载区里的一份官方交付文件。
+/// 删除本机下载区里的一份交付预设文件。
 ///
 /// 为什么可以删：删了它回到「未下载」，随时可以从云端重新下载 —— 字节有目录 SHA
 /// 锚定，**零数据损失**。此前的「不在这里删」是把"对不上目录时该修"错当成了"不许动"。
@@ -546,7 +595,12 @@ pub fn delete_downloaded(
         .files
         .iter()
         .find(|f| f.file_name == file_name)
-        .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+        .ok_or_else(|| {
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.384",
+                &[("file_name", file_name)],
+            ))
+        })?;
     let target = resolve_in(internal_root, &file.path)?;
     remove_file_idempotent(&target, file_name)
 }
@@ -560,8 +614,9 @@ pub fn delete_downloaded(
 pub fn delete_archived(internal_root: &Path, path: &str) -> Result<(), AppError> {
     let prefix = format!("{}/", super::paths::ARCHIVE_DIR);
     if !path.starts_with(&prefix) {
-        return Err(AppError::invalid_argument(format!(
-            "只认归档区（{prefix}…）里的路径，别的不是旧版本"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.delivery.385",
+            &[("prefix", &prefix.to_string())],
         )));
     }
     let target = resolve_in(internal_root, path)?;
@@ -573,13 +628,16 @@ fn remove_file_idempotent(target: &Path, what: &str) -> Result<(), AppError> {
     match std::fs::remove_file(target) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io(format!("{what} 删不掉")).with_detail(e.to_string())),
+        Err(e) => Err(
+            AppError::io(messages::text("ui.runtime.delivery.386", &[("what", what)]))
+                .with_detail(e.to_string()),
+        ),
     }
 }
 
 /* ---------- 这一份我们认得出吗（第三圈第 6 层：SHA 报警） ---------- */
 ///
-/// 四个答案，**只回答"本机这份是不是我们认可的官方内容"**——不掺"云端有没有更新"
+/// 四个答案，**只回答"本机这份是不是我们认可的云端内容"**——不掺"云端有没有更新"
 /// （那是 [`super::update::check`] 的问题，比的是目录指纹，与本机的字节无关）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileTrust {
@@ -587,7 +645,7 @@ pub enum FileTrust {
     Absent,
     /// 字节与目录登记一致 —— 就是当前这一版
     Current,
-    /// 字节与我们认得的某一版**旧**官方一致 —— 认得出它是哪一版
+    /// 字节与我们认得的某一版**旧**云端一致 —— 认得出它是哪一版
     OldVersion,
     /// 与目录、归档、被归档的旧目录都对不上 —— 这台机器上查不出它属于哪一版
     Unknown,
@@ -612,7 +670,7 @@ pub struct KnownVersion {
 /// 2. 被归档的旧目录（`archive/catalog.json`）里登记的同一份文件 ——
 ///    它记着更早那些版本的字节指纹，所以归档槽被后来的版本占了也还能认出更早那一版；
 /// 3. **目录版本链**（`archive/catalogs/`，2026-10-06）—— 每一次换代归档的那份旧目录。
-///    曾经只有来源 1+2：单槽保留最早一份，官方连发两版中间那版的指纹就永久丢了，
+///    曾经只有来源 1+2：单槽保留最早一份，云端连发两版中间那版的指纹就永久丢了，
 ///    用户盘上正规的旧版本会被误判成「内容异常」（2026-10-06 实测 7 份假警报）。
 ///    链是**追加**的（[`super::release::release_bytes`] 每次换代都进一份），
 ///    所以"这台机器见过的每一版目录"都在这里。
@@ -729,26 +787,33 @@ pub fn trust_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<File
         .collect()
 }
 
-/// 取出**可以当依据**的官方正文：只有盘上这一份与目录登记逐字节一致时才给。
+/// 取出**可以当依据**的云端正文：只有盘上这一份与目录登记逐字节一致时才给。
 ///
-/// 「临时编辑」那条链的第一步就在于此：改的来源必须是当前这一版官方原件。
+/// 「临时编辑」那条链的第一步就在于此：改的来源必须是当前这一版云端原件。
 /// 被改过（SHA 对不上）的那些不给 —— 它的字节存疑，修复它的动作是**重新下载**，
 /// 不许拿它当原文去改（改完另存成用户文件，等于把可疑内容洗成"我改过的那一份"）。
-pub fn official_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
+pub fn cloud_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
     let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
-        AppError::not_found(format!("{} 还没下载到本机 —— 先下载，再改", file.file_name))
+        AppError::not_found(messages::text(
+            "ui.runtime.delivery.387",
+            &[("v1", &file.file_name.to_string())],
+        ))
     })?;
     // 只有目录登记了期望值才比对：随包 bootstrap 目录不登记它，读得出来的正文就是可用正文
     if let Some(want) = file.expected_sha() {
         if hex(&Sha256::digest(&bytes)) != want {
-            return Err(AppError::sha_mismatch(format!(
-                "{} 盘上这一份与目录登记的字节不一致 —— 先用「重新下载」把它换成干净的官方版，再改",
-                file.file_name
+            return Err(AppError::sha_mismatch(messages::text(
+                "ui.runtime.delivery.388",
+                &[("v1", &file.file_name.to_string())],
             )));
         }
     }
-    String::from_utf8(bytes)
-        .map_err(|_| AppError::corrupted(format!("{} 不是 UTF-8 文本，改不了", file.file_name)))
+    String::from_utf8(bytes).map_err(|_| {
+        AppError::corrupted(messages::text(
+            "ui.runtime.delivery.389",
+            &[("v1", &file.file_name.to_string())],
+        ))
+    })
 }
 
 /* ---------- 一次多份（第二圈：并发） ---------- */
@@ -1228,7 +1293,7 @@ mod tests {
         // 拿不到远端目录（这个夹具没配源、没联网）时**退回保守说法** ——
         // 不许把"没联网"说成"目录过期"，更不许编一个 revision
         assert!(
-            e.message.contains("文件在源头就被改过或传坏了"),
+            e.message.contains("文件可能在源头被改过或传坏了"),
             "取不到远端时照保守说：{}",
             e.message
         );
@@ -1237,25 +1302,27 @@ mod tests {
             "没确认目录过期就不要提『检查更新』：{}",
             e.message
         );
+        /* ★ 2026-10-19（作者：「不用错误码吗」）：那条错必须自带稳定码 ——
+        没码的句子用户贴给 AI 时无从检索，这正是作者点名要补的那一半 */
+        assert_eq!(e.message_code.as_deref(), Some("E_DELIVERY_SHA_001"));
+        assert!(
+            !e.text().contains(&"0".repeat(64)),
+            "界面那一句里不该出现整串 SHA：{}",
+            e.text()
+        );
     }
 
-    /// ★ **目录过期与文件坏是两种话**（2026-10-04）。
+    /// ★ **目录过期与文件坏是两种话、两个码**（2026-10-04 定话，2026-10-19 补码）。
     ///
     /// SHA 对不上有两种成因，用户能据以行动的动作完全不同：
-    /// 目录过期 → 去刷新目录；文件真坏 → 换一台机器 / 找发布方。
-    /// 以前两种共用"文件在源头就被改过或传坏了"，导致用户照着这句话查不出问题。
-    ///
-    /// 判据直接钉那句话本身（取 revision 要联网，测试里不碰网络）。
+    /// 目录过期 → 去刷新目录；文件真坏 → 重下一遍 / 找发布方。
+    /// 判据直接钉那句话与那个码本身（取 revision 要联网，测试里不碰网络）。
     #[test]
     fn stale_catalog_gets_a_different_message_than_a_bad_file() {
         let file = entry("A1-standard.toml", "真内容".as_bytes());
 
         // ① 两个 revision 不同 → 说"目录过期"，并给出行动建议
-        let stale = sha_mismatch_message(
-            &file,
-            "got-sha",
-            Some(("remote-rev".to_owned(), "local-rev".to_owned())),
-        );
+        let stale = sha_mismatch_message(&file, Some(&("remote-rev".into(), "local-rev".into())));
         assert!(
             stale.contains("local-rev") && stale.contains("remote-rev"),
             "两个 revision 都要摆出来：{stale}"
@@ -1265,17 +1332,19 @@ mod tests {
             !stale.contains("传坏了"),
             "已定位到目录过期，就别说文件坏了：{stale}"
         );
+        assert_eq!(sha_mismatch_code(true), "E_DELIVERY_STALE_001");
 
         // ② 拿不到远端（None）→ 保守说法，且**不提**「检查更新」
-        let unknown = sha_mismatch_message(&file, "got-sha", None);
+        let unknown = sha_mismatch_message(&file, None);
         assert!(
-            unknown.contains("文件在源头就被改过或传坏了"),
+            unknown.contains("文件可能在源头被改过或传坏了"),
             "取不到远端时照保守说：{unknown}"
         );
         assert!(
             !unknown.contains("检查更新"),
             "没据实确认就不要提『检查更新』：{unknown}"
         );
+        assert_eq!(sha_mismatch_code(false), "E_DELIVERY_SHA_001");
     }
 
     #[test]
@@ -1653,8 +1722,8 @@ mod tests {
     #[test]
     fn a_clean_copy_is_current_and_not_reported() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
-        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
+        put_file(root.path(), "mkp/A1-standard.toml", "云端当前版本");
 
         let catalog = catalog_with(vec![file.clone()]);
         assert_eq!(trust_of(root.path(), &file), FileTrust::Current);
@@ -1668,7 +1737,7 @@ mod tests {
     #[test]
     fn tampered_bytes_are_not_recognized() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
         put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
 
         assert_eq!(trust_of(root.path(), &file), FileTrust::Unknown);
@@ -1741,7 +1810,7 @@ mod tests {
 
     /// **版本链修的那个 bug 的钉子**（2026-10-06，实测 7 份假「内容异常」）：
     ///
-    /// 官方连发三代（v1 → v2 → v3），用户在 v2 那一代下载了文件，随后目录一路换到 v3。
+    /// 云端连发三代（v1 → v2 → v3），用户在 v2 那一代下载了文件，随后目录一路换到 v3。
     /// 单槽归档（保留最早）会把 v2 那代目录永久丢掉 —— 单槽里只有 v1 代的目录、
     /// 归档槽里只有 v1 的字节，盘上**正规的 v2** 谁都认不出，被误判成 `Unknown`
     /// （「内容异常」）。版本链（`archive/catalogs/`）把每一代被换下的目录都留下来之后，
@@ -1812,21 +1881,21 @@ mod tests {
 
     /// 「改这份」的入口：**SHA 对不上的字节不许当原文用**（修它的动作是重新下载）
     #[test]
-    fn official_text_refuses_bytes_that_drifted() {
+    fn cloud_text_refuses_bytes_that_drifted() {
         let root = tempfile::tempdir().unwrap();
-        let file = entry("A1-standard.toml", "官方当前版本".as_bytes());
+        let file = entry("A1-standard.toml", "云端当前版本".as_bytes());
 
-        let missing = official_text(root.path(), &file).unwrap_err();
+        let missing = cloud_text(root.path(), &file).unwrap_err();
         assert_eq!(missing.code, crate::error::ErrorCode::NotFound);
 
         put_file(root.path(), "mkp/A1-standard.toml", "被人动过的字节");
-        let drifted = official_text(root.path(), &file).unwrap_err();
+        let drifted = cloud_text(root.path(), &file).unwrap_err();
         assert_eq!(drifted.code, crate::error::ErrorCode::ShaMismatch);
 
-        put_file(root.path(), "mkp/A1-standard.toml", "官方当前版本");
+        put_file(root.path(), "mkp/A1-standard.toml", "云端当前版本");
         assert_eq!(
-            official_text(root.path(), &file).unwrap(),
-            "官方当前版本",
+            cloud_text(root.path(), &file).unwrap(),
+            "云端当前版本",
             "与目录一致的那一份才是可以改的原文"
         );
     }

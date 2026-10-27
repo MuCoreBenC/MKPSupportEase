@@ -33,7 +33,7 @@ const benign = (t) => BENIGN.some((re) => re.test(t))
  *
  * 另有一条 `applyActivePreset` 只在套餐那一段放行（见 `bundleProbe` 那行注释）：
  * 从前官方线的「应用」在浏览器里没有那份字节、mock 如实抛；2026-10-08 起首页走
- * 「下载即得工作副本」（先 `ensureUserCopy` 再应用「我那一份」），假后端里这条路
+ * 「下载即得工作副本」（先 `ensureUserCopy` 再应用「本地那份」），假后端里这条路
  * 真的能走通 —— 放行那一行保留（旧行为不冲突），不再依赖它触发。
  */
 const EXPECTED = [/未实现的接口: checkRemoteUpdate/]

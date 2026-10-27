@@ -5,6 +5,11 @@
  * 遮罩 `absolute inset: 0`，盖住的是宿主那一层（内容区），不是整页。
  */
 
+/*
+ * 遮罩：铺满宿主整块（作者 2026-10-10：「它是撑得很大的……是说它这个背景」），
+ * 框在里面居中，四周留出呼吸 —— **`full` 档也一样留**：那一档只是"最大的一档"，
+ * 不再是"贴边铺满"（贴边那版看着不像模态框，作者否掉了）。
+ */
 .scrim {
   position: absolute;
   inset: 0;
@@ -12,8 +17,39 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--pad);
-  background: rgba(16, 24, 32, 0.28);
+  /*
+   * ★ 2026-10-10：框四周的留白改成**以窗口宽为自变量的连续函数**。
+   *   原来是 `clamp(16px, 3vh, 40px)` + mini 档一刀切到 8px ——
+   *   拖窗跨过 640 那一刻，框忽然从"浮在灰底上的卡片"变成"几乎铺满"，
+   *   这就是作者说的跳变（两张截图 643 / 632 差的就是这一块）。
+   *   现在 640 处约 15px，越窄越小、到 8px 收底，全程连续。
+   */
+  padding: clamp(8px, 2.4vw, 40px);
+  /*
+   * 遮罩的色 = **主题 token**，不再写死（2026-10-15）。
+   *
+   * 原来这里是 `rgb(16 24 32 / 42%)` —— 一支**蓝黑**。浅色下它看着像"墨色玻璃"，
+   * 没问题；深色下把页面那套中性灰（R=G=B）整个染蓝，于是作者看到的不是
+   * 「变暗」而是「变色」（他原话：「我觉得它的背景应该更暗一点，而不是变成这种变色」）。
+   * 现在：浅色 = 墨色淡灰（--scrim），深色 = 中性黑（--scrim）。两套各自定值，
+   * 判据只有一个 —— **它得让背后的界面"更暗"，不许改变它的色相**。
+   */
+  background: var(--scrim);
+}
+
+/*
+ * 框上面那一层（`overlay` prop）：与遮罩同尺寸、压在框之上。
+ *
+ * 遮罩自己就是 `position: absolute`（不是 fixed，见 `Modal.tsx` 头注②），所以这一层
+ * 跟着它走 —— "内容区"的几何天然对上，不用再算一次视口，也不会被窗口那个 transform
+ * 的包含块坑到。z-index 只要压过框（框是静态定位，带 z-index 的定位元素自然在上）。
+ *
+ * 里面怎么摆（背景、留白、点击收起）**由调用方定** —— 这一层只管"盖在框上面"。
+ */
+.overlayLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
 }
 
 .box {
@@ -21,22 +57,26 @@
   max-width: 100%; /* 窄窗口里框不许比可用区宽，三档一律让位给容器 */
   max-height: 100%;
   flex-direction: column;
-  border-radius: var(--r-md);
+  /* 圆角 + 裁住里面那层深色（不裁的话深色会从圆角处漏出去） */
+  overflow: hidden;
+  border-radius: 14px;
   background: var(--surface-solid);
-  box-shadow: var(--shadow-lift);
+  /* 框的影也走主题 token：深色下原来那支蓝黑影子压在灰底上发脏（见 tokens.css） */
+  box-shadow: var(--modal-shadow);
   outline: none;
 }
 
+/* 五档宽度（2026-10-10 各加宽一档：作者的框「是要很大的」） */
 .box[data-size='sm'] {
-  width: 340px;
+  width: 360px;
 }
 
 .box[data-size='md'] {
-  width: 460px;
+  width: 480px;
 }
 
 .box[data-size='lg'] {
-  width: 640px;
+  width: 680px;
 }
 
 /* 整块工作区：宽到能摆下两列参数卡，高到能自己管滚动（见下面的 .bodyFill） */
@@ -46,82 +86,241 @@
 }
 
 /*
- * **撑满宿主整块**（`full`）：遮罩不留内衬、框铺满、不圆角 —— 宿主是什么形状它就是什么形状。
- * 参数模态框挂在这一页的 `.page`（顶栏页签以下整块）上，这一档正好铺满那一块；
- * 里面那个自成一体的工作区（有自己的头 / 可滚的中间 / 钉住的底栏）照旧由 `bodyFill` 交给它自己管。
+ * `full`：**最大那一档** —— 撑满遮罩留出的可用区（不是贴边铺满）。
+ * 参数模态框挂在这一页的 `.page`（顶栏页签以下整块）上，于是它就是那一块里
+ * 一张四周留白的大卡片；里面那个自成一体的工作区（自己的头 / 可滚的中间 /
+ * 钉住的底栏）照旧由 `bodyFill` 交给它自己管。
  */
-.scrim[data-size='full'] {
-  padding: 0;
-}
-
 .box[data-size='full'] {
   width: 100%;
   height: 100%;
-  max-width: none;
-  max-height: none;
-  border-radius: 0;
+}
+
+/*
+ * ============ 框身什么时候才滚（2026-10-15 作者：模态框里尽量不要出现滚动条） ============
+ *
+ * 判据：**内容自己会溢出**才滚。短框（sm / md）里那一小段文字永远不会溢出，
+ * 给它 `overflow-y: auto` 只会招来一条**覆盖式滚动条**（真机 WKWebView 上，
+ * 内容是"差几像素"时它就会冒出来 —— 那正是作者截图里那条）。
+ *
+ * 所以：
+ *   sm / md  → `overflow: visible`，一根滚动条都不会有；内容真的比框高时
+ *              由 `.box` 的 `overflow: hidden` 收口（宁可裁一点点，也不摆"糊在内容上"的条）
+ *   lg / xl  → 那一档本来就是"列表 / 大段内容"，滚是它的正常工作方式
+ *   full     → 交给里面的整体（`bodyFill`），与这条无关
+ *   bodyFill → 永远不滚（见下面那条规则）
+ *
+ * ★ 想加新的"要滚"的档，就在这儿点名 —— 别整体放开成 `auto`：这条规则的**默认值**
+ *   才是"干净"的那一档，多出来的是例外。
+ */
+.box[data-size='lg'] > .body,
+.box[data-size='xl'] > .body {
+  overflow-y: auto;
 }
 
 
+/*
+ * 标题栏：**唯一保持浅色的那一条**（作者 2026-10-10：「它除了上面那个标题栏
+ * 不变色，其他的都变成那种深色」）—— 白底、深墨标题、灰副标题。
+ * 内衬 16/20（原来 12/14，作者：「那些文字居然都贴着模态框的边边了」）。
+ */
 .head {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
+  /*
+   * ★ `wrap`：标题栏右边那一簇**动作**可能长得比剩下的空间宽（参数页现在往上放了
+   *   撤销 / 重做 / 恢复默认值 / 修改历史 那一排）—— 窄窗里宁让它整簇掉到第二行，
+   *   也不要被 `overflow: hidden` 裁掉（裁掉就等于按钮没了，比多一行糟得多）。
+   */
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 12px 14px;
+  /*
+   * ★★ 左右内衬用 `--box-inset`（= `--box-pad` + 滚动条宽），不是 `--box-x`。
+   *
+   * 见 `.body` 那段：框身那一条会滚、标题栏与底栏不会，两边若都从"外缘"起算，
+   * 框身的**内容右缘**会比标题栏多缩进一个滚动条宽度（作者 2026-10-15：
+   * 「它的内容左右边距好像不太一致」）。这里把那一份等宽槽补回来，
+   * 于是"标题栏右缘 ≡ 框身文字的右缘"，可滚与不可滚两种内容**落在同一条线**上。
+   */
+  padding: 16px var(--box-inset) 14px;
   border-bottom: 1px solid var(--line);
+  background: var(--surface-solid);
 }
 
 .headText {
   display: flex;
   min-width: 0;
+  /*
+   * 吃掉标题右边到动作簇之间的那块空白 —— 回执要住在那儿（见 `.titleRow`）。
+   *
+   * ★ `flex-basis: 0`（不是 `auto`）：`auto` 会让这一块按**内容宽度**参与换行判断，
+   *   回执一长就把右侧动作簇挤到第二行（实测 760 宽的窗：头高 67 → 107，
+   *   回执还压到按钮底下）。basis 归零之后它只吃"剩下的那块"，回执在里面自己缩、
+   *   自己出省略号 —— 于是"长"永远不会变成"换行"。
+   */
+  flex: 1 1 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+}
+
+/*
+ * 标题那一行：标题 + 回执槽。
+ *
+ * `min-width: 0` 一路开下去：回执长的时候**先截回执**，标题永远完整
+ * （标题是 `flex: none`，回执是 `1 1 auto`）。对齐用 `center` —— 两者字号不同，
+ * 居中对齐比 baseline 更像"同一行里的一块状态"。
+ */
+.titleRow {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+}
+
+.titleRow > .title {
+  flex: none;
+}
+
+/*
+ * 标题栏右边那一簇：**动作槽**（框里 portal 进来的按钮）+ 关闭。
+ * `margin-left: auto` 让它在**换行之后**仍然贴着右缘（上面 `.head` 允许 wrap）。
+ */
+.headActs {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* 动作槽：没人往里 portal 时它就是零宽 —— 不会在标题上凭空留一道缝 */
+.headSlot {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .title {
-  font-size: var(--fs-body);
+  font-size: calc(var(--fs-body) + 1px);
   font-weight: 600;
   color: var(--text-1);
 }
 
 .sub {
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-label);
   color: var(--text-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* 文字按钮而不是一个 × 图标 —— 动作按钮要用文字（项目约定） */
+/*
+ * 回执槽（标题右边，2026-10-17 第二版）：成功 / 警告 / 失败三档**共用这一格**。
+ *
+ * 宽度策略：`flex: 1 1 auto` 拿满剩下的，`min-width: 0` 允许缩到零 ——
+ * 里面那句（页面的 `.note`）自带 `nowrap + ellipsis`，所以无论多长都只是**一行**，
+ * 不留换行、不压右侧动作簇。没人 portal 进来时它就是零宽，标题旁边不留缝。
+ */
+.headNote {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * 关闭：**一个 ×**（作者 2026-10-10：「那个关闭啊，不要那个按钮改成一个叉叉」）。
+ * 28×28 的点击区、无边框、悬停一层浅底、聚焦一圈内描边 —— 它长在浅色标题栏上。
+ */
 .close {
   flex-shrink: 0;
-  height: 26px;
-  padding: 0 10px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
-  background: var(--surface-solid);
-  font: inherit;
-  font-size: var(--fs-label);
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  margin: -1px -4px 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
   color: var(--text-2);
   cursor: pointer;
 }
 
 .close:hover {
-  background: var(--card-face);
+  background: var(--surface-sunken);
   color: var(--text-1);
 }
 
-/* 聚焦只加深边框，不加光环（项目约定） */
 .close:focus-visible {
   outline: none;
-  border-color: var(--text-1);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
   color: var(--text-1);
 }
 
+/*
+ * ★ 2026-10-10 第二轮（作者纠正）：**框里跟现在的浅色主题** ——
+ *   「你怎么能把这个修改参数的改成这种黑色呢？我说的是这个**里面的字**啊……
+ *     它的**背景**还是跟随着现在的浅色背景」。
+ *
+ * 所以这一层不再翻 token（深色只留给"代码那类内容"自己去着墨：编辑文件里的
+ * TOML 高亮就是自己画的一层，见 `presets/tomlPaint`）。
+ */
+/*
+ * ★★ 框身：**左右内衬比标题栏 / 底栏少一个滚动条宽度**（2026-10-15）。
+ *
+ * 那条滚动条是"零占位"的（`global.css` 的幽灵滚动条，`::-webkit-scrollbar { width: 0 }`），
+ * 于是同一条 20px 内衬在两种坐标系里落点不同：
+ *   · 标题栏（不滚）—— 从**框的外缘**量 20px；
+ *   · 框身（会滚）—— 从**内容边缘**量 20px，而内容边缘已经是"外缘 − 0"，
+ *     滚起来时右缘又少 0 ⇒ 作者看到的两侧不一致。
+ *
+ * 这一层给的是 `--box-inset`（`--box-pad` + 滚动条宽），与 `.head` / `.foot` 同值，
+ * 于是**三种内容的右缘落在同一条线**上；左缘三者也一致（框身不再少那一档）。
+ * 滚动条宽是**量出来的真值**（`--scrollbar-w`，宿主自己量，见 `useScrollbarWidth`）。
+ *
+ * ★ `.bodyFill` 那一档不吃这条：它把内衬交回给里面那个整体（参数编辑器），
+ *   `padding: 0` 写在下面那条规则里，顺序在后 ⇒ 覆盖这条。
+ *
+ * ★★ **这一层默认不滚**（`overflow: visible`）：滚不滚由"哪一档"决定，见下面那段
+ *   「框身什么时候才滚」。短框里摆一根覆盖式滚动条是作者点名不要的（2026-10-15）。
+ */
 .body {
   min-height: 0;
-  padding: 12px 14px;
-  overflow-y: auto;
+  padding: 18px var(--box-inset);
+  overflow: visible;
   font-size: var(--fs-label);
   color: var(--text-1);
+}
+
+/*
+ * ★★★ 框身里的**正文段落两端对齐**（2026-10-15 第三轮，作者：
+ * 「为什么模态框那个文字左右边距还是不一样？很明显看到右边宽」）。
+ *
+ * 量过才敢改：内衬是**对称**的（左右各 14.04px，标题左缘 / 底栏右缘都落在这条线上，
+ * 作者截图里也是 13.5px 对 13.5px）。不对称的是**左对齐的中文右缘参差** ——
+ * 一行排不下一个字就整字掉下一行，那一行就短掉最多一个字的宽度：
+ *   实测（同一段文案、360 宽框）：满行右缘参差 1.2 / 9.5 / **21.9px**，
+ *   而左缘永远是 0 ⇒ 看着就是"右边宽"。
+ *
+ * 修法 = **两端对齐 + `inter-ideograph`**（中文排版的标准做法，多出来的空间
+ * 加在字与字之间）。★ 两个引擎都实测过（`text-align: justify` 对**没有空格的中文**
+ * 是不是成立，各引擎不一样，所以这条不能凭印象写）：
+ *
+ * ```text
+ *   WebKit（= 真机 WKWebView）   满行右缘 1.2 / 9.5 / 21.9  ⇒  0 / 0 / 0
+ *   Chromium（Windows WebView2）  16.9 / 7   / 19.5      ⇒  0 / 0 / 0
+ * ```
+ *
+ * ★ 只给 `p`（正文段落）：列表 / 表格 / 表单那种"成行的短内容"不在此列 ——
+ *   两端对齐对**不成段的短行**没有意义，反而可能把西文拉开。
+ * ★ 每段的**最后一行**照旧左对齐（`text-align-last` 的默认值）：那是段落收尾，
+ *   拉满反倒是错的。所以这条治的是"满行为什么不贴右缘"。
+ */
+.body p {
+  text-align: justify;
+  text-justify: inter-ideograph;
 }
 
 /*
@@ -133,24 +332,45 @@
   flex: 1;
   flex-direction: column;
   padding: 0;
+  /*
+   * ★ 这条要**压过**上面「框身什么时候才滚」里按档位放开的那两条（lg / xl）——
+   * 参数编辑器那种自成一体的工作区自己管滚动与钉住的底栏，外框不许再插一手。
+   * 两条选择器同为 0,2,0，所以这条得写在后面（这一条现在在文件里确实是靠后的）。
+   */
   overflow: hidden;
 }
 
 .foot {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  gap: 6px;
-  padding: 10px 14px;
+  gap: 8px;
+  /*
+   * ★ **底栏高度是同一个数**（2026-10-21 作者：「是不是不一样高」）：
+   * 底栏高 == 14 + 32 + 14。里面的按钮一律 32px 高（`editGhost` / `editPrimary` 那套），
+   * 于是只要内容还是一行，任何两屏的底栏就一样高。
+   * `min-height` 兜的是"这一屏底栏只有小控件"的情况（比如只有一颗 24px 的分段开关）——
+   * 没有它，那一屏底栏会比别处矮 8px，肉眼一眼就看得出来。
+   */
+  min-height: 60px;
+  /*
+   * ★ 底色**不铺**（2026-10-21 试过又撤）：`--surface` 是半透明的，铺一层等于在 `.box` 上
+   * 再叠一层，底栏反而比框身更实、显得"深一点"。真正让底栏看起来不一样的是
+   * **框身贴到底栏时那两条 1px 贴成一条 2px 深线** —— 在对比屏自己的 `.diff` 上
+   * 去掉底边即可（见 `TextDiffModal.module.css` 那条注释），底栏这边保持透明。
+   */
+  /* 与 `.head` 同一条等宽槽 —— 三段的左右缘必须落在同一条线上（见 `.body` 那段） */
+  padding: 14px var(--box-inset);
   border-top: 1px solid var(--line);
 }
 
-[data-density='mini'] .scrim {
-  padding: 8px;
-}
-
-[data-density='mini'] .head,
-[data-density='mini'] .body,
-[data-density='mini'] .foot {
-  padding-left: 10px;
-  padding-right: 10px;
-}
+/*
+ * ★ 2026-10-10：这一档**不再一刀切**。
+ *
+ * 原来 mini 档把遮罩留白收到 8px、框内衬收到 10px —— 拖窗跨过 640 那一刻，
+ * 整个框缩一圈、四角留白也没了，就是作者说的跳变（643 与 632 两张截图一对就出来）。
+ * 这两样都是**「量」**（见 tokens.css 里那条"密度档只管结构性差别"的原则），
+ * 现在分别由 `--box-pad` / `--box-inset` 与 `.scrim` 自己的 `clamp()` 连续给，这里不再管它们。
+ *
+ * 密度档在这一层**只剩结构性的事**：`size` 各档的宽高、`bodyFill` 那两条。
+ */

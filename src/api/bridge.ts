@@ -1,6 +1,8 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
+import { armedFaultFor } from '../app/dev/fault'
+import { t } from '../i18n'
 import {
   isAppError,
   type AppError,
@@ -19,8 +21,8 @@ import {
  * 2026-10-02 清扫时删除：首圈的硬编码表，页面早已改走文件体系）。
  * 预设页（A41）的九个**读**接口也接上了真 command —— 读的是客户端自己的数据根
  * （`appDataDir/presets`），不是仓库，见 `src-tauri/src/ipc/presets.rs`。
- * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制官方链接）
- * 也接上了真 command；`downloadFiles`（官方仓库文件的「下载」残支）按用户裁断
+ * 2026-10-09 起 `copyToSlicer`（复制进切片器目录）与 `getFileUrl`（复制云端链接）
+ * 也接上了真 command；`downloadFiles`（云端仓库文件的「下载」残支）按用户裁断
  * **连入口一起撤了**，契约里不再留它。浏览器里（`npm run dev`）走的是 mock，不经过这一层。
  *
  * 试验场那份桥读的是 `window.__mkp_api`（假设壳会往 window 上注入方法）。那个方案在 Tauri 下
@@ -47,10 +49,23 @@ function normalizeError(err: unknown, method: MkpApiMethod): AppError {
 
   return {
     code: notRegistered ? 'NOT_IMPLEMENTED' : 'INTERNAL',
-    message: notRegistered ? `这个功能还没接好（${method}）` : '出了点问题，请重试',
+    message: notRegistered
+      ? t('api.error.notWired', { method })
+      : t('api.error.generic'),
     traceId: '-',
     detail,
   }
+}
+
+/**
+ * 从"挑中的那个路径"取显示名：去掉目录，再去掉 `.app` / `.exe` 那层壳
+ * （`/Applications/PrusaSlicer.app` → `PrusaSlicer`）。
+ *
+ * 为什么在挑的时候就取好：界面直接拿它当下拉里那一条的名字，不用再解析路径。
+ */
+function appNameOf(path: string): string {
+  const base = path.split(/[\\/]/).pop() ?? path
+  return base.replace(/\.(app|exe)$/i, '')
 }
 
 function safeStringify(v: unknown): string {
@@ -61,9 +76,20 @@ function safeStringify(v: unknown): string {
   }
 }
 
-/** 调一个 command，失败时把错误规整成 AppError 再抛 */
+/**
+ * 调一个 command，失败时把错误规整成 AppError 再抛。
+ *
+ * ★ 2026-10-19：**开发台的故障注入在这一层查一次表**（`armedFaultFor`）。
+ * 命中就**不调后端**、直接 reject 那一条错 —— 那条错是客户端进程按真值代码造的，
+ * 于是界面上出问题的是真组件、真按钮、真文案、真错误码（作者：「要真实的 mock 触发」）。
+ *
+ * 查询在**这一层**而不是散在各页面：产品逻辑一行不改，一个开关覆盖所有走这个方法的
+ * 界面（详见 `src/app/dev/fault.ts` 抬头）。正式包里那张表恒空 —— 恒不命中。
+ */
 async function call<T>(method: MkpApiMethod, command: string, args?: Record<string, unknown>) {
   try {
+    const injected = armedFaultFor(method)
+    if (injected !== null) throw injected
     return await invoke<T>(command, args)
   } catch (err) {
     const app = normalizeError(err, method)
@@ -106,52 +132,143 @@ export const bridgeApi: MkpApi = {
   savePresetCalibration: (path, axes) =>
     call('savePresetCalibration', 'save_preset_calibration', { path, axes }),
   getCalibModels: () => call('getCalibModels', 'get_calib_models'),
-  openModel: (modelId) => call('openModel', 'open_model', { modelId }),
-  /* 「复制后处理脚本」里那段可执行物路径：壳的 current_exe()（就是本程序自己） */
-  getPostProcessExe: () => call('getPostProcessExe', 'get_post_process_exe'),
+  openModel: (modelId, opts) =>
+    call('openModel', 'open_model', {
+      modelId,
+      slicer: opts?.slicer ?? null,
+      /* 「从磁盘指定的那个」：只在这一档给路径（壳读不到 webview 的 localStorage） */
+      slicerApp: opts?.slicerApp ?? null,
+    }),
+  /*
+   * 「其他应用…」—— 从磁盘挑一个切片软件（2026-10-13 第二刀）。
+   *
+   * 与 `pickExportDir` 同一个插件、同一半权限（`dialog:allow-open`），**不新增 Rust 命令**：
+   * 挑一个文件本来就是界面上的事，落点只是"记下这个名字与路径"（纯前端偏好，
+   * `STORAGE.clientSlicerApp`）。
+   *
+   * 两边成熟的那一套不一样：macOS 的切片软件是 `.app` 包（**是个目录**）⇒ 停在
+   * `/Applications` 让人挑包；Windows 挑 `.exe`。**取消 = `null`，不是错误**。
+   */
+  pickSlicerApp: async () => {
+    const mac = /Mac/i.test(navigator.userAgent)
+    const picked = await open({
+      /* macOS 挑的是 `.app` 包（目录本身）；Windows 挑可执行文件 */
+      directory: mac,
+      multiple: false,
+      title: t('dialog.slicer.title'),
+      defaultPath: mac ? '/Applications' : undefined,
+      filters: mac ? undefined : [{ name: t('dialog.filter.program'), extensions: ['exe'] }],
+    })
+    if (picked === null || Array.isArray(picked)) return null
+    return { name: appNameOf(picked), path: picked }
+  },
+  /*
+   * 「跟随系统默认」到底是哪个应用（2026-10-16）：**问系统真值** ——
+   * macOS 走 LaunchServices、Windows 走注册表，两套都在壳那一侧
+   * （`ipc::slicer::system_default_app`：前端不扫盘、不猜安装位置）。
+   * 问不出来给 `null`，界面回落原来那句话术。
+   */
+  getSystemSlicerApp: () => call('getSystemSlicerApp', 'get_system_slicer_app'),
+  /*
+   * 「去系统里改默认应用」：**我们不替用户改**，只把他送到系统那一处 ——
+   * macOS 打开那份空的示例 `.3mf` 的**「显示简介」窗口**（要过一次「控制访达」的授权；
+   * 只把文件夹定位出来不算，作者 2026-10-16 纠过），Windows 打开「打开方式」框。
+   * 回来的那句是下一步提示，直接弹给用户。
+   */
+  openDefaultAppSettings: () => call('openDefaultAppSettings', 'open_default_app_settings'),
+  /* 「自动化」授权被拒后的反悔入口：直达系统设置那一页（macOS 拒过一次就不再弹框） */
+  openAutomationSettings: () => call('openAutomationSettings', 'open_automation_settings'),
+  /* 「复制后处理脚本」那一整条命令：壳侧现拼（current_exe() + 预设真实绝对落点）。
+     `path` = 被点名的那一份（预设页右键那一行）—— 不传就是"当前使用的那一套" */
+  getPostProcessCommand: (machineId, versionId, path) =>
+    call('getPostProcessCommand', 'get_post_process_command', { machineId, versionId, path }),
   /* 钩子那一趟：切片器导出时本程序被带参数拉起来的那一次（快照 / 停 / 答一问） */
   getPostProcessRun: () => call('getPostProcessRun', 'get_post_process_run'),
   cancelPostProcess: () => call('cancelPostProcess', 'cancel_post_process'),
-  answerPostProcessMismatch: (keep) =>
-    call('answerPostProcessMismatch', 'answer_post_process_mismatch', { keep }),
+  /* 回答屏幕上那一问：`id` 是那一颗按钮的 id（`keep` / `stop` / `print` / `direct` …） */
+  answerPostProcess: (questionKind, id) =>
+    call('answerPostProcess', 'answer_post_process', { questionKind, id }),
+  /* 首帧那两条路的收尾：快照里有一问、但自己没收到事件 ⇒ 让它补推一次（只重新 emit） */
+  replayPostProcessQuestion: () =>
+    call('replayPostProcessQuestion', 'replay_post_process_question'),
+  /* 首帧竞态的另一半：开场那条落在缝里 ⇒ 把这一趟整份重推（只重新 emit） */
+  replayPostProcessRun: () => call('replayPostProcessRun', 'replay_post_process_run'),
 
   /* ——— 预设页（A41）的读接口：走真 command —— */
   getMachines: () => call('getMachines', 'get_machines'),
   getVersionFiles: (machineId, versionId) =>
     call('getVersionFiles', 'get_version_files', { machineId, versionId }),
   getLocalFiles: () => call('getLocalFiles', 'get_local_files'),
-  /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-mine） */
-  getUserPresetFiles: () => call('getUserPresetFiles', 'get_user_preset_files'),
+  /* 用户线：用户自己的预设（住 <appDataDir>/user/presets-local） */
+  getLocalPresetFiles: () => call('getLocalPresetFiles', 'get_local_preset_files'),
   /* 备注覆盖账（副标题）+ 改归属（文件头 # machine/# variant 两行） */
   getPresetRemarks: () => call('getPresetRemarks', 'get_preset_remarks'),
   setPresetRemark: (key, remark) =>
     call('setPresetRemark', 'set_preset_remark', { key, remark }),
-  setUserPresetMachineVersion: (path, machineId, versionId) =>
-    call('setUserPresetMachineVersion', 'set_user_preset_machine_version', {
+  setLocalPresetMachineVersion: (path, machineId, versionId) =>
+    call('setLocalPresetMachineVersion', 'set_local_preset_machine_version', {
       path,
       machineId,
       versionId,
     }),
-  readUserPresetText: (path) => call('readUserPresetText', 'read_user_preset_text', { path }),
-  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：官方另存 / 我的写回） */
+  readLocalPresetText: (path) => call('readLocalPresetText', 'read_local_preset_text', { path }),
+  /* 临时编辑那条链：改的是临时文件，原件全程不动（保存才落用户根：云端另存 / 本地写回） */
   beginPresetEdit: (fileName, origin, path) =>
     call('beginPresetEdit', 'begin_preset_edit', { fileName, origin, path }),
   putPresetDraft: (text) => call('putPresetDraft', 'put_preset_draft', { text }),
   patchPresetDraft: (paramKey, value) =>
     call('patchPresetDraft', 'patch_preset_draft', { paramKey, value }),
+  /* 一次手势的多项改动：一条命令、一次写盘（见 contract 里那段"为什么不能分两条发"） */
+  patchPresetDraftBatch: (edits) =>
+    call('patchPresetDraftBatch', 'patch_preset_draft_batch', { edits }),
   discardPresetDraft: () => call('discardPresetDraft', 'discard_preset_draft'),
+  /* 冷启动接回草稿层：后端草稿还在，界面那一层（内存）没了 —— 差异由后端按参数算 */
+  readPresetDraftChanges: () => call('readPresetDraftChanges', 'read_preset_draft_changes'),
+  /* 修改历史账本（2026-10-17）：一份文件一本，盘上留着、重开软件还在 */
+  getPresetHistory: (origin, id) => call('getPresetHistory', 'get_preset_history', { origin, id }),
+  /* 「哪份用得最多」：只读；写在后端"应用预设"那一步（2026-10-17） */
+  getPresetUsage: () => call('getPresetUsage', 'get_preset_usage'),
+  putPresetHistory: (origin, id, history) =>
+    call('putPresetHistory', 'put_preset_history', {
+      origin,
+      id,
+      batches: history.batches,
+      entries: history.entries,
+      prevSaved: history.prevSaved,
+    }),
+  clearPresetHistory: (origin, id) =>
+    call('clearPresetHistory', 'clear_preset_history', { origin, id }),
+  /* 备份与恢复（2026-10-17）：设置页，zip 快照 + 全量覆盖 */
+  createBackup: (destDir) => call('createBackup', 'create_backup', { destDir }),
+  restoreBackup: (zipPath) => call('restoreBackup', 'restore_backup', { zipPath }),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
+  /* 「编辑文件」那条链（2026-10-10：与参数草稿分开存，两侧互相作废） */
+  getPresetDraftSummary: () =>
+    call('getPresetDraftSummary', 'get_preset_draft_summary'),
+  beginTextEdit: (fileName, path) =>
+    call('beginTextEdit', 'begin_text_edit', { fileName, path }),
+  /* 「恢复默认值」（编辑文件那颗）读的原文镜像 —— `baseline-local/`，见 Rust `runtime::baseline` */
+  readLocalOriginText: (path) =>
+    call('readLocalOriginText', 'read_local_origin_text', { path }),
+  putTextDraft: (text) => call('putTextDraft', 'put_text_draft', { text }),
+  commitTextDraft: () => call('commitTextDraft', 'commit_text_draft'),
+  /* 编辑框实时自检：语法 + 相对最初那份缺了哪些参数（红条跟着字走） */
+  checkPresetText: (path, text) =>
+    call('checkPresetText', 'check_preset_text', { path, text }),
+  discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
+  /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
+  getLocalPresetIndex: () => call('getLocalPresetIndex', 'get_local_preset_index'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
-  renameUserPreset: (path, newName) =>
-    call('renameUserPreset', 'rename_user_preset', { path, newName }),
-  deleteUserPreset: (path) => call('deleteUserPreset', 'delete_user_preset', { path }),
-  /* 第十一层：我的文件 → 我的文件（字节复制；不覆盖、不碰任何状态） */
-  copyUserPreset: (path, newName) =>
-    call('copyUserPreset', 'copy_user_preset', { path, newName }),
-  /* 另存为我的预设：官方那一份 → 我的一份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+  renameLocalPreset: (path, newName) =>
+    call('renameLocalPreset', 'rename_local_preset', { path, newName }),
+  deleteLocalPreset: (path) => call('deleteLocalPreset', 'delete_local_preset', { path }),
+  /* 第十一层：本地文件 → 本地文件（字节复制；不覆盖、不碰任何状态） */
+  copyLocalPreset: (path, newName) =>
+    call('copyLocalPreset', 'copy_local_preset', { path, newName }),
+  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
 
-  getUserCopyFor: (machineId, versionId) =>
-    call('getUserCopyFor', 'get_user_copy_for', { machineId, versionId }),
+  getLocalCopyFor: (machineId, versionId) =>
+    call('getLocalCopyFor', 'get_local_copy_for', { machineId, versionId }),
   /*
    * 第十二层：通用导入入口。拖拽那一半住在 App 层（`FileImportProvider`），
    * 这里管的是"选择器 + 两段式导入"：
@@ -161,18 +278,22 @@ export const bridgeApi: MkpApi = {
   pickImportFiles: async () => {
     const picked = await open({
       multiple: true,
-      title: '选择要导入的文件',
+      title: t('dialog.import.title'),
       filters: [
-        { name: '预设文件', extensions: ['toml'] },
-        { name: '所有文件', extensions: ['*'] },
+        { name: t('dialog.filter.preset'), extensions: ['toml'] },
+        { name: t('dialog.filter.all'), extensions: ['*'] },
       ],
     })
     return picked === null ? [] : Array.isArray(picked) ? picked : [picked]
   },
   stageImport: (sources) => call('stageImport', 'stage_import', { sources }),
   commitImport: (items) => call('commitImport', 'commit_import', { items }),
-  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「我的文件」上做） */
+  /* 第十三层：文件外部管理（打开系统文件管理器并选中这一份；只在「本地文件」上做） */
   revealInFolder: (path) => call('revealInFolder', 'reveal_in_folder', { path }),
+  /* 两个落点各自的「打开所在文件夹」（2026-10-13）：我们那份（下载区）与切片器里那份 */
+  revealDeliveredFile: (fileName) =>
+    call('revealDeliveredFile', 'reveal_delivered_file', { fileName }),
+  revealSlicerFile: (fileName) => call('revealSlicerFile', 'reveal_slicer_file', { fileName }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),
@@ -186,12 +307,12 @@ export const bridgeApi: MkpApi = {
   getStaleFiles: () => call('getStaleFiles', 'get_stale_files'),
   /* 第 6 层：盘上这几份认得出是哪一版吗（旧版本 / 查不出它是哪一版）—— 只列有事的 */
   getDeliveryTrust: () => call('getDeliveryTrust', 'get_delivery_trust'),
-  /* 归档区（官方旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
+  /* 归档区（交付预设旧版本留档）：列 + 读正文 + 删（2026-10-06 起允许删，代价在确认框讲清） */
   getArchivedFiles: () => call('getArchivedFiles', 'get_archived_files'),
   readArchivedText: (path) => call('readArchivedText', 'read_archived_text', { path }),
   deleteArchivedFile: (path) =>
     call<void>('deleteArchivedFile', 'delete_archived_file', { path }),
-  /* 删除本机那份官方交付文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
+  /* 删除本机那份交付预设文件（一切皆可删：删了回到「未下载」，随时可从云端重下） */
   deleteDeliveryFile: (fileName) =>
     call<void>('deleteDeliveryFile', 'delete_delivery_file', { fileName }),
   downloadCatalogFile: (fileName, onTick) =>
@@ -206,17 +327,57 @@ export const bridgeApi: MkpApi = {
   setPresetSource: (mode, customUrl) =>
     call('setPresetSource', 'set_preset_source', { mode, customUrl: customUrl ?? null }),
   clearPresetSource: () => call('clearPresetSource', 'clear_preset_source'),
-  /* ——— 官方版本账 + 对比台（2026-10-08）———
-     官方版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
+  /* 界面偏好（2026-10-12）：主题（浅 / 深 / 跟随系统）—— 落 AppState 的 theme 格 */
+  getTheme: () => call('getTheme', 'get_theme'),
+  setTheme: (theme) => call('setTheme', 'set_theme', { theme }),
+  /* 窗口外观（2026-10-22）：原生背景色 = 界面底（`--bg-2`，由调用方算好传上来）——
+     治 macOS 拖拽 resize 露白边（WebKit#323132）；不落盘、不联网、失败不挡事 */
+  setWindowBackdrop: (color) =>
+    call<void>('setWindowBackdrop', 'set_window_backdrop', { color }),
+  /* 界面偏好第二格（2026-10-13）：执行记录的自动清理开关 —— 落 autoCleanHistory 格 */
+  getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
+  setAutoCleanHistory: (enabled) =>
+    call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」—— 落 presets 格。
+     关（出厂）⇒ 复制件不认云端：账本与逐参数更新账两个出口都把它滤掉 */
+  getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),
+  setCopiesFollowCloud: (enabled) =>
+    call('setCopiesFollowCloud', 'set_copies_follow_cloud', { enabled }),
+  /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
+     读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
+  getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
+  setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
+  /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
+  resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),
+  /* 应用本体那两条（2026-10-17）：「预设位置」打开目录；「卸载」删程序本体、数据不动 */
+  openPresetFolder: () => call('openPresetFolder', 'open_preset_folder'),
+  uninstall: () => call('uninstall', 'uninstall'),
+  /* 界面语言（2026-10-25）：落 locale 格；只换文案，不动任何业务判据 */
+  getLocale: () => call('getLocale', 'get_locale'),
+  setLocale: (locale) => call('setLocale', 'set_locale', { locale }),
+  /* 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗 —— 落 pin / compact 两格。
+     窗口几何的副作用全在 `ipc::window_layout`，前端只发意图、不碰 setSize */
+  getWindowPrefs: () => call('getWindowPrefs', 'get_window_prefs'),
+  setPin: (pin, onBbs) => call('setPin', 'set_pin', { pin, onBbs }),
+  applyPin: (onBbs) => call('applyPin', 'apply_pin', { onBbs }),
+  setCompact: (compact) => call('setCompact', 'set_compact', { compact }),
+  /* 屏幕引导（2026-10-15）：改了参数之后指给用户看那一步 —— 只读坐标，不替用户点 */
+  locateBedTypeControl: () => call('locateBedTypeControl', 'locate_bed_type_control'),
+  guideShow: () => call('guideShow', 'guide_show'),
+  guideClose: () => call<void>('guideClose', 'guide_close'),
+  /* ——— 云端版本账 + 对比台（2026-10-08）———
+     云端版本列表（已下载 / 新版本，**不是过时判定**）与对比台读/写用户预设的参数。
      baseline 是隐藏内部存储，前端拿不到它的路径。 */
-  getOfficialVersions: (fileName) =>
-    call('getOfficialVersions', 'get_official_versions', { fileName: fileName ?? null }),
+  getCloudVersions: (fileName) =>
+    call('getCloudVersions', 'get_cloud_versions', { fileName: fileName ?? null }),
   readPresetParams: (path) => call('readPresetParams', 'read_preset_params', { path }),
   savePresetParams: (path, edits) =>
     call<void>('savePresetParams', 'save_preset_params', { path, edits }),
-  /* ——— 逐参数「官方更新」（2026-10-09）———
-     读三方账（我 / 官方旧值 / 官方新值）+ 落采用·保持的决定。
-     `fetchMissing` 只在打开某一份预设时给 true（允许为取官方新版发一次网络）。 */
+  /* ——— 逐参数「云端更新」（2026-10-09）———
+     读三方账（我 / 云端旧值 / 云端新值）+ 落采用·保持的决定。
+     ★ `fetchMissing` 只有用户明确点「更新 / 选择要更新的参数」那一刻才给 true
+     （2026-10-20 作者裁定：没点之前不替他去取云端新版字节）。
+     `null` = 这一份不认云端（复制出来的，且那个开关关着）。 */
   getPresetParamSync: (path, fetchMissing) =>
     call('getPresetParamSync', 'get_preset_param_sync', {
       path,
@@ -228,9 +389,9 @@ export const bridgeApi: MkpApi = {
   /* 两条线一个入口：`origin` 说这一份住哪条线，用户线还要给出它在用户根里的路径 */
   applyActivePreset: (fileName, origin, path) =>
     call('applyActivePreset', 'apply_active_preset', { fileName, origin, path }),
-  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回官方 + 落一份我的工作副本（都不改当前使用） */
-  fetchOfficialPreset: (fileName) =>
-    call('fetchOfficialPreset', 'fetch_official_preset', { fileName }),
+  /* 云端表那两个动作（2026-10-09 改判）：下载 / 更新 = 取回交付预设 + 落一份我的工作副本（都不改当前使用） */
+  fetchCloudPreset: (fileName, renameIfTaken) =>
+    call('fetchCloudPreset', 'fetch_cloud_preset', { fileName, renameIfTaken }),
   clearActivePreset: () => call('clearActivePreset', 'clear_active_preset'),
   checkRemoteUpdate: () => call('checkRemoteUpdate', 'check_remote_update'),
   applyRemoteUpdate: () => call('applyRemoteUpdate', 'apply_remote_update'),
@@ -246,11 +407,34 @@ export const bridgeApi: MkpApi = {
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
 
-  /* ——— 切片器目录（复制进去才生效）+ 复制官方链接（2026-10-09 接通）——— */
+  /* ——— 切片器目录（复制进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
   copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 
-  /* ——— 报告页：后处理执行报告与历史（gcode_history 的真账，只读）——— */
+  /* ——— 本机 BBS 目录（2026-10-13）：工艺页「本机工艺」那一档 ——— */
+  getBbsPresets: () => call('getBbsPresets', 'get_bbs_presets'),
+  readBbsPreset: (scope, uid, file) =>
+    call('readBbsPreset', 'read_bbs_preset', { scope, uid, file }),
+
+  /* ——— 报告页：后处理执行报告与历史（读 gcode_history 的真账 + 一处导出写）——— */
   getReportList: () => call('getReportList', 'get_report_list'),
   getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
+  getReportExportPlan: (id) => call('getReportExportPlan', 'get_report_export_plan', { id }),
+  exportReportArchive: (id, dir) =>
+    call('exportReportArchive', 'export_report_archive', { id, dir }),
+  revealReportExport: (id, dir) =>
+    call('revealReportExport', 'reveal_report_export', { id, dir }),
+  /*
+   * 导出框那颗「更改位置」：与 `pickImportFiles` 同一半权限（`dialog:allow-open` ——
+   * 选目录与选文件在插件里是同一个 `open`，这里只是多个 `directory`）。
+   * 取消 = `null`（不是错误），界面据此保持原来那个位置。
+   */
+  pickExportDir: async (current) => {
+    const picked = await open({
+      directory: true,
+      title: t('dialog.exportDir.title'),
+      defaultPath: current,
+    })
+    return typeof picked === 'string' ? picked : null
+  },
 }

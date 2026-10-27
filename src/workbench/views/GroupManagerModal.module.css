@@ -1,0 +1,103 @@
+/* 分组管理器（2026-10-16）：左 = 组列表，右 = 这一组的编辑区。
+   颜色一律走工作台 token（`--w-*`）—— 深色那套由工作台自己的第二棵配色树给。 */
+
+.wrap {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 12px;
+  min-height: 360px;
+}
+
+.left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+  border-right: 1px solid var(--w-line);
+  padding-right: 10px;
+}
+
+.leftHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.leftList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: var(--w-fs-sm);
+  color: var(--w-t2);
+}
+
+.memHead {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+
+/* 加成员那一格：自己一块高度、超出自己滚 */
+.addBox {
+  max-height: 160px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+  background: var(--w-hover-1);
+}
+
+.memList {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-input);
+}
+
+.memRow {
+  display: grid;
+  grid-template-columns: 1fr 110px auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.role {
+  min-width: 0;
+}
+
+.ops {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}

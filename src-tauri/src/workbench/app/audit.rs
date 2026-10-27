@@ -188,7 +188,7 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     // 不该顺手造出一个目录
     let asset_root = paths::assets_root_at(ctx.presets.root());
 
-    let mut items: Vec<AuditItem> = Vec::with_capacity(16);
+    let mut items: Vec<AuditItem> = Vec::with_capacity(17);
 
     /* ① 源数据完整 —— 能走到这里就说明 `presets/` 整套读得出来（加载期校验过） */
     items.push(sources_complete(&book));
@@ -245,6 +245,13 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         &paths::repo_root(),
         &delivery_root,
     ));
+
+    /* ⑰ 校准素材身份（2026-10-19）：台账声明了预期，文件里就得真是那个身份。
+     *
+     * 与 `npm run check:calibration-assets` **同一个实现**
+     * （`postprocess::calibration_asset::read_identity`）—— 两边各写一套的话，
+     * 迟早出现"脚本说合格、工作台说没标记"。 */
+    items.push(calibration_identities(&book, &asset_root));
 
     let can_publish = items
         .iter()
@@ -406,6 +413,76 @@ fn assets_exist(presets: &crate::presetdata::Presets, asset_root: &std::path::Pa
         item.fail(
             format!("{} 条登记了却取不到文件（客户端点了会 404）", missing.len()),
             missing,
+        )
+    }
+}
+
+/// **⑰ 校准素材身份**（2026-10-19，作者：「检查脚本负责自动判断对不对」）。
+///
+/// 台账里 `type = 'model'` 且声明了 `calibration` 的每一条，文件里
+/// `3D/3dmodel.model` 的 `MKPSE:Calibration` 必须与之相同。
+///
+/// 为什么它是 Blocker：没有标记的校准件在客户端就是**一盘普通模型** —— 后处理不会
+/// 问"先打印还是直接校准"，也不会按档位算基准坐标。发出去等于那个功能坏了。
+///
+/// 判定走 `postprocess::calibration_asset`（与 CLI 检查、工作台那一段同一份代码）。
+fn calibration_identities(book: &Book<'_>, asset_root: &std::path::Path) -> AuditItem {
+    let item = AuditItem::base(
+        "assets/calibration-identity",
+        "校准素材带对了身份标记",
+        AuditSeverity::Blocker,
+        "工作台 → 资产 → 选中那个模型 → 「校准身份」里补标 / 改写；\
+         或者反过来，台账里那条的 calibration 写错了就改台账",
+    );
+
+    let mut checked = 0usize;
+    let mut bad: Vec<String> = Vec::new();
+
+    for a in book.presets.assets.items() {
+        if a.kind != crate::presetdata::assets::AssetKind::Model {
+            continue;
+        }
+        let expected = a.calibration.trim();
+        if expected.is_empty() {
+            /* 没声明预期的不查：多半是普通拼盘（支撑测试模型），不是校准件 */
+            continue;
+        }
+        checked += 1;
+        let abs = asset_root.join(&a.path);
+        let read = postprocess::calibration_asset::read_identity(&abs);
+
+        let verdict = match read.identity.as_deref() {
+            Some(actual) if actual == expected => None,
+            Some(actual) if read.is_valid() => Some(format!(
+                "{}：文件里写的是「{actual}」，台账预期「{expected}」",
+                a.path
+            )),
+            Some(actual) => Some(format!("{}：「{actual}」不是合法身份", a.path)),
+            None => Some(format!(
+                "{}：{}",
+                a.path,
+                read.problem
+                    .as_deref()
+                    .unwrap_or("文件里没有 MKPSE:Calibration")
+            )),
+        };
+        if let Some(msg) = verdict {
+            bad.push(msg);
+        }
+    }
+
+    if bad.is_empty() {
+        item.pass(format!("{checked} 份校准模型的标记与台账一致"))
+    } else {
+        /* `details` 一句话说结论、`affected_files` 才是逐条明细 —— 界面上点得进去的是后者。
+        别把明细压进 `details`：那是字符串，前端没法据此跳转。 */
+        let files: Vec<String> = bad
+            .iter()
+            .filter_map(|m| m.split('：').next().map(str::to_string))
+            .collect();
+        item.fail(
+            format!("{} 份校准模型的标记对不上（{}）", bad.len(), bad.join("；")),
+            files,
         )
     }
 }
@@ -1227,9 +1304,76 @@ fn git(repo: &std::path::Path, args: &[&str]) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// **⑰ 校准素材身份：真文件缺标记就必须红**（2026-10-19）。
+    ///
+    /// 这是这次改造最要紧的一条：没有标记的校准件在客户端就是普通模型 ——
+    /// 功能等于坏了，却没有任何报错。所以判据要证明：台账说 `ZOffset`、
+    /// 文件里没标记时，这一项是 **Blocker 红**，且点名是哪份文件。
+    ///
+    /// 用的是**真 3MF 字节**（`calibration_asset::write_identity` 写出去的），
+    /// 不走 mock 读法 —— 这一项本身验的就是"读真实字节那一路通不通"。
+    #[test]
+    fn a_calibration_asset_without_its_marker_is_a_blocker() {
+        use postprocess::postproc::calibration::Mode;
+
+        let asset_root = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(asset_root.path().join("models")).unwrap();
+
+        /* 两份都先从仓库里那份真校准件拷一份（`write_identity` 是"读-改-写"，
+        不接受从零造），再写上正确身份，然后把第二份抹掉 ——
+        正是"台账说该有、文件里却没有" */
+        let seed = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("presets/assets/models/ZOffset_Calibration.3mf");
+        let good = asset_root.path().join("models/good.3mf");
+        let bad = asset_root.path().join("models/bad.3mf");
+        for p in [&good, &bad] {
+            crate::fsx::atomic::atomic_write(p, &std::fs::read(&seed).unwrap()).unwrap();
+            postprocess::calibration_asset::write_identity(p, Mode::ZOffset).expect("写身份");
+        }
+        postprocess::calibration_asset::remove_identity(&bad).expect("抹掉标记");
+
+        /* 台账在夹具那份的基础上追加两条模型（`Assets` 从文档读出来，不从内存塞 ——
+        塞进去就绕过了整条解析，而这条判据要验的正是"读台账 + 读真字节"）
+        夹具的 `presets/` 目录由 `into_parts()` 一并交出，那里是可以写的 */
+        let (presets_root, _) = Fixture::load().into_parts();
+        let assets_file = presets_root.path().join("presets/assets.toml");
+        let mut text = std::fs::read_to_string(&assets_file).unwrap();
+        text.push_str(
+            "\n[[assets]]\n\
+             id = 'good-model'\n\
+             type = 'model'\n\
+             name = '合格校准件'\n\
+             path = 'models/good.3mf'\n\
+             calibration = 'ZOffset'\n\
+             \n\
+             [[assets]]\n\
+             id = 'bad-model'\n\
+             type = 'model'\n\
+             name = '缺标记的校准件'\n\
+             path = 'models/bad.3mf'\n\
+             calibration = 'ZOffset'\n",
+        );
+        crate::fsx::atomic::atomic_write(&assets_file, text.as_bytes()).unwrap();
+        let presets = crate::presetdata::Presets::load_from(&presets_root.path().join("presets"))
+            .expect("追加两条模型后的台账该读得通");
+
+        let committed = committed();
+        let draft = crate::workbench::domain::patch::Draft::default();
+        let book = Book::new(&presets, &committed, &draft);
+
+        let item = calibration_identities(&book, asset_root.path());
+        assert_eq!(item.severity, AuditSeverity::Blocker, "缺标记必须能拦发布");
+        assert_eq!(item.status, AuditStatus::Fail, "{}", item.details);
+        let joined = item.details.clone();
+        assert!(joined.contains("bad.3mf"), "要点名是哪份文件：{joined}");
+        assert!(!joined.contains("good.3mf"), "合格那份不该被牵连：{joined}");
+    }
+
     /// 发布闸的编号清单 —— **与 `docs/PUBLISH-ARCHITECTURE.md` §5.2 那张表同一个契约**。
     /// 改编号要连文档一起改，所以这里把它钉死。
-    const IDS: [&str; 16] = [
+    const IDS: [&str; 17] = [
         "sources/complete",
         "refs/resolve",
         "assets/exist",
@@ -1246,6 +1390,7 @@ mod tests {
         "manifest/correct",
         "git/clean",
         "client/url-reconciliation",
+        "assets/calibration-identity",
     ];
 
     /// **发布闸的形状与闸门**（第二刀的主判据）。
@@ -1263,7 +1408,7 @@ mod tests {
         let got: Vec<&str> = audit.items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             got, IDS,
-            "十六项一项不少、顺序照 §5.2（⑯ 为 2026-10-05 寻址改造新增）"
+            "十七项一项不少、顺序照 §5.2（⑰ 为 2026-10-19 校准素材身份新增）"
         );
 
         for i in &audit.items {

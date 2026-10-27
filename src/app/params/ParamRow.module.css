@@ -47,6 +47,16 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
+  /*
+   * **行名可拖选**（2026-10-20 作者：「这个标题我要可以选」）。
+   *
+   * 这一块整个住在一个 `<button>` 里，而 global.css 那条 `button { user-select: none }`
+   * 把它压住了 —— 这里显式打开（类选择器压过元素选择器）。名字下面的橙字提示与
+   * 云端差异也是给人看的字，跟着一起可选；`?` 是装饰（`.info`，aria-hidden），仍关着。
+   * 前缀与标准成对写，理由见 global.css 的「拖选（selection）的划分」。
+   */
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .left:hover .label {
@@ -69,6 +79,14 @@
   min-width: 0;
 }
 
+/* 第一行：行名 + `?`（见 `.info` 的注）—— 后面那几行注记各占满一行 */
+.head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .label {
   color: var(--text-1);
   font-weight: 500;
@@ -85,7 +103,7 @@
 [data-dep] .label {
   color: var(--text-3);
   text-decoration: line-through;
-  text-decoration-color: #b1716a;
+  text-decoration-color: var(--danger-ink);
   text-decoration-thickness: 1.5px;
 }
 
@@ -104,8 +122,9 @@
   height: 20px;
   padding: 0 7px;
   border-radius: var(--r-sm);
-  background: #f7e7e5;
-  color: #b1716a;
+  /* 淡红面 / 墨走 token（2026-10-12 深色第二遍）：写死的浅粉底在深色里是一块发亮的粉斑 */
+  background: var(--danger-surface);
+  color: var(--danger-ink);
   font-size: var(--fs-label);
   font-weight: 500;
   white-space: nowrap;
@@ -115,24 +134,25 @@
 /* 展开详情里的「状态」那一格：与弃用徽章同色系，一眼串起来 */
 .ddDep {
   margin: 0;
-  color: #b1716a;
+  color: var(--danger-ink);
   line-height: 1.6;
 }
 
 /* 改不动的原因：写清是哪个条件参数控制的 */
 .note {
   font-size: calc(var(--fs-label) - 0.5px);
-  color: #a86416;
+  /* 琥珀墨走 token：写死的棕字在深底上几乎读不出 */
+  color: var(--warn-ink);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /*
- * 官方更新（2026-10-09）：官方改过这一项、而我还没处理。
+ * 云端更新（2026-10-09）：交付预设改过这一项、而我还没处理。
  *
  * 用琥珀色系 —— 与「需先让 XXX 等于 …」那种"换个条件就能用"的提示同族（都是"还有事没完"），
- * 又与弃用那枚红章分得开。这一行只说事实（官方旧值 → 新值），动作住在右边那一格。
+ * 又与弃用那枚红章分得开。这一行只说事实（云端旧值 → 新值），动作住在右边那一格。
  */
 .syncNote {
   display: flex;
@@ -150,18 +170,50 @@
   height: 17px;
   padding: 0 6px;
   border-radius: var(--r-sm);
-  background: #fdf3e2;
-  color: #a86416;
+  /* 琥珀面 / 墨走 token（2026-10-12 深色第二遍） */
+  background: var(--warn-surface);
+  color: var(--warn-ink);
   font-weight: 500;
 }
 
 .syncDiff {
   overflow: hidden;
   text-overflow: ellipsis;
-  color: #a86416;
+  color: var(--warn-ink);
 }
 
-/* 处理过的那一项：一枚极淡的章，说明官方这一版已经不是"待处理"了 */
+/* 已采用（还在草稿里）：绿色那档 —— 与"这一版我收了"同一语气，但比"待处理"安静 */
+.syncBadgeAdopted {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  color: #2f7d59;
+  font-weight: 500;
+}
+
+[data-theme='dark'] .syncBadgeAdopted {
+  color: var(--accent);
+}
+
+/* 已保持：灰章 —— 它没有改任何东西，不该有颜色 */
+.syncBadgeHold {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 17px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--bg-2);
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+/* 处理过的那一项：一枚极淡的章，说明云端这一版已经不是"待处理"了 */
 .syncDecided {
   font-size: calc(var(--fs-label) - 0.5px);
   color: var(--text-3);
@@ -176,18 +228,20 @@
   align-items: center;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid #e3c58f;
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fffaf1;
+  background: var(--warn-surface);
   font: inherit;
   font-size: var(--fs-label);
-  color: #8a6212;
+  color: var(--warn-ink);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .syncBtn:hover:not(:disabled) {
-  background: #fdf3e2;
+  /* 反馈走边框加深（原来靠"再亮一档的米色底"，token 化后没有那一档；
+     加深边框在深浅两套里都成立） */
+  border-color: var(--warn-ink);
 }
 
 .syncBtn:disabled {
@@ -199,11 +253,11 @@
 
 .syncBtn:focus-visible {
   outline: none;
-  border-color: #8a6212;
-  box-shadow: inset 0 0 0 1px #8a6212;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
-/* 「保持我的」：不写任何东西的那一个，按次色调画（它比「用新值」轻） */
+/* 「保持本地」：不写任何东西的那一个，按次色调画（它比「用新值」轻） */
 .syncBtnGhost {
   display: inline-flex;
   align-items: center;
@@ -234,18 +288,27 @@
   border-color: var(--line-strong);
 }
 
+/*
+ * `?` 是**行名的后缀**，不是右边那一列的件（2026-10-21 作者：「tooltip 跟着标题后面，
+ * 可以适当缩小」）：它住进 `.labelWrap` 的第一行（`.head`），紧贴名字 6px，
+ * 不跟名字下面的橙字 / 云端差异挤成第二列；名字换行 / 省略时它跟着走。
+ * 尺寸从 15px 收到 13px —— 它只是「点这一行看说明」的记号，不该和正文同重。
+ */
 .info {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 15px;
-  height: 15px;
+  width: 13px;
+  height: 13px;
   border: 1px solid var(--line-strong);
   border-radius: 50%;
   font-size: 10px;
   line-height: 1;
   color: var(--text-3);
+  /* 装饰性问号（aria-hidden）—— 行名开了可拖选，它不跟着进选区 */
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .right {
@@ -254,6 +317,19 @@
   justify-content: flex-end;
   gap: 10px;
   flex-shrink: 0;
+}
+
+/*
+ * 只读态的值（2026-10-16 两态）：纯文本，不出现控件 —— 与参数对比台的只读值
+ * （`.ro`：--fs-body / --text-2）同一长相。数字右对齐（一列数字可比大小，
+ * 与 `.edNum` 的只读对齐口径同一条）。
+ */
+.roVal {
+  font-size: var(--fs-body);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
 }
 
 /*
@@ -286,39 +362,142 @@
   gap: 4px;
   height: 24px;
   padding: 0 9px;
-  border: 1px solid #f0c48a;
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fff8ee;
+  background: var(--warn-surface);
   font: inherit;
   font-size: var(--fs-label);
-  color: #a86416;
+  color: var(--warn-ink);
   white-space: nowrap;
   cursor: pointer;
 }
 
 .restore:hover {
-  background: #fdefda;
+  /* 同 .syncBtn：反馈走边框加深（token 化后没有"再亮一档"的米色） */
+  border-color: var(--warn-ink);
 }
 
 .restore:focus-visible {
   outline: none;
-  border-color: #a86416;
-  box-shadow: inset 0 0 0 1px #a86416;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
 /* ---------- 展开的详情 ---------- */
 
+/*
+ * **两栏**（2026-10-20）：左边照旧是"这一项是什么"，右边那块空白给"云端改成什么"
+ * （作者：「你在右边这个有空白的地方啊……就在这里显示我原本的值，云端的值是多少」）。
+ * 没有云端更新时右下那一栏不渲染，版面与以前一样。
+ */
+.detailWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
 .detail {
+  flex: 1;
+  min-width: 0;
   display: grid;
-  grid-template-columns: 64px 1fr;
+  /* 72px：标签列要盛得下「上次保存前」五个字 —— 64px 会挤成两行（作者 2026-10-21） */
+  grid-template-columns: 72px 1fr;
   gap: 4px 12px;
   margin: 0;
   padding: 2px 18px 14px;
   font-size: var(--fs-label);
 }
 
+/*
+ * **展开详情里的字可以拖选**（2026-10-20 作者：「我希望这些内容可以拖选」）。
+ *
+ * 全局那层 `body { user-select: none }` 是为了去掉"网页感"（判据见 global.css 的
+ * 「拖选（selection）的划分」），而这一块恰好全是给人抄的东西：说明、取值范围、
+ * 类型、字段名、已保存值、数据包里的值、作用域。
+ *
+ * 写法照本仓库的「选区边界」口径（PresetTable.module.css 末尾那段真机取证）：
+ * **容器与文本层逐格点名，不指望继承** —— Safari 把 `user-select` 当非继承属性，
+ * 只写一层在真机上会漏。这一块里没有"点它 / 拖它"的件（按钮由全局那条 none 管住），
+ * 拖出来就是一段连续文本，可以整段复制。
+ */
+.detail,
+.dt,
+.dd,
+.ddDep,
+.ddKey,
+.cloudPane,
+.cloudList dt,
+.cloudList dd,
+.cloudState {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 右栏：云端这一项的三方对照 + 用回我的值 */
+.cloudPane {
+  flex: 0 0 232px;
+  margin: 2px 18px 14px 0;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+  font-size: var(--fs-label);
+}
+
+.cloudTitle {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.cloudList {
+  display: grid;
+  grid-template-columns: 64px 1fr;
+  gap: 4px 10px;
+  margin: 0;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.cloudList dd {
+  margin: 0;
+  color: var(--text-2);
+}
+
+.cloudState {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+.cloudState[data-state='adopt'] {
+  color: #2f7d59;
+}
+
+[data-theme='dark'] .cloudState[data-state='adopt'] {
+  color: var(--accent);
+}
+
+.cloudRevert {
+  margin-top: 8px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.cloudRevert:hover {
+  border-color: var(--warn-ink);
+  color: var(--warn-ink);
+}
+
 .dt {
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 .dd {
@@ -344,6 +523,17 @@
 [data-density='mini'] .detail {
   grid-template-columns: 56px 1fr;
   padding: 2px 12px 12px;
+}
+
+/* mini 档窄：右栏收一档，别把左边那七格挤成一条缝 */
+[data-density='mini'] .detailWrap {
+  gap: 12px;
+}
+
+[data-density='mini'] .cloudPane {
+  flex-basis: 188px;
+  margin: 2px 12px 12px 0;
+  padding-left: 12px;
 }
 
 /*

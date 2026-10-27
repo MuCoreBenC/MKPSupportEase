@@ -13,11 +13,40 @@
 //! `clippy.toml` 把 `std::fs::write` / `File::create` / `tokio::fs::write` 列进
 //! `disallowed-methods`，全仓只有本文件开一个 `#[allow]` 的洞。
 
+use postprocess::diag::messages;
+
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
 use crate::error::AppError;
+
+/// Windows 上把目标路径转成 `\\?\` 前缀的 verbatim 形式。
+///
+/// 解决什么：文件名上限按**字节**算（`runtime::local::NAME_MAX_BYTES = 255`），
+/// 而 Windows 默认的 `MAX_PATH` 是 **260 字符**的整条路径 —— 用户目录一长，
+/// `presets-local/<255 字节的名字>` 就整体越界，`rename` 报
+/// “系统找不到指定的路径 (os error 3)”，复制/改名直接失败。
+/// 加 verbatim 前缀后这条路径不再受 260 限制（NT 命名空间本身支持 32K）。
+///
+/// 只对**父目录**做 `canonicalize`（目标文件还不存在，不能对它做），
+/// 拿到的已经是 verbatim 形式，直接拼文件名即可。任何一步失败就退回原路径 ——
+/// 长路径这次写不成，但不会让原本能成的短路径变坏。
+#[cfg(windows)]
+fn verbatim(path: &Path) -> std::path::PathBuf {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return path.to_path_buf();
+    };
+    match parent.canonicalize() {
+        Ok(dir) => dir.join(name),
+        Err(_) => path.to_path_buf(),
+    }
+}
+
+#[cfg(not(windows))]
+fn verbatim(path: &Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
 
 /// 原子写。目标目录不存在会自动建。
 ///
@@ -26,7 +55,7 @@ use crate::error::AppError;
 /// 跳过是安全的：写盘的唯一目的是让目标等于这串字节，它已经相等了。
 #[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
-    if let Ok(old) = std::fs::read(path) {
+    if let Ok(old) = std::fs::read(verbatim(path)) {
         if old == bytes {
             return Ok(());
         }
@@ -34,26 +63,75 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
 
     let parent = path
         .parent()
-        .ok_or_else(|| AppError::invalid_argument("写入路径没有父目录"))?;
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.fsx.atomic.012", &[])))?;
 
     std::fs::create_dir_all(parent).map_err(|e| {
-        AppError::io(format!("建不出目录：{}", parent.display())).with_detail(e.to_string())
+        AppError::io(messages::text(
+            "ui.fsx.atomic.013",
+            &[("v1", &parent.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
 
     let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
-        AppError::io("创建临时文件失败").with_detail(format!("{} / {e}", parent.display()))
+        AppError::io(messages::text("ui.fsx.atomic.014", &[]))
+            .with_detail(format!("{} / {e}", parent.display()))
     })?;
 
-    tmp.write_all(bytes)
-        .map_err(|e| AppError::io("写入临时文件失败").with_detail(e.to_string()))?;
-    tmp.as_file()
-        .sync_all()
-        .map_err(|e| AppError::io("临时文件落盘失败").with_detail(e.to_string()))?;
+    tmp.write_all(bytes).map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.015", &[])).with_detail(e.to_string())
+    })?;
+    tmp.as_file().sync_all().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.016", &[])).with_detail(e.to_string())
+    })?;
 
-    tmp.persist(path)?;
+    tmp.persist(verbatim(path))?;
 
     /* 父目录也要 fsync：rename 之后"这个名字指向哪个 inode"还可能只在缓存里。
     目录打不开（罕见）不算写失败 —— 数据已经在盘上了，只是这一步保证弱一点。 */
+    if let Ok(dir) = File::open(parent) {
+        let _ = dir.sync_all();
+    }
+
+    Ok(())
+}
+
+/// **流式原子写**（2026-10-17，给备份那一处）：给一个 `&mut File` 让调用方边读边写，
+/// 写完由本函数负责 `sync_all` → `persist` → fsync 父目录。
+///
+/// 为什么要有这一条：`atomic_write` 收的是**整串字节**，而备份那种东西
+/// （执行归档三件套能到几百 MB）不该先整个进内存再落盘。
+/// 规矩与它**一字不差** —— 同样是"临时文件 → 落盘 → 同分区 rename"，
+/// 所以写盘出口仍然只有这一个文件。
+#[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
+pub fn atomic_write_stream(
+    path: &Path,
+    write: impl FnOnce(&mut File) -> Result<(), AppError>,
+) -> Result<(), AppError> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.fsx.atomic.017", &[])))?;
+
+    std::fs::create_dir_all(parent).map_err(|e| {
+        AppError::io(messages::text(
+            "ui.fsx.atomic.018",
+            &[("v1", &parent.display().to_string())],
+        ))
+        .with_detail(e.to_string())
+    })?;
+
+    let mut tmp = tempfile::NamedTempFile::new_in(parent).map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.019", &[]))
+            .with_detail(format!("{} / {e}", parent.display()))
+    })?;
+
+    write(tmp.as_file_mut())?;
+
+    tmp.as_file().sync_all().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.atomic.020", &[])).with_detail(e.to_string())
+    })?;
+    tmp.persist(verbatim(path))?;
+
     if let Ok(dir) = File::open(parent) {
         let _ = dir.sync_all();
     }
@@ -130,6 +208,28 @@ mod tests {
             before,
             "真写入要更新 mtime"
         );
+    }
+
+    /// 流式那一档（备份 zip 用）：边读边写，落出来的与一次性写的一模一样，且不留临时文件
+    #[test]
+    fn streaming_writes_land_the_same_bytes_and_leave_no_temp_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("big.bin");
+        atomic_write_stream(&p, |f| {
+            f.write_all(b"part-1-")
+                .map_err(|e| AppError::io("写不了").with_detail(e.to_string()))?;
+            f.write_all(b"part-2")
+                .map_err(|e| AppError::io("写不了").with_detail(e.to_string()))
+        })
+        .unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"part-1-part-2");
+
+        let leftovers: Vec<_> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n != "big.bin")
+            .collect();
+        assert!(leftovers.is_empty(), "临时文件残留：{leftovers:?}");
     }
 
     #[test]

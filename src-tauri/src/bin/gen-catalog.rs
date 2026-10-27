@@ -83,6 +83,15 @@ fn write_delivery_catalog(repo: &Path) -> Result<(), Box<dyn std::error::Error>>
     catalog.apply_min_client(&rules);
 
     let out = delivery_root.join(runtime::source::CATALOG_FILE);
+    /*
+     * **保留旧目录的 `publishedAt`**：它是发布事件的戳，不是生成 / 重建的。
+     * 工作台生成也沿用旧戳（见 `delivery::published_at_of`）—— 两边同一口径，
+     * 否则一次 gen-catalog 就把“发布时间”顶成“构建时刻”。
+     */
+    catalog.published_at = std::fs::read(&out)
+        .ok()
+        .and_then(|b| Catalog::parse(&b).ok())
+        .and_then(|c| c.published_at);
     atomic_write(&out, catalog.to_pretty_json()?.as_bytes())?;
     println!(
         "已写出 {}（交付面 catalog，{} 份文件，revision {}，minClient {}）",

@@ -65,9 +65,9 @@ export function localFileIds(): string[] {
 
 /*
  * 这一支（旧 `getLocalUserFiles` 的演示集合）已随 2026-10-02 的换源退役：
- * 用户自己的文件是**用户线**，住 `<appDataDir>/user/presets-mine/`，
- * 由 `runtime::mine` + `ipc::mine` 那两条读回答（盘就是底账，没有演示集合）。
- * 浏览器模式下的演示数据在 `src/api/mock.ts` 的 `getUserPresetFiles` 里。
+ * 用户自己的文件是**用户线**，住 `<appDataDir>/user/presets-local/`，
+ * 由 `runtime::local` + `ipc::local` 那两条读回答（盘就是底账，没有演示集合）。
+ * 浏览器模式下的演示数据在 `src/api/mock.ts` 的 `getLocalPresetFiles` 里。
  *
  * 旧夹具同时退役的还有一个形状问题：它带 `machineIds`（用户自己标的适用机型），
  * 而今天没有任何地方能让用户去标 —— 留着一个永远空的字段就是在编形状。
@@ -113,15 +113,20 @@ export function slicerCopied(): string[] {
 /**
  * 复制某个切片器 profile 到切片器目录。**只改内存，刷新还原。**
  *
- * 真后端在这里有三种真实的失败：不是切片器配置、本机没有那份字节、目标已存在。
- * 假后端没有磁盘，所以只校验前两条里的"类型对不上"——
+ * 真后端在这里的真实失败：不是切片器配置、本机没有那份字节；**目标已有同名就换掉它**
+ * （2026-10-13 作者改判「有相同的就覆盖吧」—— 原来是拒的，理由是"那份可能被用户在
+ * 切片器里改过"）。假后端没有磁盘，所以只校验"类型对不上"——
  * 传错类型静默成功的话，界面上会出现「已复制一个 MKP 预设」这种说不通的状态。
+ *
+ * 回一句结果：这次是**替换**（那儿原来就有一份同名的）还是**新建**（与真后端同一个形状）。
  */
-export function copyToSlicerIn(fileName: string): void {
+export function copyToSlicerIn(fileName: string): boolean {
   const hit = allPresetFiles().find((f) => f.fileName === fileName)
   if (hit === undefined) throw new Error(`仓库里没有这个文件：${fileName}`)
   if (hit.kind === 'mkp_preset') {
     throw new Error(`${hit.fileName} 是 MKP 预设，不用复制到切片器 —— 它走「启用」`)
   }
+  const replaced = DEMO_SLICER_COPIED.has(fileName)
   DEMO_SLICER_COPIED.add(fileName)
+  return replaced
 }

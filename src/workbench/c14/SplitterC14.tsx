@@ -143,17 +143,21 @@ export default function SplitterC14({
   )
 
   /* 拖动期间锁掉全局的选中与光标：pointer capture 只管事件，管不住「指针下是谁」——
-     拖到外壳导航上也该是左右拖的光标，不然手感像断了 */
+     拖到外壳导航上也该是左右拖的光标，不然手感像断了。
+     ★ 前缀与标准成对写 —— WKWebView 上这两套账（见 `global.css` 的"拖选（selection）的划分"） */
   const [dragging, setDragging] = useState(false)
   useEffect(() => {
     if (!dragging) return
     const { body } = document
     const prevSelect = body.style.userSelect
+    const prevWebkitSelect = body.style.getPropertyValue('-webkit-user-select')
     const prevCursor = body.style.cursor
     body.style.userSelect = 'none'
+    body.style.setProperty('-webkit-user-select', 'none')
     body.style.cursor = 'col-resize'
     return () => {
       body.style.userSelect = prevSelect
+      body.style.setProperty('-webkit-user-select', prevWebkitSelect)
       body.style.cursor = prevCursor
     }
   }, [dragging])

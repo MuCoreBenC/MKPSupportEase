@@ -26,7 +26,15 @@ import SegmentedField from './SegmentedField'
 import SelectField from './SelectField'
 import TextField from './TextField'
 import type { FieldForm, FieldSchema } from './types'
-import { boolOf, decimalsOf, isNum, numOf, rawOfBool, rawOfNum } from './value'
+import {
+  boolOf,
+  decimalsOf,
+  displayDecimals,
+  isNum,
+  numOf,
+  rawOfBool,
+  rawOfNum,
+} from './value'
 
 interface Props {
   field: FieldSchema
@@ -36,6 +44,10 @@ interface Props {
   form: FieldForm
   /** 被父项条件关掉、或这一屏只读：看得见、改不动 */
   disabled?: boolean
+  /** 数字控件：打字不合法且正在编辑（透传 `NumberField`，宿主用它显示「还原」出口） */
+  onInvalidTyping?: (invalid: boolean) => void
+  /** 数字控件：宿主点了「还原」的那一拍（透传 `NumberField`，见它的 Props 注） */
+  resetSignal?: number
   /** 数字控件：点框内任何一处都进编辑态（透传给 `NumberField`，见它那里的说明） */
   focusOnBoxClick?: boolean
   /**
@@ -56,6 +68,8 @@ export default function FieldControl({
   onChange,
   form,
   disabled = false,
+  onInvalidTyping,
+  resetSignal,
   focusOnBoxClick = false,
   renderBlock,
 }: Props): ReactNode {
@@ -98,7 +112,16 @@ export default function FieldControl({
       )
     }
 
-    case 'number':
+    case 'number': {
+      /*
+       * 显示小数位（2026-10-17）：**长度量（mm）固定两位**，`-0.5` / `24` / `3.7`
+       * 一律成 `-0.50` / `24.00` / `3.70`；其余单位按 step 推（`70 mm/s` 不许变
+       * `70.00`）。见 `value.ts` 的 `displayDecimals` 那段注释。
+       *
+       * ★ 只影响**显示与算数取整**：写回仍走 `rawOfNum(n, step)`，
+       *   盘上该是 `24` 还是 `24`、该是 `3.7` 还是 `3.7` —— 不往 TOML 里塞 `.00`。
+       */
+      const showDecimals = displayDecimals(field.unit, field.step)
       return (
         <NumberField
           label={field.label}
@@ -106,16 +129,21 @@ export default function FieldControl({
           step={field.step ?? 1}
           min={field.min}
           max={field.max}
-          decimals={decimalsOf(field.step)}
+          /* `null`（不补零）只在 step 有小数位时才给得下去 —— NumberField 的 `digits`
+             是算数取整口径，`null` 会让它退回 step 的位数，两边不打架 */
+          decimals={showDecimals ?? decimalsOf(field.step)}
           /* 密表里单位是独立一列，塞两遍是重复信息 —— 保留 #32 这条判断 */
           unit={cell ? undefined : field.unit}
           disabled={disabled}
           invalid={!isNum(raw)}
+          onInvalidTyping={onInvalidTyping}
+          resetSignal={resetSignal}
           size={cell ? 'sm' : 'md'}
           focusOnBoxClick={focusOnBoxClick}
           onChange={(n) => onChange(rawOfNum(n, field.step))}
         />
       )
+    }
 
     case 'text':
       return (

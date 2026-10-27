@@ -2,17 +2,38 @@
 //! zOffsetSingLines，以及 generator_new.go 的两个 New 变体）。
 //!
 //! 经典分支拿机型固定坐标（`machine_dims` 的 `calibration.*`）；New 变体拿
-//! 模型 BBox 左下角 + 固定图案偏移，即「固定模板 + 动态原点」，图案跟着模型走。
+//! 模型 BBox 左下角 + 图案基准偏移，即「固定模板 + 动态原点」，图案跟着模型走。
+//!
+//! **这些几何（标称外形、基准偏移、方块间距/数量、质心期望）2026-10-18 起住在
+//! `presets/calibration_models.toml`** —— 见 [`model_profiles`] 与
+//! [`crate::postproc::calib_models`]。同一台机器换一块校准板 = 往那份表加一条。
 
 use crate::diag::PostprocError;
 use crate::gcode::{OffsetMode, filter_e_moves, format_float, format_speed, format_z};
 use crate::ir::Ir;
-use crate::postproc::machine_dims::get_machine_dimensions;
+use crate::postproc::calib_models::{self, ModelProfile, ProfileMatch};
+use crate::postproc::calibration::CalibrationReceipt;
+use crate::postproc::machine_dims::{self, get_machine_dimensions};
 use crate::postproc::offset::{MM_PER_MINUTE, process_gcode_offset};
 
 /// home 行含 E0.001 虚拟挤出标记（BBS Viewer 兼容）。
 const CALIBRATION_HOME_LINE: &str =
     "G1 X100 Y100 Z10 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility";
+
+/// 进校准块之前**单独抬 Z**的那一行。
+///
+/// 为什么必须有它：`CALIBRATION_HOME_LINE` 把 XY 和 Z 写在同一句里，打印机按线性插值
+/// 执行 —— 于是「从当前 Z 平移 200mm 到 (100,100)」这一路是**贴着板面拖过去的**。
+/// 直接校准（不打印模型）时尤其明显：模型路径被删光之后喷嘴停在 Z0.2～0.3，
+/// 真机上就是喷嘴在板上刮一道（用户 2026-10-20 的录像逐帧确认）。
+/// 先抬到同一个目标 Z，再平移，坐标与原来完全一致，只是分成两步。
+const CALIBRATION_PRELIFT: &str = "G1 Z10 F1200";
+
+/// 校准块的入口两步：抬 Z → 平移到位。**顺序不可合并、不可颠倒**（见 [`CALIBRATION_PRELIFT`]）。
+fn push_calibration_home(output: &mut Vec<String>) {
+    output.push(CALIBRATION_PRELIFT.to_string());
+    output.push(CALIBRATION_HOME_LINE.to_string());
+}
 
 const CALIBE_SING: &str = "\
 ;Calibration Start Music
@@ -131,30 +152,24 @@ const Z_OFFSET_SING_LINES: &[&str] = &[
     "G1 X.417 Y.858 E.01915",
 ];
 
-/// Repetition 模式对模型 BBox 的偏移（generator_new.go:21-22）。
-/// Z New 变体也用这两个值当原点偏移。
-const Z_PATTERN_OFFSET_X: f64 = 0.079;
-const Z_PATTERN_OFFSET_Y: f64 = 3.755;
-
-/// Z 校准模型的标定尺寸与方块布局（generator_new.go:23-26）。
-const Z_PATTERN_MODEL_WIDTH: f64 = 119.58;
-const Z_PATTERN_MODEL_HEIGHT: f64 = 13.063;
-const Z_SQUARE_SPACING: f64 = 11.0;
-const Z_SQUARE_COUNT: usize = 11;
-
-/// XY 图案模板（generator_new.go:28-39）。全部是相对 BBox 左下角的偏移。
+/// 校准模型档 —— 尺寸、图案基准、方块梯子、质心期望，全在
+/// `presets/calibration_models.toml`（2026-10-18 从这一片常量搬走：原来是
+/// `Z_PATTERN_*` / `XY_PATTERN_*` / `Z_SQUARE_*` 一组，加一块板就得改代码）。
 ///
-/// `xyPatternLineLength = 10.0` **不搬**：Go 侧声明了但全文没有任何引用
-/// （线长是由 start/end 两个偏移隐含的）。搬过来只会多一个没人用的常量。
-const XY_PATTERN_LINE_SPACING: f64 = 4.0;
-const XY_PATTERN_H_LINE_OFFSET_Y: f64 = 10.49;
-const XY_PATTERN_H_LINE_START_X: f64 = 0.5;
-const XY_PATTERN_H_LINE_END_X: f64 = 10.5;
-const XY_PATTERN_V_LINE_OFFSET_X: f64 = 10.5;
-const XY_PATTERN_V_LINE_START_Y: f64 = 0.49;
-const XY_PATTERN_V_LINE_END_Y: f64 = 10.49;
-const XY_PATTERN_MODEL_WIDTH: f64 = 50.5;
-const XY_PATTERN_MODEL_HEIGHT: f64 = 50.5;
+/// 这里只留一个取表的口子，读的是**进程级那张机型表**（`machine_dims::tables()`，
+/// 读取链见那边的模块头：显式 install → `MKPSE_PRESETS_DIR` → 仓库相对 `presets/`）。
+///
+/// 表缺失 = 配置/构建坏了，不是用户能修的东西 ⇒ 报 `E_CAL_FAILED_001`
+/// （「校准代码没有生成出来：…」），**不 panic、也不静默退化成"没有校准图案"**。
+fn model_profiles() -> Result<&'static [ModelProfile], PostprocError> {
+    machine_dims::tables()
+        .calibration_models()
+        .ok_or_else(|| PostprocError::Calibration {
+            message: "没有校准模型档：presets/calibration_models.toml 读不到\
+                      （读取链见 postproc/machine_dims.rs）"
+                .to_string(),
+        })
+}
 
 /// 校准模式动态定位用的 2D 包围盒（disk.BBox）。
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -225,6 +240,33 @@ pub fn generate_calibration_gcode_with_centroid(
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
 ) -> Result<Option<Vec<String>>, PostprocError> {
+    generate_calibration_gcode_with_centroid_rec(
+        mode,
+        machine_type_str,
+        ir_data,
+        model_bbox,
+        centroid,
+        z_dwell_sec,
+        xy_dwell_sec,
+        None,
+    )
+}
+
+/// 同 [`generate_calibration_gcode_with_centroid`]，外加把「认到的档」写进 `receipt`。
+///
+/// 回执**只在认档成功那一支**（`*_new` 与 Repetition）有值：经典分支按机型固定坐标走，
+/// 根本没有档可言。`receipt = None` 时与旧函数逐字节相同。
+#[allow(clippy::too_many_arguments)]
+pub fn generate_calibration_gcode_with_centroid_rec(
+    mode: &str,
+    machine_type_str: &str,
+    ir_data: &Ir,
+    model_bbox: Option<&BBox>,
+    centroid: CentroidResult,
+    z_dwell_sec: i64,
+    xy_dwell_sec: i64,
+    receipt: Option<&mut CalibrationReceipt>,
+) -> Result<Option<Vec<String>>, PostprocError> {
     let mt = parse_machine_type(machine_type_str);
     let z_dwell_ms = z_dwell_sec * 1000;
     let xy_dwell_ms = xy_dwell_sec * 1000;
@@ -233,7 +275,15 @@ pub fn generate_calibration_gcode_with_centroid(
             if ir_data.safety.xy_calibration == "new"
                 && let Some(bbox) = model_bbox
             {
-                return generate_xy_calibration_new(mode, mt, ir_data, bbox, centroid, xy_dwell_ms);
+                return generate_xy_calibration_new(
+                    mode,
+                    mt,
+                    ir_data,
+                    bbox,
+                    centroid,
+                    xy_dwell_ms,
+                    receipt,
+                );
             }
             generate_xy_calibration(mode, mt, ir_data, xy_dwell_ms)
         }
@@ -241,11 +291,13 @@ pub fn generate_calibration_gcode_with_centroid(
             if ir_data.safety.z_calibration == "new"
                 && let Some(bbox) = model_bbox
             {
-                return generate_z_offset_calibration_new(mt, ir_data, bbox, centroid, z_dwell_ms);
+                return generate_z_offset_calibration_new(
+                    mt, ir_data, bbox, centroid, z_dwell_ms, receipt,
+                );
             }
             generate_z_offset_calibration(mt, ir_data, z_dwell_ms)
         }
-        "Repetition" => generate_repetition_calibration(mt, ir_data, model_bbox),
+        "Repetition" => generate_repetition_calibration(mt, ir_data, model_bbox, receipt),
         _ => Ok(None),
     }
 }
@@ -282,7 +334,7 @@ fn generate_xy_calibration(
     }
 
     output.push("; XY Offset Calibration".to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    push_calibration_home(&mut output);
     output.push(";Rising nozzle to avoid collision".to_string());
     output.push(format!(
         "G1 Z{}",
@@ -462,7 +514,7 @@ fn generate_z_offset_calibration(
     let fr_calibe_y_start = dims.calibration.z_start_y;
 
     output.push("; ZOffset Calibration".to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    push_calibration_home(&mut output);
     output.push(";Rising nozzle to avoid collision".to_string());
     output.push(format!(
         "G1 Z{}",
@@ -607,11 +659,12 @@ fn generate_repetition_calibration(
     mt: &str,
     ir_data: &Ir,
     model_bbox: Option<&BBox>,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
     let mut output: Vec<String> = Vec::new();
 
     output.push("; LShape Repetition Calibration".to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    push_calibration_home(&mut output);
     output.push(";Rising nozzle to avoid collision".to_string());
     output.push(format!(
         "G1 Z{}",
@@ -632,7 +685,16 @@ fn generate_repetition_calibration(
     ));
 
     let (origin_x, origin_y) = if let Some(b) = model_bbox {
-        (b.x_min + Z_PATTERN_OFFSET_X, b.y_min + Z_PATTERN_OFFSET_Y)
+        /* 基准从**档**里取（原来是 `Z_PATTERN_OFFSET_*` 两个常量，Z 那边共用）——
+        Repetition 的 L 形件没有标称外形，所以认档不看尺寸，只看 mode。 */
+        let profile = resolve_profile("Repetition", b, "generate_repetition_calibration")?;
+        if profile.datum_x == 0.0 || profile.datum_y == 0.0 {
+            return Err(pattern_missing(profile, "datumX/datumY"));
+        }
+        if let Some(r) = receipt {
+            *r = CalibrationReceipt::with_profile(b, profile);
+        }
+        (b.x_min + profile.datum_x, b.y_min + profile.datum_y)
     } else {
         let dims = get_machine_dimensions(mt);
         if dims.calibration.l_shape_base_x == 0.0 {
@@ -698,49 +760,101 @@ fn filtered_mount_unmount_lines(ir_data: &Ir) -> (Vec<String>, Vec<String>) {
     )
 }
 
-/// 校准模型的尺寸检测（generator_new.go:50-84 与 :241-275，两处逐字相同）。
+/// 按实测包围盒**认档** —— `generator_new.go:50-84` 与 `:241-275` 那两道尺寸检测
+/// （宽高互换 / 尺寸不符）的泛化版：不再对着**一个**写死的标称尺寸比，而是在
+/// **已知档位**里找一档（档来自 `presets/calibration_models.toml`）。
 ///
-/// 两道：宽高互换（疑似旋转 90°）与尺寸不符（被缩放）。容差都是 0.5 mm ——
-/// 切片器的挤出宽度会让 BBox 有零点几毫米抖动，卡太死会把正常模型拦下来。
+/// 判定顺序**不可重排**（与 `calib_models::find_profile` 同一口径）：
+/// 1. 同一朝向命中 ⇒ 通过，用这一档的基准与判据；
+/// 2. 宽高互换命中 ⇒ `E_CAL_MISMATCH_001`（疑似把板转了 90°）；
+/// 3. 都不命中 ⇒ `E_CAL_MISMATCH_002`（被缩放 / 还没登记的板），
+///    正文把**已知档位的外形尺寸**列出来。
 ///
-/// 注意 `expected_width != expected_height` 这个条件：XY 图案是 50.5×50.5 的
-/// 正方形，第一道检测对 XY **恒不触发**（正方形转 90° 从 BBox 完全看不出来）。
-/// 这不是漏洞，正因如此 XY 才必须靠质心判方向。
-fn check_model_size(
+/// 「都不命中」这一档是 2026-10-18 泛化时唯一放宽的地方：原来容差 0.5 是硬卡在一个
+/// 标称尺寸上的，现在等于「有没有哪一档能容下你」；认不出来时报的话里带上清单，
+/// 用户自己就能看出是缩放还是该换档。
+fn resolve_profile<'a>(
+    mode: &str,
     bbox: &BBox,
-    expected_width: f64,
-    expected_height: f64,
+    error_source: &str,
+) -> Result<&'a ModelProfile, PostprocError> {
+    let profiles = model_profiles()?;
+    let width = bbox.x_max - bbox.x_min;
+    let height = bbox.y_max - bbox.y_min;
+    let known = calib_models::known_footprints(profiles, mode);
+    match calib_models::find_profile(profiles, mode, width, height) {
+        Some(ProfileMatch::Direct(p)) => Ok(p),
+        Some(ProfileMatch::Swapped(p)) => Err(PostprocError::CalibrationMismatch {
+            code: "E_CAL_MISMATCH_001",
+            message: mismatch_context(
+                bbox,
+                mode,
+                error_source,
+                Some((&p.id, p.footprint_w, p.footprint_h)),
+                &known,
+            ),
+        }),
+        None => Err(PostprocError::CalibrationMismatch {
+            code: "E_CAL_MISMATCH_002",
+            message: mismatch_context(bbox, mode, error_source, None, &known),
+        }),
+    }
+}
+
+/// 认档失败的正文 = **机器判据**（「检测到…请勿缩放校准模型」那两句在 `messages.toml`
+/// 里，切片器那一面还会把数值再精简掉）。
+///
+/// `known` 那一截是 2026-10-18 泛化时加的：认档失败只有两种可能 —— 模型被缩放，
+/// 或者这是一块我们还没登记的板；把已知档位摆出来，两种都能自己看出来。
+fn mismatch_context(
+    bbox: &BBox,
     calibration_mode: &str,
     error_source: &str,
-) -> Result<(), PostprocError> {
+    expected: Option<(&str, f64, f64)>,
+    known: &str,
+) -> String {
     let actual_width = bbox.x_max - bbox.x_min;
     let actual_height = bbox.y_max - bbox.y_min;
-    let context = format!(
-        "expected={expected_width}x{expected_height} actual={actual_width:.4}x{actual_height:.4} \
+    let head = match expected {
+        Some((id, w, h)) => format!("expected={w}x{h} matched={id}"),
+        None => format!("expected=未登记的档位 known={known}"),
+    };
+    format!(
+        "{head} actual={actual_width:.4}x{actual_height:.4} \
          bbox=[{:.4},{:.4}]x[{:.4},{:.4}] calibration_mode={calibration_mode} \
          source={error_source} bbox_source=original_gcode bbox_stage=before_pass2",
         bbox.x_min, bbox.x_max, bbox.y_min, bbox.y_max,
-    );
+    )
+}
 
-    if (actual_width - expected_height).abs() < 0.5
-        && (actual_height - expected_width).abs() < 0.5
-        && expected_width != expected_height
-    {
-        return Err(PostprocError::CalibrationMismatch {
-            code: "E_CAL_MISMATCH_001",
-            message: format!("检测到校准模型可能被旋转。请勿旋转校准模型。（{context}）"),
-        });
+/// Z 档的图案参数：基准 (x, y) 与方块梯子 (间距, 个数)。
+///
+/// 缺任何一个都要报出来 —— 装载期（`calib_models::load`）已经逐档校验过一遍，
+/// 这里兜的是"有人 `install` 了一张没校验过的表"那一种。**不许退化成 0.0**：
+/// 基准是 0 意味着图案落在包围盒角上，看不出错、但一定印歪。
+fn z_pattern(profile: &ModelProfile) -> Result<(f64, f64, f64, usize), PostprocError> {
+    if profile.datum_x == 0.0 || profile.datum_y == 0.0 {
+        return Err(pattern_missing(profile, "datumX/datumY"));
     }
-    if (actual_width - expected_width).abs() > 0.5 || (actual_height - expected_height).abs() > 0.5
-    {
-        return Err(PostprocError::CalibrationMismatch {
-            code: "E_CAL_MISMATCH_002",
-            message: format!(
-                "检测到校准模型尺寸已变化。请勿缩放校准模型，仅允许移动位置。（{context}）"
-            ),
-        });
+    if profile.square_count == 0 || profile.square_spacing <= 0.0 {
+        return Err(pattern_missing(profile, "squareSpacing/squareCount"));
     }
-    Ok(())
+    Ok((
+        profile.datum_x,
+        profile.datum_y,
+        profile.square_spacing,
+        profile.square_count,
+    ))
+}
+
+/// 「档里缺图案参数」那一句。说清**哪一档缺哪个键** —— 与校验期同口径。
+fn pattern_missing(profile: &ModelProfile, keys: &str) -> PostprocError {
+    PostprocError::Calibration {
+        message: format!(
+            "档 '{}' 缺 {keys}（presets/calibration_models.toml）",
+            profile.id
+        ),
+    }
 }
 
 /// `generateXYCalibrationNew`（generator_new.go:47-220）：BBox 感知的 XY 校准。
@@ -751,6 +865,7 @@ fn check_model_size(
 /// 2. 每轮末尾有 `G4 P{xy_dwell_ms}` —— 经典分支根本不消费 dwell 参数；
 /// 3. 先横线（H）11 轮再竖线（V）11 轮，经典分支是先 Y 线再 X 线；
 /// 4. mount/unmount 行逐行过 `filter_e_moves`。
+#[allow(clippy::too_many_arguments)]
 fn generate_xy_calibration_new(
     mode: &str,
     mt: &str,
@@ -758,32 +873,34 @@ fn generate_xy_calibration_new(
     model_bbox: &BBox,
     centroid: CentroidResult,
     xy_dwell_ms: i64,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
-    check_model_size(
-        model_bbox,
-        XY_PATTERN_MODEL_WIDTH,
-        XY_PATTERN_MODEL_HEIGHT,
-        mode,
-        "generate_xy_calibration_new",
-    )?;
+    let profile = resolve_profile(mode, model_bbox, "generate_xy_calibration_new")?;
+    if let Some(r) = receipt {
+        *r = CalibrationReceipt::with_profile(model_bbox, profile);
+    }
+    let expect = profile.centroid;
+    let pattern = profile.pattern.as_ref().ok_or_else(|| {
+        pattern_missing(profile, "[models.pattern] —— XY 图案那七个偏移没有别的来源")
+    })?;
 
     if centroid.valid {
         check_rotation_by_centroid(
             centroid,
             model_bbox,
-            -1,
-            -1,
+            expect.dx_sign,
+            expect.dy_sign,
             mode,
-            0.02,
+            expect.min_ratio,
             "generate_xy_calibration_new",
-            true,
+            expect.square,
             0,
         )?;
     }
 
     let mut output: Vec<String> = Vec::new();
     output.push("; XY Offset Calibration".to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    push_calibration_home(&mut output);
     output.push(";Rising nozzle to avoid collision".to_string());
     output.push(format!(
         "G1 Z{}",
@@ -812,9 +929,9 @@ fn generate_xy_calibration_new(
     let mut cali_accumulate = cali_start;
     let mut offset_accumulate = 0.0f64;
     for _ in 0..11 {
-        let line_y = model_bbox.y_min + XY_PATTERN_H_LINE_OFFSET_Y + offset_accumulate;
-        let start_x = model_bbox.x_min + XY_PATTERN_H_LINE_START_X;
-        let end_x = model_bbox.x_min + XY_PATTERN_H_LINE_END_X;
+        let line_y = model_bbox.y_min + pattern.h_line_offset_y + offset_accumulate;
+        let start_x = model_bbox.x_min + pattern.h_line_start_x;
+        let end_x = model_bbox.x_min + pattern.h_line_end_x;
 
         output.push(format!(
             "G1 F{}",
@@ -863,7 +980,7 @@ fn generate_xy_calibration_new(
             ir_data,
         )?);
         output.push(format!("G4 P{xy_dwell_ms}"));
-        offset_accumulate += XY_PATTERN_LINE_SPACING;
+        offset_accumulate += pattern.line_spacing;
         cali_accumulate += cali_step;
         output.push(format!(
             "G1 Z{}",
@@ -877,9 +994,9 @@ fn generate_xy_calibration_new(
     let mut cali_accumulate = cali_start;
     let mut offset_accumulate = 0.0f64;
     for _ in 0..11 {
-        let line_x = model_bbox.x_min + XY_PATTERN_V_LINE_OFFSET_X + offset_accumulate;
-        let start_y = model_bbox.y_min + XY_PATTERN_V_LINE_START_Y;
-        let end_y = model_bbox.y_min + XY_PATTERN_V_LINE_END_Y;
+        let line_x = model_bbox.x_min + pattern.v_line_offset_x + offset_accumulate;
+        let start_y = model_bbox.y_min + pattern.v_line_start_y;
+        let end_y = model_bbox.y_min + pattern.v_line_end_y;
 
         output.push(format!(
             "G1 F{}",
@@ -928,7 +1045,7 @@ fn generate_xy_calibration_new(
             ir_data,
         )?);
         output.push(format!("G4 P{xy_dwell_ms}"));
-        offset_accumulate += XY_PATTERN_LINE_SPACING;
+        offset_accumulate += pattern.line_spacing;
         cali_accumulate += cali_step;
         output.push(format!(
             "G1 Z{}",
@@ -950,48 +1067,50 @@ fn generate_xy_calibration_new(
 /// `generateZOffsetCalibrationNew`（generator_new.go:233-372）：BBox 感知的 Z 偏移校准。
 ///
 /// 与经典 `generate_z_offset_calibration` 只差原点：经典读机型 `z_start_x/y`，
-/// 这里用 `bbox` 左下角 + (0.079, 3.755)。其余（11 个方块、`z_accumulate` 每轮
-/// −0.1、间距 11.0、A1 家族的 Floating Z、每轮尾部停留）逐行一致。
+/// 这里用 `bbox` 左下角 + 档里的 `datumX/datumY`（现行档 0.079 / 3.755，
+/// 2026-10-18 的延长版 0.079 / 4.755）。方块个数与间距也从同一档取。
+/// 其余（`z_accumulate` 每轮 −0.1、A1 家族的 Floating Z、每轮尾部停留）逐行一致。
 ///
 /// `loadCalibrationTemplate(template_dir, "z_offset_path_new.gcode")` 无 Rust 对位：
 /// 本项目没有运行时模板目录，Go 侧 `template_dir` 为空时也回落到内嵌 `zOffsetSingLines`，
 /// 所以这里直接用 `Z_OFFSET_SING_LINES`，与经典分支同源。
+#[allow(clippy::too_many_arguments)]
 fn generate_z_offset_calibration_new(
     mt: &str,
     ir_data: &Ir,
     model_bbox: &BBox,
     centroid: CentroidResult,
     z_dwell_ms: i64,
+    receipt: Option<&mut CalibrationReceipt>,
 ) -> Result<Option<Vec<String>>, PostprocError> {
-    check_model_size(
-        model_bbox,
-        Z_PATTERN_MODEL_WIDTH,
-        Z_PATTERN_MODEL_HEIGHT,
-        "ZOffset",
-        "generate_z_offset_calibration_new",
-    )?;
+    let profile = resolve_profile("ZOffset", model_bbox, "generate_z_offset_calibration_new")?;
+    if let Some(r) = receipt {
+        *r = CalibrationReceipt::with_profile(model_bbox, profile);
+    }
+    let expect = profile.centroid;
+    let (datum_x, datum_y, spacing, count) = z_pattern(profile)?;
 
     if centroid.valid {
         check_rotation_by_centroid(
             centroid,
             model_bbox,
-            1,
-            0,
+            expect.dx_sign,
+            expect.dy_sign,
             "ZOffset",
-            0.01,
+            expect.min_ratio,
             "generate_z_offset_calibration_new",
-            false,
+            expect.square,
             0,
         )?;
     }
 
     let sing_lines: Vec<&str> = Z_OFFSET_SING_LINES.to_vec();
-    let fr_calibe_x_start = model_bbox.x_min + Z_PATTERN_OFFSET_X;
-    let fr_calibe_y_start = model_bbox.y_min + Z_PATTERN_OFFSET_Y;
+    let fr_calibe_x_start = model_bbox.x_min + datum_x;
+    let fr_calibe_y_start = model_bbox.y_min + datum_y;
 
     let mut output: Vec<String> = Vec::new();
     output.push("; ZOffset Calibration".to_string());
-    output.push(CALIBRATION_HOME_LINE.to_string());
+    push_calibration_home(&mut output);
     output.push(";Rising nozzle to avoid collision".to_string());
     output.push(format!(
         "G1 Z{}",
@@ -1033,7 +1152,7 @@ fn generate_z_offset_calibration_new(
     let mut z_accumulate = 0.5f64;
     let mut offset_accumulate = 0.0f64;
 
-    for _ in 0..Z_SQUARE_COUNT {
+    for _ in 0..count {
         output.push(format!(
             "G1 F{}",
             format_speed(ir_data.machine.travel_speed * MM_PER_MINUTE)
@@ -1066,7 +1185,7 @@ fn generate_z_offset_calibration_new(
             )?);
         }
         z_accumulate -= 0.1;
-        offset_accumulate += Z_SQUARE_SPACING;
+        offset_accumulate += spacing;
         output.push(format!(
             "G1 Z{}",
             format_z(round3(ir_data.toolhead.z_offset + 6.0))
@@ -1165,12 +1284,10 @@ fn check_rotation_by_centroid(
         centroid.centroid_x, centroid.centroid_y, bbox.x_min, bbox.x_max, bbox.y_min, bbox.y_max,
     );
 
+    // 正文 = 机器判据（那两句"请勿旋转"的话在表里，切片器那一面还会再精简一次）
     let diag_180 = |rotation_type: &str| PostprocError::CalibrationMismatch {
         code: "E_CAL_MISMATCH_001",
-        message: format!(
-            "检测到校准模型可能被旋转 180 度。请勿旋转校准模型。\
-             （{context} rotation_type={rotation_type}）"
-        ),
+        message: format!("{context} rotation_type={rotation_type}"),
     };
 
     if dx_reversed && dy_reversed && dx_large_enough && dy_large_enough {
@@ -1205,10 +1322,7 @@ fn check_rotation_by_centroid(
         if magnitude_ok {
             return Err(PostprocError::CalibrationMismatch {
                 code: "E_CAL_MISMATCH_001",
-                message: format!(
-                    "检测到校准模型可能被旋转。请勿旋转校准模型。\
-                     （{context} is_square_model=true rotation_type=90_degree）"
-                ),
+                message: format!("{context} is_square_model=true rotation_type=90_degree"),
             });
         }
     }
@@ -1248,7 +1362,7 @@ mod tests {
     }
 
     fn xy_new(mode: &str, mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_xy_calibration_new(mode, mt, ir, bbox, CentroidResult::default(), 3000)
+        generate_xy_calibration_new(mode, mt, ir, bbox, CentroidResult::default(), 3000, None)
             .expect("生成失败")
             .expect("New 变体不该返回空")
     }
@@ -1262,29 +1376,31 @@ mod tests {
         // P1S 没有 CALIBE_SING，行数干净好数
         let out = xy_new("Precise", "P1S", &ir, &b);
 
-        assert_eq!(out.len(), 6 + 22 * 7 + 3, "行数不对: {}", out.len());
+        assert_eq!(out.len(), 7 + 22 * 7 + 3, "行数不对: {}", out.len());
         assert_eq!(out[0], "; XY Offset Calibration");
-        assert_eq!(out[1], CALIBRATION_HOME_LINE);
-        assert_eq!(out[2], ";Rising nozzle to avoid collision");
-        assert_eq!(out[3], "G1 Z6.2"); // 0.2 + 0 + 6
-        assert_eq!(out[4], ";Mounting Toolhead");
-        assert_eq!(out[5], ";Toolhead Mounted");
+        // 先单独抬 Z，再平移 —— 同一句里带 Z 会贴着板面拖过去（见 CALIBRATION_PRELIFT）
+        assert_eq!(out[1], CALIBRATION_PRELIFT);
+        assert_eq!(out[2], CALIBRATION_HOME_LINE);
+        assert_eq!(out[3], ";Rising nozzle to avoid collision");
+        assert_eq!(out[4], "G1 Z6.2"); // 0.2 + 0 + 6
+        assert_eq!(out[5], ";Mounting Toolhead");
+        assert_eq!(out[6], ";Toolhead Mounted");
 
         // 第一轮横线：起点 X = x_min + 0.5，Y = y_min + 10.49 + cali(-1.0)
-        assert_eq!(out[6], "G1 F9000.0"); // travel 150 * 60
-        assert_eq!(out[7], "G1 X66.523 Y75.83");
-        assert_eq!(out[8], "G1 Z3.2"); // 0.2 + 0 + 3
-        assert_eq!(out[9], "G1 F300"); // max_speed > 10 走这条
-        assert_eq!(out[10], "G1 X76.523 Y75.83 Z0.2"); // 终点 X = x_min + 10.5
-        assert_eq!(out[11], "G4 P3000");
-        assert_eq!(out[12], "G1 Z3.2");
+        assert_eq!(out[7], "G1 F9000.0"); // travel 150 * 60
+        assert_eq!(out[8], "G1 X66.523 Y75.83");
+        assert_eq!(out[9], "G1 Z3.2"); // 0.2 + 0 + 3
+        assert_eq!(out[10], "G1 F300"); // max_speed > 10 走这条
+        assert_eq!(out[11], "G1 X76.523 Y75.83 Z0.2"); // 终点 X = x_min + 10.5
+        assert_eq!(out[12], "G4 P3000");
+        assert_eq!(out[13], "G1 Z3.2");
 
         // 第二轮：Y 再 +4.0（图案间距），cali 再 +0.2 ⇒ 净 +4.2
-        assert_eq!(out[14], "G1 X66.523 Y80.03");
+        assert_eq!(out[15], "G1 X66.523 Y80.03");
 
-        // 第一轮竖线（第 12 轮，索引 6 + 11*7 = 83）：X = x_min + 10.5 + cali(-1.0)
-        assert_eq!(out[84], "G1 X75.523 Y66.83"); // Y = y_min + 0.49
-        assert_eq!(out[87], "G1 X75.523 Y76.83 Z0.2"); // 终点 Y = y_min + 10.49
+        // 第一轮竖线（第 12 轮，索引 7 + 11*7 = 84）：X = x_min + 10.5 + cali(-1.0)
+        assert_eq!(out[85], "G1 X75.523 Y66.83"); // Y = y_min + 0.49
+        assert_eq!(out[88], "G1 X75.523 Y76.83 Z0.2"); // 终点 Y = y_min + 10.49
 
         // 每轮都有停留 —— 这是 New 与经典分支最容易漏的差异（经典分支根本没有 G4）
         assert_eq!(out.iter().filter(|l| l.as_str() == "G4 P3000").count(), 22);
@@ -1300,8 +1416,82 @@ mod tests {
         let ir = test_ir();
         let b = xy_sample_bbox();
         let out = xy_new("Rough", "P1S", &ir, &b);
-        assert_eq!(out[7], "G1 X66.523 Y74.33"); // 76.83 − 2.5
-        assert_eq!(out[14], "G1 X66.523 Y78.83"); // +4.0 −0.5 ⇒ +3.5
+        assert_eq!(out[8], "G1 X66.523 Y74.33"); // 76.83 − 2.5
+        assert_eq!(out[15], "G1 X66.523 Y78.83"); // +4.0 −0.5 ⇒ +3.5
+    }
+
+    /// **XY 板有两档了**（2026-10-19：加长版把打印区右侧 / 上侧各加 5mm，50.5 → 55.5）。
+    ///
+    /// 钉三件事：
+    /// 1. 两块板各自按包围盒认到对的那一档（差 5mm、容差 0.5 ⇒ 不会互相串），
+    ///    且回执里写的就是命中的档 id；
+    /// 2. 两档的**梯子几何**一致（`lineSpacing`；刻度槽相对板子左下角逐位未动）；
+    /// 3. 唯一的差异是加长版的 **+0.05 / +0.05 打印形貌补偿**（实心板上的凹槽，肉眼
+    ///    中心比几何中心偏左偏下，作者 2026-10-19 打出来比对后加的）—— 谁要再动这
+    ///    一组数，这条判据会把差额算给你看。
+    #[test]
+    fn xy_extended_board_hits_its_own_profile_with_the_same_ladder() {
+        let narrow = profile_of("xy-square-50");
+        let wide = profile_of("xy-square-55");
+        assert_eq!((narrow.footprint_w, narrow.footprint_h), (50.5, 50.5));
+        assert_eq!((wide.footprint_w, wide.footprint_h), (55.5, 55.5));
+        assert_eq!(narrow.centroid, wide.centroid, "两档的质心期望必须一致");
+        assert!(wide.serves("Precise") && wide.serves("Rough"));
+
+        let n = narrow.pattern.as_ref().expect("50 档要有 pattern");
+        let w = wide.pattern.as_ref().expect("55 档要有 pattern");
+        assert_eq!(n.line_spacing, w.line_spacing, "槽间距不能跟着补偿变");
+        const TRIM: f64 = 0.05;
+        let near = |got: f64, want: f64| {
+            assert!(
+                (got - want).abs() < 1e-9,
+                "补偿额应是 {want}，实测差额 {got}"
+            );
+        };
+        near(w.h_line_offset_y - n.h_line_offset_y, TRIM);
+        near(w.h_line_start_x - n.h_line_start_x, TRIM);
+        near(w.h_line_end_x - n.h_line_end_x, TRIM);
+        near(w.v_line_offset_x - n.v_line_offset_x, TRIM);
+        near(w.v_line_start_y - n.v_line_start_y, TRIM);
+        near(w.v_line_end_y - n.v_line_end_y, TRIM);
+
+        // 同一个左下角：50 档按老数走，55 档整体右/上 0.05
+        let ir = test_ir();
+        let small = BBox {
+            x_min: 66.023,
+            x_max: 66.023 + 50.5,
+            y_min: 66.340,
+            y_max: 66.340 + 50.5,
+        };
+        let big = BBox {
+            x_min: 66.023,
+            x_max: 66.023 + 55.5,
+            y_min: 66.340,
+            y_max: 66.340 + 55.5,
+        };
+        let out_small = xy_new("Precise", "P1S", &ir, &small);
+        let out_big = xy_new("Precise", "P1S", &ir, &big);
+        assert_eq!(out_small[8], "G1 X66.523 Y75.83", "旧档的落点不许动");
+        assert_eq!(out_small[85], "G1 X75.523 Y66.83", "旧档的落点不许动");
+        assert_eq!(
+            out_big[8], "G1 X66.573 Y75.88",
+            "加长版 = 旧档 + 0.05 / +0.05"
+        );
+        assert_eq!(out_big[85], "G1 X75.573 Y66.88");
+
+        let mut receipt = CalibrationReceipt::default();
+        generate_xy_calibration_new(
+            "Precise",
+            "P1S",
+            &ir,
+            &big,
+            CentroidResult::default(),
+            3000,
+            Some(&mut receipt),
+        )
+        .expect("生成失败")
+        .expect("New 变体不该返回空");
+        assert_eq!(receipt.profile_id.as_deref(), Some("xy-square-55"));
     }
 
     /// **交叉验证**：真机样例正好摆在机型默认校准位（bbox.x_min + 0.5 = A1_MINI 的
@@ -1358,6 +1548,7 @@ mod tests {
             &scaled,
             CentroidResult::default(),
             3000,
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
@@ -1381,7 +1572,8 @@ mod tests {
                 &ir,
                 &noisy,
                 CentroidResult::default(),
-                3000
+                3000,
+                None
             )
             .is_ok()
         );
@@ -1399,8 +1591,8 @@ mod tests {
             centroid_y: cy + (cy - 82.5736),
             valid: true,
         };
-        let err =
-            generate_xy_calibration_new("Precise", "P1S", &ir, &b, mirrored, 3000).unwrap_err();
+        let err = generate_xy_calibration_new("Precise", "P1S", &ir, &b, mirrored, 3000, None)
+            .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
 
         // valid=false 时不判（调用方语义）
@@ -1410,7 +1602,7 @@ mod tests {
             valid: false,
         };
         assert!(
-            generate_xy_calibration_new("Precise", "P1S", &ir, &b, ignored, 3000).is_ok(),
+            generate_xy_calibration_new("Precise", "P1S", &ir, &b, ignored, 3000, None).is_ok(),
             "valid=false 的质心不该参与判定"
         );
     }
@@ -1429,7 +1621,7 @@ mod tests {
         let out = xy_new("Precise", "P1S", &ir, &xy_sample_bbox());
 
         let mounted = out.iter().position(|l| l == ";Toolhead Mounted").unwrap();
-        let mount_block = &out[5..mounted];
+        let mount_block = &out[6..mounted];
         assert_eq!(mount_block, ["M104 S200"], "带 E 的挂载行没被过滤掉");
 
         let unmounting = out
@@ -1487,6 +1679,21 @@ mod tests {
         )
     }
 
+    /// 从生产档位表取一档 —— 判据看的必须是 `presets/calibration_models.toml` 的真内容
+    /// （档名或数值被改坏时，这里先红）。
+    fn profile_of(id: &str) -> &'static ModelProfile {
+        model_profiles()
+            .expect("presets/calibration_models.toml 读不到")
+            .iter()
+            .find(|p| p.id == id)
+            .unwrap_or_else(|| panic!("档 '{id}' 不在 presets/calibration_models.toml 里"))
+    }
+
+    /// 现行出厂那一档（ZOffset）。
+    fn z_profile() -> &'static ModelProfile {
+        profile_of("zoffset")
+    }
+
     /// 真机 Z 样例的 BBox（doc.md 第二节实测）。
     fn z_sample_bbox() -> BBox {
         BBox {
@@ -1498,7 +1705,7 @@ mod tests {
     }
 
     fn z_new(mt: &str, ir: &Ir, bbox: &BBox) -> Vec<String> {
-        generate_z_offset_calibration_new(mt, ir, bbox, CentroidResult::default(), 2000)
+        generate_z_offset_calibration_new(mt, ir, bbox, CentroidResult::default(), 2000, None)
             .expect("生成失败")
             .expect("New 变体不该返回空")
     }
@@ -1512,13 +1719,14 @@ mod tests {
         let per_round = Z_OFFSET_SING_LINES.len() + 6;
         assert_eq!(
             out.len(),
-            6 + Z_SQUARE_COUNT * per_round + 3,
+            7 + z_profile().square_count * per_round + 3,
             "行数不对: {}",
             out.len()
         );
         assert_eq!(out[0], "; ZOffset Calibration");
-        assert_eq!(out[3], "G1 Z6.2");
-        assert_eq!(out[5], ";Toolhead Mounted");
+        assert_eq!(out[1], CALIBRATION_PRELIFT, "进块之前必须先单独抬 Z");
+        assert_eq!(out[4], "G1 Z6.2");
+        assert_eq!(out[6], ";Toolhead Mounted");
         assert!(
             !out.iter().any(|l| l == ";Floating Z Calibration"),
             "P1S 不该有 Floating Z"
@@ -1527,24 +1735,61 @@ mod tests {
         // 每个方块一次停留
         assert_eq!(
             out.iter().filter(|l| l.as_str() == "G4 P2000").count(),
-            Z_SQUARE_COUNT
+            z_profile().square_count
         );
         // 第一个方块的层高：0.4 + z_offset + glue + z_accumulate(0.5) = 0.9
-        assert_eq!(out[9], "G1 Z0.9");
+        assert_eq!(out[10], "G1 Z0.9");
         // 第二个方块：z_accumulate 降到 0.4 ⇒ 0.8
-        assert_eq!(out[9 + per_round], "G1 Z0.8");
+        assert_eq!(out[10 + per_round], "G1 Z0.8");
         // 每轮抬回 z_offset + 6（`format_z` 对整数补 `.0`，所以是 `Z6.0` 不是 `Z6`）
-        assert_eq!(out[6 + per_round - 2], "G1 Z6.0");
+        assert_eq!(out[7 + per_round - 2], "G1 Z6.0");
 
         assert_eq!(out[out.len() - 1], "G1 X100 Y100 Z100");
     }
 
-    /// **交叉验证**：A1_MINI 的 `zStartX/zStartY` 恰好是 30.21 / 88.373，
-    /// 而真机样例的 `bbox.x_min + 0.079` / `bbox.y_min + 3.755` 也正是这两个数。
-    /// 于是 Z New 分支的输出应与经典分支**逐行完全相同**（Z 经典分支本来就有 G4，
-    /// 不像 XY 那样差停留行）。
+    /// 把一行里的 X / Y 数值各整体平移 `dx` / `dy`（其余字符原样）——
+    /// 让"两个分支只差 datum 实调量"这件事可以逐行断言。
+    fn shift_xy(line: &str, dx: f64, dy: f64) -> String {
+        let shift = |tok: &str, axis: char, delta: f64| -> String {
+            match tok.strip_prefix(axis).and_then(|v| v.parse::<f64>().ok()) {
+                Some(v) => format!("{axis}{}", format_float(round3(v + delta))),
+                None => tok.to_string(),
+            }
+        };
+        line.split(' ')
+            .map(|tok| {
+                if tok.starts_with('X') {
+                    shift(tok, 'X', dx)
+                } else if tok.starts_with('Y') {
+                    shift(tok, 'Y', dy)
+                } else {
+                    tok.to_string()
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    /// **交叉验证**：真机样例正好摆在机型默认校准位 —— A1_MINI 的 `zStartX/zStartY` 是
+    /// 30.21 / 88.373，而 `bbox.x_min + 0.079` / `bbox.y_min + 3.755` 也正是这两个数。
+    ///
+    /// ★ 2026-10-19 起这一档的 datum 被作者实调了（X −0.35 → −0.271、Y −0.5 → 3.255），
+    ///   所以 New 与经典分支不再逐行相同：**图案整体平移，固定坐标行（home / 回原点）
+    ///   一个字不变**。判据就按这个口径比：每行要么原样相同，要么正好等于把经典那行
+    ///   平移实调量。
     #[test]
-    fn z_new_equals_classic_when_model_sits_at_default_spot() {
+    fn z_new_matches_classic_up_to_the_datum_trim() {
+        let trim_x = z_profile().datum_x - 0.079; // 现行档相对 Go 常量的实调量（X）
+        let trim_y = z_profile().datum_y - 3.755; // 同上（Y）
+        assert!(
+            (trim_x + 0.35).abs() < 1e-9,
+            "这条判据是按 X −0.35 的实调写的；表里改成别的数就一起改这里"
+        );
+        assert!(
+            (trim_y + 0.5).abs() < 1e-9,
+            "这条判据是按 Y −0.5 的实调写的；表里改成别的数就一起改这里"
+        );
+
         let mut ir = test_ir();
         let new_out = z_new("A1_MINI", &ir, &z_sample_bbox());
 
@@ -1563,7 +1808,11 @@ mod tests {
 
         assert_eq!(new_out.len(), classic.len(), "行数应与经典分支一致");
         for (i, (n, c)) in new_out.iter().zip(classic.iter()).enumerate() {
-            assert_eq!(n.as_str(), c.as_str(), "第 {} 行不一致", i + 1);
+            assert!(
+                n == c || *n == shift_xy(c, trim_x, trim_y),
+                "第 {} 行既不是原样、也不是整体平移实调量（X {trim_x} / Y {trim_y}）\n  new: {n}\n  cls: {c}",
+                i + 1
+            );
         }
     }
 
@@ -1574,9 +1823,9 @@ mod tests {
         let ir = test_ir();
         let rotated = BBox {
             x_min: 30.131,
-            x_max: 30.131 + Z_PATTERN_MODEL_HEIGHT,
+            x_max: 30.131 + z_profile().footprint_h,
             y_min: 84.618,
-            y_max: 84.618 + Z_PATTERN_MODEL_WIDTH,
+            y_max: 84.618 + z_profile().footprint_w,
         };
         let err = generate_z_offset_calibration_new(
             "P1S",
@@ -1584,6 +1833,7 @@ mod tests {
             &rotated,
             CentroidResult::default(),
             2000,
+            None,
         )
         .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
@@ -1598,12 +1848,69 @@ mod tests {
             x_min: 30.131,
             x_max: 30.131 + 100.0,
             y_min: 84.618,
-            y_max: 84.618 + Z_PATTERN_MODEL_HEIGHT,
+            y_max: 84.618 + z_profile().footprint_h,
         };
-        let err =
-            generate_z_offset_calibration_new("P1S", &ir, &scaled, CentroidResult::default(), 2000)
-                .unwrap_err();
+        let err = generate_z_offset_calibration_new(
+            "P1S",
+            &ir,
+            &scaled,
+            CentroidResult::default(),
+            2000,
+            None,
+        )
+        .unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_002");
+    }
+
+    /// 加长版模型（2026-10-20 换成 v2 之后实测 119.5110 × 15.2720）要认到它自己那一档，
+    /// 并且**用那一档的基准**：原点 = 包围盒左下角 + (datumX, datumY)。
+    ///
+    /// 这条判据盯的是「同一个身份下多块板各用各的基准」：认得出、却用了基本版的 3.255，
+    /// 图案就会整体印偏 1mm。
+    #[test]
+    fn z_new_breaks_the_extended_model_into_its_own_datum() {
+        let ir = test_ir();
+        // 真机那份 gcode 的实测值：119.5110 × 15.2720（v2 模型）
+        let ext = BBox {
+            x_min: 30.0,
+            x_max: 30.0 + 119.5110,
+            y_min: 84.0,
+            y_max: 84.0 + 15.2720,
+        };
+        let out = z_new("P1S", &ir, &ext);
+        // `Z_OFFSET_SING_LINES[1]` = `G1 X8.224 Y9.583`，加原点 (30 − 0.271, 84 + 4.255)
+        assert!(
+            out.iter().any(|l| l == "G1 X37.953 Y97.838"),
+            "延长版档的基准没生效（该是 30 − 0.271 + 8.224 / 84 + 4.255 + 9.583）"
+        );
+    }
+
+    /// 认不出来的尺寸 ⇒ `E_CAL_MISMATCH_002`，正文要列出**已知档位**的外形尺寸
+    /// （用户自己就能看出是缩放，还是该换一块板）。
+    #[test]
+    fn unknown_z_model_lists_the_known_profiles() {
+        let ir = test_ir();
+        let weird = BBox {
+            x_min: 0.0,
+            x_max: 90.0,
+            y_min: 0.0,
+            y_max: 16.0,
+        };
+        let err = generate_z_offset_calibration_new(
+            "P1S",
+            &ir,
+            &weird,
+            CentroidResult::default(),
+            2000,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(err.code(), "E_CAL_MISMATCH_002");
+        assert!(
+            err.to_string().contains("zoffset=119.58x13.063")
+                && err.to_string().contains("zoffset-ext=119.58x15.272"),
+            "正文该列出已知档位: {err}"
+        );
     }
 
     /// Floating Z 只给 A1 / A1_MINI，且对齐点是原点 +5/+5。
@@ -1615,8 +1922,8 @@ mod tests {
             .iter()
             .position(|l| l == ";Floating Z Calibration")
             .expect("A1 应有 Floating Z");
-        // 原点 (30.21, 88.373) + 5 ⇒ (35.21, 93.373)
-        assert_eq!(a1[idx + 2], "G1 X35.21 Y93.373");
+        // 原点 (30.131 − 0.271, 84.618 + 3.255) + 5 ⇒ (34.86, 92.873)
+        assert_eq!(a1[idx + 2], "G1 X34.86 Y92.873");
         assert_eq!(
             a1.iter().filter(|l| l.as_str() == "G1 Z3.4").count(),
             5,
@@ -1639,7 +1946,8 @@ mod tests {
             centroid_y: cy + (cy - 91.0501),
             valid: true,
         };
-        let err = generate_z_offset_calibration_new("P1S", &ir, &b, mirrored, 2000).unwrap_err();
+        let err =
+            generate_z_offset_calibration_new("P1S", &ir, &b, mirrored, 2000, None).unwrap_err();
         assert_eq!(err.code(), "E_CAL_MISMATCH_001");
     }
 
@@ -1678,7 +1986,7 @@ mod tests {
         .expect("Z New 分派返回空");
         assert_eq!(
             z.iter().filter(|l| l.as_str() == "G4 P2000").count(),
-            Z_SQUARE_COUNT
+            z_profile().square_count
         );
     }
 

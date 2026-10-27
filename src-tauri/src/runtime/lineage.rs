@@ -1,4 +1,4 @@
-//! **血统三行**：用户自己那份（`presets-mine/…`）是从哪一份官方、哪一版拷出来改的。
+//! **血统三行**：用户自己那份（`presets-local/…`）是从哪一份云端、哪一版拷出来改的。
 //!
 //! # 血统写在文件里，不写在 `run/`
 //!
@@ -14,19 +14,19 @@
 //! # release_time: 2026-08-19 01:38:13
 //! # machine: A1
 //! # variant: standard
-//! # based_on: mkp/presets/A1-standard.toml      ← 从哪一份官方拷的（角色目录 + 文件名）
-//! # based_on_release_time: 2026-08-19 01:38:13  ← 那时候官方那一版的版本号（有才写）
-//! # based_on_sha256: 3f2a…                      ← 那时候官方那一版**全文**的摘要
+//! # based_on: mkp/presets/A1-standard.toml      ← 从哪一份云端拷的（角色目录 + 文件名）
+//! # based_on_release_time: 2026-08-19 01:38:13  ← 那时候交付预设那一版的版本号（有才写）
+//! # based_on_sha256: 3f2a…                      ← 那时候云端那一版**全文**的摘要
 //! [toolhead]
 //! …
 //! ```
 //!
 //! 头里**没有 uuid**：现役产物不写它（2026-10-05 删的死字段，见工作台 `app::build`
-//! 模块文档）。旧年份的官方文件与基于它们的老副本头里可能还带着那一行 ——
+//! 模块文档）。旧年份的云端文件与基于它们的老副本头里可能还带着那一行 ——
 //! 解析只认 `based_on*` 三行，多出来的头注释一律当背景噪音，不影响任何行为。
 //!
 //! 于是这份文件**拷给别人、换一台电脑**，仍然自己说得出它是从哪来的；
-//! `presets-mine/` 里也不会多出程序写的第二份文件。
+//! `presets-local/` 里也不会多出程序写的第二份文件。
 //!
 //! # 副本 = 来源 + 三行（正文一个字节不动）
 //!
@@ -42,7 +42,7 @@
 //! ```
 //!
 //! 所以「改我那份 → 保存」**不会**产生 `（已修改）2.toml`，也不会把血统改成"基于我自己"——
-//! 出处还是当初那一版官方（第八层）。两条写路共用同一个插入规则（[`splice_lineage`]），
+//! 出处还是当初那一版云端（第八层）。两条写路共用同一个插入规则（[`splice_lineage`]），
 //! 于是"保存一份没改过的副本"= 文件逐字节不变。
 //!
 //! # 为什么这一段有两份实现（客户端 / 工作台）
@@ -71,7 +71,7 @@ pub struct Lineage {
     pub based_on: Option<String>,
     /// 建副本那一刻，来源文件头的 `# release_time`（给人看的版本号）。
     pub based_on_release_time: Option<String>,
-    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「官方变了没有」）。
+    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「云端变了没有」）。
     pub based_on_sha256: Option<String>,
 }
 
@@ -87,7 +87,7 @@ impl Lineage {
 /// 全文 sha256（小写 hex）。
 ///
 /// 算的是**全文**（含头注释）：`release_time` 改了、注释改了也算变 —— 这正是我们要的
-/// （宁可多问一句「官方变了」，也别把一个真变化漏过去）。
+/// （宁可多问一句「云端变了」，也别把一个真变化漏过去）。
 pub fn sha256_hex(content: &str) -> String {
     super::catalog::hex(&Sha256::digest(content.as_bytes()))
 }
@@ -115,7 +115,7 @@ pub fn make_copy(src_text: &str, based_on: &str) -> String {
 /// 与 [`make_copy`] 的区别只有一件事：**那三行的来源**。
 /// 建副本是"我从哪来"（从**来源**算：来源的全文摘要 + 来源的 `release_time`）；
 /// 写回自己时出处没变，所以**照抄文件里原来那三行** —— 重新算的话，
-/// 摘要会变成"我自己那份改过的字节"，血统就说不出它是从哪一版官方派生的了。
+/// 摘要会变成"我自己那份改过的字节"，血统就说不出它是从哪一版云端派生的了。
 ///
 /// `existing` 是 `None`（这份文件本来就没有血统：手工拷的 / 别的程序写出来的）⇒
 /// 正文原样写回，**不编一个出处**。
@@ -257,7 +257,7 @@ pub fn strip_lineage_for_compare(text: &str) -> String {
 
 /// `# based_on` / `# based_on_release_time` / `# based_on_sha256` 三行。
 ///
-/// 三项**全都缺** ⇒ `None`（"这份文件没有血统"：手工拷的、或官方原件本身）；
+/// 三项**全都缺** ⇒ `None`（"这份文件没有血统"：手工拷的、或云端原件本身）；
 /// 只缺其中几项 ⇒ `Some`，缺的那几项是 `None`（"这几项不知道"）。
 /// 这两种情况在界面上说的话不一样，所以类型上必须分得开。
 pub fn parse_lineage_from_content(content: &str) -> Option<Lineage> {
@@ -277,12 +277,12 @@ fn parse_release_time_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "release_time")
 }
 
-/// **这一版官方是什么时候发的**（文件头 `# release_time` 的原样值，如
+/// **这一版云端是什么时候发的**（文件头 `# release_time` 的原样值，如
 /// `2026-08-19 01:38:13`）。
 ///
-/// 它是"这是哪个官方版本"的日期真值（血统三行里的 `based_on_release_time` 也用它）——
+/// 它是"这是哪个云端版本"的日期真值（血统三行里的 `based_on_release_time` 也用它）——
 /// **不许**拿下载时刻 / 文件 mtime / 目录代时间冒充它：那些回答的是"我什么时候拿到它"，
-/// 不是"这是哪个官方版本"。没有这一行就返回 `None`（不知道就不编一个）。
+/// 不是"这是哪个云端版本"。没有这一行就返回 `None`（不知道就不编一个）。
 pub fn parse_release_time(content: &str) -> Option<String> {
     parse_release_time_from_content(content)
 }
@@ -403,7 +403,7 @@ pub fn rewrite_machine_variant(text: &str, machine: &str, variant: &str) -> Stri
 mod tests {
     use super::*;
 
-    /// 一份带文件头注释的官方预设（与入库产物同形）
+    /// 一份带文件头注释的云端预设（与入库产物同形）
     const SRC: &str = "\
 # uuid: 1111
 # release_time: 2026-08-19 01:38:13
@@ -468,7 +468,7 @@ offset_z = 4 # 笔尖偏移
     /// 读得回来；**没有血统 = `None`**（不是三项全空的空壳）
     #[test]
     fn lineage_roundtrips_and_absence_is_none() {
-        assert_eq!(parse_lineage_from_content(SRC), None, "官方原件没有血统");
+        assert_eq!(parse_lineage_from_content(SRC), None, "云端原件没有血统");
 
         let copy = make_copy(SRC, "mkp/presets/A1-standard.toml");
         let got = parse_lineage_from_content(&copy).expect("三行都在，读得出来");
@@ -630,7 +630,7 @@ offset_z = 4 # 笔尖偏移
         assert!(crlf.contains("# variant: FAST\r\n"));
     }
 
-    /// 一份**没有** machine / variant 两行的官方形文件（测试夹具）
+    /// 一份**没有** machine / variant 两行的云端形文件（测试夹具）
     const SRC_WITHOUT_MV: &str = "\
 # release_time: 2026-08-19 01:38:13
 

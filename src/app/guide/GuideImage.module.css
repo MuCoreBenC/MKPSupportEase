@@ -1,0 +1,174 @@
+/* 图片引导件（2026-10-16）—— 见 GuideModal.tsx 头注 */
+
+/* 状态那一句：与图分开，先说"此刻在哪" */
+.status {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+/* 图在左、文字在右。图窄、字宽 —— 图是竖着的系统窗口截图，撑宽了会把文字挤到屏幕外 */
+.split {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+/*
+ * 右边那一列：**先"此刻在哪"，再"怎么做"**（状态那句 2026-10-16 从大标题下面搬进来）。
+ * `flex: 1 1 auto` + `min-width: 0`：图定宽，剩下的全归文字，且长句能正常折行。
+ */
+.side {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/*
+ * 图的容器 = **标注的坐标系**：标注一律百分比，所以框跟着容器走。
+ * `position: relative` 是框的定位祖先。
+ *
+ * ★ 容器**不给宽**（原来写死 `width: 314px`）：宽度交给里面那张图自己的 max-* 决定，
+ *   容器取内容的 max-content ⇒ **容器与图永远一样大**。差一点点标注就飘
+ *   （框是按容器的百分比画的）。
+ */
+.frame {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+/*
+ * 图（作者给的系统截图）—— **一像素装饰都不加**（作者 2026-10-16 定的）。
+ *
+ * 曾经给它加过圆角 + 发丝线 + 一层浅影（怕浅色下图和模态框白底粘在一起），作者当场纠：
+ * 「你这个图片不要外面再嵌套一个那个容器了……不要再加那个背景、不要再加那一个阴影了，
+ *   因为我原本截出的图片，它就已经自带的那一个阴影背景啊」
+ * —— 他给的截图四周自带系统窗口的投影与一圈桌面底，那是**图的一部分**（也正因为如此，
+ * 标注的百分比里本来就含那圈边距）；再套一层就是两个边、两层影。
+ *
+ * ============ 尺寸：**宽和高都算，谁紧听谁的**（2026-10-16 作者点名的） ============
+ *
+ * 「那个图片它可以适当的缩放，你不只是判断它的这个宽度、高度，反正你要把它缩放，
+ *   可以显示完整，就像我的测试模型那一页那个图片的变化一样」（= 校准页那张合影，
+ *   见 `PageCalib.module.css` 的 `.modelsImg`：任何窗高都完整显示）。
+ *
+ * 就三行，每一行都有原因：
+ *   `width/height: auto` + 两个 `max-*` ⇒ 替换元素按**等比**收，不会拉扁；
+ *   `max-width` 管"窗口宽"：平时 314px（作者给的截图四周带投影边距，比窗口本身宽一档；
+ *              268px 时窗口只剩 ~185px、字就糊了），窄窗再让给 `46vw`；
+ *   `max-height` 管"窗口高"：`56vh` 那一档 —— 模态框的框身上限就在视口里，
+ *              图比它还高时就要进滚动，作者要的正是"完整显示、不滚"。
+ *
+ * `display:block` 留着：`<img>` 是行内替换元素，底下会多出一条基线缝，
+ * 而这条缝会让「图的底边」量在缝上面（标注坐标系的底边就不是看起来那个了）。
+ */
+.shot {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: min(314px, 46vw);
+  max-height: min(46vh, 460px);
+}
+
+/*
+ * 放大看那一档（`<GuideFigure big />`）—— 两条上限各放大一档：
+ * 宽 640（作者给的截图 754 宽，这个数已经能看清窗口里的字）、
+ * 高 = 视口减 150（模态框遮罩上下各留一份内衬 ≈ 52、再加底下那句提示 ≈ 30）。
+ * ★ 写在 `.shot` **之后**：单类名同权重，靠源序覆盖那两条 `max-*`。
+ */
+.zoomShot {
+  max-width: min(86vw, 640px);
+  max-height: min(calc(100vh - 150px), 820px);
+}
+
+/*
+ * 图那一块现在是个按钮（点开看大的）—— 把按钮自己的皮扒干净，只留"能点"这件事：
+ * 图仍是图，外面不套容器（作者对"再套一层"是明确否过的）。
+ */
+.figBtn {
+  display: block;
+  flex: 0 0 auto;
+  padding: 0;
+  background: none;
+  border: 0;
+  /* 能点的意思只说给光标听（作者 2026-10-16：不要"点一下放大"那种提示文字） */
+  cursor: zoom-in;
+}
+
+/*
+ * 一块框选：`left/top/width/height` 由 JS 按百分比给（见 GuideMark）。
+ *
+ * ★ 认得出的三条：2px 强调色、圆角 8、外面再兜一圈半透明黑 —— 系统截图有浅有深，
+ *   只靠强调色在深色截图里会糊进背景（那圈黑把框从底上"抬"起来）。
+ */
+.mark {
+  position: absolute;
+  /*
+   * ★★ 三个数都**除掉 `--zoom-k`**（放大看的那一层里写的当前倍率，平时是 1）——
+   *   图的 `transform: scale(k)` 会把子元素一起放大，线宽 / 圆角 / 编号圆点若跟着涨，
+   *   放大到 4 倍就是一圈 8px 的橡皮筋 + 一颗 72px 的大圆点压在图上。
+   *   除回去 = **视觉大小恒定**（框线始终 2px、圆点始终 18px）。
+   *   ★ 三个值都能被标注源稿覆盖（`--mark-stroke` / `--mark-radius` / `--badge-size`，
+   *     由 `GuideFigure` 按每条标注写在 `.frame` 上）——缺省就是今天的样子。
+   *
+   * ★★ 那一圈线**不能用 `border`**：浏览器把非零 `border-width` **钳到最小 1px**
+   *   （Blink/WebKit 都是），除到 0.45px 也只会画成 1px ⇒ 放大到 2 倍以上又开始变粗
+   *   （2026-10-16 实测：k=4.4 时量到 1px，视觉就是 4.4px）。
+   *   改用**两层外扩的影**：`box-shadow` 的扩散半径**没有 1px 下限**，能真缩到细；
+   *   顺带一个好处 —— 影画在盒子**外面**，不再吃掉控件自身那 2px（原来是 border 画在内侧）。
+   */
+  border-radius: calc(var(--mark-radius, 8px) / var(--zoom-k, 1));
+  box-shadow:
+    0 0 0 calc(var(--mark-stroke, 2px) / var(--zoom-k, 1)) var(--accent),
+    0 0 0 calc((var(--mark-stroke, 2px) + 1px) / var(--zoom-k, 1)) rgb(0 0 0 / 28%);
+}
+
+/* 框角上那颗编号：与右侧那几步对得上（尺寸 / 字号同样除掉 `--zoom-k`，见 `.mark` 那段） */
+.badge {
+  position: absolute;
+  --badge: calc(var(--badge-size, 18px) / var(--zoom-k, 1));
+
+  left: calc(var(--badge) / -2);
+  top: calc(var(--badge) / -2);
+  width: var(--badge);
+  height: var(--badge);
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  /* ★★ 同一套字（`global.css` 的 `@font-face`）＋ 同一个比例（圆径 × 11/18）—— 见
+     标注台 `.badge` 那段与 `render.rs` 的 `BADGE_FONT_RATIO`，三处必须一条口径 */
+  font-family: 'MKP Badge', system-ui, sans-serif;
+  font-size: calc(var(--badge) * 11 / 18);
+  line-height: 1;
+}
+
+/* 步骤那一列 */
+.steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.step {
+  font-size: var(--fs-body);
+  color: var(--text-1);
+}
+
+.stepText {
+  display: block;
+}
+
+/* 那步下面的小字（"不点它只对这一个文件生效"） */
+.stepNote {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-label);
+  font-style: normal;
+  color: var(--text-2);
+}

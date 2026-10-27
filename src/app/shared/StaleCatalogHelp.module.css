@@ -1,0 +1,32 @@
+/*
+ * 「怎么办」那一块（见 StaleCatalogHelp.tsx 抬头那段）。
+ *
+ * 用 `--ask-*` 那一套色：**这不是故障，是请你做一件事** —— 与「请你挑一件」那些块
+ * 同色，与红字（故障）区分开。作者要的是"给个办法"，不是再来一条报错。
+ *
+ * 整块**定宽不撑框**：文案长短与调用方的框尺寸互不相干（同上一次收口的规矩）。
+ */
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--ask-line);
+  border-radius: var(--r-md);
+  background: var(--ask-surface);
+  color: var(--ask-ink);
+}
+
+.title {
+  font-size: var(--fs-label);
+  font-weight: 600;
+}
+
+.body {
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  /* 软断行：中文句子在窄框里不撑破，也不许溢出 */
+  overflow-wrap: anywhere;
+}

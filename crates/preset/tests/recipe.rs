@@ -145,11 +145,11 @@ fn kg4_every_override_field_actually_lands_in_the_product() {
     for (machine, variant) in recipe.combos() {
         let text = render(&recipe, &machine, &variant).expect("渲染");
         let parsed: toml::Value = toml::from_str(&text).expect("产物是合法 TOML");
-        // 顺手确认一件事：生成的**官方**预设不该带副本的血统三行
+        // 顺手确认一件事：生成的**云端**预设不该带副本的血统三行
         let file = preset::read_preset_from_bytes(text.clone()).expect("产物能读");
         assert!(
             file.lineage.is_none(),
-            "K-G4 红：官方预设不该带 `# based_on*`"
+            "K-G4 红：云端预设不该带 `# based_on*`"
         );
 
         for (path, want) in recipe.effective(&machine, &variant) {

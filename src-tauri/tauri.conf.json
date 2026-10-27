@@ -1,11 +1,11 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SupportEase",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "identifier": "SupportEase",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5321",
+    "devUrl": "http://[::1]:5321",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
@@ -21,7 +21,7 @@
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
-        "transparent": true
+        "transparent": false
       }
     ],
     "security": {

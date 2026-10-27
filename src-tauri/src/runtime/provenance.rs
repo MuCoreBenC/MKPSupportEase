@@ -2,16 +2,16 @@
 //!
 //! # 为什么要有这本账（而不是写在文件里）
 //!
-//! 血统（`# based_on*` 三行）记的是**官方来源**，写在文件头里、跟着文件走 —— 那条线
+//! 血统（`# based_on*` 三行）记的是**云端来源**，写在文件头里、跟着文件走 —— 那条线
 //! 已经有了。但「我这份是从**我自己另一份**复制出来的」这件事**没有地方可写**：
 //! 第十一层「另存为一份新的」是**按字节**复制（血统原样带过去），往文件头里再加一行
 //! 就得重写字节 —— 那违背它"原文件一个字节不动、副本按字节复制"的约定。
-//! 导入同理：外部文件进 `presets-mine/` 前后的字节是用户自己的，客户端不往里写东西。
+//! 导入同理：外部文件进 `presets-local/` 前后的字节是用户自己的，客户端不往里写东西。
 //!
 //! 所以出处记在**用户根的账本**里（`provenance.json`）：`to`（副本路径）→
 //! `from`（来源路径，导入没有）+ `kind`（copy / import）。它只回答界面上那一格
 //! 「来源：复制自 X / 导入」—— **不是权限、不是身份**：账本丢了或没记上，
-//! 那一份照常能用能改能删，界面上退回「我的」，什么都不坏。
+//! 那一份照常能用能改能删，界面上退回「本地」，什么都不坏。
 //!
 //! # 盘当底账的例外
 //!
@@ -19,6 +19,9 @@
 //! 这个事实盘上不存在，不记就永远丢了。它记的是**历史事件**，不是文件的现在：
 //! 文件被改名、被删除之后账上的条目要跟着改（[`repath`]）、可以悬空（界面照实退回）。
 
+use postprocess::diag::messages;
+
+use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -26,7 +29,7 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::fsx::atomic::atomic_write;
 
-/// 出处的两种来路。落账本/契约的就是这两个词（跨 IPC 的稳定词，与 `MineState` 同一规矩）
+/// 出处的两种来路。落账本/契约的就是这两个词（跨 IPC 的稳定词，与 `LocalState` 同一规矩）
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProvenanceKind {
     /// 从用户自己的另一份复制出来的（第十一层「另存为一份新的」）
@@ -64,7 +67,7 @@ struct Ledger {
     entries: Vec<Entry>,
 }
 
-/// 账本落点：用户根下的 `provenance.json`（与 `presets-mine/` 同一层 ——
+/// 账本落点：用户根下的 `provenance.json`（与 `presets-local/` 同一层 ——
 /// 它说的是用户那份的事，跟用户的数据住一起）
 fn ledger_path(user_root: &Path) -> std::path::PathBuf {
     user_root.join("provenance.json")
@@ -105,6 +108,21 @@ pub fn record(
     save(user_root, &ledger)
 }
 
+/// **哪几份是复制出来的**（`to` 那一头的路径集合，`kind == copy`）。
+///
+/// 给"复制件不认云端"那道闸用（2026-10-20）：身份账本与逐参数更新账在出口前
+/// 拿它滤一遍。**一次读、进集合**，别对每个文件各读一遍账本。
+///
+/// 账本读不出来 / 还没记过 ⇒ **空集**（于是"没有一份是复制件"）—— 出处是附加信息，
+/// 缺了不许凭空多排除一批（那时的结果与这个功能存在之前一模一样）。
+pub fn copy_targets(user_root: &Path) -> HashSet<String> {
+    load(user_root)
+        .into_iter()
+        .filter(|e| e.kind == ProvenanceKind::Copy.as_str())
+        .map(|e| e.to)
+        .collect()
+}
+
 /// 文件改名之后账跟着走（第十层）：副本改了名 ⇒ `to` 跟着改；**来源**改了名 ⇒ `from` 跟着改
 /// （不然"复制自 X"第二天就指向一个不存在的名字）。没有匹配条目就是无事发生
 pub fn repath(user_root: &Path, old_rel: &str, new_rel: &str) -> Result<(), AppError> {
@@ -129,8 +147,10 @@ pub fn repath(user_root: &Path, old_rel: &str, new_rel: &str) -> Result<(), AppE
 }
 
 fn save(user_root: &Path, ledger: &Ledger) -> Result<(), AppError> {
-    let body = serde_json::to_vec_pretty(ledger)
-        .map_err(|e| AppError::internal("出处账本序列化不了").with_detail(e.to_string()))?;
+    let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
+        AppError::internal(messages::text("ui.runtime.provenance.426", &[]))
+            .with_detail(e.to_string())
+    })?;
     atomic_write(&ledger_path(user_root), &body)
 }
 
@@ -143,15 +163,15 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].to, "presets-mine/B.toml");
-        assert_eq!(all[0].from.as_deref(), Some("presets-mine/A.toml"));
+        assert_eq!(all[0].to, "presets-local/B.toml");
+        assert_eq!(all[0].from.as_deref(), Some("presets-local/A.toml"));
         assert_eq!(all[0].kind, "copy");
     }
 
@@ -161,21 +181,21 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/C.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/C.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
         let all = load(d.path());
         assert_eq!(all.len(), 1);
-        assert_eq!(all[0].from.as_deref(), Some("presets-mine/C.toml"));
+        assert_eq!(all[0].from.as_deref(), Some("presets-local/C.toml"));
     }
 
     /// 改名：副本改名 `to` 跟走；来源改名 `from` 跟走 —— 两个方向都要
@@ -184,19 +204,19 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/B.toml",
-            Some("presets-mine/A.toml"),
+            "presets-local/B.toml",
+            Some("presets-local/A.toml"),
             ProvenanceKind::Copy,
         )
         .unwrap();
 
-        repath(d.path(), "presets-mine/B.toml", "presets-mine/B2.toml").unwrap();
-        assert_eq!(load(d.path())[0].to, "presets-mine/B2.toml");
+        repath(d.path(), "presets-local/B.toml", "presets-local/B2.toml").unwrap();
+        assert_eq!(load(d.path())[0].to, "presets-local/B2.toml");
 
-        repath(d.path(), "presets-mine/A.toml", "presets-mine/A2.toml").unwrap();
+        repath(d.path(), "presets-local/A.toml", "presets-local/A2.toml").unwrap();
         let e = &load(d.path())[0];
-        assert_eq!(e.to, "presets-mine/B2.toml");
-        assert_eq!(e.from.as_deref(), Some("presets-mine/A2.toml"));
+        assert_eq!(e.to, "presets-local/B2.toml");
+        assert_eq!(e.from.as_deref(), Some("presets-local/A2.toml"));
     }
 
     /// 坏档 ⇒ 空表：出处缺了不许让用户线的任何读失败
@@ -213,7 +233,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         record(
             d.path(),
-            "presets-mine/外来的.toml",
+            "presets-local/外来的.toml",
             None,
             ProvenanceKind::Import,
         )

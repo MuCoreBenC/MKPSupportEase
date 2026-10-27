@@ -343,6 +343,10 @@ paramKey = 'wiping.glue_z_lift_height_first_layers'
 id = 'item_5_2_2'
 paramKey = 'wiping.glue_inter_model_lift_height'
 
+[[tabs.sections.items]]
+id = 'item_5_2_3'
+paramKey = 'wiping.swap_hop_height'
+
 [[tabs.sections]]
 id = 'calibration'
 
@@ -411,12 +415,10 @@ items = []
 layout = 'component'
 width = 'half'
 
-[[tabs.sections]]
-component = 'calibration-card'
-id = 'calibration'
-items = []
-layout = 'component'
-width = 'half'
+# 2026-10-20：`component = 'calibration-card'` 那一节原本用 id = 'calibration'，
+# 与「更多」下装参数的那一节撞名 —— 同一个 id 两个页签归属，工作台空组、客户端单列。
+# 作者定：客户端不要多这一个，XY/Z 校准模式统一归到「更多 → 校准」。
+# 设置页要不要那张卡片是另一件事，要的话得换一个新 id。
 
 [[tabs.sections]]
 component = 'bed-glue-card'

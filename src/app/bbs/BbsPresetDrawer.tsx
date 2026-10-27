@@ -13,9 +13,13 @@
  *   - 继承链中间层（fdm_process_*）：根本不进列表，BBS 的下拉里也没有
  */
 
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
+import { useT } from '../../i18n'
+import Icon from '../../components/Icon'
+import { SelectField } from '../../components/field'
 import BbsSearchBox from './BbsSearchBox'
-import { MODEL_ALL, groupsFor, targetsOf } from './bbsSource'
+import { MODEL_ALL, groupsFor, inPickSource, reasonText, targetsOf } from './bbsSource'
+import type { BbsPickSource } from './bbsSource'
 import type { BbsDrawer } from './useBbsDrawer'
 import type { BbsPresetItem } from './bbsTypes'
 import s from './BbsPresetDrawer.module.css'
@@ -26,6 +30,15 @@ interface Props {
   dirty: boolean
   target: string
   query: string
+  /**
+   * 看哪一边（2026-10-13）：
+   *   `mkp`  我们自己的 —— 预设页下载到本机的那几份切片器配置
+   *   `bbs`  本机 BBS 目录里的 —— 用户配置 + 系统配置
+   *
+   * 列表、机型下拉的选项、空态说法都跟着它走。默认由页面给 `mkp`。
+   */
+  source: BbsPickSource
+  onSource: (next: BbsPickSource) => void
   /** 收起时整个不渲染（display:none） */
   open: boolean
   /**
@@ -39,6 +52,47 @@ interface Props {
   onTarget: (next: string) => void
   onQuery: (next: string) => void
   onPick: (key: string) => void
+  /**
+   * 点了**还没下载**的那一份该去哪儿（2026-10-13）：页面给的动作（跳去预设页把它取回来）。
+   * `null` = 这一档没有这个动作 —— 那时点了不做事，title 里仍写着该去哪一栏。
+   */
+  onNeedDownload: (() => void) | null
+  /**
+   * 已经复制进切片器目录的**我们那几份**（文件名）。
+   *
+   * 本机目录里出现同名的那一份时，行尾标一颗「我们发的」—— `copy_to_slicer` 之后两边
+   * 各有一份内容相同的（作者 §7：「把"来自我们那几份"标出来」），不标出来会以为
+   * 本机目录里那份是用户自己另存的。
+   */
+  copied: ReadonlySet<string>
+  /**
+   * 重扫本机（2026-10-13 从工具条搬进来的）：它是"刷新这个列表"，
+   * 与机型筛选是同一层的事。`null` = 这一档没有这个动作（比如读不到本机目录时）。
+   */
+  rescan: (() => void) | null
+  /**
+   * 正在读清单（2026-10-13）。
+   *
+   * ★ 这个状态属于**这个列表**，不属于右边那排参数 —— 作者：「这个刷新的我不喜欢，
+   * 它刷新的会去顶我这里面的东西。我这里面的东西高度在变化……它应该是刷新左侧的列表，
+   * 而不是说刷新它这一个右侧的参数吧，这种感觉你能理解吗？」
+   *
+   * 所以它只在这里表态，而且**一个字都不往流里加**（免得把项顶下去）：
+   * 头部下沿扫一条 2px 的细线、列表项重铺一遍；列表空的时候（第一次读）
+   * 才把那句提示当列表内容画出来。
+   *
+   * ★ 2026-10-13 第二轮：这个量还含"当前这一份的链正在重读"（见 `PageBbs` 的 `refreshing`），
+   *   因为那一下左侧也该有反应。那只 ↻ **不再旋转**了 —— 作者嫌转得丑、还转不完整，
+   *   现在它只跟着变色（见 css 的 `.iconBtn[data-loading]`）。
+   */
+  loading: boolean
+  /**
+   * 我们自己的切片器配置：目录里登记了几份、本机已经下到几份。
+   *
+   * 只用来**说话**（MKP 档的空态：「一份都还没下载，去预设页那一栏把它弄下来」）——
+   * 正文由页面读出来灌进清单（见 `PageBbs` 里读盘那一段），这一层不碰盘。
+   */
+  slicer: { listed: number; ready: number }
 }
 
 export default function BbsPresetDrawer({
@@ -47,22 +101,72 @@ export default function BbsPresetDrawer({
   dirty,
   target,
   query,
+  source,
+  onSource,
   open,
   mode,
   sizing,
   onTarget,
   onQuery,
   onPick,
+  onNeedDownload,
+  copied,
+  rescan,
+  loading,
+  slicer,
 }: Props) {
-  const targets = useMemo(() => targetsOf(presets), [presets])
+  const tr = useT()
+  /*
+   * 这一档里的项：列表分组与**机型下拉的选项**都从这儿来 —— 切到 MKP 之后下拉里就只剩
+   * 那几台机。作者 2026-10-13：「这个下拉菜单它就不是说显示这么多的，要我们切换到了
+   * 显示本机，它才显示这么多。你看这几百个哪里够人选？」
+   */
+  const scoped = useMemo(() => presets.filter((p) => inPickSource(p, source)), [presets, source])
+  const targets = useMemo(() => targetsOf(scoped), [scoped])
   const groups = useMemo(
-    () => groupsFor(presets, { target, currentKey, dirty, query }),
-    [presets, target, currentKey, dirty, query],
+    () => groupsFor(presets, { target, currentKey, dirty, query, source }),
+    [presets, target, currentKey, dirty, query, source],
   )
-  const liveCount = presets.filter((p) => !p.isAbstract).length
+  const liveCount = scoped.filter((p) => !p.isAbstract).length
 
   /* 当前档位不在列表里（比如导入的文件认不出机型）→ 退到「全部」，别显示一个空列表 */
   const targetValue = targets.some((t) => t.key === target) ? target : MODEL_ALL
+
+  /*
+   * 下拉上写着「全部（9）」、列表却还在按上一次那台机筛 —— 那是两种说法对不上。
+   * 换档（或换机型集合）之后目标档位可能在新的一档里根本不存在，比如从本机的 H2D
+   * 切到「MKP 预设」，而 MKP 那九份里没有 H2D —— 那时两边都得走到「全部」上去：
+   * 上面对下拉做了兜底显示，这里把**真正在筛的那个值**补齐，两处才一致。
+   */
+  useEffect(() => {
+    if (targetValue !== target) onTarget(targetValue)
+  }, [targetValue, target, onTarget])
+
+  /*
+   * 机型下拉的选项（2026-10-13：原生 `<select>` 换成自绘的共用件 `SelectField`）。
+   *
+   * 换的理由是作者看着那个系统弹层说「这个下拉菜单我不喜欢啊，样式也得改一下，
+   * 用我们自己的风格去写吧」—— 原生弹层的字号、勾选、高度全归浏览器，两套皮肤
+   * 一起走不了。共用件本身就是为这件事写的（`SelectField` 的文件头：
+   * 「全仓库一个原生 `<select>` 都没有」—— 这一页这两个是漏网的）。
+   *
+   * 文本一字不改地搬过来，包括「（全部喷嘴）」那一档的缩进：缩进用全角空格的转义写法 ——
+   * 选项是 nowrap 的一行，普通空格会被折叠掉。
+   */
+  const targetOptions = useMemo(
+    () => [
+      { value: MODEL_ALL, label: tr('bbs.drawer.allTargets', { count: liveCount }) },
+      ...targets.map((t) => ({
+        value: t.key,
+        /* 喷嘴那一档缩进一格：选项是 nowrap 的一行，普通空格会被折掉，所以用全角空格 */
+        label:
+          t.level === 'nozzle'
+            ? `\u3000${tr('bbs.drawer.target', { label: t.label, count: t.count })}`
+            : tr('bbs.drawer.target', { label: t.label, count: t.count }),
+      })),
+    ],
+    [targets, liveCount, tr],
+  )
 
   return (
     <aside
@@ -70,45 +174,135 @@ export default function BbsPresetDrawer({
       data-open={open}
       data-mode={mode}
       data-dragging={sizing.dragging ? 'true' : undefined}
-      aria-label="预设列表"
+      aria-label={tr('bbs.drawer.list')}
     >
-      <div className={s.head}>
-        <select
-          className={s.pick}
-          value={targetValue}
-          aria-label="按机型与喷嘴筛选"
-          onChange={(e) => onTarget(e.target.value)}
-        >
-          <option value={MODEL_ALL}>全部（{liveCount}）</option>
-          {targets.map((t) => (
-            <option key={t.key} value={t.key}>
-              {/* 「（全部喷嘴）」那一档缩进一格，看得出它是这台机的汇总。
-                  缩进用全角空格的转义写法：<option> 里的普通空格会被折叠掉 */}
-              {t.level === 'nozzle' ? `\u3000${t.label}（${t.count}）` : `${t.label}（${t.count}）`}
-            </option>
-          ))}
-        </select>
+      {/* `data-loading` 给头部那条扫动细线用（见 css）—— 读清单时它扫起来 */}
+      <div className={s.head} data-loading={loading ? 'true' : undefined}>
+        {/*
+          两档来源（2026-10-13 作者定）：**MKP 工艺** ↔ **本机工艺**。
+
+          作者：「最优先的是显示我们自己的 MKP 的……我希望有一个切换呀，是可以去看本机的、
+          可以去看系统的、一个就是看本软件的，而且看系统的那个一般没那么明显，不要优先显示
+          它的。」—— 系统那一档并进了「本机工艺」：它们本来就在同一个目录里，分成两个入口
+          只是把"这一份是本地还是 BBL 的"变成一次点击；真正要紧的分界是「我们自己发的」
+          与「你这台机器上原有的那几百份」。默认停在 MKP 工艺（由页面给）。
+
+          ★ 这两个名字是作者逐字定的，别自己发挥：
+            「MKP 预设」不行 —— 会跟 MKP 自己那份 **toml** 预设撞名（那是机器配置，
+            与工艺预设是两回事）；
+            「本机 BBS」也不行 —— 这一页里 BBS 是内部黑话，界面上不该出现。
+            定的是：左「MKP 工艺」、右「本机工艺」（两边都落在"工艺"这个词上，
+            这一页的页签本来也叫「工艺」）。
+        */}
+        <div className={s.sourceTabs} role="tablist" aria-label={tr('bbs.drawer.source')}>
+          <button
+            type="button"
+            role="tab"
+            className={s.sourceTab}
+            data-on={source === 'mkp'}
+            aria-selected={source === 'mkp'}
+            title={tr('bbs.drawer.mkpTitle')}
+            onClick={() => onSource('mkp')}
+          >
+            {tr('bbs.drawer.mkp')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            className={s.sourceTab}
+            data-on={source === 'bbs'}
+            aria-selected={source === 'bbs'}
+            title={tr('bbs.drawer.localTitle')}
+            onClick={() => onSource('bbs')}
+          >
+            {tr('bbs.drawer.local')}
+          </button>
+        </div>
+
+        <div className={s.headRow}>
+          <span className={s.pickWrap}>
+            <SelectField
+              label={tr('bbs.drawer.targetFilter')}
+              value={targetValue}
+              options={targetOptions}
+              onChange={onTarget}
+            />
+          </span>
+
+          {/*
+            重扫本机（2026-10-13 从工具条搬进来）：它刷新的是**这个列表**，所以跟机型筛选排在一行。
+            平时是四条字，这里收成一枚图标 + title —— 抽屉本来就只有 280 宽。
+          */}
+          {rescan !== null && (
+            <button
+              type="button"
+              className={s.iconBtn}
+              /* 读清单时它转起来 —— 这是"正在刷新这个列表"唯一的动效，不占一格位置 */
+              data-loading={loading ? 'true' : undefined}
+              title={tr('bbs.drawer.rescanTitle')}
+              aria-label={tr('bbs.drawer.rescan')}
+              onClick={rescan}
+            >
+              <Icon name="refresh" size={15} />
+            </button>
+          )}
+        </div>
 
         <BbsSearchBox
           value={query}
-          placeholder="搜索预设名…"
-          label="搜索预设名"
+          placeholder={tr('bbs.drawer.searchPlaceholder')}
+          label={tr('bbs.drawer.searchLabel')}
           variant="fill"
           onChange={onQuery}
         />
+
+        {/*
+          这里原来有一格「载入随包配置」下拉 —— 2026-10-13 退役。
+          它要你**一份一份手动载入**才看得见，与作者要的「最优先显示我们自己的」正好相反：
+          那几份现在由页面在进页时整批读出来进清单（`PageBbs` 里读盘那一段），MKP 档直接列。
+          「一份都没下载」该说什么交给下面列表的空态 —— 那儿分得清"没下载"与"搜不到"。
+        */}
       </div>
 
-      {/* data-role 是给验收探针用的稳定钩子（选择器不随 class 哈希变） */}
-      <div className={s.list} data-role="preset-list">
+      {/*
+        data-role 是给验收探针用的稳定钩子（选择器不随 class 哈希变）。
+        `data-refreshing` 是"重扫本机"那一下的列表重铺动画（见 css 里 `.list[data-refreshing]`）：
+        读清单期间挂上，读完摘掉 —— 动画自己收干净。
+      */}
+      <div
+        className={s.list}
+        data-role="preset-list"
+        data-refreshing={loading ? 'true' : undefined}
+        aria-busy={loading || undefined}
+      >
+        {/*
+          列表空的时候才把"正在读清单…"这话画出来（第一次进来那一下）。
+          列表里已经有项时**一个字都不加** —— 那句提示会把整列项顶下去，
+          正是作者说的「会去顶我这里面的东西」；那时候由上面那只转着的 ↻ 说话。
+        */}
         {!groups.length && (
           <p className={s.empty}>
-            {query ? `没有名字含「${query}」的预设` : '这个机型下没有预设'}
+            {loading
+              ? tr('bbs.drawer.loading')
+              : query
+                ? tr('bbs.drawer.noMatch', { query })
+                : source === 'mkp'
+                  ? (slicer.ready > 0
+                    /* 盘上有、却一份都没进清单 —— 只有"正文读不出来"这一种可能，
+                       别把话说成"还没下载"（那是在撒谎）。
+                       浏览器预览里就是这一档：MKP 的切片器配置在演示里能读（见
+                       mockServer/slicerPreset.ts），MKP 的 toml 则照旧读不到。 */
+                    ? tr('bbs.drawer.readFailed')
+                    : slicer.listed > 0
+                      ? tr('bbs.drawer.notDownloaded', { count: slicer.listed })
+                      : tr('bbs.drawer.noneInAssets'))
+                  : tr('bbs.drawer.noneForMachine')}
           </p>
         )}
         {groups.map((g) => (
-          <div key={g.title}>
+          <div key={g.titleKey}>
             <div className={s.group} data-weak={g.weak ? 'true' : undefined}>
-              {g.title}（{g.items.length}）
+              {tr('bbs.drawer.group', { title: tr(g.titleKey), count: g.items.length })}
             </div>
             {g.items.map((it) => (
               <button
@@ -117,13 +311,29 @@ export default function BbsPresetDrawer({
                 className={s.item}
                 data-on={it.current}
                 data-off-model={it.offModel ? 'true' : undefined}
+                data-need-download={it.notDownloaded ? 'true' : undefined}
                 disabled={it.disabled}
-                title={it.disabled ? (it.reason ?? '') : `${it.printer} · ${it.nozzle} nozzle · ${it.file}`}
-                onClick={() => onPick(it.key)}
+                title={
+                  it.disabled
+                    ? reasonText(it, tr)
+                    : it.notDownloaded
+                      ? `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
+                        + tr('bbs.drawer.needDownloadHint')
+                      : `${it.printer} · ${it.nozzle} nozzle · ${it.file}`
+                }
+                /* 还没下载的那一份：点了不是切预设，是去把它取回来（见 Props.onNeedDownload） */
+                onClick={() => (it.notDownloaded ? onNeedDownload?.() : onPick(it.key))}
               >
                 <span className={s.tick}>{it.current ? '✓' : ''}</span>
                 {it.star && <span className={s.star}>*</span>}
                 <span className={s.name}>{it.label}</span>
+                {/* 行尾那两颗小标签：都是"这一份是什么来路"，不参与选中 */}
+                {it.notDownloaded && (
+                  <span className={s.tag}>{tr('bbs.drawer.tagNotDownloaded')}</span>
+                )}
+                {source === 'bbs' && copied.has(it.file) && (
+                  <span className={s.tag}>{tr('bbs.drawer.tagOurs')}</span>
+                )}
               </button>
             ))}
           </div>

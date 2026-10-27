@@ -35,6 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 
 const SNAP_RADIUS = 8
 const BREAK_DISTANCE = 14
@@ -97,6 +98,7 @@ function writeWidth(key: string, w: number): void {
 }
 
 export function useDrawerWidth(opts: Options): DrawerWidth {
+  const tr = useT()
   const { storageKey, side, snap, min, max, label } = opts
   const [width, setWidth] = useState<number>(() => readWidth(storageKey, snap, min, max))
   const [dragging, setDragging] = useState(false)
@@ -112,16 +114,20 @@ export function useDrawerWidth(opts: Options): DrawerWidth {
     [storageKey],
   )
 
-  /* 拖动期间锁掉选中与光标：不然拖过参数区会把标签文字刷成一片蓝 */
+  /* 拖动期间锁掉选中与光标：不然拖过参数区会把标签文字刷成一片蓝。
+     ★ 前缀与标准成对写 —— WKWebView 上这两套账（见 `global.css` 的"拖选（selection）的划分"） */
   useEffect(() => {
     if (!dragging) return
     const { body } = document
     const prevSelect = body.style.userSelect
+    const prevWebkitSelect = body.style.getPropertyValue('-webkit-user-select')
     const prevCursor = body.style.cursor
     body.style.userSelect = 'none'
+    body.style.setProperty('-webkit-user-select', 'none')
     body.style.cursor = 'col-resize'
     return () => {
       body.style.userSelect = prevSelect
+      body.style.setProperty('-webkit-user-select', prevWebkitSelect)
       body.style.cursor = prevCursor
     }
   }, [dragging])
@@ -209,7 +215,7 @@ export function useDrawerWidth(opts: Options): DrawerWidth {
       role: 'separator',
       tabIndex: 0,
       'aria-orientation': 'vertical',
-      'aria-label': `${label}宽度 ${width} 像素，方向键调整，Home 复位`,
+      'aria-label': tr('drawer.widthAria', { label, width }),
       'aria-valuenow': width,
       'aria-valuemin': min,
       'aria-valuemax': max,

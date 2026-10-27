@@ -28,6 +28,8 @@
  *     这里只负责"把这一份文件里的这个字段改成这个值"。
  */
 
+use postprocess::diag::messages;
+
 use toml_edit::{DocumentMut, Item, Value};
 
 use crate::error::AppError;
@@ -67,8 +69,14 @@ impl FieldEdit {
 /// 所以这里只要最窄的那一样，不绑定某一个容器。
 fn locate<'a>(defs: &'a [ParamDef], param_key: &str) -> Result<&'a ParamDef, AppError> {
     defs.iter().find(|p| p.key == param_key).ok_or_else(|| {
-        AppError::invalid_argument(format!("不认识这个参数：{param_key}"))
-            .with_detail("它不在参数注册表里 —— 参数页不该发来一个注册表里没有的 key")
+        AppError::invalid_argument(messages::text(
+            "ui.presetdata.patch.283",
+            &[("param_key", param_key)],
+        ))
+        .with_detail(::postprocess::diag::messages::text(
+            "ui.presetdata.patch.why_unknown_key",
+            &[],
+        ))
     })
 }
 
@@ -81,27 +89,70 @@ fn to_toml_value(raw: &str, ty: ValueType) -> Result<Value, AppError> {
     match ty {
         ValueType::Float => {
             let n: f64 = t.parse().map_err(|_| {
-                AppError::invalid_argument(format!("`{raw}` 不是个数 —— 这一项要浮点数"))
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.patch.284",
+                    &[("raw", raw)],
+                ))
             })?;
-            Ok(Value::from(n))
+            /*
+             * **浮点尾闸**（2026-10-21，作者：「文件里面记录的就是两位小数的才对，
+             * 做一道统一的闸门给所有动文件的用」）：任何来路的值进 TOML 前都按
+             * 1e6 收一次 IEEE754 的尾巴 —— `3.8000000000000003` 落盘就是 `3.8`，
+             * 而真正的人写精度（最小步长 0.01，比 1e-6 大四个数量级）一个不动。
+             * 闸设在**这一处唯一出口**：参数页所有写值（步进器 / 下拉 / 云端采用 /
+             * 撤销重做 / 历史「还原」）最后都从这条过。
+             */
+            let trimmed = (n * 1e6).round() / 1e6;
+            Ok(Value::from(if n == trimmed { n } else { trimmed }))
         }
         ValueType::Int => {
             let n: i64 = t.parse().map_err(|_| {
-                AppError::invalid_argument(format!("`{raw}` 不是个数 —— 这一项要整数"))
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.patch.285",
+                    &[("raw", raw)],
+                ))
             })?;
             Ok(Value::from(n))
         }
         ValueType::Bool => match t.to_ascii_lowercase().as_str() {
             "true" | "1" | "on" | "yes" => Ok(Value::from(true)),
             "false" | "0" | "off" | "no" => Ok(Value::from(false)),
-            _ => Err(AppError::invalid_argument(format!(
-                "`{raw}` 不是个开关值 —— 这一项要 true / false"
+            _ => Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.286",
+                &[("raw", raw)],
             ))),
         },
         /* 文本与 G-code 都走字符串；**多行由 toml_edit 自己按需渲染**：
         值里带换行时它会写成 `"""…"""`，单行就是普通串（与产出侧同一套规则） */
         ValueType::Text => Ok(Value::from(t)),
     }
+}
+
+/// **写盘前的最后一道闸**（2026-10-21）：这份正文能不能当 TOML 读。
+///
+/// # 为什么要它
+///
+/// 编辑器那条链（`commit_text_draft`）是"逐字保存"：用户在框里手滑多打一个字符
+/// （真机踩过：`custom_unmount_gcode` 里被敲进一串 `1`），原来的行为是**照样写盘** ——
+/// 坏文件落到盘上，等切片器拉起钩子才报"预设解析失败（TOML 语法）"，
+/// 那一刻离"为什么坏的、哪一行"已经很远了，而且这一盘直接切不成。
+///
+/// 错要犯在编辑这一步，并且把行号说出来。参数页那条链本来就走 `toml_edit`（不合法就改不动），
+/// 这里补的是"整份正文直接落盘"的那条。
+pub fn ensure_toml_parses(text: &str) -> Result<(), AppError> {
+    toml_problem(text).map_or(Ok(()), |why| {
+        Err(
+            AppError::invalid_argument(messages::text("ui.presetdata.patch.287", &[]))
+                .with_detail(why),
+        )
+    })
+}
+
+/// 这份正文的语法错（`None` = 能解析）。**只说事实、不改任何东西** ——
+/// 编辑器打开时拿它把"这份文件现在是坏的"提前摆出来（2026-10-21），
+/// 而不是等切片器拉起钩子才报错。
+pub fn toml_problem(text: &str) -> Option<String> {
+    text.parse::<DocumentMut>().err().map(|e| e.to_string())
 }
 
 /// 改一个字段，返回**新的整份正文**。
@@ -119,20 +170,36 @@ pub fn patch_preset_toml(
     let toml_key = def.toml_key.clone();
 
     let mut doc: DocumentMut = raw.parse().map_err(|e| {
-        AppError::invalid_argument("这份草稿不是合法 TOML，改不动").with_detail(format!("{e}"))
+        AppError::invalid_argument(messages::text("ui.presetdata.patch.288", &[]))
+            .with_detail(format!("{e}"))
     })?;
 
     let table = doc
         .get_mut(&section)
         .and_then(Item::as_table_like_mut)
         .ok_or_else(|| {
-            AppError::invalid_argument(format!("草稿里没有 `[{section}]` 这一段"))
-                .with_detail(format!("参数 {} 按定义住在这一段里", edit.param_key))
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.289",
+                &[("section", &section.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.patch.why_section",
+                &[("key", &edit.param_key)],
+            ))
         })?;
 
     let item = table.get_mut(&toml_key).ok_or_else(|| {
-        AppError::invalid_argument(format!("草稿的 `[{section}]` 里没有 `{toml_key}`"))
-            .with_detail("只改已存在的字段：没有它说明这份预设不含这个参数，别凭空造一个")
+        AppError::invalid_argument(messages::text(
+            "ui.presetdata.patch.290",
+            &[
+                ("section", &section.to_string()),
+                ("toml_key", &toml_key.to_string()),
+            ],
+        ))
+        .with_detail(::postprocess::diag::messages::text(
+            "ui.presetdata.patch.why_absent",
+            &[],
+        ))
     })?;
 
     let new_value = to_toml_value(&edit.value, def.value_type)?;
@@ -156,10 +223,17 @@ pub fn patch_preset_toml(
         }
         _ => {
             /* 表 / 数组之类：参数页不该改这种结构（一个参数一个标量字段） */
-            return Err(AppError::invalid_argument(format!(
-                "`[{section}].{toml_key}` 不是个标量值，改不了"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.patch.291",
+                &[
+                    ("section", &section.to_string()),
+                    ("toml_key", &toml_key.to_string()),
+                ],
             ))
-            .with_detail("一个参数对应一个标量字段；表 / 数组不归参数页动"));
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.patch.why_scalar",
+                &[],
+            )));
         }
     }
 
@@ -191,6 +265,19 @@ custom_mount_gcode = \"\"
 [wiping]
 mode = \"tower\"
 ";
+
+    /// **打开时的语法自检**（2026-10-21）：坏在哪儿要说得出（带行号），好的不吭声。
+    ///
+    /// 这条钉的是"用户手滑敲坏之后，打开编辑器当场就知道"那条路 ——
+    /// 以前只有切片器拉起钩子时才炸，用户既不知道原因、也不知道错在第几行。
+    #[test]
+    fn toml_problem_says_where_and_stays_quiet_when_fine() {
+        assert!(toml_problem(DOC).is_none(), "合法正文不该报错");
+
+        /* 未闭合的三引号：真机上把 `"""` 敲掉一半就是这个样子 */
+        let why = toml_problem("[toolhead]\nbad = \"\"\"\nM106 S[AUTO]\n").expect("该报错");
+        assert!(why.contains("line"), "要带行号：{why}");
+    }
 
     /// **保真**：换了值，注释 / 键序 / 其它行一个字节不动。
     #[test]
@@ -264,6 +351,29 @@ mode = \"tower\"
         )
         .expect("改浮点");
         assert!(out.contains("offset_x = -1.5"), "\n{out}");
+    }
+
+    /// **浮点尾闸**（2026-10-21）：任何来路的浮点值落盘前收掉 IEEE754 的尾巴 ——
+    /// `3.8000000000000003` 进文件就是 `3.8`；人写精度一个不动。
+    #[test]
+    fn float_noise_is_trimmed_before_writing() {
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.y", "3.8000000000000003"),
+        )
+        .expect("改 offset_y");
+        assert!(out.contains("offset_y = 3.8 "), "\n{out}");
+        assert!(!out.contains("8000000000000003"), "\n{out}");
+
+        /* 正常精度原样保留（不补零、不改字） */
+        let out = patch_preset_toml(
+            DOC,
+            reg().params(),
+            &FieldEdit::new("toolhead.offset.y", "18.6"),
+        )
+        .expect("改 offset_y");
+        assert!(out.contains("offset_y = 18.6 "), "\n{out}");
     }
 
     /// 值里有换行 → 渲染成多行字面量 `"""…"""`（与产出侧同一套规则）。

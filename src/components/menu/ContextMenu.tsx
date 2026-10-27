@@ -18,17 +18,35 @@
  *
  * 翻边要先知道菜单自己多高，所以第一帧画在 (0,0) 且 visibility: hidden，量完再定位。
  *
- * # 二次确认长在菜单里
+ * # 二次确认**不**长在菜单里（2026-10-20 改判）
  *
- * 不另开一个对话框：确认层就在菜单的位置上，替换掉列表。理由是删除这件事发生在**某一行**上，
- * 把问句抬到屏幕正中会丢掉「问的是哪一行」这个上下文。
- * 确认层上**点外面不关** —— 不可逆的事必须显式选一个。
+ * 原来确认层替换掉列表、就摆在鼠标落点上，理由是"删除发生在某一行上"。
+ * 作者用下来否掉了：「这个点开了之后，我右键在哪里，它就跟随在哪里了，
+ * 就点不出右键菜单了」—— 那个位置恰好压着鼠标，而它又"点外面不关"。
+ * 现在不可逆的确认由**调用方用居中模态框**问（预设页的 `removeAsk`）：
+ * 位置固定、遮罩铺满内容区、Esc / 取消能退；菜单点完就关，不再挡路。
+ * 这一层只负责"列动作 + 交出去"，不替调用方留任何确认态。
+ *
+ * # 图标悬停放大（2026-10-16 作者：「要那种悬停缩放 103% 的那种」→ 之后「放大一点」）
+ *
+ * ① 用 **WAAPI**（`el.animate`）而不是 CSS `transition` —— 这台机器的 WKWebView 上
+ *    CSS 动画/过渡那条管线就是不播（MEMORY 有案，`transition` 会一帧内跳变）；
+ * ② 放大的**只有图标**，不是整行（整行动会让 8 项一起晃，读起来像列表在抖）；
+ * ③ 只动 `transform`，**绝不动 `opacity`**（`fill: 'forwards'` 会把元素永久按在末态）；
+ * ④ 从哪放大就从哪缩回：起始值取自 `dataset.scale`，否则 `cancel()` 一撤，
+ *    元素瞬间回 1，再补一段 1→1 的空动画（看着像"缩不回去"）。
+ *
+ * ★ 倍数与会话档：103%（第一版，作者看完说"大一点"）→ **118%**（现行）。
+ *   这个数要跟 `ICON_MS` 一起看：幅度大了，时长就得跟着长一点，否则是"啪"地一跳
+ *   而不是"涨"一下。**再往上就会顶到相邻行的字**（行高 30、图标 16），到头了。
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
+import Icon from '../Icon'
 import { useFieldLayer } from '../field'
+import { useT } from '../../i18n'
 import { isSeparator } from './types'
 import type { ContextMenuEntry, ContextMenuItem, ContextMenuPoint } from './types'
 import s from './ContextMenu.module.css'
@@ -43,11 +61,36 @@ interface Props {
 /** 贴边的安全边距。和 FieldPopover 用同一个数 */
 const EDGE = 6
 
+/** 图标悬停的放大倍数与时长（见文件头 ★ 那条：103% 是初版，作者要更大 ⇒ 118%） */
+const ICON_HOVER = 1.18
+const ICON_MS = 160
+
+/**
+ * 把某一行里的图标缩到 `to`（见文件头「图标悬停放大」）。
+ *
+ * 之所以要 `dataset.scale` 记账：动画是 `fill: 'forwards'` 挂在元素上的，
+ * 下一次进来先把上一段 `cancel()` 掉 —— 若不记账，起始值就只能读到样式表里的 1，
+ * 于是"缩回去"永远是一段 1→1 的空转（图标啪地跳回原位）。
+ */
+function scaleIcon(row: HTMLElement | null, to: number): void {
+  const el = row?.querySelector<HTMLElement>('[data-ico]')
+  if (el === null || el === undefined) return
+  const from = el.dataset.scale ?? '1'
+  if (from === String(to)) return
+  el.dataset.scale = String(to)
+  el.getAnimations().forEach((a) => a.cancel())
+  el.animate([{ transform: `scale(${from})` }, { transform: `scale(${to})` }], {
+    duration: ICON_MS,
+    easing: 'ease-out',
+    fill: 'forwards',
+  })
+}
+
 export default function ContextMenu({ at, entries, onClose }: Props) {
+  const tr = useT()
   const layer = useFieldLayer()
   const ref = useRef<HTMLDivElement>(null)
   const [box, setBox] = useState<{ left: number; top: number } | null>(null)
-  const [confirming, setConfirming] = useState<ContextMenuItem | null>(null)
 
   /* onClose 每帧都是新函数，登记/卸载不该跟着重跑 */
   const closeRef = useRef(onClose)
@@ -66,7 +109,6 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
 
   useEffect(() => {
     if (!open) {
-      setConfirming(null)
       setBox(null)
       const back = returnTo.current
       returnTo.current = null
@@ -99,21 +141,16 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
     top = Math.max(EDGE, Math.min(top, Math.max(EDGE, l.height - EDGE - h)))
 
     setBox({ left, top })
-  }, [at, layer.el, confirming, entries])
+  }, [at, layer.el, entries])
 
-  /* 开着的时候滚动就关掉（跟着走要每帧重算，而停在错的位置是撒谎）。确认层不受滚动影响 */
+  /* 开着的时候滚动就关掉（跟着走要每帧重算，而停在错的位置是撒谎） */
   useEffect(() => {
     if (!open) return
     const onDown = (e: globalThis.MouseEvent) => {
       if (ref.current?.contains(e.target as Node) === true) return
-      /* 确认层上点外面不关 —— 不可逆的事要显式选 */
-      if (confirming !== null) return
       closeRef.current()
     }
-    const onScroll = () => {
-      if (confirming !== null) return
-      closeRef.current()
-    }
+    const onScroll = () => closeRef.current()
     window.addEventListener('mousedown', onDown)
     window.addEventListener('scroll', onScroll, true)
     window.addEventListener('resize', onScroll)
@@ -122,23 +159,19 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
       window.removeEventListener('scroll', onScroll, true)
       window.removeEventListener('resize', onScroll)
     }
-  }, [confirming, open])
+  }, [open])
 
   /* 开了就把焦点放到第一个能点的项上 —— 键盘用户打开菜单是为了马上用键盘选 */
   useEffect(() => {
     if (!open || box === null) return
     const first = ref.current?.querySelector<HTMLButtonElement>('button[data-on="1"]')
     first?.focus()
-  }, [box, open, confirming])
+  }, [box, open])
 
   if (!open || layer.el === null) return null
 
   const pick = (item: ContextMenuItem) => {
     if (item.disabled !== undefined) return
-    if (item.confirm !== undefined) {
-      setConfirming(item)
-      return
-    }
     onClose()
     item.onSelect()
   }
@@ -160,8 +193,18 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
     btns[next]?.focus()
   }
 
-  const body =
-    confirming === null ? (
+  return createPortal(
+    <div
+      ref={ref}
+      className={s.pop}
+      data-ready={box !== null}
+      style={box === null ? undefined : { left: box.left, top: box.top }}
+      onKeyDown={onKeyDown}
+    >
+      {/* 一个能点的都没有时说一句，别给一个空框 */}
+      {enabled.length === 0 && items.length > 0 && (
+        <p className={s.none}>{tr('menu.noActions')}</p>
+      )}
       <ul className={s.list} role="menu">
         {entries.map((entry, i) =>
           isSeparator(entry) ? (
@@ -178,53 +221,25 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
                 title={entry.disabled}
                 tabIndex={-1}
                 onClick={() => pick(entry)}
+                /* 悬停/键盘聚焦都放大 —— 键盘走到哪一项，那一项的图标也"亮"到 103% */
+                onMouseEnter={(e) => scaleIcon(e.currentTarget, ICON_HOVER)}
+                onMouseLeave={(e) => scaleIcon(e.currentTarget, 1)}
+                onFocus={(e) => scaleIcon(e.currentTarget, ICON_HOVER)}
+                onBlur={(e) => scaleIcon(e.currentTarget, 1)}
               >
-                {entry.label}
+                {/*
+                  图标槽**无差别占位**：没挂图标的项也留同样宽的一条，
+                  否则"挂了图标"与"没挂"的行左缘会参差（作者要求只给高频项挂 ⇒ 混排是常态）。
+                */}
+                <span className={s.ico} data-ico={entry.icon === undefined ? undefined : '1'}>
+                  {entry.icon !== undefined && <Icon name={entry.icon} />}
+                </span>
+                <span className={s.label}>{entry.label}</span>
               </button>
             </li>
           ),
         )}
       </ul>
-    ) : (
-      <div className={s.ask} role="dialog" aria-label={confirming.confirm?.question ?? '确认'}>
-        <p className={s.askHead}>{confirming.confirm?.question}</p>
-        {confirming.confirm?.detail !== undefined && (
-          <p className={s.askBody}>{confirming.confirm.detail}</p>
-        )}
-        <div className={s.askActs}>
-          <button type="button" className={s.cancel} data-on="1" tabIndex={-1} onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className={s.ok}
-            data-on="1"
-            tabIndex={-1}
-            onClick={() => {
-              const go = confirming.onSelect
-              onClose()
-              go()
-            }}
-          >
-            {confirming.confirm?.ok ?? '删除'}
-          </button>
-        </div>
-      </div>
-    )
-
-  return createPortal(
-    <div
-      ref={ref}
-      className={s.pop}
-      data-ready={box !== null}
-      style={box === null ? undefined : { left: box.left, top: box.top }}
-      onKeyDown={onKeyDown}
-    >
-      {/* 一个能点的都没有时说一句，别给一个空框 */}
-      {confirming === null && enabled.length === 0 && items.length > 0 && (
-        <p className={s.none}>这一行没有可用的操作</p>
-      )}
-      {body}
     </div>,
     layer.el,
   )

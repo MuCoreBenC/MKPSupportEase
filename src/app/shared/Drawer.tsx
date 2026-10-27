@@ -16,6 +16,7 @@
 
 import { useEffect } from 'react'
 import type { ReactNode } from 'react'
+import { useT } from '../../i18n'
 import Icon from '../shell/icons'
 import type { DrawerWidth } from './useDrawerWidth'
 import s from './Drawer.module.css'
@@ -65,6 +66,7 @@ export default function Drawer({
   onClose,
   children,
 }: Props) {
+  const tr = useT()
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
@@ -93,7 +95,7 @@ export default function Drawer({
         </span>
         <span className={s.headActs}>
           {actions}
-          <button type="button" className={s.close} aria-label="关闭" onClick={onClose}>
+          <button type="button" className={s.close} aria-label={tr('common.close')} onClick={onClose}>
             <Icon name="close" size={15} />
           </button>
         </span>

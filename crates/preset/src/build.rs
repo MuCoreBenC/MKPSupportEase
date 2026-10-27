@@ -229,6 +229,12 @@ pub fn build(
     if ir.glue.inter_model_lift_height == 0.0 {
         ir.glue.inter_model_lift_height = reg_float(&defaults, "GlueInterModelLiftHeight", 2.0);
     }
+    /* 换笔脱层高度：0 当「没写」处理，回落注册表默认 1.0 —— 与上面三条同一条规矩 */
+    ir.glue.swap_hop_height = cfg.wiping.swap_hop_height;
+    if ir.glue.swap_hop_height <= 0.0 {
+        ir.glue.swap_hop_height = reg_float(&defaults, "SwapHopHeight", 1.0);
+    }
+    ir.glue.swap_hop_height = clamp_float(ir.glue.swap_hop_height, 0.2, 3.0);
     // MinHopDistance 兼容迁移 → GlueZLiftHeight
     if ir.glue.z_lift_height == 0.0 && cfg.wiping.min_hop_distance > 0.0 {
         ir.glue.z_lift_height = cfg.wiping.min_hop_distance;
@@ -934,16 +940,22 @@ pub(crate) fn normalize_ironing_suppress_expand_mode(v: &str) -> &str {
     if v.is_empty() { "bbox" } else { v }
 }
 
+/// 注册表把「原版」写成 `original`（2026-10-20 从 `default` 改名）；IR 里的正统字面量
+/// 仍是 `default` —— 后处理只认 `== "new"` 分新老路径，所以这里归一到 `default`，
+/// 旧数据里写着 `default` 的一并认。
 pub(crate) fn normalize_xy_calibration_mode(v: &str) -> &str {
     match v {
-        "default" | "new" => v,
+        "original" | "default" => "default",
+        "new" => "new",
         _ => "default",
     }
 }
 
+/// 同 [`normalize_xy_calibration_mode`]：`original` / `default` 都是「原版」。
 pub(crate) fn normalize_z_calibration_mode(v: &str) -> &str {
     match v {
-        "default" | "new" => v,
+        "original" | "default" => "default",
+        "new" => "new",
         _ => "default",
     }
 }

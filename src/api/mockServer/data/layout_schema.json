@@ -455,13 +455,6 @@
           "width": "half"
         },
         {
-          "component": "calibration-card",
-          "id": "calibration",
-          "items": [],
-          "layout": "component",
-          "width": "half"
-        },
-        {
           "component": "bed-glue-card",
           "id": "bed_glue",
           "items": [],

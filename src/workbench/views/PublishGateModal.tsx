@@ -209,7 +209,7 @@ function receiptSteps(
       note: review.state === 'merged' ? '已合并（squash）' : REVIEW_TEXT[review.state],
       state: review.state === 'merged' ? 'done' : 'todo',
     })
-    /* ★ 「把主线同步到第二个官方源」是**合并之后**的一步，只有真合上才可能发生
+    /* ★ 「把主线同步到第二个云端源」是**合并之后**的一步，只有真合上才可能发生
      * （2026-10-06 加）。它答的是"**客户端读的那个源**跟上了没有" —— 与平台上的
      * PR 状态是两件事，所以它是**独立一格**，不并进「合并」那一格里。 */
     if (mirror !== null) {
@@ -241,7 +241,7 @@ function clientVerdict(
   mirror: MirrorSync | null,
 ): { tone: 'ok' | 'warn' | 'stop' | 'todo'; text: string } {
   if (review === null) {
-    return { tone: 'todo', text: '还没建 PR/MR —— 这一版还没落到任何官方源上' }
+    return { tone: 'todo', text: '还没建 PR/MR —— 这一版还没落到任何云端源上' }
   }
   const base = review.base || 'main'
   if (review.state !== 'merged') {
@@ -253,7 +253,7 @@ function clientVerdict(
   if (mirror === null) {
     return {
       tone: 'warn',
-      text: `已合进 ${base}；第二个官方源这一步没有结论（这次没有跑）—— 读那个源的客户端看不到这一版`,
+      text: `已合进 ${base}；第二个云端源这一步没有结论（这次没有跑）—— 读那个源的客户端看不到这一版`,
     }
   }
   if (mirror.status === 'failed') {
@@ -308,7 +308,7 @@ export default function PublishGateModal({
   /** 回执里的 PR/MR —— 「刷新」与「合并」都在这一份上更新（历史是快照，这里看当下） */
   const [review, setReview] = useState<RemoteReview | null>(initialReport?.review ?? null)
   /**
-   * 「把主线同步到第二个官方源」那一步的结论。
+   * 「把主线同步到第二个云端源」那一步的结论。
    *
    * ★ 它**只由合并那次返回**（`wb_merge_review` → `MergeOutcome.mirror`）：刷新拿到的是
    * 平台上的 PR 状态，推不出"镜像跟没跟上" —— 所以刷一次不会把它改掉，只会留着。
@@ -410,7 +410,7 @@ export default function PublishGateModal({
     setMergeBusy(true)
     setError(null)
     try {
-      /* ★ 合完后端会顺手把**主线同步到第二个官方源**（幂等、不额外开 PR），
+      /* ★ 合完后端会顺手把**主线同步到第二个云端源**（幂等、不额外开 PR），
        *   结论一起返回 —— 那一格就是"客户端读的那个源跟上了没有"的答案。 */
       const out = await wb.mergeReview(review.number)
       const merged = out.review

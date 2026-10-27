@@ -16,7 +16,10 @@
 //! **防穿越**：所有相对路径都必须经过 [`resolve_in`]。拒绝绝对路径、拒绝 `..`、拼完还要再确认
 //! 结果仍在根内（符号链接能绕过前两条，所以第三条是必须的）。
 
+use postprocess::diag::messages;
+
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use tauri::{AppHandle, Manager};
 
@@ -28,9 +31,9 @@ use crate::error::AppError;
 /// 只写不读）—— 校准值改随**用户工作副本**走之后这个目录没有消费者了。
 /// 盘上遗留的空目录不清理（用户自己删）。
 const INTERNAL_DIRS: [&str; 4] = ["cloud", "archive", "logs", "run"];
-/// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::mine`）要认它，
+/// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::local`）要认它，
 /// 字面量只许有这一处
-pub const MINE_DIR: &str = "presets-mine";
+pub const LOCAL_DIR: &str = "presets-local";
 
 /// 后处理执行归档的那棵树：`<用户根>/gcode_history`。
 ///
@@ -41,8 +44,15 @@ pub const MINE_DIR: &str = "presets-mine";
 /// （`crate::ipc::report`）都要认它，字面量只许有这一处。
 pub const GCODE_HISTORY_DIR: &str = "gcode_history";
 
+/// **导出**的落点：`<用户根>/exports`。
+///
+/// 报告页的「导出执行报告」默认写到这儿（`<用户根>/exports/<基名>/三件套`）——
+/// 它是"用户自己要看要拷的东西"，所以住用户根（见模块头那条分层的理由）。
+/// `pub`：报告页那个写口（`crate::ipc::report`）要认它，字面量只许有这一处。
+pub const EXPORTS_DIR: &str = "exports";
+
 /// 用户根下首次启动就建齐的子目录
-const USER_DIRS: [&str; 4] = ["exports", "reports", MINE_DIR, GCODE_HISTORY_DIR];
+const USER_DIRS: [&str; 4] = [EXPORTS_DIR, "reports", LOCAL_DIR, GCODE_HISTORY_DIR];
 
 /// 用户根在**应用数据目录**下的那一个子目录（`<appDataDir>/user`）。
 ///
@@ -96,10 +106,9 @@ pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
         ensure_dirs(&root, &INTERNAL_DIRS)?;
         return Ok(root);
     }
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| AppError::io("找不到应用数据目录").with_detail(e.to_string()))?;
+    let root = app.path().app_data_dir().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.021", &[])).with_detail(e.to_string())
+    })?;
     ensure_dirs(&root, &INTERNAL_DIRS)?;
     Ok(root)
 }
@@ -111,7 +120,43 @@ pub fn internal_root(app: &AppHandle) -> Result<PathBuf, AppError> {
 pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
     let root = internal_root(app)?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS)?;
+    adopt_legacy_local_dir(&root);
     Ok(root)
+}
+
+/// 冷启时把**上一代本地预设目录**里用户真有的文件接回来（`presets-mine/` → `presets-local/`）。
+///
+/// - 放在这里是因为**它保证新目录已经建好**（上面那行 `ensure_dirs`），而且它是
+///   用户根的唯一入口 —— 任何用到用户文件的命令都得先过这儿（[`user_root_headless`]
+///   那条路也走同一个函数）。
+/// - **幂等**：跑完源文件就不在了，第二遍什么也不做；没有"迁移完成"标记这类第二处状态。
+/// - **一次进程只跑一遍**（`OnceLock`）：同一进程里反复调 `user_root` 不该反复扫盘；
+///   应用重启后再扫一遍是安全的（那时扫的是空目录）。
+/// - **失败不拦路**：搬不动 / 撞名都只记日志 —— 用户根照样可用，界面照旧能开。
+fn adopt_legacy_local_dir(root: &Path) {
+    static DONE: OnceLock<()> = OnceLock::new();
+    DONE.get_or_init(|| {
+        for one in crate::runtime::local::adopt_legacy_dir(root) {
+            match one.outcome {
+                crate::runtime::local::LegacyOutcome::Moved => tracing::info!(
+                    file = %one.file_name,
+                    to = %one.path,
+                    "旧目录里的本地预设接回来了（presets-mine → presets-local）"
+                ),
+                crate::runtime::local::LegacyOutcome::Conflict => tracing::warn!(
+                    file = %one.file_name,
+                    at = %one.path,
+                    "新目录里已经有同名的一份，旧目录那份没动（不覆盖）"
+                ),
+                crate::runtime::local::LegacyOutcome::Failed(detail) => tracing::warn!(
+                    file = %one.file_name,
+                    at = %one.path,
+                    detail = %detail,
+                    "旧目录里的本地预设没搬成，原文件留着"
+                ),
+            }
+        }
+    });
 }
 
 /// 用户根（**钩子进程**那条路：没有 `AppHandle`，只有平台规则 + 环境变量覆盖）。
@@ -122,14 +167,18 @@ pub fn user_root(app: &AppHandle) -> Result<PathBuf, AppError> {
 pub fn user_root_headless() -> Option<PathBuf> {
     let root = internal_root_headless()?.join(USER_ROOT_DIR);
     ensure_dirs(&root, &USER_DIRS).ok()?;
+    adopt_legacy_local_dir(&root);
     Some(root)
 }
 
 fn ensure_dirs(root: &Path, subs: &[&str]) -> Result<(), AppError> {
     for sub in subs {
         std::fs::create_dir_all(root.join(sub)).map_err(|e| {
-            AppError::io(format!("建不出数据目录：{}", root.join(sub).display()))
-                .with_detail(e.to_string())
+            AppError::io(messages::text(
+                "ui.fsx.paths.022",
+                &[("v1", &root.join(sub).display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
     }
     Ok(())
@@ -150,20 +199,24 @@ pub fn resolve_in(root: &Path, rel: &str) -> Result<PathBuf, AppError> {
     只有存在的那部分能 canonicalize，所以拿"最深的已存在祖先"来比 ——
     目标文件还不存在（第一次写）是正常情况，不能因此判越界。 */
     let anchor = deepest_existing(&joined);
-    let real_anchor = anchor
-        .canonicalize()
-        .map_err(|e| AppError::io("路径解析失败").with_detail(e.to_string()))?;
-    let real_root = root
-        .canonicalize()
-        .map_err(|e| AppError::io("数据目录不可用").with_detail(e.to_string()))?;
+    let real_anchor = anchor.canonicalize().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.023", &[])).with_detail(e.to_string())
+    })?;
+    let real_root = root.canonicalize().map_err(|e| {
+        AppError::io(messages::text("ui.fsx.paths.024", &[])).with_detail(e.to_string())
+    })?;
 
     if !real_anchor.starts_with(&real_root) {
         return Err(
-            AppError::permission_denied("路径不能越过数据目录").with_detail(format!(
-                "{} 实际指向 {}",
-                joined.display(),
-                real_anchor.display()
-            )),
+            AppError::permission_denied(messages::text("ui.fsx.paths.025", &[])).with_detail(
+                ::postprocess::diag::messages::text(
+                    "ui.fsx.paths.why_resolved",
+                    &[
+                        ("a", &joined.display().to_string()),
+                        ("b", &real_anchor.display().to_string()),
+                    ],
+                ),
+            ),
         );
     }
 
@@ -179,24 +232,40 @@ pub fn check_relative(rel: &str) -> Result<(), AppError> {
     let rel_path = Path::new(rel);
 
     if rel.is_empty() {
-        return Err(AppError::invalid_argument("路径不能为空"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.fsx.paths.026",
+            &[],
+        )));
     }
 
     if rel_path.is_absolute() {
-        return Err(AppError::permission_denied("只接受相对路径")
-            .with_detail(format!("拒绝绝对路径：{rel}")));
+        return Err(
+            AppError::permission_denied(messages::text("ui.fsx.paths.027", &[])).with_detail(
+                ::postprocess::diag::messages::text("ui.fsx.paths.why_absolute", &[("rel", rel)]),
+            ),
+        );
     }
 
     for c in rel_path.components() {
         match c {
             Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir => {
-                return Err(AppError::permission_denied("路径不能越过数据目录")
-                    .with_detail(format!("含 .. 分量：{rel}")))
+                return Err(
+                    AppError::permission_denied(messages::text("ui.fsx.paths.028", &[]))
+                        .with_detail(::postprocess::diag::messages::text(
+                            "ui.fsx.paths.why_dotdot",
+                            &[("rel", rel)],
+                        )),
+                )
             }
             Component::RootDir | Component::Prefix(_) => {
-                return Err(AppError::permission_denied("只接受相对路径")
-                    .with_detail(format!("含根分量：{rel}")))
+                return Err(
+                    AppError::permission_denied(messages::text("ui.fsx.paths.029", &[]))
+                        .with_detail(::postprocess::diag::messages::text(
+                            "ui.fsx.paths.why_root",
+                            &[("rel", rel)],
+                        )),
+                )
             }
         }
     }

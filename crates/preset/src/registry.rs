@@ -15,6 +15,9 @@ pub struct ChoiceEntry {
     /// 选项显示名（UI segmented 控件的文案；旧侧有则带上）。
     #[serde(default)]
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`。
+    #[serde(rename = "labelEn", default)]
+    pub label_en: String,
 }
 
 /// `[[params.layout]]`：UI 布局锚（sectionId 引用 tabs.sections.id，order 排序）。
@@ -64,9 +67,15 @@ pub struct ParamEntry {
     /// 中文显示名。
     #[serde(default)]
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`。
+    #[serde(rename = "labelEn", default)]
+    pub label_en: String,
     /// 说明文案（UI tooltip）。
     #[serde(default)]
     pub desc: String,
+    /// 英文说明。空 = 回落 `desc`。
+    #[serde(rename = "descEn", default)]
+    pub desc_en: String,
     /// 单位（mm / mm/s …）。
     #[serde(default)]
     pub unit: String,
@@ -130,8 +139,14 @@ pub struct SectionEntry {
     pub id: String,
     #[serde(default)]
     pub label: String,
+    /// 英文显示名（空 = 回落 `label`）。
+    #[serde(rename = "labelEn", default)]
+    pub label_en: String,
     #[serde(default)]
     pub description: String,
+    /// 英文说明（空 = 回落 `description`）。
+    #[serde(rename = "descriptionEn", default)]
+    pub description_en: String,
     #[serde(default)]
     pub order: f64,
 }
@@ -143,6 +158,9 @@ pub struct TabEntry {
     pub id: String,
     #[serde(default)]
     pub label: String,
+    /// 英文显示名（空 = 回落 `label`）。
+    #[serde(rename = "labelEn", default)]
+    pub label_en: String,
     #[serde(default)]
     pub icon: String,
     #[serde(default)]

@@ -17,7 +17,13 @@
   --wb-primary: #3b82f6;
   --wb-primary-deep: #2f74dd;
   --wb-primary-soft: rgba(59, 130, 246, 0.12);
+  /* 分隔条悬停那条线：主色的半透明版（与 --wb-primary 同源，硬编码会漂） */
+  --wb-primary-line: rgba(59, 130, 246, 0.4);
+  /* 按下态：比悬停（--wb-primary-soft）再重一档（数字框步进箭头） */
+  --wb-primary-press: rgba(59, 130, 246, 0.2);
   --wb-ok: #10b981;
+  /* 「要留意」那一档的字色（弃用徽章以外的几处提示行读它） */
+  --wb-warn: #b45309;
   /*
    * C14：圆角是**控件属性**，不是整个页面的建筑风格（作者原话：该直角的时候
    * 就要直角）。全局那套 --r-* 是给首页卡片墙的宽松量（8/12/16），C14 在稿内
@@ -125,6 +131,31 @@
   background: var(--bg-1);
   color: var(--text-1);
   font: var(--fs-body) / 1.5 -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+/*
+ * 深色那一套里**只有这几条**是 `.shell` 自己的（其余全走 `c14tokens.css` 的
+ * `[data-theme='dark'] [data-wb]`）—— 它们是工作台蓝 / 弃用红那一族，客户端那一份
+ * tokens 里没有同名变量，所以按同一套口径在这里给：
+ *   · 蓝 / 绿各提亮或压暗一档（深底上原值发闷或晃眼）；
+ *   · 「更深的蓝」在深色里反过来是**更亮的蓝** —— dark 上往下压会看不见；
+ *   · 弃用红整族换成半透明底 + 提亮的字（浅色那套是"红往灰里退"，深色要反过来）。
+ */
+[data-theme='dark'] .shell {
+  --wb-primary: #4b8ef7;
+  --wb-primary-deep: #7ab0fa;
+  --wb-primary-soft: rgba(75, 142, 247, 0.18);
+  --wb-primary-line: rgba(75, 142, 247, 0.55);
+  --wb-primary-press: rgba(75, 142, 247, 0.34);
+  --wb-ok: #2f9e5b;
+  --wb-warn: #d9942b;
+
+  --dep-red: #e09a92;
+  --dep-red-soft: rgba(226, 104, 94, 0.16);
+  --dep-red-line: rgba(226, 104, 94, 0.34);
+
+  /* 分段选择器选中那块滑块的投影：深色里浅影等于没画 */
+  --seg-on-shadow: 0 1px 3px rgb(0 0 0 / 45%);
 }
 
 /* ---------- 窗口栏 ---------- */
@@ -253,13 +284,14 @@
 }
 
 
+/* 两级"叠一层"：浅色是墨压一层，深色是白提一层（判据只有 tokens 那两个变量） */
 .wb:hover {
   color: var(--text-1);
-  background: rgb(16 24 32 / 6%);
+  background: var(--hover-1);
 }
 
 .wb:active {
-  background: rgb(16 24 32 / 11%);
+  background: var(--hover-2);
 }
 
 .wbClose:hover {
@@ -760,6 +792,50 @@
   border-color: var(--wb-primary);
 }
 
+/*
+ * 深色下的选中按钮（2026-10-16，作者截图点名：「当前生效那一栏的底色不好看，跟整体不搭」）。
+ *
+ * 病根：`--wb-primary-soft` 在浅色是 12% 蓝、在深色是 18% 蓝 —— 18% 的蓝压在
+ * `#232323` 面上是一片**发闷的灰蓝**，和旁边那几个未选中的深灰按钮几乎分不出来
+ * （浅色那边白底压 12% 蓝是清爽的，深色不是）。
+ *
+ * 治法：深色单独给一组**更亮、更实**的值 —— 底抬到 30%（一眼看得出"这是当前那栏"），
+ * 字用更亮的蓝（`#8fbcff` 一档，压在蓝底上仍然清楚），描边再提一档。
+ * 只改这一档，不动 token（token 还管着导航 / chips / 行选中那些地方）。
+ */
+[data-theme='dark'] .btnOn {
+  color: #9dc2fb;
+  background: rgba(75, 142, 247, 0.3);
+  border-color: rgba(122, 176, 250, 0.85);
+}
+
+/* 选中态本来就"已经在这儿了"，悬停别再叠一层 —— 免得按下去像还能再选一次 */
+[data-theme='dark'] .btnOn:hover:not(:disabled) {
+  background: rgba(75, 142, 247, 0.34);
+}
+
+/*
+ * 资产库那一格缩略图外面套的按钮（2026-10-16）：点一下放大看。
+ * 常态与"就是一张图"没两样（不留边框、不留底），悬停才浮出一圈描边表示"这个能点"。
+ */
+.shotBtn {
+  display: inline-block;
+  padding: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: zoom-in;
+}
+
+.shotBtn:hover {
+  border-color: var(--line-strong, var(--line));
+}
+
+.shotBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* 主操作：工作台蓝实心，一页最多一个（弹窗内算独立一层） */
 .btnPrimary {
   color: #fff;
@@ -780,19 +856,24 @@
   border-color: var(--line-strong);
 }
 
+/*
+ * 危险按钮：底取 `--w-danger-fill`（**不是** `--danger` —— 那是"字"的红，
+ * 白字压在它上面对比不够）。
+ */
 .btnDanger {
   color: #fff;
   font-weight: 600;
-  background: var(--danger);
-  border-color: var(--danger);
+  background: var(--w-danger-fill);
+  border-color: var(--w-danger-fill);
 }
 
 /* 危险按钮自己的悬停（C14）。少了这条，鼠标一悬停就被 `.btn:hover` 的灰底
    按特异性盖掉 —— 「确认恢复？」的红色瞬间变灰（作者：「恢复默认的时候，
-   我悬停的时候它的颜色不对」）。hover 只能更深一档的红，不许换成一族别的颜色。 */
+   我悬停的时候它的颜色不对」）。hover 只能更深一档的红，不许换成一族别的颜色。
+   ★ 深色里"更深一档"反而是**提亮**一档：深底上往下压，看着就像被按灭了。 */
 .btnDanger:hover:not(:disabled) {
-  background: #a8382f;
-  border-color: #a8382f;
+  background: var(--w-danger-fill-hover);
+  border-color: var(--w-danger-fill-hover);
 }
 
 .btnDanger:disabled {
@@ -858,9 +939,11 @@
   background: var(--danger-soft);
 }
 
+/* 「阻断」徽章：实心红底 + 白字。底同样取 `--w-danger-fill`（深色里 `--danger`
+   是"字"的红，白字压上去读不清） */
 .tagSevBlock {
   color: #fff;
-  background: var(--danger);
+  background: var(--w-danger-fill);
 }
 
 .tagSevTodo {
@@ -874,9 +957,9 @@
 }
 
 .tagBuildBuilt {
-  /* 「已生成」是成功语义，不是主操作 —— ok 绿 */
+  /* 「已生成」是成功语义，不是主操作 —— ok 绿（底是 ok 的浅底，跟着主题走） */
   color: var(--wb-ok);
-  background: rgba(16, 185, 129, 0.12);
+  background: var(--w-ok-soft);
 }
 
 .tagBuildStale {
@@ -913,6 +996,12 @@
   gap: 6px;
   flex-wrap: wrap;
 }
+
+/*
+ * 分类筛选（2026-10-16）：先是 `.chipFilter` 一排 chip，作者当天改成「下拉菜单吧」——
+ * 那一排 chip 已撤，这里只留一句记录，免得下一个人再来一轮。
+ * 现在是 `c14/field/SelectField`（全仓库统一的自绘下拉，没有原生 select）。
+ */
 
 /* 可操作的 chip：左半点进去看，右半的 × 解除（C05） */
 .chip:has(.chipX) {
@@ -1021,6 +1110,17 @@
 .cardNote {
   font-size: var(--fs-label);
   color: var(--text-3);
+}
+
+/*
+ * 图表里那种「标题下挂一行附注」的排布：附注必须比标题弱一档，
+ * 不然读起来是一团（作者 2026-10-16：「副标题长得跟那个主标题差不多的颜色，
+ * 差不多的字号，对阅读不友好」）。要露在页面上的附注都走这一条。
+ */
+.cardNoteDim {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  opacity: 0.85;
 }
 
 .cardBody {
@@ -1667,6 +1767,12 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  /*
+   * 主名要压得住下面那行 id：中黑、正文色、不缩水。
+   * 之前显示名与 id 都是同号灰字，「主副标题长得差不多」——作者点名过。
+   */
+  font-weight: 600;
+  color: var(--text-1);
 }
 
 .rowMeta {
@@ -1793,6 +1899,36 @@
 }
 
 /*
+ * 分组标题旁的「?」（2026-10-16，作者：「我希望就是比较多的是这些可以点击的框框，
+ * 那些说明的就比较少，你可以藏起来」）。
+ *
+ * 正文里那些整段解释（「改动即时落盘…」「真源关系是一版一套…」）不再是页面上的字，
+ * 全部挂到这一枚图标的 `title` 上 —— **悬停才出现**，扫描时一行字都不占。
+ *
+ * 为什么不自己画浮层：原生 `title` 零依赖、零 z-index 风险、在模态框里也不会被遮罩
+ * 裁掉。这里只是个"提示存在"的锚点。
+ */
+.helpDot {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  /* 跟在前一行字后面时留一点气口，别贴着句末的标点 */
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1;
+  vertical-align: -2px;
+  color: var(--text-3);
+  cursor: help;
+  background: var(--surface-sunken);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+}
+
+/*
  * 只读的代码/正文块（C15 的「查看 JSON / TOML」那一块）。等宽、可滚、不高过一屏。
  * 滚动条自己那条规矩仍然只有全局那一处（组件级不许写 ::-webkit-scrollbar）。
  *
@@ -1835,36 +1971,39 @@
 }
 
 /*
- * 语法高亮的字色（VSCode Light+ 的取向，浅底可读）。
- * **只在这一处定义** ——「生成前确认」的行级 diff 也 import 这一份（`c.tok_*`）。
+ * 语法高亮的字色。**只在这一处定义** ——「生成前确认」的行级 diff 也 import
+ * 这一份（`c.tok_*`）。
+ *
+ * ★ 值是 `--tok-*`（`c14tokens.css`）：浅色取 VSCode Light+、深色取 Dark+ 那两套。
+ *   直接写色值的话，深底上 `#00f` 的蓝关键字几乎看不见 —— 而这是"看整份 TOML"的正文。
  */
 .tok_key {
-  color: #0451a5;
+  color: var(--tok-key);
 }
 
 .tok_string {
-  color: #a31515;
+  color: var(--tok-string);
 }
 
 .tok_number {
-  color: #098658;
+  color: var(--tok-number);
 }
 
 .tok_keyword {
-  color: #00f;
+  color: var(--tok-keyword);
 }
 
 .tok_comment {
-  color: #008000;
+  color: var(--tok-comment);
 }
 
 .tok_section {
-  color: #795e26;
+  color: var(--tok-section);
   font-weight: 500;
 }
 
 .tok_punct {
-  color: #6a737d;
+  color: var(--tok-punct);
 }
 
 .fileRow {
@@ -1896,6 +2035,36 @@
   gap: 8px;
   align-items: center;
   margin-top: 12px;
+}
+
+/*
+ * 「标签在输入框上方」的一格（2026-10-16，作者：「这上面还有点空间啊，
+ * 可以把它那一个要显示的东西放到文本框的上面呀」）。
+ *
+ * 模态框表单字段统一走这一条 —— 以前只靠 `placeholder` 说这是什么格，
+ * 一填字标签就没了，人得回头猜。标签是**常驻**的，与字段一起缩。
+ */
+.fieldCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 12em;
+  min-width: 0;
+}
+
+.fieldCol > .filter,
+.fieldCol > .inp {
+  width: 100%;
+}
+
+/* 字段标签：比正文小一档、比说明重一点 —— 三级里的中间那层 */
+.fieldLabel {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-2);
 }
 
 /* 行里那段说明文字要能自己占一行并折行 —— 否则它会把整行撑宽、被卡片右侧裁掉 */
@@ -2144,9 +2313,11 @@
   margin-top: 8px;
 }
 
+/* 阻断那一条：底是 `--danger-soft`（深色自带半透明版），描边同样走变量 ——
+   浅色那支 30% 的"深红发丝"压在深底上等于没画 */
 .issueBlock {
   background: var(--danger-soft);
-  border-color: rgba(200, 69, 60, 0.3);
+  border-color: var(--dep-red-line);
 }
 
 .issueTxt {
@@ -2159,6 +2330,14 @@
 
 .issueTxt b {
   font-size: var(--fs-body);
+}
+
+/* 检查卡的长描述默认只留两行（2026-10-19 文案瘦身）—— 条目上的「展开」看全文 */
+.issueDetailClamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .issueTxt span {
@@ -2637,11 +2816,12 @@
   transition: background 0.12s ease;
 }
 
-/* 悬停：主色的半透明版（rgba 与 --wb-primary 同源）。
+/* 悬停：主色的半透明版 —— 取 `--wb-primary-line`（与 `--wb-primary` 同源，
+   深色那边提亮过，硬编码的 0.4 蓝在深底上就是一条看不见的线）。
    原来用 --line-strong，截图里在预览窗口的 90% 缩放下几乎看不见 ——
    提示线看不见就等于没提示 */
 .pSplit:hover::before {
-  background: rgba(59, 130, 246, 0.4);
+  background: var(--wb-primary-line);
 }
 
 /* 拖动中：线是实心主色，松手前一直看得见它在哪 */
@@ -3989,6 +4169,45 @@
   height: 18px;
 }
 
+/*
+ * 橙色「改之前的值」chip（2026-10-19）。
+ *
+ * 抄客户端 `ParamRow.module.css` 的 `.restore`：同一套 warn 三件套
+ * （`--warn-line` 边框 / `--warn-surface` 底 / `--warn-ink` 字，两边的 token
+ * 本来就是同一份），只是工作台这一档行更密 —— 高度收到 20px。
+ *
+ * **只在这一格真的改过时才画**（判据在 `ParamsPage` / `ParamDetail`：`cell.dirty`
+ * + `cell.rest !== null`）。它是"退回我原来的值"，与右边那枚 `↶`（挂回继承）
+ * 不是一回事。
+ */
+.pRevert {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 20px;
+  margin-right: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--warn-line);
+  border-radius: 4px;
+  background: var(--warn-surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--warn-ink);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pRevert:hover {
+  border-color: var(--warn-ink);
+}
+
+.pRevert:focus-visible {
+  outline: none;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
+}
+
 /* 技术信息：最底部、最弱的一档 —— 开发信息从主阅读路径里拿走 */
 .pDTech {
   margin-top: 14px;
@@ -4160,6 +4379,7 @@
   border-right: 1px solid var(--line);
   text-align: right;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 /* 三层共同的那把尺子（着色 / 输入 / 行号槽）—— 改这里就是三层一起改，只改一层就会错位 */
@@ -4523,6 +4743,7 @@
   color: var(--text-3);
   cursor: pointer;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 /*
@@ -4560,6 +4781,7 @@
 .pRailTree,
 .matrix {
   user-select: none;
+  -webkit-user-select: none;
 }
 
 /*

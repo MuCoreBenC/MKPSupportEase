@@ -54,44 +54,16 @@
 .headTop {
   display: flex;
   align-items: center;
-  gap: 12px;
+  /* 缝**连续**（照 a05）：12px 收到 8px 走一条斜坡，跨密度档不再突然跳一档 */
+  gap: clamp(8px, 1.1vw, 12px);
   flex-wrap: wrap;
 }
 
 /*
- * mini 档头部：**搜索在上面、修改历史在下面** —— 「修改历史」已经搬到
- * 分类条那一行（见 PageParams.tsx 的 `historyInBar`），所以这一行只剩三件
- * （标题 / 文件名 pill / 搜索框），一行放得下。
- *
- * 缝 12 → 8、搜索框允许收到 48px：实测 400 窗口下这三件加起来正好差这 12px。
- * 仍然留着 `flex-wrap: wrap`（基类给的）当兜底 —— 真撑爆了宁可多一行，
- * 也不要把文件名 pill 挤出窗口。
+ * 头部不外借任何东西（照 a05）：mini 档搜索收成分类条那一行的放大镜、
+ * 动作全在标题栏那一簇（见 PageParams 的 `headActions`）—— 于是
+ * `[data-row='head']` 那一套在 mini 档不再出现，标题行只剩标题 / pill / 搜索。
  */
-[data-density='mini'] .headTop {
-  gap: 8px;
-}
-
-/*
- * `margin-left: auto` —— **搜索框贴住标题行的右端**（作者：「小尺寸的时候
- * 搜索靠右」）。原来只靠 `flex: 1 1 48px` 往右长，长到 160 的上限就停在那儿：
- * 实测窗口 400 时它离右缘 22px、640 时离右缘 262px —— 同一个控件在小窗里飘，
- * 谁的旁边都不算。改成 auto 边距吃掉剩下的空间，任何宽度都钉在右端。
- * （预设页同一条要求：「搜索的，你需要把它往右靠呀」。）
- *
- * 上限 160 不动：作者原话是「窗口比较小的时候，搜索条还是不要这么长」，
- * 贴右不是让它长大。
- */
-[data-density='mini'] .searchSlot[data-row='head'] {
-  flex: 1 1 48px;
-  min-width: 48px;
-  margin-left: auto;
-}
-
-/* 「修改历史」在分类条那一行时不许被挤扁 —— 它和分类条是并排的两件 */
-[data-density='mini'] .bar .historyBtn {
-  flex-shrink: 0;
-  margin-left: 0;
-}
 
 .pageTitle {
   margin: 0;
@@ -101,34 +73,24 @@
   color: var(--text-1);
 }
 
-.sub {
-  margin: 4px 0 0;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-}
+/*
+ * ★ 副标题那一行「A1 · 快拆版6月以前 · 精细调整参数，优化涂胶表现」早已退役
+ * （照 a05，作者圈出那一行说「没有意义的这一行就可以去掉」—— 机型版本副标题本来
+ * 就在说、参数卡自己会讲）。它尾巴上那颗「回到已应用」也在 2026-10-20 一起退役
+ * （作者：「没有这个回到已应用的这个功能了」）—— 标题栏动作槽现在只剩「修改历史」，
+ * 样式见下面的 `.historyBtn`。
+ */
 
 /*
- * 已应用的那一份不是当前看的这份时，副标题行尾缀一句「切换回已应用」。
- * 琥珀字与 pill 同色系 —— 一行的两个信号（颜色 + 字）说的是同一件事。
- * 只用动作、不点名（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标）。
- * 可点的那个变体是按钮（名字都很像，一键回去、不靠认名字）：reset 成文字样子、
- * hover 才画下划线；已应用那份不在包里时退成纯文字 span（同样吃这一套字色）。
+ * 没有动作槽可挂时（这一页单独当页用）那一簇的位置：头部标题行的右端
+ * —— `margin-left: auto` 顶到最右。嵌在模态框里时不走这一条（portal 进标题栏）。
  */
-.usingNote {
-  margin-left: 10px;
-  color: var(--warn);
-}
-
-button.usingNote {
-  padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  cursor: pointer;
-}
-
-button.usingNote:hover {
-  text-decoration: underline;
+.headActionsInline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
 }
 
 /* 机型 / 版本两个下拉挨在一起，窄窗口下各占一半 */
@@ -136,7 +98,10 @@ button.usingNote:hover {
  * 预设 pill：绿色文件名 chip + 「切换」小字，点开抽屉。
  * 更早那两个下拉（`.picker`）已经去掉 —— 顶部只留这一件东西。
  * 颜色用项目既有的 token：淡绿底 --accent-soft、绿字 --accent（**没有** --brand 这套）。
- * 28px 高（与页内所有控件一条线）、圆角随页面 token 收到 4px。
+ * 28px 高（与页内所有控件一条线）。
+ *
+ * ★ 2026-10-13：圆角从 4px（--r-sm）改成**胶囊** —— 与首页校准卡右上角那颗是同一个
+ * 控件（作者：「这个按钮风格不对，要改成胶囊的……后面的也是一样」），全站同族同形状。
  */
 .presetPill {
   display: inline-flex;
@@ -145,9 +110,9 @@ button.usingNote:hover {
   min-width: 0;
   max-width: 340px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 14px;
   border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--accent-soft);
   color: var(--text-1);
   font: inherit;
@@ -167,7 +132,7 @@ button.usingNote:hover {
 /*
  * 看的那份**不是**正在使用的那份 —— 不画绿，换琥珀
  * （作者：「我切换到不是正在用的时候，就不要用绿色，用琥珀色」）。
- * 底 / 「切换」字 / hover 边框三处一起换；副标题行尾由 .usingNote 指路一句。
+ * 底 / 「切换」字 / hover 边框三处一起换。
  * 绿 = 在看的就是在用的（或还没应用过任何一份，没有可对比的对象）。
  */
 .presetPillOff {
@@ -204,16 +169,18 @@ button.usingNote:hover {
  */
 
 /*
- * 「修改历史」入口：**右上角、margin-left:auto 顶到最右**。
- * 原来入口是页脚那条「查看修改详情」下划线链接（.detailLink，已删）—— 参考布局
- * 把它放在标题行右端，与文件概要卡腾出来的位置正好对上。同 presetPill 一族：
- * 28px、1px --line 边框、圆角随页面 token（作者：圆角不动）。
+ * 「修改历史」入口：它住**标题栏的动作槽**（`×` 左边；见 PageParams 的 `headActions`）。
+ * 原来入口是页脚那条「查看修改详情」下划线链接（.detailLink，已删）—— 参考布局把它
+ * 放进标题栏。同 presetPill 一族：28px、1px --line 边框、圆角随页面 token（作者：圆角不动）。
+ *
+ * 它曾经与「回到已应用」并排；那一颗 2026-10-20 退役之后这一簇只剩它自己，
+ * 定宽与位置都由槽的 `gap` / `margin-left: auto` 负责，这里不自己顶右。
  */
 .historyBtn {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
   height: 28px;
   padding: 0 12px;
   border: 1px solid var(--line);
@@ -256,9 +223,19 @@ button.usingNote:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  /* 缝**连续**（照 a05）：12px 收到 8px 走一条斜坡，跨密度档不再跳一档 */
+  gap: clamp(8px, 1.1vw, 12px);
   padding: 10px calc(var(--pad) + 10px);
   min-width: 0;
+  /*
+   * ★ **这一行的高度恒定**（照 a05，作者：「我觉得就算那个左边的那个 tab 在变啊，
+   *   它外面包裹它的那个容器的高度也不要变啊……右侧那个搜索的图标的高度还是位置啊，
+   *   尽量能不变就不变」）：永不换行 + 定高 48px。
+   *   分类胶囊条自己横向滚（`CategoryPills` 的 `.group` 有 `overflow-x: auto`），
+   *   搜索那一格恒 28px 高、贴着右端 —— 换分类、搜索展开 / 收起都不动这一行。
+   */
+  flex-wrap: nowrap;
+  height: 48px;
 }
 
 /*
@@ -319,11 +296,97 @@ button.usingNote:hover {
   max-width: 160px;
 }
 
-.ok {
+/*
+ * mini 档的搜索：**一颗放大镜**（照 a05，作者：「这个搜索框还是不要这样子，
+ * 它多占了位置」）—— 那一档输入框常驻就是整整一行（还带着头部内衬），
+ * 收起成 28px 的图标按钮顶在分类条那一行的右端，点了才铺成输入框
+ * （见 PageParams 的 `searchCollapsed` / 那个聚焦 effect）。
+ */
+.searchIcon {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.searchIcon:hover {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.searchIcon:focus-visible {
+  outline: none;
+}
+
+/*
+ * 收起来了但**还在筛**（`query` 非空）：这颗图标要说出来 —— 淡绿底 + 绿框 + 深绿字，
+ * 与这一页"有东西在生效"那一套信号一致。否则"怎么只剩三条"会没头没脑。
+ */
+.searchIcon[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+/*
+ * **标题栏那一句状态**（2026-10-17 第二版）：嵌入模态框时住在**标题右边**，
+ * 成功 / 警告 / 失败三条共用这一格（见 PageParams.tsx 的 `headNote` 那段）。
+ *
+ * 形状是硬的：**永远一行**、超出省略号、`flex: 1 1 auto` 让它在 `.headNote`
+ * 那一格里收缩 —— 作者的要求是「文字长的话会导致换行，反正就是不好」。
+ * 全文在 `title` 上（悬停可读），所以截断不丢信息。
+ *
+ * 语气三档：`ok` 成功（accent）/ `warn` 被闸拦住（琥珀）/ `bad` 失败（红）。
+ */
+.note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 单独当页用（没有模态框标题栏可借位）时落回内容区顶上 —— 同一句话、同一套颜色 */
+.noteLine {
   margin: 0 calc(var(--pad) + 10px) 10px;
   font-size: var(--fs-label);
   color: var(--accent-deep);
+}
+
+/* 前面那枚小点 = 状态灯；`inline-block` 才吃得了宽高 */
+.note::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: currentcolor;
+  vertical-align: 1px;
+}
+
+/* 被写值闸拦住（弃用字段 / 弃用选项）：琥珀 —— 不是失败，是"这条改不了"。
+   走 `--warn`（深色下自己提亮），不要写死色值 */
+.note[data-tone='warn'],
+.noteLine[data-tone='warn'] {
+  color: var(--warn);
+}
+
+/* 失败 / 没有可保存的目标：走 `--danger`（深色下它自己提亮一档，不像写死的红那样发暗） */
+.note[data-tone='bad'],
+.noteLine[data-tone='bad'] {
+  color: var(--danger);
 }
 
 /* 草稿那一行没落盘 / 这份没有可编辑文件时的提示（比 .ok 显眼一档，是"要处理"的话） */
@@ -335,28 +398,35 @@ button.usingNote:hover {
 }
 
 /*
- * 官方更新那一条（2026-10-09）：一行话 + 一颗按钮，**不占一张卡的位置**。
+ * 云端更新那一条（2026-10-09）：一行话 + 一颗按钮，**不占一张卡的位置**。
  *
- * 用琥珀色系，与行上那枚「官方已更新」同族 —— 都是"还有事没完"的语气；
- * 与 `.warn`（红，那是出问题了）严格分开：官方发了新版不是错误。
+ * 用琥珀色系，与行上那枚「云端已更新」同族 —— 都是"还有事没完"的语气；
+ * 与 `.warn`（红，那是出问题了）严格分开：云端发了新版不是错误。
  */
 .syncBar {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;
-  margin: 0 calc(var(--pad) + 10px) 10px;
+  /*
+   * 上下留白**一样大**（2026-10-20 作者：「橙色可以稍微往下一点，它有点太靠上，
+   * 太靠近上面那个tab了……上下间距留一样大就好」）。
+   * 原来只有下边 10px、上边 0 —— 它紧贴着页签条，读起来像页签的一部分。
+   */
+  margin: 10px calc(var(--pad) + 10px);
   padding: 8px 12px;
-  border: 1px solid #e3c58f;
+  /* 琥珀的面 / 边 / 墨整套走 token（2026-10-12 深色第二遍）——
+     原来这四笔写死，深色里是一条横贯页面的发亮米色条 */
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fffaf1;
+  background: var(--warn-surface);
   font-size: var(--fs-label);
 }
 
 .syncBarText {
   flex: 1;
   min-width: 0;
-  color: #8a6212;
+  color: var(--warn-ink);
 }
 
 .syncBarHint {
@@ -367,23 +437,23 @@ button.usingNote:hover {
   flex-shrink: 0;
   height: 26px;
   padding: 0 12px;
-  border: 1px solid #e3c58f;
+  border: 1px solid var(--warn-line);
   border-radius: var(--r-sm);
-  background: #fff;
+  background: var(--surface-solid);
   font: inherit;
   font-size: var(--fs-label);
-  color: #8a6212;
+  color: var(--warn-ink);
   cursor: pointer;
 }
 
 .syncBarBtn:hover {
-  background: #fdf3e2;
+  background: var(--warn-surface);
 }
 
 .syncBarBtn:focus-visible {
   outline: none;
-  border-color: #8a6212;
-  box-shadow: inset 0 0 0 1px #8a6212;
+  border-color: var(--warn-ink);
+  box-shadow: inset 0 0 0 1px var(--warn-ink);
 }
 
 /* ---------- 卡片区 + 固定抽屉 ---------- */
@@ -502,12 +572,6 @@ button.usingNote:hover {
   display: flex;
   align-items: center;
   gap: 12px;
-}
-
-.sep {
-  width: 1px;
-  height: 18px;
-  background: var(--line-strong);
 }
 
 .state {
@@ -712,6 +776,30 @@ button.usingNote:hover {
   border-top: 1px solid var(--line);
   font-size: var(--fs-label);
   color: var(--text-3);
+}
+
+/* ---------- 保存确认里的「超范围拦截」块（2026-10-20） ---------- */
+
+.sheetWarn {
+  margin: 0 0 18px;
+  padding: 10px 12px;
+  border: 1px solid rgb(229 72 77 / 45%);
+  border-radius: var(--r-md);
+  background: rgb(229 72 77 / 6%);
+}
+
+.sheetWarnTitle {
+  margin: 0 0 6px;
+  font-size: var(--fs-label);
+  color: #e5484d;
+}
+
+.sheetWarnList {
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
 }
 
 .ghost {

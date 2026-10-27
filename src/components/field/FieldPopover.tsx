@@ -115,7 +115,21 @@ export default function FieldPopover({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') closeRef.current()
     }
-    const onScroll = () => closeRef.current()
+    /*
+     * 浮层**自己**滚起来不算「锚点跑了」：锚点所在的那台容器滚动才该关。
+     *
+     * 这一条是"下拉列表滚不动"的根（2026-10-13 作者：「这个下拉菜单我发现它的滚动失效了」）：
+     * 列表本身是 `.list { max-height: 40vh; overflow-y: auto }`，滚它的时候 scroll 事件在
+     * **捕获阶段**落到 window（下面是 `addEventListener('scroll', …, true)`），原来会立刻把
+     * 浮层关掉 —— 症状看着像"滚轮没反应"，其实列表是被关了。
+     *
+     * resize 也绑在这个处理函数上，那时 `e.target` 是 window（不是 Node）—— 顺着往下关，照旧。
+     */
+    const onScroll = (e: Event) => {
+      const t = e.target
+      if (t instanceof Node && ref.current?.contains(t) === true) return
+      closeRef.current()
+    }
     window.addEventListener('mousedown', onDown)
     window.addEventListener('keydown', onKey)
     /* capture：滚动事件不冒泡，要在捕获阶段才收得到表格容器自己的滚动 */

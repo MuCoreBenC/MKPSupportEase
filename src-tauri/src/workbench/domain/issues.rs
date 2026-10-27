@@ -203,28 +203,21 @@ pub fn preflight(
             // 等于把修复的路堵死。待办显眼、进计数、不挡闸。
             severity: Severity::Todo,
             title: "交付目录的清单和文件对不上".to_owned(),
-            detail: format!(
-                "{detail}\n客户端按目录登记的字节做下载校验，对不上就是下载必挂\
-                 （「响应比目录登记的大」）。在工作台生成一次（清单会跟着重算），\
-                 或重跑预设数据发布，让记录与文件回到同一代。"
-            ),
+            // 2026-10-19 文案瘦身：检查卡里不再铺整串文件路径；前两条给个印象，
+            // 完整清单在①生成卡的「交付明细…」里（那里本来就是逐份列）。
+            detail: summarize_mismatch(&detail),
             at: Where::view(View::Build),
         }),
     }
     match embedded {
         Ok(()) => {}
-        Err(detail) => issues.push(Issue {
+        Err(_) => issues.push(Issue {
             id: "embedded.catalog_stale".to_owned(),
             // 待办而不是阻断：它挡不住工作台生成任何产物 —— 伤的是**客户端首屏**
             // （安装包里编译死的那份 catalog）。重新生成是修复动作，别把路堵死。
             severity: Severity::Todo,
-            title: "内嵌目录（客户端首屏那份）落后于仓库数据".to_owned(),
-            detail: format!(
-                "{detail}\n安装包里编译死的 catalog.generated.json 是客户端首启释放的\
-                 说明书 —— 改了 presets/ 或交付产物之后没重新生成，装出来的客户端\
-                 首屏就是旧数据。跑一遍 `cargo run --bin gen-catalog` 重新生成，\
-                 重新构建安装包，这条就消。"
-            ),
+            title: "内嵌目录落后于仓库数据".to_owned(),
+            detail: "跑 `cargo run --bin gen-catalog` 重新生成，再重新构建安装包。".to_owned(),
             at: Where::view(View::Build),
         }),
     }
@@ -237,6 +230,31 @@ fn collect(book: &Book<'_>, out: &mut Vec<Issue>) {
     versions(book, out);
     filter_ghosts(book, out);
     delivery(book, out);
+}
+
+/// 把 `audit_catalog` 的整串消息压成检查卡能读的一句（2026-10-19 文案瘦身）。
+///
+/// 原串形如 `3 处与目录登记不一致：a（…）；b（…）；c（…）`；这里只留前两条 +
+/// 「等 N 处」，完整清单由①生成卡的「交付明细…」承担。`audit_catalog` 本身
+/// **不改**（发布闸与既有测试仍读原文）。
+fn summarize_mismatch(detail: &str) -> String {
+    let (head, rest) = detail.split_once('：').unwrap_or((detail, ""));
+    let items: Vec<&str> = rest
+        .split('；')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let shown = items.iter().take(2).copied().collect::<Vec<_>>().join("；");
+    if items.len() > 2 {
+        format!(
+            "{head}：{shown} 等 {} 处。生成一次会重算登记。",
+            items.len()
+        )
+    } else if shown.is_empty() {
+        format!("{head}。生成一次会重算登记。")
+    } else {
+        format!("{head}：{shown}。")
+    }
 }
 
 fn summarize(mut issues: Vec<Issue>) -> Report {
@@ -495,20 +513,21 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
                 });
             }
 
-            // 当前值正好是废弃选项：**提示**。它还能用，只是不该继续用
+            // 当前值正好是**这台机型上**已弃用的选项：提示。它还能用，只是不该继续用。
+            // 判据按机型 —— 别把「A1 上退场」说成「所有机型都退场」
             if let Some(c) = p
                 .choices
                 .iter()
-                .find(|c| c.deprecated && &c.value == hit.value)
+                .find(|c| c.deprecated_for(&v.machine_id) && &c.value == hit.value)
             {
                 out.push(Issue {
                     id: format!("deprecated.{}.{}", v.uid, key),
                     severity: Severity::Hint,
                     title: format!("{} 用的是已废弃的选项", p.label),
                     detail: format!(
-                        "当前选的是「{}」，上游把它标成了废弃。现在还能用，\
+                        "当前选的是「{}」，上游把它标成了废弃（{}）。现在还能用，\
                          但上游下一次清理可能就把它删了 —— 那时这一版会变成阻断。",
-                        c.label
+                        c.label, v.machine_id
                     ),
                     at: Where::field(&v.uid, &v.machine_id, key),
                 });

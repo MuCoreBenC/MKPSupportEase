@@ -80,19 +80,17 @@ fn extract_coord_on_real_segments() {
     assert_eq!(extract_coord(b"G1 E.4 F1800", b'E'), Some(0.4));
 }
 
-/// 真实片段上的 E 值判定。注意一个**旧侧真实的不对称**（此处刻意钉住）：
-/// `HasEParam` 扫描要求 E 后紧跟 `-` 或数字 ⇒ `E.4` **不命中**；
-/// `GetEValue` 按字段拆分再 ParseFloat ⇒ `E.4` **能取到 0.4**。
-/// 两个函数在旧 Go 侧就是不同判定，Rust 不「修」它。
+/// 真实片段上的 E 值判定。
+///
+/// 2026-10-19 作者裁定：旧侧的 `HasEParam` 只认 `E-` / `E数字`，把 `E.4`
+/// 漏掉是 **bug**（直接校准的 `filter_e_moves` 会漏删纯 E 行；挂载/涂胶的
+/// 「跳过带 E 的行」也会漏判）。现在 `has_e_param` 与 `get_e_value` 同口径。
 #[test]
 fn e_value_on_real_segments() {
     assert_eq!(get_e_value("G1 E-0.02000 F1800"), Some(-0.02));
     assert_eq!(get_e_value("G1 X49.922 Y99.168 E-.12056"), Some(-0.12056));
     assert!(has_e_param("G1 E-0.02000 F1800"));
-    assert!(
-        !has_e_param("G1 E.4 F1800"),
-        "HasEParam 不认 E.4（E 后是 '.'）"
-    );
+    assert!(has_e_param("G1 E.4 F1800"), "E.4 也是 E 值");
     assert_eq!(
         get_e_value("G1 E.4 F1800"),
         Some(0.4),

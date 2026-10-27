@@ -11,7 +11,7 @@
 //!
 //! 本事务**不碰 `Presets`**（它改的是版本号与发布信息，不是预设数据），所以它根本
 //! 不需要进 `with_ctx` —— 从根上躲开那把不可重入的锁。这是设计，不是偷懒：
-//! 发布预设那条链必须读预设，那是它的活；这条链的活不在这儿。
+//! 交付预设那条链必须读预设，那是它的活；这条链的活不在这儿。
 //!
 //! # 阶段快照，不是 `success: bool`
 //!
@@ -1954,7 +1954,7 @@ pub async fn wb_release_software(
                 hosting.as_ref().map(|h| h.as_ref()),
                 release_channel.as_ref(),
             )?;
-            // 记账：这一趟留在 `release-history.json`（**与发布预设那本账分开**）
+            // 记账：这一趟留在 `release-history.json`（**与交付预设那本账分开**）
             let _ = super::release_history::append(
                 &root,
                 super::release_history::ReleaseRecord::from_report(
@@ -2232,7 +2232,7 @@ mod tests {
         assert_eq!(info.version, "0.0.2");
         assert_eq!(info.notes, "修了几个问题");
         assert_eq!(info.url, "https://host/r/tag/v0.0.2");
-        // 它**不进** catalog / 发布预设那一批 —— 两条链不混
+        // 它**不进** catalog / 交付预设那一批 —— 两条链不混
         assert!(
             rel.starts_with("presets/"),
             "release.json 在交付根 presets/delivery/ 里：{rel}"

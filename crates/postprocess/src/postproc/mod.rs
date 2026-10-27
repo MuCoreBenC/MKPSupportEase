@@ -1,7 +1,7 @@
 //! `postproc` —— 全部后处理算法，按模块分（来源仓库也刻意**不**拆成多个 crate：
 //! crate 是架构边界，不是文件夹）。
 //!
-//! pass1 / pass2 / tower / disk / calibration / printtime / offset / geom /
+//! pass1 / pass2 / tower / disk / calibration / calib_models / printtime / offset / geom /
 //! machine_dims / support / cancel，共 31 个文件、12,975 行。
 //!
 //! 硬边界：公开签名只吃 `&Ir`，**不得出现任何预设/TOML 类型**。这条在来源仓库由 gatecheck 的
@@ -13,10 +13,12 @@
 //! `mkp_gcode::` → `crate::gcode::`、`mkp_ir::` → `crate::ir::`、`mkp_diag::` → `crate::diag::`），
 //! 算法一行未动。证据是 G1/G2/G3 三份字节判据在接上的**第一次运行就全绿**。
 
+pub mod calib_models;
 pub mod calibration;
 pub mod cancel;
 pub mod disk;
 pub mod geom;
+pub mod head_facts;
 pub mod machine_dims;
 pub mod marks;
 pub mod offset;

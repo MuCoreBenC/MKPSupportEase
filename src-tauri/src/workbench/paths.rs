@@ -151,7 +151,7 @@ pub fn resolve_delivery(rel: &str) -> Result<PathBuf, AppError> {
 /// 2026-10-03 从 `public/assets` 搬到 `presets/assets`（作者：「在 assets 吧，到时候 3mf
 /// 也要放」—— 产品数据资源住一起）：现在这个根下是台账管的全部分类
 /// `bbs/` `icons/` `models/` `printers/`。
-/// **`printers/`（整机图）是 `bundled` 档**：台账登记、工作台可管，但**不进云端交付**
+/// **`printers/`（整机图）是 `bundled` 档**：台账登记、工作台可管，但**不进交付预设**
 /// —— 到客户端靠构建期复制（`scripts/copy-assets.mjs`）。
 ///
 /// # 目录按需建

@@ -1,0 +1,180 @@
+# 校准模型档 —— 每个校准模型一条 [[models]]。
+#
+# 【为什么有这份文件】校准图案的落点与尺寸校验口径，原来写死在
+# crates/postprocess/src/postproc/disk/calibration.rs 的常量里（`Z_PATTERN_*` /
+# `XY_PATTERN_*` / `Z_SQUARE_*`）。想做第二个、第三个模型就得改代码。
+# 现在改成「一档一条数据」：**加模型 = 往这里加一条，代码不动**。
+#
+# 【谁读它】后处理那一趟（crates/postprocess，见 postproc/calib_models.rs）：
+#   ① 尺寸校验：切片实测的挤出包围盒 vs `footprintW/H`，容差 `tolerance`；
+#   ② 图案基准：`datumX/datumY`（相对包围盒左下角）+ `squareSpacing/squareCount`；
+#   ③ XY 图案模板的七个偏移（`[models.pattern]`）；
+#   ④ 质心旋转判据的期望（`[models.centroid]`）。
+# 读取走机型表同一条链（显式 install → MKPSE_PRESETS_DIR → 仓库相对 presets/）——
+# 见 postproc/machine_dims.rs 的模块头，不另造一份路径依赖。
+#
+# 【切进来的是不是校准件】**只由模型身份标记回答**，不看尺寸：
+#   3MF 里 `3D/3dmodel.model` 的 <metadata name="MKPSE:Calibration">（持久身份，
+#   Bambu Studio 另存后仍在；G-code 里那行旧注释一律忽略）。
+#   没有它 ⇒ 普通模型，**一档都不参与匹配** —— 尺寸恰好等于某块校准板也不算。
+#
+# 【身份只有四个】ZOffset / Precise / Rough / Repetition（= 内核 Mode）。`mode` 是**数组**：
+# 写"这一档服务哪些身份"。一块板服务两种校准就写两个（Precise 与 Rough 是**两种身份**，
+# 不是一种叫 XY 的东西——它们只是碰巧共用同一块 50.5×50.5 的板）。
+# 同一个身份也可以挂多档（Z 校准现有旧版与加长版）：加模型就是加一条。
+#
+# 【选哪一档】身份对上的档里按实测包围盒**自动匹配**：挑偏差最小、且两轴都在
+# `tolerance` 内的一档。都不命中 = 模型被缩放（或这块板还没登记），
+# 报 E_CAL_MISMATCH_002 并把已知档位的外形尺寸列出来。
+# 【已知局限】已在允许的档里只按尺寸认档：把旧档模型整体放大 3mm，会被认成新档。
+# 这只影响"已识别的校准件选哪一档"，**不会**让普通模型被认成校准件。
+#
+# 【footprint 口径】写的是**切片后实测**的挤出包围盒宽高（打印区网格尺寸 − 一个挤出宽度
+# 的内缩），网格尺寸写在旁边的注释里，方便对账。`0.0` = 这一档不参与尺寸校验（Repetition）。
+#
+# 【datum 口径】相对**打印区包围盒左下角**的毫米偏移。拼的是「图案落在板上哪个物理点」，
+# 所以模型哪条边被延长/缩短时，这个数要跟着那条边的位移改（见 zoffset-ext 的注释）。
+
+# ---------------- Z 偏移校准（ZOffset） ----------------
+
+[[models]]
+id = 'zoffset'
+mode = ['ZOffset']
+asset = 'zoffset-calibration'
+# 现行出厂那一版：打印区网格 120.000 × 13.484 ⇒ 切片实测 119.58 × 13.063
+#
+# ★ 2026-10-19 作者对着打印件逐条比对后做了**落点微调**（不是几何修正）：
+#   X：几何基准是 0.079（Go 那套常量里的 `Z_PATTERN_OFFSET_X`，参考 G-code 就是按它
+#      逐字节导出的）。先往左 0.1 不够，改成往左 0.4，最后又回调 0.05
+#      ⇒ 0.079 − 0.35 = −0.271。
+#   Y：几何基准是 3.755。作者：「新版旧版都一起往下 0.5 比较好」⇒ 3.755 − 0.5 = 3.255。
+#   两版 Z（旧版 / 加长版）一起挪，X、Y 的口径都保持一致（加长版的 Y 仍是 3.255 + 1）。
+#   换打印机 / 换料都可能要再动。
+footprintW = 119.58
+footprintH = 13.063
+tolerance = 0.5
+datumX = -0.271 # 0.079 - 0.35（作者实调，见上）
+datumY = 3.255 # 3.755 - 0.5（同上）
+squareSpacing = 11.0
+squareCount = 11
+
+[models.centroid]
+dxSign = 1
+dySign = 0
+minRatio = 0.01
+square = false
+
+[[models]]
+id = 'zoffset-ext'
+mode = ['ZOffset']
+asset = 'zoffset-calibration-ext'
+# 2026-10-18 加长版：打印区低沿 −1mm、高沿 +2mm（中间圆点未动）⇒ 切片实测 119.58 × 16.063。
+# 2026-10-20 作者把这一版**整体换成了 v2 模型**（同一份 3mf 覆盖写入，外壳张到 136.219 × 40.019，
+# 打印区随之变矮）：真机导出实测 **119.5110 × 15.2720**。所以下面这两个数是**按新模型量的**。
+#
+# ★ datum 这一格是**沿用加长版的口径**（4.255 = 基本版 3.255 + 1），还没按新模型实调过：
+#   新模型的打印区比上一版矮 0.791mm，如果矮掉的是**高沿**，4.255 就是对的；
+#   如果矮掉的是**低沿**（包围盒左下角整体上移），这里要改成 4.255 − 0.791 = 3.464。
+#   判据很简单：打一张，看图案整体偏上还是偏下 0.79mm —— 偏下就减，偏上就加。
+#   （X 侧 119.5110 vs 119.58 差 0.07，在容差内，datumX 沿用 −0.271。）
+footprintW = 119.58
+footprintH = 15.272
+tolerance = 0.5
+datumX = -0.271 # 与 zoffset 同步
+datumY = 4.255 # 3.255 + 1（低沿下移 1mm）；v2 待实调，见上
+squareSpacing = 11.0
+squareCount = 11
+
+[models.centroid]
+dxSign = 1
+dySign = 0
+minRatio = 0.01
+square = false
+
+# ---------------- XY 偏移校准（Precise 与 Rough 两种身份共用这一张板） ----------------
+
+[[models]]
+id = 'xy-square-50'
+mode = ['Precise', 'Rough']
+asset = 'precise-calibration'
+# 正方形板 50.5 × 50.5：转 90° 与转 180° 的 BBox 一模一样，所以只靠质心判方向
+# （见 `[models.centroid]` 的 `square = true` 那一路）。
+footprintW = 50.5
+footprintH = 50.5
+tolerance = 0.5
+
+[models.pattern]
+lineSpacing = 4.0
+hLineOffsetY = 10.49
+hLineStartX = 0.5
+hLineEndX = 10.5
+vLineOffsetX = 10.5
+vLineStartY = 0.49
+vLineEndY = 10.49
+
+[models.centroid]
+dxSign = -1
+dySign = -1
+minRatio = 0.02
+square = true
+
+[[models]]
+id = 'xy-square-55'
+mode = ['Precise', 'Rough']
+asset = 'precise-calibration-ext'
+# 2026-10-19 新版：板子右侧、上侧各加 5mm 留白 —— 网格 51 × 51 → 56 × 56
+# ⇒ 切片实测 50.5 × 50.5 → 55.5 × 55.5。
+#
+# **几何上图案偏移一个都不用改**，这是实测出来的、不是想当然：
+# 刻度槽相对板子**左下角**的位置逐位未动（都是 10.75 + 4k），而图案基准本来就
+# 挂在打印区包围盒左下角上 —— 包围盒左下角 = 板子左下角 + 一个挤出宽度内缩，
+# 两边一起走 ⇒ 槽到包围盒左下角的距离仍是 10.5 / 10.49。
+# 板块被切片器居中摆到哪、甚至用户自己挪到哪，都不影响这层关系；要改的只有
+# 「这块板多大」（认档用），所以这里 datum 两个字都不出现。
+#
+# 与 zoffset-ext 的区别值得记一笔：Z 加长版是打印区**低沿**真的往下挪了 1mm，
+# 包围盒低沿与图案基准的相对距离变了 ⇒ 必须 datumY + 1。这里板子只往右/上长，
+# 左下沿没动，所以 datum 不动。
+#
+# ★ 2026-10-19 作者打出来逐条比对后，**只给这一版**加了 +0.05 / +0.05 的补偿：
+#   旧版是 0.5mm 的**凸条**线稿（笔尖压在条顶上画），新版是实心板上的**凹槽**
+#   （槽底 0.0、槽口 0.2，笔尖沉在槽里画）。凹槽两侧的内墙第一层会把槽口各压
+#   进去一点、而且左右不均，肉眼看到的槽中心比几何中心偏左偏下 —— 所以图案整体
+#   往右、往上各挪 0.05。
+#   这 0.05 是**打印形貌补偿**，不是几何修正：换打印机 / 换料 / 改槽宽都可能要重调；
+#   而且 `xy-square-50` 一个字都没动（作者：旧档不要动）。
+footprintW = 55.5
+footprintH = 55.5
+tolerance = 0.5
+
+[models.pattern]
+lineSpacing = 4.0
+hLineOffsetY = 10.54 # 10.49 + 0.05（凹槽视觉中心补偿，见上）
+hLineStartX = 0.55 # 0.5 + 0.05
+hLineEndX = 10.55 # 10.5 + 0.05
+vLineOffsetX = 10.55 # 10.5 + 0.05
+vLineStartY = 0.54 # 0.49 + 0.05
+vLineEndY = 10.54 # 10.49 + 0.05
+
+[models.centroid]
+dxSign = -1
+dySign = -1
+minRatio = 0.02
+square = true
+
+# ---------------- 重复性校准（Repetition） ----------------
+#
+# 这一档**不做尺寸校验**（L 形件没有标称外形），只提供图案基准 —— 它原来跟 ZOffset
+# 共用 `Z_PATTERN_OFFSET_*` 那两个常量，现在单列一条，数值逐字照搬。
+
+[[models]]
+id = 'repetition'
+mode = ['Repetition']
+datumX = 0.079
+datumY = 3.755
+
+[models.centroid]
+dxSign = 0
+dySign = 0
+minRatio = 0.0
+square = false

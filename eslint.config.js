@@ -4,6 +4,74 @@ import tseslint from 'typescript-eslint'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 
+/* 两条"语法禁区"各自成组，下面按目录拼装：
+ *   客户端（`src/app` + 共用件 `src/components`）**两条都要**；
+ *   工作台（`src/workbench`，内部工具）只要内联 overflow 那条。 */
+
+/* 内联 style 是 Stylelint 的盲区，overflow 一律写进 CSS Module */
+const INLINE_OVERFLOW = [
+  {
+    selector: "JSXAttribute[name.name='style'] Property[key.name=/^overflow/]",
+    message: 'overflow 请写在 CSS Module 里，内联样式会绕过 Stylelint 的滚动条检查',
+  },
+  {
+    selector: "JSXAttribute[name.name='style'] Property[key.value=/^overflow/]",
+    message: 'overflow 请写在 CSS Module 里，内联样式会绕过 Stylelint 的滚动条检查',
+  },
+]
+
+/*
+ * 勾选 / 单选一律走共用件 `components/check`（2026-10-17 作者：「我发现我好多地方的
+ * 按钮样子不一样…主要是**勾和框统一，圆角，勾的位置**之类的」之后拍的口径）。
+ *
+ * 为什么用 eslint 硬拦（而不是只靠注释约定）：原生 `<input type=checkbox|radio>` 会被
+ * 系统画成"另一套样子"（框、圆角、勾的画法全不由我们定，还会吃 `tokens.css` 里那条
+ * 全站 `accent-color` 的印刷机绿）—— 正是这一刀要收掉的那批。写注释挡不住下一个人手写。
+ *
+ * ★ 只认**字面量** `type="checkbox" / type="radio"`：共用件自己那只是
+ *   `type={isRadio ? 'radio' : 'checkbox'}`（表达式），天然不被命中，不用给自己开后门。
+ * ★ 预设页那个分段控件（`PresetScopeBar`）的 `type="radio"` 是**刻意藏圆点**的
+ *   例外，就地 `eslint-disable` 并写明原因 —— 例外要看得见，不是悄悄放行。
+ */
+const NATIVE_CHOICE = [
+  {
+    selector:
+      "JSXOpeningElement[name.name='input'] JSXAttribute[name.name='type'][value.value='checkbox']",
+    message:
+      '勾选 / 单选一律用共用件 `components/check` 的 `Check`，不要写原生 input[type=checkbox]（见该件 check.module.css 头注释）',
+  },
+  {
+    selector:
+      "JSXOpeningElement[name.name='input'] JSXAttribute[name.name='type'][value.value='radio']",
+    message:
+      '勾选 / 单选一律用共用件 `components/check` 的 `Check`，不要写原生 input[type=radio]（见该件 check.module.css 头注释）',
+  },
+]
+
+/*
+ * **后处理模态框：这一带的定高只许有两个数**（2026-10-18）。
+ *
+ * 作者连着两轮说「模态框尺寸变化了」，两次都是同一个坏法：板子 / 翻页槽各自内联
+ * 写死一个高度数字（板子还按宽度算，实际画出 160 ⇒ 框长高 56）。eslint **量不了
+ * 渲染高度**（那是探针的活），但能挡住"又在这里手写一个数"这个动作：
+ *   · 结构都从 `src/app/postprocess/metrics.ts` 取（`HERO_H` / `FACTS_SLOT_H`）；
+ *   · 内联 `height` 的**数字字面量**在这一带一律报错（变量、CSS 变量、字符串宽高不限）。
+ *
+ * ★ 只匹配**数字字面量**（`raw` 是纯数字）：`<svg height="12">` 这种字符串
+ *   （图标尺寸）是另一类东西，不该被这条误伤。
+ */
+const POSTPROC_FIXED_HEIGHTS = [
+  {
+    selector: "JSXAttribute[name.name='style'] Property[key.name='height'] > Literal[raw=/^\\d+(\\.\\d+)?$/]",
+    message:
+      '这一带的高度只许从 `metrics.ts`（HERO_H）取 —— 内联写死会撑着模态框变大（2026-10-18 三轮踩过）',
+  },
+  {
+    selector: "JSXAttribute[name.name='height'] > Literal[raw=/^\\d+(\\.\\d+)?$/]",
+    message: '数值高度只许从 `metrics.ts`（HERO_H）取 —— 见该文件头注释',
+  },
+]
+
 export default tseslint.config(
   /* 构建产物一律不扫。
      target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
@@ -37,17 +105,34 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      // 内联 style 是 Stylelint 的盲区，overflow 一律写进 CSS Module
+      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW],
+    },
+  },
+  /*
+   * 客户端这一侧**多一条**：勾选 / 单选必须走共用件（见上面 `NATIVE_CHOICE`）。
+   * 工作台（`src/workbench`）不在这块里 —— 它是内部工具，有自己那套控件语言。
+   *
+   * ★ 这里必须把 `INLINE_OVERFLOW` 一起带上：flat config 里后一块会把同一条规则
+   *   **整条覆盖**掉，漏带就等于把上面那条 overflow 检查从客户端删了。
+   */
+  {
+    files: ['src/app/**/*.{ts,tsx}', 'src/components/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW, ...NATIVE_CHOICE],
+    },
+  },
+  /*
+   * 后处理模态框那一带多一条：定高只许来自 `metrics.ts`（见 `POSTPROC_FIXED_HEIGHTS`）。
+   * ★ 同样要把前两组**一起带上**（flat config 后一块整条覆盖同一条规则）。
+   */
+  {
+    files: ['src/app/postprocess/**/*.{ts,tsx}'],
+    rules: {
       'no-restricted-syntax': [
         'error',
-        {
-          selector: "JSXAttribute[name.name='style'] Property[key.name=/^overflow/]",
-          message: 'overflow 请写在 CSS Module 里，内联样式会绕过 Stylelint 的滚动条检查',
-        },
-        {
-          selector: "JSXAttribute[name.name='style'] Property[key.value=/^overflow/]",
-          message: 'overflow 请写在 CSS Module 里，内联样式会绕过 Stylelint 的滚动条检查',
-        },
+        ...INLINE_OVERFLOW,
+        ...NATIVE_CHOICE,
+        ...POSTPROC_FIXED_HEIGHTS,
       ],
     },
   }

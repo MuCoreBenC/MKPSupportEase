@@ -33,8 +33,61 @@ pub fn cancel_post_process(slot: State<'_, HookSlot>) -> Result<(), AppError> {
     traced("cancelPostProcess", |_| slot.0.cancel())
 }
 
-/// 回答"机型不匹配还跑不跑"：`keep = true` 继续，`false` 停下。
+/// **重置后处理状态**（设置页那一颗按钮，2026-10-17）。
+///
+/// 治的是"钩子还在等答复、界面已经不在了"留下的那一屏：先让钩子别等，再清界面状态。
+/// 返回一句给用户读的回执 —— 设置页原样摆出来，于是"点了没反应"与"本来就没东西"
+/// 分得开（见 [`crate::hook_ui::HookView::reset`]）。
 #[tauri::command]
-pub fn answer_post_process_mismatch(slot: State<'_, HookSlot>, keep: bool) -> Result<(), AppError> {
-    traced("answerPostProcessMismatch", |_| slot.0.answer(keep))
+pub fn reset_post_process_state(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<String, AppError> {
+    traced("resetPostProcessState", |_| slot.0.reset(&app))
+}
+
+/// 回答屏幕上那一问（机型 / 校准方式 …）：`id` 就是那一颗按钮的 id。
+///
+/// 2026-10-17 从 `answer_post_process_mismatch(keep)` 泛化而来 —— 校准件那一问有三个
+/// 以上选项，布尔表达不了。`question_kind` 用来挡"界面上过期那一屏"的答案
+/// （见 [`crate::hook_ui::HookView::answer`]）。
+#[tauri::command]
+pub fn answer_post_process(
+    slot: State<'_, HookSlot>,
+    question_kind: String,
+    id: String,
+) -> Result<(), AppError> {
+    traced("answerPostProcess", |_| slot.0.answer(&question_kind, &id))
+}
+
+/// **首帧那两条路的收尾**（2026-10-17）：界面读完快照，若发现里面有一份问句、但自己从没
+/// 收到过对应事件（订阅挂晚了），喊这一声把问句补推一次。
+///
+/// 只重新 `emit`，不动任何状态 —— 问句本来就还在，钩子那边还在等。
+#[tauri::command]
+pub fn replay_post_process_question(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<(), AppError> {
+    traced("replayPostProcessQuestion", |_| {
+        slot.0.replay_question(&app);
+        Ok(())
+    })
+}
+
+/// **首帧那两条路的收尾（另一半）**（2026-10-18）：界面读完快照、订阅也挂上了，
+/// 却**还是什么都没看见** ⇒ 开场那一条落在缝里了（抬窗已经发生，事件没送到），
+/// 喊这一声把这一趟整份重推一遍。
+///
+/// 与上面那条问句补推同一个形状：只重新 `emit`，不动任何状态。
+/// 这一趟从没来过就什么都不推（程序是用户自己打开的，没有这一屏）。
+#[tauri::command]
+pub fn replay_post_process_run(
+    app: tauri::AppHandle,
+    slot: State<'_, HookSlot>,
+) -> Result<(), AppError> {
+    traced("replayPostProcessRun", |_| {
+        slot.0.replay_run(&app);
+        Ok(())
+    })
 }

@@ -167,7 +167,7 @@ mod tests {
     fn the_normal_slicer_form_parses() {
         let got = parse(argv(&[
             "--Toml",
-            "C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml",
+            "C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\local\\A1MF.toml",
             "--Gcode",
             "C:\\Users\\x\\AppData\\Local\\Temp\\bamboo_model\\45600.0.gcode",
         ]))
@@ -176,7 +176,7 @@ mod tests {
             got,
             Mode::Hook(HookJob {
                 toml: PathBuf::from(
-                    "C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\mine\\A1MF.toml"
+                    "C:\\Users\\x\\Documents\\MKPSupportSSR\\presets\\local\\A1MF.toml"
                 ),
                 gcode: PathBuf::from(
                     "C:\\Users\\x\\AppData\\Local\\Temp\\bamboo_model\\45600.0.gcode"

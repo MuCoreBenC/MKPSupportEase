@@ -809,13 +809,24 @@ impl<'a> Book<'a> {
             let (n, t) = w::gcode_text(hit.value);
             (CellKind::Gcode, t, Some(n))
         } else {
-            (CellKind::Value, w::value_text(p, hit.value), None)
+            (
+                CellKind::Value,
+                w::value_text_for(p, hit.value, &col.machine_id),
+                None,
+            )
         };
 
         // 已弃用（C14 §五）**不并进 blocked**：blocked 说「条件不成立，换个条件就能用」，
         // 弃用说「这一项正在退场」—— 对弃用的行说「要 X 才可改」是假话。
-        // 它只做两件事：把 editable 关掉，给界面一档标记（Row.deprecated）去说自己的话。
-        let deprecated = p.deprecated;
+        // 它只做两件事：把 editable 关掉，给界面一档标记去说自己的话。
+        // **按这一列的机型判**：同一行在 A1 上弃用、在 P1S 上还能写是允许的。
+        let deprecated = p.deprecated_for(&col.machine_id);
+        let dead_choices: Vec<String> = self
+            .presets
+            .registry
+            .deprecated_choice_values_for(&p.key, &col.machine_id)
+            .into_iter()
+            .collect();
 
         Cell {
             kind,
@@ -847,6 +858,8 @@ impl<'a> Book<'a> {
             diff_tip: None,
             raw: hit.value.clone(),
             rest: self.rest_at(col, key),
+            deprecated,
+            dead_choices,
         }
     }
 
@@ -1061,26 +1074,26 @@ impl<'a> Book<'a> {
             self.version_layers(&v.uid)
                 .is_some_and(|l| l.has_own(Level::Version, key))
         };
-        let mine: Vec<&VersionIdentity> = self
+        let local: Vec<&VersionIdentity> = self
             .versions
             .iter()
             .filter(|v| v.machine_id == machine_id)
             .collect();
         match uid {
             Some(u) => DeskImpact {
-                targets: mine
+                targets: local
                     .iter()
                     .filter(|v| v.uid == u)
                     .map(|v| label(v))
                     .collect(),
-                followers: mine
+                followers: local
                     .iter()
                     .filter(|v| v.uid != u && !pins(v))
                     .map(|v| label(v))
                     .collect(),
             },
             None => {
-                let followers: Vec<&&VersionIdentity> = mine.iter().filter(|v| !pins(v)).collect();
+                let followers: Vec<&&VersionIdentity> = local.iter().filter(|v| !pins(v)).collect();
                 DeskImpact {
                     targets: followers.iter().map(|v| label(v)).collect(),
                     followers: Vec::new(),
@@ -1254,7 +1267,7 @@ pub struct BookView {
     pub build_rows: Vec<BuildRow>,
     /// 加载与草稿清理时发现的问题。**由 `app` 层填** ——
     /// 这一层看不到文件，而"仓库里有一份上游已经不存在的配方"只有读文件时才发现。
-    /// 不交出来的话，那一份在树上会整个消失，用户只看到"我的改动去哪了"
+    /// 不交出来的话，那一份在树上会整个消失，用户只看到"本地改动去哪了"
     pub notices: Vec<String>,
     /// 崩溃快照跟上了没有。**与 `save` / `dirty_count` 是两件事** ——
     /// 「未保存」说仓库文件，「待落盘」说快照。由 `app` 层填
@@ -1528,6 +1541,11 @@ pub struct Cell {
     /// 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
     /// 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
     pub rest: Option<Value>,
+    /// 这条参数**在这台机型上**已弃用（全局或点名这台机型）。`Row.deprecated` 是
+    /// 全机型口径，答不了「这一格」—— 一行跨多台机型时两者会不同
+    pub deprecated: bool,
+    /// 这台机型上**不能写**的选项值（显式 + 推定）。控件据此划线、手势前据此拦
+    pub dead_choices: Vec<String>,
 }
 
 impl Cell {
@@ -1551,6 +1569,8 @@ impl Cell {
             diff_tip: None,
             raw: Value::Null,
             rest: None,
+            deprecated: false,
+            dead_choices: Vec::new(),
         }
     }
 }

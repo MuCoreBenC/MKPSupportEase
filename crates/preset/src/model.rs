@@ -114,6 +114,9 @@ pub struct WipingConfig {
     pub glue_z_lift_height_first_layers: f64,
     #[serde(default)]
     pub glue_inter_model_lift_height: f64,
+    /// 换笔脱层（z-hop）高度；0 时由 `build.rs` 回落到注册表默认 1.0。
+    #[serde(default)]
+    pub swap_hop_height: f64,
     #[serde(default)]
     pub outer_structure: String,
     #[serde(default)]
@@ -195,7 +198,7 @@ pub struct Lineage {
     pub based_on: Option<String>,
     /// 建副本那一刻，来源文件头的 `# release_time`（给人看的版本号）。
     pub based_on_release_time: Option<String>,
-    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「官方变了没有」）。
+    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「云端变了没有」）。
     pub based_on_sha256: Option<String>,
 }
 
@@ -214,7 +217,7 @@ impl Lineage {
 ///
 /// 同一台机器的同一个变体，在用户机器上可能有**三份文件**：
 /// `mkp/A1MF.toml`（云端下发）、`builtin/A1_MINI-fast.toml`（我们随版本带的）、
-/// `mine/…`（他自己的副本）。实测前两者**内容完全相同**（sha 都是 `115e061f…`），
+/// `local/…`（他自己的副本）。实测前两者**内容完全相同**（sha 都是 `115e061f…`），
 /// 只有文件名不同 —— 而用户脑子里的单位是「A1 mini 的 fast 预设」，不是「三个文件」。
 ///
 /// 所以：**文件名与路径是实现细节，`(机型, 变体)` 才是身份。**

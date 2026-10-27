@@ -32,9 +32,10 @@
  * 与 `useCatalog` 同一条规矩：挂载先吃上一份结果渲染、照旧重拉。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type { FileRef, VersionFiles } from '../../api/contract'
+import { t } from '../../i18n'
 
 export interface BundleFiles {
   /**
@@ -56,30 +57,38 @@ const cache = new Map<string, BundleFiles>()
 function toBundle(vf: VersionFiles | null, key: string): BundleFiles {
   // `null` 的语义是「后端没有这个组合」，不是「这个组合下没文件」
   if (vf === null) {
-    return { files: null, problems: [`目录里没有 ${key} 这个组合`], presetFileName: null }
+    return { files: null, problems: [t('bundle.missingCombo', { key })], presetFileName: null }
   }
   const preset = vf.files.find((f) => f.kind === 'mkp_preset')?.fileName ?? null
   /* `incomplete` 只表示"该有的没配齐" —— 缺的那几条原因原样透给界面（后端的话） */
   const problems = vf.incomplete
     ? vf.missing.length > 0
       ? vf.missing
-      : [`${key} 的套餐没配齐`]
+      : [t('bundle.incomplete', { key })]
     : []
   return { files: vf.files, problems, presetFileName: preset }
 }
 
 export function useBundleFiles(machineId: string | null, versionId: string | null): BundleFiles {
   const key = machineId !== null && versionId !== null ? `${machineId}/${versionId}` : null
-  const [state, setState] = useState<BundleFiles>(key === null ? UNKNOWN : (cache.get(key) ?? UNKNOWN))
+
+  /*
+   * ★★ 状态**跟着组合钥匙走**（2026-10-17，与 `usePreset` 同一条规矩）。
+   *
+   * 原来是裸 `useState`：换一版时这一帧还拿着**上一版**的套餐 —— `presetFileName` 是上一版
+   * 那份、"在不在盘上"也是上一版的账。于是换版那一帧里「已应用 / 下载并使用 / 应用」按别人
+   * 的事实说，点快了还会去 `fetchCloudPreset` **上一版那份文件**（首页那颗主按钮的目标就是
+   * 它）。钥匙对不上就当"还没拿到"（`unknown`），不拿旧事实顶新组合。
+   */
+  const [entry, setEntry] = useState<{ key: string; bundle: BundleFiles } | null>(null)
+  const state = useMemo<BundleFiles>(() => {
+    if (key === null) return UNKNOWN
+    if (entry !== null && entry.key === key) return entry.bundle
+    return cache.get(key) ?? UNKNOWN
+  }, [entry, key])
 
   useEffect(() => {
-    if (key === null || machineId === null || versionId === null) {
-      setState(UNKNOWN)
-      return
-    }
-    /* 先吃上一份（切回来不闪空），再重拉一遍 */
-    const hit = cache.get(key)
-    if (hit !== undefined) setState(hit)
+    if (key === null || machineId === null || versionId === null) return
 
     let alive = true
     void api.getVersionFiles(machineId, versionId).then(
@@ -87,16 +96,19 @@ export function useBundleFiles(machineId: string | null, versionId: string | nul
         if (!alive) return
         const next = toBundle(vf, key)
         if (next.problems.length === 0) cache.set(key, next)
-        setState(next)
+        setEntry({ key, bundle: next })
       },
       (err: unknown) => {
         if (!alive) return
         console.error(`[bundle] 套餐拉取失败 ${key}`, err)
         /* ★ 纪律②：拿不到就说拿不到 —— 不写缓存、更不当成"套餐为空" */
-        setState({
-          files: null,
-          problems: [`${key} 的套餐没取到 —— 稍后再试，或去看数据源配好没有`],
-          presetFileName: null,
+        setEntry({
+          key,
+          bundle: {
+            files: null,
+            problems: [t('bundle.fetchFailed', { key })],
+            presetFileName: null,
+          },
         })
       },
     )

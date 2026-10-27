@@ -1,12 +1,12 @@
 /*
- * 构建脚本 —— **把两个官方源（Bootstrap）地址注入二进制**。
+ * 构建脚本 —— **把两个云端源（Bootstrap）地址注入二进制**。
  *
  * # 值的来源与优先级（2026-10-02 第十七刀）
  *
  *   ① 环境变量 `MKPSE_PRESET_SOURCE` / `MKPSE_PRESET_SOURCE_GITEE`：构建方显式覆盖
  *      （CI 打测试包用的就是它，也有权覆盖一切）——**在就不动它**；
  *   ② 工作台配置 `<repo>/workbench/bootstrap.json`（`wb_set_bootstrap` 写的，入库）：
- *      `npm run tauri dev` 与正式构建都从这里自动拿到官方源；
+ *      `npm run tauri dev` 与正式构建都从这里自动拿到云端源；
  *   ③ 都没有 → 二进制里没有那个默认地址，联网命令诚实回答「还没配置」，
  *      **不编一个 URL 出来假装能下**。
  *
@@ -15,7 +15,7 @@
  * 这两个值都是 **Bootstrap 地址**（指向发布产物里的 `source.json`），不是"直接根" ——
  * 客户端读它拿到 catalog 与文件下载根的地址（见 `runtime::source::resolve_source`）。
  *
- * ★ **两个都是官方源**（2026-10-05，作者拍"国内走 Gitee"）：`bootstrapUrl` = GitHub
+ * ★ **两个都是云端源**（2026-10-05，作者拍"国内走 Gitee"）：`bootstrapUrl` = GitHub
  *   （默认），`giteeBootstrapUrl` = Gitee。**各自独立注入**：Gitee 那边没配就少一个
  *   选项（界面不出现它），不影响 GitHub 那个。
  *

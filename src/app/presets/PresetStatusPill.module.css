@@ -1,32 +1,84 @@
 /*
- * 融合 pill 的皮（G07-1 收编；2026-10-04 从试验台收编进产品，与 A44 原件同几何）。
+ * 融合 pill 的皮。
  *
- * 两拍：外圈 1px --line 边框、--r-sm 圆角、淡绿底 --accent-soft（绿 = 正在生效）。
- * 右拍（机型筛选）在 pill 里退化成无边框的一段（`.pill .filterBtn`），
- * 独立漏斗（切片器工具条上那颗）才是带边框的完整按钮（`.filterBtn` 本体）。
+ * a03 在 a02 基础上**就地改**（stylelint 禁重复选择器）：
+ * - 一套未应用时整颗用**中性 sunken 底**（[data-empty]），不再用积极的淡绿；
+ * - 两拍分隔线与「本地文件」小枚边框**中性化**。
+ *
+ * 两拍：外圈 1px 边框、胶囊形。右拍（机型筛选）在 pill 里退化成无边框的一段
+ * （`.pill .filterBtn`），独立漏斗（切片器工具条上那颗）才是带边框的完整按钮。
  */
 
 .pill {
   position: relative;
   display: inline-flex;
-  flex-shrink: 0;
+  /*
+   * ★ 2026-10-10 第二轮：`flex-shrink: 0` → `flex: 0 1 auto`。
+   *   工具栏第二排改成「pill + 计数台账**同一行、不折行**」之后，pill 要能被压缩：
+   *   窄窗 / 超长文件名时先把左拍（`.name` 的省略号）收掉，台账永远留在这一行
+   *   （作者：「限制它一个长度」「这个（台账）跟它是放在同一行的」）。
+   *   右拍机型筛选仍是 `flex-shrink: 0` —— 它一寸不让（见 `.hold` 与 `.pill .filterBtn`）。
+   *
+   * ★ 2026-10-10 第三轮：**去掉固定上限**。原来是 `min(46vw, 440px)` 封顶 ——
+   *   作者改判：「那个最大的长度宽度啊，它可以随着这个软件窗口的变化而变化，
+   *   反正这个不能换行就是了」。所以这里只留 `max-width: 100%`（不超出这一排），
+   *   多宽由**可用空间**说了算：窗口宽、名字就多露几个字；窗口窄，`.name`
+   *   先出省略号，**筛选右拍永远完整**（`.hold` 不参与收缩）。
+   */
+  flex: 0 1 auto;
   align-items: stretch;
   gap: 0;
   min-width: 0;
   /*
-   * 上限 400 → 560（作者 2026-10-06 真机反馈：「矩形不完整，右边贴到箭头了」）——
-   * 文件名一长，400 的帽子把右拍挤得 caret 贴住右边框。放宽之后长名有更多呼吸位，
-   * 再长的由 .name 的省略号吸收；工具栏那一排可换行，计数格不会被挤走。
+   * 压到极限时左拍里那几枚 `flex-shrink: 0` 的字（机型那种）会探出盒子 ——
+   * 裁掉，别画到右拍身上。弹层是 portal（`FieldPopover`），不受这一条影响。
    */
-  max-width: 560px;
-  height: 28px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  overflow: hidden;
+  max-width: 100%;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  /* 已应用：淡绿底（绿 = 正在生效） */
   background: var(--accent-soft);
+  /*
+   * ★ 整条 pill **只用一种字号、一种行高**（2026-10-10 作者：那一行「已应用 文件名 ·
+   *   机型」上上下下对不齐）。
+   *
+   * 原来那点错位是**混排**出来的：标签与机型是 --fs-label（≈11.5px）、文件名固定
+   * 12px 等宽、分隔点「·」继承 --fs-body（≈13px）、右拍漏斗又是 --fs-body 一档。
+   * 四种字号全靠 `align-items: center` 对 —— 而那是**盒子中线**对齐：字号不同的文字
+   * 中线一齐，基线必然各自错开。现在字号 / 行高只在这一层定义、里面谁也不覆盖，
+   * 中线对齐就等于基线对齐。层次交给颜色与字重，不再交给字号。
+   */
+  font-size: var(--fs-body);
+  line-height: 1.25;
 }
 
 .pill:hover {
   border-color: var(--accent);
+}
+
+/* 一套未应用：中性 sunken 底；hover 也不画绿 */
+.pill[data-empty='true'] {
+  background: var(--surface-sunken);
+}
+
+.pill[data-empty='true']:hover {
+  border-color: transparent;
+}
+
+/*
+ * 切片器那颗（`PresetSlicerPill`）：喷嘴 / 层高**一颗都没筛** → 整颗中性 sunken
+ * （与 MKP「还没有使用任何预设」那一档同一种底，见上一条）、hover 也不画绿；
+ * 筛上了就走 `.pill` 的基础淡绿。两颗 pill 的底色都跟「有没有东西在起作用」走，
+ * 这是作者说的「长得一样」的一部分。
+ */
+.pill[data-filt='false'] {
+  background: var(--surface-sunken);
+}
+
+.pill[data-filt='false']:hover {
+  border-color: transparent;
 }
 
 /* ---------- 左拍：已应用信息，点击 = 定位 ---------- */
@@ -36,9 +88,11 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  padding: 0 10px;
+  /* 收到极限时「机型」那枚不缩的字不许探出去叠到右拍上（它自己裁掉即可） */
+  overflow: hidden;
+  padding: 0 14px;
   border: 0;
-  border-radius: 3px 0 0 3px;
+  border-radius: 999px 0 0 999px;
   background: transparent;
   font: inherit;
   font-size: var(--fs-body);
@@ -76,58 +130,67 @@
   background: var(--text-3);
 }
 
-.label {
-  flex-shrink: 0;
-  font-size: var(--fs-label);
-  color: var(--text-2);
-}
+/* （左拍上「在用」那两个字 2026-10-10 第三轮撤了 —— 作者：「节省一点字，不用那个在用」） */
 
+/*
+ * 文件名（整条 pill 的主角）。
+ * ★ 2026-10-10 第三轮：**不再用等宽字体、不再加粗** —— 从字体、字号到字重，
+ *   整条从上到下完全一致，只靠颜色分层（作者：要不就同样的字体，同样的字号，
+ *   不要用粗体）。等宽字体的中线与雅黑不同、600 的笔画比周围重，看着就是
+ *   "高高低低"；这两样去掉之后，同一行里所有字共享同一套基线。
+ */
 .name {
+  /* 长文件名：可收缩 + 截断；右拍筛选因此永远完整 */
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 600;
   color: var(--text-1);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
+/*
+ * 分隔点：**画的一个小圆，不再排「·」字形**。
+ * 中点字符落在字体的 x-height 线上（baseline 上方约 0.25em），比旁边文字的
+ * 视觉中心低 1.5px 上下 —— 那一行的"高高低低"有一半是它贡献的。
+ */
 .sep {
   flex-shrink: 0;
-  color: var(--text-3);
+  align-self: center;
+  width: 3px;
+  height: 3px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: var(--text-3);
 }
 
 .mach {
   flex-shrink: 0;
-  font-size: var(--fs-label);
   color: var(--text-2);
   white-space: nowrap;
 }
 
-/*
- * 「我的文件」那一小枚（产品仓补的，A44 原件没有）：正在使用的是用户自己那份
- * （第七层）。与旧状态条上那一枚同义，只是住处搬进了左拍 ——
- * 它要说清"现在跑的这份不跟着官方更新"，所以必须在左拍上单独看得见。
- */
-.mine {
+/* 「本地文件」小枚：边框中性化（a03） */
+.local {
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  height: 18px;
+  height: 20px;
   margin-left: 2px;
-  padding: 0 6px;
-  border: 1px solid var(--line-strong);
-  border-radius: 2px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   font-size: var(--fs-label);
   color: var(--text-2);
   white-space: nowrap;
 }
 
+/* a03：两拍分隔线 → 中性淡线 */
 .divider {
   flex-shrink: 0;
   align-self: stretch;
-  margin: 4px 0;
-  border-left: 1px solid rgb(23 146 74 / 25%);
+  margin: 6px 0;
+  border-left: 1px solid var(--line);
 }
 
 /* ---------- 右拍：机型筛选 ----------
@@ -136,8 +199,16 @@
  * pill 里那颗由下面的 `.pill .filterBtn` 覆写成右拍（无边框、透明底、撑满 pill 高）。
  */
 
+/*
+ * 右拍（机型筛选）的壳。它要**一寸不让**：`.hold` 默认 `flex-shrink: 1`，
+ * 收缩时会先于左拍被压扁，里面那颗按钮（自己 `flex-shrink: 0`）于是探出壳外、
+ * 被 `.pill` 的 `overflow: hidden` 从右端裁掉 —— 作者实测到的
+ * 「筛选的显示不完整」（「▽ A1 mi」后面缺一截）就是这么来的。
+ * 修法只有一条：**壳也不缩**，收缩全部由左拍（`.name` 省略号）承担。
+ */
 .hold {
   position: relative;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: stretch;
   min-width: 0;
@@ -148,9 +219,9 @@
   align-items: center;
   gap: 7px;
   height: 32px;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 1px solid var(--line-strong);
-  border-radius: var(--r-sm);
+  border-radius: 999px;
   background: var(--surface-solid);
   font: inherit;
   font-size: var(--fs-body);
@@ -162,7 +233,7 @@
   border-color: var(--text-3);
 }
 
-/* 筛上了（不是「全部机型」）：漏斗转绿、边框一起转 —— 筛选在生效这件事要看得见 */
+/* 筛上了（不是「全部机型」）：漏斗转绿、边框一起转 —— 筛选在生效 */
 .filterBtn[data-filt='true'] {
   border-color: var(--accent);
   color: var(--accent-deep);
@@ -172,8 +243,23 @@
   outline: none;
 }
 
+/*
+ * a03：**旧的白底筛选区形态**（`data-in-filter`）随切片器筛选区一起退役
+ * （2026-10-10 作者：三颗常驻下拉「特别讨厌」）—— 喷嘴 / 层高收进切片器那颗 pill
+ * 的左拍，见下面的 `.pill .filterBtn[data-side='left']` 与 `.axisPanel`。
+ */
+
+/*
+ * 漏斗图标。
+ * ★ 2026-10-10：`top: 1px` 是**视觉重心**的补正，不是随便加的 ——
+ *   实测它的盒子中心和旁边文字的盒子中心完全一致（都在 150.00），但漏斗上宽下窄，
+ *   图形的重量压在上半部，看着就"比「全部」高"（作者原话）。把整个图形下移 1px，
+ *   视觉重心才落到文字中线；`position: relative` 不参与基线、不影响行盒。
+ */
 .funnel {
+  position: relative;
   flex-shrink: 0;
+  top: 1px;
   width: 13px;
   height: 13px;
   color: var(--text-2);
@@ -183,30 +269,56 @@
   color: var(--accent-deep);
 }
 
+/* 筛上的值：**不加粗**（理由同 .name —— 同一行里字重一致才不跳） */
 .filterName {
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.caret {
+/*
+ * 触发器上的**前缀**（筛选区里的「机型 / 喷嘴 / 层高」）——
+ * 三个下拉并排、都写着「全部」时分不清谁是谁，前缀就是那个分界。
+ * 字号不动（同一条「一行里只一种字号」的规矩），层次交给颜色。
+ */
+.filterPrefix {
   flex-shrink: 0;
-  font-style: normal;
-  font-size: 10px;
   color: var(--text-3);
 }
 
+/*
+ * 下拉箭头：**用两条边画，不再排「▼」字形**。
+ * 字形是跟着字体跑的（字号、基线、字面框各不相同）—— 同一行里就它来自另一套
+ * 基线，原来那点上下的错位有一部分是它贡献的。图形不参与文字基线。
+ * （rotate 是静态图形变换，没有 transition，不会引发文字重栅格化。）
+ */
+.caret {
+  position: relative;
+  flex-shrink: 0;
+  align-self: center;
+  /* 与漏斗同一条规矩、方向相反：chevron 的尖朝下，视觉重量压在尖上，
+     盒居中时看着"偏低"（作者原话）。上移 1px 才是视觉居中。 */
+  top: -1px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentcolor;
+  border-bottom: 1.5px solid currentcolor;
+  color: var(--text-3);
+  transform: rotate(45deg);
+}
+
 /* pill 里的那一颗：退化成右拍 —— 无边框、透明底、撑满 pill 高，hover 一层绿。
-   flex-shrink: 0（作者 2026-10-06「矩形右边贴到箭头」）：溢出一概由左拍的文件名
-   省略号吸收，右拍一寸不让 —— 漏斗 / 机型名 / 箭头与右边框之间的呼吸位是
-   「矩形完整」的一部分，不许被压缩吃掉。 */
+   ★ 圆角必须是「左上直、右侧圆」（0 999px 999px 0）：左边与左拍 / 分隔线拼合处
+     是直角，右边才是 pill 的圆角。前一版第三个值漏了 `px`（`0 999px 999 0`）——
+     对 border-radius 是非法 shorthand，整条声明被丢弃、落回基础规则的 999px，
+     于是 hover 时右拍的高亮块四角全圆，与左拍（999px 0 0 999px）拼不上，
+     看着就是「有一边没有弧度」。右拍一寸不让：溢出由左拍文件名省略号吸收。 */
 .pill .filterBtn {
   flex-shrink: 0;
   height: auto;
   align-self: stretch;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
-  border-radius: 0 3px 3px 0;
+  border-radius: 0 999px 999px 0;
   background: transparent;
 }
 
@@ -219,13 +331,44 @@
   border-color: transparent;
 }
 
+/*
+ * **左拍**（切片器那颗的「喷嘴 × 层高」）：与右拍镜像 —— 左圆角、右边直角。
+ * 其余（撑满 pill 高、无边框、透明底、hover 一层绿）与右拍一样，先由上面那条兜着。
+ * 唯一的额外一条是 `flex: 0 1 auto; min-width: 0`：左拍要能被压缩，
+ * 窄窗里让「喷嘴 0.2 · 层高 0.12」先出省略号（全文本在 title 里），
+ * 机型筛选那一拍一寸不让 —— 与 MKP 左拍（文件名先截）同一条规矩。
+ */
+.pill .filterBtn[data-side='left'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  border-radius: 999px 0 0 999px;
+}
+
 /* ---------- 菜单（FieldPopover 只管定位，框和影自己画） ---------- */
 
+/* a03：菜单内项与容器边缘留白（padding 8）、项与项之间留缝（gap 4） */
 .menu {
   min-width: 200px;
-  padding: 4px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-md);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /*
+   * ★ 2026-10-10（作者）：值一多菜单就比窗口还长（层高一个喷嘴五六档、叠起来十几档），
+   *   底下那几档伸到窗口外，滚都滚不到 —— 所以菜单自己封顶可滚。
+   *   40vh 与 SelectField 的 .list 同一个数：同一页里所有下拉一样高。
+   *
+   *   滚动条**不画**：全局 `*::-webkit-scrollbar { width: 0 }` / `scrollbar-width: none`
+   *   已经管住了（作者：「你可以让我滚动，但是不需要滚动条也可以」）——
+   *   滚轮 / 触控板照常，只是不占宽、不出槽。
+   */
+  max-height: 40vh;
+  overflow-y: auto;
+  /* 滚到边界别再往下传（剩余 delta 会链给后面的页面 —— 这一步与 FieldPopover 的
+     wheel 兜底分工：CSS 管「到底了」「这一滚只吃了一部分」，JS 管「压根没得滚」） */
+  overscroll-behavior: contain;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
   background: var(--surface-solid);
   box-shadow: var(--shadow-lift);
 }
@@ -236,10 +379,20 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  height: 32px;
-  padding: 0 10px 0 26px;
+  /*
+   * ★ `flex-shrink: 0` 必须有（2026-10-10 回归）：`.menu` 是 flex 列 + 封顶可滚，
+   *   flex 项默认 `flex-shrink: 1` —— 项一多（「全部层高」18 档）就**先被压扁**，
+   *   一档 34px 压到三十出头、间距跟着一起缩，肉眼就是「全部的时候怎么这么密集」，
+   *   而且封顶也接不到滚动（压扁到放得下就没有溢出）。压扁后的菜单还看不出哪一项
+   *   被压过 —— 它不是滚动、是变形，所以最难查。
+   *   同一页的 `.comboItem`（PresetTable）一直有这一条，就是这个原因；这里当初漏了。
+   *   规矩：**封顶可滚的 flex 列，子项一律 `flex-shrink: 0`**。
+   */
+  flex-shrink: 0;
+  height: 34px;
+  padding: 0 12px 0 26px;
   border: 0;
-  border-radius: 2px;
+  border-radius: 8px;
   background: transparent;
   font: inherit;
   font-size: var(--fs-body);
@@ -256,7 +409,8 @@
 .item[data-on='true'] {
   background: var(--accent-soft);
   color: var(--accent-deep);
-  font-weight: 600;
+  /* 加粗改用描边：菜单项是撑满宽度的，但文字一宽「全部机型」那种行尾补充就会挪（见 global.css 的铁律） */
+  text-shadow: var(--state-bold);
 }
 
 .check {
@@ -279,4 +433,136 @@
   font-size: 11px;
   font-weight: 400;
   color: var(--text-3);
+}
+
+/* ---------- 切片器 pill 的左拍（喷嘴 × 层高）与它的弹层 ---------- */
+
+/*
+ * 左拍上的两小节（「喷嘴 0.2」·「层高 0.12」）：前缀灰、值深，中间那个点复用
+ * 上面那个画出来的 `.sep`（不是「·」字形）。
+ */
+.axisText {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  /* 窄窗：先吃掉省略号的是这一段（全文本在按钮的 title 里），右拍机型一寸不让 */
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.axisItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.axisPrefix {
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+
+.axisVal {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+/*
+ * 左拍点开的面板：**两组**（喷嘴 / 层高），各一行标题 + 一排胶囊。
+ * 一个机型四个喷嘴、一个喷嘴最多六档层高 —— 平铺都放得下；两组合起来仍可能比
+ * 窗口高，所以照旧封顶可滚（`overscroll-behavior: contain` + FieldPopover 的滚轮兜底，
+ * 缺了就会滚到后面的页面去）。固定可滚的 flex 列，子项 `flex-shrink: 0` —— 见 `.item` 那条注解。
+ */
+.axisPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 210px;
+  max-width: 320px;
+  max-height: 46vh;
+  padding: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+.axisGroup {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.axisLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.axisValues {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 值胶囊：「全部」与各档一个形状；选中 = 淡绿 + 加粗（与表格里那些胶囊同一套语言） */
+.axisChip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  font: inherit;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.axisChip:hover:not(:disabled) {
+  color: var(--text-1);
+}
+
+/*
+ * 灰态：**当前喷嘴没有这一档**（2026-10-10 作者：「别的变成那种灰色不让点击的」）。
+ * 留而不删 —— 档位本身是信息（"这个喷嘴没这档"）；收走的话用户只会以为界面上
+ * 从来没这个东西。
+ *
+ * 2026-10-10 第二轮（作者：「感觉有点不太明显」）：四重信号一起上，与"能点的
+ * 实心胶囊"拉开距离 ——
+ *
+ *   空心底（能点的是实心 sunken）+ **虚线内框**（实线边框是"一个形状"，
+ *   虚线是"这不是个选项"）+ 三级灰文字。
+ *
+ * ★ 虚线用 `outline` 而不是 `border`：border 会把盒子撑宽 2px —— 正是
+ *   「状态不许改变盒子尺寸」那条铁律不许的事；outline 不占布局，宽度一像素不动。
+ * ★ 特意**不**给整颗加 opacity：那会把虚线也一起冲淡，反而回到"不明显"
+ *   （虚线要留在可见那一档，它是这里最硬的信号）。
+ */
+.axisChip[data-off='true'] {
+  background: transparent;
+  outline: 1px dashed var(--line-strong);
+  outline-offset: -1px;
+  color: var(--text-3);
+  cursor: default;
+}
+
+.axisChip[data-on='true'] {
+  background: var(--accent-soft);
+  /* 加粗改用描边：面板里一排胶囊，选中哪一颗都不该让自己和邻居挪位（见 global.css 的铁律） */
+  text-shadow: var(--state-bold);
+  color: var(--accent-deep);
+}
+
+/* 焦点不另画一圈（与这一页的 chip 同一条裁决） */
+.axisChip:focus-visible {
+  outline: none;
 }

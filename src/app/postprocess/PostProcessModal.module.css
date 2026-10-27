@@ -1,86 +1,1113 @@
 /*
- * 那一屏自己的东西（问句 / 结论 / 进度那几行）。
- * 外壳（遮罩 + 白框 + 页头页脚）用的是 `../ui/ui.module.css` 那一套 ——
- * 与首页、校准页那些确认框是同一个外壳，这里只加这一屏独有的排版。
+ * 那一屏自己的东西（跑着的 hero / 问句那一张红卡 / 结果那几扇 / 后台那条窄条在隔壁文件）。
+ * 外壳（遮罩 + 白框 + 页头页脚）用的是 `../../components/modal` 那一套 ——
+ * 与首页、校准页那些确认框是同一个外壳，这里再管：
+ *
+ *   `.layer` / `.dragShield`  —— **跑着的那一态**要铺满整扇窗、但标题栏还得能拖窗；
+ *   其余（hero / facts / 结果）是这一屏独有的排版。
+ *
+ * # 这一份的来历（2026-10-12）
+ *
+ * 六扇窗的样子是作者在试验场 `frontend-lab/lab/mkp-postprocess/`（双击就能开的原型页）
+ * 里逐像素定稿的，见那份 `HANDOVER.md`；这里就是**定稿的落地** ——
+ * 结构、几何、配色照搬，数值一个像素没改（原型里的 `cd-*` / `sm-*` 类名在这里
+ * 换成了本地的语义类名）。要再调样子，请先回原型页定稿，再改这里。
+ *
+ * 深色那一档挂在 `[data-theme='dark']` 上（与 `styles/tokens.css` 同一处口径：
+ * 属性挂在 `<html>` 上由 `state/appState.ts` 的 `applyTheme` 写）——
+ * 所以这一屏的深浅**跟着应用主题走**，不另开开关。
  */
 
+/* ---- 跑着的那一态：整扇窗都归它（但标题栏仍然能拖） ---- */
+
+/*
+ * 外面这一层：默认什么都不做（不占层高、不吃点击）—— 遮罩在里面的行为与
+ * 通用模态框一字不差；只有跑着的那一态把它抬到窗控键之上。
+ *
+ * 为什么要抬：顶栏那三颗窗控键被 `TopTabs` 自己抬到了 `z-index: 94`
+ * （它要盖住外壳顶部那条 1px 高光），而通用模态框的遮罩是 40 —— 压不住，
+ * 于是"框开着、右上角那颗关闭照样点得着"（作者 2026-10-11 点的就是那一下）。
+ */
+.layer {
+  position: absolute;
+  inset: 0;
+  /*
+   * ★ 2026-10-18 作者：「后处理的应该最高的优先显示」。
+   *
+   * 这一层原来只在**跑着那一态**抬到 92（`[data-full='true']`）；结果态退回 0，
+   * 而参数弹窗的宿主层是 70（`PagePresets.module.css .paramsLayer`）⇒ 参数弹窗
+   * 一开就把后处理结果框压在下面，用户看到的是"改参数比后处理还高"。
+   *
+   * 现在两态同一层高：结果框永远压过普通模态框（40）与参数弹窗（70），
+   * 仍低于窗控键（94）、通知（96）与 resize 手柄（93）—— 那些还得点得着。
+   */
+  z-index: 92;
+  pointer-events: none;
+}
+
+/* 这一层铺满整扇窗又不吃点击，所以里面的东西得自己把命中重新打开（遮罩就是那一个） */
+.layer > * {
+  pointer-events: auto;
+}
+
+/*
+ * 跑着的时候顶上那一条**拖窗带**：透明、铺在所有东西之上，只认拖窗与双击缩放。
+ *
+ * 它**不在 `.layer` 里面**（是兄弟）：层里面的话 z-index 会被层自己的层高罩住，
+ * 压不过那三颗窗控键。整条标题栏宽高铺满 —— 要盖就得盖全，露一截等于留一个
+ * 点得着的关闭键。
+ */
+.dragShield {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--titlebar-h);
+  /* 压过窗控键（94）与窗口内侧那圈 resize 命中条（93）：整条标题栏归它 */
+  z-index: 95;
+  cursor: default;
+}
+
+/* Windows 的标题栏矮一档（38px），与 `TopTabs` 读的是同一对 token */
+.dragShield[data-platform='windows'] {
+  height: var(--titlebar-h-win);
+}
+
+/* ---- 整屏的竖向节奏（一条尺子：gap 12px 通到底 —— 原型第 34 轮压实的那一档） ---- */
+
+/*
+ * ★ **框身不许自己长**（2026-10-14 作者，两轮口径合起来）：
+ *
+ * 第一轮：「一打开那个模态框的高度宽度并不是固定好的……闪一下」⇒ 不能"先缩成一条再撑开"。
+ * 第二轮：「我这个高度不要这么高，你干嘛要故意帮我留这么高呢。我就要按照以前那样子
+ *         刚好的高度，下面留那么高留那么空是干什么的呢，没必要……到时候出错了呀，
+ *         或者怎么有那些提示，它自然自己变高，它那个变高的范围也不会很大，没这么突兀」
+ *         ⇒ 也不许**预先留**出警告行那份空。
+ *
+ * 合起来剩一条：**高度就是当下内容的高度**（一行警告来了就高一行 ≈ 20px，不突兀）。
+ * 所以这里不再写死 `height`，也不留 `min-height` —— 交给 Modal 默认那套
+ * （`Modal.module.css` 的 `.box` 本来就是 `height: auto`，内容多少就是多少）。
+ *
+ * 上下文：`.body` 里那几块（hero / 事实表 / 警告行）都不带自己的高度，
+ * 高度由内容决定；真正给框定时的是 `.box` 那一层的 `auto`。
+ */
 .body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
-.files {
-  font-size: var(--fs-label);
-  color: var(--text-3);
-  max-width: 18em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+/*
+ * （这一屏**不再有自己的按钮皮肤**。）
+ *
+ * 原来这里有一条 `.pill`：照 `ui.module.css` 的 `[data-page] .btn` 抄的一份 ——
+ * 因为这一屏挂在 `<main>` **外面**（窗口级），祖先里没有 `data-page`，拿不到胶囊皮。
+ *
+ * 2026-10-12 作者截了两张图（这一屏 vs 报告页导出框）说"两个按钮和别的还不一样，
+ * 帮我做成和别的一样的，就是复用，不要各自写各自的" ⇒ 胶囊形状收进了 `.btn` 默认
+ * （见 `ui.module.css`），这一份删掉。页脚那几颗 `Btn` 现在就是全站那一套，
+ * 不加任何 className、也不在深色里另换一副面。
+ */
 
-.line {
+/* ============================================================
+ * ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽进度条嵌底）
+ * ② 问句：**警告橙** hero（同一口尺寸：高 104 + 同内衬同圆角；内容多了在框内滚）
+ * ③ 成功：四格指标条（同高）
+ * ④⑤ 结果 hero（同高）—— 四样都是同一口 104px 的框，切状态时不跳
+ * ============================================================ */
+
+.hero {
   display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  margin: 0;
-  font-size: var(--fs-body);
+  flex-direction: column;
+  gap: 3px;
+  min-height: 104px;
+  justify-content: center;
+  padding: 14px 18px;
+  border-radius: var(--r-md);
+
+  /* 绿的方向是作者定死的：**左上角浅、右下角深**，落差不大（一道很平的斜光） */
+  background: linear-gradient(135deg, #2fcd71, #26b863);
+  box-shadow: 0 10px 24px rgb(21 138 70 / 22%);
 }
 
-.pct {
-  color: var(--text-2);
+/*
+ * side：meta（步骤 + 倒计时）挪到右边，大数占左。
+ * ★ 内嵌条要**独占下一行**：横向 flex 里它是一个没有内容的子项，不给宽就会塌成 0（看不见）。
+ */
+.heroSide {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+
+.heroNum {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -1px;
+  color: #fff;
   font-variant-numeric: tabular-nums;
 }
 
-.msg {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--text-2);
-  word-break: break-word;
+.heroSide .heroMeta {
+  margin-left: auto;
+  align-items: flex-end;
+  text-align: right;
 }
 
-/* 机型不匹配那一问：底色按「要你看一眼」那一档给，正文用默认色（它是主角） */
-.ask {
+.heroMeta {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: var(--r-sm);
-  background: var(--warn-soft);
-  border: 1px solid var(--line-strong);
+
+  /* 右侧那两行（步骤 / 倒计时）行距 6 —— 压到 2 会挤在一起（第 35 轮实测） */
+  gap: 6px;
 }
 
-.askText {
-  margin: 0;
-  font-size: var(--fs-body);
-}
-
-.askBtns {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.ok {
-  margin: 0;
+.heroStep {
   font-size: var(--fs-body);
   font-weight: 600;
+  color: #fff;
+}
+
+.heroEta {
+  font-size: var(--fs-label);
+  color: rgb(255 255 255 / 78%);
+  font-variant-numeric: tabular-nums;
+}
+
+.heroSide .heroBar {
+  flex: 1 0 100%;
+  margin-top: 4px;
+}
+
+/* 进度条定稿皮（pb1「凹槽条」：绿底上凿出来的一道槽）—— 不是普通白条 */
+.heroBar {
+  position: relative;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 24%);
+  overflow: hidden;
+}
+
+.heroBarGroove {
+  background: rgb(0 0 0 / 12%);
+  box-shadow:
+    inset 0 2px 3px rgb(0 0 0 / 32%),
+    inset 0 -1px 0 rgb(255 255 255 / 22%);
+}
+
+.heroBarFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 88%);
+
+  /*
+   * ★ 过渡要**短于进度事件的间隔**（2026-10-14 作者：「进度条和上面的百分比好像都没对齐，
+   * 哪一个是真的」—— **数字是真的**，条子只是"追"得慢）。
+   *
+   * 来路：这条原来是 `0.45s linear`。数字（`.heroNum`）是每来一个进度事件就**瞬变**的，
+   * 条子却要 0.45 秒才滑到位 —— 而 `pass1/pass2` 的进度事件是按 1% 一档发的、间隔几十到
+   * 几百毫秒 ⇒ 条子**永远在追下一个**，看起来就比数字少一大截（实测：47% 那一刻条子
+   * 还在 10% 附近，差 37 个百分点）。
+   *
+   * 0.1s：比事件间隔短（跟得上、不再落后），又留一点平滑（1% 一档跳变时不发抖）。
+   * ⚠️ 别再往长里调 —— 那等于把"数字与条子不同步"重新引回来。
+   */
+  transition: width 0.1s linear;
+}
+
+/* ---- 交互动效：**已全部改由 JS（Web Animations API）驱动** ----
+
+   2026-10-15：作者真机上这套 CSS 动画一个都不播（拆帧像素差量过：切换是一帧内跳变），
+   而排查确认代码/构建/重启都没问题 ⇒ 整条 CSS 动画管线在那台机器上就是不灵。
+   现在按住 / 回弹 / 淡出 / 弹入全部走 `element.animate()`（见 `PostProcessModal.tsx` 的
+   `usePressFlash` 与主件那两个 effect）—— 原来这里的 `.pressable` / `.pressing` / `.press` /
+   `.leadOut` / `.leadIn` / `.popIn` 与三个 `@keyframes` 一并删除，别再往这里加 CSS 动画：
+   加了也播不出来，只会让人以为"实现过了"。 */
+
+/* ---- ② 机型不匹配：**警告橙** hero（不是错误红，见下面那段） ---- */
+
+.warnHero {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  /*
+   * ★★ 定死高度之后，内衬不算在 104 里（`border-box` 才不算；而 flex 子项默认
+   *    按内容高度撑）—— 让 `.warnScroll` 的 `max-height: 100%` 真正等于"内容盒的高度"，
+   *    不然它按 104（含内衬 28）去算，一有滚动条就把最后一行切掉半截。
+   */
+  box-sizing: border-box;
+  /*
+   * ★★ 高度**与其它三扇一样定死 104**（作者 2026-10-17：「这个怎么 hero 这么高，
+   *    我不是固定了所有的 hero 高度吗，内容在里面滚动」）。
+   *
+   * 原来是 `min-height`：补了那两句说明之后这一扇自己长到 ~230px，整屏跟着跳，
+   * 与绿 hero / 结果 hero 齐平这件事就没了。现在框不动 —— 内容超高在 `.warnScroll`
+   * 里滚（与 `.failWarn .resCopy` 同一条：74 = 104 − 2 描边 − 28 内衬）。
+   */
+  height: 104px;
+  /* 上下各收 4px（14 → 10），给"标题 + 正文 + 倒计时"多让出 8px 的显示面积 */
+  padding: 10px 18px;
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+
+/*
+ * ★★★ **警告用警告色，不用错误色**（作者 2026-10-17：「这个警告的有没有复用错误的？
+ * 还有警告的到时候换成橙色，就是警告色的」）。
+ *
+ * 这一张原来借的是 `--danger-soft` + 一圈 35% 红描边 —— 与「处理失败」那张长得一样，
+ * 用户分不出"要你决定"和"已经坏了"。现在走 token 里现成那一套**整块浅底**：
+ *   `--warn-surface` 块底 / `--warn-line` 描边 / `--warn-ink` 块里的字（深浅两套都有）。
+ * 失败那扇（`.failWarn`）继续是红的 —— 两件事，两种颜色。
+ */
+.warnSoft {
+  background: var(--warn-surface);
+  border: 1px solid var(--warn-line);
+  color: var(--warn-ink);
+}
+
+/*
+ * **挪塔那一问的那一屏**（2026-10-18 作者：「把画布居中显示或者左侧显示，右侧显示
+ * 文字内容，坐标之类的」）—— **左图右文**，不走 104px 那口 hero（三行字答不了
+ * "塔挪到哪"这种问题）。配色跟着"流程选择"那一档（绿，不是警告橙）：
+ * 这不是出错，是"这一盘怎么跑"的选择。
+ */
+/*
+ * **挪塔那一屏的上半**（2026-10-18 第二版）：两幅俯视图并排，**不套外圈容器**
+ * （作者：「板子也不需要用 hero 或者外圈容器装起来，就可以大一点」）。
+ * `--map-h` 是板子的目标高度（跟 hero 那一带对齐，稍大一点）—— 图框宽度按
+ * 板子纵横比由组件内联折算（`width: calc(var(--map-h) * ratio)`），于是两幅一样高、
+ * 板子不被裁，整扇模态框也不用变大。
+ */
+.relocateMaps {
+  /* 高度由组件把 `height={104}` 钉在画布上（= 别的 hero 那口高），这里只负责排。
+     不摆「现在 / 挪后」小标题（作者：「上面的现在挪后不需要」）—— 省掉那 18px，
+     整扇模态框才和"结果"那一屏一样大。 */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+/*
+ * **板与板之间那支箭头**（作者 2026-10-18：「还需要第一个板子指向第二个板子的」）。
+ * 与画布内那支白色箭头各管一件事：
+ *   板间这支 = "从这一幅看到下一幅"（现在 → 挪后）；
+ *   画布内白箭 = "塔从哪挪到哪"（首尾 + 目标虚框，长度是真实位移）。
+ * 实线 + 粗头，跟这一屏的字同色；只在缝里，不占高度。
+ */
+.relocateArrow {
+  display: flex;
+  align-items: center;
+  /* 绿 = 主色（"接下来这么做"），与画布内那支白箭分开 */
   color: var(--accent-deep);
 }
 
-.cancelled {
+[data-theme='dark'] .relocateArrow {
+  color: var(--accent);
+}
+
+
+/*
+ * 一幅图：宽度由画布自己按"高度 × 板纵横比"反算（`CollisionMap height={104}`）——
+ * 两幅**一定同高**，板子不被裁（作者 2026-10-18：「板子可以一样的大小」）。
+ * 图例与标题都不摆（`hideLegend` + 上面那条）。
+ */
+.relocateFig {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.relocateMapBox {
+  width: 100%;
+}
+
+.relocateMapTag {
+  font-size: var(--fs-label);
+  color: var(--ink-2);
+}
+
+/* 「挪后」那一枚：跟着绿，一眼分出新旧 */
+.relocateMapTagNew {
+  color: var(--ask-ink);
+}
+
+/*
+ * **原来两栏事实那一格**（2026-10-18）：挪塔那一问时它变成可翻页的槽 ——
+ * 「挪塔说明」/「原始信息」两页，**定高**（`--facts-slot-h`，与两栏事实同高），
+ * 于是两页占同一块地方、模态框不跟着变大小（作者：「他们占用的高度可以一致」）。
+ * 内容多了就在这块里滚（作者：「内容多的时候就显示」）。
+ */
+/*
+ * 翻页槽 = **一格叠两页**（2026-10-18）：槽高由较高的那一页决定 —— 就是两栏事实。
+ * 于是"信息页不留空 / 翻页不跳"两件同时成立；不再写死高度（写死会跟主题字体
+ * 打架：作者真机那片留空就是这么来的）。
+ */
+.relocateSlot {
+  display: grid;
+}
+
+.relocatePage {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+/* 藏起来的那一页仍然占格（高度不被抽走），只是看不见也点不到 */
+.relocatePageOff {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
+ * 说明那一页（2026-10-18 第七版，作者定稿）：
+ *   问句（居中）→ **一组**横向坐标（现在 → 建议）→ **并排**的一句底（冲突点数 / 倒计时）。
+ * 三段共享一条中轴；**不用卡片、不用横线**，层次只靠字号、字重、间距。
+ */
+.relocateNote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 26px;
+  color: var(--text-1);
+}
+
+/* 问句：这一屏唯一一句"要你决定"的话 —— 主色 + 加粗，比正文大一号 */
+.relocateAsk {
   margin: 0;
+  font-size: calc(var(--fs-body) + 2px);
+  font-weight: 700;
+  line-height: 1.35;
+  letter-spacing: 0.2px;
+  color: var(--ask-ink);
+}
+
+/*
+ * ★ 居中要**压过** `Modal.module.css` 的 `.body p { text-align: justify }`
+ *   （那条给全站正文段落上两端对齐，特异度 0,1,1 > 这里单类 0,1,0）。
+ *   这一句是"问题"，不是一段正文 —— 它跟上面两幅板共用同一条中轴。
+ */
+.relocateNote .relocateAsk {
+  text-align: center;
+}
+
+/*
+ * 一组坐标：`[当前塔位置] → [自动摆放位置]`。
+ * 网格只占内容宽（祖先 `align-items: center` 已把它摆在模态框中轴上），
+ * 两栏各自左对齐 —— 标签与它下面的值起于同一条线，读起来才是一个整体。
+ */
+.relocateCols {
+  display: grid;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  column-gap: 22px;
+}
+
+/* 每栏：标签在上、值在下，左对齐（上下两行同一条起线） */
+.relocateCol {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.relocateColLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/*
+ * 两栏之间那支箭头：**与"值"那一行同高**，不是整块的几何中点。
+ * `align-self: end` 落到格底，再用半行高把它抬回值的基线上（值行高 1.25 ≈ 24）。
+ */
+.relocateSwap {
+  align-self: end;
+  display: flex;
+  margin-bottom: 5px;
+  color: var(--text-3);
+}
+
+.relocateSwap svg {
+  display: block;
+  width: 22px;
+  height: 15px;
+}
+
+/* 坐标值：大一号、等宽（换值时不跳）；目标那栏用主色 —— "要我挪到这儿" */
+.relocateValue {
+  font-size: calc(var(--fs-body) + 6px);
+  font-weight: 600;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text-1);
+}
+
+.relocateColNew .relocateValue {
+  color: var(--ask-ink);
+}
+
+/* X / Y 压小压暗，数字才是眼睛要找的 */
+.relocateAxis {
+  font-size: 0.7em;
+  font-weight: 500;
+  color: var(--text-3);
+}
+
+.relocateSep {
+  margin: 0 4px;
+  color: var(--text-3);
+  opacity: 0.6;
+}
+
+/*
+ * 那句话的底：**两件事并排**（作者：「它们共同组成一个信息区，不需要再用多条横线
+ * 把内容切碎」）—— 左 = 冲突点数，右 = 倒计时，中间只留一道竖发丝线。
+ */
+.relocateMeta {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  /* 与上面那组坐标再拉开一点（26 + 8）：这一句是"状况"，不是坐标的注解 */
+  margin-top: 8px;
+}
+
+/* 冲突点点数：**关键事实** ⇒ 深色 + 加粗，比标签大一号（橙只给旁边那枚警告记号） */
+.relocateHit {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.relocateHitValue {
+  font-size: calc(var(--fs-body) + 6px);
+  font-weight: 700;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-1);
+}
+
+.relocateHitUnit {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 行里那枚小图标（三角 / 时钟）：15px 方盒，颜色跟所在那一件事的语义走 */
+.relocateIcon {
+  display: flex;
+  flex: none;
+  color: var(--warn);
+}
+
+.relocateIcon svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+/* 倒计时：只是"不管会怎样"的兜底 ⇒ 灰字（浅一档），竖发丝线把它与左边分开 */
+.relocateTimer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 时钟跟着绿（同一枚 `.relocateIcon`，只换颜色） */
+.relocateIconCalm {
+  color: var(--ask-ink);
+}
+
+/*
+ * 左下角那颗**很小的翻页钮**（作者 2026-10-18：「我点击很小的切换信息按钮，
+ * 这个按钮可以放在左下角空白的位置」）——`margin-right: auto` 把它顶到最左，
+ * 动作按钮照旧靠右。
+ */
+.slotToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.slotToggle:hover {
+  color: var(--ink-1);
+  border-color: var(--ink-3);
+}
+
+.warnGlyph {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 空心叹号圈：40px、2px currentColor 描边、24px 粗体文字「!」（颜色跟随 `.warnSoft` 的墨色） */
+.warnBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--warn-soft);
+  border: 2px solid currentcolor;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.warnCopy {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+}
+
+/*
+ * 可滚的那一叠（标题 + 问话 + 两句说明）。
+ *
+ * `margin-block: auto` = 内容短就居中、超高**就从第一行开始滚**（溢出时 auto 边距
+ * 自己归零，不会像 `justify-content: center` 那样把顶上一截裁掉看不见）。
+ */
+.warnScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  align-self: stretch;
+  max-height: 100%;
+  margin-block: auto;
+  /* 右侧只留 8px：滚动条本身要占宽，别再让它挤掉正文的显示面积 */
+  padding-right: 8px;
+  overflow-y: auto;
+  /*
+   * ★ 这里**不许挂 `mask-image` 做"上下褪色"**（2026-10-17 作者：「这些字的上边缘下边缘
+   *   有点模糊」）：那一层渐变是**无条件**的，内容没有超高时也照样把第一行的上半截和
+   *   最后一行的下半截调成半透明 —— 看起来就是标题与倒计时那两行"发虚"。
+   *   要滚动提示就等真的溢出再说，别拿字迹的清晰度换。
+   */
+}
+
+.warnTitle {
+  flex-shrink: 0;
+  margin-bottom: 3px;
   font-size: var(--fs-body);
   font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
+}
+
+.warnLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  opacity: 0.85;
+}
+
+/*
+ * 那一问下面的两句说明（2026-10-17）：怎么答 / 不答会怎样。
+ * 比 `.warnLine` 再轻一档（它是"问句本身"的注），分隔靠间距不靠线。
+ */
+.warnHint {
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  letter-spacing: 0.2px;
+  opacity: 0.72;
+}
+
+.warnHint + .warnHint {
+  margin-top: 1px;
+}
+
+/* ---- 那一问的按钮簇（页脚，2026-10-17 修） ---- */
+
+/*
+ * ★ 选项簇是页脚里**唯一**的东西时，它自己吃满一行、按钮仍然贴右（页脚本来就
+ *   `justify-content: flex-end`）。原来这里写了 `margin-right: auto` —— 那是
+ *   "我还要在右边放别的东西"的写法，结果整簇被推到左边去了（作者 2026-10-17 截图）。
+ */
+.footChoices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+ * ★ 这一条**只管布局**，不管长相：皮仍旧是 `Btn` 的 `variant`
+ *   （`ui.module.css` 的 `.btn*`，深浅两套齐全）。
+ *
+ * 第一版这里自己抄了一套 `.choiceBtn` + `.choiceAccent`，漏了深色分支 ——
+ * 深色下主按钮还是浅底绿字，与全站那颗实心绿白字不一样。
+ * 现在只补"允许收缩 + 允许折行"这两条，覆掉全局 `button { white-space: nowrap }`。
+ */
+.choiceBtn {
+  min-width: 0;
+  max-width: 100%;
+  white-space: normal;
+  text-align: center;
+}
+
+/*
+ * 校准件那一问（2026-10-17）：**中性绿**，不是警告橙。
+ *
+ * 这一问不是"出错了"，是"这一盘怎么跑"的流程选择（先打印再校准 / 直接校准）——
+ * 拿 `--warn-*` 那一套去问，用户会以为出了故障。所以只换**这一块的三种颜色**
+ * （`--ask-surface / --ask-ink / --ask-line`，深浅两套都在 `tokens.css`），
+ * 骨架（104px、内衬、`.warnScroll` 内滚、字级）逐条沿用 `.warnHero`。
+ */
+.askSoft {
+  background: var(--ask-surface);
+  border: 1px solid var(--ask-line);
+  color: var(--ask-ink);
+}
+
+/* 圈里那枚符号跟着绿：`✦` 是"一件要你挑的事"，不是「!」那种拦下来 */
+.askBadge {
+  background: var(--ask-line);
+}
+
+/*
+ * 圈里那枚四角星是**画出来的 SVG**（见 `SparkMark`）：字体符号会偏低，几何坐标不会。
+ * 19px 与 `.resBadge svg` 同值 —— 两种 hero 的记号看起来一样大。
+ */
+.askBadge svg {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+
+/* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
+
+/*
+ * ★ **指标条 · 定稿皮**（原型第 24~33 轮抽出来的那一条合成了这套）：
+ *   外板 = 上/左一道暖白硬线 + 下沿一道硬线（没有模糊内影）+ 落影 + 外圈 1px 描边；
+ *   内窗 = `::before` 收进去 6px 的一块（四条边各有交代，窗底 3%）。
+ * 深色里换成"凸"那一套（见文件末尾的深色段）——浅色这份一个字都别动。
+ */
+.strip {
+  display: flex;
+  align-items: center;
+  min-height: 104px;
+  padding: 14px 8px;
+  border-radius: var(--r-md);
+  background: var(--accent-soft);
+}
+
+.stripFinal {
+  /* 内窗那一层就住在这个元素上（原型的 `.cd-stripDeco` 那两条并了进来） */
+  position: relative;
+  overflow: hidden;
+
+  background: rgb(16 24 32 / 3%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 252 246 / 95%),
+    inset 1px 0 0 rgb(255 252 246 / 55%),
+    inset 0 -1px 0 rgb(16 24 32 / 9%),
+    0 3px 5px rgb(16 24 32 / 14%),
+    0 0 0 1px rgb(16 24 32 / 5%);
+}
+
+/* 内窗：上暗下亮、左暗右亮，下沿那道白线（第 30 轮定的"线要看得见"那条） */
+.stripFinal::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  border-radius: 9px;
+  background: rgb(16 24 32 / 3%);
+  box-shadow:
+    inset 0 1px 0 rgb(16 24 32 / 9%),
+    inset 0 3px 5px rgb(16 24 32 / 11%),
+    inset 1px 0 0 rgb(16 24 32 / 6%),
+    inset -1px 0 0 rgb(255 252 246 / 45%),
+    inset 0 -1px 0 rgb(255 252 246 / 85%);
+  pointer-events: none;
+}
+
+/* 读数抬到内窗那一层之上 */
+.stripFinal > * {
+  position: relative;
+}
+
+.stripCell {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-left: 1px solid var(--line);
+}
+
+.stripCell:first-child {
+  border-left: none;
+}
+
+.stripLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.stripValue {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.stripHot {
+  color: var(--accent-deep);
+}
+
+/* ============================================================
+ * ④⑤ 结果 hero（已停止 / 失败）—— 与 ①② 同一套骨架：图标 + 文案，
+ * 同一口 104px 的框（内衬四周一律 6px、内板 92px 写死，与 ③ 的内窗逐像素重合）
+ * ============================================================ */
+
+.resHero {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-height: 104px;
+  padding: 6px;
+  /* 不许被 flex 压小 —— 内容多时框跟内容一起长，不出现"内板比框还高" */
+  flex: none;
+  border-radius: var(--r-md);
+}
+
+.resGlyph {
+  flex: none;
+  width: 46px;
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/*
+ * 内板：图标进板之后是 [空心圈 + 文案列] 的一行。
+ * **高 92px 写死** —— 文案超出就在 `.resText` 里滚，框永远 104。
+ */
+.resCopy {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  height: 92px;
+  padding: 7px 12px;
+  border-radius: 9px;
+}
+
+/* 滚动条由全局的「幽灵滚动条」管（不占位、不画出来），这里不重写 */
+.resText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  /* gap 0（不是 1px）：标题 + 三行正好落进 78px 的可用高，加 3px 会让正常四行也"以为要滚" */
+  gap: 0;
+  max-height: 100%;
+  overflow-y: auto;
+}
+
+.resTitle {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  line-height: 1.4;
+}
+
+.resLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  word-break: break-word;
+}
+
+/* 空心圈：照 `.warnBadge` 的构造（2px currentColor 描边 + 浅底 + 居中符号） */
+.resBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgb(255 255 255 / 60%);
+  border: 2px solid currentcolor;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* 圈里那个记号是**画出来的 SVG** —— 文字符号在圈里对不齐，SVG 几何居中 */
+.resBadge svg {
+  display: block;
+  width: 19px;
+  height: 19px;
+}
+
+/* 已停止：中性墨（取消不是失败，也不用警示色吓人） */
+.resStop {
+  background: linear-gradient(135deg, #5b6772, #3c4650);
+  box-shadow: 0 10px 24px rgb(60 70 80 / 24%);
+  color: #fff;
+}
+
+.resStop .resLine {
+  color: rgb(255 255 255 / 85%);
+}
+
+/* ============================================================
+ * ④ 已停止 · 定稿皮 = sm4「柔和内影」（原型第 55 轮定下来的）：
+ * **同一张气泡卡**，只换面 / 线 / 影，全部走 token ⇒ 浅色深色都成立。
+ * 现代那一路的做法：面用半透明、界用发丝、影用柔影，硬线一律不出现。
+ * ============================================================ */
+
+.smBase {
+  border: 0;
+}
+
+.smBase .resGlyph {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+
+.smBase .resBadge {
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 22px;
+}
+
+.smBase .resTitle {
+  color: var(--text-1);
+}
+
+.smBase .resLine {
   color: var(--text-2);
 }
 
-.bad {
-  margin: 0;
+.smBase .resCopy {
+  background: transparent;
+  box-shadow: none;
+}
+
+.smSunk {
+  border-radius: 14px;
+  background: var(--surface-sunken);
+  box-shadow: inset 0 2px 8px rgb(16 24 32 / 10%);
+}
+
+/* ============================================================
+ * ⑤ 失败 · 定稿皮 = `.failWarn`：当年照「机型不匹配」那一张卡做的
+ * （用户原话："算了算了，失败的也用这一种吧"）——
+ * 同一件底（--danger-soft + 一圈 35% 描边）、同一个圈叹号、
+ * **图标在板外**、文案直接落在卡上（没有白板）。
+ * 盒子逐条照 `.warnSoft`：内衬 14/18 + 1px 描边、圈盒 40×40、板高 74（= 104 − 2 − 28）。
+ *
+ * ★ 2026-10-17 起**只有这一扇是红的**：机型不匹配那一扇改成了警告橙（`--warn-*`）——
+ *   "要你决定"与"已经坏了"不该一个颜色。
+ * ============================================================ */
+
+.failWarn {
+  border: 1px solid rgb(200 69 60 / 35%);
+  padding: 14px 18px;
+  color: var(--danger);
+  background: var(--danger-soft);
+  box-shadow: none;
+}
+
+.failWarn .resGlyph {
+  width: 40px;
+  height: 40px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* 板：左对齐、无内衬、无底；高 74，超出在里面滚（这一屏尺寸锁死，不让它变长） */
+.failWarn .resCopy {
+  flex-direction: column;
+  /* ⚠ 必须是 flex-start：`.resHero` 那条 `align-items: center` 在竖列板上会变成
+     **横向居中** ⇒ 文案整段居中（原型第 46 轮踩过） */
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  height: 74px;
+  padding: 0;
+  overflow-y: auto;
+  text-align: left;
+  background: transparent;
+  box-shadow: none;
+}
+
+/* 标题 / 正文：字级与行距照 `.warnTitle` / `.warnLine` */
+.failWarn .resTitle {
+  margin-bottom: 3px;
   font-size: var(--fs-body);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0.2px;
   color: var(--danger);
 }
+
+.failWarn .resLine {
+  font-size: var(--fs-label);
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  color: var(--danger);
+  opacity: 0.85;
+}
+
+/* 红圈：逐条照 `.warnBadge` —— 圈里是 24px 粗体的**文字**「!」 */
+.failWarn .resBadge {
+  width: 40px;
+  height: 40px;
+  border: 2px solid var(--danger);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ============================================================
+ * 两组带题 facts（定稿的读数区）：题名行 = 色点 + 题 + 发丝线，下面一张精装表
+ * ============================================================ */
+
+.groups {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px 24px;
+}
+
+@media (width <= 560px) {
+  .groups {
+    grid-template-columns: 1fr;
+  }
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+}
+
+.groupHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-bottom: 6px;
+  margin-bottom: 3px;
+  border-bottom: 1px solid var(--line);
+}
+
+.groupDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.groupTitle {
+  font-size: var(--fs-body);
+  font-weight: 700;
+  color: var(--text-1);
+  letter-spacing: 0.2px;
+}
+
+.facts {
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  justify-content: center;
+  min-width: 0;
+}
+
+.factRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.factRow:last-child {
+  border-bottom: 0;
+}
+
+.factLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  /* 装不下时**标签**先让位（省略号），不许把右边的值挤成三行 */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/*
+ * ★★ **值不折行**（2026-10-18 作者：「为什么窗口尺寸大的时候反而要换行呢？修好它，
+ *   不要突变，字体也不用变大」）。
+ *
+ * 上一版这里是 `overflow-wrap: anywhere` —— 于是 `BambuStudio 02.08.02.60`
+ * 会被拆成三行、`118.54 秒 / 0.72 MB` 被拆成两行，行高跟着变（就是"突变"）。
+ * 现在：值恒一行（`nowrap`），挤不下时由**标签**收省略号；字号一点不动。
+ */
+.factValue {
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+/* 灰字行（切片软件这类「看一眼就行」的读数） */
+.factGrey .factValue {
+  color: var(--text-3);
+  font-weight: 400;
+}
+
+/* ---- 警告行 / 命令失败那一行 ---- */
 
 .warn {
   margin: 0;
@@ -88,21 +1115,103 @@
   color: var(--warn);
 }
 
-/* 错误码：小字、等宽、可选中（用户要把它复制去查/报问题） */
-.code {
-  margin: 0;
+/*
+ * 提示那三档（`.headErr / .headNote / .headOk`）与它们的框身回落版
+ * **已经搬去共用件** `components/modal/HeadNote.module.css` —— 2026-10-17 收口：
+ * 作者要求"不管是什么提示都用同一套组件、同一套逻辑复用在标题后面"，
+ * 所以这一屏不再自己持有一份。要改那一行的样子去共用件里改（一处，全站生效）。
+ */
+
+/*
+ * 「预览模式」那一枚小字（开发台演出来的那一趟）。
+ *
+ * 摆在页脚最左边（真业务按钮原来待的位置）—— 它要一眼看出"这不是真跑"：
+ * 那几颗真按钮在预览里一个都不摆（见组件里 `preview` 那一支）。
+ */
+.previewTag {
+  margin-right: auto;
   font-size: var(--fs-label);
   color: var(--text-3);
-  user-select: text;
 }
 
-.code code {
-  font-family: ui-monospace, "SF Mono", Consolas, monospace;
-  color: var(--text-2);
+/* ============================================================
+ * 深色那一档（跟着应用主题：`<html data-theme="dark">`）
+ *
+ * 取值照 macOS 深色那一路（原型第 48~58 轮逐张调过的），三类：
+ *   ① 硬编码的渐变 / 槽（绿 hero、进度条槽）换成"压暗一档"的那一支；
+ *   ② 定稿皮的"往浅处压暗"那两条在深底上太抢眼 ⇒ 换成"只留一层淡淡的面"；
+ *   ③ 两张红卡（② 机型不匹配 / ⑤ 失败）：底压深、标题与圈回到产品原本的红、
+ *      **正文换浅字**（"红字压红底"就是区分度不高的根子），且不许纯白（在深底上晃眼）。
+ * ============================================================ */
+
+/* ① 绿 hero + 凹槽进度条 */
+[data-theme='dark'] .hero {
+  background: linear-gradient(135deg, #2f9e5b, #227544);
+  box-shadow: 0 10px 24px rgb(0 0 0 / 34%);
 }
 
-.hint {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
+[data-theme='dark'] .heroBarGroove {
+  background: rgb(0 0 0 / 26%);
+  box-shadow:
+    inset 0 2px 3px rgb(0 0 0 / 42%),
+    inset 0 -1px 0 rgb(255 255 255 / 10%);
 }
+
+/* ③ 指标条：深色里是"凸"那一套（外板提亮 + 上/左亮线 + 下沿暗线 + 一层落影，内窗反过来凹） */
+[data-theme='dark'] .stripFinal {
+  background: rgb(255 255 255 / 7%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 9%),
+    inset 1px 0 0 rgb(255 255 255 / 5%),
+    inset 0 -1px 0 rgb(0 0 0 / 30%),
+    0 8px 18px rgb(0 0 0 / 34%);
+}
+
+[data-theme='dark'] .stripFinal::before {
+  background: rgb(0 0 0 / 16%);
+  box-shadow:
+    inset 0 1px 0 rgb(0 0 0 / 34%),
+    inset 0 -1px 0 rgb(255 255 255 / 7%);
+}
+
+/* ④ 已停止（sm4 深色）：浅色那道内影在深底上几乎看不见 ⇒ 更黑更大才读得出"凹" */
+[data-theme='dark'] .smSunk {
+  background: rgb(255 255 255 / 4%);
+  box-shadow: inset 0 2px 10px rgb(0 0 0 / 48%);
+}
+
+/* 面沉下去之后，圈也得跟着暗一档，不然圈会浮在面上 */
+[data-theme='dark'] .smBase .resGlyph {
+  background: rgb(255 255 255 / 6%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 14%);
+}
+
+/* ② 机型不匹配（深色）：**不用另写** —— `--warn-surface / --warn-line / --warn-ink`
+   本来就是深浅两套（tokens §「警告」那一组）。原来这里手写了一遍红，是因为当时借的是
+   错误色；换成警告色之后那一套照旧生效。 */
+
+/* ⑤ 失败（深色）：同一套 */
+[data-theme='dark'] .failWarn {
+  border-color: rgb(200 69 60 / 42%);
+  background: rgb(120 32 27 / 34%);
+  color: #c8453c;
+}
+
+[data-theme='dark'] .failWarn .resTitle {
+  color: #c8453c;
+}
+
+[data-theme='dark'] .failWarn .resLine {
+  color: rgb(255 255 255 / 78%);
+  opacity: 1;
+}
+
+[data-theme='dark'] .failWarn .resBadge {
+  border-color: #c8453c;
+  background: rgb(200 69 60 / 12%);
+  color: #c8453c;
+}
+
+/* （深色里也不给这一屏的按钮另换一副面：按钮皮肤是全站那一套，深浅由 token 管 ——
+   见文件上半段那条"不再有自己的按钮皮肤"。） */
+

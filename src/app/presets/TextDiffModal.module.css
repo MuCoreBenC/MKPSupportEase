@@ -1,0 +1,292 @@
+/*
+ * 「与最初那份对比」那一屏（2026-10-21）：左边最初、右边现在，红绿行级标记。
+ *
+ * 两列固定（行号 + 代码）各占一半 —— 作者要的是 IDE 那种 side-by-side；
+ * 窄了也不改成上下堆叠：堆起来就分不清"哪一行对应哪一行"了，宁可长行截断
+ * （全文在 `title` 上）。
+ */
+
+.wrap {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* 布局切换（左右 / 上下）：两颗小胶囊，与底栏别的东西同一行 */
+.layoutSwitch {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+}
+
+/*
+ * **底栏左簇**（2026-10-21 作者：「你别都堆在右边呀，你把那个恢复默认值左右上下的放到左边呀」）：
+ * 布局切换 + 「恢复默认值」，靠左站；`margin-right: auto` 把右边那组按钮顶到底。
+ *
+ * 按钮本身**直接用「编辑文件」那几个类**（`PagePresets.module.css` 的 editGhost / editPrimary），
+ * 这里不再自己写一份尺寸 —— 作者一直在量的就是"两边底栏不一样高"，
+ * 两份 CSS 各写一遍 32px 迟早还会漂（改一边忘一边）。共用同一个类，量出来必然一样。
+ */
+.footLeft {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+}
+
+/* 右侧那一簇：只管排间距 */
+.footActs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/*
+ * 底栏按钮：**高度与「左右 / 上下」那颗同一个数**（2026-10-21 作者：
+ * 「你就不能把这些恢复默认值、撤销重做这些按钮的高度做得跟那个左右上下按钮一样吗」）。
+ *
+ * 那个分段控件的外高 = 24（内按钮）+ 2×2（圈）= **28**，所以这里也 28 ——
+ * 比编辑框那套 32 矮一点是**故意的**：这一屏底栏里站着一颗 28 的分段控件，
+ * 旁边放 32 的按钮，那一行就会像是"没对齐"。底栏总高仍由 `.foot` 的 min-height 钉住，
+ * 所以和编辑框那一屏的底栏框还是同一条高度线。
+ */
+.pill,
+.pillPrimary {
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pill {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+.pill:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.pillPrimary {
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.pillPrimary:hover:not(:disabled) {
+  filter: brightness(1.05);
+}
+
+/*
+ * 「恢复默认值」：**危险动作穿危险色**（2026-10-21 作者：「我的恢复默认值按钮颜色丢了，加回来」）。
+ * 换成 28px 那套胶囊时把红丢了 —— 它会把整份文件打回出厂，这一颗不能看着跟「关闭」一样。
+ * 仍然是 28px：颜色回来说的是"这动作危险"，不是"这颗更大"。
+ */
+.pillDanger {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+  color: var(--danger);
+}
+
+.pillDanger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+.pill:disabled,
+.pillPrimary:disabled {
+  opacity: 0.55;
+  cursor: default;
+  filter: none;
+}
+
+.layoutSwitch button {
+  height: 24px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.layoutSwitch button[data-on] {
+  background: var(--surface-solid);
+  color: var(--text-1);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+}
+
+/* 上下（统一视图）：一行一条，前面带 - / + / ~ */
+.rowU {
+  display: grid;
+  grid-template-columns: 18px 48px minmax(0, 1fr);
+  align-items: start;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.95);
+  line-height: 1.55;
+}
+
+.mark {
+  padding-left: 4px;
+  color: var(--text-3);
+  text-align: center;
+  user-select: none;
+}
+
+.rowU[data-kind='add'] .code {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.rowU[data-kind='del'] .code {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.rowU[data-kind='change'] .code {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+}
+
+/*
+ * 就地编辑那一行（**contentEditable 的 `<span>`，不是 `<input>`**）。
+ *
+ * ★★ 2026-10-21 作者三轮连着说：
+ *   「我点击了之后，我的文字是不是有上下一点点几个像素的移动」
+ *   「我右侧的绿色背景，你不要把它搞丢」
+ *   「你不用给它加什么框框啊，也不需要给它变背景呀，就一个光标出现在那不就可以了」
+ *
+ *   `<input>` 是替换元素 —— 字在它自己那套行盒里排，怎么算都会跟旁边的 `<span>` 差一两像素；
+ *   它的白底还会把这一行的红/绿/黄底整块盖掉。
+ *   换成 contentEditable 的 span 之后，它**就是原来那一行**：同一个 class、同一个行盒、
+ *   同一个 `line-height`、同一个内衬 —— 字不动，底色也不动。
+ *
+ *   所以这一条**只管光标**：不加框、不换底、不改字号 / 内衬 / 行高
+ *   （改任何一条，这一行就会和邻居不一样，或者把绿底盖掉）。
+ */
+.lineEdit {
+  /* ★ **`outline: none` 必须写**（2026-10-21 作者：「编辑模式下还是有框框」）：
+     把上一条自己的 `outline: 2px solid` 删掉之后，浏览器会回落到**它自己的 focus ring**
+     （`-webkit-focus-ring-color auto`，Windows 上就是那个 2px 黑框）。
+     "不加框"= 明说 `none`，不是"不写" —— 不写等于把画框的活交回给 UA。 */
+  outline: none;
+  caret-color: var(--text-1);
+  cursor: text;
+}
+
+/*
+ * 「恢复默认值」那颗（2026-10-21 作者：「悬停的时候我希望它有颜色，不是这个黑色的描边」）：
+ * `variant="danger"` 本体是红字红边，这里补 hover —— 淡红底 + 实红边，不再是"黑描边白底"。
+ */
+.restoreBtn:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+/* 只有**编辑模式**下右侧才可点：只读态是一个普通的只读视图（作者：「不想直接就能编辑」） */
+.code[data-editable] {
+  cursor: text;
+}
+
+/*
+ * 正文区：**方角**（作者 2026-10-21：「这些小圆角，不要吧」）。
+ *
+ * ★ 底边不画（2026-10-21 作者：「我明显的能看出它里面深一点……我感觉是因为里面有一条线」）：
+ *   这一块是撑满框身的，它的 1px 底边正好叠在底栏的 `border-top` 上 —— 两条线贴在一起
+ *   变成一条 2px 的深色带，看起来就是"底栏比编辑框那屏深一点/多一条边"。
+ *   底边框交给 `.foot` 那条，这里只画上、左、右。
+ */
+.diff {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: 0;
+  background: var(--surface-sunken);
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr) 48px minmax(0, 1fr);
+  align-items: start;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: calc(var(--fs-label) * 0.95);
+  line-height: 1.55;
+}
+
+.no {
+  padding: 0 6px;
+  color: var(--text-3);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.code {
+  padding: 0 10px;
+  overflow: hidden;
+  color: var(--text-1);
+  white-space: pre;
+  text-overflow: ellipsis;
+  /*
+   * ★ 字要能拖选、能复制（2026-10-21 作者：「我希望左边的原本的那个可以被我拖选了之后，
+   *   我可以复制」）。全局在 `body` 上关了 `user-select`（拖窗不选字），
+   *   这里是"要看要抄的内容"，显式放开 —— 标准与前缀两套都要写（WKWebView 的老坑，
+   *   见 `global.css` 里那段）。
+   */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 改过的一行：左红（它原本的样子）、右绿（现在） */
+.row[data-kind='change'] .code[data-side='left'],
+.row[data-kind='del'] .code[data-side='left'] {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+.row[data-kind='change'] .code[data-side='right'],
+.row[data-kind='add'] .code[data-side='right'] {
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+/* 只剩一侧的行：另一侧那一格留白（不要画成"空行改成了它"） */
+.row[data-kind='del'] .code[data-side='right'],
+.row[data-kind='add'] .code[data-side='left'] {
+  background: transparent;
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.dotOld,
+.dotNow {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.dotOld {
+  background: color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
+.dotNow {
+  margin-left: 10px;
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}

@@ -9,16 +9,16 @@
  * 3px 内衬）+ 选中段嵌白（--surface-solid + 8% 小阴影）。段 24px → 槽整体 32px。
  */
 
-/* 一条分段控件 = 校准页 .rail 同款：灰底槽 + 嵌白 */
+/* a02：分段槽胶囊轨道（灰底槽 + 嵌白） */
 .seg {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   flex-shrink: 0;
   min-width: 0;
   padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: var(--surface-sunken);
 }
 
@@ -32,9 +32,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 24px;
-  padding: 0 12px;
-  border-radius: calc(var(--r-sm) - 2px);
+  height: 26px;
+  /* a03：段内衬连续，窄窗渐进、不突变 */
+  padding: 0 clamp(12px, 1.5vw, 16px);
+  border-radius: 999px;
   font-size: var(--fs-body);
   color: var(--text-3);
   white-space: nowrap;
@@ -48,22 +49,41 @@
 .opt[data-on='true'] {
   background: var(--surface-solid);
   color: var(--text-1);
-  font-weight: 600;
-  /* 校准页 .tab[data-on] 同款的小阴影 —— 「嵌在槽里」的立体感 */
-  box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
+  /* 加粗改用描边（global.css 的铁律）——下面 `.optText` / `.optGhost` 那套
+     「隐形粗体副本」是同一件事的旧补丁，留着当双保险 */
+  text-shadow: var(--state-bold);
+  /* 嵌在胶囊槽里的白底浮起 */
+  box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
 }
 
-/* ---------- mini：段内衬收一档，只排版不改外观 ----------
- * 两条分段在 DOM 里本来就排最前（工具栏的头两个兄弟），mini 不需要 order：
- * MKP 档第一排是「类型 + 位置 + 搜索」、切片器档是「类型 + 位置 + 漏斗」——
- * 排位都由自然顺序与 PagePresets 的断行/order 管（搜索 order 6 落喷嘴那排）。
- * （曾经这里有 `.seg{order:1}/.segPush{order:2}`：那是给旧 Picker 档配套的，
- * Picker 退场后它们只剩副作用 —— 把分段挤到 pill / 台账后面去，已删。）
- * 段内衬收一档：窄窗上「类型+位置」差一点摆不下。
- */
-[data-density='mini'] .seg .opt {
-  padding: 0 9px;
+/* 深色（2026-10-12 第二遍）：浅色影在深底上看不见 —— "白底浮起"那点层次会丢，换黑影 */
+[data-theme='dark'] .opt[data-on='true'] {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
+
+/*
+ * 段文字恒宽（2026-10-10）：可见文字 + 隐形粗体副本同格叠放，
+ * 盒子取两者最大宽度 —— 点击选中（加粗）不再改变整条控件的宽度。
+ */
+.optText {
+  display: inline-grid;
+  grid-template-columns: min-content;
+  align-items: center;
+}
+
+.optText > * {
+  grid-area: 1 / 1;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+.optGhost {
+  font-weight: 600;
+  visibility: hidden;
+}
+
+/* a03：mini 段内衬覆盖删除（padding 已连续 clamp）。
+ * 分段在 DOM 里排最前，窄窗排位由 flex-wrap 自然处理。 */
 
 /*
  * 原生 radio 留着（键盘左右键、读屏的「第几项」全靠它），只把圆点藏掉 ——

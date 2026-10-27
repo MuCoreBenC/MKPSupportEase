@@ -1,13 +1,17 @@
 /*
  * 三轴偏移的状态机：已保存的一份 + 草稿。
  *
- * 保存走 `api.savePresetCalibration` —— 写进**「我的预设」**那一份的 TOML
+ * 保存走 `api.savePresetCalibration` —— 写进**「本地预设」**那一份的 TOML
  * （2026-10-08 资源库改判：偏移随「我的预设」走，`index/offsets.json` 那个孤岛退役）。
- * 没有你的一份（还没在资源库里「另存为我的预设」）时保存被拦（按钮灰着 + 这里第二道）。
+ * 没有你的一份（还没在资源库里「另存为本地预设」）时保存被拦（按钮灰着 + 这里第二道）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api'
+/* 「保存后的重切引导」共用开关（与参数页同一个键，决定存完弹不弹那一屏） */
+import { guidesEnabled } from '../guide/guidesPref'
+/* 校准落盘 = 本机文件面变了 ⇒ 广播，别的页（参数弹窗的 fileValues 那层）按代次重读 */
+import { deliveryMutated } from '../state/deliveryState'
 import { LADDER } from './plateLadder'
 import {
   matchXY,
@@ -17,7 +21,11 @@ import {
   type Axis,
   type AxisView,
 } from './calibAxes'
+import type { AxisLimits } from '../../api/contract'
 import type { PresetState } from './usePreset'
+
+/** 没取到预设时的范围：不设限（界面上输入框也就没有 min/max 可言） */
+const NO_LIMITS: AxisLimits = { x: {}, y: {}, z: {} }
 
 /**
  * 三轴偏移的那一套状态机：已保存的一份 + 板上点出来 / 手输出来的草稿。
@@ -29,6 +37,8 @@ import type { PresetState } from './usePreset'
 export interface Calibration {
   /** 已保存的那一份。null = 还没有基准（没选齐 / 正在取 / 失败） */
   saved: Axes | null
+  /** 三轴的注册表范围（`AxisLimits`；没取到预设时不设限） */
+  limits: AxisLimits
   /** 叠上草稿之后的那一份。没有基准时是 null */
   draft: Axes | null
   /** 数值位怎么显示：有值 / 正在取 / 没有 */
@@ -38,12 +48,21 @@ export interface Calibration {
   dirtyAxes: Axis[]
   /** 刚保存过（2.2 秒后自己消） */
   savedNote: boolean
+  /**
+   * **保存成功之后要不要问一句"回切片器重切"**（2026-10-15）。
+   *
+   * 与参数页那一格同一条理由：切片器那份参数里没有 MKP 这些字段，它不会知道
+   * XYZ 变了 —— 于是「切片」不给点。保存成功就问一次，关掉只是这一次的决定。
+   */
+  resliceAsk: boolean
+  /** 关掉那一句提问 */
+  dismissReslice: () => void
   /** 有基准才点得动板子 */
   canPick: boolean
   /**
    * 有「我那一份」才存得动（2026-10-08 资源库改判：校准值写进它，不落别处）。
    * `false` = 这个机型 / 版本还没有你的一份 —— 保存按钮灰着，
-   * 先去资源库把这份**另存为我的预设**。
+   * 先去资源库把这份**另存为本地预设**。
    */
   canSave: boolean
   /** Z 板上高亮的格子 */
@@ -82,22 +101,35 @@ export function useCalibration(preset: PresetState): Calibration {
    */
   const [typed, setTyped] = useState<Partial<Record<Axis, number>>>({})
   const [savedNote, setSavedNote] = useState(false)
+  /** 保存成功 ⇒ 问一句"要不要回切片器重切"（与参数页同一条理由） */
+  const [resliceAsk, setResliceAsk] = useState(false)
 
   /* 预设就位即新的真相：偏移换成它带来的那一份，草稿一并作废
      —— 草稿是"相对上一份预设点出来的增量"，换了预设就没有意义了。
-     没就位（没选齐 / 正在取 / 失败）就把值清掉：宁可显示「—」，不拿旧数字冒充 */
+     没就位（没选齐 / 正在取 / 失败）就把值清掉：宁可显示「—」，不拿旧数字冒充。
+     ★ 但"重读回来轴值没变"不算换基准（2026-10-20）：参数弹窗保存会触发这一支
+       重读（delivery 代次，见 usePreset 的 effect 依赖），轴值相同就不清草稿 ——
+       否则在参数页保存一次，这页没保存的校准草稿就被静默擦掉。 */
+  const lastAxesRef = useRef<Axes | null>(null)
   useEffect(() => {
     if (preset.status !== 'ready') {
+      lastAxesRef.current = null
       setSaved(null)
       setZPick(null)
       setXyPick({ x: null, y: null })
       setTyped({})
       return
     }
-    setSaved(preset.preset.axes)
-    setZPick(null)
-    setXyPick({ x: null, y: null })
-    setTyped({})
+    const next = preset.preset.axes
+    const cur = lastAxesRef.current
+    const same = cur !== null && cur.x === next.x && cur.y === next.y && cur.z === next.z
+    lastAxesRef.current = next
+    setSaved(next)
+    if (!same) {
+      setZPick(null)
+      setXyPick({ x: null, y: null })
+      setTyped({})
+    }
   }, [preset])
 
   /** 数值位怎么显示：有值 / 正在取 / 没有。整页只认这一个判断 */
@@ -108,6 +140,23 @@ export function useCalibration(preset: PresetState): Calibration {
         ? 'loading'
         : 'blank'
 
+  /*
+   * **注册表范围**（2026-10-20，作者：「校准的也要消费注册表的限制，z 就不能为负数」）：
+   * 与参数页同一套 min/max（`Preset.axisLimits`，来自 getMachineParams 的配方行）。
+   * 手输与板选的结果都按它夹 —— z 注册表是 [0, 20]，所以点了负刻度也落回 0。
+   */
+  const limits = preset.status === 'ready' ? preset.preset.axisLimits : NO_LIMITS
+  const clampAxis = useCallback(
+    (k: Axis, v: number): number => {
+      const l = limits[k]
+      let n = v
+      if (l.min !== undefined) n = Math.max(l.min, n)
+      if (l.max !== undefined) n = Math.min(l.max, n)
+      return Number(n.toFixed(2))
+    },
+    [limits],
+  )
+
   // 草稿有两条来源：板上点出来的增量、输入框里手输的绝对值（手输优先）
   const zDelta = zPick ? (Z_SPOT.get(zPick)?.value ?? 0) : 0
   const xDelta = xyPick.x ? (LADDER[xyPick.x]?.delta ?? 0) : 0
@@ -116,12 +165,12 @@ export function useCalibration(preset: PresetState): Calibration {
     () =>
       saved
         ? {
-            x: typed.x ?? saved.x + xDelta,
-            y: typed.y ?? saved.y + yDelta,
-            z: typed.z ?? saved.z + zDelta,
+            x: clampAxis('x', typed.x ?? saved.x + xDelta),
+            y: clampAxis('y', typed.y ?? saved.y + yDelta),
+            z: clampAxis('z', typed.z ?? saved.z + zDelta),
           }
         : null,
-    [saved, typed.x, typed.y, typed.z, xDelta, yDelta, zDelta],
+    [saved, typed.x, typed.y, typed.z, xDelta, yDelta, zDelta, clampAxis],
   )
 
   /*
@@ -180,8 +229,8 @@ export function useCalibration(preset: PresetState): Calibration {
   /* 没有基准值就没有"加多少"可言：点板子不产生草稿，免得出现「— → +0.20」这种半截读数 */
   const canPick = saved !== null
 
-  /* 有「我那一份」才存得动（见接口注释）—— 官方那份是模板，校准不落它 */
-  const canSave = preset.status === 'ready' && preset.preset.mine !== null
+  /* 有「本地那份」才存得动（见接口注释）—— 云端那份是模板，校准不落它 */
+  const canSave = preset.status === 'ready' && preset.preset.local !== null
 
   const pickZ = useCallback(
     (id: string) => {
@@ -212,11 +261,12 @@ export function useCalibration(preset: PresetState): Calibration {
       if (!canPick) return
       const v = Number(raw)
       if (raw.trim() === '' || !Number.isFinite(v)) return
-      setTyped((t) => ({ ...t, [k]: Number(v.toFixed(2)) }))
+      /* 手输也按注册表夹（作者 2026-10-20：「用户点击了负数会自动变成 0」） */
+      setTyped((t) => ({ ...t, [k]: clampAxis(k, v) }))
       if (k === 'z') setZPick(null)
       else setXyPick((prev) => ({ ...prev, [k]: null }))
     },
-    [canPick],
+    [canPick, clampAxis],
   )
 
   /** Esc：把这一轴退回"板上点出来 / 已保存"的值 */
@@ -235,23 +285,42 @@ export function useCalibration(preset: PresetState): Calibration {
   )
 
   /**
-   * 保存：把**全部草稿轴**写进已保存那一份，不分页，同时写回**「我的预设」**那一份。
+   * 保存：把**全部草稿轴**写进已保存那一份，不分页，同时写回**「本地预设」**那一份。
    *
    * 没有你的一份（还没在资源库里另存过）时不写：保存按钮本来就灰着，这里是第二道
-   * —— 官方那一份不可变，校准值不落别处。
+   * —— 云端那一份不可变，校准值不落别处。
    * 落盘的结果不等、不 catch：没接后端时 api 会抛 NotImplementedError 并在控制台点名，
    * 要的就是"哪个口子没接"看得见（见 src/api/index.ts）。
    */
   const commitAll = useCallback(() => {
     if (!draft) return
-    const copy = preset.status === 'ready' ? preset.preset.mine : null
+    const copy = preset.status === 'ready' ? preset.preset.local : null
     if (copy === null) return
     setSaved(draft)
+    lastAxesRef.current = draft
     setZPick(null)
     setXyPick({ x: null, y: null })
     setTyped({})
     setSavedNote(true)
-    void api.savePresetCalibration(copy.path, draft)
+    void api.savePresetCalibration(copy.path, draft).then(
+      /* 存下了 ⇒ 问一句"要不要回切片器重切"（切片器不会自己知道 XYZ 变了），
+         理由与参数页那一处同一条，见 `app/guide/ResliceNotice.tsx` 模块头。
+         ★ 只有共用开关开着（`guidesEnabled()`，与参数页同一个键）才问 —— 关过就不再打扰 */
+      () => {
+        /*
+         * 落盘成功 ⇒ 广播一声"文件面变了"（2026-10-20）：参数页「我那份文件里真实
+         * 写着的」那一层（`useParams` 的 fileValues）按代次重读 —— 不然校准存完，
+         * 参数弹窗还显示它打开时的旧值（作者实测：校准 -0.1 → 参数页改成 0，
+         * 校准页不知道；反向同样）。`deliveryState` 头注的规矩：写完就发。
+         */
+        deliveryMutated()
+        if (guidesEnabled()) setResliceAsk(true)
+      },
+      () => {
+        /* 保存失败什么都不做：`savedNote` 那条绿字与控制台已经说过了，
+           这里不叠第二句，更不该在这种时候还问重切 */
+      },
+    )
   }, [draft, preset])
 
   useEffect(() => {
@@ -262,11 +331,15 @@ export function useCalibration(preset: PresetState): Calibration {
 
   return {
     saved,
+    /** 三轴的注册表范围（输入框的 min/max 与滚轮步进夹取都按它） */
+    limits,
     draft,
     view,
     dirty,
     dirtyAxes,
     savedNote,
+    resliceAsk,
+    dismissReslice: () => setResliceAsk(false),
     canPick,
     canSave,
     zSelected,

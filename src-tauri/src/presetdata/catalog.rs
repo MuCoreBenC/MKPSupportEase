@@ -15,6 +15,8 @@
 //! 我没建模的字段（`[dimensions.calibration]` 那十来个标定点在这一轮就没建模），
 //! 以及原文的排版。前者是数据损坏，后者让 diff 变成一片红。
 
+use postprocess::diag::messages;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -34,6 +36,9 @@ use super::literal_str;
 pub struct Brand {
     pub id: String,
     pub name: String,
+    /// 英文显示名（2026-10-27 双语数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "nameEn")]
+    pub name_en: Option<String>,
     #[serde(default)]
     pub logo: Option<String>,
 }
@@ -47,12 +52,21 @@ pub struct Brand {
 pub struct MachineVersion {
     pub id: String,
     pub name: String,
+    /// 英文显示名（2026-10-27 双语数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
     #[serde(default)]
     pub recommended_bundle: Option<String>,
     #[serde(default)]
     pub tag: Option<String>,
+    /// 英文角标。空 = 回落 `tag`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_en: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// 英文说明。空 = 回落 `description`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_en: Option<String>,
     /// **备注**（客户端副标题用它）。可空；清空 = 删键。
     ///
     /// 2026-10-07 作者定：客户端预设列表的副标题不要路径、改显示这一句 ——
@@ -281,8 +295,9 @@ impl Dimensions {
         ];
         for (name, v) in nums {
             if !v.is_finite() {
-                return Err(AppError::invalid_argument(format!(
-                    "{name} 不是有限数（NaN / 无穷大不能写进 TOML）"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.catalog.227",
+                    &[("name", name)],
                 )));
             }
         }
@@ -290,9 +305,10 @@ impl Dimensions {
         // （clippy 也拦），而这里要的正是"必须是个正数，NaN 不算"
         let positive = |v: f64| v.is_finite() && v > 0.0;
         if !positive(self.bed_size.width) || !positive(self.bed_size.depth) {
-            return Err(AppError::invalid_argument(
-                "床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.228",
+                &[],
+            )));
         }
         Ok(())
     }
@@ -416,9 +432,15 @@ impl TrimmedDimensions {
 #[serde(rename_all = "camelCase")]
 pub enum VersionField {
     Name,
+    /// 英文显示名（2026-10-27 双语数据）。可空
+    NameEn,
     RecommendedBundle,
     Tag,
+    /// 英文角标。可空
+    TagEn,
     Description,
+    /// 英文说明。可空
+    DescriptionEn,
     /// **备注**（客户端副标题）。可空
     Remark,
     /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
@@ -429,10 +451,13 @@ impl VersionField {
     fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
+            Self::NameEn => "nameEn",
             Self::RecommendedBundle => "recommendedBundle",
             Self::Image => "image",
             Self::Tag => "tag",
+            Self::TagEn => "tagEn",
             Self::Description => "description",
+            Self::DescriptionEn => "descriptionEn",
             Self::Remark => "remark",
         }
     }
@@ -483,6 +508,8 @@ impl MachineField {
 pub enum BrandField {
     /// 显示名（对着人读的那个：`拓竹 (Bambu Lab)`）
     Name,
+    /// 英文显示名（2026-10-27 双语数据）。可空
+    NameEn,
     /// 品牌图 = **资产 id**（不是文件名）。清空 = 删键 —— 消费侧回落内置字标
     Logo,
 }
@@ -491,6 +518,7 @@ impl BrandField {
     fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
+            Self::NameEn => "nameEn",
             Self::Logo => "logo",
         }
     }
@@ -571,7 +599,10 @@ impl Machine {
     pub fn add_version(&mut self, id: &str, name: &str) -> Result<(), AppError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(AppError::invalid_argument("版本名称不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.229",
+                &[],
+            )));
         }
         let id = validate_new_version_id(self, id)?;
         Self::append_version(
@@ -580,6 +611,9 @@ impl Machine {
             &mut self.versions,
             &id,
             name,
+            None,
+            None,
+            None,
             None,
             None,
             None,
@@ -605,16 +639,27 @@ impl Machine {
     ) -> Result<(), AppError> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(AppError::invalid_argument("版本名称不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.230",
+                &[],
+            )));
         }
         let new_id = validate_new_version_id(self, new_id)?;
-        let bundle = self
+        let template = self
             .versions
             .iter()
             .find(|v| v.id == template_id)
-            .ok_or_else(|| AppError::not_found(format!("模板版本 {template_id} 不存在")))?
-            .recommended_bundle
-            .clone();
+            .ok_or_else(|| {
+                AppError::not_found(messages::text(
+                    "ui.presetdata.catalog.231",
+                    &[("template_id", template_id)],
+                ))
+            })?;
+        let bundle = template.recommended_bundle.clone();
+        /* 英文那三册也随复制走 —— 否则每复制一版就得重新译一遍（缺了也只是回落中文） */
+        let name_en = template.name_en.clone();
+        let tag_en = template.tag_en.clone();
+        let description_en = template.description_en.clone();
         Self::append_version(
             &mut self.doc,
             &self.file,
@@ -624,6 +669,9 @@ impl Machine {
             bundle,
             tag,
             description,
+            name_en.as_deref(),
+            tag_en.as_deref(),
+            description_en.as_deref(),
         )
     }
 
@@ -639,10 +687,22 @@ impl Machine {
         recommended_bundle: Option<String>,
         tag: Option<&str>,
         description: Option<&str>,
+        name_en: Option<&str>,
+        tag_en: Option<&str>,
+        description_en: Option<&str>,
     ) -> Result<(), AppError> {
         let mut t = toml_edit::Table::new();
         t["id"] = literal_str(id);
         t["name"] = literal_str(name);
+        if let Some(v) = name_en.filter(|s| !s.trim().is_empty()) {
+            t["nameEn"] = literal_str(v.trim());
+        }
+        if let Some(v) = tag_en.filter(|s| !s.trim().is_empty()) {
+            t["tagEn"] = literal_str(v.trim());
+        }
+        if let Some(v) = description_en.filter(|s| !s.trim().is_empty()) {
+            t["descriptionEn"] = literal_str(v.trim());
+        }
         if let Some(tag) = tag.filter(|s| !s.trim().is_empty()) {
             t["tag"] = literal_str(tag.trim());
         }
@@ -660,22 +720,28 @@ impl Machine {
                 toml_edit::ArrayOfTables::new(),
             ));
         let arr = entry.as_array_of_tables_mut().ok_or_else(|| {
-            AppError::corrupted(format!("{} 的 versions 不是表数组", file.display()))
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.232",
+                &[("v1", &file.display().to_string())],
+            ))
         })?;
         arr.push(t);
 
         versions.push(MachineVersion {
             id: id.to_owned(),
             name: name.to_owned(),
+            name_en: name_en.map(str::to_owned),
             recommended_bundle,
             tag: tag
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            tag_en: tag_en.map(str::to_owned),
             description: description
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            description_en: description_en.map(str::to_owned),
             // 新建版本不写备注 —— 客户端副标题空了回落路径文本
             remark: None,
             // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
@@ -704,7 +770,12 @@ impl Machine {
             .versions
             .iter()
             .position(|v| v.id == id)
-            .ok_or_else(|| AppError::not_found(format!("{} 里没有叫 {id} 的版本", self.id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text(
+                    "ui.presetdata.catalog.233",
+                    &[("v1", &self.id.to_string()), ("id", id)],
+                ))
+            })?;
 
         let file = self.file.display().to_string();
         let mem = self.versions.len();
@@ -712,13 +783,22 @@ impl Machine {
             .doc
             .get_mut("versions")
             .and_then(toml_edit::Item::as_array_of_tables_mut)
-            .ok_or_else(|| AppError::corrupted(format!("{file} 的 versions 不是表数组")))?;
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.234",
+                    &[("file", &file.to_string())],
+                ))
+            })?;
         // 文件里的顺序与 `self.versions` 一致（两者来自同一次解析），所以下标通用。
         // 不在 arr 里按 id 再找一遍是刻意的：两处各查一次就有两个答案的可能
         if at >= arr.len() {
-            return Err(AppError::corrupted(format!(
-                "{file} 的版本数与文件对不上（内存 {mem} 条，文件 {} 条）",
-                arr.len()
+            return Err(AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.235",
+                &[
+                    ("file", &file.to_string()),
+                    ("mem", &mem.to_string()),
+                    ("v1", &arr.len().to_string()),
+                ],
             )));
         }
         arr.remove(at);
@@ -747,15 +827,23 @@ impl Machine {
             .versions
             .iter()
             .position(|v| v.id == version)
-            .ok_or_else(|| AppError::not_found(format!("{} 里没有叫 {version} 的版本", self.id)))?;
+            .ok_or_else(|| {
+                AppError::not_found(messages::text(
+                    "ui.presetdata.catalog.236",
+                    &[("v1", &self.id.to_string()), ("version", version)],
+                ))
+            })?;
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
-            return Err(AppError::invalid_argument(format!(
-                "{} 不能清空",
-                match field {
-                    VersionField::Name => "版本名称",
-                    _ => field.key(),
-                }
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.237",
+                &[(
+                    "v1",
+                    match field {
+                        VersionField::Name => "版本名称",
+                        _ => field.key(),
+                    },
+                )],
             )));
         }
 
@@ -764,10 +852,18 @@ impl Machine {
             .doc
             .get_mut("versions")
             .and_then(toml_edit::Item::as_array_of_tables_mut)
-            .ok_or_else(|| AppError::corrupted(format!("{file} 的 versions 不是表数组")))?;
-        let t = arr
-            .get_mut(at)
-            .ok_or_else(|| AppError::corrupted(format!("{file} 的版本数与文件对不上")))?;
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.238",
+                    &[("file", &file.to_string())],
+                ))
+            })?;
+        let t = arr.get_mut(at).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.239",
+                &[("file", &file.to_string())],
+            ))
+        })?;
         match val {
             Some(s) => t[field.key()] = literal_str(s),
             None => {
@@ -779,9 +875,12 @@ impl Machine {
         let owned = val.map(str::to_owned);
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
+            VersionField::NameEn => v.name_en = owned,
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
+            VersionField::TagEn => v.tag_en = owned,
             VersionField::Description => v.description = owned,
+            VersionField::DescriptionEn => v.description_en = owned,
             VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
         }
@@ -833,13 +932,16 @@ impl Machine {
     pub fn set_field(&mut self, field: MachineField, value: Option<&str>) -> Result<(), AppError> {
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
-            return Err(AppError::invalid_argument(format!(
-                "{} 不能清空",
-                match field {
-                    MachineField::Display => "显示名",
-                    MachineField::Brand => "品牌",
-                    _ => field.key(),
-                }
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.240",
+                &[(
+                    "v1",
+                    match field {
+                        MachineField::Display => "显示名",
+                        MachineField::Brand => "品牌",
+                        _ => field.key(),
+                    },
+                )],
             )));
         }
         match val {
@@ -923,7 +1025,9 @@ impl Catalog {
         self.brands
             .iter_mut()
             .find(|b| b.id.eq_ignore_ascii_case(&want))
-            .ok_or_else(|| AppError::not_found(format!("没有品牌 {id}")))
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.catalog.241", &[("id", id)]))
+            })
     }
 
     /// 改品牌的一格。`None` = 删键（同 [`Machine::set_field`]）。
@@ -938,12 +1042,16 @@ impl Catalog {
     ) -> Result<(), AppError> {
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
-            return Err(AppError::invalid_argument(format!(
-                "{} 不能清空",
-                match field {
-                    BrandField::Name => "显示名",
-                    BrandField::Logo => "品牌图",
-                }
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.242",
+                &[(
+                    "v1",
+                    match field {
+                        BrandField::Name => "显示名",
+                        BrandField::Logo => "品牌图",
+                        BrandField::NameEn => field.key(),
+                    },
+                )],
             )));
         }
         // 文档面：按 id 找到那一段 `[[brands]]`（与值面同一条匹配规则）
@@ -951,7 +1059,7 @@ impl Catalog {
             .brands_doc
             .get_mut("brands")
             .and_then(toml_edit::Item::as_array_of_tables_mut)
-            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+            .ok_or_else(|| AppError::corrupted(messages::text("ui.presetdata.catalog.243", &[])))?;
         let t = arr
             .iter_mut()
             .find(|t| {
@@ -959,7 +1067,9 @@ impl Catalog {
                     .and_then(|i| i.as_str())
                     .is_some_and(|s| s.eq_ignore_ascii_case(id.trim()))
             })
-            .ok_or_else(|| AppError::corrupted(format!("brands.toml 里找不到品牌 {id}")))?;
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text("ui.presetdata.catalog.244", &[("id", id)]))
+            })?;
         match val {
             Some(s) => t[field.key()] = literal_str(s),
             None => {
@@ -971,6 +1081,7 @@ impl Catalog {
         let b = self.brand_mut(id)?;
         match field {
             BrandField::Name => b.name = owned.unwrap_or_default(),
+            BrandField::NameEn => b.name_en = owned,
             BrandField::Logo => b.logo = owned,
         }
         Ok(())
@@ -986,14 +1097,21 @@ impl Catalog {
         let id = id.trim();
         let name = name.trim();
         if id.is_empty() {
-            return Err(AppError::invalid_argument("品牌 id 不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.245",
+                &[],
+            )));
         }
         if name.is_empty() {
-            return Err(AppError::invalid_argument("显示名不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.246",
+                &[],
+            )));
         }
         if self.brand(id).is_some() {
-            return Err(AppError::invalid_argument(format!(
-                "已经有一个叫 {id} 的品牌"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.247",
+                &[("id", id)],
             )));
         }
         // 文档面：`brands` 段可能整段不存在（一份空文件 / 新仓库）
@@ -1009,7 +1127,7 @@ impl Catalog {
             .brands_doc
             .get_mut("brands")
             .and_then(toml_edit::Item::as_array_of_tables_mut)
-            .ok_or_else(|| AppError::corrupted("brands.toml 的 brands 不是表数组"))?;
+            .ok_or_else(|| AppError::corrupted(messages::text("ui.presetdata.catalog.248", &[])))?;
         let mut t = toml_edit::Table::new();
         t["id"] = literal_str(id);
         t["name"] = literal_str(name);
@@ -1018,6 +1136,7 @@ impl Catalog {
         self.brands.push(Brand {
             id: id.to_owned(),
             name: name.to_owned(),
+            name_en: None,
             logo: None,
         });
         Ok(())
@@ -1047,7 +1166,9 @@ impl Catalog {
         self.machines
             .iter_mut()
             .find(|m| m.id == id)
-            .ok_or_else(|| AppError::not_found(format!("没有机型 {id}")))
+            .ok_or_else(|| {
+                AppError::not_found(messages::text("ui.presetdata.catalog.249", &[("id", id)]))
+            })
     }
 
     pub fn zones(&self, machine_id: &str) -> Option<&[Zone]> {
@@ -1075,8 +1196,12 @@ impl Catalog {
     ///
     /// 目录不存在时**先建目录**（第一次给某台机器画禁区就是这个场景）。
     pub fn set_zones(&mut self, machine_id: &str, zones: Vec<Zone>) -> Result<(), AppError> {
-        self.machine(machine_id)
-            .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?;
+        self.machine(machine_id).ok_or_else(|| {
+            AppError::not_found(messages::text(
+                "ui.presetdata.catalog.250",
+                &[("machine_id", machine_id)],
+            ))
+        })?;
         let at = self
             .root
             .join("forbidden_zones")
@@ -1087,9 +1212,11 @@ impl Catalog {
                 // 本来就没有这个文件 = 已经达到了想要的状态（幂等）
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
                 Err(e) => {
-                    return Err(
-                        AppError::io(format!("删不掉 {}", at.display())).with_detail(e.to_string())
-                    )
+                    return Err(AppError::io(messages::text(
+                        "ui.presetdata.catalog.251",
+                        &[("v1", &at.display().to_string())],
+                    ))
+                    .with_detail(e.to_string()))
                 }
             }
             self.zones.remove(machine_id);
@@ -1100,7 +1227,11 @@ impl Catalog {
         let doc = zones_doc(old.as_deref(), &zones);
         if let Some(dir) = at.parent() {
             std::fs::create_dir_all(dir).map_err(|e| {
-                AppError::io(format!("建不出 {}", dir.display())).with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.presetdata.catalog.252",
+                    &[("v1", &dir.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
         }
         atomic_write(&at, doc.as_bytes())?;
@@ -1120,9 +1251,9 @@ impl Catalog {
     /// 把一台机型写回它自己的文件。原子写（同目录临时文件 + rename）——
     /// 半个文件的 TOML 比没有更糟
     pub fn write_machine(&self, id: &str) -> Result<(), AppError> {
-        let m = self
-            .machine(id)
-            .ok_or_else(|| AppError::not_found(format!("没有机型 {id}")))?;
+        let m = self.machine(id).ok_or_else(|| {
+            AppError::not_found(messages::text("ui.presetdata.catalog.253", &[("id", id)]))
+        })?;
         atomic_write(m.file(), m.to_toml().as_bytes())
     }
 
@@ -1148,13 +1279,22 @@ impl Catalog {
         let brand = brand.trim();
         let display = display.trim();
         if id.is_empty() {
-            return Err(AppError::invalid_argument("机型 ID 不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.254",
+                &[],
+            )));
         }
         if display.is_empty() {
-            return Err(AppError::invalid_argument("显示名不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.255",
+                &[],
+            )));
         }
         if brand.is_empty() {
-            return Err(AppError::invalid_argument("品牌不能为空"));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.256",
+                &[],
+            )));
         }
         // ID 直接变成文件名，所以字符集限死 —— 放宽的话一个带 `/` 或空格的 ID
         // 会在建文件那一步才炸，而那时已经离现场很远
@@ -1162,13 +1302,15 @@ impl Catalog {
             .chars()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
         {
-            return Err(AppError::invalid_argument(
-                "机型 ID 只能用大写字母、数字和下划线（它会直接变成文件名）",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.257",
+                &[],
+            )));
         }
         if self.machine(id).is_some() {
-            return Err(AppError::invalid_argument(format!(
-                "已经有一台叫 {id} 的机型"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.258",
+                &[("id", id)],
             )));
         }
         if let Some(owner) = self
@@ -1176,15 +1318,19 @@ impl Catalog {
             .iter()
             .find(|m| m.external_aliases.iter().any(|a| a == id))
         {
-            return Err(AppError::invalid_argument(format!(
-                "{id} 已经是 {} 的外部别名了，换一个 —— 否则按 ID 找机型会有两个答案",
-                owner.id
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.259",
+                &[("id", id), ("v1", &owner.id.to_string())],
             )));
         }
 
         let dir = self.root.join("machines");
         std::fs::create_dir_all(&dir).map_err(|e| {
-            AppError::internal(format!("建不出 {}", dir.display())).with_detail(e.to_string())
+            AppError::internal(messages::text(
+                "ui.presetdata.catalog.260",
+                &[("v1", &dir.display().to_string())],
+            ))
+            .with_detail(e.to_string())
         })?;
         let file = dir.join(format!("{id}.toml"));
 
@@ -1195,13 +1341,15 @@ impl Catalog {
         // "写盘只经一处"的两条闸门之一。这里要的语义恰好是 `create_new`：
         // **不可能截断已有文件**，那正是禁列允许的那一类
         std::fs::File::create_new(&file).map_err(|e| match e.kind() {
-            std::io::ErrorKind::AlreadyExists => AppError::invalid_argument(format!(
-                "{} 已经存在了。**没有覆盖它** —— 如果那是一台你想改的机型，去左边选它",
-                file.display()
+            std::io::ErrorKind::AlreadyExists => AppError::invalid_argument(messages::text(
+                "ui.presetdata.catalog.261",
+                &[("v1", &file.display().to_string())],
             )),
-            _ => {
-                AppError::internal(format!("建不出 {}", file.display())).with_detail(e.to_string())
-            }
+            _ => AppError::internal(messages::text(
+                "ui.presetdata.catalog.262",
+                &[("v1", &file.display().to_string())],
+            ))
+            .with_detail(e.to_string()),
         })?;
 
         let mut doc = DocumentMut::new();
@@ -1260,6 +1408,11 @@ fn load_brands(path: &Path) -> Result<(Vec<Brand>, DocumentMut), AppError> {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_owned(),
+                name_en: t
+                    .get("nameEn")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .filter(|s| !s.is_empty()),
                 logo: t
                     .get("logo")
                     .and_then(|v| v.as_str())
@@ -1276,20 +1429,25 @@ fn load_brands(path: &Path) -> Result<(Vec<Brand>, DocumentMut), AppError> {
 fn validate_new_version_id(m: &Machine, id: &str) -> Result<String, AppError> {
     let id = id.trim();
     if id.is_empty() {
-        return Err(AppError::invalid_argument("版本 ID 不能为空"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.catalog.263",
+            &[],
+        )));
     }
     // 放宽的话，一个带空格或中文的 ID 会在生成 TOML 那一步才炸，那时离现场很远了
     if !id
         .chars()
         .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
     {
-        return Err(AppError::invalid_argument(
-            "版本 ID 只能用大写字母、数字和下划线",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.catalog.264",
+            &[],
+        )));
     }
     if m.versions.iter().any(|v| v.id == id) {
-        return Err(AppError::invalid_argument(format!(
-            "这台机型已经有一个叫 {id} 的版本了"
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.presetdata.catalog.265",
+            &[("id", id)],
         )));
     }
     Ok(id.to_owned())
@@ -1310,8 +1468,9 @@ fn check_unique_ids(machines: &[(String, Vec<String>)]) -> Result<(), AppError> 
     for (id, versions) in machines {
         let lower = id.to_lowercase();
         if let Some(prev) = seen.insert(lower, id.clone()) {
-            return Err(AppError::corrupted(format!(
-                "机型 id 撞了：{prev} 与 {id}（仅大小写不同）"
+            return Err(AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.266",
+                &[("prev", &prev.to_string()), ("id", &id.to_string())],
             ))
             .with_detail(
                 "id 是主键，且大小写不敏感 —— 撞了的话「按 id 查」的结果取决于谁排在前面，\
@@ -1325,8 +1484,13 @@ fn check_unique_ids(machines: &[(String, Vec<String>)]) -> Result<(), AppError> 
         for v in versions {
             let vl = v.to_lowercase();
             if let Some(prev) = versions_seen.insert(vl, v.clone()) {
-                return Err(AppError::corrupted(format!(
-                    "机型 {id} 的版本 id 撞了：{prev} 与 {v}（仅大小写不同）"
+                return Err(AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.267",
+                    &[
+                        ("id", &id.to_string()),
+                        ("prev", &prev.to_string()),
+                        ("v", &v.to_string()),
+                    ],
                 ))
                 .with_detail(
                     "版本 id 在机型内唯一，且大小写不敏感（doc §9）：\
@@ -1342,7 +1506,11 @@ fn check_unique_ids(machines: &[(String, Vec<String>)]) -> Result<(), AppError> 
 fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
     let mut out = Vec::new();
     let entries = std::fs::read_dir(dir).map_err(|e| {
-        AppError::not_found(format!("读不到机型目录 {}", dir.display())).with_detail(e.to_string())
+        AppError::not_found(messages::text(
+            "ui.presetdata.catalog.268",
+            &[("v1", &dir.display().to_string())],
+        ))
+        .with_detail(e.to_string())
     })?;
     // 收集再排序：`read_dir` 的顺序是文件系统说的，不稳定。
     // 机型顺序会直接进界面，必须是确定的
@@ -1360,8 +1528,14 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
             .and_then(|v| v.as_str())
             .map(str::to_owned)
             .ok_or_else(|| {
-                AppError::corrupted(format!("{} 里没有 id", file.display()))
-                    .with_detail("机型文件的第一行就该是 id = '...'".to_owned())
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.269",
+                    &[("v1", &file.display().to_string())],
+                ))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.catalog.why_machine_first_line",
+                    &[],
+                ))
             })?;
         let s = |k: &str| {
             doc.get(k)
@@ -1384,9 +1558,12 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                         Some(MachineVersion {
                             id: t.get("id")?.as_str()?.to_owned(),
                             name: g("name").unwrap_or_default(),
+                            name_en: g("nameEn"),
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
+                            tag_en: g("tagEn"),
                             description: g("description"),
+                            description_en: g("descriptionEn"),
                             remark: g("remark"),
                             image: g("image"),
                         })
@@ -1440,16 +1617,23 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
 /// 读一格数字。TOML 里 `10.0` 是 float、`10` 是 integer，**两种写法都要认** ——
 /// 上游手写时两种都出现过，只认 float 的话一个 `maxZ = 999` 就会让整台机型读不出来
 fn dim_num(t: &toml_edit::Table, k: &str, file: &Path, ctx: &str) -> Result<f64, AppError> {
-    let v = t
-        .get(k)
-        .ok_or_else(|| AppError::corrupted(format!("{} 的 [{ctx}] 缺了 {k}", file.display())))?;
+    let v = t.get(k).ok_or_else(|| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.catalog.270",
+            &[("v1", &file.display().to_string()), ("ctx", ctx), ("k", k)],
+        ))
+    })?;
     v.as_float()
         .or_else(|| v.as_integer().map(|i| i as f64))
         .ok_or_else(|| {
-            AppError::corrupted(format!(
-                "{} 的 [{ctx}].{k} 不是数字：{}",
-                file.display(),
-                v.to_string().trim()
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.271",
+                &[
+                    ("v1", &file.display().to_string()),
+                    ("ctx", ctx),
+                    ("k", k),
+                    ("v2", v.to_string().trim()),
+                ],
             ))
         })
 }
@@ -1468,9 +1652,9 @@ fn load_dimensions(doc: &DocumentMut, file: &Path) -> Result<Option<Dimensions>,
     };
     let sub = |name: &str| -> Result<&toml_edit::Table, AppError> {
         d.get(name).and_then(|i| i.as_table()).ok_or_else(|| {
-            AppError::corrupted(format!(
-                "{} 的 [dimensions] 缺了 {name} 子表",
-                file.display()
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.272",
+                &[("v1", &file.display().to_string()), ("name", name)],
             ))
             .with_detail(
                 "[dimensions] 是全有或全无：半张与「这台没配尺寸」在界面上长得一样，\
@@ -1524,18 +1708,18 @@ fn load_dimensions(doc: &DocumentMut, file: &Path) -> Result<Option<Dimensions>,
                 .and_then(|v| v.as_str())
                 .map(str::to_owned)
                 .ok_or_else(|| {
-                    AppError::corrupted(format!(
-                        "{} 的 [dimensions.flags].gcodeMarker 不是字符串",
-                        file.display()
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.catalog.273",
+                        &[("v1", &file.display().to_string())],
                     ))
                 })?,
             has_second_fan: flags
                 .get("hasSecondFan")
                 .and_then(|v| v.as_bool())
                 .ok_or_else(|| {
-                    AppError::corrupted(format!(
-                        "{} 的 [dimensions.flags].hasSecondFan 不是布尔值",
-                        file.display()
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.catalog.274",
+                        &[("v1", &file.display().to_string())],
                     ))
                 })?,
         },
@@ -1649,13 +1833,24 @@ fn load_plates(dir: &Path) -> Result<BTreeMap<String, Plate>, AppError> {
             .map(str::to_owned)
             .filter(|v| !v.is_empty())
             .ok_or_else(|| {
-                AppError::corrupted(format!("{} 里没有 id", file.display()))
-                    .with_detail("板文件的第一行就该是 id = '...'".to_owned())
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.275",
+                    &[("v1", &file.display().to_string())],
+                ))
+                .with_detail(::postprocess::diag::messages::text(
+                    "ui.presetdata.catalog.why_plate_first_line",
+                    &[],
+                ))
             })?;
         let num = |k: &str| -> Result<f64, AppError> {
             doc.get(k)
                 .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-                .ok_or_else(|| AppError::corrupted(format!("{} 缺了数字 {k}", file.display())))
+                .ok_or_else(|| {
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.catalog.276",
+                        &[("v1", &file.display().to_string()), ("k", k)],
+                    ))
+                })
         };
         let s = |k: &str| {
             doc.get(k)
@@ -1663,16 +1858,21 @@ fn load_plates(dir: &Path) -> Result<BTreeMap<String, Plate>, AppError> {
                 .map(str::to_owned)
                 .filter(|v| !v.is_empty())
         };
-        let frame = doc
-            .get("frame")
-            .and_then(|i| i.as_table())
-            .ok_or_else(|| AppError::corrupted(format!("{} 缺了 [frame]", file.display())))?;
+        let frame = doc.get("frame").and_then(|i| i.as_table()).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.277",
+                &[("v1", &file.display().to_string())],
+            ))
+        })?;
         let fnum = |k: &str| -> Result<f64, AppError> {
             frame
                 .get(k)
                 .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
                 .ok_or_else(|| {
-                    AppError::corrupted(format!("{} 的 [frame] 缺了数字 {k}", file.display()))
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.catalog.278",
+                        &[("v1", &file.display().to_string()), ("k", k)],
+                    ))
                 })
         };
         let plate = Plate {
@@ -1686,17 +1886,28 @@ fn load_plates(dir: &Path) -> Result<BTreeMap<String, Plate>, AppError> {
                 w: fnum("w")?,
                 h: fnum("h")?,
             },
-            body_path: s("bodyPath")
-                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 bodyPath", file.display())))?,
-            path: s("path")
-                .ok_or_else(|| AppError::corrupted(format!("{} 缺了 path", file.display())))?,
+            body_path: s("bodyPath").ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.279",
+                    &[("v1", &file.display().to_string())],
+                ))
+            })?,
+            path: s("path").ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.catalog.280",
+                    &[("v1", &file.display().to_string())],
+                ))
+            })?,
         };
         if out.insert(id.clone(), plate).is_some() {
-            return Err(
-                AppError::corrupted(format!("板 id 重复：{id}")).with_detail(
-                    "两块板用了同一个 id —— plateIds 引用会指到哪一块就不确定了".to_owned(),
-                ),
-            );
+            return Err(AppError::corrupted(messages::text(
+                "ui.presetdata.catalog.281",
+                &[("id", &id.to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.presetdata.catalog.why_plate_dup",
+                &[],
+            )));
         }
     }
     Ok(out)
@@ -2462,7 +2673,7 @@ mod tests {
         let cases = [
             "标准版",        // 中文，能用单引号
             "A1 fast",       // 带空格
-            "it's mine",     // **含单引号 → 必须退回双引号**
+            "it's local",    // **含单引号 → 必须退回双引号**
             "line1\nline2",  // 含换行 → 退回双引号
             "tab\there",     // 控制字符
             "quote\"inside", // 含双引号，但能用单引号
@@ -2740,7 +2951,7 @@ mod tests {
 
         c.machine_mut("A1")
             .unwrap()
-            .add_version("TEST_NEW", "我的新版本")
+            .add_version("TEST_NEW", "本地新版本")
             .expect("加得上");
         c.write_machine("A1").expect("写回");
 
@@ -2750,7 +2961,7 @@ mod tests {
         assert_eq!(m.versions.len(), before_ids.len() + 1);
         let v = m.versions.last().unwrap();
         assert_eq!(v.id, "TEST_NEW");
-        assert_eq!(v.name, "我的新版本");
+        assert_eq!(v.name, "本地新版本");
         // 三个可选字段**留空不写**，不是写成空串
         assert!(v.recommended_bundle.is_none() && v.tag.is_none() && v.description.is_none());
 
@@ -2772,7 +2983,7 @@ mod tests {
             inserted.contains("TEST_NEW"),
             "插入段不含新 id：{inserted:?}"
         );
-        assert!(inserted.contains("我的新版本"));
+        assert!(inserted.contains("本地新版本"));
     }
 
     /// 四条拒绝路径。**每一条都要有自己的话**，不能都回一句「参数不对」

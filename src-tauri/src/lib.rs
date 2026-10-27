@@ -15,7 +15,29 @@ pub mod archive;
 /// **参数分流**：切片器（BambuStudio）带 `--Toml/--Gcode` 调我们时走钩子，否则开界面
 /// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
 pub mod args;
+/// **屏幕引导的取数口**（macOS）：读切片器窗口与「板子类型」控件的屏幕坐标。
+/// **只读** —— 箭头怎么画是界面的事，这里只回答"在哪"。
+/// 为什么用 Accessibility 而不是固定偏移、以及那条实测判据，都写在模块头里。
+pub mod ax;
+/// **切片器窗口的跟随信号**（macOS）：注册 AX 通知（移动 / 缩放 / 最小化 /
+/// 还原 / 换最前窗），切片器自己 push 过来 —— **不起定时器**。
+/// 卡片该不该露脸、该挪到哪，由 [`ipc::guide::sync`] 收到通知后重算。
+///
+/// ★ 只有 macOS 有这一份（`#![cfg(target_os = "macos")]`）；别的平台编译期就
+/// 没有这个模块，调用点因此要用 `cfg` 挡一下（见 `ipc::guide`）。
+#[cfg(target_os = "macos")]
+pub mod ax_watch;
 pub mod chrome;
+/// **开发台的故障档位表**（2026-10-19）：给某一个 API 方法装一条错，客户端里所有走
+/// 这个方法的界面从此真的报错。**无条件编译** —— 造错发生在客户端进程里（工作台那条
+/// loopback 只过一个 id），而客户端是普通构建；正式包里没有命令发得进来，这张表恒不被问到。
+pub mod devfault;
+/// **开发台的演出脚本**（`hook-sim` 假钩子与开发台共用一份）。
+///
+/// ★ 2026-10-14 起**不再门在 workbench 档**：演出发生在**客户端进程**
+/// （工作台那档没有客户端窗口，只能发一条 `dev-scene` 让客户端演，见模块头）。
+/// 它**不是产品行为**：客户端侧唯一入口是那条通道消息（真钩子从不发它）。
+pub mod devsim;
 pub mod error;
 pub mod fsx;
 /// **后处理钩子**：切片器导出 G-code 时调的那一次 —— 预设 → IR → 12 步管线（原地覆盖），
@@ -29,6 +51,8 @@ pub mod hook_ui;
 pub mod ipc;
 /// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
 pub mod legacy;
+/// 系统通知（2026-10-17）：设置页「处理完成发送系统通知」那一格的真实现。
+pub mod notify;
 pub mod obs;
 /// 预设数据的**纯读写与解析核心**：机型目录 / 资产 / 套餐 / 字段定义 / 界面布局，
 /// 加上三层取值。[`presetdata::Presets::load_from`] 只要一个根。
@@ -41,16 +65,38 @@ pub mod obs;
 ///
 /// 与 [`ipc`] 的关系：`ipc` 是客户端命令面（什么能调），这一层是数据面（怎么读）——
 /// 命令面挂在 `ipc` 上，解析逻辑住在这里，工作台也直接用它。
+/// **我是被谁拉起来的**（2026-10-20）：后处理钩子是被**那一趟切片的 Bambu Studio**
+/// 拉起来的 ⇒ 父进程号 = "最后处理用的是哪个切片器"的唯一不靠猜的答案。
+/// 记进执行记录（`archive::Meta::slicer_pid`），引导层据此认"我刚才切的那一份"。
+pub mod parent;
 pub mod presetdata;
+/// **执行记录的自动清理**：设置页那个开关打开时，按「条数 + 空间」双限静默清掉
+/// `gcode_history` 里最旧的记录（**最新那条永远不删** —— 不按日历天数清，
+/// 停用多久都不会把用户最后一次的记录带走）。见 [`retention`] 模块头。
+pub mod retention;
 /// **新数据世界**：随包 catalog 的释放口 + 说明书 / 交付文件的落点规则
 /// （落点 = `catalog.path`，见 [`runtime::paths`]）。
 /// 客户端首屏（九条预设读命令）从这里出数 —— 首屏唯一数据源 = catalog
 /// （docs/DATA-ARCHITECTURE.md 判据 4；旧世界 `client/` 的 include_str! 铺盘已退役）。
 pub mod runtime;
+/// **切片器窗口的跟随信号**（Windows）：细定时回读（700ms 一次本地窗口列表查询 +
+/// 键比较，没变就返回）—— macOS 是"AX 推送 + 兜底回读"，这里没有等价的轻量推送，
+/// 直接用同一频率的回读当唯一信号（为什么这不算"频繁的轮询"，见模块头）。
+///
+/// ★ 只有 Windows 有这一份（`#![cfg(target_os = "windows")]`）；调用点要用
+/// `cfg` 挡一下（见 `ipc::guide`）。
+#[cfg(target_os = "windows")]
+pub mod win_watch;
+/// **切片器窗口被谁盖住了**：问 CoreGraphics 的窗口列表（**按层序从前往后**）。
+/// 用来判"别的软件压上来了 ⇒ 卡片该收起来" —— 用**层级**而不是 AX 的"焦点"。
+/// ★ 底下的窗口列表 API：macOS 是 CoreGraphics，Windows 是 `EnumWindows` 的 z 序
+/// （`mod mac` / `mod win` 在文件里各自 cfg）；其它平台 `slicer_window` 恒 `None`，
+/// 调用点见 `ipc::guide`。
+pub mod zorder;
 
 // 工作台（B03）。**默认构建里下面这一行不成立**，所以 `src/workbench/` 整个子树连编译
 // 都不会被碰，给用户的二进制里搜不到任何 `wb_` 命令。
-// 见 .comate/specs/b03-backstage-workbench/doc.md §4
+// 设计来源见 git 历史（旧 spec：.comate/specs/b03-backstage-workbench/doc.md §4，2026-10-11 删）
 //
 // （这里刻意用行注释：块注释在 Rust 里是可嵌套的，正文里出现 `/` 加 `*` 会开一个新注释，
 // 而路径通配写法很容易写出那两个字符。）
@@ -91,6 +137,12 @@ pub fn run() {
                 Ok(root) => {
                     obs::tracing::init_tracing(&root.join("logs"));
                     tracing::info!(root = %root.display(), "内部数据根就位");
+                    /* 界面语言先落地：后端这一侧的话术（`messages::text`）从这一句起
+                    才跟界面同一种语言。读不出来就按"跟随系统"（`apply_lang(None)`），
+                    不挡启动 —— 一句英文/中文不该让程序起不来 */
+                    runtime::app_state::apply_lang(
+                        runtime::app_state::locale(&root).ok().flatten(),
+                    );
                     match fsx::paths::user_root(&handle) {
                         Ok(user) => tracing::info!(root = %user.display(), "用户数据根就位"),
                         Err(e) => tracing::warn!("用户数据根建不出来：{e}"),
@@ -122,7 +174,43 @@ pub fn run() {
             #[cfg(not(feature = "workbench"))]
             if let Some(win) = app.get_webview_window("main") {
                 chrome::install_unified_toolbar(&win);
-                chrome::apply_native_corners(&win);
+                /* 圆角、以及**圆角外面那一圈的填色**。填色的深浅要按"用户选的那一档"算
+                （`resolved_dark`：档位是"跟随系统"时才问原生外观）—— 直接读 webview 的
+                `effectiveAppearance` 只会得到系统深浅，作者那台是"档位深色 + 系统浅色"，
+                那样读会画错。 */
+                let dark = ipc::prefs::resolved_dark(ipc::prefs::theme_pref(app.handle()), &win);
+                chrome::apply_native_corners(&win, dark);
+                /* 红绿灯：装了统一工具栏之后 AppKit 摆的是 (26,26) 那组默认坐标，
+                我们用 Auto Layout 约束钉到作者要的位置（2026-10-17 起 —— 补摆 frame
+                的老路在拖窗过程中一帧错一下，约束是布局的一部分，没有这个问题）。 */
+                chrome::reposition_traffic_lights(&win);
+                /* 上次是窄窗就还摆成窄窗、置顶档也照盘上那一格落（2026-10-17）。
+                ★ 摆在装饰装好之后：搬窗会触发 `Resized`，那一下要重钉红绿灯 */
+                ipc::window_layout::restore_at_startup(app.handle());
+                /* 两个重钉时机：① 档位是"跟随系统"时系统深浅变了；
+                ② 尺寸变了（拉窗 / 进出全屏）—— 进出全屏 AppKit 可能整棵标题栏视图树
+                重建，按钮换新对象时要在它们身上重新钉约束（平时这些调用都是空转） */
+                let watcher = win.clone();
+                win.on_window_event(move |event| match event {
+                    tauri::WindowEvent::ThemeChanged(_) => {
+                        let pref = ipc::prefs::theme_pref(watcher.app_handle());
+                        chrome::repaint_corner_fill(
+                            &watcher,
+                            ipc::prefs::resolved_dark(pref, &watcher),
+                        );
+                        chrome::reposition_traffic_lights(&watcher);
+                    }
+                    tauri::WindowEvent::Resized(_) => {
+                        chrome::reposition_traffic_lights(&watcher);
+                        /* 「上一次手动摆放」的记账点（2026-10-17）。事件这侧只补一个代数，
+                        判定与落盘在 400ms 之后由后台线程做（见 `ipc::window_layout`） */
+                        ipc::window_layout::touch_geometry(watcher.app_handle());
+                    }
+                    tauri::WindowEvent::Moved(_) => {
+                        ipc::window_layout::touch_geometry(watcher.app_handle());
+                    }
+                    _ => {}
+                });
             } else {
                 eprintln!("[setup] 找不到 main 窗口，跳过窗口外观");
             }
@@ -156,7 +244,21 @@ pub fn run() {
                     Some(listener) => {
                         let view = for_setup.clone();
                         let to_ui = handle.clone();
-                        let writer = listener.serve(move |msg| view.apply(&to_ui, msg));
+                        let writer = listener.serve(move |msg| {
+                            /* 开发台的演出指令（工作台发的）与真钩子的消息**分流**：
+                            它要在后台线程里按节奏演，不能堵住收消息这一段 */
+                            match msg {
+                                hook_ipc::FromHook::DevScene { scene } => {
+                                    view.run_preview(&to_ui, &scene);
+                                }
+                                /* 开发台 · 故障注入（2026-10-19）：让后端失一次真 ——
+                                客户端自己按 id 造那条错，emit 给前端的拦截表 */
+                                hook_ipc::FromHook::DevFault { fault } => {
+                                    view.run_fault(&to_ui, fault.as_deref());
+                                }
+                                other => view.apply(&to_ui, other),
+                            }
+                        });
                         for_setup.attach_writer(writer);
                         tracing::info!(root = %root.display(), "后处理通道已就位");
                     }
@@ -164,6 +266,22 @@ pub fn run() {
                 },
                 Err(e) => tracing::warn!("后处理通道没摆起来（这一侧不显示进度）：{e}"),
             }
+
+            /*
+             * 执行记录的自动清理（2026-10-13「设置里加一个自动清理开关」那一刀）：
+             * 这一趟只**起个头** —— 走后台线程，不与首屏抢那一下盘（走一遍目录 + 数
+             * 几个文件大小是毫秒级的事，但"启动该快的绝对不慢"这条不给例外）。
+             * 开关读不出来 / 清理失败都只写日志，用户侧完全静默（见 `crate::retention`）。
+             *
+             * ★ 摆在整个 setup 的**末尾**（而不是"用户根就位"那一处）：上面这些步骤里
+             * 有会动**数据根 / 模式**的动作（工作台那个沙箱开关就在上面），清理要按
+             * **最终的**那一棵树去算 —— 摆早了，哪天有人真把根接上，这里就会清错树。
+             *
+             * 每次后处理跑完那一趟不在这一侧：切片器拉起的钩子进程自己清
+             * （`hook::run_with_channel` 里那个调用点）—— 界面可能开在别的页面、甚至没开。
+             */
+            let clean_handle = handle.clone();
+            std::thread::spawn(move || crate::retention::prune_if_enabled_app(&clean_handle));
 
             Ok(())
         })
@@ -185,12 +303,24 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
-        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
-        ipc::get_post_process_exe,
+        // 「跟随系统默认」到底是哪个应用：去问系统（macOS LaunchServices / Windows 注册表）
+        ipc::get_system_slicer_app,
+        // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
+        ipc::open_default_app_settings,
+        // 「自动化」授权被拒后的反悔入口：把用户送到系统设置那一页（macOS）
+        ipc::open_automation_settings,
+        // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
+        ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
-        ipc::postprocess::answer_post_process_mismatch,
+        ipc::postprocess::reset_post_process_state,
+        ipc::postprocess::answer_post_process,
+        ipc::postprocess::replay_post_process_question,
+        ipc::postprocess::replay_post_process_run,
+        // 工艺页「本机工艺」那一档：读本机 BBS 目录（只读；见 `ipc/bbs.rs`）
+        ipc::bbs::get_bbs_presets,
+        ipc::bbs::read_bbs_preset,
         // 预设页（A41）的真后端。读客户端自己的数据根（`appDataDir/presets`）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,
@@ -199,40 +329,68 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
-        ipc::mine::get_user_preset_files,
-        ipc::mine::read_user_preset_text,
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-local）
+        ipc::local::get_local_preset_files,
+        ipc::local::read_local_preset_text,
         // 备注覆盖账 + 改归属（客户端副标题 / 复制出来的那份标机型版本）
-        ipc::mine::get_preset_remarks,
-        ipc::mine::set_preset_remark,
-        ipc::mine::set_user_preset_machine_version,
-        // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
-        ipc::mine::begin_preset_edit,
-        ipc::mine::patch_preset_draft,
-        ipc::mine::put_preset_draft,
-        ipc::mine::discard_preset_draft,
-        ipc::mine::commit_preset_draft,
+        ipc::local::get_preset_remarks,
+        ipc::local::set_preset_remark,
+        ipc::local::set_local_preset_machine_version,
+        // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
+        ipc::local::begin_preset_edit,
+        ipc::local::patch_preset_draft,
+        ipc::local::patch_preset_draft_batch,
+        ipc::local::check_preset_text,
+        ipc::local::put_preset_draft,
+        ipc::local::discard_preset_draft,
+        ipc::local::commit_preset_draft,
+        // 冷启动接回草稿层：后端只存正文，"改了哪几项"要从正文与来源比出来
+        ipc::local::read_preset_draft_changes,
+        // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
+        ipc::local::begin_text_edit,
+        ipc::local::put_text_draft,
+        ipc::local::commit_text_draft,
+        ipc::local::discard_text_draft,
+        ipc::local::get_preset_draft_summary,
+        // 「恢复默认值」（编辑文件那颗）读的原文镜像
+        ipc::local::read_local_origin_text,
+        // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
+        ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
-        ipc::mine::rename_user_preset,
-        ipc::mine::delete_user_preset,
+        ipc::local::rename_local_preset,
+        ipc::local::delete_local_preset,
         // 第十三层：文件外部管理（在 Finder / 资源管理器里选中这一份）
-        ipc::mine::reveal_in_folder,
-        // 第十一层：另存为一份新的（我的文件 → 我的文件，字节复制）
-        ipc::mine::copy_user_preset,
+        ipc::local::reveal_in_folder,
+        // 第十一层：另存为一份新的（本地文件 → 本地文件，字节复制）
+        ipc::local::copy_local_preset,
         // 找「我那一份」+ 把校准值写进它（2026-10-08 资源库改判）
-        ipc::mine::get_user_copy_for,
-        ipc::mine::save_preset_calibration,
-        // 对比台 + 官方版本账（2026-10-08）：只在**用户自己的预设**之间对比
-        ipc::preset_baseline::get_official_versions,
+        ipc::local::get_local_copy_for,
+        ipc::local::save_preset_calibration,
+        // 备份与恢复（2026-10-17）：设置页 —— 打一份 zip / 从一份 zip 全量恢复
+        ipc::backup::create_backup,
+        ipc::backup::restore_backup,
+        // 修改历史（2026-10-17）：一份文件一本账，盘上留着
+        ipc::history::get_preset_history,
+        ipc::history::put_preset_history,
+        ipc::history::clear_preset_history,
+        // 「哪份预设用得最多」的本机学习账（2026-10-17）：只读；写入在"应用预设"那一步
+        ipc::usage::get_preset_usage,
+        // 对比台 + 云端版本账（2026-10-08）：只在**用户自己的预设**之间对比
+        ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
-        // 逐参数「官方更新」（2026-10-09）：读三方账 / 落采用·保持的决定
+        // 逐参数「云端更新」（2026-10-09）：读三方账 / 落采用·保持的决定
         ipc::param_sync::get_preset_param_sync,
         ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（看落点 / 提交；Preset 只是第一个消费者）
         ipc::import::stage_import,
         ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
+        /* 打开两个落点所在的文件夹（2026-10-13）：我们那份（下载区 `assets/bbs/…`）
+        + 切片器目录里那份（`user/<账号>/process/…`）—— 这两处不是一个地方，
+        界面上要能分别打开 */
+        ipc::presets::reveal_delivered_file,
+        ipc::presets::reveal_slicer_file,
         // 切片器的「生效」= 复制进切片器自己的用户配置目录（2026-10-09 接通）
         ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
@@ -241,15 +399,19 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::download_runtime_file,
         ipc::catalog::download_runtime_files,
         ipc::catalog::read_downloaded_text,
-        // 「复制链接」：与下载管道同一个寻址出口算出来的官方 URL
+        // 「复制链接」：与下载管道同一个寻址出口算出来的云端 URL
         ipc::catalog::get_file_url,
-        // 报告页：后处理执行报告与历史（gcode_history 的真账，只读）
+        // 报告页：后处理执行报告与历史（读 gcode_history 的真账 + 一处导出写）
         ipc::report::get_report_list,
         ipc::report::get_report_detail,
+        ipc::report::get_report_export_plan,
+        ipc::report::export_report_archive,
+        // 导出之后那颗「打开位置」：打开系统文件管理器，落在**后端自己算出来的**那个目录
+        ipc::report::reveal_report_export,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
-        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::fetch_official_preset,
+        // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
+        ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -267,6 +429,38 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
+        // 界面偏好（2026-10-12 深色模式那一刀）：主题（浅 / 深 / 跟随系统）——
+        // 落 AppState 的 theme 格，读一次写一次，不联网
+        ipc::prefs::get_theme,
+        ipc::prefs::set_theme,
+        ipc::prefs::get_locale,
+        ipc::prefs::set_locale,
+        // 窗口外观（2026-10-22）：原生背景色 = 界面底（`--bg-2` 由前端报上来）——
+        // 治 macOS 拖拽 resize 露白边（WebKit#323132，见 `ipc::prefs::set_window_backdrop`）
+        ipc::prefs::set_window_backdrop,
+        // 界面偏好第二格（2026-10-13）：执行记录的自动清理开关 ——
+        // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
+        ipc::prefs::get_auto_clean_history,
+        ipc::prefs::set_auto_clean_history,
+        // 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」——
+        // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
+        ipc::prefs::get_copies_follow_cloud,
+        ipc::prefs::set_copies_follow_cloud,
+        ipc::prefs::get_postproc_prefs,
+        ipc::app::open_preset_folder,
+        ipc::app::uninstall,
+        ipc::prefs::set_postproc_prefs,
+        // 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗。落 AppState 的
+        // pin / compact / lastWindowBox 三格；窗口几何的副作用只在 `ipc::window_layout`
+        ipc::window_layout::get_window_prefs,
+        ipc::window_layout::set_pin,
+        ipc::window_layout::apply_pin,
+        ipc::window_layout::set_compact,
+        // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
+        // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
+        ipc::guide::locate_bed_type_control,
+        ipc::guide::guide_show,
+        ipc::guide::guide_close,
         // ★ **应用内更新 + 打开外链**（第五刀）—— 2026-10-09 补进客户端清单：
         // 这七条原来只在工作台那份里，正式客户端点「检查更新 / 下载安装」全落到
         // NOT_IMPLEMENTED（X-01）。与下面那份清单一字不差。
@@ -286,12 +480,24 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
     b.invoke_handler(tauri::generate_handler![
         ipc::get_calib_models,
         ipc::open_model,
-        // 「复制后处理脚本」里那段可执行物路径：就是本程序自己（`current_exe()`）
-        ipc::get_post_process_exe,
+        // 「跟随系统默认」到底是哪个应用：去问系统（macOS LaunchServices / Windows 注册表）
+        ipc::get_system_slicer_app,
+        // 「去系统里改默认应用」：我们不替用户改，只把他送到系统那一处
+        ipc::open_default_app_settings,
+        // 「自动化」授权被拒后的反悔入口：把用户送到系统设置那一页（macOS）
+        ipc::open_automation_settings,
+        // 「复制后处理脚本」那一整条命令：两段真值（本程序自己 + 预设真实落点）现拼
+        ipc::get_post_process_command,
         // 钩子那一趟的三条（切片器导出时）：看进度 / 停 / 答机型不匹配那一问
         ipc::postprocess::get_post_process_run,
         ipc::postprocess::cancel_post_process,
-        ipc::postprocess::answer_post_process_mismatch,
+        ipc::postprocess::reset_post_process_state,
+        ipc::postprocess::answer_post_process,
+        ipc::postprocess::replay_post_process_question,
+        ipc::postprocess::replay_post_process_run,
+        // 工艺页「本机工艺」那一档：读本机 BBS 目录（与上面那份清单一字不差）
+        ipc::bbs::get_bbs_presets,
+        ipc::bbs::read_bbs_preset,
         // 客户端命令：**两份清单一字不差**（漏一份就是「原生机能用、工作台构建不能用」）
         ipc::presets::get_machines,
         ipc::presets::get_version_files,
@@ -300,41 +506,67 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_param_meta,
         ipc::presets::get_machine_params,
         ipc::presets::get_local_files,
-        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-mine）
-        ipc::mine::get_user_preset_files,
-        ipc::mine::read_user_preset_text,
+        // 用户线（用户自己的预设，住 <appDataDir>/user/presets-local）
+        ipc::local::get_local_preset_files,
+        ipc::local::read_local_preset_text,
         // 备注覆盖账 + 改归属（与上面那份清单一字不差 —— 2026-10-09 对齐：这三条
         // 原来只在客户端那份里，工作台构建里发它们会落到 NOT_IMPLEMENTED）
-        ipc::mine::get_preset_remarks,
-        ipc::mine::set_preset_remark,
-        ipc::mine::set_user_preset_machine_version,
-        // 临时编辑那条链：把官方正文复制进临时文件 → 改 → 另存成用户文件
-        ipc::mine::begin_preset_edit,
-        ipc::mine::patch_preset_draft,
-        ipc::mine::put_preset_draft,
-        ipc::mine::discard_preset_draft,
-        ipc::mine::commit_preset_draft,
+        ipc::local::get_preset_remarks,
+        ipc::local::set_preset_remark,
+        ipc::local::set_local_preset_machine_version,
+        // 临时编辑那条链：把云端正文复制进临时文件 → 改 → 另存成用户文件
+        ipc::local::begin_preset_edit,
+        ipc::local::patch_preset_draft,
+        ipc::local::patch_preset_draft_batch,
+        ipc::local::check_preset_text,
+        ipc::local::put_preset_draft,
+        ipc::local::discard_preset_draft,
+        ipc::local::commit_preset_draft,
+        // 冷启动接回草稿层：后端只存正文，"改了哪几项"要从正文与来源比出来
+        ipc::local::read_preset_draft_changes,
+        // 「编辑文件」那条链（2026-10-10：与上面参数草稿分开存，两侧互相作废）
+        ipc::local::begin_text_edit,
+        ipc::local::put_text_draft,
+        ipc::local::commit_text_draft,
+        ipc::local::discard_text_draft,
+        ipc::local::get_preset_draft_summary,
+        // 「恢复默认值」（编辑文件那颗）读的原文镜像
+        ipc::local::read_local_origin_text,
+        // 身份账本（预设页判「我这边有没有一份跟云端对得上」的唯一依据）
+        ipc::local::get_local_preset_index,
         // 第十层：用户文件管理（与上面那份清单一字不差）
-        ipc::mine::rename_user_preset,
-        ipc::mine::delete_user_preset,
+        ipc::local::rename_local_preset,
+        ipc::local::delete_local_preset,
         // 第十三层：文件外部管理（与上面那份清单一字不差）
-        ipc::mine::reveal_in_folder,
+        ipc::local::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）
-        ipc::mine::copy_user_preset,
-        // 找「我那一份」+ 把校准值写进它（与上面那份清单一字不差）
-        ipc::mine::get_user_copy_for,
-        ipc::mine::save_preset_calibration,
-        // 对比台 + 官方版本账（与上面那份清单一字不差）
-        ipc::preset_baseline::get_official_versions,
+        ipc::local::copy_local_preset,
+        // 找「本地那份」+ 把校准值写进它（与上面那份清单一字不差）
+        ipc::local::get_local_copy_for,
+        ipc::local::save_preset_calibration,
+        // 备份与恢复（与上面那份清单一字不差）
+        ipc::backup::create_backup,
+        ipc::backup::restore_backup,
+        // 修改历史（与上面那份清单一字不差）
+        ipc::history::get_preset_history,
+        ipc::history::put_preset_history,
+        ipc::history::clear_preset_history,
+        // 学习账（与上面那份清单一字不差）
+        ipc::usage::get_preset_usage,
+        // 对比台 + 云端版本账（与上面那份清单一字不差）
+        ipc::preset_baseline::get_cloud_versions,
         ipc::preset_params::read_preset_params,
         ipc::preset_params::save_preset_params,
-        // 逐参数「官方更新」（与上面那份清单一字不差）
+        // 逐参数「云端更新」（与上面那份清单一字不差）
         ipc::param_sync::get_preset_param_sync,
         ipc::param_sync::apply_preset_param_decisions,
         // 第十二层：通用导入入口（与上面那份清单一字不差）
         ipc::import::stage_import,
         ipc::import::commit_import,
         ipc::presets::get_slicer_copied,
+        // 打开两个落点所在的文件夹（与上面那份清单一字不差）
+        ipc::presets::reveal_delivered_file,
+        ipc::presets::reveal_slicer_file,
         // 切片器的「生效」= 复制进切片器自己的用户配置目录（与上面那份清单一字不差）
         ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
@@ -348,10 +580,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 报告页（与上面那份清单一字不差）
         ipc::report::get_report_list,
         ipc::report::get_report_detail,
+        ipc::report::get_report_export_plan,
+        ipc::report::export_report_archive,
+        ipc::report::reveal_report_export,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
-        // 资源库那一条路（2026-10-08 改判）：官方预设「使用」= 按需取回 + 写成当前使用
-        ipc::catalog::fetch_official_preset,
+        // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
+        ipc::catalog::fetch_cloud_preset,
         ipc::catalog::clear_active_preset,
         ipc::catalog::get_stale_files,
         // 这一份我们认得出是哪一版吗（第 6 层：SHA 报警）
@@ -369,6 +604,33 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::catalog::get_preset_source,
         ipc::catalog::set_preset_source,
         ipc::catalog::clear_preset_source,
+        // 界面偏好（2026-10-12）：主题 —— 与客户端那份清单一字不差
+        ipc::prefs::get_theme,
+        ipc::prefs::set_theme,
+        ipc::prefs::get_locale,
+        ipc::prefs::set_locale,
+        // 窗口外观（2026-10-22）：与客户端那份清单一字不差
+        ipc::prefs::set_window_backdrop,
+        // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
+        ipc::prefs::get_auto_clean_history,
+        ipc::prefs::set_auto_clean_history,
+        // 预设页偏好（2026-10-20）：与上面那份清单一字不差
+        ipc::prefs::get_copies_follow_cloud,
+        ipc::prefs::set_copies_follow_cloud,
+        ipc::prefs::get_postproc_prefs,
+        ipc::app::open_preset_folder,
+        ipc::app::uninstall,
+        ipc::prefs::set_postproc_prefs,
+        // 主窗怎么摆（2026-10-17）：与上面那份清单一字不差
+        ipc::window_layout::get_window_prefs,
+        ipc::window_layout::set_pin,
+        ipc::window_layout::apply_pin,
+        ipc::window_layout::set_compact,
+        // 屏幕引导（2026-10-15）：改了参数之后，把"回切片器换一下板子类型"那一步
+        // **指给用户看**。只读切片器窗口与控件的屏幕坐标，不替用户点、不改任何参数。
+        ipc::guide::locate_bed_type_control,
+        ipc::guide::guide_show,
+        ipc::guide::guide_close,
         // 工作台（doc §6 的新契约）。**配方内容的写只有 wb_apply_draft 一条** ——
         // 其余全是读、查（只读推演）、或一件明确的事（`wb_set_bootstrap` 是单值配置写，
         // 不进制 draft 体系——见 app/mod.rs 那条命令的注释）。
@@ -377,6 +639,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_open,
         app::wb_boot,
         app::wb_reload,
+        app::wb_presets_changed,
         app::wb_set_bootstrap,
         app::wb_book,
         app::wb_registry,
@@ -412,6 +675,18 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::assets::wb_reveal_asset,
         app::assets::wb_remove_asset,
         app::assets::wb_set_asset_delivery,
+        app::assets::wb_set_calibration_identity,
+        // 「分组」（2026-10-16）：哪几张图共用同一份标注源稿 —— 登记在台账 `[[groups]]`，
+        // 即时落盘、回一份新清单。作者要的是"像台账那样的管理器"，不是靠文件名算
+        app::assets::wb_set_group,
+        app::assets::wb_remove_group,
+        // 「标注台」（2026-10-16）：图上那些框的**源稿** —— 与图同层、随仓库走、不进交付目录。
+        // 前端只给资产 id，落点由后端从台账派生（读不到 = 还没拖过，合法，不是错误）
+        app::annotation::wb_anno_read,
+        app::annotation::wb_anno_write,
+        // 「生成预览」：按**当前视角**烘一张成品图**只回字节、一个盘都不写** ——
+        // 相当于"拍一张照不存相册"（作者 2026-10-16）。确认满意了再 `wb_anno_write` 存进去。
+        app::annotation::wb_anno_render,
         // 「套餐管理」：`presets/bundles.toml` 是套餐唯一真源（Task 13.6）。
         // P4 起：读视图带指向关系（一版一套）+ 换文件清单（即时落盘，不走参数草稿）；
         // 2026-10-03 起新建 / 编辑（改 id 连带重指机型文件）/ 复制 / 删除（被指着整次拒绝）
@@ -425,7 +700,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付残留（b05 Task 13.4/13.5）：查询清单 + 显式清理（进 .trash 回收）
         app::build::wb_dist_strays,
         app::build::wb_clean_dist_strays,
-        // 交付文件清单（2026-10-07）：「发布预设」卡看这次都会写出哪些文件 + 看某一份的原文
+        // 交付文件清单（2026-10-07）：「交付预设」卡看这次都会写出哪些文件 + 看某一份的原文
         app::build::wb_delivery_files,
         app::build::wb_delivery_file,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
@@ -511,6 +786,28 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::sandbox::wb_sandbox_set,
         app::sandbox::wb_sandbox_refill,
         app::sandbox::wb_sandbox_wipe,
+        // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
+        // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
+        // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。
+        app::devsim::wb_dev_devsim_scenes,
+        app::devsim::wb_dev_trigger,
+        // **开发台 · 故障注入**（2026-10-19）：给某个 API 方法装一条错 ——
+        // 客户端里所有走这个方法的界面从此真的报错（真组件 / 真按钮 / 真错误码）。
+        // 同一条 loopback、同一个"客户端没开就如实报"的口径（见 `app::devfault` 模块头）。
+        app::devfault::wb_dev_faults,
+        app::devfault::wb_dev_fault_arm,
+        app::devfault::wb_dev_fault_clear,
+        // **开发台 · 运行真实后处理**（2026-10-19）：起一个**真的钩子子进程**跑真 G-code
+        // （`--Toml` + `--Gcode`，与切片器注册的那一行同形）⇒ 客户端窗口显示的是真进度、
+        // 真问句、真结论，那几颗真业务按钮也真的能停。**不加协议变体、不改产品逻辑**
+        // （见 `app::devreal` 模块头）。
+        app::devreal::wb_dev_run_real,
+        // **开发台 · 真实后处理测试矩阵**（2026-10-19）：六档各跑一个独立临时根，
+        // 串行、只按真凭据判定。问句档 / 取消档要人在客户端窗口真操作。
+        app::devmatrix::wb_dev_matrix_cases,
+        app::devmatrix::wb_dev_matrix_state,
+        app::devmatrix::wb_dev_matrix_start,
+        app::devmatrix::wb_dev_matrix_clear,
     ])
 }
 
@@ -523,7 +820,7 @@ mod command_list_parity {
     //!
     //! - `ipc::update::*` 七条只在工作台那份里 ⇒ 正式客户端的「检查更新 / 下载安装」
     //!   全落到 `NOT_IMPLEMENTED`（审计 X-01，2026-10-09 修）；
-    //! - `ipc::mine::set_user_preset_machine_version` 等三条只在客户端那份里
+    //! - `ipc::local::set_local_preset_machine_version` 等三条只在客户端那份里
     //!   （审计 X-08 的同一个病）。
     //!
     //! 所以这里扫**本文件源码**（与 `fsx::paths` 那条"用户根不碰 Documents"同一路数）：

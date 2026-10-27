@@ -92,6 +92,42 @@ pub fn strip_mark_lines(bytes: &[u8]) -> Vec<u8> {
         .into_bytes()
 }
 
+/// 剔除「换笔块」（`;Pre-glue preparation` → `;Glueing Started` 之前）后再比对。
+///
+/// 2026-10-20 起这一段是**有意偏离**来源实现的（见
+/// `docs/GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`）：原来把去切笔位的横移写成
+/// `G1 X.. Z{层顶+1.0}` 的 XY+Z 斜插（喷嘴从零净空起步、贴面滑行 120mm），
+/// 装好笔又落回 `last+offset_z+3.0`（笔尖净空只剩 2.8mm），高层会撞倒模型。
+/// 改成「先抬后走 + 与收笔同一净空」后，该段的结构与 Z 值必然与参考物不同。
+///
+/// 与 [`strip_mark_lines`] 同一条纪律：**判据侧只有这一份实现**。剔除整段而不是
+/// 用本侧输出覆盖参考物 —— 覆盖等于把整链判据变成自比自（2026-09-12 踩过）。
+/// 剔除后仍能证明「换笔段之外的所有输出逐字节一致」；换笔段本身由
+/// `tests/travel_clearance.rs`（净空不等式）与 G1/G2 golden（逐字节）分别守着。
+///
+/// 行尾风格原样保留（`split_inclusive`，与 [`strip_mark_lines`] 同一个理由）。
+pub fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_end();
+        if !skipping && t == ";Pre-glue preparation" {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if t == ";Glueing Started" {
+                skipping = false;
+                out.push_str(line);
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out.into_bytes()
+}
+
 /// 落盘前的收尾。**必须是最后一道行变换** —— STATS 数的就是落盘的那份，
 /// `STATS_MATCH` 靠这个保证。
 ///

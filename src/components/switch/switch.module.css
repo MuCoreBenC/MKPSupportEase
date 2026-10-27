@@ -1,0 +1,62 @@
+/*
+ * 圆钮开关的样子（`Switch.tsx`）。尺寸与配色**只在这里**，调用方不覆盖。
+ *
+ * ★ 全局有 `button { white-space: nowrap }` 那一条（胶囊按钮要它），
+ *   这颗按钮里根本没有文字，不影响；但 `min-width` 要给死，
+ *   否则在某些 flex 行里会被压扁。
+ *
+ * ★★ 没有 `transition`：WKWebView 不播 CSS 动画（项目铁律）。
+ *   切换是"换一个颜色"，不加过渡反而更准。
+ */
+
+.track {
+  position: relative;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+  min-width: 36px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-sunken);
+  cursor: pointer;
+  /* 钮的定位靠它（.knob 是 absolute） */
+  display: block;
+}
+
+/* 开：实心印刷机绿。深浅两套的 `--accent` 都是那支绿，所以这里一条就够 */
+.on {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+/* 钮：白圆点。关态贴左 2px，开态贴右 2px —— 用 left 而不是 transform，
+   因为 transform 位移在部分环境里会被合成层"补一下过渡"，这里要的是瞬移 */
+.knob {
+  position: absolute;
+  top: 50%;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  margin-top: -7px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 18%);
+}
+
+.on .knob {
+  left: auto;
+  right: 2px;
+}
+
+/* 禁用：整颗降透明度 + 不许点。仍然画得出"开 / 关"，只是不许动 */
+.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 焦点环：走全站那一套（键盘才亮，鼠标点不亮） */
+.track:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

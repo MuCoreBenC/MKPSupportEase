@@ -33,6 +33,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
 import { modalShortcutGate } from './components/modal'
+import { editQueue, settleAll } from './editQueue'
 import { useDensity } from './useDensity'
 import {
   isAppError,
@@ -57,9 +58,12 @@ import MachinesPage from './views/MachinesPage'
 import ParamsPage from './views/ParamsPage'
 import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
+import AnnotatePage from './views/AnnotatePage'
 import BuildPage from './views/BuildPage'
 import SettingsPage from './views/SettingsPage'
+import DevPage from './views/DevPage'
 import s from './c14.module.css'
+import { pageActions } from './pageActions'
 
 /**
  * 一级导航。前五页是 C14 定稿的顺序 —— C14 把矩阵并进了参数台的对照模式
@@ -111,18 +115,6 @@ const NAV: NavItem[] = [
       </>
     ),
   },
-  /* 盾牌 + 勾：检查 → 生成 → 发布按顺序走的一页（C14 合并了发布中心） */
-  {
-    id: 'build',
-    label: '生成与发布',
-    badge: 'build',
-    icon: (
-      <>
-        <path d="M12 3l8 3.5v6c0 4.2-3.4 7.4-8 8.5-4.6-1.1-8-4.3-8-8.5v-6z" />
-        <path d="m9 12 2.2 2.2L15.5 10" />
-      </>
-    ),
-  },
   /* 一张图 = 素材文件 */
   {
     id: 'assets',
@@ -131,6 +123,31 @@ const NAV: NavItem[] = [
       <>
         <rect x="3.5" y="5" width="17" height="14" rx="1.5" />
         <path d="m3.5 15.5 4.2-4.2 3 3 3.8-3.8 6 5.5" />
+      </>
+    ),
+  },
+  /* 四角框 + 中间一块选中 = 在图上拖框 */
+  {
+    id: 'annotate',
+    label: '标注台',
+    icon: (
+      <>
+        <path d="M4 8.5V6.5A2.5 2.5 0 0 1 6.5 4h2M15.5 4h2A2.5 2.5 0 0 1 20 6.5v2M20 15.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M8.5 20h-2A2.5 2.5 0 0 1 4 17.5v-2" />
+        <rect x="9" y="9" width="6" height="6" rx="1" />
+      </>
+    ),
+  },
+  /* 盾牌 + 勾：检查 → 生成 → 发布按顺序走的一页（C14 合并了发布中心）。
+     2026-10-19：作者把它挪到资产库 / 标注台之后、设置之前 —— 日常是"改数据"，
+     生成发布是最后一站；跟设置那种低频页挨着更顺。 */
+  {
+    id: 'build',
+    label: '生成与发布',
+    badge: 'build',
+    icon: (
+      <>
+        <path d="M12 3l8 3.5v6c0 4.2-3.4 7.4-8 8.5-4.6-1.1-8-4.3-8-8.5v-6z" />
+        <path d="m9 12 2.2 2.2L15.5 10" />
       </>
     ),
   },
@@ -145,9 +162,30 @@ const NAV: NavItem[] = [
       </>
     ),
   },
+  /* 扳手 = 开发台（把看不见的那几屏做成按钮；只在 workbench 构建里存在） */
+  {
+    id: 'dev',
+    label: '开发台',
+    icon: (
+      <>
+        <path d="M14.7 6.3a3.5 3.5 0 0 0 4.6 4.6l-1.9-1.9 1.4-1.4 1.9 1.9a3.5 3.5 0 0 1-4.6-4.6z" />
+        <path d="M14.7 6.3 4.5 16.5a1.5 1.5 0 0 0 2.1 2.1L17 8.4" />
+      </>
+    ),
+  },
 ]
 
 type NavId = NavItem['id']
+
+/**
+ * **走参数草稿的那几页**（页头那套「已保存 / 放弃 / 保存」的老语义属于它们）。
+ *
+ * 判据 = 这一页会不会往参数草稿里放东西（`wb.applyDraft` 那一路）：
+ * 机型（先落盘再生成）、参数台、资产库（交付身份改了先进草稿）、生成与发布（同上）。
+ * 其余：套餐页是即时落盘、设置页只读、开发台不落盘 ⇒ 页头不摆这一槽。
+ * ★ 草稿非空时**无论在哪一页都摆**（见 `headOpsVisible` 的 ③）—— 别让改动存不下去。
+ */
+const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>(['machines', 'params', 'assets', 'build'])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
 const NAVW = { dft: 236, min: 64, max: 320 }
@@ -188,6 +226,11 @@ export function WorkbenchApp() {
   const rootRef = useRef<HTMLDivElement>(null)
   const density = useDensity(rootRef)
   const toastList = useSyncExternalStore(toasts.subscribe, toasts.get)
+  /**
+   * 页头那一槽：**哪一页登记了就用它的**（例：标注台接管成"保存到仓库 / 放弃改动"）。
+   * 没人登记（`null`）⇒ 回落到外壳自己那套（参数草稿）。见 `pageActions.ts` 头注。
+   */
+  const pageSlotRaw = useSyncExternalStore(pageActions.subscribe, pageActions.get)
 
   const [boot, setBoot] = useState<Boot | null>(null)
   /**
@@ -198,11 +241,27 @@ export function WorkbenchApp() {
   const [sandbox, setSandbox] = useState<SandboxStatus | null>(null)
   const [words, setWords] = useState<Words | null>(null)
   const [book, setBook] = useState<BookView | null>(null)
+  /**
+   * 最新那一份整本（**只给回调读**）。
+   *
+   * `save` / `discard` 先 `await settleAll()` 把飞在空中的值写落完，再判
+   * "草稿脏不脏" —— 而 settleAll 落地带来的 `setBook` 是异步的，这次调用的闭包
+   * 里读不到它。`dirtyCount` 判错会让"刚点完步进器马上点保存"变成一次**静默丢弃**。
+   */
+  const bookRef = useRef<BookView | null>(null)
+  bookRef.current = book
   const [report, setReport] = useState<IssueReport | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const [page, setPage] = useState<NavId>('machines')
+  /**
+   * 只认**当前页**那一槽：非激活页的元素被冻结、不会重渲染 ⇒ 它没机会注销自己，
+   * 所以靠"页对不上就当没有"来失效（见 `pageActions.ts` 头注）。
+   * ★ 这一份是**看得见的字**，不含动作；按钮点击一律走 `pageActions.run(…)`
+   *   （拿最新那份闭包，见 `pageActions.ts` 头注"为什么 save/discard 不进快照"）。
+   */
+  const pageSlot = pageSlotRaw !== null && pageSlotRaw.page === page ? pageSlotRaw : null
   const [focus, setFocus] = useState<Focus | null>(null)
   /** 定位页的 remount 代号：`goto` 过来是「换现场」，要重挂去读新的主选中 */
   const [focusGen, setFocusGen] = useState(0)
@@ -277,12 +336,107 @@ export function WorkbenchApp() {
   }, [refreshReport])
 
   /**
+   * 盘上的 `presets/` 被外部改过没有（2026-10-20，作者：「像你这种外部改的，
+   * 我这个软件完全没有看到改的呀」）。
+   *
+   * 会话把预设**只读一次**（`wb_reload` 才重读），所以外部改完切回来，界面还是旧的。
+   * 这里只**发现并提示**，不自动重载：正开着的草稿是按旧定义起稿的，悄悄换掉
+   * 定义再存回去，会把 `sectionId` / 弃用这些格写错。
+   */
+  const [sourceStale, setSourceStale] = useState(false)
+  const checkSourceStale = useCallback(() => {
+    wb.presetsChanged()
+      .then(setSourceStale)
+      .catch(() => undefined)
+  }, [])
+
+  /** 当前页面的 ref：focus 那条监听只装一次，不能跟着每次切页重挂 */
+  const pageRef = useRef(page)
+  pageRef.current = page
+
+  /**
+   * **外面的文件改过了**（2026-10-19，作者：「我直接改了那些模型，它这里面能不能知道」）。
+   *
+   * 工作台读的是盘上的真字节，但读数只在写操作 / 进页时取 —— 作者在编辑器里改完
+   * 3MF 再切回来，屏幕还是旧的。这里在窗口重新获得焦点时重取一遍「会变的那几样」：
+   * 检查报告（交付目录对不对得上、导航徽标）+ `tick`（生成页交付清单 / 资产库列表）。
+   *
+   * ★ 2026-10-20 补上 `wb_book()`：生成与发布页那 9 行状态来自 `book.buildRows`，
+   *   它以前**不在**这条刷新链里 —— 于是外面显示「已生成」、明细显示「待更新」，
+   *   要重启才对齐。现在停在生成页时一起重取（别的页仍然只取报告，省一次全本推导）。
+   *
+   * 300ms 去抖：切窗常带一串 focus / blur（拖窗口、系统弹窗），不必每次都扫盘。
+   * **不做轮询、不引入文件监视** —— 作者要的是"切回来就能看到"，不是秒级同步。
+   */
+  useEffect(() => {
+    let t: number | null = null
+    const onFocus = () => {
+      if (t !== null) window.clearTimeout(t)
+      t = window.setTimeout(() => {
+        t = null
+        if (pageRef.current === 'build') refreshBook()
+        else refreshReport()
+        checkSourceStale()
+        setTick((n) => n + 1)
+      }, 300)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      if (t !== null) window.clearTimeout(t)
+    }
+  }, [checkSourceStale, refreshBook, refreshReport])
+
+  /**
+   * 进这两页时也重取一次：它们是「盘上现在是什么样」的读数页
+   * （生成与发布看交付目录，资产库看载荷字节）。
+   *
+   * 生成页还要**整本**：那 9 行的 `BuildState` 不住在交付清单里。
+   */
+  useEffect(() => {
+    if (page === 'build') {
+      refreshBook()
+      checkSourceStale()
+      setTick((n) => n + 1)
+      return
+    }
+    if (page === 'assets') {
+      refreshReport()
+      checkSourceStale()
+      setTick((n) => n + 1)
+    }
+  }, [checkSourceStale, page, refreshBook, refreshReport])
+
+  /**
+   * 值写入那一路的检查报告**尾随去抖**（700ms）—— 见 `run` 的 `quiet`。
+   *
+   * `wb_preflight` 是这一串里最重的一条（parse recipes + 摸盘建 catalog）；
+   * 连点步进器时每笔都跑它一次，正是"主线程被占死、数字不跟手"的主要来源。
+   * 合到最后一笔之后跑一次就够：页头徽标最多迟 700ms（低频读数，可接受）。
+   */
+  const reportSoon = useRef<number | null>(null)
+  const refreshReportSoon = useCallback(() => {
+    if (reportSoon.current !== null) window.clearTimeout(reportSoon.current)
+    reportSoon.current = window.setTimeout(() => {
+      reportSoon.current = null
+      refreshReport()
+    }, 700)
+  }, [refreshReport])
+  useEffect(
+    () => () => {
+      if (reportSoon.current !== null) window.clearTimeout(reportSoon.current)
+    },
+    [],
+  )
+
+  /**
    * `presets/` 改过之后（「重新加载」= 后端重开一次会话）：换 `Boot`，并把
    * 整本与检查报告重取一遍 —— 预设数据变了会改这两处读数
    */
   const reloadBoot = useCallback(
     (b: Boot) => {
       setBoot(b)
+      setSourceStale(false)
       refreshBook()
     },
     [refreshBook],
@@ -308,13 +462,31 @@ export function WorkbenchApp() {
    * —— 三种情形一条路径，分三份写「能不能重做」就会有三种写法。
    */
   const run = useCallback(
-    async (label: string, patches: Patch[], where: 'undo' | 'redo', refresh?: Refresh) => {
-      setBusy(true)
+    async (
+      label: string,
+      patches: Patch[],
+      where: 'undo' | 'redo',
+      refresh?: Refresh,
+      opts?: { quiet?: boolean },
+    ) => {
+      /*
+       * `quiet` = 值写入那一路（见 `editQueue` 头注）。**不拨 `tick`、不置 `busy`**：
+       *
+       *  · 拨一次 `tick`，参数台会把 `wb_registry` / 整页 `wb_desk` / `wb_matrix`
+       *    再各问一遍 —— 连点步进器时那正是"数字不跟手、停下才追账"的主因；
+       *  · `busy` 一动整壳重渲染、页头那排按钮一起闪。
+       *
+       * 页要跟着走的那一份派生，由 `wb_apply_draft` **顺带返回**（`out.desk` /
+       * `out.matrix`，后端按 `refresh` 现算）—— 不必事后再问一次。
+       */
+      const quiet = opts?.quiet === true
+      if (!quiet) setBusy(true)
       try {
         const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
-        setTick((n) => n + 1)
-        refreshReport()
+        if (!quiet) setTick((n) => n + 1)
+        if (quiet) refreshReportSoon()
+        else refreshReport()
         // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
         if (out.inverse.length > 0) {
           const entry: UndoEntry = { kind: 'patches', label, patches: out.inverse }
@@ -326,10 +498,10 @@ export function WorkbenchApp() {
         fail(e)
         return null
       } finally {
-        setBusy(false)
+        if (!quiet) setBusy(false)
       }
     },
-    [fail, refreshReport],
+    [fail, refreshReport, refreshReportSoon],
   )
 
   /*
@@ -369,6 +541,10 @@ export function WorkbenchApp() {
   }, [])
 
   const undo = useCallback(async () => {
+    /* 飞在空中的值写先落完 —— 否则撤销撤的是"落库前的那一半"，栈与页面会对不上 */
+    await settleAll()
+    /* 本地草稿层整层丢掉：撤销之后的真相在后端那份 desk 里（下一条 tick 会把它取回来） */
+    editQueue.clear()
     const top = undoStack[undoStack.length - 1]
     if (!top) return
     if (top.kind === 'meta') {
@@ -380,6 +556,9 @@ export function WorkbenchApp() {
   }, [undoStack, run, runMeta])
 
   const redo = useCallback(async () => {
+    /* 同 `undo`：先把在飞的写落完、把本地草稿层丢干净，再读栈 */
+    await settleAll()
+    editQueue.clear()
     const top = redoStack[redoStack.length - 1]
     if (!top) return
     if (top.kind === 'meta') {
@@ -391,7 +570,14 @@ export function WorkbenchApp() {
   }, [redoStack, run, runMeta])
 
   const save = useCallback(async (): Promise<boolean> => {
-    if (!book || book.dirtyCount === 0 || busy) return false
+    if (busy) return false
+    /* 飞在空中的值写先落完：`dirtyCount` 得是落完之后的账 ——
+       否则"刚点完步进器马上点保存"会静默丢掉那一笔（读的是旧整本） */
+    await settleAll()
+    const cur = bookRef.current
+    if (!cur || cur.dirtyCount === 0) return false
+    /* 保存 = 提交点：本地草稿层整层丢掉，显示交回写进仓库的那份 */
+    editQueue.clear()
     setBusy(true)
     try {
       const out = await wb.save()
@@ -408,10 +594,16 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [book, busy, fail, refreshReport])
+  }, [busy, fail, refreshReport])
 
   const discard = useCallback(async () => {
-    if (!book || book.dirtyCount === 0 || busy) return
+    if (busy) return
+    /* 同 `save`：先把在飞的写落完再判脏 —— 跳到一半的改动也得算进来 */
+    await settleAll()
+    const cur = bookRef.current
+    if (!cur || cur.dirtyCount === 0) return
+    /* 放弃 = 整条草稿丢：本地草稿层跟着一起丢 */
+    editQueue.clear()
     setBusy(true)
     try {
       setBook(await wb.discard())
@@ -424,7 +616,7 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [book, busy, fail, refreshReport])
+  }, [busy, fail, refreshReport])
 
   /** 跨页定位（C14 语义）：跳过去并落上主选中；那一页重挂一次去读它 */
   const goto = useCallback((view: string, foc?: GotoFocus) => {
@@ -473,6 +665,33 @@ export function WorkbenchApp() {
 
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
   const dirty = (book?.dirtyCount ?? 0) > 0
+
+  /**
+   * 页头那一槽要不要显示（作者 2026-10-16：「有需要的页面就显示，不需要的页面就不显示」）。
+   *
+   * 三种"显示"的理由，任一成立即显示：
+   *   ① 当前页**自己登记了**一槽（标注台）；
+   *   ② 当前页**走参数草稿**（机型 / 参数 / 资产 / 生成 —— 那套老语义属于它们）；
+   *   ③ 草稿**非空** —— 切到别的页也留一颗「保存」给它，别让改动存不下去。
+   * 其余（设置页只读、开发台）不显示。
+   */
+  const headOpsVisible =
+    pageSlot !== null || DRAFT_PAGES.has(page) || dirty
+  /**
+   * 「保存」那颗**现在点不点得动**（2026-10-17）：
+   * - 页头被某一页接管（标注台）⇒ 听它的 `canSave`；
+   * - 否则是外壳这套参数草稿 ⇒ 草稿非空、且没在保存中。
+   */
+  const saveOn =
+    pageSlot !== null ? pageSlot.canSave === true && pageSlot.busy !== true : dirty && !busy
+  /**
+   * 点不动时**说出为什么**（悬停看得见）。禁用按钮恰恰是最需要 title 的地方 ——
+   * 作者这一轮的病就是"点了没反应却不知道为什么"（其实是压根点不动）。
+   */
+  const saveWhy =
+    pageSlot !== null
+      ? '这一份没有要写回去的改动（和仓库里那份一样）'
+      : (words?.disabled.nothingToSave ?? '没有未保存的改动')
   useEffect(() => {
     if (!dirty) return
     const guard = (e: BeforeUnloadEvent) => {
@@ -529,8 +748,12 @@ export function WorkbenchApp() {
           : ''
       case 'assets':
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
+      case 'annotate':
+        return '在图上拖框 —— 导出的就是 marks（百分比坐标，浅深两张图共用一份）'
       case 'settings':
         return '只读 —— 数据根与工作台子目录的职责'
+      case 'dev':
+        return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
   }, [page, book, report])
 
@@ -557,12 +780,24 @@ export function WorkbenchApp() {
         return <PageSkeleton layout="flow" cards={3} rows={5} label="生成与发布正在加载" />
       case 'assets':
         return <PageSkeleton layout="cols" cards={2} rows={6} label="资产库正在加载" />
+      case 'annotate':
+        /* 这一页不读整本 / 词表，骨架基本见不到；给一具形状对得上的占位（见 renderPage 的门） */
+        return <PageSkeleton layout="cols" cards={2} rows={6} label="标注台正在加载" />
       case 'settings':
         return <PageSkeleton layout="flow" cards={2} rows={4} label="设置正在加载" />
+      case 'dev':
+        return <PageSkeleton layout="flow" cards={2} rows={5} label="开发台正在加载" />
     }
   }
 
   const renderPage = (id: NavId): ReactNode => {
+    /* 开发台不依赖整本 / 词表（它读的是后处理状态与场景清单）—— 先于数据闸渲染，
+       不必跟着"整本还没到"一起给骨架 */
+    if (id === 'dev') return <DevPage />
+    /* 标注台同理：它读的是资产清单（一条独立命令）与一张图，等整本没有意义。
+       ★ 它自己往页头登记那一槽（`usePageActions('annotate', …)`）—— 外壳按"页对不对得上"筛，
+         非激活页即使被冻结复用也不会污染页头。 */
+    if (id === 'annotate') return <AnnotatePage />
     /* 数据没到先给骨架（不再黑屏）—— 见 skeletonFor 的注 */
     if (!book || !words) return skeletonFor(id)
     switch (id) {
@@ -585,9 +820,10 @@ export function WorkbenchApp() {
             initialFocus={focus}
             tick={tick}
             dirty={dirty}
-            onApply={async (label, patches, refresh) => {
-              const out = await run(label, patches, 'undo', refresh)
-              return { desk: out?.desk ?? null, matrix: out?.matrix ?? null }
+            onApply={async (label, patches, refresh, opts) => {
+              const out = await run(label, patches, 'undo', refresh, opts)
+              /* `ok` 让参数台那一层知道这笔到底写进去没有（失败时 overlay 要回落） */
+              return { ok: out !== null, desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
             onMetaApplied={pushMeta}
             onSave={() => void save()}
@@ -614,8 +850,8 @@ export function WorkbenchApp() {
             initialSel={assetSel}
             initialAssign={assetAssign}
             onGoto={goto}
-            onApply={async (label, patches) => {
-              await run(label, patches, 'undo')
+            onApply={async (label, patches, opts) => {
+              await run(label, patches, 'undo', undefined, opts)
             }}
           />
         )
@@ -849,39 +1085,87 @@ export function WorkbenchApp() {
                     <span className={s.headSub}>{headSub}</span>
                   </div>
                   {/*
-                    保存三件常驻（C14）：改参数会让这里亮起来；「机型与版本」页的
-                    新增与删除是即时落盘的，不经过这三个按钮 —— 徽章只反映草稿。
+                    保存那一槽（C14 / 2026-10-16 作者）：
+                    **上面这一个就是全站唯一的位置** —— 不再让哪一页在下面自己再摆一套。
+                    三种情形：
+                      ① 当前页**自己登记了**一槽（例：标注台 → 「保存到仓库 / 放弃改动」）⇒ 用它；
+                      ② 走参数草稿的页（机型 / 参数 / 资产 / 生成）⇒ 用外壳这套（老样子）；
+                      ③ 只读页与开发台 ⇒ **不显示**（作者：「有需要的页面就显示，不需要的页面就不显示」）。
+                    ★ 草稿非空时**无论在哪一页都显示** —— 别让"改了参数切到设置页就存不了"。
                   */}
-                  <div className={s.headOps}>
-                    <span
-                      className={`${s.tag} ${s.tagGhost}`}
-                      title={
-                        dirty
-                          ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
-                          : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
-                      }
-                    >
-                      {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
-                    </span>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnSm}`}
-                      disabled={!dirty || busy}
-                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
-                      onClick={() => void discard()}
-                    >
-                      放弃
-                    </button>
-                    <button
-                      type="button"
-                      className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                      disabled={!dirty || busy}
-                      title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
-                      onClick={() => void save()}
-                    >
-                      保存
-                    </button>
-                  </div>
+                  {headOpsVisible && (
+                    <div className={s.headOps}>
+                      {pageSlot !== null ? (
+                        <>
+                          <span
+                            className={`${s.tag} ${s.tagGhost}`}
+                            title={pageSlot.dirtyTitle ?? pageSlot.dirtyLabel}
+                          >
+                            {pageSlot.dirty ? pageSlot.dirtyLabel : pageSlot.savedLabel}
+                          </span>
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            disabled={!pageSlot.canDiscard || pageSlot.busy === true}
+                            title={pageSlot.discardTitle ?? '放弃这一次的改动'}
+                            onClick={() => pageActions.run('discard')}
+                          >
+                            放弃
+                          </button>
+                          {/*
+                           * ★★ **保存默认灰色、能保存才上主色**（2026-10-17 作者：「保存应该
+                           *   默认灰色，可以保存才显示，用有颜色的」）。
+                           *   旧写法是 `btnPrimary` **恒挂** + `disabled` ⇒ 走的是
+                           *   `.btnPrimary:disabled`（底 = `--line-strong`、字仍白）：浅色下白字
+                           *   压在 14% 灰上几乎看不见，看着像"还能点"，点下去当然没反应。
+                           *   ⇒ 不能保存时**连 `btnPrimary` 都不挂**，回落普通 `.btn` 的禁用态
+                           *     （灰字 + 淡描边，一眼是"点不了"）。
+                           */}
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
+                            disabled={!saveOn}
+                            title={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
+                            onClick={() => pageActions.run('save')}
+                          >
+                            {pageSlot.busy === true ? (pageSlot.savingLabel ?? '保存中…') : '保存'}
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            className={`${s.tag} ${s.tagGhost}`}
+                            title={
+                              dirty
+                                ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
+                                : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                            }
+                          >
+                            {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
+                          </span>
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm}`}
+                            disabled={!dirty || busy}
+                            title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
+                            onClick={() => void discard()}
+                          >
+                            放弃
+                          </button>
+                          {/* 同上：能保存才上主色，不能保存是普通灰按钮（见上面那条注释） */}
+                          <button
+                            type="button"
+                            className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
+                            disabled={!saveOn}
+                            title={saveOn ? (words?.save.dirty.explain ?? undefined) : saveWhy}
+                            onClick={() => void save()}
+                          >
+                            保存
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/*
@@ -912,6 +1196,29 @@ export function WorkbenchApp() {
                       设置页
                     </button>
                     看数据根。
+                  </div>
+                )}
+
+                {/*
+                  数据被外部改过（2026-10-20）。会话只读一次 `presets/`，所以要有一条路
+                  让人知道"屏幕这份不是盘上那份"—— 重载仍然是人的动作，见 checkSourceStale。
+                */}
+                {sourceStale && (
+                  <div className="wb-banner" data-tone="warn" style={{ margin: '0 12px' }}>
+                    盘上的
+                    <span className="wb-mono"> presets/ </span>
+                    在这个窗口外面改过了 —— 现在显示的仍是打开时读进来的那一份（参数名、可选项、
+                    分组都可能是旧的）。点
+                    <button
+                      type="button"
+                      className="wb-link"
+                      onClick={() => {
+                        wb.reload().then(reloadBoot).catch(fail)
+                      }}
+                    >
+                      重新加载
+                    </button>
+                    读进来，不用重启；未保存的草稿不会丢。
                   </div>
                 )}
 

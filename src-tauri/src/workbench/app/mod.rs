@@ -37,6 +37,10 @@
 /// `<appDataDir>/publish-account.json`（**不含 token**；token 住凭据文件
 /// `credentials.json`，见 [`credentials`]）。发布目标由它决定，`git remote` 只作校验
 pub mod account;
+/// **标注源稿**（2026-10-16）：工作台「标注台」读写的那一份"能再编辑的源文件"，
+/// 住在 `presets/assets/<同类目录>/<对>.anno.json`（与它描述的图**同层**、随仓库走、
+/// **不进交付目录**）。路径由后端从台账派生，前端只给资产 id
+pub mod annotation;
 /// 「资产库」。**它也走 `Presets` 现读**（与 `machines` 同一条纪律：清单类的页面
 /// 不套参数值那套状态机）。现在只有读 —— 写入口在数据层，接上要有界面（Task 14）
 pub mod assets;
@@ -56,6 +60,27 @@ pub mod delivery;
 /// （起本地假云端 + 以 `MKPSE_PRESET_SOURCE_URL` 起客户端 dev）。
 /// **它不碰任何配置** —— 源地址是环境变量注入的，只在 debug 构建里认
 pub mod dev_source;
+/// **开发台 · 故障注入**（2026-10-19）：给某一个 API 方法**装一条错**，
+/// 客户端里所有走这个方法的界面从此真的报错（作者：「所有模态框都能触发，
+/// 而且要真实的 mock 触发」）。与 [`devsim`] 是两件事：那是"打开一格界面"，
+/// 这是"让后端失一次真"。
+pub mod devfault;
+/// **开发台 · 真实后处理测试矩阵**（2026-10-19）：六档（成功×2 / 硬失败 / 机型不匹配 /
+/// 挪塔碰撞 / 取消）各跑在**独立临时根**里，串行、只按真凭据判定（`_meta.json` 的
+/// `error` / `cancelled` / `relocation`）。问句档与取消档**需人在客户端窗口真操作**
+/// —— 验的不只是"管线能问"，还有"界面能显示、能收答复、能继续/停下"。
+/// 数据落 `target/dev-run/matrix/`，正式数据目录一个字节不动（见该文件头）。
+pub mod devmatrix;
+/// **开发台 · 运行真实后处理**（2026-10-19）：选一份预设 + 一份测试 G-code，
+/// 起一个**真的钩子子进程**（`--Toml` + `--Gcode`，与切片器注册的那一行逐字一致），
+/// 让客户端窗口跑一趟真管线 —— 真进度、真问句、真落盘、真归档，界面上没有"预览"标记。
+/// 与 [`devsim`]（演出）/ [`devfault`]（让后端失一次真）是开发台三件互不重叠的事。
+/// ★ 它**不加协议变体**：复用真机那条入口即可（见该文件头）
+pub mod devreal;
+/// **开发台**：把"平时看不见的那几屏"做成工作台里一排按钮（先接后处理那一组）。
+/// 它是假钩子 `hook-sim` 的**界面版** —— 进程内直接喂 [`crate::hook_ui::HookView`]，
+/// 与真钩子来的那条线同一个落点（见模块头：工作台与客户端是同一个进程）。
+pub mod devsim;
 /// 本地 git 子进程封装（第三刀下半）：发布事务的「本地那一半」——白名单 stage / commit / push
 pub mod git;
 pub mod history;
@@ -69,12 +94,16 @@ pub mod platform;
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
-/// ★ **与发布预设那本分开** —— 两条链不混
+/// ★ **与交付预设那本分开** —— 两条链不混
 pub mod release_history;
 /// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
 pub mod release_tx;
+/// **成品图渲染**（2026-10-16，方案 A）：把标注**烧进图片**，产出交付给客户端的
+/// `<图干>.rendered.webp`（无损 webp，纯 Rust 编码）—— 客户端 `<img>` 直接显示，
+/// 不再"读原图 + 前端现画框"。原图与源稿照旧留存（像 PSD）可再编辑
+pub mod render;
 /// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
 /// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
 pub mod sandbox;
@@ -85,6 +114,7 @@ pub mod version;
 pub mod words;
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -134,6 +164,12 @@ pub struct Ctx {
     last_edit: Instant,
     /// 上一次快照写失败的原因。**不阻断编辑**，只报出来
     flush_error: Option<String>,
+    /// 这个会话读进来时，`presets/` 源文件的盘上戳（见 [`presets_source_stamp`]）。
+    ///
+    /// 拿来回答一个问题：**盘上现在跟界面手里的是不是同一份**。外部改过要能在
+    /// 窗口切回来时被发现（作者 2026-10-20：「我这个软件完全没有看到改的呀」），
+    /// 但**不自己重载** —— 会话里可能正开着一个草稿，换掉定义会把旧值按新定义存回去
+    source_stamp: String,
 }
 
 impl Ctx {
@@ -162,6 +198,7 @@ impl Ctx {
             flushed_seq: 0,
             last_edit: Instant::now(),
             flush_error: None,
+            source_stamp: String::new(),
         };
         ctx.reload_from_disk()?;
         Ok(ctx)
@@ -186,6 +223,8 @@ impl Ctx {
         self.committed = loaded.committed;
         self.draft = draft;
         self.notices = notices;
+        /* 刚读的那一份就是"界面手里这份"——盘上戳跟着记下来 */
+        self.source_stamp = presets_source_stamp(self.presets.root());
         // 清理过的话快照就过期了，但**不在这里写** —— 交给懒写
         self.flushed_seq = self.dirty_seq;
         if dirty {
@@ -275,7 +314,76 @@ pub(super) fn with_ctx_mut<T>(
     if guard.is_none() {
         *guard = Some(Ctx::open()?);
     }
-    f(guard.as_mut().expect("刚刚放进去的"))
+    let ctx = guard.as_mut().expect("刚刚放进去的");
+    /*
+     * 盘上戳的两处用途，一次 stat 走完：
+     *
+     *   · 这一条命令自己写了 `presets/`（before != after）→ 界面手里那份就是新的，
+     *     把戳推到这一代（否则下一次 focus 会误报"外部改过"）；
+     *   · 此前已经有外部改动待发现（before != 记着的戳）→ **不覆盖**，
+     *     否则自己随手改一格就把那条提示吃掉了。
+     */
+    let before = presets_source_stamp(ctx.presets.root());
+    let out = f(ctx);
+    let after = presets_source_stamp(ctx.presets.root());
+    if before != after && before == ctx.source_stamp {
+        ctx.source_stamp = after;
+    }
+    out
+}
+
+/// `presets/` 源文件的盘上戳：`相对路径 | 字节数 | mtime(ns)` 的 sha256。
+///
+/// **只 stat，不读内容**：这条链路每个命令都要看一眼，几十个小文件的修改时间
+/// 足够判「变没变」—— 定义文件被改一个字节，mtime 一定动（`atomic_write` 换 inode）。
+///
+/// 跳过两处：`delivery/`（生成写的产物，不是"源定义"）与 `assets/`（二进制载荷）。
+/// 漏掉它们的话，点一次生成就会让界面误报"外部改过定义"。
+fn presets_source_stamp(root: &Path) -> String {
+    use sha2::{Digest, Sha256};
+
+    fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let path = e.path();
+            let Ok(ft) = e.file_type() else { continue };
+            if ft.is_dir() {
+                let name = path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default();
+                if name == paths::DELIVERY_SUBDIR || name == "assets" {
+                    continue;
+                }
+                walk(&path, base, out);
+                continue;
+            }
+            if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+                continue;
+            }
+            let rel = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            let meta = e.metadata().ok();
+            let len = meta.as_ref().map_or(0, |m| m.len());
+            let mtime = meta
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map_or(0, |d| d.as_nanos());
+            out.push(format!("{rel}|{len}|{mtime}"));
+        }
+    }
+
+    let mut rows: Vec<String> = Vec::new();
+    walk(root, root, &mut rows);
+    rows.sort();
+    let mut h = Sha256::new();
+    h.update(rows.join("\n").as_bytes());
+    format!("{:x}", h.finalize())
 }
 
 /// 空闲多久算「停手了」。写得太短等于没省，太长丢的就多
@@ -388,11 +496,11 @@ pub struct Boot {
     pub detail: Option<String>,
     /// 工作台子目录的职责（14.7）
     pub store_dirs: Vec<StoreDirRole>,
-    /// 官方源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
+    /// 云端源（Bootstrap）地址：**发布产物发到哪**（`workbench/bootstrap.json`，入库）。
     /// `None` = 还没配 —— 客户端构建时就不会注入默认源（`build.rs` 读同一份文件）。
     /// **它只对应"工作台配置"这一份**：改了要重新构建客户端才生效（编译期注入）
     pub bootstrap_url: Option<String>,
-    /// 第二官方源（Gitee 镜像，国内直连）。`None` = 没配 —— 客户端构建不注入那一档，
+    /// 第二云端源（Gitee 镜像，国内直连）。`None` = 没配 —— 客户端构建不注入那一档，
     /// 客户端界面也不出现它。与 `bootstrap_url` **各读各的**
     pub gitee_bootstrap_url: Option<String>,
 }
@@ -414,7 +522,7 @@ pub struct BootstrapConfig {
     pub gitee_bootstrap_url: Option<String>,
 }
 
-/// 读工作台配置里的**双官方源**。**读不出 / 坏档 = 全 `None` + 日志一条**：
+/// 读工作台配置里的**双云端源**。**读不出 / 坏档 = 全 `None` + 日志一条**：
 /// 它是可选配置，挡不住开场（修法：在工作台里再保存一次覆盖它，或手动删掉整个文件）。
 /// 与"坏档不静默"不冲突 —— 不静默的那一位是日志
 fn read_bootstrap_config() -> (Option<String>, Option<String>) {
@@ -422,14 +530,14 @@ fn read_bootstrap_config() -> (Option<String>, Option<String>) {
     let Some(store) = Store::open().ok() else {
         return (None, None);
     };
-    match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "官方源配置") {
+    match store.read_doc::<BootstrapConfig>(Store::BOOTSTRAP_REL, "云端源配置") {
         Ok(Some(cfg)) => (
             clean(Some(cfg.bootstrap_url)),
             clean(cfg.gitee_bootstrap_url),
         ),
         Ok(None) => (None, None),
         Err(e) => {
-            tracing::warn!(error = %e.message, "官方源配置读不出来，按「还没配」处理");
+            tracing::warn!(error = %e.message, "云端源配置读不出来，按「还没配」处理");
             (None, None)
         }
     }
@@ -478,6 +586,18 @@ pub fn wb_reload() -> Result<Boot, AppError> {
     boot_inner()
 }
 
+/// 盘上的 `presets/` 与这个会话手里的那一份**不一样**吗（外部改过 / 别处写过）。
+///
+/// 只回答"要不要重新加载"，**不自己重载** —— 会话里可能正开着一个草稿，
+/// 悄悄换掉定义会把那份草稿按旧定义存回去（`sectionId` / 弃用这些格尤其危险）。
+/// 界面拿它画一条提示 + 「重新加载」那颗按钮，动作仍然是人的。
+#[tauri::command]
+pub fn wb_presets_changed() -> Result<bool, AppError> {
+    traced("wb_presets_changed", |_| {
+        with_ctx(|ctx| Ok(presets_source_stamp(ctx.presets.root()) != ctx.source_stamp))
+    })
+}
+
 /// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
 ///
 /// 「生成与发布」页那块**只读的「软件版本」**展示位用它 —— 与客户端 `get_app_version`
@@ -492,7 +612,7 @@ pub fn wb_app_version() -> Result<String, AppError> {
     })
 }
 
-/// 记下官方源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
+/// 记下云端源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
 /// `workbench/bootstrap.json`）。GitHub 是主源；`gitee_url` 传 `None` / 空白 = 清除
 /// Gitee 镜像档（界面那格空着就是清除，如实写盘，不留 null 键）。
 ///
@@ -560,7 +680,7 @@ fn boot_inner() -> Result<Boot, AppError> {
     })() {
         Ok(boot) => Ok(boot),
         Err(e) => {
-            /* 官方源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
+            /* 云端源那格与 presets/ 无关：就算预设源定位不到，配置也照读出来显示 */
             let (bootstrap_url, gitee_bootstrap_url) = read_bootstrap_config();
             Ok(Boot {
                 roots: Roots {
@@ -603,6 +723,19 @@ pub struct RegistryView {
     pub updated: String,
     pub tabs: Vec<TabMeta>,
     pub params: Vec<ParamView>,
+    /// 能装参数的分组（含暂时空掉的），按页签顺序 —— 定义框「所属分组」下拉用。
+    /// **不过滤空组**：把一个组搬空之后还得能搬回去
+    pub sections: Vec<SectionTarget>,
+}
+
+/// 「所属分组」下拉的一行：参数落在哪个页签的哪个分组
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionTarget {
+    pub id: String,
+    pub label: String,
+    pub tab_id: String,
+    pub tab_label: String,
 }
 
 /// 一个参数在界面上要用到的那些。
@@ -632,7 +765,10 @@ pub struct ParamView {
     pub parent_key: Option<String>,
     /// 空 = 不限机型
     pub machine_filter: Vec<String>,
+    /// **全局弃用**（所有机型）
     pub deprecated: bool,
+    /// **只在这些机型上弃用**（与 `deprecated` 叠加）
+    pub deprecated_machines: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -640,7 +776,13 @@ pub struct ParamView {
 pub struct ChoiceView {
     pub label: String,
     pub value: Value,
+    /// **显式全局弃用** —— 定义框那颗勾的状态，回写只认这一格。
+    /// 之前这里是「显式 ∪ 推定」的并集，打开框再保存会把推定值固化成 `deprecated = true`
     pub deprecated: bool,
+    /// **点名弃用**的机型（回写用这一格）
+    pub deprecated_machines: Vec<String>,
+    /// 推出来的弃用（选这一档放开的子参数全弃用），**只显示、不回写**
+    pub derived: bool,
 }
 
 #[tauri::command(async)]
@@ -656,6 +798,16 @@ fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView
         updated: reg.updated().to_owned(),
         tabs: reg.param_tabs(),
         params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
+        sections: reg
+            .layout_sections()
+            .into_iter()
+            .map(|(tab_id, tab_label, id, label)| SectionTarget {
+                id,
+                label,
+                tab_id,
+                tab_label,
+            })
+            .collect(),
     }
 }
 
@@ -688,8 +840,9 @@ pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryVie
 }
 
 fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> ParamView {
-    // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集，
-    // 与 choices 一一对齐
+    // 选项级弃用（C14 §五 / §4-2）：上游标的 + 推出来的（这一档放开的参数全弃用）取并集。
+    // **并集只用来标"推定"**：显式那两格（全局 / 点名机型）单独下发，回写只认它们，
+    // 否则「打开定义框 → 保存」会把推定值固化成一条手写的 `deprecated = true`
     let dead = reg.choice_deprecated(&p.key);
     ParamView {
         key: p.key.clone(),
@@ -715,13 +868,16 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
             .map(|(c, dead)| ChoiceView {
                 label: c.label.clone(),
                 value: c.value.clone(),
-                deprecated: c.deprecated || dead,
+                derived: dead && !c.deprecated && c.deprecated_machines.is_empty(),
+                deprecated: c.deprecated,
+                deprecated_machines: c.deprecated_machines.clone(),
             })
             .collect(),
         show_when: p.show_when.clone(),
         parent_key: p.parent_key.clone(),
         machine_filter: p.machine_filter.clone(),
         deprecated: p.deprecated,
+        deprecated_machines: p.deprecated_machines.clone(),
     }
 }
 
@@ -1221,6 +1377,45 @@ mod tests {
         let (fx_dir, presets) = Fixture::load().into_parts();
         let ctx = Ctx::with(presets, store).unwrap();
         ((dir, fx_dir), f, ctx)
+    }
+
+    /* ---------- 外部改动的发现（2026-10-20） ---------- */
+
+    /// 盘上戳：**源定义改了要变；生成写的产物与资产载荷不算**。
+    ///
+    /// 这条判据是"外部改过 presets/ 就提示重新加载"的唯一依据 —— 它要是把
+    /// `delivery/` 算进去，点一次生成就会让界面误报"外部改过定义"。
+    #[test]
+    fn source_stamp_tracks_definitions_not_products() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        std::fs::create_dir_all(root.join("registry")).unwrap();
+        std::fs::create_dir_all(root.join("delivery/mkp/presets")).unwrap();
+        std::fs::create_dir_all(root.join("assets/models")).unwrap();
+        let registry = root.join("registry/param_registry.toml");
+        crate::fsx::atomic::atomic_write(&registry, b"a = 1\n").unwrap();
+        let before = presets_source_stamp(root);
+
+        // 生成写的产物 + 二进制载荷：都不该动这个戳
+        crate::fsx::atomic::atomic_write(
+            &root.join("delivery/mkp/presets/A1-standard.toml"),
+            b"x = 1\n",
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&root.join("assets/models/a.3mf"), b"binary").unwrap();
+        assert_eq!(
+            before,
+            presets_source_stamp(root),
+            "产物 / 载荷不该算进「源定义」"
+        );
+
+        // 改一个源定义：必须变（顺手改长度，避开 mtime 粒度）
+        crate::fsx::atomic::atomic_write(&registry, b"a = 1234\n").unwrap();
+        assert_ne!(
+            before,
+            presets_source_stamp(root),
+            "源定义改了这个戳必须跟着变，否则外部改动永远发现不了"
+        );
     }
 
     /* ---------- 参数正文复制（b05 Task 14.5，裁决 A：独立快照） ---------- */
@@ -1809,7 +2004,7 @@ mod tests {
     ///
     /// # 为什么这条必须有机器拦着
     ///
-    /// Tauri 官方文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
+    /// Tauri 云端文档的原文：**不带 `async` 的命令在主线程上执行，除非写成
     /// `#[tauri::command(async)]`**。而主线程就是 webview 渲染那个线程 ——
     /// 同步命令算多久，**整个界面就冻结多久**：骨架屏画不出来、导航点不动，
     /// 用户看到的就是"像被冻住了，过了好一会才有反应"（作者原话）。
@@ -1942,7 +2137,7 @@ mod tests {
         );
     }
 
-    /* ---------- 官方源双源（2026-10-05：设置页两格，写盘不再无声冲掉 Gitee） ---------- */
+    /* ---------- 云端源双源（2026-10-05：设置页两格，写盘不再无声冲掉 Gitee） ---------- */
 
     /// 单键老档（双源之前的形状）照读 —— `gitee_bootstrap_url` 缺席 = `None`，不炸
     #[test]
@@ -1977,7 +2172,7 @@ mod tests {
         );
 
         let back: BootstrapConfig = store
-            .read_doc(Store::BOOTSTRAP_REL, "官方源配置")
+            .read_doc(Store::BOOTSTRAP_REL, "云端源配置")
             .expect("读回")
             .expect("刚写的该在");
         assert_eq!(back.bootstrap_url, cfg.bootstrap_url);

@@ -403,12 +403,25 @@ pub(crate) fn custom_unmount_gcode_has_extrude(ir_data: &Ir) -> bool {
         .any(|line| get_e_value(line).is_some_and(|v| v > 0.0))
 }
 
+/// 换笔相关长距离横移的目标 Z（笔伸出态）。
+///
+/// 笔尖 = 喷嘴 − `toolhead.z_offset`，所以"笔尖离层顶的净空"恒等于 `lift_height`，
+/// 与笔伸多长无关；与 RiseNozzle / GlueEnd 同公式、同分支，避免出现两套基准。
+/// `< 3.0` 的判据是**层顶高度**，不是层序号。
+fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
+    let lift_height = if layer_z < 3.0 {
+        ir_data.glue.z_lift_height_first_layers
+    } else {
+        ir_data.glue.z_lift_height
+    };
+    layer_z + ir_data.toolhead.z_offset + lift_height
+}
+
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
 pub(crate) fn mount_toolhead(
     sink: &mut LineSink,
     ir_data: &Ir,
     current_layer_height: f64,
-    last_layer_height: f64,
     skip_final_z: bool,
 ) {
     sink.push_str(";Mounting Toolhead");
@@ -419,10 +432,9 @@ pub(crate) fn mount_toolhead(
             continue;
         }
         if ml.contains("L801") {
-            let mut l801_z = current_layer_height + ir_data.toolhead.z_offset + 3.0;
-            if current_layer_height < 3.0 {
-                l801_z = current_layer_height + ir_data.toolhead.z_offset + 4.0;
-            }
+            // 与平飞/飞回同一个高度：装笔是机构动作，垂直位置不影响能否装上，
+            // 让它跟着 `glue_z_lift_height` 走，整段只有一个可调参数。
+            let l801_z = extended_travel_z(ir_data, current_layer_height);
             sink.push_str(&format!("G1 Z{};L801", format_z(l801_z)));
         } else if !ir_data.gcode.custom_gcode_e_ownership && has_e_param(ml) {
             sink.push_str(&replace_e_value(ml, ir_data.gcode.mkp_retract));
@@ -432,9 +444,11 @@ pub(crate) fn mount_toolhead(
     }
     sink.push_str(";Toolhead Mounted");
     if !skip_final_z {
+        // 装好笔后的飞回段用 `current`（原来误用 `last`，凭空少 0.2），
+        // 并且抬到与收笔同口径的净空，笔尖余量 2.8 → lift_height。
         sink.push_str(&format!(
             "G1 Z{}",
-            format_z(last_layer_height + ir_data.toolhead.z_offset + 3.0)
+            format_z(extended_travel_z(ir_data, current_layer_height))
         ));
     }
 }
@@ -526,23 +540,6 @@ pub(crate) fn emit_glue_block(
     let wipe_x = crate::postproc::machine_dims::get_machine_dimensions(machine_type)
         .glue_area
         .wipe_x;
-    if custom_mount_gcode_has_retract(ir_data) {
-        sink.push_str(&format!(
-            "G1 X{} Z{} F{}",
-            format_float(wipe_x),
-            format_z(current_layer_height + 1.0),
-            format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
-        ));
-    } else {
-        sink.push_str(&format!(
-            "G1 X{} Z{} E{} F{}",
-            format_float(wipe_x),
-            format_z(current_layer_height + 1.0),
-            format_e(ir_data.gcode.mkp_retract),
-            format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
-        ));
-    }
-
     if ir_data.wiping.nozzle_cooling {
         sink.push_str(";Pervent Leakage");
         sink.push_str(&format!(
@@ -551,24 +548,40 @@ pub(crate) fn emit_glue_block(
         ));
     }
 
-    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
-    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
-    let mut lift_height = ir_data.glue.z_lift_height;
-    if current_layer_height < 3.0 {
-        lift_height = ir_data.glue.z_lift_height_first_layers;
-    }
+    // 1) 小螺旋只做 z-hop：抬到「层顶 + swap_hop_height」脱离层顶（默认 1.0，面板可调）。
+    //    尺度与切片器自己的 `G3 Z.8 I.706 J.991 P1` 一致（只脱层 0.2~1.0）；
+    //    I/J 分量照抄切片器（`sqrt(.706² + .991²) = 1.217`），不用 `I{半径} J0` 那种写法。
+    sink.push_str("M204 S10000");
+    sink.push_str("G17");
+    let spiral_retract = if custom_mount_gcode_has_retract(ir_data) {
+        String::new()
+    } else {
+        format!(" E{}", format_e(ir_data.gcode.mkp_retract))
+    };
     sink.push_str(&format!(
-        "G1 Z{}",
-        format_z(current_layer_height + ir_data.toolhead.z_offset + lift_height)
+        "G3 Z{} I.706 J.991 P1{} F{}",
+        format_z(current_layer_height + ir_data.glue.swap_hop_height),
+        spiral_retract,
+        format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
     ));
 
-    mount_toolhead(
-        sink,
-        ir_data,
-        current_layer_height,
-        last_layer_height,
-        false,
-    );
+    sink.push_str(crate::gcode::MARKER_RISING_NOZZLE);
+    sink.push_str(&stage_comment_line(MkpStage::RiseNozzle, ""));
+    // 2) 脱层之后**先**原位抬到净空高度（`层顶 + offset_z + lift`，也就是
+    //    `glue_z_lift_height` —— 面板上那一个值说了算），
+    //    3) **再**平飞到切笔位 —— 平飞 / 装笔 / 飞回同一个高度，全程不升降往返。
+    //    只抬 1mm 就平飞会贴着同层的其它模型走，这里必须抬到位再走。
+    sink.push_str(&format!(
+        "G1 Z{}",
+        format_z(extended_travel_z(ir_data, current_layer_height))
+    ));
+    sink.push_str(&format!(
+        "G1 X{} F{}",
+        format_float(wipe_x),
+        format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
+    ));
+
+    mount_toolhead(sink, ir_data, current_layer_height, false);
     sink.push_str(&marks::end("swap"));
 
     sink.push_str(";Glueing Started");

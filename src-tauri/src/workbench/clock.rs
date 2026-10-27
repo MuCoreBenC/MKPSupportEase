@@ -22,6 +22,19 @@ pub fn now_iso8601() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
 }
 
+/// **盘上时间戳 → RFC3339 / UTC（秒级）**。文件创建 / 修改时间、目录上次重算时间用它。
+///
+/// 与 [`now_iso8601`] 同一个口径（UTC、秒级、带 `Z`）：界面上要显示本地时间由前端转，
+/// 后端不猜时区 —— 多线程进程里 `current_local_offset()` 可能解析不出来，
+/// 那一次回落会静默差几小时。
+pub fn iso8601_of(t: std::time::SystemTime) -> String {
+    let odt = OffsetDateTime::from(t);
+    odt.replace_nanosecond(0)
+        .unwrap_or(odt)
+        .format(&Rfc3339)
+        .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
+}
+
 /// 给文件名用的时间。`20260922T143102Z` —— 不含 `:`，Windows 上冒号不能进文件名
 pub fn now_stamp() -> String {
     let fmt = format_description!("[year][month][day]T[hour][minute][second]Z");

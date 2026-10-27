@@ -10,6 +10,20 @@
   position: relative;
   height: 100%;
   min-width: 0;
+
+  /*
+   * ★ 2026-10-11 第四/五轮（作者：「提前预留好位置……不要出现才移动」→
+   *   「圈起来的要贴着下对齐……提前预留下面位置给悬浮药丸」）——
+   * **下缘**常驻给悬浮药丸留出一条：台面因此矮一截、板子跟着小一点，
+   * 药丸有自己的地方进出，谁也不动谁。
+   *
+   * 这条同时是"药丸能钉在下缘"的前提：`.hudBoard` 的底部内边距等于它，
+   * 药丸 `bottom: calc(6px + 8px)` 落在预留格底端、离下方气泡恒 14px。
+   *
+   * 值是量出来的：药丸高 24px + 与气泡的 8px 呼吸 = 32px；
+   * 多留的话板子白白变小，少留则药丸会往下探出到气泡上。
+   */
+  --shiftbar-h: 32px;
 }
 
 .hud {
@@ -34,22 +48,25 @@
   padding: 12px clamp(14px, 2vw, 24px) 8px;
 }
 
-/* 步骤条：G06-8 的凹槽直角照旧（外 4 内 2） */
+/* a02：步骤条从 G06-8 的凹槽直角改成胶囊轨道（对齐首页分段语言） */
 .rail {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   padding: 3px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
+  border: 1px solid transparent;
+  border-radius: 999px;
   background: var(--surface-sunken);
+  /* 现在只住三段步骤（预设已搬去右端，见 .presetSeg）—— 钉在左缘 */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .tab {
   appearance: none;
   border: 0;
-  border-radius: 2px;
-  padding: 6px clamp(10px, 1.2vw, 16px);
+  border-radius: 999px;
+  padding: 7px clamp(12px, 1.4vw, 20px);
   background: transparent;
   color: var(--text-2);
   font: inherit;
@@ -68,55 +85,57 @@
 .tab[data-on='true'] {
   background: var(--surface-solid);
   color: var(--text-1);
-  box-shadow: 0 1px 2px rgb(20 32 45 / 8%);
+  box-shadow: 0 1px 3px rgb(20 32 45 / 10%);
+}
+
+/* 深色（2026-10-12 第二遍）：浅色影在深底上看不见 —— 选中段浮起的那点层次会丢 */
+[data-theme='dark'] .tab[data-on='true'] {
+  box-shadow: 0 1px 3px rgb(0 0 0 / 40%);
 }
 
 /*
- * 预设 pill（G06-8 定稿形态）。10-03 作者裁决：切换预设不用这么显眼，
- * 绿底让给「打开模型」—— pill 退成实白。
+ * 预设（2026-10-11 搬出轨道，作者：「没对齐」）：从「融进轨道的第四段」改成
+ * **钉在上缘右端的一颗** —— 上缘从此左端一条步骤条、右端一颗预设，两端对齐，
+ * 与下缘（读数左 / 动作右）同一条刻度语言。窄窗里文件名照旧省略号收口。
  */
-.presetPill {
+.presetSeg {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
   min-width: 0;
-  max-width: 340px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  background: var(--surface-solid);
-  color: var(--text-1);
+  max-width: 240px;
+  /* 钉在右端：左端步骤条 + 右端预设，与 .hudTop 的 space-between 合力 */
+  margin-left: auto;
+  /* 与步骤条轨道同高（轨道 = 3px 内衬 + tab 高），视觉上并排不参差 */
+  padding: 7px clamp(10px, 1.2vw, 16px);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text-2);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-body);
   cursor: pointer;
+  transition:
+    background 0.16s ease,
+    color 0.16s ease;
 }
 
-.presetPill:hover {
-  border-color: var(--text-3);
-}
-
-.presetPill:focus-visible {
-  outline: none;
-}
-
-.presetPillOff {
+.presetSeg:hover {
+  color: var(--text-1);
   background: var(--surface-sunken);
 }
 
-.presetPillOff .presetName {
-  color: var(--text-3);
+.presetSeg:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
 }
 
-.presetPillOff:hover {
-  border-color: var(--text-3);
-}
-
-.presetPillOff .presetSwitch {
+/* 还没选预设：字形退灰（原来 .presetPillOff 的意思，一个属性带过） */
+.presetSeg[data-off='true'] {
   color: var(--text-3);
 }
 
 .presetName {
+  min-width: 0;
   overflow: hidden;
   font-family: 'SF Mono', Consolas, monospace;
   font-size: 12px;
@@ -124,56 +143,94 @@
   text-overflow: ellipsis;
 }
 
-.presetSwitch {
-  flex-shrink: 0;
-  color: var(--text-2);
-  font-size: 11.5px;
-}
-
 /* ---------- 台面 ---------- */
 
+/*
+ * 台面自己是容器：说明两行的字号用 cqw 跟着**板子的实际宽**走 ——
+ * Z 板是宽扁条，窗一小板子就缩，字若固定 12/13px 就会比板子里刻的字还大
+ * （作者：「文字感觉都比图片大了」）。cqw 让它们等比。
+ *
+ * ★ 2026-10-11 第四轮（作者：「提前预留好位置……不要出现才移动」）——
+ * 下缘常驻让出 `--shiftbar-h` 一条（**不是**"药丸在时才让"）：板子撑满台面的
+ * 内容盒，于是它算尺寸时就已经把这一条减掉，药丸出现/消失都不牵动它。
+ *
+ * 药丸就落在这条预留格里、按文档流**贴住下缘**（见 `.changeBar`）——
+ * 所以它离下方气泡的距离是常数，不会跑到板子身上去。
+ */
 .hudBoard {
   flex: 1;
   min-height: 0;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 2px clamp(14px, 2vw, 24px) 6px;
-  /*
-   * 台面自己是容器：说明两行的字号用 cqw 跟着**板子的实际宽**走 ——
-   * Z 板是宽扁条，窗一小板子就缩，字若固定 12/13px 就会比板子里刻的字还大
-   * （作者：「文字感觉都比图片大了」）。cqw 让它们等比。
-   */
+  padding: 2px clamp(14px, 2vw, 24px) calc(6px + var(--shiftbar-h));
+  /* 药丸的定位锚：它 absolute 钉在台面的下内边距线上（见 `.changeBar`） */
+  position: relative;
   container-type: inline-size;
 }
 
 /*
  * Z 步：视口锁板子自己的比例（136.219 × 34.019，取自产物 VIEW_BOX），
- * 说明两行才贴得住板下（同 G06-8）；盒子改内容高、整块在台面里**居中**
- * （2026-10-05 定稿回到居中：顶对齐试了一轮，短横板吊在步骤条底下太靠上、
- * tall 窗里下面整片空。「切页往下掉」的根因在进场二段填充与地板线，
- * 已分别在数据层与页脚处理 —— 居中是无辜的，作者拍板改回）。
+ * 说明两行才贴得住板下（同 G06-8）。
+ *
+ * ★ 2026-10-11 第五轮（作者：「z 的也有问题，怎么这么靠上」）——
+ * 顶对齐那一版把整块（板 + 两行说明）顶到台面上沿，台下空出一大片
+ * （Z 是条扁板，窗一大下方就空到底）；药丸钉在台面底缘，就孤零零吊在那片空里、
+ * 离板子十万八千里 —— "这么靠上"说的正是这一串脱了节。
+ *
+ * 改回**居中**：板子落到台面腰线上，药丸钉在下缘、就在板子**下方不远处**，
+ * "上缘 → 板子 → 药丸 → 气泡"重新聚成一组。预留格照旧在台面底端，
+ * 居中的板子不与它重叠（计算见 `.hudBoard` 的 `padding-bottom`）。
  */
 .hudBoard[data-step='z'] {
   justify-content: center;
 }
 
+/*
+ * ★ 2026-10-11 第六轮（作者：「svg 突破的容器」「svg 盖住了下面的气泡，
+ *   1400x500 的窗口……所有按钮都点击不了了，变成拖动的」）—— **必须可收缩**。
+ *
+ * 病根就在 `flex: 0 0 auto`：这两条特异性比 `.box[data-fill='true']` /
+ * `.viewport[data-fill='true']` 高，把 PlateZoom 的 `flex: 1; min-height: 0`
+ * 整个顶掉，于是台面**不会缩**。而 `aspect-ratio: 136.219/34.019 ≈ 4.004` 在
+ * 1400 宽的窗口里给出约 337px 的首选高，`max-height: 100%` 又因为父级高度不定
+ * 而解析成 `none`（约束落空）—— 加上两行说明约 390px，超出 1400×500 下约 350px
+ * 的可用高，溢出部分压在下缘气泡上。
+ *
+ * 溢出的正是 `.viewport`：它 `touch-action: none` 且 `onPointerDown` 进平移手势，
+ * 于是按钮被吞掉点击、指针变成拖动 —— 与作者描述逐字吻合。
+ *
+ * 改回 `flex: 0 1 auto` + `min-height: 0`：`.box` 缩到台面可用高、视口随之缩到
+ * aspect 高以下；视口是 `container-type: size`，`--plate-scale` 按缩小后的 `100cqh`
+ * 重算 → 板子自己等比变小，不裁不溢。`aspect-ratio` 保留（说明两行仍贴得住板下）。
+ */
 .hudBoard[data-step='z'] > [class*='box'] {
   flex: 0 1 auto;
+  min-height: 0;
 }
 
 .hudBoard[data-step='z'] [class*='viewport'] {
   flex: 0 1 auto;
+  /* 保留：Z 板是宽扁条，锁了比例说明两行才贴得住板下（同 G06-8） */
   aspect-ratio: 136.219 / 34.019;
+  /* 兜底：父级高度确定时（见上面 `.box`）这条会生效，双重保险 */
   max-height: 100%;
   min-height: 0;
 }
 
+/*
+ * Z 步板下那两行（与首页第三张卡是同一句、同一副文案 —— 见 `calibAxes.ts`）。
+ *
+ * ★ 2026-10-12 第三遍（作者：「这些字是我们自己做出来的，可以适当去放大」）：
+ *   字号整体上抬一档（老值 9~12 / 9.5~13 上下限各 +2 / +1.5）。这两行是我们
+ *   自己排的字，放大不牵动板子（板内刻字是 SVG 轮廓，改不了、也不跟着变）。
+ *   颜色另由 token 提亮（`--text-2/3` 那一刀）。
+ */
 .legend {
   margin: 0;
   text-align: center;
-  /* 跟板宽等比（cqw of .hudBoard）：正常 ~11px，窄窗缩到 9px —— 与板内刻字同档 */
-  font-size: clamp(9px, 0.92cqw, 12px);
+  /* 跟板宽等比（cqw of .hudBoard）：正常 ~13px，窄窗收到 11px */
+  font-size: clamp(11px, 1.05cqw, 14px);
   letter-spacing: 0.04em;
   color: var(--text-3);
 }
@@ -182,16 +239,38 @@
   margin: 0;
   text-align: center;
   /* 同上；窄窗一行放得下，不再折行盖过板子 */
-  font-size: clamp(9.5px, 1cqw, 13px);
+  font-size: clamp(12px, 1.12cqw, 14.5px);
   line-height: 1.5;
   color: var(--text-2);
 }
 
 .note {
   margin: 0;
-  font-size: var(--fs-label);
+  /* 2026-10-12 第三遍：板框里那行提示（「先回『选择机型』…」）抬一档 —— 
+     --fs-label 在常见宽度下只有 ~11.7px，作者圈过说看不清 */
+  font-size: calc(var(--fs-label) + 1px);
   line-height: 1.5;
   color: var(--text-3);
+}
+
+/* 「模型版本」那一行（2026-10-18：Z 板旧版 / 加长版）—— 与下面那句说明同一档字号、
+   同一档颜色，两颗胶囊并排。**只有多版的板才渲染整行**（单版由 TSX 那一侧判断）。 */
+.versionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.versionLabel {
+  font-size: calc(var(--fs-label) + 1px);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
+.versionBtns {
+  display: flex;
+  gap: 6px;
 }
 
 /* ---------- 测试模型那一步（作者第四轮定稿：不要背景，两侧留白） ---------- */
@@ -236,22 +315,51 @@
 
 /* ---------- 下缘 ---------- */
 
+/*
+ * 2026-10-10 第十一轮：读数与动作组装进**一张浮起的气泡**（作者：「我要的是气泡呀，
+ * 这个容器呀」—— 挑自抽卡页 07 的 `.hudBottom`）。原来它们裸贴在页底（只靠一条
+ * 隐形的留白分家），现在给它一个壳：白底 + 大圆角 + 两层轻影，四周留出浮起的余地。
+ *
+ * 字号 / 内衬 / 框高仍**连续**跟容器宽走（下面那些 cqw 一条不动）—— 气泡只加外壳、
+ * 不动内部刻度；`container-type` 照旧挂在它自己身上（容器 = 气泡实测宽）。
+ */
 .hudBottom {
   flex-shrink: 0;
+  /*
+   * 兜底：气泡永远在最上层（2026-10-11 第六轮）——
+   * 作者实测 1400×500 时 Z 板视口溢出、盖住这颗气泡，于是「放弃 / 保存 / 打开模型」
+   * 全被吞掉点击、指针还变成拖动。根因已在 `.hudBoard[data-step='z']` 那两条修掉，
+   * 这里再加一层：只给层级、不动任何刻度与尺寸，将来再有元素溢出也压不到它。
+   * （不加 `position` 的话 `z-index` 不生效 —— 静态定位元素不参与层叠。）
+   */
+  position: relative;
+  z-index: 1;
   display: flex;
-  align-items: flex-end;
+  /*
+   * 垂直**居中**（2026-10-10 作者：「那 3 个按钮在浮卡容器里是靠在下面的……
+   * 还不如居中」）—— 原来 `flex-end` 让按钮与读数的**底**对齐，三颗按钮吊在
+   * 下沿；居中后整组落回中线，只有一颗时也舒服。
+   */
+  align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 6px clamp(14px, 2vw, 24px) 6px;
-  /*
-   * 地板线（2026-10-05）：下缘以前没有上边线、带高 54.5，切进/切出校准时别的页
-   * 那条 y≈672 的地板线整条消失——「切到校准整页往下掉」的主体。补一条与参数页脚
-   * / BBS 状态条同款的上边线，底内衬 14→6，带高收到 47.5，线落在 672.5（参数 671
-   * / BBS 673，±2px）。读数行还是 HUD 台面的一段，只是台面在脚下收了条边。
-   */
-  border-top: 1px solid var(--line);
+  /* 气泡把自己从页底浮起来：左右与上缘那排同一条刻度，底部留出影子的余地 */
+  margin: 0 clamp(14px, 2vw, 24px) clamp(12px, 1.4vw, 18px);
+  padding: 10px clamp(14px, 2vw, 24px);
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow:
+    0 8px 24px rgb(20 32 45 / 9%),
+    0 1px 3px rgb(20 32 45 / 6%);
   /* 窄窗「读数一行按钮一行」地折行很难受（作者原话）—— 按实测宽度收紧两侧，保证一行 */
   container-type: inline-size;
+}
+
+/* 深色（2026-10-12 第二遍）：上面那道浅影在深底上看不见 —— 读数气泡的"浮起"会丢，换黑影 */
+[data-theme='dark'] .hudBottom {
+  box-shadow:
+    0 8px 24px rgb(0 0 0 / 42%),
+    0 1px 3px rgb(0 0 0 / 30%);
 }
 
 /*
@@ -260,17 +368,26 @@
  * 原来按 ≤880 / ≤660 两档整档收紧（轴名 11→10、mm 12→10、按钮 24→22…），
  * 拖窗跨线那一刻整个下缘"压一下"—— 轻，但也是跳变（作者 2026-10-05）。
  * 现在连续取值，锚点落在旧档位的值上；`dd input` 那两条档位覆盖整个撤掉，
- * 读数件自己的 `clamp(14px, 1.6vw, 17px)`（本来就是连续的）直接站出来。
+ * 读数件自己的那一档（现在叫 `--field-fs`，本来就是连续的）直接站出来。
  *
  * 顺带清一条死规则：`dt > span`（旧 660 档里 display:none 的那只）——
  * 「原 x.xx」从 span 改成 button 后它就匹配不到任何东西了，撤掉。
+ *
+ * 小字那一档（轴名 / 「原 x.xx」/ mm / 横杠）—— 2026-10-13 收成**一个变量**，
+ * 交给读数件自己用（见 CalibReadings.module.css 的 `--read-fs`）。
+ *
+ * 原来只有轴名按容器宽收紧（10~11），旁边那三个小字各写各的（11.5 / 12 / 跟着
+ * `--fs-label` 走）—— 同一行里几个小字三个大小，作者说的「字体有大有小」正是它。
+ * 现在四个共用这一条：收紧一起收，谁也不再跟谁差半号。
+ *
+ * 曲线整体比原来上移 0.5px（下限 10 → 10.5、常数 6.4 → 6.9、上限 11 → 11.5）：
+ * 「原 x.xx」当初就是因为"太小太浅"从 10.5 提到 11.5 的（见 `.axisFrom` 那条注释），
+ * 统一下压等于把那条推翻，所以取中间偏上那一档 —— 谁都不会显得小；窄窗也仍是一行
+ * （读数那几段字加起来离折行还差得远）。
  */
 .hudBottom dl {
   gap: clamp(8px, 2.1px + 0.9cqw, 14px) clamp(14px, 5.3px + 1.67cqw, 40px);
-}
-
-.hudBottom dt label {
-  font-size: clamp(10px, 6.4px + 0.45cqw, 11px);
+  --read-fs: clamp(10.5px, 6.9px + 0.45cqw, 11.5px);
 }
 
 .hudBottom dd label {
@@ -283,10 +400,317 @@
   gap: clamp(6px, 3px + 0.35cqw, 8px);
 }
 
+/*
+ * 三颗按钮**照抽卡页 07 那三颗做**（2026-10-10 第十一轮，作者：「打开模型的按钮、
+ * 放弃改动的按钮、保存的按钮，你要做成跟 7 里面的一样的呀」）—— 就是抽卡页 `.btn`
+ * 那组值：内衬 6/15、字号 12.5、胶囊 999 圆角，**宽度仍由内容定**（「打开模型」与
+ * 「放弃改动」都是 4 个字、自然一样宽，「保存」窄一点 —— 与 7 里一样）。
+ * a04 的下缘是**连续跟容器宽走**的刻度，所以这几个值写成 clamp、锚点落在抽卡页
+ * 那组上：窄窗按比例收，不跳档（旧的两档式收紧早撤了）。
+ */
 .hudBottom .actions button {
-  height: clamp(22px, 15px + 0.8cqw, 26px);
-  padding: 0 clamp(8px, 2px + 0.7cqw, 11px);
-  font-size: clamp(11px, 9px + 0.25cqw, 12px);
+  height: clamp(26px, 12px + 2.2cqw, 30px);
+  padding: 0 clamp(10px, 4px + 1.4cqw, 15px);
+  font-size: clamp(11.5px, 9.5px + 0.4cqw, 12.5px);
+  /* 胶囊（2026-10-10 作者：「按钮可以再加大一点点圆角」）—— 全站 999px 的例外归队 */
+  border-radius: 999px;
+}
+
+/*
+ * ---------- 台面底缘那条悬浮药丸（a05 第十六轮） ----------
+ *
+ * 2026-10-11（作者，四轮反馈逼出来的正解）：
+ *   「不要压着我下面的，往上面挪」（第一轮：落在读数行上）→
+ *   「这也太上了……会挡住本地 svg，得换一种算法，不是换位置就能解决的」（第二轮：
+ *     往上挪又压板子）→「提前预留好位置，可以用上面的三分之一去压住 svg……
+ *     不要出现才移动」（第三轮：位置提前留）→「不对呀，圈起来的要贴着下对齐……
+ *     svg 可以上移，缩小一点的，提前预留下面位置给悬浮药丸」（第四轮：**贴下缘**）。
+ *
+ * 病根一直是"出现时才缩身"：`.hudBoard` 是 `flex:1`，药丸一来板子当场缩一段，
+ * 于是"一出现就缩放 + 移动"。解法：高度**提前**从台面扣掉（`.root` 的
+ * `--shiftbar-h` + `.hudBoard` 的 `padding-bottom`）—— 药丸在不在，板子都那么大。
+ *
+ * 位置：**绝对定位钉在台面的下内边距线上**（`bottom: calc(6px + 8px)`，与板子多高、
+ * 哪一步、窗口多高都无关）—— 就是作者指的"贴着下面"：它与下方气泡之间的距离
+ * 恒等于那 14px，而空出来的那 32px 预留格落在它上面。
+ *
+ * 为什么不按文档流（`margin-top: auto`）排在板子后面：那是上一版翻车的地方 ——
+ * XY 步的视口是 `flex:1` 且**居中**放方板（PlateZoom 的 `place-items`），
+ * 空当全在板子**下面**，药丸排在板子后面就悬在半空、离底缘还差一大截
+ * （作者圈的第 2 张图）。钉在底缘才与"板子怎么放"无关。
+ *
+ * ★ 2026-10-11 第七轮（作者：「这些字应该被压在药丸下面才对」）——
+ * **药丸必须显式给 `z-index`**，否则被板子压在下面：
+ *
+ *   板子的视口是 `position: relative`（PlateZoom.module.css 的 `.viewport`），
+ *   药丸是 `position: absolute`，两者 z-index 都是 `auto` —— 同一层叠上下文里
+ *   **按 DOM 顺序绘制，后面的画在上面**。而 TSX 里 `{changeBar}` 排在
+ *   `{plateView}` 之前，于是板子反而画在药丸之上：XY 步药丸落在板子上，
+ *   板底那行「← 负数 →」「正数 →」就直接盖过药丸、清清楚楚（毛玻璃看着像失效）。
+ *   Z 步药丸落在板子下方的空白区、与板子不重叠，所以一直没暴露。
+ *
+ * 给了 `z-index: 2` 之后，板子才真的在药丸**下面** —— 既被压住，
+ * `backdrop-filter` 也才取得到板子内容、模糊出真正的液态玻璃。
+ */
+.changeBar {
+  position: absolute;
+  /* 压过板子视口（它是 position:relative + z-index:auto，按 DOM 顺序会画在上面） */
+  z-index: 2;
+  /*
+   * 钉在台面底端：`.hudBoard` 的底部内边距是 `6px + --shiftbar-h`，所以"下缘之上的
+   * 小间隙"就是 `6px + --shiftbar-h` 往上一格 —— 取 8px 呼吸，落在预留格底端。
+   */
+  bottom: calc(6px + 8px);
+  left: 0;
+  right: 0;
+  /* 居中收口：与老版同款，窄窗也不顶到页边 */
+  margin-inline: auto;
+  /* 不抢命中：条外空白落到板子上（仍能点板子上的格子） */
+  pointer-events: none;
+
+  /*
+   * 宽度由 **JS 弹簧动画**接管（2026-10-11 第八轮，作者：「还是一瞬间就变宽变窄了，
+   * 没有 iOS 那种弹跳、果冻的效果」）—— 见 PageCalib.tsx 的 `springWidth()`。
+   *
+   * 这里只留**没有 JS 时的回退**。`max-width` 照旧 `100%` 封顶（窄窗不顶到页边），
+   * 它只封顶、不参与补间。
+   *
+   * 为什么 CSS 做不了这件事（两轮都栽在这一点上）：
+   *   - `width: fit-content` → `fit-content` 不是可插值的长度，`transition: width` 无效；
+   *   - 改成 `transition: max-width` 是**空转**：两态都是 100%，没有变化量；
+   *   - `width: calc-size(fit-content, size)` 理论上可插值（`CSS.supports` 也返回 true），
+   *     但实测这条路径的补间并没真正跑起来，而且它只能做**单调**补间 ——
+   *     作者要的"弹跳/果冻"是带 **overshoot（冲过头再回弹）** 的弹簧曲线，
+   *     CSS 的 `transition` 表达不了。
+   * 所以交给 JS：显式 px 宽度 + Web Animations API 的多段关键帧做回弹。
+   */
+  width: fit-content;
+  max-width: 100%;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 14px;
+  border-radius: 999px;
+  /*
+   * ★ 绝不换行（2026-10-11 第八轮，作者：「不要换行，无论如果都不要自动换行」）——
+   * 上一版宽度动画的中间帧里，宽度短暂小于内容宽，flex 就把「未保存的改动」
+   * 折成了两行。两条一起兜：
+   *   - `flex-wrap: nowrap`：flex 容器绝不折行（默认值，但**显式写出来**，
+   *     免得将来有人加了 wrap 又把这条规矩破坏掉）；
+   *   - `white-space: nowrap`：连文字内部的换行机会也去掉，双保险。
+   * 宽度动画期间宁可让内容溢出（`overflow: hidden` 会裁掉一点），也不许折行。
+   */
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  overflow: hidden;
+  /*
+   * 液态玻璃（2026-10-11 第七轮，作者：「没有透明的模糊效果，你去抄一下别人开源的」）
+   * —— 照两个开源实现重写，不再自己拍数值：
+   *
+   *   ① kevinbism/liquid-glass-effect：`.glass { background: rgba(255,255,255,.15);
+   *      backdrop-filter: blur() saturate(180%); border: 1px rgba(255,255,255,.8);
+   *      box-shadow: 外阴影 + inset 内光 }`
+   *   ② iOS 26 复刻（wrenink）：`backdrop-filter: blur(28px) saturate(180%)` +
+   *      `background: linear-gradient(135deg, rgba(255,255,255,.55), rgba(255,255,255,.15))`
+   *      + `border: 1px rgba(255,255,255,.4)` + `inset 0 1px 0` 顶光。
+   *
+   * 上一版"看不出玻璃"的两个原因：
+   *   - blur 只有 20px，且**背景是单色平铺** —— 单色 + 模糊 = 一块实底，没有玻璃的
+   *     厚度；改成 **135° 渐变**（左上厚、右下薄）才有"一块斜放的玻璃"的观感。
+   *   - 缺 `saturate(180%)` 的补偿不到位：高斯模糊会把底下颜色冲淡发灰，必须
+   *     靠 saturate 补回来，否则糊成一团灰。
+   *
+   * ★ blur 最终是 **1px**（2026-10-11 作者实测定稿：「我改成了 1，效果很好」）。
+   *   从 20 → 28 → 1：板子底下那些线和小字**不需要糊掉**（药丸加了 `z-index: 2`
+   *   之后它们已经被压在下面、不干扰阅读），而 28px 把底下整个糊成一团均匀的雾，
+   *   反而丢掉了"隔着一层玻璃看见东西"的质感 —— 1px 只磨掉像素级毛刺，
+   *   玻璃感全交给渐变厚度 + 极细暗边 + 顶光去表达。与 trae-counter 那个
+   *   `GlassCircleButton` 的 1px 是同一个判断（见下面边框那段注释）。
+   */
+  /* 2026-10-11 第七轮微调（作者：「往下调」）：0.58/0.30 → 0.45/0.22 —— 更透，
+     底下板子的模糊更明显；再往下文字就该发飘了，这是可读的下限附近 */
+  background: linear-gradient(135deg, rgb(255 255 255 / 45%), rgb(255 255 255 / 22%));
+  /* 两条必须同值：Safari 只认 `-webkit-` 前缀那条，Chrome 认标准的 —— 不同值会两个浏览器两个样 */
+  -webkit-backdrop-filter: blur(1px) saturate(180%);
+  backdrop-filter: blur(1px) saturate(180%);
+  color: var(--text-1);
+  /*
+   * 边缘照 trae-counter 的 `GlassCircleButton`（frontend/src/App.tsx）——
+   * 它浅色模式用的是**暗色极细边**，不是开源那版的白边：
+   *   border: 0.5px solid rgba(0,0,0,0.08)
+   *   box-shadow: 0 0 0 0.5px rgba(0,0,0,0.04), inset 0 0.5px 1px rgba(255,255,255,0.5)
+   * 白边在我们的白卡面（--card-face #fbfcfd）上等于没有 —— 药丸只剩一团外阴影，
+   * 缺了"玻璃那一圈边"，看着就是一块雾。换成极细暗边，形状才立得住。
+   * （blur 最后也跟它一样取 1px —— 见上面那段，作者实测定稿。）
+   */
+  border: 0.5px solid var(--hover-1);
+  box-shadow:
+    /* 极细暗环：比 border 更精致的一圈（trae 那版的 `0 0 0 0.5px`） */
+    0 0 0 0.5px var(--surface-sunken),
+    /* 顶光：柔光一道（trae 的 `inset 0 0.5px 1px`，比硬 1px 更像玻璃反光） */
+    inset 0 0.5px 1px rgb(255 255 255 / 50%),
+    0 10px 30px rgb(20 32 45 / 14%),
+    0 1px 3px rgb(20 32 45 / 8%);
+  font-size: var(--fs-label);
+  /*
+   * **不要**在这里写 `transition: width` —— 宽度动效已由 JS 的弹簧关键帧接管
+   * （见上面那段注释）。两条并存会互相打架：CSS transition 会把 WAAPI 的关键帧
+   * 抹平成单调补间，回弹就没了。
+   */
+  /*
+   * 出现时的动效：只**淡入**，一个像素都不动 —— 位置已经预留好，
+   * 再让它浮起 / 滑进来就又变成"出现才移动"了（作者要的正是"不动"）。
+   */
+  animation: change-fade 0.2s ease-out both;
+}
+
+/*
+ * 那串"改了哪几轴"就是胶囊宽度的驱动源（2026-10-11，作者：「文案改一下，不要用 /
+ * 分开或者其他的分开」→「这个胶囊的宽度变化需要动画」）——
+ *
+ * 分隔不用「，」也不用「/」：每一轴自己是一颗小格子（轴名 + 原值 → 新值），
+ * 格子之间用一条**极淡的竖线**分开。改动的轴数一变，格子增减 → 本元素的
+ * `fit-content` 自然宽随之变化 → `.changeBar` 的 `width: calc-size(fit-content, size)`
+ * 一路补间过去（见 `.changeBar`）。
+ *
+ * 这里**不要**再写 `transition: max-width`：之前那条是空转（两态同为 100%），
+ * 现已由 `.changeBar` 的 `width` 过渡统一负责。
+ */
+.changeList {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 一格 = 一轴。相邻格之间竖一条淡线（第一格前面不画） */
+.changeAxis {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.changeAxis + .changeAxis {
+  margin-left: 9px;
+  padding-left: 9px;
+  border-left: 1px solid var(--hover-2);
+}
+
+/* 轴名（X / Y / Z）退一档，值才是主角 */
+.changeAxisName {
+  color: var(--text-3);
+}
+
+.changeFrom {
+  color: var(--text-3);
+}
+
+.changeArrow {
+  color: var(--text-3);
+  opacity: 0.7;
+}
+
+.changeTo {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+@keyframes change-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* 保存成功那一态：一句回执，不抢"未保存"的戏 */
+.changeBar[data-saved='true'] {
+  background: rgb(32 178 90 / 16%);
+  color: var(--accent-deep);
+}
+
+/*
+ * 颜色档 2：**提示**（没选机型时）—— 2026-10-10，作者：「还是不好看，不只是颜色的问题」。
+ *
+ * 整条**不上琥珀色**：一条长句铺满整条已经够重了，再铺一层底色就变成一整块色块。
+ * 改成——整条中性（与 NoteBar 中性款同底），"这是提示"这件事交给**开头那颗琥珀小圆点**
+ * （预设页「未保存」那颗点就是这个语言：点，不是块）；右端那颗 accent 按钮给重量、
+ * 也把条子另一头锚住，于是它和黑条是同一个模子，只是安静一档。
+ */
+.changeBar[data-tone='hint'] {
+  background: rgb(255 255 255 / 52%);
+  color: var(--text-2);
+}
+
+/* 补充那半句退一档：主句说"缺什么"，它说"差哪一步" */
+.changeBar[data-tone='hint'] .changeList {
+  color: var(--text-3);
+}
+
+.hintDot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.changeAction {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.changeAction:hover {
+  background: var(--accent-deep);
+}
+
+.changeDot {
+  opacity: 0.55;
+}
+
+.changeSp {
+  flex: 1;
+}
+
+.changeBar button {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 13px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+  /* 条子整体 pointer-events:none（条外空白落到板子上），按钮自己要收回命中 */
+  pointer-events: auto;
+}
+
+.changeGhost {
+  background: var(--hover-1);
+  color: var(--text-2);
+}
+
+.changeGhost:hover {
+  background: var(--hover-2);
+  color: var(--text-1);
+}
+
+.changeSave {
+  background: var(--text-1);
+  color: var(--bg-1);
+  font-weight: 600;
+}
+
+.changeSave:hover:not(:disabled) {
+  background: var(--text-2);
+}
+
+.changeSave:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .actions {
@@ -305,4 +729,35 @@
 
 .state[data-on='true'] {
   visibility: visible;
+}
+/* （浮动条上那颗「保存」原来也有一条"深色里换中性亮面"的补丁 —— 已删：
+   `.changeSave` 现在是**反色配对**（`--text-1` 底 + `--bg-1` 字），hover 走 `--text-2`，
+   深浅一条规则全成立。作者截图："深色的时候一些按钮的重点就没了"。） */
+
+/*
+ * 深色（2026-10-12 第二遍）：**整条药丸换成"黑玻璃"**。
+ *
+ * 上面那条 135° 白渐变（45% / 22%）是给白卡面调的 —— 深色里它就是一整条发亮的
+ * 浅色横带（截图 4 红框那条「先选一份预设…」）。液态玻璃的配方不动
+ * （1px blur + saturate 还是那套），只换"玻璃本身的色"：白 12% → 5% 的斜渐变
+ * = 深底上"提亮一档"的磨砂面；外阴影的墨色换成黑影（浅影在深底上等于没画）；
+ * 顶光降到 14%（深底上 50% 会成一条白线）。
+ */
+[data-theme='dark'] .changeBar {
+  background: linear-gradient(135deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 5%));
+  box-shadow:
+    0 0 0 0.5px var(--surface-sunken),
+    inset 0 0.5px 1px rgb(255 255 255 / 14%),
+    0 10px 30px rgb(0 0 0 / 42%),
+    0 1px 3px rgb(0 0 0 / 30%);
+}
+
+/* 「提示」档那条基础色（浅色是白 52%）同一条换法：深色 = 白 12% 平铺 */
+[data-theme='dark'] .changeBar[data-tone='hint'] {
+  background: rgb(255 255 255 / 12%);
+}
+
+/* 「保存成功」回执：底色还是淡绿，但字要用深色档的亮绿（accent-deep 在深底上发闷） */
+[data-theme='dark'] .changeBar[data-saved='true'] {
+  color: var(--accent);
 }

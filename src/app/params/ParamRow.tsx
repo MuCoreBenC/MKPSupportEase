@@ -38,7 +38,9 @@
  * 判据只有一处：`def.deprecated`（定义通道带出来的原词），落到 `data-dep`。
  */
 
+import { useCallback, useState } from 'react'
 import type { ParamSyncEntry } from '../../api'
+import { t, useT, type StringKey } from '../../i18n'
 import FieldControl from '../../components/field/FieldControl'
 import Highlight from './highlight'
 import { valueText } from './useParams'
@@ -51,24 +53,48 @@ interface Props {
   value: string
   /** 已保存的那一层 —— 还原 chip 指向的就是它 */
   savedValue: string
+  /**
+   * **上一次保存之前的值**（2026-10-21，作者：「保存之后还是那样显示，
+   * 还需要一个我的旧值；不只是更新才有，所有的都能记录下来」）。
+   * `null` = 没记录过（从没保存过它的改动 / 清过历史）—— 那就什么也不画。
+   */
+  prevSavedValue?: string | null
   /** 出厂值 —— 只在展开的行详情里显示 */
   factoryValue: string
   dirty: boolean
   /**
-   * 这一项上的**官方更新账**（我 / 官方旧值 / 官方新值）。
+   * 这一项上的**云端更新账**（我 / 云端旧值 / 云端新值）。
    *
-   * `undefined` = 这一段没有"官方更新"这回事（官方线那一份 / 认不出是哪一版官方）——
+   * `undefined` = 这一段没有"云端更新"这回事（云端线那一份 / 认不出是哪一版云端）——
    * 那时行上什么都不画，与以前长得一模一样。
    */
   sync?: ParamSyncEntry
+  /**
+   * 这一项在**草稿层**表过什么态（2026-10-20）：
+   *
+   *   `adopt` 已经「用新值」了（草稿值 = 云端新值，还没保存）
+   *   `hold`  已经「保持原样」了（值没动）
+   *   `null`  还没表态 —— 右边给那两颗按钮
+   *
+   * 与 `sync.decided` 分开：那个是**上一次保存**落下的账，这个是这一屏还没保存的那一笔。
+   */
+  syncDraft?: 'adopt' | 'hold' | null
   /** 这一项「用新值」；不传就画不出那两颗按钮（比如只读视图） */
   onAdoptSync?: (key: string) => void
-  /** 这一项「保持我的值」 */
+  /** 这一项「保持原样」 */
   onHoldSync?: (key: string) => void
-  /** 官方当前版的字节还没取回来 —— 那时只画"官方已更新"，不画差异 */
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持，退回已保存值 */
+  onUseMyValue?: (key: string) => void
+  /** 云端当前版的字节还没取回来 —— 那时只画"云端已更新"，不画差异 */
   syncBusy?: boolean
   /** 被条件参数关掉：看得见、改不动 */
   blockedBy?: BlockedBy | null
+  /**
+   * 收拢支里的行**不画**「需先让…」副标题（2026-10-21）：收拢的支本来就收进 0fr，
+   * 但收起动画那 240ms 里行还看得见 —— 那一刻副标题会瞬间多一行闪出来（作者截图）。
+   * 收拢的支里行本来不可见，这一格藏掉没有别的代价。
+   */
+  suppressNote?: boolean
   /**
    * 上面要不要那条分隔线。原来是 `.wrap + .wrap` 相邻选择器画的，但树把行隔进了
    * 各自的分支容器里，相邻链到处断；改成由 ParamCard 摆行时显式给
@@ -81,6 +107,13 @@ interface Props {
   /** 退回已保存值 */
   onRevertToSaved: (key: string) => void
   /**
+   * **只读**（2026-10-16 的两态）：控件整个替成**纯文本值**（`valueText` 的那套翻译，
+   * 与参数对比台的只读值同一长相）——「看得见、改不动」的第三种画法，
+   * 与 blocked / 弃用那两档**不叠用**（那两档画的是灰控件，这里是文本）。
+   * 还原 chip 也不摆（chip 是个写入口）。
+   */
+  readonly?: boolean
+  /**
    * 搜索词：行名与展开后那几格里命中的字加底。
    * 不搜索时是空串 —— `Highlight` 收到空串原样返回，不白包一层。
    */
@@ -92,11 +125,11 @@ interface Props {
  * `valueType`，就该把它说出来：**控件说的是「画成什么」，类型说的是「值是什么」**。
  * 括号里的英文是包里那个原词，作者点名要的就是它（「string，bool 之类的」）。
  */
-const TYPE_TEXT: Record<'float' | 'int' | 'bool' | 'string', string> = {
-  float: '浮点小数',
-  int: '整数',
-  bool: '布尔（开 / 关）',
-  string: '文本',
+const TYPE_TEXT: Record<'float' | 'int' | 'bool' | 'string', StringKey> = {
+  float: 'params.type.float',
+  int: 'params.type.int',
+  bool: 'params.type.bool',
+  string: 'params.type.string',
 }
 
 const OP_TEXT: Record<'eq' | 'neq' | 'gt', string> = { eq: '=', neq: '≠', gt: '>' }
@@ -105,17 +138,17 @@ function rangeText(def: ParamDef): string {
   const f = def.field
   if (f.control !== 'number') return '—'
   const unit = f.unit !== undefined ? ` ${f.unit}` : ''
-  const stepPart = f.step !== undefined ? `步长 ${f.step}${unit}` : ''
+  const stepPart = f.step !== undefined ? t('params.step', { step: f.step, unit }) : ''
   /* 注册表里没写范围的字段不要编一个「不限 ~ 不限」出来 */
   const bounded = f.min !== undefined || f.max !== undefined
-  if (!bounded) return stepPart === '' ? '没有写明范围' : `没有写明范围 · ${stepPart}`
-  const lo = f.min === undefined ? '不限' : String(f.min)
-  const hi = f.max === undefined ? '不限' : String(f.max)
+  if (!bounded) return stepPart === '' ? t('params.noRange') : t('params.noRangeStep', { step: stepPart })
+  const lo = f.min === undefined ? t('params.unbounded') : String(f.min)
+  const hi = f.max === undefined ? t('params.unbounded') : String(f.max)
   return stepPart === '' ? `${lo} ~ ${hi}${unit}` : `${lo} ~ ${hi}${unit} · ${stepPart}`
 }
 
 function choicesText(def: ParamDef): string {
-  if (def.field.control === 'switch') return '关闭 / 开启'
+  if (def.field.control === 'switch') return t('params.switchRange')
   if (def.field.control === 'choice') {
     return (def.field.choices ?? []).map((c) => c.label).join(' / ')
   }
@@ -126,40 +159,81 @@ export default function ParamRow({
   def,
   value,
   savedValue,
+  prevSavedValue = null,
   factoryValue,
   dirty,
   sync,
+  syncDraft = null,
   onAdoptSync,
   onHoldSync,
+  onUseMyValue,
   syncBusy = false,
   blockedBy = null,
+  suppressNote = false,
   sep = false,
   expanded = false,
   onToggleExpand,
   onEdit,
   onRevertToSaved,
+  readonly = false,
   query = '',
 }: Props) {
+  /* 这一行的话术入口：语言一变整行重渲染（`t` 那个模块级出口不订阅语言） */
+  const tr = useT()
   const blocked = blockedBy !== null
   /* 已弃用：第三档，不并进 blocked —— 见文件头。判据只有这一处（定义通道带的原词） */
   const dep = def.deprecated
   /* 改不动：条件关着，或已弃用 —— 两者控件都是 disabled，但文案与长相分开 */
   const locked = blocked || dep
-  const savedText = valueText(def, savedValue)
-  const factoryText = valueText(def, factoryValue)
+  const savedText = valueText(def, savedValue, tr)
+  const factoryText = valueText(def, factoryValue, tr)
 
   /*
-   * 官方更新：三方都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
+   * **打字不合法也要有「还原」出口**（2026-10-20，作者：「这个时候就可以显示
+   * 恢复的了呀」）：失焦闸把人困在框里之后，那个状态本来只有按 Esc 一条暗路。
+   * 未提交的打字不进草稿（`dirty` 不知道它），所以这一层自己记：
+   * 数字控件报"正在打一个不合法的值"时，chip 照常显示。
+   * 点它 = 草稿有改动就退回已保存值（老路），框里没提交的原文一并清掉
+   * （`resetSignal` 那一拍 —— 宿主"还原"一个没进草稿的值是 noop，`value` 不变）。
+   */
+  const [badTyping, setBadTyping] = useState(false)
+  const [resetNonce, setResetNonce] = useState(0)
+  const onInvalidTyping = useCallback((v: boolean) => setBadTyping(v), [])
+
+  /*
+   * 云端更新：三态都摊在这一行的名字下面（**不另开一块** —— 它说的就是这一项的事）。
    *
-   *   待处理   官方 18.6 → 19.0   [用新值] [保持我的]
-   *   处理过了 已采用官方新值 / 保持了我的值（一枚淡徽章，说明官方这一版已经处理过）
+   *   还没表态   云端已更新 · 云端 18.6 → 19.0          [用新值] [保持原样]
+   *   已采用     已采用云端新值 · 我的 18.6 → 云端 19.0   （点这一行展开，右栏能「用回我的值」）
+   *   已保持     保持原样 · 云端 18.6 → 19.0            [改用新值]
+   *   保存过了   已采用云端新值 / 保持原样（一枚淡徽章，说明云端这一版已经处理过）
    */
   const syncPending = sync?.pending === true
+  /** 草稿层的表态只对**还在待处理**的项有意义（保存过之后归 `sync.decided` 管） */
+  const syncDraftKind = syncPending ? syncDraft : null
   const syncDecided = sync?.decided ?? null
+  /** 「云端 18.6 → 19.0」 */
   const diffText =
-    sync !== undefined && sync.baselineOld !== null && sync.officialNew !== null
-      ? `官方 ${valueText(def, sync.baselineOld)} → ${valueText(def, sync.officialNew)}`
+    sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
+      ? t('params.cloudArrow', {
+          before: valueText(def, sync.baselineOld, tr),
+          after: valueText(def, sync.cloudNew, tr),
+        })
       : null
+  /*
+   * 「我的 18.6 → 云端 19.0」—— 采用之后要说得清"换掉的是我哪个值"。
+   * **保存之后**（decided）`sync.local` 已经是新值了，"我的哪个值"就换
+   * **上一次保存之前的那个**（`prevSavedValue`）—— 作者 2026-10-21：
+   * 「保存之后还是那样显示的，不是这样都变成新的」。
+   */
+  const prevOrLocal = prevSavedValue ?? sync?.local ?? null
+  const mineToCloud =
+    sync !== undefined && prevOrLocal !== null && sync.cloudNew !== null
+      ? t('params.mineArrow', {
+          before: valueText(def, prevOrLocal, tr),
+          after: valueText(def, sync.cloudNew, tr),
+        })
+      : diffText
 
   return (
     <div
@@ -181,93 +255,160 @@ export default function ParamRow({
           type="button"
           className={s.left}
           aria-expanded={expanded}
-          onClick={() => onToggleExpand?.(def.key)}
+          /*
+           * 行名可以拖选（2026-10-20 作者：「这个标题我要可以选」）—— 样式见 module.css。
+           *
+           * 拖选的松手会落在这个按钮上，不能顺手把行收起来：**选区还在按钮里
+           * （anchorNode 在按钮内部）就不切展开态**。点在别处 / 没有选区时照旧开合。
+           */
+          onClick={(e) => {
+            const sel = window.getSelection()
+            if (
+              sel !== null &&
+              !sel.isCollapsed &&
+              sel.anchorNode !== null &&
+              e.currentTarget.contains(sel.anchorNode)
+            ) {
+              return
+            }
+            onToggleExpand?.(def.key)
+          }}
         >
           <span className={s.labelWrap}>
-            <span className={s.label}>
-              <Highlight text={def.label} query={query} />
+            <span className={s.head}>
+              <span className={s.label}>
+                <Highlight text={def.label} query={query} />
+              </span>
+              {/*
+               * `?` 是行名的后缀，紧贴名字（2026-10-21 作者：「跟着标题后面，可以适当缩小」）；
+               * 悬停（`title`）说的是**这一项是什么**（注册表的 desc），不是「点它展开」——
+               * 作者点名要的就是那句说明。说明为空时退回一句「点这一行看详情」，不摆空泡。
+               */}
+              <span
+                className={s.info}
+                aria-hidden
+                title={def.desc === '' ? t('params.rowTitle') : def.desc}
+              >
+                ?
+              </span>
             </span>
             {/*
              * 那句橙字只给「换个条件就能用」的行。弃用的行说它就是假话 —— 它正在退场，
              * 跟条件满不满足无关，原因由徽章说。
              */}
-            {blocked && !dep && (
+            {blocked && !dep && !suppressNote && (
               <span className={s.note}>
-                需先让「{blockedBy.label}」{blockedBy.need}
+                {t('params.blockedBy', { label: blockedBy.label, need: blockedBy.need })}
               </span>
             )}
             {/*
-             * 官方更新那两行**只放文字**：这一段整个包在一个 `<button>` 里
+             * 云端更新那两行**只放文字**：这一段整个包在一个 `<button>` 里
              * （点它展开行详情），里面再嵌按钮就是非法结构 —— 两个动作住右边那一格。
              */}
-            {syncPending && (
+            {syncPending && syncDraftKind === 'adopt' && (
               <span className={s.syncNote}>
-                <span className={s.syncBadge}>官方已更新</span>
+                <span className={s.syncBadgeAdopted}>{t('params.syncAdopted')}</span>
+                {mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>}
+              </span>
+            )}
+            {syncPending && syncDraftKind === 'hold' && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadgeHold}>{t('params.syncHold')}</span>
+                {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
+              </span>
+            )}
+            {syncPending && syncDraftKind === null && (
+              <span className={s.syncNote}>
+                <span className={s.syncBadge}>{t('params.syncUpdated')}</span>
                 {diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
             {!syncPending && syncDecided !== null && (
               <span className={s.syncDecided}>
-                {syncDecided === 'adopt' ? '已采用官方新值' : '保持了我的值'}
+                {syncDecided === 'adopt' ? t('params.syncAdopted') : t('params.syncHold')}
+                {/* 保存过的那一版也把数字留着（2026-10-21）：
+                    采用 =「我的旧值 → 云端新值」，保持 =「云端旧值 → 云端新值」 */}
+                {syncDecided === 'adopt'
+                  ? mineToCloud !== null && <span className={s.syncDiff}>{mineToCloud}</span>
+                  : diffText !== null && <span className={s.syncDiff}>{diffText}</span>}
               </span>
             )}
-          </span>
-          <span className={s.info} aria-hidden>
-            ?
           </span>
         </button>
 
         <span className={s.right}>
           {/*
-           * 官方更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
+           * 云端更新那两个动作。**只有待处理的项才画它们** —— 处理过的项显示一枚淡徽章
            * （在上面名字那一格），不再给按钮：已经处理完的事不该留着可点的入口。
            *
-           * 「用新值」在官方当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
+           * 「用新值」在云端当前版字节还没取回来时是灰的（新值不知道是哪来的，点下去
            * 只会得到一个错），原因写在 title 里 —— 灰一颗按钮不说为什么，用户只会以为坏了。
            */}
-          {syncPending && onAdoptSync !== undefined && (
+          {syncPending && syncDraftKind === null && onAdoptSync !== undefined && (
             <button
               type="button"
               className={s.syncBtn}
-              disabled={syncBusy || sync?.officialNew === null}
+              disabled={syncBusy || sync?.cloudNew === null}
               title={
-                sync?.officialNew === null
-                  ? '官方当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它'
-                  : `采用官方新值：把这一项写成 ${diffText ?? '官方当前值'}（写进我这份文件）`
+                sync?.cloudNew === null
+                  ? tr('params.row.adoptTitleNoCloud')
+                  : tr('params.row.adoptTitle', {
+                    value: diffText ?? tr('params.row.cloudCurrent'),
+                  })
               }
               onClick={() => onAdoptSync(def.key)}
             >
-              用新值
+              {tr('params.row.adopt')}
             </button>
           )}
-          {syncPending && onHoldSync !== undefined && (
+          {syncPending && syncDraftKind === null && onHoldSync !== undefined && (
             <button
               type="button"
               className={s.syncBtnGhost}
               disabled={syncBusy}
-              title={`保持我的值：这一项写着的 ${savedText} 一个字不动（官方以后再改它还能再问你一次）`}
+              title={tr('params.row.holdTitle', { value: savedText })}
               onClick={() => onHoldSync(def.key)}
             >
-              保持我的
+              {tr('params.row.hold')}
             </button>
           )}
-          {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值） */}
-          {dirty && !locked && (
+          {/* 已保持还想改用云端新值：给一条回头路，不用先撤销再重来 */}
+          {syncPending && syncDraftKind === 'hold' && onAdoptSync !== undefined && (
+            <button
+              type="button"
+              className={s.syncBtn}
+              disabled={syncBusy || sync?.cloudNew === null}
+              title={tr('params.row.adoptShortTitle')}
+              onClick={() => onAdoptSync(def.key)}
+            >
+              {tr('params.row.adoptShort')}
+            </button>
+          )}
+          {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
+              打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
+          {(dirty || badTyping) && !locked && !readonly && (
             <button
               type="button"
               className={s.restore}
-              title={`还原为已保存的 ${savedText}（数据包里是 ${factoryText}）`}
-              onClick={() => onRevertToSaved(def.key)}
+              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
+              onClick={() => {
+                onRevertToSaved(def.key)
+                setResetNonce((n) => n + 1)
+                setBadTyping(false)
+              }}
             >
               ↩ {savedText}
             </button>
           )}
           {dep && (
-            <span className={s.depBadge} title="该参数已弃用，不再写入新预设">
-              已弃用
+            <span className={s.depBadge} title={tr('params.row.deprecatedBadgeTitle')}>
+              {tr('params.row.deprecatedBadge')}
             </span>
           )}
-          {def.field.control === 'number' ? (
+          {readonly ? (
+            /* 只读态：纯文本值（编辑模式之外的那一态，见 Props.readonly） */
+            <span className={s.roVal}>{valueText(def, value, tr)}</span>
+          ) : def.field.control === 'number' ? (
             /*
              * 数字步进器包一层同款的 `.edNum`（作者：「我专门调整过的，应该可以复用」）：
              *   132px 定宽 —— 箭头永远靠右落在同一条竖线上，不跟数值长短左右跳；
@@ -284,6 +425,8 @@ export default function ParamRow({
                 form="row"
                 disabled={locked}
                 focusOnBoxClick
+                onInvalidTyping={onInvalidTyping}
+                resetSignal={resetNonce}
                 onChange={(next) => onEdit(def.key, next)}
               />
             </span>
@@ -293,6 +436,8 @@ export default function ParamRow({
               raw={value}
               form="row"
               disabled={locked}
+              onInvalidTyping={onInvalidTyping}
+              resetSignal={resetNonce}
               onChange={(next) => onEdit(def.key, next)}
             />
           )}
@@ -306,27 +451,28 @@ export default function ParamRow({
          * 不展开就看不见它为什么被搜出来；「如果是数字也可以」落在已保存值 / 出厂值 /
          * 取值范围上，走的是同一段代码。
          */
-        <dl className={s.detail}>
+        <div className={s.detailWrap}>
+          <dl className={s.detail}>
           {/*
             弃用的行，展开后第一格就说清「它到底是什么」：上游标了弃用 —— 显示但只读，
             不再写入新预设。用户看到「为什么这个改不动」的答案在第一步。
           */}
           {dep && (
             <>
-              <dt className={s.dt}>状态</dt>
+              <dt className={s.dt}>{tr('params.row.dt.status')}</dt>
               <dd className={s.ddDep}>
-                已弃用 —— 该参数不再写入新预设，此处仅供查看（上游注册表已标记）
+                {tr('params.row.deprecatedNote')}
               </dd>
             </>
           )}
-          <dt className={s.dt}>说明</dt>
+          <dt className={s.dt}>{tr('params.row.dt.desc')}</dt>
           <dd className={s.dd}>
             <Highlight
-              text={def.desc === '' ? '注册表里没写说明' : def.desc}
+              text={def.desc === '' ? tr('params.row.noDesc') : def.desc}
               query={query}
             />
           </dd>
-          <dt className={s.dt}>取值范围</dt>
+          <dt className={s.dt}>{tr('params.row.dt.range')}</dt>
           <dd className={s.dd}>
             <Highlight text={choicesText(def)} query={query} />
           </dd>
@@ -336,46 +482,127 @@ export default function ParamRow({
             控件（开关 / 分段 / 步进器）说的是「画成什么」，类型说的是「值是什么」，
             两者不是一回事（开关是 bool，下拉是 string）。
           */}
-          <dt className={s.dt}>类型</dt>
+          <dt className={s.dt}>{tr('params.row.dt.type')}</dt>
           <dd className={s.dd}>
-            {TYPE_TEXT[def.meta?.valueType ?? 'string']}
+            {t(TYPE_TEXT[def.meta?.valueType ?? 'string'])}
             <span className={s.typeKey}> {def.meta?.valueType ?? 'string'}</span>
           </dd>
           {/* 条件：这条什么条件下才显示 —— 同样来自包里的 showWhen */}
           {def.meta?.showWhen !== undefined && (
             <>
-              <dt className={s.dt}>显示条件</dt>
+              <dt className={s.dt}>{tr('params.row.dt.showWhen')}</dt>
               <dd className={s.dd}>
-                要「{def.meta.showWhen.key}」{OP_TEXT[def.meta.showWhen.op]}{' '}
-                {String(def.meta.showWhen.value)} 才显示
+                {tr('params.row.showWhen', {
+                  key: def.meta.showWhen.key,
+                  op: OP_TEXT[def.meta.showWhen.op],
+                  value: String(def.meta.showWhen.value),
+                })}
               </dd>
             </>
           )}
-          <dt className={s.dt}>字段名</dt>
+          <dt className={s.dt}>{tr('params.row.dt.field')}</dt>
           <dd className={s.ddKey}>
             <Highlight text={def.meta?.tomlKey ?? def.key} query={query} />
           </dd>
-          <dt className={s.dt}>已保存值</dt>
+          <dt className={s.dt}>{tr('params.row.dt.saved')}</dt>
           <dd className={s.dd}>
             <Highlight text={savedText} query={query} />
           </dd>
+          {/* 上一次保存之前的值（2026-10-21）：所有参数都记，存过它的改动就能看到。
+              标签要短 —— dt 列窄，「上一次保存前」「数据包里的值」都会挤成两行（作者 2026-10-21） */}
+          {prevSavedValue !== null && prevSavedValue !== savedValue && (
+            <>
+              <dt className={s.dt}>{tr('params.row.dt.prevSaved')}</dt>
+              <dd className={s.dd}>
+                <Highlight text={valueText(def, prevSavedValue, tr)} query={query} />
+              </dd>
+            </>
+          )}
           {/*
             这一格原来叫「出厂值」。这一版的值只有一层：**包里的那一份**（下载来的
             `values`）—— 客户端不做继承推导，包里也没有「出厂 / 机型 / 版本」这三层。
             所以标签照实改成「数据包里的值」：它和「已保存值」比，正好说明本机改没改过。
           */}
-          <dt className={s.dt}>数据包里的值</dt>
+          <dt className={s.dt}>{tr('params.row.dt.package')}</dt>
           <dd className={s.dd}>
             <Highlight text={factoryText} query={query} />
           </dd>
-          <dt className={s.dt}>作用域</dt>
+          <dt className={s.dt}>{tr('params.row.dt.scope')}</dt>
           <dd className={s.dd}>
             <Highlight
-              text={def.meta?.scope === 'machine_specific' ? '机型专属' : '全机型通用'}
+              text={
+                def.meta?.scope === 'machine_specific'
+                  ? tr('params.row.scopeMachine')
+                  : tr('params.row.scopeAll')
+              }
               query={query}
             />
           </dd>
-        </dl>
+          </dl>
+
+          {/*
+           * **右栏：云端这一项的三方对照**（2026-10-20 作者：「你在右边这个有空白的地方啊，
+           * 这刚好右边有空白地方可以显示」）。
+           *
+           * 左栏那七格说的是"这一项是什么"，与云端无关；采用 / 保持之后用户想知道的是
+           * "我原来的值是什么、云端改成什么"—— 那些数字塞进左栏会把说明挤成两列小字，
+           * 右栏这块空白正好。
+           */}
+          {sync !== undefined && (sync.pending || sync.decided !== null) && (
+            <aside className={s.cloudPane}>
+              <h5 className={s.cloudTitle}>{tr('params.row.cloud')}</h5>
+              <dl className={s.cloudList}>
+                <dt>{tr('params.row.cloudMine')}</dt>
+                <dd>
+                  {sync.local === null
+                    ? tr('params.row.cloudMissing')
+                    : valueText(def, sync.local, tr)}
+                </dd>
+                {/* 保存过后「我的值」已经是新值了 —— 旧值单摆一行，别让它消失（2026-10-21） */}
+                {!sync.pending && prevSavedValue !== null && prevSavedValue !== sync.local && (
+                  <>
+                    <dt>{tr('params.row.cloudPrev')}</dt>
+                    <dd>{valueText(def, prevSavedValue, tr)}</dd>
+                  </>
+                )}
+                <dt>{tr('params.row.cloudOld')}</dt>
+                <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld, tr)}</dd>
+                <dt>{tr('params.row.cloudNew')}</dt>
+                <dd>
+                  {sync.cloudNew === null
+                    ? tr('params.row.cloudNotFetched')
+                    : valueText(def, sync.cloudNew, tr)}
+                </dd>
+              </dl>
+              <p className={s.cloudState} data-state={syncDraftKind ?? sync.decided ?? 'pending'}>
+                {syncDraftKind === 'adopt'
+                  ? tr('params.row.stateAdopt')
+                  : syncDraftKind === 'hold'
+                    ? tr('params.row.stateHold')
+                    : syncDraftKind === null && sync.pending
+                      ? tr('params.row.stateUndecided')
+                      : sync.decided === 'adopt'
+                        ? tr('params.row.stateSavedAdopt')
+                        : tr('params.row.stateSavedHold')}
+              </p>
+              {syncDraftKind === 'adopt' && onUseMyValue !== undefined && (
+                <button
+                  type="button"
+                  className={s.cloudRevert}
+                  title={tr('params.row.useMineTitle', {
+                    value:
+                      sync.local === null
+                        ? tr('params.row.useMineValue')
+                        : valueText(def, sync.local, tr),
+                  })}
+                  onClick={() => onUseMyValue(def.key)}
+                >
+                  {tr('params.row.useMine')}
+                </button>
+              )}
+            </aside>
+          )}
+        </div>
       )}
     </div>
   )

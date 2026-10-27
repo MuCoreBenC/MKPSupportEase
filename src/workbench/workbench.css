@@ -24,10 +24,39 @@
  * 而他看不出来是被藏了还是没这个功能。能省的只有说明文字。
  */
 
+/*
+ * 编号字体（`public/fonts/badge-digits.ttf`）：Poppins（OFL 1.1）裁到只剩 `0-9`，2 KB。
+ *
+ * ★★ **与 Rust 那边烧进成品图的是同一个文件**（`workbench/app/render.rs` 的 `BADGE_FONT`）——
+ *   两处一套字，成品图里那颗编号才和标注台里这颗长得一样（作者 2026-10-16：
+ *   「为什么编号的数字要用矢量图啊？他不应该用那种开源的免费字体吗」）。
+ *   ★ 2026-10-17 由 Inter 换成 Poppins（作者：「这个 1 看起来不在视觉中心」——
+ *   Inter 的 1 带底座、墨迹偏一侧；Poppins 的 1 无底座、旗标对称，圆徽章里看着居中）。
+ *   许可全文在 `public/fonts/OFL.txt`。
+ */
+@font-face {
+  font-family: 'MKP Badge';
+  src: url('/fonts/badge-digits.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* 兜底：外壳还没挂上（比如报错早退）时也别裸着 */
 body {
   margin: 0;
   background: #f8fafc;
+}
+
+/*
+ * ★ 深色档这一层也要跟着翻：它在 `[data-wb]` **之外**（`--w-page` 取不到），
+ * 所以按判据属性直接给值。
+ *
+ * ★★ 判据是 `<html data-theme>`，不是 `@media (prefers-color-scheme: dark)` ——
+ * 后者是**系统**深浅，用户选了「深色」而系统是浅色时它不响（那正是要修的那一档）。
+ */
+html[data-theme='dark'] body {
+  background: #1c1c1c;
 }
 
 /*
@@ -390,15 +419,16 @@ body {
   color: var(--w-src-factory-t);
 }
 
+/* 三档状态各读 tokens 里那一组（字 / 底 / 边）—— 硬编码的话两套主题必然漏一处 */
 .wb-tag[data-state="ok"] {
-  border-color: rgb(16 185 129 / 25%);
-  background: rgb(16 185 129 / 10%);
+  border-color: var(--w-ok-line);
+  background: var(--w-ok-soft);
   color: var(--w-ok);
 }
 
 .wb-tag[data-state="warn"] {
-  border-color: rgb(217 119 6 / 25%);
-  background: rgb(217 119 6 / 10%);
+  border-color: var(--w-warn-line);
+  background: var(--w-warn-soft);
   color: var(--w-warn);
 }
 

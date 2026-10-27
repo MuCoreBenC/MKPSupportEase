@@ -48,6 +48,20 @@ pub struct AppError {
     pub message: String,
     /// 本次调用的 trace id；`-` 表示这条错误还没被 command 包装层盖章
     pub trace_id: String,
+    /**
+     * **稳定错误码**（`E_*_NNN` / `W_*_NNN`）—— 与 [`ErrorCode`] 那个英文类别不是一个东西。
+     *
+     * 2026-10-19（作者：「不用错误码吗」）：作者定的"每一条用户能读到的句子都必须有码"
+     * 以前只落在后处理/钩子那条链上（`crates/postprocess/messages.toml`），客户端的交付、
+     * 读写、更新这些**没有码** —— 用户把错误码贴给 AI 时无码可贴。
+     *
+     * 码住在**这句话的渲染处**（谁拼句子谁给码），不在这张表里另开一份对照：
+     * 同一件事只有一个地方说得清它是什么码。
+     *
+     * `None` = 这一条还没迁（界面照旧只显示人话）。界面不自己判空，走 [`AppError::text`]。
+     */
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_code: Option<String>,
     /// 技术细节，给开发看。界面可以折叠显示
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
@@ -59,6 +73,7 @@ impl AppError {
             code,
             message: message.into(),
             trace_id: "-".into(),
+            message_code: None,
             detail: None,
         }
     }
@@ -109,6 +124,37 @@ impl AppError {
         self
     }
 
+    /// 盖上**稳定错误码**（`E_*_NNN`）。
+    ///
+    /// 码住在拼这句话的那一处（见 [`AppError::message_code`] 那段）。
+    /// 同一句话只许盖一次 —— 盖两次说明两层在抢同一件事，调用方该把码给到位的那一层。
+    pub fn with_message_code(mut self, code: impl Into<String>) -> Self {
+        self.message_code = Some(code.into());
+        self
+    }
+
+    /// **给用户看的那一句** = 人话 + 尾注的码（`（E_DELIVERY_STALE_001）`）。
+    ///
+    /// 界面直接用它，不再自己拼 —— 拼法只有这一处，于是"有码 / 没码"两种长得一样。
+    pub fn text(&self) -> String {
+        match &self.message_code {
+            None => self.message.clone(),
+            Some(code) => format!("{}（{code}）", self.message),
+        }
+    }
+
+    /// 把 [`AppError::text`] 那句写进 `message` —— **跨 IPC 交给前端的就是它**。
+    ///
+    /// `messageCode` 一并留着（要单独拿码的人用得上）；`message` 那句从此自己带码，
+    /// 于是前端所有 `errorText()` 调用点天然带码，不用逐处记得拼。
+    pub fn text_err(self) -> Self {
+        let text = self.text();
+        Self {
+            message: text,
+            ..self
+        }
+    }
+
     /// 盖 trace id。由 command 包装层统一调用，业务代码不用管
     pub fn with_trace(mut self, trace_id: &str) -> Self {
         self.trace_id = trace_id.to_owned();
@@ -134,13 +180,16 @@ impl std::error::Error for AppError {}
 impl From<std::io::Error> for AppError {
     fn from(e: std::io::Error) -> Self {
         match e.kind() {
-            std::io::ErrorKind::NotFound => {
-                AppError::not_found("文件不存在").with_detail(e.to_string())
-            }
-            std::io::ErrorKind::PermissionDenied => {
-                AppError::permission_denied("没有权限访问这个文件").with_detail(e.to_string())
-            }
-            _ => AppError::io("读写文件失败").with_detail(e.to_string()),
+            std::io::ErrorKind::NotFound => AppError::not_found(
+                ::postprocess::diag::messages::text("ui.error.not_found", &[]),
+            )
+            .with_detail(e.to_string()),
+            std::io::ErrorKind::PermissionDenied => AppError::permission_denied(
+                ::postprocess::diag::messages::text("ui.error.permission", &[]),
+            )
+            .with_detail(e.to_string()),
+            _ => AppError::io(::postprocess::diag::messages::text("ui.error.io", &[]))
+                .with_detail(e.to_string()),
         }
     }
 }
@@ -148,13 +197,15 @@ impl From<std::io::Error> for AppError {
 /// 原子写的最后一步（`persist`）失败
 impl From<tempfile::PersistError> for AppError {
     fn from(e: tempfile::PersistError) -> Self {
-        AppError::io("保存失败：临时文件没能替换目标文件").with_detail(e.to_string())
+        AppError::io(::postprocess::diag::messages::text("ui.error.persist", &[]))
+            .with_detail(e.to_string())
     }
 }
 
 impl From<serde_json::Error> for AppError {
     fn from(e: serde_json::Error) -> Self {
-        AppError::corrupted("数据格式不对，解析失败").with_detail(e.to_string())
+        AppError::corrupted(::postprocess::diag::messages::text("ui.error.json", &[]))
+            .with_detail(e.to_string())
     }
 }
 
@@ -163,10 +214,12 @@ mod tests {
     use super::*;
 
     /// 字段名必须与 src/api/contract.ts 的 `AppError` 一致。
-    /// 那边是 `{ code, message, traceId, detail? }`，`code` 是 SCREAMING_SNAKE_CASE 的字符串联合。
+    /// 那边是 `{ code, message, traceId, messageCode?, detail? }`，`code` 是
+    /// SCREAMING_SNAKE_CASE 的字符串联合。
     #[test]
     fn serializes_with_contract_field_names() {
         let err = AppError::not_found("没有这一份预设")
+            .with_message_code("E_PRESET_READ_001")
             .with_detail("presetIndex[\"x\"] 未命中")
             .with_trace("018f...");
         let v: serde_json::Value = serde_json::to_value(&err).unwrap();
@@ -174,17 +227,30 @@ mod tests {
         assert_eq!(v["code"], "NOT_FOUND");
         assert_eq!(v["message"], "没有这一份预设");
         assert_eq!(v["traceId"], "018f...");
+        assert_eq!(v["messageCode"], "E_PRESET_READ_001");
         assert_eq!(v["detail"], "presetIndex[\"x\"] 未命中");
-        // 只有这四个键，多一个就说明契约漂了
-        assert_eq!(v.as_object().unwrap().len(), 4);
+        // 只有这五个键，多一个就说明契约漂了
+        assert_eq!(v.as_object().unwrap().len(), 5);
     }
 
-    /// detail 为空时整个键不出现，前端 `'detail' in err` 才有意义
+    /// detail / messageCode 为空时整个键不出现，前端 `'detail' in err` 才有意义
     #[test]
     fn omits_detail_when_absent() {
         let v = serde_json::to_value(AppError::internal("出错了")).unwrap();
         assert!(v.get("detail").is_none());
+        assert!(v.get("messageCode").is_none());
         assert_eq!(v["traceId"], "-");
+    }
+
+    /// **码收在句尾**（2026-10-19 作者：「不用错误码吗」）——
+    /// 有码与没码两种只差这一截，界面因此只有一种长相。
+    #[test]
+    fn text_appends_the_code_when_present() {
+        let plain = AppError::internal("出了点问题");
+        assert_eq!(plain.text(), "出了点问题", "没码就只是一句人话");
+
+        let coded = AppError::sha_mismatch("文件对不上").with_message_code("E_DELIVERY_SHA_001");
+        assert_eq!(coded.text(), "文件对不上（E_DELIVERY_SHA_001）");
     }
 
     #[test]

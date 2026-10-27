@@ -32,6 +32,8 @@
 //!    两张脸的差别仅在 [`IrSource`] 这一个枚举上 —— 复制一条管线出来就等于
 //!    有两条会各自漂移的产品路径。判据：拆之前拆之后 G2 与整链参考仍字节相等。
 
+/// 热床预涂胶（`bed_glue.go` 那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
+pub mod bed_glue;
 pub mod hooks;
 pub mod progress;
 
@@ -44,6 +46,8 @@ use sha2::{Digest, Sha256};
 use crate::config;
 use crate::diag::{CancelToken, PostprocError};
 use crate::ir::Ir;
+use crate::postproc::calibration::Mode;
+use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 
 /// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
 pub const DEFAULT_SKIP_VIBRATION: bool = true;
@@ -91,6 +95,29 @@ pub struct IrProcessRequest {
     pub ir: Ir,
     /// None / 等于输入路径 → 原地覆盖（.part + rename）。
     pub output_path: Option<PathBuf>,
+    /// **这一盘是什么校准件** —— 由调用方定案，管线**只消费、不判定**。
+    ///
+    /// 2026-10-18 起身份的唯一来源是原始 3MF 的 `MKPSE:Calibration`（钩子顺着
+    /// `origin.txt` 读出来）。那件事只有钩子能做：管线手里只有 G-code，而 G-code 里
+    /// 没有任何身份信息 —— 早先那行 `;MKPCalibration …` 会被某些版本的 Bambu Studio
+    /// 在保存时吃掉，留着它做判据就是"模型明明带身份、管线却按普通模型跑"。
+    ///
+    /// 所以这条链是单向的：**钩子定案 → 传进来 → 管线照办**。管线不再自己扫、也不许
+    /// 拿尺寸去猜（`calib_models::find_profile` 只收 `Mode`，几何只决定用哪一档）。
+    ///
+    /// 缺省 `Mode::None`（普通模型）：`Default` 就取它，免得每个构造点都得写一遍。
+    pub calibration: crate::postproc::calibration::Mode,
+}
+
+impl Default for IrProcessRequest {
+    fn default() -> Self {
+        Self {
+            gcode_path: PathBuf::new(),
+            ir: Ir::default(),
+            output_path: None,
+            calibration: crate::postproc::calibration::Mode::None,
+        }
+    }
 }
 
 /// 第 2 步的 IR 从哪来 —— 私有，两张公开脸各自对应一个变体。
@@ -108,8 +135,8 @@ enum IrSource {
     Prebuilt(Box<Ir>),
 }
 
-/// 管线的内部作业单：两张公开脸都归一到这里。
-struct Job {
+/// 管线的内部作业单：几张公开脸都归一到这里。
+struct Job<'a> {
     gcode_path: PathBuf,
     output_path: Option<PathBuf>,
     ir_source: IrSource,
@@ -119,6 +146,13 @@ struct Job {
     /// 打印时间是纯报告数据，内核零读取，所以可以让常驻进程接手，钩子先退。
     /// 输出 G-code 与算了的那一版**逐字节相同** —— 延后的只是"填字段"。
     compute_print_time: bool,
+    /// 第 6 步撞了之后问谁（`None` = 没人问，直接 `Err(Collision)` —— 原行为）。
+    ///
+    /// 生命周期只活在本文件里：几张嘴（CLI / 钩子 / 判据）都是**并列入口**，
+    /// `IrProcessRequest` 那个按值传的公开结构体一个字都不用动。
+    tower_ask: Option<&'a mut dyn TowerAsk>,
+    /// 这一盘是什么校准件 —— **调用方定案**，管线只消费（见 [`IrProcessRequest::calibration`]）。
+    calibration: Mode,
 }
 
 /// 处理产物（printtime 只填字段，不作为 transform）。
@@ -134,6 +168,17 @@ pub struct ProcessResult {
     pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
     pub detail_facts: DetailFacts,
+    /// 输入 G-code 头部刮出来的 5 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名 /
+    /// 3MF 模型名）。
+    ///
+    /// 管线自己不消费它（见 [`HeaderFacts`]），但**执行记录要**：`_meta.json` 的
+    /// `detail.slicer` 里那几个键就住在这里 —— 搭车出门，调用方不用为它再扫一遍输入。
+    pub header_facts: HeaderFacts,
+    /// 校准这一趟**用了什么**（认到哪一档、实测多大、容差多少）。
+    ///
+    /// 非校准件那一趟恒为 `None`。管线自己不消费它 —— 它是给执行记录的证据：
+    /// 原来这些值在 `resolve_profile` 之后就被消费掉了，成功那趟一个字都不出门。
+    pub calibration_receipt: Option<crate::postproc::calibration::CalibrationReceipt>,
 }
 
 /// 出口事实集 —— **只搬运，不新算**。
@@ -162,24 +207,37 @@ pub struct DetailFacts {
     pub calibration_mode: String,
 }
 
-/// 输入 G-code 头部刮取出来的 4 个事实。
+/// 输入 G-code 头部刮取出来的 5 个事实（后 1 个要读盘，见 [`header_facts`]）。
 ///
 /// 这些**只读输入、不碰 IR**，所以从管线里提出来单独成函数：`dump-ir --gcode <in>`
-/// 复用它，管线本身不再需要它们（来源仓库把它们塞进 `DetailFacts` 是因为 GUI 要）。
+/// 复用它；管线在 parse 步取一次、搭 [`ProcessResult`] 出门（执行记录要），
+/// 但不进 IR、不参与任何变换（来源仓库把它们塞进 `DetailFacts` 是因为 GUI 要）。
+#[derive(Debug, Clone, PartialEq)]
 pub struct HeaderFacts {
     pub machine_preset_name: String,
     pub process_preset_name: String,
     pub slicer_ironing_enabled: bool,
     pub three_mf_file_name: String,
+    /// **3MF 模型名**（`帕姆.3mf` → `帕姆`）—— `origin.txt` → `slice_info.config` →
+    /// `_temp_1.config` 三级兜底，三级都没有 ⇒ `None`（执行记录里落 `null`，
+    /// 报告页就只显示 G-code 名）。链路与形态见 [`crate::gcode::model_name`]。
+    pub model_name: Option<String>,
 }
 
-/// 头部刮取。`path` 只用于 `; filename_format` 推 3MF 名时的兜底。
+/// 头部刮取。`path` 有两处用途：`; filename_format` 推 3MF 名时的兜底，以及
+/// [`crate::gcode::model_name`] 的三级兜底链。
+///
+/// ★ 这是本组里**唯一读盘的一格**（其余四格只读 `content`）：模型名躺在 G-code 旁边的
+/// 三处旁证里，而它们只存在于切片器的临时目录 —— **必须在 G-code 还在那儿时取一次**，
+/// 搬走之后就永远拿不到了（那时它是 `None`，不编名字）。判据里的 golden 输入不在
+/// 临时目录里，所以那几条上这一格恒为 `None` —— 真实值由 `model_name.rs` 自己的判据咬。
 pub fn header_facts(content: &[String], path: &str) -> HeaderFacts {
     HeaderFacts {
         machine_preset_name: crate::gcode::machine_preset_name(content),
         process_preset_name: crate::gcode::process_preset_name(content),
         slicer_ironing_enabled: crate::gcode::slicer_ironing_enabled(content),
         three_mf_file_name: crate::gcode::three_mf_file_name(content, path),
+        model_name: crate::gcode::model_name(std::path::Path::new(path)),
     }
 }
 
@@ -268,21 +326,29 @@ pub fn process(
     process_with_cancel_interval(request, sink, cancel, DEFAULT_CANCEL_CHECK_INTERVAL)
 }
 
-/// 同 [`process`]，但 IR 由调用方给出（钩子 / GUI 走这条）。
-pub fn process_with_ir(
+/// 同 [`process`]，但 IR 由调用方给出（**钩子走这条**）、且第 6 步撞了可以停下来问人。
+///
+/// 「IR 从哪来」与「要不要问人」在这里是**两个正交的轴**，但产品只需要两个组合：
+/// 本函数（立即算打印时间）与 [`process_with_ir_deferred_print_time_with_tower_ask`]
+/// （延后算）。所以 `process_with_ir` / `process_with_ir_and_cancel_interval` /
+/// `process_with_ir_deferred_print_time`（不带 ask）三个都不再单独存在 ——
+/// 2026-10-19 按"零产品调用方"删除。**别再为了对称感把它们加回来**：
+/// 多一层转发就多一个能在构造内部请求时悄悄丢参数的地方（那次 `Mode::None` 就是这么来的）。
+///
+/// 为什么需要「问人」这一轴（2026-10-18 方案 B）：那一问要发生在**真实进度 ~55%**（`Step::Collision` 入口），而且撞塔这件事
+/// 本来就在第 6 步判 —— 在管线之前再预检一遍等于把 擦料决策 / 碰撞扫描
+/// 各跑两次，还让用户看到"0% 就停住了"。
+///
+/// **为什么不往 `IrProcessRequest` 里塞这个回调**：那个结构体是按值传的，加一个
+/// `&mut dyn TowerAsk` 就得给它挂生命周期参数 ⇒ 所有构造点跟着改，而且以后每加一条缝
+/// 都要再来一次。**并列入口**只多一个函数，老入口一字不动。
+///
+/// `ask = None` ⇒ 与 [`process_with_ir`] **完全等价**（同一份 `run`，同一个短路分支）。
+pub fn process_with_ir_with_tower_ask(
     request: IrProcessRequest,
+    ask: Option<&mut dyn TowerAsk>,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
-) -> Result<ProcessResult, PostprocError> {
-    process_with_ir_and_cancel_interval(request, sink, cancel, DEFAULT_CANCEL_CHECK_INTERVAL)
-}
-
-/// [`process_with_ir`] 的判据缝，理由同 [`process_with_cancel_interval`]。
-pub fn process_with_ir_and_cancel_interval(
-    request: IrProcessRequest,
-    sink: &mut dyn ProgressSink,
-    cancel: &CancelToken,
-    cancel_check_interval: std::time::Duration,
 ) -> Result<ProcessResult, PostprocError> {
     run(
         Job {
@@ -290,14 +356,18 @@ pub fn process_with_ir_and_cancel_interval(
             output_path: request.output_path,
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: true,
+            tower_ask: ask,
+            /* ★ 透传 —— **这是 SupportEase 的正式主链**（`hook.rs` 非延后那一支）。
+            写死 `None` 等于把校准件当普通模型跑，且不会有任何报错。 */
+            calibration: request.calibration,
         },
         sink,
         cancel,
-        cancel_check_interval,
+        DEFAULT_CANCEL_CHECK_INTERVAL,
     )
 }
 
-/// 同 [`process_with_ir`]，但**打印时间估算延后**（这一趟不算）。
+/// 同 [`process_with_ir`]，但**打印时间估算延后**（这一趟不算），且带上第 6 步那一问。
 ///
 /// 打印时间是**纯报告数据**（内核零读取，见 `printtime` 模块头），所以可以让常驻
 /// 进程接手：钩子写完盘就退，切片器少等几百毫秒；执行记录先落一条
@@ -306,8 +376,16 @@ pub fn process_with_ir_and_cancel_interval(
 /// **输出 G-code 与 [`process_with_ir`] 逐字节相同** —— 延后的只是填字段这件事，
 /// 没有跳过任何 transform。没有界面接手时（无头场景）必须走 [`process_with_ir`]，
 /// 否则记录会永远停在"正在估算"。
-pub fn process_with_ir_deferred_print_time(
+///
+/// ★ 2026-10-19：不带 `ask` 的那个版本（`process_with_ir_deferred_print_time`）
+/// 已删除 —— 产品与测试的调用方都是 0。它和本函数只差一个 `ask: None`，
+/// 留着就是第二个"看着能用、实际没人维护"的入口。钩子在无界面时走
+/// [`process_with_ir`]（见上面那句"没有界面接手时必须走它"），不需要这个中间态。
+/// 同 [`process_with_ir_deferred_print_time`]，但带上第 6 步那一问
+/// （理由与"并列入口"的取舍见 [`process_with_ir_with_tower_ask`]）。
+pub fn process_with_ir_deferred_print_time_with_tower_ask(
     request: IrProcessRequest,
+    ask: Option<&mut dyn TowerAsk>,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<ProcessResult, PostprocError> {
@@ -317,6 +395,10 @@ pub fn process_with_ir_deferred_print_time(
             output_path: request.output_path,
             ir_source: IrSource::Prebuilt(Box::new(request.ir)),
             compute_print_time: false,
+            tower_ask: ask,
+            /* ★ 透传 —— SupportEase 正式主链的另一支（`defer_print_time` 为真的那次）。
+            "打印时间延后算"与"这是什么校准件"是两件事，别顺手把后者也置空。 */
+            calibration: request.calibration,
         },
         sink,
         cancel,
@@ -347,6 +429,8 @@ pub fn process_with_cancel_interval(
                 overrides: request.overrides,
             },
             compute_print_time: true,
+            tower_ask: None,
+            calibration: Mode::None,
         },
         sink,
         cancel,
@@ -358,7 +442,7 @@ pub fn process_with_cancel_interval(
 /// 差别只在第 2 步的 IR 从哪来；其余 11 步一个字都不分叉 ——
 /// 分叉了就等于有两条会各自漂移的产品路径。
 fn run(
-    job: Job,
+    job: Job<'_>,
     sink: &mut dyn ProgressSink,
     cancel: &CancelToken,
     cancel_check_interval: std::time::Duration,
@@ -368,6 +452,8 @@ fn run(
         output_path,
         ir_source,
         compute_print_time,
+        mut tower_ask,
+        calibration: calib_mode,
     } = job;
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
     /// （原地模式的原文件因此保证不动）。
@@ -427,9 +513,13 @@ fn run(
     timer.begin(Step::Parse, "解析 G-code...");
     executed.push(Step::Parse);
 
+    // 头部 5 个事实：只读输入（其中模型名读 G-code 旁边的临时文件）、不碰 IR。登记完
+    // 这一步就取，搭产物出门写进执行记录（`detail.slicer` 的三个键与顶层的 `modelName`）。
+    let header = header_facts(&content, &gcode_path.display().to_string());
+
     // ---- step 4 ∥ step 5 的只读半段 —— 两个全文件扫描并行 ----
-    // `detect_mode`（parse 步）与 `decide_wiping`（support 步的只读半段）都是全文件
-    // 扫描、互不写状态，串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
+    // `decide_wiping`（support 步的只读半段）是一次全文件扫描；它和 parse 步的
+    // 头部事实读取串行跑是白等。事件仍按编排顺序发（进度条顺序不变），
     // 并行的墙钟时间记在 parse 步上 —— support 步只剩 ApplyWipingDecision 那一笔，
     // 两步相加仍等于真实总耗时。
     //
@@ -439,15 +529,17 @@ fn run(
     // 而不是把 TOML 结构重新拉进来。钉住这条恒等的判据在
     // `tests/pipeline_wiping_source.rs`。
     let preferred = ir.wiping.preferred_mode.clone();
-    let (calib_mode, decision) = std::thread::scope(|s| {
-        let scan = s.spawn(|| crate::postproc::calibration::detect_mode(&content));
-        let decision = crate::postproc::support::decide_wiping(&preferred, &content);
-        (scan.join().expect("detect_mode 不 panic"), decision)
-    });
+    /* 校准身份**不从 G-code 认**（2026-10-18）：`calib_mode` 是调用方传进来的。
+    早先这里自己 `detect_mode(&content)` 扫 `;MKPCalibration …`，那条链已整条删除 ——
+    G-code 里再不会有身份，扫也只会得到 `None`，那正是"钩子认对了、管线却当普通模型跑"
+    的来路。擦料决策仍要扫正文，所以这一步照样和它并行。 */
+    let decision = crate::postproc::support::decide_wiping(&preferred, calib_mode, &content);
     ir.safety.is_calibration_mode = crate::postproc::calibration::is_any(calib_mode);
     // **无条件**取一次校准模式串（只在 is_dynamic 分支里算 ⇒ 非动态模式下出口没有
     // 这个事实）。零新计算，只是提早取。
     let calibration_mode = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
+    /* 第 7 步认档的回执（非校准件恒为 `None`）。只承载事实，不参与任何判定。 */
+    let mut calib_receipt: Option<crate::postproc::calibration::CalibrationReceipt> = None;
 
     // ---- step 5: support —— ApplyWipingDecision ----
     checkpoint(cancel)?;
@@ -462,13 +554,78 @@ fn run(
     if crate::postproc::calibration::need_collision_check(calib_mode) {
         let collision = crate::postproc::disk::detect_tower_collision(&content, &ir);
         if collision.has_collision {
-            return Err(PostprocError::Collision {
-                message: "E_GCODE_COLLISION_001: 模型与擦料塔位置冲突".to_string(),
-            });
+            /* 码仍是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码拼进正文，
+            用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`）。
+            **2026-10-18**：这一支带上"撞在哪 + 建议挪多少 + 俯视图几何"，
+            让报告页能回答"挪多少、撞在哪"，不再只有"撞了"两个字。 */
+            let Some(ask) = tower_ask.as_mut() else {
+                /* **没人问**（CLI / 没装界面 / 设置页开关关着）⇒ 一字不差的原行为 */
+                return Err(PostprocError::Collision {
+                    facts: Box::new(collision.facts(&ir)),
+                });
+            };
+            let ask: &mut dyn TowerAsk = *ask;
+            /*
+             * ★★ **停下来问人**（方案 B 的落点，2026-10-18）：进度条此刻停在第 6 步
+             * 入口那一帧（`timer.begin` 已经发过事件），等待期间**一条事件都不发** ——
+             * "停在这里等人"就是它该有的样子，前端不需要任何改动。
+             *
+             * 取消先看一眼：按了停止就别把问句推上去了。
+             */
+            checkpoint(cancel)?;
+            let facts = collision.facts(&ir);
+            let current = [ir.wiping.wiper_x, ir.wiping.wiper_y];
+            /* 候选位置与预检时代用的是同一个函数（同一份 occupancy / 塔高） */
+            let candidate = crate::postproc::disk::auto_tower_position_for_facts(
+                &ir,
+                &facts,
+                &collision.occupancy,
+                collision.tower_height,
+            );
+            match ask.ask(&facts, candidate, current, collision.tower_height) {
+                /* 用户按了停止 ⇒ 取消，**不是**碰撞失败（外层按 `Cancelled` 归档） */
+                TowerAskOutcome::Cancelled => {
+                    return Err(PostprocError::Cancelled {
+                        message: "用户已取消后处理".to_string(),
+                    });
+                }
+                /* 自己挪模型 / 超时 / 界面上没有这一问 ⇒ 这一趟按"撞了"收场 */
+                TowerAskOutcome::Declined => {
+                    return Err(PostprocError::Collision {
+                        facts: Box::new(facts),
+                    });
+                }
+                /* 交互本身坏了 ⇒ 明确失败，不拿"撞了"顶替 */
+                TowerAskOutcome::Failed { message } => {
+                    return Err(PostprocError::Processing { message });
+                }
+                TowerAskOutcome::Moved([x, y]) => {
+                    ir.wiping.wiper_x = x;
+                    ir.wiping.wiper_y = y;
+                    /*
+                     * ★★ **复检**（作者真机：「点了自动移动塔位置了，但是还是碰撞了」）：
+                     * 同一个 `detect_tower_collision`、改完之后的 IR。仍撞就**不静默继续** ——
+                     * 把"挪后的事实"交出去，外层按"挪了还撞"那句收场（并如实归档）。
+                     */
+                    let after = crate::postproc::disk::detect_tower_collision(&content, &ir);
+                    if after.has_collision {
+                        let after_facts = after.facts(&ir);
+                        ask.verified(Some(&after_facts));
+                        return Err(PostprocError::Collision {
+                            facts: Box::new(after_facts),
+                        });
+                    }
+                    ask.verified(None);
+                }
+            }
         }
     }
 
     // ---- step 7: calib-check —— 仅动态校准：BBox + 质心 + dry-run ----
+    //
+    // 这一步的 dry-run 结果会**带出去**（`CalibrationReceipt`）：认到哪一档、实测多大、
+    // 容差多少。原来这些全在内核里被消费掉，执行记录只能记"校准模式: ZOffset"，
+    // 于是"为什么这次用了加长版的基准"永远无法解释（2026-10-18 补的证据链）。
     checkpoint(cancel)?;
     if crate::postproc::calibration::is_dynamic(calib_mode, &ir) {
         timer.begin(Step::CalibCheck, "校准模型检测...");
@@ -476,7 +633,8 @@ fn run(
         let bbox = crate::postproc::disk::compute_bbox(&content)?;
         let centroid = centroid_of(&content);
         let mode_str = crate::postproc::calibration::mode_to_calibration_string(calib_mode);
-        crate::postproc::disk::generate_calibration_gcode_with_centroid(
+        let mut receipt = crate::postproc::calibration::CalibrationReceipt::default();
+        crate::postproc::disk::generate_calibration_gcode_with_centroid_rec(
             mode_str,
             &machine_type,
             &ir,
@@ -484,7 +642,9 @@ fn run(
             centroid,
             DEFAULT_Z_DWELL_SEC,
             DEFAULT_XY_DWELL_SEC,
+            Some(&mut receipt),
         )?;
+        calib_receipt = Some(receipt);
     }
 
     // ---- step 8: pass1 ----
@@ -548,14 +708,15 @@ fn run(
         } else {
             (None, crate::postproc::disk::CentroidResult::default())
         };
+        /* 停留秒数读**用户设置**（2026-10-17 之前这里是写死的两个常量，
+        于是设置页那两格"改了也不生效"）。量程已在 `PrefsIr` 那层夹过。
+        先取出来再传：`&mut ir` 已经借出去了，表达式里不能再读它的字段。 */
+        let (z_dwell, xy_dwell) = (
+            ir.prefs.z_calibration_dwell_sec,
+            ir.prefs.xy_calibration_dwell_sec,
+        );
         out_lines = crate::postproc::calibration::insert_calibration_gcode(
-            out_lines,
-            calib_mode,
-            &mut ir,
-            bbox,
-            centroid,
-            DEFAULT_Z_DWELL_SEC,
-            DEFAULT_XY_DWELL_SEC,
+            out_lines, calib_mode, &mut ir, bbox, centroid, z_dwell, xy_dwell,
         )?;
     }
 
@@ -564,14 +725,18 @@ fn run(
     checkpoint(cancel)?;
     timer.begin(Step::Write, "正在写入文件...");
     executed.push(Step::Write);
+    /* 这三处以前各读一个 `DEFAULT_*` 常量 —— 也就是"设置页那几档从来没被读过"。
+    现在全部走 `ir.prefs`（`runtime::postproc_prefs::apply_to_ir` 是唯一写入点）。 */
     out_lines = hooks::apply_begin_stage_retract(
         out_lines,
         &ir,
-        DEFAULT_BEGIN_STAGE_RETRACT,
-        DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM,
+        ir.prefs.begin_stage_retract_enabled,
+        ir.prefs.begin_stage_retract_z_lift_mm,
     );
-    out_lines = hooks::apply_skip_vibration_calibration(out_lines, DEFAULT_SKIP_VIBRATION);
-    out_lines = hooks::apply_pre_print_bed_glue(out_lines, &ir);
+    out_lines =
+        hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
+    /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
+    out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS。
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。
@@ -633,6 +798,8 @@ fn run(
             fallback_objects: wiping_applied.fallback_objects,
             calibration_mode: calibration_mode.to_string(),
         },
+        header_facts: header,
+        calibration_receipt: calib_receipt,
     })
 }
 

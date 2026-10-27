@@ -14,6 +14,8 @@
 //! [`runtime::source`]（AppState 的 presetSource 格，或构建期注入的默认值），
 //! 不知道就**诚实报没配**——不猜一个 URL、不假装下载成功。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use serde::Serialize;
@@ -27,17 +29,22 @@ use crate::runtime;
 
 use super::traced;
 
+/// 界面读的那份目录：② 为准 + **随包那份只兜底**（补 ② 里没有的 bundled 资产条目）。
+///
+/// ★ 走 [`runtime::catalog_for_ui`] 而不是直接 [`runtime::load_released_catalog`]：
+///   随包资产的字节在程序里，② 比程序旧时不该让界面"找不到那张图"
+///   （2026-10-16 实测的丢图就是这么来的，见那个函数的注释）。盘上一个字节都不动。
 #[tauri::command]
 pub async fn get_runtime_catalog(app: AppHandle) -> Result<runtime::Catalog, AppError> {
     traced("getRuntimeCatalog", |_| {
         let root = internal_root(&app)?;
-        runtime::load_released_catalog(&root)
+        runtime::catalog_for_ui(&root)
     })
 }
 
 /* ---------- 数据源的设置（重装 / 换 Gitee / 换自建 CDN 的入口） ---------- */
 
-/// 给界面的一个**内置源**选项（作者 2026-10-05 拍"两个官方源 + 收起的自定义"）。
+/// 给界面的一个**内置源**选项（作者 2026-10-05 拍"两个云端源 + 收起的自定义"）。
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BuiltinSourceDto {
@@ -65,10 +72,16 @@ pub struct PresetSourceDto {
     /// **两个内置源**（没注入的那个不出现）。界面摆两个固定单选就靠它 ——
     /// 用户没有输错地址的机会，这是防错的第一道
     pub builtin: Vec<BuiltinSourceDto>,
-    /// 出厂默认是哪一个（`github`）：界面上「恢复默认」那一句要说得清它是什么
+    /// 出厂默认是哪一个（0.0.7 起 `gitee`）：界面上「恢复默认」那一句要说得清它是什么
     pub default_mode: String,
     /// 出厂默认那个源的地址
     pub builtin_default: Option<String>,
+    /// **规范化后的源身份**（`github#owner/repo@main` 那种，2026-10-27）。
+    ///
+    /// 只给界面**显示**用（云端详情里"这个云端是哪个源"那一行）；判据不从这里拿 ——
+    /// 判定那条链在 `runtime::local::based_on`，它自己问同一处 [`identity_of`]。
+    /// 认不出（没配源 / 地址解析不了）就是 `null`，不编。
+    pub identity: Option<String>,
 }
 
 /// 生效值的装配：按盘上选中的模式 → 界面那一格。
@@ -91,6 +104,12 @@ fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
         // **不静默回落到内置源** —— 那会让界面显示"自定义"、实际连着别的地方。
         None => (String::new(), true),
     };
+    let identity = runtime::app_state::preset_source(root)
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(runtime::source_identity::identity_of)
+        .map(|id| id.key());
     Ok(Some(PresetSourceDto {
         mode: mode_wire(mode),
         label: mode.label().to_owned(),
@@ -99,6 +118,7 @@ fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
         builtin,
         default_mode: mode_wire(runtime::source::DEFAULT_MODE),
         builtin_default: runtime::source::builtin_default(),
+        identity,
     }))
 }
 
@@ -134,25 +154,31 @@ pub async fn set_preset_source(
 ) -> Result<PresetSourceDto, AppError> {
     let root = internal_root(&app)?;
     let mode = runtime::source::SourceMode::parse(mode.trim()).ok_or_else(|| {
-        AppError::invalid_argument(format!(
-            "认不出的源：{mode}（只能是 github / gitee / custom）"
+        AppError::invalid_argument(messages::text(
+            "ui.ipc.catalog.052",
+            &[("mode", &mode.to_string())],
         ))
     })?;
     if mode == runtime::source::SourceMode::Custom {
         let raw = custom_url.unwrap_or_default();
         let task = tauri::async_runtime::spawn_blocking(move || {
             traced("setPresetSource", |_| {
-                // ★ 先探形状（根 / source.json 两种都认），**通了才落盘** ——
+                // ★ 先探（交付根 / source.json / 仓库·分支页都认），**通了才落盘** ——
                 //   错地址留在设置里比"没配"更难查（0.0.2 的教训）。
-                let (shape, _resolved) = runtime::source::probe_custom_shape(&raw)?;
-                let source = runtime::source::make_source(mode, Some(&raw), shape)?;
+                // ★ 探通的那一份**一起存下来**：他贴的是分支页时，实际读的是
+                //   `presets/delivery/source.json` —— 只存"分支页 + 形状"就等于让
+                //   重启后再推一遍（2026-10-18 那份分支数据读不到，就是推不回来）。
+                let probed = runtime::source::probe_custom(&raw)?;
+                let source = runtime::source::make_source(mode, Some(&raw), probed.shape)?
+                    .with_resolved(&probed.bootstrap_url)?;
                 runtime::app_state::set_preset_source(&root, source)?;
-                source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
+                source_dto(&root)?
+                    .ok_or_else(|| AppError::internal(messages::text("ui.ipc.catalog.053", &[])))
             })
         });
-        let dto = task
-            .await
-            .map_err(|e| AppError::internal("换数据源没跑到终局").with_detail(e.to_string()))?;
+        let dto = task.await.map_err(|e| {
+            AppError::internal(messages::text("ui.ipc.catalog.054", &[])).with_detail(e.to_string())
+        })?;
         super::notify_app_state(&app);
         return dto;
     }
@@ -160,7 +186,8 @@ pub async fn set_preset_source(
         let source = runtime::source::make_source(mode, None, runtime::source::CustomShape::Unset)?;
         runtime::app_state::set_preset_source(&root, source)?;
         super::notify_app_state(&app);
-        source_dto(&root)?.ok_or_else(|| AppError::internal("数据源设置写完读不回来"))
+        source_dto(&root)?
+            .ok_or_else(|| AppError::internal(messages::text("ui.ipc.catalog.055", &[])))
     })
 }
 
@@ -218,21 +245,31 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.056",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
 
             let target = crate::fsx::paths::resolve_in(&root, &file.path)?;
             let bytes = std::fs::read(&target).map_err(|_| {
-                AppError::not_found(format!(
-                    "{file_name} 还不在本机——先下载，再读它（下载区初始是空的）"
+                AppError::not_found(messages::text(
+                    "ui.ipc.catalog.057",
+                    &[("file_name", &file_name.to_string())],
                 ))
             })?;
             String::from_utf8(bytes).map_err(|_| {
-                AppError::corrupted(format!("{file_name} 不是 UTF-8 文本，这一条读不出来"))
+                AppError::corrupted(messages::text(
+                    "ui.ipc.catalog.058",
+                    &[("file_name", &file_name.to_string())],
+                ))
             })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("读文件没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.059", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 把 catalog 里登记的一份文件从数据源拉进**它自己的落点**。
@@ -256,7 +293,12 @@ pub async fn download_runtime_file(
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.060",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
 
             // 目录给了期望大小就用它当水位总量；没给（随包 bootstrap 目录）就照实
             // 不报百分比 —— `total: None` 在界面上是"不知道还有多少"，不是 0
@@ -301,11 +343,12 @@ pub async fn download_runtime_file(
                 .unwrap_or_else(|| file_name.clone()))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("下载任务没能跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.061", &[])).with_detail(e.to_string())
+    })?
 }
 
-/// 一份目录文件的**官方下载链接**（用户「复制链接」复制的就是它）。
+/// 一份目录文件的**云端下载链接**（用户「复制链接」复制的就是它）。
 ///
 /// 寻址走唯一出口 [`runtime::resolver::SourceResolver`]（`ResourceRef::Entry`）——
 /// 与下载管道算的是**同一个地址**，"复制到的链接"与"下载时取的地址"不可能分叉。
@@ -320,7 +363,12 @@ pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, A
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.062",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
             let resolved = runtime::source::resolve_source(&root)?;
             resolved
                 .resolver
@@ -328,8 +376,9 @@ pub async fn get_file_url(app: AppHandle, file_name: String) -> Result<String, A
                 .and_then(|addr| addr.remote_or("这份文件"))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("取链接的任务没能跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.063", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 多份下载里某一份的结局。**来自 [`runtime::delivery::FileOutcome`]**，
@@ -365,7 +414,12 @@ pub async fn download_runtime_files(
                     .files
                     .iter()
                     .find(|f| f.file_name == *name)
-                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {name}")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found(messages::text(
+                            "ui.ipc.catalog.064",
+                            &[("name", &name.to_string())],
+                        ))
+                    })?;
                 wanted.push(file.clone());
             }
 
@@ -419,53 +473,92 @@ pub async fn download_runtime_files(
                 .collect())
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("批量下载没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.065", &[])).with_detail(e.to_string())
+    })?
 }
 
-/// 「取回官方预设」的结果：这次取回没有 / 落成我的一份没有 / 我那份在哪
+/// 「取回云端预设」的结果：这次取回没有 / 落成本地这份没有 / 我那份在哪
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FetchOfficialDto {
+pub struct FetchCloudDto {
     /// 这次是不是真的从数据源取了一份回来（`false` = 本机已有当前版，一次网络都没发）
     pub fetched: bool,
     /// 这次是不是**新落了一份我自己的**（`false` = 我那份本来就在，一个字节都没动）
     pub created: bool,
-    /// 我那一份的文件名（= 官方那个文件名，两份同名是设计：它就是这一份预设）
+    /// 本地那份的文件名（= 云端那个文件名，两份同名是设计：它就是这一份预设）
     pub file_name: String,
-    /// 我那一份的落点（相对用户根：`presets-mine/…`）—— 调用方要拿它去「使用」
+    /// 本地那份的落点（相对用户根：`presets-local/…`）—— 调用方要拿它去「使用」
     pub path: String,
+    /* ------------------------------------------------------------------ *
+     * 撞名（2026-10-10）：本机已经有一份同名的 —— 默认**不动它**，把"谁占了
+     * 这个名字"与"同意导入会改成什么名字"交给界面问用户；用户同意后的那次调用
+     * 走 `rename_if_taken`，这两格重新变回 `null`。
+     * ------------------------------------------------------------------ */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taken_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggested_name: Option<String>,
 }
 
-/// **把官方这一份预设取到本机** —— 资源库云端表那两个动作（「下载」/「更新」）共用的那一条。
+/// **一个没被占的名字**：`<原名>-2<后缀>`、`<原名>-3<后缀>`……（2026-10-10 撞名复试采用）。
+///
+/// 后缀保持原样（后缀决定它是哪一类文件）；名字空间是 `presets-local/`
+/// 内一圈一圈往后找一个没人占的。上限之后照原名返回 —— 那时由写盘那一层的
+/// "落点已存在"闸去说话，不在这一层编故事。
+fn untaken_name(user_root: &Path, wanted: &str) -> String {
+    let path = std::path::Path::new(wanted);
+    let stem = path
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| wanted.to_owned());
+    let with = |n: u32| match path.extension() {
+        Some(ext) => format!("{stem}-{n}.{}", ext.to_string_lossy()),
+        None => format!("{stem}-{n}"),
+    };
+    for n in 2..=999u32 {
+        let candidate = with(n);
+        let rel = format!("{}/{candidate}", crate::fsx::paths::LOCAL_DIR);
+        let taken = crate::fsx::paths::resolve_in(user_root, &rel)
+            .map(|p| p.exists())
+            .unwrap_or(true);
+        if !taken {
+            return candidate;
+        }
+    }
+    wanted.to_owned()
+}
+
+/// **把云端这一份预设取到本机** —— 资源库云端表那两个动作（「下载」/「更新」）共用的那一条。
 ///
 /// # 它做的两件事（都幂等）
 ///
 /// ```text
-///   ① 官方当前版的字节  没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
-///   ② 我的工作副本      presets-mine/<原名>.toml 还没有 → 落一份（官方原文 + 血统那三行）
-///                      已经在了 → **一个字节都不动**（我改过的东西不许被官方原件顶掉）
+///   ① 云端当前版的字节  没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
+///   ② 本地工作副本      presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 血统那三行）
+///                      已经在了 → **一个字节都不动**（我改过的东西不许被云端原件顶掉）
 /// ```
 ///
 /// # 它**不**做的事
 ///
-/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把官方的取到我机器上"，
+/// **不碰「当前使用」**（2026-10-09 改判）。下载 / 更新是"把交付预设取到我机器上"，
 /// 使用是"把哪一份设为生效" —— 两件事分在两个表上：云端表只有下载 / 更新，
 /// 本地表那几行才有「使用」。偷偷替用户换掉正在用的那份，是这一轮要根治的毛病之一。
 ///
 /// # 用户世界里的"一份"
 ///
-/// 官方原件留在下载区（`<catalog.path>`），它是**内部数据** —— 隐藏 baseline 的来源、
-/// 也是"官方当前版"的唯一可信字节。用户看到的、能改的从始至终是 `presets-mine/` 里那一份。
+/// 云端原件留在下载区（`<catalog.path>`），它是**内部数据** —— 隐藏 baseline 的来源、
+/// 也是"云端当前版"的唯一可信字节。用户看到的、能改的从始至终是 `presets-local/` 里那一份。
 #[tauri::command]
-pub async fn fetch_official_preset(
+pub async fn fetch_cloud_preset(
     app: AppHandle,
     file_name: String,
-) -> Result<FetchOfficialDto, AppError> {
+    rename_if_taken: Option<bool>,
+) -> Result<FetchCloudDto, AppError> {
     /* 句柄先留一份给自己：广播在任务之外发（阻塞任务里那把会被 move 进去） */
     let app_handle = app.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
-        traced("fetchOfficialPreset", |_| {
+        traced("fetchCloudPreset", |_| {
             let root = internal_root(&app_handle)?;
             let user = crate::fsx::paths::user_root(&app_handle)?;
             let catalog = runtime::load_released_catalog(&root)?;
@@ -473,43 +566,75 @@ pub async fn fetch_official_preset(
                 .files
                 .iter()
                 .find(|f| f.file_name == file_name)
-                .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name} 这一份")))?;
-            let fetched = ensure_official_bytes(&root, file)?;
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.066",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?;
+            let fetched = ensure_cloud_bytes(&root, file)?;
 
-            /* 官方原件是**内部**数据：它只用来落"我那一份"，绝不进用户世界 */
-            let rel = format!("{}/{}", crate::fsx::paths::MINE_DIR, file.file_name);
+            /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
+            let rel = format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name);
             let target = crate::fsx::paths::resolve_in(&user, &rel)?;
             let created = !target.is_file();
-            if created {
-                let text = runtime::delivery::official_text(&root, file)?;
-                runtime::mine::save_official_as_new(&user, file, &text, &file.file_name)?;
-            }
-            Ok(FetchOfficialDto {
+            let (file_name_here, path_here, taken_by, suggested_name) = if created {
+                let text = runtime::delivery::cloud_text(&root, file)?;
+                runtime::local::save_cloud_as_new(&user, file, &text, &file.file_name)?;
+                /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
+                落到我盘上那一刻（「恢复默认值」退的就是它） */
+                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                (file.file_name.clone(), rel, None, None)
+            } else if rename_if_taken == Some(true) {
+                /*
+                 * 用户已经点了"导入"：自动改一个**没被占的**名字落一份新的。
+                 * 原来那份一个字节不动 —— 两份同名是不允许的，但两份内容并存是用户要的。
+                 */
+                let name = untaken_name(&user, &file.file_name);
+                let text = runtime::delivery::cloud_text(&root, file)?;
+                let dir = crate::fsx::paths::LOCAL_DIR;
+                runtime::local::save_cloud_as_new(&user, file, &text, &name)?;
+                /* 原文镜像同上一支 */
+                let _ =
+                    runtime::baseline::ensure_origin_copy(&root, &user, &format!("{dir}/{name}"));
+                (name.clone(), format!("{dir}/{name}"), None, None)
+            } else {
+                /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */
+                (
+                    file.file_name.clone(),
+                    rel.clone(),
+                    Some(rel),
+                    Some(untaken_name(&user, &file.file_name)),
+                )
+            };
+            Ok(FetchCloudDto {
                 fetched,
                 created,
-                file_name: file.file_name.clone(),
-                path: rel,
+                file_name: file_name_here,
+                path: path_here,
+                taken_by,
+                suggested_name,
             })
         })
     });
-    let dto = task
-        .await
-        .map_err(|e| AppError::internal("取回预设没跑到终局").with_detail(e.to_string()))??;
+    let dto = task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.067", &[])).with_detail(e.to_string())
+    })??;
     /*
      * **一条广播都不发**：这条命令一个应用状态都不碰（不设当前使用、不碰草稿）——
      * 变的只有盘上的字节。前端的「投递面」那一格由调用方在成功后自行广播
-     * （`deliveryState.ts::deliveryMutated()`，见 `usePresetData.fetchOfficial`）。
+     * （`deliveryState.ts::deliveryMutated()`，见 `usePresetData.fetchCloud`）。
      */
     Ok(dto)
 }
 
-/// 让这份官方预设的字节**在本机可用**：盘上那份与目录登记一致就直接用（不发一次网络）；
+/// 让这份云端预设的字节**在本机可用**：盘上那份与目录登记一致就直接用（不发一次网络）；
 /// 没有 / 对不上就走同一条下载管道取回来（旧份自动归档，没有第二条路）。
 ///
 /// 回来的是"这次是否真的取了一份"（`false` = 本机已有当前版）—— 界面据此说
 /// 「已取回并使用」还是「已使用」。随包 bootstrap 目录不登记期望值：盘上有就照收
 /// （与交付面的口径一致，见 `runtime::delivery::status_of`）。
-pub(super) fn ensure_official_bytes(
+pub(super) fn ensure_cloud_bytes(
     root: &Path,
     file: &runtime::catalog::CatalogFile,
 ) -> Result<bool, AppError> {
@@ -610,7 +735,7 @@ pub async fn get_stale_files(app: AppHandle) -> Result<Vec<OnDiskFileDto>, AppEr
 /// `getStaleFiles` 只回答"盘上的字节与目录不一致"，而那可能是三件不同的事 ——
 /// 这一条把那三件分开，并且**只列有事的**（没下载 / 与目录一致的两种不出现）：
 ///
-///   `old`        = 认得出它是官方的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
+///   `old`        = 认得出它是云端的某一版旧版（归档里有它字节，或被归档的旧目录登记过）
 ///   `tampered`   = 目录、归档、旧目录都对不上 —— 这台机器上查不出它属于哪一版
 ///
 /// **它与"云端有更新"是两件事**：后者是 [`check_remote_update`]（比目录指纹），
@@ -677,11 +802,11 @@ pub struct ArchivedFileDto {
     pub kind: Option<String>,
 }
 
-/// 归档区里有什么（官方文件换版本时，被换下来的那一份）。
+/// 归档区里有什么（云端文件换版本时，被换下来的那一份）。
 ///
-/// 归档**不是用户修改历史**：它是官方版本生命周期的一部分 —— 换版本时旧份进
+/// 归档**不是用户修改历史**：它是云端版本生命周期的一部分 —— 换版本时旧份进
 /// `archive/`（保留最早一份，不覆盖、不删）。用户改出来的东西是**另一条线**
-/// （另存成另一份文件），永远不回写官方原件。
+/// （另存成另一份文件），永远不回写云端原件。
 ///
 /// 这条读只回答"盘上躺着哪些旧版本、认得出是谁的"：**不提供删除、不提供恢复**
 /// （那是归档管理的活，这一层不做）。
@@ -746,28 +871,37 @@ pub async fn read_archived_text(app: AppHandle, path: String) -> Result<String, 
             let rel = path.trim_start_matches('/').to_owned();
             let prefix = format!("{}/", runtime::paths::ARCHIVE_DIR);
             if !rel.starts_with(&prefix) {
-                return Err(AppError::invalid_argument(format!(
-                    "只读归档区里的文件（要 {prefix}… 开头，给的是 {rel}）"
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.ipc.catalog.068",
+                    &[("prefix", &prefix.to_string()), ("rel", &rel.to_string())],
                 )));
             }
             let target = crate::fsx::paths::resolve_in(&root, &rel)?;
             let bytes = std::fs::read(&target).map_err(|_| {
-                AppError::not_found(format!("归档里没有 {rel} —— 它可能已经被清掉了"))
+                AppError::not_found(messages::text(
+                    "ui.ipc.catalog.069",
+                    &[("rel", &rel.to_string())],
+                ))
             })?;
-            String::from_utf8(bytes)
-                .map_err(|_| AppError::corrupted(format!("{rel} 不是 UTF-8 文本，这一条读不出来")))
+            String::from_utf8(bytes).map_err(|_| {
+                AppError::corrupted(messages::text(
+                    "ui.ipc.catalog.070",
+                    &[("rel", &rel.to_string())],
+                ))
+            })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("读归档没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.071", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 删除（作者裁决 2026-10-06：一切皆可删） ---------- */
 
-/// **删除本机那份官方交付文件**（作者裁决 2026-10-06：一切皆可删）。
+/// **删除本机那份交付预设文件**（作者裁决 2026-10-06：一切皆可删）。
 ///
 /// 删了它回到「未下载」，随时可以从云端重新下载（字节有目录 SHA 锚定，零数据损失）。
-/// 删之前把属于这一份的**状态**一并清掉：使用中指针（官方线认文件名）撤下、
+/// 删之前把属于这一份的**状态**一并清掉：使用中指针（云端线认文件名）撤下、
 /// 没保存的草稿一并丢弃 —— 界面确认框讲清这一步。事件账与归档**不动**（历史事实）。
 #[tauri::command]
 pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
@@ -778,14 +912,14 @@ pub async fn delete_delivery_file(app: AppHandle, file_name: String) -> Result<(
         let draft = runtime::app_state::draft(&root)?;
         let mut state_cleared = false;
         if active.as_ref().is_some_and(|a| {
-            a.origin == runtime::state::ActiveOrigin::Official && a.file_name == file_name
+            a.origin == runtime::state::ActiveOrigin::Preset && a.file_name == file_name
         }) {
             runtime::app_state::clear_active_preset(&root)?;
             state_cleared = true;
         }
         if draft
             .as_ref()
-            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::official(&file_name))
+            .is_some_and(|d| d.subject() == runtime::state::DraftSubject::preset(&file_name))
         {
             runtime::app_state::clear_draft(&root)?;
             state_cleared = true;
@@ -821,10 +955,10 @@ pub async fn delete_archived_file(app: AppHandle, path: String) -> Result<(), Ap
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivePresetDto {
-    /// 这一份住在哪条线上（`official` / `mine`）—— 官方线与用户线**都能成为使用中**
+    /// 这一份住在哪条线上（`cloud` / `local`）—— 云端线与用户线**都能成为使用中**
     pub origin: runtime::state::ActiveOrigin,
     pub file_name: String,
-    /// 用户线的落点（相对用户根）；官方线是 `null`（落点由目录给）
+    /// 用户线的落点（相对用户根）；云端线是 `null`（落点由目录给）
     pub path: Option<String>,
     pub sha256: String,
     /// 认不出是哪台机型的哪一版时是空串（用户自己那份没有血统、或目录里已经没有来源那份）
@@ -832,7 +966,7 @@ pub struct ActivePresetDto {
     pub version_id: String,
     /// 盘上的文件还是不是应用时刻的那份。
     ///
-    /// 两条线上它的意思不一样：官方线正常恒 true（`mkp/` 是只读区）；用户线**用户自己
+    /// 两条线上它的意思不一样：云端线正常恒 true（`mkp/` 是只读区）；用户线**用户自己
     /// 又改了那份**时是 false —— 那是正常事（那份是他的），不是"这份配置坏了"。
     pub intact: bool,
 }
@@ -845,7 +979,7 @@ fn active_dto(
 ) -> ActivePresetDto {
     use runtime::state::ActiveOrigin;
     let (machine_id, version_id) = match state.origin {
-        ActiveOrigin::Official => {
+        ActiveOrigin::Preset => {
             let listed = catalog
                 .files
                 .iter()
@@ -855,7 +989,7 @@ fn active_dto(
                 listed.map(|f| f.version_id.clone()).unwrap_or_default(),
             )
         }
-        ActiveOrigin::Mine => {
+        ActiveOrigin::Local => {
             /*
              * 用户那份**自己说了**它从哪台机型的哪一版派生（血统三行写在文件头），
              * 这里只把那个来源翻成机型 / 版本。认不出来就留空 —— 不猜一个。
@@ -864,8 +998,8 @@ fn active_dto(
                 .path
                 .as_deref()
                 .and_then(|rel| crate::fsx::paths::resolve_in(user_root, rel).ok())
-                .and_then(|path| runtime::mine::lineage_of_file(&path));
-            let source = runtime::mine::source_of(catalog, lineage.as_ref());
+                .and_then(|path| runtime::local::lineage_of_file(&path));
+            let source = runtime::local::source_of(catalog, lineage.as_ref());
             (
                 source.map(|f| f.machine_id.clone()).unwrap_or_default(),
                 source.map(|f| f.version_id.clone()).unwrap_or_default(),
@@ -898,7 +1032,7 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
 }
 
 /// 「使用这一份」。**两条线共用这一个入口**（作者 2026-10-02 定的第七层）：
-/// 官方交付文件与用户自己那份都是真的 Preset，**"只读"是文件归属的属性，
+/// 交付预设文件与用户自己那份都是真的 Preset，**"只读"是文件归属的属性，
 /// 不是"能不能被使用"的属性** —— 所以这里只有"按来源定位 + 各自的可信度判定"，
 /// 没有两套 Preset 模型、也没有第二个写指针的口。
 ///
@@ -907,10 +1041,10 @@ pub async fn get_active_preset(app: AppHandle) -> Result<Option<ActivePresetDto>
 /// 两条线各自的**入口闸**（都在盘上真的读一遍，不靠界面拦）：
 ///
 /// ```text
-/// official  目录里有这一份 + 盘上字节与目录登记逐字节一致（没下载 / 被改过 / 是旧版本 —— 都不许应用）
-/// mine      落点必须在 `presets-mine/` 那一格里 + 盘上真有 + 能读成一份 TOML
+/// cloud  目录里有这一份 + 盘上字节与目录登记逐字节一致（没下载 / 被改过 / 是旧版本 —— 都不许应用）
+/// local      落点必须在 `presets-local/` 那一格里 + 盘上真有 + 能读成一份 TOML
 ///           （第九层的**文件级**检查；**不看 SHA** —— 用户自己改过是正常事，
-///           能不能用看"现在还能不能读"，见 `runtime::mine::read_preset_text`）
+///           能不能用看"现在还能不能读"，见 `runtime::local::read_preset_text`）
 /// ```
 #[tauri::command]
 pub async fn apply_active_preset(
@@ -925,51 +1059,63 @@ pub async fn apply_active_preset(
         let user = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&root)?;
 
+        /*
+         * ★ 这里**不记学习账**（2026-10-17 晚改口径）：作者的原话是「不是使用就增加，
+         *   是后处理才加」—— 计数点在钩子那一趟（`hook.rs` 载入 IR 之后）。
+         *   "应用了一份"只是把它设成当前预设，不等于拿它跑过后处理。
+         */
         let state = match origin.unwrap_or_default() {
-            ActiveOrigin::Official => {
+            ActiveOrigin::Preset => {
                 let file = catalog
                     .files
                     .iter()
                     .find(|f| f.file_name == file_name)
-                    .ok_or_else(|| AppError::not_found(format!("目录里没有 {file_name}")))?;
+                    .ok_or_else(|| {
+                        AppError::not_found(messages::text(
+                            "ui.ipc.catalog.072",
+                            &[("file_name", &file_name.to_string())],
+                        ))
+                    })?;
 
                 // 应用的是盘上那份：字节得真的在；**目录给了期望值**的还要与它对得上
                 // （没下载/被删/漂了都不许应用）。随包 bootstrap 目录没登记 SHA ——
                 // 那种情况下盘上有就允许应用（字节的权威判定归 OTA 目录生效后那次下载）
                 let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
-                    AppError::not_found(format!("{file_name} 还不在本机——先下载，再使用"))
+                    AppError::not_found(messages::text(
+                        "ui.ipc.catalog.073",
+                        &[("file_name", &file_name.to_string())],
+                    ))
                 })?;
                 if let Some(want) = file.expected_sha() {
                     let digest = runtime::catalog::hex(&sha2::Sha256::digest(&bytes));
                     if digest != want {
-                        return Err(AppError::sha_mismatch(format!(
-                            "{file_name} 盘上的内容与目录登记的当前版本对不上，拒绝应用 —— \
-                             先「更新」或「重新下载」换一份干净的"
+                        return Err(AppError::sha_mismatch(messages::text(
+                            "ui.ipc.catalog.074",
+                            &[("file_name", &file_name.to_string())],
                         )));
                     }
                 }
-                runtime::app_state::set_active_official(&root, file)?
+                runtime::app_state::set_active_preset(&root, file)?
             }
-            ActiveOrigin::Mine => {
+            ActiveOrigin::Local => {
                 let rel = path.ok_or_else(|| {
-                    AppError::invalid_argument(
-                        "用自己那份要给出它在用户根里的路径（presets-mine/…）",
-                    )
+                    AppError::invalid_argument(messages::text("ui.ipc.catalog.075", &[]))
                 })?;
                 /* 两道闸都在读盘之前：只认用户根那一格，而且得是一份 MKP 预设（.toml） */
-                runtime::mine::check_mine_prefix(&rel)?;
-                if runtime::mine::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
-                    return Err(AppError::invalid_argument(format!(
-                        "{file_name} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用"
+                runtime::local::check_local_prefix(&rel)?;
+                if runtime::local::kind_of(&file_name) != Some(runtime::catalog::kind::PRESET) {
+                    return Err(AppError::invalid_argument(messages::text(
+                        "ui.ipc.catalog.076",
+                        &[("file_name", &file_name.to_string())],
                     )));
                 }
                 /*
                  * 第九层的文件级检查在读的那一步里（能读 + UTF-8 + TOML 语法）——
-                 * 外部改过但仍是能读的 TOML 照常能用，**这里不比 SHA**（那是官方线的规矩）。
+                 * 外部改过但仍是能读的 TOML 照常能用，**这里不比 SHA**（那是云端线的规矩）。
                  */
-                let text = runtime::mine::read_preset_text(&user, &rel)?;
+                let text = runtime::local::read_preset_text(&user, &rel)?;
                 let digest = runtime::catalog::hex(&sha2::Sha256::digest(text.as_bytes()));
-                runtime::app_state::set_active_mine(&root, &rel, &digest)?
+                runtime::app_state::set_active_local(&root, &rel, &digest)?
             }
         };
 
@@ -1025,8 +1171,9 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
             })
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("检查更新没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
@@ -1051,10 +1198,12 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
                 remote.min_client_version.as_deref(),
             ) {
                 return Err(
-                    AppError::not_supported("此预设需要更新版 SupportEase").with_detail(format!(
-                        "远端目录结构签名 {} 本构建读不了（minClient={:?}）",
-                        remote.structure_signature, remote.min_client_version
-                    )),
+                    AppError::not_supported(messages::text("ui.ipc.catalog.078", &[])).with_detail(
+                        format!(
+                            "远端目录结构签名 {} 本构建读不了（minClient={:?}）",
+                            remote.structure_signature, remote.min_client_version
+                        ),
+                    ),
                 );
             }
 
@@ -1062,8 +1211,9 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
             Ok(report.summary())
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("应用远端目录没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.079", &[])).with_detail(e.to_string())
+    })?
 }
 
 /* ---------- 软件更新（`release.json`）—— 与预设数据**两条链** ---------- */
@@ -1103,8 +1253,9 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
             )))
         })
     });
-    task.await
-        .map_err(|e| AppError::internal("检查软件更新没跑到终局").with_detail(e.to_string()))?
+    task.await.map_err(|e| {
+        AppError::internal(messages::text("ui.ipc.catalog.080", &[])).with_detail(e.to_string())
+    })?
 }
 
 /// 给界面的软件更新状态（与 `runtime::release_info::SoftwareUpdate` 同形，camelCase）。

@@ -16,7 +16,7 @@
  *
  *   工作台端   ① 勾「待生成」→ 生成 → ② 卡的产物名单报出**真产物份数**
  *              ①b 参数台上「保存 / 放弃」各只剩一处（页头那对；工具行那对已删）
- *              ② 设置页「官方源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
+ *              ② 设置页「云端源（Bootstrap）」收得下仓库地址 + 「重新读取」能看清磁盘真相
  *              ②b 设置页「本地测试源（开发）」在、报得出地址；三份源（夹具 v1 / v2 /
  *                 当前交付）都在且是真单选、「当前交付」的地址带 /delivery；
  *                 点「启动」如实拒绝（浏览器里起不了进程 —— 那是真机上起 npm 的活）
@@ -218,7 +218,7 @@ for (const size of SIZES) {
     `保存 ${saveBtns} 个 · 放弃 ${dropBtns} 个`,
   )
 
-  /* ---------- ② 工作台「设置」页：官方源（Bootstrap）那一格 ---------- */
+  /* ---------- ② 工作台「设置」页：云端源（Bootstrap）那一格 ---------- */
   /*
    * 守第十七/十八刀定的**输入契约**：用户只表达"我有一个仓库"，其余是系统的事。
    *   ① 那格在、提示语说清"填仓库地址就够"（不是只认 blob 页）；
@@ -227,22 +227,22 @@ for (const size of SIZES) {
    *   ③ 空地址**存不进去**（按钮压住 / 如实拒）。
    *
    * **2026-10-08 修**：这一节漂过一轮 —— 输入框的 aria-label 早已从
-   * 「官方源（Bootstrap）地址」改成**两个**（GitHub 主源 / Gitee 镜像），保存那两句
+   * 「云端源（Bootstrap）地址」改成**两个**（GitHub 主源 / Gitee 镜像），保存那两句
    * 也不再带冒号；而"保存"以前靠 `~ button` 找**同一个 vrow 里的后续兄弟**，可那颗
    * 按钮其实在**下一个** vrow 里 —— 于是这条 locator 恒空、探针在这一行就断了。
    * 现在按"**点那颗活着的「保存」**"定位：夹具里草稿是干净的，外壳那颗（草稿保存）
    * 一定是禁用的，所以"哪一颗是活的"本身就是判据。
    */
   await wbPage.getByRole('button', { name: '设置', exact: true }).first().click()
-  const setReady = await until(async () => (await wbText(wbPage)).includes('官方源（Bootstrap）'), 8000)
+  const setReady = await until(async () => (await wbText(wbPage)).includes('云端源（Bootstrap）'), 8000)
   const wbSetText = flat(await wbText(wbPage))
   check(
     tag,
-    '② 设置页有「官方源（Bootstrap）」，且说明"填仓库地址就够"',
+    '② 设置页有「云端源（Bootstrap）」，且说明"填仓库地址就够"',
     setReady && wbSetText.includes('填仓库地址就够'),
     wbSetText.slice(0, 80),
   )
-  const urlInput = wbPage.getByLabel('官方源（GitHub 主源）地址')
+  const urlInput = wbPage.getByLabel('云端源（GitHub 主源）地址')
   await urlInput.fill('https://github.com/MuCoreBenC/MKPSupportEase.git')
   await wbPage.locator('button:enabled', { hasText: /^保存$/ }).first().click()
   const saved = await until(async () => (await wbText(wbPage)).includes('已保存'), 5000)
@@ -378,7 +378,7 @@ for (const size of SIZES) {
 
   console.log(
     `${tag.padEnd(8)} 工作台产物 ${before} → ${builtCount} 份（② 卡真产物份数）· `
-    + `设置页官方源收得下 / 重新读取看真相 · 客户端边界如实`,
+    + `设置页云端源收得下 / 重新读取看真相 · 客户端边界如实`,
   )
   await ctx.close()
 }
@@ -398,7 +398,7 @@ if (problems.length > 0) {
 }
 console.log(
   '工作台发布这一端走通：生成 → ② 卡报出真产物份数；客户端那一端如实（数据源那一格说真话）；'
-  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「官方源」收得下 / 「重新读取」能从磁盘看真相 / '
+  + '桩只在 ?mock=1 时装（不带就如实失败）、设置页「云端源」收得下 / 「重新读取」能从磁盘看真相 / '
   + '「本地测试源」在且点「启动」如实拒绝 / 「测试模式（沙箱）」在且点开时如实拒绝（不假装切了根）'
   + ' —— 两档尺寸 0 console error / 0 个 >=400',
 )

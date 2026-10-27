@@ -39,6 +39,8 @@
 //! `catalog.path` 一个值两用：`filesRoot + path` = 云端取哪；
 //! `<appDataDir> + path` = 本地放哪（唯一路径语义，2026-10-04）。两者都由本模块说。
 
+use postprocess::diag::messages;
+
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -92,17 +94,22 @@ impl SourceManifest {
             files_root: String,
         }
         let raw: Raw = serde_json::from_slice(bytes).map_err(|e| {
-            AppError::corrupted("Source Manifest（source.json）解析不了").with_detail(e.to_string())
+            AppError::corrupted(messages::text("ui.runtime.resolver.435", &[]))
+                .with_detail(e.to_string())
         })?;
         if raw.source_schema != MANIFEST_SCHEMA {
-            return Err(AppError::corrupted(format!(
-                "Source Manifest 的协议代次认不了：文件是 {}，程序认 {}",
-                raw.source_schema, MANIFEST_SCHEMA
+            return Err(AppError::corrupted(messages::text(
+                "ui.runtime.resolver.436",
+                &[
+                    ("v1", &raw.source_schema.to_string()),
+                    ("v2", &MANIFEST_SCHEMA.to_string()),
+                ],
             )));
         }
         let bad_rel = |what: &str, raw: &str| {
-            AppError::corrupted(format!(
-                "Source Manifest 里 {what} 的引用不合法：{raw:?}（要相对路径，不许 .. / 绝对 URL / 反斜杠）"
+            AppError::corrupted(messages::text(
+                "ui.runtime.resolver.437",
+                &[("what", what), ("raw", raw)],
             ))
         };
         validate_rel_ref(&raw.catalog).map_err(|_| bad_rel("catalog", &raw.catalog))?;
@@ -116,9 +123,9 @@ impl SourceManifest {
             }
         }
         if raw.files_root != "." && raw.files_root != ".." {
-            return Err(AppError::corrupted(format!(
-                "Source Manifest 的 filesRoot 只认 \".\" 或 \"..\"，文件里是 {:?}",
-                raw.files_root
+            return Err(AppError::corrupted(messages::text(
+                "ui.runtime.resolver.438",
+                &[("v1", &raw.files_root.to_string())],
             )));
         }
         Ok(Self {
@@ -169,9 +176,7 @@ impl ResolvedAddress {
     /// 远端地址，没有就报"未声明"。给"必须有"的调用方（release 链）。
     pub fn remote_or(self, what: &str) -> Result<String, AppError> {
         self.remote.ok_or_else(|| {
-            AppError::not_found(format!(
-                "数据源没有声明{what}的地址（source.json 里没有这一项）"
-            ))
+            AppError::not_found(messages::text("ui.runtime.resolver.439", &[("what", what)]))
         })
     }
 
@@ -264,8 +269,12 @@ impl SourceResolver {
                 Ok(self.answer(join(&base, rel), None))
             }
             ResourceRef::Entry(file) => {
-                validate_entry_path(&file.path)
-                    .map_err(|why| AppError::corrupted(format!("catalog.path 不合法：{}", why)))?;
+                validate_entry_path(&file.path).map_err(|why| {
+                    AppError::corrupted(messages::text(
+                        "ui.runtime.resolver.440",
+                        &[("v1", &why.to_string())],
+                    ))
+                })?;
                 let remote = join(&self.files_root()?, &file.path);
                 let local = self
                     .internal_root
@@ -284,8 +293,9 @@ impl SourceResolver {
             "." => Ok(self.delivery.clone()),
             // "上一层"：交付根在发布根（presets/）里面，去一段就是它
             ".." => parent_dir(&self.delivery),
-            other => Err(AppError::corrupted(format!(
-                "filesRoot 只认 \".\" / \"..\"，这份 Manifest 里是 {other:?}"
+            other => Err(AppError::corrupted(messages::text(
+                "ui.runtime.resolver.441",
+                &[("other", other)],
             ))),
         }
     }
@@ -306,12 +316,13 @@ impl SourceResolver {
 }
 
 fn undeclared(what: &'static str) -> impl Fn() -> AppError {
-    move || AppError::not_found(format!("数据源没有声明 {what}（source.json 里没有这一项）"))
+    move || AppError::not_found(messages::text("ui.runtime.resolver.442", &[("what", what)]))
 }
 
 fn invalid_rel(what: &str, raw: &str) -> AppError {
-    AppError::corrupted(format!(
-        "Source Manifest 里 {what} 的引用不合法：{raw:?}（要相对路径，不许 .. / 绝对 URL / 反斜杠）"
+    AppError::corrupted(messages::text(
+        "ui.runtime.resolver.443",
+        &[("what", what), ("raw", raw)],
     ))
 }
 
@@ -361,7 +372,7 @@ fn join(base: &str, rel: &str) -> String {
 /// （manifest 所在目录的"上一层"= `filesRoot: ".."` 的落点。）
 fn parent_dir(url: &str) -> Result<String, AppError> {
     let bad =
-        || AppError::invalid_argument(format!("地址不像一个可退回上一级的 http(s) 地址：{url}"));
+        || AppError::invalid_argument(messages::text("ui.runtime.resolver.444", &[("url", url)]));
     let rest = url
         .strip_prefix("https://")
         .or_else(|| url.strip_prefix("http://"))

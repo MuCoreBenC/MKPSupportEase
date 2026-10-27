@@ -44,6 +44,8 @@
 //! "软件版本"全局只有一处真值。将来换成 GitHub Releases，只换**消费层**取这份数据的方式
 //! （[`super::net`] 里换一个取法），不动预设发布架构（作者定死的演进路线）。
 
+use postprocess::diag::messages;
+
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
@@ -117,18 +119,23 @@ fn default_schema() -> u32 {
 /// 解析 `release.json` 的字节。坏 JSON / 代次认不出 → `CORRUPTED`（不静默当"没更新"）。
 pub fn parse(bytes: &[u8]) -> Result<ReleaseInfo, AppError> {
     let info: ReleaseInfo = serde_json::from_slice(bytes).map_err(|e| {
-        AppError::corrupted("软件发布信息（release.json）解析不了").with_detail(e.to_string())
+        AppError::corrupted(messages::text("ui.runtime.release_info.429", &[]))
+            .with_detail(e.to_string())
     })?;
     if info.release_schema != RELEASE_SCHEMA {
-        return Err(AppError::corrupted(format!(
-            "软件发布信息的格式代次认不了：文件是 {}，程序认 {}",
-            info.release_schema, RELEASE_SCHEMA
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.release_info.430",
+            &[
+                ("v1", &info.release_schema.to_string()),
+                ("v2", &RELEASE_SCHEMA.to_string()),
+            ],
         )));
     }
     if info.version.trim().is_empty() {
-        return Err(AppError::corrupted(
-            "软件发布信息里没有版本号（version 是空的）",
-        ));
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.release_info.431",
+            &[],
+        )));
     }
     Ok(info)
 }

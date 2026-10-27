@@ -29,6 +29,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 use postprocess::config;
+use postprocess::diag::messages::{self};
 use postprocess::diag::{CancelToken, PostprocError};
 use postprocess::pipeline::{self, ProcessRequest, ProgressEvent};
 
@@ -72,6 +73,10 @@ struct Cli {
     /// 日志缺省级别（trace/debug/info/warn/error）；`RUST_LOG` 优先
     #[arg(long, global = true, default_value = "info")]
     log_level: String,
+    /// 文案语言：`zh` / `en`（2026-10-25）。缺省中文 —— 本程序是诊断入口，
+    /// 客户端与钩子各自按 AppState 的语言格设，不靠这个参数
+    #[arg(long, global = true, default_value = "zh")]
+    lang: String,
     #[command(subcommand)]
     command: Command,
 }
@@ -119,12 +124,45 @@ enum Command {
         #[arg(long = "set", value_name = "路径=值")]
         set: Vec<String>,
     },
+    /// 校验**校准素材**的 3MF 身份（`npm run check:calibration-assets` 调它）
+    ///
+    /// 逐份读 `3D/3dmodel.model` 里的 `MKPSE:Calibration`，与台账里的预期比。
+    /// **只读，不写任何文件**（改文件是工作台的事）。
+    ///
+    /// 输出：stdout 每份一行（制表符分隔，给机器读），stderr 是给人看的摘要。
+    /// 退出码：`0` 全过 / `1` 有不合格 / `2` 台账读不了。
+    CheckAssets {
+        /// 资产台账。缺省取仓库里的 `presets/assets.toml`
+        #[arg(long, value_name = "台账")]
+        manifest: Option<PathBuf>,
+        /// 也扫 `assets/models` 下**没登记进台账**的 .3mf（防新增素材漏登记）
+        #[arg(long)]
+        scan: bool,
+    },
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    /*
+     * 语言先落地、再碰任何一句文案（2026-10-25）：`--lang` 之后所有
+     * `text()` / `slicer()` 都按它出。认不出的字面量整次拒绝（退 2）——
+     * 静默回落成中文会让脚本以为"英文没生效"。
+     */
+    match postprocess::diag::messages::Lang::parse(&cli.lang) {
+        Some(lang) => postprocess::diag::messages::set_lang(lang),
+        None => {
+            eprintln!(
+                "{}",
+                messages::text("cli.lang.unknown", &[("lang", &cli.lang)])
+            );
+            return ExitCode::from(EXIT_BAD_INPUT);
+        }
+    }
     if let Err(e) = logging::init(&cli.log_level) {
-        eprintln!("日志初始化失败（{e}），继续以无日志运行");
+        eprintln!(
+            "{}",
+            messages::text("cli.logging.init_failed", &[("detail", &e.to_string())])
+        );
     }
     match cli.command {
         Command::Run {
@@ -136,6 +174,199 @@ fn main() -> ExitCode {
         Command::Init { out } => cmd_init(out.as_deref()),
         Command::DumpIr { config, set, gcode } => cmd_dump_ir(&config, &set, gcode.as_deref()),
         Command::Check { config, set } => cmd_check(&config, &set),
+        Command::CheckAssets { manifest, scan } => cmd_check_assets(manifest.as_deref(), scan),
+    }
+}
+
+// ---------------------------------------------------------------- check-assets
+
+/// `check-assets`：校准素材的身份验收（**只读**）。
+///
+/// 三件事一次做完：
+/// 1. 台账里每一条声明了 `calibration` 的模型，文件里必须真的是那个身份；
+/// 2. 台账里 `type = 'model'` 但**没声明** `calibration` 的，报"未声明预期"（不是失败，
+///    只是提醒 —— 也许它压根不是校准件，比如测试拼盘）；
+/// 3. `--scan`：`assets/models` 下有 `.3mf` 却没登记进台账的，报出来（防漏登记）。
+///
+/// 判定逻辑全部走 `calibration_asset`（与工作台同一个实现），本函数只负责排序与输出。
+fn cmd_check_assets(manifest: Option<&Path>, scan: bool) -> ExitCode {
+    let manifest = match manifest {
+        Some(p) => p.to_path_buf(),
+        None => match default_manifest() {
+            Some(p) => p,
+            None => {
+                eprintln!("{}", messages::text("cli.assets.not_found", &[]));
+                return ExitCode::from(2);
+            }
+        },
+    };
+
+    let text = match std::fs::read_to_string(&manifest) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                messages::text(
+                    "cli.assets.unreadable",
+                    &[
+                        ("path", &manifest.display().to_string()),
+                        ("detail", &e.to_string())
+                    ]
+                )
+            );
+            return ExitCode::from(2);
+        }
+    };
+    let table: toml::Value = match text.parse() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!(
+                "{}",
+                messages::text(
+                    "cli.assets.malformed",
+                    &[
+                        ("path", &manifest.display().to_string()),
+                        ("detail", &e.to_string())
+                    ]
+                )
+            );
+            return ExitCode::from(2);
+        }
+    };
+
+    let assets_root = manifest.parent().unwrap_or(Path::new(".")).join("assets");
+    let entries = match table.get("assets").and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => {
+            eprintln!("{}", messages::text("cli.assets.no_section", &[]));
+            return ExitCode::from(2);
+        }
+    };
+
+    let mut rows: Vec<String> = Vec::new();
+    let mut failures = 0usize;
+    let mut checked = 0usize;
+    let mut undeclared: Vec<String> = Vec::new();
+    let mut registered: Vec<String> = Vec::new();
+
+    for a in entries {
+        let kind = a.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        let path = a.get("path").and_then(|v| v.as_str()).unwrap_or("");
+        if kind != "model" || path.is_empty() {
+            continue;
+        }
+        registered.push(path.to_string());
+        let expected = a.get("calibration").and_then(|v| v.as_str()).unwrap_or("");
+        if expected.is_empty() {
+            undeclared.push(format!(
+                "{path}（id={}）",
+                a.get("id").and_then(|v| v.as_str()).unwrap_or("")
+            ));
+            continue;
+        }
+
+        checked += 1;
+        let abs = assets_root.join(path);
+        let asset = postprocess::calibration_asset::read_identity(&abs);
+        let verdict = match asset.identity.as_deref() {
+            Some(raw) if raw == expected => "ok",
+            Some(_) if asset.is_valid() => "mismatch",
+            Some(_) => "invalid",
+            None => {
+                if asset.problem.as_deref().unwrap_or("").contains("没有") {
+                    "missing"
+                } else {
+                    "unreadable"
+                }
+            }
+        };
+        if verdict != "ok" {
+            failures += 1;
+        }
+        /* 机器可读一行：路径 \t 预期 \t 实际 \t 结论 \t 说明 */
+        rows.push(format!(
+            "{path}\t{expected}\t{}\t{verdict}\t{}",
+            asset.identity.as_deref().unwrap_or("-"),
+            asset.problem.as_deref().unwrap_or("-").replace('\t', " ")
+        ));
+    }
+
+    /* --scan：扫 assets/models 下没登记的 .3mf */
+    let mut unregistered: Vec<String> = Vec::new();
+    if scan {
+        let models = assets_root.join("models");
+        if let Ok(dir) = std::fs::read_dir(&models) {
+            for e in dir.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let rel = format!("models/{name}");
+                if name.to_ascii_lowercase().ends_with(".3mf")
+                    && !registered.iter().any(|r| r == &rel)
+                {
+                    unregistered.push(rel);
+                }
+            }
+        }
+        unregistered.sort();
+    }
+
+    for r in &rows {
+        println!("{r}");
+    }
+
+    eprintln!(
+        "{}",
+        messages::text(
+            "cli.check_assets.summary",
+            &[
+                ("checked", &checked.to_string()),
+                ("failures", &failures.to_string())
+            ]
+        )
+    );
+    for r in &rows {
+        let cols: Vec<&str> = r.split('\t').collect();
+        if cols.len() >= 5 && cols[3] != "ok" {
+            eprintln!(
+                "  ✗ {} —— 预期 {}，实际 {}（{}）",
+                cols[0], cols[1], cols[2], cols[4]
+            );
+        }
+    }
+    for u in &undeclared {
+        eprintln!(
+            "{}",
+            messages::text("cli.check_assets.undeclared", &[("u", u)])
+        );
+    }
+    for u in &unregistered {
+        eprintln!(
+            "{}",
+            messages::text("cli.check_assets.unregistered", &[("u", u)])
+        );
+    }
+    if !unregistered.is_empty() {
+        eprintln!("{}", messages::text("cli.check_assets.scan_note", &[]));
+    }
+
+    if failures == 0 {
+        eprintln!("{}", messages::text("cli.check_assets.all_ok", &[]));
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
+}
+
+/// 缺省台账：从当前目录往上找 `presets/assets.toml`（仓库根跑、`src-tauri` 里跑都行）。
+fn default_manifest() -> Option<PathBuf> {
+    let mut at = std::env::current_dir().ok()?;
+    loop {
+        let p = at.join("presets").join("assets.toml");
+        if p.is_file() {
+            return Some(p);
+        }
+        if !at.pop() {
+            return None;
+        }
     }
 }
 
@@ -151,7 +382,10 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
         let token = cancel.clone();
         move || token.cancel()
     }) {
-        eprintln!("Ctrl-C 处理器装配失败（{e}），继续但不支持协作取消");
+        eprintln!(
+            "{}",
+            messages::text("cli.ctrlc.failed", &[("detail", &e.to_string())])
+        );
     }
 
     let request = ProcessRequest {
@@ -176,7 +410,13 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
             // 结果路径 → stdout，**独占一行**（脚本消费面）
             println!("{}", result.output_path.display());
             // 逐阶段耗时 → stderr（性能基线靠这张表；报告页的 `pipeline[]` 吃的是同一份账）
-            eprintln!("总耗时：{} ms", started.elapsed().as_millis());
+            eprintln!(
+                "{}",
+                postprocess::diag::messages::text(
+                    "cli.elapsed",
+                    &[("ms", started.elapsed().as_millis().to_string().as_str())],
+                )
+            );
             for t in &result.step_timings {
                 eprintln!(
                     "  {:<14} {:>8} ms  {}",
@@ -187,31 +427,56 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
             }
             if let Some(pt) = &result.print_time {
                 eprintln!(
-                    "预计打印时间：{:.1}s（tool {:.1}s / prep {:.1}s / startup {:.1}s / segments {}）",
-                    pt.total_seconds,
-                    pt.tool_movement_seconds,
-                    pt.prep_overhead_seconds,
-                    pt.startup_overhead_seconds,
-                    pt.segments
+                    "{}",
+                    messages::text(
+                        "cli.print_time",
+                        &[
+                            ("total", &format!("{:.1}", pt.total_seconds)),
+                            ("tool", &format!("{:.1}", pt.tool_movement_seconds)),
+                            ("prep", &format!("{:.1}", pt.prep_overhead_seconds)),
+                            ("startup", &format!("{:.1}", pt.startup_overhead_seconds)),
+                            ("segments", &pt.segments.to_string()),
+                        ]
+                    )
                 );
             }
             eprintln!(
-                "统计：塔高 {:.2}mm / 涂胶层 {} / 警告 {} 条",
-                result.stats.tower_height,
-                result.stats.pass1.glue_layer_count,
-                result.warnings.len()
+                "{}",
+                messages::text(
+                    "cli.stats",
+                    &[
+                        ("tower", &format!("{:.2}", result.stats.tower_height)),
+                        ("glue", &result.stats.pass1.glue_layer_count.to_string()),
+                        ("warnings", &result.warnings.len().to_string()),
+                    ]
+                )
             );
             for w in &result.warnings {
-                eprintln!("警告：{w}");
+                eprintln!(
+                    "{}",
+                    postprocess::diag::messages::text("cli.warning", &[("text", w.as_str())])
+                );
             }
             ExitCode::SUCCESS
         }
         Err(err) if matches!(err, PostprocError::Cancelled { .. }) => {
-            eprintln!("已取消 [{}]：{err}", err.code());
+            eprintln!(
+                "{}",
+                postprocess::diag::messages::text(
+                    "cli.cancelled",
+                    &[("code", err.code()), ("detail", err.to_string().as_str())],
+                )
+            );
             ExitCode::from(EXIT_CANCELLED)
         }
         Err(err) => {
-            eprintln!("处理失败 [{}]：{err}", err.code());
+            eprintln!(
+                "{}",
+                postprocess::diag::messages::text(
+                    "cli.failed",
+                    &[("code", err.code()), ("detail", err.to_string().as_str())],
+                )
+            );
             ExitCode::from(EXIT_FAILED)
         }
     }
@@ -222,17 +487,35 @@ fn cmd_run(gcode: &Path, config: &Path, out: Option<PathBuf>, set: Vec<String>) 
 /// 返回 `Some(退出码)` 表示已经报错、调用方直接退；`None` 表示可以继续。
 fn preflight(gcode: &Path, config: &Path, set: &[String]) -> Option<ExitCode> {
     if !gcode.is_file() {
-        eprintln!("输入 G-code 不存在：{}", gcode.display());
+        eprintln!(
+            "{}",
+            postprocess::diag::messages::text(
+                "cli.gcode_missing",
+                &[("path", gcode.display().to_string().as_str())]
+            )
+        );
         return Some(ExitCode::from(EXIT_BAD_INPUT));
     }
     if !config.is_file() {
-        eprintln!("配置文件不存在：{}", config.display());
+        eprintln!(
+            "{}",
+            postprocess::diag::messages::text(
+                "cli.config_missing",
+                &[("path", config.display().to_string().as_str())]
+            )
+        );
         return Some(ExitCode::from(EXIT_BAD_INPUT));
     }
     // 这一次解析只为把「配置错」与「处理失败」分成两个退出码。
     // 管线自己还会再读一次配置 —— 是**同一个函数**，不是第二条解析路径。
     if let Err(err) = pipeline::config_ir(config, set) {
-        eprintln!("配置不可用 [{}]：{err}", err.code());
+        eprintln!(
+            "{}",
+            postprocess::diag::messages::text(
+                "cli.config_bad",
+                &[("code", err.code()), ("detail", err.to_string().as_str())],
+            )
+        );
         return Some(ExitCode::from(EXIT_BAD_INPUT));
     }
     None
@@ -267,12 +550,30 @@ fn cmd_init(out: Option<&Path>) -> ExitCode {
             }
             match std::fs::write(path, &text) {
                 Ok(()) => {
-                    eprintln!("已写入 {}（{} 字节）", path.display(), text.len());
+                    eprintln!(
+                        "{}",
+                        messages::text(
+                            "cli.write.done",
+                            &[
+                                ("path", &path.display().to_string()),
+                                ("bytes", &text.len().to_string())
+                            ]
+                        )
+                    );
                     println!("{}", path.display());
                     ExitCode::SUCCESS
                 }
                 Err(e) => {
-                    eprintln!("写入失败：{}（{e}）", path.display());
+                    eprintln!(
+                        "{}",
+                        messages::text(
+                            "cli.write.failed",
+                            &[
+                                ("path", &path.display().to_string()),
+                                ("detail", &e.to_string())
+                            ]
+                        )
+                    );
                     ExitCode::from(EXIT_BAD_INPUT)
                 }
             }
@@ -286,7 +587,16 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
         Some(p) => match std::fs::read_to_string(p) {
             Ok(s) => Some(s),
             Err(e) => {
-                eprintln!("读不到输入 G-code：{}（{e}）", p.display());
+                eprintln!(
+                    "{}",
+                    messages::text(
+                        "cli.gcode.unreadable",
+                        &[
+                            ("path", &p.display().to_string()),
+                            ("detail", &e.to_string())
+                        ]
+                    )
+                );
                 return ExitCode::from(EXIT_BAD_INPUT);
             }
         },
@@ -295,7 +605,13 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
     let ir = match pipeline::resolve_ir(config, set, raw.as_deref()) {
         Ok(ir) => ir,
         Err(err) => {
-            eprintln!("配置不可用 [{}]：{err}", err.code());
+            eprintln!(
+                "{}",
+                messages::text(
+                    "cli.config.unusable",
+                    &[("code", err.code()), ("detail", &err.to_string())]
+                )
+            );
             return ExitCode::from(EXIT_BAD_INPUT);
         }
     };
@@ -303,7 +619,10 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
     let mut value = match serde_json::to_value(&ir) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("IR 序列化失败：{e}");
+            eprintln!(
+                "{}",
+                messages::text("cli.ir.serialize_failed", &[("detail", &e.to_string())])
+            );
             return ExitCode::from(EXIT_FAILED);
         }
     };
@@ -323,6 +642,10 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
                     "ProcessPresetName": facts.process_preset_name,
                     "SlicerIroningEnabled": facts.slicer_ironing_enabled,
                     "ThreeMfFileName": facts.three_mf_file_name,
+                    // 3MF 模型名（三级兜底链；三级都没有就是 null —— 不编名字）。
+                    // 它要读 G-code 旁边的切片器临时文件 ⇒ 只有 `--gcode` 指着
+                    // 临时目录里那一份时才有值。
+                    "ModelName": facts.model_name,
                 }),
             );
         }
@@ -333,7 +656,10 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("IR 序列化失败：{e}");
+            eprintln!(
+                "{}",
+                messages::text("cli.ir.serialize_failed", &[("detail", &e.to_string())])
+            );
             ExitCode::from(EXIT_FAILED)
         }
     }
@@ -341,7 +667,13 @@ fn cmd_dump_ir(config: &Path, set: &[String], gcode: Option<&Path>) -> ExitCode 
 
 fn cmd_check(config: &Path, set: &[String]) -> ExitCode {
     if !config.is_file() {
-        eprintln!("配置文件不存在：{}", config.display());
+        eprintln!(
+            "{}",
+            messages::text(
+                "cli.config.not_found",
+                &[("path", &config.display().to_string())]
+            )
+        );
         return ExitCode::from(EXIT_BAD_INPUT);
     }
     // 用 `resolve_ir`（第 2+3 步）而不是只做第 2 步：机型表填完才知道运动范围，
@@ -349,7 +681,10 @@ fn cmd_check(config: &Path, set: &[String]) -> ExitCode {
     match pipeline::resolve_ir(config, set, None) {
         Ok(ir) => {
             // 报**判定依据**而不是一句「OK」：一句 OK 的可核对性等于零。
-            eprintln!("配置可用：{}", config.display());
+            eprintln!(
+                "{}",
+                messages::text("cli.config.ok", &[("path", &config.display().to_string())])
+            );
             eprintln!(
                 "机型 {}（X {:.1}..{:.1} / Y {:.1}..{:.1}，涂胶区 X {:.1}..{:.1} / Y {:.1}..{:.1}）",
                 ir.machine.machine_type,
@@ -377,7 +712,13 @@ fn cmd_check(config: &Path, set: &[String]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(err) => {
-            eprintln!("配置不可用 [{}]：{err}", err.code());
+            eprintln!(
+                "{}",
+                messages::text(
+                    "cli.config.unusable",
+                    &[("code", err.code()), ("detail", &err.to_string())]
+                )
+            );
             ExitCode::from(EXIT_BAD_INPUT)
         }
     }

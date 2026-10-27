@@ -1,4 +1,4 @@
-//! `pipeline::process_with_ir` 的判据：**两张公开脸必须产出同一份字节**。
+//! 后处理两条入口的判据：**钩子那条脸与 CLI 那条脸必须产出同一份字节**。
 //!
 //! 背景：mkp-ssr 的钩子路径手里已经是 `Ir`（预设 TOML 经 `mkp-preset` 映射而来），
 //! 不是 TOML 配置文件，所以 `pipeline` 多了一张脸。多一张脸就多一条会漂移的产品路径，
@@ -13,7 +13,8 @@
 //!   那份带 ±999 的机器范围，喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，
 //!   看着像搬错了，其实是选错 fixture（AGENTS.md §7⑥）。
 //! - 期望输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）：
-//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。
+//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。比对前剔除两类
+//!   **有意偏离**：MKP 标记行（纯增量）与换笔段（2026-10-20 起的净空修正）。
 //!
 //! ## 证据等级
 //!
@@ -66,6 +67,14 @@ fn reference_output() -> PathBuf {
     repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
 }
 
+/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「抬升 Z=20 + 跳过震动检测」生成
+/// （= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳 —— 两张脸都钉回去，
+/// 字节判据才不假红（同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
+const PREFERENCE_PINS: &[&str] = &[
+    "Prefs.BeginStageRetractZLiftMm=20",
+    "Prefs.SkipVibrationCalibration=true",
+];
+
 /// 把输入复制进临时目录，原地跑一遍，返回原地覆盖后的字节。
 ///
 /// **调用方必须持有 [`lock_sequence`] 的锁**：里面会 reset 那条进程级伪随机序列。
@@ -82,23 +91,29 @@ fn run_in_place(with_ir: bool) -> Vec<u8> {
     if with_ir {
         // 钩子路径：配置先变成 IR，再把 IR 交给管线。
         let raw = std::fs::read_to_string(&work).expect("读输入");
-        let ir = pipeline::resolve_ir(&config_a1(), &[], Some(&raw)).expect("配置 → IR");
-        pipeline::process_with_ir(
+        let overrides: Vec<String> = PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect();
+        let ir = pipeline::resolve_ir(&config_a1(), &overrides, Some(&raw)).expect("配置 → IR");
+        /* ★ 走**产品真正用的那个**函数（`hook.rs` 调的就是它），不是 `process_with_ir`。
+        2026-10-19 收敛之后，`process_with_ir` / `_and_cancel_interval` 已随
+        "零产品调用方"一起删除 —— 判据若还指着它们，守的就是一条没人走的路。 */
+        pipeline::process_with_ir_with_tower_ask(
             IrProcessRequest {
                 gcode_path: work.clone(),
                 ir,
                 output_path: None, // 原地
+                calibration: Default::default(),
             },
+            None,
             &mut sink,
             &cancel,
         )
-        .expect("process_with_ir 必须成功");
+        .expect("process_with_ir_with_tower_ask 必须成功");
     } else {
         pipeline::process(
             ProcessRequest {
                 gcode_path: work.clone(),
                 config_path: config_a1(),
-                overrides: Vec::new(),
+                overrides: PREFERENCE_PINS.iter().map(|s| (*s).to_string()).collect(),
                 output_path: None, // 原地
             },
             &mut sink,
@@ -141,20 +156,29 @@ fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
+/// 剔除「换笔块」—— 实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks`
+/// 这一份（2026-10-20 起换笔段有意偏离参考物，见那边的注释）。
+fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
+}
+
 #[test]
 fn process_with_ir_matches_the_end_to_end_reference() {
     let _seq = lock_sequence();
-    let via_ir = strip_mkp_marks(&run_in_place(true));
-    let want = std::fs::read(reference_output()).expect("读整链参考物");
+    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除两处**有意偏离**再比：
+    // MKP 标记行（纯增量）与换笔段（2026-10-20 起的净空修正）。
+    let via_ir = strip_swap_travel_blocks(&strip_mkp_marks(&run_in_place(true)));
+    let raw = std::fs::read(reference_output()).expect("读整链参考物");
     // 反空转哨兵：参考物必须真的是那 668,687 字节的那一份，
     // 否则「读到一个空文件、两边都空、判据全绿」在终端上长得跟真绿一样。
     assert!(
-        want.len() == 668_687,
+        raw.len() == 668_687,
         "整链参考物字节数必须是 668687，实测 {}",
-        want.len()
+        raw.len()
     );
+    let want = strip_swap_travel_blocks(&raw);
     assert_same_bytes(
-        "process_with_ir 与整链参考物（已剔除 MKP 标记行）",
+        "process_with_ir 与整链参考物（已剔除 MKP 标记行与换笔段）",
         &want,
         &via_ir,
     );

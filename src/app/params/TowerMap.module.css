@@ -12,9 +12,22 @@
   gap: 18px;
 }
 
-/* 画布列：231px 上限与参考程序一致，窄卡里可以缩 */
+/*
+ * 画布列：231px 与参考程序一致。
+ *
+ * ★★★ 2026-10-17：`flex: 0 1 231px` → `0 0 231px`（**从"可缩"改成"定死"**）。
+ *
+ * 原来是可缩的（`flex-shrink: 1`），于是右边那一列一展开详情，行内的最小内容宽
+ * 变大、`.sideCol` 撑不住，flex 只能去压左列 —— 作者看到的就是"展开右侧详情，
+ * 左边画布变窄了"。他给的是硬判据：**展开与收起，画布宽度一点都不许变**。
+ *
+ * 所以左列定死、变化全部由右列吸收（右列本来就有 `min-width: 0` + `overflow: hidden`）。
+ * 窄档（下面那条 `@container (max-width: 500px)`）仍然改为 `width: min(231px, 88%)` ——
+ * 那个断点只看容器宽，与详情开不开无关，所以也不会跳。
+ */
 .mapCol {
-  flex: 0 1 231px;
+  flex: 0 0 231px;
+  width: 231px;
   min-width: 0;
 }
 
@@ -34,6 +47,7 @@
   cursor: crosshair;
   touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
 }
 
 .mapPlate {
@@ -43,6 +57,13 @@
   cursor: crosshair;
   touch-action: none;
   user-select: none;
+  -webkit-user-select: none;
+}
+
+/* 只读（编辑模式之外）：十字收成默认 —— 拖不动的东西别摆一副能拖的样子 */
+.map[data-ro],
+.mapPlate[data-ro] {
+  cursor: default;
 }
 
 /*
@@ -68,7 +89,7 @@
 /* 板缘 → 可打印区之间的那圈余量。色调与边缘留白带一致（0.05）—— 两片要融成同一条
  * 连续的灰。白缝的真正来路是留白带 viewBox 被 preserveAspectRatio 缩放让出的空档 */
 .ring {
-  fill: rgba(16, 24, 32, 0.05);
+  fill: var(--hairline);
   stroke: none;
 }
 
@@ -100,7 +121,7 @@
   z-index: 0;
   width: 100%;
   height: 100%;
-  fill: rgba(16, 24, 32, 0.05);
+  fill: var(--hairline);
   pointer-events: none;
 }
 
@@ -151,6 +172,8 @@
 
 .rows {
   flex: 1 1 auto;
+  /* 行里的长文本 / 数值不许把这一列撑宽 —— 撑宽就会反过来压画布（见 `.mapCol`） */
+  min-width: 0;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-solid, #fff);
@@ -166,6 +189,8 @@
   }
 
   .mapCol {
+    /* 上下排时宽度由容器定，仍不受"详情开不开"影响（那一档压根没有左右分栏） */
+    flex: 0 0 auto;
     flex-basis: auto;
     width: min(231px, 88%);
     align-self: center;

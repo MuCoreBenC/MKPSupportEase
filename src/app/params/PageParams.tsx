@@ -23,10 +23,17 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { STORAGE } from '../../api/storageKeys'
+import { useT } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
 import { FieldLayer } from '../../components/field'
+/*
+ * 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts）；
+ * 保存回执（「已写回 xxx.toml」）走同一套机制的**回执槽**。
+ */
+import { useModalHeadNoteSlot, useModalHeadSlot } from '../../components/modal'
 import CategoryPills from './CategoryPills'
 import GcodeBlock from './GcodeBlock'
 import HistoryDrawer from './HistoryDrawer'
@@ -34,14 +41,18 @@ import type { DrawerMode, HistoryView } from './HistoryDrawer'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import ParamCard from './ParamCard'
 import type { TowerSlot } from './ParamCard'
+import ResliceNotice from '../guide/ResliceNotice'
 import ParamSyncModal from './ParamSyncModal'
 import PresetPickerDrawer from './PresetPickerDrawer'
+import { useLocalPickerRows } from '../presets/localPickerRows'
 import SearchField from './SearchField'
 import Icon from '../shell/icons'
 import TowerMap from './TowerMap'
 import type { TowerCoreProps } from './TowerCoreSvg'
-import { useParams, valueText } from './useParams'
-import type { ParamDef } from './useParams'
+import { invalidNumberText, useParams, valueText } from './useParams'
+import type { HistoryEntry, ParamDef } from './useParams'
+/* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
+import { EDIT_TEXT } from '../presets/presetTree'
 import s from './PageParams.module.css'
 
 interface Props {
@@ -52,11 +63,30 @@ interface Props {
    * 只改版面，不改组件：去掉页面自己的大标题与预设切换 pill（外面那个框的标题就是
    * 这一份的名字），分类条那一排照旧。卡片、G-code、擦料塔画布、历史抽屉一个不动。
    */
+  /*
+   * ★ 活口（2026-10-14 标记）：**唯一的调用点 `PresetParamsModal` 恒传 `true`**
+   * （参数页现在只以"嵌在预设弹窗里"这一档出现），所以下面那两处 `{!embedded && …}`
+   * （"修改参数"整页标题那一套壳）**当前永不渲染**。
+   *
+   * 它们不是历史垃圾：`App.tsx` 的注释里"参数"本来就有**整页**那一档的身份
+   * （从预设行右键「打开参数」进去的是同一份 `PageParams`）—— 哪天要给它一个独立入口，
+   * 这两块就是现成的壳。
+   */
   embedded?: boolean
   /** 钉住编辑目标（嵌模态框时由调用方点名：改的就是这一份） */
   target?: { path: string; fileName: string; machineId: string; versionId: string }
   /** 一进来就把「选择要跟随的更新」那一屏打开 */
   openSyncOnStart?: boolean
+  /**
+   * **编辑模式闸**（2026-10-16，作者：「不管是对比还是那个修改参数，他们的那个
+   * 编辑模式布局几乎都要一样」）：true 时**打开先只读**（控件全体降成纯文本值，
+   * 底栏只有「进入编辑模式」），点它才进入可改的那一态；false（默认）打开即可改。
+   *
+   * `PresetParamsModal`（当前唯一调用点）恒传 true —— 与参数对比台同一个框架：
+   * 只读态 → 进编辑模式 → 撤销 / 重做 / 放弃并退出 / 保存（词在 `EDIT_TEXT`）。
+   * 「放弃并退出」= **作废**这一次没保存的改动（回只读；见下面 `editMode` 那段）。
+   */
+  gateEdit?: boolean
 }
 
 interface ShownCard {
@@ -87,8 +117,20 @@ function towerNumOf(raw: string, fallback: number): number {
  *   板轮廓      按机型的 `defaultPlateId` 从 catalog 的 plates 查（没配板就退回圆角矩形）
  *
  * 拖拽与轴输入的提交都走这一页的 `u.apply`：一次手势一条撤销、还原胶囊指已保存值。
+ *
+ * `disabled`（2026-10-16 编辑模式两态）：只读态里地图拖不动 —— 按下直接不响应。
+ *
+ * `onDrag`（2026-10-17）：拖动中的临时位置往上抛，让右侧 X/Y 两行**显示**跟着走
+ * （只有显示跟着走，草稿不动 —— 一次拖动仍然只产生一条撤销）。
  */
-function towerSlotOf(u: ReturnType<typeof useParams>): TowerSlot | undefined {
+function towerSlotOf(
+  u: ReturnType<typeof useParams>,
+  disabled: boolean,
+  /* 拖动落定那一下进撤销栈的名字（修改历史里显示的那一条）——
+     由组件按当前语言取好传进来，这一层不碰字典 */
+  moveLabel: string,
+  onDrag?: (pos: { x: number; y: number } | null) => void,
+): TowerSlot | undefined {
   const dims = u.machine?.dimensions ?? null
   const xDef = u.defOf('wiping.wiper_x')
   const yDef = u.defOf('wiping.wiper_y')
@@ -144,8 +186,11 @@ function towerSlotOf(u: ReturnType<typeof useParams>): TowerSlot | undefined {
         core={core}
         plate={plate}
         side={side}
+        disabled={disabled}
+        /* 拖动中的位置往上抛：页面拿它喂右侧 X/Y 两格的显示（草稿不动） */
+        onDrag={onDrag}
         onCommit={(nx, ny) =>
-          u.apply('移动擦料塔', [
+          u.apply(moveLabel, [
             { key: xDef.key, value: String(nx) },
             { key: yDef.key, value: String(ny) },
           ])
@@ -339,33 +384,131 @@ export default function PageParams({
   embedded = false,
   target,
   openSyncOnStart = false,
+  gateEdit = false,
 }: Props) {
+  const tr = useT()
+  /* 标题栏两个借位槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
+  const headSlot = useModalHeadSlot()
+  const headNoteSlot = useModalHeadNoteSlot()
   const u = useParams(target === undefined ? undefined : { target })
+
+  /*
+   * **编辑模式**（2026-10-16，作者：「进入编辑模式的那个按钮位置也统一一下」）。
+   *
+   * `gateEdit` 时打开先只读 —— 控件全体降成纯文本值、底栏只有「进入编辑模式」
+   * （与参数对比台、编辑文件两个模态框同一个框架）；点它进编辑模式，底栏换成
+   * 撤销 / 重做 / 放弃并退出 / 保存。退出 = **作废**（作者 2026-10-16：「没有保存的话，
+   * 退出编辑模式就是作废，那些改的都作废，保存了才有」）—— 走 `u.discardAll()`：
+   * 全部未保存的改动一次退回已保存值；要留住改动只有「保存」一条路。
+   *
+   * ★ 例外：`openSyncOnStart`（右键「选择要更新的参数」那条直路）**直接进编辑模式**
+   * —— 用户是带着"来处理更新"的意图点进来的，再让他先点一下「进入编辑模式」
+   * 是白拦一道（那屏里的采用 / 保持本来就是写操作）。
+   */
+  const [editMode, setEditMode] = useState(gateEdit !== true || openSyncOnStart)
+  /*
+   * **带着没保存的草稿重开 → 直接进编辑模式**（2026-10-19）。
+   *
+   * `useParams.draftOnDisk` = 后端摘要说"盘上这份草稿真跟那份文件不一样"。
+   * 作者 2026-10-19：「我没保存的时候关闭它应该是记住着，然后下次我再进来的时候，
+   * 它一样还是保留着那个编辑模式的」。与兄弟链「编辑文件」抽屉的
+   * `unsaved = draft.reused && draft.dirty` 同一条口径（那边在 `PagePresets` 里
+   * 直接 `setEditMode(unsaved)`）。
+   *
+   * **只自动进一次**：用户点了「放弃并退出」（作废）之后就不再替他进 —— 那时他要的是只读。
+   */
+  const autoEditConsumedRef = useRef(false)
+  useEffect(() => {
+    if (autoEditConsumedRef.current) return
+    if (gateEdit !== true || u.draftOnDisk !== true) return
+    autoEditConsumedRef.current = true
+    setEditMode(true)
+  }, [gateEdit, u.draftOnDisk])
+  /** 只读 = 有闸且还没进编辑模式 */
+  const ro = gateEdit && !editMode
 
   const [categoryId, setCategoryId] = useState('')
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyMode, setHistoryMode] = useState<DrawerMode>('float')
-  const [historyView, setHistoryView] = useState<HistoryView>('live')
+  /* 默认「逐项」（一项一行）；另一档「整批」是一次保存一行、一次退整段 */
+  const [historyView, setHistoryView] = useState<HistoryView>('item')
   const [expandedDetailKey, setExpandedDetailKey] = useState<string | null>(null)
   const [askRestore, setAskRestore] = useState(false)
   const [askSave, setAskSave] = useState(false)
   const [attachBody, bodyWidth] = useWidth()
   /**
-   * 「选择要跟随的更新」那一屏的开合。`openSyncOnStart` 是右键菜单那条直路
-   * （用户点「选择要跟随的官方更新」＝他已经知道有更新等着处理）。
+   * 「选择要更新的参数」那一屏的开合。**文案 2026-10-20 改过**：原来叫「选择要跟随的
+   * 更新」（"跟随"讲的是机制，用户点它时想的是"哪几项要改成云端的新值"）。
+   * `openSyncOnStart` 是右键菜单那条直路（＝他已经知道有更新等着处理）。
    */
   const [syncOpen, setSyncOpen] = useState(openSyncOnStart)
+  /**
+   * 「选择要更新的参数」那一屏的宿主层（2026-10-20）。
+   *
+   * 点 `.page` 的**父节点**（在「修改参数」模态框里就是 `.paramsLayer`）——
+   * 遮罩挂在那儿才铺满整块内容区、不被框的圆角裁掉；`fallback` 是独立页那一档
+   * （没有父层时退回 `.page` 自己，与原来是同一处）。
+   */
+  const [syncLayer, setSyncLayer] = useState<HTMLElement | null>(null)
+  const mountSyncLayer = useCallback((el: HTMLDivElement | null) => {
+    /* `el === null` 时**不改**：卸载那一刻换宿主会凭空重挂一次遮罩 */
+    if (el !== null) setSyncLayer(el.parentElement ?? el)
+  }, [])
+  /*
+   * 走那条直路进来 ⇒ **进来就把云端新版取回来**（2026-10-20）。
+   *
+   * 用户是带着"来处理更新"的意图点进来的，他自己已经传递了"我愿意等这一次网络"；
+   * 而普通打开参数页是不取的（那时只说"云端发了新版"）。
+   */
+  useEffect(() => {
+    if (openSyncOnStart !== true) return
+    void u.fetchSync()
+    /* 只在进来时跑这一次（`u` 每次渲染都是新的，跟它走会反复取） */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSyncOnStart])
   /** 预设抽屉的开合 + pill 的 ref（关抽屉后焦点要还回去） */
   const [pickerOpen, setPickerOpen] = useState(false)
   const pillRef = useRef<HTMLButtonElement>(null)
   /** 搜索框的 ref —— `Ctrl+F` 把焦点放进去（槽在头部还是分类条那一行由布局定） */
   const searchRef = useRef<HTMLInputElement | null>(null)
+  /**
+   * mini 档搜索**是否收起**（作者：「这个搜索框还是不要这样子，它多占了位置」）——
+   * 这一档输入框常驻就是整整一行（上面还带着头部内衬），收起之后只剩一颗放大镜
+   * 图标（28px），点开才在分类条那一行铺开输入框（见 `searchCollapsed`）。
+   */
+  const [searchOpen, setSearchOpen] = useState(false)
+  /**
+   * mini 档那颗放大镜是**用户点的**吗？
+   *
+   * ★ 只有点它才给焦点（作者：「我本来没有点它的话，我变小了还会自己聚焦上去，
+   *   这是不对的」）—— 原来那个 effect 只看「展开没展开」，于是窗口一跨到 mini 档、
+   *   或从 mini 档回来，输入框都会自己抢焦点。现在用一个一次性的意图标记，
+   *   把"聚焦"这个动作绑死在**点击**这一个入口上。
+   */
+  const wantSearchFocus = useRef(false)
 
   const closePicker = useCallback(() => {
     setPickerOpen(false)
     pillRef.current?.focus()
   }, [])
+
+  /*
+   * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
+   * ★ 与页面上的 `u.machines`（目录）**不是同一份数据**，别互相替换：
+   *   目录那一套是"云端提供什么"（供的是说明书），抽屉要的是"我盘上有什么"。
+   */
+  const pickerRows = useLocalPickerRows(u.localPresets, u.machines)
+
+  /* 预设抽屉的宽度：拖内缘改宽 + 三态吸附（`shared/useDrawerWidth`，与参数页历史抽屉同一套） */
+  const pickerDrag = useDrawerWidth({
+    storageKey: STORAGE.clientPresetPickerW,
+    side: 'right',
+    snap: 320,
+    min: 240,
+    max: 560,
+    label: tr('params.presetList'),
+  })
 
   /**
    * 「最近搜索」（作者：「我点击搜索的时候没有展开搜索历史呀」）。
@@ -411,7 +554,7 @@ export default function PageParams({
     snap: 380,
     min: 280,
     max: 560,
-    label: '修改历史',
+    label: tr('params.historyDrawer'),
   })
 
   /* 当前分类里的 section 列表 */
@@ -508,28 +651,49 @@ export default function PageParams({
    * 搜索框放哪一行：够宽时待在分类条那一行的右端，不够时搬到头部标题行。
    * `bodyWidth` 量的是卡片区（`.bodyWrap`，见 useWidth），阈值与实测边界见 BAR_NEED。
    *
-   * **mini 档一律在上面** —— 作者要的小尺寸摆法是「搜索在上面、
-   * 修改历史在下面」，所以这一档不再看阈值，免得 480 与 460 两种宽度算法不一。
+   * **mini 档不再看这个阈值**：那一档搜索收成一颗放大镜钉在分类条那一行
+   * （`searchCollapsed`），点了才铺开 —— 于是头部不外借任何东西，
+   * `[data-row='head']` 那一套在 mini 档不再出现。
    */
-  const searchInHead = density === 'mini' || bodyWidth < BAR_NEED[density]
+  const searchInHead = density !== 'mini' && bodyWidth < BAR_NEED[density]
 
-  /** 「修改历史」在 mini 档跟着搜索框换到下一行（分类条那一行）的右端 */
-  const historyInBar = density === 'mini'
+  /**
+   * mini 档搜索**是否收起**（作者：「这个搜索框还是不要这样子，它多占了位置」）——
+   * 这一档它常驻就是整整一行（上面还带着头部内衬），收起之后只剩一颗放大镜图标
+   * （28px），点开才在分类条那一行铺开输入框。
+   */
+  const searchCollapsed = density === 'mini' && !searchOpen
+
+  /*
+   * mini 档点开那颗放大镜之后，焦点直接进输入框 —— 展开与聚焦是同一个动作的两半，
+   * 还要再点一下才输字就烦人了（`SearchField` 认 `inputRef`）。
+   * 它必须待在**所有 early return 之前**（hooks 的规矩），所以放在这一层。
+   */
+  useEffect(() => {
+    if (!wantSearchFocus.current) return
+    wantSearchFocus.current = false
+    if (searchCollapsed) return
+    searchRef.current?.focus()
+  }, [searchCollapsed])
 
   /** 保存确认弹层要显示的改动列表。from = 已保存值，to = 草稿值 */
   const changedEntries = useMemo(() => {
-    const entries: { key: string; label: string; from: string; to: string }[] = []
+    const entries: { key: string; label: string; from: string; to: string; bad: string | null }[] = []
     for (const def of u.defs) {
       if (!u.dirtyOf(def.key)) continue
       entries.push({
         key: def.key,
         label: def.label,
-        from: valueText(def, u.savedValueOf(def.key)),
-        to: valueText(def, u.valueOf(def.key)),
+        from: valueText(def, u.savedValueOf(def.key), tr),
+        to: valueText(def, u.valueOf(def.key), tr),
+        /* 即时校验的同一份判据（见 invalidNumberText）：超范围的项不许保存 */
+        bad: invalidNumberText(def, u.valueOf(def.key), tr),
       })
     }
     return entries
-  }, [u])
+  }, [u, tr])
+  /* 超出取值范围的改动 —— 弹层里列出来、把「确认保存」灰掉（作者 2026-10-20） */
+  const invalidEntries = changedEntries.filter((e) => e.bad !== null)
 
   const confirmSave = () => {
     u.save()
@@ -546,7 +710,7 @@ export default function PageParams({
   const fileLabel = u.fileLabel ?? `${u.machineId} · ${u.versionId}`
   /*
    * pill 说的是「**正在用哪份**」：底账命中当前 combo → 底账那份（作者 2026-10-06：
-   * 应用的是官方件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
+   * 应用的是云端件，pill 却说「（已修改）」，那是把编辑目标当成了正在用）；
    * 没命中（正在编辑另一份）→ 退回编辑目标。确认框 / 历史标题仍用 fileLabel
    * —— 它们回答的是「写回哪份 / 改的哪份」，与 pill 是两个问题。
    */
@@ -554,48 +718,129 @@ export default function PageParams({
     u.activeUse?.onIt === true && u.activeFileName !== null ? u.activeFileName : fileLabel
 
   /*
-   * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀，副标题行尾给一句
-   * **可点的**「切换回已应用」。作者把点名砍了：「不用显示那么清楚……
-   * 因为有时候是用户他自己的，你都不知道他是什么版本」——所以提示不含机型 / 版本。
-   * 底账空（activeUse === null）时不提示：没有已应用的就没有可对比的对象（见 useParams）。
+   * 看的那份**不是**已应用的那份 —— pill 不画绿、换琥珀（作者：「我切换到不是正在用的时候，
+   * 就不要用绿色，用琥珀色」）。只改这一颗 pill 的颜色，不再另给"切回去"的按钮：
+   * 作者 2026-10-20 裁定「没有这个回到已应用的这个功能了」—— 现在都从预设行的右键
+   * 进「修改参数」，切哪一份也由那条右键决定，标题栏再摆一颗只会跟它抢动作。
+   *
+   * 底账空（activeUse === null）时不比较：没有已应用的就没有可对比的对象（见 useParams）。
    */
-  const au = u.activeUse
-  const inactive = au !== null && !au.onIt
+  const inactive = u.activeUse !== null && !u.activeUse.onIt
 
   /*
-   * 「切换回已应用」的动作。跳之前**现读一次底账**，不依赖渲染期的收窄 ——
-   * 有未保存改动时 `requestCombo` 自会先问一句（那条路是现成的，不在这里另写）。
-   */
-  const backToActive = () => {
-    const back = u.activeUse
-    if (back === null || back.machineId === null || back.versionId === null) return
-    u.requestCombo(back.machineId, back.versionId)
-  }
-
-  /*
-   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是官方底稿，
-   * 保存 = 另存成你自己的一份（`presets-mine/…（已修改）.toml`，原件不动）——
+   * 底栏那句状态文案。**落点跟着编辑目标说**（A1 统一口径）：编辑的是云端底稿，
+   * 保存 = 另存成你自己的一份（`presets-local/…（已修改）.toml`，原件不动）——
    * 原来那句"保存后会覆盖 A1.toml"与实际落盘相反，是测试报告里"用户不敢赌"的根源；
-   * 编辑的是我的文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
+   * 编辑的是本地文件，保存 = 写回它自己。mini 档只留前半句 —— 实测整句占 153px，
    * 加上左边三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
    * 完整的落点说明在保存确认弹层里，这里挂了 title，悬停看全。
    */
-  const savingToMine = u.editingPreset?.origin === 'mine'
+  const savingToLocal = u.editingPreset?.origin === 'local'
+  /** 云端更新里**还没表态**的项数（0 = 都选好了，只差保存） */
+  const syncUndecided = Math.max(0, u.pendingCount - u.syncDirty)
+  /*
+   * 底栏那句状态：值改动与**云端更新的表态**分开数（2026-10-20）。
+   * 只点了「用新值 / 保持原样」而没手改任何值时，`dirtyCount` 是 0 —— 但那一笔
+   * 同样没保存，底栏必须说出来，否则「保存」亮着而左边写着"没有未保存的改动"。
+   */
   const stateText =
-    u.dirtyCount === 0
+    u.dirtyCount === 0 && u.syncDirty === 0
       ? density === 'mini'
-        ? '没有改动'
-        : '没有未保存的改动'
-      : density === 'mini'
-        ? `${u.dirtyCount} 处未保存`
-        : savingToMine
-          ? `${u.dirtyCount} 处未保存 · 保存会写回 ${fileLabel}`
-          : `${u.dirtyCount} 处未保存 · 保存会另存成你自己的一份`
+        ? tr('params.noChange')
+        : tr('params.noUnsaved')
+      : u.dirtyCount === 0
+        ? density === 'mini'
+          ? tr('params.syncDirty', { count: u.syncDirty })
+          : tr('params.syncDirtyCloud', { count: u.syncDirty })
+        : density === 'mini'
+          ? tr('params.dirty', { count: u.dirtyCount })
+          : savingToLocal
+            ? tr('params.dirtyWriteBack', { count: u.dirtyCount, file: fileLabel })
+            : tr('params.dirtySaveAsOwn', { count: u.dirtyCount })
 
   const closeHistory = () => setHistoryOpen(false)
 
+  /**
+   * **「历史 → 还原」点完的那一句回话**（2026-10-17）。
+   *
+   * 作者：「怎么我点了还原没反应…是真的没还原还是没有交互效果」。
+   * 查下来按钮是好的：还原成功会写出草稿、底栏变「N 处未保存」、抽屉顶上多一条
+   * 「未保存」；而**命中 noop 时（目标值就是现值）界面一个像素都不动** —— 那正是
+   * 他看到的那一下。而抽屉正好盖住右边那列数值，连成功也不容易看见。
+   *
+   * 所以这里按 `apply` 的三种结果各回一句话（几秒后自己消失）：
+   *   applied  绿：`已还原：X 轴偏移 → -0.45 mm`
+   *   blocked  灰：被上游标记弃用，改不了
+   *   noop     灰：现在就是那个值，不用还原
+   */
+  const [revertNote, setRevertNote] = useState<{ text: string; tone: 'ok' | 'muted' } | null>(null)
+  const revertNoteTimer = useRef<number | null>(null)
+  useEffect(
+    () => () => {
+      if (revertNoteTimer.current !== null) window.clearTimeout(revertNoteTimer.current)
+    },
+    [],
+  )
+  const onRevertHistory = useCallback(
+    (entry: HistoryEntry) => {
+      const result = u.revertEntry(entry)
+      const first = entry.items[0]
+      const many = entry.items.length > 1
+      const target = first === undefined ? '' : valueText(u.defOf(first.key), first.from, tr)
+      const label = first?.label ?? tr('params.thisItem')
+
+      const next =
+        result === 'applied'
+          ? {
+              text: many
+                ? tr('params.revertMany', {
+                    count: entry.items.length,
+                    label,
+                    target,
+                  })
+                : tr('params.revertOne', { label, target }),
+              tone: 'ok' as const,
+            }
+          : result === 'blocked'
+            ? { text: tr('params.revertBlocked', { label }), tone: 'muted' as const }
+            : {
+                text: many
+                  ? tr('params.noChangeMany')
+                  : tr('params.noChangeOne', { label, target }),
+                tone: 'muted' as const,
+              }
+
+      setRevertNote(next)
+      if (revertNoteTimer.current !== null) window.clearTimeout(revertNoteTimer.current)
+      revertNoteTimer.current = window.setTimeout(() => setRevertNote(null), 3200)
+    },
+    [u, tr],
+  )
+
+  /**
+   * 拖动擦料塔时的临时位置（`null` = 没在拖）。
+   *
+   * 它**只喂显示**：右侧 X/Y 两格在拖动期间显示这个数，于是"塔在走、数字也在走"；
+   * 松手后 `TowerMap` 提交一次（一条撤销），这个 state 立刻清掉、交回草稿值。
+   * 草稿 / 撤销栈 / 历史清单全程不碰这里 —— 作者要的是"不记中间值"。
+   */
+  const [towerDrag, setTowerDrag] = useState<{ x: number; y: number } | null>(null)
+  /* 松手时 TowerMap 回调一次 `null` ⇒ 这里清空，两格立刻交回草稿值 */
+  const onTowerDrag = useCallback((pos: { x: number; y: number } | null) => setTowerDrag(pos), [])
+
   /** 擦料塔地图的供数（见 towerSlotOf）：坐标字段不在 / 没配尺寸时是 undefined，坐标行照旧 */
-  const tower = towerSlotOf(u)
+  const tower = towerSlotOf(u, ro, tr('params.moveTower'), onTowerDrag)
+  /**
+   * 拖动期间那一卡里 X/Y 两行该显示什么：**临时值优先**。
+   *
+   * `ParamCard` 只认 `fields` 里的 key → 值；这里不改字段，只在渲染前把这两条的
+   * `def.key` 换成同一份"假 def + 临时值"代价太大，所以走 `ParamCard` 新增的
+   * `overrides` 通道（值 → 显示用的原文）。
+   */
+  const towerDragTexts =
+    towerDrag === null || tower === undefined
+      ? undefined
+      : { [tower.xKey]: String(towerDrag.x), [tower.yKey]: String(towerDrag.y) }
 
   const renderCards = (cards: ShownCard[]) =>
     cards.map(({ id, title, subtitle, fields }) => (
@@ -609,6 +854,7 @@ export default function PageParams({
         query={query}
         valueOf={u.valueOf}
         savedValueOf={u.savedValueOf}
+        prevSavedOf={u.prevSavedOf}
         factoryOf={u.factoryOf}
         dirtyOf={u.dirtyOf}
         blockedByOf={u.blockedBy}
@@ -616,17 +862,26 @@ export default function PageParams({
         condOn={u.condOn}
         /* 擦料塔地图槽位：坐标两字段都在这张卡时才生效（见 ParamCard） */
         tower={tower}
+        /* 拖动擦料塔时 X/Y 两格显示的临时值（只喂显示，草稿不动 —— 见 Props.valueOverrides） */
+        valueOverrides={towerDragTexts}
         expandedKey={expandedDetailKey}
         onToggleExpand={(key) => setExpandedDetailKey((prev) => (prev === key ? null : key))}
         onEdit={u.edit}
         onRevertToSaved={u.revertToSaved}
+        /* 只读态（编辑模式之外）：控件降成纯文本值、分支卡头点不动 */
+        readonly={ro}
         /*
-         * 官方更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
-         * 认不出是哪一版官方）时不传 —— 行上一律不画，与以前长得一模一样。
+         * 云端更新那一段（2026-10-09）。`sync` 为 null（编辑对象不是「我的预设」/
+         * 认不出是哪一版云端）时不传 —— 行上一律不画，与以前长得一模一样。
+         * 只读态两个动作也不传（ParamRow：「不传就画不出那两颗按钮」）——
+         * 「云端已更新 · 云端 x → y」那两行说明照常显示。
          */
         syncOf={u.sync === null ? undefined : u.syncOf}
-        onAdoptSync={(key) => u.decideSync([key], 'adopt')}
-        onHoldSync={(key) => u.decideSync([key], 'hold')}
+        /* 三态由草稿层那张表态表细分（待选择 / 已采用 / 已保持）—— 只读也能看，只是不给按钮 */
+        syncDraftOf={u.syncDraftOf}
+        onAdoptSync={ro ? undefined : u.adoptSync}
+        onHoldSync={ro ? undefined : u.holdSync}
+        onUseMyValue={ro ? undefined : u.useMyValue}
         syncBusy={u.syncBusy}
         renderBlock={(def) => (
           <GcodeBlock
@@ -665,7 +920,7 @@ export default function PageParams({
    *     「只把框里的字退回去」。）
    *   · `e.altKey` 时不认：`Ctrl+Alt+Z` 在部分键盘布局上是 AltGr+Z（欧洲键盘打 @ 那种）。
    *   · **弹层（保存确认 / 恢复默认值 / 切机型确认）开着时，认得的这几个键一律吃掉**
-   *     （`preventDefault` + 什么都不做）。不能只是「不办我的事」：那样按键会落到浏览器
+   *     （`preventDefault` + 什么都不做）。不能只是「不办本地事」：那样按键会落到浏览器
    *     手里，焦点要是在某个输入框上，它会去改那个框里的字 ——
    *     弹层背后悄悄变一个值，比什么都不发生更糟。关掉弹层再动手，账才干净。
    *   · `Ctrl+S` 不直落保存：那是鼠标走的路（先看清楚要写哪几处，再按「确认保存」），
@@ -683,7 +938,7 @@ export default function PageParams({
    * 管着重做），加一层 `if (loading) return` 只会让「守卫用的还是挂载时那个值」这种
    * 陈旧判断混进来。
    */
-  const { undo, redo, pendingCombo, cancelPending, dirtyCount } = u
+  const { undo, redo, pendingCombo, cancelPending, dirtyCount, syncDirty, save } = u
   useEffect(() => {
     const sheetOpen = askSave || askRestore || pendingCombo !== null
     const onKey = (e: KeyboardEvent) => {
@@ -702,12 +957,17 @@ export default function PageParams({
       /* 认得出是这一页的键，就先吃掉 —— 弹层开着也一样（理由见上面注释） */
       e.preventDefault()
       if (sheetOpen) return
-      if (k === 's') {
-        if (dirtyCount > 0) setAskSave(true)
+      if (k === 'f') {
+        /* 搜索是"看"的一部分，只读态照认 */
+        searchRef.current?.focus()
         return
       }
-      if (k === 'f') {
-        searchRef.current?.focus()
+      /* 只读态（编辑模式之外）：s / z / y 到此为止 —— 没有可保存、可撤销的东西 */
+      if (ro) return
+      if (k === 's') {
+        /* 只表了态、没改值 ⇒ 没有可确认的值改动，直接存（弹层列的是"改了什么值"） */
+        if (dirtyCount > 0) setAskSave(true)
+        else if (syncDirty > 0) save()
         return
       }
       if (k === 'y' || e.shiftKey) redo()
@@ -716,12 +976,12 @@ export default function PageParams({
     /* 捕获阶段：Esc 要抢在 `document` 上那些抽屉监听之前（见注释） */
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)
-  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, askSave, askRestore])
+  }, [undo, redo, pendingCombo, cancelPending, dirtyCount, syncDirty, save, askSave, askRestore, ro])
 
   if (u.loading) {
     return (
       <div className={s.page} data-density={density}>
-        <p className={s.loading}>正在打开数据包…</p>
+        <p className={s.loading}>{tr('params.loadingPack')}</p>
       </div>
     )
   }
@@ -740,11 +1000,8 @@ export default function PageParams({
     return (
       <div className={s.page} data-density={density}>
         <div className={s.emptyBox}>
-          <h2 className={s.emptyTitle}>读不到参数目录</h2>
-          <p className={s.emptyText}>
-            参数页画什么（页签、分组、每条的控件与类型、什么条件下显示）全部来自随安装包
-            走的那份目录（catalog）—— 读不到它时，这一页没有东西可画，也不编一份假的。
-          </p>
+          <h2 className={s.emptyTitle}>{tr('params.noCatalog.title')}</h2>
+          <p className={s.emptyText}>{tr('params.noCatalog.body')}</p>
           <p className={s.emptyText}>{u.error}</p>
         </div>
       </div>
@@ -752,7 +1009,8 @@ export default function PageParams({
   }
 
   /*
-   * 「修改历史」那颗按钮：标题行（宽档）与分类条那一行（mini 档）两处共用同一颗。
+   * 「修改历史」那颗按钮：它进**标题栏动作槽**（`×` 左边，见下面的 `headActions`）——
+   * 嵌在模态框里时 portal 到那颗槽、单独当页用时落在头部那一行的右端。
    *
    * **它是开关**（作者对着开着抽屉的截图：「这个时候点击了修改历史应该可以
    * 折叠起来」）。原来是 `setHistoryOpen(true)` —— 抽屉已经开着时点它什么都不发生，
@@ -769,16 +1027,28 @@ export default function PageParams({
       className={s.historyBtn}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
-      title={historyOpen ? '收起修改历史' : '修改历史'}
+      title={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
       onClick={() => setHistoryOpen((v) => !v)}
     >
-      修改历史
-      {u.history.length > 0 && <span className={s.detailCount}>{u.history.length}</span>}
+      {tr('params.historyDrawer')}
+      {u.historyItemCount > 0 && <span className={s.detailCount}>{u.historyItemCount}</span>}
     </button>
   )
 
   /*
-   * 搜索框也是两处共用（分类条那一行右端 / mini 档搬到标题行，见 searchInHead）——
+   * ★ **离开就折回去**（作者：「我希望它自己折回去，就是我离开了之后，它又继续
+   *   自己变小，不要一直留在这个地方」）—— mini 档那颗放大镜展开出来的输入框一失焦
+   *   （或按回车）就收回成图标：它是**临时借来的位置**，不该常驻。
+   *   `onCommit` 正是「离开框 / 回车」那一下（见 SearchField 的文件头）。
+   *   搜过的字照旧留着（`query` 不变）—— 收回的是位置，不是筛选。
+   */
+  const onSearchCommit = (term: string) => {
+    rememberSearch(term)
+    if (density === 'mini') setSearchOpen(false)
+  }
+
+  /*
+   * 搜索框也是两处共用（分类条那一行右端 / 不够宽时搬到标题行，见 searchInHead）——
    * 加上「最近搜索」那几个 prop 之后，再各写一份就该分叉了。
    */
   const searchField = (
@@ -788,7 +1058,7 @@ export default function PageParams({
       inputRef={searchRef}
       history={searchHistory}
       onChange={setQuery}
-      onCommit={rememberSearch}
+      onCommit={onSearchCommit}
       onPick={(term) => {
         setQuery(term)
         rememberSearch(term)
@@ -797,15 +1067,77 @@ export default function PageParams({
     />
   )
 
+  /*
+   * ★ **标题栏动作槽里那一簇**（照 a05）：这里只剩「修改历史」一颗。
+   *
+   * 原来与它并排的「回到已应用」**已退役**（作者 2026-10-20：「没有这个回到已应用
+   * 的这个功能了」）：那一份现在是从预设行右键「修改参数」进来的，编辑对象由那一下
+   * 定死，标题栏再多一颗"跳到已应用那份"只会跟右键抢动作。
+   *
+   * 撤销 / 重做 / 保存那些属于**这一页的编辑框架**（MKP 那一套：只读 → 进编辑模式 →
+   * 撤销 / 重做 / 放弃并退出 / 保存，见 `editMode` 与底栏），不在这一簇里 ——
+   * 「修改历史」是参数这一页自己的出口，才在标题栏。
+   */
+  const headActions = historyButton
+
+  /*
+   * 有动作槽（住在模态框里 / `embedded`）→ portal 进去，与 `×` 同一排；
+   * 没有槽（单独当页用）→ 原样摆在头部那一行右端（`headActionsInline` 的 `margin-left: auto`）。
+   */
+  const headActionsNode =
+    headSlot === null ? (
+      <span className={s.headActionsInline}>{headActions}</span>
+    ) : (
+      createPortal(headActions, headSlot)
+    )
+
+  /*
+   * **标题栏那一句状态 —— 成功 / 警告 / 失败共用一格**（2026-10-17 两改）。
+   *
+   * 第一改（上午）：保存回执从内容区顶上搬进模态框框架 —— 它原来每出现一次就把
+   * 参数列表往下顶一行。第二改（晚上，作者看截图）：搬过去之后**回执太长会换行**、
+   * 还压到右侧动作簇；而「弃用不能改」那种警告还留在内容区里没跟过来。
+   * 原话：「还有一些失败、警告的没改」「不管是成功的还是失败的，我觉得都应该复用
+   * 同样的位置和显示、和提示」「要不然利用起来标题旁边的空间」。
+   *
+   * 于是三条并成一条，位置 = **标题右边那一格**（`Modal` 的 `.titleRow`）：
+   *
+   *   优先级  `draftError`（草稿没落盘，最要紧）> `gateNote`（动手被闸拦住）> `savedNote`
+   *   语气    `bad` 红 / `warn` 琥珀 / `ok` 绿 —— 位置与长相一样，只换颜色
+   *   长相    **永远一行**，长就省略号（`.note` 的 nowrap + ellipsis），`title` 里给全文
+   *
+   * 单独当页用（没有槽）时同一份落回内容区顶上 —— 一套代码两种住处。
+   */
+  /* 语气由 `useParams` 给（`savedTone`），**不再从文案前缀猜** —— 文案随语言走，
+     拿「保存失败」开头去判红绿，一翻英文就全绿了 */
+  const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
+    if (u.draftError !== null) {
+      return { text: tr('params.draftError', { detail: u.draftError }), tone: 'bad' }
+    }
+    if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
+    if (u.savedNote === null) return null
+    return { text: u.savedNote, tone: u.savedTone }
+  })()
+  const headNoteNode =
+    headNote === null ? null : (
+      <span className={s.note} data-tone={headNote.tone} title={headNote.text}>
+        {headNote.text}
+      </span>
+    )
+
   return (
-    <div className={s.page} data-density={density}>
+    <div ref={mountSyncLayer} className={s.page} data-density={density}>
+      {/* 那一句状态 → 模态框标题栏（标题右边）；没有槽时它渲染在内容区顶上（见下面那段） */}
+      {headNoteSlot !== null && headNoteNode !== null
+        ? createPortal(headNoteNode, headNoteSlot)
+        : null}
       <FieldLayer>
         <div className={s.main}>
           <div className={s.left}>
             <header className={s.head}>
               <div className={s.headTop}>
                 {/* 嵌在模态框里时不画页面大标题 —— 外面那个框的标题就是这一份的名字 */}
-                {!embedded && <h2 className={s.pageTitle}>修改参数</h2>}
+                {!embedded && <h2 className={s.pageTitle}>{tr('params.modal.title')}</h2>}
 
                 {/*
                  * 预设选择器：一个文件名 pill + 「切换」小字，点开抽屉。
@@ -826,13 +1158,13 @@ export default function PageParams({
                     ref={pillRef}
                     title={
                       inactive
-                        ? `当前预设 ${pillLabel}（未应用）· 点击切换`
-                        : `当前预设 ${pillLabel} · 点击切换`
+                        ? tr('params.pill.inactive', { name: pillLabel })
+                        : tr('params.pill.active', { name: pillLabel })
                     }
                     onClick={() => setPickerOpen((v) => !v)}
                   >
                     <span className={s.presetName}>{pillLabel}</span>
-                    <span className={s.presetSwitch}>切换</span>
+                    <span className={s.presetSwitch}>{tr('params.pill.switch')}</span>
                   </button>
                 )}
 
@@ -847,44 +1179,15 @@ export default function PageParams({
                 )}
 
                 {/*
-                 * 修改历史搬到**右上角**（作者：「右上角不用出现那个卡片了，
-                 * 太占位置了」）—— 文件概要卡整个撤掉：机型/版本
-                 * 副标题那一行本来就在说，历史抽屉里还有全部账。按钮 margin-left:auto
-                 * 顶到最右，与参考布局一致。
+                 * 右上角那一簇（照 a05）：现在只有**修改历史** —— 见 `headActions`。
+                 * 在模态框里它 portal 到标题栏那颗动作槽（`×` 左边，`margin-left:auto`
+                 * 顶到最右）；单独当页用时落在这一行右端。
                  *
-                 * **mini 档不放在这一行**，下一行（分类条那一行）的右端才是它的位置
-                 * —— 作者对着自己画的示意图说的原话：「小尺寸这时候搜索在上面，
-                 * 修改历史在下面」。抽成 `historyButton` 一个变量，两处共用同一颗。
+                 * 原来这一簇还有一颗「回到已应用」，2026-10-20 整颗退役（作者：
+                 * 「没有这个回到已应用的这个功能了」）—— 进哪一份由预设行右键决定。
                  */}
-                {!historyInBar && historyButton}
+                {headActionsNode}
               </div>
-              {/*
-                提示挂在副标题行尾，不放 pill 那一行：窄档（mini 400px）标题 / pill /
-                搜索三件正好铺满，实测没有余量再塞一句话（见 .headTop 的 mini 注释）。
-                这一行本来就是「当前在看哪台」的说明，给「切换回已应用」这个动作正合适；
-                它**能点** —— 名字都很像，一键回到已应用的那份，不靠认名字；
-                也**不点名**（已应用那份可能是用户自己的文件，没有可靠的机型 / 版本可标，
-                见 useParams 的 ActiveUse）。已应用那份不在包里就没有动作，只陈述。
-              */}
-              <p className={s.sub}>
-                {u.machine?.display ?? '—'} · {u.version?.name ?? '—'} · 精细调整参数，优化涂胶表现
-                {au !== null &&
-                  !au.onIt &&
-                  (au.canJump ? (
-                    <button
-                      type="button"
-                      className={s.usingNote}
-                      title="点击切换回已应用的那一份"
-                      onClick={backToActive}
-                    >
-                      切换回已应用
-                    </button>
-                  ) : (
-                    <span className={s.usingNote} title="已应用那份不在当前数据包里，这里切不过去">
-                      已应用的是另一份
-                    </span>
-                  ))}
-              </p>
             </header>
 
             <div className={s.bar}>
@@ -903,68 +1206,138 @@ export default function PageParams({
                  */
                 onSelect={setCategoryId}
               />
-              {/* 搜索框在这一行的右端；窄窗时它已经搬到上面那行了（见 searchInHead） */}
-              {!searchInHead && (
-                <div className={s.searchSlot} data-row="bar">
-                  {searchField}
-                </div>
-              )}
-
-              {/* mini 档的「修改历史」搬到这里（见 historyInBar）：搜索在上面，它在下面 */}
-              {historyInBar && historyButton}
+              {/*
+               * 搜索框在这一行的右端；不够宽时它搬到上面那行（见 searchInHead）。
+               *
+               * ★ mini 档**收成一颗放大镜**（作者：「这个搜索框还是不要这样子，
+               *   它多占了位置」）—— 那一档它常驻就是整整一行；收起时只占 28px，
+               *   点开才在分类条这一行的右端铺成输入框（`:focus` 由上面那个 effect 给）。
+               */}
+              {!searchInHead &&
+                (searchCollapsed ? (
+                  <button
+                    type="button"
+                    className={s.searchIcon}
+                    /* 收起来的时候筛选**还在生效**（`query` 没清）—— 这件事要说出来，
+                       否则"怎么只剩三条"会没头没脑 */
+                    data-on={query !== ''}
+                    aria-label={tr('params.search.aria')}
+                    aria-expanded={false}
+                    onClick={() => {
+                      wantSearchFocus.current = true
+                      setSearchOpen(true)
+                    }}
+                  >
+                    <Icon name="search" size={15} />
+                  </button>
+                ) : (
+                  <div className={s.searchSlot} data-row="bar">
+                    {searchField}
+                  </div>
+                ))}
             </div>
 
             {/*
-              官方更新（2026-10-09）：官方改过的项**不直接顶掉我的值**，
-              它们先在这里等着 —— 一屏一条，动作只有一个去处（那一个弹层）。
-              行上也能逐项处理（见 ParamRow 的两个按钮），这条路是"一次看完"的那条。
+              云端更新（2026-10-09）：云端改过的项**不直接顶掉本地值**，
+              它们先在这里等着 —— 一条，动作只有一个去处（那一个弹层）。
+
+              ★ **两档**（2026-10-20）：
+                · 取回了云端字节 ⇒ 「待选择 N 项」+ 逐项差异（点它直接进那一屏）；
+                · 还没取回 ⇒ 只说"云端发了新版"这个**事实**，差异要用户点了才去取。
+                  不自动取的理由：自动取会让"没点更新，本地怎么知道参数变了"成立，
+                  而取回之后的「更新」会把我没改过的项悄悄改成云端新值。
+
+              ★ 又说清**选了几项**（同日）：表态只进草稿，不点保存一个字节都不写 ——
+                横幅必须让人知道"选完了还要保存"，否则他会以为已经生效了。
             */}
             {u.pendingCount > 0 && (
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
-                  官方更新待选择 <b>{u.pendingCount}</b> 项
-                  {u.sync?.currentReleaseTime !== null && u.sync?.currentReleaseTime !== undefined
-                    ? `（官方 ${u.sync.currentReleaseTime}）`
-                    : ''}
-                  <span className={s.syncBarHint}>
-                    —— 你改过的值不会被顶掉，勾选采用 / 不勾保持
-                  </span>
+                  {syncUndecided === 0 ? (
+                    <>
+                      {tr('params.sync.noticeDirty', { count: u.syncDirty })}
+                      {u.sync?.currentReleaseTime != null
+                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
+                        : ''}
+                    </>
+                  ) : (
+                    <>
+                      {tr('params.sync.noticePending', { count: syncUndecided })}
+                      {u.sync?.currentReleaseTime != null
+                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
+                        : ''}
+                      {u.syncDirty > 0 && (
+                        <span className={s.syncBarHint}>
+                          {tr('params.sync.noticeChosen', { count: u.syncDirty })}
+                        </span>
+                      )}
+                    </>
+                  )}
+                  {syncUndecided > 0 && (
+                    <span className={s.syncBarHint}>
+                      {tr('params.sync.noticeHint')}
+                    </span>
+                  )}
                 </span>
-                <button type="button" className={s.syncBarBtn} onClick={() => setSyncOpen(true)}>
-                  选择要跟随的更新
+                <button
+                  type="button"
+                  className={s.syncBarBtn}
+                  /*
+                   * 只读态点它 = 顺手进编辑模式再开面板 —— "处理更新"本来就是写操作，
+                   * 用不着让用户先去找底栏那颗「进入编辑模式」。
+                   */
+                  onClick={() => {
+                    if (ro) setEditMode(true)
+                    setSyncOpen(true)
+                  }}
+                >
+                  {tr('params.sync.title')}
                 </button>
               </div>
             )}
             {/*
-              「官方换版了，但新版正文还没取回来」：一条陈**述**，不是错误 ——
-              拿不到官方那一版的字节就逐项比不出来（不编一个差异出来）。
+              「云端换了新版，但它的正文还没取回来」：一条**陈述**，不是错误。
+              两件事分得开：云端有新版本（血统说的，本机就知道）与
+              逐项改了什么（要拿到云端新版字节才比得出来）—— 后者要用户点了才去取。
             */}
             {u.pendingCount === 0 && u.syncNeedsFetch && (
-              <p className={s.warn}>
-                官方发了新版，但这一版的正文还没取回来 —— 取回之后这里会列出它改了哪几项
-                {u.sync?.basedOnReleaseTime != null ? `（你现在这一份基于 ${u.sync.basedOnReleaseTime}）` : ''}
-              </p>
+              <div className={s.syncBar} role="status">
+                <span className={s.syncBarText}>
+                  {tr('params.sync.newVersion')}
+                  {u.sync?.basedOnReleaseTime != null
+                    ? tr('params.sync.basedOn', { time: u.sync.basedOnReleaseTime })
+                    : ''}
+                  <span className={s.syncBarHint}>{tr('params.sync.peekHint')}</span>
+                </span>
+                <button
+                  type="button"
+                  className={s.syncBarBtn}
+                  disabled={u.syncFetching}
+                  onClick={() => {
+                    if (ro) setEditMode(true)
+                    /* 这一下才是"拿云端新版字节"那个动作：取回来再开那一屏 */
+                    void u.fetchSync().then(() => setSyncOpen(true))
+                  }}
+                >
+                  {u.syncFetching ? tr('params.sync.fetching') : tr('params.sync.title')}
+                </button>
+              </div>
             )}
-            {u.syncError !== null && <p className={s.warn}>官方更新这一条读不出来：{u.syncError}</p>}
+            {u.syncError !== null && (
+              <p className={s.warn}>{tr('params.sync.error', { detail: u.syncError })}</p>
+            )}
 
-            {u.savedNote !== null && <p className={s.ok}>{u.savedNote}</p>}
             {/*
-              写值闸拦下一次改动（2026-10-02）：改的是弃用字段 / 弃用选项。
-              说一句人话 —— 原子拒绝（整次动作没发生），不是「跳过那几条、其余照写」。
+              那一句状态：嵌入模态框时它住在**标题右边**（见 `headNoteNode` 那段）；
+              单独当页用（没有槽）时才落回这里 —— 同一份节点、同一套语气。
             */}
-            {u.gateNote !== null && <p className={s.warn}>{u.gateNote}</p>}
-            {/*
-              草稿那一行的状态（参数页底座）：改的值**当场写进草稿 TOML**，
-              所以关掉软件再回来还在。写失败要看得见 —— 不能只有界面上改了、盘上没改。
-              没有可编辑目标时（这个 combo 没配 MKP）也说一句，别让人以为改了会保存。
-            */}
-            {u.draftError !== null && (
-              <p className={s.warn}>草稿没写进磁盘：{u.draftError}</p>
+            {headNoteSlot === null && headNote !== null && (
+              <p className={s.noteLine} data-tone={headNote.tone} title={headNote.text}>
+                {headNote.text}
+              </p>
             )}
             {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (
-              <p className={s.warn}>
-                这个版本没配 MKP 预设文件 —— 改动不会保存在任何文件里（只在这一屏）
-              </p>
+              <p className={s.warn}>{tr('params.noMkpFile')}</p>
             )}
 
             {/*
@@ -988,7 +1361,7 @@ export default function PageParams({
                   <>
                     {renderCards(shown)}
                     {searching && shown.length === 0 && (
-                      <p className={s.empty}>没有匹配的参数，换个词试试</p>
+                      <p className={s.empty}>{tr('params.noMatch')}</p>
                     )}
                   </>
                 )}
@@ -1008,72 +1381,127 @@ export default function PageParams({
               onView={setHistoryView}
               onMode={setHistoryMode}
               onClose={closeHistory}
-              onRevert={u.revertEntry}
+              onRevert={onRevertHistory}
+              /* 只读态抽屉里那颗「进入编辑模式」= 底栏同一颗（同一个 setEditMode） */
+              onEnterEdit={() => setEditMode(true)}
+              onClearHistory={u.clearHistory}
+              note={revertNote}
+              /* 只读态：历史照看，「还原」那颗不画（写入口） */
+              readonly={ro}
             />
           )}
         </div>
 
+        {/*
+         * 底栏（2026-10-16 两态，与参数对比台 / 编辑文件模态框同一套框架）：
+         *
+         *   只读态   左状态 · 右下「进入编辑模式」
+         *   编辑态   左「恢复默认值 + 状态」· 右下 撤销 / 重做 / 放弃并退出 / 保存
+         *
+         * ★ 撤销 / 重做从**左下**搬到右下（与对比台同一位置）——作者：
+         *   「我发现它有的撤销重做位置都不一样……你把他们的文案也统一一下」。
+         * ★ 「取消」退休（那一颗统一收编：回只读并作废）；
+         *   「保存修改」的按钮字收短成「保存」（三个模态框一个词）。
+         */}
         <footer className={s.foot}>
-          <div className={s.footLeft}>
-            {/*
-             * 撤销 / 重做改图标（作者：「撤销重做用图标吧，或者省略？只用快捷键」）。
-             * 选图标不选「省略」：当时**这一页还没有绑 Ctrl+Z / Ctrl+Y**（整份稿查过一遍），
-             * 删了就等于撤销这条路彻底看不见了。图标 28×28，两颗共省下约 44px ——
-             * 正好是 mini 档底栏「多一行」缺的那一截。
-             *
-             * 快捷键后来补上了（见上面那个 keydown effect），所以 tooltip 里现在
-             * **写得**出快捷键了 —— 那句话当时留的备注就是「没配就不写，免得骗人」。
-             */}
-            <button
-              type="button"
-              className={s.iconBtn}
-              disabled={!u.canUndo}
-              onClick={u.undo}
-              title="撤销（Ctrl+Z）"
-              aria-label="撤销"
-              aria-keyshortcuts="Control+Z"
-            >
-              <Icon name="undo" size={15} />
-            </button>
-            <button
-              type="button"
-              className={s.iconBtn}
-              disabled={!u.canRedo}
-              onClick={u.redo}
-              title="重做（Ctrl+Y）"
-              aria-label="重做"
-              aria-keyshortcuts="Control+Y"
-            >
-              <Icon name="redo" size={15} />
-            </button>
-            <span className={s.sep} aria-hidden />
-            <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
-              恢复默认值
-            </button>
-          </div>
+          {ro ? (
+            <>
+              <div className={s.footLeft}>
+                {/*
+                 * mini 档只留「N 处未保存」—— 「保存会写回 xxx」那半句实测 153px，
+                 * 会把底栏顶成两行（作者：「下面改不改都多一行」）。
+                 * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
+                 * 而且这里挂了 title，悬停还能看全。
+                 */}
+                <span className={s.state} title={stateText}>
+                  {stateText}
+                </span>
+              </div>
+              <div className={s.footRight}>
+                <button
+                  type="button"
+                  className={s.primary}
+                  title={tr('presets.edit.enterParamsTitle')}
+                  onClick={() => setEditMode(true)}
+                >
+                  {tr(EDIT_TEXT.enterMode)}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className={s.footLeft}>
+                {/*
+                 * 「恢复默认值」留在左下（右下的保存组离它远一点 —— 它一按下去
+                 * 全部参数回出厂值，虽然在撤销栈里、也不该挨着保存键）。
+                 */}
+                <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
+                  {tr('params.restoreDefaults')}
+                </button>
+                <span className={s.state} title={stateText}>
+                  {stateText}
+                </span>
+              </div>
 
-          <div className={s.footRight}>
-            {/*
-             * mini 档只留「N 处未保存」—— 「保存后会覆盖 xxx.toml」那半句实测 153px，
-             * 加上左边那三个按钮正好把底栏顶成两行（作者：「下面改不改都多一行」）。
-             * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
-             * 而且这里挂了 title，悬停还能看全。
-             */}
-            <span className={s.state} title={stateText}>
-              {stateText}
-            </span>
-
-            <button
-              type="button"
-              className={s.primary}
-              disabled={u.dirtyCount === 0}
-              title="保存修改（Ctrl+S）"
-              aria-keyshortcuts="Control+S"
-              onClick={() => setAskSave(true)}
-            >
-              保存修改
-            </button>
-          </div>
+              <div className={s.footRight}>
+                {/*
+                 * 撤销 / 重做改图标（作者：「撤销重做用图标吧，或者省略？只用快捷键」）。
+                 * 选图标不选「省略」：当时**这一页还没有绑 Ctrl+Z / Ctrl+Y**（整份稿查过一遍），
+                 * 删了就等于撤销这条路彻底看不见了。图标 28×28，两颗共省下约 44px。
+                 * 快捷键后来补上了（见上面那个 keydown effect），tooltip 里写得出快捷键。
+                 */}
+                <button
+                  type="button"
+                  className={s.iconBtn}
+                  disabled={!u.canUndo}
+                  onClick={u.undo}
+                  title={tr('params.undoTitle')}
+                  aria-label={tr('params.undo')}
+                  aria-keyshortcuts="Control+Z"
+                >
+                  <Icon name="undo" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={s.iconBtn}
+                  disabled={!u.canRedo}
+                  onClick={u.redo}
+                  title={tr('params.redoTitle')}
+                  aria-label={tr('params.redo')}
+                  aria-keyshortcuts="Control+Y"
+                >
+                  <Icon name="redo" size={15} />
+                </button>
+                <button
+                  type="button"
+                  className={s.textBtn}
+                  title={tr(EDIT_TEXT.exitTitle)}
+                  onClick={() => {
+                    /*
+                     * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
+                     * 就是作废，那些改的都作废，保存了才有」）——`discardAll` 正是这件事：
+                     * 全部未保存的改动一次退回已保存值（草稿条目删掉、草稿 TOML 逐键回写）。
+                     * 它本身是"一次动作"，重进编辑模式后按撤销还能整个拉回来。
+                     */
+                    u.discardAll()
+                    setEditMode(false)
+                  }}
+                >
+                  {tr(EDIT_TEXT.exitMode)}
+                </button>
+                <button
+                  type="button"
+                  className={s.primary}
+                  disabled={u.dirtyCount === 0 && u.syncDirty === 0}
+                  title={tr('presets.edit.saveTitle')}
+                  aria-keyshortcuts="Control+S"
+                  onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
+                >
+                  {tr('common.save')}
+                </button>
+              </div>
+            </>
+          )}
         </footer>
 
         {/* 切机型确认：有未保存改动时先问 */}
@@ -1082,21 +1510,59 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="丢弃改动"
+              aria-label={tr('params.discard')}
               onClick={(e) => e.stopPropagation()}
             >
               <h3 className={s.sheetTitle}>
-                切换到 {u.pendingCombo.machineId} · {u.pendingCombo.versionId}？
+                {tr('params.switchCombo.title', {
+                  machine: u.pendingCombo.machineId,
+                  version: u.pendingCombo.versionId,
+                })}
               </h3>
               <p className={s.sheetText}>
-                当前有 <b>{u.dirtyCount} 处未保存的改动</b>，切过去就丢了（修改历史也会清空）。
+                {tr('params.switchCombo.bodyPre')}
+                <b>{tr('params.switchCombo.bodyCount', { count: u.dirtyCount })}</b>
+                {tr('params.switchCombo.bodyPost')}
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={u.cancelPending}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button type="button" className={s.danger} onClick={u.confirmPending}>
-                  丢弃并切换
+                  {tr('params.switchCombo.discard')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/*
+         * 换一份预设的确认（按文件那条路，2026-10-14）。
+         * 与上面"切机型"那格分开：那个按 combo 说，这个说得清是**哪一份文件**
+         *（同一 combo 下有几份时，只有这一格答得出用户点的是哪份）。
+         */}
+        {u.pendingFile !== null && (
+          <div className={s.scrim} role="presentation" onClick={u.cancelPending}>
+            <div
+              className={s.sheet}
+              role="dialog"
+              aria-label={tr('params.discard')}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className={s.sheetTitle}>
+                {tr('params.switchFile.title', { file: u.pendingFile.fileName })}
+              </h3>
+              <p className={s.sheetText}>
+                {tr('params.switchCombo.bodyPre')}
+                <b>{tr('params.switchCombo.bodyCount', { count: u.dirtyCount })}</b>
+                {tr('params.switchCombo.bodyPost')}
+              </p>
+              <div className={s.sheetFoot}>
+                <button type="button" className={s.ghost} onClick={u.cancelPending}>
+                  {tr('common.cancel')}
+                </button>
+                <button type="button" className={s.danger} onClick={u.confirmPendingFile}>
+                  {tr('params.switchCombo.discard')}
                 </button>
               </div>
             </div>
@@ -1108,22 +1574,21 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="恢复默认值"
+              aria-label={tr('params.restoreDefaults')}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className={s.sheetTitle}>恢复默认值</h3>
+              <h3 className={s.sheetTitle}>{tr('params.restoreDefaults')}</h3>
               <p className={s.sheetText}>
                 {/*
                  * 退回的是**目录里的出厂值**（2026-10-08 资源库改判）：那套"退到这份预设
-                 * 当初那版官方的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
+                 * 当初那版云端的默认值"整个退场了。后果一样安全 —— 一次可整体撤销的改动，
                  * 都要按「保存修改」才落地。
                  */}
-                会把全部参数改回出厂设置。
-                它算<b>一次</b>改动，<b>按「撤销」可以整个退回来</b>；要落地还得按「保存修改」。
+                {tr('params.restore.body')}
               </p>
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskRestore(false)}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
                 <button
                   type="button"
@@ -1133,7 +1598,7 @@ export default function PageParams({
                     setAskRestore(false)
                   }}
                 >
-                  恢复默认值
+                  {tr('params.restoreDefaults')}
                 </button>
               </div>
             </div>
@@ -1145,32 +1610,41 @@ export default function PageParams({
             <div
               className={s.sheet}
               role="dialog"
-              aria-label="保存确认"
+              aria-label={tr('params.save.aria')}
               onClick={(e) => e.stopPropagation()}
             >
-              <h3 className={s.sheetTitle}>确认保存？</h3>
+              <h3 className={s.sheetTitle}>{tr('params.save.title')}</h3>
               {/*
                 落点按**编辑目标**说（A1 统一口径，与 Rust 侧 `commit_preset_draft` 的两条
-                落点一一对应）：官方底稿 → 另存成你自己的一份（原件一个字不动）；
-                我的文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是官方原件，
-                实际却落 presets-mine/ —— 测试报告里"我不敢赌"的那句话就是它。
+                落点一一对应）：云端底稿 → 另存成你自己的一份（原件一个字不动）；
+                本地文件 → 写回它自己。原来那句"将写入 A1xxx.toml"说的是云端原件，
+                实际却落 presets-local/ —— 测试报告里"我不敢赌"的那句话就是它。
               */}
               <p className={s.sheetText}>
-                {u.editingPreset?.origin === 'mine' ? (
+                {u.editingPreset?.origin === 'local' ? (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会写回你自己那一份{' '}
-                    <b>{fileLabel}</b>：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.writeBackMid')}
+                    <b>{fileLabel}</b>
+                    {tr('params.save.colon')}
                   </>
                 ) : /\.[a-z0-9]+$/i.test(fileLabel) ? (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份：
-                    presets-mine/<b>{fileLabel.replace(/\.([a-z0-9]+)$/i, '（已修改）.$1')}</b>
-                    （官方原件一个字不动）：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.saveAsMid')}
+                    {tr('params.save.colon')}
+                    presets-local/
+                    <b>{fileLabel.replace(/\.([a-z0-9]+)$/i, `${tr('params.save.modifiedSuffix')}.$1`)}</b>
+                    {tr('params.save.untouchedTail')}
                   </>
                 ) : (
                   <>
-                    以下 <b>{changedEntries.length}</b> 处改动会另存成你自己的一份
-                    （presets-mine/，官方原件一个字不动）：
+                    {tr('params.save.lead')}
+                    <b>{changedEntries.length}</b>
+                    {tr('params.save.saveAsMid')}
+                    {tr('params.save.saveAsLocalTail')}
                   </>
                 )}
               </p>
@@ -1185,33 +1659,81 @@ export default function PageParams({
                 ))}
                 {changedEntries.length > MAX_CONFIRM_ITEMS && (
                   <li className={s.changeMore}>
-                    …… 还有 {changedEntries.length - MAX_CONFIRM_ITEMS} 项
+                    {tr('params.save.more', { count: changedEntries.length - MAX_CONFIRM_ITEMS })}
                   </li>
                 )}
               </ul>
+              {/*
+                **范围闸的提示**（2026-10-20，作者：「超出范围了还允许我保存」）：
+                有超范围项就把这一块摆出来、把「确认保存」灰掉 —— 后端的 patch 不做
+                范围校验，落盘前唯一的闸在这里（`save` 里还有一道兜底）。
+              */}
+              {invalidEntries.length > 0 && (
+                <div className={s.sheetWarn} role="alert">
+                  <p className={s.sheetWarnTitle}>
+                    {tr('params.save.invalidLead')}
+                    <b>{invalidEntries.length}</b>
+                    {tr('params.save.invalidTail')}
+                  </p>
+                  <ul className={s.sheetWarnList}>
+                    {invalidEntries.map((e) => (
+                      <li key={e.key}>
+                        {tr('params.save.invalidRow', {
+                          label: e.label,
+                          bad: e.bad ?? '',
+                          to: e.to,
+                        })}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <div className={s.sheetFoot}>
                 <button type="button" className={s.ghost} onClick={() => setAskSave(false)}>
-                  取消
+                  {tr('common.cancel')}
                 </button>
-                <button type="button" className={s.primary} onClick={confirmSave}>
-                  确认保存
+                <button
+                  type="button"
+                  className={s.primary}
+                  disabled={invalidEntries.length > 0}
+                  title={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
+                  onClick={confirmSave}
+                >
+                  {tr('params.save.confirm')}
                 </button>
               </div>
             </div>
           </div>
         )}
         {/*
-          「选择要跟随的更新」那一屏。挂在**这一页里**（`.page` 是定位祖先）——
-          遮罩只盖参数区（在模态框里就是只盖那个框），与这一页别的弹层同一条规矩。
+          「选择要更新的参数」那一屏（原「选择要跟随的更新」）。
+
+          ★★ **挂到参数模态框的宿主层，不再嵌在它的内容里**（2026-10-20 作者：
+             「我不希望它嵌套在这个修改参数的模态框里面，它能不能在外面呢？」）。
+
+             `.page` 本身在「修改参数」模态框里就是框里的一块，所以原来它的遮罩
+             只能盖住那个框、看起来像框里又套了一层。现在是 **portal 到宿主那一层**
+             （`.paramsLayer`，`z-index: 70`）的**兄弟节点**：遮罩铺满整个内容区、
+             它成为独立的一屏，参数框压在它下面；处理完 / 暂不修改回到参数框。
+
+             ★ 为什么 portal 到这一层而不是 `document.body`：Modal 的遮罩是
+               `position: absolute`（`Modal.tsx` 硬约定②，绝不用 fixed）。`body`
+               不是定位祖先 ⇒ 遮罩会被定位到**文档最底下**，而外壳 `.shell` 是
+               `overflow: hidden` —— 那就是"点了没任何反应"（2026-10-20 踩过）。
+               这一层是定位祖先，遮罩正好铺满内容区。
         */}
-        <ParamSyncModal
-          open={syncOpen}
-          sync={u.sync}
-          busy={u.syncBusy}
-          defOf={u.defOf}
-          onDecide={u.decideSync}
-          onClose={() => setSyncOpen(false)}
-        />
+        {syncLayer !== null &&
+          createPortal(
+            <ParamSyncModal
+              open={syncOpen}
+              sync={u.sync}
+              defOf={u.defOf}
+              draftOf={u.syncDraftOf}
+              onDecide={u.applySyncDecisions}
+              onClose={() => setSyncOpen(false)}
+            />,
+            syncLayer,
+          )}
 
         {/*
          预设抽屉。挂在 FieldLayer 里、`.main` 之后 —— absolute 的定位父级是 `.main`，
@@ -1219,16 +1741,38 @@ export default function PageParams({
         */}
         <PresetPickerDrawer
           open={pickerOpen}
-          machines={u.machines}
-          machineId={u.machineId}
-          versionId={u.versionId}
-          fileOf={u.fileOf}
-          onPick={(m, v) => {
-            /* 切 combo 走现成的那条路：未保存改动的确认弹层在 requestCombo 里 */
-            u.requestCombo(m, v)
+          /* ★ 2026-10-14：只列**本机真有**的（原来列目录那 12 个组合，点哪个都换不过去） */
+          rows={pickerRows}
+          /*
+           * 在用那一份的**行键**（含文件名）—— 同组合里有几份文件时只打中真在用的那行。
+           *
+           * ★★ 2026-10-14 修：这里原来写 `u.fileLabel` —— 那是「**正在编辑**哪份」，
+           *   而这一格问的是「**正在用**哪份」（两个问题，`useParams` 的注释里写着）。
+           *   一个 combo 下有好几份时，编辑目标可能是别的一份 ⇒ 勾错行。
+           *   改用 `u.activeFileName`（**AppState 底账答的**，与三页同一个源）。
+           */
+          currentKey={
+            u.activeFileName !== null && u.machineId !== ''
+              ? `${u.machineId}/${u.versionId}/${u.activeFileName}`
+              : null
+          }
+          onUse={(row) => {
+            /*
+             * ★★ 2026-10-14：走**按文件**那条路 —— 抽屉列的是本机文件，同一 combo
+             * 下可能有好几份，`requestCombo` 那种按 combo 的走法表达不了"要哪一份"
+             * （它开头就按 combo 退货 ⇒ 点另一份没反应）。
+             * 未保存改动的确认弹层在 `requestFile` 里（`pendingFile`）。
+             */
+            u.requestFile({
+              machineId: row.machineId,
+              versionId: row.versionId,
+              fileName: row.fileName,
+              path: row.ref,
+            })
             closePicker()
           }}
           onClose={closePicker}
+          drag={pickerDrag}
         />
       </FieldLayer>
 
@@ -1250,9 +1794,19 @@ export default function PageParams({
           onView={setHistoryView}
           onMode={setHistoryMode}
           onClose={closeHistory}
-          onRevert={u.revertEntry}
+          onRevert={onRevertHistory}
+          /* 只读态抽屉里那颗「进入编辑模式」= 底栏同一颗（同一个 setEditMode） */
+          onEnterEdit={() => setEditMode(true)}
+          onClearHistory={u.clearHistory}
+          note={revertNote}
+          /* 只读态：历史照看，「还原」那颗不画（写入口） */
+          readonly={ro}
         />
       )}
+
+      {/* 保存成功之后那一句提问（2026-10-15）：切片器不会自己知道参数变了，
+          要不要把"回它那边换一下板子类型"指给用户看。关掉只是这一次的决定。 */}
+      {u.resliceAsk && <ResliceNotice open onClose={u.dismissReslice} />}
     </div>
   )
 }

@@ -69,6 +69,19 @@ const vidOf = (machineId: string, versionId: string) => `${machineId}/${versionI
 const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
 
 /**
+ * 「?」小提示（与套餐页 `BundlesPage` 那枚同形）：原说明全文挂在 `title` 上，
+ * 悬停才出现 —— 这一页那些「后端命令名 + 写盘细节」的长句不再摊在正文里。
+ * 视图之间不互相 import，就地复制这一小块（见 `c14.module.css` 的 `.helpDot`）。
+ */
+function HelpDot({ text }: { text: string }) {
+  return (
+    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+      ?
+    </span>
+  )
+}
+
+/**
  * 后端记录的是 **UTC ISO 串**（`2026-10-02T16:30:09Z`，刻意跨时区一致），
  * 给人看要转**本机时区**（作者 2026-10-03：「应该用东八区的时间，或者电脑的时区」）。
  * 解析不动就原样回（老记录可能不是 ISO）。
@@ -158,7 +171,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       try {
         const [l, a, b, r] = await Promise.all([
           wb.machines(),
-          wb.assets(null, null, null, null, null, null),
+          wb.assets(null, null, null, null, null, null, null, null),
           wb.bundles(null),
           wb.registry(),
         ])
@@ -898,8 +911,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   )}
                 </div>
                 <p className={s.note}>
-                  机型的「品牌」那一格写着这个品牌的 id —— 反查在后端算，这里只摆结果。
-                  改归属去机型的身份卡。
+                  机型引用品牌 id；改归属去身份卡。
                 </p>
               </div>
             </div>
@@ -1073,7 +1085,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <div className={s.cardBody}>
             {m.dimensions === null ? (
               <p className={s.note} style={{ margin: 0 }}>
-                {placeholderText.noDimensions} —— 占位机型不参与交付，检查与生成页会给一条说明而不是报错。
+                {placeholderText.noDimensions}。占位机型不参与交付。
               </p>
             ) : (
               <>
@@ -1230,9 +1242,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 这台机型还没有版本 —— 占位机型的正常状态。
               </p>
             )}
-            <p className={s.note}>
-              新增与删除立刻写入文件（没有草稿也没有撤销，删之前会先问孤儿引用）；
-              复制走两条命令：先版本定义，勾了才拷参数正文。
+            <p className={s.cardNoteDim}>
+              新增与删除立刻写入文件
+              <HelpDot text="没有草稿也没有撤销，删之前会先问孤儿引用。复制走两条命令：先版本定义，勾了才拷参数正文。" />
             </p>
           </div>
         </div>
@@ -1590,7 +1602,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={bunOpen !== null}
         title={`选择套餐 · ${bunOpen ?? ''}`}
-        subtitle="一个版本只记得一个套餐 —— 选完立刻写进机型文件（没有草稿）"
         size="md"
         closeOnScrim={false}
         onClose={() => setBunOpen(null)}
@@ -1633,8 +1644,10 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               className={`${s.row} ${bunPick === b.id ? s.rowPick : ''}`}
               onClick={() => setBunPick(b.id)}
             >
+              {/* 主 = 显示名，id 退成同排等宽小字（2026-10-16 与套餐页统一：
+                  「主要的是显示名可以加一个附加 ID」） */}
+              <span className={s.rowName}>{b.display || b.id}</span>
               <span className={`${s.mono} ${s.rowMeta}`}>{b.id}</span>
-              <span className={s.rowName}>{b.display || '—'}</span>
               <span className={s.rowMeta}>
                 {b.machineId !== m.id && `归属 ${b.machineId} · `}
                 MKP {b.assetRefs.filter((r) => !r.isBbs).length} · 切片器{' '}
@@ -1671,7 +1684,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={addBrandOpen}
         title="新增品牌"
-        subtitle="照 wb_add_brand(id, name) —— 往 presets/brands.toml 的 [[brands]] 里加一段并立刻写入"
         size="sm"
         closeOnScrim={false}
         onClose={() => setAddBrandOpen(false)}
@@ -1732,9 +1744,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             onChange={(e) => setNbName(e.target.value)}
           />
         </label>
-        <p className={s.note}>
-          撞名（含只差大小写）由后端当场拒。新建的品牌还没有品牌图 ——
-          建完在右边那张卡上配（留空 = 客户端回落内置字标）。
+        <p className={s.cardNoteDim}>
+          撞名（含只差大小写）由后端当场拒。新建的品牌还没有品牌图 —— 建完在右边那张卡上配
+          <HelpDot text="留空 = 客户端回落内置字标。" />
         </p>
       </ModalC14>
 
@@ -1759,7 +1771,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={moveOf !== null}
         title={`移到品牌 · ${moveOf ?? ''}`}
-        subtitle="移动只改这台机器机型文件里的 brand 一格 —— 品牌侧那份名单是反查，不用同步"
         size="sm"
         closeOnScrim={false}
         onClose={() => setMoveOf(null)}
@@ -1796,9 +1807,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             )
           })}
         </div>
-        <p className={s.note}>
-          移到别的品牌下之后，这台机器在左树里就挂在那一棵下面 ——
-          归属只有一份（机型文件的 brand 一格），不产生第二份名单。
+        <p className={s.cardNoteDim}>
+          移到别的品牌下之后，这台机器在左树里就挂在那一棵下面
+          <HelpDot text="归属只有一份（机型文件的 brand 一格），不产生第二份名单。" />
         </p>
       </ModalC14>
 
@@ -1846,7 +1857,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={addOpen}
         title="新增机型"
-        subtitle="照 wb_add_machine(id, brand, display) —— 会新建一个 presets/machines/ 下的文件并立刻写入"
         size="sm"
         closeOnScrim={false}
         onClose={() => setAddOpen(false)}
@@ -1917,12 +1927,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             onChange={(e) => setAddDisplay(e.target.value)}
           />
         </label>
-        <p className={s.note}>
-          <strong>红星只留给 id，橙星是「可以后补的必填」</strong> —— 不过这一步三格都得填：
-          真后端逐格校验，空着建不出来。新建的机型还没有尺寸（占位机型），
-          没版本、不参与交付 —— 检查与生成页会给一条说明而不是报错。
-          <br />
-          同名文件已存在时不会被覆盖，后端会直接报错。
+        <p className={s.cardNoteDim}>
+          <strong>红星只留给 id，橙星是「可以后补的必填」</strong> —— 这一步三格都得填
+          <HelpDot text="真后端逐格校验，空着建不出来。新建的机型还没有尺寸（占位机型），没版本、不参与交付 —— 检查与生成页会给一条说明而不是报错。同名文件已存在时不会被覆盖，后端会直接报错。" />
         </p>
       </ModalC14>
 
@@ -1930,7 +1937,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={addVOpen}
         title={`新增版本 · ${m.id}`}
-        subtitle="照 wb_add_version(machineId, id, name) —— 写进机型文件，立刻生效"
         size="sm"
         closeOnScrim={false}
         onClose={() => setAddVOpen(false)}
@@ -1984,12 +1990,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             onChange={(e) => setAvName(e.target.value)}
           />
         </div>
-        <p className={s.note}>
-          <strong>id 与版本名都得现在填</strong>：版本一建出来就直接参与生成，
-          没名字的版本在检查页和生成页都认不出来。
-          <br />
-          新版本的标签、说明、套餐还是空的，参数纯继承机型基底（卡片上会标
-          「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。
+        <p className={s.cardNoteDim}>
+          <strong>id 与版本名都得现在填</strong> —— 版本一建出来就直接参与生成
+          <HelpDot text="没名字的版本在检查页和生成页都认不出来。新版本的标签、说明、套餐还是空的，参数纯继承机型基底（卡片上会标「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。" />
         </p>
       </ModalC14>
 
@@ -1997,7 +2000,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={copyOpen !== null}
         title={`复制版本 · ${copyOpen ?? ''}`}
-        subtitle="两条命令各自只写单文件：先版本定义，勾了「同时复制配方」再拷参数正文"
         size="md"
         closeOnScrim={false}
         onClose={() => setCopyOpen(null)}
@@ -2049,12 +2051,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
           <span>
             <b>同时复制配方</b>
-            <span className={s.cardNote} style={{ display: 'block' }}>
-              后端是两个独立命令：<code className={s.mono}>wb_copy_version</code> 只写版本定义，
-              <code className={s.mono}>wb_copy_recipe</code> 才拷参数值，而且拷出来是
-              <strong>独立快照</strong> —— 之后改模板、改基底都传不到它身上。
-              不勾就是一个纯继承基底的空壳版本（标「参数源待补」）。
-            </span>
+            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基底都传不到它身上。不勾就是一个纯继承基底的空壳版本（标「参数源待补」）。" />
           </span>
         </label>
       </ModalC14>
@@ -2063,7 +2060,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
       <ModalC14
         open={editVOpen !== null}
         title={`编辑版本 · ${editVOpen ?? ''}`}
-        subtitle="name / tag / description —— 对齐 wb_set_version_field 的白名单；套餐在 ④ 关联里改"
         size="md"
         closeOnScrim={false}
         onClose={() => setEditVOpen(null)}
@@ -2108,9 +2104,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             onChange={(e) => setEvDesc(e.target.value)}
           />
         </label>
-        <p className={s.note}>
-          版本 id 不在这里改 —— id 是身份，改它等于删掉再加一个（后端还没有这一步）。
-          一次提交三格：一格失败就停，不会只成功一半。
+        <p className={s.cardNoteDim}>
+          版本 id 不在这里改
+          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。一次提交三格：一格失败就停，不会只成功一半。套餐在 ④ 关联里改。" />
         </p>
       </ModalC14>
 

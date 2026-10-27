@@ -101,7 +101,7 @@
 | C5 | `app/store/package.ts` | 客户端同步层：说明书自动同步 / 本机预设 / 使用中，三件互不混同 | ③ 的前端视图 | **已收口 2026-10-01（随 C4）**：三格底账整体退役，"三件互不混同"的职责模型由新世界对应物接手（catalog / `mkp/` / `run/` 使用中指针）；文件只剩时间格的格式化工具 |
 | C6 | `app/home/useCatalog.ts` | 首页消费真目录，不硬编码 | 首屏读本地 | **保留** |
 | C7 | `workbench/cloud.ts` | 模拟云端：静态快照 + localStorage 上传 | ① 演示管道 | **收口→退役**：真下载落地后整块删；`public/cloud/presets.json`（F7）随它走。`clientPackage.ts` 头注释自己写着"归宿是 Rust"——装配逻辑迁 R8 发布链路 |
-| C8 | `app/bbs/*` + `tools/dev-server/bbsFs.mjs` | BBS 页读**本机 Bambu Studio 目录**（serve 期端点，build 产物里不存在） | ① 开发/预览能力 | **保留**。注意两点已自洽：无鉴权端点的安全边界写在文件头；产品包里没有这个端点，页面是空态不是报错 |
+| C8 | `app/bbs/*` + `ipc/bbs.rs` | BBS 页读**本机 Bambu Studio 目录** | ① 开发/预览能力 + 真后端 | **已收口 2026-10-13**：清单与单份正文改走 **IPC**（`get_bbs_presets` / `read_bbs_preset`：三平台目录口径 + 三条读闸），打包版与预览同一套取数。serve 期那个端点（`tools/dev-server/bbsFs.mjs`）**退役** —— 浏览器预览改由 `mockServer/bbsLocal.ts` 给演示集合（代价：预览里看不到本机真目录，作者裁决） |
 | C9 | `workbench/c14/* views/*` | 工作台界面 | ① 工具 UI | **保留**（不属数据架构，列此备查） |
 
 ### 3.3 构建与工具
@@ -109,7 +109,7 @@
 | # | 在哪 | 干什么 | 裁决 |
 | --- | --- | --- | --- |
 | T1 | `scripts/release.mjs` | 发版流程（校验→PR→tag），不碰数据 | **保留**（① 工具） |
-| T2 | `vite.config.ts` | workbench 开关 + bbsFs 挂载；public/ 原样进包 | **保留**；F10 收口后这里加"产物即包内容"的管线 |
+| T2 | `vite.config.ts` | workbench 开关 + 随包资产流水线（`mkpAssets`）；public/ 原样进包 | **保留**；F10 收口后这里加"产物即包内容"的管线（`bbsFs` 那条挂载 2026-10-13 随 C8 摘掉） |
 | T3 | `tauri.conf.json` | 无 `resources` 字段——安装包 = 二进制 + vite 产物 | **收口**时在这里定 catalog 与内置资源的进包方式 |
 | T4 | `clippy.toml` 写盘禁列 | 唯一写盘出口的守门人 | **保留** |
 
@@ -334,7 +334,7 @@ C4 localStorage 迁 Internal   ← 依赖 R4 的新落点；解本盘点最大�
   1. **先摆正它是什么**（这一步真正的收获是把模型写下来了）：`archive/` 是**官方版本生命周期**
      的一部分（云端换版本 → 旧份进归档，保留最早一份、不覆盖、不删），**不是用户修改历史**。
      两条线不许混：**官方线**（云端 → `mkp/` → `archive/`）与**用户线**（另存 → `presets-mine/`）。
-     已写进 `docs/DATA-ARCHITECTURE.md` §1③「预设 TOML 的一生」，HANDOFF §3.5 按它排了七步。
+     已写进 `docs/DATA-ARCHITECTURE.md` §1③「预设 TOML 的一生」，HANDOFF-ARCHIVE §3.5 按它排了七步。
   2. **落点**：两条读（`get_archived_files` / `read_archived_text`，**只读、只认归档区**）
      + 一行界面（交付行展开详情里「旧版本 N 份」→ 抽屉：列表 + 看正文）。
      认人**不解析文件名**：按"去掉 `archive/` 前缀后与目录里哪一份同位"匹配；

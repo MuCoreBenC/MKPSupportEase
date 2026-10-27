@@ -12,7 +12,7 @@
  *                  「谁挂在谁下面、什么条件下用」一句话说完。缩进由子卡的边距一层层
  *                  累加，轨与肘全部退场。
  * 状态 → 折叠    **条件不满足的支折成一条，满足的摊开成子卡**（判据统一成这一句）：
- *                  摊开 = 装订子卡，折叠 = 虚线灰卡（「▸ N 项参数」+ 各行名）。
+ *                  摊开 = 装订子卡，折叠 = 虚线灰卡（箭头 +「N 项参数」+ 各行名）。
  *                  点分段（或点折叠卡）切支时，旧支 240ms 收成一条、新支摊开
  *                  （grid-template-rows 0fr↔1fr 的既定动效曲线）。折叠条点了就是把
  *                  条件参数**改成那一支的值** —— 它是一条真的切换路径，不是摆设；
@@ -22,7 +22,7 @@
  *
  * # 交接动效：手风琴头
  *
- * **一张卡、一根签、一条常驻卡头** —— 折叠行升级成卡头（▸ N 项参数 · 行名…），
+ * **一张卡、一根签、一条常驻卡头** —— 折叠行升级成卡头（箭头 + N 项参数 · 行名…），
  * 参数行在头下面 0fr↔1fr 长出来；签与卡上缘钉死，摊 / 收只有卡身高度在变。
  *
  * 分支按「条件参数 + op + value」归组（`buildTree()`：条件参数在这张卡里出现过
@@ -38,6 +38,9 @@
 
 import type { ReactNode } from 'react'
 import type { ParamSyncEntry } from '../../api'
+import Icon from '../shell/icons'
+import ui from '../ui/ui.module.css'
+import { useT } from '../../i18n'
 import Highlight from './highlight'
 import { valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
@@ -53,6 +56,8 @@ interface Props {
   mode?: 'normal' | 'search'
   valueOf: (key: string) => string
   savedValueOf: (key: string) => string
+  /** 这一项「上一次保存之前的值」（2026-10-21）；不传就不画那一格 */
+  prevSavedOf?: (key: string) => string | null
   factoryOf: (key: string) => string
   dirtyOf: (key: string) => boolean
   blockedByOf: (key: string) => BlockedBy | null
@@ -66,12 +71,25 @@ interface Props {
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
   /**
-   * **官方更新账**（逐项）。不给就是"这一段没有官方更新这回事"（官方线 / 认不出是哪一版官方）——
+   * **只读**（2026-10-16 的「进入编辑模式」两态）：行里的控件替成纯文本值、
+   * 分支卡头点不动、gcode 整块编辑器降成一行「N 行」—— 整张卡只是「看」。
+   * 页面的编辑态才传 false（默认）。
+   */
+  readonly?: boolean
+  /**
+   * **云端更新账**（逐项）。不给就是"这一段没有云端更新这回事"（云端线 / 认不出是哪一版云端）——
    * 行上一律不画，页面的长相与以前完全一样。
    */
   syncOf?: (key: string) => ParamSyncEntry | undefined
+  /**
+   * 这一项在**草稿层**表过什么态（2026-10-20）：`adopt` / `hold` / `null`。
+   * 与 `syncOf` 一起用 —— 「待选择 / 已采用 / 已保持」三态由它细分。
+   */
+  syncDraftOf?: (key: string) => 'adopt' | 'hold' | null
   onAdoptSync?: (key: string) => void
   onHoldSync?: (key: string) => void
+  /** 详情右栏「用回我的值」：撤掉这一项的采用 / 保持 */
+  onUseMyValue?: (key: string) => void
   syncBusy?: boolean
   /** G-code 这种整块的控件由调用方画 */
   renderBlock?: (def: ParamDef) => ReactNode
@@ -86,6 +104,16 @@ interface Props {
    * 不搜索时是空串。
    */
   query?: string
+  /**
+   * **只改"显示"，不改"值"**（2026-10-17）：`key → 显示用的原文`。
+   *
+   * 唯一的用户是擦料塔拖动 —— 塔在画布上走的时候，右侧 X/Y 两格要跟着走，
+   * 但那时**草稿一个字都没改**（一次拖动只提交一次、只进一条撤销）。所以这一段
+   * 不能走 `valueOf`（那是草稿的真值），只能另开一条显示通道。
+   *
+   * 不存在这里面的 key 一律走 `valueOf`；拖动一结束页面就把这一份清空。
+   */
+  valueOverrides?: Record<string, string>
 }
 
 type ShowWhen = NonNullable<NonNullable<ParamDef['meta']>['showWhen']>
@@ -185,6 +213,7 @@ export default function ParamCard({
   mode = 'normal',
   valueOf,
   savedValueOf,
+  prevSavedOf,
   factoryOf,
   dirtyOf,
   blockedByOf,
@@ -193,14 +222,21 @@ export default function ParamCard({
   onToggleExpand,
   onEdit,
   onRevertToSaved,
+  readonly = false,
   syncOf,
+  syncDraftOf,
   onAdoptSync,
   onHoldSync,
+  onUseMyValue,
   syncBusy = false,
   renderBlock,
   tower,
   query = '',
+  valueOverrides,
 }: Props) {
+  const tr = useT()
+  /** 行上的显示值：拖动中的临时值优先（见 Props.valueOverrides） */
+  const shownValueOf = (key: string): string => valueOverrides?.[key] ?? valueOf(key)
   /*
    * 整张卡都不适用就整张收起来（**只在浏览态**）。
    *
@@ -234,8 +270,9 @@ export default function ParamCard({
   /*
    * 整卡都是 G-code 编辑器且不止一块（「切换」分类那两张：装载 / 卸载胶箱）
    * —— 宽窗口下并排摆。宽窄交给容器查询（见 module.css 的 @container）。
+   * 只读态不适用：那时它们降成普通行（没有整块编辑器）。
    */
-  const gcodePair = fields.length > 1 && fields.every((d) => d.field.control === 'gcode')
+  const gcodePair = !readonly && fields.length > 1 && fields.every((d) => d.field.control === 'gcode')
 
   /*
    * 条件小签的文字：「外围结构 = 斜肋外墙」。条件参数的 label + 符号 +
@@ -247,16 +284,20 @@ export default function ParamCard({
   const condTagOf = (cond: NonNullable<ShowWhen>): string => {
     const def = defByKey.get(cond.key)
     if (def === undefined) return `${cond.key} ${TAG_OP[cond.op]} ${String(cond.value)}`
-    return `${def.label} ${TAG_OP[cond.op]} ${valueText(def, cond.value)}`
+    return `${def.label} ${TAG_OP[cond.op]} ${valueText(def, cond.value, tr)}`
   }
 
   /*
    * 递归摆树。`sep` = 上面画不画分隔线：排在一个**先行内容**后面才有。
    */
-  const renderList = (items: TreeNode[]): ReactNode[] =>
+  const renderList = (items: TreeNode[], suppressNote = false): ReactNode[] =>
     items.map((node, i) => {
       if (node.kind === 'row') {
-        return node.def.field.control === 'gcode' && renderBlock !== undefined ? (
+        /*
+         * 只读态 gcode 不走整块编辑器（`renderBlock`）：降成普通行 ——
+         * 值文本「N 行」（`valueText`），与参数对比台的只读值同一口径。
+         */
+        return node.def.field.control === 'gcode' && renderBlock !== undefined && !readonly ? (
           <div key={node.def.key} className={s.block}>
             {renderBlock(node.def)}
           </div>
@@ -264,20 +305,25 @@ export default function ParamCard({
           <ParamRow
             key={node.def.key}
             def={node.def}
-            value={valueOf(node.def.key)}
+            value={shownValueOf(node.def.key)}
             savedValue={savedValueOf(node.def.key)}
+            prevSavedValue={prevSavedOf?.(node.def.key) ?? null}
             factoryValue={factoryOf(node.def.key)}
             dirty={dirtyOf(node.def.key)}
             sync={syncOf?.(node.def.key)}
+            syncDraft={syncDraftOf?.(node.def.key) ?? null}
             onAdoptSync={onAdoptSync}
             onHoldSync={onHoldSync}
+            onUseMyValue={onUseMyValue}
             syncBusy={syncBusy}
             blockedBy={blockedByOf(node.def.key)}
+            suppressNote={suppressNote}
             sep={i > 0}
             expanded={expandedKey === node.def.key}
             onToggleExpand={onToggleExpand}
             onEdit={onEdit}
             onRevertToSaved={onRevertToSaved}
+            readonly={readonly}
             query={query}
           />
         )
@@ -288,7 +334,7 @@ export default function ParamCard({
        *   .branch  支的定位架，**签挂在这里** —— 在卡外、在任何 overflow:hidden 之外，
        *            收拢摊开一像素不动；卡的上缘同样钉死，变的只有卡身高度。
        *   .grp     卡本体：收拢 = 虚线灰、只剩卡头；摊开 = 实线白、参数行在头下面。
-       *   .fold    常驻卡头（▸ N 项参数 · 行名…），收拢时点了 = 把条件参数改成这一支的
+       *   .fold    常驻卡头（箭头 + N 项参数 · 行名…），收拢时点了 = 把条件参数改成这一支的
        *            值（写值闸在后头：弃用支点了弹回来说一句人话）。
        *   .accBody grid-rows 壳：参数行在头下面 0fr ↔ 1fr，240ms 收旧摊新。
        * 搜索态全支摊开、卡头照画但点不动。
@@ -297,7 +343,7 @@ export default function ParamCard({
       const tagText = condTagOf(node.cond)
       const condDef = defByKey.get(node.cond.key)
       const valueLabel =
-        condDef !== undefined ? valueText(condDef, node.cond.value) : String(node.cond.value)
+        condDef !== undefined ? valueText(condDef, node.cond.value, tr) : String(node.cond.value)
       const directRows = node.items.filter((it): it is RowNode => it.kind === 'row')
       const switchable =
         node.cond.op === 'eq' &&
@@ -317,18 +363,24 @@ export default function ParamCard({
                 type="button"
                 className={s.fold}
                 aria-expanded={open}
-                disabled={!switchable || open}
-                title={!open && switchable ? `切换到「${valueLabel}」` : undefined}
+                /* 只读态点不动（它是一条真的写值路径：点了 = 把条件参数改成这一支的值） */
+                disabled={!switchable || open || readonly}
+                title={
+                  !open && switchable && !readonly
+                    ? tr('params.card.switchTo', { value: valueLabel })
+                    : undefined
+                }
                 onClick={() => onEdit(node.cond.key, node.cond.value)}
               >
-                <span className={s.foldMark} aria-hidden>
-                  ▸
-                </span>
-                <b className={s.foldCount}>{directRows.length} 项参数</b>
+                {/* 箭头是形状不是字符（同报告页 / 历史抽屉）：闭着朝右、摊开朝下，绕自己中心转 90° */}
+                <Icon name="chevronDown" size={12} className={ui.disclosureCaret} data-on={open} />
+                <b className={s.foldCount}>
+                  {tr('params.card.rowsCount', { count: directRows.length })}
+                </b>
                 <span className={s.foldHint}>{directRows.map((r) => r.def.label).join(' / ')}</span>
               </button>
               <div className={open ? `${s.accBody} ${s.accBodyOpen}` : s.accBody}>
-                <div className={s.accBodyIn}>{renderList(node.items)}</div>
+                <div className={s.accBodyIn}>{renderList(node.items, !open)}</div>
               </div>
             </div>
           </div>

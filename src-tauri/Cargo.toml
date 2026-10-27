@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.6"
+version = "0.0.7"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
@@ -27,9 +27,18 @@ name = "release"
 path = "src/bin/release.rs"
 required-features = ["workbench"]
 
+# 「假钩子」：把开场 / 进度 / 那一问 / 结论演给已经开着的那扇窗看（第二次截图改样式用）。
+#
+# ★ 与 `release` 同一条闸：它**不是产品的一部分** —— 不读 G-code、不跑管线、不落记录，
+#   只是照真钩子那条线把消息按节奏发一遍。给用户的二进制里编不到这一份。
+[[bin]]
+name = "hook-sim"
+path = "src/bin/hook-sim.rs"
+required-features = ["workbench"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
-# build.rs 要读工作台配置（`workbench/bootstrap.json`）把官方源注入二进制 ——
+# build.rs 要读工作台配置（`workbench/bootstrap.json`）把云端源注入二进制 ——
 # 那是仓库里唯一一处"发布到哪"的真相（见 build.rs 头注释）
 serde_json.workspace = true
 
@@ -118,6 +127,35 @@ sha2.workspace = true
 # 那不是产品行为，是脚手架。
 ureq = { version = "3", default-features = false, features = ["rustls", "multipart"] }
 
+# 图像解码 / 编码（**只 workbench 用**：标注台保存时把框渲进图，落成品 webp）。
+#
+# **为什么现在才引**（2026-10-16，作者：「保存时就渲一张带框成品图，客户端只读成品」）：
+# 在那之前，引导图是「原图 + 前端按 marks 现画框」—— 客户端放大时看得出框是"贴上去的"。
+# 成品图把框烧进像素，客户端 `<img>` 直接显示、跨平台一致。
+#
+# **为什么 `default-features = false` + 只开 png/webp**：默认那套会拖进 jpeg/gif/tiff/avif…
+# 与一大堆解码器；这里要的只有「读 PNG（原图）+ 写 WebP（成品）」两件事。
+#
+# ★ 编码走 `image-webp`（**纯 Rust**，不绑 libwebp）—— 代价是**只能无损**。
+#   实测（`cwebp` 对真图量的）：原 PNG 309.5 KB → 无损 webp **77.9 KB**（小 75%），
+#   而有损 q90 只再省 ~7 KB ⇒ 不值得为这点体积引一套 C 工具链（三平台 CI 都要能编）。
+image = { version = "0.25", default-features = false, features = ["png", "webp"] }
+
+# 编号里那个数字（`workbench/app/render.rs` 的 `draw_number`）。
+#
+# 2026-10-16 作者点名的病：「为什么编号的数字要用矢量图啊？他不应该用那种开源的免费字体吗」——
+# 第一版是**手写矢量描点**（一段段折线硬编码在 `glyph_of` 里），树的是"不引字体库"；
+# 代价是字形与标注台/客户端那份（真字体）对不上，且那套描点被反复挑剔地改过好几次。
+#
+# **`ab_glyph` 是纯 Rust**（底层 `ttf-parser` + `ab_glyph_rasterizer`，无 C 依赖）——
+# 与 `image` 选 `image-webp` 同一条理由：三个平台的 CI 都只从源码编，不要环境差异。
+#
+# 字体本体是 `public/fonts/badge-digits.ttf` —— **Poppins（OFL 1.1）裁到只剩 `0-9`**（2 KB），
+# 前端那份 `@font-face` 用的是**同一个文件**（两处一套字，才谈得上"烧出来和标注台一样"）。
+# 2026-10-17 由 Inter 换成 Poppins（作者：「这个 1 看起来不在视觉中心」）。
+# 许可全文在 `public/fonts/OFL.txt`，别删。
+ab_glyph = "0.2"
+
 # 保留格式的 TOML 编辑器（cargo 自己用的那个）。
 #
 # **选它而不是 `toml` 是一条设计决定，不是口味**：预设层要编辑 `presets/*.toml`，
@@ -152,15 +190,31 @@ mkpse-postprocess = { path = "../crates/postprocess" }
 # Ctrl-C → **协作取消**（只在钩子模式装，见 src/hook.rs）：内核在步骤边界停下，
 # `.part` 丢掉、原文件不动。装不上处理器不阻断那一趟（最坏退回默认硬杀）。
 ctrlc.workspace = true
+zip = { version = "3.0.0", default-features = false, features = ["deflate"] }
 
 # 原生窗口外观（圆角 + 红绿灯归位）只在 macOS 上有意义，见 src/chrome.rs
 [target.'cfg(target_os = "macos")'.dependencies]
+# **屏幕引导的取数口**（src/ax.rs）：读切片器窗口与控件坐标走 macOS 的 Accessibility
+# C API，而它要拿 CF 类型（CFString / CFArray）去问。这一份本来就在依赖图里
+# （objc2 那一族传下来的，锁里是 0.10.1），这里直写一行只是让它能被 `use` 到 ——
+# 不新增任何依赖树。
+core-foundation = "0.10"
 objc2 = "0.6"
 # objc2-quartz-core：CALayer 的 cornerCurve —— 圆角曲率要从普通圆弧换成系统原生的连续曲率（见 chrome.rs）
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "objc2-quartz-core"] }
+# + `NSColor` 与 `objc2-core-graphics`：圆角窗外那圈填色要算成 CGColor 铺到 CALayer 上
+# （见 chrome.rs 的 `paint_corner_fill`）；`objc2-core-graphics` 是它取 `CGColor` 的开关。
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSView", "NSResponder", "NSWindow", "NSToolbar", "NSColor", "NSBox", "NSAppearance", "NSLayoutAnchor", "NSLayoutConstraint", "objc2-quartz-core", "objc2-core-graphics"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer"] }
-window-vibrancy = "0.8"
+# + `objc2-core-graphics`：CALayer 的 `setBackgroundColor`（铺圆角窗外那圈填色）在这个 feature 后面
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "objc2-core-graphics"] }
+
+# Windows 那半的**只读查询**：「跟随系统默认」到底是谁，要去问注册表
+# （`HKCR\.3mf` → ProgID → `…\shell\open\command`，见 `src/ipc/slicer.rs`）。
+# 它是**最小的那种**读写注册表库（没有任何默认 feature），而且
+# **本来就在依赖树里**（`embed-resource` 带进来的那一档，锁里是 0.55）——
+# 这里直写一行只是让它能被 `use` 到，不新增任何包。
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.55"
 
 [dev-dependencies]
 # 测试里用它把夹具的 JSON 转成 TOML（`testkit` / `presets::registry`），

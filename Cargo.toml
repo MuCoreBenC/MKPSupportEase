@@ -74,6 +74,13 @@ serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
 toml = "0.8"
 
 sha2 = "0.10"
+# 3MF 模型名的次选来源要从 `.gcode.3mf`（zip）里读一个条目的文本
+# （`Metadata/slice_info.config`，见 `crates/postprocess/src/gcode/model_name.rs`）。
+#
+# **刻意不引 zip 包**：我们只要一个条目的一段文本，而 zip 包会带一串新依赖进树
+# （本仓的版本号只住这一处、构建要能离线跑）。这里只用 deflate 这一档 ——
+# flate2 本来就在依赖树里（Tauri 那侧拉的），升成直接依赖不新增任何包、也不新增重复。
+flate2 = "1"
 # 写回保真那一套：`crates/preset`（改预设 / 改注册表区间）与 `src-tauri`
 # （工作台写回 `presets/*.toml`）都用它。**必须住在这里** —— 两边各写一份版本号，
 # 同一个 crate 就会在依赖树里出现两次，而那正是 `cargo tree -d` 那条判据盯的东西。

@@ -35,14 +35,26 @@
  * 校验的权威在后端（`registry::set_param_meta`）；这里先拦一道只是少挨一次错。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { isAppError } from '../api'
-import type { MachineList, ParamMetaEdit, ParamView, ShowOp, UiComponent, ValueType } from '../api'
+import type {
+  MachineList,
+  ParamMetaEdit,
+  ParamView,
+  SectionTarget,
+  ShowOp,
+  UiComponent,
+  ValueType,
+} from '../api'
 import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
-import { usePaintSelectC14 } from '../c14/usePaintSelect'
-import c from '../c14.module.css'
+import MachinePicker from '../components/MachinePicker'
+import { machineSummary } from '../components/machineSummary'
+/* 上移 / 下移那两颗箭头：客户端共享那一颗（同一颗 chevronDown，朝上的翻 180°），
+   不再排「▲ / ▼」字形 —— 字形的墨迹高度跟着字体走，按钮里看着忽高忽低 */
+import Icon from '../../app/shell/icons'
+import ui from '../../app/ui/ui.module.css'
 import s from './ParamDefModal.module.css'
 
 interface Props {
@@ -53,10 +65,16 @@ interface Props {
   /** 全部参数 —— 「属于」「前置条件」的候选从这里来 */
   params: ParamView[]
   /**
-   * 机型与品牌清单（「适用机型」选择器的候选，打开定义框时现取）。
+   * 机型与品牌清单（「适用机型」「弃用机型」两个选择器的候选，打开定义框时现取）。
    * `null` = 还没读到 —— 选择器里如实说一句，不给假清单。
    */
   machineList: MachineList | null
+  /**
+   * 能装参数的分组（含暂时空掉的），按页签顺序 —— 「所属分组」下拉的候选。
+   * 名单来自后端（`RegistryView.sections`）：**不从 params 反推**，
+   * 否则把一个组搬空之后，那个组就再也搬不回去了。
+   */
+  sections: SectionTarget[]
   onClose: () => void
   /**
    * 确认保存：整包载荷交回页面 —— 那边负责调 `wb.setParamMeta` 落盘、把
@@ -106,7 +124,10 @@ function controlCandidates(vt: ValueType, choiceCount: number): UiComponent[] {
 interface ChoiceDraft {
   value: string
   label: string
+  /** 全局弃用（所有机型都不许写这一档） */
   deprecated: boolean
+  /** 只在这些机型上弃用（与上一格叠加，空 = 不按机型弃用） */
+  deprecatedMachines: string[]
 }
 
 interface Draft {
@@ -125,10 +146,17 @@ interface Draft {
   whenKey: string
   whenOp: ShowOp
   whenValue: string
+  /** **全局弃用**（所有机型、所有版本都不许写） */
   deprecated: boolean
+  /** **只在这些机型上**弃用（与上一格叠加） */
+  deprecatedMachines: string[]
   choices: ChoiceDraft[]
   /** 空 = 全部机型 */
   machineFilter: string[]
+  /** 所属分组（`layout_schema` 的 section id）。同组 = 后端不动 */
+  sectionId: string
+  /** 组内顺序（`[params.layout].order`）—— 上下箭头改它，客户端按它排 */
+  order: number
 }
 
 /** 草稿连同它自己的历史 —— 撤销/重做是框里的事，不出这个框 */
@@ -139,6 +167,26 @@ interface FormState {
   /** 同一个 tag 的连续改动（往一个框里打字）并成一步撤销 */
   lastTag: string | null
   lastAt: number
+}
+
+/**
+ * 草稿的**深拷贝**。
+ *
+ * ★ 2026-10-20 修的真 Bug：原来 `edit` 只做 `{ ...prev.draft }`，而 `choices` 是
+ * 数组、每条是对象 —— 浅拷贝之后 `d.choices[i].value = …` 改的是**历史里每一份
+ * 草稿共用的那个对象**。于是「改个选项的值 → 按撤销」看起来毫无反应：撤销确实
+ * 换回了上一份 draft，可那一份里的选项已经被同一笔改动改掉了。
+ * （截图实测：把「默认」的值改成「原」，撤销后还是「原」。）
+ *
+ * 目录里的可变结构只有这两处：`choices[]`（含它自己的 `deprecatedMachines`）与
+ * `machineFilter[]`。其余全是标量，浅拷即安全。
+ */
+function cloneDraft(d: Draft): Draft {
+  return {
+    ...d,
+    choices: d.choices.map((c) => ({ ...c, deprecatedMachines: [...c.deprecatedMachines] })),
+    machineFilter: [...d.machineFilter],
+  }
 }
 
 const numOf = (t: string): number | null => {
@@ -163,8 +211,17 @@ const initOf = (p: ParamView): Draft => ({
   whenOp: p.showWhen?.op ?? 'eq',
   whenValue: p.showWhen === null ? '' : String(p.showWhen.value),
   deprecated: p.deprecated,
-  choices: p.choices.map((c) => ({ value: String(c.value), label: c.label, deprecated: c.deprecated })),
+  deprecatedMachines: [...p.deprecatedMachines],
+  choices: p.choices.map((c) => ({
+    value: String(c.value),
+    label: c.label,
+    /* 回写只认**显式**两格；推定的弃用（`c.derived`）是显示用的，不许固化成数据 */
+    deprecated: c.deprecated,
+    deprecatedMachines: [...c.deprecatedMachines],
+  })),
   machineFilter: [...p.machineFilter],
+  sectionId: p.sectionId,
+  order: p.order,
 })
 
 /** 草稿 → 后端载荷。归位口径与 `writeValue` 同一套：bool 归 bool、数字归数字 */
@@ -198,15 +255,26 @@ function payloadOf(d: Draft, param: ParamView, params: ParamView[]): ParamMetaEd
         ? null
         : { key: d.whenKey, op: d.whenOp, value: whenValue },
     deprecated: d.deprecated,
+    deprecatedMachines: [...d.deprecatedMachines],
     /*
      * 可选项：字符串枚举交草稿里编的那份；其他类型**原样带回**（预设档不丢 ——
      * bool 的开/关叫法、数字的快捷档不在这一框的编辑范围里，但也不许弄丢）
      */
     choices:
       d.valueType === 'string'
-        ? d.choices.map((c) => ({ label: c.label, value: c.value, deprecated: c.deprecated }))
+        ? d.choices.map((c) => ({
+            label: c.label,
+            value: c.value,
+            deprecated: c.deprecated,
+            deprecatedMachines: [...c.deprecatedMachines],
+            /* 推定是后端展示用的派生位，回写永远不认它 */
+            derived: false,
+          }))
         : param.choices,
     machineFilter: [...d.machineFilter],
+    sectionId: d.sectionId,
+    /* 顺序是**数据**（客户端按它排同一组），所以整包带上；后端见值没变就不动 */
+    order: d.order,
   }
 }
 
@@ -253,15 +321,33 @@ function errorOf(d: Draft): string | null {
 const COALESCE_MS = 400
 const HISTORY_MAX = 100
 
-/** 空选集的常量（钩子要一份稳定的输入，草稿还没起时用它） */
-const NO_MACHINES = new Set<string>()
+/**
+ * 机型选择器现在在挑**哪一格**（三处共用一个嵌套框，不各开一个）：
+ *
+ *   filter     参数级「适用机型」
+ *   paramDep   参数级「弃用机型」
+ *   choiceDep  某一条可选项的「弃用机型」
+ */
+type PickTarget =
+  | { kind: 'filter' }
+  | { kind: 'paramDep' }
+  | { kind: 'choiceDep'; index: number }
 
-export default function ParamDefModal({ paramKey, param, params, machineList, onClose, onCommit }: Props) {
+export default function ParamDefModal({
+  paramKey,
+  param,
+  params,
+  machineList,
+  sections,
+  onClose,
+  onCommit,
+}: Props) {
   const [form, setForm] = useState<FormState | null>(null)
   const [busy, setBusy] = useState(false)
-  /** 「选择适用机型」的嵌套框（参照套餐选版：模态框里的模态框，树状多选） */
-  const [pickOpen, setPickOpen] = useState(false)
-  const pickTreeRef = useRef<HTMLDivElement>(null)
+  /** 机型选择器开着吗、在挑哪一格（模态框里的模态框，与套餐选版同一副长相） */
+  const [pick, setPick] = useState<PickTarget | null>(null)
+  /** 「全局弃用」二次确认（保存前拦一道，说清影响面） */
+  const [confirmText, setConfirmText] = useState<string[] | null>(null)
 
   /*
    * 每次打开（或换了参数）都从「当前那份定义」重新起草 —— 上次取消的不该还留着。
@@ -300,38 +386,20 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
     return () => window.removeEventListener('keydown', onKey)
   }, [paramKey])
 
-  /*
-   * 「适用机型」的按住刷选（usePaintSelectC14 —— 参数台左树、套餐选版同一副引擎：
-   * 按下某行拖过去，经过哪行改哪行；模式在按下那一刻定死）。
-   * 钩子只能装在早退之前，而 edit 在草稿就绪之后才有意义 —— 中间隔一层 ref。
-   */
-  const applyFilterRef = useRef<(next: Set<string>) => void>(() => {})
-  const allMachineIds = useMemo(
-    () => (machineList?.machines ?? []).map((m) => m.id),
-    [machineList],
-  )
-  usePaintSelectC14({
-    ref: pickTreeRef,
-    ids: allMachineIds,
-    selected: form === null ? NO_MACHINES : new Set(form.draft.machineFilter),
-    onChange: (next) => applyFilterRef.current(next),
-    preview: (el, on) => {
-      el.classList.toggle(String(c.pVrowOn), on)
-      el.setAttribute('aria-checked', String(on))
-      el.firstElementChild?.setAttribute('data-on', String(on))
-    },
-    enabled: pickOpen,
-  })
-
   if (paramKey === null || param === null || form === null) return null
 
   const draft = form.draft
 
-  /** 改一格。tag 相同且连续（400ms 内）的改动并成一步撤销； redo 链作废 */
+  /**
+   * 改一格。tag 相同且连续（400ms 内）的改动并成一步撤销； redo 链作废。
+   *
+   * **必须深拷**（见 [`cloneDraft`]）：浅拷的话 `fn` 里改嵌套对象会顺手把历史
+   * 里每一份草稿一起改掉，撤销就成了空动作。
+   */
   const edit = (tag: string, fn: (d: Draft) => void) =>
     setForm((prev) => {
       if (prev === null) return prev
-      const next = { ...prev.draft }
+      const next = cloneDraft(prev.draft)
       fn(next)
       const now = Date.now()
       const merge = prev.lastTag === tag && now - prev.lastAt < COALESCE_MS
@@ -376,6 +444,75 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
   const whenCandidates = params.filter((p) => p.key !== param.key)
   const whenParam = whenCandidates.find((p) => p.key === draft.whenKey) ?? null
 
+  /*
+   * 「所属分组」的候选按页签分组（`optgroup`）。候选来自后端那份完整清单 ——
+   * 含暂时空掉的组：把一个组搬空之后还得能搬回去。
+   */
+  const sectionGroups = (() => {
+    const out: { tabId: string; tabLabel: string; sections: SectionTarget[] }[] = []
+    for (const sec of sections) {
+      const hit = out.find((g) => g.tabId === sec.tabId)
+      if (hit === undefined) {
+        out.push({ tabId: sec.tabId, tabLabel: sec.tabLabel, sections: [sec] })
+      } else {
+        hit.sections.push(sec)
+      }
+    }
+    return out
+  })()
+  const hereSection = sections.find((x) => x.id === draft.sectionId) ?? null
+
+  /*
+   * 组内顺序（2026-10-20 作者：「客户端到时候也要消费到这个排序」）——
+   * 它不是界面状态：同一把尺子还决定客户端那一列从上到下的先后，所以存进
+   * `[params.layout].order`，并让后端把 `layout_schema` 的 items 一起重排。
+   *
+   * 排序时用**草稿里的 order**（不是注册表那份）：连按两次箭头，第二次要基于刚挪过的位置。
+   */
+  const siblings = [
+    ...params
+      .filter((p) => p.sectionId === draft.sectionId && p.key !== param.key)
+      .map((p) => ({ key: p.key, order: p.order })),
+    /* 自己那一条用**草稿**里的顺序：判的是「马上要存成什么样」，不是盘上那份 */
+    { key: param.key, order: draft.order },
+  ].sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+  const myAt = siblings.findIndex((p) => p.key === param.key)
+
+  /** 上/下移一位：取两个邻居之间的中点（到头就往外扩 1），不动别人的 order */
+  const moveOrder = (dir: -1 | 1) => {
+    if (myAt < 0) return
+    const other = dir < 0 ? siblings[myAt - 1] : siblings[myAt + 1]
+    if (other === undefined) return
+    const outer = dir < 0 ? siblings[myAt - 2] : siblings[myAt + 2]
+    edit('order', (d) => {
+      d.order =
+        outer === undefined
+          ? other.order + dir /* 到头：往外扩一格 */
+          : (other.order + outer.order) / 2
+    })
+  }
+
+  /** 换分组：顺序跟着落到目标组末尾（与后端「不给顺序就放末尾」同一条口径） */
+  const onSection = (id: string) =>
+    edit('sectionId', (d) => {
+      d.sectionId = id
+      let max: number | null = null
+      for (const p of params) {
+        if (p.sectionId !== id || p.key === param.key) continue
+        max = max === null ? p.order : Math.max(max, p.order)
+      }
+      d.order = max === null ? 1 : max + 1
+    })
+
+  /** 可选项上/下移一位：数组顺序就是分段控件的先后，后端整表照写 */
+  const moveChoice = (i: number, dir: -1 | 1) =>
+    edit('choices-move', (d) => {
+      const j = i + dir
+      if (j < 0 || j >= d.choices.length) return
+      const [moved] = d.choices.splice(i, 1)
+      if (moved !== undefined) d.choices.splice(j, 0, moved)
+    })
+
   const onValueType = (vt: ValueType) =>
     edit('valueType', (d) => {
       d.valueType = vt
@@ -410,7 +547,47 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
 
   const err = errorOf(draft)
 
-  const save = async (): Promise<void> => {
+  /** 这次保存会把「全局弃用」从关变成开吗 —— 是的话，先让人看清影响面 */
+  const deprecatedConfirm = (): string[] | null => {
+    if (!param.deprecated && draft.deprecated) {
+      const kids = params.filter(
+        (p) => p.parentKey === param.key && !p.deprecated && !p.deprecatedMachines.length,
+      )
+      return [
+        `「${draft.label || param.label}」会在所有机型、所有版本上变成只读：值照旧读得到，但谁都改不了。`,
+        kids.length > 0
+          ? `它下面挂着的 ${kids.length} 条子参数（${kids.map((p) => p.label).join('、')}）也会跟着进不去。`
+          : '',
+      ].filter((x) => x !== '')
+    }
+    const lines: string[] = []
+    for (let i = 0; i < draft.choices.length; i += 1) {
+      const c = draft.choices[i]!
+      const before = param.choices.find((x) => String(x.value) === c.value)
+      if (before?.deprecated === true || !c.deprecated) continue
+      /* 被这一档放开、而自己还没弃用的参数 —— 「选它就等于通向一片改不动的子树」 */
+      const gated = params.filter((p) => {
+        const sw = p.showWhen
+        return (
+          sw !== null &&
+          sw.key === param.key &&
+          sw.op === 'eq' &&
+          String(sw.value) === c.value &&
+          !p.deprecated &&
+          p.deprecatedMachines.length === 0
+        )
+      })
+      lines.push(
+        `「${draft.label || param.label}」的「${c.label || c.value}」会在所有机型、所有版本上变成只读。` +
+          (gated.length > 0
+            ? `被它放开的 ${gated.length} 条参数（${gated.map((p) => p.label).join('、')}）也会一起变只读。`
+            : ''),
+      )
+    }
+    return lines.length > 0 ? lines : null
+  }
+
+  const doSave = async (): Promise<void> => {
     if (paramKey === null || param === null || form === null || busy) return
     const problem = errorOf(form.draft)
     if (problem !== null) {
@@ -426,71 +603,52 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
       setBusy(false)
     }
   }
-  saveRef.current = () => void save()
 
-  /* 刷选/勾选的提交口 —— 钩子经由 ref 调到这里（草稿就绪后才有意义） */
-  const applyMachineFilter = (next: Set<string>) =>
-    edit('machineFilter', (d) => {
-      d.machineFilter = [...next]
-    })
-  applyFilterRef.current = applyMachineFilter
-
-  /* —— 适用机型选择器的素材与摘要 —— */
-  const machineById = new Map((machineList?.machines ?? []).map((m) => [m.id, m]))
-  const totalMachines = machineList?.machines.length ?? 0
-  const pickedNames = draft.machineFilter.map((id) => machineById.get(id)?.display ?? id)
-  const machineSummary =
-    draft.machineFilter.length === 0
-      ? '全部机型（不限）'
-      : totalMachines > 0 && draft.machineFilter.length === totalMachines
-        ? `全部机型（${totalMachines} 台全勾）`
-        : pickedNames.length <= 3
-          ? `${pickedNames.join('、')} —— ${pickedNames.length} 台`
-          : `${pickedNames.slice(0, 3).join('、')} 等 —— ${pickedNames.length} 台`
-
-  /** 选择器的一行（与参数台左树 / 套餐选版同一副长相：勾 + 名字 + id） */
-  const machineRow = (m: { id: string; display: string }) => {
-    const on = draft.machineFilter.includes(m.id)
-    return (
-      <button
-        key={m.id}
-        type="button"
-        className={`${c.pVrow} ${on ? c.pVrowOn : ''}`}
-        role="checkbox"
-        aria-checked={on}
-        /* 刷选引擎按它认行（usePaintSelectC14 的 attr） */
-        data-sel={m.id}
-        onClick={() =>
-          edit('machineFilter', (d) => {
-            d.machineFilter = on
-              ? d.machineFilter.filter((x) => x !== m.id)
-              : [...d.machineFilter, m.id]
-          })
-        }
-      >
-        <span className={c.pVmark} data-on={on} aria-hidden>
-          <svg
-            viewBox="0 0 12 12"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="m2.6 6.3 2.4 2.4L9.5 3.9" />
-          </svg>
-        </span>
-        <span className={c.pVtext}>
-          <span className={c.pVname}>{m.display || m.id}</span>
-          <span className={c.pVid}>{m.id}</span>
-        </span>
-      </button>
-    )
+  /** 保存按钮：先看有没有「新开的全局弃用」，有就先摆确认框 */
+  const save = (): void => {
+    if (paramKey === null || param === null || form === null || busy) return
+    const problem = errorOf(form.draft)
+    if (problem !== null) {
+      toasts.push(problem)
+      return
+    }
+    const lines = deprecatedConfirm()
+    if (lines !== null) {
+      setConfirmText(lines)
+      return
+    }
+    void doSave()
   }
+  saveRef.current = save
 
-  /* 品牌分组（多品牌时一组的树；没有品牌挂在谁下面的，兜进「未归品牌」别弄丢） */
-  const brandedIds = new Set(machineList?.brands.flatMap((b) => b.machines) ?? [])
-  const orphanMachines = (machineList?.machines ?? []).filter((m) => !brandedIds.has(m.id))
+  /** 选择器当前挑的是哪一份清单 */
+  const pickedMachines: string[] =
+    pick === null
+      ? []
+      : pick.kind === 'filter'
+        ? draft.machineFilter
+        : pick.kind === 'paramDep'
+          ? draft.deprecatedMachines
+          : (draft.choices[pick.index]?.deprecatedMachines ?? [])
+
+  /** 选完写回对应那一格（三处共用同一个框，只有落点不同） */
+  const applyPicked = (next: string[]): void => {
+    if (pick === null) return
+    if (pick.kind === 'filter') {
+      edit('machineFilter', (d) => {
+        d.machineFilter = next
+      })
+    } else if (pick.kind === 'paramDep') {
+      edit('deprecatedMachines', (d) => {
+        d.deprecatedMachines = next
+      })
+    } else {
+      edit(`choice.depMachines.${pick.index}`, (d) => {
+        const row = d.choices[pick.index]
+        if (row !== undefined) row.deprecatedMachines = next
+      })
+    }
+  }
 
   /* 控件候选跟着值类型与可选项走 —— 「改成了下拉却不下拉」就是从这里堵死的 */
   const controlOptions = controlCandidates(draft.valueType, draft.choices.length)
@@ -596,7 +754,7 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
     <ModalC14
       open
       title={`编辑定义 · ${param.label}`}
-      subtitle={`写回 presets/registry/param_registry.toml 的 [[params]] —— 即时落盘；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
+      subtitle={`写回 presets/registry/param_registry.toml 的 [[params]] —— 确认保存才落盘；Cmd+Z 撤框里的改动；注册键 ${param.key}`}
       size="lg"
       closeOnScrim={false}
       onClose={onClose}
@@ -800,20 +958,51 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
                   })
                 }
               />
-              <label className={s.choiceDep}>
+              <span className={s.choiceMove}>
+                <button
+                  type="button"
+                  className={s.orderBtn}
+                  disabled={i === 0}
+                  aria-label={`第 ${i + 1} 条可选项上移`}
+                  title="上移一位（分段按钮的先后）"
+                  onClick={() => moveChoice(i, -1)}
+                >
+                  <Icon name="chevronDown" size={12} className={ui.caretUp} />
+                </button>
+                <button
+                  type="button"
+                  className={s.orderBtn}
+                  disabled={i >= draft.choices.length - 1}
+                  aria-label={`第 ${i + 1} 条可选项下移`}
+                  title="下移一位（分段按钮的先后）"
+                  onClick={() => moveChoice(i, 1)}
+                >
+                  <Icon name="chevronDown" size={12} />
+                </button>
+              </span>
+              <label className={s.choiceDep} title="所有机型、所有版本都不许再写这一档">
                 <input
                   type="checkbox"
                   className={s.check}
                   checked={c.deprecated}
-                  aria-label={`第 ${i + 1} 条可选项已弃用`}
+                  aria-label={`第 ${i + 1} 条可选项全局弃用`}
                   onChange={(e) =>
                     edit(`choice.dep.${i}`, (d) => {
                       d.choices[i]!.deprecated = e.target.checked
                     })
                   }
                 />
-                弃用
+                全局弃用
               </label>
+              <button
+                type="button"
+                className={s.choiceMachines}
+                aria-haspopup="dialog"
+                title="只在这些机型上弃用这一档（与全局那一勾叠加）"
+                onClick={() => setPick({ kind: 'choiceDep', index: i })}
+              >
+                {c.deprecatedMachines.length === 0 ? '机型…' : `机型 ${c.deprecatedMachines.length}`}
+              </button>
               <button
                 type="button"
                 className={s.choiceDel}
@@ -838,7 +1027,12 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
               className={s.btn}
               onClick={() =>
                 edit('choices-add', (d) => {
-                  d.choices.push({ value: '', label: '', deprecated: false })
+                  d.choices.push({
+                    value: '',
+                    label: '',
+                    deprecated: false,
+                    deprecatedMachines: [],
+                  })
                   /* 从无到有的第一条 —— 文本框就该换成枚举的控件了 */
                   if (d.choices.length === 1 && d.uiComponent === 'text') d.uiComponent = 'segmented'
                 })
@@ -855,6 +1049,66 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
           归属与条件<em className={s.fieldKey}>parentKey · showWhen</em>
         </div>
         <div className={s.grid}>
+          {/*
+            所属分组（2026-10-20，作者：「这个里面根本就没有看到它属于哪个 tab」）。
+            **搬到别的页签 = 两份文件一起改**：注册表的 `[params.layout].sectionId`
+            与 `layout_schema.toml` 的 items。后端在同一个事务里写，前端只管选。
+          */}
+          <label className={`${s.field} ${s.wide}`}>
+            <span className={s.fieldLabel}>
+              所属分组<em className={s.fieldKey}>sectionId</em>
+            </span>
+            <select
+              className={s.sel}
+              value={draft.sectionId}
+              aria-label="所属分组 (sectionId)"
+              onChange={(e) => onSection(e.target.value)}
+            >
+              {sectionGroups.map((g) => (
+                <optgroup key={g.tabId} label={g.tabLabel}>
+                  {g.sections.map((sec) => (
+                    <option key={sec.id} value={sec.id}>
+                      {sec.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {/*
+            组内顺序：客户端按同一个 `layout.order` 排同一组里的参数 ——
+            所以这不是「界面上的小偏好」，而是数据。后端保存时会把 items 一起重排。
+          */}
+          <label className={s.field}>
+            <span className={s.fieldLabel}>
+              组内顺序<em className={s.fieldKey}>layout.order</em>
+            </span>
+            <span className={s.orderRow}>
+              <button
+                type="button"
+                className={s.orderBtn}
+                disabled={myAt <= 0}
+                aria-label="上移一位"
+                title="上移一位"
+                onClick={() => moveOrder(-1)}
+              >
+                <Icon name="chevronDown" size={12} className={ui.caretUp} />
+              </button>
+              <span className={s.orderText}>
+                {myAt < 0 ? '—' : `第 ${myAt + 1} / ${siblings.length} 位`}
+              </span>
+              <button
+                type="button"
+                className={s.orderBtn}
+                disabled={myAt < 0 || myAt >= siblings.length - 1}
+                aria-label="下移一位"
+                title="下移一位"
+                onClick={() => moveOrder(1)}
+              >
+                <Icon name="chevronDown" size={12} />
+              </button>
+            </span>
+          </label>
           <label className={`${s.field} ${s.wide}`}>
             <span className={s.fieldLabel}>
               属于<em className={s.fieldKey}>parentKey</em>
@@ -919,6 +1173,11 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
             </>
           )}
         </div>
+        <p className={s.note}>
+          {hereSection === null
+            ? '这一组在布局里找不到了 —— 保存前先在上面选一个分组。'
+            : `现在在：${hereSection.tabLabel} · ${hereSection.label}（保存后按新分组摆放）`}
+        </p>
       </div>
 
       <div className={s.group}>
@@ -935,9 +1194,9 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
           className={s.pickerBtn}
           aria-haspopup="dialog"
           title="点开挑机型 —— 可多选，按住拖过去整批勾上/摘掉"
-          onClick={() => setPickOpen(true)}
+          onClick={() => setPick({ kind: 'filter' })}
         >
-          <span className={s.pickerText}>{machineSummary}</span>
+          <span className={s.pickerText}>{machineSummary(draft.machineFilter, machineList)}</span>
           <span className={s.pickerCaret} aria-hidden>
             <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
               <path d="m4 6 4 4 4-4" />
@@ -948,21 +1207,49 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
       </div>
 
       <div className={s.group}>
-        <div className={s.groupHead}>状态</div>
+        <div className={s.groupHead}>
+          状态<em className={s.fieldKey}>deprecated · deprecatedMachines</em>
+        </div>
         <div className={s.grid}>
-          <label className={s.field}>
+          <label className={s.field} title="勾上 = 所有机型、所有版本都不许再改它">
             <span className={s.fieldLabel}>
-              已弃用<em className={s.fieldKey}>deprecated</em>
+              全局弃用<em className={s.fieldKey}>deprecated</em>
             </span>
             <input
               className={s.check}
               type="checkbox"
               checked={draft.deprecated}
-              aria-label="已弃用 (deprecated)"
+              aria-label="全局弃用 (deprecated)"
               onChange={(e) => edit('deprecated', (d) => (d.deprecated = e.target.checked))}
             />
           </label>
+          <label className={`${s.field} ${s.wide}`}>
+            <span className={s.fieldLabel}>
+              弃用机型<em className={s.fieldKey}>deprecatedMachines</em>
+            </span>
+            <button
+              type="button"
+              className={s.pickerBtn}
+              aria-haspopup="dialog"
+              title="只在这些机型上不许改（与「全局弃用」叠加：全局勾了就不用再挑）"
+              onClick={() => setPick({ kind: 'paramDep' })}
+            >
+              <span className={s.pickerText}>
+                {draft.deprecated
+                  ? '全局已弃用（这里只是留档）'
+                  : machineSummary(draft.deprecatedMachines, machineList)}
+              </span>
+              <span className={s.pickerCaret} aria-hidden>
+                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m4 6 4 4 4-4" />
+                </svg>
+              </span>
+            </button>
+          </label>
         </div>
+        <p className={s.note}>
+          两格叠加：勾上「全局弃用」= 所有机型都不许写；只挑机型 = 只这些机型不许写，别的机型照旧能改。
+        </p>
       </div>
 
       <p className={s.hint}>
@@ -971,51 +1258,68 @@ export default function ParamDefModal({ paramKey, param, params, machineList, on
         快捷档），这里不给编辑、保存时原样保留。
       </p>
 
+      {/* 三处共用一个机型选择器（适用机型 / 参数级弃用机型 / 每条选项的弃用机型） */}
+      <MachinePicker
+        open={pick !== null}
+        title={
+          pick === null
+            ? ''
+            : pick.kind === 'filter'
+              ? `选择适用机型 · ${param.label}`
+              : pick.kind === 'paramDep'
+                ? `选择弃用机型 · ${param.label}`
+                : `选择弃用机型 · ${param.label} 的「${draft.choices[pick.index]?.label ?? ''}」`
+        }
+        subtitle={
+          pick !== null && pick.kind === 'filter'
+            ? '点一下勾/摘；按住拖过去整批刷。一个都不选 = 全部机型'
+            : '点一下勾/摘；按住拖过去整批刷。一个都不选 = 不限机型'
+        }
+        machines={machineList}
+        selected={pickedMachines}
+        onChange={applyPicked}
+        onClose={() => setPick(null)}
+      />
+
       {/*
-        「选择适用机型」—— 模态框里的模态框（套餐选版同款）：按品牌分组的树，
-        点一下勾/摘，按住拖过去整批刷（usePaintSelectC14）。Esc 只关这一层，
-        外面那框的草稿不动（modalStack 的栈序）。
+        全局弃用的确认（2026-10-20）。作者要的不是"再点一次保存"，
+        而是**看清这一勾影响到谁**：所有机型、所有版本，以及被这一档放开、
+        而自己还没弃用的子参数 —— 它们会跟着一起变成只读。
       */}
       <ModalC14
-        open={pickOpen}
-        title={`选择适用机型 · ${param.label}`}
-        subtitle="点一下勾/摘；按住拖过去整批刷。一个都不选 = 全部机型"
+        open={confirmText !== null}
+        title={`确认全局弃用 · ${param.label}`}
+        subtitle="这一步影响的是定义，不是某一台机型上的值 —— 确认后立即写回注册表"
         size="md"
         closeOnScrim={false}
-        onClose={() => setPickOpen(false)}
+        onClose={() => setConfirmText(null)}
         footer={
           <>
             <span className={s.grow} />
-            <button type="button" className={s.btn} onClick={() => setPickOpen(false)}>
-              完成（{draft.machineFilter.length} 台）
+            <button type="button" className={s.btn} onClick={() => setConfirmText(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnDanger}`}
+              onClick={() => {
+                setConfirmText(null)
+                void doSave()
+              }}
+            >
+              确认弃用
             </button>
           </>
         }
       >
-        {machineList === null ? (
-          <p className={s.note}>机型清单还没读到 —— 关掉这个框再开一次就有了。</p>
-        ) : (
-          <div className={s.pickTree} ref={pickTreeRef}>
-            {machineList.brands.map((b) => (
-              <div key={b.id} className={c.pMg}>
-                <div className={c.pMgName}>
-                  {b.name || b.id}
-                  <em>{b.machines.length}</em>
-                </div>
-                {b.machines.map((mid) => machineRow(machineById.get(mid) ?? { id: mid, display: mid }))}
-              </div>
-            ))}
-            {orphanMachines.length > 0 && (
-              <div className={c.pMg}>
-                <div className={c.pMgName}>
-                  未归品牌
-                  <em>{orphanMachines.length}</em>
-                </div>
-                {orphanMachines.map((m) => machineRow(m))}
-              </div>
-            )}
-          </div>
-        )}
+        <ul className={s.confirmList}>
+          {(confirmText ?? []).map((line, i) => (
+            <li key={i}>{line}</li>
+          ))}
+        </ul>
+        <p className={s.note}>
+          已有的值不会丢：客户端照旧读得到，只是参数台上这一项（或这一档）不能再被改。
+        </p>
       </ModalC14>
     </ModalC14>
   )

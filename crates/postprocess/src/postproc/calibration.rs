@@ -7,6 +7,19 @@
 //
 // Go 里这些函数挂在 Engine（helpers.go），但它们是纯内容变换、无编排逻辑，
 // 按「算法全下沉 postproc」原则落在本模块；engine 只调用。
+//
+// **校准身份从哪来（2026-10-18 定案）**：只有一个地方 —— 原始 3MF 的
+// `MKPSE:Calibration`（`gcode::model_identity`），由钩子顺着 `origin.txt` 读出来，
+// 经 [`crate::pipeline::IrProcessRequest::calibration`] 传进管线。
+//
+// 那条 `DetectMode`（mode.go:23，按 G-code 里的标记串认校准模式）**已整条删除**。
+// 删的理由不是简化，是**它会给出错答案**：标记住在 `Metadata/custom_gcode_per_layer.xml`
+// 里，某些版本的 Bambu Studio 存一次就把这个条目丢掉（真机核对：原件
+// `BambuStudio-02.05.00.66` 有、被 `02.08.02.60` 存过一遍的那份没有）。于是同一份模型
+// 换个版本另存一遍，G-code 里就一个字都没有，管线便把校准件当普通模型跑。
+//
+// **G-code 里即便还留着旧注释，也一律忽略。** 几何只参与认档
+// （`calib_models::find_profile`），永远不能决定"是不是校准件"。
 #![allow(
     clippy::collapsible_if,
     clippy::needless_range_loop,
@@ -21,11 +34,15 @@ use crate::gcode::{
 };
 use crate::ir::{CALIBRATION_EXEC_DIRECT_CALIBRATE, Ir};
 
-use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
+use crate::postproc::disk::{BBox, CentroidResult, generate_calibration_gcode_with_centroid_rec};
 
 /// `Mode`（calibration/mode.go:11）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// 缺省是 `None`（普通模型）—— 与"没查到身份"是同一件事，所以让 `Default` 取它，
+/// 调用点不用写 `Mode::None` 这种重复。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Mode {
+    #[default]
     None,
     ZOffset,
     XyPrecise,
@@ -36,27 +53,47 @@ pub enum Mode {
 /// Z 校准的涂胶总长常量（mode.go:21）。
 pub const Z_CALIBRATION_GLUE_TOTAL_LENGTH: f64 = 2431.32;
 
-/// `DetectMode`（mode.go:23）：按标记串识别校准模式（顺序即优先级）。
-pub fn detect_mode(lines: &[String]) -> Mode {
-    for line in lines {
-        if line.contains("Precise Calibration") {
-            return Mode::XyPrecise;
-        }
-        if line.contains("Rough Calibration") {
-            return Mode::XyRough;
-        }
-        if line.contains("ZOffset Calibration") {
-            return Mode::ZOffset;
-        }
-        if line.contains("LShape Repetition") {
-            return Mode::Repetition;
-        }
+/// 身份串 → `Mode`。**全仓唯一的解析出口**。
+///
+/// 认的是 `mode_to_calibration_string` 那四个稳定 id（`ZOffset` / `Precise` / `Rough` /
+/// `Repetition`）。3MF 的 `MKPSE:Calibration` 与档位表的 `mode` 数组都只写这几个字，
+/// 也只经这里变成 `Mode` —— 前端与存档不许自己拼。
+///
+/// 不认 `XY`：那是几何分组的旧口径（一块板服务 Precise / Rough 两个身份），
+/// 身份层面从来没有 `XY` 这个模式。大小写不敏感、首尾空白忽略。
+pub fn parse_mode_id(id: &str) -> Option<Mode> {
+    let t = id.trim();
+    if t.eq_ignore_ascii_case("ZOffset") {
+        return Some(Mode::ZOffset);
     }
-    Mode::None
+    if t.eq_ignore_ascii_case("Precise") {
+        return Some(Mode::XyPrecise);
+    }
+    if t.eq_ignore_ascii_case("Rough") {
+        return Some(Mode::XyRough);
+    }
+    if t.eq_ignore_ascii_case("Repetition") {
+        return Some(Mode::Repetition);
+    }
+    None
 }
 
 pub fn is_any(m: Mode) -> bool {
     m != Mode::None
+}
+
+/// 校准件的人类可读名字（`Z 偏移校准` / `XY 精度校准` / `XY 粗校准` / `重复性校准`）。
+///
+/// 与 [`mode_to_calibration_string`] 分工不同：那个是**给内核与报告用的稳定 id**
+/// （`ZOffset` / `Precise` …），这个只是**问句正文里那一小截字**。
+pub fn mode_display_name(m: Mode) -> &'static str {
+    match m {
+        Mode::ZOffset => "Z 偏移校准",
+        Mode::XyPrecise => "XY 精度校准",
+        Mode::XyRough => "XY 粗校准",
+        Mode::Repetition => "重复性校准",
+        Mode::None => "",
+    }
 }
 
 pub fn need_collision_check(m: Mode) -> bool {
@@ -90,6 +127,20 @@ pub fn mode_to_calibration_string(m: Mode) -> &'static str {
 
 const CALIBRATION_RETRACT_MM: f64 = 2.0;
 
+/// A1 启动段里 `G28` 之后、第一次平移之前插入的抬 Z。
+///
+/// 真机口径：归零结束时 Z 就在 0（喷嘴贴着板），而下一条 `G1 X108 Y-0.5 F30000`
+/// 是从板中心横穿到前缘 —— 在 Z0 上做这段平移，喷嘴（以及本项目的笔架）会直接刮板。
+/// 用户 2026-10-20 的录像里那一道擦痕就是它，预览逐帧也对得上。
+/// 抬到 10mm 之后紧跟着的 `G1 Z0.300` 会立刻落回去，不影响后续任何动作。
+const HOME_AFTER_G28_LIFT: &str = "G1 Z10 F1200";
+
+/// 这一行是不是 `G28`（含 `G28 X` / `G28 Z P0 T140` 这类带参数的写法）。
+fn is_g28_command(trimmed: &str) -> bool {
+    let code = code_before_comment(trimmed);
+    code.len() >= 3 && code.as_bytes()[..3].eq_ignore_ascii_case(b"G28")
+}
+
 fn is_new_calibration_mode(mode_str: &str, model_bbox: Option<&BBox>) -> bool {
     if model_bbox.is_none() {
         return false;
@@ -97,8 +148,47 @@ fn is_new_calibration_mode(mode_str: &str, model_bbox: Option<&BBox>) -> bool {
     matches!(mode_str, "Precise" | "Rough" | "ZOffset")
 }
 
+/// **校准这一趟「用了什么」的回执**（2026-10-18，执行记录用）。
+///
+/// 为什么需要它：`resolve_profile` 认出的档、实测尺寸、容差全都在
+/// [`insert_calibration_gcode`] **内部**就被消费掉了，成功那趟一个字都不出门 ——
+/// 于是"为什么这次用了加长版的基准"永远无法解释。这个结构把那几个事实**带出来**，
+/// 但它**不参与任何计算**：里面每个值都是同一次调用里已经在手的东西。
+///
+/// 全字段可空：经典分支（按机型固定坐标走）根本不认档 ⇒ `profile_id` 为 `None`；
+/// 认档失败 ⇒ 三个 geometry 字段都是 `None`（错误本身照旧报出去）。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CalibrationReceipt {
+    /// 实测挤出包围盒（只有 New 变体与 Repetition 拿得到；经典分支没有）。
+    pub measured: Option<BBox>,
+    /// 命中的档 id（`presets/calibration_models.toml` 的 `[[models]] id`）。
+    pub profile_id: Option<String>,
+    /// 该档的尺寸容差（mm）。
+    pub tolerance: Option<f64>,
+    /// 该档声明的标称外形（宽, 高）。
+    pub footprint: Option<(f64, f64)>,
+}
+
+impl CalibrationReceipt {
+    /// 从认出来的那一档填一次（认档成功才有）。
+    pub(crate) fn with_profile(
+        measured: &BBox,
+        profile: &crate::postproc::calib_models::ModelProfile,
+    ) -> Self {
+        Self {
+            measured: Some(*measured),
+            profile_id: Some(profile.id.clone()),
+            tolerance: Some(profile.tolerance),
+            footprint: Some((profile.footprint_w, profile.footprint_h)),
+        }
+    }
+}
+
 /// `InsertCalibrationGcode`（helpers.go:162）——内存行序列版（13.3 偏离）。
 /// 返回插入后的行序列；落盘（.part + rename）由 engine write 步执行。
+///
+/// 不关心回执的调用方（CLI / 判据）走这一张脸：与
+/// [`insert_calibration_gcode_with_receipt`] 传 `None` **完全等价**。
 #[allow(clippy::too_many_arguments)]
 pub fn insert_calibration_gcode(
     content: Vec<String>,
@@ -109,13 +199,40 @@ pub fn insert_calibration_gcode(
     z_dwell_sec: i64,
     xy_dwell_sec: i64,
 ) -> Result<Vec<String>, PostprocError> {
+    insert_calibration_gcode_with_receipt(
+        content,
+        mode,
+        ir_data,
+        original_bbox,
+        centroid,
+        z_dwell_sec,
+        xy_dwell_sec,
+        None,
+    )
+}
+
+/// 同 [`insert_calibration_gcode`]，但把「用了什么」写进 `receipt`。
+///
+/// 回执里的值全是同一次调用里已经在手的事实，**不新增任何计算**；
+/// `receipt = None` 时行为与旧入口逐字节相同（reference 判据因此不受影响）。
+#[allow(clippy::too_many_arguments)]
+pub fn insert_calibration_gcode_with_receipt(
+    content: Vec<String>,
+    mode: Mode,
+    ir_data: &mut Ir,
+    original_bbox: Option<BBox>,
+    centroid: CentroidResult,
+    z_dwell_sec: i64,
+    xy_dwell_sec: i64,
+    receipt: Option<&mut CalibrationReceipt>,
+) -> Result<Vec<String>, PostprocError> {
     crate::ir::fill_defaults(ir_data);
     let machine_type_str = ir_data.machine.machine_type.clone();
 
     let model_bbox = original_bbox;
 
     let mode_str = mode_to_calibration_string(mode);
-    let calibration_lines = generate_calibration_gcode_with_centroid(
+    let generated = generate_calibration_gcode_with_centroid_rec(
         mode_str,
         &machine_type_str,
         ir_data,
@@ -123,19 +240,23 @@ pub fn insert_calibration_gcode(
         centroid,
         z_dwell_sec,
         xy_dwell_sec,
-    )
-    .map_err(|e| match e {
-        // 形变检测（`E_CAL_MISMATCH_001/002`）的码是对外契约，不许被
-        // `E_CAL_FAILED_001` 吃掉 —— 前者告诉用户「把校准模型转回来」，
-        // 后者只能让人去翻日志。
-        PostprocError::CalibrationMismatch { .. } => e,
-        other => PostprocError::Calibration {
-            message: format!("E_CAL_FAILED_001: 校准代码未生成（mode={mode_str}）: {other}"),
-        },
-    })?
-    .ok_or_else(|| PostprocError::Calibration {
-        message: format!("E_CAL_FAILED_001: 校准代码未生成：无输出, mode={mode_str}"),
-    })?;
+        receipt,
+    );
+    let calibration_lines = generated
+        .map_err(|e| match e {
+            // 形变检测（`E_CAL_MISMATCH_001/002`）的码是对外契约，不许被
+            // `E_CAL_FAILED_001` 吃掉 —— 前者告诉用户「把校准模型转回来」，
+            // 后者只能让人去翻日志。
+            PostprocError::CalibrationMismatch { .. } => e,
+            // 这里只留**诊断细节**：「校准代码没有生成出来」那句与码都在表里
+            // （`messages.toml` 的 E_CAL_FAILED_001），正文里再写一遍码就是自我引用。
+            other => PostprocError::Calibration {
+                message: format!("mode={mode_str}：{other}"),
+            },
+        })?
+        .ok_or_else(|| PostprocError::Calibration {
+            message: format!("无输出，mode={mode_str}"),
+        })?;
 
     let is_direct_calibrate =
         ir_data.safety.calibration_execution_mode == CALIBRATION_EXEC_DIRECT_CALIBRATE;
@@ -146,8 +267,12 @@ pub fn insert_calibration_gcode(
             machine_type_str == "P1S" || machine_type_str == "A1" || machine_type_str == "A1_MINI";
         let filtered = filter_model_motion_paths(&content, preserve);
         minimize_startup_gcode(filtered, &machine_type_str)
-    } else {
+    } else if ir_data.prefs.skip_vibration_calibration {
+        /* ★ 2026-10-17：这一支原来是**无条件**跑的 —— 也就是说"跳过震动检测"从来没听过
+        用户的设置，一直被当成开着。现在按设置页那一档来（出厂关 ⇒ 保留 M970/M974）。 */
         remove_vibration_detection_from_mech_mode(&content)
+    } else {
+        content
     };
 
     let insert_idx = output
@@ -297,6 +422,18 @@ pub fn filter_model_motion_paths(
             in_model_region = false;
         }
 
+        /* `; CUSTOM_GCODE` 也是模型区的起点 —— 两个理由是同一件事的两半：
+         *   1) Bambu 把它发在**对象几何之前**（每个对象一段自己的 custom gcode），
+         *      所以从这里到下一个 `; FEATURE: Custom` 之间就是那个对象的全部内容；
+         *   2) 本仓实拍的 ZOffset 校准件里，这一段只剩对象起点空驶
+         *      （`G1 X127.693 Y124.368 F42000` → `G1 Z.4` → `G1 Z.2`）：模型路径被删光之后，
+         *      它变成「跑到板子正中、把喷嘴压到 0.2」的一次空点。用户 2026-10-20 报的
+         *      「切换前后在中间点点点、Z 太低刮板」就是它。
+         * 只进不出：出口仍然是上面那条 `; FEATURE: Custom`。 */
+        if has_slicer_comment_prefix(trimmed, "CUSTOM_GCODE") {
+            in_model_region = true;
+        }
+
         if in_glue_region || in_gluepen_region || in_wipe_region || in_end_region {
             filtered.push(line.clone());
             continue;
@@ -311,6 +448,9 @@ pub fn filter_model_motion_paths(
             }
             if !in_skippable_region {
                 if is_model_skeleton_line(trimmed) {
+                    continue;
+                }
+                if is_speed_only_line(trimmed) {
                     continue;
                 }
                 if is_model_motion_line(line) {
@@ -329,12 +469,18 @@ pub fn filter_model_motion_paths(
 pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(lines.len());
     let mut in_mech_mode = false;
+    /* 振动测量用的定位移动：`M970`/`M974` 被删之后，这些 `G0`/`G1` 就只剩「跑到中间空等」
+     * （用户 2026-10-20 在 A1 mini 的预览里看到的那几条居中路径）。
+     * 判据用「第一次 G28 之后」：`G0 X25 Y175 ; find a soft place to home` 与 `G28 Z` 本身
+     * 是**给 Z 归零找一块软地**，必须留；`G28 Z` 之后的一切移动都只是给测量摆位。 */
+    let mut after_home = false;
 
     for line in lines {
         let trimmed = line.trim();
 
         if trimmed.contains(";===== mech mode fast check") {
             in_mech_mode = true;
+            after_home = false;
             result.push(line.clone());
             continue;
         }
@@ -352,6 +498,16 @@ pub fn remove_vibration_detection_from_mech_mode(lines: &[String]) -> Vec<String
                 if let Some(cmd) = fields.next() {
                     let cmd = cmd.to_uppercase();
                     if cmd.starts_with("M970") || cmd == "M974" {
+                        continue;
+                    }
+                    if cmd.starts_with("G28") {
+                        after_home = true;
+                    } else if after_home
+                        && matches!(
+                            cmd.as_str(),
+                            "G0" | "G1" | "G00" | "G01" | "G2" | "G3" | "G02" | "G03"
+                        )
+                    {
                         continue;
                     }
                 }
@@ -381,6 +537,7 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
     let mut in_wipe_region = false;
     let mut in_bed_leveling_region = false;
     let mut in_home_after_wipe_region = false;
+    let mut in_post_home_region = false;
     let mut in_config_block = false;
 
     for line in lines {
@@ -473,8 +630,30 @@ fn minimize_startup_gcode_p1(lines: Vec<String>) -> Vec<String> {
             || trimmed.contains(";===== home after wipe mouth end=====")
         {
             in_home_after_wipe_region = false;
+            in_post_home_region = true;
             result.push(line.clone());
             continue;
+        }
+
+        if in_post_home_region {
+            /* P1 的擦嘴后这一段在**直接校准**下同样没有意义，而且比 A1 更"空"：
+             *   `M106 P2 S100`                 开大风扇（只是给工具头降温）
+             *   `M104 S245`                    提前升到打印温度 —— 我们根本不打印
+             *   `G1 X128 Y128 Z10` ×2          mech mode 自检的两次空跑
+             *   `G28 X ; re-home XY`           自检之后的重回零
+             * 一直到 `;===== nozzle load line` 才是后面真正要处理的段（清洗线已经被
+             * 启动段最小化削成 `M104 S30`）。这一段整块跳过，别让机器白热、白跑。 */
+            /* 出口给三个标记：X1C 走的是同一条 P1 分支，但它的
+             * `preserve_nozzle_load_line` 是 false（见 `insert_calibration_gcode_with_receipt`
+             * 里那一串机型判断），清洗线那一段连**标记本身**都会被更早删掉 ——
+             * 只认一个标记的话，跳过区会一路吃到 `MACHINE_START_GCODE_END`。 */
+            let boundary = trimmed.contains(";===== nozzle load line")
+                || trimmed.contains("turn off light and wait extrude temperature")
+                || trimmed.contains("; MACHINE_START_GCODE_END");
+            if !boundary {
+                continue;
+            }
+            in_post_home_region = false;
         }
         if in_home_after_wipe_region {
             if is_judge_flag_line(trimmed) || is_m622_line(trimmed) || is_m623_line(trimmed) {
@@ -500,6 +679,7 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
     let mut in_wipe_region = false;
     let mut in_bed_leveling_region = false;
     let mut in_home_after_wipe_region = false;
+    let mut in_post_home_region = false;
     let mut in_extrude_cali_region = false;
     let mut in_config_block = false;
 
@@ -603,6 +783,7 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
 
         if trimmed.contains(";===== home after wipe mouth end") {
             in_home_after_wipe_region = false;
+            in_post_home_region = true;
             result.push(line.clone());
             continue;
         }
@@ -616,7 +797,31 @@ fn minimize_startup_gcode_a1(lines: Vec<String>) -> Vec<String> {
                 continue;
             }
             result.push(line.clone());
+            /* `G28` 之后紧跟的那条 `G1 X108 Y-0.5 F30000` 是**在 Z0 上平移**：
+             * 归零把 Z 压到 0（喷嘴贴板），这一段横穿板面 → 真机上直接刮过去
+             * （用户 2026-10-20 的录像与预览逐帧对上）。先抬 Z 再让它走。 */
+            if is_g28_command(trimmed) {
+                result.push(HOME_AFTER_G28_LIFT.to_string());
+            }
             continue;
+        }
+
+        if in_post_home_region {
+            /* 直接校准**不打印模型**，归零之后这一整段就没有意义：
+             *   `G1 X108.000 Y-0.500 F30000`  去板前沿的「清洗线入口」
+             *   `G1 Z0.300 F1200`             落到首层高度
+             *   `M400` / `G2814 Z0.32`        等运动 + Z 微调
+             *   `M104 S245 ; prepare to print` 升到打印温度
+             * 原厂是靠紧接着的 nozzle load line 吐料把喷嘴清干净的，而那一整段在模板里
+             * 本来就是注释掉的（用户 2026-10-20 确认：直接校准不需要吐料/升温）。
+             * 于是这些行只剩下「跑到板前沿再干等」的作用，一并删掉。
+             * 交界处交给下面的 nozzle load line / extrude cali test 分支继续处理。 */
+            if !(trimmed.contains(";===== nozzle load line")
+                || trimmed.contains(";===== extrude cali test"))
+            {
+                continue;
+            }
+            in_post_home_region = false;
         }
 
         if trimmed.contains(";===== extrude cali test")
@@ -891,10 +1096,17 @@ fn should_preserve_nozzle_load_line_line(line: &str) -> (String, bool) {
     (line.to_string(), true)
 }
 
-/// 行首 M109 → M104（大小写不敏感；Go `(?i)^M109` 锚在原始行首）。
+/// 行首（允许前导空白）M109 → M104（大小写不敏感）。
+///
+/// 2026-10-19：原来只匹配第 0 个字符，A1 的 `;===== extrude cali test` 段里
+/// M109 带 4 个空格缩进 ⇒ 命令没改掉、却仍被 `replace_s_numbers` 把 S245
+/// 改成 S30，输出成**阻塞式** `M109 S30`，直接校准会停在那里等喷嘴降温。
+/// 缩进必须一起看待，替换后原缩进保留。
 fn replace_cmd_prefix(line: &str, from: &str, to: &str) -> String {
-    if line.len() >= from.len() && line[..from.len()].eq_ignore_ascii_case(from) {
-        format!("{to}{}", &line[from.len()..])
+    let body = line.trim_start();
+    let indent = &line[..line.len() - body.len()];
+    if body.len() >= from.len() && body[..from.len()].eq_ignore_ascii_case(from) {
+        format!("{indent}{to}{}", &body[from.len()..])
     } else {
         line.to_string()
     }
@@ -968,6 +1180,41 @@ fn is_model_skeleton_line(trimmed: &str) -> bool {
     false
 }
 
+/// 「只改速度、不动位置」的 G 行：`G1 F10342.643`、`G0 F15000`、`G1 F3000`。
+///
+/// 它们在模型区里是**被删掉的移动**留下的速度提示：移动没了，速度提示就是纯垃圾
+/// （2026-10-20 用户报障：直接校准的成品里 1167-1211 行全是 `G1 F10342.643` 这种行）。
+/// `is_model_motion_line` 抓不住它们 —— 那个谓词要「带轴参数」才算运动，而 F 不是轴。
+///
+/// 只在**模型区**调用：区外的 `G1 F…` 会改后续移动的模态进给，删掉就改了真机速度。
+/// 判据：G0/G1/G2/G3 + 有 F + **没有**任何轴参数（X/Y/Z/E，弧的 I/J，以及 R）。
+fn is_speed_only_line(trimmed: &str) -> bool {
+    let code_part = code_before_comment(trimmed);
+    if code_part.is_empty() {
+        return false;
+    }
+    let upper = code_part.to_uppercase();
+    if !(upper.starts_with("G0")
+        || upper.starts_with("G1")
+        || upper.starts_with("G2")
+        || upper.starts_with("G3"))
+    {
+        return false;
+    }
+    let mut has_feed = false;
+    for f in code_part.split_whitespace().skip(1) {
+        let Some(b) = f.as_bytes().first() else {
+            continue;
+        };
+        match b.to_ascii_uppercase() {
+            b'F' => has_feed = true,
+            b'X' | b'Y' | b'Z' | b'E' | b'I' | b'J' | b'R' => return false,
+            _ => {}
+        }
+    }
+    has_feed
+}
+
 /// `isModelMotionLine`（helpers.go:317）：G0-G3 且带 X/Y/Z/E(/I/J) 数值参数。
 fn is_model_motion_line(line: &str) -> bool {
     let trimmed = line.trim();
@@ -1018,5 +1265,28 @@ fn split_g_code(code_part: &str, upper: &str, digit: u8) -> (String, usize) {
         (format!("G{}", &upper[1..3]), 3)
     } else {
         (format!("G{ch}"), 2)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A1 的 `;===== extrude cali test` 段里 M109 带 4 个空格缩进。
+    /// 最小化必须把它改成**不阻塞**的 `M104 S30`；只改 S 不改命令会留下
+    /// `M109 S30`，机器会停在那里等喷嘴降到 30°C（2026-10-19 真机）。
+    #[test]
+    fn indented_m109_in_extrude_cali_becomes_non_blocking_m104() {
+        let (line, keep) = should_preserve_nozzle_load_line_line("    M109 S245");
+        assert!(keep);
+        assert_eq!(line, "    M104 S30");
+    }
+
+    /// 缩进要保留，温度照旧改 30。
+    #[test]
+    fn indented_m104_is_normalized_without_losing_indent() {
+        let (line, keep) = should_preserve_nozzle_load_line_line("\tM104 S220");
+        assert!(keep);
+        assert_eq!(line, "\tM104 S30");
     }
 }

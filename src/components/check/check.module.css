@@ -1,0 +1,177 @@
+/*
+ * 勾选 / 单选共用件的长相（把全站"勾和框"收成一套）。
+ *
+ * # 为什么要有这一件
+ *
+ * 作者 2026-10-17 看截图后问：「我发现我好多地方的按钮样子不一样，你觉得怎么统一一下，
+ * 大小颜色那些变体无所谓，主要是**勾和框统一，圆角，勾的位置**之类的」。
+ * 当时盘下来是两族：设置页那套**自绘墨色**（方框 4px 圆角 / 单选正圆 / 墨底反白勾），
+ * 与其余几处**原生**控件（吃 `tokens.css` 里全站那条 `accent-color: var(--accent)`，
+ * 于是勾是印刷机绿、框是系统画的）。这一稿把原生那几处也换到墨色这套 ——
+ * 规格以设置页那份为准（它是最完整的一版），原封不动搬进来当**唯一**口径。
+ *
+ * # 规格（改这里 = 改全站，别在页面里另画）
+ *
+ *   框身    16px 方盒；方框 `border-radius: 4px`、单选 `50%`
+ *   边线    1.5px `--line-strong`，未选底透明
+ *   选中    `--text-1`（浅色近黑 / 深色近白）—— 复选是墨底 + 反白勾，
+ *           单选是内阴影留出的实心墨点
+ *   半选    墨底 + 一道白色横杠（只有复选有；原生 DOM 属性 `indeterminate` 驱动）
+ *   焦点环  画在框上（原生 input 收成了 1px，默认焦点环看不见）
+ *
+ * 颜色全走 token（`--text-1 / --line-strong / --surface-solid / --hover-1`），
+ * 所以下面**一条 `[data-theme]` 覆盖都没有** —— 这是一道刻意留的自检：谁往这里塞
+ * 硬编码颜色，就会先在深色里露馅。
+ *
+ * # 尺寸 / 颜色 / 字号是"变体"，不在这里锁
+ *
+ * 这一件只管**结构**（怎么摆、框多大、勾画在哪）+ 必须一致的那几档颜色。
+ * 字号与文字颜色由调用方给（设置页是 `--fs-body`，弹窗里是小字灰字）——
+ * 基类不设 `font-size / color`，免得和调用方的类打"后写者赢"的架。
+ */
+
+.choice {
+  position: relative;
+  display: flex;
+  /*
+   * ★ `align-items` **不能是 `flex-start`**：方框（16px）与文字在顶边对齐，而
+   * CJK 字形坐在行盒的中下部 ⇒ 框看着偏高、勾看着没落在框中间。`center` 才是
+   * **按内容盒中线对齐**，两边几何中心自己就重合了（设置页那条同一条口径）。
+   */
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+}
+
+/* 原生 input 只剩语义与键盘：视觉上收成 1px 透明（**不是 `display: none`**——
+   那样读屏与方向键就一起没了）。`:checked` 仍是原生状态，于是 `name` 分组、
+   方向键切换、Tab 顺序、读屏播报全部免费拿到。 */
+.input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.mark {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  /*
+   * 与文字**中线对齐**（外层 `align-items: center`，这里是框自己的内容盒中线）。
+   * ★ 这里**不许改成 `margin-top`**：那会把外边距加进"行内元素的内容盒"，
+   * `align-items: center` 跟着把整框往下推，勾就又悬出线框外去了。
+   */
+  margin-top: 0;
+  border: 1.5px solid var(--line-strong);
+  background: transparent;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.markRadio {
+  border-radius: 50%;
+}
+
+.markCheck {
+  border-radius: 4px;
+}
+
+/* 悬停：整行已被调用方提亮的那一档之外，圈线再提一档 —— "这是一行，不是一格" */
+.choice:hover .mark {
+  border-color: var(--text-2);
+}
+
+/* 选中：圈线走墨色，填充按控件类型分开画 */
+.input:checked + .mark {
+  border-color: var(--text-1);
+}
+
+/* 实心墨点：内阴影比伪元素更稳（不依赖"`input` 上的伪元素算不算渲染"）；
+   spread 3.5px 留出一枚约 6px 的实心点，占 16px 圈径四成上下，与原生观感最接近 */
+.input:checked + .markRadio {
+  box-shadow: inset 0 0 0 3.5px var(--text-1);
+}
+
+/* 墨底（复选，含半选） */
+.input:checked + .markCheck {
+  background: var(--text-1);
+}
+
+/*
+ * 对勾（撇 + 2px 描边）。
+ *
+ * # 位置：先几何居中，再补一个"视觉居中"的偏移
+ *
+ * ★ **不手算 `left/top`**（踩过两次）：`::after` 的包含块是标记的**内边距盒**（13×13），
+ * 而 `::after` 是 content-box（`4.5×8` + 右/下各 2px 边框 ⇒ 边框盒 `6.5×10`），
+ * 转 45° 之后的外接盒比 13px 的内盒还大 —— 按"外接尺寸减一半"硬算出来的值必然是偏的。
+ * `inset: 0` + `margin: auto` 交给浏览器把**边框盒**居中（与旋转无关），一步到位。
+ *
+ * ★★ 但"边框盒居中"≠"**勾看着**在中心"（作者 2026-10-17：「这个勾好像不在视觉中心」）。
+ * 原因在这条 border 画法本身：`::after` 只画了**右边 + 下边**两条，可见笔画的质心
+ * 落在边框盒中心的**右下**；绕中心转 45° 之后，那个质心正好落到中心正下方。
+ * 算下来墨迹的外接盒中心比方框中心**低约 1.6px**（质心低约 1.75px）—— 所以要补一个
+ * 向上的平移把它抬回去。
+ *
+ * ★★ 这个值**是目测调出来的，不是算出来的**：先按算值 1.6px 试了一版，
+ * 作者看着说「有点偏高了」，收到 **-1px** 才顺眼。几何算值偏大是因为"看着在中心"
+ * 这件事本来就不等于"墨迹外接盒居中"（勾的短臂那头轻、长臂那头收在下方顶点，
+ * 视觉重心比几何重心略低一点）。**要动先看，别只按公式改。**
+ *
+ * ★ 顺序要紧：`translateY(...) rotate(...)` 是**先转、再在屏幕坐标里平移**
+ *（CSS transform 从右往左生效），所以这个 -1px 就是纯粹的"往上抬"，不会被
+ * 45° 拧成斜的。写成 `rotate(45deg) translateY(...)` 就会变成沿旋转后的轴移，偏掉。
+ *
+ * ★ `transform-origin` 保持默认的 `50% 50%`：旋转绕**边框盒中心**，中心不动。
+ */
+.input:checked + .markCheck::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 4.5px;
+  height: 8px;
+  border: 2px solid var(--surface-solid);
+  border-top: 0;
+  border-left: 0;
+  transform: translateY(-1px) rotate(45deg);
+}
+
+/*
+ * 半选（`indeterminate`，只有复选有）：墨底 + 一道白色横杠。
+ * ★ 这两条**必须排在**上面那条"对勾"之后 —— 两者都是 `.markCheck::after`、
+ * 特异性一样，靠**后写者赢**把对勾那条的尺寸 / 描边 / 旋转盖掉。
+ * 调用方（`ParamSyncModal` 的全选）按构造保证 `checked` 与 `indeterminate` 互斥，
+ * 但这里仍按"半选压选中"排，免得将来有人两样一起传时画出个四不像。
+ */
+.input:indeterminate + .markCheck {
+  background: var(--text-1);
+}
+
+.input:indeterminate + .markCheck::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 8px;
+  height: 2px;
+  border: 0;
+  background: var(--surface-solid);
+  transform: none;
+}
+
+/* 键盘焦点：焦点环画在框上（原生 input 被收成 1px，默认焦点环是看不见的） */
+.input:focus-visible + .mark {
+  outline: 2px solid var(--text-1);
+  outline-offset: 2px;
+}
+
+.input:disabled + .mark {
+  opacity: 0.4;
+}

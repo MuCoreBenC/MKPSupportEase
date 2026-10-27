@@ -4,7 +4,8 @@ import { mockApi } from './mock'
 
 export type { AppError, Axes, CalibModel, ErrorCode, MkpApi, Preset } from './contract'
 export { isAppError } from './contract'
-export { errorText, NotImplementedError } from './errors'
+export { errorText, NotImplementedError, uiErrorOf } from './errors'
+export type { UiError } from './errors'
 
 /*
  * 剩下的类型一律整份转出去（`export type *`）——
@@ -48,5 +49,11 @@ export async function listen<T>(
   }
 }
 
-/** 给界面用：告诉用户"这一份数据是从哪来的"。调试用，不参与业务判断 */
+/*
+ * 给界面用：告诉用户"这一份数据是从哪来的"。调试用，不参与业务判断。
+ *
+ * ★ 活口（2026-10-14 标记）：**当前零消费者**（grep 全仓只剩定义与这句注释），
+ * 但它是有意留的口 —— 换数据源排查"这条数据是后端给的还是预览假造的"时要问它。
+ * 别按"没有引用就删"处理它；真要删，得先把"数据从哪来"这个说法从界面上撤掉。
+ */
 export const apiSource: 'rust' | 'mock' = inTauri ? 'rust' : 'mock'

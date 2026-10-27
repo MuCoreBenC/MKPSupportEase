@@ -1,0 +1,76 @@
+/* 保存之后那一句提问。按钮样式与项目里其它模态框的底栏同一套观感。 */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.text {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.text b {
+  font-weight: 600;
+}
+
+.err {
+  margin: 0;
+  font-size: 12px;
+}
+
+/*
+ * 引导摆出去之后的**回执**（不是错误、也不是正文）：告诉用户"看切片器那边"，
+ * 免得他以为点了没反应 —— 卡片不在我们这扇窗里，在这儿是看不见的。
+ */
+.done {
+  margin: 0;
+  color: #0a84ff;
+  font-size: 12px;
+}
+
+/* 深色下那支 `#0a84ff` 压在中性灰上偏亮、也偏蓝（与"面族去蓝"那条同源）——
+   换成随主题走的一档（浅色仍是原来的蓝） */
+[data-theme='dark'] .done {
+  color: #5aa9ff;
+}
+
+/*
+ * 「不再显示」那一行：框身最下面、左对齐（与上面几段正文同一条左缘）。
+ * 小字灰字 —— 它是**可选的**一件事，不该跟正文抢注意力。
+ *
+ * ★ 2026-10-17：框身与对勾归共用件 `components/check`（原来这里是原生绿勾），
+ *   这里只剩**字号 / 文字色 / 上边距**这一档（共用件不锁这一档，见它头注释）。
+ */
+.check {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.primary,
+.ghost {
+  min-height: 30px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--accent, #0a84ff);
+  color: #fff;
+}
+
+.ghost {
+  background: var(--fill-2, rgb(0 0 0 / 6%));
+  color: var(--text-1, #3c3c43);
+}
+
+.primary:disabled,
+.ghost:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

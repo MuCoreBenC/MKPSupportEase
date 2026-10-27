@@ -169,6 +169,12 @@ pub struct ZCompCorners {
     pub back_right: f64,
 }
 
+/// 旧 IR / TOML 里没有 `SwapHopHeight` 时按 1.0 处理 —— 与加参数之前的硬编码一致，
+/// 这样用户手上那些老预设文件不会被判成 Corrupted。
+fn default_swap_hop_height() -> f64 {
+    1.0
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct GlueIr {
@@ -178,6 +184,9 @@ pub struct GlueIr {
     pub z_lift_height: f64,
     pub z_lift_height_first_layers: f64,
     pub inter_model_lift_height: f64,
+    /// 换笔脱层（z-hop）高度：只负责「离开刚打完的表面」，不是抬笔高度。
+    #[serde(default = "default_swap_hop_height")]
+    pub swap_hop_height: f64,
     pub z_comp_enabled: bool,
     pub z_comp_mode: String,
     pub z_comp_bed: ZCompCorners,
@@ -343,4 +352,66 @@ pub struct Ir {
     pub warnings: Vec<String>,
     #[serde(deserialize_with = "null_to_empty")]
     pub warning_diagnostics: Vec<Diagnostic>,
+    /// **用户在设置页里点出来的那几档**（2026-10-17）。
+    ///
+    /// 与预设（`presets-local/*.toml`）分开：那一份说的是"这台机器的工艺"，
+    /// 这一格说的是"用户想额外怎么做"（跳不跳震动检测、热床涂不涂胶……）。
+    /// 预设里没有这个字段 ⇒ `default()`（全按出厂），旧预设照读。
+    ///
+    /// ★ 它是**应用偏好写进 IR 的落点**，不是预设的一部分：
+    /// `runtime::postproc_prefs::apply_to_ir` 是唯一写入点。
+    /// 名字带 `prefs` 是为了在 IR 里一眼看出"这不是工艺参数"。
+    #[serde(default)]
+    pub prefs: PrefsIr,
+}
+
+/// 用户偏好落到 IR 上的那几个开关（见 [`Ir::prefs`]）。
+///
+/// **全是"真改变切出来 G-code"的那几项**；界面形态（静默/GUI）与系统通知不在这里 ——
+/// 它们不影响产物，只归客户端管。
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct PrefsIr {
+    /// 支撑面下方一层也涂胶。
+    pub glue_bottom_enabled: bool,
+    /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
+    pub skip_vibration_calibration: bool,
+    /// 开头插入工具头收起序列。
+    pub begin_stage_retract_enabled: bool,
+    /// 收笔抬升的 Z 高度（mm）。
+    pub begin_stage_retract_z_lift_mm: i64,
+    /// Z 轴校准停留秒数。
+    pub z_calibration_dwell_sec: i64,
+    /// XY 轴校准停留秒数。
+    pub xy_calibration_dwell_sec: i64,
+    /// 热床预涂胶（危险，出厂关）。
+    pub bed_glue_enabled: bool,
+    /// 热床涂胶是只涂擦料塔位置（false）还是所有模型首层（true）。
+    pub bed_glue_all_models: bool,
+    /// **自动摆塔**（2026-10-18 作者定的口径）：模型与塔相撞时问一句
+    /// "自动把塔挪到不撞的地方 / 你自己去挪模型"；选前者才按自动摆出来的位置跑完
+    /// 这一趟（**只改这一趟，不落盘**）。出厂关 —— 塔摆哪儿是用户 / 套餐定的，
+    /// 没有用户点头，内核不自作主张挪。
+    pub auto_tower_position: bool,
+}
+
+impl Default for PrefsIr {
+    /// 出厂档 —— **与 `runtime::app_state::ResolvedPostprocPrefs` 的默认值必须一致**
+    /// （判据 `crates/postprocess` 里那条 `default_prefs_match_the_client_defaults` 咬着）。
+    ///
+    /// 为什么两边各写一份而不是共用：`postprocess` 是独立 crate，**不许**回头依赖
+    /// 客户端（那是"内核知道界面"的反向依赖）。所以两份 + 一条判据，判据是唯一防线。
+    fn default() -> Self {
+        Self {
+            glue_bottom_enabled: false,
+            skip_vibration_calibration: false,
+            begin_stage_retract_enabled: true,
+            begin_stage_retract_z_lift_mm: 30,
+            z_calibration_dwell_sec: 2,
+            xy_calibration_dwell_sec: 3,
+            bed_glue_enabled: false,
+            bed_glue_all_models: false,
+            auto_tower_position: false,
+        }
+    }
 }

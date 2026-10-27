@@ -70,7 +70,7 @@ if (!(await waitFor(`${ORIGIN}/source.json`))) {
   console.error(`[preset-test-server] 服务没起来（${ORIGIN}/source.json 一直取不到）`)
   process.exit(1)
 }
-console.log(`[preset-test-server] 就绪：${ORIGIN} —— 现在起 tauri dev，并把官方源指向它`)
+console.log(`[preset-test-server] 就绪：${ORIGIN} —— 现在起 tauri dev，并把云端源指向它`)
 
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 const dev = spawn(npx, ['tauri', 'dev'], {

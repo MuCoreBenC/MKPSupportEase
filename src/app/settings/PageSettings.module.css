@@ -1,4 +1,19 @@
-/* 设置页 —— 目前只有「高级设置 → 预设数据源」这一节（见 tsx 头注释）。 */
+/* ============================================================================
+ * 设置页（a07 重做稿，2026-10-13）
+ *
+ * 这一稿只做一件事：把**表单选中态**从"浏览器默认外观 + 全局品牌绿"换成
+ * **自绘墨色**。作者当天看着旧稿的原话：「什么选中的呀？还有什么开关？都很丑，
+ * 你有没有感觉？为什么是绿色的底…很奇葩呀」。
+ *
+ * 绿的根在 `src/styles/tokens.css` 的**全站**规则上（`:root { accent-color: var(--accent) }`，
+ * `--accent` = 打印机绿 #20b25a）—— 改那一行等于同时动到预设页、参数页、切片弹窗
+ * 里所有原生控件，而这一稿明说了"只做设置那一页"。所以这里走 `appearance: none`
+ * 把原生外观**整个绕开**：绿只活在那一页之外，这一页一个全局变量都不改。
+ *
+ * 颜色全部走 token：圈线 `--line-strong`、选中/实心 `--text-1`（浅色近黑、深色近白）、
+ * 对勾反白 `--surface-solid`。所以下面**一条 `[data-theme]` 覆盖都没有** —— 这是一道
+ * 刻意留的自检：哪天有人往这里塞硬编码颜色，就会先在深色里露馅。
+ * ========================================================================== */
 
 .page {
   flex: 1;
@@ -30,9 +45,8 @@
 }
 
 /*
- * 卡片**撑满页宽**（作者 2026-10-05：「右边没有撑满，大窗口下也是」）。
- * 原来的 max-width: 760px 是早期最小版的遗留 —— 设置页就两块卡，压在左边
- * 让大窗右侧整片空白。行文长度靠句子自己断（地址类都开了 overflow-wrap）。
+ * 卡片撑满页宽（作者 2026-10-05：「右边没有撑满，大窗口下也是」）。
+ * 行文长度靠句子自己断（地址类都开了 overflow-wrap）。
  */
 .section {
   width: 100%;
@@ -44,22 +58,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-}
-
-/* 更新卡：状态在左、动作在右（顶对齐）；窄窗放不下时按钮组折到下一行、仍靠右 */
-.updateTop {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px 16px;
-  flex-wrap: wrap;
-}
-
-.secActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: auto;
-  flex-shrink: 0;
 }
 
 .secTitle {
@@ -76,39 +74,6 @@
   gap: 6px;
 }
 
-/* ——— 软件更新（第一块） ——— */
-
-.updateRow {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.updateHeadline {
-  font-size: calc(var(--fs-body) + 3px);
-  font-weight: 600;
-  color: var(--text-1);
-}
-
-/*
- * 三态各自的颜色（作者 2026-10-05：「最新的我希望字体是绿色的」）：
- *   有新版本  绿 —— 那是一条**好消息**，值得被一眼看见
- *   已是最新  绿 —— 同样是好消息（"你手上的就是最新的"），与上面同一个绿
- *   没查到    灰 —— **不是**坏消息（离线/源没部署），别用红色吓人
- *   正在检查  灰
- */
-.updateFresh {
-  color: #2f6f3e;
-}
-
-.updateLatest {
-  color: #2f6f3e;
-}
-
-.updateIdle {
-  color: var(--text-2);
-}
-
 .fieldTitle {
   font-size: var(--fs-body);
   font-weight: 600;
@@ -119,22 +84,6 @@
   margin: 0 0 2px;
   font-size: var(--fs-label);
   color: var(--text-2);
-}
-
-/* 一个单选档 + 它自己的地址提示（原来两条地址挤在一处，看不出归属） */
-.sourceOpt {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.radio {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-body);
-  color: var(--text-1);
-  cursor: pointer;
 }
 
 .hint {
@@ -162,12 +111,190 @@
   font-size: var(--fs-body);
 }
 
+/*
+ * 「切片」那格的下拉（2026-10-13 第三刀）：外面这层只为**定宽** —— 共用件
+ * `SelectField`（`shared-ui/field`）的 `.wrap` 是 inline-flex，自己不会伸；
+ * 给一个下限，值在"跟随系统默认"↔"PrusaSlicer"之间切换时宽度不跳。
+ * 触发器本身的观感（边框 / 圆角 / 勾选 / 高亮）全归共用件，这里一个字不碰。
+ */
+.slicerPick {
+  align-self: flex-start;
+  display: grid;
+  min-width: 200px;
+  max-width: 100%;
+}
+
+/* 下拉下面那行（自定义档的完整路径）——长，允许任意断行 */
+.slicerHint {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 「跟随系统默认」那行 + 右边那颗「去系统里改…」（2026-10-16）：
+ * 一句话一颗按钮，同一行；字太长时按钮**换到下一行**（不把字挤成一列窄条）。
+ */
+.slicerRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .current {
   margin: 2px 0 0;
   font-size: var(--fs-body);
   color: var(--text-2);
   overflow-wrap: anywhere;
 }
+
+/*
+ * ============ 软件更新（第一块） ============
+ *
+ * ★ 那一条「试验场专用 · 只看效果」的演示条**已经搬到预览外壳的工具条上**
+ *   （2026-10-14 作者：「把设置页面的试验场专用只看效果这些设置做到外壳上面」），
+ *   这一页里不再有它 —— 上面那些 `.demoBar / .demoTag / .demoGroup / .demoBtn`
+ *   一并删了（搬回产品时本来也要删，现在两件事合成一件）。
+ */
+
+.updateHeadline {
+  font-size: calc(var(--fs-body) + 3px);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+/*
+ * 三态各自的颜色（作者 2026-10-05：「最新的我希望字体是绿色的」）：
+ *   有新版本  绿 —— 那是一条**好消息**，值得被一眼看见
+ *   已是最新  绿 —— 同样是好消息（"你手上的就是最新的"），与上面同一个绿
+ *   没查到    灰 —— **不是**坏消息（离线/源没部署），别用红色吓人
+ *   正在检查  灰
+ *
+ * ★ 这一处的好消息绿**保留**（作者点名要过）：它是"状态语气色"，不是"选中态"——
+ *   这一稿去绿去的是表单控件的填充，不是这条语义。
+ */
+.updateFresh {
+  color: #2f6f3e;
+}
+
+.updateLatest {
+  color: #2f6f3e;
+}
+
+.updateIdle {
+  color: var(--text-2);
+}
+
+/*
+ * 更新说明（changelog）—— 长文案时的**封顶可滚**：
+ * 一次发版说明写几十行是常事，不封顶的话整张卡被撑成一整屏，下面那排按钮
+ * 与状态大字一起被推出视野（作者 2026-10-13：「显示一大堆的时候效果是怎么样的呢？」）。
+ * 封顶之后：说明自己在块内滚，状态与按钮位置不动。
+ *
+ * 这里刻意用**普通块**（不是 flex 列）：块内只有一个文本节点，没有会被 flex
+ * 压扁的子项，所以那条"封顶可滚的 flex 列里子项要 flex-shrink: 0"的约定不适用。
+ */
+.notes {
+  margin: 0;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  /* changelog 的换行照原样（一行一行念得下去），长行仍折 */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 更新卡：**状态在左、动作在右上**（顶对齐）—— a07 第二版定稿的摆法。
+ * 作者先要过"居中"、又画了支箭头指右缘，最后说：「他应该放到上面呀，
+ * 而且你不觉得它这个位置很奇怪吗？我就觉得他这个位置放在这不舒服」——
+ * 按钮吊在卡片底下空一大块，也够不着；回到右上，和状态同一行。
+ *
+ * ★ 2026-10-13 第二轮（作者看截图后）：「这个更新按钮应该它有颜色不应该放到中间，
+ *   应该放到右边啊」—— 组内顺序定成 重新检查 → 查看更新 → 更新（见 TSX），
+ *   这里只管"整组贴右缘"；**有颜色的那颗永远压最右**。
+ *
+ * 左列 `flex: 1`：长文案（一整个发版说明）只把左列撑高、自己滚，
+ * 右边那排按钮原地不动。窄窗放不下时按钮组折到下一行、仍靠右。
+ */
+.updateTop {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.updateRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 动作条：整组贴卡片右缘（`margin-left: auto`），窄窗折行后也靠右。
+ * **组内排序不在这里** —— 顺序是 TSX 的事（干扰小的在左，有颜色的主操作压最右）。 */
+.secActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ============ 勾选行（框身住共用件 `components/check`） ============
+ * 2026-10-17：这一页原来自带的那一整套自绘墨色（`.choice / .choiceInput / .mark /
+ * `.markRadio / .markCheck / `:checked` 那几条 / 焦点环 / 禁用）**整段搬去了共用件
+ * `components/check`** —— 它是全站唯一的那份规格，页面里再画一份就是"又长出一个样子"。
+ *
+ * 留在这里的只有**这一页专属**的两件事：
+ *   1. `.choiceRow` —— 整行可点的行框感（左右各让出 6px 再用负 margin 拉回来，悬停整行提亮）
+ *   2. `.choiceText / .choiceLabel / .choiceHint` —— 主文案 + 小字说明的两行文字盒
+ * 字号与文字色也留在这里（共用件不锁这一档，见它头注释）。
+ */
+
+.choiceRow {
+  /* 左右各让出 6px、再用负 margin 拉回来：让悬停那块高亮比文字宽一点，
+     又不把行文挤歪（老稿里说明行顶格的样式不变） */
+  padding: 3px 6px;
+  margin-left: -6px;
+  margin-right: -6px;
+  border-radius: var(--r-sm);
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来） */
+  transition: background-color 0.12s ease;
+}
+
+.choiceRow:hover {
+  background: var(--hover-1);
+}
+
+.choiceText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* ★ 别删：外层 `align-items: center` 会让 flex 子项被**拉伸到内容高度**，
+     文字盒的中线于是比方框的中线低一点点（视觉上"文字偏高"就是这一处造成的）。
+     写死行高 = 文字盒几何 = 字形盒几何，中线才真的重合。 */
+  line-height: 1;
+}
+
+.choiceLabel {
+  font-size: var(--fs-body);
+}
+
+.choiceHint {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* ============ 结论文案块 ============ */
 
 .note {
   margin: 0;
@@ -198,4 +325,228 @@
   color: var(--text-3);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   overflow-wrap: anywhere;
+}
+
+/* ============ 深色（2026-10-12 第二遍；2026-10-13 a07 复核） ============
+ * ★ 只剩两条，全是**语义色**（好消息绿 / 警示棕）在深底上的那一档。
+ *   自绘控件一条都不要（它们全走 token，两套主题自动翻）——
+ *   这里多出一条覆盖，就说明上面又有人硬编码了颜色。 */
+
+/*
+ * 云端更新那两行"好消息绿"与 noteBad 的棕字原来是**深色墨**（#2f6f3e / #8a5a20）——
+ * 压深底上几乎读不出。换成各族的深色档（绿走 --accent、警示走 --warn-ink）。
+ */
+[data-theme='dark'] .updateFresh,
+[data-theme='dark'] .updateLatest {
+  color: var(--accent);
+}
+
+[data-theme='dark'] .noteBad {
+  color: var(--warn-ink);
+}
+
+/*
+ * 图片引导里那颗「去重新允许」（2026-10-17）：只有"自动化授权被拒"那一条错才摆。
+ * 按钮 + 一句"勾完回来再点一次"的小字 —— 反悔的正路只有系统设置那一页
+ * （macOS 拒过一次就永远不再弹框），把落点与后续一步说清。
+ */
+.guideGrant {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.guideGrantNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ============================================================================
+ * 后处理模式 / 校准与补偿 / 热床预涂胶 / 清理与卸载（2026-10-17）
+ *
+ * 四块共用同一套"一行 = 左边说明 + 右边控件"的排版：`.fieldRow` 只加这一层
+ * 横排，**不改既有 `.field`**（那个是竖排，老块还在用，动了会连锁）。
+ *
+ * 颜色全部复用已有 token：
+ *   危险块  `--warn-surface / --warn-line / --warn-ink`（与后处理那扇 hero 同一套橙）
+ *   选中态  `--accent-soft / --accent`（印刷机绿，全站唯一的强调色）
+ * 没有一处写死色值 —— 深浅两套因此自动都对。
+ * ========================================================================== */
+
+/* ---- 一行两列：左说明、右控件 ---- */
+
+.fieldRow {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.fieldText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* 允许收缩：说明再长也不许把右边的开关挤出框 */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- 静默 / GUI 两卡 ---- */
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 2px;
+}
+
+.modeCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  text-align: center;
+  /* 全局 `button { white-space: nowrap }` 对这三行字不适用，卡片里要允许折行 */
+  white-space: normal;
+}
+
+.modeCard:hover {
+  border-color: var(--line-strong);
+}
+
+/* 选中：绿底 + 绿描边 + 绿字。颜色只在"选了"这一态出现（这一页唯一的色彩） */
+.modeCardOn {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.modeIcon {
+  display: flex;
+  line-height: 0;
+}
+
+.modeLabel {
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.modeHint {
+  font-size: var(--fs-label);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+
+/* 选中时说明文字也跟着绿一档 —— 否则绿底灰字读起来发虚 */
+.modeCardOn .modeHint {
+  color: var(--accent-deep);
+  opacity: 0.82;
+}
+
+/* ---- 数字框（抬升高度 / 停留时间）：**照抄参数台 `.edNum`** ----
+ *
+ * ★ 2026-10-27 作者：「你这个要复用修改参数那里面的呀，我点击的那一些动作也是呀，
+ *   它这个左侧的也要一样长啊」—— 也就是参数行那一套（`app/params/ParamRow.module.css`
+ *   的 `.edNum`），这里逐条搬过来，不改共用件：
+ *
+ *   1. **定宽 132px**：三个框左沿齐、右沿齐。从前 `.numBox` 是 108px 而定宽的下层
+ *      `NumberField` 按**内容**撑宽（位数 + 单位 + 箭头 + 量程占位 `20 ~ 100`），
+ *      `100 mm` 要 135px ⇒ 外层被顶开、内层溢出到卡片右沿外（「有点超出了」）。
+ *      外壳定宽 + `.numBox > *` 撑满，宽度就由壳说了算，内层不再自己长。
+ *   2. **只读态数值靠右**（框里 `.input` 本来就是 right，一列数字好比大小）；
+ *   3. **点进去编辑，数值靠左、光标落在数后面**（`input:focus` 改 left）——
+ *      作者原话「我点击了之后，那个数字是到左边的，我的光标是在右边的」。
+ */
+
+.numBox {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 132px;
+  min-width: 0;
+}
+
+.numBox > * {
+  width: 100%;
+  min-width: 0;
+}
+
+.numBox input {
+  flex: 1 1 auto;
+}
+
+.numBox input:focus {
+  text-align: left;
+}
+
+/* ---- 危险块（热床预涂胶 / 清理与卸载） ---- */
+
+.dangerBlock {
+  border-color: var(--warn-line);
+  background: var(--warn-surface);
+}
+
+.dangerTitle {
+  color: var(--warn-ink);
+  /* 标题前面的小三角与字对齐（`WarnIcon` 是 inline svg） */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 内嵌那段风险提示：底再压深一档 + 发丝内描边，与"这一块的说明"分开 */
+.dangerNote {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-xs, 6px);
+  background: var(--warn-surface);
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--warn-ink);
+  /* 背景与外面那层同色，靠描边分开；深色下也不至于糊成一片 */
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 22%);
+}
+
+.dangerNoteHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+/* ---- 中性小字提示（"不会读写你的 3MF"那一句） ---- */
+
+.noteHint {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---- 窄窗：两卡降成一列，行内控件也改上下排 ---- */
+
+@media (width <= 620px) {
+  .modeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .fieldRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .numBox {
+    width: 100%;
+  }
 }

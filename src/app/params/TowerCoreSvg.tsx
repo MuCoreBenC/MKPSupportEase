@@ -11,6 +11,7 @@
  */
 
 import { useMemo } from 'react'
+import { t } from '../../i18n'
 
 interface Pt {
   x: number
@@ -236,6 +237,12 @@ export interface TowerCoreProps {
   brimLoopCount: number
   /** 宿主给 svg 定尺寸用（module class 不能跨文件猜名字） */
   className?: string
+  /**
+   * 「塔」字相对塔身的字号比例（2026-10-21）。默认 0.34（参数页那一档）。
+   * 报告页的行内图很小（塔才 20px 上下），同一个比例字只有 7px、糊成一团 ——
+   * 那边**缩略图给大一点**，进放大层再回到 0.34（`CollisionMap` 按档位给）。
+   */
+  labelScale?: number
 }
 
 export default function TowerCoreSvg({
@@ -249,6 +256,7 @@ export default function TowerCoreSvg({
   vm,
   brimLoopCount,
   className,
+  labelScale = 0.34,
 }: TowerCoreProps) {
   const coreSize = 44
   const center = coreSize / 2
@@ -364,8 +372,33 @@ export default function TowerCoreSvg({
         <line x1={center} y1={0} x2={center} y2={coreSize} />
         <line x1={0} y1={center} x2={coreSize} y2={center} />
       </g>
-      <text x={center} y={center + 5} fontSize="15" fontWeight="bold" fill="#92400e" textAnchor="middle">
-        塔
+      {/* 塔身上的「塔」字 —— 2026-10-21 重做（作者：「这个字…… 有时候会对不齐，
+          有时候会出错，保留那个字，但是把效果做好」）：
+            · 位置：`textAnchor=middle` + `dominantBaseline=central`，按**字体度量**
+              居中；不再手工 `y + 5`（那个数只对某一款字体的 ascent 成立，换机器就偏）；
+            · 字体：点名中文字体，缺席时的 fallback 也还是常见中文字体，不会掉成
+              方框（"会出错"就是掉到了没有汉字字形的字体）；
+            · 清晰度：`geometricPrecision` 让字形按几何画，放大层里不吸附像素；
+            · 与四宫格线的关系：用塔身黄给字描一圈边（paintOrder=stroke），十字线
+              到字边就断开 —— 否则黑棕色的笔画和那两条线糊在一起，看着就是"没对齐"。 */}
+      <text
+        x={center}
+        y={center}
+        fontSize={coreSize * labelScale}
+        fontWeight="bold"
+        fill="#92400e"
+        stroke={coreFill}
+        strokeWidth={coreSize * labelScale * 0.15}
+        paintOrder="stroke"
+        textAnchor="middle"
+        dominantBaseline="central"
+        textRendering="geometricPrecision"
+        fontFamily={`"Microsoft YaHei", "PingFang SC", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif`}
+        pointerEvents="none"
+      >
+        {/* 塔身上的字（2026-10-26 进字典）：中文是「塔」，英文换成一个字宽相近的字母，
+            免得一串英文把 44×44 的塔身撑满 */}
+        {t('params.tower.coreLabel')}
       </text>
     </svg>
   )

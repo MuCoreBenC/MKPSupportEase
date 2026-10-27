@@ -79,6 +79,15 @@
   --w-shadow-float: 0 10px 40px rgb(15 23 42 / 18%);
   --w-backdrop: rgb(23 23 23 / 50%);
 
+  /**
+   * 「叠一层」的那档底色（悬停 / 分组条）。
+   *
+   * ★ 收成变量的理由与客户端 `--hover-1` 那条一样：浅色里"墨压一层"是成立的写法，
+   *   深色里**墨压墨等于没画** —— 控件底、悬停反馈会整片消失。写法只有一处，
+   *   深色那边也就不用逐处写覆盖。
+   */
+  --w-hover: rgb(16 24 32 / 5%);
+
   /* 文字四级 */
   --w-t1: #1c1c1c;
   --w-t2: #525252;
@@ -92,9 +101,28 @@
   --w-warn: #d97706;
   --w-danger: #dc2626;
 
-  /* diff 两侧 */
+  /*
+   * 绿 / 橙两族的**徽章三件**（字 / 底 / 边）。
+   *
+   * ★ 这三样原本硬编码在 `workbench.css` 的 `.wb-tag[data-state=…]` 里
+   * （`rgb(16 185 129 / 25%)` 那一组）—— 两套主题各写一遍的话，改一处必然漏另一处。
+   */
+  --w-ok-soft: rgb(16 185 129 / 10%);
+  --w-ok-line: rgb(16 185 129 / 25%);
+  --w-warn-soft: rgb(217 119 6 / 10%);
+  --w-warn-line: rgb(217 119 6 / 25%);
+
+  /* 实心红底（危险按钮 / 严重度徽章）与它的悬停 —— 与 `--w-danger`（字色）分开：
+     白字压在"字的红"上不够，压在"底的红"上才够 */
+  --w-danger-fill: #dc2626;
+  --w-danger-fill-hover: #b91c1c;
+
+  /* diff 两侧：底 + 字（字色是"绿/红/橙"这三档在正文里的那一支） */
   --w-diff-add: rgb(16 185 129 / 12%);
   --w-diff-del: rgb(220 38 38 / 10%);
+  --w-diff-add-ink: #1a7f43;
+  --w-diff-del-ink: #b4402f;
+  --w-diff-mod-ink: #b06a00;
 
   /* 来源三档：灰 = 出厂，紫 = 机型，蓝 = 版本。
      与 domain::Origin 的三个变体一一对应，多一档少一档都说明哪边漂了 */
@@ -109,4 +137,76 @@
   --w-src-version-line: rgb(37 99 235 / 25%);
 
   --w-mono: ui-monospace, sfmono-regular, 'SF Mono', menlo, consolas, monospace;
+}
+
+/* ============ 深色（2026-10-16「工作台也做深色」） ============ */
+
+/*
+ * 判据是 **`<html data-theme>`**（写它的是 `src/workbench/theme.ts` 的 `initTheme`，
+ * 真源是 AppState 的 theme 格 + 系统深浅）—— 与客户端同一条规则、同一个属性。
+ *
+ * 取值口径照客户端 `src/styles/tokens.css` 的 `[data-theme='dark']`（同一个产品群，
+ * 重新调一套只会让两扇窗像两个软件）：
+ *   · 面族**中性灰**、三档拉开（底 #1c1c1c → 卡 #232323 → 内层 / 浮层 #303030）；
+ *   · 线是**白发丝**（9% / 18%）—— 深色里墨压墨等于没画；
+ *   · 字**不纯白**（#d6d8db 起）—— 纯白在深底上对比过高、看着晃眼；
+ *   · 蓝**提亮一档**（#3b82f6 → #4b8ef7，与客户端轴标那支蓝同源）；
+ *   · 绿 / 橙 / 红**各提亮一档**（深底上不提亮就发闷）。
+ *
+ * ★ 这是一套**独立取值**，不是把浅色反过来。加新的颜色 token 时**两套都要给**。
+ */
+[data-theme='dark'] [data-wb] {
+  /* 表面四层 */
+  --w-page: #1c1c1c;
+  --w-card: #232323;
+  --w-card-inner: #303030;
+  --w-input: #303030;
+
+  --w-line: rgb(255 255 255 / 9%);
+  --w-line-strong: rgb(255 255 255 / 18%);
+  --w-shadow-float: 0 10px 40px rgb(0 0 0 / 45%);
+  --w-backdrop: rgb(0 0 0 / 52%);
+
+  /* 叠一层：浅色是墨压一层，深色反过来是白提一层 */
+  --w-hover: rgb(255 255 255 / 6%);
+
+  /* 文字四级 */
+  --w-t1: #d6d8db;
+  --w-t2: #b4b8bf;
+  --w-t3: #8f949b;
+  --w-t-off: #6f7378;
+
+  /* 语义色 */
+  --w-primary: #4b8ef7;
+  --w-primary-soft: rgb(75 142 247 / 18%);
+  --w-ok: #2f9e5b;
+  --w-warn: #d9942b;
+  --w-danger: #e2685e;
+
+  --w-ok-soft: rgb(47 158 91 / 16%);
+  --w-ok-line: rgb(47 158 91 / 30%);
+  --w-warn-soft: rgb(217 148 43 / 16%);
+  --w-warn-line: rgb(217 148 43 / 32%);
+
+  /* 实心红底：深色里往下压一档（不压的话白字在上面读不清），
+     悬停反过来**提亮**一档 —— 深底上"更深"就等于按灭了 */
+  --w-danger-fill: #a8382f;
+  --w-danger-fill-hover: #c25148;
+
+  --w-diff-add: rgb(47 158 91 / 18%);
+  --w-diff-del: rgb(226 104 94 / 16%);
+  --w-diff-add-ink: #6cc48c;
+  --w-diff-del-ink: #e08b83;
+  --w-diff-mod-ink: #d9942b;
+
+  /* 来源三档：同族各提亮一档，深底上才分得开 */
+  --w-src-factory-t: #a8aeb5;
+  --w-src-factory-bg: rgb(168 174 181 / 16%);
+  --w-src-factory-line: rgb(168 174 181 / 28%);
+  --w-src-machine-t: #a78bfa;
+  --w-src-machine-bg: rgb(167 139 250 / 16%);
+  --w-src-machine-line: rgb(167 139 250 / 30%);
+  --w-src-version-t: #4b8ef7;
+  --w-src-version-bg: rgb(75 142 247 / 16%);
+  --w-src-version-line: rgb(75 142 247 / 30%);
 }

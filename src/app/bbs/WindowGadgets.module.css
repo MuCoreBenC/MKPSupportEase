@@ -1,0 +1,87 @@
+/*
+ * 工艺页工具条右端的两枚开关胶囊（2026-10-17）。
+ *
+ * 语言照 `.iconBtn`（PageBbs.module.css）：**平时几乎看不见**，悬停才承认自己在。
+ * 差别只在形状 —— 这两件事（置顶 / 窄窗）用图标读不出来，作者要"带文字的胶囊"。
+ *
+ * 颜色全部走 BBS 那一套 `--bbs-*`（两套主题各一份，定义在 PageBbs.module.css 的 .page
+ * 上，这一块是它的后代，变量自然继承）+ 全站的 `--accent` / `--accent-soft`。
+ * 不写死任何色值 ⇒ 深色模式跟着翻，不用在这里再写一份。
+ *
+ * ★ 尺寸是"状态无关"的：**不写 `min-width`** —— 按钮里把每一档文字各渲染一份
+ *   叠进同一个 grid 格（见 `.pill > span`），可见的只有当前档，其余 `visibility:hidden`
+ *   只负责占宽 ⇒ 盒子宽度 = **当前语言里最长的那一档**。
+ *   切档一个像素不动；哪天接 i18n（英/日长度与中文不同）也不用再改宽度。
+ *
+ * ★ 2026-10-25 作者五轮收窄的落点：内衬 10 → 8 → 6px、
+ *   文案「仅本页置顶」(5) → 「本页置顶」(4) → 关闭 / 本页 / 始终（各 2 字）。
+ *   内衬 6px 已是中文 12px 的可读下限，再窄只剩降字号。
+ */
+
+.gadgets {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.pill {
+  /* inline-grid 而不是 inline-flex：所有档文案共用 1/1 那一格，宽的自然撑开盒子 */
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  height: 24px;
+  /* 与报告页那三颗同一组数（2026-10-27：左右内衬 6 → 8，字看着不贴边） */
+  padding: 0 8px;
+  border: 1px solid var(--bbs-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bbs-label);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 每一档都落在同一格：可见的那份与隐形的副本完全重叠 */
+.pill > span {
+  grid-area: 1 / 1;
+}
+
+/* 隐形副本：只撑宽，不显示、也不进读屏（`aria-hidden` 由组件给） */
+.pill > span[aria-hidden='true'] {
+  visibility: hidden;
+}
+
+/* 悬停：底色淡入（描边不动 —— 动描边会让它看起来在"跳"）
+   ★ 不写 CSS transition：WKWebView 上不播（全站动效一律 WAAPI，这里干脆不做过渡） */
+.pill:hover:not(:disabled) {
+  background: var(--bbs-btn-hover);
+  color: var(--bbs-text);
+}
+
+/*
+ * 按下：**什么都不动**（2026-10-17 作者：「点击的时候好像有像素位移」）。
+ *
+ * 上一版给了 `translateY(1px)` 的"下沉手感"—— 在标题栏这一排里，它读起来不是
+ * "按下去"而是"这颗按钮在抖"。状态反馈由颜色与文字承担就够了。
+ */
+
+/* 开启态：与 `.iconBtn[data-on]` 同一套语言（accent 字 + accent 淡染底）。
+   ★ 字色用 `--accent` 而不是 `--accent-deep`：深色主题下 deep 那一档偏暗，
+     压在深底上读不清（`.iconBtn` 选的是同一个理由） */
+.pill[data-on='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 焦点只加深描边、不发光，也不改变尺寸 */
+.pill:focus-visible {
+  border-color: var(--bbs-focus);
+  outline: 2px solid var(--bbs-focus);
+  outline-offset: 2px;
+}

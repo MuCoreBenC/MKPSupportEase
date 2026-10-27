@@ -1,3 +1,25 @@
+/*
+ * ★★ **全站层表（唯一一份，2026-10-14 作者定）** —— 改层级前先读这里，别各改各的。
+ *
+ * ```text
+ *   95  后处理那一屏「跑着」的拖窗带（整条标题栏归它，窗控键都点不着）
+ *   94  标题栏右侧的窗控键那组（`.controls`）
+ *   93  窗口内侧那圈 resize 命中条 ／ **标题栏本身**（`TopTabs` 的 `.bar`，它是窗口把手）
+ *   92  后处理那一屏的层（整扇窗都归它 —— **所以标题栏必须抬到 93**，否则拖不动）
+ *   91  标题栏上的浮层（软件更新详情面板）—— ★ 压过内容区一切模态框
+ *   90  通用浮层层 FieldLayer（右键菜单 / 下拉）
+ *   60  外壳内阴影 `.shell::after`（顶部 1px 高光 + 四周内影）
+ *   40  通用模态框遮罩 `.scrim`（**只盖内容区**，不盖标题栏）
+ *   0   内容流（含提示条 NoteBar —— 它在文档流里，不用抬）
+ * ```
+ *
+ * 三条口径：
+ *  1. **后处理那一屏最高**（跑着时整扇窗归它）—— 它是"这一趟正在跑"的唯一焦点。
+ *  2. **标题栏上的东西压过模态框**（91 > 40）：更新指示器挂在标题栏，理应在最上。
+ *  3. **模态框不盖标题栏**（它 portal 到 `pageEl`，遮罩只铺内容区）—— 于是"标题栏 >
+ *     模态框"这条**天然成立**，不靠 z-index 硬拼。
+ */
+
 .shell {
   position: relative;
   height: 100%;
@@ -29,6 +51,36 @@
     inset 0 0 24px rgb(20 32 45 / 2%);
 }
 
+/*
+ * 深色（2026-10-12）：**窗底那三层渐变**是写死的（产品里只有这一处画窗底，
+ * Tauri 侧 `transparent: true`、没有 backgroundColor），所以深色也在这儿给一套 ——
+ * 三档中性灰：左上一点点提亮当"光"、右下压深、底线性收住。
+ * 上沿那道白高光（::after 的第一条）在深色里从 90% 降到 6%：深底上它只是一道发丝，
+ * 给 90% 会变成一条刺眼的白线。
+ *
+ * ★ 2026-10-13 晚：跟着 tokens 面族**一起去蓝**（`#232327→#232323`、`#1c1c1e→#1c1c1c`、
+ *   `#151517→#151515`）——窗底和页面是相邻的画布，一个中性、一个带蓝偏，摆在一起就又
+ *   成了"差几阶又差色相"。理由都记在 tokens.css 那条"面族去蓝"里。
+ */
+[data-theme='dark'] .shell {
+  background:
+    radial-gradient(120% 90% at 18% 0%, #232323 0%, transparent 55%),
+    radial-gradient(90% 80% at 92% 100%, #191919 0%, transparent 60%),
+    linear-gradient(135deg, #1c1c1c 0%, #151515 100%);
+}
+
+[data-theme='dark'] .shell::after {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    inset 0 0 60px rgb(0 0 0 / 26%);
+}
+
+[data-theme='dark'] .shell[data-density='mini']::after {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 6%),
+    inset 0 0 24px rgb(0 0 0 / 16%);
+}
+
 .body {
   position: relative;
   flex: 1;
@@ -54,9 +106,37 @@
   flex-direction: column;
 }
 
+/*
+ * 隐藏的槽留在流里（见下面 `[data-hidden]` 那段），所以**当前那一页必须是唯一
+ * 拿到「剩余高度」的那个** —— 否则隐藏槽也 `flex: 1`，六个槽平分高度，
+ * 页面会被压成一摞。用 `:not([data-hidden])` 把"谁是当前页"说清楚。
+ */
+.pageSlot:not([data-hidden]) {
+  flex: 1 1 auto;
+  /* 入场动画：data-hidden 撤掉那一刻选择器开始命中、动画起播（每次切页重放） */
+  animation: page-in 130ms ease-out;
+}
+
 .pageSlot[data-hidden] {
-  position: absolute;
-  inset: 0;
+  /*
+   * ★★ 切走的页**不脱离文档流**（2026-08-11 报告页「假交互」的根因，第二次修）：
+   *
+   * 早先这里写的是 `position: absolute; inset: 0` —— 那会让隐藏槽按内容撑开，
+   * 而且**同一个槽在隐藏/显示两种状态下的几何不是一套**（实测报告页：槽 600 宽，
+   * 它里面的左栏却按"自己也在流里"算到 300，等于两份布局同时活着）。
+   * 后果就是页内 `container-type` 量到假宽度、`@container` 档位永远不切换，
+   * 脚本与 CSS 各说一套 —— 用户看到的就是「浮层盖着、点了不切换」。
+   *
+   * 现在改成**留在流里、尺寸照旧**：宽度由 `.body` 的 flex 给（`min-width: 0`），
+   * 高度吃零、`overflow: hidden` 裁掉内容。布局只有一套，页内任何容器查询、
+   * 任何 `100%`/`1fr` 都量到与显示时同一个数 —— 切走再切回不会重算、不抖动。
+   *
+   * `.body` 是 `flex-direction: column`：高度吃零是给**当前那一页**腾出唯一一份
+   * 可用高度（`flex: 1`），不是靠脱离流来实现的。
+   */
+  flex: 0 0 0;
+  min-width: 0;
+  overflow: hidden;
   visibility: hidden;
   pointer-events: none;
 }
@@ -72,8 +152,113 @@
   visibility: hidden !important;
 }
 
-.pageSlot:not([data-hidden]) {
-  animation: page-in 130ms ease-out;
+/*
+ * 懒加载页第一帧的占位（见 `App.tsx` 的 `PageLoading`）。
+ *
+ * 条子自己会呼吸（`home/Skeleton`），这里只管把它们排成"一页"的样子：
+ * 列表页给工具条 + 表头 + 三行，向导页给步骤条 + 图 + 侧栏，分栏页给左列表 + 右详情，
+ * 设置页给三组卡片。别加背景 —— 底下就是窗底，多一层色会与真页面跳色。
+ */
+.pageLoading {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 22px 26px 26px;
+  overflow: hidden;
+}
+
+.skRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: none;
+}
+
+.skGrow {
+  flex: 1;
+  min-width: 0;
+}
+
+.skTable {
+  display: flex;
+  flex-direction: column;
+  margin-top: 8px;
+}
+
+/* 表格行：列宽固定成同一套网格，表头与三行才对得齐（散条子不像一张表） */
+.skTableRow {
+  display: grid;
+  grid-template-columns: 1.9fr 0.7fr 1fr 0.7fr 0.8fr;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.skTableRow > :last-child {
+  justify-self: end;
+}
+
+.skFoot {
+  margin-top: auto;
+}
+
+.skWizard {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 24px;
+}
+
+.skWizardSide {
+  width: 30%;
+  min-width: 160px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+}
+
+.skFigure {
+  flex: 1;
+  min-height: 120px;
+  border-radius: 12px;
+  background: var(--hover-1);
+  opacity: 0.55;
+}
+
+.skSplit {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 26px;
+}
+
+.skList {
+  width: 38%;
+  min-width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.skDetail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.skGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
 }
 
 @keyframes page-in {

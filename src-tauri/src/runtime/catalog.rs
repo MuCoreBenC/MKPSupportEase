@@ -39,6 +39,8 @@
 //! - **不进 revision 输入**：同内容重发指纹不变，检查更新不该被一次重发惊动；
 //!   `#[serde(default)]` 也进不了结构签名（探针判的就是"删了还能不能解析"）。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -73,6 +75,11 @@ pub struct Catalog {
     /// `files[]` —— 那是 `dest_of_asset` 按交付档位拦的，不按类型拦。
     #[serde(default)]
     pub assets: Vec<Asset>,
+    /// **分组登记**（2026-10-16）：哪几张图共用同一份标注源稿 —— 组名 / 成员 / 每个成员的角色。
+    /// 客户端按它挑图（作者：「客户端也不该写死 id」），工作台按它摆"套装"。
+    /// 与 `assets` 同一类东西：进 catalog = 云端可消费 ⇒ 改组不用重编客户端。
+    #[serde(default)]
+    pub groups: Vec<crate::presetdata::Group>,
     /// 套餐定义（一版一套：MKP 与配套 BBS 的成套配发关系）
     #[serde(default)]
     pub bundles: Vec<Bundle>,
@@ -206,10 +213,13 @@ pub mod kind {
 
 /// 资产台账里的类型 → 目录里的 kind。
 ///
-/// **返回 `None` 就是不登记**。今天两种：
+/// **返回 `None` 就是不登记**。今天三种：
 ///
 /// - `Image`：图片**不进下载面**（整机图 / 品牌图都走 `bundled` 档随包，
 ///   客户端靠构建期装配拿它们，不按 URL 取）；
+/// - `Guide`（2026-10-16）：引导图同上 —— 今天 `bundled` 随包、走
+///   `/assets/<path>` 取；**将来要按需下载时，这一行才给目录**
+///   （见 `presetdata::AssetKind::Guide` 那段）；
 /// - `MkPreset`：MKP 预设的产物文件**已经**作为 `files` 条目进来了（B 类，
 ///   生成侧算的，落点 `delivery/mkp/presets/…`）—— 台账这一条只登记「哪一版叫什么、归谁」，
 ///   再登记一份文件条目就是同一个文件两条真相（作者 2026-10-03）。
@@ -222,6 +232,7 @@ fn kind_of_asset(asset_kind: crate::presetdata::AssetKind) -> Option<&'static st
         crate::presetdata::AssetKind::Model => Some(kind::MODEL),
         crate::presetdata::AssetKind::Icon => Some(kind::ICON),
         crate::presetdata::AssetKind::Image => None,
+        crate::presetdata::AssetKind::Guide => None,
         crate::presetdata::AssetKind::MkPreset => None,
     }
 }
@@ -310,12 +321,17 @@ impl CatalogFile {
 
 impl Catalog {
     pub fn parse(bytes: &[u8]) -> Result<Catalog, AppError> {
-        let catalog: Catalog = serde_json::from_slice(bytes)
-            .map_err(|e| AppError::corrupted("catalog 读不出来").with_detail(e.to_string()))?;
+        let catalog: Catalog = serde_json::from_slice(bytes).map_err(|e| {
+            AppError::corrupted(messages::text("ui.runtime.catalog.377", &[]))
+                .with_detail(e.to_string())
+        })?;
         if catalog.catalog_schema != CATALOG_SCHEMA {
-            return Err(AppError::corrupted(format!(
-                "catalog 格式代次认不了：文件是 {}，程序认 {}",
-                catalog.catalog_schema, CATALOG_SCHEMA
+            return Err(AppError::corrupted(messages::text(
+                "ui.runtime.catalog.378",
+                &[
+                    ("v1", &catalog.catalog_schema.to_string()),
+                    ("v2", &CATALOG_SCHEMA.to_string()),
+                ],
             )));
         }
         Ok(catalog)
@@ -323,10 +339,67 @@ impl Catalog {
 
     /// 产物形态：pretty JSON + 结尾换行（进仓库当判据资产，diff 要能看）
     pub fn to_pretty_json(&self) -> Result<String, AppError> {
-        let mut s = serde_json::to_string_pretty(self)
-            .map_err(|e| AppError::internal("catalog 序列化失败").with_detail(e.to_string()))?;
+        let mut s = serde_json::to_string_pretty(self).map_err(|e| {
+            AppError::internal(messages::text("ui.runtime.catalog.379", &[]))
+                .with_detail(e.to_string())
+        })?;
         s.push('\n');
         Ok(s)
+    }
+
+    /// **② 里没有、而随包那份有的「随包」资产**，从随包那份补进这份的副本 ——
+    /// 「随包那份只兜底」（作者 2026-10-16 定的口径）。
+    ///
+    /// # 为什么要有这么一步
+    ///
+    /// 随包资产（`delivery = bundled`：机型整机图、品牌图、引导图…）的**字节随程序本体走**
+    /// —— 构建期复制进 `/assets/`，客户端**不下载、不更新**它（见 [`dest_of_asset`]）。
+    /// 那么"它叫什么、在哪"这件事，**程序自己带着的那份目录就足以作答**；
+    /// ②（从云端来的那份）只是"恰好也登记着它"。
+    ///
+    /// 而 ② 是 OTA 来的、可能**比程序旧**（`ensure_released` 只在缺文件时铺底；
+    /// 进预设页那次后台对齐又是"指纹不一样就采用远端"，**没有先后概念**）。
+    /// 于是会出现：程序里明明带着两张引导图，② 却是加它们之前的那一版 ⇒ 界面上
+    /// 找 id 找不到、图凭空消失（2026-10-16 实测，作者：「诶图片不见了」）。
+    /// 补上这一条之后，**随包的东西不再依赖任何一份云端文件**。
+    ///
+    /// # 只补 bundled，且**② 里有的绝不动**
+    ///
+    /// - 缺的是 `bundled` ⇒ 补（它的字节就在程序里，补了立刻能显示）；
+    /// - 缺的是别的（进交付集合、要按需下载的那些）⇒ **不补** —— 那些要配云端字节
+    ///   与 `files[]` 才成立，凭空补一条只会给出一个下不到的条目（"不下载不使用"）；
+    /// - ② 里**已经有**同 id 的 ⇒ 一个字不动（② 是运行时的真值，铁律 4）。
+    pub fn with_missing_bundled_from(&self, embedded: &Catalog) -> Catalog {
+        let mut out = self.clone();
+        for asset in &embedded.assets {
+            if asset.delivery != crate::presetdata::assets::Delivery::Bundled {
+                continue;
+            }
+            if out.assets.iter().any(|a| a.id == asset.id) {
+                continue;
+            }
+            out.assets.push(asset.clone());
+        }
+        /*
+         * **分组也要兜底**（2026-10-16）：客户端靠 `catalog.groups` 挑图（不认文件名），
+         * ② 若比程序旧（还没有这一组），那套引导图就会"两张图都在、却不知道哪张是浅色"
+         * —— 与资产那条同一个病。补法同样保守：**id 不在 out 里**、且**成员在补完后的
+         * `assets` 里都找得到**的组才补（否则凭空造出一条指着不存在资产的登记）。
+         */
+        for g in &embedded.groups {
+            if out.groups.iter().any(|x| x.id == g.id) {
+                continue;
+            }
+            let all_present = g.members.iter().all(|m| {
+                out.assets
+                    .iter()
+                    .any(|a| a.id.eq_ignore_ascii_case(m.asset.trim()))
+            });
+            if all_present {
+                out.groups.push(g.clone());
+            }
+        }
+        out
     }
 }
 
@@ -361,8 +434,9 @@ impl Catalog {
          */
         let (catalog, missing) = Self::collect(&presets, &assets, FileHashes::None);
         if let Some(first) = missing.first() {
-            return Err(AppError::not_found(format!(
-                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            return Err(AppError::not_found(messages::text(
+                "ui.runtime.catalog.380",
+                &[("first", &first.to_string())],
             )));
         }
         // 随包那份也要带「最低正式客户端版本」—— 客户端首启释放的就是它。
@@ -386,8 +460,9 @@ impl Catalog {
     ) -> Result<Catalog, AppError> {
         let (catalog, missing) = Self::collect(presets, artifacts_dir, FileHashes::FromArtifacts);
         if let Some(first) = missing.first() {
-            return Err(AppError::not_found(format!(
-                "{first} —— 入库产物目录里没有这一份，先补齐再构建目录"
+            return Err(AppError::not_found(messages::text(
+                "ui.runtime.catalog.381",
+                &[("first", &first.to_string())],
             )));
         }
         Ok(catalog.finalize())
@@ -508,7 +583,10 @@ impl Catalog {
                 FileHashes::FromArtifacts => match std::fs::read(&full) {
                     Ok(bytes) => (Some(hex(&Sha256::digest(&bytes))), Some(bytes.len() as u64)),
                     Err(_) => {
-                        missing.push(format!("资产 {}（{}）：载荷文件不在", asset.id, asset.path));
+                        missing.push(::postprocess::diag::messages::text(
+                            "ui.runtime.catalog.asset_payload_missing",
+                            &[("id", &asset.id), ("path", &asset.path)],
+                        ));
                         continue;
                     }
                 },
@@ -535,6 +613,7 @@ impl Catalog {
                 brands: presets.catalog.brands().to_vec(),
                 machines,
                 assets: presets.assets.items().to_vec(),
+                groups: presets.assets.groups().to_vec(),
                 bundles: presets.bundles.items().to_vec(),
                 registry: CatalogRegistry {
                     params: presets.registry.params().to_vec(),
@@ -655,6 +734,9 @@ fn revision_of(catalog: &Catalog) -> String {
         brands: &'a [crate::presetdata::Brand],
         machines: &'a [CatalogMachine],
         assets: &'a [Asset],
+        /// ★ 分组也在指纹里：改组（换成员）必须是"检查更新看得见"的一次变化 ——
+        /// 不然云端换了组，客户端比 `revision` 说"已是最新"，那套图就一直是旧的
+        groups: &'a [crate::presetdata::Group],
         bundles: &'a [Bundle],
         registry: &'a CatalogRegistry,
         plates: &'a [crate::presetdata::Plate],
@@ -664,6 +746,7 @@ fn revision_of(catalog: &Catalog) -> String {
         brands: &catalog.brands,
         machines: &catalog.machines,
         assets: &catalog.assets,
+        groups: &catalog.groups,
         bundles: &catalog.bundles,
         registry: &catalog.registry,
         plates: &catalog.plates,
@@ -786,7 +869,7 @@ mod tests {
         // 2026-10-01 第三刀的剥离）。这条判据守的就是那条边界：
         //   - 台账里**要**有它（工作台要看得见、选得着 —— 硬编码进客户端源码是错的，
         //     不会编程的用户改不了图）；
-        //   - catalog 的 `files[]` 里**要没有**它（不进云端交付，客户端不下载）。
+        //   - catalog 的 `files[]` 里**要没有**它（不进交付预设那一档，客户端不下载）。
         // 拦的地方是 `dest_of_asset`（**按交付档位拦**，不是按类型拦）。
         let images = source
             .assets
@@ -802,7 +885,7 @@ mod tests {
             images
                 .iter()
                 .all(|a| a.delivery == crate::presetdata::assets::Delivery::Bundled),
-            "整机图一律 bundled 档：台账登记、工作台可管，但不进云端交付"
+            "整机图一律 bundled 档：台账登记、工作台可管，但不进交付预设那一档"
         );
         assert!(
             !catalog
@@ -819,7 +902,8 @@ mod tests {
             "下载区没有 images 这一类：整机图不进 Delivery"
         );
         // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
-        // 今天 28 条 = 9 MKP 预设 + 4 整机图（bundled）+ 9 BBS + 3 图标 + 3 模型
+        // 今天 33 条 = 9 MKP 预设 + 4 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
+        //              + 5 模型（Z / XY 各多一版「加长版」）+ 2 引导图（bundled，2026-10-16）
         assert_eq!(
             catalog.assets.len(),
             source.assets.items().len(),
@@ -827,10 +911,12 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            29,
-            "实测 29 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
-             2026-10-03 三类进台账（mkPreset / bundled image / 品牌图），条数变了要核对台账
-             再改这里的期望"
+            33,
+            "实测 33 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型 + 2 引导图）——
+             2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
+             （`type = 'guide'`，bundled）、2026-10-18 加了 Z 校准加长版
+             （`zoffset-calibration-ext`）、2026-10-19 加了 XY 校准加长版
+             （`precise-calibration-ext`）——条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -1074,17 +1160,19 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            29,
-            "实测 29 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 3 模型）——
+            33,
+            "实测 33 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型
+             + 2 引导图）——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
-             登记归属不登记路径；两者都不进 files[]）"
+             登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）；
+             2026-10-18：Z 校准加长版进台账（model 类）；2026-10-19：XY 校准加长版进台账（model 类）"
         );
         assert_eq!(
             catalog.bundles.len(),
             9,
             "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一（照 C15 模型重排）"
         );
-        assert_eq!(catalog.registry.params.len(), 74, "实测 74 条字段定义");
+        assert_eq!(catalog.registry.params.len(), 75, "实测 75 条字段定义");
         assert!(
             !catalog.registry.tabs.is_empty() && !catalog.registry.layout.is_empty(),
             "页签元数据与参数摆放都该在"
@@ -1158,5 +1246,88 @@ mod tests {
         let json = r#"{ "catalogSchema": 99, "revision": "x", "machines": [], "files": [] }"#;
         let e = Catalog::parse(json.as_bytes()).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
+    }
+
+    /// **随包那份只兜底**（2026-10-16，作者「编译进去的，就只当兜底」）——
+    /// 三条一起咬：② 里没有的 bundled 补上、② 里已有的**绝不动**、下载面**不许补**。
+    ///
+    /// 反面就是那次事故：程序里带着两张引导图，② 是加它们之前的那一版
+    /// ⇒ 界面按 id 找不着、图凭空消失（作者：「诶图片不见了」）。
+    #[test]
+    fn bundled_assets_fall_back_to_the_embedded_catalog_only_when_missing() {
+        use crate::presetdata::assets::Delivery;
+        use crate::presetdata::AssetKind;
+
+        fn asset(id: &str, kind: AssetKind, path: &str, delivery: Delivery) -> Asset {
+            Asset {
+                id: id.to_owned(),
+                kind,
+                machine_id: None,
+                name: id.to_owned(),
+                path: path.to_owned(),
+                version_id: None,
+                slicer: None,
+                profile: None,
+                delivery,
+                calibration: String::new(),
+            }
+        }
+
+        let released = Catalog {
+            assets: vec![asset(
+                "a1-image",
+                AssetKind::Image,
+                "printers/a1.webp",
+                Delivery::Bundled,
+            )],
+            ..Catalog::default()
+        };
+        let embedded = Catalog {
+            assets: vec![
+                /* ② 里也有这条（随包那份里路径不同）—— 以 ② 为准 */
+                asset(
+                    "a1-image",
+                    AssetKind::Image,
+                    "printers/换过的路径.webp",
+                    Delivery::Bundled,
+                ),
+                /* ② 里没有 —— 该补（引导图就是这么丢的） */
+                asset(
+                    "guide-open-with-light",
+                    AssetKind::Guide,
+                    "guides/open-with-light.png",
+                    Delivery::Bundled,
+                ),
+                /* 要按需下载的，② 里没有 —— 不许补（补了就是个下不到的条目） */
+                asset(
+                    "mkp-support-models",
+                    AssetKind::Model,
+                    "models/support-test.3mf",
+                    Delivery::Download,
+                ),
+            ],
+            ..Catalog::default()
+        };
+
+        let merged = released.with_missing_bundled_from(&embedded);
+
+        assert_eq!(merged.assets.len(), 2, "只补进来一条");
+        assert_eq!(
+            merged.asset("a1-image").map(|a| a.path.as_str()),
+            Some("printers/a1.webp"),
+            "② 里已有的那条一个字都不许动"
+        );
+        assert_eq!(
+            merged
+                .asset("guide-open-with-light")
+                .map(|a| a.path.as_str()),
+            Some("guides/open-with-light.png"),
+            "② 里没有的随包条目，从随包那份补上"
+        );
+        assert!(
+            merged.asset("mkp-support-models").is_none(),
+            "下载面的条目不许凭空补"
+        );
+        assert_eq!(released.assets.len(), 1, "原那份不动（补的是一份副本）");
     }
 }

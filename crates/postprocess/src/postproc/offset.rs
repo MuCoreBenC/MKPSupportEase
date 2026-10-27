@@ -4,6 +4,7 @@
 //! format_float）；本函数承载依赖 ir 的领域语义：挤出比例、边界与涂胶范围校验。
 
 use crate::diag::PostprocError;
+use crate::diag::messages;
 use crate::gcode::{
     OffsetMode, XyzeValues, format_float, format_xyze_string, parse_xyze, replace_axis_value,
 };
@@ -18,9 +19,15 @@ use crate::postproc::geom::{MoveDirection, ceil_to_01};
 /// 路径在每个发射点显式引用本常量，不做静默数字。
 pub(crate) const MM_PER_MINUTE: f64 = 60.0;
 
-/// 边界错误的用户可见消息（对照 calibrationfmt.FormatUserMessage 可见部分）。
+/// 一条越界（对照 calibrationfmt.FormatUserMessage 可见部分）。
+///
+/// ★ `code` 而不是 `title`（2026-10-11 改）：以前这里存的是中文标题
+/// （"模型超出打印边界"），出码的时候**拿标题字符串去比** ——
+/// `if be.title == "模型超出打印边界" { "E_…_001" } else { "E_…_002" }`。
+/// 那就是"文案即逻辑"：改一个字，错误码就换了一条。现在码是本字段，句子在 `messages.toml`。
 struct BoundaryError {
-    title: &'static str,
+    /// 两个边界码之一：`E_GCODE_BOUNDARY_001`（打印边界）/ `_002`（涂胶范围）。
+    code: &'static str,
     axis_x: bool,
     current_x: f64,
     limit_x_min: f64,
@@ -53,31 +60,45 @@ impl BoundaryError {
         MoveDirection::from_delta(dx, dy)
     }
 
-    fn user_message(&self) -> String {
-        let mut parts: Vec<String> = vec![self.title.to_string()];
-        if self.axis_x {
-            parts.push(format!("当前X：{:.1}mm", self.current_x));
-            let range_str = if self.current_x < self.limit_x_min {
-                format!("≥{:.1}mm", self.limit_x_min)
-            } else if self.current_x > self.limit_x_max {
-                format!("≤{:.1}mm", self.limit_x_max)
+    /// 越界那句的**从句串**（形如 `当前X：185.9mm，允许范围：≤180.0mm`）。
+    ///
+    /// 一个字都不写死：从句模板、上下限的说法（`≥` / `≤`）、连两段之间的分隔符，
+    /// 全在 `messages.toml` 那几条 `boundary.*` 里。本函数只做表做不了的那件事 ——
+    /// X 与 Y **同时**越界时要拼两段（模板语言里没有循环）。
+    fn sides(&self) -> String {
+        let clause = |axis: char, current: f64, lo: f64, hi: f64| {
+            // 只剩一种可能：出到界外了（调用点只在越界时才建这条），所以不是下界就是上界
+            let (key, bound) = if current < lo {
+                ("boundary.limit.min", lo)
             } else {
-                String::new()
+                ("boundary.limit.max", hi)
             };
-            parts.push(format!("允许范围：{range_str}"));
+            let limit = messages::text(key, &[("value", &format!("{bound:.1}"))]);
+            let current = format!("{current:.1}");
+            let axis = axis.to_string();
+            messages::text(
+                "boundary.clause",
+                &[("axis", &axis), ("current", &current), ("limit", &limit)],
+            )
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if self.axis_x {
+            parts.push(clause(
+                'X',
+                self.current_x,
+                self.limit_x_min,
+                self.limit_x_max,
+            ));
         }
         if self.axis_y {
-            parts.push(format!("当前Y：{:.1}mm", self.current_y));
-            let range_str = if self.current_y < self.limit_y_min {
-                format!("≥{:.1}mm", self.limit_y_min)
-            } else if self.current_y > self.limit_y_max {
-                format!("≤{:.1}mm", self.limit_y_max)
-            } else {
-                String::new()
-            };
-            parts.push(format!("允许范围：{range_str}"));
+            parts.push(clause(
+                'Y',
+                self.current_y,
+                self.limit_y_min,
+                self.limit_y_max,
+            ));
         }
-        parts.join("，")
+        parts.join(&messages::text("boundary.separator", &[]))
     }
 }
 
@@ -144,7 +165,7 @@ pub fn process_gcode_offset(
                     ceil_to_01(x_after - ir_data.machine.max_x)
                 };
                 boundary_err = Some(BoundaryError {
-                    title: "模型超出打印边界",
+                    code: "E_GCODE_BOUNDARY_001",
                     axis_x: true,
                     current_x: x_after,
                     limit_x_min: ir_data.machine.min_x,
@@ -161,7 +182,7 @@ pub fn process_gcode_offset(
                     && x_after < ir_data.machine.glue_min_x
                 {
                     boundary_err = Some(BoundaryError {
-                        title: "模型超出涂胶范围",
+                        code: "E_GCODE_BOUNDARY_002",
                         axis_x: true,
                         current_x: x_after,
                         limit_x_min: ir_data.machine.glue_min_x,
@@ -177,7 +198,7 @@ pub fn process_gcode_offset(
                     && x_after > ir_data.machine.glue_max_x
                 {
                     boundary_err = Some(BoundaryError {
-                        title: "模型超出涂胶范围",
+                        code: "E_GCODE_BOUNDARY_002",
                         axis_x: true,
                         current_x: x_after,
                         limit_x_min: ir_data.machine.glue_min_x,
@@ -202,7 +223,7 @@ pub fn process_gcode_offset(
                 };
                 boundary_err = match boundary_err {
                     None => Some(BoundaryError {
-                        title: "模型超出打印边界",
+                        code: "E_GCODE_BOUNDARY_001",
                         axis_x: false,
                         current_x: 0.0,
                         limit_x_min: 0.0,
@@ -228,7 +249,7 @@ pub fn process_gcode_offset(
                     && y_after < ir_data.machine.glue_min_y
                 {
                     boundary_err = Some(BoundaryError {
-                        title: "模型超出涂胶范围",
+                        code: "E_GCODE_BOUNDARY_002",
                         axis_x: false,
                         current_x: 0.0,
                         limit_x_min: 0.0,
@@ -245,7 +266,7 @@ pub fn process_gcode_offset(
                     && y_after > ir_data.machine.glue_max_y
                 {
                     boundary_err = Some(BoundaryError {
-                        title: "模型超出涂胶范围",
+                        code: "E_GCODE_BOUNDARY_002",
                         axis_x: false,
                         current_x: 0.0,
                         limit_x_min: 0.0,
@@ -263,13 +284,12 @@ pub fn process_gcode_offset(
 
         if let Some(be) = boundary_err {
             let _ = (be.direction(), be.required_move_x, be.required_move_y);
-            let code = if be.title == "模型超出打印边界" {
-                "E_GCODE_BOUNDARY_001"
-            } else {
-                "E_GCODE_BOUNDARY_002"
-            };
-            return Err(PostprocError::InvalidConfig {
-                message: format!("{code}: {}", be.user_message()),
+            /* 码随 `be` 走，正文（从句）由表渲染 —— 这里不再有字符串比较，也不再有
+            `E_…: ` 那一截自我引用（旧形态：`InvalidConfig` 里塞一句带码的正文，
+            于是外层码 "配置无效" 在说假话，见 `diag/error.rs` 的 `Boundary` 文档） */
+            return Err(PostprocError::Boundary {
+                code: be.code,
+                sides: be.sides(),
             });
         }
     }

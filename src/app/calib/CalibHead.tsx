@@ -12,19 +12,20 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 import { useDeckLayer } from '../home/DeckLayerContext'
 import Skeleton from '../home/Skeleton'
 import { GLIDE_MS } from '../home/devDefaults'
+import type { AxisLimits } from '../../api/contract'
 import { AXIS_ROWS, type Axes, type Axis, type AxisView } from './calibAxes'
 import { flipTo, layoutPos, type Pos } from './flip'
-import type { PresetState } from './usePreset'
 /*
  * 样式借用向导那一页的 CSS Module，不另抄一份。
  *
  * CSS Module 允许被多个文件 import —— 类名哈希只认"哪个 css 文件"，不认谁 import 它，
  * 所以这里拿到的 .axes / .axisInput 与向导页里的是**同一批类名**，两处长得一模一样。
- * 更要紧的是那一页里还有一批上下文选择器（`.calib[data-plate='xy'] > .axes`、
- * `[data-layer='exit'] .calibPreset` …）——把这几段 CSS 搬到新文件会让它们哈希不上、
+ * 更要紧的是那一页里还有一批上下文选择器（`.calib[data-plate='xy'] > .axes` 那几段）——
+ * 把这几段 CSS 搬到新文件会让它们哈希不上、
  * 在向导里静悄悄失效，而那些规则正是落位抖动那一轮调出来的，不能动。
  */
 import p from '../home/PageHome.module.css'
@@ -52,6 +53,7 @@ export function AxisBar({
   orient,
   view,
   fromLastRow,
+  limits = { x: {}, y: {}, z: {} },
   activeAxis,
   canType = false,
   onType,
@@ -64,6 +66,8 @@ export function AxisBar({
   view: AxisView
   /** 允许拿 LAST_ROW_POS 当起点。只有退出层给 true */
   fromLastRow: boolean
+  /** 三轴的注册表范围（输入框 min/max 与滚轮步进夹取都按它；不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   /** 这一页正在校哪一轴。给了就把另外那两（一）轴压小；不给则三轴一样大 */
   activeAxis?: 'z' | 'xy'
   /**
@@ -78,6 +82,7 @@ export function AxisBar({
   /** 点「原 x.xx」：这一轴整个退回已保存值（手输 + 板上点选一起清） */
   onReset?: (axis: Axis) => void
 }) {
+  const tr = useT()
   const ref = useRef<HTMLDListElement>(null)
   const prev = useRef<{ orient: 'col' | 'row'; pos: Pos[] } | null>(null)
   /*
@@ -111,9 +116,12 @@ export function AxisBar({
   }, [buf, draft])
 
   /*
-   * 滚轮步进 0.05（作者 10-03：原生 number 滚轮按 step 走 0.01，太细）。
+   * 滚轮步进 0.05。
    * React 的 onWheel 挂的是被动监听，preventDefault 压不住浏览器原生的滚轮步进 ——
-   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减；方向键仍走 step="0.01"。
+   * 手动挂非被动监听拦掉原生那一发，自己按 0.05 加减。
+   * ★ 2026-10-17：`step` 也从 0.01 改成 0.05 —— 原来「滚轮 0.05、箭头/键盘 0.01」
+   *   是两条口径（作者：「箭头键盘的步进是 0.05，不是 0.01」）。现在三者同一档，
+   *   这个手挂监听可以留着（它管的是"连滚不叠步"），只是不再和原生步长打架。
    * 挂在 dl 上做委托：三颗输入框共用一个监听，轴从 data-axis 读。
    */
   useEffect(() => {
@@ -127,12 +135,14 @@ export function AxisBar({
       e.preventDefault()
       const cur = Number(input.value)
       if (!Number.isFinite(cur)) return
-      const next = Math.min(50, Math.max(-50, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
+      /* 夹取按注册表范围（原来硬编码 ±50，与注册表的 z ∈ [0,20] 打架） */
+      const l = limits[k]
+      const next = Math.min(l.max ?? Infinity, Math.max(l.min ?? -Infinity, cur + (e.deltaY < 0 ? 0.05 : -0.05)))
       onType(k, next.toFixed(2))
     }
     root.addEventListener('wheel', onWheel, { passive: false })
     return () => root.removeEventListener('wheel', onWheel)
-  }, [canType, onType])
+  }, [canType, onType, limits])
 
   useLayoutEffect(() => {
     const el = ref.current
@@ -207,10 +217,10 @@ export function AxisBar({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-                title={revertible && saved ? `点一下还原成 ${saved[k].toFixed(2)}` : undefined}
+               
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
-                原 {saved ? saved[k].toFixed(2) : '0.00'}
+                {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
               </button>
             </dt>
             <dd className={p.axisValue}>
@@ -236,17 +246,17 @@ export function AxisBar({
                     className={p.axisField}
                     htmlFor={id}
                     data-readonly={!canType}
-                    title={canType ? undefined : '先选一份预设再改'}
+                   
                   >
                     <input
                       id={id}
                       className={p.axisInput}
                       type="number"
-                      step="0.01"
-                      min={-50}
-                      max={50}
+                      step="0.05"
+                      min={limits[k].min}
+                      max={limits[k].max}
                       inputMode="decimal"
-                      aria-label={`${label}（毫米）`}
+                      aria-label={tr('calib.axisAria', { label })}
                       data-axis={k}
                       readOnly={!canType}
                       tabIndex={canType ? undefined : -1}
@@ -277,9 +287,26 @@ export function AxisBar({
                   </label>
                 </>
               ) : view === 'loading' ? (
-                <Skeleton label="正在取预设" />
+                /*
+                 * 2026-10-13（作者：「它根本就不是最终的显示……当我选择了一个，它出现了
+                 * 之后，它会变大」）：值 / 正在取 / 还没有**三态同壳同尺寸** ——
+                 * 空态与取数中也住进读数壳（`axisField`），mm 留位不露脸（data-ghost），
+                 * 占位条宽度与输入框同（3.6em）。于是选预设那一刻：读数不再变宽、
+                 * 不再变高，下面的板子不会被顶开，X / Y 两列也不会挪位。
+                 */
+                <span className={p.axisField} data-readonly="true">
+                  <Skeleton width="3.6em" label={tr('calib.loadingPreset')} />
+                  <span className={p.axisUnit} data-ghost="true">
+                    mm
+                  </span>
+                </span>
               ) : (
-                <span className={p.axisBlank}>—</span>
+                <span className={p.axisField} data-readonly="true">
+                  <span className={p.axisBlank}>—</span>
+                  <span className={p.axisUnit} data-ghost="true">
+                    mm
+                  </span>
+                </span>
               )}
             </dd>
           </div>
@@ -289,68 +316,28 @@ export function AxisBar({
   )
 }
 
-/**
- * 「预设文件」那一行。
+/*
+ * ★ 这里原来有一个 `PresetLine`（「预设文件」那一行 + 一个原生 `<select>`）——
+ * 2026-10-14 作者：「那就把那个死代码去掉」，整块删了。
  *
- * 从 v0.0.20 起可以直接在这里换：一个整行宽的下拉，选了之后由页面反填「机型 + 打印件版本」，
- * 所以在校准页换预设等于把前面那两级也改了。
+ * 它死在哪：`CalibHead` 的 `showPreset` 两处调用（首页两张校准卡）都传 `false`
+ * （预设入口早挪到卡片右上角那颗胶囊、内容列里是 `PresetStack` 那块），这条路径谁都没渲染过。
  *
- * T10：选项换成**真实文件体系**里那 9 份 MKP（`getPresetFiles()` 的倒查给出每份的 机型/版本），
- * 不再读手编的 presetIndex；`value` 也换成同一套 id（`机型/版本`，与工作台发布 uid 同形状）。
- * 名字未知时停在占位项上，位置固定、不跳版。
+ * 顺带一起删的：`CalibHead` 的 `preset` / `presetUid` / `presetOptions` / `onPickPreset` /
+ * `showPreset` 五个 props，与 `PageHome.module.css` 里 `.calibPreset` / `.presetLine` /
+ * `.presetLineLabel` / `.presetSelect` 四条样式。
  *
- * 导出给「校准」tab 用 —— 那一页把它挪到了页首那一行（步骤条右边那块空地），
- * 所以要能脱离 CalibHead 单独渲染。向导里仍由 CalibHead 自己带着它。
+ * 它也是**客户端最后一个原生 `<select>`** —— 删完，"全仓库一个原生 `<select>` 都没有"
+ * 这条口径在客户端侧第一次真正成立（工作台 `ParamDefModal` 那几处还在，那是内部工具面）。
  */
-export function PresetLine({
-  state,
-  value,
-  options,
-  onPick,
-}: {
-  state: PresetState
-  /** 当前选中那份文件的 id：`机型/版本` */
-  value: string | null
-  /** 全部 MKP 预设文件（来自 `useCatalogA44` 的 presets） */
-  options: { uid: string; name: string }[]
-  onPick: (uid: string) => void
-}) {
-  const path = state.status === 'ready' ? state.preset.path : undefined
-
-  return (
-    <div className={p.presetLine} title={path}>
-      <span className={p.presetLineLabel}>预设文件</span>
-      {state.status === 'waiting' ? (
-        <Skeleton width="9em" label="正在取预设" />
-      ) : (
-        <select
-          className={p.presetSelect}
-          value={value ?? ''}
-          aria-label="预设文件"
-          onChange={(e) => onPick(e.target.value)}
-        >
-          <option value="" disabled>
-            — 选择一份预设 —
-          </option>
-          {options.map((o) => (
-            <option key={o.uid} value={o.uid}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      )}
-    </div>
-  )
-}
 
 /**
- * 校准页的头部：一行预设下拉 + 三轴读数条。向导的两张校准卡与「校准」tab 都用这一个。
+ * 校准页的头部：三轴读数条。向导的两张校准卡与「校准」tab 都用这一个。
  *
  * 在向导里它同时被渲染在当前页和"下一页的露出卡 / 正在退回的卡"上，几处要长得不一样：
  *
- * - 当前页：一行预设文件名 + 横排读数条，居中，跟板子一起看
- * - 露出卡 / 退出卡：缝里只有版面 20% 宽，横排 470px 塞不进去 —— 只留竖排的三个数，
- *   文件名不跟过去（它在缝里会折成三四行）
+ * - 当前页：横排读数条，居中，跟板子一起看
+ * - 露出卡 / 退出卡：缝里只有版面 20% 宽，横排 470px 塞不进去 —— 只留竖排的三个数
  *
  * 推入一开始（phase === 'in'）就切回横排，位移交给 AxisBar 里的 FLIP 补 ——
  * 落位与当前页的静态版面完全重合，卡片层被换成平面层那一帧不会跳。
@@ -362,38 +349,22 @@ export function PresetLine({
 export default function CalibHead({
   saved,
   draft,
-  preset,
   view,
+  limits,
   activeAxis,
-  presetUid,
-  presetOptions,
-  onPickPreset,
   canEdit,
-  showPreset = true,
   onType,
   onRevert,
   onReset,
 }: {
   saved: Axes | null
   draft: Axes | null
-  preset: PresetState
   view: AxisView
+  /** 三轴的注册表范围（透传给 AxisBar；不吃 -50/50 硬编码） */
+  limits?: AxisLimits
   activeAxis: 'z' | 'xy'
-  /** 当前那份文件的 id（`机型/版本`）—— 一份文件对应一处机型 + 版本 */
-  presetUid: string | null
-  /** 全部 MKP 预设文件 —— 预设下拉的选项（页面从 useCatalogA44 取） */
-  presetOptions: { uid: string; name: string }[]
-  onPickPreset: (uid: string) => void
   /** 取到预设才有基准可改（与"点板子不产生读数"同一条规则） */
   canEdit: boolean
-  /**
-   * 要不要带上「预设文件」那一行。
-   * 首页与「校准」tab 都传 false —— 预设入口已经不在内容列里：
-   * 「校准」tab 的 pill 在页首那行自己渲染（见 PageCalibA44），首页的 pill 在卡片右上角
-   * （CardFrame 的 corner，见 PageHomeA44）。向导不传时也不再有人用 —— PresetLine
-   * 留着给 g06-7 抽卡稿。
-   */
-  showPreset?: boolean
   onType: (axis: Axis, raw: string) => void
   onRevert: (axis: Axis) => void
   /** 点「原 x.xx」：这一轴整个退回已保存值 */
@@ -413,22 +384,13 @@ export default function CalibHead({
     <>
       {/* 三层都渲染，显不显形交给 CSS：缝里直接藏（脱离文档流，不影响 FLIP 终点），
           退回时淡出（直接卸载会"啪"一下没了） */}
-      {showPreset && (
-        <div className={p.calibPreset}>
-          <PresetLine
-            state={preset}
-            value={presetUid}
-            options={presetOptions}
-            onPick={onPickPreset}
-          />
-        </div>
-      )}
       <AxisBar
         saved={saved}
         draft={draft}
         view={view}
         orient={peek ? 'col' : 'row'}
         fromLastRow={layer === 'exit'}
+        limits={limits}
         activeAxis={activeAxis}
         canType={canType}
         onType={onType}

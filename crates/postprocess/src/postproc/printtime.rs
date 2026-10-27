@@ -1306,6 +1306,16 @@ const PREP_OVERHEAD_KEYS: &[&str] = &[
     "fan_cooling_layer_time",
 ];
 
+/// **切片器自报的预估总时长**（秒）：G-code 头 `; total estimated time: 3h 22m 55s` 那一行。
+///
+/// 开场就能给（不用跑管线）—— 界面上「切片与预估」那一栏的「预估打印时间」用它；
+/// 跑完之后那一格换成内核自己重算的（含后增设，见 [`Result::total_seconds`]）。
+/// 两个数不一样是正常的：**这是切片器说的、那是内核说的**（报告页也是两个都摆）。
+/// 头里没有这一行（不是 Bambu 的切片器 / 被裁过头）⇒ `None`（界面不摆那一格）。
+pub fn slicer_estimated_seconds(content: &str) -> Option<f64> {
+    parse_header_meta(content).1
+}
+
 /// `ParseHeaderMeta`（内容版）：返回 (prep_overhead 秒, Bambu 锚点秒)。
 fn parse_header_meta(content: &str) -> (f64, Option<f64>) {
     let mut prep = 0.0;

@@ -22,6 +22,9 @@
 //! - `markers`     ← markers.go / mkp_markers.go
 //! - `range_check` ← range_check.go
 //! - `support_fallback` ← support_fallback.go
+//! - `model_name` **新增**（无 Go 对照）：3MF 模型名三级兜底链。它与上面那些不一样 ——
+//!   **要读盘**（G-code 旁边的 `origin.txt` / 同名 zip / `_temp_1.config`），是本模块
+//!   唯一一处 IO，理由与形态见该文件头。
 //!
 //! 刻意**不移植**（属 audit/诊断面，后处理管线零消费，实测 grep 确认）：
 //! invariants.go / state_audit.go / explain.go / risk.go / segment_explain.go /
@@ -32,6 +35,8 @@ pub mod format;
 pub mod header;
 pub mod line_builder;
 pub mod markers;
+pub mod model_identity;
+pub mod model_name;
 pub mod parser;
 pub mod postprocess;
 pub mod range_check;
@@ -47,6 +52,10 @@ pub use header::{
 };
 pub use line_builder::LineBuilder;
 pub use markers::*;
+pub use model_identity::{
+    IdentityProbe, IdentityVerdict, ModelOrigin, probe as probe_model_identity,
+};
+pub use model_name::model_name;
 pub use parser::{is_feature_line, is_layer_num_line, is_z_height_line, trim_line};
 pub use postprocess::{
     filter_e_moves, get_e_value, has_e_param, remove_final_lower_z, remove_param_from_line,

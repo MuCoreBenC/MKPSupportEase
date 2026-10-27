@@ -35,6 +35,8 @@
 //! 按需 `create_dir_all`。判据也从"`mkp/` 是空的"改成"下载前一个交付文件都没有"
 //! （见 `release.rs` 的测试）。
 
+use postprocess::diag::messages;
+
 use std::path::Path;
 
 use crate::error::AppError;
@@ -131,15 +133,21 @@ pub fn release_bytes(root: &Path, bytes: &[u8]) -> Result<ReleaseReport, AppErro
         Ok(old) => {
             let archive_dir_path = archive_dir(root);
             std::fs::create_dir_all(&archive_dir_path).map_err(|e| {
-                AppError::io(format!("建不出归档目录：{}", archive_dir_path.display()))
-                    .with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.release.427",
+                    &[("v1", &archive_dir_path.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
             // 版本链：旧目录解析得出自己的 revision 就用它当文件名；解析不了也照收
             // （名字退化为 unknown-N），**字节比名字重要** —— 信任判定读的是链里所有文件的指纹
             let chain = catalog_chain_dir(root);
             std::fs::create_dir_all(&chain).map_err(|e| {
-                AppError::io(format!("建不出版本链目录：{}", chain.display()))
-                    .with_detail(e.to_string())
+                AppError::io(messages::text(
+                    "ui.runtime.release.428",
+                    &[("v1", &chain.display().to_string())],
+                ))
+                .with_detail(e.to_string())
             })?;
             let old_revision = super::Catalog::parse(&old)
                 .ok()

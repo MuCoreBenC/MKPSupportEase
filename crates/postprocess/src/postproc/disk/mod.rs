@@ -11,9 +11,14 @@ pub mod calibration;
 pub mod collision;
 pub mod wipe;
 
-pub use calibration::{BBox, CentroidResult, generate_calibration_gcode_with_centroid};
+pub use calibration::{
+    BBox, CentroidResult, generate_calibration_gcode_with_centroid,
+    generate_calibration_gcode_with_centroid_rec,
+};
 pub use collision::{
-    AdjustmentTarget, CollisionResult, CollisionType, MoveAttempt, detect_tower_collision,
+    AdjustmentTarget, CollisionFacts, CollisionResult, CollisionType, ModelFootprint,
+    ModelMapFacts, MoveAttempt, TowerAsk, TowerAskOutcome, auto_tower_position_for_facts,
+    detect_tower_collision, model_footprint, model_map_facts,
 };
 
 /// processor.ComputeBBox（对照 bbox_compute.go / model_z_map.go:59）：

@@ -13,11 +13,59 @@
   color: var(--text-3);
 }
 
+/*
+ * 只读态那颗「进入编辑模式」（2026-10-17）：贴在这一行右端。
+ * 尺寸与外观沿用 `.revert` / `.ghost`（抽屉里的次要动作只有一张脸），
+ * 只用 accent 字色说明它是个"往前一步"的动作。
+ */
+.enterEdit {
+  flex-shrink: 0;
+  height: 24px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent-deep);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.enterEdit:hover {
+  background: var(--hover-1);
+}
+
+.enterEdit:active {
+  transform: translateY(1px);
+  background: var(--hover-2);
+}
+
+.enterEdit:focus-visible {
+  outline: none;
+}
+
+/* 只读态那句门槛说明：小一号、次级色，不抢列表 */
+.readonlyHint {
+  margin: 0 14px 8px;
+  font-size: calc(var(--fs-label) - 0.5px);
+  line-height: 1.5;
+  color: var(--text-3);
+}
+
 .scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 0 10px 10px;
+  /*
+   * ★ 2026-10-16：**缩进从这一层挪给每一行**（`.groupHead` / `.item`）。
+   *   原来 `padding: 0 10px 10px` 把整个列表往里缩，于是**吸顶的段头**只有
+   *   379 − 20 = 359px 宽 —— 滚起来的时候它左右各差一条：既不贴抽屉的两边，
+   *   又像没盖住（作者：「没贴紧没贴稳」）。缩进挪进行内之后，段头是一条**通栏**，
+   *   行里的字仍在原来的位置上（6 + 10 = 16px）。
+   */
+  padding: 0 0 10px;
 }
 
 .empty {
@@ -26,22 +74,32 @@
   color: var(--text-3);
 }
 
-.group + .group {
-  margin-top: 6px;
-}
+/*
+ * ★ 2026-10-16：段与段之间**不再留那道 6px 缝**。原来 `.group + .group` 有一条
+ *   `margin-top: 6px`，它落在上一段的末行与下一段的**段头**之间 —— 段头是吸顶的
+ *   不透明横带，可那 6px 缝在它**上边**，滚到段与段交界时就是「段头上缘露出一条
+ *   背景」（作者：「他位置好像不够，上面它上边露出了一点背景」）。
+ *   缝去掉之后，下一段的段头紧接上一段的末行，横带自己（通栏 + 下缘的影）
+ *   负责把两段分开。
+ */
 
-/* 段头 sticky —— 幽灵滚动条看不见条，靠它定位 */
+/* 段头 sticky —— 幽灵滚动条看不见条，靠它定位。
+ * **通栏**（左右不再缩进）+ 下缘一层浅浅的影：条目从它下面滑过时，
+ * 「这一段到这儿」读得出来，也不会有背景从它旁边/上边露出来。 */
 .groupHead {
   position: sticky;
   top: 0;
   z-index: 1;
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  /* 2026-10-20：段名 / 条数靠左，**时间靠右单独一列**（作者：「靠右显示」） */
+  justify-content: flex-start;
+  gap: 8px;
   margin: 0;
-  padding: 8px 6px;
+  padding: 8px 16px;
   background: var(--surface-solid);
   border-bottom: 1px solid var(--line);
+  box-shadow: 0 5px 8px -6px rgb(16 24 32 / 22%);
   font-size: var(--fs-label);
   font-weight: 600;
   color: var(--text-1);
@@ -51,6 +109,19 @@
   font-weight: 400;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/*
+ * 段头右侧那一列时间（2026-10-20）：`margin-left: auto` 把它顶到最右，
+ * 等宽数字让每一段的时间**竖着对齐** —— 扫一列的时候不用重新找小数点。
+ */
+.when {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-weight: 400;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .list {
@@ -64,7 +135,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 6px;
+  /* 左边距 16px = 段头那一条的 16px（缩进从 .scroll 挪进来之后，字仍在原位） */
+  padding: 9px 16px;
   font-size: var(--fs-body);
 }
 
@@ -85,10 +157,54 @@
 
 .no {
   flex-shrink: 0;
+  /* 有展开箭头时它右边留一点，号与箭头不挤在一起 */
+  margin-right: 2px;
   width: 26px;
   font-size: var(--fs-label);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* 整批那一屏的展开箭头（作者：「整批的要可以展开看详细的」）。
+   箭头本身是 `ui.disclosureCaret`（SVG 形状，转 90°，不换字符）；这颗按钮只管
+   14px 的槽位与居中 —— 不画边框，免得行上多出一颗方块 */
+.caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.caret:hover {
+  color: var(--text-1);
+}
+
+.caret:focus-visible {
+  outline: none;
+}
+
+/* 整批的一段（行 + 展开出来的明细） */
+.block {
+  display: block;
+}
+
+/* 展开出来的明细：每一项缩进一档，读得出"它属于上面那一段" */
+.subList {
+  margin: 0;
+  padding: 0 0 2px;
+  list-style: none;
+}
+
+.subItem {
+  padding-left: 36px;
+  background: var(--hover-1);
 }
 
 .text {
@@ -122,14 +238,32 @@
   height: 16px;
   padding: 0 6px;
   border-radius: 2px;
-  background: #fff3e2;
+  /* 琥珀面 / 墨走 token（2026-10-12 深色第二遍）——同 NoteBar.noteBad */
+  background: var(--warn-surface);
   font-size: calc(var(--fs-label) - 1px);
-  color: #a86416;
+  color: var(--warn-ink);
 }
 
 .badgeSaved {
   background: var(--accent-soft);
   color: var(--accent-deep);
+}
+
+/*
+ * 「更新」徽章（2026-10-20）：这一条是云端新版带进来的。
+ * 与「未保存 / 已保存」那两枚**不同色**（那两枚说状态，这枚说来路）——
+ * 用墨色描边、不铺底，混在一排时读得出是另一个维度。
+ */
+.syncTag {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: 2px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-2);
 }
 
 .revert,
@@ -150,6 +284,55 @@
 .revert:hover,
 .ghost:hover {
   color: var(--text-1);
+  background: var(--hover-1);
+  border-color: var(--line-strong);
+}
+
+/* 按下去要"陷一下" —— 这颗按钮点了常常什么都不变（目标值 = 现值），
+   手感是唯一立刻能感觉到的东西 */
+.revert:active,
+.ghost:active {
+  transform: translateY(1px);
+  background: var(--hover-2);
+}
+
+/*
+ * 「还原」的回话（2026-10-17）：一行、几秒后自己消失。
+ * `ok` = 真写进去了（accent）；`muted` = 没变化 / 改不了（次级文字色，不吓人）。
+ */
+.revertNote {
+  margin: 10px 12px 0;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  font-size: var(--fs-label);
+  line-height: 1.45;
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  /* 长句子截断——抽屉窄，别让它撑成三行 */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.revertNote[data-tone='muted'] {
+  color: var(--text-2);
+  background: var(--surface-sunken);
+}
+
+/* 「清空历史」武装态（二次确认的第二下之前）：红的，一眼知道再点就没了。
+   底色照 PageParams 的 `.danger`（#e5484d 实心 + 白字）——同一个 app 里危险按钮只有一张脸 */
+.clearArm {
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: #e5484d;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: #fff;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 /* 聚焦不再另画一圈（作者：「点了之后不要有一个绿色描边」） */

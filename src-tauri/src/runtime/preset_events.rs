@@ -23,13 +23,15 @@
 //! | `ReleasePublished`（发布） | **不落账**：发布侧盖进目录的 `publishedAt` 随目录字节与版本链（`archive/catalogs/`）走到每台客户端，按字节指纹反查即得 |
 //! | `DeliveryDownloaded`（下载） | **落这本账**：交付文件第一次落进本机的那一刻 |
 //! | `DeliveryReplaced`（替换） | **落这本账**：旧份进归档、新份落盘的同一刻 |
-//! | `MineModified`（我的文件修改） | **不落账**：按作者裁决就是文件系统 mtime —— 声明在这里，免得它再被派别的用场 |
+//! | `LocalModified`（本地文件修改） | **不落账**：按作者裁决就是文件系统 mtime —— 声明在这里，免得它再被派别的用场 |
 //! | `ProvenanceRecorded`（出处） | 已有自己的账（`provenance.json`），不动 |
 //!
 //! 账建立之前的存量（盘上已有的下载文件、归档）由 [`super::delivery`] 一次性
 //! bootstrap 进来（见 [`super::delivery::load_events`]），之后永远追加。
 //! 账是**附加信息**：读不到 / 坏档一律当空表，不许让任何读失败 —— 界面退回「未知」，
 //! 什么都不坏（与 `provenance.json` 同一条口径）。
+
+use postprocess::diag::messages;
 
 use std::path::Path;
 
@@ -195,7 +197,8 @@ pub fn replaced_at_of(events: &[PresetEvent], file: &str, old_sha256: &str) -> O
 
 fn save(internal_root: &Path, ledger: &Ledger) -> Result<(), crate::error::AppError> {
     let body = serde_json::to_vec_pretty(ledger).map_err(|e| {
-        crate::error::AppError::internal("事件账序列化不了").with_detail(e.to_string())
+        crate::error::AppError::internal(messages::text("ui.runtime.preset_events.425", &[]))
+            .with_detail(e.to_string())
     })?;
     atomic_write(&ledger_path(internal_root), &body)
 }

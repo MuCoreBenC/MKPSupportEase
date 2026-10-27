@@ -1,0 +1,44 @@
+/*
+ * 回执槽里那一句（`HeadNote.tsx`）。三档只换颜色，尺寸一条共用。
+ *
+ * ★ 这一格的尺寸是**布局契约**，别按页面改：
+ *   `flex: 1 1 auto` 吃满标题行剩下的空位、`min-width: 0` 才允许它缩、
+ *   `nowrap + ellipsis` 保证**字数不影响框的任何尺寸**（作者 2026-10-17：
+ *   「因为你加在这的话，会导致我的模态框高度宽度变化」）。
+ */
+.head {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.head,
+.fallback {
+  letter-spacing: 0.2px;
+}
+
+/* 三档只有颜色不同 */
+.error {
+  color: var(--danger);
+}
+
+.note {
+  color: var(--text-2);
+}
+
+.ok {
+  color: var(--accent-deep);
+}
+
+/*
+ * 拿不到槽时的落点（这一屏不在框里）：与 `.head` 同一套字，但允许换行 ——
+ * 框身里没有"必须一行"的约束，硬 nowrap 会把话截掉。
+ */
+.fallback {
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+}

@@ -208,7 +208,13 @@ T8 又把这条链切了一刀，搬的时候照它：**「同步」页只说说
 - **契约扩容后的空窗**：P1 之后 native 窗口里新页面会整页「未接入」—— 这是预期，但必须有统一空态，不能白屏（P1 的第一件事）。
 - **端口**：产品仓 dev 固定 `:5321`（`strictPort`）；试验场 `:5178`、它自己的探针 `:5301` —— 别互相踩。
 - **stylelint**：两边都用 `stylelint-config-standard`，但产品仓多一条「组件级不许写 `::-webkit-scrollbar`」；搬进来的 CSS 要过这一关（滚动条只能写在 `src/styles/global.css`）。
-- **BBS 改读本机目录要自己开路**：静态快照不搬（§6-2），所以 BBS 页的**清单**得从「本机 BBS 目录」来 —— dev 下要有 dev-server 中间件（试验场是 `tools/dev-server/bbsFs.mjs`），真机上要走 IPC。**P5 落地版**：端点 `tools/dev-server/bbsFs.mjs` 同时挂 `configureServer` 与 `configurePreviewServer`（本机 `npm run dev` 被 `target/` 拖死，验收走 `build` + `preview`，只挂 dev 就验不了「278 份那一档」）；真机 IPC 本轮没做，登记在 `tasks.md` 债 #11。页面的**元数据**不走这条路，随包分发（见 §6-2 的 P5 改判）。
+- **BBS 改读本机目录要自己开路**：静态快照不搬（§6-2），所以 BBS 页的**清单**得从「本机 BBS 目录」来 —— dev 下要有 dev-server 中间件（试验场是 `tools/dev-server/bbsFs.mjs`），真机上要走 IPC。**P5 落地版**：端点 `tools/dev-server/bbsFs.mjs` 同时挂 `configureServer` 与 `configurePreviewServer`（本机 `npm run dev` 被 `target/` 拖死，验收走 `build` + `preview`，只挂 dev 就验不了「278 份那一档」）。页面的**元数据**不走这条路，随包分发（见 §6-2 的 P5 改判）。
+  **★ 2026-10-13 收口**：真机那条 IPC 落地了（`src-tauri/src/ipc/bbs.rs` 的
+  `get_bbs_presets` / `read_bbs_preset`，三平台目录口径 —— mac 的系统预设在 app 包里；
+  契约 + bridge + mock 各接一条），于是**产品仓那个 dev 端点退役**（`tools/dev-server/`
+  整个删掉，`vite.config.ts` 摘挂载）：打包版与预览同一套取数，浏览器预览那一边由
+  `mockServer/bbsLocal.ts` 给演示集合（不再读本机真目录 —— 代价由作者拍过）。
+  这条债（原文说的 `tasks.md` 债 #11）就此了结。
 - **BBS 数据源出 Bambu Studio**：预设快照不搬，这一条授权顾虑消失。但 **P5 改了判**（§6-2）：元数据四份随包分发 —— 那四份是从 Bambu Studio 源码与安装目录提的派生数据，**同协议**（两边都是 AGPL-3.0）再分发成立，条件是把来源与许可写清楚：已在 `public/bbs/PROVENANCE.md` 落一份声明。**将来若改成闭源分发，这条路要重做**（运行时从本机取或自研等价表），见 `tasks.md` 债 #10。
 - **不搬试验场的 `bridge.ts`**：它读 `window.__mkp_api`（浏览器预览器注入），产品仓是 Tauri `invoke` —— 只搬契约类型与页面，不搬那一层。
 - **别把工作台的共享件拖进用户包**：两个入口是两个 bundle，`src/components/field/` 只给客户端用；工作台自己那份留在 `src/workbench/components/`，互不 import。

@@ -19,8 +19,8 @@
 //! | `get_slicer_copied` | 切片器用户配置目录里**真有**的那几份（盘就是底账） |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
-//! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-mine/`，
-//! 由 [`crate::ipc::mine::get_user_preset_files`] / `read_user_preset_text` 那两条读回答。
+//! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-local/`，
+//! 由 [`crate::ipc::local::get_local_preset_files`] / `read_local_preset_text` 那两条读回答。
 //! 旧命令恒空、且旧 DTO 里的「用户自己标的适用机型」在新世界里没有来源（没人能标），
 //! 留着就是两套口径。
 //!
@@ -38,6 +38,8 @@
 //! Tauri 把**同步**命令放在主线程上跑、一条一条排队；`async` 的才丢进异步运行时并发跑。
 //! 预设页一打开会同时发二十多条读，串行的话总耗时就是各条之和 —— 用户看到的正是
 //! "打开先转圈、转完才出来"。这些命令只读缓存里的 catalog，彼此没有共享可变状态。
+
+use postprocess::diag::messages;
 
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -312,16 +314,13 @@ pub async fn get_machines(app: AppHandle) -> Result<Vec<MachineDto>, AppError> {
 pub struct FileRefDto {
     pub kind: &'static str,
     pub file_name: String,
-    pub path: String,
-    /// 这一份**在本机上的绝对路径**；`None` = 盘上没有它（还没下载 / 这一侧根本没有盘）。
+    /// 落点（`catalog.path`，唯一路径语义）—— 界面只当标识 / 去重键用。
     ///
-    /// 唯一的消费者是首页「复制后处理脚本」里那一段 `--Toml`：切片器起钩子时的工作目录
-    /// 不是我们的内部根，`path`（相对落点）在那里找不到文件 —— 2026-10-09 实测，
-    /// Bambu 弹的是 "Error code: 2"，正是 mkp-ssr 的 `EXIT_BAD_INPUT`「预设文件不存在」。
-    /// 所以**只有这份真在盘上时**才给值，界面据此决定摆不摆那颗按钮（宁可不摆，
-    /// 也不给一条贴进去就报错的命令）。
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub abs_path: Option<String>,
+    /// **绝对路径那一件事不在这张表里**（2026-10-10）：首页「复制后处理脚本」拼
+    /// `--Toml` 用的是 `get_post_process_command` 现给的绝对落点（切片器起钩子时的
+    /// 工作目录不是我们的内部根，相对落点在那里找不到文件 —— 2026-10-09 实测，
+    /// Bambu 弹 "Error code: 2"）。这份表只回答"该有哪些文件"。
+    pub path: String,
     /// MKP 那支带真值（catalog 文件条目对交付产物真字节算的）；切片器资产本轮不给
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size: Option<u64>,
@@ -344,11 +343,11 @@ pub struct VersionFilesDto {
 /// 不再按命名规则重算：首屏唯一数据源 = catalog（总纲判据 4）。
 /// 切片器那一支与旧世界同构：版本 → 套餐 → 资产。
 ///
-/// `internal_root` 只用来答一件事：这一份**在不在本机**（[`FileRefDto::abs_path`]）。
-/// 落点本身仍然是 catalog 登记的那个 `path`，这里不重算、也不写盘。
+/// **纯函数**（吃 catalog 吐 DTO，不碰盘）："这份在不在本机"是另一个问题，
+/// 由 `getDownloadedFiles` / `getStaleFiles`（盘上状态）与
+/// `get_post_process_command`（命令的绝对落点）各自回答。
 fn version_files_dto(
     catalog: &runtime::Catalog,
-    internal_root: &Path,
     machine_id: &str,
     version_id: &str,
 ) -> Option<VersionFilesDto> {
@@ -364,17 +363,13 @@ fn version_files_dto(
     match catalog.file_of(machine_id, version_id) {
         // 期望值原样透给界面（随包 bootstrap 目录下是 `None` —— 那一侧不登记 SHA，
         // 界面据此显示"还不知道大小/指纹"，不是显示 0 / 空串）
-        Some(f) => {
-            let at = internal_root.join(&f.path);
-            files.push(FileRefDto {
-                kind: "mkp_preset",
-                file_name: f.file_name.clone(),
-                path: f.path.clone(),
-                abs_path: at.is_file().then(|| at.display().to_string()),
-                size: f.size,
-                sha256: f.sha256.clone(),
-            })
-        }
+        Some(f) => files.push(FileRefDto {
+            kind: "mkp_preset",
+            file_name: f.file_name.clone(),
+            path: f.path.clone(),
+            size: f.size,
+            sha256: f.sha256.clone(),
+        }),
         None => missing.push(format!(
             "{machine_id} / {version_id} 在目录里没有登记交付文件"
         )),
@@ -402,7 +397,10 @@ fn version_files_dto(
                 for r in &bundle.asset_refs {
                     let a = match catalog.asset(r) {
                         None => {
-                            missing.push(format!("bundle {} 引用了不存在的 asset：{r}", bundle.id));
+                            missing.push(::postprocess::diag::messages::text(
+                                "ui.ipc.presets.why_bundle_asset",
+                                &[("id", &bundle.id), ("r", r)],
+                            ));
                             continue;
                         }
                         Some(a) => a,
@@ -433,9 +431,6 @@ fn version_files_dto(
                         kind,
                         file_name: file_name_of(&path),
                         path: dest,
-                        /* 切片器配置不是「我们的预设文件」：后台处理的 `--Toml` 不指它，
-                        这里也就不编一个绝对路径 */
-                        abs_path: None,
                         size: None,
                         sha256: None,
                     });
@@ -459,8 +454,7 @@ pub async fn get_version_files(
 ) -> Result<Option<VersionFilesDto>, AppError> {
     traced("getVersionFiles", |_| {
         let catalog = load_presets(&app)?;
-        let root = internal_root(&app)?;
-        Ok(version_files_dto(&catalog, &root, &machine_id, &version_id))
+        Ok(version_files_dto(&catalog, &machine_id, &version_id))
     })
 }
 
@@ -556,7 +550,7 @@ pub struct MenuEntryDto {
     pub visibility: &'static str,
 }
 
-/// 菜单：哪些官方文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
+/// 菜单：哪些云端文件是分配过的（`bundled`）、哪些是可选的（`optional`）。
 /// **没有 `archived`** —— 归档是工作台那边的事，客户端拿到的都是可见的。
 ///
 /// **`bundled` 交付档的资产不进这个菜单**（作者 2026-10-03）：那是「随包不下载」的那一档
@@ -624,6 +618,9 @@ pub struct ParamMetaDto {
     pub pinned: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub deprecated: bool,
+    /// **只在这些机型上**弃用（与 `deprecated` 叠加，空/缺省 = 不按机型弃用）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_machines: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub machine_filter: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -652,6 +649,8 @@ fn param_meta_dto(catalog: &runtime::Catalog) -> Vec<ParamMetaDto> {
             merge_group: p.merge_group.as_deref().and_then(non_empty),
             pinned: p.pinned,
             deprecated: p.deprecated,
+            deprecated_machines: (!p.deprecated_machines.is_empty())
+                .then(|| p.deprecated_machines.clone()),
             machine_filter: (!p.machine_filter.is_empty()).then(|| p.machine_filter.clone()),
             show_when: p.show_when.as_ref().map(|s| ShowWhenDto {
                 key: s.key.clone(),
@@ -677,6 +676,9 @@ pub async fn get_param_meta(app: AppHandle) -> Result<Vec<ParamMetaDto>, AppErro
 pub struct ChoiceDto {
     pub value: String,
     pub label: String,
+    /// 英文显示名（2026-10-26 双语注册表）。空 = 界面回落 `label`。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub label_en: String,
     /// **选项级弃用**（`Choice.deprecated`）：参数没废、某个选项废了。
     ///
     /// 真上游里就有这一档（`wiping.outer_structure` 的 `sheath` = 护套），不是为界面硬造的。
@@ -684,6 +686,9 @@ pub struct ChoiceDto {
     /// 所以两者不能合成一个布尔。
     #[serde(skip_serializing_if = "is_false")]
     pub deprecated: bool,
+    /// **只在这些机型上**弃用（空/缺省 = 不按机型弃用，与 `deprecated` 叠加）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deprecated_machines: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -701,8 +706,17 @@ pub struct RecipeParamDto {
     /// `offset_x/y/z`），不再有"多条参数共享一个 tomlKey"那种形状。
     pub toml_key: String,
     pub label: String,
+    /// 英文显示名（空 = 界面回落 `label`）。语言由界面挑，后端两份都给 —— 切语言不必重拉。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub label_en: String,
     pub desc: String,
+    /// 英文说明（空 = 回落 `desc`）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub desc_en: String,
     pub group: String,
+    /// 英文分组名（空 = 回落 `group`）。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub group_en: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     pub control: &'static str,
@@ -755,12 +769,18 @@ fn machine_params_dto(
     machine_id: &str,
     version_id: Option<&str>,
 ) -> Result<Vec<RecipeParamDto>, AppError> {
-    let machine = catalog
-        .machine(machine_id)
-        .ok_or_else(|| AppError::not_found(format!("没有机型 {machine_id}")))?;
+    let machine = catalog.machine(machine_id).ok_or_else(|| {
+        AppError::not_found(messages::text(
+            "ui.ipc.presets.116",
+            &[("machine_id", machine_id)],
+        ))
+    })?;
     if let Some(v) = version_id {
         if !machine.versions.iter().any(|x| x.id == v) {
-            return Err(AppError::not_found(format!("{machine_id} 没有版本 {v}")));
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.117",
+                &[("machine_id", machine_id), ("v", v)],
+            )));
         }
     }
 
@@ -791,11 +811,17 @@ fn machine_params_dto(
             key: p.key.clone(),
             toml_key: p.toml_key.clone(),
             label: p.label.clone(),
+            label_en: p.label_en.clone(),
             desc: p.desc.clone(),
+            desc_en: p.desc_en.clone(),
             group: catalog
                 .section_meta(&p.layout.section_id)
                 .map(|s| s.label.clone())
                 .unwrap_or_else(|| p.layout.section_id.clone()),
+            group_en: catalog
+                .section_meta(&p.layout.section_id)
+                .map(|s| s.label_en.clone())
+                .unwrap_or_default(),
             unit: p.unit.as_deref().and_then(non_empty),
             control: control_of(p.ui_component),
             choices: (!p.choices.is_empty()).then(|| {
@@ -804,7 +830,10 @@ fn machine_params_dto(
                     .map(|c| ChoiceDto {
                         value: to_text(&c.value),
                         label: c.label.clone(),
+                        label_en: c.label_en.clone(),
                         deprecated: c.deprecated,
+                        deprecated_machines: (!c.deprecated_machines.is_empty())
+                            .then(|| c.deprecated_machines.clone()),
                     })
                     .collect()
             }),
@@ -824,7 +853,7 @@ fn machine_params_dto(
 
 /* ---------- 本机状态 ---------- */
 
-/// 本机已经有的官方文件（asset id）。
+/// 本机已经有的云端文件（asset id）。
 ///
 /// **恒为 `[]`**：切片器资产的载荷不落内部根（内置的随安装包走、前端按 URL 取；
 /// 下载的 MKP 预设走 `get_downloaded_files` 那条新世界管道）。空集是"还没下载"，
@@ -832,6 +861,81 @@ fn machine_params_dto(
 #[tauri::command]
 pub async fn get_local_files(_app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getLocalFiles", |_| Ok(Vec::new()))
+}
+
+/* ---------- 打开两个落点所在的文件夹（2026-10-13） ---------- */
+
+/// 打开**我们自己的落点**（交付区 `assets/bbs/…` 里那一份）所在的文件夹，并选中它。
+///
+/// 与「本地文件」那条（`ipc::local::reveal_in_folder`）分得很清楚：那一条认
+/// `presets-local/`，这一条认**目录登记**（`catalog.files[].path`）——
+/// 两条都不接受前端拼路径，只给文件名。
+///
+/// 盘上还没有这份 → `NOT_FOUND` 原话（先「下载」），**不打开一个空文件夹**。
+#[tauri::command]
+pub fn reveal_delivered_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("revealDeliveredFile", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.118",
+                &[("file_name", &file_name.to_string())],
+            )));
+        };
+        let internal = internal_root(&app)?;
+        let target = crate::fsx::paths::resolve_in(&internal, &file.path)?;
+        if !target.is_file() {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.119",
+                &[("file_name", &file_name.to_string())],
+            )));
+        }
+        reveal_in_explorer(&app, &target)
+    })
+}
+
+/// 打开**切片器目录里那份**所在的文件夹，并选中它（`copy_to_slicer` 过去的那一份，
+/// 落点 `user/<账号>/process/…`）。
+///
+/// 只认目录里登记过的**切片器配置**（`bbs_config`）文件名 —— 前端照旧拼不出路径来。
+/// 还没复制过去、或这台机器上没有那个应用 → `NOT_FOUND` 原话（先去行上点「复制」）。
+#[tauri::command]
+pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+    traced("revealSlicerFile", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.120",
+                &[("file_name", &file_name.to_string())],
+            )));
+        };
+        if file.kind != "bbs_config" {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.121",
+                &[("file_name", &file_name.to_string())],
+            )));
+        }
+        let dir = slicer_process_dir()
+            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.122", &[])))?;
+        let target = dir.join(&file.file_name);
+        if !target.is_file() {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.123",
+                &[("file_name", &file_name.to_string())],
+            )));
+        }
+        reveal_in_explorer(&app, &target)
+    })
+}
+
+/// 打开系统文件管理器并选中这一份（两条 reveal 共用）。
+///
+/// 打开的是**系统**的文件管理器，不是我们的界面 —— 之后复制 / 压缩 / 发人随用户。
+fn reveal_in_explorer(app: &AppHandle, target: &std::path::Path) -> Result<(), AppError> {
+    use tauri_plugin_opener::OpenerExt as _;
+    app.opener().reveal_item_in_dir(target).map_err(|e| {
+        AppError::io(messages::text("ui.ipc.presets.124", &[])).with_detail(e.to_string())
+    })
 }
 
 /* ---------- 切片器目录（复制进去才生效） ---------- */
@@ -890,56 +994,78 @@ pub fn get_slicer_copied(app: AppHandle) -> Result<Vec<String>, AppError> {
     })
 }
 
+/// 「复制进切片器」这一次干了什么：`replaced` = 目标那儿**原来已经有一份同名的**，
+/// 这一手把它换成了我们这份（false = 新建）。
+///
+/// 提示条按它说话 —— 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
+/// 不合并成一句"已复制"。
+#[derive(Debug, Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyOutcome {
+    pub replaced: bool,
+}
+
 /// 把一份切片器配置复制进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
 /// （MKP 预设的生效是「启用」，两回事）。
 ///
-/// 三种真实的失败照实抛，不吞：
+/// 两条真实的失败照实抛，不吞：
 /// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型复制过去没有意义）；
 /// - 本机还没有这份文件的字节（先「下载」）；
-/// - 目标位置已经有同名文件（**不覆盖** —— 那份可能被用户在切片器里改过，静默盖掉
-///   等于删用户数据。要换新，先在切片器里删掉旧的）。
+/// - 找不到切片器的用户配置目录（没装那个应用 / 没打开过）。
+///
+/// ★ **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
+///   原来是拒的，理由是"那份可能被用户在切片器里改过"。作者口径优先：这一手就是
+///   「把切片器里那份换成我们这份」，不再要求先自己去切片器里删。
+///
+///   覆盖走**原子替换**（[`crate::fsx::atomic::atomic_write`]：同目录临时文件 → rename），
+///   切片器正开着也不会读到半个文件；盘上那份与源**一个字节不差**时连动都不动
+///   （mtime 也不变）。
 #[tauri::command]
-pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<(), AppError> {
+pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, AppError> {
     traced("copyToSlicer", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
-            return Err(AppError::not_found(format!(
-                "目录里没有这份文件：{file_name}"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.125",
+                &[("file_name", &file_name.to_string())],
             )));
         };
         if file.kind == "mkp_preset" {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.126",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         if file.kind != "bbs_config" {
-            return Err(AppError::invalid_argument(format!(
-                "{file_name} 不是切片器配置，复制进切片器目录没有意义"
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.127",
+                &[("file_name", &file_name.to_string())],
             )));
         }
         let internal = internal_root(&app)?;
         let source = crate::fsx::paths::resolve_in(&internal, &file.path)?;
         if !source.is_file() {
-            return Err(AppError::not_found(format!(
-                "本机还没有 {file_name} —— 先「下载」再复制"
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.128",
+                &[("file_name", &file_name.to_string())],
             )));
         }
-        let dir = slicer_process_dir().ok_or_else(|| {
-            AppError::not_found(
-                "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来",
-            )
-        })?;
+        let dir = slicer_process_dir()
+            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.129", &[])))?;
         let target = dir.join(&file.file_name);
-        if target.exists() {
-            return Err(AppError::io(format!(
-                "切片器目录里已经有 {file_name} 了 —— 要换新先在切片器里删掉旧的那份"
-            ))
-            .with_detail(target.display().to_string()));
-        }
-        std::fs::copy(&source, &target)
-            .map_err(|e| AppError::io("复制进切片器目录失败").with_detail(e.to_string()))?;
-        tracing::info!(file = %file_name, target = %target.display(), "已复制进切片器目录");
-        Ok(())
+        let replaced = target.is_file();
+        let bytes = std::fs::read(&source).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.presets.130", &[])).with_detail(e.to_string())
+        })?;
+        /* 原子替换：同目录临时文件 → rename（切片器正开着也不会读到半个） */
+        crate::fsx::atomic::atomic_write(&target, &bytes)?;
+        tracing::info!(
+            file = %file_name,
+            target = %target.display(),
+            replaced,
+            "已复制进切片器目录"
+        );
+        Ok(CopyOutcome { replaced })
     })
 }
 
@@ -995,9 +1121,6 @@ mod tests {
     #[test]
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
-        /* 一个空内部根：交付文件一份都不在盘上 —— `abs_path` 的起点就是这一档 */
-        let empty = tempfile::tempdir().expect("临时内部根");
-        let root = empty.path();
 
         // —— 机型清单：5 台，A1 带别名与尺寸，品牌是显示名 ——
         let machines = machines_dto(&catalog);
@@ -1011,7 +1134,7 @@ mod tests {
         assert_eq!(a1.versions.len(), 3);
 
         // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
-        let vf = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
+        let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");
         assert!(!vf.incomplete, "A1/FASTV3.3 配齐了：{:?}", vf.missing);
         let mkp = vf
             .files
@@ -1027,22 +1150,10 @@ mod tests {
         assert_eq!(mkp.size, None, "随包目录不登记 size");
         assert_eq!(mkp.sha256, None, "随包目录不登记 SHA");
         /*
-         * **绝对路径的唯一消费者是「复制后处理脚本」里那段 `--Toml`**（2026-10-09）。
-         * 盘上还没有这一份 ⇒ 不给值 —— 界面据此**不摆那颗按钮**：贴一条指不到文件的
-         * 命令进切片器，用户看到的是 "Error code: 2"（mkp-ssr 的「预设文件不存在」），
-         * 那正是这条判据要防的那次事故。
+         * **落点表里没有绝对路径**（2026-10-10）：那张表只答"该有哪些文件"；
+         * "这份真在盘上时它的绝对落点是什么"归 `get_post_process_command`
+         * （命令判据在 `ipc::mod` 那一组里）。
          */
-        assert_eq!(mkp.abs_path, None, "盘上没有这一份，不许给绝对路径");
-        // 真落到盘上之后：绝对路径 = 内部根 + 目录登记的落点
-        let at = root.join(&mkp.path);
-        crate::fsx::atomic::atomic_write(&at, b"# machine: A1\n").expect("放过一份交付文件");
-        let on_disk = version_files_dto(&catalog, root, "A1", "FASTV3.3").expect("同一份");
-        let mkp = on_disk
-            .files
-            .iter()
-            .find(|f| f.kind == "mkp_preset")
-            .expect("MKP 引用必须在");
-        assert_eq!(mkp.abs_path.as_deref(), Some(at.to_string_lossy().as_ref()));
         // 切片器那支跟着套餐走：这一版自己指的那份套餐里至少一条 BBS
         assert!(
             vf.files.iter().any(|f| f.kind == "bbs_profile"),
@@ -1067,19 +1178,9 @@ mod tests {
         // 每台机型都与 A1 同形：切片器档一条幽灵都不许有
         for m in machines.iter() {
             for v in &m.versions {
-                let Some(vf) = version_files_dto(&catalog, root, &m.id, &v.id) else {
+                let Some(vf) = version_files_dto(&catalog, &m.id, &v.id) else {
                     continue;
                 };
-                /* 切片器那支与绝对路径无关：它一份都不该带 `abs_path` */
-                assert!(
-                    vf.files
-                        .iter()
-                        .filter(|f| f.kind != "mkp_preset")
-                        .all(|f| f.abs_path.is_none()),
-                    "{}/{} 的切片器档不该给绝对路径",
-                    m.id,
-                    v.id
-                );
                 assert!(
                     vf.files
                         .iter()
@@ -1097,8 +1198,8 @@ mod tests {
         }
 
         // 不存在的机型/版本 → None（不是出错）
-        assert!(version_files_dto(&catalog, root, "NOPE", "X").is_none());
-        assert!(version_files_dto(&catalog, root, "A1", "NOPE").is_none());
+        assert!(version_files_dto(&catalog, "NOPE", "X").is_none());
+        assert!(version_files_dto(&catalog, "A1", "NOPE").is_none());
 
         // —— 云端表：只出切片器预设，15 条资产里图标/模型不进来 ——
         let presets = preset_files_dto(&catalog);
@@ -1145,9 +1246,9 @@ mod tests {
             "bundled 档不进客户端菜单"
         );
 
-        // —— 参数元信息：全部 74 条，含废弃 ——
+        // —— 参数元信息：全部 75 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 74, "实测 74 条字段定义，一条不少");
+        assert_eq!(meta.len(), 75, "实测 75 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")
@@ -1176,8 +1277,9 @@ mod tests {
             x.toml_key, offset_x.toml_key,
             "配方通道与元信息通道的 toml_key 必须是同一个值（不是两份真相）"
         );
-        // 真数据里 A1:FASTV3.3 把这一项钉在 0.1（版本层）——三层取值要读出覆盖
-        assert_eq!(x.value, "0.1");
+        // 真数据里 A1:FASTV3.3 把这一项钉在 -0.7（版本层，2026-10-19 作者改的
+        // 笔尖偏移）——三层取值要读出覆盖
+        assert_eq!(x.value, "-0.7");
         assert_eq!(x.origin, "variant");
         // 机型层没写 → 「还原成」给的是出厂默认 0
         assert_eq!(x.base_value.as_deref(), Some("0"));
@@ -1189,11 +1291,12 @@ mod tests {
 
     /// **弃用标记要真的穿过整条链，但两条通道的语义各自保持不动**（① 的判据）。
     ///
-    /// 真上游 `param_registry.toml` 里 8 处：7 字段级 + 1 选项级（`wiping.outer_structure`
-    /// 的 `sheath` = 护套）。作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为
-    /// 三件分开的事，于是这里的期望形状是：
+    /// 真上游 `param_registry.toml` 里 8 处：6 字段级 + 2 选项级（`wiping.have_wiping_components`
+    /// 的 `disk` = 圆盘擦拭，`wiping.outer_structure` 的 `sheath` = 护套）。
+    /// 作者 2026-10-02 的裁决把「显示 ≠ 可编辑 ≠ 会进入新产物」定死为三件分开的事，
+    /// 于是这里的期望形状是：
     ///
-    /// - **definition 通道**（`ParamMetaDto`）：带 7 条字段级弃用 —— 参数页靠它列字段、
+    /// - **definition 通道**（`ParamMetaDto`）：带 6 条字段级弃用 —— 参数页靠它列字段、
     ///   画红线徽章（「显示」）；
     /// - **配方通道**（`RecipeParamDto`）：**一条字段级弃用都不下发** —— `visible_keys_of`
     ///   的排除语义不许被偷改（不进入新产物）；配方里出现的每一条只能是被排除后剩下的活字段，
@@ -1204,7 +1307,7 @@ mod tests {
     fn deprecated_flags_travel_through_definition_channel_only() {
         let catalog = catalog();
 
-        // —— 字段级：definition 通道带 7 条（真注册表口径）——
+        // —— 字段级：definition 通道带 6 条（真注册表口径）——
         let meta = param_meta_dto(&catalog);
         let meta_deprecated: Vec<&str> = meta
             .iter()
@@ -1213,8 +1316,8 @@ mod tests {
             .collect();
         assert_eq!(
             meta_deprecated.len(),
-            7,
-            "真注册表 7 条字段级弃用：{meta_deprecated:?}"
+            6,
+            "真注册表 6 条字段级弃用：{meta_deprecated:?}"
         );
 
         // —— 配方通道：一条字段级弃用都不许有（排除语义没被偷改）——
@@ -1235,7 +1338,7 @@ mod tests {
                 assert!(!p.deprecated, "{} 配方侧也不许带弃用标记", p.key);
             }
         }
-        // 反向钉子：定义侧那 7 条，一条都不许出现在配方里
+        // 反向钉子：定义侧那 6 条，一条都不许出现在配方里
         for key in &meta_deprecated {
             assert!(
                 !params.iter().any(|p| p.key == *key),

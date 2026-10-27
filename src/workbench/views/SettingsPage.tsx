@@ -1,12 +1,12 @@
 /**
- * 「设置」页 —— 数据根只读 + **一块可编辑的配置**（官方源）。
+ * 「设置」页 —— 数据根只读 + **一块可编辑的配置**（云端源）。
  *
  * 数据根（presets / workbench / dist）**不可配**：本仓的预设真相源固定是
  * `<repo>/presets`（没有第二候选、不 fallback），所以这一页把它们摆开，让人一眼看清
  * 工作台在读哪几个根、工作台子目录各自谁写谁读 —— 排查「读错了目录 / 数据长在哪」
  * 的那种问题用。上游根与回退规则那两块**已经整层删掉**（`HANDOFF.md`），照实不摆。
  *
- * 2026-10-02（第十七刀）起多了一块**可编辑**的：「官方源（Bootstrap）」——
+ * 2026-10-02（第十七刀）起多了一块**可编辑**的：「云端源（Bootstrap）」——
  * 发布产物发到哪。它是**工作台唯一一处"发布到哪"**（入库的
  * `workbench/bootstrap.json`）；客户端构建时由 `build.rs` 读它注入默认源
  * （`npm run tauri dev` 也吃它）。
@@ -32,7 +32,7 @@
  *
  * 上面那一格是**发布到哪**（构建期注入）。这一格是**起一份本地假云端** ——
  * 一颗按钮替你敲 `npm run preset-source:dev`，把 `scripts/preset-test-server`
- * 起在 `127.0.0.1:8787` 上，于是不用为了验"官方发了新版本"真去发一版。
+ * 起在 `127.0.0.1:8787` 上，于是不用为了验"云端发了新版本"真去发一版。
  *
  * ★ **它只起服务，不碰客户端**（作者 2026-10-08 裁决）。先前那一版连客户端
  * `tauri dev` 一起起（`npm run dev:test-update` + `MKPSE_PRESET_SOURCE_URL`）——
@@ -48,6 +48,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 
+import type { ThemePref } from '../../api/contract'
 import { isAppError, wb } from '../api'
 import type {
   Boot,
@@ -57,10 +58,19 @@ import type {
   PublishAccount,
   SandboxStatus,
 } from '../api'
+/* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
+import { setTheme, useResolvedDark, useThemePref } from '../theme'
 import s from '../c14.module.css'
 
 /** 字节数给人看（一位小数够） */
 const mb = (n: number): string => `${(n / 1024 / 1024).toFixed(1)} MB`
+
+/** 外观三档（与客户端「设置 → 外观」同一套说法、同一个 id —— 后端那边的 ThemePref 钉着） */
+const THEME_OPTS: { id: ThemePref; label: string; note: string }[] = [
+  { id: 'system', label: '跟随系统', note: '系统切深色就跟着深色 —— 没选过的时候就是这一档' },
+  { id: 'light', label: '浅色', note: '一直是浅色，不管系统怎么设' },
+  { id: 'dark', label: '深色', note: '一直是深色，不管系统怎么设' },
+]
 
 interface Props {
   boot: Boot
@@ -74,7 +84,7 @@ interface Props {
 }
 
 export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
-  /* 官方源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
+  /* 云端源那两格：初值来自 boot；保存成功后本地回显（真值在 workbench/bootstrap.json，
      下次 wb_boot 会带回同一份）。GitHub 是主源；Gitee 是镜像（空 = 没配/清除） */
   const [bootstrap, setBootstrap] = useState(boot.bootstrapUrl ?? '')
   const [saved, setSaved] = useState<string | null>(boot.bootstrapUrl)
@@ -362,6 +372,31 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   const [sandBusy, setSandBusy] = useState(false)
   const [sandNote, setSandNote] = useState<{ text: string; bad: boolean } | null>(null)
 
+  /*
+   * 外观（深浅）：**选哪一档**由 `theme.ts` 拿着（它同时管着 `<html data-theme>`），
+   * 这一页只负责"点一下 → 交后端落盘 → 回来那一档是什么就显示什么"。
+   *
+   * ★ 真值一律取**后端答回来的那一份**（`setTheme` 的返回值）—— 界面不自己记住
+   *   "我以为是深色"，否则后端拒了而界面已经翻过去，就是"界面说了不算"。
+   */
+  const themePref = useThemePref()
+  const isDark = useResolvedDark()
+  const [themeBusy, setThemeBusy] = useState(false)
+  const [themeNote, setThemeNote] = useState<string | null>(null)
+
+  const pickTheme = async (next: ThemePref) => {
+    if (themeBusy) return
+    setThemeBusy(true)
+    setThemeNote(null)
+    try {
+      await setTheme(next)
+    } catch (e) {
+      setThemeNote(isAppError(e) ? e.message : e instanceof Error ? e.message : String(e))
+    } finally {
+      setThemeBusy(false)
+    }
+  }
+
   const sandboxAct = async (what: 'set' | 'refill' | 'wipe', enabled?: boolean) => {
     if (sandBusy) return
     setSandBusy(true)
@@ -447,6 +482,52 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
 
   return (
     <div className={s.flow} style={{ padding: 12 }}>
+      {/* ——— 外观：深浅两套配色（2026-10-16，与客户端同一套取值） ——— */}
+      <div className={s.card}>
+        <div className={s.cardHead}>
+          <b>外观</b>
+          <span className={s.cardNote}>
+            深浅两套配色 —— 现在这一窗是{isDark ? '深色' : '浅色'}
+          </span>
+        </div>
+        <div className={s.cardBody}>
+          <div className={s.vfield}>
+            <p className={s.vhelp}>
+              工作台与客户端<b>各记各的一档</b>（两个应用的数据根是分开的，谁也不去读对方那棵树）
+              —— 这儿改的是<b>工作台这一窗</b>；客户端那扇窗在它自己的「设置 → 外观」里。
+            </p>
+            {THEME_OPTS.map((o) => (
+              <label
+                key={o.id}
+                className={s.vrow}
+                style={{ alignItems: 'flex-start', cursor: 'pointer' }}
+              >
+                <input
+                  type="radio"
+                  name="wb-theme"
+                  value={o.id}
+                  /* 「没选过」= 跟随系统那一档（`null` 与 `system` 是一个意思） */
+                  checked={(themePref ?? 'system') === o.id}
+                  disabled={themeBusy}
+                  onChange={() => void pickTheme(o.id)}
+                />
+                <span className={s.grow}>
+                  <b>{o.label}</b>
+                  <span className={s.vhelp} style={{ display: 'block' }}>
+                    {o.note}
+                  </span>
+                </span>
+              </label>
+            ))}
+            {themeNote !== null && (
+              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                {themeNote}
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
       {/* ——— 测试模式（沙箱）：整套数据根切到另一棵树 ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>
@@ -773,7 +854,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
 
       <div className={s.card}>
         <div className={s.cardHead}>
-          <b>官方源（Bootstrap）</b>
+          <b>云端源（Bootstrap）</b>
           <span className={s.cardNote}>发布产物发到哪 —— 工作台唯一一处；客户端构建时编进去</span>
         </div>
         <div className={s.cardBody}>
@@ -800,7 +881,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 /* 中性示例（`<owner>/<repo>`），**不是"默认值"** ——
                    空着就是"还没配"，别让占位符看起来像已经填好了 */
                 placeholder="https://github.com/<owner>/<repo>（主源）"
-                aria-label="官方源（GitHub 主源）地址"
+                aria-label="云端源（GitHub 主源）地址"
               />
             </div>
             <div className={s.vrow}>
@@ -813,7 +894,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 value={giteeBootstrap}
                 onChange={(e) => setGiteeBootstrap(e.target.value)}
                 placeholder="https://gitee.com/<owner>/<repo>（镜像，空 = 不提供）"
-                aria-label="官方源（Gitee 镜像）地址"
+                aria-label="云端源（Gitee 镜像）地址"
               />
             </div>
             <div className={s.vrow}>
@@ -978,7 +1059,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             <p className={s.vhelp}>
               ★ 客户端那边的节奏：进「预设」页时它<b>自己查一次</b>远端目录（比 revision，
               本次运行只查一次），查到就把本地那份目录换掉 —— 但<b>绝不自动下载预设文件</b>，
-              云端表里那几行要点「下载」才落进「我的预设」。所以"生成完看不到更新"通常只有两种原因：
+              云端表里那几行要点「下载」才落进「本地预设」。所以"生成完看不到更新"通常只有两种原因：
               地址填的不是上面这一串，或者这次运行已经查过了（重进页面 / 重启客户端再查一次）。
             </p>
 

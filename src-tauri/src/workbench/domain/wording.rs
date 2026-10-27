@@ -346,6 +346,16 @@ pub const UNSUPPORTED: &str = "暂不支持";
 /// 三条：空串写「空」；开关写「开启 / 关闭」；**string 档且带 `choices`** 的写命中项
 /// 的中文名 —— 界面上显示 `disk` 的话，用户得在一堆中文按钮里猜哪个是 `disk`
 pub fn value_text(param: &ParamDef, value: &Value) -> String {
+    value_text_with(param, value, None)
+}
+
+/// 同一件事，但「已废弃」按**这台机型**判（弃用可以只对某些机型生效）。
+/// 参数台格子里该走这一条 —— 全局口径会把「A1 上退场」说成「所有机型都退场」。
+pub fn value_text_for(param: &ParamDef, value: &Value, machine_id: &str) -> String {
+    value_text_with(param, value, Some(machine_id))
+}
+
+fn value_text_with(param: &ParamDef, value: &Value, machine_id: Option<&str>) -> String {
     if param.value_type == ValueType::Bool {
         return match value {
             Value::Bool(true) => "开启".into(),
@@ -362,7 +372,11 @@ pub fn value_text(param: &ParamDef, value: &Value) -> String {
         None
     };
     if let Some(hit) = hit {
-        return if hit.deprecated {
+        let dead = match machine_id {
+            Some(m) => hit.deprecated_for(m),
+            None => hit.deprecated,
+        };
+        return if dead {
             // 当前值正好是废弃项时要标出来（doc §15）：它还能用，但不该继续用
             format!("{}（已废弃）", hit.label)
         } else {

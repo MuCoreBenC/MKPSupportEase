@@ -35,6 +35,8 @@
 //! 把结果写进 `<appData>/run/update-result.json`，**下次启动**读它并说清上次成没成
 //! （判据 [`update_result_is_read_on_next_launch`]）。
 
+use postprocess::diag::messages;
+
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -126,7 +128,10 @@ pub fn percent(received: u64, total: u64) -> u8 {
 pub fn progress_text(received: u64, total: u64) -> String {
     let mb = |v: u64| format!("{:.1} MB", v as f64 / 1024.0 / 1024.0);
     if total == 0 {
-        format!("已下载 {}", mb(received))
+        ::postprocess::diag::messages::text(
+            "ui.runtime.updater.downloaded",
+            &[("v1", &mb(received))],
+        )
     } else {
         format!("{} / {}", mb(received), mb(total))
     }
@@ -137,8 +142,12 @@ pub fn progress_text(received: u64, total: u64) -> String {
 /// 尺寸对不上 = 这一份坏了（截断 / 中间被改）—— **不装**。SHA 不在预期里也一样。
 pub fn verify_size(received: u64, expected: u64) -> Result<(), AppError> {
     if expected > 0 && received != expected {
-        return Err(AppError::corrupted(format!(
-            "下载下来的安装包大小不对（收到 {received}，应当 {expected}）—— 这一份坏了，不装"
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.updater.469",
+            &[
+                ("received", &received.to_string()),
+                ("expected", &expected.to_string()),
+            ],
         )));
     }
     Ok(())
@@ -146,14 +155,15 @@ pub fn verify_size(received: u64, expected: u64) -> Result<(), AppError> {
 
 /// 文件的 SHA-256（小写十六进制）。**空文件也给一个真值**（那本身就是"坏"的证据）。
 pub fn sha256_file(path: &Path) -> Result<String, AppError> {
-    let mut f = std::fs::File::open(path)
-        .map_err(|e| AppError::io("读不到下载好的安装包").with_detail(e.to_string()))?;
+    let mut f = std::fs::File::open(path).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.470", &[])).with_detail(e.to_string())
+    })?;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = f
-            .read(&mut buf)
-            .map_err(|e| AppError::io("算校验和时读不了文件").with_detail(e.to_string()))?;
+        let n = f.read(&mut buf).map_err(|e| {
+            AppError::io(messages::text("ui.runtime.updater.471", &[])).with_detail(e.to_string())
+        })?;
         if n == 0 {
             break;
         }
@@ -172,7 +182,10 @@ pub fn verify_sha256(actual: &str, expected: Option<&str>) -> Result<(), AppErro
         return Ok(());
     };
     if !actual.eq_ignore_ascii_case(want.trim()) {
-        return Err(AppError::corrupted("下载下来的安装包校验和对不上 —— 不装"));
+        return Err(AppError::corrupted(messages::text(
+            "ui.runtime.updater.472",
+            &[],
+        )));
     }
     Ok(())
 }
@@ -182,15 +195,18 @@ pub fn verify_sha256(actual: &str, expected: Option<&str>) -> Result<(), AppErro
 /// ★ **只认退出码**（判据 [`unpack_is_checked_by_exit_code`]）：我们不解析 zip 结构，
 ///   `unzip` 自己管格式。`ok = false` 时用它的 stderr 说人话。
 pub fn unpack(zip: &Path, into: &Path) -> Result<(), AppError> {
-    std::fs::create_dir_all(into)
-        .map_err(|e| AppError::io("建不出解压目录").with_detail(e.to_string()))?;
+    std::fs::create_dir_all(into).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.473", &[])).with_detail(e.to_string())
+    })?;
     let out = std::process::Command::new("unzip")
         .args(["-q", "-o", zip.to_str().unwrap_or_default(), "-d"])
         .arg(into)
         .output()
-        .map_err(|e| AppError::io("起不了系统 unzip").with_detail(e.to_string()))?;
+        .map_err(|e| {
+            AppError::io(messages::text("ui.runtime.updater.474", &[])).with_detail(e.to_string())
+        })?;
     if !out.status.success() {
-        return Err(AppError::io("解压安装包失败")
+        return Err(AppError::io(messages::text("ui.runtime.updater.475", &[]))
             .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
     }
     Ok(())
@@ -202,24 +218,33 @@ pub fn unpack(zip: &Path, into: &Path) -> Result<(), AppError> {
 /// 不许自己挑一个。
 pub fn find_unpacked_app(dir: &Path) -> Result<PathBuf, AppError> {
     let mut apps: Vec<PathBuf> = std::fs::read_dir(dir)
-        .map_err(|e| AppError::io("读不了解压目录").with_detail(e.to_string()))?
+        .map_err(|e| {
+            AppError::io(messages::text("ui.runtime.updater.476", &[])).with_detail(e.to_string())
+        })?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
         .collect();
     apps.sort();
     match apps.as_slice() {
         [one] => Ok(one.clone()),
-        [] => {
-            Err(AppError::corrupted("解压出来的目录里没有 .app")
-                .with_detail(dir.display().to_string()))
-        }
-        many => Err(AppError::invalid_argument(format!(
-            "解压出来的目录里有 {} 个 .app，不知道该用哪一个：{}",
-            many.len(),
-            many.iter()
-                .map(|p| p.display().to_string())
-                .collect::<Vec<_>>()
-                .join("、")
+        [] => Err(
+            AppError::corrupted(messages::text("ui.runtime.updater.477", &[]))
+                .with_detail(dir.display().to_string()),
+        ),
+        many => Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.updater.478",
+            &[
+                ("v1", &many.len().to_string()),
+                (
+                    "v2",
+                    &many
+                        .iter()
+                        .map(|p| p.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join("、")
+                        .to_string(),
+                ),
+            ],
         ))),
     }
 }
@@ -249,17 +274,22 @@ pub fn read_result(app_data: &Path) -> Result<Option<UpdateResult>, AppError> {
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(AppError::io("读不了上次安装结果").with_detail(e.to_string())),
+        Err(e) => {
+            return Err(AppError::io(messages::text("ui.runtime.updater.479", &[]))
+                .with_detail(e.to_string()))
+        }
     };
     serde_json::from_slice(&bytes).map(Some).map_err(|e| {
-        AppError::corrupted("上次安装结果（update-result.json）解析不了").with_detail(e.to_string())
+        AppError::corrupted(messages::text("ui.runtime.updater.480", &[]))
+            .with_detail(e.to_string())
     })
 }
 
 /// 写安装结果（**由退出后那个脚本代写**）。
 pub fn write_result(app_data: &Path, result: &UpdateResult) -> Result<(), AppError> {
-    let bytes = serde_json::to_vec_pretty(result)
-        .map_err(|e| AppError::internal("安装结果序列化失败").with_detail(e.to_string()))?;
+    let bytes = serde_json::to_vec_pretty(result).map_err(|e| {
+        AppError::internal(messages::text("ui.runtime.updater.481", &[])).with_detail(e.to_string())
+    })?;
     crate::fsx::atomic::atomic_write(&result_path(app_data), &bytes)?;
     Ok(())
 }
@@ -301,14 +331,13 @@ pub fn shell_quote(value: &str) -> String {
 /// 从当前可执行文件反推**这次运行的那个 `.app`**（`.../SupportEase.app/Contents/MacOS/…`
 /// → `.../SupportEase.app`）。找不到就如实说"不在 .app 里"（那就不是安装版）。
 pub fn running_app() -> Result<PathBuf, AppError> {
-    let exe = std::env::current_exe()
-        .map_err(|e| AppError::io("定位不到自己").with_detail(e.to_string()))?;
+    let exe = std::env::current_exe().map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.482", &[])).with_detail(e.to_string())
+    })?;
     exe.ancestors()
         .find(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
         .map(Path::to_path_buf)
-        .ok_or_else(|| {
-            AppError::not_implemented("这个构建不是从 .app 里跑的（开发构建），没有可替换的目标")
-        })
+        .ok_or_else(|| AppError::not_implemented(messages::text("ui.runtime.updater.483", &[])))
 }
 
 /* ---------------------- 驱动：下载任务 ---------------------- */
@@ -335,7 +364,10 @@ pub fn download(
         sess.state(),
         UpdateState::Downloading { .. } | UpdateState::Paused { .. }
     ) {
-        return Err(AppError::invalid_argument("已经在下载了"));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.updater.484",
+            &[],
+        )));
     }
     let paused = Arc::clone(&sess.paused);
     let cancelled = Arc::clone(&sess.cancelled);
@@ -347,8 +379,9 @@ pub fn download(
     if dir.exists() {
         let _ = std::fs::remove_dir_all(&dir);
     }
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| AppError::io("建不出更新暂存目录").with_detail(e.to_string()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.485", &[])).with_detail(e.to_string())
+    })?;
     let zip_path = dir.join(&asset.name);
     let part_path = dir.join(format!("{}.part", asset.name));
 
@@ -413,8 +446,9 @@ fn download_into(
     //   退役条件：**一旦**下载改成"先落 .part 再 atomic rename"的那套（postprocess 的
     //   `write_atomic` 已经是那个形状），这里就换成它。
     #[allow(clippy::disallowed_methods)]
-    let mut f = std::fs::File::create(part)
-        .map_err(|e| AppError::io("建不出下载暂存文件").with_detail(e.to_string()))?;
+    let mut f = std::fs::File::create(part).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.486", &[])).with_detail(e.to_string())
+    })?;
 
     let mut received: u64 = 0;
     let mut last_report = std::time::Instant::now();
@@ -428,26 +462,30 @@ fn download_into(
             if cancelled.load(Ordering::SeqCst) {
                 sess.set(UpdateState::Cancelled);
                 emit(sess.state());
-                return Err(AppError::io("下载已取消"));
+                return Err(AppError::io(messages::text("ui.runtime.updater.487", &[])));
             }
         }
         if cancelled.load(Ordering::SeqCst) {
             sess.set(UpdateState::Cancelled);
             emit(sess.state());
-            return Err(AppError::io("下载已取消"));
+            return Err(AppError::io(messages::text("ui.runtime.updater.488", &[])));
         }
         let n = reader.read(&mut buf).map_err(|e| {
-            let msg = format!("下载中断：{e}");
+            let msg = ::postprocess::diag::messages::text(
+                "ui.runtime.updater.interrupted_detail",
+                &[("detail", &e.to_string())],
+            );
             sess.set(UpdateState::Failed {
                 reason: msg.clone(),
             });
-            AppError::io("下载中断").with_detail(e.to_string())
+            AppError::io(messages::text("ui.runtime.updater.489", &[])).with_detail(e.to_string())
         })?;
         if n == 0 {
             break;
         }
-        f.write_all(&buf[..n])
-            .map_err(|e| AppError::io("写不了下载暂存文件").with_detail(e.to_string()))?;
+        f.write_all(&buf[..n]).map_err(|e| {
+            AppError::io(messages::text("ui.runtime.updater.490", &[])).with_detail(e.to_string())
+        })?;
         received += n as u64;
         // 进度**别太密**：每 120ms 一次就够画环了（每块都发会把界面打爆）
         if last_report.elapsed() >= std::time::Duration::from_millis(120) {
@@ -466,8 +504,9 @@ fn download_into(
     if let Some(want) = asset.expect_sha256() {
         verify_sha256(&sha256_file(part)?, Some(&want))?;
     }
-    std::fs::rename(part, done)
-        .map_err(|e| AppError::io("下载完成但改名失败").with_detail(e.to_string()))?;
+    std::fs::rename(part, done).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.491", &[])).with_detail(e.to_string())
+    })?;
     Ok(())
 }
 
