@@ -629,23 +629,12 @@ export default function PageHome({ density }: PageHomeProps) {
     /* 预判：这一批里缺的与漂的（已去重）。空 = 全齐全新 —— 直接应用，一个字节都不重下 */
     const todo = bundleState.todo
     /*
-     * ★ 2026-10-13：这一趟**先浮一句再动手**（作者：「点这个下载并应用的时候，也可以出现
-     * 刚才说的那个透明的气泡呀……如果还没有下载的时候，那个提示是和那个已经下载过、
-     * 只应用的那个气泡里面显示的内容还不太一样，就区分一下」）。
-     *
-     * 三档分的正是"这一趟到底要做什么"，用词按作者定的口径（不出现"云端 / 本地这份"）：
-     *   · 本机全齐（ready）→ 只应用；· 缺（missing）→ 先下载；· 漂（drift）→ 重新下载
-     *
-     * 吃的是页面底部那颗 `.scriptToast`（与「复制脚本」共用一颗）——**不占任何布局位置**，
-     * 说完自己走（5s，见上面那个 effect）。
+     * ★ 2026-10-28（作者：「怎么我点了下载就出现……这个透明度通知感觉很劣质很廉价，
+     *   通知都用右上角的吧，再也不需要下面的通知了」）：
+     *   底部那颗透明气泡整个退役 —— 结果统一走右上角 `notify`（实心通知卡）。
+     *   也**不再预告**"这一趟要做什么"：按钮自己就写着「下载并使用 / 更新并使用 / 使用」，
+     *   再浮一句就是重复；只报结果。
      */
-    const pendingNote =
-      bundleState.kind === 'ready'
-        ? tr('home.note.ready')
-        : bundleState.kind === 'drift'
-          ? tr('home.note.drift')
-          : tr('home.note.missing')
-    setScriptNote(pendingNote)
     try {
       if (todo.length > 0) {
         /* 逐份看结局：**任何一份没成就停下、不应用** —— 套餐缺一份就是没齐（不编成功） */
@@ -681,19 +670,21 @@ export default function PageHome({ density }: PageHomeProps) {
       /* 本仓术语就是 `preset / local`（来源只有这两条线，见契约 ActiveOrigin） */
       await api.applyActivePreset(fetched.fileName, 'local', fetched.path)
       appStateMutated()
-      /* 做完了换一句结果（与上面那句同源：这一趟是"下载并应用"还是"只应用"） */
-      setScriptNote(
-        bundleState.kind === 'ready'
-          ? tr('home.note.used')
-          : bundleState.kind === 'drift'
-            ? tr('home.note.updated')
-            : tr('home.note.downloaded'),
-      )
+      /* 做完了报一句结果（这一趟是"下载并应用"还是"只应用"） */
+      notify({
+        kind: 'ok',
+        title:
+          bundleState.kind === 'ready'
+            ? tr('home.note.used')
+            : bundleState.kind === 'drift'
+              ? tr('home.note.updated')
+              : tr('home.note.downloaded'),
+      })
     } catch (e) {
       const msg = errorText(e)
-      /* 失败留痕两条路：列里那行红字（带 traceId、常驻）+ 底部气泡浮一句（点击必须有回声） */
+      /* 失败留痕两条路：列里那行红字（带 traceId、常驻）+ 右上角通知（点击必须有回声） */
       setApplyError(msg)
-      setScriptNote(msg)
+      notify({ kind: 'bad', title: msg, ttl: 6000 })
     } finally {
       setApplying(false)
       /* 投递面广播：本页重读那两份单子（订阅在上面），**别的页**（预设页本地表 /
@@ -715,11 +706,11 @@ export default function PageHome({ density }: PageHomeProps) {
     try {
       await api.applyActivePreset(pickedCopy.fileName, 'local', pickedCopy.path)
       appStateMutated()
-      setScriptNote(tr('home.note.used'))
+      notify({ kind: 'ok', title: tr('home.note.used') })
     } catch (e) {
       const msg = errorText(e)
       setApplyError(msg)
-      setScriptNote(msg)
+      notify({ kind: 'bad', title: msg, ttl: 6000 })
     } finally {
       setApplying(false)
     }
@@ -782,8 +773,8 @@ export default function PageHome({ density }: PageHomeProps) {
    *
    * ★ 2026-10-13：进页面**不再预读一次命令**（原来那份 `copyCommand` 现况只喂给
    *   `CopyAction`，用来决定按钮下面那行小字说什么）。现在原因不再常驻在按钮下面 ——
-   *   点了之后由页面底部那颗不占位的 `.scriptToast` 说（作者：「干嘛要放在这？都被
-   *   截断了」），于是这份"缓存现况"整个退役：**点的时候现要一次**就够，前端不留旧路径。
+   *   点了之后由右上角通知说（2026-10-28 起；此前是页面底部那颗透明气泡），
+   *   于是这份"缓存现况"整个退役：**点的时候现要一次**就够，前端不留旧路径。
    */
 
   /*
@@ -791,9 +782,8 @@ export default function PageHome({ density }: PageHomeProps) {
    *
    * ★ 2026-10-16：取命令走**全站那一个出口**（`postProcessCommand`）——
    *   与标题栏 `MKP` 字标、与预设页右键那一项同一个函数，只是**反馈方式不同**：
-   *   ★ 首页这颗**不走通知系统**，仍用页面底部那颗不占位的气泡 —— 那是作者
-   *     2026-10-13 的裁决（气泡挂在按钮下面会被卡片两层 overflow 裁掉一截：
-   *     「干嘛要放在这？都被截断了」）。换位置是另一件事，本轮不动。
+   *   ★ 2026-10-28 起首页这颗也**走通知系统**（右上角实心卡）—— 作者把底部那颗
+   *     透明气泡判掉了（「感觉劣质很廉价」「再也不需要下面的通知了」）。
    */
   const loadCommand = useCallback(async (): Promise<PostProcessCommand> => {
     if (sel.model === null || sel.variant === null) {
@@ -806,14 +796,13 @@ export default function PageHome({ density }: PageHomeProps) {
    * ★ 2026-10-13（作者：「可以加一下那个复制的……他要复制的是那个后处理脚本呀，就跟首页的
    * 是一样的呀……你改成复制脚本吧，反正位置足够」）：四个步骤的底部各摆一颗「复制脚本」——
    * 与第一页那颗（内容里的 `CopyAction`）是同一个东西：点一下向后端**现要**一条命令，
-   * 拿到就进剪贴板（就地变「已复制」1.5s）；抄不了就把原因浮出来 ——
-   * 用**不占位的悬浮气泡**（`.scriptToast`），不挤压任何东西。
+   * 拿到就进剪贴板（就地变「已复制」1.5s）；抄不了就把原因交给右上角通知
+   * （`noteCopyProblem`，2026-10-28 起统一走通知系统）。
    *
    * 门槛（作者给的两句话）：「选定了、有预设的时候才可以复制」+「没有应用的时候就不能复制」——
    * 显形要"选齐三级 + 这一份预设取得到"，未应用就灰着（title 说差哪一步）。
    */
   const [scriptCopied, setScriptCopied] = useState(false)
-  const [scriptNote, setScriptNote] = useState<string | null>(null)
   const scriptTimer = useRef<number | null>(null)
 
   useEffect(
@@ -824,46 +813,40 @@ export default function PageHome({ density }: PageHomeProps) {
   )
 
   /*
-   * 气泡自己走（5s）。
-   *
-   * ★ 2026-10-13：原来这里还有"鼠标停在上面时先不走"（当时图的是"文字能拖选，
-   * 拖到一半消失等于没给这个能力"）。作者试过之后判掉了拖选本身
-   * （「它的拖选好像是失败的……算了，不要了」）—— 现在气泡 `pointer-events: none`
-   * 不吃指针，悬停判断也就永远触发不了，一并删掉。
+   * 「这条命令现在给不了」的**唯一出口**：右上角通知（实心卡）。
+   * 2026-10-28 起底部那颗透明气泡退役（作者：「感觉劣质很廉价」），
+   * 页脚那颗与卡片里的 `CopyAction` 都走这里。
    */
-  useEffect(() => {
-    if (scriptNote === null) return
-    const t = window.setTimeout(() => setScriptNote(null), 5000)
-    return () => window.clearTimeout(t)
-  }, [scriptNote])
+  const noteCopyProblem = useCallback((note: string) => {
+    notify({ kind: 'warn', title: note, ttl: 6000 })
+  }, [])
 
   const copyScript = useCallback(() => {
     void loadCommand().then(
       (cmd) => {
         if (!cmd.ready || cmd.command === undefined) {
           setScriptCopied(false)
-          setScriptNote(cmd.reason ?? tr('home.script.notReady'))
+          noteCopyProblem(cmd.reason ?? tr('home.script.notReady'))
           return
         }
         void navigator.clipboard.writeText(cmd.command).then(
           () => {
-            setScriptNote(null)
             setScriptCopied(true)
             if (scriptTimer.current !== null) window.clearTimeout(scriptTimer.current)
             scriptTimer.current = window.setTimeout(() => setScriptCopied(false), 1500)
           },
           (e: unknown) => {
             setScriptCopied(false)
-            setScriptNote(errorText(e))
+            notify({ kind: 'bad', title: errorText(e), ttl: 6000 })
           },
         )
       },
       (e: unknown) => {
         setScriptCopied(false)
-        setScriptNote(errorText(e))
+        notify({ kind: 'bad', title: errorText(e), ttl: 6000 })
       },
     )
-  }, [loadCommand, tr])
+  }, [loadCommand, noteCopyProblem, tr])
 
   /**
    * 四步共用那颗「复制脚本」（住 navs 左侧那一组 —— 作者：「它应该放到左侧吧」）。
@@ -874,7 +857,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 所以这里**不再有灰态**：差一步就整颗不出现，出现就是能点的。
    *
    * 点了之后后端说"这条命令现在给不了"（没落盘 / 预览里没有可执行物）不再靠灰按钮 + 小字，
-   * 而是**浮一颗不占位的气泡**说原因（见 `copyScript` 与页脚那颗 `.scriptToast`）。
+   * 而是**右上角通知**说原因（见 `noteCopyProblem`）。
    */
   const scriptAction = useMemo(
     () => ({
@@ -950,12 +933,12 @@ export default function PageHome({ density }: PageHomeProps) {
                     </p>
                     {/* 按钮**常驻**（2026-10-10）：这条命令能不能给由后端的两条真事实
                         说（本程序自己 + 预设真在盘上），点它才向后端现要命令。
-                        抄不了时的原因由**页面底部那颗气泡**说 —— 不给 `onNote` 的话，
-                        气泡就永远出不来（`CopyAction` 自己不再渲染任何提示，2026-10-13） */}
+                        抄不了时的原因走**右上角通知**（2026-10-28 起底部气泡退役）；
+                        `CopyAction` 自己仍不渲染任何提示，不给 `onNote` 就没人说这句话 */}
                     <CopyAction
                       label={tr('home.copy.action')}
                       load={loadCommand}
-                      onNote={setScriptNote}
+                      onNote={noteCopyProblem}
                     />
                   </>
                 )}
@@ -1360,6 +1343,7 @@ export default function PageHome({ density }: PageHomeProps) {
       loadCommand,
       modelName,
       modelOptions,
+      noteCopyProblem,
       pick,
       pickXY,
       pickZ,
@@ -1400,23 +1384,6 @@ export default function PageHome({ density }: PageHomeProps) {
   return (
     <div className={p.page} data-density={density}>
       <SlideDeck ref={deckRef} sheets={sheets} density={density} canLeave={canLeave} />
-
-      {/*
-       * 「抄不了」的原因气泡 —— **绝对定位、不占任何布局位置，全页只有这一颗**：
-       *   · 页脚那颗「复制脚本」（见 copyScript）点了给不了时；
-       *   · 卡片里那颗「复制后处理脚本」（见上面的 `CopyAction`）点了给不了时 ——
-       *     它自己不再渲染提示（挂在按钮下面会压住读数表、还被卡片裁，2026-10-13 作者退回）。
-       *
-       * 作者 2026-10-13：「你去用这个校准页面的这种提示啊，这种悬浮气泡不占任何位置的提示」
-       * （上一版把它做成卡里的一行字，把板子和按钮都往上挤了）。说完自己走（5s，
-       * 见上面那个 effect）；`pointer-events: none`（在 CSS 里）—— 不吃指针、不挡底下的按钮。
-       */}
-      {scriptNote !== null && (
-        <div className={p.scriptToast} role="status">
-          <i className={p.scriptToastDot} aria-hidden />
-          <span>{scriptNote}</span>
-        </div>
-      )}
 
       {/* 预设抽屉：从左缘出（右边常驻露出卡，没地方）。有草稿时先问一句（`presetAsk` 那个确认框），
           确认后才换；抽屉挂在 .page（container 的布局包含块）上 */}
