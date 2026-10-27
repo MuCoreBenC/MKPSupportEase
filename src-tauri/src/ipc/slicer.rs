@@ -617,9 +617,7 @@ fn bundle_display_name(app_url: &core_foundation::url::CFURL) -> Option<String> 
 fn windows_system_default_app() -> Option<SlicerApp> {
     let command = windows_open_command("3mf")?;
     let path = PathBuf::from(exe_from_command_line(&command)?);
-    let name = known_label(&path)
-        .map(str::to_string)
-        .unwrap_or_else(|| app_stem(&path));
+    let name = known_label(&path).unwrap_or_else(|| app_stem(&path));
     Some(SlicerApp {
         name,
         path: path.to_string_lossy().into_owned(),
