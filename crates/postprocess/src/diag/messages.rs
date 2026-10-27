@@ -252,6 +252,24 @@ pub fn keys() -> Vec<&'static str> {
     table().keys().map(String::as_str).collect()
 }
 
+/// 按**原文**反查键（2026-10-27）。
+///
+/// 老归档只存了当年那句话（没有键）—— 报告页要按当前语言重说一遍，就得先认出
+/// 它是表里哪一条。比的是 `text` 与 `text_en` 的**整句相等**：带占位符的句子
+/// （值已经填进去了）对不上，那就对不上，不猜、不模糊匹配。
+pub fn key_of_exact_text(s: &str) -> Option<&'static str> {
+    let want = s.trim();
+    if want.is_empty() {
+        return None;
+    }
+    table()
+        .iter()
+        .find(|(_, e)| {
+            e.text.trim() == want || e.text_en.as_deref().is_some_and(|en| en.trim() == want)
+        })
+        .map(|(k, _)| k.as_str())
+}
+
 /// 这条键对应的**对外码**。
 ///
 /// 规则两条，够用且不歧义：
@@ -349,6 +367,18 @@ mod tests {
             missing.is_empty(),
             "这些条目没有英文（text_en）：{missing:?}"
         );
+    }
+
+    /// 按原文反查键：中文原句、英文原句都能认回来；带填值的句子认不出（返回 `None`）。
+    #[test]
+    fn exact_text_finds_its_key() {
+        let key = "hook.tower_relocate_declined";
+        let zh = text_in(Lang::Zh, key, &[]);
+        let en = text_in(Lang::En, key, &[]);
+        assert_eq!(key_of_exact_text(&zh), Some(key));
+        assert_eq!(key_of_exact_text(&en), Some(key));
+        assert_eq!(key_of_exact_text("  根本不存在的句子  "), None);
+        assert_eq!(key_of_exact_text(""), None);
     }
 
     /// 英文那几栏里**不许有中文**（分隔符也换过：`，` → `, `）。

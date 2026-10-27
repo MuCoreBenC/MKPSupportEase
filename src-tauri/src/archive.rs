@@ -556,6 +556,13 @@ pub struct Meta {
     pub warnings: Vec<String>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
     pub error: Option<String>,
+    /// 那句"为什么没成"的**字典键**（2026-10-27）。有了它，报告页就能按当前语言
+    /// 重说一遍 —— 记录里不再只剩某一刻的那一句。老记录没有这一格。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_key: Option<String>,
+    /// 上面那条的占位符值（原始事实，不是词）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_args: Option<std::collections::BTreeMap<String, String>>,
     pub cancelled: bool,
     pub pipeline: Vec<PipelineStep>,
     /**
@@ -1626,6 +1633,8 @@ mod tests {
             },
             warnings: vec!["这一盘没有支撑".into()],
             error: None,
+            error_key: None,
+            error_args: None,
             cancelled: false,
             pipeline: vec![PipelineStep {
                 id: "input",
@@ -1729,6 +1738,8 @@ mod tests {
             invocation: invocation(),
             warnings: Vec::new(),
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
+            error_key: None,
+            error_args: None,
             cancelled: false,
             pipeline: Vec::new(),
             /* 越界失败不是碰撞 —— 那一格必须是 null（判据里钉住键名即可） */

@@ -96,7 +96,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
-import { useT, type StringKey, type Tr } from '../../i18n'
+import { useLocale, useT, type StringKey, type Tr } from '../../i18n'
 import type {
   CatalogParamDef,
   PostProcessPrintTime,
@@ -1338,6 +1338,8 @@ export default function PageReport() {
   const reloadDetail = useCallback(() => setDetailNonce((n) => n + 1), [])
   /** 右栏现在这份 `detail` 是给哪一条读的（换记录才清空，同一条补读不闪） */
   const detailFor = useRef<string | null>(null)
+  /* 语言一换就重读记录：那句「为什么没成」是后端按当前语言给的（见 `localized_error`） */
+  const locale = useLocale()
   const [tab, setTab] = useState<string>(TAB_ALL)
   const [sideOpen, setSideOpen] = useState(false)
   /*
@@ -1471,7 +1473,7 @@ export default function PageReport() {
       alive = false
       for (const off of offs) off()
     }
-  }, [read, reloadDetail])
+  }, [read, reloadDetail, locale])
 
   /*
    * 导出计划**在选中那一条时就读**（不是等按了「导出」才读）。

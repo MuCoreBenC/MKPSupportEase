@@ -195,7 +195,14 @@ fn summarize(path: &std::path::Path, id: &str, day: &str) -> ReportSummary {
             .map(|s| s.trim().to_owned())
             .filter(|s| !s.is_empty())
     };
-    let error = str_at("error");
+    /*
+     * 那句「为什么没成」**按当前语言重说一遍**（2026-10-27 作者：回放/报告切到中文
+     * 就该是中文，不能停在写记录那一刻的语言）。
+     *
+     * 新记录带 `errorKey`（写的时候认出来的）；老记录只有当年那句话，就按**原文反查**
+     * 一次键。反查不到（那句里已经填了值）就原样摆 —— 不猜、不模糊匹配。
+     */
+    let error = localized_error(&meta).or_else(|| str_at("error"));
     let warnings = meta
         .get("warnings")
         .and_then(|v| v.as_array())
@@ -276,6 +283,39 @@ pub fn get_report_detail(app: AppHandle, id: String) -> Result<ReportDetail, App
         let summary = summarize(&path, &id, &day);
         Ok(detail_of(summary, &meta))
     })
+}
+
+/**
+ * 记录里那句"为什么没成"，按**当前语言**给（2026-10-27）。
+ *
+ * 归档的道理与管线明细同一条：**存事实不存句子**。新记录带 `errorKey`；老记录只有
+ * 当年那一句，就按原文在文案表里反查一次键。两样都没有 ⇒ `None`，调用方回落原句。
+ */
+fn localized_error(meta: &serde_json::Value) -> Option<String> {
+    let key = meta
+        .get("errorKey")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .or_else(|| {
+            meta.get("error")
+                .and_then(|v| v.as_str())
+                .and_then(messages::key_of_exact_text)
+                .map(str::to_owned)
+        })?;
+    let empty = serde_json::Map::new();
+    let args = meta
+        .get("errorArgs")
+        .and_then(|v| v.as_object())
+        .unwrap_or(&empty);
+    let pairs: Vec<(String, String)> = args
+        .iter()
+        .map(|(k, v)| (k.clone(), v.as_str().unwrap_or_default().to_owned()))
+        .collect();
+    let refs: Vec<(&str, &str)> = pairs
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    Some(messages::text(&key, &refs))
 }
 
 /// 在整棵树里找 `<id>_meta.json`（id 全树唯一，文件名即 id）

@@ -1200,6 +1200,8 @@ fn archive_success(
         invocation: crate::archive::invocation(),
         warnings: done.warnings.clone(),
         error: None,
+        error_key: None,
+        error_args: None,
         cancelled: false,
         pipeline,
         /* 成功那一趟没有碰撞事实（撞了就走不到这里）—— 这一格恒 `null` */
@@ -1258,6 +1260,10 @@ fn archive_failure(
         invocation: crate::archive::invocation(),
         warnings: Vec::new(),
         error: Some(error.to_string()),
+        /* 认得出是哪一条就把键也记下 —— 归档里存事实，词由读的那一刻决定（2026-10-27）。
+        带占位符的句子（值已经填进去了）认不出来就留 `None`，读的时候原样摆，不猜。 */
+        error_key: postprocess::diag::messages::key_of_exact_text(error).map(str::to_owned),
+        error_args: None,
         cancelled,
         pipeline,
         collision,
