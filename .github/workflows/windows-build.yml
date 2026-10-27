@@ -61,9 +61,26 @@ jobs:
       - name: 构建 NSIS 安装包
         run: npm run tauri -- build --bundles nsis
 
-      - name: 上传安装包
+      # **免安装版**：`tauri build` 编出来的主二进制本来就在 `target/release/`，
+      # NSIS 那一份只是把它包起来（解包后就是同一个 exe）。这里复制一份带版本名的，
+      # 免得下载者把 `SupportEase.exe` 和 `…-setup.exe` 混在一起分不清。
+      #
+      # 依赖 WebView2：Win11 自带；Win10 需要系统里装过 WebView2 Runtime
+      # （setup.exe 会替你装，免安装版不会 —— 这是两种产物唯一的实际差别）。
+      - name: 准备免安装 exe
+        shell: bash
+        run: |
+          v=$(node -p "require('./package.json').version")
+          ls -l target/release/*.exe
+          # 主二进制用的是 cargo 的 bin 名（`mkp-support-ease`），不是 productName ——
+          # 2026-10-27 第一次跑时写成了 SupportEase.exe，cp 直接报 No such file。
+          cp "target/release/mkp-support-ease.exe" "target/release/SupportEase_${v}_x64-portable.exe"
+
+      - name: 上传安装包（setup + 免安装）
         uses: actions/upload-artifact@v4
         with:
           name: SupportEase-windows-${{ github.sha }}
-          path: target/release/bundle/nsis/*.exe
+          path: |
+            target/release/bundle/nsis/*.exe
+            target/release/SupportEase_*_x64-portable.exe
           if-no-files-found: error
