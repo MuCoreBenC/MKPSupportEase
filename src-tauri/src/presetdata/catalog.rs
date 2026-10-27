@@ -36,6 +36,9 @@ use super::literal_str;
 pub struct Brand {
     pub id: String,
     pub name: String,
+    /// 英文显示名（2026-10-27 双语数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "nameEn")]
+    pub name_en: Option<String>,
     #[serde(default)]
     pub logo: Option<String>,
 }
@@ -49,12 +52,21 @@ pub struct Brand {
 pub struct MachineVersion {
     pub id: String,
     pub name: String,
+    /// 英文显示名（2026-10-27 双语数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
     #[serde(default)]
     pub recommended_bundle: Option<String>,
     #[serde(default)]
     pub tag: Option<String>,
+    /// 英文角标。空 = 回落 `tag`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_en: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    /// 英文说明。空 = 回落 `description`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_en: Option<String>,
     /// **备注**（客户端副标题用它）。可空；清空 = 删键。
     ///
     /// 2026-10-07 作者定：客户端预设列表的副标题不要路径、改显示这一句 ——
@@ -420,9 +432,15 @@ impl TrimmedDimensions {
 #[serde(rename_all = "camelCase")]
 pub enum VersionField {
     Name,
+    /// 英文显示名（2026-10-27 双语数据）。可空
+    NameEn,
     RecommendedBundle,
     Tag,
+    /// 英文角标。可空
+    TagEn,
     Description,
+    /// 英文说明。可空
+    DescriptionEn,
     /// **备注**（客户端副标题）。可空
     Remark,
     /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
@@ -433,10 +451,13 @@ impl VersionField {
     fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
+            Self::NameEn => "nameEn",
             Self::RecommendedBundle => "recommendedBundle",
             Self::Image => "image",
             Self::Tag => "tag",
+            Self::TagEn => "tagEn",
             Self::Description => "description",
+            Self::DescriptionEn => "descriptionEn",
             Self::Remark => "remark",
         }
     }
@@ -487,6 +508,8 @@ impl MachineField {
 pub enum BrandField {
     /// 显示名（对着人读的那个：`拓竹 (Bambu Lab)`）
     Name,
+    /// 英文显示名（2026-10-27 双语数据）。可空
+    NameEn,
     /// 品牌图 = **资产 id**（不是文件名）。清空 = 删键 —— 消费侧回落内置字标
     Logo,
 }
@@ -495,6 +518,7 @@ impl BrandField {
     fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
+            Self::NameEn => "nameEn",
             Self::Logo => "logo",
         }
     }
@@ -590,6 +614,9 @@ impl Machine {
             None,
             None,
             None,
+            None,
+            None,
+            None,
         )
     }
 
@@ -618,7 +645,7 @@ impl Machine {
             )));
         }
         let new_id = validate_new_version_id(self, new_id)?;
-        let bundle = self
+        let template = self
             .versions
             .iter()
             .find(|v| v.id == template_id)
@@ -627,9 +654,12 @@ impl Machine {
                     "ui.presetdata.catalog.231",
                     &[("template_id", template_id)],
                 ))
-            })?
-            .recommended_bundle
-            .clone();
+            })?;
+        let bundle = template.recommended_bundle.clone();
+        /* 英文那三册也随复制走 —— 否则每复制一版就得重新译一遍（缺了也只是回落中文） */
+        let name_en = template.name_en.clone();
+        let tag_en = template.tag_en.clone();
+        let description_en = template.description_en.clone();
         Self::append_version(
             &mut self.doc,
             &self.file,
@@ -639,6 +669,9 @@ impl Machine {
             bundle,
             tag,
             description,
+            name_en.as_deref(),
+            tag_en.as_deref(),
+            description_en.as_deref(),
         )
     }
 
@@ -654,10 +687,22 @@ impl Machine {
         recommended_bundle: Option<String>,
         tag: Option<&str>,
         description: Option<&str>,
+        name_en: Option<&str>,
+        tag_en: Option<&str>,
+        description_en: Option<&str>,
     ) -> Result<(), AppError> {
         let mut t = toml_edit::Table::new();
         t["id"] = literal_str(id);
         t["name"] = literal_str(name);
+        if let Some(v) = name_en.filter(|s| !s.trim().is_empty()) {
+            t["nameEn"] = literal_str(v.trim());
+        }
+        if let Some(v) = tag_en.filter(|s| !s.trim().is_empty()) {
+            t["tagEn"] = literal_str(v.trim());
+        }
+        if let Some(v) = description_en.filter(|s| !s.trim().is_empty()) {
+            t["descriptionEn"] = literal_str(v.trim());
+        }
         if let Some(tag) = tag.filter(|s| !s.trim().is_empty()) {
             t["tag"] = literal_str(tag.trim());
         }
@@ -685,15 +730,18 @@ impl Machine {
         versions.push(MachineVersion {
             id: id.to_owned(),
             name: name.to_owned(),
+            name_en: name_en.map(str::to_owned),
             recommended_bundle,
             tag: tag
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            tag_en: tag_en.map(str::to_owned),
             description: description
                 .map(str::trim)
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
+            description_en: description_en.map(str::to_owned),
             // 新建版本不写备注 —— 客户端副标题空了回落路径文本
             remark: None,
             // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
@@ -827,9 +875,12 @@ impl Machine {
         let owned = val.map(str::to_owned);
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
+            VersionField::NameEn => v.name_en = owned,
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
+            VersionField::TagEn => v.tag_en = owned,
             VersionField::Description => v.description = owned,
+            VersionField::DescriptionEn => v.description_en = owned,
             VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
         }
@@ -998,6 +1049,7 @@ impl Catalog {
                     match field {
                         BrandField::Name => "显示名",
                         BrandField::Logo => "品牌图",
+                        BrandField::NameEn => field.key(),
                     },
                 )],
             )));
@@ -1029,6 +1081,7 @@ impl Catalog {
         let b = self.brand_mut(id)?;
         match field {
             BrandField::Name => b.name = owned.unwrap_or_default(),
+            BrandField::NameEn => b.name_en = owned,
             BrandField::Logo => b.logo = owned,
         }
         Ok(())
@@ -1083,6 +1136,7 @@ impl Catalog {
         self.brands.push(Brand {
             id: id.to_owned(),
             name: name.to_owned(),
+            name_en: None,
             logo: None,
         });
         Ok(())
@@ -1354,6 +1408,11 @@ fn load_brands(path: &Path) -> Result<(Vec<Brand>, DocumentMut), AppError> {
                     .and_then(|v| v.as_str())
                     .unwrap_or_default()
                     .to_owned(),
+                name_en: t
+                    .get("nameEn")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .filter(|s| !s.is_empty()),
                 logo: t
                     .get("logo")
                     .and_then(|v| v.as_str())
@@ -1499,9 +1558,12 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                         Some(MachineVersion {
                             id: t.get("id")?.as_str()?.to_owned(),
                             name: g("name").unwrap_or_default(),
+                            name_en: g("nameEn"),
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
+                            tag_en: g("tagEn"),
                             description: g("description"),
+                            description_en: g("descriptionEn"),
                             remark: g("remark"),
                             image: g("image"),
                         })

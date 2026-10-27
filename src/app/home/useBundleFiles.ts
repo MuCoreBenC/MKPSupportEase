@@ -35,6 +35,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import type { FileRef, VersionFiles } from '../../api/contract'
+import { t } from '../../i18n'
 
 export interface BundleFiles {
   /**
@@ -56,14 +57,14 @@ const cache = new Map<string, BundleFiles>()
 function toBundle(vf: VersionFiles | null, key: string): BundleFiles {
   // `null` 的语义是「后端没有这个组合」，不是「这个组合下没文件」
   if (vf === null) {
-    return { files: null, problems: [`目录里没有 ${key} 这个组合`], presetFileName: null }
+    return { files: null, problems: [t('bundle.missingCombo', { key })], presetFileName: null }
   }
   const preset = vf.files.find((f) => f.kind === 'mkp_preset')?.fileName ?? null
   /* `incomplete` 只表示"该有的没配齐" —— 缺的那几条原因原样透给界面（后端的话） */
   const problems = vf.incomplete
     ? vf.missing.length > 0
       ? vf.missing
-      : [`${key} 的套餐没配齐`]
+      : [t('bundle.incomplete', { key })]
     : []
   return { files: vf.files, problems, presetFileName: preset }
 }
@@ -105,7 +106,7 @@ export function useBundleFiles(machineId: string | null, versionId: string | nul
           key,
           bundle: {
             files: null,
-            problems: [`${key} 的套餐没取到 —— 稍后再试，或去看数据源配好没有`],
+            problems: [t('bundle.fetchFailed', { key })],
             presetFileName: null,
           },
         })

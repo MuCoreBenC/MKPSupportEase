@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 import { isAppError } from './contract'
 
 /**
@@ -24,7 +25,7 @@ export class NotImplementedError extends Error {
     /** 给界面看的那句人话（发生了什么 + 能干什么）。缺省兜底也尽量不说黑话 */
     hint?: string,
   ) {
-    super(hint ?? `这一步在这一版里还没有：换桌面版试试，或先用能用的那几步把事情办完`)
+    super(hint ?? t('api.error.notImplementedHint'))
     this.name = 'NotImplementedError'
     console.error(`[API] 未实现的接口: ${method}${hint === undefined ? '' : ` —— ${hint}`}`)
   }

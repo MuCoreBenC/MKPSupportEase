@@ -307,15 +307,17 @@ export default function ParamSyncModal({
                           <div className={s.vals}>
                             {localText !== null && e.local !== e.baselineOld && (
                               <>
-                                本地 <span className={s.local}>{localText}</span>
+                                {tr('params.sync.local')}{' '}
+                                <span className={s.local}>{localText}</span>
                                 {' · '}
                               </>
                             )}
-                            云端 {diff}
+                            {tr('params.sync.cloud')} {diff}
                           </div>
                         </div>
                         <div className={s.after}>
-                          确认后：<span className={s.afterVal}>{afterOf(e)}</span>
+                          {tr('params.sync.after')}{' '}
+                          <span className={s.afterVal}>{afterOf(e)}</span>
                         </div>
                       </div>
                     )

@@ -1323,11 +1323,15 @@
   border-color: var(--text-2);
 }
 
-/* 右侧展开箭头 */
+/* 右侧展开箭头：形状与翻转都由 `ui.selectCaret` 给（闭着朝下、开列翻成朝上），
+   这里只管那颗 22px 的点击热区与居中 —— 不再用「▾」字形（字形有自己的一套基线） */
 .comboCaret {
   position: absolute;
   top: 50%;
   right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   transform: translateY(-50%);
   width: 22px;
   height: 22px;
@@ -1335,8 +1339,6 @@
   border: 0;
   background: transparent;
   color: var(--text-3);
-  font-size: 10px;
-  line-height: 1;
   cursor: pointer;
 }
 

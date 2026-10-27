@@ -51,6 +51,10 @@ import ModalC14 from '../c14/ModalC14'
 import { toasts } from '../c14/toast'
 import MachinePicker from '../components/MachinePicker'
 import { machineSummary } from '../components/machineSummary'
+/* 上移 / 下移那两颗箭头：客户端共享那一颗（同一颗 chevronDown，朝上的翻 180°），
+   不再排「▲ / ▼」字形 —— 字形的墨迹高度跟着字体走，按钮里看着忽高忽低 */
+import Icon from '../../app/shell/icons'
+import ui from '../../app/ui/ui.module.css'
 import s from './ParamDefModal.module.css'
 
 interface Props {
@@ -963,7 +967,7 @@ export default function ParamDefModal({
                   title="上移一位（分段按钮的先后）"
                   onClick={() => moveChoice(i, -1)}
                 >
-                  ▲
+                  <Icon name="chevronDown" size={12} className={ui.caretUp} />
                 </button>
                 <button
                   type="button"
@@ -973,7 +977,7 @@ export default function ParamDefModal({
                   title="下移一位（分段按钮的先后）"
                   onClick={() => moveChoice(i, 1)}
                 >
-                  ▼
+                  <Icon name="chevronDown" size={12} />
                 </button>
               </span>
               <label className={s.choiceDep} title="所有机型、所有版本都不许再写这一档">
@@ -1088,7 +1092,7 @@ export default function ParamDefModal({
                 title="上移一位"
                 onClick={() => moveOrder(-1)}
               >
-                ▲
+                <Icon name="chevronDown" size={12} className={ui.caretUp} />
               </button>
               <span className={s.orderText}>
                 {myAt < 0 ? '—' : `第 ${myAt + 1} / ${siblings.length} 位`}
@@ -1101,7 +1105,7 @@ export default function ParamDefModal({
                 title="下移一位"
                 onClick={() => moveOrder(1)}
               >
-                ▼
+                <Icon name="chevronDown" size={12} />
               </button>
             </span>
           </label>

@@ -29,6 +29,8 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import Icon from '../shell/icons'
+import ui from '../ui/ui.module.css'
 import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import Drawer from '../shared/Drawer'
@@ -235,7 +237,7 @@ export default function HistoryDrawer({
             }
             onClick={caret.onToggle}
           >
-            {caret.open ? '▾' : '▸'}
+            <Icon name="chevronDown" size={12} className={ui.disclosureCaret} data-on={caret.open} />
           </button>
         )}
         <span className={s.no}>{noText ?? `#${entry.no}`}</span>
@@ -326,7 +328,7 @@ export default function HistoryDrawer({
                    * 段内子项的号 = **段号-段内序号**（2026-10-17 作者：「能不能用 1-1 这种」）——
                    * 跨段连续的 `#4 #5` 读不出"它在哪一段"，`2-1` 一眼就读出来。
                    */
-                  `${g.batch ?? '未'}-${i + 1}`,
+                  `${g.batch === null ? tr('params.history.draftShort') : g.batch}-${i + 1}`,
                 )}
               </li>
             ))}
@@ -378,11 +380,7 @@ export default function HistoryDrawer({
           )}
         </>
       }
-      footer={
-        <p className={s.foot}>
-          这些改动跟着这份文件留着 —— 关掉软件、重开都还在；只有「清空历史」会清掉它。
-        </p>
-      }
+      footer={<p className={s.foot}>{tr('params.history.foot')}</p>}
     >
       {/* 「还原」的回话：一句话、占一行，几秒后自己消失（状态由页面管） */}
       {note !== null && <RevertNote note={note} />}

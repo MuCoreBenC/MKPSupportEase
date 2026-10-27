@@ -1,10 +1,11 @@
 {
   "catalogSchema": 1,
-  "revision": "b654d9842f820678",
+  "revision": "f0838b252767ef5c",
   "brands": [
     {
       "id": "Bambu Lab",
       "name": "拓竹 (Bambu Lab)",
+      "nameEn": "Bambu Lab",
       "logo": "bambu-lab-logo"
     }
   ],
@@ -67,25 +68,34 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "标准配置，适合大多数用户",
+          "descriptionEn": "Standard configuration for most users",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
+          "nameEn": "Quick-release (before June)",
           "recommendedBundle": "A1_FAST",
           "tag": "热门",
+          "tagEn": "Popular",
           "description": "支持快拆配件的改装配置",
+          "descriptionEn": "Modded setup for quick-release parts",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
+          "nameEn": "Quick-release 260628",
           "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
+          "tagEn": "Newest",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "image": null
         }
       ],
@@ -152,25 +162,34 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "标准配置",
+          "descriptionEn": "Standard configuration",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
+          "nameEn": "Quick-release (before June)",
           "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
+          "tagEn": "Popular",
           "description": "支持快拆配件的改装配置",
+          "descriptionEn": "Modded setup for quick-release parts",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
+          "nameEn": "Quick-release 260628",
           "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
+          "tagEn": "Newest",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
+          "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
           "image": null
         }
       ],
@@ -236,9 +255,12 @@
         {
           "id": "LITE",
           "name": "lite版",
+          "nameEn": "Lite",
           "recommendedBundle": "P1S_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "群里开源的最新lite",
+          "descriptionEn": "Latest lite released in the group",
           "image": null
         }
       ],
@@ -350,9 +372,12 @@
         {
           "id": "STANDARD",
           "name": "标准版",
+          "nameEn": "Standard",
           "recommendedBundle": "P2S_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "未完成，没有打印机",
+          "descriptionEn": "Unfinished; no printer available",
           "image": null
         }
       ],
@@ -468,9 +493,12 @@
         {
           "id": "LITE",
           "name": "lite版",
+          "nameEn": "Lite",
           "recommendedBundle": "X1C_default",
           "tag": "推荐",
+          "tagEn": "Recommended",
           "description": "群里开源的最新lite",
+          "descriptionEn": "Latest lite released in the group",
           "image": null
         }
       ],

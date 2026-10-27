@@ -35,6 +35,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useT } from '../../i18n'
 
 const SNAP_RADIUS = 8
 const BREAK_DISTANCE = 14
@@ -97,6 +98,7 @@ function writeWidth(key: string, w: number): void {
 }
 
 export function useDrawerWidth(opts: Options): DrawerWidth {
+  const tr = useT()
   const { storageKey, side, snap, min, max, label } = opts
   const [width, setWidth] = useState<number>(() => readWidth(storageKey, snap, min, max))
   const [dragging, setDragging] = useState(false)
@@ -213,7 +215,7 @@ export function useDrawerWidth(opts: Options): DrawerWidth {
       role: 'separator',
       tabIndex: 0,
       'aria-orientation': 'vertical',
-      'aria-label': `${label}宽度 ${width} 像素，方向键调整，Home 复位`,
+      'aria-label': tr('drawer.widthAria', { label, width }),
       'aria-valuenow': width,
       'aria-valuemin': min,
       'aria-valuemax': max,

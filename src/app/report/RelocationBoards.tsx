@@ -17,6 +17,7 @@
  *   那一支只是组件自己的兜底（只画左幅），别拿它去表达"没挪"。
  */
 import type { ReportCollision, ReportBox4 } from '../../api/contract'
+import { useT } from '../../i18n'
 import CollisionMap from './CollisionMap'
 import s from './RelocationBoards.module.css'
 
@@ -61,6 +62,7 @@ export default function RelocationBoards({
   to: [number, number] | null
   machineType: string | null
 }) {
+  const tr = useT()
   const dx = to !== null ? to[0] - from[0] : 0
   const dy = to !== null ? to[1] - from[1] : 0
   const moved = to !== null ? shifted(before, dx, dy) : null
@@ -90,7 +92,7 @@ export default function RelocationBoards({
           hideLegend
           height={MAP_H}
         />
-        <span className={s.tag}>现在</span>
+        <span className={s.tag}>{tr('report.relocation.before')}</span>
       </div>
       {moved !== null && (
         <>
@@ -121,7 +123,7 @@ export default function RelocationBoards({
               hideLegend
               height={MAP_H}
             />
-            <span className={s.tag}>挪后</span>
+            <span className={s.tag}>{tr('report.relocation.after')}</span>
           </div>
         </>
       )}

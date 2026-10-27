@@ -699,6 +699,9 @@ export const en: Record<StringKey, string> = {
   'params.history.empty': 'This file has no changes since it was opened',
   'params.history.emptyNet': 'Everything was changed back — no net change by save batch',
   'params.history.count': '{count} entries',
+  'params.history.draftShort': 'Draft',
+  'params.history.foot':
+    'These changes stay with this file — they survive quitting and reopening the app; only “Clear history” removes them.',
 
 
   // ---- 报告页 ----
@@ -1659,4 +1662,36 @@ export const en: Record<StringKey, string> = {
   'report.value.tower': 'plain tower',
   'report.value.inPlace': 'Overwrote in place',
   'report.value.newFile': 'Wrote a separate file',
+
+  // ---- 2026-10-27 收尾：共用件 / 对话框 / 数据提示 ----
+  'field.switch.off': 'Off',
+  'field.switch.on': 'On',
+  'params.card.switchTo': 'Switch to “{value}”',
+  'params.card.rowsCount': '{count} parameters',
+  'params.sync.local': 'Local',
+  'params.sync.cloud': 'Cloud',
+  'params.sync.after': 'After:',
+  'notes.more': '{count} notes · {first} …',
+  'report.relocation.before': 'Before',
+  'report.relocation.after': 'After',
+  'catalog.stale.title': 'How to fix',
+  'catalog.stale.body':
+    'The cloud has a newer version, but this machine still has the old one. Quit and reopen the app, then click “Get from cloud” again.',
+  'drawer.widthAria': '{label} width {width} pixels; arrow keys adjust, Home resets',
+  'api.error.notWired': 'This feature isn’t wired up yet ({method})',
+  'api.error.generic': 'Something went wrong. Try again.',
+  'api.error.notImplementedHint':
+    'This step isn’t available in this version yet — try the desktop app, or finish what you can with the steps that work.',
+  'dialog.slicer.title': 'Choose the slicer app used to open models',
+  'dialog.filter.program': 'Programs',
+  'dialog.import.title': 'Choose files to import',
+  'dialog.filter.preset': 'Preset files',
+  'dialog.filter.all': 'All files',
+  'dialog.exportDir.title': 'Choose save location',
+  'bundle.missingCombo': 'The catalog has no such machine/version: {key}',
+  'bundle.incomplete': 'The bundle for {key} is incomplete',
+  'bundle.fetchFailed': 'Couldn’t fetch the bundle for {key} — try again later, or check the data source',
+  'calib.preset.pendingName': 'Preset file',
+  'guide.openWith.alt':
+    'System “Get Info” window: “Open With” expanded, with the app dropdown and “Change All…”',
 }

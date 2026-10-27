@@ -259,7 +259,8 @@ export function labelOf(item: BbsPresetItem, items: BbsPresetItem[]): string {
   const parts: string[] = []
   if (tail) parts.push(tail)
   if (uids.size > 1 && item.uid) parts.push(item.uid)
-  return parts.length ? `${item.name}（${parts.join(' · ')}）` : item.name
+  /* 括号走 ASCII：这条在英文界面也会露脸，全角括号只属于中文排版 */
+  return parts.length ? `${item.name} (${parts.join(' · ')})` : item.name
 }
 
 /* 筛选档位：三层。`all` / `打印机|*`（该机型全部喷嘴）/ `打印机|0.4`（某个喷嘴）

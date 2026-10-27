@@ -153,10 +153,7 @@
   background: var(--w-hover);
 }
 
-.caret {
-  flex: none;
-  color: var(--w-t3);
-}
+/* 组头那颗箭头不在本表：它是客户端共享的 `ui.disclosureCaret`（闭着朝右 / 摊开朝下） */
 
 /* ---------- 右：详情（行级 diff） ---------- */
 

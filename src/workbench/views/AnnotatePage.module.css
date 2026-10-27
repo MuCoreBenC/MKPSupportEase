@@ -521,10 +521,16 @@
   color: var(--w-t3);
 }
 
+/* 行尾那几颗 20px 小方钮（上下挪一位 / 藏起来 / 删）：内容现在是 SVG 箭头 + 两颗字形，
+   一律由 flex 摆中线 —— 字形的行盒中线比盒子略高，靠 text-align 会看着偏 */
 .iconBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
   width: 20px;
   height: 20px;
+  padding: 0;
   font-size: var(--w-fs-base);
   line-height: 1;
   color: var(--w-t2);
@@ -623,16 +629,8 @@
   background: var(--w-hover-1);
 }
 
-/* 收起的三角转 90°（CSS transition 在真机 WKWebView 不播，故用 transform 就好、不加过渡） */
-.ioCaret {
-  display: inline-block;
-  font-size: 10px;
-  color: var(--w-t3);
-}
-
-.ioCaretOn {
-  transform: rotate(90deg);
-}
+/* 收起 / 展开那颗箭头不在这张表里：它是客户端共享的 `ui.disclosureCaret`
+   （形状 + 闭着朝右 / 摊开朝下的翻转都归那个类，这里不再自己排三角字符） */
 
 .ioRow {
   display: flex;

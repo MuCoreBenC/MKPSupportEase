@@ -83,7 +83,8 @@ import type {
   LocalPresetIdentity,
 } from '../../api'
 import { isAppError } from '../../api/contract'
-import { useT } from '../../i18n'
+import { useLocale, useT } from '../../i18n'
+import { localizeMachines } from '../shared/dataLabel'
 import { STORAGE } from '../../api/storageKeys'
 import { useSessionState } from '../shared/useSessionState'
 import type { DeliveryPresetSource } from './presetTree'
@@ -515,6 +516,7 @@ interface TreeSeed {
  */
 export function usePresetData(importRevision = 0): PresetData {
   const tr = useT()
+  const locale = useLocale()
   const [machines, setMachines] = useState<Machine[]>([])
   /*
    * 建树那几份读的**原样结果**（不是树本身）。
@@ -528,8 +530,14 @@ export function usePresetData(importRevision = 0): PresetData {
     () =>
       treeSeed === null
         ? { machines: [], fileCounts: { mkp_preset: 0, bbs_profile: 0, orca_profile: 0 } }
-        : buildPresetTree(tr, treeSeed.list, treeSeed.repo, treeSeed.inputs, treeSeed.archived),
-    [treeSeed, tr],
+        : buildPresetTree(
+            tr,
+            localizeMachines(treeSeed.list, locale),
+            treeSeed.repo,
+            treeSeed.inputs,
+            treeSeed.archived,
+          ),
+    [treeSeed, tr, locale],
   )
   const [localIds, setLocalIds] = useState<string[]>([])
   /* 远端这一代读不懂（NOT_SUPPORTED）：独立于 `error`，不挡列表、只开一句提示 */
@@ -1185,15 +1193,17 @@ export function usePresetData(importRevision = 0): PresetData {
 
   const machineId = at?.machineId ?? ''
   const versionId = at?.versionId ?? ''
+  /* 版本显示名/说明按语言摊开（id、套餐、图位不动）；树那边同一份摊法 */
+  const machinesShown = useMemo(() => localizeMachines(machines, locale), [machines, locale])
 
   return {
     loading: error === null && !ready,
     error,
     needsNewerClient,
-    machines,
+    machines: machinesShown,
     machineId,
     versionId,
-    machine: machines.find((m) => m.id === machineId),
+    machine: machinesShown.find((m) => m.id === machineId),
     sourceLabel,
     tree,
     localIds,

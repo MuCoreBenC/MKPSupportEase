@@ -118,6 +118,7 @@ import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
 import Icon from '../shell/icons'
+import ui from '../ui/ui.module.css'
 import ExportModal from './ExportModal'
 import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
@@ -1133,7 +1134,7 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
               <Icon
                 name="chevronDown"
                 size={12}
-                className={s.snapCaret}
+                className={ui.disclosureCaret}
                 data-on={shown}
               />
               <b>{sec.id}</b>

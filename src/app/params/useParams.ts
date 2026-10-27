@@ -46,7 +46,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { useLocale, useT, type StringKey, type Tr } from '../../i18n'
-import { localizeParamDef as localizeDef, localizeTab } from '../shared/dataLabel'
+import {
+  localizeMachines,
+  localizeParamDef as localizeDef,
+  localizeTab,
+} from '../shared/dataLabel'
 /* 「保存后的重切引导」共用开关（读盘上真值，决定存完弹不弹那一屏） */
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
@@ -1535,7 +1539,30 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     },
     [combo, locale],
   )
-  const placeOf = useCallback((key: string) => combo?.placeByKey.get(key), [combo])
+  /*
+   * 分类 / 分组名也按当前语言摊开（id 一个字不动，只换给眼睛看的那两格）。
+   *
+   * `placeByKey` 里存的是注册表原文（中文），而历史条目会把这两个名字**快照**进账本 ——
+   * 照原样取，英文界面上「偏移 / 空间偏移 · Z 轴偏移」就整片中文。历史行的显示走
+   * [`historyByBatch`] 的回落逻辑：这一项还在当前定义里就用这里的本语言名，
+   * 不在了才用快照（那时快照是唯一说得清"当时改的是哪一项"的东西）。
+   */
+  const placeOf = useCallback(
+    (key: string) => {
+      const p = combo?.placeByKey.get(key)
+      if (p === undefined) return undefined
+      const tab = combo?.tabs.find((t) => t.id === p.tabId)
+      if (tab === undefined) return p
+      const localized = localizeTab(tab, locale)
+      const section = localized.sections.find((s) => s.id === p.sectionId)
+      return {
+        ...p,
+        tabLabel: localized.label,
+        sectionLabel: section?.label ?? p.sectionLabel,
+      }
+    },
+    [combo, locale],
+  )
 
   /**
    * **这一轮编辑的是哪一份**（参数页底座 ③）。
@@ -2313,7 +2340,23 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     let no = 0
     let id = 0
     const push = (batch: number | null, title: string, src: HistoryEntry[]) => {
-      const items = netOf(src)
+      /*
+       * 快照里的名字是**写那一刻的语言**（旧账里存的就是中文）。历史行照当前语言
+       * 重说一遍：`defOf` / `placeOf` 都是摊过的，这一项还在当前定义里就换成本语言名；
+       * 不在（换了机型/版本）才回落快照 —— 那时快照是唯一说得清"当时改的是哪一项"的东西。
+       */
+      const items = netOf(src).map((it): HistoryItem => {
+        const def = defOf(it.key)
+        if (def === undefined) return it
+        const place = placeOf(it.key)
+        return {
+          ...it,
+          label: def.label,
+          tab: place?.tabLabel ?? it.tab,
+          section: place?.sectionLabel ?? it.section,
+          unit: def.unit ?? it.unit,
+        }
+      })
       if (items.length === 0) return
       /*
        * 段头右侧那一列时间：取这一段里**最后落笔**的 `tsUnix`（保存那一刻就在它附近）。
@@ -2333,7 +2376,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           return {
             id,
             no,
-            action: `改 ${it.label}`,
+            action: tr('params.act.change', { label: it.label }),
             items: [it],
             /* 未保存那一段标「未保存」，落过盘的标「已保存」 —— 与旧版同一套词 */
             state: batch === null ? 'draft' : 'saved',
@@ -2348,10 +2391,15 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       push(b, tr('params.history.batchTitle', { n: b }), log.filter((e) => e.batch === b))
     }
     return groups
-  }, [log, savedBatches, tr])
+  }, [defOf, log, placeOf, savedBatches, tr])
 
   const machine = catalog?.machines.find((m) => m.id === machineId)
   const version = machine?.versions.find((v) => v.id === versionId)
+  /* 抽屉那几行要显示版本名（`localPickerRows`），按语言摊开后再给出去 */
+  const machinesShown = useMemo(
+    () => localizeMachines(catalog?.machines ?? [], locale),
+    [catalog, locale],
+  )
 
   const fileOf = useCallback(
     (m: string, v: string) => catalog?.fileByCombo.get(`${m}:${v}`) ?? null,
@@ -2744,7 +2792,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   return {
     loading: error === null && (catalog === null || combo === null),
     error,
-    machines: catalog?.machines ?? [],
+    machines: machinesShown,
     /* 本机真有的（抽屉列的）；`machines` 那份目录数据仍然来自 catalog */
     localPresets,
     deliveryRevision,

@@ -22,16 +22,11 @@
  * 禁用时给按钮真的 `disabled`。
  */
 
-import { useCallback, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent } from 'react'
+import { useT } from '../../i18n'
 import type { FieldOption } from './types'
 import s from './SegmentedField.module.css'
-
-/** 开关的两段。文案照旧程序：布尔在那边就是「关闭 / 开启」两段，不是胶囊开关 */
-const SWITCH_OPTIONS: FieldOption[] = [
-  { value: 'off', label: '关闭' },
-  { value: 'on', label: '开启' },
-]
 
 /** 超过这个字数的段算长文案，降一号字 */
 const LONG_LABEL = 3
@@ -54,8 +49,17 @@ type Props =
 
 export default function SegmentedField(props: Props) {
   const { label, disabled = false, dense = false } = props
+  const tr = useT()
   const isSwitch = props.variant === 'switch'
-  const options = isSwitch ? SWITCH_OPTIONS : props.options
+  /* 开关的两段：布尔在那边就是「关闭 / 开启」两段，不是胶囊开关。文案走字典（双语） */
+  const switchOptions = useMemo<FieldOption[]>(
+    () => [
+      { value: 'off', label: tr('field.switch.off') },
+      { value: 'on', label: tr('field.switch.on') },
+    ],
+    [tr],
+  )
+  const options = isSwitch ? switchOptions : props.options
   const value = isSwitch ? (props.checked ? 'on' : 'off') : props.value
 
   const wrapRef = useRef<HTMLDivElement>(null)

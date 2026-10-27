@@ -31,8 +31,10 @@
  * 先旧后新在静态目录上没有一致性风险。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
+import { useLocale } from '../../i18n'
+import { localizeMachines } from '../shared/dataLabel'
 import type {
   CatalogAsset,
   CatalogGroup,
@@ -72,6 +74,7 @@ export function uidOfFile(file: PresetFileInfo): string | null {
 let catalogCache: Catalog = { machines: [], presets: [], assets: [], brands: [], groups: [] }
 
 export function useCatalog(): Catalog {
+  const locale = useLocale()
   const [cat, setCat] = useState<Catalog>(catalogCache)
 
   useEffect(() => {
@@ -113,5 +116,10 @@ export function useCatalog(): Catalog {
     }
   }, [])
 
-  return cat
+  /*
+   * 版本显示名按语言摊开（缓存里存原样：缓存在语言切换前就建好了，不能把某一册写死进去）。
+   * `tag` 不摊 —— 它还要给 `TAG_TONE` 当键，显示那一步单独挑。
+   */
+  const machines = useMemo(() => localizeMachines(cat.machines, locale), [cat.machines, locale])
+  return { ...cat, machines }
 }

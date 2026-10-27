@@ -166,16 +166,18 @@
 }
 
 /* 整批那一屏的展开箭头（作者：「整批的要可以展开看详细的」）。
-   只是一颗字符按钮 —— 不画边框，免得行上多出一颗方块 */
+   箭头本身是 `ui.disclosureCaret`（SVG 形状，转 90°，不换字符）；这颗按钮只管
+   14px 的槽位与居中 —— 不画边框，免得行上多出一颗方块 */
 .caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
   width: 14px;
+  height: 14px;
   padding: 0;
   border: 0;
   background: none;
-  font: inherit;
-  font-size: var(--fs-label);
-  line-height: 1;
   color: var(--text-3);
   cursor: pointer;
 }

@@ -71,6 +71,50 @@
  * ★ 定了高就得自己管行盒居中：`.btn` 原来的观感靠上下 8px 内衬撑，换成 24px 定高后
  *   字的中线由 flex 负责（同 `.pill` 的 `place-items: center`）。
  */
+/*
+ * 展开 / 下拉箭头（2026-10-27 统一）：**形状**是 `shell/icons` 的 `chevronDown`，不是字符。
+ *
+ * 字符 `▸` 的墨迹不按盒子居中（字体右侧留白更大），转 90° 看着像被拉了一下 —— 报告页
+ * 那颗就是这个毛病；换字符（`▸`↔`▾`）的那一路更糟：墨迹位置全变，看着像跳了一下。
+ * 凡是要"转"的箭头都用这三个类（都是同一颗 SVG 绕自己中心转，不换字形）：
+ *   .disclosureCaret  展开指示：闭着 -90° 朝右、开着（`data-on="true"`）0° 朝下
+ *   .selectCaret      下拉指示：闭着 0° 朝下、开着（`data-on="true"`）180° 朝上
+ *   .caretUp          单向朝上（上移这类按钮）：恒 180°、不转
+ *
+ * 尺寸 12px 由调用方给（`<Icon size={12}>`），这里只管定位与旋转。
+ */
+.disclosureCaret {
+  display: block;
+  flex: 0 0 auto;
+  color: var(--text-3);
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.disclosureCaret[data-on='true'] {
+  transform: rotate(0deg);
+}
+
+.selectCaret {
+  display: block;
+  flex: 0 0 auto;
+  color: var(--text-3);
+  transform: rotate(0deg);
+  transform-origin: 50% 50%;
+  transition: transform 120ms ease;
+}
+
+.selectCaret[data-on='true'] {
+  transform: rotate(180deg);
+}
+
+.caretUp {
+  display: block;
+  flex: 0 0 auto;
+  transform: rotate(180deg);
+}
+
 .btnSm {
   display: inline-flex;
   align-items: center;

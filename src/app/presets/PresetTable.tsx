@@ -117,6 +117,11 @@ import type { ContextMenuApi } from '../../components/menu'
 import { FieldPopover } from '../../components/field'
 /* 展开详情卡头那一枚文件图标（2026-10-10，参考稿的绿色文档图标 —— 本项目走描边风格） */
 import Icon from '../../components/Icon'
+/* 组合框那颗下拉箭头走**共享那一颗**（`ui.selectCaret`）：本页别处的图标在
+   `components/Icon`，但箭头要和报告页 / 参数卡 / 历史抽屉是同一颗形状 —— 两个图标集
+   并存是既有的债（见 `app/shell/icons` 头注释），箭头这一处先统一 */
+import Chevron from '../shell/icons'
+import ui from '../ui/ui.module.css'
 import { useT } from '../../i18n'
 import type { Machine } from '../../api'
 /*
@@ -1640,7 +1645,7 @@ function ComboField(props: {
           wrapRef.current?.querySelector('input')?.focus()
         }}
       >
-        ▾
+        <Chevron name="chevronDown" size={12} className={ui.selectCaret} data-on={open} />
       </button>
       {open && (
         <FieldPopover

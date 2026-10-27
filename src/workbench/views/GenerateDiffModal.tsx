@@ -74,6 +74,9 @@ import type { DiffViewMode } from './DiffView'
 import { measureRulerMarks } from './diffRuler'
 import type { RulerMark } from './diffRuler'
 import c from '../c14.module.css'
+/* 「N 份无变化」那两行的展开箭头：客户端共享那一颗（`shell/icons` + `ui.disclosureCaret`） */
+import Icon from '../../app/shell/icons'
+import ui from '../../app/ui/ui.module.css'
 import s from './GenerateDiffModal.module.css'
 
 interface Props {
@@ -395,9 +398,12 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   aria-expanded={showUnchanged}
                   onClick={() => setShowUnchanged((v) => !v)}
                 >
-                  <span className={s.caret} aria-hidden>
-                    ▸
-                  </span>
+                  <Icon
+                    name="chevronDown"
+                    size={12}
+                    className={ui.disclosureCaret}
+                    data-on={showUnchanged}
+                  />
                   {unchanged.length} 份无变化
                 </button>
                 {showUnchanged && unchanged.map(item)}
@@ -414,9 +420,12 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   aria-expanded={showAuxUnchanged}
                   onClick={() => setShowAuxUnchanged((v) => !v)}
                 >
-                  <span className={s.caret} aria-hidden>
-                    ▸
-                  </span>
+                  <Icon
+                    name="chevronDown"
+                    size={12}
+                    className={ui.disclosureCaret}
+                    data-on={showAuxUnchanged}
+                  />
                   {auxUnchanged.length} 份无变化
                 </button>
                 {showAuxUnchanged && auxUnchanged.map(item)}

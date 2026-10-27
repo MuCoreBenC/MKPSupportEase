@@ -21,9 +21,24 @@ export function bi(zh: string, en: string | undefined, locale: Locale): string {
 }
 
 /**
+ * 单位符号的英册。**只收中文那三个**（`层` / `次` / `秒`）—— `mm` / `mm/s` / `°` / `%`
+ * 两种语言写法一样，走 `?? unit` 原样返回。
+ *
+ * 为什么不做进注册表：单位是**符号**，不是这条参数的名字/说明；注册表已经用
+ * `unit` 存了中文那一册，再长一个 `unitEn` 就是同一件事的第二份手抄。
+ */
+const UNIT_EN: Record<string, string> = { 层: 'layers', 次: 'times', 秒: 's' }
+
+/** 单位按界面语言挑一册（`en` 只换上面那三个中文单位） */
+export function unitText(unit: string | undefined, locale: Locale): string | undefined {
+  if (unit === undefined || locale !== 'en') return unit
+  return UNIT_EN[unit] ?? unit
+}
+
+/**
  * 一条定义按界面语言摊开（参数页与对比台共用）。
  *
- * 只摊**显示名**：`label` / `desc` 与控件里的选项名。键、范围、默认值一个字不动。
+ * 只摊**显示名**：`label` / `desc` / 控件里的选项名 / 单位符号。键、范围、默认值一个字不动。
  */
 export function localizeParamDef<
   T extends {
@@ -31,6 +46,7 @@ export function localizeParamDef<
     labelEn?: string
     desc: string
     descEn?: string
+    unit?: string
     field: FieldSchema
   },
 >(def: T, locale: Locale): T {
@@ -41,10 +57,12 @@ export function localizeParamDef<
     ...def,
     label,
     desc,
+    unit: unitText(def.unit, locale),
     field: {
       ...def.field,
       label,
       desc,
+      unit: unitText(def.field.unit, locale),
       choices: def.field.choices?.map((c) => ({ ...c, label: bi(c.label, c.labelEn, locale) })),
     },
   }
@@ -68,6 +86,33 @@ export function localizeTab<
       desc: s.desc === undefined ? undefined : bi(s.desc, s.descEn, locale),
     })),
   }
+}
+
+/**
+ * 机型目录里的**版本显示名/说明**按界面语言摊开（`tag` 刻意不动：它还要给
+ * `TAG_TONE` 当键用，显示时再单挑）。
+ *
+ * 只动 `name` / `description` 两格 —— 版本 id、套餐指向、图位全不动。
+ */
+export function localizeMachines<
+  V extends {
+    name: string
+    nameEn?: string | null
+    description?: string | null
+    descriptionEn?: string | null
+  },
+  M extends { versions: V[] },
+>(machines: M[], locale: Locale): M[] {
+  if (locale !== 'en') return machines
+  return machines.map((m) => ({
+    ...m,
+    versions: m.versions.map((v) => ({
+      ...v,
+      name: bi(v.name, v.nameEn ?? undefined, locale),
+      description:
+        v.description == null ? v.description : bi(v.description, v.descriptionEn ?? undefined, locale),
+    })),
+  }))
 }
 
 /**

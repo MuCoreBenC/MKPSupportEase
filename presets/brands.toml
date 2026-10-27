@@ -5,3 +5,4 @@ id = 'Bambu Lab'
 # 查不到就回落内置字标 —— 那是兜底，不是常态。
 logo = 'bambu-lab-logo'
 name = '拓竹 (Bambu Lab)'
+nameEn = 'Bambu Lab'

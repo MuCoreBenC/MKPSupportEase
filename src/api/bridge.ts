@@ -2,6 +2,7 @@ import { invoke, Channel } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 
 import { armedFaultFor } from '../app/dev/fault'
+import { t } from '../i18n'
 import {
   isAppError,
   type AppError,
@@ -48,7 +49,9 @@ function normalizeError(err: unknown, method: MkpApiMethod): AppError {
 
   return {
     code: notRegistered ? 'NOT_IMPLEMENTED' : 'INTERNAL',
-    message: notRegistered ? `这个功能还没接好（${method}）` : '出了点问题，请重试',
+    message: notRegistered
+      ? t('api.error.notWired', { method })
+      : t('api.error.generic'),
     traceId: '-',
     detail,
   }
@@ -152,9 +155,9 @@ export const bridgeApi: MkpApi = {
       /* macOS 挑的是 `.app` 包（目录本身）；Windows 挑可执行文件 */
       directory: mac,
       multiple: false,
-      title: '选择用来打开模型的切片软件',
+      title: t('dialog.slicer.title'),
       defaultPath: mac ? '/Applications' : undefined,
-      filters: mac ? undefined : [{ name: '程序', extensions: ['exe'] }],
+      filters: mac ? undefined : [{ name: t('dialog.filter.program'), extensions: ['exe'] }],
     })
     if (picked === null || Array.isArray(picked)) return null
     return { name: appNameOf(picked), path: picked }
@@ -275,10 +278,10 @@ export const bridgeApi: MkpApi = {
   pickImportFiles: async () => {
     const picked = await open({
       multiple: true,
-      title: '选择要导入的文件',
+      title: t('dialog.import.title'),
       filters: [
-        { name: '预设文件', extensions: ['toml'] },
-        { name: '所有文件', extensions: ['*'] },
+        { name: t('dialog.filter.preset'), extensions: ['toml'] },
+        { name: t('dialog.filter.all'), extensions: ['*'] },
       ],
     })
     return picked === null ? [] : Array.isArray(picked) ? picked : [picked]
@@ -429,7 +432,7 @@ export const bridgeApi: MkpApi = {
   pickExportDir: async (current) => {
     const picked = await open({
       directory: true,
-      title: '选择保存位置',
+      title: t('dialog.exportDir.title'),
       defaultPath: current,
     })
     return typeof picked === 'string' ? picked : null

@@ -53,20 +53,29 @@ minY = 0.0
 [[versions]]
 id = 'STANDARD'
 name = '标准版'
+nameEn = 'Standard'
 recommendedBundle = 'A1_STANDARD'
 tag = '推荐'
+tagEn = 'Recommended'
 description = '标准配置，适合大多数用户'
+descriptionEn = 'Standard configuration for most users'
 
 [[versions]]
 id = 'FAST'
 name = '快拆版6月以前'
+nameEn = 'Quick-release (before June)'
 recommendedBundle = 'A1_FAST'
 tag = '热门'
+tagEn = 'Popular'
 description = '支持快拆配件的改装配置'
+descriptionEn = 'Modded setup for quick-release parts'
 
 [[versions]]
 id = 'FASTV3.3'
 name = '快拆版260628'
+nameEn = 'Quick-release 260628'
 recommendedBundle = 'A1_FASTV3.3'
 tag = '最新'
+tagEn = 'Newest'
 description = '6月以后闲鱼购买的，以及6月28开源的快拆260628版本'
+descriptionEn = 'For units bought after June, plus the open-sourced 260628 quick-release design'

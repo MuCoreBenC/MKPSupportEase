@@ -729,6 +729,8 @@ export const zhCN = {
   'params.history.empty': '这个文件本次打开还没有改动',
   'params.history.emptyNet': '改动都改回了原值 —— 按保存批次看，这里没有净变化',
   'params.history.count': '{count} 条',
+  'params.history.draftShort': '未',
+  'params.history.foot': '这些改动跟着这份文件留着 —— 关掉软件、重开都还在；只有「清空历史」会清掉它。',
 
   /* 报告页（2026-10-26） */
 
@@ -1695,6 +1697,37 @@ export const zhCN = {
   'report.value.tower': '普通擦料塔',
   'report.value.inPlace': '原地覆盖完成',
   'report.value.newFile': '写入独立文件完成',
+
+  /* 2026-10-27 收尾：共用件 / 对话框 / 数据提示 */
+  'field.switch.off': '关闭',
+  'field.switch.on': '开启',
+  'params.card.switchTo': '切换到「{value}」',
+  'params.card.rowsCount': '{count} 项参数',
+  'params.sync.local': '本地',
+  'params.sync.cloud': '云端',
+  'params.sync.after': '确认后：',
+  'notes.more': '{count} 条 · {first} …',
+  'report.relocation.before': '现在',
+  'report.relocation.after': '挪后',
+  'catalog.stale.title': '怎么解决',
+  'catalog.stale.body':
+    '云端出了新版，这台机器上还是旧的。关掉软件再打开一次，回来再点「从云端获取」就行。',
+  'drawer.widthAria': '{label}宽度 {width} 像素，方向键调整，Home 复位',
+  'api.error.notWired': '这个功能还没接好（{method}）',
+  'api.error.generic': '出了点问题，请重试',
+  'api.error.notImplementedHint':
+    '这一步在这一版里还没有：换桌面版试试，或先用能用的那几步把事情办完',
+  'dialog.slicer.title': '选择用来打开模型的切片软件',
+  'dialog.filter.program': '程序',
+  'dialog.import.title': '选择要导入的文件',
+  'dialog.filter.preset': '预设文件',
+  'dialog.filter.all': '所有文件',
+  'dialog.exportDir.title': '选择保存位置',
+  'bundle.missingCombo': '目录里没有 {key} 这个组合',
+  'bundle.incomplete': '{key} 的套餐没配齐',
+  'bundle.fetchFailed': '{key} 的套餐没取到 —— 稍后再试，或去看数据源配好没有',
+  'calib.preset.pendingName': '预设文件',
+  'guide.openWith.alt': '系统「显示简介」窗口：展开的「打开方式」，里面有应用下拉与「全部更改…」',
 } as const
 
 /** 全部键（`en.ts` 用 `Record<StringKey, string>` 钉住，漏一条编译期就红） */

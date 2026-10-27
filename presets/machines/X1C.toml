@@ -50,6 +50,9 @@ minY = 0.0
 [[versions]]
 id = 'LITE'
 name = 'lite版'
+nameEn = 'Lite'
 tag = '推荐'
+tagEn = 'Recommended'
 description = '群里开源的最新lite'
+descriptionEn = 'Latest lite released in the group'
 recommendedBundle = 'X1C_default'

@@ -74,6 +74,7 @@
  */
 
 import type { CatalogAsset, CatalogGroup } from '../../api/contract'
+import { t } from '../../i18n'
 import { assetUrlOf } from '../home/heroArt'
 import type { GuideFigureSpec } from './GuideImage'
 
@@ -115,7 +116,7 @@ export function openWithGuideFigure(
   return {
     light,
     dark,
-    alt: '系统「显示简介」窗口：展开的「打开方式」，里面有应用下拉与「全部更改…」',
+    alt: t('guide.openWith.alt'),
     /*
      * ★★★ **交付的是"框已经烧进像素"的成品图**（2026-10-16 方案 A）：
      * 台账那条 `path` 指 `.rendered.webp`，框是工作台保存标注时用 `render.rs` 渲进去的。

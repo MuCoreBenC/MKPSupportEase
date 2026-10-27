@@ -515,9 +515,15 @@ export interface MachineVersion {
   id: string
   /** 给人看的名字，'标准版' / '快拆版260628' */
   name: string
+  /** 英文显示名（2026-10-27 双语数据）。空 = 回落 `name` */
+  nameEn?: string | null
   /** 角标，'推荐' / '热门' / '最新'；没有就不显示 */
   tag?: string
+  /** 英文角标。空 = 回落 `tag` */
+  tagEn?: string | null
   description?: string
+  /** 英文说明。空 = 回落 `description` */
+  descriptionEn?: string | null
   /**
    * **备注**（2026-10-07）：客户端预设列表的**副标题**用它 —— 不再显示
    * 「下载区 mkp · 路径」那种位置文案。可空（工作台可以不写；没写副标题就空着）。
@@ -1311,6 +1317,8 @@ export interface RuntimeCatalogBrand {
   id: string
   /** `'拓竹 (Bambu Lab)'` —— 给人看的显示名（机型上的 `brand` 就是它） */
   name: string
+  /** 英文显示名（2026-10-27 双语数据）。空 = 回落 `name` */
+  nameEn?: string | null
   /** 品牌图的资产 id；空/查不到 = 回落内置字标 */
   logo: string | null
 }

@@ -12,7 +12,7 @@
  *                  「谁挂在谁下面、什么条件下用」一句话说完。缩进由子卡的边距一层层
  *                  累加，轨与肘全部退场。
  * 状态 → 折叠    **条件不满足的支折成一条，满足的摊开成子卡**（判据统一成这一句）：
- *                  摊开 = 装订子卡，折叠 = 虚线灰卡（「▸ N 项参数」+ 各行名）。
+ *                  摊开 = 装订子卡，折叠 = 虚线灰卡（箭头 +「N 项参数」+ 各行名）。
  *                  点分段（或点折叠卡）切支时，旧支 240ms 收成一条、新支摊开
  *                  （grid-template-rows 0fr↔1fr 的既定动效曲线）。折叠条点了就是把
  *                  条件参数**改成那一支的值** —— 它是一条真的切换路径，不是摆设；
@@ -22,7 +22,7 @@
  *
  * # 交接动效：手风琴头
  *
- * **一张卡、一根签、一条常驻卡头** —— 折叠行升级成卡头（▸ N 项参数 · 行名…），
+ * **一张卡、一根签、一条常驻卡头** —— 折叠行升级成卡头（箭头 + N 项参数 · 行名…），
  * 参数行在头下面 0fr↔1fr 长出来；签与卡上缘钉死，摊 / 收只有卡身高度在变。
  *
  * 分支按「条件参数 + op + value」归组（`buildTree()`：条件参数在这张卡里出现过
@@ -38,6 +38,8 @@
 
 import type { ReactNode } from 'react'
 import type { ParamSyncEntry } from '../../api'
+import Icon from '../shell/icons'
+import ui from '../ui/ui.module.css'
 import { useT } from '../../i18n'
 import Highlight from './highlight'
 import { valueText } from './useParams'
@@ -332,7 +334,7 @@ export default function ParamCard({
        *   .branch  支的定位架，**签挂在这里** —— 在卡外、在任何 overflow:hidden 之外，
        *            收拢摊开一像素不动；卡的上缘同样钉死，变的只有卡身高度。
        *   .grp     卡本体：收拢 = 虚线灰、只剩卡头；摊开 = 实线白、参数行在头下面。
-       *   .fold    常驻卡头（▸ N 项参数 · 行名…），收拢时点了 = 把条件参数改成这一支的
+       *   .fold    常驻卡头（箭头 + N 项参数 · 行名…），收拢时点了 = 把条件参数改成这一支的
        *            值（写值闸在后头：弃用支点了弹回来说一句人话）。
        *   .accBody grid-rows 壳：参数行在头下面 0fr ↔ 1fr，240ms 收旧摊新。
        * 搜索态全支摊开、卡头照画但点不动。
@@ -363,13 +365,18 @@ export default function ParamCard({
                 aria-expanded={open}
                 /* 只读态点不动（它是一条真的写值路径：点了 = 把条件参数改成这一支的值） */
                 disabled={!switchable || open || readonly}
-                title={!open && switchable && !readonly ? `切换到「${valueLabel}」` : undefined}
+                title={
+                  !open && switchable && !readonly
+                    ? tr('params.card.switchTo', { value: valueLabel })
+                    : undefined
+                }
                 onClick={() => onEdit(node.cond.key, node.cond.value)}
               >
-                <span className={s.foldMark} aria-hidden>
-                  ▸
-                </span>
-                <b className={s.foldCount}>{directRows.length} 项参数</b>
+                {/* 箭头是形状不是字符（同报告页 / 历史抽屉）：闭着朝右、摊开朝下，绕自己中心转 90° */}
+                <Icon name="chevronDown" size={12} className={ui.disclosureCaret} data-on={open} />
+                <b className={s.foldCount}>
+                  {tr('params.card.rowsCount', { count: directRows.length })}
+                </b>
                 <span className={s.foldHint}>{directRows.map((r) => r.def.label).join(' / ')}</span>
               </button>
               <div className={open ? `${s.accBody} ${s.accBodyOpen}` : s.accBody}>

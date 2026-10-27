@@ -24,6 +24,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../../api'
 import { isAppError } from '../../api/contract'
+import { t } from '../../i18n'
 import type { AppError, Axes, Preset, AxisLimit, AxisLimits } from '../../api/contract'
 import type { Selection } from '../home/MachinePicker'
 import { useActivePreset } from '../state/appState'
@@ -57,7 +58,7 @@ export type PresetState =
  * 等待期间宁可显示一个中性占位，也不猜一个名字出来（PresetStack 在 waiting 态本来就渲染骨架屏，
  * 这个串只在「强制 downloading / failed 且还没拿到响应」这一种情况下露脸）。
  */
-const PENDING_NAME = '预设文件'
+const pendingName = (): string => t('calib.preset.pendingName')
 
 /** 三轴与速度那四个字段 —— 参数注册表里的真名字，别在别处再写一遍 */
 const OFFSET_KEYS = {
@@ -129,7 +130,7 @@ export function usePreset(sel: Selection): PresetState {
     if (key === null) return { status: 'idle' }
     if (entry !== null && entry.key === key) return entry.state
     const hit = presetCache.get(key)
-    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'waiting', name: PENDING_NAME }
+    return hit !== undefined ? { status: 'ready', preset: hit } : { status: 'waiting', name: pendingName() }
   }, [entry, key])
 
   useEffect(() => {
@@ -139,7 +140,7 @@ export function usePreset(sel: Selection): PresetState {
     let alive = true
     /* 缓存里有上一份就站在它上面刷新，不清成 waiting —— 重挂时读数不许闪「—」 */
     if (!presetCache.has(key)) {
-      setEntry({ key, state: { status: 'waiting', name: PENDING_NAME } })
+      setEntry({ key, state: { status: 'waiting', name: pendingName() } })
     }
 
     Promise.all([
@@ -194,7 +195,7 @@ export function usePreset(sel: Selection): PresetState {
 
         /* 四个数缺一个就当取不到：读数条宁可说「取不到」，也不拿半个基准开始校准 */
         if (axes === null || speed === null) {
-          setEntry({ key, state: { status: 'failed', name: PENDING_NAME } })
+          setEntry({ key, state: { status: 'failed', name: pendingName() } })
           return
         }
 
@@ -223,7 +224,7 @@ export function usePreset(sel: Selection): PresetState {
           key,
           state: {
             status: 'failed',
-            name: PENDING_NAME,
+            name: pendingName(),
             error: isAppError(err) ? err : undefined,
           },
         })

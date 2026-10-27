@@ -5,6 +5,8 @@
  * `react-refresh/only-export-components` 报"这个文件不能热更新"。
  */
 
+import { t } from '../../i18n'
+
 /**
  * 把**多条**提示压成一行（标题右边那一格只放得下一行）。
  *
@@ -15,5 +17,5 @@
  */
 export function summarizeNotes(list: string[]): string {
   if (list.length <= 1) return list[0] ?? ''
-  return `${list.length} 条 · ${list[0]} …`
+  return t('notes.more', { count: list.length, first: list[0] ?? '' })
 }

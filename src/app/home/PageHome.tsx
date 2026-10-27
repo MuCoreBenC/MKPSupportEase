@@ -25,7 +25,8 @@ import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
-import { useT, type StringKey } from '../../i18n'
+import { useLocale, useT, type StringKey } from '../../i18n'
+import { bi } from '../shared/dataLabel'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { notify } from '../notify/notify'
 import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
@@ -122,6 +123,7 @@ interface PageHomeProps {
 export default function PageHome({ density }: PageHomeProps) {
   /* 这一页所有用户能读到的字都走字典（2026-10-26） */
   const tr = useT()
+  const locale = useLocale()
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
   const plateTheme = PLATE_THEME_OF[isDark ? 'dark' : 'light']
@@ -158,6 +160,14 @@ export default function PageHome({ density }: PageHomeProps) {
 
   /* ---------- 文件体系：三级清单与「文件」那一级都从这里来（T10） ---------- */
   const catalog = useCatalog()
+  /* 品牌的显示名（机型的 `brand` 存的是品牌显示名）—— 英文界面走 `nameEn` */
+  const brandLabel = useCallback(
+    (id: string): string => {
+      const b = catalog.brands.find((x) => x.name === id)
+      return b === undefined ? id : bi(b.name, b.nameEn ?? undefined, locale)
+    },
+    [catalog.brands, locale],
+  )
 
   /*
    * T9/T10 联动（预设页 → 首页）：对准「正在使用的那一条」（AppState 的 activePreset 格）——
@@ -325,10 +335,10 @@ export default function PageHome({ density }: PageHomeProps) {
   const brandOptions = useMemo<Option[]>(() => {
     const out: Option[] = []
     for (const m of catalog.machines) {
-      if (!out.some((o) => o.id === m.brand)) out.push({ id: m.brand, label: m.brand })
+      if (!out.some((o) => o.id === m.brand)) out.push({ id: m.brand, label: brandLabel(m.brand) })
     }
     return out
-  }, [catalog.machines])
+  }, [catalog.machines, brandLabel])
 
   const modelOptions = useMemo<Option[]>(
     () => catalog.machines.map((m) => ({ id: m.id, label: m.display })),
@@ -340,11 +350,12 @@ export default function PageHome({ density }: PageHomeProps) {
     return (machine?.versions ?? []).map((v) => ({
       id: v.id,
       label: v.name,
-      badge: v.tag,
+      badge: v.tag == null ? undefined : bi(v.tag, v.tagEn ?? undefined, locale),
+      /* 色调仍按**原角标**查表（`TAG_TONE` 的键是中文那一册） */
       badgeTone: TAG_TONE[v.tag ?? ''],
       note: v.description,
     }))
-  }, [catalog.machines, sel.model])
+  }, [catalog.machines, sel.model, locale])
 
   /* 「文件」这一级：仓库里的 9 份 MKP，每份带 机型/版本 倒查（校准页的预设下拉用它） */
   const presetOptions = useMemo(
@@ -411,7 +422,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * （`onUse` 里 `if (dirty)` 那一支）还在用它。
    */
 
-  const brandName = sel.brand
+  const brandName = sel.brand === null ? null : brandLabel(sel.brand)
   const modelNode = catalog.machines.find((m) => m.id === sel.model)
   const modelName = modelNode?.display ?? null
   const variantName = modelNode?.versions.find((v) => v.id === sel.variant)?.name ?? null

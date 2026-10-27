@@ -53,6 +53,10 @@ import { assetsBus } from '../assetsBus'
 import { toasts } from '../c14/toast'
 import c from '../c14.module.css'
 import { usePageActions } from '../pageActions'
+/* 箭头一律是客户端那一颗形状（`shell/icons` 的 chevronDown + `ui` 的两个转向类），
+   工作台不再自己排「▸」字形 —— 字形转 90° 会被字体度量拉一下 */
+import Icon from '../../app/shell/icons'
+import ui from '../../app/ui/ui.module.css'
 import s from './AnnotatePage.module.css'
 
 /** 网格步长：作者量坐标时用的就是「每 50px 一条线」 */
@@ -1923,7 +1927,7 @@ export default function AnnotatePage() {
                         moveRow(i, -1)
                       }}
                     >
-                      ↑
+                      <Icon name="chevronDown" size={12} className={ui.caretUp} />
                     </button>
                     <button
                       type="button"
@@ -1935,7 +1939,7 @@ export default function AnnotatePage() {
                         moveRow(i, 1)
                       }}
                     >
-                      ↓
+                      <Icon name="chevronDown" size={12} />
                     </button>
                     <button
                       type="button"
@@ -2060,7 +2064,12 @@ export default function AnnotatePage() {
               onClick={() => setIoOpen((v) => !v)}
               title="把框的坐标导出去（贴回客户端源码）／从 JSON 贴回来继续编 —— 平时用不到"
             >
-              <span className={`${s.ioCaret} ${ioOpen ? s.ioCaretOn : ''}`}>▸</span>
+              <Icon
+                name="chevronDown"
+                size={12}
+                className={ui.disclosureCaret}
+                data-on={ioOpen}
+              />
               <span>导出／导入</span>
               <span className={s.dim}>给开发用</span>
             </button>

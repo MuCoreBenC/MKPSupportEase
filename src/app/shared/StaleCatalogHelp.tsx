@@ -11,6 +11,7 @@
  * 摆放位置由调用方定（都在模态框内容区那句状态下面）。
  */
 
+import { useT } from '../../i18n'
 import s from './StaleCatalogHelp.module.css'
 
 /**
@@ -20,12 +21,11 @@ import s from './StaleCatalogHelp.module.css'
  * 不摆 SHA / revision —— 那些是排查用的，住在后端 `detail` 与日志里。
  */
 export function StaleCatalogHelp() {
+  const tr = useT()
   return (
     <div className={s.help}>
-      <span className={s.title}>怎么解决</span>
-      <span className={s.body}>
-        云端出了新版，这台机器上还是旧的。关掉软件再打开一次，回来再点「从云端获取」就行。
-      </span>
+      <span className={s.title}>{tr('catalog.stale.title')}</span>
+      <span className={s.body}>{tr('catalog.stale.body')}</span>
     </div>
   )
 }

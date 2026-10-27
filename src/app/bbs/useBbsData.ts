@@ -178,6 +178,7 @@ function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPreset
     isAbstract: false,
     selectable: !missing,
     reason: missing ? '还没下载' : null,
+    reasonKey: missing ? 'bbs.reason.notDownloaded' : undefined,
     notDownloaded: missing,
     doc,
   }
