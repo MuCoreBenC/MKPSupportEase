@@ -117,6 +117,7 @@ import { POSTPROCESS_FINISHED, POSTPROCESS_PRINT_TIME } from '../postprocess/eve
 import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
+import Icon from '../shell/icons'
 import ExportModal from './ExportModal'
 import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
@@ -1126,9 +1127,15 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
               aria-expanded={shown}
               onClick={() => setOpen((cur) => ({ ...cur, [sec.id]: !shown }))}
             >
-              <span className={s.snapCaret} data-on={shown} aria-hidden="true">
-                ▸
-              </span>
+              {/* 展开箭头用**形状**不用字形（2026-10-27 作者：「点了之后会变形，不是原地转的」
+                  —— `▸` 是字体字形，旋转时墨迹跟着字体度量走，看着像被拉了一下）。
+                  SVG 绕自己中心转 90°，闭着朝右、开着朝下，原地转。 */}
+              <Icon
+                name="chevronDown"
+                size={12}
+                className={s.snapCaret}
+                data-on={shown}
+              />
               <b>{sec.id}</b>
               <span className={s.snapSecCount}>{sec.rows.length}</span>
             </button>

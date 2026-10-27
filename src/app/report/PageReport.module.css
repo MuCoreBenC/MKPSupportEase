@@ -1010,14 +1010,17 @@
 }
 
 .snapCaret {
-  display: inline-block;
-  width: 12px;
+  /* 形状（SVG 雪佛龙）而不是字形：绕**自己的中心**转，闭着朝右、开着朝下 */
+  display: block;
+  flex: 0 0 auto;
   color: var(--text-3);
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
   transition: transform 120ms ease;
 }
 
 .snapCaret[data-on='true'] {
-  transform: rotate(90deg);
+  transform: rotate(0deg);
 }
 
 .snapSecCount {
