@@ -418,6 +418,26 @@ export const PRESET_UNTRUSTED_NOTE: StringKey = 'presets.tree.untrustedNote'
  *     `update` （本机是旧的）→「更新」换掉旧的
  *   **管道仍然只有一条**（`runtime/delivery.rs`：旧份自动归档），只是按钮说实话。
  */
+/**
+ * 云端那一行"我这边怎么样"那枚徽章怎么写（2026-10-27：**与本地行同一条规则**）。
+ *
+ * 作者原话：「两边都统一呀，不要有差异，一样的判断，一样的显示，云端旧的就不用显示更新」。
+ * 所以这里不再自己判，直接搬认领者那一份的 `BasedOn`：
+ *   newer     → 「云端较旧」（云端比我这份旧，不给动作）
+ *   elsewhere → 「另一个源」
+ *   其余照旧（current → 本地已有 / outdated → 有新版 / 没认领 → 未获取）
+ */
+export function cloudClaimBadge(row: {
+  basedOn?: BasedOn
+  localState?: CloudLocalState
+}): { text: StringKey; state: string } | null {
+  /* 云端较旧时**外部什么都不显示**（2026-10-27 作者：「就当无事发生一样」） */
+  if (row.basedOn === 'newer') return null
+  /* `elsewhere` 不挂任何徽章：源不同不是用户要看的，判定看内容与时间（2026-10-27） */
+  if (row.localState === undefined) return null
+  return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
+}
+
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
   missing: 'presets.tree.updateAction.missing',
   latest: 'presets.tree.updateAction.latest',
@@ -861,7 +881,7 @@ export const USAGE_HINT: StringKey = 'presets.tree.usageHint'
 export function basedOnCellText(
   tr: Tr,
   row: {
-    basedOn?: BasedOn
+  basedOn?: BasedOn
     basedOnSource?: string | null
     basedOnCloud?: string | null
   },
@@ -889,10 +909,15 @@ export function basedOnCellText(
      * 不是同一个源：换平台 / 换分支 / 换目录，或老副本没记源身份。
      * 比不出新旧 —— 照实说"另有所在"，动作是「下载」而不是「更新」。
      */
+    /*
+     * 不是题目里的那个源、时间又比不出来（2026-10-27 起很少见）：
+     * 只把血统里那串来源照抄出来，**不再加"不是当前这个云的"这种话** ——
+     * 作者的原话是"不要显示另一个源"，那就连解释都不扯源。
+     */
     case 'elsewhere':
       return source === ''
-        ? tr('presets.tree.basedOn.elsewhereNoSource')
-        : tr('presets.tree.basedOn.elsewhere', { source })
+        ? tr('presets.tree.basedOn.noneNoSource')
+        : tr('presets.tree.basedOn.elsewhereBare', { source })
     default:
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
@@ -1367,6 +1392,11 @@ export function versionsText(tr: Tr, versions: string[]): { text: string; why: s
 
 /** 两张表的行共有的部分。表格那 7 列全靠它 —— 组件不再回头查树 */
 export interface PresetRowBase {
+  /** 「版本来源」那几格（云端行只有后两格：源身份 + 目录发布时间） */
+  basedOnFacts?: BasedOnFacts
+  /** 我本地那一份**基于的云端版本时间**（血统 release_time；只有云端行有） */
+  localReleaseText?: string | null
+
   /** 这张表里唯一。带上机型：**一个文件在一台机型下只有一行**（版本收进了 `versions`） */
   rowKey: string
   /**
@@ -1540,14 +1570,14 @@ export interface PresetLocalRow extends PresetRowBase {
    * 它是"文件头血统 + 目录现况"比出来的一个事实，不是"这份文件好不好"——
    * `outdated` 的那份照常能用能改，见 [`BASED_ON_WHY`]。
    */
-  basedOn?: BasedOn
   /**
-   * 上面那个结论**摆事实**的那几格（源身份 / 各自发布时刻）。
+   * 上面的结论**摆事实**的那几格（源身份 / 各自发布时刻；云端行只有后两格）。
    *
-   * 展开详情里「版本来源」那四行原样搬它 —— 判定全在 Rust 侧，前端不重算，
+   * 展开详情里「版本来源」那几行原样搬它 —— 判定全在 Rust 侧，前端不重算，
    * 也不自己解释"谁更新"（那会变成第二套判据）。
    */
   basedOnFacts?: BasedOnFacts
+  basedOn?: BasedOn
   /**
    * 血统里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
@@ -1585,6 +1615,10 @@ export interface PresetLocalRow extends PresetRowBase {
 }
 
 export interface PresetCloudRow extends PresetRowBase {
+  /** 认领它的那份本地文件的判据（与本地行同一个 BasedOn；没认领 ⇒ undefined） */
+  basedOn?: BasedOn
+
+
   scope: 'cloud'
   /**
    * 云端表上的东西：云端仓库的文件（切片器档），或者**目录登记的交付预设**（MKP 档）。
@@ -1688,6 +1722,13 @@ export interface PresetRowsInput {
    * 行为不退化。
    */
   cloudVersions: CloudVersion[]
+  /**
+   * **云端条目 → 我本地那一份的修改时刻**（epoch 秒），云端详情里摆「本地版本时间」用。
+   *
+   * 键是云端文件名（认亲只认血统 based_on 的末段，与 claims 同一套）；
+   * 我这儿没有那一份就没有这个键 —— 就写「还没下载」，不编。
+   */
+  localTimes: Map<string, { at: number; release: string | null }>
   /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`PresetFileState = ok`） */
   localPresets: DeliveryPresetSource[]
   /**
@@ -1718,6 +1759,12 @@ export interface PresetRowsInput {
    * （离线 / 随包），来源照旧退「云端」。
    */
   sourceLabel: string | null
+  /**
+   * 当前源的**规范化身份**（`github#owner/repo@main`）—— 云端详情里
+   * 「云端源」那一行照它显示。`null` = 没配源 / 认不出（就写「未知」）。
+   * **判据不读它**：那是 Rust 侧 `based_on` 的事。
+   */
+  sourceIdentity: string | null
 }
 
 /**
@@ -2535,8 +2582,10 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     sort,
     deliveryPresets,
     cloudVersions,
+    localTimes,
     presetVersion,
     releaseAt,
+    sourceIdentity,
   } = input
   const names = machineNames(machines)
   const versionName = versionNameLookup(machines)
@@ -2742,8 +2791,31 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
         downloaded: state === 'ok',
         presetState: state,
         publishedAt: releaseAt,
+        /*
+         * 我本地那一份**基于的云端版本时间**（认亲认出来的）—— 云端详情里和
+         * 「云端发布时间」同量纲对照。★ 不能拿文件修改时间：那是我哪天动过它，
+         * 与版本新旧无关（作者 2026-10-27 就是被那个数带偏了）。
+         */
+        localReleaseText: localTimes.get(p.fileName)?.release ?? null,
+        /*
+         * 云端详情里那一行「云端源」（2026-10-27）。
+         *
+         * ★ 云端也要摆**时间**（作者第二次截图：详情里只有「更新」按钮、没有时间）。
+         *   与本地行同一套「源 + 时间」两格，读的人不用去别处凑。
+         *   与「来源：自定义源」不重复：那一格说的是**模式**（自定义 / GitHub / Gitee），
+         *   这一格是**规范化身份**（`gitee#owner/repo@ref`）—— 键名也分开写。
+         */
+        basedOnFacts: {
+          lineageSource: null,
+          lineageRelease: null,
+          lineagePublishedAt: null,
+          cloudSource: sourceIdentity,
+          cloudPublishedAt: releaseAt,
+        },
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */
+        /* 同一个判据：云端行也用后端那一格 BasedOn（与本地行同一条规则） */
+        basedOn: claims.get(p.fileName),
         localState: localStateOf(p.fileName),
       } satisfies PresetCloudRow
       return [row]

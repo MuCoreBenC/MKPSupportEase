@@ -282,27 +282,35 @@ pub fn based_on(
     };
 
     /*
-     * **先问"是不是同一个源"**（作者 2026-10-27 定的判定顺序）：
+     * **判据只看两件事：内容一样不一样、时间谁在前**（作者 2026-10-27 第三次改口径：
+     * 「不是同一个源也不要显示另一个源吧，主要是不要显示更新呀，不要因为源不同就更新，
+     *   还是看内容和时间吧」）。
      *
-     * 不同源的两份目录各自演化，SHA 不同只说明"内容不一样"，谁新谁旧根本无从谈起。
-     * 从前只比 SHA，于是从 GitHub 切到旧一版的 Gitee 会把**每一份**派生过的文件
-     * 都翻成「有新版」，再配一颗绿色「更新」按钮 —— 那是把用户往回带。
-     *
-     * 血统账上没记源身份（这个功能之前建的副本）⇒ `Elsewhere`：
-     * 不猜它当初来自哪个源，也不给「更新」。
+     * 所以源身份不再是"能不能比"的闸门，只降级成兜底：**时间比不出来时**才回头看它 ——
+     *   · 同一个源、时间缺一 ⇒ 照旧算 `Outdated`（保守：说它是旧版，动作仍给）；
+     *   · 不是同一个源、时间缺一 ⇒ `Elsewhere`（不声称新旧、**不给更新**）。
+     * 内容不同 + 两端时间都在 ⇒ 完全按时间定：云端更早就是 `Newer`（不给更新），
+     * 否则 `Outdated`（给更新）—— 与源是否同一个无关。
      */
     if copy_source.is_none() || judge.cloud != copy_source {
-        return verdict(BasedOn::Elsewhere);
+        return match cloud_direction(judge, copy_source, lineage) {
+            Some(older) => verdict(if older {
+                BasedOn::Newer
+            } else {
+                BasedOn::Outdated
+            }),
+            /* 时间也比不出来 ⇒ 不猜（不挂「有新版」，也不给更新） */
+            None => verdict(BasedOn::Elsewhere),
+        };
     }
 
     match (lineage.based_on_sha256.as_deref(), file.expected_sha()) {
         (Some(sha), Some(want)) if sha == want => verdict(BasedOn::Current),
         (Some(_), Some(_)) => {
-            /* 同一个源、内容不同：这时才轮到"谁更新" —— 而且只作辅助判断 */
-            if cloud_is_older(judge, copy_source) {
-                verdict(BasedOn::Newer)
-            } else {
-                verdict(BasedOn::Outdated)
+            /* 内容不同：按时间定方向；时间缺一才退回"照旧算旧版" */
+            match cloud_direction(judge, copy_source, lineage) {
+                Some(true) => verdict(BasedOn::Newer),
+                _ => verdict(BasedOn::Outdated),
             }
         }
         /*
@@ -319,16 +327,23 @@ pub fn based_on(
 /// ★ 只在这一处用，而且只用来在 `Outdated` 与 `Newer` 之间二选一 ——
 ///   **绝不**单独据此声称"有新版本"（作者 2026-10-27：`publishedAt` 只能辅助）。
 ///   两端缺一 ⇒ `false`（退回 `Outdated`：同为旧版的说法，不凭空升格成"你可更新"）。
-fn cloud_is_older(judge: &Judge<'_>, copy_source: Option<&SourceIdentity>) -> bool {
-    let cloud = judge.catalog.published_at.as_deref().and_then(moment_of);
+fn cloud_direction(
+    judge: &Judge<'_>,
+    copy_source: Option<&SourceIdentity>,
+    lineage: &Lineage,
+) -> Option<bool> {
+    let cloud = judge.catalog.published_at.as_deref().and_then(moment_of)?;
+    /*
+     * "我这份基于的那一版是什么时候" —— 两个来源，先用账本，账本没有就退回血统里
+     * 那一行 `based_on_release_time`（2026-10-27：老副本没有账本记录，而文件头那行
+     * 正是用户界面上看到的「本地版本时间」，两边必须是同一个数）。
+     */
     let mine = copy_source
         .and_then(|id| source_note(judge.notes, id))
         .and_then(|n| n.published_at.as_deref())
-        .and_then(moment_of);
-    match (mine, cloud) {
-        (Some(mine), Some(cloud)) => cloud < mine,
-        _ => false,
-    }
+        .or(lineage.based_on_release_time.as_deref())
+        .and_then(moment_of)?;
+    Some(cloud < mine)
 }
 
 fn source_note<'a>(notes: &'a [SourceNote], id: &SourceIdentity) -> Option<&'a SourceNote> {
@@ -339,7 +354,12 @@ fn source_note<'a>(notes: &'a [SourceNote], id: &SourceIdentity) -> Option<&'a S
 /// 认不出就 `None`（判据退回"不知道"，不拿字符串做字典序比较 —— 时区不同的两份会错）。
 fn moment_of(raw: &str) -> Option<i64> {
     let s = raw.trim();
-    let (date, rest) = s.split_once('T')?;
+    /*
+     * 血统那一行 `# release_time` 写的是 `2026-10-15 09:00:00`（空格），目录里是
+     * RFC3339（`T`）。同一件事的两种写法都得认 —— 只有认得出才能回答"云端是不是更旧"。
+     */
+    let normalized = s.replacen(' ', "T", 1);
+    let (date, rest) = normalized.split_once('T')?;
     let mut d = date.split('-');
     let y: i64 = d.next()?.parse().ok()?;
     let mo: i64 = d.next()?.parse().ok()?;
@@ -1696,7 +1716,7 @@ mod tests {
     /// —— 否则从 10-25 的 GitHub 切到 10-19 的 Gitee，全表都成了"有新版"，一点
     /// 就把用户往旧内容上带。
     #[test]
-    fn another_source_is_never_reported_as_a_newer_cloud() {
+    fn a_cross_source_copy_without_times_is_never_a_newer_cloud() {
         let catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         let gh = github();
         let gt = gitee();
@@ -1749,6 +1769,51 @@ mod tests {
         );
     }
 
+    /// **跨源也按内容和时间判**（2026-10-27 作者：「不要因为源不同就更新，还是看内容和时间吧」）。
+    ///
+    /// 两端时间都在 ⇒ 谁说了算的是时间，不是源：云端更早 = `Newer`（不给更新），
+    /// 云端更新 = `Outdated`（给更新）。源身份只用来兜底"时间缺一"那一档。
+    #[test]
+    fn a_cross_source_copy_still_follows_the_times() {
+        let gh = github();
+        let gt = gitee();
+        let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
+        catalog.published_at = Some("2026-10-19T12:00:00Z".to_owned());
+        let notes = vec![SourceNote {
+            identity: gh.clone(),
+            published_at: Some("2026-10-25T12:00:00Z".to_owned()),
+            revision: "rev-gh".to_owned(),
+            seen_at: 0,
+        }];
+        let from_gh = Lineage {
+            based_on: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
+            based_on_release_time: Some("2026-10-25T12:00:00Z".to_owned()),
+            based_on_sha256: Some(lineage::sha256_hex("云端第一版")),
+        };
+        assert_eq!(
+            based_on(
+                &judge(&catalog, Some(&gt), &notes),
+                Some(&from_gh),
+                Some(&gh)
+            )
+            .based_on,
+            BasedOn::Newer,
+            "云端 10-19 比这份基于的 10-25 旧 ⇒ 云端较旧，不给更新"
+        );
+
+        catalog.published_at = Some("2026-10-27T12:00:00Z".to_owned());
+        assert_eq!(
+            based_on(
+                &judge(&catalog, Some(&gt), &notes),
+                Some(&from_gh),
+                Some(&gh)
+            )
+            .based_on,
+            BasedOn::Outdated,
+            "云端时间更晚 ⇒ 照常说有新版（与是不是同一个源无关）"
+        );
+    }
+
     /// 老副本（这个功能之前建的，账上没记源身份）⇒ `Elsewhere`：不猜它来自哪个源
     #[test]
     fn a_copy_without_a_recorded_source_is_elsewhere() {
@@ -1769,6 +1834,29 @@ mod tests {
         assert_eq!(
             based_on(&judge(&catalog, None, &notes), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Elsewhere
+        );
+    }
+
+    /// **账本里没有那个源**时，用血统那一行 `# release_time` 顶上（2026-10-27）。
+    ///
+    /// 老副本是在记账之前建的；界面上「本地版本时间」显示的就是这一行 —— 判定必须
+    /// 和用户看得见的那个数是同一个，否则又会出现"时间明明是旧的，却让我更新"。
+    #[test]
+    fn without_a_ledger_note_the_lineage_release_time_decides() {
+        let gh = github();
+        let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
+        catalog.published_at = Some("2026-10-19T12:00:00Z".to_owned());
+        let lineage = Lineage {
+            based_on: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
+            /* 文件头那种写法（空格分隔）也得认 */
+            based_on_release_time: Some("2026-10-25 12:00:00".to_owned()),
+            based_on_sha256: Some(lineage::sha256_hex("云端第一版")),
+        };
+        let v = based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), Some(&gh));
+        assert_eq!(
+            v.based_on,
+            BasedOn::Newer,
+            "账本没有记录 ⇒ 用血统那一行判：云端 10-19 比它 10-25 旧"
         );
     }
 

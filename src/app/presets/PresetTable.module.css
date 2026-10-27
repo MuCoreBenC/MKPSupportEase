@@ -933,10 +933,16 @@
   line-height: 1.5;
 }
 
+/*
+ * 键宽**定死、且不许换行**（2026-10-27 作者："字段不要换行，就一行显示完整名字"）：
+ * 56px 放不下「本地版本时间」那种六字键，一换行就把那一行撑成两倍高，
+ * 上下间距看着忽宽忽窄。92px = 七字档（当前最长一行），照旧左对齐。
+ */
 .dKey {
   flex-shrink: 0;
-  width: 56px;
+  width: 92px;
   color: var(--text-3);
+  white-space: nowrap;
 }
 
 .dVal {
@@ -944,6 +950,13 @@
   min-width: 0;
   color: var(--text-1);
   overflow-wrap: anywhere;
+}
+
+/* 源身份那种长串：**一行到底**，放不下就省略号（完整值在 title 里） */
+.dOne {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 概览内可定位链接：安静、深色、不用绿 */

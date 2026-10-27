@@ -1573,6 +1573,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 「下载的时候，我点得很快，就会出现这个情况，它好像就重复了」——
      * 第一下已经把本地那份落下来了，第二下就变成"撞名、再导入一份"。
      */
+    /* 云端较旧的行任何入口都不该走到这里（按钮与右键项都已撤）—— 兜底也别做反向更新 */
+    if (row.scope === 'cloud' && row.basedOn === 'newer') return
     const key = `download:${row.rowKey}`
     if (!enter(key)) return
     if (row.scope === 'cloud' && row.localState !== undefined) {
@@ -2789,12 +2791,19 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (row.scope === 'cloud') {
       const localState = row.localState
       const cloudAction = CLOUD_LOCAL_ACTION[localState ?? 'none']
-      const label =
-        localState !== undefined
+      /*
+       * **云端较旧 ⇒ 这一项也不给**（2026-10-27）：右键菜单是与操作列并列的第二个入口，
+       * 只守列表那颗按钮不够。与 `CloudLocalAction` 读同一个 `basedOn`，两处同源。
+       */
+      const older = row.basedOn === 'newer'
+      const label = older
+        ? tr('presets.table.staleOlder')
+        : localState !== undefined
           ? tr(cloudAction ?? CLOUD_LOCAL_TEXT[localState])
           : tr(UPDATE_ACTION_TEXT.missing)
-      const whyNot =
-        localState !== undefined && cloudAction === null
+      const whyNot = older
+        ? tr('presets.table.staleOlder.title')
+        : localState !== undefined && cloudAction === null
           ? tr(CLOUD_LOCAL_WHY[localState])
           : undefined
       return [

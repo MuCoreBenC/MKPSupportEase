@@ -76,6 +76,12 @@ pub struct PresetSourceDto {
     pub default_mode: String,
     /// 出厂默认那个源的地址
     pub builtin_default: Option<String>,
+    /// **规范化后的源身份**（`github#owner/repo@main` 那种，2026-10-27）。
+    ///
+    /// 只给界面**显示**用（云端详情里"这个云端是哪个源"那一行）；判据不从这里拿 ——
+    /// 判定那条链在 `runtime::local::based_on`，它自己问同一处 [`identity_of`]。
+    /// 认不出（没配源 / 地址解析不了）就是 `null`，不编。
+    pub identity: Option<String>,
 }
 
 /// 生效值的装配：按盘上选中的模式 → 界面那一格。
@@ -98,6 +104,12 @@ fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
         // **不静默回落到内置源** —— 那会让界面显示"自定义"、实际连着别的地方。
         None => (String::new(), true),
     };
+    let identity = runtime::app_state::preset_source(root)
+        .ok()
+        .flatten()
+        .as_ref()
+        .and_then(runtime::source_identity::identity_of)
+        .map(|id| id.key());
     Ok(Some(PresetSourceDto {
         mode: mode_wire(mode),
         label: mode.label().to_owned(),
@@ -106,6 +118,7 @@ fn source_dto(root: &Path) -> Result<Option<PresetSourceDto>, AppError> {
         builtin,
         default_mode: mode_wire(runtime::source::DEFAULT_MODE),
         builtin_default: runtime::source::builtin_default(),
+        identity,
     }))
 }
 

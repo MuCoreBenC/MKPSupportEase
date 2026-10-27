@@ -139,6 +139,7 @@ import {
   ASSET_USE_TEXT,
   BASED_ON_KEY,
   basedOnCellText,
+  cloudClaimBadge,
   CLOUD_LOCAL_ACTION,
   CLOUD_LOCAL_TEXT,
   CLOUD_STATE_TEXT,
@@ -189,6 +190,25 @@ function CloudLocalAction({
   onDownload: (row: PresetTableRow) => void
 }) {
   const tr = useT()
+  /*
+   * ★ **这一格是「云端行动作」的唯一出口**，所以「云端较旧」的闸必须在这一行的最前面 ——
+   *   2026-10-27 作者截图：名称列已经什么都不显示了，右边却还挂着一颗绿色「更新」。
+   *
+   *   原来这个组件只认 `row.localState`（`missing` / `stale` / `has`），完全不看
+   *   `row.basedOn`；主链上那句 `needsUpdate && !cloudIsOlder` 守的是**另一条**渲染
+   *   路径，够不到这里。于是"云端比我这份旧"的行照样长出一颗更新按钮。
+   *
+   *   判据只有一条：结论是 `newer`（云端较旧）⇒ 这一格**什么都不给**，画破折号。
+   *   想知道为什么，展开详情里有「云端较旧」和那句"要云端版就先删掉本地再下载"。
+   *   ★ 以后再加动作，请统一从 `basedOn` 起手，别再只看 `localState`。
+   */
+  if (row.basedOn === 'newer') {
+    return (
+      <span className={s.actNone} title={tr('presets.table.staleOlder.title')}>
+        {DASH_}
+      </span>
+    )
+  }
   const state = row.localState
   if (state === undefined) return null
   const action = CLOUD_LOCAL_ACTION[state]
@@ -607,7 +627,9 @@ export default function PresetTable({
                */
               const updateState =
                 row.presetState !== undefined ? updateStateOf(row.presetState) : undefined
-              const needsUpdate = updateState === 'update'
+              /* 云端较旧 ⇒ 一律不给更新（列表上也不显示任何徽章，详情里才说） */
+              const cloudIsOlder = row.scope === 'cloud' && row.basedOn === 'newer'
+              const needsUpdate = updateState === 'update' && !cloudIsOlder
               /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档）——
                  **MKP 档不出现**：那一档按 `localState` 说，不碰下载区四态（2026-10-09） */
               const untrusted =
@@ -738,46 +760,30 @@ export default function PresetTable({
                         </span>
                       )}
                       {/*
-                        **「云端较旧」（2026-10-27）**：同一个源，但当前云端那一份比我这份旧。
-                        这一枚只陈述事实，**没有任何动作** —— 从前这里会挂「有新版」并长出
-                        一颗绿色「更新」，等于劝用户把本地往旧内容上退。
+                        **「云端较旧」在列表上不挂徽章**（2026-10-27 作者：「本地也不用显示了吧」）。
+                        这条结论只在两处出现：云端行展开详情头部、本地行详情「基于」那一格。
+                        列表上什么都不说 —— 没有新版就是没有新版，不拿"云端比我旧"占位置。
                       */}
-                      {row.scope === 'local' && row.basedOn === 'newer' && !detached && (
-                        <span
-                          className={s.localState}
-                          data-state="stale"
-                          title={tr('presets.table.staleOlder.title')}
-                        >
-                          {tr('presets.table.staleOlder')}
-                        </span>
-                      )}
                       {/*
-                        **「另有所在」**：这份来自另一个源（换平台 / 分支 / 目录，或老副本
-                        没记源身份）。比不出新旧，所以**不挂「有新版」**；动作是「下载」
-                        而不是「更新」（见详情里的快捷操作）。
+                        **「另一个源」这枚标签撤了**（2026-10-27 作者：「不是同一个源也不要
+                        显示另一个源吧，主要是不要显示更新呀」）：源不同本身不是用户要看的
+                        信息 —— 内容不同、且**云端更旧**才挂「云端较旧」，其余情况什么都不挂、
+                        也不给「更新」。判定只看内容与时间（见 `runtime::local::based_on`）。
                       */}
-                      {row.scope === 'local' && row.basedOn === 'elsewhere' && !detached && (
-                        <span
-                          className={s.localState}
-                          title={tr('presets.table.elsewhere.title')}
-                        >
-                          {tr('presets.table.elsewhere')}
-                        </span>
-                      )}
                       {/*
                         **我这边怎么样**（MKP 云端行，2026-10-09）：未获取 / 本地已有 / 有新版。
                         这一格回答的是用户点开"云端"时问的那件事 ——
                         "云端有这些，那我手上有没有、要不要拿"。判据在 `cloudRows` 里。
                       */}
-                      {row.scope === 'cloud' && row.localState !== undefined && (
-                        <span
-                          className={s.localState}
-                          data-state={row.localState}
-                         
-                        >
-                          {tr(CLOUD_LOCAL_TEXT[row.localState])}
-                        </span>
-                      )}
+                      {row.scope === 'cloud' &&
+                        (() => {
+                          const badge = cloudClaimBadge(row)
+                          return badge === null ? null : (
+                            <span className={s.localState} data-state={badge.state}>
+                              {tr(badge.text)}
+                            </span>
+                          )
+                        })()}
                       {/*
                         「云端模板已更新」那枚小字**退役了**（2026-10-09）：云端改过的项
                        现在按**参数逐项**处理（打开参数 → 行上的「用新值 / 保持本地」），
@@ -1024,6 +1030,9 @@ export default function PresetTable({
                       <span className={s.actDone}>
                         {tr(CLOUD_STATE_TEXT.downloaded)}
                       </span>
+                    ) : row.basedOn === 'newer' ? (
+                      /* 云端比我这份还旧 ⇒ 这一格**不给动作**（「云端旧的就不用显示更新」） */
+                      <span className={s.actNone}>{DASH_}</span>
                     ) : row.presetUid !== undefined ? (
                       /*
                        * 云端交付行：**未获取 →「下载」白底**，**有更新 →「更新」绿底**
@@ -1097,8 +1106,10 @@ export default function PresetTable({
                           <span className={s.dHeadName}>{row.fileName}</span>
                           <span className={s.dHeadMeta}>
                             <span>
-                              {row.scope === 'cloud' && row.localState !== undefined
-                                ? tr(CLOUD_LOCAL_TEXT[row.localState])
+                              {row.scope === 'cloud' && row.basedOn === 'newer'
+                                ? tr('presets.table.staleOlder')
+                                : row.scope === 'cloud' && row.localState !== undefined
+                                  ? tr(CLOUD_LOCAL_TEXT[row.localState])
                                 : row.presetState !== undefined
                                   ? tr(UPDATE_STATE_TEXT[updateState ?? 'latest'])
                                   : mkp && row.scope === 'local'
@@ -1178,7 +1189,20 @@ export default function PresetTable({
                               )}
 
                               <div className={s.dRow}>
-                                <span className={s.dKey}>{tr('presets.table.detail.key.source')}</span>
+                                {/*
+                                  **云端行那一格叫「源配置」，不叫「来源」**（2026-10-27 作者：
+                                  「来源和云端源感觉有点歧义和重复」）：它的值是"自定义源 / GitHub /
+                                  Gitee"这种**模式名**，而下面「云端源」是规范化身份
+                                  （`gitee#owner/repo@ref`）—— 两个都叫"来源"就分不清谁是谁。
+                                  本地行那一格的值是"复制自 X"，仍叫「来源」。
+                                */}
+                                <span className={s.dKey}>
+                                  {tr(
+                                    row.origin === 'preset'
+                                      ? 'presets.table.detail.key.sourceMode'
+                                      : 'presets.table.detail.key.source',
+                                  )}
+                                </span>
                                 <span className={s.dVal}>
                                   {locateTarget !== null ? (
                                     <button
@@ -1216,7 +1240,10 @@ export default function PresetTable({
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.local')}
                                     </span>
-                                    <span className={s.dVal}>
+                                    <span
+                                      className={`${s.dVal} ${s.dOne}`}
+                                      title={row.basedOnFacts.lineageSource ?? undefined}
+                                    >
                                       {row.basedOnFacts.lineageSource ?? tr(UNKNOWN)}
                                     </span>
                                   </div>
@@ -1236,7 +1263,10 @@ export default function PresetTable({
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.cloud')}
                                     </span>
-                                    <span className={s.dVal}>
+                                    <span
+                                      className={`${s.dVal} ${s.dOne}`}
+                                      title={row.basedOnFacts.cloudSource ?? undefined}
+                                    >
                                       {row.basedOnFacts.cloudSource ?? tr(UNKNOWN)}
                                     </span>
                                   </div>
@@ -1254,6 +1284,58 @@ export default function PresetTable({
                               )}
 
                               {/*
+                                云端行也摆这份账（2026-10-27 作者：「云端的更需要看那些信息呀」）：
+                                这个云端是哪个源、这个目录什么时候发布、**我本地那一份是什么时候的**
+                                —— 三行并排就是一次对比。判定不读它们，纯展示。
+                              */}
+                              {row.origin === 'preset' && row.basedOnFacts !== undefined && (
+                                <>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.cloud')}
+                                    </span>
+                                    <span
+                                      className={`${s.dVal} ${s.dOne}`}
+                                      title={row.basedOnFacts.cloudSource ?? undefined}
+                                    >
+                                      {row.basedOnFacts.cloudSource ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.cloudTime')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {longStatText(
+                                        row.basedOnFacts.cloudPublishedAt ?? undefined,
+                                      ) ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                  {/*
+                                    **本地版本时间**（作者：「云端应该也能把本地的那个显示一下
+                                    吧，对比的感觉」）：两行并排就能一眼看出我这份比云端新还是旧；
+                                    没下过就照实说「还没下载」，不编。
+                                  */}
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.localTime')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {row.localReleaseText ?? tr('presets.table.detail.ver.notDownloaded')}
+                                    </span>
+                                  </div>
+                                </>
+                              )}
+
+                              {/*
+                                云端较旧的说明（2026-10-27 作者：「详细里面能看到，但是不显示更新，
+                                提示可以删除本地再下载」）—— 列表上什么都不显示，这里把话说全。
+                              */}
+                              {row.origin === 'preset' && row.basedOn === 'newer' && (
+                                <p className={s.dNote}>{tr('presets.table.detail.olderHint')}</p>
+                              )}
+
+                              {/*
                                 后处理跑成过几次（2026-10-17 作者：「加一个显示的字段，
                                 后处理使用次数……在展开的详细里面吧」）。
 
@@ -1261,8 +1343,13 @@ export default function PresetTable({
                                 钥匙在行上（`usageKey`，见 `PresetRowBase`）。只有 MKP 预设
                                 才有这一格 —— 切片器配置不跑后处理，那几行连钥匙都没有。
                                 0 次照常显示「还没跑过」：这是事实，不是缺数据。
+
+                                ★ **云端行不显示**（2026-10-27 作者：「云端的不用显示后处理次数」）：
+                                  那本账记的是**本机跑过几次**，而云端那一行是"云上这一版"，
+                                  两者不是同一个东西 —— 在云端行写「还没跑过」会让人以为
+                                  云上这一版从没被跑过，其实只是我这台没跑过它。
                               */}
-                              {row.usageKey !== undefined && (
+                              {row.scope === 'local' && row.usageKey !== undefined && (
                                 <div className={s.dRow} title={tr(USAGE_HINT)}>
                                   <span className={s.dKey}>{tr(USAGE_KEY)}</span>
                                   <span className={s.dVal}>
@@ -1326,27 +1413,6 @@ export default function PresetTable({
                                       onClick={() => onUpdateLocal(row)}
                                     >
                                       {tr(UPDATE_ACTION_TEXT.update)}
-                                    </button>
-                                  )}
-                                {/*
-                                  **另一个源的那一份：动作叫「下载」**（作者 2026-10-27：
-                                  「先显示『下载』，避免诱导用户回退」）。词不同、色也退到
-                                  次要（不用那颗绿底）—— 它做的仍然是"按参数并进来"，
-                                  只是不许用「更新」这个词让人以为云端那份更新。
-                                  `newer` 连这颗都没有：云端更旧时**任何动作都不给**。
-                                */}
-                                {row.origin === 'local' &&
-                                  row.basedOn === 'elsewhere' &&
-                                  !detached &&
-                                  row.localState !== 'unreadable' && (
-                                    <button
-                                      type="button"
-                                      className={s.ghostBtn}
-                                      disabled={busy}
-                                      title={tr('presets.table.elsewhere.title')}
-                                      onClick={() => onUpdateLocal(row)}
-                                    >
-                                      {tr('presets.tree.updateAction.download')}
                                     </button>
                                   )}
                                 {/*

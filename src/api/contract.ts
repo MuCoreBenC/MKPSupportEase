@@ -1885,6 +1885,13 @@ export interface PresetSource {
   defaultMode: string
   /** 出厂默认那个源的地址 */
   builtinDefault: string | null
+  /**
+   * **规范化后的源身份**（`github#owner/repo@main`，2026-10-27）。
+   *
+   * 只用来显示（云端详情里"这个云端是哪个源"）；判据在 Rust 侧，前端不拿它算新旧。
+   * 认不出就是 `null`。
+   */
+  identity: string | null
 }
 
 /* ---------- 界面偏好（2026-10-12） ---------- */

@@ -170,6 +170,8 @@ export interface PresetData {
    * （来源那一格照实退「云端」，不让整页因为这一格失败）。
    */
   sourceLabel: string | null
+  /** 当前源的规范化身份（`github#owner/repo@main`）；没配源 / 认不出 ⇒ null */
+  sourceIdentity: string | null
   /** 未过滤的整棵树（仅归档的文件建树时就剔掉了）。计数用它 */
   tree: PresetTree
   /**
@@ -562,6 +564,11 @@ export function usePresetData(importRevision = 0): PresetData {
   /* 当前数据源（preset 行「来源」列的字）。读失败照实 null，不挡任何表 */
   const [sourceLabel, setSourceLabel] = useState<string | null>(null)
   /*
+   * 当前源的**规范化身份**（`github#owner/repo@main`，2026-10-27）。
+   * 只给云端详情那一行显示用 —— 判定不在这里（Rust 侧 `based_on` 自己问）。
+   */
+  const [sourceIdentity, setSourceIdentity] = useState<string | null>(null)
+  /*
    * **备注覆盖账**（副标题）：用户改过的备注（键 = 文件身份）。只读一次 +
    * 写后重读整本 —— 与 delivery / local 同一条「界面读底账」的规矩。
    */
@@ -781,7 +788,10 @@ export function usePresetData(importRevision = 0): PresetData {
           if (!alive) return
           /* 数据源与 delivery 一路同读：它只服务「来源」那一格的字，失败照实 null */
           const source = await api.getPresetSource().catch(() => null)
-          if (alive) setSourceLabel(source?.mode ?? null)
+          if (alive) {
+            setSourceLabel(source?.mode ?? null)
+            setSourceIdentity(source?.identity ?? null)
+          }
           /*
            * 后台检查一次（本次运行只一次，见 `checkBootstrapOnce`）。
            * 有新版才把本地 catalog 换掉，**随后重读那一路**（目录换了，'ok / old / tampered'
@@ -1205,6 +1215,7 @@ export function usePresetData(importRevision = 0): PresetData {
     versionId,
     machine: machinesShown.find((m) => m.id === machineId),
     sourceLabel,
+    sourceIdentity,
     tree,
     localIds,
     local: localPresets,
@@ -1534,12 +1545,25 @@ export function usePresetPage(data: PresetData): PresetPage {
       pinned,
       sort,
       deliveryPresets: data.delivery.presets,
+      /* 云端条目 → 我本地那一份的修改时刻（认亲只认血统末段，与 claims 同一套） */
+      localTimes: (() => {
+        const m = new Map<string, { at: number; release: string | null }>()
+        for (const f of data.local) {
+          const seg = f.basedOnLabel?.split('/').pop()
+          if (seg == null) continue
+          const prev = m.get(seg)
+          const at = f.modifiedUnix ?? prev?.at ?? 0
+          if (prev == null || at > prev.at) m.set(seg, { at, release: f.basedOnRelease ?? null })
+        }
+        return m
+      })(),
       cloudVersions: data.cloudVersions,
       localPresets: data.delivery.localPresets,
       stalePresets: data.delivery.stale,
       presetVersion: data.delivery.version,
       releaseAt: data.delivery.publishedAt,
       sourceLabel: data.sourceLabel,
+      sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */

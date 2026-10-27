@@ -2439,6 +2439,8 @@ export const mockApi: MkpApi = {
         builtin: [],
         defaultMode: 'github',
         builtinDefault: null,
+        /* 浏览器里不解析地址：照实说不知道（判据不在这里跑） */
+        identity: null,
       }
       return mockSource
     }
