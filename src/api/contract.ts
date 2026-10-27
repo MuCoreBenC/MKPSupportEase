@@ -149,6 +149,28 @@ export interface ReportBox4 {
 }
 
 /**
+ * **模型俯视几何**（2026-10-27，`_meta.json` 顶层 `modelMap`）。
+ *
+ * 作者：「我希望把它模型的包围盒也显示出来，就是后处理的时候碰撞检测的那个显示的一样的，
+ * 复用的」。所以这里**只有几何、没有塔、没有冲突** —— 塔由报告页按 IR 补，冲突是另一格。
+ * 三档字段与 `ReportCollision` 里那三个同名键逐字同义（同一个内核出口算出来）：
+ * 报告页擦料塔那一栏的俯视图拿它画"模型在板上占哪一块"。
+ *
+ * `modelBbox` 不在这里：画图只用 `modelBoxes` / `modelPolygons`（一个模型一块），
+ * 整体框是给"挪模型"那条建议算方向的。
+ */
+export interface ReportModelMap {
+  /** 可打印区（映射基准；与碰撞那一趟同一口径：gcode 的 `; printable_area` 优先） */
+  printable?: ReportBox4
+  /** 一个模型一个框（内核按 2mm 占用格连通块切） */
+  modelBoxes?: ReportBox4[]
+  /** 一个模型一块轮廓（凸包，≤24 边，机器坐标）—— 画的是它 */
+  modelPolygons?: [number, number][][]
+  /** 机型禁区（通常没有） */
+  forbiddenZones?: [number, number][][]
+}
+
+/**
  * **碰撞那一趟的事实**（2026-10-18）。
  *
  * 内核算完检测就把这些一起带出来（旧版有"移动建议"，这一稿把它落进执行记录）：
@@ -391,6 +413,16 @@ export interface ReportDetail {
    * 别的记录（含成功记录与旧记录）一律 `null` ⇒ 报告页那两块整组不摆。
    */
   collision: ReportCollision | null
+  /**
+   * **模型俯视几何**（2026-10-27，`_meta.json` 顶层 `modelMap`）。
+   *
+   * 报告页擦料塔那一栏的俯视图拿它画"模型在板上占哪一块" —— 与碰撞那一屏同一份
+   * `CollisionMap`、同一套几何（内核 `model_map_facts` 一个出口算出来）。
+   *
+   * 为什么单独一格：成功那趟 `collision` 恒为 `null`（撞了走不到成功出口），而要看
+   * 的恰恰是成功那趟。旧记录 / 那趟扫不出模型点 ⇒ `null` ⇒ 图只画塔。
+   */
+  modelMap?: ReportModelMap | null
   /**
    * **挪塔记录**（2026-10-18，`_meta.json` 顶层 `relocation`）。
    *

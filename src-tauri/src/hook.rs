@@ -364,6 +364,29 @@ impl std::fmt::Display for HookError {
     }
 }
 
+/* ---------- 模型俯视几何（2026-10-27）---------- */
+
+/// **成功那一趟**：IR 终态在手，床按 gcode 的 `; printable_area` 认（与碰撞检测同一口径）。
+fn model_map_of(
+    content: &[String],
+    ir: &postprocess::ir::Ir,
+) -> Option<postprocess::postproc::disk::collision::ModelMapFacts> {
+    postprocess::postproc::disk::model_map_facts(content, ir)
+        .map(|f| postprocess::postproc::disk::collision::ModelMapFacts::of(&f))
+}
+
+/// **失败 / 取消那一趟**：没有 IR 终态，只能借用"当时那份 IR"的机器维度（机型维度 +
+/// 禁区）；`; printable_area` 由内核那一侧自己认（`model_map_facts` 第一步就是它）。
+///
+/// 用 borrowed IR 而不是重跑一遍 IR 构建：这一层要的只有 `Machine` 那几格，
+/// 而 IR 构建是"读预设 + 两层校验 + 1,130 行映射"——为画一张图去重跑它不值得。
+fn model_map_from(
+    content: &[String],
+    ir: Option<&postprocess::ir::Ir>,
+) -> Option<postprocess::postproc::disk::collision::ModelMapFacts> {
+    ir.and_then(|ir| model_map_of(content, ir))
+}
+
 impl std::error::Error for HookError {}
 
 /// 成功产物。
@@ -617,6 +640,17 @@ pub fn run(
     let mut archive_warnings: Vec<String> = Vec::new();
     let archived = archive_begin(&job.gcode, &raw, &mut archive_warnings);
 
+    /*
+     * **正文按行切好，留一份给归档**（2026-10-27）：报告页擦料塔那一栏的俯视图要画
+     * "模型在板上占哪一块"，那是从正文里那批挤出点扫出来的（与碰撞检测同一批点）。
+     * 内核对正文的切法是 `lines()` + 去尾部 `\r`（见 `pipeline::run` 第 1 步），
+     * 这里跟它逐字一致 —— 两处切法不同会让图上那块与判据那块差一行。
+     */
+    let content: Vec<String> = raw
+        .lines()
+        .map(|l| l.trim_end_matches('\r').to_string())
+        .collect();
+
     // 预设 → IR：唯一入口（`crates/preset`）。预设里的参数错、机型不认识都在这一步报出来
     let mut ir = match preset::load_ir(&job.toml, Some(&raw)) {
         Ok(ir) => ir,
@@ -639,6 +673,8 @@ pub fn run(
                 Vec::new(),
                 None,
                 relocation.as_ref(),
+                // 预设都读不出来 ⇒ 没有 IR ⇒ 画不出模型几何（不编）
+                None,
                 // 这一笔在身份探测之前（预设都读不出来）⇒ 空探测："没有身份"是事实，
                 // 不是"没去查"。
                 &postprocess::gcode::IdentityProbe::default(),
@@ -718,6 +754,7 @@ pub fn run(
                         Vec::new(),
                         None,
                         relocation.as_ref(),
+                        model_map_from(&content, Some(&ir)),
                         &identity_probe,
                     );
                     return Err(err);
@@ -738,6 +775,7 @@ pub fn run(
                     Vec::new(),
                     None,
                     relocation.as_ref(),
+                    model_map_from(&content, Some(&ir)),
                     &identity_probe,
                 );
                 return Err(err);
@@ -818,6 +856,7 @@ pub fn run(
                         Vec::new(),
                         None,
                         relocation.as_ref(),
+                        model_map_from(&content, Some(&ir)),
                         &identity_probe,
                     );
                     return Err(err);
@@ -856,6 +895,12 @@ pub fn run(
         done: Vec::new(),
     };
     let ask: Option<&mut dyn TowerAsk> = tower_ask.as_mut().map(|a| a as &mut dyn TowerAsk);
+    /*
+     * 模型俯视几何**在 IR 被搬进管线之前**算好（2026-10-27）：管线按值收 IR，
+     * 搬走之后就再也借不到了。成功那趟另有一份（取自 IR 终态），这里这份只给
+     * 失败 / 取消那几条出口用 —— 那时手里只剩下"进管线之前"的这一份。
+     */
+    let model_map = model_map_from(&content, Some(&ir));
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time_with_tower_ask(
             IrProcessRequest {
@@ -919,6 +964,7 @@ pub fn run(
                 failed_pipeline,
                 collision,
                 relocation.as_ref(),
+                model_map,
                 &identity_probe,
             );
             return Err(e);
@@ -934,6 +980,8 @@ pub fn run(
             &done,
             raw.len() as u64, // 输入大小 = 原文字节数（盘上那份此刻已经是输出了）
             raw.lines().count() as u64,
+            /* 模型俯视几何要扫 G-code 正文（板上那批挤出点）—— 正文在这里才在手上 */
+            &content,
             started_at,
             started,
             &mut archive_warnings,
@@ -1043,6 +1091,8 @@ fn archive_success(
     done: &postprocess::pipeline::ProcessResult,
     input_size_bytes: u64,
     input_lines: u64,
+    // 输入正文（已按行切好）—— 模型俯视几何要扫它（板上那批挤出点）
+    content: &[String],
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
     warnings: &mut Vec<String>,
@@ -1206,6 +1256,10 @@ fn archive_success(
         pipeline,
         /* 成功那一趟没有碰撞事实（撞了就走不到这里）—— 这一格恒 `null` */
         collision: None,
+        /* **模型在板上占哪一块**（2026-10-27 作者：「把它模型的包围盒也显示出来，就是后处理
+        的时候碰撞检测的那个显示的一样的，复用的」）：报告页擦料塔那一栏的俯视图用它
+        画模型。几何与碰撞检测同一套切法（内核 `model_map_facts`），这里只调用、不新算。 */
+        model_map: model_map_of(content, &done.detail_facts.ir),
         /* 挪过塔就记一笔（成功那趟也可能挪过 —— 那正是"挪完复检通过"） */
         relocation: relocation.cloned(),
         detail,
@@ -1238,6 +1292,9 @@ fn archive_failure(
     collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
     // 挪塔那一趟的记录（2026-10-18）—— 没走到那一问就是 `None`。
     relocation: Option<&crate::archive::RelocationRecord>,
+    // **模型俯视几何**（2026-10-27）：失败那趟没有 IR 终态，由调用方拿"当时那份 IR 的
+    // 机器维度 + 正文"算好递进来（`model_map_from`）。给不出就是 `None`。
+    model_map: Option<postprocess::postproc::disk::collision::ModelMapFacts>,
     // 校准件身份探测结果。**失败也要留**（作者："不能只在成功时产生"）——
     // 身份冲突就把两边的原值留在记录里，那正是复盘要看的东西。
     identity: &postprocess::gcode::IdentityProbe,
@@ -1267,6 +1324,9 @@ fn archive_failure(
         cancelled,
         pipeline,
         collision,
+        /* 模型俯视几何：失败那趟也画（碰撞那一屏的模型框就靠它，report 页的擦料塔
+        那一栏同样读它）—— 调用方算好递进来，见 `model_map_from`。 */
+        model_map,
         relocation: relocation.cloned(),
         detail: Detail {
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),

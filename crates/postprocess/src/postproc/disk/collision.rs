@@ -591,6 +591,179 @@ fn simplify_polygon(poly: Vec<[f64; 2]>) -> Vec<[f64; 2]> {
     poly
 }
 
+/// **模型在板上占的那一块**（2026-10-27 作者：「把它模型的包围盒也显示出来，就是后处理
+/// 的时候碰撞检测的那个显示的一样的，复用的」）。
+///
+/// 这是"模型俯视几何"的**唯一出口** —— 碰撞检测（[`detect_tower_collision_all_layers`]）
+/// 与报告页那几张"只有塔没有碰撞"的图都从这里拿，所以图上那块模型永远与碰撞判据是
+/// 同一批点、同一套切法。
+///
+/// 三档数据一次给全：
+/// - `bbox`：所有板内模型点的整体外接框（`None` = 板上没有模型点）。
+///   ★ 不含切片器的 prime tower（那段是切片器自己的塔，不是用户模型）。
+/// - `boxes`：按 2mm 占用格连通块切出来的**一个一个框**。
+/// - `polygons`：同批点的凸包（≤24 边），图上优先画它。
+///
+/// 边界口径与碰撞检测逐字一致（不许在这里另立一套）：
+/// - **床 = 打印范围**（gcode 的 `; printable_area` 优先，没写退回机型维度）；
+/// - **板外的挤出不算模型**（清料 / 擦拭在 X<0 那段也带挤出 —— 拿它算会把框拽出板外）；
+/// - `FEATURE: Prime tower` 之后的点归切片器那座塔，不算模型。
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ModelFootprint {
+    pub bbox: Option<GBBox>,
+    pub boxes: Vec<GBBox>,
+    pub polygons: Vec<Vec<[f64; 2]>>,
+}
+
+impl ModelFootprint {
+    /// 图上"有没有东西可画"：三个都空 ⇒ 这份 gcode 里一个板内模型点都没有。
+    pub fn is_empty(&self) -> bool {
+        self.bbox.is_none() && self.boxes.is_empty() && self.polygons.is_empty()
+    }
+
+    /// 把这一份几何灌进一份**对外事实**（报告页画图读的就是这三个键）。
+    pub fn apply_to(&self, facts: &mut CollisionFacts) {
+        facts.model_bbox = self.bbox.map(|b| Box4::of(&b)).unwrap_or_default();
+        facts.model_boxes = self.boxes.iter().copied().map(|b| Box4::of(&b)).collect();
+        facts.model_polygons = self.polygons.clone();
+    }
+
+    /// 同 [`Self::apply_to`]，灌进内核自己的检测结果（`detect_tower_collision` 那一路）。
+    fn apply_to_result(&self, result: &mut CollisionResult) {
+        result.model_bbox = self.bbox;
+        result.model_boxes = self.boxes.clone();
+        result.model_polygons = self.polygons.clone();
+    }
+}
+
+/// **给报告页画图用的那份碰撞事实**（2026-10-27）：只有板子与模型，没有塔、没有冲突。
+///
+/// 用来回答作者那一问 ——「我希望把它模型的包围盒也显示出来，就是后处理的时候碰撞检测的
+/// 那个显示的一样的，复用的」。所以它**不自己算任何几何**：床与模型都问
+/// [`model_footprint`]，禁区照抄 IR（`Machine.ForbiddenZones`，机型表填进去的）。
+///
+/// `None` = 这份 G-code 里一个板内模型点都没有（读不动 / 空文件）—— 调用方不写这一格，
+/// 报告页就不摆图（与"没给就不摆"同一条，不画编出来的图）。
+pub fn model_map_facts(content: &[String], ir: &Ir) -> Option<CollisionFacts> {
+    let foot = model_footprint(content, ir);
+    if foot.is_empty() {
+        return None;
+    }
+    let mut facts = CollisionFacts {
+        printable: printable_area_of(content).unwrap_or(Box4 {
+            x_min: ir.machine.min_x,
+            x_max: ir.machine.max_x,
+            y_min: ir.machine.min_y,
+            y_max: ir.machine.max_y,
+        }),
+        forbidden_zones: ir
+            .machine
+            .forbidden_zones
+            .iter()
+            .map(|zone| zone.iter().map(|p| [p[0], p[1]]).collect())
+            .collect(),
+        ..CollisionFacts::default()
+    };
+    foot.apply_to(&mut facts);
+    Some(facts)
+}
+
+/// `_meta.json` 里**模型俯视几何**那一格（2026-10-27）：报告页的擦料塔俯视图拿它画
+/// "模型在板上占哪一块"，与碰撞那一屏同一个画法。
+///
+/// 为什么单独一格、不复用 `collision`：成功那趟 `collision` 恒为 `null`（撞了就走不到
+/// 成功出口），而作者要看的恰恰是**成功那趟**的板子上模型在哪。
+/// 为什么是"事实"不是"图"：记录里存事实（几何 + 数字），画法住界面（`CollisionMap`）。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelMapFacts {
+    pub printable: Box4,
+    #[serde(default)]
+    pub model_boxes: Vec<Box4>,
+    #[serde(default)]
+    pub model_polygons: Vec<Vec<[f64; 2]>>,
+    #[serde(default)]
+    pub forbidden_zones: Vec<Vec<[f64; 2]>>,
+}
+
+impl ModelMapFacts {
+    /// 从一份完整事实里摘（字段意义与 `CollisionFacts` 逐字相同 —— 同一个来源）。
+    pub fn of(facts: &CollisionFacts) -> Self {
+        Self {
+            printable: facts.printable,
+            model_boxes: facts.model_boxes.clone(),
+            model_polygons: facts.model_polygons.clone(),
+            forbidden_zones: facts.forbidden_zones.clone(),
+        }
+    }
+
+    /// 反查成画布要的那份（`kind` / 塔 / 冲突全是空 ⇒ `CollisionMap` 只画板子与模型）。
+    pub fn as_collision(&self) -> CollisionFacts {
+        CollisionFacts {
+            printable: self.printable,
+            model_boxes: self.model_boxes.clone(),
+            model_polygons: self.model_polygons.clone(),
+            forbidden_zones: self.forbidden_zones.clone(),
+            ..CollisionFacts::default()
+        }
+    }
+}
+
+/// 扫一遍 G-code，交出模型在板上的俯视几何（见 [`ModelFootprint`]）。
+///
+/// 一次全文件线性扫描（与碰撞检测同一批点）；调用方给不出床就用机型维度。
+pub fn model_footprint(content: &[String], ir_data: &Ir) -> ModelFootprint {
+    let printable = printable_area_of(content);
+    let bed = bed_of(ir_data, printable);
+    model_footprint_in(content, &bed)
+}
+
+/// 同 [`model_footprint`]，但床由调用方给（碰撞检测那一趟手里已经有一份可打印区，
+/// 不必再解析一遍 `; printable_area`）。
+fn model_footprint_in(content: &[String], bed: &Box4) -> ModelFootprint {
+    let mut occ = Occupancy::new(bed, 2.0);
+    let mut bbox: Option<GBBox> = None;
+    let mut in_prime_tower = false;
+    for line in content {
+        let trimmed = line.trim();
+        if crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE") {
+            in_prime_tower =
+                crate::gcode::has_slicer_comment_prefix(trimmed, "FEATURE: Prime tower");
+            continue;
+        }
+        let Some((x, y)) = is_extrusion_move(line) else {
+            continue;
+        };
+        if in_prime_tower {
+            continue;
+        }
+        /* 板外的挤出不算模型 —— 与碰撞检测同一条闸（见那里的长注） */
+        if x < bed.x_min || x > bed.x_max || y < bed.y_min || y > bed.y_max {
+            continue;
+        }
+        occ.mark(x, y);
+        bbox = Some(match bbox {
+            Some(b) => GBBox {
+                x_min: b.x_min.min(x),
+                x_max: b.x_max.max(x),
+                y_min: b.y_min.min(y),
+                y_max: b.y_max.max(y),
+            },
+            None => GBBox {
+                x_min: x,
+                x_max: x,
+                y_min: y,
+                y_max: y,
+            },
+        });
+    }
+    ModelFootprint {
+        bbox,
+        boxes: occ.boxes(),
+        polygons: occ.polygons(),
+    }
+}
+
 /// `DetectTowerCollision`：检测擦料塔包围盒与模型/原塔挤出点的冲突。
 /// `UseTowers=false` 时直接返回空结果（无 MKP 擦料塔，跳过检测）。
 pub fn detect_tower_collision(content: &[String], ir_data: &Ir) -> CollisionResult {
@@ -1406,9 +1579,11 @@ fn detect_tower_collision_all_layers(
     }
 
     /* 每个模型各自的框与轮廓（2026-10-18 作者：「做出来，分开的独立的包围盒」／
-    「真的做成俯视图，多边形的」）—— 与"有没有撞"无关：只要板上有模型点就切。 */
-    result.model_boxes = model_occ.boxes();
-    result.model_polygons = model_occ.polygons();
+    「真的做成俯视图，多边形的」）—— 与"有没有撞"无关：只要板上有模型点就切。
+    ★ 2026-10-27：**图上那块模型只由 [`model_footprint_in`] 一个出口给**（报告页那张
+      "只有塔"的图也走它 ⇒ 两处画的必须是同一块模型、同一种切法）。上面那段逐层扫描
+      仍留着自己的 `model_occ` / 整体框 —— 它们喂的是"撞了多少、往哪挪"，不是画图。 */
+    model_footprint_in(content, &bed).apply_to_result(&mut result);
     result
 }
 
@@ -1830,6 +2005,77 @@ mod tests {
             facts.model_bbox
         );
         assert_eq!(facts.model_bbox.x_min, 30.0, "板外那一段不计入包围盒");
+    }
+
+    /// **画图那块模型 = 判据那块模型**（2026-10-27 作者：「把它模型的包围盒也显示出来，
+    /// 就是后处理的时候碰撞检测的那个显示的一样的，复用的」）。
+    ///
+    /// 这里钉的是"复用"这件事本身：`detect_tower_collision` 填进图上的几何，与
+    /// 报告页那个独立入口 `model_map_facts` 单独跑一遍得到的，必须逐字相等 ——
+    /// 两条路只要有一条自己算，两屏的模型框就会慢慢漂开。
+    #[test]
+    fn the_drawn_model_is_the_same_one_collision_judges() {
+        let ir = tower_ir();
+        let content = lines(&[
+            "; printable_area = 0x0,180x0,180x180,0x180",
+            "G1 X-13.5 Y10 E0.5 ; 板外清料，不算模型",
+            "G1 X30 Y30 E0.6 ; 塔内冲突点",
+            "G1 X120 Y120 E0.7",
+            "; FEATURE: Prime tower",
+            "G1 X150 Y150 E0.8 ; 切片器自己的塔，不算模型",
+        ]);
+        let detected = detect_tower_collision(&content, &ir);
+        assert!(detected.has_collision, "这份输入就是要去撞那座塔");
+
+        let facts = model_map_facts(&content, &ir).expect("板上有模型点就得给出几何");
+        assert_eq!(
+            facts.model_boxes,
+            detected
+                .model_boxes
+                .iter()
+                .map(Box4::of)
+                .collect::<Vec<_>>(),
+            "分块包围盒必须是同一份"
+        );
+        assert_eq!(
+            facts.model_polygons, detected.model_polygons,
+            "凸包轮廓必须是同一份"
+        );
+        assert_eq!(
+            facts.printable,
+            detected.facts(&ir).printable,
+            "床用同一口径"
+        );
+
+        /* 三档都落在板内，且不含板外清料与切片器自己的塔 */
+        let all = facts
+            .model_boxes
+            .iter()
+            .flat_map(|b| [b.x_min, b.x_max, b.y_min, b.y_max])
+            .collect::<Vec<_>>();
+        assert!(all.iter().all(|v| *v >= 0.0 && *v <= 180.0), "{all:?}");
+        assert!(
+            facts.model_boxes.iter().all(|b| b.x_max < 140.0),
+            "切片器那座塔与板外清料都不许进框：{:?}",
+            facts.model_boxes
+        );
+        assert!(!facts.model_polygons.is_empty(), "俯视图要的是多边形");
+    }
+
+    /// **没有模型点就不给图**（2026-10-27）：报告页照"没给就不摆"退掉那一块，
+    /// 不许画一张空的板子充数。
+    #[test]
+    fn an_empty_file_yields_no_model_map() {
+        let ir = tower_ir();
+        assert!(
+            model_map_facts(&lines(&["G28", "G1 X200 Y200 F3000"]), &ir).is_none(),
+            "只有空走刀 ⇒ 没有模型 ⇒ 不给几何"
+        );
+        /* `Ir::default()` 的机器维度是 0 ⇒ 床是 0mm，任何点都在板外 ⇒ 不出图 */
+        assert!(
+            model_map_facts(&lines(&["G1 X10 Y10 E0.5"]), &Ir::default()).is_none(),
+            "没有床就画不出板子"
+        );
     }
 
     /// **建议挪动带得出箭头**（2026-10-18 作者：「图片能不能做上引导移动的箭头呢」）：

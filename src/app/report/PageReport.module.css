@@ -167,6 +167,38 @@
   white-space: nowrap;
 }
 
+/*
+ * 栏头那颗「收起」（2026-10-27）：20px 小方钮，灰字档、悬停才上色 ——
+ * 它是这一栏的**结构动作**，不是页头上那两颗业务按钮，所以不套 `.btn`
+ * （同"动作按钮一律文字"那条的反面：这里只有图标，长在眉题那一行里）。
+ */
+.sideFold {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+.sideFold:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+/* `chevronDown` 转 90° = 朝左（"往左收起来"）—— 形状只有一颗，转向走 CSS */
+.sideFoldIcon {
+  display: block;
+  transform: rotate(90deg);
+  transform-origin: 50% 50%;
+}
+
 /* ---- 工具区：搜索框 + 状态筛选胶囊 ---- */
 
 .sideTools {
@@ -824,6 +856,59 @@
   line-height: 1.7;
 }
 
+/* ============ 手动折叠：左栏收成一条 44px 窄轨（2026-10-27） ============ */
+
+/*
+ * 作者：「左侧这一个可以自己折叠成小窗那种小尺寸窗口」。
+ *
+ * 折起来那条轨的宽度与**窄档滑盖收起时露出的那一截是同一个数**（44，见 `PEEK`）——
+ * 两档看起来是同一件事：一窄条靠在左边，点一下列表就回来。
+ *
+ * ★ 与窄档那套滑盖**不是一回事**：那套是"窗口挤窄了自动变"，这套是用户自己按；
+ *   窄档里两者可以同时发生，覆盖写在下面容器查询块里。
+ */
+.pane[data-peek='true'] {
+  grid-template-columns: 44px 1fr;
+}
+
+.rail {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow);
+  color: var(--text-3);
+  font: inherit;
+  cursor: pointer;
+}
+
+.rail:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+/* 竖排的眉题（与 `.sideLb` 同一档字）：44px 只放得下竖字 */
+.railLb {
+  writing-mode: vertical-rl;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.railCnt {
+  margin-top: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ============ 窄档：列表滑盖化（只盖内容区 —— 顶部那行字与刷新不动） ============ */
 
 /*
@@ -836,6 +921,24 @@
     /* 收起时露出 44px，主区整体让开这一条 */
     grid-template-columns: 1fr;
     padding-left: 56px;
+  }
+
+  /*
+   * 手动折叠在窄档里照样认（用户收起来的那一栏，不该因为窗口变窄又自己张开）：
+   * 仍旧单列，那条轨**绝对定位**贴着左缘 —— 与滑盖收起时露出的那一截同一个位置，
+   * 内衬还是上面那 56px，两者不会叠。
+   */
+  .pane[data-peek='true'] {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 44px;
+    border-radius: 0 var(--r-lg) var(--r-lg) 0;
   }
 
   /* ★ 不动 `.head` / `.sub`：窄窗里顶部照样一行小灰字 + 刷新靠右 */

@@ -103,6 +103,7 @@ import type {
   ReportBox4,
   ReportCollision,
   ReportDetail,
+  ReportModelMap,
   PostProcessRun,
   ReportPipelineStep,
   ReportExportPlan,
@@ -1191,10 +1192,17 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
 function TowerPlate({
   snap,
   machineType,
+  modelMap,
 }: {
   snap: ReportSnapshot
   /** 报告行的机型 —— `CollisionMap` 按它查板规格（`A1_MINI` 这种） */
   machineType: string | null
+  /**
+   * **模型俯视几何**（2026-10-27）：作者「我希望把它模型的包围盒也显示出来，就是后处理
+   * 的时候碰撞检测的那个显示的一样的，复用的」。给了就画上（同一块板、同一套几何
+   * —— 内核一个出口算出来）；`null` / 旧记录 ⇒ 只画塔（与从前一样）。
+   */
+  modelMap: ReportModelMap | null | undefined
 }) {
   const tr = useT()
   const ir = snap.ir
@@ -1250,6 +1258,15 @@ function TowerPlate({
    */
   const collision: ReportCollision = {
     towerBbox: boxAt(at.x, at.y),
+    /* 模型几何照抄后端那一格（同一个内核出口算的，不在这里推算）—— `null` 就什么都不加 */
+    ...(modelMap != null
+      ? {
+          printable: modelMap.printable,
+          modelBoxes: modelMap.modelBoxes,
+          modelPolygons: modelMap.modelPolygons,
+          forbiddenZones: modelMap.forbiddenZones,
+        }
+      : null),
     tower: {
       outerStructure: outer,
       bodyMm: BODY_MM,
@@ -1281,13 +1298,22 @@ function TowerPlate({
         height={132}
         label={tr('report.towerPlate.label')}
       />
+      {/*
+        ── 这一行只有一句话的分量（2026-10-27 作者：「这个圈起来的红色文案不要这么长」）：
+           `预设 (20, 20) ≠ 实际 (18.19, 67.3)，按实际的跑`。
+
+        原来写的是「预设写 … · 程序认到 … —— 两处不一致，这一盘按程序认到的那个跑」，
+        四十多个字在 1080 宽的窗口里必然折成两行，把那张图旁边挤成一块文字墙。
+        现在：**关系用 `=` / `≠` 说**（符号一眼就懂，省掉「两处不一致」五个字），
+        坐标本身也各自短一格（「预设写」→「预设」、「程序认到」→「实际」），
+        只剩"按哪个跑"这一句尾音 —— 那是不看符号也想知道的事，短话留着。
+        一致时只留 `预设 (20, 20) = 实际 (20, 20)`，不再缀「—— 一致」（等于号就是）。
+      */}
       <p className={same || !hasIr ? s.plateNote : `${s.plateNote} ${s.plateBad}`}>
         {hasPreset && tr('report.towerPlate.preset', { x: fmtNum(presetX), y: fmtNum(presetY) })}
-        {hasPreset && hasIr && ' · '}
+        {hasPreset && hasIr && (same ? ' = ' : ' ≠ ')}
         {hasIr && tr('report.towerPlate.ir', { x: fmtNum(irX as number), y: fmtNum(irY as number) })}
-        {hasPreset &&
-          hasIr &&
-          tr(same ? 'report.towerPlate.same' : 'report.towerPlate.diff')}
+        {hasPreset && hasIr && !same && tr('report.towerPlate.diff')}
       </p>
     </div>
   )
@@ -1350,6 +1376,15 @@ export default function PageReport() {
   const locale = useLocale()
   const [tab, setTab] = useState<string>(TAB_ALL)
   const [sideOpen, setSideOpen] = useState(false)
+  /*
+   * 左栏**手动折叠**（2026-10-27 作者：「左侧这一个可以自己折叠成小窗那种」）：
+   * `true` = 折成一条 44px 的窄轨、详情自己占满；点那条轨就放回来。
+   *
+   * ★ 与 `sideOpen` **不是一回事**：那个是窄档滑盖的开合（窗口挤窄了才有），
+   *   这个是用户在宽档里自己收的一栏。两格都留着，窄档下互不干扰（CSS 里各管各的）。
+   * 不落盘：与上面那三格筛选态同一条口径，切走再回来回到展开。
+   */
+  const [sidePeek, setSidePeek] = useState(false)
   /*
    * 左栏工具区（V13）：搜索词 / 状态筛选 / 折叠了的日期组。
    * 三样都是**本页自己的**筛选态，不问后端、不落盘 —— 切走再回来就回到全展开。
@@ -1782,6 +1817,16 @@ export default function PageReport() {
       <div className={s.sideHead}>
         <span className={s.sideLb}>{tr('report.side.title')}</span>
         <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
+        {/* 收起这一栏（宽档折成窄轨；窄档里折起来就是那条滑盖露出的一截） */}
+        <button
+          type="button"
+          className={s.sideFold}
+          onClick={() => setSidePeek(true)}
+          title={tr('report.side.fold')}
+          aria-label={tr('report.side.fold')}
+        >
+          <Icon name="chevronDown" size={12} className={s.sideFoldIcon} />
+        </button>
       </div>
 
       <div className={s.sideTools}>
@@ -1923,6 +1968,27 @@ export default function PageReport() {
     </nav>
   )
 
+  /*
+   * 折起来之后那一条窄轨（`sidePeek` 为真时代替上面整块列表）。
+   *
+   * 44px 只放得下竖字：竖排的眉题「执行记录」+ 条数，点一下放回来。
+   * 与窄档那套滑盖**同一个宽度**（44，见 `PEEK`），看起来是同一件事的两种来路。
+   */
+  const railHtml = (
+    <button
+      type="button"
+      className={s.rail}
+      onClick={() => setSidePeek(false)}
+      title={tr('report.side.unfold', { n: (rows ?? []).length })}
+      aria-label={tr('report.side.unfold', { n: (rows ?? []).length })}
+      aria-expanded={false}
+    >
+      <Icon name="chevronDown" size={12} className={ui.disclosureCaret} />
+      <span className={s.railLb}>{tr('report.side.title')}</span>
+      <span className={s.railCnt}>{(rows ?? []).length}</span>
+    </button>
+  )
+
   return (
     <section className={s.page} ref={pageRef} aria-label={tr('report.aria.page')}>
       <header className={s.head}>
@@ -1978,8 +2044,8 @@ export default function PageReport() {
         ) : rows.length === 0 ? (
           <p className={s.empty}>{tr('report.empty.none')}</p>
         ) : (
-          <div className={s.pane}>
-            {listHtml}
+          <div className={s.pane} data-peek={sidePeek}>
+            {sidePeek ? railHtml : listHtml}
             <div className={s.scrim} onClick={() => setSideOpen(false)} role="presentation" />
 
             <section className={s.main}>
@@ -2125,6 +2191,8 @@ export default function PageReport() {
                                   <TowerPlate
                                     snap={detail.snapshot}
                                     machineType={detail.summary.machineType}
+                                    /* 模型在板上占哪一块（成功那趟也有；旧记录 `null` ⇒ 只画塔） */
+                                    modelMap={detail.modelMap}
                                   />
                                 )}
                               </>

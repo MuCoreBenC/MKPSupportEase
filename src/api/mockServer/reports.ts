@@ -129,6 +129,65 @@ const EXPORT_SUFFIX: Record<ReportExportKind, string> = {
 }
 const EXPORT_KINDS: ReportExportKind[] = ['original', 'processed', 'meta']
 
+/**
+ * **参数快照**（2026-10-21）的形状 —— 预览里给成功那几趟都摆一份。
+ *
+ * ★ 从前夹具里**根本没有这一格**，于是报告页"擦料塔那一栏的俯视图"（它挂在
+ *   `snapshot != null` 上）在预览里一次都没渲染过 —— 2026-10-27 作者指着那块空地说
+ *   「把模型的包围盒也显示出来」，打开预览却是一片空白才发现。演示数据照着真机那份
+ *   填：`params` 用点号键，`ir` 用 PascalCase（与 Rust 的 `Ir` 同名）。
+ */
+function mockSnapshot(): NonNullable<ReportDetail['snapshot']> {
+  return {
+    params: {
+      'wiping.wiper_x': '70',
+      'wiping.wiper_y': '84',
+      'wiping.outer_structure': 'brim',
+      'rib.width': '0',
+      'rib.extra_length': '0',
+      'sheath.base_expand': '5',
+    },
+    ir: {
+      Wiping: { WiperX: 70, WiperY: 84, OuterStructure: 'brim' },
+      Rib: { Width: 0, ExtraLength: 0, FilletWall: false },
+      Sheath: { BaseExpand: 5 },
+    },
+    missing: [],
+  }
+}
+
+/**
+ * **模型俯视几何**（2026-10-27）：预览里那几趟成功记录都摆这一份形状。
+ *
+ * 数值不是编的 —— 它抄的是同一份夹具在碰撞那一屏撞出来的那两块模型（`mock.ts` 里
+ * `geo.collision` 的 `modelBoxes` / `modelPolygons`）；A1 mini 的可打印区 180²。
+ * 与真机同一个口径：一个模型一块轮廓 + 一个框（内核按占用格切）。
+ */
+const MOCK_MODEL_MAP: NonNullable<ReportDetail['modelMap']> = {
+  printable: { xMin: 0, xMax: 180, yMin: 0, yMax: 180 },
+  modelBoxes: [
+    { xMin: 40, xMax: 96, yMin: 26, yMax: 58 },
+    { xMin: 52, xMax: 90, yMin: 62, yMax: 88 },
+  ],
+  modelPolygons: [
+    [
+      [40, 26],
+      [70, 22],
+      [96, 30],
+      [94, 58],
+      [56, 58],
+    ],
+    [
+      [52, 62],
+      [76, 60],
+      [90, 70],
+      [86, 88],
+      [58, 84],
+    ],
+  ],
+  forbiddenZones: [],
+}
+
 /** `<原名>_<YYYYMMDD>_<HHMMSS>` 尾巴上那 14 位时刻 */
 function stampOf(r: FixtureRow): string {
   return idOf(r)
@@ -406,6 +465,10 @@ function firstDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
     },
     /* 真机夹具里没有碰撞那一趟（那条记录是别的失败）⇒ 恒 null */
     collision: null,
+    /* 模型俯视几何（2026-10-27）：成功那趟也有 —— 擦料塔那一栏的俯视图画它 */
+    modelMap: MOCK_MODEL_MAP,
+    /* 参数快照：擦料塔那一栏的俯视图与"参数快照"那一栏都靠它（从前夹具里没有） */
+    snapshot: mockSnapshot(),
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',
@@ -508,6 +571,10 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
       : null,
     /* 同上：夹具照真机，碰撞那一格没有就是 null（预览里那两块整组不摆） */
     collision: null,
+    /* 模型俯视几何：演示里成功那几趟都有（预览要能看见"板上哪块是模型"） */
+    modelMap: r.ok ? MOCK_MODEL_MAP : null,
+    /* 参数快照：成功那几趟有（失败记录照真机不写这一格） */
+    snapshot: r.ok ? mockSnapshot() : null,
     warnings: [],
     invocation: {
       exe: '/Users/wzy/projects/MKPSupportEase/target/debug/mkp-support-ease',

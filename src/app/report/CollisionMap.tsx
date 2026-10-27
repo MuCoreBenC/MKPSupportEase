@@ -62,6 +62,14 @@ interface Props {
    * 画"塔在哪"，说成"碰撞"会误导 —— 那边自己给一句。
    */
   label?: string
+  /**
+   * **这一屏画不画塔**（2026-10-27，缺省画）。
+   *
+   * 擦料塔那一栏的俯视图要给的是"模型在板上占哪一块"（作者：「把它模型的包围盒也显示
+   * 出来，就是后处理的时候碰撞检测的那个显示的一样的，复用的」）—— 同一块板、同一份
+   * 模型几何，那里不摆塔、不摆判据框，图例里也没有塔这一条。
+   */
+  noTower?: boolean
 }
 /** 塔身固定画成 44px（与参数页同一个数 —— 两边比例一致，形状才是同一个形状） */
 const TOWER_CORE_PX = 44
@@ -110,10 +118,15 @@ export default function CollisionMap({
   hideLegend = false,
   height,
   label,
+  noTower = false,
 }: Props) {
   const tr = useT()
   const mapLabel = label ?? tr('report.map.label')
-  const tower = boxOf(collision.towerBbox)
+  /*
+   * 塔框：**只有要画塔时才算**（2026-10-27）。`noTower` 那一档（模型俯视图）本来就没有
+   * `towerBbox`，下面"没塔就不画整块"的闸按它放行。
+   */
+  const tower = noTower ? null : boxOf(collision.towerBbox)
   const model = boxOf(collision.modelBbox)
   /*
    * 画图用的模型框：**一个模型一个**（内核按占用格连通块切好的 `modelBoxes`）。
@@ -162,8 +175,9 @@ export default function CollisionMap({
     boxOf(collision.printable) ??
     (plate !== null ? { x: 0, y: 0, w: plate.frame.w, h: plate.frame.h } : null)
 
-  /* 热床都没有（老记录 / 几何缺 / 板规格也查不到）⇒ 整块不画，交给上一层的空白态 */
-  if (bed === null || tower === null) return null
+  /* 热床都没有（老记录 / 几何缺 / 板规格也查不到）⇒ 整块不画，交给上一层的空白态。
+     要画塔的屏还多一道"没有塔框就不画"；`noTower` 那一档（模型俯视图）按前一条判。 */
+  if (bed === null || (tower === null && !noTower)) return null
 
   /* 有板：画布是板坐标系（可打印区在板上的 frame 是机器坐标的落点）；
      没板：画布就是可打印区本身。两套换算都收在 bedPt 里 */
@@ -188,13 +202,17 @@ export default function CollisionMap({
     )
     .filter((poly) => poly.length >= 3)
 
-  const towerShape = collision.tower ?? null
-  const bodyMm = towerShape?.bodyMm ?? tower.w
+  /* `noTower` 时 `tower` 恒为 `null`（上面就这么定的），这一串只给要画塔的那两屏用 */
+  const towerShape = noTower ? null : (collision.tower ?? null)
+  const bodyMm = towerShape?.bodyMm ?? tower?.w ?? 0
   /*
    * 塔图那张 svg 自己带"外围结构往外扩多少"的画布：扩展量取**判据框与塔身之差的一半**
    * —— 于是画出来的外沿正好压在虚线判据框上（两件事是同一件事实的两个说法）。
    */
-  const expand = Math.max(0, (Math.min(tower.w, tower.h) - bodyMm) / 2)
+  const expand = Math.max(
+    0,
+    (Math.min(tower?.w ?? bodyMm, tower?.h ?? bodyMm) - bodyMm) / 2,
+  )
   const vm = TOWER_CORE_PX / (bodyMm > 0 ? bodyMm : 1)
   /*
    * viewBox 比判据框再多 2px 的描边余量（2026-10-21 作者：「我这一个塔不要被裁剪掉」）：
@@ -211,7 +229,9 @@ export default function CollisionMap({
   )
   const dotR = Math.max(0.8, bed.w / 240)
 
-  const [towerLeftPlate, towerTopPlate] = bedPt(tower.x, tower.y + tower.h)
+  /* 塔的左下角在板坐标里（`noTower` 没有塔 ⇒ 不参与，下面那两处都带闸） */
+  const [towerLeftPlate, towerTopPlate] =
+    tower !== null ? bedPt(tower.x, tower.y + tower.h) : [0, 0]
 
   /*
    * **建议挪动的箭头**（2026-10-18 作者定的样子：**白**、粗、和塔的暖色分开；
@@ -251,7 +271,10 @@ export default function CollisionMap({
       du.y /= n
       const pad = canvasW * 0.045
       const boxes: Array<[number, number, number, number]> = []
-      for (const b of [model, { x: tower.x, y: tower.y, w: tower.w, h: tower.h }]) {
+      for (const b of [
+        model,
+        tower !== null ? { x: tower.x, y: tower.y, w: tower.w, h: tower.h } : null,
+      ]) {
         if (b === null) continue
         const [ax, ay] = bedPt(b.x, b.y + b.h)
         const [bx, by] = bedPt(b.x + b.w, b.y)
@@ -369,14 +392,17 @@ export default function CollisionMap({
             )
           })}
 
-      {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上） */}
-      <rect
-        className={s.towerBox}
-        x={towerLeftPlate}
-        y={towerTopPlate}
-        width={tower.w}
-        height={tower.h}
-      />
+      {/* 判据框：碰撞按这一块算（虚线，压在塔的真实形状外沿上）。
+          `noTower`（模型俯视图）没有塔 ⇒ 这一层不画。 */}
+      {tower !== null && (
+        <rect
+          className={s.towerBox}
+          x={towerLeftPlate}
+          y={towerTopPlate}
+          width={tower.w}
+          height={tower.h}
+        />
+      )}
 
       {/* **塔的目标位置虚框**（挪塔那一屏）：箭头指过去时落点看得见 */}
       {ghost != null &&
@@ -461,7 +487,7 @@ export default function CollisionMap({
           </svg>
           {factSvg}
           {/* 塔的真实形状（绝对定位盖在判据框上，百分比按板坐标算） */}
-          {towerShape !== null && (
+          {towerShape !== null && tower !== null && (
             <div
               className={s.tower}
               style={{
@@ -507,7 +533,7 @@ export default function CollisionMap({
           }}
         >
           {factSvg}
-          {towerShape !== null && (
+          {towerShape !== null && tower !== null && (
             <div
               className={s.tower}
               style={{
@@ -562,26 +588,31 @@ export default function CollisionMap({
       </button>
 
       {/* 图例：三个色块 + 名字（不标数字 —— 数字在「建议」那组里）。
-          挪塔那一屏两幅并排，图例各占一行太吵 ⇒ `hideLegend` */}
+          挪塔那一屏两幅并排，图例各占一行太吵 ⇒ `hideLegend`；
+          `noTower` 那一档没画塔、也没有冲突点 ⇒ 只剩"模型轮廓"一条（空的那几条不摆）。 */}
       {!hideLegend && (
       <ul className={s.legend}>
-        <li>
-          <span className={s.swTower} aria-hidden="true" />
-          {tr('report.map.legendTower')}
-        </li>
+        {!noTower && (
+          <li>
+            <span className={s.swTower} aria-hidden="true" />
+            {tr('report.map.legendTower')}
+          </li>
+        )}
         <li>
           <span className={s.swModel} aria-hidden="true" />
           {tr('report.map.legendModel')}
         </li>
-        <li>
-          <span className={s.swHit} aria-hidden="true" />
-          {tr('report.map.legendHit')}
-          {collision.conflictCount !== undefined && collision.conflictCount > 0 && (
-            <span className={s.legendNum}>
-              {tr('report.map.hitCount', { n: collision.conflictCount })}
-            </span>
-          )}
-        </li>
+        {!noTower && (
+          <li>
+            <span className={s.swHit} aria-hidden="true" />
+            {tr('report.map.legendHit')}
+            {collision.conflictCount !== undefined && collision.conflictCount > 0 && (
+              <span className={s.legendNum}>
+                {tr('report.map.hitCount', { n: collision.conflictCount })}
+              </span>
+            )}
+          </li>
+        )}
       </ul>
       )}
 

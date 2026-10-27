@@ -119,6 +119,12 @@ pub struct ReportDetail {
     /// 只有 `E_GCODE_COLLISION_001` 会写：撞在哪、建议往哪挪多少、画俯视图的几何。
     /// 别的记录一律 `null`（原样透传，不在这一层挑字段）。
     pub collision: Option<serde_json::Value>,
+    /// **模型俯视几何**（`_meta.json` 顶层 `modelMap`，2026-10-27）：报告页擦料塔那一栏
+    /// 的俯视图拿它画"模型在板上占哪一块" —— 与碰撞那一屏同一个画法、同一个来源。
+    ///
+    /// 为什么单列一格而不是塞进 `collision`：成功那趟 `collision` 恒为 `null`，
+    /// 而作者要看的正是成功那趟。旧记录 / 那趟算不出来 ⇒ `null` ⇒ 页面退回"只有塔"那幅。
+    pub model_map: Option<serde_json::Value>,
     /// **参数快照**（`detail.snapshot`，2026-10-21）：切片那一刻预设 TOML 的全量参数
     /// + IR 终态原样。旧记录没有这个键 ⇒ `null` ⇒ 页面整组不摆。
     pub snapshot: Option<serde_json::Value>,
@@ -375,6 +381,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
             })
             .unwrap_or_default(),
         collision: meta.get("collision").cloned(),
+        model_map: meta.get("modelMap").cloned(),
         relocation: meta.get("relocation").cloned(),
         invocation: meta.get("invocation").cloned(),
         preset_path: str_at("presetPath"),

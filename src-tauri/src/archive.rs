@@ -576,6 +576,12 @@ pub struct Meta {
     pub collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
     /// **挪塔记录**（2026-10-18）：走到了那一问才有，别的一律 `null`。
     pub relocation: Option<RelocationRecord>,
+    /// **模型俯视几何**（2026-10-27）：报告页擦料塔那一栏的俯视图拿它画"模型在板上
+    /// 占哪一块"—— 与碰撞那一屏同一套画法、同一个来源（内核 `model_map_facts`）。
+    ///
+    /// 为什么单独一格：成功那趟 `collision` 恒为 `null`，而作者要看的正是成功那趟。
+    /// 也是**新增键**：旧记录读到 `null` ⇒ 那幅图退回"从头算一遍"（见 `ipc::report`）。
+    pub model_map: Option<postprocess::postproc::disk::collision::ModelMapFacts>,
     pub detail: Detail,
 }
 
@@ -1651,6 +1657,18 @@ mod tests {
             }],
             /* 成功记录没有碰撞事实 */
             collision: None,
+            /* 模型俯视几何（2026-10-27）：成功那趟也有 —— 报告页擦料塔那一栏就画它 */
+            model_map: Some(postprocess::postproc::disk::collision::ModelMapFacts {
+                printable: postprocess::postproc::disk::collision::Box4 {
+                    x_min: 0.0,
+                    x_max: 180.0,
+                    y_min: 0.0,
+                    y_max: 180.0,
+                },
+                model_boxes: Vec::new(),
+                model_polygons: Vec::new(),
+                forbidden_zones: Vec::new(),
+            }),
             relocation: None,
             detail: Detail {
                 input_file: FileFact {
@@ -1744,6 +1762,8 @@ mod tests {
             pipeline: Vec::new(),
             /* 越界失败不是碰撞 —— 那一格必须是 null（判据里钉住键名即可） */
             collision: None,
+            /* 越界失败这一份不画图（这一格同样是 `null`：不编几何） */
+            model_map: None,
             relocation: None,
             detail: Detail {
                 input_file: FileFact {

@@ -119,6 +119,27 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
   const [forcedOpen, setForcedOpen] = useState(false)
 
   /*
+   * 档位**当场**换过来（2026-10-27，作者：「我一开始点了静默，后来切成 GUI，
+   * 后续的后处理还是都在右上角，没有变成真正的模态框」）。
+   *
+   * `silent` 是 `App` 那一侧从设置页那份偏好**派生**出来的，改档后它会跟着变
+   * （那份偏好现在是"一份缓存 + 广播"，见 `usePostprocPrefs` 头注约定 1）；
+   * 这里只补一件它管不到的事：换档那一刻把上一档留下的两支笔抹掉，让**这一趟**
+   * 立刻按新档摆，而不是等下一趟开场 ——
+   *   · `forcedOpen`：静默档下"点开过那一屏"的临时通行证，换了档不再作数
+   *     （否则切成静默后模态框还赖在屏上）；
+   *   · `quietUntil`：只在"这一趟此刻不该显示模态框"时才有意义（右上角那枚结论胶囊）。
+   *     转成 GUI 之后模态框自己会把结论摆出来，胶囊再留 60 秒就成了同一件事说两遍。
+   */
+  const prevSilent = useRef(silent)
+  useEffect(() => {
+    if (prevSilent.current === silent) return
+    prevSilent.current = silent
+    setForcedOpen(false)
+    if (!silent) setQuietUntil(null)
+  }, [silent])
+
+  /*
    * 这一趟**界面到底看见过没有**（2026-10-18）。
    *
    * 首帧两条路（读快照 / 订阅事件）谁先到全看运气，光靠"读回来的快照是 null"

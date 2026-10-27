@@ -323,8 +323,12 @@ export default function App() {
    * 就是不用这个后处理的前端出现，缩在右上角就可以，结束也不出现」）。
    *
    * ★ 读不到偏好（还没读回来 / 读失败）按 **GUI** 处理：静默是用户主动选的
-   *   "这次别打扰我"，读不到时退回"看得见"这一侧 —— 免得用户以为程序没动静。
+   *   "这次别打扰我"，读不到时退回"看得见"那一侧 —— 免得用户以为程序没动静。
    *   与后端 `hook_ipc::wants_display` 的兜底同一个取向。
+   *
+   * ★★ 这一格是**活的**：设置页改档后 `usePostprocPrefs` 会广播给每一份读者，
+   *   `silentPostproc` 跟着变、`usePostProcessRun` 立刻按新档摆（2026-10-27 修：
+   *   原来是各读各的模块缓存，设置页改成 GUI 之后外壳还按静默走，模态框再也不出来）。
    */
   const { prefs: postprocPrefs } = usePostprocPrefs()
   const silentPostproc = postprocPrefs?.resolved.uiMode === 'silent'

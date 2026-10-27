@@ -406,7 +406,7 @@ impl Default for PrefsIr {
             glue_bottom_enabled: false,
             skip_vibration_calibration: false,
             begin_stage_retract_enabled: true,
-            begin_stage_retract_z_lift_mm: 100,
+            begin_stage_retract_z_lift_mm: 30,
             z_calibration_dwell_sec: 2,
             xy_calibration_dwell_sec: 3,
             bed_glue_enabled: false,
