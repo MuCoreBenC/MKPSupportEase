@@ -63,7 +63,7 @@
 
 /*
  * 小号（2026-10-26）：**页头那一行里的小胶囊**的尺寸 —— 与工艺页工具条右端那两枚
- * 开关（`WindowGadgets` 的 `.pill`）同一组数：24px 高 / 左右 6px / 12px 字。
+ * 开关（`WindowGadgets` 的 `.pill`）同一组数：24px 高 / 左右 8px / 12px 字。
  *
  * ★ 它不是"另一套按钮皮"：圆角、描边、字色照旧由 `.btn`（和各 `variant`）给，
  *   这里只缩小盒子。作者那天的原话是「改小报告的胶囊按钮和工艺的一样」——
@@ -76,9 +76,17 @@
   align-items: center;
   justify-content: center;
   height: 24px;
-  padding: 0 6px;
+  /*
+   * 2026-10-27（作者：「胶囊里的字看着贴左」）：左右内衬 6 → 8，并显式居中。
+   *
+   * 量出来其实是准的（墨迹中心与胶囊中心差 1px 以内），但两个汉字在 6px 的
+   * 内衬里挨得太近，眼睛会觉得它贴着左边 —— 加两像素的呼吸就正了。
+   * `line-height: 1` 会让 CJK 的字面比行盒中线高一点点，改由 `align-items` 摆中线。
+   */
+  padding: 0 8px;
   font-size: 12px;
   line-height: 1;
+  text-align: center;
 }
 
 /*
