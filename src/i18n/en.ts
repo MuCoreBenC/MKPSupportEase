@@ -716,8 +716,9 @@ export const en: Record<StringKey, string> = {
   'report.note.devExport': 'Export confirmed: 3 files written to {path}',
   'report.err.list': 'Could not read records: {err}',
   'report.empty.loading': 'Loading records…',
+  'report.empty.title': 'No records yet',
   'report.empty.none':
-    'No records yet — paste the “Copy post-process script” command from the home page into your slicer’s post-processing slot; exporting a print file creates the first one automatically.',
+    'Paste the “Copy post-process script” command from the home page into your slicer’s post-processing slot; exporting a print file creates the first one automatically.',
   'report.detail.pick': 'Pick a record on the left to see details.',
   'report.detail.err': 'Could not read details: {err}',
   'report.detail.loading': 'Loading details…',
