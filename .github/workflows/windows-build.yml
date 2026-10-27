@@ -72,7 +72,9 @@ jobs:
         run: |
           v=$(node -p "require('./package.json').version")
           ls -l target/release/*.exe
-          cp "target/release/SupportEase.exe" "target/release/SupportEase_${v}_x64-portable.exe"
+          # 主二进制用的是 cargo 的 bin 名（`mkp-support-ease`），不是 productName ——
+          # 2026-10-27 第一次跑时写成了 SupportEase.exe，cp 直接报 No such file。
+          cp "target/release/mkp-support-ease.exe" "target/release/SupportEase_${v}_x64-portable.exe"
 
       - name: 上传安装包（setup + 免安装）
         uses: actions/upload-artifact@v4
