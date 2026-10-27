@@ -50,6 +50,7 @@
   "wiping.rib_width": 8.0,
   "wiping.small_feature_factor": 1.0,
   "wiping.support_extrusion_multiplier": 0.8,
+  "wiping.swap_hop_height": 1.0,
   "wiping.tower_custom_layer_height": "auto",
   "wiping.tower_extrude_ratio": 1.0,
   "wiping.tower_first_layer_flow": 1.0,
