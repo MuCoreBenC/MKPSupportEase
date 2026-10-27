@@ -1023,6 +1023,9 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
    * 预览就明确是预览，不许点出真业务）。所以预览里把它们**禁掉**，并标一句「预览模式」。
    */
   const preview = run?.preview === true
+  /* 回放（2026-10-27）：界面拿报告页那份归档造出来的"当时那一趟"。
+     与预览同一套禁真业务的口径，只是文案说"回放"，不说"预览" */
+  const replay = run?.replay === true
 
   useEffect(() => {
     if (!running) return
@@ -1195,7 +1198,13 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       title={showProgress ? tr('postproc.title.progress') : tr('postproc.title.result')}
       /* 文件名那一格原来是标题右边的 `s.files` —— 通用框有 `subtitle`，用它。
       预览里前面加「预览 ·」—— 一眼看出这不是真跑（页脚那枚小字之外的第二处） */
-      subtitle={preview ? tr('postproc.preview.subtitle', { name: run.gcodeName }) : run.gcodeName}
+      subtitle={
+        replay
+          ? tr('postproc.replay.subtitle', { name: run.gcodeName })
+          : preview
+            ? tr('postproc.preview.subtitle', { name: run.gcodeName })
+            : run.gcodeName
+      }
       /* 点遮罩不关（全站口径 2026-10-15；跑着的时候更是如此）—— 收起来请按 Esc 或「后台运行」 */
       /* 跑着的时候连 × 都不摆 —— 那一刻没有"关掉"这个动作。
          结果那几扇也不摆（第 16~17 轮定的）：收窗走页脚「关闭」那一条明路 */
@@ -1204,7 +1213,15 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       closeOnEsc={!running}
       onClose={dismiss}
       footer={
-        preview ? (
+        replay ? (
+          /* 回放：与预览同一套——真业务按钮一个都不摆，只留「关闭回放」 */
+          <>
+            <span className={s.previewTag}>{tr('postproc.replay.tag')}</span>
+            <Btn variant="accent" onClick={dismiss}>
+              {tr('postproc.replay.close')}
+            </Btn>
+          </>
+        ) : preview ? (
           /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
              只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
           <>

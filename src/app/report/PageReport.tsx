@@ -103,6 +103,7 @@ import type {
   ReportBox4,
   ReportCollision,
   ReportDetail,
+  PostProcessRun,
   ReportPipelineStep,
   ReportExportPlan,
   ReportGlueFacts,
@@ -117,6 +118,7 @@ import NoteBar from '../shared/NoteBar'
 import type { Note } from '../shared/note'
 import { Btn } from '../ui/Controls'
 import ExportModal from './ExportModal'
+import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
 import RelocationBoards from './RelocationBoards'
 import { useDevPreview } from '../dev/useDevPreview'
@@ -179,35 +181,66 @@ const FILE_TAIL_LEN = 12
  * 这张表就是那一处。认不出来的 id 原样摆（新步骤忘了登记也不会显示成空白）。
  */
 const STEP_NAMES: Record<string, StringKey> = {
-  input: 'report.step.input',
-  config: 'report.step.config',
-  'machine-detect': 'report.step.machine',
-  parse: 'report.step.parse',
-  support: 'report.step.support',
-  collision: 'report.step.collision',
-  'calib-check': 'report.step.calib',
-  pass1: 'report.step.pass1',
-  pass2: 'report.step.pass2',
-  calibration: 'report.step.calibInsert',
-  write: 'report.step.write',
-  printtime: 'report.step.printtime',
+  input: 'postproc.steps.input',
+  config: 'postproc.steps.config',
+  'machine-detect': 'postproc.steps.machineDetect',
+  parse: 'postproc.steps.parse',
+  support: 'postproc.steps.support',
+  collision: 'postproc.steps.collision',
+  'calib-check': 'postproc.steps.calibCheck',
+  pass1: 'postproc.steps.pass1',
+  pass2: 'postproc.steps.pass2',
+  calibration: 'postproc.steps.calibration',
+  write: 'postproc.steps.write',
+  printtime: 'postproc.steps.printtime',
 }
 
 
-/** 进度句：内核那句（中文）按步骤 id 换成本地的 —— 认不出的 id 原样摆 */
-const MSG_KEYS: Record<string, StringKey> = {
-  input: 'report.msg.input',
-  config: 'report.msg.config',
-  'machine-detect': 'report.msg.machine',
-  parse: 'report.msg.parse',
-  support: 'report.msg.support',
-  collision: 'report.msg.collision',
-  'calib-check': 'report.msg.calib',
-  pass1: 'report.msg.pass1',
-  pass2: 'report.msg.pass2',
-  calibration: 'report.msg.calibInsert',
-  write: 'report.msg.write',
-  printtime: 'report.msg.printtime',
+/**
+ * 把一份归档记录摊成「当时那一趟」（2026-10-27 作者：报告页要一颗回放按钮）。
+ *
+ * **不真跑**：作者裁定只回放当时那份 `_meta.json` 里的进度 / 耗时 / 明细 / 收尾，
+ * 一个文件都不碰、也不产生新记录。所以这里造出来的是 `replay: true` 的一份
+ * `PostProcessRun` —— 模态框见到它就把真业务按钮全禁掉，文案也说「回放」。
+ *
+ * 只摊记录里**真有**的那几格：没有的给 `null`，模态框本来就有「没给就不摆」的口径。
+ */
+function replayRunOf(d: ReportDetail): PostProcessRun {
+  const g = d.glue
+  return {
+    presetName: d.summary.presetName ?? '',
+    gcodeName: d.summary.gcodeName ?? d.summary.modelName ?? '',
+    /* 开场事实那一栏是钩子当场报的，归档里没有同形状的一份 —— 不给，卡片自己会省掉 */
+    facts: null,
+    question: null,
+    progress: null,
+    finished: {
+      ok: d.summary.ok,
+      cancelled: false,
+      message: d.summary.error ?? '',
+      code: null,
+      stage: null,
+      exitCode: d.summary.ok ? 0 : 1,
+      elapsedMs: d.summary.elapsedMs ?? 0,
+      output: d.outputFile?.path ?? null,
+      warnings: d.warnings ?? [],
+      result:
+        g == null
+          ? undefined
+          : {
+            penX: g.penOffsetX,
+            penY: g.penOffsetY,
+            penZ: g.penOffsetZ,
+            glueSpeed: g.glueSpeed,
+            glueLengthMm: g.glueTotalLength,
+            printTimeSeconds: d.printTime?.totalSeconds,
+            slicer: d.slicer?.slicerVersion,
+          },
+    },
+    preview: false,
+    replay: true,
+    questionEmitted: true,
+  }
 }
 
 /**
@@ -1316,6 +1349,8 @@ export default function PageReport() {
   const [collapsedDays, setCollapsedDays] = useState<ReadonlySet<string>>(new Set())
   /** 导出框开着没有（它的内务全在 `ExportModal` 里，页面只管这一格开关） */
   const [exportOpen, setExportOpen] = useState(false)
+  /* 回放：拿当前这条记录摊成「当时那一趟」，塞进原本那扇后处理模态框 */
+  const [replay, setReplay] = useState<PostProcessRun | null>(null)
   /* 开发台：（只在开发构建里收得到事件）—— 有选中记录才开那一框（没记录时那框本来是灰的） */
   const devExport = useDevPreview('export')
   useEffect(() => {
@@ -1897,6 +1932,16 @@ export default function PageReport() {
           </Btn>
           <Btn
             size="sm"
+            disabled={detail === null}
+            title={detail === null ? tr('report.replay.needDetail') : undefined}
+            onClick={() => {
+              if (detail !== null) setReplay(replayRunOf(detail))
+            }}
+          >
+            {tr('report.action.replay')}
+          </Btn>
+          <Btn
+            size="sm"
             onClick={() => {
               read()
               /* 列表重读之外，右栏那条也重读 —— 打印时间可能刚从 `computing` 变成 `ready` */
@@ -2017,13 +2062,6 @@ export default function PageReport() {
                                         </span>
                                       )}
                                     </span>
-                                    {(MSG_KEYS[step.id ?? ''] ?? step.message) !== undefined && (
-                                      <span className={s.stepMsg}>
-                                        {MSG_KEYS[step.id ?? '']
-                                          ? tr(MSG_KEYS[step.id ?? ''])
-                                          : step.message}
-                                      </span>
-                                    )}
                                     {stepDetailText(step, tr) !== null && (
                                       <span className={s.stepDetail}>
                                         {stepDetailText(step, tr)}
@@ -2119,6 +2157,22 @@ export default function PageReport() {
           setExportOpen(false)
         }}
       />
+
+      {/* 回放：还是那扇后处理模态框，只是数据来自这一条记录（不真跑、不落新账） */}
+      {replay !== null && (
+        <PostProcessModal
+          view={{
+            run: replay,
+            dismissed: false,
+            sinceMs: null,
+            dismiss: () => setReplay(null),
+            reopen: () => {},
+            silent: false,
+            quietUntil: null,
+          }}
+          onOpenReport={() => setReplay(null)}
+        />
+      )}
     </section>
   )
 }
