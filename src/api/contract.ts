@@ -1881,7 +1881,7 @@ export interface PresetSource {
   fromUser: boolean
   /** 两个内置源（没注入的那个不出现） */
   builtin: BuiltinPresetSource[]
-  /** 出厂默认是哪一个（`github`）—— 「恢复默认」那一句要说清它是什么 */
+  /** 出厂默认是哪一个（0.0.7 起 `gitee`）—— 「恢复默认」那一句要说清它是什么 */
   defaultMode: string
   /** 出厂默认那个源的地址 */
   builtinDefault: string | null

@@ -72,7 +72,7 @@ pub struct PresetSourceDto {
     /// **两个内置源**（没注入的那个不出现）。界面摆两个固定单选就靠它 ——
     /// 用户没有输错地址的机会，这是防错的第一道
     pub builtin: Vec<BuiltinSourceDto>,
-    /// 出厂默认是哪一个（`github`）：界面上「恢复默认」那一句要说得清它是什么
+    /// 出厂默认是哪一个（0.0.7 起 `gitee`）：界面上「恢复默认」那一句要说得清它是什么
     pub default_mode: String,
     /// 出厂默认那个源的地址
     pub builtin_default: Option<String>,

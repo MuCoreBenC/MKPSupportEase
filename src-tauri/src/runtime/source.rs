@@ -179,8 +179,9 @@ impl SourceMode {
 /// 出厂默认选哪个。
 ///
 /// ★ 0.0.3 先是 **GitHub**（Gitee 镜像还没全部就绪，默认指过去等于把用户往取不到
-///   数据的地方带）；Gitee 内容确认就绪后的下一版再翻成 [`SourceMode::Gitee`]。
-pub const DEFAULT_MODE: SourceMode = SourceMode::Github;
+///   数据的地方带）；0.0.7 起翻成 **Gitee** —— 国内直连更稳，镜像内容已与 GitHub 对齐
+///   （作者 2026-10-27 裁定）。
+pub const DEFAULT_MODE: SourceMode = SourceMode::Gitee;
 
 /// 两个内置源（给界面摆两个固定选项用；没注入的那个**不出现**）。
 pub fn builtin_sources() -> Vec<(SourceMode, String)> {
@@ -600,9 +601,12 @@ fn fetch_and_accept(
 }
 
 /// 构建期注入的默认地址（没注就是 `None`）。界面用它区分"出厂默认值"与"用户改过的"，
-/// 免得读一次之后分不清当前地址是自己选的还是出厂的
+/// 免得读一次之后分不清当前地址是自己选的还是出厂的。
+///
+/// ★ 它跟着 [`DEFAULT_MODE`] 走，不是固定指 GitHub —— 默认源翻成 Gitee 之后，
+///   这里必须一起翻，否则界面会拿 GitHub 的地址说"这是出厂默认"。
 pub fn builtin_default() -> Option<String> {
-    DEFAULT_BASE_URL.map(str::to_owned)
+    DEFAULT_MODE.builtin_url().map(str::to_owned)
 }
 
 /// **当前选的是哪一个**（没写过设置 = 出厂默认 [`DEFAULT_MODE`]）。
