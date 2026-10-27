@@ -118,6 +118,7 @@
   grid-template-columns: 340px 1fr;
   gap: 18px;
   padding: 0 clamp(16px, 2vw, 26px) 16px;
+  /* 折/展是**瞬时**切换（作者第四次：过程里任何重叠都不接受，见下面折叠段注释） */
 }
 
 /*
@@ -131,6 +132,9 @@
 .side {
   position: relative;
   z-index: 5;
+  /* ★ grid 子项默认 `min-width: auto`，会被里面定宽 340 的 `.sideBody` 顶住 ——
+     没有这一条，列宽缩到 44 时盒子还是 340，列表整块溢到详情上面（2026-10-27 实测） */
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -504,11 +508,6 @@
   text-align: center;
 }
 
-/* 抓手：只在窄档（滑盖）出现，提示"这一块能拖" */
-.grabber {
-  display: none;
-}
-
 /* ============ 右：详情 ============ */
 
 .scrim {
@@ -856,45 +855,72 @@
   line-height: 1.7;
 }
 
-/* ============ 手动折叠：左栏收成一条 44px 窄轨（2026-10-27） ============ */
+/* ============ 折叠：同一个面板变窄（2026-10-27 第三版） ============ */
 
 /*
- * 作者：「左侧这一个可以自己折叠成小窗那种小尺寸窗口」。
+ * 作者：「不要有两个的感觉，就感觉是一个整体，只是被折到里面了和伸出来这种感觉」。
  *
- * 折起来那条轨的宽度与**窄档滑盖收起时露出的那一截是同一个数**（44，见 `PEEK`）——
- * 两档看起来是同一件事：一窄条靠在左边，点一下列表就回来。
+ * 所以**没有第二个元素**：`<nav class="side">` 就是那只盒子，340 → 44 是折起来、
+ * 44 → 340 是伸出来。盒子里的 `.sideBody`（真正的列表）**定宽 340**：外壳收窄时
+ * 它不重排、只被裁 —— 看起来是抽屉被推进去，而不是"列表被挤成一团"。
+ * 折到位时显形的是盒子里那张脸 `.sideFace`（44px、钉在左缘、竖排眉题）。
  *
- * ★ 与窄档那套滑盖**不是一回事**：那套是"窗口挤窄了自动变"，这套是用户自己按；
- *   窄档里两者可以同时发生，覆盖写在下面容器查询块里。
+ * 两档共用这一套，差别只在盒子的宽度由谁给：
+ *   · 宽档：grid 第一列（340 / 44）；
+ *   · 窄档：盒子自己的 width（`min(340px, 82%)` / 44）。
+ *
+ * ★★ **不做过渡动画**（2026-10-27 第四版）：宽度动画期间必然存在半展开的一帧，
+ *   那一帧里列表与脊同时在场 —— 作者三次截图说的都是它。现在两态**瞬时切换**，
+ *   折起来时列表直接不画（display:none），任何一帧都只有一个东西。
  */
 .pane[data-peek='true'] {
   grid-template-columns: 44px 1fr;
 }
 
-.rail {
-  position: relative;
-  z-index: 5;
+/* 列表本体：**折起来就不画**（不留半截在脊里） */
+.pane[data-peek='true'] .sideBody {
+  display: none;
+}
+
+.sideBody {
+  flex: 1;
+  width: 340px;
+  min-height: 0;
   display: flex;
+  flex-direction: column;
+}
+
+/*
+ * 折起来时露出的那张脸：钉在盒子左缘的 44px，只在折叠态现形。
+ *
+ * ★ 宽度钉死 44（不铺满外壳）：折叠那 240ms 里外壳还宽着，脸若铺满，竖排字会
+ *   在宽盒子中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"，随盒子一起收进去。
+ */
+.sideFace {
+  display: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 44px;
   flex-direction: column;
   align-items: center;
   gap: 10px;
   padding: 14px 0 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
+  border: 0;
   background: var(--surface-solid);
-  box-shadow: var(--shadow);
   color: var(--text-3);
   font: inherit;
   cursor: pointer;
 }
 
-.rail:hover {
+.sideFace:hover {
   background: var(--surface-sunken);
   color: var(--text-1);
 }
 
 /* 竖排的眉题（与 `.sideLb` 同一档字）：44px 只放得下竖字 */
-.railLb {
+.sideFaceLb {
   writing-mode: vertical-rl;
   font-size: var(--fs-label);
   font-weight: 600;
@@ -902,11 +928,16 @@
   white-space: nowrap;
 }
 
-.railCnt {
+.sideFaceCnt {
   margin-top: auto;
   font-size: var(--fs-label);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
+}
+
+/* 宽档：用户按栏头那颗「收起」才折 */
+.pane[data-peek='true'] .sideFace {
+  display: flex;
 }
 
 /* ============ 窄档：列表滑盖化（只盖内容区 —— 顶部那行字与刷新不动） ============ */
@@ -918,27 +949,16 @@
  */
 @container report (width < 880px) {
   .pane {
-    /* 收起时露出 44px，主区整体让开这一条 */
+    /* 收起时露出 44px 的窄轨，主区整体让开这一条 */
     grid-template-columns: 1fr;
     padding-left: 56px;
   }
 
   /*
-   * 手动折叠在窄档里照样认（用户收起来的那一栏，不该因为窗口变窄又自己张开）：
-   * 仍旧单列，那条轨**绝对定位**贴着左缘 —— 与滑盖收起时露出的那一截同一个位置，
-   * 内衬还是上面那 56px，两者不会叠。
+   * 手动折叠在窄档里照样认（用户收起来的那一栏，不该因为窗口变窄又自己张开）。
    */
   .pane[data-peek='true'] {
     grid-template-columns: 1fr;
-  }
-
-  .rail {
-    position: absolute;
-    top: 0;
-    left: 0;
-    bottom: 0;
-    width: 44px;
-    border-radius: 0 var(--r-lg) var(--r-lg) 0;
   }
 
   /* ★ 不动 `.head` / `.sub`：窄窗里顶部照样一行小灰字 + 刷新靠右 */
@@ -958,60 +978,49 @@
    * 开盖只认 `.side` 自己的状态（相邻兄弟）—— 不靠 JS 同步第二份状态。
    * DOM 顺序必须是 side → scrim → main。
    */
-  .side[data-open='true'] + .scrim {
+  /* ★ `:not([data-peek])`：手动折起来之后面板只剩 44px，遮罩再留着就是"整页发灰"
+     （2026-10-27 作者截图），所以折起来那一刻遮罩必须一起退场 */
+  .pane:not([data-peek='true']) .side[data-open='true'] + .scrim {
     opacity: 1;
     pointer-events: auto;
   }
 
-  /* 滑盖锚在 `.pane` 上（不是整页）：打开时盖住详情，但盖不到顶部那行 */
+  /*
+   * 窄档的盒子（2026-10-27 第四版）：收起 44px 只画那张脊，展开 `min(340px, 82%)`
+   * 盖在详情上。**两态瞬切**，中间不留半展开的帧（列表在收起态直接不画）。
+   */
   .side {
     position: absolute;
     top: 0;
     left: 0;
     bottom: 0;
-    width: min(340px, 82%);
+    width: 44px;
     border-radius: 0 var(--r-lg) var(--r-lg) 0;
-    transform: translateX(calc(-100% + 44px));
-    transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1);
-    touch-action: pan-y;
   }
 
   .side[data-open='true'] {
-    transform: none;
+    width: min(340px, 82%);
   }
 
-  /*
-   * 收起时露的那 44px 是面板的右缘 —— 状态/耗时挂在行右端会被截断，
-   * 收起态先藏掉，展开再显形。
-   */
-  .side:not([data-open='true']) .sideDur,
-  .side:not([data-open='true']) .rowStatus {
-    visibility: hidden;
+  /* 收起态：列表不画，只剩脊 */
+  .side:not([data-open='true']) .sideBody {
+    display: none;
   }
 
-  .grabber {
-    display: block;
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 6px;
-    background: linear-gradient(90deg, rgb(16 24 32 / 0%), var(--hairline));
-    cursor: ew-resize;
-    border-radius: 0 var(--r-lg) var(--r-lg) 0;
+  /* 手动折叠优先于展开态：折了就是 44，不管 sideOpen 是不是还留着 true */
+  .pane[data-peek='true'] .side {
+    width: 44px;
   }
 
-  .grabber::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    right: 1px;
-    transform: translateY(-50%);
-    width: 3px;
-    height: 46px;
-    border-radius: 999px;
-    background: var(--text-3);
-    opacity: 0.55;
+  /* 窄档里那张脸：展开就藏（宽档那半套在基础样式里） */
+  .side[data-open='true'] .sideFace {
+    display: none;
+  }
+
+  /* 收起 = 露脸；手动折叠优先（放最后）：折了就一直露，哪怕 sideOpen 还留着 true */
+  .side:not([data-open='true']) .sideFace,
+  .pane[data-peek='true'] .sideFace {
+    display: flex;
   }
 }
 

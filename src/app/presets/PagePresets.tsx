@@ -1449,7 +1449,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 于是同一云端条目下有好几份时，从哪个行点就更新哪个行。
    */
   const runUpdateLocal = (row: PresetLocalRow) => {
-    if (row.basedOn !== 'outdated') return
+    /*
+     * 两档都走这一条：`outdated`（同一个源、云端换版）叫「更新」，
+     * `elsewhere`（另一个源）叫「下载」—— **落地逻辑是同一段**（按参数并进来），
+     * 区别只在那一颗按钮的词与颜色（作者 2026-10-27）。`newer` / `unknown` 不入口。
+     */
+    if (row.basedOn !== 'outdated' && row.basedOn !== 'elsewhere') return
     const local = data.local.find((f) => f.path === row.path)
     if (local === undefined) {
       setNote({ text: tr('presets.page.update.gone', { name: row.fileName }), bad: true })

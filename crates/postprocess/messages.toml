@@ -3287,3 +3287,10 @@ text = "去掉打印件，只走校准路径"
 text_en = "Drop the print, run the calibration path only"
 params = []
 note = "次按钮的副标题"
+
+["ui.runtime.source_ledger.493"]
+code = "E_FS_SOURCE_LEDGER_001"
+text = "源身份账本写不出来"
+text_en = "Failed to write the preset-source ledger"
+params = []
+note = "run/source-ledger.json / run/lineage-source.json 写失败（附加信息，主流程不受影响）"

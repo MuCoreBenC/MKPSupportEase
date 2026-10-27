@@ -68,6 +68,14 @@ pub mod release_info;
 pub mod remarks;
 pub mod resolver;
 pub mod source;
+/// **源身份**（2026-10-27）：把「云端在哪」规范化成 `平台#仓库@ref`，用来回答
+/// 「本地这份与云端那份是不是同一个源」—— 换源之后 `BasedOn` 靠它区分
+/// 「云端变了」与「两边本来就不是一回事」。见 [`source_identity`] 的模块头。
+pub mod source_identity;
+/// **源身份账**（2026-10-27）：`run/source-ledger.json`（见过哪些源、各自发布时刻）与
+/// `run/lineage-source.json`（哪份副本是在哪个源下建的）。**不动用户的 preset 文件**，
+/// 坏档按空账。见 [`source_ledger`] 的模块头。
+pub mod source_ledger;
 pub mod state;
 /// **结构代次**：这批数据是什么结构、哪个客户端起读得懂（`docs/PUBLISH-ARCHITECTURE.md` §5.3）。
 /// 签名是机器真值（从类型探），「签名 → 最低客户端版本」是人必须显式登记的那半。

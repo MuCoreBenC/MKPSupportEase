@@ -738,6 +738,33 @@ export default function PresetTable({
                         </span>
                       )}
                       {/*
+                        **「云端较旧」（2026-10-27）**：同一个源，但当前云端那一份比我这份旧。
+                        这一枚只陈述事实，**没有任何动作** —— 从前这里会挂「有新版」并长出
+                        一颗绿色「更新」，等于劝用户把本地往旧内容上退。
+                      */}
+                      {row.scope === 'local' && row.basedOn === 'newer' && !detached && (
+                        <span
+                          className={s.localState}
+                          data-state="stale"
+                          title={tr('presets.table.staleOlder.title')}
+                        >
+                          {tr('presets.table.staleOlder')}
+                        </span>
+                      )}
+                      {/*
+                        **「另有所在」**：这份来自另一个源（换平台 / 分支 / 目录，或老副本
+                        没记源身份）。比不出新旧，所以**不挂「有新版」**；动作是「下载」
+                        而不是「更新」（见详情里的快捷操作）。
+                      */}
+                      {row.scope === 'local' && row.basedOn === 'elsewhere' && !detached && (
+                        <span
+                          className={s.localState}
+                          title={tr('presets.table.elsewhere.title')}
+                        >
+                          {tr('presets.table.elsewhere')}
+                        </span>
+                      )}
+                      {/*
                         **我这边怎么样**（MKP 云端行，2026-10-09）：未获取 / 本地已有 / 有新版。
                         这一格回答的是用户点开"云端"时问的那件事 ——
                         "云端有这些，那我手上有没有、要不要拿"。判据在 `cloudRows` 里。
@@ -1176,6 +1203,57 @@ export default function PresetTable({
                               )}
 
                               {/*
+                                **版本来源**（2026-10-27 作者：「展开的详细里面显示哪些源的，
+                                本地源什么，云端源什么，不同的时间之类的」）。
+
+                                四行都**照实说**：认不出就写「未知」，不拿当前源去补血统源 ——
+                                「不知道它来自哪」本身就是用户需要知道的那句话（换源误判的根源）。
+                                数据来自后端 `basedOnFacts`，界面不重算。
+                              */}
+                              {row.origin === 'local' && row.basedOnFacts !== undefined && (
+                                <>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.local')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {row.basedOnFacts.lineageSource ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.localTime')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {longStatText(
+                                        row.basedOnFacts.lineagePublishedAt ??
+                                          row.basedOnFacts.lineageRelease ??
+                                          undefined,
+                                      ) ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.cloud')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {row.basedOnFacts.cloudSource ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.ver.cloudTime')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {longStatText(
+                                        row.basedOnFacts.cloudPublishedAt ?? undefined,
+                                      ) ?? tr(UNKNOWN)}
+                                    </span>
+                                  </div>
+                                </>
+                              )}
+
+                              {/*
                                 后处理跑成过几次（2026-10-17 作者：「加一个显示的字段，
                                 后处理使用次数……在展开的详细里面吧」）。
 
@@ -1248,6 +1326,27 @@ export default function PresetTable({
                                       onClick={() => onUpdateLocal(row)}
                                     >
                                       {tr(UPDATE_ACTION_TEXT.update)}
+                                    </button>
+                                  )}
+                                {/*
+                                  **另一个源的那一份：动作叫「下载」**（作者 2026-10-27：
+                                  「先显示『下载』，避免诱导用户回退」）。词不同、色也退到
+                                  次要（不用那颗绿底）—— 它做的仍然是"按参数并进来"，
+                                  只是不许用「更新」这个词让人以为云端那份更新。
+                                  `newer` 连这颗都没有：云端更旧时**任何动作都不给**。
+                                */}
+                                {row.origin === 'local' &&
+                                  row.basedOn === 'elsewhere' &&
+                                  !detached &&
+                                  row.localState !== 'unreadable' && (
+                                    <button
+                                      type="button"
+                                      className={s.ghostBtn}
+                                      disabled={busy}
+                                      title={tr('presets.table.elsewhere.title')}
+                                      onClick={() => onUpdateLocal(row)}
+                                    >
+                                      {tr('presets.tree.updateAction.download')}
                                     </button>
                                   )}
                                 {/*

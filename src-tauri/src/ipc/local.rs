@@ -35,6 +35,22 @@ use crate::fsx::paths::internal_root;
 use crate::ipc::traced;
 use crate::runtime;
 
+/// 「基于云端哪一版」这个结论**摆事实**用的那几格（全部可空：不知道就说 `null`）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalBasedOnFactsDto {
+    /// 这份副本建的时候哪个源在生效（`github#owner/repo@ref` 那种规范化身份）
+    pub lineage_source: Option<String>,
+    /// 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻）
+    pub lineage_release: Option<String>,
+    /// 那个源最近一次发布目录的时刻（账本上记的）
+    pub lineage_published_at: Option<String>,
+    /// 当前生效的源身份
+    pub cloud_source: Option<String>,
+    /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
+    pub cloud_published_at: Option<String>,
+}
+
 /// 用户自己的一份文件（给界面看的形状）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,12 +73,16 @@ pub struct LocalPresetFileDto {
     /// 用不了时的一句人话原因（可直接显示，比如"TOML 语法不对（第 3 行第 1 列）"）；
     /// 能用 / 不适用是 `null`
     pub state_detail: Option<String>,
-    /// 它当初基于的云端那一版，和目录里**现在**这一版是不是同一份：
-    /// `current` / `outdated` / `unknown`（见 [`runtime::local::BasedOn`]）。
+    /// 它当初基于的云端那一版，和目录里**现在**这一版是什么关系：
+    /// `current` / `outdated` / `newer` / `elsewhere` / `unknown`
+    /// （见 [`runtime::local::BasedOn`]）。
     ///
     /// **它不判"这份文件好不好"**：用户自己那份从来不是坏文件；
-    /// `outdated` 只说"云端换版了，你这份是从旧版派生的"（第七层要说的那件事）。
+    /// `outdated` 只说"同一个源的云端换版了，你这份是从旧版派生的"，
+    /// `elsewhere` 说"这份与当前云端不是同一个源，谈不上新旧"（2026-10-27）。
     pub based_on: String,
+    /// 上面那个结论**摆事实**的那几格（详情面板直接显示，界面不重算）
+    pub based_on_facts: LocalBasedOnFactsDto,
     /// 血统里记的来源（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`
     pub based_on_label: Option<String>,
     /// 建副本那一刻来源文件头的版本号（给人看的，形如 `2026-08-19 01:38:13`）
@@ -100,6 +120,44 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
         let catalog = runtime::load_released_catalog(&internal)?;
         /* 出处账整本读一次（小 JSON），扫出来的每份按路径对号 */
         let book = runtime::provenance::load(&root);
+        /*
+         * **源身份**（2026-10-27）：当前这个源是谁 + 账上见过它什么样 + 每份副本建的时候
+         * 哪个源在生效。三样都是一次读、整批复用 —— 别在每份文件里各读一遍账。
+         */
+        let current_source = runtime::app_state::preset_source(&internal).ok().flatten();
+        let cloud = current_source
+            .as_ref()
+            .and_then(runtime::source_identity::identity_of);
+        let notes = runtime::source_ledger::load_notes(&internal);
+        /*
+         * 目录变了就补一笔（同一个源、同一份目录不重复写）：账本要能回答
+         * "我当初那个源最近一次发布是哪一版"，不记就只剩当前这份。
+         * 写不进去不影响这次读 —— 源身份是附加信息，主流程不因它失败。
+         */
+        if let Some(identity) = cloud.as_ref() {
+            let changed = runtime::source_ledger::find_note(&notes, identity).map_or(true, |n| {
+                n.revision != catalog.revision || n.published_at != catalog.published_at
+            });
+            if changed {
+                let _ = runtime::source_ledger::note_seen(
+                    &internal,
+                    identity,
+                    catalog.published_at.as_deref(),
+                    &catalog.revision,
+                );
+            }
+        }
+        let notes = if cloud.is_some() {
+            runtime::source_ledger::load_notes(&internal)
+        } else {
+            notes
+        };
+        let copies = runtime::source_ledger::load_copies(&internal);
+        let judge = runtime::local::Judge {
+            catalog: &catalog,
+            cloud: cloud.as_ref(),
+            notes: &notes,
+        };
         Ok(runtime::local::local_files(&root)
             .into_iter()
             .map(|f| {
@@ -109,13 +167,21 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                 let copied_from = provenance.and_then(|e| e.from.clone());
                 /* 自己的归属（头两行优先、回落血统，见 [`owner_of`]） */
                 let (owner_machine, owner_version) = owner_of(&catalog, &f);
+                let copy_source = copies
+                    .iter()
+                    .find(|e| e.path == f.path)
+                    .map(|e| e.identity.clone());
+                let verdict =
+                    runtime::local::based_on(&judge, f.lineage.as_ref(), copy_source.as_ref());
                 LocalPresetFileDto {
-                    based_on: match runtime::local::based_on(&catalog, f.lineage.as_ref()) {
-                        runtime::local::BasedOn::Current => "current",
-                        runtime::local::BasedOn::Outdated => "outdated",
-                        runtime::local::BasedOn::Unknown => "unknown",
-                    }
-                    .to_owned(),
+                    based_on: verdict.based_on.as_str().to_owned(),
+                    based_on_facts: LocalBasedOnFactsDto {
+                        lineage_source: verdict.facts.lineage_source,
+                        lineage_release: verdict.facts.lineage_release,
+                        lineage_published_at: verdict.facts.lineage_published_at,
+                        cloud_source: verdict.facts.cloud_source,
+                        cloud_published_at: verdict.facts.cloud_published_at,
+                    },
                     based_on_label: f.lineage.as_ref().and_then(|l| l.based_on.clone()),
                     based_on_release: f
                         .lineage
@@ -1051,6 +1117,19 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                 /* 原文镜像：新文件**落盘之后**存（刚写进去的就是原文）。
                 记不上不影响保存本身 —— 与出处账同一条口径 */
                 let _ = runtime::baseline::ensure_origin_copy(&root, &user_root, &done.path);
+                /*
+                 * **源身份账**（2026-10-27）：这一份是"在哪个源生效时建出来的"。
+                 * 没有它，换源之后 SHA 不同就只剩"内容变了"这一种说法 ——
+                 * 那正是把用户往旧源上带的那个「有新版」。
+                 * 记不上不影响保存（附加信息，与出处账同一条口径）。
+                 */
+                let identity = runtime::app_state::preset_source(&root)
+                    .ok()
+                    .flatten()
+                    .and_then(|s| runtime::source_identity::identity_of(&s));
+                if let Some(identity) = identity {
+                    let _ = runtime::source_ledger::remember_copy(&root, &done.path, &identity);
+                }
                 done
             }
             /*
@@ -1127,6 +1206,8 @@ pub async fn rename_local_preset(
         super::notify_app_state(&app);
         /* 出处账跟着走：副本改名了 to 跟走，来源改名了 from 跟走（「复制自 X」不失联） */
         let _ = runtime::provenance::repath(&user_root, &path, &done.path);
+        /* 源身份账跟着改（与出处账同一件事：账记的是历史，路径是现在） */
+        let _ = runtime::source_ledger::repath(&root, &path, &done.path);
 
         Ok(LocalFileIdentityDto {
             path: done.path,
@@ -1166,6 +1247,14 @@ pub async fn copy_local_preset(
             Some(&path),
             runtime::provenance::ProvenanceKind::Copy,
         );
+        /*
+         * 源身份**跟着原件走**（副本是原件按字节拷的，血统也照抄）：原件账上有，
+         * 副本就记同一份；原件没有（这个功能之前建的）⇒ 副本也不记 ——
+         * 「不知道」一路传下去，比猜一个当前源更诚实（判定会落 `Elsewhere`）。
+         */
+        if let Some(identity) = runtime::source_ledger::copy_source(&internal, &path) {
+            let _ = runtime::source_ledger::remember_copy(&internal, &done.path, &identity);
+        }
         Ok(LocalFileIdentityDto {
             path: done.path,
             file_name: done.file_name,

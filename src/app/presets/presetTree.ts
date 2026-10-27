@@ -86,6 +86,7 @@
 import type {
   ActivePreset,
   BasedOn,
+  BasedOnFacts,
   FileKind,
   FileRef,
   FilesState,
@@ -876,6 +877,22 @@ export function basedOnCellText(
       return source === ''
         ? tr('presets.tree.basedOn.outdatedNoSource')
         : tr('presets.tree.basedOn.outdated', { source })
+    /*
+     * 同一个源、但云端那份更旧（2026-10-27）：**不说"有新版"** —— 那会把人往回带。
+     * 这句话只说事实："当前云端比我这份旧"，动作一个都不给（见 `PresetTable`）。
+     */
+    case 'newer':
+      return source === ''
+        ? tr('presets.tree.basedOn.newerNoSource')
+        : tr('presets.tree.basedOn.newer', { source })
+    /*
+     * 不是同一个源：换平台 / 换分支 / 换目录，或老副本没记源身份。
+     * 比不出新旧 —— 照实说"另有所在"，动作是「下载」而不是「更新」。
+     */
+    case 'elsewhere':
+      return source === ''
+        ? tr('presets.tree.basedOn.elsewhereNoSource')
+        : tr('presets.tree.basedOn.elsewhere', { source })
     default:
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
@@ -1524,6 +1541,13 @@ export interface PresetLocalRow extends PresetRowBase {
    * `outdated` 的那份照常能用能改，见 [`BASED_ON_WHY`]。
    */
   basedOn?: BasedOn
+  /**
+   * 上面那个结论**摆事实**的那几格（源身份 / 各自发布时刻）。
+   *
+   * 展开详情里「版本来源」那四行原样搬它 —— 判定全在 Rust 侧，前端不重算，
+   * 也不自己解释"谁更新"（那会变成第二套判据）。
+   */
+  basedOnFacts?: BasedOnFacts
   /**
    * 血统里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
@@ -2220,6 +2244,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         live,
         /* 血统：它当初基于云端哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
+        basedOnFacts: f.basedOnFacts,
         basedOnSource: f.basedOnLabel,
         basedOnCloud: source,
 

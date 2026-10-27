@@ -929,14 +929,39 @@ export interface PresetFileInfo {
 /**
  * 用户自己那份**基于的云端那一版**现在怎么样了（第七层）。
  *
- * 三档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是不是同一份** ——
+ * 五档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是什么关系** ——
  * 不回答"这份用户文件好不好"（用户自己那份从来不是坏文件）。
  *
- * 判定用的是文件头血统里记的 `based_on_sha256`（建副本那一刻来源全文的摘要），
- * **不拿用户文件自己的字节去比**：用户改过的东西必然与云端不同，那样只会得出
- * "永远不一样"这种废话。
+ * 判定顺序（2026-10-27 定，后端唯一出口 `runtime::local::based_on`）：
+ * 先认「是不是同一个源」，再比内容，最后才谈谁更新。换源之后 SHA 不同**不再**
+ * 自动等于「有新版」—— 那会把用户从新源往旧源上带。
+ *
+ * - `current`：同一个源，内容与云端那份一样
+ * - `outdated`：同一个源，云端换版了（这份从旧版派生）
+ * - `newer`：同一个源，但**云端那份更旧** —— 只显示「云端较旧」，不给任何动作
+ * - `elsewhere`：**不是同一个源**（换平台 / 换分支 / 换目录，或旧副本没记源身份）
+ * - `unknown`：说不清（没有血统、来源已不在目录里、摘要缺失）
  */
-export type BasedOn = 'current' | 'outdated' | 'unknown'
+export type BasedOn = 'current' | 'outdated' | 'newer' | 'elsewhere' | 'unknown'
+
+/**
+ * 「基于哪一版」这个结论**摆事实**用的那几格（全可空）。
+ *
+ * 界面只负责把这几行原样摆出来 —— 判定全在 Rust 侧（`runtime::local::based_on`），
+ * 前端不再自己拼第二套判据。
+ */
+export interface BasedOnFacts {
+  /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
+  lineageSource: string | null
+  /** 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻） */
+  lineageRelease: string | null
+  /** 那个源最近一次发布目录的时刻 */
+  lineagePublishedAt: string | null
+  /** 当前生效的源身份 */
+  cloudSource: string | null
+  /** 当前这份目录的发布时刻（随包 bootstrap 目录没有） */
+  cloudPublishedAt: string | null
+}
 
 /**
  * 用户文件的**文件级**状态（第九层）：`ok` = 能读 + 是 UTF-8 + TOML 语法能解析；
@@ -973,6 +998,13 @@ export interface LocalPresetFile {
   stateDetail: string | null
   /** 它基于的云端那一版在不在（见 [`BasedOn`]）。`outdated` 就是"云端换版了，你这份基于旧版" */
   basedOn: BasedOn
+  /**
+   * 上面那个结论**摆事实**的那几格（详情面板直接显示，前端不重算）。
+   *
+   * 全部可空：`null` = 不知道（血统源没记账 / 目录没发布时刻），**不编**。
+   * 源身份是规范化过的 `平台#仓库@ref`（`github#owner/repo@main`、`custom#host@-`）。
+   */
+  basedOnFacts: BasedOnFacts
   /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
   basedOnLabel: string | null
   /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */

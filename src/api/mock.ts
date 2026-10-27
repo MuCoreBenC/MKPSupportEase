@@ -150,6 +150,7 @@ import type {
   ActivePreset,
   ArchivedFile,
   Axes,
+  BasedOnFacts,
   CalibModel,
   MkpApi,
   CloudVersion,
@@ -342,6 +343,18 @@ let mockPinBeforeCompact: PinPref | null = null
  * 东西；只抛"未实现"的话，浏览器里连编辑器长什么样、保存之后表格怎么变都验不了。
  * 真机上它是 `<appDataDir>/user/presets-local/`，盘就是底账。
  */
+/*
+ * 「版本来源」那几格（2026-10-27）：浏览器里没有真源，也没有账本 —— **一律未知**。
+ * 照实留空，不在演示数据里编一个 `github#…` 出来（那会让人以为判据在跑）。
+ */
+const MOCK_FACTS: BasedOnFacts = {
+  lineageSource: null,
+  lineageRelease: null,
+  lineagePublishedAt: null,
+  cloudSource: null,
+  cloudPublishedAt: null,
+}
+
 const mockLocal: LocalPresetFile[] = [
   /*
    * ★★ 2026-10-14 与 catalog 那 9 份 MKP **对齐**（作者：「连本地表也照 catalog 铺」）。
@@ -370,6 +383,7 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'current',
+    basedOnFacts: MOCK_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-standard.toml',
     basedOnRelease: '2026-10-05 08:00:00',
     basedOnMachineId: 'A1',
@@ -390,6 +404,7 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'current',
+    basedOnFacts: MOCK_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-10-15 09:00:00',
     basedOnMachineId: 'A1',
@@ -413,6 +428,7 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'outdated',
+    basedOnFacts: MOCK_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
@@ -433,6 +449,7 @@ const mockLocal: LocalPresetFile[] = [
     state: null,
     stateDetail: null,
     basedOn: 'unknown',
+    basedOnFacts: MOCK_FACTS,
     basedOnLabel: null,
     basedOnRelease: null,
     basedOnMachineId: null,
@@ -457,6 +474,7 @@ const mockLocal: LocalPresetFile[] = [
     state: 'unreadable',
     stateDetail: 'TOML 语法不对（第 3 行第 1 列）',
     basedOn: 'unknown',
+    basedOnFacts: MOCK_FACTS,
     basedOnLabel: null,
     basedOnRelease: null,
     basedOnMachineId: null,
@@ -1667,6 +1685,7 @@ export const mockApi: MkpApi = {
       stateDetail: null,
       /* 刚存出来的这份就是基于**当前**目录那一版（演示里那份恰好对得上目录） */
       basedOn: 'current',
+      basedOnFacts: MOCK_FACTS,
       basedOnLabel: label,
       basedOnRelease: null,
       basedOnMachineId: 'A1',
@@ -2028,6 +2047,7 @@ export const mockApi: MkpApi = {
         state: 'ok',
         stateDetail: null,
         basedOn: 'unknown',
+        basedOnFacts: MOCK_FACTS,
         basedOnLabel: null,
         basedOnRelease: null,
         basedOnMachineId: null,
@@ -2694,6 +2714,7 @@ export const mockApi: MkpApi = {
       mockLocal[at] = {
         ...mockLocal[at]!,
         basedOn: 'current',
+        basedOnFacts: MOCK_FACTS,
         basedOnLabel:
           before.cloudFileName === null
             ? mockLocal[at]!.basedOnLabel
@@ -2863,6 +2884,7 @@ export const mockApi: MkpApi = {
         state: 'ok',
         stateDetail: null,
         basedOn: 'current',
+        basedOnFacts: MOCK_FACTS,
         basedOnLabel: label,
         basedOnRelease: '2026-10-06 03:34:17',
         basedOnMachineId: hit.machineId,
@@ -2903,6 +2925,7 @@ export const mockApi: MkpApi = {
         state: 'ok',
         stateDetail: null,
         basedOn: 'current',
+        basedOnFacts: MOCK_FACTS,
         basedOnLabel: label,
         basedOnRelease: '2026-10-06 03:34:17',
         basedOnMachineId: hit.machineId,

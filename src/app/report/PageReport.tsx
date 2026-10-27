@@ -41,9 +41,9 @@
  *       **导出成了不在这一页顶上报一句**（作者 2026-10-11）：框留着，落在哪 / 打开位置
  *       都在框里说完，这一页再通知一次只是吵。
  *
- * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：整块常驻、只露出一截（行首那枚
- * 文件图标 + 抓手），点一下整块滑过来盖在详情上，点遮罩或往左拖滑回去 —— 手机
- * 分屏那种手感。CSS 用容器查询（同一套 DOM 两档），JS 只管拖拽与"点了先滑开"。
+ * 窗口挤的时候（<880px 布局宽度）列表**滑盖化**：收起时露出的是那条 44px 窄轨
+ * （与宽档「收起」后同一条），点它整块滑过来盖在详情上，点遮罩或往左拖滑回去 ——
+ * 手机分屏那种手感。CSS 用容器查询（同一套 DOM 两档），JS 只管拖拽与"点了先滑开"。
  *
  * # 三态分得开
  *
@@ -141,10 +141,6 @@ const STAT_CELLS: [string, StringKey, string][] = [
 
 /** 列表滑盖的临界宽度：与 CSS 里 `@container (width < 880px)` 同一个数 */
 const NARROW_W = 880
-/** 收起时露出的那一截 */
-const PEEK = 44
-/** 拖动超过这个距离才吸边，否则回弹 */
-const SNAP = 40
 /**
  * 打印时间还在补算（`printTimeStatus === 'computing'`）时再看一眼的间隔 / 上限。
  *
@@ -1427,16 +1423,6 @@ export default function PageReport() {
     return el !== null && getComputedStyle(el).position === 'absolute'
   }, [])
 
-  /** 拖拽中的现场；null = 没在拖 */
-  const drag = useRef<{ x: number; y: number; dx: number; open: boolean; moved: boolean } | null>(
-    null,
-  )
-  /**
-   * 下一次落到行按钮上的 click 不当"选行"：① 收起态点开抽屉那一下（露出的
-   * 44px 下面就是行按钮）；② 真拖拽收尾的那一下。新一次 pointerdown 会清残留，
-   * 挂不住（见 `onDown`）。
-   */
-  const suppressClick = useRef(false)
 
   /**
    * `pickNewest` = 读完把选中切到最新那条。手动刷新不传（别抢用户正看着的那条）；
@@ -1644,115 +1630,22 @@ export default function PageReport() {
    *   现在收起/展开只认**真的是浮层**时的状态，常驻档永远落到"选中"。
    */
   const pick = (row: ReportSummary) => {
-    /*
-     * 收起态那一下点的是**把手**那 44px（整块列表在屏幕左缘之外，命中测试是空的），
-     * 所以这一下既要滑开、也要**顺手选上** —— 只滑开不选，用户得点两下才看见内容，
-     * 手感就是「点了没反应」。展开态才是纯粹的"换一条"，选完收回。
-     */
-    if (suppressClick.current) {
-      suppressClick.current = false
-      return
-    }
     setSelId(row.id)
+    /* 浮层档（窄窗）里选完一条就收回去；宽档两栏常驻，不必收 */
     if (isFloating()) setSideOpen(false)
   }
 
-  /* ---------- 滑盖拖拽（只在浮层档生效） ---------- */
   /*
-   * ★★ 别在 pointerdown 当场 setPointerCapture。
+   * 折起来的那一栏被点了一下 ⇒ 放回去。
    *
-   * 已在 WebKit（Tauri macOS 的 WKWebView）与 Chromium 双内核实测：祖先（nav）
-   * 在按下的那一刻把指针 capture 走，这次按压随后产生的 click 会被重定向到祖先，
-   * 列表里每行 <button> 自己的 onClick 压根不触发 —— 表现就是窄窗浮层态下
-   * **整块执行记录怎么点都不切换**（宽窗口双栏档只是因为 `isFloating()` 早退、
-   * 没 capture 才一直是好的，所以平时试不出来）。
-   *
-   * 做法：按下只记账；等真的横过 8px 阈值（onMove）确认是拖拽，再 capture。
-   * 普通点击不 capture，click 老老实实落在行按钮上。
+   * 两档各走各的出口，但都只动**同一个面板**（不再有第二条"窄轨"在旁边等着）：
+   *   · 宽档：退出折叠，grid 列 44 → 340；
+   *   · 窄档：面板本来就是这条窄条，把它撑开到 `min(340px, 82%)` 盖住详情。
    */
-  const onDown = (e: React.PointerEvent<HTMLElement>) => {
-    /*
-     * 新一次按下绝不继承上一轮残留的 suppressClick：真拖拽后那次 click 会被
-     * capture 导向 nav（到不了行按钮），标记没人消费就挂住了；不在这儿清，
-     * 下一次点行会被白白吞掉。拖拽自己的那下 click 由**同一次**按压产生，
-     * 前面不会再有 pointerdown，所以这里清不掉"该压的那一下"。
-     */
-    suppressClick.current = false
-    if (!isFloating()) return
-    /*
-     * 抽屉**开着**的时候，在搜索框里按下不算"抓抽屉"：那里横向拖是**选字**，
-     * 抓走指针就变成抽屉跟着手走、刚选中的一段也丢了。
-     * 收起态不在此列 —— 那 44px 里也压着搜索框的左缘，按下去该把抽屉拉出来。
-     */
-    if (sideOpen && e.target instanceof HTMLInputElement) return
-    drag.current = { x: e.clientX, y: e.clientY, dx: 0, open: sideOpen, moved: false }
-    /*
-     * ★ 收尾线挂在 **window** 上，不是只靠 nav 自己那两颗 onPointerUp。
-     *
-     * 按下之后如果还没到 8px 阈值（也就还没 capture），指针就在 nav 外面松开了 ——
-     * nav 收不到那一下 pointerup，`drag.current` 与那一行内联 `transform` **一起留下**：
-     * 手感就是"手早就松了、面板还跟着鼠标走"，而且面板会永远卡在拖到一半的位置
-     * （作者 2026-10-11 实测：左栏被推得只剩一窄条，怎么点都回不来）。
-     * 挂在 window 上就一定收得到；重复触发无害（`onUp` 自己认 `drag.current` 是否已清）。
-     */
-    window.addEventListener('pointerup', onUp)
-    window.addEventListener('pointercancel', onUp)
+  const unfoldSide = () => {
+    setSidePeek(false)
+    if (isFloating()) setSideOpen(true)
   }
-  const onMove = (e: React.PointerEvent<HTMLElement>) => {
-    const d = drag.current
-    if (d === null || sideRef.current === null || !isFloating()) return
-    const dx = e.clientX - d.x
-    const dy = e.clientY - d.y
-    if (!d.moved && Math.abs(dx) < 8) return
-    /* 纵向意图交给列表自己滚 */
-    if (!d.moved && Math.abs(dx) <= Math.abs(dy)) {
-      drag.current = null
-      return
-    }
-    d.moved = true
-    d.dx = dx
-    /* 确认是拖拽的这一刻才抓指针 —— 抓早了会把行按钮的 click 吃掉（见 onDown） */
-    e.currentTarget.setPointerCapture(e.pointerId)
-    const el = sideRef.current
-    el.style.transition = 'none'
-    const min = -(el.getBoundingClientRect().width - PEEK)
-    const base = d.open ? 0 : min
-    el.style.transform = `translateX(${Math.min(0, Math.max(min, base + dx))}px)`
-  }
-  /**
-   * 收尾（拖拽 / 点把手两件事都从这儿出）。
-   *
-   * ★ 身份必须**稳定**（`useCallback` 空依赖）：`onDown` 把它挂到 `window` 上，
-   *   每次渲染换个新函数的话 `removeEventListener` 摘掉的是别人，收尾线会越挂越多。
-   */
-  const onUp = useCallback(() => {
-    window.removeEventListener('pointerup', onUp)
-    window.removeEventListener('pointercancel', onUp)
-    const d = drag.current
-    if (d === null) return
-    drag.current = null
-    const el = sideRef.current
-    if (el !== null) {
-      el.style.transition = ''
-      el.style.transform = ''
-    }
-    if (!d.moved) {
-      /*
-       * 没拖：收起态下点把手就是"滑过来"，随后那次 click 要压掉。
-       * ※ 现在 pointerdown 不再 capture（见 onDown），露出那 44px 下面压着的就是
-       *   一行行按钮 —— 不压就会变成「刚展开、又被这一行选中并关回去」，看起来
-       *   跟没反应一样。展开态不压 —— 那才是真正的"选一条"。
-       */
-      if (!d.open && isFloating()) {
-        setSideOpen(true)
-        suppressClick.current = true
-      }
-      return
-    }
-    suppressClick.current = true
-    if (!d.open && d.dx > SNAP) setSideOpen(true)
-    else if (d.open && d.dx < -SNAP) setSideOpen(false)
-  }, [isFloating])
 
   /* ---------- 列表：搜索 + 筛选 + 按日分组 ---------- */
 
@@ -1804,189 +1697,193 @@ export default function PageReport() {
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
 
-  const listHtml = (
-    <nav
-      className={s.side}
-      ref={sideRef}
-      data-open={sideOpen}
-      onPointerDown={onDown}
-      onPointerMove={onMove}
-      onPointerUp={onUp}
-      onPointerCancel={onUp}
-    >
-      <div className={s.sideHead}>
-        <span className={s.sideLb}>{tr('report.side.title')}</span>
-        <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
-        {/* 收起这一栏（宽档折成窄轨；窄档里折起来就是那条滑盖露出的一截） */}
-        <button
-          type="button"
-          className={s.sideFold}
-          onClick={() => setSidePeek(true)}
-          title={tr('report.side.fold')}
-          aria-label={tr('report.side.fold')}
-        >
-          <Icon name="chevronDown" size={12} className={s.sideFoldIcon} />
-        </button>
-      </div>
-
-      <div className={s.sideTools}>
-        <div className={s.searchBox}>
-          <svg
-            className={s.searchIcon}
-            width={14}
-            height={14}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            aria-hidden="true"
-          >
-            <circle cx="11" cy="11" r="6.5" />
-            <path d="M16 16l4.5 4.5" />
-          </svg>
-          <input
-            className={s.searchInput}
-            type="text"
-            placeholder={tr('report.side.searchPh')}
-            aria-label={tr('report.side.searchAria')}
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
-        </div>
-        <div className={s.filterBar}>
-          {FILTERS.map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={s.filterPill}
-              data-on={filter === id}
-              aria-pressed={filter === id}
-              onClick={() => setFilter(id)}
-            >
-              {tr(label)} <b>{counts[id]}</b>
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <ul className={s.sideList}>
-        {days.length === 0 && (
-          <li>
-            <p className={s.listEmpty}>{tr('report.side.noMatch')}</p>
-          </li>
-        )}
-        {days.map((day) => {
-          const collapsed = collapsedDays.has(day)
-          return (
-            <li key={day}>
-              <button
-                type="button"
-                className={s.dayRow}
-                data-collapsed={collapsed}
-                aria-expanded={!collapsed}
-                onClick={() => toggleDay(day)}
-              >
-                <svg
-                  className={s.dayIcon}
-                  width={13}
-                  height={13}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.8}
-                  aria-hidden="true"
-                >
-                  <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
-                  <path d="M8 3v4M16 3v4M3.5 10h17" />
-                </svg>
-                <span className={s.dayName}>
-                  {dayLabel(tr, day)} · {day}
-                </span>
-                <svg
-                  className={s.dayChev}
-                  width={12}
-                  height={12}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  aria-hidden="true"
-                >
-                  <path d="M6 15l6-6 6 6" />
-                </svg>
-              </button>
-              {!collapsed && (
-                <ul className={s.dayList}>
-                  {(byDay.get(day) ?? []).map((row) => (
-                    <li key={row.id}>
-                      <button
-                        type="button"
-                        className={s.sideRow}
-                        data-ok={row.ok}
-                        data-on={row.id === selId}
-                        title={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
-                        onClick={() => pick(row)}
-                      >
-                        <span className={s.rowIcon} aria-hidden="true">
-                          <svg
-                            width={15}
-                            height={15}
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth={1.7}
-                          >
-                            <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
-                            <path d="M13.5 3v5h5" />
-                          </svg>
-                        </span>
-                        <span className={s.rowMain}>
-                          <span className={s.rowTop}>
-                            <span className={s.sideFile}>
-                              <FileName name={row.gcodeName} />
-                            </span>
-                            <span className={s.rowStatus} data-ok={row.ok}>
-                              <span className={s.stDot} aria-hidden="true" />
-                              {row.ok ? tr('report.row.ok') : tr('report.row.bad')}
-                            </span>
-                          </span>
-                          <span className={s.rowSub}>
-                            <span className={s.rowMeta}>{rowMeta(row)}</span>
-                            <span className={s.sideDur}>{elapsedText(tr, row.elapsedMs)}</span>
-                          </span>
-                        </span>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-      <span className={s.grabber} aria-hidden="true" />
-    </nav>
-  )
-
   /*
-   * 折起来之后那一条窄轨（`sidePeek` 为真时代替上面整块列表）。
+   * 左栏 = **一个面板**（2026-10-27 作者第三次改口径：「不要有两个的感觉，就感觉是
+   * 一个整体，只是被折到里面了和伸出来这种感觉」）。
    *
-   * 44px 只放得下竖字：竖排的眉题「执行记录」+ 条数，点一下放回来。
-   * 与窄档那套滑盖**同一个宽度**（44，见 `PEEK`），看起来是同一件事的两种来路。
+   * 所以这里不再有"列表 + 旁边一条窄轨"两个东西，而是一个 `<nav>`：
+   *   · `.sideBody` 是面板本身，**定宽 340**（宽档）/ `min(340px, 82%)`（窄档），
+   *     外壳收窄时它不重排、只被裁 —— 看起来就是把抽屉推进去；
+   *   · `.sideFace` 是折起来之后露出的那张脸（竖排「执行记录」+ 条数），
+   *     绝对定位铺满外壳，只有折起来时才现形。
+   * 两者同宽同底、变换同时发生，收/展就是同一个盒子变宽变窄，不再有第二块东西等着。
    */
-  const railHtml = (
-    <button
-      type="button"
-      className={s.rail}
-      onClick={() => setSidePeek(false)}
-      title={tr('report.side.unfold', { n: (rows ?? []).length })}
-      aria-label={tr('report.side.unfold', { n: (rows ?? []).length })}
-      aria-expanded={false}
-    >
-      <Icon name="chevronDown" size={12} className={ui.disclosureCaret} />
-      <span className={s.railLb}>{tr('report.side.title')}</span>
-      <span className={s.railCnt}>{(rows ?? []).length}</span>
-    </button>
+  const listHtml = (
+    <nav className={s.side} ref={sideRef} data-open={sideOpen}>
+      <div className={s.sideBody}>
+        <div className={s.sideHead}>
+          <span className={s.sideLb}>{tr('report.side.title')}</span>
+          <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
+          {/* 收起这一栏（两档同一个动作：盒子变窄，露出那张竖排的脸） */}
+          <button
+            type="button"
+            className={s.sideFold}
+            onClick={() => {
+              /* 折起来 = 这一栏收场：窄档里若还挂着「展开」，遮罩会留在屏上把整页压暗
+                 （2026-10-27 作者截图：折起来后内容整片发灰）。两个状态一起翻 */
+              setSidePeek(true)
+              setSideOpen(false)
+            }}
+            title={tr('report.side.fold')}
+            aria-label={tr('report.side.fold')}
+          >
+            <Icon name="chevronDown" size={12} className={s.sideFoldIcon} />
+          </button>
+        </div>
+
+        <div className={s.sideTools}>
+          <div className={s.searchBox}>
+            <svg
+              className={s.searchIcon}
+              width={14}
+              height={14}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <circle cx="11" cy="11" r="6.5" />
+              <path d="M16 16l4.5 4.5" />
+            </svg>
+            <input
+              className={s.searchInput}
+              type="text"
+              placeholder={tr('report.side.searchPh')}
+              aria-label={tr('report.side.searchAria')}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className={s.filterBar}>
+            {FILTERS.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={s.filterPill}
+                data-on={filter === id}
+                aria-pressed={filter === id}
+                onClick={() => setFilter(id)}
+              >
+                {tr(label)} <b>{counts[id]}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <ul className={s.sideList}>
+          {days.length === 0 && (
+            <li>
+              <p className={s.listEmpty}>{tr('report.side.noMatch')}</p>
+            </li>
+          )}
+          {days.map((day) => {
+            const collapsed = collapsedDays.has(day)
+            return (
+              <li key={day}>
+                <button
+                  type="button"
+                  className={s.dayRow}
+                  data-collapsed={collapsed}
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleDay(day)}
+                >
+                  <svg
+                    className={s.dayIcon}
+                    width={13}
+                    height={13}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    aria-hidden="true"
+                  >
+                    <rect x="3.5" y="5" width="17" height="15.5" rx="2.5" />
+                    <path d="M8 3v4M16 3v4M3.5 10h17" />
+                  </svg>
+                  <span className={s.dayName}>
+                    {dayLabel(tr, day)} · {day}
+                  </span>
+                  <svg
+                    className={s.dayChev}
+                    width={12}
+                    height={12}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={2}
+                    aria-hidden="true"
+                  >
+                    <path d="M6 15l6-6 6 6" />
+                  </svg>
+                </button>
+                {!collapsed && (
+                  <ul className={s.dayList}>
+                    {(byDay.get(day) ?? []).map((row) => (
+                      <li key={row.id}>
+                        <button
+                          type="button"
+                          className={s.sideRow}
+                          data-ok={row.ok}
+                          data-on={row.id === selId}
+                          title={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
+                          onClick={() => pick(row)}
+                        >
+                          <span className={s.rowIcon} aria-hidden="true">
+                            <svg
+                              width={15}
+                              height={15}
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth={1.7}
+                            >
+                              <path d="M7 3h7l4.5 4.5V20a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 20V4.5A1.5 1.5 0 0 1 7 3z" />
+                              <path d="M13.5 3v5h5" />
+                            </svg>
+                          </span>
+                          <span className={s.rowMain}>
+                            <span className={s.rowTop}>
+                              <span className={s.sideFile}>
+                                <FileName name={row.gcodeName} />
+                              </span>
+                              <span className={s.rowStatus} data-ok={row.ok}>
+                                <span className={s.stDot} aria-hidden="true" />
+                                {row.ok ? tr('report.row.ok') : tr('report.row.bad')}
+                              </span>
+                            </span>
+                            <span className={s.rowSub}>
+                              <span className={s.rowMeta}>{rowMeta(row)}</span>
+                              <span className={s.sideDur}>{elapsedText(tr, row.elapsedMs)}</span>
+                            </span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
+
+      {/*
+        折起来之后露出的那张脸：不是"另一个面板"，就是这只盒子变窄时显形的那一面
+        （绝对定位铺满外壳，和列表同一块底，收/展都是同一个盒子在变宽变窄）。
+      */}
+      <button
+        type="button"
+        className={s.sideFace}
+        onClick={unfoldSide}
+        title={tr('report.side.unfold', { n: (rows ?? []).length })}
+        aria-label={tr('report.side.unfold', { n: (rows ?? []).length })}
+      >
+        <Icon name="chevronDown" size={12} className={ui.disclosureCaret} />
+        <span className={s.sideFaceLb}>{tr('report.side.title')}</span>
+        <span className={s.sideFaceCnt}>{(rows ?? []).length}</span>
+      </button>
+    </nav>
   )
 
   return (
@@ -2044,8 +1941,8 @@ export default function PageReport() {
         ) : rows.length === 0 ? (
           <p className={s.empty}>{tr('report.empty.none')}</p>
         ) : (
-          <div className={s.pane} data-peek={sidePeek}>
-            {sidePeek ? railHtml : listHtml}
+          <div className={s.pane} data-peek={sidePeek} data-open={sideOpen}>
+            {listHtml}
             <div className={s.scrim} onClick={() => setSideOpen(false)} role="presentation" />
 
             <section className={s.main}>
