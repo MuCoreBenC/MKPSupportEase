@@ -13,7 +13,8 @@
 //!   那份带 ±999 的机器范围，喂进整链会在边界检查处报 `E_GCODE_BOUNDARY_001`，
 //!   看着像搬错了，其实是选错 fixture（AGENTS.md §7⑥）。
 //! - 期望输出 `tests/golden/42274.2.e2e-A1.reference.gcode`（668,687 B）：
-//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。
+//!   由 `mkp-sr` 的 CLI 生成，命令记在 `tests/end_to_end.rs` 头部。比对前剔除两类
+//!   **有意偏离**：MKP 标记行（纯增量）与换笔段（2026-10-20 起的净空修正）。
 //!
 //! ## 证据等级
 //!
@@ -155,20 +156,29 @@ fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_mark_lines(bytes)
 }
 
+/// 剔除「换笔块」—— 实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks`
+/// 这一份（2026-10-20 起换笔段有意偏离参考物，见那边的注释）。
+fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
+}
+
 #[test]
 fn process_with_ir_matches_the_end_to_end_reference() {
     let _seq = lock_sequence();
-    let via_ir = strip_mkp_marks(&run_in_place(true));
-    let want = std::fs::read(reference_output()).expect("读整链参考物");
+    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除两处**有意偏离**再比：
+    // MKP 标记行（纯增量）与换笔段（2026-10-20 起的净空修正）。
+    let via_ir = strip_swap_travel_blocks(&strip_mkp_marks(&run_in_place(true)));
+    let raw = std::fs::read(reference_output()).expect("读整链参考物");
     // 反空转哨兵：参考物必须真的是那 668,687 字节的那一份，
     // 否则「读到一个空文件、两边都空、判据全绿」在终端上长得跟真绿一样。
     assert!(
-        want.len() == 668_687,
+        raw.len() == 668_687,
         "整链参考物字节数必须是 668687，实测 {}",
-        want.len()
+        raw.len()
     );
+    let want = strip_swap_travel_blocks(&raw);
     assert_same_bytes(
-        "process_with_ir 与整链参考物（已剔除 MKP 标记行）",
+        "process_with_ir 与整链参考物（已剔除 MKP 标记行与换笔段）",
         &want,
         &via_ir,
     );

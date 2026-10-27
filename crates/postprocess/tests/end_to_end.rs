@@ -136,36 +136,10 @@ fn strip_mkp_marks(bytes: &[u8]) -> Vec<u8> {
 
 /// 剔除「换笔块」（`;Pre-glue preparation` → `;Glueing Started` 之前）后再比对。
 ///
-/// 2026-10-20 起这一段是**有意偏离**来源实现的（见
-/// `docs/GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`）：原来把去切笔位的横移写成
-/// `G1 X.. Z{层顶+1.0}` 的 XY+Z 斜插（喷嘴从零净空起步、贴面滑行 120mm），
-/// 装好笔又落回 `last+offset_z+3.0`（笔尖净空只剩 2.8mm），高层会撞倒模型。
-/// 改成「先抬后走 + 与收笔同一净空」后，该段的结构与 Z 值必然与参考物不同。
-///
-/// 这里选择**剔除整段**而不是用本侧输出覆盖参考物：覆盖等于把整链判据变成自比自
-/// （2026-09-12 那段已踩过一次）。剔除后仍能证明「换笔段之外的所有输出逐字节一致」；
-/// 换笔段本身由 `tests/travel_clearance.rs`（净空不等式）与 G1/G2 golden（逐字节）
-/// 两条判据分别守着，不是无人看守。
+/// **实现只有 `postprocess::postproc::marks::strip_swap_travel_blocks` 这一份**
+/// （换笔段为何偏离参考物、为什么是"剔除"而不是"覆盖参考物"，见那边的注释）。
 fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
-    let text = String::from_utf8_lossy(bytes);
-    let mut out = String::with_capacity(text.len());
-    let mut skipping = false;
-    for line in text.split_inclusive('\n') {
-        let t = line.trim_end();
-        if !skipping && t == ";Pre-glue preparation" {
-            skipping = true;
-            continue;
-        }
-        if skipping {
-            if t == ";Glueing Started" {
-                skipping = false;
-                out.push_str(line);
-            }
-            continue;
-        }
-        out.push_str(line);
-    }
-    out.into_bytes()
+    postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
 }
 
 /// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。

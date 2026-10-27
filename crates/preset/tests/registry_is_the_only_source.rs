@@ -69,8 +69,8 @@ fn the_only_source_actually_carries_the_registry() {
     let reg = preset::load_param_registry();
     assert_eq!(
         reg.params.len(),
-        74,
-        "真源应有 74 条 [[params]]（实测基线）；条数变了就该在提交里说清为什么"
+        75,
+        "真源应有 75 条 [[params]]（实测基线）；条数变了就该在提交里说清为什么"
     );
     assert_eq!(reg.tabs.len(), 8, "真源应有 8 个 [[tabs]]（实测基线）");
 
