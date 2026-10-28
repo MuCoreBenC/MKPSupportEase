@@ -353,6 +353,36 @@ pub fn based_on(
         return verdict(BasedOn::Unverified);
     };
 
+    /*
+     * ①½ **源身份不同 ⇒ 不比较**（2026-10-28 复审补上的一道）。
+     *
+     * 发布线（`catalogId`）答的是"同一个产品的哪一支"，它**故意跨镜像共享**
+     * （GitHub / Gitee 是同一笔提交的两个远端）。而用户此刻指向的**地址**是另一回事：
+     * `平台#仓库@分支`。同一个仓库的 `main` 与 `feat/x` 共用 `catalogId`，但各自的
+     * 发布账本是各自的 —— 两边的序号根本不在一条数轴上。
+     *
+     * 所以先问"这两份东西出自同一个地址吗"：不同就 `Elsewhere`，**连序号都不比**。
+     * 只在两边都知道地址时才判（血统源记在 `run/lineage-source.json` 里，文件搬到
+     * 另一台机器就没了）—— 不知道就退回只按发布线判，不凭空造一个"来源不同"。
+     */
+    if let (Some(mine), Some(theirs)) = (&facts.lineage_source, &facts.cloud_source) {
+        /*
+         * ★ 比的是 **ref（分支）**，不是整串地址。
+         *
+         * 整串地址里那个 host 恰恰是镜像要忽略的东西：GitHub 与 Gitee 是同一笔提交的
+         * 两个远端，用户换镜像**不该**被判成"来源不同"（那会让每次换源都掉一批更新提示）。
+         * 而同一个仓库的另一个分支是另一回事：内容各自演化、账本各数各的号。
+         *
+         * 所以口径是「同一条 ref 才可比较」；`NO_REF`（自建源没有分支概念）与缺地址
+         * 都是"不知道"，不据此下判断。
+         */
+        if let (Some(a), Some(b)) = (address_ref(mine), address_ref(theirs)) {
+            if a != b {
+                return verdict(BasedOn::Elsewhere);
+            }
+        }
+    }
+
     /* ② 同不同一条线 —— 不同线时序号毫无可比性（两条线各自数各自的号） */
     if lineage_line != cloud_line {
         return verdict(BasedOn::Elsewhere);
@@ -495,6 +525,21 @@ pub fn kind_of(file_name: &str) -> Option<&'static str> {
         .to_ascii_lowercase()
         .ends_with(".toml")
         .then_some("mkp_preset")
+}
+
+/// 从源身份串（`平台#仓库@ref`，见 [`SourceIdentity::key`]）里取出 **ref**。
+///
+/// 判定"能不能比较"时只看这一段的理由见 [`based_on`] 里 ①½ 那一段：
+/// host 是镜像之间的差异（GitHub / Gitee 同一笔提交），ref 才是内容真正分叉的地方。
+///
+/// `None` = 说不清（[`source_identity::NO_REF`] 的自建源、串里没有 `@`、空串）。
+pub fn address_ref(key: &str) -> Option<&str> {
+    let (_, git_ref) = key.rsplit_once('@')?;
+    let git_ref = git_ref.trim();
+    if git_ref.is_empty() || git_ref == crate::runtime::source_identity::NO_REF {
+        return None;
+    }
+    Some(git_ref)
 }
 
 /// TOML 语法这一关（**文件级**，不是 Preset schema）：能解析 ⇒ `None`；不能 ⇒ 一句人话原因。
@@ -2032,24 +2077,54 @@ mod tests {
         );
     }
 
-    /// **判定的输入里没有"当前源是什么"**：换平台、清空源都不影响结论。
+    /// **换了分支 ⇒ 连序号都不比**（2026-10-28 复审补上）。
     ///
-    /// 2026-10-28 起"是不是同一个源"由 `catalogId` 回答（发布线），而不是由
-    /// `SourceIdentity`（哪个 host / 哪个分支）回答 —— 两个镜像就是同一条线。
+    /// 发布线（`catalogId`）答"同一个产品的哪一支"，它**故意跨镜像共享**；
+    /// 而分支是另一回事：同一个仓库的 `main` 与 `feat/x` 共用 `catalogId`，
+    /// 但**各数各的号**（各自的发布账本）—— 拿 43 和 42 比大小是假问题。
+    ///
+    /// 比的是 **ref**，不是整串地址：换 host（GitHub ↔ Gitee 镜像）不算换线，
+    /// 那一条由 `a_mirror_switch_is_judged_by_the_line_and_serial_not_the_host` 咬住。
+    ///
+    /// 三支一起咬：同分支 ⇒ 照常判；异分支 ⇒ `Elsewhere`；不知道地址（文件搬到
+    /// 别的机器，`run/lineage-source.json` 不在）⇒ 退回只按发布线判，不凭空说"不同"。
     #[test]
-    fn the_current_source_identity_does_not_decide_anything() {
+    fn another_address_is_not_compared_even_on_the_same_release_line() {
         let gh = github();
+        let branch =
+            crate::runtime::source_identity::parse_identity("https://github.com/o/r/tree/feat/x")
+                .unwrap();
+        assert_ne!(gh.key(), branch.key(), "前提：同仓库不同分支是两个地址");
+
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut catalog, 43);
         let lineage = lineage_at(42, "云端第一版");
 
-        for cloud in [Some(&gh), None] {
-            assert_eq!(
-                based_on(&judge(&catalog, cloud, &[]), Some(&lineage), Some(&gh)).based_on,
-                BasedOn::Outdated,
-                "配没配源、配的是哪个源，都改不了「有新版」这个结论"
-            );
-        }
+        /* 同一个地址：照常按发布顺序判 */
+        assert_eq!(
+            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), Some(&gh)).based_on,
+            BasedOn::Outdated,
+            "同一地址、云端号更大、字节变了 ⇒ 就是有新版"
+        );
+
+        /* 地址不同：序号再比也没意义 */
+        assert_eq!(
+            based_on(
+                &judge(&catalog, Some(&branch), &[]),
+                Some(&lineage),
+                Some(&gh)
+            )
+            .based_on,
+            BasedOn::Elsewhere,
+            "血统来自 main、现在指向 feat/x —— 不比较，也不声称有新版"
+        );
+
+        /* 不知道血统地址（跨机器的那份文件）：退回按发布线判，不当成"来源不同" */
+        assert_eq!(
+            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), None).based_on,
+            BasedOn::Outdated,
+            "地址缺失是「不知道」，不是「不同」—— 只按发布线判"
+        );
     }
 
     /// **`release_time` 与 `publishedAt` 不再决定更新方向**（这次要根治的那一条）。

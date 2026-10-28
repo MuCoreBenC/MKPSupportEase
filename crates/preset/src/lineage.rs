@@ -31,8 +31,26 @@ pub fn sha256_hex(content: &str) -> String {
     })
 }
 
-/// 三行血统注释的键名。**单点具名**：读（`read.rs`）与写（这里）咬同一份。
-const LINEAGE_KEYS: [&str; 3] = ["based_on", "based_on_release_time", "based_on_sha256"];
+/// 血统注释的键名。**单点具名**：读（`read.rs`）与写（这里）咬同一份。
+///
+/// # 为什么是 5 个（2026-10-28）
+///
+/// 前三条是"我从哪一版拷的"；后两条（`based_on_catalog` / `based_on_serial`）是
+/// "那条发布线的第几号" —— 客户端判"要不要更新"靠它（`revision` 是 SHA，比不了大小）。
+///
+/// ★ 这两个键**必须在这里也认识**，因为 [`is_lineage_line`] 是"剥旧血统"的判据：
+///   不认识 ⇒ 副本再拷副本时，旧的两行不会被剥掉、新的又追加进去，`parse_header_value`
+///   先命中的那条旧行就成了**骗人的血统**（新副本自称基于上一代）。
+///
+/// 客户端侧那份（`src-tauri/src/runtime/lineage.rs`）是同一个清单的**重写实现**
+/// （默认构建不编本 crate），两端由 `workbench::lineage_parity` 逐字节钉住。
+const LINEAGE_KEYS: [&str; 5] = [
+    "based_on",
+    "based_on_release_time",
+    "based_on_sha256",
+    "based_on_catalog",
+    "based_on_serial",
+];
 
 /// 建一份副本的**文本**。
 ///
@@ -276,6 +294,37 @@ offset_z = 4 # 笔尖偏移
         assert_eq!(head[4], "# based_on: mkp/A1.toml");
         assert_eq!(head[5], "# based_on_release_time: 2026-08-19 01:38:13");
         assert!(head[6].starts_with("# based_on_sha256: "));
+    }
+
+    /// **发布线那两行也必须被剥掉**（2026-10-28）。
+    ///
+    /// 它们与前三行是同一族：`based_on_catalog` / `based_on_serial` 说明"基于哪条线的
+    /// 第几号"。剥不干净时，副本再拷副本会同时留着旧的与新的两套，而
+    /// `parse_header_value` **只认第一条** —— 血统于是骗人：新副本自称基于上一代，
+    /// 客户端据此判"有新版"，用户点了更新却拿到自己刚复制的那一份。
+    #[test]
+    fn copy_strips_the_release_line_lines_too() {
+        let with_line = format!(
+            "{SRC}# based_on: delivery/mkp/presets/A1-standard.toml\n\
+             # based_on_sha256: 115e061f00\n\
+             # based_on_catalog: support-ease\n\
+             # based_on_serial: 42\n"
+        );
+        /* 先确认这份夹具真的能被当前实现剥干净：剥完应当只剩原样 */
+        let copy = make_copy(&with_line, "local/A1.toml");
+
+        for key in ["based_on_catalog", "based_on_serial"] {
+            assert_eq!(
+                copy.matches(&format!("# {key}:")).count(),
+                0,
+                "旧的 `# {key}` 必须被剥掉 —— 留着就成了骗人的血统"
+            );
+        }
+        assert_eq!(copy.matches("# based_on:").count(), 1, "前三行同样只有一套");
+        assert!(
+            copy.contains("# based_on: local/A1.toml"),
+            "新血统指向这一次的来源"
+        );
     }
 
     #[test]
