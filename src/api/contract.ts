@@ -929,20 +929,36 @@ export interface PresetFileInfo {
 /**
  * 用户自己那份**基于的云端那一版**现在怎么样了（第七层）。
  *
- * 五档只回答一个问题：**它当初基于的那一版，和目录里现在这一版是什么关系** ——
- * 不回答"这份用户文件好不好"（用户自己那份从来不是坏文件）。
+ * # 三个问题，各答各的（2026-10-28 重写）
  *
- * 判定顺序（2026-10-27 定，后端唯一出口 `runtime::local::based_on`）：
- * 先认「是不是同一个源」，再比内容，最后才谈谁更新。换源之后 SHA 不同**不再**
- * 自动等于「有新版」—— 那会把用户从新源往旧源上带。
+ * 旧版把三件事揉在一个判定里，最后只能靠「`# release_time`（配方写作日期）」比
+ * 「`publishedAt`（发布时刻）」定方向 —— 两个不同性质的数一比，云端永远"更新"，
+ * 于是**每份文件都挂「有新版」**。现在拆开：
  *
- * - `current`：同一个源，内容与云端那份一样
- * - `outdated`：同一个源，云端换版了（这份从旧版派生）
- * - `newer`：同一个源，但**云端那份更旧** —— 只显示「云端较旧」，不给任何动作
- * - `elsewhere`：**不是同一个源**（换平台 / 换分支 / 换目录，或旧副本没记源身份）
- * - `unknown`：说不清（没有血统、来源已不在目录里、摘要缺失）
+ * | 问题 | 谁来答 |
+ * |---|---|
+ * | 是不是同一条发布线 | `catalogId`（`lineageCatalog` vs `cloudCatalog`） |
+ * | 发布有没有往前走 | `publishSerial`（`lineageSerial` vs `cloudSerial`） |
+ * | 这一份内容一不一样 | 文件 SHA-256 |
+ *
+ * 判定唯一出口是 Rust 侧 `runtime::local::based_on`，前端不重算。
+ *
+ * - `current`：同一条线、同一号、字节也一样
+ * - `outdated`：同一条线、云端序号更大、**这一份字节变了** ⇒ 唯一给「更新」的一档
+ * - `unchanged`：同一条线、云端序号更大，但**这一份字节没变** ⇒ 不给按钮
+ * - `newer`：同一条线，但**云端序号更小**（镜像落后）⇒ 只显示「云端较旧」
+ * - `elsewhere`：**不是同一条发布线**（另一条线 / 另一个目录）
+ * - `unverified`：**说不清版本关系**（老副本缺发布线 / 老目录没身份 / 来源不在目录里）
+ * - `inconsistent`：**目录自相矛盾**（同一条线同一个号，字节却变了）⇒ 报异常，不更新
  */
-export type BasedOn = 'current' | 'outdated' | 'newer' | 'elsewhere' | 'unknown'
+export type BasedOn =
+  | 'current'
+  | 'outdated'
+  | 'newer'
+  | 'elsewhere'
+  | 'unchanged'
+  | 'unverified'
+  | 'inconsistent'
 
 /**
  * 「基于哪一版」这个结论**摆事实**用的那几格（全可空）。
@@ -953,14 +969,25 @@ export type BasedOn = 'current' | 'outdated' | 'newer' | 'elsewhere' | 'unknown'
 export interface BasedOnFacts {
   /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
   lineageSource: string | null
-  /** 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻） */
+  /**
+   * 血统里记的来源版本标记（文件头 `# release_time`）。
+   * **只做展示**：那是配方的写作日期，不是发布顺序。
+   */
   lineageRelease: string | null
   /** 那个源最近一次发布目录的时刻 */
   lineagePublishedAt: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
-  /** 当前这份目录的发布时刻（随包 bootstrap 目录没有） */
+  /** 当前这份目录的发布时刻（随包 bootstrap 目录没有）。同样**只做展示** */
   cloudPublishedAt: string | null
+  /** 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null` */
+  lineageCatalog: string | null
+  /** 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null` */
+  lineageSerial: number | null
+  /** 当前目录的发布线（`catalogId`）。老目录 / 随包旧版 ⇒ `null` */
+  cloudCatalog: string | null
+  /** 当前目录是那条线的第几号（`publishSerial`） */
+  cloudSerial: number | null
 }
 
 /**

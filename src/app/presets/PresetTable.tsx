@@ -209,6 +209,39 @@ function CloudLocalAction({
       </span>
     )
   }
+  /*
+   * ★ **只有 `outdated` 才给「更新」主按钮**（2026-10-28 三问题模型）。
+   *
+   *   以前这里只看 `localState === 'stale'`，而 `stale` 是"本地那份和目录字节不同"——
+   *   它同时覆盖了「真有新版」「说不清」「目录自相矛盾」三种完全不同的情形，
+   *   于是三种都长出了同一颗绿色按钮。
+   *
+   *   现在按结论分派：
+   *     outdated     ⇒ 给（唯一一档）
+   *     unchanged    ⇒ 破折号（发布前进了，但这份没变）
+   *     unverified   ⇒ 破折号（说不清，补基线要用户明确接受当前版本）
+   *     inconsistent ⇒ 破折号 + 警告字样（数据坏了，不能覆盖）
+   */
+  if (
+    row.basedOn === 'unchanged' ||
+    row.basedOn === 'unverified' ||
+    row.basedOn === 'inconsistent'
+  ) {
+    const why =
+      row.basedOn === 'inconsistent'
+        ? tr('presets.table.inconsistent.title')
+        : row.basedOn === 'unverified'
+          ? tr('presets.table.unverified.title')
+          : tr('presets.table.unchanged.title')
+    return (
+      <span
+        className={row.basedOn === 'inconsistent' ? s.actWarn : s.actNone}
+        title={why}
+      >
+        {row.basedOn === 'inconsistent' ? tr('presets.table.inconsistent.badge') : DASH_}
+      </span>
+    )
+  }
   const state = row.localState
   if (state === undefined) return null
   const action = CLOUD_LOCAL_ACTION[state]

@@ -305,6 +305,53 @@ pub(super) fn finalize_consistency(
     ]
 }
 
+/// **发布身份闸**（`publish/identity`）：这一代要写的序号，与账本说的是同一回事吗。
+///
+/// 在**分配完号、落盘之前**由 [`super::publish_tx::run`] 调一次（2026-10-28）。
+/// 它拦的是三类"序号一旦错代，客户端就再也分不出新旧"的情形：
+///
+/// | 现场 | 为什么必须停 |
+/// |---|---|
+/// | 账本说 N，盘上 catalog 却说 N+2 | 有人并行发了一代，或者手工改了 catalog —— 两边都以为自己是对的 |
+/// | 账本 `catalogId` 与这份目录的不同 | 换了发布线；旧序号不能跨线复用 |
+/// | 账本记着 44 号却写的是 45 号的 `revision` | 账本被手工改过（与 [`super::publish_book`] 的"同号同内容"约束对不上） |
+///
+/// ★ 它是 **Blocker**：红了就一个字节都不写（调用点早于 `publish_into`）。
+pub(super) fn assert_release_identity(
+    state: &super::publish_book::State,
+    catalog_id: &str,
+    next_serial: u64,
+) -> Result<(), AppError> {
+    use super::publish_book::State;
+    let book = match state {
+        State::NoBook => return Ok(()), // 这条线第一次发布，没有可冲突的历史
+        State::InSync(b) | State::Stale(b) => b,
+    };
+    if book.catalog_id != catalog_id {
+        return Err(AppError::invalid_argument(format!(
+            "账本属于发布线 `{}`，这一次要发的是 `{catalog_id}` —— 换了线，序号不能跨线复用",
+            book.catalog_id
+        ))
+        .with_detail(
+            "确认发布线没被改错；真要换线，得先把账本里的 catalogId 手工改定，再重发".to_owned(),
+        ));
+    }
+    /*
+     * 下一号必须**严格大于**账本记住的那一号。等于/小于说明分配逻辑坏了，
+     * 或者有人在两次发布之间手工动过账本 —— 两种都不许往前走。
+     */
+    if next_serial <= book.serial {
+        return Err(AppError::internal(format!(
+            "分配到的序号 {next_serial} 不比账本里的 {} 大 —— 序号只增不减",
+            book.serial
+        ))
+        .with_detail(
+            "这通常是账本被手工改过，或两次发布并行跑了。先确认发布线，再重发".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 /* ---------- 十五项 ---------- */
 
 fn sources_complete(book: &Book<'_>) -> AuditItem {
@@ -1742,13 +1789,19 @@ mod tests {
         }
 
         /// 定稿态：跑过 `publish_into` —— manifest / catalog / source 三账一致
+        ///
+        /// 先补 `write_content`：`content/` 三份是**生成**的产物，`publish_into` 只核对
+        /// 不补（2026-10-28 plan/commit 拆分后）。
         fn published() -> Self {
             let fx = Self::without_publish();
             let book = fx.book();
+            delivery::write_content(&fx.delivery_root(), fx.asset_root.path(), &book)
+                .expect("生成");
             let meta = delivery::PublishMeta {
                 stamp: "2026-10-05T00:00:00Z".to_owned(),
                 channel: "stable".to_owned(),
                 version: String::new(),
+                identity: Some(delivery::PublishIdentity::new_line("support-ease", 1)),
             };
             delivery::publish_into(&fx.delivery_root(), fx.asset_root.path(), &book, &meta)
                 .expect("定稿");
@@ -1835,6 +1888,7 @@ mod tests {
             stamp: "2026-10-05T01:00:00Z".to_owned(),
             channel: "stable".to_owned(),
             version: String::new(),
+            identity: Some(delivery::PublishIdentity::new_line("support-ease", 2)),
         };
         delivery::publish_into(&fx.delivery_root(), fx.asset_root.path(), &book, &meta)
             .expect("定稿");

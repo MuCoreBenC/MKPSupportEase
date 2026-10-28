@@ -918,6 +918,28 @@ export function basedOnCellText(
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
         : tr('presets.tree.basedOn.elsewhereBare', { source })
+    /*
+     * **发布前进了，但这一份没变**（2026-10-28）：别的预设可能有新版，这份没有。
+     * 说事实、不给动作 —— 不许因为它跟"这条线发过新版"沾边就说它有新版。
+     */
+    case 'unchanged':
+      return source === ''
+        ? tr('presets.tree.basedOn.unchangedNoSource')
+        : tr('presets.tree.basedOn.unchanged', { source })
+    /*
+     * **说不清版本关系**（老副本缺发布线 / 老目录没身份）：照实说不知道，
+     * 不冒充"已是最新"，也不冒充"有新版"。补基线要等用户明确「更新」那一趟。
+     */
+    case 'unverified':
+      return source === ''
+        ? tr('presets.tree.basedOn.unverifiedNoSource')
+        : tr('presets.tree.basedOn.unverified', { source })
+    /*
+     * **目录自相矛盾**：同一条发布线的同一个序号，字节却变了 —— 那是数据坏了，
+     * 不是"有新版"。这句话要说得像报警，因为它就是。
+     */
+    case 'inconsistent':
+      return tr('presets.tree.basedOn.inconsistent', { source })
     default:
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
@@ -2811,6 +2833,11 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           lineagePublishedAt: null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
+          /* 浏览器里没有真目录 ⇒ 发布线那一格照实未知 */
+          lineageCatalog: null,
+          lineageSerial: null,
+          cloudCatalog: null,
+          cloudSerial: null,
         },
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */

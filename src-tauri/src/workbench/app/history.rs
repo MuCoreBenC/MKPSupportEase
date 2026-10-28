@@ -336,6 +336,8 @@ mod tests {
             revision: Some("ebc8e6d7a74e467c".to_owned()),
             changes: None,
             changed_files: Vec::new(),
+            publish_serial: Some(7),
+            catalog_id: Some("support-ease".to_owned()),
         };
         let r = PublishRecord::from_report(&report, "2026-10-04T14:02:00+08:00".to_owned());
         assert_eq!(r.stage, "reviewOpened");

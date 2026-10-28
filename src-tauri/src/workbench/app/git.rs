@@ -173,6 +173,19 @@ impl Git {
             .to_owned())
     }
 
+    /// **HEAD 这笔提交动过某个路径没有**（只读）。
+    ///
+    /// 「上一笔发布 commit 已经在本地、只是没推出去」的恢复路用它认亲：
+    /// 账本说第 N 号、盘上 catalog 也是 N，而 HEAD 恰好改过 `catalog.json`
+    /// ⇒ 这一代已经完整落地，重跑只该补一次 push。
+    ///
+    /// 用 `show --name-only --format=` 而不是 `diff HEAD~1`：**第一次提交没有父**，
+    /// `diff HEAD~1` 在那里会报错，而发布的第一笔 commit 正是这种情况。
+    pub fn head_touches(&self, path: &str) -> Result<bool, AppError> {
+        let out = self.run(&["show", "--name-only", "--format=", "HEAD"])?;
+        Ok(out.lines().any(|l| l.trim() == path))
+    }
+
     /// 推分支（`git push -u origin <branch>`）。`branch` 为空 = 用当前分支。
     ///
     /// **不带认证** —— 只在凭据已由别处（如 CI 的 credential helper）提供时用。

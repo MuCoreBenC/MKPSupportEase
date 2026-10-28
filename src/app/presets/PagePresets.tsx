@@ -1450,11 +1450,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runUpdateLocal = (row: PresetLocalRow) => {
     /*
-     * 两档都走这一条：`outdated`（同一个源、云端换版）叫「更新」，
-     * `elsewhere`（另一个源）叫「下载」—— **落地逻辑是同一段**（按参数并进来），
-     * 区别只在那一颗按钮的词与颜色（作者 2026-10-27）。`newer` / `unknown` 不入口。
+     * ★ **只有 `outdated` 才走这一条**（2026-10-28 三问题模型）。
+     *
+     * `elsewhere` 曾经也走这里（那时它表示"源不同但内容更新"）；现在它表示
+     * **另一条发布线**，按参数并进来会把两条线的值混成一份谁也说不清的中间态 ——
+     * 那正是这一轮要根治的误认。其余各档同理：
+     *
+     *   unchanged    ⇒ 这份没变，没有可并的东西
+     *   unverified   ⇒ 说不清基于哪一版，不许"顺手认成最新"
+     *   inconsistent ⇒ 目录自相矛盾，覆盖等于把错的东西写进用户文件
      */
-    if (row.basedOn !== 'outdated' && row.basedOn !== 'elsewhere') return
+    if (row.basedOn !== 'outdated') return
     const local = data.local.find((f) => f.path === row.path)
     if (local === undefined) {
       setNote({ text: tr('presets.page.update.gone', { name: row.fileName }), bad: true })

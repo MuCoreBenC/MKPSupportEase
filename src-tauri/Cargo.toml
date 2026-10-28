@@ -36,6 +36,13 @@ name = "hook-sim"
 path = "src/bin/hook-sim.rs"
 required-features = ["workbench"]
 
+# 预设工作流 CLI（2026-10-28）：check / generate / diff / verify / publish。
+# 与工作台**同一个内核**（workbench::app 里那几个自由函数），只是多一个 AI / 脚本入口。
+[[bin]]
+name = "presets"
+path = "src/bin/presets.rs"
+required-features = ["workbench"]
+
 [build-dependencies]
 tauri-build = { version = "2.5.1", features = [] }
 # build.rs 要读工作台配置（`workbench/bootstrap.json`）把云端源注入二进制 ——

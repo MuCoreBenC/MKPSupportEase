@@ -353,6 +353,11 @@ const MOCK_FACTS: BasedOnFacts = {
   lineagePublishedAt: null,
   cloudSource: null,
   cloudPublishedAt: null,
+  /* 发布线 / 序号：演示数据里也没有真目录身份 —— 照样留空（老目录那种"说不清"） */
+  lineageCatalog: null,
+  lineageSerial: null,
+  cloudCatalog: null,
+  cloudSerial: null,
 }
 
 const mockLocal: LocalPresetFile[] = [
@@ -448,7 +453,7 @@ const mockLocal: LocalPresetFile[] = [
     kind: null,
     state: null,
     stateDetail: null,
-    basedOn: 'unknown',
+    basedOn: 'unverified',
     basedOnFacts: MOCK_FACTS,
     basedOnLabel: null,
     basedOnRelease: null,
@@ -473,7 +478,7 @@ const mockLocal: LocalPresetFile[] = [
     kind: 'mkp_preset',
     state: 'unreadable',
     stateDetail: 'TOML 语法不对（第 3 行第 1 列）',
-    basedOn: 'unknown',
+    basedOn: 'unverified',
     basedOnFacts: MOCK_FACTS,
     basedOnLabel: null,
     basedOnRelease: null,
@@ -2046,7 +2051,7 @@ export const mockApi: MkpApi = {
         kind: 'mkp_preset',
         state: 'ok',
         stateDetail: null,
-        basedOn: 'unknown',
+        basedOn: 'unverified',
         basedOnFacts: MOCK_FACTS,
         basedOnLabel: null,
         basedOnRelease: null,

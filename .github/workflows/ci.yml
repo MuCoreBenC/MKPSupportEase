@@ -28,6 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 全历史：产物边界那道闸要比 `<base>...HEAD`（浅克隆里 base 不存在，
+          # 它会红着报"读不出变更清单"—— 那不是误报，而是白跑一趟）
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:
@@ -72,6 +76,17 @@ jobs:
       # 禁止 github.com/.../releases。v≤0.0.5 是断代前的历史记录，照旧合法。
       - name: 软件发布源扫描（断代后禁 GitHub Releases）
         run: npm run check:release-source
+
+      # 判据：**开发时生成的东西不许混进正式交付**（作者 2026-10-28）。
+      # `.gitignore` 里那句「`presets/delivery/` 只由发布命令动它」一直只是注释 ——
+      # 这一条把它变成机器闸：交付目录变了却没写发布账本 = 这批字节不是发出来的；
+      # 内核产物（`crates/preset/assets/presets/*`、`catalog.generated.json`）变了
+      # 却没有源变更 = 测试残留。本地 pre-push 跑同一份脚本，这里兜住 `--no-verify`。
+      # checkout 要全历史：`<base>...HEAD` 才比得出来。
+      - name: 产物边界（开发产物不许进正式交付）
+        run: npm run check:artifacts -- --base "origin/${{ github.base_ref || 'main' }}"
+        env:
+          GITHUB_BASE_REF: ${{ github.base_ref }}
 
   rust:
     name: rust

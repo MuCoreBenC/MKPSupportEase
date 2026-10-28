@@ -3,8 +3,10 @@
 # 闸③：拒绝非快进（force）推送
 # 闸④：拒绝删除 main 与 tag（普通分支放行）
 # 闸⑤：推 tag 时，tag 名必须等于 v<package.json version>、必须 annotated、必须在 main 上
+# 闸⑧：产物边界 —— 开发时生成的东西不许混进正式交付（见 scripts/check-artifact-boundary.mjs）
 #
 # 逃生开关：ALLOW_PUSH_MAIN=1  ALLOW_FORCE_PUSH=1  ALLOW_DELETE_REMOTE=1  ALLOW_TAG_MISMATCH=1
+#           ALLOW_PRESET_ARTIFACTS=1（只放掉闸⑧）
 #
 # 闸②在本仓库是**无条件拦截**，与试验场不同。试验场的判据是「结果校验」——
 # 推 main 时看 tip 有没有对应版本号的 annotated tag，因为那边 main 由本地合并推进。
@@ -137,6 +139,27 @@ if [ "$push_main" = "1" ]; then
     echo "" >&2
     echo "  确实要裸推 main（会留痕）：ALLOW_PUSH_MAIN=1 git push origin main" >&2
     fail=1
+  fi
+fi
+
+# ---------- 闸⑧：产物边界 ----------
+#
+# 只在**变更里碰到那几层生成物**时才跑：日常改代码 / 前端不该被它拖慢。
+# 判据与 CI 完全同一份（`scripts/check-artifact-boundary.mjs`）——
+# 本地拦一次，CI 再拦一次，`--no-verify` 绕不过远端那一道。
+#
+# ★ 基准用 `origin/main`：它可能比本地 `main` 旧一点，那只会让检查更宽松（少报），
+#   不会误伤；真正的兜底在 CI（那边 checkout 全历史、与 PR base 比）。
+boundary_paths=$(git diff --name-only "origin/main...HEAD" 2>/dev/null | grep -E '^(presets/|crates/preset/assets/presets/|src-tauri/src/runtime/catalog\.generated\.json)' || true)
+if [ -n "$boundary_paths" ]; then
+  if ALLOW_PRESET_ARTIFACTS="$ALLOW_PRESET_ARTIFACTS" npm run --silent check:artifacts; then
+    :
+  else
+    if [ "$ALLOW_PRESET_ARTIFACTS" = "1" ]; then
+      pending_bypass="$pending_bypass ALLOW_PRESET_ARTIFACTS"
+    else
+      fail=1
+    fi
   fi
 fi
 
