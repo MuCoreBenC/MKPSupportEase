@@ -3061,11 +3061,20 @@ mod tests {
 
         let committed = std::fs::read_to_string(repo.join("presets/delivery/catalog.json"))
             .expect("入库的交付面 catalog 在（2026-10-05 起入库）");
-        /* 戳从**入库那份**里取、补到重建结果上：它是发布事件的痕迹，不是源的一部分
-        （发布侧 `write_catalog_json` 盖的，与 manifest 的 `updated` 同一个戳） */
-        rebuilt.published_at = crate::runtime::catalog::Catalog::parse(committed.as_bytes())
-            .expect("入库的交付面 catalog 读得出来")
-            .published_at;
+        /*
+         * 戳与**发布身份**都从入库那份里取、补到重建结果上：它们是发布事件的痕迹，
+         * 不来自源（2026-10-28 加了 `catalogId` / `publishSerial` 之后同一条道理 ——
+         * 重建永远算不出"第几号"，那不算不一致）。
+         *
+         * ★ 这两格与 `published_at` 一起**不进 `revision_of`**：所以就算这里补错了，
+         *   下面的逐字节比会立刻红；而真正的一致性（账本与目录同代）由
+         *   `publish_book::inspect` + 发布身份闸管，不靠这条判据。
+         */
+        let on_disk = crate::runtime::catalog::Catalog::parse(committed.as_bytes())
+            .expect("入库的交付面 catalog 读得出来");
+        rebuilt.published_at = on_disk.published_at.clone();
+        rebuilt.catalog_id = on_disk.catalog_id.clone();
+        rebuilt.publish_serial = on_disk.publish_serial;
         assert_eq!(
             committed.trim(),
             rebuilt.to_pretty_json().expect("该序列化得出").trim(),
