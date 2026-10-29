@@ -355,15 +355,13 @@
    */
   height: 28px;
   /*
-   * 下内衬 1.5px（第十二轮）：与操作列按钮同一条**字重心**修正 ——
-   * 中文字形在行盒里天生偏下 ~0.7px，下内衬让内容上移 0.75px 把它压回正中
-   * （探针实测 0.71px → 0.18px，见 `PresetTable.module.css` 里 `.useBtn` 那段）。
-   *
-   * ★ 2026-10-11：这句横幅**没跟着操作列换 `--font-label`**（那里是纯中文按钮）——
-   *   横幅里混着西文文件名，换字族会连西文一起接管。这里的 1.5px 仍是 Windows 口径，
-   *   mac 上会略高；要一起治得先给西文也做一套度量归一化（见 global.css 说明）。
+   * ★★ 2026-10-29：上下内衬**必须对称**。原来这里是 `0 12px 1.5px` —— 那 1.5px 本是给
+   *   中文字形在行盒里偏下 ~0.7px 做的补偿，可它加在**整条**上，于是右边的「去更新」和
+   *   「×」跟着一起被顶上去 0.75px。作者连提两回（操作条那几颗按钮、这条的叉叉），
+   *   根子都是同一处：**补偿要加在"那一句字"上，不能加在"整格"上**。
+   *   现在补偿挪到 `.bannerText`（见下），这里回到对称 —— 按钮 / 叉叉按几何居中。
    */
-  padding: 0 12px 1.5px;
+  padding: 0 12px;
   /* 方角矩形（作者：「不喜欢这种圆圆的，像胶囊一样的」）—— 2026-10-10 从 999px 退回 */
   border-radius: var(--r-sm);
   font-size: var(--fs-label);
@@ -379,13 +377,20 @@
   color: var(--warn-ink);
 }
 
-/* 单行截断的那一句（明细在 title 里看全） */
+/*
+ * 单行截断的那一句（明细在 title 里看全）。
+ *
+ * 下内衬 1.5px = **只在文字上**做的字重心修正（中文字形在行盒里天生偏下 ~0.7px，
+ * 内容上移 0.75px 压回正中；探针实测 0.71px → 0.18px，同 `PresetTable.module.css`
+ * 的 `.useBtn` 那一条）。同一行里的按钮 / 叉叉不要这 0.75px —— 它们的形状由几何决定。
+ */
 .bannerText {
   flex: 1;
   min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  padding-bottom: 1.5px;
 }
 
 /* 「去更新」那一颗：贴着主句右端（`margin-left: auto` 把它推过去），与关闭按钮同一条规矩。
@@ -411,27 +416,133 @@
   box-shadow: inset 0 0 0 1px currentcolor;
 }
 
+/* 批量条上那两颗闲着的时候（一项都没选）：灰下去，但字还在 —— 位置不跳 */
+.noteAction:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* —————— 多选操作条（2026-10-29，批量删除）—————— */
+
+/*
+ * 住的地方就是页脚那一格（本页唯一的横幅位），**与横幅同高 28** ——
+ * 进 / 出多选时页脚不长一像素，列表高度从头到尾不动（这一页的老规矩）。
+ *
+ * # 配色：**跟别的回执横幅同一块料**（2026-10-29 作者：「下面这一行配色有点问题」）
+ *
+ * 原来这一条铺的是 `--accent-soft` + `--accent-deep` 的绿字。本页的页脚一直只有一种
+ * 长相（灰底 `--surface-sunken` 一条话），突然整条变绿会被读成"一种告警色"，
+ * 而且绿底绿字又和选中行的浅绿、删除的红挤在同一屏 —— 三个颜色互相抢。
+ * 现在回到横幅那一档：**底色是灰的、字是墨的**，"正在多选"由勾选列与按钮自己说。
+ * 全屏只剩一处颜色：`删除选中` 那颗红字（破坏性动作才配有色）。
+ */
+.selectBar {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  /*
+   * ★ 上下内衬**必须对称**（作者：「几个按钮没有做到竖直居中」）。
+   *   原来是 `padding: 0 12px 1.5px` —— 那 1.5px 是给**中文字形**在行盒里偏下做的
+   *   补偿，可它连同右边那几颗按钮一起被推上去了：28 的条里，按钮上沿贴顶 0.25、
+   *   下沿留 1.75，看着是"顶在上面"。补偿改到纯文字那两个 span 上（见下），
+   *   按钮盒就真的在 28 里居中。
+   */
+  padding: 0 12px;
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 「已选 N 项」是这一格的主角：左侧钉住，不许被后面几个按钮挤没 */
+.selectCount {
+  flex-shrink: 0;
+  font-weight: 600;
+  color: var(--text-1);
+  /* 中文字形在行盒里偏下 ~0.7px 的补偿 —— 只上在**文字**上，不动旁边的按钮 */
+  padding-bottom: 1.5px;
+}
+
+/*
+ * 用法提示（点一行勾选 / Esc 退出）—— 窄窗先收它，计数与按钮永远在。
+ * 同上：偏下补偿只加在这一格文字上。
+ */
+.selectHint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding-bottom: 1.5px;
+}
+
+/* 按钮簇顶到右端（与横幅那颗 `.noteAction` 的 `margin-left: auto` 同一条） */
+.selectActs {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+/*
+ * 「删除选中」：这一条里唯一的破坏性动作 —— 红字，形状与旁边那几颗一样（不做实心红：
+ * 它在页脚常驻，实心红会一直抢眼睛）。
+ */
+.selectDanger {
+  padding: 3.5px 12px 4.5px;
+  border: 1px solid currentcolor;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--danger);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.selectDanger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
+}
+
+.selectDanger:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* 批量确认框里那几句代价：一句一行，行间留一点气（`.editNote` 自己是 margin: 0） */
+.editNoteLines {
+  display: grid;
+  gap: 6px;
+}
+
+/*
+ * 关闭那颗叉。
+ *
+ * # 2026-10-29：从「×」这个**字**换成描边图标（`Icon name="close"`）
+ *
+ * 作者连提两回：「这个叉叉没有竖直居中」「它有点偏上了」。根子不在内衬多少，
+ * 而在**它是字**：`×`（U+00D7）的墨迹坐在基线上方、离行盒中线天生差 1~2px，
+ * 各家字体的差还不一样 —— 靠 `padding` 一点点试，换个字族就得重试一次。
+ * 全站其它关闭按钮（`Modal` / `Drawer` / 顶部页签 / 搜索框）本来就用
+ * `components/Icon` 的 `close`（24 格视图里 6→18 的十字，左右上下对称），
+ * 走几何居中、不吃字体度量。这一处补上，顺手把当年那条 2px 补丁删掉。
+ */
 .noteClose {
   flex-shrink: 0;
   margin-left: auto;
-  /*
-   * 明确居中（第十二轮，作者：「右边那个叉叉明显偏低了」）：原来靠 button 的
-   * UA 行为摆位置 —— 现在 `inline-flex` 居中 + 行高 1 + 下内衬 2px（内容上移
-   * 1px，"×"的墨迹在行盒里实测偏下 1.00px@13px）；和「使用」那颗按钮同一条
-   * 字重心修正（探针实测后定）。
-   */
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 18px;
   height: 18px;
-  padding: 0 0 2px;
+  padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
   color: inherit;
   cursor: pointer;
 }

@@ -1321,6 +1321,8 @@ order = 0.0
 [params.machineVariants]
 "A1:FASTV3.3" = 'auto'
 "A1_MINI:FASTV3.3" = 'auto'
+A1 = 'auto'
+"A1:STANDARD" = 'auto'
 
 [[params]]
 key = 'wiping.ironing_suppress_expand'
@@ -1578,8 +1580,12 @@ P2S = 1.1
 'P2S:STANDARD' = 1.1
 X1C = 1.1
 'X1C:LITE' = 1.1
-"A1:FASTV3.3" = 3.7
+"A1:FASTV3.3" = 3.9
 "A1_MINI:FASTV3.3" = 3.9
+"A1:STANDARD" = 3.9
+"A1:FAST" = 3.9
+"A1_MINI:STANDARD" = 3.9
+"A1_MINI:FAST" = 3.9
 
 [params.machineMinVariants]
 'P1S:LITE' = 0.0
@@ -2214,6 +2220,9 @@ order = 22.0
 key = 'wiping.have_wiping_components'
 op = 'eq'
 value = 'tower'
+
+[params.machineVariants]
+A1 = 0.9
 
 [[params]]
 key = 'wiping.tower_first_layer_flow'

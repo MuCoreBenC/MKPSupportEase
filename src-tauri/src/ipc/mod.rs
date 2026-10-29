@@ -56,6 +56,7 @@ pub mod preset_baseline;
 /// **只在用户自己的预设之间对比** —— 云端基线不进对比台。
 pub mod preset_params;
 pub mod presets;
+pub mod recovery;
 /// **报告页**：后处理执行报告与历史（读 `gcode_history/*_meta.json`）+
 /// 「导出执行报告」那个**唯一的写口**（复制三件套到用户点名的目录）
 pub mod report;

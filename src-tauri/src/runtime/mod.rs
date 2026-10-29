@@ -8,9 +8,12 @@
 //!     │  首启释放（release）
 //!     ▼
 //! <appDataDir>/catalog.json     说明书 —— 首屏唯一数据源（铁律 2：启动零网络）
-//! <appDataDir>/<catalog.path>   交付文件 —— 落点由目录自己说（铁律 3：没下载就没有）
-//!                               A 类是 `assets/…`、B 类是 `delivery/mkp/presets/…`；
-//!                               **没有固定的"下载区根"**，目录在落盘那一刻按需建
+//! <appDataDir>/content/<sha>.toml  云端原文内容仓库（2026-10-29）—— 预设没有 path 副本，
+//!                                 同 SHA 多 path 共用一份；"手上有哪一版"由索引回答
+//! <appDataDir>/run/delivery-index.json  path → 手上这一版的 sha + 目录身份四格
+//! <appDataDir>/<catalog.path>   非预设交付件（A 类资产）—— 落点由目录自己说
+//!                               （铁律 3：没下载就没有），**没有固定的"下载区根"**
+//! <appDataDir>/recovery/<id>/   最近删除：文件 + 原文镜像 + 来源账
 //! ```
 //!
 //! 客户端首屏（`ipc::presets` 的九条读命令）从 catalog 的 definition 出数；
@@ -28,12 +31,14 @@ use postprocess::diag::messages;
 /// **备份与恢复**（2026-10-17）：一个 zip = 这台机器的全部家当（设置 / catalog /
 /// toml / 修改历史 / 基准 / 执行归档）；**恢复 = 全量覆盖**（理由见模块头）
 pub mod backup;
-/// **隐藏 baseline 存储**（2026-10-08 作者改判）：每一版下载过的交付预设在这里留一份
-/// 不可见的基准快照，按 `sha256` 寻址。用户不可见、不进对比台，只服务"恢复默认"与
-/// 血统里的 `based_on_sha256`。见 [`baseline`] 的模块头。
+/// **原文镜像**（2026-10-08 作者改判，2026-10-29 改口径）：`baseline-local/` 存的是
+/// **每份用户文件自己最初的样子**（按用户根相对路径镜像），服务"恢复默认"。云端原文
+/// 在 [`content`] 里按 SHA 存，两件事别混。见 [`baseline`] 的模块头。
 pub mod baseline;
 pub mod catalog;
+pub mod content;
 pub mod delivery;
+pub mod delivery_index;
 /// **修改历史账本**（2026-10-17）：一份文件一本，git 式 —— 不清空、重开软件还在
 /// （用户线按相对路径、云端线按文件名认文件，于是导入的 toml 也有自己的一本）。
 /// 见 [`history`] 的模块头。
@@ -44,9 +49,11 @@ pub mod history;
 pub mod import;
 /// **血统三行**（用户那份是从哪份云端、哪一版拷出来改的）—— 写在文件头注释里
 pub mod lineage;
-/// **用户线**：用户自己的预设（`presets-local/`）—— 与云端线（`<catalog.path>` /
-/// `archive/`）分开
+/// **用户线**：用户自己的预设（`presets-local/`）—— 与云端线（[`content`] /
+/// [`delivery_index`] / `archive/`）分开
 pub mod local;
+/// **一次性存储迁移**（2026-10-29）：旧 delivery/baseline → content + 索引
+pub mod migrate;
 pub mod net;
 /// **逐参数「云端更新」的比对**（2026-10-09）：我这份 / 云端旧值 / 云端新值三方账。
 /// 纯算法（不读盘），落点是 `ipc::param_sync` 的两条命令。
@@ -57,8 +64,7 @@ pub mod postproc_prefs;
 /// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
 /// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
 pub mod preset_events;
-/// **出处账**（复制 / 导入的来源）：用户文件"从哪复制来的"这件事盘上不存在，记在这一本
-pub mod provenance;
+pub mod recovery;
 pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
 /// 与预设数据（catalog）**两条链**——不进 catalog / manifest，不参与发布闸（作者定死）。

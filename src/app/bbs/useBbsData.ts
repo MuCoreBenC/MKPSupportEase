@@ -50,7 +50,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { t, type Tr } from '../../i18n'
+import { msg, t, type Text, type Tr } from '../../i18n'
 import { api, errorText } from '../../api'
 import { PRINTER_BY_MACHINE_ID, normalizeList } from './bbsSource'
 import type {
@@ -187,7 +187,8 @@ function slicerItem({ fileName, machineId, path, doc }: BbsSlicerRow): BbsPreset
 export interface BbsData {
   loading: boolean
   /** 元数据都没拿到（`public/bbs/*.json` 缺了）—— 这是空态，不是崩溃 */
-  fatal: string | null
+  /** 存键（`msg`）：空态那一屏会一直挂着，换语言得跟着换字 */
+  fatal: Text | null
   registry: Record<string, BbsParamMeta>
   layout: BbsLayoutTab[]
   defaults: BbsValues
@@ -197,7 +198,8 @@ export interface BbsData {
   sourceMode: BbsSourceMode
   sourceRoot: string
   /** 读不到本机目录的理由（`sourceMode === 'none'` 时那句给人看的话）。空串 = 读到了 */
-  sourceNote: string
+  /** 这一行"读不到本机目录"的理由（存键，渲染时再翻） */
+  sourceNote: Text
   presets: BbsPresetItem[]
   presetByName: Map<string, BbsPresetItem>
 
@@ -227,7 +229,7 @@ export interface BbsData {
 
 export function useBbsData(): BbsData {
   const [loading, setLoading] = useState(true)
-  const [fatal, setFatal] = useState<string | null>(null)
+  const [fatal, setFatal] = useState<Text | null>(null)
 
   const [registry, setRegistry] = useState<Record<string, BbsParamMeta>>({})
   const [layout, setLayout] = useState<BbsLayoutTab[]>([])
@@ -240,7 +242,7 @@ export function useBbsData(): BbsData {
   const [raw, setRaw] = useState<Partial<BbsListRaw>>({})
   const [sourceMode, setSourceMode] = useState<BbsSourceMode>('none')
   const [sourceRoot, setSourceRoot] = useState('')
-  const [sourceNote, setSourceNote] = useState('')
+  const [sourceNote, setSourceNote] = useState<Text>('')
   const [imported, setImported] = useState<BbsPresetItem[]>([])
   /*
    * 我们自己的切片器配置（2026-10-13）。与 `imported` 同属"内容带在身上"的那一类，
@@ -273,7 +275,7 @@ export function useBbsData(): BbsData {
         setSync(syn)
       } catch (err) {
         if (!alive) return
-        setFatal(t('bbs.data.missingMeta', { error: String(err) }))
+        setFatal(msg('bbs.data.missingMeta', { error: String(err) }))
       }
     })()
     return () => { alive = false }
@@ -286,12 +288,12 @@ export function useBbsData(): BbsData {
       setLoading(true)
       const started = performance.now()
       let live: BbsListRaw | null = null
-      let why = ''
+      let why: Text = ''
       try {
         live = await api.getBbsPresets()
       } catch (err) {
         /* 这一条真出错时（没装 BBS 不是错误，那种情况走 available:false）照实说 */
-        why = t('bbs.data.liveFailed', { error: errorText(err) })
+        why = msg('bbs.data.liveFailed', { error: errorText(err) })
       }
       if (!alive) return
 
@@ -312,7 +314,7 @@ export function useBbsData(): BbsData {
         setRaw({})
         setSourceMode('none')
         setSourceRoot('')
-        setSourceNote(live?.reason || why || t('bbs.data.noDir'))
+        setSourceNote(live?.reason || why || msg('bbs.data.noDir'))
       }
       /* 换来源之后单份预设的 URL 也变了 —— 靠缓存键上的来源前缀区分，不清缓存（见文件头）。
          重扫时这一句照样执行，但文档缓存没失效（键里没有重扫次数了），重算出来的数一模一样，

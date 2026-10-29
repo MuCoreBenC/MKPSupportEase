@@ -524,6 +524,98 @@
 
 /* ---- 中性小字提示（"不会读写你的 3MF"那一句） ---- */
 
+/* ---------- 最近删除：模态框里的列表（2026-10-29） ---------- */
+
+/*
+ * **照「归档抽屉」那张列表做**（作者：「这种样式你不要自己在这乱写嘛，你可以复用啊。
+ * 你看还有什么是那种列表的，你就按照那个列表的去做呀」）—— 形状与
+ * `PagePresets.module.css` 的 `.archList / .archItem / .archLine` 同一套：
+ * 竖排卡片、一条细边 + `--r-sm`、浅底，名字在左、动作在右。
+ * 与它的差别只有一处：动作是**小方角**（作者：「不要用圆形的了，用那种矩形的，
+ * 有一点点小圆角的就可以了」），尺寸也收小一档（24px / 圆角 6）。
+ */
+.recList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.recText {
+  min-width: 0;
+}
+
+.recName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+}
+
+.recMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.recBtns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 小方角动作：24px 高、6px 圆角、细边白底（与列表里的卡片同一层次） */
+.recBtn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  line-height: 1;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.recBtn:focus-visible {
+  outline: none;
+}
+
+.recBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.recBtnDanger,
+.recBtnDanger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .noteHint {
   margin: 0;
   display: flex;

@@ -8,13 +8,20 @@
 
 import { createContext, useContext } from 'react'
 
-/** 一次导入落定后，结果条上那一块 */
+import type { Text } from '../../i18n'
+
+/**
+ * 一次导入落定后，结果条上那一块。
+ *
+ * ★ 文案是 [`Text`]（存键 `msg`，渲染时才翻）：这一格会在屏幕上一直挂到用户点「知道了」，
+ *   中途换语言它也得跟着换字。
+ */
 export interface ImportBannerState {
-  text: string
+  text: Text
   /** 有没成的就红一点 */
   bad: boolean
   /** 逐份明细（成功的也列 —— 落了哪个名字看得见） */
-  lines: string[]
+  lines: Text[]
 }
 
 export interface ImportEntry {

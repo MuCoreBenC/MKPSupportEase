@@ -252,8 +252,8 @@ pub async fn read_downloaded_text(app: AppHandle, file_name: String) -> Result<S
                     ))
                 })?;
 
-            let target = crate::fsx::paths::resolve_in(&root, &file.path)?;
-            let bytes = std::fs::read(&target).map_err(|_| {
+            /* 预设的正文在内容仓库里（索引 → SHA），其余仍按目录路径读 */
+            let bytes = runtime::delivery::stored_bytes(&root, file).ok_or_else(|| {
                 AppError::not_found(messages::text(
                     "ui.ipc.catalog.057",
                     &[("file_name", &file_name.to_string())],
@@ -336,11 +336,9 @@ pub async fn download_runtime_file(
                 ),
             }
 
-            let target = outcome?;
-            Ok(target
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_else(|| file_name.clone()))
+            outcome?;
+            /* 预设的真实落点是 `content/<sha>`，文件名一律报目录里的名字 */
+            Ok(file.file_name.clone())
         })
     });
     task.await.map_err(|e| {
@@ -562,6 +560,10 @@ pub async fn fetch_cloud_preset(
             let root = internal_root(&app_handle)?;
             let user = crate::fsx::paths::user_root(&app_handle)?;
             let catalog = runtime::load_released_catalog(&root)?;
+            /* 索引与当前目录对一次：共享 SHA 直接认、目录里已经没有的 path 退出索引 */
+            if let Err(e) = runtime::delivery_index::sync(&root, &catalog) {
+                tracing::warn!("目录索引没对上当前目录（不影响下载）：{e}");
+            }
             let file = catalog
                 .files
                 .iter()
@@ -572,12 +574,35 @@ pub async fn fetch_cloud_preset(
                         &[("file_name", &file_name.to_string())],
                     ))
                 })?;
-            let fetched = ensure_cloud_bytes(&root, file)?;
+            /*
+             * ★ 显式下载 = **真实联网取当前云端版**（2026-10-29 作者口径）。
+             *
+             * 不再有"盘上恰好有同 SHA 就复用"这条捷径：网络失败直接报错，绝不降级成
+             * 旧内容；取回来的字节 SHA/大小与目录登记值不一致由 `deliver` 拒绝落盘。
+             * 存储去重只发生在 `content/` 这一层（同 SHA 写一次），与"下没下过"无关。
+             */
+            deliver_cloud_bytes(&root, file)?;
             /*
              * 这一代目录自报的发布身份（`catalogId` + `publishSerial`）。老目录没有 ⇒
              * `None` ⇒ 血统不写那两行 ⇒ 判定走 `Unverified`。**不猜**成官方线。
              */
             let line = runtime::local::CatalogLine::of(&catalog);
+            /*
+             * 「这份是从哪下载的」：这次操作选的源就是答案 —— 字节是刚刚从它取的。
+             * 目录四格（id / 序号 / revision / 发布时间）与云端原文 SHA 一起定格：
+             * 云端后来换代，这一格一个字都不改（= 界面的「本地版本时间」）。
+             */
+            let identity = runtime::app_state::preset_source(&root)
+                .ok()
+                .flatten()
+                .and_then(|s| runtime::source_identity::identity_of(&s));
+            let stamp = runtime::source_ledger::CatalogStamp {
+                catalog_id: catalog.catalog_id.as_deref(),
+                serial: catalog.publish_serial,
+                revision: &catalog.revision,
+                published_at: catalog.published_at.as_deref(),
+            };
+            let source_sha = file.expected_sha();
 
             /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
             let rel = format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name);
@@ -595,6 +620,15 @@ pub async fn fetch_cloud_preset(
                 /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
                 落到我盘上那一刻（「恢复默认值」退的就是它） */
                 let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                /* 来路账：记不上不影响下载本身（附加信息，与原文镜像同一条口径） */
+                let _ = runtime::source_ledger::record_download(
+                    &root,
+                    &rel,
+                    identity.as_ref(),
+                    &file.file_name,
+                    &stamp,
+                    source_sha,
+                );
                 (file.file_name.clone(), rel, None, None)
             } else if rename_if_taken == Some(true) {
                 /*
@@ -604,11 +638,20 @@ pub async fn fetch_cloud_preset(
                 let name = untaken_name(&user, &file.file_name);
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
+                let rel = format!("{dir}/{name}");
                 runtime::local::save_cloud_as_new(&user, file, &text, &name, line.as_ref())?;
                 /* 原文镜像同上一支 */
-                let _ =
-                    runtime::baseline::ensure_origin_copy(&root, &user, &format!("{dir}/{name}"));
-                (name.clone(), format!("{dir}/{name}"), None, None)
+                let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
+                /* 撞名另存也是从云端下载来的，照样记（用户看到的仍不是"拷贝"） */
+                let _ = runtime::source_ledger::record_download(
+                    &root,
+                    &rel,
+                    identity.as_ref(),
+                    &file.file_name,
+                    &stamp,
+                    source_sha,
+                );
+                (name, rel, None, None)
             } else {
                 /* 默认：不动它 —— 把"谁占了 + 会改成什么"交给界面问 */
                 (
@@ -619,7 +662,7 @@ pub async fn fetch_cloud_preset(
                 )
             };
             Ok(FetchCloudDto {
-                fetched,
+                fetched: true,
                 created,
                 file_name: file_name_here,
                 path: path_here,
@@ -639,31 +682,20 @@ pub async fn fetch_cloud_preset(
     Ok(dto)
 }
 
-/// 让这份云端预设的字节**在本机可用**：盘上那份与目录登记一致就直接用（不发一次网络）；
-/// 没有 / 对不上就走同一条下载管道取回来（旧份自动归档，没有第二条路）。
+/// **显式下载**：向选定的云端源请求当前文件，校验通过后落进内容仓库。
 ///
-/// 回来的是"这次是否真的取了一份"（`false` = 本机已有当前版）—— 界面据此说
-/// 「已取回并使用」还是「已使用」。随包 bootstrap 目录不登记期望值：盘上有就照收
-/// （与交付面的口径一致，见 `runtime::delivery::status_of`）。
-pub(super) fn ensure_cloud_bytes(
+/// 没有"盘上已有就跳过"的捷径（2026-10-29 作者口径：下载就是下载）。
+/// 网络失败 / SHA 不符 / 大小不符都直接报错，不降级到本机旧内容。
+pub(super) fn deliver_cloud_bytes(
     root: &Path,
     file: &runtime::catalog::CatalogFile,
-) -> Result<bool, AppError> {
-    if let Ok(bytes) = std::fs::read(root.join(&file.path)) {
-        let current = match file.expected_sha() {
-            Some(want) => runtime::catalog::hex(&sha2::Sha256::digest(&bytes)) == want,
-            None => true,
-        };
-        if current {
-            return Ok(false);
-        }
-    }
+) -> Result<(), AppError> {
     let resolved = runtime::source::resolve_source(root)?;
-    /* 这条路不问进度（用户点的是"使用"）——水位没人听，打个空拍就行 */
+    /* 这条路不问进度（用户点的是"下载"）——水位没人听，打个空拍就行 */
     let forward = |_tick: &runtime::net::Tick| {};
     let remote = runtime::net::RemoteSource::new(resolved.resolver.clone(), &forward);
     runtime::delivery::deliver(root, file, &remote)?;
-    Ok(true)
+    Ok(())
 }
 
 /// 水位发货。**Channel 关了（调用方已经不再听）不是错误** —— 记一行 debug 就够，
@@ -1091,7 +1123,7 @@ pub async fn apply_active_preset(
                 // 应用的是盘上那份：字节得真的在；**目录给了期望值**的还要与它对得上
                 // （没下载/被删/漂了都不许应用）。随包 bootstrap 目录没登记 SHA ——
                 // 那种情况下盘上有就允许应用（字节的权威判定归 OTA 目录生效后那次下载）
-                let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
+                let bytes = runtime::delivery::stored_bytes(&root, file).ok_or_else(|| {
                     AppError::not_found(messages::text(
                         "ui.ipc.catalog.073",
                         &[("file_name", &file_name.to_string())],
@@ -1218,7 +1250,30 @@ pub async fn apply_remote_update(app: AppHandle) -> Result<String, AppError> {
                 );
             }
 
+            /* ★ 换代顺序（规则③，2026-10-29）：**先入库 → 再换目录 → 最后换索引 / 清理**。
+             *
+             * 换目录会把旧交付面归档、并把目录里没有的 path 从索引里删掉。若某一版只在
+             * `archive/` 里躺着、`content/` 里没有，换完就再没有"它曾经是哪一版"的记录。
+             * 这里先把它补进内容仓库；补不进去就**停在旧目录**（宁可不换，也不让旧版丢）。 */
+            let before = runtime::delivery_index::load(&root);
+            runtime::content::ensure_referenced(&root, &before).map_err(|e| {
+                AppError::io(messages::text("ui.runtime.content.508", &[]))
+                    .with_detail(e.to_string())
+            })?;
+
             let report = runtime::release::release_bytes(&root, &bytes)?;
+
+            /* 索引按新目录收口（换代只换索引，不动内容），随后按引用清理内容仓库。
+            这两步是**附加信息**：失败只告警 —— 目录已经换好，这里红了不该让用户以为没换。 */
+            if let Err(e) = runtime::delivery_index::sync(&root, &remote) {
+                tracing::warn!("目录索引收口失败（不影响这一次换代）：{e}");
+            }
+            match runtime::content::gc(&root) {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(removed = n, "换代后清理了没人引用的云端原文"),
+                Err(e) => tracing::warn!("清理内容仓库失败：{e}"),
+            }
+
             Ok(report.summary())
         })
     });

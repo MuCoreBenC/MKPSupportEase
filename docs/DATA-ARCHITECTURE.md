@@ -81,18 +81,40 @@
 ```text
 <appDataDir>/
 ├── catalog.json   说明书运行时副本（首启从安装包释放 / 校验，程序只读）
-├── <catalog.path> 交付文件的落点，由目录自己说（铁律 3：下载了什么才有什么）——
-│                  B 类 = `delivery/mkp/presets/…`，A 类 = `assets/…`。
-│                  **预设的那份就是官方基线**（2026-10-08 起这么叫）：程序管、用户不可见，
-│                  只用于与云端比对有没有新版
-├── archive/       更新后旧版本的归档（不删）
+├── content/       **云端原文内容仓库**（2026-10-29）：`<sha256>.toml`，一份内容只存一份，
+│                  与路径无关。预设的"官方基线"就在这儿 —— 不再有 `delivery/` 副本
+├── run/delivery-index.json
+│                  **当前目录手上是哪一版**：`path → { sha256, size, at }` +
+│                  目录身份四格（revision / catalogId / publishSerial / publishedAt）。
+│                  换目录只换索引，不动 content/：旧版因此不会因为换代而丢
+├── <catalog.path> 非预设交付件的落点（A 类资产：模型 / 图标 / BBS 配置），由目录自己说
+├── archive/       更新后旧版本的归档（不删）；换代时换下的旧目录在 `archive/catalogs/`
+├── recovery/      **最近删除**（2026-10-29）：`<id>/` 里收文件 + 原文镜像 + 来源账 +
+│                  `recovery.json`。恢复回原位但不自动设为"使用中"；30 天或 20 份先到先清
 ├── logs/          按天滚动日志（**两条流**：`supportease.log.<日期>` = 界面那个常驻进程；
 │                 `hook.log.<日期>` = 后处理那一趟，2026-10-11 起。见
 │                 `docs/HOOK-ERRORS-AND-MESSAGES.md` §4）
 └── run/           运行状态：`app-state.json`（使用中指针 activePreset / 编辑中的那一份 draft /
-                   数据源地址 presetSource —— 见 `docs/APP-STATE.md`）。
-                   编辑中的那份是**临时文件**：内容从用户工作副本复制出来，点保存才写回用户根
+                   数据源地址 presetSource / 逐参数更新账 paramDecisions —— 见 `docs/APP-STATE.md`）、
+                   `delivery-index.json`（见上）、`lineage-source.json`（每份云端下载件的来源身份）、
+                   `source-ledger.json`。编辑中的那份是**临时文件**：内容从用户工作副本复制出来，
+                   点保存才写回用户根
 ```
+
+★ **为什么预设不再落 `<catalog.path>`**（2026-10-29 改判）：同一个 SHA 会被两条 path、
+几代目录、几份用户血统同时指着。按 path 存副本 = 同一份字节存 N 份，而且"磁盘上有同名
+文件"会被当成"下载成功了"（正是这条在冒充来源）。现在**内容按 SHA 存一份**，
+"手上有哪一版"由索引回答，两者分开。
+
+**换代 / 换源的顺序是死的**：`先入库 → 再换目录 → 最后换索引与清理`。
+换目录之前先 `content::ensure_referenced` 把旧索引仍引用的版本从 `archive/` 补进
+`content/`；补不进去就**停在旧目录**（`E_FS_CONTENT_001`），绝不出现"新目录已生效、
+旧版本已丢"。索引里的"内容已在"只在**同一条线 + 同一代**里算数 —— 换源 / 换代之后要真实
+下载一次才认，否则会把"从 A 源下过"冒充成"B 源这一份已下"。
+
+**一次性迁移**：盘上旧的 `delivery/**` 与 `baseline/<sha>.toml` 在启动时搬进 `content/`
+（`run/storage-v2.json` 是完成标记）。**全部写成功才删旧目录**，任何一步失败保留原状、
+下次启动再试 —— 不留半成品。
 
 （`index/` 2026-10-08 退役：它唯一住过的东西是 `offsets.json` —— 校准偏移改随工作副本走，
 落点在 `presets-mine/` 的 TOML 里。盘上遗留的空目录不清理，用户自己删。）
@@ -158,9 +180,9 @@ catalog 是 OTA 数据，**随包那份只是起点，不是最终资源**。三
 MKP TOML"（落点 = `catalog.path`，铁律 3）。工作台生成的是 ③ 的交付根 `presets/delivery/mkp/presets/*.toml`，
 两批字节不同**本身不构成下载失败** —— 真正的失败只来自 ② 落后于 ③。
 
-#### 预设 TOML 的一生：**基线 + 工作副本，用户只有一份**（2026-10-08 改判）
+#### 预设 TOML 的一生：**内容仓库 + 工作副本，用户只有一份**（2026-10-08 改判 · 2026-10-29 改落点）
 
-这是官方基线区（`<catalog.path>`，即 `delivery/mkp/presets/…`）与 `presets-mine/`
+这是官方线（`content/<sha>` + `run/delivery-index.json`）与 `presets-mine/`
 各自服务的那件事，也是 Preset 功能的**总模型**（改判记录与实施明细见
 [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md)）：
 
@@ -169,24 +191,26 @@ MKP TOML"（落点 = `catalog.path`，铁律 3）。工作台生成的是 ③ �
   云端发布 v1
       │ 用户点「下载」
       ▼
-  基线 <appDataDir>/<catalog.path>        用户工作副本 <appDataDir>/user/presets-mine/<原名>
-  （= delivery/mkp/presets/…）            （下载那一刻就有：官方原文 + 血统三行）
-      │ 云端发布 v2                            │ 点「改这份」→ 保存 = 写回它自己
-      ▼                                        │ 校准 = offset 写进它（2026-10-08 改判）
-  旧份进 archive/（不删）                     ▼ 应用 = 使用中那一份（mine 线）
-  新份换上（**只换基线**）                  **永远不回写基线**
+  原文 content/<sha256>.toml              用户工作副本 <appDataDir>/user/presets-mine/<原名>
+  索引   run/delivery-index.json          （下载那一刻就有：官方原文 + 血统三行）
+   （path → 手上这一版的 sha）                │ 点「改这份」→ 保存 = 写回它自己
+      │ 云端发布 v2                            │ 校准 = offset 写进它（2026-10-08 改判）
+      ▼                                        ▼ 应用 = 使用中那一份（mine 线）
+  旧目录进 archive/catalogs/（不删）        **永远不回写官方线**
+  content/ 里的旧版留着（三方更新要读）
+  索引只往前走一版
 ```
 
 五条不许破的：
 
-1. **基线不可变**（只有在"云端换版本"时被替换）：它只代表"当初拿到的那一版官方内容"——
-   用途是与云端比对有没有新版，**对用户不可见、也不被用户编辑**。
+1. **官方线不可变**（只有"云端换版本"才往前一版）：`content/` 里那一份代表"当初拿到的那一版
+   官方内容"——用途是与云端比对有没有新版、给三方更新做基准，**对用户不可见、也不被用户编辑**。
 2. **下载即得工作副本**：MKP 预设落盘那一刻，`presets-mine/<官方原名>` 就有一份
    （`mine::ensure_working_copy`，幂等 —— 已有就一个字节不动）。用户此后只操作这一份，
    **编辑 / 校准都不再有"另存为"这一步**。
 3. **用户世界里只有一份预设**：本地表 MKP 档只列 `presets-mine/`；官方行不进本地表
    （云端表才是"下载 / 更新"的入口）。"下载一个预设、列表里冒出两份"构造上不会发生。
-4. **官方换版本不碰工作副本**：下载同一条管道，新字节换基线、旧版进 `archive/`；
+4. **官方换版本不碰工作副本**：下载同一条管道，新字节进 `content/`、旧目录进 `archive/catalogs/`；
    用户那份照常用、照常改，界面说清「官方已换新版 / 我的基于旧版」
    （血统 sha256 ↔ 目录期望 sha256，见 [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md) §3）。
 5. **归档只服务官方线**：`archive/` 是**官方版本生命周期**的一部分（换版本时旧份进这里，保留最早一份），

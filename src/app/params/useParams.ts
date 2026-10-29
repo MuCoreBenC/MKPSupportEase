@@ -45,7 +45,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
-import { useLocale, useT, type StringKey, type Tr } from '../../i18n'
+import { msg, useLocale, useT, type StringKey, type Text, type Tr } from '../../i18n'
 import {
   localizeMachines,
   localizeParamDef as localizeDef,
@@ -566,8 +566,8 @@ export interface ActiveUse {
 
 export interface Params {
   loading: boolean
-  /** null = 没出错。非 null 时页面要把这句话显示出来，不要装成空表 */
-  error: string | null
+  /** null = 没出错。非 null 时页面要把这句话显示出来，不要装成空表（存键，渲染时再翻） */
+  error: Text | null
 
   machines: Machine[]
   /**
@@ -697,12 +697,12 @@ export interface Params {
    */
   discardAll: () => void
   save: () => void
-  /** 保存之后那一行回执（成功绿 / 部分失败琥珀 / 失败红）；null = 不显示 */
-  savedNote: string | null
+  /** 保存之后那一行回执（成功绿 / 部分失败琥珀 / 失败红）；null = 不显示。存键（`msg`） */
+  savedNote: Text | null
   /** 上面那句的语气。**由产出方定** —— 页面不许从文案里猜（一翻语言就猜错） */
   savedTone: 'ok' | 'warn' | 'bad'
-  /** 写值闸拦下一次改动时那句人话（弃用字段 / 弃用选项）；`null` = 不显示 */
-  gateNote: string | null
+  /** 写值闸拦下一次改动时那句人话（弃用字段 / 弃用选项）；`null` = 不显示。存键（`msg`） */
+  gateNote: Text | null
   undo: () => void
   redo: () => void
   canUndo: boolean
@@ -847,7 +847,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [localPresets, setLocalPresets] = useState<LocalPresetFile[]>([])
   const deliveryRevision = useDeliveryRevision()
   const [combo, setCombo] = useState<ComboData | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<Text | null>(null)
   /** 当前选的组合。catalog 到了才知道选谁，所以初值是 null */
   const [pick, setPick] = useState<{ machineId: string; versionId: string } | null>(null)
   const [pendingCombo, setPendingCombo] = useState<{ machineId: string; versionId: string } | null>(
@@ -880,7 +880,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
   const [future, setFuture] = useState<EditStep[]>([])
   const [log, setLog] = useState<HistoryEntry[]>([])
   const [seq, setSeq] = useState(0)
-  const [savedNote, setSavedNote] = useState<string | null>(null)
+  const [savedNote, setSavedNote] = useState<Text | null>(null)
   /*
    * 那一句回执的**语气**（`ok` / `warn` / `bad`）。从前是页面拿 `startsWith('保存失败')`
    * 反推颜色 —— 文案进了字典就再也猜不准（英文里没有那个开头），所以由产出方定。
@@ -984,7 +984,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *
    * 与 `savedNote`（保存成功的绿字）分开：这是**拒绝**，语气与位置都不同。
    */
-  const [gateNote, setGateNote] = useState<string | null>(null)
+  const [gateNote, setGateNote] = useState<Text | null>(null)
 
   /*
    * **我那份文件里真实写着的参数值**（`presets-local/…` 的字节，`readPresetParams` 读的）。
@@ -1043,7 +1043,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       const cur = editingPresetRef.current
       if (cur === null) {
         setSavedTone('bad')
-        setSavedNote(tr('params.saved.noTarget'))
+        setSavedNote(msg('params.saved.noTarget'))
         return
       }
       void api.commitPresetDraft().then(
@@ -1052,10 +1052,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           setSavedTone('ok')
           setSavedNote(
             cur.origin === 'local'
-              ? tr('params.saved.writtenBack', { file: done.fileName })
+              ? msg('params.saved.writtenBack', { file: done.fileName })
               : done.replaced
-                ? tr('params.saved.overwrote', { file: done.fileName })
-                : tr('params.saved.savedAs', { file: done.fileName }),
+                ? msg('params.saved.overwrote', { file: done.fileName })
+                : msg('params.saved.savedAs', { file: done.fileName }),
           )
           setSaveResult(done.path)
           /*
@@ -1136,7 +1136,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
                 setSyncBusy(false)
                 setSavedTone('warn')
                 setSavedNote(
-                  tr('params.saved.syncFailed', {
+                  msg('params.saved.syncFailed', {
                     file: done.fileName,
                     detail: errorText(e),
                   }),
@@ -1150,11 +1150,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         },
         (e: unknown) => {
           setSavedTone('bad')
-          setSavedNote(tr('params.saved.failed', { detail: errorText(e) }))
+          setSavedNote(msg('params.saved.failed', { detail: errorText(e) }))
         },
       )
     },
-    [broadcastDraftNow, tr],
+    [broadcastDraftNow],
   )
 
   /*
@@ -1239,7 +1239,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       ])
       if (!alive) return
       if (world === null) {
-        setError(tr('params.error.noCatalog'))
+        setError(msg('params.error.noCatalog'))
         return
       }
       const metaByKey = new Map<string, ParamMeta>(meta.map((m) => [m.key, m]))
@@ -1711,11 +1711,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         )
         setGateNote(
           choice !== undefined
-            ? tr('params.gate.deprecatedChoice', {
+            ? msg('params.gate.deprecatedChoice', {
               label: def?.label ?? dep.key,
               choice: choice.label,
             })
-            : tr('params.gate.deprecated', { label: def?.label ?? dep.key }),
+            : msg('params.gate.deprecated', { label: def?.label ?? dep.key }),
         )
         return 'blocked'
       }
@@ -1822,7 +1822,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     patchDraft(toDraft)
     return 'applied'
     },
-    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions, tr],
+    [defOf, draft, log, past, patchDraft, placeOf, savedValueOf, seq, syncDecisions],
   )
 
   const edit = useCallback(
@@ -2036,7 +2036,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     })
     if (badKeys.length > 0) {
       setSavedNote(
-        tr('params.save.invalidKeys', {
+        msg('params.save.invalidKeys', {
           keys: badKeys.map((k) => defOf(k)?.label ?? k).join(tr('params.listSep')),
         }),
       )
@@ -2197,7 +2197,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
         () => {
           setDraftOnDisk(false)
           setSavedTone('ok')
-          setSavedNote(tr('params.saved.discarded'))
+          setSavedNote(msg('params.saved.discarded'))
           broadcastDraftNow()
         },
         (e: unknown) => setDraftError(errorText(e)),

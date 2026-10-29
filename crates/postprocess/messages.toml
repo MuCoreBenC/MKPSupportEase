@@ -3302,6 +3302,29 @@ text_en = "Failed to write the preset-source ledger"
 params = []
 note = "run/source-ledger.json / run/lineage-source.json 写失败（附加信息，主流程不受影响）"
 
+["ui.runtime.content.505"]
+text = "建不出内容仓库目录：{v1}"
+text_en = "Cannot create the content-store folder: {v1}"
+params = ["v1"]
+note = "<appDataDir>/content：云端原文按 SHA 存一份的仓库"
+
+["ui.runtime.content.506"]
+text = "读不到内容仓库里的 {v1}"
+text_en = "Cannot read {v1} from the content store"
+params = ["v1"]
+
+["ui.runtime.content.507"]
+text = "内容仓库里的 {v1} 删不掉"
+text_en = "Cannot delete {v1} from the content store"
+params = ["v1"]
+
+["ui.runtime.content.508"]
+code = "E_FS_CONTENT_001"
+text = "换代之前没能把旧版本存进内容仓库，已停在原来的目录"
+text_en = "Could not put the previous versions into the content store before switching; staying on the old catalog"
+params = []
+note = "目录换代前 content::ensure_referenced 失败：宁可不换，也不让旧版因为换索引而丢"
+
 ["ui.workbench.book.500"]
 code = "E_PUBLISH_BOOK_001"
 text = "发布账本读不出来"

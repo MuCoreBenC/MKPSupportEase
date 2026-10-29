@@ -76,6 +76,14 @@ impl SourceIdentity {
     }
 }
 
+/// 把一份**已经存下来的**身份归一（老账里的 ref 可能还是 `%2F` 编码）。
+///
+/// 只动 `git_ref`：平台与仓库在写入时已经小写归一，不需要重算。
+pub fn normalize(mut identity: SourceIdentity) -> SourceIdentity {
+    identity.git_ref = decode_ref(&identity.git_ref);
+    identity
+}
+
 /// **当前生效的源身份**。
 ///
 /// 优先级与解析链同一条：自定义源先认**探通的那一份**（`customResolved`，
@@ -148,7 +156,7 @@ pub fn parse_identity(url: &str) -> Option<SourceIdentity> {
         return Some(SourceIdentity {
             platform,
             repo: format!("{}/{repo}", owner.to_ascii_lowercase()).to_ascii_lowercase(),
-            git_ref,
+            git_ref: decode_ref(&git_ref),
         });
     }
 
@@ -193,6 +201,35 @@ fn git_repo_rest<'a>(host: &str, path: &'a str) -> Option<&'a str> {
 
 /// 切掉交付尾巴：`presets/delivery/source.json` / `presets/delivery` / 单独的 `source.json`。
 ///
+/// 分支名里的百分号编码 → 原文。
+///
+/// Gitee / GitHub 的网页地址会把带斜杠的分支写成 `fix%2Fpublish-identity-matrix`；
+/// 那和 `fix/publish-identity-matrix` 是**同一支**。不归一化，用户把地址从编码写法
+/// 改成规范写法时，已下载的文件会突然被判成 `elsewhere` —— 那是把"换写法"误判成"换源"。
+/// 非法序列原样保留（认不出就不猜）。
+fn decode_ref(raw: &str) -> String {
+    if !raw.contains('%') {
+        return raw.to_owned();
+    }
+    let bytes = raw.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hi = (bytes[i + 1] as char).to_digit(16);
+            let lo = (bytes[i + 2] as char).to_digit(16);
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                out.push((hi * 16 + lo) as u8);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8(out).unwrap_or_else(|_| raw.to_owned())
+}
+
 /// ★ 切完还要再切一次 `source.json`：`…/presets/delivery/source.json` 与
 ///   `…/presets/delivery` 是同一份源，别让它们长出两个身份。
 fn strip_delivery_tail(path: &str) -> String {
@@ -240,6 +277,19 @@ mod tests {
         assert_eq!(by_page, by_raw_dir);
         assert_eq!(by_raw_dir, by_file);
         assert_eq!(by_file, by_slash);
+    }
+
+    /// **同一个分支的两种写法**（网页把 `/` 编码成 `%2F`）⇒ 同一份源
+    #[test]
+    fn a_percent_encoded_branch_is_the_same_source() {
+        let plain =
+            id("https://gitee.com/MuCoreBenC/MKPSupportEase/tree/fix/publish-identity-matrix");
+        let encoded =
+            id("https://gitee.com/MuCoreBenC/MKPSupportEase/tree/fix%2Fpublish-identity-matrix");
+        let raw = id("https://gitee.com/MuCoreBenC/MKPSupportEase/raw/fix%2Fpublish-identity-matrix/presets/delivery/source.json");
+        assert_eq!(plain.git_ref, "fix/publish-identity-matrix");
+        assert_eq!(plain, encoded, "编码写法与规范写法是同一支");
+        assert_eq!(plain, raw, "raw / tree 两种形状也是同一支");
     }
 
     /// 同仓库换分支 ⇒ 换了源（作者点名的第二种误判）

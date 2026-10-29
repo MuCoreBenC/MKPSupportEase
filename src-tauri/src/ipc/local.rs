@@ -23,8 +23,6 @@
 
 use postprocess::diag::messages;
 
-use std::collections::HashSet;
-
 use serde::Serialize;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -34,22 +32,30 @@ use crate::fsx::paths::internal_root;
 
 use crate::ipc::traced;
 use crate::runtime;
+use crate::runtime::source_ledger::OriginKind;
 
 /// 「基于云端哪一版」这个结论**摆事实**用的那几格（全部可空：不知道就说 `null`）。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBasedOnFactsDto {
+    /// 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null`
+    pub lineage_kind: Option<String>,
     /// 这份副本建的时候哪个源在生效（`github#owner/repo@ref` 那种规范化身份）
     pub lineage_source: Option<String>,
     /// 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻）。
     /// **只做展示**：它是配方的写作日期，不是发布顺序。
     pub lineage_release: Option<String>,
-    /// 那个源最近一次发布目录的时刻（账本上记的）
+    /// ★ 这份**对应的那个云端版本**实际发布的时刻（下载那一刻目录的 `publishedAt`）。
+    /// 老文件没记过 ⇒ `null`，界面写「未知」，**不许拿 `release_time` 顶**
     pub lineage_published_at: Option<String>,
+    /// 血统记的来源那一版云端原文的 SHA-256（不是本地文件此刻的字节）
+    pub lineage_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
     pub cloud_published_at: Option<String>,
+    /// 当前云端这一份的原文摘要（目录登记的 sha256）—— 「更多」里与本地对照
+    pub cloud_sha256: Option<String>,
     /// 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null`
     pub lineage_catalog: Option<String>,
     /// 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null`
@@ -58,6 +64,10 @@ pub struct LocalBasedOnFactsDto {
     pub cloud_catalog: Option<String>,
     /// 当前目录是那条线的第几号（`catalog.publishSerial`）
     pub cloud_serial: Option<u64>,
+    /// `unverified` 时为什么说不清：`no_lineage` / `no_release_line` /
+    /// `catalog_without_identity` / `not_in_catalog` / `no_sha` / `no_source_identity`。
+    /// 其余档位是 `null`
+    pub unverified_reason: Option<String>,
 }
 
 /// 用户自己的一份文件（给界面看的形状）。
@@ -107,13 +117,20 @@ pub struct LocalPresetFileDto {
     /// 归属是文件自己的属性，随文件走。
     pub machine_id: Option<String>,
     pub version_id: Option<String>,
-    /// **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
-    /// 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编
-    pub copied_from: Option<String>,
-    /// 上面那条路径里的**文件名**（界面直接显示用）。没有同上
-    pub copied_from_name: Option<String>,
-    /// 出处档：`copy`（复制自另一份用户文件）/ `import`（外部导入）。都没记 ⇒ `null`
-    pub provenance: Option<String>,
+    /// 来路：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null`
+    /// （`unknown` 是"账是旧格式"那一档，界面照实说「未知」）
+    pub provenance_kind: Option<String>,
+    /// 拷贝的母本（相对用户根路径）。下载 / 导入 / 没记 ⇒ `null`
+    pub origin_path: Option<String>,
+    /// 上面那条路径里的**文件名**（界面直接显示用）
+    pub origin_name: Option<String>,
+    /// 这份对应的云端目录文件名（认亲用；目录换路径也还认得出）
+    pub cloud_file: Option<String>,
+    /// ★ 「本地版本时间」：这份对应的那个云端版本**实际发布**的时刻。
+    /// 从没记过 ⇒ `null` → 界面写「未知」，**不回落文件修改时间 / `# release_time`**
+    pub version_published_at: Option<String>,
+    /// 这份文件落进 `presets-local/` 的时刻（UTC epoch 秒）：下载 / 拷贝 / 导入各按各的
+    pub obtained_unix: Option<u64>,
 }
 
 /// 用户自己有哪些文件（`presets-local/` 里躺着什么）。
@@ -127,8 +144,6 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
         let root = crate::fsx::paths::user_root(&app)?;
         let internal = internal_root(&app)?;
         let catalog = runtime::load_released_catalog(&internal)?;
-        /* 出处账整本读一次（小 JSON），扫出来的每份按路径对号 */
-        let book = runtime::provenance::load(&root);
         /*
          * **源身份**（2026-10-27）：当前这个源是谁 + 账上见过它什么样 + 每份副本建的时候
          * 哪个源在生效。三样都是一次读、整批复用 —— 别在每份文件里各读一遍账。
@@ -156,44 +171,41 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                 );
             }
         }
-        let notes = if cloud.is_some() {
-            runtime::source_ledger::load_notes(&internal)
-        } else {
-            notes
-        };
-        let copies = runtime::source_ledger::load_copies(&internal);
+        /*
+         * **本地来路账**整本读一次，扫出来的每份按路径对号。
+         * 判定不再读"目录账"—— 它只回答"这个源见过哪些版本"，与本份对不上号。
+         */
+        let provenance = runtime::source_ledger::load_provenance(&internal);
+        let by_path = runtime::source_ledger::index_by_path(&provenance);
         let judge = runtime::local::Judge {
             catalog: &catalog,
             cloud: cloud.as_ref(),
-            notes: &notes,
         };
         Ok(runtime::local::local_files(&root)
             .into_iter()
             .map(|f| {
                 let source = runtime::local::source_of(&catalog, f.lineage.as_ref());
-                /* 出处账：这一份是复制来的还是导入来的（没记过就是 null，照实退回「本地」） */
-                let provenance = book.iter().find(|e| e.to == f.path);
-                let copied_from = provenance.and_then(|e| e.from.clone());
                 /* 自己的归属（头两行优先、回落血统，见 [`owner_of`]） */
                 let (owner_machine, owner_version) = owner_of(&catalog, &f);
-                let copy_source = copies
-                    .iter()
-                    .find(|e| e.path == f.path)
-                    .map(|e| e.identity.clone());
-                let verdict =
-                    runtime::local::based_on(&judge, f.lineage.as_ref(), copy_source.as_ref());
+                /* 本地来路账：这一份是谁、怎么来的（没记过 ⇒ None，界面照实写「未知」） */
+                let entry = by_path.get(f.path.as_str()).copied();
+                let verdict = runtime::local::based_on(&judge, f.lineage.as_ref(), entry);
                 LocalPresetFileDto {
                     based_on: verdict.based_on.as_str().to_owned(),
                     based_on_facts: LocalBasedOnFactsDto {
+                        lineage_kind: verdict.facts.lineage_kind.map(|k| k.as_str().to_owned()),
                         lineage_source: verdict.facts.lineage_source,
                         lineage_release: verdict.facts.lineage_release,
                         lineage_published_at: verdict.facts.lineage_published_at,
+                        lineage_sha256: verdict.facts.lineage_sha256,
                         cloud_source: verdict.facts.cloud_source,
                         cloud_published_at: verdict.facts.cloud_published_at,
+                        cloud_sha256: verdict.facts.cloud_sha256,
                         lineage_catalog: verdict.facts.lineage_catalog,
                         lineage_serial: verdict.facts.lineage_serial,
                         cloud_catalog: verdict.facts.cloud_catalog,
                         cloud_serial: verdict.facts.cloud_serial,
+                        unverified_reason: verdict.facts.unverified_reason.map(str::to_owned),
                     },
                     based_on_label: f.lineage.as_ref().and_then(|l| l.based_on.clone()),
                     based_on_release: f
@@ -209,11 +221,16 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                      */
                     machine_id: owner_machine,
                     version_id: owner_version,
-                    copied_from_name: copied_from
-                        .as_deref()
-                        .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned()),
-                    copied_from,
-                    provenance: provenance.map(|e| e.kind.clone()),
+                    provenance_kind: entry.map(|e| e.kind.as_str().to_owned()),
+                    origin_path: entry.and_then(|e| e.origin_path.clone()),
+                    origin_name: entry.and_then(|e| {
+                        e.origin_path
+                            .as_deref()
+                            .map(|p| p.rsplit('/').next().unwrap_or(p).to_owned())
+                    }),
+                    cloud_file: entry.and_then(|e| e.cloud_file.clone()),
+                    version_published_at: entry.and_then(|e| e.published_at.clone()),
+                    obtained_unix: entry.map(|e| e.at),
                     path: f.path,
                     file_name: f.file_name,
                     size: f.size,
@@ -987,28 +1004,37 @@ pub async fn get_local_preset_index(
         let user_root = crate::fsx::paths::user_root(&app)?;
         let catalog = runtime::load_released_catalog(&internal)?;
         let files = runtime::local::local_files(&user_root);
-        /* 开关开着 ⇒ 不做排除，连出处账都不必读（省一次读） */
-        let copies = if runtime::app_state::copies_follow_cloud(&internal)? {
-            HashSet::new()
-        } else {
-            runtime::provenance::copy_targets(&user_root)
-        };
+        let provenance = runtime::source_ledger::load_provenance(&internal);
+        let by_path = runtime::source_ledger::index_by_path(&provenance);
+        /* 开关一句话决定；开着就连"是不是拷贝"都不看 */
+        let follow_copies = runtime::app_state::copies_follow_cloud(&internal)?;
 
         Ok(files
             .into_iter()
             .filter_map(|f| {
-                let lineage = f.lineage.as_ref()?;
-                /* 那一版还在目录里才认这个关系（否则这笔关系已经无处对账） */
-                let source = runtime::local::source_of(&catalog, Some(lineage))?;
-                /* 复制出来的那一份不认领：它是独立的一份，跟云端没关系 */
-                if copies.contains(&f.path) {
+                let entry = by_path.get(f.path.as_str()).copied();
+                /*
+                 * 拷贝出来的那一份默认不认领：它是独立的一份，跟云端没关系。
+                 * 认的是**账上的 kind**，不按名字猜（名字改了就失效）。
+                 */
+                if !follow_copies && entry.is_some_and(|e| e.kind == OriginKind::Copy) {
                     return None;
                 }
+                /*
+                 * 认亲优先用账上记的云端文件名 —— 目录换路径也还认得出是同一份；
+                 * 只有旧账 / 没账时才回落到血统解析。
+                 */
+                let cloud_source = match entry.and_then(|e| e.cloud_file.clone()) {
+                    Some(name) => name,
+                    None => runtime::local::source_of(&catalog, f.lineage.as_ref())?
+                        .file_name
+                        .clone(),
+                };
                 Some(LocalPresetIdentityDto {
                     id: f.path.clone(),
                     file_name: f.file_name.clone(),
                     path: f.path,
-                    cloud_source: source.file_name.clone(),
+                    cloud_source,
                 })
             })
             .collect())
@@ -1140,8 +1166,26 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                     .ok()
                     .flatten()
                     .and_then(|s| runtime::source_identity::identity_of(&s));
-                if let Some(identity) = identity {
-                    let _ = runtime::source_ledger::remember_copy(&root, &done.path, &identity);
+                /*
+                 * 来路账：这一份是"在哪个源、哪一代目录下"从云端落成的。
+                 * 已经有账（先前下载过、这是编辑保存）⇒ 保留原 kind / 母本，
+                 * 只把目录四格推进到当前这一代；没有账 ⇒ 按下载记。
+                 */
+                if let Ok(catalog) = runtime::load_released_catalog(&root) {
+                    let stamp = crate::runtime::source_ledger::CatalogStamp {
+                        catalog_id: catalog.catalog_id.as_deref(),
+                        serial: catalog.publish_serial,
+                        revision: &catalog.revision,
+                        published_at: catalog.published_at.as_deref(),
+                    };
+                    let _ = runtime::source_ledger::record_baseline(
+                        &root,
+                        &done.path,
+                        identity.as_ref(),
+                        &draft.source_file_name,
+                        &stamp,
+                        None,
+                    );
                 }
                 done
             }
@@ -1217,9 +1261,7 @@ pub async fn rename_local_preset(
             },
         )?;
         super::notify_app_state(&app);
-        /* 出处账跟着走：副本改名了 to 跟走，来源改名了 from 跟走（「复制自 X」不失联） */
-        let _ = runtime::provenance::repath(&user_root, &path, &done.path);
-        /* 源身份账跟着改（与出处账同一件事：账记的是历史，路径是现在） */
+        /* 来路账跟着走：自己改名 path 跟走，母本改名 originPath 跟走 */
         let _ = runtime::source_ledger::repath(&root, &path, &done.path);
 
         Ok(LocalFileIdentityDto {
@@ -1253,21 +1295,14 @@ pub async fn copy_local_preset(
         ★ 没有这一步，导入 / 复制出来的那两份"恢复默认值"就没得退 —— 它们在摘库里
         没有对应（`based_on_sha256` 指的是更上一层的云端原文，不是自己） */
         let _ = runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path);
-        /* 出处账：副本从哪来的 —— 界面上「来源：复制自 X」靠它。记不上不影响复制本身 */
-        let _ = runtime::provenance::record(
-            &user_root,
-            &done.path,
-            Some(&path),
-            runtime::provenance::ProvenanceKind::Copy,
-        );
         /*
-         * 源身份**跟着原件走**（副本是原件按字节拷的，血统也照抄）：原件账上有，
-         * 副本就记同一份；原件没有（这个功能之前建的）⇒ 副本也不记 ——
-         * 「不知道」一路传下去，比猜一个当前源更诚实（判定会落 `Elsewhere`）。
+         * 来路账：副本从**母本**来的，母本账上有多少格就继承多少格
+         * （源身份 / 云端文件名 / 目录四格 / 云端摘要）；母本没有 ⇒ 副本也没有 ——
+         * 「不知道」一路传下去，比猜一个当前源更诚实。
+         * 记不上不影响拷贝本身。
          */
-        if let Some(identity) = runtime::source_ledger::copy_source(&internal, &path) {
-            let _ = runtime::source_ledger::remember_copy(&internal, &done.path, &identity);
-        }
+        let mother = runtime::source_ledger::provenance_of(&internal, &path);
+        let _ = runtime::source_ledger::record_copy(&internal, &done.path, &path, mother.as_ref());
         Ok(LocalFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
@@ -1444,16 +1479,27 @@ pub async fn delete_local_preset(app: AppHandle, path: String) -> Result<(), App
             runtime::app_state::clear_draft(&root)?;
             state_cleared = true;
         }
-        runtime::local::delete_file(&user_root, &path)?;
-        /* 原文镜像一起走（这份都没了，"它最初的样子"不该留在内部存储里） */
-        let _ = runtime::baseline::remove_origin_copy(&root, &path);
-        /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句；删账失败不拦删除） */
+        /*
+         * ★ 删除 = **进回收站**（2026-10-29 作者口径）：
+         * 文件 + 原文镜像 + 来源账一起收进 `recovery/<id>/`，用户可在设置页找回。
+         * 收不进去就不删 —— 宁可这次失败，也不做"删了找不回"。
+         */
+        let provenance = runtime::source_ledger::provenance_of(&root, &path);
+        runtime::recovery::create(&root, &user_root, &path, provenance)?;
+        /* 来源账同步移除：不删的话，同路径下一份手工放的文件会继承旧来源 */
+        runtime::source_ledger::remove(&root, &path)?;
+        /* 备注覆盖跟着删（删了重新下载 / 重新拷贝 = 回到工作台那句） */
         let _ = runtime::remarks::remove(&user_root, &path);
         /*
          * 逐参数「云端更新」决定账跟着删：那份文件都不在了，"我处理过哪几项"再留着
          * 只会是一条悬空的账（而且下一次同名文件出现时会莫名其妙继承它）。
          */
         let _ = runtime::app_state::forget_param_decisions(&root, &path);
+        /* 内容是否还在，由引用关系决定；回收条目按 30 天 / 20 份清理 */
+        if let Err(e) = runtime::content::gc(&root) {
+            tracing::warn!("内容清理没跑完（不影响这次删除）：{}", e.message);
+        }
+        runtime::recovery::cleanup(&root);
         if state_cleared {
             super::notify_app_state(&app);
         }

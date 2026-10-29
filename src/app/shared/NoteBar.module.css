@@ -33,18 +33,24 @@
   color: var(--warn-ink);
 }
 
+/*
+ * ★ 2026-10-29：里面的叉从「×」这个**字**换成描边图标（`components/Icon` 的 `close`）。
+ * 作者：「叉叉没有竖直居中 / 有点偏上」—— `×` 的墨迹坐在基线上方，离行盒中线天生差
+ * 1~2px，且各家字体差得不一样，靠 `padding` 试出来的值换个字族就废。
+ * 图标是 24 格视图里 6→18 的十字，四边对称，`inline-flex` 一居中就是几何准确。
+ */
 .noteClose {
   flex-shrink: 0;
   margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 18px;
   height: 18px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  font: inherit;
-  font-size: 13px;
-  line-height: 1;
   color: inherit;
   cursor: pointer;
 }

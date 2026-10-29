@@ -262,6 +262,11 @@ export const bridgeApi: MkpApi = {
   renameLocalPreset: (path, newName) =>
     call('renameLocalPreset', 'rename_local_preset', { path, newName }),
   deleteLocalPreset: (path) => call('deleteLocalPreset', 'delete_local_preset', { path }),
+  /* 回收站（2026-10-29）：删掉的预设可以找回 */
+  listRecovery: () => call('listRecovery', 'list_recovery'),
+  restoreLocalPreset: (id) => call('restoreLocalPreset', 'restore_local_preset', { id }),
+  purgeRecovery: (id) => call('purgeRecovery', 'purge_recovery', { id }),
+  emptyRecovery: () => call('emptyRecovery', 'empty_recovery'),
   /* 第十一层：本地文件 → 本地文件（字节复制；不覆盖、不碰任何状态） */
   copyLocalPreset: (path, newName) =>
     call('copyLocalPreset', 'copy_local_preset', { path, newName }),

@@ -30,7 +30,7 @@ use crate::error::AppError;
 /// `index/` 2026-10-08 退役：它唯一住过的东西是 `offsets.json`（校准偏移的孤岛，
 /// 只写不读）—— 校准值改随**用户工作副本**走之后这个目录没有消费者了。
 /// 盘上遗留的空目录不清理（用户自己删）。
-const INTERNAL_DIRS: [&str; 4] = ["cloud", "archive", "logs", "run"];
+const INTERNAL_DIRS: [&str; 6] = ["cloud", "archive", "logs", "run", "content", "recovery"];
 /// **用户自己的预设**住的那个子目录。`pub`：用户线那两条读（`runtime::local`）要认它，
 /// 字面量只许有这一处
 pub const LOCAL_DIR: &str = "presets-local";

@@ -109,16 +109,58 @@
 
 /* ============ 左：悬浮面板（搜索 + 筛选 + 日期分组 + 两层行） ============ */
 
+/*
+ * 首列那条宽度的**唯一来源**，同时做成可过渡的自定义属性。
+ *
+ * 为什么不是 `grid-template-columns: auto`：auto 轨道每帧都要按内容重新量一次最大 / 最小
+ * 尺寸（列表里有长文件名、`nowrap` 的耗时列，`.sideBody` 还是 340 宽的长列表），
+ * 那是折/展时最贵的一步 —— 量出来的结果又恰好等于 `.side` 写死的宽度，白量。
+ * 换成一条明确的 length，每帧只按数值摆，不再摸内容。
+ *
+ * 不支持 `@property` 的引擎（Safari < 16.4）会退化成瞬切，布局仍然对。
+ */
+@property --side-w {
+  syntax: '<length>';
+  /*
+   * ★ `inherits: false` 是性能条款，别改回 true（2026-10-29 实测）：
+   *   这个变量每帧都在变，一旦继承，整棵子树（详情里 70+ 项参数快照）的 computed style
+   *   每帧全部失效 —— Chrome trace 里 UpdateLayoutTree 占折/展总耗时的六成以上，
+   *   WKWebView 只会更糟。它只被 `.pane` 自己的 `grid-template-columns` 与
+   *   （宽档）`.side` 的轨道宽度消费，没有后代需要读它。
+   */
+  inherits: false;
+  initial-value: 340px;
+}
+
 .pane {
-  /* 窄档的滑盖/遮罩锚在内容区（不是整页）—— 顶部那行字与刷新不受它影响 */
-  position: relative;
+  /*
+   * ★ 2026-10-29：这里**不再** `position: relative` —— 抽屉与遮罩的定位祖先上提到 `.page`，
+   *   窄档滑盖因此会压住上面那一行（说明 + 导出 / 回放 / 刷新）。作者：「这一行不希望它
+   *   单独成为一行，希望它也是那个内容的，就是说这个侧边抽屉应该是压着它的」。
+   *   （原先锚在这里，抽屉只能从那一行**下面**开始，看着像两套东西。）
+   */
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 340px 1fr;
+  /* 首列 = `--side-w`（见上面 @property）：折/展时它是一个连续的量，详情区跟着连续让位 */
+  --side-w: 340px;
+  grid-template-columns: var(--side-w) 1fr;
   gap: 18px;
   padding: 0 clamp(16px, 2vw, 26px) 16px;
-  /* 折/展是**瞬时**切换（作者第四次：过程里任何重叠都不接受，见下面折叠段注释） */
+
+  /*
+   * 折/展的时长与曲线（2026-10-29 第三版）。
+   *
+   * 版本沿革，别再往回改：
+   *   ① 首页推卡那条 `(.32,.68,.12,1)`：前 110ms 走完 70%，后 150ms 只挪 30px ——
+   *      "猛一顿再慢慢爬"，作者两次都说卡。
+   *   ② 240ms + `(.4,0,.2,1)`：平稳了，但内容被挤的时间仍然太长（作者还是觉得卡）。
+   *   ③ 现在：180ms + `(.2,0,0,1)`。前段直接给速度、后段迅速收住 —— 侧栏折展
+   *      在真软件里本来就是"一下就到"的动作，拖长只会让它看起来吃力。
+   */
+  --fold-ms: 180ms;
+  --fold-ease: cubic-bezier(0.2, 0, 0, 1);
+  transition: --side-w var(--fold-ms) var(--fold-ease);
 }
 
 /*
@@ -136,6 +178,13 @@
      没有这一条，列宽缩到 44 时盒子还是 340，列表整块溢到详情上面（2026-10-27 实测） */
   min-width: 0;
   min-height: 0;
+  /*
+   * 宽度 = 「折了多少」：
+   *   · 宽档：**不写 width** —— grid 项默认 stretch，轨道多宽它就多宽（轨道读 `--side-w`）。
+   *     这也是性能条款：`.side` 不读那个每帧变的变量，变量就不必继承出去。
+   *   · 窄档：它本来就绝对定位，宽度就是滑盖的进出（容器查询里写了 width）。
+   * 过渡只动这条宽度（真实布局），不动 transform —— 列表里的行因此一直是可读的实字。
+   */
   display: flex;
   flex-direction: column;
   border: 1px solid var(--line);
@@ -143,6 +192,14 @@
   background: var(--surface-solid);
   box-shadow: var(--shadow);
   overflow: hidden;
+  /* 折起来时阴影收掉（深色主题那道影很重，硬切会闪）；只给 80ms，别让它跟着整段动画重绘 */
+  transition: box-shadow 80ms linear;
+  /*
+   * 内部布局自成一块：宽度每帧都在变，没这一条时 WebKit 会连它后面的详情区
+   * 一起重新排（面板里那 21 行列表跟着量一遍）—— 折/展的顿感多半出在这儿。
+   * 不用 `paint`：那会把面板自己的阴影剪掉。
+   */
+  contain: layout;
 }
 
 .sideHead {
@@ -532,6 +589,12 @@
   overflow: hidden;
   user-select: text;
   -webkit-user-select: text;  cursor: text;
+  /*
+   * 详情区自成一块（2026-10-29）：折/展时它的宽度每帧都在变，文字重排本来就躲不掉，
+   * 但重排与重绘只该发生在这一块里 —— 不要让它的变化把整页（含左栏列表）一起带重。
+   * 放大层走 portal（`ZoomLayer` 挂在 body），不受这条裁剪影响。
+   */
+  contain: layout paint;
 }
 
 .mainHead {
@@ -896,54 +959,92 @@
   line-height: 1.7;
 }
 
-/* ============ 折叠：同一个面板变窄（2026-10-27 第三版） ============ */
+/* ============ 折叠：同一个面板变窄（2026-10-27 第三版 / 2026-10-29 加回过程） ============ */
 
 /*
  * 作者：「不要有两个的感觉，就感觉是一个整体，只是被折到里面了和伸出来这种感觉」。
  *
- * 所以**没有第二个元素**：`<nav class="side">` 就是那只盒子，340 → 44 是折起来、
- * 44 → 340 是伸出来。盒子里的 `.sideBody`（真正的列表）**定宽 340**：外壳收窄时
- * 它不重排、只被裁 —— 看起来是抽屉被推进去，而不是"列表被挤成一团"。
- * 折到位时显形的是盒子里那张脸 `.sideFace`（44px、钉在左缘、竖排眉题）。
+ * 所以**没有第二个元素**：`<nav class="side">` 就是那只盒子，340 ⇄ 44 都是它。
+ * 盒子里的 `.sideBody`（真正的列表）**定宽不塌**：外壳收窄时它不重排、只被裁 ——
+ * 看起来是抽屉被推进去，而不是"列表被挤成一团"。折到位时显形的是盒子里那张脸
+ * `.sideFace`（44px、钉在左缘、竖排眉题）。
  *
  * 两档共用这一套，差别只在盒子的宽度由谁给：
- *   · 宽档：grid 第一列（340 / 44）；
- *   · 窄档：盒子自己的 width（`min(340px, 82%)` / 44）。
+ *   · 宽档：首列 auto 读 `.side` 自己的 width；
+ *   · 窄档：盒子绝对定位，宽度就是滑盖的进出。
  *
- * ★★ **不做过渡动画**（2026-10-27 第四版）：宽度动画期间必然存在半展开的一帧，
- *   那一帧里列表与脊同时在场 —— 作者三次截图说的都是它。现在两态**瞬时切换**，
- *   折起来时列表直接不画（display:none），任何一帧都只有一个东西。
+ * ★★ 2026-10-29 改判：这一版**要过程**（作者：「不够灵动…我还是喜欢那种展开折叠的
+ *   感觉，就像首页的…在过程中去变化它的内容和文字」）。第四版那会儿是瞬切，为的是
+ *   躲开"半展开时列表与脊同时在场"；现在不靠瞬切躲，靠**内容交叉**躲：
+ *
+ *      折叠（340→44）   0~110ms 列表淡出并左移  →  140~260ms 脊（竖排眉题）淡入
+ *      展开（44→340）   0~110ms 脊先退场        →  150~270ms 列表归位
+ *
+ *   任何一帧里只有一件东西是"实的"，另一件要么已经淡掉、要么还没亮起来；
+ *   而宽度从头到尾是真的在变，详情区因此连续地被让位 / 收回，不是先跳一格再补动画。
  */
+/* 折到底：只改这一个变量 —— 轨道与 `.side` 的宽度同一帧到 44 */
 .pane[data-peek='true'] {
-  grid-template-columns: 44px 1fr;
+  --side-w: 44px;
 }
 
-/* 列表本体：**折起来就不画**（不留半截在脊里） */
-.pane[data-peek='true'] .sideBody {
-  display: none;
-}
-
-.sideBody {
-  flex: 1;
-  width: 340px;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+/* 折起来就不要阴影（理由见窄档那一条）：贴边的一条脊不需要浮起感 */
+.pane[data-peek='true'] .side {
+  box-shadow: none;
 }
 
 /*
- * 折起来时露出的那张脸：钉在盒子左缘的 44px，只在折叠态现形。
+ * 列表本体：`min-width` 才是"不塌"的那条 —— 外壳收到 44 时它仍是 340（溢出被
+ * `.side` 的 overflow: hidden 裁掉），所以收窄全程行不重排。
+ * 折叠后 `visibility: hidden`：既然不画了，就不该还能被 Tab 到、还能被点到。
+ */
+.sideBody {
+  flex: 1;
+  min-width: 340px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  /* 列表自己一块：行不重排、也不让它的重绘漏到面板外面 */
+  contain: layout paint;
+  /*
+   * ★ 全程**交叉**（2026-10-29 第四版，作者口径）：「苹果那些很流畅的，就是边收起的时候
+   *   那个字边出现 —— 原本的字开始消失，后面的字就开始出现」。所以两者的 opacity 用
+   *   同一条 180ms、同时起 —— 列表淡出的每一帧，脊也在同比例亮起来，任何一帧都有内容，
+   *   不存在"先全都消失、再冒出字"的空窗（上一版把脊压到最后 25% 就是这个毛病）。
+   */
+  transition:
+    opacity var(--fold-ms) var(--fold-ease),
+    transform var(--fold-ms) var(--fold-ease);
+}
+
+.pane[data-peek='true'] .sideBody {
+  opacity: 0;
+  transform: translateX(-12px);
+  visibility: hidden;
+  /* 已经透明的那一段也点不到：否则刚点「收起」还会误触到行首 */
+  pointer-events: none;
+  transition:
+    opacity var(--fold-ms) var(--fold-ease),
+    transform var(--fold-ms) var(--fold-ease),
+    visibility 0s linear var(--fold-ms);
+}
+
+/*
+ * 折起来时露出的那张脸：钉在盒子左缘的 44px，**常驻**（`display: flex`），
+ * 靠 opacity + 6px 位移进出场 —— 以前是 display: none 硬切，没有过程可言。
  *
- * ★ 宽度钉死 44（不铺满外壳）：折叠那 240ms 里外壳还宽着，脸若铺满，竖排字会
- *   在宽盒子中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"，随盒子一起收进去。
+ * ★ 宽度钉死 44（不铺满外壳）：收窄过程中外壳还宽着，脸若铺满，竖排字会在宽盒子
+ *   中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"，随盒子一起收进去。
+ * ★ 它在 DOM 里排在列表之后（压在列表上），所以展开态必须真的不可见、不可点，
+ *   否则那 44px 会盖住列表的行首。
  */
 .sideFace {
-  display: none;
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
   width: 44px;
+  display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
@@ -953,6 +1054,14 @@
   color: var(--text-3);
   font: inherit;
   cursor: pointer;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateX(-6px);
+  /* 与列表全程交叉（见 `.sideBody` 那段）：脊退的每一帧，列表同比例亮起来 */
+  transition:
+    opacity var(--fold-ms) var(--fold-ease),
+    transform var(--fold-ms) var(--fold-ease),
+    visibility 0s linear var(--fold-ms);
 }
 
 .sideFace:hover {
@@ -976,9 +1085,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 宽档：用户按栏头那颗「收起」才折 */
+/* 宽档：用户按栏头那颗「收起」才折。脊在面板收窄的**后半段**才亮起来（见上面那段） */
 .pane[data-peek='true'] .sideFace {
-  display: flex;
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  /* 折叠：与列表同起同收（交叉淡入，见 `.sideBody` 那段） */
+  transition:
+    opacity var(--fold-ms) var(--fold-ease),
+    transform var(--fold-ms) var(--fold-ease),
+    visibility 0s linear;
 }
 
 /* ============ 窄档：列表滑盖化（只盖内容区 —— 顶部那行字与刷新不动） ============ */
@@ -996,14 +1112,16 @@
   }
 
   /*
-   * 手动折叠在窄档里照样认（用户收起来的那一栏，不该因为窗口变窄又自己张开）。
+   * ★ 不动 `.head` / `.sub`：窄窗里顶部照样一行小灰字 + 刷新靠右（见下面 `.side` 的 top）。
+   *   2026-10-29 第二版：收起态下这条脊**从页头下面开始**，不再拿 padding 去给一行
+   *   不属于抽屉的字让位（那版里 `.head` 的 padding-left 在某些窗口下没盖住字首）。
    */
-  .pane[data-peek='true'] {
-    grid-template-columns: 1fr;
-  }
 
-  /* ★ 不动 `.head` / `.sub`：窄窗里顶部照样一行小灰字 + 刷新靠右 */
-
+  /*
+   * 遮罩与面板**同一条时长、同一条曲线**（2026-10-29）：面板收窄时背景跟着一起亮，
+   * 收完的那一帧正好全亮 —— 谁也不会单独留在场上（上一版面板瞬切、遮罩却慢慢淡，
+   * 于是"面板已经没了、页面还在自己变亮"，作者说别扭）。
+   */
   .scrim {
     display: block;
     position: absolute;
@@ -1012,7 +1130,7 @@
     background: rgb(16 24 32 / 28%);
     opacity: 0;
     pointer-events: none;
-    transition: opacity 0.2s ease;
+    transition: opacity var(--fold-ms) var(--fold-ease);
   }
 
   /*
@@ -1027,25 +1145,46 @@
   }
 
   /*
-   * 窄档的盒子（2026-10-27 第四版）：收起 44px 只画那张脊，展开 `min(340px, 82%)`
-   * 盖在详情上。**两态瞬切**，中间不留半展开的帧（列表在收起态直接不画）。
+   * 窄档的盒子：收起 44px 只画那张脊，展开 `min(340px, 82%)` 盖在详情上。
+   * 两态之间走 `.side` 的 width 过渡（基础段那条），叠在同一条进度上的还有遮罩、
+   * 列表的淡出与脊的浮现（见下面两条）。
    */
   .side {
     position: absolute;
-    top: 0;
+    /*
+     * 收起态从页头**下面**起（2026-10-29 第二版）：那一行不属于抽屉，脊不该切它一个字
+     * （作者截图：「上面的字体有点被挡了」）。展开时顶回 0，整块盖住页头 ——
+     * 作者要的「侧边抽屉应该是压着它的」仍然成立，压的是**拉出来的抽屉**，不是那条脊。
+     */
+    top: var(--head-h);
     left: 0;
     bottom: 0;
     width: 44px;
     border-radius: 0 var(--r-lg) var(--r-lg) 0;
+    /* 宽度不走 `--side-w`（这一档要 `min(340px, 82%)` 这种百分比），自己过渡；
+       top 跟同一条曲线 —— 展开是"顶上去 + 拉出来"一个动作，收起是同一个动作倒放
+       （这条 transition 是整条替换，基础段那条 box-shadow 也要一起带上） */
+    transition:
+      width var(--fold-ms) var(--fold-ease),
+      top var(--fold-ms) var(--fold-ease),
+      box-shadow 80ms linear;
+  }
+
+  /* 展开（且不是手动折叠）：抽屉顶到内容区最上，压住页头那行与三颗按钮 */
+  .side[data-open='true']:not([data-peek='true']) {
+    top: 0;
   }
 
   .side[data-open='true'] {
     width: min(340px, 82%);
   }
 
-  /* 收起态：列表不画，只剩脊 */
-  .side:not([data-open='true']) .sideBody {
-    display: none;
+  /*
+   * 列表"不塌"的那条在窄档要跟着外壳走：外壳最宽 `min(340px, 82%)`，
+   * 写死 340 的话窗口窄于 415 布局像素时列表右边会被裁掉一截（耗时列）。
+   */
+  .sideBody {
+    min-width: min(340px, 82cqw);
   }
 
   /* 手动折叠优先于展开态：折了就是 44，不管 sideOpen 是不是还留着 true */
@@ -1053,15 +1192,50 @@
     width: 44px;
   }
 
-  /* 窄档里那张脸：展开就藏（宽档那半套在基础样式里） */
-  .side[data-open='true'] .sideFace {
-    display: none;
+  /*
+   * 窄档收起 = 列表退场、脊进场。下面两条的数值必须与基础段那两条
+   * （`.pane[data-peek='true'] .sideBody` / `.sideFace`）**逐字一致**：
+   * 那里管"手动折叠"，这里管"窄档收起"，同一个动作的两种触发，过程得一样。
+   */
+  .side:not([data-open='true']) .sideBody {
+    opacity: 0;
+    transform: translateX(-12px);
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      opacity var(--fold-ms) var(--fold-ease),
+      transform var(--fold-ms) var(--fold-ease),
+      visibility 0s linear var(--fold-ms);
   }
 
-  /* 收起 = 露脸；手动折叠优先（放最后）：折了就一直露，哪怕 sideOpen 还留着 true */
-  .side:not([data-open='true']) .sideFace,
-  .pane[data-peek='true'] .sideFace {
-    display: flex;
+  .side:not([data-open='true']) .sideFace {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition:
+      opacity var(--fold-ms) var(--fold-ease),
+      transform var(--fold-ms) var(--fold-ease),
+      visibility 0s linear;
+  }
+
+  /*
+   * 收起态**不要阴影**（2026-10-29）：贴边那条脊本来不需要浮起感，而大面积圆角阴影
+   * 在宽度每帧变化的动画里要整块重绘 —— WebKit 上这是折/展最贵的一笔。
+   */
+  .side:not([data-open='true']) {
+    box-shadow: none;
+  }
+}
+
+/* 折/展：系统说"别动"就一步到位（只留一次极短的淡出，不至于硬闪） */
+@media (prefers-reduced-motion: reduce) {
+  .pane,
+  .side,
+  .sideBody,
+  .sideFace,
+  .scrim {
+    transition-duration: 0.01ms;
+    transition-delay: 0s;
   }
 }
 

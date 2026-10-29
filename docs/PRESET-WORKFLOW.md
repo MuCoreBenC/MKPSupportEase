@@ -202,3 +202,22 @@ npm run check:artifacts          # 产物边界（CI 同一条）
 
 故障注入判据在 `src-tauri/src/workbench/app/fault_tests.rs`（F1–F8），
 判定矩阵在 `src-tauri/src/runtime/local.rs` 的 `based_on` 测试组。
+
+### 客户端存储（2026-10-29 改判）—— 手工核对五项
+
+改到 `runtime::{content,delivery_index,migrate,recovery}` 或 `ipc::{catalog,local,recovery}` 时，
+除上面那组命令外还要在真机上核这几条（自动判据在各自模块的 `tests` 里，这里说的是**盘面**）：
+
+1. **一份内容一份**：同一份云端原文下载两次、或两个 path 内容相同 ⇒ `content/` 只多一个
+   `<sha>.toml`，**不产生** `delivery/<path>` 文件。
+2. **换代不丢旧版**：`check_remote_update` → `apply_remote_update` 之后，旧 `sha` 仍在
+   `content/` 里（被索引 / 血统 / 回收 / 待处理更新之一引用），三方更新仍读得出来。
+3. **断网点下载**：明确报"取不到当前云端文件"，`run/delivery-index.json` 不出现这一条 ——
+   不许出现"已下载"，也不许静默复用旧内容。
+4. **删除进回收站**：`recovery/<id>/` 里有文件 + 原文镜像 + 来源账；设置页「最近删除」看得到、
+   恢复得回来，恢复后**不是**使用中。
+5. **清理按引用**：`content/` 里被当前索引 / 用户血统 `based_on_sha256` / 回收记录 /
+   `appState.paramDecisions` 水位引用的 sha 一个都不许少；只清"没人引用且超 30 天或 20 份"的。
+
+盘上旧的 `delivery/**` + `baseline/<sha>.toml` 由 `run/storage-v2.json` 那次迁移搬进
+`content/`：**全部写成功才删旧目录**，失败保留原状、下次启动重试。

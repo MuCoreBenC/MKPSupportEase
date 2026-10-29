@@ -28,7 +28,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { STORAGE } from '../../api/storageKeys'
-import { useLocale, useT } from '../../i18n'
+import { useLocale, useText, useT } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useIsDark } from '../state/appState'
 import type { Density } from '../../hooks/useDensity'
@@ -107,6 +107,7 @@ const labelWidth = (pageW: number) => Math.round(
 
 export default function PageBbs({ density, pending, onNeedDownload }: Props) {
   const tr = useT()
+  const say = useText()
   /* BBS 那几份 json 自带 `name` / `name_en` 与 `label.zh` / `label.en` —— 数据双语，界面挑一册 */
   const locale = useLocale()
   const data = useBbsData()
@@ -442,7 +443,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
   if (data.fatal) {
     return (
       <div className={s.page} data-density={density} data-theme={light ? 'light' : 'dark'}>
-        <p className={s.blank}>{data.fatal}</p>
+        <p className={s.blank}>{say(data.fatal)}</p>
       </div>
     )
   }
@@ -606,7 +607,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
                 className={s.iconBtn}
                 onClick={openRail}
                 title={preset.error !== ''
-                  ? tr('bbs.detailTitleError', { error: preset.error })
+                  ? tr('bbs.detailTitleError', { error: say(preset.error) })
                   : tr('bbs.detailTitle')}
                 aria-label={tr('bbs.detail')}
               >
@@ -667,7 +668,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
             */}
             {data.sourceMode === 'none' && source === 'bbs' && (
               <p className={s.blank}>
-                {tr('bbs.noSource', { note: data.sourceNote })}
+                {tr('bbs.noSource', { note: say(data.sourceNote) })}
                 <br />
                 {tr('bbs.noSourceDesc')}
                 <br />
@@ -739,7 +740,8 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
             note={[
               preset.note,
               localNote,
-              preset.importError,
+              /* 导入被拒那句是存键的，这里摊开再拼（拼完的整句只活在同一帧里） */
+              preset.importError === '' ? '' : say(preset.importError),
               /* 被规则收起的行里也有命中 —— 闷着不说会让人以为搜索漏了 */
               searching && panel.stats.hiddenHits > 0
                 ? tr('bbs.rail.hiddenHitsLine', {

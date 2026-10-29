@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useT } from '../../i18n'
+import { msg, useT, type Text } from '../../i18n'
 import { mergeChain, norm, resolvePreset, variantIndex } from './bbsMerge'
 import type { VariantPick } from './bbsMerge'
 import { inPickSource } from './bbsSource'
@@ -111,8 +111,8 @@ export interface BbsPreset {
   dirty: boolean
   /** 一句话：链缺了 / 有环 / 变体对不上 / support_style 被拉回默认 / 未登记多少项 */
   note: string
-  /** 读文件失败这类真问题 */
-  error: string
+  /** 读文件失败这类真问题（存键：`msg` 或后端原话） */
+  error: Text
 
   setValue: (key: string, value: BbsValue) => void
   resetKey: (key: string) => void
@@ -132,7 +132,7 @@ export interface BbsPreset {
   refreshCurrent: () => Promise<void>
   /** 导入一份：进清单 +（如果能选）选中它 */
   importDoc: (fileName: string, doc: BbsPresetDoc) => void
-  importError: string
+  importError: Text
 }
 
 export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
@@ -145,8 +145,8 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
   const [userDoc, setUserDoc] = useState<BbsPresetDoc | null>(null)
   const [baseDoc, setBaseDoc] = useState<BbsPresetDoc | null>(null)
   const [editedKeys, setEditedKeys] = useState<Set<string>>(() => new Set())
-  const [error, setError] = useState('')
-  const [importError, setImportError] = useState('')
+  const [error, setError] = useState<Text>('')
+  const [importError, setImportError] = useState<Text>('')
   /** 切预设时丢掉的未还原改动数，要说一声 */
   const [dropped, setDropped] = useState(0)
 
@@ -184,8 +184,11 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
     if (!current) return
     if (!current.selectable) {
       setError(current.reasonKey !== undefined
-        ? tr(current.reasonKey, current.reasonArgs)
-        : `${current.name}：${current.reason ?? tr('bbs.reason.notSelectable')}`)
+        ? msg(current.reasonKey, current.reasonArgs)
+        : msg('bbs.reason.namedNotSelectable', {
+            name: current.name,
+            reason: current.reason ?? tr('bbs.reason.notSelectable'),
+          }))
       return
     }
     let alive = true
@@ -196,7 +199,7 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
       await loadDocs(Array.from(new Set([current.name, ...names])))
       if (!alive) return
       const doc = getDoc(current.name)
-      if (!doc) { setError(tr('bbs.preset.readFailed', { name: current.name })); return }
+      if (!doc) { setError(msg('bbs.preset.readFailed', { name: current.name })); return }
       setError('')
       setDropped(editedKeys.size)
       setBaseDoc(structuredClone(doc))
@@ -387,18 +390,18 @@ export function useBbsPreset(data: BbsData, source: BbsPickSource): BbsPreset {
    */
   const importDoc = useCallback((fileName: string, doc: BbsPresetDoc) => {
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-      setImportError(tr('bbs.import.notObject', { file: fileName }))
+      setImportError(msg('bbs.import.notObject', { file: fileName }))
       return
     }
     const probe = resolvePreset({ userDoc: doc, registry })
     if (Object.keys(probe.user).length === 0) {
-      setImportError(tr('bbs.import.noProcessParams', { file: fileName }))
+      setImportError(msg('bbs.import.noProcessParams', { file: fileName }))
       return
     }
     setImportError('')
     const key = data.addImported(fileName, doc)
     setCurrentKey(key)
-  }, [registry, data, tr])
+  }, [registry, data])
 
   const title = useMemo(() => {
     const name = String(userDoc?.name ?? current?.name ?? '—')

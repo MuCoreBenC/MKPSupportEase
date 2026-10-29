@@ -167,6 +167,22 @@ pub fn run() {
                 Err(e) => tracing::warn!("运行时 catalog 没就位：{e}"),
             }
 
+            /* 存储迁移（2026-10-29）：旧 delivery 副本 + baseline 摘库 → content + 索引。
+            失败保留原状，不挡启动 —— 下次再试。 */
+            if let Ok(root) = fsx::paths::internal_root(&handle) {
+                match runtime::migrate::run(&root) {
+                    Ok(true) => tracing::info!("存储结构已迁到 content + delivery-index"),
+                    Ok(false) => {}
+                    Err(e) => tracing::warn!("存储迁移没跑完（保留原状）：{e}"),
+                }
+                /* 目录身份与索引收口：每次启动都对一次当前 catalog */
+                if let Ok(catalog) = runtime::load_released_catalog(&root) {
+                    if let Err(e) = runtime::delivery_index::sync(&root, &catalog) {
+                        tracing::warn!("目录索引没对上当前 catalog：{e}");
+                    }
+                }
+            }
+
             /* 窗口外观：原生圆角 + 让 AppKit 按统一工具栏那一档摆红绿灯。
             两件事都只在 macOS 上有意义，失败都只打日志 —— 外观问题不该挡启动。
             ★ 只给客户端窗口做：工作台构建里**没有** main 窗口（见下一段），
@@ -359,6 +375,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 第十层：用户文件管理（改名 / 删除 —— 只动名字或删掉，字节一个不动）
         ipc::local::rename_local_preset,
         ipc::local::delete_local_preset,
+        // 回收站（2026-10-29）：删掉的预设可以找回
+        ipc::recovery::list_recovery,
+        ipc::recovery::restore_local_preset,
+        ipc::recovery::purge_recovery,
+        ipc::recovery::empty_recovery,
         // 第十三层：文件外部管理（在 Finder / 资源管理器里选中这一份）
         ipc::local::reveal_in_folder,
         // 第十一层：另存为一份新的（本地文件 → 本地文件，字节复制）
@@ -537,6 +558,11 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 第十层：用户文件管理（与上面那份清单一字不差）
         ipc::local::rename_local_preset,
         ipc::local::delete_local_preset,
+        // 回收站（与上面那份清单一字不差）
+        ipc::recovery::list_recovery,
+        ipc::recovery::restore_local_preset,
+        ipc::recovery::purge_recovery,
+        ipc::recovery::empty_recovery,
         // 第十三层：文件外部管理（与上面那份清单一字不差）
         ipc::local::reveal_in_folder,
         // 第十一层：另存为一份新的（与上面那份清单一字不差）

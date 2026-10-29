@@ -32,7 +32,7 @@
 import { useState } from 'react'
 
 import { api, errorText } from '../../api'
-import { useT } from '../../i18n'
+import { msg, useT, type Text } from '../../i18n'
 import { HeadNote, Modal } from '../../components/modal'
 /* 勾选共用件（2026-10-17「统一全站的勾和框」）：原来是原生绿勾，换成全站同一套墨色 */
 import { Check } from '../../components/check'
@@ -48,7 +48,7 @@ export default function ResliceNotice({
 }) {
   const tr = useT()
   const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
+  const [err, setErr] = useState<Text | null>(null)
   /* 这一趟摆出去成功了没有 —— 只用来给一句回执，不关这一屏 */
   const [shown, setShown] = useState(false)
   /*
@@ -70,7 +70,7 @@ export default function ResliceNotice({
         }
         /* 指不了：把后端的那句人话原样显示，不画箭头 */
         setShown(false)
-        setErr(t.reason ?? tr('guide.cannotShow'))
+        setErr(t.reason ?? msg('guide.cannotShow'))
       })
       .catch((e: unknown) => {
         setShown(false)

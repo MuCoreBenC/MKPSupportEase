@@ -96,7 +96,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 
 import { api, errorText, listen } from '../../api'
-import { useLocale, useT, type StringKey, type Tr } from '../../i18n'
+import { msg, useLocale, useT, type StringKey, type Tr } from '../../i18n'
 import type {
   CatalogParamDef,
   PostProcessPrintTime,
@@ -151,8 +151,10 @@ const NARROW_W = 880
 const PRINT_TIME_POLL_MS = 800
 const PRINT_TIME_POLL_MAX_MS = 30_000
 
-/** 「正在重读…」那条提示的键；读完（成或败）按原文收掉，不误伤别的提示 */
+/** 「正在重读…」那条提示的键；读完（成或败）按**这一条**收掉，不误伤别的提示 */
 const READING_NOTE: StringKey = 'report.note.reading'
+/** 同一个常量对象：存进提示条、事后按身份比对（存键的话不能拿字符串比） */
+const READING_MSG = msg(READING_NOTE)
 
 const TAB_ALL = 'all'
 
@@ -1346,7 +1348,7 @@ export default function PageReport() {
   useEffect(() => {
     if (devNote.on) {
       setNote({
-        text: tr('report.note.devExport', {
+        text: msg('report.note.devExport', {
           path: '/Users/wzy/Library/Application Support/SupportEase/exports/',
         }),
         bad: false,
@@ -1446,15 +1448,15 @@ export default function PageReport() {
          * 页面早就不在读了，提示还赖在那儿，用户只会当它坏了（提示条本来
          * 就"手动关、不自动消失"，那**读完了**这件事就必须由代码自己说）。
          */
-        setNote((cur) => (cur?.text === tr(READING_NOTE) ? null : cur))
+        setNote((cur) => (cur?.text === READING_MSG ? null : cur))
       },
       (e: unknown) => {
         setRows([])
         setErr(errorText(e))
-        setNote((cur) => (cur?.text === tr(READING_NOTE) ? null : cur))
+        setNote((cur) => (cur?.text === READING_MSG ? null : cur))
       },
     )
-  }, [tr])
+  }, [])
 
   useEffect(() => {
     read()
@@ -1639,8 +1641,9 @@ export default function PageReport() {
    * 折起来的那一栏被点了一下 ⇒ 放回去。
    *
    * 两档各走各的出口，但都只动**同一个面板**（不再有第二条"窄轨"在旁边等着）：
-   *   · 宽档：退出折叠，grid 列 44 → 340；
+   *   · 宽档：退出折叠，面板宽度 44 → 340（首列 auto 跟着连续让位）；
    *   · 窄档：面板本来就是这条窄条，把它撑开到 `min(340px, 82%)` 盖住详情。
+   * 两种收/展都是**有过程的**（260ms，见 CSS 折叠段）。
    */
   const unfoldSide = () => {
     setSidePeek(false)
@@ -1702,11 +1705,14 @@ export default function PageReport() {
    * 一个整体，只是被折到里面了和伸出来这种感觉」）。
    *
    * 所以这里不再有"列表 + 旁边一条窄轨"两个东西，而是一个 `<nav>`：
-   *   · `.sideBody` 是面板本身，**定宽 340**（宽档）/ `min(340px, 82%)`（窄档），
-   *     外壳收窄时它不重排、只被裁 —— 看起来就是把抽屉推进去；
+   *   · `.sideBody` 是面板本身，宽度**不塌**（min-width 兜着），外壳收窄时它不重排、
+   *     只被裁 —— 看起来就是把抽屉推进去；
    *   · `.sideFace` 是折起来之后露出的那张脸（竖排「执行记录」+ 条数），
-   *     绝对定位铺满外壳，只有折起来时才现形。
-   * 两者同宽同底、变换同时发生，收/展就是同一个盒子变宽变窄，不再有第二块东西等着。
+   *     绝对定位钉在左缘，常驻但平时透明。
+   *
+   * ★ 2026-10-29：收/展回了**有过程**（作者：「不够灵动…喜欢首页那种展开折叠」）——
+   *   宽度连续变，内容跟着交叉（列表先淡出、脊后浮现；展开时反过来），
+   *   任何一帧里只有一件东西是实的。进度表见 `PageReport.module.css` 的折叠段。
    */
   const listHtml = (
     <nav className={s.side} ref={sideRef} data-open={sideOpen}>
@@ -1919,7 +1925,7 @@ export default function PageReport() {
               read()
               /* 列表重读之外，右栏那条也重读 —— 打印时间可能刚从 `computing` 变成 `ready` */
               reloadDetail()
-              setNote({ text: tr(READING_NOTE), bad: false })
+              setNote({ text: READING_MSG, bad: false })
             }}
           >
             {tr('report.action.refresh')}

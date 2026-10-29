@@ -191,6 +191,27 @@
   width: clamp(86px, 6.6vw, 94px);
 }
 
+/*
+ * **多选那一列**（2026-10-29，批量删除）：固定 34px，只在多选模式下存在。
+ * 它接过名称列的 `--page-x` 左内衬（页面基准线还在同一条），名称列因此让出去
+ * —— 见下面 `[data-selecting]` 那两条。
+ */
+.thCheck,
+.tdCheck {
+  width: 36px;
+}
+
+.head th.thCheck {
+  padding-right: 0;
+  padding-left: var(--page-x);
+  text-align: left;
+}
+
+.row td.tdCheck {
+  padding-right: 0;
+  padding-left: var(--page-x);
+}
+
 /* 操作列右缘与名称列左缘等距（同 --page-x） */
 .head th.thAct,
 .row td.act {
@@ -252,6 +273,26 @@
 /* 菜单正开在这一行上：中性淡底，不染绿 */
 .row[data-active='true'] {
   background: var(--hairline);
+}
+
+/*
+ * **多选模式**（2026-10-29）：整表多一层，只做两件 CSS 的事 ——
+ * ① 名称列让出左内衬给复选框那一列（否则基准线会右移 20px，两行的字对不齐）；
+ * ② 行上给个手型（点行 = 勾选，不再是"展开详情"）。
+ */
+.table[data-selecting='true'] .head th.thName,
+.table[data-selecting='true'] .row td.name {
+  padding-left: clamp(4px, 0.9vw, 10px);
+}
+
+.table[data-selecting='true'] .row {
+  cursor: pointer;
+}
+
+/* 勾上的那一行：整行一层淡绿（与"正在生效"的绿字不同族，不抢那个语义） */
+.row[data-selected='true'],
+.row[data-selected='true']:hover {
+  background: var(--accent-soft);
 }
 
 /* 聚焦不另画圈：行开合看内容就够了 */
@@ -328,6 +369,21 @@
 
 .localState[data-state='stale'] {
   color: var(--warn);
+}
+
+/*
+ * 行首那枚结论字**可以缩、可以省略**（2026-10-29 作者截图）：它原来
+ * `flex-shrink: 0` + `nowrap`，一句长话（「无法比较：这份来自 …，当前取的是 …」）
+ * 会把同一行里的**文件名挤到 0 宽**，自己再冲出名称列压到机型格上 ——
+ * 那一行看起来就只剩半句没头没尾的话。现在它让位给文件名：
+ * 最多占半行，放不下就省略号（完整结论在详情里）。
+ */
+.localState {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*
@@ -480,9 +536,14 @@
 .useBtn {
   /* `::after` 的命中区靠它定位 */
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /*
+   * ★ 2026-10-29 **两档同宽**（作者：「use 和 in use 导致按钮宽度不一样，我有强迫症」）：
+   *   改 `inline-grid` 之后，里面那两段字（真字 + `visibility:hidden` 的「在用」副本）
+   *   叠在同一个网格格里，宽度 = **两档里更长的那个** —— 中文两字本来同宽，英文
+   *   `In use` 比 `Use` 长就靠它补齐。**不写死 px**：换语种不用再改样式。
+   */
+  display: inline-grid;
+  place-items: center;
   /*
    * ★ 2026-10-10 第四轮：**去掉 64px 定宽，回到 `.actBtn` 那一档尺码**
    *   （作者：小一点，就像那个复制的一样）。
@@ -527,6 +588,15 @@
   position: absolute;
   inset: -4px;
   border-radius: 999px;
+}
+
+/* 两档同宽的隐形副本（见上面 `.useBtn` 那段注释） */
+.useBtn > span {
+  grid-area: 1 / 1;
+}
+
+.useGhost {
+  visibility: hidden;
 }
 
 /* 悬停：底色提亮一档（平面：不浮、不凹，几何与阴影都不动） */
@@ -589,6 +659,21 @@
   transition:
     background 0.18s ease,
     color 0.18s ease;
+  /* 进行中那圈图标要绝对居中盖在字上（见 `.actBtn[data-busy]`） */
+  position: relative;
+}
+
+/* 字本身：进行中只藏起来占位，宽度因此一个字都不变 */
+.actLabel {
+  display: inline-block;
+}
+
+/* 进行中的那圈（绝对居中）。转不转由 `BusySpin` 用 WAAPI 定 */
+.actSpin {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
 }
 
 .actBtn:hover {
@@ -608,6 +693,25 @@
   background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
+}
+
+/*
+ * **进行中 ≠ 不可用**（2026-10-29 作者：「我点了下载之后它变成了灰色……要那种下载中的感觉」）。
+ * `:disabled` 那一档是"这颗现在不该点"的浅灰；正在下的那颗留在**实心**那一档。
+ *
+ * ★ 字**不换**（作者第二轮：「不希望那个字变多了，把按钮撑开了」+「用图标吧」）：
+ *   字只 `visibility: hidden` 留着占宽，一圈图标绝对居中盖上去 ——
+ *   宽度与空闲时一模一样，中文两字 / 英文 "Download" / 日文都不会撑列。
+ *
+ * 必须写在 `:disabled` 之后：同为 0,2,0，后写的赢。
+ */
+.actBtn[data-busy] {
+  background: var(--text-2);
+  color: var(--bg-1);
+  cursor: progress;
+}
+.actBtn[data-busy] .actLabel {
+  visibility: hidden;
 }
 
 /* 已生效 / 已下载：灰字，不是按钮 */
@@ -946,11 +1050,15 @@
 /*
  * 键宽**定死、且不许换行**（2026-10-27 作者："字段不要换行，就一行显示完整名字"）：
  * 56px 放不下「本地版本时间」那种六字键，一换行就把那一行撑成两倍高，
- * 上下间距看着忽宽忽窄。92px = 七字档（当前最长一行），照旧左对齐。
+ * 上下间距看着忽宽忽窄。照旧左对齐。
+ *
+ * 92 → 104px（2026-10-29）：新加的「本地 / 云端 SHA-256」中文量出来正好 92px（顶格），
+ * 英文 "Cloud SHA-256" 是 102px —— 定宽定死要按**最长的那个**留，不然英文界面那一列
+ * 会压到值上（这就是上一轮「当前源地址（当前设置）」那次事故的同一个坑）。
  */
 .dKey {
   flex-shrink: 0;
-  width: 92px;
+  width: 104px;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -1013,6 +1121,105 @@
   margin: 10px 0 0;
   font-size: var(--fs-label);
   line-height: 1.6;
+  color: var(--text-2);
+}
+
+/* 来源那一格后面的小字解释（未知 / 分支未记录） */
+.dWhyInline {
+  margin-left: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 判定那一行括注的**原始枚举**（2026-10-29）：人话在前、机器值在后。
+ * 用等宽字 + 灰一档 —— 它是给排查用的注解，不该跟人话抢同一条视线。
+ */
+.dVerdictRaw {
+  margin-left: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 目录自相矛盾那一档：报警色 */
+.dWarn {
+  color: var(--danger, #d92d20);
+}
+
+/* 状态文字后面那颗动作（「有新版本」→ 绿色「更新」） */
+.dInlineAction {
+  margin-left: 10px;
+  vertical-align: baseline;
+}
+
+/* 「云端新版发布」后面那枚来源标记（`Gitee · main`） */
+.dSourceTag {
+  margin-left: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 「更多」里的技术值：等宽、可换行（长 SHA / 身份不撑破卡片） */
+.dMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 「更多」折叠区（2026-10-29） ---------- */
+
+.dMore {
+  margin-top: 10px;
+}
+
+.dMoreSummary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.dMoreSummary:hover {
+  color: var(--text-1);
+}
+
+.dMoreHint {
+  color: var(--text-3);
+}
+
+/*
+ * 展开区**不给底色、不给内衬**（2026-10-29 作者：「为什么要给它加一个这个背景呢？
+ * 它右侧还空出来了这么一大片」）：它只占左栏那么宽，套个浅底就是一个"半截的框"，
+ * 右边那片空白反倒更显眼。与上面那些 `dRow` 一样当普通展示行处理即可。
+ */
+.dMoreBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.dMoreGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dMoreLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.dMoreMono {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   color: var(--text-2);
 }
 
@@ -1271,6 +1478,7 @@
   font: inherit;
   font-size: var(--fs-label);
   cursor: pointer;
+  position: relative;
 }
 
 .updateBtn:hover:not(:disabled) {
@@ -1281,6 +1489,16 @@
   background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
+}
+
+/* 同 `.actBtn[data-busy]`：进行中保持实心，只是深一档 */
+.updateBtn[data-busy] {
+  background: var(--accent-deep);
+  color: #fff;
+  cursor: progress;
+}
+.updateBtn[data-busy] .actLabel {
+  visibility: hidden;
 }
 
 /* 卡底安静的描边小按钮 */

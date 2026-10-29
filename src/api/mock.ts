@@ -348,16 +348,35 @@ let mockPinBeforeCompact: PinPref | null = null
  * 照实留空，不在演示数据里编一个 `github#…` 出来（那会让人以为判据在跑）。
  */
 const MOCK_FACTS: BasedOnFacts = {
+  lineageKind: null,
   lineageSource: null,
   lineageRelease: null,
   lineagePublishedAt: null,
+  lineageSha256: null,
   cloudSource: null,
   cloudPublishedAt: null,
+  cloudSha256: null,
   /* 发布线 / 序号：演示数据里也没有真目录身份 —— 照样留空（老目录那种"说不清"） */
   lineageCatalog: null,
   lineageSerial: null,
   cloudCatalog: null,
   cloudSerial: null,
+  unverifiedReason: null,
+}
+
+/** 演示里的"从 main 下载"那一档：源身份 + 对应版本的发布时间都定格在下载那一刻 */
+const MOCK_DOWNLOAD_FACTS: BasedOnFacts = {
+  ...MOCK_FACTS,
+  lineageKind: 'download',
+  lineageSource: 'github#MuCoreBenC/MKPSupportEase@main',
+  lineagePublishedAt: '2026-10-15T05:46:00Z',
+  lineageSha256: 'a2'.padEnd(64, '0'),
+  cloudSource: 'github#MuCoreBenC/MKPSupportEase@main',
+  cloudPublishedAt: '2026-10-15T05:46:00Z',
+  lineageCatalog: 'support-ease',
+  lineageSerial: 1,
+  cloudCatalog: 'support-ease',
+  cloudSerial: 1,
 }
 
 const mockLocal: LocalPresetFile[] = [
@@ -388,16 +407,19 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'current',
-    basedOnFacts: MOCK_FACTS,
+    basedOnFacts: MOCK_DOWNLOAD_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-standard.toml',
     basedOnRelease: '2026-10-05 08:00:00',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'STANDARD',
     machineId: 'A1',
     versionId: 'STANDARD',
-    copiedFrom: null,
-    copiedFromName: null,
-    provenance: null,
+    provenanceKind: 'download',
+    originPath: null,
+    originName: null,
+    cloudFile: 'A1-standard.toml',
+    versionPublishedAt: '2026-10-15T05:46:00Z',
+    obtainedUnix: 1780000000,
   },
   {
     /* 云端新版落下来的那一份（`current`，带 2026-10-15 那一版的发布时间） */
@@ -409,16 +431,19 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'current',
-    basedOnFacts: MOCK_FACTS,
+    basedOnFacts: MOCK_DOWNLOAD_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-10-15 09:00:00',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
     machineId: 'A1',
     versionId: 'FAST',
-    copiedFrom: null,
-    copiedFromName: null,
-    provenance: null,
+    provenanceKind: 'download',
+    originPath: null,
+    originName: null,
+    cloudFile: 'A1-fast.toml',
+    versionPublishedAt: '2026-10-15T05:46:00Z',
+    obtainedUnix: 1780900000,
   },
   {
     /*
@@ -433,16 +458,19 @@ const mockLocal: LocalPresetFile[] = [
     state: 'ok',
     stateDetail: null,
     basedOn: 'outdated',
-    basedOnFacts: MOCK_FACTS,
+    basedOnFacts: MOCK_DOWNLOAD_FACTS,
     basedOnLabel: 'delivery/mkp/presets/A1-fast.toml',
     basedOnRelease: '2026-05-29 04:26:12',
     basedOnMachineId: 'A1',
     basedOnVersionId: 'FAST',
     machineId: 'A1',
     versionId: 'FAST',
-    copiedFrom: null,
-    copiedFromName: null,
-    provenance: null,
+    provenanceKind: 'copy',
+    originPath: 'presets-local/A1-fast.toml',
+    originName: 'A1-fast.toml',
+    cloudFile: 'A1-fast.toml',
+    versionPublishedAt: '2026-10-15T05:46:00Z',
+    obtainedUnix: 1780500000,
   },
   {
     /* 手工放进来的、认不出是哪一类的（`kind: null`：合法状态，详情里照实写"认不出"） */
@@ -461,9 +489,12 @@ const mockLocal: LocalPresetFile[] = [
     basedOnVersionId: null,
     machineId: null,
     versionId: null,
-    copiedFrom: null,
-    copiedFromName: null,
-    provenance: null,
+    provenanceKind: 'import',
+    originPath: null,
+    originName: null,
+    cloudFile: null,
+    versionPublishedAt: null,
+    obtainedUnix: 1780003600,
   },
   {
     /*
@@ -486,9 +517,12 @@ const mockLocal: LocalPresetFile[] = [
     basedOnVersionId: null,
     machineId: null,
     versionId: null,
-    copiedFrom: null,
-    copiedFromName: null,
-    provenance: null,
+    provenanceKind: null,
+    originPath: null,
+    originName: null,
+    cloudFile: null,
+    versionPublishedAt: null,
+    obtainedUnix: null,
   },
 ]
 /** 正文库。键 = 相对用户根的路径。真机上每一份都能读；假后端里先把演示那份种上 */
@@ -765,6 +799,19 @@ mockLocalText.set(
  * 保存 / 改名这些**改写**动作则不碰它（改名只搬家）。
  */
 const mockLocalOrigin = new Map<string, string>(mockLocalText)
+
+/* 回收站（演示）：删掉的条目连同正文 / 镜像一起收着，恢复时原样放回 */
+const mockRecovery: {
+  id: string
+  path: string
+  fileName: string
+  deletedAt: number
+  hasOrigin: boolean
+  cloudFile: string | null
+}[] = []
+const mockRecoveryFiles = new Map<string, LocalPresetFile>()
+const mockRecoveryTexts = new Map<string, string>()
+const mockRecoveryOrigins = new Map<string, string>()
 
 /* ---------- 逐参数「云端更新」（2026-10-09）----------
  *
@@ -1699,9 +1746,12 @@ export const mockApi: MkpApi = {
       machineId: 'A1',
       versionId: 'STANDARD',
       /* 云端另存出来的：出处走 based_on 血统（界面上显示"复制自云端 X"），账本不重复记 */
-      copiedFrom: null,
-      copiedFromName: null,
-      provenance: null,
+      provenanceKind: null,
+      originPath: null,
+      originName: null,
+      cloudFile: null,
+      versionPublishedAt: null,
+      obtainedUnix: null,
     }
     if (replaced) {
       mockLocal[mockLocal.findIndex((f) => f.path === path)] = entry
@@ -1911,10 +1961,13 @@ export const mockApi: MkpApi = {
       path: newPath,
       fileName: name,
       modifiedUnix: nowSec(),
-      /* 与真机同形：复制出来的那份在出处账里记着从哪来（界面上「来源：复制自 X」） */
-      copiedFrom: path,
-      copiedFromName: hit.fileName,
-      provenance: 'copy' as const,
+      /* 与真机同形：拷贝出来的那份在来路账里记着母本与继承的版本身份 */
+      provenanceKind: 'copy' as const,
+      originPath: path,
+      originName: hit.fileName,
+      cloudFile: hit.cloudFile,
+      versionPublishedAt: hit.versionPublishedAt,
+      obtainedUnix: nowSec(),
     })
     /* 出处账那一条：这份是复制出来的（真机 `copy_local_preset` 里 `provenance::record`） */
     mockCopyTargets.add(newPath)
@@ -2060,10 +2113,13 @@ export const mockApi: MkpApi = {
         /* 导入的裸文件没有归属（文件头里没有那两行）—— 照实 null */
         machineId: null,
         versionId: null,
-        /* 与真机同形：导入进来的在出处账里记一档「导入」 */
-        copiedFrom: null,
-        copiedFromName: null,
-        provenance: 'import',
+        /* 与真机同形：导入进来的在来路账里记一档「导入」，没有源身份 / 目录四格 */
+        provenanceKind: 'import' as const,
+        originPath: null,
+        originName: null,
+        cloudFile: null,
+        versionPublishedAt: null,
+        obtainedUnix: nowSec(),
       })
       outcomes.push({ source: item.source, ok: true, path, fileName: name, message: '' })
     }
@@ -2112,14 +2168,68 @@ export const mockApi: MkpApi = {
     if (mockDraft !== null && mockDraft.origin === 'local' && mockDraft.path === path) {
       mockDraft = null
     }
+    const file = mockLocal[i]
+    const id = `${Math.floor(Date.now() / 1000)}-${i}`
+    mockRecovery.unshift({
+      id,
+      path,
+      fileName: file.fileName,
+      deletedAt: Math.floor(Date.now() / 1000),
+      hasOrigin: mockLocalOrigin.has(path),
+      cloudFile: file.cloudFile,
+    })
+    mockRecoveryFiles.set(id, file)
+    const text = mockLocalText.get(path)
+    if (text != null) mockRecoveryTexts.set(id, text)
+    const origin = mockLocalOrigin.get(path)
+    if (origin != null) mockRecoveryOrigins.set(id, origin)
+
     mockLocal.splice(i, 1)
     mockLocalText.delete(path)
-    /* 原文镜像一起走（这份都没了，"它最初的样子"不该留着） */
     mockLocalOrigin.delete(path)
-    /* 备注覆盖跟着删（删了重新下载 / 重新复制 = 回到工作台那句） */
     mockRemarks.delete(path)
-    /* 逐参数「云端更新」决定账跟着删：文件都不在了，留着一本账只会是悬空的 */
     mockParamDecisions.delete(path)
+  },
+
+  async listRecovery() {
+    return [...mockRecovery]
+  },
+
+  async restoreLocalPreset(id) {
+    const entry = mockRecovery.find((e) => e.id === id)
+    const file = mockRecoveryFiles.get(id)
+    if (entry === undefined || file === undefined) throw new Error('回收站里没有这一条')
+    if (mockLocal.some((f) => f.path === entry.path)) {
+      throw new Error('原位置已经有一份同名预设，先改名或删掉它再恢复')
+    }
+    mockLocal.push(file)
+    const text = mockRecoveryTexts.get(id)
+    if (text != null) mockLocalText.set(entry.path, text)
+    const origin = mockRecoveryOrigins.get(id)
+    if (origin != null) mockLocalOrigin.set(entry.path, origin)
+    mockRecoveryFiles.delete(id)
+    mockRecoveryTexts.delete(id)
+    mockRecoveryOrigins.delete(id)
+    const i = mockRecovery.findIndex((e) => e.id === id)
+    if (i !== -1) mockRecovery.splice(i, 1)
+    return entry.path
+  },
+
+  async purgeRecovery(id) {
+    mockRecoveryFiles.delete(id)
+    mockRecoveryTexts.delete(id)
+    mockRecoveryOrigins.delete(id)
+    const i = mockRecovery.findIndex((e) => e.id === id)
+    if (i !== -1) mockRecovery.splice(i, 1)
+  },
+
+  async emptyRecovery() {
+    const n = mockRecovery.length
+    mockRecovery.length = 0
+    mockRecoveryFiles.clear()
+    mockRecoveryTexts.clear()
+    mockRecoveryOrigins.clear()
+    return n
   },
 
   async getSlicerCopied() {
@@ -2898,10 +3008,15 @@ export const mockApi: MkpApi = {
         basedOnVersionId: hit.versionId,
         machineId: hit.machineId,
         versionId: hit.versionId,
-        /* 它是从云端原件落下来的：出处账记着从哪来（界面上「来源」那一格） */
-        copiedFrom: label,
-        copiedFromName: fileName,
-        provenance: 'copy' as const,
+        /* 它是从云端原件落下来的：来路记成「下载」，不是拷贝 */
+        provenanceKind: 'download' as const,
+        originPath: null,
+        originName: null,
+        cloudFile: fileName,
+        versionPublishedAt:
+          MOCK_PRESET_VERSIONS.find((v) => v.fileName === fileName && v.current)
+            ?.publishedAt ?? null,
+        obtainedUnix: nowSec(),
       })
     }
     /*
@@ -2939,9 +3054,14 @@ export const mockApi: MkpApi = {
         basedOnVersionId: hit.versionId,
         machineId: hit.machineId,
         versionId: hit.versionId,
-        copiedFrom: label,
-        copiedFromName: fileName,
-        provenance: 'copy' as const,
+        provenanceKind: 'download' as const,
+        originPath: null,
+        originName: null,
+        cloudFile: fileName,
+        versionPublishedAt:
+          MOCK_PRESET_VERSIONS.find((v) => v.fileName === fileName && v.current)
+            ?.publishedAt ?? null,
+        obtainedUnix: nowSec(),
       })
       return { fetched: false, created: true, fileName: name, path: newPath }
     }

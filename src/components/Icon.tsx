@@ -79,6 +79,7 @@ export type IconName =
   | 'caret'
   | 'pencil'
   | 'fileCopy'
+  | 'progress'
 
 const paths: Record<IconName, string> = {
   home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
@@ -140,6 +141,11 @@ const paths: Record<IconName, string> = {
   pencil: 'M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5zM15 5l4 4',
   /* 复制文件：一份文件 + 右下角一枚加号（= 再出一份）。别画成两份纸 —— 那是 `copy` */
   fileCopy: 'M8 3h6l3 3v7H8zM14 3v3h3M12 19h5M14.5 16.5v5',
+  /*
+   * 进行中那一圈（八根辐条，转起来就是"正在办"）：行内动作跑着的时候**替掉文字**。
+   * 动效不在图标里 —— 由调用方用 WAAPI 转它（WKWebView 上 CSS animation 不播）。
+   */
+  progress: 'M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.2 16.2l2.8 2.8M2 12h4M18 12h4M4.9 19.1l2.8-2.8M16.2 7.8l2.8-2.8',
 }
 
 interface IconProps {

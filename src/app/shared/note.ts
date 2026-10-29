@@ -6,9 +6,16 @@
  * 预设页那一份也是这么分的（版面在 `presets/PagePresets.tsx`，话术在 `presets/presetTree.ts`）。
  */
 
-/** 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」 */
+import type { Text } from '../../i18n'
+
+/**
+ * 页面上那一句话：做了什么 / 缺什么。`bad` 的那一种是「没接上」，不是「操作失败」。
+ *
+ * `text` 是 [`Text`]（`msg(键, 变量)` 或原样句子）：这句话会一直躺在页脚直到下一次动作，
+ * 换语言时它得跟着换字 ⇒ **存键，不存 `t()` 的结果**（渲染处用 `useText()`）。
+ */
 export interface Note {
-  text: string
+  text: Text
   bad: boolean
 }
 

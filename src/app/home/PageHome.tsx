@@ -25,7 +25,7 @@ import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
-import { useLocale, useT, type StringKey } from '../../i18n'
+import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
 import { bi } from '../shared/dataLabel'
 import { activeForSelection, selectionFromActive } from './activeSelection'
 import { notify } from '../notify/notify'
@@ -123,6 +123,7 @@ interface PageHomeProps {
 export default function PageHome({ density }: PageHomeProps) {
   /* 这一页所有用户能读到的字都走字典（2026-10-26） */
   const tr = useT()
+  const say = useText()
   const locale = useLocale()
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
@@ -136,7 +137,8 @@ export default function PageHome({ density }: PageHomeProps) {
   const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
 
-  const [openModel, setOpenModel] = useState<{ id: string; name: string } | null>(null)
+  /** `name` 存键（`msg`）：这个弹窗会一直开着，换语言时框里那几句话得跟着翻 */
+  const [openModel, setOpenModel] = useState<{ id: string; name: Text } | null>(null)
   /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
@@ -321,14 +323,14 @@ export default function PageHome({ density }: PageHomeProps) {
             /* 撤不掉就如实说，不留一个「以为撤了」的界面 */
             notify({
               kind: 'bad',
-              title: tr('home.unapply.failed'),
+              title: msg('home.unapply.failed'),
               text: errorText(e),
               ttl: 6000,
             })
           })
       }
     },
-    [sel, activeForSel, tr],
+    [sel, activeForSel],
   )
 
   /* ---------- 三级的清单：数据源是契约（getMachines），不再是手编表 ---------- */
@@ -675,10 +677,10 @@ export default function PageHome({ density }: PageHomeProps) {
         kind: 'ok',
         title:
           bundleState.kind === 'ready'
-            ? tr('home.note.used')
+            ? msg('home.note.used')
             : bundleState.kind === 'drift'
-              ? tr('home.note.updated')
-              : tr('home.note.downloaded'),
+              ? msg('home.note.updated')
+              : msg('home.note.downloaded'),
       })
     } catch (e) {
       const msg = errorText(e)
@@ -706,7 +708,7 @@ export default function PageHome({ density }: PageHomeProps) {
     try {
       await api.applyActivePreset(pickedCopy.fileName, 'local', pickedCopy.path)
       appStateMutated()
-      notify({ kind: 'ok', title: tr('home.note.used') })
+      notify({ kind: 'ok', title: msg('home.note.used') })
     } catch (e) {
       const msg = errorText(e)
       setApplyError(msg)
@@ -714,7 +716,7 @@ export default function PageHome({ density }: PageHomeProps) {
     } finally {
       setApplying(false)
     }
-  }, [applying, pickedCopy, tr])
+  }, [applying, pickedCopy])
 
   /*
    * 那颗主按钮的**目标**与**文字**（2026-10-17 晚，两改）：
@@ -817,7 +819,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 2026-10-28 起底部那颗透明气泡退役（作者：「感觉劣质很廉价」），
    * 页脚那颗与卡片里的 `CopyAction` 都走这里。
    */
-  const noteCopyProblem = useCallback((note: string) => {
+  const noteCopyProblem = useCallback((note: Text) => {
     notify({ kind: 'warn', title: note, ttl: 6000 })
   }, [])
 
@@ -826,7 +828,7 @@ export default function PageHome({ density }: PageHomeProps) {
       (cmd) => {
         if (!cmd.ready || cmd.command === undefined) {
           setScriptCopied(false)
-          noteCopyProblem(cmd.reason ?? tr('home.script.notReady'))
+          noteCopyProblem(cmd.reason ?? msg('home.script.notReady'))
           return
         }
         void navigator.clipboard.writeText(cmd.command).then(
@@ -846,7 +848,7 @@ export default function PageHome({ density }: PageHomeProps) {
         notify({ kind: 'bad', title: errorText(e), ttl: 6000 })
       },
     )
-  }, [loadCommand, noteCopyProblem, tr])
+  }, [loadCommand, noteCopyProblem])
 
   /**
    * 四步共用那颗「复制脚本」（住 navs 左侧那一组 —— 作者：「它应该放到左侧吧」）。
@@ -1111,7 +1113,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'z', name: tr('home.calib.zPlate') }),
+              onClick: () => setOpenModel({ id: 'z', name: msg('home.calib.zPlate') }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
@@ -1203,7 +1205,7 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'xy', name: tr('home.calib.xyPlate') }),
+              onClick: () => setOpenModel({ id: 'xy', name: msg('home.calib.xyPlate') }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
@@ -1294,7 +1296,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 label: tr('home.calib.openTest'),
                 primary: true,
                 onClick: () =>
-                  setOpenModel({ id: TEST_MODEL_ID, name: tr('home.calib.testModel') }),
+                  setOpenModel({ id: TEST_MODEL_ID, name: msg('home.calib.testModel') }),
               },
               { label: tr('home.nav.home'), onClick: () => deckRef.current?.jumpTo(0) },
             ]}
@@ -1459,15 +1461,15 @@ export default function PageHome({ density }: PageHomeProps) {
           {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={p.note}>
             {modelBusy
-              ? tr('home.openModel.working', { name: openModel.name })
+              ? tr('home.openModel.working', { name: say(openModel.name) })
               : modelInfo === null
-                ? tr('home.openModel.checking', { name: openModel.name })
+                ? tr('home.openModel.checking', { name: say(openModel.name) })
                 : modelInfo.ready
                   ? tr('home.openModel.hasCache', {
-                      name: openModel.name,
+                      name: say(openModel.name),
                       size: modelInfo.size ?? tr('home.openModel.sizeUnknown'),
                     })
-                  : tr('home.openModel.noCache', { name: openModel.name })}
+                  : tr('home.openModel.noCache', { name: say(openModel.name) })}
           </p>
           {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
               下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}

@@ -121,9 +121,10 @@ import Icon from '../../components/Icon'
    `components/Icon`，但箭头要和报告页 / 参数卡 / 历史抽屉是同一颗形状 —— 两个图标集
    并存是既有的债（见 `app/shell/icons` 头注释），箭头这一处先统一 */
 import Chevron from '../shell/icons'
+/* 多选那一列的两颗框（表头全选 / 行勾选）走共用件 —— 全站勾与框的唯一出口 */
+import Check from '../../components/check/Check'
 import ui from '../ui/ui.module.css'
 import { useT } from '../../i18n'
-import type { Tr } from '../../i18n'
 import type { Machine } from '../../api'
 /*
  * ★ 2026-10-14：原来这里 `import { machineToneKeyOf } from '../ui/machineTone'`，
@@ -138,16 +139,13 @@ import {
   archiveOpenText,
   ASSET_STATE_TEXT,
   ASSET_USE_TEXT,
-  BASED_ON_KEY,
-  basedOnCellText,
-  RELEASE_LINE_KEY,
-  releaseLineText,
+  BASED_ON_TEXT,
   cloudClaimBadge,
-  cloudRowState,
   CLOUD_STATE_TEXT,
   DASH_,
   LOCAL_DRAWER,
   LOCAL_UNREADABLE_TEXT,
+  localUnreadableWhy,
   PARAMS_TEXT,
   PRESET_UNTRUSTED_NOTE,
   UPDATE_ACTION_TEXT,
@@ -157,9 +155,11 @@ import {
   USAGE_HINT,
   USAGE_KEY,
   usageCellText,
+  identityDisplayOf,
   isDetachedCopy,
   originCellOf,
   updateStateOf,
+  updateStatusOf,
   UNKNOWN,
   versionsText,
 } from './presetTree'
@@ -176,30 +176,23 @@ import type {
 import s from './PresetTable.module.css'
 
 /**
+ * 摘要的短写法：前 12 位 + 省略号（`null` / 空串 ⇒ `null`，由调用方决定写什么）。
+ *
+ * 完整 64 位永远在 `title` 里（2026-10-29 作者：页面可以继续显示短摘要，
+ * 完整值放悬浮提示）。**不在这里算出"未知"** —— 那是文案，归 i18n。
+ */
+function shortSha(sha: string | null): string | null {
+  if (sha === null || sha === '') return null
+  return sha.length > 12 ? `${sha.slice(0, 12)}…` : sha
+}
+
+/**
  * MKP 云端行操作列那一格（2026-10-09）：三态两种动作，**状态与动作用词都从一处出**
  * （[`CLOUD_LOCAL_TEXT`] / [`CLOUD_LOCAL_ACTION`] / [`CLOUD_LOCAL_WHY`]）。
  *
  * 「本地已有」那一档**不给按钮**：那颗按钮按下去没有意义（要改、要用都在本地表那一行上），
  * 而摆一个看起来能点的东西比不摆糟得多 —— 画一枚灰字，`title` 里说清该去哪儿。
  */
-/**
- * 展开详情里「发布线」那一行（2026-10-28）。
- *
- * **`text == null` 就整行不渲染** —— 老目录 / 老副本没有这条信息，摆一行"未知"
- * 只会让人以为界面没做完（这条判断在 `releaseLineText` 里，一处出）。
- */
-function ReleaseLineRow({ tr, text }: { tr: Tr; text: string | null }) {
-  if (text == null) return null
-  return (
-    <div className={s.dRow}>
-      <span className={s.dKey}>{tr(RELEASE_LINE_KEY)}</span>
-      <span className={`${s.dVal} ${s.dOne}`} title={text}>
-        {text}
-      </span>
-    </div>
-  )
-}
-
 function CloudLocalAction({
   row,
   busy,
@@ -220,15 +213,14 @@ function CloudLocalAction({
    *   四档动作：`download`（我这儿一份都没有）/ `update`（有新版，或说不清要建基线）/
    *   `none`（不给按钮）/ `none + warn`（目录自相矛盾，报警）。
    */
-  const st = cloudRowState(row)
+  const st = updateStatusOf(row)
   if (st.action === 'none') {
-    /* 一句话都没有的那种（`newer` / `elsewhere`）：作者要「就当无事发生」⇒ 整格不画 */
-    if (st.text === null && !st.warn) return null
+    if (st.text === null) return null
     return (
       <>
-        {st.warn && st.text !== null && (
+        {st.warn && (
           <span className={s.actWarn} title={tr('presets.table.inconsistent.title')}>
-            {tr(st.text)}
+            {tr(st.text, st.params)}
           </span>
         )}
         {!st.warn && <span className={s.actNone}>{DASH_}</span>}
@@ -241,17 +233,82 @@ function CloudLocalAction({
    * `download` 是白底，`update` 是绿底（同一个 `.updateBtn`）。
    */
   const isUpdate = st.action === 'update'
+  const label = tr(
+    isUpdate ? 'presets.tree.cloudLocalAction.stale' : 'presets.tree.cloudLocalAction.none',
+  )
+  /*
+   * **进行中 = 一圈图标盖在字上，字只藏起来占位**（2026-10-29 作者两轮口径）：
+   *   第一轮「不要因为我点了别的按钮就变回去」⇒ 状态改成按行的集合（在页面层）；
+   *   第二轮「不希望它那个字变多了，因为它从两个字变成3个字，把按钮撑开了」+「用图标吧」
+   *   ⇒ 不再换字，**字留在原地只 `visibility:hidden`**，图标绝对居中盖上去。
+   *
+   * 这样按钮宽度与空闲时**一模一样**：中文「下载」、英文 "Download"、将来的日文，
+   * 都不会因为"进行中"那三个字更长而把操作列撑开（操作列是定宽 clamp，撑不开就顶破）。
+   * "下载中 / Downloading" 仍然给屏幕阅读器与悬停看（`aria-label` / `title`），
+   * 它在提示里，长度不再影响布局。
+   *
+   * `data-busy` 把 `:disabled` 那档浅灰收回实心 —— 它是在做事，不是不可点。
+   */
   return (
     <button
       type="button"
       className={isUpdate ? s.updateBtn : s.actBtn}
       disabled={busy}
+      data-busy={busy ? '' : undefined}
+      aria-busy={busy || undefined}
+      aria-label={
+        busy
+          ? tr(
+              isUpdate
+                ? 'presets.tree.cloudLocalAction.updating'
+                : 'presets.tree.cloudLocalAction.downloading',
+            )
+          : undefined
+      }
+      title={
+        busy
+          ? tr(
+              isUpdate
+                ? 'presets.tree.cloudLocalAction.updating'
+                : 'presets.tree.cloudLocalAction.downloading',
+            )
+          : undefined
+      }
       onClick={() => onDownload(row)}
-      /* 说不清版本关系时，这一下点击的含义要多说一句（文案在 `cloudRowState` 里定） */
-      title={st.hint === null ? undefined : tr(st.hint)}
     >
-      {tr(isUpdate ? 'presets.tree.cloudLocalAction.stale' : 'presets.tree.cloudLocalAction.none')}
+      <span className={s.actLabel}>{label}</span>
+      {busy && <BusySpin />}
     </button>
+  )
+}
+
+/**
+ * 进行中那一圈。**盖在字上面**（绝对居中），字只藏不删 —— 按钮宽度一个字都不动。
+ *
+ * ★ 动效走 WAAPI：WKWebView 上 CSS animation 不播（同 `app/components/UpdateIndicator.tsx`）。
+ * ★ `prefers-reduced-motion` 时不转：不转的辐条圈仍然读得出"在处理"，只是不晃。
+ */
+function BusySpin() {
+  const ref = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el === null) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const anim = el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], {
+      duration: 900,
+      iterations: Infinity,
+      easing: 'linear',
+    })
+    return () => anim.cancel()
+  }, [])
+
+  return (
+    <span className={s.actSpin}>
+      <span ref={ref}>
+        <Icon name="progress" size={13} strokeWidth={2} />
+      </span>
+    </span>
   )
 }
 
@@ -364,18 +421,18 @@ interface Props {
    */
   expandedKey: string | null
   onToggleExpand: (rowKey: string) => void
-  /** 正在做动作的那一行（rowKey）。只禁那一颗按钮，不锁整张表 */
-  busyKey: string | null
+  /**
+   * 正在做动作的那几行（rowKey 集合）。只禁那几颗按钮，不锁整张表。
+   *
+   * **是集合不是单值**（2026-10-29 作者）：两次下载可以同时在跑，后点的那一行
+   * 不该把前一行的「进行中」顶掉 —— 详见 `PagePresets` 里 `busyKeys` 的注释。
+   */
+  busyKeys: ReadonlySet<string>
   /**
    * 定位到来源那一行（「复制自 X」可点击那一格的落点）：切轴 + 展开 + 滚动 + 闪光
    * 全在页面层（与状态条「定位」同一个 overlay 机制），表这边只把点击交出去。
    */
   onLocate: (target: LocateTarget) => void
-  /**
-   * 当前数据源（`gitee` / `github` / `custom`）—— preset 行「来源」列显示
-   * GitHub / Gitee / 自定义源 的依据。null = 没配源，来源退「云端」。
-   */
-  sourceLabel: string | null
   /** 表头那一列怎么排（页面层持有；落会话，切页回来不复位） */
   sort: PresetSort
   /** 点表头。同一列升 / 降互换，换列从升序起（时间列除外，见 `usePresetData`） */
@@ -451,6 +508,25 @@ interface Props {
    */
   usage: Map<string, number>
   /**
+   * **多选（批量删除）**（2026-10-29 作者：「我想批量删除」）。省略 = 平常那张表。
+   *
+   * 给了这一格，表就多出**最左一列复选框**，而且**点行 = 勾选**（不再展开）——
+   * 两件事必须一起变：只加复选框、点行还展开的话，用户在选东西时每点一行就弹一张卡。
+   *
+   * 判据（谁能勾）不在表里：`whyNot` 由页面给（唯一实现 `removeWhyNotOf`），
+   * 表只负责画与转发 —— 与这一页别处「结论只算一次」同一条规矩。
+   */
+  selection?: {
+    /** 已经勾上的（`rowKey`） */
+    keys: Set<string>
+    /** 这一行为什么不能勾。`undefined` = 能勾 */
+    whyNot: (row: PresetTableRow) => string | undefined
+    onToggle: (rowKey: string) => void
+    /** 表头那颗全选 / 取消全选（页面按「能勾的那几行」算） */
+    onAll: () => void
+    onNone: () => void
+  }
+  /**
    * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂 = 关）。
    *
    * **关**时复制 / 导入出来的那几份是**独立的一份**：它们不认云端 —— 云端换版时
@@ -471,12 +547,11 @@ export default function PresetTable({
   failure,
   triggerProps,
   activeKey,
-  busyKey,
+  busyKeys,
   /** 展开详情的那一行(rowKey)。状态在页面层(右键菜单也要能展开它) */
   expandedKey,
   onToggleExpand,
   onLocate,
-  sourceLabel,
   sort,
   onSort,
   archiveCountOf,
@@ -493,10 +568,20 @@ export default function PresetTable({
   onSetAttribution,
   usage,
   copiesFollow,
+  selection,
 }: Props) {
   /* 这一个布尔决定表头有几列、每行画哪几格。两处都读它，不许各判一次 */
   const mkp = kind === 'mkp'
   const tr = useT()
+  /*
+   * 多选那一路的量：`select === null` = 没在多选。表头那颗框的半选态与
+   * 「全选 / 取消全选」都从这两份集合算 —— 只算一次，散在各行里各判一遍会算歪。
+   */
+  const select = selection ?? null
+  const selectable = select === null ? [] : rows.filter((r) => select.whyNot(r) === undefined)
+  const allChosen =
+    select !== null && selectable.length > 0 && selectable.every((r) => select.keys.has(r.rowKey))
+  const someChosen = select !== null && selectable.some((r) => select.keys.has(r.rowKey))
 
   /*
    * 展开卡底部那两条编辑带（备注 / 归属）的开关 —— 2026-10-10 第八轮。
@@ -563,9 +648,30 @@ export default function PresetTable({
   return (
     <div className={s.hold}>
       <div className={s.wrap}>
-        <table className={s.table}>
+        {/* `data-selecting` 只给 CSS 用：多选时名称列让出左内衬给复选框那一列 */}
+        <table className={s.table} data-selecting={select !== null}>
           <thead className={s.head}>
             <tr>
+              {/*
+               * **多选那一列**（2026-10-29）：最左、固定 34px，只在多选模式下存在。
+               * 表头那颗是**全选**（原生 checkbox，半选态由 `indeterminate` 画）；
+               * 它只勾"能删的"那几行 —— 勾一个不能删的只会让下面的「删除选中」按下去没反应。
+               */}
+              {select !== null && (
+                <th className={s.thCheck} scope="col">
+                  <span title={tr('presets.table.select.allTitle')}>
+                    {/* 共用件 `Check`（全站勾与框的唯一出口，见 `components/check`）——
+                        半选走它的 `indeterminate`，不自己画横杠 */}
+                    <Check
+                      checked={allChosen}
+                      indeterminate={someChosen && !allChosen}
+                      disabled={selectable.length === 0}
+                      ariaLabel={tr('presets.table.select.allAria')}
+                      onChange={(next) => (next ? select.onAll() : select.onNone())}
+                    />
+                  </span>
+                </th>
+              )}
               {/*
                * **每一列都能点着排序**（2026-10-16 作者：「表头加上排序吧……名称排序，
                * 机型排序，所有的都排序，时间也排序」）。
@@ -632,7 +738,7 @@ export default function PresetTable({
                * 云端的「已下载」不画线 —— 下载不等于生效，九行里有八行带绿线那道线就没意思了。
                */
               const inUse = row.scope === 'local' ? row.live : row.applied
-              const busy = row.rowKey === busyKey
+              const busy = busyKeys.has(row.rowKey)
               /*
                * preset 行的**云端 vs 盘上**三态（未下载 / 已下载 / 有更新）——
                * 状态主词与按钮都从它出（见 `updateStateOf`）。以前"盘上字节认不出"那一档
@@ -641,9 +747,63 @@ export default function PresetTable({
                */
               const updateState =
                 row.presetState !== undefined ? updateStateOf(row.presetState) : undefined
+              /*
+               * ★ **更新状态唯一出口**（2026-10-29 第二代）：详情、徽章、操作列都读它。
+               *   `showCloudRelease` 为真时，详情才画「云端新版发布」那一行。
+               */
+              const mkpCloudStatus = row.scope === 'cloud' && row.localState !== undefined
+              /*
+               * **这一行是"跟云端没关系的一份"**（2026-10-20 / 10-29）：拷贝 / 导入出来的，
+               * 而设置页「拷贝出来的也跟着云端更新」关着 ⇒ 云端换版不该在它身上报「有新版」。
+               * 判据只看后端那一格 + 来路账的 `provenanceKind`（不按名字猜）。
+               */
+              const detached = isDetachedCopy(row, copiesFollow)
+              const status =
+                row.kind === 'mkp_preset'
+                  ? updateStatusOf({
+                      basedOn: row.basedOn,
+                      basedOnFacts: row.basedOnFacts,
+                      detached,
+                      /*
+                       * 云端行：`localState` 回答"我这儿有没有一份基于它的"；
+                       * 本地行：这一份自己就在手上 ⇒ 恒为 `has`（不能让 undefined 把状态吞掉）。
+                       */
+                      localState: mkpCloudStatus
+                        ? row.localState
+                        : row.origin === 'local'
+                          ? 'has'
+                          : undefined,
+                    })
+                  : {
+                      /* 切片器 / BBS 档没有"跟云端哪一版"这回事：整格不出现 */
+                      text: null,
+                      action: 'none' as const,
+                      warn: false,
+                      hint: null,
+                      showCloudRelease: false,
+                    }
+              const statusText = status.text === null ? null : tr(status.text, status.params)
+              /*
+               * 「来源预设路径」只对**本地行**有意义（血统里的 `# based_on`，说明这份是从云端哪一份来的）。
+               *
+               * 曾试图给云端行也填这一格（填 `p.path`），2026-10-29 作者否掉：
+               * 「这个来源预设路径是什么意思？云端的仓库的还是本地的，感觉这个没必要出现」——
+               * 云端行整块就是在说那一份，再写一遍它自己的目录路径纯属绕人；本机路径在下面「文件」组里。
+               */
+              const basedOnLabel = row.origin === 'local' ? row.basedOnSource : null
+              /*
+               * **本机没有这一份**（云端行、且没有任何本地副本认领它）。
+               *
+               * 这时「本地发布线 / 本地 SHA-256 / 判定」不是"记不清"—— 是**还没有**。
+               * 原来三格都写「未知（当时没有记录）」，删掉一份预设再看它就会读成人品问题。
+               */
+              const noLocalCopy = row.origin !== 'local' && row.localState === 'none'
+              const obtainedUnix = row.origin === 'local' ? row.obtainedUnix : null
               /* 云端较旧 ⇒ 一律不给更新（列表上也不显示任何徽章，详情里才说） */
               const cloudIsOlder = row.scope === 'cloud' && row.basedOn === 'newer'
-              const needsUpdate = updateState === 'update' && !cloudIsOlder
+              const needsUpdate = mkpCloudStatus
+                ? status.action === 'update'
+                : updateState === 'update' && !cloudIsOlder
               /* 认不出是哪一版的注记只在展开详情里出现（tampered 那一档）——
                  **MKP 档不出现**：那一档按 `localState` 说，不碰下载区四态（2026-10-09） */
               const untrusted =
@@ -662,18 +822,12 @@ export default function PresetTable({
                 row.scope === 'cloud' &&
                 (row.presetState === undefined ? row.downloaded : row.presetState === 'ok')
               /* 来源那一格（列 + 展开详情共用）：三种来源三种说法，可定位的带 `locate` */
-              const origin = originCellOf(tr, row, sourceLabel)
+              const origin = originCellOf(tr, row)
               /*
                * 缩窄到手：`origin.locate` 的判空进不了 JSX 回调（TS 对属性访问的收窄
                * 不跨函数边界），先落一个本地的量。
                */
               const locateTarget = origin.locate ?? null
-              /*
-               * **这一行是"跟云端没关系的一份"**（2026-10-20）：复制 / 导入出来的，
-               * 而设置页「复制出来的也跟着云端更新」关着 ⇒ 云端换版不该在它身上报「有新版」。
-               * 判据只看后端那一格 + 出处账给出的 `provenance`（不按名字猜）。
-               */
-              const detached = isDetachedCopy(row, copiesFollow)
               /* 与参数页同一套交互：点行展开下方的内容，同一时刻只开一行 */
               const expanded = row.rowKey === expandedKey
               /*
@@ -699,6 +853,9 @@ export default function PresetTable({
               const attrBand = localAttr
                 ? `${row.rowKey}:${ownMachineId ?? ''}:${ownVersionId ?? ''}`
                 : null
+              /* 多选那一路的两格：勾没勾、这一行为什么勾不了（`undefined` = 能勾） */
+              const picked = select !== null && select.keys.has(row.rowKey)
+              const whyNot = select === null ? undefined : select.whyNot(row)
               return (
                 <Fragment key={row.rowKey}>
                 <tr
@@ -707,15 +864,40 @@ export default function PresetTable({
                   /* 置顶只有一层**很浅的底**（2026-10-10：不要字、不要图钉，见 CSS 那一段） */
                   data-pinned={row.pinned}
                   data-active={row.rowKey === activeKey}
+                  /* 多选：勾上的那一行整行落一层淡绿（`--accent-soft`），一眼数得清选了几份 */
+                  data-selected={picked}
                   /* 定位滚动/闪光用（「复制自 X」点过来要滚到这一行）——选择器认它 */
                   data-rowkey={row.rowKey}
                   {...triggerProps(row)}
                   onClick={(e) => {
-                    /* 点在按钮上不算「展开这一行」—— 按钮有自己的动作 */
-                    if ((e.target as HTMLElement).closest('button') !== null) return
+                    const el = e.target as HTMLElement
+                    /* 点在按钮 / 复选框上不算「这一行的事」—— 它们各自有动作 */
+                    if (el.closest('button') !== null || el.closest('input') !== null) return
+                    /*
+                     * 多选时**点行 = 勾选**（不展开）：只加复选框而点行还展开的话，
+                     * 选东西的每一指都会弹出一张详情卡。不能勾的那一行点了什么都不做
+                     * （灰勾上写着原因，不另开一句）。
+                     */
+                    if (select !== null) {
+                      if (whyNot === undefined) select.onToggle(row.rowKey)
+                      return
+                    }
                     onToggleExpand(row.rowKey)
                   }}
                 >
+                  {select !== null && (
+                    <td className={s.tdCheck} onClick={(e) => e.stopPropagation()}>
+                      {/* 勾不了的那几行：灰勾 + 悬停说原因（禁用一定带原因） */}
+                      <span title={whyNot}>
+                        <Check
+                          checked={picked}
+                          disabled={whyNot !== undefined}
+                          ariaLabel={tr('presets.table.select.rowAria', { name: row.fileName })}
+                          onChange={() => select.onToggle(row.rowKey)}
+                        />
+                      </span>
+                    </td>
+                  )}
                   <td className={s.name}>
                     {/*
                      * 行里的文件名**常显**（第十轮撤回了第七轮那条「展开时隐去」——
@@ -764,7 +946,7 @@ export default function PresetTable({
                           它跟云端没关系，云端换版也不该在它身上报更新 —— 判据走后端那一格
                           （`copiesFollow === false` 且 `provenance` 是 copy / import），别处不许再写第二份。
                       */}
-                      {row.scope === 'local' && row.basedOn === 'outdated' && !detached && (
+                      {row.scope === 'local' && status.action === 'update' && !detached && (
                         <span
                           className={s.localState}
                           data-state="stale"
@@ -794,7 +976,7 @@ export default function PresetTable({
                           const badge = cloudClaimBadge(row)
                           return badge === null ? null : (
                             <span className={s.localState} data-state={badge.state}>
-                              {tr(badge.text)}
+                              {tr(badge.text, badge.params)}
                             </span>
                           )
                         })()}
@@ -822,11 +1004,17 @@ export default function PresetTable({
                        * 一眼看得见；为什么读不出来在 title 里。**照常列出来**，不藏。
                        */}
                       {row.scope === 'local' && row.localState === 'unreadable' && (
+                        /*
+                         * ★ 2026-10-29 修：这里原来直接把**键名**印出来了
+                         * （`{LOCAL_UNREADABLE_TEXT}` = 一串 `presets.tree.localUnreadable`），
+                         * 英文界面下一眼就能看见这串鬼东西；`title` 也被误删了。
+                         * 键要过 `tr` 才是句子，为什么读不出来回 title（见上面那段注释）。
+                         */
                         <span
                           className={s.unreadable}
-                         
+                          title={localUnreadableWhy(tr, row.localStateDetail)}
                         >
-                          {LOCAL_UNREADABLE_TEXT}
+                          {tr(LOCAL_UNREADABLE_TEXT)}
                         </span>
                       )}
                     </span>
@@ -922,7 +1110,17 @@ export default function PresetTable({
                          * 样式：外阴影=凸起（使用）/ 内阴影=凹下（使用中）—— 见 `.useBtn`。
                          */
                         <button type="button" className={s.useBtn} data-live="true" disabled>
-                          {tr(ASSET_USE_TEXT.on)}
+                          {/*
+                            两个状态**同宽**（作者 2026-10-29：「use 和 in use 导致按钮宽度不一样，
+                            我有强迫症」）：`In use` 比 `Use` 长，硬切就一宽一窄。
+                            办法是全仓那条老规矩 —— **隐形副本撑宽**：两段字叠在同一个网格格里，
+                            `在用` 那一份 `visibility: hidden` 只占宽度。中文两字本来就一样宽，
+                            英文/日文/将来任何语种都不会再跳。
+                          */}
+                          <span className={s.useGhost} aria-hidden>
+                            {tr(ASSET_USE_TEXT.on)}
+                          </span>
+                          <span>{tr(ASSET_USE_TEXT.on)}</span>
                         </button>
                       ) : row.origin === 'local' && row.kind !== 'mkp_preset' ? (
                         <span className={s.actNone}>
@@ -938,10 +1136,13 @@ export default function PresetTable({
                           type="button"
                           className={s.useBtn}
                           disabled={busy}
-                         
                           onClick={() => onUse(row)}
                         >
-                          {tr(ASSET_USE_TEXT.off)}
+                          {/* 隐形的那一份是「在用」那一档：它更长，撑住了两档同宽 */}
+                          <span className={s.useGhost} aria-hidden>
+                            {tr(ASSET_USE_TEXT.on)}
+                          </span>
+                          <span>{tr(ASSET_USE_TEXT.off)}</span>
                         </button>
                       )
                     ) : row.scope === 'local' ? (
@@ -1083,7 +1284,7 @@ export default function PresetTable({
                      * 比表头多出的那一跨会撑出一个匿名列，吃掉表格右侧的全部余量 ——
                      * 改列数时这里要一起改。
                      */}
-                    <td colSpan={mkp ? 5 : 6}>
+                    <td colSpan={(mkp ? 5 : 6) + (select !== null ? 1 : 0)}>
                       {/*
                        * —— 展开的小动画（2026-10-16 第四轮：行高不再动）——
                        * 三段内衬：`.dFold`（撑开格子）→ `.dFoldCut`（裁）→ `.dFoldIn`
@@ -1120,15 +1321,15 @@ export default function PresetTable({
                           <span className={s.dHeadName}>{row.fileName}</span>
                           <span className={s.dHeadMeta}>
                             <span>
-                              {row.scope === 'cloud' && row.basedOn === 'newer'
-                                ? tr('presets.table.staleOlder')
-                                : /*
-                                   * ★ 与行首徽章、操作列读**同一个结论**（2026-10-29 收口）。
-                                   *   原先这里直接取 `CLOUD_LOCAL_TEXT[localState]`，绕过了
-                                   *   徽章那层分档 ⇒ 行上写「版本关系未知」、卡头仍写「有新版」。
-                                   */
-                                  row.scope === 'cloud' && cloudClaimBadge(row) !== null
-                                  ? tr(cloudClaimBadge(row)!.text)
+                              {/*
+                               * ★ 与行首徽章、操作列读**同一个结论**（`updateStatusOf`）。
+                               *   早先这里直接取 `CLOUD_LOCAL_TEXT[localState]`，绕过了
+                               *   徽章那层分档 ⇒ 行上写「版本关系未知」、卡头仍写「有新版」。
+                               */}
+                              {row.scope === 'cloud' &&
+                              row.localState !== undefined &&
+                              cloudClaimBadge(row) !== null
+                                ? tr(cloudClaimBadge(row)!.text, cloudClaimBadge(row)!.params)
                                 : row.presetState !== undefined
                                   ? tr(UPDATE_STATE_TEXT[updateState ?? 'latest'])
                                   : mkp && row.scope === 'local'
@@ -1209,18 +1410,12 @@ export default function PresetTable({
 
                               <div className={s.dRow}>
                                 {/*
-                                  **云端行那一格叫「源配置」，不叫「来源」**（2026-10-27 作者：
-                                  「来源和云端源感觉有点歧义和重复」）：它的值是"自定义源 / GitHub /
-                                  Gitee"这种**模式名**，而下面「云端源」是规范化身份
-                                  （`gitee#owner/repo@ref`）—— 两个都叫"来源"就分不清谁是谁。
-                                  本地行那一格的值是"复制自 X"，仍叫「来源」。
+                                  **来源**（2026-10-29 第二代）：只有一句话 ——
+                                  云端下载（`云端 · main`）/ 用户自己另存（`本地 · 母本名`）/
+                                  导入 / 未知。软件内部的 baseline、拷贝中间层**一个字都不出现**。
                                 */}
                                 <span className={s.dKey}>
-                                  {tr(
-                                    row.origin === 'preset'
-                                      ? 'presets.table.detail.key.sourceMode'
-                                      : 'presets.table.detail.key.source',
-                                  )}
+                                  {tr('presets.table.detail.key.source')}
                                 </span>
                                 <span className={s.dVal}>
                                   {locateTarget !== null ? (
@@ -1234,149 +1429,350 @@ export default function PresetTable({
                                   ) : (
                                     <span>{origin.text}</span>
                                   )}
+                                  {origin.why !== null && (
+                                    <span className={s.dWhyInline}>{origin.why}</span>
+                                  )}
                                 </span>
                               </div>
 
-                              {/* 血统：我那份从哪一版改出来的 */}
-                              {row.origin === 'local' && (
+                              {/* 来源预设：血统指向的云端那一份（只在本机那份上有意义） */}
+                              {row.origin === 'local' && origin.ref !== null && (
                                 <div className={s.dRow}>
-                                  <span className={s.dKey}>{tr(BASED_ON_KEY)}</span>
-                                  <span className={s.dVal}>{basedOnCellText(tr, row)}</span>
+                                  <span className={s.dKey}>
+                                    {tr('presets.table.detail.key.sourcePreset')}
+                                  </span>
+                                  <span className={s.dVal}>
+                                    {origin.locate != null ? (
+                                      <button
+                                        type="button"
+                                        className={s.dLink}
+                                        onClick={() => onLocate(origin.locate!)}
+                                      >
+                                        {origin.ref}
+                                      </button>
+                                    ) : (
+                                      origin.ref
+                                    )}
+                                  </span>
                                 </div>
                               )}
 
                               {/*
-                                **版本来源**（2026-10-27 作者：「展开的详细里面显示哪些源的，
-                                本地源什么，云端源什么，不同的时间之类的」）。
-
-                                四行都**照实说**：认不出就写「未知」，不拿当前源去补血统源 ——
-                                「不知道它来自哪」本身就是用户需要知道的那句话（换源误判的根源）。
-                                数据来自后端 `basedOnFacts`，界面不重算。
+                                **本地版本时间**：这份对应的那个云端版本**实际发布**的时刻。
+                                下载那一刻定格在来路账里；没记过就写「未知（当时没有记录）」——
+                                **不回落**配方写作日期 / 文件修改时间（那正是上一代的误报来源）。
                               */}
-                              {row.origin === 'local' && row.basedOnFacts !== undefined && (
-                                <>
-                                  {/*
-                                    **发布线**（2026-10-28）：我这份基于哪条线的第几号。
-                                    两格同生同死，缺一个就整行不渲染（见 `releaseLineText`）。
-                                  */}
-                                  <ReleaseLineRow
-                                    tr={tr}
-                                    text={releaseLineText(
-                                      tr,
-                                      row.basedOnFacts.lineageCatalog,
-                                      row.basedOnFacts.lineageSerial,
-                                    )}
-                                  />
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.local')}
-                                    </span>
-                                    <span
-                                      className={`${s.dVal} ${s.dOne}`}
-                                      title={row.basedOnFacts.lineageSource ?? undefined}
-                                    >
-                                      {row.basedOnFacts.lineageSource ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.localTime')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {longStatText(
-                                        row.basedOnFacts.lineagePublishedAt ??
-                                          row.basedOnFacts.lineageRelease ??
-                                          undefined,
-                                      ) ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.cloud')}
-                                    </span>
-                                    <span
-                                      className={`${s.dVal} ${s.dOne}`}
-                                      title={row.basedOnFacts.cloudSource ?? undefined}
-                                    >
-                                      {row.basedOnFacts.cloudSource ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.cloudTime')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {longStatText(
-                                        row.basedOnFacts.cloudPublishedAt ?? undefined,
-                                      ) ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                </>
+                              {row.origin === 'local' && (
+                                <div className={s.dRow}>
+                                  <span className={s.dKey}>
+                                    {tr('presets.table.detail.key.localVersionTime')}
+                                  </span>
+                                  <span
+                                    className={s.dVal}
+                                    title={tr('presets.table.detail.localVersionTime.why')}
+                                  >
+                                    {longStatText(row.versionPublishedAt ?? undefined) ??
+                                      tr('presets.table.detail.versionUnknown')}
+                                  </span>
+                                </div>
                               )}
 
                               {/*
-                                云端行也摆这份账（2026-10-27 作者：「云端的更需要看那些信息呀」）：
-                                这个云端是哪个源、这个目录什么时候发布、**我本地那一份是什么时候的**
-                                —— 三行并排就是一次对比。判定不读它们，纯展示。
+                                **更新状态**：与列表徽章、云端操作列**同一个出口**
+                                （`updateStatusOf`：版本身份 + 内容，不比时间）。
+                                有新版 ⇒ 绿色「更新」；其余档只说状态，不给假按钮。
                               */}
-                              {row.origin === 'preset' && row.basedOnFacts !== undefined && (
-                                <>
-                                  {/*
-                                    **发布线**（2026-10-28）：云端这份目录是第几号。
-                                    与本地那一行同键同档 —— 两行并排就能看出差了几代。
-                                  */}
-                                  <ReleaseLineRow
-                                    tr={tr}
-                                    text={releaseLineText(
-                                      tr,
-                                      row.basedOnFacts.cloudCatalog,
-                                      row.basedOnFacts.cloudSerial,
-                                    )}
-                                  />
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.cloud')}
+                              {status.text !== null && (
+                                <div className={s.dRow}>
+                                  <span className={s.dKey}>
+                                    {tr('presets.table.detail.key.updateState')}
+                                  </span>
+                                  <span className={s.dVal}>
+                                    <span className={status.warn ? s.dWarn : undefined}>
+                                      {statusText}
                                     </span>
-                                    <span
-                                      className={`${s.dVal} ${s.dOne}`}
-                                      title={row.basedOnFacts.cloudSource ?? undefined}
-                                    >
-                                      {row.basedOnFacts.cloudSource ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.cloudTime')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {longStatText(
-                                        row.basedOnFacts.cloudPublishedAt ?? undefined,
-                                      ) ?? tr(UNKNOWN)}
-                                    </span>
-                                  </div>
-                                  {/*
-                                    **本地版本时间**（作者：「云端应该也能把本地的那个显示一下
-                                    吧，对比的感觉」）：两行并排就能一眼看出我这份比云端新还是旧；
-                                    没下过就照实说「还没下载」，不编。
-                                  */}
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.ver.localTime')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {row.localReleaseText ?? tr('presets.table.detail.ver.notDownloaded')}
-                                    </span>
-                                  </div>
-                                </>
+                                    {status.action === 'update' &&
+                                      row.origin === 'local' &&
+                                      !detached &&
+                                      row.localState !== 'unreadable' && (
+                                        <button
+                                          type="button"
+                                          className={`${s.updateBtn} ${s.dInlineAction}`}
+                                          disabled={busy}
+                                          title={tr('presets.table.detail.update.title')}
+                                          onClick={() => onUpdateLocal(row)}
+                                        >
+                                          {tr(UPDATE_ACTION_TEXT.update)}
+                                        </button>
+                                      )}
+                                  </span>
+                                </div>
                               )}
 
                               {/*
-                                云端较旧的说明（2026-10-27 作者：「详细里面能看到，但是不显示更新，
-                                提示可以删除本地再下载」）—— 列表上什么都不显示，这里把话说全。
+                                ★ **云端新版发布**：**只有真有新版、且真给更新按钮时**才出现。
+                                本地能用的状态下不显示云端时间 —— 那会让人以为"云端有新的"，
+                                却没有任何可更新的版本（作者 2026-10-29 的口径）。
+                                这一行同时说"新版从哪来"（`Gitee · main`）。
                               */}
-                              {row.origin === 'preset' && row.basedOn === 'newer' && (
-                                <p className={s.dNote}>{tr('presets.table.detail.olderHint')}</p>
+                              {status.showCloudRelease && row.basedOnFacts !== undefined && (
+                                <div className={s.dRow}>
+                                  <span className={s.dKey}>
+                                    {tr('presets.table.detail.key.cloudRelease')}
+                                  </span>
+                                  <span className={s.dVal}>
+                                    {longStatText(
+                                      row.basedOnFacts.cloudPublishedAt ?? undefined,
+                                    ) ?? tr('presets.table.detail.versionUnknown')}
+                                    {identityDisplayOf(tr, row.basedOnFacts.cloudSource) !==
+                                      null && (
+                                      <span className={s.dSourceTag}>
+                                        {identityDisplayOf(tr, row.basedOnFacts.cloudSource)}
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
                               )}
+
+                              {/*
+                                **更多**（2026-10-29 第二代）：技术信息不在主区挤着，
+                                但展开后每一项都必须是**真实、可追溯**的 ——
+                                这是作者检查软件有没有把来源 / 版本 / 时间记错的地方。
+                              */}
+                              <details className={s.dMore}>
+                                <summary className={s.dMoreSummary}>
+                                  <span>{tr('presets.table.detail.more')}</span>
+                                  <span className={s.dMoreHint}>
+                                    {tr('presets.table.detail.more.hint')}
+                                  </span>
+                                </summary>
+                                <div className={s.dMoreBody}>
+                                  {/*
+                                    「来源追溯」这一组只在**真有可追的东西**时出现：
+                                    本机没有这一份（`noLocalCopy`）时它两行都是空的 ——
+                                    空的组标题只会让人以为"又记错了"。
+                                  */}
+                                  {row.basedOnFacts !== undefined &&
+                                    (row.basedOnFacts.lineageSource !== null ||
+                                      basedOnLabel !== null) && (
+                                    <div className={s.dMoreGroup}>
+                                      <span className={s.dMoreLabel}>
+                                        {tr('presets.table.detail.more.origin')}
+                                      </span>
+                                      {row.basedOnFacts.lineageSource !== null && (
+                                        <div className={s.dRow}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.fullOrigin')}
+                                          </span>
+                                          <span className={`${s.dVal} ${s.dMono}`}>
+                                            {row.basedOnFacts.lineageSource}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {/*
+                                        ★ **「当前源地址」这一行撤掉了**（2026-10-29 作者：
+                                        「我觉得这个当前没必要显示出来，你觉得呢」）。
+                                        理由不是"占地方"，是**它不属于这一份**：那一格是
+                                        应用**现在配置的数据源**（设置 → 数据源），不是这份文件
+                                        从哪来 —— 放在「来源追溯」里等于把全局设置说成这份的出身，
+                                        读者会误以为"这份是从那儿下的"。这一份的出身由
+                                        `完整来源` 回答，已经够了。
+                                        真要解释「跨分支」时它才现形：云端真有新版时，
+                                        「云端新版发布」那一行本来就带来源标签。
+                                      */}
+                                      {basedOnLabel !== null && (
+                                        <div className={s.dRow}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.sourcePresetPath')}
+                                          </span>
+                                          <span className={`${s.dVal} ${s.dMono}`}>
+                                            {basedOnLabel}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* 一组标题底下一行都没有就别画（`noLocalCopy` 时只剩云端那两行） */}
+                                  {row.basedOnFacts !== undefined &&
+                                    (!noLocalCopy ||
+                                      row.basedOnFacts.cloudCatalog !== null ||
+                                      row.basedOnFacts.cloudSha256 !== null) && (
+                                    <div className={s.dMoreGroup}>
+                                      <span className={s.dMoreLabel}>
+                                        {tr('presets.table.detail.more.version')}
+                                      </span>
+                                      {/*
+                                        ★ 「本地」那三格（发布线 / SHA-256 / 判定）**在本机没有这一份时整行不画**
+                                        （2026-10-29 作者：「我删除了的，他还是未知」）：
+                                        删掉一份预设之后，云端行上再写「未知（当时没有记录）」等于说
+                                        "我们记漏了"，可实情只是**还没下**。写三遍「本机没有这一份」
+                                        也是噪声 —— 主区「更新状态」已经说了「未获取」，这里能说的
+                                        只有云端那一侧，那就只说云端。
+                                      */}
+                                      {!noLocalCopy && (
+                                        <div className={s.dRow}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.localLine')}
+                                          </span>
+                                          <span className={s.dVal}>
+                                            {row.basedOnFacts.lineageCatalog !== null &&
+                                            row.basedOnFacts.lineageSerial !== null
+                                              ? `${row.basedOnFacts.lineageCatalog} · 第 ${row.basedOnFacts.lineageSerial} 号`
+                                              : tr('presets.table.detail.more.none')}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <div className={s.dRow}>
+                                        <span className={s.dKey}>
+                                          {tr('presets.table.detail.more.cloudLine')}
+                                        </span>
+                                        <span className={s.dVal}>
+                                          {row.basedOnFacts.cloudCatalog !== null &&
+                                          row.basedOnFacts.cloudSerial !== null
+                                            ? `${row.basedOnFacts.cloudCatalog} · 第 ${row.basedOnFacts.cloudSerial} 号`
+                                            : tr('presets.table.detail.more.none')}
+                                        </span>
+                                      </div>
+                                      {/*
+                                        摘要两行（2026-10-29 作者）：标成 SHA-256、短摘要带
+                                        省略号、完整 64 位在 `title` 里。云端那一边读的是
+                                        **目录登记值**（`cloudSha256`），本地那一边读血统头
+                                        （`lineageSha256`）—— 两边都不会因为"前端没搬"而写未知。
+                                      */}
+                                      {!noLocalCopy && (
+                                        <div className={s.dRow}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.localSha')}
+                                          </span>
+                                          <span
+                                            className={`${s.dVal} ${s.dMono}`}
+                                            title={row.basedOnFacts.lineageSha256 ?? undefined}
+                                          >
+                                            {shortSha(row.basedOnFacts.lineageSha256) ??
+                                              tr('presets.table.detail.more.none')}
+                                          </span>
+                                        </div>
+                                      )}
+                                      <div className={s.dRow}>
+                                        <span className={s.dKey}>
+                                          {tr('presets.table.detail.more.cloudSha')}
+                                        </span>
+                                        <span
+                                          className={`${s.dVal} ${s.dMono}`}
+                                          title={row.basedOnFacts.cloudSha256 ?? undefined}
+                                        >
+                                          {shortSha(row.basedOnFacts.cloudSha256) ??
+                                            tr('presets.table.detail.more.none')}
+                                        </span>
+                                      </div>
+                                      {/*
+                                        判定 = **人话 + 括注原始枚举**：作者 2026-10-29
+                                        「不能再让裸枚举成为唯一解释」。原始值留着 ——
+                                        排查时要能一眼对回 `runtime::local::based_on` 的出口。
+                                      */}
+                                      {!noLocalCopy && (
+                                        <div className={s.dRow}>
+                                          <span className={s.dKey}>
+                                            {tr('presets.table.detail.more.verdict')}
+                                          </span>
+                                          <span className={s.dVal}>
+                                            {row.basedOn === undefined
+                                              ? tr('presets.table.detail.more.none')
+                                              : tr(BASED_ON_TEXT[row.basedOn])}
+                                            {row.basedOn !== undefined && (
+                                              <span className={s.dVerdictRaw}>
+                                                {` (${row.basedOn}`}
+                                                {row.basedOnFacts.unverifiedReason !== null
+                                                  ? ` · ${row.basedOnFacts.unverifiedReason}`
+                                                  : ''}
+                                                {')'}
+                                              </span>
+                                            )}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {row.origin === 'local' && (
+                                    <div className={s.dMoreGroup}>
+                                      <span className={s.dMoreLabel}>
+                                        {tr('presets.table.detail.more.file')}
+                                      </span>
+                                      <div className={s.dRow}>
+                                        <span className={s.dKey}>
+                                          {tr('presets.table.detail.more.path')}
+                                        </span>
+                                        <span className={`${s.dVal} ${s.dMono}`}>{row.path}</span>
+                                      </div>
+                                    <div className={s.dRow}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.modified')}
+                                      </span>
+                                      <span className={s.dVal}>
+                                        {longStatText(row.modifiedText) ?? tr(UNKNOWN)}
+                                      </span>
+                                    </div>
+                                    <div className={s.dRow}>
+                                      <span className={s.dKey}>
+                                        {tr('presets.table.detail.more.obtained')}
+                                      </span>
+                                      <span className={s.dVal}>
+                                        {obtainedUnix != null
+                                          ? (longStatText(
+                                              new Date(obtainedUnix * 1000).toISOString(),
+                                            ) ?? tr(UNKNOWN))
+                                          : tr('presets.table.detail.more.none')}
+                                      </span>
+                                    </div>
+                                      <div className={s.dRow}>
+                                        <span className={s.dKey}>
+                                          {tr('presets.table.detail.more.baseline')}
+                                        </span>
+                                        <span className={`${s.dVal} ${s.dMono}`}>
+                                          {`baseline-local/${row.path}`}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {row.origin === 'local' && row.basedOnFacts !== undefined && (
+                                    <div className={s.dMoreGroup}>
+                                      <span className={s.dMoreLabel}>
+                                        {tr('presets.table.detail.more.lineage')}
+                                      </span>
+                                      <div className={`${s.dMoreMono} ${s.dMono}`}>
+                                        <div>
+                                          # based_on:{' '}
+                                          {basedOnLabel ??
+                                            tr('presets.table.detail.more.none')}
+                                        </div>
+                                        <div>
+                                          # based_on_release_time:{' '}
+                                          {row.basedOnFacts.lineageRelease ??
+                                            tr('presets.table.detail.more.none')}
+                                        </div>
+                                        <div>
+                                          # based_on_sha256:{' '}
+                                          {row.basedOnFacts.lineageSha256 ??
+                                            tr('presets.table.detail.more.none')}
+                                        </div>
+                                        <div>
+                                          # based_on_catalog:{' '}
+                                          {row.basedOnFacts.lineageCatalog ??
+                                            tr('presets.table.detail.more.none')}
+                                        </div>
+                                        <div>
+                                          # based_on_serial:{' '}
+                                          {row.basedOnFacts.lineageSerial ??
+                                            tr('presets.table.detail.more.none')}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </details>
 
                               {/*
                                 后处理跑成过几次（2026-10-17 作者：「加一个显示的字段，
@@ -1436,28 +1832,10 @@ export default function PresetTable({
                                   </button>
                                 )}
                                 {/*
-                                  * **更新**（2026-10-20 作者：「他云端有更新的时候，只在那个
-                                  * 快捷操作里面显示更新」「那里面的下载两个字改成更新两个字，
-                                  * 并且加上背景颜色吧，绿色吧」）。
-                                  *
-                                  * 所以：**只有这里**因为「有新版」长出一颗「更新」，
-                                  * 而且是绿底（`.updateBtn`）—— 与旁边安静的「编辑」一眼分得开；
-                                  * 表格右侧那一格**照旧只写「使用 / 在用」**，不许跟着变。
+                                  * 「更新」不再住在快捷操作里（2026-10-29 第二代）：
+                                  * 它跟着**更新状态**那一行走（详情主区），
+                                  * 这样状态、原因、动作在同一格里说完，不再两处各摆一颗。
                                   */}
-                                {row.origin === 'local' &&
-                                  row.basedOn === 'outdated' &&
-                                  !detached &&
-                                  row.localState !== 'unreadable' && (
-                                    <button
-                                      type="button"
-                                      className={s.updateBtn}
-                                      disabled={busy}
-                                      title={tr('presets.table.detail.update.title')}
-                                      onClick={() => onUpdateLocal(row)}
-                                    >
-                                      {tr(UPDATE_ACTION_TEXT.update)}
-                                    </button>
-                                  )}
                                 {/*
                                   * **「快捷操作」里那颗从「编辑」换成「修改参数」**（2026-10-20 作者：
                                   * 「我不希望它是编辑作为快捷操作，我希望是那个修改参数作为快捷操作。
@@ -1603,7 +1981,7 @@ export default function PresetTable({
                             hasOverride={
                               row.remarkKey !== null && remarks[row.remarkKey] !== undefined
                             }
-                            busy={row.rowKey === busyKey}
+                            busy={busy}
                             onSave={(remark) => onSetRemark(row.remarkKey ?? '', remark)}
                             onClose={() => setBands((b) => ({ ...b, remark: null }))}
                           />
@@ -1611,7 +1989,7 @@ export default function PresetTable({
                         {attrBand !== null && (
                           <AttrBand
                             open={bands.attr === attrBand}
-                            busy={row.rowKey === busyKey}
+                            busy={busy}
                             machines={machines}
                             machineId={ownMachineId}
                             versionId={ownVersionId}

@@ -25,7 +25,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STORAGE } from '../../api/storageKeys'
-import { useT } from '../../i18n'
+import { msg, useT, useText, type Text } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
 import { FieldLayer } from '../../components/field'
@@ -387,6 +387,8 @@ export default function PageParams({
   gateEdit = false,
 }: Props) {
   const tr = useT()
+  /* `savedNote` / `gateNote` 存的是键：抬头那一格在渲染时摊开（换语言就重翻） */
+  const say = useText()
   /* 标题栏两个借位槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
   const headSlot = useModalHeadSlot()
   const headNoteSlot = useModalHeadNoteSlot()
@@ -773,7 +775,8 @@ export default function PageParams({
    *   blocked  灰：被上游标记弃用，改不了
    *   noop     灰：现在就是那个值，不用还原
    */
-  const [revertNote, setRevertNote] = useState<{ text: string; tone: 'ok' | 'muted' } | null>(null)
+  /** 「已还原 / 改不了」那一句（存键，渲染时再翻 —— 它会挂 3.2 秒，横跨一次切语言也可能） */
+  const [revertNote, setRevertNote] = useState<{ text: Text; tone: 'ok' | 'muted' } | null>(null)
   const revertNoteTimer = useRef<number | null>(null)
   useEffect(
     () => () => {
@@ -793,20 +796,20 @@ export default function PageParams({
         result === 'applied'
           ? {
               text: many
-                ? tr('params.revertMany', {
+                ? msg('params.revertMany', {
                     count: entry.items.length,
                     label,
                     target,
                   })
-                : tr('params.revertOne', { label, target }),
+                : msg('params.revertOne', { label, target }),
               tone: 'ok' as const,
             }
           : result === 'blocked'
-            ? { text: tr('params.revertBlocked', { label }), tone: 'muted' as const }
+            ? { text: msg('params.revertBlocked', { label }), tone: 'muted' as const }
             : {
                 text: many
-                  ? tr('params.noChangeMany')
-                  : tr('params.noChangeOne', { label, target }),
+                  ? msg('params.noChangeMany')
+                  : msg('params.noChangeOne', { label, target }),
                 tone: 'muted' as const,
               }
 
@@ -1002,7 +1005,7 @@ export default function PageParams({
         <div className={s.emptyBox}>
           <h2 className={s.emptyTitle}>{tr('params.noCatalog.title')}</h2>
           <p className={s.emptyText}>{tr('params.noCatalog.body')}</p>
-          <p className={s.emptyText}>{u.error}</p>
+          <p className={s.emptyText}>{say(u.error)}</p>
         </div>
       </div>
     )
@@ -1110,18 +1113,20 @@ export default function PageParams({
    */
   /* 语气由 `useParams` 给（`savedTone`），**不再从文案前缀猜** —— 文案随语言走，
      拿「保存失败」开头去判红绿，一翻英文就全绿了 */
-  const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
+  const headNote = ((): { text: Text; tone: 'ok' | 'warn' | 'bad' } | null => {
     if (u.draftError !== null) {
-      return { text: tr('params.draftError', { detail: u.draftError }), tone: 'bad' }
+      return { text: msg('params.draftError', { detail: u.draftError }), tone: 'bad' }
     }
     if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
     if (u.savedNote === null) return null
     return { text: u.savedNote, tone: u.savedTone }
   })()
+  /* 这一格存的是键（`msg`）：`draftError` 的详情是后端当场说的话，套在键里一起重翻前缀 */
+  const headNoteText = headNote === null ? '' : say(headNote.text)
   const headNoteNode =
     headNote === null ? null : (
-      <span className={s.note} data-tone={headNote.tone} title={headNote.text}>
-        {headNote.text}
+      <span className={s.note} data-tone={headNote.tone} title={headNoteText}>
+        {headNoteText}
       </span>
     )
 
@@ -1332,8 +1337,8 @@ export default function PageParams({
               单独当页用（没有槽）时才落回这里 —— 同一份节点、同一套语气。
             */}
             {headNoteSlot === null && headNote !== null && (
-              <p className={s.noteLine} data-tone={headNote.tone} title={headNote.text}>
-                {headNote.text}
+              <p className={s.noteLine} data-tone={headNote.tone} title={headNoteText}>
+                {headNoteText}
               </p>
             )}
             {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (

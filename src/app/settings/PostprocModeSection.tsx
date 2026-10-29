@@ -11,7 +11,7 @@
 import { useState, type ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
-import { useT, type StringKey } from '../../i18n'
+import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
 import { Btn } from '../ui/Controls'
@@ -40,9 +40,11 @@ const UI_MODES: { id: 'silent' | 'gui'; label: StringKey; hint: StringKey; icon:
 
 export default function PostprocModeSection() {
   const tr = useT()
+  const say = useText()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
-  const [resetNote, setResetNote] = useState<string | null>(null)
+  /** 成功时是后端给的落点原话，失败时是存键的那句 —— 两种都住 [`Text`] */
+  const [resetNote, setResetNote] = useState<Text | null>(null)
   const [resetBusy, setResetBusy] = useState(false)
 
   const on = (why: string) => setErr(why)
@@ -68,7 +70,7 @@ export default function PostprocModeSection() {
         setResetBusy(false)
       },
       (e: unknown) => {
-        setResetNote(tr('settings.postproc.resetFailed', { detail: errorText(e) }))
+        setResetNote(msg('settings.postproc.resetFailed', { detail: errorText(e) }))
         setResetBusy(false)
       },
     )
@@ -151,7 +153,7 @@ export default function PostprocModeSection() {
         </Btn>
       </div>
 
-      {resetNote !== null && <p className={s.note}>{resetNote}</p>}
+      {resetNote !== null && <p className={s.note}>{say(resetNote)}</p>}
       {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
     </section>
   )

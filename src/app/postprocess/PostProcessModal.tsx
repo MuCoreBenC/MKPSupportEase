@@ -39,7 +39,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 
 import { api, errorText } from '../../api'
-import { t, useT } from '../../i18n'
+import { t, useT, type Tr } from '../../i18n'
 import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
@@ -257,17 +257,17 @@ interface FactGroup {
 }
 
 /** 左栏「机型与切片基础」—— 六态共用（这一栏几格真机全有） */
-function baseGroup(facts: PostProcessFacts | null): FactGroup {
+function baseGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
   return {
-    title: t('postproc.facts.baseTitle'),
+    title: tr('postproc.facts.baseTitle'),
     rows: [
-      { label: t('postproc.facts.gcodeMachine'), value: facts?.gcodeMachine ?? '—' },
-      { label: t('postproc.facts.presetMachine'), value: facts?.presetMachine ?? '—' },
+      { label: tr('postproc.facts.gcodeMachine'), value: facts?.gcodeMachine ?? '—' },
+      { label: tr('postproc.facts.presetMachine'), value: facts?.presetMachine ?? '—' },
       {
         /* 喷嘴那一格：`0` 是"没有值"的哨兵（内核缺值一律 0）—— 别把它当 0.00 mm 摆出去
            （作者 2026-10-14：「它怎么就不显示那一个喷嘴层高」）。真值现在由内核
            从输入头 `; nozzle_diameter = ` 认（`pass1::adopt_nozzle_and_layer_height`）。 */
-        label: t('postproc.facts.filamentNozzle'),
+        label: tr('postproc.facts.filamentNozzle'),
         value:
           facts === null
             ? '—'
@@ -276,7 +276,7 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
               }`,
       },
       {
-        label: t('postproc.facts.layerHeight'),
+        label: tr('postproc.facts.layerHeight'),
         value: facts !== null && facts.layerHeight > 0 ? `${mmText(facts.layerHeight)} mm` : '—',
       },
     ],
@@ -290,46 +290,46 @@ function baseGroup(facts: PostProcessFacts | null): FactGroup {
  * 内核重算的那个要跑完才有（而且有界面时还延后）；涂胶速度 / 切片软件开跑就确定。
  * 缺哪格不摆哪格。
  */
-function runGroup(facts: PostProcessFacts | null): FactGroup {
+function runGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
   const rows: FactRow[] = [
     {
-      label: t('postproc.facts.printTime'),
+      label: tr('postproc.facts.printTime'),
       value: facts?.slicerPrintTimeSeconds === undefined ? '—' : printTimeText(facts.slicerPrintTimeSeconds),
     },
-    { label: t('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
-    { label: t('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
-    { label: t('report.slicer.software'), value: facts?.slicer ?? '—', grey: true },
+    { label: tr('postproc.facts.fileSize'), value: facts === null ? '—' : sizeText(facts.fileSizeBytes) },
+    { label: tr('report.glue.speed'), value: facts?.glueSpeed === undefined ? '—' : speedText(facts.glueSpeed) },
+    { label: tr('report.slicer.software'), value: facts?.slicer ?? '—', grey: true },
   ]
-  return { title: t('postproc.facts.runTitle'), rows }
+  return { title: tr('postproc.facts.runTitle'), rows }
 }
 
 /** 跑完：右栏是「擦料与胶水消耗」——结果读数有哪几格就摆哪几格 */
-function doneGroup(finished: PostProcessFinished, facts: PostProcessFacts | null): FactGroup {
+function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFacts | null): FactGroup {
   const res = finished.result
   const rows: FactRow[] = []
   /* 打印时间**常常是后到的**（有界面时延后算）：先空着，`postprocess-print-time` 到了再补；
    * 失败 / 取消时退回开场那一格（切片器自报的）—— 有就摆，比空着强 */
   const printSec = res?.printTimeSeconds ?? facts?.slicerPrintTimeSeconds
   rows.push({
-    label: t('postproc.facts.printTime'),
+    label: tr('postproc.facts.printTime'),
     value: printSec === undefined ? '—' : printTimeText(printSec),
   })
   rows.push({
-    label: t('report.glue.total'),
+    label: tr('report.glue.total'),
     value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
   })
   /* 这一格真机现在就有：处理耗时 = finished.elapsedMs，大小 = 开场那几个事实里的字节数 */
   rows.push({
-    label: t('postproc.facts.elapsed'),
-    value: t('postproc.facts.elapsedValue', {
+    label: tr('postproc.facts.elapsed'),
+    value: tr('postproc.facts.elapsedValue', {
       sec: (finished.elapsedMs / 1000).toFixed(2),
       size: facts === null ? '—' : sizeText(facts.fileSizeBytes),
     }),
   })
   /* 切片软件：跑完给带版本的完整串；失败 / 取消时退回开场那个名字（总比空着强） */
   const slicer = res?.slicer ?? facts?.slicer
-  rows.push({ label: t('report.slicer.software'), value: slicer ?? '—', grey: true })
-  return { title: t('postproc.facts.doneTitle'), rows }
+  rows.push({ label: tr('report.slicer.software'), value: slicer ?? '—', grey: true })
+  return { title: tr('postproc.facts.doneTitle'), rows }
 }
 
 /**
@@ -1392,15 +1392,15 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
               className={`${s.relocatePage} ${relocateTab === 'facts' ? '' : s.relocatePageOff}`}
               aria-hidden={relocateTab !== 'facts'}
             >
-              <FactsGroups groups={[baseGroup(facts), runGroup(facts)]} />
+              <FactsGroups groups={[baseGroup(tr, facts), runGroup(tr, facts)]} />
             </div>
           </div>
         ) : (
           <FactsGroups
             groups={
               asking || running
-                ? [baseGroup(facts), runGroup(facts)]
-                : [baseGroup(facts), doneGroup(finished as PostProcessFinished, facts)]
+                ? [baseGroup(tr, facts), runGroup(tr, facts)]
+                : [baseGroup(tr, facts), doneGroup(tr, finished as PostProcessFinished, facts)]
             }
           />
         )}

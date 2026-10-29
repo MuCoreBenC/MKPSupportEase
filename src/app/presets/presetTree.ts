@@ -88,6 +88,7 @@ import type {
   BasedOn,
   BasedOnFacts,
   FileKind,
+  UnverifiedReason,
   FileRef,
   FilesState,
   Machine,
@@ -203,8 +204,8 @@ export const ORIGIN_TEXT: Record<PresetOrigin, StringKey> = {
    * 分属两个类型档，同一张表里只会出现其中一类。既然不并排，就没有"两个词挨着分不清"
    * 这回事，硬造「发布预设」只是让用户多学一个他看不出差别的新概念。
    *
-   * 用户问"这份从哪来"，本来就有更准的一处答：来源列显示**数据源名**
-   *（`Gitee` / `GitHub` / `自定义源`，见 [`sourceTextOf`]）。而这两类真正不同的地方
+   * 用户问"这份从哪来"，由统一的「来源」格回答（`云端 · <分支>` / `本地 · <母本>`）。
+   * 而这两类真正不同的地方
    *（受不受目录登记、有没有版本指纹与换代）是**程序内部怎么管**，写在悬停说明里就够了。
    *
    * ★ 名字为什么是这两个词（2026-10-14 作者定）：分类值只回答**这是哪一类业务对象**，
@@ -220,28 +221,7 @@ export const ORIGIN_WHY: Record<PresetOrigin, StringKey> = {
   preset: 'presets.tree.originWhy.preset',
 }
 
-/**
- * 数据源（设置页那一个）→ 来源列上**交付预设**那一行显示的字。
- *
- * 用户问的是「这文件从哪来」—— 答案是 **Gitee / GitHub / 自定义源**，不是一串目录指纹
- * （那串曾经过出现在来源 chip 上：`云端 · 08e55a3f…`，作者原话「我觉得这个没有意义」。
- * 指纹唯一还有意义的位置是展开详情里的「云端版本」—— 那是版本的身份证，不是来源）。
- *
- * 没配源（离线 / 随包）就退回「云端」—— 说不出是从哪一个源下的，
- * 但"它是从云端来的"这件事照样说得准。
- */
-export function sourceTextOf(tr: Tr, sourceLabel: string | null): string {
-  switch (sourceLabel) {
-    case 'gitee':
-      return 'Gitee'
-    case 'github':
-      return 'GitHub'
-    case 'custom':
-      return tr('presets.tree.source.custom')
-    default:
-      return tr(ORIGIN_TEXT.preset)
-  }
-}
+
 
 /**
  * 来源列 / 展开详情「来源」一格的统一出口。
@@ -267,63 +247,152 @@ export interface LocateTarget {
   fileName: string
 }
 
-export function originCellOf(
-  tr: Tr,
-  row: PresetTableRow,
-  sourceLabel: string | null,
-): { text: string; title: string; locate?: LocateTarget } {
+export interface OriginCell {
+  /** 主值：`云端 · main` / `本地 · 母本名` / `导入` / `未知` */
+  text: string
+  /** 来源预设文件名（云端下载 / 云端血统才有） */
+  ref: string | null
+  title: string
+  locate?: LocateTarget
+  /** 「更多」里那一行完整身份（`github#owner/repo@main`） */
+  full: string | null
+  /** 为什么是未知（有值时界面补一句） */
+  why: string | null
+}
+
+export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
   /*
    * **正向判别 `=== 'local'`**，不是两个反向 `!==`：PresetCloudRow 的 origin 本身是
    * 联合（'asset' | 'preset'），TS 的反向排除对"判别值是联合的成员"不彻底
    * （成员删不掉，后面的字段访问照样报错）。正向判别一次到位 —— 剩下的必是 local 行。
    */
   if (row.origin === 'local') {
-    /* 出处账优先（用户文件 → 用户文件、导入），其次血统（云端另存出来的），再退「本地」 */
-    if (row.provenance === 'copy' && row.copiedFromName) {
+    const kind = row.provenanceKind ?? null
+    const full = row.basedOnFacts?.lineageSource ?? null
+    const ref = row.cloudFile ?? (row.basedOnSource?.split('/').pop() ?? null)
+
+    /* 用户自己另存出来的：指向母本那一份（可点） */
+    if (kind === 'copy') {
+      if (row.originName) {
+        return {
+          text: tr('presets.tree.origin.localCopy', { name: row.originName }),
+          ref: null,
+          title: tr('presets.tree.origin.localCopyTitle', { name: row.originName }),
+          locate: {
+            scope: 'local',
+            kind: row.kind === null ? null : 'mkp',
+            /* 定位永远按「全部机型」那一档算行键（local 行的键里带机型筛选） */
+            rowKey: `local::${row.originPath}`,
+            fileName: row.originName,
+          },
+          full,
+          why: null,
+        }
+      }
       return {
-        text: tr('presets.tree.origin.copyFrom', { name: row.copiedFromName }),
-        title: tr('presets.tree.origin.copyFromTitle', { name: row.copiedFromName }),
-        locate: {
-          scope: 'local',
-          kind: row.kind === null ? null : 'mkp',
-          /* 定位永远按「全部机型」那一档算行键（local 行的键里带机型筛选） */
-          rowKey: `local::${row.copiedFrom}`,
-          fileName: row.copiedFromName,
-        },
+        text: tr(ORIGIN_TEXT.local),
+        ref: null,
+        title: tr('presets.tree.origin.localCopyGone'),
+        full,
+        why: tr('presets.tree.origin.localCopyGone'),
       }
     }
-    if (row.provenance === 'import') {
+
+    if (kind === 'import') {
       return {
         text: tr('presets.tree.origin.imported'),
+        ref: null,
         title: tr('presets.tree.origin.importedTitle'),
+        full: null,
+        why: null,
       }
     }
-    if (row.basedOnSource) {
-      const sourceName = row.basedOnSource.split('/').pop() ?? row.basedOnSource
+
+    /* 云端下载：来源就是那个源 + 分支；完整身份留给「更多」 */
+    if (kind === 'download') {
+      const branch = identityRefOf(full)
       return {
-        text: tr('presets.tree.origin.copyFrom', { name: sourceName }),
-        title: tr('presets.tree.origin.basedOnTitle', { basedOn: basedOnCellText(tr, row) }),
-        locate: {
-          scope: 'cloud',
-          kind: 'mkp',
-          rowKey: `preset-cloud:${sourceName}`,
-          fileName: sourceName,
-        },
+        text:
+          branch === null
+            ? tr('presets.tree.origin.cloud')
+            : tr('presets.tree.origin.cloudRef', { ref: branch }),
+        ref,
+        title:
+          branch === null
+            ? tr('presets.tree.origin.cloudNoRefTitle')
+            : tr('presets.tree.origin.cloudTitle', { ref: branch }),
+        locate: ref
+          ? {
+              scope: 'cloud',
+              kind: 'mkp',
+              rowKey: `preset-cloud:${ref}`,
+              fileName: ref,
+            }
+          : undefined,
+        full,
+        why: branch === null ? tr('presets.tree.origin.cloudNoRefTitle') : null,
       }
     }
-    return { text: tr(ORIGIN_TEXT.local), title: tr(ORIGIN_WHY.local) }
+
+    /*
+     * 旧账 / 只有血统：**不假装知道当时是从哪个分支下载的**。
+     * 血统能证明"它基于云端哪一份"，证明不了"哪一次下载、从哪个源"。
+     */
+    if (kind === 'unknown' || row.basedOnSource) {
+      return {
+        text: tr('presets.tree.origin.unknownCloud'),
+        ref,
+        title: tr('presets.tree.origin.unknownCloudTitle'),
+        locate: ref
+          ? {
+              scope: 'cloud',
+              kind: 'mkp',
+              rowKey: `preset-cloud:${ref}`,
+              fileName: ref,
+            }
+          : undefined,
+        full,
+        why: tr('presets.tree.origin.unknownCloudTitle'),
+      }
+    }
+
+    return {
+      text: tr(ORIGIN_TEXT.local),
+      ref: null,
+      title: tr(ORIGIN_WHY.local),
+      full: null,
+      why: null,
+    }
   }
   if (row.origin === 'preset') {
-    const source = sourceTextOf(tr, sourceLabel)
+    /*
+     * 云端行也只有一个「来源」：`云端 · main`（当前源 + 分支）。
+     * 以前这里显示的是**源类型**（自定义源 / GitHub / Gitee），与本地行那句
+     * `云端 · main` 对不上；源类型属于"当前设置"那一层，收进「更多」即可。
+     */
+    const identity = row.basedOnFacts?.cloudSource ?? null
+    const branch = identityRefOf(identity)
     return {
-      text: source,
-      title: tr('presets.tree.origin.presetTitle', {
-        source,
-        version: row.presetVersion ?? tr(UNKNOWN),
-      }),
+      text:
+        branch === null
+          ? tr('presets.tree.origin.cloud')
+          : tr('presets.tree.origin.cloudRef', { ref: branch }),
+      ref: null,
+      title:
+        identity === null
+          ? tr('presets.tree.origin.cloudNoRefTitle')
+          : tr('presets.tree.origin.cloudTitle', { ref: branch ?? '-' }),
+      full: identity,
+      why: null,
     }
   }
-  return { text: tr(ORIGIN_TEXT.asset), title: tr(ORIGIN_WHY.asset) }
+  return {
+    text: tr(ORIGIN_TEXT.asset),
+    ref: null,
+    title: tr(ORIGIN_WHY.asset),
+    full: null,
+    why: null,
+  }
 }
 
 /** 云端表那一列：这个云端文件在不在本机。判据与本地表是同一个 `getLocalFiles()` */
@@ -431,15 +500,15 @@ export function cloudClaimBadge(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
   basedOnFacts?: BasedOnFacts
-}): { text: StringKey; state: string } | null {
+}): { text: StringKey; params?: Record<string, string>; state: string } | null {
   /*
-   * 徽章只搬 [`cloudRowState`] 的结论（2026-10-29 收口）——
+   * 徽章只搬 [`updateStatusOf`] 的结论（2026-10-29 收口）——
    * 以前这里自己写了一遍同样意思的 switch，详情头又直接读 `CLOUD_LOCAL_TEXT`，
    * 三处各自判一次，于是永远有一处没跟上。
    */
-  const st = cloudRowState(row)
+  const st = updateStatusOf(row)
   if (st.text === null) return null
-  return { text: st.text, state: row.localState ?? st.action }
+  return { text: st.text, params: st.params, state: row.localState ?? st.action }
 }
 
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
@@ -478,6 +547,26 @@ export const CLOUD_LOCAL_TEXT: Record<CloudLocalState, StringKey> = {
   none: 'presets.tree.cloudLocal.none',
   has: 'presets.tree.cloudLocal.has',
   stale: 'presets.tree.cloudLocal.stale',
+}
+
+/**
+ * **判定那个枚举的人话**（2026-10-29）。
+ *
+ * 详情「更多 → 版本判定」里原来只印裸枚举（`current` / `elsewhere` / `unverified`）——
+ * 作者：「不能再让裸枚举成为唯一解释」。现在是「人话 + 括注原始值」：
+ * `已是最新 (current)`、`来源分支不同 (elsewhere)`。原始值留着，排查时照样能读。
+ *
+ * 这里是**短标签**（三五个字），不是行上那句话：行上说什么由
+ * [`updateStatusOf`] 决定（那边带"为什么"），两处各司其职。
+ */
+export const BASED_ON_TEXT: Record<BasedOn, StringKey> = {
+  current: 'presets.table.verdict.current',
+  outdated: 'presets.table.verdict.outdated',
+  unchanged: 'presets.table.verdict.unchanged',
+  newer: 'presets.table.verdict.newer',
+  elsewhere: 'presets.table.verdict.elsewhere',
+  unverified: 'presets.table.verdict.unverified',
+  inconsistent: 'presets.table.verdict.inconsistent',
 }
 
 export const CLOUD_LOCAL_WHY: Record<CloudLocalState, StringKey> = {
@@ -523,115 +612,164 @@ export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, StringKey | null> = {
 export type CloudRowAction = 'download' | 'update' | 'none'
 
 export interface CloudRowState {
-  /** 徽章 / 详情头那句话。`null` = 什么都不写（`newer` / `elsewhere` 故意不吭声） */
+  /** 徽章 / 详情头那句话。`null` = 这一档不写 */
   text: StringKey | null
+  /** 这句话里的参数（来源 ref / 说不清的原因） */
+  params?: Record<string, string>
   /** 这一格给什么动作 */
   action: CloudRowAction
   /** 要不要用警告样式（目录自相矛盾是一句报警，不是一个动作） */
   warn: boolean
-  /** 动作按钮的悬停说明（只有「说不清」那一档需要多解释一句） */
+  /** 动作按钮的悬停说明 */
   hint: StringKey | null
+  /**
+   * ★ **只有这一档为真，详情才画「云端新版发布」那一行**。
+   *
+   * 作者的口径：本地文件能用的状态下不显示云端时间 —— 那会让人以为"云端有新的"，
+   * 却没有任何可更新的版本。时间只在真有新版、且真给更新按钮时出现。
+   */
+  showCloudRelease: boolean
 }
 
-/** 一句话定案。**任何要显示"云端这一行怎么样"的地方都必须走它。** */
-export function cloudRowState(row: {
+/** `github#owner/repo@main` → `main`；没有 ref（自建源）⇒ `null` */
+export function identityRefOf(key: string | null | undefined): string | null {
+  if (!key) return null
+  const at = key.lastIndexOf('@')
+  if (at < 0) return null
+  const ref = key.slice(at + 1)
+  return ref !== '' && ref !== '-' ? ref : null
+}
+
+/** `github#owner/repo@main` → `GitHub · main`（有新版那一行显示"从哪来的新版"） */
+export function identityDisplayOf(tr: Tr, key: string | null | undefined): string | null {
+  if (!key) return null
+  const host = key.split('#')[0]
+  const platform =
+    host === 'github'
+      ? 'GitHub'
+      : host === 'gitee'
+        ? 'Gitee'
+        : (host || tr('presets.tree.identity.unknownSource'))
+  const ref = identityRefOf(key)
+  return ref === null ? platform : `${platform} · ${ref}`
+}
+
+/** 说不清的原因 → 人话（后端给稳定词，界面只翻词） */
+export const UNVERIFIED_WHY: Record<UnverifiedReason, StringKey> = {
+  no_lineage: 'presets.tree.unverified.noLineage',
+  no_release_line: 'presets.tree.unverified.noReleaseLine',
+  catalog_without_identity: 'presets.tree.unverified.catalogWithoutIdentity',
+  not_in_catalog: 'presets.tree.unverified.notInCatalog',
+  no_sha: 'presets.tree.unverified.noSha',
+  no_source_identity: 'presets.tree.unverified.noSourceIdentity',
+}
+
+/**
+ * **更新状态的唯一出口**（2026-10-29 第二代）。
+ *
+ * 详情主区、列表徽章、操作列、右键菜单**全部只读它**：结论（文案 + 动作 +
+ * 是否显示云端时间）在这里产生一次，组件只负责画。
+ *
+ * 它**不看时间**：谁新谁旧由 `basedOn`（Rust 侧 `catalogId + serial + SHA + ref`）回答。
+ * 时间只做追溯：`showCloudRelease` 为真时，界面才把「云端新版发布」那一行画出来。
+ */
+export function updateStatusOf(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
-  /** 目录那一代的两格身份（`basedOnFacts`）—— 决定「更新」是不是一条真出路 */
   basedOnFacts?: BasedOnFacts
+  /** 用户自己拷贝出来的独立一份（设置页开关关着）—— 与云端没有更新关系 */
+  detached?: boolean
 }): CloudRowState {
-  const none = { text: null, action: 'none', warn: false, hint: null } as const
+  const none = {
+    text: null,
+    action: 'none',
+    warn: false,
+    hint: null,
+    showCloudRelease: false,
+  } as const
   if (row.localState === undefined) return { ...none }
 
   /* 我这儿一份都没有 ⇒ 「下载」。与 basedOn 无关：没有那份文件就谈不上基于哪一版。 */
   if (row.localState === 'none') {
     return {
+      ...none,
       text: CLOUD_LOCAL_TEXT.none,
       action: 'download',
-      warn: false,
-      hint: null,
     }
   }
 
+  /* 用户自己拷贝出来的那一份：跟云端没有更新关系（开关关着），照实说，不给动作 */
+  if (row.detached) {
+    return { ...none, text: 'presets.tree.cloudLocal.detached' }
+  }
+
+  const facts = row.basedOnFacts
   switch (row.basedOn) {
     case 'current':
-      return { text: CLOUD_LOCAL_TEXT.has, action: 'none', warn: false, hint: null }
+      return { ...none, text: 'presets.tree.cloudLocal.has' }
     case 'outdated':
       return {
-        text: CLOUD_LOCAL_TEXT.stale,
+        ...none,
+        text: 'presets.tree.cloudLocal.stale',
         action: 'update',
-        warn: false,
-        hint: null,
+        showCloudRelease: true,
       }
     /*
      * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
-     * 它确实没有需要更新的内容。
+     * 它确实没有需要更新的内容；云端时间也不许露头。
      */
     case 'unchanged':
-      return {
-        text: 'presets.tree.cloudLocal.unchanged',
-        action: 'none',
-        warn: false,
-        hint: null,
-      }
+      return { ...none, text: 'presets.tree.cloudLocal.unchanged' }
     /*
-     * **说不清版本关系**（血统缺发布线 / 老目录没身份）：不声称有新版，
-     * 但**必须留一条出路** —— 否则老副本永远没有建立新基线的入口。
-     * 点它 = 以当前云端版建立新基线，`hint` 里把这句话说全。
+     * **说不清版本关系**：不声称有新版，也不给「更新」——
+     * 建立在猜测上的更新会把用户往错误的方向带。出路是右键重新从云端下载。
      */
     case 'unverified': {
       /*
-       * ★ **云端这一代自己就没有发布身份**（2026-10-29 作者真机踩到的死循环）：
-       *   本机目录还停在"没有 catalogId / publishSerial"的旧一代（那次只盖身份的
-       *   发布没被 `revision` 发现），此时点「更新」只能以"没有身份"再建一次基线
-       *   —— 点完照样是"未知"，按钮永远挂着。那个循环比没有按钮更坏。
-       *
-       *   判据用**目录那一代**的两格，不是血统的：血统没有身份是正常的（老副本），
-       *   云端目录没有身份才是"现在做什么都没用，先拿新目录"。
+       * **原因必须来自后端那一格**（2026-10-29 修）：以前这里 `?? 'no_release_line'`，
+       * 于是所有说不清的都念「下载时没有记录发布线」—— 而云端行的事实被写死成 null，
+       * 等于每一行都在念这句错话。现在缺原因就照实说"没记下原因"，不再拿某个具体
+       * 原因去顶（顶上去的那句话，用户是会当真的）。
        */
-      const line = row.basedOnFacts?.cloudCatalog
-      const serial = row.basedOnFacts?.cloudSerial
-      if (line == null || serial == null) {
-        return {
-          text: 'presets.tree.cloudLocal.noIdentity',
-          action: 'none',
-          warn: false,
-          hint: null,
-        }
-      }
+      const reason = facts?.unverifiedReason ?? null
       return {
-        text: 'presets.tree.cloudLocal.unverified',
-        action: 'update',
-        warn: false,
-        hint: 'presets.table.unverified.updateTitle',
+        ...none,
+        text: (reason !== null ? UNVERIFIED_WHY[reason] : undefined) ??
+          'presets.tree.unverified.noReason',
+        warn: reason === 'catalog_without_identity',
       }
     }
+    /*
+     * **不是同一个来源**：必须说清楚，不许静默 —— 用户看到"云端时间更新"却没有按钮，
+     * 唯一能解释的就是这一句。
+     *
+     * 2026-10-29 作者：「不用显示这么长」—— 行上只说结论（**跨分支，不比版本**），
+     * 具体是哪两条分支在详情「更多 → 来源追溯」里（`完整来源` / `当前源地址`）。
+     * 列表一行只有一行的宽度，把 identity 串塞进去会把文件名挤没。
+     */
+    case 'elsewhere':
+      return { ...none, text: 'presets.tree.cloudLocal.elsewhere' }
+    /* 云端这一份比我手上的旧：不给更新（那是把用户往回带），也不显示云端时间 */
+    case 'newer':
+      return { ...none, text: 'presets.tree.cloudLocal.newer' }
     /* **目录自相矛盾**：报警，不给动作（覆盖等于把错的东西写进用户文件） */
     case 'inconsistent':
-      return {
-        text: 'presets.tree.cloudLocal.inconsistent',
-        action: 'none',
-        warn: true,
-        hint: null,
-      }
-    /* 云端更旧 / 不是同一条线：作者要「就当无事发生」—— 一个字都不写、不给动作 */
-    case 'newer':
-    case 'elsewhere':
-      return { ...none }
+      return { ...none, text: 'presets.tree.cloudLocal.inconsistent', warn: true }
     /*
      * 后端没给结论（老后端 / 探针数据）：退回 `localState` 那三档。
-     * 这是**唯一的兜底**，也是唯一还会出现"说不清却写有新版"的地方 —— 收口在这儿，
-     * 一眼能看出它什么时候会被用到。
+     * 这是**唯一的兜底**，一眼能看出它什么时候会被用到。
      */
     default:
       return {
+        ...none,
         text: CLOUD_LOCAL_TEXT[row.localState],
         action: row.localState === 'stale' ? 'update' : 'none',
-        warn: false,
-        hint: null,
+        showCloudRelease: row.localState === 'stale',
       }
   }
 }
+
+
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */
 export const PRESET_SUSPECT_WHY: StringKey = 'presets.tree.suspectWhy'
@@ -805,7 +943,7 @@ export const PARAMS_TEXT = {
  */
 export function isDetachedCopy(row: PresetTableRow, copiesFollow: boolean): boolean {
   if (copiesFollow || row.scope !== 'local') return false
-  return row.provenance === 'copy' || row.provenance === 'import'
+  return row.provenanceKind === 'copy' || row.provenanceKind === 'import'
 }
 
 /**
@@ -825,11 +963,9 @@ export function isDetachedCopy(row: PresetTableRow, copiesFollow: boolean): bool
  */
 export function defaultNameOf(row: PresetTableRow): string | null {
   if (row.origin !== 'local') return null
-  if (row.provenance === 'import') return null
-  if (row.provenance === 'copy') {
-    return row.copiedFromName !== null && row.copiedFromName !== undefined
-      ? row.copiedFromName
-      : null
+  if (row.provenanceKind === 'import') return null
+  if (row.provenanceKind === 'copy') {
+    return row.originName !== null && row.originName !== undefined ? row.originName : null
   }
   const source = row.basedOnSource
   if (source === null || source === undefined || source === '') return null
@@ -992,9 +1128,6 @@ export const LOCAL_DRAWER = {
 
 /** 「看正文」那颗按钮的说明（展开详情里的 title） */
 
-/** 展开详情里那一格的名字 */
-export const BASED_ON_KEY: StringKey = 'presets.tree.basedOnKey'
-
 /** 展开详情里「后处理」那一格（本机学习账：这一份后处理成功跑过几次） */
 export const USAGE_KEY: StringKey = 'presets.tree.usageKey'
 
@@ -1013,100 +1146,6 @@ export function usageCellText(tr: Tr, count: number | undefined): string {
 
 /** 那一格的 tooltip：把"怎么算一次"当场说清，省得用户拿它跟「使用」次数对不上 */
 export const USAGE_HINT: StringKey = 'presets.tree.usageHint'
-
-/**
- * 展开详情里「发布线」那一行写什么（2026-10-28）：`support-ease · 第 12 号`。
- *
- * **两格同生同死**（后端 `Catalog::parse` 拒收只有一格的目录），所以缺任何一个
- * 就返回 `null` —— 调用方据此**整行不渲染**。这里刻意不返回「未知」：
- * 老目录 / 老副本本来就没有这条信息，摆一行"未知"只会让人以为界面没做完。
- *
- * 本地行传血统的（我这份基于第几号），云端行传目录的（云端是第几号）。
- */
-export function releaseLineText(
-  tr: Tr,
-  line: string | null | undefined,
-  serial: number | null | undefined,
-): string | null {
-  if (line == null || line === '' || serial == null) return null
-  return tr('presets.table.detail.ver.lineValue', { id: line, serial })
-}
-
-/** 「发布线」那一行的键名（一条句子只有一个出处，组件只搬） */
-export const RELEASE_LINE_KEY: StringKey = 'presets.table.detail.ver.line'
-
-/**
- * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
- * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
- */
-export function basedOnCellText(
-  tr: Tr,
-  row: {
-  basedOn?: BasedOn
-    basedOnSource?: string | null
-    basedOnCloud?: string | null
-  },
-): string {
-  /* 说得清来源的名字就说它（`A1 · 标准版`），说不清就退回血统里那串原文 */
-  const source = row.basedOnCloud ?? row.basedOnSource ?? ''
-  switch (row.basedOn) {
-    case 'current':
-      return source === ''
-        ? tr('presets.tree.basedOn.currentNoSource')
-        : tr('presets.tree.basedOn.current', { source })
-    case 'outdated':
-      return source === ''
-        ? tr('presets.tree.basedOn.outdatedNoSource')
-        : tr('presets.tree.basedOn.outdated', { source })
-    /*
-     * 同一个源、但云端那份更旧（2026-10-27）：**不说"有新版"** —— 那会把人往回带。
-     * 这句话只说事实："当前云端比我这份旧"，动作一个都不给（见 `PresetTable`）。
-     */
-    case 'newer':
-      return source === ''
-        ? tr('presets.tree.basedOn.newerNoSource')
-        : tr('presets.tree.basedOn.newer', { source })
-    /*
-     * 不是同一个源：换平台 / 换分支 / 换目录，或老副本没记源身份。
-     * 比不出新旧 —— 照实说"另有所在"，动作是「下载」而不是「更新」。
-     */
-    /*
-     * 不是题目里的那个源、时间又比不出来（2026-10-27 起很少见）：
-     * 只把血统里那串来源照抄出来，**不再加"不是当前这个云的"这种话** ——
-     * 作者的原话是"不要显示另一个源"，那就连解释都不扯源。
-     */
-    case 'elsewhere':
-      return source === ''
-        ? tr('presets.tree.basedOn.noneNoSource')
-        : tr('presets.tree.basedOn.elsewhereBare', { source })
-    /*
-     * **发布前进了，但这一份没变**（2026-10-28）：别的预设可能有新版，这份没有。
-     * 说事实、不给动作 —— 不许因为它跟"这条线发过新版"沾边就说它有新版。
-     */
-    case 'unchanged':
-      return source === ''
-        ? tr('presets.tree.basedOn.unchangedNoSource')
-        : tr('presets.tree.basedOn.unchanged', { source })
-    /*
-     * **说不清版本关系**（老副本缺发布线 / 老目录没身份）：照实说不知道，
-     * 不冒充"已是最新"，也不冒充"有新版"。补基线要等用户明确「更新」那一趟。
-     */
-    case 'unverified':
-      return source === ''
-        ? tr('presets.tree.basedOn.unverifiedNoSource')
-        : tr('presets.tree.basedOn.unverified', { source })
-    /*
-     * **目录自相矛盾**：同一条发布线的同一个序号，字节却变了 —— 那是数据坏了，
-     * 不是"有新版"。这句话要说得像报警，因为它就是。
-     */
-    case 'inconsistent':
-      return tr('presets.tree.basedOn.inconsistent', { source })
-    default:
-      return source === ''
-        ? tr('presets.tree.basedOn.noneNoSource')
-        : tr('presets.tree.basedOn.none', { source })
-  }
-}
 
 /**
  * 用户那份**不能被应用**时的说明：认不出它是 MKP 预设。
@@ -1577,8 +1616,6 @@ export function versionsText(tr: Tr, versions: string[]): { text: string; why: s
 export interface PresetRowBase {
   /** 「版本来源」那几格（云端行只有后两格：源身份 + 目录发布时间） */
   basedOnFacts?: BasedOnFacts
-  /** 我本地那一份**基于的云端版本时间**（血统 release_time；只有云端行有） */
-  localReleaseText?: string | null
 
   /** 这张表里唯一。带上机型：**一个文件在一台机型下只有一行**（版本收进了 `versions`） */
   rowKey: string
@@ -1780,14 +1817,23 @@ export interface PresetLocalRow extends PresetRowBase {
   /** 读不出来时后端给的那句人话原因（角标与动作格的 title 用它） */
   localStateDetail?: string | null
   /**
-   * **出处账**：这一份是复制来的还是导入来的（`copy` / `import`）。没记过是 `null`。
-   * 与 `copiedFrom` / `copiedFromName` 一起构成「来源：复制自 X / 导入」那一格的数据。
+   * 来路：`download`（云端下载）/ `copy`（用户自己另存，母本在 `originPath`）/
+   * `import`（外部导入）/ `unknown`（旧账，说不清）。没记过是 `null`。
    */
-  provenance?: 'copy' | 'import' | null
-  /** 出处账记的来源路径（相对用户根）。没有是 `null` */
-  copiedFrom?: string | null
-  /** 出处账记的来源**文件名**（界面直接显示）。没有是 `null` */
-  copiedFromName?: string | null
+  provenanceKind?: 'download' | 'copy' | 'import' | 'unknown' | null
+  /** 拷贝的母本路径（相对用户根）。没有是 `null` */
+  originPath?: string | null
+  /** 拷贝的母本**文件名**（界面直接显示）。没有是 `null` */
+  originName?: string | null
+  /** 这份对应的云端目录文件名（认亲用；目录换路径也还认得出） */
+  cloudFile?: string | null
+  /**
+   * ★ 「本地版本时间」：这份对应的那个云端版本**实际发布**的时刻。
+   * 没记过是 `null` —— 界面写「未知」，**不回落** `basedOnRelease` / mtime。
+   */
+  versionPublishedAt?: string | null
+  /** 这份落进 `presets-local/` 的时刻（epoch 秒） */
+  obtainedUnix?: number | null
   /**
    * **这一份自己的归属**（只有 `local` 行有它）：文件头 `# machine:` / `# variant:`
    * 两行（认不出回落来源那份）。行上的 `machineId` 是**筛选档**（这一行挂在哪个
@@ -1905,13 +1951,6 @@ export interface PresetRowsInput {
    * 行为不退化。
    */
   cloudVersions: CloudVersion[]
-  /**
-   * **云端条目 → 我本地那一份的修改时刻**（epoch 秒），云端详情里摆「本地版本时间」用。
-   *
-   * 键是云端文件名（认亲只认血统 based_on 的末段，与 claims 同一套）；
-   * 我这儿没有那一份就没有这个键 —— 就写「还没下载」，不编。
-   */
-  localTimes: Map<string, { at: number; release: string | null }>
   /** 下载区（`mkp/`）里有、**且与目录登记一致**的那些（`PresetFileState = ok`） */
   localPresets: DeliveryPresetSource[]
   /**
@@ -1950,7 +1989,6 @@ export interface PresetRowsInput {
    * preset 行「来源」列显示 GitHub / Gitee / 自定义源 的依据。null = 没配源
    * （离线 / 随包），来源照旧退「云端」。
    */
-  sourceLabel: string | null
   /**
    * 当前源的**规范化身份**（`github#owner/repo@main`）—— 云端详情里
    * 「云端源」那一行照它显示。`null` = 没配源 / 认不出（就写「未知」）。
@@ -2016,6 +2054,14 @@ export interface DeliveryPresetSource {
   layerHeight?: string
   /** 目录登记的字节数（真值） */
   size: number
+  /**
+   * **目录登记的这一份原文 SHA-256**（发布时对真字节算的）。
+   *
+   * 2026-10-29 补：云端详情「云端 SHA-256」那一行要它。此前这一格根本没搬过来，
+   * 云端行只能写「未知」—— 而目录里明明有。`null` = 目录没登记（随包 bootstrap
+   * 目录 / 老目录），**不是**"前端没取"。
+   */
+  sha256: string | null
   /** 它属于哪次发布（新世界目录没有版本号概念，恒 null；chip 只写「云端」） */
   presetVersion: string | null
   /**
@@ -2497,10 +2543,13 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
          */
         localState: f.state ?? undefined,
         localStateDetail: f.stateDetail,
-        /* 出处账：复制自哪一份 / 是不是导入的（「来源」那一格的数据，见 `originCellOf`） */
-        provenance: f.provenance ?? null,
-        copiedFrom: f.copiedFrom,
-        copiedFromName: f.copiedFromName,
+        /* 来路账：「来源」与「本地版本时间」两格的数据（见 `originCellOf`） */
+        provenanceKind: f.provenanceKind,
+        originPath: f.originPath,
+        originName: f.originName,
+        cloudFile: f.cloudFile,
+        versionPublishedAt: f.versionPublishedAt,
+        obtainedUnix: f.obtainedUnix,
       }
     })
     /*
@@ -2774,7 +2823,6 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     sort,
     deliveryPresets,
     cloudVersions,
-    localTimes,
     presetVersion,
     releaseAt,
     catalogLine,
@@ -2812,7 +2860,15 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
    *   血统照旧留在文件头 —— 它管的是"这一份从哪一版派生"（展开详情那一格），
    *   与"跟不跟云端"是两件事。
    */
-  const claims = new Map<string, BasedOn>()
+  /*
+   * 认领者记的是**结论 + 摆事实的那几格**（2026-10-29 修）。
+   *
+   * 以前只存 `BasedOn` 一个枚举，云端行的 `basedOnFacts` 就在下面被整套写死成 null
+   * （作者截图：云端详情里「本地发布线 / 本地 SHA-256」全是「未知（当时没有记录）」，
+   * 而那份本地文件的血统头里明明写着 `# based_on_catalog` / `# based_on_serial`）。
+   * 结论与它的事实必须**同源同份**，否则详情会自相矛盾。
+   */
+  const claims = new Map<string, { basedOn: BasedOn; facts: BasedOnFacts }>()
   if (kind === 'mkp') {
     const indexByPath = new Map(input.localIndex.map((e) => [e.path, e]))
     for (const f of input.local) {
@@ -2827,7 +2883,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
        */
       const prev = claims.get(entry.cloudSource)
       if (f.basedOn === 'current' && prev !== undefined) continue
-      claims.set(entry.cloudSource, f.basedOn)
+      claims.set(entry.cloudSource, { basedOn: f.basedOn, facts: f.basedOnFacts })
     }
   }
   /**
@@ -2845,7 +2901,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     if (kind !== 'mkp') return undefined
     const claim = claims.get(fileName)
     if (claim === undefined) return 'none'
-    if (claim === 'current') return 'has'
+    if (claim.basedOn === 'current') return 'has'
     /*
      * 我那份基于的**不是**云端现在这一版 → 给「更新」。
      *
@@ -2941,6 +2997,8 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
           : cloudVersions.filter(
               (v) => v.fileName === p.fileName && v.downloaded && !v.current,
             ).length
+      /* 认领它的那份本地文件（结论 + 事实同源，见上面 `claims` 的注释）；没有 = 我这儿没这份 */
+      const claim = claims.get(p.fileName)
       const row = {
         /* 行键 / 置顶键都认 fileName —— 理由见 `localRows` 里那一段（别拿 uid 当键） */
         rowKey: `preset-cloud:${p.fileName}`,
@@ -2990,7 +3048,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          * 「云端发布时间」同量纲对照。★ 不能拿文件修改时间：那是我哪天动过它，
          * 与版本新旧无关（作者 2026-10-27 就是被那个数带偏了）。
          */
-        localReleaseText: localTimes.get(p.fileName)?.release ?? null,
+
         /*
          * 云端详情里那一行「云端源」（2026-10-27）。
          *
@@ -3001,27 +3059,38 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          */
         basedOnFacts: {
           /*
-           * 云端行没有"我基于哪一版"这回事 —— 那是**本地行**的语义（我手上这份从哪拷的）。
-           * 这里照实留空，不拿目录的身份去冒充血统。
+           * 云端行「本地」那几格 = **认领它的那份本地文件**的事实（2026-10-29 修）。
+           *
+           * 以前这里整套写 null（连 `unverifiedReason` 也 null），于是
+           *   · 详情里「本地发布线 / 本地 SHA-256」永远「未知」；
+           *   · 行上那句「无法确认：…」永远回落到 `no_release_line`
+           *     （`updateStatusOf` 的兜底），哪怕真实原因是"没记录来源分支"。
+           * 现在结论与事实同源：认领者是谁，事实就是谁的；没有认领者（`localState='none'`）
+           * 才照实留空 —— 那是"我这儿没有这份"，不是"记不清"。
            */
-          lineageSource: null,
-          lineageRelease: null,
-          lineagePublishedAt: null,
+          lineageKind: claim?.facts.lineageKind ?? null,
+          lineageSource: claim?.facts.lineageSource ?? null,
+          lineageRelease: claim?.facts.lineageRelease ?? null,
+          lineagePublishedAt: claim?.facts.lineagePublishedAt ?? null,
+          lineageSha256: claim?.facts.lineageSha256 ?? null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
-          lineageCatalog: null,
-          lineageSerial: null,
+          /* 目录登记值就摆在这儿 —— 不再因为"前端没搬"而写未知 */
+          cloudSha256: p.sha256,
+          lineageCatalog: claim?.facts.lineageCatalog ?? null,
+          lineageSerial: claim?.facts.lineageSerial ?? null,
           /*
            * **这一份目录的发布身份**（2026-10-28）：详情里「发布线 · 第几号」那一行。
            * 两格同生同死；老目录 / 随包旧版都是 null ⇒ 那一行不渲染。
            */
           cloudCatalog: catalogLine,
           cloudSerial: catalogSerial,
-        },
+          unverifiedReason: claim?.facts.unverifiedReason ?? null,
+          },
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */
         /* 同一个判据：云端行也用后端那一格 BasedOn（与本地行同一条规则） */
-        basedOn: claims.get(p.fileName),
+        basedOn: claim?.basedOn,
         localState: localStateOf(p.fileName),
       } satisfies PresetCloudRow
       return [row]

@@ -394,7 +394,17 @@
  * 所以字号比行小一档、`line-height: 15px` 写死，`margin-left: auto` 把它顶到右缘。
  */
 .tag {
-  flex-shrink: 0;
+  /*
+   * **可以让位给文件名**（2026-10-29：英文 "Not downloaded" 一长就把名字挤没了）。
+   * 原来 `flex-shrink: 0` + `nowrap`：中文「未下载」三个字没问题，英文十几个字符
+   * 直接把左边那串文件名压成 `MKPProcess A1 0.2 0.1…`。
+   * 现在最多占半行，放不下自己省略 —— 名字是"哪一份"的唯一答案，先保它。
+   */
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   margin-left: auto;
   padding: 0 5px;
   border: 1px solid var(--bbs-line);

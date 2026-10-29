@@ -798,7 +798,7 @@ pub fn set_active_preset(root: &Path, file: &CatalogFile) -> Result<ActivePreset
     let sha256 = match file.expected_sha() {
         Some(want) => want.to_owned(),
         None => {
-            let bytes = std::fs::read(root.join(&file.path)).map_err(|_| {
+            let bytes = super::delivery::stored_bytes(root, file).ok_or_else(|| {
                 AppError::not_found(messages::text(
                     "ui.runtime.app_state.350",
                     &[("v1", &file.file_name.to_string())],

@@ -19,15 +19,17 @@
 import { useEffect, useState } from 'react'
 
 import { api, errorText } from '../../api'
-import { useT } from '../../i18n'
+import { msg, useText, useT, type Text } from '../../i18n'
 import { presetPrefsMutated } from '../state/deliveryState'
 import { Switch } from '../../components/switch'
 import s from './PageSettings.module.css'
 
 export default function PresetsSection() {
   const tr = useT()
+  const say = useText()
   const [copiesFollowCloud, setCopiesFollowCloud] = useState<boolean | null>(null)
-  const [err, setErr] = useState<string | null>(null)
+  /** 存键（`msg`）：这一格会一直挂着，换语言得跟着换字 */
+  const [err, setErr] = useState<Text | null>(null)
 
   /*
    * 进设置页读一次。★ 后端回的是**解析后的 boolean** —— 盘上"没选过"是 null，
@@ -40,7 +42,7 @@ export default function PresetsSection() {
         if (alive) setCopiesFollowCloud(v)
       },
       (e: unknown) => {
-        if (alive) setErr(tr('settings.presets.readFailed', { detail: errorText(e) }))
+        if (alive) setErr(msg('settings.presets.readFailed', { detail: errorText(e) }))
       },
     )
     return () => {
@@ -59,7 +61,7 @@ export default function PresetsSection() {
         presetPrefsMutated()
       },
       (e: unknown) => {
-        setErr(tr('settings.presets.saveFailed', { detail: errorText(e) }))
+        setErr(msg('settings.presets.saveFailed', { detail: errorText(e) }))
         /* 落盘失败就回去问后端现在到底是什么 —— 不许把界面留在与盘上不一致的那一档 */
         void api.getCopiesFollowCloud().then(
           (v) => setCopiesFollowCloud(v),
@@ -90,7 +92,7 @@ export default function PresetsSection() {
         )}
       </div>
 
-      {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
+      {err !== null && <p className={`${s.note} ${s.noteBad}`}>{say(err)}</p>}
     </section>
   )
 }

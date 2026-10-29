@@ -97,12 +97,7 @@ pub async fn commit_import(
                     没有对应，这份镜像就是它们"恢复默认值"唯一能退回去的地方 */
                     let _ =
                         runtime::baseline::ensure_origin_copy(&internal, &user_root, &outcome.path);
-                    let _ = runtime::provenance::record(
-                        &user_root,
-                        &outcome.path,
-                        None,
-                        runtime::provenance::ProvenanceKind::Import,
-                    );
+                    let _ = runtime::source_ledger::record_import(&internal, &outcome.path);
                 }
                 ImportOutcomeDto {
                     source: outcome.source,

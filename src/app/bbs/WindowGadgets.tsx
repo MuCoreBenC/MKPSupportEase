@@ -47,7 +47,7 @@ import { useState } from 'react'
 
 import { api, errorText } from '../../api'
 import type { PinPref } from '../../api/contract'
-import { useT, type StringKey } from '../../i18n'
+import { msg, useT, type StringKey } from '../../i18n'
 import { notify } from '../notify/notify'
 import { appStateMutated, useCompactWindow, usePinPref } from '../state/appState'
 import s from './WindowGadgets.module.css'
@@ -125,7 +125,7 @@ export default function WindowGadgets() {
       /* 浏览器 mock 没有 app-state 事件通道 —— 写完兜底刷一次快照（桌面端只是多一次重读） */
       appStateMutated()
     } catch (e) {
-      notify({ kind: 'bad', title: t(failTitle), text: errorText(e) })
+      notify({ kind: 'bad', title: msg(failTitle), text: errorText(e) })
     } finally {
       setBusy(false)
     }

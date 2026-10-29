@@ -76,7 +76,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 
 import { api, errorText, isAppError } from '../../api'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
-import { useT, type StringKey } from '../../i18n'
+import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
@@ -150,7 +150,7 @@ export default function PageSettings() {
   const [mode, setMode] = useState<Mode>('github')
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
-  const [note, setNote] = useState<{ text: string; bad?: boolean; detail?: string } | null>(null)
+  const [note, setNote] = useState<{ text: Text; bad?: boolean; detail?: string } | null>(null)
   /*
    * 软件更新这一块的状态。三态各有各的话：
    *   `loading`  还在问
@@ -185,6 +185,8 @@ export default function PageSettings() {
   const [localeBusy, setLocaleBusy] = useState(false)
   const [localeErr, setLocaleErr] = useState<string | null>(null)
   const tr = useT()
+  /* 存在 state 里的那句回执（备份 / 换源）：渲染时再翻 */
+  const say = useText()
 
   /*
    * 切片（「切片」那一块）：默认用哪个切片软件打开模型。纯前端偏好 ——
@@ -203,7 +205,7 @@ export default function PageSettings() {
    */
   const systemApp = useSystemSlicerApp()
   const [slicerBusy, setSlicerBusy] = useState(false)
-  const [slicerErr, setSlicerErr] = useState<string | null>(null)
+  const [slicerErr, setSlicerErr] = useState<Text | null>(null)
   /* 「去系统里改…」那一颗：点了会弹一个系统窗口/框，防连点 */
   const [slicerToSystem, setSlicerToSystem] = useState(false)
   /*
@@ -228,7 +230,7 @@ export default function PageSettings() {
    */
   const [autoClean, setAutoClean] = useState<boolean | null>(null)
   const [autoCleanBusy, setAutoCleanBusy] = useState(false)
-  const [autoCleanErr, setAutoCleanErr] = useState<string | null>(null)
+  const [autoCleanErr, setAutoCleanErr] = useState<Text | null>(null)
 
   /*
    * **备份与恢复**（2026-10-17）：两个动作都要先问系统要一个位置（文件夹 / 那份 zip）。
@@ -241,7 +243,7 @@ export default function PageSettings() {
   const [restoreBusy, setRestoreBusy] = useState(false)
   /* 恢复的二次确认：点了「从备份恢复」之后摆出来（再点一次才真恢复） */
   const [restoreArm, setRestoreArm] = useState<string | null>(null)
-  const [backupNote, setBackupNote] = useState<{ text: string; bad: boolean } | null>(null)
+  const [backupNote, setBackupNote] = useState<{ text: Text; bad: boolean } | null>(null)
 
   /** 备份：问系统"放到哪个文件夹"，剩下的（文件名、打包）全交给后端 */
   const doBackup = useCallback(async () => {
@@ -256,11 +258,11 @@ export default function PageSettings() {
       }
       const sum = await api.createBackup(dir)
       setBackupNote({
-        text: tr('settings.backup.done', { path: sum.path, files: sum.files }),
+        text: msg('settings.backup.done', { path: sum.path, files: sum.files }),
         bad: false,
       })
     } catch (e) {
-      setBackupNote({ text: tr('settings.backup.failed', { detail: errorText(e) }), bad: true })
+      setBackupNote({ text: msg('settings.backup.failed', { detail: errorText(e) }), bad: true })
     } finally {
       setBackupBusy(false)
     }
@@ -282,12 +284,12 @@ export default function PageSettings() {
         if (typeof at !== 'string' || at === '') return
         setRestoreArm(at)
         setBackupNote({
-          text: tr('settings.restore.ask', { path: at }),
+          text: msg('settings.restore.ask', { path: at }),
           bad: false,
         })
       } catch (e) {
         setBackupNote({
-          text: tr('settings.restore.pickFailed', { detail: errorText(e) }),
+          text: msg('settings.restore.pickFailed', { detail: errorText(e) }),
           bad: true,
         })
       }
@@ -297,10 +299,10 @@ export default function PageSettings() {
     try {
       const sum = await api.restoreBackup(restoreArm)
       /* 盘上换过了 ⇒ 整窗重载（内存里的都不算数） */
-      setBackupNote({ text: tr('settings.restore.done', { files: sum.files }), bad: false })
+      setBackupNote({ text: msg('settings.restore.done', { files: sum.files }), bad: false })
       window.setTimeout(() => window.location.reload(), 600)
     } catch (e) {
-      setBackupNote({ text: tr('settings.restore.failed', { detail: errorText(e) }), bad: true })
+      setBackupNote({ text: msg('settings.restore.failed', { detail: errorText(e) }), bad: true })
       setRestoreArm(null)
       setRestoreBusy(false)
     }
@@ -366,9 +368,9 @@ export default function PageSettings() {
       setAutoCleanErr(null)
     } catch (e) {
       setAutoClean(null)
-      setAutoCleanErr(tr('settings.history.readFailed', { detail: errorText(e) }))
+      setAutoCleanErr(msg('settings.history.readFailed', { detail: errorText(e) }))
     }
-  }, [tr])
+  }, [])
 
   useEffect(() => {
     void readAutoClean()
@@ -417,12 +419,12 @@ export default function PageSettings() {
       }
       setSource(got)
       setMode(got.mode as Mode)
-      setNote({ text: tr('settings.advanced.switched', { label: got.label }) })
+      setNote({ text: msg('settings.advanced.switched', { label: got.label }) })
       sourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
-        text: tr('settings.advanced.switchFailed', {
+        text: msg('settings.advanced.switchFailed', {
           label: source?.label ?? tr('settings.advanced.defaultSource'),
         }),
         bad: true,
@@ -484,7 +486,7 @@ export default function PageSettings() {
     try {
       setAutoClean(await api.setAutoCleanHistory(next))
     } catch (e) {
-      setAutoCleanErr(tr('settings.history.writeFailed', { detail: errorText(e) }))
+      setAutoCleanErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
     } finally {
       setAutoCleanBusy(false)
     }
@@ -511,7 +513,7 @@ export default function PageSettings() {
         setSlicerApp(app)
         setSlicer('custom')
       } catch (e) {
-        setSlicerErr(tr('settings.slicer.pickFailed', { detail: errorText(e) }))
+        setSlicerErr(msg('settings.slicer.pickFailed', { detail: errorText(e) }))
       } finally {
         setSlicerBusy(false)
       }
@@ -631,11 +633,11 @@ export default function PageSettings() {
     try {
       const got = await api.setPresetSource('custom', draft.trim())
       setSource(got)
-      setNote({ text: tr('settings.advanced.applied') })
+      setNote({ text: msg('settings.advanced.applied') })
       sourceChanged()
     } catch (e) {
       setNote({
-        text: tr('settings.advanced.applyFailed', {
+        text: msg('settings.advanced.applyFailed', {
           label: source?.label ?? tr('settings.advanced.defaultSource'),
         }),
         bad: true,
@@ -663,8 +665,15 @@ export default function PageSettings() {
   const jumpUrl =
     source?.mode === 'custom' && source.address !== '' ? source.address : releaseUrl
 
+  /*
+   * 这一页的根（`.page`）= 「顶栏页签以下那一整块」。交给模态框当 `host`，
+   * 遮罩 `absolute inset:0` 才会铺满这一块（与 `PagePresets` 的 `pageEl` 同一个做法）。
+   * 只在「最近删除」那个框上用得到 —— 列表搬进框里之后（2026-10-29）。
+   */
+  const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null)
+
   return (
-    <div className={s.page}>
+    <div className={s.page} ref={setPageEl}>
       <header className={s.head}>
         <h1 className={s.title}>{tr('settings.title')}</h1>
         <p className={s.sub}>{tr('settings.subtitle')}</p>
@@ -876,7 +885,7 @@ export default function PageSettings() {
               </Btn>
             </div>
           )}
-          {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{slicerErr}</p>}
+          {slicerErr !== null && <p className={`${s.note} ${s.noteBad}`}>{say(slicerErr)}</p>}
         </div>
       </section>
 
@@ -946,7 +955,7 @@ export default function PageSettings() {
         </div>
 
         {autoCleanErr !== null && (
-          <p className={`${s.note} ${s.noteBad}`}>{autoCleanErr}</p>
+          <p className={`${s.note} ${s.noteBad}`}>{say(autoCleanErr)}</p>
         )}
       </section>
 
@@ -1009,7 +1018,7 @@ export default function PageSettings() {
         </div>
 
         {backupNote !== null && (
-          <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{backupNote.text}</p>
+          <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{say(backupNote.text)}</p>
         )}
       </section>
 
@@ -1029,7 +1038,7 @@ export default function PageSettings() {
       <CalibSection />
       <BedGlueSection />
       <PresetsSection />
-      <DataSection />
+      <DataSection host={pageEl} />
 
       <section className={s.section} aria-label={tr('settings.advanced.title')}>
         <h2 className={s.secTitle}>{tr('settings.advanced.title')}</h2>
@@ -1096,7 +1105,7 @@ export default function PageSettings() {
         <p className={s.current}>{tr('settings.advanced.current', { text: currentText })}</p>
         {note !== null && (
           <div className={s.noteBlock}>
-            <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{note.text}</p>
+            <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{say(note.text)}</p>
             {note.detail !== undefined && (
               /* 技术细节收进折叠：普通用户只看结论（作者 2026-10-05：
                  「出了一堆东西我也看不懂，你要给用户看得懂的东西」） */
