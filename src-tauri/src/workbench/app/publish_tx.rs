@@ -313,10 +313,28 @@ fn plan_only(
         branch: None,
         commit: None,
         files: plan.files,
-        summary: format!(
-            "预演：这次会写成第 {next_serial} 号（{}）。变化：新增 {} · 修改 {} · 删除 {} · 未变化 {}。（演练：未写入任何文件）",
-            line, changes.added, changes.changed, changes.removed, changes.unchanged
-        ),
+        /*
+         * 措辞要分得清两件事（作者 2026-10-29：「0 改动就代表没东西可发，这是完全不对的」）：
+         * ① **产物字节**变了几份；② **目录身份 / 发布戳 / 账本**会不会变。
+         * 只报 ① 时，干净的交付面会显示"0 变化"，看起来像什么都没发生。
+         */
+        summary: {
+            let first = matches!(book_state, super::publish_book::State::NoBook);
+            let bytes_same = changes.added + changes.changed + changes.removed == 0;
+            let mut s = format!("预演：这次会把目录写成 {line} 第 {next_serial} 号");
+            if first {
+                s.push_str("（现在还没有发布身份 —— 第一次盖章，并新建发布账本）");
+            }
+            s.push_str(&format!(
+                "。产物字节：新增 {} · 修改 {} · 删除 {} · 未变化 {}",
+                changes.added, changes.changed, changes.removed, changes.unchanged
+            ));
+            if bytes_same && !first {
+                s.push_str("。字节没变 —— 这次要发的是目录身份 / 发布戳 / 账本的更新");
+            }
+            s.push_str("。（演练：未写入任何文件）");
+            s
+        },
         published_at: Some(meta.stamp),
         revision: Some(plan.revision.clone()),
         changes: Some(changes),

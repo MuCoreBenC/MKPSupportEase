@@ -595,6 +595,19 @@ export default function PublishGateModal({
           <h3 className={s.blockTitle}>客户端</h3>
           <p className={`${s.verdict} ${s[`verdict_${verdict.tone}`]}`}>{verdict.text}</p>
           <p className={s.blockLine}>
+            {/*
+             * **这一版是第几号**（2026-10-29）：客户端判"要不要更新"唯一能比的数。
+             * 以前回执里只有 `revision` 前 8 位，翻遍界面都看不到"第几号"。
+             */}
+            这一版是{' '}
+            {report.publishSerial == null || report.publishSerial <= 0 ? (
+              <>第几号未知（这次没走到分配）</>
+            ) : (
+              <b>
+                {report.catalogId ?? '未知'} 第 {report.publishSerial} 号
+              </b>
+            )}
+            <span className={s.sep}>|</span>
             本次目录指纹{' '}
             <span className={c.mono} title={report.revision ?? ''}>
               {report.revision === null || report.revision === undefined
@@ -737,12 +750,67 @@ export default function PublishGateModal({
 
       {audit !== null && (
         <>
-          {/* 这一批会让 presets/ 怎么变 —— 数来自后端那一格（只数 presets/ 下面的） */}
+          {/*
+           * ★★ **先说这次真的要发出去什么**（2026-10-29 作者：「0 改动就代表没东西可发，
+           *   这是完全不对的」）。
+           *
+           *   下面那三个数（新增/改动/删除）数的是**工作区脏文件**，工作区干净时恒为 0 ——
+           *   可目录身份、账本、manifest 定稿照样要变。把两者分开说，才不会让人以为
+           *   "什么都不会发"。
+           */}
           <p className={s.counts}>
-            本次发布会让 <span className={c.mono}>presets/</span> 新增{' '}
-            <b>{audit.filesAdded}</b> · 改动 <b>{audit.filesChanged}</b> · 删除{' '}
-            <b>{audit.filesRemoved}</b> 个文件
-            {audit.minVersion !== null && <> · 最低客户端版本 {audit.minVersion}</>}
+            {/*
+             * ★ 守卫用 `!x || !(x > 0)`，**不要用 `=== ''`**（2026-10-29 实测踩过）：
+             *   工作台后端还没重新编译时，这些新字段根本不出现 ⇒ `undefined`，
+             *   `undefined === ''` 是 false，于是渲染出「写成 第 号」这种半句话。
+             *   拿不到就明说拿不到，别让界面在那儿漏字。
+             */}
+            {!audit.catalogId || !(audit.publishSerial > 0) ? (
+              <>这一版是第几号读不出来（发布账本读不出来，或工作台后端版本旧 —— 见下面那几项）</>
+            ) : (
+              <>
+                这次会把目录写成{' '}
+                <b>
+                  {audit.catalogId} 第 {audit.publishSerial} 号
+                </b>
+                {/* 目录现在有没有身份：老目录是"无 → 有"，读的人要能看出这是一次换代 */}
+                {!audit.identityNow || !(audit.serialNow != null && audit.serialNow > 0) ? (
+                  <>（目录现在还没有发布身份，这次是第一次给它盖章）</>
+                ) : (
+                  <>
+                    （目录现在是 {audit.identityNow} 第 {audit.serialNow} 号）
+                  </>
+                )}
+                {/* 账本是新建还是沿用：首次发布会多出一个文件，值得让人知道 */}
+                {!audit.ledgerExists && <>，并新建发布账本</>}
+              </>
+            )}
+            {/*
+             * **最低客户端版本不是"当前版本"**（作者 2026-10-29 问"这判断对不对"）：
+             * 它是**兼容下限** —— 由结构签名去 `presets/structure-signatures.toml` 查出来的
+             * "读得懂这一代结构的最老正式版"。内容/功能变了它不动；只有结构变了才该换一条。
+             */}
+            {audit.minVersion !== null && (
+              <> · 最低客户端版本 {audit.minVersion}（兼容下限，不是当前版本）</>
+            )}
+          </p>
+
+          {/*
+           * 工作区那一组数：**如实标注它数的是什么**（不是"这次要发什么"）。
+           * 三个都是 0 时只写一句"工作区干净"，不摆一串 0 让人误读。
+           */}
+          <p className={s.counts}>
+            {audit.filesAdded + audit.filesChanged + audit.filesRemoved === 0 ? (
+              <>
+                <span className={c.mono}>presets/</span> 里没有未提交的零散改动（工作区干净）
+              </>
+            ) : (
+              <>
+                工作区里 <span className={c.mono}>presets/</span> 还有未提交的改动：新增{' '}
+                <b>{audit.filesAdded}</b> · 改动 <b>{audit.filesChanged}</b> · 删除{' '}
+                <b>{audit.filesRemoved}</b>（与"这次要发什么"是两件事）
+              </>
+            )}
           </p>
 
           <div className={s.list} role="list">

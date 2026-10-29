@@ -150,6 +150,23 @@ pub struct PublishAudit {
     /// （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
     /// 界面不许把那颗按钮画亮 —— 点下去只会被后端如实拒掉。
     pub publish_closed: Option<String>,
+    /*
+     * ---- **这次真要发出去的东西**（2026-10-29） ----
+     *
+     * ★ 上面那三个 `files_*` 数的是**工作区脏文件**，不是"要发什么"：工作区干净时恒为 0，
+     *   可目录身份 / 账本 / manifest 定稿照样要变。作者的原话：「0 改动就代表没东西可发，
+     *   这是完全不对的」。所以界面要有一组真的在描述本次发布内容的数。
+     */
+    /// 这一代要写的发布线（`support-ease`）。空串 = 账本坏了，读不出来
+    pub catalog_id: String,
+    /// 这一代要写的序号（第几号）。0 = 读不出来
+    pub publish_serial: u64,
+    /// 发布账本**现在**存在吗 —— `false` = 首次发布，会新建一本
+    pub ledger_exists: bool,
+    /// 目录**现在**的发布线（`None` = 老目录 / 还没发过，这次会从"无"变成"有"）
+    pub identity_now: Option<String>,
+    /// 目录**现在**的序号
+    pub serial_now: Option<u64>,
 }
 
 impl PublishAudit {
@@ -257,6 +274,35 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         .iter()
         .all(|i| !(i.severity == AuditSeverity::Blocker && i.status == AuditStatus::Fail));
 
+    /*
+     * **这一代要写成第几号**（2026-10-29，作者：「0 改动就代表没东西可发」）。
+     *
+     * 闸上那三个"新增 / 改动 / 删除"数的是**工作区脏文件**，与"这次要发什么"根本不是
+     * 一回事：工作区干净时它恒为 0，可目录身份 / 账本 / manifest 定稿照样要变。
+     * 所以另给一组**真的在描述本次发布**的数：谁、第几号、账本是新建还是沿用。
+     *
+     * 只读：`inspect` 读账本与 catalog，`next_after` 是纯算术 —— 预演与真发走同一处分配，
+     * 所以这里说"第 1 号"，真发就一定是第 1 号。
+     */
+    let (catalog_id, publish_serial, ledger_exists) =
+        match super::publish_book::inspect(&delivery_root, super::delivery::NEW_CATALOG_FILE) {
+            Ok(state) => {
+                use super::publish_book::State;
+                let on_disk = super::delivery::PublishIdentity::inherit_from(&delivery_root).serial;
+                match state {
+                    State::NoBook => (super::publish_book::DEFAULT_LINE.to_owned(), 1u64, false),
+                    State::InSync(b) | State::Stale(b) => {
+                        (b.catalog_id.clone(), b.next_after(on_disk), true)
+                    }
+                }
+            }
+            /* 账本坏了：闸别处会报，这里如实说"读不出来"，不编一个号 */
+            Err(_) => (String::new(), 0, false),
+        };
+
+    /* 目录**现在**有没有身份 —— 与"这次将写成第几号"是两件事：老目录会从"无"变成"有" */
+    let identity_now = super::delivery::PublishIdentity::inherit_from(&delivery_root);
+
     Ok(PublishAudit {
         items,
         files_added: added,
@@ -265,6 +311,11 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         min_version,
         can_publish,
         publish_closed: closed_reason(),
+        catalog_id,
+        publish_serial,
+        ledger_exists,
+        identity_now: identity_now.catalog_id,
+        serial_now: identity_now.serial,
     })
 }
 
