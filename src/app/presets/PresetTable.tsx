@@ -238,22 +238,22 @@ function CloudLocalAction({
    *   于是三种都长出了同一颗绿色按钮。
    *
    *   现在按结论分派：
-   *     outdated     ⇒ 给（唯一一档）
+   *     outdated     ⇒ 给（唯一一档是"确定有新版"）
    *     unchanged    ⇒ 破折号（发布前进了，但这份没变）
-   *     unverified   ⇒ 破折号（说不清，补基线要用户明确接受当前版本）
    *     inconsistent ⇒ 破折号 + 警告字样（数据坏了，不能覆盖）
+   *     unverified   ⇒ **也给**，但换了说法（见下）
+   *
+   *   ★ `unverified` 必须留一条出路（2026-10-29）：老副本（血统里没有发布线/序号）
+   *     会被判成"说不清"，如果连按钮都不给，那一份就**永远**没有建立新基线的入口 ——
+   *     只能删掉重下。而"接受当前云端版"这件事本来就得由用户明确点一下才算数
+   *     （下载 ≠ 接受版本），所以按钮留着，`title` 里把话说清：点它 = 以当前云端版
+   *     建立起新基线。至于"有新版"那三个字，那是徽章的事，已经不在这格说了。
    */
-  if (
-    row.basedOn === 'unchanged' ||
-    row.basedOn === 'unverified' ||
-    row.basedOn === 'inconsistent'
-  ) {
+  if (row.basedOn === 'unchanged' || row.basedOn === 'inconsistent') {
     const why =
       row.basedOn === 'inconsistent'
         ? tr('presets.table.inconsistent.title')
-        : row.basedOn === 'unverified'
-          ? tr('presets.table.unverified.title')
-          : tr('presets.table.unchanged.title')
+        : tr('presets.table.unchanged.title')
     return (
       <span
         className={row.basedOn === 'inconsistent' ? s.actWarn : s.actNone}
@@ -289,6 +289,12 @@ function CloudLocalAction({
       className={isUpdate ? s.updateBtn : s.actBtn}
       disabled={busy}
       onClick={() => onDownload(row)}
+      /* 说不清版本关系时，这一下点击的含义要多说一句（见上面那段注释） */
+      title={
+        row.basedOn === 'unverified'
+          ? tr('presets.table.unverified.updateTitle')
+          : undefined
+      }
     >
       {tr(action)}
     </button>

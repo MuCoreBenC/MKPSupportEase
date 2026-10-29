@@ -435,7 +435,26 @@ export function cloudClaimBadge(row: {
   if (row.basedOn === 'newer') return null
   /* `elsewhere` 不挂任何徽章：源不同不是用户要看的，判定看内容与时间（2026-10-27） */
   if (row.localState === undefined) return null
-  return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
+  /*
+   * ★ **徽章也要按结论分档，不能只看 `localState`**（2026-10-29 作者截图抓出来的）。
+   *
+   *   `localState` 只有三档（未获取 / 有新版 / 本地已有），而它把"说不清"与
+   *   "内容没变"都并进了 `stale` —— 于是行上写着「有新版」，可这一份到底有没有新版
+   *   根本不知道。按钮那边早就按 `basedOn` 分派了，徽章没跟上，就成了"按钮说没事、
+   *   徽章说有事"的自相矛盾。
+   *
+   *   所以：**能声称"有新版"的只有 `outdated`**；其余三种在 `stale` 里各有各的说法。
+   */
+  switch (row.basedOn) {
+    case 'unchanged':
+      return { text: 'presets.tree.cloudLocal.unchanged', state: row.localState }
+    case 'unverified':
+      return { text: 'presets.tree.cloudLocal.unverified', state: row.localState }
+    case 'inconsistent':
+      return { text: 'presets.tree.cloudLocal.inconsistent', state: row.localState }
+    default:
+      return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
+  }
 }
 
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
