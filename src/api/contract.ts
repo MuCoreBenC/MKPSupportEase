@@ -972,12 +972,13 @@ export interface BasedOnFacts {
   /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
   lineageSource: string | null
   /**
-   * 血统里记的来源版本标记（文件头 `# release_time`）。
-   * **只做展示**：那是配方的写作日期，不是发布顺序，**更不是「本地版本时间」**。
+   * 血统里记的来源版本标记（文件头 `# release_time`）—— 界面「配方版本时间」就是它。
+   * **只做展示**：那是配方自己写下的时间，不是发布顺序，**更不是「云端发布时刻」**。
    */
   lineageRelease: string | null
   /**
-   * ★ 「本地版本时间」的真值：这份**对应的那个云端版本**实际发布的时刻。
+   * ★ 「云端发布时刻」的真值：这份**对应的那一代目录**实际发布的时刻。
+   * 它只说明目录什么时候发布，**不代表内容变过**。
    * 从没记过 ⇒ `null` → 界面写「未知」，**不回落** `lineageRelease` / mtime。
    */
   lineagePublishedAt: string | null
@@ -1089,8 +1090,9 @@ export interface LocalPresetFile {
   /** 这份对应的云端目录文件名（认亲用；目录换路径也还认得出） */
   cloudFile: string | null
   /**
-   * ★ 「本地版本时间」：这份对应的那个云端版本**实际发布**的时刻。
-   * 从没记过 ⇒ `null` → 界面写「未知」，**不回落文件修改时间 / `# release_time`**。
+   * ★ 「云端发布时刻」：这份对应的那一代目录**实际发布**的时刻（只说明目录发布，
+   * 不代表内容变过）。从没记过 ⇒ `null` → 界面写「未知」，
+   * **不回落文件修改时间 / `# release_time`**。
    */
   versionPublishedAt: string | null
   /** 这份文件落进 `presets-local/` 的时刻（epoch 秒）：下载 / 拷贝 / 导入各按各的 */

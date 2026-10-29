@@ -1408,21 +1408,27 @@ export const zhCN = {
   'presets.table.inconsistent.title': '云端目录自相矛盾：同一次发布里这一份的内容却变了，先别更新',
   'presets.table.inconsistent.badge': '目录异常',
   'presets.table.detail.key.versions': '版本来源',
-  /* 主区：来源 / 来源预设 / 本地版本时间 / 更新状态（+ 有新版才出现的云端新版发布） */
+  /* 主区：来源 / 来源预设 / 云端发布时刻 + 配方版本时间 / 更新状态（+ 有新版才出现的云端新版发布） */
   'presets.table.detail.key.sourcePreset': '来源预设',
-  'presets.table.detail.key.localVersionTime': '本地版本时间',
+  'presets.table.detail.key.cloudPublishedAt': '云端发布时刻',
+  'presets.table.detail.key.recipeVersion': '配方版本时间',
   'presets.table.detail.key.updateState': '更新状态',
   'presets.table.detail.key.cloudRelease': '云端新版发布',
   'presets.table.detail.versionUnknown': '未知（当时没有记录）',
-  'presets.table.detail.localVersionTime.why':
-    '这份对应的那个云端版本实际发布的时间 —— 下载那一刻记下，不随后来的文件修改变化',
-  /* 更多：技术信息（排查 / 审计用） */
-  'presets.table.detail.more': '更多',
-  'presets.table.detail.more.hint': '来源追溯、版本判定、内部路径',
-  'presets.table.detail.more.origin': '来源追溯',
+  'presets.table.detail.recipeVersion.unknown': '未知（文件头里没有这一行）',
+  'presets.table.detail.cloudPublishedAt.why':
+    '这一代目录正式发布、确定发布身份的时间 —— 只说明目录什么时候发布，不代表内容变过',
+  'presets.table.detail.recipeVersion.why':
+    'TOML 文件头里的 # release_time，由配方自身提供 —— 不保证等于文件实际生成或修改时间',
+  /* 版本判定：本地 / 云端两列对照（一致时合并成一行） */
+  'presets.table.detail.line': '发布线',
+  'presets.table.detail.sha': 'SHA-256',
+  'presets.table.detail.lineValue': '{catalog} · 第 {serial} 号',
+  'presets.table.detail.same': '（一致）',
   'presets.table.detail.more.version': '版本判定',
-  'presets.table.detail.more.file': '文件',
+  'presets.table.detail.more.file': '文件信息',
   'presets.table.detail.more.lineage': '血统记录',
+  'presets.table.detail.lineage.count': '共 {count} 项',
   'presets.table.detail.more.fullOrigin': '完整来源',
   'presets.table.detail.more.sourcePresetPath': '来源预设路径',
   'presets.table.detail.more.localLine': '本地发布线',

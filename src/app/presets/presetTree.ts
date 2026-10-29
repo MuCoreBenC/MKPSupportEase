@@ -1828,8 +1828,8 @@ export interface PresetLocalRow extends PresetRowBase {
   /** 这份对应的云端目录文件名（认亲用；目录换路径也还认得出） */
   cloudFile?: string | null
   /**
-   * ★ 「本地版本时间」：这份对应的那个云端版本**实际发布**的时刻。
-   * 没记过是 `null` —— 界面写「未知」，**不回落** `basedOnRelease` / mtime。
+   * ★ 「云端发布时刻」：这份对应的那一代目录**实际发布**的时刻（只说明目录发布，
+   * 不代表内容变过）。没记过是 `null` —— 界面写「未知」，**不回落** `basedOnRelease` / mtime。
    */
   versionPublishedAt?: string | null
   /** 这份落进 `presets-local/` 的时刻（epoch 秒） */
@@ -2543,7 +2543,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
          */
         localState: f.state ?? undefined,
         localStateDetail: f.stateDetail,
-        /* 来路账：「来源」与「本地版本时间」两格的数据（见 `originCellOf`） */
+        /* 来路账：「来源」与「云端发布时刻」两格的数据（见 `originCellOf`） */
         provenanceKind: f.provenanceKind,
         originPath: f.originPath,
         originName: f.originName,
