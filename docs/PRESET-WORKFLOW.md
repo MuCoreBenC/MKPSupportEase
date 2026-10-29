@@ -177,16 +177,17 @@ presets/…（源）
 逃生口 `ALLOW_PRESET_ARTIFACTS=1`（只放掉这一道，会写进 CI 日志）。
 本地只跑某个范围：`npm run check:artifacts -- --base origin/main` 或 `-- --staged`。
 
-### 老发布链已退役
+### 老发布链已删除（2026-10-28）
 
-`npm run publish:presets`（`scripts/publish-presets.mjs`）是**第二个生成出口**，它在入口
-直接拒绝并指向 `npm run presets -- publish`。两个理由：
+`scripts/publish-presets.mjs` 与 `npm run publish:presets` **都已删除**（git 历史里还在）。
+它是**第二个生成出口**，而且不写发布账本 —— 两个理由都是硬伤：
 
 - 它**不生成**，只提交 `presets/delivery/` 的现存字节（测试残留会被原样发出去）；
 - 它**不写发布账本**，发出去的目录没有 `catalogId` / `publishSerial`，客户端会判
   `unverified` —— 谁都不提示更新。
 
-确实要临时用它：`ALLOW_LEGACY_PRESET_PUBLISH=1`（会留痕）。
+正式发布只有一条路：`npm run presets -- publish`（分配序号、校验、提交、推送、开 PR
+一次做完，且目录与账本进同一笔提交）。
 
 ## 8. 验收
 

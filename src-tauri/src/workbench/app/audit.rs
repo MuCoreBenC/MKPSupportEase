@@ -1241,7 +1241,7 @@ fn manifest_correct_strict(delivery_root: &std::path::Path) -> AuditItem {
 /// ⑮ Git 工作区：**除 `presets/delivery/` 之外**没有别的改动，而且不在游离 HEAD 上。
 ///
 /// `presets/delivery/` 必须排除 —— 它就是这次要提交的产物本身，拿它的未跟踪状态
-/// 去拦自己的发布是个死锁（与 `scripts/publish-presets.mjs` 同一条口径）。
+/// 去拦自己的发布是个死锁 —— 同一口径也写在 `scripts/check-artifact-boundary.mjs` 里。
 ///
 /// 返回值第二部分 = 「这次发布会让 `presets/` 怎么变」的计数（新增/改动/删除，
 /// 弹窗顶上那三个数），**从原始 porcelain 状态码解析** —— 不许再从结论行反推。
@@ -1802,6 +1802,8 @@ mod tests {
                 channel: "stable".to_owned(),
                 version: String::new(),
                 identity: Some(delivery::PublishIdentity::new_line("support-ease", 1)),
+                /* 夹具里没有 git ⇒ 没有"上一代是哪一笔"可说 */
+                commit_sha: None,
             };
             delivery::publish_into(&fx.delivery_root(), fx.asset_root.path(), &book, &meta)
                 .expect("定稿");
@@ -1889,6 +1891,7 @@ mod tests {
             channel: "stable".to_owned(),
             version: String::new(),
             identity: Some(delivery::PublishIdentity::new_line("support-ease", 2)),
+            commit_sha: None,
         };
         delivery::publish_into(&fx.delivery_root(), fx.asset_root.path(), &book, &meta)
             .expect("定稿");

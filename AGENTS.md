@@ -43,7 +43,8 @@ presets/…（源）
 - 测试时生成过、又不想发出去 ⇒ **还原**（`git restore`），别跟着提交。
 - 真要发 ⇒ 走 `npm run presets -- publish`，它会分配序号并把目录与账本放进同一笔提交。
 - 闸：`npm run check:artifacts`（pre-push + CI 各跑一次）。红了先看它给的两条路。
-- `npm run publish:presets` **已退役**（第二个生成出口、不写账本）。它会直接把话说明白。
+- `npm run publish:presets` **已删除**（2026-10-28）：它是第二个生成出口、且不写账本。
+  正式发布只有 `npm run presets -- publish` 一条路。
 
 ## 4. 只有正式发布才推进序号
 
