@@ -123,6 +123,7 @@ import Icon from '../../components/Icon'
 import Chevron from '../shell/icons'
 import ui from '../ui/ui.module.css'
 import { useT } from '../../i18n'
+import type { Tr } from '../../i18n'
 import type { Machine } from '../../api'
 /*
  * ★ 2026-10-14：原来这里 `import { machineToneKeyOf } from '../ui/machineTone'`，
@@ -139,6 +140,8 @@ import {
   ASSET_USE_TEXT,
   BASED_ON_KEY,
   basedOnCellText,
+  RELEASE_LINE_KEY,
+  releaseLineText,
   cloudClaimBadge,
   CLOUD_LOCAL_ACTION,
   CLOUD_LOCAL_TEXT,
@@ -180,6 +183,24 @@ import s from './PresetTable.module.css'
  * 「本地已有」那一档**不给按钮**：那颗按钮按下去没有意义（要改、要用都在本地表那一行上），
  * 而摆一个看起来能点的东西比不摆糟得多 —— 画一枚灰字，`title` 里说清该去哪儿。
  */
+/**
+ * 展开详情里「发布线」那一行（2026-10-28）。
+ *
+ * **`text == null` 就整行不渲染** —— 老目录 / 老副本没有这条信息，摆一行"未知"
+ * 只会让人以为界面没做完（这条判断在 `releaseLineText` 里，一处出）。
+ */
+function ReleaseLineRow({ tr, text }: { tr: Tr; text: string | null }) {
+  if (text == null) return null
+  return (
+    <div className={s.dRow}>
+      <span className={s.dKey}>{tr(RELEASE_LINE_KEY)}</span>
+      <span className={`${s.dVal} ${s.dOne}`} title={text}>
+        {text}
+      </span>
+    </div>
+  )
+}
+
 function CloudLocalAction({
   row,
   busy,
@@ -1269,6 +1290,18 @@ export default function PresetTable({
                               */}
                               {row.origin === 'local' && row.basedOnFacts !== undefined && (
                                 <>
+                                  {/*
+                                    **发布线**（2026-10-28）：我这份基于哪条线的第几号。
+                                    两格同生同死，缺一个就整行不渲染（见 `releaseLineText`）。
+                                  */}
+                                  <ReleaseLineRow
+                                    tr={tr}
+                                    text={releaseLineText(
+                                      tr,
+                                      row.basedOnFacts.lineageCatalog,
+                                      row.basedOnFacts.lineageSerial,
+                                    )}
+                                  />
                                   <div className={s.dRow}>
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.local')}
@@ -1323,6 +1356,18 @@ export default function PresetTable({
                               */}
                               {row.origin === 'preset' && row.basedOnFacts !== undefined && (
                                 <>
+                                  {/*
+                                    **发布线**（2026-10-28）：云端这份目录是第几号。
+                                    与本地那一行同键同档 —— 两行并排就能看出差了几代。
+                                  */}
+                                  <ReleaseLineRow
+                                    tr={tr}
+                                    text={releaseLineText(
+                                      tr,
+                                      row.basedOnFacts.cloudCatalog,
+                                      row.basedOnFacts.cloudSerial,
+                                    )}
+                                  />
                                   <div className={s.dRow}>
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.cloud')}

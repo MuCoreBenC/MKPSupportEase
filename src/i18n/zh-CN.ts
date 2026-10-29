@@ -1357,6 +1357,8 @@ export const zhCN = {
   'presets.table.inconsistent.title': '云端目录自相矛盾：同一次发布里这一份的内容却变了，先别更新',
   'presets.table.inconsistent.badge': '目录异常',
   'presets.table.detail.key.versions': '版本来源',
+  'presets.table.detail.ver.line': '发布线',
+  'presets.table.detail.ver.lineValue': '{id} · 第 {serial} 号',
   'presets.table.detail.ver.local': '本地源',
   'presets.table.detail.ver.localTime': '本地版本时间',
   'presets.table.detail.ver.cloud': '云端源',

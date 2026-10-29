@@ -288,6 +288,8 @@ fn plan_only(
         channel: "stable".to_owned(),
         version: String::new(),
         identity: Some(identity.clone()),
+        /* 预演不落地、也不碰账本 —— 这一格用不上，照实留空 */
+        commit_sha: None,
     };
     // 只算不写：`plan_publish` 的返回值我们不调 `.write()`
     let plan = super::delivery::plan_publish(root, &asset_root, &book, &meta)?;
@@ -528,6 +530,16 @@ pub fn run(
         channel: "stable".to_owned(),
         version: String::new(),
         identity: Some(identity.clone()),
+        /*
+         * **上一代**那一代目录落库的提交（只读、不联网）。写在账本里只做事后对账：
+         * 这一代自己的 sha 要 commit 之后才存在，而账本必须与目录同笔提交 ⇒ 只能滞后一代。
+         * 读不出来（没有 git / 第一次发布）就照实留空，不编。
+         */
+        commit_sha: super::git::Git::at_repo_root().last_commit_touching(&format!(
+            "{}/{}",
+            super::delivery::DELIVERY_DIR_REL,
+            super::delivery::NEW_CATALOG_FILE
+        )),
     };
     /*
      * ★ **落地**：manifest → catalog → source → 账本，一次跑完，且**全都在下面 stage 之前**。
@@ -640,7 +652,11 @@ pub fn run(
         && report.commit.is_none()
     {
         let head_carries_it = git
-            .head_touches("presets/delivery/catalog.json")
+            .head_touches(&format!(
+                "{}/{}",
+                super::delivery::DELIVERY_DIR_REL,
+                super::delivery::NEW_CATALOG_FILE
+            ))
             .unwrap_or(false);
         if head_carries_it {
             report.stage = PublishStage::Committed;

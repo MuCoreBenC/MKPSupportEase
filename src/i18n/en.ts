@@ -1326,6 +1326,8 @@ export const en: Record<StringKey, string> = {
   'presets.table.inconsistent.title': 'The cloud catalog contradicts itself: this file changed within the same release — hold off updating',
   'presets.table.inconsistent.badge': 'Catalog error',
   'presets.table.detail.key.versions': 'Version origin',
+  'presets.table.detail.ver.line': 'Release line',
+  'presets.table.detail.ver.lineValue': '{id} · release {serial}',
   'presets.table.detail.ver.local': 'Local source',
   'presets.table.detail.ver.localTime': 'Local version time',
   'presets.table.detail.ver.cloud': 'Cloud source',

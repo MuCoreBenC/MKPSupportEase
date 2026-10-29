@@ -95,6 +95,13 @@ use crate::workbench::presets::{Asset, AssetKind};
 /// 这里 re-export 保持原引用不断。
 pub use crate::workbench::paths::{MKP_DIR, MKP_PRESETS_DIR};
 /// 目录类 JSON 的子目录
+/// **交付根相对发布根的位置**（`presets/delivery`）。
+///
+/// 单独具名是因为它不只用于"拼路径"：git 那一层要按它判断
+/// 「HEAD 这笔动过交付目录没有」（幂等恢复）与「上一代是哪一笔」（账本 `commit_sha`）。
+/// 两处各写一遍字面量就迟早会有一处漏改。
+pub const DELIVERY_DIR_REL: &str = "presets/delivery";
+
 pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
 pub const MANIFEST_FILE: &str = "manifest.json";
@@ -1146,6 +1153,12 @@ pub struct PublishMeta {
     /// `publish_tx` 从账本取了号再填进来。传进来的是**已经分配好的**号，
     /// 交付层不自己数数 —— 分配只有一处（见 `publish_book` 文件头）。
     pub identity: Option<PublishIdentity>,
+    /// **上一代**目录落库的那一笔提交（`git log -1 -- presets/delivery/catalog.json`）。
+    ///
+    /// 只写进账本、只做事后对账 —— 幂等恢复**不读它**（读 `head_touches` + `InSync`），
+    /// 所以它滞后一代、缺失、甚至写错，都不会让发布判据误判。
+    /// `None` = 第一次发布 / 读不出 git（都照实留空，不编一个 sha）。
+    pub commit_sha: Option<String>,
 }
 
 /// 一次发布的产出计数
@@ -1206,6 +1219,9 @@ pub struct PublishPlan {
     pub files: usize,
     /// 这一代的目录内容指纹（= `catalog.revision` 的快照，方便回执与账本同源取用）。
     pub revision: String,
+    /// **上一代**（不是这一代）目录落库的那一笔提交 —— 账本只记这个，见
+    /// [`PublishMeta::commit_sha`] 与 `publish_book::Book::commit_sha`。
+    pub commit_sha: Option<String>,
 }
 
 impl PublishPlan {
@@ -1234,7 +1250,8 @@ impl PublishPlan {
                 serial,
                 revision: self.revision.clone(),
                 catalog_hash: crate::workbench::app::publish_book::sha256_hex(text.as_bytes()),
-                commit_sha: None,
+                /* 上一代的那一笔（滞后一代是设计，见 `Book::commit_sha` 的注释） */
+                commit_sha: self.commit_sha.clone(),
             };
             crate::workbench::app::publish_book::save(delivery_root, &ledger)?;
         }
@@ -1517,6 +1534,7 @@ pub fn plan_publish(
         assets_copied: content.assets_checked,
         presets: presets_count,
         files: assets.len(),
+        commit_sha: meta.commit_sha.clone(),
     })
 }
 
@@ -2431,6 +2449,7 @@ mod tests {
             channel: "stable".to_owned(),
             version: String::new(),
             identity: Some(PublishIdentity::new_line("support-ease", 1)),
+            commit_sha: None,
         };
         let err = publish_into(&delivery, asset_root.path(), &book, &meta)
             .expect_err("有残留必须中止发布");

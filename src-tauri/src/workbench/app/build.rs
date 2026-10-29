@@ -1276,6 +1276,8 @@ fn publish_deliverable_only() -> Result<PublishReport, AppError> {
             channel: PUBLISH_CHANNEL.to_owned(),
             version: String::new(),
             identity: None,
+            /* 这个入口不提交 git（它只是"重算式定稿"）⇒ 没有"上一代是哪一笔"可说 */
+            commit_sha: None,
         };
         /*
          * `content/` 那三份（`machine_catalog` / `bundles` / `assets_index`）是**生成**的

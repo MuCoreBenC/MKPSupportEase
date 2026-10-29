@@ -168,6 +168,19 @@ import { longStatText } from '../store/package'
  * 底栏与窗口右下角的 resize 手柄照旧点得着（Modal 自己那条约定）。
  */
 import { HeadNote, Modal } from '../../components/modal'
+
+/**
+ * **「这一行为什么不能删」**（`undefined` = 能删）。
+ *
+ * 提在模块级、把 `tr` 当参数，是为了让引用它的那个 effect 能老实声明依赖：
+ * 以前它是组件里的一个闭包，effect 只能靠 `eslint-disable` 闭嘴
+ * —— 那正是"依赖漏声明"最容易藏身的地方（2026-10-28 扫 lint 时抓出来的）。
+ *
+ * 云端仓库文件（`asset`）的本地副本不给删：它们走资源那一套命令，删了没人补得回来。
+ */
+function removeWhyNotOf(tr: Tr, row: PresetTableRow): string | undefined {
+  return row.origin === 'asset' ? tr('presets.page.why.remove') : undefined
+}
 /* 通用导入入口（第十二层，停在 App 层）：这一页消费它的 revision（拖拽导入照常生效） */
 import { useFileImport } from '../import/useFileImport'
 import { useDevPreview } from '../dev/useDevPreview'
@@ -615,10 +628,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const devDelete = useDevPreview('delete-confirm')
   useEffect(() => {
     if (!devDelete.on) return
-    const row = page.local.rows.find((r) => removeWhyNot(r) === undefined)
+    const row = page.local.rows.find((r) => removeWhyNotOf(tr, r) === undefined)
     if (row !== undefined) setRemoveAsk(row)
     return () => setRemoveAsk(null)
-  }, [devDelete.on, page.local.rows])
+  }, [devDelete.on, page.local.rows, tr])
   /*
    * **右键「打开参数」那一份**（2026-10-09）。`syncFirst` = 直接把「选择要更新的参数」
    * 那一屏打开（用户点的是那条直路：他已经知道有云端更新等着处理 ——
@@ -2639,10 +2652,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * - 云端表没有删除 —— 那不是"不让"，是"不能"：客户端删不了仓库里的东西
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
-  const removeWhyNot = (row: PresetTableRow): string | undefined =>
-    row.origin === 'asset'
-      ? tr('presets.page.why.remove')
-      : undefined
+  /* 措辞在模块级 `removeWhyNotOf`（那里才谈得上"依赖稳定"）：effect 里也能老实声明依赖 */
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
   const removeConfirmDetail = (row: PresetTableRow): string => {
@@ -3054,7 +3064,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           icon: 'trash',
           label: tr('presets.page.menu.remove'),
           danger: true,
-          disabled: removeWhyNot(row),
+          disabled: removeWhyNotOf(tr, row),
           /* 确认框在页面层（`removeAsk` 那个居中模态框）—— 菜单里不再自带一层 */
           onSelect: () => askRemove(row),
         },
@@ -3137,7 +3147,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         danger: true,
         /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
            —— 代价在确认框里说清（框在页面层：`askRemove` → `removeAsk`） */
-        disabled: removeWhyNot(row),
+        disabled: removeWhyNotOf(tr, row),
         onSelect: () => askRemove(row),
       },
     ]

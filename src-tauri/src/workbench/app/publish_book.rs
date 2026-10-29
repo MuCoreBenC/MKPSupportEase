@@ -102,7 +102,25 @@ pub struct Book {
     /// 那一次发布的 `catalog.json` 全文 sha256 —— 回答"账本说的那一版是不是盘上这一份"。
     #[serde(default)]
     pub catalog_hash: String,
-    /// 那一次发布的提交。**推送失败时靠它认出"这笔commit 就是我"**，重跑只补 push。
+    /// **上一代**那一代目录落进 git 的那一笔提交（`git log -1 -- presets/delivery/catalog.json`）。
+    ///
+    /// # 为什么是"上一代"，为什么不是"本次"
+    ///
+    /// 账本与 catalog 必须是**同一笔 commit**（否则"目录说 43、账本说 42"那种半截状态
+    /// 就没人拦得住）。而记账本需要知道"这一笔的 sha"—— 那个 sha 只有 commit 之后才存在，
+    /// commit 之后再写账本就得再提交一次（amend 是仓库明令避免的）。
+    ///
+    /// 所以口径定为：**下一次**发布落盘时，把**上一次**那一代的提交号写进来。
+    /// 于是它永远滞后一代 —— 这不是缺陷，是"账本要跟目录同笔提交"的必然代价。
+    ///
+    /// # 它答什么、不答什么
+    ///
+    /// 答：**这一代目录是在哪一笔提交里落库的**（排障、追凶、跨机器对账）。
+    /// 不答：**推没推出去** —— 本地提交也可能没 push 成功。想要"推了没有"去问 git，
+    /// 不要拿这一格当"已发布到远端"的证据。
+    ///
+    /// 幂等恢复**不读它**（读的是 `head_touches` + [`State::InSync`]），所以它写错或
+    /// 缺失都不会让恢复逻辑误判 —— 这也正是它敢"滞后一代"的底气。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commit_sha: Option<String>,
 }
@@ -300,5 +318,59 @@ mod tests {
             inspect(dir.path(), "catalog.json").unwrap(),
             State::InSync(book)
         );
+    }
+
+    /// **回填 `commit_sha` 不能把 `InSync` 弄坏**（2026-10-28）。
+    ///
+    /// `commit_sha` 是"上一代那一笔" —— 它永远是下一次发布才写进去的，也就是说
+    /// 账本**每次发布都会变一格**。如果 `matches_catalog` 把账本自身也算进指纹，
+    /// 那么"账本变了、catalog 没变"就会被判成 `Stale`，幂等恢复（只补 push）立刻失效，
+    /// 还会连带让 `verify` 报假警。
+    ///
+    /// 所以它只算 `catalog.json` 的字节。这一条把它钉死。
+    #[test]
+    fn refilling_the_commit_sha_does_not_break_in_sync() {
+        let dir = tmp();
+        let catalog = br#"{"catalogSchema":1,"revision":"abc","files":[]}"#;
+        atomic_write(&dir.path().join("catalog.json"), catalog).unwrap();
+
+        let mut book = Book::new_line("support-ease");
+        book.serial = 3;
+        book.revision = "abc".to_owned();
+        book.catalog_hash = sha256_hex(catalog);
+        save(dir.path(), &book).unwrap();
+        let before = inspect(dir.path(), "catalog.json").unwrap();
+        assert!(matches!(before, State::InSync(_)), "第一代：同代");
+
+        /* 下一次发布回填上一代的提交 */
+        book.commit_sha = Some("4f56320".to_owned());
+        save(dir.path(), &book).unwrap();
+        let after = inspect(dir.path(), "catalog.json").unwrap();
+        assert_eq!(
+            after,
+            State::InSync(book.clone()),
+            "只改 commit_sha ⇒ 仍是同一代（幂等恢复的判断不受影响）"
+        );
+    }
+
+    /// **内容没变就不改盘**：同一份账本存两次，字节完全一致（`atomic_write` 不比内容时会白写）。
+    ///
+    /// 这条咬的是"每次发布都必然产生账本 diff"那个隐患：如果序列化不稳定（键序、缩进、
+    /// 末尾换行），即使值一样也会让 `git has_staged` 非空，于是"产物无变化"那一支永远
+    /// 走不到 —— `serial` 就会被白白推进。
+    #[test]
+    fn saving_the_same_book_twice_writes_the_same_bytes() {
+        let dir = tmp();
+        let mut book = Book::new_line("support-ease");
+        book.serial = 9;
+        book.revision = "abc".to_owned();
+        book.catalog_hash = "0".repeat(64);
+        book.commit_sha = Some("4f56320".to_owned());
+
+        save(dir.path(), &book).unwrap();
+        let first = std::fs::read(book_path(dir.path())).unwrap();
+        save(dir.path(), &book).unwrap();
+        let second = std::fs::read(book_path(dir.path())).unwrap();
+        assert_eq!(first, second, "同一份账本两次写盘必须逐字节相同");
     }
 }

@@ -875,6 +875,27 @@ export function usageCellText(tr: Tr, count: number | undefined): string {
 export const USAGE_HINT: StringKey = 'presets.tree.usageHint'
 
 /**
+ * 展开详情里「发布线」那一行写什么（2026-10-28）：`support-ease · 第 12 号`。
+ *
+ * **两格同生同死**（后端 `Catalog::parse` 拒收只有一格的目录），所以缺任何一个
+ * 就返回 `null` —— 调用方据此**整行不渲染**。这里刻意不返回「未知」：
+ * 老目录 / 老副本本来就没有这条信息，摆一行"未知"只会让人以为界面没做完。
+ *
+ * 本地行传血统的（我这份基于第几号），云端行传目录的（云端是第几号）。
+ */
+export function releaseLineText(
+  tr: Tr,
+  line: string | null | undefined,
+  serial: number | null | undefined,
+): string | null {
+  if (line == null || line === '' || serial == null) return null
+  return tr('presets.table.detail.ver.lineValue', { id: line, serial })
+}
+
+/** 「发布线」那一行的键名（一条句子只有一个出处，组件只搬） */
+export const RELEASE_LINE_KEY: StringKey = 'presets.table.detail.ver.line'
+
+/**
  * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
  * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
  */
@@ -1763,6 +1784,15 @@ export interface PresetRowsInput {
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   presetVersion: string | null
   /**
+   * **当前目录的发布身份**（`catalog.catalogId` + `catalog.publishSerial`）——
+   * 详情面板「发布线」那一行显示"云端是第几号"。
+   *
+   * **两格一组**：后端保证同生同死（只有一格的目录过不了解析），所以要么都有、
+   * 要么都是 `null`（老目录 / 随包旧版 ⇒ 那一行不渲染，不摆"未知"）。
+   */
+  catalogLine: string | null
+  catalogSerial: number | null
+  /**
    * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。**只有本地表读它** ——
    * 云端表只读工作台写的那句（2026-10-07 作者定：本地的改动不许影响云端显示）。
    * 键 = 文件身份（交付预设行 `catalog.path` / 本地文件相对用户根路径）；
@@ -2607,6 +2637,8 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     localTimes,
     presetVersion,
     releaseAt,
+    catalogLine,
+    catalogSerial,
     sourceIdentity,
   } = input
   const names = machineNames(machines)
@@ -2828,16 +2860,23 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          *   这一格是**规范化身份**（`gitee#owner/repo@ref`）—— 键名也分开写。
          */
         basedOnFacts: {
+          /*
+           * 云端行没有"我基于哪一版"这回事 —— 那是**本地行**的语义（我手上这份从哪拷的）。
+           * 这里照实留空，不拿目录的身份去冒充血统。
+           */
           lineageSource: null,
           lineageRelease: null,
           lineagePublishedAt: null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
-          /* 浏览器里没有真目录 ⇒ 发布线那一格照实未知 */
           lineageCatalog: null,
           lineageSerial: null,
-          cloudCatalog: null,
-          cloudSerial: null,
+          /*
+           * **这一份目录的发布身份**（2026-10-28）：详情里「发布线 · 第几号」那一行。
+           * 两格同生同死；老目录 / 随包旧版都是 null ⇒ 那一行不渲染。
+           */
+          cloudCatalog: catalogLine,
+          cloudSerial: catalogSerial,
         },
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */

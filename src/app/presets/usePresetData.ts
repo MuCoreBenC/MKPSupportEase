@@ -404,6 +404,15 @@ export interface PresetFeed {
   /** 目录指纹（两端共用契约的 revision；旧世界的"包版本"没有对应物，指纹更诚实） */
   version: string | null
   /**
+   * **发布线身份**（目录的 `catalogId`）+ **这条线的第几号**（`publishSerial`）。
+   *
+   * 两格**同生同死**（后端 `Catalog::parse` 拒收只有一格的目录），这里也按一组传：
+   * 要么都有、要么都 `null`（= 老目录 / 随包旧版，判不出"第几号"）。
+   * 详情面板「发布线」那一行读它；判定（要不要更新）不读它 —— 那在 Rust 侧。
+   */
+  catalogLine: string | null
+  catalogSerial: number | null
+  /**
    * **发布时刻**（catalog 的 `publishedAt`，RFC3339 / UTC）—— 云端表「时间」列的来源，
    * 显示时由前端转本机时区。`null` = 这份目录没带（随包 bootstrap 目录、或旧版发布的
    * 目录没有这一格）—— 照实说「未知」，**不编**。
@@ -436,6 +445,9 @@ export interface PresetFeed {
 const EMPTY_PRESET_FEED: PresetFeed = {
   version: null,
   publishedAt: null,
+  /* 还没读到目录 ⇒ 发布身份也不知道（不是"没有身份"，是"还没问"） */
+  catalogLine: null,
+  catalogSerial: null,
   presets: [],
   localPresets: [],
   stale: [],
@@ -685,6 +697,12 @@ export function usePresetData(importRevision = 0): PresetData {
       version: catalog.revision,
       /* 发布时刻跟着目录走：随包 / 旧版目录没有这一格 → null（界面照实说未知） */
       publishedAt: catalog.publishedAt ?? null,
+      /*
+       * **发布身份两格一组**（2026-10-28）：后端保证同生同死，这里不再各自兜底 ——
+       * 只有一格就当没有（那种目录本来就过不了解析）。
+       */
+      catalogLine: catalog.catalogId ?? null,
+      catalogSerial: catalog.publishSerial ?? null,
       presets: listed,
       localPresets: localList,
       stale: staleList,
@@ -1562,6 +1580,9 @@ export function usePresetPage(data: PresetData): PresetPage {
       stalePresets: data.delivery.stale,
       presetVersion: data.delivery.version,
       releaseAt: data.delivery.publishedAt,
+      /* 发布身份两格一组：详情里「发布线 · 第几号」那一行用（老目录两格都 null） */
+      catalogLine: data.delivery.catalogLine,
+      catalogSerial: data.delivery.catalogSerial,
       sourceLabel: data.sourceLabel,
       sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
