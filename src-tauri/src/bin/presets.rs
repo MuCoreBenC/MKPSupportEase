@@ -73,13 +73,15 @@ fn run_cli() -> Result<i32, AppError> {
     let rest = &args[1..];
     let all = rest.iter().any(|a| a == "--all");
     let dry_run = rest.iter().any(|a| a == "--dry-run");
+    /* 内容一字未改时仍然重发（会推进序号）—— 默认不发，见 `TxOptions::republish` */
+    let republish = rest.iter().any(|a| a == "--republish");
 
     match cmd.as_str() {
         "check" => cmd_check(),
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
-        "publish" => cmd_publish(dry_run),
+        "publish" => cmd_publish(dry_run, republish),
         "-h" | "--help" | "help" => {
             usage();
             Ok(0)
@@ -283,14 +285,15 @@ fn cmd_verify() -> Result<i32, AppError> {
 }
 
 /// **发布**：`--dry-run` 只说不写；不带就走正式事务。
-fn cmd_publish(dry_run: bool) -> Result<i32, AppError> {
+fn cmd_publish(dry_run: bool, republish: bool) -> Result<i32, AppError> {
     let mut ctx = open_ctx()?;
     /*
-     * ★ 发布事务用 `TxOptions::default()` 的 dry_run 开关 —— **与工作台同一个字段**，
-     *   于是"预演"在工作台、CLI 两处是同一段代码判的（不是两套开关）。
+     * ★ 发布事务用 `TxOptions::default()` 的 dry_run / republish 开关 —— **与工作台同一个
+     *   字段**，于是"预演""重发"在 CLI 与工作台两处是同一段代码判的（不是两套开关）。
      */
     let opts = app_pkg::TxOptions {
         dry_run,
+        republish,
         ..Default::default()
     };
     let target = app_pkg::resolve_target_opt(&ctx)?;
@@ -298,12 +301,17 @@ fn cmd_publish(dry_run: bool) -> Result<i32, AppError> {
     let report = app_pkg::publish_tx(&mut ctx, &opts, target.as_ref(), hosting.as_deref(), None)?;
 
     eprintln!("{}", report.summary);
+    /*
+     * `NoChange` 算**成功**：这一趟的结论就是"没有可发的变化"，不是失败 ——
+     * 脚本拿退出码判断时会把它当异常，那就本末倒置了。
+     */
     let ok = matches!(
         report.stage,
         app_pkg::PublishStage::Committed
             | app_pkg::PublishStage::Pushed
             | app_pkg::PublishStage::ReviewOpened
             | app_pkg::PublishStage::StatusRead
+            | app_pkg::PublishStage::NoChange
             | app_pkg::PublishStage::Generated
     ) && !(report.stage == app_pkg::PublishStage::Generated && !dry_run);
     let code = if report.stage == app_pkg::PublishStage::BlockedAudit {
@@ -318,7 +326,15 @@ fn cmd_publish(dry_run: bool) -> Result<i32, AppError> {
             "command": "publish",
             "dryRun": dry_run,
             "ok": ok,
-            "changed": !dry_run && report.stage != app_pkg::PublishStage::Generated,
+            /* 只有真写出去了才算 changed —— `NoChange` 与预演都不算 */
+            "changed": !dry_run
+                && matches!(
+                    report.stage,
+                    app_pkg::PublishStage::Committed
+                        | app_pkg::PublishStage::Pushed
+                        | app_pkg::PublishStage::ReviewOpened
+                        | app_pkg::PublishStage::StatusRead
+                ),
             "stage": report.stage,
             "publishSerial": report.publish_serial,
             "catalogId": report.catalog_id,

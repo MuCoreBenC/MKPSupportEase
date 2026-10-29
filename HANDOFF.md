@@ -957,3 +957,23 @@ IPC 在飞的那几十~几百毫秒里 `shownDesk` 退回 base（旧值）⇒ �
 
 `fmt` ✓ · 双 clippy 0 · 客户端 **642** / 内核 **235** 全绿 · `tsc` ✓ · eslint 0 error ·
 build ✓ · 六道 check ✓ · 探针 `i18n` 13/13 · `i18n-cjk` **9 行**（29 → 9）。
+
+## 增量之五十八 · 发布闸把「没有要发的东西」说出来（2026-10-29）
+
+作者问：什么都没改，一点发布就要变第 2 号，"那不是没什么意义吗"。
+
+**事实**：事务根本不会分配到 2 —— `publish_tx` 在分配序号**之前**就 `inspect` 账本，
+`catalogHash == 盘上 catalog.json 的 sha256` ⇒ 判 `NoChange`（零写入、不提交、序号不动）。
+`audit.rs` 也已算出 `nothing_to_publish`，`api.ts` 有类型 —— **只有界面没接**：
+`PublishGateModal` 把 `publishSerial`（= 下一号）直接印成"这次会把目录写成第 2 号"。
+
+改了三处（只前端）：
+
+- 闸：`nothingToPublish` 为真时改写「这一代与已发布的 support-ease 第 1 号逐字节相同 ——
+  没有要发的东西：不会推进序号、不写一个字节、也不提交」；
+- 回执：补 `PublishStage.noChange`（`STAGE_RANK` 原来缺这个键，`tsc --force` 会红）——
+  subtitle / 过程 / 结果 / 客户端四块各说一句，不再出现"本轮走到 0/7 步"或"这一轮没走到生成"；
+- 假后端补 `nothingToPublish: false`，保持同形状。
+
+验证：`tsc -b --force` ✓ · eslint 0 · `build` ✓ · `build:workbench` ✓ · `check:i18n` ✓（1582 键）。
+只改前端，Rust 四道未跑。**未提交**（等作者 `npm run tauri dev` 验）。

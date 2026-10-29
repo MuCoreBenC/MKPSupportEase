@@ -88,6 +88,12 @@ const FILE_CAP = 6
 /** 阶段名次 —— 回执按它把每一格画成"过了 / 停在这 / 还没到" */
 const STAGE_RANK: Record<PublishStage, number> = {
   blockedAudit: 0,
+  /*
+   * **没东西可发**（2026-10-29）：审计与生成都过了，但这一代与已发布的那一号逐字节
+   * 相同 ⇒ 事务在分配序号之前就收场。它是"走到这里为止"，不是"红在检查" ——
+   * 所以过程块单独说一句，不套那两条失败分支。
+   */
+  noChange: 0,
   generated: 1,
   committed: 2,
   pushed: 3,
@@ -150,6 +156,8 @@ function receiptSteps(
   review: RemoteReview | null,
   mirror: MirrorSync | null,
 ): Step[] {
+  /* 没东西可发：没有过程可讲（过程块自己说一句结论，不摆七步链） */
+  if (report.stage === 'noChange') return []
   const rank = STAGE_RANK[report.stage] ?? 0
   const mk = (key: string, label: string, reached: boolean, note: string): Step => ({
     key,
@@ -438,7 +446,11 @@ export default function PublishGateModal({
     const steps = receiptSteps(report, review, mirror)
     const changes: ChangeSummary | null = report.changes ?? null
     const changedFiles: FileChange[] = report.changedFiles ?? []
-    const verdict = clientVerdict(review, mirror)
+    const verdict =
+      report.stage === 'noChange'
+        ? /* 本来就没有新版：别套"还没建 PR/MR"那句 —— 那会让人以为漏了一步 */
+          { tone: 'warn' as const, text: '这一次没有内容变化 —— 云端和客户端看到的仍是已经发过的那一号' }
+        : clientVerdict(review, mirror)
     const canMerge = review !== null && review.state === 'open'
     const confirmText =
       review === null
@@ -457,7 +469,9 @@ export default function PublishGateModal({
         subtitle={
           report.stage === 'blockedAudit'
             ? '停在发布检查 —— 一个字节都没写'
-            : `本轮走到「${steps.filter((x) => x.state === 'done').length}/${steps.length}」步`
+            : report.stage === 'noChange'
+              ? '没有要发的东西 —— 一个字节都没写，序号没推进'
+              : `本轮走到「${steps.filter((x) => x.state === 'done').length}/${steps.length}」步`
         }
         closeOnScrim={false}
         onClose={onClose}
@@ -518,7 +532,9 @@ export default function PublishGateModal({
             <p className={s.blockLine}>
               {report.stage === 'blockedAudit'
                 ? '停在发布检查 —— 一个字节都没写，所以没有"改了什么"'
-                : '这一轮没走到生成，拿不到变化清单'}
+                : report.stage === 'noChange'
+                  ? '没有变化清单 —— 这一代与已发布的那一号逐字节相同'
+                  : '这一轮没走到生成，拿不到变化清单'}
             </p>
           ) : (
             <>
@@ -572,17 +588,24 @@ export default function PublishGateModal({
         {/* ---------- 块二 · 过程：发布前 → 发布后 ---------- */}
         <section className={s.block}>
           <h3 className={s.blockTitle}>过程</h3>
-          <div className={s.chain} role="list">
-            {steps.map((st) => (
-              <div key={st.key} className={s.step} data-state={st.state} role="listitem">
-                <span className={s.stepMark}>{STEP_MARK[st.state]}</span>
-                <b className={s.stepLabel}>{st.label}</b>
-                <span className={`${s.stepNote} ${st.key === 'commit' ? c.mono : ''}`}>
-                  {st.note}
-                </span>
-              </div>
-            ))}
-          </div>
+          {report.stage === 'noChange' ? (
+            <p className={s.blockLine}>
+              审计过了、也生成过了，但盘上这一代与已发布的 {report.catalogId ?? '这条线'} 第{' '}
+              {report.publishSerial ?? '—'} 号逐字节相同 —— 没有提交、没有推送，序号也没动。
+            </p>
+          ) : (
+            <div className={s.chain} role="list">
+              {steps.map((st) => (
+                <div key={st.key} className={s.step} data-state={st.state} role="listitem">
+                  <span className={s.stepMark}>{STEP_MARK[st.state]}</span>
+                  <b className={s.stepLabel}>{st.label}</b>
+                  <span className={`${s.stepNote} ${st.key === 'commit' ? c.mono : ''}`}>
+                    {st.note}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
           {review !== null && review.url !== '' && (
             <p className={s.prLine}>
               <span className={c.mono}>{review.url}</span>
@@ -608,12 +631,18 @@ export default function PublishGateModal({
               </b>
             )}
             <span className={s.sep}>|</span>
-            本次目录指纹{' '}
-            <span className={c.mono} title={report.revision ?? ''}>
-              {report.revision === null || report.revision === undefined
-                ? '未知'
-                : report.revision.slice(0, 8)}
-            </span>
+            {report.stage === 'noChange' ? (
+              <>本次没有重算目录 —— 沿用已发布的那一份</>
+            ) : (
+              <>
+                本次目录指纹{' '}
+                <span className={c.mono} title={report.revision ?? ''}>
+                  {report.revision === null || report.revision === undefined
+                    ? '未知'
+                    : report.revision.slice(0, 8)}
+                </span>
+              </>
+            )}
             {mirror !== null && (
               <>
                 <span className={s.sep}>|</span>
@@ -767,6 +796,21 @@ export default function PublishGateModal({
              */}
             {!audit.catalogId || !(audit.publishSerial > 0) ? (
               <>这一版是第几号读不出来（发布账本读不出来，或工作台后端版本旧 —— 见下面那几项）</>
+            ) : audit.nothingToPublish === true ? (
+              /*
+               * ★ **没有要发的东西**（2026-10-29 作者：「我一点击它就要变成 2 了，那不是
+               *   没什么意义吗」）。`publishSerial` 是"下一号"，不是"这次会写成几号" ——
+               *   这一代与已发布的那一号逐字节相同时，事务会在分配序号**之前**判 `noChange`
+               *   （零写入、不提交）。所以这里必须换成那句实话，不能让人以为点一下就涨号。
+               */
+              <>
+                这一代与已发布的{' '}
+                <b>
+                  {audit.identityNow ?? audit.catalogId} 第 {audit.serialNow ?? '—'} 号
+                </b>{' '}
+                逐字节相同 —— <b>没有要发的东西</b>：点「确认发布」不会推进序号、不写一个字节、
+                也不提交（序号只在内容真的变了时才往前走）
+              </>
             ) : (
               <>
                 这次会把目录写成{' '}

@@ -782,6 +782,13 @@ export interface PublishAudit {
   /** 目录现在的序号 */
   serialNow: number | null
   /**
+   * **什么都不用发**：盘上这一代与已发布的那一号完全相同（账本说"同一代"）。
+   *
+   * `true` 时发布会被事务判成 `noChange`（零写入、序号不推进）——
+   * 闸要提前说出来，别让人点了按钮才发现什么都没发生。
+   */
+  nothingToPublish: boolean
+  /**
    * 这一代结构要求的**最低正式客户端版本**（`presets/structure-signatures.toml` 里登记的）。
    *
    * `null` = ⑫ 没给出答案（签名没登记 / 规则表读不出来）—— 那种情况 ⑫ 已经是 Blocker，
@@ -811,6 +818,8 @@ export interface PublishAudit {
  */
 export type PublishStage =
   | 'blockedAudit'
+  /** **没有可发的变化**：盘上这一代与已发布的第 N 号完全相同 —— 零写入、序号不推进 */
+  | 'noChange'
   | 'generated'
   | 'committed'
   | 'pushed'
@@ -905,6 +914,13 @@ export interface PublishTxReport {
 export interface TxOptions {
   /** 只审计 + 生成 + 定稿 + 报"会提交什么"，不 commit / push / 建 PR */
   dryRun?: boolean
+  /**
+   * **内容一字未改时仍然重发、并推进序号**（默认 `false`）。
+   *
+   * 默认不发：什么都没改就点一次发布，若照样 +1，序号就成了噪声
+   * （客户端每收到一个新号都要重比字节，用户看到"有新版"其实什么都没变）。
+   */
+  republish?: boolean
   /** 提交推送之后要不要建 PR/MR（默认 true） */
   openReview?: boolean
   /** 目标分支（PR 的 base）；空 = main */

@@ -1009,6 +1009,8 @@ function mockAudit(): Json {
     ledgerExists: true,
     identityNow: 'support-ease',
     serialNow: 6,
+    /* 桩里假装这次真有变化（演示"第 7 号"那条路；noChange 那条路要真后端才验得到） */
+    nothingToPublish: false,
     minVersion: '0.0.1',
     canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
     /* 桩里没有"测试模式"这回事（沙箱切不动，见 `wb_sandbox_*`），所以发布这门是开的 */

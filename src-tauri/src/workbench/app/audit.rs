@@ -167,6 +167,12 @@ pub struct PublishAudit {
     pub identity_now: Option<String>,
     /// 目录**现在**的序号
     pub serial_now: Option<u64>,
+    /// **什么都不用发**：盘上这一代内容与已发布的那一号完全相同（账本说"同一代"）。
+    ///
+    /// `true` 时那次发布会被事务判成 `NoChange`（零写入、序号不推进）——
+    /// 闸要提前把这句话说出来，别让人点了按钮才发现"什么都没发生"
+    /// （2026-10-29 作者：「我一点击它就要变成 2 了，那不是没什么意义吗」）。
+    pub nothing_to_publish: bool,
 }
 
 impl PublishAudit {
@@ -284,20 +290,29 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
      * 只读：`inspect` 读账本与 catalog，`next_after` 是纯算术 —— 预演与真发走同一处分配，
      * 所以这里说"第 1 号"，真发就一定是第 1 号。
      */
-    let (catalog_id, publish_serial, ledger_exists) =
+    let (catalog_id, publish_serial, ledger_exists, nothing_to_publish) =
         match super::publish_book::inspect(&delivery_root, super::delivery::NEW_CATALOG_FILE) {
             Ok(state) => {
                 use super::publish_book::State;
-                let on_disk = super::delivery::PublishIdentity::inherit_from(&delivery_root).serial;
+                let identity = super::delivery::PublishIdentity::inherit_from(&delivery_root);
+                let on_disk = identity.serial;
                 match state {
-                    State::NoBook => (super::publish_book::DEFAULT_LINE.to_owned(), 1u64, false),
-                    State::InSync(b) | State::Stale(b) => {
-                        (b.catalog_id.clone(), b.next_after(on_disk), true)
+                    State::NoBook => (
+                        super::publish_book::DEFAULT_LINE.to_owned(),
+                        1u64,
+                        false,
+                        false,
+                    ),
+                    State::InSync(b) => {
+                        /* 同一代 + 已有身份 ⇒ 发与不发没有区别（事务会判 `NoChange`） */
+                        let noop = identity.catalog_id.is_some() && on_disk.is_some();
+                        (b.catalog_id.clone(), b.next_after(on_disk), true, noop)
                     }
+                    State::Stale(b) => (b.catalog_id.clone(), b.next_after(on_disk), true, false),
                 }
             }
             /* 账本坏了：闸别处会报，这里如实说"读不出来"，不编一个号 */
-            Err(_) => (String::new(), 0, false),
+            Err(_) => (String::new(), 0, false, false),
         };
 
     /* 目录**现在**有没有身份 —— 与"这次将写成第几号"是两件事：老目录会从"无"变成"有" */
@@ -316,6 +331,7 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         ledger_exists,
         identity_now: identity_now.catalog_id,
         serial_now: identity_now.serial,
+        nothing_to_publish,
     })
 }
 

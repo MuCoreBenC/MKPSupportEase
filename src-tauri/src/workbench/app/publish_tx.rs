@@ -85,6 +85,8 @@ impl PublishTarget {
 pub enum PublishStage {
     /// 停在审计（有 Blocker 红）—— 零写入
     BlockedAudit,
+    /// **没有可发的变化**：盘上这一代内容与已发布的第 N 号完全相同 —— 零写入、序号不推进
+    NoChange,
     /// 审计过了、正在生成 + 定稿
     Generated,
     /// 已提交（本地）
@@ -102,6 +104,7 @@ impl PublishStage {
     pub fn wire_name(self) -> &'static str {
         match self {
             PublishStage::BlockedAudit => "blockedAudit",
+            PublishStage::NoChange => "noChange",
             PublishStage::Generated => "generated",
             PublishStage::Committed => "committed",
             PublishStage::Pushed => "pushed",
@@ -365,6 +368,15 @@ pub struct TxOptions {
     /// 或多个配好时取"与当前 remote 一致"的那个）
     #[serde(default)]
     pub platform: Option<String>,
+    /// **内容与上一号完全相同时，仍然重发一次并推进序号**（默认 `false`）。
+    ///
+    /// 默认行为是**不发**：什么都没改就点一次发布，若照样 +1，序号就变成了噪声 ——
+    /// 客户端每收到一个"新号"都要重新比一遍字节，用户则看到一条"有新版"其实什么都没变。
+    /// 作者 2026-10-29 原话：「我一点击它就要变成 2 了，那不是没什么意义吗」。
+    ///
+    /// 真要重发（例如远端目录被手工改坏、要重新盖一次戳）时显式打开它。
+    #[serde(default)]
+    pub republish: bool,
 }
 
 fn default_open_review() -> bool {
@@ -378,6 +390,7 @@ impl Default for TxOptions {
             open_review: true,
             base: "main".to_owned(),
             platform: None,
+            republish: false,
         }
     }
 }
@@ -504,6 +517,50 @@ pub fn run(
 
     let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
     let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
+
+    /*
+     * ⓪½ **什么都没有改 ⇒ 不发**（2026-10-29 作者：「我一点击它就要变成 2 了，
+     *     那不是没什么意义吗」）。
+     *
+     * 判据只用一件事：**生成之后账本还说"同一代"** —— `inspect` 拿账本里的
+     * `catalogHash` 与盘上 catalog 全文比，相等就等于"盘上这一代内容 = 已发布的那一代"。
+     * 它比"算一遍字节差异"更硬：账本是我们自己写的，别人改了内容哈希就对不上。
+     *
+     * 放在**分配序号之前** ⇒ 这一趟零写入、序号不推进、不留 commit。
+     * `republish` 是显式逃生口（远端目录被改坏、要重新盖一次戳时用）。
+     */
+    if !opts.republish {
+        if let Ok(super::publish_book::State::InSync(b)) =
+            super::publish_book::inspect(&root, super::delivery::NEW_CATALOG_FILE)
+        {
+            if let Some(serial) = super::delivery::PublishIdentity::inherit_from(&root).serial {
+                let summary = format!(
+                    "没有可发的变化：盘上这一代内容与已发布的 {} 第 {serial} 号完全相同 —— \
+                     序号不推进、不提交（确实要重发请加 --republish）。",
+                    b.catalog_id
+                );
+                return Ok(PublishTxReport {
+                    stage: PublishStage::NoChange,
+                    audit_passed: passed,
+                    audit_failed: failed,
+                    generated: gen.written.len(),
+                    unchanged: gen.unchanged.len(),
+                    committed_paths: Vec::new(),
+                    review: None,
+                    branch: None,
+                    commit: None,
+                    files: 0,
+                    summary,
+                    published_at: None,
+                    revision: None,
+                    changes: None,
+                    changed_files: Vec::new(),
+                    publish_serial: Some(serial),
+                    catalog_id: Some(b.catalog_id.clone()),
+                });
+            }
+        }
+    }
 
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
