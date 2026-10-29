@@ -272,9 +272,16 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     [machineId, target, tabSel, q],
   )
 
-  /** 当前这一页 refresh 的记号 —— 判断"回来的派生还是不是这一页的"（切机型 / 改搜索就作废） */
+  /**
+   * 当前这一页 refresh 的记号 —— 判断"回来的派生还是不是这一页的"（切机型 / 改搜索就作废）。
+   *
+   * ★ **按模式算**（2026-10-29 修）：对照模式写回时递的是 `page: 'matrix'` 的
+   * `refresh`（见 `onWrite` 里 `refreshKind === 'matrix'` 那一支），而这里曾经恒按
+   * `page: 'desk'` 算 —— 两个串前缀都不同，`sendEdits` 于是把矩阵模式**每一次**
+   * 写回的响应都当成"过期派生"丢掉。表现就是作者看到的：手动输入后格子只变红、
+   * 数字还是旧的（编辑器开着时读 `raw` 才看得见，所以只有步进箭头"像是对的"）。
+   */
   const refreshKeyRef = useRef('')
-  refreshKeyRef.current = refreshKeyOf(refresh)
 
   /*
    * 乐观覆盖层（`editQueue` 头注第 1 条）：还没落库的那几格，用队列里的值盖在 base
@@ -320,6 +327,11 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         return { machineId: m, versionUid: uid === '' ? null : uid }
       }),
     [compareCols],
+  )
+
+  /* 与 `onWrite` 递出去的 `pageRefresh` 用同一套构造（page / 列序 / 查询都要一字不差） */
+  refreshKeyRef.current = refreshKeyOf(
+    mode === 'compare' ? { page: 'matrix', cols: compareColRefs, tab: null, query: q } : refresh,
   )
 
   /* 一屏配方台。tab / 搜索的过滤在后端（搜索跨分类，B02 的行为） */
