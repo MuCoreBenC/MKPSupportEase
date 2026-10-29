@@ -588,7 +588,7 @@ export const en: Record<StringKey, string> = {
   'params.sync.summary': 'Cloud {release} · {count} items changed',
   'params.sync.newRelease': 'new release',
   'params.sync.closeTitle': 'Close (nothing handled yet; the cloud update is still waiting)',
-  'params.sync.hint': 'Checked items are adopted, unchecked ones stay — “Save” writes it to this file',
+  'params.sync.hint': 'Applying only stages the change — “Save” writes it to this file',
   'params.sync.neverGroup': 'Values the machine owns (not checked for you)',
   'params.sync.cleanGroup': 'No conflict — the cloud changed it, you didn’t',
   'params.sync.conflictGroup': 'Conflict — you changed it too, pick a side',
@@ -923,6 +923,8 @@ export const en: Record<StringKey, string> = {
   'presets.page.update.noLocalMatch': 'Updating {name} failed: no local file matches this cloud entry',
   'presets.page.update.cloudNotReady': 'Updating {name} failed: the new cloud bytes have not been fetched yet (network or source issue)',
   'presets.page.update.zeroPending': 'Updated {name} — it is already the latest cloud version',
+  'presets.page.update.zeroPendingNoLine':
+    'Applied the current cloud content to {name}. This release line has no release identity yet, so the baseline cannot be recorded — this prompt will go away after one real publish',
   'presets.page.update.unknownAttribution': 'Updating {name} failed: cannot tell which machine and version this file belongs to',
   'presets.page.update.askPick': '{name} has {count} cloud-changed parameters waiting for your pick',
   'presets.page.update.gone': '{name} is no longer local — the list just changed, take another look',

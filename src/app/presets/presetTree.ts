@@ -431,30 +431,14 @@ export function cloudClaimBadge(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
 }): { text: StringKey; state: string } | null {
-  /* 云端较旧时**外部什么都不显示**（2026-10-27 作者：「就当无事发生一样」） */
-  if (row.basedOn === 'newer') return null
-  /* `elsewhere` 不挂任何徽章：源不同不是用户要看的，判定看内容与时间（2026-10-27） */
-  if (row.localState === undefined) return null
   /*
-   * ★ **徽章也要按结论分档，不能只看 `localState`**（2026-10-29 作者截图抓出来的）。
-   *
-   *   `localState` 只有三档（未获取 / 有新版 / 本地已有），而它把"说不清"与
-   *   "内容没变"都并进了 `stale` —— 于是行上写着「有新版」，可这一份到底有没有新版
-   *   根本不知道。按钮那边早就按 `basedOn` 分派了，徽章没跟上，就成了"按钮说没事、
-   *   徽章说有事"的自相矛盾。
-   *
-   *   所以：**能声称"有新版"的只有 `outdated`**；其余三种在 `stale` 里各有各的说法。
+   * 徽章只搬 [`cloudRowState`] 的结论（2026-10-29 收口）——
+   * 以前这里自己写了一遍同样意思的 switch，详情头又直接读 `CLOUD_LOCAL_TEXT`，
+   * 三处各自判一次，于是永远有一处没跟上。
    */
-  switch (row.basedOn) {
-    case 'unchanged':
-      return { text: 'presets.tree.cloudLocal.unchanged', state: row.localState }
-    case 'unverified':
-      return { text: 'presets.tree.cloudLocal.unverified', state: row.localState }
-    case 'inconsistent':
-      return { text: 'presets.tree.cloudLocal.inconsistent', state: row.localState }
-    default:
-      return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
-  }
+  const st = cloudRowState(row)
+  if (st.text === null) return null
+  return { text: st.text, state: row.localState ?? st.action }
 }
 
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
@@ -510,6 +494,120 @@ export const CLOUD_LOCAL_ACTION: Record<CloudLocalState, StringKey | null> = {
   none: 'presets.tree.cloudLocalAction.none',
   has: null,
   stale: 'presets.tree.cloudLocalAction.stale',
+}
+
+/**
+ * **云端那一行的唯一结论**（2026-10-29 收口）。
+ *
+ * # 为什么要有它
+ *
+ * 作者一天里连撞三次"界面自相矛盾"：徽章写「有新版」、详情头写「有新版」、按钮却是破折号；
+ * 点了「更新」提示"已经是最新"，行上却还挂着「更新」。根因不是哪一处画错，而是**同一件事
+ * 有三套并行话术**，各自算各自的：
+ *
+ * | 谁 | 原来读什么 | 缺什么 |
+ * |---|---|---|
+ * | 行首徽章 `cloudClaimBadge` | `localState`（3 档） | 「说不清 / 内容没变」都并进 `stale` |
+ * | 详情头那枚 | `CLOUD_LOCAL_TEXT[localState]` 直接取 | 同上，且**绕过了**徽章那层 |
+ * | 操作列 `CloudLocalAction` | `basedOn` + `localState` 两套混用 | 两条路各判一次 |
+ *
+ * 现在三者都从这里取：**结论（文案 + 动作 + 是否报警）只在这个函数里产生一次**，
+ * 组件只负责画。以后再加一档判定，改这里一处即可。
+ *
+ * # `localState` 还剩什么用
+ *
+ * 只剩一个真问题：**我这儿有没有一份基于它的文件**（`none` = 没有 ⇒ 那是「下载」不是
+ * 「更新」）。其余全部交给 `basedOn`（Rust 侧七档，唯一真值）。
+ */
+export type CloudRowAction = 'download' | 'update' | 'none'
+
+export interface CloudRowState {
+  /** 徽章 / 详情头那句话。`null` = 什么都不写（`newer` / `elsewhere` 故意不吭声） */
+  text: StringKey | null
+  /** 这一格给什么动作 */
+  action: CloudRowAction
+  /** 要不要用警告样式（目录自相矛盾是一句报警，不是一个动作） */
+  warn: boolean
+  /** 动作按钮的悬停说明（只有「说不清」那一档需要多解释一句） */
+  hint: StringKey | null
+}
+
+/** 一句话定案。**任何要显示"云端这一行怎么样"的地方都必须走它。** */
+export function cloudRowState(row: {
+  basedOn?: BasedOn
+  localState?: CloudLocalState
+}): CloudRowState {
+  const none = { text: null, action: 'none', warn: false, hint: null } as const
+  if (row.localState === undefined) return { ...none }
+
+  /* 我这儿一份都没有 ⇒ 「下载」。与 basedOn 无关：没有那份文件就谈不上基于哪一版。 */
+  if (row.localState === 'none') {
+    return {
+      text: CLOUD_LOCAL_TEXT.none,
+      action: 'download',
+      warn: false,
+      hint: null,
+    }
+  }
+
+  switch (row.basedOn) {
+    case 'current':
+      return { text: CLOUD_LOCAL_TEXT.has, action: 'none', warn: false, hint: null }
+    case 'outdated':
+      return {
+        text: CLOUD_LOCAL_TEXT.stale,
+        action: 'update',
+        warn: false,
+        hint: null,
+      }
+    /*
+     * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
+     * 它确实没有需要更新的内容。
+     */
+    case 'unchanged':
+      return {
+        text: 'presets.tree.cloudLocal.unchanged',
+        action: 'none',
+        warn: false,
+        hint: null,
+      }
+    /*
+     * **说不清版本关系**（血统缺发布线 / 老目录没身份）：不声称有新版，
+     * 但**必须留一条出路** —— 否则老副本永远没有建立新基线的入口。
+     * 点它 = 以当前云端版建立新基线，`hint` 里把这句话说全。
+     */
+    case 'unverified':
+      return {
+        text: 'presets.tree.cloudLocal.unverified',
+        action: 'update',
+        warn: false,
+        hint: 'presets.table.unverified.updateTitle',
+      }
+    /* **目录自相矛盾**：报警，不给动作（覆盖等于把错的东西写进用户文件） */
+    case 'inconsistent':
+      return {
+        text: 'presets.tree.cloudLocal.inconsistent',
+        action: 'none',
+        warn: true,
+        hint: null,
+      }
+    /* 云端更旧 / 不是同一条线：作者要「就当无事发生」—— 一个字都不写、不给动作 */
+    case 'newer':
+    case 'elsewhere':
+      return { ...none }
+    /*
+     * 后端没给结论（老后端 / 探针数据）：退回 `localState` 那三档。
+     * 这是**唯一的兜底**，也是唯一还会出现"说不清却写有新版"的地方 —— 收口在这儿，
+     * 一眼能看出它什么时候会被用到。
+     */
+    default:
+      return {
+        text: CLOUD_LOCAL_TEXT[row.localState],
+        action: row.localState === 'stale' ? 'update' : 'none',
+        warn: false,
+        hint: null,
+      }
+  }
 }
 
 /** 内容存疑那两档共有的那条边界（右键菜单禁用 / 详情里那句话都用它） */

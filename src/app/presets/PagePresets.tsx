@@ -1422,7 +1422,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     if (pending.length === 0) {
       await data.applyParamDecisions(behind.path, [])
-      setNote({ text: tr('presets.page.update.zeroPending', { name: behind.fileName }), bad: false })
+      /*
+       * ★ **措辞要说实话**（2026-10-29 作者截图：提示"已经是最新"，行上却仍挂着「更新」）。
+       *
+       * 这一趟写的是血统三行 + **发布线与序号**（`param_sync::apply_at` 里 `remaining == 0`
+       * 那一支）。而目录还没有发布身份时（`catalogId` / `publishSerial` 都是空），那两格
+       * 没东西可写 ⇒ 判定仍是 `unverified` ⇒ 按钮还在。这时候说"已经是最新"就是在骗人：
+       * 内容确实按云端处理完了，但**基线记不下来**。
+       */
+      const line = data.delivery.catalogLine
+      setNote({
+        text:
+          line === null
+            ? tr('presets.page.update.zeroPendingNoLine', { name: behind.fileName })
+            : tr('presets.page.update.zeroPending', { name: behind.fileName }),
+        bad: false,
+      })
       return
     }
     /*
