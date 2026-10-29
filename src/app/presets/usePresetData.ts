@@ -478,7 +478,8 @@ interface BootstrapResult {
  *
  * 判据（作者 2026-10-02，2026-10-04 补）：
  *
- *   - **只检查目录指纹**（`checkRemoteUpdate`，比的是 revision），不碰任何预设文件；
+ *   - **只检查目录这一代**（`checkRemoteUpdate`：`revision` 内容指纹 + `publishSerial`
+ *     发布身份，任一前进 = 有新目录），不碰任何预设文件；
  *   - 有变化才 `applyRemoteUpdate` —— 换的是**本地那一份 catalog**（旧目录自动归档），
  *     **绝不自动下载预设文件**（用户点了"下载"才下）；
  *   - ★ 远端这一代**读不懂**时（`readable === false`，或 `applyRemoteUpdate` 抛回

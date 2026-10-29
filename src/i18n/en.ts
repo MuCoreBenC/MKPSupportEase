@@ -1286,6 +1286,7 @@ export const en: Record<StringKey, string> = {
   'presets.tree.cloudLocal.stale': 'New version',
   'presets.tree.cloudLocal.unchanged': 'No content change',
   'presets.tree.cloudLocal.unverified': 'Version unknown',
+  'presets.tree.cloudLocal.noIdentity': 'Catalog is stale',
   'presets.tree.cloudLocal.inconsistent': 'Catalog error',
   'presets.tree.cloudLocalWhy.none': 'The cloud has this one and your machine doesn’t yet — click “Download” to fetch it (a local file lands on disk; you can edit and use it)',
   'presets.tree.cloudLocalWhy.has': 'You already have a copy matching the cloud’s current version — there is nothing to do on this row: to edit or use it, go to that row in the “Local” table',

@@ -430,6 +430,7 @@ export const PRESET_UNTRUSTED_NOTE: StringKey = 'presets.tree.untrustedNote'
 export function cloudClaimBadge(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
+  basedOnFacts?: BasedOnFacts
 }): { text: StringKey; state: string } | null {
   /*
    * 徽章只搬 [`cloudRowState`] 的结论（2026-10-29 收口）——
@@ -536,6 +537,8 @@ export interface CloudRowState {
 export function cloudRowState(row: {
   basedOn?: BasedOn
   localState?: CloudLocalState
+  /** 目录那一代的两格身份（`basedOnFacts`）—— 决定「更新」是不是一条真出路 */
+  basedOnFacts?: BasedOnFacts
 }): CloudRowState {
   const none = { text: null, action: 'none', warn: false, hint: null } as const
   if (row.localState === undefined) return { ...none }
@@ -576,13 +579,33 @@ export function cloudRowState(row: {
      * 但**必须留一条出路** —— 否则老副本永远没有建立新基线的入口。
      * 点它 = 以当前云端版建立新基线，`hint` 里把这句话说全。
      */
-    case 'unverified':
+    case 'unverified': {
+      /*
+       * ★ **云端这一代自己就没有发布身份**（2026-10-29 作者真机踩到的死循环）：
+       *   本机目录还停在"没有 catalogId / publishSerial"的旧一代（那次只盖身份的
+       *   发布没被 `revision` 发现），此时点「更新」只能以"没有身份"再建一次基线
+       *   —— 点完照样是"未知"，按钮永远挂着。那个循环比没有按钮更坏。
+       *
+       *   判据用**目录那一代**的两格，不是血统的：血统没有身份是正常的（老副本），
+       *   云端目录没有身份才是"现在做什么都没用，先拿新目录"。
+       */
+      const line = row.basedOnFacts?.cloudCatalog
+      const serial = row.basedOnFacts?.cloudSerial
+      if (line == null || serial == null) {
+        return {
+          text: 'presets.tree.cloudLocal.noIdentity',
+          action: 'none',
+          warn: false,
+          hint: null,
+        }
+      }
       return {
         text: 'presets.tree.cloudLocal.unverified',
         action: 'update',
         warn: false,
         hint: 'presets.table.unverified.updateTitle',
       }
+    }
     /* **目录自相矛盾**：报警，不给动作（覆盖等于把错的东西写进用户文件） */
     case 'inconsistent':
       return {

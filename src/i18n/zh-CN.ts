@@ -1317,6 +1317,7 @@ export const zhCN = {
   'presets.tree.cloudLocal.stale': '有新版',
   'presets.tree.cloudLocal.unchanged': '内容未变',
   'presets.tree.cloudLocal.unverified': '版本关系未知',
+  'presets.tree.cloudLocal.noIdentity': '目录旧了',
   'presets.tree.cloudLocal.inconsistent': '目录异常',
   'presets.tree.cloudLocalWhy.none': '云端有这一份，你机器上还没有它 —— 点「下载」把它取到本机（会落一份本地文件，能改能用）',
   'presets.tree.cloudLocalWhy.has': '你机器上已经有一份跟上云端当前版的了 —— 这一行没有要你做的事：要改、要用，去「本地」那张表那一行',
