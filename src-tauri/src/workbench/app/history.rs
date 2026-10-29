@@ -60,6 +60,17 @@ pub struct PublishRecord {
     pub audit_failed: usize,
     /// 一句话结论（与事务报告同一句）
     pub summary: String,
+    /*
+     * **这一版是第几号**（2026-10-29）。历史里没有这两格时，翻回去看不出
+     * "那次发的是几号" —— 而号是客户端判新旧的唯一依据，事后追查全靠它。
+     * 老记录没有这两格：`default` 让它们照常读得出来（不编一个 0 冒充第零号）。
+     */
+    /// 那一次写的发布线（`support-ease`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+    /// 那一次写的序号
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_serial: Option<u64>,
     /// **合并之后把主线同步到第二个云端源**的结论（2026-10-06 加）。
     ///
     /// `None` = 这一条记下来的时候还没走到合并那一步（或还没做这一步）。
@@ -83,6 +94,9 @@ impl PublishRecord {
             audit_passed: report.audit_passed,
             audit_failed: report.audit_failed,
             summary: report.summary.clone(),
+            /* 号与线一起落库：事后翻历史才能回答"那次发的是几号" */
+            catalog_id: report.catalog_id.clone(),
+            publish_serial: report.publish_serial,
             /* 发布事务本身**不推镜像** —— 那一步发生在 PR/MR **合并之后**
             （`wb_merge_review`），由 `update_review` 把结论补进这一格。 */
             mirror: None,
@@ -224,6 +238,8 @@ mod tests {
             audit_failed: 0,
             summary: "已生成 0 份、定稿 17 份产物。已提交并推送到 `feat/x`。已建 PR !27。"
                 .to_owned(),
+            catalog_id: Some("support-ease".to_owned()),
+            publish_serial: Some(7),
             mirror: None,
         }
     }

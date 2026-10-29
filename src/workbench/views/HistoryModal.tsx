@@ -172,6 +172,12 @@ export default function HistoryModal({ onClose }: Props) {
                     )}
                   </div>
                   <div className={h.meta}>
+                    {/* 那一次发的是第几号（2026-10-29）：老记录没有这两格 ⇒ 照实不显示 */}
+                    {r.publishSerial != null && r.publishSerial > 0 && (
+                      <span>
+                        {r.catalogId ?? '未知'} 第 {r.publishSerial} 号
+                      </span>
+                    )}
                     {r.commit !== null && <span className={c.mono}>{r.commit}</span>}
                     <span>{r.files} 份产物</span>
                     {r.generated > 0 && <span>新生成 {r.generated} 份</span>}

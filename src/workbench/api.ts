@@ -762,9 +762,25 @@ export interface AuditItem {
  */
 export interface PublishAudit {
   items: AuditItem[]
+  /*
+   * ★ 这三个数数的是**工作区里 `presets/` 的未提交改动**，不是"这次要发什么"
+   *   （2026-10-29 作者：「0 改动就代表没东西可发，这是完全不对的」）。
+   *   工作区干净时它们恒为 0，而目录身份 / 账本 / manifest 定稿照样要变 ——
+   *   要发什么看下面那四格。
+   */
   filesAdded: number
   filesChanged: number
   filesRemoved: number
+  /** 这一代要写的发布线（`support-ease`）。空串 = 账本读不出来，说不出第几号 */
+  catalogId: string
+  /** 这一代要写的序号（第几号）。0 = 读不出来 */
+  publishSerial: number
+  /** 发布账本现在存在吗 —— `false` = 首次发布，会新建一本 */
+  ledgerExists: boolean
+  /** 目录现在的发布线（`null` = 老目录 / 还没发过，这次会从"无"变成"有"） */
+  identityNow: string | null
+  /** 目录现在的序号 */
+  serialNow: number | null
   /**
    * 这一代结构要求的**最低正式客户端版本**（`presets/structure-signatures.toml` 里登记的）。
    *
@@ -873,6 +889,10 @@ export interface PublishTxReport {
   summary: string
   /** 本次发布时刻（= 写进目录 `publishedAt` 的那一个）。审计没过 = null */
   publishedAt?: string | null
+  /** **这一代是第几号**（`catalog.publishSerial`）。审计没过 / 预演前可能没有 */
+  publishSerial?: number | null
+  /** 这条发布线是谁（`catalogId`） */
+  catalogId?: string | null
   /** 本次发布的目录指纹（交付面 catalog 的 `revision`）。没走到生成 = null */
   revision?: string | null
   /** 这次改了几份（新增 / 修改 / 删除 / 未变化）。没走到生成 = null */
@@ -914,6 +934,12 @@ export interface PublishRecord {
   auditPassed: number
   auditFailed: number
   summary: string
+  /**
+   * **那一次发的是第几号**（2026-10-29）。号是客户端判新旧的唯一依据，
+   * 翻历史时少了它就答不出"上一版是几号"。老记录没有这两格 ⇒ `null`，不编。
+   */
+  catalogId?: string | null
+  publishSerial?: number | null
   /**
    * 合并之后「把主线同步到第二个云端源」的结论。
    *
