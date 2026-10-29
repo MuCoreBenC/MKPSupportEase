@@ -254,7 +254,7 @@ Git 仓库
 | 检查 | ✅ 工作台 | 本地全跑一遍 |
 | 生成产物 | ✅ 工作台 | `dist/` + catalog/source/manifest |
 | git commit | ✅ 工作台 | 只提交 `presets/` 下的变化 |
-| push 分支 | ✅ 工作台 | 一次性分支名（照 `publish:presets` 现有命名） |
+| push 分支 | ✅ 工作台 | 一次性分支名（`presets publish` 同一条命名规则） |
 | 创建 PR | ✅ 工作台 | 调 `gh` 或 GitHub API |
 | **跑 CI** | ✅ GitHub | 工作台轮询状态 |
 | 回读 PR 状态 | ✅ 工作台 | 显示每项检查结果 |
@@ -352,7 +352,8 @@ struct PublishAudit {
 | ⑯ | `client/url-reconciliation` | **客户端视角 URL 对账**：从 `workbench/bootstrap.json` 反推交付根，用生产 Resolver 把 catalog 全量条目 + catalog/release/manifest/content 逐条拼 URL，折回仓库相对路径与磁盘对账 —— 跨端锚点错位（`dist/dist` 事故）在发布前就红 | ✅ 2026-10-05 寻址改造（纯读不发网络；Golden Fixture 在 `runtime::resolver::tests`） |
 
 **⑮ 为什么把 `presets/delivery/` 排除在外**：`dist/` 就是这次要提交的产物本身 ——
-拿它的未跟踪状态去拦自己的发布是个死锁（与 `scripts/publish-presets.mjs` 同一条口径）。
+拿它的未跟踪状态去拦自己的发布是个死锁（`scripts/check-artifact-boundary.mjs` 也是同一条口径：
+R1 只要求"交付变了就得有账本变"，不要求工作区干净）。
 **`dist/` 之外**有任何改动、或不在分支上，都拦发布。
 
 **⑥ 与 ⑦ 的区别**（重要）：⑥ 管"该生成的生成了"，⑦ 管"登记的每一条都取得到"。

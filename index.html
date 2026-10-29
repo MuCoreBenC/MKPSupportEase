@@ -13,6 +13,14 @@
       if (new URLSearchParams(location.search).get('guide') === '1') {
         document.documentElement.dataset.guide = '1'
       }
+      /*
+       * 目标平台：这具骨架要按平台决定「右边画不画窗口键」（见下面样式里那段）。
+       * 必须在样式之前挂到 `html` 上 —— 这段 HTML 比任何 JS 都先到，晚一步就会先闪一帧
+       * Windows 三键。正则与 `src/hooks/usePlatform.ts` 的 `detectPlatform` 同一条。
+       */
+      document.documentElement.dataset.platform = /Mac/i.test(navigator.userAgent)
+        ? 'macos'
+        : 'windows'
     </script>
     <!--
       ★★ **首屏骨架（2026-10-19）** —— 为什么写在 index.html 里、而不是 React 组件：
@@ -75,7 +83,8 @@
         --boot-divider: rgba(16, 24, 32, 0.06);
         --boot-text: #1a2128;
         --boot-icon: rgba(16, 24, 32, 0.55);
-        --boot-accent: #2f9e6e;
+        /* 与 `tokens.css` 的 `--accent`（浅色档）同一个值 —— 页签下划线换场不变色 */
+        --boot-accent: #20b25a;
 
         height: 100%;
         display: flex;
@@ -105,23 +114,62 @@
 
       /* ---- 顶栏：与 TopTabs 同高（--titlebar-h = 38px）---- */
       #boot .boot-bar {
+        position: relative;
         height: 38px;
         flex: none;
         display: flex;
         align-items: center;
         /* 右边不留白：窗口键要贴到窗沿（与 TopTabs 的 `.controls` 一样） */
         padding: 0 0 0 16px;
-        border-bottom: 1px solid var(--boot-line);
         box-sizing: border-box;
+
+        /*
+         * ★★★ **底边那条线不能写成 `border-bottom`**（2026-10-29 作者：「顶部有一点
+         * 上下像素的移动」）。
+         *
+         * `box-sizing: border-box` 下那条 border 会**吃掉内容盒的 1px**：里面垂直居中的
+         * 中心从 19 变成 18.5，retina 上正好差**一个物理像素** —— 骨架退场、真标题栏
+         * （`TopTabs` 的线是 `::after`，不占布局）接手的那一帧，整条顶栏的内容往上弹一下。
+         *
+         * ⇒ 线改由 `::after` 画在边上（与 `TopTabs.module.css` 里 `.bar::after` 同一手法），
+         * 内容盒就是完整的 38，中心 19 与真标题栏逐像素对齐。
+         */
       }
 
-      /* 字标是真的（它不是数据）；骨架里留它也让人一眼认出是哪一扇窗 */
+      #boot .boot-bar::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 1px;
+        /* 两端渐隐，与 `TopTabs.module.css` 的 `.bar::after` 同一条渐变 —— 窗口圆角那段
+           不能留一道实线。颜色取 `--boot-divider`（0.06）= 真标题栏的 `--hairline` 同一档；
+           原来用 `--boot-line`（0.09）会显得更黑更粗，像边线自己挪了位置。 */
+        background: linear-gradient(
+          90deg,
+          transparent 0,
+          var(--boot-divider) 4%,
+          var(--boot-divider) 96%,
+          transparent 100%
+        );
+      }
+
+      /*
+       * 字标是真的（它不是数据）；骨架里留它也让人一眼认出是哪一扇窗。
+       *
+       * ★★ `padding: 0 7px` 是**位置**，不是装饰（2026-10-29 作者：「MKP 那三个字总是在
+       * 变化，我不喜欢它变化位置」）：真的 `MKP` 是 `<button>`，`.logo` 带 `padding: 3px 7px`
+       * ⇒ **字**从盒子右移 7px 才开始画。骨架这边不加，挂载那一帧字标会往右挪 7px。
+       * 左右内衬都写 7，与 `.logo` 那份逐字对齐（改那边要回来改这里）。
+       */
       #boot .boot-logo {
         font-size: 15px;
         font-weight: 700;
         letter-spacing: 0.1em;
         color: var(--boot-text);
         flex: none;
+        padding: 0 7px;
         opacity: 0.75;
       }
 
@@ -149,14 +197,22 @@
         background: var(--boot-line-strong);
       }
 
+      /*
+       * 选中那条下划线：**几何照真界面量**（2026-10-29，与上面"上下像素"那条一起收）。
+       *
+       * 真界面（`TopTabs.module.css` 的 `.indicator`）：`bottom: -1px; height: 2px`，
+       * 而 `.tabs` 是 `overflow: hidden` ⇒ 实际看得见的是 **y = 37..38 那一像素**。
+       * 骨架原来是 36..38 两像素 —— 又高又厚，换场时那条绿线会"跳一下"。
+       * 这里直接画看得见的那一像素：tab 顶 14（(38−10)/2）+ 23 = 37。
+       * 颜色跟 `--accent` 同一档（见 `--boot-accent` 两套值），不然换场还会变色。
+       */
       #boot .boot-tab.is-on::after {
         content: '';
         position: absolute;
         left: 0;
         right: 0;
-        top: 22px;
-        height: 2px;
-        border-radius: 1px;
+        top: 23px;
+        height: 1px;
         background: var(--boot-accent);
       }
 
@@ -183,6 +239,40 @@
 
       #boot .boot-win svg {
         display: block;
+      }
+
+      /*
+       * ★★★ macOS（2026-10-29 作者：「这个骨架屏的时候怎么默认是 win 的，在 mac 上很差」）：
+       *
+       * 交通灯是**系统画在窗口图层上**的（`src-tauri/src/chrome.rs` 的
+       * `reposition_traffic_lights`，灯心距左 = 距上 = 19，灯径 14、间距 23），
+       * 骨架里那三个键却是 Windows 的（─ □ ✕）。两个一起画 ⇒ 左边红黄绿、右边 Win 三键，
+       * 一眼就不是这台机器上的窗口。
+       *
+       * ⇒ macOS 上：① 右边那组整组不画；② 左边让出灯位。
+       *
+       * 96 = 真标题栏里 MKP 那个**按钮盒子**的左缘（`TopTabs` 的 14 内衬 + 66 灯位占位
+       * + 16 gap，见 `TopTabs.tsx` 的 `MAC_LIGHTS_INSET` 与 `.bar[data-platform='macos']`）；
+       * 字本身还要再让 7px（按钮内衬，见下面 `.boot-logo`）⇒ 字的左缘 103。
+       * 那个 16 的 gap 在 mini 档也被钉住了（`TopTabs.module.css` 里 mac + mini 那条）——
+       * 不钉的话窗口跨过 640，字标会横移 4px。
+       *
+       * 页签靠右、右内衬 16 也与真标题栏一致（`TopTabs.module.css` 里
+       * `.bar[data-platform='macos'] .tabs { margin-left: auto }`）—— 不然挂载那一帧
+       * 页签会从左边跳到右边。
+       *
+       * 判据 `html[data-platform]` 由 head 里那段脚本挂（先于这里，不会闪）。
+       */
+      html[data-platform='macos'] #boot .boot-bar {
+        padding: 0 16px 0 96px;
+      }
+
+      html[data-platform='macos'] #boot .boot-wins {
+        display: none;
+      }
+
+      html[data-platform='macos'] #boot .boot-tabs {
+        margin-left: auto;
       }
 
       /* ---- 正文：左信息 / 中产品图 / 右抽屉 ---- */
@@ -422,7 +512,8 @@
           --boot-divider: rgba(255, 255, 255, 0.06);
           --boot-text: #e8eaec;
           --boot-icon: rgba(255, 255, 255, 0.62);
-          --boot-accent: #3fbf8f;
+          /* 同 `tokens.css` 的深色 `--accent`（压暗一档的那组） */
+          --boot-accent: #2f9e5b;
         }
 
         #boot .boot-drawer {

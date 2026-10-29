@@ -108,6 +108,33 @@ pub struct Catalog {
     /// （发布闸会拦住，所以**发出去的目录里不会缺它**）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_client_version: Option<String>,
+    /// **发布线身份**（`support-ease`）：逻辑上是同一条发布线的目录都写同一个值 ——
+    /// GitHub / Gitee 镜像与随包 bootstrap 因为来自同一仓库的同一笔提交而天然同 ID。
+    ///
+    /// ★ 它是**本程序自己的交付线名**（取自产品名），**不代表任何厂商官方身份**：
+    ///   这套预设是第三方整理分发的。不写 = 不知道是哪条线，**不是"默认官方"**。
+    ///
+    /// # 为什么不能推导
+    ///
+    /// 路径、品牌、机型集合相同**都不证明**是同一条线（作者 2026-10-28）：两个独立目录
+    /// 恰好长一样，也会是不同的演化。所以它只能由发布账本（
+    /// `presets/delivery/publish-serial.json`）持有并被抄进这里，不从别处推。
+    ///
+    /// **不进 [`revision_of`]**：与 `published_at` 同一条理由 —— 它不描述目录内容。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+    /// **单调发布序号**：只有正式发布事务（`workbench::app::delivery::publish_into`）
+    /// 才能让它 +1，`gen-catalog` / 生成只沿用上一次发布的值。
+    ///
+    /// 它回答的是 `revision` 回答不了的那个问题：**发布有没有往前走**。
+    /// `revision` 是内容指纹（SHA，不可比较大小）；这里才是顺序。回滚 = 一次新的发布
+    /// （serial 继续 +1，而 `revision` 回到旧值），所以序号只增不减。
+    ///
+    /// 与 [`Catalog::catalog_id`] **同生同死**（只有一个 ⇒ 目录是坏的，见 [`Catalog::parse`]）。
+    ///
+    /// **不进 [`revision_of`]**。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publish_serial: Option<u64>,
 }
 
 /// catalog 里 definition 的注册表部分：字段定义 + 分组元数据 + 参数摆放。
@@ -334,7 +361,44 @@ impl Catalog {
                 ],
             )));
         }
+        /*
+         * **发布身份同生同死**（作者 2026-10-28）：只有一半 = 这份目录被谁手工改坏了。
+         *
+         * 不补救（不替它推一个 ID、也不假定 serial）—— 那种"猜一半"正是这次要根治的
+         * 毛病。老的、从来没带过这两格的目录照常读（两格都 `None` = 不知道哪条线）。
+         */
+        if catalog.catalog_id.is_some() != catalog.publish_serial.is_some() {
+            return Err(AppError::corrupted(messages::text(
+                "ui.runtime.catalog.382",
+                &[
+                    (
+                        "id",
+                        &catalog
+                            .catalog_id
+                            .clone()
+                            .unwrap_or_else(|| "catalogId 缺失".to_owned()),
+                    ),
+                    (
+                        "serial",
+                        &catalog
+                            .publish_serial
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "publishSerial 缺失".to_owned()),
+                    ),
+                ],
+            )));
+        }
         Ok(catalog)
+    }
+
+    /// **这份目录属于哪条发布线**（`None` = 不知道）。
+    pub fn line(&self) -> Option<&str> {
+        self.catalog_id.as_deref()
+    }
+
+    /// **这份目录是这条线的第几次发布**（`None` = 不知道；随包旧目录就是这种）。
+    pub fn serial(&self) -> Option<u64> {
+        self.publish_serial
     }
 
     /// 产物形态：pretty JSON + 结尾换行（进仓库当判据资产，diff 要能看）
@@ -625,6 +689,13 @@ impl Catalog {
                 // 两格都由 `finalize` 收口（签名从自己算；最低版本由发布侧查规则表填）
                 structure_signature: String::new(),
                 min_client_version: None,
+                /*
+                 * **构建出来的目录不带发布身份**（2026-10-28）：它回答不了"这是哪条线的
+                 * 第几次发布"—— 那是发布事务的事（`publish_into` 从账本抄进来）。
+                 * 随包 bootstrap 也走这条路 ⇒ 它要么是发布产物（带身份），要么老实说不知道。
+                 */
+                catalog_id: None,
+                publish_serial: None,
             },
             missing,
         )
@@ -727,6 +798,10 @@ impl Catalog {
 
 /// 对 definition + files 的稳定序列化取摘要。`revision` 本身不在输入里，没有自指问题。
 /// definition 在输入里：改字段定义、挪布局、换套餐，检查更新都看得见
+///
+/// ★ **发布身份（`catalogId` / `publishSerial`）刻意不进这里**（作者 2026-10-28）：
+///   `revision` 是内容指纹，同内容重发不许变；序号是另一件事（顺序，不是内容）。
+///   两者混一个数，就又回到"一个字段同时回答三个问题"的老毛病。
 fn revision_of(catalog: &Catalog) -> String {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
@@ -1246,6 +1321,64 @@ mod tests {
         let json = r#"{ "catalogSchema": 99, "revision": "x", "machines": [], "files": [] }"#;
         let e = Catalog::parse(json.as_bytes()).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
+    }
+
+    /// **发布身份同生同死**（2026-10-28）：只写了一格 = 被手工改坏，不猜另一半。
+    ///
+    /// 三支一起咬：两格都缺（老目录）照常读、只缺一个就 `CORRUPTED`、两格都在就照读。
+    /// 判据只认形状，不认值 —— "哪个 ID 才算官方"是发布账本的事，不在解析层。
+    #[test]
+    fn the_release_identity_is_all_or_nothing() {
+        let base = r#""catalogSchema": 1, "revision": "abc", "machines": [], "files": []"#;
+
+        let neither = format!("{{ {base} }}");
+        let c = Catalog::parse(neither.as_bytes()).expect("老目录（两格都缺）照常读");
+        assert_eq!(c.line(), None, "没写 = 不知道是哪条线，不是默认官方");
+        assert_eq!(c.serial(), None);
+
+        let id_only = format!(r#"{{ {base}, "catalogId": "support-ease" }}"#);
+        assert_eq!(
+            Catalog::parse(id_only.as_bytes()).unwrap_err().code,
+            crate::error::ErrorCode::Corrupted,
+            "只有 ID 没有序号 —— 不许替它编一个序号"
+        );
+
+        let serial_only = format!(r#"{{ {base}, "publishSerial": 7 }}"#);
+        assert_eq!(
+            Catalog::parse(serial_only.as_bytes()).unwrap_err().code,
+            crate::error::ErrorCode::Corrupted,
+            "只有序号没有 ID —— 那序号说不清属于哪条线"
+        );
+
+        let both = format!(r#"{{ {base}, "catalogId": "support-ease", "publishSerial": 7 }}"#);
+        let c = Catalog::parse(both.as_bytes()).expect("两格齐了照读");
+        assert_eq!(c.line(), Some("support-ease"));
+        assert_eq!(c.serial(), Some(7));
+    }
+
+    /// **发布身份不进内容指纹**：同内容重发（只有序号变）`revision` 必须不变。
+    ///
+    /// 反过来咬的是"别拿序号冒充内容"：序号变了而 `revision` 一分没动 = 一次
+    /// 没有内容变化的发布（回执要说"产物无变化"，判定也据此判 `Unchanged`）。
+    #[test]
+    fn the_release_identity_stays_out_of_the_content_fingerprint() {
+        let catalog = Catalog::build_from_repo(&repo_root()).unwrap();
+        let before = catalog.revision.clone();
+
+        let mut republished = catalog.clone();
+        republished.catalog_id = Some("support-ease".to_owned());
+        republished.publish_serial = Some(42);
+        republished.published_at = Some("2026-10-28T00:00:00Z".to_owned());
+        assert_eq!(
+            revision_of(&republished),
+            before,
+            "序号 / 发布线 / 发布时刻都不描述内容 —— 指纹一动，OTA 就会以为内容变了"
+        );
+
+        /* 内容真的变了才许动指纹（这里改一份的字节） */
+        let mut changed = republished.clone();
+        changed.files[0].sha256 = Some("0".repeat(64));
+        assert_ne!(revision_of(&changed), before, "内容变了，指纹得跟着变");
     }
 
     /// **随包那份只兜底**（2026-10-16，作者「编译进去的，就只当兜底」）——

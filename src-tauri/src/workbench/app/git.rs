@@ -173,6 +173,31 @@ impl Git {
             .to_owned())
     }
 
+    /// **HEAD 这笔提交动过某个路径没有**（只读）。
+    ///
+    /// 「上一笔发布 commit 已经在本地、只是没推出去」的恢复路用它认亲：
+    /// 账本说第 N 号、盘上 catalog 也是 N，而 HEAD 恰好改过 `catalog.json`
+    /// ⇒ 这一代已经完整落地，重跑只该补一次 push。
+    ///
+    /// 用 `show --name-only --format=` 而不是 `diff HEAD~1`：**第一次提交没有父**，
+    /// `diff HEAD~1` 在那里会报错，而发布的第一笔 commit 正是这种情况。
+    pub fn head_touches(&self, path: &str) -> Result<bool, AppError> {
+        let out = self.run(&["show", "--name-only", "--format=", "HEAD"])?;
+        Ok(out.lines().any(|l| l.trim() == path))
+    }
+
+    /// **最近一次动过这个路径的提交**（`git log -1 --format=%H -- <path>`），没有就 `None`。
+    ///
+    /// 发布账本那一格 `commit_sha` 用它回填：它答的是"这一代目录是在哪一笔提交里落库的"，
+    /// **不是**"推没推出去"（后者要问远端，账本不冒充）。见 `publish_book::Book::commit_sha`。
+    ///
+    /// 只读、不联网。仓库里还没有过这个路径（第一次发布）⇒ `None`。
+    pub fn last_commit_touching(&self, path: &str) -> Option<String> {
+        let out = self.run(&["log", "-1", "--format=%h", "--", path]).ok()?;
+        let sha = out.trim();
+        (!sha.is_empty()).then(|| sha.to_owned())
+    }
+
     /// 推分支（`git push -u origin <branch>`）。`branch` 为空 = 用当前分支。
     ///
     /// **不带认证** —— 只在凭据已由别处（如 CI 的 credential helper）提供时用。

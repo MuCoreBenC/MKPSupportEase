@@ -39,7 +39,7 @@ presets/          ← 【仓库】我们自己拥有的东西（人手维护的�
 | ② | release.json 位置 | **入 `delivery/`**（它本来就是交付元数据；`release_url` 的"上跳一级"推导随之废除） |
 | ③ | 老客户端 v≤0.0.5 | **主动切断（测试版断代，不是"暂时不能更新"）**：delivery 改名 + sourceSchema 升 2 后它们的内置地址失效，且 OTA 同源同死 —— v0.0.5 及更早测试客户端**永久失去更新能力**，界面将永远显示"已是最新"（`software_update` 的 `Err → none_available` 静默降级）。这是未发布阶段的**有意决策**，作者机手动更新一次即出断代。**任何人不得把这条误写成"老客户端兼容，只是暂时收不到"** |
 | ④ | `filesRoot` 声明位置 | **Source Manifest**（`"filesRoot": ".."`，唯一被允许的"向上"，单点声明） |
-| ⑤ | 生成器出口 | **只认 `presets/delivery/`**；`scripts/publish-presets.mjs` 等第二出口收敛或退役 |
+| ⑤ | 生成器出口 | **只认 `presets/delivery/`**；第二出口已删除（`scripts/publish-presets.mjs`，2026-10-28） |
 | ⑥ | 业务层寻址 | **禁止拼路径**；`catalog.path` 永远不允许 `..`；Source Manifest 是唯一的"寻址规则声明"，Catalog 只是资源清单、不得自带第二套根/URL |
 | ⑦ | 生成物分类 | **维持现状**：A 类源资产留 `presets/assets/` 不复制；B 类渲染产物进 `delivery/mkp/presets/` |
 | ⑧ | 节奏 | **长期大纲、分刀推进**（本文档即大纲），不搞一刀切；每刀独立可停、可验收 |
@@ -158,7 +158,7 @@ presets/                          ← Publish Root（catalog.files[].path 的锚
 - 验收：负向测试（业务层拼 URL → 编译失败/CI 红；Fixture 改错一个地址 → 红并打印人话 diff）。
 
 ### M5 · 清算（长期收尾，允许拖）
-- `scripts/publish-presets.mjs` 退役或改调 wb_publish 内核（它现在是**第二个生成出口**，12 处 dist 引用）。
+- ~~`scripts/publish-presets.mjs` 退役或改调 wb_publish 内核~~ —— **已删除（2026-10-28）**：它既是第二个生成出口、又不写发布账本，正式发布只剩 `npm run presets -- publish`。
 - `src/workbench/dev/mockBackend.ts`、`api.ts`、`SettingsPage`/`BuildPage`/`PageSettings` 文案、`tools/assets/sync.mjs`、`scripts/probes/*` 与新地址对齐。
 - HANDOFF / PUBLISH-KNIFE3/4 / ASSET-CHAIN 等流水账文档加"历史快照"头注（不重写）——2026-10-11：PUBLISH-KNIFE3/4 / ASSET-CHAIN 已删除（git 历史可查），只剩 HANDOFF 一处，已由清理注记代行。
 - 相邻项处置评估：`release.json.asset.url` 绝对 GitHub Releases 地址（Gitee 用户更新流量走 GitHub）——已升格为 **M6**（§5），独立一刀。
@@ -208,7 +208,7 @@ Resolver 管"source.json 声明的资源在哪"；Release Asset 是另一条链�
 | 6 | content/ 三件 | 随目录改名 | 闸⑯ 固定物对账 |
 | 7 | 血统 based_on 字符串 | 旧形状（`dist/…` / `mkp/…`）**不迁移** —— 按 2026-10-04 既有裁决（`runtime::mine` "老形状认不出就是认不出，绝不猜"）优雅降级为 `Unknown`；field 数据为空，零实际影响 | `an_old_shaped_based_on_is_unknown_and_never_guessed`（已扩展覆盖两代旧形状） |
 | 8 | 模块与函数名 | `app::dist` / `dist_root` / `DIST_REL_PATH` / `PRESET_DEST_DIR` 值 | **编译器**（改模块名全仓编译失败，漏不了——这是主动选择把名字一起改的原因） |
-| 9 | scripts/publish-presets.mjs | 12 处 dist 引用；第二生成出口 | M5 退役/收敛；过渡期 grep 清单 |
+| 9 | scripts/publish-presets.mjs | 12 处 dist 引用；第二生成出口 | **已删除（2026-10-28）** |
 | 10 | .gitignore | `/dist` 锚定规则保留（vite 输出仍叫 dist）；注释里 presets/dist 表述更新 | 人工（CI 无法盯注释） |
 | 11 | 前端文案与假后端 | SettingsPage placeholder / BuildPage 说明 / api.ts / mockBackend | grep 清单 + 工作台手测 |
 | 12 | scripts/probes/*、tools/assets/sync.mjs | 各 1 处 | grep 清单 |
@@ -225,7 +225,7 @@ Resolver 管"source.json 声明的资源在哪"；Release Asset 是另一条链�
 
 代码（必须改逻辑或常量）：`src-tauri/src/workbench/app/audit.rs`(18)、`dist.rs`(13)、`source.rs`(12)、`git.rs`(11)、`paths.rs`(5)、`assets.rs`(4)、`catalog.rs`(4)、`release_info.rs`(3)、`publish_tx.rs`(2)、`presetdata/assets.rs`(2)、`workbench/mod.rs`(1)、`history.rs`(1)、`build.rs`(1)、`ipc/catalog.rs`(1)、`crates/preset/tests/baseline_stays_untouched_on_the_generate_path.rs`(1)
 前端：`src/workbench/views/SettingsPage.tsx`(4)、`src/workbench/dev/mockBackend.ts`(3)、`src/workbench/api.ts`(2)、`src/app/settings/PageSettings.tsx`(1)
-脚本工具：`scripts/publish-presets.mjs`(12)、`tools/assets/sync.mjs`(1)、`scripts/probes/chain.mjs`(1)、`scripts/probes/asset-preview.mjs`(1)
+脚本工具（`publish-presets.mjs` 已删除 2026-10-28）：`tools/assets/sync.mjs`(1)、`scripts/probes/chain.mjs`(1)、`scripts/probes/asset-preview.mjs`(1)
 文档：`HANDOFF.md`(28，流水账加头注即可)、`docs/PUBLISH-ARCHITECTURE.md`(17)、`docs/PRESET-DELIVERY-CONTRACT.md`(8)、`docs/DATA-INVENTORY.md`(6)、`docs/DATA-ARCHITECTURE.md`(6)、`ASSET-CHAIN-HANDOFF.md`(3)、`PUBLISH-KNIFE3/4-HANDOFF.md`(2×2)、`docs/TWO-REPO-ALIGNMENT.md`(1)
 配置：`workbench/bootstrap.json`、`.gitignore`（注释）、`presets/dist/*` 生成物（gen-catalog 重建）
 
@@ -294,7 +294,7 @@ SHA 校验
 | M2 | 修锚（Entry 锚由 Manifest `filesRoot` 声明决定） | ✅ 完成 | 2026-10-05 | 端到端验收由闸⑯在真仓库上完成：catalog 24 条 + 固定物逐条对上磁盘 |
 | M3 | delivery 重排 + release 入场 + Manifest v2 + epoch 2 | ✅ 完成 | 2026-10-05 | 新结构签名 `2242174c52e8a9b6`（minClient 0.0.6）；embedded + 交付面 catalog 由 gen-catalog 重建；血统不迁移（见 §6.1-7 修正） |
 | M4 | 立法（CI 绊线 + 交付面无绝对 URL + 文档修正） | ✅ 完成 | 2026-10-05 | `ci.yml` 寻址立法扫描；PUBLISH-ARCHITECTURE §0/§2.2/§5.3.1/§6 重写 + 历史教训钉防重犯 |
-| M5 | 清算（脚本收敛 / mock 对齐 / 术语清扫 / HANDOFF 头注） | ✅ 完成 | 2026-10-05 | `publish-presets.mjs` 加清算中头注并跟新路径（退役裁决留待下一刀）；HANDOFF 系加历史快照头注 |
+| M5 | 清算（脚本收敛 / mock 对齐 / 术语清扫 / HANDOFF 头注） | ✅ 完成 | 2026-10-05 | `publish-presets.mjs` 加清算中头注并跟新路径（该脚本已于 2026-10-28 删除）；HANDOFF 系加历史快照头注 |
 | M6 | Gitee Release 发布链路（release.asset.url 全量切 Gitee） | ✅ 完成 | 2026-10-05 | 四件事查清（写入点 ⑨ / 建释放 ⑧ / 上传 ⑧+⑧之二 / asset.url=平台返回值）；`ReleaseChannel` 与 PR/tag 的 target 刻意分开；⑥½ 把 tag+main 推到发布仓库（数据源主线同步）；`validate_release_source` 写盘前拦 + CI `check:release-source`（断代线 0.0.6 双侧同值）；preflight 新增 `release-channel` 项。**Gitee 适配层字段名待真机核对**（#32 既有免责）；CI 的 JS 判据从 0.0.6 起真正咬人 |
 
 > **施工记录（2026-10-05）**：`cargo test`（默认 + workbench feature）全绿；

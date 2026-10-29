@@ -435,7 +435,26 @@ export function cloudClaimBadge(row: {
   if (row.basedOn === 'newer') return null
   /* `elsewhere` 不挂任何徽章：源不同不是用户要看的，判定看内容与时间（2026-10-27） */
   if (row.localState === undefined) return null
-  return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
+  /*
+   * ★ **徽章也要按结论分档，不能只看 `localState`**（2026-10-29 作者截图抓出来的）。
+   *
+   *   `localState` 只有三档（未获取 / 有新版 / 本地已有），而它把"说不清"与
+   *   "内容没变"都并进了 `stale` —— 于是行上写着「有新版」，可这一份到底有没有新版
+   *   根本不知道。按钮那边早就按 `basedOn` 分派了，徽章没跟上，就成了"按钮说没事、
+   *   徽章说有事"的自相矛盾。
+   *
+   *   所以：**能声称"有新版"的只有 `outdated`**；其余三种在 `stale` 里各有各的说法。
+   */
+  switch (row.basedOn) {
+    case 'unchanged':
+      return { text: 'presets.tree.cloudLocal.unchanged', state: row.localState }
+    case 'unverified':
+      return { text: 'presets.tree.cloudLocal.unverified', state: row.localState }
+    case 'inconsistent':
+      return { text: 'presets.tree.cloudLocal.inconsistent', state: row.localState }
+    default:
+      return { text: CLOUD_LOCAL_TEXT[row.localState], state: row.localState }
+  }
 }
 
 export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
@@ -875,6 +894,27 @@ export function usageCellText(tr: Tr, count: number | undefined): string {
 export const USAGE_HINT: StringKey = 'presets.tree.usageHint'
 
 /**
+ * 展开详情里「发布线」那一行写什么（2026-10-28）：`support-ease · 第 12 号`。
+ *
+ * **两格同生同死**（后端 `Catalog::parse` 拒收只有一格的目录），所以缺任何一个
+ * 就返回 `null` —— 调用方据此**整行不渲染**。这里刻意不返回「未知」：
+ * 老目录 / 老副本本来就没有这条信息，摆一行"未知"只会让人以为界面没做完。
+ *
+ * 本地行传血统的（我这份基于第几号），云端行传目录的（云端是第几号）。
+ */
+export function releaseLineText(
+  tr: Tr,
+  line: string | null | undefined,
+  serial: number | null | undefined,
+): string | null {
+  if (line == null || line === '' || serial == null) return null
+  return tr('presets.table.detail.ver.lineValue', { id: line, serial })
+}
+
+/** 「发布线」那一行的键名（一条句子只有一个出处，组件只搬） */
+export const RELEASE_LINE_KEY: StringKey = 'presets.table.detail.ver.line'
+
+/**
  * 展开详情里「基于」那一格写什么。**文案收在这一处**（组件只搬）——
  * 与 `versionsText` / `presetBatchText` 同一条规矩：一句话只有一个出处。
  */
@@ -918,6 +958,28 @@ export function basedOnCellText(
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
         : tr('presets.tree.basedOn.elsewhereBare', { source })
+    /*
+     * **发布前进了，但这一份没变**（2026-10-28）：别的预设可能有新版，这份没有。
+     * 说事实、不给动作 —— 不许因为它跟"这条线发过新版"沾边就说它有新版。
+     */
+    case 'unchanged':
+      return source === ''
+        ? tr('presets.tree.basedOn.unchangedNoSource')
+        : tr('presets.tree.basedOn.unchanged', { source })
+    /*
+     * **说不清版本关系**（老副本缺发布线 / 老目录没身份）：照实说不知道，
+     * 不冒充"已是最新"，也不冒充"有新版"。补基线要等用户明确「更新」那一趟。
+     */
+    case 'unverified':
+      return source === ''
+        ? tr('presets.tree.basedOn.unverifiedNoSource')
+        : tr('presets.tree.basedOn.unverified', { source })
+    /*
+     * **目录自相矛盾**：同一条发布线的同一个序号，字节却变了 —— 那是数据坏了，
+     * 不是"有新版"。这句话要说得像报警，因为它就是。
+     */
+    case 'inconsistent':
+      return tr('presets.tree.basedOn.inconsistent', { source })
     default:
       return source === ''
         ? tr('presets.tree.basedOn.noneNoSource')
@@ -1740,6 +1802,15 @@ export interface PresetRowsInput {
   stalePresets: DeliveryPresetSource[]
   /** 目录指纹前 16 位（来源列那枚 chip 用）。null = 没读到目录 */
   presetVersion: string | null
+  /**
+   * **当前目录的发布身份**（`catalog.catalogId` + `catalog.publishSerial`）——
+   * 详情面板「发布线」那一行显示"云端是第几号"。
+   *
+   * **两格一组**：后端保证同生同死（只有一格的目录过不了解析），所以要么都有、
+   * 要么都是 `null`（老目录 / 随包旧版 ⇒ 那一行不渲染，不摆"未知"）。
+   */
+  catalogLine: string | null
+  catalogSerial: number | null
   /**
    * **备注覆盖账**（`api.getPresetRemarks()`）：用户改过的副标题。**只有本地表读它** ——
    * 云端表只读工作台写的那句（2026-10-07 作者定：本地的改动不许影响云端显示）。
@@ -2585,6 +2656,8 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
     localTimes,
     presetVersion,
     releaseAt,
+    catalogLine,
+    catalogSerial,
     sourceIdentity,
   } = input
   const names = machineNames(machines)
@@ -2806,11 +2879,23 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
          *   这一格是**规范化身份**（`gitee#owner/repo@ref`）—— 键名也分开写。
          */
         basedOnFacts: {
+          /*
+           * 云端行没有"我基于哪一版"这回事 —— 那是**本地行**的语义（我手上这份从哪拷的）。
+           * 这里照实留空，不拿目录的身份去冒充血统。
+           */
           lineageSource: null,
           lineageRelease: null,
           lineagePublishedAt: null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
+          lineageCatalog: null,
+          lineageSerial: null,
+          /*
+           * **这一份目录的发布身份**（2026-10-28）：详情里「发布线 · 第几号」那一行。
+           * 两格同生同死；老目录 / 随包旧版都是 null ⇒ 那一行不渲染。
+           */
+          cloudCatalog: catalogLine,
+          cloudSerial: catalogSerial,
         },
         olderVersions,
         /* MKP 档的那一问（切片器档是 `undefined`，它照旧读 `presetState`） */

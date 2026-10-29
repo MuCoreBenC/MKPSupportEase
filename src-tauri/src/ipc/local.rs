@@ -41,7 +41,8 @@ use crate::runtime;
 pub struct LocalBasedOnFactsDto {
     /// 这份副本建的时候哪个源在生效（`github#owner/repo@ref` 那种规范化身份）
     pub lineage_source: Option<String>,
-    /// 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻）
+    /// 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻）。
+    /// **只做展示**：它是配方的写作日期，不是发布顺序。
     pub lineage_release: Option<String>,
     /// 那个源最近一次发布目录的时刻（账本上记的）
     pub lineage_published_at: Option<String>,
@@ -49,6 +50,14 @@ pub struct LocalBasedOnFactsDto {
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
     pub cloud_published_at: Option<String>,
+    /// 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null`
+    pub lineage_catalog: Option<String>,
+    /// 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null`
+    pub lineage_serial: Option<u64>,
+    /// 当前目录的发布线（`catalog.catalogId`）。老目录 / 随包旧版 ⇒ `null`
+    pub cloud_catalog: Option<String>,
+    /// 当前目录是那条线的第几号（`catalog.publishSerial`）
+    pub cloud_serial: Option<u64>,
 }
 
 /// 用户自己的一份文件（给界面看的形状）。
@@ -181,6 +190,10 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
                         lineage_published_at: verdict.facts.lineage_published_at,
                         cloud_source: verdict.facts.cloud_source,
                         cloud_published_at: verdict.facts.cloud_published_at,
+                        lineage_catalog: verdict.facts.lineage_catalog,
+                        lineage_serial: verdict.facts.lineage_serial,
+                        cloud_catalog: verdict.facts.cloud_catalog,
+                        cloud_serial: verdict.facts.cloud_serial,
                     },
                     based_on_label: f.lineage.as_ref().and_then(|l| l.based_on.clone()),
                     based_on_release: f

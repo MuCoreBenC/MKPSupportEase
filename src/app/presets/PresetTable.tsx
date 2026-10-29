@@ -123,6 +123,7 @@ import Icon from '../../components/Icon'
 import Chevron from '../shell/icons'
 import ui from '../ui/ui.module.css'
 import { useT } from '../../i18n'
+import type { Tr } from '../../i18n'
 import type { Machine } from '../../api'
 /*
  * ★ 2026-10-14：原来这里 `import { machineToneKeyOf } from '../ui/machineTone'`，
@@ -139,6 +140,8 @@ import {
   ASSET_USE_TEXT,
   BASED_ON_KEY,
   basedOnCellText,
+  RELEASE_LINE_KEY,
+  releaseLineText,
   cloudClaimBadge,
   CLOUD_LOCAL_ACTION,
   CLOUD_LOCAL_TEXT,
@@ -180,6 +183,24 @@ import s from './PresetTable.module.css'
  * 「本地已有」那一档**不给按钮**：那颗按钮按下去没有意义（要改、要用都在本地表那一行上），
  * 而摆一个看起来能点的东西比不摆糟得多 —— 画一枚灰字，`title` 里说清该去哪儿。
  */
+/**
+ * 展开详情里「发布线」那一行（2026-10-28）。
+ *
+ * **`text == null` 就整行不渲染** —— 老目录 / 老副本没有这条信息，摆一行"未知"
+ * 只会让人以为界面没做完（这条判断在 `releaseLineText` 里，一处出）。
+ */
+function ReleaseLineRow({ tr, text }: { tr: Tr; text: string | null }) {
+  if (text == null) return null
+  return (
+    <div className={s.dRow}>
+      <span className={s.dKey}>{tr(RELEASE_LINE_KEY)}</span>
+      <span className={`${s.dVal} ${s.dOne}`} title={text}>
+        {text}
+      </span>
+    </div>
+  )
+}
+
 function CloudLocalAction({
   row,
   busy,
@@ -209,6 +230,39 @@ function CloudLocalAction({
       </span>
     )
   }
+  /*
+   * ★ **只有 `outdated` 才给「更新」主按钮**（2026-10-28 三问题模型）。
+   *
+   *   以前这里只看 `localState === 'stale'`，而 `stale` 是"本地那份和目录字节不同"——
+   *   它同时覆盖了「真有新版」「说不清」「目录自相矛盾」三种完全不同的情形，
+   *   于是三种都长出了同一颗绿色按钮。
+   *
+   *   现在按结论分派：
+   *     outdated     ⇒ 给（唯一一档是"确定有新版"）
+   *     unchanged    ⇒ 破折号（发布前进了，但这份没变）
+   *     inconsistent ⇒ 破折号 + 警告字样（数据坏了，不能覆盖）
+   *     unverified   ⇒ **也给**，但换了说法（见下）
+   *
+   *   ★ `unverified` 必须留一条出路（2026-10-29）：老副本（血统里没有发布线/序号）
+   *     会被判成"说不清"，如果连按钮都不给，那一份就**永远**没有建立新基线的入口 ——
+   *     只能删掉重下。而"接受当前云端版"这件事本来就得由用户明确点一下才算数
+   *     （下载 ≠ 接受版本），所以按钮留着，`title` 里把话说清：点它 = 以当前云端版
+   *     建立起新基线。至于"有新版"那三个字，那是徽章的事，已经不在这格说了。
+   */
+  if (row.basedOn === 'unchanged' || row.basedOn === 'inconsistent') {
+    const why =
+      row.basedOn === 'inconsistent'
+        ? tr('presets.table.inconsistent.title')
+        : tr('presets.table.unchanged.title')
+    return (
+      <span
+        className={row.basedOn === 'inconsistent' ? s.actWarn : s.actNone}
+        title={why}
+      >
+        {row.basedOn === 'inconsistent' ? tr('presets.table.inconsistent.badge') : DASH_}
+      </span>
+    )
+  }
   const state = row.localState
   if (state === undefined) return null
   const action = CLOUD_LOCAL_ACTION[state]
@@ -235,6 +289,12 @@ function CloudLocalAction({
       className={isUpdate ? s.updateBtn : s.actBtn}
       disabled={busy}
       onClick={() => onDownload(row)}
+      /* 说不清版本关系时，这一下点击的含义要多说一句（见上面那段注释） */
+      title={
+        row.basedOn === 'unverified'
+          ? tr('presets.table.unverified.updateTitle')
+          : undefined
+      }
     >
       {tr(action)}
     </button>
@@ -1236,6 +1296,18 @@ export default function PresetTable({
                               */}
                               {row.origin === 'local' && row.basedOnFacts !== undefined && (
                                 <>
+                                  {/*
+                                    **发布线**（2026-10-28）：我这份基于哪条线的第几号。
+                                    两格同生同死，缺一个就整行不渲染（见 `releaseLineText`）。
+                                  */}
+                                  <ReleaseLineRow
+                                    tr={tr}
+                                    text={releaseLineText(
+                                      tr,
+                                      row.basedOnFacts.lineageCatalog,
+                                      row.basedOnFacts.lineageSerial,
+                                    )}
+                                  />
                                   <div className={s.dRow}>
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.local')}
@@ -1290,6 +1362,18 @@ export default function PresetTable({
                               */}
                               {row.origin === 'preset' && row.basedOnFacts !== undefined && (
                                 <>
+                                  {/*
+                                    **发布线**（2026-10-28）：云端这份目录是第几号。
+                                    与本地那一行同键同档 —— 两行并排就能看出差了几代。
+                                  */}
+                                  <ReleaseLineRow
+                                    tr={tr}
+                                    text={releaseLineText(
+                                      tr,
+                                      row.basedOnFacts.cloudCatalog,
+                                      row.basedOnFacts.cloudSerial,
+                                    )}
+                                  />
                                   <div className={s.dRow}>
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.ver.cloud')}

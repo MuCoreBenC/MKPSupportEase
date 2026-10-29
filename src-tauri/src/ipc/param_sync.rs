@@ -518,6 +518,13 @@ fn apply_at(
      * 血统推不推到云端当前版，看**这一批之后还有没有落下的待处理项**：
      *   都处理了（含"一项都没有"）⇒ 出处换成当前版 —— 「有新版」就此收场；
      *   还剩几项没表态        ⇒ 出处照旧 —— 那几项仍然挂在那儿，不该被这一趟悄悄抹掉。
+     *
+     * ★ **这里是唯一"用户明确接受当前版本"的动作**（2026-10-28）。所以只有这一支
+     *   才写发布线与序号：`based_on_catalog` / `based_on_serial` 取**当前目录**的
+     *   身份，等于说"我这份已经对齐到第 N 号发布了"。
+     *
+     *   反过来，`remaining > 0`（部分更新）时血统原样保留 —— 序号也**不前进**，
+     *   于是它仍然显示「有新版」。那是对的：这一趟确实没接受完。
      */
     let remaining = before
         .entries
@@ -529,9 +536,18 @@ fn apply_at(
             based_on: Some(cloud_path),
             based_on_release_time: runtime::lineage::parse_release_time(&cloud_text),
             based_on_sha256: Some(current_sha.clone()),
+            based_on_catalog: catalog.catalog_id.clone(),
+            based_on_serial: catalog.publish_serial,
         }
     } else {
-        runtime::lineage::parse_lineage_from_content(&local_text).unwrap_or_default()
+        let kept: runtime::lineage::Lineage =
+            runtime::lineage::parse_lineage_from_content(&local_text).unwrap_or_default();
+        tracing::info!(
+            remaining,
+            serial = kept.based_on_serial,
+            "部分更新：血统原样保留（序号不前进，仍会显示有新版）"
+        );
+        kept
     };
     let next = runtime::lineage::rewrite_keeping_lineage(&skeleton, Some(&lineage));
 

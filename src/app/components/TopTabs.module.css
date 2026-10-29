@@ -112,6 +112,22 @@
   gap: 12px;
 }
 
+/*
+ * ★★★ macOS：**密度档不许挪 MKP**（2026-10-29 作者：「左上角 MKP 那三个字总是在变化，
+ * 我不喜欢它变化位置」）。
+ *
+ * 来路：mac 上字标的左缘 = 14（左内衬）+ 66（灯位占位）+ **gap**；上面那条 mini 把 gap
+ * 收到 12 ⇒ 窗口跨过 640 时字标左移 4px（实测：540 宽 99、700 宽 103，字的左缘）。
+ * 灯是钉死的（`chrome.rs` 的 `LIGHTS_CENTER = 19`），字标跟着密度动没有道理。
+ *
+ * 为什么放开 gap 不会把页签挤掉：mac 上 `.tabs` 是 `margin-left: auto` 靠右的，
+ * 字标与页签之间那点 gap 不参与"放不放得下"（见上面 `.bar[data-platform='macos'] .tabs`）。
+ * Windows 那条留着 12 —— 那边字标贴左内衬，gap 只影响页签，不是这件事。
+ */
+.bar[data-platform='macos'][data-density='mini'] {
+  gap: 16px;
+}
+
 /* 系统交通灯的占位块。宽度由 TSX 给（MAC_LIGHTS_INSET），
    高度不用管 —— 灯是系统画在窗口图层上的，不在我们的 DOM 里 */
 .lightsInset {

@@ -776,8 +776,11 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     }
     // 与真生成同一处构造：沿用旧目录的发布戳（生成不盖新时间）
     let published = super::delivery::published_at_of(&delivery);
+    // 同理**沿用旧的发布身份**：预演不是发布事件，序号一分不动
+    let identity = super::delivery::PublishIdentity::inherit_from(&delivery);
     let catalog_text =
-        super::delivery::built_catalog(&delivery, &book, published.as_deref())?.to_pretty_json()?;
+        super::delivery::built_catalog(&delivery, &book, published.as_deref(), &identity)?
+            .to_pretty_json()?;
     let catalog_rel = super::delivery::NEW_CATALOG_FILE;
     let old = std::fs::read_to_string(delivery.join(catalog_rel)).ok();
     aux.push(preview_text(
@@ -1263,11 +1266,26 @@ fn publish_deliverable_only() -> Result<PublishReport, AppError> {
 
         let root = paths::delivery_root()?;
         let asset_root = paths::assets_root()?;
+        /*
+         * `wb_publish` 是**发布命令壳**（不是事务），它沿用盘上已有的发布身份 ——
+         * 序号只由 `publish_tx` 分配。所以这里 `identity: None`：交付层会用
+         * `PublishIdentity::inherit_from` 拿盘上那一份，不会自己数数。
+         */
         let meta = super::delivery::PublishMeta {
             stamp: clock::now_iso8601(),
             channel: PUBLISH_CHANNEL.to_owned(),
             version: String::new(),
+            identity: None,
+            /* 这个入口不提交 git（它只是"重算式定稿"）⇒ 没有"上一代是哪一笔"可说 */
+            commit_sha: None,
         };
+        /*
+         * `content/` 那三份（`machine_catalog` / `bundles` / `assets_index`）是**生成**的
+         * 产物。拆成 plan/commit 之后 `publish_into` 不再自己往交付根里拷它们
+         * （2026-10-28），所以这个"只定稿、不生成"的老入口必须先补上生成 ——
+         * 否则它就是在对着一份不存在的内容做定稿。
+         */
+        super::delivery::write_content(&root, &asset_root, &book)?;
         let out = super::delivery::publish_into(&root, &asset_root, &book, &meta)?;
         let stamp = meta.stamp;
 

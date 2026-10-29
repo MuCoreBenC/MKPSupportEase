@@ -60,27 +60,59 @@ use sha2::{Digest, Sha256};
 
 /// 三行血统注释的键名。**单点具名**：写（[`make_copy`]）与读（[`parse_lineage_from_content`]）
 /// 咬同一份（工作台那份的 `LINEAGE_KEYS` 是同一个清单）。
-const LINEAGE_KEYS: [&str; 3] = ["based_on", "based_on_release_time", "based_on_sha256"];
+const LINEAGE_KEYS: [&str; 5] = [
+    "based_on",
+    "based_on_release_time",
+    "based_on_sha256",
+    "based_on_catalog",
+    "based_on_serial",
+];
 
-/// 一份副本的血统。三项各自 `Option`：手工拷的副本可能只有一半，
+/// 一份副本的血统。各项各自 `Option`：手工拷的副本可能只有一半，
 /// **缺谁就是谁不知道，不许拿默认值假装知道**。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Lineage {
-    /// 来源，形如 `mkp/presets/A1-standard.toml`（角色目录 + 文件名，**不写绝对路径**——
+    /// 来源，形如 `delivery/mkp/presets/A1-standard.toml`（角色目录 + 文件名，**不写绝对路径**——
     /// 数据根可能被搬走，绝对路径会失效）。
     pub based_on: Option<String>,
     /// 建副本那一刻，来源文件头的 `# release_time`（给人看的版本号）。
+    ///
+    /// ★ **只做展示**（2026-10-28）：语义回到"配方里本来就写的那一行"。
+    /// 它曾经被拿来和目录的 `publishedAt` 比大小定"谁新" —— 那是两个不同性质的数
+    /// （配方写作日期 vs 发布时刻），比出来的结果让云端永远"更新"。
     pub based_on_release_time: Option<String>,
-    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「云端变了没有」）。
+    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「这一份内容变了没有」）。
     pub based_on_sha256: Option<String>,
+    /// 建副本那一刻，来源属于**哪条发布线**（目录的 `catalogId`）。
+    ///
+    /// # 没有这一行 = 不知道，不是"默认官方"
+    ///
+    /// 2026-10-28 之前建的副本**全都没有**这两行。它们不会被自动补上 ——
+    /// "内容恰好相同"不证明"历史来源相同"（作者定死的一条边界）。
+    /// 判定遇到它一律 `Unverified`：不声称有新版、不给更新按钮。
+    pub based_on_catalog: Option<String>,
+    /// 建副本那一刻，来源是那条线的**第几号发布**（目录的 `publishSerial`）。
+    ///
+    /// 它才是"发布有没有往前走"的那个数：`revision` 是内容指纹（不可比大小），
+    /// 时间戳是展示。回滚 = 一次新的发布（序号照样 +1，内容回到旧版）。
+    pub based_on_serial: Option<u64>,
 }
 
 impl Lineage {
-    /// 三项全空 = 没有血统（不是「血统未知」）
+    /// 全部为空 = 没有血统（不是「血统未知」）
     pub fn is_empty(&self) -> bool {
         self.based_on.is_none()
             && self.based_on_release_time.is_none()
             && self.based_on_sha256.is_none()
+            && self.based_on_catalog.is_none()
+            && self.based_on_serial.is_none()
+    }
+
+    /// **能不能拿它判"谁新"**：发布线 + 序号 + 内容摘要三样都在。
+    ///
+    /// 缺一样就不知道 —— 判定据此走 `Unverified`，绝不靠剩下的那几样硬凑一个结论。
+    pub fn has_release_baseline(&self) -> bool {
+        self.based_on_catalog.is_some() && self.based_on_serial.is_some()
     }
 }
 
@@ -100,11 +132,30 @@ pub fn sha256_hex(content: &str) -> String {
 /// 来源本身已经带血统时（副本再拷副本），旧的三行会被**换掉**而不是叠加：
 /// 叠加之后只有第一条读得出来，血统就成了骗人的。
 pub fn make_copy(src_text: &str, based_on: &str) -> String {
+    make_copy_with_line(src_text, based_on, None, None)
+}
+
+/// 同 [`make_copy`]，外加**来源所属的发布线与序号**（2026-10-28）。
+///
+/// 这是"下载一份云端预设"唯一该走的入口：它同时记下
+/// 「我是从**哪条线的第几号**拷出来的」（`based_on_catalog` / `based_on_serial`）
+/// 和「那一刻的字节摘要」（`based_on_sha256`）。
+///
+/// 传 `None`（目录没有发布身份 = 老目录 / 随包旧版）就**不写这两行** ——
+/// 不猜一个"大概属于官方线"，那会把"不知道"伪装成"知道"。
+pub fn make_copy_with_line(
+    src_text: &str,
+    based_on: &str,
+    catalog: Option<&str>,
+    serial: Option<u64>,
+) -> String {
     let body = strip_lineage_lines(src_text);
     let lineage = Lineage {
         based_on: Some(based_on.to_owned()),
         based_on_release_time: parse_release_time_from_content(src_text),
         based_on_sha256: Some(sha256_hex(src_text)),
+        based_on_catalog: catalog.map(str::to_owned),
+        based_on_serial: serial,
     };
     let block = lineage_block(&lineage, newline_of(&body));
     splice_lineage(&body, &block)
@@ -145,6 +196,13 @@ fn lineage_block(lineage: &Lineage, nl: &str) -> String {
         lineage.based_on_release_time.as_deref(),
     );
     push("based_on_sha256", lineage.based_on_sha256.as_deref());
+    /*
+     * 发布线 / 序号（2026-10-28）：老副本没有这两行，**不补**。
+     * 顺序放在最后，让"三行血统"那三行在文件头里保持它原来的相邻位置。
+     */
+    push("based_on_catalog", lineage.based_on_catalog.as_deref());
+    let serial = lineage.based_on_serial.map(|n| n.to_string());
+    push("based_on_serial", serial.as_deref());
     out
 }
 
@@ -265,6 +323,13 @@ pub fn parse_lineage_from_content(content: &str) -> Option<Lineage> {
         based_on: parse_header_value(content, "based_on"),
         based_on_release_time: parse_header_value(content, "based_on_release_time"),
         based_on_sha256: parse_header_value(content, "based_on_sha256"),
+        based_on_catalog: parse_header_value(content, "based_on_catalog"),
+        /*
+         * 序号认不出（被手工写成 `abc`）就当没有 —— 那是"不知道是哪一版"，
+         * 不是"第 0 号"。判定据此走 `Unverified`，不假设一个号。
+         */
+        based_on_serial: parse_header_value(content, "based_on_serial")
+            .and_then(|v| v.trim().parse::<u64>().ok()),
     };
     if lineage.is_empty() {
         return None;

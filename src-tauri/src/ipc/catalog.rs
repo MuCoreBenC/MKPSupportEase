@@ -573,6 +573,11 @@ pub async fn fetch_cloud_preset(
                     ))
                 })?;
             let fetched = ensure_cloud_bytes(&root, file)?;
+            /*
+             * 这一代目录自报的发布身份（`catalogId` + `publishSerial`）。老目录没有 ⇒
+             * `None` ⇒ 血统不写那两行 ⇒ 判定走 `Unverified`。**不猜**成官方线。
+             */
+            let line = runtime::local::CatalogLine::of(&catalog);
 
             /* 云端原件是**内部**数据：它只用来落"本地那份"，绝不进用户世界 */
             let rel = format!("{}/{}", crate::fsx::paths::LOCAL_DIR, file.file_name);
@@ -580,7 +585,13 @@ pub async fn fetch_cloud_preset(
             let created = !target.is_file();
             let (file_name_here, path_here, taken_by, suggested_name) = if created {
                 let text = runtime::delivery::cloud_text(&root, file)?;
-                runtime::local::save_cloud_as_new(&user, file, &text, &file.file_name)?;
+                runtime::local::save_cloud_as_new(
+                    &user,
+                    file,
+                    &text,
+                    &file.file_name,
+                    line.as_ref(),
+                )?;
                 /* ★ 原文镜像：下载**落盘之后**存一份 —— 这份的"最初那样"= 云端当前版
                 落到我盘上那一刻（「恢复默认值」退的就是它） */
                 let _ = runtime::baseline::ensure_origin_copy(&root, &user, &rel);
@@ -593,7 +604,7 @@ pub async fn fetch_cloud_preset(
                 let name = untaken_name(&user, &file.file_name);
                 let text = runtime::delivery::cloud_text(&root, file)?;
                 let dir = crate::fsx::paths::LOCAL_DIR;
-                runtime::local::save_cloud_as_new(&user, file, &text, &name)?;
+                runtime::local::save_cloud_as_new(&user, file, &text, &name, line.as_ref())?;
                 /* 原文镜像同上一支 */
                 let _ =
                     runtime::baseline::ensure_origin_copy(&root, &user, &format!("{dir}/{name}"));

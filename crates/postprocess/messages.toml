@@ -2161,6 +2161,13 @@ text = "{first} —— 入库产物目录里没有这一份，先补齐再构建
 text_en = "{first} — the ingest output folder does not have this copy; fill it in before building the catalog"
 params = ["first"]
 
+["ui.runtime.catalog.382"]
+code = "E_CATALOG_IDENTITY_001"
+text = "目录的发布身份不完整：{id} 与 {serial} 必须同时有或同时没有 —— 这份 catalog 被手工改坏了"
+text_en = "The catalog's release identity is incomplete: {id} and {serial} must both be present or both absent — this catalog was edited by hand"
+params = ["id", "serial"]
+note = "Catalog::parse 的成对校验；不猜一半，也不回填"
+
 ["ui.runtime.delivery.382"]
 text = "下载源里没有 {v1}"
 text_en = "The download source has no {v1}"
@@ -3294,3 +3301,38 @@ text = "源身份账本写不出来"
 text_en = "Failed to write the preset-source ledger"
 params = []
 note = "run/source-ledger.json / run/lineage-source.json 写失败（附加信息，主流程不受影响）"
+
+["ui.workbench.book.500"]
+code = "E_PUBLISH_BOOK_001"
+text = "发布账本读不出来"
+text_en = "Cannot read the publish ledger"
+params = []
+note = "presets/delivery/publish-serial.json 读盘失败（发布序号是发布线身份的一半，不能当没有）"
+
+["ui.workbench.book.501"]
+code = "E_PUBLISH_BOOK_002"
+text = "发布账本解析不了 —— 它被手工改坏了"
+text_en = "The publish ledger cannot be parsed — it was edited by hand"
+params = []
+note = "坏 JSON；不许静默当 0（当 0 的后果是下一次发布复用已经发出去过的号）"
+
+["ui.workbench.book.502"]
+code = "E_PUBLISH_BOOK_003"
+text = "发布账本的格式代次认不了：文件是 {v1}，程序认 {v2}"
+text_en = "Unsupported publish-ledger format: the file is {v1}, this build reads {v2}"
+params = ["v1", "v2"]
+note = "与 source / catalog / manifest 同一条：加字段不升号、改语义才升"
+
+["ui.workbench.book.503"]
+code = "E_PUBLISH_BOOK_004"
+text = "发布账本没有发布线身份 —— 它说不清这些序号属于哪条线"
+text_en = "The publish ledger has no release-line identity — it cannot say which line these serials belong to"
+params = []
+note = "catalogId 为空；不许回填成官方线"
+
+["ui.workbench.book.504"]
+code = "E_PUBLISH_BOOK_005"
+text = "发布账本写不出来"
+text_en = "Cannot write the publish ledger"
+params = []
+note = "序列化失败（正常不会发生；发生说明结构被改坏了）"

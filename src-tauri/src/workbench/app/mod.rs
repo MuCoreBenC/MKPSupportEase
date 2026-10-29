@@ -90,6 +90,9 @@ pub mod machines;
 /// 代码托管平台出口（第三刀下半）：GitHub / Gitee 的 PR/MR + CI，**自持凭据**
 /// （被批准的第二个网络出口，见模块文档）
 pub mod platform;
+/// **发布账本**：`presets/delivery/publish-serial.json` —— 发布线身份 + 单调序号。
+/// 只有正式发布事务能推进它；生成 / 预演只沿用（见该文件头）
+pub mod publish_book;
 /// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
@@ -107,6 +110,159 @@ pub mod render;
 /// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
 /// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
 pub mod sandbox;
+
+/// **发布身份的故障注入判据**（2026-10-28）：中断 / 重发 / 回滚 / 换线 / 坏账本。
+/// 见该文件头那张表 —— 咬的就是"出错时也必须说得清"。
+#[cfg(test)]
+mod fault_tests;
+
+/* ---------- CLI 门面（`bin/presets`）---------- */
+
+/// **预设工作流 CLI 的唯一入口**：把内核里那几处自由函数转出来给 `bin/presets`。
+///
+/// 为什么要有这几行（2026-10-28）：`audit_with` / `generate_with` / `preview_with` /
+/// `publish_tx::run` 都是 `pub(super)`（锁纪律：库里只能从 `app` 里调）。CLI 是
+/// `bin/`，在 crate 外面，够不着 —— 于是这里开一扇**只转发、不加逻辑**的门。
+///
+/// ★ 纪律：这一节**不许有业务判断**。谁在这里加一句"应该怎样"，工作台与 CLI 就
+///   开始各说各话了 —— 那正是这一轮要根治的毛病（两套入口必须同一条路）。
+pub use self::audit::{AuditStatus, PublishAudit};
+pub use self::build::{DiffState, GenerateReport, PreviewReport, Scope};
+pub use self::publish_tx::{PublishStage, PublishTarget, TxOptions};
+
+/// 跑发布闸（只读，不写盘）。工作台按钮与 CLI `check` 走的是同一个函数。
+pub fn audit_check(ctx: &Ctx) -> Result<PublishAudit, AppError> {
+    self::audit::audit_with(ctx)
+}
+
+/// 跑生成器（`Scope::Stale` / `All`）。**不推进发布序号**（序号在 `publish_into`）。
+pub fn generate(ctx: &mut Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
+    self::build::generate_with(ctx, scope)
+}
+
+/// 生成**预演**（只算不写）。`diff` 用它 —— 于是"会变什么"与真生成算的是同一批。
+pub fn generate_preview(ctx: &Ctx) -> Result<PreviewReport, AppError> {
+    self::build::preview_with(ctx, &Scope::Stale)
+}
+
+/// 发布事务（工作台那颗按钮的内核）。
+pub fn publish_tx(
+    ctx: &mut Ctx,
+    opts: &TxOptions,
+    target: Option<&PublishTarget>,
+    hosting: Option<&dyn self::platform::Hosting>,
+    repo_root: Option<std::path::PathBuf>,
+) -> Result<self::publish_tx::PublishTxReport, AppError> {
+    self::publish_tx::run(ctx, opts, target, hosting, repo_root)
+}
+
+/// 解析发布账户配置（没配 ⇒ `None`，退化成纯本地推送）。与工作台同一条。
+///
+/// 配置住 `<appDataDir>/publish-account.json`（+ 凭据文件）；读不出来 / 不完整一律
+/// 当"没配"（不是错误）—— 那时发布只走本地那一半，如实说"没建 PR"。
+pub fn resolve_target_opt(_ctx: &Ctx) -> Result<Option<PublishTarget>, AppError> {
+    /*
+     * CLI 里没有 `AppHandle`，配置根从**环境**取（与工作台同一条规则：
+     * 应用数据目录）。取不到 = 这台机器上没配发布账户 ⇒ 只走本地那一半。
+     */
+    let Some(root) = crate::fsx::paths::internal_root_headless() else {
+        return Ok(None);
+    };
+    Ok(self::publish_tx::resolve_target(&root, None).ok())
+}
+
+/// 按发布目标建平台出口（没配 / 平台不认识 ⇒ `None`）。
+pub fn hosting_for(
+    target: &Option<PublishTarget>,
+) -> Result<Option<Box<dyn self::platform::Hosting>>, AppError> {
+    let Some(t) = target else { return Ok(None) };
+    Ok(match t.platform.as_str() {
+        "github" => Some(Box::new(self::platform::github::GitHub::new(
+            t.token.clone(),
+        ))),
+        "gitee" => Some(Box::new(self::platform::gitee::Gitee::new(t.token.clone()))),
+        _ => None,
+    })
+}
+
+/// 交付根的**一致性体检**结论（CLI `verify` 用）。
+#[derive(Debug, Clone, Default)]
+pub struct VerifyReport {
+    /// 核对了多少份文件（catalog 的 `files` 条数）
+    pub files_checked: usize,
+    /// 一处问题一句话（空 = 全一致）
+    pub problems: Vec<String>,
+    pub serial: Option<u64>,
+    pub catalog_id: Option<String>,
+}
+
+/// **核对交付根**：catalog 能不能解析、登记的文件在不在、字节对不对、manifest 与账本
+/// 跟目录是不是同一代。**只读**（一个字节都不写）。
+///
+/// 与发布事务里的 `finalize_consistency` 不同：那个是"刚定稿的这一刻"的严格核对；
+/// 这个是**随时可以问一次**的体检（人和 AI 在改完 TOML 之后想知道"盘上还自洽吗"）。
+pub fn verify_delivery(
+    delivery_root: &std::path::Path,
+    publish_root: &std::path::Path,
+) -> Result<VerifyReport, AppError> {
+    let mut report = VerifyReport::default();
+    let catalog_path = delivery_root.join(self::delivery::NEW_CATALOG_FILE);
+    let bytes = std::fs::read(&catalog_path).map_err(|e| {
+        AppError::not_found(format!("{} 读不出来", catalog_path.display()))
+            .with_detail(e.to_string())
+    })?;
+    let catalog = crate::runtime::Catalog::parse(&bytes)?;
+    report.files_checked = catalog.files.len();
+    report.serial = catalog.publish_serial;
+    report.catalog_id = catalog.catalog_id.clone();
+
+    /* ① 目录登记的每一份，在发布根下真有、字节对得上 */
+    for f in &catalog.files {
+        let on_disk = publish_root.join(&f.path);
+        let Ok(raw) = std::fs::read(&on_disk) else {
+            report.problems.push(format!(
+                "目录登记了 {}，发布根里没有这份文件（{}）",
+                f.path,
+                on_disk.display()
+            ));
+            continue;
+        };
+        if let Some(want) = f.expected_sha() {
+            use sha2::Digest as _;
+            let got = crate::runtime::catalog::hex(&sha2::Sha256::digest(&raw));
+            if !want.eq_ignore_ascii_case(&got) {
+                report
+                    .problems
+                    .push(format!("{} 的字节与目录登记的 SHA 不一致", f.path));
+            }
+        }
+    }
+
+    /* ② 账本与目录是不是同一代（两个都说得出身份时才比） */
+    match publish_book::load(delivery_root)? {
+        None => {
+            if catalog.publish_serial.is_some() {
+                report
+                    .problems
+                    .push("目录有发布序号，但交付根里没有发布账本 —— 生成 / 发布不同源".to_owned());
+            }
+        }
+        Some(book) => {
+            if !book.matches_catalog(&bytes) {
+                report.problems.push(format!(
+                    "账本说的是第 {} 号（{}），与盘上这份目录不是同一代",
+                    book.serial, book.revision
+                ));
+            }
+            if book.catalog_id != catalog.catalog_id.clone().unwrap_or_default() {
+                report
+                    .problems
+                    .push("账本的发布线与目录的发布线不一致".to_owned());
+            }
+        }
+    }
+    Ok(report)
+}
 pub mod storage;
 /// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
 /// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果

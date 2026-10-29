@@ -152,6 +152,178 @@ pub struct PublishTxReport {
     /// 逐份明细（只含新增 / 修改 / 删除那几份；未变化的不列）
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub changed_files: Vec<FileChange>,
+    /// **这一代是这条发布线的第几号**（`catalog.publishSerial` 的值）。
+    /// 审计没过 / 预演时可能还没分配 —— 那就如实省掉，不编一个 0
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub publish_serial: Option<u64>,
+    /// 这条发布线是谁（`catalogId`）。同上，没分配就省掉
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub catalog_id: Option<String>,
+}
+
+impl PublishTxReport {
+    /// 推出去之后接着建 PR / MR（推送后的那一段，两处共用：正常路 + 「只补 push」的恢复路）。
+    fn finish_review(
+        mut self,
+        opts: &TxOptions,
+        hosting: Option<&dyn Hosting>,
+        target: Option<&PublishTarget>,
+        generated: usize,
+    ) -> Self {
+        if !opts.open_review {
+            return self;
+        }
+        let (Some(hosting), Some(t), Some(branch)) = (hosting, target, self.branch.clone()) else {
+            self.summary
+                .push_str("未配置发布账户 —— 已推送，但没建 PR。");
+            return self;
+        };
+        let spec = t.review_spec(
+            branch.clone(),
+            opts.base_or_main().to_owned(),
+            self.files,
+            generated,
+        );
+        // ★ 平台不许同一个 head→base 开两份 PR：在合并之前再点一次「发布」，`create_review`
+        //   会落 422（"这一支已经有一份"）。那不是失败 —— 产物已经推上去了，人只是又发了一次；
+        //   **回读那一份开着的 PR** 继续（发布要可重跑，别把人堵在死路上）。
+        let mut reused_why: Option<String> = None;
+        let review = match hosting.create_review(&spec) {
+            Ok(r) => r,
+            Err(e) => {
+                match hosting.find_open_review(&t.owner, &t.repo, &branch, opts.base_or_main()) {
+                    Ok(Some(found)) => {
+                        reused_why = Some(e.message.clone());
+                        found
+                    }
+                    Ok(None) => {
+                        self.summary
+                            .push_str(&format!("推送成功，但建 PR 失败：{e}"));
+                        return self;
+                    }
+                    Err(_) => {
+                        self.summary
+                            .push_str(&format!("推送成功，但建 PR 失败：{e}"));
+                        return self;
+                    }
+                }
+            }
+        };
+        self.stage = PublishStage::ReviewOpened;
+        match &reused_why {
+            None => self
+                .summary
+                .push_str(&format!("已建 PR !{}。", review.number)),
+            Some(why) => self.summary.push_str(&format!(
+                "PR !{} 这一支上已经开着 —— 回读那一份，没有重复建（平台原话：{why}）。",
+                review.number
+            )),
+        }
+        self.review = Some(review);
+        self
+    }
+}
+
+/// **推一次**（发布账户配置走凭据；没配置就普通 push）。
+///
+/// 抽出来是因为它有**两个调用点**：正常发布路，与「上笔 commit 没推出去」的恢复路。
+/// 两条路必须一模一样地推 —— 否则恢复路的失败会变成另一种语义。
+fn push_once(
+    git: &super::git::Git,
+    branch: &str,
+    target: Option<&PublishTarget>,
+) -> Result<(), AppError> {
+    match target {
+        Some(t) => {
+            /*
+             * ★ 推送前先**校验 remote 与配置一致**：当前工作目录必须就是配置的那个仓库。
+             *   不一致 = 用户在错的目录里点了发布 —— 如实拒绝，不推错地方。
+             */
+            if !git.remote_matches(&t.repository_url)? {
+                return Err(AppError::invalid_argument(
+                    "当前仓库的远端地址和「发布账户」里配置的不一致，先确认一下发布目标",
+                )
+                .with_detail(format!("配置：{}", t.repository_url)));
+            }
+            git.push_authenticated(branch, &t.username, &t.token)
+                .map(|_| ())
+        }
+        None => git.push(branch).map(|_| ()),
+    }
+}
+
+/// **预演**：说清"真发会写出什么、第几号"，但**一个字节都不写**。
+///
+/// 只读三处：账本（[`publish_book::inspect`] 已在调用方读过）、盘上 catalog、
+/// 内存里那份 `Book`。`plan_publish` 用 ==**生成前**== 的 delivery 算一遍 ——
+/// 所以它给出的差异是"和现在盘上相比"，与真发布前的样子一致；不 generate，
+/// 也就不存在"预演顺手把产物刷新了"。
+fn plan_only(
+    ctx: &mut Ctx,
+    root: &std::path::Path,
+    book_state: super::publish_book::State,
+    passed: usize,
+    failed: usize,
+    _opts: &TxOptions,
+) -> Result<PublishTxReport, AppError> {
+    let (c, d, _) = state(ctx)?;
+    let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
+    let asset_root = root
+        .parent()
+        .map(|p| p.join("assets"))
+        .unwrap_or_else(|| root.to_path_buf());
+
+    // **不分配新号**：预演只报"下一次会拿几号"
+    let (line, next_serial) = match &book_state {
+        super::publish_book::State::NoBook => (super::publish_book::DEFAULT_LINE.to_owned(), 1u64),
+        super::publish_book::State::InSync(b) | super::publish_book::State::Stale(b) => {
+            let on_disk = super::delivery::PublishIdentity::inherit_from(root).serial;
+            (b.catalog_id.clone(), b.next_after(on_disk))
+        }
+    };
+
+    let identity = super::delivery::PublishIdentity::new_line(line.clone(), next_serial);
+    let meta = super::delivery::PublishMeta {
+        stamp: crate::workbench::clock::now_iso8601(),
+        channel: "stable".to_owned(),
+        version: String::new(),
+        identity: Some(identity.clone()),
+        /* 预演不落地、也不碰账本 —— 这一格用不上，照实留空 */
+        commit_sha: None,
+    };
+    // 只算不写：`plan_publish` 的返回值我们不调 `.write()`
+    let plan = super::delivery::plan_publish(root, &asset_root, &book, &meta)?;
+    let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
+    let after: std::collections::BTreeMap<String, String> = plan
+        .catalog
+        .files
+        .iter()
+        .filter_map(|f| f.sha256.clone().map(|s| (f.path.clone(), s)))
+        .collect();
+    let (changes, changed_files) = diff_fingerprints(&before, &after);
+
+    Ok(PublishTxReport {
+        stage: PublishStage::Generated,
+        audit_passed: passed,
+        audit_failed: failed,
+        generated: 0,
+        unchanged: 0,
+        committed_paths: Vec::new(),
+        review: None,
+        branch: None,
+        commit: None,
+        files: plan.files,
+        summary: format!(
+            "预演：这次会写成第 {next_serial} 号（{}）。变化：新增 {} · 修改 {} · 删除 {} · 未变化 {}。（演练：未写入任何文件）",
+            line, changes.added, changes.changed, changes.removed, changes.unchanged
+        ),
+        published_at: Some(meta.stamp),
+        revision: Some(plan.revision.clone()),
+        changes: Some(changes),
+        changed_files,
+        publish_serial: Some(next_serial),
+        catalog_id: Some(line),
+    })
 }
 
 /// 事务的开关：控制"走到哪一步停"。
@@ -277,6 +449,8 @@ pub fn run(
             revision: None,
             changes: None,
             changed_files: Vec::new(),
+            publish_serial: None,
+            catalog_id: None,
         });
     }
 
@@ -294,6 +468,22 @@ pub fn run(
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io("建不出发布目录").with_detail(format!("{}：{e}", root.display()))
     })?;
+    let book_state = super::publish_book::inspect(&root, super::delivery::NEW_CATALOG_FILE)?;
+
+    /*
+     * ★★ **预演在这里分流，早于任何写盘**（2026-10-28，作者明确要求）。
+     *
+     * 以前 dry-run 的判断在 `publish_into` **之后** —— 于是"只想看看"的一次预演
+     * 会把交付目录真的改写一遍（内容、catalog、账本全落），那就不叫预演了。
+     *
+     * 现在：预演走**只读**的三步 —— ① 读账本 ② 读盘上 catalog ③ 用生成前的目录
+     * 算一遍"真发会写出什么"。**不 generate、不 publish、不分配序号**，
+     * 盘上一个字节都不动（判据见 `fault_tests::f9`）。
+     */
+    if opts.dry_run {
+        return plan_only(ctx, &root, book_state, passed, failed, opts);
+    }
+
     let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
     let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
 
@@ -304,11 +494,57 @@ pub fn run(
     std::fs::create_dir_all(&asset_root).map_err(|e| {
         AppError::io("建不出资产目录").with_detail(format!("{}：{e}", asset_root.display()))
     })?;
+
+    /*
+     * ★ **分配这一代的发布序号**（唯一分配点，`publish_book` 文件头有完整规则）。
+     *
+     * - 账本在 = 这条线发过；下一号 = `max(账本, 盘上 catalog) + 1`
+     *   （盘上更大说明上次写到 catalog 就断了，那一号已经露出去了，绝不复用）；
+     * - 账本不在 = 这条线第一次发布，`1` 号。
+     *
+     * ★ 生成**不走到这里**（`generate_with` 沿用盘上身份，见 `delivery::write_catalog_json`），
+     * 所以"改了 TOML 又生成一遍"不会白白吃掉一个号。
+     */
+    let identity = match &book_state {
+        super::publish_book::State::NoBook => {
+            super::delivery::PublishIdentity::new_line(super::publish_book::DEFAULT_LINE, 1)
+        }
+        super::publish_book::State::InSync(b) | super::publish_book::State::Stale(b) => {
+            let on_disk = super::delivery::PublishIdentity::inherit_from(&root).serial;
+            super::delivery::PublishIdentity::new_line(b.catalog_id.clone(), b.next_after(on_disk))
+        }
+    };
+
+    /*
+     * ⓪ **发布身份闸**：账本与盘上 catalog 说不清是同一条线 = 拒发。
+     *
+     * 这一条专门拦"有人手工改过账本 / 并行发了两次 / 换了线"：
+     * 序号一旦错代，客户端就再也分不出新旧 —— 那比"没发成"严重得多。
+     */
+    if let (Some(line), Some(disk)) = (&identity.catalog_id, identity.serial) {
+        super::audit::assert_release_identity(&book_state, line, disk)?;
+    }
+
     let meta = super::delivery::PublishMeta {
         stamp: crate::workbench::clock::now_iso8601(),
         channel: "stable".to_owned(),
         version: String::new(),
+        identity: Some(identity.clone()),
+        /*
+         * **上一代**那一代目录落库的提交（只读、不联网）。写在账本里只做事后对账：
+         * 这一代自己的 sha 要 commit 之后才存在，而账本必须与目录同笔提交 ⇒ 只能滞后一代。
+         * 读不出来（没有 git / 第一次发布）就照实留空，不编。
+         */
+        commit_sha: super::git::Git::at_repo_root().last_commit_touching(&format!(
+            "{}/{}",
+            super::delivery::DELIVERY_DIR_REL,
+            super::delivery::NEW_CATALOG_FILE
+        )),
     };
+    /*
+     * ★ **落地**：manifest → catalog → source → 账本，一次跑完，且**全都在下面 stage 之前**。
+     * 于是 stage 一收就是"目录 + 清单 + 账本"同一笔 commit —— 不存在"提交了目录却没提交账本"。
+     */
     let out = super::delivery::publish_into(&root, &asset_root, &book, &meta)?;
 
     // 定稿之后的目录：取它的指纹（回执里显示「这一版是哪一版」）并与生成前逐份比。
@@ -369,13 +605,10 @@ pub fn run(
         revision: Some(delivered.revision.clone()),
         changes: Some(changes),
         changed_files,
+        // 这一代是这条线的第几号 —— 客户端判定"谁新"唯一可比的数
+        publish_serial: Some(identity.serial.unwrap_or(0)),
+        catalog_id: identity.catalog_id.clone(),
     };
-
-    // dry_run：到这里就停（"只想看看会提交什么"）。
-    if opts.dry_run {
-        report.summary.push_str("（演练：未提交）");
-        return Ok(report);
-    }
 
     // ④ 本地 git：白名单 stage → commit → push。
     let git = match repo_root {
@@ -397,6 +630,47 @@ pub fn run(
     let staged = git.stage_allowed(&candidates)?;
     report.committed_paths = staged.clone();
 
+    /*
+     * ★ **"上一笔 commit 还没推出去"的幂等恢复**（2026-10-28）。
+     *
+     * 场景：上次 commit 成功、push 失败（断网 / token 过期 / 远端拒绝）。这时本地 HEAD
+     * 已经带着 `publishSerial = N` 的目录与账本，只是远端还停在 N-1。
+     *
+     * 若照常往下走，会出现两件事都很糟：
+     * - 内容没变 ⇒ `!has_staged()` ⇒ 回"产物无变化"，**账本却已经是 N** —— 用户以为没发成，
+     *   远端却也永远停在 N-1，这一号变成黑洞；
+     * - 内容又改了 ⇒ 分配 N+1，于是 N 这一代永不抵达远端。
+     *
+     * 所以先问一句"HEAD 是不是就是账本那一代"，是的话**直接补 push**：不重新生成、
+     * 不重新分配、不新建 commit —— 就是"把已经做好的那一步推出去"。
+     *
+     * 判据只读盘（见 `publish_book::State::InSync` = `catalogHash` 对得上盘上目录）：
+     * 账本说 N、盘上 catalog 也是 N 且字节一致 ⇒ 这一代完整落地过。
+     */
+    if !git.has_staged()?
+        && matches!(book_state, super::publish_book::State::InSync(_))
+        && report.commit.is_none()
+    {
+        let head_carries_it = git
+            .head_touches(&format!(
+                "{}/{}",
+                super::delivery::DELIVERY_DIR_REL,
+                super::delivery::NEW_CATALOG_FILE
+            ))
+            .unwrap_or(false);
+        if head_carries_it {
+            report.stage = PublishStage::Committed;
+            report.commit = git.head_short().ok();
+            report.summary.push_str(
+                "上一笔提交已经落在本地、只是没推出去 —— 只补一次推送，序号与产物都不动。",
+            );
+            push_once(&git, &branch, target)?;
+            report.stage = PublishStage::Pushed;
+            report.summary.push_str(&format!("已补推送到 `{branch}`。"));
+            return Ok(report.finish_review(opts, hosting, target, gen.written.len()));
+        }
+    }
+
     if !git.has_staged()? {
         // 没有可提交的（产物逐字节没变）—— 不算失败，如实说。
         report.stage = PublishStage::Committed;
@@ -410,25 +684,7 @@ pub fn run(
     report.commit = git.head_short().ok();
     report.stage = PublishStage::Committed;
 
-    /*
-     * 推送：**从发布账户配置取凭据**（SupportEase 自持），Token 经 `http.extraHeader`
-     * 临时喂给 git —— **不进 remote URL、不读用户已有凭据**（详见 `git::push_authenticated`）。
-     *
-     * ★ 推送前先**校验 remote 与配置一致**：当前工作目录必须就是配置的那个仓库。
-     *   不一致 = 用户在错的目录里点了发布 —— 如实拒绝，不推错地方。
-     */
-    match target {
-        Some(t) => {
-            if !git.remote_matches(&t.repository_url)? {
-                return Err(AppError::invalid_argument(
-                    "当前仓库的远端地址和「发布账户」里配置的不一致，先确认一下发布目标",
-                )
-                .with_detail(format!("配置：{}", t.repository_url)));
-            }
-            git.push_authenticated(&branch, &t.username, &t.token)?;
-        }
-        None => git.push(&branch)?,
-    }
+    push_once(&git, &branch, target)?;
     report.stage = PublishStage::Pushed;
     report
         .summary

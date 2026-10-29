@@ -84,14 +84,24 @@ fn write_delivery_catalog(repo: &Path) -> Result<(), Box<dyn std::error::Error>>
 
     let out = delivery_root.join(runtime::source::CATALOG_FILE);
     /*
-     * **保留旧目录的 `publishedAt`**：它是发布事件的戳，不是生成 / 重建的。
-     * 工作台生成也沿用旧戳（见 `delivery::published_at_of`）—— 两边同一口径，
-     * 否则一次 gen-catalog 就把“发布时间”顶成“构建时刻”。
+     * **保留旧目录的三格发布信息**（2026-10-28 起多了发布身份）：
+     *
+     * | 格 | 为什么不能由生成定 |
+     * |---|---|
+     * | `publishedAt` | 发布事件的戳，不是生成 / 重建的 —— 一次 gen-catalog 不许把"发布时间"顶成"构建时刻" |
+     * | `catalogId` | 发布线身份，只有发布账本持有；生成乱写就把线认错了 |
+     * | `publishSerial` | **序号只由正式发布事务 +1**；生成重算目录不是发布事件 |
+     *
+     * 与工作台生成**同一口径**（`delivery::PublishIdentity::inherit_from` +
+     * `published_at_of`），否则同一批输入两边写出的 catalog 会差一代。
      */
-    catalog.published_at = std::fs::read(&out)
-        .ok()
-        .and_then(|b| Catalog::parse(&b).ok())
-        .and_then(|c| c.published_at);
+    if let Ok(bytes) = std::fs::read(&out) {
+        if let Ok(prev) = Catalog::parse(&bytes) {
+            catalog.published_at = prev.published_at;
+            catalog.catalog_id = prev.catalog_id;
+            catalog.publish_serial = prev.publish_serial;
+        }
+    }
     atomic_write(&out, catalog.to_pretty_json()?.as_bytes())?;
     println!(
         "已写出 {}（交付面 catalog，{} 份文件，revision {}，minClient {}）",

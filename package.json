@@ -23,12 +23,13 @@
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
     "dev:test-update": "node scripts/preset-test-server/dev.mjs",
     "release": "node scripts/release.mjs",
-    "publish:presets": "node scripts/publish-presets.mjs",
+    "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",
     "check:channel-args": "node scripts/check-channel-args.mjs",
     "check:release-source": "node scripts/check-release-source.mjs",
     "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
+    "check:artifacts": "node scripts/check-artifact-boundary.mjs",
     "check:i18n": "node scripts/check-i18n.mjs"
   },
   "dependencies": {

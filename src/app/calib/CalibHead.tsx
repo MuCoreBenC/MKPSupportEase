@@ -199,7 +199,7 @@ export function AxisBar({
           <div className={p.axis} key={k} data-changed={changed} data-minor={minor}>
             <dt className={p.axisLabel}>
               {/* 轴名也是热区的一部分：点它一样聚焦（G06-8 的整列可点，作者 10-03 点名要带上首页） */}
-              <label htmlFor={id}>{label}</label>
+              <label htmlFor={id}>{tr(label)}</label>
               <i className={p.dot} data-on={changed} aria-hidden={!changed} />
               {/*
                 原始值跟在标签右侧，不再占值行。

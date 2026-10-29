@@ -4,6 +4,8 @@ import { createRoot } from 'react-dom/client'
 import './styles/tokens.css'
 import './styles/global.css'
 
+import { applyTheme } from './app/state/theme'
+
 /*
  * 入口只做一件事：把该挂的那一棵挂上去。
  *
@@ -29,6 +31,20 @@ const isGuide = new URLSearchParams(window.location.search).get('guide') === '1'
  * `html[data-guide] body { background: none }` 收口。
  */
 if (isGuide) document.documentElement.dataset.guide = '1'
+
+/*
+ * ★★ 首帧主题（2026-10-28，作者截图：深色系统下"刚打开先白一下"）。
+ *
+ * `appState` 的 theme 格要等一次 IPC，App 自己还要先 `await import()` —— 这之前
+ * `<html>` 上没有 `data-theme`，`:root` 是浅色 token，于是骨架 / 顶栏已经是深色，
+ * 底色却是浅的（`index.html` 那具 boot 骨架只认系统深浅，React 一挂上来就换成
+ * `global.css` 的 token 底）。
+ *
+ * 先按**系统**落一次，能把这段白帧抹掉；显式选「浅色 / 深色」的用户会在这里先按
+ * 系统走一帧、随后被 appState 覆盖 —— 一帧偏差比整扇窗白闪好。判据仍只有
+ * `theme.ts` 的 `resolveDark` 那一份，这里不另写。
+ */
+applyTheme(null)
 
 void (async () => {
   if (isGuide) {

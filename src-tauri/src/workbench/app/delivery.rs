@@ -95,6 +95,13 @@ use crate::workbench::presets::{Asset, AssetKind};
 /// 这里 re-export 保持原引用不断。
 pub use crate::workbench::paths::{MKP_DIR, MKP_PRESETS_DIR};
 /// 目录类 JSON 的子目录
+/// **交付根相对发布根的位置**（`presets/delivery`）。
+///
+/// 单独具名是因为它不只用于"拼路径"：git 那一层要按它判断
+/// 「HEAD 这笔动过交付目录没有」（幂等恢复）与「上一代是哪一笔」（账本 `commit_sha`）。
+/// 两处各写一遍字面量就迟早会有一处漏改。
+pub const DELIVERY_DIR_REL: &str = "presets/delivery";
+
 pub const CONTENT_DIR: &str = "content";
 /// manifest 的固定文件名
 pub const MANIFEST_FILE: &str = "manifest.json";
@@ -549,6 +556,52 @@ pub fn write_content(
     })
 }
 
+/// **只读核对**：[`write_content`] 该写的东西现在都还在不在（一个字节都不写）。
+///
+/// 拆出 plan/commit 之后它的位置变了（2026-10-28）：`publish_into` 不再自己往
+/// `delivery/` 里拷资产 —— 那是"生成"那一刀的事。发布只负责核对"该在的都在"，
+/// 少一份就当场报错（缺的那份不能由发布悄悄补上：补出来的东西没人审过）。
+fn check_content(delivery_root: &Path, book: &Book<'_>) -> Result<DistContent, AppError> {
+    let mut missing: Vec<String> = Vec::new();
+    for (rel, _) in content_json_texts(book)? {
+        if !delivery_root.join(rel).is_file() {
+            missing.push(rel.to_owned());
+        }
+    }
+    for a in &referenced_assets(book) {
+        if crate::runtime::catalog::dest_of_asset(a).is_none() {
+            continue;
+        }
+        /*
+         * A 类资产在发布根（`presets/assets/`）原地交付，不在 `delivery/` 下 ——
+         * 与 `write_content` 的体检同一口径（`dest_of_asset` 给出落点）。
+         */
+        let Some(rel) = crate::runtime::catalog::dest_of_asset(a) else {
+            continue;
+        };
+        let Some(publish_root) = delivery_root.parent() else {
+            continue;
+        };
+        if !publish_root.join(&rel).is_file() {
+            missing.push(rel);
+        }
+    }
+    if !missing.is_empty() {
+        return Err(
+            AppError::not_found(format!("{} 份交付内容不在盘上", missing.len())).with_detail(
+                format!(
+                    "{}。先在生成视角里生成，再发布 —— 发布不替你补内容",
+                    missing.join("、")
+                ),
+            ),
+        );
+    }
+    Ok(DistContent {
+        content_files: 3,
+        assets_checked: referenced_assets(book).len(),
+    })
+}
+
 /* ---------- 发布（b05 Task 13） ---------- */
 
 /// **`delivery/` 里该有什么**（13.1）：本次发布应当存在于交付目录的全部文件，
@@ -571,6 +624,12 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
     set.insert(SOURCE_FILE.to_owned());
+    /*
+     * ★ **发布账本也住交付根**（2026-10-28，`presets/delivery/publish-serial.json`）：
+     * 序号与发布线身份。不把它算进应有集合，第二次发布就会被自己的残留扫描拦下
+     * （"交付目录里有 1 个不在本次交付集合内的残留文件"）—— 而它是**应该在那**的。
+     */
+    set.insert(super::publish_book::BOOK_FILE.to_owned());
     // ★ `release.json` 也住交付根（M6，2026-10-05 起）：它是**软件发布链**的信息源
     //   （客户端按 Source Manifest 的 `release` 声明取它），与预设产物同目录、不同链。
     //   不把它算进应有集合，发布闸的残留审计会永远拦着预设发布 —— 而且点「清理残留」
@@ -1088,6 +1147,18 @@ pub struct PublishMeta {
     pub stamp: String,
     pub channel: String,
     pub version: String,
+    /// **这一代分到的发布身份**（`catalogId` + `publishSerial`）。
+    ///
+    /// `None` = 沿用盘上那一份（"重算目录"这类非发布场景）；正式发布由
+    /// `publish_tx` 从账本取了号再填进来。传进来的是**已经分配好的**号，
+    /// 交付层不自己数数 —— 分配只有一处（见 `publish_book` 文件头）。
+    pub identity: Option<PublishIdentity>,
+    /// **上一代**目录落库的那一笔提交（`git log -1 -- presets/delivery/catalog.json`）。
+    ///
+    /// 只写进账本、只做事后对账 —— 幂等恢复**不读它**（读 `head_touches` + `InSync`），
+    /// 所以它滞后一代、缺失、甚至写错，都不会让发布判据误判。
+    /// `None` = 第一次发布 / 读不出 git（都照实留空，不编一个 sha）。
+    pub commit_sha: Option<String>,
 }
 
 /// 一次发布的产出计数
@@ -1120,6 +1191,94 @@ pub fn publish_into(
     book: &Book<'_>,
     meta: &PublishMeta,
 ) -> Result<PublishOutcome, AppError> {
+    let plan = plan_publish(delivery_root, asset_root, book, meta)?;
+    plan.write(delivery_root)
+}
+
+/// **一次发布要落地的东西**（[`plan_publish`] 算出来、[`PublishPlan::write`] 写下去）。
+///
+/// 拆这两半是为了两件必须分开的事（作者 2026-10-28）：
+///
+/// - **预演**（`publish --dry-run` / 工作台「预演」）要能说出"这次会发什么、第几号"，
+///   却**一个字节都不许写** —— 所以它只走到 `plan_publish` 就返回；
+/// - **落地**必须是"先全算完、再一次性写"，不能算到一半写一半（那是发布目录与账本
+///   各说一代的来源）。
+#[derive(Debug, Clone)]
+pub struct PublishPlan {
+    /// 这一代的目录（已带 `catalogId` / `publishSerial` / `publishedAt`）。
+    pub catalog: crate::runtime::catalog::Catalog,
+    /// 这一代的清单（`manifest.json`）。
+    pub manifest: serde_json::Value,
+    /// 这一代分到的发布身份 —— 账本按它写。
+    pub identity: PublishIdentity,
+    /// 这次复制/核对过的资产条数。
+    pub assets_copied: usize,
+    /// 这一代有几份预设产物。
+    pub presets: usize,
+    /// 发出去几份文件（manifest 的 assets 条数）。
+    pub files: usize,
+    /// 这一代的目录内容指纹（= `catalog.revision` 的快照，方便回执与账本同源取用）。
+    pub revision: String,
+    /// **上一代**（不是这一代）目录落库的那一笔提交 —— 账本只记这个，见
+    /// [`PublishMeta::commit_sha`] 与 `publish_book::Book::commit_sha`。
+    pub commit_sha: Option<String>,
+}
+
+impl PublishPlan {
+    /// **落地**：manifest → catalog → source → 账本，四份都是原子写。
+    ///
+    /// 顺序有讲究（[`crate::workbench::app::publish_book`] 文件头有完整恢复规则）：
+    ///
+    /// - catalog 在账本**之前**：catalog 是权威，账本只做"我发到几号了"的记忆；
+    /// - 账本**最后**：它写成功 = 这一代整代落地。
+    ///
+    /// 但**四份不构成一次原子提交** —— 中途断掉时盘上是"新 catalog + 旧账本"，
+    /// 下次发布靠 [`crate::workbench::app::publish_book::Book::next_after`] 取最大值
+    /// 继续往上编号，不会重号。真正的"同一次提交"由 git 那一层保证：这四份都在
+    /// `presets/delivery/` 下，`STAGE_ALLOWLIST` 会把它们一起加进**同一笔** commit。
+    pub fn write(self, delivery_root: &Path) -> Result<PublishOutcome, AppError> {
+        crate::fsx::atomic::atomic_write_json(&delivery_root.join(MANIFEST_FILE), &self.manifest)?;
+        let text = self.catalog.to_pretty_json()?;
+        crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
+        /* Bootstrap：客户端"云端内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
+        crate::fsx::atomic::atomic_write_json(&delivery_root.join(SOURCE_FILE), &bootstrap_json())?;
+        /* ★ 账本最后写；且**必须在 git stage 之前** —— 这样它与 catalog 进同一笔 commit */
+        if let (Some(line), Some(serial)) = (&self.identity.catalog_id, self.identity.serial) {
+            let ledger = crate::workbench::app::publish_book::Book {
+                serial_schema: crate::workbench::app::publish_book::BOOK_SCHEMA,
+                catalog_id: line.clone(),
+                serial,
+                revision: self.revision.clone(),
+                catalog_hash: crate::workbench::app::publish_book::sha256_hex(text.as_bytes()),
+                /* 上一代的那一笔（滞后一代是设计，见 `Book::commit_sha` 的注释） */
+                commit_sha: self.commit_sha.clone(),
+            };
+            crate::workbench::app::publish_book::save(delivery_root, &ledger)?;
+        }
+        Ok(PublishOutcome {
+            files: self.files,
+            assets_copied: self.assets_copied,
+            presets: self.presets,
+            minimum_client: self.catalog.min_client_version.clone(),
+        })
+    }
+}
+
+/// **算出这一次发布要落地的东西，一个字节都不写。**
+///
+/// `meta.identity` 决定这一代的发布身份（`None` = 沿用盘上那一份，只在
+/// "重算目录"这类非发布场景出现）。预演与真正落地走**同一个**函数 ——
+/// 预演说的就是真发会写的那一代。
+pub fn plan_publish(
+    delivery_root: &Path,
+    asset_root: &Path,
+    book: &Book<'_>,
+    meta: &PublishMeta,
+) -> Result<PublishPlan, AppError> {
+    let identity = meta
+        .identity
+        .clone()
+        .unwrap_or_else(|| PublishIdentity::inherit_from(delivery_root));
     let expected = delivery_expected_set(book);
 
     // 13.4：**先扫残留，再动任何一个字节**。带着残留写新内容，
@@ -1133,7 +1292,14 @@ pub fn publish_into(
         .with_detail(strays.join("、")));
     }
 
-    let content = write_content(delivery_root, asset_root, book)?;
+    /*
+     * ★ 这里**必须**已经由调用方把内容生成好了（`generate_with(Scope::Stale)` 那一刀）。
+     *
+     * 早先 `publish_into` 自己调 `write_content` 往里拷资产；拆成 plan/commit 之后
+     * 它挪到了调用方（只有真落地才允许写盘），所以这里退化成一次只读核对：
+     * 该在的都在不在。少一份就是"生成没跑完"，不该由发布悄悄补。
+     */
+    let content = check_content(delivery_root, book)?;
     let referenced = referenced_assets(book);
 
     let mut assets: Vec<DistAsset> = Vec::new();
@@ -1210,6 +1376,18 @@ pub fn publish_into(
         book.presets,
         &delivery_root.join(MKP_PRESETS_DIR),
     );
+
+    /*
+     * ★ **发布身份在这一刻盖章**（2026-10-28）：`catalogId` + `publishSerial` 进了
+     * `new_catalog` 之后，下面每一条核对、以及最后写出来的 catalog.json 都带着它。
+     *
+     * 与之配套的一条铁律：**它与 manifest / 账本进的是同一笔 commit**（都在
+     * `presets/delivery/` 下，`STAGE_ALLOWLIST` 一次 stage 全收），所以"目录说 43 号、
+     * 账本说 42 号"这种半截状态要么根本没提交，要么被 `publish/identity` 闸拦住。
+     */
+    new_catalog.catalog_id = identity.catalog_id.clone();
+    new_catalog.publish_serial = identity.serial;
+    new_catalog.published_at = Some(meta.stamp.clone());
 
     /*
      * **最低客户端版本只有一个来源**：结构规则表（`presets/structure-signatures.toml`）
@@ -1341,22 +1519,22 @@ pub fn publish_into(
         }
     }
 
-    // 清单、目录与 Bootstrap 收尾写（都过了核对才落）；`fsx::atomic` 是仓库唯一的写盘出口
-    crate::fsx::atomic::atomic_write_json(&delivery_root.join(MANIFEST_FILE), &manifest)?;
     /*
-     * 发布时刻在这里盖：与 manifest 的 `updated` 是**同一个戳**（`meta.stamp`）——
-     * 一次发布事件只有一个时间，目录与清单不许各说一个。客户端把它显示在
-     * 云端表的「时间」列（`catalog.publishedAt` → 这次发布的时刻）。
+     * **到此为止，一个字节都还没写** —— 全部核对通过才组装成 [`PublishPlan`]，
+     * 由调用方决定落盘（[`PublishPlan::write`]）还是只报给用户看（预演）。
+     *
+     * 发布时刻已在上面与 manifest 的 `updated` 用**同一个戳**盖进 `new_catalog`
+     * （`meta.stamp`）—— 一次发布事件只有一个时间，目录与清单不许各说一个。
      */
-    write_catalog_json(delivery_root, book, Some(&meta.stamp))?;
-    /* Bootstrap：客户端"云端内置地址"指向的就是它（`resolve_source` 解析它拿两个地址） */
-    crate::fsx::atomic::atomic_write_json(&delivery_root.join(SOURCE_FILE), &bootstrap_json())?;
-
-    Ok(PublishOutcome {
-        files: assets.len(),
+    Ok(PublishPlan {
+        revision: new_catalog.revision.clone(),
+        manifest,
+        identity,
+        catalog: new_catalog,
         assets_copied: content.assets_checked,
         presets: presets_count,
-        minimum_client: new_catalog.min_client_version.clone(),
+        files: assets.len(),
+        commit_sha: meta.commit_sha.clone(),
     })
 }
 
@@ -1380,12 +1558,17 @@ pub fn publish_into(
 /// 目录里的资产条目**按源字节算 SHA**（[`Catalog::build_from_presets_lenient`] 的
 /// 口径）—— 所以调用方要先把引用资产补进交付根（`write_content`），否则就是
 /// 「目录登记了，文件不在」。
+///
+/// ★ **发布身份（`catalogId` / `publishSerial`）在这里一律沿用盘上那一份**
+/// （2026-10-28）：生成重算目录**不是发布事件**，序号与发布线一分不动。
+/// 只有 [`publish_into`] 才会带着新的 `PublishIdentity` 覆盖它。
 pub fn write_catalog_json(
     delivery_root: &Path,
     book: &Book<'_>,
     published_at: Option<&str>,
 ) -> Result<usize, AppError> {
-    let catalog = built_catalog(delivery_root, book, published_at)?;
+    let identity = PublishIdentity::inherit_from(delivery_root);
+    let catalog = built_catalog(delivery_root, book, published_at, &identity)?;
     let count = catalog.files.len();
     let text = catalog.to_pretty_json()?;
     crate::fsx::atomic::atomic_write(&delivery_root.join(NEW_CATALOG_FILE), text.as_bytes())?;
@@ -1402,6 +1585,42 @@ pub fn published_at_of(delivery_root: &Path) -> Option<String> {
         .published_at
 }
 
+/// **目录里的发布身份**（`catalogId` + `publishSerial`）。
+///
+/// 三个来源，按优先级：发布事务分配 ⇒ 盘上那份沿用 ⇒ 都没有（`None` = 不知道）。
+/// 「谁分配」只有一处（[`publish_into`]），这里是它的传递载体。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PublishIdentity {
+    pub catalog_id: Option<String>,
+    pub serial: Option<u64>,
+}
+
+impl PublishIdentity {
+    /// **沿用盘上那一份**（生成 / 重算目录用）：发布重心算目录不是发布事件。
+    ///
+    /// 读不出来 = 不知道（两格都 `None`），不猜一个 —— 与 `publishedAt` 同一套保守口径。
+    pub fn inherit_from(delivery_root: &Path) -> Self {
+        let Ok(raw) = std::fs::read(delivery_root.join(NEW_CATALOG_FILE)) else {
+            return Self::default();
+        };
+        let Ok(catalog) = crate::runtime::catalog::Catalog::parse(&raw) else {
+            return Self::default();
+        };
+        Self {
+            catalog_id: catalog.catalog_id.clone(),
+            serial: catalog.publish_serial,
+        }
+    }
+
+    /// 一个正式发布事务分到的那一代。
+    pub fn new_line(catalog_id: impl Into<String>, serial: u64) -> Self {
+        Self {
+            catalog_id: Some(catalog_id.into()),
+            serial: Some(serial),
+        }
+    }
+}
+
 /// **这一代要写出的目录**（纯函数，不落盘）。
 ///
 /// ★ 写盘（[`write_catalog_json`]）与预演（生成前确认）共用这一处构造 ——
@@ -1411,6 +1630,7 @@ pub fn built_catalog(
     delivery_root: &Path,
     book: &Book<'_>,
     published_at: Option<&str>,
+    identity: &PublishIdentity,
 ) -> Result<crate::runtime::catalog::Catalog, AppError> {
     let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
         book.presets,
@@ -1423,6 +1643,12 @@ pub fn built_catalog(
         catalog.apply_min_client(&rules);
     }
     catalog.published_at = published_at.map(str::to_owned);
+    /*
+     * **发布身份三格同生同死**（与 `Catalog::parse` 的校验同一口径）：
+     * 只有 ID 没有序号（或反过来）的目录过不了解析，也就不该被写出来。
+     */
+    catalog.catalog_id = identity.catalog_id.clone();
+    catalog.publish_serial = identity.serial;
     Ok(catalog)
 }
 
@@ -2173,9 +2399,10 @@ mod tests {
         let expected = delivery_expected_set(&book);
         assert_eq!(
             expected.len(),
-            10,
+            11,
             "content 3 + manifest 1 + catalog.json 1 + source.json 1 + **release.json 1（M6 起\
-             住交付根）** + mkp 产物 3 = 10（A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
+             住交付根）** + **publish-serial.json 1（2026-10-28 起发布账本也住交付根）**\
+             + mkp 产物 3 = 11（A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
         );
         assert!(expected.contains("mkp/presets/A1-standard.toml"));
         assert!(
@@ -2221,6 +2448,8 @@ mod tests {
             stamp: "2026-09-24T00:00:00Z".to_owned(),
             channel: "stable".to_owned(),
             version: String::new(),
+            identity: Some(PublishIdentity::new_line("support-ease", 1)),
+            commit_sha: None,
         };
         let err = publish_into(&delivery, asset_root.path(), &book, &meta)
             .expect_err("有残留必须中止发布");
@@ -2251,9 +2480,19 @@ mod tests {
 
         // **重发成功**：manifest v3、无 bundles 字段（第二份套餐列表删掉了）、
         // 条目 = mkp 3 + 资产 3（可达 4 条里 image 类不进）
+        //
+        // 先补 `write_content`：`content/` 是生成的产物，`publish_into` 只核对不补
+        // （2026-10-28 plan/commit 拆分后 —— 发布不再私下往交付根里拷东西）
+        write_content(&delivery, asset_root.path(), &book).unwrap();
         let out = publish_into(&delivery, asset_root.path(), &book, &meta).expect("发布");
         assert_eq!(out.presets, 3);
-        assert_eq!(out.assets_copied, 3);
+        /*
+         * `assets_copied` 是**引用可达且登记**的资产条数（体检口径，是否真复制进
+         * delivery 是另一回事 —— A 类原地交付）。拆成 plan/commit 之后这个数由
+         * `check_content` 给，取的是引用集总数（**4**，含 image 类那条）；
+         * 进交付/进 catalog 的仍是 3 条（下面 `files` = 3 预设 + 3 资产）。
+         */
+        assert_eq!(out.assets_copied, 4);
         assert_eq!(out.files, 6);
 
         let manifest_text = std::fs::read_to_string(delivery.join("manifest.json")).unwrap();
@@ -2340,6 +2579,7 @@ mod tests {
                 rel != MANIFEST_FILE
                     && rel != NEW_CATALOG_FILE
                     && rel != SOURCE_FILE
+                    && rel != crate::workbench::app::publish_book::BOOK_FILE
                     && !CONTENT_FILES.contains(&rel.as_str())
             })
             .collect();
@@ -2394,11 +2634,12 @@ mod tests {
 
         let expected = delivery_expected_set(&book);
         // 反空转锚点（2026-10-04 改口径后）：content 3 + manifest 1 + catalog.json 1
-        // + source.json 1 + **release.json 1（M6 起软件发布信息也住交付根）** + mkp 9
-        // （五台机型全部有套餐）= 16 —— **A 类资产不在 delivery 面**
+        // + source.json 1 + **release.json 1（M6 起软件发布信息也住交付根）**
+        // + **publish-serial.json 1（2026-10-28 起发布账本也住交付根）** + mkp 9
+        // （五台机型全部有套餐）= 17 —— **A 类资产不在 delivery 面**
         assert_eq!(
             expected.len(),
-            16,
+            17,
             "delivery 面条数变了 —— 说清为什么（裁决 C/甲后 A 类资产原地交付，不再进 delivery）"
         );
         assert!(

@@ -1939,7 +1939,30 @@ export default function PageReport() {
         ) : rows === null ? (
           <p className={s.empty}>{tr('report.empty.loading')}</p>
         ) : rows.length === 0 ? (
-          <p className={s.empty}>{tr('report.empty.none')}</p>
+          /*
+           * 空状态（2026-10-28 作者：「报告页面空着的时候不好看」）：
+           * 原来是一条虚线框 + 一句长句，下面整片空 —— 改成**居中**的图形 + 标题 + 说明，
+           * 视线落在页面中间，而不是贴着顶栏往下读一句就没了。
+           */
+          <div className={s.emptyState}>
+            <svg
+              className={s.emptyArt}
+              viewBox="0 0 48 48"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="9" y="6.5" width="30" height="35" rx="4.5" />
+              <path d="M16.5 16.5h15M16.5 23.5h15M16.5 30.5h9" />
+              <circle cx="35" cy="35" r="6.5" />
+              <path d="M35 31.8V35l2.2 1.6" />
+            </svg>
+            <p className={s.emptyTitle}>{tr('report.empty.title')}</p>
+            <p className={s.emptyHint}>{tr('report.empty.none')}</p>
+          </div>
         ) : (
           <div className={s.pane} data-peek={sidePeek} data-open={sideOpen}>
             {listHtml}
