@@ -617,7 +617,7 @@ export const zhCN = {
   'params.sync.summary': '云端 {release} · {count} 项有改动',
   'params.sync.newRelease': '新版',
   'params.sync.closeTitle': '关掉（一项都还没处理，云端更新仍然等着）',
-  'params.sync.hint': '勾上的采用、没勾的保持 —— 点「保存」才写进这份文件',
+  'params.sync.hint': '应用之后要保存 —— 才会写进这份文件',
   'params.sync.neverGroup': '机器自己的数（不替你勾）',
   'params.sync.cleanGroup': '没冲突 —— 云端改了、你没动过',
   'params.sync.conflictGroup': '有冲突 —— 你也改过这一项，选一边',
@@ -951,6 +951,8 @@ export const zhCN = {
   'presets.page.update.noLocalMatch': '更新 {name} 没成：你机器上没有跟这个云端条目对得上的那一份',
   'presets.page.update.cloudNotReady': '更新 {name} 没成：云端新版的字节还没取回来（网络或数据源的问题）',
   'presets.page.update.zeroPending': '已更新 {name} —— 已经是云端最新版了',
+  'presets.page.update.zeroPendingNoLine':
+    '已按云端内容处理完 {name}。这条发布线还没有发布身份，暂时记不下基线 —— 做完一次正式发布后就不会再提示了',
   'presets.page.update.unknownAttribution': '更新 {name} 没成：认不出这一份属于哪台机型的哪一版',
   'presets.page.update.askPick': '{name} 有 {count} 项云端改过的参数等你挑',
   'presets.page.update.gone': '{name} 已经不在本地了 —— 列表刚变过，再看一眼',

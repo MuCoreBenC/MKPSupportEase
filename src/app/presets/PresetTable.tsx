@@ -143,8 +143,7 @@ import {
   RELEASE_LINE_KEY,
   releaseLineText,
   cloudClaimBadge,
-  CLOUD_LOCAL_ACTION,
-  CLOUD_LOCAL_TEXT,
+  cloudRowState,
   CLOUD_STATE_TEXT,
   DASH_,
   LOCAL_DRAWER,
@@ -212,91 +211,46 @@ function CloudLocalAction({
 }) {
   const tr = useT()
   /*
-   * ★ **这一格是「云端行动作」的唯一出口**，所以「云端较旧」的闸必须在这一行的最前面 ——
-   *   2026-10-27 作者截图：名称列已经什么都不显示了，右边却还挂着一颗绿色「更新」。
+   * ★★ **这一格不再自己判**（2026-10-29 收口）。
    *
-   *   原来这个组件只认 `row.localState`（`missing` / `stale` / `has`），完全不看
-   *   `row.basedOn`；主链上那句 `needsUpdate && !cloudIsOlder` 守的是**另一条**渲染
-   *   路径，够不到这里。于是"云端比我这份旧"的行照样长出一颗更新按钮。
+   *   作者一天里连撞三次自相矛盾：徽章写「有新版」、详情头写「有新版」、按钮却是破折号；
+   *   点完「更新」提示"已经是最新"，行上仍挂着「更新」。根因是同一件事有三套话术各算
+   *   各的 —— 结论现在只在 `cloudRowState` 里产生一次，这里只负责画。
    *
-   *   判据只有一条：结论是 `newer`（云端较旧）⇒ 这一格**什么都不给**，画破折号。
-   *   想知道为什么，展开详情里有「云端较旧」和那句"要云端版就先删掉本地再下载"。
-   *   ★ 以后再加动作，请统一从 `basedOn` 起手，别再只看 `localState`。
+   *   四档动作：`download`（我这儿一份都没有）/ `update`（有新版，或说不清要建基线）/
+   *   `none`（不给按钮）/ `none + warn`（目录自相矛盾，报警）。
    */
-  if (row.basedOn === 'newer') {
+  const st = cloudRowState(row)
+  if (st.action === 'none') {
+    /* 一句话都没有的那种（`newer` / `elsewhere`）：作者要「就当无事发生」⇒ 整格不画 */
+    if (st.text === null && !st.warn) return null
     return (
-      <span className={s.actNone} title={tr('presets.table.staleOlder.title')}>
-        {DASH_}
-      </span>
-    )
-  }
-  /*
-   * ★ **只有 `outdated` 才给「更新」主按钮**（2026-10-28 三问题模型）。
-   *
-   *   以前这里只看 `localState === 'stale'`，而 `stale` 是"本地那份和目录字节不同"——
-   *   它同时覆盖了「真有新版」「说不清」「目录自相矛盾」三种完全不同的情形，
-   *   于是三种都长出了同一颗绿色按钮。
-   *
-   *   现在按结论分派：
-   *     outdated     ⇒ 给（唯一一档是"确定有新版"）
-   *     unchanged    ⇒ 破折号（发布前进了，但这份没变）
-   *     inconsistent ⇒ 破折号 + 警告字样（数据坏了，不能覆盖）
-   *     unverified   ⇒ **也给**，但换了说法（见下）
-   *
-   *   ★ `unverified` 必须留一条出路（2026-10-29）：老副本（血统里没有发布线/序号）
-   *     会被判成"说不清"，如果连按钮都不给，那一份就**永远**没有建立新基线的入口 ——
-   *     只能删掉重下。而"接受当前云端版"这件事本来就得由用户明确点一下才算数
-   *     （下载 ≠ 接受版本），所以按钮留着，`title` 里把话说清：点它 = 以当前云端版
-   *     建立起新基线。至于"有新版"那三个字，那是徽章的事，已经不在这格说了。
-   */
-  if (row.basedOn === 'unchanged' || row.basedOn === 'inconsistent') {
-    const why =
-      row.basedOn === 'inconsistent'
-        ? tr('presets.table.inconsistent.title')
-        : tr('presets.table.unchanged.title')
-    return (
-      <span
-        className={row.basedOn === 'inconsistent' ? s.actWarn : s.actNone}
-        title={why}
-      >
-        {row.basedOn === 'inconsistent' ? tr('presets.table.inconsistent.badge') : DASH_}
-      </span>
-    )
-  }
-  const state = row.localState
-  if (state === undefined) return null
-  const action = CLOUD_LOCAL_ACTION[state]
-  if (action === null) {
-    /* 「本地已有」：不给按钮（那件事在本地表那一行上做），画一个破折号 + 为什么 */
-    return (
-      <span className={s.actNone}>
-        {DASH_}
-      </span>
+      <>
+        {st.warn && st.text !== null && (
+          <span className={s.actWarn} title={tr('presets.table.inconsistent.title')}>
+            {tr(st.text)}
+          </span>
+        )}
+        {!st.warn && <span className={s.actNone}>{DASH_}</span>}
+      </>
     )
   }
   /*
    * **「下载」与「更新」要分得开**（2026-10-20 作者：「我希望区分一下下载和更新啊，
    * 更新的话，就跟那本地的那个快捷操作里面的一样，用绿色背景吧」）。
-   *
-   * 判据是**这一份是不是"第一次取回来"**：`localState === 'missing'` 才是「下载」
-   * （白底、与原来一样）；「有新版」那一档是「更新」—— 绿底，与本地行
-   * 「快捷操作」里那颗绿色「更新」同一副样子（同一个 `.updateBtn`）。
+   * `download` 是白底，`update` 是绿底（同一个 `.updateBtn`）。
    */
-  const isUpdate = state === 'stale'
+  const isUpdate = st.action === 'update'
   return (
     <button
       type="button"
       className={isUpdate ? s.updateBtn : s.actBtn}
       disabled={busy}
       onClick={() => onDownload(row)}
-      /* 说不清版本关系时，这一下点击的含义要多说一句（见上面那段注释） */
-      title={
-        row.basedOn === 'unverified'
-          ? tr('presets.table.unverified.updateTitle')
-          : undefined
-      }
+      /* 说不清版本关系时，这一下点击的含义要多说一句（文案在 `cloudRowState` 里定） */
+      title={st.hint === null ? undefined : tr(st.hint)}
     >
-      {tr(action)}
+      {tr(isUpdate ? 'presets.tree.cloudLocalAction.stale' : 'presets.tree.cloudLocalAction.none')}
     </button>
   )
 }
@@ -1168,8 +1122,13 @@ export default function PresetTable({
                             <span>
                               {row.scope === 'cloud' && row.basedOn === 'newer'
                                 ? tr('presets.table.staleOlder')
-                                : row.scope === 'cloud' && row.localState !== undefined
-                                  ? tr(CLOUD_LOCAL_TEXT[row.localState])
+                                : /*
+                                   * ★ 与行首徽章、操作列读**同一个结论**（2026-10-29 收口）。
+                                   *   原先这里直接取 `CLOUD_LOCAL_TEXT[localState]`，绕过了
+                                   *   徽章那层分档 ⇒ 行上写「版本关系未知」、卡头仍写「有新版」。
+                                   */
+                                  row.scope === 'cloud' && cloudClaimBadge(row) !== null
+                                  ? tr(cloudClaimBadge(row)!.text)
                                 : row.presetState !== undefined
                                   ? tr(UPDATE_STATE_TEXT[updateState ?? 'latest'])
                                   : mkp && row.scope === 'local'
