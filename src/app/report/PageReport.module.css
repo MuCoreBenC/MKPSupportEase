@@ -160,7 +160,14 @@
    */
   --fold-ms: 180ms;
   --fold-ease: cubic-bezier(0.2, 0, 0, 1);
-  transition: --side-w var(--fold-ms) var(--fold-ease);
+  /*
+   * `padding-left` 一起过渡：收起时它收到 0，那条 44px 的脊才贴得到窗口左缘 ——
+   * 只收宽度、留着 22px 内衬的话，收起后就是页面里一块孤零零的小方块
+   * （2026-10-30 作者圈图：「不像一个整体」）。两者同一条时长曲线 ⇒ 一边收一边贴边。
+   */
+  transition:
+    --side-w var(--fold-ms) var(--fold-ease),
+    padding-left var(--fold-ms) var(--fold-ease);
 }
 
 /*
@@ -207,7 +214,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 16px 18px 10px;
+  /*
+   * 左内衬 12（不是 18）：栏头第一颗是「收起」按钮，20px 宽 ⇒ 中心 x = 22，
+   * 正好是折起来后那条 44px 脊的中心 —— 收起 / 展开在**同一个位置**点
+   * （2026-10-30 作者：「按钮都放在左边吧，这样我的鼠标不用来回」）。
+   */
+  padding: 16px 18px 10px 12px;
 }
 
 /* 眉题：小字距灰字（CardFrame 的 .eyebrow 语言） */
@@ -229,9 +241,9 @@
 }
 
 /*
- * 栏头那颗「收起」（2026-10-27）：20px 小方钮，灰字档、悬停才上色 ——
- * 它是这一栏的**结构动作**，不是页头上那两颗业务按钮，所以不套 `.btn`
- * （同"动作按钮一律文字"那条的反面：这里只有图标，长在眉题那一行里）。
+ * 栏头那颗「收起」（2026-10-27；2026-10-30 挪到栏头最左）：20px 小方钮，
+ * 灰字档、悬停才上色 —— 它是这一栏的**结构动作**，不是页头上那两颗业务按钮，
+ * 所以不套 `.btn`（同"动作按钮一律文字"那条的反面：这里只有图标，长在眉题那一行里）。
  */
 .sideFold {
   flex: 0 0 auto;
@@ -239,7 +251,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-left: 4px;
+  margin-right: 4px;
   padding: 0;
   border: 0;
   border-radius: var(--r-sm);
@@ -973,30 +985,51 @@
  *   · 宽档：首列 auto 读 `.side` 自己的 width；
  *   · 窄档：盒子绝对定位，宽度就是滑盖的进出。
  *
- * ★★ 2026-10-29 改判：这一版**要过程**（作者：「不够灵动…我还是喜欢那种展开折叠的
- *   感觉，就像首页的…在过程中去变化它的内容和文字」）。第四版那会儿是瞬切，为的是
- *   躲开"半展开时列表与脊同时在场"；现在不靠瞬切躲，靠**内容交叉**躲：
+ * ★★ 2026-10-30 定稿（作者连否三版）：**只有宽度在动，文字一概不做淡入淡出、也不滑**。
  *
- *      折叠（340→44）   0~110ms 列表淡出并左移  →  140~260ms 脊（竖排眉题）淡入
- *      展开（44→340）   0~110ms 脊先退场        →  150~270ms 列表归位
+ *   ① 交叉淡入淡出（10-29）→ 作者：「出现的同时也在同时消失」，两层半透明叠着；
+ *   ② 列表整块往左滑走再换字（10-30 上午）→ 作者：「整个侧边的往左消失了之后，
+ *      再出现那一个文字，感觉也不是很舒服」（中间有一段时间整栏是空的）。
  *
- *   任何一帧里只有一件东西是"实的"，另一件要么已经淡掉、要么还没亮起来；
- *   而宽度从头到尾是真的在变，详情区因此连续地被让位 / 收回，不是先跳一格再补动画。
+ *   现在的做法就是 iOS 折叠抽屉最朴素那一种：列表**不透明、不位移、不淡出**，
+ *   只是被外壳裁切（`overflow: hidden`）；宽度收到 44 的那一帧，列表先退场、
+ *   脊紧接着换上来（`visibility` 的延迟 + 负延迟，**零时长**，不是淡入）。
+ *   所以整个过程里用户只会看到「一条边往左走」，被裁掉的行是被裁掉的，不是"化掉"的。
  */
-/* 折到底：只改这一个变量 —— 轨道与 `.side` 的宽度同一帧到 44 */
+/*
+ * 折到底：轨道到 44，左内衬同时收到 0（脊贴窗口左缘，见 `.side` 收起那条）。
+ * 两者同一条 transition ⇒ 面板一边变窄一边往外贴。
+ */
 .pane[data-peek='true'] {
   --side-w: 44px;
-}
-
-/* 折起来就不要阴影（理由见窄档那一条）：贴边的一条脊不需要浮起感 */
-.pane[data-peek='true'] .side {
-  box-shadow: none;
+  padding-left: 0;
 }
 
 /*
- * 列表本体：`min-width` 才是"不塌"的那条 —— 外壳收到 44 时它仍是 340（溢出被
- * `.side` 的 overflow: hidden 裁掉），所以收窄全程行不重排。
- * 折叠后 `visibility: hidden`：既然不画了，就不该还能被 Tab 到、还能被点到。
+ * 收起态 = **贴左缘的一条脊**，不是一块浮在页面里的小卡片（2026-10-30 作者圈图：
+ * 「不像一个整体，它这一个是一个单独的这样子出现的」）。
+ *
+ * 对照物是窄档：那边收起后就是 `left: 0` + `0 r-lg r-lg 0` 的直角贴边脊 —— 作者一直说
+ * 窄的没问题。宽档以前只把宽度收到 44，四角圆角 + 四周描边 + 左边还留着 22px 内衬，
+ * 于是看起来像页面里"多长出来一个小方块"。
+ *
+ * 所以收起时三件事一起做（与宽度同一条时长/曲线，见 `.pane` 的 padding-left）：
+ *   ① 左边贴到窗口缘（靠 `.pane` 的 `padding-left: 0`）；
+ *   ② 左边直角、去掉左侧描边；
+ *   ③ 阴影收掉（阴影本来就让"贴边"读成"浮起"）。
+ */
+.pane[data-peek='true'] .side {
+  box-shadow: none;
+  border-radius: 0 var(--r-lg) var(--r-lg) 0;
+  border-left-color: transparent;
+}
+
+/*
+ * 列表本体：外壳窄了它就被裁（`overflow: hidden` 在 `.side` 上），行因此永不重排 ——
+ * 收起来的过程就是"一条边往左走"，列表本身不淡、不滑。
+ *
+ * ★ 有实底 + `z-index: 1`（压在 `.sideFace` 的 0 上）：展开态它把脊完整盖住，
+ *   折叠时也保证"露出 44px 时看到的是脊，不是列表右半截"。
  */
 .sideBody {
   flex: 1;
@@ -1004,51 +1037,64 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
+  z-index: 1;
+  background: var(--surface-solid);
   /* 列表自己一块：行不重排、也不让它的重绘漏到面板外面 */
   contain: layout paint;
   /*
-   * ★ 全程**交叉**（2026-10-29 第四版，作者口径）：「苹果那些很流畅的，就是边收起的时候
-   *   那个字边出现 —— 原本的字开始消失，后面的字就开始出现」。所以两者的 opacity 用
-   *   同一条 180ms、同时起 —— 列表淡出的每一帧，脊也在同比例亮起来，任何一帧都有内容，
-   *   不存在"先全都消失、再冒出字"的空窗（上一版把脊压到最后 25% 就是这个毛病）。
+   * 折/展的**前段**：列表自己淡出（0~70%），不是被裁到最后才突然没了。
+   * 展开时反过来、但**推迟 30% 才起步** —— 让脊先退，列表再回来，两者错开。
    */
   transition:
-    opacity var(--fold-ms) var(--fold-ease),
-    transform var(--fold-ms) var(--fold-ease);
-}
-
-.pane[data-peek='true'] .sideBody {
-  opacity: 0;
-  transform: translateX(-12px);
-  visibility: hidden;
-  /* 已经透明的那一段也点不到：否则刚点「收起」还会误触到行首 */
-  pointer-events: none;
-  transition:
-    opacity var(--fold-ms) var(--fold-ease),
-    transform var(--fold-ms) var(--fold-ease),
+    opacity calc(var(--fold-ms) * 0.7) var(--fold-ease) calc(var(--fold-ms) * 0.3),
     visibility 0s linear var(--fold-ms);
 }
 
 /*
- * 折起来时露出的那张脸：钉在盒子左缘的 44px，**常驻**（`display: flex`），
- * 靠 opacity + 6px 位移进出场 —— 以前是 display: none 硬切，没有过程可言。
+ * 折叠：列表 0~70% 淡出（同时被外壳裁着，两个效果叠在一起 —— 一边被推走一边化掉），
+ * 之后 `visibility` 到点再关（此时早就 0 不透明度了，关掉只是为了不挡 Tab / 点按）。
+ */
+.pane[data-peek='true'] .sideBody {
+  opacity: 0;
+  visibility: hidden;
+  /* 退场之后也点不到：否则刚点「收起」还会误触到行首 */
+  pointer-events: none;
+  transition:
+    opacity calc(var(--fold-ms) * 0.7) var(--fold-ease),
+    visibility 0s linear var(--fold-ms);
+}
+
+/*
+ * 折起来时露出的那张脸：钉在盒子左缘的 44px，**常驻在列表下层**（z 0）。
  *
+ * ★ 2026-10-30 第五版（作者：「可能你加一个渐入渐出的效果」）：**错开淡入淡出**。
+ *   折叠时列表先走（0~70% 淡出），脊**后半段**才淡入（40%~100%）——
+ *   两条只在中间重叠约 0.3 个时长，不是"整块同时两套字"，也不是"先全没、再冒出字"。
+ *   展开时反向：脊 0~60% 退，列表 30%~100% 回来。
+ *   （前几版都被否：全程同时交叉 = "出现的同时也在同时消失"；硬切 = "突然出现"；
+ *    整体旋转 90° = "把后面的挡住了"。）
  * ★ 宽度钉死 44（不铺满外壳）：收窄过程中外壳还宽着，脸若铺满，竖排字会在宽盒子
- *   中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"，随盒子一起收进去。
- * ★ 它在 DOM 里排在列表之后（压在列表上），所以展开态必须真的不可见、不可点，
- *   否则那 44px 会盖住列表的行首。
+ *   中间晃一下 —— 钉在左缘才像"抽屉上的一条脊"。
+ * ★ 展开态它是 `visibility: hidden`（**无过渡、立即**）：列表的第一帧就已经铺在它
+ *   上面，它退不退场都看不见；而「立刻藏」让 Tab 永远停不到一块看不见的按钮上。
  */
 .sideFace {
   position: absolute;
   top: 0;
   bottom: 0;
   left: 0;
+  z-index: 0;
   width: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  padding: 14px 0 12px;
+  /*
+   * 上内衬 20（不是 14）：箭头 12px ⇒ 中心 y = 26，与展开态栏头那颗「收起」
+   * （padding-top 16 + 20/2）同一条水平线 —— 收起后鼠标原地一按就是展开。
+   */
+  padding: 20px 0 12px;
   border: 0;
   background: var(--surface-solid);
   color: var(--text-3);
@@ -1056,11 +1102,9 @@
   cursor: pointer;
   opacity: 0;
   visibility: hidden;
-  transform: translateX(-6px);
-  /* 与列表全程交叉（见 `.sideBody` 那段）：脊退的每一帧，列表同比例亮起来 */
+  /* 展开：脊 0~60% 先退场（列表 30% 之后才回来，见 `.sideBody` 那条） */
   transition:
-    opacity var(--fold-ms) var(--fold-ease),
-    transform var(--fold-ms) var(--fold-ease),
+    opacity calc(var(--fold-ms) * 0.6) var(--fold-ease),
     visibility 0s linear var(--fold-ms);
 }
 
@@ -1069,7 +1113,18 @@
   color: var(--text-1);
 }
 
-/* 竖排的眉题（与 `.sideLb` 同一档字）：44px 只放得下竖字 */
+/*
+ * 脊上的箭头**朝右**（拉出来）：`chevronDown` 转 -90°。
+ * 展开态那颗是 +90°（朝左 = 收进去），两颗正好是一对反向的箭头 —— 这个位置上的
+ * 动作只有"收 / 放"，箭头指哪边就是抽屉要去哪边。
+ */
+.sideFaceIcon {
+  display: block;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+/* 竖排的眉题（与 `.sideLb` 同一档字）：字是**固定竖排**的，折展全程位置不变 */
 .sideFaceLb {
   writing-mode: vertical-rl;
   font-size: var(--fs-label);
@@ -1078,6 +1133,7 @@
   white-space: nowrap;
 }
 
+/* 条数：竖排底下那一格（`margin-top: auto` 把它推到脊的最下端） */
 .sideFaceCnt {
   margin-top: auto;
   font-size: var(--fs-label);
@@ -1085,16 +1141,21 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 宽档：用户按栏头那颗「收起」才折。脊在面板收窄的**后半段**才亮起来（见上面那段） */
+/*
+ * 宽档：用户按栏头那颗「收起」才折。
+ *
+ * `visible` 用**负延迟**提前生效 —— 它整段时间都被列表的实底盖着，提前变可见不影响
+ * 观感，却换来一个好处：列表退场（延迟 `--fold-ms`）与脊露面是**同一帧**交接。
+ * 反过来写（脊延迟 `--fold-ms` 才可见）会留下一帧空栏，「侧边消失了之后才出现文字」。
+ */
 .pane[data-peek='true'] .sideFace {
   opacity: 1;
   visibility: visible;
-  transform: none;
-  /* 折叠：与列表同起同收（交叉淡入，见 `.sideBody` 那段） */
+  /* 折叠：**后半段**才淡入（40% 起，100% 到）—— 与列表（0~70%）只重叠一小段 */
   transition:
-    opacity var(--fold-ms) var(--fold-ease),
-    transform var(--fold-ms) var(--fold-ease),
+    opacity calc(var(--fold-ms) * 0.6) var(--fold-ease) calc(var(--fold-ms) * 0.4),
     visibility 0s linear;
+  pointer-events: auto;
 }
 
 /* ============ 窄档：列表滑盖化（只盖内容区 —— 顶部那行字与刷新不动） ============ */
@@ -1108,6 +1169,15 @@
   .pane {
     /* 收起时露出 44px 的窄轨，主区整体让开这一条 */
     grid-template-columns: 1fr;
+    padding-left: 56px;
+  }
+
+  /*
+   * 窄档不收那 56px：这一档的面板本来就是 `left: 0` 的浮层，详情区必须一直让开
+   * 44px 的脊，否则收起后正文会被脊压住。基础段那条 `.pane[data-peek='true']`
+   * （特异性更高）收左内衬是为宽档的"贴边脊"，这里补回来。
+   */
+  .pane[data-peek='true'] {
     padding-left: 56px;
   }
 
@@ -1180,16 +1250,28 @@
   }
 
   /*
-   * 列表"不塌"的那条在窄档要跟着外壳走：外壳最宽 `min(340px, 82%)`，
-   * 写死 340 的话窗口窄于 415 布局像素时列表右边会被裁掉一截（耗时列）。
+   * ★ 2026-10-30：这里原来有一条 `.sideBody { min-width: min(340px, 82cqw) }`
+   *   （列表"不塌"、收窄时只被裁）—— 它与"一收就补上脊"配套，但现在列表是靠**被外壳
+   *   裁切**来收进去的，留着这条定宽反而让它在 44 宽的壳里溢出来、露出右缘那一竖条空白
+   *   （作者截图）。所以并入下面那条 `min-width: 0`：窄档的列表只读外壳宽度。
    */
-  .sideBody {
-    min-width: min(340px, 82cqw);
-  }
 
   /* 手动折叠优先于展开态：折了就是 44，不管 sideOpen 是不是还留着 true */
   .pane[data-peek='true'] .side {
     width: 44px;
+  }
+
+  /*
+   * 窄档的列表**只读外壳宽度**（不写 min-width）：外壳收到 44 时它就是 44，
+   * 多出去的行/字**被行自己裁掉** —— 与宽档"被外壳裁切"看起来是同一种收进去。
+   *
+   * ★ 2026-10-30：原来这里是 `visibility` 一收就藏、到 44px 才换脊，等于让这条
+   *   定宽 340 的列表在 44 宽的壳里**溢出来**（外壳还留着 `overflow: hidden`），
+   *   收起过程中面板右缘会露出一竖条空白，把滚上去的行盖掉。改成互相盖住之后不再有
+   *   那条缝，也顺便把宽/窄两档收成同一套机制。
+   */
+  .sideBody {
+    min-width: 0;
   }
 
   /*
@@ -1199,24 +1281,24 @@
    */
   .side:not([data-open='true']) .sideBody {
     opacity: 0;
-    transform: translateX(-12px);
     visibility: hidden;
     pointer-events: none;
     transition:
-      opacity var(--fold-ms) var(--fold-ease),
-      transform var(--fold-ms) var(--fold-ease),
+      opacity calc(var(--fold-ms) * 0.7) var(--fold-ease),
       visibility 0s linear var(--fold-ms);
   }
 
   .side:not([data-open='true']) .sideFace {
     opacity: 1;
     visibility: visible;
-    transform: none;
+    /* 与宽档同一套错峰（见 `.pane[data-peek='true'] .sideFace` 那段）：
+       列表 0~70% 走，脊 40%~100% 来 */
     transition:
-      opacity var(--fold-ms) var(--fold-ease),
-      transform var(--fold-ms) var(--fold-ease),
+      opacity calc(var(--fold-ms) * 0.6) var(--fold-ease) calc(var(--fold-ms) * 0.4),
       visibility 0s linear;
   }
+
+
 
   /*
    * 收起态**不要阴影**（2026-10-29）：贴边那条脊本来不需要浮起感，而大面积圆角阴影
@@ -1232,6 +1314,7 @@
   .pane,
   .side,
   .sideBody,
+  .sideTags,
   .sideFace,
   .scrim {
     transition-duration: 0.01ms;

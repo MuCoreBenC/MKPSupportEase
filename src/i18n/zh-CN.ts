@@ -611,7 +611,8 @@ export const zhCN = {
   'params.search.compact': '搜索参数…',
   'params.search.mini': '搜索…',
   'params.search.aria': '搜索参数',
-  'params.search.title': '搜索参数（Ctrl+F）',
+  /* {keys} = 那一串组合键，按平台给（mac ⌘F / Windows Ctrl+F，见 `comboOf`） */
+  'params.search.title': '搜索参数（{keys}）',
   'params.search.clear': '清空搜索',
   'params.search.recent': '最近搜索',
   'params.search.forget': '忘掉「{term}」',
@@ -951,6 +952,11 @@ export const zhCN = {
 
   // ---- 预设页（含对比台 / 编辑模式）（续） ----
   'presets.page.searchPlaceholder': '搜索文件…',
+  /*
+   * 「打开所在文件夹」那颗的文案按平台分（mac / Windows 两套，`detectPlatform()` 选）：
+   * 底下是 `app.opener().reveal_item_in_dir()` —— mac 开访达、Windows 开文件资源管理器，
+   * **并且选中那个文件**（不只是打开目录）。
+   */
   'presets.page.revealMac': '在访达中显示',
   'presets.page.revealWindows': '显示所在文件夹',
   'presets.page.headNote.problem': '这份文件的写法读不懂，切不了',
@@ -1112,9 +1118,12 @@ export const zhCN = {
   'presets.page.rename.extTitle': '后缀保持原样，不能改',
   'presets.page.rename.fillDefaultTitle': '填成默认名（{name}）',
   'presets.page.rename.failed': '没改成：{detail}',
-  'presets.page.foot.mkpCloud': '右键任意一行还有下载 / 更新 / 拷贝链接（没有鼠标就 Shift+F10 或菜单键）',
-  'presets.page.foot.mkpLocal': '右键任意一行还有使用 / 拷贝后处理脚本 / 修改参数 / 编辑文件 / 参数对比 / 拷贝 / 重命名 / 显示所在文件夹 / 置顶（没有鼠标就 Shift+F10 或菜单键）',
-  'presets.page.foot.slicer': '右键任意一行还有置顶 / 参数对比 / 拷贝 / 重命名 / 删除（没有鼠标就 Shift+F10 或菜单键）',
+  /* {menu} = 「没有鼠标」那一句，按平台给（Windows 有 Shift+F10 与菜单键，mac 用 Ctrl+点按） */
+  'presets.page.foot.mkpCloud': '右键任意一行还有下载 / 更新 / 拷贝链接（没有鼠标就 {menu}）',
+  'presets.page.foot.mkpLocal': '右键任意一行还有使用 / 拷贝后处理脚本 / 修改参数 / 编辑文件 / 参数对比 / 拷贝 / 重命名 / 显示所在文件夹 / 置顶（没有鼠标就 {menu}）',
+  'presets.page.foot.slicer': '右键任意一行还有置顶 / 参数对比 / 拷贝 / 重命名 / 删除（没有鼠标就 {menu}）',
+  'presets.page.menuKey.win': 'Shift+F10 或菜单键',
+  'presets.page.menuKey.mac': 'Ctrl+点按',
 
   /* 预设表 PresetTable */
   'presets.table.col.name': '名称',
@@ -1160,12 +1169,11 @@ export const zhCN = {
   'presets.table.detail.key.source': '来源',
   'presets.table.detail.key.sourceMode': '源配置',
   'presets.table.detail.key.remark': '备注',
-  'presets.table.detail.key.attr': '归属',
   'presets.table.detail.key.machine': '机型',
-  'presets.table.detail.key.variant': '预设类型',
+  'presets.table.detail.key.variant': '版本',
   'presets.table.detail.remarkEmpty': '空着 = 副标题留空',
   'presets.table.detail.editRemark.title': '编辑备注 —— 列表里文件名下面那行小字',
-  'presets.table.detail.editAttr.title': '编辑归属 —— 写进文件头的 # machine: / # variant: 两行',
+  'presets.table.detail.editAttr.title': '编辑机型 / 版本 —— 写进文件头的 # machine: / # variant: 两行',
   'presets.table.detail.edit': '编辑',
   'presets.table.detail.publishedHere': '本机这份发布于 {time}',
   'presets.table.detail.publishedCloud': '云端最新版发布于 {time}',
@@ -1408,26 +1416,30 @@ export const zhCN = {
   'presets.table.inconsistent.title': '云端目录自相矛盾：同一次发布里这一份的内容却变了，先别更新',
   'presets.table.inconsistent.badge': '目录异常',
   'presets.table.detail.key.versions': '版本来源',
-  /* 主区：来源 / 来源预设 / 云端发布时刻 + 配方版本时间 / 更新状态（+ 有新版才出现的云端新版发布） */
+  /* 主区：来源 / 来源预设 / 发布时间 / 更新状态（+ 有新版才出现的云端新版发布） */
   'presets.table.detail.key.sourcePreset': '来源预设',
-  'presets.table.detail.key.cloudPublishedAt': '云端发布时刻',
-  'presets.table.detail.key.recipeVersion': '配方版本时间',
+  'presets.table.detail.key.cloudPublishedAt': '发布时间',
+  'presets.table.detail.key.recipeVersion': '生成时间',
   'presets.table.detail.key.updateState': '更新状态',
   'presets.table.detail.key.cloudRelease': '云端新版发布',
   'presets.table.detail.versionUnknown': '未知（当时没有记录）',
-  'presets.table.detail.recipeVersion.unknown': '未知（文件头里没有这一行）',
   'presets.table.detail.cloudPublishedAt.why':
     '这一代目录正式发布、确定发布身份的时间 —— 只说明目录什么时候发布，不代表内容变过',
-  'presets.table.detail.recipeVersion.why':
-    'TOML 文件头里的 # release_time，由配方自身提供 —— 不保证等于文件实际生成或修改时间',
   /* 版本判定：本地 / 云端两列对照（一致时合并成一行） */
   'presets.table.detail.line': '发布线',
   'presets.table.detail.sha': 'SHA-256',
   'presets.table.detail.lineValue': '{catalog} · 第 {serial} 号',
   'presets.table.detail.same': '（一致）',
+  /* 第十六轮：四组的标题（文件位置 / 更新信息 / 文件时间 / 更多详情） */
   'presets.table.detail.more.version': '版本判定',
-  'presets.table.detail.more.file': '文件信息',
-  'presets.table.detail.more.lineage': '血统记录',
+  'presets.table.detail.location': '文件位置',
+  'presets.table.detail.update': '更新信息',
+  'presets.table.detail.fileTime': '文件时间',
+  'presets.table.detail.moreTech': '更多详情',
+  'presets.table.detail.moreTech.hint': '（本机留档 / 发布线 / SHA）',
+  /* 本机没有副本时「判定」那一格：那时没有"新旧"可比，不拿 outdated 冒充 */
+  'presets.table.detail.verdict.none': '本机暂无副本，下载后建立基线再判定',
+  'presets.table.detail.more.lineage': '来源记录',
   'presets.table.detail.lineage.count': '共 {count} 项',
   'presets.table.detail.more.fullOrigin': '完整来源',
   'presets.table.detail.more.sourcePresetPath': '来源预设路径',
@@ -1443,10 +1455,9 @@ export const zhCN = {
   'presets.table.verdict.elsewhere': '来源分支不同',
   'presets.table.verdict.unverified': '无法确认',
   'presets.table.verdict.inconsistent': '目录自相矛盾',
-  'presets.table.detail.more.path': '本地路径',
   'presets.table.detail.more.modified': '本地修改时间',
-  'presets.table.detail.more.obtained': '落盘时间',
-  'presets.table.detail.more.baseline': '原文镜像',
+  'presets.table.detail.more.obtained': '下载时间',
+  'presets.table.detail.more.baseline': '本机留档',
   'presets.table.detail.more.none': '未知（当时没有记录）',
   'presets.tree.localNotPresetWhy': '这一份认不出来是 MKP 预设（切片器那两类都是 .json，光看扩展名分不出是 bbs 还是 orca）—— 能被使用的只有 TOML 预设',
   'presets.tree.localUnreadable': '文件无法读取',
@@ -1484,7 +1495,7 @@ export const zhCN = {
   'presets.edit.title': '编辑文件',
   'presets.edit.enterMode': '进入编辑模式',
   'presets.edit.enterParamsTitle': '进编辑模式：参数就可以改了',
-  'presets.edit.saveTitle': '保存（Ctrl+S）',
+  'presets.edit.saveTitle': '保存（{keys}）',
   'presets.edit.exitMode': '放弃',
   'presets.edit.exitTitle': '放弃 —— 这一次没保存的改动都作废，回只读（要留住就先保存）',
   'presets.edit.discard': '放弃修改',
@@ -1609,9 +1620,9 @@ export const zhCN = {
   'params.noMkpFile': '这个版本没配 MKP 预设文件 —— 改动不会保存在任何文件里（只在这一屏）',
   'params.noMatch': '没有匹配的参数，换个词试试',
   'params.restoreDefaults': '恢复默认值',
-  'params.undoTitle': '撤销（Ctrl+Z）',
+  'params.undoTitle': '撤销（{keys}）',
   'params.undo': '撤销',
-  'params.redoTitle': '重做（Ctrl+Y）',
+  'params.redoTitle': '重做（{keys}）',
   'params.redo': '重做',
   'params.discard': '丢弃改动',
   'params.switchCombo.title': '切换到 {machine} · {version}？',

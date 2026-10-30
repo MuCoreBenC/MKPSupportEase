@@ -28,6 +28,8 @@ import { STORAGE } from '../../api/storageKeys'
 import { msg, useT, useText, type Text } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
+/* 键位说法按平台（`⌘Z` / `Ctrl+Z`、重做 mac 是 `⇧⌘Z`）—— 唯一出处在 `usePlatform` */
+import { ariaOf, comboOf } from '../../hooks/usePlatform'
 import { FieldLayer } from '../../components/field'
 /*
  * 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts）；
@@ -1460,9 +1462,9 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canUndo}
                   onClick={u.undo}
-                  title={tr('params.undoTitle')}
+                  title={tr('params.undoTitle', { keys: comboOf('undo') })}
                   aria-label={tr('params.undo')}
-                  aria-keyshortcuts="Control+Z"
+                  aria-keyshortcuts={ariaOf('undo')}
                 >
                   <Icon name="undo" size={15} />
                 </button>
@@ -1471,9 +1473,9 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canRedo}
                   onClick={u.redo}
-                  title={tr('params.redoTitle')}
+                  title={tr('params.redoTitle', { keys: comboOf('redo') })}
                   aria-label={tr('params.redo')}
-                  aria-keyshortcuts="Control+Y"
+                  aria-keyshortcuts={ariaOf('redo')}
                 >
                   <Icon name="redo" size={15} />
                 </button>
@@ -1498,8 +1500,8 @@ export default function PageParams({
                   type="button"
                   className={s.primary}
                   disabled={u.dirtyCount === 0 && u.syncDirty === 0}
-                  title={tr('presets.edit.saveTitle')}
-                  aria-keyshortcuts="Control+S"
+                  title={tr('presets.edit.saveTitle', { keys: comboOf('save') })}
+                  aria-keyshortcuts={ariaOf('save')}
                   onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >
                   {tr('common.save')}

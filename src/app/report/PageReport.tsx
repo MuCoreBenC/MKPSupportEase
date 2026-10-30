@@ -1718,9 +1718,13 @@ export default function PageReport() {
     <nav className={s.side} ref={sideRef} data-open={sideOpen}>
       <div className={s.sideBody}>
         <div className={s.sideHead}>
-          <span className={s.sideLb}>{tr('report.side.title')}</span>
-          <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
-          {/* 收起这一栏（两档同一个动作：盒子变窄，露出那张竖排的脸） */}
+          {/*
+            收起这一栏（两档同一个动作：盒子变窄，露出那张竖排的脸）。
+            ★ 2026-10-30 作者：「展开折叠的按钮都放在左边吧，这样我的鼠标不用来回」
+            —— 它原来挂在栏头**最右**（离左缘 320px），折起来后那只 44px 的脊在左缘，
+            鼠标要横跨整栏才能再展开。现在它是栏头第一颗，中心与脊上的箭头同一条竖线，
+            收起 / 展开都在同一个位置点。
+          */}
           <button
             type="button"
             className={s.sideFold}
@@ -1735,6 +1739,8 @@ export default function PageReport() {
           >
             <Icon name="chevronDown" size={12} className={s.sideFoldIcon} />
           </button>
+          <span className={s.sideLb}>{tr('report.side.title')}</span>
+          <span className={s.sideCnt}>{tr('report.side.count', { n: (rows ?? []).length })}</span>
         </div>
 
         <div className={s.sideTools}>
@@ -1875,8 +1881,16 @@ export default function PageReport() {
       </div>
 
       {/*
-        折起来之后露出的那张脸：不是"另一个面板"，就是这只盒子变窄时显形的那一面
-        （绝对定位铺满外壳，和列表同一块底，收/展都是同一个盒子在变宽变窄）。
+        折起来之后露出的那张脸（成熟做法：VS Code / Finder 侧边栏那种 rail ——
+        竖排标签**静止不动**，只是慢慢露出来 / 慢慢没入，字从不旋转、从不淡）。
+
+        ★ 2026-10-30 撤掉那一版"标题整体旋转 90° 落到脊上"：作者看到的是
+          「转的时候把后面那些挡住了，后面又突然消失」—— 旋转的字必然扫过一大片区域。
+        ★ 这里的字是**固定的竖排**（`writing-mode: vertical-rl`），位置全程不变：
+          折叠时列表那条边往左走、把它一点一点让出来（被列表实底盖住 → 逐渐露出）；
+          展开时被列表反过来一点一点盖回去。字本身既不动也不淡。
+        ★ z 0：列表（z 1）盖着它。`pointer-events` 只在收起态开，展开态 `visibility:
+          hidden` 保证 Tab 停不到它。
       */}
       <button
         type="button"
@@ -1885,7 +1899,7 @@ export default function PageReport() {
         title={tr('report.side.unfold', { n: (rows ?? []).length })}
         aria-label={tr('report.side.unfold', { n: (rows ?? []).length })}
       >
-        <Icon name="chevronDown" size={12} className={ui.disclosureCaret} />
+        <Icon name="chevronDown" size={12} className={s.sideFaceIcon} />
         <span className={s.sideFaceLb}>{tr('report.side.title')}</span>
         <span className={s.sideFaceCnt}>{(rows ?? []).length}</span>
       </button>

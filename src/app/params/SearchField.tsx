@@ -44,6 +44,8 @@ import { useRef, useState } from 'react'
 import type { MutableRefObject } from 'react'
 import { useT, type StringKey } from '../../i18n'
 import type { Density } from '../../hooks/useDensity'
+/* 键位说法按平台（`⌘F` / `Ctrl+F`）—— 唯一出处在 `usePlatform` */
+import { ariaOf, comboOf } from '../../hooks/usePlatform'
 import FieldPopover from '../../components/field/FieldPopover'
 import Icon from '../shell/icons'
 import s from './SearchField.module.css'
@@ -136,8 +138,8 @@ export default function SearchField({
         value={value}
         placeholder={tr(PLACEHOLDER[density])}
         aria-label={tr('params.search.aria')}
-        aria-keyshortcuts="Control+F"
-        title={tr('params.search.title')}
+        aria-keyshortcuts={ariaOf('search')}
+        title={tr('params.search.title', { keys: comboOf('search') })}
         onFocus={openHist}
         onBlur={() => onCommit?.(value)}
         onChange={(e) => {

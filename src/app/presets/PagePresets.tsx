@@ -193,7 +193,11 @@ import { FieldLayer } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
-import { detectPlatform } from '../../hooks/usePlatform'
+import {
+  comboOf,
+  FOOT_MENU_HINT_KEY,
+  REVEAL_LABEL_KEY,
+} from '../../hooks/usePlatform'
 import Icon from '../shell/icons'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
@@ -294,8 +298,10 @@ const PLACEHOLDER_KEY: StringKey = 'presets.page.searchPlaceholder'
  *   压成「显示所在文件夹」（动作没变，只是不再把那台程序的全名印在按钮上），
  *   macOS 跟着压成「在访达中显示」。
  */
-const REVEAL_LABEL_KEY: StringKey =
-  detectPlatform() === 'windows' ? 'presets.page.revealWindows' : 'presets.page.revealMac'
+/*
+ * 这两个平台常量 2026-10-30 收回 `usePlatform`（那里是平台真值的唯一出口，
+ * 详情卡 `PresetTable` 也要用同一份）—— 这里改成导入，不再自己探一遍。
+ */
 
 /**
  * **「切换自动换行」那个键怎么写**（2026-10-21 作者：「Windows 下就用 ALT 啊，
@@ -305,7 +311,7 @@ const REVEAL_LABEL_KEY: StringKey =
  * "~z 切换自动换行" 就是它，看着像个错字。那就按平台给各自的键名：Windows 写
  * `Alt+Z`（键帽上印的就是这个），macOS 仍是 `⌥Z`（那边字体有这一格，也是苹果的印法）。
  */
-const WRAP_KEY = detectPlatform() === 'windows' ? 'Alt+Z' : '⌥Z'
+const WRAP_KEY = comboOf('wrap')
 
 /**
  * 从 `TOML parse error at line 23, column 1` 里挑出**行号**（界面只说"第 23 行附近"）。
@@ -506,6 +512,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
+  /*
+   * 搜索框的两个 ref（**必须住在这儿**：本组件后面有提前 return，hook 不能跟在后面）
+   * —— 见 `searchNode` 那段注：非受控输入 + 防抖筛表。
+   */
+  const searchRef = useRef<HTMLInputElement>(null)
+  const searchTimer = useRef(0)
+  /*
+   * 外部把 `page.query` 改掉（切范围复位、点 ×、ESC）时写回 DOM —— 非受控输入框
+   * 自己不认 state，得有人把"真值"递进去。反向不成立：打字只走防抖那条路。
+   */
+  useEffect(() => {
+    const el = searchRef.current
+    if (el === null) return
+    if (el.value !== page.query) el.value = page.query
+  }, [page.query])
+  /* 卸载时把没到点的防抖撤掉，别对着已卸载的页面 setState */
+  useEffect(
+    () => () => {
+      if (searchTimer.current !== 0) window.clearTimeout(searchTimer.current)
+    },
+    [],
+  )
 
   /*
    * 工艺页跳过来那一下（见 `Props.pending`）：落到「切片器配置 → 云端」——
@@ -3435,22 +3463,66 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 边界对比强，搜索是白底细边框，标称同高视觉上仍矮一截（作者：「高度上看着
    * 比切换器小」）。
    */
+  /*
+   * ★★ **搜索框不参与"每键重渲染"**（第十八轮 2026-10-30，作者：任何输入框都卡、
+   * Safari 里也一样 ⇒ 平台的事不再追，只把我们的开销砍到零）。
+   *
+   * 原来它是受控的：每敲一个字 → `page.setQuery` → **整页重渲染**（表头、两整张表、
+   * 所有行）。现在改成两层：
+   *
+   *   · **输入框非受控**（`defaultValue` + `onInput`）：DOM 里就是真值，React 不往回写
+   *     —— 键入路径上 React 一点活都不干（WebKit 的光标与合成也不用等我们）。
+   *   · **筛表防抖 120ms**：手停下来才把词交给 `page`。打字过程中列表不动，
+   *     不抖、不闪、也不抢帧；停手那一瞬再筛，眼睛看不出来。
+   *
+   * `page.query` 仍是唯一真值：外部把它改掉（点 × 清空、切范围时复位、ESC 清空）
+   * 由下面那个 effect 写回 DOM，两边不会各说一套。
+   */
+  const commitQuery = (next: string) => {
+    if (searchTimer.current !== 0) {
+      window.clearTimeout(searchTimer.current)
+      searchTimer.current = 0
+    }
+    page.setQuery(next)
+  }
+  /* 停手 120ms 才筛（见 `searchNode` 那段注）；合成期间不调用它 */
+  const scheduleQuery = (next: string) => {
+    if (searchTimer.current !== 0) window.clearTimeout(searchTimer.current)
+    searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = 0
+      page.setQuery(next)
+    }, 120)
+  }
   const searchNode = (
     /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
     <div className={s.search}>
 
       <input
+        ref={searchRef}
         className={s.input}
-        value={page.query}
+        defaultValue={page.query}
         placeholder={tr(PLACEHOLDER_KEY)}
         aria-label={tr('presets.page.search.aria')}
-        onChange={(e) => page.setQuery(e.target.value)}
+        onInput={(e) => {
+          /*
+           * ★ **合成期间不筛**（2026-10-30 作者圈图：搜索词里出现一长串「hhhhh」
+           * 其实是拼音还没提交）。输入的合成串（带下划线那一段）在 WebKit 里有个
+           * 长度上限 —— 到顶之后按键进不去，要空格/回车提交一段才能继续；那不是
+           * 我们的 bug（Safari 里一样），但我们**不该拿还没提交的合成串去筛表**。
+           */
+          if ((e.nativeEvent as InputEvent).isComposing === true) return
+          scheduleQuery(e.currentTarget.value)
+        }}
+        onCompositionEnd={(e) => scheduleQuery(e.currentTarget.value)}
         onKeyDown={(e) => {
-          /* ESC 清空但不失焦 —— 清完通常是想换个词继续打 */
-          if (e.key === 'Escape' && page.query !== '') {
+          /* ESC 清空但不失焦 —— 清完通常是想换个词继续打（清空要立刻生效，不走防抖） */
+          if (e.key === 'Escape' && e.currentTarget.value !== '') {
             e.preventDefault()
-            page.setQuery('')
+            e.currentTarget.value = ''
+            commitQuery('')
           }
+          /* 回车 = 「现在就筛」，不用等那 120ms */
+          if (e.key === 'Enter') commitQuery(e.currentTarget.value)
         }}
       />
       {page.query !== '' && (
@@ -3458,7 +3530,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           type="button"
           className={s.clear}
           aria-label={tr('presets.page.search.clearAria')}
-          onClick={() => page.setQuery('')}
+          onClick={() => {
+            const el = searchRef.current
+            if (el !== null) el.value = ''
+            commitQuery('')
+          }}
         >
           ×
         </button>
@@ -3774,6 +3850,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}
+                /* 「在文件夹中打开」= 右键菜单那颗（详情卡「文件位置」那一行右侧同一动作） */
+                onReveal={runReveal}
                 /*
                  * 展开详情「快捷操作」那颗「修改参数」（2026-10-20）——
                  * 与右键菜单里那一项同一个动作、同一个词（`PARAMS_TEXT`）。
@@ -4544,11 +4622,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于本地文件的话。
                       「参数对比」是右键两下那一条（选第一份 → 再选第二份）—— 入口只住菜单里，
                       所以这句提示就是它的发现路径，不能省 */}
-                  {page.kind === 'mkp'
-                    ? page.scope === 'cloud'
-                      ? tr('presets.page.foot.mkpCloud')
-                      : tr('presets.page.foot.mkpLocal')
-                    : tr('presets.page.foot.slicer')}
+                  {/*
+                    {menu} = 「没有鼠标就…」那半句，**按平台给**（Windows 有 Shift+F10
+                    与菜单键，mac 两样都没有 ⇒ 写 Ctrl+点按，见 `FOOT_MENU_HINT_KEY`）。
+                  */}
+                  {tr(
+                    page.kind === 'mkp'
+                      ? page.scope === 'cloud'
+                        ? 'presets.page.foot.mkpCloud'
+                        : 'presets.page.foot.mkpLocal'
+                      : 'presets.page.foot.slicer',
+                    { menu: tr(FOOT_MENU_HINT_KEY) },
+                  )}
                 </span>
               )}
             </>

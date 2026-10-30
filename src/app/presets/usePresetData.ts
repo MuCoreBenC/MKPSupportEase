@@ -54,7 +54,7 @@
  * 外壳按 tab 切换页面（切走就卸载），两页之间没有共享状态，跨页联动也没做。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import {
@@ -1488,6 +1488,19 @@ export function usePresetPage(data: PresetData): PresetPage {
    * 最常问的是「我这台机器上现在有什么」。
    */
   const [query, setQuery] = useSessionState('presets.query', '')
+  /*
+   * ★ **搜索词分两路走**（第十八轮 2026-10-30，作者报"打字卡、松手了还在往里加字"，
+   * 且"搜索框一样卡"）：
+   *
+   *   · `query` —— 输入框**自己**用的那一份，每次敲键都立刻更新（输入框跟手）。
+   *   · `deferredQuery` —— **筛表**用的那一份。React 18 的 `useDeferredValue`：
+   *     敲键那一帧先把输入框画出来，重活（重建两整张表 + 画所有行）放到**低优先级**
+   *     的那一趟；下一个键来了就打断它重来 —— 于是**键入永远不被列表拖住**，
+   *     也就不会再有"按键排队、松手了还在蹦字"。
+   *
+   * 打字机上"搜什么"和"表长什么样"差一两帧，用户看不出；卡住输入法才是真问题。
+   */
+  const deferredQuery = useDeferredValue(query)
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
   const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
@@ -1578,7 +1591,8 @@ export function usePresetPage(data: PresetData): PresetPage {
       slicerCopiedIds: copiedSet,
       active: data.active,
       kind,
-      query,
+      /* 筛表用**延后**的那一份（见上面 `deferredQuery` 那段注） */
+      query: deferredQuery,
       pinned,
       sort,
       deliveryPresets: data.delivery.presets,
@@ -1594,7 +1608,7 @@ export function usePresetPage(data: PresetData): PresetPage {
       remarks: data.remarks,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, query, sort],
+    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort],
   )
 
   /*
