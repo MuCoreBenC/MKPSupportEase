@@ -52,6 +52,9 @@ export const zhCN = {
   'settings.locale.systemHint': '系统是英文就用英文，否则中文',
   'settings.locale.zh': '简体中文',
   'settings.locale.zhHint': '界面全部中文',
+  /* 2026-10-30：繁体中文（台湾用字）—— 语言名用自己那种写法，与 `settings.locale.zh` 同一条 */
+  'settings.locale.zhTW': '繁體中文',
+  'settings.locale.zhTWHint': '台灣用字（預設 / 設定 / 檔案）',
   'settings.locale.en': 'English',
   'settings.locale.enHint': 'Interface in English',
   'settings.locale.failed': '没换成：{detail}',

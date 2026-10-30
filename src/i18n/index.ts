@@ -32,28 +32,35 @@ import { useCallback, useSyncExternalStore } from 'react'
 import type { LocalePref } from '../api/contract'
 import { en } from './en'
 import { zhCN, type StringKey } from './zh-CN'
+import { zhTW } from './zh-TW'
 
 /** 真语言（解析完的）。加语言时这里是第一个动的地方。 */
-export type Locale = 'zh-CN' | 'en'
+export type Locale = 'zh-CN' | 'zh-TW' | 'en'
 
 export type { StringKey }
 
 /** 文案变量的值（`{count}` 这类占位符） */
 export type Vars = Record<string, string | number>
 
-const DICTS: Record<Locale, Record<string, string>> = { 'zh-CN': zhCN, en }
+const DICTS: Record<Locale, Record<string, string>> = { 'zh-CN': zhCN, 'zh-TW': zhTW, en }
 
 /**
  * 语言档 → 真语言。**"跟随系统"只在这里落地一次**：
- * 系统语言以 `zh` 开头 ⇒ 中文，其余一律英文（今天只发这两种）。
+ *
+ * - `zh-Hant` / `zh-TW` / `zh-HK` / `zh-MO` ⇒ 繁體中文（2026-10-30 加）；
+ * - 其余 `zh` 开头 ⇒ 简体中文；
+ * - 非中文 ⇒ English。
  *
  * `null`（还没选过）与 `'system'` 走同一条路 —— 它们的区别在盘上，不在渲染上。
  */
 export function resolveLocale(pref: LocalePref | null): Locale {
   if (pref === 'zh-CN') return 'zh-CN'
+  if (pref === 'zh-TW') return 'zh-TW'
   if (pref === 'en') return 'en'
-  const tag = typeof navigator === 'undefined' ? '' : navigator.language
-  return tag.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+  const tag = typeof navigator === 'undefined' ? '' : navigator.language.toLowerCase()
+  if (tag === 'zh-hant' || tag.startsWith('zh-hant-')) return 'zh-TW'
+  if (tag === 'zh-tw' || tag === 'zh-hk' || tag === 'zh-mo') return 'zh-TW'
+  return tag.startsWith('zh') ? 'zh-CN' : 'en'
 }
 
 /* ---------- 活的那一格（模块级 store） ---------- */

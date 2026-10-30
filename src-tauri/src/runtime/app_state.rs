@@ -136,6 +136,9 @@ pub enum LocalePref {
     /// ★ 大写 `CN`：BCP 47 的写法，**不是** serde 默认会生成的那个小写
     #[serde(rename = "zh-CN")]
     ZhCn,
+    /// 繁體中文（台灣用字，2026-10-30 加）
+    #[serde(rename = "zh-TW")]
+    ZhTw,
     #[serde(rename = "en")]
     En,
 }
@@ -146,6 +149,7 @@ impl LocalePref {
         match raw.trim() {
             "system" => Some(Self::System),
             "zh-CN" => Some(Self::ZhCn),
+            "zh-TW" => Some(Self::ZhTw),
             "en" => Some(Self::En),
             _ => None,
         }
@@ -156,6 +160,7 @@ impl LocalePref {
         match self {
             Self::System => "system",
             Self::ZhCn => "zh-CN",
+            Self::ZhTw => "zh-TW",
             Self::En => "en",
         }
     }
@@ -168,6 +173,7 @@ impl LocalePref {
     pub fn lang(self) -> messages::Lang {
         match self {
             Self::ZhCn => messages::Lang::Zh,
+            Self::ZhTw => messages::Lang::ZhTw,
             Self::En => messages::Lang::En,
             Self::System => messages::resolve_system_lang(),
         }
@@ -1237,6 +1243,31 @@ mod tests {
             sha256: Some(hex(&Sha256::digest(content))),
             size: Some(content.len() as u64),
         }
+    }
+
+    /// **`parse` 与 `wire` 必须互相对得上**：`wire()` 出来的一定要 `parse` 得回去。
+    ///
+    /// 2026-10-30 加 `zh-TW` 时正是漏了 `parse` 那一支 —— `wire` 认、`parse` 不认，
+    /// 界面上点「繁體中文」直接报「认不出的界面语言：zh-TW」，而且报错里那句
+    /// `只能是 system / zh-CN / en` 也跟着把人带偏。这条判据就是钉这个不对称的。
+    #[test]
+    fn every_locale_wire_round_trips_through_parse() {
+        for p in [
+            LocalePref::System,
+            LocalePref::ZhCn,
+            LocalePref::ZhTw,
+            LocalePref::En,
+        ] {
+            assert_eq!(
+                LocalePref::parse(p.wire()),
+                Some(p),
+                "{} 写得出来却认不回来（parse 漏了一支）",
+                p.wire()
+            );
+        }
+        /* 认不出的**不许**静默回落成中文：那会让人以为自己点没反应 */
+        assert_eq!(LocalePref::parse("zh-Hans"), None);
+        assert_eq!(LocalePref::parse(""), None);
     }
 
     /* ---------- 整份状态文件的规矩 ---------- */
