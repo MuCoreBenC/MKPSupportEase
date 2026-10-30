@@ -383,9 +383,18 @@ mod tests {
         // 2026-10-21：参数台那一刀（弃用 / 所属分组 / 去重）新增 4 条版本覆盖 ——
         //   A1 +2、A1_MINI +2（`machineVariants` 里各多出 `'auto'` 与一条数值覆盖），
         //   合计 15 → 19；基底一列未变（仍是 18）。重算后：A1 (1, 11)、A1_MINI (2, 8)。
+        //
+        // 2026-10-31：三个参数在这两台机型的全部版本上拉齐了 ——
+        //   toolhead.offset_z 统一 3.9（A1 的 FASTV3.3 原 3.7 一起抬上来）、
+        //   wiping.ironing_mode 统一 auto、wiping.tower_extrude_ratio 统一 0.9。
+        //   A1 三版各改这三项；A1_MINI 三版只改 offset_z（它的 FASTV3.3 早就是 3.9）。
+        //   全版本同值，归并时上提成机型基底：A1 基底 1 变 4、覆盖仍 11；
+        //   A1_MINI 基底 2 变 3、覆盖 8 变 7。合计 (18, 19) 变 (22, 18)。
+        //   同一刀按 AGENTS 第 1 条「presets/ 是真源」同步进了 preset_recipes.toml
+        //   与对照基线，不是把判据改松。
         let want: BTreeMap<&str, (usize, usize)> = [
-            ("A1", (1, 11)),
-            ("A1_MINI", (2, 8)),
+            ("A1", (4, 11)),
+            ("A1_MINI", (3, 7)),
             ("P1S", (5, 0)),
             ("P2S", (5, 0)),
             ("X1C", (5, 0)),
@@ -408,7 +417,7 @@ mod tests {
                 );
             }
         }
-        assert_eq!(total, (18, 19), "合计与 doc §3.3 不一致");
+        assert_eq!(total, (22, 18), "合计与 doc §3.3 不一致");
 
         // A1 基底里那一项的身份也钉住：表里写的是 custom_mount_gcode
         let a1 = digest(
