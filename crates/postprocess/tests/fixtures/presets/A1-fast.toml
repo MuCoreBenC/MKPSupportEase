@@ -7,7 +7,7 @@
 [toolhead]
 offset_x = -0.7 # 笔尖偏移
 offset_y = 26.3 # 笔尖偏移
-offset_z = 3.9 # 笔尖偏移
+offset_z = 4 # 笔尖偏移
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 # 自定义工具头获取 G-code
 custom_mount_gcode = """
@@ -68,7 +68,7 @@ glue_z_lift_height_first_layers = 6 # 前3层抬升高度(mm) 范围:6~10
 swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 ironing_coverage_threshold = 10 # 熨烫覆盖率阈值(%) 范围:0~100
 ironing_e_sum_threshold = 7.9 # 熨烫E总和阈值 范围:0~100
-ironing_mode = "auto" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
+ironing_mode = "off" # 熨烫模式: off=始终移除, on=始终保留, auto=自动判断
 ironing_suppress_expand = 0 # 熨烫抑制扩展(mm) 范围:0~20
 ironing_suppress_expand_mode = "bbox" # 熨烫抑制扩展模式(bbox/centroid)
 min_support_interface_enabled = true # 最小支撑涂胶面过滤
@@ -85,7 +85,7 @@ rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
 support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
-tower_extrude_ratio = 0.9 # 支撑体挤出倍率
+tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
 tower_glue_layer_speed = 35 # 涂胶面层速度
 tower_rib_speed = "follow" # 斜肋打印速度模式
