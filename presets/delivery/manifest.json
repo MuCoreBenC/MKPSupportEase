@@ -1,7 +1,7 @@
 {
   "manifestVersion": 3,
   "channel": "stable",
-  "updated": "2026-10-29T04:54:13Z",
+  "updated": "2026-10-30T14:32:41Z",
   "minimumClient": "0.0.6",
   "version": "",
   "assets": [
@@ -11,8 +11,8 @@
       "machineId": "A1",
       "fileName": "A1-standard.toml",
       "relativePath": "delivery/mkp/presets/A1-standard.toml",
-      "sha256": "9396e78b31b391672b7f12da537c175334a3c378a1e8105af9c7a909efc67062",
-      "size": 4336
+      "sha256": "629d88729e58e5092a321f94ae5cdca7b1a2b08bcf98b9aa56413d6ef8ed4d20",
+      "size": 4341
     },
     {
       "id": "A1-fast.toml",
@@ -20,8 +20,8 @@
       "machineId": "A1",
       "fileName": "A1-fast.toml",
       "relativePath": "delivery/mkp/presets/A1-fast.toml",
-      "sha256": "9bb2e19a863849017283825e6020ef29e237b21c21fd1acb9fe4fef8b7ceb387",
-      "size": 4334
+      "sha256": "dcc2d62be4e63f72fb4378ba7177fadd548129b9a940e6970c1fea7e2a82d935",
+      "size": 4339
     },
     {
       "id": "A1-fastv3.3.toml",
@@ -29,8 +29,8 @@
       "machineId": "A1",
       "fileName": "A1-fastv3.3.toml",
       "relativePath": "delivery/mkp/presets/A1-fastv3.3.toml",
-      "sha256": "be5c64e2a36a5c6d4f764262b9489cc11ef2b0e76bf0db0de4dd4c4d7e36daf8",
-      "size": 4341
+      "sha256": "a3c52ffeed798a57784c8987d2a1962315e188a3fe16597ec9b4e27cc70fe2e2",
+      "size": 4343
     },
     {
       "id": "A1_MINI-standard.toml",
@@ -38,8 +38,8 @@
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-standard.toml",
       "relativePath": "delivery/mkp/presets/A1_MINI-standard.toml",
-      "sha256": "7ee0abf809f0a8e6fa35fe924dd518843f6a6976d364a858bd297e4643e52e97",
-      "size": 4343
+      "sha256": "eb3e6f9f61e7b55c531d94f210f72271a26be2751bc98b4fa60faefa88b7c684",
+      "size": 4345
     },
     {
       "id": "A1_MINI-fast.toml",
@@ -47,8 +47,8 @@
       "machineId": "A1_MINI",
       "fileName": "A1_MINI-fast.toml",
       "relativePath": "delivery/mkp/presets/A1_MINI-fast.toml",
-      "sha256": "12a25c618a7b09f60aa4d499bfcb31a7c83da83da3639c481e7fa10fb15a59d2",
-      "size": 4337
+      "sha256": "e7c222021034d78e706102fcffa3dcf1a2f4e66cce74445371841cc6ac3cf1b5",
+      "size": 4339
     },
     {
       "id": "A1_MINI-fastv3.3.toml",
