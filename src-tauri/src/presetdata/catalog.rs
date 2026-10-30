@@ -55,6 +55,12 @@ pub struct MachineVersion {
     /// 英文显示名（2026-10-27 双语数据）。空 = 回落 `name`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_en: Option<String>,
+    /// 繁體显示名（2026-10-31 多语言数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_tw: Option<String>,
+    /// 日文显示名（2026-10-31 多语言数据）。空 = 回落 `name`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_ja: Option<String>,
     #[serde(default)]
     pub recommended_bundle: Option<String>,
     #[serde(default)]
@@ -62,11 +68,23 @@ pub struct MachineVersion {
     /// 英文角标。空 = 回落 `tag`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tag_en: Option<String>,
+    /// 繁體角标。空 = 回落 `tag`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_tw: Option<String>,
+    /// 日文角标。空 = 回落 `tag`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_ja: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     /// 英文说明。空 = 回落 `description`
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description_en: Option<String>,
+    /// 繁體说明。空 = 回落 `description`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_tw: Option<String>,
+    /// 日文说明。空 = 回落 `description`
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_ja: Option<String>,
     /// **备注**（客户端副标题用它）。可空；清空 = 删键。
     ///
     /// 2026-10-07 作者定：客户端预设列表的副标题不要路径、改显示这一句 ——
@@ -434,13 +452,25 @@ pub enum VersionField {
     Name,
     /// 英文显示名（2026-10-27 双语数据）。可空
     NameEn,
+    /// 繁體显示名。可空
+    NameTw,
+    /// 日文显示名。可空
+    NameJa,
     RecommendedBundle,
     Tag,
     /// 英文角标。可空
     TagEn,
+    /// 繁體角标。可空
+    TagTw,
+    /// 日文角标。可空
+    TagJa,
     Description,
     /// 英文说明。可空
     DescriptionEn,
+    /// 繁體说明。可空
+    DescriptionTw,
+    /// 日文说明。可空
+    DescriptionJa,
     /// **备注**（客户端副标题）。可空
     Remark,
     /// 这一版专属的外观图（资产 id）。空 = 回落机型图 —— 允许清空
@@ -452,12 +482,18 @@ impl VersionField {
         match self {
             Self::Name => "name",
             Self::NameEn => "nameEn",
+            Self::NameTw => "nameTw",
+            Self::NameJa => "nameJa",
             Self::RecommendedBundle => "recommendedBundle",
             Self::Image => "image",
             Self::Tag => "tag",
             Self::TagEn => "tagEn",
+            Self::TagTw => "tagTw",
+            Self::TagJa => "tagJa",
             Self::Description => "description",
             Self::DescriptionEn => "descriptionEn",
+            Self::DescriptionTw => "descriptionTw",
+            Self::DescriptionJa => "descriptionJa",
             Self::Remark => "remark",
         }
     }
@@ -754,6 +790,13 @@ impl Machine {
                 .filter(|s| !s.is_empty())
                 .map(str::to_owned),
             description_en: description_en.map(str::to_owned),
+            // 新建版本不写其他语言的册子 —— 空了客户端回落中文那一册
+            name_tw: None,
+            name_ja: None,
+            tag_tw: None,
+            tag_ja: None,
+            description_tw: None,
+            description_ja: None,
             // 新建版本不写备注 —— 客户端副标题空了回落路径文本
             remark: None,
             // 新建版本不带图 —— 版本图缺就是"回落机型图"，不是"没图"
@@ -888,11 +931,17 @@ impl Machine {
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
             VersionField::NameEn => v.name_en = owned,
+            VersionField::NameTw => v.name_tw = owned,
+            VersionField::NameJa => v.name_ja = owned,
             VersionField::RecommendedBundle => v.recommended_bundle = owned,
             VersionField::Tag => v.tag = owned,
             VersionField::TagEn => v.tag_en = owned,
+            VersionField::TagTw => v.tag_tw = owned,
+            VersionField::TagJa => v.tag_ja = owned,
             VersionField::Description => v.description = owned,
             VersionField::DescriptionEn => v.description_en = owned,
+            VersionField::DescriptionTw => v.description_tw = owned,
+            VersionField::DescriptionJa => v.description_ja = owned,
             VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
         }
@@ -1591,11 +1640,17 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
                             id: t.get("id")?.as_str()?.to_owned(),
                             name: g("name").unwrap_or_default(),
                             name_en: g("nameEn"),
+                            name_tw: g("nameTw"),
+                            name_ja: g("nameJa"),
                             recommended_bundle: g("recommendedBundle"),
                             tag: g("tag"),
                             tag_en: g("tagEn"),
+                            tag_tw: g("tagTw"),
+                            tag_ja: g("tagJa"),
                             description: g("description"),
                             description_en: g("descriptionEn"),
+                            description_tw: g("descriptionTw"),
+                            description_ja: g("descriptionJa"),
                             remark: g("remark"),
                             image: g("image"),
                         })

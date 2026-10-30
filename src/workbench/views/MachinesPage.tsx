@@ -34,6 +34,7 @@ import type {
   MachineList,
   MachineView,
   RegistryView,
+  VersionField,
   VersionView,
   Words,
 } from '../api'
@@ -101,6 +102,23 @@ const STATE_TAG: Record<string, string> = {
   noResources: s.tagBuildNone,
 }
 
+/*
+ * 版本多语言（2026-10-31）：中文是打底那一册（详情卡的普通输入框），
+ * 其余语言走「多语言」模态框。**加一种语言 = 在 `I18N_LANGS` 加一行**，
+ * TOML 字段名就是 `${字段}${后缀}`（`nameEn` / `tagTw` …），前后端按同一套后缀拼。
+ */
+const I18N_LANGS = [
+  { suffix: 'En', label: 'English' },
+  { suffix: 'Tw', label: '繁體中文' },
+  { suffix: 'Ja', label: '日本語' },
+] as const
+const I18N_FIELDS = [
+  { suffix: 'name', label: '显示名', ph: '空 = 客户端回落中文那一册' },
+  { suffix: 'tag', label: '标签', ph: '可空' },
+  { suffix: 'description', label: '描述', ph: '可空' },
+] as const
+type I18nKey = `${(typeof I18N_FIELDS)[number]['suffix']}${(typeof I18N_LANGS)[number]['suffix']}`
+
 export default function MachinesPage({ book, words, onGoto, onSave, onBookRefresh }: Props) {
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
   const bodyRef = useRef<HTMLDivElement | null>(null)
@@ -141,11 +159,11 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const [verImgOpen, setVerImgOpen] = useState(false)
   const [editVOpen, setEditVOpen] = useState<string | null>(null)
   const [evName, setEvName] = useState('')
-  const [evNameEn, setEvNameEn] = useState('')
   const [evTag, setEvTag] = useState('')
-  const [evTagEn, setEvTagEn] = useState('')
   const [evDesc, setEvDesc] = useState('')
-  const [evDescEn, setEvDescEn] = useState('')
+  /** 多语言模态框：`${字段}${语言后缀}` → 草稿值。字段/语言两表都见下面的常量 */
+  const [i18nOpen, setI18nOpen] = useState<string | null>(null)
+  const [i18nDraft, setI18nDraft] = useState<Record<string, string>>({})
 
   /* —— 品牌（2026-10-03，作者：「在这一页多加一个品牌吧，右侧也是一样可以编辑，
         品牌图、显示名，不管客户端消不消费都提供」）——
@@ -324,7 +342,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   /** 改版本的一格。同上 */
   const saveVersion = async (
     versionId: string,
-    field: 'name' | 'tag' | 'description' | 'remark' | 'recommendedBundle' | 'image',
+    field: VersionField,
     value: string | null,
   ) => {
     if (!m) return
@@ -436,11 +454,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               const v = m.versions.find((x) => x.id === vid)
               setEditVOpen(`${m.id}/${vid}`)
               setEvName(v?.name ?? '')
-              setEvNameEn(v?.nameEn ?? '')
               setEvTag(v?.tag ?? '')
-              setEvTagEn(v?.tagEn ?? '')
               setEvDesc(v?.description ?? '')
-              setEvDescEn(v?.descriptionEn ?? '')
             },
           },
           {
@@ -616,24 +631,45 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     const [, vid] = editVOpen.split('/')
     try {
       let next = await wb.setVersionField(m.id, vid, 'name', evName)
-      next = await wb.setVersionField(m.id, vid, 'nameEn', evNameEn.trim() === '' ? null : evNameEn)
       next = await wb.setVersionField(m.id, vid, 'tag', evTag.trim() === '' ? null : evTag)
-      next = await wb.setVersionField(m.id, vid, 'tagEn', evTagEn.trim() === '' ? null : evTagEn)
       next = await wb.setVersionField(
         m.id,
         vid,
         'description',
         evDesc.trim() === '' ? null : evDesc,
       )
-      next = await wb.setVersionField(
-        m.id,
-        vid,
-        'descriptionEn',
-        evDescEn.trim() === '' ? null : evDescEn,
-      )
       setList(next)
       toasts.push(`已更新 ${m.id}/${vid} 的版本信息`)
       setEditVOpen(null)
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
+  /** 提交多语言模态框：只提交**有变化的**格，一格失败就停，不静默半成功 */
+  const submitI18n = async () => {
+    if (i18nOpen === null) return
+    const [mid, vid] = i18nOpen.split('/')
+    const ver = list?.machines.find((x) => x.id === mid)?.versions.find((x) => x.id === vid)
+    if (!ver) return
+    try {
+      let next: MachineList | null = null
+      for (const f of I18N_FIELDS) {
+        for (const l of I18N_LANGS) {
+          const key = `${f.suffix}${l.suffix}` as I18nKey
+          const draft = (i18nDraft[key] ?? '').trim()
+          if (draft === (ver[key] ?? '')) continue
+          next = await wb.setVersionField(
+            mid,
+            vid,
+            key,
+            draft === '' ? null : draft,
+          )
+        }
+      }
+      if (next) setList(next)
+      toasts.push(`已更新 ${mid}/${vid} 的多语言名称`)
+      setI18nOpen(null)
     } catch (e) {
       failToast(e)
     }
@@ -1300,11 +1336,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 onClick={() => {
                   setEditVOpen(vidOf(m.id, picked.id))
                   setEvName(picked.name)
-                  setEvNameEn(picked.nameEn ?? '')
                   setEvTag(picked.tag ?? '')
-                  setEvTagEn(picked.tagEn ?? '')
                   setEvDesc(picked.description ?? '')
-                  setEvDescEn(picked.descriptionEn ?? '')
                 }}
               >
                 编辑
@@ -1356,26 +1389,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                     />
                   </span>
 
-                  {/* 英文显示名：客户端按 locale 双语取值（空则回落中文）。
-                      留空 = 删掉文件里那一行，与 tag/description 同一口径 */}
-                  <span className={s.kvKey}>英文名称</span>
-                  <span className={s.kvVal}>
-                    <input
-                      className={s.inp}
-                      defaultValue={picked.nameEn ?? ''}
-                      key={`vname-en-${picked.id}-${picked.nameEn ?? ''}`}
-                      aria-label="英文名称"
-                      placeholder="可空 —— 英文界面回落上面的中文名"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim()
-                        if (next !== (picked.nameEn ?? '')) void saveVersion(picked.id, 'nameEn', next === '' ? null : next)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                      }}
-                    />
-                  </span>
-
+                  {/* 其他语言的显示名/标签/描述收进「多语言」模态框 ——
+                      一行一行排会随语言变多而撑爆详情卡（2026-10-31 作者定） */}
                   <span className={s.kvKey}>版本 id</span>
                   <span className={s.kvVal}>
                     <span className={s.mono}>{picked.id}</span>
@@ -1393,24 +1408,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                       onBlur={(e) => {
                         const next = e.target.value.trim()
                         if (next !== (picked.tag ?? '')) void saveVersion(picked.id, 'tag', next === '' ? null : next)
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                      }}
-                    />
-                  </span>
-
-                  <span className={s.kvKey}>英文标签</span>
-                  <span className={s.kvVal}>
-                    <input
-                      className={s.inp}
-                      defaultValue={picked.tagEn ?? ''}
-                      key={`vtag-en-${picked.id}-${picked.tagEn ?? ''}`}
-                      aria-label="英文标签"
-                      placeholder="可空 —— 英文界面回落上面的标签"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim()
-                        if (next !== (picked.tagEn ?? '')) void saveVersion(picked.id, 'tagEn', next === '' ? null : next)
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -1437,23 +1434,27 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                     />
                   </span>
 
-                  <span className={s.kvKey}>英文描述</span>
+                  {/* 其他语言的入口。详情卡只留中文打底的三格，
+                      其余语言（英/繁/日…）进模态框集中编辑 */}
+                  <span className={s.kvKey}>多语言</span>
                   <span className={s.kvVal}>
-                    <input
-                      className={s.inp}
-                      defaultValue={picked.descriptionEn ?? ''}
-                      key={`vdesc-en-${picked.id}-${picked.descriptionEn ?? ''}`}
-                      aria-label="英文描述"
-                      placeholder="可空 —— 英文界面回落上面的描述"
-                      onBlur={(e) => {
-                        const next = e.target.value.trim()
-                        if (next !== (picked.descriptionEn ?? ''))
-                          void saveVersion(picked.id, 'descriptionEn', next === '' ? null : next)
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() => {
+                        const draft: Record<string, string> = {}
+                        for (const f of I18N_FIELDS)
+                          for (const l of I18N_LANGS)
+                            draft[`${f.suffix}${l.suffix}`] = picked[`${f.suffix}${l.suffix}` as keyof typeof picked] as string ?? ''
+                        setI18nDraft(draft)
+                        setI18nOpen(vidOf(m.id, picked.id))
                       }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-                      }}
-                    />
+                    >
+                      编辑多语言…
+                    </button>
+                    <span className={s.cardNote}>
+                      {I18N_LANGS.map((l) => l.label).join(' · ')} —— 空了客户端就回落中文那一册
+                    </span>
                   </span>
 
                   {/* **备注**（2026-10-07）：客户端预设列表的**副标题**显示的就是这一句。
@@ -2155,7 +2156,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         </label>
       </ModalC14>
 
-      {/* —— 编辑版本（name/tag/description 各带英文，六格一次提交） —— */}
+      {/* —— 编辑版本（name / tag / description 三格一次提交） —— */}
       <ModalC14
         open={editVOpen !== null}
         title={`编辑版本 · ${editVOpen ?? ''}`}
@@ -2186,14 +2187,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <FieldMark />
           </span>
           <input className={s.inp} value={evName} aria-label="版本名" onChange={(e) => setEvName(e.target.value)} />
-          <span className={s.kvKey}>英文名</span>
-          <input
-            className={s.inp}
-            value={evNameEn}
-            aria-label="英文名"
-            placeholder="可空 —— 英文界面回落中文名"
-            onChange={(e) => setEvNameEn(e.target.value)}
-          />
           <span className={s.kvKey}>标签</span>
           <input
             className={s.inp}
@@ -2201,14 +2194,6 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             aria-label="标签"
             placeholder="可空"
             onChange={(e) => setEvTag(e.target.value)}
-          />
-          <span className={s.kvKey}>英文标签</span>
-          <input
-            className={s.inp}
-            value={evTagEn}
-            aria-label="英文标签"
-            placeholder="可空"
-            onChange={(e) => setEvTagEn(e.target.value)}
           />
           <span className={s.kvKey}>描述</span>
           <input
@@ -2218,18 +2203,57 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             placeholder="可空"
             onChange={(e) => setEvDesc(e.target.value)}
           />
-          <span className={s.kvKey}>英文描述</span>
-          <input
-            className={s.inp}
-            value={evDescEn}
-            aria-label="英文描述"
-            placeholder="可空"
-            onChange={(e) => setEvDescEn(e.target.value)}
-          />
         </label>
         <p className={s.cardNoteDim}>
           版本 id 不在这里改
-          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。一次提交六格：一格失败就停，不会只成功一半。套餐在 ④ 关联里改。" />
+          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。其他语言的显示名/标签/描述在详情卡的「多语言」里编辑。套餐在 ④ 关联里改。" />
+        </p>
+      </ModalC14>
+
+      {/* —— 多语言（英/繁/日…的显示名/标签/描述，一次提交；语言表见 I18N_LANGS） —— */}
+      <ModalC14
+        open={i18nOpen !== null}
+        title={`多语言 · ${i18nOpen ?? ''}`}
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setI18nOpen(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setI18nOpen(null)}>
+              取消
+            </button>
+            <button type="button" className={`${s.btn} ${s.btnPrimary}`} onClick={() => void submitI18n()}>
+              保存
+            </button>
+          </>
+        }
+      >
+        {I18N_LANGS.map((l) => (
+          <div key={l.suffix} style={{ marginBottom: 14 }}>
+            <div className={s.cardNote}>{l.label}</div>
+            <label className={s.kv} style={{ display: 'grid' }}>
+              {I18N_FIELDS.map((f) => {
+                const key = `${f.suffix}${l.suffix}` as I18nKey
+                return (
+                  <div key={key} style={{ display: 'contents' }}>
+                    <span className={s.kvKey}>{f.label}</span>
+                    <input
+                      className={s.inp}
+                      value={i18nDraft[key] ?? ''}
+                      aria-label={`${l.label} · ${f.label}`}
+                      placeholder={f.ph}
+                      onChange={(e) => setI18nDraft((d) => ({ ...d, [key]: e.target.value }))}
+                    />
+                  </div>
+                )
+              })}
+            </label>
+          </div>
+        ))}
+        <p className={s.cardNoteDim}>
+          中文那一册在详情卡里改；这里空着就回落中文
+          <HelpDot text="加一种语言 = 在本文件顶部的 I18N_LANGS 加一行（后缀与 TOML 字段名对齐，如 nameTw）。一次提交所有改动：一格失败就停，不会只成功一半。" />
         </p>
       </ModalC14>
 

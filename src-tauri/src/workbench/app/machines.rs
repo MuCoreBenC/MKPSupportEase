@@ -44,15 +44,21 @@ pub struct BrandView {
 pub struct VersionView {
     pub id: String,
     pub name: String,
-    /// 英文显示名（2026-10-31 工作台开编辑入口）。可空，客户端空则回落 `name`
+    /// 各语言显示名（2026-10-31 多语言数据）。可空，客户端按语言挑、空则回落 `name`
     pub name_en: Option<String>,
+    pub name_tw: Option<String>,
+    pub name_ja: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
-    /// 英文角标。可空
+    /// 各语言角标。可空
     pub tag_en: Option<String>,
+    pub tag_tw: Option<String>,
+    pub tag_ja: Option<String>,
     pub description: Option<String>,
-    /// 英文说明。可空
+    /// 各语言说明。可空
     pub description_en: Option<String>,
+    pub description_tw: Option<String>,
+    pub description_ja: Option<String>,
     /// **备注**（客户端副标题）。可空
     pub remark: Option<String>,
     /// **这一版专属的外观图**（资产 id）。`None` = 回落机型图（`Machine::image`）——
@@ -506,11 +512,17 @@ fn list_of(p: &Presets) -> MachineList {
                             id: v.id.clone(),
                             name: v.name.clone(),
                             name_en: v.name_en.clone(),
+                            name_tw: v.name_tw.clone(),
+                            name_ja: v.name_ja.clone(),
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
                             tag_en: v.tag_en.clone(),
+                            tag_tw: v.tag_tw.clone(),
+                            tag_ja: v.tag_ja.clone(),
                             description: v.description.clone(),
                             description_en: v.description_en.clone(),
+                            description_tw: v.description_tw.clone(),
+                            description_ja: v.description_ja.clone(),
                             remark: v.remark.clone(),
                             image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),

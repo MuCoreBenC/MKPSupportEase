@@ -393,12 +393,13 @@ export default function PageHome({ density }: PageHomeProps) {
     return (machine?.versions ?? []).map((v) => ({
       id: v.id,
       label: v.name,
-      badge: v.tag == null ? undefined : bi(v.tag, v.tagEn ?? undefined, locale),
-      /* 色调仍按**原角标**查表（`TAG_TONE` 的键是中文那一册） */
+      /* `catalog.machines` 已按语言摊开（useCatalog），角标直接用；
+         色调查表只认中文那一册，非中文界面回落默认色调 */
+      badge: v.tag ?? undefined,
       badgeTone: TAG_TONE[v.tag ?? ''],
       note: v.description,
     }))
-  }, [catalog.machines, sel.model, locale])
+  }, [catalog.machines, sel.model])
 
 
   /*
