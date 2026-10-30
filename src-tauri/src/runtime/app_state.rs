@@ -139,6 +139,8 @@ pub enum LocalePref {
     /// 繁體中文（台灣用字，2026-10-30 加）
     #[serde(rename = "zh-TW")]
     ZhTw,
+    /// 日本語（2026-10-30 加）
+    Ja,
     #[serde(rename = "en")]
     En,
 }
@@ -150,6 +152,7 @@ impl LocalePref {
             "system" => Some(Self::System),
             "zh-CN" => Some(Self::ZhCn),
             "zh-TW" => Some(Self::ZhTw),
+            "ja" => Some(Self::Ja),
             "en" => Some(Self::En),
             _ => None,
         }
@@ -161,6 +164,7 @@ impl LocalePref {
             Self::System => "system",
             Self::ZhCn => "zh-CN",
             Self::ZhTw => "zh-TW",
+            Self::Ja => "ja",
             Self::En => "en",
         }
     }
@@ -174,6 +178,7 @@ impl LocalePref {
         match self {
             Self::ZhCn => messages::Lang::Zh,
             Self::ZhTw => messages::Lang::ZhTw,
+            Self::Ja => messages::Lang::Ja,
             Self::En => messages::Lang::En,
             Self::System => messages::resolve_system_lang(),
         }

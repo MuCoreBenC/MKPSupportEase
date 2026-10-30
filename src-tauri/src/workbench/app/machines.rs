@@ -44,9 +44,15 @@ pub struct BrandView {
 pub struct VersionView {
     pub id: String,
     pub name: String,
+    /// 英文显示名（2026-10-31 工作台开编辑入口）。可空，客户端空则回落 `name`
+    pub name_en: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
+    /// 英文角标。可空
+    pub tag_en: Option<String>,
     pub description: Option<String>,
+    /// 英文说明。可空
+    pub description_en: Option<String>,
     /// **备注**（客户端副标题）。可空
     pub remark: Option<String>,
     /// **这一版专属的外观图**（资产 id）。`None` = 回落机型图（`Machine::image`）——
@@ -499,9 +505,12 @@ fn list_of(p: &Presets) -> MachineList {
                         VersionView {
                             id: v.id.clone(),
                             name: v.name.clone(),
+                            name_en: v.name_en.clone(),
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
+                            tag_en: v.tag_en.clone(),
                             description: v.description.clone(),
+                            description_en: v.description_en.clone(),
                             remark: v.remark.clone(),
                             image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),

@@ -224,7 +224,7 @@ pub async fn get_locale(app: AppHandle) -> Result<Option<String>, AppError> {
     })
 }
 
-/// 换界面语言：`system` / `zh-CN` / `zh-TW` / `en`。**先认字符串再落盘** ——
+/// 换界面语言：`system` / `zh-CN` / `zh-TW` / `ja` / `en`。**先认字符串再落盘** ——
 /// 认不出就整次拒绝（不静默写成中文：那会让人以为自己点没反应）。
 ///
 /// ★ 落盘成功之后有两件事要跟着做，顺序不能反：

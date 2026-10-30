@@ -48,6 +48,8 @@ export const en: Record<StringKey, string> = {
   /* 2026-10-30: Traditional Chinese (Taiwan usage). The name is written in its own script. */
   'settings.locale.zhTW': '繁體中文',
   'settings.locale.zhTWHint': 'Traditional Chinese (Taiwan usage)',
+  'settings.locale.ja': '日本語',
+  'settings.locale.jaHint': 'Japanese interface',
   'settings.locale.en': 'English',
   'settings.locale.enHint': 'English interface',
   'settings.locale.failed': 'Couldn’t switch: {detail}',

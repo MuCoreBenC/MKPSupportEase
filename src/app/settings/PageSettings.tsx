@@ -172,6 +172,7 @@ const LOCALE_CHOICES: { id: LocalePref; label: StringKey; hint: StringKey }[] = 
   { id: 'system', label: 'settings.locale.system', hint: 'settings.locale.systemHint' },
   { id: 'zh-CN', label: 'settings.locale.zh', hint: 'settings.locale.zhHint' },
   { id: 'zh-TW', label: 'settings.locale.zhTW', hint: 'settings.locale.zhTWHint' },
+  { id: 'ja', label: 'settings.locale.ja', hint: 'settings.locale.jaHint' },
   { id: 'en', label: 'settings.locale.en', hint: 'settings.locale.enHint' },
 ]
 

@@ -141,8 +141,11 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const [verImgOpen, setVerImgOpen] = useState(false)
   const [editVOpen, setEditVOpen] = useState<string | null>(null)
   const [evName, setEvName] = useState('')
+  const [evNameEn, setEvNameEn] = useState('')
   const [evTag, setEvTag] = useState('')
+  const [evTagEn, setEvTagEn] = useState('')
   const [evDesc, setEvDesc] = useState('')
+  const [evDescEn, setEvDescEn] = useState('')
 
   /* —— 品牌（2026-10-03，作者：「在这一页多加一个品牌吧，右侧也是一样可以编辑，
         品牌图、显示名，不管客户端消不消费都提供」）——
@@ -433,8 +436,11 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               const v = m.versions.find((x) => x.id === vid)
               setEditVOpen(`${m.id}/${vid}`)
               setEvName(v?.name ?? '')
+              setEvNameEn(v?.nameEn ?? '')
               setEvTag(v?.tag ?? '')
+              setEvTagEn(v?.tagEn ?? '')
               setEvDesc(v?.description ?? '')
+              setEvDescEn(v?.descriptionEn ?? '')
             },
           },
           {
@@ -610,12 +616,20 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     const [, vid] = editVOpen.split('/')
     try {
       let next = await wb.setVersionField(m.id, vid, 'name', evName)
+      next = await wb.setVersionField(m.id, vid, 'nameEn', evNameEn.trim() === '' ? null : evNameEn)
       next = await wb.setVersionField(m.id, vid, 'tag', evTag.trim() === '' ? null : evTag)
+      next = await wb.setVersionField(m.id, vid, 'tagEn', evTagEn.trim() === '' ? null : evTagEn)
       next = await wb.setVersionField(
         m.id,
         vid,
         'description',
         evDesc.trim() === '' ? null : evDesc,
+      )
+      next = await wb.setVersionField(
+        m.id,
+        vid,
+        'descriptionEn',
+        evDescEn.trim() === '' ? null : evDescEn,
       )
       setList(next)
       toasts.push(`已更新 ${m.id}/${vid} 的版本信息`)
@@ -1286,8 +1300,11 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 onClick={() => {
                   setEditVOpen(vidOf(m.id, picked.id))
                   setEvName(picked.name)
+                  setEvNameEn(picked.nameEn ?? '')
                   setEvTag(picked.tag ?? '')
+                  setEvTagEn(picked.tagEn ?? '')
                   setEvDesc(picked.description ?? '')
+                  setEvDescEn(picked.descriptionEn ?? '')
                 }}
               >
                 编辑
@@ -1339,6 +1356,26 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                     />
                   </span>
 
+                  {/* 英文显示名：客户端按 locale 双语取值（空则回落中文）。
+                      留空 = 删掉文件里那一行，与 tag/description 同一口径 */}
+                  <span className={s.kvKey}>英文名称</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.nameEn ?? ''}
+                      key={`vname-en-${picked.id}-${picked.nameEn ?? ''}`}
+                      aria-label="英文名称"
+                      placeholder="可空 —— 英文界面回落上面的中文名"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.nameEn ?? '')) void saveVersion(picked.id, 'nameEn', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
+
                   <span className={s.kvKey}>版本 id</span>
                   <span className={s.kvVal}>
                     <span className={s.mono}>{picked.id}</span>
@@ -1363,6 +1400,24 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                     />
                   </span>
 
+                  <span className={s.kvKey}>英文标签</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.tagEn ?? ''}
+                      key={`vtag-en-${picked.id}-${picked.tagEn ?? ''}`}
+                      aria-label="英文标签"
+                      placeholder="可空 —— 英文界面回落上面的标签"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.tagEn ?? '')) void saveVersion(picked.id, 'tagEn', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
+
                   <span className={s.kvKey}>描述</span>
                   <span className={s.kvVal}>
                     <input
@@ -1375,6 +1430,25 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                         const next = e.target.value.trim()
                         if (next !== (picked.description ?? ''))
                           void saveVersion(picked.id, 'description', next === '' ? null : next)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                      }}
+                    />
+                  </span>
+
+                  <span className={s.kvKey}>英文描述</span>
+                  <span className={s.kvVal}>
+                    <input
+                      className={s.inp}
+                      defaultValue={picked.descriptionEn ?? ''}
+                      key={`vdesc-en-${picked.id}-${picked.descriptionEn ?? ''}`}
+                      aria-label="英文描述"
+                      placeholder="可空 —— 英文界面回落上面的描述"
+                      onBlur={(e) => {
+                        const next = e.target.value.trim()
+                        if (next !== (picked.descriptionEn ?? ''))
+                          void saveVersion(picked.id, 'descriptionEn', next === '' ? null : next)
                       }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
@@ -2081,7 +2155,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         </label>
       </ModalC14>
 
-      {/* —— 编辑版本（name / tag / description 三格一次提交） —— */}
+      {/* —— 编辑版本（name/tag/description 各带英文，六格一次提交） —— */}
       <ModalC14
         open={editVOpen !== null}
         title={`编辑版本 · ${editVOpen ?? ''}`}
@@ -2112,6 +2186,14 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <FieldMark />
           </span>
           <input className={s.inp} value={evName} aria-label="版本名" onChange={(e) => setEvName(e.target.value)} />
+          <span className={s.kvKey}>英文名</span>
+          <input
+            className={s.inp}
+            value={evNameEn}
+            aria-label="英文名"
+            placeholder="可空 —— 英文界面回落中文名"
+            onChange={(e) => setEvNameEn(e.target.value)}
+          />
           <span className={s.kvKey}>标签</span>
           <input
             className={s.inp}
@@ -2119,6 +2201,14 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             aria-label="标签"
             placeholder="可空"
             onChange={(e) => setEvTag(e.target.value)}
+          />
+          <span className={s.kvKey}>英文标签</span>
+          <input
+            className={s.inp}
+            value={evTagEn}
+            aria-label="英文标签"
+            placeholder="可空"
+            onChange={(e) => setEvTagEn(e.target.value)}
           />
           <span className={s.kvKey}>描述</span>
           <input
@@ -2128,10 +2218,18 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             placeholder="可空"
             onChange={(e) => setEvDesc(e.target.value)}
           />
+          <span className={s.kvKey}>英文描述</span>
+          <input
+            className={s.inp}
+            value={evDescEn}
+            aria-label="英文描述"
+            placeholder="可空"
+            onChange={(e) => setEvDescEn(e.target.value)}
+          />
         </label>
         <p className={s.cardNoteDim}>
           版本 id 不在这里改
-          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。一次提交三格：一格失败就停，不会只成功一半。套餐在 ④ 关联里改。" />
+          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。一次提交六格：一格失败就停，不会只成功一半。套餐在 ④ 关联里改。" />
         </p>
       </ModalC14>
 

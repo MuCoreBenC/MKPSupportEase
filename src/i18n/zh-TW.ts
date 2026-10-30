@@ -50,6 +50,8 @@ export const zhTW: Record<StringKey, string> = {
   'settings.locale.zhHint': '介面全部中文',
   'settings.locale.zhTW': '繁體中文',
   'settings.locale.zhTWHint': '台灣用字（預設 / 設定 / 檔案）',
+  'settings.locale.ja': '日語',
+  'settings.locale.jaHint': '介面全部日文',
   /* 2026-10-30：繁體中文（台灣用字）—— 語言名用自己那種寫法，與 `settings.locale.zh` 同一條 */
   'settings.locale.en': 'English',
   'settings.locale.enHint': 'Interface in English',

@@ -788,7 +788,8 @@ export default function PresetTable({
               <SortTh
                 label={scope === 'cloud' ? tr('presets.table.col.cloudTime') : tr('presets.table.col.time')}
                 colKey="time"
-                cls={s.thTime}
+                /* 云端档表头文案长（EN "Catalog published"），列宽单独一档 —— 见 CSS 那段 */
+                cls={scope === 'cloud' ? s.thTimeCloud : s.thTime}
                 sort={sort}
                 onSort={onSort}
               />

@@ -30,7 +30,7 @@ const i18nDir = join(here, '..', 'src', 'i18n')
  * 语言名这几条本来就该用**它自己的文字**写（"简体中文" / "繁體中文"），不算漏翻。
  * 2026-10-30 加繁体时一并把 `zhTW` 放进来。
  */
-const CJK_ALLOWED = new Set(['settings.locale.zh', 'settings.locale.zhTW'])
+const CJK_ALLOWED = new Set(['settings.locale.zh', 'settings.locale.zhTW', 'settings.locale.ja'])
 
 /**
  * 从字典源码里抠出 `键 → 值`。
@@ -58,6 +58,7 @@ const problems = []
 const zh = parseDict(await readFile(join(i18nDir, 'zh-CN.ts'), 'utf8'), 'zh-CN.ts')
 const en = parseDict(await readFile(join(i18nDir, 'en.ts'), 'utf8'), 'en.ts')
 const zhTW = parseDict(await readFile(join(i18nDir, 'zh-TW.ts'), 'utf8'), 'zh-TW.ts')
+const ja = parseDict(await readFile(join(i18nDir, 'ja.ts'), 'utf8'), 'ja.ts')
 
 /*
  * 除源语言之外每多一本，就多查一遍 —— 加语言只改这张表。
@@ -67,6 +68,7 @@ const zhTW = parseDict(await readFile(join(i18nDir, 'zh-TW.ts'), 'utf8'), 'zh-TW
 const OTHERS = [
   { file: 'en.ts', dict: en, cjk: true },
   { file: 'zh-TW.ts', dict: zhTW, cjk: false },
+  { file: 'ja.ts', dict: ja, cjk: false },
 ]
 
 /* ① 键集一致 */

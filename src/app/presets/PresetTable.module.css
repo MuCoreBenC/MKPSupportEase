@@ -215,6 +215,18 @@
   width: 60px;
 }
 
+/*
+ * 云端档的时间列表头（2026-10-30）：云端表这一列说的事是「目录发布」，
+ * 英文 "Catalog published" 在 60px 里被截成 "Catalog p"（作者截图）。
+ * 定宽按**最长的那个**留是这一页的老规矩（`.dKey` 92→104 同一个坑）：
+ * 14px 顶格字号量出来 ≈121px + 两侧内衬 ≈ 20 ⇒ 上限 144；
+ * 下限按窄窗 12px 字号 + 内衬 ≈ 120 保底，中间随窗连续（a03 的 clamp 纪律）。
+ * 本地档的「时间 / Time」照旧 60 —— 那一格只有「月-日」。
+ */
+.thTimeCloud {
+  width: clamp(120px, 12vw, 144px);
+}
+
 /* 操作：两颗两字胶囊（使用 / 在用）；列宽含右侧 page-x 对称边距 */
 .thAct {
   width: clamp(86px, 6.6vw, 94px);
@@ -985,8 +997,30 @@
  */
 .dHead {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: baseline;
+  /*
+   * ★ 2026-10-30 第二轮（作者截图：卡头名字竖着一字一行）：
+   *   中间那格原来是 `auto` —— `auto` 轨道按「整条小事实不折行」的 max-content
+   *   优先拿地，结论那句英文一长（"Up to date (a new release shipped, …)"），
+   *   `minmax(0, 1fr)` 的名字格没有任何下限，被压到接近 0 宽，名字靠
+   *   `overflow-wrap: anywhere` 逐字竖排。
+   *
+   * ★ 2026-10-31 第三轮（作者圈图：「这都啥呀，没有做到视觉对齐」）—— 上限改算法：
+   *   第二轮的 `60%` 是按比例砍，中文那段小事实（"已是最新（…这份没变）· 正在用 ·
+   *   4.4 KB · 云端更新 2026-10-30 22:32" ≈ 626px）明明放得下也被砍成两行，
+   *   "云端更新…" 孤零零吊在右下。上限真正要防的只是英文那种真放不下的场景，
+   *   所以改成**算术下限**：`calc(100% - 240px)` —— 永远给「名字 + 收起 + 沟」留
+   *   240px（名字保底 ≈164px，长名字照旧自己折），剩下的全给小事实：
+   *   中文一行装得下就一行（与改版前同一摆位）；英文超了才折行。
+   *   下限仍是 min-content：再窄也保证每个小事实词自己不截断。
+   *
+   * ★ 竖向对齐（同一张圈图）：`baseline` 在这里**不成立** —— 名字格的基线取的是
+   *   它第一个 flex 子项的基线，而那是**图标**（SVG 没有文字基线，取盒子底缘），
+   *   于是 grid 拿"图标底缘"去对小事实的文字基线，名字与小事实首行错开 3.5~4px
+   *   （WebKit / Chromium 实测一致）。改 `start` + 小事实与「收起」的行高对齐
+   *   名字（1.45，见下）：首行盒顶对齐 ⇒ 基线差 <1px，两引擎实测 Δ=0。
+   */
+  grid-template-columns: minmax(0, 1fr) minmax(min-content, calc(100% - 240px)) auto;
+  align-items: start;
   gap: 4px 8px;
   min-width: 0;
 }
@@ -1030,6 +1064,9 @@
   justify-content: flex-end;
   gap: 8px;
   font-size: var(--fs-label);
+  /* 行高与 `.dHeadName` 同一个 1.45：`.dHead` 用 start 对齐，首行盒顶一齐，
+     基线差就只剩字号的半行距（<1px）—— 那条 `baseline` 的图标坑见上面那段 */
+  line-height: 1.45;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -1046,6 +1083,8 @@
   background: transparent;
   font: inherit;
   font-size: var(--fs-label);
+  /* 与 `.dHeadMeta` 同一条：start 对齐下首行盒顶跟名字一齐（见 `.dHead` 那段） */
+  line-height: 1.45;
   color: var(--text-3);
   cursor: pointer;
 }

@@ -1992,13 +1992,14 @@ export type ThemePref = 'light' | 'dark' | 'system'
  * - `system`：跟随系统（出厂档）；
  * - `zh-CN`：简体中文；
  * - `zh-TW`：繁體中文（台灣用字，2026-10-30 加）；
+ * - `ja`：日本語（2026-10-30 加）；
  * - `en`：English。
  *
  * ★ 线上字面量带大写（`zh-CN`）—— Rust 那一侧是逐个 `serde(rename)`，
  *   不是 `rename_all`，改这里必须同时改那边。
  * ★ `null`（还没选过）与 `'system'`（明确点了跟随系统）分得开，与主题同一条口径。
  */
-export type LocalePref = 'system' | 'zh-CN' | 'zh-TW' | 'en'
+export type LocalePref = 'system' | 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 
 /* ---------- 主窗怎么摆（2026-10-17） ---------- */
 

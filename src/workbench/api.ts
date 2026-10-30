@@ -1417,9 +1417,15 @@ export interface BrandView {
 export interface VersionView {
   id: string
   name: string
+  /** 英文显示名。可空，客户端空则回落 `name` */
+  nameEn: string | null
   recommendedBundle: string | null
   tag: string | null
+  /** 英文角标。可空 */
+  tagEn: string | null
   description: string | null
+  /** 英文说明。可空 */
+  descriptionEn: string | null
   /**
    * **备注**（2026-10-07）：客户端预设列表的**副标题**显示的就是这一句。
    * `null` = 没写（客户端回落路径文本）。可空 —— 客户端「副标题不要位置文案」的正文。
@@ -1871,9 +1877,12 @@ export const assetUrl = (url: string) => encodeURI(url)
 /** `catalog::VersionField` —— 版本身上可改的那几格。`id` 不在里面（改 ID = 删+加） */
 export type VersionField =
   | 'name'
+  | 'nameEn'
   | 'recommendedBundle'
   | 'tag'
+  | 'tagEn'
   | 'description'
+  | 'descriptionEn'
   | 'remark'
   | 'image'
 
