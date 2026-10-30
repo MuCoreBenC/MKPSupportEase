@@ -463,6 +463,34 @@ impl Catalog {
                 out.groups.push(g.clone());
             }
         }
+        /*
+         * **机型的图位也要兜底**（2026-10-30 作者：「随包的到底受不受云端的影响？
+         * 云端的比较旧、随包的比较新，会被覆盖吗」）。
+         *
+         * 上面那条只补了 `assets` / `groups`，机型自己的 `image` / `imageVariant` /
+         * `icon` 是**机型行上的字段**，② 旧 ⇒ 那几格是 `None` ⇒ 首页查不到图、
+         * 一路回落到品牌字标。2026-10-30 补 P2S / X1C 外观图时正撞上这条：
+         * 程序里带着图、盘上那份目录（第 1 号）里 `image` 还是空，界面上就是没图。
+         *
+         * 补法同口径，**只补空位、② 说了话就一个字不动**：
+         * - ② 那台机型的 `image` 是 `None` 且随包那份有 ⇒ 抄随包那份的；
+         * - `imageVariant` / `icon` 同理；
+         * - ② 里根本没有这台机型（停用了 / 新加的）⇒ **不补** —— 机型在不在是目录说了算。
+         */
+        for m in &mut out.machines {
+            let Some(src) = embedded.machines.iter().find(|x| x.id == m.id) else {
+                continue;
+            };
+            if m.image.is_none() {
+                m.image = src.image.clone();
+            }
+            if m.image_variant.is_none() {
+                m.image_variant = src.image_variant.clone();
+            }
+            if m.icon.is_none() {
+                m.icon = src.icon.clone();
+            }
+        }
         out
     }
 }
@@ -569,6 +597,15 @@ impl Catalog {
         let mut missing = Vec::new();
 
         for m in presets.catalog.machines() {
+            /*
+             * **停用的机型整台不进目录**（2026-10-30）：机型与它的预设文件都不发。
+             * 客户端因此看不到它（`getMachines` 读的就是这份目录），后处理也查不到它
+             * （`hook` 按"目录里没有这台机型"拒绝）。源文件照留、引用都不用动 ——
+             * 重新启用 = 去掉 `enabled = false` 再发一版。
+             */
+            if !m.enabled {
+                continue;
+            }
             machines.push(CatalogMachine {
                 id: m.id.clone(),
                 display: if m.display.trim().is_empty() {
@@ -977,7 +1014,7 @@ mod tests {
             "下载区没有 images 这一类：整机图不进 Delivery"
         );
         // 反空转：catalog 的资产定义与台账**逐条对齐**（不是只数一个总数）——
-        // 今天 33 条 = 9 MKP 预设 + 4 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
+        // 今天 35 条 = 9 MKP 预设 + 6 整机图（bundled）+ 1 品牌字标 + 9 BBS + 3 图标
         //              + 5 模型（Z / XY 各多一版「加长版」）+ 2 引导图（bundled，2026-10-16）
         assert_eq!(
             catalog.assets.len(),
@@ -986,12 +1023,13 @@ mod tests {
         );
         assert_eq!(
             catalog.assets.len(),
-            33,
-            "实测 33 条（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型 + 2 引导图）——
+            35,
+            "实测 35 条（9 MKP 预设 + 6 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型 + 2 引导图）——
              2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
              （`type = 'guide'`，bundled）、2026-10-18 加了 Z 校准加长版
              （`zoffset-calibration-ext`）、2026-10-19 加了 XY 校准加长版
-             （`precise-calibration-ext`）——条数变了要核对台账再改这里的期望"
+             （`precise-calibration-ext`）、2026-10-30 加了 P2S / X1C 外观图
+             （`p2s-image` / `x1c-image`，bundled）——条数变了要核对台账再改这里的期望"
         );
 
         // 文件条目与命名规则对得上：A1 + FASTV3.3 → A1-fastv3.3.toml
@@ -1235,12 +1273,13 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            33,
-            "实测 33 条资产定义（9 MKP 预设 + 4 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型
+            35,
+            "实测 35 条资产定义（9 MKP 预设 + 6 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型
              + 2 引导图）——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
              登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）；
-             2026-10-18：Z 校准加长版进台账（model 类）；2026-10-19：XY 校准加长版进台账（model 类）"
+             2026-10-18：Z 校准加长版进台账（model 类）；2026-10-19：XY 校准加长版进台账（model 类）；
+             2026-10-30：P2S / X1C 外观图进台账（image 类、bundled）"
         );
         assert_eq!(
             catalog.bundles.len(),
@@ -1462,5 +1501,69 @@ mod tests {
             "下载面的条目不许凭空补"
         );
         assert_eq!(released.assets.len(), 1, "原那份不动（补的是一份副本）");
+    }
+
+    /// **机型的图位同样兜底**（2026-10-30）：程序带着图、云上那份目录还是老的一版
+    /// （机型行的 `image` 空着）—— 界面上不该没图。
+    ///
+    /// 边界同 [`Catalog::with_missing_bundled_from`] 那条：
+    /// 只补**空位**，② 说了话的一个字不动；② 里根本没有这台机型就不补。
+    #[test]
+    fn machine_image_slots_backfill_from_the_bundled_catalog() {
+        let machine = |id: &str, image: Option<&str>, icon: Option<&str>| CatalogMachine {
+            id: id.to_owned(),
+            display: id.to_owned(),
+            name: String::new(),
+            brand: String::new(),
+            default_bundle: None,
+            external_aliases: Vec::new(),
+            image: image.map(str::to_owned),
+            image_variant: None,
+            icon: icon.map(str::to_owned),
+            plate_ids: Vec::new(),
+            default_plate_id: None,
+            dimensions: None,
+            versions: Vec::new(),
+            zones: Vec::new(),
+        };
+
+        let released = Catalog {
+            machines: vec![
+                /* ② 还没配图（加图之前那一版目录） */
+                machine("P2S", None, None),
+                /* ② 已经说了话 —— 以它为准 */
+                machine("A1", Some("a1-image-old"), Some("a1-icon")),
+            ],
+            ..Catalog::default()
+        };
+        let embedded = Catalog {
+            machines: vec![
+                machine("P2S", Some("p2s-image"), Some("p1s-icon")),
+                machine("A1", Some("a1-image"), Some("a1-icon")),
+                /* ② 里没有这台（停用 / 新加）—— 不许凭空补 */
+                machine("X1C", Some("x1c-image"), None),
+            ],
+            ..Catalog::default()
+        };
+
+        let merged = released.with_missing_bundled_from(&embedded);
+
+        assert_eq!(merged.machines.len(), 2, "机型条数由 ② 定，不补新机型");
+        assert_eq!(
+            merged.machine("P2S").and_then(|m| m.image.as_deref()),
+            Some("p2s-image"),
+            "空着的图位从随包那份补上"
+        );
+        assert_eq!(
+            merged.machine("P2S").and_then(|m| m.icon.as_deref()),
+            Some("p1s-icon"),
+            "图标同理"
+        );
+        assert_eq!(
+            merged.machine("A1").and_then(|m| m.image.as_deref()),
+            Some("a1-image-old"),
+            "② 里已有的一格都不许动"
+        );
+        assert!(merged.machine("X1C").is_none(), "② 里没有的机型不补");
     }
 }

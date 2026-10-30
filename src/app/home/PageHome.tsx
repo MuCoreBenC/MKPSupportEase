@@ -105,15 +105,34 @@ const TAG_TONE: Record<string, Option['badgeTone']> = {
   最新: 'new',
 }
 
+/**
+ * 参数行：标签 | 数字 | 单位。
+ *
+ * ★ 2026-10-30（作者：「这些单位啊，都是靠右的……我感觉它总是没对齐」）：
+ * 值原来是**一整串左对齐**（`-25.90 mm`），于是数字左缘齐、右缘参差（`-25.90` 六位、
+ * `14.00` 五位），单位跟着数字宽度跑。现在把「最后一个空格」当分界拆成两段：
+ * 数字右对齐、单位右对齐到同一条竖线（单位列固定宽，`mm` 与 `mm/s` 才都能对齐）。
+ *
+ * 为什么用 `lastIndexOf(' ')` 而不是固定正则：值只有两种形状 —— `数字 单位`
+ * 与 `—`（没值），后者没有空格，两段都留在数字那一格，右对齐照样成立。
+ */
 function Rows({ items }: { items: [string, string][] }) {
   return (
     <dl className={p.rows}>
-      {items.map(([label, value]) => (
-        <div className={p.row} key={label}>
-          <dt className={p.label}>{label}</dt>
-          <dd className={p.value}>{value}</dd>
-        </div>
-      ))}
+      {items.map(([label, value]) => {
+        const cut = value.lastIndexOf(' ')
+        const num = cut > 0 ? value.slice(0, cut) : value
+        const unit = cut > 0 ? value.slice(cut + 1) : ''
+        return (
+          <div className={p.row} key={label}>
+            <dt className={p.label}>{label}</dt>
+            <dd className={p.value}>
+              <span className={p.num}>{num}</span>
+              <span className={p.unit}>{unit}</span>
+            </dd>
+          </div>
+        )
+      })}
     </dl>
   )
 }

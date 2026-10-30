@@ -249,6 +249,11 @@ export const en: Record<StringKey, string> = {
   'settings.advanced.applyFailed': 'This address serves no preset data, so nothing changed — still using {label}. Check the address (or pick Gitee / GitHub above).',
   'settings.advanced.switched': 'Switched to: {label}',
   'settings.advanced.switchFailed': 'Couldn’t switch; still using {label}.',
+  /* 2026-10-30: sync the catalog right after the source changes (used to need a restart) */
+  'settings.advanced.syncing': 'The address is in use — syncing the catalog…',
+  'settings.advanced.synced': 'The address is in use and the catalog is up to date.',
+  'settings.advanced.syncFailed':
+    'The address is in use, but the catalog did not sync: {detail}. Open the Presets page — it will try again.',
   'settings.advanced.readFailed': 'Couldn’t read: {detail}',
   'settings.advanced.unconfigured': 'Not configured yet — downloads and update checks will refuse honestly and say where to configure it',
   'settings.advanced.customText': 'Your address: {address}',

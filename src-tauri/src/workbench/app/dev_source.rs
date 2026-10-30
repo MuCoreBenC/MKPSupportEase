@@ -58,15 +58,6 @@ use crate::error::AppError;
 /// 这颗按钮点的就是一个空壳（下面有测试钉着）。
 const NPM_SCRIPT: &str = "preset-source:dev";
 
-/// 夹具根（v1 / v2）：**服务端出去的就是这一份**。两代只差两处（发布日 + 一个参数值），
-/// 够演示"云端发新版了 → 检查更新看得见"。路径只在 `scripts/preset-test-server/`
-/// 那一处约定，这里照同一个相对位置认。
-const FIXTURE_REL_V1: &str = "scripts/preset-test-server/fixtures/v1";
-const FIXTURE_REL_V2: &str = "scripts/preset-test-server/fixtures/v2";
-
-/// 夹具齐了的标志文件（`make-fixtures.mjs` 派生的第一件东西；`dev.mjs` 也拿它判"在不在"）。
-const FIXTURE_MARKER: &str = "catalog.json";
-
 /// 「当前交付」那一份齐了的标志：交付根的说明书（发布动作写出来的第一件东西）。
 const DELIVERY_MARKER: &str = "source.json";
 
@@ -82,6 +73,18 @@ const DELIVERY_SUBDIR: &str = "delivery";
 /// argv 路径。`server.mjs` 那边 `--root` 参数**仍然优先**，这个变量只是它的第二档。
 const ROOT_ENV: &str = "PRESET_TEST_ROOT";
 
+/// 让 `server.mjs` **把发布序号往前拨一格**（`catalog.json` 里 `publishSerial + 1`、
+/// `publishedAt` 换成此刻）。
+///
+/// ★ 2026-10-30 作者：「我这一个模拟的你如果能加一就更好了，这样子就更真实了」。
+/// 不拨的话，测试源那份目录和客户端手上那份**同号**，而内容又不同 ⇒ 逐文件判据给
+/// `Inconsistent`（"那一代目录不再唯一"）—— 看着像坏了。拨一格就成了正常的
+/// "云端发了下一版"，`Outdated` 才对得上真实使用。
+///
+/// **只改端出去的那一份响应，盘上一个字节都不动**，也不是给判据开口子：
+/// 判据照旧比 `publishSerial`，只是这份模拟源自称"刚发过一版"。
+const BUMP_ENV: &str = "PRESET_TEST_BUMP_SERIAL";
+
 /// 测试源的默认端口 —— 与 `scripts/preset-test-server/server.mjs` 同一个值。
 /// 它读 `PRESET_TEST_PORT`（见 [`port_from`]），这里只是那个变量的默认档。
 const DEFAULT_PORT: u16 = 8787;
@@ -90,22 +93,20 @@ const DEFAULT_PORT: u16 = 8787;
 /// 万一取到一张成环的表，没有上限的循环会把工作台卡死。
 const MAX_ANCESTOR_HOPS: usize = 32;
 
-/* ---------- 端什么（三选一） ---------- */
+/* ---------- 端什么 ---------- */
 
 /// 测试源端哪一份。
 ///
-/// 前两项是**夹具**（`make-fixtures.mjs` 从真交付根派生的两代，够演"云端发新版了"）。
-/// 第三项是 2026-10-08 作者要的那一环：**当前交付** —— 端你（在沙箱里）生成出来的
-/// 那一份，于是「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地
-/// 整条走得通，而且**永远不碰正式**。
+/// **只剩一项**（2026-10-30 作者：「我就不需要这些什么测试夹具一夹具二了，就直接是模拟的
+/// 不就可以了吗」）：端**当前交付** —— 你（在沙箱里）生成出来的那一份，于是
+/// 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通，
+/// 而且**永远不碰正式**。
+///
+/// 原来那两代夹具是拿真交付根派生的副本，作用就一个：演"云端发了下一版"。现在那一层
+/// 由 [`BUMP_ENV`] 顶掉 —— 同一份真产物，端出去时把发布序号往前拨一格，比夹具更真
+/// （不用派生、不会和源漂移、也没有第二套目录）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
-    /// 夹具 v1：模拟「云端源，还没有新版本」
-    #[serde(rename = "v1")]
-    V1,
-    /// 夹具 v2：模拟「云端发了新版」（revision 变了 → 「检查更新」看得见）
-    #[serde(rename = "v2")]
-    V2,
     /// **当前交付**：测试模式开着 = 沙箱那份，正式 = 仓库那份
     #[serde(rename = "delivery")]
     Delivery,
@@ -113,11 +114,10 @@ pub enum SourceKind {
 
 /// 一份源**端出去时**的样子：服务根在哪、客户端该填哪个地址。
 ///
-/// ★ 地址**不只端口那一截**：夹具自己就是一个交付根（`filesRoot: "."`），填到根上；
-/// 而真交付根的 `source.json` 写的是 `filesRoot: ".."` —— 交付文件（`mkp/presets/*.toml`）
-/// 住在**预设根**底下、不在 `delivery/` 里。所以那一份要端的目录是**预设根**，
-/// 客户端填 `<地址>/delivery`：`..` 一解就落回预设根，客户端那条真链（catalog /
-/// manifest / 寻址规则 / SHA 校验）一个环节都不变。
+/// ★ 地址**不只端口那一截**：真交付根的 `source.json` 写的是 `filesRoot: ".."` ——
+/// 交付文件（`mkp/presets/*.toml`）住在**预设根**底下、不在 `delivery/` 里。所以要端的
+/// 目录是**预设根**，客户端填 `<地址>/delivery`：`..` 一解就落回预设根，客户端那条真链
+/// （catalog / manifest / 寻址规则 / SHA 校验）一个环节都不变。
 struct Served {
     /// 交给 `server.mjs` 的那个目录（`PRESET_TEST_ROOT`）
     root: PathBuf,
@@ -127,16 +127,8 @@ struct Served {
 
 impl SourceKind {
     /// 服务根与地址的**纯派生**（不碰磁盘，所以测试钉得住）。
-    fn derive(self, repo: &Path, presets_root: &Path) -> Served {
+    fn derive(self, presets_root: &Path) -> Served {
         match self {
-            SourceKind::V1 => Served {
-                root: repo.join(FIXTURE_REL_V1),
-                url: origin(),
-            },
-            SourceKind::V2 => Served {
-                root: repo.join(FIXTURE_REL_V2),
-                url: origin(),
-            },
             SourceKind::Delivery => Served {
                 root: presets_root.to_path_buf(),
                 url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
@@ -148,7 +140,6 @@ impl SourceKind {
     /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远。
     fn marker(self, served: &Served) -> PathBuf {
         match self {
-            SourceKind::V1 | SourceKind::V2 => served.root.join(FIXTURE_MARKER),
             SourceKind::Delivery => served.root.join(DELIVERY_SUBDIR).join(DELIVERY_MARKER),
         }
     }
@@ -156,14 +147,6 @@ impl SourceKind {
     /// 不齐时那句人话：**缺什么 + 怎么补**（界面直接摆，不重写措辞）。
     fn missing(self, marker: &Path) -> AppError {
         match self {
-            SourceKind::V1 | SourceKind::V2 => AppError::invalid_argument(format!(
-                "这份夹具还没派生：{} 不在",
-                marker.display()
-            ))
-            .with_detail(
-                "跑一次 `npm run preset-source:make`（从真交付根派生两代夹具），再点「启动」"
-                    .to_owned(),
-            ),
             SourceKind::Delivery => AppError::invalid_argument(format!(
                 "还没有交付产物：{} 不在",
                 marker.display()
@@ -183,7 +166,7 @@ impl SourceKind {
 #[serde(rename_all = "camelCase")]
 pub struct SourceOption {
     pub kind: SourceKind,
-    /// 行上的名字（如 `夹具 v1`）
+    /// 行上的名字（现在是「当前交付」）
     pub label: String,
     /// 这一份是干什么用的（一句话）
     pub note: String,
@@ -295,6 +278,9 @@ fn origin() -> String {
 ///
 /// ★ 端哪一份由 [`ROOT_ENV`] 交下去（`server.mjs` 读它，`--root` 参数仍然优先）：
 /// 命令本身不带参数，于是"换源"不必给这条命令另开一条 argv 路径。
+///
+/// ★ 发布序号 `+1` 由 [`BUMP_ENV`] 交下去：端出去的 `catalog.json` 自称"刚发过一版"，
+/// 于是客户端看到的是正常的「有新版本」，而不是同号改内容那种"那一代目录不再唯一"。
 fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
@@ -306,6 +292,7 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     cmd.args(["run", NPM_SCRIPT])
         .current_dir(repo)
         .env(ROOT_ENV, &served.root)
+        .env(BUMP_ENV, "1")
         /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -491,30 +478,26 @@ impl SourceKind {
     }
 }
 
-/// 三行单选的内容：每一份**现在**在哪儿、客户端填什么地址、齐没齐。
+/// 那一行的内容：这一份**现在**在哪儿、客户端填什么地址、齐没齐。
 ///
-/// ★ 每一份都现算：`delivery` 那一份随**模式**走（测试模式开着就是沙箱的预设根）——
+/// ★ 现算：`delivery` 那一份随**模式**走（测试模式开着就是沙箱的预设根）——
 /// 模式一切，这一行的根与"齐没齐"立刻就是新那棵树的读数，界面不必自己推一遍。
-fn sources_of(repo: &Path) -> Vec<SourceOption> {
+///
+/// 2026-10-30 起只有一行（夹具已退役，见 [`SourceKind`]）—— 但仍按"列表"给，
+/// 界面那套单选不用为一个选项另写一版。
+fn sources_of(_repo: &Path) -> Vec<SourceOption> {
     let presets = crate::workbench::paths::presets_root_path();
-    [SourceKind::V1, SourceKind::V2, SourceKind::Delivery]
+    [SourceKind::Delivery]
         .into_iter()
         .map(|kind| {
-            let served = kind.derive(repo, &presets);
+            let served = kind.derive(&presets);
             let marker = kind.marker(&served);
             let ready = marker.is_file();
             let (label, note) = match kind {
-                SourceKind::V1 => (
-                    "夹具 v1",
-                    "模拟「云端源，还没有新版本」—— 客户端那边该显示「已下载、没有新版」",
-                ),
-                SourceKind::V2 => (
-                    "夹具 v2",
-                    "模拟「云端发了新版」—— 同一份预设的下一版（revision 变了）",
-                ),
                 SourceKind::Delivery => (
                     "当前交付",
-                    "端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」",
+                    "端你生成出来的那一份（测试模式开着 = 沙箱那份）。端出去时发布序号自动 +1 \
+                     —— 客户端那边看到的就是「云端发了下一版」，和真发布一样",
                 ),
             };
             SourceOption {
@@ -651,7 +634,7 @@ fn wait_gone(child: &mut Child, timeout: Duration) {
 /// **换了源 = 换源重启**：把那棵进程树整棵收掉，等端口让出来，再以新的那一份起。
 /// 一件事一次点击，不用"先停再起"两步（中间那一步人容易忘，然后就撞端口了）。
 ///
-/// **先验齐没齐，再动进程**：选了一份还没派生的夹具 / 还没生成的交付时**如实拒绝** ——
+/// **先验齐没齐，再动进程**：那一份还没生成时**如实拒绝** ——
 /// 而且是在**杀掉手上那一份之前**就拒绝，选错了不该把正在跑的服务带下水。
 ///
 /// **起之前先探端口**（[`conflicts_of`]）：被占着就如实拒绝，把那句人话（谁占着、
@@ -662,7 +645,7 @@ pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppErr
     crate::ipc::traced("wb_dev_source_start", |_| {
         let repo = crate::workbench::paths::repo_root();
         let presets = crate::workbench::paths::presets_root_path();
-        let served = source.derive(&repo, &presets);
+        let served = source.derive(&presets);
         let marker = source.marker(&served);
         if !marker.is_file() {
             return Err(source.missing(&marker));
@@ -1020,28 +1003,10 @@ mod tests {
     /// 客户端按 `..` 解出来的文件全在服务根外面 —— 一个一个都是 403。
     /// 这条链就是在这一处悄悄断的，值得专门钉一条。
     #[test]
-    fn each_source_serves_the_root_that_makes_files_addressable() {
-        let repo = Path::new("/tmp/repo");
+    fn the_source_serves_the_root_that_makes_files_addressable() {
         let presets = Path::new("/tmp/repo/presets");
 
-        let v1 = SourceKind::V1.derive(repo, presets);
-        assert!(
-            v1.root.ends_with("fixtures/v1"),
-            "v1 端的是夹具根：{}",
-            v1.root.display()
-        );
-        assert_eq!(v1.url, origin(), "夹具自己就是一个交付根，地址填到根上");
-
-        let v2 = SourceKind::V2.derive(repo, presets);
-        assert!(
-            v2.root.ends_with("fixtures/v2"),
-            "v2 端的是夹具根：{}",
-            v2.root.display()
-        );
-        assert_eq!(v2.url, v1.url, "两代夹具同一个地址（换的是内容，不是端口）");
-        assert_ne!(v1.root, v2.root, "两代必须是两个不同的目录");
-
-        let d = SourceKind::Delivery.derive(repo, presets);
+        let d = SourceKind::Delivery.derive(presets);
         assert_eq!(
             d.root, presets,
             "交付那一份端的是**预设根**（filesRoot: \"..\" 得解得到那儿）"
@@ -1061,8 +1026,8 @@ mod tests {
         let repo = Path::new("/tmp/repo");
         let real = repo.join("presets");
         let sandbox = repo.join("workbench").join(".sandbox").join("presets");
-        let a = SourceKind::Delivery.derive(repo, &real);
-        let b = SourceKind::Delivery.derive(repo, &sandbox);
+        let a = SourceKind::Delivery.derive(&real);
+        let b = SourceKind::Delivery.derive(&sandbox);
         assert_eq!(a.root, real);
         assert_eq!(b.root, sandbox);
         assert_ne!(a.root, b.root, "两份预设根必须端出两个不同的目录");
@@ -1076,36 +1041,30 @@ mod tests {
         );
     }
 
-    /// 不齐的两句人话**各指各的补法**：夹具去 `preset-source:make`，交付去点「生成」——
-    /// 指错方向（让还没生成过的人去跑 make）比不提示还坏
+    /// 不齐时那句人话要**指对方向**：交付产物缺了就去点「生成」。
     #[test]
     fn a_source_that_is_not_ready_says_how_to_make_it_ready() {
-        let repo = Path::new("/tmp/repo");
         let presets = Path::new("/tmp/repo/presets");
-
-        let served = SourceKind::V1.derive(repo, presets);
-        let fixture = SourceKind::V1.missing_sentence(&served.root.join(FIXTURE_MARKER));
-        assert!(fixture.contains("preset-source:make"), "实测：{fixture}");
-
-        let served = SourceKind::Delivery.derive(repo, presets);
+        let served = SourceKind::Delivery.derive(presets);
         let delivery = SourceKind::Delivery
             .missing_sentence(&served.root.join("delivery").join(DELIVERY_MARKER));
         assert!(delivery.contains("生成"), "实测：{delivery}");
         assert!(
             !delivery.contains("preset-source:make"),
-            "别把交付那一条指去跑夹具：{delivery}"
+            "夹具那一套已经退役，别再把人指过去：{delivery}"
         );
     }
 
-    /// 界面上那三行：**名字与说法由后端给**，三份都在、都带根与地址、齐没齐都说得出
-    /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）
+    /// 那一行：**名字与说法由后端给**，带根与地址、齐没齐都说得出
+    /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）。
+    ///
+    /// 2026-10-30 起只剩「当前交付」一行（夹具退役）—— 但接口仍是列表，
+    /// 界面那套单选不用为一个选项另写一版。
     #[test]
-    fn the_three_rows_are_told_by_the_backend() {
+    fn the_row_is_told_by_the_backend() {
         let rows = sources_of(Path::new("/tmp/repo"));
-        assert_eq!(rows.len(), 3, "三行单选：v1 / v2 / 当前交付");
-        assert_eq!(rows[0].kind, SourceKind::V1);
-        assert_eq!(rows[1].kind, SourceKind::V2);
-        assert_eq!(rows[2].kind, SourceKind::Delivery);
+        assert_eq!(rows.len(), 1, "只剩「当前交付」这一份");
+        assert_eq!(rows[0].kind, SourceKind::Delivery);
         for r in &rows {
             assert!(!r.label.is_empty() && !r.note.is_empty(), "{:?}", r.kind);
             assert!(r.url.starts_with("http://127.0.0.1:"), "{:?}", r.kind);
@@ -1114,9 +1073,14 @@ mod tests {
             assert_eq!(r.missing.is_none(), r.ready, "{:?}", r.kind);
         }
         assert!(
-            rows[2].note.contains("沙箱"),
-            "「当前交付」那一行要说清它跟着模式走：{}",
-            rows[2].note
+            rows[0].note.contains("沙箱"),
+            "要说清它跟着模式走：{}",
+            rows[0].note
+        );
+        assert!(
+            rows[0].note.contains("+1"),
+            "要说清端出去时序号自动 +1（否则人会以为客户端那边不该有新版）：{}",
+            rows[0].note
         );
     }
 
@@ -1160,12 +1124,28 @@ mod tests {
         assert!(!st.running && st.pid.is_none());
         /* 从没起过：不谎报"端的是哪一份"（免得界面把某一行当成"正在端"） */
         assert!(st.source.is_none() && st.source_root.is_empty());
-        assert_eq!(st.sources.len(), 3);
+        assert_eq!(st.sources.len(), 1, "夹具退役后只剩「当前交付」这一行");
+    }
+
+    /// **序号 +1 这个开关的名字得是 `server.mjs` 真读的那个** —— 与 `ROOT_ENV` 同一条理由：
+    /// 拼错的话服务照起、序号也不拨，客户端那边就退回"同号改了内容"那种像坏了的读数。
+    #[test]
+    fn the_bump_flag_is_the_one_the_server_reads() {
+        let server = crate::workbench::paths::repo_root()
+            .join("scripts")
+            .join("preset-test-server")
+            .join("server.mjs");
+        let text = std::fs::read_to_string(&server)
+            .unwrap_or_else(|e| panic!("读不了 {}：{e}", server.display()));
+        assert!(
+            text.contains(BUMP_ENV) && text.contains("--bump-serial"),
+            "server.mjs 不认 {BUMP_ENV} —— 序号那一下会静悄悄地不生效"
+        );
     }
 
     /// **端哪一份靠 `PRESET_TEST_ROOT` 交下去**，而它得是 `server.mjs` 真读的那个名字 ——
-    /// 改名 / 拼错会表现成"服务起得来、但端的是默认那份"（夹具 v1），
-    /// 那是一种看不出错的错：界面上写着"当前交付"，客户端拿到的还是 v1。
+    /// 改名 / 拼错会表现成"服务起得来、但端的是默认那份"，
+    /// 那是一种看不出错的错：界面上写着这一份，客户端拿到的却是另一份。
     #[test]
     fn the_root_env_var_is_the_one_the_server_reads() {
         let server = crate::workbench::paths::repo_root()

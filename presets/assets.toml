@@ -93,6 +93,26 @@ name = 'P1S 外观图'
 path = 'printers/p1s.webp'
 delivery = 'bundled'
 
+# 2026-10-30：P2S / X1C 一直是「有图位没素材」（`heroArt` 里记着它们落回品牌字标）。
+# 作者把两张官方渲染图给齐了，按既有规矩处理：**白底抠成透明**（首页是深色底，
+# 不透明白底会变成一个白方块），尺寸取到画布能给的（原图 780² 里主体约 500²，
+# 比其它几张 1600² 小 —— 只在超大窗 + 2x 屏上略软，不拦使用。
+[[assets]]
+id = 'p2s-image'
+type = 'image'
+machineId = 'P2S'
+name = 'P2S 外观图'
+path = 'printers/p2s.webp'
+delivery = 'bundled'
+
+[[assets]]
+id = 'x1c-image'
+type = 'image'
+machineId = 'X1C'
+name = 'X1C 外观图'
+path = 'printers/x1c.webp'
+delivery = 'bundled'
+
 # ---------------- 公共素材（不属于任何机型） ----------------
 #
 # 2026-10-03（作者：「品牌 Logo 也应该正式进入资产体系」）：品牌图与机型图、版本图

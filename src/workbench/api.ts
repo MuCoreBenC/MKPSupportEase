@@ -1267,8 +1267,8 @@ export interface MatrixState {
  * ★ `running` 是**后端每次现问子进程**得到的（`try_wait`），不是前端记的一个布尔：
  * 那个进程可能是人在终端里 Ctrl+C 掉的。
  *
- * ★ **端哪一份（`source`）与地址（`url`）也由后端给**：地址随源不同（夹具填到根上、
- * 「当前交付」要带 `/delivery` —— 真交付那份的 `source.json` 写着 `filesRoot: ".."`），
+ * ★ **端哪一份（`source`）与地址（`url`）也由后端给**：地址随源不同（「当前交付」
+ * 要带 `/delivery` —— 真交付那份的 `source.json` 写着 `filesRoot: ".."`），
  * 界面照报，不自己拼一遍路径。
  */
 export interface DevSourceStatus {
@@ -1276,8 +1276,8 @@ export interface DevSourceStatus {
   /** 包装层（Windows 上是 cmd）的 PID；不在跑时 null */
   pid: number | null
   /**
-   * 客户端「自定义地址」里该填的那一串。**在跑时是那一份的地址**（夹具填到根上、
-   * 当前交付带 `/delivery`），没起过时是默认地址当兜底 —— 界面照后端说的报。
+   * 客户端「自定义地址」里该填的那一串。**在跑时是那一份的地址**（当前交付带
+   * `/delivery`），没起过时是默认地址当兜底 —— 界面照后端说的报。
    */
   url: string
   /** 在跑（没在跑时：上次起）的是哪一份；**从没起过 = null** */
@@ -1292,17 +1292,22 @@ export interface DevSourceStatus {
   note: string | null
   /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
   conflicts: PortConflict[]
-  /** 三行单选：每一份的名字 / 在哪儿 / 填什么地址 / 齐没齐 */
+  /** 选项列表（2026-10-30 起只有「当前交付」一行）：名字 / 在哪儿 / 填什么地址 / 齐没齐 */
   sources: SourceOption[]
 }
 
-/** `dev_source::SourceKind` —— 测试源端哪一份 */
-export type DevSourceKind = 'v1' | 'v2' | 'delivery'
+/**
+ * `dev_source::SourceKind` —— 测试源端哪一份。
+ *
+ * 2026-10-30 起**只剩「当前交付」**：夹具那两代（`v1` / `v2`）退役了 ——
+ * 端真产物、发布序号在响应里 +1 就够演"云端发了下一版"，还不会和源漂移。
+ */
+export type DevSourceKind = 'delivery'
 
-/** `dev_source::SourceOption` —— 界面那三行单选，一行一份 */
+/** `dev_source::SourceOption` —— 那个选项，一行一份 */
 export interface SourceOption {
   kind: DevSourceKind
-  /** 行上的名字（如「夹具 v1」） */
+  /** 行上的名字（现在是「当前交付」） */
   label: string
   /** 这一份是干什么用的（那句话由**后端**给，界面不重写一遍） */
   note: string
@@ -1512,6 +1517,11 @@ export interface MachineView {
   externalAliases: string[]
   image: string | null
   icon: string | null
+  /**
+   * **启用 / 停用**（2026-10-30）。`false` = 停用 —— 不进目录（客户端不显示）、
+   * 后处理拒绝。这一页照常列出来，只是打上「已停用」
+   */
+  enabled: boolean
   /** 有没有 `[dimensions]` —— 界面上要能看出「这台还没配尺寸」 */
   hasDimensions: boolean
   /** **`[dimensions]` 的逐格视图**（尺寸卡六组）。`null` = 这台没配尺寸 */
@@ -1868,7 +1878,7 @@ export type VersionField =
   | 'image'
 
 /** `catalog::MachineField` —— 机型身上可改的那几格。`id` 不在里面（它是文件名） */
-export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon'
+export type MachineField = 'display' | 'brand' | 'name' | 'image' | 'icon' | 'enabled'
 
 /** `delivery::DeliveryStage` —— 一份交付文件是谁写的 */
 export type DeliveryStage = 'generate' | 'publish' | 'software'
@@ -2351,9 +2361,10 @@ export const wb = {
    * 被占着时**如实拒绝**并点名那个端口（`conflicts` 摆着是谁）；
    * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
    *
-   * ★ 端哪一份：`v1` / `v2` 是两代夹具，`delivery` 是**当前交付** ——
-   * **测试模式开着就端沙箱里那份**，于是「改参数 → 生成 → 客户端检查更新 → 看到本地
-   * 新版」这条闭环在本地整条走得通，而且正式那份从头到尾不参与。
+   * ★ 端的只有 **`delivery` = 当前交付**：**测试模式开着就端沙箱里那份**，于是
+   * 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通，
+   * 而且正式那份从头到尾不参与。端出去时发布序号**自动 +1**（见 `dev_source` 的
+   * `BUMP_ENV`）—— 客户端看到的就是正常的"云端发了下一版"。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
   devSourceStart: (source: DevSourceKind) =>

@@ -19,30 +19,39 @@
  * # 行为
  *
  *   · 悬停 320ms 才出（扫过一排按钮不会乱弹）；键盘 focus 立刻出；
- *   · 位置每次现算：下方不足 ~96px 往上弹，右边不足 340px 往左长；
+ *   · **位置跟着鼠标**（2026-10-30 作者：「有一些悬停的 tooltip 位置不对，应该在
+ *     鼠标的位置才对」）—— 锚点是**光标右下方** 14 / 18px，不是元素矩形；
+ *     键盘 focus 时没有光标，才退到元素下沿；
+ *   · 出框一律夹回视口内（见 `useLayoutEffect` 那段）：不翻转、不换向，只平移。
  *   · 指针按下、滚轮滚动、离开元素 → 立刻收。
  *
  * ★ 气泡是 `position: fixed`：它挂在 App 根，祖先没有 `container-type` / `transform`，
  *   所以 fixed 相对视口，不会被 `.main` 这类滚动容器裁掉。
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import s from './TipLayer.module.css'
 
 /** 悬停多久才弹（毫秒）。太短会"扫过一排按钮时一路乱闪" */
 const DELAY = 320
 
+/** 光标 / 元素下沿 → 气泡左上角的偏移 */
+const GAP_X = 14
+const GAP_Y = 18
+/** 气泡与视口边缘至少留这么多，别贴着窗口边 */
+const EDGE = 8
+
 interface Shown {
   text: string
+  /** 气泡**左上角**想要的落点（视口坐标）；出框时由下面那段 effect 平移回来 */
   x: number
   y: number
-  up: boolean
-  right: boolean
 }
 
 export default function TipLayer() {
   const [shown, setShown] = useState<Shown | null>(null)
+  const boxRef = useRef<HTMLDivElement>(null)
 
   /*
    * 无障碍兜底：`data-tip` 替换掉原生 `title` 之后，纯图标按钮少了一层读屏名字
@@ -103,6 +112,14 @@ export default function TipLayer() {
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | undefined
     let host: HTMLElement | null = null
+    /**
+     * 光标**当前**在视口的哪儿。
+     *
+     * 为什么记"当前"而不是"进入元素那一瞬"：320ms 的等待里手还在动，
+     * 拿进入点当锚点会明显落在鼠标后面（作者就是看见气泡挂在按钮下沿）。
+     * `pointermove` 一直更新它，弹出来的那一帧取最新的。
+     */
+    let pt: { x: number; y: number } | null = null
 
     const clear = () => {
       if (timer !== undefined) {
@@ -117,20 +134,26 @@ export default function TipLayer() {
       setShown(null)
     }
 
-    const place = (el: HTMLElement) => {
+    /** 鼠标路径：光标右下方 */
+    const placeAtPointer = (el: HTMLElement) => {
+      const text = el.dataset.tip ?? ''
+      if (text === '') return
+      if (pt === null) {
+        placeAtElement(el)
+        return
+      }
+      setShown({ text, x: pt.x + GAP_X, y: pt.y + GAP_Y })
+    }
+
+    /**
+     * 键盘路径（Tab 到元素上）：没有光标可用，退到**元素下沿**。
+     * 只在 `pt === null`（这一趟压根没碰鼠标）时才会走到这里。
+     */
+    const placeAtElement = (el: HTMLElement) => {
       const text = el.dataset.tip ?? ''
       if (text === '') return
       const r = el.getBoundingClientRect()
-      const up = r.bottom + 96 > window.innerHeight
-      const right = r.left + 340 > window.innerWidth - 12
-      setShown({
-        text,
-        /* 锚点：往上弹时取上沿，往左长时取右沿 —— 配合 CSS 的两个 transform */
-        x: right ? r.right : r.left,
-        y: up ? r.top - 6 : r.bottom + 6,
-        up,
-        right,
-      })
+      setShown({ text, x: r.left, y: r.bottom + 8 })
     }
 
     const findTip = (target: EventTarget | null): HTMLElement | null => {
@@ -138,7 +161,12 @@ export default function TipLayer() {
       return el instanceof HTMLElement ? el : null
     }
 
+    const onMove = (e: Event) => {
+      if (e instanceof PointerEvent) pt = { x: e.clientX, y: e.clientY }
+    }
+
     const onOver = (e: Event) => {
+      if (e instanceof PointerEvent) pt = { x: e.clientX, y: e.clientY }
       const el = findTip(e.target)
       if (el === null) {
         hide()
@@ -147,7 +175,7 @@ export default function TipLayer() {
       if (el === host) return
       clear()
       host = el
-      timer = setTimeout(() => place(el), DELAY)
+      timer = setTimeout(() => placeAtPointer(el), DELAY)
     }
 
     const onOut = (e: Event) => {
@@ -161,10 +189,11 @@ export default function TipLayer() {
       if (el !== null) {
         hide()
         host = el
-        place(el)
+        placeAtElement(el)
       }
     }
 
+    document.addEventListener('pointermove', onMove, { passive: true })
     document.addEventListener('pointerover', onOver)
     document.addEventListener('pointerout', onOut)
     document.addEventListener('focusin', onFocusIn)
@@ -174,6 +203,7 @@ export default function TipLayer() {
 
     return () => {
       clear()
+      document.removeEventListener('pointermove', onMove)
       document.removeEventListener('pointerover', onOver)
       document.removeEventListener('pointerout', onOut)
       document.removeEventListener('focusin', onFocusIn)
@@ -182,11 +212,39 @@ export default function TipLayer() {
     }
   }, [])
 
+  /*
+   * ============ 出框就**平移**回来（2026-10-30） ============
+   *
+   * 原先靠 CSS 两个 transform 翻转（下方不够往上、右边不够往左）。跟着鼠标之后
+   * 那两个 transform 的语义就错了：锚点已经是光标，再 `translate(-100%)` 会整块
+   * 跳到光标**左上**，反而离鼠标更远。
+   *
+   * 现在只做一件事：量出气泡的实际矩形，哪条边过界就平移多少，保证整块留在视口里。
+   * 用真实矩形而不是估算 —— 气泡是 `max-content` + `max-width`，行数事先算不出来。
+   *
+   * 直接写 DOM 的 `left/top`，不走 state：`shown` 没变就不会重渲染，也就不会被 React
+   * 覆盖回去；同一次显示里这段跑两遍结果一样（第二遍量到的已经在框内，`dx/dy` 都是 0）。
+   */
+  useLayoutEffect(() => {
+    const el = boxRef.current
+    if (el === null || shown === null) return
+    const r = el.getBoundingClientRect()
+    let dx = 0
+    let dy = 0
+    if (r.right > window.innerWidth - EDGE) dx = window.innerWidth - EDGE - r.right
+    if (r.left + dx < EDGE) dx = EDGE - r.left
+    if (r.bottom > window.innerHeight - EDGE) dy = window.innerHeight - EDGE - r.bottom
+    if (r.top + dy < EDGE) dy = EDGE - r.top
+    if (dx !== 0) el.style.left = `${shown.x + dx}px`
+    if (dy !== 0) el.style.top = `${shown.y + dy}px`
+  }, [shown])
+
   if (shown === null) return null
 
   return (
     <div
-      className={`${s.tip} ${shown.up ? s.tipUp : ''} ${shown.right ? s.tipRight : ''}`}
+      ref={boxRef}
+      className={s.tip}
       style={{ left: shown.x, top: shown.y }}
       role="tooltip"
     >

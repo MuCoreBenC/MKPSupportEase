@@ -5,6 +5,7 @@ brand = 'Bambu Lab'
 defaultBundle = 'X1C_default'
 externalAliases = ['X1', 'X1S', 'X1E', 'X1 Carbon', 'X1CARBON']
 icon = 'p1s-icon'
+image = 'x1c-image'
 
 # 与 A1 同一块板（单卡舌 256）—— 塔地图按 defaultPlateId 选板
 plateIds = ['single-latch-256']

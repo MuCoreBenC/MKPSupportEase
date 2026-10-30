@@ -275,7 +275,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     [x.display, x.brand].filter((v) => !v.trim()).length
 
   /** 改机型的一格。后端校验；失败的话把那句话原样端给人 */
-  const saveMachine = async (field: 'display' | 'brand' | 'name' | 'image' | 'icon', value: string | null) => {
+  const saveMachine = async (field: 'display' | 'brand' | 'name' | 'image' | 'icon' | 'enabled', value: string | null) => {
     if (!m) return
     try {
       setList(await wb.setMachineField(m.id, field, value))
@@ -800,6 +800,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                           <span className={`${s.mono} ${s.rowMeta}`}>{x.id}</span>
                           <span className={s.rowMeta}>{x.versions.length} 版</span>
                           {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>占位</span>}
+                          {/* 停用的机型仍然列在这儿（还能把它打开），但一眼要看得出来 */}
+                          {!x.enabled && <span className={`${s.tag} ${s.tagGhost}`}>已停用</span>}
                           {t > 0 && (
                             <span className={s.todo} data-tip={fieldState.needsInputHint}>
                               {fieldState.needsInput} {t}
@@ -1037,6 +1039,29 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   <span className={s.kvDim}>—</span>
                 )}
                 <span className={s.cardNote}>对照名来自数据文件，工作台不给编辑</span>
+              </span>
+
+              {/*
+               * 启用 / 停用（2026-10-30 作者：「就在工作台里面，加一个开关去禁用它」）。
+               *
+               * 停用**不是删除**：机型文件、套餐、参数注册表里的引用一个都不动，
+               * 只是不在目录里出现 —— 客户端因此看不到它，后处理也拒绝（`hook.machine_disabled`）。
+               * 写进文件的是 `enabled = false`；打开就删掉那一行（启用是缺省）。
+               */}
+              <span className={s.kvKey}>{machineFieldLabels.enabled}</span>
+              <span className={s.kvVal}>
+                <label className={s.refRow}>
+                  <input
+                    type="checkbox"
+                    checked={m.enabled}
+                    onChange={(e) => void saveMachine('enabled', e.target.checked ? null : 'false')}
+                  />
+                  <span>
+                    {m.enabled
+                      ? '启用 —— 客户端能看到这台，后处理照常跑'
+                      : '已停用 —— 不进目录：客户端不显示这台，后处理也会拒绝'}
+                  </span>
+                </label>
               </span>
             </div>
           </div>

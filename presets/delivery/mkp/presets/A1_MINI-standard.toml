@@ -1,4 +1,4 @@
-# release_time: 2026-10-27 15:25:50
+# release_time: 2026-10-30 14:25:34
 # machine: A1_MINI
 # variant: standard
 
@@ -35,7 +35,7 @@ glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_retract = 0 # 回抽长度(mm)
 offset_x = -0.3 # 笔尖偏移
 offset_y = 18.1 # 笔尖偏移
-offset_z = 4 # 笔尖偏移
+offset_z = 3.9 # 笔尖偏移
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 

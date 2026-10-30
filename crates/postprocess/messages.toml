@@ -286,6 +286,14 @@ slicer = "机型不匹配：这份 G-code 是 {gcode} 切的，而注册的预�
 params = ["gcode", "preset"]
 note = "E_CFG_MISMATCH_001 是**新造码**（旧词汇表里没有）：这一档以前无码，报告与日志里搜不到"
 
+["hook.machine_disabled"]
+code = "W_CFG_DISABLED_001"
+text = "已停下（{machine} 这台机型已经停用）—— 原文件没有被改动"
+text_en = "Stopped (the {machine} model is no longer supported) — the original file was not changed"
+slicer = "这台机型已经停用，这一盘没有做后处理：原文件没有被改动"
+params = ["machine"]
+note = "2026-10-30：停用机型的后处理也拒（作者：「禁用了之后，后处理也不行」）。判据是**目录里没有这台机型**（停用 = 不进目录），不看别处的表；目录读不出来 / 一台机型都没有时**不阻断**"
+
 ["hook.cancelled"]
 code = "W_SYS_CANCELLED_001"
 text = "已停止 —— 这一盘没有做后处理，原文件没有被改动（G-code 没有被覆盖）"

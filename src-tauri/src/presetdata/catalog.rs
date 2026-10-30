@@ -479,6 +479,9 @@ pub enum MachineField {
     /// 第二个图位（快拆版外观图）。见 [`Machine::image_variant`]
     ImageVariant,
     Icon,
+    /// 启用 / 停用。**唯一的布尔格**：`value` 传 `"false"` 表示停用，
+    /// 其余（含 `None` / `""`）都是启用；启用就删键，不在文件里留一行 `true`。
+    Enabled,
 }
 
 impl MachineField {
@@ -490,6 +493,7 @@ impl MachineField {
             Self::Image => "image",
             Self::ImageVariant => "imageVariant",
             Self::Icon => "icon",
+            Self::Enabled => "enabled",
         }
     }
 
@@ -548,6 +552,14 @@ pub struct Machine {
     /// 「这台机器有两张图」是机型自己的事，不是界面的事。
     pub image_variant: Option<String>,
     pub icon: Option<String>,
+    /// **这台机型现在给不给客户端**（2026-10-30 作者：停用的机型客户端不显示、
+    /// 后处理也拒绝）。`false` 才在文件里写 `enabled = false` —— **缺键 = 启用**，
+    /// 与其它几格"空着 = 没填过"同一口径（启用是常态，不该让每个文件都写一行）。
+    ///
+    /// 落地点只有两处：`runtime::catalog::collect` 跳过它（机型与它的预设文件都
+    /// 不进目录）、`hook` 拒绝（目录里没有这台 ⇒ 这一趟不跑）。**不是删除** ——
+    /// 源文件照留，`bundles.toml` / `param_registry.toml` 的引用一个都不用动。
+    pub enabled: bool,
     /// 这台机型能用的打印板（`presets/plates/*.toml` 的 id）。空 = 没有板规格
     /// （塔地图那一层不出，画布退回圆角矩形）。**只持引用，不持几何** —— 几何归 [`Plate`]。
     pub plate_ids: Vec<String>,
@@ -930,6 +942,22 @@ impl Machine {
 
     /// 改机型自己的一格。`None`/空 = 删键（同 [`Self::set_version_field`]）
     pub fn set_field(&mut self, field: MachineField, value: Option<&str>) -> Result<(), AppError> {
+        /*
+         * **布尔那一格单独走**（2026-10-30）：它不能套下面"写字符串 / 删键"那条路
+         * —— 写成 `enabled = "false"`（字符串）在 TOML 里读回来是 `as_bool() == None`
+         * ⇒ 停用永远不生效。而且**启用是缺省**：开的时候删键，不在文件里留 `true`。
+         */
+        if field == MachineField::Enabled {
+            let raw = value.map(str::trim).unwrap_or("");
+            let on = !matches!(raw, "false" | "0" | "no" | "off");
+            if on {
+                self.doc.remove("enabled");
+            } else {
+                self.doc["enabled"] = toml_edit::value(false);
+            }
+            self.enabled = on;
+            return Ok(());
+        }
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
             return Err(AppError::invalid_argument(messages::text(
@@ -958,6 +986,8 @@ impl Machine {
             MachineField::Image => self.image = owned,
             MachineField::ImageVariant => self.image_variant = owned,
             MachineField::Icon => self.icon = owned,
+            // 布尔那一格在本函数开头就写完了（写 `false` / 删键），到不了这里
+            MachineField::Enabled => {}
         }
         Ok(())
     }
@@ -1371,6 +1401,8 @@ impl Catalog {
             image: None,
             image_variant: None,
             icon: None,
+            // 新建的机型默认启用（停用是后来显式做的动作）
+            enabled: true,
             // 新建机型不带板 —— 板是后来按需挂的（与 has_dimensions: false 同一口径）
             plate_ids: Vec::new(),
             default_plate_id: None,
@@ -1592,6 +1624,8 @@ fn load_machines(dir: &Path) -> Result<Vec<Machine>, AppError> {
             image: s("image"),
             image_variant: s("imageVariant"),
             icon: s("icon"),
+            // 布尔：**缺键或不是布尔 = 启用**（老文件里没有这一行是常态）
+            enabled: doc.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true),
             // 板引用（与 `externalAliases` 同法读字符串数组）。读不出就是空 = 没板
             plate_ids: doc
                 .get("plateIds")
@@ -2296,6 +2330,46 @@ mod tests {
         // ⑥ 不存在的机型如实拒
         let err = c2.set_zones("NOPE", Vec::new()).expect_err("没这台机器");
         assert!(err.message.contains("没有机型"), "实测：{}", err.message);
+    }
+
+    /// **停用是一个布尔格**（2026-10-30）：写 `false` 落成布尔、读回来 `enabled == false`；
+    /// 打开就删键（启用是缺省，文件里不留一行 `true`）。
+    ///
+    /// 这条咬住的是"写成字符串"那个坑：`enabled = "false"` 在 TOML 里 `as_bool()` 是
+    /// `None` ⇒ 停用永远不生效，而界面上勾已经去掉了。那种错在真机上表现成
+    /// "我明明停用了，客户端还看得见"，最难查。
+    #[test]
+    fn disabling_a_machine_writes_a_boolean_and_enabling_removes_the_key() {
+        let Some((root, _c)) = catalog() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let (tmp, mut c2) = copy_of(&root);
+        let file = tmp.path().join("machines").join("P2S.toml");
+
+        c2.machine_mut("P2S")
+            .expect("有 P2S")
+            .set_field(MachineField::Enabled, Some("false"))
+            .expect("停用");
+        c2.write_machine("P2S").expect("写回");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            text.contains("enabled = false"),
+            "落盘的必须是布尔：\n{text}"
+        );
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert!(!again.machine("P2S").unwrap().enabled, "读回来是停用");
+
+        // 打开：删键 —— 启用是缺省，不在文件里留一行 `true`
+        c2.machine_mut("P2S")
+            .unwrap()
+            .set_field(MachineField::Enabled, None)
+            .expect("启用");
+        c2.write_machine("P2S").expect("写回");
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains("enabled"), "启用不许留一行：\n{text}");
+        let again = Catalog::load_from(tmp.path()).expect("重读");
+        assert!(again.machine("P2S").unwrap().enabled);
     }
 
     /// 移动机型 = 改 `brand` 一格（值面 + 文档面），**归属只有一份**。

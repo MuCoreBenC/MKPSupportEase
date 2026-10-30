@@ -73,6 +73,9 @@ pub struct MachineView {
     /// 第二个图位（快拆版外观图）。今天只有 A1 mini 有 —— 见 `presetdata::Machine::image_variant`
     pub image_variant: Option<String>,
     pub icon: Option<String>,
+    /// **启用 / 停用**（2026-10-30）。停用的机型不进目录 ⇒ 客户端不显示、
+    /// 后处理拒绝。这一页照常列出来（还能把它打开），只是打上「已停用」
+    pub enabled: bool,
     /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
     /// **`[dimensions]` 的逐格视图**（2026-10-03 尺寸卡六组）。`None` = 这台没配尺寸
@@ -473,6 +476,7 @@ fn list_of(p: &Presets) -> MachineList {
                 image: m.image.clone(),
                 image_variant: m.image_variant.clone(),
                 icon: m.icon.clone(),
+                enabled: m.enabled,
                 has_dimensions: m.has_dimensions,
                 dimensions: m.dimensions.clone(),
                 // 禁区两格**从同一个来源算出**（一处取，一处 len）——

@@ -450,7 +450,7 @@ export default function PageSettings() {
       setSource(got)
       setMode(got.mode as Mode)
       setNote({ text: msg('settings.advanced.switched', { label: got.label }) })
-      sourceChanged()
+      await afterSourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
@@ -655,6 +655,45 @@ export default function PageSettings() {
     deliveryMutated()
   }
 
+  /**
+   * 换源之后**立刻把目录同步一次**（2026-10-30 作者实测：应用完新地址，首页还停在旧目录
+   * —— X1C 没图、参数全是「—」，要重启客户端才正常）。
+   *
+   * 为什么不能只靠 `usePresetData` 里那条换源 effect：它挂在**首页 / 预设页**上，还要过
+   * 「本次运行只检查一次」那道闸 —— 换源发生在设置页时，轮不轮得到它得看那两页挂没挂、
+   * 谁先跑。这里显式走一遍；**失败不挡保存**（地址已经落盘了），只把原因说出来。
+   *
+   * 返回 `'same'`（本来同一代）/ `'synced'`（换掉了）/ 其余 = 失败原因那句。
+   */
+  const syncCatalog = async (): Promise<'same' | 'synced' | string> => {
+    try {
+      const check = await api.checkRemoteUpdate()
+      if (check.upToDate) return 'same'
+      /* 读不懂就不换（与预设页同一条规矩）：不落盘，只如实说 */
+      if (!check.readable) return 'unreadable'
+      await api.applyRemoteUpdate()
+      deliveryMutated()
+      return 'synced'
+    } catch (e: unknown) {
+      return isAppError(e) ? e.message : String(e)
+    }
+  }
+
+  /** 换源成功之后那一步：先报"在了"，同步完再报结果 */
+  const afterSourceChanged = async () => {
+    sourceChanged()
+    setNote({ text: msg('settings.advanced.syncing') })
+    const r = await syncCatalog()
+    if (r === 'synced' || r === 'same') {
+      setNote({ text: msg(r === 'synced' ? 'settings.advanced.synced' : 'settings.advanced.applied') })
+      return
+    }
+    setNote({
+      text: msg('settings.advanced.syncFailed', { detail: r }),
+      bad: true,
+    })
+  }
+
   /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
   const apply = async () => {
     if (busy) return
@@ -663,8 +702,8 @@ export default function PageSettings() {
     try {
       const got = await api.setPresetSource('custom', draft.trim())
       setSource(got)
-      setNote({ text: msg('settings.advanced.applied') })
-      sourceChanged()
+      /* 地址生效了还要**当场把目录同步过来** —— 不然界面停在旧目录直到重启 */
+      await afterSourceChanged()
     } catch (e) {
       setNote({
         text: msg('settings.advanced.applyFailed', {

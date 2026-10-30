@@ -113,7 +113,7 @@
       "externalAliases": [
         "P2"
       ],
-      "image": null,
+      "image": "p2s-image",
       "icon": "p1s-icon",
       "defaultBundle": "P2S_default",
       "hasDimensions": true,
@@ -138,7 +138,7 @@
         "X1 Carbon",
         "X1CARBON"
       ],
-      "image": null,
+      "image": "x1c-image",
       "icon": "p1s-icon",
       "defaultBundle": "X1C_default",
       "hasDimensions": true,

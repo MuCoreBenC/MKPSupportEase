@@ -17,6 +17,8 @@ export const machineFieldLabels = {
   name: '内部名',
   image: '机型图',
   icon: '图标',
+  /** 2026-10-30：停用 = 不进目录（客户端不显示、后处理拒绝） */
+  enabled: '启用',
 } as const
 
 /** 字段自己的状态。只有一档：必填却还空着（可选字段空着不是状态，永远没有词条） */

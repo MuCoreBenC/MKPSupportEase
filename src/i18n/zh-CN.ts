@@ -271,6 +271,11 @@ export const zhCN = {
   'settings.advanced.applyFailed': '这个地址取不到预设数据，没有改，现在用的还是 {label}。请检查地址（或直接选上面的 Gitee / GitHub）。',
   'settings.advanced.switched': '已切到：{label}',
   'settings.advanced.switchFailed': '没换成，现在用的还是 {label}。',
+  /* 2026-10-30：换源之后**立刻同步一次目录**（原来要重启客户端才生效） */
+  'settings.advanced.syncing': '地址已生效，正在同步目录……',
+  'settings.advanced.synced': '地址已生效，目录也同步到最新了。',
+  'settings.advanced.syncFailed':
+    '地址已生效，但目录没同步下来：{detail}。可以先去「预设」页，那边会再试一次。',
   'settings.advanced.readFailed': '读不出来：{detail}',
   'settings.advanced.unconfigured': '还没配置 —— 下载与检查更新会先如实拒绝，并说明去哪儿配',
   'settings.advanced.customText': '你指定：{address}',

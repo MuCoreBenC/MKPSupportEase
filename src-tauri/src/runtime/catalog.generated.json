@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "f0838b252767ef5c",
+  "revision": "60d204fb14d78a14",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -324,7 +324,7 @@
       "externalAliases": [
         "P2"
       ],
-      "image": null,
+      "image": "p2s-image",
       "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
@@ -445,7 +445,7 @@
         "X1 Carbon",
         "X1CARBON"
       ],
-      "image": null,
+      "image": "x1c-image",
       "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
@@ -585,6 +585,22 @@
       "machineId": "P1S",
       "name": "P1S 外观图",
       "path": "printers/p1s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "p2s-image",
+      "type": "image",
+      "machineId": "P2S",
+      "name": "P2S 外观图",
+      "path": "printers/p2s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "x1c-image",
+      "type": "image",
+      "machineId": "X1C",
+      "name": "X1C 外观图",
+      "path": "printers/x1c.webp",
       "delivery": "bundled"
     },
     {
@@ -2405,7 +2421,9 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
+          "A1": "auto",
           "A1:FASTV3.3": "auto",
+          "A1:STANDARD": "auto",
           "A1_MINI:FASTV3.3": "auto"
         },
         "machineMinVariants": {},
@@ -2750,8 +2768,12 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1:FASTV3.3": 3.7,
+          "A1:FAST": 3.9,
+          "A1:FASTV3.3": 3.9,
+          "A1:STANDARD": 3.9,
+          "A1_MINI:FAST": 3.9,
           "A1_MINI:FASTV3.3": 3.9,
+          "A1_MINI:STANDARD": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -3574,7 +3596,9 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.9
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,

@@ -88,6 +88,8 @@ mod keys {
     pub const MISMATCH_QUESTION: &str = "hook.mismatch_question";
     pub const MISMATCH_STOPPED: &str = "hook.mismatch_stopped";
     pub const MISMATCH_REFUSE: &str = "hook.mismatch_refuse";
+    /// 这台机型已经停用（目录里没有它）⇒ 这一趟不跑
+    pub const MACHINE_DISABLED: &str = "hook.machine_disabled";
     pub const CALIB_MODE_QUESTION: &str = "hook.calib_mode_question";
     pub const CALIB_STOPPED: &str = "hook.calib_stopped";
     /* 挪塔那一问（2026-10-18）：设置页「智能塔位置」开着且真撞了才问 */
@@ -145,6 +147,7 @@ const ALL_KEYS: &[&str] = &[
     keys::MISMATCH_QUESTION,
     keys::MISMATCH_STOPPED,
     keys::MISMATCH_REFUSE,
+    keys::MACHINE_DISABLED,
     keys::CALIB_MODE_QUESTION,
     keys::CALIB_STOPPED,
     keys::CALIB_DONE_PRINT,
@@ -727,6 +730,44 @@ pub fn run(
     // 报的是"模型超出打印边界 X：185.9mm"，把真正的原因埋在了一句听不懂的话里）。
     let preset_machine = ir.machine.machine_type.clone();
     let gcode_machine = ir.machine.gcode_machine_type.clone();
+
+    /*
+     * **停用的机型这一趟不跑**（2026-10-30 作者：「禁用了之后，后处理也不行」）。
+     *
+     * 判据不新造标记：停用 = `runtime::catalog::collect` 不把它放进目录 ⇒
+     * **本程序现在的目录里没有这台机型**。所以这里问的就是目录 ——
+     * 不读源 TOML（用户机器上根本没有 `presets/machines` 那份源）。
+     *
+     * 读不出目录（首启还没释放、坏档、被外部直接调起）**一律不阻断**：
+     * 与偏好那一格同口径，读不到就不加戏 —— 不能因为目录读不出来把所有人的
+     * 后处理停掉。目录里一台机型都没有时同理（那本来就是一份读不出来的目录）。
+     */
+    if let Some(root) = crate::fsx::paths::internal_root_headless() {
+        if let Ok(catalog) = crate::runtime::load_released_catalog(&root) {
+            if !catalog.machines.is_empty() && catalog.machine(&preset_machine).is_none() {
+                let err = HookError::stopped(
+                    Reason::new(keys::MACHINE_DISABLED).with("machine", preset_machine.clone()),
+                );
+                archive_failure(
+                    &archived,
+                    job,
+                    &preset_machine,
+                    &conclusion_line(&err),
+                    true,
+                    raw.len() as u64,
+                    started_at,
+                    started,
+                    /* 管线还没进（机型停用），没有步骤账 */
+                    Vec::new(),
+                    None,
+                    relocation.as_ref(),
+                    model_map_from(&content, Some(&ir)),
+                    &identity_probe,
+                );
+                return Err(err);
+            }
+        }
+    }
     /* 学习账要用：机型不符的那一趟**不算**（见下面成功出口那段） */
     let machine_mismatch = is_machine_mismatch(&preset_machine, &gcode_machine);
     if machine_mismatch {
