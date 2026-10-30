@@ -139,7 +139,7 @@ export default function SearchField({
         placeholder={tr(PLACEHOLDER[density])}
         aria-label={tr('params.search.aria')}
         aria-keyshortcuts={ariaOf('search')}
-        title={tr('params.search.title', { keys: comboOf('search') })}
+        data-tip={tr('params.search.title', { keys: comboOf('search') })}
         onFocus={openHist}
         onBlur={() => onCommit?.(value)}
         onChange={(e) => {
@@ -215,7 +215,7 @@ export default function SearchField({
                   type="button"
                   className={s.histForget}
                   aria-label={tr('params.search.forget', { term })}
-                  title={tr('params.search.forgetTitle')}
+                  data-tip={tr('params.search.forgetTitle')}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => onForget?.(term)}
                 >

@@ -135,7 +135,7 @@ export function DiffRuler({
           type="button"
           className={`${s.rulerMark} ${m.kind === 'add' ? s.rulerAdd : s.rulerDel}`}
           style={{ top: `${m.top * 100}%`, height: `${Math.max(m.height * 100, 0.6)}%` }}
-          title={
+          data-tip={
             m.kind === 'add'
               ? `跳到新增行（第 ${m.line} 行）`
               : `跳到删除行（旧文件第 ${m.line} 行）`

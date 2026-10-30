@@ -222,7 +222,7 @@ export default function BbsRail({
         type="button"
         className={s.close}
         onClick={onClose}
-        title={tr('bbs.closeDetail')}
+        data-tip={tr('bbs.closeDetail')}
         aria-label={tr('bbs.closeDetail')}
       >
         <Icon name="close" size={16} />
@@ -260,7 +260,7 @@ export default function BbsRail({
               type="button"
               className={s.chip}
               data-on={viewMode === 'bbs'}
-              title={tr('bbs.rail.sameAsBbsTitle', { note: rulesNote })}
+              data-tip={tr('bbs.rail.sameAsBbsTitle', { note: rulesNote })}
               onClick={() => onViewMode('bbs')}
             >
               {tr('bbs.rail.sameAsBbs')}
@@ -269,7 +269,7 @@ export default function BbsRail({
               type="button"
               className={s.chip}
               data-on={viewMode === 'all'}
-              title={tr('bbs.rail.allParamsTitle')}
+              data-tip={tr('bbs.rail.allParamsTitle')}
               onClick={() => onViewMode('all')}
             >
               {tr('bbs.rail.allParams')}
@@ -287,7 +287,7 @@ export default function BbsRail({
           )}
 
           <dt>{tr('bbs.rail.source')}</dt>
-          <dd title={fromMkp
+          <dd data-tip={fromMkp
             ? tr('bbs.rail.mkpSourceTitle')
             : sourceRoot + (sourceNote ? tr('bbs.rail.sourceNote', { note: say(sourceNote) }) : '')}
           >
@@ -295,7 +295,7 @@ export default function BbsRail({
           </dd>
 
           <dt>{tr('bbs.rail.meta')}</dt>
-          <dd title={tr('bbs.rail.metaTitle')}>
+          <dd data-tip={tr('bbs.rail.metaTitle')}>
             {stamp}
           </dd>
         </dl>
@@ -318,10 +318,10 @@ export default function BbsRail({
             ))}
           </ul>
         ) : (
-          <span className={s.chain} title={rulesNote}>{tr('bbs.rail.noParent')}</span>
+          <span className={s.chain} data-tip={rulesNote}>{tr('bbs.rail.noParent')}</span>
         )}
 
-        {variantNote !== '' && <span className={s.chain} title={rulesNote}>{variantNote}</span>}
+        {variantNote !== '' && <span className={s.chain} data-tip={rulesNote}>{variantNote}</span>}
 
         {note !== '' && <span className={s.note}>{note}</span>}
         {error !== '' && <span className={s.error}>{say(error)}</span>}

@@ -3359,3 +3359,40 @@ text = "发布账本写不出来"
 text_en = "Cannot write the publish ledger"
 params = []
 note = "序列化失败（正常不会发生；发生说明结构被改坏了）"
+
+# ==================== 「去系统里改默认打开方式」那扇引导（2026-10-30） ====================
+#
+# 这四句原来**硬编码在 `src-tauri/src/ipc/slicer.rs` 里**（作者 2026-10-30 让做中英双语时
+# 才浮出来）：界面切到 English 时，引导右侧的步骤是英文（`settings.guide.step*` 走前端表），
+# 而顶上一整段状态句仍是中文 —— 同一扇窗里两种语言，看着像 bug。
+#
+# 为什么它们当初在代码里：这几句带**平台知识**（macOS 的访达/桌面、Windows 的「始终」勾选框），
+# 谁写这段逻辑谁最清楚该怎么说，顺手就 format! 了。现在统一收到表里，平台差异仍在
+# `slicer.rs`（它决定**取哪条键**），措辞回表（这里决定**怎么说**）。
+#
+# ★ 153 / 154 那两条的 `{steps}` / `{where_it_is}` 由调用方填 —— 现在填的是 510 / 511
+#   这两条**已按当前语言取过**的句子，所以整段跟着界面语言走。
+
+["ui.ipc.slicer.509"]
+text = "已打开「{name}」的「显示简介」—— 在「打开方式」里选好应用，再点右边的「更改全部…」（不点它只对这一个文件生效）。这窗口由 macOS 开在访达所在的那个桌面 —— 眼前没看到的话，去访达那个桌面找"
+text_en = "Opened “Get Info” for “{name}” — pick the app under “Open With”, then click “Change All…” to its right (without that click the change applies to this file only). macOS opens this window on the desktop where Finder lives — if you cannot see it, switch to that desktop."
+params = ["name"]
+note = "macOS 走通时回给引导弹窗的那整段状态句；「更改全部…」必须点名，不点只对这一个文件生效"
+
+["ui.ipc.slicer.510"]
+text = "已经帮你在访达里定位到那份文件"
+text_en = "The file is already selected in Finder for you"
+params = []
+note = "开「显示简介」失败后的退路里，`{where_it_is}` 的**做到**那一支（没做到走 why_not_located）"
+
+["ui.ipc.slicer.511"]
+text = "手动来：右键它 →「显示简介」→「打开方式」里选好应用 → 点「更改全部…」（不点只对这一个文件生效）"
+text_en = "Do it by hand: right-click it → “Get Info” → pick the app under “Open With” → click “Change All…” (without that click the change applies to this file only)"
+params = []
+note = "同上那条错里的 `{steps}`：用户点了「不允许」之后唯一能自己走完的三步"
+
+["ui.ipc.slicer.512"]
+text = "在「你要如何打开这个文件？」里选好应用，再勾上「始终使用此应用打开 .3mf 文件」"
+text_en = "In the “How do you want to open this file?” dialog pick the app, then tick “Always use this app to open .3mf files”"
+params = []
+note = "Windows 走通时的状态句；「始终」那个勾选框是那边唯一能改成默认的地方（我们不碰注册表）"

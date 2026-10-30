@@ -289,7 +289,7 @@ function AxisGroup({ label, values, enabled, value, onPick }: AxisGroupProps) {
               data-off={off}
               disabled={off}
               /* 灰一个项不说原因，用户只会以为坏了 —— 悬停给一句人话 */
-              title={off ? tr('presets.filter.chipOff', { label, value: v }) : undefined}
+              data-tip={off ? tr('presets.filter.chipOff', { label, value: v }) : undefined}
               onClick={() => onPick(v)}
             >
               {v}
@@ -365,7 +365,7 @@ export function PresetSlicerPill({
         aria-haspopup="true"
         aria-expanded={open}
         /* 窄窗里左拍的值会被省略号吃掉，悬停看全 */
-        title={tr('presets.filter.aria', {
+        data-tip={tr('presets.filter.aria', {
           nozzle: nozzle === '' ? tr('presets.filter.all') : nozzle,
           layer: layer === '' ? tr('presets.filter.all') : layer,
         })}
@@ -445,7 +445,7 @@ export default function PresetStatusPill({
           type="button"
           className={s.left}
           /* 名字在窄窗里会被省略号吃掉 —— 悬停看全名；「点击定位」这件事也在这句话里 */
-          title={tr('presets.filter.locate', { name: appliedFileName })}
+          data-tip={tr('presets.filter.locate', { name: appliedFileName })}
           onClick={onLocate}
         >
           <i className={s.dot} aria-hidden />

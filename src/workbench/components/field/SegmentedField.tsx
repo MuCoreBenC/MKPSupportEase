@@ -212,7 +212,7 @@ export default function SegmentedField(props: Props) {
             /* 这一档已弃用（C13）：划一条线，但仍然可点 —— 落盘那道闸在调用方 */
             data-dep={o.deprecated ? '' : undefined}
             disabled={disabled}
-            title={o.note}
+            data-tip={o.note}
             onClick={() => commit(o.value)}
           >
             {o.label}

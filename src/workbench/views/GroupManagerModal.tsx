@@ -269,7 +269,7 @@ export default function GroupManagerModal({ open, groups, assets, onClose, onSav
                     ])
                     setAdding(false)
                   }}
-                  title={a.path}
+                  data-tip={a.path}
                 >
                   <span className={s.rowName}>{a.display}</span>
                   <span className={s.rowMeta}>{KIND_TEXT(a.kind)}</span>

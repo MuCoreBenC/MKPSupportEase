@@ -76,7 +76,7 @@ function Pill({ label, onClick, primary, arrow, back, on = true, disabled, title
       data-fixed={fixed ? 'true' : undefined}
       tabIndex={on && !disabled ? 0 : -1}
       disabled={disabled}
-      title={title}
+      data-tip={title}
       onMouseDown={noFocus}
       onClick={onClick}
     >
@@ -103,41 +103,57 @@ export default function CardFrame({
   children,
   style,
 }: CardFrameProps) {
+  /*
+   * 顶部那一条 = **一行 flex**：左边眉标题，右边 [打开模型 / 徽标 / 右上角那一块]。
+   *
+   * ★ 2026-10-30（作者截图：「他被压住了……左边那个打开模型比较小，它们顶部好像都是一样的」）：
+   *   原来是两套绝对定位 —— 眉标题行从左往右排（含「打开模型」），右上角那颗预设 pill
+   *   单独钉在右边。两边各自生长、谁都不知道对方的宽度，窄窗里 pill 直接盖住按钮，
+   *   而且行盒 22 与 pill 28 同 top 不同心（差 3px）。现在三种东西同属一行，
+   *   `align-items: center` 让它们同心，`space-between` + 左侧省略号保证永远不重叠。
+   */
+  const head = eyebrow || tag || topAction || corner
   return (
     <div
       className={s.frame}
       data-peek-safe={peekSafe ? 'true' : undefined}
-      /* 没有眉标题就不给眉标题留那条带子。带子是为它预留的，它不在，
-         留着就是白占一百多像素 —— 内容被压低，下面的东西还容易被裁 */
-      data-bare-top={eyebrow || tag ? undefined : 'true'}
+      /* 顶部那一条里什么都没有时不给它留带子（留着就是白占一百多像素 —— 内容被压低） */
+      data-bare-top={head ? undefined : 'true'}
       /* 左下角一颗胶囊都没有时，同理不给胶囊留那条带子 */
       data-bare-bottom={navs.length || actions?.length ? undefined : 'true'}
       style={style}
     >
-      {(eyebrow || tag) && (
-        <p className={s.eyebrow}>
-          {eyebrow}
-          <i />
-          {topAction && (
-            <button
-              type="button"
-              className={s.topBtn}
-              data-accent={topAction.accent ? 'true' : undefined}
-              onMouseDown={noFocus}
-              onClick={topAction.onClick}
-            >
-              {topAction.label}
-            </button>
-          )}
-          {tag && (
-            <span className={s.tag} data-tone={tagTone}>
-              {tag}
-            </span>
-          )}
-        </p>
+      {head && (
+        <div className={s.head}>
+          <div className={s.headLeft}>
+            {eyebrow && (
+              <>
+                <span className={s.eyebrowText}>{eyebrow}</span>
+                <i aria-hidden="true" />
+              </>
+            )}
+          </div>
+          <div className={s.headRight}>
+            {topAction && (
+              <button
+                type="button"
+                className={s.topBtn}
+                data-accent={topAction.accent ? 'true' : undefined}
+                onMouseDown={noFocus}
+                onClick={topAction.onClick}
+              >
+                {topAction.label}
+              </button>
+            )}
+            {tag && (
+              <span className={s.tag} data-tone={tagTone}>
+                {tag}
+              </span>
+            )}
+            {corner && <div className={s.corner}>{corner}</div>}
+          </div>
+        </div>
       )}
-
-      {corner && <div className={s.corner}>{corner}</div>}
 
       {children}
 

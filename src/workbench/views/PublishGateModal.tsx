@@ -546,7 +546,7 @@ export default function PublishGateModal({
                 <span className={c.mono}>{report.publishedAt ?? '未知'}</span>
                 <span className={s.sep}>|</span>
                 目录指纹{' '}
-                <span className={c.mono} title={report.revision ?? ''}>
+                <span className={c.mono} data-tip={report.revision ?? ''}>
                   {report.revision === null || report.revision === undefined
                     ? '未知'
                     : report.revision.slice(0, 8)}
@@ -566,11 +566,11 @@ export default function PublishGateModal({
                       {changedFiles.map((f) => (
                         <div key={f.path} className={s.fileRow}>
                           <code className={`${c.mono} ${s.filePath}`}>{f.path}</code>
-                          <span className={`${c.mono} ${s.fileSha}`} title={f.before ?? '（新增）'}>
+                          <span className={`${c.mono} ${s.fileSha}`} data-tip={f.before ?? '（新增）'}>
                             {shortSha(f.before)}
                           </span>
                           <span className={s.arrow}>→</span>
-                          <span className={`${c.mono} ${s.fileSha}`} title={f.after ?? '（删除）'}>
+                          <span className={`${c.mono} ${s.fileSha}`} data-tip={f.after ?? '（删除）'}>
                             {shortSha(f.after)}
                           </span>
                         </div>
@@ -636,7 +636,7 @@ export default function PublishGateModal({
             ) : (
               <>
                 本次目录指纹{' '}
-                <span className={c.mono} title={report.revision ?? ''}>
+                <span className={c.mono} data-tip={report.revision ?? ''}>
                   {report.revision === null || report.revision === undefined
                     ? '未知'
                     : report.revision.slice(0, 8)}
@@ -739,7 +739,7 @@ export default function PublishGateModal({
             type="button"
             className={`${c.btn} ${c.btnPrimary}`}
             disabled={!audit?.canPublish || busy || closed !== null}
-            title={
+            data-tip={
               closed !== null
                 ? closed
                 : audit?.canPublish

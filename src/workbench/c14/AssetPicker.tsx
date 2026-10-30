@@ -96,7 +96,7 @@ export default function AssetPicker({ open, title, options, value, onCancel, onP
               type="button"
               className={`${s.imgCell} ${a.id === picked ? s.imgCellOn : ''}`}
               aria-pressed={a.id === picked}
-              title={a.present ? a.display : `${a.display} —— 文件还没搬进资产库`}
+              data-tip={a.present ? a.display : `${a.display} —— 文件还没搬进资产库`}
               onClick={() => setPicked(a.id)}
             >
               {a.present ? (
@@ -179,7 +179,7 @@ export function AssetField({
             onError={() => setOk(false)}
           />
         ) : (
-          <span className={s.assetThumbPh} title={asset.present ? '图加载不出来' : '文件还没搬'}>
+          <span className={s.assetThumbPh} data-tip={asset.present ? '图加载不出来' : '文件还没搬'}>
             缺图
           </span>
         )

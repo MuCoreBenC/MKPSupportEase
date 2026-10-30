@@ -1143,7 +1143,7 @@ function ParamSnapshotPanel({ snap }: { snap: ReportSnapshot }) {
               <dl className={s.snapRows}>
                 {sec.rows.map((row) => (
                   <div className={s.snapRow} key={row.key}>
-                    <dt title={row.key}>{row.label}</dt>
+                    <dt data-tip={row.key}>{row.label}</dt>
                     <dd>{row.value === '' ? tr('report.snapshot.empty') : row.value}</dd>
                   </div>
                 ))}
@@ -1734,7 +1734,7 @@ export default function PageReport() {
               setSidePeek(true)
               setSideOpen(false)
             }}
-            title={tr('report.side.fold')}
+            data-tip={tr('report.side.fold')}
             aria-label={tr('report.side.fold')}
           >
             <Icon name="chevronDown" size={12} className={s.sideFoldIcon} />
@@ -1838,7 +1838,7 @@ export default function PageReport() {
                           className={s.sideRow}
                           data-ok={row.ok}
                           data-on={row.id === selId}
-                          title={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
+                          data-tip={`${row.gcodeName ?? tr('report.row.noName')} · ${row.startedAt ?? row.day} · ${elapsedText(tr, row.elapsedMs)}`}
                           onClick={() => pick(row)}
                         >
                           <span className={s.rowIcon} aria-hidden="true">
@@ -1896,7 +1896,7 @@ export default function PageReport() {
         type="button"
         className={s.sideFace}
         onClick={unfoldSide}
-        title={tr('report.side.unfold', { n: (rows ?? []).length })}
+        data-tip={tr('report.side.unfold', { n: (rows ?? []).length })}
         aria-label={tr('report.side.unfold', { n: (rows ?? []).length })}
       >
         <Icon name="chevronDown" size={12} className={s.sideFaceIcon} />
@@ -1994,7 +1994,7 @@ export default function PageReport() {
               ) : (
                 <>
                   <div className={s.mainHead}>
-                    <h3 className={s.mainFile} title={sel.gcodeName ?? tr('report.row.noName')}>
+                    <h3 className={s.mainFile} data-tip={sel.gcodeName ?? tr('report.row.noName')}>
                       <FileName name={sel.gcodeName} />
                     </h3>
                     <span className={sel.ok ? s.chip : `${s.chip} ${s.chipBad}`}>

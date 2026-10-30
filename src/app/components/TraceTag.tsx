@@ -32,7 +32,7 @@ export default function TraceTag({ traceId }: TraceTagProps) {
   }
 
   return (
-    <button type="button" className={s.tag} onClick={copy} title={tr('trace.copy')}>
+    <button type="button" className={s.tag} onClick={copy} data-tip={tr('trace.copy')}>
       {copied ? tr('trace.copied') : `#${traceId.slice(0, 8)}`}
     </button>
   )

@@ -563,7 +563,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                     type="checkbox"
                     checked={!!picked[r.uid]}
                     disabled={!pickable(r)}
-                    title={r.disabledReason ?? undefined}
+                    data-tip={r.disabledReason ?? undefined}
                     onClick={(e) => e.stopPropagation()}
                     onChange={(e) => setPicked({ ...picked, [r.uid]: e.target.checked })}
                     aria-label={`选择 ${r.uid}`}
@@ -574,7 +574,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                   <span className={s.grow} />
                   <span
                     className={`${s.tag} ${STATE_TAG[r.state]}`}
-                    title={words.build[r.state].explain ?? undefined}
+                    data-tip={words.build[r.state].explain ?? undefined}
                   >
                     {words.build[r.state].label}
                   </span>
@@ -640,7 +640,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
                 disabled={!ids.length || blocked}
-                title={blocked ? words.disabled.buildBlocked : undefined}
+                data-tip={blocked ? words.disabled.buildBlocked : undefined}
                 onClick={() => void openGenerate()}
               >
                 生成 {ids.length} 项
@@ -693,7 +693,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
                 disabled={blocked}
-                title={
+                data-tip={
                   blocked
                     ? words.disabled.publishBlocked
                     : '先过发布闸：十五项逐项打勾，全绿才给发布'
@@ -873,7 +873,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
                 disabled={!baseline || baselineDirty === 0}
-                title={
+                data-tip={
                   baseline && baselineDirty === 0
                     ? '九份产物与基线逐字节相同，没有要写的'
                     : '只写上面标「已变更 / 基线缺失」的那几份'

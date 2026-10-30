@@ -1,0 +1,49 @@
+/*
+ * 全局气泡（2026-10-30）：**全站唯一一份**提示气泡的样式。
+ *
+ * 形状照参数页那颗原生 title 的观感（作者认这个形状）：深灰圆角小卡 + 白字 + 柔影，
+ * 深浅两套主题都用这一档 —— 跟着 `--surface-solid` 走的话，深色主题下会变成灰底灰字，
+ * 糊在卡片里认不出来。
+ *
+ * 位置由 `TipLayer.tsx` 算好写进 inline style（`left` / `top` 是**锚点**）：
+ * 往下弹 / 往上弹、往右长 / 往左长，都靠下面两个 transform 收尾。
+ */
+
+.tip {
+  position: fixed;
+  z-index: 90;
+
+  /*
+   * ★ 宽度必须 `max-content`：气泡是绝对/固定定位，只写 `max-width` 会按包含块收缩
+   *   （13px 的 `?` 圈那回就是这么变成"一条竖字"的）。`max-content` 让内容撑开，
+   *   `max-width` 再封顶 —— 320 大约一行 23 个汉字，长句子 3–4 行收住。
+   */
+  width: max-content;
+  max-width: min(320px, 60vw);
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #3a3a3a;
+  box-shadow: 0 8px 22px rgb(0 0 0 / 34%);
+  color: #fff;
+  font-size: var(--fs-label);
+  font-weight: 400;
+  line-height: 1.55;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  /* 不吃鼠标：否则一进入就离开触发元素，气泡会闪 */
+  pointer-events: none;
+}
+
+/* 下方放不下 ⇒ 往上弹（锚点落在触发元素的上沿） */
+.tipUp {
+  transform: translateY(-100%);
+}
+
+/* 右边放不下 ⇒ 往左长（锚点落在触发元素的右沿） */
+.tipRight {
+  transform: translateX(-100%);
+}
+
+.tipUp.tipRight {
+  transform: translate(-100%, -100%);
+}

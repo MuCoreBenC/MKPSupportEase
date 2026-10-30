@@ -386,7 +386,7 @@ pub fn record_import(root: &Path, path: &str) -> Result<(), AppError> {
     save(&copies_path(root), &ledger)
 }
 
-/// 哪几份是用户拷贝出来的（设置页「拷贝出来的也跟着云端更新」关着时要把它们排除）
+/// 哪几份是用户复制出来的（设置页「复制出来的也跟着云端更新」关着时要把它们排除）
 pub fn copy_paths(root: &Path) -> std::collections::HashSet<String> {
     load_provenance(root)
         .into_iter()

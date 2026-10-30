@@ -30,7 +30,7 @@
    * 眉标题那一行本身的高度。它是绝对定位的，所以必须在内容的上内边距里显式让出来 ——
    * 以前靠 --chrome-pad "顺便"盖住（眉标题约 15px、pad 最小 16px，刚好不撞），
    * v0.0.20 把行盒钉成 22px、pad 下限压到 12px 之后就撞上了：扁窗里预设文件那一行
-   * 直接压在标题上。让位量与 .eyebrow 的 min-height 同源，改一处就够。
+   * 直接压在标题上。让位量与 `.head` 的 height 同源，改一处就够。
    */
   --chrome-head: 22px;
 
@@ -85,36 +85,65 @@
   --chrome-b: clamp(12px, 3vh, 40px);
 }
 
-.eyebrow {
+/*
+ * 顶部那一条：**一行 flex，左右两端**（2026-10-30）。
+ *
+ * 左边眉标题（+ 那道 28px 发丝线），右边 [打开模型 / 徽标 / 右上角那一块]。
+ * 原来这两边是两套绝对定位：眉标题行从左往右长（里面还塞着「打开模型」），
+ * pill 单独钉在右边 —— 两边互不知道宽度，窄窗里 pill 直接压住按钮；
+ * 行盒 22 与 pill 28 又同 top 不同心（差 3px）。现在同一行里 `space-between`，
+ * 高度 = 眉标题那条行盒（--chrome-head），所有子项 `align-items: center` 同心；
+ * 左边文本用省略号收尾，**永远不可能叠到右边那一簇上**。
+ */
+.head {
   position: absolute;
   left: var(--chrome-x);
+  right: calc(var(--chrome-x) + var(--chrome-peek, 0px));
   top: var(--chrome-y);
   z-index: 2;
+  height: var(--chrome-head);
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: space-between;
+  gap: 18px;
+  min-width: 0;
+}
 
-  /*
-   * 行盒高度写死：徽标（10.5px 字 + 1px 上下内边距 + 1px 边框）比 11px 的标题文字高，
-   * 它一出现 flex 行就变高、居中的标题跟着往下挪 —— 实测 1.5px，看起来就是"标题抖一下"。
-   * 22px 比两者都高，于是有没有徽标，标题的 y 都由这一条决定。
-   */
-  min-height: 22px;
-  line-height: 22px;
-  margin: 0;
-  /* 2026-10-12 第三遍：11 → 12（作者圈过这行「第三步 · Z 偏移校准」说看不清）。
-     行盒 22px 没动，所以占比位与徽标的那两条老账都还成立 */
+.headLeft {
+  display: flex;
+  /* 只剩它会让：窄窗里先收眉标题（省略号），右边那一簇（打开模型 / pill）保持完整 */
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 眉标题的字：2026-10-12 第三遍 11 → 12（作者圈过这行「第三步 · Z 偏移校准」说看不清） */
+.eyebrowText {
+  min-width: 0;
+  overflow: hidden;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.18em;
   color: var(--text-3);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.eyebrow i {
+.headLeft i {
+  flex: none;
   width: 28px;
   height: 1px;
   background: var(--line-strong);
+}
+
+/* 右端那一簇：打开模型 / 徽标 / 预设 pill，**同一条行盒里**排，不再各自绝对定位 */
+.headRight {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 /*
@@ -167,18 +196,16 @@
 }
 
 /*
- * 卡片右上角的一小块（首页校准卡的预设 pill）。与眉标题同一条 y（--chrome-y），
- * 右缘对齐 --chrome-x；peekSafe 的卡跟着 --chrome-peek 一起退，
- * 不然 pill 会钻到露出卡底下去（.pills 那条注释里量过同一个坑）。
+ * 卡片右上角那一块（首页校准卡的预设 pill）：从绝对定位改成 `.headRight` 里的一项
+ * （2026-10-30）—— 位置与「打开模型」由同一行 flex 排，不再各排各的、互相压住。
+ * 它比行盒高（pill 28 / 行盒 22），`align-items: center` 让它上下各溢出 3px，
+ * 圆心与眉标题、打开模型**同一条中线**（原来同 top 不同心，差 3px）。
  */
 .corner {
-  position: absolute;
-  top: var(--chrome-y);
-  right: calc(var(--chrome-x) + var(--chrome-peek, 0px));
-  z-index: 2;
   display: flex;
   align-items: center;
   min-height: 22px;
+  min-width: 0;
 }
 
 /* 露出卡 / 退出层里不显形：缝里只有 20% 宽，右上角这一块放不下也不该能点 */
@@ -188,8 +215,7 @@
   pointer-events: none;
 }
 
-/* 徽标挂在标题右侧固定间距：不占位，出现消失都不动版面。
-   line-height 也要写死 —— 让整颗（含边框）矮于 .eyebrow 的 22px 行盒 */
+/* 徽标挂在右端那一簇里：line-height 写死 —— 让整颗（含边框）矮于 `--chrome-head` 的 22px 行盒 */
 .tag {
   padding: 1px 7px;
   border-radius: 999px;

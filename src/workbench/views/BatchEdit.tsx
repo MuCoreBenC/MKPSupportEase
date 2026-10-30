@@ -219,7 +219,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
             <button
               type="button"
               className={s.pMiniBtn}
-              title={allOn ? '全不选' : '勾上所有对照列'}
+              data-tip={allOn ? '全不选' : '勾上所有对照列'}
               onClick={() => setPickedIds(allOn ? [] : targets.map((t) => t.id))}
             >
               {allOn ? '全不选' : '全选'}
@@ -297,7 +297,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
           type="button"
           className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
           disabled={!picked.length || noChange}
-          title={
+          data-tip={
             !picked.length
               ? '先挑至少一个应用目标'
               : noChange
@@ -316,7 +316,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
           type="button"
           className={`${s.btn} ${s.btnSm}`}
           disabled={restorable.length === 0}
-          title={
+          data-tip={
             restorable.length === 0
               ? '勾选的列都没有改动，没有要恢复的'
               : '把改过的列各自退回改动前的值'
@@ -359,7 +359,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
                 disabled={!preview.effects.some((e) => e.kind !== 'noChange')}
-                title={
+                data-tip={
                   preview.effects.some((e) => e.kind !== 'noChange')
                     ? undefined
                     : '勾选的列都已经是这个值了'
@@ -398,7 +398,7 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
                 <em className={s.cardNote}>{skip.machine}</em>
               </span>
               <span className={s.pKvV}>
-                <span className={s.cardNote} title={skip.blocked.map((b) => b.need).join('；') || undefined}>
+                <span className={s.cardNote} data-tip={skip.blocked.map((b) => b.need).join('；') || undefined}>
                   {skip.reason}
                 </span>
               </span>

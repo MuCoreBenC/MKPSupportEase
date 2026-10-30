@@ -141,7 +141,7 @@ export default function BundleResourcesModal({ open, assets, bundle, onCancel, o
             type="button"
             className={`${s.btn} ${s.btnPrimary}`}
             disabled={bundle === null}
-            title={bundle === null ? '先选一个套餐' : undefined}
+            data-tip={bundle === null ? '先选一个套餐' : undefined}
             onClick={() => onConfirm([...mkp, ...slicer])}
           >
             保存
@@ -225,7 +225,7 @@ export default function BundleResourcesModal({ open, assets, bundle, onCancel, o
                       台账键（id）/ 版本名退成同排浅色附注。 */}
                   <span
                     className={`${s.fileName} ${s.mono}`}
-                    title={a.productName !== '' ? a.productName : a.path}
+                    data-tip={a.productName !== '' ? a.productName : a.path}
                   >
                     {leadNameOf(a)}
                   </span>
@@ -278,7 +278,7 @@ export default function BundleResourcesModal({ open, assets, bundle, onCancel, o
  */
 function HelpDot({ text }: { text: string }) {
   return (
-    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+    <span className={s.helpDot} role="img" aria-label={text} data-tip={text}>
       ?
     </span>
   )

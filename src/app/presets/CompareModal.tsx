@@ -521,7 +521,7 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={past.length === 0 || busy}
-              title={tr('presets.cmp.undoTitle')}
+              data-tip={tr('presets.cmp.undoTitle')}
               aria-label={tr('presets.cmp.undo')}
               onClick={undo}
             >
@@ -531,7 +531,7 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={future.length === 0 || busy}
-              title={tr('presets.cmp.redo')}
+              data-tip={tr('presets.cmp.redo')}
               aria-label={tr('presets.cmp.redo')}
               onClick={redo}
             >
@@ -541,7 +541,7 @@ export default function CompareModal({
               type="button"
               className={s.textBtn}
               disabled={busy}
-              title={tr(EDIT_TEXT.exitTitle)}
+              data-tip={tr(EDIT_TEXT.exitTitle)}
               onClick={() => {
                 /*
                  * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -606,7 +606,7 @@ export default function CompareModal({
               type="button"
               className={onlyDiff ? `${s.onlyDiff} ${s.on}` : s.onlyDiff}
               onClick={() => setOnlyDiff((v) => !v)}
-              title={tr('presets.cmp.onlyDiffTitle')}
+              data-tip={tr('presets.cmp.onlyDiffTitle')}
             >
               <span className={s.sw} />
               {tr('presets.cmp.onlyDiff')} <span className={s.cnt}>{tabCounts.all}</span>
@@ -620,7 +620,7 @@ export default function CompareModal({
                 type="button"
                 className={s.addBtn}
                 disabled={picked.length >= MAX_PICKED || candidates.length === 0}
-                title={
+                data-tip={
                   picked.length >= MAX_PICKED
                     ? tr('presets.cmp.maxPicked')
                     : tr('presets.cmp.addPick')
@@ -678,7 +678,7 @@ export default function CompareModal({
               {picked.map((path, i) => (
                 <span key={path} className={s.hcol}>
                   <i className={s.dot} style={{ background: COL_COLORS[i] }} />
-                  <span className={s.nm} title={nameOf(path)}>
+                  <span className={s.nm} data-tip={nameOf(path)}>
                     {nameOf(path)}
                   </span>
                   <span className={s.ops}>

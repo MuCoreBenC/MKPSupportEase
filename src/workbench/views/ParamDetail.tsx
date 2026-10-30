@@ -61,7 +61,7 @@ export function StatusTag({
   return (
     <span
       className={`${s.pStatus} ${ST_CLASS[id]}`}
-      title={short ? `${w.label} —— ${w.explain ?? ''}` : (w.explain ?? undefined)}
+      data-tip={short ? `${w.label} —— ${w.explain ?? ''}` : (w.explain ?? undefined)}
     >
       {short ? ST_SHORT[id] : w.label}
     </span>
@@ -222,7 +222,7 @@ export default function ParamDetail({
           <StatusTag cell={cell} words={words} short />
           <span
             className={s.pEdName}
-            title={`${machineLabel(layerUid)} —— ${on ? param.desc : (cell.blockedNote ?? '')}`}
+            data-tip={`${machineLabel(layerUid)} —— ${on ? param.desc : (cell.blockedNote ?? '')}`}
           >
             {layerUid === null
               ? `${machine.display} 基底`
@@ -247,7 +247,7 @@ export default function ParamDetail({
                 <button
                   type="button"
                   className={s.pRevert}
-                  title={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复默认」）`}
+                  data-tip={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复默认」）`}
                   onClick={() => onWriteLayer(layerUid, String(cell.rest))}
                 >
                   ↩ {String(cell.rest)}
@@ -266,12 +266,12 @@ export default function ParamDetail({
             /* 弃用不说「要 X 才可改」——那也是假话（C14 §五） */
             <span
               className={`${s.pEdOff} ${s.pEdOffDep}`}
-              title={words.paramDeprecated.explain ?? undefined}
+              data-tip={words.paramDeprecated.explain ?? undefined}
             >
               {words.paramDeprecated.label}
             </span>
           ) : (
-            <span className={s.pEdOff} title={cell.blockedNote ?? undefined}>
+            <span className={s.pEdOff} data-tip={cell.blockedNote ?? undefined}>
               {cell.blocked[0]?.need ?? words.placeholder.notApplicable}
             </span>
           )}
@@ -279,7 +279,7 @@ export default function ParamDetail({
             <button
               type="button"
               className={s.pEdReset}
-              title={
+              data-tip={
                 below
                   ? `恢复默认 —— 跟随${words.level.machine.label}，值 ${below.text}`
                   : '恢复出厂默认'
@@ -313,7 +313,7 @@ export default function ParamDetail({
             {deprecated && (
               <>
                 {' · '}
-                <span className={s.pDepTag} title={words.paramDeprecated.explain ?? undefined}>
+                <span className={s.pDepTag} data-tip={words.paramDeprecated.explain ?? undefined}>
                   {words.paramDeprecated.label}
                 </span>
               </>
@@ -429,7 +429,7 @@ export default function ParamDetail({
                     <button
                       type="button"
                       className={s.pKvLink}
-                      title={`去看 ${row.parentLabel}`}
+                      data-tip={`去看 ${row.parentLabel}`}
                       onClick={() => onPick(row.parentKey as string)}
                     >
                       {row.parentLabel}

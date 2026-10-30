@@ -36,7 +36,7 @@ export default function BbsTabs({ pages, active, searching, onChange }: Props) {
           data-on={p.id === active}
           data-dim={searching && p.hitCount === 0 ? 'true' : undefined}
           aria-current={p.id === active ? 'page' : undefined}
-          title={
+          data-tip={
             searching
               ? tr('bbs.tabs.titleHit', { title: p.title, rows: p.rowCount, hits: p.hitCount })
               : tr('bbs.tabs.title', { title: p.title, rows: p.rowCount })

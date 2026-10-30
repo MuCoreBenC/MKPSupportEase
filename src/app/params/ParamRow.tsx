@@ -42,6 +42,8 @@ import { useCallback, useState } from 'react'
 import type { ParamSyncEntry } from '../../api'
 import { t, useT, type StringKey } from '../../i18n'
 import FieldControl from '../../components/field/FieldControl'
+/* 自绘提示气泡（2026-10-30）：`?` 那颗圈的说明不再用原生 `title` */
+import { Tip } from '../../components/tooltip'
 import Highlight from './highlight'
 import { valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
@@ -281,16 +283,19 @@ export default function ParamRow({
               </span>
               {/*
                * `?` 是行名的后缀，紧贴名字（2026-10-21 作者：「跟着标题后面，可以适当缩小」）；
-               * 悬停（`title`）说的是**这一项是什么**（注册表的 desc），不是「点它展开」——
+               * 悬停说的是**这一项是什么**（注册表的 desc），不是「点它展开」——
                * 作者点名要的就是那句说明。说明为空时退回一句「点这一行看详情」，不摆空泡。
+               *
+               * ★ 2026-10-30：作者要的是"系统性的自绘 tooltip"（原生 `title` 在 Windows
+               *   上是另一副样子）。气泡定稿后作者点头「没问题，可以去替换」——
+               *   这一处换成共用件，`?` 圈的样式（`s.info`）一个像素没动，
+               *   只是把"说这句什么话"交给 `<Tip>`（气泡由根上的 `<TipLayer>` 画）。
                */}
-              <span
-                className={s.info}
-                aria-hidden
-                title={def.desc === '' ? t('params.rowTitle') : def.desc}
-              >
-                ?
-              </span>
+              <Tip text={def.desc === '' ? t('params.rowTitle') : def.desc}>
+                <span className={s.info} aria-hidden>
+                  ?
+                </span>
+              </Tip>
             </span>
             {/*
              * 那句橙字只给「换个条件就能用」的行。弃用的行说它就是假话 —— 它正在退场，
@@ -349,7 +354,7 @@ export default function ParamRow({
               type="button"
               className={s.syncBtn}
               disabled={syncBusy || sync?.cloudNew === null}
-              title={
+              data-tip={
                 sync?.cloudNew === null
                   ? tr('params.row.adoptTitleNoCloud')
                   : tr('params.row.adoptTitle', {
@@ -366,7 +371,7 @@ export default function ParamRow({
               type="button"
               className={s.syncBtnGhost}
               disabled={syncBusy}
-              title={tr('params.row.holdTitle', { value: savedText })}
+              data-tip={tr('params.row.holdTitle', { value: savedText })}
               onClick={() => onHoldSync(def.key)}
             >
               {tr('params.row.hold')}
@@ -378,7 +383,7 @@ export default function ParamRow({
               type="button"
               className={s.syncBtn}
               disabled={syncBusy || sync?.cloudNew === null}
-              title={tr('params.row.adoptShortTitle')}
+              data-tip={tr('params.row.adoptShortTitle')}
               onClick={() => onAdoptSync(def.key)}
             >
               {tr('params.row.adoptShort')}
@@ -390,7 +395,7 @@ export default function ParamRow({
             <button
               type="button"
               className={s.restore}
-              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
+              data-tip={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
               onClick={() => {
                 onRevertToSaved(def.key)
                 setResetNonce((n) => n + 1)
@@ -401,7 +406,7 @@ export default function ParamRow({
             </button>
           )}
           {dep && (
-            <span className={s.depBadge} title={tr('params.row.deprecatedBadgeTitle')}>
+            <span className={s.depBadge} data-tip={tr('params.row.deprecatedBadgeTitle')}>
               {tr('params.row.deprecatedBadge')}
             </span>
           )}
@@ -589,7 +594,7 @@ export default function ParamRow({
                 <button
                   type="button"
                   className={s.cloudRevert}
-                  title={tr('params.row.useMineTitle', {
+                  data-tip={tr('params.row.useMineTitle', {
                     value:
                       sync.local === null
                         ? tr('params.row.useMineValue')

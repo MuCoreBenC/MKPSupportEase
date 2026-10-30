@@ -21,11 +21,35 @@ import {
   type Axis,
   type AxisView,
 } from './calibAxes'
-import type { AxisLimits } from '../../api/contract'
+import type { ActivePreset, AxisLimits } from '../../api/contract'
 import type { PresetState } from './usePreset'
 
 /** 没取到预设时的范围：不设限（界面上输入框也就没有 min/max 可言） */
 const NO_LIMITS: AxisLimits = { x: {}, y: {}, z: {} }
+
+/** 没有基准时交出去的空预设（模块级常量：对象身份稳定，下面那条 effect 不会每帧重跑） */
+const NO_BASIS: PresetState = { status: 'idle' }
+
+/**
+ * 校准状态机该吃哪一份预设 —— **没有真基准就一口都不给**（2026-10-30）。
+ *
+ * 两件事缺一不可：
+ *
+ * 1. `basis !== null`：底账（`run/app-state.json` 的 activePreset）正指着这一版，
+ *    而且那一份是本机文件（判据唯一实现在 `home/activeSelection` 的
+ *    [`localActiveForSelection`]）。只是"浏览到这一版"不算 —— 那正是作者截图里
+ *    第三步凭空冒出数值的那条路。
+ * 2. `preset.preset.local !== null`：`usePreset` 真读到了本机那一份。没有本机副本时
+ *    它给出的三轴是注册表的**云端默认值**（出厂值），拿来当"已保存的偏移"是编的。
+ *
+ * `waiting` / `failed` 原样放行：那两档是"正在取 / 取不到"，读数位自己会显示骨架或
+ * 横杠，比一律压成空态更诚实。
+ */
+export function presetForCalibration(preset: PresetState, basis: ActivePreset | null): PresetState {
+  if (basis === null) return NO_BASIS
+  if (preset.status === 'ready' && preset.preset.local === null) return NO_BASIS
+  return preset
+}
 
 /**
  * 三轴偏移的那一套状态机：已保存的一份 + 板上点出来 / 手输出来的草稿。

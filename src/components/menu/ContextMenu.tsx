@@ -218,7 +218,7 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
                 className={entry.danger === true ? s.danger : s.item}
                 data-on={entry.disabled === undefined ? '1' : '0'}
                 disabled={entry.disabled !== undefined}
-                title={entry.disabled}
+                data-tip={entry.disabled}
                 tabIndex={-1}
                 onClick={() => pick(entry)}
                 /* 悬停/键盘聚焦都放大 —— 键盘走到哪一项，那一项的图标也"亮"到 103% */

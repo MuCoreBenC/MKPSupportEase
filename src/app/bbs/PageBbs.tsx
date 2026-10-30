@@ -499,7 +499,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           className={s.iconBtn}
           data-on={showDrawer}
           onClick={toggleDrawer}
-          title={tr('bbs.presetListTitle')}
+          data-tip={tr('bbs.presetListTitle')}
           aria-label={tr('bbs.presetList')}
         >
           <Icon name="menu" size={16} />
@@ -510,7 +510,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
           （窄于 NARROW_W 就浮层），与报告页的滑盖同一个判据。
         */}
 
-        <span className={s.name} title={preset.current?.file ?? ''}>{preset.title}</span>
+        <span className={s.name} data-tip={preset.current?.file ?? ''}>{preset.title}</span>
 
         {/*
           搜参数（2026-10-13 第三轮从页签行搬上来）：它是"看参数"时一直在敲的东西，
@@ -606,7 +606,7 @@ export default function PageBbs({ density, pending, onNeedDownload }: Props) {
                 type="button"
                 className={s.iconBtn}
                 onClick={openRail}
-                title={preset.error !== ''
+                data-tip={preset.error !== ''
                   ? tr('bbs.detailTitleError', { error: say(preset.error) })
                   : tr('bbs.detailTitle')}
                 aria-label={tr('bbs.detail')}

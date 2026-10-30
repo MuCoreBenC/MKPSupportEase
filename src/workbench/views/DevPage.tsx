@@ -329,7 +329,7 @@ export default function DevPage() {
                         type="button"
                         className={`${s.btn} ${sc.ready ? s.btnPrimary : ''}`}
                         disabled={busy !== null}
-                        title={sc.ready ? `在客户端窗口显示：${sc.label}` : '这一档还没接上'}
+                        data-tip={sc.ready ? `在客户端窗口显示：${sc.label}` : '这一档还没接上'}
                         onClick={() => void run(sc)}
                       >
                         {busy === sc.id ? '触发中…' : sc.ready ? '演示' : '还没做'}
@@ -547,7 +547,7 @@ export default function DevPage() {
                     type="button"
                     className={s.btn}
                     disabled={busy !== null || matrix?.current != null || !c.ready}
-                    title={c.ready ? `只跑「${c.label}」` : '这一档的夹具不在'}
+                    data-tip={c.ready ? `只跑「${c.label}」` : '这一档的夹具不在'}
                     onClick={() => void runMatrix([c.id])}
                   >
                     跑这一档
@@ -593,7 +593,7 @@ export default function DevPage() {
                       type="button"
                       className={`${s.btn} ${on ? '' : s.btnPrimary}`}
                       disabled={busy !== null}
-                      title={on ? `卸下「${row.label}」` : `装上「${row.label}」`}
+                      data-tip={on ? `卸下「${row.label}」` : `装上「${row.label}」`}
                       onClick={() => void toggleFault(row)}
                     >
                       {busy === row.id ? '处理中…' : on ? '卸下' : '装上'}

@@ -86,7 +86,7 @@ export default function GuideCard() {
           {/* 副标题：一句"为什么"，小字灰字 —— 解释不该抢操作步骤的地方 */}
           <p
             className={s.lead}
-            title={tr('guide.card.leadTitle')}
+            data-tip={tr('guide.card.leadTitle')}
           >
             {tr('guide.card.lead')}
           </p>

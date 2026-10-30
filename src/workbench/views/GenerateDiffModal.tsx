@@ -201,7 +201,7 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
         type="button"
         className={`${f.fileName === current?.fileName ? `${s.item} ${s.itemOn}` : s.item}${frozen ? ` ${s.itemFrozen}` : ''}`}
         aria-current={f.fileName === current?.fileName}
-        title={f.fileName}
+        data-tip={f.fileName}
         onClick={() => setSel(f.fileName)}
       >
         <span className={s.itemName}>{f.fileName}</span>

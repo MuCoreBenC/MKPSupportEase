@@ -134,7 +134,14 @@ export function Btn({
    * 深色下主按钮就不是全站那颗实心绿了）。
    */
   className?: string
-  /** 悬停提示（`hint` / 全文这类"看得见但占地方"的补充说明挂这儿） */
+  /**
+   * 悬停提示（`hint` / 全文这类"看得见但占地方"的补充说明挂这儿）。
+   *
+   * ★ 2026-10-30：改成 `data-tip` 输出，气泡由全站的 `<TipLayer>` 画 ——
+   *   原生 `title` 的形状与延迟由系统定，Windows / WebView2 上完全是另一副样子
+   *   （作者：「那到时候在 Windows 上显示效果可能就比较差了」）。
+   *   调用点一个字不用改：`<Btn title="…">` 照旧写。
+   */
   title?: string
 }) {
   const cls = [
@@ -149,7 +156,14 @@ export function Btn({
     .filter(Boolean)
     .join(' ')
   return (
-    <button type="button" className={cls} disabled={disabled} onClick={onClick} title={title}>
+    <button
+      type="button"
+      className={cls}
+      disabled={disabled}
+      onClick={onClick}
+      /* `data-tip` 而不是 `title`：气泡归 `<TipLayer>`（全站一套） */
+      {...(title !== undefined && title !== '' ? { 'data-tip': title } : {})}
+    >
       {children}
     </button>
   )

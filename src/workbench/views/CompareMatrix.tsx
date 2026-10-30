@@ -135,7 +135,7 @@ export default function CompareMatrix({
                     className={s.pPickDot}
                     data-on={sel === row.key}
                     aria-pressed={sel === row.key}
-                    title={`选中 ${row.label} —— 右侧「批量修改」把这个值写到多个版本`}
+                    data-tip={`选中 ${row.label} —— 右侧「批量修改」把这个值写到多个版本`}
                     onClick={() => onPickBatch(row.key)}
                   />
                 )}
@@ -203,15 +203,15 @@ export default function CompareMatrix({
 
               <span className={s.pState}>
                 {!own ? (
-                  <span className={s.pTagNA} title={words.matrixRow.notOwn.explain ?? undefined}>
+                  <span className={s.pTagNA} data-tip={words.matrixRow.notOwn.explain ?? undefined}>
                     {words.matrixRow.notOwn.label}
                   </span>
                 ) : isDiff ? (
-                  <span className={s.pTagDiff} title={words.matrixRow.diff.explain ?? undefined}>
+                  <span className={s.pTagDiff} data-tip={words.matrixRow.diff.explain ?? undefined}>
                     {words.matrixRow.diff.label}
                   </span>
                 ) : (
-                  <span className={s.pTagSame} title={words.matrixRow.same.explain ?? undefined}>
+                  <span className={s.pTagSame} data-tip={words.matrixRow.same.explain ?? undefined}>
                     {words.matrixRow.same.label}
                   </span>
                 )}

@@ -22,6 +22,7 @@ import { api, errorText } from '../../api'
 import { msg, useText, useT, type Text } from '../../i18n'
 import { presetPrefsMutated } from '../state/deliveryState'
 import { Switch } from '../../components/switch'
+import { Tip } from '../../components/tooltip'
 import s from './PageSettings.module.css'
 
 export default function PresetsSection() {
@@ -77,8 +78,10 @@ export default function PresetsSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.presets.copies')}</div>
-          <p className={s.fieldNote}>{tr('settings.presets.copiesNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.presets.copies')}
+            <Tip text={tr('settings.presets.copiesNote')} />
+          </div>
         </div>
         {/* 还没读回来：不画开关（画一个"看起来是关的"开关会骗人） */}
         {copiesFollowCloud === null ? (

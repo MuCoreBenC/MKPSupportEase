@@ -191,7 +191,7 @@ export default function TextDiffModal({
          */
         data-side="right"
         data-editable={editable || undefined}
-        title={text ?? undefined}
+        data-tip={text ?? undefined}
         onClick={() => {
           if (!editable || lineNo === null) return
           beginEdit(lineNo, text ?? '')
@@ -251,7 +251,7 @@ export default function TextDiffModal({
                   className={s.pill}
                   onClick={shell.onUndo}
                   disabled={!shell.canUndo}
-                  title={tr('presets.diff.undo')}
+                  data-tip={tr('presets.diff.undo')}
                 >
                   {tr('presets.diff.undo')}
                 </button>
@@ -260,7 +260,7 @@ export default function TextDiffModal({
                   className={s.pill}
                   onClick={shell.onRedo}
                   disabled={!shell.canRedo}
-                  title={tr('presets.diff.redo')}
+                  data-tip={tr('presets.diff.redo')}
                 >
                   {tr('presets.diff.redo')}
                 </button>
@@ -268,7 +268,7 @@ export default function TextDiffModal({
                   type="button"
                   className={s.pill}
                   onClick={shell.onExit}
-                  title={tr(EDIT_TEXT.exitTitle)}
+                  data-tip={tr(EDIT_TEXT.exitTitle)}
                 >
                   {tr(EDIT_TEXT.exitMode)}
                 </button>
@@ -311,7 +311,7 @@ export default function TextDiffModal({
                   <span className={s.no} role="cell">
                     {r.leftNo ?? ''}
                   </span>
-                  <span className={s.code} data-side="left" role="cell" title={r.left ?? undefined}>
+                  <span className={s.code} data-side="left" role="cell" data-tip={r.left ?? undefined}>
                     {r.left ?? ''}
                   </span>
                   <span className={s.no} role="cell">
@@ -331,7 +331,7 @@ export default function TextDiffModal({
                         <span className={s.no} role="cell">
                           {r.leftNo ?? ''}
                         </span>
-                        <span className={s.code} role="cell" title={r.left ?? undefined}>
+                        <span className={s.code} role="cell" data-tip={r.left ?? undefined}>
                           {r.left ?? ''}
                         </span>
                       </div>

@@ -151,13 +151,63 @@
   border-top: 1px solid var(--hairline);
 }
 
-.copiesHead {
+/* 组标题（「我的副本」/「切片器配置」共用：同一层级的第二组，字比「预设文件」低一档） */
+.groupHead {
   margin: 0 0 2px;
   padding: 0 8px;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.1em;
   color: var(--text-3);
+}
+
+/*
+ * 套餐里的配套文件（切片器配置，2026-10-30）：与「我的副本」同一道发丝线起一组。
+ * 只读 —— 套餐配的是哪份就是哪份，没有"选哪一份"这回事（所以不是按钮、没有圆点）。
+ */
+.companions {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}
+
+.companionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 2px 8px;
+  color: var(--text-2);
+}
+
+.companionName {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 标签贴右边，与「我的副本」行尾那一簇同一个位置 */
+.companionRow .pickTag {
+  margin-left: auto;
+}
+
+/* 「未下载」= 主按钮还写着"下载并使用"的原因，给它一点分量（其余两档保持灰）。
+   默认那一行与配套文件那一组共用（同一个标签词汇）。 */
+.pickTag[data-state='missing'] {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
 }
 
 .note {

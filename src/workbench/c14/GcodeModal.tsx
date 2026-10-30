@@ -105,7 +105,7 @@ export default function GcodeModal({
             type="button"
             className={`${s.btn} ${s.btnSm}`}
             disabled={String(cell.raw ?? '') === openValue}
-            title={
+            data-tip={
               String(cell.raw ?? '') === openValue
                 ? '这一层还没改过 —— 没有可取消的'
                 : '把这一层改回打开框之前的值，然后关框'
@@ -118,7 +118,7 @@ export default function GcodeModal({
             type="button"
             className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
             disabled={!dirty}
-            title={dirty ? '把工作台里的未保存改动落盘' : '没有未保存的改动'}
+            data-tip={dirty ? '把工作台里的未保存改动落盘' : '没有未保存的改动'}
             onClick={onSave}
           >
             保存

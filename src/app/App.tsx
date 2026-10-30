@@ -15,6 +15,8 @@ import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
+/* 提示气泡（2026-10-30）：全站唯一一份，挂在根上认 `data-tip` */
+import { TipLayer } from '../components/tooltip'
 import TopTabs from './components/TopTabs'
 import { tabs } from './constants/tabs'
 import PageHome from './home/PageHome'
@@ -401,6 +403,12 @@ export default function App() {
       {/* 通知停泊区（右上角）。**挂在根部一次**就够 —— 它自己 portal 到 body，
           与这里的 DOM 层级无关（见 `notify/NotifyHost.tsx` 头注释） */}
       <NotifyHost />
+
+      {/* 提示气泡：全站唯一的那个（2026-10-30）。
+          认 `data-tip` 元素（`Btn` 已把 `title` 转成它），位置与避让都在它里面算。
+          ★ 挂在根部：它用 `position: fixed`，祖先里不能有 `container-type` / `transform`，
+            否则会退化成相对那个容器定位（设置页 `.page` 就是 container，所以不能挂进去）。 */}
+      <TipLayer />
     </div>
   )
 }

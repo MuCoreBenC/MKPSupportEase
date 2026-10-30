@@ -84,6 +84,9 @@ export const zhCN = {
   // ---- 设置页（续） ----
   'settings.title': '设置',
   'settings.subtitle': '软件更新与应用设置。',
+  /* 页头搜索（2026-10-30）：按设置项的文字过滤，只留命中的行 */
+  'settings.search': '搜索设置项',
+  'settings.searchEmpty': '没有匹配的设置项',
   'settings.theme.label': '主题',
   'settings.theme.note': '换完立刻生效，记在应用状态里 —— 下次打开还是这一档。',
   'settings.theme.system': '跟随系统',
@@ -139,8 +142,8 @@ export const zhCN = {
 
   /* 设置页：预设 */
   'settings.presets.title': '预设',
-  'settings.presets.copies': '拷贝出来的也跟着云端更新',
-  'settings.presets.copiesNote': '默认关：你拷贝出来的那一份是独立的一份 —— 它不算「云端有新版」的那一份，点「更新」也不会动它。开着时它与原件一样，一样显示云端更新、一样会被更新到。',
+  'settings.presets.copies': '复制出来的也跟着云端更新',
+  'settings.presets.copiesNote': '默认关：你复制出来的那一份是独立的一份 —— 它不算「云端有新版」的那一份，点「更新」也不会动它。开着时它与原件一样，一样显示云端更新、一样会被更新到。',
   'settings.presets.readFailed': '这一档读不出来：{detail}',
   'settings.presets.saveFailed': '没保存成：{detail}',
 
@@ -230,7 +233,7 @@ export const zhCN = {
   'settings.backup.notePre': '打一个 zip：应用设置、目录、你自己那些预设 toml（含导入进来的）、',
   'settings.backup.noteKeep': '修改历史',
   'settings.backup.notePost': '、云端基准与原文镜像、执行归档 —— 全都在里面。文件名带时刻，一天打几份也不会互相盖掉。',
-  'settings.backup.do': '打一份备份…',
+  'settings.backup.do': '备份…',
   'settings.backup.busy': '正在打备份…',
   'settings.backup.pickDir': '把备份放到哪个文件夹',
   'settings.backup.done': '备份好了：{path}（{files} 个文件）',
@@ -239,7 +242,7 @@ export const zhCN = {
   'settings.restore.notePre': '它会',
   'settings.restore.noteKeep': '完全覆盖',
   'settings.restore.notePost': '现在的数据 —— 备份里有的一律覆盖，备份里没有的会跟着删掉（回到「打那份备份那一刻」的样子）。恢复完会重新载入一次。',
-  'settings.restore.do': '从备份恢复…',
+  'settings.restore.do': '恢复…',
   'settings.restore.confirm': '确认恢复',
   'settings.restore.busy': '正在恢复…',
   'settings.restore.cancel': '算了',
@@ -280,9 +283,9 @@ export const zhCN = {
   'settings.guide.grant': '去重新允许（系统设置 → 自动化）',
   'settings.guide.grantNote': '勾上「访达」后，回来再点一次「去系统里改…」就行',
   'settings.guide.step1': '在「打开方式」下拉里选好你要的应用',
-  'settings.guide.step1Note': '选完，右边那颗「更改全部…」才会亮',
-  'settings.guide.step2': '点「更改全部…」',
-  'settings.guide.step2Note': '从此所有 .3mf 都归它；不点它只对这一个文件生效',
+  'settings.guide.step1Note': '选好之后，下面那颗「全部更改…」才会亮',
+  'settings.guide.step2': '点「全部更改…」',
+  'settings.guide.step2Note': '对所有 .3mf 生效',
 
   /* 首页（2026-10-26） */
 
@@ -353,7 +356,6 @@ export const zhCN = {
   'home.modal.pendingLose': '。现在离开这些改动会丢掉。',
   'home.modal.axisSeparator': '，',
   'home.modal.discardSwitch': '不保存并切换',
-  'home.modal.otherPreset': '另一份预设',
   'home.modal.presetAskNote': '换成 {name} 之后，这一页点出来的偏移草稿会作废 —— 草稿是相对上一份预设点出来的增量，换了基准就没有意义了。',
 
   /* 校准共用（首页校准卡与校准页都读这两条轴名 / 图例） */
@@ -388,6 +390,7 @@ export const zhCN = {
   'home.stack.inUse': '正在使用',
   'home.stack.default': '默认',
   'home.stack.copies': '我的副本',
+  'home.stack.companions': '切片器配置',
   'home.stack.count': '{count} 次',
   'home.stack.reading': '正在读取预设',
   'home.stack.loading': '正在读取…',
@@ -570,6 +573,9 @@ export const zhCN = {
   'calib.hit.xyX': '横向 {delta} mm',
   'calib.hit.xyY': '纵向 {delta} mm',
   'calib.original': '原 {value}',
+  /* 横排读数条那一档用的短版（中文本来就只有一个「原」，所以与上一条相同） */
+  'calib.originalShort': '原 {value}',
+  'calib.originalTitle': '原值 {value} —— 改过之后点这里退回',
 
   /* 参数页（2026-10-26） */
 
@@ -1013,10 +1019,10 @@ export const zhCN = {
   'presets.page.rename.empty': '新名字不能是空的',
   'presets.page.rename.done': '已改名：{from} → {to} —— 只换了名字，内容与血统一个字节没动',
   'presets.page.rename.doneClipped': '已改名：{from} → {to}（名字超过了上限，已截短）',
-  'presets.page.copy.running': '正在拷贝 {name}…',
-  'presets.page.copy.done': '已拷贝出一份：{name} —— 原文件一个字节没动',
-  'presets.page.copy.doneClipped': '已拷贝出一份：{name}（名字到了上限，截短了一点）—— 原文件一个字节没动',
-  'presets.page.copy.failed': '没拷贝成：{detail}',
+  'presets.page.copy.running': '正在复制 {name}…',
+  'presets.page.copy.done': '已复制出一份：{name} —— 原文件一个字节没动',
+  'presets.page.copy.doneClipped': '已复制出一份：{name}（名字到了上限，截短了一点）—— 原文件一个字节没动',
+  'presets.page.copy.failed': '没复制成：{detail}',
   'presets.page.remove.running': '正在删除 {name}…',
   'presets.page.remove.donePreset': '已删除 {name} —— 它回到「未下载」，随时可以从云端重新下载',
   'presets.page.remove.doneLocal': '已删除 {name} —— 已放进回收站，可在「设置 → 最近删除」找回',
@@ -1065,7 +1071,7 @@ export const zhCN = {
   'presets.page.menu.compareWith': '与「{name}」对比',
   'presets.page.menu.compareCancel': '取消对比选择',
   'presets.page.why.rename': '只有「本地文件」能改名（只动名字、字节一个不动）—— 云端那份不归你改名',
-  'presets.page.why.copy': '只有「本地文件」能拷贝出一份新的 —— 云端那份不归你拷贝',
+  'presets.page.why.copy': '只有「本地文件」能复制出一份新的 —— 云端那份不归你复制',
   'presets.page.why.reveal': '住在程序自己管理的区域 —— 能这样打开的是「本地文件」（你自己的目录里的那份）',
   'presets.page.why.remove': '云端仓库文件不在这里删 —— 能删的是你自己那份与目录登记的交付文件',
   'presets.page.why.params': '只有「本地」那一份能改参数 —— 云端那一份是模板，先用「使用」取一份自己的',
@@ -1119,9 +1125,9 @@ export const zhCN = {
   'presets.page.rename.fillDefaultTitle': '填成默认名（{name}）',
   'presets.page.rename.failed': '没改成：{detail}',
   /* {menu} = 「没有鼠标」那一句，按平台给（Windows 有 Shift+F10 与菜单键，mac 用 Ctrl+点按） */
-  'presets.page.foot.mkpCloud': '右键任意一行还有下载 / 更新 / 拷贝链接（没有鼠标就 {menu}）',
-  'presets.page.foot.mkpLocal': '右键任意一行还有使用 / 拷贝后处理脚本 / 修改参数 / 编辑文件 / 参数对比 / 拷贝 / 重命名 / 显示所在文件夹 / 置顶（没有鼠标就 {menu}）',
-  'presets.page.foot.slicer': '右键任意一行还有置顶 / 参数对比 / 拷贝 / 重命名 / 删除（没有鼠标就 {menu}）',
+  'presets.page.foot.mkpCloud': '右键任意一行还有下载 / 更新 / 复制链接（没有鼠标就 {menu}）',
+  'presets.page.foot.mkpLocal': '右键任意一行还有使用 / 复制后处理脚本 / 修改参数 / 编辑文件 / 参数对比 / 复制 / 重命名 / 显示所在文件夹 / 置顶（没有鼠标就 {menu}）',
+  'presets.page.foot.slicer': '右键任意一行还有置顶 / 参数对比 / 复制 / 重命名 / 删除（没有鼠标就 {menu}）',
   'presets.page.menuKey.win': 'Shift+F10 或菜单键',
   'presets.page.menuKey.mac': 'Ctrl+点按',
 
@@ -1140,7 +1146,7 @@ export const zhCN = {
   'presets.table.sort.by': '按{label}排',
   'presets.table.sort.az': '按{label}的 a-z 排',
   'presets.table.sort.desc': '按{label}倒序排',
-  'presets.table.sort.default': '回到默认（原件在前、拷贝出来的跟在后面）',
+  'presets.table.sort.default': '回到默认（原件在前、复制出来的跟在后面）',
   'presets.table.sort.asc': '按{label}升序排',
   'presets.table.sort.descCol': '按{label}降序排',
   'presets.table.empty.failed': '加载失败：{detail}',
@@ -1339,17 +1345,17 @@ export const zhCN = {
   'presets.tree.origin.asset': '云端',
   'presets.tree.origin.local': '本地',
   'presets.tree.origin.preset': '云端',
-  'presets.tree.originWhy.asset': '云端：仓库里那份文件下载到本机的副本。不能改名（拷贝一份再改），删了可以从云端重新下载',
+  'presets.tree.originWhy.asset': '云端：仓库里那份文件下载到本机的副本。不能改名（复制一份再改），删了可以从云端重新下载',
   'presets.tree.originWhy.local': '本地：你自己放进预设目录的文件，云端没有它。可以改名，但删了没有任何地方能找回来',
-  'presets.tree.originWhy.preset': '云端：发布方写进目录（catalog）、随发布换代的那一版，客户端从下载区取。不能改名（拷贝一份再改），删了可以从云端重新下载',
+  'presets.tree.originWhy.preset': '云端：发布方写进目录（catalog）、随发布换代的那一版，客户端从下载区取。不能改名（复制一份再改），删了可以从云端重新下载',
   'presets.tree.source.custom': '自定义源',
-  /* 来源三态（2026-10-29 第二代）：云端下载 / 本地拷贝 / 导入；说不清就写未知 */
+  /* 来源三态（2026-10-29 第二代）：云端下载 / 本地副本 / 导入；说不清就写未知 */
   'presets.tree.origin.cloudRef': '云端 · {ref}',
   'presets.tree.origin.cloud': '云端',
   'presets.tree.origin.cloudTitle': '从云端下载：这条发布线的 {ref} 分支',
   'presets.tree.origin.cloudNoRefTitle': '从云端下载；当时没有记下来源分支',
   'presets.tree.origin.localCopy': '本地 · {name}',
-  'presets.tree.origin.localCopyTitle': '本地拷贝：从 {name} 拷出来的（点击定位到母本那一份）',
+  'presets.tree.origin.localCopyTitle': '本地副本：从 {name} 复制出来的（点击定位到母本那一份）',
   'presets.tree.origin.localCopyGone': '本地（母本已经找不到了）',
   'presets.tree.origin.unknownCloud': '未知（当时没有记录来源）',
   'presets.tree.origin.unknownCloudTitle': '这份文件落在盘上时还没有来源记录 —— 只能确认它基于云端那一份，说不出当时从哪个分支下载的',
@@ -1374,7 +1380,7 @@ export const zhCN = {
   'presets.tree.cloudLocal.unchanged': '已是最新（云端发过新版，这份没变）',
   'presets.tree.cloudLocal.elsewhere': '跨分支，不比版本',
   'presets.tree.cloudLocal.newer': '云端这一份比你手上的旧',
-  'presets.tree.cloudLocal.detached': '本地拷贝（不跟云端更新）',
+  'presets.tree.cloudLocal.detached': '本地副本（不跟云端更新）',
   'presets.tree.cloudLocal.inconsistent': '目录异常',
   /* 说不清的六种原因：后端给稳定词，界面只翻词 */
   'presets.tree.unverified.noLineage': '无法确认：这份没有血统记录',
@@ -1392,7 +1398,7 @@ export const zhCN = {
   'presets.tree.cloudLocalAction.downloading': '下载中',
   'presets.tree.cloudLocalAction.updating': '更新中',
   'presets.tree.cloudLocalAction.stale': '更新',
-  'presets.tree.suspectWhy': '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许使用、不许改、不许拷贝。先「下载」换一份干净的回来',
+  'presets.tree.suspectWhy': '这一份的字节不是目录登记的当前版本 —— 内容存疑，所以不许使用、不许改、不许复制。先「下载」换一份干净的回来',
   'presets.tree.archiveWhy': '归档：云端换版本时，旧的那一份被换下来留在这里（保留最早一份，不覆盖）。它属于云端文件的生命周期，不是你的修改历史 —— 你改出来的东西是另一份文件（另存），永远不回写云端原件。这份留档可以删：但云端只有最新版，删了就找不回（版本链与事件账不受影响）。仍然没有「恢复」、也没有「用这份旧版本」。',
   'presets.tree.archiveOpen': '{count} 份（点开看）',
   'presets.tree.archiveDrawer.title': '旧版本',
@@ -1512,7 +1518,7 @@ export const zhCN = {
   'presets.edit.restoreDefaultName': '恢复默认名',
   'presets.edit.params.open': '修改参数',
   'presets.edit.params.why': '改这一份的参数（打开参数表，就是参数页本身）；要改 TOML 正文走右键菜单的「编辑文件」',
-  'presets.edit.localCopy.cell': '拷贝',
+  'presets.edit.localCopy.cell': '复制',
 
   /* 后处理 12 步的显示名（steps.ts；报告页那一套另有 report.step.*，不合并） */
 

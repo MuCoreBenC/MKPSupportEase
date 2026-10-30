@@ -49,14 +49,14 @@ export function HeadNote({ text, tone }: { text: Text; tone: HeadNoteTone }) {
   if (slot === null) {
     /* 没有槽 = 这一屏不在框里：照旧渲染在原处（不许"什么都没画"） */
     return (
-      <p className={`${s.fallback} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} title={line}>
+      <p className={`${s.fallback} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} data-tip={line}>
         {line}
       </p>
     )
   }
 
   return createPortal(
-    <span className={`${s.head} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} title={line}>
+    <span className={`${s.head} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} data-tip={line}>
       {line}
     </span>,
     slot,

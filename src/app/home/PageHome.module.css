@@ -632,11 +632,13 @@
   font-weight: 400;
   color: var(--text-3);
   /*
-   * 2026-10-13：占位宽度**钉死** —— 「原 0.00 / 原 -1.00 / 原 18.60」几种长度
-   * 各占各的宽，会给三列轨道带来几像素的差（等宽轨道取最宽列，整条读数跟着动）。
-   * 5.2em 容得下最长的一档「原 -50.00」（值域 ±50），从此这一格宽窄不变。
+   * 2026-10-13：占位宽度**钉死** —— 几种长度各占各的宽会给三列轨道带来几像素的差
+   * （等宽轨道取最宽列，整条读数跟着动）。
+   *
+   * 2026-10-30：5.2em → 4.2em —— 英文那一支不再说 "was"（只剩数字，原话进 title），
+   * 4em（≈46px）容得下「-50.00」（值域 ±50），窄窗那一列（≈103px）才不再折行。
    */
-  min-width: 5.2em;
+  min-width: 4em;
   font-variant-numeric: tabular-nums;
   visibility: hidden;
   cursor: default;
@@ -774,7 +776,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
 }
 
 .axisValue {
@@ -819,21 +821,6 @@
   color: var(--accent-deep);
 }
 
-
-.dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 5px;
-  vertical-align: 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  visibility: hidden;
-}
-
-.dot[data-on='true'] {
-  visibility: visible;
-}
 
 /*
  * 板子这一块。原来一圈细边框 + 白底把它装成一个容器（把「标题 + 说明 + 板 + 刻度」

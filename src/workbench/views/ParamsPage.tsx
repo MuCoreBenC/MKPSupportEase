@@ -852,7 +852,7 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           className={`${s.pRailHandle} ${railPinned ? s.pRailHandleOn : ''}`}
           data-open={railOpen}
           aria-expanded={railOpen}
-          title={
+          data-tip={
             railPinned
               ? '收起机型与版本（收起后鼠标扫过就能临时打开）'
               : '钉住机型与版本（不点也行：鼠标扫过就浮出来）'
@@ -1480,7 +1480,7 @@ function CollapsedCard({
         <em>{group.count}</em>
       </header>
       <div className={s.pOffRow}>
-        <span className={s.pOffNote} title={note}>
+        <span className={s.pOffNote} data-tip={note}>
           {note}
         </span>
         <span className={s.grow} />
@@ -1621,7 +1621,7 @@ function ParamLine({
       id={`t-param-${row.key}`}
       className={`${s.pRow} ${on ? s.pRowOn : ''} ${off ? s.pRowOff : ''} ${dep ? s.pRowDep : ''}`}
       onClick={() => onPick(row.key)}
-      title={
+      data-tip={
         cell.editable
           ? (param.desc || undefined)
           : dep
@@ -1656,7 +1656,7 @@ function ParamLine({
           <button
             type="button"
             className={s.pRevert}
-            title={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复出厂默认」）`}
+            data-tip={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复出厂默认」）`}
             onClick={() =>
               onWrite(
                 row,
@@ -1688,12 +1688,12 @@ function ParamLine({
            已修改」占同一列，行尾的竖线不会因为它参差 */
         <span
           className={`${s.pStatus} ${s.pStatusDep}`}
-          title={words.paramDeprecated.explain ?? undefined}
+          data-tip={words.paramDeprecated.explain ?? undefined}
         >
           {words.paramDeprecated.label}
         </span>
       ) : (
-        <span className={s.pRowBlock} title={cell.blockedNote ?? undefined}>
+        <span className={s.pRowBlock} data-tip={cell.blockedNote ?? undefined}>
           {cell.blockedHint ?? words.placeholder.notApplicable}
         </span>
       )}

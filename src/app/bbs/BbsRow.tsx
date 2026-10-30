@@ -71,7 +71,7 @@ export default function BbsRow({
 
   return (
     <div className={cls} data-key={paramKey} data-hit={hit ? 'true' : undefined}>
-      <span className={s.lbl} title={title}>
+      <span className={s.lbl} data-tip={title}>
         {parts
           ? <>{parts[0]}<mark className={s.mark}>{parts[1]}</mark>{parts[2]}</>
           : label}
@@ -89,7 +89,7 @@ export default function BbsRow({
           type="button"
           className={s.reset}
           disabled={readOnly}
-          title={tr('bbs.row.resetTitle', {
+          data-tip={tr('bbs.row.resetTitle', {
             base: base === undefined ? tr('bbs.row.baseMissing') : String(base),
           }) + (readOnly ? tr('bbs.row.readOnlyHint') : '')}
           aria-label={tr('bbs.row.resetAria', { label })}
@@ -116,7 +116,7 @@ export default function BbsRow({
       {Array.isArray(value) && value.length > 1 && (
         <span
           className={s.variant}
-          title={tr('bbs.row.variantValue', {
+          data-tip={tr('bbs.row.variantValue', {
             index: variantIdx + 1,
             value: JSON.stringify(value),
           })}

@@ -1032,7 +1032,7 @@ export default function PageParams({
       className={s.historyBtn}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
-      title={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
+      data-tip={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
       onClick={() => setHistoryOpen((v) => !v)}
     >
       {tr('params.historyDrawer')}
@@ -1127,7 +1127,7 @@ export default function PageParams({
   const headNoteText = headNote === null ? '' : say(headNote.text)
   const headNoteNode =
     headNote === null ? null : (
-      <span className={s.note} data-tone={headNote.tone} title={headNoteText}>
+      <span className={s.note} data-tone={headNote.tone} data-tip={headNoteText}>
         {headNoteText}
       </span>
     )
@@ -1163,7 +1163,7 @@ export default function PageParams({
                     type="button"
                     className={inactive ? `${s.presetPill} ${s.presetPillOff}` : s.presetPill}
                     ref={pillRef}
-                    title={
+                    data-tip={
                       inactive
                         ? tr('params.pill.inactive', { name: pillLabel })
                         : tr('params.pill.active', { name: pillLabel })
@@ -1339,7 +1339,7 @@ export default function PageParams({
               单独当页用（没有槽）时才落回这里 —— 同一份节点、同一套语气。
             */}
             {headNoteSlot === null && headNote !== null && (
-              <p className={s.noteLine} data-tone={headNote.tone} title={headNoteText}>
+              <p className={s.noteLine} data-tone={headNote.tone} data-tip={headNoteText}>
                 {headNoteText}
               </p>
             )}
@@ -1420,7 +1420,7 @@ export default function PageParams({
                  * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
                  * 而且这里挂了 title，悬停还能看全。
                  */}
-                <span className={s.state} title={stateText}>
+                <span className={s.state} data-tip={stateText}>
                   {stateText}
                 </span>
               </div>
@@ -1428,7 +1428,7 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.primary}
-                  title={tr('presets.edit.enterParamsTitle')}
+                  data-tip={tr('presets.edit.enterParamsTitle')}
                   onClick={() => setEditMode(true)}
                 >
                   {tr(EDIT_TEXT.enterMode)}
@@ -1445,7 +1445,7 @@ export default function PageParams({
                 <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
                   {tr('params.restoreDefaults')}
                 </button>
-                <span className={s.state} title={stateText}>
+                <span className={s.state} data-tip={stateText}>
                   {stateText}
                 </span>
               </div>
@@ -1462,7 +1462,7 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canUndo}
                   onClick={u.undo}
-                  title={tr('params.undoTitle', { keys: comboOf('undo') })}
+                  data-tip={tr('params.undoTitle', { keys: comboOf('undo') })}
                   aria-label={tr('params.undo')}
                   aria-keyshortcuts={ariaOf('undo')}
                 >
@@ -1473,7 +1473,7 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canRedo}
                   onClick={u.redo}
-                  title={tr('params.redoTitle', { keys: comboOf('redo') })}
+                  data-tip={tr('params.redoTitle', { keys: comboOf('redo') })}
                   aria-label={tr('params.redo')}
                   aria-keyshortcuts={ariaOf('redo')}
                 >
@@ -1482,7 +1482,7 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.textBtn}
-                  title={tr(EDIT_TEXT.exitTitle)}
+                  data-tip={tr(EDIT_TEXT.exitTitle)}
                   onClick={() => {
                     /*
                      * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -1500,7 +1500,7 @@ export default function PageParams({
                   type="button"
                   className={s.primary}
                   disabled={u.dirtyCount === 0 && u.syncDirty === 0}
-                  title={tr('presets.edit.saveTitle', { keys: comboOf('save') })}
+                  data-tip={tr('presets.edit.saveTitle', { keys: comboOf('save') })}
                   aria-keyshortcuts={ariaOf('save')}
                   onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >
@@ -1703,7 +1703,7 @@ export default function PageParams({
                   type="button"
                   className={s.primary}
                   disabled={invalidEntries.length > 0}
-                  title={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
+                  data-tip={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
                   onClick={confirmSave}
                 >
                   {tr('params.save.confirm')}

@@ -56,3 +56,26 @@ export function activeForSelection(
   if (entry === null || model === null || variant === null) return null
   return entry.machineId === model && entry.versionId === variant ? entry : null
 }
+
+/**
+ * **校准的基准**：底账正指着这一版，而且那一份是**本机文件**（`origin === 'local'`）。
+ *
+ * 为什么比 [`activeForSelection`] 更严（2026-10-30，作者截图：没下载也没使用，第三步
+ * 已经有 X -0.70 / Y 26.30 / Z 4.00，右上角还写着抽屉里根本没有的 `A1-standard.toml`）：
+ *
+ * - 校准读写的对象是 `presets-local/` 里那份**工作副本**。没有本机副本时
+ *   `usePreset` 只能回落到注册表的**云端默认值** —— 那是出厂值，不是"你的"校准值，
+ *   把它摆在读数位上就等于替用户编了一个基准。
+ * - 云端原件（`origin === 'preset'`）即便当时在盘上有字节，`getLocalCopyFor` 也读不到它，
+ *   照样只会给出上面那套默认值；名字又来自目录，抽屉（只列本机文件）里自然查不到。
+ *
+ * 于是"名字"与"数值"共用这一个判据：没有基准时卡片只摆「选择预设」，一个数都不露。
+ */
+export function localActiveForSelection(
+  entry: ActivePreset | null,
+  model: string | null,
+  variant: string | null,
+): ActivePreset | null {
+  const hit = activeForSelection(entry, model, variant)
+  return hit !== null && hit.origin === 'local' ? hit : null
+}

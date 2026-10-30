@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from 'react'
 import { useT } from '../../i18n'
+import type { StringKey } from '../../i18n'
 import type { PresetState } from '../calib/usePreset'
 import TraceTag from '../components/TraceTag'
 import Skeleton from './Skeleton'
@@ -31,6 +32,31 @@ export interface PresetCopy {
   path: string
   /** 后处理跑过几次（学习账；0 = 还没用过） */
   count: number
+}
+
+/**
+ * 套餐里**除 MKP 预设之外**的那几份（今天 = 切片器配置，`presets/bundles.toml`
+ * 的 `assetRefs` 里 `bbs_profile` 那一条）。
+ *
+ * ★ 2026-10-30（作者：「这一个它不仅是包含这个预设文件，它还包含了那个 JSON 对吧？
+ *   我觉得这个首页应该把那个切片器的也显示出来」）：首页此前只摆 MKP 那一行，
+ *   于是「已经下载过预设了，主按钮怎么还写着下载并使用」看起来自相矛盾 ——
+ *   主按钮算的是**整个套餐**（MKP + 切片器配置），缺的是切片器那份，界面却看不见它。
+ */
+export interface BundleCompanion {
+  fileName: string
+  /**
+   * 盘上现状。`unknown` = 两张单子（已下载 / 漂移）还没回来 —— 这时**不摆标签**，
+   * 不拿"判不了"冒充"未下载"（纪律②）。
+   */
+  state: 'ready' | 'stale' | 'missing' | 'unknown'
+}
+
+/** 配套文件盘上现状 → 标签键（`unknown` 不摆标签，故不进这张表） */
+const COMPANION_STATE_KEY: Record<Exclude<BundleCompanion['state'], 'unknown'>, StringKey> = {
+  ready: 'presets.tree.cloudState.downloaded',
+  stale: 'presets.tree.updateState.update',
+  missing: 'presets.tree.cloudState.pending',
 }
 
 interface PresetStackProps {
@@ -81,6 +107,16 @@ interface PresetStackProps {
    */
   pickedPath?: string | null
   onPick?: (copy: PresetCopy | null) => void
+  /** 套餐里 MKP 之外的配套文件（切片器配置）。空 = 不渲染这一组 */
+  companions?: BundleCompanion[]
+  /**
+   * 「默认」那份的现状：**交付面 + 本机工作副本**一起看（判据在 PageHome 的
+   * `defaultFileState`，与主按钮同一份）。`null` / `'unknown'` = 判不了 —— 不摆标签。
+   *
+   * ★ 2026-10-30 作者：把 `presets-local/` 里那份删了，行上什么状态都没有 ⇒ 看不出
+   *   "默认这份还没下载"，主按钮也还写着「使用」。
+   */
+  defaultState?: BundleCompanion['state'] | null
 }
 
 /**
@@ -104,6 +140,8 @@ export default function PresetStack({
   defaultActive = false,
   pickedPath = null,
   onPick,
+  companions = [],
+  defaultState = null,
 }: PresetStackProps) {
   const tr = useT()
   const ready = state.status === 'ready'
@@ -175,13 +213,19 @@ export default function PresetStack({
               type="button"
               className={s.pickRow}
               data-picked={pickedPath === null}
-              title={path}
+              data-tip={path}
               onClick={() => onPick?.(null)}
             >
               <span className={s.pickDot} aria-hidden="true" />
               <span className={s.pickName}>{name === '' ? '—' : name}</span>
               <span className={s.pickTail}>
                 {defaultActive && <span className={s.pickTag}>{tr('home.stack.inUse')}</span>}
+                {/* 已下载 / 未下载 / 有更新：与主按钮同一份判据（见 defaultState 注释） */}
+                {defaultState !== null && defaultState !== 'unknown' && (
+                  <span className={s.pickTag} data-state={defaultState}>
+                    {tr(COMPANION_STATE_KEY[defaultState])}
+                  </span>
+                )}
                 {/* 「默认」而不是「套餐」：这一行就是用户手里那份本体（见上面那段注释） */}
                 <span className={s.pickTag} data-kind="default">
                   {tr('home.stack.default')}
@@ -189,21 +233,21 @@ export default function PresetStack({
               </span>
             </button>
           ) : (
-            <p className={s.name} title={path}>
+            <p className={s.name} data-tip={path}>
               {name === '' ? '—' : name}
             </p>
           )}
 
           {selectable && ranked.length > 0 && (
             <div className={s.copies}>
-              <p className={s.copiesHead}>{tr('home.stack.copies')}</p>
+              <p className={s.groupHead}>{tr('home.stack.copies')}</p>
               {ranked.map((c) => (
                 <button
                   key={c.path}
                   type="button"
                   className={s.pickRow}
                   data-picked={pickedPath === c.path}
-                  title={c.path}
+                  data-tip={c.path}
                   onClick={() => onPick?.(c)}
                 >
                   <span className={s.pickDot} aria-hidden="true" />
@@ -219,6 +263,25 @@ export default function PresetStack({
                     )}
                   </span>
                 </button>
+              ))}
+            </div>
+          )}
+
+          {/* 套餐里 MKP 之外的那几份（切片器配置）—— 主按钮说"下载并使用"时，
+              缺的就是这里标着「未下载」的那一份（见 BundleCompanion 注释）。
+              整块只读：它没有"选哪一份"这回事，套餐配的是哪份就是哪份 */}
+          {companions.length > 0 && (
+            <div className={s.companions}>
+              <p className={s.groupHead}>{tr('home.stack.companions')}</p>
+              {companions.map((c) => (
+                <p key={c.fileName} className={s.companionRow} data-tip={c.fileName}>
+                  <span className={s.companionName}>{c.fileName}</span>
+                  {c.state !== 'unknown' && (
+                    <span className={s.pickTag} data-state={c.state}>
+                      {tr(COMPANION_STATE_KEY[c.state])}
+                    </span>
+                  )}
+                </p>
               ))}
             </div>
           )}

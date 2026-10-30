@@ -75,7 +75,7 @@ const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
  */
 function HelpDot({ text }: { text: string }) {
   return (
-    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+    <span className={s.helpDot} role="img" aria-label={text} data-tip={text}>
       ?
     </span>
   )
@@ -748,7 +748,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   <button
                     type="button"
                     className={s.treeTwist}
-                    title={folded ? '展开这个品牌下的机型' : '收起这个品牌下的机型'}
+                    data-tip={folded ? '展开这个品牌下的机型' : '收起这个品牌下的机型'}
                     aria-expanded={!folded}
                     aria-label={`${folded ? '展开' : '收起'} ${b.name || b.id}`}
                     onClick={() => setFoldedBrands((prev) => {
@@ -801,7 +801,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                           <span className={s.rowMeta}>{x.versions.length} 版</span>
                           {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>占位</span>}
                           {t > 0 && (
-                            <span className={s.todo} title={fieldState.needsInputHint}>
+                            <span className={s.todo} data-tip={fieldState.needsInputHint}>
                               {fieldState.needsInput} {t}
                             </span>
                           )}
@@ -833,7 +833,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             : `筛出 ${listed.length} / ${list.machines.length} 台`}
         </div>
         {/* 明写数据根：这一页读写的是 presets/machines/，与参数台的草稿是两个地方 */}
-        <div className={s.sum} title={list.root}>
+        <div className={s.sum} data-tip={list.root}>
           读写 {list.root}
         </div>
       </div>
@@ -924,7 +924,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <h2>身份</h2>
             <span className={s.cardNote}>{m.id}</span>
             {todo > 0 && (
-              <span className={s.todo} title={fieldState.needsInputHint}>
+              <span className={s.todo} data-tip={fieldState.needsInputHint}>
                 {fieldState.needsInput} {todo} 项
               </span>
             )}
@@ -1054,7 +1054,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnSm}`}
               disabled={!m.hasDimensions && m.dimensions === null}
-              title={
+              data-tip={
                 m.dimensions === null
                   ? '这台还没有 [dimensions] —— 先建一份尺寸（床身那两格必填）'
                   : '改这六组读数（床身 / 移动范围 / 边缘 / 涂胶 / 标定点 / 标志位）'
@@ -1230,7 +1230,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   )}
                   <span
                     className={`${s.tag} ${STATE_TAG[st]}`}
-                    title={`${words.build[st].explain ?? ''} · ${bbsHint}`}
+                    data-tip={`${words.build[st].explain ?? ''} · ${bbsHint}`}
                   >
                     {words.build[st].label}
                   </span>
@@ -1460,7 +1460,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                           type="button"
                           className={`${s.btn} ${s.btnSm} ${s.btnPrimary}`}
                           disabled={!canGen}
-                          title={canGen ? `生成 ${pickedRow?.mkpFile ?? '预设'}` : note}
+                          data-tip={canGen ? `生成 ${pickedRow?.mkpFile ?? '预设'}` : note}
                           onClick={() => void doBuild(m.id, picked.id)}
                         >
                           {pickedNode.build === 'stale' ? '重新生成' : '生成配方'}
@@ -1615,7 +1615,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!bunPick}
-              title={bunPick ? undefined : '先在下面挑一个套餐'}
+              data-tip={bunPick ? undefined : '先在下面挑一个套餐'}
               onClick={() => {
                 if (bunOpen === null || !bunPick) return
                 const [, vid] = bunOpen.split('/')
@@ -1697,7 +1697,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={nbId.trim() === '' || nbName.trim() === ''}
-              title={
+              data-tip={
                 nbId.trim() === ''
                   ? 'id 不能空'
                   : nbName.trim() === ''
@@ -1794,7 +1794,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 type="button"
                 className={`${s.row} ${s.treeKid} ${here ? s.treeKidOn : ''}`}
                 disabled={here}
-                title={here ? '它现在就在这家' : `挪到 ${b.name || b.id}`}
+                data-tip={here ? '它现在就在这家' : `挪到 ${b.name || b.id}`}
                 onClick={() => {
                   if (moveOf !== null) void moveMachine(moveOf, b.id)
                 }}
@@ -1870,7 +1870,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!addReady}
-              title={
+              data-tip={
                 !idOk(addId) && addId.trim() !== ''
                   ? 'id 只能用大写字母、数字和下划线（它会直接变成文件名）'
                   : addIdTaken
@@ -1950,7 +1950,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!avReady}
-              title={
+              data-tip={
                 avTaken
                   ? '这台机型已经有这个版本 id 了'
                   : !idOk(avId) && avId.trim() !== ''
@@ -2013,7 +2013,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!copyReady}
-              title={
+              data-tip={
                 copyTaken
                   ? '这台机型已经有这个版本 id 了'
                   : idOk(copyId) || copyId.trim() === ''
@@ -2073,7 +2073,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!evName.trim()}
-              title={evName.trim() ? undefined : '版本名不许清空'}
+              data-tip={evName.trim() ? undefined : '版本名不许清空'}
               onClick={() => void submitEditVersion()}
             >
               保存

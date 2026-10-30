@@ -525,7 +525,7 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
           onClick={() => go('next')}
           onMouseDown={noMultiClickSelect}
           aria-label={tr('home.deck.next')}
-          title={tr('home.deck.nextTitle')}
+          data-tip={tr('home.deck.nextTitle')}
         />
       )}
 
@@ -537,7 +537,7 @@ const SlideDeck = forwardRef<DeckHandle, SlideDeckProps>(function SlideDeck(
         onClick={() => go('prev')}
         onMouseDown={noMultiClickSelect}
         aria-label={tr('home.deck.prev')}
-        title={tr('home.deck.prevTitle')}
+        data-tip={tr('home.deck.prevTitle')}
       />
 
       {sheets.length > 1 && (

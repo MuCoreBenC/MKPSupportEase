@@ -972,40 +972,63 @@
  *   3. 无边框、轻影子、不拿线分区照旧（第六轮的纪律：悬浮感靠层次，不靠装饰）。
  */
 
-/* 卡头：图标 + 文件名（左），三个小事实 + 一颗安静的「收起」（右）。窄窗整行折 */
+/*
+ * 卡头：图标 + 文件名（左），三个小事实 + 一颗安静的「收起」（右）。
+ *
+ * ★ 2026-10-30（作者：「这个名字有点长呢，已经超过了他名字。要做到自动换行呀」）：
+ *   原来是三个平级 flex 项 + `flex-wrap`，名字又写死 `nowrap + 省略号` —— 名字顶满
+ *   一行，右边那串小事实挤不下，「收起」就被折到第二行**孤零零挂在左边**（截图里那样）。
+ *
+ *   现在是 grid：名字那格 `minmax(0, 1fr)` 吃剩下的宽度、**自己折行**（长串也断），
+ *   小事实与「收起」各占一格贴在右上，**永远不掉行**。
+ *   `baseline` 对齐：名字折成两行时，右边两项跟着**第一行**的基线，不会浮到中间去。
+ */
 .dHead {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: baseline;
   gap: 4px 8px;
+  min-width: 0;
+}
+
+/* 图标 + 名字：图标钉在第一行的顶上（名字折行时它不跟着居中） */
+.dHeadTitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
 }
 
 .dHeadIcon {
   flex-shrink: 0;
+  margin-top: 2px;
   color: var(--text-3);
 }
 
 /*
  * 卡头的名字：**文件名**（2026-10-10 第七轮从「文件详情」写回来的）——
  * 作者看过第六轮的实际效果后定：名字住进卡片，列表行在展开时把名称列隐去
- * （见 `.nameLine` / `.path` 的 `data-hidden`）。长名照旧省略号。
+ * （见 `.nameLine` / `.path` 的 `data-hidden`）。
+ *
+ * ★ 2026-10-30 改判：**不再省略号**，改自动换行（作者：「要做到自动换行呀」）——
+ *   复制件那种 `xxx copy copy copy.toml` 的名字，截断了就认不出是哪一份。
+ *   `overflow-wrap: anywhere`：没有空格的长串（`A1_MINI-fastv3.3copy.toml`）也断得开。
  */
 .dHeadName {
   min-width: 0;
-  overflow: hidden;
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-1);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .dHeadMeta {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 8px;
-  margin-left: auto;
   font-size: var(--fs-label);
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
@@ -1063,15 +1086,25 @@
  * 右列组织更新状态、云端发布时间及文件时间」「两列采用稳定的标签和值对齐方式，
  * 避免标签长度影响值的位置」。
  *
- *   .dCols  双列轨道：左 1.15fr / 右 1fr（右边那列字段数少一档，窄一点更匀）
+ *   .dCols  双列轨道：左列宽度 = `--dSplit`（**量出来的**，见下）
  *   .dColR  中缝一条 `--line` 竖线 —— 全卡**唯二**的结构线之一（另一条是卡底上方）
  *   .dKvs   组内的键列：单列纵向，键仍是 `.dKey` 那条 104px 刻度 ⇒ 值左对齐成一条线
  *
- * 窄窗（<= 880px）降单列、中缝线撤掉 —— 两列硬挤会把长路径折成三行，比一列还高。
+ * ★ 2026-10-30 第二轮（作者看**窄窗**截图后）：「左右分布能不能灵活一点，有 10% 或
+ *   20% 的容差……主要还是看文字 —— 这个线再往左一点，那右边那个三行就能变两行了」。
+ *   于是中线不再是 `1.15fr / 1fr` 这个定值，改成 `--dSplit` 由 `splitFit.ts` 量出来：
+ *   在正中 ±10% 里挑"更高的那列最矮"的那条（顺便让两列行数尽量相等）。
+ *
+ *   60px = 中缝（30 gap + 30 右列左内衬）**不参与配比** —— 所以 `--dSplit: 0.5` 时
+ *   那条竖线正好落在卡片正中；往左往右都只动"文字能用的那一段"。
  */
 .dCols {
+  --dSplit: 0.5;
+
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-columns:
+    minmax(0, calc((100% - 60px) * var(--dSplit)))
+    minmax(0, 1fr);
   gap: 0 30px;
   min-width: 0;
 }
@@ -1108,7 +1141,17 @@
   overflow-wrap: anywhere;
 }
 
+/*
+ * 「在访达中显示 / 在文件夹中显示」（组标题那一行最右）。
+ *
+ * ★ 2026-10-30（作者圈着它：「打开文件夹这一个它有点绿色颜色吧，或者加一个倾斜向上的
+ *   箭头」）：给了两样 —— **绿色**说明"这是个动作"（同组标题是灰的，它得跳出来），
+ *   **↗** 说明"这一下把人送到系统窗口里去"（站内那种原地展开的链接不长这样）。
+ */
 .dReveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex: none;
   margin-left: auto;
   padding: 0;
@@ -1116,14 +1159,15 @@
   background: none;
   font: inherit;
   font-size: var(--fs-label);
-  color: var(--text-2);
+  color: var(--accent);
   white-space: nowrap;
   cursor: pointer;
 }
 
+/* hover 只加下划线：深色档的 `--accent-deep` 比 `--accent` 更暗，换色反而像"失效了" */
 .dReveal:hover {
-  color: var(--accent);
   text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /*
@@ -1226,13 +1270,24 @@
   text-overflow: ellipsis;
 }
 
-/* 概览内可定位链接：安静、深色、不用绿 */
+/*
+ * 概览内可定位链接：安静、深色、不用绿。
+ *
+ * ★ 2026-10-30（作者圈图：「来源」那一行的长文件名**压到右列**上去了）：
+ *   `<button>` 的 UA 默认是 `white-space: nowrap` —— `.dVal` 上那句
+ *   `overflow-wrap: anywhere` 继承下来也**折不动**，于是整串按一行画出去，
+ *   越过中缝盖住右边的发布时间。按钮这里必须显式把 nowrap 撤掉。
+ */
 .dLink {
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   font: inherit;
   color: var(--text-1);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-decoration: underline;
   text-decoration-color: var(--line-strong);
   text-underline-offset: 3px;

@@ -64,7 +64,7 @@ function RevertNote({ note }: { note: { text: Text; tone: 'ok' | 'muted' } }) {
   }, [note.text])
 
   return (
-    <p ref={ref} className={s.revertNote} data-tone={note.tone} title={say(note.text)}>
+    <p ref={ref} className={s.revertNote} data-tone={note.tone} data-tip={say(note.text)}>
       {say(note.text)}
     </p>
   )
@@ -252,7 +252,7 @@ export default function HistoryDrawer({
           光看"改 X 轴偏移 0.1 → 0.7"分不出来。
         */}
         {entry.fromSync === true && (
-          <span className={s.syncTag} title={tr('params.history.syncTag')}>
+          <span className={s.syncTag} data-tip={tr('params.history.syncTag')}>
             {tr('params.history.syncTagShort')}
           </span>
         )}
@@ -355,7 +355,7 @@ export default function HistoryDrawer({
             <button
               type="button"
               className={armClear ? s.clearArm : s.ghost}
-              title={armClear ? tr('params.history.clearArmTitle') : tr('params.history.clearTitle')}
+              data-tip={armClear ? tr('params.history.clearArmTitle') : tr('params.history.clearTitle')}
               onClick={() => {
                 if (armClear) {
                   setArmClear(false)
@@ -404,7 +404,7 @@ export default function HistoryDrawer({
           <button
             type="button"
             className={s.enterEdit}
-            title={tr('params.history.enterEditTitle')}
+            data-tip={tr('params.history.enterEditTitle')}
             onClick={onEnterEdit}
           >
             {tr(EDIT_TEXT.enterMode)}

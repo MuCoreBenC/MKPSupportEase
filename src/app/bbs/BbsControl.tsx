@@ -154,7 +154,7 @@ export default function BbsControl({
                 role="option"
                 aria-selected={o.value === text}
                 className={`${s.menuItem}${o.value === text ? ` ${s.menuItemOn}` : ''}`}
-                title={o.value}
+                data-tip={o.value}
                 onClick={() => {
                   setOpen(false)
                   /* 写进去的是 enum_values 里的原始字符串（BBS json 里就是这个），不是中文 label */

@@ -597,7 +597,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 type="button"
                 className={`${s.btn} ${sandbox?.enabled === true ? '' : s.btnPrimary}`}
                 disabled={sandBusy || sandbox === null}
-                title={
+                data-tip={
                   sandbox?.enabled === true
                     ? '切回正式 —— 沙箱原样留着，下次回来还在'
                     : '开之前会先把正式那份整个拷进沙箱（presets/ 整棵，含 3MF 与模型）'
@@ -786,7 +786,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                         disabled={revealBusy === p}
                         onClick={() => void toggleReveal(p)}
                         aria-label={`${PLATFORM_LABEL[p]} Token 明文查看`}
-                        title={revealed[p] !== undefined ? '收起明文' : '显示明文（可复制）'}
+                        data-tip={revealed[p] !== undefined ? '收起明文' : '显示明文（可复制）'}
                       >
                         <svg viewBox="0 0 20 20" aria-hidden>
                           <path
@@ -1077,7 +1077,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                       type="button"
                       className={s.btn}
                       disabled={devBusy || c.pid === null}
-                      title={
+                      data-tip={
                         c.pid === null
                           ? '认不出占着它的进程 —— 请在那个终端里自己停掉它'
                           : '把它停掉（后端会先确认这个端口还是它的，再动手）'
@@ -1112,7 +1112,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                   type="button"
                   className={`${s.btn} ${s.btnPrimary}`}
                   disabled={devBusy || devSrc === null || devConflicts.length > 0}
-                  title={
+                  data-tip={
                     devConflicts.length > 0
                       ? '先把上面那条端口占用处理掉'
                       : `以「${devLabel(devDraft)}」这一份起`
@@ -1128,7 +1128,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                   type="button"
                   className={s.btn}
                   disabled={devBusy || devConflicts.length > 0}
-                  title={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
+                  data-tip={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
                     devDraft,
                   )}」：先把它那棵进程树收掉再起，一次点击一件事`}
                   onClick={() => void startDevSrc()}

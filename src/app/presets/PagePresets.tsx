@@ -261,6 +261,20 @@ import { splitHeader, tomlTokens } from './tomlPaint'
 import s from './PagePresets.module.css'
 
 
+/**
+ * 行所在的**滚动容器**：往上找第一个 `overflow-y: auto | scroll` 的祖先，到 `root` 为止。
+ *
+ * 为什么要有这一句：定位闪光那块 div 住在页面根（`.locateFlash`），而真正滚动的是表格
+ * 里那一层 `.wrap` —— 调用处拿不到它的类名（CSS Modules 的哈希），只能按"谁在滚"找。
+ */
+function scrollingParentOf(el: HTMLElement, root: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p !== null && p !== root; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === 'auto' || oy === 'scroll') return p
+  }
+  return null
+}
+
 interface Props {
   density: Density
   /**
@@ -581,6 +595,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
   const flashRef = useRef<HTMLDivElement>(null)
+  /** 那一趟的"跟着滚动走"监听，下一次定位 / 动画结束时撤掉（见 `flashRow`） */
+  const stopFlash = useRef<(() => void) | null>(null)
 
   /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
   const menu = useContextMenu<PresetTableRow>()
@@ -591,11 +607,31 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   /*
+   * **跳出本表去看母本时，手上那张卡要跟着回来**（2026-10-30 作者：
+   * 「原本的展开还是展开……它就只是上下滚动然后去定位，我再切换回来，
+   * 就还是保持我原本的位置」）。
+   *
+   * 麻烦在本地行的行键里带机型（`local:<机型>:<路径>`，见 `presetTree` 的 `localRows`），
+   * 而定位要先清掉机型筛选（不然目标行可能被筛没）⇒ 同一行的键**当场就换了**，
+   * 存着的 `expandedKey` 再也对不上，切回来那张卡就没了。
+   * 所以换筛选之前把那一行的 `path` 记下来，等本地表再画出来时按路径接回去。
+   * 云端行的键（`preset-cloud:<ref>`）不带机型，根本不用记。
+   */
+  const [keepOpenPath, setKeepOpenPath] = useState<string | null>(null)
+  /*
    * 详情卡里「后处理 N 次」读的那本账（本机学习账 `run/usage.json`）。
    * 拿 `expandedKey` 当刷新信号：这一页是常驻的（六页签都在 DOM 里），只靠挂载读一次
    * 会一直显示旧的；每开一行重读一遍 —— 刚跑完一趟后处理回来，展开就看见新数。
    */
   const usage = usePresetUsage(expandedKey)
+  /* 把 `keepOpenPath` 记下的那张卡接回来：本地表重新画出来时按路径认出同一行、换上新键 */
+  useEffect(() => {
+    if (keepOpenPath === null || page.scope !== 'local') return
+    const hit = page.local.rows.find((r) => r.path === keepOpenPath)
+    if (hit === undefined) return
+    setExpandedKey(hit.rowKey)
+    setKeepOpenPath(null)
+  }, [keepOpenPath, page.scope, page.local.rows])
   /*
    * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂关）：
    * 关着时复制 / 导入出来的那几份**不挂「有新版」** —— 作者：
@@ -1297,20 +1333,66 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
    * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
    * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
-   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
+   *
+   * ★ 2026-10-30（作者：「定位之后的这个绿色背景没有跟随着移动，很假，直接贴上去的，
+   *   很快滚一下列表就发现它错开了」）：这块 div 不再"定死一次"——
+   *   列表一滚就按行当前位置重摆（滚动事件里每帧对一次，1.8s 后随动画一起撤），
+   *   行滚出列表可视区就先藏起来（否则会画到表头上）。
    */
   const flashRow = (row: HTMLElement) => {
     const root = rootRef.current
     const overlay = flashRef.current
     if (!root || !overlay) return
+
+    /* 上一趟的跟随先撤（连着定位两行时不能留两条监听） */
+    stopFlash.current?.()
+
     /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
     row.scrollIntoView({ block: 'center' })
-    const rr = row.getBoundingClientRect()
-    const pr = root.getBoundingClientRect()
-    overlay.style.left = `${rr.left - pr.left}px`
-    overlay.style.width = `${rr.width}px`
-    overlay.style.top = `${rr.top - pr.top}px`
-    overlay.style.height = `${rr.height}px`
+
+    /* 位置按"行在 root 里的坐标"算 —— 这块 div 的定位祖先是页面根 */
+    const place = () => {
+      const rr = row.getBoundingClientRect()
+      const pr = root.getBoundingClientRect()
+      overlay.style.left = `${rr.left - pr.left}px`
+      overlay.style.width = `${rr.width}px`
+      overlay.style.top = `${rr.top - pr.top}px`
+      overlay.style.height = `${rr.height}px`
+    }
+
+    /*
+     * **跟着滚动走**：行在 `.wrap` 里滚、这块 div 不滚，闪的 1.8s 里一滚就露馅。
+     * 滚一次对一次（rAF 合并）；行离开列表可视区就藏 —— 那块 div 不受 `.wrap` 的
+     * `overflow` 裁切，不藏就会画到表头 / 页脚上。回到视野里再显示。
+     */
+    const scroller = scrollingParentOf(row, root)
+    const follow = () => {
+      place()
+      const rr = row.getBoundingClientRect()
+      const sr = scroller?.getBoundingClientRect()
+      const out = sr !== undefined && (rr.bottom <= sr.top || rr.top >= sr.bottom)
+      overlay.style.display = out ? 'none' : 'block'
+    }
+    let raf = 0
+    const onMove = () => {
+      if (raf !== 0) return
+      raf = window.requestAnimationFrame(() => {
+        raf = 0
+        follow()
+      })
+    }
+    const stop = () => {
+      scroller?.removeEventListener('scroll', onMove)
+      window.removeEventListener('resize', onMove)
+      if (raf !== 0) window.cancelAnimationFrame(raf)
+      raf = 0
+      stopFlash.current = null
+    }
+    scroller?.addEventListener('scroll', onMove, { passive: true })
+    window.addEventListener('resize', onMove)
+    stopFlash.current = stop
+
+    place()
     overlay.style.display = 'block'
     overlay.getAnimations().forEach((a) => a.cancel())
     overlay
@@ -1324,6 +1406,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       )
       .onfinish = () => {
         overlay.style.display = 'none'
+        stop()
       }
   }
 
@@ -1348,8 +1431,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
   /*
    * **来源定位**（「复制自 X」那一格点过来）：切到来源所在的表（local / cloud、
-   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、展开那一行、
+   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、
    * 滚过去亮一下 —— 用户要的是"看见我从哪复制来的"，缺一步都到不了那个效果。
+   *
+   * ★ **不展开、也不收起**（2026-10-30 作者两句话定死）：
+   *   第一句「点击了这些跳转过去的，不要展开呀」⇒ 目标行**绝不**展开；
+   *   第二句「我原本是展开的，就没必要去取消它……原本的那个状态不用改变——
+   *   它就只是上下滚动，然后去定位，我再切换回来还是保持我原本的位置」
+   *   ⇒ **不碰 `expandedKey`**：他手上那张卡原地开着，跳过去只是滚 + 闪，
+   *   切换回来（本地 ⇄ 云端）那张卡还在原处。
+   *
+   *   （上一版两次都改错方向：先 `setExpandedKey(target.rowKey)` 把目标炸开，
+   *   再一律 `null` 把手里那张也收了 —— 都不是他要的。）
    *
    * 行键按「全部机型」那一档算（local 行的键里带机型筛选，见 `originCellOf`）；
    * 类型轴只在目标说得出类型时才切（认不出类别的那份两张表里都有，不动当前档）。
@@ -1357,11 +1450,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const locateRow = (target: LocateTarget) => {
     menu.close()
+    /*
+     * 清机型筛选会把本地行的行键换掉（键里带机型）——**先**把手上开着的那张卡
+     * 按路径记下来，等本地表再画出来时由上面的 effect 接回去。
+     */
+    const openRow =
+      expandedKey === null ? undefined : page.local.rows.find((r) => r.rowKey === expandedKey)
+    if (openRow !== undefined) setKeepOpenPath(openRow.path)
     page.setScope(target.scope)
     if (target.kind !== null) page.setKind(target.kind)
     data.pickMachine('')
     page.setQuery('')
-    setExpandedKey(target.rowKey)
+    /* `expandedKey` **一个字都不动** —— 见上面那段：只滚 + 闪，不动他手上那张卡 */
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector(
         `tr[data-rowkey="${CSS.escape(target.rowKey)}"]`,
@@ -2509,6 +2609,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const startSelect = (row: PresetTableRow) => {
     menu.close()
     setExpandedKey(null)
+    /* 多选时不弹卡：定位那一趟记下的"回来要开着"也一并作废 */
+    setKeepOpenPath(null)
     setSelecting(true)
     /*
      * ★ 这一行**自己能不能删**要先问 `removeWhyNotOf`：云端仓库文件的本地副本
@@ -3613,7 +3715,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       : [note.text, ...(note.lines ?? [])].map(say).join(tr('common.clauseSep'))
   const footBanner =
     note !== null ? (
-      <div className={note.bad ? s.bannerBad : s.banner} role="status" title={noteText}>
+      <div className={note.bad ? s.bannerBad : s.banner} role="status" data-tip={noteText}>
         {/* 逐份结局并在主句后面一句：单行，超出省略（明细也躺在 title 里） */}
         <span className={s.bannerText}>{noteText}</span>
         <button
@@ -3838,7 +3940,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 activeKey={menu.target?.rowKey ?? null}
                 expandedKey={expandedKey}
                 /* 点同一行收起、点别行换行 —— 与参数页同一条规则 */
-                onToggleExpand={(rowKey) => setExpandedKey((k) => (k === rowKey ? null : rowKey))}
+                onToggleExpand={(rowKey) => {
+                  /* 他自己点了行 —— 定位之前记下的那张卡就不算数了 */
+                  setKeepOpenPath(null)
+                  setExpandedKey((k) => (k === rowKey ? null : rowKey))
+                }}
                 /*
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
@@ -4186,7 +4292,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     type="button"
                     className={s.editDiffBtn}
                     disabled={originText === null}
-                    title={
+                    data-tip={
                       originText === null
                         ? tr('presets.page.editor.diffNoOrigin')
                         : tr('presets.page.editor.diffHint')
@@ -4209,7 +4315,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.iconBtn}
                           disabled={undoStack.length === 0}
-                          title={tr('presets.page.editor.undoTitle')}
+                          data-tip={tr('presets.page.editor.undoTitle')}
                           aria-label={tr('presets.page.editor.undoAria')}
                           onClick={undoEdit}
                         >
@@ -4219,7 +4325,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.iconBtn}
                           disabled={redoStack.length === 0}
-                          title={tr('presets.page.editor.redoTitle')}
+                          data-tip={tr('presets.page.editor.redoTitle')}
                           aria-label={tr('presets.page.editor.redoAria')}
                           onClick={redoEdit}
                         >
@@ -4229,7 +4335,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.textBtn}
                           /* 词与说明都取自 `EDIT_TEXT`（三个模态框同一句话，见那一份的长注释） */
-                          title={tr(EDIT_TEXT.exitTitle)}
+                          data-tip={tr(EDIT_TEXT.exitTitle)}
                           onClick={exitEdit}
                         >
                           {tr(EDIT_TEXT.exitMode)}
@@ -4259,7 +4365,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                       <button
                         type="button"
                         className={s.primary}
-                        title={tr('presets.page.editor.enterTitle')}
+                        data-tip={tr('presets.page.editor.enterTitle')}
                         /*
                          * 进编辑模式**接着看**：把只读态读到哪抄下来（编辑态是另一个滚动
                          * 元素，CSS 接不过来），见 `editAreaOpen` 那个 effect。
@@ -4529,7 +4635,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 <button
                   type="button"
                   className={s.renameReset}
-                  title={tr('presets.page.rename.fillDefaultTitle', {
+                  data-tip={tr('presets.page.rename.fillDefaultTitle', {
                     name:
                       renaming?.row === undefined
                         ? ''
@@ -4589,7 +4695,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     }}
                   />
                   {renaming.ext !== '' && (
-                    <span className={s.renameExt} title={tr('presets.page.rename.extTitle')}>
+                    <span className={s.renameExt} data-tip={tr('presets.page.rename.extTitle')}>
                       {renaming.ext}
                     </span>
                   )}

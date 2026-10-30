@@ -21,6 +21,7 @@ import Modal from '../../components/modal/Modal'
 import { msg, useText, useT, type Text } from '../../i18n'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { Btn } from '../ui/Controls'
+import { Tip } from '../../components/tooltip'
 import s from './PageSettings.module.css'
 
 const CONFIRM_MS = 3000
@@ -131,10 +132,20 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
 
   return (
     <section className={s.section} aria-label={tr('settings.recovery.title')}>
+      {/*
+       * ★ 2026-10-30：原来把 `<h2 class={s.secTitle}>` 塞进了 `.fieldText`（行内），
+       *   三个毛病一起犯：① 章节标题自带 12px 左内衬 ⇒ 比别的行右移 12px（作者截图里
+       *   「最近删除」比「卸载应用」右一截）；② 标题的 `::after` 那条线伸到按钮前，
+       *   看着像"标题 + 线 + 按钮"；③ 标题字号 + 行内衬把整块撑高一倍。
+       *   这一块本来就只有一句话 + 一个按钮 ⇒ 直接当**一行**画，
+       *   与「卸载应用」「预设位置」同字号、同左缘、同高度。
+       */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <h2 className={s.secTitle}>{tr('settings.recovery.title')}</h2>
-          <p className={s.fieldNote}>{tr('settings.recovery.note')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.recovery.title')}
+            <Tip text={tr('settings.recovery.note')} />
+          </div>
         </div>
         <Btn disabled={entries === null} onClick={() => setOpen(true)}>
           {count > 0
@@ -171,6 +182,9 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
         )}
 
         {entries !== null && entries.length > 0 && (
+          /* 列表自己滚：`.box` 是 `overflow: hidden` + `max-height: 100%`，
+             内容一高就会从底栏底下穿出去（作者截图里「清空 / 关闭」压在列表项上）。 */
+          <div className={s.recScroll}>
           <ul className={s.recList}>
             {entries.map((entry) => (
               <li key={entry.id} className={s.recItem}>
@@ -205,6 +219,7 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
               </li>
             ))}
           </ul>
+          </div>
         )}
 
         {note !== null && <p className={s.noteHint}>{say(note)}</p>}

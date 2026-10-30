@@ -184,7 +184,7 @@ export default function MachineDimensionsModal({
             type="button"
             className={`${s.btn} ${s.btnPrimary}`}
             disabled={busy || !bedOk}
-            title={bedOk ? undefined : '床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图'}
+            data-tip={bedOk ? undefined : '床身宽与深都必须大于 0 —— 一台没有可打印面积的机器画不出床身图'}
             onClick={() => void save()}
           >
             {busy ? '保存中…' : '确认保存'}

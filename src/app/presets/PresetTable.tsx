@@ -120,7 +120,7 @@
  */
 
 
-import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ContextMenuApi } from '../../components/menu'
 /* a03：归属控件用 FieldPopover 做可输入 + 可选的自定义组合框（替代原生 select/datalist） */
 import { FieldPopover } from '../../components/field'
@@ -144,6 +144,8 @@ import type { Machine } from '../../api'
  * `ui/machineTone.ts` 整个模块）一起删了。
  */
 import { longStatText, shortStatText } from '../store/package'
+/* 详情卡双列的中线自适应（量出来的，见那个文件的头注释） */
+import { fitSplitWhenResized } from './splitFit'
 /* a03：所有 WHY（悬停用）导入已随「去悬停提示」移除 */
 import {
   ACTION_TEXT,
@@ -243,7 +245,7 @@ function CloudLocalAction({
     return (
       <>
         {st.warn && (
-          <span className={s.actWarn} title={tr('presets.table.inconsistent.title')}>
+          <span className={s.actWarn} data-tip={tr('presets.table.inconsistent.title')}>
             {tr(st.text, st.params)}
           </span>
         )}
@@ -289,7 +291,7 @@ function CloudLocalAction({
             )
           : undefined
       }
-      title={
+      data-tip={
         busy
           ? tr(
               isUpdate
@@ -409,7 +411,7 @@ function SortTh({
         /* 降序时 CSS 把那颗箭头转 180°；默认（族优先）那一档没有方向，不画箭头 */
         data-dir={on ? sort.dir : undefined}
         onClick={() => onSort(colKey)}
-        title={next}
+        data-tip={next}
       >
         <span className={s.sortText}>{label}</span>
         {/* 常驻渲染、由 CSS 管显隐 —— 非当前列 hover 才淡淡露出（见上面那段） */}
@@ -633,6 +635,40 @@ export default function PresetTable({
   }, [expandedKey])
 
   /*
+   * 详情卡双列的**中线自适应**（2026-10-30，作者：「线再往左一点，右边那三行就能
+   * 变两行」）。任何时刻最多一张卡（见下面"收起一律瞬时"那段），所以一只 ref 就够。
+   *
+   * 为什么在 `useLayoutEffect` 里量：这一刻 DOM 已挂好、还没绘制 —— 量完立刻定列宽，
+   * 用户第一眼看到的就是量过的那版。交给 `useEffect` 会先按 0.5 画一帧再挪线（能看见跳）。
+   * 之后只在**宽度变了**时重量（窗口缩放 / 换页签），那一路由 rAF 合并。
+   */
+  const colsRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => {
+    const cols = colsRef.current
+    if (cols === null) return
+    return fitSplitWhenResized(cols)
+  }, [expandedKey])
+
+  /*
+   * **本地 / 云端各记一条滚动位置**（2026-10-30 作者：「我点了那个来源，如果它是云端，
+   * 我希望本地的位置一点都不变……切回本地时跟离开时一模一样，不要又回最上面」）。
+   *
+   * 两张表共用这一个滚动容器（`.wrap`）：换 scope 时不重建 DOM，`scrollTop` 还是上一张表
+   * 那个数字 —— 新内容一矮就被夹回去（看着像"回到了最上面"），高度相近时又停在一个
+   * 跟这边内容无关的位置。所以按 scope 分开记，换回来按记录摆回去。
+   *
+   * 记的时机是**滚动时**（`onScroll`），不是换 scope 时现读：那时读到的已经是新内容
+   * 夹过的数字了。
+   */
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const scrollMemo = useRef<Record<string, number>>({})
+  useLayoutEffect(() => {
+    const el = wrapRef.current
+    if (el === null) return
+    el.scrollTop = scrollMemo.current[scope] ?? 0
+  }, [scope])
+
+  /*
    *  /*
    * **收起没有动画**（2026-10-17 第七轮，作者：「旧的没有收起动画」「我希望是保持高度
    * 不变……而且只是收起的话，这个动画也不好，先快后慢，最后的慢有点不舒服」）。
@@ -681,7 +717,17 @@ export default function PresetTable({
 
   return (
     <div className={s.hold}>
-      <div className={s.wrap}>
+      <div
+        className={s.wrap}
+        ref={wrapRef}
+        /*
+         * 一直在记"当前这一档停在哪儿"。不靠换 scope 那一刻去读：那一刻读到的
+         * 已经是新内容夹过的数字了（见上面 `scrollMemo` 那段）。
+         */
+        onScroll={(e) => {
+          scrollMemo.current[scope] = e.currentTarget.scrollTop
+        }}
+      >
         {/* `data-selecting` 只给 CSS 用：多选时名称列让出左内衬给复选框那一列 */}
         <table className={s.table} data-selecting={select !== null}>
           <thead className={s.head}>
@@ -693,7 +739,7 @@ export default function PresetTable({
                */}
               {select !== null && (
                 <th className={s.thCheck} scope="col">
-                  <span title={tr('presets.table.select.allTitle')}>
+                  <span data-tip={tr('presets.table.select.allTitle')}>
                     {/* 共用件 `Check`（全站勾与框的唯一出口，见 `components/check`）——
                         半选走它的 `indeterminate`，不自己画横杠 */}
                     <Check
@@ -787,8 +833,8 @@ export default function PresetTable({
                */
               const mkpCloudStatus = row.scope === 'cloud' && row.localState !== undefined
               /*
-               * **这一行是"跟云端没关系的一份"**（2026-10-20 / 10-29）：拷贝 / 导入出来的，
-               * 而设置页「拷贝出来的也跟着云端更新」关着 ⇒ 云端换版不该在它身上报「有新版」。
+               * **这一行是"跟云端没关系的一份"**（2026-10-20 / 10-29）：复制 / 导入出来的，
+               * 而设置页「复制出来的也跟着云端更新」关着 ⇒ 云端换版不该在它身上报「有新版」。
                * 判据只看后端那一格 + 来路账的 `provenanceKind`（不按名字猜）。
                */
               const detached = isDetachedCopy(row, copiesFollow)
@@ -959,7 +1005,7 @@ export default function PresetTable({
                   {select !== null && (
                     <td className={s.tdCheck} onClick={(e) => e.stopPropagation()}>
                       {/* 勾不了的那几行：灰勾 + 悬停说原因（禁用一定带原因） */}
-                      <span title={whyNot}>
+                      <span data-tip={whyNot}>
                         <Check
                           checked={picked}
                           disabled={whyNot !== undefined}
@@ -989,7 +1035,7 @@ export default function PresetTable({
                           className={s.unsavedDot}
                           role="img"
                           aria-label={tr('presets.table.unsaved.aria')}
-                          title={tr('presets.table.unsaved.title')}
+                          data-tip={tr('presets.table.unsaved.title')}
                         />
                       )}
                       {/*
@@ -1021,7 +1067,7 @@ export default function PresetTable({
                         <span
                           className={s.localState}
                           data-state="stale"
-                          title={tr('presets.table.stale.title')}
+                          data-tip={tr('presets.table.stale.title')}
                         >
                           {tr('presets.table.stale')}
                         </span>
@@ -1083,7 +1129,7 @@ export default function PresetTable({
                          */
                         <span
                           className={s.unreadable}
-                          title={localUnreadableWhy(tr, row.localStateDetail)}
+                          data-tip={localUnreadableWhy(tr, row.localStateDetail)}
                         >
                           {tr(LOCAL_UNREADABLE_TEXT)}
                         </span>
@@ -1388,8 +1434,16 @@ export default function PresetTable({
                          * 最右一颗安静的「收起」（与点这一行同一件事 —— 抽卡页 #11 有）。
                          */}
                         <div className={s.dHead}>
-                          <Icon name="doc" size={15} className={s.dHeadIcon} />
-                          <span className={s.dHeadName}>{row.fileName}</span>
+                          {/*
+                            ★ 2026-10-30（作者：「这个名字有点长呢…要做到自动换行呀」）：
+                            图标 + 名字单独包一格 —— 名字长了**自己折成两行**，右边那串
+                            小事实与「收起」原地不动。早先是三个平级 flex 项 + `flex-wrap`：
+                            名字用省略号顶满一行，于是「收起」被挤到第二行孤零零挂着。
+                          */}
+                          <span className={s.dHeadTitle}>
+                            <Icon name="doc" size={15} className={s.dHeadIcon} />
+                            <span className={s.dHeadName}>{row.fileName}</span>
+                          </span>
                           <span className={s.dHeadMeta}>
                             <span>
                               {/*
@@ -1438,7 +1492,7 @@ export default function PresetTable({
                           <button
                             type="button"
                             className={s.dHeadFold}
-                            title={tr('presets.table.collapse.title')}
+                            data-tip={tr('presets.table.collapse.title')}
                             onClick={() => onToggleExpand(row.rowKey)}
                           >
                             {tr('presets.table.collapse')}
@@ -1460,7 +1514,7 @@ export default function PresetTable({
                          */}
                         <div className={s.dBody}>
                          {/* 双列：左「这份是什么 / 从哪来 / 判成什么」，右「云端与文件的时间线」 */}
-                         <div className={s.dCols}>
+                         <div className={s.dCols} ref={colsRef}>
                           <div className={s.dCol}>
                           {/* ① 基本信息：最常看的那几格 */}
                           <section className={s.dSec}>
@@ -1557,10 +1611,16 @@ export default function PresetTable({
                                     {tr('presets.table.detail.more.verdict')}
                                   </span>
                                   <span className={s.dVal}>
+                                    {/*
+                                      ★ 2026-10-30（作者看截图：「看这个文字，我也觉得他
+                                      没做到视觉对齐呀」）：这一格**不能**用 `.dWhyInline` ——
+                                      那是"跟在主词后面的小注"（8px 左缩进 + 小一号灰字），
+                                      放在这里就是整格的值，于是它比上面「版本 / 来源」的值
+                                      往右缩了一截、字还小一档。值就是值：与其它格同一个起点、
+                                      同一档字色。
+                                    */}
                                     {noLocalCopy ? (
-                                      <span className={s.dWhyInline}>
-                                        {tr('presets.table.detail.verdict.none')}
-                                      </span>
+                                      tr('presets.table.detail.verdict.none')
                                     ) : row.basedOn === undefined ? (
                                       tr('presets.table.detail.more.none')
                                     ) : (
@@ -1591,7 +1651,7 @@ export default function PresetTable({
                                   「云端有没有新版」不是同一件事。
                               */}
                               {row.scope === 'local' && row.usageKey !== undefined && (
-                                <div className={s.dRow} title={tr(USAGE_HINT)}>
+                                <div className={s.dRow} data-tip={tr(USAGE_HINT)}>
                                   <span className={s.dKey}>{tr(USAGE_KEY)}</span>
                                   <span className={s.dVal}>
                                     {usageCellText(tr, usage.get(row.usageKey))}
@@ -1620,17 +1680,23 @@ export default function PresetTable({
                                 <Icon name="folder" size={13} className={s.dSecIcon} />
                                 <span>{tr('presets.table.detail.location')}</span>
                                 {onReveal !== undefined && (
+                                  /*
+                                   * ★ 2026-10-30（作者：「打开文件夹这一个它有点绿色颜色吧，
+                                   *   或者加一个倾斜向上的箭头」）—— 两样都给了：绿色 = 这是个
+                                   *   动作，↗ = 这一下**把人送到系统窗口里**（站内链接不长这样）。
+                                   */
                                   <button
                                     type="button"
                                     className={s.dReveal}
                                     onClick={() => onReveal(row)}
                                   >
                                     {tr(REVEAL_LABEL_KEY)}
+                                    <Icon name="external" size={11} />
                                   </button>
                                 )}
                               </div>
                               <div className={s.dPathRow}>
-                                <span className={`${s.dMono} ${s.dPath}`} title={row.path}>
+                                <span className={`${s.dMono} ${s.dPath}`} data-tip={row.path}>
                                   {row.path}
                                 </span>
                               </div>
@@ -1681,7 +1747,7 @@ export default function PresetTable({
                                           type="button"
                                           className={`${s.updateBtn} ${s.dInlineAction}`}
                                           disabled={busy}
-                                          title={tr('presets.table.detail.update.title')}
+                                          data-tip={tr('presets.table.detail.update.title')}
                                           onClick={() => onUpdateLocal(row)}
                                         >
                                           {tr(UPDATE_ACTION_TEXT.update)}
@@ -1698,7 +1764,7 @@ export default function PresetTable({
                                   </span>
                                   <span
                                     className={s.dVal}
-                                    title={tr('presets.table.detail.cloudPublishedAt.why')}
+                                    data-tip={tr('presets.table.detail.cloudPublishedAt.why')}
                                   >
                                     {longStatText(row.versionPublishedAt ?? undefined) ??
                                       tr('presets.table.detail.versionUnknown')}
@@ -1911,7 +1977,7 @@ export default function PresetTable({
                                   verdictFacts?.cloudSha256 !== undefined && (
                                     <div
                                       className={s.dRow}
-                                      title={verdictFacts.cloudSha256 ?? undefined}
+                                      data-tip={verdictFacts.cloudSha256 ?? undefined}
                                     >
                                       <span className={s.dKey}>
                                         {tr('presets.table.detail.more.cloudSha')}
@@ -1924,7 +1990,7 @@ export default function PresetTable({
                                 {verdictFacts !== undefined && !noLocalCopy && (
                                   <div
                                     className={s.dRow}
-                                    title={verdictFacts.lineageSha256 ?? undefined}
+                                    data-tip={verdictFacts.lineageSha256 ?? undefined}
                                   >
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.more.localSha')}
@@ -2014,7 +2080,7 @@ export default function PresetTable({
                                 <button
                                   type="button"
                                   className={s.editTrigger}
-                                  title={tr('presets.table.detail.editRemark.title')}
+                                  data-tip={tr('presets.table.detail.editRemark.title')}
                                   onClick={() =>
                                     setBands((b) => ({
                                       ...b,
@@ -2047,7 +2113,7 @@ export default function PresetTable({
                                 <button
                                   type="button"
                                   className={s.editTrigger}
-                                  title={tr('presets.table.detail.editAttr.title')}
+                                  data-tip={tr('presets.table.detail.editAttr.title')}
                                   onClick={() =>
                                     setBands((b) => ({
                                       ...b,
@@ -2103,7 +2169,7 @@ export default function PresetTable({
                                 <button
                                   type="button"
                                   className={s.dPrimary}
-                                  title={tr(PARAMS_TEXT.why)}
+                                  data-tip={tr(PARAMS_TEXT.why)}
                                   onClick={() => onParams(row)}
                                 >
                                   {tr(PARAMS_TEXT.open)}
@@ -2346,7 +2412,7 @@ function RemarkBand(props: {
                   type="button"
                   className={s.bandQuiet}
                   disabled={saving || props.busy}
-                  title={tr('presets.table.remark.restoreDefault.title')}
+                  data-tip={tr('presets.table.remark.restoreDefault.title')}
                   onClick={() => void save(null)}
                 >
                   {tr('presets.table.remark.restoreDefault')}

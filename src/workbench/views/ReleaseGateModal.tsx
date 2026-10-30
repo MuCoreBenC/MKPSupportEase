@@ -379,7 +379,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
               type="button"
               className={`${c.btn} ${c.btnPrimary}`}
               disabled={!pre?.canRelease || busy}
-              title={pre?.canRelease ? undefined : '闸没全绿 —— 这颗按钮不亮'}
+              data-tip={pre?.canRelease ? undefined : '闸没全绿 —— 这颗按钮不亮'}
               onClick={() => void release()}
             >
               {busy ? '发布中…（要构建并上传安装包，几分钟）' : '确认发布'}

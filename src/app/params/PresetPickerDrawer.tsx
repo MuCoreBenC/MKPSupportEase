@@ -197,7 +197,7 @@ export default function PresetPickerDrawer({
                      * ★ 点整行**什么都不做**（规则①）：这里不是 button，也没有 onClick ——
                      *   选中态只由调用方给的 `currentKey` 决定。要切就走右边那颗「使用」。
                      */
-                    title={`${row.fileName}（${row.machineDisplay} · ${row.versionName}）`}
+                    data-tip={`${row.fileName}（${row.machineDisplay} · ${row.versionName}）`}
                   >
                     {/*
                      * ★★ 2026-10-14（作者）：在用的那一份**不摆按钮**，与预设页本地表同形 ——

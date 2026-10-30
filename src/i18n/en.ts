@@ -75,6 +75,8 @@ export const en: Record<StringKey, string> = {
   // ---- 设置页（续） ----
   'settings.title': 'Settings',
   'settings.subtitle': 'Software updates and app settings.',
+  'settings.search': 'Search settings',
+  'settings.searchEmpty': 'No matching setting',
   'settings.theme.label': 'Theme',
   'settings.theme.note': 'Applies immediately and is saved — this is the theme next time.',
   'settings.theme.system': 'Follow system',
@@ -210,7 +212,7 @@ export const en: Record<StringKey, string> = {
   'settings.backup.notePre': 'Writes a zip with app settings, the catalogue, your own preset TOML files (including imported ones), ',
   'settings.backup.noteKeep': 'edit history',
   'settings.backup.notePost': ', cloud baselines and original mirrors, and run archives — all of it. The file name carries the time, so several backups a day don’t overwrite each other.',
-  'settings.backup.do': 'Make a backup…',
+  'settings.backup.do': 'Back up…',
   'settings.backup.busy': 'Making a backup…',
   'settings.backup.pickDir': 'Where to put the backup',
   'settings.backup.done': 'Backup saved: {path} ({files} files)',
@@ -219,7 +221,7 @@ export const en: Record<StringKey, string> = {
   'settings.restore.notePre': 'It ',
   'settings.restore.noteKeep': 'completely overwrites',
   'settings.restore.notePost': ' the current data — anything in the backup is overwritten, anything not in it is deleted (you go back to the moment that backup was made). The app reloads once afterwards.',
-  'settings.restore.do': 'Restore from a backup…',
+  'settings.restore.do': 'Restore…',
   'settings.restore.confirm': 'Confirm restore',
   'settings.restore.busy': 'Restoring…',
   'settings.restore.cancel': 'Never mind',
@@ -258,9 +260,9 @@ export const en: Record<StringKey, string> = {
   'settings.guide.grant': 'Allow again (System Settings → Automation)',
   'settings.guide.grantNote': 'Tick “Finder”, then come back and click “Change it in the system…” once more',
   'settings.guide.step1': 'Pick the app you want in the “Open with” menu',
-  'settings.guide.step1Note': 'The “Change All…” button on the right only lights up after you pick one',
+  'settings.guide.step1Note': '“Change All…” below lights up after you pick one',
   'settings.guide.step2': 'Click “Change All…”',
-  'settings.guide.step2Note': 'From then on every .3mf goes to that app; without it only this one file changes',
+  'settings.guide.step2Note': 'Applies to every .3mf',
 
 
   // ---- 首页 ----
@@ -330,7 +332,6 @@ export const en: Record<StringKey, string> = {
   'home.modal.pendingLose': '. Leaving now discards these changes.',
   'home.modal.axisSeparator': ', ',
   'home.modal.discardSwitch': 'Switch without saving',
-  'home.modal.otherPreset': 'another preset',
   'home.modal.presetAskNote': 'After switching to {name}, the offset drafts made on this page are discarded — they are deltas against the previous preset, so a new baseline makes them meaningless.',
 
 
@@ -363,6 +364,7 @@ export const en: Record<StringKey, string> = {
   'home.stack.inUse': 'In use',
   'home.stack.default': 'Default',
   'home.stack.copies': 'My copies',
+  'home.stack.companions': 'Slicer profile',
   'home.stack.count': '{count}×',
   'home.stack.reading': 'Reading presets',
   'home.stack.loading': 'Loading…',
@@ -543,6 +545,9 @@ export const en: Record<StringKey, string> = {
   'calib.hit.xyX': 'Horizontal {delta} mm',
   'calib.hit.xyY': 'Vertical {delta} mm',
   'calib.original': 'was {value}',
+  /* 横排读数条那一档专用：不带 "was"，窄窗那一列放不下（2026-10-30），原话进 title / aria */
+  'calib.originalShort': '{value}',
+  'calib.originalTitle': 'Was {value} — click to revert',
 
 
   // ---- 参数页 ----

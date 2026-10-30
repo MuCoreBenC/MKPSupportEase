@@ -21,6 +21,7 @@ import { useT } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import NumberField from '../../components/field/NumberField'
 import { Switch } from '../../components/switch'
+import { Tip } from '../../components/tooltip'
 import s from './PageSettings.module.css'
 
 export default function CalibSection() {
@@ -48,8 +49,10 @@ export default function CalibSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.calib.skipVibration')}</div>
-          <p className={s.fieldNote}>{tr('settings.calib.skipVibrationNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.skipVibration')}
+            <Tip text={tr('settings.calib.skipVibrationNote')} />
+          </div>
         </div>
         <Switch
           checked={r.skipVibrationCalibration}
@@ -60,8 +63,10 @@ export default function CalibSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.calib.beginRetract')}</div>
-          <p className={s.fieldNote}>{tr('settings.calib.beginRetractNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.beginRetract')}
+            <Tip text={tr('settings.calib.beginRetractNote')} />
+          </div>
         </div>
         <Switch
           checked={r.beginStageRetractEnabled}
@@ -73,12 +78,12 @@ export default function CalibSection() {
       {/* 只在收笔开着时才问抬多高：关着的时候配一个不生效的数等于骗人
           （与热床涂胶那一块"只在开着时才问涂哪儿"同一条规矩） */}
       {r.beginStageRetractEnabled && (
-        <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>{tr('settings.calib.lift')}</div>
-            <p className={s.fieldNote}>
-              {tr('settings.calib.liftNote', { min: zLift.min, max: zLift.max })}
-            </p>
+            <div className={s.fieldTitle}>
+              {tr('settings.calib.lift')}
+              <Tip text={tr('settings.calib.liftNote', { min: zLift.min, max: zLift.max })} />
+            </div>
           </div>
           <span className={s.numBox}>
             <NumberField
@@ -94,12 +99,12 @@ export default function CalibSection() {
         </div>
       )}
 
-      <div className={`${s.field} ${s.fieldRow}`}>
+      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.calib.zDwell')}</div>
-          <p className={s.fieldNote}>
-            {tr('settings.calib.zDwellNote', { min: zDwell.min, max: zDwell.max })}
-          </p>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.zDwell')}
+            <Tip text={tr('settings.calib.zDwellNote', { min: zDwell.min, max: zDwell.max })} />
+          </div>
         </div>
         <span className={s.numBox}>
           <NumberField
@@ -114,12 +119,12 @@ export default function CalibSection() {
         </span>
       </div>
 
-      <div className={`${s.field} ${s.fieldRow}`}>
+      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.calib.xyDwell')}</div>
-          <p className={s.fieldNote}>
-            {tr('settings.calib.xyDwellNote', { min: xyDwell.min, max: xyDwell.max })}
-          </p>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.xyDwell')}
+            <Tip text={tr('settings.calib.xyDwellNote', { min: xyDwell.min, max: xyDwell.max })} />
+          </div>
         </div>
         <span className={s.numBox}>
           <NumberField

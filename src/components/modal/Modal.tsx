@@ -241,7 +241,9 @@ export default function Modal({
         tabIndex={-1}
         onKeyDown={onKeyDown}
       >
-        <header className={s.head}>
+        {/* `data-solo` = 这一扇**没有副标题**：头部只放一行，高度可以矮一档
+            （作者 2026-10-30：「没有副标题的高度都可以低一点」） */}
+        <header className={s.head} data-solo={subtitle === undefined ? '' : undefined}>
           <span className={s.headText}>
             {/*
              * 标题那一行 = 标题 + **回执槽**（框里 portal 进来的那一句状态）。
@@ -268,7 +270,7 @@ export default function Modal({
               <button
                 type="button"
                 className={s.close}
-                title={closeTitle ?? tr('common.close')}
+                data-tip={closeTitle ?? tr('common.close')}
                 aria-label={tr('common.close')}
                 onClick={onClose}
               >

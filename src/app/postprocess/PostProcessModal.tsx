@@ -437,7 +437,7 @@ function ProgressHero({
       onPointerCancel={press.onPointerCancel}
       onPointerLeave={press.onPointerLeave}
       onClick={press.onClick}
-      title={onDoubleClick === undefined ? undefined : t('postproc.dbl.toResult')}
+      data-tip={onDoubleClick === undefined ? undefined : t('postproc.dbl.toResult')}
     >
       <span className={s.heroNum} ref={numRef} />
       <div className={s.heroMeta}>
@@ -621,7 +621,7 @@ function MetricsStrip({
       onPointerCancel={press.onPointerCancel}
       onPointerLeave={press.onPointerLeave}
       onClick={press.onClick}
-      title={t('postproc.dbl.toProgress')}
+      data-tip={t('postproc.dbl.toProgress')}
     >
       {cells.map(([label, value, hot]) => (
         <span className={s.stripCell} key={label}>
@@ -1264,7 +1264,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
                     ? tr('postproc.relocate.toFacts')
                     : tr('postproc.relocate.toNote')
                 }
-                title={relocateTab === 'note' ? tr('postproc.relocate.toFactsTitle') : tr('postproc.relocate.toNoteTitle')}
+                data-tip={relocateTab === 'note' ? tr('postproc.relocate.toFactsTitle') : tr('postproc.relocate.toNoteTitle')}
               >
                 <InfoGlyph />
                 {relocateTab === 'note' ? tr('postproc.relocate.facts') : tr('postproc.relocate.note')}

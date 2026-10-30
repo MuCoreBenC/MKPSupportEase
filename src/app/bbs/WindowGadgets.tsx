@@ -146,7 +146,7 @@ export default function WindowGadgets() {
         data-on={pin !== 'off'}
         data-mode={pin}
         aria-label={t('bbs.gadgets.pin.aria', { now: t(PIN_LONG[pin]) })}
-        title={t('bbs.gadgets.pin.title', {
+        data-tip={t('bbs.gadgets.pin.title', {
           now: t(PIN_LONG[pin]),
           next: t(PIN_LONG[PIN_NEXT[pin]]),
         })}
@@ -168,7 +168,7 @@ export default function WindowGadgets() {
         data-on={compact}
         aria-pressed={compact}
         aria-label={t(COMPACT_ARIA[compactSide])}
-        title={t(COMPACT_TITLE[compactSide])}
+        data-tip={t(COMPACT_TITLE[compactSide])}
         onClick={toggleCompact}
       >
         {/* 同一套撑宽法：两档文字各一份，宽的一档决定盒子宽度 */}

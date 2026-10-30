@@ -363,7 +363,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               type="button"
               className={s.tool}
               disabled={sel === null}
-              title={sel === null ? '先在右边选一块' : '删掉选中的那一块'}
+              data-tip={sel === null ? '先在右边选一块' : '删掉选中的那一块'}
               onClick={() => sel !== null && removeZone(sel)}
             >
               删除选中
@@ -372,7 +372,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
               type="button"
               className={s.tool}
               disabled={sel === null}
-              title={sel === null ? '先在右边选一块' : '复制选中的那一块'}
+              data-tip={sel === null ? '先在右边选一块' : '复制选中的那一块'}
               onClick={() => sel !== null && duplicateZone(sel)}
             >
               复制
@@ -599,7 +599,7 @@ export default function ZoneEditorModal({ machineId, machine, onClose, onSaved }
                       <button
                         type="button"
                         className={s.coordDel}
-                        title={`删掉第 ${j + 1} 个顶点`}
+                        data-tip={`删掉第 ${j + 1} 个顶点`}
                         onClick={() => removePoint(i, j)}
                       >
                         ×

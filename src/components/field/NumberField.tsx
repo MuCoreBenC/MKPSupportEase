@@ -428,7 +428,7 @@ export default function NumberField({
         inputMode="decimal"
         aria-label={label}
         aria-invalid={bad || undefined}
-        title={bad && range !== undefined ? tr('field.exceedsRange', { range }) : range}
+        data-tip={bad && range !== undefined ? tr('field.exceedsRange', { range }) : range}
         placeholder={rangePlaceholder}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}

@@ -17,6 +17,7 @@ import { useState } from 'react'
 import { useT } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
+import { Tip } from '../../components/tooltip'
 import s from './PageSettings.module.css'
 
 export default function BedGlueSection() {
@@ -58,8 +59,10 @@ export default function BedGlueSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={`${s.fieldTitle} ${s.dangerTitle}`}>{tr('settings.glue.enable')}</div>
-          <p className={s.fieldNote}>{tr('settings.glue.enableNote')}</p>
+          <div className={`${s.fieldTitle} ${s.dangerTitle}`}>
+            {tr('settings.glue.enable')}
+            <Tip text={tr('settings.glue.enableNote')} />
+          </div>
         </div>
         <Switch
           checked={r.bedGlueEnabled}
@@ -72,8 +75,10 @@ export default function BedGlueSection() {
       {r.bedGlueEnabled && (
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>{tr('settings.glue.allModels')}</div>
-            <p className={s.fieldNote}>{tr('settings.glue.allModelsNote')}</p>
+            <div className={s.fieldTitle}>
+              {tr('settings.glue.allModels')}
+              <Tip text={tr('settings.glue.allModelsNote')} />
+            </div>
           </div>
           <Switch
             checked={r.bedGlueAllModels}
