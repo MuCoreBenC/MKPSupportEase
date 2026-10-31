@@ -42,10 +42,10 @@ import {
   type Boot,
   type IssueReport,
   type MetaApplied,
-  type ParamMetaEdit,
   type Patch,
   type Refresh,
   type SandboxStatus,
+  type TxnState,
   type Words,
 } from './api'
 import { toasts } from './c14/toast'
@@ -198,19 +198,6 @@ interface Focus {
 }
 
 /**
- * 撤销栈上的一条。**两种改动共用一个入口**（状态栏那两颗按钮 + Cmd+Z），所以
- * 条目自带「怎么倒回去」：
- *
- *   patches  值的改动 —— 反向 patch 交回 `wb.applyDraft`，后端算它自己的反向；
- *   meta     参数定义的改动（即时落盘那一路）—— **自带改前/改后两份整包**，
- *            撤销交改前、重做交改后，不用现算反向。label 写明「定义 · 某参数」，
- *            与值那条在栈里各说各的。
- */
-type UndoEntry =
-  | { kind: 'patches'; label: string; patches: Patch[] }
-  | { kind: 'meta'; label: string; key: string; before: ParamMetaEdit; after: ParamMetaEdit }
-
-/**
  * 状态条上的数据根怎么显示（2026-10-03，作者：「左下角的也是，没必要显示这个吧，这么长」）。
  *
  * 完整绝对路径放在 `title` 里（悬停能看到全部），行上只留**最后两段** ——
@@ -250,6 +237,34 @@ export function WorkbenchApp() {
    */
   const bookRef = useRef<BookView | null>(null)
   bookRef.current = book
+  /**
+   * 统一编辑事务的状态（2026-10-31）。`dirtyCount` 覆盖全部编辑类型；
+   * `canUndo/canRedo` 决定状态栏那两颗按钮点不点得动。
+   */
+  const [txn, setTxn] = useState<TxnState | null>(null)
+  /**
+   * 事务状态**只读内存**（后端那份 `Txn` 的条数），几乎不花代价。
+   *
+   * 为什么不靠各页面上报：工作台有二十多条写命令，页面各自拿自己的返回值刷新，
+   * 谁漏一次「上报」就是状态栏少一个数。这里按固定节拍对一下账 —— 页面怎么改，
+   * 「未保存改动 / 能不能撤销」都不会落后。
+   */
+  useEffect(() => {
+    let alive = true
+    const pull = () => {
+      wb.txnState()
+        .then((st) => {
+          if (alive) setTxn(st)
+        })
+        .catch(() => undefined)
+    }
+    pull()
+    const timer = window.setInterval(pull, 800)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+  }, [])
   const [report, setReport] = useState<IssueReport | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -270,10 +285,6 @@ export function WorkbenchApp() {
   const [assetSel, setAssetSel] = useState<string | null>(null)
   /** 资产页身份筛选的预选（检查报告的孤儿文件跳过来替人筛好「可选」） */
   const [assetAssign, setAssetAssign] = useState<string | null>(null)
-
-  /** 撤销 / 重做栈。会话内存，关窗就没 —— 草稿本身还在盘上 */
-  const [undoStack, setUndoStack] = useState<UndoEntry[]>([])
-  const [redoStack, setRedoStack] = useState<UndoEntry[]>([])
 
   const [navW, setNavW] = useSplitWidth('nav', NAVW.dft, NAVW.min, NAVW.max)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -331,6 +342,10 @@ export function WorkbenchApp() {
   const refreshBook = useCallback(() => {
     wb.book()
       .then(setBook)
+      .catch(() => undefined)
+    /* 事务状态与整本同源：谁改了书，谁就得把「未保存改动 / 可撤销」一并刷新 */
+    wb.txnState()
+      .then(setTxn)
       .catch(() => undefined)
     refreshReport()
   }, [refreshReport])
@@ -465,7 +480,6 @@ export function WorkbenchApp() {
     async (
       label: string,
       patches: Patch[],
-      where: 'undo' | 'redo',
       refresh?: Refresh,
       opts?: { quiet?: boolean },
     ) => {
@@ -484,15 +498,13 @@ export function WorkbenchApp() {
       try {
         const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
+        /* 2026-10-31：撤销不再由前端记账 —— 后端已把这次编辑记成一条事务 */
+        wb.txnState()
+          .then(setTxn)
+          .catch(() => undefined)
         if (!quiet) setTick((n) => n + 1)
         if (quiet) refreshReportSoon()
         else refreshReport()
-        // 不可撤销的手势（生成记录）不进栈，否则栈里会有一条按不动的
-        if (out.inverse.length > 0) {
-          const entry: UndoEntry = { kind: 'patches', label, patches: out.inverse }
-          if (where === 'undo') setUndoStack((st) => [...st, entry])
-          else setRedoStack((st) => [...st, entry])
-        }
         return out
       } catch (e) {
         fail(e)
@@ -504,89 +516,79 @@ export function WorkbenchApp() {
     [fail, refreshReport, refreshReportSoon],
   )
 
-  /*
-   * meta 条目（参数定义）的执行：把条目里指定的那份整包交回去，成了就把这条
-   * 压进对面那摞（撤销压重做、重做压撤销）。定义是即时落盘 —— 一次调用就是
-   * 一次成败，失败就原地不动。
+  /**
+   * 参数台「编辑定义」保存成功后交上来的一条。
+   *
+   * 2026-10-31：撤销不再由前端记账 —— 后端把这次定义改动也记成一条事务
+   * （`wb_set_param_meta` 在编辑登记表里），这里只需要把事务状态刷一下。
    */
-  const runMeta = useCallback(
-    async (
-      entry: Extract<UndoEntry, { kind: 'meta' }>,
-      dir: 'before' | 'after',
-      toStack: 'undo' | 'redo',
-    ): Promise<boolean> => {
-      setBusy(true)
-      try {
-        await wb.setParamMeta(entry.key, entry[dir])
-        /* 注册表变了：参数台按 tick 重取（注册表 / 配方台 / 矩阵三处派生跟着走） */
-        setTick((n) => n + 1)
-        refreshReport()
-        if (toStack === 'undo') setUndoStack((st) => [...st, entry])
-        else setRedoStack((st) => [...st, entry])
-        return true
-      } catch (e) {
-        fail(e)
-        return false
-      } finally {
-        setBusy(false)
-      }
-    },
-    [fail, refreshReport],
-  )
-
-  /** 参数台「编辑定义」保存成功后交上来的一条：压进撤销栈（改前/改后都在手上） */
   const pushMeta = useCallback((m: MetaApplied) => {
-    setUndoStack((st) => [...st, { kind: 'meta', ...m }])
-    setRedoStack([])
+    void m
+    wb.txnState()
+      .then(setTxn)
+      .catch(() => undefined)
   }, [])
 
+  /**
+   * 撤销 / 重做：**服务器侧一条栈**（2026-10-31 统一编辑事务）。
+   *
+   * 以前这里是「把反向 patch 再发一次」——值编辑能这么玩，结构编辑（新增版本、
+   * 删套餐）没有反向 patch。现在一律交回后端：它按影子树里那条 op 的 `before`
+   * 写回去，字段 / 尺寸 / 结构 / 参数值走的是同一条路径。
+   */
   const undo = useCallback(async () => {
-    /* 飞在空中的值写先落完 —— 否则撤销撤的是"落库前的那一半"，栈与页面会对不上 */
+    /* 飞在空中的值写先落完 —— 否则撤销撤的是"落完之前的那一半" */
     await settleAll()
-    /* 本地草稿层整层丢掉：撤销之后的真相在后端那份 desk 里（下一条 tick 会把它取回来） */
     editQueue.clear()
-    const top = undoStack[undoStack.length - 1]
-    if (!top) return
-    if (top.kind === 'meta') {
-      if (await runMeta(top, 'before', 'redo')) setUndoStack((st) => st.slice(0, -1))
-      return
+    setBusy(true)
+    try {
+      const st = await wb.txnUndo()
+      setTxn(st)
+      await refreshBook()
+      refreshReport()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
     }
-    const out = await run(`撤销：${top.label}`, top.patches, 'redo')
-    if (out) setUndoStack((st) => st.slice(0, -1))
-  }, [undoStack, run, runMeta])
+  }, [fail, refreshBook, refreshReport])
 
   const redo = useCallback(async () => {
-    /* 同 `undo`：先把在飞的写落完、把本地草稿层丢干净，再读栈 */
     await settleAll()
     editQueue.clear()
-    const top = redoStack[redoStack.length - 1]
-    if (!top) return
-    if (top.kind === 'meta') {
-      if (await runMeta(top, 'after', 'undo')) setRedoStack((st) => st.slice(0, -1))
-      return
+    setBusy(true)
+    try {
+      const st = await wb.txnRedo()
+      setTxn(st)
+      await refreshBook()
+      refreshReport()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
     }
-    const out = await run(`重做：${top.label}`, top.patches, 'undo')
-    if (out) setRedoStack((st) => st.slice(0, -1))
-  }, [redoStack, run, runMeta])
+  }, [fail, refreshBook, refreshReport])
 
   const save = useCallback(async (): Promise<boolean> => {
     if (busy) return false
     /* 飞在空中的值写先落完：`dirtyCount` 得是落完之后的账 ——
        否则"刚点完步进器马上点保存"会静默丢掉那一笔（读的是旧整本） */
     await settleAll()
+    /* 现问一次（别信上一次轮询的那份）：刚改完就按 Cmd+S 时它可能还没刷新 */
+    const fresh = await wb.txnState()
+    setTxn(fresh)
     const cur = bookRef.current
-    if (!cur || cur.dirtyCount === 0) return false
+    if (!fresh.dirty && (cur?.dirtyCount ?? 0) === 0) return false
     /* 保存 = 提交点：本地草稿层整层丢掉，显示交回写进仓库的那份 */
     editQueue.clear()
     setBusy(true)
     try {
       const out = await wb.save()
       setBook(out.view)
-      setUndoStack([])
-      setRedoStack([])
+      setTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
-      toasts.push('已保存 —— 草稿写进仓库文件了')
+      toasts.push('已保存 —— 改动已写进仓库文件')
       return true
     } catch (e) {
       fail(e)
@@ -600,15 +602,16 @@ export function WorkbenchApp() {
     if (busy) return
     /* 同 `save`：先把在飞的写落完再判脏 —— 跳到一半的改动也得算进来 */
     await settleAll()
+    const fresh = await wb.txnState()
+    setTxn(fresh)
     const cur = bookRef.current
-    if (!cur || cur.dirtyCount === 0) return
-    /* 放弃 = 整条草稿丢：本地草稿层跟着一起丢 */
+    if (!fresh.dirty && (cur?.dirtyCount ?? 0) === 0) return
+    /* 放弃 = 整条草稿丢：影子树整个拉回磁盘原状 */
     editQueue.clear()
     setBusy(true)
     try {
       setBook(await wb.discard())
-      setUndoStack([])
-      setRedoStack([])
+      setTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
     } catch (e) {
@@ -664,7 +667,8 @@ export function WorkbenchApp() {
   }, [undo, redo, save])
 
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
-  const dirty = (book?.dirtyCount ?? 0) > 0
+  /* 脏 = 整本里记的（值草稿 + 事务）+ 事务自己那份。两处都看，切页瞬间也不会闪「已保存」 */
+  const dirty = (book?.dirtyCount ?? 0) > 0 || txn?.dirty === true
 
   /**
    * 页头那一槽要不要显示（作者 2026-10-16：「有需要的页面就显示，不需要的页面就不显示」）。
@@ -821,7 +825,7 @@ export function WorkbenchApp() {
             tick={tick}
             dirty={dirty}
             onApply={async (label, patches, refresh, opts) => {
-              const out = await run(label, patches, 'undo', refresh, opts)
+              const out = await run(label, patches, refresh, opts)
               /* `ok` 让参数台那一层知道这笔到底写进去没有（失败时 overlay 要回落） */
               return { ok: out !== null, desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
@@ -851,7 +855,7 @@ export function WorkbenchApp() {
             initialAssign={assetAssign}
             onGoto={goto}
             onApply={async (label, patches, opts) => {
-              await run(label, patches, 'undo', undefined, opts)
+              await run(label, patches, undefined, opts)
             }}
           />
         )
@@ -1278,10 +1282,10 @@ export function WorkbenchApp() {
                 <button
                   type="button"
                   className={s.sbBtn}
-                  disabled={undoStack.length === 0 || busy}
+                  disabled={txn?.canUndo !== true || busy}
                   data-tip={
-                    undoStack.length > 0
-                      ? `撤销：${undoStack[undoStack.length - 1].label}`
+                    txn !== null && txn.ops.length > 0
+                      ? `撤销：${txn.ops[txn.ops.length - 1].label}`
                       : (words?.disabled.nothingToUndo ?? '没有可撤销的改动')
                   }
                   onClick={() => void undo()}
@@ -1291,10 +1295,10 @@ export function WorkbenchApp() {
                 <button
                   type="button"
                   className={s.sbBtn}
-                  disabled={redoStack.length === 0 || busy}
+                  disabled={txn?.canRedo !== true || busy}
                   data-tip={
-                    redoStack.length > 0
-                      ? `重做：${redoStack[redoStack.length - 1].label}`
+                    txn?.canRedo === true
+                      ? '重做上一条撤销'
                       : (words?.disabled.nothingToUndo ?? '没有可重做的改动')
                   }
                   onClick={() => void redo()}

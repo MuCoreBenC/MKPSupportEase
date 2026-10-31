@@ -222,8 +222,11 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const [genBusy, setGenBusy] = useState(false)
   const [genDone, setGenDone] = useState<GenerateReport | null>(null)
 
+  /* 2026-10-31 统一编辑事务：生成/发布只在「已保存」那一版上跑。
+     后端也有同一道闸（`require_clean`）—— 这里只是让按钮早点变灰、说清原因。 */
+  const unsaved = book.dirtyCount > 0
   const blocked = (report?.blocks ?? 0) > 0
-  const dirty = book.dirtyCount > 0
+  const dirty = unsaved
   const ids = Object.keys(picked).filter((k) => picked[k])
 
   /*
@@ -639,8 +642,14 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                disabled={!ids.length || blocked}
-                data-tip={blocked ? words.disabled.buildBlocked : undefined}
+                disabled={!ids.length || blocked || unsaved}
+                data-tip={
+                  unsaved
+                    ? '有改动还没保存 —— 先保存或放弃，再生成'
+                    : blocked
+                      ? words.disabled.buildBlocked
+                      : undefined
+                }
                 onClick={() => void openGenerate()}
               >
                 生成 {ids.length} 项
@@ -692,11 +701,13 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                disabled={blocked}
+                disabled={blocked || unsaved}
                 data-tip={
-                  blocked
-                    ? words.disabled.publishBlocked
-                    : '先过发布闸：十五项逐项打勾，全绿才给发布'
+                  unsaved
+                    ? '有改动还没保存 —— 先保存或放弃，再发布'
+                    : blocked
+                      ? words.disabled.publishBlocked
+                      : '先过发布闸：十五项逐项打勾，全绿才给发布'
                 }
                 onClick={() => {
                   setGateReport(null)

@@ -583,6 +583,26 @@ export type Refresh =
   | { page: 'matrix'; cols: ColRef[]; tab?: string | null; query?: string }
 
 /** `app::SaveResult` */
+/**
+ * 统一编辑事务的状态（2026-10-31）。
+ *
+ * 一条 `op` = 一次编辑，标签是给人看的（撤销提示 / 保存清单）。
+ * `dirtyCount` 覆盖**全部**编辑类型：开关、文本、尺寸、禁区、增删版本、套餐、资产、参数值。
+ */
+export interface TxnOp {
+  label: string
+  at: string
+  files: { rel: string; before?: number; after?: number }[]
+}
+
+export interface TxnState {
+  dirty: boolean
+  dirtyCount: number
+  canUndo: boolean
+  canRedo: boolean
+  ops: TxnOp[]
+}
+
 export interface SaveResult {
   view: BookView
   /**
@@ -2273,6 +2293,10 @@ export const wb = {
     invoke<ApplyResult>('wb_apply_draft', { label, patches, refresh: refresh ?? null }),
   save: () => invoke<SaveResult>('wb_save'),
   discard: () => invoke<BookView>('wb_discard'),
+  /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
+  txnState: () => invoke<TxnState>('wb_txn_state'),
+  txnUndo: () => invoke<TxnState>('wb_txn_undo'),
+  txnRedo: () => invoke<TxnState>('wb_txn_redo'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */

@@ -4776,3 +4776,11 @@ text_zh_tw = "在「你要如何開啟這個檔案？」裡選好應用，再勾
 text_ja = "「このファイルを開く方法」でアプリを選び、「.3mf ファイルは常にこのアプリで開く」にチェック"
 params = []
 note = "Windows 走通时的状态句；「始终」那个勾选框是那边唯一能改成默认的地方（我们不碰注册表）"
+
+["ui.workbench.txn.dirty"]
+text = "有 {count} 处改动还没保存 —— 先保存或放弃，再生成/发布"
+text_en = "{count} change(s) are not saved yet — save or discard them before generating or publishing"
+text_zh_tw = "有 {count} 處改動還沒儲存 —— 先儲存或放棄，再產生/發佈"
+text_ja = "{count} 件の変更が未保存です — 生成・公開の前に保存するか破棄してください"
+params = ["count"]
+note = "2026-10-31 统一编辑事务：生成与发布都要求在「已保存」状态上跑 —— 不自动替用户保存"

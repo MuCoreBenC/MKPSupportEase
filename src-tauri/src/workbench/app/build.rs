@@ -84,6 +84,7 @@ use crate::workbench::domain::wording as w;
 use crate::workbench::domain::Level;
 use crate::workbench::paths;
 use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
+use postprocess::diag::messages;
 
 use super::delivery::DeliveryStage;
 use super::{state, with_ctx, with_ctx_mut};
@@ -486,8 +487,32 @@ fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, S
 #[tauri::command]
 pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
-        with_ctx_mut(|ctx| generate_with(ctx, &scope))
+        with_ctx_mut(|ctx| {
+            require_clean(ctx)?;
+            let out = generate_with(ctx, &scope)?;
+            /* 产物写的是真仓库；影子树里那份 `delivery/` 还停在旧代。
+            不对齐的话，下一次「保存」会把它当成"要写回旧内容" —— 直接把刚生成的
+            产物覆盖回去。生成要求干净，所以整份对齐是安全的。 */
+            crate::workbench::domain::txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
+            Ok(out)
+        })
     })
+}
+
+/// **生成/发布只在「已保存」的那一版上跑**（2026-10-31 统一编辑事务）。
+///
+/// 草稿是编辑态，产物是发布态 —— 拿编辑态去生成，产物里就会混进一批
+/// 「还没决定要不要」的改动，而台账记的却是另一代。所以这里**拒绝**，并且
+/// **不自动保存**（保存是用户的边界，不是生成顺手的副作用）。
+pub(super) fn require_clean(ctx: &super::Ctx) -> Result<(), AppError> {
+    let dirty = ctx.txn.dirty_count() + ctx.draft.dirty_count();
+    if dirty == 0 {
+        return Ok(());
+    }
+    Err(AppError::invalid_argument(messages::text(
+        "ui.workbench.txn.dirty",
+        &[("count", &dirty.to_string())],
+    )))
 }
 
 /// 生成的**锁无关内核**：给定一份会话，按 scope 把产物写进 `delivery/mkp/presets/` 并重算目录。
@@ -521,9 +546,12 @@ pub(super) fn generate_with(
 
     // ② 全部成功才逐个原子替换。落点是**交付根里的 `mkp/presets/`** ——
     // 与客户端下载区同名同形（消费者拿 catalog 的 path 拼 URL，两个根必须同形）。
-    // 根从**会话那份 presets 的根**派生（与 `product_on_disk` 同一条同源规矩），
-    // 不绕全局 repo_root —— 会话的数据树在哪，交付就落在哪。
-    let presets_root = ctx.presets.root();
+    //
+    // ★ 2026-10-31：根是**真仓库**，不是 `ctx.presets.root()`。统一编辑事务之后
+    // `presets` 从影子树加载（`workbench/.draft/presets/`），而产物是发布资产，
+    // 必须落在 git 看得见的那棵树上。生成前 `require_clean` 已保证影子树 == 真仓库，
+    // 所以这里不会把未保存的编辑带进产物。
+    let presets_root = ctx.real_root.as_path();
     let delivery_root = paths::delivery_root_at(presets_root).join(super::delivery::MKP_DIR);
     let delivery_mkp = delivery_root.join("presets");
     let mut written = Vec::new();
@@ -621,6 +649,9 @@ pub(super) fn generate_with(
     })
 }
 
+// 生成之后把影子树对齐回真仓库（2026-10-31）：这一步发生在 `wb_generate` 的包装里，
+// 因为 `generate_with` 也要被发布事务复用，而发布那一路自己收尾。
+
 /* ---------- 生成前预演（生成前确认那一步） ---------- */
 
 /// 一份文件的预演结论。
@@ -714,7 +745,11 @@ pub struct PreviewReport {
 #[tauri::command(async)]
 pub fn wb_generate_preview(scope: Scope) -> Result<PreviewReport, AppError> {
     traced("wb_generate_preview", |_| {
-        with_ctx(|ctx| preview_with(ctx, &scope))
+        with_ctx(|ctx| {
+            // 预演也只在已保存状态上算：否则「预演的东西」和「能生成的东西」不是一份
+            require_clean(ctx)?;
+            preview_with(ctx, &scope)
+        })
     })
 }
 
@@ -1151,13 +1186,18 @@ pub fn wb_publish(
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
         let report = with_ctx_mut(|ctx| {
-            super::publish_tx::run(
+            // 发布只认「已保存」那一版：草稿混进产物 = 发出去的东西没人审过
+            require_clean(ctx)?;
+            let out = super::publish_tx::run(
                 ctx,
                 &opts,
                 target.as_ref(),
                 hosting.as_ref().map(|h| h.as_ref()),
                 None,
-            )
+            )?;
+            /* 发布写了交付产物 / 账本（真仓库）；影子树跟着换到新一代 */
+            crate::workbench::domain::txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
+            Ok::<_, AppError>(out)
         })?;
 
         // 收尾：把这次回执落进**发布历史**（作者 2026-10-04）。

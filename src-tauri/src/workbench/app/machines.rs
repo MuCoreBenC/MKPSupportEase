@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 use crate::ipc::traced;
-use crate::workbench::load_presets;
+use crate::workbench::load_session_presets;
 use crate::workbench::presets::{
     BrandField, Dimensions, MachineField, Presets, VersionField, Zone,
 };
@@ -127,7 +127,7 @@ pub struct MachineList {
 /// 机型与版本清单。**这一页唯一的读入口**
 #[tauri::command(async)]
 pub fn wb_machines() -> Result<MachineList, AppError> {
-    traced("wb_machines", |_| Ok(list_of(&load_presets()?)))
+    traced("wb_machines", |_| Ok(list_of(&load_session_presets()?)))
 }
 
 /// 加一个版本，**立刻落盘**，回一份新的清单。
@@ -163,7 +163,7 @@ pub fn wb_add_version(
             tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
             // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
             // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -199,7 +199,7 @@ pub fn wb_copy_version(
                 "从模板复制了一个版本（只写版本定义）"
             );
             // 从盘上重读再返回：**界面看到的应该是落盘的结果**
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -217,7 +217,7 @@ pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<Mach
             tracing::info!(machine = %id, "建了一台机型");
             // 重读盘再返回：**界面看到的是落盘的结果**。
             // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -231,7 +231,7 @@ pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<Mach
 #[tauri::command(async)]
 pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<String>, AppError> {
     traced("wb_version_orphans", |_| {
-        Ok(load_presets()?.orphans_if_version_removed(&machine_id, &version_id))
+        Ok(load_session_presets()?.orphans_if_version_removed(&machine_id, &version_id))
     })
 }
 
@@ -262,7 +262,7 @@ pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<Machi
                     "删了一个版本，留下了孤儿引用"
                 );
             }
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -285,7 +285,7 @@ pub fn wb_set_version_field(
                 .machine_mut(&machine_id)?
                 .set_version_field(&version_id, field, value.as_deref())?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -304,7 +304,7 @@ pub fn wb_set_machine_field(
                 .machine_mut(&machine_id)?
                 .set_field(field, value.as_deref())?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -327,7 +327,7 @@ pub fn wb_set_brand_field(
                 .catalog
                 .set_brand_field(&brand_id, field, value.as_deref())?;
             ctx.presets.catalog.write_brands()?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -362,7 +362,7 @@ pub fn wb_move_machine_to_brand(
                 .machine_mut(&machine_id)?
                 .set_field(MachineField::Brand, Some(&canonical))?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -386,7 +386,7 @@ pub fn wb_set_machine_dimensions(
                 .machine_mut(&machine_id)?
                 .set_dimensions(dimensions)?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -434,7 +434,7 @@ pub fn wb_set_machine_zones(
         }
         with_ctx_mut(|ctx| {
             ctx.presets.catalog.set_zones(&machine_id, out)?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
@@ -449,7 +449,7 @@ pub fn wb_add_brand(id: String, name: String) -> Result<MachineList, AppError> {
         with_ctx_mut(|ctx| {
             ctx.presets.catalog.add_brand(&id, &name)?;
             ctx.presets.catalog.write_brands()?;
-            Ok(list_of(&load_presets()?))
+            Ok(list_of(&ctx.presets.reload()?))
         })
     })
 }
