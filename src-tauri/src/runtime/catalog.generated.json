@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "9571b7b8c2b1b8a9",
+  "revision": "3acd6acf69d1acd2",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -2409,7 +2409,7 @@
           "order": 1.0,
           "sectionId": "glue_params"
         },
-        "min": -5.0,
+        "min": -1.0,
         "max": 5.0,
         "step": 0.01,
         "unit": "mm",
