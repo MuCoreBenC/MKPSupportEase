@@ -1245,24 +1245,48 @@ pub async fn rename_local_preset(
         /* 两本状态账先整份读出来：坏档就什么都不做（宁可原地不动，也不留悬空指针） */
         runtime::app_state::load(&root)?;
 
-        let done = runtime::local::rename_file(&user_root, &path, &new_name)?;
-        /* 原文镜像跟着搬家（改名前那份的原文，改名后还是它）—— 没有镜像就没什么可搬的 */
-        let _ = runtime::baseline::move_origin_copy(&root, &path, &done.path);
+        /*
+         * ★ 2026-10-31：改名 = **一次多文件事务**（用户文件 + 镜像 + 指针 + 来路账）。
+         *
+         * 原来这四步是顺序写的：文件名挪了、镜像没搬 / 指针没改 / 来路账没跟上，任何一步
+         * 失败都会留下"界面指着一份不存在的文件"。现在先把会动的每一份都列进事务，
+         * 中途失败由 `utxn::atomically` 整体回滚。
+         *
+         * 新路径要过一遍名字规整才定得下来，所以先 `plan_rename`（只算不动盘）。
+         */
+        let planned = runtime::local::plan_rename(&user_root, &path, &new_name)?;
+        let mut tracked = vec![
+            user_root.join(&path),
+            user_root.join(&planned.path),
+            runtime::app_state::file_path(&root),
+            root.join("run/source-ledger.json"),
+            root.join("run/lineage-source.json"),
+        ];
+        // 原文镜像跟着搬家（没有镜像就没什么可搬的；路径先算出来，事务才不会漏它）
+        if let Ok(p) = runtime::baseline::origin_path(&root, &path) {
+            tracked.push(p);
+        }
+        if let Ok(p) = runtime::baseline::origin_path(&root, &planned.path) {
+            tracked.push(p);
+        }
 
-        /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格；
-        万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
-        runtime::app_state::repoint_local(&root, &path, &done.path, &done.file_name).map_err(
-            |e| {
-                AppError::internal(messages::text(
-                    "ui.ipc.local.096",
-                    &[("v1", &done.file_name.to_string())],
-                ))
-                .with_detail(e.to_string())
-            },
-        )?;
+        let done = runtime::utxn::atomically("改名用户预设", &tracked, || {
+            runtime::local::apply_rename(&user_root, &path, &planned.path)?;
+            let _ = runtime::baseline::move_origin_copy(&root, &path, &planned.path);
+            /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格 */
+            runtime::app_state::repoint_local(&root, &path, &planned.path, &planned.file_name)
+                .map_err(|e| {
+                    AppError::internal(messages::text(
+                        "ui.ipc.local.096",
+                        &[("v1", &planned.file_name.to_string())],
+                    ))
+                    .with_detail(e.to_string())
+                })?;
+            /* 来路账跟着走：自己改名 path 跟走，母本改名 originPath 跟走 */
+            let _ = runtime::source_ledger::repath(&root, &path, &planned.path);
+            Ok(planned)
+        })?;
         super::notify_app_state(&app);
-        /* 来路账跟着走：自己改名 path 跟走，母本改名 originPath 跟走 */
-        let _ = runtime::source_ledger::repath(&root, &path, &done.path);
 
         Ok(LocalFileIdentityDto {
             path: done.path,

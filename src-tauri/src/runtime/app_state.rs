@@ -555,6 +555,14 @@ fn state_file(root: &Path) -> PathBuf {
     root.join(STATE_FILE)
 }
 
+/// 状态账的落点（给多文件事务声明用，2026-10-31）。
+///
+/// 改名那一路要同时动「用户文件 + 镜像 + 指针 + 来路账」，事务得先把这几份都列出来
+/// 才能在失败时整体回滚 —— 这个访问器就是让它不用自己拼路径。
+pub fn file_path(root: &Path) -> PathBuf {
+    state_file(root)
+}
+
 /// 迁移完成后要退役的旧文件（读端已不再看它们；写端首次写成功后顺手删掉）。
 fn legacy_files(root: &Path) -> [PathBuf; 3] {
     [
