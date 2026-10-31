@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "191260b7ffc3137a",
+  "revision": "c03b5304a766f173",
   "publishedAt": "2026-10-30T17:15:39Z",
   "brands": [
     {
@@ -2410,7 +2410,7 @@
           "order": 1.0,
           "sectionId": "glue_params"
         },
-        "min": -5.0,
+        "min": -1.0,
         "max": 5.0,
         "step": 0.01,
         "unit": "mm",
