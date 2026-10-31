@@ -127,9 +127,13 @@ fn open_ctx() -> Result<Ctx, AppError> {
     Ctx::open()
 }
 
-/// 交付根（`<presets>/delivery`）—— 与会话同一棵数据树。
+/// 交付根（`<presets>/delivery`）—— **真仓库那一棵**（不是影子树）。
+///
+/// ★ 2026-10-31：原来用 `ctx.presets.root()`（= `workbench/.draft/presets/`），
+/// 于是 `verify` 核对的是影子里的交付目录 —— 发布把账本写进影子、真仓库还停在旧账本时，
+/// 它照样报「✓ 一致」，而 `check:artifacts`（读真实 git 树）红。两边必须看同一棵树。
 fn delivery_root(ctx: &Ctx) -> PathBuf {
-    mkp_support_ease_lib::workbench::paths::delivery_root_at(ctx.presets.root())
+    mkp_support_ease_lib::workbench::paths::delivery_root_at(ctx.real_root())
 }
 
 /// **检查**：跑发布闸（只读那个入口），把红项列出来。**不写盘**。

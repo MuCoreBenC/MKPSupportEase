@@ -336,6 +336,19 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// **真仓库的 `presets/`**（编辑落在影子树，只有保存 / 发布才碰这里）。
+    ///
+    /// ★★★ 2026-10-31：**发布与核对必须用它，不能用 `presets.root()`**。
+    ///
+    /// `presets.root()` 是**影子树**（`workbench/.draft/presets/`）。发布若落在影子，
+    /// 而 `git.stage_allowed` stage 的是真仓库里的 `presets/delivery/`，结果就是
+    /// 「生成阶段写进真仓库的那几份」（catalog 的 revision / 参数改动）进了 commit，
+    /// **账本与发布戳留在影子里** —— `presets verify` 读影子反而绿、`check:artifacts`
+    /// 读真实树红（R1「交付目录变了但账本没变」），push 被闸拦下。
+    pub fn real_root(&self) -> &Path {
+        &self.real_root
+    }
+
     /// 真仓库。
     ///
     /// **唯一的数据根是 `presets/`**（旧的上游仓库连同它的定位、设置项一起退休了）：
