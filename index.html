@@ -422,7 +422,9 @@
        */
       #boot .boot-switch {
         position: absolute;
-        left: 0;
+        /* ★ 左缘要跟信息列对齐：绝对定位是相对**padding box**，写 `left: 0` 会贴到
+           窗口左缘（作者的录屏里那颗压到了窗口边），所以这里补上 5vw */
+        left: 5vw;
         /* 量出来的：1080×928 下真页面那颗在 y 851..884，栏底 914 ⇒ 离底 30 */
         bottom: 30px;
         width: 96px;
@@ -552,6 +554,24 @@
         background: var(--boot-card);
         box-shadow: 0 1px 2px rgba(16, 24, 32, 0.04), 0 14px 34px rgba(16, 24, 32, 0.06);
         box-sizing: border-box;
+      }
+
+      /*
+       * 窗口窄下去时，真页面那张卡**露出来的越来越少**（measured：700 宽 ⇒ 左缘 83vw，
+       * 600 ⇒ 88.7vw，540 ⇒ 97.2vw）。骨架原来一条 83vw 走到底，窄窗就露出太多
+       * （作者：「右侧的抽屉还是可以变窄一点，和实际的一样比较好」）。
+       * 下面两档就是照真页面那两级台阶。
+       */
+      @media (max-width: 640px) {
+        #boot .boot-drawer {
+          left: 88vw;
+        }
+      }
+
+      @media (max-width: 580px) {
+        #boot .boot-drawer {
+          left: 97vw;
+        }
       }
 
       #boot .boot-group {
@@ -733,6 +753,27 @@
         box-shadow: none;
       }
     </style>
+    <!--
+      ★ 首帧就把**用户选的主题**落上（2026-10-31 作者录屏：骨架先按系统深色画出来，
+      读完 app-state 才翻成浅色）。localStorage 是这一帧唯一来得及的来源。
+      这个键由 `state/theme.ts` 的 `applyTheme` 在知道真值时写入。
+    -->
+    <script>
+      try {
+        /* 存的是**档位**（`system` / `light` / `dark`），这里当场解析一次 ——
+           与 `theme.ts` 的 `resolveDark` 同一条规则，不另立判据。 */
+        var bootTheme = localStorage.getItem('mkpse.boot.theme')
+        if (bootTheme) {
+          var bootDark =
+            bootTheme === 'dark' ||
+            (bootTheme !== 'light' &&
+              window.matchMedia('(prefers-color-scheme: dark)').matches)
+          document.documentElement.dataset.theme = bootDark ? 'dark' : 'light'
+        }
+      } catch (err) {
+        /* 隐私模式：不写就不写，骨架按系统深浅走 */
+      }
+    </script>
   </head>
   <body>
     <!--

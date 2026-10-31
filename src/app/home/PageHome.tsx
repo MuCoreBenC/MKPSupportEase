@@ -260,35 +260,7 @@ export default function PageHome({ density }: PageHomeProps) {
     }
   }, [activeEntry])
 
-  /*
-   * ★ 首屏的最后一块（2026-10-31）：三级选择按底账定下来之后，那一份预设的读数
-   *   还要再读一次盘（`usePreset` 的 `waiting`）。**这一段也等** —— 不等的话正式版面
-   *   会先把文件行摆出来、四行 X/Y/Z 全是「—」，半拍之后才填上（作者第二张截图
-   *   圈的就是这一块）。`failed` 放行：那一屏自己会把原因说出来，不该永远停在启动画面。
-   */
-  const booted = hydrated && preset.status !== 'waiting' && preset.status !== 'downloading'
 
-  /*
-   * ★★ 收骨架（2026-10-31）：**就绪或明确失败**那一刻才收，而且放在 layout effect 里 ——
-   *   它在浏览器绘制之前跑，所以"骨架消失"与"终态版面出现"是**同一帧**，
-   *   中间不会空一下（作者：「就直接用骨架」，别再出现第二个加载画面）。
-   *
-   * 失败也收：那时这一层会渲染 `BootFailure`（一句话 + 重试），继续用骨架盖着
-   * 就成了"假装还在读"。重试那颗按钮会先把骨架放回来再重读。
-   */
-  useLayoutEffect(() => {
-    if (booted || catalog.failed) hideBootSkeleton()
-  }, [booted, catalog.failed])
-
-  /*
-   * 重试：骨架放回来（否则重读期间是一扇空窗），再让目录重跑一趟。
-   * `catalog.reload` 自己的依赖是空数组（永远是同一个函数），单独取出来当依赖。
-   */
-  const reloadCatalog = catalog.reload
-  const retryBoot = useCallback(() => {
-    showBootSkeleton()
-    reloadCatalog()
-  }, [reloadCatalog])
 
   /*
    * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
@@ -554,6 +526,77 @@ export default function PageHome({ density }: PageHomeProps) {
     [sel, modelNode, catalog.assets, catalog.brands],
   )
   const { layers, settle, drop } = useArtLayers(art)
+
+  /*
+   * ★ 首屏还要等**那张机器图解码完**（2026-10-31 作者录屏：骨架收掉、正式版面出来了，
+   *   机器过一会儿才冒出来）。
+   *
+   * `<img>` 的下载 / 解码发生在挂上之后；不等它，用户看到的就是"先一个空档，图再出现"。
+   * 这里提前用 `new Image()` 把同一个 src 解码一次，算进 `booted` —— 骨架多留几十毫秒，
+   * 换来"露出来就是完整一屏"。1.5s 兜底：读不出来也放行，不能为一张图卡住整屏。
+   */
+  const heroSrc = art?.src ?? null
+  const [heroReady, setHeroReady] = useState(false)
+  useEffect(() => {
+    if (heroSrc === null) {
+      setHeroReady(true)
+      return
+    }
+    let alive = true
+    let timer = 0
+    const done = () => {
+      window.clearTimeout(timer)
+      if (alive) setHeroReady(true)
+    }
+    setHeroReady(false)
+    timer = window.setTimeout(done, 1500)
+    const img = new Image()
+    img.src = heroSrc
+    if (typeof img.decode === 'function') {
+      void img.decode().then(done, done)
+    } else {
+      img.onload = done
+      img.onerror = done
+    }
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [heroSrc])
+
+  /*
+   * ★ 首屏的最后一块（2026-10-31）：三级选择按底账定下来之后，那一份预设的读数
+   *   还要再读一次盘（`usePreset` 的 `waiting`）。**这一段也等** —— 不等的话正式版面
+   *   会先把文件行摆出来、四行 X/Y/Z 全是「—」，半拍之后才填上（作者第二张截图
+   *   圈的就是这一块）。`failed` 放行：那一屏自己会把原因说出来，不该永远停在启动画面。
+   */
+  const booted =
+    hydrated &&
+    preset.status !== 'waiting' &&
+    preset.status !== 'downloading' &&
+    (heroSrc === null || heroReady)
+
+  /*
+   * ★★ 收骨架（2026-10-31）：**就绪或明确失败**那一刻才收，而且放在 layout effect 里 ——
+   *   它在浏览器绘制之前跑，所以"骨架消失"与"终态版面出现"是**同一帧**，
+   *   中间不会空一下（作者：「就直接用骨架」，别再出现第二个加载画面）。
+   *
+   * 失败也收：那时这一层会渲染 `BootFailure`（一句话 + 重试），继续用骨架盖着
+   * 就成了"假装还在读"。重试那颗按钮会先把骨架放回来再重读。
+   */
+  useLayoutEffect(() => {
+    if (booted || catalog.failed) hideBootSkeleton()
+  }, [booted, catalog.failed])
+
+  /*
+   * 重试：骨架放回来（否则重读期间是一扇空窗），再让目录重跑一趟。
+   * `catalog.reload` 自己的依赖是空数组（永远是同一个函数），单独取出来当依赖。
+   */
+  const reloadCatalog = catalog.reload
+  const retryBoot = useCallback(() => {
+    showBootSkeleton()
+    reloadCatalog()
+  }, [reloadCatalog])
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物
   const ready = Boolean(sel.brand && sel.model && sel.variant)
