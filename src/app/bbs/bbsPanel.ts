@@ -14,7 +14,7 @@
  */
 
 import type { Locale, Tr } from '../../i18n'
-import { bi } from '../shared/dataLabel'
+import { bbsLayoutName } from '../shared/dataLabel'
 import { matchRow, normalizeQuery } from './bbsSearch'
 import type { BbsHit } from './bbsSearch'
 import type {
@@ -152,7 +152,7 @@ export function buildBbsPanel(
         stats.rows++
       }
       if (rows.length) {
-        groups.push({ name: bi(group.name, group.name_en, locale), icon: group.icon, rows })
+        groups.push({ name: bbsLayoutName(group, locale), icon: group.icon, rows })
       }
     }
 
@@ -177,7 +177,7 @@ export function buildBbsPanel(
 
     return {
       id: TAB_ID[i] ?? `tab${i}`,
-      title: bi(tab.name, tab.name_en, locale),
+      title: bbsLayoutName(tab, locale),
       groups,
       rowCount: groups.reduce((n, g) => n + g.rows.length, 0),
       hitCount: groups.reduce((n, g) => n + g.rows.filter((r) => r.hit).length, 0),

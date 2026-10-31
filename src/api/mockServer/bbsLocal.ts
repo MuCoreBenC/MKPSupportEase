@@ -27,6 +27,7 @@
  *   `inherits` 跳到系统那一层去认（`bbsSource.resolveTarget` 对 `user` 就是这条口径）。
  */
 
+import { t } from '../../i18n'
 import type { BbsLocalEntry, BbsLocalTree } from '../contract'
 
 /** 演示用的账号目录名（真机上是数字 uid，也有 `BBL` / `default` 这种） */
@@ -186,13 +187,15 @@ function entryOf(scope: 'user' | 'system', uid: string | null, file: string, doc
  * `root` 写的是**演示标记**而不是一条真路径 —— 界面上那一句"本机 BBS 目录"要能看出来
  * 这是预览，不是你那台机器上真的什么都没有。
  */
-export const bbsLocalTree: BbsLocalTree = {
-  available: true,
-  app: 'BambuStudio（演示集合）',
-  root: '（浏览器预览：演示集合，真值在桌面版里现读）',
-  user: Object.entries(USER).map(([file, doc]) => entryOf('user', DEMO_UID, file, doc)),
-  system: Object.entries(SYSTEM).map(([file, doc]) => entryOf('system', null, file, doc)),
-  reason: null,
+export function bbsLocalTree(): BbsLocalTree {
+  return {
+    available: true,
+    app: t('mock.bbs.appDemo'),
+    root: t('mock.bbs.rootDemo'),
+    user: Object.entries(USER).map(([file, doc]) => entryOf('user', DEMO_UID, file, doc)),
+    system: Object.entries(SYSTEM).map(([file, doc]) => entryOf('system', null, file, doc)),
+    reason: null,
+  }
 }
 
 /** 一份正文的**原文**（解析交给页面：坏 JSON 要由它照实报错）。认不出返回 `null`。 */

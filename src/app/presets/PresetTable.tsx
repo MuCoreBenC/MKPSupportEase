@@ -2583,6 +2583,11 @@ function AttrBand(props: {
   const versionOptions: ComboOption[] = versions.map((v) => ({
     value: v.id,
     title: v.id,
+    /*
+     * `versions` 来自 `data.machines` —— 那一份**已经按语言摊开**（`localizeMachines`），
+     * 所以这里直接读 `v.name` 就是当前语言的。2026-10-31 之前这里读的是**未摊开**的
+     * 原始对象，导致首页显示日文、这个下拉仍是中文。
+     */
     sub: v.name,
   }))
 

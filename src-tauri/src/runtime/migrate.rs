@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
+use postprocess::diag::messages;
 
 use super::catalog::hex;
 use super::{content, delivery_index};
@@ -50,8 +51,10 @@ pub fn run(root: &Path) -> Result<bool, AppError> {
             if content::check_sha(stem).is_err() {
                 continue;
             }
-            let bytes = std::fs::read(&path)
-                .map_err(|e| AppError::io("旧基准读不出来").with_detail(e.to_string()))?;
+            let bytes = std::fs::read(&path).map_err(|e| {
+                AppError::io(messages::text("ui.migrate.baseline_read_failed", &[]))
+                    .with_detail(e.to_string())
+            })?;
             if hex(&Sha256::digest(&bytes)) != stem.to_ascii_lowercase() {
                 tracing::warn!(file = %path.display(), "旧基准的字节与文件名对不上，跳过");
                 continue;
@@ -64,8 +67,10 @@ pub fn run(root: &Path) -> Result<bool, AppError> {
     let delivery = root.join(DELIVERY_DIR);
     collect_delivery_files(root, &delivery, &mut migrated)?;
     for (rel, sha, size, at) in &migrated {
-        let bytes = std::fs::read(root.join(rel))
-            .map_err(|e| AppError::io("旧交付文件读不出来").with_detail(e.to_string()))?;
+        let bytes = std::fs::read(root.join(rel)).map_err(|e| {
+            AppError::io(messages::text("ui.migrate.delivery_read_failed", &[]))
+                .with_detail(e.to_string())
+        })?;
         content::ensure(root, sha, &bytes)?;
         delivery_index::record_file(root, rel, sha, *size)?;
         let _ = at;
@@ -93,7 +98,10 @@ pub fn run(root: &Path) -> Result<bool, AppError> {
             .map(|d| d.as_secs())
             .unwrap_or(0),
     })
-    .map_err(|e| AppError::io("迁移标记写不出来").with_detail(e.to_string()))?;
+    .map_err(|e| {
+        AppError::io(messages::text("ui.migrate.marker_write_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
     crate::fsx::atomic::atomic_write(&root.join(MARKER), &marker)?;
 
     tracing::info!(
@@ -123,12 +131,17 @@ fn collect_delivery_files(
         if !kind.is_file() {
             continue;
         }
-        let bytes = std::fs::read(&path)
-            .map_err(|e| AppError::io("旧交付文件读不出来").with_detail(e.to_string()))?;
+        let bytes = std::fs::read(&path).map_err(|e| {
+            AppError::io(messages::text("ui.migrate.delivery_read_failed", &[]))
+                .with_detail(e.to_string())
+        })?;
         let sha = hex(&Sha256::digest(&bytes));
         let rel = path
             .strip_prefix(root)
-            .map_err(|e| AppError::io("旧交付路径不在数据根里").with_detail(e.to_string()))?
+            .map_err(|e| {
+                AppError::io(messages::text("ui.migrate.path_outside_root", &[]))
+                    .with_detail(e.to_string())
+            })?
             .to_string_lossy()
             .replace('\\', "/");
         let at = entry

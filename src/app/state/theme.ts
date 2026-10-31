@@ -40,5 +40,37 @@ export function resolveDark(pref: ThemePref | null): boolean {
  * ② `body` 自己的底色在 `styles/global.css` 里就吃 token，只有 `<html>` 能一次盖住。
  */
 export function applyTheme(pref: ThemePref | null): void {
-  document.documentElement.dataset.theme = resolveDark(pref) ? 'dark' : 'light'
+  /*
+   * `null` = 这一趟还不知道用户选了哪档（app-state 还没落地）。这时**沿用上次记下的**
+   * —— 不能直接按系统深浅落，那会把首帧脚本已经放好的浅色又翻成深色（作者录屏里
+   * 「先是深色、再变浅色」正是这条路径）。
+   */
+  const dark = resolveDark(pref ?? readStoredTheme())
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+  /*
+   * 记一份给**首屏骨架**用（2026-10-31 作者录屏：骨架先按系统深色画出来，读了 app-state
+   * 才翻成浅色）。`index.html` 的 head 里那段内联脚本同步读这个键 —— 那是首帧唯一来得及
+   * 的来源，不用等任何 IPC。
+   *
+   * 只在**知道用户真值**时写（`pref !== null`）：`applyTheme(null)` 是"还不知道"的兜底，
+   * 拿它去覆盖记录，等于把系统档当成用户档存下来。
+   */
+  if (pref === null) return
+  try {
+    /* 存**档位**（含 `system`），不是存这一次的解析结果 —— 存结果的话，
+       系统在两次启动之间换了深浅（白天/夜里），首帧就会按上一次的结果画。 */
+    localStorage.setItem('mkpse.boot.theme', pref)
+  } catch {
+    /* 存储被禁（隐私模式）：那就让骨架按系统深浅走 */
+  }
+}
+
+/** 首屏骨架读的那一份（`index.html` 的 head 脚本用同一处写入的值） */
+export function readStoredTheme(): ThemePref | null {
+  try {
+    const v = localStorage.getItem('mkpse.boot.theme')
+    return v === 'dark' || v === 'light' || v === 'system' ? v : null
+  } catch {
+    return null
+  }
 }

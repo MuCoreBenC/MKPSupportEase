@@ -23,6 +23,23 @@
 本仓这四份是**从试验场 `mkp-adaptive-console@e509255` 的 `public/bbs/` 原样抄来的**
 （提取器产物，未做改动），对应的 BBS 版本记在同目录 `_sync.json`。
 
+## 2026-10-31 补的日语 / 繁中
+
+`registry.json` 的 `label.ja` / `label.zh_tw`、`opts[].label_ja` / `label_zh_tw`，以及
+`layout.json` 的 `name_ja` / `name_zh_tw`，**是本仓补的**，不是 `bbs-extract.mjs` 的产物。
+
+起因：作者 2026-10-31 指着工艺页说「都用 BBS 开源仓库里面的语言，因为我这些就是他的那里面的」——
+参数名必须和切片器里一模一样（層高 在日语切片器里叫 **積層ピッチ**，不是另翻一个词）。
+
+- 来源：BBS 官方语言包 `resources/i18n/ja/BambuStudio.mo`、`resources/i18n/zh_TW/BambuStudio.mo`
+  （同一 BBS 版本 02.08.02.61，与 `_sync.json` 记的那份一致）
+- 做法：按 `name_en` / `label.en` / `label_en`（英文原文 = msgid）精确匹配后回填
+- 覆盖率：参数 494/702、枚举项 219/313、页签 5/5、分组 30/30；
+  没匹配上的（多是打印机/挤出机内部参数）保持只有中英，界面回落中文
+
+**注意**：试验场重跑提取器会把这两份 json 整份覆盖 —— 重抄时要按同样的 `.mo` 再补一遍，
+或把这一步加进 `bbs-extract.mjs`。
+
 ## 许可
 
 **Bambu Studio 整体是 AGPL-3.0**（[官方对协议的表态](https://blog.bambulab.com/agpl-compliance-of-bambu-studio/)），

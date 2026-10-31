@@ -1182,7 +1182,11 @@ pub enum LegacyOutcome {
 ///
 /// 使用中指针与草稿的跟改名不在这里做（那是 [`super::state`] 那两条 repoint 的事）——
 /// 这一层只碰用户根里的文件。
-pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
+/// **只算不动盘**：校验 + 算出改名后的路径（2026-10-31）。
+///
+/// 多文件事务必须在动手**之前**就知道会动哪几份（改名 = 用户文件 + 镜像 + 指针 + 来路账），
+/// 而新路径要过一遍 `normalize_new_name` 才定得下来。所以把"算"与"做"拆开。
+pub fn plan_rename(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
     check_local_prefix(rel)?;
     let old = crate::fsx::paths::resolve_in(user_root, rel)?;
     if !old.is_file() {
@@ -1215,14 +1219,33 @@ pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
             &[("new_name", &new_name.to_string())],
         )));
     }
-    std::fs::rename(&old, &new_path).map_err(|e| {
-        AppError::io(messages::text("ui.runtime.local.406", &[("rel", rel)]))
-            .with_detail(e.to_string())
-    })?;
     Ok(FileIdentity {
         path: new_rel,
         file_name: new_name,
         adjusted,
+    })
+}
+
+/// 改名 = [`plan_rename`] + [`apply_rename`] 的薄壳（单文件调用方的老入口）。
+///
+/// **多文件联动别用这个**（改名会同时动镜像 / 指针 / 来路账）：那一路要用
+/// `utxn::atomically` 把两份都声明进去，见 `ipc::local::rename_local_preset`。
+pub fn rename_file(user_root: &Path, rel: &str, new_name: &str) -> Result<FileIdentity, AppError> {
+    let planned = plan_rename(user_root, rel, new_name)?;
+    apply_rename(user_root, rel, &planned.path)?;
+    Ok(planned)
+}
+
+/// 真正把文件挪过去（`plan_rename` 之后的第二步）。
+pub fn apply_rename(user_root: &Path, from_rel: &str, to_rel: &str) -> Result<(), AppError> {
+    if from_rel == to_rel {
+        return Ok(());
+    }
+    let from = crate::fsx::paths::resolve_in(user_root, from_rel)?;
+    let to = crate::fsx::paths::resolve_in(user_root, to_rel)?;
+    std::fs::rename(&from, &to).map_err(|e| {
+        AppError::io(messages::text("ui.runtime.local.406", &[("rel", from_rel)]))
+            .with_detail(e.to_string())
     })
 }
 

@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::AppError;
+use postprocess::diag::messages;
 
 use super::catalog::hex;
 use super::source_ledger::LocalProvenance;
@@ -81,12 +82,13 @@ pub fn read(root: &Path, id: &str) -> Result<Option<RecoveryEntry>, AppError> {
         Ok(b) => b,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => {
-            return Err(AppError::io("回收记录读不出来").with_detail(e.to_string()));
+            return Err(AppError::io(messages::text("ui.recovery.read_failed", &[]))
+                .with_detail(e.to_string()));
         }
     };
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|e| AppError::corrupted("回收记录坏了").with_detail(e.to_string()))
+    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+        AppError::corrupted(messages::text("ui.recovery.corrupt", &[])).with_detail(e.to_string())
+    })
 }
 
 /// 列出所有回收条目（最新删除的在前）。
@@ -123,8 +125,10 @@ pub fn create(
 ) -> Result<RecoveryEntry, AppError> {
     super::local::check_local_prefix(path)?;
     let source = crate::fsx::paths::resolve_in(user_root, path)?;
-    let bytes = std::fs::read(&source)
-        .map_err(|e| AppError::io("要删除的预设读不出来").with_detail(e.to_string()))?;
+    let bytes = std::fs::read(&source).map_err(|e| {
+        AppError::io(messages::text("ui.recovery.source_read_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
 
     let origin = super::baseline::read_origin_bytes(root, path)
         .ok()
@@ -138,8 +142,10 @@ pub fn create(
         n += 1;
     }
     let dir = entry_dir(root, &id);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| AppError::io("回收目录建不出来").with_detail(e.to_string()))?;
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        AppError::io(messages::text("ui.recovery.dir_create_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
 
     let file_name = source
         .file_name()
@@ -162,14 +168,19 @@ pub fn create(
         provenance,
         has_origin: origin.is_some(),
     };
-    let manifest = serde_json::to_vec_pretty(&entry)
-        .map_err(|e| AppError::io("回收记录写不出来").with_detail(e.to_string()))?;
+    let manifest = serde_json::to_vec_pretty(&entry).map_err(|e| {
+        AppError::io(messages::text("ui.recovery.manifest_write_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
     crate::fsx::atomic::atomic_write(&manifest_path(root, &id), &manifest)?;
 
     /* 清单落好之后才动原文件；失败就把刚建的目录撤掉 */
     if let Err(e) = std::fs::remove_file(&source) {
         let _ = std::fs::remove_dir_all(&dir);
-        return Err(AppError::io("预设删不掉（原文件还在）").with_detail(e.to_string()));
+        return Err(
+            AppError::io(messages::text("ui.recovery.delete_failed", &[]))
+                .with_detail(e.to_string()),
+        );
     }
     let _ = super::baseline::remove_origin_copy(root, path);
     Ok(entry)
@@ -177,21 +188,26 @@ pub fn create(
 
 /// **从回收站恢复**：文件回到原路径、镜像回去、来源账写回，**不自动设为使用中**。
 pub fn restore(root: &Path, user_root: &Path, id: &str) -> Result<RecoveryEntry, AppError> {
-    let entry = read(root, id)?.ok_or_else(|| AppError::not_found("回收站里没有这一条"))?;
+    let entry = read(root, id)?
+        .ok_or_else(|| AppError::not_found(messages::text("ui.recovery.not_found", &[])))?;
     super::local::check_local_prefix(&entry.path)?;
     let target = crate::fsx::paths::resolve_in(user_root, &entry.path)?;
     if target.exists() {
-        return Err(AppError::invalid_argument(
-            "原位置已经有一份同名预设，先改名或删掉它再恢复",
-        ));
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.recovery.name_taken",
+            &[],
+        )));
     }
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AppError::io("恢复目录建不出来").with_detail(e.to_string()))?;
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AppError::io(messages::text("ui.recovery.restore_dir_failed", &[]))
+                .with_detail(e.to_string())
+        })?;
     }
     let src = entry_dir(root, id).join(&entry.file_name);
-    let bytes = std::fs::read(&src)
-        .map_err(|e| AppError::io("回收副本读不出来").with_detail(e.to_string()))?;
+    let bytes = std::fs::read(&src).map_err(|e| {
+        AppError::io(messages::text("ui.recovery.copy_read_failed", &[])).with_detail(e.to_string())
+    })?;
     crate::fsx::atomic::atomic_write(&target, &bytes)?;
 
     if entry.has_origin {
@@ -211,8 +227,10 @@ pub fn restore(root: &Path, user_root: &Path, id: &str) -> Result<RecoveryEntry,
     if let Some(provenance) = &entry.provenance {
         super::source_ledger::restore(root, provenance)?;
     }
-    std::fs::remove_dir_all(entry_dir(root, id))
-        .map_err(|e| AppError::io("回收目录删不掉").with_detail(e.to_string()))?;
+    std::fs::remove_dir_all(entry_dir(root, id)).map_err(|e| {
+        AppError::io(messages::text("ui.recovery.dir_remove_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
     Ok(entry)
 }
 
@@ -222,7 +240,10 @@ pub fn purge(root: &Path, id: &str) -> Result<(), AppError> {
     match std::fs::remove_dir_all(&dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(AppError::io("回收条目删不掉").with_detail(e.to_string())),
+        Err(e) => Err(
+            AppError::io(messages::text("ui.recovery.entry_remove_failed", &[]))
+                .with_detail(e.to_string()),
+        ),
     }
 }
 

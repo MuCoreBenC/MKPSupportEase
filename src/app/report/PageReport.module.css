@@ -1045,10 +1045,21 @@
   /*
    * 折/展的**前段**：列表自己淡出（0~70%），不是被裁到最后才突然没了。
    * 展开时反过来、但**推迟 30% 才起步** —— 让脊先退，列表再回来，两者错开。
+   *
+   * ★ `visibility` 这条**不许带 delay**（2026-10-31）。它只在"离开"方向需要延迟
+   *   （等淡出放完再收焦点），那一条写在两个折叠态规则里；基础规则是"回来"的方向，
+   *   必须 `0s`。
+   *
+   *   原来这里写的是 `visibility 0s linear var(--fold-ms)`（180ms delay），后果：
+   *   `App.module.css` 的 `.pageSlot[data-hidden] *` 会给隐藏页的**所有后代**上
+   *   `visibility: hidden !important`（防浮层透页）；切回报告页时那条一撤，
+   *   `.sideBody` 从 hidden → visible 要走自己的 transition，被这条 delay 拖住 180ms。
+   *   表现就是作者 2026-10-31 那张图：左栏白卡已经 340 宽、里面**一个字都没有**，
+   *   等半拍才整体冒出来（WebKit 上更久，看着像闪一下）。
    */
   transition:
     opacity calc(var(--fold-ms) * 0.7) var(--fold-ease) calc(var(--fold-ms) * 0.3),
-    visibility 0s linear var(--fold-ms);
+    visibility 0s linear;
 }
 
 /*

@@ -279,7 +279,9 @@ export function targetsOf(items: BbsPresetItem[]): BbsTargetOption[] {
     .map(([printer, noz]) => ({ printer, noz, total: [...noz.values()].reduce((a, b) => a + b, 0) }))
     .sort((a, b) => (b.total - a.total) || a.printer.localeCompare(b.printer))
   for (const p of printers) {
-    out.push({ key: `${p.printer}|*`, label: `${p.printer}（全部喷嘴）`, count: p.total, level: 'printer' })
+    /* `label` 只放**数据**（机型名）；「全部喷嘴」是词，住在 i18n
+     * `bbs.drawer.targetAll`，由抽屉按 `level === 'printer'` 挑那一句（2026-10-31）。 */
+    out.push({ key: `${p.printer}|*`, label: p.printer, count: p.total, level: 'printer' })
     for (const [nozzle, count] of [...p.noz.entries()].sort((a, b) => Number(a[0]) - Number(b[0]))) {
       out.push({ key: `${p.printer}|${nozzle}`, label: `${p.printer} · ${nozzle}`, count, level: 'nozzle' })
     }

@@ -81,7 +81,7 @@ pub const EXIT_BAD_INPUT: u8 = 2;
 /// ★ 为什么不就地写字符串常量：判据要把它们挨个拿去表里问"这条在不在"
 /// （见 [`ALL_KEYS`]）。敲错一个键的表现是**用户眼前的框里**出现
 /// `［未登记的文案 hook.xxx］`，那种错不该靠眼睛在 2000 行里找。
-mod keys {
+pub(crate) mod keys {
     pub const PRESET_MISSING: &str = "hook.preset_missing";
     pub const GCODE_MISSING: &str = "hook.gcode_missing";
     pub const GCODE_UNREADABLE: &str = "hook.gcode_unreadable";
@@ -223,6 +223,15 @@ impl Reason {
     /// 给**切片器**那一行的口径（表里的 `slicer`，缺省 = [`Self::text`]）。
     pub fn slicer(&self) -> String {
         messages::slicer(self.key, &self.as_refs())
+    }
+
+    /// 这条原因的**具名参数**（原始事实，不是词）。
+    ///
+    /// 归档那一侧要把它们原样记进 `_meta.json` 的 `errorArgs`：报告页读记录时
+    /// 按**当时**的参数与**当前**语言重说一遍（2026-10-31）。存句子 = 把那一刻的
+    /// 语言冻进账里，切到日语/英语也只会看到写记录时的中文。
+    pub fn params(&self) -> &[(&'static str, String)] {
+        &self.params
     }
 
     fn as_refs(&self) -> Vec<(&str, &str)> {
@@ -668,7 +677,7 @@ pub fn run(
                 &archived,
                 job,
                 "",
-                &conclusion_line(&err),
+                &err,
                 false,
                 raw.len() as u64,
                 started_at,
@@ -752,7 +761,7 @@ pub fn run(
                     &archived,
                     job,
                     &preset_machine,
-                    &conclusion_line(&err),
+                    &err,
                     true,
                     raw.len() as u64,
                     started_at,
@@ -786,7 +795,7 @@ pub fn run(
                         &archived,
                         job,
                         &preset_machine,
-                        &conclusion_line(&err),
+                        &err,
                         true,
                         raw.len() as u64,
                         started_at,
@@ -807,7 +816,7 @@ pub fn run(
                     &archived,
                     job,
                     &preset_machine,
-                    &conclusion_line(&err),
+                    &err,
                     false,
                     raw.len() as u64,
                     started_at,
@@ -888,7 +897,7 @@ pub fn run(
                         &archived,
                         job,
                         &preset_machine,
-                        &conclusion_line(&err),
+                        &err,
                         true,
                         raw.len() as u64,
                         started_at,
@@ -997,7 +1006,7 @@ pub fn run(
                 &archived,
                 job,
                 &preset_machine,
-                &conclusion_line(&e),
+                &e,
                 e.cancelled(),
                 raw.len() as u64,
                 started_at,
@@ -1322,7 +1331,7 @@ fn archive_failure(
     archived: &Option<ArchivePaths>,
     job: &HookJob,
     machine: &str,
-    error: &str,
+    err: &HookError,
     cancelled: bool,
     input_size_bytes: u64,
     started_at: time::OffsetDateTime,
@@ -1341,6 +1350,7 @@ fn archive_failure(
     identity: &postprocess::gcode::IdentityProbe,
 ) {
     let Some(paths) = archived else { return };
+    let error = conclusion_line(err);
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
         started_at: crate::archive::display_stamp(started_at),
@@ -1357,11 +1367,30 @@ fn archive_failure(
         slicer_pid: crate::parent::pid(),
         invocation: crate::archive::invocation(),
         warnings: Vec::new(),
-        error: Some(error.to_string()),
-        /* 认得出是哪一条就把键也记下 —— 归档里存事实，词由读的那一刻决定（2026-10-27）。
-        带占位符的句子（值已经填进去了）认不出来就留 `None`，读的时候原样摆，不猜。 */
-        error_key: postprocess::diag::messages::key_of_exact_text(error).map(str::to_owned),
-        error_args: None,
+        error: Some(error),
+        /*
+         * ★ 存**原因键 + 参数**，不是"拿整句去反查"（2026-10-31 修）。
+         *
+         * 原来这里是 `key_of_exact_text(&error)` —— 比的是表里 `text` 的整句相等，
+         * 而 `error` 是 `conclusion_line` 渲染出来的结论行（`已停止：{原因}［{码}］`），
+         * 永远对不上 ⇒ `errorKey` 恒 `None` ⇒ 报告页只能原地摆写入那一刻的句子。
+         * 钩子是由切片器拉起来的，默认语言是简体，于是日语/英语界面上那句永远是中文
+         * （作者 2026-10-31 截图：`已停止：这一盘没有做后处理，原文件没有被改动［W_SYS_CANCELLED_001］`）。
+         *
+         * 现在把"是哪一条原因、参数各是什么"原样记下；读的时候由
+         * `ipc::report` 按当前语言重新拼结论行（框子 + 码与写入侧同一套判定）。
+         * 老记录没有这一格 ⇒ 照旧原样摆，不猜。
+         */
+        error_key: Some(err.reason().key().to_owned()),
+        error_args: {
+            let params = err.reason().params();
+            (!params.is_empty()).then(|| {
+                params
+                    .iter()
+                    .map(|(k, v)| ((*k).to_owned(), v.clone()))
+                    .collect::<std::collections::BTreeMap<_, _>>()
+            })
+        },
         cancelled,
         pipeline,
         collision,
@@ -2844,6 +2873,61 @@ mod tests {
         let line = conclusion_line(&by_watchdog);
         assert!(line.starts_with("已停止："), "{line}");
         assert!(line.contains("［E_SYS_STALLED_001］"), "{line}");
+    }
+
+    /// 失败 / 取消写账：记的是**原因键 + 参数**，不是渲染好的整句（2026-10-31）。
+    ///
+    /// 报告页那句「为什么没成」要按**读的那一刻的语言**重说 —— 存句子等于把钩子进程
+    /// 的语言冻进账里。钩子由切片器拉起、默认简体，于是日语/英语界面永远看到中文
+    /// （作者 2026-10-31 截图那条）。
+    #[test]
+    fn a_failed_archive_records_the_reason_key_and_args() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let toml = dir.path().join("A1-fast.toml");
+        let gcode = dir.path().join("a.gcode");
+        std::fs::write(&toml, "").expect("写预设");
+        std::fs::write(&gcode, "").expect("写 G-code");
+        let paths = ArchivePaths {
+            original: dir.path().join("a_original.gcode"),
+            output: dir.path().join("a_out.gcode"),
+            meta: dir.path().join("a_meta.json"),
+        };
+        let err = HookError::stopped(
+            Reason::new(keys::MISMATCH_STOPPED)
+                .with("gcode", "A1_MINI")
+                .with("preset", "A1"),
+        );
+        archive_failure(
+            &Some(paths.clone()),
+            &HookJob { toml, gcode },
+            "A1",
+            &err,
+            true,
+            0,
+            time::OffsetDateTime::now_utc(),
+            std::time::Instant::now(),
+            Vec::new(),
+            None,
+            None,
+            None,
+            &postprocess::gcode::IdentityProbe::default(),
+        );
+
+        let raw = std::fs::read_to_string(&paths.meta).expect("读回记录");
+        let meta: serde_json::Value = serde_json::from_str(&raw).expect("记录是 JSON");
+        assert_eq!(
+            meta["errorKey"], "hook.mismatch_stopped",
+            "存原因键，不是拿整句反查：{raw}"
+        );
+        assert_eq!(meta["errorArgs"]["gcode"], "A1_MINI");
+        assert_eq!(meta["errorArgs"]["preset"], "A1");
+        assert!(
+            meta["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("W_CFG_MISMATCH_001"),
+            "原句照旧留着（老读者 / 日志还要看）：{raw}"
+        );
     }
 
     /// 失败时**多给一行日志落点**（用户报问题时把它整段发给我们）；

@@ -51,11 +51,15 @@ const isLongText = (str: string) => str.length > 24 || str.includes('\n')
  * 两册都空就露原始值 —— 那是个 enum 字符串，**不猜**。
  */
 const optionText = (
-  o: { value?: string; label_zh?: string; label_en?: string },
+  o: { value?: string; label_zh?: string; label_en?: string; label_ja?: string; label_zh_tw?: string },
   locale: Locale,
 ): string => {
   const zh = o.label_zh ?? ''
   const en = o.label_en ?? ''
+  const ja = o.label_ja ?? ''
+  const tw = o.label_zh_tw ?? ''
+  if (locale === 'ja') return ja !== '' ? ja : zh !== '' ? zh : en !== '' ? en : o.value ?? ''
+  if (locale === 'zh-TW') return tw !== '' ? tw : zh !== '' ? zh : en !== '' ? en : o.value ?? ''
   if (locale === 'en') return en !== '' ? en : zh !== '' ? zh : o.value ?? ''
   return zh !== '' ? zh : en !== '' ? en : o.value ?? ''
 }

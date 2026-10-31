@@ -1179,7 +1179,9 @@
 .mHead {
   position: sticky;
   top: 0;
-  z-index: 1;
+  /* 3 = 压在「编辑态那一格」的 2 上面：G-code 浮窗向下溢出要压住下面的行，
+     但滚动时行不许穿到表头上面去（两档见 `.cell[data-editing]` 那条注） */
+  z-index: 3;
   background: var(--card-face);
   border-bottom: 1px solid var(--line);
 }
@@ -1423,9 +1425,16 @@
  *   数字步进器           **去掉它自己的框** —— 它外面已经有格子了，
  *                        再描一圈就是框套框；值直接坐在格子里
  */
+/*
+ * ★ `:not(.pGceTa)` 是必须的（2026-10-31）：G-code 的框是**两层叠着画**的
+ * （着色层 + 透明输入框，见 `GcodeEditor` 文件头）。它的输入框也是 `<textarea>`，
+ * 被这条通用规则一并命中 ⇒ 白底 + 描边，正好盖住下面写着代码的那一层 ——
+ * 表现就是对照矩阵里点开 G-code 格**一片空白**（单版本行不在 `.cellEd` 里，
+ * 所以那边一直正常）。输入层自己那套（透明底、inset:0）原样生效。
+ */
 .cellEd input,
 .cellEd select,
-.cellEd textarea {
+.cellEd textarea:not(.pGceTa) {
   width: 100%;
   height: 24px;
   padding: 0 6px;
@@ -1489,13 +1498,72 @@
   background: var(--surface-solid);
   box-shadow: inset 0 0 0 1px var(--accent);
   border-radius: 2px;
+  /*
+   * 抬到后面那些行之上 —— G-code 的浮窗（fixed）在这个层叠环境里画，不能被
+   * 下一行盖住。表头自己 z-index 3（`.mHead`），比它低一档：滚动时行不该穿到
+   * 表头上面去。**裁剪另说**：fixed 的包含块是视口，`.matrix` 的 overflow 管
+   * 不到它（这正是这一修要的，见 `.cellEd .pGwrap`）。
+   */
+  position: relative;
+  z-index: 2;
 }
 
-.cellEd textarea {
+.cellEd textarea:not(.pGceTa) {
   height: auto;
   padding: 4px 6px;
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
+
+/*
+ * 格子里的 G-code 框：**悬浮的小窗**，不嵌在格子里（2026-10-31 作者定）。
+ *
+ * 作者的原话：「它不是去占用我的格子、不是去变化，而是悬浮出来的一个小矩形
+ * 容器 —— 跟改之前（那个空白框）一样，高度不变，不是嵌在里面的」。
+ *
+ * 所以**脱离文档流**：`position: absolute` 贴着这一格的左上沿往下展开。行高
+ * 因此一点不动 —— 下面那行被浮窗压住半截是正常的，点外面一下就收。
+ *
+ * 宽度 **auto**（不是 100%）：这一层的宽要跟着里面那个按内容量出来的框走，
+ * 不然右上角那枚「打开编辑器」会贴在格子右沿、而不是浮窗右沿。
+ *
+ * `height: auto` 同样是必要的：`.cellEd > *` 那条给了 `height: 100%`（相对 32px
+ * 的格子高），不撤掉它，浮窗自己就只剩一条边。
+ */
+.cellEd .pGwrap {
+  /*
+   * **fixed**，不是 absolute（2026-10-31 第三修）：表格那一层是 `overflow: auto`，
+   * absolute 的后代照样被它裁 —— 表格只有两三行时容器就那么高，浮窗往下展开
+   * 一过底边就被切（作者：「还是被截断了呀，它可以出现到下面的呀」）。
+   * fixed 的包含块是视口，不受祖先 overflow 裁剪。
+   *
+   * 坐标由 `CompareMatrix` 的 `placeGcode` 按格子实测写进 `--gce-left/top`；
+   * 滚动 / 缩放时它跟着重算。
+   */
+  position: fixed;
+  top: var(--gce-top, 0);
+  left: var(--gce-left, 0);
+  width: auto;
+  height: auto;
+  z-index: 1;
+}
+
+/*
+ * 浮窗的尺寸**按内容量**（2026-10-31 第二轮，作者：「它被截断了，我希望它变大一点
+ * 都可以，不要被截断」）。
+ *
+ *   --gce-cols   最长一行的列数（中文按两列算，写在 `GcodeEditor` 里）
+ *   --gce-lines  行数
+ *
+ * 行上的 `inline` 那档仍是 88px 定高（行高有下限、不能随内容长），这一条只盖
+ * 矩阵格子里那份。上限（44 列 / 16 行）只防"一段几千行把屏幕铺满"：
+ * 真超了就在框里滚，最后那一行也不再被切掉半个字。44→ 44*1ch(≈7.5px)+44 ≈ 374px。
+ */
+.cellEd .pGce[data-size='inline'] {
+  width: calc((min(var(--gce-cols, 24), 44) * 1ch) + 44px);
+  height: calc((min(var(--gce-lines, 8), 16) * (var(--fs-label) + 3px)) + 12px);
+}
+
+
 
 /* 修改历史 */
 .history {

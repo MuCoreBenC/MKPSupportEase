@@ -1245,24 +1245,48 @@ pub async fn rename_local_preset(
         /* 两本状态账先整份读出来：坏档就什么都不做（宁可原地不动，也不留悬空指针） */
         runtime::app_state::load(&root)?;
 
-        let done = runtime::local::rename_file(&user_root, &path, &new_name)?;
-        /* 原文镜像跟着搬家（改名前那份的原文，改名后还是它）—— 没有镜像就没什么可搬的 */
-        let _ = runtime::baseline::move_origin_copy(&root, &path, &done.path);
+        /*
+         * ★ 2026-10-31：改名 = **一次多文件事务**（用户文件 + 镜像 + 指针 + 来路账）。
+         *
+         * 原来这四步是顺序写的：文件名挪了、镜像没搬 / 指针没改 / 来路账没跟上，任何一步
+         * 失败都会留下"界面指着一份不存在的文件"。现在先把会动的每一份都列进事务，
+         * 中途失败由 `utxn::atomically` 整体回滚。
+         *
+         * 新路径要过一遍名字规整才定得下来，所以先 `plan_rename`（只算不动盘）。
+         */
+        let planned = runtime::local::plan_rename(&user_root, &path, &new_name)?;
+        let mut tracked = vec![
+            user_root.join(&path),
+            user_root.join(&planned.path),
+            runtime::app_state::file_path(&root),
+            root.join("run/source-ledger.json"),
+            root.join("run/lineage-source.json"),
+        ];
+        // 原文镜像跟着搬家（没有镜像就没什么可搬的；路径先算出来，事务才不会漏它）
+        if let Ok(p) = runtime::baseline::origin_path(&root, &path) {
+            tracked.push(p);
+        }
+        if let Ok(p) = runtime::baseline::origin_path(&root, &planned.path) {
+            tracked.push(p);
+        }
 
-        /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格；
-        万一失败，说清"文件其实已经改了名"，别让用户以为白点了 */
-        runtime::app_state::repoint_local(&root, &path, &done.path, &done.file_name).map_err(
-            |e| {
-                AppError::internal(messages::text(
-                    "ui.ipc.local.096",
-                    &[("v1", &done.file_name.to_string())],
-                ))
-                .with_detail(e.to_string())
-            },
-        )?;
+        let done = runtime::utxn::atomically("改名用户预设", &tracked, || {
+            runtime::local::apply_rename(&user_root, &path, &planned.path)?;
+            let _ = runtime::baseline::move_origin_copy(&root, &path, &planned.path);
+            /* 使用中指针 + 草稿一起跟着改名走 —— AppState 一次原子写里改两格 */
+            runtime::app_state::repoint_local(&root, &path, &planned.path, &planned.file_name)
+                .map_err(|e| {
+                    AppError::internal(messages::text(
+                        "ui.ipc.local.096",
+                        &[("v1", &planned.file_name.to_string())],
+                    ))
+                    .with_detail(e.to_string())
+                })?;
+            /* 来路账跟着走：自己改名 path 跟走，母本改名 originPath 跟走 */
+            let _ = runtime::source_ledger::repath(&root, &path, &planned.path);
+            Ok(planned)
+        })?;
         super::notify_app_state(&app);
-        /* 来路账跟着走：自己改名 path 跟走，母本改名 originPath 跟走 */
-        let _ = runtime::source_ledger::repath(&root, &path, &done.path);
 
         Ok(LocalFileIdentityDto {
             path: done.path,
@@ -1291,18 +1315,35 @@ pub async fn copy_local_preset(
         let internal = internal_root(&app)?;
         let user_root = crate::fsx::paths::user_root(&app)?;
         let done = runtime::local::copy_as_new(&user_root, &path, &new_name)?;
-        /* 原文镜像：副本**落盘之后**存一份（副本的"最初那样"= 它诞生那一刻的字节）。
-        ★ 没有这一步，导入 / 复制出来的那两份"恢复默认值"就没得退 —— 它们在摘库里
-        没有对应（`based_on_sha256` 指的是更上一层的云端原文，不是自己） */
-        let _ = runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path);
         /*
-         * 来路账：副本从**母本**来的，母本账上有多少格就继承多少格
-         * （源身份 / 云端文件名 / 目录四格 / 云端摘要）；母本没有 ⇒ 副本也没有 ——
-         * 「不知道」一路传下去，比猜一个当前源更诚实。
-         * 记不上不影响拷贝本身。
+         * ★ 2026-10-31：副本落盘之后的两步（原文镜像 + 来路账）**不再静默忽略**。
+         *
+         * 原来它们是 `let _ =`（"记不上不影响拷贝本身"）。但那两种"记不上"的后果是
+         * 用户看得见的：没有镜像 ⇒ 副本永远退不回"刚复制出来那样"；没有来路账 ⇒
+         * 之后判不出它要不要更新。既然这次要求"要么全成、要么全回原样"，
+         * 就把它们当成同一次提交的一部分 —— 失败时把刚写的那份删掉、镜像也撤掉。
          */
-        let mother = runtime::source_ledger::provenance_of(&internal, &path);
-        let _ = runtime::source_ledger::record_copy(&internal, &done.path, &path, mother.as_ref());
+        let after = (|| -> Result<(), AppError> {
+            /* 原文镜像：副本**落盘之后**存一份（副本的"最初那样"= 它诞生那一刻的字节） */
+            runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path)?;
+            /*
+             * 来路账：副本从**母本**来的，母本账上有多少格就继承多少格
+             * （源身份 / 云端文件名 / 目录四格 / 云端摘要）；母本没有 ⇒ 副本也没有 ——
+             * 「不知道」一路传下去，比猜一个当前源更诚实。
+             */
+            let mother = runtime::source_ledger::provenance_of(&internal, &path);
+            runtime::source_ledger::record_copy(&internal, &done.path, &path, mother.as_ref())?;
+            Ok(())
+        })();
+
+        if let Err(e) = after {
+            /* 回滚：刚写出来的那份与它的镜像都撤掉（母本那份一个字节没动过） */
+            if let Ok(p) = crate::fsx::paths::resolve_in(&user_root, &done.path) {
+                let _ = std::fs::remove_file(p);
+            }
+            let _ = runtime::baseline::remove_origin_copy(&internal, &done.path);
+            return Err(e);
+        }
         Ok(LocalFileIdentityDto {
             path: done.path,
             file_name: done.file_name,
@@ -1463,31 +1504,59 @@ pub async fn delete_local_preset(app: AppHandle, path: String) -> Result<(), App
         let user_root = crate::fsx::paths::user_root(&app)?;
         let active = runtime::app_state::active_preset(&root)?;
         let draft = runtime::app_state::draft(&root)?;
-        /* 属于这一份的状态先撤（命中 = 用户线 + 同一条相对路径），再删文件 */
-        let mut state_cleared = false;
-        if active.as_ref().is_some_and(|a| {
+        /* 这一份是不是"正在使用 / 有草稿"—— 先算标记，**改动留到文件收进回收站之后**：
+        反过来的话，收编失败会留下"指针已撤、文件还在"的半套状态。 */
+        let was_active = active.as_ref().is_some_and(|a| {
             a.origin == runtime::state::ActiveOrigin::Local
                 && a.path.as_deref() == Some(path.as_str())
-        }) {
-            runtime::app_state::clear_active_preset(&root)?;
-            state_cleared = true;
-        }
-        if draft.as_ref().is_some_and(|d| {
+        });
+        let had_draft = draft.as_ref().is_some_and(|d| {
             d.origin == runtime::state::ActiveOrigin::Local
                 && d.path.as_deref() == Some(path.as_str())
-        }) {
-            runtime::app_state::clear_draft(&root)?;
-            state_cleared = true;
-        }
+        });
+        let mut state_cleared = false;
         /*
-         * ★ 删除 = **进回收站**（2026-10-29 作者口径）：
-         * 文件 + 原文镜像 + 来源账一起收进 `recovery/<id>/`，用户可在设置页找回。
-         * 收不进去就不删 —— 宁可这次失败，也不做"删了找不回"。
+         * ★ 删除 = **进回收站**（2026-10-29 作者口径），且是**一次可回滚的操作**
+         * （2026-10-31 统一提交）：
+         *
+         *   1. 先把文件 + 原文镜像 + 来源账收进 `recovery/<id>/`（收不进去就整体中止，
+         *      一个字节都不动 —— 原来就是这样）；
+         *   2. 再撤指针 / 丢草稿 / 移来源账 / 删备注；
+         *   3. 2 里任何一步失败 ⇒ 用 `recovery::restore` 把文件搬回原处，
+         *      不留"文件已删、指针还在"或"账没了、文件回来了"的半套。
+         *
+         * 注意顺序：**不可逆的那一步（搬进回收站）后面才做状态改动**，一旦状态改不动，
+         * 还有得退。
          */
         let provenance = runtime::source_ledger::provenance_of(&root, &path);
-        runtime::recovery::create(&root, &user_root, &path, provenance)?;
-        /* 来源账同步移除：不删的话，同路径下一份手工放的文件会继承旧来源 */
-        runtime::source_ledger::remove(&root, &path)?;
+        let entry = runtime::recovery::create(&root, &user_root, &path, provenance)?;
+
+        let after = (|| -> Result<(), AppError> {
+            if was_active {
+                runtime::app_state::clear_active_preset(&root)?;
+                state_cleared = true;
+            }
+            if had_draft {
+                runtime::app_state::clear_draft(&root)?;
+                state_cleared = true;
+            }
+            /* 来源账同步移除：不删的话，同路径下一份手工放的文件会继承旧来源 */
+            runtime::source_ledger::remove(&root, &path)?;
+            Ok(())
+        })();
+
+        if let Err(e) = after {
+            /* 回滚：把刚收进回收站的那份搬回原处（文件名、镜像、来源账由它自己带回去） */
+            let rollback = runtime::recovery::restore(&root, &user_root, &entry.id);
+            return match rollback {
+                Ok(_) => Err(e),
+                Err(rb) => Err(e.with_detail(format!(
+                    "删除失败后没能把文件退回原处（回收站里那份 id={}），请到「设置 → 回收站」手动恢复：{rb}",
+                    entry.id
+                ))),
+            };
+        }
+
         /* 备注覆盖跟着删（删了重新下载 / 重新拷贝 = 回到工作台那句） */
         let _ = runtime::remarks::remove(&user_root, &path);
         /*

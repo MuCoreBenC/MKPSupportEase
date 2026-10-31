@@ -270,7 +270,7 @@ pub mod version;
 pub mod words;
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -283,6 +283,7 @@ use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
+use crate::workbench::domain::txn::{self, Op, Txn};
 use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
@@ -326,9 +327,28 @@ pub struct Ctx {
     /// 窗口切回来时被发现（作者 2026-10-20：「我这个软件完全没有看到改的呀」），
     /// 但**不自己重载** —— 会话里可能正开着一个草稿，换掉定义会把旧值按新定义存回去
     source_stamp: String,
+    /// **真仓库的 `presets/`**。保存时只往这里写 —— 编辑一律写影子树
+    real_root: PathBuf,
+    /// **影子工作树**（`workbench/.draft/presets/`）。所有编辑写这里
+    shadow_root: PathBuf,
+    /// 统一编辑事务（2026-10-31）：撤销/重做/保存/放弃的唯一真相
+    txn: Txn,
 }
 
 impl Ctx {
+    /// **真仓库的 `presets/`**（编辑落在影子树，只有保存 / 发布才碰这里）。
+    ///
+    /// ★★★ 2026-10-31：**发布与核对必须用它，不能用 `presets.root()`**。
+    ///
+    /// `presets.root()` 是**影子树**（`workbench/.draft/presets/`）。发布若落在影子，
+    /// 而 `git.stage_allowed` stage 的是真仓库里的 `presets/delivery/`，结果就是
+    /// 「生成阶段写进真仓库的那几份」（catalog 的 revision / 参数改动）进了 commit，
+    /// **账本与发布戳留在影子里** —— `presets verify` 读影子反而绿、`check:artifacts`
+    /// 读真实树红（R1「交付目录变了但账本没变」），push 被闸拦下。
+    pub fn real_root(&self) -> &Path {
+        &self.real_root
+    }
+
     /// 真仓库。
     ///
     /// **唯一的数据根是 `presets/`**（旧的上游仓库连同它的定位、设置项一起退休了）：
@@ -339,11 +359,47 @@ impl Ctx {
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
         store.bootstrap()?;
-        Self::with(load_presets()?, store)
+        let real_root = crate::workbench::paths::presets_root().ok_or_else(|| {
+            AppError::not_found("找不到工作台的预设数据根 presets/").with_detail(
+                "期望 <repo>/presets/registry/param_registry.toml 存在 —— \
+                 工作台的数据根指向**仓库里的开发源数据**，不是 appDataDir"
+                    .to_owned(),
+            )
+        })?;
+        let shadow_root = crate::workbench::domain::txn::shadow_root(&store.root);
+
+        // 影子树的一生（2026-10-31）：
+        //   ① 没有 / 空的 ⇒ 从磁盘整份铺一份（这是常态，开机第一件事）
+        //   ② 有、且与磁盘不一致 ⇒ **上次会话崩了**：保留它当「一次未保存的改动」，
+        //      由作者决定保存还是放弃 —— 绝不静默丢用户的编辑
+        //   ③ 有、且与磁盘一致 ⇒ 干净
+        let recovered = if crate::workbench::domain::txn::snapshot(&shadow_root)?.is_empty() {
+            crate::workbench::domain::txn::mirror(&real_root, &shadow_root)?;
+            false
+        } else {
+            shadow_differs(&real_root, &shadow_root)?
+        };
+
+        let mut presets = crate::presetdata::Presets::load_from(&shadow_root)?;
+        if let Ok(asset_root) = crate::workbench::paths::assets_root() {
+            // 载荷根仍指真仓库：资产是只读读出来的，编辑走「暂存 + 保存时搬」
+            presets.set_asset_root(&asset_root);
+        }
+        let mut ctx = Self::with(presets, store)?;
+        ctx.real_root = real_root;
+        ctx.shadow_root = shadow_root;
+        if recovered {
+            ctx.txn = Txn::recovered();
+            tracing::warn!("影子树里有上次会话未保存的改动 —— 已按一条未保存改动呈现");
+        }
+        Ok(ctx)
     }
 
     /// 给定预设数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
     pub(super) fn with(presets: Presets, store: Store) -> Result<Self, AppError> {
+        /* 测试夹具没有影子树：两个根都指回它自己的那份预设根（镜像 = 恒等）。
+        `Ctx::open` 会随后把真仓库 / 影子树填上。 */
+        let root = presets.root().to_path_buf();
         let mut ctx = Self {
             presets,
             store,
@@ -355,9 +411,23 @@ impl Ctx {
             last_edit: Instant::now(),
             flush_error: None,
             source_stamp: String::new(),
+            real_root: root.clone(),
+            shadow_root: root,
+            txn: Txn::new(),
         };
         ctx.reload_from_disk()?;
         Ok(ctx)
+    }
+
+    /// 事务视图（撤销/重做/保存按钮读它）
+    pub(super) fn txn_state(&self) -> TxnState {
+        TxnState {
+            dirty: self.txn.is_dirty(),
+            dirty_count: self.txn.dirty_count(),
+            can_undo: self.txn.undo_depth() > 0,
+            can_redo: self.txn.redo_depth() > 0,
+            ops: self.txn.ops(),
+        }
     }
 
     /// 从磁盘重建「清单 + 已落盘 + 草稿快照」。**只在三处调**：开场、`wb_save` 之后、`wb_reload`。
@@ -458,6 +528,66 @@ pub(super) fn with_ctx<T>(f: impl FnOnce(&Ctx) -> Result<T, AppError>) -> Result
 }
 
 /// 要改草稿的那几条命令走这个。**改完只动内存**，落盘交给懒写
+/// **哪些命令是编辑**（2026-10-31 统一编辑事务的登记表）。
+///
+/// 只登记「会改 `presets/` 的命令」，读命令一条都不进来 —— 它们不该为一次读付
+/// 两次全树快照的代价。键是 IPC 名（`traced` 里那个），值是给撤销栈/状态栏看的人话。
+///
+/// ★ 新增写命令时必须在这里加一行，否则那条编辑**不会进事务**（写的是影子树，
+///   但撤销栈与「未保存改动」都看不见它）。
+const EDIT_COMMANDS: &[(&str, &str)] = &[
+    ("wb_set_machine_field", "改机型信息"),
+    ("wb_set_version_field", "改版本信息"),
+    ("wb_set_brand_field", "改品牌信息"),
+    ("wb_add_machine", "新增机型"),
+    ("wb_add_version", "新增版本"),
+    ("wb_copy_version", "复制版本"),
+    ("wb_copy_recipe", "复制版本参数"),
+    ("wb_remove_version", "删除版本"),
+    ("wb_add_brand", "新增品牌"),
+    ("wb_move_machine_to_brand", "移动机型"),
+    ("wb_set_machine_dimensions", "改机型尺寸"),
+    ("wb_set_machine_zones", "改禁区"),
+    ("wb_set_bundle_refs", "改套餐成员"),
+    ("wb_add_bundle", "新建套餐"),
+    ("wb_rename_bundle", "套餐改名"),
+    ("wb_copy_bundle", "复制套餐"),
+    ("wb_remove_bundle", "删除套餐"),
+    ("wb_assign_bundle_versions", "指派版本到套餐"),
+    ("wb_remove_asset", "删除资产"),
+    ("wb_set_asset_delivery", "改资产交付档"),
+    ("wb_set_calibration_identity", "改校准身份"),
+    ("wb_set_group", "改资产分组"),
+    ("wb_remove_group", "删除资产分组"),
+    ("wb_set_param_meta", "改参数定义"),
+    ("wb_apply_draft", "改参数值"),
+    ("wb_anno_write", "保存标注"),
+];
+
+thread_local! {
+    /// 当前正在跑的命令名。`traced` 设置、跑完还原（支持嵌套）
+    static CURRENT_COMMAND: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// `traced` 进入时调：返回上一个值，供 [`leave_command`] 还原
+pub(crate) fn enter_command(name: &'static str) -> Option<&'static str> {
+    CURRENT_COMMAND.with(|c| c.replace(Some(name)))
+}
+
+pub(crate) fn leave_command(previous: Option<&'static str>) {
+    CURRENT_COMMAND.with(|c| c.set(previous));
+}
+
+/// 当前命令如果是一条编辑，返回它的人类标签
+fn current_edit_label() -> Option<&'static str> {
+    CURRENT_COMMAND.with(|c| c.get()).and_then(|name| {
+        EDIT_COMMANDS
+            .iter()
+            .find(|(k, _)| *k == name)
+            .map(|(_, label)| *label)
+    })
+}
+
 pub(super) fn with_ctx_mut<T>(
     f: impl FnOnce(&mut Ctx) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
@@ -471,6 +601,16 @@ pub(super) fn with_ctx_mut<T>(
         *guard = Some(Ctx::open()?);
     }
     let ctx = guard.as_mut().expect("刚刚放进去的");
+    run_ctx(ctx, current_edit_label(), f)
+}
+
+/// `with_ctx_mut` 的本体（**抽出来是为了可测**）：拿一份现成会话跑一次命令，
+/// 该记事务的记事务。`edit` 为 `Some(label)` = 这条命令是编辑。
+pub(super) fn run_ctx<T>(
+    ctx: &mut Ctx,
+    edit: Option<&'static str>,
+    f: impl FnOnce(&mut Ctx) -> Result<T, AppError>,
+) -> Result<T, AppError> {
     /*
      * 盘上戳的两处用途，一次 stat 走完：
      *
@@ -479,11 +619,43 @@ pub(super) fn with_ctx_mut<T>(
      *   · 此前已经有外部改动待发现（before != 记着的戳）→ **不覆盖**，
      *     否则自己随手改一格就把那条提示吃掉了。
      */
-    let before = presets_source_stamp(ctx.presets.root());
+    /* ★ 2026-10-31：编辑 = 一条事务。登记表里的命令才拍快照 —— 读命令零开销。
+    拍的是**影子树**：写命令改的就是它（`ctx.presets` 的根）。
+    ★ `edit` 是**参数**（调用方给），不许在这里再算一遍 —— 早先写过一版
+      在这里 `let edit = current_edit_label();`，把参数遮住了：测试传进来的标签
+      被丢掉，于是"编辑没进事务"（真机表现为状态栏永远是 0）。 */
+    let shot = match edit {
+        Some(_) => Some(txn::snapshot(&ctx.shadow_root)?),
+        None => None,
+    };
+
+    /* 盘上戳只盯**真仓库**：影子树是我们自己改的，不该触发「外部改过」提示 */
+    let before = presets_source_stamp(&ctx.real_root);
     let out = f(ctx);
-    let after = presets_source_stamp(ctx.presets.root());
+    let after = presets_source_stamp(&ctx.real_root);
     if before != after && before == ctx.source_stamp {
         ctx.source_stamp = after;
+    }
+
+    if let (Some(label), Some(shot_before)) = (edit, shot) {
+        // 命令失败也记：它可能已经改了影子树（写了一半、或校验在写之后），
+        // 不记的话这部分改动就没有撤销点，用户只能放弃整份草稿。
+        let shot_after = txn::snapshot(&ctx.shadow_root)?;
+        if let Some(op) = ctx
+            .txn
+            .record(label, &shot_before, &shot_after, &ctx.shadow_root)?
+        {
+            tracing::info!(
+                label = %op.label,
+                files = op.files.len(),
+                dirty = ctx.txn.dirty_count(),
+                "编辑已进事务"
+            );
+        }
+        // 视图与影子树对齐：界面显示的是编辑态
+        if ctx.txn.is_dirty() || out.is_ok() {
+            ctx.presets = ctx.presets.reload()?;
+        }
     }
     out
 }
@@ -638,7 +810,28 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
     let mut v = Book::new(&ctx.presets, committed, draft).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
+    /* ★ 2026-10-31：未保存改动 = 值草稿（旧层）+ 事务里的每一条（新层）。
+    统一之后事务才是主体，值那一层只是还没搬完的过渡。 */
+    v.dirty_count = v.dirty_count.saturating_add(ctx.txn.dirty_count());
     v
+}
+
+/// 影子树与磁盘是否已经不是同一份（开场判断「上次会话有没有没保存的改动」）
+fn shadow_differs(real: &Path, shadow: &Path) -> Result<bool, AppError> {
+    let a = txn::snapshot(real)?;
+    let b = txn::snapshot(shadow)?;
+    Ok(!txn::equal(&a, &b))
+}
+
+/// 统一事务的状态（页头三按钮 + 状态栏读它）
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxnState {
+    pub dirty: bool,
+    pub dirty_count: usize,
+    pub can_undo: bool,
+    pub can_redo: bool,
+    pub ops: Vec<Op>,
 }
 
 /* ---------- 启动 ---------- */
@@ -739,6 +932,15 @@ pub fn wb_boot() -> Result<Boot, AppError> {
 #[tauri::command]
 pub fn wb_reload() -> Result<Boot, AppError> {
     drop_ctx();
+    /* 2026-10-31：重新加载 = **放弃编辑态、回到磁盘那一版**。
+    影子树不跟着铺的话，重开出来的还是上一次的编辑，而界面说"已重新加载" ——
+    两句话对不上。这里整份对齐（与「放弃」同一条语义）。 */
+    if let (Ok(store), Some(real)) = (Store::open(), crate::workbench::paths::presets_root()) {
+        let shadow = txn::shadow_root(&store.root);
+        std::fs::create_dir_all(&shadow)
+            .map_err(|e| AppError::io("建不出影子树").with_detail(e.to_string()))?;
+        txn::mirror(&real, &shadow)?;
+    }
     boot_inner()
 }
 
@@ -750,7 +952,8 @@ pub fn wb_reload() -> Result<Boot, AppError> {
 #[tauri::command]
 pub fn wb_presets_changed() -> Result<bool, AppError> {
     traced("wb_presets_changed", |_| {
-        with_ctx(|ctx| Ok(presets_source_stamp(ctx.presets.root()) != ctx.source_stamp))
+        // 盯**真仓库**：影子树是我们自己的编辑态，不算"外部改过"
+        with_ctx(|ctx| Ok(presets_source_stamp(&ctx.real_root) != ctx.source_stamp))
     })
 }
 
@@ -903,7 +1106,15 @@ pub struct SectionTarget {
 pub struct ParamView {
     pub key: String,
     pub label: String,
+    /// 四册的另外三册（2026-10-31）：工作台定义框要能看见/编辑它们，
+    /// 也是「预览语言」切换的数据来源。空 = 这一册没译，界面回落中文
+    pub label_en: String,
+    pub label_ja: String,
+    pub label_tw: String,
     pub desc: String,
+    pub desc_en: String,
+    pub desc_ja: String,
+    pub desc_tw: String,
     pub toml_key: String,
     pub section_id: String,
     pub tab_id: Option<String>,
@@ -931,6 +1142,10 @@ pub struct ParamView {
 #[serde(rename_all = "camelCase")]
 pub struct ChoiceView {
     pub label: String,
+    /// 选项名的另外三册（2026-10-31）
+    pub label_en: String,
+    pub label_ja: String,
+    pub label_tw: String,
     pub value: Value,
     /// **显式全局弃用** —— 定义框那颗勾的状态，回写只认这一格。
     /// 之前这里是「显式 ∪ 推定」的并集，打开框再保存会把推定值固化成 `deprecated = true`
@@ -1003,7 +1218,13 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
     ParamView {
         key: p.key.clone(),
         label: p.label.clone(),
+        label_en: p.label_en.clone(),
+        label_ja: p.label_ja.clone(),
+        label_tw: p.label_tw.clone(),
         desc: p.desc.clone(),
+        desc_en: p.desc_en.clone(),
+        desc_ja: p.desc_ja.clone(),
+        desc_tw: p.desc_tw.clone(),
         toml_key: p.toml_key.clone(),
         tab_id: reg.tab_of_section(&p.layout.section_id).map(str::to_owned),
         section_id: p.layout.section_id.clone(),
@@ -1023,6 +1244,9 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
             .zip(dead)
             .map(|(c, dead)| ChoiceView {
                 label: c.label.clone(),
+                label_en: c.label_en.clone(),
+                label_ja: c.label_ja.clone(),
+                label_tw: c.label_tw.clone(),
                 value: c.value.clone(),
                 derived: dead && !c.deprecated && c.deprecated_machines.is_empty(),
                 deprecated: c.deprecated,
@@ -1315,9 +1539,19 @@ pub fn wb_apply_draft(
                 &ctx.presets.registry,
                 &patches,
             )?;
+            /* ★ 2026-10-31：值也立刻落进**影子树**（不是真仓库）。
+            于是它和开关/尺寸/增删版本走同一条事务：同一个撤销栈、同一个保存边界。
+            旧行为是"攒在内存里等保存"，那正是两套编辑规则的最后一块。 */
+            let written = storage::apply_draft_now(&mut ctx.presets, &ctx.committed, &ctx.draft)?;
+            ctx.draft = Draft::default();
             ctx.touch();
             let notices = ctx.notices_now();
-            tracing::info!(label = %label, patches = patches.len(), "草稿已更新");
+            tracing::info!(
+                label = %label,
+                patches = patches.len(),
+                written,
+                "值已写进影子树（事务）"
+            );
 
             // 一次派生，两份结果：整本视图 + 调用方要的那一页
             let book = Book::new(&ctx.presets, &ctx.committed, &ctx.draft);
@@ -1467,21 +1701,41 @@ pub struct SaveResult {
 pub fn wb_save() -> Result<SaveResult, AppError> {
     traced("wb_save", |_| {
         with_ctx_mut(|ctx| {
-            if ctx.draft.is_clean() {
+            /* ★ 2026-10-31：保存是**唯一写盘边界**。
+            值草稿先落进影子树，再和结构类编辑一起提交 —— 两套编辑走同一个出口 */
+            let values_dirty = !ctx.draft.is_clean();
+            if !values_dirty && !ctx.txn.is_dirty() {
                 return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
             }
             // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
             ctx.flush();
-            let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
+            let mut remap = BTreeMap::new();
+            if values_dirty {
+                let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
+                remap = out.remap;
+            }
+            // 影子树 → 真仓库：逐份原子写、删除进回收站、失败整体回滚
+            let stamp = crate::workbench::clock::now_iso8601().replace(':', "-");
+            let report = txn::commit(
+                &ctx.real_root,
+                &ctx.shadow_root,
+                &ctx.store.root.join(".trash"),
+                &stamp,
+            )?;
+            tracing::info!(
+                written = report.written,
+                deleted = report.deleted,
+                ops = ctx.txn.dirty_count(),
+                "保存：事务已提交"
+            );
 
+            ctx.draft = Draft::default();
+            ctx.txn.clear();
             // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
             ctx.reload_from_disk()?;
             let notices = ctx.notices_now();
             let view = view_of(ctx, &ctx.committed, &ctx.draft, notices);
-            Ok(SaveResult {
-                view,
-                remap: out.remap,
-            })
+            Ok(SaveResult { view, remap })
         })
     })
 }
@@ -1490,17 +1744,67 @@ pub fn wb_save() -> Result<SaveResult, AppError> {
 pub fn wb_discard() -> Result<BookView, AppError> {
     traced("wb_discard", |_| {
         with_ctx_mut(|ctx| {
-            if ctx.draft.is_clean() {
+            if ctx.draft.is_clean() && !ctx.txn.is_dirty() {
                 return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
             }
-            let dropped = ctx.draft.dirty_count();
+            let dropped = ctx.draft.dirty_count() + ctx.txn.dirty_count();
             ctx.draft = Draft::default();
+            // ★ 放弃 = 把影子树整个拉回磁盘原状（结构类改动也一起丢）
+            txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
+            ctx.txn.clear();
             ctx.touch();
             // 丢弃**立刻落盘**：留着旧快照的话，崩一次就把刚丢掉的又捞回来了
             ctx.flush();
-            tracing::info!(dropped, "草稿已丢弃");
+            tracing::info!(dropped, "草稿与事务已丢弃（影子树已对齐磁盘）");
             let notices = ctx.notices_now();
             Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices))
+        })
+    })
+}
+
+/* ---------- 统一事务：撤销 / 重做 / 状态 ---------- */
+
+#[tauri::command(async)]
+pub fn wb_txn_state() -> Result<TxnState, AppError> {
+    traced("wb_txn_state", |_| with_ctx(|ctx| Ok(ctx.txn_state())))
+}
+
+/// 撤销一条（服务器侧）：把影子树里那份 `before` 写回去，再重读
+#[tauri::command]
+pub fn wb_txn_undo() -> Result<TxnState, AppError> {
+    traced("wb_txn_undo", |_| {
+        with_ctx_mut(|ctx| {
+            let mut undo_after_commit = false;
+            if let Some(label) = ctx.txn.undo(&ctx.shadow_root)? {
+                ctx.presets = ctx.presets.reload()?;
+                ctx.touch();
+                tracing::info!(%label, "事务撤销");
+                undo_after_commit = true;
+            }
+            if undo_after_commit {
+                ctx.reload_from_disk()?;
+            }
+            Ok(ctx.txn_state())
+        })
+    })
+}
+
+/// 重做一条
+#[tauri::command]
+pub fn wb_txn_redo() -> Result<TxnState, AppError> {
+    traced("wb_txn_redo", |_| {
+        with_ctx_mut(|ctx| {
+            let mut redone = false;
+            if let Some(label) = ctx.txn.redo(&ctx.shadow_root)? {
+                ctx.presets = ctx.presets.reload()?;
+                ctx.touch();
+                tracing::info!(%label, "事务重做");
+                redone = true;
+            }
+            if redone {
+                ctx.reload_from_disk()?;
+            }
+            Ok(ctx.txn_state())
         })
     })
 }
@@ -1519,6 +1823,68 @@ mod tests {
     use crate::workbench::domain::testkit::Fixture;
     use crate::workbench::domain::wording::BuildState;
     use crate::workbench::domain::Origin;
+
+    /// **统一编辑事务的端到端判据**（2026-10-31）：走一遍真正的编辑包装器
+    /// （`run_ctx`，与 IPC 命令同一条路），证明——
+    ///
+    /// 1. 编辑只写**影子树**，真仓库一个字节不动；
+    /// 2. 它进了事务（状态栏那个 N）；
+    /// 3. 「放弃」把影子树拉回磁盘原状。
+    #[test]
+    fn an_edit_writes_only_the_shadow_tree_and_lands_in_the_transaction() {
+        use crate::presetdata::MachineField;
+
+        let dir = tempfile::tempdir().unwrap();
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let shadow = crate::workbench::domain::txn::shadow_root(&dir.path().join("workbench"));
+        std::fs::create_dir_all(&shadow).unwrap();
+        crate::workbench::domain::txn::mirror(&real, &shadow).unwrap();
+
+        let store = Store::at(dir.path().join("workbench"));
+        store.bootstrap().unwrap();
+        let shadow_presets = crate::presetdata::Presets::load_from(&shadow).unwrap();
+        let mut ctx = Ctx::with(shadow_presets, store).unwrap();
+        ctx.real_root = real.clone();
+        ctx.shadow_root = shadow.clone();
+
+        let rel = "machines/A1.toml";
+        let real_before = std::fs::read(real.join(rel)).unwrap();
+
+        run_ctx(&mut ctx, Some("改机型信息"), |ctx| {
+            ctx.presets
+                .catalog
+                .machine_mut("A1")?
+                .set_field(MachineField::Display, Some("A1 改名"))?;
+            ctx.presets.catalog.write_machine("A1")?;
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(ctx.txn.dirty_count(), 1, "编辑必须进事务");
+        assert_eq!(
+            std::fs::read(real.join(rel)).unwrap(),
+            real_before,
+            "编辑只许写影子树，真仓库一个字节都不能动"
+        );
+        assert!(
+            std::fs::read_to_string(shadow.join(rel))
+                .unwrap()
+                .contains("A1 改名"),
+            "影子树里应该是改后的那一份"
+        );
+
+        // 放弃 = 影子树拉回磁盘原状
+        crate::workbench::domain::txn::mirror(&ctx.real_root, &ctx.shadow_root).unwrap();
+        ctx.txn.clear();
+        assert!(
+            !std::fs::read_to_string(shadow.join(rel))
+                .unwrap()
+                .contains("A1 改名"),
+            "放弃之后影子树必须回到磁盘那一份"
+        );
+        drop(fx_dir);
+    }
 
     /// 造一个不碰真仓库、也不碰那个全局的 `Ctx`。
     ///

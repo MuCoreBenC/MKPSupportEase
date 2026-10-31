@@ -2265,7 +2265,7 @@ dependencies = [
 
 [[package]]
 name = "mkp-support-ease"
-version = "0.0.8"
+version = "0.0.9"
 dependencies = [
  "ab_glyph",
  "core-foundation",

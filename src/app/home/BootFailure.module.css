@@ -1,0 +1,28 @@
+/*
+ * 首屏读取失败那一屏（见 `BootFailure.tsx` 的头注）。
+ *
+ * 宿主是页面槽（`App.module.css` 的 `.pageSlot`：`display:flex; flex-direction:column`），
+ * 所以用 `flex: 1` 撑满 —— 不写 `height: 100%`（百分比高度要祖先有确定高度才算得出来）。
+ * 底色**不铺**：窗口那层渐变本来就是应用的底。
+ */
+
+.fail {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+}
+
+.note {
+  max-width: 32em;
+  margin: 0;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-2);
+}

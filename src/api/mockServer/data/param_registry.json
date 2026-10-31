@@ -24,7 +24,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Retract length",
-      "descEn": "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code"
+      "descEn": "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code",
+      "labelJa": "リトラクト長",
+      "labelTw": "回抽長度",
+      "descJa": "塗布ペンのリトラクト長（mm）。負値＝リトラクト。この値を優先し、0 のときはロード G-code から自動で解析します",
+      "descTw": "塗膠筆回抽長度（mm），負值＝回抽。優先使用此值，為 0 時從裝載 G-code 自動解析"
     },
     {
       "configKey": "CustomMountGcode",
@@ -59,7 +63,11 @@
       "valueType": "string",
       "variantMode": "per_variant",
       "labelEn": "Load glue box G-code",
-      "descEn": "Custom command used to mount the glue pen; supports the [AUTO] variable"
+      "descEn": "Custom command used to mount the glue pen; supports the [AUTO] variable",
+      "labelJa": "接着剤ボックスの装着 G-code",
+      "labelTw": "裝載膠箱 G-code",
+      "descJa": "塗布ペンを取り付けるためのカスタム命令。[AUTO] 変数に対応します",
+      "descTw": "用於掛載塗膠筆的自訂指令，支援 [AUTO] 變數"
     },
     {
       "configKey": "CustomUnmountGcode",
@@ -94,7 +102,11 @@
       "valueType": "string",
       "variantMode": "per_variant",
       "labelEn": "Unload glue box G-code",
-      "descEn": "Custom command used to unmount the glue pen; supports the [AUTO] variable"
+      "descEn": "Custom command used to unmount the glue pen; supports the [AUTO] variable",
+      "labelJa": "接着剤ボックスの取り外し G-code",
+      "labelTw": "卸載膠箱 G-code",
+      "descJa": "塗布ペンを取り外すためのカスタム命令。[AUTO] 変数に対応します",
+      "descTw": "用於卸載塗膠筆的自訂指令，支援 [AUTO] 變數"
     },
     {
       "configKey": "Disable3rdLayerClogDetect",
@@ -118,7 +130,11 @@
       "valueType": "bool",
       "variantMode": "shared",
       "labelEn": "Disable third-layer clog detection",
-      "descEn": "Removes the third-layer clog detection section. Only applies to A1 / A1 mini"
+      "descEn": "Removes the third-layer clog detection section. Only applies to A1 / A1 mini",
+      "labelJa": "3 層目のノズル詰まり検出を無効化",
+      "labelTw": "關閉第三層包頭檢測",
+      "descJa": "オンにすると 3 層目のノズル詰まり検出セクションを削除します。A1 / A1 mini のみ有効です",
+      "descTw": "開啟後移除第三層包頭檢測段。僅對 A1／A1 mini 機型有效"
     },
     {
       "configKey": "DisableFrontCoverAlarm",
@@ -143,7 +159,11 @@
       "valueType": "bool",
       "variantMode": "shared",
       "labelEn": "Force-off front cover alarm",
-      "descEn": "Forces the front cover detached alarm off. Only applies to the P1 series"
+      "descEn": "Forces the front cover detached alarm off. Only applies to the P1 series",
+      "labelJa": "前面カバー警告を強制オフ",
+      "labelTw": "強制關閉前蓋警報",
+      "descJa": "前面カバー取り外しの警告を強制的にオフにします。P1 シリーズのみ有効です",
+      "descTw": "強制關閉前蓋拆卸警報。僅適用於 P1 系列"
     },
     {
       "configKey": "DisableTimelapse",
@@ -167,7 +187,11 @@
       "valueType": "bool",
       "variantMode": "shared",
       "labelEn": "Disable timelapse",
-      "descEn": "Removes the timelapse section (SKIPTYPE: timelapse). Only applies to i3-style A-series machines"
+      "descEn": "Removes the timelapse section (SKIPTYPE: timelapse). Only applies to i3-style A-series machines",
+      "labelJa": "タイムラプスを無効化",
+      "labelTw": "關閉縮時攝影",
+      "descJa": "オンにするとタイムラプス区間（SKIPTYPE: timelapse）を削除します。i3 構造の A シリーズのみ有効です",
+      "descTw": "開啟後移除縮時攝影段（SKIPTYPE: timelapse）。僅對 i3 結構的 A 系列機型有效"
     },
     {
       "configKey": "DiskStaggerAngle",
@@ -199,7 +223,11 @@
       "unit": "°",
       "valueType": "float",
       "labelEn": "Stagger angle",
-      "descEn": "Rotation offset applied to the disc every layer (0-30 deg)"
+      "descEn": "Rotation offset applied to the disc every layer (0-30 deg)",
+      "labelJa": "ずらし角度",
+      "labelTw": "錯開角度",
+      "descJa": "レイヤーごとにディスクを回転させる角度（0〜30°）",
+      "descTw": "每層圓盤旋轉偏移的角度（0-30°）"
     },
     {
       "configKey": "DiskStaggerMaxAngle",
@@ -231,24 +259,34 @@
       "unit": "°",
       "valueType": "float",
       "labelEn": "Max stagger angle",
-      "descEn": "Maximum swing offset angle (10-90 deg)"
+      "descEn": "Maximum swing offset angle (10-90 deg)",
+      "labelJa": "最大ずらし角度",
+      "labelTw": "最大偏移角度",
+      "descJa": "スイングの最大ずらし角度（10〜90°）",
+      "descTw": "擺動的最大偏移角度（10-90°）"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         },
         {
           "label": "自动",
           "value": "auto",
-          "labelEn": "Auto"
+          "labelEn": "Auto",
+          "labelJa": "自動",
+          "labelTw": "自動"
         }
       ],
       "configKey": "DiskStaggerMode",
@@ -276,19 +314,27 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Stagger mode",
-      "descEn": "Off: no rotation | On: always stagger | Auto: stagger only at small layer heights"
+      "descEn": "Off: no rotation | On: always stagger | Auto: stagger only at small layer heights",
+      "labelJa": "ずらしモード",
+      "labelTw": "錯開模式",
+      "descJa": "オフ：回転しない | オン：常にずらす | 自動：レイヤー高さが小さいときだけずらす",
+      "descTw": "關閉：不旋轉 | 開啟：始終錯開 | 自動：小層高時自動錯開"
     },
     {
       "choices": [
         {
           "label": "旋转楼梯",
           "value": "spiral",
-          "labelEn": "Spiral stairs"
+          "labelEn": "Spiral stairs",
+          "labelJa": "スパイラル",
+          "labelTw": "旋轉樓梯"
         },
         {
           "label": "锯齿摆动",
           "value": "oscillate",
-          "labelEn": "Sawtooth swing"
+          "labelEn": "Sawtooth swing",
+          "labelJa": "のこぎりスイング",
+          "labelTw": "鋸齒擺動"
         }
       ],
       "configKey": "DiskStaggerSwingMode",
@@ -316,7 +362,11 @@
       "uiComponent": "select",
       "valueType": "string",
       "labelEn": "Swing mode",
-      "descEn": "Spiral stairs: accumulate in one direction, then wrap around at the maximum | Sawtooth swing: reverse direction at the maximum"
+      "descEn": "Spiral stairs: accumulate in one direction, then wrap around at the maximum | Sawtooth swing: reverse direction at the maximum",
+      "labelJa": "スイングモード",
+      "labelTw": "擺動模式",
+      "descJa": "スパイラル：一方向に加算し、最大値で折り返す | のこぎり：最大値で逆方向に折り返す",
+      "descTw": "旋轉樓梯：單向累加到達最大值後回捲 | 鋸齒擺動：到最大值後反向折返"
     },
     {
       "configKey": "FanSpeed",
@@ -342,24 +392,34 @@
       "unit": "0-255",
       "valueType": "float",
       "labelEn": "Fan speed",
-      "descEn": "Fan PWM speed (0-255), controls the cooling airflow"
+      "descEn": "Fan PWM speed (0-255), controls the cooling airflow",
+      "labelJa": "ファン速度",
+      "labelTw": "風扇速度",
+      "descJa": "ファンの PWM 値（0〜255）。冷却風量を制御します",
+      "descTw": "風扇 PWM 速度（0-255），控制冷卻風量"
     },
     {
       "choices": [
         {
           "label": "快速",
           "value": "fast",
-          "labelEn": "Fast"
+          "labelEn": "Fast",
+          "labelJa": "高速",
+          "labelTw": "快速"
         },
         {
           "label": "跟随模型",
           "value": "follow",
-          "labelEn": "Follow model"
+          "labelEn": "Follow model",
+          "labelJa": "モデルに追従",
+          "labelTw": "跟隨模型"
         },
         {
           "label": "自定义",
           "value": "custom",
-          "labelEn": "Custom"
+          "labelEn": "Custom",
+          "labelJa": "カスタム",
+          "labelTw": "自訂"
         }
       ],
       "configKey": "FastTowerMode",
@@ -387,19 +447,27 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Tower speed and quality",
-      "descEn": "Fast: print at the maximum layer height, wipe slowly only on glue layers | Follow model: layer height matches the model | Custom: custom layer height and wipe strategy"
+      "descEn": "Fast: print at the maximum layer height, wipe slowly only on glue layers | Follow model: layer height matches the model | Custom: custom layer height and wipe strategy",
+      "labelJa": "タワーの速度と品質",
+      "labelTw": "擦拭塔速度與品質",
+      "descJa": "高速：最大レイヤー高さで印刷し、塗布面のレイヤーだけ低速でノズルワイプ | モデルに追従：レイヤー高さをモデルに合わせる | カスタム：レイヤー高さとワイプ方式を個別に設定",
+      "descTw": "快速：最大層高列印，僅塗膠面層慢速擦嘴 | 跟隨模型：層高與模型一致 | 自訂：自訂層高和擦嘴策略"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         }
       ],
       "configKey": "FirstPenRevitalizationFlag",
@@ -421,7 +489,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "First-pen priming",
-      "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled"
+      "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled",
+      "labelJa": "初回筆の活性化",
+      "labelTw": "首筆活化",
+      "descJa": "ワイプタワーの 1 層目で塗布しながらペンを活性化します。ワイプタワー有効時のみ働きます",
+      "descTw": "在擦拭塔的首層塗膠時活化膠筆出膠，僅在開啟擦拭塔時有效"
     },
     {
       "configKey": "GlueInterModelLiftHeight",
@@ -447,7 +519,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Z lift between glue areas",
-      "descEn": "Combined hop control for inter-model travel and segment hops. Both use this height"
+      "descEn": "Combined hop control for inter-model travel and segment hops. Both use this height",
+      "labelJa": "塗布領域間の Z リフト",
+      "labelTw": "塗膠區域間 Z 軸抬升高度",
+      "descJa": "モデル間の移動と区間内ジャンプの微小リフトをまとめて制御します。塗布領域間の移動と区間ジャンプの両方でこの高さを使います",
+      "descTw": "模型間跳轉＋段間跳轉微抬合併控制。塗膠區域間移動和段間跳轉均使用此高度"
     },
     {
       "configKey": "GluePassCount",
@@ -473,7 +549,11 @@
       "unit": "次",
       "valueType": "int",
       "labelEn": "Glue passes",
-      "descEn": "Number of glue passes over the same area; more passes improve adhesion but take longer"
+      "descEn": "Number of glue passes over the same area; more passes improve adhesion but take longer",
+      "labelJa": "塗布回数",
+      "labelTw": "塗膠次數",
+      "descJa": "同じ領域を塗布する回数。増やすと接着力は上がりますが印刷時間が延びます",
+      "descTw": "同一區域的塗膠遍數，多次塗膠可增加黏合力但延長列印時間"
     },
     {
       "configKey": "GlueSparseRatio",
@@ -498,7 +578,11 @@
       "uiComponent": "number",
       "valueType": "float",
       "labelEn": "Glue sparsity",
-      "descEn": "Sparsity of the glue path with a small nozzle (<=0.3mm): 0 = no sparsity, 50 = drop every other line (default), 100 = keep only the ends"
+      "descEn": "Sparsity of the glue path with a small nozzle (<=0.3mm): 0 = no sparsity, 50 = drop every other line (default), 100 = keep only the ends",
+      "labelJa": "塗布の間引き率",
+      "labelTw": "塗膠稀疏比",
+      "descJa": "小径ノズル（0.3mm 以下）での塗布経路の間引き率。0＝間引きなし、50＝1 行おきに削除（既定）、100＝両端のみ残す",
+      "descTw": "小噴嘴（≤0.3mm）塗膠路徑稀疏比例，0＝不稀疏，50＝隔行刪除（預設），100＝僅保留首尾"
     },
     {
       "configKey": "GlueZCompensationBedBL",
@@ -530,7 +614,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Bed trim - rear left",
-      "descEn": "Z trim at the rear left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge"
+      "descEn": "Z trim at the rear left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
+      "labelJa": "ベッド補正 - 左奥",
+      "labelTw": "熱床-後左補償",
+      "descJa": "ベッドモードの左奥角の Z 補正値。負値＝押し下げ（ペンがベッドに近づき塗布量が増える）、正値＝持ち上げ。補正範囲は端の段差を避けるため自動で 2mm 外側に広がります",
+      "descTw": "熱床模式下後左角的 Z 補償值。負值＝下壓（塗膠筆更近床面，膠更多）；正值＝上抬。補償範圍自動外擴 2mm 避免邊緣突變"
     },
     {
       "configKey": "GlueZCompensationBedBR",
@@ -562,7 +650,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Bed trim - rear right",
-      "descEn": "Z trim at the rear right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge"
+      "descEn": "Z trim at the rear right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
+      "labelJa": "ベッド補正 - 右奥",
+      "labelTw": "熱床-後右補償",
+      "descJa": "ベッドモードの右奥角の Z 補正値。負値＝押し下げ（ペンがベッドに近づき塗布量が増える）、正値＝持ち上げ。補正範囲は端の段差を避けるため自動で 2mm 外側に広がります",
+      "descTw": "熱床模式下後右角的 Z 補償值。負值＝下壓（塗膠筆更近床面，膠更多）；正值＝上抬。補償範圍自動外擴 2mm 避免邊緣突變"
     },
     {
       "configKey": "GlueZCompensationBedFL",
@@ -594,7 +686,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Bed trim - front left",
-      "descEn": "Z trim at the front left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge"
+      "descEn": "Z trim at the front left corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
+      "labelJa": "ベッド補正 - 左手前",
+      "labelTw": "熱床-前左補償",
+      "descJa": "ベッドモードの左手前角の Z 補正値。負値＝押し下げ（ペンがベッドに近づき塗布量が増える）、正値＝持ち上げ。補正範囲は端の段差を避けるため自動で 2mm 外側に広がります",
+      "descTw": "熱床模式下前左角的 Z 補償值。負值＝下壓（塗膠筆更近床面，膠更多）；正值＝上抬。補償範圍自動外擴 2mm 避免邊緣突變"
     },
     {
       "configKey": "GlueZCompensationBedFR",
@@ -626,7 +722,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Bed trim - front right",
-      "descEn": "Z trim at the front right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge"
+      "descEn": "Z trim at the front right corner in bed mode. Negative = press down (pen closer to the bed, more glue); positive = lift. The trim area extends by 2mm automatically to avoid a hard edge",
+      "labelJa": "ベッド補正 - 右手前",
+      "labelTw": "熱床-前右補償",
+      "descJa": "ベッドモードの右手前角の Z 補正値。負値＝押し下げ（ペンがベッドに近づき塗布量が増える）、正値＝持ち上げ。補正範囲は端の段差を避けるため自動で 2mm 外側に広がります",
+      "descTw": "熱床模式下前右角的 Z 補償值。負值＝下壓（塗膠筆更近床面，膠更多）；正值＝上抬。補償範圍自動外擴 2mm 避免邊緣突變"
     },
     {
       "configKey": "GlueZCompensationEnabled",
@@ -649,19 +749,27 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Glue Z direction compensation",
-      "descEn": "When on, the glue Z is interpolated bilinearly from the four corner trims by X/Y position, fixing directions where the glue does not stick. The trim area extends by 2mm automatically to avoid a hard edge"
+      "descEn": "When on, the glue Z is interpolated bilinearly from the four corner trims by X/Y position, fixing directions where the glue does not stick. The trim area extends by 2mm automatically to avoid a hard edge",
+      "labelJa": "塗布 Z 方向補正",
+      "labelTw": "塗膠方向補償",
+      "descJa": "オンにすると、塗布 Z は X/Y 位置に応じて 4 隅の補正値から双線形補間されます。特定方向に塗布できない問題を解消します。補正範囲は端の段差を避けるため自動で 2mm 外側に広がります",
+      "descTw": "開啟後塗膠 Z 會根據 X/Y 位置按 4 角補償值進行雙線性插值，解決特定方向塗不上膠的問題。補償範圍自動外擴 2mm 避免邊緣突變"
     },
     {
       "choices": [
         {
           "label": "热床范围",
           "value": "bed",
-          "labelEn": "Bed range"
+          "labelEn": "Bed range",
+          "labelJa": "ベッド範囲",
+          "labelTw": "熱床範圍"
         },
         {
           "label": "涂胶面范围",
           "value": "patch",
-          "labelEn": "Glue-area range"
+          "labelEn": "Glue-area range",
+          "labelJa": "塗布面範囲",
+          "labelTw": "塗膠面範圍"
         }
       ],
       "configKey": "GlueZCompensationMode",
@@ -689,7 +797,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Trim range mode",
-      "descEn": "Bed range: compensate over the whole physical bed, for a bed that is itself tilted (range +/-0.2mm, extended 2mm) | Glue-area range: compensate per continuous glue area on each layer, for locally uneven models (range +/-0.1mm, extended 2mm)"
+      "descEn": "Bed range: compensate over the whole physical bed, for a bed that is itself tilted (range +/-0.2mm, extended 2mm) | Glue-area range: compensate per continuous glue area on each layer, for locally uneven models (range +/-0.1mm, extended 2mm)",
+      "labelJa": "補正範囲モード",
+      "labelTw": "補償範圍模式",
+      "descJa": "ベッド範囲：ベッド全体の物理面積を補正。ベッド自体が傾いている場合に適します（±0.2mm、2mm 外側まで）。塗布面範囲：各レイヤーの連続した塗布領域のバウンディングボックスごとに補正。モデルの局所的な凹凸に適します（±0.1mm、2mm 外側まで）",
+      "descTw": "熱床範圍：針對整個熱床物理面積補償，適合床面本身傾斜（範圍 ±0.2mm，外擴 2mm）；塗膠面範圍：針對每層每個連續塗膠區域的包圍盒補償，適合模型局部不平（範圍 ±0.1mm，外擴 2mm）"
     },
     {
       "configKey": "GlueZCompensationPatchBL",
@@ -721,7 +833,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue trim - rear left",
-      "descEn": "Z trim at the rear left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift"
+      "descEn": "Z trim at the rear left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
+      "labelJa": "塗布面補正 - 左奥",
+      "labelTw": "塗膠面-後左補償",
+      "descJa": "塗布面モードの左奥角の Z 補正値。各塗布領域のバウンディングボックスを 2mm 外側に広げて補正範囲とします。負値＝押し下げ、正値＝持ち上げ",
+      "descTw": "塗膠面模式下後左角的 Z 補償值。每塊塗膠區域的包圍盒自動外擴 2mm 作為補償範圍。負值＝下壓；正值＝上抬"
     },
     {
       "configKey": "GlueZCompensationPatchBR",
@@ -753,7 +869,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue trim - rear right",
-      "descEn": "Z trim at the rear right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift"
+      "descEn": "Z trim at the rear right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
+      "labelJa": "塗布面補正 - 右奥",
+      "labelTw": "塗膠面-後右補償",
+      "descJa": "塗布面モードの右奥角の Z 補正値。各塗布領域のバウンディングボックスを 2mm 外側に広げて補正範囲とします。負値＝押し下げ、正値＝持ち上げ",
+      "descTw": "塗膠面模式下後右角的 Z 補償值。每塊塗膠區域的包圍盒自動外擴 2mm 作為補償範圍。負值＝下壓；正值＝上抬"
     },
     {
       "configKey": "GlueZCompensationPatchFL",
@@ -785,7 +905,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue trim - front left",
-      "descEn": "Z trim at the front left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift"
+      "descEn": "Z trim at the front left corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
+      "labelJa": "塗布面補正 - 左手前",
+      "labelTw": "塗膠面-前左補償",
+      "descJa": "塗布面モードの左手前角の Z 補正値。各塗布領域のバウンディングボックスを 2mm 外側に広げて補正範囲とします。負値＝押し下げ、正値＝持ち上げ",
+      "descTw": "塗膠面模式下前左角的 Z 補償值。每塊塗膠區域的包圍盒自動外擴 2mm 作為補償範圍。負值＝下壓；正值＝上抬"
     },
     {
       "configKey": "GlueZCompensationPatchFR",
@@ -817,7 +941,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue trim - front right",
-      "descEn": "Z trim at the front right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift"
+      "descEn": "Z trim at the front right corner in glue-area mode. Each glue area bounding box extends by 2mm to define the trim range. Negative = press down; positive = lift",
+      "labelJa": "塗布面補正 - 右手前",
+      "labelTw": "塗膠面-前右補償",
+      "descJa": "塗布面モードの右手前角の Z 補正値。各塗布領域のバウンディングボックスを 2mm 外側に広げて補正範囲とします。負値＝押し下げ、正値＝持ち上げ",
+      "descTw": "塗膠面模式下前右角的 Z 補償值。每塊塗膠區域的包圍盒自動外擴 2mm 作為補償範圍。負值＝下壓；正值＝上抬"
     },
     {
       "configKey": "GlueZLiftHeight",
@@ -843,7 +971,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue Z hop height",
-      "descEn": "Pen lift before and after gluing. Used for the hop after a pen refill and for the hop at the end of gluing. The first 3 layers use the first-3-layers lift sub-parameter"
+      "descEn": "Pen lift before and after gluing. Used for the hop after a pen refill and for the hop at the end of gluing. The first 3 layers use the first-3-layers lift sub-parameter",
+      "labelJa": "塗布 Z リフト高さ",
+      "labelTw": "塗膠 Z 軸抬升高度",
+      "descJa": "塗布前後のペン持ち上げ量。インク補充後のホップと塗布終了時のホップに使います。最初の 3 層は「前 3 層のリフト」副パラメータを使います",
+      "descTw": "塗膠前後抬筆量。用於補墨後的跳升與塗膠結束時的跳升。前 3 層使用「前 3 層抬升」子參數"
     },
     {
       "configKey": "GlueZLiftHeightFirstLayers",
@@ -875,7 +1007,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "First 3 layers lift",
-      "descEn": "Extra pen lift before and after gluing on the first 3 layers, to stabilize first-layer adhesion. Added on top of the glue Z hop height"
+      "descEn": "Extra pen lift before and after gluing on the first 3 layers, to stabilize first-layer adhesion. Added on top of the glue Z hop height",
+      "labelJa": "前 3 層のリフト高さ",
+      "labelTw": "前 3 層抬升高度",
+      "descJa": "最初の 3 層で塗布前後に追加するペン持ち上げ量。1 層目の密着を安定させます。塗布 Z リフト高さに加算されます",
+      "descTw": "前 3 層塗膠前後抬筆的額外高度，用於首層附著穩定。與塗膠 Z 軸抬升高度疊加使用"
     },
     {
       "configKey": "SwapHopHeight",
@@ -901,7 +1037,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Pen swap hop height",
-      "descEn": "How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height"
+      "descEn": "How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height",
+      "labelJa": "ペン交換時の剥離高さ",
+      "labelTw": "換筆脫層高度",
+      "descJa": "ペン交換時にノズルを印刷直後の面から離す高さ（z-hop）。この小さなスパイラル剥離だけに効き、ペンの持ち上げ高さとは別です",
+      "descTw": "換筆時噴嘴離開剛列印表面的高度（z-hop）。只影響那次小螺旋脫層，不是抬筆高度"
     },
     {
       "configKey": "GlueZOffset",
@@ -927,19 +1067,27 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Glue Z offset",
-      "descEn": "Extra Z offset while gluing; negative brings the pen closer to the model surface"
+      "descEn": "Extra Z offset while gluing; negative brings the pen closer to the model surface",
+      "labelJa": "塗布 Z オフセット",
+      "labelTw": "塗膠 Z 偏移",
+      "descJa": "塗布時の Z 軸の追加オフセット。負値にするとペン先がモデル表面に近づきます",
+      "descTw": "塗膠時 Z 軸額外偏移，負值使筆尖更靠近模型表面"
     },
     {
       "choices": [
         {
           "label": "擦料塔",
           "value": "tower",
-          "labelEn": "Wipe tower"
+          "labelEn": "Wipe tower",
+          "labelJa": "ワイプタワー",
+          "labelTw": "擦拭塔"
         },
         {
           "label": "圆盘擦拭",
           "value": "disk",
-          "labelEn": "Disc wipe"
+          "labelEn": "Disc wipe",
+          "labelJa": "ディスクワイプ",
+          "labelTw": "圓盤擦拭"
         }
       ],
       "configKey": "UseWipingTowers",
@@ -962,21 +1110,31 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Wipe method",
-      "descEn": "How to wipe: the wipe tower builds a tower at a fixed position; disc wiping uses the printer built-in disc"
+      "descEn": "How to wipe: the wipe tower builds a tower at a fixed position; disc wiping uses the printer built-in disc",
+      "labelJa": "ワイプ方式",
+      "labelTw": "擦料方式",
+      "descJa": "ワイプ方法：ワイプタワーは固定位置に塔を建てます。ディスクワイプはプリンター内蔵のディスクを使います",
+      "descTw": "擦料方式：擦拭塔在固定位置建塔；圓盤擦拭使用印表機內建圓盤"
     },
     {
       "choices": [
         {
           "label": "关闭",
-          "value": 0
+          "value": 0,
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "稀疏一半",
-          "value": 50
+          "value": 50,
+          "labelJa": "50% 間引き",
+          "labelTw": "稀疏一半"
         },
         {
           "label": "稀疏90%",
-          "value": 90
+          "value": 90,
+          "labelJa": "90% 間引き",
+          "labelTw": "稀疏 90%"
         }
       ],
       "configKey": "IroningCoverageThreshold",
@@ -1002,7 +1160,11 @@
       "unit": "%",
       "valueType": "float",
       "labelEn": "Ironing coverage threshold",
-      "descEn": "Minimum share of the ironing surface covered by the support surface; below it the glue falls back to the support surface"
+      "descEn": "Minimum share of the ironing surface covered by the support surface; below it the glue falls back to the support surface",
+      "labelJa": "アイロニング被覆しきい値",
+      "labelTw": "熨燙覆蓋閾值",
+      "descJa": "サポート面のうちアイロニング面が占める最低割合。これを下回ると塗布はサポート面に戻ります",
+      "descTw": "熨燙面佔支撐面的最低路徑長度比例，低於此值時回退到支撐面"
     },
     {
       "configKey": "IroningESumThreshold",
@@ -1034,24 +1196,34 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Ironing extrusion threshold",
-      "descEn": "Ironing is removed automatically when the extruded length of an ironing segment exceeds this threshold (auto mode only)"
+      "descEn": "Ironing is removed automatically when the extruded length of an ironing segment exceeds this threshold (auto mode only)",
+      "labelJa": "アイロニング押し出ししきい値",
+      "labelTw": "熨燙擠出閾值",
+      "descJa": "アイロニング区間の押し出し総量がこの値を超えると、アイロニングを自動で削除します（自動モードのみ）",
+      "descTw": "當熨燙段擠出總量超過此閾值時自動移除熨燙（僅在自動模式下生效）"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         },
         {
           "label": "自动",
           "value": "auto",
-          "labelEn": "Auto"
+          "labelEn": "Auto",
+          "labelJa": "自動",
+          "labelTw": "自動"
         }
       ],
       "configKey": "IroningMode",
@@ -1073,7 +1245,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Support surface ironing",
-      "descEn": "Keep or remove ironing on top of the support surface: off = always remove ironing extrusion; on = always keep; auto = decide by the extrusion threshold"
+      "descEn": "Keep or remove ironing on top of the support surface: off = always remove ironing extrusion; on = always keep; auto = decide by the extrusion threshold",
+      "labelJa": "サポート面アイロニング",
+      "labelTw": "支撐面熨燙",
+      "descJa": "サポート面上のアイロニングを残すか削除するか：オフ＝常に削除、オン＝常に残す、自動＝押し出し量のしきい値で判定",
+      "descTw": "控制支撐面上層熨燙的保留／移除：關閉＝始終移除熨燙擠出；開啟＝始終保留；自動＝根據擠出量閾值判斷"
     },
     {
       "configKey": "IroningSuppressExpand",
@@ -1099,19 +1275,27 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Ironing suppression expansion",
-      "descEn": "How far the bounding box of an active ironing segment expands outwards; 0 = no expansion"
+      "descEn": "How far the bounding box of an active ironing segment expands outwards; 0 = no expansion",
+      "labelJa": "アイロニング抑制の拡張範囲",
+      "labelTw": "熨燙抑制擴展範圍",
+      "descJa": "有効なアイロニング区間のバウンディングボックスを外側に広げる距離。0 で拡張なし",
+      "descTw": "已啟用熨燙段包圍盒向外擴展的距離，0 為關閉擴展"
     },
     {
       "choices": [
         {
           "label": "包围盒外扩",
           "value": "bbox",
-          "labelEn": "Bounding box"
+          "labelEn": "Bounding box",
+          "labelJa": "バウンディングボックス",
+          "labelTw": "包圍盒外擴"
         },
         {
           "label": "质心半径外扩",
           "value": "centroid",
-          "labelEn": "Centroid radius"
+          "labelEn": "Centroid radius",
+          "labelJa": "重心半径",
+          "labelTw": "重心半徑外擴"
         }
       ],
       "configKey": "IroningSuppressExpandMode",
@@ -1139,19 +1323,27 @@
       "uiComponent": "select",
       "valueType": "string",
       "labelEn": "Ironing suppression mode",
-      "descEn": "How the suppression area expands: bounding box = evenly along X and Y; centroid radius = radially outwards from the centroid"
+      "descEn": "How the suppression area expands: bounding box = evenly along X and Y; centroid radius = radially outwards from the centroid",
+      "labelJa": "アイロニング抑制の拡張モード",
+      "labelTw": "熨燙抑制擴展模式",
+      "descJa": "抑制領域の広げ方：バウンディングボックス＝XY 方向へ均等に拡張、重心半径＝重心から放射状に拡張",
+      "descTw": "熨燙抑制區域的擴展方式：包圍盒外擴＝沿 XY 軸均勻外擴；質心半徑外擴＝從質心向外徑向擴展"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         }
       ],
       "configKey": "MinSupportInterfaceEnabled",
@@ -1173,7 +1365,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Filter tiny support glue areas",
-      "descEn": "Filters out support glue areas that are too small, avoiding wasted glue"
+      "descEn": "Filters out support glue areas that are too small, avoiding wasted glue",
+      "labelJa": "小さなサポート塗布面を除外",
+      "labelTw": "最小支撐塗膠面過濾",
+      "descJa": "有効にすると小さすぎるサポート塗布面を除外し、無駄な塗布を防ぎます",
+      "descTw": "啟用後過濾掉過小的支撐塗膠面，避免無效塗膠"
     },
     {
       "configKey": "NozzleCoolingFlag",
@@ -1195,7 +1391,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Cool nozzle while gluing",
-      "descEn": "Lowers the nozzle temperature while gluing so the glue does not drip from overheating"
+      "descEn": "Lowers the nozzle temperature while gluing so the glue does not drip from overheating",
+      "labelJa": "塗布中のノズル冷却",
+      "labelTw": "塗膠期間降溫",
+      "descJa": "塗布中にノズル温度を下げ、過熱による接着剤の垂れを防ぎます",
+      "descTw": "塗膠期間降低噴嘴溫度以防止膠水因過熱而滴漏"
     },
     {
       "configKey": "XOffset",
@@ -1246,7 +1446,11 @@
       "valueType": "float",
       "variantMode": "per_variant",
       "labelEn": "X offset",
-      "descEn": "X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right"
+      "descEn": "X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right",
+      "labelJa": "X 軸オフセット",
+      "labelTw": "X 軸偏移",
+      "descJa": "ノズルに対する塗布ペン先の X 方向オフセット（mm）。負値は左、正値は右",
+      "descTw": "塗膠筆尖相對噴嘴的 X 方向偏移量（mm），負值向左正值向右"
     },
     {
       "configKey": "YOffset",
@@ -1297,7 +1501,11 @@
       "valueType": "float",
       "variantMode": "per_variant",
       "labelEn": "Y offset",
-      "descEn": "Y offset of the glue pen tip relative to the nozzle (mm); calibrate against the real hardware"
+      "descEn": "Y offset of the glue pen tip relative to the nozzle (mm); calibrate against the real hardware",
+      "labelJa": "Y 軸オフセット",
+      "labelTw": "Y 軸偏移",
+      "descJa": "ノズルに対する塗布ペン先の Y 方向オフセット（mm）。実際の機械構成に合わせて校正します",
+      "descTw": "塗膠筆尖相對噴嘴的 Y 方向偏移量（mm），根據實際機械結構校準"
     },
     {
       "configKey": "ZOffset",
@@ -1345,25 +1553,35 @@
       "valueType": "float",
       "variantMode": "per_variant",
       "labelEn": "Z offset",
-      "descEn": "Height offset of the glue pen tip (mm); affects the distance between the pen and the model"
+      "descEn": "Height offset of the glue pen tip (mm); affects the distance between the pen and the model",
+      "labelJa": "Z 軸オフセット",
+      "labelTw": "Z 軸偏移",
+      "descJa": "塗布ペン先の高さオフセット（mm）。ペン先とモデルの距離に影響します",
+      "descTw": "塗膠筆尖相對噴嘴的高度偏移（mm），影響筆尖與模型的距離"
     },
     {
       "choices": [
         {
           "label": "brim",
           "value": "brim",
-          "labelEn": "Brim"
+          "labelEn": "Brim",
+          "labelJa": "ブリム",
+          "labelTw": "brim"
         },
         {
           "label": "斜肋外墙",
           "value": "rib",
-          "labelEn": "Ribbed wall"
+          "labelEn": "Ribbed wall",
+          "labelJa": "リブ外壁",
+          "labelTw": "斜肋外牆"
         },
         {
           "deprecated": true,
           "label": "护套",
           "value": "sheath",
-          "labelEn": "Sheath"
+          "labelEn": "Sheath",
+          "labelJa": "シース",
+          "labelTw": "護套"
         }
       ],
       "configKey": "OuterStructure",
@@ -1391,7 +1609,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Outer structure",
-      "descEn": "Outer structure of the wipe tower: none = no outer shell; ribbed wall = angled ribs outside the tower; sheath = wrap the tower to keep it from collapsing"
+      "descEn": "Outer structure of the wipe tower: none = no outer shell; ribbed wall = angled ribs outside the tower; sheath = wrap the tower to keep it from collapsing",
+      "labelJa": "外周構造",
+      "labelTw": "外圍結構",
+      "descJa": "ワイプタワーの外周構造：なし＝外周を生成しない、リブ外壁＝タワー外側に斜めリブを生成、シース＝タワーを包んで倒れを防ぐ",
+      "descTw": "選擇擦拭塔外圍結構類型：無＝不產生外圍；斜肋外牆＝在塔外側產生斜肋支撐；護套＝包覆塔體外圍防止倒塌"
     },
     {
       "configKey": "PrimeEnabled",
@@ -1413,19 +1635,27 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Enable priming",
-      "descEn": "Master switch for priming; when off, all priming parameters are hidden and the priming logic is skipped"
+      "descEn": "Master switch for priming; when off, all priming parameters are hidden and the priming logic is skipped",
+      "labelJa": "プライミングを有効化",
+      "labelTw": "啟用潤筆",
+      "descJa": "プライミングの主スイッチ。オフにすると関連パラメータは非表示になり、プライミング処理も実行しません",
+      "descTw": "潤筆總開關，關閉後所有潤筆相關參數不顯示且潤筆邏輯不執行"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         }
       ],
       "configKey": "PrimeEveryLayer",
@@ -1453,7 +1683,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Prime every layer",
-      "descEn": "Primes before gluing on every layer; mutually exclusive with the priming trigger layer count"
+      "descEn": "Primes before gluing on every layer; mutually exclusive with the priming trigger layer count",
+      "labelJa": "毎層プライミング",
+      "labelTw": "每層潤筆",
+      "descJa": "オンにすると毎層の塗布前にプライミングします。プライミングのトリガー層数とは排他です",
+      "descTw": "開啟後每層塗膠前都觸發潤筆，與潤筆觸發層數互斥"
     },
     {
       "configKey": "PrimeLength",
@@ -1485,7 +1719,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Priming path length",
-      "descEn": "Path length of a re-prime after a long time without gluing, ensuring the glue flows"
+      "descEn": "Path length of a re-prime after a long time without gluing, ensuring the glue flows",
+      "labelJa": "プライミング経路長",
+      "labelTw": "潤筆路徑長度",
+      "descJa": "長時間塗布しなかった後に再プライミングする経路長。接着剤が十分に出るようにします",
+      "descTw": "長時間未塗膠後重新潤筆的路徑長度，確保膠水充分流出"
     },
     {
       "configKey": "PrimeMinPathLength",
@@ -1517,19 +1755,27 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Minimum priming path length",
-      "descEn": "Path lengths below this threshold do not trigger priming"
+      "descEn": "Path lengths below this threshold do not trigger priming",
+      "labelJa": "プライミング最小経路長",
+      "labelTw": "潤筆最小路徑長度",
+      "descJa": "プライミングを起こす最小の経路長。これより短い経路では実行しません",
+      "descTw": "觸發潤筆的最小路徑長度閾值，路徑長度小於此值時不觸發潤筆"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         }
       ],
       "configKey": "PrimePerModel",
@@ -1557,7 +1803,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Prime for every model",
-      "descEn": "Primes before gluing each model; when off, priming happens only once per layer"
+      "descEn": "Primes before gluing each model; when off, priming happens only once per layer",
+      "labelJa": "モデルごとにプライミング",
+      "labelTw": "每個模型都潤筆",
+      "descJa": "オンにすると各モデルの塗布前にプライミングします。オフなら毎層 1 回だけです",
+      "descTw": "開啟後每個模型的塗膠前都執行潤筆，關閉則每層只潤筆一次"
     },
     {
       "configKey": "PrimeTriggerLayers",
@@ -1589,7 +1839,11 @@
       "unit": "层",
       "valueType": "int",
       "labelEn": "Priming trigger layers",
-      "descEn": "Priming is triggered automatically after this many layers without gluing"
+      "descEn": "Priming is triggered automatically after this many layers without gluing",
+      "labelJa": "プライミングのトリガー層数",
+      "labelTw": "潤筆觸發層數",
+      "descJa": "この層数だけ塗布しない状態が続くと、自動でプライミングします",
+      "descTw": "超過此層數未塗膠時自動觸發潤筆"
     },
     {
       "configKey": "RibExtraLength",
@@ -1621,7 +1875,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Rib extra length",
-      "descEn": "Extra extension length of the ribbed wall; 0 = no extension"
+      "descEn": "Extra extension length of the ribbed wall; 0 = no extension",
+      "labelJa": "リブの追加長",
+      "labelTw": "斜肋額外長度",
+      "descJa": "リブ外壁の追加延長長さ。0 で延長なし",
+      "descTw": "斜肋外牆的額外延伸長度，0 為不延伸"
     },
     {
       "configKey": "RibFilletWall",
@@ -1649,7 +1907,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Rounded outer wall",
-      "descEn": "Whether the ribbed outer wall is rounded"
+      "descEn": "Whether the ribbed outer wall is rounded",
+      "labelJa": "外壁の角丸め",
+      "labelTw": "外牆倒圓角",
+      "descJa": "リブ外壁の角を丸めるかどうか",
+      "descTw": "斜肋外牆是否倒圓角"
     },
     {
       "configKey": "RibWidth",
@@ -1681,7 +1943,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Rib width",
-      "descEn": "Width of the ribbed outer wall"
+      "descEn": "Width of the ribbed outer wall",
+      "labelJa": "リブ幅",
+      "labelTw": "斜肋寬度",
+      "descJa": "リブ外壁の幅",
+      "descTw": "斜肋外牆的寬度"
     },
     {
       "configKey": "SheathBaseExpand",
@@ -1714,7 +1980,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Sheath base expansion",
-      "descEn": "Single-side expansion of the sheath over the tower body on the bottom layer"
+      "descEn": "Single-side expansion of the sheath over the tower body on the bottom layer",
+      "labelJa": "シース底面の拡張量",
+      "labelTw": "護套底層膨脹量",
+      "descJa": "最下層におけるシースのタワー本体に対する片側の拡張量",
+      "descTw": "護套底層相對塔體的單邊膨脹量"
     },
     {
       "configKey": "SheathConvergeLayers",
@@ -1747,7 +2017,11 @@
       "unit": "层",
       "valueType": "int",
       "labelEn": "Sheath convergence layers",
-      "descEn": "Number of layers over which the sheath converges from the base expansion back to the tower outline"
+      "descEn": "Number of layers over which the sheath converges from the base expansion back to the tower outline",
+      "labelJa": "シースの収束層数",
+      "labelTw": "護套收斂層數",
+      "descJa": "シースが底面の拡張からタワー外形へ戻るまでの層数",
+      "descTw": "護套從底層膨脹逐漸收斂到塔體外輪廓的層數"
     },
     {
       "configKey": "SheathEnableHeight",
@@ -1780,7 +2054,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Sheath auto-enable height",
-      "descEn": "In auto mode the sheath is enabled once the model is taller than this"
+      "descEn": "In auto mode the sheath is enabled once the model is taller than this",
+      "labelJa": "シース自動有効化の高さ",
+      "labelTw": "護套自動啟用高度",
+      "descJa": "自動モードで、モデルの高さがこの値を超えるとシースを有効にします",
+      "descTw": "自動模式下，模型高度超過此值時啟用護套"
     },
     {
       "configKey": "SheathWallWidth",
@@ -1813,7 +2091,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Sheath wall width",
-      "descEn": "Wall width of the sheath"
+      "descEn": "Wall width of the sheath",
+      "labelJa": "シースの壁幅",
+      "labelTw": "護套壁寬",
+      "descJa": "シース壁の幅",
+      "descTw": "護套壁的寬度"
     },
     {
       "configKey": "SmallFeatureFactor",
@@ -1838,7 +2120,11 @@
       "uiComponent": "number",
       "valueType": "float",
       "labelEn": "Small feature factor",
-      "descEn": "Small-feature speed = MaxSpeed x this value. Lower (e.g. 0.5) is finer but slower"
+      "descEn": "Small-feature speed = MaxSpeed x this value. Lower (e.g. 0.5) is finer but slower",
+      "labelJa": "小特徴の係数",
+      "labelTw": "小特徵因子",
+      "descJa": "小特徴の速度＝MaxSpeed × この値。小さくする（例：0.5）と精細になりますが遅くなります",
+      "descTw": "小特徵速度係數＝MaxSpeed × 此值。值越小（如 0.5）小特徵越精細但更慢"
     },
     {
       "configKey": "MaxSpeed",
@@ -1865,7 +2151,11 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Glue speed limit",
-      "descEn": "Maximum travel speed of the glue pen (mm/s); too high may cause uneven glue or lost steps"
+      "descEn": "Maximum travel speed of the glue pen (mm/s); too high may cause uneven glue or lost steps",
+      "labelJa": "塗布速度の上限",
+      "labelTw": "塗膠速度限制",
+      "descJa": "塗布ペンの最大移動速度（mm/s）。高すぎると塗布ムラや脱調の原因になります",
+      "descTw": "塗膠筆的最大移動速度（mm/s），過高可能導致塗膠不均勻或丟步"
     },
     {
       "configKey": "SupportExtrusionMultiplier",
@@ -1890,24 +2180,34 @@
       "uiComponent": "number",
       "valueType": "float",
       "labelEn": "Support extrusion multiplier",
-      "descEn": "Extrusion multiplier for support material; affects support density and how easy it is to remove"
+      "descEn": "Extrusion multiplier for support material; affects support density and how easy it is to remove",
+      "labelJa": "サポートの押し出し倍率",
+      "labelTw": "支撐擠出倍率",
+      "descJa": "サポート材の押し出し倍率。サポート密度と取り外しやすさに影響します",
+      "descTw": "支撐材料的擠出倍率，影響支撐密度和拆除難度"
     },
     {
       "choices": [
         {
           "label": "最小层高",
           "value": "min",
-          "labelEn": "Min layer height"
+          "labelEn": "Min layer height",
+          "labelJa": "最小レイヤー高さ",
+          "labelTw": "最小層高"
         },
         {
           "label": "最大层高",
           "value": "max",
-          "labelEn": "Max layer height"
+          "labelEn": "Max layer height",
+          "labelJa": "最大レイヤー高さ",
+          "labelTw": "最大層高"
         },
         {
           "label": "自适应",
           "value": "auto",
-          "labelEn": "Adaptive"
+          "labelEn": "Adaptive",
+          "labelJa": "自動調整",
+          "labelTw": "自適應"
         }
       ],
       "configKey": "TowerCustomLayerHeight",
@@ -1935,7 +2235,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Tower layer height",
-      "descEn": "Wipe tower layer height strategy in custom mode"
+      "descEn": "Wipe tower layer height strategy in custom mode",
+      "labelJa": "タワーのレイヤー高さ戦略",
+      "labelTw": "塔層高策略",
+      "descJa": "カスタムモードでのワイプタワーのレイヤー高さ戦略",
+      "descTw": "自訂模式下的擦拭塔層高策略"
     },
     {
       "configKey": "TowerExtrudeRatio",
@@ -1966,7 +2270,11 @@
       "uiComponent": "number",
       "valueType": "float",
       "labelEn": "Tower extrusion ratio",
-      "descEn": "Glue output ratio of the wipe tower; higher means more glue. Overridden by the processor at runtime"
+      "descEn": "Glue output ratio of the wipe tower; higher means more glue. Overridden by the processor at runtime",
+      "labelJa": "ワイプタワーの押し出し倍率",
+      "labelTw": "擦拭塔擠出倍率",
+      "descJa": "ワイプタワーの塗布量比率。大きいほど塗布量が増えます。実行時にプロセッサの計算で上書きされます",
+      "descTw": "擦拭塔出膠量比例，值越大出膠越多。會被處理器動態計算覆蓋"
     },
     {
       "configKey": "TowerFirstLayerFlow",
@@ -1997,7 +2305,11 @@
       "uiComponent": "number",
       "valueType": "float",
       "labelEn": "Tower first-layer flow",
-      "descEn": "Extrusion flow ratio for the sheath and ribs on the first layer; 1.0 is the standard flow"
+      "descEn": "Extrusion flow ratio for the sheath and ribs on the first layer; 1.0 is the standard flow",
+      "labelJa": "タワー 1 層目の流量",
+      "labelTw": "擦拭塔首層流量",
+      "descJa": "1 層目のシースとリブの押し出し流量比。1.0 が標準流量です",
+      "descTw": "擦拭塔首層護套和斜肋的擠出流量比例，1.0 為標準流量"
     },
     {
       "configKey": "TowerGlueLayerSpeed",
@@ -2029,19 +2341,27 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Glue layer speed",
-      "descEn": "Tower print speed on glue layers"
+      "descEn": "Tower print speed on glue layers",
+      "labelJa": "塗布面レイヤーの速度",
+      "labelTw": "塗膠面層速度",
+      "descJa": "塗布面レイヤーでのタワー印刷速度",
+      "descTw": "塗膠面層的塔體列印速度"
     },
     {
       "choices": [
         {
           "label": "跟随塔",
           "value": "follow",
-          "labelEn": "Follow tower"
+          "labelEn": "Follow tower",
+          "labelJa": "タワーに追従",
+          "labelTw": "跟隨塔"
         },
         {
           "label": "自定义",
           "value": "custom",
-          "labelEn": "Custom"
+          "labelEn": "Custom",
+          "labelJa": "カスタム",
+          "labelTw": "自訂"
         }
       ],
       "configKey": "TowerRibSpeed",
@@ -2069,7 +2389,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Rib print speed",
-      "descEn": "Follow tower: use the tower print speed | Custom: use a specific rib print speed"
+      "descEn": "Follow tower: use the tower print speed | Custom: use a specific rib print speed",
+      "labelJa": "リブの印刷速度",
+      "labelTw": "斜肋列印速度",
+      "descJa": "タワーに追従：タワーの印刷速度を使う | カスタム：リブ専用の印刷速度を指定",
+      "descTw": "跟隨塔：使用塔體列印速度 | 自訂：指定斜肋列印速度"
     },
     {
       "configKey": "TowerRibSpeedValue",
@@ -2101,7 +2425,11 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Custom speed",
-      "descEn": "Custom print speed for the ribbed outer wall"
+      "descEn": "Custom print speed for the ribbed outer wall",
+      "labelJa": "カスタム速度",
+      "labelTw": "自訂速度",
+      "descJa": "リブ外壁のカスタム印刷速度",
+      "descTw": "斜肋外牆的自訂列印速度"
     },
     {
       "configKey": "TowerSafeZOffset",
@@ -2133,7 +2461,11 @@
       "unit": "mm",
       "valueType": "float",
       "labelEn": "Tower safety Z offset",
-      "descEn": "Safety Z offset for the wipe tower, 0.3-5.0mm"
+      "descEn": "Safety Z offset for the wipe tower, 0.3-5.0mm",
+      "labelJa": "タワーの安全 Z オフセット",
+      "labelTw": "塔安全 Z 偏移",
+      "descJa": "ワイプタワーの安全 Z オフセット距離（0.3〜5.0mm）",
+      "descTw": "擦拭塔安全 Z 偏移距離，範圍 0.3~5.0mm"
     },
     {
       "configKey": "TowerSheathSpeed",
@@ -2166,7 +2498,11 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Sheath print speed",
-      "descEn": "Print speed of the sheath"
+      "descEn": "Print speed of the sheath",
+      "labelJa": "シースの印刷速度",
+      "labelTw": "護套列印速度",
+      "descJa": "シースの印刷速度",
+      "descTw": "護套的列印速度"
     },
     {
       "configKey": "TowerTravelSpeed",
@@ -2198,24 +2534,34 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Tower wipe speed",
-      "descEn": "Travel speed of the tower wipe, 50-500mm/s"
+      "descEn": "Travel speed of the tower wipe, 50-500mm/s",
+      "labelJa": "タワーのワイプ速度",
+      "labelTw": "塔刮擦速度",
+      "descJa": "ワイプタワーでのワイプ移動速度（50〜500mm/s）",
+      "descTw": "擦拭塔刮擦移動速度，範圍 50~500mm/s"
     },
     {
       "choices": [
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         },
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "自动",
           "value": "auto",
-          "labelEn": "Auto"
+          "labelEn": "Auto",
+          "labelJa": "自動",
+          "labelTw": "自動"
         }
       ],
       "configKey": "TowerWipeMode",
@@ -2243,19 +2589,27 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Nozzle wipe strategy",
-      "descEn": "On: wipe every layer | Off: no wipe, not even on glue layers | Auto: wipe only on glue layers"
+      "descEn": "On: wipe every layer | Off: no wipe, not even on glue layers | Auto: wipe only on glue layers",
+      "labelJa": "ノズルワイプ戦略",
+      "labelTw": "擦嘴策略",
+      "descJa": "オン：毎層ワイプ | オフ：塗布面も含めてワイプしない | 自動：塗布面レイヤーだけワイプ",
+      "descTw": "開啟：每層都擦嘴 | 關閉：包括塗膠面都不擦 | 自動：僅塗膠面層擦嘴"
     },
     {
       "choices": [
         {
           "label": "关闭",
           "value": "off",
-          "labelEn": "Off"
+          "labelEn": "Off",
+          "labelJa": "オフ",
+          "labelTw": "關閉"
         },
         {
           "label": "开启",
           "value": "on",
-          "labelEn": "On"
+          "labelEn": "On",
+          "labelJa": "オン",
+          "labelTw": "開啟"
         }
       ],
       "configKey": "UseIroningPath",
@@ -2277,7 +2631,11 @@
       "uiComponent": "switch",
       "valueType": "bool",
       "labelEn": "Glue along ironing path",
-      "descEn": "When on, glue follows the XY path of the ironing segment first; areas with too little ironing fall back to the support surface path"
+      "descEn": "When on, glue follows the XY path of the ironing segment first; areas with too little ironing fall back to the support surface path",
+      "labelJa": "アイロニング経路で塗布",
+      "labelTw": "塗膠面使用熨燙路徑",
+      "descJa": "オンにすると、塗布面はまずアイロニング区間の XY 経路を使います。アイロニングが足りない領域はサポート面の経路に戻ります",
+      "descTw": "開啟後，塗膠面優先使用熨燙段的 XY 路徑；熨燙覆蓋不足的區域自動回退到支撐面路徑"
     },
     {
       "configKey": "UserDryTime",
@@ -2303,7 +2661,11 @@
       "unit": "秒",
       "valueType": "int",
       "labelEn": "Extra drying time",
-      "descEn": "Extra drying time after gluing (seconds) so the glue sets"
+      "descEn": "Extra drying time after gluing (seconds) so the glue sets",
+      "labelJa": "追加乾燥時間",
+      "labelTw": "額外乾燥時間",
+      "descJa": "塗布後に追加で乾燥させる時間（秒）。接着剤を十分に固めます",
+      "descTw": "塗膠後額外等待乾燥的時間（秒），讓膠水充分固化"
     },
     {
       "configKey": "WiperX",
@@ -2357,7 +2719,11 @@
       "valueType": "float",
       "variantMode": "shared",
       "labelEn": "Wipe tower X",
-      "descEn": "X position of the wipe tower on the bed (mm)"
+      "descEn": "X position of the wipe tower on the bed (mm)",
+      "labelJa": "ワイプタワー X 座標",
+      "labelTw": "擦拭塔 X 座標",
+      "descJa": "ベッド上でのワイプタワーの X 座標（mm）",
+      "descTw": "擦拭塔在熱床上的 X 座標（mm）"
     },
     {
       "configKey": "WiperY",
@@ -2409,7 +2775,11 @@
       "valueType": "float",
       "variantMode": "shared",
       "labelEn": "Wipe tower Y",
-      "descEn": "Y position of the wipe tower on the bed (mm)"
+      "descEn": "Y position of the wipe tower on the bed (mm)",
+      "labelJa": "ワイプタワー Y 座標",
+      "labelTw": "擦拭塔 Y 座標",
+      "descJa": "ベッド上でのワイプタワーの Y 座標（mm）",
+      "descTw": "擦拭塔在熱床上的 Y 座標（mm）"
     },
     {
       "configKey": "WipeTowerPrintSpeed",
@@ -2441,7 +2811,11 @@
       "unit": "mm/s",
       "valueType": "float",
       "labelEn": "Tower print speed",
-      "descEn": "Tower print speed on non-glue layers"
+      "descEn": "Tower print speed on non-glue layers",
+      "labelJa": "タワー本体の印刷速度",
+      "labelTw": "塔體列印速度",
+      "descJa": "塗布面以外のレイヤーでのタワー印刷速度",
+      "descTw": "非塗膠面層的塔體列印速度"
     },
     {
       "choices": [
@@ -2452,7 +2826,9 @@
         {
           "label": "新型",
           "value": "new",
-          "labelEn": "New"
+          "labelEn": "New",
+          "labelJa": "新版",
+          "labelTw": "新版"
         }
       ],
       "configKey": "XYCalibrationMode",
@@ -2474,7 +2850,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "XY calibration mode",
-      "descEn": "XY calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)"
+      "descEn": "XY calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)",
+      "labelJa": "XY キャリブレーションモード",
+      "labelTw": "XY 校準模式",
+      "descJa": "XY キャリブレーションモード：オリジナルは機種ごとの固定座標、新版はベッド上のモデル位置から生成します（既定）",
+      "descTw": "XY 校準模式：原版按機型固定座標；新版按模型在床上的實際位置產生（預設）"
     },
     {
       "choices": [
@@ -2485,7 +2865,9 @@
         {
           "label": "新型",
           "value": "new",
-          "labelEn": "New"
+          "labelEn": "New",
+          "labelJa": "新版",
+          "labelTw": "新版"
         }
       ],
       "configKey": "ZCalibrationMode",
@@ -2507,7 +2889,11 @@
       "uiComponent": "segmented",
       "valueType": "string",
       "labelEn": "Z calibration mode",
-      "descEn": "Z calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)"
+      "descEn": "Z calibration mode: original uses fixed coordinates per machine; new generates them from the model position on the bed (default)",
+      "labelJa": "Z キャリブレーションモード",
+      "labelTw": "Z 校準模式",
+      "descJa": "Z キャリブレーションモード：オリジナルは機種ごとの固定座標、新版はベッド上のモデル位置から生成します（既定）",
+      "descTw": "Z 校準模式：原版按機型固定座標；新版按模型在床上的實際位置產生（預設）"
     }
   ],
   "tabs": [
@@ -2523,7 +2909,11 @@
           "label": "空间偏移",
           "order": 100,
           "labelEn": "Space offsets",
-          "descriptionEn": "Toolhead space offset parameters"
+          "descriptionEn": "Toolhead space offset parameters",
+          "labelJa": "空間オフセット",
+          "labelTw": "空間偏移",
+          "descriptionJa": "ツールヘッドの空間オフセットパラメータ",
+          "descriptionTw": "工具頭空間偏移參數"
         },
         {
           "description": "运动速度与挤出参数",
@@ -2531,10 +2921,16 @@
           "label": "运动与挤出",
           "order": 200,
           "labelEn": "Motion and extrusion",
-          "descriptionEn": "Motion speed and extrusion parameters"
+          "descriptionEn": "Motion speed and extrusion parameters",
+          "labelJa": "動作と押し出し",
+          "labelTw": "運動與擠出",
+          "descriptionJa": "動作速度と押し出しのパラメータ",
+          "descriptionTw": "運動速度與擠出參數"
         }
       ],
-      "labelEn": "Offset"
+      "labelEn": "Offset",
+      "labelJa": "オフセット",
+      "labelTw": "偏移"
     },
     {
       "icon": "layers",
@@ -2548,7 +2944,11 @@
           "label": "擦料方式",
           "order": 0,
           "labelEn": "Wipe method",
-          "descriptionEn": "Wipe method selection (tower / disc)"
+          "descriptionEn": "Wipe method selection (tower / disc)",
+          "labelJa": "ワイプ方式",
+          "labelTw": "擦料方式",
+          "descriptionJa": "ワイプ方式の選択（ワイプタワー / ディスクワイプ）",
+          "descriptionTw": "擦料方式選擇（擦拭塔／圓盤擦拭）"
         },
         {
           "description": "擦料塔位置与打印参数",
@@ -2556,7 +2956,11 @@
           "label": "擦料塔位置与打印",
           "order": 1,
           "labelEn": "Tower position and printing",
-          "descriptionEn": "Wipe tower position and printing parameters"
+          "descriptionEn": "Wipe tower position and printing parameters",
+          "labelJa": "ワイプタワーの位置と印刷",
+          "labelTw": "擦拭塔位置與列印",
+          "descriptionJa": "ワイプタワーの位置と印刷のパラメータ",
+          "descriptionTw": "擦拭塔位置與列印參數"
         },
         {
           "description": "安全与高级擦料塔参数",
@@ -2564,7 +2968,11 @@
           "label": "安全与高级参数",
           "order": 2,
           "labelEn": "Safety and advanced",
-          "descriptionEn": "Safety and advanced wipe tower parameters"
+          "descriptionEn": "Safety and advanced wipe tower parameters",
+          "labelJa": "安全と詳細設定",
+          "labelTw": "安全與進階參數",
+          "descriptionJa": "ワイプタワーの安全・詳細パラメータ",
+          "descriptionTw": "擦拭塔安全與進階參數"
         },
         {
           "description": "擦料塔结构加强参数",
@@ -2572,7 +2980,11 @@
           "label": "塔结构加强",
           "order": 3,
           "labelEn": "Tower structure",
-          "descriptionEn": "Wipe tower structural reinforcement parameters"
+          "descriptionEn": "Wipe tower structural reinforcement parameters",
+          "labelJa": "タワー構造の補強",
+          "labelTw": "塔結構加強",
+          "descriptionJa": "ワイプタワーの構造補強パラメータ",
+          "descriptionTw": "擦拭塔結構加強參數"
         },
         {
           "description": "圆盘擦拭动作控制参数",
@@ -2580,10 +2992,16 @@
           "label": "圆盘动作控制",
           "order": 4,
           "labelEn": "Disc control",
-          "descriptionEn": "Disc wiping motion control parameters"
+          "descriptionEn": "Disc wiping motion control parameters",
+          "labelJa": "ディスク動作制御",
+          "labelTw": "圓盤動作控制",
+          "descriptionJa": "ディスクワイプの動作制御パラメータ",
+          "descriptionTw": "圓盤擦拭動作控制參數"
         }
       ],
-      "labelEn": "Wiping"
+      "labelEn": "Wiping",
+      "labelJa": "ワイピング",
+      "labelTw": "擦料"
     },
     {
       "icon": "fan",
@@ -2597,10 +3015,16 @@
           "label": "温控与风扇",
           "order": 0,
           "labelEn": "Temperature and fan",
-          "descriptionEn": "Temperature control and fan parameters"
+          "descriptionEn": "Temperature control and fan parameters",
+          "labelJa": "温度制御とファン",
+          "labelTw": "溫控與風扇",
+          "descriptionJa": "温度制御とファンのパラメータ",
+          "descriptionTw": "溫控與風扇參數"
         }
       ],
-      "labelEn": "Fan"
+      "labelEn": "Fan",
+      "labelJa": "ファン",
+      "labelTw": "風扇"
     },
     {
       "icon": "paintbrush",
@@ -2614,7 +3038,11 @@
           "label": "高级运动调控",
           "order": 0,
           "labelEn": "Advanced motion",
-          "descriptionEn": "Advanced glue motion parameters"
+          "descriptionEn": "Advanced glue motion parameters",
+          "labelJa": "詳細な動作制御",
+          "labelTw": "進階運動調控",
+          "descriptionJa": "塗布の詳細な動作制御パラメータ",
+          "descriptionTw": "塗膠進階運動調控參數"
         },
         {
           "description": "支撑面熨烫与稀疏涂胶参数",
@@ -2622,7 +3050,11 @@
           "label": "支撑面熨烫",
           "order": 1,
           "labelEn": "Support ironing",
-          "descriptionEn": "Support surface ironing and sparse glue parameters"
+          "descriptionEn": "Support surface ironing and sparse glue parameters",
+          "labelJa": "サポート面アイロニング",
+          "labelTw": "支撐面熨燙",
+          "descriptionJa": "サポート面のアイロニングと間引き塗布のパラメータ",
+          "descriptionTw": "支撐面熨燙與稀疏塗膠參數"
         },
         {
           "description": "涂胶 Z 方向补偿参数",
@@ -2630,10 +3062,16 @@
           "label": "涂胶方向补偿",
           "order": 2,
           "labelEn": "Glue Z compensation",
-          "descriptionEn": "Glue Z directional compensation parameters"
+          "descriptionEn": "Glue Z directional compensation parameters",
+          "labelJa": "塗布 Z 補正",
+          "labelTw": "塗膠方向補償",
+          "descriptionJa": "塗布の Z 方向補正パラメータ",
+          "descriptionTw": "塗膠 Z 方向補償參數"
         }
       ],
-      "labelEn": "Glue"
+      "labelEn": "Glue",
+      "labelJa": "塗布",
+      "labelTw": "塗膠"
     },
     {
       "icon": "terminal",
@@ -2647,10 +3085,16 @@
           "label": "自定义G-code",
           "order": 0,
           "labelEn": "Custom G-code",
-          "descriptionEn": "Custom G-code commands"
+          "descriptionEn": "Custom G-code commands",
+          "labelJa": "カスタム G-code",
+          "labelTw": "自訂 G-code",
+          "descriptionJa": "カスタム G-code 命令",
+          "descriptionTw": "自訂 G-code 指令"
         }
       ],
-      "labelEn": "Switching"
+      "labelEn": "Switching",
+      "labelJa": "切り替え",
+      "labelTw": "切換"
     },
     {
       "icon": "sliders",
@@ -2664,7 +3108,11 @@
           "label": "润笔",
           "order": 0,
           "labelEn": "Priming",
-          "descriptionEn": "Priming and first-pen activation parameters"
+          "descriptionEn": "Priming and first-pen activation parameters",
+          "labelJa": "プライミング",
+          "labelTw": "潤筆",
+          "descriptionJa": "プライミングと初回筆の活性化パラメータ",
+          "descriptionTw": "潤筆與首筆活化參數"
         },
         {
           "description": "涂胶基础参数",
@@ -2672,7 +3120,11 @@
           "label": "涂胶参数",
           "order": 1,
           "labelEn": "Glue parameters",
-          "descriptionEn": "Basic glue parameters"
+          "descriptionEn": "Basic glue parameters",
+          "labelJa": "塗布パラメータ",
+          "labelTw": "塗膠參數",
+          "descriptionJa": "塗布の基本パラメータ",
+          "descriptionTw": "塗膠基礎參數"
         },
         {
           "description": "Z 轴抬升高度参数",
@@ -2680,7 +3132,11 @@
           "label": "Z轴抬升",
           "order": 2,
           "labelEn": "Z lift",
-          "descriptionEn": "Z lift height parameters"
+          "descriptionEn": "Z lift height parameters",
+          "labelJa": "Z 軸リフト",
+          "labelTw": "Z 軸抬升",
+          "descriptionJa": "Z 軸リフト高さのパラメータ",
+          "descriptionTw": "Z 軸抬升高度參數"
         },
         {
           "description": "机型专属参数",
@@ -2688,10 +3144,16 @@
           "label": "机型专属",
           "order": 3,
           "labelEn": "Machine specific",
-          "descriptionEn": "Machine-specific parameters"
+          "descriptionEn": "Machine-specific parameters",
+          "labelJa": "機種専用",
+          "labelTw": "機型專屬",
+          "descriptionJa": "機種専用パラメータ",
+          "descriptionTw": "機型專屬參數"
         }
       ],
-      "labelEn": "More"
+      "labelEn": "More",
+      "labelJa": "その他",
+      "labelTw": "更多"
     },
     {
       "icon": "settings",
@@ -2699,7 +3161,9 @@
       "label": "内部参数",
       "order": 70,
       "sections": [],
-      "labelEn": "Internal"
+      "labelEn": "Internal",
+      "labelJa": "内部パラメータ",
+      "labelTw": "內部參數"
     },
     {
       "id": "settings",
@@ -2710,64 +3174,106 @@
           "id": "appearance",
           "label": "外观",
           "order": 100,
-          "labelEn": "Appearance"
+          "labelEn": "Appearance",
+          "labelJa": "外観",
+          "labelTw": "外觀",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "update",
           "label": "软件更新",
           "order": 200,
-          "labelEn": "Software update"
+          "labelEn": "Software update",
+          "labelJa": "ソフトウェア更新",
+          "labelTw": "軟體更新",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "interaction",
           "label": "辅助交互",
           "order": 300,
-          "labelEn": "Interaction"
+          "labelEn": "Interaction",
+          "labelJa": "補助操作",
+          "labelTw": "輔助互動",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "slicer",
           "label": "切片器",
           "order": 400,
-          "labelEn": "Slicer"
+          "labelEn": "Slicer",
+          "labelJa": "スライサー",
+          "labelTw": "切片器",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "post_process",
           "label": "后处理",
           "order": 500,
-          "labelEn": "Post-processing"
+          "labelEn": "Post-processing",
+          "labelJa": "後処理",
+          "labelTw": "後處理",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "bed_glue",
           "label": "热床预涂胶",
           "order": 700,
-          "labelEn": "Bed pre-glue"
+          "labelEn": "Bed pre-glue",
+          "labelJa": "ベッド予備塗布",
+          "labelTw": "熱床預塗膠",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "cache_management",
           "label": "缓存管理",
           "order": 800,
-          "labelEn": "Cache management"
+          "labelEn": "Cache management",
+          "labelJa": "キャッシュ管理",
+          "labelTw": "快取管理",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "data_maintenance",
           "label": "数据维护",
           "order": 900,
-          "labelEn": "Data maintenance"
+          "labelEn": "Data maintenance",
+          "labelJa": "データメンテナンス",
+          "labelTw": "資料維護",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "uninstall_cleanup",
           "label": "卸载清理",
           "order": 1000,
-          "labelEn": "Uninstall cleanup"
+          "labelEn": "Uninstall cleanup",
+          "labelJa": "アンインストール時のクリーンアップ",
+          "labelTw": "解除安裝清理",
+          "descriptionJa": null,
+          "descriptionTw": null
         },
         {
           "id": "performance",
           "label": "性能（DEV）",
           "order": 1100,
-          "labelEn": "Performance (DEV)"
+          "labelEn": "Performance (DEV)",
+          "labelJa": "パフォーマンス（DEV）",
+          "labelTw": "效能（DEV）",
+          "descriptionJa": null,
+          "descriptionTw": null
         }
       ],
-      "labelEn": "Settings"
+      "labelEn": "Settings",
+      "labelJa": "ソフトウェア設定",
+      "labelTw": "軟體設定"
     }
   ],
   "updated": "2026-07-05 16:46:54"

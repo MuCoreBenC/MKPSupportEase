@@ -496,10 +496,16 @@ export interface RecipeParam {
   label: string
   /** 英文显示名（2026-10-26 双语注册表）。缺省 = 回落 `label` */
   labelEn?: string
+  /** 日 / 繁中显示名（2026-10-31 四册）。缺省 = 回落中文 */
+  labelJa?: string
+  labelTw?: string
   /** 一句话说明，鼠标悬停时显示。注册表本来就有这份数据 */
   desc: string
   /** 英文说明。缺省 = 回落 `desc` */
   descEn?: string
+  /** 日 / 繁中说明。缺省 = 回落中文 */
+  descJa?: string
+  descTw?: string
   /** 分组名，来自注册表的 section —— 界面不自己造分类 */
   group: string
   /** 英文分组名。缺省 = 回落 `group` */
@@ -518,6 +524,9 @@ export interface RecipeParam {
     label: string
     /** 英文显示名。缺省 = 回落 `label` */
     labelEn?: string
+    /** 日 / 繁中显示名（缺省 = 回落中文） */
+    labelJa?: string
+    labelTw?: string
     deprecated?: boolean
     /** 只在这些机型上弃用（与 `deprecated` 叠加） */
     deprecatedMachines?: string[]
@@ -794,9 +803,15 @@ export interface ParamSection {
   label: string
   /** 英文名（空 = 回落 `label`） */
   labelEn?: string
+  /** 日 / 繁中名（空 = 回落中文） */
+  labelJa?: string
+  labelTw?: string
   desc?: string
   /** 英文说明（空 = 回落 `desc`） */
   descEn?: string
+  /** 日 / 繁中说明（空 = 回落中文） */
+  descJa?: string
+  descTw?: string
   /** 这一组里有几条。**已按 machineFilter 与废弃过滤**，所以是这台机型真实看得到的条数 */
   count: number
 }
@@ -808,6 +823,9 @@ export interface ParamTab {
   label: string
   /** 英文名（空 = 回落 `label`） */
   labelEn?: string
+  /** 日 / 繁中名（空 = 回落中文） */
+  labelJa?: string
+  labelTw?: string
   /** 这个分类下有几条（= 各 section 的 count 之和） */
   count: number
   sections: ParamSection[]
@@ -1465,7 +1483,26 @@ export interface RuntimeCatalogMachine {
   id: string
   display: string
   brand: string
-  versions: { id: string; name: string }[]
+  /**
+   * 版本清单。**多语言那几册必须在这里也出现**（2026-10-31）：`getMachines`
+   * 走的是另一套 DTO，而 `getRuntimeCatalog` 是同一份数据的第二条出口 ——
+   * 类型写窄了，后端真带了字段前端也用不上（TS 会当成不存在）。
+   */
+  versions: {
+    id: string
+    name: string
+    nameEn?: string | null
+    nameTw?: string | null
+    nameJa?: string | null
+    tag?: string | null
+    tagEn?: string | null
+    tagTw?: string | null
+    tagJa?: string | null
+    description?: string | null
+    descriptionEn?: string | null
+    descriptionTw?: string | null
+    descriptionJa?: string | null
+  }[]
 }
 
 /**
@@ -1572,9 +1609,15 @@ export interface CatalogParamDef {
   label: string
   /** 英文显示名（2026-10-26 双语注册表）。缺省 = 回落 `label` */
   labelEn?: string
+  /** 日 / 繁中显示名（2026-10-31 四册）。缺省 = 回落中文 */
+  labelJa?: string
+  labelTw?: string
   desc: string
   /** 英文说明。缺省 = 回落 `desc` */
   descEn?: string
+  /** 日 / 繁中说明。缺省 = 回落中文 */
+  descJa?: string
+  descTw?: string
   unit?: string
   /** `number` / `switch` / `segmented` / `select` / `gcode` —— 控件形态的原词 */
   uiComponent: string
@@ -1585,6 +1628,9 @@ export interface CatalogParamDef {
     label: string
     /** 英文显示名。缺省 = 回落 `label` */
     labelEn?: string
+    /** 日 / 繁中显示名（缺省 = 回落中文） */
+    labelJa?: string
+    labelTw?: string
     deprecated?: boolean
     deprecatedMachines?: string[]
   }[]
@@ -1605,15 +1651,22 @@ export interface CatalogTabMeta {
   label: string
   /** 英文显示名（缺省 = 回落 `label`） */
   labelEn?: string
+  /** 日 / 繁中显示名（2026-10-31 四册）。缺省 = 回落中文 */
+  labelJa?: string
+  labelTw?: string
   order: number
   icon?: string
   sections: {
     id: string
     label: string
     labelEn?: string
+    labelJa?: string
+    labelTw?: string
     order: number
     description?: string
     descriptionEn?: string
+    descriptionJa?: string
+    descriptionTw?: string
   }[]
 }
 

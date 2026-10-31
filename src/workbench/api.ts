@@ -202,6 +202,10 @@ export interface TabMeta {
 /** `app::ChoiceView` */
 export interface ChoiceView {
   label: string
+  /** 选项名的另外三册 —— 原样带回，回写不丢 */
+  labelEn: string
+  labelJa: string
+  labelTw: string
   value: unknown
   /**
    * **显式全局弃用**（所有机型都不许写）—— 定义框那颗勾的状态。
@@ -228,7 +232,14 @@ export interface ShowWhen {
 export interface ParamView {
   key: string
   label: string
+  /** 另外三册（2026-10-31）—— 定义框里能看见、也能改 */
+  labelEn: string
+  labelJa: string
+  labelTw: string
   desc: string
+  descEn: string
+  descJa: string
+  descTw: string
   tomlKey: string
   sectionId: string
   tabId: string | null
@@ -281,6 +292,16 @@ export interface RegistryView {
 export interface ParamMetaEdit {
   label: string
   desc: string
+  /**
+   * 另外三册（2026-10-31）。`undefined` = **不动**（后端 `None` 语义），
+   * 空串 = 清掉那一册。定义框现在能编这六格。
+   */
+  labelEn?: string | null
+  labelJa?: string | null
+  labelTw?: string | null
+  descEn?: string | null
+  descJa?: string | null
+  descTw?: string | null
   unit: string | null
   valueType: ValueType
   uiComponent: UiComponent
@@ -583,6 +604,26 @@ export type Refresh =
   | { page: 'matrix'; cols: ColRef[]; tab?: string | null; query?: string }
 
 /** `app::SaveResult` */
+/**
+ * 统一编辑事务的状态（2026-10-31）。
+ *
+ * 一条 `op` = 一次编辑，标签是给人看的（撤销提示 / 保存清单）。
+ * `dirtyCount` 覆盖**全部**编辑类型：开关、文本、尺寸、禁区、增删版本、套餐、资产、参数值。
+ */
+export interface TxnOp {
+  label: string
+  at: string
+  files: { rel: string; before?: number; after?: number }[]
+}
+
+export interface TxnState {
+  dirty: boolean
+  dirtyCount: number
+  canUndo: boolean
+  canRedo: boolean
+  ops: TxnOp[]
+}
+
 export interface SaveResult {
   view: BookView
   /**
@@ -2273,6 +2314,10 @@ export const wb = {
     invoke<ApplyResult>('wb_apply_draft', { label, patches, refresh: refresh ?? null }),
   save: () => invoke<SaveResult>('wb_save'),
   discard: () => invoke<BookView>('wb_discard'),
+  /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
+  txnState: () => invoke<TxnState>('wb_txn_state'),
+  txnUndo: () => invoke<TxnState>('wb_txn_undo'),
+  txnRedo: () => invoke<TxnState>('wb_txn_redo'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */

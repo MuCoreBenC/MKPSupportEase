@@ -29,6 +29,9 @@ pub mod issues;
 pub use crate::presetdata::resolve as layer;
 pub mod patch;
 pub mod preview;
+/// **统一编辑事务**（2026-10-31）：影子工作树 + 文件级操作日志。
+/// 所有编辑都只写影子树，「保存」是唯一落盘边界 —— 见模块头注。
+pub mod txn;
 pub mod variants;
 pub mod visibility;
 pub mod wording;

@@ -30,6 +30,7 @@
  */
 
 import { useMemo, useRef } from 'react'
+import type { CSSProperties } from 'react'
 
 import { tokenizeGcode } from './gcode'
 import type { GTokenKind } from './gcode'
@@ -93,6 +94,24 @@ export default function GcodeEditor({
   const nums = useMemo(() => lines.map((_, i) => String(i + 1)).join('\n'), [lines])
 
   /**
+   * 内容有多少（行数 / 最长一行几列）—— 交给 CSS 决定框的尺寸。
+   *
+   * 参数台那个矩阵格子里的浮窗按它量尺寸（2026-10-31）：固定 88px / 104px 宽
+   * 会把 10 来行、20 多列的脚本截掉（作者：「它被截断了，我希望它变大一点都可以」）。
+   * 宽度按 `ch` 算，所以**必须**和 `.pGcePre/.pGceTa` 同一副等宽字体（本来就是）。
+   * 中文按两个 `ch` 计 —— 全角字符在等宽字体里就是一个字宽，不折算会窄一截。
+   */
+  const metrics = useMemo(() => {
+    let cols = 0
+    for (const line of value.split('\n')) {
+      let w = 0
+      for (const ch of line) w += (ch.codePointAt(0) ?? 0) > 0x2e80 ? 2 : 1
+      if (w > cols) cols = w
+    }
+    return { '--gce-lines': lines.length, '--gce-cols': cols } as CSSProperties
+  }, [value, lines.length])
+
+  /**
    * 失焦时把**结尾的空行**摘掉（`"…F42000\n"` → `"…F42000"`）。
    *
    * 尾部换行是编辑过程的临时态（回车落在行尾就会带出一个），存进草稿之后
@@ -120,7 +139,7 @@ export default function GcodeEditor({
   }
 
   return (
-    <div className={s.pGce} data-size={size} data-off={disabled ? '' : undefined}>
+    <div className={s.pGce} data-size={size} data-off={disabled ? '' : undefined} style={metrics}>
       {gutter && (
         <pre ref={numRef} className={s.pGceNum} aria-hidden>
           {nums}

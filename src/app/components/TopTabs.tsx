@@ -259,10 +259,11 @@ export default function TopTabs({
       />
 
       {/* Windows 侧的窗口键：撑满标题栏全高、贴到右上角、彼此无缝。
-          按钮是 <button>，useTitlebarDrag 里 closest('button') 会跳过它们，
-          不会误把点击窗口键当成拖窗或双击缩放 */}
+          `data-no-drag` 是给 useTitlebarDrag 看的（2026-10-31）：可点击控件默认
+          「不动 = 点击、动了 = 拖窗」，但这三颗键要**一点都不能拖** —— 按住关闭键
+          手一抖就变成移窗口、关不掉，是最难受的那种"点不灵"。 */}
       {!isMac && (
-        <div className={s.controls}>
+        <div className={s.controls} data-no-drag="true">
           <button type="button" className={s.ctrl} aria-label={tr('tabs.min')} onClick={winMinimize}>
             <Icon name="min" size={15} strokeWidth={1.5} />
           </button>

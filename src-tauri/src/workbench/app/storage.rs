@@ -238,6 +238,27 @@ pub struct SaveOutcome {
     pub remap: BTreeMap<String, String>,
 }
 
+/// **把值草稿立刻写进影子树**（2026-10-31 统一编辑事务）。
+///
+/// 值不再"攒在内存里、保存时才写文件"：一改就落进影子树，于是它和开关、尺寸、增删版本
+/// 走的是同一条路 —— 同一套撤销栈、同一个保存边界。写的是**影子树**，
+/// 真仓库一个字节都不会动。
+///
+/// 返回真正写下去的键数。
+pub fn apply_draft_now(
+    presets: &mut Presets,
+    committed: &Committed,
+    draft: &Draft,
+) -> Result<usize, AppError> {
+    let edits = plan_value_edits(presets, committed, draft);
+    if edits.is_empty() {
+        return Ok(0);
+    }
+    let written = edits.len();
+    presets.apply_values(&edits)?;
+    Ok(written)
+}
+
 /// 把草稿写回仓库。
 ///
 /// 值走 [`Presets::apply_values`] 一次写进 `machineVariants`，
@@ -300,16 +321,21 @@ fn plan_value_edits(
     committed: &Committed,
     draft: &Draft,
 ) -> Vec<(String, String, Option<serde_json::Value>)> {
+    let _ = committed;
     let mut out = Vec::new();
 
-    for m in &committed.catalog {
+    /* ★ 清单从 **presets** 取，不从 `committed` 取（2026-10-31）：统一事务之后
+    `presets` 才是编辑态 —— 刚新增的版本在它里面，`committed` 还停在开场那一代。
+    用旧清单算，新版本上改的值会被静默丢掉。 */
+    for m in presets.catalog.machines() {
+        let version_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
         for (key, value) in pending_of(draft, Level::Machine, &m.id) {
             // 上提过的那几条版本键此刻还钉着旧值 —— 它们的新值得跟着一起写，
             // 否则下一次归并又把它们提上来，把这一刀抹掉
             let mut owners = vec![m.id.clone()];
             if let Some(param) = presets.registry.param(&key) {
-                if variants::promoted_to_base(param, &m.id, &m.version_ids) {
-                    owners.extend(m.version_ids.iter().map(|v| format!("{}:{}", m.id, v)));
+                if variants::promoted_to_base(param, &m.id, &version_ids) {
+                    owners.extend(version_ids.iter().map(|v| format!("{}:{}", m.id, v)));
                 }
             }
             for owner in owners {
@@ -317,7 +343,7 @@ fn plan_value_edits(
             }
         }
 
-        for vid in &m.version_ids {
+        for vid in &version_ids {
             let uid = format!("{}/{}", m.id, vid);
             for (key, value) in pending_of(draft, Level::Version, &uid) {
                 out.push((key, format!("{}:{}", m.id, vid), value));

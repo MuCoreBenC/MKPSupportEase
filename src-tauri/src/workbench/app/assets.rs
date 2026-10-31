@@ -36,7 +36,7 @@ use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::domain::wording::{AssetIdentity, BuildState};
 use crate::workbench::domain::Visibility;
-use crate::workbench::load_presets;
+use crate::workbench::load_session_presets;
 use crate::workbench::paths;
 use crate::workbench::presets::{AssetKind, Presets};
 
@@ -820,7 +820,7 @@ pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
 #[tauri::command(async)]
 pub fn wb_asset_usage(asset_id: String) -> Result<AssetUsageView, AppError> {
     traced("wb_asset_usage", |_| {
-        let presets = load_presets()?;
+        let presets = load_session_presets()?;
         let usage = presets.asset_usage(&asset_id)?;
         Ok(AssetUsageView {
             id: asset_id.clone(),
@@ -1114,7 +1114,7 @@ fn positive_dims(w: f64, h: f64) -> Option<(u32, u32)> {
 #[tauri::command(async)]
 pub fn wb_asset_inspect(asset_id: String) -> Result<AssetInspectView, AppError> {
     traced("wb_asset_inspect", |_| {
-        let presets = load_presets()?;
+        let presets = load_session_presets()?;
         let asset = presets
             .assets
             .get(&asset_id)
@@ -1152,7 +1152,7 @@ fn reveal_target(
 #[tauri::command(async)]
 pub fn wb_reveal_asset(app: tauri::AppHandle, asset_id: String) -> Result<(), AppError> {
     traced("wb_reveal_asset", |_| {
-        let presets = load_presets()?;
+        let presets = load_session_presets()?;
         let asset = presets
             .assets
             .get(&asset_id)
@@ -1195,6 +1195,8 @@ fn parse_identity(s: &str) -> Option<AssetIdentity> {
 mod tests {
     use super::*;
     use crate::workbench::domain::testkit::Fixture;
+    // 测试读**真仓库**（不是影子树）：这些判据钉的是源数据本身
+    use crate::workbench::load_presets;
 
     /// **真数据上的一条**：条目数与文件都在（b05 Task 9 的验收）。
     ///

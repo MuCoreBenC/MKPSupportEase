@@ -752,6 +752,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_apply_draft,
         app::wb_save,
         app::wb_discard,
+        app::wb_txn_state,
+        app::wb_txn_undo,
+        app::wb_txn_redo,
         // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,

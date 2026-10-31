@@ -122,6 +122,12 @@ pub struct Choice {
     /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`
     #[serde(default)]
     pub label_en: String,
+    /// 日文显示名（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub label_ja: String,
+    /// 繁中显示名（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub label_tw: String,
     pub value: Value,
     /// 全局弃用：所有机型、所有版本都不许再写这一档
     #[serde(default)]
@@ -170,10 +176,22 @@ pub struct ParamDef {
     /// 英文显示名（2026-10-26 双语注册表）。空 = 回落 `label`
     #[serde(default)]
     pub label_en: String,
+    /// 日文显示名（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub label_ja: String,
+    /// 繁中显示名（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub label_tw: String,
     pub desc: String,
     /// 英文说明。空 = 回落 `desc`
     #[serde(default)]
     pub desc_en: String,
+    /// 日文说明（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub desc_ja: String,
+    /// 繁中说明（2026-10-31 四册）。空 = 回落中文
+    #[serde(default)]
+    pub desc_tw: String,
     /// 生成 TOML 时写的行内注释
     pub toml_comment: String,
     pub value_type: ValueType,
@@ -275,6 +293,15 @@ pub struct ParamMetaEdit {
     /// 英文说明，语义同上。
     #[serde(default)]
     pub desc_en: Option<String>,
+    /// 日 / 繁中两册，语义同 `label_en`（`None` = 不动）。2026-10-31 四册化。
+    #[serde(default)]
+    pub label_ja: Option<String>,
+    #[serde(default)]
+    pub label_tw: Option<String>,
+    #[serde(default)]
+    pub desc_ja: Option<String>,
+    #[serde(default)]
+    pub desc_tw: Option<String>,
     pub unit: Option<String>,
     pub value_type: ValueType,
     pub ui_component: UiComponent,
@@ -318,11 +345,23 @@ pub struct SectionMeta {
     /// 英文显示名（空 = 回落 `label`）
     #[serde(default)]
     pub label_en: String,
+    /// 日文显示名（2026-10-31 四册，空 = 回落中文）
+    #[serde(default)]
+    pub label_ja: String,
+    /// 繁中显示名（2026-10-31 四册，空 = 回落中文）
+    #[serde(default)]
+    pub label_tw: String,
     #[serde(default)]
     pub description: Option<String>,
     /// 英文说明（空 = 回落 `description`）
     #[serde(default)]
     pub description_en: Option<String>,
+    /// 日文说明（2026-10-31 四册，空 = 回落中文）
+    #[serde(default)]
+    pub description_ja: Option<String>,
+    /// 繁中说明（2026-10-31 四册，空 = 回落中文）
+    #[serde(default)]
+    pub description_tw: Option<String>,
     pub order: f64,
 }
 
@@ -334,6 +373,12 @@ pub struct TabMeta {
     /// 英文显示名（空 = 回落 `label`）
     #[serde(default)]
     pub label_en: String,
+    /// 日文显示名（空 = 回落中文）
+    #[serde(default)]
+    pub label_ja: String,
+    /// 繁中显示名（空 = 回落中文）
+    #[serde(default)]
+    pub label_tw: String,
     pub order: f64,
     #[serde(default)]
     pub icon: Option<String>,
@@ -1290,6 +1335,28 @@ impl ParamRegistry {
                 } else {
                     c.label_en.clone()
                 },
+                // 日 / 繁中同一条口径：载荷没带就沿用文件里同一档的旧值，
+                // 否则工作台保存一次，这两册全丢（2026-10-31）
+                label_ja: if c.label_ja.trim().is_empty() {
+                    self.params[at]
+                        .choices
+                        .iter()
+                        .find(|old| json_key(&old.value) == json_key(&c.value))
+                        .map(|old| old.label_ja.clone())
+                        .unwrap_or_default()
+                } else {
+                    c.label_ja.clone()
+                },
+                label_tw: if c.label_tw.trim().is_empty() {
+                    self.params[at]
+                        .choices
+                        .iter()
+                        .find(|old| json_key(&old.value) == json_key(&c.value))
+                        .map(|old| old.label_tw.clone())
+                        .unwrap_or_default()
+                } else {
+                    c.label_tw.clone()
+                },
                 value: c.value.clone(),
                 deprecated: c.deprecated,
                 deprecated_machines: normalize_machines(&c.deprecated_machines),
@@ -1305,6 +1372,12 @@ impl ParamRegistry {
                 tbl["label"] = toml_edit::value(c.label.trim());
                 if !c.label_en.trim().is_empty() {
                     tbl["labelEn"] = toml_edit::value(c.label_en.trim());
+                }
+                if !c.label_ja.trim().is_empty() {
+                    tbl["labelJa"] = toml_edit::value(c.label_ja.trim());
+                }
+                if !c.label_tw.trim().is_empty() {
+                    tbl["labelTw"] = toml_edit::value(c.label_tw.trim());
                 }
                 if c.deprecated {
                     tbl["deprecated"] = toml_edit::value(true);
@@ -1437,6 +1510,21 @@ impl ParamRegistry {
                 t.remove("descEn");
             } else {
                 t["descEn"] = toml_edit::value(v.trim());
+            }
+        }
+        /* 日 / 繁中：与上面两格同一套语义（None = 不动、空串 = 删键） */
+        for (field, key_name) in [
+            (&edit.label_ja, "labelJa"),
+            (&edit.label_tw, "labelTw"),
+            (&edit.desc_ja, "descJa"),
+            (&edit.desc_tw, "descTw"),
+        ] {
+            if let Some(v) = field {
+                if v.trim().is_empty() {
+                    t.remove(key_name);
+                } else {
+                    t[key_name] = toml_edit::value(v.trim());
+                }
             }
         }
         match &unit {
@@ -2625,7 +2713,11 @@ mod tests {
             "jsonKey",
             "label",
             "labelEn",
+            "labelJa",
+            "labelTw",
             "descEn",
+            "descJa",
+            "descTw",
             "desc",
             "tomlComment",
             "valueType",
@@ -2719,6 +2811,66 @@ mod tests {
         assert!(
             missing.is_empty(),
             "这些条目还没有英文（英文界面会冒出中文）：{missing:#?}"
+        );
+    }
+
+    /// **四册的覆盖闸**（2026-10-31）。
+    ///
+    /// 作者口径：「需要单独翻译」—— MKP 自己这套涂胶/擦料塔参数 BBS 没有，日/繁中是我们
+    /// 自己译的。界面在 ja / zh-TW 下拿不到那一册会**回落中文**（安全网，不是可以长期缺着
+    /// 的理由）。新增参数时这条会红：补上 `labelJa` / `labelTw` 再提交。
+    ///
+    /// `desc` 只在原文有说明时才要求译文（有几条本来就没有说明）。
+    #[test]
+    fn every_entry_has_japanese_and_traditional() {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let r = ParamRegistry::load_from(&root).expect("真注册表读得通");
+
+        let mut missing: Vec<String> = Vec::new();
+        for p in &r.params {
+            if p.label_ja.trim().is_empty() {
+                missing.push(format!("{}.labelJa", p.key));
+            }
+            if p.label_tw.trim().is_empty() {
+                missing.push(format!("{}.labelTw", p.key));
+            }
+            if !p.desc.is_empty() && p.desc_ja.trim().is_empty() {
+                missing.push(format!("{}.descJa", p.key));
+            }
+            if !p.desc.is_empty() && p.desc_tw.trim().is_empty() {
+                missing.push(format!("{}.descTw", p.key));
+            }
+            for c in &p.choices {
+                if c.label_ja.trim().is_empty() {
+                    missing.push(format!("{}.choices[{}].labelJa", p.key, c.label.trim()));
+                }
+                if c.label_tw.trim().is_empty() {
+                    missing.push(format!("{}.choices[{}].labelTw", p.key, c.label.trim()));
+                }
+            }
+        }
+        for t in r.tabs() {
+            if t.label_ja.trim().is_empty() {
+                missing.push(format!("tab {}.labelJa", t.id));
+            }
+            if t.label_tw.trim().is_empty() {
+                missing.push(format!("tab {}.labelTw", t.id));
+            }
+            for s in &t.sections {
+                if s.label_ja.trim().is_empty() {
+                    missing.push(format!("section {}.labelJa", s.id));
+                }
+                if s.label_tw.trim().is_empty() {
+                    missing.push(format!("section {}.labelTw", s.id));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "这些条目还没有日/繁中（那两个界面会冒出中文）：{missing:#?}"
         );
     }
 
@@ -3197,8 +3349,12 @@ mod tests {
         ParamMetaEdit {
             label: label.to_owned(),
             label_en: None,
+            label_ja: None,
+            label_tw: None,
             desc: String::new(),
             desc_en: None,
+            desc_ja: None,
+            desc_tw: None,
             unit: None,
             value_type: ValueType::Float,
             ui_component: UiComponent::Number,
@@ -3222,6 +3378,8 @@ mod tests {
         Choice {
             label: label.to_owned(),
             label_en: String::new(),
+            label_ja: String::new(),
+            label_tw: String::new(),
             value,
             deprecated,
             deprecated_machines: Vec::new(),

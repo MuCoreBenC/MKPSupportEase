@@ -16,6 +16,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -29,10 +30,17 @@ import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../
 import { bi } from '../shared/dataLabel'
 import { activeForSelection, localActiveForSelection, selectionFromActive } from './activeSelection'
 import { notify } from '../notify/notify'
-import { activateFile, appStateMutated, useActivePreset } from '../state/appState'
+import {
+  activateFile,
+  appStateMutated,
+  useActivePreset,
+  useActivePresetReady,
+} from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { usePresetUsage } from '../state/usePresetUsage'
 import { useCatalog } from './useCatalog'
+import BootFailure from './BootFailure'
+import { hideBootSkeleton, showBootSkeleton } from '../bootSkeleton'
 import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
 import type { BundleCompanion } from './PresetStack'
@@ -202,14 +210,57 @@ export default function PageHome({ density }: PageHomeProps) {
    * 这里同帧换基准 —— 不需要回页签对账（第一轮的补丁已拆，见 docs/APP-STATE.md）。
    */
   const activeEntry = useActivePreset()
+  /*
+   * ★★ **首屏闸门**（2026-10-31，作者逐帧截图点的那一下）：
+   *   启动 / Reload 时先闪一帧欢迎页（「MKP をかんたんに始める」），数据回来才换成
+   *   A1 正式版面 —— 根因就是下面这个 effect 之前，`sel` 一律是空的三级，而空三级
+   *   在渲染那一侧等于"用户没选过机型"。
+   *
+   * 判据只有两处（都是**真值**，页面不另算一套）：
+   *   `activeReady`       AppState 那一份落地了（`appState.loaded`；null 在里面才真的表示"没有"）
+   *   `catalog.attempted` 机型目录那一趟读完了（成功 / 失败 / 超时都算）
+   *
+   * 两件都到齐才敢让首页落地：**先在这一帧把 `sel` 和 `hydrated` 一起设掉**
+   * （同一个 effect、React 会合并成一次提交），于是"闸门打开"与"三级选择已是 A1"
+   * 发生在同一帧，中间不会再有欢迎页那一拍。
+   *
+   * ★ 读**失败**（`catalog.failed`）时不放行：那时目录是空的，放行就等于把"没读到"
+   *   当成"没机型"，又回到欢迎页 —— 那正是这次要消灭的错误中间态。失败留在启动画面，
+   *   由那一层的「重试」重新拉一次。
+   */
+  const activeReady = useActivePresetReady()
+  const [hydrated, setHydrated] = useState(false)
   useEffect(() => {
-    if (catalog.machines.length === 0) return
+    if (!activeReady || !catalog.attempted || catalog.failed) return
     const next = selectionFromActive(catalog.machines, activeEntry)
     if (next !== null) setSel(next)
-  }, [activeEntry, catalog.machines])
+    /* 就绪之后这一条继续生效：预设页 / 抽屉换了「使用中」，这里照样同帧换基准 */
+    if (!hydrated) setHydrated(true)
+  }, [activeReady, catalog.attempted, catalog.failed, activeEntry, catalog.machines, hydrated])
 
   // ---------- 预设：选哪一份由 sel 定；取件、等待、失败三态都在 usePreset 里 ----------
   const preset = usePreset(sel)
+
+  /*
+   * ★ 把「使用中的机型」记到 localStorage —— **只给骨架用**（2026-10-31）。
+   *
+   *   `index.html` 末尾那段内联脚本在首帧**同步**读它，决定骨架中间摆哪一台的剪影。
+   *   没有这一步，骨架只能等 IPC 回来才敢摆 —— 那就必然先摆错一家再跳
+   *   （作者：「先是 A1 的，然后再变成 P1 的……我需要它一次性就到位」）。
+   *
+   *   写在这里是因为这一页常驻挂：`activeEntry` 一变（换机型 / 换预设）它就跟上，
+   *   下次冷启动第一帧就是对的。**不参与任何业务判断**，读不到也不影响任何东西。
+   */
+  useEffect(() => {
+    if (activeEntry === null) return
+    try {
+      localStorage.setItem('mkpse.boot.machine', activeEntry.machineId)
+    } catch {
+      /* 存储被禁（隐私模式）：那就让骨架空着，绝不猜一台给用户看 */
+    }
+  }, [activeEntry])
+
+
 
   /*
    * A3：显示层与底账对齐。sel 已经按底账反填（上面那个 effect），activeForSel 拿底账
@@ -475,6 +526,77 @@ export default function PageHome({ density }: PageHomeProps) {
     [sel, modelNode, catalog.assets, catalog.brands],
   )
   const { layers, settle, drop } = useArtLayers(art)
+
+  /*
+   * ★ 首屏还要等**那张机器图解码完**（2026-10-31 作者录屏：骨架收掉、正式版面出来了，
+   *   机器过一会儿才冒出来）。
+   *
+   * `<img>` 的下载 / 解码发生在挂上之后；不等它，用户看到的就是"先一个空档，图再出现"。
+   * 这里提前用 `new Image()` 把同一个 src 解码一次，算进 `booted` —— 骨架多留几十毫秒，
+   * 换来"露出来就是完整一屏"。1.5s 兜底：读不出来也放行，不能为一张图卡住整屏。
+   */
+  const heroSrc = art?.src ?? null
+  const [heroReady, setHeroReady] = useState(false)
+  useEffect(() => {
+    if (heroSrc === null) {
+      setHeroReady(true)
+      return
+    }
+    let alive = true
+    let timer = 0
+    const done = () => {
+      window.clearTimeout(timer)
+      if (alive) setHeroReady(true)
+    }
+    setHeroReady(false)
+    timer = window.setTimeout(done, 1500)
+    const img = new Image()
+    img.src = heroSrc
+    if (typeof img.decode === 'function') {
+      void img.decode().then(done, done)
+    } else {
+      img.onload = done
+      img.onerror = done
+    }
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [heroSrc])
+
+  /*
+   * ★ 首屏的最后一块（2026-10-31）：三级选择按底账定下来之后，那一份预设的读数
+   *   还要再读一次盘（`usePreset` 的 `waiting`）。**这一段也等** —— 不等的话正式版面
+   *   会先把文件行摆出来、四行 X/Y/Z 全是「—」，半拍之后才填上（作者第二张截图
+   *   圈的就是这一块）。`failed` 放行：那一屏自己会把原因说出来，不该永远停在启动画面。
+   */
+  const booted =
+    hydrated &&
+    preset.status !== 'waiting' &&
+    preset.status !== 'downloading' &&
+    (heroSrc === null || heroReady)
+
+  /*
+   * ★★ 收骨架（2026-10-31）：**就绪或明确失败**那一刻才收，而且放在 layout effect 里 ——
+   *   它在浏览器绘制之前跑，所以"骨架消失"与"终态版面出现"是**同一帧**，
+   *   中间不会空一下（作者：「就直接用骨架」，别再出现第二个加载画面）。
+   *
+   * 失败也收：那时这一层会渲染 `BootFailure`（一句话 + 重试），继续用骨架盖着
+   * 就成了"假装还在读"。重试那颗按钮会先把骨架放回来再重读。
+   */
+  useLayoutEffect(() => {
+    if (booted || catalog.failed) hideBootSkeleton()
+  }, [booted, catalog.failed])
+
+  /*
+   * 重试：骨架放回来（否则重读期间是一扇空窗），再让目录重跑一趟。
+   * `catalog.reload` 自己的依赖是空数组（永远是同一个函数），单独取出来当依赖。
+   */
+  const reloadCatalog = catalog.reload
+  const retryBoot = useCallback(() => {
+    showBootSkeleton()
+    reloadCatalog()
+  }, [reloadCatalog])
 
   // 三级齐全才有 toml / 偏移 / 脚本这些"某机型某版本"的产物
   const ready = Boolean(sel.brand && sel.model && sel.variant)
@@ -1511,6 +1633,25 @@ export default function PageHome({ density }: PageHomeProps) {
       tr,
     ],
   )
+
+  /*
+   * ★★ 首屏闸门（2026-10-31）：数据没落地之前**一个业务画面都不给**。
+   *
+   * 放在所有 hook 之后（这一行的下面没有 hook 了）—— 提前 return 不会打乱 hook 顺序。
+   * 这一层只挡首页自己的内容：外壳（顶栏 / 通知 / 提示层）照常挂着，开发台的
+   * `dev-preview` 认领路径也不受影响（它由各持有者在自己的组件里认领）。
+   *
+   * 失败留在启动画面（带一句说明 + 「重试」），**绝不**放行到欢迎页 ——
+   * 「没读到」和「没选过」是两件事，这次修的就是把它们混成一件。
+   */
+  /*
+   * 未就绪：**什么都不画** —— 屏幕上这会儿是 `index.html` 那具骨架（`#boot`），
+   * 它压在应用上面（见 `bootSkeleton.ts`）。就绪时这里返回真版面、同时把骨架收掉，
+   * 两者是同一帧。失败时换成 `BootFailure`（骨架同一帧收掉，换成一句说明 + 重试）。
+   */
+  if (!booted) {
+    return catalog.failed ? <BootFailure onRetry={retryBoot} /> : null
+  }
 
   return (
     <div className={p.page} data-density={density}>

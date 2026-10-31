@@ -298,6 +298,11 @@ pub fn get_report_detail(app: AppHandle, id: String) -> Result<ReportDetail, App
  * 当年那一句，就按原文在文案表里反查一次键。两样都没有 ⇒ `None`，调用方回落原句。
  */
 fn localized_error(meta: &serde_json::Value) -> Option<String> {
+    localized_error_in(messages::current(), meta)
+}
+
+/// [`localized_error`] 的**指定语言**那一份（判据用；生产走上面那个"当前语言"）。
+fn localized_error_in(lang: messages::Lang, meta: &serde_json::Value) -> Option<String> {
     let key = meta
         .get("errorKey")
         .and_then(|v| v.as_str())
@@ -321,7 +326,45 @@ fn localized_error(meta: &serde_json::Value) -> Option<String> {
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    Some(messages::text(&key, &refs))
+    Some(error_line_in(lang, &key, &refs, meta))
+}
+
+/// 一条记录的 error 按**这个键**重说一遍。
+///
+/// ★ 两种情况长得不一样（2026-10-31）：
+///
+/// 1. `errorKey` 是 `hook.line.*`（或老记录没有 `cancelled` 那一格）⇒ 键指的就是
+///    **那一整句**，直接取。
+/// 2. `errorKey` 是**原因键**（`hook.cancelled` / `hook.mismatch_stopped` …）——
+///    这是 2026-10-31 起钩子写的新形状。记录里那句原文是结论行
+///    （`已停止：{原因}［{码}］`），只取原因会丢掉框子与码，所以按写入侧
+///    [`crate::hook::conclusion_line`] 同一套判定重新拼：
+///    `cancelled` × `code` 有没有 ⇒ 四个框子之一。
+///
+/// 判据见 `an_archived_stop_is_restated_in_the_current_language`。
+fn error_line_in(
+    lang: messages::Lang,
+    key: &str,
+    refs: &[(&str, &str)],
+    meta: &serde_json::Value,
+) -> String {
+    let cancelled = meta.get("cancelled").and_then(serde_json::Value::as_bool);
+    if key.starts_with("hook.line.") || cancelled.is_none() {
+        return messages::text_in(lang, key, refs);
+    }
+    let reason = messages::text_in(lang, key, refs);
+    let code = messages::code_of(key).unwrap_or_default();
+    let line_key = match (cancelled.unwrap_or(false), code.is_empty()) {
+        (false, false) => crate::hook::keys::LINE_FAILED,
+        (false, true) => crate::hook::keys::LINE_FAILED_NOCODE,
+        (true, false) => crate::hook::keys::LINE_STOPPED,
+        (true, true) => crate::hook::keys::LINE_CANCELLED,
+    };
+    messages::text_in(
+        lang,
+        line_key,
+        &[("reason", reason.as_str()), ("code", code.as_str())],
+    )
 }
 
 /// 在整棵树里找 `<id>_meta.json`（id 全树唯一，文件名即 id）
@@ -817,6 +860,66 @@ mod tests {
             .as_deref()
             .unwrap()
             .contains("E_GCODE_BOUNDARY_001"));
+    }
+
+    /// 新记录（`errorKey` = 原因键）：那句结论行按**读的那一刻的语言**重说，码不许丢。
+    ///
+    /// 2026-10-31 那条真机记录：钩子以简体写账，日语界面上那句一直是中文。
+    /// 修法在写侧（`hook::archive_failure` 存原因键 + 参数）与本函数（重建结论行）。
+    #[test]
+    fn an_archived_stop_is_restated_in_the_readers_language() {
+        let meta = serde_json::json!({
+            "error": "已停止：这一盘没有做后处理，原文件没有被改动［W_SYS_CANCELLED_001］",
+            "errorKey": "hook.cancelled",
+            "cancelled": true
+        });
+        let zh = localized_error_in(messages::Lang::Zh, &meta).unwrap();
+        assert!(zh.contains("已停止："), "{zh}");
+        assert!(zh.contains("W_SYS_CANCELLED_001"), "{zh}");
+
+        let ja = localized_error_in(messages::Lang::Ja, &meta).unwrap();
+        assert!(ja.contains("停止しました"), "日语界面要说日语：{ja}");
+        assert!(ja.contains("W_SYS_CANCELLED_001"), "码是契约，不许丢：{ja}");
+        assert!(!ja.contains("这一盘"), "日语界面不许再冒出中文：{ja}");
+
+        let en = localized_error_in(messages::Lang::En, &meta).unwrap();
+        assert!(en.contains("Stopped:"), "{en}");
+    }
+
+    /// 带占位符的那几条：值原样进新语言，句子按那门语言重新拼。
+    #[test]
+    fn a_keyed_failure_keeps_its_placeholders_in_the_new_language() {
+        let meta = serde_json::json!({
+            "error": "已停下（机型不匹配：G-code 是 A1_MINI，预设是 A1）—— 原文件没有被改动［W_CFG_MISMATCH_001］",
+            "errorKey": "hook.mismatch_stopped",
+            "errorArgs": { "gcode": "A1_MINI", "preset": "A1" },
+            "cancelled": true
+        });
+        let ja = localized_error_in(messages::Lang::Ja, &meta).unwrap();
+        assert!(ja.contains("A1_MINI") && ja.contains("A1"), "{ja}");
+        assert!(ja.contains("W_CFG_MISMATCH_001"), "{ja}");
+        assert!(!ja.contains("机型不匹配"), "句子该整句换语言：{ja}");
+    }
+
+    /// 老记录没有 `errorKey`：**不猜**，回落原句（调用方 `.or_else(|| str_at("error"))`）。
+    #[test]
+    fn an_old_record_without_a_key_is_not_guessed() {
+        let meta = serde_json::json!({
+            "error": "处理失败 [E_GCODE_BOUNDARY_001]：模型超出打印边界"
+        });
+        assert!(localized_error_in(messages::Lang::Ja, &meta).is_none());
+    }
+
+    /// `errorKey` 本身就是一整句的键（`hook.line.*`）⇒ 直接取，不许再包一层框子。
+    #[test]
+    fn a_line_key_is_not_wrapped_twice() {
+        let meta = serde_json::json!({
+            "errorKey": "hook.line.stopped",
+            "errorArgs": { "reason": "x", "code": "W_SYS_CANCELLED_001" },
+            "cancelled": true
+        });
+        let ja = localized_error_in(messages::Lang::Ja, &meta).unwrap();
+        assert_eq!(ja.matches("停止しました").count(), 1, "{ja}");
     }
 
     /// 记录文件坏了：**照进列表**，写明读不出来 —— 不许悄悄消失

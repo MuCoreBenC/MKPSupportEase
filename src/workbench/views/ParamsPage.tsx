@@ -1210,6 +1210,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                       setSel(key)
                       setBatchTab(true)
                     }}
+                    /* 格子里那枚「打开编辑器」—— 与单版本行上那枚同一个模态框。
+                       模态框自己按 `mid + uid` 去 matrix 里取那一格（见 `gcodeCell`） */
+                    onOpenGcode={(col, row) =>
+                      setGcodeOpen({
+                        key: row.key,
+                        mid: col.machineId,
+                        uid: col.versionUid ?? null,
+                      })
+                    }
                     onWriteCell={(col, row, param, next) => {
                       const cell = cellAtCol(shownMatrix, col, row.key)
                       writeValue(

@@ -1498,31 +1498,54 @@
  *
  * 原来这里不写宽 ⇒ 被 `.info` 的 stretch 拉满（480px），每行的分隔线一直铺到列右缘；
  * 而右图会从 `.slot` 往左溢出 ⇒ 线看着就"搭在机器上"。
+ * 后来收到**内容宽**（`fit-content`）—— 线只从轴名起到单位右缘；
+ * 2026-10-31 起改成一个**定宽 216 的网格**（见下面那条），同样不伸进图里。
+ */
+/*
+ * ★ 2026-10-31（作者：「后面其实是有空间的，它完全可以往后放，没必要换行」）：
+ *   日语「接着剤の吐出速度」原来被折成两行，可右边明明还有一大片空白。
  *
- * 现在宽度收到**内容宽**（`fit-content`）：线从轴名起、到单位右缘为止，
- * 既不伸进图里，也不必为它单独做层级（线根本到不了那边）。
+ *   根因是每行自己是一个 flex、轴名列**定死** 74~88px（`0 0 clamp(74px,7vw,88px)`）：
+ *   那条轴名比列宽多几像素就折行，而不是往右放。
+ *
+ *   现在列宽交给 `.rows` 这一层统一算：第一列 `max-content`（= 这一册语言里**最长的
+ *   那条轴名**，四行共用），第二列仍是定宽 `6em`。于是：
+ *     · 轴名不再折行，多出来的宽度往右放；
+ *     · 四行的数字右缘、单位左缘仍各成一条线（同一列宽，不是各行自己算）；
+ *     · 底线还是一条连续的线（两格各画一次，中间**没有** column-gap）。
+ *
+ *   `.row` 用 `display: contents`：它只是把 dt/dd 归成一组，不再生成盒子 ——
+ *   生成盒子的话它自己是一格，拿不到列宽。
  */
 .rows {
   margin: 14px 0 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  width: fit-content;
+  display: grid;
+  /*
+   * ★ 2026-10-31 第二遍（作者：「我是希望……中间留的那个空位不是固定的，整个容器差不多
+   *   是固定的」）：**整块宽度定下来**（216，四行共用一条底线），
+   *   **轴名与数值之间那段留白不固定** —— 第一列吃掉剩下的空间（`max-content` 托底，
+   *   长轴名也不会折行），数值贴着右缘。
+   *
+   *   于是：中文短轴名中间空得多、日语长轴名空得少，而四条线与数值右缘始终在同一个位置。
+   */
+  grid-template-columns: minmax(max-content, 1fr) 6em;
+  width: 216px;
   max-width: 100%;
+  align-items: baseline;
 }
 
+/* 不生成盒子，只做 dt/dd 的分组（见上面 `.rows` 那条） */
 .row {
-  display: flex;
-  align-items: baseline;
-  gap: 16px;
-  padding: 7px 0;
-  border-bottom: 1px solid var(--hairline);
-  min-width: 0;
+  display: contents;
 }
+
 .label {
-  flex: 0 0 clamp(74px, 7vw, 88px);
+  /* 与数值之间留一点点**最小**间距（12px）；剩下的留白由第一列自己吃掉，
+     见上面 `.rows` 那条。这条 padding 也算进 `max-content`，所以长轴名不会贴上去。 */
+  padding: 7px 12px 7px 0;
   font-size: 11.5px;
   color: var(--text-3);
+  border-bottom: 1px solid var(--hairline);
 }
 
 /*
@@ -1543,8 +1566,11 @@
  * `mm/s` 的左缘也成一条线，数字与单位之间只隔那 6px —— 回到"一个数带个单位"。
  */
 .value {
-  flex: 0 0 6em;
-  min-width: 0;
+  /* 列宽由 `.rows` 的第二列（6em）定，这里不再自己占位；
+     `margin: 0` 是必须的 —— `dd` 自带 40px 缩进，留着会从这一格里再咬掉 40px */
+  margin: 0;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--hairline);
   font-size: 14px;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
@@ -1568,11 +1594,8 @@
   text-align: left;
 }
 
-@supports (width: 1cqw) {
-  .label {
-    flex-basis: clamp(74px, 7cqw, 88px);
-  }
-}
+/* 轴名列不再定宽（2026-10-31），原来那条 `flex-basis` 的容器单位覆盖随之作废：
+   列宽现在由 `.rows` 的 `max-content` 算，容器与视口都自动跟着走。 */
 
 
 

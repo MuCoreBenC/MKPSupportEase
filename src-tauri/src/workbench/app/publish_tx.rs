@@ -494,7 +494,17 @@ pub fn run(
     //    ★ 根从**会话那份 presets 的根**派生（与生成 / 审计同一条 `*_at` 派生）——
     //    会话的数据树在哪，交付与定稿就落在哪。
     //    （先 clone 成 owned：后面 generate_with 要可变借出会话。）
-    let presets_root = ctx.presets.root().to_path_buf();
+    /*
+     * ★ 发布落**真仓库**，不是影子树（2026-10-31 修）。
+     *
+     * 原来这里用的是 `ctx.presets.root()`——那是 `workbench/.draft/presets/`。
+     * 于是 manifest / catalog / source / 账本四份写进影子，而下面 `stage_allowed`
+     * 读的是真仓库：只有"生成阶段已经写进真仓库的那几份"进了 commit，
+     * **账本与发布戳留在影子里**。表现就是 `presets verify` 绿（它读影子）
+     * 而 `check:artifacts` 红（R1：目录变了账本没变），push 被闸拦下。
+     * 与既定口径一致：生成与发布都落 `real_root`，之后 `mirror` 回影子。
+     */
+    let presets_root = ctx.real_root().to_path_buf();
     let root = super::super::paths::delivery_root_at(&presets_root);
     std::fs::create_dir_all(&root).map_err(|e| {
         AppError::io("建不出发布目录").with_detail(format!("{}：{e}", root.display()))

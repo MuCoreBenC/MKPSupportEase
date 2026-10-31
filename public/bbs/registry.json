@@ -39,7 +39,9 @@
     "printable_area": {
       "label": {
         "zh": "可打印区域",
-        "en": "Printable area"
+        "en": "Printable area",
+        "ja": "造形可能領域",
+        "zh_tw": "可列印區域"
       },
       "unit": {
         "zh": "",
@@ -59,7 +61,9 @@
     "extruder_printable_area": {
       "label": {
         "zh": "挤出机可打印区域",
-        "en": "Extruder printable area"
+        "en": "Extruder printable area",
+        "ja": "エクストルーダーの印刷可能エリア",
+        "zh_tw": "擠出機可列印區域"
       },
       "unit": {
         "zh": "",
@@ -79,7 +83,9 @@
     "bed_exclude_area": {
       "label": {
         "zh": "不可打印区域",
-        "en": "Bed exclude area"
+        "en": "Bed exclude area",
+        "ja": "ベッド除外領域",
+        "zh_tw": "不可列印區域"
       },
       "unit": {
         "zh": "",
@@ -99,7 +105,9 @@
     "bed_custom_texture": {
       "label": {
         "zh": "自定义热床纹理",
-        "en": "Bed custom texture"
+        "en": "Bed custom texture",
+        "ja": "カスタムベッドテクスチャ",
+        "zh_tw": "自定義熱床紋理"
       },
       "unit": {
         "zh": "",
@@ -119,7 +127,9 @@
     "bed_custom_model": {
       "label": {
         "zh": "自定义热床模型",
-        "en": "Bed custom model"
+        "en": "Bed custom model",
+        "ja": "カスタムベッドモデル",
+        "zh_tw": "自定義熱床模型"
       },
       "unit": {
         "zh": "",
@@ -159,7 +169,9 @@
     "elefant_foot_compensation": {
       "label": {
         "zh": "象脚补偿",
-        "en": "Elephant foot compensation"
+        "en": "Elephant foot compensation",
+        "ja": "象足補正",
+        "zh_tw": "象腳補償"
       },
       "unit": {
         "zh": "mm",
@@ -179,7 +191,9 @@
     "layer_height": {
       "label": {
         "zh": "层高",
-        "en": "Layer height"
+        "en": "Layer height",
+        "ja": "積層ピッチ",
+        "zh_tw": "層高"
       },
       "unit": {
         "zh": "mm",
@@ -199,7 +213,9 @@
     "printable_height": {
       "label": {
         "zh": "可打印高度",
-        "en": "Printable height"
+        "en": "Printable height",
+        "ja": "造形可能高さ",
+        "zh_tw": "可列印高度"
       },
       "unit": {
         "zh": "mm",
@@ -219,7 +235,9 @@
     "extruder_printable_height": {
       "label": {
         "zh": "挤出机可打印高度",
-        "en": "Extruder printable height"
+        "en": "Extruder printable height",
+        "ja": "エクストルーダーの印刷可能高さ",
+        "zh_tw": "擠出機可列印高度"
       },
       "unit": {
         "zh": "mm",
@@ -239,7 +257,9 @@
     "preset_names": {
       "label": {
         "zh": "打印机预设名",
-        "en": "Printer preset names"
+        "en": "Printer preset names",
+        "ja": "プリセット名",
+        "zh_tw": "印表機預設名"
       },
       "unit": {
         "zh": "",
@@ -259,7 +279,9 @@
     "print_host": {
       "label": {
         "zh": "主机名，IP或URL",
-        "en": "Hostname, IP or URL"
+        "en": "Hostname, IP or URL",
+        "ja": "Hostname、IPまたはURL",
+        "zh_tw": "主機名，IP或URL"
       },
       "unit": {
         "zh": "",
@@ -279,7 +301,9 @@
     "print_host_webui": {
       "label": {
         "zh": "设备界面",
-        "en": "Device UI"
+        "en": "Device UI",
+        "ja": "デバイスUI",
+        "zh_tw": "裝置介面"
       },
       "unit": {
         "zh": "",
@@ -299,7 +323,9 @@
     "printhost_apikey": {
       "label": {
         "zh": "API秘钥/密码",
-        "en": "API Key / Password"
+        "en": "API Key / Password",
+        "ja": "APIキー/パスワード",
+        "zh_tw": "API秘鑰/密碼"
       },
       "unit": {
         "zh": "",
@@ -319,7 +345,9 @@
     "printhost_port": {
       "label": {
         "zh": "打印机",
-        "en": "Printer"
+        "en": "Printer",
+        "ja": "プリンター",
+        "zh_tw": "印表機"
       },
       "unit": {
         "zh": "",
@@ -339,7 +367,9 @@
     "printhost_cafile": {
       "label": {
         "zh": "HTTPS CA文件",
-        "en": "HTTPS CA File"
+        "en": "HTTPS CA File",
+        "ja": "CA証書ファイル",
+        "zh_tw": "HTTPS CA檔案"
       },
       "unit": {
         "zh": "",
@@ -359,7 +389,9 @@
     "printhost_user": {
       "label": {
         "zh": "用户名",
-        "en": "User"
+        "en": "User",
+        "ja": "ユーザ",
+        "zh_tw": "使用者名稱"
       },
       "unit": {
         "zh": "",
@@ -379,7 +411,9 @@
     "printhost_password": {
       "label": {
         "zh": "密码",
-        "en": "Password"
+        "en": "Password",
+        "ja": "パスワード",
+        "zh_tw": "密碼"
       },
       "unit": {
         "zh": "",
@@ -399,7 +433,9 @@
     "printhost_ssl_ignore_revoke": {
       "label": {
         "zh": "忽略HTTPS证书吊销检查",
-        "en": "Ignore HTTPS certificate revocation checks"
+        "en": "Ignore HTTPS certificate revocation checks",
+        "ja": "HTTPS証書失効を無視",
+        "zh_tw": "忽略HTTPS證書吊銷檢查"
       },
       "unit": {
         "zh": "",
@@ -419,7 +455,9 @@
     "printhost_authorization_type": {
       "label": {
         "zh": "授权类型",
-        "en": "Authorization Type"
+        "en": "Authorization Type",
+        "ja": "認証タイプ",
+        "zh_tw": "授權型別"
       },
       "unit": {
         "zh": "",
@@ -438,13 +476,17 @@
           "value": "key",
           "label_en": "API key",
           "label_zh": "API秘钥",
-          "icon": null
+          "icon": null,
+          "label_ja": "APIキー",
+          "label_zh_tw": "API秘鑰"
         },
         {
           "value": "user",
           "label_en": "HTTP digest",
           "label_zh": "HTTP摘要",
-          "icon": null
+          "icon": null,
+          "label_ja": "HTTP digest",
+          "label_zh_tw": "HTTP摘要"
         }
       ],
       "is_print_option": false
@@ -472,7 +514,9 @@
     "reduce_crossing_wall": {
       "label": {
         "zh": "避免跨越外墙",
-        "en": "Avoid crossing wall"
+        "en": "Avoid crossing wall",
+        "ja": "ウォールの交差を回避",
+        "zh_tw": "避免跨越外牆"
       },
       "unit": {
         "zh": "",
@@ -492,7 +536,9 @@
     "z_direction_outwall_speed_continuous": {
       "label": {
         "zh": "平滑z方向外墙速度（实验）",
-        "en": "Smoothing wall speed along Z(experimental)"
+        "en": "Smoothing wall speed along Z(experimental)",
+        "ja": "Z に沿った壁面速度の平滑化(実験的)",
+        "zh_tw": "平滑z方向外牆速度（實驗）"
       },
       "unit": {
         "zh": "",
@@ -512,7 +558,9 @@
     "max_travel_detour_distance": {
       "label": {
         "zh": "避免跨越外墙-最大绕行长度",
-        "en": "Avoid crossing wall - Max detour length"
+        "en": "Avoid crossing wall - Max detour length",
+        "ja": "ウォールの交差を回避 - 最大迂回距離",
+        "zh_tw": "避免跨越外牆-最大繞行長度"
       },
       "unit": {
         "zh": "mm 或 %",
@@ -532,7 +580,9 @@
     "avoid_crossing_wall_includes_support": {
       "label": {
         "zh": "避免跨越外墙-包含支撑",
-        "en": "Avoid crossing wall - Includes support"
+        "en": "Avoid crossing wall - Includes support",
+        "ja": "壁越え回避（サポートを含む）",
+        "zh_tw": "避免跨越外牆-包含支撐"
       },
       "unit": {
         "zh": "",
@@ -552,7 +602,9 @@
     "supertack_plate_temp": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -572,7 +624,9 @@
     "cool_plate_temp": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -592,7 +646,9 @@
     "eng_plate_temp": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -612,7 +668,9 @@
     "hot_plate_temp": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -632,7 +690,9 @@
     "textured_plate_temp": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -652,7 +712,9 @@
     "supertack_plate_temp_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -672,7 +734,9 @@
     "cool_plate_temp_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -692,7 +756,9 @@
     "eng_plate_temp_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -712,7 +778,9 @@
     "hot_plate_temp_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -732,7 +800,9 @@
     "textured_plate_temp_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -752,7 +822,9 @@
     "curr_bed_type": {
       "label": {
         "zh": "打印板类型",
-        "en": "Bed type"
+        "en": "Bed type",
+        "ja": "プレート",
+        "zh_tw": "列印板型別"
       },
       "unit": {
         "zh": "",
@@ -771,31 +843,41 @@
           "value": "Cool Plate",
           "label_en": "Cool Plate",
           "label_zh": "低温打印板",
-          "icon": null
+          "icon": null,
+          "label_ja": "常温プレート",
+          "label_zh_tw": "低溫列印板"
         },
         {
           "value": "Engineering Plate",
           "label_en": "Engineering Plate",
           "label_zh": "工程材料打印板",
-          "icon": null
+          "icon": null,
+          "label_ja": "エンジニアリングプレート",
+          "label_zh_tw": "工程材料列印板"
         },
         {
           "value": "High Temp Plate",
           "label_en": "Smooth PEI Plate / High Temp Plate",
           "label_zh": "光面PEI打印板 / 高温打印板",
-          "icon": null
+          "icon": null,
+          "label_ja": "スムースPEIプレート/高温プレート",
+          "label_zh_tw": "光面PEI列印板 / 高溫列印板"
         },
         {
           "value": "Textured PEI Plate",
           "label_en": "Textured PEI Plate",
           "label_zh": "纹理PEI打印板",
-          "icon": null
+          "icon": null,
+          "label_ja": "テクスチャ PEIプレート",
+          "label_zh_tw": "紋理PEI列印板"
         },
         {
           "value": "Supertack Plate",
           "label_en": "Bambu Cool Plate SuperTack",
           "label_zh": "增稳低温打印板",
-          "icon": null
+          "icon": null,
+          "label_ja": "常温プレート SuperTack",
+          "label_zh_tw": "增穩低溫列印板"
         }
       ],
       "is_print_option": false
@@ -803,7 +885,9 @@
     "first_layer_print_sequence": {
       "label": {
         "zh": "首层打印顺序",
-        "en": "First layer print sequence"
+        "en": "First layer print sequence",
+        "ja": "1層目の印刷順序",
+        "zh_tw": "首層列印順序"
       },
       "unit": {
         "zh": "",
@@ -823,7 +907,9 @@
     "other_layers_print_sequence": {
       "label": {
         "zh": "其他层打印顺序",
-        "en": "Other layers print sequence"
+        "en": "Other layers print sequence",
+        "ja": "その他の層の印刷順序",
+        "zh_tw": "其他層列印順序"
       },
       "unit": {
         "zh": "",
@@ -843,7 +929,9 @@
     "other_layers_print_sequence_nums": {
       "label": {
         "zh": "其他层的打印顺序数量",
-        "en": "The number of other layers print sequence"
+        "en": "The number of other layers print sequence",
+        "ja": "他の層の印刷順序を設定する数",
+        "zh_tw": "其他層的列印順序數量"
       },
       "unit": {
         "zh": "",
@@ -863,7 +951,9 @@
     "first_layer_sequence_choice": {
       "label": {
         "zh": "首层耗材打印顺序",
-        "en": "First layer filament sequence"
+        "en": "First layer filament sequence",
+        "ja": "1層目のフィラメント順序",
+        "zh_tw": "首層耗材列印順序"
       },
       "unit": {
         "zh": "",
@@ -882,13 +972,17 @@
           "value": "Auto",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         },
         {
           "value": "Customize",
           "label_en": "Customize",
           "label_zh": "自定义",
-          "icon": null
+          "icon": null,
+          "label_ja": "カスタマイズ",
+          "label_zh_tw": "自定義"
         }
       ],
       "is_print_option": false
@@ -896,7 +990,9 @@
     "other_layers_sequence_choice": {
       "label": {
         "zh": "其他层的耗材打印顺序",
-        "en": "Other layers filament sequence"
+        "en": "Other layers filament sequence",
+        "ja": "その他の層のフィラメント配列",
+        "zh_tw": "其他層的耗材列印順序"
       },
       "unit": {
         "zh": "",
@@ -915,13 +1011,17 @@
           "value": "Auto",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         },
         {
           "value": "Customize",
           "label_en": "Customize",
           "label_zh": "自定义",
-          "icon": null
+          "icon": null,
+          "label_ja": "カスタマイズ",
+          "label_zh_tw": "自定義"
         }
       ],
       "is_print_option": false
@@ -929,7 +1029,9 @@
     "before_layer_change_gcode": {
       "label": {
         "zh": "换层前G-code",
-        "en": "Before layer change G-code"
+        "en": "Before layer change G-code",
+        "ja": "積層変更前のG-code",
+        "zh_tw": "換層前G-code"
       },
       "unit": {
         "zh": "",
@@ -949,7 +1051,9 @@
     "bottom_shell_layers": {
       "label": {
         "zh": "底部壳体层数",
-        "en": "Bottom shell layers"
+        "en": "Bottom shell layers",
+        "ja": "底面層数",
+        "zh_tw": "底部殼體層數"
       },
       "unit": {
         "zh": "",
@@ -969,7 +1073,9 @@
     "bottom_shell_thickness": {
       "label": {
         "zh": "底部壳体厚度",
-        "en": "Bottom shell thickness"
+        "en": "Bottom shell thickness",
+        "ja": "底面厚さ",
+        "zh_tw": "底部殼體厚度"
       },
       "unit": {
         "zh": "mm",
@@ -989,7 +1095,9 @@
     "enable_overhang_bridge_fan": {
       "label": {
         "zh": "悬垂/桥接强制冷却",
-        "en": "Force cooling for overhang and bridge"
+        "en": "Force cooling for overhang and bridge",
+        "ja": "オーバーハングとブリッジの強制冷却",
+        "zh_tw": "懸垂/橋接強制冷卻"
       },
       "unit": {
         "zh": "",
@@ -1009,7 +1117,9 @@
     "overhang_fan_speed": {
       "label": {
         "zh": "悬垂风扇速度",
-        "en": "Fan speed for overhang"
+        "en": "Fan speed for overhang",
+        "ja": "オーバーハング時のファン速度",
+        "zh_tw": "懸垂風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -1029,7 +1139,9 @@
     "ironing_fan_speed": {
       "label": {
         "zh": "熨烫风扇速度",
-        "en": "Ironing fan speed"
+        "en": "Ironing fan speed",
+        "ja": "アイロニング時のファン速度",
+        "zh_tw": "熨燙風扇轉速"
       },
       "unit": {
         "zh": "%",
@@ -1049,7 +1161,9 @@
     "pre_start_fan_time": {
       "label": {
         "zh": "风扇预启动时间",
-        "en": "Pre start fan time"
+        "en": "Pre start fan time",
+        "ja": "プリスタートファン時間",
+        "zh_tw": "風扇預啟動時間"
       },
       "unit": {
         "zh": "秒",
@@ -1069,7 +1183,9 @@
     "overhang_fan_threshold": {
       "label": {
         "zh": "冷却悬空阈值",
-        "en": "Cooling overhang threshold"
+        "en": "Cooling overhang threshold",
+        "ja": "オーバーハングの冷却閾値",
+        "zh_tw": "冷卻懸空閾值"
       },
       "unit": {
         "zh": "",
@@ -1126,7 +1242,9 @@
     "overhang_threshold_participating_cooling": {
       "label": {
         "zh": "参与冷却降速的悬垂阈值",
-        "en": "Overhang threshold for participating cooling"
+        "en": "Overhang threshold for participating cooling",
+        "ja": "冷却に参加するためのオーバーハングしきい値",
+        "zh_tw": "參與冷卻降速的懸垂閾值"
       },
       "unit": {
         "zh": "",
@@ -1175,7 +1293,9 @@
           "value": "100%",
           "label_en": "100%",
           "label_zh": "100%",
-          "icon": null
+          "icon": null,
+          "label_ja": "100％",
+          "label_zh_tw": "100%"
         }
       ],
       "is_print_option": false
@@ -1183,7 +1303,9 @@
     "bridge_angle": {
       "label": {
         "zh": "桥接方向",
-        "en": "Bridge direction"
+        "en": "Bridge direction",
+        "ja": "ブリッジ方向",
+        "zh_tw": "橋接方向"
       },
       "unit": {
         "zh": "°",
@@ -1203,7 +1325,9 @@
     "bridge_flow": {
       "label": {
         "zh": "桥接流量",
-        "en": "Bridge flow"
+        "en": "Bridge flow",
+        "ja": "ブリッジ流量",
+        "zh_tw": "橋接流量"
       },
       "unit": {
         "zh": "",
@@ -1223,7 +1347,9 @@
     "counterbore_hole_bridging": {
       "label": {
         "zh": "沉孔搭桥",
-        "en": "Bridge counterbore holes"
+        "en": "Bridge counterbore holes",
+        "ja": "座ぐり穴のブリッジ処理",
+        "zh_tw": "橋接沉頭孔"
       },
       "unit": {
         "zh": "",
@@ -1242,19 +1368,25 @@
           "value": "none",
           "label_en": "None",
           "label_zh": "无",
-          "icon": null
+          "icon": null,
+          "label_ja": "無し",
+          "label_zh_tw": "無"
         },
         {
           "value": "partiallybridge",
           "label_en": "Partially bridged",
           "label_zh": "部分桥接",
-          "icon": null
+          "icon": null,
+          "label_ja": "部分ブリッジ",
+          "label_zh_tw": "部分橋接"
         },
         {
           "value": "sacrificiallayer",
           "label_en": "Sacrificial layer",
           "label_zh": "牺牲层",
-          "icon": null
+          "icon": null,
+          "label_ja": "犠牲層",
+          "label_zh_tw": "犧牲層"
         }
       ],
       "is_print_option": true
@@ -1262,7 +1394,9 @@
     "top_solid_infill_flow_ratio": {
       "label": {
         "zh": "顶部表面流量比例",
-        "en": "Top surface flow ratio"
+        "en": "Top surface flow ratio",
+        "ja": "トップ面の流量比率",
+        "zh_tw": "頂部表面流量比例"
       },
       "unit": {
         "zh": "",
@@ -1282,7 +1416,9 @@
     "initial_layer_flow_ratio": {
       "label": {
         "zh": "首层流量比",
-        "en": "Initial layer flow ratio"
+        "en": "Initial layer flow ratio",
+        "ja": "一層目の流量比",
+        "zh_tw": "首層流量比"
       },
       "unit": {
         "zh": "",
@@ -1302,7 +1438,9 @@
     "top_one_wall_type": {
       "label": {
         "zh": "顶面单层墙",
-        "en": "Only one wall on top surfaces"
+        "en": "Only one wall on top surfaces",
+        "ja": "トップ面に1層",
+        "zh_tw": "頂面單層牆"
       },
       "unit": {
         "zh": "",
@@ -1321,19 +1459,25 @@
           "value": "not apply",
           "label_en": "Not apply",
           "label_zh": "不使用",
-          "icon": null
+          "icon": null,
+          "label_ja": "適用されていません",
+          "label_zh_tw": "不使用"
         },
         {
           "value": "all top",
           "label_en": "Top surfaces",
           "label_zh": "顶面",
-          "icon": null
+          "icon": null,
+          "label_ja": "トップ面",
+          "label_zh_tw": "頂面"
         },
         {
           "value": "topmost",
           "label_en": "Topmost surface",
           "label_zh": "最顶面",
-          "icon": null
+          "icon": null,
+          "label_ja": "最上面",
+          "label_zh_tw": "最頂面"
         }
       ],
       "is_print_option": true
@@ -1341,7 +1485,9 @@
     "top_area_threshold": {
       "label": {
         "zh": "顶部区域阈值",
-        "en": "Top area threshold"
+        "en": "Top area threshold",
+        "ja": "トップエリアのしきい値",
+        "zh_tw": "頂部區域閾值"
       },
       "unit": {
         "zh": "%",
@@ -1361,7 +1507,9 @@
     "only_one_wall_first_layer": {
       "label": {
         "zh": "首层仅单层墙",
-        "en": "Only one wall on first layer"
+        "en": "Only one wall on first layer",
+        "ja": "1層目に壁面が1つだけ",
+        "zh_tw": "首層僅單層牆"
       },
       "unit": {
         "zh": "",
@@ -1381,7 +1529,9 @@
     "enable_overhang_speed": {
       "label": {
         "zh": "悬垂降速",
-        "en": "Slow down for overhang"
+        "en": "Slow down for overhang",
+        "ja": "オーバーハング減速",
+        "zh_tw": "懸垂降速"
       },
       "unit": {
         "zh": "",
@@ -1481,7 +1631,9 @@
     "overhang_totally_speed": {
       "label": {
         "zh": "100%",
-        "en": "100%"
+        "en": "100%",
+        "ja": "100％",
+        "zh_tw": "100%"
       },
       "unit": {
         "zh": "mm/s",
@@ -1501,7 +1653,9 @@
     "enable_height_slowdown": {
       "label": {
         "zh": "随高度降速",
-        "en": "Slow down by height"
+        "en": "Slow down by height",
+        "ja": "高さに応じて減速",
+        "zh_tw": "隨高度降速"
       },
       "unit": {
         "zh": "",
@@ -1521,7 +1675,9 @@
     "slowdown_start_height": {
       "label": {
         "zh": "起始高度",
-        "en": "Starting height"
+        "en": "Starting height",
+        "ja": "開始高さ",
+        "zh_tw": "起始高度"
       },
       "unit": {
         "zh": "mm",
@@ -1541,7 +1697,9 @@
     "slowdown_start_speed": {
       "label": {
         "zh": "起始高度处速度",
-        "en": "Speed at starting height"
+        "en": "Speed at starting height",
+        "ja": "開始高さでの速度",
+        "zh_tw": "起始高度處速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -1561,7 +1719,9 @@
     "slowdown_start_acc": {
       "label": {
         "zh": "起始高度处加速度",
-        "en": "Acceleration at starting height"
+        "en": "Acceleration at starting height",
+        "ja": "開始高さでの加速度",
+        "zh_tw": "起始高度處加速度"
       },
       "unit": {
         "zh": "mm/s²",
@@ -1581,7 +1741,9 @@
     "slowdown_end_height": {
       "label": {
         "zh": "结束高度",
-        "en": "Ending height"
+        "en": "Ending height",
+        "ja": "終了高さ",
+        "zh_tw": "結束高度"
       },
       "unit": {
         "zh": "mm",
@@ -1601,7 +1763,9 @@
     "slowdown_end_speed": {
       "label": {
         "zh": "结束高度处速度",
-        "en": "Speed at ending height"
+        "en": "Speed at ending height",
+        "ja": "終了高さでの速度",
+        "zh_tw": "結束高度處速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -1621,7 +1785,9 @@
     "slowdown_end_acc": {
       "label": {
         "zh": "结束高度处加速度",
-        "en": "Acceleration at ending height"
+        "en": "Acceleration at ending height",
+        "ja": "終了高さでの加速度",
+        "zh_tw": "結束高度處加速度"
       },
       "unit": {
         "zh": "mm/s²",
@@ -1641,7 +1807,9 @@
     "bridge_speed": {
       "label": {
         "zh": "桥接",
-        "en": "Bridge"
+        "en": "Bridge",
+        "ja": "ブリッジ",
+        "zh_tw": "橋接"
       },
       "unit": {
         "zh": "mm/s",
@@ -1661,7 +1829,9 @@
     "brim_width": {
       "label": {
         "zh": "Brim宽度",
-        "en": "Brim width"
+        "en": "Brim width",
+        "ja": "ブリム幅",
+        "zh_tw": "Brim寬度"
       },
       "unit": {
         "zh": "mm",
@@ -1681,7 +1851,9 @@
     "brim_type": {
       "label": {
         "zh": "Brim类型",
-        "en": "Brim type"
+        "en": "Brim type",
+        "ja": "ブリムタイプ",
+        "zh_tw": "Brim型別"
       },
       "unit": {
         "zh": "",
@@ -1700,37 +1872,49 @@
           "value": "auto_brim",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         },
         {
           "value": "brim_ears",
           "label_en": "Painted",
           "label_zh": "绘制",
-          "icon": null
+          "icon": null,
+          "label_ja": "塗装済み",
+          "label_zh_tw": "繪製"
         },
         {
           "value": "outer_only",
           "label_en": "Outer brim only",
           "label_zh": "仅外侧",
-          "icon": null
+          "icon": null,
+          "label_ja": "外側のブリムのみ",
+          "label_zh_tw": "僅外側"
         },
         {
           "value": "inner_only",
           "label_en": "Inner brim only",
           "label_zh": "仅内侧",
-          "icon": null
+          "icon": null,
+          "label_ja": "内側のブリムのみ",
+          "label_zh_tw": "僅內側"
         },
         {
           "value": "outer_and_inner",
           "label_en": "Outer and inner brim",
           "label_zh": "内侧和外侧",
-          "icon": null
+          "icon": null,
+          "label_ja": "外側と内側のブリム",
+          "label_zh_tw": "內側和外側"
         },
         {
           "value": "no_brim",
           "label_en": "No-brim",
           "label_zh": "无brim",
-          "icon": null
+          "icon": null,
+          "label_ja": "ブリム無し",
+          "label_zh_tw": "無brim"
         }
       ],
       "is_print_option": true
@@ -1738,7 +1922,9 @@
     "brim_object_gap": {
       "label": {
         "zh": "Brim与模型的间隙",
-        "en": "Brim-object gap"
+        "en": "Brim-object gap",
+        "ja": "ブリムとオブジェクトの間隔",
+        "zh_tw": "Brim與模型的間隙"
       },
       "unit": {
         "zh": "mm",
@@ -1758,7 +1944,9 @@
     "compatible_printers": {
       "label": {
         "zh": "兼容的机器",
-        "en": "Compatible machine"
+        "en": "Compatible machine",
+        "ja": "対応機種",
+        "zh_tw": "相容的機器"
       },
       "unit": {
         "zh": "",
@@ -1778,7 +1966,9 @@
     "upward_compatible_machine": {
       "label": {
         "zh": "向上兼容的机器",
-        "en": "upward compatible machine"
+        "en": "upward compatible machine",
+        "ja": "互換性のあるデバイス",
+        "zh_tw": "向上相容的機器"
       },
       "unit": {
         "zh": "",
@@ -1798,7 +1988,9 @@
     "compatible_printers_condition": {
       "label": {
         "zh": "兼容的机器的条件",
-        "en": "Compatible machine condition"
+        "en": "Compatible machine condition",
+        "ja": "対応機種条件",
+        "zh_tw": "相容的機器的條件"
       },
       "unit": {
         "zh": "",
@@ -1818,7 +2010,9 @@
     "compatible_prints": {
       "label": {
         "zh": "兼容的切片配置",
-        "en": "Compatible process profiles"
+        "en": "Compatible process profiles",
+        "ja": "互換性のあるプロセスプロファイル",
+        "zh_tw": "相容的切片配置"
       },
       "unit": {
         "zh": "",
@@ -1838,7 +2032,9 @@
     "compatible_prints_condition": {
       "label": {
         "zh": "兼容的切片配置的条件",
-        "en": "Compatible process profiles condition"
+        "en": "Compatible process profiles condition",
+        "ja": "互換性のあるプロセスプロファイル条件",
+        "zh_tw": "相容的切片配置的條件"
       },
       "unit": {
         "zh": "",
@@ -1938,7 +2134,9 @@
     "print_sequence": {
       "label": {
         "zh": "打印顺序",
-        "en": "Print sequence"
+        "en": "Print sequence",
+        "ja": "造形シーケンス",
+        "zh_tw": "列印順序"
       },
       "unit": {
         "zh": "",
@@ -1957,13 +2155,17 @@
           "value": "by layer",
           "label_en": "By layer",
           "label_zh": "逐层",
-          "icon": null
+          "icon": null,
+          "label_ja": "積層順",
+          "label_zh_tw": "逐層"
         },
         {
           "value": "by object",
           "label_en": "By object",
           "label_zh": "逐件",
-          "icon": null
+          "icon": null,
+          "label_ja": "オブジェクト順",
+          "label_zh_tw": "逐件"
         }
       ],
       "is_print_option": true
@@ -1971,7 +2173,9 @@
     "slow_down_for_layer_cooling": {
       "label": {
         "zh": "降低打印速度 以得到更好的冷却",
-        "en": "Slow printing down for better layer cooling"
+        "en": "Slow printing down for better layer cooling",
+        "ja": "冷却の為減速",
+        "zh_tw": "降低列印速度 以得到更好的冷卻"
       },
       "unit": {
         "zh": "",
@@ -1991,7 +2195,9 @@
     "no_slow_down_for_cooling_on_outwalls": {
       "label": {
         "zh": "不减慢外墙速度",
-        "en": "Don't slow down outer walls"
+        "en": "Don't slow down outer walls",
+        "ja": "外周壁の速度を低下させない",
+        "zh_tw": "不減慢外牆速度"
       },
       "unit": {
         "zh": "",
@@ -2011,7 +2217,9 @@
     "cooling_slowdown_logic": {
       "label": {
         "zh": "冷却减速逻辑",
-        "en": "Cooling slowdown logic"
+        "en": "Cooling slowdown logic",
+        "ja": "冷却時の減速ロジック",
+        "zh_tw": "冷卻減速邏輯"
       },
       "unit": {
         "zh": "",
@@ -2030,13 +2238,17 @@
           "value": "uniform_cooling",
           "label_en": "Uniform cooling",
           "label_zh": "均匀冷却",
-          "icon": null
+          "icon": null,
+          "label_ja": "均一冷却",
+          "label_zh_tw": "均勻冷卻"
         },
         {
           "value": "consistent_surface",
           "label_en": "Consistent surface",
           "label_zh": "表面一致性",
-          "icon": null
+          "icon": null,
+          "label_ja": "表面品質優先",
+          "label_zh_tw": "表面一致性"
         }
       ],
       "is_print_option": false
@@ -2044,7 +2256,9 @@
     "cooling_perimeter_transition_distance": {
       "label": {
         "zh": "外围过渡距离",
-        "en": "Perimeter transition distance"
+        "en": "Perimeter transition distance",
+        "ja": "外周の遷移距離",
+        "zh_tw": "外圍過渡距離"
       },
       "unit": {
         "zh": "mm",
@@ -2064,7 +2278,9 @@
     "default_acceleration": {
       "label": {
         "zh": "普通打印",
-        "en": "Normal printing"
+        "en": "Normal printing",
+        "ja": "通常造形",
+        "zh_tw": "普通列印"
       },
       "unit": {
         "zh": "mm/s²",
@@ -2084,7 +2300,9 @@
     "travel_acceleration": {
       "label": {
         "zh": "空驶",
-        "en": "Travel"
+        "en": "Travel",
+        "ja": "移動",
+        "zh_tw": "空駛"
       },
       "unit": {
         "zh": "mm/s²",
@@ -2104,7 +2322,9 @@
     "travel_short_distance_acceleration": {
       "label": {
         "zh": "短程移动",
-        "en": "Short travel"
+        "en": "Short travel",
+        "ja": "短距離移動",
+        "zh_tw": "短程移動"
       },
       "unit": {
         "zh": "mm/s²",
@@ -2124,7 +2344,9 @@
     "initial_layer_travel_acceleration": {
       "label": {
         "zh": "首层空驶",
-        "en": "Initial layer travel"
+        "en": "Initial layer travel",
+        "ja": "1層目の移動動作",
+        "zh_tw": "首層空駛"
       },
       "unit": {
         "zh": "mm/s²",
@@ -2144,7 +2366,9 @@
     "default_filament_profile": {
       "label": {
         "zh": "默认耗材配置",
-        "en": "Default filament profile"
+        "en": "Default filament profile",
+        "ja": "デフォルト フィラメント プロファイル",
+        "zh_tw": "預設耗材配置"
       },
       "unit": {
         "zh": "",
@@ -2164,7 +2388,9 @@
     "default_print_profile": {
       "label": {
         "zh": "默认切片配置",
-        "en": "Default process profile"
+        "en": "Default process profile",
+        "ja": "デフォルト プロセスプロファイル",
+        "zh_tw": "預設切片配置"
       },
       "unit": {
         "zh": "",
@@ -2184,7 +2410,9 @@
     "activate_air_filtration": {
       "label": {
         "zh": "空气过滤增强",
-        "en": "Activate air filtration"
+        "en": "Activate air filtration",
+        "ja": "エアフィルター有効化",
+        "zh_tw": "空氣過濾增強"
       },
       "unit": {
         "zh": "",
@@ -2204,7 +2432,9 @@
     "during_print_exhaust_fan_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -2224,7 +2454,9 @@
     "complete_print_exhaust_fan_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -2244,7 +2476,9 @@
     "close_additional_fan_first_x_layers": {
       "label": {
         "zh": "在最初的",
-        "en": "For the first"
+        "en": "For the first",
+        "ja": "最初に",
+        "zh_tw": "在最初的"
       },
       "unit": {
         "zh": "层",
@@ -2264,7 +2498,9 @@
     "additional_fan_full_speed_layer": {
       "label": {
         "zh": "满速风扇在",
-        "en": "Full fan speed at layer"
+        "en": "Full fan speed at layer",
+        "ja": "最大回転速度の積層",
+        "zh_tw": "滿速風扇在"
       },
       "unit": {
         "zh": "",
@@ -2284,7 +2520,9 @@
     "close_fan_the_first_x_layers": {
       "label": {
         "zh": "在最初的",
-        "en": "For the first"
+        "en": "For the first",
+        "ja": "最初に",
+        "zh_tw": "在最初的"
       },
       "unit": {
         "zh": "层",
@@ -2304,7 +2542,9 @@
     "first_x_layer_part_fan_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -2324,7 +2564,9 @@
     "first_x_layer_fan_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -2344,7 +2586,9 @@
     "bridge_no_support": {
       "label": {
         "zh": "不支撑桥接",
-        "en": "Don't support bridges"
+        "en": "Don't support bridges",
+        "ja": "ブリッジにサポートしない",
+        "zh_tw": "不支撐橋接"
       },
       "unit": {
         "zh": "",
@@ -2364,7 +2608,9 @@
     "thick_bridges": {
       "label": {
         "zh": "厚桥",
-        "en": "Thick bridges"
+        "en": "Thick bridges",
+        "ja": "厚いブリッジ",
+        "zh_tw": "厚橋"
       },
       "unit": {
         "zh": "",
@@ -2384,7 +2630,9 @@
     "max_bridge_length": {
       "label": {
         "zh": "最大桥接长度",
-        "en": "Max bridge length"
+        "en": "Max bridge length",
+        "ja": "最大ブリッジ長さ",
+        "zh_tw": "最大橋接長度"
       },
       "unit": {
         "zh": "mm",
@@ -2404,7 +2652,9 @@
     "machine_end_gcode": {
       "label": {
         "zh": "结尾G-code",
-        "en": "End G-code"
+        "en": "End G-code",
+        "ja": "終了G-code",
+        "zh_tw": "結尾G-code"
       },
       "unit": {
         "zh": "",
@@ -2424,7 +2674,9 @@
     "printing_by_object_gcode": {
       "label": {
         "zh": "对象之间Gcode",
-        "en": "Between Object Gcode"
+        "en": "Between Object Gcode",
+        "ja": "オブジェクト間 G-code",
+        "zh_tw": "物件之間Gcode"
       },
       "unit": {
         "zh": "",
@@ -2444,7 +2696,9 @@
     "filament_end_gcode": {
       "label": {
         "zh": "结尾G-code",
-        "en": "End G-code"
+        "en": "End G-code",
+        "ja": "終了G-code",
+        "zh_tw": "結尾G-code"
       },
       "unit": {
         "zh": "",
@@ -2464,7 +2718,9 @@
     "ensure_vertical_shell_thickness": {
       "label": {
         "zh": "确保垂直外壳厚度",
-        "en": "Ensure vertical shell thickness"
+        "en": "Ensure vertical shell thickness",
+        "ja": "壁の厚さを確保",
+        "zh_tw": "確保垂直外殼厚度"
       },
       "unit": {
         "zh": "",
@@ -2483,19 +2739,25 @@
           "value": "disabled",
           "label_en": "Disabled",
           "label_zh": "关闭",
-          "icon": null
+          "icon": null,
+          "label_ja": "無効化",
+          "label_zh_tw": "關閉"
         },
         {
           "value": "partial",
           "label_en": "Partial",
           "label_zh": "部分",
-          "icon": null
+          "icon": null,
+          "label_ja": "部分的な",
+          "label_zh_tw": "部分"
         },
         {
           "value": "enabled",
           "label_en": "Enabled",
           "label_zh": "打开",
-          "icon": null
+          "icon": null,
+          "label_ja": "有効",
+          "label_zh_tw": "開啟"
         }
       ],
       "is_print_option": true
@@ -2503,7 +2765,9 @@
     "vertical_shell_speed": {
       "label": {
         "zh": "斜面填充速度",
-        "en": "Vertical shell speed"
+        "en": "Vertical shell speed",
+        "ja": "垂直シェル速度",
+        "zh_tw": "斜面填充速度"
       },
       "unit": {
         "zh": "mm/s 或 %",
@@ -2523,7 +2787,9 @@
     "detect_floating_vertical_shell": {
       "label": {
         "zh": "识别悬空实心填充",
-        "en": "Detect floating vertical shells"
+        "en": "Detect floating vertical shells",
+        "ja": "浮遊する垂直シェルを検出",
+        "zh_tw": "識別懸空實心填充"
       },
       "unit": {
         "zh": "",
@@ -2543,7 +2809,9 @@
     "internal_bridge_support_thickness": {
       "label": {
         "zh": "内部桥接支撑厚度",
-        "en": "Internal bridge support thickness"
+        "en": "Internal bridge support thickness",
+        "ja": "内部ブリッジサポート厚さ",
+        "zh_tw": "內部橋接支撐厚度"
       },
       "unit": {
         "zh": "mm",
@@ -2563,7 +2831,9 @@
     "top_surface_pattern": {
       "label": {
         "zh": "顶面图案",
-        "en": "Top surface pattern"
+        "en": "Top surface pattern",
+        "ja": "トップ面パターン",
+        "zh_tw": "頂面圖案"
       },
       "unit": {
         "zh": "",
@@ -2582,49 +2852,65 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "monotonic",
           "label_en": "Monotonic",
           "label_zh": "单调",
-          "icon": "param_monotonic"
+          "icon": "param_monotonic",
+          "label_ja": "単調",
+          "label_zh_tw": "單調"
         },
         {
           "value": "monotonicline",
           "label_en": "Monotonic line",
           "label_zh": "单调线",
-          "icon": "param_monotonicline"
+          "icon": "param_monotonicline",
+          "label_ja": "単調線",
+          "label_zh_tw": "單調線"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         }
       ],
       "is_print_option": true
@@ -2632,7 +2918,9 @@
     "top_surface_density": {
       "label": {
         "zh": "顶面密度",
-        "en": "Top surface density"
+        "en": "Top surface density",
+        "ja": "トップ表面密度",
+        "zh_tw": "頂面密度"
       },
       "unit": {
         "zh": "%",
@@ -2652,7 +2940,9 @@
     "monotonic_travel_into_wall": {
       "label": {
         "zh": "单调线空驶延伸",
-        "en": "Monotonic line travel extend"
+        "en": "Monotonic line travel extend",
+        "ja": "モノトニックラインの移動距離拡張",
+        "zh_tw": "單調線移動延伸"
       },
       "unit": {
         "zh": "%",
@@ -2672,7 +2962,9 @@
     "bottom_surface_pattern": {
       "label": {
         "zh": "底面图案",
-        "en": "Bottom surface pattern"
+        "en": "Bottom surface pattern",
+        "ja": "底面パターン",
+        "zh_tw": "底面圖案"
       },
       "unit": {
         "zh": "",
@@ -2691,49 +2983,65 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "monotonic",
           "label_en": "Monotonic",
           "label_zh": "单调",
-          "icon": "param_monotonic"
+          "icon": "param_monotonic",
+          "label_ja": "単調",
+          "label_zh_tw": "單調"
         },
         {
           "value": "monotonicline",
           "label_en": "Monotonic line",
           "label_zh": "单调线",
-          "icon": "param_monotonicline"
+          "icon": "param_monotonicline",
+          "label_ja": "単調線",
+          "label_zh_tw": "單調線"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         }
       ],
       "is_print_option": true
@@ -2741,7 +3049,9 @@
     "bottom_surface_density": {
       "label": {
         "zh": "底面密度",
-        "en": "Bottom surface density"
+        "en": "Bottom surface density",
+        "ja": "ボトム表面密度",
+        "zh_tw": "底面密度"
       },
       "unit": {
         "zh": "%",
@@ -2761,7 +3071,9 @@
     "internal_solid_infill_pattern": {
       "label": {
         "zh": "内部实心填充图案",
-        "en": "Internal solid infill pattern"
+        "en": "Internal solid infill pattern",
+        "ja": "内部ソリッドインフィルパターン",
+        "zh_tw": "內部實心填充圖案"
       },
       "unit": {
         "zh": "",
@@ -2780,49 +3092,65 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "monotonic",
           "label_en": "Monotonic",
           "label_zh": "单调",
-          "icon": "param_monotonic"
+          "icon": "param_monotonic",
+          "label_ja": "単調",
+          "label_zh_tw": "單調"
         },
         {
           "value": "monotonicline",
           "label_en": "Monotonic line",
           "label_zh": "单调线",
-          "icon": "param_monotonicline"
+          "icon": "param_monotonicline",
+          "label_ja": "単調線",
+          "label_zh_tw": "單調線"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         }
       ],
       "is_print_option": true
@@ -2830,7 +3158,9 @@
     "outer_wall_line_width": {
       "label": {
         "zh": "外墙",
-        "en": "Outer wall"
+        "en": "Outer wall",
+        "ja": "外壁",
+        "zh_tw": "外牆"
       },
       "unit": {
         "zh": "mm",
@@ -2850,7 +3180,9 @@
     "outer_wall_speed": {
       "label": {
         "zh": "外墙",
-        "en": "Outer wall"
+        "en": "Outer wall",
+        "ja": "外壁",
+        "zh_tw": "外牆"
       },
       "unit": {
         "zh": "mm/s",
@@ -2870,7 +3202,9 @@
     "small_perimeter_speed": {
       "label": {
         "zh": "小轮廓",
-        "en": "Small perimeters"
+        "en": "Small perimeters",
+        "ja": "小さな周囲",
+        "zh_tw": "小輪廓"
       },
       "unit": {
         "zh": "mm/s 或 %",
@@ -2890,7 +3224,9 @@
     "small_perimeter_threshold": {
       "label": {
         "zh": "小轮廓阈值",
-        "en": "Small perimeter threshold"
+        "en": "Small perimeter threshold",
+        "ja": "小さな外周のしきい値",
+        "zh_tw": "小輪廓閾值"
       },
       "unit": {
         "zh": "mm",
@@ -2910,7 +3246,9 @@
     "wall_sequence": {
       "label": {
         "zh": "墙顺序",
-        "en": "Order of walls"
+        "en": "Order of walls",
+        "ja": "壁面の順序",
+        "zh_tw": "牆順序"
       },
       "unit": {
         "zh": "",
@@ -2929,19 +3267,25 @@
           "value": "inner wall/outer wall",
           "label_en": "inner/outer",
           "label_zh": "内墙/外墙",
-          "icon": null
+          "icon": null,
+          "label_ja": "内 / 外",
+          "label_zh_tw": "內牆/外牆"
         },
         {
           "value": "outer wall/inner wall",
           "label_en": "outer/inner",
           "label_zh": "外墙/内墙",
-          "icon": null
+          "icon": null,
+          "label_ja": "外側/内側",
+          "label_zh_tw": "外牆/內牆"
         },
         {
           "value": "inner-outer-inner wall",
           "label_en": "inner wall/outer wall/inner wall",
           "label_zh": "内墙/外墙/内墙",
-          "icon": null
+          "icon": null,
+          "label_ja": "内壁 / 外壁 / 内壁",
+          "label_zh_tw": "內牆/外牆/內牆"
         }
       ],
       "is_print_option": true
@@ -2949,7 +3293,9 @@
     "is_infill_first": {
       "label": {
         "zh": "首先打印填充",
-        "en": "Print infill first"
+        "en": "Print infill first",
+        "ja": "最初にインフィルを印刷する",
+        "zh_tw": "首先列印填充"
       },
       "unit": {
         "zh": "",
@@ -2969,7 +3315,9 @@
     "extruder": {
       "label": {
         "zh": "挤出机",
-        "en": "Extruder"
+        "en": "Extruder",
+        "ja": "押出機",
+        "zh_tw": "擠出機"
       },
       "unit": {
         "zh": "",
@@ -2989,7 +3337,9 @@
     "extruder_clearance_height_to_rod": {
       "label": {
         "zh": "到横杆高度",
-        "en": "Height to rod"
+        "en": "Height to rod",
+        "ja": "レールまでの高さ",
+        "zh_tw": "到橫杆高度"
       },
       "unit": {
         "zh": "mm",
@@ -3009,7 +3359,9 @@
     "extruder_clearance_height_to_lid": {
       "label": {
         "zh": "到顶盖高度",
-        "en": "Height to lid"
+        "en": "Height to lid",
+        "ja": "蓋までの高さ",
+        "zh_tw": "到頂蓋高度"
       },
       "unit": {
         "zh": "mm",
@@ -3029,7 +3381,9 @@
     "extruder_clearance_dist_to_rod": {
       "label": {
         "zh": "到滑杆距离",
-        "en": "Distance to rod"
+        "en": "Distance to rod",
+        "ja": "レールまでの距離",
+        "zh_tw": "到滑桿距離"
       },
       "unit": {
         "zh": "mm",
@@ -3049,7 +3403,9 @@
     "nozzle_height": {
       "label": {
         "zh": "喷嘴高度",
-        "en": "Nozzle height"
+        "en": "Nozzle height",
+        "ja": "ノズルの高さ",
+        "zh_tw": "噴嘴高度"
       },
       "unit": {
         "zh": "mm",
@@ -3069,7 +3425,9 @@
     "extruder_clearance_max_radius": {
       "label": {
         "zh": "最大半径",
-        "en": "Max Radius"
+        "en": "Max Radius",
+        "ja": "最大半径",
+        "zh_tw": "最大半徑"
       },
       "unit": {
         "zh": "mm",
@@ -3089,7 +3447,9 @@
     "grab_length": {
       "label": {
         "zh": "抓手长度",
-        "en": "Grab length"
+        "en": "Grab length",
+        "ja": "取り込み長さ",
+        "zh_tw": "抓手長度"
       },
       "unit": {
         "zh": "mm",
@@ -3109,7 +3469,9 @@
     "extruder_colour": {
       "label": {
         "zh": "挤出机颜色",
-        "en": "Extruder Color"
+        "en": "Extruder Color",
+        "ja": "押出機の色",
+        "zh_tw": "擠出機顏色"
       },
       "unit": {
         "zh": "",
@@ -3129,7 +3491,9 @@
     "extruder_offset": {
       "label": {
         "zh": "挤出机偏移",
-        "en": "Extruder offset"
+        "en": "Extruder offset",
+        "ja": "押出機オフセット",
+        "zh_tw": "擠出機偏移"
       },
       "unit": {
         "zh": "mm",
@@ -3149,7 +3513,9 @@
     "filament_flow_ratio": {
       "label": {
         "zh": "流量比例",
-        "en": "Flow ratio"
+        "en": "Flow ratio",
+        "ja": "流量比",
+        "zh_tw": "流量比例"
       },
       "unit": {
         "zh": "",
@@ -3169,7 +3535,9 @@
     "print_flow_ratio": {
       "label": {
         "zh": "对象流量比率",
-        "en": "Object flow ratio"
+        "en": "Object flow ratio",
+        "ja": "対象物の流量比",
+        "zh_tw": "物件流量比率"
       },
       "unit": {
         "zh": "",
@@ -3189,7 +3557,9 @@
     "enable_pressure_advance": {
       "label": {
         "zh": "启用压力提前补偿",
-        "en": "Enable pressure advance"
+        "en": "Enable pressure advance",
+        "ja": "圧力進行を有効にする",
+        "zh_tw": "啟用壓力提前補償"
       },
       "unit": {
         "zh": "",
@@ -3209,7 +3579,9 @@
     "pressure_advance": {
       "label": {
         "zh": "压力提升",
-        "en": "Pressure advance"
+        "en": "Pressure advance",
+        "ja": "圧力進行",
+        "zh_tw": "壓力提升"
       },
       "unit": {
         "zh": "",
@@ -3229,7 +3601,9 @@
     "filament_notes": {
       "label": {
         "zh": "Filament notes",
-        "en": "Filament notes"
+        "en": "Filament notes",
+        "ja": "フィラメントノート",
+        "zh_tw": "線材備註"
       },
       "unit": {
         "zh": "",
@@ -3249,7 +3623,9 @@
     "process_notes": {
       "label": {
         "zh": "Process notes",
-        "en": "Process notes"
+        "en": "Process notes",
+        "ja": "プロセスノート",
+        "zh_tw": "製程備註"
       },
       "unit": {
         "zh": "",
@@ -3269,7 +3645,9 @@
     "printer_notes": {
       "label": {
         "zh": "打印机注意事项",
-        "en": "Printer notes"
+        "en": "Printer notes",
+        "ja": "プリンターメモ",
+        "zh_tw": "印表機注意事項"
       },
       "unit": {
         "zh": "",
@@ -3289,7 +3667,9 @@
     "line_width": {
       "label": {
         "zh": "默认",
-        "en": "Default"
+        "en": "Default",
+        "ja": "デフォルト",
+        "zh_tw": "預設"
       },
       "unit": {
         "zh": "mm",
@@ -3309,7 +3689,9 @@
     "reduce_fan_stop_start_freq": {
       "label": {
         "zh": "保持风扇常开",
-        "en": "Keep fan always on"
+        "en": "Keep fan always on",
+        "ja": "ファン常時ON",
+        "zh_tw": "保持風扇常開"
       },
       "unit": {
         "zh": "",
@@ -3329,7 +3711,9 @@
     "fan_cooling_layer_time": {
       "label": {
         "zh": "层时间",
-        "en": "Layer time"
+        "en": "Layer time",
+        "ja": "積層時間",
+        "zh_tw": "層時間"
       },
       "unit": {
         "zh": "秒",
@@ -3349,7 +3733,9 @@
     "default_filament_colour": {
       "label": {
         "zh": "默认颜色",
-        "en": "Default color"
+        "en": "Default color",
+        "ja": "デフォルト色",
+        "zh_tw": "預設顏色"
       },
       "unit": {
         "zh": "",
@@ -3369,7 +3755,9 @@
     "filament_colour": {
       "label": {
         "zh": "颜色",
-        "en": "Color"
+        "en": "Color",
+        "ja": "色",
+        "zh_tw": "顏色"
       },
       "unit": {
         "zh": "",
@@ -3429,7 +3817,9 @@
     "required_nozzle_HRC": {
       "label": {
         "zh": "喷嘴硬度要求",
-        "en": "Required nozzle HRC"
+        "en": "Required nozzle HRC",
+        "ja": "ノズルHRC",
+        "zh_tw": "噴嘴硬度要求"
       },
       "unit": {
         "zh": "",
@@ -3449,7 +3839,9 @@
     "filament_map": {
       "label": {
         "zh": "耗材丝匹配至挤出机",
-        "en": "Filament map to extruder"
+        "en": "Filament map to extruder",
+        "ja": "フィラメントのエクストルーダー対応付け",
+        "zh_tw": "耗材絲匹配至擠出機"
       },
       "unit": {
         "zh": "",
@@ -3529,7 +3921,9 @@
     "filament_map_mode": {
       "label": {
         "zh": "耗材丝匹配模式",
-        "en": "filament mapping mode"
+        "en": "filament mapping mode",
+        "ja": "フィラメントマッピングモード",
+        "zh_tw": "耗材絲匹配模式"
       },
       "unit": {
         "zh": "",
@@ -3548,31 +3942,41 @@
           "value": "Auto For Flush",
           "label_en": "Auto For Flush",
           "label_zh": "Auto For Flush",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動フラッシュ",
+          "label_zh_tw": "自動用於沖洗"
         },
         {
           "value": "Auto For Match",
           "label_en": "Auto For Match",
           "label_zh": "Auto For Match",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動マッチング",
+          "label_zh_tw": "自動用於匹配"
         },
         {
           "value": "Manual",
           "label_en": "Manual",
           "label_zh": "手动",
-          "icon": null
+          "icon": null,
+          "label_ja": "手動",
+          "label_zh_tw": "手動"
         },
         {
           "value": "Nozzle Manual",
           "label_en": "Default",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "デフォルト",
+          "label_zh_tw": "預設"
         },
         {
           "value": "Default",
           "label_en": "Nozzle Manual",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "ノズルマニュアル",
+          "label_zh_tw": "噴嘴手動"
         }
       ],
       "is_print_option": false
@@ -3600,7 +4004,9 @@
     "filament_flush_temp": {
       "label": {
         "zh": "冲刷温度",
-        "en": "Flush temperature"
+        "en": "Flush temperature",
+        "ja": "フラッシュ温度",
+        "zh_tw": "沖刷溫度"
       },
       "unit": {
         "zh": "°C",
@@ -3620,7 +4026,9 @@
     "filament_flush_temp_fast": {
       "label": {
         "zh": "冲刷温度",
-        "en": "Flush temperature"
+        "en": "Flush temperature",
+        "ja": "フラッシュ温度",
+        "zh_tw": "沖刷溫度"
       },
       "unit": {
         "zh": "°C",
@@ -3640,7 +4048,9 @@
     "filament_flush_volumetric_speed": {
       "label": {
         "zh": "冲刷体积流量",
-        "en": "Flush volumetric speed"
+        "en": "Flush volumetric speed",
+        "ja": "フラッシュの体積速度",
+        "zh_tw": "沖刷體積流量"
       },
       "unit": {
         "zh": "mm³/s",
@@ -3660,7 +4070,9 @@
     "filament_max_volumetric_speed": {
       "label": {
         "zh": "最大体积速度",
-        "en": "Max volumetric speed"
+        "en": "Max volumetric speed",
+        "ja": "最大体積速度",
+        "zh_tw": "最大體積速度"
       },
       "unit": {
         "zh": "mm³/s",
@@ -3680,7 +4092,9 @@
     "filament_ramming_volumetric_speed": {
       "label": {
         "zh": "挤出机更换",
-        "en": "Extruder change"
+        "en": "Extruder change",
+        "ja": "押出機の変更",
+        "zh_tw": "擠出機更換"
       },
       "unit": {
         "zh": "mm³/s",
@@ -3700,7 +4114,9 @@
     "filament_ramming_volumetric_speed_nc": {
       "label": {
         "zh": "热端更换",
-        "en": "Hotend change"
+        "en": "Hotend change",
+        "ja": "ホットエンドの変更",
+        "zh_tw": "熱端更換"
       },
       "unit": {
         "zh": "mm³/s",
@@ -3720,7 +4136,9 @@
     "filament_minimal_purge_on_wipe_tower": {
       "label": {
         "zh": "擦料塔上的最小清理量",
-        "en": "Minimal purge on wipe tower"
+        "en": "Minimal purge on wipe tower",
+        "ja": "プライムタワー上最小フラッシュ量",
+        "zh_tw": "擦料塔上的最小清理量"
       },
       "unit": {
         "zh": "mm³",
@@ -3740,7 +4158,9 @@
     "machine_load_filament_time": {
       "label": {
         "zh": "加载耗材丝的时间",
-        "en": "Filament load time"
+        "en": "Filament load time",
+        "ja": "フィラメントロード時間",
+        "zh_tw": "載入耗材絲的時間"
       },
       "unit": {
         "zh": "秒",
@@ -3760,7 +4180,9 @@
     "machine_unload_filament_time": {
       "label": {
         "zh": "卸载耗材丝的时间",
-        "en": "Filament unload time"
+        "en": "Filament unload time",
+        "ja": "フィラメントアンロード時間",
+        "zh_tw": "解除安裝耗材絲的時間"
       },
       "unit": {
         "zh": "秒",
@@ -3780,7 +4202,9 @@
     "ams_filament_load_time_ams": {
       "label": {
         "zh": "AMS 耗材进料时间",
-        "en": "AMS filament load time"
+        "en": "AMS filament load time",
+        "ja": "AMSフィラメントのロード時間",
+        "zh_tw": "AMS 線材進料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3800,7 +4224,9 @@
     "ams_filament_load_time_ams_lite": {
       "label": {
         "zh": "AMS Lite 耗材进料时间",
-        "en": "AMS Lite filament load time"
+        "en": "AMS Lite filament load time",
+        "ja": "AMS Liteフィラメントのロード時間",
+        "zh_tw": "AMS Lite 線材進料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3820,7 +4246,9 @@
     "ams_filament_load_time_n3f_s": {
       "label": {
         "zh": "N3F/N3S 耗材进料时间",
-        "en": "N3F/N3S filament load time"
+        "en": "N3F/N3S filament load time",
+        "ja": "N3F/N3Sフィラメントのロード時間",
+        "zh_tw": "N3F/N3S 線材進料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3840,7 +4268,9 @@
     "ams_filament_unload_time_ams": {
       "label": {
         "zh": "AMS 耗材退料时间",
-        "en": "AMS filament unload time"
+        "en": "AMS filament unload time",
+        "ja": "AMSフィラメントのアンロード時間",
+        "zh_tw": "AMS 線材退料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3860,7 +4290,9 @@
     "ams_filament_unload_time_ams_lite": {
       "label": {
         "zh": "AMS Lite 耗材退料时间",
-        "en": "AMS Lite filament unload time"
+        "en": "AMS Lite filament unload time",
+        "ja": "AMS Liteフィラメントのアンロード時間",
+        "zh_tw": "AMS Lite 線材退料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3880,7 +4312,9 @@
     "ams_filament_unload_time_n3f_s": {
       "label": {
         "zh": "N3F/N3S 耗材退料时间",
-        "en": "N3F/N3S filament unload time"
+        "en": "N3F/N3S filament unload time",
+        "ja": "N3F/N3Sフィラメントのアンロード時間",
+        "zh_tw": "N3F/N3S 線材退料時間"
       },
       "unit": {
         "zh": "秒",
@@ -3900,7 +4334,9 @@
     "default_ams_type": {
       "label": {
         "zh": "默认 AMS 类型",
-        "en": "Default AMS type"
+        "en": "Default AMS type",
+        "ja": "デフォルトのAMSタイプ",
+        "zh_tw": "預設 AMS 類型"
       },
       "unit": {
         "zh": "",
@@ -3920,7 +4356,9 @@
     "machine_switch_extruder_time": {
       "label": {
         "zh": "挤出机切换时间",
-        "en": "Extruder switch time"
+        "en": "Extruder switch time",
+        "ja": "エクストルーダーの切り替え時間",
+        "zh_tw": "擠出機切換時間"
       },
       "unit": {
         "zh": "秒",
@@ -3940,7 +4378,9 @@
     "machine_hotend_change_time": {
       "label": {
         "zh": "热端更换时间",
-        "en": "Hotend change time"
+        "en": "Hotend change time",
+        "ja": "ホットエンド交換時間",
+        "zh_tw": "熱端更換時間"
       },
       "unit": {
         "zh": "秒",
@@ -4080,7 +4520,9 @@
     "bed_temperature_formula": {
       "label": {
         "zh": "热床温度类型",
-        "en": "Bed temperature type"
+        "en": "Bed temperature type",
+        "ja": "ベッド温度タイプ",
+        "zh_tw": "熱床溫度型別"
       },
       "unit": {
         "zh": "",
@@ -4099,13 +4541,17 @@
           "value": "by_first_filament",
           "label_en": "By First filament",
           "label_zh": "依据首个材料",
-          "icon": null
+          "icon": null,
+          "label_ja": "最初のフィラメントの順序",
+          "label_zh_tw": "依據首個材料"
         },
         {
           "value": "by_highest_temp",
           "label_en": "By Highest Temp",
           "label_zh": "依据最高温",
-          "icon": null
+          "icon": null,
+          "label_ja": "最高温度順",
+          "label_zh_tw": "依據最高溫"
         }
       ],
       "is_print_option": false
@@ -4133,7 +4579,9 @@
     "filament_diameter": {
       "label": {
         "zh": "直径",
-        "en": "Diameter"
+        "en": "Diameter",
+        "ja": "直径",
+        "zh_tw": "直徑"
       },
       "unit": {
         "zh": "mm",
@@ -4153,7 +4601,9 @@
     "filament_adaptive_volumetric_speed": {
       "label": {
         "zh": "自适应体积速度",
-        "en": "Adaptive volumetric speed"
+        "en": "Adaptive volumetric speed",
+        "ja": "適応体積速度",
+        "zh_tw": "自適應體積速度"
       },
       "unit": {
         "zh": "",
@@ -4173,7 +4623,9 @@
     "volumetric_speed_coefficients": {
       "label": {
         "zh": "最大体积速度多项式系数",
-        "en": "Max volumetric speed multinomial coefficients"
+        "en": "Max volumetric speed multinomial coefficients",
+        "ja": "最大体積速度の多項式係数",
+        "zh_tw": "最大體積速度多項式係數"
       },
       "unit": {
         "zh": "",
@@ -4193,7 +4645,9 @@
     "filament_shrink": {
       "label": {
         "zh": "收缩",
-        "en": "Shrinkage"
+        "en": "Shrinkage",
+        "ja": "収縮",
+        "zh_tw": "收縮"
       },
       "unit": {
         "zh": "%",
@@ -4213,7 +4667,9 @@
     "filament_velocity_adaptation_factor": {
       "label": {
         "zh": "速度适应系数",
-        "en": "Velocity Adaptation Factor"
+        "en": "Velocity Adaptation Factor",
+        "ja": "速度適応係数",
+        "zh_tw": "速度適應係數"
       },
       "unit": {
         "zh": "",
@@ -4233,7 +4689,9 @@
     "filament_adhesiveness_category": {
       "label": {
         "zh": "粘接性类别",
-        "en": "Adhesiveness Category"
+        "en": "Adhesiveness Category",
+        "ja": "粘着性カテゴリー",
+        "zh_tw": "粘接性類別"
       },
       "unit": {
         "zh": "",
@@ -4253,7 +4711,9 @@
     "filament_metal_stickiness": {
       "label": {
         "zh": "对金属粘性",
-        "en": "Metal stickiness"
+        "en": "Metal stickiness",
+        "ja": "金属への付着性",
+        "zh_tw": "金屬黏性"
       },
       "unit": {
         "zh": "",
@@ -4272,25 +4732,33 @@
           "value": "None",
           "label_en": "None",
           "label_zh": "无",
-          "icon": null
+          "icon": null,
+          "label_ja": "無し",
+          "label_zh_tw": "無"
         },
         {
           "value": "Low",
           "label_en": "Low",
           "label_zh": "低",
-          "icon": null
+          "icon": null,
+          "label_ja": "低い",
+          "label_zh_tw": "低"
         },
         {
           "value": "Medium",
           "label_en": "Medium",
           "label_zh": "中",
-          "icon": null
+          "icon": null,
+          "label_ja": "中位",
+          "label_zh_tw": "中"
         },
         {
           "value": "High",
           "label_en": "High",
           "label_zh": "高",
-          "icon": null
+          "icon": null,
+          "label_ja": "高い",
+          "label_zh_tw": "高"
         }
       ],
       "is_print_option": false
@@ -4298,7 +4766,9 @@
     "filament_density": {
       "label": {
         "zh": "密度",
-        "en": "Density"
+        "en": "Density",
+        "ja": "密度",
+        "zh_tw": "密度"
       },
       "unit": {
         "zh": "g/cm³",
@@ -4318,7 +4788,9 @@
     "filament_type": {
       "label": {
         "zh": "类型",
-        "en": "Type"
+        "en": "Type",
+        "ja": "タイプ",
+        "zh_tw": "型別"
       },
       "unit": {
         "zh": "",
@@ -4537,7 +5009,9 @@
     "filament_soluble": {
       "label": {
         "zh": "可溶性材料",
-        "en": "Soluble material"
+        "en": "Soluble material",
+        "ja": "可溶性材料",
+        "zh_tw": "可溶性材料"
       },
       "unit": {
         "zh": "",
@@ -4557,7 +5031,9 @@
     "filament_scarf_seam_type": {
       "label": {
         "zh": "斜拼接缝类型",
-        "en": "Scarf seam type"
+        "en": "Scarf seam type",
+        "ja": "スカーフ継ぎ目タイプ",
+        "zh_tw": "斜拼接縫型別"
       },
       "unit": {
         "zh": "",
@@ -4576,19 +5052,25 @@
           "value": "none",
           "label_en": "None",
           "label_zh": "无",
-          "icon": null
+          "icon": null,
+          "label_ja": "無し",
+          "label_zh_tw": "無"
         },
         {
           "value": "external",
           "label_en": "Contour",
           "label_zh": "轮廓",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭",
+          "label_zh_tw": "輪廓"
         },
         {
           "value": "all",
           "label_en": "Contour and hole",
           "label_zh": "轮廓和孔",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭と穴",
+          "label_zh_tw": "輪廓和孔"
         }
       ],
       "is_print_option": false
@@ -4596,7 +5078,9 @@
     "filament_scarf_height": {
       "label": {
         "zh": "斜拼接缝起始高度",
-        "en": "Scarf start height"
+        "en": "Scarf start height",
+        "ja": "スカーフ開始高さ",
+        "zh_tw": "斜拼接縫起始高度"
       },
       "unit": {
         "zh": "mm/%",
@@ -4616,7 +5100,9 @@
     "filament_scarf_gap": {
       "label": {
         "zh": "斜拼接缝间隔",
-        "en": "Scarf slope gap"
+        "en": "Scarf slope gap",
+        "ja": "スカーフ斜面ギャップ",
+        "zh_tw": "斜拼接縫間隔"
       },
       "unit": {
         "zh": "mm/%",
@@ -4636,7 +5122,9 @@
     "filament_scarf_length": {
       "label": {
         "zh": "斜拼接缝长度",
-        "en": "Scarf length"
+        "en": "Scarf length",
+        "ja": "スカーフの長さ",
+        "zh_tw": "斜拼接縫長度"
       },
       "unit": {
         "zh": "mm",
@@ -4656,7 +5144,9 @@
     "filament_change_length": {
       "label": {
         "zh": "挤出机更换",
-        "en": "Extruder change"
+        "en": "Extruder change",
+        "ja": "押出機の変更",
+        "zh_tw": "擠出機更換"
       },
       "unit": {
         "zh": "mm",
@@ -4676,7 +5166,9 @@
     "filament_change_length_nc": {
       "label": {
         "zh": "热端更换",
-        "en": "Hotend change"
+        "en": "Hotend change",
+        "ja": "ホットエンドの変更",
+        "zh_tw": "熱端更換"
       },
       "unit": {
         "zh": "mm",
@@ -4696,7 +5188,9 @@
     "filament_is_support": {
       "label": {
         "zh": "支撑材料",
-        "en": "Support material"
+        "en": "Support material",
+        "ja": "サポート材料",
+        "zh_tw": "支撐材料"
       },
       "unit": {
         "zh": "",
@@ -4716,7 +5210,9 @@
     "filament_is_mixed": {
       "label": {
         "zh": "是否为混色耗材",
-        "en": "Is mixed filament"
+        "en": "Is mixed filament",
+        "ja": "混合フィラメントとして設定",
+        "zh_tw": "是否為混合線材"
       },
       "unit": {
         "zh": "",
@@ -4736,7 +5232,9 @@
     "filament_mixed_components": {
       "label": {
         "zh": "混色耗材组成",
-        "en": "Mixed filament components"
+        "en": "Mixed filament components",
+        "ja": "混合フィラメントの構成要素",
+        "zh_tw": "混合線材組件"
       },
       "unit": {
         "zh": "",
@@ -4756,7 +5254,9 @@
     "filament_mixed_sublayer_ratios": {
       "label": {
         "zh": "混色耗材子层比例",
-        "en": "Mixed filament sublayer ratios"
+        "en": "Mixed filament sublayer ratios",
+        "ja": "混合フィラメントのサブレイヤー比率",
+        "zh_tw": "混合線材子層比例"
       },
       "unit": {
         "zh": "",
@@ -4776,7 +5276,9 @@
     "filament_mixed_gradient": {
       "label": {
         "zh": "混色耗材渐变",
-        "en": "Mixed filament gradient"
+        "en": "Mixed filament gradient",
+        "ja": "混合フィラメントのグラデーション",
+        "zh_tw": "混合線材漸層"
       },
       "unit": {
         "zh": "",
@@ -4796,7 +5298,9 @@
     "filament_mixed_gradient_range": {
       "label": {
         "zh": "混色耗材渐变范围",
-        "en": "Mixed filament gradient range"
+        "en": "Mixed filament gradient range",
+        "ja": "混合フィラメントのグラデーション範囲",
+        "zh_tw": "混合線材漸層範圍"
       },
       "unit": {
         "zh": "",
@@ -4816,7 +5320,9 @@
     "filament_mixed_gradient_curve": {
       "label": {
         "zh": "混色耗材渐变曲线",
-        "en": "Mixed filament gradient curve"
+        "en": "Mixed filament gradient curve",
+        "ja": "混合フィラメント勾配曲線",
+        "zh_tw": "混合線材漸層曲線"
       },
       "unit": {
         "zh": "",
@@ -4836,7 +5342,9 @@
     "filament_mixed_gradient_per_part": {
       "label": {
         "zh": "混色耗材单个零件渐变",
-        "en": "Mixed filament per-part gradient"
+        "en": "Mixed filament per-part gradient",
+        "ja": "パーツごとの混合フィラメントグラデーション",
+        "zh_tw": "混合線材各零件漸層"
       },
       "unit": {
         "zh": "",
@@ -4856,7 +5364,9 @@
     "filament_printable": {
       "label": {
         "zh": "主体耗材可打印性",
-        "en": "Filament printable"
+        "en": "Filament printable",
+        "ja": "造形可能なフィラメント",
+        "zh_tw": "主體耗材可列印性"
       },
       "unit": {
         "zh": "",
@@ -4876,7 +5386,9 @@
     "filament_extruder_compatibility": {
       "label": {
         "zh": "耗材-挤出机兼容性",
-        "en": "Filament-extruder compatibility"
+        "en": "Filament-extruder compatibility",
+        "ja": "フィラメントと押出機の互換性",
+        "zh_tw": "線材與擠出機相容性"
       },
       "unit": {
         "zh": "",
@@ -4896,7 +5408,9 @@
     "filament_prime_volume": {
       "label": {
         "zh": "耗材丝更换",
-        "en": "Filament change"
+        "en": "Filament change",
+        "ja": "フィラメント交換",
+        "zh_tw": "耗材絲更換"
       },
       "unit": {
         "zh": "mm³",
@@ -4916,7 +5430,9 @@
     "filament_prime_volume_nc": {
       "label": {
         "zh": "热端更换",
-        "en": "Hotend change"
+        "en": "Hotend change",
+        "ja": "ホットエンドの変更",
+        "zh_tw": "熱端更換"
       },
       "unit": {
         "zh": "mm³",
@@ -4936,7 +5452,9 @@
     "filament_preheat_temperature_delta": {
       "label": {
         "zh": "预热温度差",
-        "en": "Preheat temperature delta"
+        "en": "Preheat temperature delta",
+        "ja": "予熱温度差",
+        "zh_tw": "預熱溫度差值"
       },
       "unit": {
         "zh": "°C",
@@ -4956,7 +5474,9 @@
     "filament_cooling_before_tower": {
       "label": {
         "zh": "擦料塔冷却",
-        "en": "Wipe tower cooling"
+        "en": "Wipe tower cooling",
+        "ja": "ワイプタワー冷却",
+        "zh_tw": "擦料塔冷卻"
       },
       "unit": {
         "zh": "°C",
@@ -4976,7 +5496,9 @@
     "filament_tower_interface_pre_extrusion_dist": {
       "label": {
         "zh": "接触层预挤出距离",
-        "en": "Interface layer pre-extrusion distance"
+        "en": "Interface layer pre-extrusion distance",
+        "ja": "インターフェース層の事前押出し距離",
+        "zh_tw": "接觸層預擠出距離"
       },
       "unit": {
         "zh": "mm",
@@ -4996,7 +5518,9 @@
     "filament_tower_interface_pre_extrusion_length": {
       "label": {
         "zh": "接触层预挤出长度",
-        "en": "Interface layer pre-extrusion length"
+        "en": "Interface layer pre-extrusion length",
+        "ja": "インターフェース層の事前押出し長さ",
+        "zh_tw": "接觸層預擠出長度"
       },
       "unit": {
         "zh": "mm",
@@ -5016,7 +5540,9 @@
     "filament_tower_ironing_area": {
       "label": {
         "zh": "擦拭塔熨烫面积",
-        "en": "Tower ironing area"
+        "en": "Tower ironing area",
+        "ja": "タワーアイロニング領域",
+        "zh_tw": "擦拭塔熨燙麵積"
       },
       "unit": {
         "zh": "mm²",
@@ -5036,7 +5562,9 @@
     "filament_tower_interface_purge_volume": {
       "label": {
         "zh": "擦拭塔冲刷长度",
-        "en": "Interface layer purge length"
+        "en": "Interface layer purge length",
+        "ja": "インターフェース層のパージ長さ",
+        "zh_tw": "擦拭塔沖刷長度"
       },
       "unit": {
         "zh": "mm",
@@ -5056,7 +5584,9 @@
     "filament_tower_interface_print_temp": {
       "label": {
         "zh": "接触层打印温度",
-        "en": "Interface layer print temperature"
+        "en": "Interface layer print temperature",
+        "ja": "インターフェース層の造形温度",
+        "zh_tw": "接觸層列印溫度"
       },
       "unit": {
         "zh": "°C",
@@ -5076,7 +5606,9 @@
     "enable_tower_interface_features": {
       "label": {
         "zh": "启用料塔接触层优化",
-        "en": "Enable tower interface features"
+        "en": "Enable tower interface features",
+        "ja": "プライムタワーのインターフェース機能を有効化",
+        "zh_tw": "啟用塔體介面功能"
       },
       "unit": {
         "zh": "",
@@ -5096,7 +5628,9 @@
     "temperature_vitrification": {
       "label": {
         "zh": "软化温度",
-        "en": "Softening temperature"
+        "en": "Softening temperature",
+        "ja": "軟化温度",
+        "zh_tw": "軟化溫度"
       },
       "unit": {
         "zh": "",
@@ -5116,7 +5650,9 @@
     "filament_ramming_travel_time": {
       "label": {
         "zh": "挤出机更换",
-        "en": "Extruder change"
+        "en": "Extruder change",
+        "ja": "押出機の変更",
+        "zh_tw": "擠出機更換"
       },
       "unit": {
         "zh": "秒",
@@ -5136,7 +5672,9 @@
     "filament_ramming_travel_time_nc": {
       "label": {
         "zh": "热端更换",
-        "en": "Hotend change"
+        "en": "Hotend change",
+        "ja": "ホットエンドの変更",
+        "zh_tw": "熱端更換"
       },
       "unit": {
         "zh": "秒",
@@ -5156,7 +5694,9 @@
     "filament_pre_cooling_temperature": {
       "label": {
         "zh": "挤出机更换",
-        "en": "Extruder change"
+        "en": "Extruder change",
+        "ja": "押出機の変更",
+        "zh_tw": "擠出機更換"
       },
       "unit": {
         "zh": "°C",
@@ -5176,7 +5716,9 @@
     "filament_pre_cooling_temperature_nc": {
       "label": {
         "zh": "热端更换",
-        "en": "Hotend change"
+        "en": "Hotend change",
+        "ja": "ホットエンドの変更",
+        "zh_tw": "熱端更換"
       },
       "unit": {
         "zh": "°C",
@@ -5196,7 +5738,9 @@
     "filament_cost": {
       "label": {
         "zh": "价格",
-        "en": "Price"
+        "en": "Price",
+        "ja": "価格",
+        "zh_tw": "價格"
       },
       "unit": {
         "zh": "money/kg",
@@ -5256,7 +5800,9 @@
     "filament_vendor": {
       "label": {
         "zh": "供应商",
-        "en": "Vendor"
+        "en": "Vendor",
+        "ja": "ベンダー",
+        "zh_tw": "供應商"
       },
       "unit": {
         "zh": "",
@@ -5276,7 +5822,9 @@
     "infill_direction": {
       "label": {
         "zh": "填充方向",
-        "en": "Infill direction"
+        "en": "Infill direction",
+        "ja": "インフィル方向",
+        "zh_tw": "填充方向"
       },
       "unit": {
         "zh": "°",
@@ -5296,7 +5844,9 @@
     "sparse_infill_density": {
       "label": {
         "zh": "稀疏填充密度",
-        "en": "Sparse infill density"
+        "en": "Sparse infill density",
+        "ja": "充填密度",
+        "zh_tw": "稀疏填充密度"
       },
       "unit": {
         "zh": "%",
@@ -5316,7 +5866,9 @@
     "fill_multiline": {
       "label": {
         "zh": "填充多线",
-        "en": "Fill multiline"
+        "en": "Fill multiline",
+        "ja": "複数ラインで充填",
+        "zh_tw": "填充多線"
       },
       "unit": {
         "zh": "",
@@ -5336,7 +5888,9 @@
     "sparse_infill_pattern": {
       "label": {
         "zh": "稀疏填充图案",
-        "en": "Sparse infill pattern"
+        "en": "Sparse infill pattern",
+        "ja": "充填パターン",
+        "zh_tw": "稀疏填充圖案"
       },
       "unit": {
         "zh": "",
@@ -5355,133 +5909,177 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "grid",
           "label_en": "Grid",
           "label_zh": "网格",
-          "icon": "param_grid"
+          "icon": "param_grid",
+          "label_ja": "グリッド",
+          "label_zh_tw": "網格"
         },
         {
           "value": "line",
           "label_en": "Line",
           "label_zh": "线",
-          "icon": "param_line"
+          "icon": "param_line",
+          "label_ja": "直線",
+          "label_zh_tw": "線"
         },
         {
           "value": "cubic",
           "label_en": "Cubic",
           "label_zh": "立方体",
-          "icon": "param_cubic"
+          "icon": "param_cubic",
+          "label_ja": "キュービック",
+          "label_zh_tw": "立方體"
         },
         {
           "value": "triangles",
           "label_en": "Triangles",
           "label_zh": "三角形",
-          "icon": "param_triangles"
+          "icon": "param_triangles",
+          "label_ja": "三角形",
+          "label_zh_tw": "三角形"
         },
         {
           "value": "tri-hexagon",
           "label_en": "Tri-hexagon",
           "label_zh": "内六边形",
-          "icon": "param_tri-hexagon"
+          "icon": "param_tri-hexagon",
+          "label_ja": "六角形",
+          "label_zh_tw": "內六邊形"
         },
         {
           "value": "gyroid",
           "label_en": "Gyroid",
           "label_zh": "螺旋体",
-          "icon": "param_gyroid"
+          "icon": "param_gyroid",
+          "label_ja": "ジャイロイド",
+          "label_zh_tw": "螺旋體"
         },
         {
           "value": "honeycomb",
           "label_en": "Honeycomb",
           "label_zh": "蜂窝",
-          "icon": "param_honeycomb"
+          "icon": "param_honeycomb",
+          "label_ja": "ハニカム",
+          "label_zh_tw": "蜂窩"
         },
         {
           "value": "adaptivecubic",
           "label_en": "Adaptive Cubic",
           "label_zh": "自适应立方体",
-          "icon": "param_adaptivecubic"
+          "icon": "param_adaptivecubic",
+          "label_ja": "アダプティブ キュービック",
+          "label_zh_tw": "自適應立方體"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "3dhoneycomb",
           "label_en": "3D Honeycomb",
           "label_zh": "3D 蜂窝",
-          "icon": "param_3dhoneycomb"
+          "icon": "param_3dhoneycomb",
+          "label_ja": "3D ハニカム",
+          "label_zh_tw": "3D 蜂窩"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         },
         {
           "value": "supportcubic",
           "label_en": "Support Cubic",
           "label_zh": "支撑立方体",
-          "icon": "param_supportcubic"
+          "icon": "param_supportcubic",
+          "label_ja": "キュービックサポート",
+          "label_zh_tw": "支撐立方體"
         },
         {
           "value": "lightning",
           "label_en": "Lightning",
           "label_zh": "闪电",
-          "icon": "param_lightning"
+          "icon": "param_lightning",
+          "label_ja": "ライトニング",
+          "label_zh_tw": "閃電"
         },
         {
           "value": "crosshatch",
           "label_en": "Cross Hatch",
           "label_zh": "交叉层叠",
-          "icon": "param_crosshatch"
+          "icon": "param_crosshatch",
+          "label_ja": "クロスハッチ",
+          "label_zh_tw": "交叉層疊"
         },
         {
           "value": "zigzag",
           "label_en": "Zig Zag",
           "label_zh": "Zig Zag",
-          "icon": "param_zigzag"
+          "icon": "param_zigzag",
+          "label_ja": "ジグザグ",
+          "label_zh_tw": "鋸齒"
         },
         {
           "value": "crosszag",
           "label_en": "Cross Zag",
           "label_zh": "Cross Zag",
-          "icon": "param_crosszag"
+          "icon": "param_crosszag",
+          "label_ja": "クロスザグ",
+          "label_zh_tw": "交叉鋸齒"
         },
         {
           "value": "lockedzag",
           "label_en": "Locked Zag",
           "label_zh": "Locked Zag",
-          "icon": "param_lockedzag"
+          "icon": "param_lockedzag",
+          "label_ja": "ロックされたザグ",
+          "label_zh_tw": "鎖定鋸齒"
         },
         {
           "value": "2dlattice",
           "label_en": "2D Lattice",
           "label_zh": "二维晶格",
-          "icon": "param_2dlattice"
+          "icon": "param_2dlattice",
+          "label_ja": "2Dラティス",
+          "label_zh_tw": "二維晶格"
         }
       ],
       "is_print_option": true
@@ -5489,7 +6087,9 @@
     "locked_skin_infill_pattern": {
       "label": {
         "zh": "表皮填充图案",
-        "en": "Skin infill pattern"
+        "en": "Skin infill pattern",
+        "ja": "スキン充填パターン",
+        "zh_tw": "表皮填充圖案"
       },
       "unit": {
         "zh": "",
@@ -5508,103 +6108,137 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "grid",
           "label_en": "Grid",
           "label_zh": "网格",
-          "icon": "param_grid"
+          "icon": "param_grid",
+          "label_ja": "グリッド",
+          "label_zh_tw": "網格"
         },
         {
           "value": "line",
           "label_en": "Line",
           "label_zh": "线",
-          "icon": "param_line"
+          "icon": "param_line",
+          "label_ja": "直線",
+          "label_zh_tw": "線"
         },
         {
           "value": "cubic",
           "label_en": "Cubic",
           "label_zh": "立方体",
-          "icon": "param_cubic"
+          "icon": "param_cubic",
+          "label_ja": "キュービック",
+          "label_zh_tw": "立方體"
         },
         {
           "value": "triangles",
           "label_en": "Triangles",
           "label_zh": "三角形",
-          "icon": "param_triangles"
+          "icon": "param_triangles",
+          "label_ja": "三角形",
+          "label_zh_tw": "三角形"
         },
         {
           "value": "tri-hexagon",
           "label_en": "Tri-hexagon",
           "label_zh": "内六边形",
-          "icon": "param_tri-hexagon"
+          "icon": "param_tri-hexagon",
+          "label_ja": "六角形",
+          "label_zh_tw": "內六邊形"
         },
         {
           "value": "gyroid",
           "label_en": "Gyroid",
           "label_zh": "螺旋体",
-          "icon": "param_gyroid"
+          "icon": "param_gyroid",
+          "label_ja": "ジャイロイド",
+          "label_zh_tw": "螺旋體"
         },
         {
           "value": "honeycomb",
           "label_en": "Honeycomb",
           "label_zh": "蜂窝",
-          "icon": "param_honeycomb"
+          "icon": "param_honeycomb",
+          "label_ja": "ハニカム",
+          "label_zh_tw": "蜂窩"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "3dhoneycomb",
           "label_en": "3D Honeycomb",
           "label_zh": "3D 蜂窝",
-          "icon": "param_3dhoneycomb"
+          "icon": "param_3dhoneycomb",
+          "label_ja": "3D ハニカム",
+          "label_zh_tw": "3D 蜂窩"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         },
         {
           "value": "crosshatch",
           "label_en": "Cross Hatch",
           "label_zh": "交叉层叠",
-          "icon": "param_crosshatch"
+          "icon": "param_crosshatch",
+          "label_ja": "クロスハッチ",
+          "label_zh_tw": "交叉層疊"
         },
         {
           "value": "zigzag",
           "label_en": "Zig Zag",
           "label_zh": "Zig Zag",
-          "icon": "param_zigzag"
+          "icon": "param_zigzag",
+          "label_ja": "ジグザグ",
+          "label_zh_tw": "鋸齒"
         },
         {
           "value": "crosszag",
           "label_en": "Cross Zag",
           "label_zh": "Cross Zag",
-          "icon": "param_crosszag"
+          "icon": "param_crosszag",
+          "label_ja": "クロスザグ",
+          "label_zh_tw": "交叉鋸齒"
         }
       ],
       "is_print_option": true
@@ -5612,7 +6246,9 @@
     "locked_skeleton_infill_pattern": {
       "label": {
         "zh": "骨架填充图案",
-        "en": "Skeleton infill pattern"
+        "en": "Skeleton infill pattern",
+        "ja": "スケルトン充填パター",
+        "zh_tw": "骨架填充圖案"
       },
       "unit": {
         "zh": "",
@@ -5631,103 +6267,137 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "grid",
           "label_en": "Grid",
           "label_zh": "网格",
-          "icon": "param_grid"
+          "icon": "param_grid",
+          "label_ja": "グリッド",
+          "label_zh_tw": "網格"
         },
         {
           "value": "line",
           "label_en": "Line",
           "label_zh": "线",
-          "icon": "param_line"
+          "icon": "param_line",
+          "label_ja": "直線",
+          "label_zh_tw": "線"
         },
         {
           "value": "cubic",
           "label_en": "Cubic",
           "label_zh": "立方体",
-          "icon": "param_cubic"
+          "icon": "param_cubic",
+          "label_ja": "キュービック",
+          "label_zh_tw": "立方體"
         },
         {
           "value": "triangles",
           "label_en": "Triangles",
           "label_zh": "三角形",
-          "icon": "param_triangles"
+          "icon": "param_triangles",
+          "label_ja": "三角形",
+          "label_zh_tw": "三角形"
         },
         {
           "value": "tri-hexagon",
           "label_en": "Tri-hexagon",
           "label_zh": "内六边形",
-          "icon": "param_tri-hexagon"
+          "icon": "param_tri-hexagon",
+          "label_ja": "六角形",
+          "label_zh_tw": "內六邊形"
         },
         {
           "value": "gyroid",
           "label_en": "Gyroid",
           "label_zh": "螺旋体",
-          "icon": "param_gyroid"
+          "icon": "param_gyroid",
+          "label_ja": "ジャイロイド",
+          "label_zh_tw": "螺旋體"
         },
         {
           "value": "honeycomb",
           "label_en": "Honeycomb",
           "label_zh": "蜂窝",
-          "icon": "param_honeycomb"
+          "icon": "param_honeycomb",
+          "label_ja": "ハニカム",
+          "label_zh_tw": "蜂窩"
         },
         {
           "value": "alignedrectilinear",
           "label_en": "Aligned Rectilinear",
           "label_zh": "直线排列",
-          "icon": "param_alignedrectilinear"
+          "icon": "param_alignedrectilinear",
+          "label_ja": "整列直線",
+          "label_zh_tw": "直線排列"
         },
         {
           "value": "3dhoneycomb",
           "label_en": "3D Honeycomb",
           "label_zh": "3D 蜂窝",
-          "icon": "param_3dhoneycomb"
+          "icon": "param_3dhoneycomb",
+          "label_ja": "3D ハニカム",
+          "label_zh_tw": "3D 蜂窩"
         },
         {
           "value": "hilbertcurve",
           "label_en": "Hilbert Curve",
           "label_zh": "希尔伯特曲线",
-          "icon": "param_hilbertcurve"
+          "icon": "param_hilbertcurve",
+          "label_ja": "ヒルベルト曲線",
+          "label_zh_tw": "希爾伯特曲線"
         },
         {
           "value": "archimedeanchords",
           "label_en": "Archimedean Chords",
           "label_zh": "阿基米德螺旋",
-          "icon": "param_archimedeanchords"
+          "icon": "param_archimedeanchords",
+          "label_ja": "アルキメデス螺旋",
+          "label_zh_tw": "阿基米德螺旋"
         },
         {
           "value": "octagramspiral",
           "label_en": "Octagram Spiral",
           "label_zh": "八角螺旋",
-          "icon": "param_octagramspiral"
+          "icon": "param_octagramspiral",
+          "label_ja": "オクタグラムスパイラル",
+          "label_zh_tw": "八角螺旋"
         },
         {
           "value": "crosshatch",
           "label_en": "Cross Hatch",
           "label_zh": "交叉层叠",
-          "icon": "param_crosshatch"
+          "icon": "param_crosshatch",
+          "label_ja": "クロスハッチ",
+          "label_zh_tw": "交叉層疊"
         },
         {
           "value": "zigzag",
           "label_en": "Zig Zag",
           "label_zh": "Zig Zag",
-          "icon": "param_zigzag"
+          "icon": "param_zigzag",
+          "label_ja": "ジグザグ",
+          "label_zh_tw": "鋸齒"
         },
         {
           "value": "crosszag",
           "label_en": "Cross Zag",
           "label_zh": "Cross Zag",
-          "icon": "param_crosszag"
+          "icon": "param_crosszag",
+          "label_ja": "クロスザグ",
+          "label_zh_tw": "交叉鋸齒"
         }
       ],
       "is_print_option": true
@@ -5735,7 +6405,9 @@
     "top_surface_acceleration": {
       "label": {
         "zh": "顶面",
-        "en": "Top surface"
+        "en": "Top surface",
+        "ja": "トップ面",
+        "zh_tw": "頂面"
       },
       "unit": {
         "zh": "mm/s²",
@@ -5755,7 +6427,9 @@
     "outer_wall_acceleration": {
       "label": {
         "zh": "外墙",
-        "en": "Outer wall"
+        "en": "Outer wall",
+        "ja": "外壁",
+        "zh_tw": "外牆"
       },
       "unit": {
         "zh": "mm/s²",
@@ -5775,7 +6449,9 @@
     "inner_wall_acceleration": {
       "label": {
         "zh": "内墙",
-        "en": "Inner wall"
+        "en": "Inner wall",
+        "ja": "内壁",
+        "zh_tw": "內牆"
       },
       "unit": {
         "zh": "mm/s²",
@@ -5795,7 +6471,9 @@
     "sparse_infill_acceleration": {
       "label": {
         "zh": "稀疏填充",
-        "en": "Sparse infill"
+        "en": "Sparse infill",
+        "ja": "スパース インフィル",
+        "zh_tw": "稀疏填充"
       },
       "unit": {
         "zh": "mm/s² 或 %",
@@ -5815,7 +6493,9 @@
     "initial_layer_acceleration": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "mm/s²",
@@ -5835,7 +6515,9 @@
     "accel_to_decel_enable": {
       "label": {
         "zh": "Enable accel_to_decel",
-        "en": "Enable accel_to_decel"
+        "en": "Enable accel_to_decel",
+        "ja": "加減速制御を有効にする",
+        "zh_tw": "啟用 accel_to_decel"
       },
       "unit": {
         "zh": "",
@@ -5855,7 +6537,9 @@
     "accel_to_decel_factor": {
       "label": {
         "zh": "accel_to_decel",
-        "en": "accel_to_decel"
+        "en": "accel_to_decel",
+        "ja": "加減速",
+        "zh_tw": "accel_to_decel"
       },
       "unit": {
         "zh": "%",
@@ -5875,7 +6559,9 @@
     "default_jerk": {
       "label": {
         "zh": "默认",
-        "en": "Default"
+        "en": "Default",
+        "ja": "デフォルト",
+        "zh_tw": "預設"
       },
       "unit": {
         "zh": "mm/s",
@@ -5895,7 +6581,9 @@
     "outer_wall_jerk": {
       "label": {
         "zh": "外墙",
-        "en": "Outer wall"
+        "en": "Outer wall",
+        "ja": "外壁",
+        "zh_tw": "外牆"
       },
       "unit": {
         "zh": "mm/s",
@@ -5915,7 +6603,9 @@
     "inner_wall_jerk": {
       "label": {
         "zh": "内墙",
-        "en": "Inner wall"
+        "en": "Inner wall",
+        "ja": "内壁",
+        "zh_tw": "內牆"
       },
       "unit": {
         "zh": "mm/s",
@@ -5935,7 +6625,9 @@
     "infill_jerk": {
       "label": {
         "zh": "填充",
-        "en": "Infill"
+        "en": "Infill",
+        "ja": "インフィル",
+        "zh_tw": "填充"
       },
       "unit": {
         "zh": "mm/s",
@@ -5955,7 +6647,9 @@
     "top_surface_jerk": {
       "label": {
         "zh": "顶面",
-        "en": "Top surface"
+        "en": "Top surface",
+        "ja": "トップ面",
+        "zh_tw": "頂面"
       },
       "unit": {
         "zh": "mm/s",
@@ -5975,7 +6669,9 @@
     "initial_layer_jerk": {
       "label": {
         "zh": "首层",
-        "en": "First layer"
+        "en": "First layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "mm/s",
@@ -5995,7 +6691,9 @@
     "travel_jerk": {
       "label": {
         "zh": "空驶",
-        "en": "Travel"
+        "en": "Travel",
+        "ja": "移動",
+        "zh_tw": "空駛"
       },
       "unit": {
         "zh": "mm/s",
@@ -6015,7 +6713,9 @@
     "initial_layer_line_width": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "mm",
@@ -6035,7 +6735,9 @@
     "initial_layer_print_height": {
       "label": {
         "zh": "首层层高",
-        "en": "Initial layer height"
+        "en": "Initial layer height",
+        "ja": "1層目の高さ",
+        "zh_tw": "首層層高"
       },
       "unit": {
         "zh": "mm",
@@ -6055,7 +6757,9 @@
     "initial_layer_speed": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "mm/s",
@@ -6075,7 +6779,9 @@
     "initial_layer_infill_speed": {
       "label": {
         "zh": "首层填充",
-        "en": "Initial layer infill"
+        "en": "Initial layer infill",
+        "ja": "1層目のインフィル",
+        "zh_tw": "首層填充"
       },
       "unit": {
         "zh": "mm/s",
@@ -6095,7 +6801,9 @@
     "nozzle_temperature_initial_layer": {
       "label": {
         "zh": "首层",
-        "en": "Initial layer"
+        "en": "Initial layer",
+        "ja": "1層目",
+        "zh_tw": "首層"
       },
       "unit": {
         "zh": "°C",
@@ -6115,7 +6823,9 @@
     "full_fan_speed_layer": {
       "label": {
         "zh": "满速风扇在",
-        "en": "Full fan speed at layer"
+        "en": "Full fan speed at layer",
+        "ja": "最大回転速度の積層",
+        "zh_tw": "滿速風扇在"
       },
       "unit": {
         "zh": "",
@@ -6135,7 +6845,9 @@
     "fuzzy_skin": {
       "label": {
         "zh": "绒毛表面",
-        "en": "Fuzzy Skin"
+        "en": "Fuzzy Skin",
+        "ja": "ファジースキン",
+        "zh_tw": "絨毛表面"
       },
       "unit": {
         "zh": "",
@@ -6154,31 +6866,41 @@
           "value": "none",
           "label_en": "None(allow paint)",
           "label_zh": "无(允许绘制)",
-          "icon": null
+          "icon": null,
+          "label_ja": "なし（ペイント可）",
+          "label_zh_tw": "無(允許繪製)"
         },
         {
           "value": "external",
           "label_en": "Contour",
           "label_zh": "轮廓",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭",
+          "label_zh_tw": "輪廓"
         },
         {
           "value": "all",
           "label_en": "Contour and hole",
           "label_zh": "轮廓和孔",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭と穴",
+          "label_zh_tw": "輪廓和孔"
         },
         {
           "value": "allwalls",
           "label_en": "All walls",
           "label_zh": "所有墙",
-          "icon": null
+          "icon": null,
+          "label_ja": "すべての壁",
+          "label_zh_tw": "所有牆"
         },
         {
           "value": "disabled_fuzzy",
           "label_en": "Disabled",
           "label_zh": "关闭",
-          "icon": null
+          "icon": null,
+          "label_ja": "無効化",
+          "label_zh_tw": "關閉"
         }
       ],
       "is_print_option": true
@@ -6186,7 +6908,9 @@
     "fuzzy_skin_thickness": {
       "label": {
         "zh": "绒毛表面厚度",
-        "en": "Fuzzy skin thickness"
+        "en": "Fuzzy skin thickness",
+        "ja": "厚さ",
+        "zh_tw": "絨毛表面厚度"
       },
       "unit": {
         "zh": "mm",
@@ -6206,7 +6930,9 @@
     "fuzzy_skin_point_distance": {
       "label": {
         "zh": "绒毛表面点间距",
-        "en": "Fuzzy skin point distance"
+        "en": "Fuzzy skin point distance",
+        "ja": "ポイント距離",
+        "zh_tw": "絨毛表面點間距"
       },
       "unit": {
         "zh": "mm",
@@ -6226,7 +6952,9 @@
     "fuzzy_skin_first_layer": {
       "label": {
         "zh": "绒毛表面应用至首层",
-        "en": "Apply fuzzy skin to first layer"
+        "en": "Apply fuzzy skin to first layer",
+        "ja": "一層目にファジースキンを適用",
+        "zh_tw": "將毛邊套用至第一層"
       },
       "unit": {
         "zh": "",
@@ -6246,7 +6974,9 @@
     "fuzzy_skin_noise_type": {
       "label": {
         "zh": "绒毛噪声类型",
-        "en": "Fuzzy skin noise type"
+        "en": "Fuzzy skin noise type",
+        "ja": "ファジースキンのノイズタイプ",
+        "zh_tw": "毛邊雜訊類型"
       },
       "unit": {
         "zh": "",
@@ -6265,7 +6995,9 @@
           "value": "classic",
           "label_en": "Classic",
           "label_zh": "经典",
-          "icon": null
+          "icon": null,
+          "label_ja": "クラシック",
+          "label_zh_tw": "經典"
         },
         {
           "value": "perlin",
@@ -6297,7 +7029,9 @@
     "fuzzy_skin_scale": {
       "label": {
         "zh": "绒毛表面特征尺寸",
-        "en": "Fuzzy skin feature size"
+        "en": "Fuzzy skin feature size",
+        "ja": "ファジースキンの特徴サイズ",
+        "zh_tw": "毛邊特徵尺寸"
       },
       "unit": {
         "zh": "mm",
@@ -6317,7 +7051,9 @@
     "fuzzy_skin_octaves": {
       "label": {
         "zh": "绒毛表面噪声八度数",
-        "en": "Fuzzy skin noise octaves"
+        "en": "Fuzzy skin noise octaves",
+        "ja": "ファジースキンのノイズオクターブ数",
+        "zh_tw": "毛邊雜訊八度"
       },
       "unit": {
         "zh": "",
@@ -6337,7 +7073,9 @@
     "fuzzy_skin_persistence": {
       "label": {
         "zh": "绒毛表面噪声持续度",
-        "en": "Fuzzy skin noise persistence"
+        "en": "Fuzzy skin noise persistence",
+        "ja": "ファジースキンのノイズ減衰率",
+        "zh_tw": "毛邊雜訊持續度"
       },
       "unit": {
         "zh": "",
@@ -6357,7 +7095,9 @@
     "fuzzy_skin_mode": {
       "label": {
         "zh": "绒毛表面生成器模式",
-        "en": "Fuzzy skin generator mode"
+        "en": "Fuzzy skin generator mode",
+        "ja": "ファジースキンの生成モード",
+        "zh_tw": "毛邊產生器模式"
       },
       "unit": {
         "zh": "",
@@ -6376,19 +7116,25 @@
           "value": "displacement",
           "label_en": "Displacement",
           "label_zh": "位移",
-          "icon": null
+          "icon": null,
+          "label_zh_tw": "位移",
+          "label_ja": "ディスプレイスメント"
         },
         {
           "value": "extrusion",
           "label_en": "Extrusion",
           "label_zh": "挤出",
-          "icon": null
+          "icon": null,
+          "label_zh_tw": "擠出",
+          "label_ja": "押し出し"
         },
         {
           "value": "combined",
           "label_en": "Combined",
           "label_zh": "组合",
-          "icon": null
+          "icon": null,
+          "label_zh_tw": "組合",
+          "label_ja": "組み合わせ"
         }
       ],
       "is_print_option": true
@@ -6396,7 +7142,9 @@
     "filter_out_gap_fill": {
       "label": {
         "zh": "过滤掉微小间隙",
-        "en": "Filter out tiny gaps"
+        "en": "Filter out tiny gaps",
+        "ja": "微小な隙間を除外",
+        "zh_tw": "過濾掉微小間隙"
       },
       "unit": {
         "zh": "mm",
@@ -6416,7 +7164,9 @@
     "precise_outer_wall": {
       "label": {
         "zh": "精准外墙尺寸",
-        "en": "Precise wall"
+        "en": "Precise wall",
+        "ja": "精密ウォール",
+        "zh_tw": "精準外牆尺寸"
       },
       "unit": {
         "zh": "",
@@ -6436,7 +7186,9 @@
     "gap_infill_speed": {
       "label": {
         "zh": "填缝",
-        "en": "Gap infill"
+        "en": "Gap infill",
+        "ja": "隙間インフィル",
+        "zh_tw": "填縫"
       },
       "unit": {
         "zh": "mm/s",
@@ -6456,7 +7208,9 @@
     "precise_z_height": {
       "label": {
         "zh": "精准Z高度",
-        "en": "Precise Z height"
+        "en": "Precise Z height",
+        "ja": "正確なZの高さ",
+        "zh_tw": "精準Z高度"
       },
       "unit": {
         "zh": "",
@@ -6476,7 +7230,9 @@
     "enable_arc_fitting": {
       "label": {
         "zh": "圆弧拟合",
-        "en": "Arc fitting"
+        "en": "Arc fitting",
+        "ja": "曲線フィッティング",
+        "zh_tw": "圓弧擬合"
       },
       "unit": {
         "zh": "",
@@ -6496,7 +7252,9 @@
     "gcode_add_line_number": {
       "label": {
         "zh": "标注行号",
-        "en": "Add line number"
+        "en": "Add line number",
+        "ja": "行番号を追加",
+        "zh_tw": "標註行號"
       },
       "unit": {
         "zh": "",
@@ -6516,7 +7274,9 @@
     "scan_first_layer": {
       "label": {
         "zh": "首层扫描",
-        "en": "Scan first layer"
+        "en": "Scan first layer",
+        "ja": "1層目を検査",
+        "zh_tw": "首層掃描"
       },
       "unit": {
         "zh": "",
@@ -6536,7 +7296,9 @@
     "print_in_clockwise": {
       "label": {
         "zh": "顺时针打印环形走线",
-        "en": "Print loops in clockwise"
+        "en": "Print loops in clockwise",
+        "ja": "ループを時計回りで造形",
+        "zh_tw": "順時針列印迴圈"
       },
       "unit": {
         "zh": "",
@@ -6556,7 +7318,9 @@
     "enable_wrapping_detection": {
       "label": {
         "zh": "开启触碰裹头检测",
-        "en": "Enable clumping detection"
+        "en": "Enable clumping detection",
+        "ja": "クラミング検出を有効にする",
+        "zh_tw": "開啟觸碰裹頭檢測"
       },
       "unit": {
         "zh": "",
@@ -6576,7 +7340,9 @@
     "enable_order_independent_overlap_carving": {
       "label": {
         "zh": "重叠区域稳定归属",
-        "en": "Order-independent overlap carving"
+        "en": "Order-independent overlap carving",
+        "ja": "順序に依存しない重なり部分の切り抜き",
+        "zh_tw": "順序無關的重疊雕刻"
       },
       "unit": {
         "zh": "",
@@ -6596,7 +7362,9 @@
     "wrapping_detection_layers": {
       "label": {
         "zh": "触碰裹头检测层数",
-        "en": "Clumping detection layers"
+        "en": "Clumping detection layers",
+        "ja": "クラミング検出レイヤー",
+        "zh_tw": "觸碰裹頭檢測層數"
       },
       "unit": {
         "zh": "",
@@ -6616,7 +7384,9 @@
     "wrapping_exclude_area": {
       "label": {
         "zh": "探测排除裹头检测区域",
-        "en": "Probing exclude area of clumping"
+        "en": "Probing exclude area of clumping",
+        "ja": "クラッピング用プロービング除外エリア",
+        "zh_tw": "探測排除裹頭檢測區域"
       },
       "unit": {
         "zh": "",
@@ -6636,7 +7406,9 @@
     "thumbnail_size": {
       "label": {
         "zh": "缩略图大小",
-        "en": "Thumbnail size"
+        "en": "Thumbnail size",
+        "ja": "サムネイルサイズ",
+        "zh_tw": "縮圖大小"
       },
       "unit": {
         "zh": "",
@@ -6656,7 +7428,9 @@
     "nozzle_type": {
       "label": {
         "zh": "喷嘴类型",
-        "en": "Nozzle type"
+        "en": "Nozzle type",
+        "ja": "ノズルタイプ",
+        "zh_tw": "噴嘴類型"
       },
       "unit": {
         "zh": "",
@@ -6675,7 +7449,9 @@
           "value": "undefine",
           "label_en": "Undefine",
           "label_zh": "未定义",
-          "icon": null
+          "icon": null,
+          "label_ja": "未定義",
+          "label_zh_tw": "未定義"
         },
         {
           "value": "hardened_steel",
@@ -6699,7 +7475,9 @@
           "value": "brass",
           "label_en": "Brass",
           "label_zh": "黄铜",
-          "icon": null
+          "icon": null,
+          "label_ja": "真鍮",
+          "label_zh_tw": "黃銅"
         }
       ],
       "is_print_option": false
@@ -6707,7 +7485,9 @@
     "printer_structure": {
       "label": {
         "zh": "打印机结构",
-        "en": "Printer structure"
+        "en": "Printer structure",
+        "ja": "プリンタ構造",
+        "zh_tw": "印表機結構"
       },
       "unit": {
         "zh": "",
@@ -6726,7 +7506,9 @@
           "value": "undefine",
           "label_en": "Undefine",
           "label_zh": "未定义",
-          "icon": null
+          "icon": null,
+          "label_ja": "未定義",
+          "label_zh_tw": "未定義"
         },
         {
           "value": "corexy",
@@ -6758,7 +7540,9 @@
     "best_object_pos": {
       "label": {
         "zh": "最佳对象位置",
-        "en": "Best object position"
+        "en": "Best object position",
+        "ja": "最適なオブジェクト位置",
+        "zh_tw": "最佳物件位置"
       },
       "unit": {
         "zh": "",
@@ -6778,7 +7562,9 @@
     "auxiliary_fan": {
       "label": {
         "zh": "辅助部件冷却风扇",
-        "en": "Auxiliary part cooling fan"
+        "en": "Auxiliary part cooling fan",
+        "ja": "パーツ補助冷却ファン",
+        "zh_tw": "輔助部件冷卻風扇"
       },
       "unit": {
         "zh": "",
@@ -6798,7 +7584,9 @@
     "fan_direction": {
       "label": {
         "zh": "风扇方向",
-        "en": "Fan direction"
+        "en": "Fan direction",
+        "ja": "ファンの向き",
+        "zh_tw": "風扇方向"
       },
       "unit": {
         "zh": "",
@@ -6817,25 +7605,33 @@
           "value": "undefine",
           "label_en": "Undefine",
           "label_zh": "未定义",
-          "icon": null
+          "icon": null,
+          "label_ja": "未定義",
+          "label_zh_tw": "未定義"
         },
         {
           "value": "left",
           "label_en": "Left",
           "label_zh": "左",
-          "icon": null
+          "icon": null,
+          "label_ja": "左側",
+          "label_zh_tw": "左"
         },
         {
           "value": "right",
           "label_en": "Right",
           "label_zh": "右",
-          "icon": null
+          "icon": null,
+          "label_ja": "右側",
+          "label_zh_tw": "右"
         },
         {
           "value": "both",
           "label_en": "Both",
           "label_zh": "两者都",
-          "icon": null
+          "icon": null,
+          "label_ja": "両方",
+          "label_zh_tw": "兩者都"
         }
       ],
       "is_print_option": false
@@ -6843,7 +7639,9 @@
     "support_chamber_temp_control": {
       "label": {
         "zh": "支持腔温控制",
-        "en": "Support control chamber temperature"
+        "en": "Support control chamber temperature",
+        "ja": "チャンバー温度の制御サポート",
+        "zh_tw": "支援腔溫控制"
       },
       "unit": {
         "zh": "",
@@ -6863,7 +7661,9 @@
     "support_air_filtration": {
       "label": {
         "zh": "支持空气过滤增强",
-        "en": "Air filtration enhancement"
+        "en": "Air filtration enhancement",
+        "ja": "空気清浄強化",
+        "zh_tw": "支援空氣過濾增強"
       },
       "unit": {
         "zh": "",
@@ -6903,7 +7703,9 @@
     "cooling_filter_enabled": {
       "label": {
         "zh": "开启冷却过滤",
-        "en": "Use cooling filter"
+        "en": "Use cooling filter",
+        "ja": "冷却フィルターを使用",
+        "zh_tw": "開啟冷卻過濾"
       },
       "unit": {
         "zh": "",
@@ -6923,7 +7725,9 @@
     "gcode_flavor": {
       "label": {
         "zh": "G-code风格",
-        "en": "G-code flavor"
+        "en": "G-code flavor",
+        "ja": "G-codeスタイル",
+        "zh_tw": "G-code風格"
       },
       "unit": {
         "zh": "",
@@ -6956,7 +7760,9 @@
     "exclude_object": {
       "label": {
         "zh": "排除对象",
-        "en": "Exclude objects"
+        "en": "Exclude objects",
+        "ja": "オブジェクトを除外",
+        "zh_tw": "排除物件"
       },
       "unit": {
         "zh": "",
@@ -6976,7 +7782,9 @@
     "infill_combination": {
       "label": {
         "zh": "合并填充",
-        "en": "Infill combination"
+        "en": "Infill combination",
+        "ja": "インフィル マージ",
+        "zh_tw": "合併填充"
       },
       "unit": {
         "zh": "",
@@ -6996,7 +7804,9 @@
     "infill_shift_step": {
       "label": {
         "zh": "填充移动步长",
-        "en": "Infill shift step"
+        "en": "Infill shift step",
+        "ja": "インフィルシフトステップ",
+        "zh_tw": "填充移動步長"
       },
       "unit": {
         "zh": "mm",
@@ -7016,7 +7826,9 @@
     "infill_rotate_step": {
       "label": {
         "zh": "填充旋转步长",
-        "en": "Infill rotate step"
+        "en": "Infill rotate step",
+        "ja": "インフィル回転ステップ",
+        "zh_tw": "填充旋轉步長"
       },
       "unit": {
         "zh": "°",
@@ -7036,7 +7848,9 @@
     "skeleton_infill_density": {
       "label": {
         "zh": "骨架填充密度",
-        "en": "Skeleton infill density"
+        "en": "Skeleton infill density",
+        "ja": "スケルトンインフィル密度",
+        "zh_tw": "骨架填充密度"
       },
       "unit": {
         "zh": "%",
@@ -7056,7 +7870,9 @@
     "skin_infill_density": {
       "label": {
         "zh": "表皮填充密度",
-        "en": "Skin infill density"
+        "en": "Skin infill density",
+        "ja": "スキンインフィル密度",
+        "zh_tw": "表皮填充密度"
       },
       "unit": {
         "zh": "%",
@@ -7076,7 +7892,9 @@
     "skin_infill_depth": {
       "label": {
         "zh": "表皮填充深度",
-        "en": "Skin infill depth"
+        "en": "Skin infill depth",
+        "ja": "スキンインフィル深さ",
+        "zh_tw": "表皮填充深度"
       },
       "unit": {
         "zh": "mm",
@@ -7096,7 +7914,9 @@
     "infill_lock_depth": {
       "label": {
         "zh": "填充互锁深度",
-        "en": "Infill lock depth"
+        "en": "Infill lock depth",
+        "ja": "インフィルの固定深さ",
+        "zh_tw": "填充互鎖深度"
       },
       "unit": {
         "zh": "mm",
@@ -7116,7 +7936,9 @@
     "skin_infill_line_width": {
       "label": {
         "zh": "表皮线宽",
-        "en": "Skin line width"
+        "en": "Skin line width",
+        "ja": "スキン線幅",
+        "zh_tw": "表皮線寬"
       },
       "unit": {
         "zh": "mm",
@@ -7136,7 +7958,9 @@
     "skeleton_infill_line_width": {
       "label": {
         "zh": "骨架线宽",
-        "en": "Skeleton line width"
+        "en": "Skeleton line width",
+        "ja": "スケルトンの線幅",
+        "zh_tw": "骨架線寬"
       },
       "unit": {
         "zh": "mm",
@@ -7156,7 +7980,9 @@
     "symmetric_infill_y_axis": {
       "label": {
         "zh": "填充关于y轴对称",
-        "en": "Symmetric infill y axis"
+        "en": "Symmetric infill y axis",
+        "ja": "Y軸対称のインフィル",
+        "zh_tw": "填充關於y軸對稱"
       },
       "unit": {
         "zh": "",
@@ -7176,7 +8002,9 @@
     "sparse_infill_lattice_angle_1": {
       "label": {
         "zh": "晶格角度 1",
-        "en": "Lattice angle 1"
+        "en": "Lattice angle 1",
+        "ja": "ラティス角度 1",
+        "zh_tw": "晶格角度 1"
       },
       "unit": {
         "zh": "°",
@@ -7196,7 +8024,9 @@
     "sparse_infill_lattice_angle_2": {
       "label": {
         "zh": "晶格角度 2",
-        "en": "Lattice angle 2"
+        "en": "Lattice angle 2",
+        "ja": "ラティス角度 2",
+        "zh_tw": "晶格角度 2"
       },
       "unit": {
         "zh": "°",
@@ -7216,7 +8046,9 @@
     "sparse_infill_anchor": {
       "label": {
         "zh": "稀疏填充铆线长度",
-        "en": "Length of sparse infill anchor"
+        "en": "Length of sparse infill anchor",
+        "ja": "スパースインフィルアンカーの長さ",
+        "zh_tw": "稀疏填充鉚線長度"
       },
       "unit": {
         "zh": "mm 或 %",
@@ -7235,7 +8067,9 @@
           "value": "0",
           "label_en": "0 (no open anchors)",
           "label_zh": "0 (无铆线)",
-          "icon": null
+          "icon": null,
+          "label_ja": "0（開いているアンカーなし）",
+          "label_zh_tw": "0 (無鉚線)"
         },
         {
           "value": "1",
@@ -7265,7 +8099,9 @@
           "value": "1000",
           "label_en": "1000 (unlimited)",
           "label_zh": "1000（无限制）",
-          "icon": null
+          "icon": null,
+          "label_ja": "1000 (無制限)",
+          "label_zh_tw": "1000（無限制）"
         }
       ],
       "is_print_option": true
@@ -7273,7 +8109,9 @@
     "sparse_infill_anchor_max": {
       "label": {
         "zh": "稀疏填充铆线最大长度",
-        "en": "Maximum length of sparse infill anchor"
+        "en": "Maximum length of sparse infill anchor",
+        "ja": "スパースインフィルアンカーの最大長さ",
+        "zh_tw": "稀疏填充鉚線最大長度"
       },
       "unit": {
         "zh": "",
@@ -7292,7 +8130,9 @@
           "value": "0",
           "label_en": "0 (not anchored)",
           "label_zh": "0（无）",
-          "icon": null
+          "icon": null,
+          "label_ja": "0 (アンカーなし)",
+          "label_zh_tw": "0（無）"
         },
         {
           "value": "1",
@@ -7322,7 +8162,9 @@
           "value": "1000",
           "label_en": "1000 (unlimited)",
           "label_zh": "1000（无限制）",
-          "icon": null
+          "icon": null,
+          "label_ja": "1000 (無制限)",
+          "label_zh_tw": "1000（無限制）"
         }
       ],
       "is_print_option": true
@@ -7330,7 +8172,9 @@
     "sparse_infill_filament": {
       "label": {
         "zh": "稀疏填充耗材",
-        "en": "Sparse infill filament"
+        "en": "Sparse infill filament",
+        "ja": "スパースインフィル用フィラメント",
+        "zh_tw": "稀疏填充耗材"
       },
       "unit": {
         "zh": "",
@@ -7350,7 +8194,9 @@
     "sparse_infill_line_width": {
       "label": {
         "zh": "稀疏填充",
-        "en": "Sparse infill"
+        "en": "Sparse infill",
+        "ja": "スパース インフィル",
+        "zh_tw": "稀疏填充"
       },
       "unit": {
         "zh": "mm",
@@ -7370,7 +8216,9 @@
     "infill_wall_overlap": {
       "label": {
         "zh": "填充/墙 重叠",
-        "en": "Infill/Wall overlap"
+        "en": "Infill/Wall overlap",
+        "ja": "インフィル/壁面の重なり",
+        "zh_tw": "填充/牆 重疊"
       },
       "unit": {
         "zh": "%",
@@ -7390,7 +8238,9 @@
     "sparse_infill_speed": {
       "label": {
         "zh": "稀疏填充",
-        "en": "Sparse infill"
+        "en": "Sparse infill",
+        "ja": "スパース インフィル",
+        "zh_tw": "稀疏填充"
       },
       "unit": {
         "zh": "mm/s",
@@ -7450,7 +8300,9 @@
     "interface_shells": {
       "label": {
         "zh": "接触面外壳",
-        "en": "Interface shells"
+        "en": "Interface shells",
+        "ja": "インターフェースシェル",
+        "zh_tw": "接觸面外殼"
       },
       "unit": {
         "zh": "",
@@ -7470,7 +8322,9 @@
     "mmu_segmented_region_max_width": {
       "label": {
         "zh": "分段区域的最大宽度",
-        "en": "Maximum width of a segmented region"
+        "en": "Maximum width of a segmented region",
+        "ja": "分割領域の最大幅",
+        "zh_tw": "分段區域的最大寬度"
       },
       "unit": {
         "zh": "mm",
@@ -7490,7 +8344,9 @@
     "mmu_segmented_region_interlocking_depth": {
       "label": {
         "zh": "分割区域的交错深度",
-        "en": "Interlocking depth of a segmented region"
+        "en": "Interlocking depth of a segmented region",
+        "ja": "分割領域のかみ合わせ深さ",
+        "zh_tw": "分割區域的交錯深度"
       },
       "unit": {
         "zh": "mm",
@@ -7510,7 +8366,9 @@
     "interlocking_beam": {
       "label": {
         "zh": "启用互锁梁",
-        "en": "Use beam interlocking"
+        "en": "Use beam interlocking",
+        "ja": "梁のインターロックを使用",
+        "zh_tw": "啟用互鎖梁"
       },
       "unit": {
         "zh": "",
@@ -7530,7 +8388,9 @@
     "interlocking_beam_width": {
       "label": {
         "zh": "互锁梁宽度",
-        "en": "Interlocking beam width"
+        "en": "Interlocking beam width",
+        "ja": "かみ合わせビーム幅",
+        "zh_tw": "互鎖梁寬度"
       },
       "unit": {
         "zh": "mm",
@@ -7550,7 +8410,9 @@
     "interlocking_orientation": {
       "label": {
         "zh": "互锁方向",
-        "en": "Interlocking direction"
+        "en": "Interlocking direction",
+        "ja": "かみ合わせ方向",
+        "zh_tw": "互鎖方向"
       },
       "unit": {
         "zh": "°",
@@ -7570,7 +8432,9 @@
     "interlocking_beam_layer_count": {
       "label": {
         "zh": "互锁梁层数",
-        "en": "Interlocking beam layers"
+        "en": "Interlocking beam layers",
+        "ja": "かみ合わせビームレイヤー",
+        "zh_tw": "互鎖梁層數"
       },
       "unit": {
         "zh": "",
@@ -7590,7 +8454,9 @@
     "interlocking_depth": {
       "label": {
         "zh": "互锁深度",
-        "en": "Interlocking depth"
+        "en": "Interlocking depth",
+        "ja": "かみ合わせ深さ",
+        "zh_tw": "互鎖深度"
       },
       "unit": {
         "zh": "",
@@ -7610,7 +8476,9 @@
     "interlocking_boundary_avoidance": {
       "label": {
         "zh": "边界留白量",
-        "en": "Interlocking boundary avoidance"
+        "en": "Interlocking boundary avoidance",
+        "ja": "かみ合わせ境界回避",
+        "zh_tw": "邊界留白量"
       },
       "unit": {
         "zh": "",
@@ -7630,7 +8498,9 @@
     "ironing_type": {
       "label": {
         "zh": "熨烫类型",
-        "en": "Ironing Type"
+        "en": "Ironing Type",
+        "ja": "アイロンタイプ",
+        "zh_tw": "熨燙型別"
       },
       "unit": {
         "zh": "",
@@ -7649,25 +8519,33 @@
           "value": "no ironing",
           "label_en": "No ironing",
           "label_zh": "不熨烫",
-          "icon": null
+          "icon": null,
+          "label_ja": "しない",
+          "label_zh_tw": "不熨燙"
         },
         {
           "value": "top",
           "label_en": "Top surfaces",
           "label_zh": "顶面",
-          "icon": null
+          "icon": null,
+          "label_ja": "トップ面",
+          "label_zh_tw": "頂面"
         },
         {
           "value": "topmost",
           "label_en": "Topmost surface",
           "label_zh": "最顶面",
-          "icon": null
+          "icon": null,
+          "label_ja": "最上面",
+          "label_zh_tw": "最頂面"
         },
         {
           "value": "solid",
           "label_en": "All solid layer",
           "label_zh": "所有实心层",
-          "icon": null
+          "icon": null,
+          "label_ja": "全レイヤーソリッド",
+          "label_zh_tw": "所有實心層"
         }
       ],
       "is_print_option": true
@@ -7675,7 +8553,9 @@
     "ironing_pattern": {
       "label": {
         "zh": "熨烫模式",
-        "en": "Ironing Pattern"
+        "en": "Ironing Pattern",
+        "ja": "アイロニングパターン",
+        "zh_tw": "熨燙模式"
       },
       "unit": {
         "zh": "",
@@ -7694,13 +8574,17 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         }
       ],
       "is_print_option": true
@@ -7708,7 +8592,9 @@
     "ironing_flow": {
       "label": {
         "zh": "熨烫流量",
-        "en": "Ironing flow"
+        "en": "Ironing flow",
+        "ja": "アイロン時の流量比率",
+        "zh_tw": "熨燙流量"
       },
       "unit": {
         "zh": "%",
@@ -7728,7 +8614,9 @@
     "ironing_spacing": {
       "label": {
         "zh": "熨烫间距",
-        "en": "Ironing line spacing"
+        "en": "Ironing line spacing",
+        "ja": "アイロン時にライン間隔",
+        "zh_tw": "熨燙間距"
       },
       "unit": {
         "zh": "mm",
@@ -7748,7 +8636,9 @@
     "ironing_inset": {
       "label": {
         "zh": "熨烫内缩",
-        "en": "Ironing inset"
+        "en": "Ironing inset",
+        "ja": "アイロニングインセット",
+        "zh_tw": "熨燙內縮"
       },
       "unit": {
         "zh": "mm",
@@ -7768,7 +8658,9 @@
     "ironing_speed": {
       "label": {
         "zh": "熨烫速度",
-        "en": "Ironing speed"
+        "en": "Ironing speed",
+        "ja": "アイロン時の移動速度",
+        "zh_tw": "熨燙速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -7788,7 +8680,9 @@
     "ironing_direction": {
       "label": {
         "zh": "熨烫方向",
-        "en": "ironing direction"
+        "en": "ironing direction",
+        "ja": "アイロニング方向",
+        "zh_tw": "熨燙方向"
       },
       "unit": {
         "zh": "°",
@@ -7808,7 +8702,9 @@
     "layer_change_gcode": {
       "label": {
         "zh": "换层G-code",
-        "en": "Layer change G-code"
+        "en": "Layer change G-code",
+        "ja": "積層変更時のG-code",
+        "zh_tw": "換層G-code"
       },
       "unit": {
         "zh": "",
@@ -7828,7 +8724,9 @@
     "time_lapse_gcode": {
       "label": {
         "zh": "延时摄影G-code",
-        "en": "Time lapse G-code"
+        "en": "Time lapse G-code",
+        "ja": "タイムラプスG-code",
+        "zh_tw": "延時攝影G-code"
       },
       "unit": {
         "zh": "",
@@ -7848,7 +8746,9 @@
     "wrapping_detection_gcode": {
       "label": {
         "zh": "触碰裹头检测G-code",
-        "en": "Clumping detection G-code"
+        "en": "Clumping detection G-code",
+        "ja": "クラミング検出G-code",
+        "zh_tw": "觸碰裹頭檢測G-code"
       },
       "unit": {
         "zh": "",
@@ -7868,7 +8768,9 @@
     "silent_mode": {
       "label": {
         "zh": "支持静音模式",
-        "en": "Supports silent mode"
+        "en": "Supports silent mode",
+        "ja": "サイレントモード対応",
+        "zh_tw": "支援靜音模式"
       },
       "unit": {
         "zh": "",
@@ -7888,7 +8790,9 @@
     "machine_pause_gcode": {
       "label": {
         "zh": "暂停 G-code",
-        "en": "Pause G-code"
+        "en": "Pause G-code",
+        "ja": "G-codeを一時停止",
+        "zh_tw": "暫停 G-code"
       },
       "unit": {
         "zh": "",
@@ -7908,7 +8812,9 @@
     "template_custom_gcode": {
       "label": {
         "zh": "自定义 G-code",
-        "en": "Custom G-code"
+        "en": "Custom G-code",
+        "ja": "カスタム G-code",
+        "zh_tw": "自定義 G-code"
       },
       "unit": {
         "zh": "",
@@ -7948,7 +8854,9 @@
     "support_fast_purge_mode": {
       "label": {
         "zh": "支持快速冲刷模式",
-        "en": "Support fast purge mode"
+        "en": "Support fast purge mode",
+        "ja": "高速パージモードに対応",
+        "zh_tw": "支援快速清除模式"
       },
       "unit": {
         "zh": "",
@@ -8148,7 +9056,9 @@
     "fan_max_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -8168,7 +9078,9 @@
     "max_layer_height": {
       "label": {
         "zh": "最大",
-        "en": "Max"
+        "en": "Max",
+        "ja": "最大",
+        "zh_tw": "最大"
       },
       "unit": {
         "zh": "mm",
@@ -8188,7 +9100,9 @@
     "fan_min_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -8208,7 +9122,9 @@
     "additional_cooling_fan_speed": {
       "label": {
         "zh": "风扇速度",
-        "en": "Fan speed"
+        "en": "Fan speed",
+        "ja": "回転速度",
+        "zh_tw": "風扇速度"
       },
       "unit": {
         "zh": "%",
@@ -8228,7 +9144,9 @@
     "min_layer_height": {
       "label": {
         "zh": "最小",
-        "en": "Min"
+        "en": "Min",
+        "ja": "最小",
+        "zh_tw": "最小"
       },
       "unit": {
         "zh": "mm",
@@ -8248,7 +9166,9 @@
     "slow_down_min_speed": {
       "label": {
         "zh": "最小打印速度",
-        "en": "Min print speed"
+        "en": "Min print speed",
+        "ja": "最小造形速度",
+        "zh_tw": "最小列印速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -8268,7 +9188,9 @@
     "nozzle_diameter": {
       "label": {
         "zh": "喷嘴直径",
-        "en": "Nozzle diameter"
+        "en": "Nozzle diameter",
+        "ja": "ノズル直径",
+        "zh_tw": "噴嘴直徑"
       },
       "unit": {
         "zh": "mm",
@@ -8288,7 +9210,9 @@
     "host_type": {
       "label": {
         "zh": "主机类型",
-        "en": "Host Type"
+        "en": "Host Type",
+        "ja": "ホストタイプ",
+        "zh_tw": "主機型別"
       },
       "unit": {
         "zh": "",
@@ -8351,7 +9275,9 @@
     "nozzle_volume": {
       "label": {
         "zh": "喷嘴内腔体积",
-        "en": "Nozzle volume"
+        "en": "Nozzle volume",
+        "ja": "内腔容積",
+        "zh_tw": "噴嘴內腔體積"
       },
       "unit": {
         "zh": "mm³",
@@ -8371,7 +9297,9 @@
     "start_end_points": {
       "label": {
         "zh": "起始终止点",
-        "en": "Start end points"
+        "en": "Start end points",
+        "ja": "終始点",
+        "zh_tw": "起始終止點"
       },
       "unit": {
         "zh": "",
@@ -8391,7 +9319,9 @@
     "reduce_infill_retraction_mode": {
       "label": {
         "zh": "减小填充回抽",
-        "en": "Reduce infill retraction"
+        "en": "Reduce infill retraction",
+        "ja": "ｲﾝﾌｨﾙのﾘﾄﾗｸｼｮﾝ低減",
+        "zh_tw": "減小填充回抽"
       },
       "unit": {
         "zh": "",
@@ -8410,19 +9340,25 @@
           "value": "Disabled",
           "label_en": "Disabled",
           "label_zh": "关闭",
-          "icon": null
+          "icon": null,
+          "label_ja": "無効化",
+          "label_zh_tw": "關閉"
         },
         {
           "value": "Auto",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         },
         {
           "value": "Enabled",
           "label_en": "Enabled",
           "label_zh": "打开",
-          "icon": null
+          "icon": null,
+          "label_ja": "有効",
+          "label_zh_tw": "開啟"
         }
       ],
       "is_print_option": true
@@ -8430,7 +9366,9 @@
     "ooze_prevention": {
       "label": {
         "zh": "开启",
-        "en": "Enable"
+        "en": "Enable",
+        "ja": "有効化",
+        "zh_tw": "開啟"
       },
       "unit": {
         "zh": "",
@@ -8450,7 +9388,9 @@
     "filename_format": {
       "label": {
         "zh": "文件名格式",
-        "en": "Filename format"
+        "en": "Filename format",
+        "ja": "ファイル名形式",
+        "zh_tw": "檔名格式"
       },
       "unit": {
         "zh": "",
@@ -8470,7 +9410,9 @@
     "detect_overhang_wall": {
       "label": {
         "zh": "识别悬空外墙",
-        "en": "Detect overhang wall"
+        "en": "Detect overhang wall",
+        "ja": "オーバーハング壁を検出",
+        "zh_tw": "識別懸空外牆"
       },
       "unit": {
         "zh": "",
@@ -8490,7 +9432,9 @@
     "smooth_speed_discontinuity_area": {
       "label": {
         "zh": "平滑速度不连续区域",
-        "en": "Smooth speed discontinuity area"
+        "en": "Smooth speed discontinuity area",
+        "ja": "滑らかな速度不連続領域",
+        "zh_tw": "平滑速度不連續區域"
       },
       "unit": {
         "zh": "",
@@ -8510,7 +9454,9 @@
     "smooth_coefficient": {
       "label": {
         "zh": "平滑系数",
-        "en": "Smooth coefficient"
+        "en": "Smooth coefficient",
+        "ja": "平滑係数",
+        "zh_tw": "平滑係數"
       },
       "unit": {
         "zh": "",
@@ -8530,7 +9476,9 @@
     "wall_filament": {
       "label": {
         "zh": "墙耗材",
-        "en": "Walls filament"
+        "en": "Walls filament",
+        "ja": "壁用フィラメント",
+        "zh_tw": "牆耗材"
       },
       "unit": {
         "zh": "",
@@ -8550,7 +9498,9 @@
     "inner_wall_line_width": {
       "label": {
         "zh": "内墙",
-        "en": "Inner wall"
+        "en": "Inner wall",
+        "ja": "内壁",
+        "zh_tw": "內牆"
       },
       "unit": {
         "zh": "mm",
@@ -8570,7 +9520,9 @@
     "inner_wall_speed": {
       "label": {
         "zh": "内墙",
-        "en": "Inner wall"
+        "en": "Inner wall",
+        "ja": "内壁",
+        "zh_tw": "內牆"
       },
       "unit": {
         "zh": "mm/s",
@@ -8590,7 +9542,9 @@
     "wall_loops": {
       "label": {
         "zh": "墙层数",
-        "en": "Wall loops"
+        "en": "Wall loops",
+        "ja": "壁面層数",
+        "zh_tw": "牆層數"
       },
       "unit": {
         "zh": "",
@@ -8610,7 +9564,9 @@
     "embedding_wall_into_infill": {
       "label": {
         "zh": "将墙体嵌入填充中",
-        "en": "Embedding the wall into the infill"
+        "en": "Embedding the wall into the infill",
+        "ja": "壁をインフィルに埋め込む",
+        "zh_tw": "將牆體嵌入填充中"
       },
       "unit": {
         "zh": "",
@@ -8630,7 +9586,9 @@
     "alternate_extra_wall": {
       "label": {
         "zh": "交替额外墙层",
-        "en": "Alternate extra wall"
+        "en": "Alternate extra wall",
+        "ja": "代替エクストラウォール",
+        "zh_tw": "交替額外壁"
       },
       "unit": {
         "zh": "",
@@ -8650,7 +9608,9 @@
     "post_process": {
       "label": {
         "zh": "后处理脚本",
-        "en": "Post-processing Scripts"
+        "en": "Post-processing Scripts",
+        "ja": "後処理スクリプト",
+        "zh_tw": "後處理指令碼"
       },
       "unit": {
         "zh": "",
@@ -8750,7 +9710,9 @@
     "raft_contact_distance": {
       "label": {
         "zh": "筏层Z间距",
-        "en": "Raft contact Z distance"
+        "en": "Raft contact Z distance",
+        "ja": "ラフト接触面Z間隔",
+        "zh_tw": "筏層Z間距"
       },
       "unit": {
         "zh": "mm",
@@ -8770,7 +9732,9 @@
     "raft_expansion": {
       "label": {
         "zh": "筏层扩展",
-        "en": "Raft expansion"
+        "en": "Raft expansion",
+        "ja": "ラフト拡張",
+        "zh_tw": "筏層擴充套件"
       },
       "unit": {
         "zh": "mm",
@@ -8790,7 +9754,9 @@
     "raft_first_layer_density": {
       "label": {
         "zh": "首层密度",
-        "en": "Initial layer density"
+        "en": "Initial layer density",
+        "ja": "1層目の密度",
+        "zh_tw": "首層密度"
       },
       "unit": {
         "zh": "%",
@@ -8810,7 +9776,9 @@
     "raft_first_layer_expansion": {
       "label": {
         "zh": "首层扩展",
-        "en": "Initial layer expansion"
+        "en": "Initial layer expansion",
+        "ja": "1層目の拡張",
+        "zh_tw": "首層擴充套件"
       },
       "unit": {
         "zh": "mm",
@@ -8830,7 +9798,9 @@
     "raft_layers": {
       "label": {
         "zh": "筏层",
-        "en": "Raft layers"
+        "en": "Raft layers",
+        "ja": "ラフト",
+        "zh_tw": "筏層"
       },
       "unit": {
         "zh": "层",
@@ -8850,7 +9820,9 @@
     "resolution": {
       "label": {
         "zh": "分辨率",
-        "en": "Resolution"
+        "en": "Resolution",
+        "ja": "分解能",
+        "zh_tw": "解析度"
       },
       "unit": {
         "zh": "mm",
@@ -8870,7 +9842,9 @@
     "retraction_minimum_travel": {
       "label": {
         "zh": "空驶距离阈值",
-        "en": "Travel distance threshold"
+        "en": "Travel distance threshold",
+        "ja": "移動距離閾値",
+        "zh_tw": "空駛距離閾值"
       },
       "unit": {
         "zh": "mm",
@@ -8890,7 +9864,9 @@
     "retract_before_wipe": {
       "label": {
         "zh": "擦拭前的回抽量",
-        "en": "Retract amount before wipe"
+        "en": "Retract amount before wipe",
+        "ja": "拭き上げ前のリトラクション量",
+        "zh_tw": "擦拭前的回抽量"
       },
       "unit": {
         "zh": "%",
@@ -8910,7 +9886,9 @@
     "retract_when_changing_layer": {
       "label": {
         "zh": "换层时回抽",
-        "en": "Retract when change layer"
+        "en": "Retract when change layer",
+        "ja": "積層変更時に引き込む",
+        "zh_tw": "換層時回抽"
       },
       "unit": {
         "zh": "",
@@ -8930,7 +9908,9 @@
     "retraction_length": {
       "label": {
         "zh": "长度",
-        "en": "Length"
+        "en": "Length",
+        "ja": "長さ",
+        "zh_tw": "長度"
       },
       "unit": {
         "zh": "mm",
@@ -8970,7 +9950,9 @@
     "long_retractions_when_cut": {
       "label": {
         "zh": "切料时回抽（实验）",
-        "en": "Long retraction when cut(experimental)"
+        "en": "Long retraction when cut(experimental)",
+        "ja": "カット時の長い引っ込み（実験的）",
+        "zh_tw": "切料時回抽（實驗）"
       },
       "unit": {
         "zh": "",
@@ -8990,7 +9972,9 @@
     "retraction_distances_when_cut": {
       "label": {
         "zh": "切料回抽距离",
-        "en": "Retraction distance when cut"
+        "en": "Retraction distance when cut",
+        "ja": "カット時の後退距離",
+        "zh_tw": "切料回抽距離"
       },
       "unit": {
         "zh": "",
@@ -9010,7 +9994,9 @@
     "long_retractions_when_ec": {
       "label": {
         "zh": "切换喷嘴时回抽",
-        "en": "Long retraction when extruder change"
+        "en": "Long retraction when extruder change",
+        "ja": "押出機切り替え時のロングリトラクション",
+        "zh_tw": "切換噴嘴時回抽"
       },
       "unit": {
         "zh": "",
@@ -9030,7 +10016,9 @@
     "retraction_distances_when_ec": {
       "label": {
         "zh": "切换喷嘴回抽距离",
-        "en": "Retraction distance when extruder change"
+        "en": "Retraction distance when extruder change",
+        "ja": "押出機切替時のリトラクション距離",
+        "zh_tw": "切換噴嘴回抽距離"
       },
       "unit": {
         "zh": "mm",
@@ -9050,7 +10038,9 @@
     "retract_length_toolchange": {
       "label": {
         "zh": "长度",
-        "en": "Length"
+        "en": "Length",
+        "ja": "長さ",
+        "zh_tw": "長度"
       },
       "unit": {
         "zh": "mm",
@@ -9070,7 +10060,9 @@
     "z_hop": {
       "label": {
         "zh": "回抽时抬升Z",
-        "en": "Z hop when retract"
+        "en": "Z hop when retract",
+        "ja": "リトラクト時のZホップ",
+        "zh_tw": "回抽時抬升Z"
       },
       "unit": {
         "zh": "mm",
@@ -9090,7 +10082,9 @@
     "retract_lift_above": {
       "label": {
         "zh": "Z抬升范围下限",
-        "en": "Z hop lower boundary"
+        "en": "Z hop lower boundary",
+        "ja": "Zホップ下限",
+        "zh_tw": "Z抬升範圍下限"
       },
       "unit": {
         "zh": "mm",
@@ -9110,7 +10104,9 @@
     "retract_lift_below": {
       "label": {
         "zh": "Z抬升范围上限",
-        "en": "Z hop upper boundary"
+        "en": "Z hop upper boundary",
+        "ja": "Zホップ上限",
+        "zh_tw": "Z抬升範圍上限"
       },
       "unit": {
         "zh": "mm",
@@ -9130,7 +10126,9 @@
     "z_hop_types": {
       "label": {
         "zh": "Z抬升方式",
-        "en": "Z Hop Type"
+        "en": "Z Hop Type",
+        "ja": "Z方向調整タイプ",
+        "zh_tw": "Z抬升方式"
       },
       "unit": {
         "zh": "",
@@ -9149,25 +10147,33 @@
           "value": "Auto Lift",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         },
         {
           "value": "Normal Lift",
           "label_en": "Normal",
           "label_zh": "普通",
-          "icon": null
+          "icon": null,
+          "label_ja": "普通",
+          "label_zh_tw": "普通"
         },
         {
           "value": "Slope Lift",
           "label_en": "Slope",
           "label_zh": "斜向",
-          "icon": null
+          "icon": null,
+          "label_ja": "スロープ",
+          "label_zh_tw": "斜向"
         },
         {
           "value": "Spiral Lift",
           "label_en": "Spiral",
           "label_zh": "螺旋",
-          "icon": null
+          "icon": null,
+          "label_ja": "スパイラル",
+          "label_zh_tw": "螺旋"
         }
       ],
       "is_print_option": false
@@ -9175,7 +10181,9 @@
     "extruder_type": {
       "label": {
         "zh": "类型",
-        "en": "Type"
+        "en": "Type",
+        "ja": "タイプ",
+        "zh_tw": "型別"
       },
       "unit": {
         "zh": "",
@@ -9194,13 +10202,17 @@
           "value": "Direct Drive",
           "label_en": "Direct Drive",
           "label_zh": "直接驱动",
-          "icon": null
+          "icon": null,
+          "label_ja": "ダイレクトドライブ",
+          "label_zh_tw": "直接驅動"
         },
         {
           "value": "Bowden",
           "label_en": "Bowden",
           "label_zh": "远程",
-          "icon": null
+          "icon": null,
+          "label_ja": "Bowden",
+          "label_zh_tw": "遠端"
         }
       ],
       "is_print_option": false
@@ -9208,7 +10220,9 @@
     "nozzle_volume_type": {
       "label": {
         "zh": "喷嘴体积类型",
-        "en": "Nozzle Volume Type"
+        "en": "Nozzle Volume Type",
+        "ja": "ノズル容量タイプ",
+        "zh_tw": "噴嘴體積型別"
       },
       "unit": {
         "zh": "",
@@ -9227,31 +10241,41 @@
           "value": "Standard",
           "label_en": "Standard",
           "label_zh": "标准",
-          "icon": null
+          "icon": null,
+          "label_ja": "標準",
+          "label_zh_tw": "標準"
         },
         {
           "value": "High Flow",
           "label_en": "High Flow",
           "label_zh": "高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "大流量",
+          "label_zh_tw": "高流量"
         },
         {
           "value": "Hybrid",
           "label_en": "Hybrid",
           "label_zh": "混合",
-          "icon": null
+          "icon": null,
+          "label_ja": "ハイブリッド",
+          "label_zh_tw": "混合"
         },
         {
           "value": "TPU High Flow",
           "label_en": "TPU High Flow",
           "label_zh": "TPU高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "TPUハイフロー",
+          "label_zh_tw": "TPU高流量"
         },
         {
           "value": "E3D High Flow",
           "label_en": "E3D High Flow",
           "label_zh": "E3D高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "E3Dハイフロー",
+          "label_zh_tw": "E3D 高流量"
         }
       ],
       "is_print_option": false
@@ -9259,7 +10283,9 @@
     "default_nozzle_volume_type": {
       "label": {
         "zh": "默认喷嘴体积类型",
-        "en": "Default Nozzle Volume Type"
+        "en": "Default Nozzle Volume Type",
+        "ja": "デフォルトノズルボリュームタイプ",
+        "zh_tw": "預設噴嘴體積型別"
       },
       "unit": {
         "zh": "",
@@ -9278,31 +10304,41 @@
           "value": "Standard",
           "label_en": "Standard",
           "label_zh": "标准",
-          "icon": null
+          "icon": null,
+          "label_ja": "標準",
+          "label_zh_tw": "標準"
         },
         {
           "value": "High Flow",
           "label_en": "High Flow",
           "label_zh": "高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "大流量",
+          "label_zh_tw": "高流量"
         },
         {
           "value": "Hybrid",
           "label_en": "Hybrid",
           "label_zh": "混合",
-          "icon": null
+          "icon": null,
+          "label_ja": "ハイブリッド",
+          "label_zh_tw": "混合"
         },
         {
           "value": "TPU High Flow",
           "label_en": "TPU High Flow",
           "label_zh": "TPU高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "TPUハイフロー",
+          "label_zh_tw": "TPU高流量"
         },
         {
           "value": "E3D High Flow",
           "label_en": "E3D High Flow",
           "label_zh": "E3D高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "E3Dハイフロー",
+          "label_zh_tw": "E3D 高流量"
         }
       ],
       "is_print_option": false
@@ -9449,19 +10485,25 @@
           "value": "Default",
           "label_en": "Default",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "デフォルト",
+          "label_zh_tw": "預設"
         },
         {
           "value": "Saving",
           "label_en": "Saving",
           "label_zh": "保存中",
-          "icon": null
+          "icon": null,
+          "label_ja": "保存中...",
+          "label_zh_tw": "儲存中"
         },
         {
           "value": "Fast",
           "label_en": "Fast",
           "label_zh": "快速",
-          "icon": null
+          "icon": null,
+          "label_ja": "高速",
+          "label_zh_tw": "快速"
         }
       ],
       "is_print_option": false
@@ -9508,25 +10550,33 @@
           "value": "Standard",
           "label_en": "Standard",
           "label_zh": "标准",
-          "icon": null
+          "icon": null,
+          "label_ja": "標準",
+          "label_zh_tw": "標準"
         },
         {
           "value": "High Flow",
           "label_en": "High Flow",
           "label_zh": "高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "大流量",
+          "label_zh_tw": "高流量"
         },
         {
           "value": "TPU High Flow",
           "label_en": "TPU High Flow",
           "label_zh": "TPU高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "TPUハイフロー",
+          "label_zh_tw": "TPU高流量"
         },
         {
           "value": "E3D High Flow",
           "label_en": "E3D High Flow",
           "label_zh": "E3D高流量",
-          "icon": null
+          "icon": null,
+          "label_ja": "E3Dハイフロー",
+          "label_zh_tw": "E3D 高流量"
         }
       ],
       "is_print_option": false
@@ -9674,7 +10724,9 @@
     "filament_retract_length_nc": {
       "label": {
         "zh": "换热端时回抽量",
-        "en": "length when change hotend"
+        "en": "length when change hotend",
+        "ja": "ノズル切替時のリトラクト長さ",
+        "zh_tw": "換熱端時回抽量"
       },
       "unit": {
         "zh": "mm",
@@ -9694,7 +10746,9 @@
     "retract_restart_extra": {
       "label": {
         "zh": "额外回填长度",
-        "en": "Extra length on restart"
+        "en": "Extra length on restart",
+        "ja": "再開時の追加長さ",
+        "zh_tw": "額外回填長度"
       },
       "unit": {
         "zh": "mm",
@@ -9714,7 +10768,9 @@
     "retract_restart_extra_toolchange": {
       "label": {
         "zh": "额外回填长度",
-        "en": "Extra length on restart"
+        "en": "Extra length on restart",
+        "ja": "再開時の追加長さ",
+        "zh_tw": "額外回填長度"
       },
       "unit": {
         "zh": "mm",
@@ -9734,7 +10790,9 @@
     "retraction_speed": {
       "label": {
         "zh": "回抽速度",
-        "en": "Retraction Speed"
+        "en": "Retraction Speed",
+        "ja": "引き込み速度",
+        "zh_tw": "回抽速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -9754,7 +10812,9 @@
     "deretraction_speed": {
       "label": {
         "zh": "装填速度",
-        "en": "Deretraction Speed"
+        "en": "Deretraction Speed",
+        "ja": "リトラクション解除速度",
+        "zh_tw": "裝填速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -9774,7 +10834,9 @@
     "seam_position": {
       "label": {
         "zh": "接缝位置",
-        "en": "Seam position"
+        "en": "Seam position",
+        "ja": "継ぎ目位置",
+        "zh_tw": "接縫位置"
       },
       "unit": {
         "zh": "",
@@ -9793,25 +10855,33 @@
           "value": "nearest",
           "label_en": "Nearest",
           "label_zh": "最近",
-          "icon": null
+          "icon": null,
+          "label_ja": "最寄り",
+          "label_zh_tw": "最近"
         },
         {
           "value": "aligned",
           "label_en": "Aligned",
           "label_zh": "对齐",
-          "icon": null
+          "icon": null,
+          "label_ja": "整列",
+          "label_zh_tw": "對齊"
         },
         {
           "value": "back",
           "label_en": "Back",
           "label_zh": "背面",
-          "icon": null
+          "icon": null,
+          "label_ja": "背面",
+          "label_zh_tw": "背面"
         },
         {
           "value": "random",
           "label_en": "Random",
           "label_zh": "随机",
-          "icon": null
+          "icon": null,
+          "label_ja": "ランダム",
+          "label_zh_tw": "隨機"
         }
       ],
       "is_print_option": true
@@ -9819,7 +10889,9 @@
     "seam_placement_away_from_overhangs": {
       "label": {
         "zh": "接缝远离悬垂点放置（实验）",
-        "en": "Seam placement away from overhangs(experimental)"
+        "en": "Seam placement away from overhangs(experimental)",
+        "ja": "継ぎ目をオーバーハングから離して配置（実験的）",
+        "zh_tw": "接縫遠離懸垂點放置（實驗）"
       },
       "unit": {
         "zh": "",
@@ -9839,7 +10911,9 @@
     "seam_gap": {
       "label": {
         "zh": "接缝间隔",
-        "en": "Seam gap"
+        "en": "Seam gap",
+        "ja": "継ぎ目ギャップ",
+        "zh_tw": "接縫間隔"
       },
       "unit": {
         "zh": "%",
@@ -9859,7 +10933,9 @@
     "seam_slope_conditional": {
       "label": {
         "zh": "智能应用斜拼接缝",
-        "en": "Smart scarf seam application"
+        "en": "Smart scarf seam application",
+        "ja": "スマートスカーフ継ぎ目の適用",
+        "zh_tw": "智慧應用斜拼接縫"
       },
       "unit": {
         "zh": "",
@@ -9879,7 +10955,9 @@
     "scarf_angle_threshold": {
       "label": {
         "zh": "斜拼角度阈值",
-        "en": "Scarf application angle threshold"
+        "en": "Scarf application angle threshold",
+        "ja": "スカーフ適用角度しきい値",
+        "zh_tw": "斜拼角度閾值"
       },
       "unit": {
         "zh": "°",
@@ -9899,7 +10977,9 @@
     "seam_slope_entire_loop": {
       "label": {
         "zh": "围绕整个围墙",
-        "en": "Scarf around entire wall"
+        "en": "Scarf around entire wall",
+        "ja": "壁全体にスカーフを巻く",
+        "zh_tw": "圍繞整個圍牆"
       },
       "unit": {
         "zh": "",
@@ -9919,7 +10999,9 @@
     "seam_slope_steps": {
       "label": {
         "zh": "斜拼段数",
-        "en": "Scarf steps"
+        "en": "Scarf steps",
+        "ja": "スカーフのステップ",
+        "zh_tw": "斜拼段數"
       },
       "unit": {
         "zh": "",
@@ -9939,7 +11021,9 @@
     "seam_slope_inner_walls": {
       "label": {
         "zh": "应用斜拼于内墙",
-        "en": "Scarf joint for inner walls"
+        "en": "Scarf joint for inner walls",
+        "ja": "内壁用のスカーフ継ぎ目",
+        "zh_tw": "應用斜拼於內牆"
       },
       "unit": {
         "zh": "",
@@ -9959,7 +11043,9 @@
     "override_filament_scarf_seam_setting": {
       "label": {
         "zh": "覆盖材料的斜拼接缝参数",
-        "en": "Override filament scarf seam setting"
+        "en": "Override filament scarf seam setting",
+        "ja": "フィラメントのスカーフ継ぎ目設定を上書き",
+        "zh_tw": "覆蓋材料的斜拼接縫引數"
       },
       "unit": {
         "zh": "",
@@ -9979,7 +11065,9 @@
     "seam_slope_type": {
       "label": {
         "zh": "斜拼接缝类型",
-        "en": "Scarf seam type"
+        "en": "Scarf seam type",
+        "ja": "スカーフ継ぎ目タイプ",
+        "zh_tw": "斜拼接縫型別"
       },
       "unit": {
         "zh": "",
@@ -9998,19 +11086,25 @@
           "value": "none",
           "label_en": "None",
           "label_zh": "无",
-          "icon": null
+          "icon": null,
+          "label_ja": "無し",
+          "label_zh_tw": "無"
         },
         {
           "value": "external",
           "label_en": "Contour",
           "label_zh": "轮廓",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭",
+          "label_zh_tw": "輪廓"
         },
         {
           "value": "all",
           "label_en": "Contour and hole",
           "label_zh": "轮廓和孔",
-          "icon": null
+          "icon": null,
+          "label_ja": "輪郭と穴",
+          "label_zh_tw": "輪廓和孔"
         }
       ],
       "is_print_option": true
@@ -10018,7 +11112,9 @@
     "seam_slope_start_height": {
       "label": {
         "zh": "斜拼接缝起始高度",
-        "en": "Scarf start height"
+        "en": "Scarf start height",
+        "ja": "スカーフ開始高さ",
+        "zh_tw": "斜拼接縫起始高度"
       },
       "unit": {
         "zh": "mm/%",
@@ -10038,7 +11134,9 @@
     "seam_slope_gap": {
       "label": {
         "zh": "斜拼接缝间隔",
-        "en": "Scarf slope gap"
+        "en": "Scarf slope gap",
+        "ja": "スカーフ斜面ギャップ",
+        "zh_tw": "斜拼接縫間隔"
       },
       "unit": {
         "zh": "mm/%",
@@ -10058,7 +11156,9 @@
     "seam_slope_min_length": {
       "label": {
         "zh": "斜拼接缝长度",
-        "en": "Scarf length"
+        "en": "Scarf length",
+        "ja": "スカーフの長さ",
+        "zh_tw": "斜拼接縫長度"
       },
       "unit": {
         "zh": "mm",
@@ -10078,7 +11178,9 @@
     "wipe_speed": {
       "label": {
         "zh": "擦拭速度",
-        "en": "Wipe speed"
+        "en": "Wipe speed",
+        "ja": "拭き上げ速度",
+        "zh_tw": "擦拭速度"
       },
       "unit": {
         "zh": "%",
@@ -10098,7 +11200,9 @@
     "role_base_wipe_speed": {
       "label": {
         "zh": "自动擦拭速度",
-        "en": "Role-based wipe speed"
+        "en": "Role-based wipe speed",
+        "ja": "ロール別拭き上げ速度",
+        "zh_tw": "自動擦拭速度"
       },
       "unit": {
         "zh": "",
@@ -10118,7 +11222,9 @@
     "skirt_distance": {
       "label": {
         "zh": "Skirt距离",
-        "en": "Skirt distance"
+        "en": "Skirt distance",
+        "ja": "スカート距離",
+        "zh_tw": "Skirt距離"
       },
       "unit": {
         "zh": "mm",
@@ -10138,7 +11244,9 @@
     "skirt_per_object": {
       "label": {
         "zh": "每个对象的裙边",
-        "en": "Skirt per object"
+        "en": "Skirt per object",
+        "ja": "オブジェクトごとにスカートを生成",
+        "zh_tw": "每個物件獨立裙邊"
       },
       "unit": {
         "zh": "",
@@ -10158,7 +11266,9 @@
     "skirt_height": {
       "label": {
         "zh": "Skirt高度",
-        "en": "Skirt height"
+        "en": "Skirt height",
+        "ja": "スカートの高さ",
+        "zh_tw": "Skirt高度"
       },
       "unit": {
         "zh": "层",
@@ -10197,7 +11307,9 @@
           "value": "disabled",
           "label_en": "Disabled",
           "label_zh": "关闭",
-          "icon": null
+          "icon": null,
+          "label_ja": "無効化",
+          "label_zh_tw": "關閉"
         },
         {
           "value": "limited",
@@ -10209,7 +11321,9 @@
           "value": "enabled",
           "label_en": "Enabled",
           "label_zh": "打开",
-          "icon": null
+          "icon": null,
+          "label_ja": "有効",
+          "label_zh_tw": "開啟"
         }
       ],
       "is_print_option": true
@@ -10217,7 +11331,9 @@
     "skirt_loops": {
       "label": {
         "zh": "Skirt圈数",
-        "en": "Skirt loops"
+        "en": "Skirt loops",
+        "ja": "スカートのループ数",
+        "zh_tw": "Skirt圈數"
       },
       "unit": {
         "zh": "",
@@ -10237,7 +11353,9 @@
     "slow_down_layer_time": {
       "label": {
         "zh": "层时间",
-        "en": "Layer time"
+        "en": "Layer time",
+        "ja": "積層時間",
+        "zh_tw": "層時間"
       },
       "unit": {
         "zh": "秒",
@@ -10257,7 +11375,9 @@
     "minimum_sparse_infill_area": {
       "label": {
         "zh": "稀疏填充最小阈值",
-        "en": "Minimum sparse infill threshold"
+        "en": "Minimum sparse infill threshold",
+        "ja": "スパース インフィルの下閾値",
+        "zh_tw": "稀疏填充最小閾值"
       },
       "unit": {
         "zh": "mm²",
@@ -10277,7 +11397,9 @@
     "solid_infill_filament": {
       "label": {
         "zh": "实心填充耗材",
-        "en": "Solid infill filament"
+        "en": "Solid infill filament",
+        "ja": "ソリッドインフィル用フィラメント",
+        "zh_tw": "實心填充耗材"
       },
       "unit": {
         "zh": "",
@@ -10297,7 +11419,9 @@
     "internal_solid_infill_line_width": {
       "label": {
         "zh": "内部实心填充",
-        "en": "Internal solid infill"
+        "en": "Internal solid infill",
+        "ja": "内部ソリッド インフィル",
+        "zh_tw": "內部實心填充"
       },
       "unit": {
         "zh": "mm",
@@ -10317,7 +11441,9 @@
     "internal_solid_infill_speed": {
       "label": {
         "zh": "内部实心填充",
-        "en": "Internal solid infill"
+        "en": "Internal solid infill",
+        "ja": "内部ソリッド インフィル",
+        "zh_tw": "內部實心填充"
       },
       "unit": {
         "zh": "mm/s",
@@ -10337,7 +11463,9 @@
     "spiral_mode": {
       "label": {
         "zh": "旋转花瓶",
-        "en": "Spiral vase"
+        "en": "Spiral vase",
+        "ja": "スパイラル",
+        "zh_tw": "旋轉花瓶"
       },
       "unit": {
         "zh": "",
@@ -10357,7 +11485,9 @@
     "spiral_mode_smooth": {
       "label": {
         "zh": "平滑旋转花瓶",
-        "en": "Smooth Spiral"
+        "en": "Smooth Spiral",
+        "ja": "スムーススパイラル",
+        "zh_tw": "平滑旋轉花瓶"
       },
       "unit": {
         "zh": "",
@@ -10377,7 +11507,9 @@
     "spiral_mode_max_xy_smoothing": {
       "label": {
         "zh": "最大XY平滑阈值",
-        "en": "Max XY Smoothing"
+        "en": "Max XY Smoothing",
+        "ja": "最大XYスムージング",
+        "zh_tw": "最大XY平滑閾值"
       },
       "unit": {
         "zh": "mm 或 %",
@@ -10397,7 +11529,9 @@
     "timelapse_type": {
       "label": {
         "zh": "延时摄影",
-        "en": "Timelapse"
+        "en": "Timelapse",
+        "ja": "タイムラプス",
+        "zh_tw": "延時攝影"
       },
       "unit": {
         "zh": "",
@@ -10416,13 +11550,16 @@
           "value": "0",
           "label_en": "Traditional",
           "label_zh": "传统模式",
-          "icon": null
+          "icon": null,
+          "label_ja": "従来のモード"
         },
         {
           "value": "1",
           "label_en": "Smooth",
           "label_zh": "平滑模式",
-          "icon": null
+          "icon": null,
+          "label_ja": "滑らか目",
+          "label_zh_tw": "平滑模式"
         }
       ],
       "is_print_option": true
@@ -10430,7 +11567,9 @@
     "farthest_point_timelapse": {
       "label": {
         "zh": "最远点延时摄影",
-        "en": "Farthest point timelapse"
+        "en": "Farthest point timelapse",
+        "ja": "最遠点タイムラプス",
+        "zh_tw": "最遠點縮時攝影"
       },
       "unit": {
         "zh": "",
@@ -10450,7 +11589,9 @@
     "standby_temperature_delta": {
       "label": {
         "zh": "软化温度",
-        "en": "Temperature variation"
+        "en": "Temperature variation",
+        "ja": "軟化温度",
+        "zh_tw": "軟化溫度"
       },
       "unit": {
         "zh": "∆°C",
@@ -10470,7 +11611,9 @@
     "machine_start_gcode": {
       "label": {
         "zh": "起始G-code",
-        "en": "Start G-code"
+        "en": "Start G-code",
+        "ja": "スタートG-code",
+        "zh_tw": "起始G-code"
       },
       "unit": {
         "zh": "",
@@ -10490,7 +11633,9 @@
     "filament_start_gcode": {
       "label": {
         "zh": "起始G-code",
-        "en": "Start G-code"
+        "en": "Start G-code",
+        "ja": "スタートG-code",
+        "zh_tw": "起始G-code"
       },
       "unit": {
         "zh": "",
@@ -10530,7 +11675,9 @@
     "wipe_tower_no_sparse_layers": {
       "label": {
         "zh": "无稀疏层（实验性）",
-        "en": "No sparse layers (experimental)"
+        "en": "No sparse layers (experimental)",
+        "ja": "スパースレイヤーなし（実験的）",
+        "zh_tw": "無稀疏層（實驗性）"
       },
       "unit": {
         "zh": "",
@@ -10550,7 +11697,9 @@
     "slice_closing_radius": {
       "label": {
         "zh": "切片间隙闭合半径",
-        "en": "Slice gap closing radius"
+        "en": "Slice gap closing radius",
+        "ja": "隙間充填半径",
+        "zh_tw": "切片間隙閉合半徑"
       },
       "unit": {
         "zh": "mm",
@@ -10570,7 +11719,9 @@
     "slicing_mode": {
       "label": {
         "zh": "切片模式",
-        "en": "Slicing Mode"
+        "en": "Slicing Mode",
+        "ja": "スライシングモード",
+        "zh_tw": "切片模式"
       },
       "unit": {
         "zh": "",
@@ -10589,19 +11740,25 @@
           "value": "regular",
           "label_en": "Regular",
           "label_zh": "常规",
-          "icon": null
+          "icon": null,
+          "label_ja": "レギュラー",
+          "label_zh_tw": "常規"
         },
         {
           "value": "even_odd",
           "label_en": "Even-odd",
           "label_zh": "奇偶",
-          "icon": null
+          "icon": null,
+          "label_ja": "Even-odd",
+          "label_zh_tw": "奇偶"
         },
         {
           "value": "close_holes",
           "label_en": "Close holes",
           "label_zh": "闭孔",
-          "icon": null
+          "icon": null,
+          "label_ja": "穴を閉じる",
+          "label_zh_tw": "閉孔"
         }
       ],
       "is_print_option": true
@@ -10609,7 +11766,9 @@
     "enable_support": {
       "label": {
         "zh": "开启支撑",
-        "en": "Enable support"
+        "en": "Enable support",
+        "ja": "有効化",
+        "zh_tw": "開啟支撐"
       },
       "unit": {
         "zh": "",
@@ -10629,7 +11788,9 @@
     "support_type": {
       "label": {
         "zh": "类型",
-        "en": "Type"
+        "en": "Type",
+        "ja": "タイプ",
+        "zh_tw": "型別"
       },
       "unit": {
         "zh": "",
@@ -10648,25 +11809,33 @@
           "value": "normal(auto)",
           "label_en": "normal(auto)",
           "label_zh": "普通(自动)",
-          "icon": null
+          "icon": null,
+          "label_ja": "通常 (自動)",
+          "label_zh_tw": "普通(自動)"
         },
         {
           "value": "tree(auto)",
           "label_en": "tree(auto)",
           "label_zh": "树状(自动)",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリー (自動)",
+          "label_zh_tw": "樹狀(自動)"
         },
         {
           "value": "normal(manual)",
           "label_en": "normal(manual)",
           "label_zh": "普通(手动)",
-          "icon": null
+          "icon": null,
+          "label_ja": "通常 (手動)",
+          "label_zh_tw": "普通(手動)"
         },
         {
           "value": "tree(manual)",
           "label_en": "tree(manual)",
           "label_zh": "树状(手动)",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリー (手動)",
+          "label_zh_tw": "樹狀(手動)"
         }
       ],
       "is_print_option": true
@@ -10674,7 +11843,9 @@
     "support_object_xy_distance": {
       "label": {
         "zh": "支撑/模型xy间距",
-        "en": "Support/object xy distance"
+        "en": "Support/object xy distance",
+        "ja": "水平間隔",
+        "zh_tw": "支撐/模型xy間距"
       },
       "unit": {
         "zh": "mm",
@@ -10694,7 +11865,9 @@
     "support_object_first_layer_gap": {
       "label": {
         "zh": "支撑/对象首层间距",
-        "en": "Support/object first layer gap"
+        "en": "Support/object first layer gap",
+        "ja": "サポート／オブジェクト一層目のギャップ",
+        "zh_tw": "支撐/物件首層間距"
       },
       "unit": {
         "zh": "mm",
@@ -10714,7 +11887,9 @@
     "support_angle": {
       "label": {
         "zh": "模式角度",
-        "en": "Pattern angle"
+        "en": "Pattern angle",
+        "ja": "パターン角度",
+        "zh_tw": "模式角度"
       },
       "unit": {
         "zh": "°",
@@ -10734,7 +11909,9 @@
     "support_on_build_plate_only": {
       "label": {
         "zh": "仅在打印板生成",
-        "en": "On build plate only"
+        "en": "On build plate only",
+        "ja": "ビルドプレートのみ",
+        "zh_tw": "僅在列印板生成"
       },
       "unit": {
         "zh": "",
@@ -10754,7 +11931,9 @@
     "support_critical_regions_only": {
       "label": {
         "zh": "仅支撑关键区域",
-        "en": "Support critical regions only"
+        "en": "Support critical regions only",
+        "ja": "必須領域のみ",
+        "zh_tw": "僅支撐關鍵區域"
       },
       "unit": {
         "zh": "",
@@ -10774,7 +11953,9 @@
     "support_remove_small_overhang": {
       "label": {
         "zh": "移除小悬空",
-        "en": "Remove small overhangs"
+        "en": "Remove small overhangs",
+        "ja": "小さなオーバーハングを削除",
+        "zh_tw": "移除小懸空"
       },
       "unit": {
         "zh": "",
@@ -10794,7 +11975,9 @@
     "support_top_z_distance": {
       "label": {
         "zh": "顶部Z距离",
-        "en": "Top Z distance"
+        "en": "Top Z distance",
+        "ja": "トップ面とのZ間隔",
+        "zh_tw": "頂部Z距離"
       },
       "unit": {
         "zh": "mm",
@@ -10814,7 +11997,9 @@
     "support_bottom_z_distance": {
       "label": {
         "zh": "底部Z距离",
-        "en": "Bottom Z distance"
+        "en": "Bottom Z distance",
+        "ja": "底面とのZ間隔",
+        "zh_tw": "底部Z距離"
       },
       "unit": {
         "zh": "mm",
@@ -10854,7 +12039,9 @@
     "support_filament": {
       "label": {
         "zh": "支撑/筏层主体",
-        "en": "Support/raft base"
+        "en": "Support/raft base",
+        "ja": "サポート/ラフトベース",
+        "zh_tw": "支撐/筏層主體"
       },
       "unit": {
         "zh": "",
@@ -10874,7 +12061,9 @@
     "support_interface_not_for_body": {
       "label": {
         "zh": "界面材料不用于主体",
-        "en": "Avoid interface filament for base"
+        "en": "Avoid interface filament for base",
+        "ja": "ベース用のインターフェイスフィラメントを回避",
+        "zh_tw": "介面材料不用於主體"
       },
       "unit": {
         "zh": "",
@@ -10894,7 +12083,9 @@
     "support_line_width": {
       "label": {
         "zh": "支撑",
-        "en": "Support"
+        "en": "Support",
+        "ja": "サポート",
+        "zh_tw": "支撐"
       },
       "unit": {
         "zh": "mm",
@@ -10914,7 +12105,9 @@
     "support_interface_loop_pattern": {
       "label": {
         "zh": "接触面采用圈形走线。",
-        "en": "Interface use loop pattern"
+        "en": "Interface use loop pattern",
+        "ja": "インターフェースをループパターンにする",
+        "zh_tw": "接觸面採用圈形走線。"
       },
       "unit": {
         "zh": "",
@@ -10934,7 +12127,9 @@
     "support_interface_filament": {
       "label": {
         "zh": "支撑/筏层界面",
-        "en": "Support/raft interface"
+        "en": "Support/raft interface",
+        "ja": "サポート/ラフトインターフェース",
+        "zh_tw": "支撐/筏層介面"
       },
       "unit": {
         "zh": "",
@@ -10954,7 +12149,9 @@
     "support_interface_top_layers": {
       "label": {
         "zh": "顶部接触面层数",
-        "en": "Top interface layers"
+        "en": "Top interface layers",
+        "ja": "トップ接触面の層数",
+        "zh_tw": "頂部接觸面層數"
       },
       "unit": {
         "zh": "层",
@@ -10973,7 +12170,9 @@
           "value": "0",
           "label_en": "0",
           "label_zh": "0",
-          "icon": null
+          "icon": null,
+          "label_ja": "0",
+          "label_zh_tw": "0"
         },
         {
           "value": "1",
@@ -10999,7 +12198,9 @@
     "support_interface_bottom_layers": {
       "label": {
         "zh": "底部接触面层数",
-        "en": "Bottom interface layers"
+        "en": "Bottom interface layers",
+        "ja": "底部接触面層数",
+        "zh_tw": "底部接觸面層數"
       },
       "unit": {
         "zh": "层",
@@ -11018,7 +12219,9 @@
           "value": "-1",
           "label_en": "Same as top",
           "label_zh": "和顶部相同",
-          "icon": null
+          "icon": null,
+          "label_ja": "トップと同じ",
+          "label_zh_tw": "和頂部相同"
         }
       ],
       "is_print_option": true
@@ -11026,7 +12229,9 @@
     "support_interface_spacing": {
       "label": {
         "zh": "顶部接触面线距",
-        "en": "Top interface spacing"
+        "en": "Top interface spacing",
+        "ja": "トップ接触面間隔",
+        "zh_tw": "頂部接觸面線距"
       },
       "unit": {
         "zh": "mm",
@@ -11046,7 +12251,9 @@
     "enable_support_ironing": {
       "label": {
         "zh": "启用支撑界面熨烫",
-        "en": "Enable ironing support interface"
+        "en": "Enable ironing support interface",
+        "ja": "サポートインターフェースのアイロニングを有効化",
+        "zh_tw": "啟用支撐介面熨燙"
       },
       "unit": {
         "zh": "",
@@ -11066,7 +12273,9 @@
     "support_ironing_pattern": {
       "label": {
         "zh": "支撑熨烫模式",
-        "en": "Support ironing pattern"
+        "en": "Support ironing pattern",
+        "ja": "サポートアイロニングパターン",
+        "zh_tw": "支撐熨燙模式"
       },
       "unit": {
         "zh": "",
@@ -11085,13 +12294,17 @@
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "zig-zag",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_zig-zag"
+          "icon": "param_zig-zag",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         }
       ],
       "is_print_option": true
@@ -11099,7 +12312,9 @@
     "support_ironing_flow": {
       "label": {
         "zh": "支撑熨烫流量",
-        "en": "Support ironing flow"
+        "en": "Support ironing flow",
+        "ja": "サポートアイロニング流量",
+        "zh_tw": "支撐熨燙流量"
       },
       "unit": {
         "zh": "%",
@@ -11119,7 +12334,9 @@
     "support_ironing_spacing": {
       "label": {
         "zh": "支撑熨烫间距",
-        "en": "Support ironing line spacing"
+        "en": "Support ironing line spacing",
+        "ja": "サポートアイロニングライン間隔",
+        "zh_tw": "支撐熨燙間距"
       },
       "unit": {
         "zh": "mm",
@@ -11139,7 +12356,9 @@
     "support_ironing_inset": {
       "label": {
         "zh": "支撑熨烫内缩",
-        "en": "Support ironing inset"
+        "en": "Support ironing inset",
+        "ja": "サポートアイロニングのインセット",
+        "zh_tw": "支撐熨燙內縮"
       },
       "unit": {
         "zh": "mm",
@@ -11159,7 +12378,9 @@
     "support_ironing_speed": {
       "label": {
         "zh": "支撑熨烫速度",
-        "en": "Support ironing speed"
+        "en": "Support ironing speed",
+        "ja": "サポートアイロニング速度",
+        "zh_tw": "支撐熨燙速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -11179,7 +12400,9 @@
     "support_ironing_direction": {
       "label": {
         "zh": "支撑熨烫方向",
-        "en": "Support ironing direction"
+        "en": "Support ironing direction",
+        "ja": "サポートアイロニング方向",
+        "zh_tw": "支撐熨燙方向"
       },
       "unit": {
         "zh": "°",
@@ -11199,7 +12422,9 @@
     "support_bottom_interface_spacing": {
       "label": {
         "zh": "底部接触面线距",
-        "en": "Bottom interface spacing"
+        "en": "Bottom interface spacing",
+        "ja": "底部接触面間隔",
+        "zh_tw": "底部接觸面線距"
       },
       "unit": {
         "zh": "mm",
@@ -11219,7 +12444,9 @@
     "support_interface_speed": {
       "label": {
         "zh": "支撑面",
-        "en": "Support interface"
+        "en": "Support interface",
+        "ja": "サポート接触面",
+        "zh_tw": "支撐面"
       },
       "unit": {
         "zh": "mm/s",
@@ -11239,7 +12466,9 @@
     "support_base_pattern": {
       "label": {
         "zh": "支撑主体图案",
-        "en": "Base pattern"
+        "en": "Base pattern",
+        "ja": "基本パターン",
+        "zh_tw": "支撐主體圖案"
       },
       "unit": {
         "zh": "",
@@ -11258,37 +12487,49 @@
           "value": "default",
           "label_en": "Default",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "デフォルト",
+          "label_zh_tw": "預設"
         },
         {
           "value": "rectilinear",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_rectilinear"
+          "icon": "param_rectilinear",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "rectilinear-grid",
           "label_en": "Rectilinear grid",
           "label_zh": "直线网格",
-          "icon": "param_rectilinear-grid"
+          "icon": "param_rectilinear-grid",
+          "label_ja": "直線グリッド",
+          "label_zh_tw": "直線網格"
         },
         {
           "value": "honeycomb",
           "label_en": "Honeycomb",
           "label_zh": "蜂窝",
-          "icon": "param_honeycomb"
+          "icon": "param_honeycomb",
+          "label_ja": "ハニカム",
+          "label_zh_tw": "蜂窩"
         },
         {
           "value": "lightning",
           "label_en": "Lightning",
           "label_zh": "闪电",
-          "icon": "param_lightning"
+          "icon": "param_lightning",
+          "label_ja": "ライトニング",
+          "label_zh_tw": "閃電"
         },
         {
           "value": "hollow",
           "label_en": "Hollow",
           "label_zh": "空心",
-          "icon": "param_hollow"
+          "icon": "param_hollow",
+          "label_ja": "中空",
+          "label_zh_tw": "空心"
         }
       ],
       "is_print_option": true
@@ -11296,7 +12537,9 @@
     "support_interface_pattern": {
       "label": {
         "zh": "支撑面图案",
-        "en": "Interface pattern"
+        "en": "Interface pattern",
+        "ja": "接触面パターン",
+        "zh_tw": "支撐面圖案"
       },
       "unit": {
         "zh": "",
@@ -11315,31 +12558,41 @@
           "value": "auto",
           "label_en": "Default",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "デフォルト",
+          "label_zh_tw": "預設"
         },
         {
           "value": "rectilinear",
           "label_en": "Rectilinear",
           "label_zh": "直线",
-          "icon": "param_rectilinear"
+          "icon": "param_rectilinear",
+          "label_ja": "直線",
+          "label_zh_tw": "直線"
         },
         {
           "value": "concentric",
           "label_en": "Concentric",
           "label_zh": "同心",
-          "icon": "param_concentric"
+          "icon": "param_concentric",
+          "label_ja": "同心",
+          "label_zh_tw": "同心"
         },
         {
           "value": "rectilinear_interlaced",
           "label_en": "Rectilinear Interlaced",
           "label_zh": "交叠的直线",
-          "icon": "param_rectilinear_interlaced"
+          "icon": "param_rectilinear_interlaced",
+          "label_ja": "直線インターレース",
+          "label_zh_tw": "交疊的直線"
         },
         {
           "value": "grid",
           "label_en": "Grid",
           "label_zh": "网格",
-          "icon": "param_grid"
+          "icon": "param_grid",
+          "label_ja": "グリッド",
+          "label_zh_tw": "網格"
         }
       ],
       "is_print_option": true
@@ -11347,7 +12600,9 @@
     "support_base_pattern_spacing": {
       "label": {
         "zh": "主体图案线距",
-        "en": "Base pattern spacing"
+        "en": "Base pattern spacing",
+        "ja": "基本パターン間隔",
+        "zh_tw": "主體圖案線距"
       },
       "unit": {
         "zh": "mm",
@@ -11367,7 +12622,9 @@
     "support_expansion": {
       "label": {
         "zh": "普通支撑拓展",
-        "en": "Normal Support expansion"
+        "en": "Normal Support expansion",
+        "ja": "通常サポート拡大",
+        "zh_tw": "普通支撐拓展"
       },
       "unit": {
         "zh": "mm",
@@ -11387,7 +12644,9 @@
     "support_speed": {
       "label": {
         "zh": "支撑",
-        "en": "Support"
+        "en": "Support",
+        "ja": "サポート",
+        "zh_tw": "支撐"
       },
       "unit": {
         "zh": "mm/s",
@@ -11407,7 +12666,9 @@
     "support_style": {
       "label": {
         "zh": "样式",
-        "en": "Style"
+        "en": "Style",
+        "ja": "スタイル",
+        "zh_tw": "樣式"
       },
       "unit": {
         "zh": "",
@@ -11426,43 +12687,57 @@
           "value": "default",
           "label_en": "Default",
           "label_zh": "默认",
-          "icon": null
+          "icon": null,
+          "label_ja": "デフォルト",
+          "label_zh_tw": "預設"
         },
         {
           "value": "grid",
           "label_en": "Grid",
           "label_zh": "网格",
-          "icon": "param_grid"
+          "icon": "param_grid",
+          "label_ja": "グリッド",
+          "label_zh_tw": "網格"
         },
         {
           "value": "snug",
           "label_en": "Snug",
           "label_zh": "紧贴",
-          "icon": null
+          "icon": null,
+          "label_ja": "Snug",
+          "label_zh_tw": "緊貼"
         },
         {
           "value": "tree_slim",
           "label_en": "Tree Slim",
           "label_zh": "苗条树",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリースリム",
+          "label_zh_tw": "苗條樹"
         },
         {
           "value": "tree_strong",
           "label_en": "Tree Strong",
           "label_zh": "粗壮树",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリーストロング",
+          "label_zh_tw": "粗壯樹"
         },
         {
           "value": "tree_hybrid",
           "label_en": "Tree Hybrid",
           "label_zh": "混合树",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリーハイブリッド",
+          "label_zh_tw": "混合樹"
         },
         {
           "value": "tree_organic",
           "label_en": "Tree Organic",
           "label_zh": "有机树",
-          "icon": null
+          "icon": null,
+          "label_ja": "ツリーオーガニック",
+          "label_zh_tw": "有機樹"
         }
       ],
       "is_print_option": true
@@ -11470,7 +12745,9 @@
     "top_z_overrides_xy_distance": {
       "label": {
         "zh": "Z 覆盖 X/Y",
-        "en": "Z overrides X/Y"
+        "en": "Z overrides X/Y",
+        "ja": "Z が X/Y を上書きする",
+        "zh_tw": "Z 覆蓋 X/Y"
       },
       "unit": {
         "zh": "",
@@ -11490,7 +12767,9 @@
     "independent_support_layer_height": {
       "label": {
         "zh": "支撑独立层高",
-        "en": "Independent support layer height"
+        "en": "Independent support layer height",
+        "ja": "独立サポート層ピッチ",
+        "zh_tw": "支撐獨立層高"
       },
       "unit": {
         "zh": "",
@@ -11510,7 +12789,9 @@
     "support_threshold_angle": {
       "label": {
         "zh": "阈值角度",
-        "en": "Threshold angle"
+        "en": "Threshold angle",
+        "ja": "閾値角度",
+        "zh_tw": "閾值角度"
       },
       "unit": {
         "zh": "°",
@@ -11530,7 +12811,9 @@
     "tree_support_branch_angle": {
       "label": {
         "zh": "分支角度",
-        "en": "Branch angle"
+        "en": "Branch angle",
+        "ja": "分岐角度",
+        "zh_tw": "分支角度"
       },
       "unit": {
         "zh": "°",
@@ -11550,7 +12833,9 @@
     "tree_support_branch_distance": {
       "label": {
         "zh": "分支距离",
-        "en": "Branch distance"
+        "en": "Branch distance",
+        "ja": "枝角度",
+        "zh_tw": "分支距離"
       },
       "unit": {
         "zh": "mm",
@@ -11570,7 +12855,9 @@
     "tree_support_branch_diameter": {
       "label": {
         "zh": "分支直径",
-        "en": "Branch diameter"
+        "en": "Branch diameter",
+        "ja": "枝径",
+        "zh_tw": "分支直徑"
       },
       "unit": {
         "zh": "mm",
@@ -11590,7 +12877,9 @@
     "tree_support_branch_diameter_angle": {
       "label": {
         "zh": "分支直径角度",
-        "en": "Branch diameter angle"
+        "en": "Branch diameter angle",
+        "ja": "枝径角度",
+        "zh_tw": "分支直徑角度"
       },
       "unit": {
         "zh": "°",
@@ -11610,7 +12899,9 @@
     "tree_support_wall_count": {
       "label": {
         "zh": "支撑外墙层数",
-        "en": "Support wall loops"
+        "en": "Support wall loops",
+        "ja": "サポートウォールループ",
+        "zh_tw": "支撐外牆層數"
       },
       "unit": {
         "zh": "",
@@ -11630,7 +12921,9 @@
     "chamber_temperatures": {
       "label": {
         "zh": "腔体温度",
-        "en": "Chamber temperature"
+        "en": "Chamber temperature",
+        "ja": "チャンバー温度",
+        "zh_tw": "腔體溫度"
       },
       "unit": {
         "zh": "°C",
@@ -11650,7 +12943,9 @@
     "nozzle_temperature": {
       "label": {
         "zh": "其它层",
-        "en": "Other layers"
+        "en": "Other layers",
+        "ja": "他の層",
+        "zh_tw": "其它層"
       },
       "unit": {
         "zh": "°C",
@@ -11670,7 +12965,9 @@
     "nozzle_temperature_range_low": {
       "label": {
         "zh": "最小",
-        "en": "Min"
+        "en": "Min",
+        "ja": "最小",
+        "zh_tw": "最小"
       },
       "unit": {
         "zh": "°C",
@@ -11690,7 +12987,9 @@
     "nozzle_temperature_range_high": {
       "label": {
         "zh": "最大",
-        "en": "Max"
+        "en": "Max",
+        "ja": "最大",
+        "zh_tw": "最大"
       },
       "unit": {
         "zh": "°C",
@@ -11730,7 +13029,9 @@
     "impact_strength_z": {
       "label": {
         "zh": "Z向冲击强度",
-        "en": "Impact Strength Z"
+        "en": "Impact Strength Z",
+        "ja": "積層間衝撃強度 - Z 方向",
+        "zh_tw": "Z向衝擊強度"
       },
       "unit": {
         "zh": "",
@@ -11750,7 +13051,9 @@
     "detect_thin_wall": {
       "label": {
         "zh": "检查薄壁",
-        "en": "Detect thin wall"
+        "en": "Detect thin wall",
+        "ja": "薄い壁面を検出",
+        "zh_tw": "檢查薄壁"
       },
       "unit": {
         "zh": "",
@@ -11770,7 +13073,9 @@
     "change_filament_gcode": {
       "label": {
         "zh": "耗材丝更换G-code",
-        "en": "Change filament G-code"
+        "en": "Change filament G-code",
+        "ja": "フィラメント変更G-code",
+        "zh_tw": "耗材絲更換G-code"
       },
       "unit": {
         "zh": "",
@@ -11790,7 +13095,9 @@
     "top_surface_line_width": {
       "label": {
         "zh": "顶面",
-        "en": "Top surface"
+        "en": "Top surface",
+        "ja": "トップ面",
+        "zh_tw": "頂面"
       },
       "unit": {
         "zh": "mm",
@@ -11810,7 +13117,9 @@
     "top_surface_speed": {
       "label": {
         "zh": "顶面",
-        "en": "Top surface"
+        "en": "Top surface",
+        "ja": "トップ面",
+        "zh_tw": "頂面"
       },
       "unit": {
         "zh": "mm/s",
@@ -11830,7 +13139,9 @@
     "top_shell_layers": {
       "label": {
         "zh": "顶部壳体层数",
-        "en": "Top shell layers"
+        "en": "Top shell layers",
+        "ja": "トップ面層数",
+        "zh_tw": "頂部殼體層數"
       },
       "unit": {
         "zh": "",
@@ -11850,7 +13161,9 @@
     "top_shell_thickness": {
       "label": {
         "zh": "顶部壳体厚度",
-        "en": "Top shell thickness"
+        "en": "Top shell thickness",
+        "ja": "トップ面厚さ",
+        "zh_tw": "頂部殼體厚度"
       },
       "unit": {
         "zh": "mm",
@@ -11870,7 +13183,9 @@
     "top_color_penetration_layers": {
       "label": {
         "zh": "顶部涂色渗透层数",
-        "en": "Top paint penetration layers"
+        "en": "Top paint penetration layers",
+        "ja": "トップ塗装の浸透層数",
+        "zh_tw": "頂部塗色滲透層數"
       },
       "unit": {
         "zh": "",
@@ -11890,7 +13205,9 @@
     "bottom_color_penetration_layers": {
       "label": {
         "zh": "底部涂色渗透层数",
-        "en": "Bottom paint penetration layers"
+        "en": "Bottom paint penetration layers",
+        "ja": "下塗りの浸透層数",
+        "zh_tw": "底部塗色滲透層數"
       },
       "unit": {
         "zh": "",
@@ -11910,7 +13227,9 @@
     "infill_instead_top_bottom_surfaces": {
       "label": {
         "zh": "使用填充纹理以取代封闭的顶面和底面",
-        "en": "Use infill instead of top and bottom surfaces"
+        "en": "Use infill instead of top and bottom surfaces",
+        "ja": "上下面の代わりにインフィルを使用",
+        "zh_tw": "使用填充紋理以取代封閉的頂面和底面"
       },
       "unit": {
         "zh": "",
@@ -11930,7 +13249,9 @@
     "travel_speed": {
       "label": {
         "zh": "空驶",
-        "en": "Travel"
+        "en": "Travel",
+        "ja": "移動",
+        "zh_tw": "空駛"
       },
       "unit": {
         "zh": "mm/s",
@@ -11970,7 +13291,9 @@
     "use_relative_e_distances": {
       "label": {
         "zh": "使用相对E距离",
-        "en": "Use relative E distances"
+        "en": "Use relative E distances",
+        "ja": "相対E距離を使用",
+        "zh_tw": "使用相對E距離"
       },
       "unit": {
         "zh": "",
@@ -11990,7 +13313,9 @@
     "use_firmware_retraction": {
       "label": {
         "zh": "硬件回抽",
-        "en": "Use firmware retraction"
+        "en": "Use firmware retraction",
+        "ja": "ファームウェアリトラクションを使用",
+        "zh_tw": "硬體回抽"
       },
       "unit": {
         "zh": "",
@@ -12010,7 +13335,9 @@
     "wipe": {
       "label": {
         "zh": "回抽时擦拭",
-        "en": "Wipe while retracting"
+        "en": "Wipe while retracting",
+        "ja": "リトラクション時に拭き上げ",
+        "zh_tw": "回抽時擦拭"
       },
       "unit": {
         "zh": "",
@@ -12030,7 +13357,9 @@
     "wipe_distance": {
       "label": {
         "zh": "擦拭距离",
-        "en": "Wipe Distance"
+        "en": "Wipe Distance",
+        "ja": "拭き上げ距離",
+        "zh_tw": "擦拭距離"
       },
       "unit": {
         "zh": "mm",
@@ -12050,7 +13379,9 @@
     "enable_mixed_color_sublayer": {
       "label": {
         "zh": "混色子层",
-        "en": "Mixed color sublayer"
+        "en": "Mixed color sublayer",
+        "ja": "混色サブレイヤー",
+        "zh_tw": "混色子層"
       },
       "unit": {
         "zh": "",
@@ -12070,7 +13401,9 @@
     "enable_prime_tower": {
       "label": {
         "zh": "开启",
-        "en": "Enable"
+        "en": "Enable",
+        "ja": "有効化",
+        "zh_tw": "開啟"
       },
       "unit": {
         "zh": "",
@@ -12090,7 +13423,9 @@
     "prime_tower_enable_framework": {
       "label": {
         "zh": "内支撑肋",
-        "en": "Internal ribs"
+        "en": "Internal ribs",
+        "ja": "内部リブ",
+        "zh_tw": "內支撐肋"
       },
       "unit": {
         "zh": "",
@@ -12110,7 +13445,9 @@
     "enable_circle_compensation": {
       "label": {
         "zh": "自动圆形轴孔补偿",
-        "en": "Auto circle contour-hole compensation"
+        "en": "Auto circle contour-hole compensation",
+        "ja": "自動円輪郭穴補正",
+        "zh_tw": "自動圓形軸孔補償"
       },
       "unit": {
         "zh": "",
@@ -12130,7 +13467,9 @@
     "circle_compensation_manual_offset": {
       "label": {
         "zh": "用户自设定补偿",
-        "en": "User Customized Offset"
+        "en": "User Customized Offset",
+        "ja": "ユーザーカスタマイズオフセット",
+        "zh_tw": "使用者自設定補償"
       },
       "unit": {
         "zh": "mm",
@@ -12150,7 +13489,9 @@
     "apply_scarf_seam_on_circles": {
       "label": {
         "zh": "在补偿的圆形上应用斜拼接缝",
-        "en": "Scarf Seam On Compensation Circles"
+        "en": "Scarf Seam On Compensation Circles",
+        "ja": "補正サークル上のスカーフ継ぎ目",
+        "zh_tw": "在補償的圓形上應用斜拼接縫"
       },
       "unit": {
         "zh": "",
@@ -12170,7 +13511,9 @@
     "circle_compensation_speed": {
       "label": {
         "zh": "Circle Compensation Speed",
-        "en": "Circle Compensation Speed"
+        "en": "Circle Compensation Speed",
+        "ja": "円補正速度",
+        "zh_tw": "圓形補償速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -12190,7 +13533,9 @@
     "counter_coef_1": {
       "label": {
         "zh": "Counter Coef 1",
-        "en": "Counter Coef 1"
+        "en": "Counter Coef 1",
+        "ja": "カウンター係数1",
+        "zh_tw": "輪廓係數 1"
       },
       "unit": {
         "zh": "",
@@ -12210,7 +13555,9 @@
     "counter_coef_2": {
       "label": {
         "zh": "Contour Coef 2",
-        "en": "Contour Coef 2"
+        "en": "Contour Coef 2",
+        "ja": "輪郭係数 2",
+        "zh_tw": "輪廓係數 2"
       },
       "unit": {
         "zh": "",
@@ -12230,7 +13577,9 @@
     "counter_coef_3": {
       "label": {
         "zh": "Contour Coef 3",
-        "en": "Contour Coef 3"
+        "en": "Contour Coef 3",
+        "ja": "輪郭係数 3",
+        "zh_tw": "輪廓係數 3"
       },
       "unit": {
         "zh": "mm",
@@ -12250,7 +13599,9 @@
     "hole_coef_1": {
       "label": {
         "zh": "Hole Coef 1",
-        "en": "Hole Coef 1"
+        "en": "Hole Coef 1",
+        "ja": "穴係数 1",
+        "zh_tw": "孔洞係數 1"
       },
       "unit": {
         "zh": "",
@@ -12270,7 +13621,9 @@
     "hole_coef_2": {
       "label": {
         "zh": "Hole Coef 2",
-        "en": "Hole Coef 2"
+        "en": "Hole Coef 2",
+        "ja": "穴係数 2",
+        "zh_tw": "孔洞係數 2"
       },
       "unit": {
         "zh": "",
@@ -12290,7 +13643,9 @@
     "hole_coef_3": {
       "label": {
         "zh": "Hole Coef 3",
-        "en": "Hole Coef 3"
+        "en": "Hole Coef 3",
+        "ja": "穴係数 3",
+        "zh_tw": "孔洞係數 3"
       },
       "unit": {
         "zh": "mm",
@@ -12310,7 +13665,9 @@
     "counter_limit_min": {
       "label": {
         "zh": "Contour limit min",
-        "en": "Contour limit min"
+        "en": "Contour limit min",
+        "ja": "輪郭下限",
+        "zh_tw": "輪廓下限"
       },
       "unit": {
         "zh": "mm",
@@ -12330,7 +13687,9 @@
     "counter_limit_max": {
       "label": {
         "zh": "Contour limit max",
-        "en": "Contour limit max"
+        "en": "Contour limit max",
+        "ja": "輪郭上限",
+        "zh_tw": "輪廓上限"
       },
       "unit": {
         "zh": "mm",
@@ -12350,7 +13709,9 @@
     "hole_limit_min": {
       "label": {
         "zh": "Hole limit min",
-        "en": "Hole limit min"
+        "en": "Hole limit min",
+        "ja": "穴制限最小",
+        "zh_tw": "孔洞下限"
       },
       "unit": {
         "zh": "mm",
@@ -12370,7 +13731,9 @@
     "hole_limit_max": {
       "label": {
         "zh": "Hole limit max",
-        "en": "Hole limit max"
+        "en": "Hole limit max",
+        "ja": "穴制限最大",
+        "zh_tw": "孔洞上限"
       },
       "unit": {
         "zh": "mm",
@@ -12390,7 +13753,9 @@
     "diameter_limit": {
       "label": {
         "zh": "直径限制",
-        "en": "Diameter limit"
+        "en": "Diameter limit",
+        "ja": "直径制限",
+        "zh_tw": "直徑限制"
       },
       "unit": {
         "zh": "mm",
@@ -12430,7 +13795,9 @@
     "flush_volumes_matrix": {
       "label": {
         "zh": "冲刷体积",
-        "en": "Purging volumes"
+        "en": "Purging volumes",
+        "ja": "フラッシュ体積",
+        "zh_tw": "沖刷體積"
       },
       "unit": {
         "zh": "",
@@ -12450,7 +13817,9 @@
     "flush_multiplier": {
       "label": {
         "zh": "冲刷量乘数",
-        "en": "Flush multiplier"
+        "en": "Flush multiplier",
+        "ja": "フラッシュ倍率",
+        "zh_tw": "沖刷量乘數"
       },
       "unit": {
         "zh": "",
@@ -12470,7 +13839,9 @@
     "flush_multiplier_fast": {
       "label": {
         "zh": "冲刷系数（快速模式）",
-        "en": "Flush multiplier (Fast mode)"
+        "en": "Flush multiplier (Fast mode)",
+        "ja": "フラッシュ倍率（高速モード）",
+        "zh_tw": "沖洗倍率（快速模式）"
       },
       "unit": {
         "zh": "",
@@ -12530,7 +13901,9 @@
     "prime_tower_width": {
       "label": {
         "zh": "宽度",
-        "en": "Width"
+        "en": "Width",
+        "ja": "幅",
+        "zh_tw": "寬度"
       },
       "unit": {
         "zh": "mm",
@@ -12570,7 +13943,9 @@
     "prime_tower_max_speed": {
       "label": {
         "zh": "最大速度",
-        "en": "Max speed"
+        "en": "Max speed",
+        "ja": "最高速度",
+        "zh_tw": "最大速度"
       },
       "unit": {
         "zh": "mm/s",
@@ -12630,7 +14005,9 @@
     "prime_tower_brim_width": {
       "label": {
         "zh": "Brim宽度",
-        "en": "Brim width"
+        "en": "Brim width",
+        "ja": "ブリム幅",
+        "zh_tw": "Brim寬度"
       },
       "unit": {
         "zh": "mm",
@@ -12649,7 +14026,9 @@
           "value": "-1",
           "label_en": "Auto",
           "label_zh": "自动",
-          "icon": null
+          "icon": null,
+          "label_ja": "自動",
+          "label_zh_tw": "自動"
         }
       ],
       "is_print_option": true
@@ -12657,7 +14036,9 @@
     "prime_tower_extra_rib_length": {
       "label": {
         "zh": "斜肋额外的长度",
-        "en": "Extra rib length"
+        "en": "Extra rib length",
+        "ja": "追加リブ長さ",
+        "zh_tw": "斜肋額外的長度"
       },
       "unit": {
         "zh": "mm",
@@ -12677,7 +14058,9 @@
     "prime_tower_rib_width": {
       "label": {
         "zh": "斜肋宽度",
-        "en": "Rib width"
+        "en": "Rib width",
+        "ja": "リブ幅",
+        "zh_tw": "斜肋寬度"
       },
       "unit": {
         "zh": "mm",
@@ -12697,7 +14080,9 @@
     "prime_tower_skip_points": {
       "label": {
         "zh": "外墙缺口",
-        "en": "Skip points"
+        "en": "Skip points",
+        "ja": "ポイントをスキップ",
+        "zh_tw": "外牆缺口"
       },
       "unit": {
         "zh": "",
@@ -12737,7 +14122,9 @@
     "prime_tower_rib_wall": {
       "label": {
         "zh": "斜肋外墙",
-        "en": "Rib wall"
+        "en": "Rib wall",
+        "ja": "リブ壁",
+        "zh_tw": "斜肋外牆"
       },
       "unit": {
         "zh": "",
@@ -12757,7 +14144,9 @@
     "prime_tower_fillet_wall": {
       "label": {
         "zh": "外墙倒圆角",
-        "en": "Fillet wall"
+        "en": "Fillet wall",
+        "ja": "丸み付き壁",
+        "zh_tw": "外牆倒圓角"
       },
       "unit": {
         "zh": "",
@@ -12777,7 +14166,9 @@
     "prime_tower_infill_gap": {
       "label": {
         "zh": "填充间隙",
-        "en": "Infill gap"
+        "en": "Infill gap",
+        "ja": "インフィルの隙間",
+        "zh_tw": "填充間隙"
       },
       "unit": {
         "zh": "%",
@@ -12797,7 +14188,9 @@
     "flush_into_infill": {
       "label": {
         "zh": "冲刷到对象的填充",
-        "en": "Flush into objects' infill"
+        "en": "Flush into objects' infill",
+        "ja": "インフィルにフラッシュ",
+        "zh_tw": "沖刷到物件的填充"
       },
       "unit": {
         "zh": "",
@@ -12817,7 +14210,9 @@
     "flush_into_support": {
       "label": {
         "zh": "冲刷到对象的支撑",
-        "en": "Flush into objects' support"
+        "en": "Flush into objects' support",
+        "ja": "サポートにフラッシュ",
+        "zh_tw": "沖刷到物件的支撐"
       },
       "unit": {
         "zh": "",
@@ -12837,7 +14232,9 @@
     "flush_into_objects": {
       "label": {
         "zh": "冲刷到这个对象",
-        "en": "Flush into this object"
+        "en": "Flush into this object",
+        "ja": "このオブジェクトにフラッシュする",
+        "zh_tw": "沖刷到這個物件"
       },
       "unit": {
         "zh": "",
@@ -12857,7 +14254,9 @@
     "xy_hole_compensation": {
       "label": {
         "zh": "X-Y 内轮廓尺寸补偿",
-        "en": "X-Y hole compensation"
+        "en": "X-Y hole compensation",
+        "ja": "ホール補正 X-Y",
+        "zh_tw": "X-Y 內輪廓尺寸補償"
       },
       "unit": {
         "zh": "mm",
@@ -12877,7 +14276,9 @@
     "xy_contour_compensation": {
       "label": {
         "zh": "X-Y 外轮廓尺寸补偿",
-        "en": "X-Y contour compensation"
+        "en": "X-Y contour compensation",
+        "ja": "輪郭補正 X-Y",
+        "zh_tw": "X-Y 外輪廓尺寸補償"
       },
       "unit": {
         "zh": "mm",
@@ -12897,7 +14298,9 @@
     "wall_generator": {
       "label": {
         "zh": "墙生成器",
-        "en": "Wall generator"
+        "en": "Wall generator",
+        "ja": "壁面生成器",
+        "zh_tw": "牆生成器"
       },
       "unit": {
         "zh": "",
@@ -12916,13 +14319,17 @@
           "value": "classic",
           "label_en": "Classic",
           "label_zh": "经典",
-          "icon": null
+          "icon": null,
+          "label_ja": "クラシック",
+          "label_zh_tw": "經典"
         },
         {
           "value": "arachne",
           "label_en": "Arachne",
           "label_zh": "Arachne",
-          "icon": null
+          "icon": null,
+          "label_ja": "Arachne",
+          "label_zh_tw": "Arachne"
         }
       ],
       "is_print_option": true
@@ -12930,7 +14337,9 @@
     "wall_transition_length": {
       "label": {
         "zh": "墙过渡长度",
-        "en": "Wall transition length"
+        "en": "Wall transition length",
+        "ja": "壁面遷移長さ",
+        "zh_tw": "牆過渡長度"
       },
       "unit": {
         "zh": "%",
@@ -12950,7 +14359,9 @@
     "wall_transition_filter_deviation": {
       "label": {
         "zh": "墙过渡过滤间距",
-        "en": "Wall transitioning filter margin"
+        "en": "Wall transitioning filter margin",
+        "ja": "フィルタマージン",
+        "zh_tw": "牆過渡過濾間距"
       },
       "unit": {
         "zh": "%",
@@ -12970,7 +14381,9 @@
     "wall_transition_angle": {
       "label": {
         "zh": "墙过渡阈值角度",
-        "en": "Wall transitioning threshold angle"
+        "en": "Wall transitioning threshold angle",
+        "ja": "角度閾値",
+        "zh_tw": "牆過渡閾值角度"
       },
       "unit": {
         "zh": "°",
@@ -12990,7 +14403,9 @@
     "wall_distribution_count": {
       "label": {
         "zh": "墙分布计数",
-        "en": "Wall distribution count"
+        "en": "Wall distribution count",
+        "ja": "壁面分布カウント",
+        "zh_tw": "牆分佈計數"
       },
       "unit": {
         "zh": "",
@@ -13010,7 +14425,9 @@
     "min_feature_size": {
       "label": {
         "zh": "最小特征尺寸",
-        "en": "Minimum feature size"
+        "en": "Minimum feature size",
+        "ja": "最小サイズ",
+        "zh_tw": "最小特徵尺寸"
       },
       "unit": {
         "zh": "%",
@@ -13030,7 +14447,9 @@
     "min_bead_width": {
       "label": {
         "zh": "墙最小线宽",
-        "en": "Minimum wall width"
+        "en": "Minimum wall width",
+        "ja": "最小壁幅",
+        "zh_tw": "牆最小線寬"
       },
       "unit": {
         "zh": "%",
@@ -13210,7 +14629,9 @@
     "override_process_overhang_speed": {
       "label": {
         "zh": "覆盖工艺悬垂速度",
-        "en": "Override overhang speed"
+        "en": "Override overhang speed",
+        "ja": "オーバーハング速度を上書きする",
+        "zh_tw": "覆寫懸垂速度"
       },
       "unit": {
         "zh": "",
@@ -13230,7 +14651,9 @@
     "detect_narrow_internal_solid_infill": {
       "label": {
         "zh": "识别狭窄内部实心填充",
-        "en": "Detect narrow internal solid infill"
+        "en": "Detect narrow internal solid infill",
+        "ja": "薄いソリッド インフィル検出",
+        "zh_tw": "識別狹窄內部實心填充"
       },
       "unit": {
         "zh": "",
@@ -14986,7 +16409,9 @@
     "help": {
       "label": {
         "zh": "帮助",
-        "en": "Help"
+        "en": "Help",
+        "ja": "ヘルプ",
+        "zh_tw": "幫助"
       },
       "unit": {
         "zh": "",
@@ -15106,7 +16531,9 @@
     "no_check": {
       "label": {
         "zh": "不要检查",
-        "en": "No check"
+        "en": "No check",
+        "ja": "チェックなし",
+        "zh_tw": "不要檢查"
       },
       "unit": {
         "zh": "",
@@ -15266,7 +16693,9 @@
     "assemble": {
       "label": {
         "zh": "装配",
-        "en": "Assemble"
+        "en": "Assemble",
+        "ja": "組立てる",
+        "zh_tw": "裝配"
       },
       "unit": {
         "zh": "",
@@ -15326,7 +16755,9 @@
     "rotate": {
       "label": {
         "zh": "旋转",
-        "en": "Rotate"
+        "en": "Rotate",
+        "ja": "回転",
+        "zh_tw": "旋轉"
       },
       "unit": {
         "zh": "",
@@ -15386,7 +16817,9 @@
     "scale": {
       "label": {
         "zh": "缩放",
-        "en": "Scale"
+        "en": "Scale",
+        "ja": "スケール",
+        "zh_tw": "縮放"
       },
       "unit": {
         "zh": "",
@@ -15446,7 +16879,9 @@
     "skip_objects": {
       "label": {
         "zh": "零件跳过",
-        "en": "Skip Objects"
+        "en": "Skip Objects",
+        "ja": "オブジェクトをスキップ",
+        "zh_tw": "零件跳過"
       },
       "unit": {
         "zh": "",

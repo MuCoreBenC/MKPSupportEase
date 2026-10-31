@@ -56,6 +56,7 @@ use std::path::{Path, PathBuf};
 use toml_edit::DocumentMut;
 
 use crate::error::AppError;
+use postprocess::diag::messages;
 
 pub use assets::{Asset, AssetKind, Assets, Group, GroupMember};
 pub use bundles::{Bundle, Bundles};
@@ -691,9 +692,10 @@ impl Presets {
             return Err(AppError::not_found(format!("没有机型 {machine_id}")));
         }
         if display.trim().is_empty() {
-            return Err(AppError::invalid_argument(
-                "套餐要有给人看的名字（display）",
-            ));
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.bundle_display_missing",
+                &[],
+            )));
         }
         self.check_bundle_content(id, refs)?;
         self.bundles.add(Bundle {

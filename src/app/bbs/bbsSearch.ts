@@ -65,10 +65,12 @@ function valueForms(meta: BbsParamMeta, value: BbsValue | undefined, variantIdx:
 
   const out = [s]
 
-  /* 枚举：中英文 label 都认（界面显示中文，BBS 文档里常是英文） */
+  /* 枚举：四册 label 都认（界面显示当前语言，BBS 文档里常是英文） */
   const opt = (meta.opts ?? []).find((o) => o.value === s)
   if (opt?.label_zh) out.push(opt.label_zh)
   if (opt?.label_en) out.push(opt.label_en)
+  if (opt?.label_ja) out.push(opt.label_ja)
+  if (opt?.label_zh_tw) out.push(opt.label_zh_tw)
 
   /* 数值的两处显示加工，与 BbsControl 里那三条规则对齐 */
   const co = meta.co ?? ''
@@ -92,8 +94,12 @@ export function matchRow(
   value: BbsValue | undefined,
   variantIdx = 0,
 ): BbsHit | null {
-  const label = meta.label?.zh || meta.label?.en || key
-  if (label.toLowerCase().includes(q)) return { where: 'label' }
+  /* 四册都参与命中（2026-10-31）：日语界面搜「積層」、中文界面搜「层高」都得找到。
+     圈字只认当前语言那个名字（`sliceLabel` 用调用方传进来的 label），命中在别的册就不圈。 */
+  const labels = [meta.label?.zh, meta.label?.en, meta.label?.ja, meta.label?.zh_tw]
+  if (labels.some((l) => l !== undefined && l !== '' && l.toLowerCase().includes(q))) {
+    return { where: 'label' }
+  }
   /* 英文标签单独一档：中文界面下搜 "layer height" 也该找到，但标签上没字可圈 */
   if (meta.label?.en && meta.label.en.toLowerCase().includes(q)) return { where: 'label_en' }
   if (key.toLowerCase().includes(q)) return { where: 'key' }

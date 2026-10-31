@@ -30,6 +30,13 @@
  *      保存位置那颗按钮从「更改位置」翻成「打开位置」、页脚左边多一句
  *      「已导出 N 个文件」。一条新行都不加，框的大小一动不动。
  *
+ *    ★ 2026-10-31 作者第三次点同一件事，这次是**打开的那一下**：「一打开那个高度
+ *    不是固定的 —— 开始比较矮，过半秒一秒才变高」。两条根因、两处修：
+ *    · 计划原来只在 `useEffect` 里灌进 state ⇒ 首帧画的是"正在读导出清单…"。
+ *      现在 `plan` 是渲染期算出来的（预取命中就直接用），首帧即终态；
+ *    · `.body` 里垫了一副看不见的**量尺**（与终态同构的空架子）⇒ 就算真要现场读，
+ *      框身高度也不动。两处都写在 `ExportModal.module.css` 的 `.body` 那条下面。
+ *
  * # 保存位置记着上一次（`STORAGE.clientReportExportDir`）
  *
  * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。目录不在了照样是
@@ -57,6 +64,15 @@ const KIND_LABEL: Record<ReportExportKind, StringKey> = {
   processed: 'report.export.kindProcessed',
   meta: 'report.export.kindMeta',
 }
+
+/**
+ * 「量尺」要摆几行 —— **跟着三件套的份数走**（以后加一份就自动多一行，不会漏）。
+ * 见下面 `.gauge`：它撑起的是"终态该有多高"，不是内容。
+ */
+const GAUGE_ROWS = Object.keys(KIND_LABEL)
+
+/** 撑开行盒的那一格空白（`&nbsp;`）：空 span 没有行盒、高度是 0，量尺就白摆了 */
+const NBSP = '\u00a0'
 
 /** 折角的那张纸（形状与报告页详情里那套同一网格：24×24、currentColor） */
 const PAPER_SHAPE = (
@@ -137,7 +153,8 @@ export interface ExportModalProps {
 
 export default function ExportModal({ open, id, preload, onClose }: ExportModalProps) {
   const tr = useT()
-  const [plan, setPlan] = useState<ReportExportPlan | null>(null)
+  /* 现场读回来的计划。**`id` 一起存** —— 光有计划分不清它是哪一条记录的 */
+  const [fetched, setFetched] = useState<{ id: string; plan: ReportExportPlan } | null>(null)
   const [planErr, setPlanErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   /**
@@ -150,22 +167,25 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`） */
   const [picked, setPicked] = useStickyState<string>(STORAGE.clientReportExportDir, '')
 
-  /* 开框读一次计划：文件名 / 默认落点 / 缺哪几份都是后端算的（页面预取过就直接用） */
+  /*
+   * 开框读一次计划：文件名 / 默认落点 / 缺哪几份都是后端算的（页面预取过就直接用）。
+   *
+   * ★ 预取命中时**这里一个字节都不用写**：`plan` 是下面那条渲染期派生出来的，
+   *   打开的第一帧就已经是终态（见那条注释）。原来在这里 `setPlan`，要等本 effect
+   *   跑完才长高 —— 那一帧矮框就是作者 2026-10-31 点的那一下。
+   */
   useEffect(() => {
     if (!open || id === null) return
     setPlanErr(null)
     setFail(null)
     setDone(null)
 
-    if (preload !== null && preload.id === id) {
-      setPlan(preload.plan)
-      return
-    }
-    setPlan(null)
+    if (preload !== null && preload.id === id) return
+
     let alive = true
     api.getReportExportPlan(id).then(
       (got) => {
-        if (alive) setPlan(got)
+        if (alive) setFetched({ id, plan: got })
       },
       (e: unknown) => {
         if (alive) setPlanErr(errorText(e))
@@ -175,6 +195,36 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
       alive = false
     }
   }, [open, id, preload])
+
+  /*
+   * 关掉的这一下就把内务清干净，别等下次打开再 `set` —— 那会让"打开的第一帧"
+   * 带着上一条的「已导出 N 个文件」/ 错误 / 灰按钮，再在第二帧变回去。
+   */
+  useEffect(() => {
+    if (open) return
+    setPlanErr(null)
+    setFail(null)
+    setDone(null)
+    setBusy(false)
+    setFetched(null)
+  }, [open])
+
+  /**
+   * 框里要摊开的那份计划 —— **首帧就要拿到**。
+   *
+   * 页面替这条记录预取过（`preload`），这里在**渲染期**直接用它，不再等 effect
+   * 灌进 state：`useEffect` 是首帧画完之后才跑的，所以原来打开的第一帧一定画成
+   * "正在读导出清单…"那一行（框矮一截），下一帧才长到终态 —— 框是居中撑开的，
+   * 上下一起外扩，比"内容变多"更扎眼（作者：「一打开那个高度不是固定的」）。
+   *
+   * 优先级：现场读回来的（同一 `id`）> 页面预取的（同一 `id`）> 没有。
+   */
+  const plan =
+    fetched !== null && fetched.id === id
+      ? fetched.plan
+      : preload !== null && preload.id === id
+        ? preload.plan
+        : null
 
   const dir = picked === '' ? (plan?.defaultDir ?? '') : picked
   const path = plan === null || dir === '' ? null : pathPill(dir, plan.base)
@@ -246,98 +296,132 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         )
       }
     >
-      {/* `.body` 那条最小高度是"读计划"与"计划到手"两态一样高 —— 不长高就不会跳 */}
       <div className={s.body}>
-        {/* 提示一律进标题右边那一格（`HeadNote`，2026-10-17 收口）：
-            摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳。
-            ★ 2026-10-19：**只留这一处** —— 下面原来还给 `planErr` 摆了一份红字，
-            同一条错同一个框里出现两遍（作者看见了那句重复）。 */}
-        {planErr !== null && (
-          <HeadNote text={tr('report.export.planErr', { err: planErr })} tone="error" />
-        )}
-        {fail !== null && (
-          <HeadNote
-            text={`${tr(fail.what === 'export' ? 'report.export.failExport' : 'report.export.failOpen')}${fail.text}`}
-            tone="error"
-          />
-        )}
-        {plan === null && planErr === null && (
-          <p className={s.filling}>{tr('report.export.loading')}</p>
-        )}
-
-        {plan !== null && (
+        {/*
+         * 量尺（2026-10-31）：一副**与终态同构、看不见**的空架子，永远垫在内容底下。
+         * 它撑出的是"三行文件 + 保存位置胶囊"该有的高度，于是这一块的高度与
+         * 「有没有读到计划」无关 —— 打开的那一刻就是终态，一秒之后也不会再长。
+         *
+         * 为什么不是写死 `min-height`：这里的字号是 `clamp()` 跟着窗口走的
+         * （`--fs-body` 12~14、`--fs-label` 10~12.5），写死像素只会在某个窗口
+         * 宽度上刚好，别的宽度上照样差几像素。叠一层真 DOM 就分毫不差。
+         *
+         * 它不画、不读屏、不吃鼠标（`.gauge` 那三条），也不导出 —— 只是布局。
+         */}
+        <div className={s.gauge} aria-hidden="true">
           <ul className={s.fileList}>
-            {plan.files.map((f) => (
-              <li key={f.kind} className={s.fileItem}>
-                {/* 写好了就地把纸换成勾：形状占同一格，框一行都不长 */}
-                <span className={s.fileIcon} data-done={exported} aria-hidden="true">
-                  <svg
-                    width={15}
-                    height={15}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={1.7}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    {exported ? CHECK_SHAPE : KIND_ICON[f.kind]}
-                  </svg>
-                </span>
+            {GAUGE_ROWS.map((kind) => (
+              <li key={kind} className={s.fileItem}>
+                <span className={s.fileIcon} />
                 <span className={s.fileMeta}>
-                  <span className={s.fileName}>{f.name}</span>
-                  <span className={s.fileKind}>{tr(KIND_LABEL[f.kind])}</span>
+                  {/* 空 span 没有行盒（高度 0），一格 `&nbsp;` 才撑得出与真行一样的高度 */}
+                  <span className={s.fileName}>{NBSP}</span>
+                  <span className={s.fileKind}>{NBSP}</span>
                 </span>
               </li>
             ))}
           </ul>
-        )}
-
-        {plan !== null && plan.missing.length > 0 && (
-          <p className={s.notFull}>
-            {tr('report.export.missing', {
-              names: plan.missing.map((k) => `「${tr(KIND_LABEL[k])}」`).join('、'),
-            })}
-          </p>
-        )}
-
-        {path !== null && (
-          /*
-           * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
-           * 路径正文因此还能拖选、误点一下也不会弹系统框。
-           */
-          <div className={s.pathPill} data-tip={path.full}>
-            <svg
-              className={s.pathIcon}
-              width={15}
-              height={15}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.7}
-              aria-hidden="true"
-            >
-              <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
-            </svg>
+          <div className={s.pathPill}>
             <span className={s.pathText}>
-              <span className={s.pathHead}>{path.head}</span>
-              <span className={s.pathTail}>{path.tail}</span>
+              <span className={s.pathTail}>{NBSP}</span>
             </span>
-            {/*
-             * ★ 成了之后这一颗**就地翻成「打开位置」**（作者：都导出成功了，
-             *   位置已经定了，那一刻要的是"去那儿看看"）—— 同一格、同一尺寸，
-             *   框的宽窄一动不动。
-             */}
-            <button
-              type="button"
-              className={s.pathEdit}
-              data-open={exported}
-              onClick={exported ? openFolder : changeDir}
-            >
-              {exported ? tr('report.export.open') : tr('report.export.change')}
-            </button>
+            <span className={s.pathEdit}>{NBSP}</span>
           </div>
-        )}
+        </div>
+
+        {/* 真正的几块：与量尺同住一格（见 `ExportModal.module.css` 的 `.body`） */}
+        <div className={s.live}>
+          {/* 提示一律进标题右边那一格（`HeadNote`，2026-10-17 收口）：
+              摆在框身里会把这个框撑高，下面那张文件清单跟着往下跳。
+              ★ 2026-10-19：**只留这一处** —— 下面原来还给 `planErr` 摆了一份红字，
+              同一条错同一个框里出现两遍（作者看见了那句重复）。 */}
+          {planErr !== null && (
+            <HeadNote text={tr('report.export.planErr', { err: planErr })} tone="error" />
+          )}
+          {fail !== null && (
+            <HeadNote
+              text={`${tr(fail.what === 'export' ? 'report.export.failExport' : 'report.export.failOpen')}${fail.text}`}
+              tone="error"
+            />
+          )}
+          {plan === null && planErr === null && (
+            <p className={s.filling}>{tr('report.export.loading')}</p>
+          )}
+
+          {plan !== null && (
+            <ul className={s.fileList}>
+              {plan.files.map((f) => (
+                <li key={f.kind} className={s.fileItem}>
+                  {/* 写好了就地把纸换成勾：形状占同一格，框一行都不长 */}
+                  <span className={s.fileIcon} data-done={exported} aria-hidden="true">
+                    <svg
+                      width={15}
+                      height={15}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.7}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      {exported ? CHECK_SHAPE : KIND_ICON[f.kind]}
+                    </svg>
+                  </span>
+                  <span className={s.fileMeta}>
+                    <span className={s.fileName}>{f.name}</span>
+                    <span className={s.fileKind}>{tr(KIND_LABEL[f.kind])}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {plan !== null && plan.missing.length > 0 && (
+            <p className={s.notFull}>
+              {tr('report.export.missing', {
+                names: plan.missing.map((k) => `「${tr(KIND_LABEL[k])}」`).join('、'),
+              })}
+            </p>
+          )}
+
+          {path !== null && (
+            /*
+             * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
+             * 路径正文因此还能拖选、误点一下也不会弹系统框。
+             */
+            <div className={s.pathPill} data-tip={path.full}>
+              <svg
+                className={s.pathIcon}
+                width={15}
+                height={15}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.7}
+                aria-hidden="true"
+              >
+                <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
+              </svg>
+              <span className={s.pathText}>
+                <span className={s.pathHead}>{path.head}</span>
+                <span className={s.pathTail}>{path.tail}</span>
+              </span>
+              {/*
+               * ★ 成了之后这一颗**就地翻成「打开位置」**（作者：都导出成功了，
+               *   位置已经定了，那一刻要的是"去那儿看看"）—— 同一格、同一尺寸，
+               *   框的宽窄一动不动。
+               */}
+              <button
+                type="button"
+                className={s.pathEdit}
+                data-open={exported}
+                onClick={exported ? openFolder : changeDir}
+              >
+                {exported ? tr('report.export.open') : tr('report.export.change')}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     </Modal>
   )

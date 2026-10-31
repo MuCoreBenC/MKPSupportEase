@@ -64,6 +64,33 @@ pub fn load_presets() -> Result<crate::presetdata::Presets, AppError> {
     Ok(p)
 }
 
+/// **编辑态**的那一份预设（影子树）。
+///
+/// 2026-10-31 起工作台的所有编辑只写影子树（`workbench/.draft/presets/`），
+/// 于是「读当前状态」必须是读它 —— 读真仓库会拿到保存前的那一份，
+/// 表现为「改了没反应」（正是这次要根治的病）。
+pub fn load_session_presets() -> Result<crate::presetdata::Presets, AppError> {
+    let store = crate::workbench::store::Store::open()?;
+    let shadow = crate::workbench::domain::txn::shadow_root(&store.root);
+    let root = if shadow
+        .join("registry")
+        .join("param_registry.toml")
+        .is_file()
+    {
+        shadow
+    } else {
+        crate::workbench::paths::presets_root().ok_or_else(|| {
+            AppError::not_found("找不到工作台的预设数据根 presets/")
+                .with_detail("影子树与仓库里的 presets/ 都没定位到".to_owned())
+        })?
+    };
+    let mut p = crate::presetdata::Presets::load_from(&root)?;
+    if let Ok(asset_root) = crate::workbench::paths::assets_root() {
+        p.set_asset_root(&asset_root);
+    }
+    Ok(p)
+}
+
 /// 工作台窗口的标签。与客户端的 `main` 分开，`get_webview_window` 拿的是各自那一个
 ///
 /// ★ `pub`：换主题那一档要按它找到这扇窗（见 [`crate::ipc::prefs::set_theme`]）。

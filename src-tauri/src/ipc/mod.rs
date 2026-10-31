@@ -127,8 +127,12 @@ pub(crate) fn traced<T>(
     let trace_id = new_trace_id();
     let span = tracing::info_span!("ipc", command = name, trace_id = %trace_id);
     let _guard = span.enter();
+    /* 2026-10-31：把"现在跑的是哪条命令"告诉会话层 —— 写命令要自动记一条编辑事务。
+    只在这一处设置，不在每条命令里各写一遍（漏一条就漏一条撤销）。 */
+    #[cfg(feature = "workbench")]
+    let previous = crate::workbench::app::enter_command(name);
 
-    match f(&trace_id) {
+    let out = match f(&trace_id) {
         Ok(v) => {
             tracing::info!("ok");
             Ok(v)
@@ -149,7 +153,11 @@ pub(crate) fn traced<T>(
             );
             Err(e.text_err().with_trace(&trace_id))
         }
-    }
+    };
+
+    #[cfg(feature = "workbench")]
+    crate::workbench::app::leave_command(previous);
+    out
 }
 
 /* ---------- 校准模型（四份 3mf） ---------- */

@@ -1432,7 +1432,16 @@ export default function PageReport() {
    */
   const read = useCallback((pickNewest = false) => {
     setErr(null)
-    setRows(null)
+    /*
+     * ★ 这里**不许**再把 `rows` 打回 `null`（2026-10-31）。
+     *
+     * 原来第一句是 `setRows(null)`：刷新 / 换语言 / 后处理跑完每一趟，整块双栏都会
+     * 先塌成一句「正在读取…」，数据回来再重新铺一遍 —— 列表、选中的行、滚动位置
+     * 全跟着闪一下（作者 2026-10-31：「打开的时候左侧的抽屉列表是空白的，像闪烁」）。
+     * 「正在读」这件事已经由 `READING_MSG` 那条提示说了，列表本身不该退场：
+     * 旧数据比一句 loading 有用，读到再原地换。
+     * 首次进来 `rows` 本来就是 `null`，所以这一句删掉不影响 loading 态。
+     */
     api.getReportList().then(
       (list) => {
         setRows(list)

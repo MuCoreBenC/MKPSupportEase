@@ -31,6 +31,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use postprocess::diag::messages;
 
 use super::content;
 
@@ -91,8 +92,10 @@ pub fn load(root: &Path) -> DeliveryIndex {
 }
 
 fn save(root: &Path, index: &DeliveryIndex) -> Result<(), AppError> {
-    let bytes = serde_json::to_vec_pretty(index)
-        .map_err(|e| AppError::io("目录索引写不出来").with_detail(e.to_string()))?;
+    let bytes = serde_json::to_vec_pretty(index).map_err(|e| {
+        AppError::io(messages::text("ui.storage.index_write_failed", &[]))
+            .with_detail(e.to_string())
+    })?;
     crate::fsx::atomic::atomic_write(&index_path(root), &bytes)
 }
 
