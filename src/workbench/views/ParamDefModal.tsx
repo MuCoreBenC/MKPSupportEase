@@ -35,7 +35,7 @@
  * 校验的权威在后端（`registry::set_param_meta`）；这里先拦一道只是少挨一次错。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 import { isAppError } from '../api'
 import type {
@@ -107,6 +107,20 @@ const OP_LABEL: Record<ShowOp, string> = {
 }
 
 /**
+ * 注册表里那三册的编辑格（2026-10-31）。
+ *
+ * 作者口径：「它是注册表，中英文日文就该一起存里面」—— 所以这一框不是另开一张
+ * 翻译表，而是**同一个 `[[params]]` 块**里的 `labelEn/labelJa/labelTw` 与
+ * `descEn/descJa/descTw`。中文那两格在上面（必填），这三组可空：
+ * 空 = 那一册没译，客户端按语言回落中文。
+ */
+const LANG_FIELDS = [
+  { title: 'English', labelKey: 'labelEn', descKey: 'descEn' },
+  { title: '日本語', labelKey: 'labelJa', descKey: 'descJa' },
+  { title: '繁體中文', labelKey: 'labelTw', descKey: 'descTw' },
+] as const
+
+/**
  * 控件 × 值类型的合法候选。与后端 `registry::set_param_meta` 的校验同一张表 ——
  * 那边是权威，这里先拦一道只是少挨一次错。
  */
@@ -124,6 +138,10 @@ function controlCandidates(vt: ValueType, choiceCount: number): UiComponent[] {
 interface ChoiceDraft {
   value: string
   label: string
+  /** 另外三册（2026-10-31）—— 这一框不编它们，但**原样带回**，保存不许丢 */
+  labelEn: string
+  labelJa: string
+  labelTw: string
   /** 全局弃用（所有机型都不许写这一档） */
   deprecated: boolean
   /** 只在这些机型上弃用（与上一格叠加，空 = 不按机型弃用） */
@@ -132,7 +150,13 @@ interface ChoiceDraft {
 
 interface Draft {
   label: string
+  labelEn: string
+  labelJa: string
+  labelTw: string
   desc: string
+  descEn: string
+  descJa: string
+  descTw: string
   unit: string
   valueType: ValueType
   uiComponent: UiComponent
@@ -198,7 +222,13 @@ const numOf = (t: string): number | null => {
 
 const initOf = (p: ParamView): Draft => ({
   label: p.label,
+  labelEn: p.labelEn,
+  labelJa: p.labelJa,
+  labelTw: p.labelTw,
   desc: p.desc,
+  descEn: p.descEn,
+  descJa: p.descJa,
+  descTw: p.descTw,
   unit: p.unit ?? '',
   valueType: p.valueType,
   uiComponent: p.uiComponent,
@@ -215,6 +245,9 @@ const initOf = (p: ParamView): Draft => ({
   choices: p.choices.map((c) => ({
     value: String(c.value),
     label: c.label,
+    labelEn: c.labelEn,
+    labelJa: c.labelJa,
+    labelTw: c.labelTw,
     /* 回写只认**显式**两格；推定的弃用（`c.derived`）是显示用的，不许固化成数据 */
     deprecated: c.deprecated,
     deprecatedMachines: [...c.deprecatedMachines],
@@ -264,6 +297,9 @@ function payloadOf(d: Draft, param: ParamView, params: ParamView[]): ParamMetaEd
       d.valueType === 'string'
         ? d.choices.map((c) => ({
             label: c.label,
+            labelEn: c.labelEn,
+            labelJa: c.labelJa,
+            labelTw: c.labelTw,
             value: c.value,
             deprecated: c.deprecated,
             deprecatedMachines: [...c.deprecatedMachines],
@@ -823,6 +859,38 @@ export default function ParamDefModal({
       </div>
 
       <div className={s.group}>
+        <div className={s.groupHead}>其他语言</div>
+        <div className={s.grid}>
+          {LANG_FIELDS.map((f) => (
+            <Fragment key={f.labelKey}>
+              <label className={s.field}>
+                <span className={s.fieldLabel}>
+                  名称<em className={s.fieldKey}>{f.labelKey}</em>
+                </span>
+                <input
+                  className={s.txt}
+                  value={draft[f.labelKey]}
+                  aria-label={`${f.title} 名称 (${f.labelKey})`}
+                  onChange={(e) => edit(f.labelKey, (d) => (d[f.labelKey] = e.target.value))}
+                />
+              </label>
+              <label className={s.field}>
+                <span className={s.fieldLabel}>
+                  说明<em className={s.fieldKey}>{f.descKey}</em>
+                </span>
+                <input
+                  className={s.txt}
+                  value={draft[f.descKey]}
+                  aria-label={`${f.title} 说明 (${f.descKey})`}
+                  onChange={(e) => edit(f.descKey, (d) => (d[f.descKey] = e.target.value))}
+                />
+              </label>
+            </Fragment>
+          ))}
+        </div>
+      </div>
+
+      <div className={s.group}>
         <div className={s.groupHead}>类型与外观</div>
         <div className={s.grid}>
           <label className={s.field}>
@@ -1030,6 +1098,9 @@ export default function ParamDefModal({
                   d.choices.push({
                     value: '',
                     label: '',
+                    labelEn: '',
+                    labelJa: '',
+                    labelTw: '',
                     deprecated: false,
                     deprecatedMachines: [],
                   })

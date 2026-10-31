@@ -1,3 +1,4 @@
+import { t } from '../../i18n'
 import type { FileKind, FileRef, RuntimeCatalogFile, VersionFiles } from '../../api/contract'
 import assetsJson from './data/assets.json'
 import { mockCatalogFiles } from './catalogFiles'
@@ -80,22 +81,28 @@ export function resolveVersionFiles(machineId: string, versionId: string): Versi
   if (registered !== null) {
     files.push({ kind: 'mkp_preset', fileName: registered.fileName, path: registered.path })
   } else {
-    missing.push(`${machineId} / ${versionId} 没有配 MKP 预设文件（目录里查不到）`)
+    missing.push(t('mock.files.noPreset', { machine: machineId, version: versionId }))
   }
 
   // —— 切片器 profile 一支 ——
   if (!version.bundle) {
-    missing.push(`${machineId} / ${versionId} 没有配 bundle，取不到切片器配置`)
+    missing.push(t('mock.files.noBundle', { machine: machineId, version: versionId }))
   } else {
     const bundle = bundleById.get(version.bundle)
     if (!bundle) {
-      missing.push(`${machineId} / ${versionId} 指向的 bundle 不存在：${version.bundle}`)
+      missing.push(
+        t('mock.files.bundleMissing', {
+          machine: machineId,
+          version: versionId,
+          bundle: version.bundle,
+        }),
+      )
     } else {
       for (const ref of bundle.assetRefs) {
         const asset = assetById.get(ref)
         if (!asset) {
           // 上游这一跳是硬失败（E_DANGLING_ASSET_REF），我们也不静默丢弃
-          missing.push(`bundle ${bundle.id} 引用了不存在的 asset：${ref}`)
+          missing.push(t('mock.files.danglingAsset', { bundle: bundle.id, asset: ref }))
           continue
         }
         files.push(refFromAsset(asset))

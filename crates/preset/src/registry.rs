@@ -18,6 +18,12 @@ pub struct ChoiceEntry {
     /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`。
     #[serde(rename = "labelEn", default)]
     pub label_en: String,
+    /// 日文显示名（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "labelJa", default)]
+    pub label_ja: String,
+    /// 繁中显示名（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "labelTw", default)]
+    pub label_tw: String,
 }
 
 /// `[[params.layout]]`：UI 布局锚（sectionId 引用 tabs.sections.id，order 排序）。
@@ -70,12 +76,24 @@ pub struct ParamEntry {
     /// 英文显示名（2026-10-26 双语注册表）。空 = 这条还没译，界面回落 `label`。
     #[serde(rename = "labelEn", default)]
     pub label_en: String,
+    /// 日文显示名（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "labelJa", default)]
+    pub label_ja: String,
+    /// 繁中显示名（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "labelTw", default)]
+    pub label_tw: String,
     /// 说明文案（UI tooltip）。
     #[serde(default)]
     pub desc: String,
     /// 英文说明。空 = 回落 `desc`。
     #[serde(rename = "descEn", default)]
     pub desc_en: String,
+    /// 日文说明（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "descJa", default)]
+    pub desc_ja: String,
+    /// 繁中说明（2026-10-31 四册）。空 = 回落中文。
+    #[serde(rename = "descTw", default)]
+    pub desc_tw: String,
     /// 单位（mm / mm/s …）。
     #[serde(default)]
     pub unit: String,
@@ -142,11 +160,23 @@ pub struct SectionEntry {
     /// 英文显示名（空 = 回落 `label`）。
     #[serde(rename = "labelEn", default)]
     pub label_en: String,
+    /// 日文显示名（空 = 回落中文）。
+    #[serde(rename = "labelJa", default)]
+    pub label_ja: String,
+    /// 繁中显示名（空 = 回落中文）。
+    #[serde(rename = "labelTw", default)]
+    pub label_tw: String,
     #[serde(default)]
     pub description: String,
     /// 英文说明（空 = 回落 `description`）。
     #[serde(rename = "descriptionEn", default)]
     pub description_en: String,
+    /// 日文说明（空 = 回落中文）。
+    #[serde(rename = "descriptionJa", default)]
+    pub description_ja: String,
+    /// 繁中说明（空 = 回落中文）。
+    #[serde(rename = "descriptionTw", default)]
+    pub description_tw: String,
     #[serde(default)]
     pub order: f64,
 }
@@ -161,6 +191,12 @@ pub struct TabEntry {
     /// 英文显示名（空 = 回落 `label`）。
     #[serde(rename = "labelEn", default)]
     pub label_en: String,
+    /// 日文显示名（空 = 回落中文）。
+    #[serde(rename = "labelJa", default)]
+    pub label_ja: String,
+    /// 繁中显示名（空 = 回落中文）。
+    #[serde(rename = "labelTw", default)]
+    pub label_tw: String,
     #[serde(default)]
     pub icon: String,
     #[serde(default)]

@@ -162,7 +162,8 @@ export default function BbsPresetDrawer({
         label:
           t.level === 'nozzle'
             ? `\u3000${tr('bbs.drawer.target', { label: t.label, count: t.count })}`
-            : tr('bbs.drawer.target', { label: t.label, count: t.count }),
+            : /* 「全部喷嘴」那一档不是机型名的一部分，别把中文拼进 `label`（2026-10-31） */
+              tr('bbs.drawer.targetAll', { label: t.label, count: t.count }),
       })),
     ],
     [targets, liveCount, tr],

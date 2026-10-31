@@ -55,7 +55,11 @@ import {
 import { guidesEnabled } from '../guide/guidesPref'
 import { activateCombo, activateFile, activePresetSnapshot, useActivePreset } from '../state/appState'
 import { draftMutated } from '../state/draftState'
-import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
+import {
+  deliveryMutated,
+  useDeliveryRevision,
+  usePresetPrefsRevision,
+} from '../state/deliveryState'
 import type {
   ActiveOrigin,
   CatalogParamDef,
@@ -105,9 +109,15 @@ export interface ParamDef {
   label: string
   /** 英文显示名（双语注册表）。空 = 这条还没译；`localizeDef` 按界面语言挑 */
   labelEn?: string
+  /** 日 / 繁中显示名（2026-10-31 四册）。空 = 回落中文；`localizeDef` 按界面语言挑 */
+  labelJa?: string
+  labelTw?: string
   desc: string
   /** 英文说明（空 = 回落 `desc`） */
   descEn?: string
+  /** 日 / 繁中说明。空 = 回落中文 */
+  descJa?: string
+  descTw?: string
   /** 中文分组名（注册表的 section 名，'空间偏移' 这种） */
   group: string
   sectionId: string
@@ -386,8 +396,12 @@ function tabsOf(registry: RuntimeCatalog['registry']): ParamTab[] {
         id: s.id,
         label: s.label,
         labelEn: s.labelEn,
+        labelJa: s.labelJa,
+        labelTw: s.labelTw,
         desc: s.description,
         descEn: s.descriptionEn,
+        descJa: s.descriptionJa,
+        descTw: s.descriptionTw,
         count: itemsBySection.get(s.id) ?? 0,
       }))
       .filter((s) => s.count > 0)
@@ -397,6 +411,8 @@ function tabsOf(registry: RuntimeCatalog['registry']): ParamTab[] {
         id: meta.id,
         label: meta.label,
         labelEn: meta.labelEn,
+        labelJa: meta.labelJa,
+        labelTw: meta.labelTw,
         count: sections.reduce((n, s) => n + s.count, 0),
         sections,
       },
@@ -1018,6 +1034,17 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    * 真账（水位）在保存那一步交给后端，这里只是"还没保存的那一笔"。
    */
   const [syncDecisions, setSyncDecisions] = useState<Record<string, 'adopt' | 'hold'>>({})
+  /**
+   * 设置页那一格「复制出来的也跟着云端更新」的代次（2026-10-31）。
+   *
+   * **这一屏也得听它**：那一格决定「这一份认不认云端」（后端逐参数账的出口正看它），
+   * 而页面槽是**常驻挂**的（只切 `data-hidden`）—— 用户开着「修改参数」去设置里拨那一档，
+   * 这一屏不会重挂，不跟这条代次的话那条「云端发了新版」就停在那儿（作者：
+   * 「我改了之后，它没有实时的刷新」）。
+   */
+  const presetPrefsRevision = usePresetPrefsRevision()
+  /** 上一次那次读认的是哪一份文件 —— 换文件才丢云端表态，改偏好不该丢 */
+  const syncPathRef = useRef<string | null>(null)
 
   /**
    * **「恢复默认值」的基准** —— **已退场**（2026-10-08 资源库改判）。
@@ -1437,6 +1464,10 @@ export function useParams(opts: UseParamsOptions = {}): Params {
           /* 两册都留：显示哪一册由 `localizeDef` 在读的时候决定（见那里的注释） */
           const labelEn = p?.labelEn ?? rd.labelEn
           const descEn = p?.descEn ?? rd.descEn
+          const labelJa = p?.labelJa ?? rd.labelJa
+          const labelTw = p?.labelTw ?? rd.labelTw
+          const descJa = p?.descJa ?? rd.descJa
+          const descTw = p?.descTw ?? rd.descTw
           const label = p?.label ?? rd.label
           const desc = p?.desc ?? rd.desc
           /*
@@ -1452,8 +1483,12 @@ export function useParams(opts: UseParamsOptions = {}): Params {
             key,
             label,
             labelEn,
+            labelJa,
+            labelTw,
             desc: desc,
             descEn,
+            descJa,
+            descTw,
             group: p?.group ?? rd.layout.sectionId,
             sectionId,
             unit: unitOf(p?.unit ?? rd.unit),
@@ -1476,6 +1511,8 @@ export function useParams(opts: UseParamsOptions = {}): Params {
                 value: c.value,
                 label: c.label,
                 labelEn: c.labelEn,
+                labelJa: c.labelJa,
+                labelTw: c.labelTw,
                 /* 全局弃用 ∪ 点名这台机型 —— 与后端 `Choice::deprecated_for` 同一条 */
                 deprecated:
                   c.deprecated === true || c.deprecatedMachines?.includes(machineId) === true
@@ -2633,10 +2670,14 @@ export function useParams(opts: UseParamsOptions = {}): Params {
    *
    * 后端没有云端字节时 `pendingCount` 天然是 0（`param_sync::diff` 缺新值不报待处理），
    * 所以界面不会编出"待选择 N 项"。
+   *
+   * ★ 也跟 `presetPrefsRevision`（2026-10-31）：设置页拨「复制出来的也跟着云端更新」
+   * 会改后端这一账的出口（复制件认不认云端），而页面槽常驻挂 ⇒ 不重读就停在旧账上。
    */
   useEffect(() => {
     /* 换了文件：上一份的云端表态不带过来（它认的是那一份的参数与那一版云端） */
-    setSyncDecisions({})
+    if (syncPathRef.current !== localPath) setSyncDecisions({})
+    syncPathRef.current = localPath
     if (localPath === null) {
       setSync(null)
       setSyncError(null)
@@ -2658,7 +2699,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     return () => {
       alive = false
     }
-  }, [localPath])
+  }, [localPath, presetPrefsRevision])
 
   /**
    * **把云端当前版的字节取回来**（2026-10-20）—— 全应用**唯一**会为看差异发网络的那一处。

@@ -26,6 +26,9 @@ export interface FieldOption {
    * 上游（参数页）在把数据递给控件之前，按当前语言把 `label` 换成该显示的那一册。
    */
   labelEn?: string
+  /** 日 / 繁中显示名（2026-10-31 四册）。共用件同样只画 `label`，挑册在宿主 */
+  labelJa?: string
+  labelTw?: string
   /** 选项右边那一列小字（「3 个版本共用」/「2 处自有」）。下拉与分段都支持 */
   note?: string
   /**

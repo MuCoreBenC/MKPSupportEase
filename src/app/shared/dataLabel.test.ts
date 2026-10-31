@@ -16,7 +16,7 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import { bi, localizeMachines, multiLang } from './dataLabel'
+import { bi, localizeMachines, localizeParamDef, localizeTab, multiLang } from './dataLabel'
 
 type V = {
   id: string
@@ -123,5 +123,92 @@ describe('bi：两册择一的老口径不受影响', () => {
     expect(bi('标准版', undefined, 'en')).toBe('标准版')
     expect(bi('标准版', 'Standard', 'en')).toBe('Standard')
     expect(bi('标准版', 'Standard', 'zh-CN')).toBe('标准版')
+  })
+})
+
+/*
+ * MKP 自己那份参数注册表（`presets/registry/param_registry.toml`）2026-10-31 起是四册。
+ * 作者口径：「需要单独翻译」—— BBS 没有这些涂胶/擦料塔参数，术语要我们自己定。
+ */
+const param = {
+  label: '回抽长度',
+  labelEn: 'Retract length',
+  labelJa: 'リトラクト長',
+  labelTw: '回抽長度',
+  desc: '涂胶笔回抽长度',
+  descEn: 'Glue pen retract length',
+  descJa: '塗布ペンのリトラクト長',
+  descTw: '塗膠筆回抽長度',
+  unit: '层',
+  field: {
+    key: 'toolhead.MKP_retract',
+    label: '回抽长度',
+    desc: '涂胶笔回抽长度',
+    control: 'choice' as const,
+    choices: [{ value: 'on', label: '开', labelEn: 'On', labelJa: 'オン', labelTw: '開' }],
+  },
+}
+
+describe('localizeParamDef：四册挑一册', () => {
+  it('ja：标签 / 说明 / 选项名 / 单位都换日文', () => {
+    const d = localizeParamDef(param, 'ja')
+    expect(d.label).toBe('リトラクト長')
+    expect(d.desc).toBe('塗布ペンのリトラクト長')
+    expect(d.field.choices?.[0].label).toBe('オン')
+    expect(d.unit).toBe('レイヤー')
+  })
+
+  it('zh-TW：用繁中册', () => {
+    expect(localizeParamDef(param, 'zh-TW').label).toBe('回抽長度')
+  })
+
+  it('en：用英文册', () => {
+    expect(localizeParamDef(param, 'en').label).toBe('Retract length')
+  })
+
+  it('zh-CN：原样不动（连对象都还是那一份）', () => {
+    expect(localizeParamDef(param, 'zh-CN')).toBe(param)
+  })
+
+  it('缺日文册时回落中文，不显示空', () => {
+    const d = localizeParamDef({ ...param, labelJa: '', descJa: '' }, 'ja')
+    expect(d.label).toBe('回抽长度')
+    expect(d.desc).toBe('涂胶笔回抽长度')
+  })
+})
+
+describe('localizeTab：页签与分组同样是四册', () => {
+  const tab = {
+    label: '涂胶',
+    labelEn: 'Glue',
+    labelJa: '塗布',
+    labelTw: '塗膠',
+    sections: [
+      {
+        label: '涂胶参数',
+        labelEn: 'Glue parameters',
+        labelJa: '塗布パラメータ',
+        labelTw: '塗膠參數',
+        desc: '涂胶基础参数',
+        descEn: 'Basic glue parameters',
+        descJa: '塗布の基本パラメータ',
+        descTw: '塗膠基礎參數',
+      },
+    ],
+  }
+
+  it('ja：页签与分组都换日文', () => {
+    const t = localizeTab(tab, 'ja')
+    expect(t.label).toBe('塗布')
+    expect(t.sections[0].label).toBe('塗布パラメータ')
+    expect(t.sections[0].desc).toBe('塗布の基本パラメータ')
+  })
+
+  it('zh-TW：用繁中册', () => {
+    expect(localizeTab(tab, 'zh-TW').sections[0].label).toBe('塗膠參數')
+  })
+
+  it('zh-CN：原样不动', () => {
+    expect(localizeTab(tab, 'zh-CN')).toBe(tab)
   })
 })

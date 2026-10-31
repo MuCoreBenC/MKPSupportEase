@@ -202,6 +202,10 @@ export interface TabMeta {
 /** `app::ChoiceView` */
 export interface ChoiceView {
   label: string
+  /** 选项名的另外三册 —— 原样带回，回写不丢 */
+  labelEn: string
+  labelJa: string
+  labelTw: string
   value: unknown
   /**
    * **显式全局弃用**（所有机型都不许写）—— 定义框那颗勾的状态。
@@ -228,7 +232,14 @@ export interface ShowWhen {
 export interface ParamView {
   key: string
   label: string
+  /** 另外三册（2026-10-31）—— 定义框里能看见、也能改 */
+  labelEn: string
+  labelJa: string
+  labelTw: string
   desc: string
+  descEn: string
+  descJa: string
+  descTw: string
   tomlKey: string
   sectionId: string
   tabId: string | null
@@ -281,6 +292,16 @@ export interface RegistryView {
 export interface ParamMetaEdit {
   label: string
   desc: string
+  /**
+   * 另外三册（2026-10-31）。`undefined` = **不动**（后端 `None` 语义），
+   * 空串 = 清掉那一册。定义框现在能编这六格。
+   */
+  labelEn?: string | null
+  labelJa?: string | null
+  labelTw?: string | null
+  descEn?: string | null
+  descJa?: string | null
+  descTw?: string | null
   unit: string | null
   valueType: ValueType
   uiComponent: UiComponent

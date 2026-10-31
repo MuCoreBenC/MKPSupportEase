@@ -12,6 +12,7 @@
  *    （真机那一刻的记录里还没有这几组，形状照 `docs/REPORT-DETAIL-FIELDS.md`）；
  * 3. 其余记录给同形状的详情（按本行字段合成），展开任何一行都不是空的。
  */
+import { t } from '../../i18n'
 import type {
   ReportDetail,
   ReportExportKind,
@@ -34,8 +35,15 @@ const DAY_COMPACT = DAY.replace(/-/g, '')
  * ★ 2026-10-11 起：这句话由 Rust 侧的文案表（`crates/postprocess/messages.toml`）渲染后
  * 写进记录，前端**不再自己拼**。形态是「结论：原因」——
  * 「已取消」这一档**不带错误码**（用户自己按的停止不是错误，看门狗那种系统叫停才带）。
+ *
+ * ★ 2026-10-31：假后端也不许写死中文。这里没有 Rust 文案表可问，句子住前端字典
+ * `mock.report.stopped`；每次读记录时按**当前语言**取（`t` 读的是全局 locale），
+ * 切语言后 `read()` 重来一遍就是新语言 —— 原来那个模块级中文常量会让日语/英语
+ * 的浏览器预览里也显示中文。
  */
-const CANCEL_ERROR = '已取消：这一盘没有做后处理，原文件没有被改动'
+function cancelledError(): string {
+  return t('mock.report.stopped')
+}
 
 /** 一行记录的输入（顺序就是列表顺序：最新在前） */
 interface FixtureRow {
@@ -107,7 +115,7 @@ function toSummary(r: FixtureRow): ReportSummary {
     gcodeName: r.gcode,
     modelName: r.modelName ?? null,
     ok: r.ok,
-    error: r.ok ? null : CANCEL_ERROR,
+    error: r.ok ? null : cancelledError(),
     warningCount: 0,
   }
 }

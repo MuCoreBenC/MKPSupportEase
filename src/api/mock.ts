@@ -1,3 +1,4 @@
+import { t } from '../i18n'
 import { NotImplementedError } from './errors'
 
 /*
@@ -44,7 +45,7 @@ function devPostProcessRun(): PostProcessRun | null {
       finished: {
         ok: true,
         cancelled: false,
-        message: '处理完成：已覆盖原文件',
+        message: t('mock.ask.done'),
         code: null,
         stage: null,
         exitCode: 0,
@@ -62,7 +63,7 @@ function devPostProcessRun(): PostProcessRun | null {
       finished: null,
       question: {
         questionKind: 'machine-mismatch',
-        text: 'G-code 是 A1_MINI，预设是 A1 —— 机型对不上，结果可能出错。还继续吗？',
+        text: t('mock.ask.mismatch'),
         deadlineUnixMs: Date.now() + 110_000,
         choices: [],
       },
@@ -75,16 +76,21 @@ function devPostProcessRun(): PostProcessRun | null {
     finished: null,
     question: {
       questionKind: 'tower-relocation',
-      text: '擦料塔与模型发生碰撞，是否自动调整擦料塔位置？',
+      text: t('mock.ask.tower'),
       deadlineUnixMs: Date.now() + 110_000,
       choices: [
         {
           id: 'relocate',
-          label: '自动调整塔位置',
-          hint: '只改这一趟，预设文件不动',
+          label: t('mock.ask.relocate'),
+          hint: t('mock.ask.relocateHint'),
           accent: true,
         },
-        { id: 'model', label: '停止并自己挪模型', hint: '这一趟停下，原文件不动', accent: false },
+        {
+          id: 'model',
+          label: t('mock.ask.stopModel'),
+          hint: t('mock.ask.stopModelHint'),
+          accent: false,
+        },
       ],
       geo: {
         current: [78, 91],
@@ -139,7 +145,7 @@ function devPostProcessRun(): PostProcessRun | null {
           },
           forbiddenZones: [],
           adviceCode: 'E_GCODE_COLLISION_002',
-          adviceText: '建议：把模型往左上挪 —— X 至少 32.6mm，Y 至少 32.6mm',
+          adviceText: t('mock.advice.collision'),
         },
       },
     },
@@ -508,7 +514,7 @@ const mockLocal: LocalPresetFile[] = [
     modifiedUnix: 1780007200,
     kind: 'mkp_preset',
     state: 'unreadable',
-    stateDetail: 'TOML 语法不对（第 3 行第 1 列）',
+    stateDetail: t('mock.err.tomlLine'),
     basedOn: 'unverified',
     basedOnFacts: MOCK_FACTS,
     basedOnLabel: null,
@@ -606,7 +612,7 @@ function mockNormalizeName(
   newName: string,
 ): { ok: true; name: string; adjusted: boolean } | { ok: false; problem: string } {
   const trimmed = newName.trim()
-  if (trimmed === '') return { ok: false, problem: '新名字不能是空的' }
+  if (trimmed === '') return { ok: false, problem: t('mock.name.empty') }
   const cleaned = Array.from(trimmed)
     .filter((c) => {
       const code = c.charCodeAt(0)
@@ -614,13 +620,13 @@ function mockNormalizeName(
     })
     .join('')
     .trim()
-  if (cleaned === '') return { ok: false, problem: '新名字不能是空的' }
-  if (cleaned === '.' || cleaned === '..') return { ok: false, problem: '这个名字不是一个文件名' }
+  if (cleaned === '') return { ok: false, problem: t('mock.name.empty') }
+  if (cleaned === '.' || cleaned === '..') return { ok: false, problem: t('mock.name.notFile') }
   const ext = (n: string): string => mockSplitExt(n)[1].toLowerCase()
   if (ext(cleaned) !== ext(oldName)) {
     return {
       ok: false,
-      problem: '后缀要保持原样 —— 改名 / 复制都不改它是哪一类（.toml 还是 .toml）',
+      problem: t('mock.name.extChanged'),
     }
   }
   if (mockUtf8Len(cleaned) <= NAME_MAX_BYTES) {
@@ -640,7 +646,7 @@ function mockNormalizeName(
   if (keep === '') {
     return {
       ok: false,
-      problem: '名字太长了 —— 光是后缀就把上限占满了（换一个短点的后缀再来）',
+      problem: t('mock.name.tooLong'),
     }
   }
   return { ok: true, name: `${keep}${extText}`, adjusted: true }
@@ -881,7 +887,7 @@ function mockHeaderOf(text: string, key: string): string | null {
 /** 一份用户预设现在的云端更新账（真机：`ipc::param_sync::sync_of`） */
 function mockSyncOf(path: string): PresetParamSync {
   const text = mockLocalText.get(path)
-  if (text === undefined) throw new Error(`找不到 ${path}`)
+  if (text === undefined) throw new Error(t('mock.err.notFound', { path }))
   const fileName = path.split('/').pop() ?? path
   const basedOn = mockHeaderOf(text, 'based_on')
   const cloudFileName = basedOn === null ? null : (basedOn.split('/').pop() ?? null)
@@ -1142,7 +1148,7 @@ function patchMockParam(text: string, def: RawParamDef, value: string): string {
     lines[i] = `${hit[1]}${hit[2]}${hit[3]}${literal}${comment === '' ? '' : ` ${comment}`}`
     return lines.join('\n')
   }
-  throw new Error(`演示正文里没有 [${def.section}].${def.tomlKey} —— 这一项改不动`)
+  throw new Error(t('mock.edit.noSectionItem', { section: def.section, key: def.tomlKey }))
 }
 
 /**
@@ -1175,9 +1181,9 @@ function literalFor(raw: string, valueType: string): string {
  * ★ 单条与批量共用这一份（2026-10-21）：两条路径的语义必须一致，分开写迟早漂。
  */
 function patchMockDraft(paramKey: string, value: string): void {
-  if (mockDraft === null) throw new Error('现在没有正在改的那一份，改不了参数')
+  if (mockDraft === null) throw new Error(t('mock.edit.noneForParams'))
   const def = paramMeta().find((p) => p.key === paramKey)
-  if (def === undefined) throw new Error(`不认识这个参数：${paramKey}`)
+  if (def === undefined) throw new Error(t('mock.params.unknown', { param: paramKey }))
   const { section, tomlKey, valueType } = def
   const literal = literalFor(value, valueType)
   /* 找 `[section]` 那一段，在段内替换 `<tomlKey> = …` 那一行 */
@@ -1199,7 +1205,7 @@ function patchMockDraft(paramKey: string, value: string): void {
     }
   }
   if (!done) {
-    throw new Error(`草稿的 [${section}] 里没有 ${tomlKey}`)
+    throw new Error(t('mock.draft.noItem', { section, key: tomlKey }))
   }
   mockDraft = { ...mockDraft, text: lines.join('\n'), updatedUnix: nowSec() }
 }
@@ -1304,7 +1310,7 @@ async function mockDeliver(
   onTick?: (tick: DownloadTick) => void,
 ): Promise<void> {
   const file = mockPresetFile(fileName)
-  if (file === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
+  if (file === undefined) throw new Error(t('mock.catalog.noFile', { file: fileName }))
   /* 总长度从目录拿（真机是 Content-Length / 目录登记的 expected_size） */
   const total = mockCatalogFiles().find((f) => f.fileName === fileName)?.size ?? 4096
   const send = (stage: DownloadTick['stage'], received: number) =>
@@ -1355,7 +1361,7 @@ export const mockApi: MkpApi = {
   async savePresetCalibration(path, axes) {
     const text = mockLocalText.get(path)
     if (text === undefined) {
-      throw new Error(`${path} 读不出来 —— 先把这份另存为本地预设，再保存校准`)
+      throw new Error(t('mock.calib.readFailed', { path }))
     }
     mockLocalText.set(path, patchMockOffsets(text, axes))
     const at = mockLocal.findIndex((f) => f.path === path)
@@ -1407,7 +1413,7 @@ export const mockApi: MkpApi = {
   async openDefaultAppSettings() {
     throw new NotImplementedError(
       'openDefaultAppSettings',
-      '浏览器预览里打不开系统那一处 —— 改默认应用请用桌面版（SupportEase 应用）',
+      t('mock.preview.noDefaultApp'),
     )
   },
 
@@ -1417,7 +1423,7 @@ export const mockApi: MkpApi = {
   async openAutomationSettings() {
     throw new NotImplementedError(
       'openAutomationSettings',
-      '浏览器预览里打不开系统设置 —— 授权请用桌面版（SupportEase 应用）',
+      t('mock.preview.noSystemSettings'),
     )
   },
 
@@ -1430,7 +1436,7 @@ export const mockApi: MkpApi = {
   async getPostProcessCommand() {
     return {
       ready: false,
-      reason: '浏览器预览里没有本机的可执行物与预设文件 —— 命令由桌面版按真实路径现拼',
+      reason: t('mock.preview.noCommand'),
     }
   },
 
@@ -1450,14 +1456,14 @@ export const mockApi: MkpApi = {
   async cancelPostProcess() {
     throw new NotImplementedError(
       'cancelPostProcess',
-      '浏览器预览里没有在跑的后处理 —— 那一趟由切片器带参数拉起来（用桌面版试）',
+      t('mock.preview.noRun'),
     )
   },
 
   async answerPostProcess() {
     throw new NotImplementedError(
       'answerPostProcess',
-      '浏览器预览里没有在跑的后处理 —— 那一趟由切片器带参数拉起来（用桌面版试）',
+      t('mock.preview.noRun'),
     )
   },
 
@@ -1505,7 +1511,7 @@ export const mockApi: MkpApi = {
 
   async setPresetRemark(key, remark) {
     const k = key.trim()
-    if (k === '') throw new Error('备注要说是哪一份（缺文件身份）')
+    if (k === '') throw new Error(t('mock.attr.needIdentity'))
     if (remark === null) mockRemarks.delete(k)
     else mockRemarks.set(k, remark.trim())
   },
@@ -1518,13 +1524,13 @@ export const mockApi: MkpApi = {
     const mid = machineId.trim()
     const vid = versionId.trim()
     if (mid === '' || vid === '') {
-      throw new Error('机型与版本都要填 —— 归属写的是文件头的那两行，留空就认不出')
+      throw new Error(t('mock.attr.needMachineVersion'))
     }
     const hit = mockLocal.find((f) => f.path === path)
-    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (hit === undefined) throw new Error(t('mock.err.movedAway', { path }))
     const known = allMachines().some((m) => m.id === mid)
     if (!known) {
-      throw new Error(`${mid} 不是目录里登记的机型 —— 归属的机型要选一台真的机器`)
+      throw new Error(t('mock.attr.notMachine', { machine: mid }))
     }
     const text = mockLocalText.get(path)
     if (text !== undefined) {
@@ -1540,7 +1546,7 @@ export const mockApi: MkpApi = {
     if (text === undefined) {
       throw new NotImplementedError(
         'readLocalPresetText',
-        '浏览器预览里读不到这一份的正文 —— 用桌面版就能看（每一份都读得到）',
+        t('mock.preview.cannotReadBody'),
       )
     }
     return text
@@ -1563,14 +1569,14 @@ export const mockApi: MkpApi = {
       const entry = mockLocal.find((f) => f.path === rel)
       if (entry?.state === 'unreadable') {
         throw new Error(
-          `${rel} 读不出来：${entry.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+          t('mock.preset.unreadable', { file: rel, why: entry.stateDetail ?? t('mock.err.toml') }),
         )
       }
       const raw = mockLocalText.get(rel)
       if (raw === undefined) {
         throw new NotImplementedError(
           'beginPresetEdit',
-          `浏览器预览里读不到 ${rel} 的正文 —— 用桌面版就能改（每一份都读得到）`,
+          t('mock.preview.cannotEditBody', { file: rel }),
         )
       }
       /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
@@ -1594,7 +1600,7 @@ export const mockApi: MkpApi = {
   },
 
   async putPresetDraft(text) {
-    if (mockDraft === null) throw new Error('现在没有正在改的那一份')
+    if (mockDraft === null) throw new Error(t('mock.edit.none'))
     mockDraft = { ...mockDraft, text, updatedUnix: nowSec() }
   },
 
@@ -1682,20 +1688,20 @@ export const mockApi: MkpApi = {
   async createBackup() {
     throw new NotImplementedError(
       'createBackup',
-      '浏览器预览里打不了备份（没有本机数据）—— 用桌面版就能打（设置页这一块）',
+      t('mock.preview.noBackup'),
     )
   },
 
   async restoreBackup() {
     throw new NotImplementedError(
       'restoreBackup',
-      '浏览器预览里恢复不了备份（没有本机数据）—— 用桌面版就能恢复（设置页这一块）',
+      t('mock.preview.noRestore'),
     )
   },
 
   /** 云端线：另存成 `presets-local/<原名>（已修改）.toml`（与 Rust 侧 `local::edited_name` 同一条规则） */
   async commitPresetDraft() {
-    if (mockDraft === null) throw new Error('现在没有正在改的那一份，没得存')
+    if (mockDraft === null) throw new Error(t('mock.edit.noneToSave'))
 
     /*
      * 用户线（第八层）：**写回它自己** —— 同一个路径、同一份文件，不产生第二份；
@@ -1707,7 +1713,7 @@ export const mockApi: MkpApi = {
       if (old === undefined) {
         throw new NotImplementedError(
           'commitPresetDraft',
-          `浏览器预览里读不到 ${rel} 的正文，写不回去 —— 用桌面版就能存`,
+          t('mock.preview.cannotWriteBody', { file: rel }),
         )
       }
       const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
@@ -1822,7 +1828,7 @@ export const mockApi: MkpApi = {
     if (raw === undefined) {
       throw new NotImplementedError(
         'beginTextEdit',
-        `浏览器预览里读不到 ${path} 的正文 —— 用桌面版就能改（每一份都读得到）`,
+        t('mock.preview.cannotEditBody', { file: path }),
       )
     }
     /* 编辑器里这份**带着它自己的血统三行**（在这一份上有效，保存时照写回） */
@@ -1832,7 +1838,7 @@ export const mockApi: MkpApi = {
   },
 
   async putTextDraft(text) {
-    if (mockTextDraft === null) throw new Error('现在没有正在改的那一份正文')
+    if (mockTextDraft === null) throw new Error(t('mock.edit.noBody'))
     mockTextDraft = { ...mockTextDraft, text, updatedUnix: nowSec() }
   },
 
@@ -1846,10 +1852,10 @@ export const mockApi: MkpApi = {
 
   /** 保存：正文原子写回同一份用户文件，然后丢草稿 + 作废另一侧 */
   async commitTextDraft() {
-    if (mockTextDraft === null) throw new Error('现在没有正在改的那一份正文，没得存')
+    if (mockTextDraft === null) throw new Error(t('mock.edit.noBodyToSave'))
     const rel = mockTextDraft.path
     const at = mockLocal.findIndex((f) => f.path === rel)
-    if (at < 0) throw new Error(`找不到 ${rel} —— 它可能已经被移走或删掉了`)
+    if (at < 0) throw new Error(t('mock.err.movedAway', { path: rel }))
     mockLocalText.set(rel, mockTextDraft.text)
     mockLocal[at] = { ...mockLocal[at], size: mockTextDraft.text.length, modifiedUnix: nowSec() }
     const fileName = rel.slice(rel.lastIndexOf('/') + 1)
@@ -1887,14 +1893,14 @@ export const mockApi: MkpApi = {
    */
   async renameLocalPreset(path, newName) {
     const hit = mockLocal.find((f) => f.path === path)
-    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (hit === undefined) throw new Error(t('mock.err.movedAway', { path }))
     const got = mockNormalizeName(hit.fileName, newName)
     if (!got.ok) throw new Error(got.problem)
     const name = got.name
     const dir = path.slice(0, path.length - hit.fileName.length)
     const newPath = `${dir}${name}`
     if (newPath !== path && mockLocal.some((f) => f.path === newPath)) {
-      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+      throw new Error(t('mock.name.taken', { name }))
     }
     if (newPath !== path) {
       /* 使用中指针跟着改（指纹原样 —— 字节没动）；草稿跟着改（「接着上次改」不接丢） */
@@ -1939,16 +1945,16 @@ export const mockApi: MkpApi = {
    */
   async copyLocalPreset(path, newName) {
     const hit = mockLocal.find((f) => f.path === path)
-    if (hit === undefined) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (hit === undefined) throw new Error(t('mock.err.movedAway', { path }))
     /* 名字太长也照样复制（截断到上限）—— 与真机同一套门槛（不再因长度失败） */
     const got = mockNormalizeName(hit.fileName, newName)
     if (!got.ok) throw new Error(got.problem)
     const name = got.name
     const dir = path.slice(0, path.length - hit.fileName.length)
     const newPath = `${dir}${name}`
-    if (newPath === path) throw new Error('新名字和原来一样 —— 复制要起个不同的名字')
+    if (newPath === path) throw new Error(t('mock.copy.sameName'))
     if (mockLocal.some((f) => f.path === newPath)) {
-      throw new Error(`已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`)
+      throw new Error(t('mock.name.taken', { name }))
     }
     const text = mockLocalText.get(path)
     if (text !== undefined) {
@@ -2029,7 +2035,7 @@ export const mockApi: MkpApi = {
           source,
           fileName: source,
           state: 'rejected',
-          reason: '这个路径里没有文件名 —— 它不是一份能导入的文件',
+          reason: t('mock.import.noFileName'),
         }
       }
       if (!/\.toml$/i.test(fileName)) {
@@ -2038,7 +2044,7 @@ export const mockApi: MkpApi = {
           fileName,
           state: 'rejected',
           reason:
-            '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器（ZIP / 备份包以后再说）',
+            t('mock.import.onlyTomlLong'),
         }
       }
       if (taken.has(fileName)) return { source, fileName, state: 'collision', reason: null }
@@ -2062,7 +2068,7 @@ export const mockApi: MkpApi = {
           ok: false,
           path: '',
           fileName,
-          message: '现在只收 .toml 预设 —— 这种文件还没有认领它的导入器',
+          message: t('mock.import.onlyToml'),
         })
         continue
       }
@@ -2089,7 +2095,7 @@ export const mockApi: MkpApi = {
           ok: false,
           path: '',
           fileName: name,
-          message: `已经有一份叫 ${name} 的文件了 —— 换个名字（这里不覆盖）`,
+          message: t('mock.name.taken', { name }),
         })
         continue
       }
@@ -2138,31 +2144,31 @@ export const mockApi: MkpApi = {
    */
   async revealDeliveredFile(fileName) {
     throw new Error(
-      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，选中我们自己的那份「${fileName}」`,
+      t('mock.reveal.mkp', { file: fileName }),
     )
   },
 
   async revealSlicerFile(fileName) {
     throw new Error(
-      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，选中切片器目录里的「${fileName}」`,
+      t('mock.reveal.slicer', { file: fileName }),
     )
   },
 
   async revealInFolder(path) {
     if (!path.startsWith('presets-local/')) {
-      throw new Error('只给「本地文件」显示 —— 云端那两份住程序自己管的目录')
+      throw new Error(t('mock.reveal.localOnly'))
     }
     if (!mockLocal.some((f) => f.path === path)) {
-      throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了（列表以磁盘为准，刷新一下）`)
+      throw new Error(t('mock.err.movedAwayRefresh', { path }))
     }
     throw new Error(
-      `假后端没有文件系统 —— 真机上这一步会打开 Finder / 资源管理器并选中「${path}」`,
+      t('mock.reveal.finder', { path }),
     )
   },
 
   async deleteLocalPreset(path) {
     const i = mockLocal.findIndex((f) => f.path === path)
-    if (i === -1) throw new Error(`找不到 ${path} —— 它可能已经被移走或删掉了`)
+    if (i === -1) throw new Error(t('mock.err.movedAway', { path }))
     /* 与真机同语义（2026-10-06 一切皆可删）：属于这一份的状态一并清掉，不再拦 */
     if (mockActive?.origin === 'local' && mockActive.path === path) mockActive = null
     if (mockDraft !== null && mockDraft.origin === 'local' && mockDraft.path === path) {
@@ -2198,9 +2204,9 @@ export const mockApi: MkpApi = {
   async restoreLocalPreset(id) {
     const entry = mockRecovery.find((e) => e.id === id)
     const file = mockRecoveryFiles.get(id)
-    if (entry === undefined || file === undefined) throw new Error('回收站里没有这一条')
+    if (entry === undefined || file === undefined) throw new Error(t('mock.trash.notFound'))
     if (mockLocal.some((f) => f.path === entry.path)) {
-      throw new Error('原位置已经有一份同名预设，先改名或删掉它再恢复')
+      throw new Error(t('mock.trash.nameTaken'))
     }
     mockLocal.push(file)
     const text = mockRecoveryTexts.get(id)
@@ -2248,13 +2254,13 @@ export const mockApi: MkpApi = {
    * 清单与正文都从同一份数据推出来 —— 不会出现"列了却读不出来"。见 `mockServer/bbsLocal.ts`。
    */
   async getBbsPresets() {
-    return bbsLocalTree
+    return bbsLocalTree()
   },
 
   async readBbsPreset(scope, uid, file) {
     const text = bbsPresetText(scope, uid, file)
     if (text === null) {
-      throw new Error(`演示集合里没有这一份：${scope} / ${uid ?? '（无账号）'} / ${file}`)
+      throw new Error(t('mock.bbs.missingEntry', { scope, uid: uid ?? t('mock.bbs.noAccount'), file }))
     }
     return text
   },
@@ -2283,7 +2289,7 @@ export const mockApi: MkpApi = {
   async getFileUrl() {
     throw new NotImplementedError(
       'getFileUrl',
-      '浏览器预览里没有云端源地址 —— 复制链接请用桌面版（SupportEase 应用）',
+      t('mock.preview.noSourceUrl'),
     )
   },
 
@@ -2319,7 +2325,7 @@ export const mockApi: MkpApi = {
    */
   async revealReportExport(_id, dir) {
     throw new Error(
-      `假后端没有文件系统 —— 真机上这一步会打开文件管理器，停在 ${dir}\\<基名>\\`,
+      t('mock.reveal.folder', { dir: dir + '\\<基名>\\' }),
     )
   },
 
@@ -2482,7 +2488,7 @@ export const mockApi: MkpApi = {
     const before = mockDownloaded.length
     mockDownloaded = mockDownloaded.filter((f) => f.fileName !== fileName)
     if (mockDownloaded.length === before) {
-      throw new Error(`下载区里没有 ${fileName} —— 它可能已经被删掉了`)
+      throw new Error(t('mock.downloads.noFile', { file: fileName }))
     }
     mockDeliveredText.delete(fileName)
   },
@@ -2492,7 +2498,7 @@ export const mockApi: MkpApi = {
     const before = mockArchived.length
     mockArchived = mockArchived.filter((a) => a.path !== path)
     if (mockArchived.length === before) {
-      throw new Error(`归档区里没有 ${path} —— 它可能已经被删掉了`)
+      throw new Error(t('mock.archive.noFile', { file: path }))
     }
   },
 
@@ -2523,7 +2529,7 @@ export const mockApi: MkpApi = {
     if (demo !== null) return demo
     throw new NotImplementedError(
       'readDownloadedText',
-      '浏览器预览里没有下载区，读不到这份的正文 —— 用桌面版就能看',
+      t('mock.preview.noDownloads'),
     )
   },
 
@@ -2542,13 +2548,13 @@ export const mockApi: MkpApi = {
        只认 http(s)、砍尾斜杠、空地址拒绝 */
     if (mode === 'custom') {
       const url = (customUrl ?? '').trim().replace(/\/+$/, '')
-      if (url === '') throw new Error('数据源地址是空的')
+      if (url === '') throw new Error(t('mock.settings.emptyUrl'))
       if (!url.startsWith('http://') && !url.startsWith('https://')) {
-        throw new Error(`数据源地址只认 http:// 或 https://，填进来的是 ${url}`)
+        throw new Error(t('mock.settings.badUrl', { url }))
       }
       mockSource = {
         mode: 'custom',
-        label: '自定义地址',
+        label: t('mock.settings.customUrl'),
         address: url,
         fromUser: true,
         builtin: [],
@@ -2560,7 +2566,7 @@ export const mockApi: MkpApi = {
       return mockSource
     }
     if (mode !== 'github' && mode !== 'gitee') {
-      throw new Error(`认不出的源：${mode}（只能是 github / gitee / custom）`)
+      throw new Error(t('mock.settings.badSource', { value: mode }))
     }
     // 演示后端没有内置源：选了内置 = 回到"没配"（与上面那段注释同一口径）
     mockSource = null
@@ -2582,7 +2588,7 @@ export const mockApi: MkpApi = {
 
   async setTheme(theme) {
     if (theme !== 'light' && theme !== 'dark' && theme !== 'system') {
-      throw new Error(`认不出的主题：${theme}（只能是 light / dark / system）`)
+      throw new Error(t('mock.settings.badTheme', { value: theme }))
     }
     mockTheme = theme
     return mockTheme
@@ -2656,7 +2662,7 @@ export const mockApi: MkpApi = {
 
   /* 浏览器里没有钩子，也就没有"残留状态"——照实说，不假装清掉了什么 */
   async resetPostProcessState() {
-    return '浏览器预览里没有正在跑的处理 —— 不用重置'
+    return t('mock.preview.noRunning')
   },
 
   /*
@@ -2673,7 +2679,7 @@ export const mockApi: MkpApi = {
   },
 
   async uninstall() {
-    throw new NotImplementedError('浏览器预览里不能卸载应用')
+    throw new NotImplementedError(t('mock.preview.noUninstall'))
   },
 
   /*
@@ -2686,7 +2692,7 @@ export const mockApi: MkpApi = {
 
   async setLocale(locale: LocalePref) {
     if (locale !== 'system' && locale !== 'zh-CN' && locale !== 'en') {
-      throw new Error(`认不出的界面语言：${locale}（只能是 system / zh-CN / en）`)
+      throw new Error(t('mock.settings.badLocale', { value: locale }))
     }
     mockLocale = locale
     return mockLocale
@@ -2703,7 +2709,7 @@ export const mockApi: MkpApi = {
   /* 第二个参数（`onBbs`）在演示后端没有读者：浏览器里本来就没有"置顶"这件事 */
   async setPin(pin: PinPref) {
     if (pin !== 'off' && pin !== 'page' && pin !== 'always') {
-      throw new Error(`认不出的置顶档：${pin}（只能是 off / page / always）`)
+      throw new Error(t('mock.settings.badPin', { value: pin }))
     }
     mockPin = pin
     return mockPin
@@ -2738,18 +2744,18 @@ export const mockApi: MkpApi = {
     const text = mockLocalText.get(path)
     const fileName = path.split('/').pop() ?? path
     if (text === undefined) {
-      return { path, fileName, values: {}, problem: `找不到 ${path}` }
+      return { path, fileName, values: {}, problem: t('mock.err.notFound', { path }) }
     }
     return { path, fileName, values: readMockParams(text), problem: null }
   },
 
   async savePresetParams(path: string, edits: ParamEdit[]) {
     const text = mockLocalText.get(path)
-    if (text === undefined) throw new Error(`找不到 ${path} —— 没有动别的地方`)
+    if (text === undefined) throw new Error(t('mock.err.notFoundUntouched', { path }))
     let next = text
     for (const e of edits) {
       const def = rawParamDefs().find((d) => d.key === e.paramKey)
-      if (def === undefined) throw new Error(`不认识这个参数：${e.paramKey}`)
+      if (def === undefined) throw new Error(t('mock.params.unknown', { param: e.paramKey }))
       next = patchMockParam(next, def, e.value)
     }
     if (next === text) return
@@ -2771,12 +2777,12 @@ export const mockApi: MkpApi = {
 
   async applyPresetParamDecisions(path: string, decisions: ParamDecision[]) {
     const text = mockLocalText.get(path)
-    if (text === undefined) throw new Error(`找不到 ${path}`)
+    if (text === undefined) throw new Error(t('mock.err.notFound', { path }))
     const before = mockSyncOf(path)
     const current =
       before.cloudFileName === null ? undefined : mockParamCurrent.get(before.cloudFileName)
     if (current === undefined) {
-      throw new Error('云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一项')
+      throw new Error(t('mock.cloud.bodyNotLocal'))
     }
     /*
      * 与真机同一条写规矩（2026-10-20）：**以云端当前版正文为骨架**重写这一份 ——
@@ -2787,12 +2793,12 @@ export const mockApi: MkpApi = {
     const book = mockParamDecisions.get(path) ?? new Map()
     for (const d of decisions) {
       if (d.kind !== 'adopt' && d.kind !== 'hold') {
-        throw new Error(`不认得这种处理方式：${d.kind}（只有 adopt / hold）`)
+        throw new Error(t('mock.adopt.badKind', { value: d.kind }))
       }
       if (d.kind === 'adopt') {
         const value = before.entries.find((e) => e.key === d.paramKey)?.cloudNew
         if (value === null || value === undefined) {
-          throw new Error(`云端当前版里没有 ${d.paramKey} 的新值 —— 采用不了`)
+          throw new Error(t('mock.adopt.noValue', { param: d.paramKey }))
         }
       }
       kinds.set(d.paramKey, d.kind)
@@ -2881,7 +2887,7 @@ export const mockApi: MkpApi = {
   async readArchivedText() {
     throw new NotImplementedError(
       'readArchivedText',
-      '浏览器预览里没有归档区，读不到这份旧版本的正文 —— 用桌面版（跑过一次更新）就能看',
+      t('mock.preview.noArchive'),
     )
   },
 
@@ -2902,7 +2908,7 @@ export const mockApi: MkpApi = {
     if (origin !== 'local') {
       throw new NotImplementedError(
         'applyActivePreset',
-        `浏览器预览里没有 ${fileName} 的字节，应用云端预设要用桌面版（先在桌面版里下载一份）`,
+        t('mock.preview.noBytes', { file: fileName }),
       )
     }
     /*
@@ -2916,29 +2922,29 @@ export const mockApi: MkpApi = {
      * 加上原来的"文件得在、内容得读得出来"。
      */
     if (path === undefined || path === '') {
-      throw new Error('用自己那份要给出它在用户根里的路径（presets-local/…）')
+      throw new Error(t('mock.user.pathRequired'))
     }
     /* ② 前缀闸：与后端同一句话的形状（`只读用户自己的预设（要 … 开头，给的是 …）`） */
     if (!path.startsWith(LOCAL_PREFIX)) {
       throw new Error(
-        `只读用户自己的预设（要 ${LOCAL_PREFIX}… 开头，给的是 ${path}）`,
+        t('mock.user.onlyUserPresets', { prefix: LOCAL_PREFIX, path }),
       )
     }
     if (path.slice(LOCAL_PREFIX.length).split('/').includes('..')) {
-      throw new Error(`路径里不许有 .. —— 给的路径是 ${path}`)
+      throw new Error(t('mock.user.noDotDot', { path }))
     }
     /* ③ 类型闸（后端 `kind_of`：只认 `.toml`；大小写不敏感，但用户文件里只认预设） */
     if (!fileName.toLowerCase().endsWith('.toml')) {
       throw new Error(
-        `${fileName} 不是一份 MKP 预设（TOML）—— 用户文件里只有预设能被使用`,
+        t('mock.user.notPreset', { file: fileName }),
       )
     }
     const hit = mockLocal.find((f) => f.path === path)
-    if (hit === undefined) throw new Error(`用户目录里没有 ${path}`)
+    if (hit === undefined) throw new Error(t('mock.user.noSuchFile', { path }))
     /* 第九层：读不出来的那份**不许应用**（真机入口闸会拒；消息形状对齐后端） */
     if (hit.state === 'unreadable') {
       throw new Error(
-        `${hit.path} 读不出来：${hit.stateDetail ?? 'TOML 语法不对'} —— 这一份现在不能应用、也不能改`,
+        t('mock.preset.unreadable', { file: hit.path, why: hit.stateDetail ?? t('mock.err.toml') }),
       )
     }
     mockActive = {
@@ -2971,7 +2977,7 @@ export const mockApi: MkpApi = {
    */
   async fetchCloudPreset(fileName, renameIfTaken = false) {
     const hit = mockPresetFile(fileName)
-    if (hit === undefined) throw new Error(`目录里没有 ${fileName} 这一份`)
+    if (hit === undefined) throw new Error(t('mock.catalog.noFile', { file: fileName }))
     /*
      * ★★ 2026-10-14：原来这里有个闸 —— 演示集合里没有的那份**直接拒**。
      * 现在**逻辑要真**：目录里登记的任何一份都能取回（内存里模拟一次交付，
@@ -3079,14 +3085,14 @@ export const mockApi: MkpApi = {
   async checkRemoteUpdate() {
     throw new NotImplementedError(
       'checkRemoteUpdate',
-      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+      t('mock.preview.noRemoteCatalog'),
     )
   },
 
   async applyRemoteUpdate() {
     throw new NotImplementedError(
       'applyRemoteUpdate',
-      '浏览器预览里没有远端目录 —— 目录更新是桌面版自动做的事，这里不用管',
+      t('mock.preview.noRemoteCatalog'),
     )
   },
 
@@ -3108,7 +3114,7 @@ export const mockApi: MkpApi = {
   async locateBedTypeControl(): Promise<GuideTarget> {
     return {
       ready: false,
-      reason: '开发台里没有屏幕引导：它要读切片器窗口的坐标（真机上才有）',
+      reason: t('mock.dev.noScreenGuide'),
     }
   },
 
@@ -3129,7 +3135,7 @@ export const mockApi: MkpApi = {
       hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
       currentVersion: MOCK_APP_VERSION,
       latestVersion: MOCK_NEW_VERSION,
-      notes: '演示：更新检查是独立的一条链（release.json），与预设数据无关。',
+      notes: t('mock.demo.updateChain'),
       url: 'https://example.com/supportease/releases',
       /* 演示带安装包 ⇒ 界面会摆「在应用内下载」；删掉这一格就退回"打开下载页" */
       asset: {
@@ -3151,7 +3157,7 @@ export const mockApi: MkpApi = {
       hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
       currentVersion: MOCK_APP_VERSION,
       latestVersion: MOCK_NEW_VERSION,
-      notes: '演示：应用内更新的进度、暂停与重启安装。',
+      notes: t('mock.demo.updateFlow'),
       url: 'https://example.com/supportease/releases',
       asset: {
         name: 'SupportEase_demo.app.zip',

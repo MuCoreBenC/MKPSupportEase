@@ -16,7 +16,9 @@
             "layer_height",
             "initial_layer_print_height",
             "enable_mixed_color_sublayer"
-          ]
+          ],
+          "name_ja": "積層ピッチ",
+          "name_zh_tw": "層高"
         },
         {
           "name_en": "Line width",
@@ -31,7 +33,9 @@
             "sparse_infill_line_width",
             "internal_solid_infill_line_width",
             "support_line_width"
-          ]
+          ],
+          "name_ja": "線幅",
+          "name_zh_tw": "線寬"
         },
         {
           "name_en": "Seam",
@@ -53,7 +57,9 @@
             "seam_slope_min_length",
             "wipe_speed",
             "role_base_wipe_speed"
-          ]
+          ],
+          "name_ja": "継ぎ目",
+          "name_zh_tw": "接縫"
         },
         {
           "name_en": "Precision",
@@ -70,7 +76,9 @@
             "elefant_foot_compensation",
             "precise_outer_wall",
             "precise_z_height"
-          ]
+          ],
+          "name_ja": "精度",
+          "name_zh_tw": "精度"
         },
         {
           "name_en": "Ironing",
@@ -84,7 +92,9 @@
             "ironing_spacing",
             "ironing_inset",
             "ironing_direction"
-          ]
+          ],
+          "name_ja": "アイロン",
+          "name_zh_tw": "熨燙"
         },
         {
           "name_en": "Wall generator",
@@ -98,7 +108,9 @@
             "wall_distribution_count",
             "min_bead_width",
             "min_feature_size"
-          ]
+          ],
+          "name_ja": "壁面生成器",
+          "name_zh_tw": "牆生成器"
         },
         {
           "name_en": "Advanced",
@@ -123,9 +135,13 @@
             "max_travel_detour_distance",
             "avoid_crossing_wall_includes_support",
             "z_direction_outwall_speed_continuous"
-          ]
+          ],
+          "name_ja": "高度な設定",
+          "name_zh_tw": "高階"
         }
-      ]
+      ],
+      "name_ja": "品質",
+      "name_zh_tw": "質量"
     },
     {
       "name_en": "Strength",
@@ -141,7 +157,9 @@
             "alternate_extra_wall",
             "embedding_wall_into_infill",
             "detect_thin_wall"
-          ]
+          ],
+          "name_ja": "壁面",
+          "name_zh_tw": "牆"
         },
         {
           "name_en": "Top/bottom shells",
@@ -161,7 +179,9 @@
             "bottom_color_penetration_layers",
             "infill_instead_top_bottom_surfaces",
             "internal_solid_infill_pattern"
-          ]
+          ],
+          "name_ja": "トップ面/底面",
+          "name_zh_tw": "頂部/底部外殼"
         },
         {
           "name_en": "Sparse infill",
@@ -187,7 +207,9 @@
             "sparse_infill_anchor",
             "sparse_infill_anchor_max",
             "filter_out_gap_fill"
-          ]
+          ],
+          "name_ja": "スパース インフィル",
+          "name_zh_tw": "稀疏填充"
         },
         {
           "name_en": "Advanced",
@@ -203,9 +225,13 @@
             "detect_narrow_internal_solid_infill",
             "ensure_vertical_shell_thickness",
             "detect_floating_vertical_shell"
-          ]
+          ],
+          "name_ja": "高度な設定",
+          "name_zh_tw": "高階"
         }
-      ]
+      ],
+      "name_ja": "強度",
+      "name_zh_tw": "強度"
     },
     {
       "name_en": "Speed",
@@ -219,7 +245,9 @@
           "fields": [
             "initial_layer_speed",
             "initial_layer_infill_speed"
-          ]
+          ],
+          "name_ja": "1層目の速度",
+          "name_zh_tw": "首層速度"
         },
         {
           "name_en": "Other layers speed",
@@ -246,7 +274,9 @@
             "gap_infill_speed",
             "support_speed",
             "support_interface_speed"
-          ]
+          ],
+          "name_ja": "他の層の速度",
+          "name_zh_tw": "其他層速度"
         },
         {
           "name_en": "Travel speed",
@@ -254,7 +284,9 @@
           "icon": "param_travel_speed",
           "fields": [
             "travel_speed"
-          ]
+          ],
+          "name_ja": "移動速度",
+          "name_zh_tw": "空駛速度"
         },
         {
           "name_en": "Acceleration",
@@ -272,7 +304,9 @@
             "sparse_infill_acceleration",
             "accel_to_decel_enable",
             "accel_to_decel_factor"
-          ]
+          ],
+          "name_ja": "加速度",
+          "name_zh_tw": "加速度"
         },
         {
           "name_en": "Jerk(XY)",
@@ -288,9 +322,13 @@
             "travel_jerk",
             "max_volumetric_extrusion_rate_slope_positive",
             "max_volumetric_extrusion_rate_slope_negative"
-          ]
+          ],
+          "name_ja": "ジャーク (XY)",
+          "name_zh_tw": "抖動（XY軸）"
         }
-      ]
+      ],
+      "name_ja": "速度",
+      "name_zh_tw": "速度"
     },
     {
       "name_en": "Support",
@@ -309,7 +347,9 @@
             "support_on_build_plate_only",
             "support_critical_regions_only",
             "support_remove_small_overhang"
-          ]
+          ],
+          "name_ja": "サポート",
+          "name_zh_tw": "支撐"
         },
         {
           "name_en": "Raft",
@@ -318,7 +358,9 @@
           "fields": [
             "raft_layers",
             "raft_contact_distance"
-          ]
+          ],
+          "name_ja": "ラフト",
+          "name_zh_tw": "筏層"
         },
         {
           "name_en": "Support filament",
@@ -328,7 +370,9 @@
             "support_filament",
             "support_interface_filament",
             "support_interface_not_for_body"
-          ]
+          ],
+          "name_ja": "サポート用フィラメント",
+          "name_zh_tw": "支撐耗材"
         },
         {
           "name_en": "Support ironing",
@@ -342,7 +386,9 @@
             "support_ironing_spacing",
             "support_ironing_inset",
             "support_ironing_direction"
-          ]
+          ],
+          "name_ja": "サポートアイロニング",
+          "name_zh_tw": "支撐熨燙"
         },
         {
           "name_en": "Advanced",
@@ -369,7 +415,9 @@
             "bridge_no_support",
             "max_bridge_length",
             "independent_support_layer_height"
-          ]
+          ],
+          "name_ja": "高度な設定",
+          "name_zh_tw": "高階"
         },
         {
           "name_en": "Tree Support",
@@ -380,9 +428,13 @@
             "tree_support_branch_diameter",
             "tree_support_branch_angle",
             "tree_support_branch_diameter_angle"
-          ]
+          ],
+          "name_ja": "ツリーサポート",
+          "name_zh_tw": "樹狀支撐"
         }
-      ]
+      ],
+      "name_ja": "サポート",
+      "name_zh_tw": "支撐"
     },
     {
       "name_en": "Others",
@@ -400,7 +452,9 @@
             "brim_type",
             "brim_width",
             "brim_object_gap"
-          ]
+          ],
+          "name_ja": "ベッド接着",
+          "name_zh_tw": "熱床粘接"
         },
         {
           "name_en": "Prime tower",
@@ -420,7 +474,9 @@
             "prime_tower_fillet_wall",
             "enable_tower_interface_features",
             "wipe_tower_no_sparse_layers"
-          ]
+          ],
+          "name_ja": "プライムタワー",
+          "name_zh_tw": "擦料塔"
         },
         {
           "name_en": "Flush options",
@@ -430,7 +486,9 @@
             "flush_into_infill",
             "flush_into_objects",
             "flush_into_support"
-          ]
+          ],
+          "name_ja": "フラッシュオプション",
+          "name_zh_tw": "換料沖刷選項"
         },
         {
           "name_en": "Special mode",
@@ -452,7 +510,9 @@
             "fuzzy_skin_octaves",
             "fuzzy_skin_persistence",
             "fuzzy_skin_first_layer"
-          ]
+          ],
+          "name_ja": "特別モード",
+          "name_zh_tw": "特殊模式"
         },
         {
           "name_en": "Advanced",
@@ -471,7 +531,9 @@
             "sparse_infill_filament",
             "solid_infill_filament",
             "wall_filament"
-          ]
+          ],
+          "name_ja": "高度な設定",
+          "name_zh_tw": "高階"
         },
         {
           "name_en": "G-code output",
@@ -481,21 +543,29 @@
             "reduce_infill_retraction_mode",
             "gcode_add_line_number",
             "exclude_object"
-          ]
+          ],
+          "name_ja": "G-code出力",
+          "name_zh_tw": "G-code 輸出"
         },
         {
           "name_en": "Post-processing scripts",
           "name": "后处理脚本",
           "icon": "param_gcode",
-          "fields": []
+          "fields": [],
+          "name_ja": "後処理スクリプト",
+          "name_zh_tw": "後處理指令碼"
         },
         {
           "name_en": "Notes",
           "name": "注释",
           "icon": "note",
-          "fields": []
+          "fields": [],
+          "name_ja": "メモ",
+          "name_zh_tw": "註釋"
         }
-      ]
+      ],
+      "name_ja": "その他",
+      "name_zh_tw": "其他"
     }
   ]
 }

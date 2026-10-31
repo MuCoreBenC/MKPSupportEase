@@ -37,6 +37,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::AppError;
+use postprocess::diag::messages;
 
 /// 一份文件在事务开始前的样子（`None` = 当时还不存在）。
 struct Before {
@@ -81,10 +82,8 @@ pub fn atomically<T>(
             Ok(b) => Some(b),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
-                return Err(
-                    AppError::io("事务开始前读不到这份文件，已中止（一个字节都没动）")
-                        .with_detail(format!("{}: {e}", path.display())),
-                )
+                return Err(AppError::io(messages::text("ui.txn.pre_read_failed", &[]))
+                    .with_detail(format!("{}: {e}", path.display())))
             }
         };
         tracked.push(Before {
@@ -115,9 +114,11 @@ pub fn atomically<T>(
                     None => match std::fs::remove_file(&b.path) {
                         Ok(()) => Ok(()),
                         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                        Err(err) => {
-                            Err(AppError::io("回滚时删不掉新文件").with_detail(err.to_string()))
-                        }
+                        Err(err) => Err(AppError::io(messages::text(
+                            "ui.txn.rollback_remove_failed",
+                            &[],
+                        ))
+                        .with_detail(err.to_string())),
                     },
                 };
                 if let Err(rollback) = done {
@@ -133,10 +134,13 @@ pub fn atomically<T>(
                     failed = failed.len(),
                     "客户端事务失败，且有几份没能退回去"
                 );
-                Err(e.with_detail(format!(
-                    "回滚没能退完这几份，请手工核对：{}",
-                    failed.join("；")
-                )))
+                {
+                    let joined = failed.join("；");
+                    Err(e.with_detail(messages::text(
+                        "ui.txn.rollback_incomplete",
+                        &[("files", joined.as_str())],
+                    )))
+                }
             }
         }
     }

@@ -1093,7 +1093,15 @@ pub struct SectionTarget {
 pub struct ParamView {
     pub key: String,
     pub label: String,
+    /// 四册的另外三册（2026-10-31）：工作台定义框要能看见/编辑它们，
+    /// 也是「预览语言」切换的数据来源。空 = 这一册没译，界面回落中文
+    pub label_en: String,
+    pub label_ja: String,
+    pub label_tw: String,
     pub desc: String,
+    pub desc_en: String,
+    pub desc_ja: String,
+    pub desc_tw: String,
     pub toml_key: String,
     pub section_id: String,
     pub tab_id: Option<String>,
@@ -1121,6 +1129,10 @@ pub struct ParamView {
 #[serde(rename_all = "camelCase")]
 pub struct ChoiceView {
     pub label: String,
+    /// 选项名的另外三册（2026-10-31）
+    pub label_en: String,
+    pub label_ja: String,
+    pub label_tw: String,
     pub value: Value,
     /// **显式全局弃用** —— 定义框那颗勾的状态，回写只认这一格。
     /// 之前这里是「显式 ∪ 推定」的并集，打开框再保存会把推定值固化成 `deprecated = true`
@@ -1193,7 +1205,13 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
     ParamView {
         key: p.key.clone(),
         label: p.label.clone(),
+        label_en: p.label_en.clone(),
+        label_ja: p.label_ja.clone(),
+        label_tw: p.label_tw.clone(),
         desc: p.desc.clone(),
+        desc_en: p.desc_en.clone(),
+        desc_ja: p.desc_ja.clone(),
+        desc_tw: p.desc_tw.clone(),
         toml_key: p.toml_key.clone(),
         tab_id: reg.tab_of_section(&p.layout.section_id).map(str::to_owned),
         section_id: p.layout.section_id.clone(),
@@ -1213,6 +1231,9 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
             .zip(dead)
             .map(|(c, dead)| ChoiceView {
                 label: c.label.clone(),
+                label_en: c.label_en.clone(),
+                label_ja: c.label_ja.clone(),
+                label_tw: c.label_tw.clone(),
                 value: c.value.clone(),
                 derived: dead && !c.deprecated && c.deprecated_machines.is_empty(),
                 deprecated: c.deprecated,

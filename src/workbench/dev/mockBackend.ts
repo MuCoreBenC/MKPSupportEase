@@ -1399,12 +1399,15 @@ function buildRegistry(): Json {
     tabs: TABS,
     params: PARAMS.map((pdef) => ({
       key: pdef.key, label: pdef.label, desc: pdef.desc, tomlKey: pdef.key,
+      /* 夹具不带译文：三册给空串（真数据里它们是可选册，空 = 回落中文） */
+      labelEn: '', labelJa: '', labelTw: '', descEn: '', descJa: '', descTw: '',
       sectionId: pdef.sectionId, tabId: pdef.tabId, order: pdef.order,
       valueType: pdef.valueType, uiComponent: pdef.uiComponent,
       defaultValue: pdef.defaultValue, defaultText: valueText(pdef, pdef.defaultValue),
       min: pdef.min, max: pdef.max, step: pdef.step, unit: pdef.unit,
       choices: pdef.choices.map((c) => ({
         label: c.label,
+        labelEn: '', labelJa: '', labelTw: '',
         value: c.value,
         deprecated: c.deprecated,
         deprecatedMachines: c.deprecatedMachines ?? [],

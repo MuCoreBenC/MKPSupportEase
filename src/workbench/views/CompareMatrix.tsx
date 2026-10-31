@@ -13,7 +13,7 @@
  * 点在下拉浮层里不算空白（浮层 portal 到 FieldLayer，按 `data-popover` 认）。
  * 「点一下换下一个值」试过又被作者撤掉——**选项要能看见**，浮层开就行。
  */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import type { Col, Matrix, ParamView, Row, Words } from '../api'
 import CellEditor from './CellEditor'
@@ -33,6 +33,14 @@ interface Props {
   onPickBatch: (key: string) => void
   /** 写一个格子。层由那一列决定（基底列 = 机型层，其余 = 版本层） */
   onWriteCell: (col: Col, row: Row, param: ParamView, next: string) => void
+  /**
+   * 多行 G-code：**打开模态框**那一枚按钮的动作（C14 第十八轮那枚「开新窗口」）。
+   *
+   * 由参数台给（模态框挂在定位祖先上，不能挂在一行里）；不给就不画那枚按钮。
+   * 单版本那一行一直是这么接的 —— 对照矩阵这一支最初漏了，于是格子里虽能就地改，
+   * 却打不开全屏编辑器（2026-10-31 补上）。
+   */
+  onOpenGcode?: (col: Col, row: Row, param: ParamView) => void
 }
 
 /**
@@ -54,10 +62,40 @@ export default function CompareMatrix({
   onPick,
   onPickBatch,
   onWriteCell,
+  onOpenGcode,
 }: Props) {
   const [editing, setEditing] = useState<string | null>(null)
   /** 正在编辑的那一格。点外面时用它判断「这一下是不是点在格子里」 */
   const editRef = useRef<HTMLSpanElement | null>(null)
+
+  /**
+   * G-code 浮窗的落点（2026-10-31 第三修）。
+   *
+   * 浮窗是 `position: fixed`：**只有脱离 `.matrix` 那个 `overflow: auto`**，
+   * 它才能长到表格容器外面去。作者的原话：「还是被截断了呀，它可以出现到下面的呀」
+   * —— 那一眼看到的正是「框的下沿与表格底边齐平」，下面明明还有空地。
+   *
+   * 位置由这一格自己的 `getBoundingClientRect()` 算，写回 `--gce-left/top`：
+   *   · 右边界放不下 ⇒ 贴格子右沿向左展开；
+   *   · 视口下方放不下 ⇒ 贴格子下沿向上展开；
+   * 滚动（含表格自己的横向滚动）/ 窗口缩放时跟着走。
+   */
+  const placeGcode = useCallback(() => {
+    const cell = editRef.current
+    const wrap = cell?.querySelector<HTMLElement>('[class*="pGwrap"]')
+    if (!cell || !wrap) return
+    const box = cell.getBoundingClientRect()
+    const w = wrap.offsetWidth
+    const h = wrap.offsetHeight
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    let left = box.left
+    if (left + w > vw - 8) left = Math.max(8, Math.min(box.right - w, vw - w - 8))
+    let top = box.top
+    if (top + h > vh - 8) top = Math.max(8, box.bottom - h)
+    cell.style.setProperty('--gce-left', `${Math.round(left)}px`)
+    cell.style.setProperty('--gce-top', `${Math.round(top)}px`)
+  }, [])
 
   /*
    * 参数行没有刷选、没有多选（C14 第十五轮）：一次只选一个参数。
@@ -72,6 +110,32 @@ export default function CompareMatrix({
     )
     node?.focus()
   }, [editing])
+
+  /* 浮窗落点：每次提交后（含内容改动导致宽高变）都重算一次，绘制前完成 */
+  useLayoutEffect(() => {
+    if (editing === null) return
+    placeGcode()
+  })
+
+  /* 滚动（表格内滚也算）/ 窗口缩放时跟着格子走；rAF 合并成每帧一次 */
+  useEffect(() => {
+    if (editing === null) return
+    let raf = 0
+    const soon = () => {
+      if (raf !== 0) return
+      raf = requestAnimationFrame(() => {
+        raf = 0
+        placeGcode()
+      })
+    }
+    window.addEventListener('scroll', soon, true)
+    window.addEventListener('resize', soon)
+    return () => {
+      if (raf !== 0) cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', soon, true)
+      window.removeEventListener('resize', soon)
+    }
+  }, [editing, placeGcode])
 
   /* 点空白收起编辑态；浮层（data-popover）不算外面 */
   useEffect(() => {
@@ -188,6 +252,10 @@ export default function CompareMatrix({
                           cell={cell}
                           form="cell"
                           onWrite={(next) => onWriteCell(c, row, p, next)}
+                          /* G-code 那枚「打开编辑器」：与单版本行上那枚同一个动作 */
+                          onOpenGcode={
+                            onOpenGcode ? () => onOpenGcode(c, row, p) : undefined
+                          }
                         />
                       </span>
                     ) : cell.editable ? (

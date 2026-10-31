@@ -68,7 +68,50 @@ void (async () => {
     createRoot(host).render(<GuideCard />)
     return
   }
-  const { default: App } = await import('./app/App')
+  /*
+   * ★★ 首帧的**语言与主题**在挂 React 之前就问好（2026-10-31）。
+   *
+   * 这一段等待**用户看不见**：屏幕上这会儿是 `index.html` 那具骨架，不是业务界面。
+   * 换来的是一整类中间态消失 —— 原来 React 一挂上来就按**系统语言**出字
+   * （`i18n` 的 `active = resolveLocale(null)`），要等 `appState` 那次 IPC 回来
+   * 才换成用户选的那一档：用户把界面语言设成日文、系统却是中文时，启动会先闪一帧中文。
+   * 主题也是同一件事（`appState` 的 theme 格同样要一次 IPC）。
+   *
+   * 判据**不在这里重写**：语言交给 `i18n.resolveLocale`，深浅交给 `state/theme`
+   * 的 `applyTheme` —— 与 AppState 落地时调的是同一对函数，只是提前调用一次。
+   * 上面那行 `applyTheme(null)` 保留：它兜的是"连 IPC 都还没通"的那一小段（先按系统落一档）。
+   *
+   * 三个 import 与 `App` 并行发起（App 本来就依赖它们，不会多下载一份）。
+   */
+  const [{ default: App }, { api }, { applyTheme }, i18n] = await Promise.all([
+    import('./app/App'),
+    import('./api'),
+    import('./app/state/theme'),
+    import('./i18n'),
+  ])
+  const [themePref, localePref, active] = await Promise.all([
+    api.getTheme().catch(() => null),
+    api.getLocale().catch(() => null),
+    api.getActivePreset().catch(() => null),
+  ])
+  applyTheme(themePref)
+  i18n.setActiveLocale(i18n.resolveLocale(localePref))
+
+  /*
+   * 骨架中间那台机器按**正在用的机型**换（2026-10-31）。
+   *
+   * 原来骨架只描了 A1 一份，选了 A1 mini / P1S 的用户刷新时看到的还是 A1 的剪影
+   * （作者：「我有的它是 mini 的，但是刷新骨架是这样的，其他的都变成了 A1」）。
+   * 五份轮廓都写在 `index.html` 里（各按机型一张，带自己的 viewBox），这里只负责
+   * 把机型名写到 `#boot` 上，让那几条 `#boot[data-machine='…']` 的规则挑中一张。
+   *
+   * 读不到（首次安装 / mock）就**不写**：那种情况骨架停在默认那张 A1 上 —— 不猜。
+   */
+  const boot = document.getElementById('boot')
+  if (boot !== null && active !== null) {
+    boot.dataset.machine = active.machineId
+  }
+
   createRoot(host).render(
     <StrictMode>
       <App />

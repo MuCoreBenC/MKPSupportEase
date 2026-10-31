@@ -1,3 +1,4 @@
+import { t } from '../../i18n'
 import { allPresetFiles } from './resources'
 
 /*
@@ -122,9 +123,9 @@ export function slicerCopied(): string[] {
  */
 export function copyToSlicerIn(fileName: string): boolean {
   const hit = allPresetFiles().find((f) => f.fileName === fileName)
-  if (hit === undefined) throw new Error(`仓库里没有这个文件：${fileName}`)
+  if (hit === undefined) throw new Error(t('mock.slicer.noSuchFile', { file: fileName }))
   if (hit.kind === 'mkp_preset') {
-    throw new Error(`${hit.fileName} 是 MKP 预设，不用复制到切片器 —— 它走「启用」`)
+    throw new Error(t('mock.slicer.notMKP', { file: hit.fileName }))
   }
   const replaced = DEMO_SLICER_COPIED.has(fileName)
   DEMO_SLICER_COPIED.add(fileName)

@@ -3867,6 +3867,137 @@ text_en = "The data is malformed and could not be parsed"
 text_zh_tw = "資料格式不對，解析失敗"
 text_ja = "データ形式が正しくなく、解析に失敗"
 
+# ── 存储 / 回收站 / 事务（2026-10-31 第三刀）───────────────────────────────────
+# 这些句子原来直接写死在 `runtime/*.rs` 的 `AppError::io("…")` 里，日语/英语界面
+# 会原样冒出中文。都是用户点「删除预设 / 恢复 / 清空回收站」时能读到的话。
+
+["ui.recovery.read_failed"]
+text = "回收记录读不出来"
+text_en = "Could not read the recycle record"
+text_zh_tw = "回收記錄讀不出來"
+text_ja = "ごみ箱の記録を読み取れません"
+
+["ui.recovery.corrupt"]
+text = "回收记录坏了"
+text_en = "The recycle record is corrupted"
+text_zh_tw = "回收記錄壞了"
+text_ja = "ごみ箱の記録が壊れています"
+
+["ui.recovery.source_read_failed"]
+text = "要删除的预设读不出来"
+text_en = "Could not read the preset to delete"
+text_zh_tw = "要刪除的預設讀不出來"
+text_ja = "削除するプリセットを読み取れません"
+
+["ui.recovery.dir_create_failed"]
+text = "回收目录建不出来"
+text_en = "Could not create the recycle folder"
+text_zh_tw = "回收目錄建不出來"
+text_ja = "ごみ箱のフォルダーを作成できません"
+
+["ui.recovery.manifest_write_failed"]
+text = "回收记录写不出来"
+text_en = "Could not write the recycle record"
+text_zh_tw = "回收記錄寫不出來"
+text_ja = "ごみ箱の記録を書き込めません"
+
+["ui.recovery.delete_failed"]
+text = "预设删不掉（原文件还在）"
+text_en = "Could not delete the preset (the original file is still there)"
+text_zh_tw = "預設刪不掉（原檔案還在）"
+text_ja = "プリセットを削除できません（元のファイルは残っています）"
+
+["ui.recovery.not_found"]
+text = "回收站里没有这一条"
+text_en = "That entry is not in the recycle bin"
+text_zh_tw = "回收站裡沒有這一條"
+text_ja = "ごみ箱にこの項目はありません"
+
+["ui.recovery.name_taken"]
+text = "原位置已经有一份同名预设，先改名或删掉它再恢复"
+text_en = "A preset with the same name already exists there — rename or delete it before restoring"
+text_zh_tw = "原位置已經有一份同名預設，先改名或刪掉它再還原"
+text_ja = "元の場所に同じ名前のプリセットがあります。名前変更か削除をしてから復元してください"
+
+["ui.recovery.restore_dir_failed"]
+text = "恢复目录建不出来"
+text_en = "Could not create the restore folder"
+text_zh_tw = "還原目錄建不出來"
+text_ja = "復元先のフォルダーを作成できません"
+
+["ui.recovery.copy_read_failed"]
+text = "回收副本读不出来"
+text_en = "Could not read the recycled copy"
+text_zh_tw = "回收副本讀不出來"
+text_ja = "ごみ箱の控えを読み取れません"
+
+["ui.recovery.dir_remove_failed"]
+text = "回收目录删不掉"
+text_en = "Could not remove the recycle folder"
+text_zh_tw = "回收目錄刪不掉"
+text_ja = "ごみ箱のフォルダーを削除できません"
+
+["ui.recovery.entry_remove_failed"]
+text = "回收条目删不掉"
+text_en = "Could not remove the recycle entry"
+text_zh_tw = "回收條目刪不掉"
+text_ja = "ごみ箱の項目を削除できません"
+
+["ui.migrate.baseline_read_failed"]
+text = "旧基准读不出来"
+text_en = "Could not read the old baseline"
+text_zh_tw = "舊基準讀不出來"
+text_ja = "旧ベースラインを読み取れません"
+
+["ui.migrate.delivery_read_failed"]
+text = "旧交付文件读不出来"
+text_en = "Could not read the old delivery file"
+text_zh_tw = "舊交付檔案讀不出來"
+text_ja = "旧配布ファイルを読み取れません"
+
+["ui.migrate.marker_write_failed"]
+text = "迁移标记写不出来"
+text_en = "Could not write the migration marker"
+text_zh_tw = "遷移標記寫不出來"
+text_ja = "移行マーカーを書き込めません"
+
+["ui.migrate.path_outside_root"]
+text = "旧交付路径不在数据根里"
+text_en = "The old delivery path is outside the data root"
+text_zh_tw = "舊交付路徑不在資料根裡"
+text_ja = "旧配布パスがデータルートの外にあります"
+
+["ui.txn.pre_read_failed"]
+text = "事务开始前读不到这份文件，已中止（一个字节都没动）"
+text_en = "Could not read this file before the transaction; aborted with nothing written"
+text_zh_tw = "事務開始前讀不到這份檔案，已中止（一個位元組都沒動）"
+text_ja = "トランザクション開始前にこのファイルを読めなかったため中止しました（1 バイトも書き換えていません）"
+
+["ui.txn.rollback_remove_failed"]
+text = "回滚时删不掉新文件"
+text_en = "Could not delete the new file while rolling back"
+text_zh_tw = "回滾時刪不掉新檔案"
+text_ja = "ロールバック時に新しいファイルを削除できません"
+
+["ui.txn.rollback_incomplete"]
+text = "回滚没能退完这几份，请手工核对：{files}"
+text_en = "Rollback could not restore these files; please check them manually: {files}"
+text_zh_tw = "回滾沒能退完這幾份，請手動核對：{files}"
+text_ja = "ロールバックしきれなかったファイルがあります。手動で確認してください：{files}"
+params = ["files"]
+
+["ui.storage.index_write_failed"]
+text = "目录索引写不出来"
+text_en = "Could not write the catalog index"
+text_zh_tw = "目錄索引寫不出來"
+text_ja = "カタログ索引を書き込めません"
+
+["ui.presetdata.bundle_display_missing"]
+text = "套餐要有给人看的名字（display）"
+text_en = "A bundle needs a display name (display)"
+text_zh_tw = "套餐要有給人看的名字（display）"
+text_ja = "バンドルには表示名（display）が必要です"
+
 # ── `with_detail(...)` 那些「为什么」的补充说明（2026-10-26 第二刀）────────────
 # 这些句子跟着 `AppError` 一起到前端，展开详情才看得见 —— 也是用户能读到的话。
 

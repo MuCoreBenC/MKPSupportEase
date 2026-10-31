@@ -24,6 +24,10 @@ export interface BbsOpt {
   value: string
   label_en?: string
   label_zh?: string
+  /* 2026-10-31：BBS 官方语言包的日 / 繁中（取自 `resources/i18n/{ja,zh_TW}/BambuStudio.mo`）。
+     缺了回落中文 —— 数据没译完不能变成"这个选项没有名字"。 */
+  label_ja?: string
+  label_zh_tw?: string
   icon?: string | null
 }
 
@@ -32,7 +36,8 @@ export type BbsParamType = 'num' | 'bool' | 'sel' | 'text'
 
 /** registry.json 里一条参数的定义（702 条） */
 export interface BbsParamMeta {
-  label?: { zh?: string; en?: string }
+  /** 四册：`zh` / `en` 来自上游提取器，`ja` / `zh_tw` 由 BBS 官方语言包补（2026-10-31） */
+  label?: { zh?: string; en?: string; ja?: string; zh_tw?: string }
   unit?: { zh?: string; en?: string }
   /** C++ 原类型：coFloat / coInt / coPercent / coFloatOrPercent … 数值显示规则看它 */
   co?: string
@@ -54,6 +59,8 @@ export interface BbsRegistryFile {
 export interface BbsLayoutGroup {
   name: string
   name_en?: string
+  name_ja?: string
+  name_zh_tw?: string
   /** icons.json 里的键名，来自 Tab.cpp 的 new_optgroup 第二个参数 */
   icon?: string
   fields: string[]
@@ -62,6 +69,8 @@ export interface BbsLayoutGroup {
 export interface BbsLayoutTab {
   name: string
   name_en?: string
+  name_ja?: string
+  name_zh_tw?: string
   icon?: string
   groups: BbsLayoutGroup[]
 }
