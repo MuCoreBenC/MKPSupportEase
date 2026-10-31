@@ -4,7 +4,7 @@ import { createRoot } from 'react-dom/client'
 import './styles/tokens.css'
 import './styles/global.css'
 
-import { applyTheme } from './app/state/theme'
+import { applyTheme, readStoredTheme } from './app/state/theme'
 
 /*
  * 入口只做一件事：把该挂的那一棵挂上去。
@@ -21,6 +21,24 @@ import { applyTheme } from './app/state/theme'
  */
 const host = document.getElementById('root')
 if (!host) throw new Error('index.html 里没有 #root')
+
+/*
+ * ★★ 正式构建里**关掉 WebView 自带的右键菜单**（2026-10-31 作者）。
+ *
+ * 作者：「正式编译打包发布之后……只有我自己自定义的右键菜单出现，其他的都不出现」。
+ * 截图里那一份（Open Image in New Window / Download Image / Copy Image / Copy Subject /
+ * Look Up / Share / Inspect Element）是 **macOS 原生菜单**，由 WKWebView 自己弹的，
+ * 不是我们画的 —— 只能在 `contextmenu` 上压住默认行为。
+ *
+ * 判据只有一条：**开发构建放行**（作者要留着 Inspect Element 调试），正式构建拦。
+ * 监听放在 capture：页面里任何元素自己的 handler 之前就压住，不必等冒泡到底。
+ *
+ * ★ 只 `preventDefault`、**不 `stopPropagation`**：自定义菜单（`useContextMenu` 的
+ *   `onContextMenu`，住在行上、冒泡阶段）还要靠这一下才能开。
+ */
+if (import.meta.env.PROD) {
+  window.addEventListener('contextmenu', (e) => e.preventDefault(), true)
+}
 
 const isGuide = new URLSearchParams(window.location.search).get('guide') === '1'
 
@@ -44,7 +62,7 @@ if (isGuide) document.documentElement.dataset.guide = '1'
  * 系统走一帧、随后被 appState 覆盖 —— 一帧偏差比整扇窗白闪好。判据仍只有
  * `theme.ts` 的 `resolveDark` 那一份，这里不另写。
  */
-applyTheme(null)
+applyTheme(readStoredTheme())
 
 void (async () => {
   if (isGuide) {

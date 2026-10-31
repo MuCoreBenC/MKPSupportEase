@@ -187,6 +187,29 @@
   background: var(--hover-2);
 }
 
+/*
+ * 拖窗一开始就撤掉按压 / 悬停观感（2026-10-31 作者：「拖动的之后，就不是说去点它」）。
+ *
+ * `useTitlebarDrag` 判定"动过阈值 = 拖窗"时给 `<body>` 挂 `data-window-dragging`，
+ * 正常松手 / 下一次在标题栏按下时摘掉。为什么需要这一条：系统接管拖窗之后
+ * webview 收不到 mouseup，`:active` 会一直挂着 —— 拖完窗口字标还停在
+ * `scale(0.96)` 的"被按住"样子，看起来就像是顺手点了它一下。
+ *
+ * ★ 特异性不能省：原来的 `.logo[data-clickable='true']:active` 是 (0,3,0)，
+ *   上一版这里只写 `.logo:active`（(0,2,1)）**输了**，规则根本没生效。
+ *   现在把 `[data-clickable='true']` 一起写上，并且把 `:hover` 也带上（拖窗时指针
+ *   就压在字标上，只撤 `:active` 的话它还亮着一层底色）。
+ *
+ * 只覆盖"盒模型之外"的属性（transform / background），不改字号字重 —— 理由同上一条注释。
+ * `body[…]` 是标签 + 属性选择器，CSS Modules 只改类名，不会被 hash 掉。
+ */
+body[data-window-dragging='true'] .logo[data-clickable='true'],
+body[data-window-dragging='true'] .logo[data-clickable='true']:hover,
+body[data-window-dragging='true'] .logo[data-clickable='true']:active {
+  transform: none;
+  background: transparent;
+}
+
 /* 入场"亮一下"：一次，不循环。`forwards` 把终态按在"完全不着色"上，
    不留残影（这是全站那条"fill:forwards 会把元素永久按在透明"的相反用法 ——
    这里终态恰恰就是透明，所以安全）。 */
