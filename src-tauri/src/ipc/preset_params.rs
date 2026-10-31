@@ -24,8 +24,8 @@ use crate::error::AppError;
 use crate::fsx::paths::{internal_root, user_root};
 use crate::ipc::traced;
 use crate::presetdata::params as param_alg;
-use crate::presetdata::patch::FieldEdit;
 use crate::runtime;
+use postprocess::diag::messages;
 
 /// 一份用户预设的参数值（对比台里的一列）。
 #[derive(Debug, Clone, Serialize)]
@@ -92,7 +92,18 @@ pub async fn read_preset_params(
 
 /// 把一批改过的参数写回**它自己那一份**（同一路径，不产生第二份）。
 ///
-/// 空改动直接返回（不写盘）；算出来与原文一样也**不写盘**（一次空操作不该刷新 mtime）。
+/// # 2026-10-31：这里**不再直接写盘**
+///
+/// 对比台原来绕过草稿，`runtime::local::write_text` 一按保存就落盘 —— 同一份文件
+/// 于是有两条写路径（参数页走草稿、对比台直写），谁先谁后都能把对方的改动冲掉。
+///
+/// 现在改成**走同一条草稿链**：`begin_preset_edit` → `patch_preset_draft_batch` →
+/// `commit_preset_draft`。也就是：
+///
+///   · 保存前不碰正式文件（改的是 `run/draft-preset.json`）；
+///   · 「保存」= 写盘边界，与参数页那颗按钮同一套语义；
+///   · 编辑器里已有的草稿会**被复用**（`reused`），两处看到的是同一份未保存改动；
+///   · 若另一份预设正开着草稿 ⇒ **拒绝**（不能悄悄把它的改动丢掉或一起提交）。
 #[tauri::command]
 pub async fn save_preset_params(
     app: AppHandle,
@@ -103,20 +114,37 @@ pub async fn save_preset_params(
         return Ok(());
     }
     let root = internal_root(&app)?;
-    let user = user_root(&app)?;
-    let catalog = runtime::load_released_catalog(&root)?;
-    traced("savePresetParams", |_| {
-        let text = runtime::local::read_text(&user, &path)?;
-        let field_edits: Vec<FieldEdit> = edits
-            .iter()
-            .map(|e| FieldEdit::new(e.param_key.clone(), e.value.clone()))
-            .collect();
-        let next = param_alg::apply_param_edits(&text, &catalog.registry.params, &field_edits)?;
-        if next == text {
-            return Ok(());
+    let file_name = path
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.local.150", &[])))?
+        .to_owned();
+
+    /*
+     * 先看有没有**另一份**的草稿开着：有就拒绝。
+     * 直接 begin 会把那份草稿换掉（`begin_preset_edit` 的实现就是"不是同一份就重开"），
+     * 用户会在完全不知情的情况下丢掉另一份的未保存改动。
+     */
+    if let Some(existing) = runtime::app_state::draft(&root)? {
+        let same = existing.origin == crate::runtime::state::ActiveOrigin::Local
+            && existing.path.as_deref() == Some(path.as_str());
+        if !same {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.local.151",
+                &[],
+            )));
         }
-        /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文；新文件那一路在落盘时就存过） */
-        let _ = runtime::baseline::ensure_origin_copy(&root, &user, &path);
-        runtime::local::write_text(&user, &path, &next)
-    })
+    }
+
+    let _ = super::local::begin_preset_edit(
+        app.clone(),
+        file_name,
+        Some(crate::runtime::state::ActiveOrigin::Local),
+        Some(path.clone()),
+    )
+    .await?;
+    super::local::patch_preset_draft_batch(app.clone(), edits).await?;
+    let _ = super::local::commit_preset_draft(app.clone()).await?;
+    Ok(())
 }

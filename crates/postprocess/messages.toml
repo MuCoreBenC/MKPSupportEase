@@ -4784,3 +4784,17 @@ text_zh_tw = "有 {count} 處改動還沒儲存 —— 先儲存或放棄，再�
 text_ja = "{count} 件の変更が未保存です — 生成・公開の前に保存するか破棄してください"
 params = ["count"]
 note = "2026-10-31 统一编辑事务：生成与发布都要求在「已保存」状态上跑 —— 不自动替用户保存"
+
+["ui.ipc.local.150"]
+text = "这份预设的路径不对，存不回去"
+text_en = "That preset path is invalid, so it cannot be saved back"
+text_zh_tw = "這份預設的路徑不對，存不回去"
+text_ja = "このプリセットのパスが不正なため、保存できません"
+params = []
+
+["ui.ipc.local.151"]
+text = "另一份预设还有没保存的改动 —— 先在那份里保存或放弃，再来存这一份"
+text_en = "Another preset still has unsaved changes — save or discard those first, then save this one"
+text_zh_tw = "另一份預設還有沒儲存的改動 —— 先在那份裡儲存或放棄，再來存這一份"
+text_ja = "別のプリセットに未保存の変更があります — 先にそちらを保存するか破棄してから、これを保存してください"
+params = []

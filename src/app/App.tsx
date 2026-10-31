@@ -15,6 +15,7 @@ import NotifyHost from './notify/NotifyHost'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
+import { useUnsavedDraft } from './state/useUnsavedDraft'
 /* 提示气泡（2026-10-30）：全站唯一一份，挂在根上认 `data-tip` */
 import { TipLayer } from '../components/tooltip'
 import TopTabs from './components/TopTabs'
@@ -268,6 +269,23 @@ export default function App() {
       /* 置顶失败不该打断用户 —— 真实原因是窗口没了之类，日志在 Rust 侧 */
     })
   }, [pin, tab])
+
+  /*
+   * **关窗 / 刷新前拦一下**（2026-10-31）：只有**参数草稿**会拦。
+   *
+   * 改名 / 删除 / 复制 / 备注 / 归属是立即执行的，它们不会留下"未保存"状态，
+   * 所以这里不该因为它们拦人 —— 拦的判据只有一条：后端说草稿是脏的。
+   */
+  const unsaved = useUnsavedDraft()
+  useEffect(() => {
+    if (!unsaved.dirty) return
+    const guard = (e: BeforeUnloadEvent) => {
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', guard)
+    return () => window.removeEventListener('beforeunload', guard)
+  }, [unsaved.dirty])
 
   /*
    * 预设页右键「在 BBS 预设查看器中打开」要跨页带一个目标过去。
