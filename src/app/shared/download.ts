@@ -13,28 +13,33 @@
  */
 
 import type { DownloadOutcome, DownloadTick } from '../../api/contract'
-import type { Tr } from '../../i18n'
+import { msg, type Msg } from '../../i18n'
 
-/** 把一次下载的水位说成一句话。五态由后端给（`DownloadTick.stage`），这里只负责措辞 */
-export function tickText(tr: Tr, t: DownloadTick): string {
+/**
+ * 把一次下载的水位说成一句话。五态由后端给（`DownloadTick.stage`），这里只负责措辞。
+ *
+ * ★ 交出的是 [`Msg`]（键 + 变量）而不是成品句子：这几句会被**存进提示条的 state**，
+ *   存成品的话换语言之后它还挂着旧语言（2026-10-29 作者截图）。
+ */
+export function tickText(t: DownloadTick): Msg {
   switch (t.stage) {
     case 'connecting':
-      return tr('download.tick.connecting', { name: t.fileName })
+      return msg('download.tick.connecting', { name: t.fileName })
     case 'transferring':
       return t.total !== null && t.total > 0
-        ? tr('download.tick.transferringPct', {
+        ? msg('download.tick.transferringPct', {
             name: t.fileName,
             pct: Math.round((t.received / t.total) * 100),
             received: t.received,
             total: t.total,
           })
-        : tr('download.tick.transferringBytes', { name: t.fileName, received: t.received })
+        : msg('download.tick.transferringBytes', { name: t.fileName, received: t.received })
     case 'done':
-      return tr('download.tick.done', { name: t.fileName })
+      return msg('download.tick.done', { name: t.fileName })
     case 'failed':
       return t.message !== undefined && t.message !== ''
-        ? tr('download.tick.failedWhy', { name: t.fileName, message: t.message })
-        : tr('download.tick.failed', { name: t.fileName })
+        ? msg('download.tick.failedWhy', { name: t.fileName, message: t.message })
+        : msg('download.tick.failed', { name: t.fileName })
   }
 }
 
@@ -44,8 +49,8 @@ export function tickText(tr: Tr, t: DownloadTick): string {
  * 后端约定失败必带原因（`FileOutcome` 的注释：成功了才是空的），所以空原因这一支
  * 是兜底 —— 它出现就说明后端漏说了，界面上宁可写"原因没说清"也不许写"失败"两个字了事。
  */
-export function outcomeText(tr: Tr, o: DownloadOutcome): string {
+export function outcomeText(o: DownloadOutcome): Msg {
   return o.message === ''
-    ? tr('download.outcome.failed', { name: o.fileName })
-    : tr('download.outcome.failedWhy', { name: o.fileName, message: o.message })
+    ? msg('download.outcome.failed', { name: o.fileName })
+    : msg('download.outcome.failedWhy', { name: o.fileName, message: o.message })
 }

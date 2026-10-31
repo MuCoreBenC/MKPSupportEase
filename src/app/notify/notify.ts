@@ -33,9 +33,13 @@
  * <NotifyHost />
  *
  * // ② 谁想说话就 push。返回一个 id，用它收回去。
- * const id = notify({ kind: 'info', text: '已复制' }, { ttl: 2200 })
+ * const id = notify({ kind: 'info', text: msg('copyScript.ok.title') }, { ttl: 2200 })
  * dismiss(id)
  * ```
+ *
+ * ★ 文案一律给 `msg(键, 变量)`（`i18n` 的 `Text`），**别给已经翻好的字符串** ——
+ *   通知活得比一次渲染长（sticky 的更新面板能挂一整趟下载），换语言时那张卡
+ *   要跟着换字，只有"存键、渲染时再翻"做得到（`NotifyHost` 用 `useText()` 摊开）。
  *
  * ★ 这是一个**极小的发布订阅**（不是 React Context）：因为**通知的发起方不一定是
  * React 组件**（将来可能从 IPC 回调、从 Rust 侧事件里发），而且发起方与渲染处
@@ -45,12 +49,19 @@
 
 import { useSyncExternalStore } from 'react'
 
+import type { Text } from '../../i18n'
+
 /** 通知的"语气"：只决定左侧那颗点/图标的颜色，不决定形状 */
 export type NotifyKind = 'info' | 'ok' | 'warn' | 'bad'
 
-/** 可选的一颗动作按钮（更新面板的"暂停 / 取消 / 重试"就是它） */
+/**
+ * 可选的一颗动作按钮（更新面板的"暂停 / 取消 / 重试"就是它）。
+ *
+ * ★ `label` 走 [`Text`]（`msg(…)` 或原样句子）：通知会**跨语言切换一直挂着**
+ *   （更新面板不自动消失），存成品字符串的话换语言后它还是旧语言那一句。
+ */
 export interface NotifyAction {
-  label: string
+  label: Text
   onClick: () => void
   /** 主按钮（实心强调），如"重启并安装" */
   primary?: boolean
@@ -61,9 +72,9 @@ export interface Notice {
   id: string
   kind: NotifyKind
   /** 标题（粗体那一行）。更新面板是"软件更新"，复制是"已复制" */
-  title: string
+  title: Text
   /** 正文（可省）。更新面板是"正在下载 40.0 MB / 64.0 MB" */
-  text?: string
+  text?: Text
   /** 0~1 的进度条；给了就画一条（更新的下载态用） */
   progress?: number
   /** 动作按钮。★ 有它 ⇒ 建议用 sticky（否则按钮还没点就飘走了） */

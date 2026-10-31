@@ -306,7 +306,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
            * 整条是**显示**不是按钮：只有右边那颗改位置 / 开位置（作者 2026-10-11）。
            * 路径正文因此还能拖选、误点一下也不会弹系统框。
            */
-          <div className={s.pathPill} title={path.full}>
+          <div className={s.pathPill} data-tip={path.full}>
             <svg
               className={s.pathIcon}
               width={15}

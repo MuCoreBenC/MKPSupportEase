@@ -1922,13 +1922,14 @@ mod tests {
             "一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一"
         );
 
-        // 可达集 20 = 整机图 3（bundled 档：被机型 image 字段引用，但 dest 为 None ——
+        // 可达集 22 = 整机图 5（bundled 档：被机型 image 字段引用，但 dest 为 None ——
         // 不复制、不下载、构建期随包）+ 图标 3 + BBS 5 + mkPreset 9（无落点）；
         // 模型与 0.2mm BBS 刻意不进
+        // （2026-10-30：整机图 3 → 5 —— P2S / X1C 也挂上了 image 字段）
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            20,
+            22,
             "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么\
              （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20）"
         );

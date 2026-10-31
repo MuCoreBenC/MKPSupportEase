@@ -892,7 +892,7 @@ export function WorkbenchApp() {
               key={it.id}
               type="button"
               className={`${s.navItem} ${page === it.id ? s.navItemOn : ''}`}
-              title={it.label}
+              data-tip={it.label}
               onClick={() => setPage(it.id)}
             >
               <span className={s.navIcon} aria-hidden>
@@ -911,7 +911,7 @@ export function WorkbenchApp() {
               {bd.n > 0 && (
                 <span
                   className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                  title={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                  data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
                 >
                   {bd.n}
                 </span>
@@ -930,7 +930,7 @@ export function WorkbenchApp() {
         className={s.upstream}
         role="button"
         tabIndex={0}
-        title={
+        data-tip={
           boot
             ? `预设源 ${boot.roots.presets}\n配方本 ${boot.roots.workbench}\n交付 ${boot.roots.delivery}\n点击查看设置`
             : '正在读…'
@@ -1005,7 +1005,7 @@ export function WorkbenchApp() {
                         key={it.id}
                         type="button"
                         className={`${s.mnavItem} ${page === it.id ? s.mnavItemOn : ''}`}
-                        title={it.label}
+                        data-tip={it.label}
                         onClick={() => setPage(it.id)}
                       >
                         <span className={s.navIcon} aria-hidden>
@@ -1024,7 +1024,7 @@ export function WorkbenchApp() {
                         {bd.n > 0 && (
                           <span
                             className={`${s.navBadge} ${bd.block ? '' : s.navBadgeSoft}`}
-                            title={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
+                            data-tip={bd.block ? '有阻断没处理完' : '有待处理的项，但不挡生成'}
                           >
                             {bd.n}
                           </span>
@@ -1099,7 +1099,7 @@ export function WorkbenchApp() {
                         <>
                           <span
                             className={`${s.tag} ${s.tagGhost}`}
-                            title={pageSlot.dirtyTitle ?? pageSlot.dirtyLabel}
+                            data-tip={pageSlot.dirtyTitle ?? pageSlot.dirtyLabel}
                           >
                             {pageSlot.dirty ? pageSlot.dirtyLabel : pageSlot.savedLabel}
                           </span>
@@ -1107,7 +1107,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm}`}
                             disabled={!pageSlot.canDiscard || pageSlot.busy === true}
-                            title={pageSlot.discardTitle ?? '放弃这一次的改动'}
+                            data-tip={pageSlot.discardTitle ?? '放弃这一次的改动'}
                             onClick={() => pageActions.run('discard')}
                           >
                             放弃
@@ -1125,7 +1125,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
                             disabled={!saveOn}
-                            title={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
+                            data-tip={saveOn ? (pageSlot.saveTitle ?? '把这一份落盘') : saveWhy}
                             onClick={() => pageActions.run('save')}
                           >
                             {pageSlot.busy === true ? (pageSlot.savingLabel ?? '保存中…') : '保存'}
@@ -1135,7 +1135,7 @@ export function WorkbenchApp() {
                         <>
                           <span
                             className={`${s.tag} ${s.tagGhost}`}
-                            title={
+                            data-tip={
                               dirty
                                 ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
                                 : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
@@ -1147,7 +1147,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm}`}
                             disabled={!dirty || busy}
-                            title={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
+                            data-tip={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
                             onClick={() => void discard()}
                           >
                             放弃
@@ -1157,7 +1157,7 @@ export function WorkbenchApp() {
                             type="button"
                             className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
                             disabled={!saveOn}
-                            title={saveOn ? (words?.save.dirty.explain ?? undefined) : saveWhy}
+                            data-tip={saveOn ? (words?.save.dirty.explain ?? undefined) : saveWhy}
                             onClick={() => void save()}
                           >
                             保存
@@ -1249,7 +1249,7 @@ export function WorkbenchApp() {
                   <span
                     className={s.sbSeg}
                     style={{ color: 'var(--accent-deep)', fontWeight: 600 }}
-                    title={`测试模式（沙箱）：${sandbox.sandboxRoot}`}
+                    data-tip={`测试模式（沙箱）：${sandbox.sandboxRoot}`}
                   >
                     【测试模式】
                   </span>
@@ -1263,14 +1263,14 @@ export function WorkbenchApp() {
               <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
               <span
                 className={`${s.sbSeg} ${s.sbMinor}`}
-                title={(words && book ? words.artifact[book.artifact].explain : undefined) ?? undefined}
+                data-tip={(words && book ? words.artifact[book.artifact].explain : undefined) ?? undefined}
               >
                 {words && book ? words.artifact[book.artifact].label : '—'}
               </span>
               <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
               <span
                 className={`${s.sbSeg} ${s.sbMinor}`}
-                title={(words && book ? words.snapshot[book.snapshot].explain : undefined) ?? undefined}
+                data-tip={(words && book ? words.snapshot[book.snapshot].explain : undefined) ?? undefined}
               >
                 {words && book ? words.snapshot[book.snapshot].label : '—'}
               </span>
@@ -1279,7 +1279,7 @@ export function WorkbenchApp() {
                   type="button"
                   className={s.sbBtn}
                   disabled={undoStack.length === 0 || busy}
-                  title={
+                  data-tip={
                     undoStack.length > 0
                       ? `撤销：${undoStack[undoStack.length - 1].label}`
                       : (words?.disabled.nothingToUndo ?? '没有可撤销的改动')
@@ -1292,7 +1292,7 @@ export function WorkbenchApp() {
                   type="button"
                   className={s.sbBtn}
                   disabled={redoStack.length === 0 || busy}
-                  title={
+                  data-tip={
                     redoStack.length > 0
                       ? `重做：${redoStack[redoStack.length - 1].label}`
                       : (words?.disabled.nothingToUndo ?? '没有可重做的改动')

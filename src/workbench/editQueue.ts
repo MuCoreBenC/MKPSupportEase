@@ -231,9 +231,24 @@ function patchRow(row: Row, cols: Col[], ov: Map<string, string>): Row {
     const raw = ov.get(cellKeyOf(c.machineId, c.versionUid ?? null, row.key))
     if (raw === undefined || String(cell.raw ?? '') === raw) return cell
     any = true
-    /* 乐观那格顺手点亮 `dirty` —— 状态徽章与「改之前的值」chip 都读它；
-       与 base 相同的那一格不算脏（overlay 覆盖到同值 = 等于没改） */
-    return { ...cell, raw, dirty: true } as Cell
+    /*
+     * 乐观那格顺手点亮 `dirty` —— 状态徽章与「改之前的值」chip 都读它；
+     * 与 base 相同的那一格不算脏（overlay 覆盖到同值 = 等于没改）。
+     *
+     * ★ 显示文本也得跟着换（2026-10-29）：只读态画的是 `cell.text`
+     *   （`CompareMatrix` 的 `cellText`），只改 `raw` 就会出现作者看到的那一幕 ——
+     *   格子已经红了、数字还是旧的（编辑器开着时读 `raw`，所以只有步进箭头"像是对的"）。
+     *   只换"看着就是原文"的那一档（数值）；枚举要 label、G-code 要行数摘要，
+     *   都不在前端重算，等后端那份 `text` 回来替换。
+     */
+    /*
+     * 空串 = 删键 / 挂回继承 —— 显示也留空，**不许继续挂着旧那份 `text`**。
+     * 否则会出现"格子上写着「10 行 · 点开」、点开却是空的"（那一格确实已被清空）。
+     * 继承来的值由后端那份派生算好再换上来（本层猜不到）。
+     */
+    const shown =
+      raw === '' ? '' : Number.isFinite(Number(raw)) ? raw : cell.text
+    return { ...cell, raw, text: shown, dirty: true } as Cell
   })
   return any ? { ...row, cells } : row
 }

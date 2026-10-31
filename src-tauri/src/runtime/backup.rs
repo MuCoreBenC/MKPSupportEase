@@ -10,7 +10,8 @@
 //! catalog.json              目录（首屏唯一数据源）
 //! run/app-state.json        应用状态：主题、数据源、正在用哪一份……
 //! run/preset-history/*.json **修改历史**（2026-10-17：一份文件一本，git 式）
-//! baseline/*.toml           云端各版的基准快照（「恢复默认」的摘库）
+//! content/*.toml            云端各版的原文仓库（按 SHA 一份）
+//! recovery/**               回收站（删除的用户预设 + 镜像 + 来源账）
 //! baseline-local/**         原文镜像（这份用户文件自己最初的样子）
 //! user/presets-local/**     **用户自己的预设**（全部 toml，含导入进来的）
 //! user/gcode_history/**     后处理执行归档（三件套）
@@ -59,16 +60,21 @@ pub const BACKUP_SCHEMA: u32 = 1;
 const INFO_FILE: &str = "backup-info.json";
 
 /// 被管的**整棵树**（相对内部根）：恢复时这几棵**整棵换掉**
-const MANAGED_DIRS: [&str; 5] = [
+const MANAGED_DIRS: [&str; 6] = [
     "run/preset-history",
-    "baseline",
+    "content",
+    "recovery",
     "baseline-local",
     "user/presets-local",
     "user/gcode_history",
 ];
 
 /// 被管的**单份文件**（相对内部根）：有就覆盖
-const MANAGED_FILES: [&str; 2] = ["catalog.json", "run/app-state.json"];
+const MANAGED_FILES: [&str; 3] = [
+    "catalog.json",
+    "run/app-state.json",
+    "run/delivery-index.json",
+];
 
 /// 备份里那份说明书
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -200,7 +200,6 @@ export function AxisBar({
             <dt className={p.axisLabel}>
               {/* 轴名也是热区的一部分：点它一样聚焦（G06-8 的整列可点，作者 10-03 点名要带上首页） */}
               <label htmlFor={id}>{tr(label)}</label>
-              <i className={p.dot} data-on={changed} aria-hidden={!changed} />
               {/*
                 原始值跟在标签右侧，不再占值行。
                 常驻占位、只切 visibility：标签行的宽高在"改没改过"之间一个像素都不动，
@@ -210,6 +209,15 @@ export function AxisBar({
                 10-03 起它同时是还原入口（作者：点了就变回原本的）：有基准就常显
                 （只在改动后才冒出来等于没有），改过的那一轴可点 —— 整轴退回已保存值，
                 手输的与板上点出来的一起清。没改动 / 只读时 disabled。
+
+                ★ 2026-10-30（作者：「怎么也换行了……没必要这么长的文案吧」）：
+                  这一条在窄窗里只有 ~100px 一列，`X offset`(50) + 旧值那一串 + 圆点(14)
+                  放不下就折成两行，X 折 Y 不折，丑。现在：
+                    · **圆点收掉**（值变绿加粗 + 这一颗转绿可点，已经够说明「改过」）；
+                    · **横排那一档只说数字**（`was -25.90` → `-25.90`，`calib.originalShort`），
+                      原话进 title/aria；竖排那几档（第四页 / 校准 tab）地方够，仍说 `was`；
+                  于是最紧的一列也只要 ~99px，不再折行（`.axisFrom` 的 min-width 同步收到
+                  4em，仍然是固定宽，值变长短不会让读数条抖动）。
               */}
               <button
                 type="button"
@@ -217,10 +225,21 @@ export function AxisBar({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-               
+                data-tip={
+                  hasBase
+                    ? tr('calib.originalTitle', { value: saved ? saved[k].toFixed(2) : '0.00' })
+                    : undefined
+                }
+                aria-label={
+                  hasBase
+                    ? tr('calib.originalTitle', { value: saved ? saved[k].toFixed(2) : '0.00' })
+                    : undefined
+                }
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
-                {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
+                {tr(orient === 'row' ? 'calib.originalShort' : 'calib.original', {
+                  value: saved ? saved[k].toFixed(2) : '0.00',
+                })}
               </button>
             </dt>
             <dd className={p.axisValue}>

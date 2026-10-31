@@ -2,28 +2,28 @@
   "v": 1,
   "records": {
     "A1/FAST": {
-      "stamp": "2026-10-27T15:25:50Z",
-      "fingerprint": "cf359447d248f5562207e71a8aad142adf111638dd2f7079d4115edcf7fe2a92"
+      "stamp": "2026-10-30T14:25:35Z",
+      "fingerprint": "58ca07e2355e0f8a4c336b0adfed537b86b533a0ec7203aef8a5f85fbec146e3"
     },
     "A1/FASTV3.3": {
-      "stamp": "2026-10-27T15:25:50Z",
-      "fingerprint": "38549df2656e81e127b1fe8b90158c8d30fc23c0642eb88288f153cab5a0d7e9"
+      "stamp": "2026-10-30T14:25:35Z",
+      "fingerprint": "a108fae348560029874eab6964654b54da9c7fabf147b5f0e4c50d82c2fdadf5"
     },
     "A1/STANDARD": {
-      "stamp": "2026-10-27T15:25:50Z",
-      "fingerprint": "6cdd09452a59c148c80cbea1fd6e7d8e8e6a76c7baebc5b4d5694dac6e190ec3"
+      "stamp": "2026-10-30T14:25:35Z",
+      "fingerprint": "6969c0e00f47a8999a9c0519b065be809597f8ee26c54fd296125e04ae354e46"
     },
     "A1_MINI/FAST": {
-      "stamp": "2026-10-27T15:25:50Z",
-      "fingerprint": "e9a11a1335215d14f7f8d88fc5181ffa588f49e94fe73d842c68591a4bfbf90b"
+      "stamp": "2026-10-30T14:25:35Z",
+      "fingerprint": "1b963f7810edaf8cb8b771831a66f5933145b947a51268417bd266c49e8f32c9"
     },
     "A1_MINI/FASTV3.3": {
       "stamp": "2026-10-27T15:25:50Z",
       "fingerprint": "660996a66ef1867e27756e1fa6ab390f1becf7c2d2fef690251bdde6287f7a22"
     },
     "A1_MINI/STANDARD": {
-      "stamp": "2026-10-27T15:25:50Z",
-      "fingerprint": "25d7c054f083c4f710eb56a5c6c47510edb525748ecb0cdf2c6a3a6fd2411d18"
+      "stamp": "2026-10-30T14:25:35Z",
+      "fingerprint": "c8d1a8369392b274a758c3b9549e7b26dc65eb6ea219d17fa832b9ccb98868bf"
     },
     "P1S/LITE": {
       "stamp": "2026-10-27T15:25:50Z",

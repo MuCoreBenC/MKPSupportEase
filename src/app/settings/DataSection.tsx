@@ -18,23 +18,30 @@
 
 import { useEffect, useState } from 'react'
 
+import { msg, useText, type Text } from '../../i18n'
+
 import { api, errorText } from '../../api'
 import { useT } from '../../i18n'
 import { Btn } from '../ui/Controls'
+import { Tip } from '../../components/tooltip'
+import RecoverySection from './RecoverySection'
 import s from './PageSettings.module.css'
 
 /** 两段式确认的窗口：与「清空历史」那一套同一个时长（3 秒无操作就回退） */
 const CONFIRM_MS = 3000
 
-export default function DataSection() {
+/** `host`：只有「最近删除」那个模态框要（遮罩铺满标题栏以下那一块），原样传下去 */
+export default function DataSection({ host }: { host: HTMLElement | null }) {
   const tr = useT()
+  const say = useText()
   const [folderBusy, setFolderBusy] = useState(false)
-  const [folderNote, setFolderNote] = useState<string | null>(null)
+  /** 成功时是**落点路径原样**（不翻），失败时是存键的那句话 —— 两种都住 [`Text`] */
+  const [folderNote, setFolderNote] = useState<Text | null>(null)
 
   /* 卸载：点了第一下变成「确认卸载」，3 秒没人再点就自己退回 */
   const [armed, setArmed] = useState(false)
   const [uninstallBusy, setUninstallBusy] = useState(false)
-  const [uninstallNote, setUninstallNote] = useState<string | null>(null)
+  const [uninstallNote, setUninstallNote] = useState<Text | null>(null)
 
   useEffect(() => {
     if (!armed) return
@@ -51,7 +58,7 @@ export default function DataSection() {
         setFolderBusy(false)
       },
       (e: unknown) => {
-        setFolderNote(tr('settings.data.openFailed', { detail: errorText(e) }))
+        setFolderNote(msg('settings.data.openFailed', { detail: errorText(e) }))
         setFolderBusy(false)
       },
     )
@@ -70,7 +77,7 @@ export default function DataSection() {
       () => setUninstallBusy(false),
       (e: unknown) => {
         setUninstallBusy(false)
-        setUninstallNote(tr('settings.data.uninstallFailed', { detail: errorText(e) }))
+        setUninstallNote(msg('settings.data.uninstallFailed', { detail: errorText(e) }))
       },
     )
   }
@@ -80,11 +87,15 @@ export default function DataSection() {
       <section className={s.section} aria-label={tr('settings.data.title')}>
         <h2 className={s.secTitle}>{tr('settings.data.title')}</h2>
 
-        <div className={`${s.field} ${s.fieldRow}`}>
+        {/* 次级行：只是"打开个目录"的附属动作 */}
+        <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>{tr('settings.data.folder')}</div>
-            <p className={s.fieldNote}>{tr('settings.data.folderNote')}</p>
-            {folderNote !== null && <p className={s.fieldNote}>{folderNote}</p>}
+            <div className={s.fieldTitle}>
+              {tr('settings.data.folder')}
+              <Tip text={tr('settings.data.folderNote')} />
+            </div>
+            {/* 这一句是**运行结果/错误**，不是说明 —— 留在版面上（`.current` 是常显那档） */}
+            {folderNote !== null && <p className={s.current}>{say(folderNote)}</p>}
           </div>
           <Btn disabled={folderBusy} onClick={openFolder}>
             {folderBusy ? tr('settings.data.opening') : tr('settings.data.open')}
@@ -93,6 +104,12 @@ export default function DataSection() {
 
         <p className={s.noteHint}>{tr('settings.data.privacy')}</p>
       </section>
+
+      {/* 「最近删除」是独立一章（产品里它自己一个 section）：套一层带 id 的壳，
+          左目录才跳得到、搜索才筛得到 */}
+      <div id="recovery" data-sec>
+        <RecoverySection host={host} />
+      </div>
 
       <section className={`${s.section} ${s.dangerBlock}`} aria-label={tr('settings.data.uninstallTitle')}>
         <h2 className={`${s.secTitle} ${s.dangerTitle}`}>{tr('settings.data.uninstallTitle')}</h2>
@@ -108,8 +125,8 @@ export default function DataSection() {
           <div className={s.fieldText}>
             <div className={`${s.fieldTitle} ${s.dangerTitle}`}>
               {tr('settings.data.uninstall')}
+              <Tip text={tr('settings.data.uninstallNote')} />
             </div>
-            <p className={s.fieldNote}>{tr('settings.data.uninstallNote')}</p>
           </div>
           <Btn variant="danger" disabled={uninstallBusy} onClick={doUninstall}>
             {uninstallBusy
@@ -120,7 +137,7 @@ export default function DataSection() {
           </Btn>
         </div>
 
-        {uninstallNote !== null && <p className={`${s.note} ${s.noteBad}`}>{uninstallNote}</p>}
+        {uninstallNote !== null && <p className={`${s.note} ${s.noteBad}`}>{say(uninstallNote)}</p>}
       </section>
     </>
   )

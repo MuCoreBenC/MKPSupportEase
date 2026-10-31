@@ -237,7 +237,7 @@ export default function DeliveryFilesModal({
       ref={sel === key ? selRef : undefined}
       className={sel === key ? `${s.item} ${s.itemOn}` : s.item}
       aria-current={sel === key}
-      title={name}
+      data-tip={name}
       onClick={() => setSel(key)}
     >
       <span className={`${s.itemState} ${stateCls}`}>{stateLabel}</span>
@@ -261,7 +261,7 @@ export default function DeliveryFilesModal({
             type="button"
             className={`${c.btn} ${c.btnPrimary}`}
             disabled={generateTargets.length === 0}
-            title={
+            data-tip={
               generateTargets.length === 0
                 ? '没有待更新 / 未生成的版本，也没有要重算的目录'
                 : '自动带上待更新与未生成的版本，先预演、确认后才写盘'

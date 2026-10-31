@@ -195,7 +195,7 @@ export default function Modal({
             {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
           </span>
           {headerExtra !== undefined && <div className={s.headExtra}>{headerExtra}</div>}
-          <button type="button" className={s.close} title={closeTitle} onClick={onClose}>
+          <button type="button" className={s.close} data-tip={closeTitle} onClick={onClose}>
             关闭
           </button>
         </header>

@@ -58,6 +58,8 @@ use crate::fsx::paths::resolve_in;
 
 use super::catalog::hex;
 use super::catalog::CatalogFile;
+use super::content;
+use super::delivery_index;
 use super::paths::{archive_dir, CATALOG_FILE};
 use super::preset_events::{self, PresetEvent};
 
@@ -110,10 +112,39 @@ pub enum FileOnDisk {
 }
 
 pub fn file_status(internal_root: &Path, file: &CatalogFile) -> FileOnDisk {
+    if is_preset(file) {
+        let Some(entry) = delivery_index::entry(internal_root, &file.path) else {
+            return FileOnDisk::Absent;
+        };
+        if !content::exists(internal_root, &entry.sha256) {
+            return FileOnDisk::Absent;
+        }
+        return match file.expected_sha() {
+            Some(want) if entry.sha256 != want => FileOnDisk::Stale,
+            _ => FileOnDisk::Current,
+        };
+    }
     match std::fs::read(internal_root.join(&file.path)) {
         Ok(bytes) => status_of(file, &bytes),
         Err(_) => FileOnDisk::Absent,
     }
+}
+
+/// 预设走内容仓库，其余（资源 / 模型 / 图标）仍按 `file.path` 存。
+fn is_preset(file: &CatalogFile) -> bool {
+    file.kind == super::catalog::kind::PRESET
+}
+
+/// 本机手上这一份的字节。
+///
+/// 预设：索引里记的 SHA → `content/<sha>.toml`；索引没有 / 内容丢了 ⇒ `None`。
+/// 其余：旧路径读盘（不动它们）。
+pub fn stored_bytes(internal_root: &Path, file: &CatalogFile) -> Option<Vec<u8>> {
+    if is_preset(file) {
+        let entry = delivery_index::entry(internal_root, &file.path)?;
+        return content::read_bytes(internal_root, &entry.sha256);
+    }
+    std::fs::read(internal_root.join(&file.path)).ok()
 }
 
 /// [`file_status`] 的字节已在手的版本（`entries_in_status` 一份字节只用读一次）
@@ -255,14 +286,14 @@ pub fn deliver(
     // 防穿越：catalog 是我们自己写的，但路径判据不信任任何来源（总纲 §1③）
     let target = resolve_in(internal_root, &file.path)?;
 
-    // 更新与归档：旧份与目录不一样才叫"换版本"，复制进 archive/（保留最早一份），
-    // 然后原子换新。第一次下载没有旧份，直接落。
-    let old = std::fs::read(&target).ok();
-    let is_update = match file.expected_sha() {
-        Some(want) => matches!(&old, Some(b) if hex(&Sha256::digest(b)) != want),
-        // 没有期望值：旧份字节与"带来这份"是否一样由内容自己说了算
-        None => matches!(&old, Some(b) if b.as_slice() != bytes.as_slice()),
-    };
+    /*
+     * 旧份：预设从索引 + 内容仓库取，其余仍读旧路径。
+     * 「换版本」按**字节**判，不按"目录说要什么"判 —— 旧份与这次带来的字节一样时
+     * 什么都不用做（事件也不记）。
+     */
+    let old = stored_bytes(internal_root, file);
+    let new_sha = sha_hex(&bytes);
+    let is_update = matches!(&old, Some(b) if b.as_slice() != bytes.as_slice());
     if is_update {
         let archive_target = archive_dir(internal_root).join(&file.path);
         std::fs::create_dir_all(archive_target.parent().expect("归档路径必有父目录")).map_err(
@@ -281,7 +312,16 @@ pub fn deliver(
             )?;
         }
     }
-    if is_update || old.is_none() {
+
+    /*
+     * ★ 存储：预设只进**内容仓库**（按 SHA 一份）+ 目录索引（path → 手上这一版），
+     *   **不再写 `delivery/<path>`**。其余资源仍按 `file.path` 落盘。
+     *   先写内容、再写索引：任何一步失败都不会出现"索引说有、内容没有"。
+     */
+    if is_preset(file) {
+        content::ensure(internal_root, &new_sha, &bytes)?;
+        delivery_index::record_file(internal_root, &file.path, &new_sha, file.expected_size())?;
+    } else if is_update || old.is_none() {
         atomic_write(&target, &bytes)?;
     }
 
@@ -289,21 +329,7 @@ pub fn deliver(
      * 任何云端换代都不改它。界面上「下载时间 / 替换时间」从这里来 —— mtime 不再上界面。
      * 记不上不影响这次下载本身（附加信息，与 provenance 同一条口径）；
      * 同字节重放（旧份在、字节一致）：什么都没发生 —— 不记事件。 */
-    let new_sha = sha_hex(&bytes);
-
-    /* ★ **隐藏 baseline**（2026-10-08 作者改判）：每一版交付预设都留一份不可见的
-     * 基准快照（[`super::baseline`]）。按内容摘要寻址 ⇒ 幂等、每版一份、不覆盖；
-     * 它是参数页「恢复默认」的取值依据，也是用户那份血统里 `based_on_sha256`
-     * 指向的东西。**与归档（`archive/`）是两件事**：归档服务交付四态判定，
-     * 这一份服务恢复默认 —— 两条线各管各的。
-     * 落不上**不影响这次下载**（附加信息，与事件账、出处账同一条口径）：
-     * 缺了只表现为"恢复默认"回退到出厂值。 */
-    if file.kind == super::catalog::kind::PRESET {
-        if let Err(e) = super::baseline::ensure_baseline(internal_root, &new_sha, &bytes) {
-            tracing::warn!("baseline 没落上（{}）：{}", new_sha, e.message);
-        }
-    }
-
+    let stored = content::content_path(internal_root, &new_sha);
     match old.as_deref() {
         // 第一次落盘：这是「下载」
         None => preset_events::append(
@@ -333,7 +359,8 @@ pub fn deliver(
         }
         Some(_) => {}
     }
-    Ok(target)
+    /* 预设的真实落点是内容仓库；其余仍是 `file.path` */
+    Ok(if is_preset(file) { stored } else { target })
 }
 
 /* ---------- 版本身份（字节指纹 → 哪一代目录、那一代何时发布） ---------- */
@@ -466,17 +493,30 @@ fn bootstrap_events(internal_root: &Path, catalog: &super::Catalog) {
     /* 下载区存量：认得出出身的记「下载」—— 但**来历已经被替换事件解释过的不再记**
      * （盘上那份就是那次替换换上去的新字节；一份字节只有一种来路，硬规则①） */
     for f in &catalog.files {
-        let Ok(bytes) = std::fs::read(internal_root.join(&f.path)) else {
-            continue;
+        let (sha, at) = if is_preset(f) {
+            let Some(entry) = delivery_index::entry(internal_root, &f.path) else {
+                continue;
+            };
+            (entry.sha256, Some(entry.at))
+        } else {
+            let Ok(bytes) = std::fs::read(internal_root.join(&f.path)) else {
+                continue;
+            };
+            if preset_events::arrival_of(&events, &f.path, &sha_hex(&bytes)).is_some() {
+                continue;
+            }
+            (
+                sha_hex(&bytes),
+                modified_unix_of(&internal_root.join(&f.path)),
+            )
         };
-        let sha = sha_hex(&bytes);
         if preset_events::arrival_of(&events, &f.path, &sha).is_some() {
             continue;
         }
         let Some(g) = generations.get(&sha) else {
             continue; // 认不出的字节不记账（硬规则③）
         };
-        let Some(at) = modified_unix_of(&internal_root.join(&f.path)) else {
+        let Some(at) = at else {
             continue;
         };
         events.push(PresetEvent::DeliveryDownloaded {
@@ -601,6 +641,17 @@ pub fn delete_downloaded(
                 &[("file_name", file_name)],
             ))
         })?;
+    /*
+     * 预设：删的是**本机索引里这一条**，字节留在内容仓库（还可能被别的 path /
+     * 用户血统 / 回收记录引用）。`gc` 会按引用关系决定内容去留。
+     */
+    if is_preset(file) {
+        delivery_index::remove(internal_root, &file.path)?;
+        if let Err(e) = content::gc(internal_root) {
+            tracing::warn!("内容清理没跑完（不影响这次删除）：{}", e.message);
+        }
+        return Ok(());
+    }
     let target = resolve_in(internal_root, &file.path)?;
     remove_file_idempotent(&target, file_name)
 }
@@ -730,10 +781,21 @@ pub fn other_known_versions(internal_root: &Path, file: &CatalogFile) -> Vec<Kno
 
 /// 盘上这一份是哪一版（[`FileTrust`] 四档），以及认得出时**证据在哪**。
 fn inspect(internal_root: &Path, file: &CatalogFile) -> (FileTrust, Option<String>) {
-    let Ok(bytes) = std::fs::read(internal_root.join(&file.path)) else {
-        return (FileTrust::Absent, None);
+    let got = if is_preset(file) {
+        let Some(entry) = delivery_index::entry(internal_root, &file.path) else {
+            return (FileTrust::Absent, None);
+        };
+        /* 读一遍内容：字节与 SHA 名字对不上也算"没有这一份"（不拿坏内容当证据） */
+        if content::read_bytes(internal_root, &entry.sha256).is_none() {
+            return (FileTrust::Absent, None);
+        }
+        entry.sha256
+    } else {
+        let Ok(bytes) = std::fs::read(internal_root.join(&file.path)) else {
+            return (FileTrust::Absent, None);
+        };
+        hex(&Sha256::digest(&bytes))
     };
-    let got = hex(&Sha256::digest(&bytes));
     let Some(want) = file.expected_sha() else {
         /*
          * 目录没登记期望值（随包 bootstrap 目录）：盘上有就算 `Current` ——
@@ -793,12 +855,31 @@ pub fn trust_entries(internal_root: &Path, catalog: &super::Catalog) -> Vec<File
 /// 被改过（SHA 对不上）的那些不给 —— 它的字节存疑，修复它的动作是**重新下载**，
 /// 不许拿它当原文去改（改完另存成用户文件，等于把可疑内容洗成"我改过的那一份"）。
 pub fn cloud_text(internal_root: &Path, file: &CatalogFile) -> Result<String, AppError> {
-    let bytes = std::fs::read(internal_root.join(&file.path)).map_err(|_| {
-        AppError::not_found(messages::text(
-            "ui.runtime.delivery.387",
-            &[("v1", &file.file_name.to_string())],
-        ))
-    })?;
+    let bytes = if is_preset(file) {
+        /*
+         * 预设：先按**目录登记的 SHA** 找（当前云端版本的唯一真值；同内容被别的
+         * path 下过也能直接共用），再退回索引里"手上这一版"。
+         * 两处都没有 ⇒ 这份云端原文不在本机。
+         */
+        let from_current = file
+            .expected_sha()
+            .and_then(|sha| content::read_bytes(internal_root, sha));
+        let from_index = delivery_index::entry(internal_root, &file.path)
+            .and_then(|e| content::read_bytes(internal_root, &e.sha256));
+        from_current.or(from_index).ok_or_else(|| {
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.387",
+                &[("v1", &file.file_name.to_string())],
+            ))
+        })?
+    } else {
+        std::fs::read(internal_root.join(&file.path)).map_err(|_| {
+            AppError::not_found(messages::text(
+                "ui.runtime.delivery.387",
+                &[("v1", &file.file_name.to_string())],
+            ))
+        })?
+    };
     // 只有目录登记了期望值才比对：随包 bootstrap 目录不登记它，读得出来的正文就是可用正文
     if let Some(want) = file.expected_sha() {
         if hex(&Sha256::digest(&bytes)) != want {
@@ -866,11 +947,9 @@ pub fn deliver_all(
                     break;
                 };
                 let outcome = match deliver(internal_root, file, source) {
-                    Ok(target) => FileOutcome {
-                        file_name: target
-                            .file_name()
-                            .map(|n| n.to_string_lossy().into_owned())
-                            .unwrap_or_else(|| file.file_name.clone()),
+                    /* 预设的真实落点是 `content/<sha>`，文件名与它无关 —— 一律报目录名 */
+                    Ok(_) => FileOutcome {
+                        file_name: file.file_name.clone(),
                         ok: true,
                         message: String::new(),
                     },
@@ -949,11 +1028,22 @@ fn entries_in_status(
         .files
         .iter()
         .filter_map(|f| {
-            let bytes = std::fs::read(internal_root.join(&f.path)).ok()?;
-            if status_of(f, &bytes) != want {
+            let (sha, status) = if is_preset(f) {
+                let entry = delivery_index::entry(internal_root, &f.path)?;
+                /* 内容丢了 / 坏了 ⇒ 这份不算"在" */
+                content::read_bytes(internal_root, &entry.sha256)?;
+                let status = match f.expected_sha() {
+                    Some(w) if entry.sha256 != w => FileOnDisk::Stale,
+                    _ => FileOnDisk::Current,
+                };
+                (entry.sha256, status)
+            } else {
+                let bytes = std::fs::read(internal_root.join(&f.path)).ok()?;
+                (sha_hex(&bytes), status_of(f, &bytes))
+            };
+            if status != want {
                 return None;
             }
-            let sha = sha_hex(&bytes);
             let arrival = preset_events::arrival_of(&events, &f.path, &sha);
             Some(OnDiskEntry {
                 file_name: f.file_name.clone(),
@@ -989,7 +1079,7 @@ mod tests {
     /// 造一份内容为 `content` 的目录条目（SHA/大小都对得上）
     fn entry(name: &str, content: &[u8]) -> CatalogFile {
         CatalogFile {
-            kind: "mkp_preset".to_owned(),
+            kind: "asset".to_owned(),
             file_name: name.to_owned(),
             path: format!("mkp/{name}"),
             machine_id: "A1".to_owned(),
@@ -1002,7 +1092,7 @@ mod tests {
     /// 随包 bootstrap 目录那种条目：有这一份、不登记期望值
     fn entry_without_expectations(name: &str) -> CatalogFile {
         CatalogFile {
-            kind: "mkp_preset".to_owned(),
+            kind: "asset".to_owned(),
             file_name: name.to_owned(),
             path: format!("mkp/{name}"),
             machine_id: "A1".to_owned(),
@@ -2049,5 +2139,98 @@ mod tests {
         let p = dir.path().join("mkp");
         let _ = std::fs::create_dir_all(&p);
         p
+    }
+
+    // ---- 预设：内容仓库 + 索引（2026-10-29） ----
+
+    fn preset_entry(name: &str, content: &[u8]) -> CatalogFile {
+        CatalogFile {
+            kind: super::super::catalog::kind::PRESET.to_owned(),
+            file_name: name.to_owned(),
+            path: format!("delivery/mkp/presets/{name}"),
+            machine_id: "A1".to_owned(),
+            version_id: "FAST".to_owned(),
+            sha256: Some(hex(&Sha256::digest(content))),
+            size: Some(content.len() as u64),
+        }
+    }
+
+    #[test]
+    fn a_preset_lands_in_content_not_in_delivery() {
+        let root = tempfile::tempdir().unwrap();
+        let content = b"# preset\nspeed = 60\n";
+        let file = preset_entry("A1.toml", content);
+
+        let target = deliver(root.path(), &file, &MemorySource(content.to_vec())).unwrap();
+        assert_eq!(
+            target,
+            content::content_path(root.path(), file.expected_sha().unwrap())
+        );
+        assert!(target.is_file());
+        assert!(
+            !root.path().join(&file.path).exists(),
+            "不再写 delivery/<path> 副本"
+        );
+        assert_eq!(file_status(root.path(), &file), FileOnDisk::Current);
+        assert_eq!(
+            delivery_index::entry(root.path(), &file.path)
+                .unwrap()
+                .sha256,
+            file.expected_sha().unwrap()
+        );
+    }
+
+    #[test]
+    fn two_paths_with_the_same_bytes_share_one_content_file() {
+        let root = tempfile::tempdir().unwrap();
+        let content = b"# same\n";
+        let a = preset_entry("A.toml", content);
+        let mut b = preset_entry("B.toml", content);
+        b.path = "delivery/mkp/presets/B.toml".to_owned();
+
+        deliver(root.path(), &a, &MemorySource(content.to_vec())).unwrap();
+        deliver(root.path(), &b, &MemorySource(content.to_vec())).unwrap();
+
+        assert_eq!(content::shas(root.path()).len(), 1, "同 SHA 只存一份");
+        assert!(delivery_index::entry(root.path(), &a.path).is_some());
+        assert!(delivery_index::entry(root.path(), &b.path).is_some());
+    }
+
+    #[test]
+    fn a_preset_replacement_keeps_the_old_version_and_archives_it() {
+        let root = tempfile::tempdir().unwrap();
+        let v1 = b"# v1\nx = 1\n";
+        let v2 = b"# v2\nx = 2\n";
+        let old = preset_entry("A1.toml", v1);
+        let new = preset_entry("A1.toml", v2);
+
+        deliver(root.path(), &old, &MemorySource(v1.to_vec())).unwrap();
+        deliver(root.path(), &new, &MemorySource(v2.to_vec())).unwrap();
+
+        assert!(content::exists(root.path(), old.expected_sha().unwrap()));
+        assert!(content::exists(root.path(), new.expected_sha().unwrap()));
+        assert_eq!(
+            delivery_index::entry(root.path(), &new.path)
+                .unwrap()
+                .sha256,
+            new.expected_sha().unwrap(),
+            "索引指向新版"
+        );
+        assert!(
+            root.path()
+                .join(super::super::paths::ARCHIVE_DIR)
+                .join(&new.path)
+                .is_file(),
+            "旧版进归档"
+        );
+    }
+
+    #[test]
+    fn cloud_text_reads_the_current_version_from_content() {
+        let root = tempfile::tempdir().unwrap();
+        let content = b"# preset\ny = 2\n";
+        let file = preset_entry("A1.toml", content);
+        deliver(root.path(), &file, &MemorySource(content.to_vec())).unwrap();
+        assert_eq!(cloud_text(root.path(), &file).unwrap(), "# preset\ny = 2\n");
     }
 }

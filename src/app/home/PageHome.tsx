@@ -25,18 +25,20 @@ import SlideDeck, { type DeckHandle, type Sheet } from './SlideDeck'
 import MachinePicker, { type Option, type Selection } from './MachinePicker'
 import { api, errorText, uiErrorOf } from '../../api'
 import type { CalibModel, PostProcessCommand, UiError } from '../../api'
-import { useLocale, useT, type StringKey } from '../../i18n'
+import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
 import { bi } from '../shared/dataLabel'
-import { activeForSelection, selectionFromActive } from './activeSelection'
+import { activeForSelection, localActiveForSelection, selectionFromActive } from './activeSelection'
 import { notify } from '../notify/notify'
-import { activateCombo, activateFile, appStateMutated, useActivePreset } from '../state/appState'
+import { activateFile, appStateMutated, useActivePreset } from '../state/appState'
 import { deliveryMutated, useDeliveryRevision } from '../state/deliveryState'
 import { usePresetUsage } from '../state/usePresetUsage'
-import { uidOfFile, useCatalog } from './useCatalog'
+import { useCatalog } from './useCatalog'
 import { useBundleFiles } from './useBundleFiles'
 import PresetStack from './PresetStack'
+import type { BundleCompanion } from './PresetStack'
 import CalibPlate from '../calib/CalibPlate'
 import PresetPickerDrawer from '../params/PresetPickerDrawer'
+import type { PresetPickerRow } from '../params/PresetPickerDrawer'
 import { useLocalPickerRows, useLocalPresetFiles } from '../presets/localPickerRows'
 import { useDrawerWidth } from '../shared/useDrawerWidth'
 import { StaleCatalogHelp } from '../shared/StaleCatalogHelp'
@@ -66,7 +68,7 @@ import {
   xyHitLabel,
   zHitLabel,
 } from '../calib/calibAxes'
-import { useCalibration } from '../calib/useCalibration'
+import { presetForCalibration, useCalibration } from '../calib/useCalibration'
 import { usePreset } from '../calib/usePreset'
 /* 第五步那张合影：**界面自带素材**（不进 Catalog / Delivery）——
    取图那一步（浅 / 深两张位图）收在 `heroPileSource` 里，见它的文件头 */
@@ -103,15 +105,34 @@ const TAG_TONE: Record<string, Option['badgeTone']> = {
   最新: 'new',
 }
 
+/**
+ * 参数行：标签 | 数字 | 单位。
+ *
+ * ★ 2026-10-30（作者：「这些单位啊，都是靠右的……我感觉它总是没对齐」）：
+ * 值原来是**一整串左对齐**（`-25.90 mm`），于是数字左缘齐、右缘参差（`-25.90` 六位、
+ * `14.00` 五位），单位跟着数字宽度跑。现在把「最后一个空格」当分界拆成两段：
+ * 数字右对齐、单位右对齐到同一条竖线（单位列固定宽，`mm` 与 `mm/s` 才都能对齐）。
+ *
+ * 为什么用 `lastIndexOf(' ')` 而不是固定正则：值只有两种形状 —— `数字 单位`
+ * 与 `—`（没值），后者没有空格，两段都留在数字那一格，右对齐照样成立。
+ */
 function Rows({ items }: { items: [string, string][] }) {
   return (
     <dl className={p.rows}>
-      {items.map(([label, value]) => (
-        <div className={p.row} key={label}>
-          <dt className={p.label}>{label}</dt>
-          <dd className={p.value}>{value}</dd>
-        </div>
-      ))}
+      {items.map(([label, value]) => {
+        const cut = value.lastIndexOf(' ')
+        const num = cut > 0 ? value.slice(0, cut) : value
+        const unit = cut > 0 ? value.slice(cut + 1) : ''
+        return (
+          <div className={p.row} key={label}>
+            <dt className={p.label}>{label}</dt>
+            <dd className={p.value}>
+              <span className={p.num}>{num}</span>
+              <span className={p.unit}>{unit}</span>
+            </dd>
+          </div>
+        )
+      })}
     </dl>
   )
 }
@@ -123,6 +144,7 @@ interface PageHomeProps {
 export default function PageHome({ density }: PageHomeProps) {
   /* 这一页所有用户能读到的字都走字典（2026-10-26） */
   const tr = useT()
+  const say = useText()
   const locale = useLocale()
   /* 板子配色跟随应用主题（见文件头那条注释）：真值在 useIsDark() 里解析好了 */
   const isDark = useIsDark()
@@ -136,7 +158,8 @@ export default function PageHome({ density }: PageHomeProps) {
   const { fadeMs } = useDevDefaults()
   const [sel, setSel] = useState<Selection>(EMPTY)
 
-  const [openModel, setOpenModel] = useState<{ id: string; name: string } | null>(null)
+  /** `name` 存键（`msg`）：这个弹窗会一直开着，换语言时框里那几句话得跟着翻 */
+  const [openModel, setOpenModel] = useState<{ id: string; name: Text } | null>(null)
   /* 「打开测试模型」弹窗的**真实状态**（2026-10-09）：本机有没有缓存由盘说了算 */
   const [modelInfo, setModelInfo] = useState<CalibModel | null>(null)
   const [modelBusy, setModelBusy] = useState(false)
@@ -149,10 +172,12 @@ export default function PageHome({ density }: PageHomeProps) {
   const [slicerApp] = useSlicerAppPref()
   const slicerPick = useSlicerPick(defaultSlicer, openModel !== null)
   const [pending, setPending] = useState<{ from: number; to: number } | null>(null)
-  /* 预设抽屉要换一份、但本页有未保存草稿时，先把要换的那一份记下来等确认。
+  /* 预设抽屉要换一份、但本页有未保存草稿时，先把要换的那**一行**记下来等确认。
+     ★ 记整行（含文件名 + 路径），不是只记 `机型/版本` —— 确认后要与「使用」走同一条
+     按文件的路（2026-10-30，见 `applyRow`）。
      （入口是抽屉的 `onUse` 里那个 `if (dirty)` —— 2026-10-14 之前还有"校准卡里的
      预设下拉"那一条，那条随 `PresetLine` 一起删了。） */
-  const [presetAsk, setPresetAsk] = useState<string | null>(null)
+  const [presetAsk, setPresetAsk] = useState<PresetPickerRow | null>(null)
   /* 预设抽屉（与「校准」tab 同一颗）：pill 点开，从左缘出 */
   const [pickerOpen, setPickerOpen] = useState(false)
   // 保存 / 放弃之后自己发起的那一次跳转不该再被拦
@@ -193,10 +218,28 @@ export default function PageHome({ density }: PageHomeProps) {
    */
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
 
+  /*
+   * **校准卡的基准**（2026-10-30）：底账正指着这一版、且那一份是本机文件。
+   *
+   * 向导允许从步骤条直接跳到第三 / 四步，而这时 `sel` 可能只是**浏览**到的一版
+   * （没有「使用」过、本机也没有它）：`usePreset` 会拿注册表的云端默认值顶上，
+   * 于是第三步凭空冒出 X -0.70 / Y 26.30 / Z 4.00，右上角还写着目录里的文件名 ——
+   * 抽屉（只列本机文件）里根本查不到。没有基准就一个数都不给（见 `presetForCalibration`）。
+   */
+  const calibActive = localActiveForSelection(activeEntry, sel.model, sel.variant)
+
+  /*
+   * 校准卡右上角那颗 pill 念的名字 —— **与读数同源**（底账里正在使用的那份本机文件）。
+   * 不能回落到 `presetName`：它没有本机副本时给的是**目录里的云端原名**，
+   * 而抽屉只列本机文件 —— 于是卡上写着 `A1-standard.toml`、列表里却查不到
+   * （作者 2026-10-30 截图）。没有基准就只说「选择预设」。
+   */
+  const calibFileName = calibActive?.fileName ?? null
+
   // ---------- 偏移：已保存的一份 + 板上点出来 / 手输出来的草稿 ----------
   /* 整块状态机搬进了 useCalibration —— 向导这几页与「校准」tab 用同一份实现。
      这里只解构成原来那些名字，JSX 与换页拦截一行没动 */
-  const calib = useCalibration(preset)
+  const calib = useCalibration(presetForCalibration(preset, calibActive))
   const {
     saved,
     draft,
@@ -321,14 +364,14 @@ export default function PageHome({ density }: PageHomeProps) {
             /* 撤不掉就如实说，不留一个「以为撤了」的界面 */
             notify({
               kind: 'bad',
-              title: tr('home.unapply.failed'),
+              title: msg('home.unapply.failed'),
               text: errorText(e),
               ttl: 6000,
             })
           })
       }
     },
-    [sel, activeForSel, tr],
+    [sel, activeForSel],
   )
 
   /* ---------- 三级的清单：数据源是契约（getMachines），不再是手编表 ---------- */
@@ -350,29 +393,22 @@ export default function PageHome({ density }: PageHomeProps) {
     return (machine?.versions ?? []).map((v) => ({
       id: v.id,
       label: v.name,
-      badge: v.tag == null ? undefined : bi(v.tag, v.tagEn ?? undefined, locale),
-      /* 色调仍按**原角标**查表（`TAG_TONE` 的键是中文那一册） */
+      /* `catalog.machines` 已按语言摊开（useCatalog），角标直接用；
+         色调查表只认中文那一册，非中文界面回落默认色调 */
+      badge: v.tag ?? undefined,
       badgeTone: TAG_TONE[v.tag ?? ''],
       note: v.description,
     }))
-  }, [catalog.machines, sel.model, locale])
-
-  /* 「文件」这一级：仓库里的 9 份 MKP，每份带 机型/版本 倒查（校准页的预设下拉用它） */
-  const presetOptions = useMemo(
-    () =>
-      catalog.presets.flatMap((f) => {
-        const uid = uidOfFile(f)
-        return uid === null ? [] : [{ uid, name: f.fileName }]
-      }),
-    [catalog.presets],
-  )
+  }, [catalog.machines, sel.model])
 
 
   /*
    * 抽屉的行 = **本机真有**的预设（`presets-local/` 那一份扫描结果摊出来）。
    * ★ 与页面上的 `catalog`（目录）**不是同一份数据**，别互相替换。
    */
-  const pickerRows = useLocalPickerRows(useLocalPresetFiles(), catalog.machines)
+  /* 本机那份扫描结果留一份：抽屉的行由它摊出来，下面「默认」那份在不在也查它 */
+  const localFiles = useLocalPresetFiles()
+  const pickerRows = useLocalPickerRows(localFiles, catalog.machines)
 
   /* 预设抽屉的宽度：拖内缘改宽 + 三态吸附（与参数页历史抽屉同一套，见 `shared/useDrawerWidth`） */
   const pickerDrag = useDrawerWidth({
@@ -396,21 +432,28 @@ export default function PageHome({ density }: PageHomeProps) {
   )
 
   /*
-   * 抽屉里点一份 = 明确要用这份（与「改预设先问一句」同一入口）：落到 sel 之外，
-   * 真写底账 —— 四个页面同账。首页三级的**浏览选择不算应用**（作者 2026-10-06：
-   * 「不是说点了它就是应用」，应用走下面那颗明确的按钮）。
-   * 守则见 activateCombo：底账已命中不动（不顶掉「本地文件」）、应用不了保持原账。
+   * 抽屉里点一份 = 明确要用**这一份文件**：落到 sel 之外，真写底账（与「校准」tab
+   * 的 `applyRow` 同一条路，见 `activateFile` 的注释）。首页三级的**浏览选择不算应用**
+   * （作者 2026-10-06：「不是说点了它就是应用」，应用走下面那颗明确的按钮）。
+   *
+   * ★ 2026-10-30：这里原来是 `applyPreset(combo)` —— 抽屉在**有未保存改动**时只把
+   *   `机型/版本` 记进确认框，确认后走 combo 级的 `activateCombo`。那条路会把底账指向
+   *   **目录里的原名**并丢掉用户点的具体那份，而抽屉只列本机文件 ⇒ 界面出现"正在使用
+   *   `A1-standard.toml`、列表里却没有它"（作者截图），校准卡也读不到它的本机副本，
+   *   只剩云端默认值。现在两条分支共用**按文件**这一条。
    */
-  const applyPreset = useCallback(
-    (uid: string) => {
-      const [machineId, versionId] = uid.split('/')
-      const machine = catalog.machines.find((m) => m.id === machineId)
-      const version = machine?.versions.find((v) => v.id === versionId)
-      if (machine === undefined || version === undefined) return
-      setSel({ brand: machine.brand, model: machine.id, variant: version.id })
-      activateCombo(machine.id, version.id, fileOf, activeEntry)
+  const applyRow = useCallback(
+    (row: PresetPickerRow) => {
+      if (row.machineId !== sel.model || row.versionId !== sel.variant) {
+        const machine = catalog.machines.find((m) => m.id === row.machineId)
+        const version = machine?.versions.find((v) => v.id === row.versionId)
+        if (machine !== undefined && version !== undefined) {
+          setSel({ brand: machine.brand, model: machine.id, variant: version.id })
+        }
+      }
+      activateFile(row.fileName, row.ref)
     },
-    [catalog.machines, fileOf, activeEntry],
+    [catalog.machines, sel.model, sel.variant],
   )
 
   /*
@@ -419,7 +462,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 的 `onPickPreset`，下拉撤掉之后再没人调它。
    *
    * ⚠️ 那个 `presetAsk` 确认框**留着** —— 它不是同一条链上的：抽屉换预设
-   * （`onUse` 里 `if (dirty)` 那一支）还在用它。
+   * （`onUse` 里 `if (dirty)` 那一支）还在用它，确认之后与「使用」走同一个 `applyRow`。
    */
 
   const brandName = sel.brand === null ? null : brandLabel(sel.brand)
@@ -576,26 +619,104 @@ export default function PageHome({ density }: PageHomeProps) {
   const bundleState = useMemo(() => {
     const files = bundle.files
     if (files === null || bundle.problems.length > 0 || onDisk === null) {
-      return { kind: 'unknown' as const, todo: [] as string[], missing: 0, drift: 0 }
+      return {
+        kind: 'unknown' as const,
+        todo: [] as string[],
+        missing: 0,
+        drift: 0,
+        /* 判不了时没有意义；调用方先看 `kind === 'unknown'`（见下面 defaultFileState） */
+        mkp: 'missing' as const,
+      }
     }
     const todo = new Set<string>()
     let missing = 0
     let drift = 0
+    /* 套餐里那份 MKP 自己的状态（「默认」那一行 / 主按钮要单独用到，`kind` 是整套餐的） */
+    let mkp: 'ready' | 'stale' | 'missing' = 'missing'
     for (const f of files) {
       const onDiskNow = onDisk.downloaded.has(f.fileName) || onDisk.stale.has(f.fileName)
+      const stale = onDiskNow && onDisk.stale.has(f.fileName)
+      if (f.kind === 'mkp_preset') mkp = !onDiskNow ? 'missing' : stale ? 'stale' : 'ready'
       if (!onDiskNow) {
         missing += 1
         todo.add(f.fileName)
         continue
       }
-      if (onDisk.stale.has(f.fileName)) {
+      if (stale) {
         drift += 1
         todo.add(f.fileName)
       }
     }
     const kind = missing > 0 ? 'missing' : drift > 0 ? 'drift' : 'ready'
-    return { kind, todo: [...todo], missing, drift }
+    return { kind, todo: [...todo], missing, drift, mkp }
   }, [bundle, onDisk])
+
+  /*
+   * **「默认」那一份到底齐了没** —— 2026-10-30 作者截图：把 `presets-local/` 里那份删了，
+   * 行上什么状态都没有，主按钮还写「使用」。
+   *
+   * 两件事一起看才算「已下载」（两件是这条链的两层，不是两个判据）：
+   *
+   *   1. **交付面**：套餐里那份 MKP 在不在下载区 / 是不是旧字节（`getDownloadedFiles` /
+   *      `getStaleFiles`，与 `bundleState` 同一份账）；
+   *   2. **本机工作副本**：`presets-local/<套餐文件名>.toml` 在不在 —— 校准 / 参数 /
+   *      抽屉读写的就是它。作者删的是它。
+   *
+   * 为什么第 2 条必须进判据：`fetchCloudPreset` 每次都**真联网**取云端当前版
+   * （`deliver_cloud_bytes` 不走"盘上有同 SHA 就复用"那条捷径，见 `AGENTS.md` §1.5），
+   * 所以本机副本不在了，点「使用」实际做的是一次下载 —— 文案不能还叫「使用」。
+   */
+  const defaultCopyOnDisk =
+    defaultName !== null && localFiles.some((f) => f.path === `presets-local/${defaultName}`)
+
+  const defaultFileState: BundleCompanion['state'] =
+    bundleState.kind === 'unknown'
+      ? 'unknown'
+      : bundleState.mkp === 'missing' || !defaultCopyOnDisk
+        ? 'missing'
+        : bundleState.mkp === 'stale'
+          ? 'stale'
+          : 'ready'
+
+  /*
+   * 主按钮的「缺口」= 整个套餐 + 本机那份工作副本。`bundleState.kind` 只看交付面，
+   * 少了下面这一格就会在"本地副本被删"时还写「使用」（就是上面那条截图）。
+   */
+  const bundleGap: typeof bundleState.kind =
+    bundleState.kind === 'unknown'
+      ? 'unknown'
+      : bundleState.kind !== 'ready'
+        ? bundleState.kind
+        : defaultFileState === 'missing'
+          ? 'missing'
+          : 'ready'
+
+  /*
+   * **套餐里除 MKP 之外那几份**的盘上现状（2026-10-30，作者：「这一个不仅是包含这个
+   * 预设文件，它还包含了那个 JSON 对吧？……我觉得这个首页应该把那个切片器的也显示出来」）。
+   *
+   * 主按钮算的本来就是**整个套餐**（MKP 预设 + 切片器配置，见 `presets/bundles.toml`），
+   * 但此前上面只摆 MKP 一行 —— 预设页下过那份 TOML 之后回来看见"下载并使用"，
+   * 用户没法知道缺的是看不见的那份 JSON。这里照实摊开，状态与 `bundleState` 同一份账
+   * （已下载 / 漂移两张单子），不另算一套。
+   */
+  const companionRows = useMemo<BundleCompanion[]>(() => {
+    const files = bundle.files
+    if (files === null) return []
+    return files
+      .filter((f) => f.kind !== 'mkp_preset')
+      .map((f) => {
+        const state: BundleCompanion['state'] =
+          onDisk === null
+            ? 'unknown'
+            : onDisk.stale.has(f.fileName)
+              ? 'stale'
+              : onDisk.downloaded.has(f.fileName)
+                ? 'ready'
+                : 'missing'
+        return { fileName: f.fileName, state }
+      })
+  }, [bundle.files, onDisk])
 
   /*
    * 文案口径（作者 2026-10-17 第七轮）：「**下面的按钮从应用改成使用**」——
@@ -603,22 +724,23 @@ export default function PageHome({ density }: PageHomeProps) {
    * 这里原来叫「应用」，同一个动作两个词。
    */
   /*
-   * ★ 存的是**字典键**而不是句子（2026-10-26）：下面 `actionText` 要拿它跟
-   *   「正在使用」那一档比，比句子会在换语言时失效 —— 比键永远稳。
+   * **主按钮该说哪句话**只由 `bundleGap` 答（整个套餐 + 本机那份工作副本，见上）。
+   * 存的是**字典键**而不是句子（2026-10-26）。
+   *
+   * 这里**不含**「正在使用 / 使用中」：那两档是"选中的那份文件"的事
+   *（`targetActive` / `applying`），在下面 `actionTextKey` 里判 —— 目标不同，
+   * 一句「使用」在两种情况下意思也不一样，别在这张表里混。
    */
-  const actionLabelKey: StringKey = applying
-    ? 'home.action.applying'
-    : comboApplied
-      ? 'home.action.inUse'
-      : bundleState.kind === 'unknown'
-        ? bundle.problems.length > 0
-          ? 'home.action.planMissing'
-          : 'home.action.loading'
-        : bundleState.kind === 'missing'
-          ? 'home.action.downloadUse'
-          : bundleState.kind === 'drift'
-            ? 'home.action.updateUse'
-            : 'home.action.use'
+  const gapLabelKey: StringKey =
+    bundleGap === 'unknown'
+      ? bundle.problems.length > 0
+        ? 'home.action.planMissing'
+        : 'home.action.loading'
+      : bundleGap === 'missing'
+        ? 'home.action.downloadUse'
+        : bundleGap === 'drift'
+          ? 'home.action.updateUse'
+          : 'home.action.use'
   /* 主按钮的可用性在下面按「选中的那份文件」算（`actionOff`）——
      combo 级的旧判据（`comboApplied || …`）不再直接使用，留着这一行只会误导。 */
 
@@ -674,11 +796,11 @@ export default function PageHome({ density }: PageHomeProps) {
       notify({
         kind: 'ok',
         title:
-          bundleState.kind === 'ready'
-            ? tr('home.note.used')
-            : bundleState.kind === 'drift'
-              ? tr('home.note.updated')
-              : tr('home.note.downloaded'),
+          bundleGap === 'ready'
+            ? msg('home.note.used')
+            : bundleGap === 'drift'
+              ? msg('home.note.updated')
+              : msg('home.note.downloaded'),
       })
     } catch (e) {
       const msg = errorText(e)
@@ -691,7 +813,7 @@ export default function PageHome({ density }: PageHomeProps) {
          BBS 交付面）也收得到 —— 成了一半也是变了，所以放在 finally 里 */
       deliveryMutated()
     }
-  }, [applying, bundleState, presetFile, tr])
+  }, [applying, bundleState, bundleGap, presetFile, tr])
 
   /*
    * **用我选中的那份副本**（2026-10-17 晚）。
@@ -706,7 +828,7 @@ export default function PageHome({ density }: PageHomeProps) {
     try {
       await api.applyActivePreset(pickedCopy.fileName, 'local', pickedCopy.path)
       appStateMutated()
-      notify({ kind: 'ok', title: tr('home.note.used') })
+      notify({ kind: 'ok', title: msg('home.note.used') })
     } catch (e) {
       const msg = errorText(e)
       setApplyError(msg)
@@ -714,7 +836,7 @@ export default function PageHome({ density }: PageHomeProps) {
     } finally {
       setApplying(false)
     }
-  }, [applying, pickedCopy, tr])
+  }, [applying, pickedCopy])
 
   /*
    * 那颗主按钮的**目标**与**文字**（2026-10-17 晚，两改）：
@@ -730,14 +852,11 @@ export default function PageHome({ density }: PageHomeProps) {
     : targetActive
       ? 'home.action.inUse'
       : pickedCopy !== null
-        ? 'home.action.use'
-        : /* 默认那份没在用：`actionLabelKey` 里那句"正在使用"是 combo 级的，这里换成"使用" */
-          actionLabelKey === 'home.action.inUse'
-          ? 'home.action.use'
-          : actionLabelKey
+        ? /* 选中的是副本：不下载、不落副本，直接设成正在使用 */
+          'home.action.use'
+        : gapLabelKey
   const actionText = tr(actionTextKey)
-  const actionOff =
-    applying || targetActive || (pickedCopy === null && bundleState.kind === 'unknown')
+  const actionOff = applying || targetActive || (pickedCopy === null && bundleGap === 'unknown')
   const runAction = pickedCopy === null ? applyCurrent : applyPickedCopy
 
   /** 已经拿到的那一份预设；还在等 / 失败时为 null —— 不回退到 mock 里的默认那份 */
@@ -817,7 +936,7 @@ export default function PageHome({ density }: PageHomeProps) {
    * 2026-10-28 起底部那颗透明气泡退役（作者：「感觉劣质很廉价」），
    * 页脚那颗与卡片里的 `CopyAction` 都走这里。
    */
-  const noteCopyProblem = useCallback((note: string) => {
+  const noteCopyProblem = useCallback((note: Text) => {
     notify({ kind: 'warn', title: note, ttl: 6000 })
   }, [])
 
@@ -826,7 +945,7 @@ export default function PageHome({ density }: PageHomeProps) {
       (cmd) => {
         if (!cmd.ready || cmd.command === undefined) {
           setScriptCopied(false)
-          noteCopyProblem(cmd.reason ?? tr('home.script.notReady'))
+          noteCopyProblem(cmd.reason ?? msg('home.script.notReady'))
           return
         }
         void navigator.clipboard.writeText(cmd.command).then(
@@ -846,7 +965,7 @@ export default function PageHome({ density }: PageHomeProps) {
         notify({ kind: 'bad', title: errorText(e), ttl: 6000 })
       },
     )
-  }, [loadCommand, noteCopyProblem, tr])
+  }, [loadCommand, noteCopyProblem])
 
   /**
    * 四步共用那颗「复制脚本」（住 navs 左侧那一组 —— 作者：「它应该放到左侧吧」）。
@@ -920,7 +1039,7 @@ export default function PageHome({ density }: PageHomeProps) {
                   type="button"
                   className={p.variant}
                   onClick={() => deckRef.current?.jumpTo(1)}
-                  title={tr('home.entry.changeTitle')}
+                  data-tip={tr('home.entry.changeTitle')}
                 >
                   {variantName ?? entryLabel}
                   <span aria-hidden="true">›</span>
@@ -928,7 +1047,7 @@ export default function PageHome({ density }: PageHomeProps) {
 
                 {ready && (
                   <>
-                    <p className={p.path} title={displayPath ?? undefined}>
+                    <p className={p.path} data-tip={displayPath ?? undefined}>
                       {displayName ?? '—'}
                     </p>
                     {/* 按钮**常驻**（2026-10-10）：这条命令能不能给由后端的两条真事实
@@ -950,7 +1069,12 @@ export default function PageHome({ density }: PageHomeProps) {
                     [tr('calib.axis.x'), axisText(saved, 'x')],
                     [tr('calib.axis.y'), axisText(saved, 'y')],
                     [tr('calib.axis.z'), axisText(saved, 'z')],
-                    [tr('home.rows.glueSpeed'), presetInfo ? `${presetInfo.speed} mm/s` : '—'],
+                    /* 与三轴同一个判据：没有基准（没「使用」过 / 本机没有那份）就不报速度，
+                       否则这里也会拿注册表的云端默认值冒充"你这份"的值 */
+                    [
+                      tr('home.rows.glueSpeed'),
+                      calibActive !== null && presetInfo ? `${presetInfo.speed} mm/s` : '—',
+                    ],
                   ]}
                 />
               )}
@@ -1077,6 +1201,10 @@ export default function PageHome({ density }: PageHomeProps) {
                     /* 第一行（默认那份）在用：底账指着云端原件，或指着本地同名那份 */
                     defaultActive={defaultActive}
                     pickedPath={pickedCopy?.path ?? null}
+                    /* 「默认」那份的现状（交付面 + 本机那份工作副本）：与主按钮同一份判据 */
+                    defaultState={defaultName === null ? null : defaultFileState}
+                    /* 套餐里的配套文件（切片器配置）：主按钮的「下载并使用」缺的就是它 */
+                    companions={companionRows}
                     onPick={(c) =>
                       setPicked(
                         c === null || comboKey === null
@@ -1111,19 +1239,19 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'z', name: tr('home.calib.zPlate') }),
+              onClick: () => setOpenModel({ id: 'z', name: msg('home.calib.zPlate') }),
             }}
             corner={
               /* 预设 pill 挂右上角（作者 10-03：内容列里那一行别占地方）——点开左抽屉；
                  没取到文件名时退成「选择预设」的灰态 */
               <button
                 type="button"
-                className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
+                className={calibFileName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
                 onClick={() => setPickerOpen(true)}
-                title={tr('home.calib.pickPresetTitle')}
+                data-tip={tr('home.calib.pickPresetTitle')}
               >
                 <span className={p.presetFileName}>
-                  {presetName ?? tr('home.calib.pickPreset')}
+                  {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
               </button>
@@ -1203,18 +1331,18 @@ export default function PageHome({ density }: PageHomeProps) {
             topAction={{
               label: tr('home.calib.openModel'),
               accent: true,
-              onClick: () => setOpenModel({ id: 'xy', name: tr('home.calib.xyPlate') }),
+              onClick: () => setOpenModel({ id: 'xy', name: msg('home.calib.xyPlate') }),
             }}
             corner={
               /* 同 Z 步：预设 pill 挂右上角，点开左抽屉 */
               <button
                 type="button"
-                className={presetName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
+                className={calibFileName ? p.presetPill : `${p.presetPill} ${p.presetPillOff}`}
                 onClick={() => setPickerOpen(true)}
-                title={tr('home.calib.pickPresetTitle')}
+                data-tip={tr('home.calib.pickPresetTitle')}
               >
                 <span className={p.presetFileName}>
-                  {presetName ?? tr('home.calib.pickPreset')}
+                  {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
               </button>
@@ -1294,7 +1422,7 @@ export default function PageHome({ density }: PageHomeProps) {
                 label: tr('home.calib.openTest'),
                 primary: true,
                 onClick: () =>
-                  setOpenModel({ id: TEST_MODEL_ID, name: tr('home.calib.testModel') }),
+                  setOpenModel({ id: TEST_MODEL_ID, name: msg('home.calib.testModel') }),
               },
               { label: tr('home.nav.home'), onClick: () => deckRef.current?.jumpTo(0) },
             ]}
@@ -1325,10 +1453,13 @@ export default function PageHome({ density }: PageHomeProps) {
       artAlt,
       axisView,
       brandOptions,
+      calibActive,
+      calibFileName,
       canPick,
       canSave,
       clearAll,
       comboApplied,
+      companionRows,
       commitAll,
       dirty,
       displayName,
@@ -1351,7 +1482,6 @@ export default function PageHome({ density }: PageHomeProps) {
       plateTheme,
       preset,
       presetInfo,
-      presetName,
       presetView,
       ready,
       resetAxis,
@@ -1367,6 +1497,7 @@ export default function PageHome({ density }: PageHomeProps) {
       comboKey,
       pickedCopy,
       defaultActive,
+      defaultFileState,
       defaultName,
       applyError,
       bundle,
@@ -1411,20 +1542,13 @@ export default function PageHome({ density }: PageHomeProps) {
            * ★★ 2026-10-14：走**按文件**那条路（`activateFile`），不是按 combo。
            * 原来把 `机型/版本` 交给 `pickPreset` —— 它开头"uid 与当前相同就退货"，
            * 而同一 combo 下的另一份 uid 完全相同 ⇒ 点了没反应。见 `activateFile` 的注释。
-           * 有未保存改动时仍先问一句（原有那条分支）。
+           * 有未保存改动时仍先问一句（原有那条分支）；确认后走同一个 `applyRow`。
            */
           if (dirty) {
-            setPresetAsk(`${row.machineId}/${row.versionId}`)
+            setPresetAsk(row)
             return
           }
-          if (row.machineId !== sel.model || row.versionId !== sel.variant) {
-            const machine = catalog.machines.find((m) => m.id === row.machineId)
-            const version = machine?.versions.find((v) => v.id === row.versionId)
-            if (machine !== undefined && version !== undefined) {
-              setSel({ brand: machine.brand, model: machine.id, variant: version.id })
-            }
-          }
-          activateFile(row.fileName, row.ref)
+          applyRow(row)
         }}
         onClose={() => setPickerOpen(false)}
         drag={pickerDrag}
@@ -1459,15 +1583,15 @@ export default function PageHome({ density }: PageHomeProps) {
           {modelErr !== null && <HeadNote text={modelErr.text} tone="error" />}
           <p className={p.note}>
             {modelBusy
-              ? tr('home.openModel.working', { name: openModel.name })
+              ? tr('home.openModel.working', { name: say(openModel.name) })
               : modelInfo === null
-                ? tr('home.openModel.checking', { name: openModel.name })
+                ? tr('home.openModel.checking', { name: say(openModel.name) })
                 : modelInfo.ready
                   ? tr('home.openModel.hasCache', {
-                      name: openModel.name,
+                      name: say(openModel.name),
                       size: modelInfo.size ?? tr('home.openModel.sizeUnknown'),
                     })
-                  : tr('home.openModel.noCache', { name: openModel.name })}
+                  : tr('home.openModel.noCache', { name: say(openModel.name) })}
           </p>
           {/* ★ 2026-10-19（作者）：**内容区要给"怎么办"** —— 标题格只说"出了什么事"，
               下一步做什么住在这里。只在真能靠重启解决时才出现（判据是那个码，不是文案） */}
@@ -1536,7 +1660,8 @@ export default function PageHome({ density }: PageHomeProps) {
                 variant="primary"
                 onClick={() => {
                   clearAll()
-                  applyPreset(presetAsk)
+                  /* ★ 与抽屉那颗「使用」走**同一条**路（按文件，不是按 combo） */
+                  applyRow(presetAsk)
                   setPresetAsk(null)
                 }}
               >
@@ -1546,11 +1671,7 @@ export default function PageHome({ density }: PageHomeProps) {
           }
         >
           <p className={p.note}>
-            {tr('home.modal.presetAskNote', {
-              name:
-                presetOptions.find((o) => o.uid === presetAsk)?.name ??
-                tr('home.modal.otherPreset'),
-            })}
+            {tr('home.modal.presetAskNote', { name: presetAsk.fileName })}
           </p>
         </Modal>
       )}

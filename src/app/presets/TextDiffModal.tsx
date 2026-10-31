@@ -21,7 +21,7 @@
 
 import { useCallback, useMemo, useRef, useState } from 'react'
 
-import { useT } from '../../i18n'
+import { useT, useText, type Text } from '../../i18n'
 import { HeadNote, Modal } from '../../components/modal'
 /* 底栏按钮**直接用编辑文件那一套类**：两边高度必须是同一个数（见 `.footLeft` 那段注释） */
 import ps from './PagePresets.module.css'
@@ -36,8 +36,9 @@ export interface DiffShell {
   canUndo: boolean
   canRedo: boolean
   saveDisabled: boolean
-  /** 底栏左侧那行红字（草稿没写进去 / 没存上）—— 与编辑文件同一个位置 */
-  error: string | null
+  /** 底栏左侧那行红字（草稿没写进去 / 没存上）—— 与编辑文件同一个位置。
+   *  [`Text`]：它存的是键（`msg`），渲染时才翻 —— 这一屏开着切语言也得跟着换。 */
+  error: Text | null
   onEnter: () => void
   onUndo: () => void
   onRedo: () => void
@@ -71,6 +72,7 @@ export default function TextDiffModal({
   onClose: () => void
 }) {
   const tr = useT()
+  const say = useText()
   const rows = useMemo(() => lineDiff(left, right), [left, right])
   const sum = useMemo(() => diffSummary(rows), [rows])
   const total = sum.changed + sum.added + sum.removed
@@ -189,7 +191,7 @@ export default function TextDiffModal({
          */
         data-side="right"
         data-editable={editable || undefined}
-        title={text ?? undefined}
+        data-tip={text ?? undefined}
         onClick={() => {
           if (!editable || lineNo === null) return
           beginEdit(lineNo, text ?? '')
@@ -239,7 +241,7 @@ export default function TextDiffModal({
             </button>
           </span>
 
-          {shell.error !== null && <span className={ps.editorStateBad}>{shell.error}</span>}
+          {shell.error !== null && <span className={ps.editorStateBad}>{say(shell.error)}</span>}
 
           <span className={s.footActs}>
             {editable ? (
@@ -249,7 +251,7 @@ export default function TextDiffModal({
                   className={s.pill}
                   onClick={shell.onUndo}
                   disabled={!shell.canUndo}
-                  title={tr('presets.diff.undo')}
+                  data-tip={tr('presets.diff.undo')}
                 >
                   {tr('presets.diff.undo')}
                 </button>
@@ -258,7 +260,7 @@ export default function TextDiffModal({
                   className={s.pill}
                   onClick={shell.onRedo}
                   disabled={!shell.canRedo}
-                  title={tr('presets.diff.redo')}
+                  data-tip={tr('presets.diff.redo')}
                 >
                   {tr('presets.diff.redo')}
                 </button>
@@ -266,7 +268,7 @@ export default function TextDiffModal({
                   type="button"
                   className={s.pill}
                   onClick={shell.onExit}
-                  title={tr(EDIT_TEXT.exitTitle)}
+                  data-tip={tr(EDIT_TEXT.exitTitle)}
                 >
                   {tr(EDIT_TEXT.exitMode)}
                 </button>
@@ -309,7 +311,7 @@ export default function TextDiffModal({
                   <span className={s.no} role="cell">
                     {r.leftNo ?? ''}
                   </span>
-                  <span className={s.code} data-side="left" role="cell" title={r.left ?? undefined}>
+                  <span className={s.code} data-side="left" role="cell" data-tip={r.left ?? undefined}>
                     {r.left ?? ''}
                   </span>
                   <span className={s.no} role="cell">
@@ -329,7 +331,7 @@ export default function TextDiffModal({
                         <span className={s.no} role="cell">
                           {r.leftNo ?? ''}
                         </span>
-                        <span className={s.code} role="cell" title={r.left ?? undefined}>
+                        <span className={s.code} role="cell" data-tip={r.left ?? undefined}>
                           {r.left ?? ''}
                         </span>
                       </div>

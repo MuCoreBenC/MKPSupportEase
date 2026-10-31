@@ -33,7 +33,11 @@ import { HeadNote, Modal } from '../../components/modal'
 import { api, uiErrorOf } from '../../api'
 import type { CalibModel, UiError } from '../../api'
 import { useT, type StringKey } from '../../i18n'
-import { activeForSelection, selectionFromActive } from '../home/activeSelection'
+import {
+  activeForSelection,
+  localActiveForSelection,
+  selectionFromActive,
+} from '../home/activeSelection'
 import { activateFile, useActivePreset, useActivePresetReady } from '../state/appState'
 import { useCatalog } from '../home/useCatalog'
 import {
@@ -45,7 +49,7 @@ import {
   xyHitLabel,
   zHitLabel,
 } from './calibAxes'
-import { useCalibration } from './useCalibration'
+import { presetForCalibration, useCalibration } from './useCalibration'
 import { usePreset } from './usePreset'
 import type { Selection } from '../home/MachinePicker'
 import CalibReadings from './CalibReadings'
@@ -313,8 +317,13 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     }
   }, [sel])
 
-  const currentUid =
-    sel.model !== null && sel.variant !== null ? `${sel.model}/${sel.variant}` : null
+  /*
+   * **校准的基准**只认「正在使用 + 本机那份」（与首页两张校准卡同一条判据，
+   * 唯一实现在 `home/activeSelection` 与 `calib/useCalibration`）：
+   * 底账没指着这一版、或它指的是云端原名时，读数位一个数都不给 ——
+   * `usePreset` 那时只能拿注册表的云端默认值顶上，那是出厂值，不是"你的"校准值。
+   */
+  const calibActive = localActiveForSelection(activeEntry, sel.model, sel.variant)
 
   const preset = usePreset(sel)
   const {
@@ -338,7 +347,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     commitAll,
     resliceAsk,
     dismissReslice,
-  } = useCalibration(preset)
+  } = useCalibration(presetForCalibration(preset, calibActive))
 
   /* 预设抽屉（与 G06-8 同一颗） */
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -359,27 +368,15 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
     label: tr('calib.presetList'),
   })
 
-  const fileOf = useCallback(
-    (machineId: string, versionId: string) => {
-      const hit = catalog.presets.find((f) =>
-        f.usedByVersions.some((r) => r.machine === machineId && r.version === versionId),
-      )
-      return hit?.fileName ?? null
-    },
-    [catalog.presets],
-  )
-
-  const currentFileName = currentUid && sel.model !== null && sel.variant !== null
-    ? fileOf(sel.model, sel.variant)
-    : null
-
   /*
    * A3：底账正指着当前选中 combo 时，pill 说**底账那份**的名字 ——
    * 应用了「本地文件」就显示本地文件（与预设页横幅、首页同源），不再显示目录底稿。
-   * （activeEntry 来自上面的 AppState 订阅。）
+   * ★ 2026-10-30：与读数**同一个判据**（`calibActive` = 在用 + 本机那份）。
+   *   原来还回落到目录里的云端原名（`currentFileName`）—— 抽屉只列本机文件，
+   *   于是出现"卡上写着 `A1-standard.toml`、列表里根本没有它"（作者截图）。
    */
   const activeForSel = activeForSelection(activeEntry, sel.model, sel.variant)
-  const pillFileName = activeForSel?.fileName ?? currentFileName
+  const pillFileName = calibActive?.fileName ?? null
 
   const [opening, setOpening] = useState<OpeningModel | null>(null)
   /* 打开模型用哪个切片软件：默认在设置页那格；模态框里可临时换（勾「仅这一次」就不写回） */
@@ -789,7 +786,7 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               type="button"
               className={s.presetSeg}
               data-off={pillFileName === null}
-              title={pillFileName ?? tr('calib.pickPreset')}
+              data-tip={pillFileName ?? tr('calib.pickPreset')}
               onMouseDown={noFocus}
               onClick={() => setPickerOpen(true)}
             >

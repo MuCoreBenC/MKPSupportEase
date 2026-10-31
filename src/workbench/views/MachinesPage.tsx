@@ -34,6 +34,7 @@ import type {
   MachineList,
   MachineView,
   RegistryView,
+  VersionField,
   VersionView,
   Words,
 } from '../api'
@@ -75,7 +76,7 @@ const idOk = (v: string) => /^[A-Z][A-Z0-9_]*$/.test(v)
  */
 function HelpDot({ text }: { text: string }) {
   return (
-    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+    <span className={s.helpDot} role="img" aria-label={text} data-tip={text}>
       ?
     </span>
   )
@@ -100,6 +101,23 @@ const STATE_TAG: Record<string, string> = {
   neverBuilt: s.tagBuildNever,
   noResources: s.tagBuildNone,
 }
+
+/*
+ * 版本多语言（2026-10-31）：中文是打底那一册（详情卡的普通输入框），
+ * 其余语言走「多语言」模态框。**加一种语言 = 在 `I18N_LANGS` 加一行**，
+ * TOML 字段名就是 `${字段}${后缀}`（`nameEn` / `tagTw` …），前后端按同一套后缀拼。
+ */
+const I18N_LANGS = [
+  { suffix: 'En', label: 'English' },
+  { suffix: 'Tw', label: '繁體中文' },
+  { suffix: 'Ja', label: '日本語' },
+] as const
+const I18N_FIELDS = [
+  { suffix: 'name', label: '显示名', ph: '空 = 客户端回落中文那一册' },
+  { suffix: 'tag', label: '标签', ph: '可空' },
+  { suffix: 'description', label: '描述', ph: '可空' },
+] as const
+type I18nKey = `${(typeof I18N_FIELDS)[number]['suffix']}${(typeof I18N_LANGS)[number]['suffix']}`
 
 export default function MachinesPage({ book, words, onGoto, onSave, onBookRefresh }: Props) {
   /** 左栏宽度可拖（作者 2026-10-03，同参数台） */
@@ -143,6 +161,9 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   const [evName, setEvName] = useState('')
   const [evTag, setEvTag] = useState('')
   const [evDesc, setEvDesc] = useState('')
+  /** 多语言模态框：`${字段}${语言后缀}` → 草稿值。字段/语言两表都见下面的常量 */
+  const [i18nOpen, setI18nOpen] = useState<string | null>(null)
+  const [i18nDraft, setI18nDraft] = useState<Record<string, string>>({})
 
   /* —— 品牌（2026-10-03，作者：「在这一页多加一个品牌吧，右侧也是一样可以编辑，
         品牌图、显示名，不管客户端消不消费都提供」）——
@@ -275,7 +296,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     [x.display, x.brand].filter((v) => !v.trim()).length
 
   /** 改机型的一格。后端校验；失败的话把那句话原样端给人 */
-  const saveMachine = async (field: 'display' | 'brand' | 'name' | 'image' | 'icon', value: string | null) => {
+  const saveMachine = async (field: 'display' | 'brand' | 'name' | 'image' | 'icon' | 'enabled', value: string | null) => {
     if (!m) return
     try {
       setList(await wb.setMachineField(m.id, field, value))
@@ -321,7 +342,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
   /** 改版本的一格。同上 */
   const saveVersion = async (
     versionId: string,
-    field: 'name' | 'tag' | 'description' | 'remark' | 'recommendedBundle' | 'image',
+    field: VersionField,
     value: string | null,
   ) => {
     if (!m) return
@@ -625,6 +646,35 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     }
   }
 
+  /** 提交多语言模态框：只提交**有变化的**格，一格失败就停，不静默半成功 */
+  const submitI18n = async () => {
+    if (i18nOpen === null) return
+    const [mid, vid] = i18nOpen.split('/')
+    const ver = list?.machines.find((x) => x.id === mid)?.versions.find((x) => x.id === vid)
+    if (!ver) return
+    try {
+      let next: MachineList | null = null
+      for (const f of I18N_FIELDS) {
+        for (const l of I18N_LANGS) {
+          const key = `${f.suffix}${l.suffix}` as I18nKey
+          const draft = (i18nDraft[key] ?? '').trim()
+          if (draft === (ver[key] ?? '')) continue
+          next = await wb.setVersionField(
+            mid,
+            vid,
+            key,
+            draft === '' ? null : draft,
+          )
+        }
+      }
+      if (next) setList(next)
+      toasts.push(`已更新 ${mid}/${vid} 的多语言名称`)
+      setI18nOpen(null)
+    } catch (e) {
+      failToast(e)
+    }
+  }
+
   /* 下一步：按真实工作流挑第一件没做完的事（判据全部来自上面的派生） */
   const nextStep = (() => {
     if (!picked || !pickedNode) return null
@@ -748,7 +798,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   <button
                     type="button"
                     className={s.treeTwist}
-                    title={folded ? '展开这个品牌下的机型' : '收起这个品牌下的机型'}
+                    data-tip={folded ? '展开这个品牌下的机型' : '收起这个品牌下的机型'}
                     aria-expanded={!folded}
                     aria-label={`${folded ? '展开' : '收起'} ${b.name || b.id}`}
                     onClick={() => setFoldedBrands((prev) => {
@@ -800,8 +850,10 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                           <span className={`${s.mono} ${s.rowMeta}`}>{x.id}</span>
                           <span className={s.rowMeta}>{x.versions.length} 版</span>
                           {!x.hasDimensions && <span className={`${s.tag} ${s.tagGhost}`}>占位</span>}
+                          {/* 停用的机型仍然列在这儿（还能把它打开），但一眼要看得出来 */}
+                          {!x.enabled && <span className={`${s.tag} ${s.tagGhost}`}>已停用</span>}
                           {t > 0 && (
-                            <span className={s.todo} title={fieldState.needsInputHint}>
+                            <span className={s.todo} data-tip={fieldState.needsInputHint}>
                               {fieldState.needsInput} {t}
                             </span>
                           )}
@@ -833,7 +885,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             : `筛出 ${listed.length} / ${list.machines.length} 台`}
         </div>
         {/* 明写数据根：这一页读写的是 presets/machines/，与参数台的草稿是两个地方 */}
-        <div className={s.sum} title={list.root}>
+        <div className={s.sum} data-tip={list.root}>
           读写 {list.root}
         </div>
       </div>
@@ -924,7 +976,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
             <h2>身份</h2>
             <span className={s.cardNote}>{m.id}</span>
             {todo > 0 && (
-              <span className={s.todo} title={fieldState.needsInputHint}>
+              <span className={s.todo} data-tip={fieldState.needsInputHint}>
                 {fieldState.needsInput} {todo} 项
               </span>
             )}
@@ -1038,6 +1090,29 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 )}
                 <span className={s.cardNote}>对照名来自数据文件，工作台不给编辑</span>
               </span>
+
+              {/*
+               * 启用 / 停用（2026-10-30 作者：「就在工作台里面，加一个开关去禁用它」）。
+               *
+               * 停用**不是删除**：机型文件、套餐、参数注册表里的引用一个都不动，
+               * 只是不在目录里出现 —— 客户端因此看不到它，后处理也拒绝（`hook.machine_disabled`）。
+               * 写进文件的是 `enabled = false`；打开就删掉那一行（启用是缺省）。
+               */}
+              <span className={s.kvKey}>{machineFieldLabels.enabled}</span>
+              <span className={s.kvVal}>
+                <label className={s.refRow}>
+                  <input
+                    type="checkbox"
+                    checked={m.enabled}
+                    onChange={(e) => void saveMachine('enabled', e.target.checked ? null : 'false')}
+                  />
+                  <span>
+                    {m.enabled
+                      ? '启用 —— 客户端能看到这台，后处理照常跑'
+                      : '已停用 —— 不进目录：客户端不显示这台，后处理也会拒绝'}
+                  </span>
+                </label>
+              </span>
             </div>
           </div>
         </div>
@@ -1054,7 +1129,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnSm}`}
               disabled={!m.hasDimensions && m.dimensions === null}
-              title={
+              data-tip={
                 m.dimensions === null
                   ? '这台还没有 [dimensions] —— 先建一份尺寸（床身那两格必填）'
                   : '改这六组读数（床身 / 移动范围 / 边缘 / 涂胶 / 标定点 / 标志位）'
@@ -1230,7 +1305,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   )}
                   <span
                     className={`${s.tag} ${STATE_TAG[st]}`}
-                    title={`${words.build[st].explain ?? ''} · ${bbsHint}`}
+                    data-tip={`${words.build[st].explain ?? ''} · ${bbsHint}`}
                   >
                     {words.build[st].label}
                   </span>
@@ -1314,6 +1389,8 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                     />
                   </span>
 
+                  {/* 其他语言的显示名/标签/描述收进「多语言」模态框 ——
+                      一行一行排会随语言变多而撑爆详情卡（2026-10-31 作者定） */}
                   <span className={s.kvKey}>版本 id</span>
                   <span className={s.kvVal}>
                     <span className={s.mono}>{picked.id}</span>
@@ -1355,6 +1432,29 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                         if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                       }}
                     />
+                  </span>
+
+                  {/* 其他语言的入口。详情卡只留中文打底的三格，
+                      其余语言（英/繁/日…）进模态框集中编辑 */}
+                  <span className={s.kvKey}>多语言</span>
+                  <span className={s.kvVal}>
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() => {
+                        const draft: Record<string, string> = {}
+                        for (const f of I18N_FIELDS)
+                          for (const l of I18N_LANGS)
+                            draft[`${f.suffix}${l.suffix}`] = picked[`${f.suffix}${l.suffix}` as keyof typeof picked] as string ?? ''
+                        setI18nDraft(draft)
+                        setI18nOpen(vidOf(m.id, picked.id))
+                      }}
+                    >
+                      编辑多语言…
+                    </button>
+                    <span className={s.cardNote}>
+                      {I18N_LANGS.map((l) => l.label).join(' · ')} —— 空了客户端就回落中文那一册
+                    </span>
                   </span>
 
                   {/* **备注**（2026-10-07）：客户端预设列表的**副标题**显示的就是这一句。
@@ -1460,7 +1560,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                           type="button"
                           className={`${s.btn} ${s.btnSm} ${s.btnPrimary}`}
                           disabled={!canGen}
-                          title={canGen ? `生成 ${pickedRow?.mkpFile ?? '预设'}` : note}
+                          data-tip={canGen ? `生成 ${pickedRow?.mkpFile ?? '预设'}` : note}
                           onClick={() => void doBuild(m.id, picked.id)}
                         >
                           {pickedNode.build === 'stale' ? '重新生成' : '生成配方'}
@@ -1615,7 +1715,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!bunPick}
-              title={bunPick ? undefined : '先在下面挑一个套餐'}
+              data-tip={bunPick ? undefined : '先在下面挑一个套餐'}
               onClick={() => {
                 if (bunOpen === null || !bunPick) return
                 const [, vid] = bunOpen.split('/')
@@ -1697,7 +1797,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={nbId.trim() === '' || nbName.trim() === ''}
-              title={
+              data-tip={
                 nbId.trim() === ''
                   ? 'id 不能空'
                   : nbName.trim() === ''
@@ -1794,7 +1894,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                 type="button"
                 className={`${s.row} ${s.treeKid} ${here ? s.treeKidOn : ''}`}
                 disabled={here}
-                title={here ? '它现在就在这家' : `挪到 ${b.name || b.id}`}
+                data-tip={here ? '它现在就在这家' : `挪到 ${b.name || b.id}`}
                 onClick={() => {
                   if (moveOf !== null) void moveMachine(moveOf, b.id)
                 }}
@@ -1870,7 +1970,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!addReady}
-              title={
+              data-tip={
                 !idOk(addId) && addId.trim() !== ''
                   ? 'id 只能用大写字母、数字和下划线（它会直接变成文件名）'
                   : addIdTaken
@@ -1950,7 +2050,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!avReady}
-              title={
+              data-tip={
                 avTaken
                   ? '这台机型已经有这个版本 id 了'
                   : !idOk(avId) && avId.trim() !== ''
@@ -2013,7 +2113,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!copyReady}
-              title={
+              data-tip={
                 copyTaken
                   ? '这台机型已经有这个版本 id 了'
                   : idOk(copyId) || copyId.trim() === ''
@@ -2073,7 +2173,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!evName.trim()}
-              title={evName.trim() ? undefined : '版本名不许清空'}
+              data-tip={evName.trim() ? undefined : '版本名不许清空'}
               onClick={() => void submitEditVersion()}
             >
               保存
@@ -2106,7 +2206,54 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         </label>
         <p className={s.cardNoteDim}>
           版本 id 不在这里改
-          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。一次提交三格：一格失败就停，不会只成功一半。套餐在 ④ 关联里改。" />
+          <HelpDot text="id 是身份，改它等于删掉再加一个（后端还没有这一步）。其他语言的显示名/标签/描述在详情卡的「多语言」里编辑。套餐在 ④ 关联里改。" />
+        </p>
+      </ModalC14>
+
+      {/* —— 多语言（英/繁/日…的显示名/标签/描述，一次提交；语言表见 I18N_LANGS） —— */}
+      <ModalC14
+        open={i18nOpen !== null}
+        title={`多语言 · ${i18nOpen ?? ''}`}
+        size="md"
+        closeOnScrim={false}
+        onClose={() => setI18nOpen(null)}
+        footer={
+          <>
+            <span className={s.grow} />
+            <button type="button" className={s.btn} onClick={() => setI18nOpen(null)}>
+              取消
+            </button>
+            <button type="button" className={`${s.btn} ${s.btnPrimary}`} onClick={() => void submitI18n()}>
+              保存
+            </button>
+          </>
+        }
+      >
+        {I18N_LANGS.map((l) => (
+          <div key={l.suffix} style={{ marginBottom: 14 }}>
+            <div className={s.cardNote}>{l.label}</div>
+            <label className={s.kv} style={{ display: 'grid' }}>
+              {I18N_FIELDS.map((f) => {
+                const key = `${f.suffix}${l.suffix}` as I18nKey
+                return (
+                  <div key={key} style={{ display: 'contents' }}>
+                    <span className={s.kvKey}>{f.label}</span>
+                    <input
+                      className={s.inp}
+                      value={i18nDraft[key] ?? ''}
+                      aria-label={`${l.label} · ${f.label}`}
+                      placeholder={f.ph}
+                      onChange={(e) => setI18nDraft((d) => ({ ...d, [key]: e.target.value }))}
+                    />
+                  </div>
+                )
+              })}
+            </label>
+          </div>
+        ))}
+        <p className={s.cardNoteDim}>
+          中文那一册在详情卡里改；这里空着就回落中文
+          <HelpDot text="加一种语言 = 在本文件顶部的 I18N_LANGS 加一行（后缀与 TOML 字段名对齐，如 nameTw）。一次提交所有改动：一格失败就停，不会只成功一半。" />
         </p>
       </ModalC14>
 

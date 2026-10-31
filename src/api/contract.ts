@@ -549,13 +549,25 @@ export interface MachineVersion {
   name: string
   /** 英文显示名（2026-10-27 双语数据）。空 = 回落 `name` */
   nameEn?: string | null
+  /** 繁體显示名。空 = 回落 `name` */
+  nameTw?: string | null
+  /** 日文显示名。空 = 回落 `name` */
+  nameJa?: string | null
   /** 角标，'推荐' / '热门' / '最新'；没有就不显示 */
   tag?: string
   /** 英文角标。空 = 回落 `tag` */
   tagEn?: string | null
+  /** 繁體角标。空 = 回落 `tag` */
+  tagTw?: string | null
+  /** 日文角标。空 = 回落 `tag` */
+  tagJa?: string | null
   description?: string
   /** 英文说明。空 = 回落 `description` */
   descriptionEn?: string | null
+  /** 繁體说明。空 = 回落 `description` */
+  descriptionTw?: string | null
+  /** 日文说明。空 = 回落 `description` */
+  descriptionJa?: string | null
   /**
    * **备注**（2026-10-07）：客户端预设列表的**副标题**用它 —— 不再显示
    * 「下载区 mkp · 路径」那种位置文案。可空（工作台可以不写；没写副标题就空着）。
@@ -967,19 +979,32 @@ export type BasedOn =
  * 前端不再自己拼第二套判据。
  */
 export interface BasedOnFacts {
+  /** 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null` */
+  lineageKind: 'download' | 'copy' | 'import' | 'unknown' | null
   /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
   lineageSource: string | null
   /**
-   * 血统里记的来源版本标记（文件头 `# release_time`）。
-   * **只做展示**：那是配方的写作日期，不是发布顺序。
+   * 血统里记的来源版本标记（文件头 `# release_time`）—— 界面「配方版本时间」就是它。
+   * **只做展示**：那是配方自己写下的时间，不是发布顺序，**更不是「云端发布时刻」**。
    */
   lineageRelease: string | null
-  /** 那个源最近一次发布目录的时刻 */
+  /**
+   * ★ 「云端发布时刻」的真值：这份**对应的那一代目录**实际发布的时刻。
+   * 它只说明目录什么时候发布，**不代表内容变过**。
+   * 从没记过 ⇒ `null` → 界面写「未知」，**不回落** `lineageRelease` / mtime。
+   */
   lineagePublishedAt: string | null
+  /** 血统记的来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
+  lineageSha256: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
-  /** 当前这份目录的发布时刻（随包 bootstrap 目录没有）。同样**只做展示** */
+  /**
+   * 当前云端目录自己的发布时刻（随包 bootstrap 目录没有）。
+   * **只在判定为「有新版本」时**才显示 —— 它不属于"你手上这份"。
+   */
   cloudPublishedAt: string | null
+  /** 当前云端这一份的原文摘要（目录登记值）—— 「更多」里与本地对照 */
+  cloudSha256: string | null
   /** 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null` */
   lineageCatalog: string | null
   /** 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null` */
@@ -988,7 +1013,22 @@ export interface BasedOnFacts {
   cloudCatalog: string | null
   /** 当前目录是那条线的第几号（`publishSerial`） */
   cloudSerial: number | null
+  /**
+   * `unverified` 时为什么说不清：`no_lineage` / `no_release_line` /
+   * `catalog_without_identity` / `not_in_catalog` / `no_sha` / `no_source_identity`。
+   * 其余档位是 `null`。
+   */
+  unverifiedReason: UnverifiedReason | null
 }
+
+/** 说不清的原因（跨 IPC 的稳定词；界面翻成人话，不自己判） */
+export type UnverifiedReason =
+  | 'no_lineage'
+  | 'no_release_line'
+  | 'catalog_without_identity'
+  | 'not_in_catalog'
+  | 'no_sha'
+  | 'no_source_identity'
 
 /**
  * 用户文件的**文件级**状态（第九层）：`ok` = 能读 + 是 UTF-8 + TOML 语法能解析；
@@ -1050,18 +1090,25 @@ export interface LocalPresetFile {
   machineId: string | null
   versionId: string | null
   /**
-   * **出处账**记的来源：从用户自己的哪一份复制来的（相对用户根路径）。
-   * 没记过 / 是导入的 / 来源已删除 ⇒ `null` —— 界面退回别的说法，不编。
-   *
-   * 为什么在账本里而不是文件头：另存是**按字节**复制（血统原样带过去），往文件头里
-   * 加一行就得重写字节；导入的外部文件更不能动。账本只服务界面上「来源：复制自 X」
-   * 一格，丢了就退回「本地」，什么都不坏。
+   * 来路：`download`（云端下载）/ `copy`（用户自己另存，母本在 `originPath`）/
+   * `import`（外部导入）/ `unknown`（旧账，来路说不清）。
+   * 账上没记 ⇒ `null` —— 界面照实说「未知（当时没有记录来源）」，不编。
    */
-  copiedFrom: string | null
-  /** 上面那条路径里的**文件名**（界面直接显示用）。没有同上 */
-  copiedFromName: string | null
-  /** 出处档：`copy`（复制自另一份用户文件）/ `import`（外部导入）。都没记 ⇒ `null` */
-  provenance: 'copy' | 'import' | null
+  provenanceKind: 'download' | 'copy' | 'import' | 'unknown' | null
+  /** 拷贝的母本（相对用户根路径）。下载 / 导入 / 没记 ⇒ `null` */
+  originPath: string | null
+  /** 上面那条路径里的**文件名**（界面直接显示用） */
+  originName: string | null
+  /** 这份对应的云端目录文件名（认亲用；目录换路径也还认得出） */
+  cloudFile: string | null
+  /**
+   * ★ 「云端发布时刻」：这份对应的那一代目录**实际发布**的时刻（只说明目录发布，
+   * 不代表内容变过）。从没记过 ⇒ `null` → 界面写「未知」，
+   * **不回落文件修改时间 / `# release_time`**。
+   */
+  versionPublishedAt: string | null
+  /** 这份文件落进 `presets-local/` 的时刻（epoch 秒）：下载 / 拷贝 / 导入各按各的 */
+  obtainedUnix: number | null
 }
 
 /**
@@ -1956,13 +2003,15 @@ export type ThemePref = 'light' | 'dark' | 'system'
  *
  * - `system`：跟随系统（出厂档）；
  * - `zh-CN`：简体中文；
+ * - `zh-TW`：繁體中文（台灣用字，2026-10-30 加）；
+ * - `ja`：日本語（2026-10-30 加）；
  * - `en`：English。
  *
  * ★ 线上字面量带大写（`zh-CN`）—— Rust 那一侧是逐个 `serde(rename)`，
  *   不是 `rename_all`，改这里必须同时改那边。
  * ★ `null`（还没选过）与 `'system'`（明确点了跟随系统）分得开，与主题同一条口径。
  */
-export type LocalePref = 'system' | 'zh-CN' | 'en'
+export type LocalePref = 'system' | 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 
 /* ---------- 主窗怎么摆（2026-10-17） ---------- */
 
@@ -2564,6 +2613,18 @@ export interface SlicerApp {
   path: string
 }
 
+/** 回收站里的一条：删掉的用户预设 + 它的来源记录 */
+export interface RecoveryEntry {
+  id: string
+  /** 原相对路径（`presets-local/xxx.toml`） */
+  path: string
+  fileName: string
+  /** 删除时刻（UTC epoch 秒） */
+  deletedAt: number
+  hasOrigin: boolean
+  cloudFile: string | null
+}
+
 export interface MkpApi {
   /**
    * **把校准好的三轴偏移写进「我的预设」**（2026-10-08 资源库改判）。
@@ -3050,13 +3111,24 @@ export interface MkpApi {
   revealSlicerFile(fileName: string): Promise<void>
 
   /**
-   * **删除一份用户文件**（第十层）：**真删除** —— 没有垃圾桶、也没有归档
-   * （`archive/` 是云端版本生命周期的一部分；用户自己删自己的文件就结束）。
+   * **删除一份用户文件**：进**回收站**，不是真删（2026-10-29 作者改判）。
    *
-   * 两道硬闸在后端：**正在使用的不许删**（删了「使用中」就指向一份不存在的文件）、
-   * **还有没保存的草稿的不许删**（删了草稿就永远存不回去）。失败原话冒上来。
+   * 文件 + 原文镜像 + 来源账一起收进 `recovery/<id>/`；设使用中 / 有草稿的先把状态撤掉。
+   * 收不进去就不删 —— 宁可这次失败，也不做"删了找不回"。
    */
   deleteLocalPreset(path: string): Promise<void>
+
+  /** 回收站列表（最新删除的在前） */
+  listRecovery(): Promise<RecoveryEntry[]>
+
+  /** 从回收站恢复一条，返回恢复后的相对路径；**不自动设为使用中** */
+  restoreLocalPreset(id: string): Promise<string>
+
+  /** 永久删掉一条回收记录 */
+  purgeRecovery(id: string): Promise<void>
+
+  /** 清空回收站，返回清掉的条数 */
+  emptyRecovery(): Promise<number>
 
   /**
    * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。

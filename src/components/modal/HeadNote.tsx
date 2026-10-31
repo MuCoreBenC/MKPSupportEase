@@ -29,34 +29,35 @@
  */
 
 import { createPortal } from 'react-dom'
+import { useText, type Text } from '../../i18n'
 import { useModalHeadNoteSlot } from './modalHeadSlot'
 import s from './HeadNote.module.css'
 
 export type HeadNoteTone = 'error' | 'note' | 'ok'
 
-export function HeadNote({ text, tone }: { text: string; tone: HeadNoteTone }) {
+/**
+ * 标题右边那一格提示。
+ *
+ * `text` 收 [`Text`]：**这里摊开**（`useText`），所以调用方可以直接给 `msg(键, 变量)` 存着，
+ * 换语言时这一格自己跟着翻；后端原话那种翻不了的照旧给字符串。
+ */
+export function HeadNote({ text, tone }: { text: Text; tone: HeadNoteTone }) {
   const slot = useModalHeadNoteSlot()
+  const say = useText()
+  const line = say(text)
 
   if (slot === null) {
     /* 没有槽 = 这一屏不在框里：照旧渲染在原处（不许"什么都没画"） */
     return (
-      <p
-        className={`${s.fallback} ${s[tone]}`}
-        role={tone === 'error' ? 'alert' : undefined}
-        title={text}
-      >
-        {text}
+      <p className={`${s.fallback} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} data-tip={line}>
+        {line}
       </p>
     )
   }
 
   return createPortal(
-    <span
-      className={`${s.head} ${s[tone]}`}
-      role={tone === 'error' ? 'alert' : undefined}
-      title={text}
-    >
-      {text}
+    <span className={`${s.head} ${s[tone]}`} role={tone === 'error' ? 'alert' : undefined} data-tip={line}>
+      {line}
     </span>,
     slot,
   )

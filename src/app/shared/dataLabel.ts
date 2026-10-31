@@ -89,28 +89,55 @@ export function localizeTab<
 }
 
 /**
- * 机型目录里的**版本显示名/说明**按界面语言摊开（`tag` 刻意不动：它还要给
- * `TAG_TONE` 当键用，显示时再单挑）。
+ * 数据的多语言挑选规矩（2026-10-31 起不止两册）：中文打底，`en` / `zh-TW` / `ja`
+ * 界面优先本语种那一册，空着逐级回落中文。与 `bi` 同一条规矩的推广 —— 回落不是妥协，
+ * 是防线：数据可能还没译完，缺一册不能变成"这行没有名字"。
+ */
+export function multiLang(
+  zh: string,
+  t: { En?: string | null; Tw?: string | null; Ja?: string | null },
+  locale: Locale,
+): string {
+  if (locale === 'en' && t.En) return t.En
+  if (locale === 'zh-TW' && t.Tw) return t.Tw
+  if (locale === 'ja' && t.Ja) return t.Ja
+  return zh
+}
+
+/**
+ * 机型目录里的**版本显示名/说明/角标**按界面语言摊开（`tag` 摊开的是显示值；
+ * `TAG_TONE` 当键用的地方在**摊开前**先取原值）。
  *
- * 只动 `name` / `description` 两格 —— 版本 id、套餐指向、图位全不动。
+ * 只动 `name` / `description` / `tag` 三格 —— 版本 id、套餐指向、图位全不动。
  */
 export function localizeMachines<
   V extends {
     name: string
     nameEn?: string | null
+    nameTw?: string | null
+    nameJa?: string | null
     description?: string | null
     descriptionEn?: string | null
+    descriptionTw?: string | null
+    descriptionJa?: string | null
+    tag?: string | null
+    tagEn?: string | null
+    tagTw?: string | null
+    tagJa?: string | null
   },
   M extends { versions: V[] },
 >(machines: M[], locale: Locale): M[] {
-  if (locale !== 'en') return machines
+  if (locale !== 'en' && locale !== 'zh-TW' && locale !== 'ja') return machines
   return machines.map((m) => ({
     ...m,
     versions: m.versions.map((v) => ({
       ...v,
-      name: bi(v.name, v.nameEn ?? undefined, locale),
+      name: multiLang(v.name, { En: v.nameEn, Tw: v.nameTw, Ja: v.nameJa }, locale),
       description:
-        v.description == null ? v.description : bi(v.description, v.descriptionEn ?? undefined, locale),
+        v.description == null
+          ? v.description
+          : multiLang(v.description, { En: v.descriptionEn, Tw: v.descriptionTw, Ja: v.descriptionJa }, locale),
+      tag: v.tag == null ? v.tag : multiLang(v.tag, { En: v.tagEn, Tw: v.tagTw, Ja: v.tagJa }, locale),
     })),
   }))
 }

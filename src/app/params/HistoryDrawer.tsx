@@ -31,7 +31,7 @@
 import { useEffect, useRef, useState } from 'react'
 import Icon from '../shell/icons'
 import ui from '../ui/ui.module.css'
-import { useT, type StringKey } from '../../i18n'
+import { useText, useT, type StringKey, type Text } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import Drawer from '../shared/Drawer'
 import type { DrawerWidth } from '../shared/useDrawerWidth'
@@ -45,8 +45,9 @@ import s from './HistoryDrawer.module.css'
  * 160ms 从上方 3px 淡入 —— 不弹、不跳，只是让人看见"刚刚发生了一件事"。
  * ★ 动效走 WAAPI（WKWebView 不播 CSS animation）。
  */
-function RevertNote({ note }: { note: { text: string; tone: 'ok' | 'muted' } }) {
+function RevertNote({ note }: { note: { text: Text; tone: 'ok' | 'muted' } }) {
   const ref = useRef<HTMLParagraphElement | null>(null)
+  const say = useText()
 
   useEffect(() => {
     const el = ref.current
@@ -63,8 +64,8 @@ function RevertNote({ note }: { note: { text: string; tone: 'ok' | 'muted' } }) 
   }, [note.text])
 
   return (
-    <p ref={ref} className={s.revertNote} data-tone={note.tone} title={note.text}>
-      {note.text}
+    <p ref={ref} className={s.revertNote} data-tone={note.tone} data-tip={say(note.text)}>
+      {say(note.text)}
     </p>
   )
 }
@@ -105,7 +106,7 @@ interface Props {
    * 真相是**还原成功有变化、但命中 noop 时界面一个像素都不动**（目标值就是现值），
    * 而抽屉盖住了右边那列数值。所以这里必须回一句话，不能让人对着一颗按钮发愣。
    */
-  note?: { text: string; tone: 'ok' | 'muted' } | null
+  note?: { text: Text; tone: 'ok' | 'muted' } | null
   /**
    * **进入编辑模式**（2026-10-17，作者：「没有进入编辑模式就没有还原按钮，怎么让用户
    * 知道点击进入编辑模式…和外面的按钮复用同样的逻辑」）。
@@ -251,7 +252,7 @@ export default function HistoryDrawer({
           光看"改 X 轴偏移 0.1 → 0.7"分不出来。
         */}
         {entry.fromSync === true && (
-          <span className={s.syncTag} title={tr('params.history.syncTag')}>
+          <span className={s.syncTag} data-tip={tr('params.history.syncTag')}>
             {tr('params.history.syncTagShort')}
           </span>
         )}
@@ -354,7 +355,7 @@ export default function HistoryDrawer({
             <button
               type="button"
               className={armClear ? s.clearArm : s.ghost}
-              title={armClear ? tr('params.history.clearArmTitle') : tr('params.history.clearTitle')}
+              data-tip={armClear ? tr('params.history.clearArmTitle') : tr('params.history.clearTitle')}
               onClick={() => {
                 if (armClear) {
                   setArmClear(false)
@@ -403,7 +404,7 @@ export default function HistoryDrawer({
           <button
             type="button"
             className={s.enterEdit}
-            title={tr('params.history.enterEditTitle')}
+            data-tip={tr('params.history.enterEditTitle')}
             onClick={onEnterEdit}
           >
             {tr(EDIT_TEXT.enterMode)}

@@ -525,7 +525,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                       {r.buildState && (
                         <span
                           className={s.tag}
-                          title={words.build[r.buildState]?.explain ?? '这一版的产物还没生成'}
+                          data-tip={words.build[r.buildState]?.explain ?? '这一版的产物还没生成'}
                         >
                           {words.build[r.buildState]?.label ?? r.buildState}
                         </span>
@@ -647,7 +647,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                           <button
                             type="button"
                             className={s.chipX}
-                            title={`取消 ${uid} 自己的指向`}
+                            data-tip={`取消 ${uid} 自己的指向`}
                             aria-label={`取消 ${uid} 自己的指向`}
                             onClick={() => void unassign(u.machineId, u.versionId)}
                           >
@@ -725,7 +725,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
                     type="button"
                     className={`${s.btn} ${s.btnPrimary}`}
                     disabled={assignPicks.length === 0}
-                    title={assignPicks.length === 0 ? '先在上面挑版本' : undefined}
+                    data-tip={assignPicks.length === 0 ? '先在上面挑版本' : undefined}
                     onClick={() => setAssignConfirm(true)}
                   >
                     确认指向
@@ -770,7 +770,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={!newId.trim() || !newMachine}
-              title={!newId.trim() ? '先填 id' : !newMachine ? '先选归属机型' : undefined}
+              data-tip={!newId.trim() ? '先填 id' : !newMachine ? '先选归属机型' : undefined}
               onClick={create}
             >
               创建
@@ -846,7 +846,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
               type="button"
               className={`${s.btn} ${s.btnPrimary}`}
               disabled={editId.trim() === cur?.id && editDisplay.trim() === cur?.display}
-              title={editId.trim() === cur?.id && editDisplay.trim() === cur?.display ? '两个值都没动' : undefined}
+              data-tip={editId.trim() === cur?.id && editDisplay.trim() === cur?.display ? '两个值都没动' : undefined}
               onClick={saveEdit}
             >
               保存
@@ -1111,7 +1111,7 @@ export default function BundlesPage({ words, tick, initialSel, onGoto }: Props) 
  */
 function HelpDot({ text }: { text: string }) {
   return (
-    <span className={s.helpDot} role="img" aria-label={text} title={text}>
+    <span className={s.helpDot} role="img" aria-label={text} data-tip={text}>
       ?
     </span>
   )

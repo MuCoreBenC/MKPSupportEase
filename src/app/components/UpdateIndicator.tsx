@@ -22,7 +22,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { api, errorText, listen } from '../../api'
-import { t, useT } from '../../i18n'
+import { msg, t, useT } from '../../i18n'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
 import type { UpdateInfo, UpdateState } from '../../api/contract'
 import TitlebarChip from './TitlebarChip'
@@ -141,26 +141,26 @@ function buildActions(
   switch (shown.state) {
     case 'downloading':
       return [
-        { label: t('update.pause'), onClick: d.pause, disabled: busy },
-        { label: t('update.cancel'), onClick: d.cancel, disabled: busy },
+        { label: msg('update.pause'), onClick: d.pause, disabled: busy },
+        { label: msg('update.cancel'), onClick: d.cancel, disabled: busy },
       ]
     case 'paused':
       return [
-        { label: t('update.resume'), onClick: d.resume, disabled: busy },
-        { label: t('update.cancel'), onClick: d.cancel, disabled: busy },
+        { label: msg('update.resume'), onClick: d.resume, disabled: busy },
+        { label: msg('update.cancel'), onClick: d.cancel, disabled: busy },
       ]
     case 'ready':
       return [
-        { label: t('update.install'), onClick: d.install, disabled: busy, primary: true },
+        { label: msg('update.install'), onClick: d.install, disabled: busy, primary: true },
       ]
     case 'failed':
-      return [{ label: t('update.retry'), onClick: d.retry, disabled: busy }]
+      return [{ label: msg('update.retry'), onClick: d.retry, disabled: busy }]
     case 'cancelled':
       /* 取消之后还能重来一遍（要真有可下的那一版） */
       return d.download !== null
         ? [
             {
-              label: t('update.download', {
+              label: msg('update.download', {
                 version: d.latestVersion,
                 size: mb(d.assetSize),
               }),
@@ -174,7 +174,7 @@ function buildActions(
       return d.download !== null
         ? [
             {
-              label: t('update.download', {
+              label: msg('update.download', {
                 version: d.latestVersion,
                 size: mb(d.assetSize),
               }),
@@ -283,27 +283,28 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
 
     const body: Omit<Notice, 'id'> = {
       kind: error !== null ? 'bad' : shown.state === 'failed' ? 'bad' : shown.state === 'ready' ? 'ok' : 'info',
-      title: tr('update.title'),
+      title: msg('update.title'),
       /* ★ 操作失败（`error`，如点"暂停"时后端报错）**优先于**状态文案 ——
-         原来它显示在面板底部，现在并入正文，不许静默吞掉。 */
+         原来它显示在面板底部，现在并入正文，不许静默吞掉。
+         ★ 这里的文案一律 `msg(…)`：更新面板**不自动消失**，换语言时它得跟着换字。 */
       text:
         error !== null
           ? error
           : shown.state === 'downloading'
             ? shown.total > 0
-              ? tr('update.downloadingOf', {
+              ? msg('update.downloadingOf', {
                   received: mb(shown.received),
                   total: mb(shown.total),
                 })
-              : tr('update.downloading', { received: mb(shown.received) })
+              : msg('update.downloading', { received: mb(shown.received) })
             : shown.state === 'paused'
-              ? tr('update.paused', { received: mb(shown.received) })
+              ? msg('update.paused', { received: mb(shown.received) })
               : shown.state === 'ready'
-                ? tr('update.done')
+                ? msg('update.done')
                 : shown.state === 'failed'
-                  ? tr('update.downloadFailed', { detail: shown.reason })
+                  ? msg('update.downloadFailed', { detail: shown.reason })
                   : shown.state === 'cancelled'
-                    ? tr('update.cancelled')
+                    ? msg('update.cancelled')
                     : '',
       progress: pct,
       /* 不自动走（有按钮）。用户点 × 收掉 */

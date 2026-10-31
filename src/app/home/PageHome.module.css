@@ -21,7 +21,8 @@
    * 一动所有"没有眉标题"的卡（选机型那一页首当其冲）全跟着往上窜；而这里要动的
    * 只是这一张卡的内容列，不该去挪公共坐标。
    */
-  --home-lift: clamp(0px, 3.4vh, 40px);
+  /* 2026-10-30 作者：这一块「有点偏高」，往下 10~20px —— 3.4vh → 1.7vh（900 高窗约 15px） */
+  --home-lift: clamp(0px, 1.7vh, 20px);
 
   /* 大图按这个容器的宽高双约束 */
   container-type: size;
@@ -632,11 +633,13 @@
   font-weight: 400;
   color: var(--text-3);
   /*
-   * 2026-10-13：占位宽度**钉死** —— 「原 0.00 / 原 -1.00 / 原 18.60」几种长度
-   * 各占各的宽，会给三列轨道带来几像素的差（等宽轨道取最宽列，整条读数跟着动）。
-   * 5.2em 容得下最长的一档「原 -50.00」（值域 ±50），从此这一格宽窄不变。
+   * 2026-10-13：占位宽度**钉死** —— 几种长度各占各的宽会给三列轨道带来几像素的差
+   * （等宽轨道取最宽列，整条读数跟着动）。
+   *
+   * 2026-10-30：5.2em → 4.2em —— 英文那一支不再说 "was"（只剩数字，原话进 title），
+   * 4em（≈46px）容得下「-50.00」（值域 ±50），窄窗那一列（≈103px）才不再折行。
    */
-  min-width: 5.2em;
+  min-width: 4em;
   font-variant-numeric: tabular-nums;
   visibility: hidden;
   cursor: default;
@@ -774,7 +777,7 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px;
+  gap: 3px;
 }
 
 .axisValue {
@@ -819,21 +822,6 @@
   color: var(--accent-deep);
 }
 
-
-.dot {
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin-left: 5px;
-  vertical-align: 3px;
-  border-radius: 999px;
-  background: var(--accent);
-  visibility: hidden;
-}
-
-.dot[data-on='true'] {
-  visibility: visible;
-}
 
 /*
  * 板子这一块。原来一圈细边框 + 白底把它装成一个容器（把「标题 + 说明 + 板 + 刻度」
@@ -1504,11 +1492,23 @@
 }
 
 /* ---------- 参数行 ---------- */
+/*
+ * 读数条（2026-10-30 作者：「线也没必要延长那么长吧……这些大机器，图片有点大，
+ * 参数几乎就贴着了」，而且线画到了图**上面**）。
+ *
+ * 原来这里不写宽 ⇒ 被 `.info` 的 stretch 拉满（480px），每行的分隔线一直铺到列右缘；
+ * 而右图会从 `.slot` 往左溢出 ⇒ 线看着就"搭在机器上"。
+ *
+ * 现在宽度收到**内容宽**（`fit-content`）：线从轴名起、到单位右缘为止，
+ * 既不伸进图里，也不必为它单独做层级（线根本到不了那边）。
+ */
 .rows {
   margin: 14px 0 0;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  width: fit-content;
+  max-width: 100%;
 }
 
 .row {
@@ -1525,12 +1525,47 @@
   color: var(--text-3);
 }
 
+/*
+ * 数字 | 单位 两列（2026-10-30 作者：「这些单位啊，都是靠右的……总感觉没对齐」）。
+ *
+ * 原来整串 `-25.90 mm` 左对齐：数字左缘齐、右缘参差（六位 / 五位），单位跟着数字宽度跑。
+ * 现在数字占 1fr 靠右、单位占一个**固定宽**的列也靠右 —— 于是数字的个位对成一条线，
+ * `mm` 与 `mm/s` 的右缘也落在同一条线上（单位列不固定的话，宽的那一行会把数字推左）。
+ *
+ * ★ 2026-10-30 第二遍（作者：「你好像把这个往右了……字和图片都叠在一起了。这些字可以
+ * 适当往左边」）：**不能再是 `flex: 1`** —— 那样这一格吃满整列，右对齐就把数字顶到卡片
+ * 右缘、压到机床上。改成**固定宽**：数字块紧跟在轴名后面，整条读数仍靠左起，
+ * 右边留白（那一段本来就要留给大图）。
+ *
+ * ★ 2026-10-30 第三遍（作者：「我没有说要把单位和数值分开，我就说让他们再左移一点」）：
+ * 上一版单位**右对齐在 3em 列**里 ⇒ 数字和 `mm` 之间空出 2em 的一道沟，像被拆成两件事。
+ * 现在单位列收到 2.6em（刚好容下 `mm/s`）且**左对齐**：数字右缘成一条线、`mm` 与
+ * `mm/s` 的左缘也成一条线，数字与单位之间只隔那 6px —— 回到"一个数带个单位"。
+ */
 .value {
-  flex: 1;
+  flex: 0 0 6em;
   min-width: 0;
   font-size: 14px;
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 2.6em;
+  column-gap: 6px;
+  align-items: baseline;
+  justify-items: end;
+  white-space: nowrap;
+}
+
+/* 数字：贴着自己那一格的右缘（与后面的单位只隔那 6px） */
+.num {
+  text-align: right;
+}
+
+/* 单位：2.6em 的列（`mm/s` 的宽度）**左对齐** —— 紧贴数字、且两种长度左缘对齐。
+   颜色与数字同色（继承）：「mm」原来就跟在数字后头，不给它单独压一档灰 */
+.unit {
+  justify-self: start;
+  text-align: left;
 }
 
 @supports (width: 1cqw) {

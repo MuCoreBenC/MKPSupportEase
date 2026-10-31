@@ -15,57 +15,150 @@
  * 刻意留的自检：哪天有人往这里塞硬编码颜色，就会先在深色里露馅。
  * ========================================================================== */
 
+/* ============================================================================
+ * 版式（2026-10-30）：从"一叠灰卡片"改成"左目录 + 右栏章节"。
+ *
+ * 作者看试验场 a11 之后的判决：「可以先把这个做回我们的软件里面吧」。
+ * 这一层只换**骨架**，一块都没增减：
+ *
+ *   .page  = 整页（页头 + 左目录 + 右栏），也是模态框的 host
+ *   .head  = 「设置」+ 搜索（副标题删了 —— 作者：「副标题也太多了」）
+ *   .side  = 左目录（12 项，滚到哪亮到哪，见 TSX 的 scrollspy）
+ *   .main  = 右栏滚动区
+ *   .section = 一章：`.secTitle` + 若干 `.fieldRow`
+ *   .fieldRow = 一行：左边标题/说明，右边控件；**悬停整行亮起**
+ *
+ * ★ 卡片没了：`.section` 不再有边框/底色/内衬，块与块靠 26px 间距分开，
+ *   一章里靠 `.secTitle` 后面那条细线开头（`.secTitle::after`）。
+ * ★ 滚动条由 `src/styles/global.css` 统一零占位，这里一条都不写。
+ * ========================================================================== */
+
 .page {
   flex: 1;
   min-height: 0;
-  overflow: auto;
-  padding: var(--pad);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  /* 滚动交给 `.main` —— 页头与左目录不动 */
+  overflow: hidden;
+  /* 窄态按**页面宽**算，不按视口 —— 窗口缩小时这几条才跟着变 */
+  container-type: inline-size;
+  container-name: settings;
 }
 
 .head {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 28px 14px;
 }
 
 .title {
   margin: 0;
-  font-size: var(--fs-metric);
-  font-weight: 600;
+  font-size: calc(var(--fs-body) + 6px);
+  font-weight: 650;
+  letter-spacing: -0.01em;
   color: var(--text-1);
 }
 
-.sub {
-  margin: 0;
-  font-size: var(--fs-body);
-  color: var(--text-2);
+.body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
-/*
- * 卡片撑满页宽（作者 2026-10-05：「右边没有撑满，大窗口下也是」）。
- * 行文长度靠句子自己断（地址类都开了 overflow-wrap）。
- */
+/* ---------- 左目录 ---------- */
+
+.side {
+  flex: 0 0 216px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 12px 16px;
+  overflow-y: auto;
+}
+
+.navLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  text-decoration: none;
+}
+
+.navLink svg {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+
+.navLink:hover {
+  background: var(--hover-1);
+  color: var(--text-1);
+}
+
+/* 当前这一块：绿字 + 淡绿底（作者：「悬停上去的都不知道选择了哪一个」） */
+.navOn,
+.navOn:hover {
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.navOn svg {
+  opacity: 1;
+}
+
+.sideFoot {
+  margin-top: auto;
+  padding: 14px 10px 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* ---------- 右栏 ---------- */
+
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 16px 28px 44px;
+}
+
+/* 一章：没有卡片了，靠间距与章节标题分开 */
 .section {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  padding: 14px 18px 16px;
+  margin: 0 0 26px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0;
 }
 
+/*
+ * 章节标题：名字 + 一条通到右边的细线（`::after` 造线，DOM 一个字不用改）。
+ * 字号比行标题大一号 —— 一页里"章"和"条"要分得开（作者：「没有看出重点」）。
+ */
 .secTitle {
-  margin: 0;
-  font-size: var(--fs-label);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 4px;
+  padding: 0 12px;
+  font-size: calc(var(--fs-body) + 1px);
   font-weight: 600;
-  color: var(--text-3);
-  letter-spacing: 0.04em;
+  letter-spacing: 0;
+  color: var(--text-1);
+}
+
+.secTitle::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  margin-left: 4px;
+  background: var(--hairline);
 }
 
 .field {
@@ -130,6 +223,33 @@
   font-size: var(--fs-label);
   color: var(--text-2);
   overflow-wrap: anywhere;
+}
+
+/*
+ * 说明尾巴上的文字动作（2026-10-30）：「去系统里改…」原来是一颗按钮，和下拉
+ * 并排挤在行右缘 —— 作者说「我不喜欢放在这里吧，反正就是不舒服」。
+ * 挪进说明句里之后它就是一条**下划线小字**，不再是第二个"框"。
+ */
+.inlineLink {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.inlineLink:hover:not(:disabled) {
+  color: var(--accent-deep);
+}
+
+.inlineLink:disabled {
+  color: var(--text-3);
+  cursor: default;
 }
 
 /*
@@ -226,6 +346,19 @@
   align-items: flex-start;
   gap: 8px 16px;
   flex-wrap: wrap;
+}
+
+/*
+ * ★ 2026-10-30（作者看截图后）：「让它看起来是居中的…这两行的时候，竖直居中」——
+ *   左列只有「状态 + 版本对照」两行、没有说明 / 失败原因 / 提示时，动作条**竖向居中**：
+ *   顶对齐在这两行旁边会显得按钮吊在第一行上，底下空半行。
+ *
+ *   一旦多出 changelog / 失败原因 / 提示那几段（左列被撑高），就**退回顶对齐** ——
+ *   那是 a07 的裁决：长文案把卡片撑高时，按钮不许跟着往下掉到卡片中部。
+ *   哪一态用哪一格由 TSX 按"有没有第三段"决定（见 `compactUpdate`）。
+ */
+.updateTopCentered {
+  align-items: center;
 }
 
 .updateRow {
@@ -374,13 +507,135 @@
  * 没有一处写死色值 —— 深浅两套因此自动都对。
  * ========================================================================== */
 
-/* ---- 一行两列：左说明、右控件 ---- */
+/* ---- 一行两列：左说明、右控件（2026-10-30 起它就是一"行"：带内衬、悬停整行亮） ---- */
 
 .fieldRow {
   flex-direction: row;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+}
+
+/* 行与行之间不再画 1px 分隔线（那才是"一条一条"的来源），只留 2px 呼吸 */
+.fieldRow + .fieldRow {
+  margin-top: 2px;
+}
+
+/* 卡片没了之后，章节里那些"整行之外"的句子（错误提示 / 隐私小字 / 当前值）要自己带内衬，
+   否则会贴着页边、跟行里的人错开 12px */
+.section > .note,
+.section > .noteHint,
+.section > .current,
+.section > .hint,
+.section > .noteBlock {
+  margin: 6px 0 0;
+  padding: 0 12px;
+}
+
+/* 卸载那块的风险条：左右跟着 12px 内衬走，上下各留一点 */
+.section > .dangerNote {
+  margin: 8px 12px 6px;
+}
+
+/* 分出来的那五块（后处理/校准/涂胶/预设/数据）住在自己的文件里，
+   PageSettings 只给它们套了一层带 id 的 div —— 用 flow-root 兜住里面
+   `.section` 的下边距（否则相邻 margin 一塌陷，块之间的 26px 就少了） */
+.main > div[data-sec] {
+  display: flow-root;
+}
+
+/*
+ * ============ 说明文字：收成 tooltip（2026-10-30） ============
+ *
+ * 作者：「字就是要这么精简，这么简练，不需要的文字都不用，可以用 tooltips」
+ * 「为什么这么多这个副标题呀」。
+ *
+ * 做法：DOM 一个字没删（产品的原句都还在，翻译也还在），只是**默认不排版**——
+ * 悬停/键盘聚焦到这一行的文字区时，才在下方浮出一个小卡片。
+ * 好处：行变矮一档（只剩标题），而信息一点没丢，也不用为每句话重写 Tooltip 组件。
+ *
+ * ★ 只作用于 `.fieldText` 里的 `.fieldNote` —— 章节里那些"加载中 / 报错"的段落不受影响。
+ */
+/*
+ * ★★ 2026-10-30 第三刀：说明全部改走共用件 `components/tooltip`（`<Tip text={…} />`），
+ *   这里原来那套"整行 hover 浮出 `<p class=fieldNote>`"的 CSS 已删 —— 两套并存会
+ *   一半气泡一半浮层，比没有更难理解。
+ *
+ *   为什么不用原生 `title`（参数页一直在用）：作者当天指出「它是不是用原生的自带的，
+ *   那到时候在 Windows 上显示效果可能就比较差了」—— 形状、延迟、方向全由系统定，
+ *   WebView2 里还可能被裁。共用件自己量位置：下方放不下翻到上方、右边放不下改右对齐。
+ */
+
+/* 次级行：数字、查看、打开、重置这类附属动作 —— 往右让一格、字灰一档、行矮一档 */
+.rowSub {
+  min-height: 48px;
+  padding-left: 32px;
+}
+
+.rowSub .fieldTitle {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 行右侧的控件组：开关、下拉、按钮、"去系统里改…"这类并排时都装它 */
+.ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+/* 右侧放输入框时给它定宽（自定义数据源地址）—— `.input` 自己是 flex:1，装进 `.ctl` 会塌 */
+.ctl .input {
+  width: 220px;
+  flex: 0 0 auto;
+}
+
+/* 行右侧那一颗勾选不许被压窄 ——「不显示」三个字挤成两行就是这么来的 */
+.fieldRow > .choiceRow {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* ---------- 页头搜索（2026-10-30 补）---------- */
+
+.search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  margin-left: auto;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  color: var(--text-3);
+}
+
+.search:focus-within {
+  border-color: var(--accent);
+  background: var(--surface-solid);
+}
+
+.search input {
+  width: 150px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-label);
+  outline: none;
+}
+
+.search input::placeholder {
+  color: var(--text-3);
+}
+
+.fieldRow:hover {
+  background: var(--surface-solid);
 }
 
 .fieldText {
@@ -390,6 +645,8 @@
   /* 允许收缩：说明再长也不许把右边的开关挤出框 */
   min-width: 0;
   flex: 1 1 auto;
+  /* 说明收成浮层（`.fieldText > .fieldNote`）时的定位锚 */
+  position: relative;
 }
 
 /* ---- 静默 / GUI 两卡 ---- */
@@ -465,11 +722,23 @@
  *      作者原话「我点击了之后，那个数字是到左边的，我的光标是在右边的」。
  */
 
+/*
+ * ★ 宽度**不能小于 132**（2026-10-30 试过 110，箭头被裁了）。
+ *
+ * `NumberField` 的内部是硬算出来的：左内衬 10 + 输入框最小 40 + 右内衬 4 +
+ * 单位最小 26 + 分隔线 1 + 步进格 22 + 两道边框 ≈ **109**，再算上"秒"这种
+ * 比 "mm" 宽一截的单位，110 就顶到边了 —— `.box` 是 `overflow: hidden`，
+ * 挤出去的那几像素正好把箭头格的右边切掉（截图里箭头贴边、右边一条残影）。
+ *
+ * 132 是参数台量过的那个值（`.edNum` 同一个数），这里照抄，只把**高度**收一档
+ * （`--num-h` 28，与设置页其它控件 26–28 对齐；参数页用的是 28/34 那套钩子）。
+ */
 .numBox {
   display: inline-flex;
   flex: 0 0 auto;
   width: 132px;
   min-width: 0;
+  --num-h: 28px;
 }
 
 .numBox > * {
@@ -485,18 +754,21 @@
   text-align: left;
 }
 
-/* ---- 危险块（热床预涂胶 / 清理与卸载） ---- */
+/* ---- 危险块（热床预涂胶 / 清理与卸载） ----
+ * 卡片没了之后，危险只由**橙色章节标题**表达（作者 2026-10-30：
+ * 「左侧不要出现那一条就是一竖下来的带颜色的东西」—— 不再给整块上色）。 */
 
-.dangerBlock {
-  border-color: var(--warn-line);
-  background: var(--warn-surface);
+.dangerBlock .secTitle {
+  color: var(--warn-ink);
+}
+
+.dangerBlock .secTitle::after {
+  background: var(--warn-line);
 }
 
 .dangerTitle {
   color: var(--warn-ink);
   /* 标题前面的小三角与字对齐（`WarnIcon` 是 inline svg） */
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
 }
 
@@ -524,6 +796,110 @@
 
 /* ---- 中性小字提示（"不会读写你的 3MF"那一句） ---- */
 
+/* ---------- 最近删除：模态框里的列表（2026-10-29） ---------- */
+
+/*
+ * **照「归档抽屉」那张列表做**（作者：「这种样式你不要自己在这乱写嘛，你可以复用啊。
+ * 你看还有什么是那种列表的，你就按照那个列表的去做呀」）—— 形状与
+ * `PagePresets.module.css` 的 `.archList / .archItem / .archLine` 同一套：
+ * 竖排卡片、一条细边 + `--r-sm`、浅底，名字在左、动作在右。
+ * 与它的差别只有一处：动作是**小方角**（作者：「不要用圆形的了，用那种矩形的，
+ * 有一点点小圆角的就可以了」），尺寸也收小一档（24px / 圆角 6）。
+ */
+/*
+ * 列表自己滚（2026-10-30）：模态的 `.box` 是 `overflow: hidden` + `max-height: 100%`，
+ * 而 `.body` 不滚 —— 条数一多，列表直接从底栏底下穿出去（作者截图：「清空 / 关闭」
+ * 压在「恢复 / 永久删除」上）。封个顶让它在框内滚，底栏就永远压在它下面。
+ */
+.recScroll {
+  max-height: min(48vh, 420px);
+  overflow-y: auto;
+  margin: 0 -4px;
+  padding: 0 4px;
+}
+
+.recList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
+
+.recText {
+  min-width: 0;
+}
+
+.recName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+}
+
+.recMeta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.recBtns {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 小方角动作：24px 高、6px 圆角、细边白底（与列表里的卡片同一层次） */
+.recBtn {
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: var(--fs-label);
+  line-height: 1;
+  color: var(--text-2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.recBtn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.recBtn:focus-visible {
+  outline: none;
+}
+
+.recBtn:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.recBtnDanger,
+.recBtnDanger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
 .noteHint {
   margin: 0;
   display: flex;
@@ -533,17 +909,106 @@
   color: var(--text-3);
 }
 
-/* ---- 窄窗：两卡降成一列，行内控件也改上下排 ---- */
+/* ---- 分段控件（2026-10-30）----
+ * 主题 / 界面语言 / 预设数据源原来是"三行竖排单选 + 每行一条小字"，
+ * 一屏里最占地方的正是它们（作者：「一条一条一条一条的参数、选项太多了」）。
+ * 改成一行的分段控件：选中的那一档用实色块抬起来。
+ *
+ * ★ 选中态**不许**写 font-weight：`src/styles/global.css` 的兜底网会把
+ *   `[aria-checked='true']` 的字重钉回基础值（「状态不许改变盒子尺寸」），
+ *   半档加粗只能走 `text-shadow: var(--state-bold)`。
+ */
+.seg {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+}
 
-@media (width <= 620px) {
+.seg button {
+  height: 22px;
+  padding: 0 11px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.seg button:hover {
+  color: var(--text-1);
+}
+
+/* 正在写盘那一瞬间（换主题/换语言）整组不可点 */
+.seg button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.seg button[aria-checked='true'] {
+  background: var(--surface-solid);
+  box-shadow:
+    inset 0 0 0 1px var(--line-strong),
+    0 1px 2px rgb(0 0 0 / 18%);
+  color: var(--text-1);
+  text-shadow: var(--state-bold);
+}
+
+/* ---- 窄窗：左目录**整块不显示**（作者 2026-10-30：「窄的时候直接不显示就算了」，
+ *  「不希望左边的那个侧边的变成上面的那一条」）。定位改由章节标题接管。 ---- */
+
+@container settings (width <= 900px) {
+  .side {
+    display: none;
+  }
+
+  .head {
+    padding: 14px 18px 12px;
+  }
+
+  .main {
+    padding: 12px 18px 34px;
+  }
+}
+
+/* 620 以下**只收紧、不翻行**（作者：「它就差几十个像素，你却帮我把它变成了这种换行」） */
+@container settings (width <= 620px) {
   .modeGrid {
     grid-template-columns: 1fr;
   }
 
   .fieldRow {
+    gap: 12px;
+    padding: 9px 8px;
+  }
+
+  /* 数字框**不再跟着缩**：它内部有最小宽（见 `.numBox` 上面那段），
+     96px 会把步进箭头切掉。窄窗要省的宽度从内衬和间距里出。 */
+
+  .secTitle {
+    padding: 0 8px;
+  }
+
+  .head {
+    padding: 12px 14px 10px;
+  }
+
+  .main {
+    padding: 10px 14px 28px;
+  }
+}
+
+/* 440 以下才认输：控件落到下一行（这一档产品窗口到不了，留着只为不撑破） */
+@container settings (width <= 440px) {
+  .fieldRow {
     flex-direction: column;
     align-items: flex-start;
-    gap: 10px;
+    gap: 8px;
   }
 
   .numBox {

@@ -136,9 +136,9 @@ pub async fn get_preset_param_sync(
         traced("getPresetParamSync", |_| {
             let root = internal_root(&handle)?;
             let user = user_root(&handle)?;
-            /* 复制件不认云端 ⇒ 整本账都不给它（连目录都不必读） */
+            /* 拷贝件不认云端 ⇒ 整本账都不给它（连目录都不必读） */
             if !runtime::app_state::copies_follow_cloud(&root)?
-                && runtime::provenance::copy_targets(&user).contains(&path)
+                && runtime::source_ledger::copy_paths(&root).contains(&path)
             {
                 return Ok(None);
             }
@@ -238,7 +238,7 @@ fn sync_at(
         if by_sha.contains_key(&sha) {
             continue;
         }
-        if let Some(text) = runtime::baseline::read_baseline(root, &sha)? {
+        if let Some(text) = runtime::content::read(root, &sha)? {
             by_sha.insert(sha.clone(), param_alg::read_param_values(&text, defs)?);
         }
     }
@@ -374,11 +374,6 @@ fn cloud_text_for(
     if let Some(text) = local_cloud_text(root, file) {
         return Ok(Some(text));
     }
-    if let Some(want) = file.expected_sha() {
-        if let Some(text) = runtime::baseline::read_baseline(root, want)? {
-            return Ok(Some(text));
-        }
-    }
     if !fetch {
         return Ok(None);
     }
@@ -387,34 +382,39 @@ fn cloud_text_for(
      * 表现成 `cloudReady: false` + `versionAdvanced: true`（界面说"云端有新版本，
      * 还没取回来"）—— 比整页报错有用得多。
      */
-    if let Err(e) = super::catalog::ensure_cloud_bytes(root, file) {
+    if let Err(e) = super::catalog::deliver_cloud_bytes(root, file) {
         tracing::warn!(file = %file.file_name, detail = %e.message, "云端当前版没取回来（照旧比不了）");
         return Ok(None);
     }
-    if let Some(text) = local_cloud_text(root, file) {
-        return Ok(Some(text));
-    }
-    Ok(file
-        .expected_sha()
-        .map(|w| runtime::baseline::read_baseline(root, w))
-        .transpose()?
-        .flatten())
+    Ok(local_cloud_text(root, file))
 }
 
-/// 盘上那份云端正文（下载区）。字节与目录登记对不上（旧版本 / 被改过）⇒ `None`。
+/// 本机的云端当前版正文。
 ///
-/// 顺手把它落进基准区（幂等）—— 于是"这份云端当前版"以后离线也读得到，
-/// 用户不用为了看一次云端更新而再连一次网。
+/// 预设：`content/<目录登记 SHA>`（内容仓库；同内容被别的 path 下过也能用），
+/// 再退回索引里"手上这一版"（只有它等于目录登记值时才可用）。
+/// 其余：旧路径读盘（字节与目录登记对不上 ⇒ `None`）。
 fn local_cloud_text(root: &std::path::Path, file: &CatalogFile) -> Option<String> {
+    if file.kind == runtime::catalog::kind::PRESET {
+        let want = file.expected_sha();
+        if let Some(w) = want {
+            if let Ok(Some(text)) = runtime::content::read(root, w) {
+                return Some(text);
+            }
+        }
+        let entry = runtime::delivery_index::entry(root, &file.path)?;
+        let text = runtime::content::read(root, &entry.sha256).ok().flatten()?;
+        return match want {
+            Some(w) if !entry.sha256.eq_ignore_ascii_case(w) => None,
+            _ => Some(text),
+        };
+    }
     let bytes = std::fs::read(root.join(&file.path)).ok()?;
     let sha = hex(&Sha256::digest(&bytes));
     if let Some(want) = file.expected_sha() {
         if !want.eq_ignore_ascii_case(&sha) {
             return None;
         }
-    }
-    if let Err(e) = runtime::baseline::ensure_baseline(root, &sha, &bytes) {
-        tracing::warn!(file = %file.file_name, detail = %e.message, "基准没落上（不影响这次比对）");
     }
     String::from_utf8(bytes).ok()
 }
@@ -531,6 +531,12 @@ fn apply_at(
         .iter()
         .filter(|e| e.pending && !kinds.contains_key(e.key.as_str()))
         .count();
+    /* 更新后账上要写"对应哪一版"——先用云端文件名，别等 cloud_path 被 move 走 */
+    let cloud_file = cloud_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(&cloud_path)
+        .to_owned();
     let lineage = if remaining == 0 {
         runtime::lineage::Lineage {
             based_on: Some(cloud_path),
@@ -594,6 +600,27 @@ fn apply_at(
         /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
         let _ = runtime::baseline::ensure_origin_copy(root, user, path);
         runtime::local::write_text(user, path, &next)?;
+        /*
+         * 来路账跟着前进：剩下的待处理项为 0 ⇒ 这份已经对齐到当前云端版，
+         * 「本地版本时间」要指向**这一版**的发布时刻（不是当初下载那一版）。
+         * 身份 / 母本原样保留；没有账时不硬填当前源（那可能是别的分支取的字节）。
+         */
+        if remaining == 0 {
+            let stamp = runtime::source_ledger::CatalogStamp {
+                catalog_id: catalog.catalog_id.as_deref(),
+                serial: catalog.publish_serial,
+                revision: &catalog.revision,
+                published_at: catalog.published_at.as_deref(),
+            };
+            let _ = runtime::source_ledger::record_baseline(
+                root,
+                path,
+                None,
+                &cloud_file,
+                &stamp,
+                Some(&current_sha),
+            );
+        }
     }
 
     if clean_draft {
@@ -825,15 +852,14 @@ offset_x = -1
                 repo_root().join("presets/delivery/mkp/presets/A1-fast.toml"),
             )
             .expect("读交付预设文件");
-            runtime::baseline::ensure_baseline(&root, &current_sha, current_text.as_bytes())
-                .unwrap();
+            runtime::content::ensure(&root, &current_sha, current_text.as_bytes()).unwrap();
 
             /* 我这份当初基于的那一版：云端当前版把这一项改成别的（同一个保真写口） */
             let based_text =
                 param_alg::apply_param_edits(&current_text, &defs, &[FieldEdit::new(KEY, "-2")])
                     .unwrap();
             let based_sha = runtime::lineage::sha256_hex(&based_text);
-            runtime::baseline::ensure_baseline(&root, &based_sha, based_text.as_bytes()).unwrap();
+            runtime::content::ensure(&root, &based_sha, based_text.as_bytes()).unwrap();
 
             /* 我那份 = 基于那一版 + 我自己把它改成 -5（场景 B：改过的值不许被顶掉） */
             let copy =
@@ -896,7 +922,7 @@ offset_x = -1
         /// 云端发一版**任意正文**（注释级变更那种：值一项都没动，摘要照样变）
         fn publish_text(&self, text: String) {
             let sha = runtime::lineage::sha256_hex(&text);
-            runtime::baseline::ensure_baseline(&self.root, &sha, text.as_bytes()).unwrap();
+            runtime::content::ensure(&self.root, &sha, text.as_bytes()).unwrap();
             let mut catalog = catalog_with_shas();
             for f in catalog.files.iter_mut() {
                 if f.file_name == "A1-fast.toml" {
@@ -1099,7 +1125,7 @@ offset_x = -1
         )
         .unwrap();
         let sha = runtime::lineage::sha256_hex(&next);
-        runtime::baseline::ensure_baseline(&w.root, &sha, next.as_bytes()).unwrap();
+        runtime::content::ensure(&w.root, &sha, next.as_bytes()).unwrap();
         let mut catalog = catalog_with_shas();
         for f in catalog.files.iter_mut() {
             if f.file_name == "A1-fast.toml" {
@@ -1164,7 +1190,7 @@ offset_x = -1
     fn adopting_before_the_official_bytes_are_here_is_an_error() {
         let w = World::new();
         /* 把云端当前版的基准抽掉（模拟"这一版还没取回来"） */
-        std::fs::remove_file(runtime::baseline::baseline_path(&w.root, &w.current_sha)).unwrap();
+        std::fs::remove_file(runtime::content::content_path(&w.root, &w.current_sha)).unwrap();
         let report = w.sync();
         assert!(!report.cloud_ready);
         assert_eq!(report.pending_count, 0, "拿不到新值就不许报待处理");

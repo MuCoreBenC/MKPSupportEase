@@ -1505,7 +1505,7 @@ export default function AnnotatePage() {
               className={`${c.btn} ${c.btnSm} ${view === k ? c.btnOn : ''}`}
               /* ★ 再点一次当前这一档 = **反选**：三颗都不亮，只看那张原图（作者 2026-10-17 要的） */
               onClick={() => setView(view === k ? 'none' : k)}
-              title={tip}
+              data-tip={tip}
             >
               {label}
             </button>
@@ -1541,7 +1541,7 @@ export default function AnnotatePage() {
           type="button"
           className={`${c.btn} ${c.btnSm}`}
           disabled={src === null || src.w === 0 || src.key.startsWith('file:') || rendering}
-          title={
+          data-tip={
             src?.key.startsWith('file:')
               ? '本地图片没有台账条目，烘不了成品图'
               : '把当前这些框烘成一张成品图先看一眼（临时的，满意再点保存）'
@@ -1911,7 +1911,7 @@ export default function AnnotatePage() {
                     }}
                   >
                     <span className={s.rowBadge}>{i + 1}</span>
-                    <span className={s.rowName} title={m.note}>
+                    <span className={s.rowName} data-tip={m.note}>
                       {m.note.trim() === '' ? <em className={s.dim}>未命名</em> : m.note}
                     </span>
                     <span className={`${s.rowSize} ${c.tnum}`}>
@@ -1944,7 +1944,7 @@ export default function AnnotatePage() {
                     <button
                       type="button"
                       className={s.iconBtn}
-                      title={m.off ? '显示这个框' : '先藏起来（还留着）'}
+                      data-tip={m.off ? '显示这个框' : '先藏起来（还留着）'}
                       onClick={(e) => {
                         e.stopPropagation()
                         toggleOff(m.id)
@@ -2040,7 +2040,7 @@ export default function AnnotatePage() {
                         type="number"
                         min={1}
                         defaultValue={selMark.style?.[key] ?? def}
-                        title={`单位 px；缺省 ${def}（留空 = 用缺省）`}
+                        data-tip={`单位 px；缺省 ${def}（留空 = 用缺省）`}
                         onKeyDown={onNumKeyDown}
                         onFocus={onNumFocus}
                         onBlur={(e) => setStyle(selMark.id, key, e.target.value)}

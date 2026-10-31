@@ -34,7 +34,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview'
 
 import { api, errorText } from '../../api'
 import type { ImportItem, ImportOutcome, StagedImport } from '../../api'
-import { useT } from '../../i18n'
+import { msg, t, useT, useText, type Text } from '../../i18n'
 import { Modal } from '../../components/modal'
 import Drawer from '../shared/Drawer'
 import { useDevPreview } from '../dev/useDevPreview'
@@ -50,6 +50,7 @@ import s from './FileImport.module.css'
  */
 export function ImportBanner() {
   const tr = useT()
+  const say = useText()
   const entry = useContext(ImportContext)
   /* 开发台那一格（`import-result`）：预览时 `entry.banner` 是 Provider 摆出来的样本，
    * 关掉它要同时告诉 Provider 收工（见 `FileImportProvider` 里那两条 effect） */
@@ -65,7 +66,7 @@ export function ImportBanner() {
       open
       size="sm"
       title={bad ? tr('import.bad') : tr('import.done')}
-      subtitle={text}
+      subtitle={say(text)}
       onClose={close}
       footer={
         <button type="button" className={s.primary} onClick={close}>
@@ -76,8 +77,8 @@ export function ImportBanner() {
       {lines.length > 0 && (
         <ul className={s.bannerLines}>
           {lines.map((line, i) => (
-            <li key={`${i}-${line}`} className={s.bannerLine}>
-              {line}
+            <li key={i} className={s.bannerLine}>
+              {say(line)}
             </li>
           ))}
         </ul>
@@ -91,11 +92,13 @@ interface CollisionRow {
   source: string
   fileName: string
   name: string
-  error: string | null
+  /** 这一行为什么没改成（存键；后端原话翻不了，就那样存着） */
+  error: Text | null
 }
 
 export function FileImportProvider({ children }: { children: ReactNode }) {
   const tr = useT()
+  const say = useText()
   const [revision, setRevision] = useState(0)
   const [dragging, setDragging] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -130,11 +133,17 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!devResult.on) return
     setBanner({
-      text: '导入了 2 份文件',
+      text: msg('import.count', { count: 2 }),
       bad: false,
       lines: [
-        '已导入 A1_MINI-fast.toml → presets-local/A1_MINI-fast.toml',
-        '已导入 A1_涂胶.toml → presets-local/A1_涂胶.toml',
+        msg('import.line.done', {
+          name: 'A1_MINI-fast.toml',
+          path: 'presets-local/A1_MINI-fast.toml',
+        }),
+        msg('import.line.done', {
+          name: 'A1_涂胶.toml',
+          path: 'presets-local/A1_涂胶.toml',
+        }),
       ],
     })
     return () => setBanner(null)
@@ -149,13 +158,13 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       const lines = [
         ...outcomes.map((o) =>
           o.ok
-            ? tr('import.line.done', { name: o.fileName, path: o.path })
-            : tr('import.line.rejected', { name: o.fileName, reason: o.message }),
+            ? msg('import.line.done', { name: o.fileName, path: o.path })
+            : msg('import.line.rejected', { name: o.fileName, reason: o.message }),
         ),
         ...rejected.map((r) =>
-          tr('import.line.rejected', {
+          msg('import.line.rejected', {
             name: r.fileName,
-            reason: r.reason ?? tr('import.rejectedReason'),
+            reason: r.reason ?? t('import.rejectedReason'),
           }),
         ),
       ]
@@ -163,7 +172,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       if (done.length === 0 && failed.length === 0) {
         /* 纯粹是"收不了"（比如一个 ZIP）：不摆"0 份成了"那种读起来别扭的句子 */
         note({
-          text: tr('import.allRejected', { count: rejected.length }),
+          text: msg('import.allRejected', { count: rejected.length }),
           bad: true,
           lines,
         })
@@ -171,15 +180,15 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
       }
       note(
         miss === 0
-          ? { text: tr('import.count', { count: done.length }), bad: false, lines }
+          ? { text: msg('import.count', { count: done.length }), bad: false, lines }
           : {
-              text: tr('import.partial', { done: done.length, miss }),
+              text: msg('import.partial', { done: done.length, miss }),
               bad: true,
               lines,
             },
       )
     },
-    [note, tr],
+    [note],
   )
 
   /**
@@ -219,13 +228,13 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
           })
         }
       } catch (e) {
-        note({ text: tr('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
+        note({ text: msg('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
       } finally {
         busyRef.current = false
         setBusy(false)
       }
     },
-    [note, report, tr],
+    [note, report],
   )
 
   /** 「继续导入」：把重名的那些（名字已改）提交；没成的留在格子里让继续改 */
@@ -241,7 +250,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
     if (rows.some((r) => r.name === '')) {
       setModal({
         rows: rows.map((r) =>
-          r.name === '' ? { ...r, error: tr('import.emptyName') } : r,
+          r.name === '' ? { ...r, error: msg('import.emptyName') } : r,
         ),
       })
       return
@@ -262,17 +271,17 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
         if (outcome !== undefined && outcome.ok) continue
         remaining.push({
           ...row,
-          error: outcome?.message ?? tr('import.noOutcome'),
+          error: outcome?.message ?? msg('import.noOutcome'),
         })
       }
 
       if (remaining.length === 0) {
         setModal(null)
         note({
-          text: tr('import.renamed', { count: done.length }),
+          text: msg('import.renamed', { count: done.length }),
           bad: false,
           lines: done.map((o) =>
-            tr('import.line.done', { name: o.fileName, path: o.path }),
+            msg('import.line.done', { name: o.fileName, path: o.path }),
           ),
         })
       } else {
@@ -280,22 +289,22 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
         note({
           text:
             done.length > 0
-              ? tr('import.someDone', {
+              ? msg('import.someDone', {
                   done: done.length,
                   rest: remaining.length,
                 })
-              : tr('import.noneDone', { count: remaining.length }),
+              : msg('import.noneDone', { count: remaining.length }),
           bad: true,
           lines: [],
         })
       }
     } catch (e) {
-      note({ text: tr('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
+      note({ text: msg('import.failed', { detail: errorText(e) }), bad: true, lines: [] })
     } finally {
       busyRef.current = false
       setBusy(false)
     }
-  }, [modal, note, devCollision, tr])
+  }, [modal, note, devCollision])
 
   /** 取消 = 这些重名的没进来（别的该进的早进了 —— 一份错不拖累别人） */
   const cancelModal = useCallback(() => {
@@ -310,23 +319,23 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
     const names = modal.rows.map((r) => r.fileName)
     setModal(null)
     note({
-      text: tr('import.cancelled', { count: names.length }),
+      text: msg('import.cancelled', { count: names.length }),
       bad: false,
       lines: names,
     })
-  }, [modal, note, devCollision, tr])
+  }, [modal, note, devCollision])
 
   const pickFiles = useCallback(() => {
     void api.pickImportFiles().then(
       (paths) => void importPaths(paths),
       (e: unknown) =>
         note({
-          text: tr('import.pickerFailed', { detail: errorText(e) }),
+          text: msg('import.pickerFailed', { detail: errorText(e) }),
           bad: true,
           lines: [],
         }),
     )
-  }, [importPaths, note, tr])
+  }, [importPaths, note])
 
   /*
    * 拖拽两套适配器，落到同一段 `importPaths`：
@@ -439,7 +448,7 @@ export function FileImportProvider({ children }: { children: ReactNode }) {
                     )
                   }
                 />
-                {row.error !== null && <p className={s.rowErr}>{row.error}</p>}
+                {row.error !== null && <p className={s.rowErr}>{say(row.error)}</p>}
               </div>
             ))}
             <p className={s.hint}>{tr('import.nameRule')}</p>

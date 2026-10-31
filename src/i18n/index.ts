@@ -6,7 +6,9 @@
  *   ① 键 → 当前语言的那句话（`t`），带 `{占位符}`；
  *   ② 语言档（`system` / `zh-CN` / `en`）解析成**真语言**（`resolveLocale`）——
  *      "跟随系统"只在**这里**翻译成具体语言，别处不许各自猜 `navigator.language`；
- *   ③ 语言换了要**通知订阅者重渲染**（`useLocale` / `useT` 走 `useSyncExternalStore`）。
+ *   ③ 语言换了要**通知订阅者重渲染**（`useLocale` / `useT` 走 `useSyncExternalStore`）；
+ *   ④ **要存起来的话存 `msg(key, vars)`，别存 `t()` 的结果**（语言换了它才会跟着翻，
+ *      见文件下半截 `Msg` / `useText`）。
  *
  * # 谁写这一格
  *
@@ -30,28 +32,44 @@ import { useCallback, useSyncExternalStore } from 'react'
 import type { LocalePref } from '../api/contract'
 import { en } from './en'
 import { zhCN, type StringKey } from './zh-CN'
+import { zhTW } from './zh-TW'
+import { ja } from './ja'
 
 /** 真语言（解析完的）。加语言时这里是第一个动的地方。 */
-export type Locale = 'zh-CN' | 'en'
+export type Locale = 'zh-CN' | 'zh-TW' | 'ja' | 'en'
 
 export type { StringKey }
 
 /** 文案变量的值（`{count}` 这类占位符） */
 export type Vars = Record<string, string | number>
 
-const DICTS: Record<Locale, Record<string, string>> = { 'zh-CN': zhCN, en }
+const DICTS: Record<Locale, Record<string, string>> = {
+  'zh-CN': zhCN,
+  'zh-TW': zhTW,
+  ja,
+  en,
+}
 
 /**
  * 语言档 → 真语言。**"跟随系统"只在这里落地一次**：
- * 系统语言以 `zh` 开头 ⇒ 中文，其余一律英文（今天只发这两种）。
+ *
+ * - `zh-Hant` / `zh-TW` / `zh-HK` / `zh-MO` ⇒ 繁體中文（2026-10-30 加）；
+ * - `ja*` ⇒ 日本語（2026-10-30 加）；
+ * - 其余 `zh` 开头 ⇒ 简体中文；
+ * - 以上都不是 ⇒ English。
  *
  * `null`（还没选过）与 `'system'` 走同一条路 —— 它们的区别在盘上，不在渲染上。
  */
 export function resolveLocale(pref: LocalePref | null): Locale {
   if (pref === 'zh-CN') return 'zh-CN'
+  if (pref === 'zh-TW') return 'zh-TW'
+  if (pref === 'ja') return 'ja'
   if (pref === 'en') return 'en'
-  const tag = typeof navigator === 'undefined' ? '' : navigator.language
-  return tag.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en'
+  const tag = typeof navigator === 'undefined' ? '' : navigator.language.toLowerCase()
+  if (tag === 'zh-hant' || tag.startsWith('zh-hant-')) return 'zh-TW'
+  if (tag === 'zh-tw' || tag === 'zh-hk' || tag === 'zh-mo') return 'zh-TW'
+  if (tag === 'ja' || tag.startsWith('ja-')) return 'ja'
+  return tag.startsWith('zh') ? 'zh-CN' : 'en'
 }
 
 /* ---------- 活的那一格（模块级 store） ---------- */
@@ -138,4 +156,49 @@ export type Tr = (key: StringKey, vars?: Vars) => string
 export function useT(): Tr {
   const locale = useLocale()
   return useCallback((key: StringKey, vars?: Vars) => translate(locale, key, vars), [locale])
+}
+
+/* ---------- 要存起来的那句话（2026-10-29「切换语言后旧句子不变」那一刀） ---------- */
+
+/**
+ * 一条**还没决定用哪种语言说**的话：存键 + 变量，渲染那一刻才翻。
+ *
+ * # 为什么要有它
+ *
+ * `t()` 交出来的是**那一刻**的语言。存进 `useState` / 模块级 `let` / 通知队列之后，
+ * 语言再换，那一格不会自己重算 —— 界面上就留着一句旧语言的话（预设页底部提示条、
+ * 右上角通知、各种"保存好了"的状态句都是这么来的）。
+ *
+ * ⇒ 规矩：**进 state 的文案不存 `t()` 的结果，存 `msg()`**；渲染处用 `useText()` 摊开。
+ * 只有真的翻不了的外部句子（后端错误、文件名）才允许以 `string` 存。
+ */
+export interface Msg {
+  key: StringKey
+  vars?: Vars
+}
+
+/** 造一条「等渲染时再翻」的话。短名：调用点很多，`text: msg('…', {…})` 读起来正好 */
+export function msg(key: StringKey, vars?: Vars): Msg {
+  return { key, vars }
+}
+
+/** 存得住的文案：能重翻的 `Msg`，或翻不了的原样句子（后端错误等） */
+export type Text = Msg | string
+
+/** 就地取一句（非组件代码用：没有 hooks 上下文时已经来不及"再翻"了） */
+export function textOf(text: Text): string {
+  return typeof text === 'string' ? text : translate(active, text.key, text.vars)
+}
+
+/**
+ * 组件里把 `Text` 说成**当前语言**那一句 —— 语言一变组件重渲染，返回的函数跟着换。
+ *
+ * ```tsx
+ * const say = useText()
+ * <p>{say(note.text)}</p>
+ * ```
+ */
+export function useText(): (text: Text) => string {
+  const tr = useT()
+  return useCallback((text: Text) => (typeof text === 'string' ? text : tr(text.key, text.vars)), [tr])
 }

@@ -82,7 +82,7 @@ export default function TextField({
         className={s.view}
         data-invalid={invalid}
         aria-label={label}
-        title={value === '' ? '空' : value}
+        data-tip={value === '' ? '空' : value}
         disabled={disabled}
         onClick={() => {
           setDraft(value)

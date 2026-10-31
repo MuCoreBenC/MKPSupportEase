@@ -32,7 +32,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { api, errorText } from '../../api'
 /* `t` 只给**事件回调**用（保存成功/失败的句子在事发那一刻取，语言是对的）；
    渲染期的字一律走 `tr`，否则切语言不重渲染 */
-import { t, useLocale, useT, type Locale, type Tr } from '../../i18n'
+import { msg, t, useLocale, useText, useT, type Locale, type Text, type Tr } from '../../i18n'
 import type { CatalogRegistry, ParamEdit, PresetParamValues, LocalPresetFile } from '../../api'
 import { bi } from '../shared/dataLabel'
 import { FieldControl } from '../../components/field'
@@ -166,6 +166,7 @@ export default function CompareModal({
   onSaved,
 }: Props) {
   const tr = useT()
+  const say = useText()
   /* 数据（参数名/分组名）那一册 —— 与参数页同一个工具，别在这条路上再抄一遍 */
   const locale = useLocale()
   const [picked, setPicked] = useState<string[]>([])
@@ -173,7 +174,8 @@ export default function CompareModal({
   const [draft, setDraft] = useState<Record<string, Record<string, string>>>({})
   const [registry, setRegistry] = useState<CatalogRegistry | null>(null)
   const [busy, setBusy] = useState(false)
-  const [problem, setProblem] = useState<string | null>(null)
+  /** 这张台子自己的"没成"那句话（存键，渲染时再翻） */
+  const [problem, setProblem] = useState<Text | null>(null)
 
   /* 只读 / 编辑（作者：「默认是不能改参数的，加一个编辑或者修改按钮才能改」） */
   const [editing, setEditing] = useState(false)
@@ -200,7 +202,7 @@ export default function CompareModal({
         if (alive) setRegistry(c.registry)
       },
       () => {
-        if (alive) setProblem(t('presets.cmp.registryFailed'))
+        if (alive) setProblem(msg('presets.cmp.registryFailed'))
       },
     )
     return () => {
@@ -437,7 +439,7 @@ export default function CompareModal({
         onClose()
       } else {
         setProblem(
-          t('presets.cmp.savedFailed', {
+          msg('presets.cmp.savedFailed', {
             count: failed.length,
             names: failed.join(t('presets.cmp.savedFailSep')),
           }),
@@ -519,7 +521,7 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={past.length === 0 || busy}
-              title={tr('presets.cmp.undoTitle')}
+              data-tip={tr('presets.cmp.undoTitle')}
               aria-label={tr('presets.cmp.undo')}
               onClick={undo}
             >
@@ -529,7 +531,7 @@ export default function CompareModal({
               type="button"
               className={s.iconBtn}
               disabled={future.length === 0 || busy}
-              title={tr('presets.cmp.redo')}
+              data-tip={tr('presets.cmp.redo')}
               aria-label={tr('presets.cmp.redo')}
               onClick={redo}
             >
@@ -539,7 +541,7 @@ export default function CompareModal({
               type="button"
               className={s.textBtn}
               disabled={busy}
-              title={tr(EDIT_TEXT.exitTitle)}
+              data-tip={tr(EDIT_TEXT.exitTitle)}
               onClick={() => {
                 /*
                  * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -586,7 +588,7 @@ export default function CompareModal({
 
   const body: ReactNode = (
     <>
-      {problem !== null && <p className={s.problem}>{problem}</p>}
+      {problem !== null && <p className={s.problem}>{say(problem)}</p>}
 
       {picked.length < 2 ? (
         <p className={s.note}>{tr('presets.cmp.needTwo')}</p>
@@ -604,7 +606,7 @@ export default function CompareModal({
               type="button"
               className={onlyDiff ? `${s.onlyDiff} ${s.on}` : s.onlyDiff}
               onClick={() => setOnlyDiff((v) => !v)}
-              title={tr('presets.cmp.onlyDiffTitle')}
+              data-tip={tr('presets.cmp.onlyDiffTitle')}
             >
               <span className={s.sw} />
               {tr('presets.cmp.onlyDiff')} <span className={s.cnt}>{tabCounts.all}</span>
@@ -618,7 +620,7 @@ export default function CompareModal({
                 type="button"
                 className={s.addBtn}
                 disabled={picked.length >= MAX_PICKED || candidates.length === 0}
-                title={
+                data-tip={
                   picked.length >= MAX_PICKED
                     ? tr('presets.cmp.maxPicked')
                     : tr('presets.cmp.addPick')
@@ -676,7 +678,7 @@ export default function CompareModal({
               {picked.map((path, i) => (
                 <span key={path} className={s.hcol}>
                   <i className={s.dot} style={{ background: COL_COLORS[i] }} />
-                  <span className={s.nm} title={nameOf(path)}>
+                  <span className={s.nm} data-tip={nameOf(path)}>
                     {nameOf(path)}
                   </span>
                   <span className={s.ops}>

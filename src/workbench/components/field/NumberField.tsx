@@ -319,7 +319,7 @@ export default function NumberField({
         inputMode="decimal"
         aria-label={label}
         aria-invalid={bad || undefined}
-        title={bad && range !== undefined ? `超出${range}` : range}
+        data-tip={bad && range !== undefined ? `超出${range}` : range}
         disabled={disabled}
         onChange={(e) => setText(e.target.value)}
         onBlur={commitTyped}

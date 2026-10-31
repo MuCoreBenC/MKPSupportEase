@@ -54,7 +54,7 @@
  * 外壳按 tab 切换页面（切走就卸载），两页之间没有共享状态，跨页联动也没做。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { api, errorText } from '../../api'
 import { activePresetSnapshot, appStateMutated, useActivePreset } from '../state/appState'
 import {
@@ -367,7 +367,7 @@ export interface PresetData {
    */
   copyAsNew: (path: string, newName: string) => Promise<LocalFileIdentity>
   /**
-   * **删除一份用户文件**（第十层）：**真删除**（没有垃圾桶、没有归档）。回来重读本地文件。
+   * 删除一份用户文件（第十层）：进回收站（2026-10-29），可恢复。回来重读本地文件。
    * 正在使用 / 有草稿不再拦（2026-10-06 一切皆可删）—— 后端把属于这一份的状态
    * 一并清掉；代价由页面的确认框讲清。
    */
@@ -478,7 +478,8 @@ interface BootstrapResult {
  *
  * 判据（作者 2026-10-02，2026-10-04 补）：
  *
- *   - **只检查目录指纹**（`checkRemoteUpdate`，比的是 revision），不碰任何预设文件；
+ *   - **只检查目录这一代**（`checkRemoteUpdate`：`revision` 内容指纹 + `publishSerial`
+ *     发布身份，任一前进 = 有新目录），不碰任何预设文件；
  *   - 有变化才 `applyRemoteUpdate` —— 换的是**本地那一份 catalog**（旧目录自动归档），
  *     **绝不自动下载预设文件**（用户点了"下载"才下）；
  *   - ★ 远端这一代**读不懂**时（`readable === false`，或 `applyRemoteUpdate` 抛回
@@ -624,7 +625,7 @@ export function usePresetData(importRevision = 0): PresetData {
      * `DeliveryPresetSource.nozzle`）。中间三个合起来才是四档（见 `PresetFileState`）；
      * 归档是"更新过之后会变"的那一份，所以它跟着这一路一起读，而不是单开一次首屏读。
      */
-    const [catalog, local, drifted, trust, keep, repo, versions] = await Promise.all([
+    const [catalog, local, drifted, trust, keep, repo, versions, source] = await Promise.all([
       api.getRuntimeCatalog(),
       api.getDownloadedFiles(),
       api.getStaleFiles(),
@@ -633,9 +634,25 @@ export function usePresetData(importRevision = 0): PresetData {
       api.getPresetFiles(),
       /* 云端版本账（2026-10-08）：云端表 MKP 档按它把每个预设摊成多行版本 */
       api.getCloudVersions(),
+      /*
+       * **当前源的两格**（2026-10-29 补）：云端行「云端源」/「来源」那两行要它们。
+       * 此前只在首屏 `load()` 里读过一次、只喂了 `usePresetData` 的 state，
+       * `PresetFeed` 里根本没有这两格 —— 于是 `data.sourceIdentity` 恒为 undefined，
+       * 云端详情那一行**永远写「未知」**（本地行有值是因为它读 Rust 的 `based_on` facts）。
+       * 读失败照实 null，不挡这张表（与 `load()` 同一口径）。
+       */
+      api.getPresetSource().catch(() => null),
     ])
     setArchived(keep)
     setCloudVersions(versions)
+    /*
+     * **当前源的两格跟着每一次重读一起刷**（2026-10-29 修）：原来只在首屏
+     * `load()` 里读一次、之后再不问 —— 切源 / 目录换代后，云端详情「云端源」
+     * 那一行会一直停在 `null`（写「未知」），而目录本身已经是新的。
+     * 读失败照实 null，不挡这张表。
+     */
+    setSourceLabel(source?.mode ?? null)
+    setSourceIdentity(source?.identity ?? null)
     const downloaded = new Set(local.map((f) => f.fileName))
     const driftedSet = new Set(drifted.map((f) => f.fileName))
     /*
@@ -678,6 +695,8 @@ export function usePresetData(importRevision = 0): PresetData {
           /* 目录登记的落点：备注覆盖账的键（「改了备注，更新不覆盖」认的就是它） */
           path: f.path,
           size: f.size,
+          /* 目录登记的原文摘要（发布时对真字节算的）：云端详情那一行读它 */
+          sha256: f.sha256 !== '' ? f.sha256 : null,
           /* 喷嘴 / 层高（切片器 profile 才有）：从 `getPresetFiles` 的同一份文件上搬 */
           nozzle: axesByName.get(f.fileName)?.nozzle,
           layerHeight: axesByName.get(f.fileName)?.layerHeight,
@@ -1469,6 +1488,19 @@ export function usePresetPage(data: PresetData): PresetPage {
    * 最常问的是「我这台机器上现在有什么」。
    */
   const [query, setQuery] = useSessionState('presets.query', '')
+  /*
+   * ★ **搜索词分两路走**（第十八轮 2026-10-30，作者报"打字卡、松手了还在往里加字"，
+   * 且"搜索框一样卡"）：
+   *
+   *   · `query` —— 输入框**自己**用的那一份，每次敲键都立刻更新（输入框跟手）。
+   *   · `deferredQuery` —— **筛表**用的那一份。React 18 的 `useDeferredValue`：
+   *     敲键那一帧先把输入框画出来，重活（重建两整张表 + 画所有行）放到**低优先级**
+   *     的那一趟；下一个键来了就打断它重来 —— 于是**键入永远不被列表拖住**，
+   *     也就不会再有"按键排队、松手了还在蹦字"。
+   *
+   * 打字机上"搜什么"和"表长什么样"差一两帧，用户看不出；卡住输入法才是真问题。
+   */
+  const deferredQuery = useDeferredValue(query)
   const [kind, setKind] = useSessionState<PresetKindAxis>('presets.kind', 'mkp')
   const [scope, setScope] = useSessionState<PresetScopeAxis>('presets.scope', 'local')
   /* 切片器的喷嘴 / 层高筛选。空串 = 「全部」。落会话：切页对一眼回来不该复位 */
@@ -1559,22 +1591,11 @@ export function usePresetPage(data: PresetData): PresetPage {
       slicerCopiedIds: copiedSet,
       active: data.active,
       kind,
-      query,
+      /* 筛表用**延后**的那一份（见上面 `deferredQuery` 那段注） */
+      query: deferredQuery,
       pinned,
       sort,
       deliveryPresets: data.delivery.presets,
-      /* 云端条目 → 我本地那一份的修改时刻（认亲只认血统末段，与 claims 同一套） */
-      localTimes: (() => {
-        const m = new Map<string, { at: number; release: string | null }>()
-        for (const f of data.local) {
-          const seg = f.basedOnLabel?.split('/').pop()
-          if (seg == null) continue
-          const prev = m.get(seg)
-          const at = f.modifiedUnix ?? prev?.at ?? 0
-          if (prev == null || at > prev.at) m.set(seg, { at, release: f.basedOnRelease ?? null })
-        }
-        return m
-      })(),
       cloudVersions: data.cloudVersions,
       localPresets: data.delivery.localPresets,
       stalePresets: data.delivery.stale,
@@ -1583,12 +1604,11 @@ export function usePresetPage(data: PresetData): PresetPage {
       /* 发布身份两格一组：详情里「发布线 · 第几号」那一行用（老目录两格都 null） */
       catalogLine: data.delivery.catalogLine,
       catalogSerial: data.delivery.catalogSerial,
-      sourceLabel: data.sourceLabel,
       sourceIdentity: data.sourceIdentity,
       remarks: data.remarks,
     }),
     /* `data` 一个就够（`data.xxx` 都在它下面 —— 单列出来 eslint 会报"多余"） */
-    [data, copiedSet, kind, localSet, machines, pinned, query, sort],
+    [data, copiedSet, kind, localSet, machines, pinned, deferredQuery, sort],
   )
 
   /*

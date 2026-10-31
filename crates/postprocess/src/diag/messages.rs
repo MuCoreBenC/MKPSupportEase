@@ -39,15 +39,27 @@ pub enum Lang {
     /// 简体中文 —— **源语言**，也是"什么都没设置时"的那一档（与今天的行为一致）
     #[default]
     Zh,
+    /// 繁體中文（台灣用字，2026-10-30 加）。正文由 `text_zh_tw` 给，
+    /// 表里缺这一格时掉回中文（`pick_text` 的兜底链）。
+    ZhTw,
+    /// 日本語（2026-10-30 加）。正文由 `text_ja` 给。
+    Ja,
     /// English
     En,
 }
 
 impl Lang {
     /// 线上 / CLI 的字面量 → 语言。宽松认（`zh` / `en-US` 这类系统语言直传也收）。
+    ///
+    /// ★ `zh-TW` / `zh-Hant`（含 `zh-Hant-TW` 这种）**必须排在 `zh-` 那条前面判** ——
+    /// 否则会被笼统的"zh 开头 = 简体"吃掉（2026-10-30 加繁体时的第一次顺序错误）。
     pub fn parse(raw: &str) -> Option<Self> {
         let raw = raw.trim().to_ascii_lowercase();
-        if raw == "zh" || raw.starts_with("zh-") || raw.starts_with("zh_") {
+        if raw == "zh-tw" || raw == "zh-hk" || raw == "zh-mo" || raw.starts_with("zh-hant") {
+            Some(Self::ZhTw)
+        } else if raw == "ja" || raw.starts_with("ja-") || raw.starts_with("ja_") {
+            Some(Self::Ja)
+        } else if raw == "zh" || raw.starts_with("zh-") || raw.starts_with("zh_") {
             Some(Self::Zh)
         } else if raw == "en" || raw.starts_with("en-") || raw.starts_with("en_") {
             Some(Self::En)
@@ -60,12 +72,14 @@ impl Lang {
     pub fn wire(self) -> &'static str {
         match self {
             Self::Zh => "zh-CN",
+            Self::ZhTw => "zh-TW",
+            Self::Ja => "ja",
             Self::En => "en",
         }
     }
 }
 
-/// 当前语言的活值（0 = 中文，1 = 英文）。
+/// 当前语言的活值（0 = 中文，1 = 繁體，2 = 日文，3 = 英文）。
 ///
 /// 为什么是**进程级**而不是每调用点传参：这张表的读者散在管线、钩子、CLI 三层，
 /// 五十来个调用点。语言是"这一趟执行的口径"，不是每句话的属性 —— 传参会把
@@ -79,7 +93,9 @@ pub fn set_lang(lang: Lang) {
     CURRENT.store(
         match lang {
             Lang::Zh => 0,
-            Lang::En => 1,
+            Lang::ZhTw => 1,
+            Lang::Ja => 2,
+            Lang::En => 3,
         },
         Ordering::Relaxed,
     );
@@ -88,7 +104,9 @@ pub fn set_lang(lang: Lang) {
 /// 现在用的是哪种语言。
 pub fn current() -> Lang {
     match CURRENT.load(Ordering::Relaxed) {
-        1 => Lang::En,
+        1 => Lang::ZhTw,
+        2 => Lang::Ja,
+        3 => Lang::En,
         _ => Lang::Zh,
     }
 }
@@ -150,12 +168,24 @@ struct Entry {
     /// 运行期缺了会掉回中文（宁可夹一句中文，也不要空着）。
     #[serde(default)]
     text_en: Option<String>,
+    /// 繁體中文正文（2026-10-30）。同上：缺了掉回中文，判据会指名哪条没补。
+    #[serde(default)]
+    text_zh_tw: Option<String>,
+    /// 日本語正文（2026-10-30）。同上：缺了掉回中文。
+    #[serde(default)]
+    text_ja: Option<String>,
     /// 给切片器那一行的口径；缺省 = `text`。
     #[serde(default)]
     slicer: Option<String>,
     /// 英文的切片器口径；缺省 = `text_en`。
     #[serde(default)]
     slicer_en: Option<String>,
+    /// 繁體的切片器口径；缺省 = `text_zh_tw`。
+    #[serde(default)]
+    slicer_zh_tw: Option<String>,
+    /// 日文的切片器口径；缺省 = `text_ja`。
+    #[serde(default)]
+    slicer_ja: Option<String>,
     /// 本条用到的占位符名字（**只给判据看**，运行时零消费，见 crate 文档的字段说明）。
     ///
     /// `allow(dead_code)` 的理由：它跟 `note` 一样是**声明式**字段 —— 判据读它
@@ -186,14 +216,18 @@ fn table() -> &'static BTreeMap<String, Entry> {
 fn missing_key(key: &str) -> String {
     match current() {
         Lang::Zh => format!("［未登记的文案 {key}］"),
+        Lang::ZhTw => format!("［未登記的文案 {key}］"),
+        Lang::Ja => format!("［未登録の文面 {key}］"),
         Lang::En => format!("[missing message {key}]"),
     }
 }
 
-/// 这一条在**这一种语言**下的正文（英文缺了掉回中文 —— 宁可夹一句中文，也不要空着）。
+/// 这一条在**这一种语言**下的正文（缺了掉回中文 —— 宁可夹一句中文，也不要空着）。
 fn pick_text(lang: Lang, entry: &Entry) -> &str {
     match lang {
         Lang::Zh => &entry.text,
+        Lang::ZhTw => entry.text_zh_tw.as_deref().unwrap_or(&entry.text),
+        Lang::Ja => entry.text_ja.as_deref().unwrap_or(&entry.text),
         Lang::En => entry.text_en.as_deref().unwrap_or(&entry.text),
     }
 }
@@ -204,6 +238,16 @@ fn pick_text(lang: Lang, entry: &Entry) -> &str {
 fn pick_slicer(lang: Lang, entry: &Entry) -> &str {
     match lang {
         Lang::Zh => entry.slicer.as_deref().unwrap_or(&entry.text),
+        Lang::ZhTw => entry
+            .slicer_zh_tw
+            .as_deref()
+            .or(entry.text_zh_tw.as_deref())
+            .unwrap_or(&entry.text),
+        Lang::Ja => entry
+            .slicer_ja
+            .as_deref()
+            .or(entry.text_ja.as_deref())
+            .unwrap_or(&entry.text),
         Lang::En => entry
             .slicer_en
             .as_deref()
@@ -347,25 +391,49 @@ mod tests {
         }
     }
 
-    /// **每一条都必须有英文**（2026-10-25「全站 i18n」）。
+    /// **每一条都必须有英文、繁體和日文**（2026-10-25 英文 / 2026-10-30 繁體與日文）。
     ///
-    /// 这条红了 = 有一条会在英文界面 / 英文切片器框里掉回中文。
-    /// 加新条目时忘了补 `text_en`，就是这里先红，而不是用户先看见。
+    /// 这条红了 = 有一条会在那种语言的界面 / 切片器框里掉回中文。
+    /// 加新条目时忘了补，就是这里先红，而不是用户先看见。
     #[test]
     fn every_entry_has_every_language() {
-        let mut missing = Vec::new();
+        let mut missing_en = Vec::new();
+        let mut missing_tw = Vec::new();
+        let mut missing_ja = Vec::new();
         for (key, entry) in table() {
-            let filled = entry
+            if !entry
                 .text_en
                 .as_deref()
-                .is_some_and(|s| !s.trim().is_empty());
-            if !filled {
-                missing.push(key.as_str());
+                .is_some_and(|s| !s.trim().is_empty())
+            {
+                missing_en.push(key.as_str());
+            }
+            if !entry
+                .text_zh_tw
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+            {
+                missing_tw.push(key.as_str());
+            }
+            if !entry
+                .text_ja
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty())
+            {
+                missing_ja.push(key.as_str());
             }
         }
         assert!(
-            missing.is_empty(),
-            "这些条目没有英文（text_en）：{missing:?}"
+            missing_en.is_empty(),
+            "这些条目没有英文（text_en）：{missing_en:?}"
+        );
+        assert!(
+            missing_tw.is_empty(),
+            "这些条目没有繁體（text_zh_tw）：{missing_tw:?}"
+        );
+        assert!(
+            missing_ja.is_empty(),
+            "这些条目没有日文（text_ja）：{missing_ja:?}"
         );
     }
 

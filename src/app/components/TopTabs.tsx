@@ -231,7 +231,7 @@ export default function TopTabs({
         type="button"
         className={s.logo}
         data-clickable="true"
-        title={tr('tabs.copyScript')}
+        data-tip={tr('tabs.copyScript')}
         onClick={copyScript}
       >
         MKP

@@ -976,4 +976,52 @@ build ✓ · 六道 check ✓ · 探针 `i18n` 13/13 · `i18n-cjk` **9 行**（2
 - 假后端补 `nothingToPublish: false`，保持同形状。
 
 验证：`tsc -b --force` ✓ · eslint 0 · `build` ✓ · `build:workbench` ✓ · `check:i18n` ✓（1582 键）。
-只改前端，Rust 四道未跑。**未提交**（等作者 `npm run tauri dev` 验）。
+只改前端，Rust 四道未跑。后已提交 `bb46c00` 并推 origin/main。
+
+## 增量之五十九 · 客户端看不见「只盖身份」的那次发布（2026-10-29）
+
+作者真机：第 1 号发布之后，预设页每份文件都是「版本关系未知」，点「更新」之后还是「未知」，
+按钮永远挂着。
+
+**根因**：`runtime::update::check` 只比 `revision`，而 `revision` 刻意**不含**
+`catalogId` / `publishSerial`（它们是发布事件痕迹，不是内容）⇒ 第 1 号那次
+「内容一字未变、只盖身份」的发布**永远到不了客户端**。客户端手里一直是 10-19 那代
+没有身份的目录（截图「云端更新时间 2026-10-19 22:12」就是它，而云端真实是
+`publishedAt 2026-10-29T04:54:13Z`），于是每份文件 `based_on` 第 ① 步就 `Unverified`；
+点「更新」只能以「没有身份」再建一次基线 ⇒ 死循环。
+
+修两处：
+
+- `update::check` 补上「发布身份前进」这一半：`revision` 变 **或** 同线
+  `publishSerial` 变大 **或** 本机没身份而远端有 ⇒ 有新目录。远端没身份 /
+  不同线不比序号。五个单测钉住。
+- 前端兜底：`cloudRowState` 在 `unverified` 且**云端目录自己没身份**时不给「更新」，
+  改说「目录旧了」—— 那个按钮点了也建不出基线，比没有更坏
+  （新键 `presets.tree.cloudLocal.noIdentity`，中英各一条）。
+
+验证：`cargo test --features workbench --lib` 1076 + 238 + 78 全绿；双 feature clippy 0；
+`fmt --check` ✓；`tsc -b --force` ✓；eslint/stylelint 0；`build` ✓；i18n 1583 键。
+**未提交**。
+
+## 增量之六十 · 矩阵写回被当成「过期派生」丢掉（2026-10-29）
+
+作者实测：对照矩阵里手动输入改数值，格子只变红、数字还是旧的（点步进箭头"像是对的"）；
+G-code 格只读态写着「10 行 · 点开」，点开却是空白。
+
+**同一个根因**：`ParamsPage` 的 `refreshKeyRef.current` 恒按 `page: 'desk'` 算，
+而对照模式 `onWrite` 递出去的是 `page: 'matrix'` 的 `refresh`
+（`refreshKeyOf` 前缀就不同）⇒ `sendEdits` 把矩阵模式**每一次**写回的派生
+都判成"过期"丢掉 ⇒ `setMatrix` 从不执行 ⇒ `cell.text` 永远是旧值。
+手输后关闭编辑器看到的是旧 `text`（只有 `raw` 变了 ⇒ 红），
+而步进箭头全程开着编辑器、读的是 `raw`，所以"看起来只有箭头生效"。
+批量编辑那一支同理（`BatchEdit` 的 `onApply` 也按同一颗 ref 判）。
+
+修两处：
+
+- `refreshKeyRef.current` 按 `mode` 算（matrix 用 `cols` + `tab:null` + `query`），
+  与 `onWrite` 递的 `pageRefresh` 一字不差；
+- `editQueue.patchRow` 乐观层顺手换 `text`：数值用原文（后端那份带单位/小数位，
+  回来替换），**空串显示也留空**（原来会留着旧摘要 —— "写着 10 行、点开空白"正是它）。
+  枚举/开关/G-code 摘要不在前端重算。
+
+验证：`tsc -b --force` ✓ · eslint ✓ · `build` ✓ · `build:workbench` ✓。**未提交**。

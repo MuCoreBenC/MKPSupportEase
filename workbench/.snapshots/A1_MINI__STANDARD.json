@@ -6,7 +6,7 @@
   "toolhead.glue_z_offset": -0.05,
   "toolhead.offset.x": -0.3,
   "toolhead.offset.y": 18.1,
-  "toolhead.offset.z": 4.0,
+  "toolhead.offset.z": 3.9,
   "toolhead.prime_length": 100.0,
   "toolhead.speed_limit": 70.0,
   "wiping.disable_3rd_layer_clog_detect": true,

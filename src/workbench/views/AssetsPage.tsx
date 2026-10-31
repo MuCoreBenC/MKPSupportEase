@@ -506,7 +506,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 type="button"
                 className={`${s.btn} ${s.btnSm} ${group === g.id ? s.btnOn : ''}`}
                 onClick={() => setGroup(g.id)}
-                title={`${g.id} · ${g.members.length} 张共用一份标注`}
+                data-tip={`${g.id} · ${g.members.length} 张共用一份标注`}
               >
                 {g.name}
               </button>
@@ -619,7 +619,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                    词与判据都取生成页那一套 —— 这里只是把同一件事显示在资产库里 */
                 <span
                   className={s.tag}
-                  title={words.build[a.buildState]?.explain ?? '这一版的产物还没生成'}
+                  data-tip={words.build[a.buildState]?.explain ?? '这一版的产物还没生成'}
                 >
                   {words.build[a.buildState]?.label ?? a.buildState}
                 </span>
@@ -628,7 +628,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                   不再「已分配/可选/仅归档 + 随包」两套轴各说各的 */}
               <span
                 className={s.tag}
-                title={words.identity[a.identity].explain ?? undefined}
+                data-tip={words.identity[a.identity].explain ?? undefined}
               >
                 {words.identity[a.identity].label}
               </span>
@@ -636,7 +636,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
               {a.groupName !== null && (
                 <span
                   className={`${s.tag} ${s.tagGhost}`}
-                  title={`分组 ${a.groupId}${a.role === null ? '' : ` · 角色 ${a.role}`}`}
+                  data-tip={`分组 ${a.groupId}${a.role === null ? '' : ` · 角色 ${a.role}`}`}
                 >
                   {a.groupName}
                 </span>
@@ -694,7 +694,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
                 disabled={insp === null || !insp.exists}
-                title={
+                data-tip={
                   insp === null
                     ? '正在读文件信息……'
                     : insp.exists
@@ -1017,7 +1017,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                           className={`${s.btn} ${s.btnSm}`}
                           onClick={() => setCalibPick(true)}
                           disabled={!cur.present}
-                          title={cur.present ? undefined : '文件不在，先把它放回来'}
+                          data-tip={cur.present ? undefined : '文件不在，先把它放回来'}
                         >
                           {cur.calibration.actual == null ? '补标记' : '改写'}
                         </button>
@@ -1062,7 +1062,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                       className={`${s.btn} ${s.btnSm}`}
                       onClick={() => onGoto('bundles', { machineId: null, uid: usage?.bundles[0] ?? null, key: null })}
                       disabled={!usage?.bundles.length}
-                      title={usage?.bundles.length ? undefined : '反查还没回来'}
+                      data-tip={usage?.bundles.length ? undefined : '反查还没回来'}
                     >
                       去套餐页看谁装着它
                     </button>
@@ -1092,7 +1092,7 @@ export default function AssetsPage({ words, tick, initialSel, initialAssign, onG
                       if (cur.delivery === 'bundled') void applyDelivery(cur.id, 'download')
                       else void setVis(cur.id, 'menu')
                     }}
-                    title={
+                    data-tip={
                       cur.delivery === 'bundled'
                         ? '改回按需下载：客户端预设页看得到、可手动下'
                         : '解除归档：回到可选'

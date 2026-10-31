@@ -44,9 +44,21 @@ pub struct BrandView {
 pub struct VersionView {
     pub id: String,
     pub name: String,
+    /// 各语言显示名（2026-10-31 多语言数据）。可空，客户端按语言挑、空则回落 `name`
+    pub name_en: Option<String>,
+    pub name_tw: Option<String>,
+    pub name_ja: Option<String>,
     pub recommended_bundle: Option<String>,
     pub tag: Option<String>,
+    /// 各语言角标。可空
+    pub tag_en: Option<String>,
+    pub tag_tw: Option<String>,
+    pub tag_ja: Option<String>,
     pub description: Option<String>,
+    /// 各语言说明。可空
+    pub description_en: Option<String>,
+    pub description_tw: Option<String>,
+    pub description_ja: Option<String>,
     /// **备注**（客户端副标题）。可空
     pub remark: Option<String>,
     /// **这一版专属的外观图**（资产 id）。`None` = 回落机型图（`Machine::image`）——
@@ -73,6 +85,9 @@ pub struct MachineView {
     /// 第二个图位（快拆版外观图）。今天只有 A1 mini 有 —— 见 `presetdata::Machine::image_variant`
     pub image_variant: Option<String>,
     pub icon: Option<String>,
+    /// **启用 / 停用**（2026-10-30）。停用的机型不进目录 ⇒ 客户端不显示、
+    /// 后处理拒绝。这一页照常列出来（还能把它打开），只是打上「已停用」
+    pub enabled: bool,
     /// 有没有 `[dimensions]` —— 界面上要能看出"这台还没配尺寸"
     pub has_dimensions: bool,
     /// **`[dimensions]` 的逐格视图**（2026-10-03 尺寸卡六组）。`None` = 这台没配尺寸
@@ -473,6 +488,7 @@ fn list_of(p: &Presets) -> MachineList {
                 image: m.image.clone(),
                 image_variant: m.image_variant.clone(),
                 icon: m.icon.clone(),
+                enabled: m.enabled,
                 has_dimensions: m.has_dimensions,
                 dimensions: m.dimensions.clone(),
                 // 禁区两格**从同一个来源算出**（一处取，一处 len）——
@@ -495,9 +511,18 @@ fn list_of(p: &Presets) -> MachineList {
                         VersionView {
                             id: v.id.clone(),
                             name: v.name.clone(),
+                            name_en: v.name_en.clone(),
+                            name_tw: v.name_tw.clone(),
+                            name_ja: v.name_ja.clone(),
                             recommended_bundle: v.recommended_bundle.clone(),
                             tag: v.tag.clone(),
+                            tag_en: v.tag_en.clone(),
+                            tag_tw: v.tag_tw.clone(),
+                            tag_ja: v.tag_ja.clone(),
                             description: v.description.clone(),
+                            description_en: v.description_en.clone(),
+                            description_tw: v.description_tw.clone(),
+                            description_ja: v.description_ja.clone(),
                             remark: v.remark.clone(),
                             image: v.image.clone(),
                             has_recipe: p.registry.version_has_variants(&uid),

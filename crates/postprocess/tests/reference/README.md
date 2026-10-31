@@ -1,5 +1,35 @@
 # tests/reference 与 tests/fixtures —— 证据等级声明（Task 4.6）
 
+## SupportEase 自有整链 golden（2026-10-31）
+
+`crates/postprocess/tests/golden/42274.2.e2e-A1.support-ease.gcode` 是**我们自己的**参考输出，
+它替代了原来「`load_ir` 整链与 MKP-SR 逐字节相同」那条判据。理由：那份外部参考物在本仓无法
+复现，等于把**当时的参数值**一起钉死 —— 参数源一改就红，只能去外部重出。独立之后这条依赖必须断。
+
+| 项 | 规定 |
+|---|---|
+| 输入 | `tests/fixtures/presets-frozen/A1-standard.frozen.toml`（**冻结件**，属测试资产） |
+| 谁维护 | 跟着代码走；**不跟随** `presets/` 参数更新 |
+| `--sync-baseline` | **不碰**它（那只同步 `tests/fixtures/presets/` 的数据基线） |
+| 参数更新时 | 一个字都不动 —— 输入冻结 ⇒ 输出不变 ⇒ 判据不红 |
+| 映射/管线改了 | 会红，这正是它的用途：提醒有人检查差异 |
+| 唯一更新入口 | `MKPSE_RECORD_PRESET_GOLDEN=1 cargo test -p mkpse-preset --test load_ir preset_chain_matches_the_support_ease_golden` |
+| 更新前必须 | 人工确认差异**是想要的**，并把原因写进提交信息；不挂在生成/发布/`--sync-baseline` 任何自动路径上 |
+| 证据等级 | **自比自**：证明「没变」，不证明「对」。工艺正确性仍靠真机与人工验收 |
+
+配套的三条数据无关判据（映射逐字段 / 参数行为差分 / 确定性与结构）见
+`crates/preset/tests/load_ir.rs` 的文件头表格；它们才是「参数确实生效」的那一层。
+
+## 冻结 config 路径的外部参考（仍然保留）
+
+`crates/postprocess/tests/{end_to_end,process_with_ir}.rs` 继续与
+`tests/golden/42274.2.e2e-A1.reference.gcode` 逐字节比对。它们喂的是
+`tests/fixtures/config/A1.toml`（IR TOML，冻结），**不读预设文件**，所以参数更新不会碰它们 ——
+它们守的是「搬过来的管线字节没变」，与自有 golden 分工不重叠。
+
+---
+
+
 **这三份产物与 `tests/golden/` 的证据等级不同，收口报告不得把差别抹平：**
 
 | 产物 | 是什么 | 证据等级 |

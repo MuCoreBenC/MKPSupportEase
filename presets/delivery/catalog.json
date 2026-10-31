@@ -1,7 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "48a1517241b6da83",
-  "publishedAt": "2026-10-29T04:54:13Z",
+  "revision": "46595db4362e2cb3",
+  "publishedAt": "2026-10-30T17:15:39Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -70,33 +70,51 @@
           "id": "STANDARD",
           "name": "标准版",
           "nameEn": "Standard",
+          "nameTw": "標準版",
+          "nameJa": "スタンダード版",
           "recommendedBundle": "A1_STANDARD",
           "tag": "推荐",
           "tagEn": "Recommended",
+          "tagTw": "推薦",
+          "tagJa": "おすすめ",
           "description": "标准配置，适合大多数用户",
           "descriptionEn": "Standard configuration for most users",
+          "descriptionTw": "標準配置，適合大多數使用者",
+          "descriptionJa": "標準構成，ほとんどのユーザーに適しています",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "nameEn": "Quick-release (before June)",
+          "nameTw": "快拆版（6月以前）",
+          "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_FAST",
           "tag": "热门",
           "tagEn": "Popular",
+          "tagTw": "熱門",
+          "tagJa": "人気",
           "description": "支持快拆配件的改装配置",
           "descriptionEn": "Modded setup for quick-release parts",
+          "descriptionTw": "支援快拆配件的改裝配置",
+          "descriptionJa": "クイックリリースパーツに対応した改造構成",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "nameEn": "Quick-release 260628",
+          "nameTw": "快拆版260628",
+          "nameJa": "クイックリリース版260628",
           "recommendedBundle": "A1_FASTV3.3",
           "tag": "最新",
           "tagEn": "Newest",
+          "tagTw": "最新",
+          "tagJa": "最新",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
+          "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
+          "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
           "image": null
         }
       ],
@@ -164,33 +182,51 @@
           "id": "STANDARD",
           "name": "标准版",
           "nameEn": "Standard",
+          "nameTw": "標準版",
+          "nameJa": "スタンダード版",
           "recommendedBundle": "A1_MINI_STANDARD",
           "tag": "推荐",
           "tagEn": "Recommended",
+          "tagTw": "推薦",
+          "tagJa": "おすすめ",
           "description": "标准配置",
           "descriptionEn": "Standard configuration",
+          "descriptionTw": "標準配置",
+          "descriptionJa": "標準構成",
           "image": null
         },
         {
           "id": "FAST",
           "name": "快拆版6月以前",
           "nameEn": "Quick-release (before June)",
+          "nameTw": "快拆版（6月以前）",
+          "nameJa": "クイックリリース版（6月以前）",
           "recommendedBundle": "A1_MINI_FAST",
           "tag": "热门",
           "tagEn": "Popular",
+          "tagTw": "熱門",
+          "tagJa": "人気",
           "description": "支持快拆配件的改装配置",
           "descriptionEn": "Modded setup for quick-release parts",
+          "descriptionTw": "支援快拆配件的改裝配置",
+          "descriptionJa": "クイックリリースパーツに対応した改造構成",
           "image": null
         },
         {
           "id": "FASTV3.3",
           "name": "快拆版260628",
           "nameEn": "Quick-release 260628",
+          "nameTw": "快拆版260628",
+          "nameJa": "クイックリリース版260628",
           "recommendedBundle": "A1_MINI_FASTV3.3",
           "tag": "最新",
           "tagEn": "Newest",
+          "tagTw": "最新",
+          "tagJa": "最新",
           "description": "6月以后闲鱼购买的，以及6月28开源的快拆260628版本",
           "descriptionEn": "For units bought after June, plus the open-sourced 260628 quick-release design",
+          "descriptionTw": "6月以後在閒魚購買的機器，以及6月28開源的快拆260628版本",
+          "descriptionJa": "6月以降にフリマアプリで購入した機体、および6月28日に公開されたクイックリリース260628に対応",
           "image": null
         }
       ],
@@ -257,11 +293,17 @@
           "id": "LITE",
           "name": "lite版",
           "nameEn": "Lite",
+          "nameTw": "lite版",
+          "nameJa": "Lite版",
           "recommendedBundle": "P1S_default",
           "tag": "推荐",
           "tagEn": "Recommended",
+          "tagTw": "推薦",
+          "tagJa": "おすすめ",
           "description": "群里开源的最新lite",
           "descriptionEn": "Latest lite released in the group",
+          "descriptionTw": "群裡開源的最新lite",
+          "descriptionJa": "グループで公開されている最新のLite構成",
           "image": null
         }
       ],
@@ -325,7 +367,7 @@
       "externalAliases": [
         "P2"
       ],
-      "image": null,
+      "image": "p2s-image",
       "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
@@ -374,11 +416,17 @@
           "id": "STANDARD",
           "name": "标准版",
           "nameEn": "Standard",
+          "nameTw": "標準版",
+          "nameJa": "スタンダード版",
           "recommendedBundle": "P2S_default",
           "tag": "推荐",
           "tagEn": "Recommended",
+          "tagTw": "推薦",
+          "tagJa": "おすすめ",
           "description": "未完成，没有打印机",
           "descriptionEn": "Unfinished; no printer available",
+          "descriptionTw": "未完成，沒有印表機",
+          "descriptionJa": "未完成（プリンターが手元にないため）",
           "image": null
         }
       ],
@@ -446,7 +494,7 @@
         "X1 Carbon",
         "X1CARBON"
       ],
-      "image": null,
+      "image": "x1c-image",
       "imageVariant": null,
       "icon": "p1s-icon",
       "plateIds": [
@@ -495,11 +543,17 @@
           "id": "LITE",
           "name": "lite版",
           "nameEn": "Lite",
+          "nameTw": "lite版",
+          "nameJa": "Lite版",
           "recommendedBundle": "X1C_default",
           "tag": "推荐",
           "tagEn": "Recommended",
+          "tagTw": "推薦",
+          "tagJa": "おすすめ",
           "description": "群里开源的最新lite",
           "descriptionEn": "Latest lite released in the group",
+          "descriptionTw": "群裡開源的最新lite",
+          "descriptionJa": "グループで公開されている最新のLite構成",
           "image": null
         }
       ],
@@ -586,6 +640,22 @@
       "machineId": "P1S",
       "name": "P1S 外观图",
       "path": "printers/p1s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "p2s-image",
+      "type": "image",
+      "machineId": "P2S",
+      "name": "P2S 外观图",
+      "path": "printers/p2s.webp",
+      "delivery": "bundled"
+    },
+    {
+      "id": "x1c-image",
+      "type": "image",
+      "machineId": "X1C",
+      "name": "X1C 外观图",
+      "path": "printers/x1c.webp",
       "delivery": "bundled"
     },
     {
@@ -2406,7 +2476,9 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
+          "A1": "auto",
           "A1:FASTV3.3": "auto",
+          "A1:STANDARD": "auto",
           "A1_MINI:FASTV3.3": "auto"
         },
         "machineMinVariants": {},
@@ -2751,8 +2823,12 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1:FASTV3.3": 3.7,
+          "A1:FAST": 3.9,
+          "A1:FASTV3.3": 3.9,
+          "A1:STANDARD": 3.9,
+          "A1_MINI:FAST": 3.9,
           "A1_MINI:FASTV3.3": 3.9,
+          "A1_MINI:STANDARD": 3.9,
           "P1S": 1.1,
           "P1S:LITE": 1.1,
           "P2S": 1.1,
@@ -3575,7 +3651,9 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.9
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -5204,8 +5282,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "9396e78b31b391672b7f12da537c175334a3c378a1e8105af9c7a909efc67062",
-      "size": 4336
+      "sha256": "629d88729e58e5092a321f94ae5cdca7b1a2b08bcf98b9aa56413d6ef8ed4d20",
+      "size": 4341
     },
     {
       "kind": "mkp_preset",
@@ -5213,8 +5291,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "9bb2e19a863849017283825e6020ef29e237b21c21fd1acb9fe4fef8b7ceb387",
-      "size": 4334
+      "sha256": "dcc2d62be4e63f72fb4378ba7177fadd548129b9a940e6970c1fea7e2a82d935",
+      "size": 4339
     },
     {
       "kind": "mkp_preset",
@@ -5222,8 +5300,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "be5c64e2a36a5c6d4f764262b9489cc11ef2b0e76bf0db0de4dd4c4d7e36daf8",
-      "size": 4341
+      "sha256": "a3c52ffeed798a57784c8987d2a1962315e188a3fe16597ec9b4e27cc70fe2e2",
+      "size": 4343
     },
     {
       "kind": "mkp_preset",
@@ -5231,8 +5309,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "7ee0abf809f0a8e6fa35fe924dd518843f6a6976d364a858bd297e4643e52e97",
-      "size": 4343
+      "sha256": "eb3e6f9f61e7b55c531d94f210f72271a26be2751bc98b4fa60faefa88b7c684",
+      "size": 4345
     },
     {
       "kind": "mkp_preset",
@@ -5240,8 +5318,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "12a25c618a7b09f60aa4d499bfcb31a7c83da83da3639c481e7fa10fb15a59d2",
-      "size": 4337
+      "sha256": "e7c222021034d78e706102fcffa3dcf1a2f4e66cce74445371841cc6ac3cf1b5",
+      "size": 4339
     },
     {
       "kind": "mkp_preset",
@@ -5436,5 +5514,5 @@
   "structureSignature": "2242174c52e8a9b6",
   "minClientVersion": "0.0.6",
   "catalogId": "support-ease",
-  "publishSerial": 1
+  "publishSerial": 3
 }

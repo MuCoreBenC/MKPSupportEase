@@ -25,9 +25,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { STORAGE } from '../../api/storageKeys'
-import { useT } from '../../i18n'
+import { msg, useT, useText, type Text } from '../../i18n'
 import { useStickyState } from '../../hooks/useStickyState'
 import type { Density } from '../../hooks/useDensity'
+/* 键位说法按平台（`⌘Z` / `Ctrl+Z`、重做 mac 是 `⇧⌘Z`）—— 唯一出处在 `usePlatform` */
+import { ariaOf, comboOf } from '../../hooks/usePlatform'
 import { FieldLayer } from '../../components/field'
 /*
  * 「修改历史」在模态框里会搬到标题栏 —— 那颗动作槽由通用模态框给（见 modalHeadSlot.ts）；
@@ -387,6 +389,8 @@ export default function PageParams({
   gateEdit = false,
 }: Props) {
   const tr = useT()
+  /* `savedNote` / `gateNote` 存的是键：抬头那一格在渲染时摊开（换语言就重翻） */
+  const say = useText()
   /* 标题栏两个借位槽（只有挂在模态框里才有值）—— hook 必须在所有 early return 之前调 */
   const headSlot = useModalHeadSlot()
   const headNoteSlot = useModalHeadNoteSlot()
@@ -773,7 +777,8 @@ export default function PageParams({
    *   blocked  灰：被上游标记弃用，改不了
    *   noop     灰：现在就是那个值，不用还原
    */
-  const [revertNote, setRevertNote] = useState<{ text: string; tone: 'ok' | 'muted' } | null>(null)
+  /** 「已还原 / 改不了」那一句（存键，渲染时再翻 —— 它会挂 3.2 秒，横跨一次切语言也可能） */
+  const [revertNote, setRevertNote] = useState<{ text: Text; tone: 'ok' | 'muted' } | null>(null)
   const revertNoteTimer = useRef<number | null>(null)
   useEffect(
     () => () => {
@@ -793,20 +798,20 @@ export default function PageParams({
         result === 'applied'
           ? {
               text: many
-                ? tr('params.revertMany', {
+                ? msg('params.revertMany', {
                     count: entry.items.length,
                     label,
                     target,
                   })
-                : tr('params.revertOne', { label, target }),
+                : msg('params.revertOne', { label, target }),
               tone: 'ok' as const,
             }
           : result === 'blocked'
-            ? { text: tr('params.revertBlocked', { label }), tone: 'muted' as const }
+            ? { text: msg('params.revertBlocked', { label }), tone: 'muted' as const }
             : {
                 text: many
-                  ? tr('params.noChangeMany')
-                  : tr('params.noChangeOne', { label, target }),
+                  ? msg('params.noChangeMany')
+                  : msg('params.noChangeOne', { label, target }),
                 tone: 'muted' as const,
               }
 
@@ -1002,7 +1007,7 @@ export default function PageParams({
         <div className={s.emptyBox}>
           <h2 className={s.emptyTitle}>{tr('params.noCatalog.title')}</h2>
           <p className={s.emptyText}>{tr('params.noCatalog.body')}</p>
-          <p className={s.emptyText}>{u.error}</p>
+          <p className={s.emptyText}>{say(u.error)}</p>
         </div>
       </div>
     )
@@ -1027,7 +1032,7 @@ export default function PageParams({
       className={s.historyBtn}
       aria-haspopup="dialog"
       aria-expanded={historyOpen}
-      title={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
+      data-tip={historyOpen ? tr('params.historyDrawerCollapse') : tr('params.historyDrawer')}
       onClick={() => setHistoryOpen((v) => !v)}
     >
       {tr('params.historyDrawer')}
@@ -1110,18 +1115,20 @@ export default function PageParams({
    */
   /* 语气由 `useParams` 给（`savedTone`），**不再从文案前缀猜** —— 文案随语言走，
      拿「保存失败」开头去判红绿，一翻英文就全绿了 */
-  const headNote = ((): { text: string; tone: 'ok' | 'warn' | 'bad' } | null => {
+  const headNote = ((): { text: Text; tone: 'ok' | 'warn' | 'bad' } | null => {
     if (u.draftError !== null) {
-      return { text: tr('params.draftError', { detail: u.draftError }), tone: 'bad' }
+      return { text: msg('params.draftError', { detail: u.draftError }), tone: 'bad' }
     }
     if (u.gateNote !== null) return { text: u.gateNote, tone: 'warn' }
     if (u.savedNote === null) return null
     return { text: u.savedNote, tone: u.savedTone }
   })()
+  /* 这一格存的是键（`msg`）：`draftError` 的详情是后端当场说的话，套在键里一起重翻前缀 */
+  const headNoteText = headNote === null ? '' : say(headNote.text)
   const headNoteNode =
     headNote === null ? null : (
-      <span className={s.note} data-tone={headNote.tone} title={headNote.text}>
-        {headNote.text}
+      <span className={s.note} data-tone={headNote.tone} data-tip={headNoteText}>
+        {headNoteText}
       </span>
     )
 
@@ -1156,7 +1163,7 @@ export default function PageParams({
                     type="button"
                     className={inactive ? `${s.presetPill} ${s.presetPillOff}` : s.presetPill}
                     ref={pillRef}
-                    title={
+                    data-tip={
                       inactive
                         ? tr('params.pill.inactive', { name: pillLabel })
                         : tr('params.pill.active', { name: pillLabel })
@@ -1332,8 +1339,8 @@ export default function PageParams({
               单独当页用（没有槽）时才落回这里 —— 同一份节点、同一套语气。
             */}
             {headNoteSlot === null && headNote !== null && (
-              <p className={s.noteLine} data-tone={headNote.tone} title={headNote.text}>
-                {headNote.text}
+              <p className={s.noteLine} data-tone={headNote.tone} data-tip={headNoteText}>
+                {headNoteText}
               </p>
             )}
             {u.draftError === null && u.editingPreset === null && u.fileLabel === null && (
@@ -1413,7 +1420,7 @@ export default function PageParams({
                  * 半句话不丢：它本来就在保存确认弹层里说（「以下 N 处改动将写入 A1.toml」），
                  * 而且这里挂了 title，悬停还能看全。
                  */}
-                <span className={s.state} title={stateText}>
+                <span className={s.state} data-tip={stateText}>
                   {stateText}
                 </span>
               </div>
@@ -1421,7 +1428,7 @@ export default function PageParams({
                 <button
                   type="button"
                   className={s.primary}
-                  title={tr('presets.edit.enterParamsTitle')}
+                  data-tip={tr('presets.edit.enterParamsTitle')}
                   onClick={() => setEditMode(true)}
                 >
                   {tr(EDIT_TEXT.enterMode)}
@@ -1438,7 +1445,7 @@ export default function PageParams({
                 <button type="button" className={s.textBtn} onClick={() => setAskRestore(true)}>
                   {tr('params.restoreDefaults')}
                 </button>
-                <span className={s.state} title={stateText}>
+                <span className={s.state} data-tip={stateText}>
                   {stateText}
                 </span>
               </div>
@@ -1455,9 +1462,9 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canUndo}
                   onClick={u.undo}
-                  title={tr('params.undoTitle')}
+                  data-tip={tr('params.undoTitle', { keys: comboOf('undo') })}
                   aria-label={tr('params.undo')}
-                  aria-keyshortcuts="Control+Z"
+                  aria-keyshortcuts={ariaOf('undo')}
                 >
                   <Icon name="undo" size={15} />
                 </button>
@@ -1466,16 +1473,16 @@ export default function PageParams({
                   className={s.iconBtn}
                   disabled={!u.canRedo}
                   onClick={u.redo}
-                  title={tr('params.redoTitle')}
+                  data-tip={tr('params.redoTitle', { keys: comboOf('redo') })}
                   aria-label={tr('params.redo')}
-                  aria-keyshortcuts="Control+Y"
+                  aria-keyshortcuts={ariaOf('redo')}
                 >
                   <Icon name="redo" size={15} />
                 </button>
                 <button
                   type="button"
                   className={s.textBtn}
-                  title={tr(EDIT_TEXT.exitTitle)}
+                  data-tip={tr(EDIT_TEXT.exitTitle)}
                   onClick={() => {
                     /*
                      * **那一颗 = 作废**（作者 2026-10-16：「没有保存的话，退出编辑模式
@@ -1493,8 +1500,8 @@ export default function PageParams({
                   type="button"
                   className={s.primary}
                   disabled={u.dirtyCount === 0 && u.syncDirty === 0}
-                  title={tr('presets.edit.saveTitle')}
-                  aria-keyshortcuts="Control+S"
+                  data-tip={tr('presets.edit.saveTitle', { keys: comboOf('save') })}
+                  aria-keyshortcuts={ariaOf('save')}
                   onClick={() => (u.dirtyCount === 0 ? u.save() : setAskSave(true))}
                 >
                   {tr('common.save')}
@@ -1696,7 +1703,7 @@ export default function PageParams({
                   type="button"
                   className={s.primary}
                   disabled={invalidEntries.length > 0}
-                  title={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
+                  data-tip={invalidEntries.length > 0 ? tr('params.save.blocked') : undefined}
                   onClick={confirmSave}
                 >
                   {tr('params.save.confirm')}

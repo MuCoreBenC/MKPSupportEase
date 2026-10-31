@@ -1206,13 +1206,14 @@ mod tests {
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         assert_eq!(
             list.assets.len(),
-            33,
-            "MKP 预设 9 + 整机图 4 + 品牌字标 1 + 图标 3 + 模型 5 + BBS 9 + 引导图 2 ——
+            35,
+            "MKP 预设 9 + 整机图 6 + 品牌字标 1 + 图标 3 + 模型 5 + BBS 9 + 引导图 2 ——
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类）、
              品牌 logo 也正式进了台账（`bambu-lab-logo`，公共素材：不写 machineId）。
              2026-10-16：引导图进台账（`type = 'guide'`，bundled —— 图片引导那两张）。
              2026-10-18：模型 3 → 4（`zoffset-calibration-ext`，Z 校准加长版进台账）。
              2026-10-19：模型 4 → 5（`precise-calibration-ext`，XY 校准加长版进台账）。
+             2026-10-30：整机图 4 → 6（`p2s-image` / `x1c-image`，bundled）。
              条数变了要说清为什么"
         );
 
@@ -1302,8 +1303,8 @@ mod tests {
         let all =
             wb_assets(None, None, None, None, None, None, None, None).expect("真 presets 读得通");
         let want_of = [
-            // image 档 5 = 整机图 4 + 品牌字标 1（2026-10-03 品牌图正式进台账）
-            (AssetKind::Image, 5usize),
+            // image 档 7 = 整机图 6（2026-10-30 补了 P2S / X1C 两张）+ 品牌字标 1
+            (AssetKind::Image, 7usize),
             (AssetKind::Icon, 3),
             // 模型 5 = Z 旧版 / Z 加长版（2026-10-18 进台账）/ XY 旧版 /
             // XY 加长版（2026-10-19 进台账）/ 支撑测试
@@ -1377,15 +1378,15 @@ mod tests {
         let bundled = count(Bundled);
         assert_eq!(
             bundled.len(),
-            7,
-            "四条整机图 + 品牌字标 + **两条引导图**是随包档（品牌图 2026-10-03 进台账；
-             引导图 2026-10-16 进台账）：{bundled:?}"
+            9,
+            "六条整机图 + 品牌字标 + **两条引导图**是随包档（品牌图 2026-10-03 进台账；
+             引导图 2026-10-16 进台账；P2S / X1C 两张 2026-10-30 进台账）：{bundled:?}"
         );
         assert_eq!(count(ArchiveOnly).len(), 0, "没人动过可见性");
         assert_eq!(
             count(Optional).len(),
             12,
-            "33 - 14 进套餐 - 7 随包 = 12 可选（图标 3 + 模型 5 + 没进套餐的 BBS 4）"
+            "35 - 14 进套餐 - 9 随包 = 12 可选（图标 3 + 模型 5 + 没进套餐的 BBS 4）"
         );
 
         // 身份轴筛选：每一档筛出来都恰好是那一档
@@ -1406,9 +1407,9 @@ mod tests {
             .all(|a| a.identity == AssetIdentity::Bundled));
         assert_eq!(
             filtered.assets.len(),
-            7,
-            "按随包身份筛 = 4 张整机图 + 品牌字标 + 2 张引导图（品牌图 2026-10-03 进台账；
-             引导图 2026-10-16 进台账）"
+            9,
+            "按随包身份筛 = 6 张整机图 + 品牌字标 + 2 张引导图（品牌图 2026-10-03 进台账；
+             引导图 2026-10-16 进台账；P2S / X1C 两张 2026-10-30 进台账）"
         );
     }
 

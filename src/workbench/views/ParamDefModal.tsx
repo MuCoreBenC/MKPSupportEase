@@ -787,7 +787,7 @@ export default function ParamDefModal({
             type="button"
             className={`${s.btn} ${s.btnPrimary}`}
             disabled={busy || err !== null}
-            title={err ?? undefined}
+            data-tip={err ?? undefined}
             onClick={() => void save()}
           >
             {busy ? '保存中…' : '确认保存'}

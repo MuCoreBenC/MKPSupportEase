@@ -954,11 +954,7 @@ fn macos_open_default_app_settings(file: &Path) -> Result<String, AppError> {
     有它窗口的那个桌面**，而改默认应用只能走访达这一个宿主 —— 窗口落在访达那个桌面、
     人跟着过去，都是系统那一层定的，不是没开。这一句写在这儿（平台知识在这一侧），
     前端照原样摆，不复述。 */
-    Ok(format!(
-        "已打开「{name}」的「显示简介」—— 在「打开方式」里选好应用，再点右边的「更改全部…」\
-         （不点它只对这一个文件生效）。这窗口由 macOS 开在访达所在的那个桌面 —— \
-         眼前没看到的话，去访达那个桌面找"
-    ))
+    Ok(messages::text("ui.ipc.slicer.509", &[("name", &name)]))
 }
 
 /// 「显示简介」窗口开不出来时的**退路**（作者 2026-10-16 的口径：「如果点了不允许的话，
@@ -979,9 +975,9 @@ fn information_window_failed(file: &Path, why: &str) -> AppError {
         .map(|o| o.status.success())
         .unwrap_or(false);
     let where_it_is = if located {
-        "已经帮你在访达里定位到那份文件".to_string()
+        messages::text("ui.ipc.slicer.510", &[])
     } else {
-        ::postprocess::diag::messages::text(
+        messages::text(
             "ui.ipc.slicer.why_not_located",
             &[("v1", &file.display().to_string())],
         )
@@ -995,19 +991,18 @@ fn information_window_failed(file: &Path, why: &str) -> AppError {
 /// 出错的那句话里必须带着那三步。
 #[cfg(target_os = "macos")]
 fn information_window_failure(why: &str, where_it_is: &str) -> AppError {
-    let steps = "手动来：右键它 →「显示简介」→「打开方式」里选好应用 → 点「更改全部…」\
-                 （不点只对这一个文件生效）";
+    let steps = messages::text("ui.ipc.slicer.511", &[]);
     /* -1743 = errAEEventNotPermitted：用户点了「不允许」，MKP 控制不了访达 */
     if why.contains("-1743") {
         AppError::permission_denied(messages::text(
             "ui.ipc.slicer.153",
-            &[("where_it_is", where_it_is), ("steps", steps)],
+            &[("where_it_is", where_it_is), ("steps", &steps)],
         ))
         .with_detail(why.to_string())
     } else {
         AppError::io(messages::text(
             "ui.ipc.slicer.154",
-            &[("where_it_is", where_it_is), ("steps", steps)],
+            &[("where_it_is", where_it_is), ("steps", &steps)],
         ))
         .with_detail(why.to_string())
     }
@@ -1020,10 +1015,7 @@ fn windows_open_default_app_settings(file: &Path) -> Result<String, AppError> {
         .arg("shell32.dll,OpenAs_RunDLL")
         .arg(file)
         .spawn()
-        .map(|_| {
-            "在「你要如何打开这个文件？」里选好应用，再勾上「始终使用此应用打开 .3mf 文件」"
-                .to_string()
-        })
+        .map(|_| messages::text("ui.ipc.slicer.512", &[]))
         .map_err(|e| {
             AppError::io(messages::text("ui.ipc.slicer.155", &[])).with_detail(e.to_string())
         })
@@ -1323,17 +1315,29 @@ mod tests {
             "已经帮你在访达里定位到那份文件",
         );
         assert_eq!(err.code, crate::error::ErrorCode::PermissionDenied);
-        for want in ["不允许", "显示简介", "打开方式", "更改全部…"] {
+        /* ★ 这几句 2026-10-30 进了文案表（`153` / `511`）⇒ **不再比死一种语言**：
+        语言是进程级活值，测试并行时可能被别的用例切成英文。
+        要求的是"四件事都在话里"，中英哪一种都算过。 */
+        for (zh, en) in [
+            ("不允许", "Do Not Allow"),
+            ("显示简介", "Get Info"),
+            ("打开方式", "Open With"),
+            ("更改全部…", "Change All"),
+        ] {
             assert!(
-                err.message.contains(want),
-                "这句话里没有「{want}」：{}",
+                err.message.contains(zh) || err.message.contains(en),
+                "这句话里没有「{zh}」/ “{en}”：{}",
                 err.message
             );
         }
         /* 别的失败（比如 osascript 起不来）也得给那三步，只是语气没那么具体 */
         let other = information_window_failure("No such file or directory", "没能在访达里定位它");
         assert_eq!(other.code, crate::error::ErrorCode::Io);
-        assert!(other.message.contains("更改全部…"), "{}", other.message);
+        assert!(
+            other.message.contains("更改全部…") || other.message.contains("Change All"),
+            "{}",
+            other.message
+        );
     }
 
     /// 真机冒烟：这台机器怎么答都算过（CI 上没有关联程序 ⇒ `None`），

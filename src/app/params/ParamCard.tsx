@@ -365,7 +365,7 @@ export default function ParamCard({
                 aria-expanded={open}
                 /* 只读态点不动（它是一条真的写值路径：点了 = 把条件参数改成这一支的值） */
                 disabled={!switchable || open || readonly}
-                title={
+                data-tip={
                   !open && switchable && !readonly
                     ? tr('params.card.switchTo', { value: valueLabel })
                     : undefined

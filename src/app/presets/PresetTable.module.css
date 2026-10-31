@@ -40,13 +40,42 @@
 
 /* ---------- 表头 ---------- */
 
+/*
+ * sticky **挂在 `thead` 上**（2026-10-29）。
+ *
+ * 只挂在 `th` 上是**不成立的** —— 两个引擎都实测过（Playwright 的 WebKit 与
+ * Chromium 各跑一遍，量 `thead` / `th` / 滚动容器三条顶边）：
+ *
+ *   · Chromium：`th` 的粘性约束框就是它所在的 `thead`（槽高 = `th` 高 ⇒ 一格都粘不动），
+ *     于是表头**跟着内容一起滚出可视区** —— 工具栏底下直接露出滚上来的行；
+ *   · WebKit：`th` 自己粘住了，可 `thead` 的**行槽**照旧往上走，表头与行因此错位
+ *     整整一行（34px），行被表头吃掉一截。
+ *
+ * 挂在 `thead` 上：槽位与绘制不再分家，两个引擎都停在滚动容器的顶边。
+ * `th` 那一份 sticky **留着兜底**（它相对已粘住的 `thead` 定位，没有可动的空间，
+ * 哪个引擎都不受影响）。
+ */
+.head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 .head th {
   position: sticky;
   top: 0;
   z-index: 1;
   height: 34px;
   padding: 0 clamp(4px, 0.9vw, 10px);
-  border-bottom: 1px solid var(--line);
+  /*
+   * 下边线**不画 border**，画 `inset` 阴影（2026-10-29）。
+   *
+   * `border-collapse: collapse` 下，边框归**表格**画、位置跟着 `thead` 的**行槽**走
+   * —— 它不跟着 sticky 的那一层动。实测：一滚，这条线就留在原处被裁掉，表头底下
+   * 光秃秃的、行直接顶到表头下沿（作者截的"拼接的地方漏出了底下的内容"就是它）。
+   * `inset` 阴影画在 `th` 自己的盒子里，表头粘到哪儿它跟到哪儿。
+   */
+  box-shadow: inset 0 -1px 0 var(--line);
   /*
    * 2026-10-10：**不透明**卡片底。a03 曾把底色去掉（透明），sticky 表头一滚，
    * 底下的行就从表头文字间透出来叠在一起（作者截图）。回归卡片本色：字号照旧
@@ -186,9 +215,42 @@
   width: 60px;
 }
 
+/*
+ * 云端档的时间列表头（2026-10-30）：云端表这一列说的事是「目录发布」，
+ * 英文 "Catalog published" 在 60px 里被截成 "Catalog p"（作者截图）。
+ * 定宽按**最长的那个**留是这一页的老规矩（`.dKey` 92→104 同一个坑）：
+ * 14px 顶格字号量出来 ≈121px + 两侧内衬 ≈ 20 ⇒ 上限 144；
+ * 下限按窄窗 12px 字号 + 内衬 ≈ 120 保底，中间随窗连续（a03 的 clamp 纪律）。
+ * 本地档的「时间 / Time」照旧 60 —— 那一格只有「月-日」。
+ */
+.thTimeCloud {
+  width: clamp(120px, 12vw, 144px);
+}
+
 /* 操作：两颗两字胶囊（使用 / 在用）；列宽含右侧 page-x 对称边距 */
 .thAct {
   width: clamp(86px, 6.6vw, 94px);
+}
+
+/*
+ * **多选那一列**（2026-10-29，批量删除）：固定 34px，只在多选模式下存在。
+ * 它接过名称列的 `--page-x` 左内衬（页面基准线还在同一条），名称列因此让出去
+ * —— 见下面 `[data-selecting]` 那两条。
+ */
+.thCheck,
+.tdCheck {
+  width: 36px;
+}
+
+.head th.thCheck {
+  padding-right: 0;
+  padding-left: var(--page-x);
+  text-align: left;
+}
+
+.row td.tdCheck {
+  padding-right: 0;
+  padding-left: var(--page-x);
 }
 
 /* 操作列右缘与名称列左缘等距（同 --page-x） */
@@ -252,6 +314,26 @@
 /* 菜单正开在这一行上：中性淡底，不染绿 */
 .row[data-active='true'] {
   background: var(--hairline);
+}
+
+/*
+ * **多选模式**（2026-10-29）：整表多一层，只做两件 CSS 的事 ——
+ * ① 名称列让出左内衬给复选框那一列（否则基准线会右移 20px，两行的字对不齐）；
+ * ② 行上给个手型（点行 = 勾选，不再是"展开详情"）。
+ */
+.table[data-selecting='true'] .head th.thName,
+.table[data-selecting='true'] .row td.name {
+  padding-left: clamp(4px, 0.9vw, 10px);
+}
+
+.table[data-selecting='true'] .row {
+  cursor: pointer;
+}
+
+/* 勾上的那一行：整行一层淡绿（与"正在生效"的绿字不同族，不抢那个语义） */
+.row[data-selected='true'],
+.row[data-selected='true']:hover {
+  background: var(--accent-soft);
 }
 
 /* 聚焦不另画圈：行开合看内容就够了 */
@@ -328,6 +410,21 @@
 
 .localState[data-state='stale'] {
   color: var(--warn);
+}
+
+/*
+ * 行首那枚结论字**可以缩、可以省略**（2026-10-29 作者截图）：它原来
+ * `flex-shrink: 0` + `nowrap`，一句长话（「无法比较：这份来自 …，当前取的是 …」）
+ * 会把同一行里的**文件名挤到 0 宽**，自己再冲出名称列压到机型格上 ——
+ * 那一行看起来就只剩半句没头没尾的话。现在它让位给文件名：
+ * 最多占半行，放不下就省略号（完整结论在详情里）。
+ */
+.localState {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /*
@@ -480,9 +577,14 @@
 .useBtn {
   /* `::after` 的命中区靠它定位 */
   position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  /*
+   * ★ 2026-10-29 **两档同宽**（作者：「use 和 in use 导致按钮宽度不一样，我有强迫症」）：
+   *   改 `inline-grid` 之后，里面那两段字（真字 + `visibility:hidden` 的「在用」副本）
+   *   叠在同一个网格格里，宽度 = **两档里更长的那个** —— 中文两字本来同宽，英文
+   *   `In use` 比 `Use` 长就靠它补齐。**不写死 px**：换语种不用再改样式。
+   */
+  display: inline-grid;
+  place-items: center;
   /*
    * ★ 2026-10-10 第四轮：**去掉 64px 定宽，回到 `.actBtn` 那一档尺码**
    *   （作者：小一点，就像那个复制的一样）。
@@ -527,6 +629,15 @@
   position: absolute;
   inset: -4px;
   border-radius: 999px;
+}
+
+/* 两档同宽的隐形副本（见上面 `.useBtn` 那段注释） */
+.useBtn > span {
+  grid-area: 1 / 1;
+}
+
+.useGhost {
+  visibility: hidden;
 }
 
 /* 悬停：底色提亮一档（平面：不浮、不凹，几何与阴影都不动） */
@@ -589,6 +700,21 @@
   transition:
     background 0.18s ease,
     color 0.18s ease;
+  /* 进行中那圈图标要绝对居中盖在字上（见 `.actBtn[data-busy]`） */
+  position: relative;
+}
+
+/* 字本身：进行中只藏起来占位，宽度因此一个字都不变 */
+.actLabel {
+  display: inline-block;
+}
+
+/* 进行中的那圈（绝对居中）。转不转由 `BusySpin` 用 WAAPI 定 */
+.actSpin {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
 }
 
 .actBtn:hover {
@@ -608,6 +734,25 @@
   background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
+}
+
+/*
+ * **进行中 ≠ 不可用**（2026-10-29 作者：「我点了下载之后它变成了灰色……要那种下载中的感觉」）。
+ * `:disabled` 那一档是"这颗现在不该点"的浅灰；正在下的那颗留在**实心**那一档。
+ *
+ * ★ 字**不换**（作者第二轮：「不希望那个字变多了，把按钮撑开了」+「用图标吧」）：
+ *   字只 `visibility: hidden` 留着占宽，一圈图标绝对居中盖上去 ——
+ *   宽度与空闲时一模一样，中文两字 / 英文 "Download" / 日文都不会撑列。
+ *
+ * 必须写在 `:disabled` 之后：同为 0,2,0，后写的赢。
+ */
+.actBtn[data-busy] {
+  background: var(--text-2);
+  color: var(--bg-1);
+  cursor: progress;
+}
+.actBtn[data-busy] .actLabel {
+  visibility: hidden;
 }
 
 /* 已生效 / 已下载：灰字，不是按钮 */
@@ -790,9 +935,11 @@
  * 前缀与标准成对写，理由见 `global.css` 的"拖选（selection）的划分"。
  */
 .detailCard .dRow,
-.detailCard .dGroup,
-.detailCard .dCol,
-.detailCard .dGrid,
+.detailCard .dSec,
+.detailCard .dBody,
+.detailCard .dCells,
+.detailCard .dLineageBody,
+.detailCard .dFoot,
 .detailCard .dMain,
 .detailCard .dHead {
   user-select: none;
@@ -812,14 +959,19 @@
 }
 
 /*
- * ---------- 展开详情（2026-10-10 第八轮：卡头 + 两栏 + 展示行 + 卡底编辑带） ----------
+ * ---------- 展开详情（2026-10-10 第八轮；2026-10-29 第十五轮改分组两列） ----------
  *
  *   ┌ [icon] 本地 A1 mini 涂胶…toml  在用 · 2.0 KB · 修改于 …   [收起] ┐  ← 卡头（.dHead）
- *   ├ 基本信息                     │ 快捷操作                ┤   ← 主体两栏（.dGrid）
- *   │ 版本 / 来源 / 基于            │ [归档…] [看正文] [编辑]  │
+ *   ├ ① 基本信息（两列）                                                 │
+ *   │   版本 / 更新状态   来源 / 来源预设   云端发布时刻 / 配方版本时间   │  ← .dBody > .dSec
+ *   ├ ② 版本判定（两列，一致就合并）                                     │     > .dCells >
+ *   │   发布线 / SHA-256 / 判定                                          │       .dRow（+ .dCellWide）
+ *   ├ ③ 文件信息（两列）                                                 │
+ *   ├ ④ 血统记录（默认收起 · 共 N 项）                                   │   ← .dLineage（<details>）
  *   │ 备注 空着 = 副标题留空                        [编辑]     │   ← .editrows 展示行
  *   │ 归属 机型 A1_MINI · 预设类型 FAST             [编辑]     │
  *   ├────────────────────────────────────────────────────────┤
+ *   │                          [归档…] [看正文] [修改参数]     │   ← 卡底操作带（.dFoot）
  *   │ 备注 […………………………]        [恢复默认] [取消] [保存]      │   ← 卡底编辑带（.dBand，可折）
  *   └────────────────────────────────────────────────────────┘
  *
@@ -832,41 +984,91 @@
  *   3. 无边框、轻影子、不拿线分区照旧（第六轮的纪律：悬浮感靠层次，不靠装饰）。
  */
 
-/* 卡头：图标 + 文件名（左），三个小事实 + 一颗安静的「收起」（右）。窄窗整行折 */
+/*
+ * 卡头：图标 + 文件名（左），三个小事实 + 一颗安静的「收起」（右）。
+ *
+ * ★ 2026-10-30（作者：「这个名字有点长呢，已经超过了他名字。要做到自动换行呀」）：
+ *   原来是三个平级 flex 项 + `flex-wrap`，名字又写死 `nowrap + 省略号` —— 名字顶满
+ *   一行，右边那串小事实挤不下，「收起」就被折到第二行**孤零零挂在左边**（截图里那样）。
+ *
+ *   现在是 grid：名字那格 `minmax(0, 1fr)` 吃剩下的宽度、**自己折行**（长串也断），
+ *   小事实与「收起」各占一格贴在右上，**永远不掉行**。
+ *   `baseline` 对齐：名字折成两行时，右边两项跟着**第一行**的基线，不会浮到中间去。
+ */
 .dHead {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  /*
+   * ★ 2026-10-30 第二轮（作者截图：卡头名字竖着一字一行）：
+   *   中间那格原来是 `auto` —— `auto` 轨道按「整条小事实不折行」的 max-content
+   *   优先拿地，结论那句英文一长（"Up to date (a new release shipped, …)"），
+   *   `minmax(0, 1fr)` 的名字格没有任何下限，被压到接近 0 宽，名字靠
+   *   `overflow-wrap: anywhere` 逐字竖排。
+   *
+   * ★ 2026-10-31 第三轮（作者圈图：「这都啥呀，没有做到视觉对齐」→「这个应该两行就可以的呀」）
+   *   —— 真凶是**页面缩放**：作者窗口开着 ~160% 的 WKWebView 页面缩放，CSS 视口只剩
+   *   ~630px（从两个已知元素反推坐实：搜索框 285 图像 px = clamp 上限 178 × 1.6、
+   *   「目录发布」列 192 = 120 × 1.6）。在 630px 下，第二轮的 60% / 第三轮的
+   *   calc(100% - 240px) / 164px 下限给「名字 + 收起 + 沟」留得太多，小事实只剩
+   *   ~320px，连状态句（实测 ~358px）都放不下，只能把那一项折了内部连出三行。
+   *   现在：`minmax(104px, 1fr) auto auto` —— 名字格 104px 下限（长名字照旧自己折），
+   *   中列 `auto`：630px 视口下状态句独占一行（365px 槽）、其余事实第二行右对齐
+   *   = 作者要的两行；窗宽上来（≥ ~940）整条回到一行。断行永远落在
+   *   「结论 · 在用 / 大小 / 云端更新」这些**整项**之间，绝不折一项的内部。
+   *
+   * ★ 竖向对齐（同一张圈图）：`baseline` 在这里**不成立** —— 名字格的基线取的是
+   *   它第一个 flex 子项的基线，而那是**图标**（SVG 没有文字基线，取盒子底缘），
+   *   于是 grid 拿"图标底缘"去对小事实的文字基线，名字与小事实首行错开 3.5~4px
+   *   （WebKit / Chromium 实测一致）。改 `start` + 小事实与「收起」的行高对齐
+   *   名字（1.45，见下）：首行盒顶对齐 ⇒ 基线差 <1px，两引擎实测 Δ=0。
+   */
+  grid-template-columns: minmax(104px, 1fr) auto auto;
+  align-items: start;
   gap: 4px 8px;
+  min-width: 0;
+}
+
+/* 图标 + 名字：图标钉在第一行的顶上（名字折行时它不跟着居中） */
+.dHeadTitle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
   min-width: 0;
 }
 
 .dHeadIcon {
   flex-shrink: 0;
+  margin-top: 2px;
   color: var(--text-3);
 }
 
 /*
  * 卡头的名字：**文件名**（2026-10-10 第七轮从「文件详情」写回来的）——
  * 作者看过第六轮的实际效果后定：名字住进卡片，列表行在展开时把名称列隐去
- * （见 `.nameLine` / `.path` 的 `data-hidden`）。长名照旧省略号。
+ * （见 `.nameLine` / `.path` 的 `data-hidden`）。
+ *
+ * ★ 2026-10-30 改判：**不再省略号**，改自动换行（作者：「要做到自动换行呀」）——
+ *   复制件那种 `xxx copy copy copy.toml` 的名字，截断了就认不出是哪一份。
+ *   `overflow-wrap: anywhere`：没有空格的长串（`A1_MINI-fastv3.3copy.toml`）也断得开。
  */
 .dHeadName {
   min-width: 0;
-  overflow: hidden;
   font-size: var(--fs-body);
   font-weight: 600;
   color: var(--text-1);
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .dHeadMeta {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: baseline;
+  justify-content: flex-end;
   gap: 8px;
-  margin-left: auto;
   font-size: var(--fs-label);
+  /* 行高与 `.dHeadName` 同一个 1.45：`.dHead` 用 start 对齐，首行盒顶一齐，
+     基线差就只剩字号的半行距（<1px）—— 那条 `baseline` 的图标坑见上面那段 */
+  line-height: 1.45;
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
@@ -883,6 +1085,8 @@
   background: transparent;
   font: inherit;
   font-size: var(--fs-label);
+  /* 与 `.dHeadMeta` 同一条：start 对齐下首行盒顶跟名字一齐（见 `.dHead` 那段） */
+  line-height: 1.45;
   color: var(--text-3);
   cursor: pointer;
 }
@@ -892,46 +1096,180 @@
 }
 
 /*
- * 主体两栏：左「基本信息」、右「快捷操作」；窄卡两栏自己折成上下（flex-wrap）。
- * 卡头的内线撤掉后，这里的间距就是两段之间唯一的界。
+ * ---------- 主体：纵向分组 × 组内两列（2026-10-29 第十五轮） ----------
+ *
+ * 作者看过真机后改判（原话）：「问题不是单纯的『行距太大』，而是所有信息都按同一种
+ * 纵向表单排列了。基本信息、版本判定、文件路径、血统记录本来重要程度不同，现在却
+ * 全部从上往下排，导致一份预设占掉几乎整个屏幕。」
+ *
+ * 于是「左栏基本信息 + 右栏快捷操作」这套撤了：**整卡宽度交给四组**（基本信息 /
+ * 版本判定 / 文件信息 / 血统记录），组内两列。纪律仍按第六轮那条：
+ *   · 组与组之间**只有间距** —— 不加分隔线、不加底纹、不往组里再套小卡片
+ *     （作者三次点名不要那种"很重的容器感"）；
+ *   · 组标题是一行灰色小字（+ 一枚线性图标），层次靠它，不靠容器；
+ *   · 键仍是 `.dKey` 那一条 104px 刻度 ⇒ 左右两格的值在竖直方向对齐，读起来像表。
+ *
+ * 两列用 `grid` 而不是 `flex-wrap`：`minmax(0, 1fr)` 让两列**永远等宽**（值的长短
+ * 拽不动列宽），"这一格占满一行"也只要一句 `grid-column: 1 / -1`（`.dCellWide`），
+ * 不用靠 `flex-wrap` 去猜折在哪。
  */
-.dGrid {
+.dBody {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: 10px 32px;
-  margin-top: 14px;
+  flex-direction: column;
+  gap: 13px;
+  margin-top: 13px;
 }
 
-.dCol {
+/*
+ * ---------- 双列（2026-10-30 第十六轮：结构重构，不是间距调整）----------
+ *
+ * 作者：「核心信息区改为明确的双列布局 —— 左列组织版本信息、来源及版本判定；
+ * 右列组织更新状态、云端发布时间及文件时间」「两列采用稳定的标签和值对齐方式，
+ * 避免标签长度影响值的位置」。
+ *
+ *   .dCols  双列轨道：左列宽度 = `--dSplit`（**量出来的**，见下）
+ *   .dColR  中缝一条 `--line` 竖线 —— 全卡**唯二**的结构线之一（另一条是卡底上方）
+ *   .dKvs   组内的键列：单列纵向，键仍是 `.dKey` 那条 104px 刻度 ⇒ 值左对齐成一条线
+ *
+ * ★ 2026-10-30 第二轮（作者看**窄窗**截图后）：「左右分布能不能灵活一点，有 10% 或
+ *   20% 的容差……主要还是看文字 —— 这个线再往左一点，那右边那个三行就能变两行了」。
+ *   于是中线不再是 `1.15fr / 1fr` 这个定值，改成 `--dSplit` 由 `splitFit.ts` 量出来：
+ *   在正中 ±10% 里挑"更高的那列最矮"的那条（顺便让两列行数尽量相等）。
+ *
+ *   60px = 中缝（30 gap + 30 右列左内衬）**不参与配比** —— 所以 `--dSplit: 0.5` 时
+ *   那条竖线正好落在卡片正中；往左往右都只动"文字能用的那一段"。
+ */
+.dCols {
+  --dSplit: 0.5;
+
+  display: grid;
+  grid-template-columns:
+    minmax(0, calc((100% - 60px) * var(--dSplit)))
+    minmax(0, 1fr);
+  gap: 0 30px;
+  min-width: 0;
+}
+
+.dCol,
+.dColR {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.dColR {
+  padding-left: 30px;
+  border-left: 1px solid var(--line);
+}
+
+.dKvs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 文件位置：路径独占一行，允许换行（「在访达中显示」在组标题那一行最右） */
+.dPathRow {
   display: flex;
   min-width: 0;
+}
+
+.dPath {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * 「在访达中显示 / 在文件夹中显示」（组标题那一行最右）。
+ *
+ * ★ 2026-10-30（作者圈着它：「打开文件夹这一个它有点绿色颜色吧，或者加一个倾斜向上的
+ *   箭头」）：给了两样 —— **绿色**说明"这是个动作"（同组标题是灰的，它得跳出来），
+ *   **↗** 说明"这一下把人送到系统窗口里去"（站内那种原地展开的链接不长这样）。
+ */
+.dReveal {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--accent);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* hover 只加下划线：深色档的 `--accent-deep` 比 `--accent` 更暗，换色反而像"失效了" */
+.dReveal:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/*
+ * ★ 窄窗**不再降单列**（2026-10-30 第十七轮，作者：「我希望窄窗口尽量也能左右布局」）。
+ *   上一版 880px 以下折成一列，结果整卡反而更高；两列在窄窗里每格窄一点，
+ *   但长值照旧 `overflow-wrap: anywhere`，比单列竖排矮得多。
+ */
+
+.dSec {
+  display: flex;
   flex-direction: column;
   gap: 7px;
+  min-width: 0;
 }
 
-/* 第一栏（基本信息）吃掉余宽；后面那栏（快捷操作）按内容宽站右边 */
-.dGrid > .dCol:first-child {
-  flex: 1 1 260px;
-}
-
-.dColLabel {
+/* 组标题：灰色小字 + 一枚 13px 线性图标。没有底纹、没有边框、没有上边线 */
+.dSecHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-label);
   color: var(--text-3);
 }
 
-/* 快捷操作那一栏里的按钮：横向排、放不下自己折 */
+.dSecIcon {
+  flex-shrink: 0;
+}
+
+/* 组内两列 —— 行与行之间 6px（比上一版 7px 略紧，靠"组"分层次，不靠行距） */
+.dCells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 28px;
+  min-width: 0;
+}
+
+/*
+ * 独占一行的那一格（分支名 / 本机路径 / 原文镜像 / 「云端新版发布」那一句）。
+ * 作者原话：「长分支名允许占满一行，不要为了两列而把它挤得换行」——
+ * 跨列是**写死的意图**，不是让浏览器按内容去猜。
+ */
+.dCellWide {
+  grid-column: 1 / -1;
+}
+
+/*
+ * 窄窗（`minWidth` 600 那一档）降成一列：两列硬挤会把长值折成三行，比一列还高。
+ * 用 `@media` 而不是 `@container` —— 这一屏的卡宽本来就跟着窗口走，
+ * 而容器查询的区间语法在这版 WKWebView 上有过"浏览器对、真机不生效"的前科。
+ */
+@media (width <= 720px) {
+  .dCells {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 卡底操作带里的按钮：横向排、放不下自己折 */
 .dActs {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-/* 概览组：key/val 行 */
-.dGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
 }
 
 .dRow {
@@ -945,12 +1283,16 @@
 
 /*
  * 键宽**定死、且不许换行**（2026-10-27 作者："字段不要换行，就一行显示完整名字"）：
- * 56px 放不下「本地版本时间」那种六字键，一换行就把那一行撑成两倍高，
- * 上下间距看着忽宽忽窄。92px = 七字档（当前最长一行），照旧左对齐。
+ * 56px 放不下「配方版本时间」那种六字键，一换行就把那一行撑成两倍高，
+ * 上下间距看着忽宽忽窄。照旧左对齐。
+ *
+ * 92 → 104px（2026-10-29）：新加的「本地 / 云端 SHA-256」中文量出来正好 92px（顶格），
+ * 英文 "Cloud SHA-256" 是 102px —— 定宽定死要按**最长的那个**留，不然英文界面那一列
+ * 会压到值上（这就是上一轮「当前源地址（当前设置）」那次事故的同一个坑）。
  */
 .dKey {
   flex-shrink: 0;
-  width: 92px;
+  width: 104px;
   color: var(--text-3);
   white-space: nowrap;
 }
@@ -969,13 +1311,24 @@
   text-overflow: ellipsis;
 }
 
-/* 概览内可定位链接：安静、深色、不用绿 */
+/*
+ * 概览内可定位链接：安静、深色、不用绿。
+ *
+ * ★ 2026-10-30（作者圈图：「来源」那一行的长文件名**压到右列**上去了）：
+ *   `<button>` 的 UA 默认是 `white-space: nowrap` —— `.dVal` 上那句
+ *   `overflow-wrap: anywhere` 继承下来也**折不动**，于是整串按一行画出去，
+ *   越过中缝盖住右边的发布时间。按钮这里必须显式把 nowrap 撤掉。
+ */
 .dLink {
+  max-width: 100%;
   padding: 0;
   border: 0;
   background: transparent;
   font: inherit;
   color: var(--text-1);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
   text-decoration: underline;
   text-decoration-color: var(--line-strong);
   text-underline-offset: 3px;
@@ -1015,6 +1368,181 @@
   line-height: 1.6;
   color: var(--text-2);
 }
+
+/* 来源那一格后面的小字解释（未知 / 分支未记录） */
+.dWhyInline {
+  margin-left: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 判定那一行括注的**原始枚举**（2026-10-29）：人话在前、机器值在后。
+ * 用等宽字 + 灰一档 —— 它是给排查用的注解，不该跟人话抢同一条视线。
+ */
+.dVerdictRaw {
+  margin-left: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* 判定那一格的结论（第十七轮：图标与原始枚举都省了，只留人话） */
+.dVerdictText {
+  font-weight: 500;
+}
+
+/* 目录自相矛盾那一档：报警色 */
+.dWarn {
+  color: var(--danger, #d92d20);
+}
+
+/* 状态文字后面那颗动作（「有新版本」→ 绿色「更新」） */
+.dInlineAction {
+  margin-left: 10px;
+  vertical-align: baseline;
+}
+
+/* 「云端新版发布」后面那枚来源标记（`Gitee · main`） */
+.dSourceTag {
+  margin-left: 8px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 「更多」里的技术值：等宽、可换行（长 SHA / 身份不撑破卡片） */
+.dMono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 血统记录：默认收起的原始证据（2026-10-29 第十五轮） ---------- */
+
+/*
+ * `# based_on / # based_on_catalog …` 那一串原文：排查时才要看的东西。
+ * 默认只留一行「血统记录 · 共 N 项」（作者：「这里不是删除信息，而是让用户先看到结论，
+ * 需要追查时再展开原始证据」）。
+ *
+ * 原生 `<details>`、**不做开合动画** —— 这一块一天点不了两次，WKWebView 上任何
+ * 高度动画都可能有代价（见 `.dBand` 那段的教训），稳比顺重要。
+ */
+.dLineage {
+  min-width: 0;
+}
+
+.dLineage > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+  /* 自画的三角代替原生那颗：`display: flex` 的 summary 上，原生 marker 根本不画 */
+  list-style: none;
+}
+
+.dLineage > summary::-webkit-details-marker {
+  display: none;
+}
+
+.dLineage > summary::before {
+  content: '▸';
+  font-size: 9px;
+  line-height: 1;
+}
+
+.dLineage[open] > summary::before {
+  content: '▾';
+}
+
+.dLineage > summary:hover {
+  color: var(--text-1);
+}
+
+.dLineageBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+/* 那一串原文：等宽、可换行（长 SHA 不撑破卡片）、灰一档 */
+.dLineageMono {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-2);
+}
+
+/*
+ * ---------- 「更多详情」折叠行（第十六轮）----------
+ *
+ * 原文镜像 / 发布线 / 两边 SHA 都退到这里 —— 它们是排查时才看的数，摆在主区
+ * 会把「文件位置」挤成半宽。与血统记录是两条**独立**的折叠行（各带自己的三角），
+ * 不做开合动画（同 `.dLineage` 那条理由）。
+ */
+.dMore2 {
+  min-width: 0;
+}
+
+.dMore2 > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  cursor: pointer;
+  list-style: none;
+}
+
+.dMore2 > summary::-webkit-details-marker {
+  display: none;
+}
+
+/*
+ * 那颗箭头用共享的 `chevron`（默认朝右 ▸）：收起 = 原样，展开 = 转 90° 朝下。
+ * 与 `.dLineage` 的 `▸/▾` 同一套语义（那颗是伪元素画的字，这颗是图标 —— 图标集
+ * 统一走 `components/Icon`，这里不再加第二颗自画三角）。
+ */
+.dMoreChev {
+  flex: none;
+}
+
+.dMore2[open] .dMoreChev {
+  transform: rotate(90deg);
+}
+
+.dMoreHint {
+  color: var(--text-3);
+}
+
+.dMore2 > summary:hover {
+  color: var(--text-1);
+}
+
+/* 展开后的技术值：两列（与主体双列同一条 28px 沟），长 SHA / 长路径不撑破卡 */
+.dMoreGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 28px;
+  margin-top: 8px;
+}
+
+/*
+ * 「本机留档」**整行**（第十八轮 2026-10-30）：它是一条长路径，半栏放不下；
+ * 其余四条照旧两两成行（左云端 / 右本地）。
+ */
+.dMoreFull {
+  grid-column: 1 / -1;
+}
+
+/*
+ * ★ **窄窗也不降单列**（第十八轮 2026-10-30 作者：「窄一点应该也能左右显示」）——
+ * 原来 640px 以下改成一列，结果窄窗里这一组被拉成一条长条、白白多出四行高度；
+ * 两列的值（发布线、短 SHA）本来就短，挤一点也读得出来，矮比宽要紧。
+ */
 
 /*
  * 备注 / 归属的**展示行**（2026-10-10 第八轮）：就是两行 `dRow`
@@ -1159,14 +1687,24 @@
 
 .bandHead > button {
   flex-shrink: 0;
+  /* 三颗钮（恢复默认 / 取消 / 保存）跟着输入框**竖直居中**（作者 2026-10-30 定）；
+     输入框已封顶 240px（见 `.remarkArea`），再长也不会把钮吊出屏。 */
   align-self: center;
 }
 
-/* 备注输入：自增高 textarea（高度由组件里的 fit() 同步 —— 内容与宽度都盯） */
+/*
+ * 备注输入：自增高 textarea（高度由组件里的 fit() 同步 —— 内容与宽度都盯）。
+ * ★ 第十八轮去而复返：中间改成过固定四行，作者立刻报「到一定字数输入没反应、
+ *   回车才能继续」—— 固定高 + 框内滚动时，**合成中的文字一超过框高，WebKit 的
+ *   光标不跟着滚**，字进去了看不见、合成卡住。自增高没有"框内滚"这一段，
+ *   光标永远贴着最后一行；封顶 240px 之内的排版开销也已被
+ *   `.pageSlot[data-hidden]` 的 content-visibility 那刀摊薄。
+ */
 .remarkArea {
   flex: 1;
   min-width: 0;
   min-height: 30px;
+  max-height: 240px;
   padding: 5px 12px;
   border: 1px solid var(--line-strong);
   border-radius: 8px;
@@ -1176,7 +1714,7 @@
   line-height: 1.5;
   color: var(--text-1);
   resize: none;
-  overflow-y: hidden;
+  overflow-y: auto;
 }
 
 .remarkArea:focus {
@@ -1271,6 +1809,7 @@
   font: inherit;
   font-size: var(--fs-label);
   cursor: pointer;
+  position: relative;
 }
 
 .updateBtn:hover:not(:disabled) {
@@ -1281,6 +1820,16 @@
   background: var(--hover-1);
   color: var(--text-3);
   cursor: default;
+}
+
+/* 同 `.actBtn[data-busy]`：进行中保持实心，只是深一档 */
+.updateBtn[data-busy] {
+  background: var(--accent-deep);
+  color: #fff;
+  cursor: progress;
+}
+.updateBtn[data-busy] .actLabel {
+  visibility: hidden;
 }
 
 /* 卡底安静的描边小按钮 */
@@ -1307,7 +1856,67 @@
   cursor: default;
 }
 
-/* （原「卡底操作区」`.dFoot` 已退役 —— 2026-10-10 那三颗按钮搬进右栏「快捷操作」） */
+/*
+ * 卡底操作带（2026-10-29 第十五轮回来）。
+ *
+ * 那三颗 2026-10-10 搬进右栏「快捷操作」，把基本信息挤成半宽 —— 而两列网格要的正是
+ * **整卡宽度**，于是它们回到卡底横排（作者：「快捷操作沉到卡底一条带」）。
+ *
+ * 顶线是全卡**唯一**一条线（与 `.dBandPane` 同一条 `--line`）：不画它，按钮就浮在
+ * 最后一组字段下面，读起来像"多出来的一行字"；画多了又回到作者嫌弃的"重容器感"。
+ */
+/*
+ * ---------- 卡底那条带（第十六轮重写）----------
+ *
+ * 左半 = 次级信息（备注 / 归属，各占一格、后面跟一颗「编辑」小钮）；
+ * 右半 = 动作，**只有一颗带底色**（「修改参数」），其余白底幽灵钮。
+ * 顶线是它与信息主体的分界 —— 全卡第二条结构线（第一条是双列中缝）。
+ * 作者：「底部操作区与信息主体在结构上明确分离」「不要为了填满空间而拉长按钮」。
+ */
+.dFoot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  /* 与 `.dMain` 同一条 16px 横内衬：它住在 `.dMain` 外面，自己得带上 */
+  gap: 8px 14px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--line);
+}
+
+/* 一条「键 + 值 + 编辑」：备注 / 归属各一条，横着排在这一带里，不再各占一大行 */
+.dFootItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dFootKey {
+  flex: none;
+  font-size: var(--fs-body);
+  color: var(--text-3);
+}
+
+/* 把动作推到最右（作者：「『修改参数』作为主要操作，位置稳定」） */
+.dFootSpacer {
+  flex: 1 1 auto;
+}
+
+/* 这一条带上唯一带底色的按钮 */
+.dPrimary {
+  padding: 5px 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm, 8px);
+  background: var(--accent);
+  color: #fff;
+  font: inherit;
+  font-size: var(--fs-body);
+  cursor: pointer;
+}
+
+.dPrimary:hover {
+  filter: brightness(1.06);
+}
 
 /* ---------- 空态 ---------- */
 

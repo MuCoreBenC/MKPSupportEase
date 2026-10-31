@@ -398,14 +398,14 @@ const P1S_ZONES: { points: [number, number][] }[] = [
 const MACHINE_VIEWS: {
   id: string; display: string; name: string; brand: string;
   defaultBundle: string | null; externalAliases: string[]; image: string | null;
-  icon: string | null; hasDimensions: boolean;
+  icon: string | null; enabled: boolean; hasDimensions: boolean;
   dimensions: typeof A1_DIMENSIONS | null;
   zoneCount: number; zones: { points: [number, number][] }[]; file: string;
   versions: { id: string; name: string; recommendedBundle: string | null; tag: string | null; description: string | null; image: string | null; hasRecipe: boolean }[];
 }[] = [
   {
     id: 'A1', display: 'A1', name: 'A1', brand: 'Bambu Lab',
-    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon',
+    defaultBundle: 'A1_default', externalAliases: ['A1C'], image: null, icon: 'a1-icon', enabled: true,
     hasDimensions: true, dimensions: A1_DIMENSIONS, zoneCount: 0, zones: [], file: 'A1.toml',
     versions: [
       // `image` = 这一版专属的外观图（资产 id）。`null` = 回落机型图（第三刀的默认）
@@ -416,7 +416,7 @@ const MACHINE_VIEWS: {
   {
     // 第二台（有禁区）—— 禁区编辑器与「移到品牌…」都要有第二条才量得出来
     id: 'P1S', display: 'P1S', name: 'P1S', brand: 'Bambu Lab',
-    defaultBundle: 'P1S_default', externalAliases: ['P1'], image: 'p1s-image', icon: null,
+    defaultBundle: 'P1S_default', externalAliases: ['P1'], image: 'p1s-image', icon: null, enabled: true,
     hasDimensions: true, dimensions: P1S_DIMENSIONS, zoneCount: 2, zones: P1S_ZONES, file: 'P1S.toml',
     versions: [
       { id: 'STANDARD', name: '标准版', recommendedBundle: 'P1S_default', tag: '推荐', description: null, image: null, hasRecipe: true },
@@ -425,7 +425,7 @@ const MACHINE_VIEWS: {
   {
     // 占位机型（没尺寸）—— 「尺寸卡显示说明而不是报错」那一档
     id: 'A2L', display: 'A2L', name: 'A2L', brand: 'Bambu Lab',
-    defaultBundle: null, externalAliases: [], image: null, icon: null,
+    defaultBundle: null, externalAliases: [], image: null, icon: null, enabled: true,
     hasDimensions: false, dimensions: null, zoneCount: 0, zones: [], file: 'A2L.toml',
     versions: [
       { id: 'STANDARD', name: '标准版', recommendedBundle: null, tag: null, description: null, image: null, hasRecipe: false },

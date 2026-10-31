@@ -6,19 +6,20 @@
  */
 
 import { createPortal } from 'react-dom'
-import { useT } from '../../i18n'
+import { useT, useText } from '../../i18n'
 import { dismiss, useNotices, type Notice } from './notify'
 import s from './NotifyHost.module.css'
 
 function NoticeCard({ n }: { n: Notice }) {
   const tr = useT()
+  const say = useText()
   return (
     <div className={s.card} data-kind={n.kind} role="status" aria-live="polite">
       <span className={s.dot} aria-hidden="true" />
 
       <div className={s.body}>
-        <div className={s.title}>{n.title}</div>
-        {n.text !== undefined && <div className={s.text}>{n.text}</div>}
+        <div className={s.title}>{say(n.title)}</div>
+        {n.text !== undefined && <div className={s.text}>{say(n.text)}</div>}
 
         {n.progress !== undefined && (
           <div className={s.progressTrack}>
@@ -32,15 +33,15 @@ function NoticeCard({ n }: { n: Notice }) {
 
         {n.actions !== undefined && n.actions.length > 0 && (
           <div className={s.actions}>
-            {n.actions.map((a) => (
+            {n.actions.map((a, i) => (
               <button
-                key={a.label}
+                key={i}
                 type="button"
                 className={a.primary === true ? `${s.btn} ${s.btnPrimary}` : s.btn}
                 disabled={a.disabled === true}
                 onClick={a.onClick}
               >
-                {a.label}
+                {say(a.label)}
               </button>
             ))}
           </div>

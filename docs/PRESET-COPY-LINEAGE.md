@@ -1,5 +1,14 @@
 # 预设的复制与身世（另存放开 · 机型/版本继承）
 
+> **2026-10-29 改判（本文件的大部分口径已退役）**：来源不再用「复制自 X」表达。
+> 下载落成的本地文件 = `来源：云端 · <分支>`；用户自己「另存为一份新的」才记
+> `来源：本地 · <母本文件名>`。基线（baseline）与内部拷贝**不进入任何用户可见文案**。
+> 这份文件只保留历史设计价值；现行唯一实现在
+> `runtime/source_ledger.rs`（`LocalProvenance`）、`runtime/local.rs::based_on` 与
+> `src/app/presets/presetTree.ts::originCellOf / updateStatusOf`。
+> 云端原文的存储也已改判：`content/<sha>.toml` 唯一一份 + `run/delivery-index.json`
+> 目录索引，**不再有 `delivery/<path>` 副本**；删除进 `recovery/`（2026-10-29）。
+
 - 日期：2026-10-06
 - 性质：**设计稿**（部分已被 2026-10-08 改判取代，见下）。作者定方向，本文把它写成可实施的规格。
 - 上一批：删除已全面放开（同分支提交，见 `PRESET-TIME-SEMANTICS.md` §6 与 `PRESET-EVENT-TIME-MODEL.md`）。

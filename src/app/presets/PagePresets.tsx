@@ -126,7 +126,7 @@
  *                            **盘上那份直到点保存才被碰** —— 判据逐字节盯着；
  *                            参数页未保存的改动**不进来**（两条草稿分开存，2026-10-10））
  *   **重命名 / 删除**（本地文件） `api.renameLocalPreset()` / `deleteLocalPreset()` 真（第十层：只动名字，
- *                            字节一个不动；使用中指针与该份草稿跟着改名。删=真删，没有垃圾桶、没有归档；
+ *                            字节一个不动；使用中指针与该份草稿跟着改名。删=进回收站，可恢复；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **复制**（本地文件）      `api.copyLocalPreset()`                        真（第十一层：本地文件 → 本地文件，
  *                            按字节复制、血统原样带过去；名字由程序起 `<原名> copy.toml`
@@ -153,8 +153,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
-import { useT } from '../../i18n'
-import type { StringKey, Tr, Vars } from '../../i18n'
+import { msg, useT, useText } from '../../i18n'
+import type { StringKey, Text, Tr, Vars } from '../../i18n'
 import type {
   ArchivedFile,
   LocalPresetFile,
@@ -193,7 +193,11 @@ import { FieldLayer } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { Density } from '../../hooks/useDensity'
-import { detectPlatform } from '../../hooks/usePlatform'
+import {
+  comboOf,
+  FOOT_MENU_HINT_KEY,
+  REVEAL_LABEL_KEY,
+} from '../../hooks/usePlatform'
 import Icon from '../shell/icons'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
@@ -217,10 +221,6 @@ import {
   ASSET_USE_TEXT,
   /* 撞名那一格的文案（a04：不覆盖、不静默，问用户要不要导入 + 自动改名） */
   IMPORT_TAKEN_TEXT,
-  /* MKP 云端行三态的按钮词与说明（与操作列那颗按钮同一条出处，2026-10-09） */
-  CLOUD_LOCAL_ACTION,
-  CLOUD_LOCAL_TEXT,
-  CLOUD_LOCAL_WHY,
   EDIT_TEXT,
   HEAD_LOCKED,
   LOCAL_COPY,
@@ -245,6 +245,8 @@ import {
   sizeTextOf,
   /* 重命名框：主名与后缀拆开（后缀灰色贴在行尾、不可改） */
   splitFileName,
+  /* 更新状态的唯一出口：按钮显示 / 下载还是更新，都读它 */
+  updateStatusOf,
 } from './presetTree'
 import type {
   LocateTarget,
@@ -258,6 +260,20 @@ import { usePresetData, usePresetPage } from './usePresetData'
 import { splitHeader, tomlTokens } from './tomlPaint'
 import s from './PagePresets.module.css'
 
+
+/**
+ * 行所在的**滚动容器**：往上找第一个 `overflow-y: auto | scroll` 的祖先，到 `root` 为止。
+ *
+ * 为什么要有这一句：定位闪光那块 div 住在页面根（`.locateFlash`），而真正滚动的是表格
+ * 里那一层 `.wrap` —— 调用处拿不到它的类名（CSS Modules 的哈希），只能按"谁在滚"找。
+ */
+function scrollingParentOf(el: HTMLElement, root: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p !== null && p !== root; p = p.parentElement) {
+    const oy = getComputedStyle(p).overflowY
+    if (oy === 'auto' || oy === 'scroll') return p
+  }
+  return null
+}
 
 interface Props {
   density: Density
@@ -296,8 +312,10 @@ const PLACEHOLDER_KEY: StringKey = 'presets.page.searchPlaceholder'
  *   压成「显示所在文件夹」（动作没变，只是不再把那台程序的全名印在按钮上），
  *   macOS 跟着压成「在访达中显示」。
  */
-const REVEAL_LABEL_KEY: StringKey =
-  detectPlatform() === 'windows' ? 'presets.page.revealWindows' : 'presets.page.revealMac'
+/*
+ * 这两个平台常量 2026-10-30 收回 `usePlatform`（那里是平台真值的唯一出口，
+ * 详情卡 `PresetTable` 也要用同一份）—— 这里改成导入，不再自己探一遍。
+ */
 
 /**
  * **「切换自动换行」那个键怎么写**（2026-10-21 作者：「Windows 下就用 ALT 啊，
@@ -307,7 +325,7 @@ const REVEAL_LABEL_KEY: StringKey =
  * "~z 切换自动换行" 就是它，看着像个错字。那就按平台给各自的键名：Windows 写
  * `Alt+Z`（键帽上印的就是这个），macOS 仍是 `⌥Z`（那边字体有这一格，也是苹果的印法）。
  */
-const WRAP_KEY = detectPlatform() === 'windows' ? 'Alt+Z' : '⌥Z'
+const WRAP_KEY = comboOf('wrap')
 
 /**
  * 从 `TOML parse error at line 23, column 1` 里挑出**行号**（界面只说"第 23 行附近"）。
@@ -378,9 +396,10 @@ const TOKEN_CLASS = {
  * 「哪一份坏了」这唯一有用的信息就淹了。
  */
 interface Note {
-  text: string
+  /** [`Text`]：存键（`msg`），渲染时才翻 —— 这条会一直躺着，换语言得跟着换字 */
+  text: Text
   bad: boolean
-  lines?: string[]
+  lines?: Text[]
 }
 
 /*
@@ -427,14 +446,14 @@ function clearUnsavedNotice() {
   unsavedNoticeId = null
 }
 
-function notifyUnsaved(tr: Tr, text: string, onDiscard: () => void) {
+function notifyUnsaved(text: Text, onDiscard: () => void) {
   clearUnsavedNotice()
   unsavedNoticeId = notify({
     kind: 'warn',
-    title: tr('presets.page.notify.unsavedTitle'),
+    title: msg('presets.page.notify.unsavedTitle'),
     text,
     ttl: UNSAVED_NOTICE_MS,
-    actions: [{ label: tr(EDIT_TEXT.discard), onClick: onDiscard }],
+    actions: [{ label: msg(EDIT_TEXT.discard), onClick: onDiscard }],
   })
 }
 
@@ -445,12 +464,12 @@ function notifyUnsaved(tr: Tr, text: string, onDiscard: () => void) {
  * —— 同一句话重复入队只会让它闪。ttl 到了把 id 落回 `null`，下一次再试还能说。
  */
 let headLockedNoticeId: string | null = null
-function notifyHeadLocked(tr: Tr) {
+function notifyHeadLocked() {
   if (headLockedNoticeId !== null) return
   const id = notify({
     kind: 'warn',
-    title: tr(HEAD_LOCKED.title),
-    text: tr(HEAD_LOCKED.text),
+    title: msg(HEAD_LOCKED.title),
+    text: msg(HEAD_LOCKED.text),
     ttl: HEAD_LOCKED_MS,
   })
   headLockedNoticeId = id
@@ -495,6 +514,8 @@ function offsetOfLine(text: string, lines: number): number {
 
 export default function PagePresets({ density, onOpenBbs, onOpenSettings, pending }: Props) {
   const tr = useT()
+  /* 存在 state 里的那些话（提示条 / 草稿出错 / 改名出错）在这里摊开：语言一换就重翻 */
+  const say = useText()
   /*
    * 通用导入入口（第十二层）停在 App 层；这一页拿 `revision`
    * （导入落进 `presets-local/` 之后整屏重读，「本地文件」立刻以磁盘为准）。
@@ -505,6 +526,28 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const imp = useFileImport()
   const data = usePresetData(imp.revision)
   const page = usePresetPage(data)
+  /*
+   * 搜索框的两个 ref（**必须住在这儿**：本组件后面有提前 return，hook 不能跟在后面）
+   * —— 见 `searchNode` 那段注：非受控输入 + 防抖筛表。
+   */
+  const searchRef = useRef<HTMLInputElement>(null)
+  const searchTimer = useRef(0)
+  /*
+   * 外部把 `page.query` 改掉（切范围复位、点 ×、ESC）时写回 DOM —— 非受控输入框
+   * 自己不认 state，得有人把"真值"递进去。反向不成立：打字只走防抖那条路。
+   */
+  useEffect(() => {
+    const el = searchRef.current
+    if (el === null) return
+    if (el.value !== page.query) el.value = page.query
+  }, [page.query])
+  /* 卸载时把没到点的防抖撤掉，别对着已卸载的页面 setState */
+  useEffect(
+    () => () => {
+      if (searchTimer.current !== 0) window.clearTimeout(searchTimer.current)
+    },
+    [],
+  )
 
   /*
    * 工艺页跳过来那一下（见 `Props.pending`）：落到「切片器配置 → 云端」——
@@ -552,6 +595,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
   /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
   const flashRef = useRef<HTMLDivElement>(null)
+  /** 那一趟的"跟着滚动走"监听，下一次定位 / 动画结束时撤掉（见 `flashRow`） */
+  const stopFlash = useRef<(() => void) | null>(null)
 
   /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
   const menu = useContextMenu<PresetTableRow>()
@@ -562,11 +607,31 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const [expandedKey, setExpandedKey] = useState<string | null>(null)
   /*
+   * **跳出本表去看母本时，手上那张卡要跟着回来**（2026-10-30 作者：
+   * 「原本的展开还是展开……它就只是上下滚动然后去定位，我再切换回来，
+   * 就还是保持我原本的位置」）。
+   *
+   * 麻烦在本地行的行键里带机型（`local:<机型>:<路径>`，见 `presetTree` 的 `localRows`），
+   * 而定位要先清掉机型筛选（不然目标行可能被筛没）⇒ 同一行的键**当场就换了**，
+   * 存着的 `expandedKey` 再也对不上，切回来那张卡就没了。
+   * 所以换筛选之前把那一行的 `path` 记下来，等本地表再画出来时按路径接回去。
+   * 云端行的键（`preset-cloud:<ref>`）不带机型，根本不用记。
+   */
+  const [keepOpenPath, setKeepOpenPath] = useState<string | null>(null)
+  /*
    * 详情卡里「后处理 N 次」读的那本账（本机学习账 `run/usage.json`）。
    * 拿 `expandedKey` 当刷新信号：这一页是常驻的（六页签都在 DOM 里），只靠挂载读一次
    * 会一直显示旧的；每开一行重读一遍 —— 刚跑完一趟后处理回来，展开就看见新数。
    */
   const usage = usePresetUsage(expandedKey)
+  /* 把 `keepOpenPath` 记下的那张卡接回来：本地表重新画出来时按路径认出同一行、换上新键 */
+  useEffect(() => {
+    if (keepOpenPath === null || page.scope !== 'local') return
+    const hit = page.local.rows.find((r) => r.path === keepOpenPath)
+    if (hit === undefined) return
+    setExpandedKey(hit.rowKey)
+    setKeepOpenPath(null)
+  }, [keepOpenPath, page.scope, page.local.rows])
   /*
    * 设置页那一格「复制出来的也跟着云端更新」（2026-10-20，出厂关）：
    * 关着时复制 / 导入出来的那几份**不挂「有新版」** —— 作者：
@@ -629,7 +694,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   useEffect(() => {
     if (!devDelete.on) return
     const row = page.local.rows.find((r) => removeWhyNotOf(tr, r) === undefined)
-    if (row !== undefined) setRemoveAsk(row)
+    if (row !== undefined) setRemoveAsk([row])
     return () => setRemoveAsk(null)
   }, [devDelete.on, page.local.rows, tr])
   /*
@@ -642,11 +707,30 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     syncFirst: boolean
   } | null>(null)
   /*
-   * 正在做动作的那一行（rowKey）。只用来把那一颗按钮禁掉 —— 假后端是同进程的内存写，
-   * 这一下快到看不见；真后端上「应用」要写盘，连点两次就会发两个写。
-   * 不做全表遮罩：一行的动作不该把整张表锁住。
+   * 正在做动作的那几行（rowKey 集合）—— 只用来把**那一颗**按钮禁掉 / 换成「下载中」。
+   *
+   * ★ 从"一个 key"改成"一个集合"（2026-10-29 作者）：「我点击了下载之后它变成了灰色，
+   *   然后我点击了另外一个的下载，然后另外一个变成了灰色，之前那一个又恢复成了原本的颜色」。
+   *   根因是单值：后点的那一行把前一行**顶掉**，前一行于是回到可点状态（它确实还在下），
+   *   而任何一个完成都会把所有人清空。动作本来就是各下各的，状态也该各记各的。
+   *
+   * 不做全表遮罩：一行的动作不该把整张表锁住（这条没变）。
    */
-  const [busyKey, setBusyKey] = useState<string | null>(null)
+  const [busyKeys, setBusyKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const markBusy = (key: string) =>
+    setBusyKeys((cur) => {
+      if (cur.has(key)) return cur
+      const next = new Set(cur)
+      next.add(key)
+      return next
+    })
+  const clearBusy = (key: string) =>
+    setBusyKeys((cur) => {
+      if (!cur.has(key)) return cur
+      const next = new Set(cur)
+      next.delete(key)
+      return next
+    })
   /*
    * **行内动作的同步在途闸**（2026-10-20）。
    *
@@ -713,7 +797,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     /** 盘上那份的落点（相对用户根）—— 保存提示里"写回哪去了"读它 */
     path: string
     text: string
-    draftError: string | null
+    draftError: Text | null
     /**
      * **这份正文现在的 TOML 语法错**（2026-10-21，`null` = 能解析）。
      *
@@ -800,8 +884,55 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 而且"点外面不关"（不可逆的事必须显式选）⇒ 它压着鼠标，用户想右键别处也点不出菜单。
    * 现在改成与「撞名导入」同一个居中模态框：位置固定、遮罩盖住内容区、Esc / 取消可退，
    * 右键菜单点完就关。`null` = 没有在问。
+   *
+   * ★ 2026-10-29：**一格改成一份名单**（批量删除）。单份删除 = 长度为 1 的名单，
+   *   问句与代价照旧；批量时同一个框说"这 N 份"、并按来源把代价分开数。
    */
-  const [removeAsk, setRemoveAsk] = useState<PresetTableRow | null>(null)
+  const [removeAsk, setRemoveAsk] = useState<PresetTableRow[] | null>(null)
+
+  /*
+   * **多选（批量删除）**（2026-10-29 作者：「我想批量删除」）。
+   *
+   * 入口只有一条：右键菜单的「批量删除…」（本地表那一档）—— 它把**右键的那一行先勾上**
+   * 再进多选，用户不用再找一遍自己要动的那一份。进了多选：
+   *   · 表最左多出一列复选框，**点行 = 勾 / 取消**（不再展开）；
+   *   · 页脚那一格换成操作条（已选几项 / 全选 / 取消全选 / 删除选中 / 退出）；
+   *   · Esc 退出。
+   *
+   * 为什么不做"⌘/Ctrl + 点行多选"：这一页**点行就是展开详情**（作者定死的），
+   * 修饰键会把同一指击变成三件事（展开 / 多选 / 既展开又多选），谁也说不清那一下算哪个。
+   * 一个显式的模式反而没有歧义 —— 进了模式，行的点击含义就只有一个。
+   */
+  const [selecting, setSelecting] = useState(false)
+  /** 勾上的行（`rowKey`）。换表 / 退出就清空 —— 不跨表留着一堆看不见的选中 */
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  /**
+   * 批量删除跑到第几份（`null` = 没在跑）。进度**写在页脚那条上**，
+   * 不写在回执横幅里 —— 多选时横幅被操作条压着，写在那边等于没写。
+   */
+  const [bulkAt, setBulkAt] = useState<{ index: number; total: number } | null>(null)
+
+  /*
+   * 换了表（类型 / 位置）就退出多选：勾着的行是**另一张表**里的，留着它们只会让
+   * 「已选 3 项」说一件眼前看不见的事。
+   */
+  useEffect(() => {
+    setSelecting(false)
+    setSelectedKeys([])
+  }, [page.scope, page.kind])
+
+  /* Esc 退出多选。删除确认框开着时让给它（Modal 自己关自己，别一脚退两层） */
+  useEffect(() => {
+    if (!selecting) return
+    const onKey = (e: KeyboardEvent) => {
+      /* 批量正在跑的时候不给退（退了操作条就没了，删到一半没人看得见） */
+      if (e.key !== 'Escape' || removeAsk !== null || bulkAt !== null) return
+      setSelecting(false)
+      setSelectedKeys([])
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selecting, removeAsk, bulkAt])
 
   /*
    * ★ 2026-10-11（a04）：**「更新」不再弹确认层**。
@@ -862,11 +993,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     (next: boolean) => {
       setSoftWrap(next)
       setNote({
-        text: next ? tr('presets.page.softWrap.on') : tr('presets.page.softWrap.off'),
+        text: next ? msg('presets.page.softWrap.on') : msg('presets.page.softWrap.off'),
         bad: false,
       })
     },
-    [tr],
+    [],
   )
 
   /**
@@ -1163,7 +1294,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const headLockedAt = (e: { preventDefault: () => void }, from: number): void => {
     if (headLen === 0 || from >= headLen) return
     e.preventDefault()
-    notifyHeadLocked(tr)
+    notifyHeadLocked()
   }
 
   /*
@@ -1187,7 +1318,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     /** 后缀（含点，如 `.toml`；拆不出来就是空串）。提交时原样拼回去 */
     ext: string
     busy: boolean
-    error: string | null
+    /** 上一句"为什么改名没成"的**详情**（存键，渲染时由 `rename.failed` 套进去） */
+    error: Text | null
   } | null>(null)
 
 
@@ -1201,20 +1333,66 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
    * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
    * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
-   * 闪的 1.8s 里用户要是滚动了页面，这块 div 不跟着走 —— 一次 1.8 秒的瞬态效果，接受。
+   *
+   * ★ 2026-10-30（作者：「定位之后的这个绿色背景没有跟随着移动，很假，直接贴上去的，
+   *   很快滚一下列表就发现它错开了」）：这块 div 不再"定死一次"——
+   *   列表一滚就按行当前位置重摆（滚动事件里每帧对一次，1.8s 后随动画一起撤），
+   *   行滚出列表可视区就先藏起来（否则会画到表头上）。
    */
   const flashRow = (row: HTMLElement) => {
     const root = rootRef.current
     const overlay = flashRef.current
     if (!root || !overlay) return
+
+    /* 上一趟的跟随先撤（连着定位两行时不能留两条监听） */
+    stopFlash.current?.()
+
     /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
     row.scrollIntoView({ block: 'center' })
-    const rr = row.getBoundingClientRect()
-    const pr = root.getBoundingClientRect()
-    overlay.style.left = `${rr.left - pr.left}px`
-    overlay.style.width = `${rr.width}px`
-    overlay.style.top = `${rr.top - pr.top}px`
-    overlay.style.height = `${rr.height}px`
+
+    /* 位置按"行在 root 里的坐标"算 —— 这块 div 的定位祖先是页面根 */
+    const place = () => {
+      const rr = row.getBoundingClientRect()
+      const pr = root.getBoundingClientRect()
+      overlay.style.left = `${rr.left - pr.left}px`
+      overlay.style.width = `${rr.width}px`
+      overlay.style.top = `${rr.top - pr.top}px`
+      overlay.style.height = `${rr.height}px`
+    }
+
+    /*
+     * **跟着滚动走**：行在 `.wrap` 里滚、这块 div 不滚，闪的 1.8s 里一滚就露馅。
+     * 滚一次对一次（rAF 合并）；行离开列表可视区就藏 —— 那块 div 不受 `.wrap` 的
+     * `overflow` 裁切，不藏就会画到表头 / 页脚上。回到视野里再显示。
+     */
+    const scroller = scrollingParentOf(row, root)
+    const follow = () => {
+      place()
+      const rr = row.getBoundingClientRect()
+      const sr = scroller?.getBoundingClientRect()
+      const out = sr !== undefined && (rr.bottom <= sr.top || rr.top >= sr.bottom)
+      overlay.style.display = out ? 'none' : 'block'
+    }
+    let raf = 0
+    const onMove = () => {
+      if (raf !== 0) return
+      raf = window.requestAnimationFrame(() => {
+        raf = 0
+        follow()
+      })
+    }
+    const stop = () => {
+      scroller?.removeEventListener('scroll', onMove)
+      window.removeEventListener('resize', onMove)
+      if (raf !== 0) window.cancelAnimationFrame(raf)
+      raf = 0
+      stopFlash.current = null
+    }
+    scroller?.addEventListener('scroll', onMove, { passive: true })
+    window.addEventListener('resize', onMove)
+    stopFlash.current = stop
+
+    place()
     overlay.style.display = 'block'
     overlay.getAnimations().forEach((a) => a.cancel())
     overlay
@@ -1228,6 +1406,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       )
       .onfinish = () => {
         overlay.style.display = 'none'
+        stop()
       }
   }
 
@@ -1252,8 +1431,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
   /*
    * **来源定位**（「复制自 X」那一格点过来）：切到来源所在的表（local / cloud、
-   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、展开那一行、
+   * 必要时换类型档）、清掉机型筛选与搜索词（不然目标行可能被筛没）、
    * 滚过去亮一下 —— 用户要的是"看见我从哪复制来的"，缺一步都到不了那个效果。
+   *
+   * ★ **不展开、也不收起**（2026-10-30 作者两句话定死）：
+   *   第一句「点击了这些跳转过去的，不要展开呀」⇒ 目标行**绝不**展开；
+   *   第二句「我原本是展开的，就没必要去取消它……原本的那个状态不用改变——
+   *   它就只是上下滚动，然后去定位，我再切换回来还是保持我原本的位置」
+   *   ⇒ **不碰 `expandedKey`**：他手上那张卡原地开着，跳过去只是滚 + 闪，
+   *   切换回来（本地 ⇄ 云端）那张卡还在原处。
+   *
+   *   （上一版两次都改错方向：先 `setExpandedKey(target.rowKey)` 把目标炸开，
+   *   再一律 `null` 把手里那张也收了 —— 都不是他要的。）
    *
    * 行键按「全部机型」那一档算（local 行的键里带机型筛选，见 `originCellOf`）；
    * 类型轴只在目标说得出类型时才切（认不出类别的那份两张表里都有，不动当前档）。
@@ -1261,11 +1450,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const locateRow = (target: LocateTarget) => {
     menu.close()
+    /*
+     * 清机型筛选会把本地行的行键换掉（键里带机型）——**先**把手上开着的那张卡
+     * 按路径记下来，等本地表再画出来时由上面的 effect 接回去。
+     */
+    const openRow =
+      expandedKey === null ? undefined : page.local.rows.find((r) => r.rowKey === expandedKey)
+    if (openRow !== undefined) setKeepOpenPath(openRow.path)
     page.setScope(target.scope)
     if (target.kind !== null) page.setKind(target.kind)
     data.pickMachine('')
     page.setQuery('')
-    setExpandedKey(target.rowKey)
+    /* `expandedKey` **一个字都不动** —— 见上面那段：只滚 + 闪，不动他手上那张卡 */
     window.setTimeout(() => {
       const row = rootRef.current?.querySelector(
         `tr[data-rowkey="${CSS.escape(target.rowKey)}"]`,
@@ -1353,12 +1549,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     api.getFileUrl(row.fileName).then(
       (url) => {
         void navigator.clipboard.writeText(url).then(
-          () => setNote({ text: tr('presets.page.link.copied', { name: row.fileName }), bad: false }),
+          () => setNote({ text: msg('presets.page.link.copied', { name: row.fileName }), bad: false }),
           (e: unknown) =>
-            setNote({ text: tr('presets.page.link.clipFailed', { detail: errorText(e) }), bad: true }),
+            setNote({ text: msg('presets.page.link.clipFailed', { detail: errorText(e) }), bad: true }),
         )
       },
-      (e: unknown) => setNote({ text: tr('presets.page.link.fetchFailed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.link.fetchFailed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -1385,7 +1581,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     row: PresetTableRow,
     fileName: string,
   ): Promise<void> => {
-    setBusyKey(row.rowKey)
+    markBusy(row.rowKey)
     /*
      * ② 读逐参数三方账。`fetchMissing: true` 允许后端**顺手把云端新版字节取回来**
      * （内部基准，**不动本地这份文件**）—— 所以这里不需要先「下载」一遍。
@@ -1394,7 +1590,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * 因为用户到这一步已经点了「更新」（作者 2026-10-20：不点就别替他去取）。
      */
     const sync = await data.presetSync(behind.path, true)
-    setBusyKey(null)
+    clearBusy(row.rowKey)
     /*
      * `null` = 这一份不认云端（复制出来的那一份）。账本已经把它滤掉了，
      * 正常走不到这里 —— 万一走到（数据刚被别处改过），也**不许当成"零项待处理"**，
@@ -1402,14 +1598,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     if (sync === null) {
       setNote({
-        text: tr('presets.page.update.noLocalMatch', { name: fileName }),
+        text: msg('presets.page.update.noLocalMatch', { name: fileName }),
         bad: true,
       })
       return
     }
     if (!sync.cloudReady) {
       setNote({
-        text: tr('presets.page.update.cloudNotReady', { name: fileName }),
+        text: msg('presets.page.update.cloudNotReady', { name: fileName }),
         bad: true,
       })
       return
@@ -1434,8 +1630,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       setNote({
         text:
           line === null
-            ? tr('presets.page.update.zeroPendingNoLine', { name: behind.fileName })
-            : tr('presets.page.update.zeroPending', { name: behind.fileName }),
+            ? msg('presets.page.update.zeroPendingNoLine', { name: behind.fileName })
+            : msg('presets.page.update.zeroPending', { name: behind.fileName }),
         bad: false,
       })
       return
@@ -1453,7 +1649,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const versionId = behind.versionId ?? behind.basedOnVersionId
     if (machineId === null || versionId === null) {
       setNote({
-        text: tr('presets.page.update.unknownAttribution', { name: behind.fileName }),
+        text: msg('presets.page.update.unknownAttribution', { name: behind.fileName }),
         bad: true,
       })
       return
@@ -1463,7 +1659,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       syncFirst: true,
     })
     setNote({
-      text: tr('presets.page.update.askPick', { name: behind.fileName, count: pending.length }),
+      text: msg('presets.page.update.askPick', { name: behind.fileName, count: pending.length }),
       bad: false,
     })
   }
@@ -1491,18 +1687,18 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (row.basedOn !== 'outdated') return
     const local = data.local.find((f) => f.path === row.path)
     if (local === undefined) {
-      setNote({ text: tr('presets.page.update.gone', { name: row.fileName }), bad: true })
+      setNote({ text: msg('presets.page.update.gone', { name: row.fileName }), bad: true })
       return
     }
     /* 连点的第二下丢掉（见 `inflightRef`）—— 两次更新会各写一遍盘 */
     const key = `update:${row.rowKey}`
     if (!enter(key)) return
     const cloudName = row.basedOnCloud ?? row.fileName
-    setNote({ text: tr('presets.page.update.running', { name: row.fileName }), bad: false })
+    setNote({ text: msg('presets.page.update.running', { name: row.fileName }), bad: false })
     void applyCloudUpdate(local, row, cloudName)
       .catch((e: unknown) => {
-        setBusyKey(null)
-        setNote({ text: tr('presets.page.update.failed', { detail: errorText(e) }), bad: true })
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.update.failed', { detail: errorText(e) }), bad: true })
       })
       .finally(() => leave(key))
   }
@@ -1523,8 +1719,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (!enter(key)) return
     const fileName = row.fileName
     void (async () => {
-      setBusyKey(row.rowKey)
-      setNote({ text: tr('presets.page.update.running', { name: fileName }), bad: false })
+      markBusy(row.rowKey)
+      setNote({ text: msg('presets.page.update.running', { name: fileName }), bad: false })
       /*
        * ① 更新的是**本地那一份**：它跟这个云端条目的关系**只看身份账本**
        * （`cloudSource` 对上它），而且还没跟上当前版（`basedOn !== 'current'`）。
@@ -1546,9 +1742,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           )
         }) ?? null
       if (behind === null) {
-        setBusyKey(null)
+        clearBusy(row.rowKey)
         setNote({
-          text: tr('presets.page.update.nothingToDo', { name: fileName }),
+          text: msg('presets.page.update.nothingToDo', { name: fileName }),
           bad: false,
         })
         return
@@ -1556,8 +1752,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       await applyCloudUpdate(behind, row, fileName)
     })()
       .catch((e: unknown) => {
-        setBusyKey(null)
-        setNote({ text: tr('presets.page.update.failed', { detail: errorText(e) }), bad: true })
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.update.failed', { detail: errorText(e) }), bad: true })
       })
       .finally(() => leave(key))
   }
@@ -1578,14 +1774,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         leave(key)
         setTakenAsk(null)
         setNote({
-          text: tr('presets.page.import.takenDone', { name: done.fileName }),
+          text: msg('presets.page.import.takenDone', { name: done.fileName }),
           bad: false,
         })
       },
       (e: unknown) => {
         leave(key)
         setTakenAsk((cur) => (cur === null ? cur : { ...cur, busy: false }))
-        setNote({ text: tr('presets.page.import.failed', { detail: errorText(e) }), bad: true })
+        setNote({ text: msg('presets.page.import.failed', { detail: errorText(e) }), bad: true })
       },
     )
   }
@@ -1612,20 +1808,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const key = `download:${row.rowKey}`
     if (!enter(key)) return
     if (row.scope === 'cloud' && row.localState !== undefined) {
-      /* 「更新」≠ 只把云端取回来：要把差异处理到本地这份上（见 runUpdate） */
-      if (row.localState === 'stale') {
+      /* 「更新」≠ 只把云端取回来：要把差异处理到本地这份上（见 runUpdate）。
+         判据与徽章/按钮同源：`updateStatusOf` 说更新才更新，`stale` 不再是唯一入口。 */
+      if (updateStatusOf(row).action === 'update') {
         /* 交给更新那把锁（它自己也防连点），这一把先放掉 */
         leave(key)
         runUpdate(row)
         return
       }
       /* 「下载」：本地还没有这一份 —— 取回云端当前版并落一份本地的 */
-      setBusyKey(row.rowKey)
-      setNote({ text: tr('presets.page.download.running', { name: row.fileName }), bad: false })
+      markBusy(row.rowKey)
+      setNote({ text: msg('presets.page.download.running', { name: row.fileName }), bad: false })
       data.fetchCloud(row.fileName).then(
         (done) => {
           leave(key)
-          setBusyKey(null)
+          clearBusy(row.rowKey)
           /*
            * ★ a04：**同名已经有一份了** —— 不覆盖、也不静默：问用户
            * （同意就自动改一个没被占的名字落一份新的，原来那份一个字节不动）。
@@ -1643,15 +1840,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             /* 一句大白话就够（2026-10-13 作者：**技术细节不必让用户知道**）——
                "云端字节进了下载区、另落一份你自己那份"是我们内部的两件事，
                用户要的是"这下我能用它了" */
-            text: tr('presets.page.download.done', { name: done.fileName }),
+            text: msg('presets.page.download.done', { name: done.fileName }),
             bad: false,
           })
         },
         (e: unknown) => {
           leave(key)
-          setBusyKey(null)
+          clearBusy(row.rowKey)
           /* 断网 / 取不回来照实说：不假装已经可以使用（它确实还不能用） */
-          setNote({ text: tr('presets.page.download.failed', { detail: errorText(e) }), bad: true })
+          setNote({ text: msg('presets.page.download.failed', { detail: errorText(e) }), bad: true })
         },
       )
       return
@@ -1664,43 +1861,43 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
        * 别在这里分支去找"另一个命令"：没有那个命令。
        */
       const updating = row.presetState === 'tampered' || row.presetState === 'old'
-      setBusyKey(row.rowKey)
+      markBusy(row.rowKey)
       setNote({
         text: updating
-          ? tr('presets.page.update.running', { name: row.fileName })
-          : tr('presets.page.download.running', { name: row.fileName }),
+          ? msg('presets.page.update.running', { name: row.fileName })
+          : msg('presets.page.download.running', { name: row.fileName }),
         bad: false,
       })
       /* 过程如实说：一次调用一路水位，后端推到哪说到哪 —— 不编一个分母，也不转空圈 */
       data
         .downloadPreset(row.fileName, (tick) =>
-          setNote({ text: tickText(tr, tick), bad: tick.stage === 'failed' }),
+          setNote({ text: tickText(tick), bad: tick.stage === 'failed' }),
         )
         .then(
           () => {
             leave(key)
-            setBusyKey(null)
+            clearBusy(row.rowKey)
             setNote({
               text: updating
                 ? row.presetState === 'tampered'
-                  ? tr('presets.page.download.tamperedDone', { name: row.fileName })
-                  : tr('presets.page.download.archivedDone', { name: row.fileName })
+                  ? msg('presets.page.download.tamperedDone', { name: row.fileName })
+                  : msg('presets.page.download.archivedDone', { name: row.fileName })
                 /*
                  * 大白话（2026-10-13 作者：**技术细节不必让用户知道**）——
                  * 落点路径不印在提示条上（要看文件在哪，行上右键有「显示我们那份的文件夹」）；
                  * **"要进切片器还得点复制"这条指引留着**：那是用户真要做的下一步。
                  */
-                : tr('presets.page.download.doneSlicer', { name: row.fileName }),
+                : msg('presets.page.download.doneSlicer', { name: row.fileName }),
               bad: false,
             })
           },
           (e: unknown) => {
             leave(key)
-            setBusyKey(null)
+            clearBusy(row.rowKey)
             setNote({
               text: updating
-                ? tr('presets.page.update.failed', { detail: errorText(e) })
-                : tr('presets.page.download.failed', { detail: errorText(e) }),
+                ? msg('presets.page.update.failed', { detail: errorText(e) })
+                : msg('presets.page.download.failed', { detail: errorText(e) }),
               bad: true,
             })
           },
@@ -1714,9 +1911,46 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     leave(key)
     setNote({
-      text: tr('presets.page.download.notDeliverable', { name: row.fileName }),
+      text: msg('presets.page.download.notDeliverable', { name: row.fileName }),
       bad: true,
     })
+  }
+
+  /**
+   * **重新从云端下载一份**（2026-10-29）：`unverified` / `elsewhere` 的出路。
+   *
+   * 它不是「更新」—— 更新要把差异逐项合进现有文件；这一条是"以云端当前版另落一份"，
+   * 原有的那份一个字节不动（撞名时走同一套「导入一份新的」对话框）。
+   * 只用于说不清版本关系 / 来源不同的本地行：不拿猜测去覆盖用户的东西。
+   */
+  const redownloadLocal = (row: PresetTableRow) => {
+    if (row.origin !== 'local') return
+    const fileName = row.cloudFile ?? row.fileName
+    const key = `redownload:${row.rowKey}`
+    if (!enter(key)) return
+    markBusy(row.rowKey)
+    setNote({ text: msg('presets.page.download.running', { name: fileName }), bad: false })
+    data.fetchCloud(fileName).then(
+      (done) => {
+        leave(key)
+        clearBusy(row.rowKey)
+        if (done.takenBy !== undefined) {
+          setTakenAsk({
+            fileName,
+            existingPath: done.takenBy,
+            suggestedName: done.suggestedName ?? fileName,
+            busy: false,
+          })
+          return
+        }
+        setNote({ text: msg('presets.page.download.done', { name: done.fileName }), bad: false })
+      },
+      (e: unknown) => {
+        leave(key)
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.download.failed', { detail: errorText(e) }), bad: true })
+      },
+    )
   }
 
   /**
@@ -1838,15 +2072,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            * 就是这件事的另一个入口。
            */
           notifyUnsaved(
-            tr,
-            tr('presets.page.notify.unsavedLast'),
+            msg('presets.page.notify.unsavedLast'),
             () => discardNowRef.current(),
           )
         }
       },
       (e: unknown) => {
         setNote({
-          text: tr('presets.page.edit.openFailed', { name: row.fileName, detail: errorText(e) }),
+          text: msg('presets.page.edit.openFailed', { name: row.fileName, detail: errorText(e) }),
           bad: true,
         })
       },
@@ -1881,7 +2114,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setEditing((cur) =>
             cur === null
               ? cur
-              : { ...cur, draftError: tr('presets.page.edit.draftFailed', { detail: errorText(e) }) },
+              : { ...cur, draftError: msg('presets.page.edit.draftFailed', { detail: errorText(e) }) },
           ),
       )
     }, 700)
@@ -1970,9 +2203,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         setUndoStack([])
         setRedoStack([])
         setEditing((cur) => (cur === null ? cur : { ...cur, text: draft.text, draftError: null }))
-        setNote({ text: tr('presets.page.edit.savedReopened'), bad: false })
+        setNote({ text: msg('presets.page.edit.savedReopened'), bad: false })
       },
-      (e: unknown) => setNote({ text: tr('presets.page.edit.reopenFailed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.edit.reopenFailed', { detail: errorText(e) }), bad: true }),
     )
   }, [data, editing, textDropRev, tr])
 
@@ -2030,7 +2263,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           /* 那一条"还没保存"的通知跟着过期（它已经是保存过的了） */
           clearUnsavedNotice()
           setNote({
-            text: tr(EDIT_TEXT.savedBack, { name: done.fileName, path: done.path }),
+            text: msg(EDIT_TEXT.savedBack, { name: done.fileName, path: done.path }),
             bad: false,
           })
         },
@@ -2042,7 +2275,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           setEditing((cur) =>
             cur === null
               ? cur
-              : { ...cur, draftError: tr('presets.page.edit.saveFailed', { detail: errorText(e) }) },
+              : { ...cur, draftError: msg('presets.page.edit.saveFailed', { detail: errorText(e) }) },
           )
         },
       )
@@ -2060,7 +2293,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     setEditing(null)
     if (unsaved) {
       /* 这一条不用教底栏那颗（按钮已经不在屏幕上了）—— 那颗「放弃修改」就在卡上 */
-      notifyUnsaved(tr, tr('presets.page.notify.unsavedJust'), () =>
+      notifyUnsaved(msg('presets.page.notify.unsavedJust'), () =>
         discardNowRef.current(),
       )
     }
@@ -2103,7 +2336,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           /* 那一条"还没保存"的通知跟着过期（它说的那件事已经作废了） */
           clearUnsavedNotice()
         },
-        (e: unknown) => setNote({ text: tr('presets.page.edit.exitFailed', { detail: errorText(e) }), bad: true }),
+        (e: unknown) => setNote({ text: msg('presets.page.edit.exitFailed', { detail: errorText(e) }), bad: true }),
       )
   }
 
@@ -2129,7 +2362,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             changed: [],
           },
     )
-    setNote({ text: tr('presets.page.edit.restored'), bad: false })
+    setNote({ text: msg('presets.page.edit.restored'), bad: false })
   }
 
   /**
@@ -2150,10 +2383,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             void data.discardTextDraft().then(
               () => {
                 clearUnsavedNotice()
-                setNote({ text: tr('presets.page.edit.discarded'), bad: false })
+                setNote({ text: msg('presets.page.edit.discarded'), bad: false })
               },
               (e: unknown) =>
-                setNote({ text: tr('presets.page.edit.discardFailed', { detail: errorText(e) }), bad: true }),
+                setNote({ text: msg('presets.page.edit.discardFailed', { detail: errorText(e) }), bad: true }),
             )
           }
         : exitEdit
@@ -2187,7 +2420,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     menu.close()
     const want = defaultNameOf(row)
     if (want === null) {
-      setNote({ text: tr('presets.page.rename.noDefault', { name: row.fileName }), bad: true })
+      setNote({ text: msg('presets.page.rename.noDefault', { name: row.fileName }), bad: true })
       return
     }
     const name = defaultNameAvoiding(
@@ -2195,22 +2428,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       data.local.filter((f) => f.path !== row.path).map((f) => f.fileName),
     )
     if (name === row.fileName) {
-      setNote({ text: tr('presets.page.rename.alreadyDefault', { name: row.fileName }), bad: false })
+      setNote({ text: msg('presets.page.rename.alreadyDefault', { name: row.fileName }), bad: false })
       return
     }
     setNote({
-      text: tr('presets.page.rename.restoring', { from: row.fileName, to: name }),
+      text: msg('presets.page.rename.restoring', { from: row.fileName, to: name }),
       bad: false,
     })
     data.rename(row.path, name).then(
       (done) =>
         setNote({
           text: done.fileName === want
-            ? tr('presets.page.rename.restored', { from: row.fileName, to: done.fileName })
-            : tr('presets.page.rename.restoredShifted', { from: row.fileName, to: done.fileName }),
+            ? msg('presets.page.rename.restored', { from: row.fileName, to: done.fileName })
+            : msg('presets.page.rename.restoredShifted', { from: row.fileName, to: done.fileName }),
           bad: false,
         }),
-      (e: unknown) => setNote({ text: tr('presets.page.rename.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.rename.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2224,7 +2457,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const want = defaultNameOf(row)
     if (want === null) {
       setRenaming((cur) =>
-        cur === null ? cur : { ...cur, error: tr('presets.page.rename.noDefaultInline') },
+        cur === null ? cur : { ...cur, error: msg('presets.page.rename.noDefaultInline') },
       )
       return
     }
@@ -2250,7 +2483,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       row.fileName,
       data.local.map((f) => f.fileName),
     )
-    setNote({ text: tr('presets.page.copy.running', { name: row.fileName }), bad: false })
+    setNote({ text: msg('presets.page.copy.running', { name: row.fileName }), bad: false })
     data.copyAsNew(row.path, name).then(
       (done) => {
         leave(key)
@@ -2260,14 +2493,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            ★ 也不让复制失败（作者 2026-10-20 那条裁定的另一半），截到上限并照实说一句。
            */
           text: done.adjusted
-            ? tr('presets.page.copy.doneClipped', { name: done.fileName })
-            : tr('presets.page.copy.done', { name: done.fileName }),
+            ? msg('presets.page.copy.doneClipped', { name: done.fileName })
+            : msg('presets.page.copy.done', { name: done.fileName }),
           bad: false,
         })
       },
       (e: unknown) => {
         leave(key)
-        setNote({ text: tr('presets.page.copy.failed', { detail: errorText(e) }), bad: true })
+        setNote({ text: msg('presets.page.copy.failed', { detail: errorText(e) }), bad: true })
       },
     )
   }
@@ -2289,13 +2522,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     if (renaming === null || renaming.busy) return
     let stem = renaming.name.trim()
     if (stem === '') {
-      setRenaming({ ...renaming, error: tr('presets.page.rename.empty') })
+      setRenaming({ ...renaming, error: msg('presets.page.rename.empty') })
       return
     }
     if (renaming.ext !== '' && stem.toLowerCase().endsWith(renaming.ext.toLowerCase())) {
       stem = stem.slice(0, stem.length - renaming.ext.length).trim()
       if (stem === '') {
-        setRenaming({ ...renaming, error: tr('presets.page.rename.empty') })
+        setRenaming({ ...renaming, error: msg('presets.page.rename.empty') })
         return
       }
     }
@@ -2311,8 +2544,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            * 落盘的就是回执里那一串 —— 这里照实说"被截短了"，不说就等于骗他。
            */
           text: done.adjusted
-            ? tr('presets.page.rename.doneClipped', { from: renaming.row.fileName, to: done.fileName })
-            : tr('presets.page.rename.done', { from: renaming.row.fileName, to: done.fileName }),
+            ? msg('presets.page.rename.doneClipped', { from: renaming.row.fileName, to: done.fileName })
+            : msg('presets.page.rename.done', { from: renaming.row.fileName, to: done.fileName }),
           bad: false,
         })
       },
@@ -2324,13 +2557,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * **删除**（2026-10-06 一切皆可删）：我的文件走本地文件（**真删除**）；
+   * **删除**（2026-10-06 一切皆可删）：我的文件走本地文件（进回收站）；
    * 切片器交付行走交付线（删了回「未下载」，随时可从云端重下）。
    * 二次确认是**居中的模态框**（`removeAsk`，2026-10-20 从右键菜单里搬出来）；
    * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
   const runRemove = (row: PresetTableRow) => {
-    setNote({ text: tr('presets.page.remove.running', { name: row.fileName }), bad: false })
+    setNote({ text: msg('presets.page.remove.running', { name: row.fileName }), bad: false })
     const done =
       row.origin === 'preset' ? data.removePreset(row.fileName) : data.remove(row.path)
     done.then(
@@ -2338,11 +2571,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         setNote({
           text:
             row.origin === 'preset'
-              ? tr('presets.page.remove.donePreset', { name: row.fileName })
-              : tr('presets.page.remove.doneLocal', { name: row.fileName, path: row.path }),
+              ? msg('presets.page.remove.donePreset', { name: row.fileName })
+              : msg('presets.page.remove.doneLocal', { name: row.fileName, path: row.path }),
           bad: false,
         }),
-      (e: unknown) => setNote({ text: tr('presets.page.remove.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.remove.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2355,15 +2588,100 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const askRemove = (row: PresetTableRow) => {
     menu.close()
-    setRemoveAsk(row)
+    setRemoveAsk([row])
   }
 
-  /** 删除确认框里那颗「删除」：关框，照旧走 [`runRemove`] */
+  /** 删除确认框里那颗「删除」：关框；一份走 [`runRemove`]，多份走 [`runRemoveMany`] */
   const confirmRemove = () => {
-    const row = removeAsk
-    if (row === null) return
+    const rows = removeAsk
+    if (rows === null || rows.length === 0) return
     setRemoveAsk(null)
-    runRemove(row)
+    if (rows.length === 1) runRemove(rows[0])
+    else void runRemoveMany(rows)
+  }
+
+  /* ————————————————— 多选（批量删除） ————————————————— */
+
+  /**
+   * 进多选：**右键的那一行先勾上**（作者点的就是它），并收起展开卡 ——
+   * 多选时点行不再展开，留一张开着的卡在那儿只会让人以为那行是"选中的那张"。
+   */
+  const startSelect = (row: PresetTableRow) => {
+    menu.close()
+    setExpandedKey(null)
+    /* 多选时不弹卡：定位那一趟记下的"回来要开着"也一并作废 */
+    setKeepOpenPath(null)
+    setSelecting(true)
+    /*
+     * ★ 这一行**自己能不能删**要先问 `removeWhyNotOf`：云端仓库文件的本地副本
+     *   （`asset`）删不了，硬把它塞进选中会让「已选 N 项」与眼前的灰勾对不上
+     *   —— 那种行只是"从这里进多选"的入口，它自己不进名单。
+     */
+    setSelectedKeys(removeWhyNotOf(tr, row) === undefined ? [row.rowKey] : [])
+  }
+
+  const toggleSelect = (rowKey: string) => {
+    setSelectedKeys((keys) =>
+      keys.includes(rowKey) ? keys.filter((k) => k !== rowKey) : [...keys, rowKey],
+    )
+  }
+
+  const exitSelect = () => {
+    setSelecting(false)
+    setSelectedKeys([])
+  }
+
+  /**
+   * 表头那颗「全选」：只勾**能删的**（判据唯一实现 `removeWhyNotOf`）。
+   * 勾上不能删的那几份，只会让下面的「删除选中」按下去一半没反应。
+   */
+  const selectAll = (rows: PresetTableRow[]) => {
+    setSelectedKeys(rows.filter((r) => removeWhyNotOf(tr, r) === undefined).map((r) => r.rowKey))
+  }
+
+  /**
+   * **逐份删**（批量删除的执行体）。
+   *
+   * 一份一份地走**同一条删除管道**（`data.remove` / `data.removePreset`）——
+   * 它们各自会重读本地文件 / 投递面，并发跑会同时写同一份底账、也说不清哪一份坏在哪。
+   * 慢一点也不并发：用户眼前总共就几十份。
+   *
+   * 失败**不中断**：一份删不掉不该把后面几份一起拖住（用户要的是"能删的都删掉"）。
+   * 逐份结局按文件名回报；没删掉的那几份**留在选中里**，下一步多半是重试或先去处理它们。
+   */
+  const runRemoveMany = async (rows: PresetTableRow[]) => {
+    /* 失败按 `rowKey` 记（不用文件名：两个目录下同名文件是合法的两份东西） */
+    const failedKeys: string[] = []
+    const failedLines: Text[] = []
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i]
+      setBulkAt({ index: i + 1, total: rows.length })
+      try {
+        if (row.origin === 'preset') await data.removePreset(row.fileName)
+        else await data.remove(row.path)
+      } catch (e: unknown) {
+        failedKeys.push(row.rowKey)
+        failedLines.push(
+          msg('presets.page.remove.failedLine', { name: row.fileName, detail: errorText(e) }),
+        )
+      }
+    }
+    setBulkAt(null)
+    if (failedKeys.length === 0) {
+      exitSelect()
+      setNote({ text: msg('presets.page.remove.doneMany', { count: rows.length }), bad: false })
+      return
+    }
+    /* 没删掉的那几份留在选中里 —— 用户多半原地下一次「删除选中」重试 */
+    setSelectedKeys(failedKeys)
+    setNote({
+      text: msg('presets.page.remove.doneManyPartial', {
+        done: rows.length - failedKeys.length,
+        failed: failedKeys.length,
+      }),
+      bad: true,
+      lines: failedLines,
+    })
   }
 
   /**
@@ -2376,16 +2694,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runRemoveArchived = (a: ArchivedFile) => {
     setConfirmingArchive(null)
     setNote({
-      text: tr('presets.page.remove.archivedRunning', { name: a.fileName }),
+      text: msg('presets.page.remove.archivedRunning', { name: a.fileName }),
       bad: false,
     })
     data.removeArchived(a.path).then(
       () =>
         setNote({
-          text: tr('presets.page.remove.archivedDone', { name: a.fileName }),
+          text: msg('presets.page.remove.archivedDone', { name: a.fileName }),
           bad: false,
         }),
-      (e: unknown) => setNote({ text: tr('presets.page.remove.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.remove.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2400,7 +2718,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     data.reveal(row.path).then(
       () => undefined,
       (e: unknown) =>
-        setNote({ text: tr('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
+        setNote({ text: msg('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2417,14 +2735,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runRevealOurs = (row: PresetTableRow) => {
     data.revealDelivered(row.fileName).then(
       () => undefined,
-      (e: unknown) => setNote({ text: tr('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
   const runRevealSlicer = (row: PresetTableRow) => {
     data.revealSlicer(row.fileName).then(
       () => undefined,
-      (e: unknown) => setNote({ text: tr('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.reveal.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2440,8 +2758,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     page.togglePin(row.pinKey)
     setNote({
       text: row.pinned
-        ? tr('presets.page.pin.off', { name: row.fileName })
-        : tr('presets.page.pin.on', { name: row.fileName }),
+        ? msg('presets.page.pin.off', { name: row.fileName })
+        : msg('presets.page.pin.on', { name: row.fileName }),
       bad: false,
     })
   }
@@ -2457,13 +2775,13 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         setNote({
           text:
             remark === null
-              ? tr('presets.page.remark.restored')
+              ? msg('presets.page.remark.restored')
               : remark === ''
-                ? tr('presets.page.remark.savedEmpty')
-                : tr('presets.page.remark.saved'),
+                ? msg('presets.page.remark.savedEmpty')
+                : msg('presets.page.remark.saved'),
           bad: false,
         }),
-      (e: unknown) => setNote({ text: tr('presets.page.remark.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.remark.failed', { detail: errorText(e) }), bad: true }),
     )
 
   /*
@@ -2476,14 +2794,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     return data.setLocalMachineVersion(row.path, machineId, versionId).then(
       () =>
         setNote({
-          text: tr('presets.page.attr.saved', {
+          text: msg('presets.page.attr.saved', {
             name: row.fileName,
             machine: m?.display ?? machineId,
             version: v?.name ?? versionId,
           }),
           bad: false,
         }),
-      (e: unknown) => setNote({ text: tr('presets.page.attr.failed', { detail: errorText(e) }), bad: true }),
+      (e: unknown) => setNote({ text: msg('presets.page.attr.failed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2515,11 +2833,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     /* 连点两下会往切片器目录写两遍 —— 第二下丢掉（见 `inflightRef`） */
     const key = `live:${row.rowKey}`
     if (!enter(key)) return
-    setBusyKey(row.rowKey)
+    markBusy(row.rowKey)
     data.copy(row.fileName).then(
       (outcome) => {
         leave(key)
-        setBusyKey(null)
+        clearBusy(row.rowKey)
         /*
          * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
          * 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
@@ -2529,15 +2847,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
            文件在哪，行上右键有「显示切片器里的那份」 */
         setNote({
           text: outcome.replaced
-            ? tr('presets.page.live.copiedReplaced', { name: row.fileName })
-            : tr('presets.page.live.copied', { name: row.fileName }),
+            ? msg('presets.page.live.copiedReplaced', { name: row.fileName })
+            : msg('presets.page.live.copied', { name: row.fileName }),
           bad: false,
         })
       },
       (e: unknown) => {
         leave(key)
-        setBusyKey(null)
-        setNote({ text: tr('presets.page.live.failed', { detail: errorText(e) }), bad: true })
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.live.failed', { detail: errorText(e) }), bad: true })
       },
     )
   }
@@ -2552,17 +2870,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const runUse = (row: PresetLocalRow) => {
     const key = `use:${row.rowKey}`
     if (!enter(key)) return
-    setBusyKey(row.rowKey)
+    markBusy(row.rowKey)
     data.apply(row.fileName, row.path).then(
       () => {
         leave(key)
-        setBusyKey(null)
-        setNote({ text: tr('presets.page.use.done', { name: row.fileName }), bad: false })
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.use.done', { name: row.fileName }), bad: false })
       },
       (e: unknown) => {
         leave(key)
-        setBusyKey(null)
-        setNote({ text: tr('presets.page.use.failed', { detail: errorText(e) }), bad: true })
+        clearBusy(row.rowKey)
+        setNote({ text: msg('presets.page.use.failed', { detail: errorText(e) }), bad: true })
       },
     )
   }
@@ -2577,9 +2895,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const runUnuse = () => {
     data.clearApply().then(
-      () => setNote({ text: tr('presets.page.use.cleared'), bad: false }),
+      () => setNote({ text: msg('presets.page.use.cleared'), bad: false }),
       (e: unknown) =>
-        setNote({ text: tr('presets.page.use.clearFailed', { detail: errorText(e) }), bad: true }),
+        setNote({ text: msg('presets.page.use.clearFailed', { detail: errorText(e) }), bad: true }),
     )
   }
 
@@ -2681,6 +2999,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
+   * **批量**那一屏的代价：按来源**分开数**（与单份那三条同一个口径）。
+   *
+   * 一句一条、哪一档是 0 就不说那句 —— 不写「其中 0 份是…」那种凑数的句子。
+   *
+   * ★ 「正在使用」只对**用户自己的那几份**单说一句：`live` 对切片器是「已复制进切片器目录」，
+   *   对云端交付行不能凭它断言"正在被使用"（云端那一条自带"正在被使用的话会一并撤下"
+   *   的条件句）—— 与单份删除那一处的措辞保持一套口径。
+   */
+  const removeManyDetail = (rows: PresetTableRow[]): string[] => {
+    const preset = rows.filter((r) => r.origin === 'preset').length
+    const own = rows.length - preset
+    const lines: string[] = []
+    if (preset > 0) lines.push(tr('presets.page.removeAsk.manyPreset', { count: preset }))
+    if (own > 0) lines.push(tr('presets.page.removeAsk.manyLocal', { count: own }))
+    if (rows.some((r) => r.origin !== 'preset' && 'live' in r && r.live)) {
+      lines.push(tr('presets.page.removeAsk.manyLive'))
+    }
+    return lines
+  }
+
+  /**
    * **「修改参数」为什么不给点**（2026-10-09）。
    *
    * 参数表画哪些项、怎么分组，全由**这一份自己的归属**（文件头 `# machine:` /
@@ -2739,7 +3078,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     menu.close()
     setComparePick({ path: row.path, fileName: row.fileName })
     setNote({
-      text: tr('presets.page.compare.picked', { name: row.fileName }),
+      text: msg('presets.page.compare.picked', { name: row.fileName }),
       bad: false,
     })
   }
@@ -2820,29 +3159,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      * "为什么"在状态列与这一项的 title 里说。
      */
     if (row.scope === 'cloud') {
-      const localState = row.localState
-      const cloudAction = CLOUD_LOCAL_ACTION[localState ?? 'none']
       /*
-       * **云端较旧 ⇒ 这一项也不给**（2026-10-27）：右键菜单是与操作列并列的第二个入口，
-       * 只守列表那颗按钮不够。与 `CloudLocalAction` 读同一个 `basedOn`，两处同源。
+       * 入口与操作列**同一个结论**（2026-10-29）：`updateStatusOf` 说下载才下载、
+       * 说更新才更新；说不清 / 来源不同 / 目录异常一律**不给动作**，并把原因写进
+       * title。右键菜单是第二个入口，不许自己再判一套。
        */
-      const older = row.basedOn === 'newer'
-      const label = older
-        ? tr('presets.table.staleOlder')
-        : localState !== undefined
-          ? tr(cloudAction ?? CLOUD_LOCAL_TEXT[localState])
-          : tr(UPDATE_ACTION_TEXT.missing)
-      const whyNot = older
-        ? tr('presets.table.staleOlder.title')
-        : localState !== undefined && cloudAction === null
-          ? tr(CLOUD_LOCAL_WHY[localState])
-          : undefined
+      const st = updateStatusOf(row)
+      const label =
+        st.action === 'update'
+          ? tr(UPDATE_ACTION_TEXT.update)
+          : st.action === 'download'
+            ? tr(UPDATE_ACTION_TEXT.missing)
+            : st.text !== null
+              ? tr(st.text, st.params)
+              : tr('presets.table.staleOlder')
+      const disabled = st.action === 'none' ? (st.text === null ? tr('presets.table.staleOlder.title') : tr(st.text, st.params)) : undefined
       return [
         {
           id: 'download',
           icon: 'download',
           label,
-          disabled: whyNot,
+          disabled,
           onSelect: () => download(row),
         },
         /* 见 `goLocal`。云端表一味只读 —— "我这一份怎么样"永远在**本地表**那一侧，
@@ -3011,6 +3348,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               },
             ] satisfies ContextMenuEntry[])
           : []),
+        /*
+         * **说不清 / 来源不同的出路**（2026-10-29）：不猜、不覆盖 ——
+         * 重新从云端取一份落成新的，原文件不动。
+         */
+        ...(row.origin === 'local' &&
+        (row.basedOn === 'unverified' || row.basedOn === 'elsewhere')
+          ? ([
+              {
+                id: 'redownload',
+                icon: 'download',
+                label: tr('presets.page.menu.redownload'),
+                onSelect: () => redownloadLocal(row),
+              },
+            ] satisfies ContextMenuEntry[])
+          : []),
         /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry`。**不挂图标** */
         ...(canCompare(row) ? [compareEntry(row)] : []),
         {
@@ -3074,6 +3426,16 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         /* MKP 档这一项恒为空（`bbsWhyNot` 对 MKP 配方恒有话说）—— 见 `bbsEntries` */
         ...bbsEntries(row),
         { separator: true },
+        /*
+         * **「批量删除…」**（2026-10-29 作者：「我想批量删除」）：不挂图标（上面「删除」挂 `trash`，
+         * 这一项与它并排、语义上属于同一族，空着正好读成"删除的两个粒度"）。
+         * 它进的是**多选模式**（见 `startSelect`）：这一行先勾上，然后点别的行累加。
+         */
+        {
+          id: 'bulkRemove',
+          label: tr('presets.page.menu.bulkRemove'),
+          onSelect: () => startSelect(row),
+        },
         {
           id: 'remove',
           icon: 'trash',
@@ -3155,6 +3517,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       },
       ...bbsEntries(row),
       { separator: true },
+      /* 「批量删除…」—— 与 MKP 档那一项同一个入口、同一段话（见那一处的注释） */
+      {
+        id: 'bulkRemove',
+        label: tr('presets.page.menu.bulkRemove'),
+        onSelect: () => startSelect(row),
+      },
       {
         id: 'remove',
         icon: 'trash',
@@ -3197,22 +3565,66 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 边界对比强，搜索是白底细边框，标称同高视觉上仍矮一截（作者：「高度上看着
    * 比切换器小」）。
    */
+  /*
+   * ★★ **搜索框不参与"每键重渲染"**（第十八轮 2026-10-30，作者：任何输入框都卡、
+   * Safari 里也一样 ⇒ 平台的事不再追，只把我们的开销砍到零）。
+   *
+   * 原来它是受控的：每敲一个字 → `page.setQuery` → **整页重渲染**（表头、两整张表、
+   * 所有行）。现在改成两层：
+   *
+   *   · **输入框非受控**（`defaultValue` + `onInput`）：DOM 里就是真值，React 不往回写
+   *     —— 键入路径上 React 一点活都不干（WebKit 的光标与合成也不用等我们）。
+   *   · **筛表防抖 120ms**：手停下来才把词交给 `page`。打字过程中列表不动，
+   *     不抖、不闪、也不抢帧；停手那一瞬再筛，眼睛看不出来。
+   *
+   * `page.query` 仍是唯一真值：外部把它改掉（点 × 清空、切范围时复位、ESC 清空）
+   * 由下面那个 effect 写回 DOM，两边不会各说一套。
+   */
+  const commitQuery = (next: string) => {
+    if (searchTimer.current !== 0) {
+      window.clearTimeout(searchTimer.current)
+      searchTimer.current = 0
+    }
+    page.setQuery(next)
+  }
+  /* 停手 120ms 才筛（见 `searchNode` 那段注）；合成期间不调用它 */
+  const scheduleQuery = (next: string) => {
+    if (searchTimer.current !== 0) window.clearTimeout(searchTimer.current)
+    searchTimer.current = window.setTimeout(() => {
+      searchTimer.current = 0
+      page.setQuery(next)
+    }, 120)
+  }
   const searchNode = (
     /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
     <div className={s.search}>
 
       <input
+        ref={searchRef}
         className={s.input}
-        value={page.query}
+        defaultValue={page.query}
         placeholder={tr(PLACEHOLDER_KEY)}
         aria-label={tr('presets.page.search.aria')}
-        onChange={(e) => page.setQuery(e.target.value)}
+        onInput={(e) => {
+          /*
+           * ★ **合成期间不筛**（2026-10-30 作者圈图：搜索词里出现一长串「hhhhh」
+           * 其实是拼音还没提交）。输入的合成串（带下划线那一段）在 WebKit 里有个
+           * 长度上限 —— 到顶之后按键进不去，要空格/回车提交一段才能继续；那不是
+           * 我们的 bug（Safari 里一样），但我们**不该拿还没提交的合成串去筛表**。
+           */
+          if ((e.nativeEvent as InputEvent).isComposing === true) return
+          scheduleQuery(e.currentTarget.value)
+        }}
+        onCompositionEnd={(e) => scheduleQuery(e.currentTarget.value)}
         onKeyDown={(e) => {
-          /* ESC 清空但不失焦 —— 清完通常是想换个词继续打 */
-          if (e.key === 'Escape' && page.query !== '') {
+          /* ESC 清空但不失焦 —— 清完通常是想换个词继续打（清空要立刻生效，不走防抖） */
+          if (e.key === 'Escape' && e.currentTarget.value !== '') {
             e.preventDefault()
-            page.setQuery('')
+            e.currentTarget.value = ''
+            commitQuery('')
           }
+          /* 回车 = 「现在就筛」，不用等那 120ms */
+          if (e.key === 'Enter') commitQuery(e.currentTarget.value)
         }}
       />
       {page.query !== '' && (
@@ -3220,7 +3632,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           type="button"
           className={s.clear}
           aria-label={tr('presets.page.search.clearAria')}
-          onClick={() => page.setQuery('')}
+          onClick={() => {
+            const el = searchRef.current
+            if (el !== null) el.value = ''
+            commitQuery('')
+          }}
         >
           ×
         </button>
@@ -3294,10 +3710,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 窄窗丢掉的细节靠悬停看全（作者：「显示不完整就显示不完整，无所谓」）。
    */
   const noteText =
-    note === null ? '' : [note.text, ...(note.lines ?? [])].join(tr('common.clauseSep'))
+    note === null
+      ? ''
+      : [note.text, ...(note.lines ?? [])].map(say).join(tr('common.clauseSep'))
   const footBanner =
     note !== null ? (
-      <div className={note.bad ? s.bannerBad : s.banner} role="status" title={noteText}>
+      <div className={note.bad ? s.bannerBad : s.banner} role="status" data-tip={noteText}>
         {/* 逐份结局并在主句后面一句：单行，超出省略（明细也躺在 title 里） */}
         <span className={s.bannerText}>{noteText}</span>
         <button
@@ -3306,7 +3724,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           aria-label={tr('presets.page.banner.closeAria')}
           onClick={() => setNote(null)}
         >
-          ×
+          {/* 叉是**图标**不是字（`×` 的墨迹不吃行盒中线，见 `.noteClose` 那段） */}
+          <Icon name="close" size={13} strokeWidth={1.8} />
         </button>
       </div>
     ) : data.needsNewerClient ? (
@@ -3327,6 +3746,53 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         )}
       </div>
     ) : null
+
+  /*
+   * **多选操作条**（2026-10-29）。住的地方就是页脚那一格（本页唯一的横幅位）：
+   * 摆在表格上方会把列表往下推，而这一页的列表高度不许动。
+   *
+   * 优先级在 `note` **上面**：正在选东西时，用户要读的是"选了几份、能干什么"，
+   * 上一条操作结果可以先让位（它本来也是一闪而过的回执）。
+   */
+  const selectedRows = selecting
+    ? table.rows.filter(
+        (r) => selectedKeys.includes(r.rowKey) && removeWhyNotOf(tr, r) === undefined,
+      )
+    : []
+  /* 跑到一半时整条只报进度：两颗按钮一起灰下去（不能一边删一边改名单） */
+  const bulkBusy = bulkAt !== null
+  /*
+   * ★ 这一条**没有「全选 / 取消全选」按钮**（作者 2026-10-29：「没必要」）：
+   *   表头那颗复选框本来就是这两件事（空 → 全选、满 → 全不选、半选 → 补满），
+   *   同一格再摆两颗字就是同一件事说三遍。
+   */
+  const selectBar = selecting ? (
+    <div className={s.selectBar} role="status">
+      <span className={s.selectCount}>
+        {bulkAt === null
+          ? tr('presets.page.select.count', { count: selectedRows.length })
+          : tr('presets.page.select.busy', { index: bulkAt.index, total: bulkAt.total })}
+      </span>
+      <span className={s.selectHint}>{tr('presets.page.select.hint')}</span>
+      <span className={s.selectActs}>
+        {/*
+         * 删除走**与单份删除同一个确认框**（`removeAsk` 现在是一份名单）——
+         * 批量不另起一个"你确定吗"，问句与代价在两处必须长得一样。
+         */}
+        <button
+          type="button"
+          className={s.selectDanger}
+          disabled={bulkBusy || selectedRows.length === 0}
+          onClick={() => setRemoveAsk(selectedRows)}
+        >
+          {tr('presets.page.select.remove')}
+        </button>
+        <button type="button" className={s.noteAction} disabled={bulkBusy} onClick={exitSelect}>
+          {tr('presets.page.select.exit')}
+        </button>
+      </span>
+    </div>
+  ) : null
 
   return (
     <div ref={mountPage} className={s.page} data-density={density}>
@@ -3474,18 +3940,24 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 activeKey={menu.target?.rowKey ?? null}
                 expandedKey={expandedKey}
                 /* 点同一行收起、点别行换行 —— 与参数页同一条规则 */
-                onToggleExpand={(rowKey) => setExpandedKey((k) => (k === rowKey ? null : rowKey))}
+                onToggleExpand={(rowKey) => {
+                  /* 他自己点了行 —— 定位之前记下的那张卡就不算数了 */
+                  setKeepOpenPath(null)
+                  setExpandedKey((k) => (k === rowKey ? null : rowKey))
+                }}
                 /*
                  * 操作列常驻：本地表那一颗按钮的字随类型变（应用 / 复制），云端表是下载。
                  * 右键菜单**照旧全在**，操作列只是把最常用的那一个摆到明面上。
                  */
-                busyKey={busyKey}
+                busyKeys={busyKeys}
                 /* 表头排序（2026-10-16）：状态在 `page` 里（落会话），表这边只把点击交出去 */
                 sort={page.sort}
                 onSort={page.toggleSort}
                 archiveCountOf={archiveCountOf}
                 onOpenArchive={openArchive}
                 onOpenLocal={openLocal}
+                /* 「在文件夹中打开」= 右键菜单那颗（详情卡「文件位置」那一行右侧同一动作） */
+                onReveal={runReveal}
                 /*
                  * 展开详情「快捷操作」那颗「修改参数」（2026-10-20）——
                  * 与右键菜单里那一项同一个动作、同一个词（`PARAMS_TEXT`）。
@@ -3503,9 +3975,8 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 onUpdateLocal={(localRow) => {
                   void runUpdateLocal(localRow)
                 }}
-                /* 来源格「复制自 X」的定位落点；sourceLabel 决定交付预设行来源列显示 GitHub / Gitee */
+                /* 来源格「云端 · 分支」/「本地 · 母本」的定位落点 */
                 onLocate={locateRow}
-                sourceLabel={data.sourceLabel}
                 /* 备注（副标题覆盖账）与归属（复制出来的那份标机型 / 版本） */
                 machines={data.machines}
                 remarks={data.remarks}
@@ -3517,6 +3988,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                  * 这一格由 `usePresetPrefs` 读（后端唯一出口），表那边只照着画。
                  */
                 copiesFollow={copiesFollowCloud}
+                /*
+                 * **多选**（批量删除）：给了这一格表就长出复选框那一列、点行变勾选。
+                 * 判据只有 `removeWhyNotOf` 一处（云端表没有删除，所以那边永远不给）。
+                 */
+                selection={
+                  selecting
+                    ? {
+                        keys: new Set(selectedKeys),
+                        whyNot: (r) => removeWhyNotOf(tr, r),
+                        onToggle: toggleSelect,
+                        onAll: () => selectAll(table.rows),
+                        onNone: () => setSelectedKeys([]),
+                      }
+                    : undefined
+                }
               />
             </>
           )}
@@ -3742,7 +4228,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             title={
               removeAsk === null
                 ? tr('presets.page.removeAsk.title')
-                : tr('presets.page.removeAsk.titleNamed', { name: removeAsk.fileName })
+                : removeAsk.length === 1
+                  ? tr('presets.page.removeAsk.titleNamed', { name: removeAsk[0].fileName })
+                  : tr('presets.page.removeAsk.titleMany', { count: removeAsk.length })
             }
             footer={
               <>
@@ -3750,13 +4238,27 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   {tr('presets.page.removeAsk.cancel')}
                 </button>
                 <button type="button" className={s.editDanger} onClick={confirmRemove}>
-                  {tr('presets.page.removeAsk.confirm')}
+                  {removeAsk !== null && removeAsk.length > 1
+                    ? tr('presets.page.removeAsk.confirmMany', { count: removeAsk.length })
+                    : tr('presets.page.removeAsk.confirm')}
                 </button>
               </>
             }
             onClose={() => setRemoveAsk(null)}
           >
-            {removeAsk !== null && <p className={s.editNote}>{removeConfirmDetail(removeAsk)}</p>}
+            {/* 一份 = 原来那一条代价；多份 = 按来源分开数（见 `removeManyDetail`） */}
+            {removeAsk !== null &&
+              (removeAsk.length === 1 ? (
+                <p className={s.editNote}>{removeConfirmDetail(removeAsk[0])}</p>
+              ) : (
+                <div className={s.editNoteLines}>
+                  {removeManyDetail(removeAsk).map((line) => (
+                    <p key={line} className={s.editNote}>
+                      {line}
+                    </p>
+                  ))}
+                </div>
+              ))}
           </Modal>
 
           <Modal
@@ -3790,7 +4292,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     type="button"
                     className={s.editDiffBtn}
                     disabled={originText === null}
-                    title={
+                    data-tip={
                       originText === null
                         ? tr('presets.page.editor.diffNoOrigin')
                         : tr('presets.page.editor.diffHint')
@@ -3804,7 +4306,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                   </p>
 
                   {editing.draftError !== null && (
-                    <span className={s.editorStateBad}>{editing.draftError}</span>
+                    <span className={s.editorStateBad}>{say(editing.draftError)}</span>
                   )}
                   <span className={s.editorActs}>
                     {editMode ? (
@@ -3813,7 +4315,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.iconBtn}
                           disabled={undoStack.length === 0}
-                          title={tr('presets.page.editor.undoTitle')}
+                          data-tip={tr('presets.page.editor.undoTitle')}
                           aria-label={tr('presets.page.editor.undoAria')}
                           onClick={undoEdit}
                         >
@@ -3823,7 +4325,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.iconBtn}
                           disabled={redoStack.length === 0}
-                          title={tr('presets.page.editor.redoTitle')}
+                          data-tip={tr('presets.page.editor.redoTitle')}
                           aria-label={tr('presets.page.editor.redoAria')}
                           onClick={redoEdit}
                         >
@@ -3833,7 +4335,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                           type="button"
                           className={s.textBtn}
                           /* 词与说明都取自 `EDIT_TEXT`（三个模态框同一句话，见那一份的长注释） */
-                          title={tr(EDIT_TEXT.exitTitle)}
+                          data-tip={tr(EDIT_TEXT.exitTitle)}
                           onClick={exitEdit}
                         >
                           {tr(EDIT_TEXT.exitMode)}
@@ -3863,7 +4365,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                       <button
                         type="button"
                         className={s.primary}
-                        title={tr('presets.page.editor.enterTitle')}
+                        data-tip={tr('presets.page.editor.enterTitle')}
                         /*
                          * 进编辑模式**接着看**：把只读态读到哪抄下来（编辑态是另一个滚动
                          * 元素，CSS 接不过来），见 `editAreaOpen` 那个 effect。
@@ -4133,7 +4635,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 <button
                   type="button"
                   className={s.renameReset}
-                  title={tr('presets.page.rename.fillDefaultTitle', {
+                  data-tip={tr('presets.page.rename.fillDefaultTitle', {
                     name:
                       renaming?.row === undefined
                         ? ''
@@ -4193,13 +4695,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                     }}
                   />
                   {renaming.ext !== '' && (
-                    <span className={s.renameExt} title={tr('presets.page.rename.extTitle')}>
+                    <span className={s.renameExt} data-tip={tr('presets.page.rename.extTitle')}>
                       {renaming.ext}
                     </span>
                   )}
                 </div>
                 {renaming.error !== null && (
-                  <p className={s.editErr}>{tr('presets.page.rename.failed', { detail: renaming.error })}</p>
+                  <p className={s.editErr}>
+                    {tr('presets.page.rename.failed', { detail: say(renaming.error) })}
+                  </p>
                 )}
               </div>
             )}
@@ -4217,18 +4721,25 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
          * 10×2 = 48，页脚一像素都不长：列表高度从头到尾不动（作者要求的）。
          */}
         <div className={s.foot}>
-          {footBanner ?? (
+          {selectBar ?? footBanner ?? (
             <>
               {!page.unsupported && (
                 <span className={s.footHint}>
                   {/* 菜单里有什么，按档 + 按表说 —— 云端表一味只读，没有"重命名 / 删除"那种只属于本地文件的话。
                       「参数对比」是右键两下那一条（选第一份 → 再选第二份）—— 入口只住菜单里，
                       所以这句提示就是它的发现路径，不能省 */}
-                  {page.kind === 'mkp'
-                    ? page.scope === 'cloud'
-                      ? tr('presets.page.foot.mkpCloud')
-                      : tr('presets.page.foot.mkpLocal')
-                    : tr('presets.page.foot.slicer')}
+                  {/*
+                    {menu} = 「没有鼠标就…」那半句，**按平台给**（Windows 有 Shift+F10
+                    与菜单键，mac 两样都没有 ⇒ 写 Ctrl+点按，见 `FOOT_MENU_HINT_KEY`）。
+                  */}
+                  {tr(
+                    page.kind === 'mkp'
+                      ? page.scope === 'cloud'
+                        ? 'presets.page.foot.mkpCloud'
+                        : 'presets.page.foot.mkpLocal'
+                      : 'presets.page.foot.slicer',
+                    { menu: tr(FOOT_MENU_HINT_KEY) },
+                  )}
                 </span>
               )}
             </>

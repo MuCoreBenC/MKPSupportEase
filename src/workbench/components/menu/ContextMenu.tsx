@@ -175,7 +175,7 @@ export default function ContextMenu({ at, entries, onClose }: Props) {
                 className={entry.danger === true ? s.danger : s.item}
                 data-on={entry.disabled === undefined ? '1' : '0'}
                 disabled={entry.disabled !== undefined}
-                title={entry.disabled}
+                data-tip={entry.disabled}
                 tabIndex={-1}
                 onClick={() => pick(entry)}
               >

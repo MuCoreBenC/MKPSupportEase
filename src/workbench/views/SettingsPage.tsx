@@ -252,8 +252,12 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
   const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
   const [devBusy, setDevBusy] = useState(false)
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
-  /** 起哪一份（**草稿**：点一下只是选，交出去是点「启动」/「换源并重启」那一下） */
-  const [devDraft, setDevDraft] = useState<DevSourceKind>('v1')
+  /**
+   * 起哪一份（**草稿**：点一下只是选，交出去是点「启动」那一下）。
+   *
+   * 2026-10-30 起只有一项（夹具退役）—— 仍留成状态，是为了接口形状不为一处特例改窄。
+   */
+  const [devDraft, setDevDraft] = useState<DevSourceKind>('delivery')
 
   /**
    * 现读一次状态。`sync` 只在**第一次**读的时候为真：把"上次端的是哪一份"选中一次。
@@ -321,7 +325,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
 
   /**
    * 那一份的行名 —— **后端给的说法**（`sources[].label`），界面不自己拼一套。
-   * 还没读到状态时退回枚举值本身（`v1`），总比空着强。
+   * 还没读到状态时退回枚举值本身，总比空着强。
    */
   const devLabel = (k: DevSourceKind | null): string =>
     devSrc?.sources.find((o) => o.kind === k)?.label ?? (k ?? '—')
@@ -597,7 +601,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                 type="button"
                 className={`${s.btn} ${sandbox?.enabled === true ? '' : s.btnPrimary}`}
                 disabled={sandBusy || sandbox === null}
-                title={
+                data-tip={
                   sandbox?.enabled === true
                     ? '切回正式 —— 沙箱原样留着，下次回来还在'
                     : '开之前会先把正式那份整个拷进沙箱（presets/ 整棵，含 3MF 与模型）'
@@ -786,7 +790,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                         disabled={revealBusy === p}
                         onClick={() => void toggleReveal(p)}
                         aria-label={`${PLATFORM_LABEL[p]} Token 明文查看`}
-                        title={revealed[p] !== undefined ? '收起明文' : '显示明文（可复制）'}
+                        data-tip={revealed[p] !== undefined ? '收起明文' : '显示明文（可复制）'}
                       >
                         <svg viewBox="0 0 20 20" aria-hidden>
                           <path
@@ -992,13 +996,11 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
               </span>
             </div>
 
-            {/* ——— 端哪一份：三行单选（名字 / 说法 / 在哪儿 / 齐没齐都由后端给） ——— */}
+            {/* ——— 端哪一份：一行（名字 / 说法 / 在哪儿 / 齐没齐都由后端给） ——— */}
             <div className={s.vhead}>
               <b>端哪一份</b>
               <span className={s.vkey}>
-                {devSrc?.running === true
-                  ? '服务在跑着 —— 换到别的会重启它'
-                  : '选一份，再点「启动」'}
+                {devSrc?.running === true ? '服务在跑着' : '点「启动」'}
               </span>
             </div>
 
@@ -1047,10 +1049,12 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
             </p>
 
             <p className={s.vhelp}>
-              ★ <b>选「当前交付」时不用先去发布</b>：客户端判"有没有新版"只比交付根里{' '}
-              <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>
-              （下载时校的 SHA 也从它来），而<b>「生成」就已经把它重算了</b>。发布才定稿的
-              那两份（<span className={s.mono}>manifest.json</span> /{' '}
+              ★ <b>不用先去发布</b>：客户端判"有没有新版"看交付根里{' '}
+              <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>{' '}
+              与 <span className={s.mono}>publishSerial</span>，而<b>「生成」就已经把 revision
+              重算了</b>。发布序号则由这个测试源在响应里<b>自动 +1</b>（盘上一个字节不动）——
+              于是客户端看到的是正常的"云端发了下一版"，不会出现"同号改了内容"那种像坏了的读数。
+              发布才定稿的那两份（<span className={s.mono}>manifest.json</span> /{' '}
               <span className={s.mono}>release.json</span>）不在客户端那条链上 ——
               测试模式里它们会一直停在上一版，发布闸因此报一条「待留意」，<b>那是正常的</b>，
               不用为它去点发布。
@@ -1077,7 +1081,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                       type="button"
                       className={s.btn}
                       disabled={devBusy || c.pid === null}
-                      title={
+                      data-tip={
                         c.pid === null
                           ? '认不出占着它的进程 —— 请在那个终端里自己停掉它'
                           : '把它停掉（后端会先确认这个端口还是它的，再动手）'
@@ -1112,7 +1116,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                   type="button"
                   className={`${s.btn} ${s.btnPrimary}`}
                   disabled={devBusy || devSrc === null || devConflicts.length > 0}
-                  title={
+                  data-tip={
                     devConflicts.length > 0
                       ? '先把上面那条端口占用处理掉'
                       : `以「${devLabel(devDraft)}」这一份起`
@@ -1128,7 +1132,7 @@ export default function SettingsPage({ boot, sandbox, onSandbox }: Props) {
                   type="button"
                   className={s.btn}
                   disabled={devBusy || devConflicts.length > 0}
-                  title={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
+                  data-tip={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
                     devDraft,
                   )}」：先把它那棵进程树收掉再起，一次点击一件事`}
                   onClick={() => void startDevSrc()}

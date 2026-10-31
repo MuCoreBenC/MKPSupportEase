@@ -11,9 +11,10 @@
 import { useState, type ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
-import { useT, type StringKey } from '../../i18n'
+import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
+import { Tip } from '../../components/tooltip'
 import { Btn } from '../ui/Controls'
 import s from './PageSettings.module.css'
 
@@ -40,9 +41,11 @@ const UI_MODES: { id: 'silent' | 'gui'; label: StringKey; hint: StringKey; icon:
 
 export default function PostprocModeSection() {
   const tr = useT()
+  const say = useText()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
-  const [resetNote, setResetNote] = useState<string | null>(null)
+  /** 成功时是后端给的落点原话，失败时是存键的那句 —— 两种都住 [`Text`] */
+  const [resetNote, setResetNote] = useState<Text | null>(null)
   const [resetBusy, setResetBusy] = useState(false)
 
   const on = (why: string) => setErr(why)
@@ -68,7 +71,7 @@ export default function PostprocModeSection() {
         setResetBusy(false)
       },
       (e: unknown) => {
-        setResetNote(tr('settings.postproc.resetFailed', { detail: errorText(e) }))
+        setResetNote(msg('settings.postproc.resetFailed', { detail: errorText(e) }))
         setResetBusy(false)
       },
     )
@@ -80,8 +83,10 @@ export default function PostprocModeSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.postproc.notify')}</div>
-          <p className={s.fieldNote}>{tr('settings.postproc.notifyNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.notify')}
+            <Tip text={tr('settings.postproc.notifyNote')} />
+          </div>
         </div>
         <Switch
           checked={r.notifyOnFinish}
@@ -90,37 +95,36 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      <div className={s.field}>
-        <div className={s.fieldTitle}>{tr('settings.postproc.mode')}</div>
-        <p className={s.fieldNote}>{tr('settings.postproc.modeNote')}</p>
-
-        <div className={s.modeGrid} role="radiogroup" aria-label={tr('settings.postproc.modeAria')}>
-          {UI_MODES.map((m) => {
-            const picked = r.uiMode === m.id
-            return (
-              <button
-                key={m.id}
-                type="button"
-                role="radio"
-                aria-checked={picked}
-                className={`${s.modeCard} ${picked ? s.modeCardOn : ''}`}
-                onClick={() => void set({ uiMode: m.id }, on)}
-              >
-                <span className={s.modeIcon} aria-hidden="true">
-                  {m.icon}
-                </span>
-                <span className={s.modeLabel}>{tr(m.label)}</span>
-                <span className={s.modeHint}>{tr(m.hint)}</span>
-              </button>
-            )
-          })}
+      {/* 2026-10-30：两张模式卡 → 一行分段（与主题/语言/数据源同一套）。
+          卡的说明不再铺在页面上，挪进 title（悬停看）。 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle} data-tip={tr('settings.postproc.modeNote')}>
+            {tr('settings.postproc.mode')}
+          </div>
+        </div>
+        <div className={s.seg} role="radiogroup" aria-label={tr('settings.postproc.modeAria')}>
+          {UI_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={r.uiMode === m.id}
+              data-tip={tr(m.hint)}
+              onClick={() => void set({ uiMode: m.id }, on)}
+            >
+              {tr(m.label)}
+            </button>
+          ))}
         </div>
       </div>
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.postproc.glueBottom')}</div>
-          <p className={s.fieldNote}>{tr('settings.postproc.glueBottomNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.glueBottom')}
+            <Tip text={tr('settings.postproc.glueBottomNote')} />
+          </div>
         </div>
         <Switch
           checked={r.glueBottomEnabled}
@@ -131,8 +135,10 @@ export default function PostprocModeSection() {
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.postproc.tower')}</div>
-          <p className={s.fieldNote}>{tr('settings.postproc.towerNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.tower')}
+            <Tip text={tr('settings.postproc.towerNote')} />
+          </div>
         </div>
         <Switch
           checked={r.autoTowerPosition}
@@ -141,17 +147,20 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      <div className={`${s.field} ${s.fieldRow}`}>
+      {/* 次级行：附属动作，往右让一格、字灰一档 */}
+      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle}>{tr('settings.postproc.reset')}</div>
-          <p className={s.fieldNote}>{tr('settings.postproc.resetNote')}</p>
+          <div className={s.fieldTitle}>
+            {tr('settings.postproc.reset')}
+            <Tip text={tr('settings.postproc.resetNote')} />
+          </div>
         </div>
         <Btn variant="danger" disabled={resetBusy} onClick={doReset}>
           {resetBusy ? tr('settings.postproc.resetting') : tr('settings.postproc.resetAction')}
         </Btn>
       </div>
 
-      {resetNote !== null && <p className={s.note}>{resetNote}</p>}
+      {resetNote !== null && <p className={s.note}>{say(resetNote)}</p>}
       {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
     </section>
   )

@@ -68,7 +68,7 @@ use super::catalog::kind::PRESET;
 use super::catalog::{Catalog, CatalogFile};
 use super::lineage::{self, Lineage};
 use super::source_identity::SourceIdentity;
-use super::source_ledger::SourceNote;
+use super::source_ledger::{LocalProvenance, OriginKind};
 
 /// 读血统时最多看文件头这么多字节。
 ///
@@ -188,17 +188,24 @@ impl BasedOn {
 /// 是两件事，界面各说各的）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerdictFacts {
+    /// 这份本地文件**怎么来的**（下载 / 拷贝 / 导入 / 旧账未知）。账上没记 ⇒ `None`
+    pub lineage_kind: Option<OriginKind>,
     /// 这份副本**建的时候**哪个源在生效（[`SourceIdentity::key`]；账上没记 ⇒ None）
     pub lineage_source: Option<String>,
     /// 血统里记的来源版本标记（文件头的 `# release_time`，可能是版本号不是时间）。
     /// **只做展示**：它是配方的写作日期，不是发布顺序。
     pub lineage_release: Option<String>,
-    /// 账上那个源（血统源）最近一次发布目录的时刻
+    /// ★ 这份**对应的那个云端版本**实际发布的时刻（下载那一刻目录的 `publishedAt`，
+    /// 记在本地来路账里）。老文件没有这一格 ⇒ `None`，**不许拿 `release_time` 顶**。
     pub lineage_published_at: Option<String>,
+    /// 血统记的**来源那一版云端原文**的 SHA-256（不是本地文件此刻的字节）
+    pub lineage_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
     pub cloud_published_at: Option<String>,
+    /// 当前云端这一份的原文摘要（目录里登记的 sha256）—— 「更多」里对照用
+    pub cloud_sha256: Option<String>,
     /// 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `None`
     pub lineage_catalog: Option<String>,
     /// 血统认定自己基于那一条线的第几号（`# based_on_serial`）。老副本 ⇒ `None`
@@ -207,6 +214,9 @@ pub struct VerdictFacts {
     pub cloud_catalog: Option<String>,
     /// 当前目录是那一条线的第几号（`catalog.publishSerial`）
     pub cloud_serial: Option<u64>,
+    /// `Unverified` 时**为什么**说不清（跨 IPC 的稳定词，界面翻成人话）。
+    /// 其余档位一律 `None`。
+    pub unverified_reason: Option<&'static str>,
 }
 
 /// 一次判定的结果：结论 + 摆事实的那几格
@@ -221,8 +231,6 @@ pub struct Judge<'a> {
     pub catalog: &'a Catalog,
     /// 当前生效的源身份（没配置源 ⇒ `None` ⇒ 一律说不清"是不是同一个源"）
     pub cloud: Option<&'a SourceIdentity>,
-    /// 目录账（见过哪些源、各自发布时刻）
-    pub notes: &'a [SourceNote],
 }
 
 /// 第九层：这份用户文件**文件级**上能不能被安全使用。
@@ -294,25 +302,55 @@ fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
 pub fn based_on(
     judge: &Judge<'_>,
     lineage: Option<&Lineage>,
-    copy_source: Option<&SourceIdentity>,
+    provenance: Option<&LocalProvenance>,
 ) -> Verdict {
-    let facts = VerdictFacts {
-        lineage_source: copy_source.map(SourceIdentity::key),
+    judge_against(judge, lineage, provenance)
+}
+
+/// 判定本体（[`based_on`] 是它唯一的公开出口）。
+fn judge_against(
+    judge: &Judge<'_>,
+    lineage: Option<&Lineage>,
+    provenance: Option<&LocalProvenance>,
+) -> Verdict {
+    let mut facts = VerdictFacts {
+        lineage_kind: provenance.map(|p| p.kind),
+        lineage_source: provenance
+            .and_then(|p| p.identity.as_ref())
+            .map(SourceIdentity::key),
         lineage_release: lineage.and_then(|l| l.based_on_release_time.clone()),
-        lineage_published_at: copy_source
-            .and_then(|id| source_note(judge.notes, id))
-            .and_then(|n| n.published_at.clone()),
+        /* ★ 这一格只认**下载那一刻定格**的目录发布时刻；老账没有 ⇒ None（界面写「未知」） */
+        lineage_published_at: provenance.and_then(|p| p.published_at.clone()),
+        lineage_sha256: lineage.and_then(|l| l.based_on_sha256.clone()),
         cloud_source: judge.cloud.map(SourceIdentity::key),
         cloud_published_at: judge.catalog.published_at.clone(),
+        cloud_sha256: None,
         lineage_catalog: lineage.and_then(|l| l.based_on_catalog.clone()),
         lineage_serial: lineage.and_then(|l| l.based_on_serial),
         cloud_catalog: judge.catalog.catalog_id.clone(),
         cloud_serial: judge.catalog.publish_serial,
+        unverified_reason: None,
     };
-    let verdict = |based_on| Verdict {
-        based_on,
-        facts: facts.clone(),
-    };
+    /*
+     * 判定出口用宏而不是闭包：`facts.cloudSha256` 要等目录里那份文件找到之后才填，
+     * 闭包一旦捕获 `facts` 就不能再改；宏每次展开时 clone 当前的 facts。
+     */
+    macro_rules! verdict {
+        ($b:expr, $r:expr $(,)?) => {
+            Verdict {
+                based_on: $b,
+                facts: VerdictFacts {
+                    unverified_reason: $r,
+                    ..facts.clone()
+                },
+            }
+        };
+    }
+    macro_rules! unknown {
+        ($r:expr $(,)?) => {
+            verdict!(BasedOn::Unverified, Some($r))
+        };
+    }
 
     /*
      * ★ **判定顺序**（2026-10-28 三问题模型）：
@@ -328,10 +366,10 @@ pub fn based_on(
      * 那是第 ④ 步的事（一次发布改了 3 份，另外 6 份就是 `Unchanged`）。
      */
     let Some(lineage) = lineage else {
-        return verdict(BasedOn::Unverified);
+        return unknown!("no_lineage");
     };
     let Some(source) = lineage.based_on.as_deref() else {
-        return verdict(BasedOn::Unverified);
+        return unknown!("no_lineage");
     };
     let known = judge
         .catalog
@@ -341,16 +379,18 @@ pub fn based_on(
         .or_else(|| judge.catalog.files.iter().find(|f| f.file_name == source));
     let Some(file) = known else {
         /* 血统指的那一份根本不在当前目录里（换源 / 下线 / 改过名）—— 说不清 */
-        return verdict(BasedOn::Unverified);
+        return unknown!("not_in_catalog");
     };
+    /* 目录里登记的云端原文摘要：给「更多」对照用 */
+    facts.cloud_sha256 = file.expected_sha().map(str::to_owned);
 
     /* ① 血统有没有发布线 / 序号：老副本没有，老目录也没有 */
     let (Some(lineage_line), Some(lineage_serial)) = (&facts.lineage_catalog, facts.lineage_serial)
     else {
-        return verdict(BasedOn::Unverified);
+        return unknown!("no_release_line");
     };
     let (Some(cloud_line), Some(cloud_serial)) = (&facts.cloud_catalog, facts.cloud_serial) else {
-        return verdict(BasedOn::Unverified);
+        return unknown!("catalog_without_identity");
     };
 
     /*
@@ -362,10 +402,15 @@ pub fn based_on(
      * 发布账本是各自的 —— 两边的序号根本不在一条数轴上。
      *
      * 所以先问"这两份东西出自同一个地址吗"：不同就 `Elsewhere`，**连序号都不比**。
-     * 只在两边都知道地址时才判（血统源记在 `run/lineage-source.json` 里，文件搬到
-     * 另一台机器就没了）—— 不知道就退回只按发布线判，不凭空造一个"来源不同"。
+     *
+     * ★ 2026-10-29 起这条闸是**硬性**的：账上没有源身份（旧下载 / 拷贝丢了母本账）
+     * 就不再"退回只按发布线判" —— 两个分支各自数号，序号根本不在一条数轴上，
+     * 硬比出来的 `outdated` / `newer` 都是编的。说不清就 `Unverified`。
      */
-    if let (Some(mine), Some(theirs)) = (&facts.lineage_source, &facts.cloud_source) {
+    let Some(mine) = facts.lineage_source.as_deref() else {
+        return unknown!("no_source_identity");
+    };
+    if let Some(theirs) = facts.cloud_source.as_deref() {
         /*
          * ★ 比的是 **ref（分支）**，不是整串地址。
          *
@@ -378,19 +423,19 @@ pub fn based_on(
          */
         if let (Some(a), Some(b)) = (address_ref(mine), address_ref(theirs)) {
             if a != b {
-                return verdict(BasedOn::Elsewhere);
+                return verdict!(BasedOn::Elsewhere, None);
             }
         }
     }
 
     /* ② 同不同一条线 —— 不同线时序号毫无可比性（两条线各自数各自的号） */
     if lineage_line != cloud_line {
-        return verdict(BasedOn::Elsewhere);
+        return verdict!(BasedOn::Elsewhere, None);
     }
 
     /* ③ 发布顺序 */
     if cloud_serial < lineage_serial {
-        return verdict(BasedOn::Newer);
+        return verdict!(BasedOn::Newer, None);
     }
 
     /*
@@ -403,31 +448,33 @@ pub fn based_on(
          * 缺摘要就说不清 —— 尤其**随包 bootstrap 目录不登记期望值**，
          * 那种"比不出来"绝不许当成"过期了"（会凭空报一批假更新）。
          */
-        _ => return verdict(BasedOn::Unverified),
+        _ => return unknown!("no_sha"),
     };
 
     if cloud_serial == lineage_serial {
-        return verdict(if same_content {
-            BasedOn::Current
-        } else {
-            /*
-             * 同一发布线的同一序号，字节却变了 —— 那一代发布目录不再唯一。
-             * 不是"有新版"，是**数据坏了**：界面出异常码，不进更新流程。
-             */
-            BasedOn::Inconsistent
-        });
+        return verdict!(
+            if same_content {
+                BasedOn::Current
+            } else {
+                /*
+                 * 同一发布线的同一序号，字节却变了 —— 那一代发布目录不再唯一。
+                 * 不是"有新版"，是**数据坏了**：界面出异常码，不进更新流程。
+                 */
+                BasedOn::Inconsistent
+            },
+            None,
+        );
     }
 
     /* 云端序号更大：发布确实往前走了。但对**这一份**来说，还可能什么都没变 */
-    verdict(if same_content {
-        BasedOn::Unchanged
-    } else {
-        BasedOn::Outdated
-    })
-}
-
-fn source_note<'a>(notes: &'a [SourceNote], id: &SourceIdentity) -> Option<&'a SourceNote> {
-    notes.iter().find(|n| n.identity == *id)
+    verdict!(
+        if same_content {
+            BasedOn::Unchanged
+        } else {
+            BasedOn::Outdated
+        },
+        None,
+    )
 }
 
 /// RFC3339 → 可比较的秒数。**不引时间库**：只认 `YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM]`，
@@ -1761,18 +1808,12 @@ mod tests {
         let mut v2 = entry_bytes("A1-standard.toml", "云端第二版");
         let based_on_v1 = lineage_at(11, "云端第一版");
         let gh = github();
-        let notes: Vec<SourceNote> = Vec::new();
 
         /* 目录里还是 v1：基于当前版 */
         let mut c1 = catalog_with(vec![v1.clone()]);
         stamp(&mut c1, 11);
         assert_eq!(
-            based_on(
-                &judge(&c1, Some(&gh), &notes),
-                Some(&based_on_v1),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&c1, Some(&gh)), Some(&based_on_v1), Some(&gh)).based_on,
             BasedOn::Current
         );
 
@@ -1781,12 +1822,7 @@ mod tests {
         let mut c2 = catalog_with(vec![v2.clone()]);
         stamp(&mut c2, 12);
         assert_eq!(
-            based_on(
-                &judge(&c2, Some(&gh), &notes),
-                Some(&based_on_v1),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&c2, Some(&gh)), Some(&based_on_v1), Some(&gh)).based_on,
             BasedOn::Outdated,
             "云端换版了，用户那份还是基于旧版"
         );
@@ -1820,11 +1856,10 @@ mod tests {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端")]);
         stamp(&mut catalog, 7);
         let gh = github();
-        let notes: Vec<SourceNote> = Vec::new();
-        let j = judge(&catalog, Some(&gh), &notes);
+        let j = judge(&catalog, Some(&gh));
 
         assert_eq!(
-            based_on(&j, None, Some(&gh)).based_on,
+            based_on_id(&j, None, Some(&gh)).based_on,
             BasedOn::Unverified,
             "没有血统"
         );
@@ -1836,7 +1871,7 @@ mod tests {
         let mut no_sha = no_sha;
         no_sha.based_on_sha256 = None;
         assert_eq!(
-            based_on(&j, Some(&no_sha), Some(&gh)).based_on,
+            based_on_id(&j, Some(&no_sha), Some(&gh)).based_on,
             BasedOn::Unverified,
             "记了来源没记摘要 —— 比不了就是比不了"
         );
@@ -1846,7 +1881,7 @@ mod tests {
             ..lineage_at(7, "云端")
         };
         assert_eq!(
-            based_on(&j, Some(&gone), Some(&gh)).based_on,
+            based_on_id(&j, Some(&gone), Some(&gh)).based_on,
             BasedOn::Unverified,
             "来源不在目录里（换源或下线）"
         );
@@ -1857,10 +1892,10 @@ mod tests {
         bare.sha256 = None;
         let mut catalog = catalog_with(vec![bare]);
         stamp(&mut catalog, 7);
-        let j = judge(&catalog, Some(&gh), &notes);
+        let j = judge(&catalog, Some(&gh));
         let sha = lineage_at(7, "云端第一版");
         assert_eq!(
-            based_on(&j, Some(&sha), Some(&gh)).based_on,
+            based_on_id(&j, Some(&sha), Some(&gh)).based_on,
             BasedOn::Unverified,
             "目录没登记期望值 —— 不许当成过期"
         );
@@ -1874,13 +1909,12 @@ mod tests {
     fn a_mirror_switch_is_judged_by_the_line_and_serial_not_the_host() {
         let gh = github();
         let gt = gitee();
-        let notes: Vec<SourceNote> = Vec::new();
 
         /* 镜像落后一版：云端 39 号、我基于 42 号 ⇒ 云端较旧，不给更新 */
         let mut behind = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut behind, 39);
-        let v = based_on(
-            &judge(&behind, Some(&gt), &notes),
+        let v = based_on_id(
+            &judge(&behind, Some(&gt)),
             Some(&lineage_at(42, "云端第一版")),
             Some(&gh),
         );
@@ -1905,8 +1939,8 @@ mod tests {
         );
 
         /* 两镜像同一代：39 号 + 同一份字节 ⇒ 已是最新 */
-        let same = based_on(
-            &judge(&behind, Some(&gt), &notes),
+        let same = based_on_id(
+            &judge(&behind, Some(&gt)),
             Some(&lineage_at(39, "云端第二版")),
             Some(&gh),
         );
@@ -1922,8 +1956,8 @@ mod tests {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         catalog.catalog_id = Some("someone-else".to_owned());
         catalog.publish_serial = Some(99);
-        let v = based_on(
-            &judge(&catalog, Some(&gh), &[]),
+        let v = based_on_id(
+            &judge(&catalog, Some(&gh)),
             Some(&lineage_at(42, "云端第一版")),
             Some(&gh),
         );
@@ -1940,8 +1974,8 @@ mod tests {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut catalog, 43);
 
-        let same_bytes = based_on(
-            &judge(&catalog, Some(&gh), &[]),
+        let same_bytes = based_on_id(
+            &judge(&catalog, Some(&gh)),
             Some(&lineage_at(42, "云端第一版")),
             Some(&gh),
         );
@@ -1952,8 +1986,8 @@ mod tests {
         );
         assert!(!same_bytes.based_on.allows_update());
 
-        let changed_bytes = based_on(
-            &judge(&catalog, Some(&gh), &[]),
+        let changed_bytes = based_on_id(
+            &judge(&catalog, Some(&gh)),
             Some(&lineage_at(42, "云端第零版")),
             Some(&gh),
         );
@@ -1969,8 +2003,8 @@ mod tests {
          */
         let mut same_serial = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut same_serial, 43);
-        let conflict = based_on(
-            &judge(&same_serial, Some(&gh), &[]),
+        let conflict = based_on_id(
+            &judge(&same_serial, Some(&gh)),
             Some(&lineage_at(43, "另一个字节")),
             Some(&gh),
         );
@@ -1989,7 +2023,6 @@ mod tests {
     #[test]
     fn without_a_release_baseline_nothing_is_claimed() {
         let gh = github();
-        let notes: Vec<SourceNote> = Vec::new();
         let mut identified = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut identified, 43);
 
@@ -2001,12 +2034,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            based_on(
-                &judge(&identified, Some(&gh), &notes),
-                Some(&old_three),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&identified, Some(&gh)), Some(&old_three), Some(&gh)).based_on,
             BasedOn::Unverified,
             "老血统没有发布线 —— 内容恰好相同也不许说已是最新"
         );
@@ -2014,8 +2042,8 @@ mod tests {
         /* 目录没有身份（随包旧目录 / 手工拼的目录） */
         let bare = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         assert_eq!(
-            based_on(
-                &judge(&bare, Some(&gh), &notes),
+            based_on_id(
+                &judge(&bare, Some(&gh)),
                 Some(&lineage_at(43, "云端第一版")),
                 Some(&gh)
             )
@@ -2030,12 +2058,7 @@ mod tests {
             ..lineage_at(43, "云端第一版")
         };
         assert_eq!(
-            based_on(
-                &judge(&identified, Some(&gh), &notes),
-                Some(&half),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&identified, Some(&gh)), Some(&half), Some(&gh)).based_on,
             BasedOn::Unverified
         );
     }
@@ -2047,14 +2070,13 @@ mod tests {
     #[test]
     fn a_user_edited_copy_is_judged_by_its_lineage_not_its_bytes() {
         let gh = github();
-        let notes: Vec<SourceNote> = Vec::new();
 
         /* 云端还在第 42 号、字节也没变 ⇒ 我这份就是当前版（哪怕正文早被我改过） */
         let mut same = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut same, 42);
         assert_eq!(
-            based_on(
-                &judge(&same, Some(&gh), &notes),
+            based_on_id(
+                &judge(&same, Some(&gh)),
                 Some(&lineage_at(42, "云端第一版")),
                 Some(&gh)
             )
@@ -2067,8 +2089,8 @@ mod tests {
         let mut moved = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut moved, 43);
         assert_eq!(
-            based_on(
-                &judge(&moved, Some(&gh), &notes),
+            based_on_id(
+                &judge(&moved, Some(&gh)),
                 Some(&lineage_at(42, "云端第一版")),
                 Some(&gh)
             )
@@ -2102,29 +2124,26 @@ mod tests {
 
         /* 同一个地址：照常按发布顺序判 */
         assert_eq!(
-            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), Some(&gh)).based_on,
+            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Outdated,
             "同一地址、云端号更大、字节变了 ⇒ 就是有新版"
         );
 
         /* 地址不同：序号再比也没意义 */
         assert_eq!(
-            based_on(
-                &judge(&catalog, Some(&branch), &[]),
-                Some(&lineage),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&catalog, Some(&branch)), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Elsewhere,
             "血统来自 main、现在指向 feat/x —— 不比较，也不声称有新版"
         );
 
-        /* 不知道血统地址（跨机器的那份文件）：退回按发布线判，不当成"来源不同" */
-        assert_eq!(
-            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), None).based_on,
-            BasedOn::Outdated,
-            "地址缺失是「不知道」，不是「不同」—— 只按发布线判"
-        );
+        /*
+         * 不知道血统地址（老文件 / 跨机器那份）：**不再**退回按序号判 ——
+         * 两个分支各数各的号，硬比出来的新旧是编的。说不清就 Unverified，
+         * 并带上原因，界面据此说「无法确认」而不是「已是最新」。
+         */
+        let unknown = based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), None);
+        assert_eq!(unknown.based_on, BasedOn::Unverified);
+        assert_eq!(unknown.facts.unverified_reason, Some("no_source_identity"));
     }
 
     /// **`release_time` 与 `publishedAt` 不再决定更新方向**（这次要根治的那一条）。
@@ -2145,7 +2164,7 @@ mod tests {
         };
 
         assert_eq!(
-            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), Some(&gh)).based_on,
+            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Outdated,
             "序号真的前进了、字节真的变了 ⇒ 有新版（这次结论靠序号 + 字节）"
         );
@@ -2153,7 +2172,7 @@ mod tests {
         /* 反过来：目录发布时刻早得离谱，但序号确实更大、字节确实变了 ⇒ 照样给更新 */
         catalog.published_at = Some("2020-01-01T00:00:00Z".to_owned());
         assert_eq!(
-            based_on(&judge(&catalog, Some(&gh), &[]), Some(&lineage), Some(&gh)).based_on,
+            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Outdated,
             "发布时间只做展示 —— 它早不等于云端旧"
         );
@@ -2163,15 +2182,62 @@ mod tests {
         stamp(&mut same_serial, 42);
         same_serial.published_at = Some("2030-01-01T00:00:00Z".to_owned());
         assert_eq!(
-            based_on(
-                &judge(&same_serial, Some(&gh), &[]),
-                Some(&lineage),
-                Some(&gh)
-            )
-            .based_on,
+            based_on_id(&judge(&same_serial, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
             BasedOn::Current,
             "同一条线同一号、字节一样 ⇒ 已是最新"
         );
+    }
+
+    /// **「本地版本时间」只认下载那一刻定格的目录发布时刻**。
+    ///
+    /// 老账没有这一格 ⇒ `None`（界面写「未知」），**绝不回落**血统里的
+    /// `# release_time` —— 那是配方写作日期，正是上一代"云端永远更新"的误报来源。
+    #[test]
+    fn the_local_version_time_comes_from_the_download_stamp() {
+        let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
+        stamp(&mut catalog, 42);
+        let lineage = Lineage {
+            based_on_release_time: Some("2026-08-19 01:38:13".to_owned()),
+            ..lineage_at(42, "云端第一版")
+        };
+        let gh = github();
+        let provenance = LocalProvenance {
+            path: "presets-local/A1-standard.toml".to_owned(),
+            kind: OriginKind::Download,
+            identity: Some(gh.clone()),
+            origin_path: None,
+            cloud_file: Some("A1-standard.toml".to_owned()),
+            catalog_id: Some("support-ease".to_owned()),
+            serial: Some(42),
+            revision: Some("rev-42".to_owned()),
+            published_at: Some("2026-10-27T07:25:50Z".to_owned()),
+            source_sha256: Some(lineage::sha256_hex("云端第一版")),
+            at: 1,
+        };
+        let v = based_on(
+            &judge(&catalog, Some(&gh)),
+            Some(&lineage),
+            Some(&provenance),
+        );
+        assert_eq!(
+            v.facts.lineage_published_at.as_deref(),
+            Some("2026-10-27T07:25:50Z"),
+            "下载那一刻的目录发布时间"
+        );
+        assert_eq!(v.facts.lineage_kind, Some(OriginKind::Download));
+
+        /* 旧账（只有源身份、没有下载时刻）⇒ 未知，不拿 release_time 顶 */
+        let old = LocalProvenance {
+            kind: OriginKind::Unknown,
+            published_at: None,
+            ..provenance
+        };
+        let v = based_on(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&old));
+        assert_eq!(
+            v.facts.lineage_published_at, None,
+            "老账没有下载时刻 ⇒ 未知，不许拿 release_time 顶"
+        );
+        assert_eq!(v.facts.lineage_kind, Some(OriginKind::Unknown));
     }
 
     fn github() -> SourceIdentity {
@@ -2182,16 +2248,31 @@ mod tests {
         crate::runtime::source_identity::parse_identity("https://gitee.com/o/r/tree/main").unwrap()
     }
 
-    fn judge<'a>(
-        catalog: &'a Catalog,
-        cloud: Option<&'a SourceIdentity>,
-        notes: &'a [SourceNote],
-    ) -> Judge<'a> {
-        Judge {
-            catalog,
-            cloud,
-            notes,
-        }
+    fn judge<'a>(catalog: &'a Catalog, cloud: Option<&'a SourceIdentity>) -> Judge<'a> {
+        Judge { catalog, cloud }
+    }
+
+    /// 老测试只关心"这一份当初从哪个源来"：包一条等价于下载件的来路账，
+    /// 其余四格留空（判定不看它们）。
+    fn based_on_id(
+        judge: &Judge<'_>,
+        lineage: Option<&Lineage>,
+        id: Option<&SourceIdentity>,
+    ) -> Verdict {
+        let p = id.map(|id| LocalProvenance {
+            path: String::new(),
+            kind: OriginKind::Download,
+            identity: Some(id.clone()),
+            origin_path: None,
+            cloud_file: None,
+            catalog_id: None,
+            serial: None,
+            revision: None,
+            published_at: None,
+            source_sha256: None,
+            at: 0,
+        });
+        judge_against(judge, lineage, p.as_ref())
     }
 
     /// ★ **老形状的 `based_on` 认不出就是认不出**（2026-10-04 作者裁决：**不引兼容层**）。
@@ -2217,10 +2298,9 @@ mod tests {
             ..Default::default()
         };
         let gh = github();
-        let notes: Vec<SourceNote> = Vec::new();
-        let judge = judge(&catalog, Some(&gh), &notes);
+        let judge = judge(&catalog, Some(&gh));
         assert_eq!(
-            based_on(&judge, Some(&old), Some(&gh)).based_on,
+            based_on_id(&judge, Some(&old), Some(&gh)).based_on,
             BasedOn::Unverified,
             "老形状的 based_on 不许被猜成 Current / Outdated"
         );
@@ -2230,7 +2310,7 @@ mod tests {
             ..old.clone()
         };
         assert_eq!(
-            based_on(&judge, Some(&dist_shaped), Some(&gh)).based_on,
+            based_on_id(&judge, Some(&dist_shaped), Some(&gh)).based_on,
             BasedOn::Unverified,
             "上一代形状（dist/…）同样不猜"
         );

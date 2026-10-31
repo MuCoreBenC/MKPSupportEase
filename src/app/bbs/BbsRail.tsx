@@ -33,7 +33,7 @@
  * 窄了就跟抽屉一样浮在内容上面（`data-mode='float'`），宽度仍然可以拖。
  */
 import { useEffect, useState } from 'react'
-import { useT } from '../../i18n'
+import { useText, useT, type Text } from '../../i18n'
 import type { PanelStats } from './bbsPanel'
 import type { BbsSourceMode, BbsSyncInfo, BbsViewMode } from './bbsTypes'
 import type { BbsRail as RailSizing } from './useBbsRail'
@@ -60,7 +60,7 @@ interface Props {
   variantNote: string
   sourceMode: BbsSourceMode
   sourceRoot: string
-  sourceNote: string
+  sourceNote: Text
   userCount: number
   systemCount: number
   sync: BbsSyncInfo | null
@@ -68,8 +68,8 @@ interface Props {
   search: string | null
   /** 一句话提示（链缺了 / 变体对不上 / support_style 被拉回默认…） */
   note: string
-  /** 真问题（读文件失败、导入被拒） */
-  error: string
+  /** 真问题（读文件失败、导入被拒）—— 存键，渲染时再翻 */
+  error: Text
   /**
    * 有选中一份预设吗（2026-10-13）。
    * 没有的时候左边那排画的是**骨架**（版面照铺、值空着），这一栏也不能撒谎 ——
@@ -161,6 +161,7 @@ export default function BbsRail({
    * 它只在 `refreshing` 期间活着 —— 一落定 interval 就拆掉，不留后台定时器。
    */
   const tr = useT()
+  const say = useText()
   const [tick, setTick] = useState(0)
   useEffect(() => {
     if (!refreshing) return undefined
@@ -221,7 +222,7 @@ export default function BbsRail({
         type="button"
         className={s.close}
         onClick={onClose}
-        title={tr('bbs.closeDetail')}
+        data-tip={tr('bbs.closeDetail')}
         aria-label={tr('bbs.closeDetail')}
       >
         <Icon name="close" size={16} />
@@ -259,7 +260,7 @@ export default function BbsRail({
               type="button"
               className={s.chip}
               data-on={viewMode === 'bbs'}
-              title={tr('bbs.rail.sameAsBbsTitle', { note: rulesNote })}
+              data-tip={tr('bbs.rail.sameAsBbsTitle', { note: rulesNote })}
               onClick={() => onViewMode('bbs')}
             >
               {tr('bbs.rail.sameAsBbs')}
@@ -268,7 +269,7 @@ export default function BbsRail({
               type="button"
               className={s.chip}
               data-on={viewMode === 'all'}
-              title={tr('bbs.rail.allParamsTitle')}
+              data-tip={tr('bbs.rail.allParamsTitle')}
               onClick={() => onViewMode('all')}
             >
               {tr('bbs.rail.allParams')}
@@ -286,15 +287,15 @@ export default function BbsRail({
           )}
 
           <dt>{tr('bbs.rail.source')}</dt>
-          <dd title={fromMkp
+          <dd data-tip={fromMkp
             ? tr('bbs.rail.mkpSourceTitle')
-            : sourceRoot + (sourceNote ? tr('bbs.rail.sourceNote', { note: sourceNote }) : '')}
+            : sourceRoot + (sourceNote ? tr('bbs.rail.sourceNote', { note: say(sourceNote) }) : '')}
           >
             {roll(source)}
           </dd>
 
           <dt>{tr('bbs.rail.meta')}</dt>
-          <dd title={tr('bbs.rail.metaTitle')}>
+          <dd data-tip={tr('bbs.rail.metaTitle')}>
             {stamp}
           </dd>
         </dl>
@@ -317,13 +318,13 @@ export default function BbsRail({
             ))}
           </ul>
         ) : (
-          <span className={s.chain} title={rulesNote}>{tr('bbs.rail.noParent')}</span>
+          <span className={s.chain} data-tip={rulesNote}>{tr('bbs.rail.noParent')}</span>
         )}
 
-        {variantNote !== '' && <span className={s.chain} title={rulesNote}>{variantNote}</span>}
+        {variantNote !== '' && <span className={s.chain} data-tip={rulesNote}>{variantNote}</span>}
 
         {note !== '' && <span className={s.note}>{note}</span>}
-        {error !== '' && <span className={s.error}>{error}</span>}
+        {error !== '' && <span className={s.error}>{say(error)}</span>}
       </div>
     </aside>
   )

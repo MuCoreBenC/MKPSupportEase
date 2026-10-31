@@ -1,6 +1,7 @@
 # 全仓文档索引（整理与待合并清单）
 
-> 整理日期：2026-10-11 ｜ 依据：各文档**自己的文首标注**（⚠️ 历史快照 / 已被取代 / 已实施 / 施工计划…）
+> 整理日期：2026-10-11（**2026-10-30 补登**：`PRESET-WORKFLOW.md` 与 10-15 ~ 10-30 之间新增的几份，
+> 只登记、不改裁决）｜ 依据：各文档**自己的文首标注**（⚠️ 历史快照 / 已被取代 / 已实施 / 施工计划…）
 > ＋ 各目录盘点。本文**不做裁决、不做合并** —— 哪份并入哪份、以谁为准，由作者自己裁决；
 > 没有标注可引用、由盘点判断的，行内都标了**（推断）**。
 >
@@ -25,6 +26,7 @@
 | 文档 | 管什么 | 状态 |
 | --- | --- | --- |
 | [`README.md`](../README.md) | 入口：项目一句话 / 跑法 / 文档地图 | 现行（首段的"报告页"口径已于 2026-10-11 修正） |
+| [`docs/PRESET-WORKFLOW.md`](PRESET-WORKFLOW.md) | **预设怎么做**：命令 / 状态顺序 / 失败恢复 / 验收五项（`AGENTS.md` 的"怎么做"那一半） | 现行 |
 | [`docs/DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) | **根规则**：四层世界 + 四铁律 + 十问 + 准入问句 | 现行 |
 | [`docs/PRESET-PRODUCT-RULES.md`](PRESET-PRODUCT-RULES.md) | 产品规则：本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 | 现行（正文已就地吸收 2026-10-08 三次改判，含三条 ⚠️ 注记） |
 | [`docs/ARCHITECTURE.md`](ARCHITECTURE.md) | 工程约束：目录、两层数据根、IPC、trace、原子写、权限 | 现行 |
@@ -39,12 +41,15 @@
 | [`docs/PROJECT-AUDIT.md`](PROJECT-AUDIT.md) | 项目总盘点：已定义但未落地（四类） | 参考：2026-10-02 的对账，时效以日期计 |
 | [`docs/DATA-INVENTORY.md`](DATA-INVENTORY.md) | 总纲的对账单（43 件归位 + 收口日志） | 对账单：基准 2026-10-01 `58f4295`，收口一条勾一条（是否勾完没终检） |
 | [`docs/SMART-TOWER-RELOCATION-HANDOFF.md`](SMART-TOWER-RELOCATION-HANDOFF.md) | **智能塔位置**（2026-10-18）：碰撞时自动摆塔那一问的全链路交接（口径 / 数据流 / 文件 / 判据 / 还差什么 / 坑） | 现行：代码全绿，差「答 relocate 后跑完」一条真机验收 |
+| [`docs/PIPELINE-TOWER-ASK-HANDOFF.md`](PIPELINE-TOWER-ASK-HANDOFF.md) | **把"挪塔那一问"挪进内核第 6 步**（2026-10-18 夜，方案 B） | 已落地（文内落地记录与设计有差异，**以落地记录为准**） |
 
 ## 2. 记录与计划（docs/ 顶层带日期的那些）
 
 | 文档 | 日期 | 一句话 | 状态（自标优先） |
 | --- | --- | --- | --- |
 | [`HOOK-ERRORS-AND-MESSAGES.md`](HOOK-ERRORS-AND-MESSAGES.md) | 2026-10-11 | 后处理的错误：切片器那一框吃什么（BBS 源码证据）+ 文案表 + 两条日志流 | 现行（本分支新增，随"切片器能显示什么"那一刀） |
+| [`NEED-BBS-INVALIDATE.md`](NEED-BBS-INVALIDATE.md) + [`INVESTIGATION-BBS-INVALIDATE.md`](INVESTIGATION-BBS-INVALIDATE.md) | 2026-10-15 | 需求：改了 MKP 参数后让 BBS 当前切片结果失效 → 技术调查 | **需求未实施**：BBS `02.08.02.60` 没有无侵入的外部入口（三个入口全排除、运行时注入被 entitlement 封死） |
+| [`detail-card-mock.html`](detail-card-mock.html) | — | 详情卡抽卡的参考图复刻（mock，浏览器直接打开） | 素材（原型） |
 | [`I18N-MAP.md`](I18N-MAP.md) | 2026-10-26 | 文案对照表：四类「名字」各住哪、前缀 → 页面 → 文件、两本字典的分段约定 | 现行（本分支新增，随"英文界面还有中文"那一刀） |
 | [`GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`](GLUE-TRAVEL-Z-SAFETY-2026-10-20.md) | 2026-10-20 | **胶笔移动安全余量权威结论**（高层炒面事故归因）：伸缩笔两态模型 / 逐段公式 + 真实代码行 / 实机账本 / 风险排序 / 未实施的修复方案 | 现行·结论文档（改抬升逻辑前必读；**只记录结论，本节不改代码**） |
 | [`GUIDE-IMAGE-HANDOFF-2026-10-16.md`](GUIDE-IMAGE-HANDOFF-2026-10-16.md) | 2026-10-16 | **图片引导交接**：现状口径六条 + 下一刀（① 图片按需下载 ② "一组/套装"三件裁决）+ 判据与探针清单 | 现行（本分支新增；对应 `HANDOFF.md` 增量之三十六） |

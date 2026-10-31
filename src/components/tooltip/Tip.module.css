@@ -1,0 +1,39 @@
+/*
+ * 触发物（`?` 圆圈）—— 气泡的样式在 `TipLayer.module.css`，这里只管触发物本身。
+ * 2026-10-30：原来这个文件里还有一整套气泡样式，统一到 TipLayer 后删掉了
+ * （两套样式就是两个样子）。
+ */
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* `?` 圆圈：与标题同一行的字号，13px、细边；悬停/聚焦时转成强调色 */
+.dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  margin-left: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--text-3);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: default;
+}
+
+.dot:hover,
+.dot:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+.dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}

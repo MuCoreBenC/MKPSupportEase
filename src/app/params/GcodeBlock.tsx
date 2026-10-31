@@ -117,7 +117,7 @@ export default function GcodeBlock({
       <header className={s.head}>
         <span className={s.headLeft}>
           <strong className={s.label}>{def.label}</strong>
-          <span className={s.info} title={`${def.desc}\n${def.meta?.tomlKey ?? def.key}`} aria-hidden>
+          <span className={s.info} data-tip={`${def.desc}\n${def.meta?.tomlKey ?? def.key}`} aria-hidden>
             ?
           </span>
           {value.trim() !== '' && <span className={s.filled}>{tr('params.gcode.filled')}</span>}
@@ -127,7 +127,7 @@ export default function GcodeBlock({
             <button
               type="button"
               className={s.restore}
-              title={tr('params.gcode.revertTitle', { lines: savedValue.split('\n').length })}
+              data-tip={tr('params.gcode.revertTitle', { lines: savedValue.split('\n').length })}
               onClick={() => onRevertToSaved(def.key)}
             >
               {tr('params.gcode.revertLabel', { lines: savedValue.split('\n').length })}

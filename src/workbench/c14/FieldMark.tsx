@@ -34,7 +34,7 @@ export default function FieldMark({ later = false }: { later?: boolean }) {
 /** 值位的「需填写」—— 只给必填且当前为空的格子用 */
 export function TodoValue() {
   return (
-    <span className={s.todo} title={fieldState.needsInputHint}>
+    <span className={s.todo} data-tip={fieldState.needsInputHint}>
       {fieldState.needsInput}
     </span>
   )

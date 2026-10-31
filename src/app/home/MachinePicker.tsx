@@ -93,7 +93,7 @@ function Group({
               className={s.option}
               data-on={picked}
               aria-pressed={picked}
-              title={picked ? tr('home.picker.deselect') : undefined}
+              data-tip={picked ? tr('home.picker.deselect') : undefined}
               onClick={() => onPick(o.id)}
             >
               <span className={s.optionLabel}>{o.label}</span>
@@ -102,8 +102,10 @@ function Group({
           )
         })}
 
-        {/* 展开指示器：宽窗里 CSS 把它收掉（display: none），所以那边点不到、也不占位 */}
-        {collapsible && Boolean(value) && (
+        {/* 展开指示器：宽窗里 CSS 把它收掉（display: none），所以那边点不到、也不占位。
+            ★ 默认只有一个选项时不摆：收起来也藏不掉任何一行，"0 more" 是句空话
+              （作者 2026-10-30 截图：标准版那一组只一颗，旁边挂着一颗「0 more」）。 */}
+        {collapsible && Boolean(value) && items.length > 1 && (
           <button
             type="button"
             className={s.toggle}

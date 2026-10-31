@@ -8,7 +8,9 @@
 >
 > **现状段 2026-10-02 刷新**（§1 / §3 / §4 / §6 / §9 / §10.5）：第一圈写的"五个 command /
 > 四页占位 / 云端未开始"已经全部过期 —— 工程纪律一条没变，变的是跑到了哪一步。
-> 落地现状的全景在 `docs/PROJECT-AUDIT.md`。
+> **§3 的目录树 2026-10-30 再核一遍**（六页、后处理钩子、runtime / ipc 的新模块）；
+> 其余各节的"现状"若与代码对不上，以 `HANDOFF.md` §2.4 与 `docs/DOC-INDEX.md` 为准 ——
+> `docs/PROJECT-AUDIT.md` 是 2026-10-02 的快照，只当历史看。
 
 ---
 
@@ -39,33 +41,42 @@ MKP 支撑辅助的桌面端：选机型 → 确认偏移 → 校准 Z / XY → 
 ```text
 src/                      前端
 ├── api/                  与后端之间唯一的约定
-│   ├── contract.ts       契约：MkpApi（约 40 个方法）+ 全部 DTO 类型 + AppError
+│   ├── contract.ts       契约：MkpApi + 全部 DTO 类型 + AppError
 │   ├── mock.ts           ／ mockServer/：浏览器里跑的假后端（真机上整个不再被引用）
 │   ├── bridge.ts         Tauri 实现：把契约映射到 invoke（命名两套只在这一处翻译）
 │   └── index.ts          运行时探测走哪一份（`__TAURI_INTERNALS__`，不是构建期 DEV）
-├── app/                  客户端界面（8 页签）
-│   ├── App.tsx           根组件：页签 + 页面
-│   ├── home/ presets/ params/ calib/ bbs/ pages/    真页面（数据一律经 src/api）
-│   ├── components/ ui/ constants/                   组件 / 通用控件 / 界面结构数据
+├── app/                  客户端界面（六页：首页 / 预设 / 校准 / 工艺 / 报告 / 设置）
+│   ├── App.tsx           根组件：页签 + 页面槽（切页只切 data-hidden，不卸载）
+│   ├── home/ presets/ calib/ bbs/ report/ settings/  真页面（数据一律经 src/api）
+│   ├── params/ presets 行右键进去的那一屏（不再是独立页签）
+│   ├── import/ notify/ state/ store/ dev/           跨页的东西：导入 / 通知 / 底账 / 预览
+│   ├── components/ ui/ shared/ constants/           共用件 / 通用控件 / 界面结构数据
 │   └── assets/           界面展示素材（品牌 logo / 机型整机图 / 测试模型合影）
 ├── workbench/            工作台（开发工具；只进 workbench 构建，判据 1 盯着）
 ├── hooks/                useDensity（密度档）/ usePlatform / useWindowSize
+├── i18n/                 前端文案字典（zh-CN / en；闸门 `check:i18n`）
 ├── calib/                标定板的生成产物（.generated.ts，别手改）
-└── styles/               tokens.css + global.css
+├── styles/               tokens.css + global.css
+└── main.tsx              入口（`index.html` 客户端 / `workbench.html` 工作台）
 
 src-tauri/                Rust 侧
 ├── src/error.rs          AppError / ErrorCode
-├── src/obs/tracing.rs    trace id + 按天滚动日志
+├── src/obs/tracing.rs    trace id + 按天滚动日志（钩子单开 `hook.log.*`）
 ├── src/fsx/paths.rs      两层数据根 + 防穿越
 ├── src/fsx/atomic.rs     唯一的写盘出口
-├── src/runtime/          数据世界：catalog / delivery / net / source / state / release / mine / import
-├── src/ipc/              命令面：mod（校准三件）/ presets / mine / catalog / import
+├── src/runtime/          数据世界：catalog / delivery / content / delivery_index / net / source /
+│                         state / release / local / lineage / recovery / usage / postproc_prefs
+├── src/ipc/              命令面：mod（校准三件）/ presets / local / catalog / import / report / recovery …
+├── src/hook*.rs          后处理钩子（`--Toml/--Gcode` 那一趟）+ 钩子与界面的通道
+├── src/archive.rs        执行归档三件套（报告页读它）
+├── src/workbench/        工作台后端（生成 / 发布闸 / 沙箱）；`bin/presets.rs` 与它同一段代码
 ├── clippy.toml           禁用直接写盘的方法
 └── capabilities/         权限（core:default + dialog:allow-open 一条）
 ```
 
-**报告页 / 设置页目前是空态**（`PagePlaceholder`，明说"本版未接入"，不是白屏）——
-落地现状全景见 `docs/PROJECT-AUDIT.md`。
+**六页都已接真数据**（报告页读 `gcode_history/…/_meta.json`，设置页读写 AppState）——
+落地现状的全景以 `HANDOFF.md` §2.4 与 `docs/DOC-INDEX.md` 为准，`PROJECT-AUDIT.md` 是
+2026-10-02 的快照。
 
 ## 4. 两层数据根
 

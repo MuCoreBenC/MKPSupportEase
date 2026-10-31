@@ -201,7 +201,7 @@ export default function BbsPresetDrawer({
             className={s.sourceTab}
             data-on={source === 'mkp'}
             aria-selected={source === 'mkp'}
-            title={tr('bbs.drawer.mkpTitle')}
+            data-tip={tr('bbs.drawer.mkpTitle')}
             onClick={() => onSource('mkp')}
           >
             {tr('bbs.drawer.mkp')}
@@ -212,7 +212,7 @@ export default function BbsPresetDrawer({
             className={s.sourceTab}
             data-on={source === 'bbs'}
             aria-selected={source === 'bbs'}
-            title={tr('bbs.drawer.localTitle')}
+            data-tip={tr('bbs.drawer.localTitle')}
             onClick={() => onSource('bbs')}
           >
             {tr('bbs.drawer.local')}
@@ -239,7 +239,7 @@ export default function BbsPresetDrawer({
               className={s.iconBtn}
               /* 读清单时它转起来 —— 这是"正在刷新这个列表"唯一的动效，不占一格位置 */
               data-loading={loading ? 'true' : undefined}
-              title={tr('bbs.drawer.rescanTitle')}
+              data-tip={tr('bbs.drawer.rescanTitle')}
               aria-label={tr('bbs.drawer.rescan')}
               onClick={rescan}
             >
@@ -313,7 +313,7 @@ export default function BbsPresetDrawer({
                 data-off-model={it.offModel ? 'true' : undefined}
                 data-need-download={it.notDownloaded ? 'true' : undefined}
                 disabled={it.disabled}
-                title={
+                data-tip={
                   it.disabled
                     ? reasonText(it, tr)
                     : it.notDownloaded

@@ -954,8 +954,8 @@ mod tests {
 
         assert_eq!(
             target,
-            super::super::paths::released_file(root.path(), &file.path),
-            "落在 catalog.path 说的那个位置（唯一路径语义）"
+            super::super::content::content_path(root.path(), file.expected_sha().unwrap()),
+            "预设落在内容仓库（按 SHA 一份），不再写 delivery 副本"
         );
         assert_eq!(std::fs::read(&target).expect("读到"), content);
         assert_eq!(

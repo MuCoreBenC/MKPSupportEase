@@ -55,7 +55,7 @@ export default function TitlebarChip({
       className={s.chip}
       data-tone={tone}
       data-testid={testId}
-      title={title}
+      data-tip={title}
       aria-label={ariaLabel}
       onClick={onClick}
       disabled={disabled}

@@ -136,7 +136,17 @@ export default function CalibReadings({
                 data-on={hasBase}
                 data-act={changed ? 'revert' : undefined}
                 disabled={!revertible}
-               
+                /* 英文那一支只显示数字（2026-10-30，窄窗放不下 "was"），原话挂在这里 */
+                data-tip={
+                  hasBase
+                    ? tr('calib.originalTitle', { value: saved ? saved[k].toFixed(2) : '0.00' })
+                    : undefined
+                }
+                aria-label={
+                  hasBase
+                    ? tr('calib.originalTitle', { value: saved ? saved[k].toFixed(2) : '0.00' })
+                    : undefined
+                }
                 onClick={revertible ? () => onReset?.(k) : undefined}
               >
                 {tr('calib.original', { value: saved ? saved[k].toFixed(2) : '0.00' })}
