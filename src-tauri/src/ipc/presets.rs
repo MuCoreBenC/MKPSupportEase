@@ -199,10 +199,37 @@ fn is_false(b: &bool) -> bool {
 pub struct VersionDto {
     pub id: String,
     pub name: String,
+    /*
+     * **各语言那一册**（2026-10-31）。这里是客户端拿版本名的唯一出口，
+     * 少一个字段 = 那种语言永远回落中文 —— 而且**静默**：前端 `multiLang`
+     * 拿到 `undefined` 只会当"没译"，不会报错。作者截图里「日文界面仍是中文」
+     * 就是这几格漏了（数据、目录、前端选择逻辑全都是好的）。
+     *
+     * 加一种语言 = 这里 + `MachineVersion` 各加一册，别只加一头。
+     * `remark`（备注）**不译**：它是给发布者看的一句话，不是给用户的界面文案。
+     */
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_en: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_tw: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_ja: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_en: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_tw: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tag_ja: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_en: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_tw: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description_ja: Option<String>,
     /// **备注**（客户端预设列表副标题用）。缺 = 没写（界面回落路径）
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remark: Option<String>,
@@ -273,8 +300,19 @@ fn machines_dto(catalog: &runtime::Catalog) -> Vec<MachineDto> {
                 .map(|v| VersionDto {
                     id: v.id.clone(),
                     name: v.name.clone(),
+                    /* 三册**原样带出去**：空/空白由前端 `multiLang` 回落中文，
+                    这里不做"没有就填空串"那种判断 —— 那会把"没译"和"译成空"混在一起 */
+                    name_en: v.name_en.clone(),
+                    name_tw: v.name_tw.clone(),
+                    name_ja: v.name_ja.clone(),
                     tag: v.tag.as_deref().and_then(non_empty),
+                    tag_en: v.tag_en.clone(),
+                    tag_tw: v.tag_tw.clone(),
+                    tag_ja: v.tag_ja.clone(),
                     description: v.description.as_deref().and_then(non_empty),
+                    description_en: v.description_en.clone(),
+                    description_tw: v.description_tw.clone(),
+                    description_ja: v.description_ja.clone(),
                     remark: v.remark.as_deref().and_then(non_empty),
                     bundle: non_empty(v.recommended_bundle.as_deref().unwrap_or_default())
                         .or_else(|| non_empty(m.default_bundle.as_deref().unwrap_or_default()))
@@ -1132,6 +1170,41 @@ mod tests {
         assert!(a1.dimensions.is_some());
         assert!(a1.forbidden_zones.is_empty(), "A1 没有禁区");
         assert_eq!(a1.versions.len(), 3);
+
+        /*
+         * ★ **多语言必须活到 IPC 边界**（2026-10-31）。
+         *
+         * 作者真机截图：日文界面下首页/预设列表仍是中文。数据、目录、前端选择逻辑
+         * 全都是通的 —— 断点就在这个 DTO 上：它曾经只有 `name`，`nameJa` 在
+         * **序列化那一刻被静默丢掉**（serde 不报错，前端 `multiLang` 只会当"没译"）。
+         *
+         * 所以这条判据不吃 DTO 的 Rust 字段，而是**看真序列化出来的 JSON** ——
+         * 只有 JSON 里有，客户端才拿得到。少一册就会红。
+         */
+        let json = serde_json::to_value(&a1.versions).expect("DTO 必须能序列化");
+        let std_v = json
+            .as_array()
+            .and_then(|a| a.iter().find(|v| v["id"] == "STANDARD"))
+            .expect("A1/STANDARD 必须在");
+        for (key, expect) in [
+            ("nameEn", "Standard"),
+            ("nameTw", "標準版"),
+            ("nameJa", "スタンダード版"),
+            ("tagEn", "Recommended"),
+            ("tagTw", "推薦"),
+            ("tagJa", "おすすめ"),
+        ] {
+            assert_eq!(
+                std_v[key].as_str(),
+                Some(expect),
+                "出站 JSON 里少了 {key} —— 该语言的界面会静默回落中文"
+            );
+        }
+        // 备注**不译**：它不出现在任何语言册里（免得以后有人"顺手也加一册"）
+        assert!(
+            std_v.get("remarkEn").is_none() && std_v.get("remarkJa").is_none(),
+            "备注是给发布者看的，不进多语言册"
+        );
 
         // —— 版本文件：MKP 那支从 catalog 文件条目出，名字与落点对得上 ——
         let vf = version_files_dto(&catalog, "A1", "FASTV3.3").expect("A1/FASTV3.3 该有答案");

@@ -1465,7 +1465,26 @@ export interface RuntimeCatalogMachine {
   id: string
   display: string
   brand: string
-  versions: { id: string; name: string }[]
+  /**
+   * 版本清单。**多语言那几册必须在这里也出现**（2026-10-31）：`getMachines`
+   * 走的是另一套 DTO，而 `getRuntimeCatalog` 是同一份数据的第二条出口 ——
+   * 类型写窄了，后端真带了字段前端也用不上（TS 会当成不存在）。
+   */
+  versions: {
+    id: string
+    name: string
+    nameEn?: string | null
+    nameTw?: string | null
+    nameJa?: string | null
+    tag?: string | null
+    tagEn?: string | null
+    tagTw?: string | null
+    tagJa?: string | null
+    description?: string | null
+    descriptionEn?: string | null
+    descriptionTw?: string | null
+    descriptionJa?: string | null
+  }[]
 }
 
 /**
