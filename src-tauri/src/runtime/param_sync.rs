@@ -37,7 +37,7 @@ use std::collections::BTreeMap;
 
 use crate::presetdata::registry::ParamDef;
 
-use super::app_state::{ParamDecision, ParamDecisionKind};
+use super::app_state::{ParamDecision, ParamDecisionKind, ParamOrigin};
 
 /// 一个参数上的四方账（给界面用的那一份形状）。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,7 +48,16 @@ pub struct ParamSyncEntry {
     /// （"不含这个参数"与"这个参数是空值"是两件事）
     pub local: Option<String>,
     /// 云端**旧值**（我上次处理到的那一版）。没有血统 / 拿不到那一版 ⇒ `None`
+    ///
+    /// ★ 它是"待处理"的判据，**不是**界面那个「上次云端」—— 采用/保持会把水位推到
+    /// 当前版，于是它等于新值。界面要显示的那一格看 [`Self::origin`]。
     pub cloud_old: Option<String>,
+    /// **上次云端值**（2026-10-31 的滚动记录，见 [`ParamOrigin`]）。
+    ///
+    /// 有它就显示它（那是"我上次从云端拿到的是多少"）；没有才退回 `cloud_old`。
+    /// 这一格不会被采用/保持推进 —— 只在用户第一次改得与云端不同、以及整份对齐到
+    /// 新云端（滚动）时动。旧档 / 没改过 ⇒ `None`。
+    pub origin: Option<String>,
     /// 云端**当前最新值**。云端当前版字节不在本机 ⇒ `None`
     pub cloud_new: Option<String>,
     /// 云端改过这一项、而我还没处理
@@ -90,6 +99,9 @@ pub struct SyncInput<'a> {
     /// 摘要 → 那一版云端的参数值（baseline 里读出来的）。
     /// **至少要含** `current_sha256` 与各个 `decisions[*].sha256`；缺谁那一项就算不出来 —— 如实给 `None`，不编。
     pub by_sha: &'a BTreeMap<String, BTreeMap<String, String>>,
+    /// 「上次云端值」的滚动记录（`run/app-state.json#paramOrigins`）。
+    /// 空表 = 还没记过（旧档 / 从没改过）—— 界面退回 `cloud_old`。
+    pub origins: &'a BTreeMap<String, ParamOrigin>,
 }
 
 /// 比一遍：逐项的四方账 + 待处理条数。
@@ -132,6 +144,8 @@ pub fn diff(input: &SyncInput<'_>) -> (Vec<ParamSyncEntry>, usize) {
             key: def.key.clone(),
             local: input.local.get(key).cloned(),
             cloud_old: old.cloned(),
+            /* 滚动记录优先 —— 它不会被水位吃掉（见字段注释） */
+            origin: input.origins.get(key).map(|o| o.value.clone()),
             cloud_new: new.cloned(),
             pending: is_pending,
             decided,
@@ -225,6 +239,7 @@ mod tests {
         current: Option<&str>,
     ) -> (Vec<ParamSyncEntry>, usize) {
         let defs = defs_of(keys);
+        let no_origins = BTreeMap::new();
         diff(&SyncInput {
             defs: &defs,
             local: &local,
@@ -232,6 +247,7 @@ mod tests {
             based_on_sha256: based,
             current_sha256: current,
             by_sha: &by_sha,
+            origins: &no_origins,
         })
     }
 
@@ -258,6 +274,67 @@ mod tests {
         assert_eq!(out[0].cloud_new.as_deref(), Some("-1.5"));
         assert!(out[0].pending);
         assert_eq!(out[0].decided, None);
+    }
+
+    /// 「上次云端值」独立于水位：采用/保持把水位推到当前版之后，
+    /// `cloud_old` 会等于新值（那格是待处理判据），但 `origin` 仍是记下的那一版。
+    #[test]
+    fn the_recorded_origin_survives_the_watermark() {
+        let mut by_sha = BTreeMap::new();
+        by_sha.insert("current".to_owned(), map(&[(K1, "-0.9")]));
+
+        let mut origins = BTreeMap::new();
+        origins.insert(
+            K1.to_owned(),
+            ParamOrigin {
+                sha256: Some("downloaded".to_owned()),
+                value: "-1".to_owned(),
+            },
+        );
+
+        let defs = defs_of(&[K1]);
+        let local = map(&[(K1, "-0.9")]);
+        let decisions = decisions_of(&[(K1, "current", ParamDecisionKind::Adopt)]);
+        let (out, _) = diff(&SyncInput {
+            defs: &defs,
+            local: &local,
+            decisions: &decisions,
+            based_on_sha256: Some("current"),
+            current_sha256: Some("current"),
+            by_sha: &by_sha,
+            origins: &origins,
+        });
+
+        assert_eq!(
+            out[0].cloud_old.as_deref(),
+            Some("-0.9"),
+            "水位那格处理过之后就是当前版（这正是它不能当界面显示的原因）"
+        );
+        assert_eq!(
+            out[0].origin.as_deref(),
+            Some("-1"),
+            "记下的那一版不许被水位推走"
+        );
+    }
+
+    /// 没记过（旧档 / 从没改过）⇒ `origin` 是 `None`，界面退回水位那格
+    #[test]
+    fn without_a_record_the_origin_is_none() {
+        let mut by_sha = BTreeMap::new();
+        by_sha.insert("old".to_owned(), map(&[(K1, "-1")]));
+        by_sha.insert("new".to_owned(), map(&[(K1, "-1.5")]));
+
+        let (out, _) = run(
+            &[K1],
+            map(&[(K1, "-2")]),
+            by_sha,
+            BTreeMap::new(),
+            Some("old"),
+            Some("new"),
+        );
+
+        assert_eq!(out[0].origin, None);
+        assert_eq!(out[0].cloud_old.as_deref(), Some("-1"));
     }
 
     /// 场景 B：用户改过的那一项，云端也改了 —— 照样待处理，但「我」那一栏是他的值

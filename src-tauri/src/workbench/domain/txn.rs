@@ -141,6 +141,21 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// **去掉生成产物**（`delivery/`）。
+    ///
+    /// 影子与真仓库的"是不是同一份"只该看**源**：`delivery/` 每次生成都会变，
+    /// 拿它去判"外面改过源"会让横幅在每次生成之后复活（作者 2026-11-01：
+    /// 「我点了重新加载，下次打开它还在」）。
+    pub fn without_products(self) -> Self {
+        Self {
+            map: self
+                .map
+                .into_iter()
+                .filter(|(p, _)| !p.starts_with("delivery/"))
+                .collect(),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.map.len()
     }

@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "3acd6acf69d1acd2",
+  "revision": "c06431f5ebe953c4",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -3828,7 +3828,7 @@
         "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 0.8,
+        "defaultValue": 0.7,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -3845,7 +3845,9 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.75
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -3959,7 +3961,7 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 0.9
+          "A1": 1.0
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},

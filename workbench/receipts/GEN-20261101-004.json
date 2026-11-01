@@ -1,0 +1,70 @@
+{
+  "id": "GEN-20261101-004",
+  "stamp": "2026-11-01T02:55:12Z",
+  "status": "passed",
+  "steps": [
+    {
+      "key": "frozen",
+      "ok": true,
+      "detail": "presets/"
+    },
+    {
+      "key": "delivery",
+      "ok": true,
+      "detail": "3/3"
+    },
+    {
+      "key": "assets",
+      "ok": true,
+      "detail": "9/9"
+    },
+    {
+      "key": "baseline",
+      "ok": true,
+      "detail": "0/9"
+    },
+    {
+      "key": "embedded",
+      "ok": true,
+      "detail": "26 份文件"
+    },
+    {
+      "key": "ledger",
+      "ok": true,
+      "detail": "3 条"
+    },
+    {
+      "key": "catalog",
+      "ok": true,
+      "detail": "catalog.json"
+    },
+    {
+      "key": "verify",
+      "ok": true,
+      "detail": "交付 3 / 内核 9 / 基线 0"
+    },
+    {
+      "key": "commit",
+      "ok": true,
+      "detail": "catalog + 台账已落盘"
+    }
+  ],
+  "delivery": {
+    "written": 3,
+    "total": 3
+  },
+  "assets": {
+    "written": 9,
+    "total": 9
+  },
+  "baseline": {
+    "written": 0,
+    "total": 9
+  },
+  "files": [
+    "A1/STANDARD",
+    "A1/FAST",
+    "A1/FASTV3.3"
+  ],
+  "error": null
+}

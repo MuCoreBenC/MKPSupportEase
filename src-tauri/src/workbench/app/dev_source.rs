@@ -98,16 +98,15 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 /// 测试源端哪一份。
 ///
 /// **只剩一项**（2026-10-30 作者：「我就不需要这些什么测试夹具一夹具二了，就直接是模拟的
-/// 不就可以了吗」）：端**当前交付** —— 你（在沙箱里）生成出来的那一份，于是
-/// 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通，
-/// 而且**永远不碰正式**。
+/// 不就可以了吗」）：端**当前交付** —— 你刚生成出来的那一份，于是
+/// 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通。
 ///
 /// 原来那两代夹具是拿真交付根派生的副本，作用就一个：演"云端发了下一版"。现在那一层
 /// 由 [`BUMP_ENV`] 顶掉 —— 同一份真产物，端出去时把发布序号往前拨一格，比夹具更真
 /// （不用派生、不会和源漂移、也没有第二套目录）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SourceKind {
-    /// **当前交付**：测试模式开着 = 沙箱那份，正式 = 仓库那份
+    /// **当前交付**：仓库里 `presets/delivery/` 那一份
     #[serde(rename = "delivery")]
     Delivery,
 }
@@ -147,15 +146,12 @@ impl SourceKind {
     /// 不齐时那句人话：**缺什么 + 怎么补**（界面直接摆，不重写措辞）。
     fn missing(self, marker: &Path) -> AppError {
         match self {
-            SourceKind::Delivery => AppError::invalid_argument(format!(
-                "还没有交付产物：{} 不在",
-                marker.display()
-            ))
-            .with_detail(
-                "在「生成与发布」里点一次生成 —— 注意**当前模式**：测试模式开着时生成物落在沙箱里，\
-                 端的就是沙箱那一份（这正是这一项要验的）"
-                    .to_owned(),
-            ),
+            SourceKind::Delivery => {
+                AppError::invalid_argument(format!("还没有交付产物：{} 不在", marker.display()))
+                    .with_detail(
+                        "在「生成与发布」里点一次生成，端的就是刚生成出来的那一份".to_owned(),
+                    )
+            }
         }
     }
 }
@@ -480,8 +476,8 @@ impl SourceKind {
 
 /// 那一行的内容：这一份**现在**在哪儿、客户端填什么地址、齐没齐。
 ///
-/// ★ 现算：`delivery` 那一份随**模式**走（测试模式开着就是沙箱的预设根）——
-/// 模式一切，这一行的根与"齐没齐"立刻就是新那棵树的读数，界面不必自己推一遍。
+/// ★ 现算：每一行都从**当前预设根**推出来 —— 根一变，这一行的地址与"齐没齐"
+/// 立刻就是新的读数，界面不必自己推一遍。
 ///
 /// 2026-10-30 起只有一行（夹具已退役，见 [`SourceKind`]）—— 但仍按"列表"给，
 /// 界面那套单选不用为一个选项另写一版。
@@ -496,7 +492,7 @@ fn sources_of(_repo: &Path) -> Vec<SourceOption> {
             let (label, note) = match kind {
                 SourceKind::Delivery => (
                     "当前交付",
-                    "端你生成出来的那一份（测试模式开着 = 沙箱那份）。端出去时发布序号自动 +1 \
+                    "端你生成出来的那一份。端出去时发布序号自动 +1 \
                      —— 客户端那边看到的就是「云端发了下一版」，和真发布一样",
                 ),
             };
@@ -1018,18 +1014,17 @@ mod tests {
         );
     }
 
-    /// **「当前交付」跟着调用方给的预设根走** —— 工作台传的是
-    /// `paths::presets_root_path()`（**模式感知**），于是测试模式开着时端出去的就是
-    /// 沙箱里生成的那份交付，正式那份从头到尾不参与。这正是闭环那一环的要害。
+    /// **「当前交付」跟着调用方给的预设根走** —— 端的就是那次生成的落点，
+    /// 换个根就换一个目录（不写死 `presets/`）。
     #[test]
     fn the_delivery_source_serves_the_presets_root_it_is_given() {
         let repo = Path::new("/tmp/repo");
         let real = repo.join("presets");
-        let sandbox = repo.join("workbench").join(".sandbox").join("presets");
+        let other = repo.join("some-other").join("presets");
         let a = SourceKind::Delivery.derive(&real);
-        let b = SourceKind::Delivery.derive(&sandbox);
+        let b = SourceKind::Delivery.derive(&other);
         assert_eq!(a.root, real);
-        assert_eq!(b.root, sandbox);
+        assert_eq!(b.root, other);
         assert_ne!(a.root, b.root, "两份预设根必须端出两个不同的目录");
         /* 缺的那份标志文件也各说各的（界面据此告诉人"去哪儿生成"） */
         assert!(SourceKind::Delivery
@@ -1073,8 +1068,8 @@ mod tests {
             assert_eq!(r.missing.is_none(), r.ready, "{:?}", r.kind);
         }
         assert!(
-            rows[0].note.contains("沙箱"),
-            "要说清它跟着模式走：{}",
+            rows[0].note.contains("生成"),
+            "要说清它端的是哪一份：{}",
             rows[0].note
         );
         assert!(

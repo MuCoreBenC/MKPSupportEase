@@ -49,6 +49,9 @@ pub mod assets;
 /// 界面不许自己再实现一套检查
 pub mod audit;
 pub mod build;
+/// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
+/// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
+pub mod receipt;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
 /// 发布账户凭据（第三刀下半）：每平台一份 Token，住**本机凭据文件**（`credentials.json`，
@@ -107,9 +110,6 @@ pub mod release_tx;
 /// `<图干>.rendered.webp`（无损 webp，纯 Rust 编码）—— 客户端 `<img>` 直接显示，
 /// 不再"读原图 + 前端现画框"。原图与源稿照旧留存（像 PSD）可再编辑
 pub mod render;
-/// **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
-/// 正式目录一个字节都不碰（作者 2026-10-08：「完全另起炉灶」「测试的归测试的」）
-pub mod sandbox;
 
 /// **发布身份的故障注入判据**（2026-10-28）：中断 / 重发 / 回滚 / 换线 / 坏账本。
 /// 见该文件头那张表 —— 咬的就是"出错时也必须说得清"。
@@ -137,6 +137,8 @@ pub fn audit_check(ctx: &Ctx) -> Result<PublishAudit, AppError> {
 
 /// 跑生成器（`Scope::Stale` / `All`）。**不推进发布序号**（序号在 `publish_into`）。
 pub fn generate(ctx: &mut Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
+    /* 与工作台那颗按钮同一道闸（2026-10-31）：CLI 也不许拿旧影子覆盖真仓库 */
+    self::build::require_shadow_in_sync(ctx)?;
     self::build::generate_with(ctx, scope)
 }
 
@@ -741,31 +743,6 @@ pub(super) fn spawn_flusher() {
     });
 }
 
-/// 现在这一摞草稿有几处未保存的改动。**没有会话时 `None`** ——
-/// 不为了问一句话去新开一个会话（那会顺便建目录、把整个预设根读一遍）。
-///
-/// 给测试模式那颗开关用：切模式会把会话整个换掉，而草稿是两套、
-/// 未保存的改动不会跟着过去 —— 所以有改动就先拦下来（见 `sandbox` 模块头）。
-pub(super) fn dirty_count_now() -> Option<usize> {
-    let guard = session().lock().ok()?;
-    guard.as_ref().map(|ctx| ctx.draft.dirty_count())
-}
-
-/// 把会话丢掉（下一条命令按**现在**的根重建）。
-///
-/// 给"整套数据根换了"那条路用（测试模式开关、沙箱重拷/清空）：留着旧会话，
-/// 界面显示的是旧根的数据、写盘写的是新根 —— 那是最坏的一种组合。
-/// **丢之前先把草稿落一次盘**（落到旧根），别让"没保存的编辑"随会话一起没。
-pub(super) fn reset_session() {
-    let Ok(mut guard) = session().lock() else {
-        return;
-    };
-    if let Some(ctx) = guard.as_mut() {
-        ctx.flush();
-    }
-    *guard = None;
-}
-
 /// 空闲落盘。**没停手就不写** —— 连着改 10 个值只在停手之后写一次
 fn flush_if_due() {
     let Ok(mut guard) = session().lock() else {
@@ -818,8 +795,10 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 
 /// 影子树与磁盘是否已经不是同一份（开场判断「上次会话有没有没保存的改动」）
 fn shadow_differs(real: &Path, shadow: &Path) -> Result<bool, AppError> {
-    let a = txn::snapshot(real)?;
-    let b = txn::snapshot(shadow)?;
+    /* 只比**源**：`delivery/` 是生成产物，每生成一次就变一次 —— 算进来的话，
+       横幅会在每次生成之后复活（作者 2026-11-01 报的就是这个）。 */
+    let a = txn::snapshot(real)?.without_products();
+    let b = txn::snapshot(shadow)?.without_products();
     Ok(!txn::equal(&a, &b))
 }
 

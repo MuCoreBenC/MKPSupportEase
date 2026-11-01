@@ -674,6 +674,40 @@ export interface IssueReport {
 /** `build::Scope` —— 三个生成入口 */
 export type BuildScope = 'stale' | 'all' | { picked: string[] }
 
+/** `receipt::StepRow` —— 事务里的一步 */
+export interface ReceiptStep {
+  /** 步骤键（文案在前端查表，后端不写死句子） */
+  key: string
+  ok: boolean
+  detail: string
+}
+
+/** `receipt::Counts` */
+export interface ReceiptCounts {
+  written: number
+  total: number
+}
+
+/**
+ * `receipt::GenerationReceipt` —— **一次生成留下的结构化结果**（2026-11-01）。
+ *
+ * 工作台模态框、CLI 的 JSON、AI 的报告读的都是它：不是三套说法。
+ * 落盘在 `workbench/receipts/<id>.json`，事后能回答"上一次生成哪一步断了"。
+ */
+export interface GenerationReceipt {
+  /** `GEN-20261101-001` */
+  id: string
+  /** 生成时刻（UTC，与产物头同一个时钟） */
+  stamp: string
+  status: 'passed' | 'failed'
+  steps: ReceiptStep[]
+  delivery: ReceiptCounts
+  assets: ReceiptCounts
+  baseline: ReceiptCounts
+  files: string[]
+  error: string | null
+}
+
 /** `build::GenerateReport` */
 export interface GenerateReport {
   stamp: string
@@ -682,6 +716,8 @@ export interface GenerateReport {
    *  不说的话「点了生成但文件时间没变」看起来像失败了 */
   unchanged: string[]
   skipped: [string, string][]
+  /** 生成事务回执（`null` = 还没进事务就被拦下了） */
+  receipt: GenerationReceipt | null
   // 没有生成记录字段：台账（built.json）由生成事务直接落盘，生成完成 = 台账已是这一代
 }
 
@@ -837,16 +873,6 @@ export interface PublishAudit {
    */
   minVersion: string | null
   canPublish: boolean
-  /**
-   * **当前模式让不让发布**：测试模式（沙箱）里这条路整个关着，这里是那句原因；
-   * 正式模式是 `null`。
-   *
-   * ★ 它与 `canPublish` 答的是两件事：`canPublish` = "这一版东西能不能发出去"
-   * （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
-   * 那颗「确认发布」不许画亮 —— 点下去只会被后端如实拒掉，而**一颗点了会被拒的
-   * 按钮比没有按钮更坏**（人会以为是自己点错了）。
-   */
-  publishClosed: string | null
 }
 
 /* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
@@ -1176,28 +1202,6 @@ export interface PortConflict {
   text: string
 }
 
-/**
- * `sandbox::SandboxStatus` —— **测试模式（沙箱）**现在什么样。
- *
- * 作者 2026-10-08：「我希望它是完全另起炉灶那种……测试的归测试的，而且我测试的随时
- * 可以把这些清空，从正式的复制一份过去，再进行测试」「我不能迷迷糊糊的，不知道我在
- * 测试版还是正式版」。所以这一格数字要一直摆在界面上（横幅 + 设置页那张卡）。
- */
-export interface SandboxStatus {
-  /** 测试模式开着吗（= 整套数据根现在指着沙箱） */
-  enabled: boolean
-  /** 沙箱根：`<repo>/workbench/.sandbox` */
-  sandboxRoot: string
-  /** 沙箱里那份 `presets/` 建起来了吗（没建 = 刚打开、还没拷） */
-  ready: boolean
-  /** 沙箱这一棵里有几个文件 / 几字节（"真拷了东西"的读数） */
-  files: number
-  bytes: number
-  /** 正式那一份的预设根（界面上摆出"从哪儿拷的"） */
-  realPresetsRoot: string
-  /** 上一次动作的结果（"已从正式拷了一份：54 个文件 4.4 MB"） */
-  note: string | null
-}
 
 /**
  * `devsim::DevScene` —— **开发台**上一个可点的场景。
@@ -2427,9 +2431,9 @@ export const wb = {
    * 被占着时**如实拒绝**并点名那个端口（`conflicts` 摆着是谁）；
    * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
    *
-   * ★ 端的只有 **`delivery` = 当前交付**：**测试模式开着就端沙箱里那份**，于是
-   * 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通，
-   * 而且正式那份从头到尾不参与。端出去时发布序号**自动 +1**（见 `dev_source` 的
+   * ★ 端的只有 **`delivery` = 当前交付**（就是你刚生成出来的那一份），于是
+   * 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通。
+   * 端出去时发布序号**自动 +1**（见 `dev_source` 的
    * `BUMP_ENV`）—— 客户端看到的就是正常的"云端发了下一版"。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
@@ -2444,20 +2448,6 @@ export const wb = {
    */
   devSourceClearConflict: (port: number, pid: number | null) =>
     invoke<DevSourceStatus>('wb_dev_source_clear_conflict', { port, pid }),
-
-  /**
-   * **测试模式（沙箱）** —— 整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
-   * 正式目录一个字节都不碰（作者：「完全另起炉灶」「测试的归测试的」）。
-   *
-   * - `sandboxSet(true)`：沙箱不齐就先**从正式拷一份**（`presets/` 整棵，含 3MF /
-   *   模型 / 图片），然后把根切过去；**有未保存的改动时如实拒绝**（草稿是两套）；
-   * - `sandboxRefill()`：清空沙箱再从正式重新拷一份；
-   * - `sandboxWipe()`：只清空（留在当前模式）。
-   */
-  sandboxStatus: () => invoke<SandboxStatus>('wb_sandbox_status'),
-  sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
-  sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
-  sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
 
   /**
    * **开发台**（`app::devsim`）—— 客户端界面触发器。

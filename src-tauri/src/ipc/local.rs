@@ -1205,6 +1205,11 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                 runtime::local::save_back(&user_root, &rel, &draft.text)?
             }
         };
+        /*
+         * **「上次云端值」的第一笔**：这次保存里凡是"与手上那版云端不同"的项，
+         * 记下那一版是多少（已有记录的不覆盖）。记不上不影响保存。
+         */
+        note_first_divergence(&root, &done.path, &draft.text);
         /* 存完就该丢掉草稿：它会盖住下一次「改这份」的"接着上次改" */
         runtime::app_state::clear_draft(&root)?;
         /*
@@ -1221,6 +1226,63 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             replaced: done.replaced,
         })
     })
+}
+
+/// **「上次云端值」的第一笔**（2026-10-31）：这次保存里凡是"与手上那版云端不同"的项，
+/// 记下那一版是多少。
+///
+/// 为什么比的是**血统那一版**而不是"当前云端最新"：用户手上这份是从哪一版来的，
+/// 才是他改动之前看到的那个数 —— 云端后来发了什么，这一格不该替它改口（那由
+/// `apply_at` 的滚动负责，见 `ipc::param_sync::roll_origins`）。
+///
+/// 三条边界：只记**没有记录**的项（已有记录是更早的那一版，保存不许覆盖）；
+/// 没有血统 / 那一版正文不在本机 ⇒ 整件事跳过（不编）；记不上不影响保存本身
+/// （附加信息，与原文镜像 / 出处账同口径）。
+fn note_first_divergence(root: &std::path::Path, rel: &str, text: &str) {
+    use crate::presetdata::params as param_alg;
+
+    let Some(sha) =
+        runtime::lineage::parse_lineage_from_content(text).and_then(|l| l.based_on_sha256)
+    else {
+        return;
+    };
+    let Ok(Some(base_text)) = runtime::content::read(root, &sha) else {
+        return;
+    };
+    let Ok(catalog) = runtime::load_released_catalog(root) else {
+        return;
+    };
+    let defs = &catalog.registry.params;
+    let Ok(local) = param_alg::read_param_values(text, defs) else {
+        return;
+    };
+    let Ok(base) = param_alg::read_param_values(&base_text, defs) else {
+        return;
+    };
+    let existing = runtime::app_state::param_origins(root, rel).unwrap_or_default();
+    let mut entries = Vec::new();
+    for def in defs {
+        let key = def.key.as_str();
+        if existing.contains_key(key) {
+            continue;
+        }
+        let (Some(current), Some(before)) = (local.get(key), base.get(key)) else {
+            continue;
+        };
+        if current == before {
+            continue;
+        }
+        entries.push((
+            key.to_owned(),
+            runtime::app_state::ParamOrigin {
+                sha256: Some(sha.clone()),
+                value: before.clone(),
+            },
+        ));
+    }
+    if let Err(e) = runtime::app_state::record_param_origins(root, rel, &entries) {
+        tracing::warn!(error = %e, "「上次云端值」没记上（不影响本次保存）");
+    }
 }
 
 /// **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** ——

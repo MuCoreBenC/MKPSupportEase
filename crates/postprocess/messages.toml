@@ -4916,6 +4916,14 @@ text_ja = "{count} 件の変更が未保存です — 生成・公開の前に�
 params = ["count"]
 note = "2026-10-31 统一编辑事务：生成与发布都要求在「已保存」状态上跑 —— 不自动替用户保存"
 
+["ui.workbench.txn.diverged"]
+text = "工作台手里那份源文件与 presets/ 已经不是同一份 —— 可能是外部改过源，或上次留下了没保存的改动。先「重新加载」（CLI：presets reload），确认保留哪一份，再生成"
+text_en = "What the workbench has loaded no longer matches presets/ — the sources may have been changed outside, or a previous session left unsaved changes. Reload first (CLI: presets reload), decide which copy to keep, then generate"
+text_zh_tw = "工作台手裡那份來源檔與 presets/ 已經不是同一份 —— 可能是外部改過來源，或上次留下了沒儲存的改動。先「重新載入」（CLI：presets reload），確認保留哪一份，再產生"
+text_ja = "ワークベンチが読み込んでいる内容は presets/ と一致しません — 外部でソースが変更されたか、前回の未保存の変更が残っています。先に「再読み込み」（CLI: presets reload）でどちらを残すか決めてから生成してください"
+params = []
+note = "2026-10-31 影子分叉闸：生成不许拿旧影子渲染再写回真仓库（A1 三份 0.7 被写回 0.8 那次）。不自动 mirror —— 影子可能含着用户没保存的工作"
+
 ["ui.ipc.local.150"]
 text = "这份预设的路径不对，存不回去"
 text_en = "That preset path is invalid, so it cannot be saved back"

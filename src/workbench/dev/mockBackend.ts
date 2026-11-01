@@ -1013,8 +1013,6 @@ function mockAudit(): Json {
     nothingToPublish: false,
     minVersion: '0.0.1',
     canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
-    /* 桩里没有"测试模式"这回事（沙箱切不动，见 `wb_sandbox_*`），所以发布这门是开的 */
-    publishClosed: null,
   }
 }
 
@@ -2368,29 +2366,6 @@ export function installMockBackend() {
        * 状态如实报"没在跑"；起 / 停如实拒绝，理由写在消息里 —— 照 `wb_reveal_asset`
        * 那条口径：演示里点它要说实话，不是静默成功。
        */
-      /*
-       * **测试模式（沙箱）**：桩里没有那个仓库 —— 沙箱那棵树（拷 `presets/`）建不出来，
-       * 于是"开关"这件事在浏览器里必须**如实拒绝**，不能假装切了根（那会让人以为
-       * 自己正站在沙箱里，而其实一个字都没动）。状态那一格报"没开"。
-       */
-      case 'wb_sandbox_status':
-        return Promise.resolve({
-          enabled: false,
-          sandboxRoot: 'C:\\dev\\MKPSupportEase\\workbench\\.sandbox',
-          ready: false,
-          files: 0,
-          bytes: 0,
-          realPresetsRoot: 'C:\\dev\\MKPSupportEase\\presets',
-          note: null,
-        })
-      case 'wb_sandbox_set':
-      case 'wb_sandbox_refill':
-      case 'wb_sandbox_wipe':
-        return Promise.reject({
-          code: 'NOT_IMPLEMENTED',
-          message: '浏览器演示里没有那个仓库 —— 沙箱（拷一份 presets/）建不出来，测试模式切不了',
-          traceId: 'mock',
-        })
       case 'wb_dev_source_status':
         return Promise.resolve({
           running: false,
@@ -2428,7 +2403,7 @@ export function installMockBackend() {
             {
               kind: 'delivery',
               label: '当前交付',
-              note: '端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」',
+              note: '端你生成出来的那一份 —— 验「我改的东西客户端拿不拿得到」',
               root: 'C:\\dev\\MKPSupportEase\\presets',
               url: 'http://127.0.0.1:8787/delivery',
               ready: true,

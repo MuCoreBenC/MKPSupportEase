@@ -913,6 +913,8 @@ function mockSyncOf(path: string): PresetParamSync {
       local: localValue,
       baselineOld: old ?? null,
       cloudNew: neu ?? null,
+      /* mock 不做「上次云端」的滚动记账，和旧档一样走 baselineOld 回退 */
+      origin: null,
       pending,
       /* 冲突：云端改过它、**我也改过它**，两边的值还不一样（与 Rust 同一式子） */
       conflict:

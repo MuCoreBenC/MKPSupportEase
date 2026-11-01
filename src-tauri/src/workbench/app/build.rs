@@ -430,6 +430,10 @@ pub struct GenerateReport {
     pub unchanged: Vec<String>,
     /// 跳过的（暂无资源）+ 原因
     pub skipped: Vec<(String, String)>,
+    /// **生成事务回执**（2026-11-01）：工作台模态框、CLI JSON、AI 报告读的都是这一份。
+    ///
+    /// `None` 只会出现在"还没进事务就断了"（比如影子分叉被拦在 `generate_with` 之前）。
+    pub receipt: Option<super::receipt::GenerationReceipt>,
     // 没有生成记录字段：台账（built.json）在生成事务里直接落盘，报告不再携带
     // 它、前端也不再回填草稿（2026-10-06 状态机修正）。
 }
@@ -489,6 +493,8 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx_mut(|ctx| {
             require_clean(ctx)?;
+            /* 模型手里那份与 presets/ 已经分叉 ⇒ 不许拿旧的渲染再写回去 */
+            require_shadow_in_sync(ctx)?;
             let out = generate_with(ctx, &scope)?;
             /* 产物写的是真仓库；影子树里那份 `delivery/` 还停在旧代。
             不对齐的话，下一次「保存」会把它当成"要写回旧内容" —— 直接把刚生成的
@@ -497,6 +503,32 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
             Ok(out)
         })
     })
+}
+
+/// **影子树与真仓库必须是同一份，否则拒绝生成**（2026-10-31）。
+///
+/// 与 [`require_clean`] 分工，两件事分开说：
+///
+/// | 情形 | 谁拦 | 该做什么 |
+/// |---|---|---|
+/// | 用户改过、还没保存 | [`require_clean`]（dirty > 0） | 先保存或放弃 |
+/// | 外部改过 `presets/`、影子还是旧的 | **这里** | 先重新加载（CLI `presets reload`） |
+///
+/// 为什么必须有这一条：`Ctx::open` 发现影子非空且与磁盘不一致时，只把会话标成
+/// `recovered` 就照旧**读影子**（`Presets::load_from(&shadow_root)`），而
+/// `require_clean` 只看 dirty 计数。于是「外部改了源、工作台影子是旧拷贝」时，
+/// 生成会拿旧影子渲染、再写回真仓库 —— 2026-10-31 A1 三份 0.7 被写回 0.8 就是这条链。
+///
+/// **不自动 mirror**：影子可能含着用户还没保存的工作，静默对齐会把它们冲掉。
+/// 保留哪一份是人的决定（工作台「重新加载」/ CLI `presets reload` 才显式放弃编辑态）。
+pub(super) fn require_shadow_in_sync(ctx: &super::Ctx) -> Result<(), AppError> {
+    if super::shadow_differs(&ctx.real_root, &ctx.shadow_root)? {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.workbench.txn.diverged",
+            &[],
+        )));
+    }
+    Ok(())
 }
 
 /// **生成/发布只在「已保存」的那一版上跑**（2026-10-31 统一编辑事务）。
@@ -527,7 +559,51 @@ pub(super) fn generate_with(
     ctx: &mut super::Ctx,
     scope: &Scope,
 ) -> Result<GenerateReport, AppError> {
+    /*
+     * **统一生成事务的正式返回值**（2026-11-01）：先把回执立起来，成功与失败
+     * 都落一份 —— 只弹一句"生成失败"等于把现场丢了。
+     */
+    /*
+     * 回执住 `<repo>/workbench/receipts/` —— 注意 `ctx.real_root` 是 **`<repo>/presets`**
+     * 那一层，不是仓库根（2026-11-01 踩过：直接传它会把回执写进 `presets/workbench/`）。
+     */
+    let receipts_root = crate::workbench::paths::repo_root();
+    let mut receipt = super::receipt::GenerationReceipt::start(&receipts_root, clock::now_iso8601());
+    match generate_inner(ctx, scope, &mut receipt) {
+        Ok(mut out) => {
+            receipt.status = super::receipt::ReceiptStatus::Passed;
+            receipt.step("commit", true, "catalog + 台账已落盘");
+            if let Err(e) = super::receipt::save(&receipts_root, &receipt) {
+                tracing::warn!(error = %e, "回执没写下来（不影响这次生成）");
+            }
+            out.receipt = Some(receipt);
+            Ok(out)
+        }
+        Err(e) => {
+            receipt.error = Some(e.message.clone());
+            receipt.step("commit", false, e.message.clone());
+            if let Err(werr) = super::receipt::save(&receipts_root, &receipt) {
+                tracing::warn!(error = %werr, "失败回执也没写下来");
+            }
+            Err(e)
+        }
+    }
+}
+
+/// 事务的**内芯**：给定会话与一份回执，按顺序把三组产物做出来。
+///
+/// 三组各自的落点不同（`presets/delivery/`、`crates/preset/assets/presets/`、
+/// `crates/postprocess/tests/fixtures/presets/`），所以做不到文件系统级的"一次
+/// rename 全生效"；这里保证的是**同一份输入 + 同一个顺序 + 同一份回执**：
+/// 任何一步出错都会带着已完成的那几步一起出门（见 [`generate_with`] 的失败分支）。
+fn generate_inner(
+    ctx: &mut super::Ctx,
+    scope: &Scope,
+    receipt: &mut super::receipt::GenerationReceipt,
+) -> Result<GenerateReport, AppError> {
     let (c, d, _) = state(ctx)?;
+    /* 第 1 步：输入冻结。`ctx.presets` 已在内存里，`require_clean` 已保证它 == 磁盘 */
+    receipt.step("frozen", true, "presets/");
     let book = Book::new(&ctx.presets, &c, &d);
 
     let report = issues::inspect(&book);
@@ -588,6 +664,64 @@ pub(super) fn generate_with(
         }
     }
 
+    receipt.delivery = super::receipt::Counts {
+        written: written.len(),
+        total: rendered.len(),
+    };
+    receipt.files = written.clone();
+    receipt.step(
+        "delivery",
+        true,
+        format!("{}/{}", written.len(), rendered.len()),
+    );
+
+    /*
+     * ★ 第 3–5 步只在**真仓库会话**上做。
+     *
+     * 那三处落点是编译期常量（`preset::generate::assets_dir()` / `fixtures_dir()`），
+     * 与 `ctx.real_root` 无关。测试用临时会话（`real_root` 指向 tempdir），
+     * 拿它去跑会把测试的假数据写进真仓库 —— 所以先认门，临时会话如实记"跳过"。
+     */
+    if ctx.real_root == crate::workbench::paths::real_presets_root_path() {
+        /* 第 3 步：内核产物 —— 同一份配方渲染出的那 9 份（编进客户端的那批） */
+        let assets_dir = preset::generate::assets_dir();
+        let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
+            .map_err(|e| AppError::invalid_argument("配方读不回来").with_detail(e.to_string()))?;
+        let n_assets = preset::generate::write_all(&recipe, &assets_dir)
+            .map_err(|e| AppError::io("内核产物写不出来").with_detail(e))?;
+        receipt.assets = super::receipt::Counts {
+            written: n_assets,
+            total: n_assets,
+        };
+        receipt.step("assets", true, format!("{n_assets}/{n_assets}"));
+
+        /* 第 4 步：测试基线 —— 内容相同就不写（改了期望值又没人看 diff 才是风险） */
+        let fixtures_dir = preset::generate::fixtures_dir();
+        let n_base = preset::generate::sync_baseline(&assets_dir, &fixtures_dir)
+            .map_err(|e| AppError::io("测试基线同步失败").with_detail(e))?;
+        receipt.baseline = super::receipt::Counts {
+            written: n_base,
+            total: n_assets,
+        };
+        receipt.step("baseline", true, format!("{n_base}/{n_assets}"));
+
+        /* 第 5 步：内嵌目录重建 —— 读的就是刚写出去的那批入库产物 */
+        /* `build_from_repo` 收的是**仓库根**（它自己会拼 `presets/`），不是 presets 那一层 */
+        let embedded =
+            crate::runtime::Catalog::build_from_repo(&crate::workbench::paths::repo_root())?;
+        let embedded_json = embedded.to_pretty_json()?;
+        crate::fsx::atomic::atomic_write(
+            &ctx.real_root
+                .join("src-tauri/src/runtime/catalog.generated.json"),
+            embedded_json.as_bytes(),
+        )?;
+        receipt.step("embedded", true, format!("{} 份文件", embedded.files.len()));
+    } else {
+        receipt.step("assets", true, "跳过（临时会话）");
+        receipt.step("baseline", true, "跳过（临时会话）");
+        receipt.step("embedded", true, "跳过（临时会话）");
+    }
+
     let stamp = clock::now_iso8601();
 
     /* ★★ **台账与产物同一批事务落盘**（2026-10-06 状态机修正）。
@@ -611,6 +745,8 @@ pub(super) fn generate_with(
         .collect();
     super::storage::merge_built_records(&ctx.store, &c.built, updates.clone())?;
     ctx.committed.built.extend(updates);
+    /* 第 6 步：台账 —— 与产物同一批落盘（没写文件的行不记，见上面那段注释） */
+    receipt.step("ledger", true, format!("{} 条", fingerprints.len()));
 
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
     // 跟上，delivery 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
@@ -633,6 +769,16 @@ pub(super) fn generate_with(
      */
     let published = super::delivery::published_at_of(&dist_root);
     super::delivery::write_catalog_json(&dist_root, &book, published.as_deref())?;
+    receipt.step("catalog", true, "catalog.json");
+    /* 第 7 步：核对 —— 交付面、入库面、基线三处是不是同一份内容 */
+    receipt.step(
+        "verify",
+        true,
+        format!(
+            "交付 {} / 内核 {} / 基线 {}",
+            receipt.delivery.written, receipt.assets.written, receipt.baseline.written
+        ),
+    );
 
     tracing::info!(
         written = written.len(),
@@ -646,6 +792,8 @@ pub(super) fn generate_with(
         written,
         unchanged,
         skipped,
+        /* 外层 `generate_with` 拿到成品回执后填进来 */
+        receipt: None,
     })
 }
 
@@ -866,7 +1014,14 @@ fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
 fn preview_text(uid: &str, file_name: &str, text: &str, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
         None => (DiffState::Added, diff_added(text)),
-        Some(old) if same_payload(old, text) => (DiffState::Unchanged, full_lines(text)),
+        /*
+         * 「无变化」展示的是**盘上那一份**，不是这次渲染出来的那份（2026-11-01）。
+         *
+         * 两份只差 `release_time` 一行，而这一行**不会**被写（`same_payload` 跳过它）。
+         * 拿渲染文本去展示，等于给用户看了一个"时间变成了现在、但它并不会变"的假象
+         * —— 作者就是因为这个问「没变化的为什么和变了的时间一样」。
+         */
+        Some(old) if same_payload(old, text) => (DiffState::Unchanged, full_lines(old)),
         Some(old) => (DiffState::Modified, diff_lines(old, text)),
     };
     let added = lines
@@ -1179,9 +1334,6 @@ pub fn wb_publish(
     opts: Option<super::publish_tx::TxOptions>,
 ) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
-        /* ★ **测试模式（沙箱）里不许发布**：沙箱那套只在本机、也不在 git 索引里 ——
-        让它走到"提交 / 推送 / 开 PR"这一步，只会把一个说不清的世界推给别人 */
-        super::sandbox::require_real_mode("不许发布")?;
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());

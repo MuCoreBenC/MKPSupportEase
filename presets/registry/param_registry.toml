@@ -2529,7 +2529,7 @@ descTw = '支撐材料的擠出倍率，影響支撐密度和拆除難度'
 tomlKey = 'support_extrusion_multiplier'
 valueType = 'float'
 uiComponent = 'number'
-defaultValue = 0.8
+defaultValue = 0.7
 section = 'wiping'
 configKey = 'SupportExtrusionMultiplier'
 jsonKey = 'support_extrusion_multiplier'
@@ -2544,6 +2544,9 @@ tomlComment = '支撑体挤出倍率'
 [params.layout]
 sectionId = 'glue_advanced_motion'
 order = 0.0
+
+[params.machineVariants]
+A1 = 0.75
 
 [[params]]
 key = 'wiping.tower_custom_layer_height'
@@ -2634,7 +2637,7 @@ op = 'eq'
 value = 'tower'
 
 [params.machineVariants]
-A1 = 0.9
+A1 = 1.0
 
 [[params]]
 key = 'wiping.tower_first_layer_flow'

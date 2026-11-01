@@ -98,6 +98,24 @@ const STATE_TEXT: Record<PreviewFile['state'], string> = {
   unchanged: '无变化',
 }
 
+/**
+ * 生成事务回执里每一步的说法。
+ *
+ * **键在后端、句子在前端**（`receipt::StepRow.key`）：后端不写死用户能读的中文，
+ * 换语言 / 改措辞只改这张表。
+ */
+const RECEIPT_STEP_LABEL: Record<string, string> = {
+  frozen: '读取并冻结源数据',
+  delivery: '生成交付文件',
+  assets: '生成内核产物',
+  baseline: '生成测试基线',
+  embedded: '重建内嵌目录',
+  ledger: '写生成台账',
+  catalog: '重算交付目录',
+  verify: '核对三组产物',
+  commit: '提交本次事务',
+}
+
 
 
 /** 一份文件在清单里的排序权重：有变化（修改 / 新增）在前，无变化在最后 */
@@ -252,6 +270,45 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
             )}
             {done.unchanged.length > 0 && <> · 内容没变、跳过：{done.unchanged.length} 份</>}
           </p>
+
+          {/*
+            **生成事务回执**（2026-11-01）：这是后端的正式返回值，不是这里另拼的
+            一份总结 —— 工作台、CLI、AI 读的是同一个 `receipt`。
+            步骤顺序 = 真执行顺序；失败的步子由后端带着 `ok: false` 一起出门。
+          */}
+          {done.receipt !== null && (
+            <section className={s.resultGroup}>
+              <h3 style={{ margin: '0 0 4px', fontSize: 13 }}>生成事务回执</h3>
+              <p className={s.footNote} style={{ margin: '0 0 6px' }}>
+                事务 ID <code>{done.receipt.id}</code> · {done.receipt.stamp}（UTC）·
+                <b>
+                  {done.receipt.status === 'passed' ? ' 全部通过' : ' 有失败'}
+                </b>
+              </p>
+              <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, fontSize: 12 }}>
+                {done.receipt.steps.map((st) => (
+                  <li
+                    key={st.key}
+                    style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0' }}
+                  >
+                    <span style={{ color: st.ok ? '#16a34a' : '#dc2626' }}>{st.ok ? '✓' : '✗'}</span>
+                    <span style={{ flex: 1 }}>{RECEIPT_STEP_LABEL[st.key] ?? st.key}</span>
+                    <span style={{ opacity: 0.65 }}>{st.detail}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className={s.summary}>
+                交付 <b>{done.receipt.delivery.written}/{done.receipt.delivery.total}</b>
+                {' · '}内核 <b>{done.receipt.assets.written}/{done.receipt.assets.total}</b>
+                {' · '}基线 <b>{done.receipt.baseline.written}/{done.receipt.baseline.total}</b>
+              </p>
+              {done.receipt.error !== null && (
+                <p className={s.footNote} style={{ margin: '4px 0 0', color: '#dc2626' }}>
+                  {done.receipt.error}
+                </p>
+              )}
+            </section>
+          )}
 
           {/* 作者 2026-10-19 问的那件事：生成 ≠ 发布 —— 在这里再说一遍 */}
           <p className={s.footNote} style={{ margin: 0 }}>

@@ -59,7 +59,7 @@ use crate::ipc::traced;
 use crate::presetdata::params as param_alg;
 use crate::presetdata::patch::FieldEdit;
 use crate::runtime;
-use crate::runtime::app_state::{ParamDecision, ParamDecisionKind};
+use crate::runtime::app_state::{ParamDecision, ParamDecisionKind, ParamOrigin};
 use crate::runtime::catalog::{hex, Catalog, CatalogFile};
 use crate::runtime::param_sync::{self, SyncInput};
 
@@ -80,6 +80,9 @@ pub struct ParamSyncEntryDto {
     pub conflict: bool,
     /// 我已经对当前云端版处理过这一项：`adopt` / `hold`
     pub decided: Option<&'static str>,
+    /// **上次云端值**（2026-10-31 的滚动记录）：界面那个「上次云端」用它，
+    /// 不被采用/保持推进。`None` = 还没记过（旧档 / 从没改过）⇒ 界面退回 `baselineOld`。
+    pub origin: Option<String>,
 }
 
 /// 一份用户预设的「云端更新」总账。
@@ -244,6 +247,8 @@ fn sync_at(
     }
 
     let local = param_alg::read_param_values(&text, defs)?;
+    /* 「上次云端值」的滚动记录（没记过 = 空表，界面退回旧口径） */
+    let origins = runtime::app_state::param_origins(root, path)?;
     let (entries, pending_count) = param_sync::diff(&SyncInput {
         defs,
         local: &local,
@@ -251,6 +256,7 @@ fn sync_at(
         based_on_sha256,
         current_sha256: current_sha256.as_deref(),
         by_sha: &by_sha,
+        origins: &origins,
     });
 
     Ok(PresetParamSyncDto {
@@ -281,6 +287,7 @@ fn sync_at(
                     pending: e.pending,
                     conflict,
                     decided: e.decided.map(kind_text),
+                    origin: e.origin,
                 }
             })
             .collect(),
@@ -421,6 +428,47 @@ fn local_cloud_text(root: &std::path::Path, file: &CatalogFile) -> Option<String
 
 /* ---------- 写 ---------- */
 
+/// **滚动「上次云端值」**：整份对齐到新云端之后，把每一格换成**被换下来的那一版**的值。
+///
+/// 与 [`ParamOrigin`] 的两条规则配套（作者 2026-10-31 定的）：
+///
+/// ```text
+/// 下载 A → 改成 B（记 A）→ 下载 C：上次云端仍是 A（这一项云端没改过）
+///                        → 下载 D：上次云端滚成 C
+/// ```
+///
+/// 判据 = 这一项的「旧云端值」与「新云端值」不同。相同就**不动** —— 那是"云端这一项
+/// 没改"，用户手改时记下的 A 必须留着；不同才滚，且滚的是**旧的那一侧**（不是我改的值）。
+/// 拿不到旧值 ⇒ 跳过这一项（不编一个）。
+fn roll_origins(
+    root: &std::path::Path,
+    path: &str,
+    before: &PresetParamSyncDto,
+    before_based_on: Option<&str>,
+    cloud_new: &BTreeMap<String, String>,
+) -> Result<(), AppError> {
+    let mut entries: Vec<(String, ParamOrigin)> = Vec::new();
+    for e in &before.entries {
+        let Some(old) = e.baseline_old.as_deref() else {
+            continue;
+        };
+        let Some(new) = cloud_new.get(&e.key) else {
+            continue;
+        };
+        if old == new {
+            continue;
+        }
+        entries.push((
+            e.key.clone(),
+            ParamOrigin {
+                sha256: before_based_on.map(str::to_owned),
+                value: old.to_owned(),
+            },
+        ));
+    }
+    runtime::app_state::record_param_origins(root, path, &entries)
+}
+
 /// 落一批决定：**以云端当前版为底重写这一份**（注释 / 时间戳 / 新字段跟着新版走），
 /// 采用的那几项写成云端新值、其余**保持我这份现在写着的值**，血统换成当前版。
 ///
@@ -453,6 +501,9 @@ fn apply_at(
     let catalog = runtime::load_released_catalog(root)?;
     let defs = &catalog.registry.params;
     let local_text = runtime::local::read_text(user, path)?;
+    /* 滚动要用「应用前的血统」：那一版就是这一趟即将被换下来的"上次云端" */
+    let before_based_on =
+        runtime::lineage::parse_lineage_from_content(&local_text).and_then(|l| l.based_on_sha256);
     let local = param_alg::read_param_values(&local_text, defs)?;
     let cloud = param_alg::read_param_values(&cloud_text, defs)?;
 
@@ -600,6 +651,13 @@ fn apply_at(
         /* ★ 原文镜像：写盘**之前**存（那一刻盘上还是原文） */
         let _ = runtime::baseline::ensure_origin_copy(root, user, path);
         runtime::local::write_text(user, path, &next)?;
+        /*
+         * **「上次云端值」滚动**：这一趟把这份对齐到了新云端，被换下来的那一版
+         * 就成为新的「上次云端」。记不上不影响更新本身（附加信息，与出处账同口径）。
+         */
+        if let Err(e) = roll_origins(root, path, &before, before_based_on.as_deref(), &cloud) {
+            tracing::warn!(error = %e, "「上次云端值」没滚上，界面会退回旧口径");
+        }
         /*
          * 来路账跟着前进：剩下的待处理项为 0 ⇒ 这份已经对齐到当前云端版，
          * 「本地版本时间」要指向**这一版**的发布时刻（不是当初下载那一版）。
@@ -795,6 +853,7 @@ offset_x = -1
             based_on_sha256: Some("old"),
             current_sha256: Some("new"),
             by_sha: &by_sha,
+            origins: &BTreeMap::new(),
         });
 
         assert_eq!(pending, 1, "只有那一项该进待处理");
@@ -802,6 +861,88 @@ offset_x = -1
         assert!(e.pending);
         assert_eq!(e.local.as_deref(), Some("7.5"), "本地值不许被顶掉");
         assert_eq!(e.cloud_new.as_deref(), Some(changed.as_str()));
+    }
+
+    /* ---------- 「上次云端值」的滚动（2026-10-31） ---------- */
+
+    /// 摆一条只用来测滚动的总账：这一项旧云端 `old`、新云端 `new`、记录 `origin`。
+    fn sync_book(old: &str, new: &str, origin: Option<&str>) -> PresetParamSyncDto {
+        PresetParamSyncDto {
+            path: "presets-local/A1.toml".to_owned(),
+            file_name: "A1.toml".to_owned(),
+            machine_id: None,
+            version_id: None,
+            cloud_file_name: None,
+            based_on_release_time: None,
+            current_release_time: None,
+            current_sha256: Some("sha-b".to_owned()),
+            cloud_ready: true,
+            version_advanced: true,
+            pending_count: 1,
+            entries: vec![ParamSyncEntryDto {
+                key: "toolhead.offset.x".to_owned(),
+                local: Some("-2".to_owned()),
+                baseline_old: Some(old.to_owned()),
+                cloud_new: Some(new.to_owned()),
+                pending: true,
+                conflict: true,
+                decided: None,
+                origin: origin.map(str::to_owned),
+            }],
+        }
+    }
+
+    /// 云端把这一项改了 ⇒ 记录滚成**被换下来的那一版**（不是"我改的值"）
+    #[test]
+    fn rolling_takes_the_version_being_replaced() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cloud = BTreeMap::new();
+        cloud.insert("toolhead.offset.x".to_owned(), "-0.9".to_owned());
+
+        roll_origins(
+            tmp.path(),
+            "presets-local/A1.toml",
+            &sync_book("-0.5", "-0.9", Some("-1")),
+            Some("sha-a"),
+            &cloud,
+        )
+        .unwrap();
+
+        let got =
+            crate::runtime::app_state::param_origins(tmp.path(), "presets-local/A1.toml").unwrap();
+        assert_eq!(
+            got["toolhead.offset.x"].value, "-0.5",
+            "滚的是旧云端那一侧，不是用户改的值，也不是新值"
+        );
+        assert_eq!(
+            got["toolhead.offset.x"].sha256.as_deref(),
+            Some("sha-a"),
+            "摘要跟着记下来（排查用）"
+        );
+    }
+
+    /// 这一项云端**没改** ⇒ 一个字不写（用户手改时记下的那版必须留着）
+    #[test]
+    fn rolling_leaves_unchanged_params_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut cloud = BTreeMap::new();
+        cloud.insert("toolhead.offset.x".to_owned(), "-0.9".to_owned());
+
+        roll_origins(
+            tmp.path(),
+            "presets-local/A1.toml",
+            &sync_book("-0.9", "-0.9", Some("-1")),
+            Some("sha-a"),
+            &cloud,
+        )
+        .unwrap();
+
+        let got =
+            crate::runtime::app_state::param_origins(tmp.path(), "presets-local/A1.toml").unwrap();
+        assert!(
+            got.is_empty(),
+            "没有差异就不该动记录（它还是用户改值那一刻记下的 -1）"
+        );
     }
 
     /* ---------- 端到端：摆一个真世界，走一遍场景 A–E ---------- */

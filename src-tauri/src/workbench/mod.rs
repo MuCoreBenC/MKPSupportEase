@@ -96,27 +96,9 @@ pub fn load_session_presets() -> Result<crate::presetdata::Presets, AppError> {
 /// ★ `pub`：换主题那一档要按它找到这扇窗（见 [`crate::ipc::prefs::set_theme`]）。
 pub const WINDOW_LABEL: &str = "workbench";
 
-/// 窗口标题。**测试模式那一份带前缀** —— 标题栏是唯一一处"切到别的窗口也还看得见"
-/// 的地方（任务栏、Alt+Tab、截图里都在），作者要的"时时刻刻知道我在哪一边"就靠它兜底。
+/// 工作台窗口标题。一度带「【测试模式】」前缀，沙箱删掉之后只剩这一个名字。
 fn window_title() -> String {
-    if paths::sandbox_on() {
-        format!("{SANDBOX_TITLE_PREFIX}SupportEase 工作台")
-    } else {
-        "SupportEase 工作台".to_owned()
-    }
-}
-
-/// 测试模式下标题的前缀（一眼分得开）
-const SANDBOX_TITLE_PREFIX: &str = "【测试模式】";
-
-/// 把窗口标题按**现在**的模式写一遍。
-///
-/// 开窗时用 [`window_title`]，切换模式时由那几条命令调这里 —— 标题不是启动一次的
-/// 快照，它得跟着模式走，否则人会对着一个说"正式"的标题栏看沙箱。
-pub fn refresh_window_title(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = win.set_title(&window_title());
-    }
+    "SupportEase 工作台".to_owned()
 }
 
 /// 开工作台窗口。已经开着就聚焦，不重复开第二个。

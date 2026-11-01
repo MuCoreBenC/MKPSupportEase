@@ -81,6 +81,7 @@ fn run_cli() -> Result<i32, AppError> {
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
+        "reload" => cmd_reload(),
         "publish" => cmd_publish(dry_run, republish),
         "-h" | "--help" | "help" => {
             usage();
@@ -101,6 +102,7 @@ fn usage() {
   presets generate [--all]      跑生成器刷新交付产物（**不推进发布序号**）
   presets diff                  报盘上与真生成结果的差异（只读）
   presets verify                核对 catalog / manifest / 账本 / SHA（只读）
+  presets reload                把工作台影子树对齐到 presets/（= 工作台「重新加载」）
   presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写
   presets publish               执行正式发布事务（唯一能让序号 +1 的动作）
 
@@ -125,6 +127,31 @@ fn emit(value: serde_json::Value, code: i32) -> Result<i32, AppError> {
 
 fn open_ctx() -> Result<Ctx, AppError> {
     Ctx::open()
+}
+
+/// **把工作台的影子树对齐到真仓库**（= 工作台那颗「重新加载」）。
+///
+/// 为什么需要它：影子与 `presets/` 分叉时生成会被拒（`ui.workbench.txn.diverged`）——
+/// 那条闸故意**不自动对齐**，因为影子可能含着用户还没保存的编辑。CLI 这边要往下走，
+/// 就得显式说一句"放弃影子里的编辑态，回到磁盘那一版"。
+/// 与 `wb_reload` 是同一件事（`txn::mirror(real → shadow)`），不是第二套逻辑。
+fn cmd_reload() -> Result<i32, AppError> {
+    let real = mkp_support_ease_lib::workbench::paths::presets_root()
+        .ok_or_else(|| AppError::not_found("找不到 <repo>/presets"))?;
+    let wb = mkp_support_ease_lib::workbench::paths::real_workbench_root();
+    let shadow = mkp_support_ease_lib::workbench::domain::txn::shadow_root(&wb);
+    std::fs::create_dir_all(&shadow)
+        .map_err(|e| AppError::io("建不出影子树").with_detail(e.to_string()))?;
+    mkp_support_ease_lib::workbench::domain::txn::mirror(&real, &shadow)?;
+    emit(
+        json!({
+            "command": "reload",
+            "ok": true,
+            "changed": true,
+            "summary": "影子树已对齐到 presets/（影子里的编辑态已放弃）",
+        }),
+        0,
+    )
 }
 
 /// 交付根（`<presets>/delivery`）—— **真仓库那一棵**（不是影子树）。

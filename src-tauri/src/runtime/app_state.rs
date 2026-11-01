@@ -81,6 +81,31 @@ pub struct ParamDecision {
     pub kind: ParamDecisionKind,
 }
 
+/// 一个参数的「**上次云端值**」（2026-10-31，作者定的滚动记账）。
+///
+/// 与 [`ParamDecision`] 回答的是两件事：那一格是"我处理到哪一版"（会被采用/保持推进），
+/// 这一格是"**我上次从云端拿到的是多少**"—— 它只在两个时刻动：
+///
+/// ```text
+/// ① 用户第一次把这一项改成与手上那版云端不同 ⇒ 记下那版的值（A）
+/// ② 整份对齐到新云端（下载/更新）            ⇒ 滚成"被换下来的那版"（A → … → C）
+/// ```
+///
+/// 例：下载 A → 改成 B（记 A）→ 云端发 C，界面「上次云端 A / 最新 C」
+///     → 云端发 D，界面「上次云端 C / 最新 D」。
+///
+/// 之所以不跟着决定账的水位走：水位一推到当前版，旧值就等于新值了，
+/// 界面上那两格变成同义反复（2026-10-31 排查确认）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamOrigin {
+    /// 记下这一刻的那版云端摘要（排查 / 去重用；拿不到时为 `None`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// 那一刻云端里这一项的值 —— 界面「上次云端」显示的就是它
+    pub value: String,
+}
+
 /// **界面主题档位**（2026-10-12 整套客户端做深色模式那一刀）。
 ///
 /// 三档，与前端 `src/api/contract.ts` 的 `ThemePref` 一一对应 —— **id 是契约**
@@ -468,6 +493,15 @@ pub struct AppStateFile {
     /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_local`]）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_decisions: BTreeMap<String, BTreeMap<String, ParamDecision>>,
+    /// **逐参数「上次云端值」**：`presets-local/…` → `参数 key → 那一版的值`。
+    ///
+    /// 与上面那一格同族（都住 `run/`，都回答"程序怎么管理这一份"），但语义不同：
+    /// 决定账记"我处理到哪一版"（会被采用/保持推进），这一格记"我上次拿到的是多少"，
+    /// 只在"第一次改得与云端不同"与"整份对齐到新云端"两个时刻动 —— 见 [`ParamOrigin`]。
+    ///
+    /// 空的格不写进文件（`skip_serializing_if`）—— 没改过参数的应用，状态文件与以前一样。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub param_origins: BTreeMap<String, BTreeMap<String, ParamOrigin>>,
     /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
     ///
     /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
@@ -538,6 +572,7 @@ impl Default for AppStateFile {
             text_draft: None,
             preset_source: None,
             param_decisions: BTreeMap::new(),
+            param_origins: BTreeMap::new(),
             theme: None,
             locale: None,
             auto_clean_history: None,
@@ -715,6 +750,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         preset_source: super::source::read_source_file(root)?,
         /* 逐参数决定账是 2026-10-09 才有的格：旧档里本来就没有它 */
         param_decisions: BTreeMap::new(),
+        /* 「上次云端值」是 2026-10-31 才有的格：旧档里本来就没有它 */
+        param_origins: BTreeMap::new(),
         /* 主题这一格是 2026-10-12 才有的：旧档里本来就没有它（没选过 = None） */
         theme: None,
         /* 界面语言这一格是 2026-10-25 才有的：旧档里本来就没有它（没选过 = 跟随系统） */
@@ -1002,6 +1039,10 @@ pub fn repoint_local(
         if let Some(book) = state.param_decisions.remove(old_rel) {
             state.param_decisions.insert(new_rel.to_owned(), book);
         }
+        /* 「上次云端值」按同一条钥匙跟着走：改名不该让"我上次拿到的是 A"凭空消失 */
+        if let Some(book) = state.param_origins.remove(old_rel) {
+            state.param_origins.insert(new_rel.to_owned(), book);
+        }
         Ok((active_followed, draft_followed))
     })
 }
@@ -1045,6 +1086,41 @@ pub fn record_param_decisions(
 pub fn forget_param_decisions(root: &Path, rel: &str) -> Result<(), AppError> {
     with_state(root, |state| {
         state.param_decisions.remove(rel);
+        /* 「上次云端值」与它同生共死：文件都不在了，那一版的值也不该留着占位置 */
+        state.param_origins.remove(rel);
+        Ok(())
+    })
+}
+
+/* ---------- paramOrigins：逐参数「上次云端值」（2026-10-31） ---------- */
+
+/// 这一份用户预设上，**我上次从云端拿到的那些值**（参数 key → 那一版的值）。
+/// 没改过参数就是空表。
+pub fn param_origins(root: &Path, rel: &str) -> Result<BTreeMap<String, ParamOrigin>, AppError> {
+    Ok(load(root)?
+        .param_origins
+        .get(rel)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 记下/覆盖若干项的「上次云端值」（同一份文件上的**合并写**，别的项一个不动）。
+///
+/// ★ **写不写由调用方判**（只有两个时刻，见 [`ParamOrigin`]）—— 这里只管合并与落盘，
+/// 不在这里另做一套"该不该"的判断（判据只留一处）。
+pub fn record_param_origins(
+    root: &Path,
+    rel: &str,
+    entries: &[(String, ParamOrigin)],
+) -> Result<(), AppError> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    with_state(root, |state| {
+        let book = state.param_origins.entry(rel.to_owned()).or_default();
+        for (key, origin) in entries {
+            book.insert(key.clone(), origin.clone());
+        }
         Ok(())
     })
 }

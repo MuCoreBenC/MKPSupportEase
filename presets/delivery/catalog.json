@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "c03b5304a766f173",
+  "revision": "256743d13c1e6ab8",
   "publishedAt": "2026-10-31T12:17:42Z",
   "brands": [
     {
@@ -3829,7 +3829,7 @@
         "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 0.8,
+        "defaultValue": 0.7,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -3846,7 +3846,9 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.75
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -3960,7 +3962,7 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 0.9
+          "A1": 1.0
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -5796,8 +5798,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "629d88729e58e5092a321f94ae5cdca7b1a2b08bcf98b9aa56413d6ef8ed4d20",
-      "size": 4341
+      "sha256": "2169925801bc90caa8ed0b5b4e669966ec2b1c1186f5a031e2d386a345ea918a",
+      "size": 4340
     },
     {
       "kind": "mkp_preset",
@@ -5805,8 +5807,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "dcc2d62be4e63f72fb4378ba7177fadd548129b9a940e6970c1fea7e2a82d935",
-      "size": 4339
+      "sha256": "2d1d50ada179ef53b2dddd68a7deb7b744c5101ffd0cad76ea31c1b83ac04228",
+      "size": 4338
     },
     {
       "kind": "mkp_preset",
@@ -5814,8 +5816,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "a3c52ffeed798a57784c8987d2a1962315e188a3fe16597ec9b4e27cc70fe2e2",
-      "size": 4343
+      "sha256": "1629b720a4e206e72178e1234d4ab7edbb3aad831998d10e3630507a511cf940",
+      "size": 4342
     },
     {
       "kind": "mkp_preset",
@@ -5823,7 +5825,7 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "eb3e6f9f61e7b55c531d94f210f72271a26be2751bc98b4fa60faefa88b7c684",
+      "sha256": "70715b7a079463415d071344acdc8a713755f640d6250b6fad25580ccf4f7c97",
       "size": 4345
     },
     {
@@ -5832,7 +5834,7 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "e7c222021034d78e706102fcffa3dcf1a2f4e66cce74445371841cc6ac3cf1b5",
+      "sha256": "4094d25a6db2a3b8593eebb3d31a6afeb3e4388e5eb2947be6f2fffec944df50",
       "size": 4339
     },
     {
@@ -5841,7 +5843,7 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "5da29bdf3eb17ce9f63741b694a958ed1be29c35d309af5f37c3341c75c7fe30",
+      "sha256": "4fd67cea90f7be1520676da7bfdba3e91fa10d811d865041a7e86c877f0ff9c3",
       "size": 4344
     },
     {
@@ -5850,7 +5852,7 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "723d39c3d1795e2fdc2120eeed1b7a7b4ceee1123093fba7d234549dff3890d1",
+      "sha256": "dbd1104804dbf94cf936764850964ff989e532eed0b8a2946312f13aa477fd71",
       "size": 4475
     },
     {
@@ -5859,7 +5861,7 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "eede0d4ed874cdb2df3c5dfb9c4012ef7bfb47be18c09352fb005b4e92015803",
+      "sha256": "1d96dacade30fcdc39c81d1a93b62b49f3537d88f519cf7fe63eb13a8f96e867",
       "size": 4479
     },
     {
@@ -5868,7 +5870,7 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "69cde252d626753c463ec2f97a5136c51e552802f830031e814d1e1f91eac371",
+      "sha256": "d1c1d107d5bbf0fcf08f969bec2a0dbb8bd5461c351fc329165845a66aaee978",
       "size": 4475
     },
     {
