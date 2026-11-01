@@ -640,7 +640,6 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::domain::patch::BuiltRecord;
     use crate::workbench::domain::patch::{apply, Committed, CommittedVersion, Draft, Patch};
     use crate::workbench::domain::testkit::{fixture_catalog, Fixture};
     use std::collections::BTreeMap;
@@ -1016,6 +1015,47 @@ uuid = '33333333-3333-3333-3333-333333333333'
         assert!(r.issues.iter().all(|i| i.id != "embedded.catalog_stale"));
     }
 
+    /// **没有渲染器时不许报"产物是旧的"**（2026-11-01 作者截图踩到）。
+    ///
+    /// `build_state` 判"旧不旧"要拿当前渲染跟盘上字节比；`Book` 没装探针时它只能
+    /// 保守说 `Stale`，于是检查卡永远说「有 9 个版本的产物是旧的」，而右边生成页
+    /// 同时显示「已生成」—— 同一份数据两处说法相反。
+    ///
+    /// 现在 `wb_preflight` / `wb_assets` / `wb_bundles` / `audit_with` 都装了探针，
+    /// 这条判据盯着"没装探针的 Book 不该被用来出这个结论"这件事本身。
+    #[test]
+    fn a_book_without_a_renderer_cannot_call_products_stale() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        /* 没有渲染器：盘上没产物时是 `NeverBuilt`（正确），
+        盘上**有**产物时只能保守说 `Stale` —— 后者正是要避免拿去出结论的那一档。
+        这里用"有产物但没探针"来钉住它，因为那才是作者截图里那一幕。 */
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join("mkp/presets/A1-standard.toml");
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&product, b"# machine: A1\n").unwrap();
+
+        let blind = Book::new(&f.presets, &c, &d);
+        assert_eq!(
+            blind.build_state("A1/STANDARD"),
+            BuildState::Stale,
+            "有产物但没探针 → 只能保守说 Stale（这条钉住：为什么必须给 Book 装探针）"
+        );
+
+        // 装了探针、探针给出的字节与盘上一致 → 已生成，不是"旧"
+        let probe = |_uid: &str| Some("# machine: A1\n".to_owned());
+        let seeing = Book::new(&f.presets, &c, &d).with_renderer(&probe);
+        assert_eq!(
+            seeing.build_state("A1/STANDARD"),
+            BuildState::Built,
+            "字节对得上就不该再报旧"
+        );
+    }
+
     /// 有旧版待重新生成时，检查卡要给一条提示（作者 2026-10-02：
     /// 「有旧的、然后新的未生成」这件事只在生成页数得出来，左侧检查里没有）。
     ///
@@ -1026,22 +1066,25 @@ uuid = '33333333-3333-3333-3333-333333333333'
         let c = committed();
         let mut d = Draft::default();
 
-        // 先按当前配方「生成」一次（记进**台账**，2026-10-06 状态机修正）
-        let mut c = c;
-        let fp = Book::new(&f.presets, &c, &d)
-            .version_layers("A1/STANDARD")
-            .unwrap()
-            .fingerprint();
-        c.built.insert(
-            "A1/STANDARD".to_owned(),
-            BuiltRecord {
-                stamp: "2026-01-01T00:00:00Z".to_owned(),
-                fingerprint: fp,
-            },
-        );
+        /* 判据是**盘上字节**（2026-11-01 改判，台账不再参与）：
+        盘上摆一份与"改前渲染结果"相同的产物 = 产物跟得上源。 */
+        let before = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
+        {
+            let b = Book::new(&f.presets, &c, &d);
+            let mkp = b.version("A1/STANDARD").unwrap().mkp_file.clone();
+            let target = f
+                .presets
+                .root()
+                .join(crate::workbench::paths::DELIVERY_SUBDIR)
+                .join(crate::workbench::paths::MKP_PRESETS_DIR)
+                .join(&mkp);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&target, "machine = A1/STANDARD\n".as_bytes())
+                .unwrap();
+        }
 
         // 产物跟得上配方 → 没有这条提示
-        let r = inspect(&Book::new(&f.presets, &c, &d));
+        let r = inspect(&Book::new(&f.presets, &c, &d).with_renderer(&before));
         assert!(r.issues.iter().all(|i| i.id != "build.stale_versions"));
 
         // 改一个值 → 旧了 → 提示出现：提示档、点得出数量、列得出是哪几版
@@ -1057,7 +1100,9 @@ uuid = '33333333-3333-3333-3333-333333333333'
             }],
         )
         .unwrap();
-        let r = inspect(&Book::new(&f.presets, &c, &d));
+        // 源改了 → 渲染结果变了 → 与盘上那份不同
+        let after = |_: &str| Some("machine = A1/STANDARD\nchild = 33\n".to_owned());
+        let r = inspect(&Book::new(&f.presets, &c, &d).with_renderer(&after));
         let hint = r
             .issues
             .iter()

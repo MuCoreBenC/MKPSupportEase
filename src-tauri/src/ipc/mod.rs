@@ -125,7 +125,7 @@ pub(crate) fn traced<T>(
     f: impl FnOnce(&str) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
     let trace_id = new_trace_id();
-    let span = tracing::info_span!("ipc", command = name, trace_id = %trace_id);
+    let span = tracing::debug_span!("ipc", command = name, trace_id = %trace_id);
     let _guard = span.enter();
     /* 2026-10-31：把"现在跑的是哪条命令"告诉会话层 —— 写命令要自动记一条编辑事务。
     只在这一处设置，不在每条命令里各写一遍（漏一条就漏一条撤销）。 */
@@ -134,7 +134,12 @@ pub(crate) fn traced<T>(
 
     let out = match f(&trace_id) {
         Ok(v) => {
-            tracing::info!("ok");
+            /* `debug!` 而不是 `info!`（2026-11-01 作者：「终端一直在滚动，
+            我没有任何操作，都一直有新内容」）。
+            原因是界面上有一个 800ms 的 `wb_txn_state` 轮询 —— 那是**高频只读**命令，
+            每条打一行 INFO 就变成一台永不停的打印机，把真正有用的日志全冲走了。
+            成功是常态，不该刷屏；失败（下面那条 `warn`）才值得每次都说。 */
+            tracing::debug!("ok");
             Ok(v)
         }
         Err(e) => {

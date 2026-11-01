@@ -591,7 +591,13 @@ fn apply_at(
     let lineage = if remaining == 0 {
         runtime::lineage::Lineage {
             based_on: Some(cloud_path),
-            based_on_release_time: runtime::lineage::parse_release_time(&cloud_text),
+            /* 血统里记的"这一版是哪一版"用**目录的发布时刻**（2026-11-01）。
+             *
+             * 原来读的是产物文件头的 `# release_time` —— 那个字段写的是**渲染时刻**，
+             * 与"这一版是何时发布出去的"无关（而且工作台产物已不再写它）。
+             * 目录的 `publishedAt` 才是发布事件的真值；文件头那个只能算配方自己的标记。
+             * 拿不到就留空（界面显示「未知」），**不拿文件修改时间顶**。 */
+            based_on_release_time: catalog.published_at.clone(),
             based_on_sha256: Some(current_sha.clone()),
             based_on_catalog: catalog.catalog_id.clone(),
             based_on_serial: catalog.publish_serial,
@@ -976,7 +982,10 @@ offset_x = -1
             std::fs::create_dir_all(user.join("presets-local")).unwrap();
 
             let defs = defs();
-            let catalog = catalog_with_shas();
+            /* 这一份目录代表"云端发布出来的那一版"，所以带上发布时刻 ——
+            血统里的"基于哪一版"读的就是它（2026-11-01 起不再读文件头的渲染时刻）。 */
+            let mut catalog = catalog_with_shas();
+            catalog.published_at = Some("2026-10-31T00:00:00Z".to_owned());
             crate::fsx::atomic::atomic_write(
                 &root.join("catalog.json"),
                 catalog.to_pretty_json().unwrap().as_bytes(),
@@ -1065,6 +1074,9 @@ offset_x = -1
             let sha = runtime::lineage::sha256_hex(&text);
             runtime::content::ensure(&self.root, &sha, text.as_bytes()).unwrap();
             let mut catalog = catalog_with_shas();
+            /* 模拟一次**发布**：发布事件会盖 `publishedAt`（生成不会）。
+            血统里"基于哪一版"现在读的就是它（2026-11-01 起不再读文件头那个渲染时刻）。 */
+            catalog.published_at = Some("2026-10-31T00:00:00Z".to_owned());
             for f in catalog.files.iter_mut() {
                 if f.file_name == "A1-fast.toml" {
                     f.sha256 = Some(sha.clone());

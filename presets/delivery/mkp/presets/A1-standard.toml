@@ -1,6 +1,6 @@
-# release_time: 2026-11-01 02:55:12
 # machine: A1
 # variant: standard
+# generated_at: 2026-11-01T12:53:32+08:00
 
 [toolhead]
 # 自定义工具头获取 G-code

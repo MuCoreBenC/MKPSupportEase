@@ -600,8 +600,11 @@ pub fn wb_assets(
             let (committed, draft, _) = state(ctx)?;
             let kind = kind.as_deref().and_then(parse_kind);
             let identity = identity.as_deref().and_then(parse_identity);
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 判 `present`（MKP 预设看 `build_state`）要的是"盘上产物与当前渲染是否一致"，
+            所以必须装渲染器 —— 不装的话 `build_state` 只能保守说 `Stale`，
+            界面就会把明明生成好的产物标成"不在"（2026-11-01 改判后需同步此处）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -664,7 +667,8 @@ pub fn wb_remove_group(id: String) -> Result<AssetList, AppError> {
 /// 界面拿到它自己重筛，免得"改完才发现筛选条件变了"）
 fn list_now(ctx: &mut super::Ctx) -> Result<AssetList, AppError> {
     let (committed, draft, _) = state(ctx)?;
-    let book = crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
     Ok(list_of(
         &ctx.presets,
         &book,

@@ -1,6 +1,6 @@
-# release_time: 2026-10-31 15:56:11
 # machine: X1C
 # variant: lite
+# generated_at: 2026-11-01T12:53:32+08:00
 
 [wiping]
 disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)

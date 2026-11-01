@@ -84,6 +84,12 @@ pub struct VersionIdentity {
 
 /* ---------- 整本 ---------- */
 
+/// 「这一版现在会渲染成什么」的探针（见 [`Book::renderer`]）。
+///
+/// 抽成别名而不是内联：`Option<&dyn Fn(&str) -> Option<String>>` 这种形状写在
+/// 结构体字段里，clippy 的 `type_complexity` 会拦。
+pub type RenderProbe<'a> = dyn Fn(&str) -> Option<String> + 'a;
+
 pub struct Book<'a> {
     /// 我们自己那份预设数据（`<repo>/presets`，**唯一的预设真相源**）。
     /// 字段定义与三层取值全走它
@@ -103,6 +109,17 @@ pub struct Book<'a> {
     versions: Vec<VersionIdentity>,
     built: BTreeMap<String, BuiltRecord>,
     bundles: BTreeMap<String, BundleEdit>,
+    /// 这一版现在会渲染成什么（判「待更新」要拿它跟盘上字节比）。
+    ///
+    /// **注入而不是自己拼**：渲染器住在 `app::build::render`（那层要用
+    /// `presets` / 注册表 / 版本层），本模块只认一个闭包。这样"界面说待更新"
+    /// 与"生成会不会写"用的是**同一台渲染器**，不会长出第二套口径。
+    /// `None`（默认）= 这一层不做字节比对，只按"盘上有没有"判。
+    renderer: Option<&'a RenderProbe<'a>>,
+    /// 产物（交付根）在哪棵树。默认 = `presets.root()`（即 `Book` 读的那棵）。
+    ///
+    /// **必须能分开**：`Book` 常读影子树，而产物写在真仓库。见 [`Self::product_bytes`]。
+    product_root: std::path::PathBuf,
 }
 
 impl<'a> Book<'a> {
@@ -160,7 +177,26 @@ impl<'a> Book<'a> {
             versions,
             built,
             bundles,
+            renderer: None,
+            // 默认：产物与源同根（测试 / 独立使用时就是这个形状）
+            product_root: presets.root().to_path_buf(),
         }
+    }
+
+    /// 装上"这一版现在会渲染成什么"的探针（判「待更新」用；见字段文档）。
+    ///
+    /// 只有 `app` 那一层能提供（渲染器在 `app::build`）—— `workbench::Book::new`
+    /// 就是替调用方装好再交出去的。
+    pub fn with_renderer(mut self, renderer: &'a RenderProbe<'a>) -> Self {
+        self.renderer = Some(renderer);
+        self
+    }
+
+    /// 指定产物（交付根）在哪棵树 —— `Book` 读影子树时**必须**调到真仓库，
+    /// 否则影子树里没有 `delivery/`，所有产物都会被判成"不在"。
+    pub fn with_product_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.product_root = root.into();
+        self
     }
 
     /* ---------- 清单 ---------- */
@@ -310,7 +346,20 @@ impl<'a> Book<'a> {
 
     /* ---------- 生成状态 ---------- */
 
-    /// 四档之一。判据是**指纹比对，不看文件时间**
+    /// 四档之一。判据**只看盘上产物与当前候选是否逐字节相同**（2026-11-01 收口）。
+    ///
+    /// 以前这里比的是"台账里记的配方指纹 == 现在算出来的指纹"。那有两个毛病：
+    /// ① 判的是**记录**而不是**文件** —— 记录一乱，界面上"待更新"就跟着乱；
+    /// ② 它和真生成用的判据（盘上字节）是两套口径，于是会出现"界面说待更新、
+    ///    生成却说无变化"这种自相矛盾。现在两边同一句话：
+    ///
+    /// | 盘上产物 | 判 |
+    /// |---|---|
+    /// | 没有 | `NeverBuilt` |
+    /// | 有、字节 == 现在算出来的 | `Built` |
+    /// | 有、字节不同 / 渲染不出来 | `Stale` |
+    ///
+    /// 台账（`built.json`）**不参与**：它只提供"上次成功生成时刻"那一格给人看。
     pub fn build_state(&self, uid: &str) -> BuildState {
         if self.version(uid).is_none() {
             return BuildState::NeverBuilt;
@@ -323,23 +372,22 @@ impl<'a> Book<'a> {
         if !self.has_any_recipe(uid) && !has_bbs {
             return BuildState::NoResources;
         }
-        let Some(rec) = self.built.get(uid) else {
-            // 生成记录里没有这一版 —— 但磁盘上可能躺着以前生成的产物
-            //（记录丢了：快照回退 / 换机器 / 清过 store）。这时候说「未生成」
-            // 是在撒谎：客户端现在就能下载到那份旧的。归成 Stale ——
-            // 有旧的，且至少对不上「现在会算出来的这份」，该重新生成。
-            // （真机踩过：预演说 9 份全是「修改」，版本行却全说「未生成」。）
-            if self.product_on_disk(uid) {
-                return BuildState::Stale;
-            }
+        // 盘上"有旧产物、但记录丢了"不构成另一档：下面是拿字节比的，
+        // 有旧产物且对不上自然就是 `Stale`，对得上就是 `Built` —— 不需要看台账。
+        let Some(on_disk) = self.product_bytes(uid) else {
             return BuildState::NeverBuilt;
         };
-        match self.version_layers(uid) {
-            Some(l) if l.fingerprint() == rec.fingerprint => BuildState::Built,
-            Some(_) => BuildState::Stale,
-            // 层都取不出来（机型被上游删了）—— 说"待生成"而不是"已生成"：
-            // 说错成"已生成"会让人以为客户端拿到的是对的
-            None => BuildState::Stale,
+        let Some(now) = self.render_text(uid) else {
+            // 没有渲染器（这一层不做字节比对）或渲染不出来：有产物就先按"可能过时"说，
+            // 不冒充 `Built` —— 说错成"已生成"会让人以为客户端拿到的是对的
+            return BuildState::Stale;
+        };
+        /* 剥掉 `# generated_at:` 再比：时间属于"何时写出去的"，不属于"内容"，
+        它变了不代表要重新生成（2026-11-01 作者裁定）。 */
+        if crate::workbench::strip_generated_at(&on_disk) == now {
+            BuildState::Built
+        } else {
+            BuildState::Stale
         }
     }
 
@@ -367,32 +415,50 @@ impl<'a> Book<'a> {
             .map_or(true, |l| l.effective_recipe().is_empty())
     }
 
+    /// 这一版**最后一次成功生成**的时刻（给人看的那一格）。`None` = 从没成功生成过。
+    ///
+    /// 它**不参与任何判断**（2026-11-01 收口）：写不写、待更新与否，只看盘上字节
+    /// 与当前候选是否相同（见 [`Self::build_state`]）。台账记错了只会让这一格显示错，
+    /// 不会让该写的文件被跳过 —— 正确性不挂在它身上。
     pub fn last_build(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.stamp.as_str())
     }
 
     /// 已生成记录里的配方指纹（没有记录 = `None`）。
     ///
-    /// 生成侧拿它决定「这一行要不要补记」：产物字节没变、记录也对得上，
-    /// 台账就不许动 —— no-op 的生成不该把 `built.json` 顶新（2026-10-05）。
+    /// 2026-11-01 起**生成侧不再读它**：写不写只看字节，"该不该补记台账"这个
+    /// 问题随 `needs_built_record` 一起删了。留着这个访问器是给展示层
+    /// （"记录里那一代的配方指纹"）用的，别拿它去判"要不要生成"。
     pub fn built_fingerprint(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.fingerprint.as_str())
     }
 
-    /// 磁盘的交付根里有没有这一版的产物文件（只 stat，不读内容、不算哈希）。
+    /// 磁盘的交付根里这一版产物的字节（读不出来 = `None`）。
     ///
     /// 路径与生成 / 发布写盘同源（`paths` 的 `DIST_SUBDIR` + `MKP_PRESETS_DIR`，
     /// 根用 `presets.root()` —— 与本 `Book` 读的数据同一棵树），不许第二处自拼。
-    fn product_on_disk(&self, uid: &str) -> bool {
-        let Some(v) = self.version(uid) else {
-            return false;
-        };
-        self.presets
-            .root()
+    fn product_bytes(&self, uid: &str) -> Option<String> {
+        let v = self.version(uid)?;
+        let path = self
+            .product_root
             .join(crate::workbench::paths::DELIVERY_SUBDIR)
             .join(crate::workbench::paths::MKP_PRESETS_DIR)
-            .join(&v.mkp_file)
-            .exists()
+            .join(&v.mkp_file);
+        std::fs::read_to_string(path).ok()
+    }
+
+    /// 这一版**现在**会渲染成什么（渲染不出来 = `None`）。
+    ///
+    /// 判"待更新"要拿它跟盘上字节比 —— 与真生成用的是同一台渲染器
+    /// （`app::build::render`），所以"界面说待更新"和"生成会不会写"永远是同一句话。
+    ///
+    /// ★ 为什么产物路径不能直接用 `presets.root()`（2026-11-01）：
+    /// `Book` 读的常常是**影子树**（`workbench/.draft/presets/`），而产物写在
+    /// **真仓库**（`presets/delivery/…`）。影子树里压根没有 `delivery/`，
+    /// 于是"盘上产物"永远读不到 → 全部判成待更新。所以产物根单独给
+    /// （[`Book::with_product_root`]），默认仍取 `presets.root()`。
+    fn render_text(&self, uid: &str) -> Option<String> {
+        (*self.renderer?)(uid)
     }
 
     /* ---------- 视图 ---------- */
@@ -1816,9 +1882,72 @@ mod tests {
         );
     }
 
-    /// 生成状态靠**指纹**，不靠文件时间
+    /// 生成状态靠**盘上产物字节**，不靠文件时间，也不靠台账。
+    ///
+    /// 2026-11-01 改判：原来是"台账指纹 == 现在算出来的指纹"。那是拿**记录**判**文件**，
+    /// 记录一乱界面就跟着乱，而且和真生成用的判据（盘上字节）是两套口径。
+    /// 现在两边同一句话：`盘上产物 == 现在渲染出的内容` 就是 `Built`。
+    ///
+    /// 这条测试因此不再摆弄 `c.built`，而是往交付根里放一份"渲染结果"，
+    /// 再改源看它变 `Stale`。
     #[test]
-    fn build_state_compares_fingerprints() {
+    fn build_state_compares_the_bytes_on_disk() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let probe = |uid: &str| {
+            // 测试用渲染器：把"现在会渲染成什么"固定成一段可预期的文本
+            Some(format!("machine = {uid}\n"))
+        };
+
+        // 盘上还没有产物 → 未生成
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::NeverBuilt
+        );
+
+        // 盘上放一份**与当前渲染相同**的产物 → 已生成
+        let mkp = {
+            let b = Book::new(&f.presets, &c, &d);
+            b.version("A1/STANDARD").unwrap().mkp_file.clone()
+        };
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp);
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\n".as_bytes()).unwrap();
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::Built
+        );
+
+        // 盘上那份与当前渲染不同（= 源改过、还没生成）→ 待生成
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\nold = 1\n".as_bytes())
+            .unwrap();
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::Stale
+        );
+
+        // 台账**完全不影响**判定：现在没记任何 built 记录，上面已经是 Built 了
+        assert!(c.built.is_empty(), "这条判据不该需要台账");
+    }
+
+    /// 旧口径（指纹比对）的回归点：**改源 → 待生成**。
+    ///
+    /// 现在判据是字节，所以"改源"必须体现为"渲染结果变了"。这里用一个会随草稿
+    /// 变化的渲染器模拟：源改了 → 渲染输出变了 → 与盘上那份不同 → `Stale`。
+    #[test]
+    fn editing_a_value_makes_the_product_stale() {
         let f = Fixture::load();
         let mut c = committed();
         let d = Draft::default();
@@ -1836,12 +1965,29 @@ mod tests {
                 fingerprint: fp,
             },
         );
+
+        // 盘上放一份与"改前"相同的产物 → 已生成
+        let mkp = {
+            let b = Book::new(&f.presets, &c, &d);
+            b.version("A1/STANDARD").unwrap().mkp_file.clone()
+        };
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp);
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\n".as_bytes()).unwrap();
+        let before = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&before)
+                .build_state("A1/STANDARD"),
             BuildState::Built
         );
 
-        // 改一个值 → 指纹变 → 待生成
+        // 改一个值 → 渲染结果跟着变 → 与盘上那份不同 → 待生成
         let mut d = Draft::default();
         apply(
             &mut d,
@@ -1855,8 +2001,12 @@ mod tests {
             }],
         )
         .unwrap();
+        // 渲染器代表"源改过之后会算出来的东西"：内容变了
+        let after = |_: &str| Some("machine = A1/STANDARD\nchild = 33\n".to_owned());
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&after)
+                .build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -1872,9 +2022,13 @@ mod tests {
         let c = committed();
         let d = Draft::default();
 
+        let probe = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
+
         // 没记录、磁盘上也没有 → 未生成
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
             BuildState::NeverBuilt
         );
 
@@ -1893,8 +2047,14 @@ mod tests {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         crate::fsx::atomic::atomic_write(&target, "# 以前生成的旧产物\n".as_bytes()).unwrap();
 
+        /* 有产物、但与现在会算出来的那份不同 → 待生成。
+         *
+         * 2026-11-01 起这条**不再需要**"台账丢了怎么办"的兜底：判据本来就是盘上字节，
+         * 台账有没有都不影响结论。`c.built` 在这里是空的，照样判得出 `Stale`。 */
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -2804,31 +2964,29 @@ mod tests {
             ArtifactState::Missing
         );
 
-        // 把三个有产物的版本都记成已生成（记进**台账**，2026-10-06 状态机修正）
+        // 三个有产物的版本：盘上摆一份与当前渲染**相同**的产物 → 已生成
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
-        let fps: Vec<String> = {
+        let probe = |_: &str| Some("same\n".to_owned());
+        for u in uids {
             let b = Book::new(&f.presets, &c, &d);
-            uids.iter()
-                .map(|u| b.version_layers(u).unwrap().fingerprint())
-                .collect()
-        };
-        let mut c = c;
-        for (u, fp) in uids.iter().zip(fps) {
-            c.built.insert(
-                (*u).to_owned(),
-                BuiltRecord {
-                    stamp: "2026-01-01T00:00:00Z".to_owned(),
-                    fingerprint: fp,
-                },
-            );
+            let mkp = b.version(u).unwrap().mkp_file.clone();
+            let target = f
+                .presets
+                .root()
+                .join(crate::workbench::paths::DELIVERY_SUBDIR)
+                .join(crate::workbench::paths::MKP_PRESETS_DIR)
+                .join(&mkp);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&target, "same\n".as_bytes()).unwrap();
         }
 
-        let view = Book::new(&f.presets, &c, &d).book_view();
+        let view = Book::new(&f.presets, &c, &d)
+            .with_renderer(&probe)
+            .book_view();
         assert_eq!(
             view.artifact,
             ArtifactState::Fresh,
             "A2L 还是「暂无资源」，但它不该拖住整本"
         );
-        assert_eq!(view.last_build.as_deref(), Some("2026-01-01T00:00:00Z"));
     }
 }

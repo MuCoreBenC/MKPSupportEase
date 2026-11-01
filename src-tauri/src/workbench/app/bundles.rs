@@ -229,8 +229,10 @@ pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
     traced("wb_bundles", |_| {
         with_ctx(|ctx| {
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -260,8 +262,10 @@ pub fn wb_set_bundle_refs(
             ctx.presets
                 .set_bundle_refs(&bundle_id, &asset_ids, &clock::now_iso8601())?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -294,8 +298,10 @@ pub fn wb_add_bundle(
                 &clock::now_iso8601(),
             )?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -324,8 +330,10 @@ pub fn wb_rename_bundle(
                 &clock::now_iso8601(),
             )?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -353,8 +361,10 @@ pub fn wb_copy_bundle(
                 &clock::now_iso8601(),
             )?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -378,8 +388,10 @@ pub fn wb_assign_bundle_versions(
         with_ctx_mut(|ctx| {
             ctx.presets.assign_versions(&bundle_id, &uids)?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -399,8 +411,10 @@ pub fn wb_remove_bundle(bundle_id: String) -> Result<BundleList, AppError> {
         with_ctx_mut(|ctx| {
             ctx.presets.remove_bundle(&bundle_id)?;
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,

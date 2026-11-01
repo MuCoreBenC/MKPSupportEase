@@ -49,9 +49,6 @@ pub mod assets;
 /// 界面不许自己再实现一套检查
 pub mod audit;
 pub mod build;
-/// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
-/// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
-pub mod receipt;
 /// 「套餐管理」（b05 Task 10）。同一套纪律：只读，写入口在数据层（Task 14 接界面）
 pub mod bundles;
 /// 发布账户凭据（第三刀下半）：每平台一份 Token，住**本机凭据文件**（`credentials.json`，
@@ -99,6 +96,9 @@ pub mod publish_book;
 /// **发布事务**（第三刀下半）：audit → generate → 定稿 → 本地 git → 平台 PR/MR，
 /// 串成一次手势 + 平台无关的状态模型。**锁无关内核**，只收 `&Ctx`
 pub mod publish_tx;
+/// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
+/// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
+pub mod receipt;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与交付预设那本分开** —— 两条链不混
 pub mod release_history;
@@ -139,7 +139,7 @@ pub fn audit_check(ctx: &Ctx) -> Result<PublishAudit, AppError> {
 pub fn generate(ctx: &mut Ctx, scope: &Scope) -> Result<GenerateReport, AppError> {
     /* 与工作台那颗按钮同一道闸（2026-10-31）：CLI 也不许拿旧影子覆盖真仓库 */
     self::build::require_shadow_in_sync(ctx)?;
-    self::build::generate_with(ctx, scope)
+    self::build::generate_with(ctx, scope, false)
 }
 
 /// 生成**预演**（只算不写）。`diff` 用它 —— 于是"会变什么"与真生成算的是同一批。
@@ -282,6 +282,7 @@ use serde_json::Value;
 use crate::error::AppError;
 use crate::ipc::traced;
 use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
+
 use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
@@ -700,11 +701,23 @@ fn presets_source_stamp(root: &Path) -> String {
                 .replace('\\', "/");
             let meta = e.metadata().ok();
             let len = meta.as_ref().map_or(0, |m| m.len());
-            let mtime = meta
-                .and_then(|m| m.modified().ok())
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_nanos());
-            out.push(format!("{rel}|{len}|{mtime}"));
+            /* **只认内容**，不认 mtime（2026-11-01 作者裁定）。
+             *
+             * 原来这里把 `mtime` 的纳秒也揉进戳里，于是：`git checkout`、
+             * 编辑器"另存"、任何一次 `touch` —— 内容一个字节没变，也会被当成
+             * "盘上的 presets/ 在外面改过了"，横幅弹出来、点重新加载能消掉、
+             * 下次一碰又出现，永远关不掉。
+             *
+             * 作者的原话是「AI 在外面改了预设，工作台打开后却把它当成异常」——
+             * 判断"改没改"该看内容，文件是怎么被写到盘上的不该参与。
+             * 文件不大（几十份 TOML），读一遍哈希比一次 mtime 只贵一点。 */
+            let content_hash = std::fs::read(&path)
+                .map(|b| {
+                    use sha2::{Digest, Sha256};
+                    format!("{:x}", Sha256::digest(&b))
+                })
+                .unwrap_or_default();
+            out.push(format!("{rel}|{len}|{content_hash}"));
         }
     }
 
@@ -784,7 +797,8 @@ pub(super) fn state(ctx: &Ctx) -> Result<(Committed, Draft, Vec<String>), AppErr
 }
 
 fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>) -> BookView {
-    let mut v = Book::new(&ctx.presets, committed, draft).book_view();
+    let probe = build::renderer_for(ctx);
+    let mut v = build::book_with_probe(ctx, &ctx.presets, committed, draft, &probe).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
     /* ★ 2026-10-31：未保存改动 = 值草稿（旧层）+ 事务里的每一条（新层）。
@@ -796,7 +810,7 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
 /// 影子树与磁盘是否已经不是同一份（开场判断「上次会话有没有没保存的改动」）
 fn shadow_differs(real: &Path, shadow: &Path) -> Result<bool, AppError> {
     /* 只比**源**：`delivery/` 是生成产物，每生成一次就变一次 —— 算进来的话，
-       横幅会在每次生成之后复活（作者 2026-11-01 报的就是这个）。 */
+    横幅会在每次生成之后复活（作者 2026-11-01 报的就是这个）。 */
     let a = txn::snapshot(real)?.without_products();
     let b = txn::snapshot(shadow)?.without_products();
     Ok(!txn::equal(&a, &b))
@@ -1802,6 +1816,55 @@ mod tests {
     use crate::workbench::domain::testkit::Fixture;
     use crate::workbench::domain::wording::BuildState;
     use crate::workbench::domain::Origin;
+
+    /// 「盘上的 `presets/` 在外面改过」只看**内容**，不看文件时间（2026-11-01 作者裁定）。
+    ///
+    /// 作者的原话：「AI 在外面改了预设，工作台打开后却把它当成异常；点重新加载
+    /// 没反应，下次打开又出现」。根因是戳里揉进了 mtime —— `git checkout`、
+    /// 编辑器另存、`touch` 都会让"内容没变"的文件被当成外部改过，横幅关不掉。
+    #[test]
+    fn the_outside_change_stamp_ignores_file_times() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("machines")).unwrap();
+        let f = root.join("machines/A1.toml");
+        crate::fsx::atomic::atomic_write(&f, b"[machine]\nid = \"A1\"\n").unwrap();
+
+        let stamp = presets_source_stamp(root);
+
+        // 只碰时间、内容一个字节不变 → 戳必须不变（不算"外部改过"）
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        crate::fsx::atomic::atomic_write(&f, b"[machine]\nid = \"A1\"\n").unwrap();
+        assert_eq!(
+            presets_source_stamp(root),
+            stamp,
+            "内容没变，mtime 变了也不算外部改过"
+        );
+
+        // 内容真变了 → 戳必变
+        crate::fsx::atomic::atomic_write(&f, b"[machine]\nid = \"A2\"\n").unwrap();
+        assert_ne!(presets_source_stamp(root), stamp, "内容变了必须能认出来");
+    }
+
+    /// 交付产物**不参与**「外部改过」的判断（它是生成出来的，不是用户改的源）。
+    #[test]
+    fn the_outside_change_stamp_ignores_generated_products() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("machines")).unwrap();
+        crate::fsx::atomic::atomic_write(&root.join("machines/A1.toml"), b"id = \"A1\"\n").unwrap();
+        let stamp = presets_source_stamp(root);
+
+        let delivery = root.join(crate::workbench::paths::DELIVERY_SUBDIR);
+        std::fs::create_dir_all(delivery.join("mkp/presets")).unwrap();
+        crate::fsx::atomic::atomic_write(&delivery.join("mkp/presets/A1-standard.toml"), b"x\n")
+            .unwrap();
+        assert_eq!(
+            presets_source_stamp(root),
+            stamp,
+            "生成产物变化不许冒充「源被外面改过」"
+        );
+    }
 
     /// **统一编辑事务的端到端判据**（2026-10-31）：走一遍真正的编辑包装器
     /// （`run_ctx`，与 IPC 命令同一条路），证明——

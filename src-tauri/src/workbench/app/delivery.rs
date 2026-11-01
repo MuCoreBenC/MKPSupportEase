@@ -928,13 +928,13 @@ fn toml_state_of(
     use DeliveryPendingReason as Why;
     let build_state = build.map(|(_, s)| *s);
     match build_state {
-        // 配方还没生成过 / 没有可产出的东西：盘上有旧文件也仍是「未生成」
-        Some(BuildState::NeverBuilt) | Some(BuildState::NoResources) => {
-            (DeliveryState::Missing, None)
-        }
-        // 配方改过、还没重新生成 —— 与①卡同一句话：「待更新」
-        Some(BuildState::Stale) => (DeliveryState::Pending, Some(Why::Build)),
-        Some(BuildState::Built) | None => {
+        /* 「没东西可产」（占位版本）→ 交付里就不该有它。
+         *
+         * 2026-11-01 起 `NeverBuilt` / `Stale` **都不再短路**：它们只是"还没生成过"
+         * 的粗判，可能因为调用方的 `Book` 没装渲染器而失真。本函数下面那段
+         * `render` + 字节比对才是权威，粗判盖住它就会把「全齐」误报成待更新。 */
+        Some(BuildState::NoResources) => (DeliveryState::Missing, None),
+        Some(BuildState::NeverBuilt) | Some(BuildState::Stale) | Some(BuildState::Built) | None => {
             let Some(b) = bytes else {
                 return (DeliveryState::Missing, None);
             };
@@ -951,7 +951,9 @@ fn toml_state_of(
             };
             match super::build::render(book, uid) {
                 Ok(r) => match std::str::from_utf8(b) {
-                    Ok(text) if super::build::same_payload(text, &r.text) => {
+                    // 与真生成同一道判据：**逐字节相同**才算跟上（2026-11-01 起没有例外行）
+                    // 剥掉 `# generated_at:` 再比（与真生成同一道判据）
+                    Ok(text) if crate::workbench::strip_generated_at(text) == r.text => {
                         (DeliveryState::UpToDate, None)
                     }
                     // 字节不是 UTF-8 / 渲染结果不同：不冒充「已生成」
@@ -2318,41 +2320,39 @@ mod tests {
             DeliveryState::UpToDate
         );
 
-        // **配方改过（台账指纹对不上）** → 即使字节与目录一致，也必须是「待更新」
-        // （2026-10-19，作者：`A1/FASTV3.3` 在①卡说待更新、明细里却显示已生成）
-        let mut stale = committed();
-        stale.built.insert(
-            "A1/STANDARD".to_owned(),
-            BuiltRecord {
-                stamp: "2026-10-06T00:00:00Z".to_owned(),
-                fingerprint: "old-fingerprint".to_owned(),
-            },
-        );
-        let stale_book = Book::new(&f.presets, &stale, &d);
-        let status = delivery_status(&delivery, &stale_book);
+        /* **源改过（盘上那份与现在会算出来的不同）** → 必须显示「待更新」
+         * （2026-10-19 作者：`A1/FASTV3.3` 在①卡说待更新、明细里却显示已生成）。
+         *
+         * 2026-11-01 改判：原来是拿"台账指纹对不上"模拟"配方改过"，现在判据是字节，
+         * 所以直接改盘上那份产物 —— 那才是"源改过、产物没跟上"的真实样子。
+         * 台账不参与：这条断言在台账**为空**的情况下也必须成立。 */
+        let tampered = format!("{a1_text}\n# 手改了一行\n");
+        crate::fsx::atomic::atomic_write(&delivery.join(&rel), tampered.as_bytes()).unwrap();
+        let status = delivery_status(&delivery, &book);
         assert_eq!(
             state_of(&status, &rel),
             DeliveryState::Pending,
-            "配方待更新不能显示已生成"
+            "盘上那份与当前渲染不同，不能显示已生成"
         );
         assert_eq!(
             state_of(&status, "catalog.json"),
             DeliveryState::Pending,
-            "有配方待更新，目录也该重算"
+            "有产物待更新，目录也该重算"
         );
 
-        // **没有生成记录** → 未生成（哪怕盘上还躺着旧产物）
+        /* **没有生成记录、盘上也没有产物** → 未生成。
+         *
+         * 注意：判据是"盘上有没有 + 字节对不对"，不是"台账有没有"。下面先把
+         * 产物删掉再判 —— 只要盘上那份还在且对得上，台账空着也该是 `UpToDate`。 */
+        std::fs::remove_file(delivery.join(&rel)).unwrap();
         let never = committed();
         let never_book = Book::new(&f.presets, &never, &d);
         let status = delivery_status(&delivery, &never_book);
         assert_eq!(
             state_of(&status, &rel),
             DeliveryState::Missing,
-            "没有生成记录就是未生成"
+            "盘上没有产物就是未生成（与台账无关）"
         );
-
-        // 删掉 → Missing（未生成），目录仍然 Pending（登记了却取不到）
-        std::fs::remove_file(delivery.join(&rel)).unwrap();
         let status = delivery_status(&delivery, &book);
         assert_eq!(state_of(&status, &rel), DeliveryState::Missing);
         assert!(

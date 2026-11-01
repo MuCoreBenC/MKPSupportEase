@@ -692,7 +692,8 @@ export interface ReceiptCounts {
  * `receipt::GenerationReceipt` —— **一次生成留下的结构化结果**（2026-11-01）。
  *
  * 工作台模态框、CLI 的 JSON、AI 的报告读的都是它：不是三套说法。
- * 落盘在 `workbench/receipts/<id>.json`，事后能回答"上一次生成哪一步断了"。
+ * **只在内存**（2026-11-01 起不落盘）：它就是"刚才那次生成做了什么"的临时说明，
+ * 生成结束后随返回值到界面，进程退出即消失。
  */
 export interface GenerationReceipt {
   /** `GEN-20261101-001` */

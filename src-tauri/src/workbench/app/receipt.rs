@@ -4,15 +4,21 @@
 //! 工作台拿它渲染模态框、CLI 直接输出这份 JSON、AI 读的也是同一份 ——
 //! 三处读的是同一个结构，不存在"第二套报告"。
 //!
-//! 落点 `workbench/receipts/<ID>.json`（本机状态，与 `.draft` / `.snapshots`
-//! 同一族，不入库）：事后要回答"上一次生成为什么失败"时读它，而不是重新猜。
+//! **只在内存里，不落盘、不入库**（2026-11-01 作者裁定）。
+//!
+//! 它回答的是"刚才那次生成做了什么" —— 生成结束后由返回值带回界面。
+//! 曾经落过 `workbench/receipts/<ID>.json`，结果 91 份 `GEN-*.json` 被 git 跟踪、
+//! 混进提交：那是把本机运行时状态当成仓库内容。作者的原话是
+//! "这些不要放到我这个仓库呀，就放临时路径，而且会自动清理，不需要存起来"。
+//!
+//! 要追溯历次生成，看 git 里的产物与 `built.json` 就够了，不需要第二套存档。
 //!
 //! ## 一条硬规矩
 //!
 //! **失败也必须有回执。** 只弹一句"生成失败"是把现场丢了 —— 哪一步失败、
 //! 哪些文件已经落盘、哪些没写，都得在里面。
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -86,38 +92,42 @@ impl GenerationReceipt {
     }
 }
 
-/// 回执目录：`<repo>/workbench/receipts/`。
-pub fn receipts_dir(repo_root: &Path) -> PathBuf {
-    repo_root.join("workbench").join("receipts")
-}
-
 /// 下一条事务号：`GEN-<本地日期>-<当天第几笔>`。
 ///
-/// 取"当天已有几份"而不是全局计数器：删掉旧回执不会让新号重复到已删除的号上，
-/// 人也一眼知道这是哪一天的。
-pub fn next_id(repo_root: &Path) -> String {
+/// **进程内计数**（2026-11-01 作者裁定：回执不落盘、不进仓库）。
+/// 取"这个进程今天已经开了几笔"，所以编号只在本次运行内有意义 ——
+/// 它本来就是给人看"这是今天第几次生成"的，不该为此在仓库里留一堆文件。
+pub fn next_id(_root: &Path) -> String {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static SEQ: AtomicU32 = AtomicU32::new(0);
     let d = crate::archive::now_local().date();
     let day = format!("{:04}{:02}{:02}", d.year(), u8::from(d.month()), d.day());
-    let prefix = format!("GEN-{day}-");
-    let n = std::fs::read_dir(receipts_dir(repo_root))
-        .ok()
-        .map(|it| {
-            it.filter_map(|e| e.ok())
-                .filter_map(|e| e.file_name().into_string().ok())
-                .filter(|n| n.starts_with(&prefix) && n.ends_with(".json"))
-                .count()
-        })
-        .unwrap_or(0);
-    format!("{prefix}{:03}", n + 1)
+    let n = SEQ.fetch_add(1, Ordering::Relaxed) + 1;
+    format!("GEN-{day}-{n:03}")
 }
 
-/// 落一份回执。**写不进去不报给用户**（生成本身已经成了）—— 但要留日志。
-pub fn save(repo_root: &Path, receipt: &GenerationReceipt) -> Result<PathBuf, String> {
-    let dir = receipts_dir(repo_root);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("建 {} 失败：{e}", dir.display()))?;
-    let path = dir.join(format!("{}.json", receipt.id));
-    let text = serde_json::to_string_pretty(receipt).map_err(|e| format!("回执序列化失败：{e}"))?;
-    crate::fsx::atomic::atomic_write(&path, text.as_bytes())
-        .map_err(|e| format!("写 {} 失败：{}", path.display(), e.message))?;
-    Ok(path)
+/// 本次运行里**最近一份**回执 —— 就放在内存里，给"刚才那次生成做了什么"这个问题。
+///
+/// 2026-11-01 作者裁定：回执是**临时展示**的东西，不是要存起来的资产。
+/// 原来它落到 `<repo>/workbench/receipts/`，结果 91 份 `GEN-*.json` 被 git 跟踪、
+/// 混进提交里 —— 那是把本机运行时状态当成仓库内容了。
+///
+/// 现在：进程活着就在，进程退出就没了。生成结束后界面拿的是返回值里的那一份，
+/// 不需要"过几天再回来查上一次"。真要把历次生成留成可追溯的记录，那是 Git 的事
+/// （产物与 `built.json` 都在版本里），不该再造一套回执存档。
+static LAST: std::sync::Mutex<Option<GenerationReceipt>> = std::sync::Mutex::new(None);
+
+/// 把这份回执记为"最近一份"（**只在内存**，不写盘）。
+///
+/// 签名保留 `Result` 只是为了让调用点不用改形状；内存操作不会失败。
+pub fn save(_repo_root: &Path, receipt: &GenerationReceipt) -> Result<(), String> {
+    if let Ok(mut g) = LAST.lock() {
+        *g = Some(receipt.clone());
+    }
+    Ok(())
+}
+
+/// 上一次生成的回执（本次运行内；没有就是 `None`）。
+pub fn last() -> Option<GenerationReceipt> {
+    LAST.lock().ok().and_then(|g| g.clone())
 }

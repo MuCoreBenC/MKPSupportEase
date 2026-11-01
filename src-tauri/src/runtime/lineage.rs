@@ -152,6 +152,12 @@ pub fn make_copy_with_line(
     let body = strip_lineage_lines(src_text);
     let lineage = Lineage {
         based_on: Some(based_on.to_owned()),
+        /* 血统里那个"哪一版"的日期，来源换成产物头的 `# generated_at:`
+        （2026-11-01 改名：原来叫 `release_time`）。
+        它仍是产物自己记录的时间，但语义收窄成"这份产物何时生成" ——
+        "这是哪个云端版本"由 `based_on_catalog` + `based_on_serial` +
+        `based_on_sha256` 三行唯一定，日期只做展示。
+        老文件里若只有旧的 `release_time`，照样读得到（[`parse_release_time_from_content`]）。 */
         based_on_release_time: parse_release_time_from_content(src_text),
         based_on_sha256: Some(sha256_hex(src_text)),
         based_on_catalog: catalog.map(str::to_owned),
@@ -337,9 +343,15 @@ pub fn parse_lineage_from_content(content: &str) -> Option<Lineage> {
     Some(lineage)
 }
 
-/// `^#\s*release_time\s*:\s*(.+)$`（与工作台那份同一条路）
+/// 产物头里"这份是何时生成的"。**两个名字都认**（2026-11-01）：
+///
+/// · `generated_at` —— 现在产物写的（ISO 8601 + 偏移，如 `2026-11-01T12:30:00+08:00`）
+/// · `release_time` —— 老产物写的（`2026-08-19 01:38:13`，空格分隔、无时区）
+///
+/// 老件照样读得出来，不逼着谁去改历史文件；新件优先。
 fn parse_release_time_from_content(content: &str) -> Option<String> {
-    parse_header_value(content, "release_time")
+    parse_header_value(content, "generated_at")
+        .or_else(|| parse_header_value(content, "release_time"))
 }
 
 /// **这一版云端是什么时候发的**（文件头 `# release_time` 的原样值，如

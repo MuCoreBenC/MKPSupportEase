@@ -4924,6 +4924,15 @@ text_ja = "ワークベンチが読み込んでいる内容は presets/ と一�
 params = []
 note = "2026-10-31 影子分叉闸：生成不许拿旧影子渲染再写回真仓库（A1 三份 0.7 被写回 0.8 那次）。不自动 mirror —— 影子可能含着用户没保存的工作"
 
+["ui.workbench.build.dual_source"]
+code = "E_PRESET_DUAL_SOURCE_001"
+text = "生成没完成：{file} 在「安装包内置」和「云端交付」两边算出来不一样 —— 这说明又有人给其中一侧开了第二个数据源。先修掉那处，再生成"
+text_en = "Generation stopped: {file} differs between the built-in copy and the delivered copy — something has introduced a second data source for one of them. Fix that first, then generate again"
+text_zh_tw = "產生沒有完成：{file} 在「安裝包內建」與「雲端交付」兩邊算出來不一樣 —— 這表示又有人替其中一側開了第二個資料來源。先修掉那處，再產生"
+text_ja = "生成が完了しませんでした：{file} は「内蔵」と「配信」で算出結果が異なります — どちらかに第二のデータソースが追加された可能性があります。まずそこを直してから再生成してください"
+params = ["file"]
+note = "2026-11-01 单一源闸：交付产物与内核产物必须逐字节相同（都由 presets/ 同一台渲染器算出）。历史上 tower_extrude_ratio 一边 1.0 一边 0.9 就是第二条数据源造成的"
+
 ["ui.ipc.local.150"]
 text = "这份预设的路径不对，存不回去"
 text_en = "That preset path is invalid, so it cannot be saved back"

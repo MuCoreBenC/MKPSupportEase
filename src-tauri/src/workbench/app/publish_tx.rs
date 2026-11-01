@@ -270,7 +270,9 @@ fn plan_only(
     _opts: &TxOptions,
 ) -> Result<PublishTxReport, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
+    // 装渲染器：发布要判"产物是否跟上源"，走的是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
     let asset_root = root
         .parent()
         .map(|p| p.join("assets"))
@@ -526,7 +528,7 @@ pub fn run(
     }
 
     let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
-    let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
+    let gen = super::build::generate_with(ctx, &super::build::Scope::Stale, false)?;
 
     /*
      * ⓪½ **什么都没有改 ⇒ 不发**（2026-10-29 作者：「我一点击它就要变成 2 了，
@@ -574,7 +576,9 @@ pub fn run(
 
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
-    let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
+    // 装渲染器：发布要判"产物是否跟上源"，走的是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
     let asset_root = super::super::paths::assets_root_at(&presets_root);
     std::fs::create_dir_all(&asset_root).map_err(|e| {
         AppError::io("建不出资产目录").with_detail(format!("{}：{e}", asset_root.display()))

@@ -24,6 +24,23 @@ pub mod app;
 pub mod clock;
 pub mod domain;
 pub mod paths;
+
+/// 产物头那一行的前缀。**全仓只有这一处**定义它（读、写、剥离都走这里）。
+///
+/// 它记的是"这份产物最近一次成功生成"的时刻（ISO 8601 + 偏移，本地可读），
+/// 客户端会读它显示。但它**不参与"内容变没变"的判断** —— 判断前先剥掉这一行
+/// （[`strip_generated_at`]），否则每点一次生成都会"有变化"。
+pub const GENERATED_AT_PREFIX: &str = "# generated_at:";
+
+/// 从文本里剥掉 `# generated_at:` 行，得到"业务内容"。
+///
+/// 这是"变没变"的唯一口径：生成、预演、待更新标记、交付判定全都用它，
+/// 不许有第二套（各写一套迟早有一边把"没变"报成"变了"）。
+pub fn strip_generated_at(text: &str) -> String {
+    text.split_inclusive('\n')
+        .filter(|l| !l.starts_with(GENERATED_AT_PREFIX))
+        .collect()
+}
 /// 预设真相源。**它不住在这里** —— 代码搬去了 [`crate::presetdata`]（客户端也要读预设，
 /// 而这一整棵子树是 feature gate 的），这里只是把它**别名**回 `presets`：
 /// 工作台侧几十处 `crate::workbench::presets::X` 因此一个都不用改。

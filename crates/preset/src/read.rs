@@ -91,7 +91,12 @@ fn unknown_field_name(message: &str) -> Option<String> {
 /// 手写匹配器（无 regex 依赖）：'#'、任意空白、字面量、任意空白、':'、
 /// 任意空白、至少一个字符的捕获（TrimSpace 后为空视同未命中）。
 pub fn parse_release_time_from_content(content: &str) -> Option<String> {
-    parse_header_value(content, "release_time")
+    /* 两个名字都认（2026-11-01）：
+    · `generated_at` —— 现在产物写的（ISO 8601 + 偏移，如 `2026-11-01T12:30:00+08:00`）
+    · `release_time` —— 老产物写的（`2026-08-19 01:38:13`，空格分隔无时区）
+    老件照样读得出来，不逼着谁去改历史文件；新件优先。 */
+    parse_header_value(content, "generated_at")
+        .or_else(|| parse_header_value(content, "release_time"))
 }
 
 /// `^#\s*machine\s*:\s*(.+)$`（read.go:219；actualMachine 的 SSOT 数据源）。

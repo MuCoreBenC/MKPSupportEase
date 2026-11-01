@@ -196,7 +196,9 @@ pub fn publish_audit() -> Result<PublishAudit, AppError> {
 /// 与 `build::preview_with` / `generate_with` 同一条纪律，`publish_tx` 的源码扫描判据钉住它。
 pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = Book::new(&ctx.presets, &c, &d);
+    // 装渲染器：审计里的"产物是否跟上"用的就是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
     // ★ 根从**会话那份 presets 的根**派生（`*_at`，与生成 / 发布同一条派生）——
     // 审计查的就是这个会话要发的那一棵交付树
     let delivery_root = paths::delivery_root_at(ctx.presets.root());
