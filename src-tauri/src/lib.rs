@@ -115,6 +115,26 @@ use tauri::Manager;
 /// [`crate::hook::run_with_channel`]（干活 + 退出码，不开窗、不建 Tauri 应用）；
 /// 窗口留在**这个**常驻进程里，靠 [`hook_ipc`] 那条通道喂它（见 [`hook_ui`] 模块头）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/* ---------- 构建指纹（2026-11-02） ----------
+ *
+ * build.rs 在**编译那一刻**把这三格刻进来。它们的唯一用途是回答
+ * 「现在跑的这个进程，是哪一次编译出来的」—— 以前这个问题只能靠猜，
+ * 于是反复出现「你是不是没重新编译后端」这种没有证据的互疑。
+ *
+ * 三格都要一起看，单看一格会骗人：
+ * - `编译时刻` 比源码 / 提交都晚 ⇒ 这一次确实重编了（不管 `target` 目录的 mtime 多旧）；
+ * - `提交` 带 `-dirty` ⇒ 编的时候工作区有未提交改动（改完没提交也能对上）；
+ * - `档位` ⇒ 两档共用可执行文件名，光看进程名分不出是客户端还是工作台。
+ */
+pub const BUILD_TIME: &str = env!("MKPSE_BUILD_TIME");
+pub const GIT_COMMIT: &str = env!("MKPSE_GIT_COMMIT");
+pub const BUILD_TIER: &str = env!("MKPSE_BUILD_TIER");
+
+/// 一行人读的指纹（日志用）。
+pub fn build_fingerprint() -> String {
+    format!("{BUILD_TIER} · {GIT_COMMIT} · 编译于 {BUILD_TIME}")
+}
+
 pub fn run() {
     let view = hook_ui::HookView::new();
     let for_setup = view.clone();
@@ -137,6 +157,9 @@ pub fn run() {
                 Ok(root) => {
                     obs::tracing::init_tracing(&root.join("logs"));
                     tracing::info!(root = %root.display(), "内部数据根就位");
+                    /* 第一句就说清「这是哪一次编译出来的」——
+                    见 `build_fingerprint` 上方那段。以后别再用「你是不是没重编」猜。 */
+                    tracing::info!("构建指纹：{}", build_fingerprint());
                     /* 界面语言先落地：后端这一侧的话术（`messages::text`）从这一句起
                     才跟界面同一种语言。读不出来就按"跟随系统"（`apply_lang(None)`），
                     不挡启动 —— 一句英文/中文不该让程序起不来 */
@@ -152,6 +175,7 @@ pub fn run() {
                     eprintln!("[setup] 内部数据根建不出来，日志只写 stderr：{e}");
                     obs::tracing::init_tracing(std::path::Path::new("/tmp/supportease-logs"));
                     tracing::warn!("内部数据根不可用：{e}");
+                    tracing::info!("构建指纹：{}", build_fingerprint());
                 }
             }
 

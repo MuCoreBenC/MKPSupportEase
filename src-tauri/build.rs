@@ -25,10 +25,30 @@
  * `tauri dev`）；`rerun-if-changed` 登记了它，cargo 会帮忙看见变化。
  */
 
+/* ---------- 构建指纹（2026-11-02） ----------
+ *
+ * 为什么要有：作者反复被问「你是不是没重新编译后端」—— 而这个问题**以前只能靠猜**。
+ * 光看文件日期也不可靠（`target/debug` 与 `target-workbench/debug` 是两份，
+ * 谁新谁旧一眼看不出来，而且「编了但没重启」的进程还在跑旧字节）。
+ *
+ * 所以每次编译把三格刻进二进制，启动时打一行日志：
+ *
+ * | 格 | 回答什么 |
+ * |---|---|
+ * | `BUILD_TIME` | **这一次**是什么时候编的（不是源码时间，是 build.rs 跑的时间） |
+ * | `GIT_COMMIT` | 编的是哪个提交（`-dirty` 后缀 = 有未提交改动） |
+ * | `FEATURES` | 带没带 `workbench` —— 两档是同一个可执行文件名，光看名字分不出 |
+ *
+ * `rerun-if-changed` 不登记任何源码：否则每改一行都要重跑 build.rs。
+ * 只有 `.git/HEAD` 与 `.git/index` 变了才重算这三格（切分支 / 提交后要能反映出来）。
+ */
 fn main() {
     println!("cargo:rerun-if-env-changed=MKPSE_PRESET_SOURCE");
     println!("cargo:rerun-if-env-changed=MKPSE_PRESET_SOURCE_GITEE");
     println!("cargo:rerun-if-changed=../workbench/bootstrap.json");
+    println!("cargo:rerun-if-changed=../.git/HEAD");
+    println!("cargo:rerun-if-changed=../.git/index");
+    emit_build_fingerprint();
 
     let configured = bootstrap_urls_from_workbench();
 
@@ -44,6 +64,52 @@ fn main() {
     }
 
     tauri_build::build()
+}
+
+/// 把「这一次编译」的三格刻进二进制（见 [`emit_build_fingerprint`] 上方那段说明）。
+///
+/// 全部失败都不挡构建：拿不到就用 `unknown`，**绝不编一个看起来像真的值**。
+fn emit_build_fingerprint() {
+    // ① 编译时刻（build.rs 真正跑起来的这一刻，UTC，秒级）
+    let stamp = std::process::Command::new("date")
+        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_owned());
+    println!("cargo:rustc-env=MKPSE_BUILD_TIME={stamp}");
+
+    // ② 提交号 + 有没有未提交改动。`--always` 让无 tag 的浅克隆也给短 sha
+    let git = |args: &[&str]| -> Option<String> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir("..")
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8(out.stdout).ok()?.trim().to_owned();
+        if s.is_empty() {
+            None
+        } else {
+            Some(s)
+        }
+    };
+    let mut commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
+    if git(&["status", "--porcelain"]).is_some_and(|s| !s.is_empty()) {
+        commit.push_str("-dirty");
+    }
+    println!("cargo:rustc-env=MKPSE_GIT_COMMIT={commit}");
+
+    // ③ 这一档带没带 workbench。两档共用可执行文件名，光看进程名分不出
+    let features = std::env::var("CARGO_FEATURE_WORKBENCH").is_ok();
+    println!(
+        "cargo:rustc-env=MKPSE_BUILD_TIER={}",
+        if features { "workbench" } else { "client" }
+    );
 }
 
 /// 读工作台配置里那两个字段。**读不出 / 解析不出 / 是空串都当"没配"**（返回 `None`）——

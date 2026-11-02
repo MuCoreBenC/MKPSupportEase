@@ -687,8 +687,21 @@ for rel in &want {
 >   `rest_at` 读它、`dirty_of` 恢复；`Cell.rest_default` 补「盘上没钉 ⇒ 退到出厂值」。
 >   三条生产路径必须 `with_rest`：`book_with_probe`、`wb_matrix`、`wb_desk`（**`wb_matrix` 最容易漏**，
 >   参数台那一屏就是它）。`save_in` / `discard_in` 搬完基准后重读 `ctx.base`。
-> - 刀 3 起待做：放弃改 `mirror(BASE → WORK)`。
->   注意：**刀 1 只让徽章对了，状态模型仍不稳** —— 刀 5（保存阶段机）/ 刀 6（冲突判定）才是后者。
+> - 刀 3 ✅ `cb31830` —— 放弃改 `mirror(BASE → WORK)`，**一个字节都不读 `presets/`**。
+>   判据 11 钉住「外部改了 presets 后点放弃，回的是打开那一刻」。
+> - 刀 5 ✅ 同上一笔 —— `txn::SaveStage`（`idle/prepared/real_committed/baseline_advanced`）
+>   写进 `.draft/session.json`，启动 `recover_save_stage` 补完。判据 17。
+> - 刀 6 ✅ 同上一笔 —— `diskStamp` 比对，不一致报 `E_WB_SAVE_STALE_001`。判据 18。
+> - **未做（附理由）**：
+>   - 刀 4（物理换根 `.draft/presets` → `.session/<sid>/work`）：双身份在刀 1/3 之后
+>     已在**语义**上解除（`rest` 与放弃都读 BASE），改路径只剩改名收益，要动
+>     `settle_shadow` / `paths` / CLI 三处。
+>   - 刀 7（撤销粒度）：现有实现已是「受影响文件 before/after 字节」，功能可逆、
+>     无 bug 报告；改成按格存是优化，风险高于收益。
+>   - 刀 8（生成写 WORK）：会破坏「产物与台账同代」不变量（`bundles.rs:465`）。
+>     现在 `require_clean` 拦「有未保存改动不许生成」是保守但正确的限制。
+>   - 刀 9（清理）：随刀 3/5/6 一起做完了必要的部分（`shadow_diff` 改名仍待做，
+>     纯命名，不影响行为）。
 
 | 刀 | 做什么 | 红→绿的判据 | 回滚点 |
 |---|---|---|---|

@@ -25,7 +25,7 @@
  * 代价：第一次跑要在这份新目录里做一次完整编译（数分钟），并多占一份磁盘。
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 
@@ -47,6 +47,36 @@ if (action !== 'dev' && action !== 'build') {
 // `--no-watch` 来放行的。
 const isDev = action === 'dev'
 const cmd = `tauri ${action}${isDev ? ' --no-watch' : ''} --config src-tauri/tauri.workbench.conf.json --features workbench`
+
+/* ★ 开跑之前先把**当前二进制**的构建指纹打出来（2026-11-02）。
+ *
+ * 为什么：`--no-watch` 决定了改 Rust 要手动重启；而「重启了但没有重编」
+ * 与「重编了但没有重启」在界面上长得一模一样。以前这件事只能靠猜，
+ * 于是反复出现「你是不是没重新编译后端」这种没有证据的互疑。
+ *
+ * 指纹由 build.rs 在**编译那一刻**刻进二进制（`MKPSE_BUILD_TIME` /
+ * `MKPSE_GIT_COMMIT` / `MKPSE_BUILD_TIER`），所以它说的是「这个 exe 是谁」，
+ * 不是「源码现在是什么」—— 正好是我们要问的那一问。
+ *
+ * 打不出来**不挡启动**：这只是一个说明，不是闸。
+ */
+const exe = process.platform === 'win32' ? '.exe' : ''
+/* ★ 用 `presets build` 而不是主程序：主程序会忽略参数直接起窗口。
+ 两个二进制**同一次 cargo 编译产出**，所以指纹一致。 */
+const probe = join(TARGET_DIR, 'debug', `presets${exe}`)
+const shown = join(TARGET_DIR, 'debug', `mkp-support-ease${exe}`)
+let fingerprint = ''
+try {
+  fingerprint = (spawnSync(probe, ['build'], { encoding: 'utf8' }).stdout || '').trim()
+} catch {
+  fingerprint = ''
+}
+if (fingerprint) {
+  console.log(`\n  运行的是：${fingerprint}`)
+} else {
+  console.log(`\n  运行的是：${shown}（还没编过 —— 本命令会先编一次）`)
+}
+console.log(`  （改 Rust 必须 Ctrl+C 后重跑本命令；改前端走 HMR 不用）\n`)
 
 const child = spawn(cmd, {
   cwd: REPO_ROOT,

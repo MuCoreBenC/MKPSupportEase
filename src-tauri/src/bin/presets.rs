@@ -79,6 +79,13 @@ fn run_cli() -> Result<i32, AppError> {
     let force = rest.iter().any(|a| a == "--force");
 
     match cmd.as_str() {
+        /* 这一条**不读任何文件、不建任何目录**：它只回答「我这个二进制是哪次编的」。
+        用来分辨 `target/debug` 与 `target-workbench/debug` 里哪一份是最新的，
+        以及「编了但没重启」时窗里跑的是不是旧字节。 */
+        "build" => {
+            println!("{}", mkp_support_ease_lib::build_fingerprint());
+            Ok(0)
+        }
         "check" => cmd_check(),
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
@@ -100,6 +107,7 @@ fn run_cli() -> Result<i32, AppError> {
 fn usage() {
     eprintln!(
         "用法：
+  presets build                 说清这个二进制是哪次编译的（只读，不碰数据）
   presets check                 检查源 TOML / 引用 / 交付约束（只读）
   presets generate [--all]      跑生成器刷新交付产物（**不推进发布序号**）
   presets diff                  报盘上与真生成结果的差异（只读）
