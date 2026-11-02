@@ -231,9 +231,9 @@ export default function ParamDetail({
   const layerRow = (layerUid: string | null) => {
     const cell = cellAt(layerUid)
     if (!cell) return null
-    /* 「改之前的值」：盘上钉着用 `rest`，盘上没钉退到出厂 `restDefault`。
-       两者都空才是"没有可回的值"（见 `Cell.restDefault` 的注）。 */
-    const before = cell.rest ?? cell.restDefault ?? null
+    /* 「改之前的值」= 盘上那一份里这一格的有效值（后端按版本→机型→出厂算好）。
+       `null` 才是"没有可回的值"（见 `Cell.rest` 的注）。 */
+    const before = cell.rest ?? null
     const on = cell.editable
     const isCur = layerUid === uid
     /* 「挂回继承」之后落到哪一层：版本层 → 机型基底那格；基底 → 出厂默认 */
@@ -272,8 +272,8 @@ export default function ParamDetail({
                   className={s.pRevert}
                   data-tip={`恢复修改前的值：${String(before)}（这一层保存前是多少，不是「恢复默认」）`}
                   onClick={() =>
-                    /* 盘上本来钉着 ⇒ 写回那个值；盘上没钉 ⇒ 写 null 删键挂回继承 */
-                    onWriteLayer(layerUid, cell.rest === null ? null : String(cell.rest))
+                    /* 盘上这一层本来钉着 ⇒ 写回那个值；没钉 ⇒ 写 null 删键挂回继承 */
+                    onWriteLayer(layerUid, cell.restPinned ? String(cell.rest) : null)
                   }
                 >
                   ↩ {String(before)}

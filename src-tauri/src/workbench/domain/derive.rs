@@ -922,7 +922,7 @@ impl<'a> Book<'a> {
             origin_label: Some(w::origin_label(hit.origin).to_owned()),
             origin_explain: Some(w::origin_explain(hit.origin).to_owned()),
             own,
-            dirty: self.dirty_of(col, key, Some(hit.value), own),
+            dirty: self.dirty_of(col, key, Some(hit.value)),
             editable: blocked.is_empty() && !deprecated,
             reason: if !blocked.is_empty() {
                 Some(w::disabled::BLOCKED_BY_CONDITION.to_owned())
@@ -939,8 +939,8 @@ impl<'a> Book<'a> {
             differs: false,
             diff_tip: None,
             raw: hit.value.clone(),
-            rest: self.rest_at(col, key),
-            rest_default: self.rest_default_at(key),
+            rest: self.base_effective_at(col, key),
+            rest_pinned: self.base_pinned_at(col, key),
             deprecated,
             dead_choices,
         }
@@ -962,9 +962,13 @@ impl<'a> Book<'a> {
     /// 两份数据真的不同源了，这条判据才成立。
     ///
     /// 盘上**没钉**时不能只靠值判：「算出来的值」永远有值（出厂默认也是一个值），
-    /// 那样整页工厂默认的格子会全亮。改过没有的真相是**这一层有没有自己钉上**
-    /// （`own`，来自 `layers.has_own`）—— 钉了才算改。
-    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, now: Option<&Value>, own: bool) -> bool {
+    /// 那样整页工厂默认的格子会全亮 —— 所以要跟**盘上的有效值**比，而不是跟"空"比。
+    ///
+    /// ★ 2026-11-02 再改：以前判「这一层有没有钉记录」（`own`），那是**内部表示**。
+    /// 归并会把同值从版本层上提到机型基底，于是用户在版本列改值、记录落在机型层，
+    /// 版本列 `own` 永远是 `false` ⇒ **徽章永不出现**（作者连报三次的就是这个）。
+    /// 用户看得见的是**值**，所以判据也只能是值。
+    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, now: Option<&Value>) -> bool {
         /* 还在草稿里（值那套老路径 / 结构编辑）—— 先认这一条，别让判据退化 */
         if self
             .draft
@@ -973,13 +977,13 @@ impl<'a> Book<'a> {
         {
             return true;
         }
-        match (now, self.rest_at(col, key)) {
+        match (now, self.base_effective_at(col, key)) {
             (None, None) => false,
-            (Some(now), Some(rest)) => now != &rest,
-            // 盘上没钉着它：算出来的值来自继承 / 出厂默认，只有「这一层现在自己钉上了」
-            // 才说明用户改过。反过来（原来钉着、现在算不出来）不算改 ——
-            // 那多半是「这台机型没有这一项」，标脏只会骗人。
-            (Some(_), None) => own,
+            (Some(now), Some(before)) => now != &before,
+            // 盘上那份里这一项不适用（弃用 / 不在这台机型上），而这一格现在有值 ⇒ 变了。
+            (Some(_), None) => true,
+            // 盘上那份有这个值、这一格现在算不出来 —— 走不到：`cell()` 早在
+            // `view_effective` 返回 `None` 时就 `not_applicable()` 了。保守判不脏。
             (None, Some(_)) => false,
         }
     }
@@ -994,26 +998,43 @@ impl<'a> Book<'a> {
         self.rest_base.unwrap_or(self.presets)
     }
 
-    /// 这一列**盘上**钉着的值（草稿不算）。`None` = 这一层没钉着它 ——
-    /// 界面上的「恢复修改前的」要据此写 `null` **删键**、让它挂回继承，
-    /// 而不是写回一个值（写回值会把继承钉死，那是另一回事）。
-    fn rest_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
-        let p = self.rest().registry.param(key)?;
+    /// 盘上那一份里，**这一层自己钉着吗**（只决定还原怎么写，见 [`Cell::rest_pinned`]）。
+    fn base_pinned_at(&self, col: &ResolvedCol<'_>, key: &str) -> bool {
+        let Some(p) = self.rest().registry.param(key) else {
+            return false;
+        };
         p.machine_variants
-            .get(&variant_key(col.level, &col.key_of_level()))
-            .cloned()
+            .contains_key(&variant_key(col.level, &col.key_of_level()))
     }
 
-    /// `rest` 为 `None` 时，「改之前的值」退到哪一格 = 参数的出厂值。
+    /// 盘上那一份里，这一格的**有效值** —— 三层依次：版本覆盖 → 机型基底 → 出厂。
     ///
-    /// 例子（作者实测的那一格）：`A1:STANDARD` 的 `toolhead.speed_limit` 在盘上是
-    /// **空表**（2026-10-06 的注：同值副本没有信号），出厂 70 来自 `default_value`。
-    /// 把 70 改成 65 之后要看到的 `↩ 70` 就取这一格。
-    fn rest_default_at(&self, key: &str) -> Option<Value> {
-        self.rest()
-            .registry
-            .param(key)
-            .map(|p| p.default_value.clone())
+    /// 这是「改之前是多少」与「改没改」的**唯一**真相。不能改成「这一层钉着的值」：
+    /// 归并会把同值从版本层上提到机型基底（`variants.rs:28`），那时
+    /// 「你点的那一层没有钉」而「值确实变了」—— 两者必须以前者为准的是值，不是记录。
+    fn base_effective_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
+        let p = self.rest().registry.param(key)?;
+        if p.deprecated_for(&col.machine_id) || !p.applies_to(&col.machine_id) {
+            return None;
+        }
+        // ① 版本层（只有版本列才查）
+        if col.level == Level::Version {
+            if let Some(v) = p
+                .machine_variants
+                .get(&variant_key(Level::Version, &col.key_of_level()))
+            {
+                return Some(v.clone());
+            }
+        }
+        // ② 机型基底
+        if let Some(v) = p
+            .machine_variants
+            .get(&variant_key(Level::Machine, &col.machine_id))
+        {
+            return Some(v.clone());
+        }
+        // ③ 出厂
+        Some(p.default_value.clone())
     }
 
     /// 行头常驻的那一句：这一项归谁管。
@@ -1681,20 +1702,25 @@ pub struct Cell {
     pub diff_tip: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
     pub raw: Value,
-    /// 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
-    /// 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+    /// **盘上那一份里，这一格的有效值**（= 用户看得见的那个数）。
+    ///
+    /// 三层依次找：版本覆盖 → 机型基底 → 出厂 `defaultValue`。`None` 只有一种情况：
+    /// 这一项在这台机型上不适用 / 已弃用。
+    ///
+    /// 它同时是**徽章显示什么**与**改没改的判据**（见 [`Book::dirty_of`]）。
+    /// 为什么不能用「这一层钉着的值」：归并会把同值从版本层**上提到机型基底**
+    /// （`variants.rs:28`），于是「你点的那一层有没有钉」跟「值变没变」会分叉 ——
+    /// 作者在「A1 / 标准版」列改值、值落到机型基底，那一列就永远判不脏。
     pub rest: Option<Value>,
-    /// `rest` 为 `null` 时，「改之前的值」退到哪一格（= 参数的 `defaultValue`）。
+    /// 盘上那一份里，**这一层自己钉着吗**。
     ///
-    /// 为什么需要它：`A1:STANDARD` 上的 `toolhead.speed_limit` 在盘上**是空的**
-    /// （登记表 2026-10-06 的注：同值副本没有信号，空表是刻意的），出厂值 70 来自
-    /// `defaultValue`。作者把 70 改成 65 之后要看到的那枚 `↩ 70`，取的就是这一格。
+    /// 只用于**还原动作怎么写**：
+    /// - `true` ⇒ 写回 `rest` 那个值（磁盘上本来就有这一层，恢复它的钉状态）；
+    /// - `false` ⇒ 写 `null` **删键**（磁盘上这层是空的，恢复它的"没钉"状态）。
     ///
-    /// 它与 `rest` 一起回答两个不同的问题：
-    /// - **显示**：`rest ?? rest_default`（有值就亮徽章）；
-    /// - **还原**：`rest` 有值 ⇒ 写回那个值；`rest` 为 `null` ⇒ 写 `null` **删键**挂回继承
-    ///   （写值会把继承钉死，那是另一回事）。
-    pub rest_default: Option<Value>,
+    /// 不能只看 `rest` 有没有值来决定：版本层继承机型层时 `rest` 有值但这一层没钉，
+    /// 写一个值回去就把继承钉死了。
+    pub rest_pinned: bool,
     /// 这条参数**在这台机型上**已弃用（全局或点名这台机型）。`Row.deprecated` 是
     /// 全机型口径，答不了「这一格」—— 一行跨多台机型时两者会不同
     pub deprecated: bool,
@@ -1723,7 +1749,7 @@ impl Cell {
             diff_tip: None,
             raw: Value::Null,
             rest: None,
-            rest_default: None,
+            rest_pinned: false,
             deprecated: false,
             dead_choices: Vec::new(),
         }
@@ -1844,18 +1870,18 @@ mod tests {
         let first = cell_of(&work);
         assert!(first.dirty, "改过必须标脏（以前这里恒 false ⇒ 徽章不出现）");
         assert_eq!(
-            first.rest, None,
-            "盘上没钉着它 ⇒ rest 为 None：还原时写 null 删键、挂回继承"
-        );
-        assert_eq!(
-            first.rest_default,
+            first.rest,
             base.registry
                 .param("wiping.mode")
                 .map(|p| p.default_value.clone()),
-            "rest 为空时「改之前的值」退到出厂值"
+            "盘上没钉 ⇒ 有效值退到出厂值 —— 这枚 `↩` 要把用户送回这里"
+        );
+        assert!(
+            !first.rest_pinned,
+            "盘上这一层没钉着它 ⇒ 还原时写 null 删键、挂回继承"
         );
 
-        // ② 再改一次：`rest` / `rest_default` 都不许跟着跑
+        // ② 再改一次：`rest` 不许跟着跑
         let mut work2 = f.presets.reload().unwrap();
         work2
             .set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
@@ -1865,7 +1891,7 @@ mod tests {
             second.rest, first.rest,
             "改第二次不许让「改之前的值」变成上一个值（2026-11-02 作者实测的 65 那个 bug）"
         );
-        assert_eq!(second.rest_default, first.rest_default);
+        assert_eq!(second.rest_pinned, first.rest_pinned);
 
         // ③ 改回去 ⇒ 不脏，徽章消失
         let clean = cell_of(&f.presets);

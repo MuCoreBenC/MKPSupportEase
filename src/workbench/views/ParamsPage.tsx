@@ -2179,11 +2179,9 @@ function ParamLine({
   /* 弃用按**这一列的机型**判（`Row.deprecated` 是全机型口径，答不了这一格） */
   const dep = cell.deprecated
   const off = !cell.editable && !dep
-  /* 「改之前的值」：盘上钉着就用它（`rest`），盘上没钉（出厂默认）就退到
-     `restDefault`。两格都是 `null` 才是"没有可回的值"。
-     **不许写成 `cell.rest`** —— 那会让 `A1:STANDARD` 这类空表机型永远没有徽章，
-     而作者的实测用例（70 → 65 应显示 `↩ 70`）正是这一类。 */
-  const before = cell.rest ?? cell.restDefault ?? null
+  /* 「改之前的值」= 盘上那一份里这一格的**有效值**（后端已按版本→机型→出厂
+     三层算好）。`null` 才算"没有可回的值"。 */
+  const before = cell.rest ?? null
 
   return (
     <div
@@ -2234,9 +2232,9 @@ function ParamLine({
                 param,
                 ownerMachineId,
                 uid,
-                /* 盘上本来钉着 ⇒ 写回那个值；盘上没钉 ⇒ 写 null **删键**挂回继承。
+                /* 盘上这一层本来钉着 ⇒ 写回那个值；没钉 ⇒ 写 null **删键**挂回继承。
                    写值会把继承钉死（`A1:STANDARD` 那格会从此不再跟随 `defaultValue`）。 */
-                cell.rest === null ? null : String(cell.rest),
+                cell.restPinned ? String(cell.rest) : null,
                 undefined,
                 String(cell.raw ?? ''),
               )

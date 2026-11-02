@@ -3022,7 +3022,7 @@ mod tests {
             again.rest, first.rest,
             "改第二次，「改之前的值」不许变成上一个值"
         );
-        assert_eq!(again.rest_default, first.rest_default);
+        assert_eq!(again.rest_pinned, first.rest_pinned);
 
         // 保存：新值成为新基准 ⇒ 徽章消失
         super::save_in(&mut ctx).unwrap();

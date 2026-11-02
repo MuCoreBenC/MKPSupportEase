@@ -1127,6 +1127,16 @@ impl ParamRegistry {
             ))
         })?;
         check_owner(owner)?;
+
+        /* ★ **这里刻意不做「同值不落键」**（2026-11-02）。
+         *
+         * 那条归一化是对的（见 `app::storage::normalize_same_as_inherited`），
+         * 但**不能放在这一层**：`set_variant` 还被「复制配方 / 新建版本」用，
+         * 那些场景里"显式写一个与继承值相同的值"正是**独立快照**的语义 ——
+         * 删了它，副本就会跟着基底一起变（`copied_recipe_is_an_independent_snapshot`
+         * 与 `a_machine_level_edit_rewrites_the_promoted_version_keys` 钉着这两条）。
+         *
+         * 所以归一化只放在「用户改一格值」那条路上。 */
         let item = to_toml_value(value, self.params[at].value_type, key)?;
 
         let t = self.param_table_mut(at, key)?;
@@ -1146,6 +1156,27 @@ impl ParamRegistry {
             .machine_variants
             .insert(owner.to_owned(), value.clone());
         Ok(())
+    }
+
+    /// 这一层**继承来的值** = 它自己不钉时算出来的那个。
+    ///
+    /// - 机型层（`A1`）：继承 `defaultValue`；
+    /// - 版本层（`A1:STANDARD`）：继承机型层那一格，机型层也没钉就继承 `defaultValue`。
+    ///
+    /// 给「用户改值」那条路做同值归一化用（`app::storage::normalize_same_as_inherited`）。
+    /// **不要**拿它去改 [`Self::set_variant`] —— 那条路还被复制配方用。
+    pub fn inherited_value_for(&self, key: &str, owner: &str) -> Option<Value> {
+        let at = *self.index.get(key)?;
+        let p = &self.params[at];
+        match owner.split_once(':') {
+            Some((machine, _)) => Some(
+                p.machine_variants
+                    .get(machine)
+                    .cloned()
+                    .unwrap_or_else(|| p.default_value.clone()),
+            ),
+            None => Some(p.default_value.clone()),
+        }
     }
 
     /// 「清空」一个机型/版本的值 = **把那个键整行删掉**，不是写 `0` 或空串。

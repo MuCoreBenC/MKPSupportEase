@@ -250,13 +250,46 @@ pub fn apply_draft_now(
     committed: &Committed,
     draft: &Draft,
 ) -> Result<usize, AppError> {
-    let edits = plan_value_edits(presets, committed, draft);
+    let mut edits = plan_value_edits(presets, committed, draft);
+    normalize_same_as_inherited(presets, &mut edits);
     if edits.is_empty() {
         return Ok(0);
     }
     let written = edits.len();
     presets.apply_values(&edits)?;
     Ok(written)
+}
+
+/// **用户改一格值时，同值不落键**（2026-11-02，作者实测逼出来的）。
+///
+/// 把一个值与「它本来就会继承到的值」写成一样，等于铺一层**同值副本**：
+/// 信息量是 0，但文件字节变了 ⇒ 右上角「未保存 N」+1、行上徽章也不消失。
+///
+/// 作者那天的病历：在机型基底上把 `toolhead.speed_limit` 改成 70，而 70 就是
+/// `defaultValue` —— 于是 `[params.machineVariants]` 里多出 `A1 = 70.0`，
+/// 文件从「没有这一层」变成「有这一层」，界面上就成了「改过了，而且改不回去」。
+///
+/// 注册表 2026-10-06 就给过这个立场：「要改全局值请改上面的 `defaultValue`，
+/// 别在这儿铺一层同值副本」。那句话当时只管住版本层（归并时同值会被上提掉）。
+///
+/// ★ **只在这一条路上做**：`Registry::set_variant` 还被「复制配方 / 新建版本」用，
+/// 那些场景里显式写一个相同值正是**独立快照**的语义，删了副本就不再独立
+/// （`copied_recipe_is_an_independent_snapshot` 钉着）。
+fn normalize_same_as_inherited(
+    presets: &Presets,
+    edits: &mut [(String, String, Option<serde_json::Value>)],
+) {
+    for (key, owner, value) in edits.iter_mut() {
+        let Some(v) = value.as_ref() else { continue };
+        if presets
+            .registry
+            .inherited_value_for(key, owner)
+            .is_some_and(|inherited| &inherited == v)
+        {
+            // `None` = 删键，让它挂回继承
+            *value = None;
+        }
+    }
 }
 
 /// 把草稿写回仓库。
@@ -275,7 +308,9 @@ pub fn save(
     committed: &Committed,
     draft: &Draft,
 ) -> Result<SaveOutcome, AppError> {
-    let edits = plan_value_edits(presets, committed, draft);
+    let mut edits = plan_value_edits(presets, committed, draft);
+    /* 保存也走同一条归一化：草稿里那些"改回原值"的项不该在真仓库里留下副本 */
+    normalize_same_as_inherited(presets, &mut edits);
     presets.apply_values(&edits)?;
 
     // ② 菜单 / 套餐
@@ -399,6 +434,45 @@ mod tests {
     use crate::workbench::domain::patch::{apply, Patch, Visibility};
     use crate::workbench::domain::testkit::Fixture;
     use crate::workbench::domain::Level;
+
+    /// **同值不落键**（2026-11-02 作者实测逼出来的）。
+    ///
+    /// 他那天做的事：在机型基底上把涂胶速度限制改成 70，而 70 就是出厂值。
+    /// 结果 `[params.machineVariants]` 里多出 `A1 = 70.0` —— 文件字节变了，
+    /// 于是「未保存（1）」不归零、徽章也不消失，看着像"改过了却改不回去"。
+    #[test]
+    fn a_value_equal_to_the_inherited_one_is_turned_into_a_delete() {
+        let f = Fixture::load();
+        let key = "toolhead.offset.x";
+        let factory = f
+            .presets
+            .registry
+            .param(key)
+            .expect("夹具里该有这一项")
+            .default_value
+            .clone();
+
+        // 写成出厂值 ⇒ 转成删键
+        let mut edits = vec![(key.to_owned(), "A1".to_owned(), Some(factory.clone()))];
+        normalize_same_as_inherited(&f.presets, &mut edits);
+        assert_eq!(
+            edits[0].2, None,
+            "与出厂同值 ⇒ 删键（铺同值副本是零信息量，却会让文件字节变）"
+        );
+
+        // 真的改了 ⇒ 原样保留
+        let mut edits = vec![(
+            key.to_owned(),
+            "A1".to_owned(),
+            Some(serde_json::json!(999.0)),
+        )];
+        normalize_same_as_inherited(&f.presets, &mut edits);
+        assert_eq!(
+            edits[0].2,
+            Some(serde_json::json!(999.0)),
+            "真的改了就不许动它"
+        );
+    }
 
     fn store() -> (tempfile::TempDir, Store) {
         let d = tempfile::tempdir().unwrap();
