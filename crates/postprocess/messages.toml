@@ -5031,6 +5031,15 @@ text_ja = "{count} 件の変更のうち {conflicts} 件は同じファイルが
 params = ["count", "conflicts"]
 note = "2026-11-01 数据保护：三方对账（影子/真源/基准）发现『同一个文件两边都改过』时单独提示。这类冲突不能自动选边 —— 自动用真源覆盖会丢掉用户的未保存编辑"
 
+["ui.workbench.save.stale"]
+code = "E_WB_SAVE_STALE_001"
+text = "磁盘上的 presets/ 在你会话期间被外部改过 —— 直接保存会把它盖掉。先「重新加载」看清磁盘那一份，再决定保留谁"
+text_en = "presets/ was changed outside this session — saving now would overwrite that. Reload first to see the on-disk copy, then decide which side to keep"
+text_zh_tw = "磁碟上的 presets/ 在你會話期間被外部改過 —— 直接儲存會把它蓋掉。先「重新載入」看清磁碟那一份，再決定保留誰"
+text_ja = "ディスク上の presets/ がこのセッション中に外部で変更されました — このまま保存すると上書きされます。先に「再読み込み」でディスク側を確認し、どちらを残すか決めてください"
+params = []
+note = "2026-11-02 刀 6：保存前比 session.json 的 diskStamp 与 presets/ 当前指纹。不一致 = 外部改过，**不许静默覆盖**（2026-10-31「A1 三份 0.7 被写回 0.8」就是这条没拦）。空 diskStamp（老账本/测试夹具）跳过校验"
+
 ["ui.workbench.build.dual_source"]
 code = "E_PRESET_DUAL_SOURCE_001"
 text = "生成没完成：{file} 在「安装包内置」和「云端交付」两边算出来不一样 —— 这说明又有人给其中一侧开了第二个数据源。先修掉那处，再生成"

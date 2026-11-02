@@ -683,7 +683,12 @@ for rel in &want {
 > - 刀 0 ✅ 回滚点 `239e6a7`（报告定稿，零代码改动）
 > - 刀 2 ✅ `dea451f` —— `mirror` 改成「整份拷到 `.reset` → 校验 → rename 让位 → rename 就位」，
 >   新增 `recover_dir_replace`，7 条故障注入测试全绿。**语义未变**（放弃仍 `mirror(real→shadow)`）。
-> - 刀 1 起待做。注意：**刀 2 完成后徽章仍不正确** —— 那是刀 1 的事，两件事不要混。
+> - 刀 1 ✅ `39cf88c` —— `Book.rest_base` + `Ctx.base`（读 `txn::base_root()`）；
+>   `rest_at` 读它、`dirty_of` 恢复；`Cell.rest_default` 补「盘上没钉 ⇒ 退到出厂值」。
+>   三条生产路径必须 `with_rest`：`book_with_probe`、`wb_matrix`、`wb_desk`（**`wb_matrix` 最容易漏**，
+>   参数台那一屏就是它）。`save_in` / `discard_in` 搬完基准后重读 `ctx.base`。
+> - 刀 3 起待做：放弃改 `mirror(BASE → WORK)`。
+>   注意：**刀 1 只让徽章对了，状态模型仍不稳** —— 刀 5（保存阶段机）/ 刀 6（冲突判定）才是后者。
 
 | 刀 | 做什么 | 红→绿的判据 | 回滚点 |
 |---|---|---|---|

@@ -674,6 +674,164 @@ fn remove_dir_all_if_exists(path: &Path) -> Result<(), AppError> {
     }
 }
 
+/* ---------- 保存的提交阶段（刀 5，2026-11-02） ---------- */
+
+/// 一次保存要走四步，**不是一步**：
+///
+/// ```text
+/// ① commit(WORK → presets/)        磁盘换成新的
+/// ② BASE := WORK                    基准跟上
+/// ③ 重读内存
+/// ④ 清草稿 / 清事务
+/// ```
+///
+/// 每份文件都是 `atomic_write`，但**四次原子不等于一次原子**：① 成功、② 之前崩，
+/// 磁盘已经是新的、`BASE` 还是旧的 ⇒ 下次打开会判「有未保存草稿」，
+/// 用户点「放弃」就把刚保存成功的东西退回去。
+///
+/// 所以在 `session.json` 里记阶段，启动时按阶段补完（见 [`recover_save_stage`]）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveStage {
+    /// 没有正在进行的保存
+    Idle,
+    /// 已决定要提交，磁盘还没动 ⇒ 崩在这一步等于什么都没发生
+    Prepared,
+    /// `commit` 返回 Ok —— **磁盘已经是新的，基准还没搬**
+    RealCommitted,
+    /// 基准也搬完了，只差清内存
+    BaselineAdvanced,
+}
+
+impl SaveStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Idle => "idle",
+            Self::Prepared => "prepared",
+            Self::RealCommitted => "real_committed",
+            Self::BaselineAdvanced => "baseline_advanced",
+        }
+    }
+
+    fn parse(s: &str) -> Self {
+        match s {
+            "prepared" => Self::Prepared,
+            "real_committed" => Self::RealCommitted,
+            "baseline_advanced" => Self::BaselineAdvanced,
+            _ => Self::Idle,
+        }
+    }
+}
+
+fn stage_path(wb: &Path) -> PathBuf {
+    wb.join(".draft").join("session.json")
+}
+
+/// 会话账本。两个字段各管一件事，**不许互相顶替**：
+///
+/// | 字段 | 回答什么 | 谁写 |
+/// |---|---|---|
+/// | `stage` | 上次保存走到第几步（见 [`SaveStage`]） | 保存过程 / 启动补完 |
+/// | `disk_stamp` | **打开会话时** `presets/` 是什么样 | 打开（无草稿时）/ 保存成功后 |
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionState {
+    pub stage: SaveStage,
+    /// 空 = 老账本 / 测试夹具没写 ⇒ 不做「外部改过」校验。
+    pub disk_stamp: String,
+}
+
+impl Default for SessionState {
+    fn default() -> Self {
+        Self {
+            stage: SaveStage::Idle,
+            disk_stamp: String::new(),
+        }
+    }
+}
+
+/// 读会话账本。读不出 / 坏档 / 没这文件一律当空 —— 宁可少补一次，
+/// 也不能因为一个记账文件把工作台卡在打不开的状态。
+pub fn read_session(wb: &Path) -> SessionState {
+    let Ok(text) = std::fs::read_to_string(stage_path(wb)) else {
+        return SessionState::default();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return SessionState::default();
+    };
+    SessionState {
+        stage: v
+            .get("stage")
+            .and_then(|x| x.as_str())
+            .map(SaveStage::parse)
+            .unwrap_or(SaveStage::Idle),
+        disk_stamp: v
+            .get("diskStamp")
+            .and_then(|x| x.as_str())
+            .unwrap_or_default()
+            .to_owned(),
+    }
+}
+
+pub fn write_session(wb: &Path, s: &SessionState) -> Result<(), AppError> {
+    let path = stage_path(wb);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AppError::io(format!("建不出目录：{}", parent.display())).with_detail(e.to_string())
+        })?;
+    }
+    let body = serde_json::json!({ "stage": s.stage.as_str(), "diskStamp": s.disk_stamp });
+    atomic_write(&path, body.to_string().as_bytes())
+}
+
+pub fn read_save_stage(wb: &Path) -> SaveStage {
+    read_session(wb).stage
+}
+
+/// 只改阶段，**保留 `disk_stamp`** —— 两个字段各说一件事，整份覆盖会把另一件抹掉。
+pub fn write_save_stage(wb: &Path, stage: SaveStage) -> Result<(), AppError> {
+    let mut s = read_session(wb);
+    s.stage = stage;
+    write_session(wb, &s)
+}
+
+/// 记下「这一刻 `presets/` 是什么样」。只有**打开会话（无草稿）**与**保存成功**
+/// 该调 —— 编辑中途调，等于把外部改动洗白。
+pub fn write_disk_stamp(wb: &Path, stamp: &str) -> Result<(), AppError> {
+    let mut s = read_session(wb);
+    s.disk_stamp = stamp.to_owned();
+    write_session(wb, &s)
+}
+
+/// 启动时按阶段补完上一次没走完的保存。返回做了哪些动作（给日志用）。
+///
+/// | 读到 | 磁盘 | BASE | 动作 |
+/// |---|---|---|---|
+/// | `prepared` | 未动 | 旧 | 什么都不用补（零写入，安全），只清阶段 |
+/// | `real_committed` | **已换** | 旧 | **补完** `mirror(real → base)` ⇒ 基准跟上 |
+/// | `baseline_advanced` | 已换 | 新 | 只清阶段 |
+///
+/// 这条是「保存中断不会让已保存与基准分裂」的全部保证。
+pub fn recover_save_stage(wb: &Path, real: &Path, base: &Path) -> Result<Vec<String>, AppError> {
+    let mut log = Vec::new();
+    match read_save_stage(wb) {
+        SaveStage::Idle => {}
+        SaveStage::Prepared => {
+            log.push("上次保存停在提交之前（磁盘一个字节没动）".to_owned());
+        }
+        SaveStage::RealCommitted => {
+            /* 磁盘已经是新的、基准还是旧的 ⇒ 补搬。幂等：再跑一次也是同一结果。 */
+            mirror(real, base)?;
+            log.push("补完上次保存的基准推进（磁盘已提交、基准未搬）".to_owned());
+        }
+        SaveStage::BaselineAdvanced => {
+            log.push("上次保存已完成，只差清理".to_owned());
+        }
+    }
+    if !log.is_empty() {
+        write_save_stage(wb, SaveStage::Idle)?;
+    }
+    Ok(log)
+}
+
 /// 启动时收拾「上次目录替换没做完」的现场。返回做了哪些动作（给日志用，空 `Vec` = 很干净）。
 ///
 /// 判据来自四步的**可观察中间态**：

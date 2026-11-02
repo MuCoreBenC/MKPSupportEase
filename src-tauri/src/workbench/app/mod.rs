@@ -504,12 +504,18 @@ impl Ctx {
          * 而影子的完整性正由这一步保证。两个根都要收拾 —— `save_in` 会
          * `mirror(real → base)`，`wb_generate` 会 `mirror(real → shadow)`，
          * 两处都可能停在「旧的让开了、新的没进来」。 */
+        let base_root = txn::base_root(&store.root);
         for line in crate::workbench::domain::txn::recover_dir_replace(&shadow_root)? {
             tracing::warn!("{line}");
         }
-        for line in
-            crate::workbench::domain::txn::recover_dir_replace(&txn::base_root(&store.root))?
-        {
+        for line in crate::workbench::domain::txn::recover_dir_replace(&base_root)? {
+            tracing::warn!("{line}");
+        }
+        /* ★ **保存阶段补完**（刀 5），必须在 `settle_shadow` 之前：
+        上次保存可能停在「磁盘已换、基准未搬」，那一步不补，
+        `settle_shadow` 会把"已保存"误判成"用户有草稿"，
+        接着用户点「放弃」就把刚存的东西退回去。 */
+        for line in txn::recover_save_stage(&store.root, &real_root, &base_root)? {
             tracing::warn!("{line}");
         }
         let recovered = settle_shadow(&store.root, &real_root)?;
@@ -525,8 +531,7 @@ impl Ctx {
             // 载荷根仍指真仓库：资产是只读读出来的，编辑走「暂存 + 保存时搬」
             presets.set_asset_root(&asset_root);
         }
-        /* 基准目录先算出来 —— `store` 马上要被 move 进会话 */
-        let base_root = txn::base_root(&store.root);
+        /* `base_root` 在上面已经算过 —— `store` 马上要被 move 进会话 */
         let mut ctx = Self::with(presets, store)?;
         ctx.real_root = real_root;
         ctx.shadow_root = shadow_root;
@@ -541,6 +546,11 @@ impl Ctx {
         if recovered {
             ctx.txn = Txn::recovered();
             tracing::warn!("影子树里有上次会话未保存的改动 —— 已按一条未保存改动呈现");
+            /* **有草稿时不许覆盖 `diskStamp`**：那个戳是「我上次打开时磁盘长什么样」，
+            重启后要靠它判「磁盘在这期间被外部改过」。覆盖了就等于把冲突洗白。 */
+        } else {
+            /* 干净的打开 = 一次新会话 ⇒ 记下磁盘此刻的样子 */
+            txn::write_disk_stamp(&ctx.store.root, &presets_source_stamp(&ctx.real_root))?;
         }
         /* 两个根换过之后重算：`with` 那次比的是"预设根 vs 自己"（恒等，必为 0），
         而这里才是真正的"真仓库 vs 影子树" */
@@ -2190,6 +2200,19 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
     if !values_dirty && !ctx.txn.is_dirty() {
         return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
     }
+    /* ★ 刀 6：磁盘在会话期间被外部改过 ⇒ **不许静默覆盖**。
+     *
+     * 2026-10-31「A1 三份 0.7 被写回 0.8」就是这条没拦：工作台拿着一份旧内容
+     * 写回了真仓库。`diskStamp` 是「打开会话时 / 上次保存后」那一刻的指纹，
+     * 与现在不同就说明中间有人动过 —— 保留哪一份是人的决定，不是程序的。
+     *
+     * 空 `diskStamp` = 老账本 / 测试夹具 ⇒ 跳过（它们没有"打开会话"这个动作）。 */
+    let sess = txn::read_session(&ctx.store.root);
+    if !sess.disk_stamp.is_empty() && sess.disk_stamp != presets_source_stamp(&ctx.real_root) {
+        return Err(AppError::invalid_argument(
+            postprocess::diag::messages::text("ui.workbench.save.stale", &[]),
+        ));
+    }
     // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
     ctx.flush();
     let mut remap = BTreeMap::new();
@@ -2199,12 +2222,20 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
     }
     // 影子树 → 真仓库：逐份原子写、删除进回收站、失败整体回滚
     let stamp = crate::workbench::clock::now_iso8601().replace(':', "-");
+    /* ★ 提交阶段机（刀 5）：**逐份原子 ≠ 整笔原子**。
+    下面四步之间任何一处崩溃，都要能在下次启动时分辨「磁盘动没动」。
+    见 `txn::SaveStage` / `recover_save_stage`。 */
+    let wb = ctx.store.root.clone();
+    txn::write_save_stage(&wb, txn::SaveStage::Prepared)?;
     let report = txn::commit(
         &ctx.real_root,
         &ctx.shadow_root,
         &ctx.store.root.join(".trash"),
         &stamp,
     )?;
+    // 走到这里 = 磁盘已经是新的。**从这一刻起，基准必须跟上**，否则崩溃会让
+    // 「已保存」与「基准」分裂，用户点放弃就把刚存的东西退回去。
+    txn::write_save_stage(&wb, txn::SaveStage::RealCommitted)?;
     tracing::info!(
         written = report.written,
         deleted = report.deleted,
@@ -2225,12 +2256,19 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
      *
      * 保存是全量提交（影子整份进真源），所以直接镜像即可，
      * 不存在"只同步一部分、把别的冲突一起抹掉"的问题。 */
-    txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
+    let base_root = txn::base_root(&ctx.store.root);
+    txn::mirror(&ctx.real_root, &base_root)?;
+    txn::write_save_stage(&wb, txn::SaveStage::BaselineAdvanced)?;
     /* 基准是一份**独立的内存文档**（刀 1）：盘上搬完了还得把它读进来，
     否则「改之前的值」还停在上一次保存 —— 刚存完徽章就会一直亮着。 */
-    ctx.base = Presets::load_from(&txn::base_root(&ctx.store.root))?;
+    ctx.base = Presets::load_from(&base_root)?;
     // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
     ctx.reload_from_disk()?;
+    /* 保存把磁盘换成了新的一代 ⇒ 「打开时那一刻」也跟着变成这一代。
+    不更新的话，下一次保存会被刀 6 的校验误判成「外部改过」。 */
+    txn::write_disk_stamp(&wb, &presets_source_stamp(&ctx.real_root))?;
+    // 全部落定才清阶段：半路崩在任何一个 `?` 上，下次启动都还知道该补哪一步
+    txn::write_save_stage(&wb, txn::SaveStage::Idle)?;
     let notices = ctx.notices_now();
     let view = view_of(ctx, &ctx.committed, &ctx.draft, notices);
     Ok(SaveResult { view, remap })
@@ -2252,14 +2290,18 @@ pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
     // 下面 reload_from_disk 会把盘上那份旧草稿读回来，放弃就白放了
     ctx.flush();
     // ★ 放弃 = 把影子树整个拉回磁盘原状（结构类改动也一起丢）
-    txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
-    /* 放弃成功后同步基准（2026-11-01 R3）：此刻影子 == 真源，
-    基准也该是这一份。**放在 mirror 成功之后** —— 失败时不动基准，
-    下一次打开还能认出"这里有东西没处理"。 */
-    txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
-    /* 放弃之后基准就是磁盘那一份 —— 内存文档跟着换（刀 1），
-    否则放弃完徽章还亮着「改之前的值」，而那个值已经等于当前值了。 */
-    ctx.base = Presets::load_from(&txn::base_root(&ctx.store.root))?;
+    /* ★ **放弃 = 回到「打开工作台那一刻」**（刀 3，2026-11-02 作者裁定）。
+     *
+     * 以前这里是 `mirror(real → shadow)` —— 让影子等于**磁盘现在**。
+     * 两者只在一种情况下不同，而那种情况恰恰最危险：开会话到点放弃之间，
+     * `presets/` 被外部改过（`git checkout`、AI 直接改文件、另一个终端 publish）。
+     * 那时「放弃」会把外部改动一起变成工作台的状态，而用户以为只是作废自己的编辑。
+     *
+     * 基准（`base_root`）**不动**：它就是"我来的时候"那一份。
+     * 增删改名排序全都不用逐种回退 —— 整份覆盖天然覆盖它们。 */
+    let base_root = txn::base_root(&ctx.store.root);
+    txn::mirror(&base_root, &ctx.shadow_root)?;
+    ctx.base = Presets::load_from(&base_root)?;
     ctx.txn.clear();
     /* **放弃后同样要重读内存**（2026-11-01）。
      *
@@ -2269,7 +2311,7 @@ pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
      * 就是"点了放弃没反应"。保存路径（`wb_save`）在 commit 后一直
      * 有这一步，这里是把漏掉的那半补齐。 */
     ctx.reload_from_disk()?;
-    tracing::info!(dropped, "草稿与事务已丢弃（影子树已对齐磁盘）");
+    tracing::info!(dropped, "草稿与事务已丢弃（已回到打开工作台那一刻）");
     let notices = ctx.notices_now();
     Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices))
 }
@@ -2817,6 +2859,180 @@ mod tests {
     /// 这条走**真入口**（`Ctx::open_at` + `run_ctx` + `discard_in` / `save_in`），
     /// 验的是盘上的字节，不是文案：
     ///   ① 刚开（没有草稿）时会话的根必须是影子树；
+    /// **判据 11**（刀 3）：开会话之后外部改了 `presets/`，点「放弃」必须回到
+    /// **打开那一刻**，不是回到磁盘现在 —— 后者会把别人的改动当成自己的编辑一起留下。
+    #[test]
+    fn discard_returns_to_the_opening_snapshot_not_the_current_disk() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = Ctx::open_at(Store::at(dir.path().join("workbench")), real.clone()).unwrap();
+
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+
+        /* 会话进行中，外部（git checkout / AI 改文件 / 另一个终端）动了真仓库 */
+        let rel = "machines/A1.toml";
+        let mut outside = std::fs::read_to_string(real.join(rel)).unwrap();
+        outside.push_str("\n# 外部改动\n");
+        crate::fsx::atomic::atomic_write(&real.join(rel), outside.as_bytes()).unwrap();
+
+        super::discard_in(&mut ctx).unwrap();
+
+        let shadow_text = std::fs::read_to_string(ctx.shadow_root.join(rel)).unwrap();
+        assert!(
+            !shadow_text.contains("外部改动"),
+            "放弃回到的是「打开那一刻」，不许把中途的外部改动吸进来：{shadow_text}"
+        );
+    }
+
+    /// **判据 18**（刀 6）：会话期间磁盘被外部改过 ⇒ 保存**不许静默覆盖**。
+    ///
+    /// 2026-10-31「A1 三份 0.7 被写回 0.8」就是这条没拦。
+    #[test]
+    fn saving_over_an_externally_changed_presets_is_refused() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let mut ctx = Ctx::open_at(Store::at(dir.path().join("workbench")), real.clone()).unwrap();
+
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+
+        /* 外部改了真仓库 —— 与会话里那份已经不一样了 */
+        let rel = "machines/A1.toml";
+        let mut outside = std::fs::read_to_string(real.join(rel)).unwrap();
+        outside.push_str("\n# 外部改动\n");
+        crate::fsx::atomic::atomic_write(&real.join(rel), outside.as_bytes()).unwrap();
+
+        assert!(
+            super::save_in(&mut ctx).is_err(),
+            "磁盘被外部改过时必须拒绝保存，不许静默覆盖"
+        );
+        assert!(
+            std::fs::read_to_string(real.join(rel))
+                .unwrap()
+                .contains("外部改动"),
+            "被拒绝的保存不许在真仓库留下任何痕迹"
+        );
+    }
+
+    /// **判据 17**（刀 5）：保存停在「磁盘已换、基准未搬」⇒ 下次打开补完基准，
+    /// 不许变成「保存了却提示有未保存改动」（那会让人点「放弃」把成果退回去）。
+    #[test]
+    fn an_interrupted_save_does_not_look_like_unsaved_work() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let wb = dir.path().join("workbench");
+
+        {
+            let mut ctx = Ctx::open_at(Store::at(wb.clone()), real.clone()).unwrap();
+            run_ctx(&mut ctx, Some("改值"), |c| {
+                c.presets
+                    .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            })
+            .unwrap();
+
+            /* 只做到 commit 为止 —— 这正是「①成功、②之前崩」的形状 */
+            let stamp = crate::workbench::clock::now_iso8601().replace(':', "-");
+            txn::commit(&ctx.real_root, &ctx.shadow_root, &wb.join(".trash"), &stamp).unwrap();
+            txn::write_save_stage(&wb, txn::SaveStage::RealCommitted).unwrap();
+        }
+
+        assert_eq!(
+            txn::read_save_stage(&wb),
+            txn::SaveStage::RealCommitted,
+            "现场造对了：阶段停在 real_committed"
+        );
+
+        // 重开：基准必须被补完成磁盘那一份
+        let ctx2 = Ctx::open_at(Store::at(wb.clone()), real.clone()).unwrap();
+        assert_eq!(
+            txn::read_save_stage(&wb),
+            txn::SaveStage::Idle,
+            "补完之后阶段要清掉"
+        );
+        assert!(
+            txn::equal(
+                &txn::snapshot(&real).unwrap(),
+                &txn::snapshot(&txn::base_root(&wb)).unwrap()
+            ),
+            "基准必须跟上磁盘 —— 否则下次打开会判成「有未保存改动」"
+        );
+        assert_eq!(ctx2.txn.dirty_count(), 0, "不许凭空多出一条未完成事务");
+    }
+
+    /// **端到端判据 1/2/3**（刀 1）：打开会话改一格值，界面拿到的那格必须带
+    /// 「保存前那一个」，且改第二次不跟着跑、保存后消失。
+    ///
+    /// 走的是真机同一条链：`Ctx::open_at` → 写影子 → `Book::with_rest(&ctx.base)`。
+    /// **不走这条就测不出 `rest` 读的是哪一份** —— 单元测试里两份数据是手搓的，
+    /// 而这里 `ctx.base` 由 `settle_shadow` 真正铺出来。
+    #[test]
+    fn touching_a_value_makes_the_saved_value_visible_to_the_ui() {
+        let (_fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        let cols = vec![crate::workbench::domain::derive::ColRef {
+            machine_id: "A1".to_owned(),
+            version_uid: None,
+        }];
+        let cell_of = |ctx: &Ctx| {
+            crate::workbench::domain::derive::Book::new(&ctx.presets, &ctx.committed, &ctx.draft)
+                .with_rest(&ctx.base)
+                .matrix(&cols, Some("wiping"), "", None)
+                .rows
+                .iter()
+                .find(|r| r.key == "wiping.mode")
+                .map(|r| r.cells[0].clone())
+                .expect("wiping.mode 该在 wiping 组里")
+        };
+
+        assert!(!cell_of(&ctx).dirty, "刚打开是干净的");
+
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+        let first = cell_of(&ctx);
+        assert!(
+            first.dirty,
+            "改过必须标脏 —— 不脏就是徽章不出现（2026-10-31 ~ 11-02 的老病）"
+        );
+        assert_eq!(first.raw, serde_json::json!("disk"), "格子显示改完的值");
+
+        run_ctx(&mut ctx, Some("再改"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
+        })
+        .unwrap();
+        let again = cell_of(&ctx);
+        assert_eq!(
+            again.rest, first.rest,
+            "改第二次，「改之前的值」不许变成上一个值"
+        );
+        assert_eq!(again.rest_default, first.rest_default);
+
+        // 保存：新值成为新基准 ⇒ 徽章消失
+        super::save_in(&mut ctx).unwrap();
+        let saved = cell_of(&ctx);
+        assert!(
+            !saved.dirty,
+            "保存后徽章必须消失（`Ctx::base` 要跟着搬，否则会一直亮着）"
+        );
+    }
+
     ///   ② 编辑之后真仓库一个字节不动，事务 +1；
     ///   ③ 放弃 → 影子回到磁盘原状、事务清零；
     ///   ④ 再改一次并保存 → 这时真仓库才变。
