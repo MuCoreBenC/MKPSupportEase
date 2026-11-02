@@ -2179,6 +2179,11 @@ function ParamLine({
   /* 弃用按**这一列的机型**判（`Row.deprecated` 是全机型口径，答不了这一格） */
   const dep = cell.deprecated
   const off = !cell.editable && !dep
+  /* 「改之前的值」：盘上钉着就用它（`rest`），盘上没钉（出厂默认）就退到
+     `restDefault`。两格都是 `null` 才是"没有可回的值"。
+     **不许写成 `cell.rest`** —— 那会让 `A1:STANDARD` 这类空表机型永远没有徽章，
+     而作者的实测用例（70 → 65 应显示 `↩ 70`）正是这一类。 */
+  const before = cell.rest ?? cell.restDefault ?? null
 
   return (
     <div
@@ -2218,24 +2223,26 @@ function ParamLine({
           与右栏那枚 `↶`（挂回继承、写 `null` 删键）**不是一回事**：那枚是"跟随别人"，
           这枚是"退回我原来的"。title 里把这条差别说清。
         */}
-        {cell.dirty && cell.rest !== null && cell.editable && !dep && (
+        {cell.dirty && before !== null && cell.editable && !dep && (
           <button
             type="button"
             className={s.pRevert}
-            data-tip={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复出厂默认」）`}
+            data-tip={`恢复修改前的值：${String(before)}（这一层保存前是多少，不是「恢复出厂默认」）`}
             onClick={() =>
               onWrite(
                 row,
                 param,
                 ownerMachineId,
                 uid,
-                String(cell.rest),
+                /* 盘上本来钉着 ⇒ 写回那个值；盘上没钉 ⇒ 写 null **删键**挂回继承。
+                   写值会把继承钉死（`A1:STANDARD` 那格会从此不再跟随 `defaultValue`）。 */
+                cell.rest === null ? null : String(cell.rest),
                 undefined,
                 String(cell.raw ?? ''),
               )
             }
           >
-            ↩ {String(cell.rest)}
+            ↩ {String(before)}
           </button>
         )}
         <CellEditor

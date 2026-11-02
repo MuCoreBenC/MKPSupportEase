@@ -334,6 +334,14 @@ pub struct Ctx {
     real_root: PathBuf,
     /// **影子工作树**（`workbench/.draft/presets/`）。所有编辑写这里
     shadow_root: PathBuf,
+    /// **盘上已保存的那一份**（2026-11-02 刀 1）—— 「改之前的值」唯一来源。
+    ///
+    /// 从 `txn::base_root()`（`.draft/base/`）加载，与 `presets` **必须是两份数据**：
+    /// `presets` 是编辑树（值写进去就变），`base` 只在「打开会话」与「保存成功」时推进。
+    /// 有了它，`Book::with_rest` 才答得出「这一格保存前是多少」。
+    ///
+    /// 之前没有这一格，`rest_at` 与当前值同源 ⇒ `dirty` 恒假 ⇒ 徽章永不亮（见 `derive::Book::rest`）。
+    base: Presets,
     /// 统一编辑事务（2026-10-31）：撤销/重做/保存/放弃的唯一真相
     txn: Txn,
     /// **这一条命令改的是哪一格**（2026-11-02）。`wb_apply_draft` 在动手前填上，
@@ -517,6 +525,8 @@ impl Ctx {
             // 载荷根仍指真仓库：资产是只读读出来的，编辑走「暂存 + 保存时搬」
             presets.set_asset_root(&asset_root);
         }
+        /* 基准目录先算出来 —— `store` 马上要被 move 进会话 */
+        let base_root = txn::base_root(&store.root);
         let mut ctx = Self::with(presets, store)?;
         ctx.real_root = real_root;
         ctx.shadow_root = shadow_root;
@@ -524,6 +534,10 @@ impl Ctx {
          * 真仓库换上之后必须重记一次 —— 否则第一条编辑命令前后比的是真仓库、
          * 参照的却是影子戳，会被误判成"盘上被别人改过"。 */
         ctx.source_stamp = presets_source_stamp(&ctx.real_root);
+        /* **盘上已保存的那一份**（刀 1）。`settle_shadow` 刚刚把它铺好/对齐过，
+        所以这里读到的就是「打开会话时 / 上次保存后」的内容 ——
+        行上那枚 `↩ 改之前的值` 的唯一来源。 */
+        ctx.base = Presets::load_from(&base_root)?;
         if recovered {
             ctx.txn = Txn::recovered();
             tracing::warn!("影子树里有上次会话未保存的改动 —— 已按一条未保存改动呈现");
@@ -540,8 +554,13 @@ impl Ctx {
         /* 测试夹具没有影子树：两个根都指回它自己的那份预设根（镜像 = 恒等）。
         `Ctx::open` 会随后把真仓库 / 影子树填上。 */
         let root = presets.root().to_path_buf();
+        /* 「改之前的值」要读**另一份**数据。测试夹具里两份同源（镜像 = 恒等），
+        所以 `dirty` 恒假 —— 这是对的：夹具没有"保存过"这个动作。
+        `open_at` 随后会把 `base` 换成 `.draft/base/` 那一份。 */
+        let base = presets.reload()?;
         let mut ctx = Self {
             presets,
+            base,
             store,
             committed: Committed::default(),
             draft: Draft::default(),
@@ -1625,7 +1644,10 @@ pub fn wb_matrix(
     traced("wb_matrix", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.presets, &c, &d).matrix(
+            /* ★ `with_rest` 必须在这里 —— 参数台那一屏的格子就是这条命令吐出去的。
+            漏掉它 `rest_at` 与 `hit.value` 同源，`dirty` 恒假、徽章永不亮
+            （2026-10-31 ~ 11-02 作者连报三次的就是这个）。 */
+            Ok(Book::new(&ctx.presets, &c, &d).with_rest(&ctx.base).matrix(
                 &cols,
                 tab.as_deref(),
                 query.as_deref().unwrap_or_default(),
@@ -1648,7 +1670,8 @@ pub fn wb_desk(
     traced("wb_desk", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            Ok(Book::new(&ctx.presets, &c, &d).desk(
+            /* 与 `wb_matrix` 同一条理由：这一屏的格子也要带「改之前的值」 */
+            Ok(Book::new(&ctx.presets, &c, &d).with_rest(&ctx.base).desk(
                 &machine_id,
                 uid.as_deref(),
                 tab.as_deref(),
@@ -2203,6 +2226,9 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
      * 保存是全量提交（影子整份进真源），所以直接镜像即可，
      * 不存在"只同步一部分、把别的冲突一起抹掉"的问题。 */
     txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
+    /* 基准是一份**独立的内存文档**（刀 1）：盘上搬完了还得把它读进来，
+    否则「改之前的值」还停在上一次保存 —— 刚存完徽章就会一直亮着。 */
+    ctx.base = Presets::load_from(&txn::base_root(&ctx.store.root))?;
     // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
     ctx.reload_from_disk()?;
     let notices = ctx.notices_now();
@@ -2231,6 +2257,9 @@ pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
     基准也该是这一份。**放在 mirror 成功之后** —— 失败时不动基准，
     下一次打开还能认出"这里有东西没处理"。 */
     txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
+    /* 放弃之后基准就是磁盘那一份 —— 内存文档跟着换（刀 1），
+    否则放弃完徽章还亮着「改之前的值」，而那个值已经等于当前值了。 */
+    ctx.base = Presets::load_from(&txn::base_root(&ctx.store.root))?;
     ctx.txn.clear();
     /* **放弃后同样要重读内存**（2026-11-01）。
      *

@@ -231,6 +231,9 @@ export default function ParamDetail({
   const layerRow = (layerUid: string | null) => {
     const cell = cellAt(layerUid)
     if (!cell) return null
+    /* 「改之前的值」：盘上钉着用 `rest`，盘上没钉退到出厂 `restDefault`。
+       两者都空才是"没有可回的值"（见 `Cell.restDefault` 的注）。 */
+    const before = cell.rest ?? cell.restDefault ?? null
     const on = cell.editable
     const isCur = layerUid === uid
     /* 「挂回继承」之后落到哪一层：版本层 → 机型基底那格；基底 → 出厂默认 */
@@ -263,14 +266,17 @@ export default function ParamDetail({
                 点它 = 把这层写回**盘上钉着的值**（`cell.rest`）；右边那枚 `↶`
                 是"挂回继承"（写 null 删键）—— 两条语义不同，两枚并存。
               */}
-              {cell.dirty && cell.rest !== null && (
+              {cell.dirty && before !== null && (
                 <button
                   type="button"
                   className={s.pRevert}
-                  data-tip={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复默认」）`}
-                  onClick={() => onWriteLayer(layerUid, String(cell.rest))}
+                  data-tip={`恢复修改前的值：${String(before)}（这一层保存前是多少，不是「恢复默认」）`}
+                  onClick={() =>
+                    /* 盘上本来钉着 ⇒ 写回那个值；盘上没钉 ⇒ 写 null 删键挂回继承 */
+                    onWriteLayer(layerUid, cell.rest === null ? null : String(cell.rest))
+                  }
                 >
-                  ↩ {String(cell.rest)}
+                  ↩ {String(before)}
                 </button>
               )}
               {/* form="row"：与中间列表**同一个控件形态**（步进器、分段、开关长相一致） */}

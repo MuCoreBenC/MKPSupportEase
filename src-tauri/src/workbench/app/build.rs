@@ -133,6 +133,9 @@ pub(super) fn book_with_probe<'a>(
     probe: &'a dyn Fn(&str) -> Option<String>,
 ) -> Book<'a> {
     Book::new(presets, committed, draft)
+        /* 「改之前的值」读盘上已保存那一份，**不是**编辑树（刀 1）。
+        参数台 / 版本详情 / 批量抽屉的 `↩` 都从这条路径拿数。 */
+        .with_rest(&ctx.base)
         .with_renderer(probe)
         .with_product_root(ctx.real_root.clone())
 }

@@ -120,6 +120,15 @@ pub struct Book<'a> {
     ///
     /// **必须能分开**：`Book` 常读影子树，而产物写在真仓库。见 [`Self::product_bytes`]。
     product_root: std::path::PathBuf,
+    /// 「改之前的值」从哪一份数据读（2026-11-02 刀 1）。
+    ///
+    /// **`None` = 退回 `self.presets`**，也就是「读到的就是当前树」。这在生产路径上
+    /// 等价于徽章永不亮 —— 2026-10-31 起的病就是这么来的：会话的 `presets` 指影子树，
+    /// 编辑先把值写进去、`rest_at` 再从同一棵树读，两者必然相等。
+    ///
+    /// 生产路径必须用 [`Self::with_rest`] 指到**盘上已保存那一份**（`Ctx::base`）。
+    /// 不指不是「兼容旧行为」，是「这一屏本来就不需要改之前的值」（如生成预演）。
+    rest_base: Option<&'a Presets>,
 }
 
 impl<'a> Book<'a> {
@@ -180,7 +189,18 @@ impl<'a> Book<'a> {
             renderer: None,
             // 默认：产物与源同根（测试 / 独立使用时就是这个形状）
             product_root: presets.root().to_path_buf(),
+            rest_base: None,
         }
+    }
+
+    /// 指定「改之前的值」读哪一份数据 —— **生产路径必须调**（见字段文档）。
+    ///
+    /// 语义：`base` 是**盘上已保存的那一份**（`Ctx::base`，打开工作台时的快照，
+    /// 保存成功后推进）。它与 `self.presets`（编辑树）必须是两份数据，
+    /// 否则 `rest_at` 与当前值同源，徽章永远不会亮。
+    pub fn with_rest(mut self, base: &'a Presets) -> Self {
+        self.rest_base = Some(base);
+        self
     }
 
     /// 装上"这一版现在会渲染成什么"的探针（判「待更新」用；见字段文档）。
@@ -902,11 +922,7 @@ impl<'a> Book<'a> {
             origin_label: Some(w::origin_label(hit.origin).to_owned()),
             origin_explain: Some(w::origin_explain(hit.origin).to_owned()),
             own,
-            // 改动还在草稿里 —— 界面用蓝色描边标它，不换底色（doc §7 视觉规范）
-            dirty: self
-                .draft
-                .pending(col.level, &col.key_of_level(), key)
-                .is_some(),
+            dirty: self.dirty_of(col, key, Some(hit.value), own),
             editable: blocked.is_empty() && !deprecated,
             reason: if !blocked.is_empty() {
                 Some(w::disabled::BLOCKED_BY_CONDITION.to_owned())
@@ -924,19 +940,80 @@ impl<'a> Book<'a> {
             diff_tip: None,
             raw: hit.value.clone(),
             rest: self.rest_at(col, key),
+            rest_default: self.rest_default_at(key),
             deprecated,
             dead_choices,
         }
+    }
+
+    /// 这一行的**当前值是不是与盘上已保存那一份不一样**。
+    ///
+    /// # 这条判据的历史（值得留着，因为它是本报告的病历）
+    ///
+    /// 最初判 `draft.pending(...)` —— 那是「改动还在内存草稿里」。可 2026-10-31 起
+    /// 值编辑**立刻写进影子树**、草稿随即清空（`wb_apply_draft` 里
+    /// `ctx.draft = Draft::default()`），于是这个判据恒为 `false`。
+    ///
+    /// 后来改成「算出来的值 vs `rest_at`」，但那时 `rest_at` 与 `hit.value`
+    /// **读的是同一棵树**（会话的 `presets` 指影子），两者必然相等 ⇒ 仍然恒 `false`。
+    /// 作者看到的就是「徽章闪一秒就消失」「改成 65 根本没出现」。
+    ///
+    /// 现在 `rest_at` 读的是 `rest_base`（盘上已保存那一份，见 [`Self::rest`]），
+    /// 两份数据真的不同源了，这条判据才成立。
+    ///
+    /// 盘上**没钉**时不能只靠值判：「算出来的值」永远有值（出厂默认也是一个值），
+    /// 那样整页工厂默认的格子会全亮。改过没有的真相是**这一层有没有自己钉上**
+    /// （`own`，来自 `layers.has_own`）—— 钉了才算改。
+    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, now: Option<&Value>, own: bool) -> bool {
+        /* 还在草稿里（值那套老路径 / 结构编辑）—— 先认这一条，别让判据退化 */
+        if self
+            .draft
+            .pending(col.level, &col.key_of_level(), key)
+            .is_some()
+        {
+            return true;
+        }
+        match (now, self.rest_at(col, key)) {
+            (None, None) => false,
+            (Some(now), Some(rest)) => now != &rest,
+            // 盘上没钉着它：算出来的值来自继承 / 出厂默认，只有「这一层现在自己钉上了」
+            // 才说明用户改过。反过来（原来钉着、现在算不出来）不算改 ——
+            // 那多半是「这台机型没有这一项」，标脏只会骗人。
+            (Some(_), None) => own,
+            (None, Some(_)) => false,
+        }
+    }
+
+    /// 「改之前的值」该读哪一份数据。
+    ///
+    /// 指定了 `rest_base` 就读它（生产路径：盘上已保存那一份 = `Ctx::base`）；
+    /// 没指定就退回 `self.presets` —— 那等于「读到的就是当前树」，
+    /// `rest_at` 与本格当前值必然相等，徽章不会亮。**这不是兼容旧行为**，
+    /// 是「这一屏不需要改之前的值」时的一个诚实默认（如生成预演）。
+    fn rest(&self) -> &Presets {
+        self.rest_base.unwrap_or(self.presets)
     }
 
     /// 这一列**盘上**钉着的值（草稿不算）。`None` = 这一层没钉着它 ——
     /// 界面上的「恢复修改前的」要据此写 `null` **删键**、让它挂回继承，
     /// 而不是写回一个值（写回值会把继承钉死，那是另一回事）。
     fn rest_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
-        let p = self.presets.registry.param(key)?;
+        let p = self.rest().registry.param(key)?;
         p.machine_variants
             .get(&variant_key(col.level, &col.key_of_level()))
             .cloned()
+    }
+
+    /// `rest` 为 `None` 时，「改之前的值」退到哪一格 = 参数的出厂值。
+    ///
+    /// 例子（作者实测的那一格）：`A1:STANDARD` 的 `toolhead.speed_limit` 在盘上是
+    /// **空表**（2026-10-06 的注：同值副本没有信号），出厂 70 来自 `default_value`。
+    /// 把 70 改成 65 之后要看到的 `↩ 70` 就取这一格。
+    fn rest_default_at(&self, key: &str) -> Option<Value> {
+        self.rest()
+            .registry
+            .param(key)
+            .map(|p| p.default_value.clone())
     }
 
     /// 行头常驻的那一句：这一项归谁管。
@@ -1607,6 +1684,17 @@ pub struct Cell {
     /// 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
     /// 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
     pub rest: Option<Value>,
+    /// `rest` 为 `null` 时，「改之前的值」退到哪一格（= 参数的 `defaultValue`）。
+    ///
+    /// 为什么需要它：`A1:STANDARD` 上的 `toolhead.speed_limit` 在盘上**是空的**
+    /// （登记表 2026-10-06 的注：同值副本没有信号，空表是刻意的），出厂值 70 来自
+    /// `defaultValue`。作者把 70 改成 65 之后要看到的那枚 `↩ 70`，取的就是这一格。
+    ///
+    /// 它与 `rest` 一起回答两个不同的问题：
+    /// - **显示**：`rest ?? rest_default`（有值就亮徽章）；
+    /// - **还原**：`rest` 有值 ⇒ 写回那个值；`rest` 为 `null` ⇒ 写 `null` **删键**挂回继承
+    ///   （写值会把继承钉死，那是另一回事）。
+    pub rest_default: Option<Value>,
     /// 这条参数**在这台机型上**已弃用（全局或点名这台机型）。`Row.deprecated` 是
     /// 全机型口径，答不了「这一格」—— 一行跨多台机型时两者会不同
     pub deprecated: bool,
@@ -1635,6 +1723,7 @@ impl Cell {
             diff_tip: None,
             raw: Value::Null,
             rest: None,
+            rest_default: None,
             deprecated: false,
             dead_choices: Vec::new(),
         }
@@ -1717,6 +1806,137 @@ mod tests {
                 version_uid: v.map(str::to_owned),
             })
             .collect()
+    }
+
+    /* ---------- 「改之前的值」读哪一份（刀 1，2026-11-02） ----------
+     *
+     * 这三条钉住作者实测的两个现象：
+     *   70 → 65    徽章必须出现（以前根本不出现）
+     *   70 → 65 → 60  徽章仍是 70（以前显示 65，即"上一个值"）
+     */
+
+    /// `rest` 读的是**盘上那一份**，不随编辑树变化。
+    #[test]
+    fn the_rest_value_comes_from_the_saved_copy_not_the_editing_tree() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        // 盘上那一份（未编辑）
+        let base = f.presets.reload().unwrap();
+
+        let cell_of = |p: &Presets| {
+            Book::new(p, &c, &d)
+                .with_rest(&base)
+                .matrix(&cols, Some("wiping"), "", None)
+                .rows
+                .iter()
+                .find(|r| r.key == "wiping.mode")
+                .map(|r| r.cells[0].clone())
+                .expect("wiping.mode 该在 wiping 组里")
+        };
+
+        // ① 改一次
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+        let first = cell_of(&work);
+        assert!(first.dirty, "改过必须标脏（以前这里恒 false ⇒ 徽章不出现）");
+        assert_eq!(
+            first.rest, None,
+            "盘上没钉着它 ⇒ rest 为 None：还原时写 null 删键、挂回继承"
+        );
+        assert_eq!(
+            first.rest_default,
+            base.registry
+                .param("wiping.mode")
+                .map(|p| p.default_value.clone()),
+            "rest 为空时「改之前的值」退到出厂值"
+        );
+
+        // ② 再改一次：`rest` / `rest_default` 都不许跟着跑
+        let mut work2 = f.presets.reload().unwrap();
+        work2
+            .set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
+            .unwrap();
+        let second = cell_of(&work2);
+        assert_eq!(
+            second.rest, first.rest,
+            "改第二次不许让「改之前的值」变成上一个值（2026-11-02 作者实测的 65 那个 bug）"
+        );
+        assert_eq!(second.rest_default, first.rest_default);
+
+        // ③ 改回去 ⇒ 不脏，徽章消失
+        let clean = cell_of(&f.presets);
+        assert!(!clean.dirty, "没改过就是干净的");
+    }
+
+    /// 盘上**钉着**时，`rest` 就是那个钉值 —— 与编辑树无关。
+    #[test]
+    fn a_pinned_value_is_reported_even_after_the_tree_changed() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        let mut base = f.presets.reload().unwrap();
+        base.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
+            .unwrap();
+
+        let cell = Book::new(&work, &c, &d)
+            .with_rest(&base)
+            .matrix(&cols, Some("wiping"), "", None)
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.mode")
+            .map(|r| r.cells[0].clone())
+            .unwrap();
+
+        assert!(cell.dirty);
+        assert_eq!(
+            cell.rest,
+            Some(serde_json::json!("disk")),
+            "盘上钉着的那个才是「改之前的值」"
+        );
+    }
+
+    /// 不指定 `rest_base` 时退回编辑树 —— 两者同源，`dirty` 恒假。
+    ///
+    /// 这条**不是**在保护旧行为，是在钉住「为什么必须调 `with_rest`」：
+    /// 生产路径漏掉它，徽章就会退回 2026-10-31 的状态（永不亮）。
+    #[test]
+    fn without_a_saved_copy_the_rest_reads_the_editing_tree_and_never_dirties() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+
+        let cell = Book::new(&work, &c, &d)
+            .matrix(&cols, Some("wiping"), "", None)
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.mode")
+            .map(|r| r.cells[0].clone())
+            .unwrap();
+
+        assert_eq!(
+            cell.rest,
+            Some(serde_json::json!("disk")),
+            "同源 ⇒ rest 就是刚写进去的值"
+        );
+        assert!(
+            !cell.dirty,
+            "同源 ⇒ 永远不脏。这正是「徽章永不出现」的机制，with_rest 必须调"
+        );
     }
 
     /* ---------- 整本 ---------- */
