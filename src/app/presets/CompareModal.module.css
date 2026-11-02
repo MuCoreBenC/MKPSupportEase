@@ -17,12 +17,27 @@
  */
 
 /* 列身份色：轴标三色是 tokens 里现成的（校准页 / 报告页同源） */
+/*
+ * 对比表的外框（2026-11-01）：**框不滚，里面的行滚**。
+ *
+ * 原来列头是 `position: sticky` 粘在这个 `overflow: auto` 的框里 —— 与预设表
+ * 同一个毛病：WKWebView 给粘性元素单独合成，层缓存不失效就闪残影/露出底色。
+ * 现在列头是框里的普通孩子（永远在上方），行在 `.gridBody` 里滚。
+ */
 .grid {
   max-height: 56vh;
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface-solid);
+}
+
+.gridBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   overscroll-behavior: contain;
 }
 
@@ -170,9 +185,7 @@
 /* ---------- 列头（槽位） ---------- */
 
 .thead {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   display: grid;
   grid-template-columns: var(--key-w, 230px) repeat(var(--n, 2), minmax(0, 1fr)) var(--st-w, 74px);
   min-height: 46px;

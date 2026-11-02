@@ -89,6 +89,7 @@ import DeliveryFilesModal from './DeliveryFilesModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
 import HistoryModal from './HistoryModal'
+import GenHistoryModal from './GenHistoryModal'
 import s from '../c14.module.css'
 
 interface Props {
@@ -162,6 +163,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** 生成记录面板（历次生成的回执；住应用数据目录，不轮询） */
+  const [genHistoryOpen, setGenHistoryOpen] = useState(false)
   /*
    * **发布软件版本**的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
    * 「交付预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
@@ -535,13 +538,22 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
             >
               交付明细…
             </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              onClick={() => setGenHistoryOpen(true)}
+              title="历次生成的回执：每一步做了什么、写了哪些文件、失败在哪（住应用数据目录，只留最近 50 份）"
+            >
+              生成记录
+            </button>
           </div>
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
-              勾版本、按已保存的配方生成；字节没变的产物不重写。
+              勾版本、按已保存的源生成；<strong>内容没变的产物不重写</strong>
+              （时间戳跟着不动，连文件修改时间都不动）。
               <br />
-              这一列的「已生成」只比<strong>配方快照</strong>；交付文件与盘上 / 目录登记是否一致，
-              看「交付明细…」—— 两处判据不同，不是同一件事。
+              这一列的「已生成」比的是<strong>盘上那份产物</strong>与现在会算出来的那份是否一致
+              —— 时间不参与判断。交付文件与目录登记是否一致，看「交付明细…」。
             </p>
             {dirty && (
               <p className={s.note} style={{ marginTop: 0 }}>
@@ -1011,6 +1023,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
       {/* 发布历史：本地回执日志（`publish-history.json`），最新在前 */}
       {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} />}
+      {genHistoryOpen && <GenHistoryModal onClose={() => setGenHistoryOpen(false)} />}
 
       {/*
         发布软件版本的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条

@@ -153,6 +153,10 @@ export const zhCN = {
   'settings.presets.title': '预设',
   'settings.presets.copies': '复制出来的也跟着云端更新',
   'settings.presets.copiesNote': '默认关：你复制出来的那一份是独立的一份 —— 它不算「云端有新版」的那一份，点「更新」也不会动它。开着时它与原件一样，一样显示云端更新、一样会被更新到。',
+  /* 2026-11-01 作者：「我使用之后自动复制后处理脚本……只要变了那个使用的状态，
+     就从一个文件变成另外一个文件的时候，就复制那一个正在使用的后处理脚本到那个剪切板」 */
+  'settings.presets.autoCopy': '使用后自动复制后处理脚本',
+  'settings.presets.autoCopyNote': '默认关：每次「使用中」换成另一份文件时，自动把那一份的后处理命令抄进剪贴板并发一条通知 —— 回切片器直接粘贴。同一份再点一次不重复抄；撤销使用也不抄。',
   'settings.presets.readFailed': '这一档读不出来：{detail}',
   'settings.presets.saveFailed': '没保存成：{detail}',
 
@@ -168,11 +172,25 @@ export const zhCN = {
   'settings.data.uninstallRiskPre': '「卸载应用」会退出程序并删除程序本体，',
   'settings.data.uninstallRiskKeep': '您的数据会保留',
   'settings.data.uninstallRiskPost': ' —— 预设、执行记录、备份都留在原来的位置，重装回来还在。',
+  /* 同一句的"打开一并删除"那一档：字必须跟着开关走，否则界面说的与后端做的不是一回事 */
+  'settings.data.uninstallRiskWipe': '连数据一起删掉',
+  'settings.data.uninstallRiskWipePost': ' —— 预设、执行记录、备份全部清空，重装回来是一张白纸。',
   'settings.data.uninstall': '卸载应用',
   'settings.data.uninstallNote': '删掉程序本体之后就打不开了。切片器里那条后处理命令也要自己清掉，否则下次切片会报「脚本不存在」。',
   'settings.data.uninstallAction': '卸载',
   'settings.data.uninstallConfirm': '确认卸载',
   'settings.data.uninstalling': '正在卸载…',
+  /* 清理数据（2026-11-01 作者：「还有一个清理数据的，就是只清理不卸载，
+     或者卸载的时候一起清理」）—— 只删数据，程序本体留着 */
+  'settings.data.clearRisk': '「清理数据」只删数据、不删程序本体，但那一步不可撤销。',
+  'settings.data.clear': '清理数据',
+  'settings.data.clearNote': '删掉本机的预设、云端原文、执行记录、回收站与全部偏好，程序本体保留。清理完会退出程序，重新打开就是出厂状态。',
+  'settings.data.clearAction': '清理',
+  'settings.data.clearConfirm': '确认清理',
+  'settings.data.clearing': '正在清理…',
+  'settings.data.clearFailed': '没清成：{detail}',
+  'settings.data.cleanOnUninstall': '卸载时一并删除数据',
+  'settings.data.cleanOnUninstallNote': '打开后，卸载时会连预设、执行记录、备份、偏好一起删掉 —— 重装回来是一张白纸。关着则只删程序本体，数据原样留着、重装回来还在。',
   /* 设置页：最近删除（回收站，2026-10-29） */
   'settings.recovery.title': '最近删除',
   'settings.recovery.note':
@@ -820,6 +838,7 @@ export const zhCN = {
   'mock.settings.customUrl': '自定义地址',
   'mock.preview.noRunning': '浏览器预览里没有正在跑的处理 —— 不用重置',
   'mock.preview.noUninstall': '浏览器预览里不能卸载应用',
+  'mock.preview.noClearData': '浏览器预览里不能清理数据',
   'mock.cloud.bodyNotLocal': '云端当前版的正文还不在本机 —— 先把云端新版取回来，再处理这一项',
   'mock.preview.noArchive': '浏览器预览里没有归档区，读不到这份旧版本的正文 —— 用桌面版（跑过一次更新）就能看',
   'mock.user.pathRequired': '用自己那份要给出它在用户根里的路径（presets-local/…）',

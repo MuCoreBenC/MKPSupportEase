@@ -494,17 +494,26 @@ export function WorkbenchApp() {
   )
 
   /**
-   * 参数台「编辑定义」保存成功后交上来的一条。
+   * 编辑落进草稿之后，把**服务器侧那条栈**的状态拉一次。
    *
-   * 2026-10-31：撤销不再由前端记账 —— 后端把这次定义改动也记成一条事务
-   * （`wb_set_param_meta` 在编辑登记表里），这里只需要把事务状态刷一下。
+   * 2026-10-31：撤销不再由前端记账 —— 后端把每次结构编辑也记成一条事务
+   * （`EDIT_COMMANDS` 里登记的命令），这里只需要把事务状态刷一下。
+   * 参数台两种编辑都要它：改定义（`pushMeta`）与改分组（`onEditApplied`）。
    */
-  const pushMeta = useCallback((m: MetaApplied) => {
-    void m
+  const refreshTxn = useCallback(() => {
     wb.txnState()
       .then(setTxn)
       .catch(() => undefined)
   }, [])
+
+  /** 参数台「编辑定义」保存成功后交上来的一条 */
+  const pushMeta = useCallback(
+    (m: MetaApplied) => {
+      void m
+      refreshTxn()
+    },
+    [refreshTxn],
+  )
 
   /**
    * 撤销 / 重做：**服务器侧一条栈**（2026-10-31 统一编辑事务）。
@@ -513,7 +522,9 @@ export function WorkbenchApp() {
    * 删套餐）没有反向 patch。现在一律交回后端：它按影子树里那条 op 的 `before`
    * 写回去，字段 / 尺寸 / 结构 / 参数值走的是同一条路径。
    */
-  const undo = useCallback(async () => {
+  /* 两个都返回 `boolean`（真撤成了没有）：未保存改动框里的「撤销这一笔」要据此
+     决定要不要重取它自己那份 diff —— 没撤成还重取一次，等于把同一份账读两遍。 */
+  const undo = useCallback(async (): Promise<boolean> => {
     /* 飞在空中的值写先落完 —— 否则撤销撤的是"落完之前的那一半" */
     await settleAll()
     editQueue.clear()
@@ -523,14 +534,16 @@ export function WorkbenchApp() {
       setTxn(st)
       await refreshBook()
       refreshReport()
+      return true
     } catch (e) {
       fail(e)
+      return false
     } finally {
       setBusy(false)
     }
   }, [fail, refreshBook, refreshReport])
 
-  const redo = useCallback(async () => {
+  const redo = useCallback(async (): Promise<boolean> => {
     await settleAll()
     editQueue.clear()
     setBusy(true)
@@ -539,8 +552,10 @@ export function WorkbenchApp() {
       setTxn(st)
       await refreshBook()
       refreshReport()
+      return true
     } catch (e) {
       fail(e)
+      return false
     } finally {
       setBusy(false)
     }
@@ -807,6 +822,7 @@ export function WorkbenchApp() {
               return { ok: out !== null, desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
             onMetaApplied={pushMeta}
+            onEditApplied={refreshTxn}
             onSave={() => void save()}
             onUndo={() => void undo()}
             onGoto={goto}
@@ -1071,37 +1087,35 @@ export function WorkbenchApp() {
                           </button>
                         </>
                       ) : (
-                        <>
-                          <span
-                            className={`${s.tag} ${s.tagGhost}`}
-                            data-tip={
-                              dirty
-                                ? `有 ${book?.dirtyCount ?? 0} 处改动没落盘 —— 状态栏的「未保存改动」能看明细`
-                                : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
-                            }
-                          >
-                            {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
-                          </span>
-                          <button
-                            type="button"
-                            className={`${s.btn} ${s.btnSm}`}
-                            disabled={!dirty || busy}
-                            data-tip={dirty ? undefined : (words?.disabled.nothingToSave ?? '草稿是空的')}
-                            onClick={() => void discard()}
-                          >
-                            放弃
-                          </button>
-                          {/* 同上：能保存才上主色，不能保存是普通灰按钮（见上面那条注释） */}
-                          <button
-                            type="button"
-                            className={`${s.btn} ${s.btnSm} ${saveOn ? s.btnPrimary : ''}`}
-                            disabled={!saveOn}
-                            data-tip={saveOn ? (words?.save.dirty.explain ?? undefined) : saveWhy}
-                            onClick={() => void save()}
-                          >
-                            保存
-                          </button>
-                        </>
+                        /*
+                         * **一颗按钮**（2026-11-02 作者：「外面的按钮就换一下文案，变成一个，
+                         * 就是查看改动这种的吧」）。
+                         *
+                         * 原来这里是「未保存 · 放弃 · 保存」三颗：改完想知道自己改了什么，
+                         * 得先记住去状态栏找「未保存改动」；看过之后又得回到页头再按保存。
+                         * 现在三件事收进同一个框：**看 diff → 在框里放弃或保存**。
+                         *
+                         * 落盘边界没有变（框里的「保存」调的就是下面这条 `save()`）——
+                         * 变的是入口只有一个，且"看"排在"决定"之前。
+                         */
+                        <button
+                          type="button"
+                          /*
+                           * 常年是**普通灰按钮**：它现在只负责"看"，不负责落盘 ——
+                           * 真正的保存落在框里那颗（能保存才上主色）。页头这颗上主色
+                           * 会让人以为"点它就是保存"，而它其实只是打开一个框。
+                           */
+                          className={`${s.btn} ${s.btnSm}`}
+                          data-tip={
+                            dirty
+                              ? `看看这 ${book?.dirtyCount ?? 0} 处改动 —— 逐行 diff，看完在框里放弃或保存`
+                              : (words?.save.saved.explain ?? '草稿和磁盘那一份一致')
+                          }
+                          onClick={() => setHistoryOpen(true)}
+                        >
+                          {words ? words.save[dirty ? 'dirty' : 'saved'].label : '—'}
+                          {dirty ? `（${book?.dirtyCount ?? 0}）` : ''} · 查看改动
+                        </button>
                       )}
                     </div>
                   )}
@@ -1152,12 +1166,25 @@ export function WorkbenchApp() {
                       type="button"
                       className="wb-link"
                       onClick={() => {
-                        wb.reload().then(reloadBoot).catch(fail)
+                        /* 有未保存草稿时后端会拒绝（W_WB_RELOAD_DRAFTS_001）——
+                           把那条话说出来，让人自己决定，不静默丢东西。 */
+                        wb.reload()
+                          .then(reloadBoot)
+                          .catch((e) => {
+                            if (isAppError(e) && e.messageCode === 'W_WB_RELOAD_DRAFTS_001') {
+                              if (window.confirm(`${e.message}\n\n确定放弃这些未保存的改动，按磁盘上的 presets/ 重新加载吗？`)) {
+                                wb.reload(true).then(reloadBoot).catch(fail)
+                              }
+                              return
+                            }
+                            fail(e)
+                          })
                       }}
                     >
                       重新加载
                     </button>
-                    读进来，不用重启；未保存的草稿不会丢。
+                    读进来，不用重启。{' '}
+                    <strong>有未保存的改动时会先问你一句</strong>，不会悄悄丢掉。
                   </div>
                 )}
 
@@ -1238,7 +1265,32 @@ export function WorkbenchApp() {
               </span>
             </div>
 
-            <HistoryModal open={historyOpen} onClose={() => setHistoryOpen(false)} />
+            {/*
+              框里给「放弃改动 / 保存」：这两颗调的就是外壳这条 `save()` / `discard()`，
+              落盘边界仍然只有一处。保存成功后把框关掉（改完了、也没什么可看的了）；
+              放弃同理 —— 留在框里只会显示一堆已经不存在的变化。
+            */}
+            <HistoryModal
+              open={historyOpen}
+              onClose={() => setHistoryOpen(false)}
+              canSave={saveOn}
+              canDiscard={dirty && !busy}
+              busy={busy}
+              onDiscard={() => {
+                setHistoryOpen(false)
+                void discard()
+              }}
+              onSave={() => {
+                void save().then((ok) => {
+                  if (ok) setHistoryOpen(false)
+                })
+              }}
+              /* 撤销/重做走外壳这一条 —— 框里发完还要让外壳重取整本，状态栏才不会说谎 */
+              canUndo={txn?.canUndo === true}
+              canRedo={txn?.canRedo === true}
+              onUndo={undo}
+              onRedo={redo}
+            />
 
             {/* Toast：右下角，压在模态遮罩之上（遮罩开着时「已撤销」这类提示还得看得见） */}
             <div

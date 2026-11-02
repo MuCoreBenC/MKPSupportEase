@@ -43,6 +43,13 @@ export interface ModalProps {
   /** 底部一条。没有就不画那一条边 */
   footer?: ReactNode
   /**
+   * 底部那一条左边那句话（「这一笔只进草稿」这类说明）。
+   *
+   * **不要**把它塞进 `footer` 里当第一个子元素 —— 那一条是右对齐的单行 flex，
+   * 说明会被挤成一条竖窄条。见 `footLead` 那条注释。
+   */
+  footLead?: ReactNode
+  /**
    * 标题行右侧的空白位（关闭按钮左边）。确认框那种「想在头上放个小切换」的
    * （如生成前确认的「完整 / 对比」）用它，不用各自改外壳。
    */
@@ -88,6 +95,7 @@ export default function Modal({
   size = 'md',
   closeOnScrim = true,
   host = null,
+  footLead,
   closeTitle,
   shellShortcuts = false,
   onClose,
@@ -202,10 +210,40 @@ export default function Modal({
 
         <div className={s.body}>{children}</div>
 
-        {footer !== undefined && <footer className={s.foot}>{footer}</footer>}
+        {/*
+         * `footLead`：footer 里"说明那一句"该占的位置。
+         *
+         * ★ 2026-11-02 的教训：footer 是 `justify-content: flex-end` 的一行 flex，
+         *   说明文字直接当第一个子元素塞进去，它会被**挤成一条竖着的窄条**（作者截图：
+         *   「这一笔也只进 / 草稿 —— 右上 / 角「保存」才 / 落盘」四行高、按钮还斜着排）。
+         *   所以说明不许跟按钮抢同一条轴：想放说明就用这个位子，它自己吃掉左侧全部余量。
+         */}
+        {footer !== undefined && (
+          <footer className={s.foot}>
+            {footLead !== undefined && <div className={s.footLead}>{footLead}</div>}
+            {footer}
+          </footer>
+        )}
       </div>
     </div>
   )
 
-  return host !== null ? createPortal(scrim, host) : scrim
+  /*
+   * ★ 直接挂到 `host` 下**会跟同级的抽屉打平**（2026-11-02）。
+   *
+   * `host`（`FieldLayer` 里那个 `absolute inset:0` 的 div）是**平铺的父子容器**：
+   * 抽屉 `<aside>` 也是直接挂进去的，带 `z-index: 20`。两者成了兄弟 —— 遮罩虽然是
+   * 40，但 `.scrim` 没有自己的层，遇到"兄弟里有正 z"的排序照样可能被压下去；
+   * 更关键是**入 DOM 的先后**（React 按组件树顺序插入 portal）能反超 z。
+   *
+   * 所以再包一层**自建定位容器**：它自己有层（`z 60`）、自己 `inset: 0`。
+   * 抽屉在它下面（20），其余浮层（90 那层里的兄弟）不受影响 —— 这一层只装模态框。
+   */
+  const mounted = (
+    <div className={s.hostLayer}>
+      {scrim}
+    </div>
+  )
+
+  return host !== null ? createPortal(mounted, host) : mounted
 }

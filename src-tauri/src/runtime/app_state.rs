@@ -395,6 +395,17 @@ pub struct PresetPrefs {
     ///   **前端不按名字猜**（名字改了就失效）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copies_follow_cloud: Option<bool>,
+
+    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 关）。
+    ///
+    /// 开 ⇒ 只要「使用中」从一个文件换到另一个文件，就把**新的那一份**的后处理命令
+    /// 抄进剪贴板并发一条通知（作者 2026-11-01：「只要变了那个使用的状态，就从一个
+    /// 文件变成另外一个文件的时候，就复制那一个正在使用的后处理脚本」）。
+    ///
+    /// ★ 这一格**不改任何产物**：它只决定前端那一条"换完之后顺手抄一下"要不要跑。
+    ///   所以判据只有一个读者 —— `src/app/postprocess/autoCopy.ts`，后端不参与。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_copy_script: Option<bool>,
 }
 
 /// Z 轴校准停留时间的出厂值与量程（秒）。
@@ -1241,6 +1252,24 @@ pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppEr
     with_state(root, |state| {
         let mut prefs = state.presets.clone().unwrap_or_default();
         prefs.copies_follow_cloud = Some(enabled);
+        state.presets = Some(prefs);
+        Ok(enabled)
+    })
+}
+
+/// **换上一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+///
+/// 与 [`copies_follow_cloud`] 同一条口径：盘上"没选过"是 `None`，
+/// "没选过怎么解释"是后端的事，界面不拿 `null` 去猜。
+pub fn auto_copy_script(root: &Path) -> Result<bool, AppError> {
+    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(false))
+}
+
+/// 记下「使用之后自动复制后处理脚本」（整份状态原子替换，别的格一个不动）。
+pub fn set_auto_copy_script(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        let mut prefs = state.presets.clone().unwrap_or_default();
+        prefs.auto_copy_script = Some(enabled);
         state.presets = Some(prefs);
         Ok(enabled)
     })

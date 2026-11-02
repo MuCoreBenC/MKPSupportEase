@@ -5,6 +5,35 @@
  * 遮罩 `absolute inset: 0`，盖住的是宿主那一层（内容区），不是整页。
  */
 
+/*
+ * 模态框自己的定位容器。
+ *
+ * # 为什么必须自建一层
+ *
+ * 宿主是**平铺容器**：抽屉、上下文菜单、各种 popover、这个模态框，全都是它的
+ * 直接子元素、互为兄弟。兄弟之间只比 z —— `.scrim` 一旦直接挂进去，它要么
+ * 跟抽屉差 40 vs 20、要么被 React 插入 portal 的先后反超。
+ * 自建一层之后，模态框在宿主里只有**一个**代表：`.hostLayer`。
+ *
+ * # 60 只是「模态框与模态框之间」的序，不是「压得住抽屉」的凭据
+ *
+ *     抽屉 `.drawer`        20   （压过页面根那顶玻璃面 `.pPage::before` z5）
+ *     `.hostLayer`          60   ← 本层，同一个宿主里的模态框都在这层
+ *
+ * 抽屉是 z 90 那一整层（`FieldLayer .layer`）的**兄弟**，这个 60 再大也盖不住它：
+ * 同一个 `.layer` 里，portal 进来的模态框是「兄弟的后代」，后代抬不过兄弟。
+ *
+ * 所以要盖住抽屉的框（分组抽屉里的删除确认）由一个**排在 `.layer` 之后的同层容器**
+ * 承接 —— `FieldLayer` 通过 `layer.host` 交出来（见 `fieldLayerContext.ts`）。
+ * 谁在这个容器里，就天然画在抽屉之上，本文件的数一个都不用动。
+ */
+.hostLayer {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  pointer-events: auto;
+}
+
 .scrim {
   position: absolute;
   inset: 0;
@@ -133,10 +162,28 @@
 
 .foot {
   display: flex;
+  /* 按钮永远贴右；左边那句话由 `.footLead` 吃掉余量（见下） */
   justify-content: flex-end;
   gap: 6px;
+  align-items: center;
   padding: 10px 14px;
   border-top: 1px solid var(--line);
+}
+
+/*
+ * footer 左边那句说明（2026-11-02）。
+ *
+ * 不加这一条，说明文字直接当 footer 的第一个子元素时会被压成一条竖窄条：
+ * 右对齐的 flex 行里它没有 `flex-grow`，`min-width` 又是 auto 但余量是负的 ——
+ * 文字只能一行一个词地往下折。给它 `flex: 1 1 auto; min-width: 0` 之后
+ * 它拿的是**全部余量**，按钮保住自己的宽，说明自己一行。
+ */
+.footLead {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-right: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
 }
 
 [data-density='mini'] .scrim {

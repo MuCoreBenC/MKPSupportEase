@@ -322,6 +322,12 @@ let mockPostproc: PostprocPrefsWire = {}
 let mockCopiesFollowCloud = false
 
 /*
+ * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 关
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`）。
+ */
+let mockAutoCopyScript = false
+
+/*
  * **出处账**（2026-10-20）：真机那一本在用户根 `provenance.json`（`runtime::provenance`），
  * 这里用内存里的一个集合代替 —— 只记"哪几份是复制出来的"（`kind: copy` 的 `to` 那一头）。
  * 演示也要能看出"复制件不认云端"，否则浏览器里看到的样子与真机不同。
@@ -2628,6 +2634,23 @@ export const mockApi: MkpApi = {
   },
 
   /*
+   * 「使用之后自动复制后处理脚本」（2026-11-01）：与上面那条同一套口径 ——
+   * 内存镜像、回解析后的 boolean、出厂 = 关。
+   *
+   * ★ 浏览器里它**真的会生效**（换「使用中」之后抄脚本那条链是前端的），
+   *   但 preview 里没有本机可执行物与预设文件，`getPostProcessCommand` 会照实
+   *   回 "抄不了" —— 与真机上"没下载就应用"同一条路，不假装抄到了。
+   */
+  async getAutoCopyScript() {
+    return mockAutoCopyScript
+  },
+
+  async setAutoCopyScript(enabled) {
+    mockAutoCopyScript = enabled
+    return mockAutoCopyScript
+  },
+
+  /*
    * 后处理偏好（2026-10-17）：与主题同一套口径 —— 内存镜像。
    * 出厂档**照抄后端那一份**（`runtime::app_state::PostprocPrefs::resolved`），
    * 量程也照抄；这里不另发明一套默认值，否则浏览器里看到的样子会与真机不同。
@@ -2668,19 +2691,25 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 应用本体那两条（2026-10-17）。
+   * 应用本体那三条（2026-10-17 两条 / 2026-11-01 加「清理数据」）。
    *
    * `openPresetFolder` 给一个**像样的假路径**：这一行要显示"东西放哪"，
    * 空字符串会让界面画出一个没有意义的空行。
    *
-   * `uninstall` **不许在浏览器里演成功** —— 那是不可逆动作，在预览里"假装卸掉了"
-   * 比报错更糟（用户会以为真卸了）。照实抛 `NotImplementedError`。
+   * `clearAppData` 与 `uninstall` **都不许在浏览器里演成功** —— 那是不可逆动作，
+   * 在预览里"假装清掉了 / 卸掉了"比报错更糟（用户会以为真清了）。
+   * 照实抛 `NotImplementedError`。
    */
   async openPresetFolder() {
     return '/Users/you/Library/Application Support/MKPSupportEase/presets-local'
   },
 
-  async uninstall() {
+  async clearAppData() {
+    throw new NotImplementedError(t('mock.preview.noClearData'))
+  },
+
+  async uninstall(cleanData: boolean) {
+    void cleanData
     throw new NotImplementedError(t('mock.preview.noUninstall'))
   },
 

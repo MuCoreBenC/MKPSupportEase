@@ -70,6 +70,8 @@
 /* ---------- 左目录 ---------- */
 
 .side {
+  /* 高亮块（`.navGlow`）以这条目录为坐标原点 */
+  position: relative;
   flex: 0 0 216px;
   display: flex;
   flex-direction: column;
@@ -78,7 +80,33 @@
   overflow-y: auto;
 }
 
+/*
+ * 高亮块（2026-11-01）：**整条目录只有这一块**，跟着选中项上下滑 ——
+ * 原来是每行自己换底色，切章时"啪"地跳一下，作者说「背景的变化不流畅」。
+ * 位置由 TSX 的 `moveGlow` 写 inline `transform`（WAAPI 动，不是 CSS transition：
+ * WKWebView 上 transition 不播，见 `postprocess/HANDOVER.md` §4）。
+ *
+ * 左右内衬与 `.side` 的 12px 对齐（`position: absolute` 的 0 点是 padding box 边）；
+ * 高度由脚本按实测行高写，这里给的是第一帧的兜底。
+ */
+.navGlow {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  pointer-events: none;
+  will-change: transform;
+  z-index: 0;
+}
+
 .navLink {
+  /* 压在 `.navGlow` 之上（否则 abspos 的块会盖住字）；行高固定，测量才对得上 */
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -100,10 +128,11 @@
   color: var(--text-1);
 }
 
-/* 当前这一块：绿字 + 淡绿底（作者：「悬停上去的都不知道选择了哪一个」） */
+/* 当前这一块：只换**字色**（作者：「悬停上去的都不知道选择了哪一个」）——
+   底色那一块归 `.navGlow`，这里再画一层就会和滑块打架 */
 .navOn,
 .navOn:hover {
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--accent-deep);
 }
 
@@ -399,8 +428,9 @@
   border-radius: var(--r-sm);
   color: var(--text-1);
   font-size: var(--fs-body);
-  /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来） */
-  transition: background-color 0.12s ease;
+  /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来）
+   * ★ 不给过渡：悬停底色必须是**即时**的（作者 2026-11-01：「悬停的时候背景不跟手」）——
+   *   120ms 的淡入在鼠标扫过一串行时就是"底色追着手跑"。桌面软件都不这么做。 */
 }
 
 .choiceRow:hover {
@@ -542,8 +572,18 @@
 /* 分出来的那五块（后处理/校准/涂胶/预设/数据）住在自己的文件里，
    PageSettings 只给它们套了一层带 id 的 div —— 用 flow-root 兜住里面
    `.section` 的下边距（否则相邻 margin 一塌陷，块之间的 26px 就少了） */
-.main > div[data-sec] {
+.mainBody > div[data-sec] {
   display: flow-root;
+}
+
+/*
+ * 正文那一层（2026-11-01）：只为了给"点目录"的位移动画当载体 —— 平时它就是个普通块，
+ * 一点样式都不许加（`transform` 是脚本临时写的，`will-change` 也是演的时候才挂）。
+ * 刻意**不**常驻 `will-change`：那会把这整块（两千多像素高）长久栅格化成一张大位图。
+ */
+.mainBody {
+  /* 什么都不写：它只是动画的载体。**别在这里加 `position`** —— 那会改掉章节里任何
+     绝对定位东西的锚点；`transform` 只在演的那 0.5 秒里临时生效，够用了。 */
 }
 
 /*

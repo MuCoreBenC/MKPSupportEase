@@ -6,15 +6,15 @@ id = 'space_offset'
 
 [[tabs.sections.items]]
 id = 'item_0_0_1'
-paramKey = 'toolhead.offset.x'
+paramKey = "toolhead.offset.x"
 
 [[tabs.sections.items]]
 id = 'item_0_0_0'
-paramKey = 'toolhead.offset.y'
+paramKey = "toolhead.offset.y"
 
 [[tabs.sections.items]]
 id = 'item_0_0_2'
-paramKey = 'toolhead.offset.z'
+paramKey = "toolhead.offset.z"
 
 [[tabs.sections]]
 id = 'motion'
@@ -141,6 +141,13 @@ id = 'item_1_3_10'
 paramKey = 'wiping.sheath_converge_layers'
 
 [[tabs.sections]]
+id = 'custom_1'
+
+[[tabs.sections.items]]
+id = 'item_custom_1_support_extrusion_multiplier'
+paramKey = 'wiping.support_extrusion_multiplier'
+
+[[tabs.sections]]
 id = 'disk_action'
 
 [[tabs.sections.items]]
@@ -179,13 +186,6 @@ paramKey = 'wiping.user_dry_time'
 
 [[tabs]]
 id = 'glue'
-
-[[tabs.sections]]
-id = 'glue_advanced_motion'
-
-[[tabs.sections.items]]
-id = 'item_3_0_0'
-paramKey = 'wiping.support_extrusion_multiplier'
 
 [[tabs.sections]]
 id = 'glue_ironing'
@@ -377,81 +377,3 @@ paramKey = 'wiping.disable_timelapse'
 id = 'internal'
 sections = []
 
-[[tabs]]
-id = 'settings'
-
-[[tabs.sections]]
-component = 'appearance-section'
-id = 'appearance'
-items = []
-layout = 'component'
-width = 'full'
-
-[[tabs.sections]]
-component = 'update-card'
-id = 'update'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'interaction-card'
-id = 'interaction'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'slicer-card'
-id = 'slicer'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'post-process-card'
-id = 'post_process'
-items = []
-layout = 'component'
-width = 'half'
-
-# 2026-10-20：`component = 'calibration-card'` 那一节原本用 id = 'calibration'，
-# 与「更多」下装参数的那一节撞名 —— 同一个 id 两个页签归属，工作台空组、客户端单列。
-# 作者定：客户端不要多这一个，XY/Z 校准模式统一归到「更多 → 校准」。
-# 设置页要不要那张卡片是另一件事，要的话得换一个新 id。
-
-[[tabs.sections]]
-component = 'bed-glue-card'
-id = 'bed_glue'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'cache-management-card'
-id = 'cache_management'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'data-maintenance-card'
-id = 'data_maintenance'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'uninstall-cleanup-card'
-id = 'uninstall_cleanup'
-items = []
-layout = 'component'
-width = 'half'
-
-[[tabs.sections]]
-component = 'performance-card'
-id = 'performance'
-items = []
-layout = 'component'
-visible = 'DEV'
-width = 'half'

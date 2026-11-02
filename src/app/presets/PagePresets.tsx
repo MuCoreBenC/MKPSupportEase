@@ -258,22 +258,10 @@ import type {
 import { usePresetData, usePresetPage } from './usePresetData'
 /* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
 import { splitHeader, tomlTokens } from './tomlPaint'
+/* 「滚到某一行」：全仓那一套（演 transform），见那个文件的头注 */
+import { glideIntoView } from '../../components/scroll/glide'
 import s from './PagePresets.module.css'
 
-
-/**
- * 行所在的**滚动容器**：往上找第一个 `overflow-y: auto | scroll` 的祖先，到 `root` 为止。
- *
- * 为什么要有这一句：定位闪光那块 div 住在页面根（`.locateFlash`），而真正滚动的是表格
- * 里那一层 `.wrap` —— 调用处拿不到它的类名（CSS Modules 的哈希），只能按"谁在滚"找。
- */
-function scrollingParentOf(el: HTMLElement, root: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p !== null && p !== root; p = p.parentElement) {
-    const oy = getComputedStyle(p).overflowY
-    if (oy === 'auto' || oy === 'scroll') return p
-  }
-  return null
-}
 
 interface Props {
   density: Density
@@ -593,8 +581,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     rootRef.current = el
     setPageEl(el)
   }
-  /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
-  const flashRef = useRef<HTMLDivElement>(null)
   /** 那一趟的"跟着滚动走"监听，下一次定位 / 动画结束时撤掉（见 `flashRow`） */
   const stopFlash = useRef<(() => void) | null>(null)
 
@@ -1325,89 +1311,47 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
 
   /*
-   * 「定位」的闪光本体：把目标行滚到视口中央，然后盖上 overlay 亮一下再退光。
+   * 「定位」：把目标行滚到视口中央，然后**这一行自己**亮一下绿。
+   *
+   * ★ 2026-11-01（作者看截图定的）：「这个绿色的不是背景的，你把它做成背景的，这样就
+   *   不会出现跟随的情况了 —— 现在两个滚动速度不一样，绿条跟不上列表」。
+   *   那块绿原来是页面根上一块绝对定位的 div，每帧量行的位置再摆过去；浮层与列表是
+   *   两条独立的运动，滚起来必然差半拍。现在它是 `tr` 自己的底色（`data-flash`，
+   *   见 `PresetTable.module.css`）——**行怎么动它怎么动**，跟不跟得上这件事不存在了。
+   *   顺带省掉一条 scroll 监听 + 一条 rAF。
+   *
+   * ★ 底色用 `data-flash` 两段（`in` / `out`）+ CSS `transition` 淡，**不用 @keyframes**：
+   *   这张折叠边框表早先在行背景上跑关键帧，适配缩放下合成层缓存会留旧帧，行里多出
+   *   一条若隐若现的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。
+   *
    * 两个入口共用（状态条的「定位已应用」与来源格的「复制自 X → 定位」）。
-   *
-   * 闪烁本体是 `s.locateFlash` 那块**盖在行上的普通 div**：现量现设位置，
-   * Web Animations API 淡出（1.8s、先停在 55%）后隐藏。**不许**给行本身挂 class
-   * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
-   * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
-   * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
-   *
-   * ★ 2026-10-30（作者：「定位之后的这个绿色背景没有跟随着移动，很假，直接贴上去的，
-   *   很快滚一下列表就发现它错开了」）：这块 div 不再"定死一次"——
-   *   列表一滚就按行当前位置重摆（滚动事件里每帧对一次，1.8s 后随动画一起撤），
-   *   行滚出列表可视区就先藏起来（否则会画到表头上）。
    */
+  const FLASH_IN_MS = 160
+  const FLASH_HOLD_MS = 1000
+  const FLASH_OUT_MS = 620
+
   const flashRow = (row: HTMLElement) => {
-    const root = rootRef.current
-    const overlay = flashRef.current
-    if (!root || !overlay) return
+    /* 滚过去走全仓那一套（演 transform，见 `components/scroll/glide`）。
+       这里**不再需要 onFrame 跟随** —— 绿色就是行的底色。 */
+    glideIntoView(row, { align: 'center' })
 
-    /* 上一趟的跟随先撤（连着定位两行时不能留两条监听） */
+    /* 上一趟没退完的（连着定位两行）：先摘干净，否则上一层还挂着 */
     stopFlash.current?.()
+    row.dataset.flash = 'in'
+    const t1 = window.setTimeout(() => {
+      row.dataset.flash = 'out'
+    }, FLASH_IN_MS + FLASH_HOLD_MS)
+    const t2 = window.setTimeout(() => {
+      delete row.dataset.flash
+      stopFlash.current = null
+    }, FLASH_IN_MS + FLASH_HOLD_MS + FLASH_OUT_MS)
 
-    /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
-    row.scrollIntoView({ block: 'center' })
-
-    /* 位置按"行在 root 里的坐标"算 —— 这块 div 的定位祖先是页面根 */
-    const place = () => {
-      const rr = row.getBoundingClientRect()
-      const pr = root.getBoundingClientRect()
-      overlay.style.left = `${rr.left - pr.left}px`
-      overlay.style.width = `${rr.width}px`
-      overlay.style.top = `${rr.top - pr.top}px`
-      overlay.style.height = `${rr.height}px`
-    }
-
-    /*
-     * **跟着滚动走**：行在 `.wrap` 里滚、这块 div 不滚，闪的 1.8s 里一滚就露馅。
-     * 滚一次对一次（rAF 合并）；行离开列表可视区就藏 —— 那块 div 不受 `.wrap` 的
-     * `overflow` 裁切，不藏就会画到表头 / 页脚上。回到视野里再显示。
-     */
-    const scroller = scrollingParentOf(row, root)
-    const follow = () => {
-      place()
-      const rr = row.getBoundingClientRect()
-      const sr = scroller?.getBoundingClientRect()
-      const out = sr !== undefined && (rr.bottom <= sr.top || rr.top >= sr.bottom)
-      overlay.style.display = out ? 'none' : 'block'
-    }
-    let raf = 0
-    const onMove = () => {
-      if (raf !== 0) return
-      raf = window.requestAnimationFrame(() => {
-        raf = 0
-        follow()
-      })
-    }
-    const stop = () => {
-      scroller?.removeEventListener('scroll', onMove)
-      window.removeEventListener('resize', onMove)
-      if (raf !== 0) window.cancelAnimationFrame(raf)
-      raf = 0
+    stopFlash.current = () => {
+      window.clearTimeout(t1)
+      window.clearTimeout(t2)
+      delete row.dataset.flash
       stopFlash.current = null
     }
-    scroller?.addEventListener('scroll', onMove, { passive: true })
-    window.addEventListener('resize', onMove)
-    stopFlash.current = stop
-
-    place()
-    overlay.style.display = 'block'
-    overlay.getAnimations().forEach((a) => a.cancel())
-    overlay
-      .animate(
-        [
-          { opacity: 1 },
-          { opacity: 1, offset: 0.55 },
-          { opacity: 0 },
-        ],
-        { duration: 1800, easing: 'ease-out' },
-      )
-      .onfinish = () => {
-        overlay.style.display = 'none'
-        stop()
-      }
   }
 
   /*
@@ -4776,10 +4720,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           />
         </div>
       </FieldLayer>
-
-      {/* 「定位」的闪烁层：盖在被定位那一行上的普通 div，位置尺寸由 locateApplied
-          现量现设。为什么不闪行本身 —— 见 PagePresets.module.css 的 .locateFlash。 */}
-      <div ref={flashRef} className={s.locateFlash} />
     </div>
   )
 }

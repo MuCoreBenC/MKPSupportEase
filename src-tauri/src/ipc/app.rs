@@ -1,13 +1,22 @@
-//! **应用本体这一层**（2026-10-17）：打开预设目录、卸载。
+//! **应用本体这一层**（2026-10-17）：打开预设目录、清理数据、卸载。
 //!
-//! 两条命令都不碰业务数据：
+//! 三条命令里前两条只扔不建：
 //!   · [`open_preset_folder`] 只是把 Finder / 资源管理器喊出来（一个字节都不读）
-//!   · [`uninstall`] 删的是**程序本体**，用户数据（`AppData` 那几棵树）一个不碰
+//!   · [`clear_app_data`] 删的是**用户数据**（`AppData` 那一整棵树），程序本体留着
+//!   · [`uninstall`] 删的是**程序本体**，默认**一个字节的数据都不碰**
+//!     （`clean_data` 明确点名时才连数据一起删）
 //!
 //! 为什么单开一个模块：`ipc/prefs.rs` 管的是"用户点出来的一档偏好"，
-//! `ipc/catalog.rs` 管"数据从哪儿来"；这两条既不是偏好也不是数据源 ——
+//! `ipc/catalog.rs` 管"数据从哪儿来"；这几条既不是偏好也不是数据源 ——
 //! 它们是**进程与安装包自己**的事。混进去会让"这条命令要不要联网/碰文件"这个问题
 //! 又得靠通读代码来回答。
+//!
+//! # 为什么清理 / 卸载之后都要 `exit`（2026-11-01）
+//!
+//! 删的那棵树里有 `run/app-state.json`（使用中指针、主题、偏好全在里面）。
+//! 进程要是继续活着，界面上那个"当前状态"仍是删之前的那一份，
+//! 下一次任何写（换主题、挪窗口）就会把刚清掉的文件原样写回去 ——
+//! 用户看到"清了个寂寞"。所以**清完就退**：重新打开才是一张白纸。
 
 use postprocess::diag::messages;
 
@@ -58,6 +67,78 @@ fn reveal_dir(app: &AppHandle, dir: &Path) -> Result<(), AppError> {
         .map_err(|e| AppError::io(messages::text("ui.ipc.app.031", &[])).with_detail(e.to_string()))
 }
 
+/// **清理数据**（2026-11-01，作者：「还有一个清理数据的，就是只清理不卸载」）：
+/// 把 `AppData` 那一整棵树删掉（预设、云端原文、归档、回收站、执行记录、备份账、
+/// 状态文件、日志），**程序本体留着**，然后退出。
+///
+/// # 为什么连根目录一起删
+///
+/// 那棵树里没有一个是"程序本体"：`user/presets-local`（用户预设）、`content`（云端原文）、
+/// `recovery`（回收站）、`run`（使用中指针 + 偏好 + 历史）、`gcode_history`（执行归档）、
+/// `catalog.json`（目录副本）。留着其中任何一样，"清理"就是不彻底 —— 用户重开发现
+/// 使用中指针还指着一份已经不存在的预设，比清空更难解释。
+///
+/// # 与「卸载」的分工
+///
+/// 卸载删程序本体、默认不碰数据；这一条删数据、不碰本体。两条都**清完就退**。
+///
+/// # 失败
+///
+/// 原样报错带码（`E_SYS_CLEAR_DATA_001`）—— 删了一半比完全不删更难查，
+/// 所以不静默、也不假装成功。
+#[tauri::command]
+pub async fn clear_app_data(app: AppHandle) -> Result<(), AppError> {
+    traced("clearAppData", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        remove_data_root(&root)?;
+        app.exit(0);
+        Ok(())
+    })
+}
+
+/// 删掉数据根（内部根 + 它下面那棵 `user/`）。
+///
+/// ★ Windows 上日志文件正被本进程开着，`remove_dir_all` 会失败 ⇒ 交给一个 detach 的
+///   `cmd`：等两秒（那时我们已经 `exit`）、再删。与卸载那条同一个手法。
+fn remove_data_root(root: &Path) -> Result<(), AppError> {
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("cmd")
+            .args([
+                "/c",
+                "timeout",
+                "/t",
+                "2",
+                "/nobreak",
+                ">nul",
+                "&",
+                "rmdir",
+                "/s",
+                "/q",
+                &root.display().to_string(),
+            ])
+            .spawn()
+            .map_err(|e| {
+                AppError::io(messages::text("ui.ipc.app.038", &[]))
+                    .with_detail(format!("E_SYS_CLEAR_DATA_001 {e}"))
+            })?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        /* 不在就先建一个空的：删"一棵不存在的树"不该报错，但也不能什么都不做 —
+        让调用方看到同一个落点确实空着 */
+        if !root.exists() {
+            return Ok(());
+        }
+        std::fs::remove_dir_all(root).map_err(|e| {
+            AppError::io(messages::text("ui.ipc.app.038", &[]))
+                .with_detail(format!("E_SYS_CLEAR_DATA_001 {}：{e}", root.display()))
+        })
+    }
+}
+
 /// **卸载应用**：删程序本体，然后退出。
 ///
 /// # 它到底做什么
@@ -68,22 +149,28 @@ fn reveal_dir(app: &AppHandle, dir: &Path) -> Result<(), AppError> {
 /// - Windows：起一个 detach 的 `cmd`，等我们退出之后再删（正在运行的 exe 删不掉）。
 /// - 其他平台：如实报"没做"，**不假装卸掉了**。
 ///
-/// # 用户数据怎么办
+/// # 用户数据怎么办（2026-11-01 改口）
 ///
-/// **一个不碰**。`AppData` 那几棵树（预设、执行记录、备份）原样留着 ——
-/// 这与界面上那句"用户数据保留"必须一致，否则用户重装回来发现东西全没了。
-/// 真想连数据一起清，那是另一件事（本轮明确不做）。
+/// `clean_data` 不点名时**一个不碰**（`AppData` 那几棵树原样留着，重装回来还在）；
+/// 点名了就先清数据再删本体 —— 界面上那颗开关说的就是这一句，
+/// 两条路必须与界面上那几个字一致，否则用户重装回来会发现东西没了 / 还在。
 ///
 /// # 失败
 ///
 /// 原样报错，带错误码（`E_SYS_UNINSTALL_001`）—— 这是不可逆动作，
 /// 静默失败会让用户以为已经卸了、结果下次切片器还在调它。
 #[tauri::command]
-pub async fn uninstall(app: AppHandle) -> Result<(), AppError> {
+pub async fn uninstall(app: AppHandle, clean_data: bool) -> Result<(), AppError> {
     traced("uninstall", |_| {
         let exe = std::env::current_exe().map_err(|e| {
             AppError::io(messages::text("ui.ipc.app.032", &[])).with_detail(e.to_string())
         })?;
+
+        /* 删了数据还要接着删本体：数据那一步失败就整次停下（不假装卸干净了） */
+        if clean_data {
+            let root = crate::fsx::paths::internal_root(&app)?;
+            remove_data_root(&root)?;
+        }
 
         #[cfg(target_os = "macos")]
         {

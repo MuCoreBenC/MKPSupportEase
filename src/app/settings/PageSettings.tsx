@@ -70,7 +70,14 @@
  * `updateBusy / update / updateErr`，四态一律由真检查给。
  */
 
-import { useCallback, useEffect, useRef, useState, type MouseEvent } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type MouseEvent,
+} from 'react'
 /* 系统文件选择框：挑"备份放哪个文件夹"与"恢复哪一份 zip" —— 位置一律由用户点名 */
 import { open } from '@tauri-apps/plugin-dialog'
 
@@ -120,6 +127,8 @@ import { useCatalog } from '../home/useCatalog'
 import { Btn } from '../ui/Controls'
 /* 左目录那 12 枚图标走全站同一张 path 表（`theme` 是 2026-10-30 为「外观」加的） */
 import Icon, { type IconName } from '../../components/Icon'
+/* 「滚到某一处」的唯一实现（2026-11-01）：全仓的定位动画都走它，见那个文件的头注 */
+import { glideTo } from '../../components/scroll/glide'
 import s from './PageSettings.module.css'
 
 /*
@@ -145,6 +154,317 @@ const NAV: { id: string; key: StringKey; icon: IconName }[] = [
   { id: 'recovery', key: 'settings.recovery.title', icon: 'history' },
   { id: 'advanced', key: 'settings.advanced.title', icon: 'params' },
 ]
+
+/* ---------------------------------------------------------------------------
+ * 左目录（2026-11-01 第二次改：**单独一个组件**）
+ *
+ * ★ 为什么必须拆出去：`active` 原来住在 `PageSettings` 里，每越过一章的边界就要把
+ *   这一整页（十几章、几十个控件、几颗自绘下拉）重新 render 一遍 —— 滚动路径上
+ *   每隔三四百像素顿一下，就是作者说的「右侧卡卡的」。拆出来之后滚到哪儿只重画
+ *   这 13 行，正文一个字节都不参与。
+ *
+ * ★ 滚动路径上**一个 DOM 都不读**：章节顶点只在布局真变了时量一次
+ *   （挂载 / `ResizeObserver` / 窗口 resize），滚动时纯算术 + 一帧最多一次 rAF。
+ *
+ * ★ 到底 ⇒ 直接算最后一章。末几章（最近删除 / 高级设置）比一屏矮，怎么滚都越不过
+ *   那条"顶线" ⇒ 不给这条规则它们永远不亮（作者：「有一些已经滚到底了，根本就
+ *   滚不到了，那它那个背景就不可能亮了」）。
+ *
+ * ★ 高亮是**目录里唯一一块底**（`.navGlow`）滑过去，不是每行各换各的底色。
+ * ------------------------------------------------------------------------- */
+/*
+ * 高亮块滑动时长（ms）—— 两档，别合成一个数：
+ *   `GLOW_SLIDE_MS` 滚动驱动：**短**。长了就是"高亮慢半拍才追上来"（作者的原话）；
+ *     跨多行时每多一行 +45ms（最多 `GLOW_SLIDE_MAX_MS`），中间那几行要看得到滑过。
+ *   `GLOW_CLICK_MS` 点目录：**长**，他要看得见"滑过去"这件事（否则点了就换块底色）。
+ */
+const GLOW_SLIDE_MS = 130
+const GLOW_SLIDE_MAX_MS = 300
+const GLOW_CLICK_MS = 260
+
+function SideNav({
+  boxRef,
+  contentRef,
+  hidden,
+  version,
+}: {
+  /* 右栏那个滚动容器（页面 `<main>` 上那个 ref） */
+  boxRef: { current: HTMLElement | null }
+  /* 右栏里包着全部章节的那一层（点目录的位移动画挂在它身上） */
+  contentRef: { current: HTMLElement | null }
+  /* 被搜索筛掉的章节 id：不进目录，也不参与"滚到哪" */
+  hidden: string[]
+  /* 页脚那行版本号 */
+  version: string
+}) {
+  const tr = useT()
+  const sideRef = useRef<HTMLElement | null>(null)
+  const glowRef = useRef<HTMLSpanElement | null>(null)
+  /* 高亮块现在停在哪一行（px）：下一次动画要从"眼睛看到的那个位置"出发，不从 state 猜 */
+  const glowYRef = useRef<number | null>(null)
+  /* 这一次 `active` 变了高亮块用多久滑过去（**0 = 直接落位**）。两档：
+     滚动驱动给短的（要跟手），点目录给长的（要看得见起承转合）。 */
+  const glowMsRef = useRef(0)
+  /* 当前亮着的是哪一项（给 spy 判"跨了几章"用；`active` 在 effect 里是旧闭包） */
+  const activeRef = useRef<string>('upd')
+  /* 自己跑的那段滚动（点目录）期间屏蔽 spy —— 高亮已经按点击定案，路上不许被抢回去 */
+  const lockRef = useRef(0)
+  /* 点完目录之后停住的那个位置：位置没动就一直按点击那一项亮（到底的章节按线算不出来） */
+  const holdTopRef = useRef<number | null>(null)
+  /* 正在跑的那段滚动（卸载 / 连点第二下时先叫停） */
+  const glideRef = useRef<(() => void) | null>(null)
+
+  const [active, setActive] = useState<string>('upd')
+
+  /*
+   * 目录每一行的几何（相对 `.side` 的 y / 行高）。**只在布局变时量一次**。
+   *
+   * ★ 为什么不每次现读 `offsetTop`：那是一次**强制同步排版**，而高亮换行恰好发生在
+   *   用户滚动的帧里 —— 每跨一章就在滚动帧里插一次排版 + 一次样式重算，作者看到的
+   *   就是「我上下滚的时候，左边那个不跟手、不连贯」（2026-11-01）。
+   */
+  const rowsRef = useRef<Map<string, { y: number; h: number }>>(new Map())
+
+  const measureRows = useCallback(() => {
+    const side = sideRef.current
+    const next = new Map<string, { y: number; h: number }>()
+    if (side !== null) {
+      side.querySelectorAll<HTMLElement>('[data-nav]').forEach((el) => {
+        const id = el.dataset.nav
+        if (id !== undefined) next.set(id, { y: el.offsetTop, h: el.offsetHeight })
+      })
+    }
+    rowsRef.current = next
+  }, [])
+
+  /* 把高亮块挪到某一项下面（`instant` = 落位不许动，挂载 / 搜索筛完 / 窗口变宽用） */
+  const moveGlow = useCallback((id: string, instant: boolean) => {
+    const side = sideRef.current
+    const glow = glowRef.current
+    if (side === null || glow === null) return
+    let row = rowsRef.current.get(id)
+    if (row === undefined) {
+      /* 第一次 / 搜索刚筛完（尺还是旧的）才走到这儿 —— 平时滚动一次 DOM 都不读 */
+      measureRows()
+      row = rowsRef.current.get(id)
+    }
+    /* 搜索把这一项也筛掉了 ⇒ 不挂一块底在空处（目录里已经没有它能停的行） */
+    glow.style.display = row === undefined ? 'none' : ''
+    if (row === undefined) return
+
+    const { y, h } = row
+    /* 先读后写：这两读放在任何写之前，才不会把这一帧逼出第二次排版 */
+    const sideTop = side.scrollTop
+    const sideH = side.clientHeight
+    const from = glowYRef.current
+    glowYRef.current = y
+    const to = `translate3d(0, ${y}px, 0)`
+    /* 窗口矮、目录自己会滚的时候，把选中项推进视野（否则高亮滑到看不见的地方去了） */
+    if (y < sideTop) side.scrollTop = y
+    else if (y + h > sideTop + sideH) side.scrollTop = y + h - sideH
+    /* 终点写进样式 ⇒ 动画跑完自然就停在它上面，不用 `fill: forwards`（那个会把层永久按住） */
+    glow.style.height = `${h}px`
+    glow.style.transform = to
+
+    const ms = glowMsRef.current
+    glowMsRef.current = 0
+    if (instant || ms <= 0 || from === null || typeof glow.animate !== 'function') return
+    /* 连点两下：起点取"正在半路上的那个位置"，不然会先弹回旧终点再滑走 */
+    let start = from
+    const running = glow.getAnimations()
+    if (running.length > 0) {
+      const now = getComputedStyle(glow).transform
+      running.forEach((a) => a.cancel())
+      if (now !== 'none') {
+        try {
+          start = new DOMMatrixReadOnly(now).m42
+        } catch {
+          /* 量不出来就用旧的终点（顶多滑得不那么顺，不许因此不滑） */
+        }
+      }
+    }
+    if (Math.abs(y - start) < 0.5) return
+    /* 动效一律 WAAPI（WKWebView 上 CSS transition 不播，见 `postprocess/HANDOVER.md` §4）；
+       曲线"起步快、尾巴长"——滚动里那几次要**短**，不然就是"高亮慢半拍追上你" */
+    glow.animate([{ transform: `translate3d(0, ${start}px, 0)` }, { transform: to }], {
+      duration: ms,
+      easing: 'cubic-bezier(0.32, 0.72, 0.12, 1)',
+    })
+  }, [measureRows])
+
+  /* 高亮块落位；搜索筛掉几章之后行位会整体上移 ⇒ `hidden` 变了要重量、也要重新落位 */
+  useLayoutEffect(() => {
+    activeRef.current = active
+  }, [active])
+
+  useLayoutEffect(() => {
+    measureRows()
+    moveGlow(activeRef.current, true)
+  }, [hidden, measureRows, moveGlow])
+
+  useLayoutEffect(() => {
+    moveGlow(active, glowYRef.current === null)
+  }, [active, moveGlow])
+
+  /* 窄窗（≤900）左目录整块 `display:none` ⇒ 那时量到的行高是 0；拉宽回来要重量 + 重新落位 */
+  useEffect(() => {
+    const onResize = () => {
+      measureRows()
+      moveGlow(activeRef.current, true)
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [measureRows, moveGlow])
+
+  useEffect(() => {
+    const box = boxRef.current
+    if (box === null) return
+
+    /* 各章在**内容坐标**里的顶点。布局变一次量一次，滚动时一个 DOM 都不读 */
+    let marks: { id: string; top: number }[] = []
+
+    const measure = () => {
+      /* 演的那一段里正文整块被 `transform` 推着走 —— 量顶点要把这份位移扣回来，
+         否则刻度会整体偏掉一截（"布局真变了" 且 "正好在演" 两个条件撞一起的概率不高，
+         撞上就是"高亮从此错一格"，不值得省这一行） */
+      let shift = 0
+      const body = contentRef.current
+      if (body !== null) {
+        const m = getComputedStyle(body).transform
+        if (m !== 'none') {
+          try {
+            shift = new DOMMatrixReadOnly(m).m42
+          } catch {
+            shift = 0
+          }
+        }
+      }
+      const base = box.getBoundingClientRect().top - box.scrollTop - shift
+      marks = []
+      box.querySelectorAll<HTMLElement>('[data-sec]').forEach((sec) => {
+        /* 被搜索筛掉的章是 `display:none` ⇒ 不参与定位（量它只会得到 0） */
+        if (sec.offsetParent === null) return
+        marks.push({ id: sec.id, top: sec.getBoundingClientRect().top - base })
+      })
+    }
+
+    const pick = (): string | null => {
+      if (marks.length === 0) return null
+      /* 到底 ⇒ 最后一章（末几章比一屏矮，按线走永远亮不到，见上面那段注释） */
+      const room = box.scrollHeight - box.clientHeight
+      if (room > 4 && box.scrollTop >= room - 2) return marks[marks.length - 1].id
+      /* 「顶线往下 60px」以内最靠下的那一章 = 正在读的那一章 */
+      const line = box.scrollTop + 60
+      let cur = marks[0].id
+      for (const m of marks) if (m.top <= line) cur = m.id
+      return cur
+    }
+
+    let raf = 0
+    const tick = () => {
+      raf = 0
+      /* 点目录那一趟还在自己跑（见 `glide`）：高亮按点击定案，路上不许改 */
+      if (performance.now() < lockRef.current) return
+      const held = holdTopRef.current
+      if (held !== null) {
+        if (Math.abs(box.scrollTop - held) <= 2) return
+        holdTopRef.current = null
+      }
+      const id = pick()
+      if (id === null || id === activeRef.current) return
+      /*
+       * 高亮块滑多久：**跨得越多给得越长**（一路滑过去，中间那几行都看得见）。
+       *
+       * ★ 2026-11-01 第四次改：原来"一次跨好几章就直接落位"，作者马上指出来 ——
+       *   「滚快的时候它直接就略过、跳过了一些背景」。越过中间项的那段位移本身就是
+       *   "连贯"的来源，所以这里**不许跳**，只是把它压短：跨 1 行 130ms，跨 3 行
+       *   220ms，最多 300ms（再长就变成追不上手了）。
+       */
+      const a = marks.findIndex((m) => m.id === activeRef.current)
+      const b = marks.findIndex((m) => m.id === id)
+      const rows = a < 0 || b < 0 ? 1 : Math.abs(a - b)
+      glowMsRef.current = Math.min(GLOW_SLIDE_MAX_MS, GLOW_SLIDE_MS + (rows - 1) * 45)
+      setActive(id)
+    }
+    const ask = () => {
+      if (raf === 0) raf = requestAnimationFrame(tick)
+    }
+    /* 量完再算：尺寸一变刻度就是旧的了 */
+    const refresh = () => {
+      measure()
+      ask()
+    }
+
+    refresh()
+    tick()
+    box.addEventListener('scroll', ask, { passive: true })
+    /* 内容长高 / 折叠 / 搜索筛掉几章 —— 不重量的话后面全错一格 */
+    const ro = new ResizeObserver(refresh)
+    Array.from(box.children).forEach((c) => ro.observe(c))
+    window.addEventListener('resize', refresh)
+    return () => {
+      ro.disconnect()
+      box.removeEventListener('scroll', ask)
+      window.removeEventListener('resize', refresh)
+      if (raf !== 0) cancelAnimationFrame(raf)
+      glideRef.current?.()
+    }
+  }, [boxRef, contentRef])
+
+  /*
+   * 点目录 = `glideTo`（全仓唯一那条"演 transform"的实现，见 `components/scroll/glide`）。
+   *
+   * 这套做法 2026-11-01 在这里定下来，然后才推广到别处：真位置先落终点 → 内容整块
+   * 推回起点 → 位移演到 0（合成器线程）。走的弯路与原因都写在那个文件的头注里，
+   * **别再回到"逐帧写 scrollTop"那条路**（作者：「以后不要再回归」）。
+   */
+  const jump = (id: string) => (e: MouseEvent<HTMLAnchorElement>) => {
+    e.preventDefault()
+    const box = boxRef.current
+    if (box === null) return
+    const el = box.querySelector<HTMLElement>(`#${id}`)
+    if (el === null) return
+
+    /* 点击即选中（不等滚到位）—— 成熟软件都是这么给的；高亮这一趟给长的时间，看得见过程 */
+    glowMsRef.current = GLOW_CLICK_MS
+    setActive(id)
+
+    const at = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8
+    const room = Math.max(0, box.scrollHeight - box.clientHeight)
+    /* 演的那一段来源不明地"占着"spy：高亮按点击定案，路上不许被"到底算最后一章"抢走 */
+    lockRef.current = Number.POSITIVE_INFINITY
+    holdTopRef.current = null
+    glideRef.current = glideTo(box, contentRef.current, Math.min(Math.max(at, 0), room), {
+      onDone: () => {
+        lockRef.current = 0
+        /* 停在点击那一项上（到底的章节按"顶线"算不出来，位置没动之前不许改） */
+        holdTopRef.current = box.scrollTop
+        glideRef.current = null
+      },
+    })
+  }
+
+  return (
+    <nav className={s.side} aria-label={tr('settings.title')} ref={sideRef}>
+      {/* 高亮块：整条目录只有这一块，位置由 `moveGlow` 写（见上面那段注释） */}
+      <span className={s.navGlow} ref={glowRef} aria-hidden="true" />
+      {NAV.filter((n) => !hidden.includes(n.id)).map((n) => (
+        <a
+          key={n.id}
+          className={`${s.navLink} ${active === n.id ? s.navOn : ''}`}
+          href={`#${n.id}`}
+          data-nav={n.id}
+          aria-current={active === n.id ? 'true' : undefined}
+          onClick={jump(n.id)}
+        >
+          <Icon name={n.icon} size={15} />
+          {tr(n.key)}
+        </a>
+      ))}
+      <div className={s.sideFoot}>{version}</div>
+    </nav>
+  )
+}
 
 /**
  * 选的是**哪一个源**（`github` / `gitee` / `custom`）—— 与后端 `SourceMode` 一一对应，
@@ -750,38 +1070,10 @@ export default function PageSettings() {
    */
   const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null)
 
-  /* ---------- 左目录：滚到哪亮到哪（2026-10-30） ---------- */
-
+  /* 右栏滚动容器：搜索效果与左目录都认它（左目录里那颗 ref 由 SideNav 收） */
   const mainRef = useRef<HTMLElement | null>(null)
-  const [active, setActive] = useState<string>('upd')
-
-  useEffect(() => {
-    const el = mainRef.current
-    if (el === null) return
-
-    const spy = () => {
-      const line = el.getBoundingClientRect().top + 60
-      let cur = 'upd'
-      el.querySelectorAll<HTMLElement>('[data-sec]').forEach((sec) => {
-        if (sec.getBoundingClientRect().top <= line) cur = sec.id
-      })
-      setActive(cur)
-    }
-
-    spy()
-    el.addEventListener('scroll', spy, { passive: true })
-    return () => el.removeEventListener('scroll', spy)
-  }, [])
-
-  /* 点目录：滚到那一章（与产品别处的 `behavior: smooth` 同一条口径） */
-  const jump = (id: string) => (e: MouseEvent<HTMLAnchorElement>) => {
-    e.preventDefault()
-    const box = mainRef.current
-    const el = box?.querySelector<HTMLElement>(`#${id}`)
-    if (box !== null && box !== undefined && el !== null && el !== undefined) {
-      box.scrollTo({ top: box.scrollTop + el.getBoundingClientRect().top - 8, behavior: 'smooth' })
-    }
-  }
+  /* 右栏里那层**整块正文**：点目录的动画在这层上做 `transform`（见 `SideNav` 的 `glide`） */
+  const mainBodyRef = useRef<HTMLDivElement | null>(null)
 
   /* 分段控件下面那句小字：只说**当前选中的那一档**是什么意思（三档的说明不再同时铺开） */
   const themeRow = THEME_CHOICES.find((c) => c.id === currentTheme)
@@ -838,24 +1130,22 @@ export default function PageSettings() {
       </header>
 
       <div className={s.body}>
-        <nav className={s.side} aria-label={tr('settings.title')}>
-          {NAV.filter((n) => !hiddenSecs.includes(n.id)).map((n) => (
-            <a
-              key={n.id}
-              className={`${s.navLink} ${active === n.id ? s.navOn : ''}`}
-              href={`#${n.id}`}
-              aria-current={active === n.id ? 'true' : undefined}
-              onClick={jump(n.id)}
-            >
-              <Icon name={n.icon} size={15} />
-              {tr(n.key)}
-            </a>
-          ))}
-          <div className={s.sideFoot}>{appVersion}</div>
-        </nav>
+        {/* 左目录自己一个组件：滚动路径上只重画这 13 行，正文不参与（见 `SideNav` 头注） */}
+        <SideNav
+          boxRef={mainRef}
+          contentRef={mainBodyRef}
+          hidden={hiddenSecs}
+          version={appVersion}
+        />
 
         <main className={s.main} ref={mainRef}>
           {noHit && <p className={s.note}>{tr('settings.searchEmpty')}</p>}
+          {/*
+           * 正文整块套一层（2026-11-01）：点目录那一下的动画**不靠改 scrollTop**，
+           * 而是把这层做 `transform` 位移（合成器上跑，见 `SideNav` 的 `glide`）。
+           * 别把这一层去掉 —— 去掉了那个动画就只剩"改滚动位置"那条慢路。
+           */}
+          <div className={s.mainBody} ref={mainBodyRef}>
       {/*
        * 软件更新 —— **a07 提到第一块**（作者 2026-10-13：「有没有必要放在最上面」）。
        * 这一块与预设页的「读不懂」提示是两条链，两个事实不许混成一句话（见文件头）。
@@ -1325,6 +1615,7 @@ export default function PageSettings() {
           </div>
         )}
       </section>
+          </div>
         </main>
       </div>
 

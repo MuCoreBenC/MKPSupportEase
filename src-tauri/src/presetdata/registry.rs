@@ -252,6 +252,22 @@ pub struct ParamDef {
     pub pinned: bool,
     #[serde(default)]
     pub serialization: Option<Serialization>,
+    /// **哪几册译文跟着这份中文一起过期了**（2026-11-02）。
+    ///
+    /// # 它记的是"事实"，不是"语气"
+    ///
+    /// 作者的口径：「我改了中文，但是其他没有改，这种能不能记录下来，让 AI 去改」——
+    /// 界面上看不出「英文还是旧中文的译本」，只能靠人记；所以把它写成**数据**：
+    /// `label` / `desc` 一改，剩下那三册的 `labelX` / `descX` 就登记在这里，
+    /// 直到有人把译文重写了才摘掉。
+    ///
+    /// - 登记发生在 [`ParamDef::mark_translations_stale`]，调用点只有
+    ///   [`ParamRegistry::set_param_meta`] 一处 —— 界面上没有第二个地方能改中文。
+    /// - 客户端**不读它**（显示仍是 `labelX` 原样，缺了回落中文）。它是给工作台与
+    ///   AI 看的待办：`scripts/stale-translations.mjs` 按它出一份清单。
+    /// - 空 = 没问题。空数组**不落盘**（`skip_serializing_if`），所以老文件一个字节不变。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_translations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +293,101 @@ impl ParamDef {
     pub fn deprecated_for(&self, machine_id: &str) -> bool {
         self.deprecated || self.deprecated_machines.iter().any(|m| m == machine_id)
     }
+
+    /// 中文这几格变了之后，把**跟着一起过期**的译文登记进 `stale_translations`。
+    ///
+    /// `before` 是改之前那一份（同一份中文 + 那一份译文）。判据三条，缺一不可：
+    ///
+    /// 1. **中文真的变了** —— 没变就不该往台账上添一条（改个单位、挪个分组不算）。
+    /// 2. **那一册有译文** —— 没译的册（空串）没有"过期"可言，它只是「还没译」；
+    ///    旧译本换新中文之后**留着不删**（空串才是"删掉"），所以必须看一眼旧值：
+    ///    旧值在中文变化的那一刻就成了"旧中文的译本"。
+    /// 3. **译文本身这一笔没被重写** —— 同一次保存里既改了中文、又填了新译文，
+    ///    那就是已经译好了，不该记一笔待办（作者：「我改了所有的都可以用公共的方法」）。
+    ///
+    /// 只登记、不清账：摘标记由 `set_param_meta` 里"这次真的重写了那一册"负责。
+    pub fn mark_translations_stale(&mut self, before: &ParamDef) {
+        let label_changed = self.label != before.label;
+        let desc_changed = self.desc != before.desc;
+        if !label_changed && !desc_changed {
+            return;
+        }
+        for (changed, now, old, key_name) in [
+            (label_changed, &self.label_en, &before.label_en, "labelEn"),
+            (label_changed, &self.label_ja, &before.label_ja, "labelJa"),
+            (label_changed, &self.label_tw, &before.label_tw, "labelTw"),
+            (desc_changed, &self.desc_en, &before.desc_en, "descEn"),
+            (desc_changed, &self.desc_ja, &before.desc_ja, "descJa"),
+            (desc_changed, &self.desc_tw, &before.desc_tw, "descTw"),
+        ] {
+            // 中文没动这一格（或者译文这一笔被重写了）⇒ 这一册不欠账
+            if !changed || now != old {
+                continue;
+            }
+            if old.trim().is_empty() || self.stale_translations.iter().any(|x| x == key_name) {
+                continue;
+            }
+            self.stale_translations.push(key_name.to_owned());
+        }
+    }
+}
+
+/// 「保存这一趟顺手新建一个分组」—— 定义框分组下拉里每个页签右边那个「＋」。
+///
+/// # 为什么跟着定义一起交，而不是先建一个空组
+///
+/// 建了又取消的话，数据里会留下一个**谁也删不掉**的空组（这里没有删分组的入口）。
+/// 所以它和参数定义是**同一笔**：`set_param_meta` 一次性把分组与参数的位置都写进
+/// 两份文件；取消 = 一个字节都没动。
+///
+/// # id 由前端给
+///
+/// 撤销 / 重做会把同一笔载荷**原样重放**，那时这个分组已经在了 —— 所以下游的语义
+/// 是「确保这个分组在」（见 [`ParamRegistry::ensure_section`]），不是「再造一个」。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewSection {
+    /// 新分组的 id（`param_registry` 与 `layout_schema` 两侧共用；只许 a-z / 0-9 / `_`）
+    pub id: String,
+    /// 挂在哪个页签下（页签必须已经在注册表里）
+    pub tab_id: String,
+    /// 中文显示名（必填；另外三册留空 = 回落中文，与分组元数据同一口径）
+    pub label: String,
+}
+
+/// 同一页签里往前 / 往后挪一格。**位置是数据**，所以由后端挪、前端只说方向
+/// （参数那条路是前端算 `order` 中点，两边不一样：分组的显示顺序在**数组**里）
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SectionMove {
+    Up,
+    Down,
+}
+
+/// 一次「分组」编辑的载荷 —— `wb_set_section_meta`。`None` = 这一格不动。
+///
+/// 改的是 `param_registry.toml` 的 `[[tabs.sections]]`：名字落在 `label`，
+/// 位置落在**数组次序**（客户端 `tabsOf` 按数组排，不读 `order`）与 `order`
+/// （工作台卡片按它排）两处 —— 见 [`ParamRegistry::set_section_meta`]。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionMetaEdit {
+    /// 新名字（`None` = 不动）。**只写中文那一册**，另外三册留在原处不动
+    #[serde(default)]
+    pub label: Option<String>,
+    /// 往哪边挪一格（`None` = 不动）
+    #[serde(default, rename = "move")]
+    pub move_dir: Option<SectionMove>,
+    /// **顺手新建这一组**（`None` = 不建）。分组抽屉那颗「＋ 新增分组」用它。
+    ///
+    /// 为什么挂在 `SectionMetaEdit` 上而不是另开一条命令：新建与改名/换位是
+    /// **同一类结构编辑**，同一套事务、同一套撤销、同一套"只进草稿"。另开一条命令
+    /// 会多出一种「建了但还没命名」的中间态，数据里也得为它留个位置。
+    ///
+    /// 语义与参数定义框那条 `ParamMetaEdit::new_section` 一致：**幂等** ——
+    /// 撤销 / 重做把同一笔载荷原样重放时，这一组已经在，按「确保它在」处理。
+    #[serde(default)]
+    pub new_section: Option<NewSection>,
 }
 
 /// 一次「参数定义」编辑的载荷 —— `wb_set_param_meta` 整包提交（模态框一次
@@ -324,9 +435,13 @@ pub struct ParamMetaEdit {
     #[serde(default)]
     pub machine_filter: Vec<String>,
     /// 搬到哪个分组（`layout_schema.toml` 的 section id）。
-    /// `None` = 不动 —— 旧载荷没有这一格时，不能把它读成「搬回某个默认组」
+    /// `None` = 不动 —— 旧载荷没有这一格时，不能把它读成「搬回某个默认组」。
+    /// 带 `new_section` 时这一格被忽略（目标是那个新分组）
     #[serde(default)]
     pub section_id: Option<String>,
+    /// 这一笔顺手新建的分组（`None` = 不建）。见 [`NewSection`]
+    #[serde(default)]
+    pub new_section: Option<NewSection>,
     /// **组内顺序**（`[params.layout].order`）。`None` = 不动。
     ///
     /// 界面上是「第 n / m 位」那对上下箭头；客户端按同一个值排同一组里的参数，
@@ -1402,10 +1517,26 @@ impl ParamRegistry {
          * 所以这里先在**不改任何东西**的前提下把要改的全算好：目标组合不合法、
          * 新 item id 撞名，都在这一步就拒掉。
          */
+        /*
+         * 新分组（分组下拉里那个「＋」）先建出来，后面就只剩「搬组」一条路 ——
+         * 两份文件的写法不必写第二遍。它会一并进 `self.doc` / `self.layout_doc`，
+         * 但**只在整笔成功时才落盘**（`write_back` 在调用方那一层），取消/报错 = 没建。
+         * 已经在时是空操作：撤销 / 重做会把同一笔载荷原样重放一次。
+         */
+        if let Some(fresh) = &edit.new_section {
+            self.ensure_section(&fresh.tab_id, &fresh.id, &fresh.label)?;
+        }
         let current_section = self.params[at].layout.section_id.clone();
-        let target_section = match edit.section_id.as_deref().map(str::trim) {
-            Some(s) if !s.is_empty() && s != current_section => Some(s.to_owned()),
-            _ => None,
+        let target_section = match &edit.new_section {
+            /* 目标是刚建的那个 —— 已经在里头的话不算「搬」（同组 = 不动） */
+            Some(fresh) => {
+                let id = fresh.id.trim();
+                (id != current_section).then(|| id.to_owned())
+            }
+            None => match edit.section_id.as_deref().map(str::trim) {
+                Some(s) if !s.is_empty() && s != current_section => Some(s.to_owned()),
+                _ => None,
+            },
         };
         let requested_order = match edit.order {
             Some(o) if !o.is_finite() => {
@@ -1645,6 +1776,20 @@ impl ParamRegistry {
         }
 
         /* ---------- 内存 ---------- */
+        /*
+         * 中文与六格译文**改前**各留一份：下面把它们换掉之后，判「中文变了没有」
+         * 「旧译文有没有」全靠这几份（见 `mark_translations_stale`）。
+         */
+        let before_label = self.params[at].label.clone();
+        let before_desc = self.params[at].desc.clone();
+        let before_langs = (
+            self.params[at].label_en.clone(),
+            self.params[at].label_ja.clone(),
+            self.params[at].label_tw.clone(),
+            self.params[at].desc_en.clone(),
+            self.params[at].desc_ja.clone(),
+            self.params[at].desc_tw.clone(),
+        );
         let p = &mut self.params[at];
         p.label = label.to_owned();
         p.desc = edit.desc;
@@ -1661,6 +1806,472 @@ impl ParamRegistry {
         p.deprecated_machines = deprecated_machines;
         p.choices = choices;
         p.machine_filter = machine_filter;
+        /*
+         * 译文台账（2026-11-02）：中文改了、那一册没跟着重写 ⇒ 记一笔「这册过期」。
+         * 反过来：这一笔**真的重写了**哪一册（给了非空值且与旧译文不同）⇒ 摘掉那一笔。
+         *
+         * 判「重写」只看"给了非空的、跟旧的不一样"：撤销 / 重做把同一笔载荷原样重放时
+         * 值没变，不清账也不添账（幂等）；空串是"删掉这一册"，不是"重译好了"。
+         */
+        let stale_before = p.stale_translations.clone();
+        for (field, current, key_name) in [
+            (&edit.label_en, &mut p.label_en, "labelEn"),
+            (&edit.label_ja, &mut p.label_ja, "labelJa"),
+            (&edit.label_tw, &mut p.label_tw, "labelTw"),
+            (&edit.desc_en, &mut p.desc_en, "descEn"),
+            (&edit.desc_ja, &mut p.desc_ja, "descJa"),
+            (&edit.desc_tw, &mut p.desc_tw, "descTw"),
+        ] {
+            if let Some(v) = field {
+                let v = v.trim();
+                /* 真重写了（给了非空的、跟旧译文不一样）⇒ 这一册不欠账了 */
+                if !v.is_empty() && v != current.trim() {
+                    p.stale_translations.retain(|x| x != key_name);
+                }
+                /* 内存也得跟着换 —— 上面那段只写了文件，`reload` 之前读内存的那条路要一致 */
+                *current = v.to_owned();
+            }
+        }
+        /*
+         * 中文改了、那一册没跟着重写 ⇒ 记一笔「这册过期」。
+         * `before` 取的是**旧中文 + 旧的译文**（内存里那两份已经被换掉了），
+         * 靠它判"中文真的变了"与"译文本来就有"。
+         */
+        let before = ParamDef {
+            label: before_label,
+            desc: before_desc,
+            label_en: before_langs.0,
+            label_ja: before_langs.1,
+            label_tw: before_langs.2,
+            desc_en: before_langs.3,
+            desc_ja: before_langs.4,
+            desc_tw: before_langs.5,
+            stale_translations: Vec::new(),
+            ..p.clone()
+        };
+        p.mark_translations_stale(&before);
+        if p.stale_translations != stale_before {
+            let list = p.stale_translations.clone();
+            let t = self.param_table_mut(at, key)?;
+            if list.is_empty() {
+                t.remove("staleTranslations");
+            } else {
+                let mut arr = toml_edit::Array::new();
+                for v in &list {
+                    arr.push(v.as_str());
+                }
+                t["staleTranslations"] = toml_edit::value(arr);
+            }
+        }
+        Ok(())
+    }
+
+    /// **确保这个分组在**：`param_registry.toml` 的 `[[tabs.sections]]` 与
+    /// `layout_schema.toml` 的 `[[tabs.sections]]`（`items = []`）各补一条，内存跟着加。
+    ///
+    /// 已经在了就当无事发生 —— 撤销 / 重做会把同一笔载荷原样重放，那时它已经建好了。
+    /// **但不许**借这条路改名或改归属：落在别的页签、或那个 id 是个整块组件，一律拒。
+    /// 分组名只有新建的那一版算数（改名是另一件事，这条路上不做）。
+    pub(crate) fn ensure_section(
+        &mut self,
+        tab_id: &str,
+        id: &str,
+        label: &str,
+    ) -> Result<(), AppError> {
+        let id = id.trim();
+        let label = label.trim();
+        /*
+         * id 会进两份 TOML、也会进客户端 catalog —— 只收 a-z / 0-9 / `_`。
+         * 中文标签没法直接当 id（那不是排版问题，是引用问题），所以界面上是
+         * 「名字随便写、id 自动取 custom_N」。
+         */
+        if id.is_empty()
+            || id.len() > 48
+            || !id
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.345",
+                &[("id", id)],
+            )));
+        }
+        if label.is_empty() || label.chars().count() > 24 {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.346",
+                &[],
+            )));
+        }
+        if !self.tabs.iter().any(|t| t.id == tab_id) {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.347",
+                &[("tab", tab_id)],
+            )));
+        }
+        // 同一个 id 全局只能有一个归属（`check_consistency` ④同一口径）
+        if let Some((here, sec)) = self.layout.iter().find_map(|t| {
+            t.sections
+                .iter()
+                .find(|s| s.id == id)
+                .map(|s| (t.id.as_str(), s))
+        }) {
+            if sec.component.is_some() || here != tab_id {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.348",
+                    &[("id", id), ("tab", here)],
+                )));
+            }
+            return Ok(());
+        }
+
+        // 顺序取该页签里最大 +1：新组挂在那个页签的末尾
+        let order = self.tabs.iter().find(|t| t.id == tab_id).map_or(0.0, |t| {
+            t.sections.iter().map(|s| s.order).fold(0.0_f64, f64::max)
+        }) + 1.0;
+
+        /* ---------- 注册表文件：`[[tabs.sections]]` 追加一条 ---------- */
+        let tabs = self
+            .doc
+            .get_mut("tabs")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.349",
+                    &[("tab", tab_id)],
+                ))
+            })?;
+        let tab = find_table_mut(tabs, tab_id).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.349",
+                &[("tab", tab_id)],
+            ))
+        })?;
+        let mut tbl = toml_edit::Table::new();
+        tbl["id"] = toml_edit::value(id);
+        tbl["label"] = toml_edit::value(label);
+        tbl["order"] = toml_edit::value(order);
+        push_section_table(tab, tbl);
+
+        /* ---------- 布局文件：同 id 的 section，`items = []` ---------- */
+        let ltabs = self
+            .layout_doc
+            .get_mut("tabs")
+            .and_then(toml_edit::Item::as_array_of_tables_mut)
+            .ok_or_else(|| {
+                AppError::corrupted(messages::text(
+                    "ui.presetdata.registry.350",
+                    &[("tab", tab_id)],
+                ))
+            })?;
+        let ltab = find_table_mut(ltabs, tab_id).ok_or_else(|| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.350",
+                &[("tab", tab_id)],
+            ))
+        })?;
+        let mut ltbl = toml_edit::Table::new();
+        ltbl["id"] = toml_edit::value(id);
+        /* 空组在真数据里就是内联空数组；`layout_push_item` 认这个形状 */
+        ltbl["items"] = toml_edit::value(toml_edit::Array::new());
+        push_section_table(ltab, ltbl);
+
+        /* ---------- 内存两半 ---------- */
+        if let Some(t) = self.tabs.iter_mut().find(|t| t.id == tab_id) {
+            t.sections.push(SectionMeta {
+                id: id.to_owned(),
+                label: label.to_owned(),
+                label_en: String::new(),
+                label_ja: String::new(),
+                label_tw: String::new(),
+                description: None,
+                description_en: None,
+                description_ja: None,
+                description_tw: None,
+                order,
+            });
+        }
+        if let Some(t) = self.layout.iter_mut().find(|t| t.id == tab_id) {
+            t.sections.push(LayoutSection {
+                id: id.to_owned(),
+                items: Vec::new(),
+                component: None,
+                show_when: None,
+                layout: None,
+                width: None,
+                visible: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// **删掉一个空分组**（2026-11-01 作者：「空的时候可以删除，比如说我建了一个新的，
+    /// 不小心建多了也可以删除」）。
+    ///
+    /// # 只删「空」的
+    ///
+    /// 「空」= **没有任何参数归它**（注册表 `[params.layout].sectionId` 一条都不指向它）。
+    /// 这是唯一能安全删的情形：有参数的分组一删，那些参数就成了没有家的孤儿（客户端那边
+    /// 会凭空少一截），要删得先把参数搬走 —— 那是另一件事，不在这一笔下。
+    ///
+    /// 顺带挡住两类"看起来能删、其实不能"的：
+    ///
+    ///   · `component` 占位（设置页那 11 张卡、`tower-map`）—— 那是**功能卡**，
+    ///     不是参数分组，删了等于删功能；
+    ///   · 带 `showWhen` 的组 —— 条件分组是排版契约的一部分，空也只说明「这一档没放参数」。
+    ///
+    /// # 两份文件一起删
+    ///
+    /// `param_registry.toml` 的 `[[tabs.sections]]` 与 `layout_schema.toml` 的同 id
+    /// section 都要去掉，否则两份文件的 section 集合对不上，「所属分组」下拉与
+    /// `param_tabs()` 会各说各的。**只按文本块删**（与 [`swap_section_blocks`] 同一个
+    /// 理由）：`toml_edit` 挪 `Table` 会丢 span / 丢嵌套的 `items` 子表。
+    ///
+    /// 删完把这个页签的 `order` 重排成 `0..n-1` —— 客户端按数组次序排，中间留个号
+    /// 不影响显示，但下一次"挪一格"是按新次序重写的，留个空洞只会让 diff 更乱。
+    ///
+    /// # 译文台账的逃生通道（2026-11-02）
+    ///
+    /// 台账在 [`ParamRegistry::set_param_meta`] 里**只在值真的变了**时摘（那是撤销/重做
+    /// 幂等的前提）。但译文可以由别处写好 —— 直接改文件、或由 AI 按
+    /// `scripts/stale-translations.mjs` 的清单一次改一批 —— 那种"改"不经过后端，
+    /// 值明明是对的、标记却永远摘不掉。
+    ///
+    /// 所以另开一条**显式**的路：「我叫你清哪几格，就清哪几格，不看你改了没有」。
+    /// 它不是放宽判据 —— `set_param_meta` 那条老规矩一个字没动，撤销/重做照样幂等；
+    /// 这里要求调用方**点名**，是因为"替你判定哪几格已经译好了"在前端做不到
+    /// （前端没有"旧中文"，判不出译文是不是跟着那一版写的）。
+    ///
+    /// `keys` 里的名字必须在六册之内，写错一个就整笔拒收（不做"能清几个算几个"）。
+    pub fn clear_stale_translations(
+        &mut self,
+        key: &str,
+        keys: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        let at = *self.index.get(key).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.303",
+                &[("key", key)],
+            ))
+        })?;
+        const NAMES: [&str; 6] = [
+            "labelEn", "labelJa", "labelTw", "descEn", "descJa", "descTw",
+        ];
+        // 先整批校验：名字写错了不许"清了一半"再报错
+        for k in keys {
+            if !NAMES.contains(&k.as_str()) {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.356",
+                    &[("k", k), ("names", &NAMES.join(" / "))],
+                )));
+            }
+        }
+        let held: Vec<String> = keys.to_vec();
+        let p = &mut self.params[at];
+        p.stale_translations.retain(|x| !held.contains(x));
+        let left = p.stale_translations.clone();
+
+        let t = self.param_table_mut(at, key)?;
+        if left.is_empty() {
+            t.remove("staleTranslations");
+        } else {
+            let mut arr = toml_edit::Array::new();
+            for v in &left {
+                arr.push(v.as_str());
+            }
+            t["staleTranslations"] = toml_edit::value(arr);
+        }
+        Ok(left)
+    }
+
+    pub fn remove_section(&mut self, section_id: &str) -> Result<(), AppError> {
+        let id = section_id.trim();
+        let ti = self
+            .tabs
+            .iter()
+            .position(|t| t.sections.iter().any(|s| s.id == id))
+            .ok_or_else(|| {
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.351",
+                    &[("id", id)],
+                ))
+            })?;
+        let tab_id = self.tabs[ti].id.clone();
+        let at = self.tabs[ti]
+            .sections
+            .iter()
+            .position(|s| s.id == id)
+            .expect("上面刚判过");
+
+        /* ---------- 三道门：有参数 / 组件卡 / 条件组 ---------- */
+        let used = self
+            .params
+            .iter()
+            .filter(|p| p.layout.section_id == id)
+            .count();
+        if used > 0 {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.354",
+                &[
+                    ("label", self.tabs[ti].sections[at].label.as_str()),
+                    ("n", &used.to_string()),
+                ],
+            )));
+        }
+        let is_component = self
+            .layout
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == id)
+            .is_some_and(|s| s.component.is_some() || s.show_when.is_some());
+        if is_component {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.355",
+                &[("label", self.tabs[ti].sections[at].label.as_str())],
+            )));
+        }
+
+        /* ---------- 两份文件：按文本块删（先文件、再内存，删失败就一个字没动） ---------- */
+        remove_section_block(&mut self.doc, &tab_id, at)?;
+        if let Some(lti) = self.layout.iter().position(|t| t.id == tab_id) {
+            if let Some(lat) = self.layout[lti].sections.iter().position(|s| s.id == id) {
+                remove_section_block(&mut self.layout_doc, &tab_id, lat)?;
+                self.layout[lti].sections.remove(lat);
+            }
+        }
+
+        /* ---------- 内存 + 重排 order ---------- */
+        self.tabs[ti].sections.remove(at);
+        for (j, sec) in self.tabs[ti].sections.iter_mut().enumerate() {
+            sec.order = j as f64;
+        }
+        let orders: Vec<f64> = self.tabs[ti].sections.iter().map(|s| s.order).collect();
+        set_section_orders(&mut self.doc, &tab_id, &orders);
+        Ok(())
+    }
+
+    /// **改一个分组的名字 / 位置**（参数台卡片头那颗可点的标题与上下箭头，2026-11-01）。
+    ///
+    /// # 位置到底是哪一个字段
+    ///
+    /// 两个读者、两把尺子，这里一次写完、保证同序：
+    ///
+    ///   · 客户端 `tabsOf` 按 `[[tabs.sections]]` 的**数组次序**排（它不读 `order`）；
+    ///   · 工作台卡片按 `SectionMeta.order` 排（`derive::row_sort_key`）。
+    ///
+    /// 所以挪一格 = 数组里换两位 + 把这个页签的 `order` 按新次序重排成 `0..n-1`
+    /// （既有数据本来就是连续整数，重排不会平白改动没挪的组）。
+    /// `layout_schema.toml` 的同名数组跟着换 —— 那份不决定显示顺序，但「所属分组」
+    /// 下拉按它的次序出，两个文件不该各说各的。
+    ///
+    /// # 只改中文名
+    ///
+    /// 另外三册（`labelEn` / `labelJa` / `labelTw`）留在原处：把它们一起改成中文名
+    /// 等于把译文弄丢，而这里没有编辑译文的格子。
+    pub fn set_section_meta(
+        &mut self,
+        section_id: &str,
+        edit: SectionMetaEdit,
+    ) -> Result<(), AppError> {
+        /*
+         * 顺带新建（抽屉里那颗「＋ 新增分组」）：**先建，再按常规往下改名 / 换位**。
+         * `ensure_section` 幂等（已经在就空操作），所以撤销 / 重做重放同一笔没问题。
+         */
+        if let Some(fresh) = &edit.new_section {
+            self.ensure_section(&fresh.tab_id, &fresh.id, &fresh.label)?;
+        }
+        let id = section_id.trim();
+        let ti = self
+            .tabs
+            .iter()
+            .position(|t| t.sections.iter().any(|s| s.id == id))
+            .ok_or_else(|| {
+                AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.351",
+                    &[("id", id)],
+                ))
+            })?;
+        /*
+         * 带 `component` 的分组（`tower-map` 那张、设置页那 11 张）**与普通分组同权**：
+         * 改名、换位都放行（2026-11-01 作者：「组件卡跟别的一样呀，只是它的样子不一样
+         * 而已」）。名字落在 `[[tabs.sections]].label`，位置落在数组次序 —— 与有没有
+         * 画布无关，别在数据层替界面决定"哪些能改"。
+         */
+        let tab_id = self.tabs[ti].id.clone();
+        let at = self.tabs[ti]
+            .sections
+            .iter()
+            .position(|s| s.id == id)
+            .expect("上面刚判过");
+
+        /* ---------- 改名 ---------- */
+        if let Some(label) = edit.label.as_deref() {
+            let label = label.trim();
+            if label.is_empty() || label.chars().count() > 24 {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.346",
+                    &[],
+                )));
+            }
+            if label != self.tabs[ti].sections[at].label {
+                self.tabs[ti].sections[at].label = label.to_owned();
+                if let Some(tbl) = section_table_mut(&mut self.doc, &tab_id, id) {
+                    tbl.insert("label", toml_edit::value(label));
+                }
+            }
+        }
+
+        /* ---------- 换位置 ---------- */
+        if let Some(dir) = edit.move_dir {
+            let n = self.tabs[ti].sections.len();
+            let to = match dir {
+                SectionMove::Up => at.checked_sub(1),
+                SectionMove::Down => (at + 1 < n).then_some(at + 1),
+            };
+            let Some(to) = to else {
+                return Err(AppError::invalid_argument(messages::text(
+                    "ui.presetdata.registry.353",
+                    &[("label", self.tabs[ti].sections[at].label.as_str())],
+                )));
+            };
+            /*
+             * **先改文件、再改内存**：文本块对调失败就直接报错退出，内存一个字没动，
+             * 上层也不会 `write_back` —— 不会出现"内存换了、盘上没换"的半截状态。
+             * （2026-11-01 的血泪：反过来的顺序 + 换表内容的算法，把布局文件搅错了。）
+             */
+            swap_section_blocks(&mut self.doc, &tab_id, at, to)?;
+            /* 布局那份按 id 找自己的位置（两份的数组未必一一对应：组件占位只在布局里） */
+            let layout_swap = self
+                .layout
+                .iter()
+                .position(|t| t.id == tab_id)
+                .and_then(|lti| {
+                    let lat = self.layout[lti].sections.iter().position(|s| s.id == id)?;
+                    let lto = match dir {
+                        SectionMove::Up => lat.checked_sub(1),
+                        SectionMove::Down => {
+                            (lat + 1 < self.layout[lti].sections.len()).then_some(lat + 1)
+                        }
+                    }?;
+                    Some((lti, lat, lto))
+                });
+            if let Some((_, lat, lto)) = layout_swap {
+                swap_section_blocks(&mut self.layout_doc, &tab_id, lat, lto)?;
+            }
+
+            /* 两份文件都改完，才动内存 */
+            self.tabs[ti].sections.swap(at, to);
+            if let Some((lti, lat, lto)) = layout_swap {
+                self.layout[lti].sections.swap(lat, lto);
+            }
+
+            /* order 跟着数组位置走 —— 卡片头与客户端读的是同一次改动 */
+            for (j, sec) in self.tabs[ti].sections.iter_mut().enumerate() {
+                sec.order = j as f64;
+            }
+            let orders: Vec<f64> = self.tabs[ti].sections.iter().map(|s| s.order).collect();
+            set_section_orders(&mut self.doc, &tab_id, &orders);
+        }
+
         Ok(())
     }
 
@@ -1776,21 +2387,66 @@ impl ParamRegistry {
     /// 给「所属分组」下拉用：`(tab_id, tab_label, section_id, section_label)`。
     /// **不过滤空组** —— 把一个组搬空之后还得能搬回去。
     pub fn layout_sections(&self) -> Vec<(String, String, String, String)> {
+        self.layout_sections_all()
+            .into_iter()
+            .filter(|(_, _, _, _, component)| component.is_none())
+            .map(|(tab_id, tab_label, id, label, _)| (tab_id, tab_label, id, label))
+            .collect()
+    }
+
+    /// 布局里的**全部分组**，含 `component` 整块组件卡（最后那一格是组件名）。
+    ///
+    /// 分组抽屉要它：组件卡也有卡头、也有参数（`tower-map` 那张），点得开才说得清
+    /// 它在哪儿。**「所属分组」下拉仍然只认 `layout_sections()`** ——
+    /// 后端 `move_param` 拒收组件卡（`ui.presetdata.registry.329`），下拉里就不该摆它。
+    pub fn layout_sections_all(&self) -> Vec<(String, String, String, String, Option<String>)> {
         let mut out = Vec::new();
         for lt in &self.layout {
             let Some(meta) = self.tabs.iter().find(|t| t.id == lt.id) else {
                 continue;
             };
-            for s in &lt.sections {
-                if s.component.is_some() {
-                    continue;
-                }
-                let label = meta
-                    .sections
-                    .iter()
-                    .find(|m| m.id == s.id)
-                    .map_or_else(|| s.id.clone(), |m| m.label.clone());
-                out.push((lt.id.clone(), meta.label.clone(), s.id.clone(), label));
+            /*
+             * 抽屉这侧的分组顺序，必须与参数台卡片那侧（`derive::row_sort_key` 用的
+             * 是 `SectionMeta.order`）完全一致 —— 否则「支撑」在左边是第 6 个、在右侧
+             * 抽屉里是第 3 个，作者 2026-11-01 就是被这个不一致搞晕的。
+             * 两份文件里，注册表那份带 `order`，而且换位置时我们把它重排成了数组下标，
+             * 所以这里按注册表里的 `order` 排序（找不到就排到最后），两处就永远对齐了。
+             */
+            let mut rows: Vec<(f64, String, String, String)> = lt
+                .sections
+                .iter()
+                .map(|s| {
+                    let order = meta
+                        .sections
+                        .iter()
+                        .find(|m| m.id == s.id)
+                        .map_or(f64::INFINITY, |m| m.order);
+                    let label = meta
+                        .sections
+                        .iter()
+                        .find(|m| m.id == s.id)
+                        .map_or_else(|| s.id.clone(), |m| m.label.clone());
+                    (
+                        order,
+                        s.id.clone(),
+                        label,
+                        s.component.clone().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+            for (_, id, label, component) in rows {
+                out.push((
+                    lt.id.clone(),
+                    meta.label.clone(),
+                    id,
+                    label,
+                    if component.is_empty() {
+                        None
+                    } else {
+                        Some(component)
+                    },
+                ));
             }
         }
         out
@@ -1810,6 +2466,227 @@ fn normalize_machines(ids: &[String]) -> Vec<String> {
 }
 
 /// 布局文件里一个 section 的表（`tabs[].sections[]` 里 id 命中的那一节）
+/// 在 `[[tabs]]` 里按 `id` 找那一张表（`ensure_section` 用）
+fn find_table_mut<'a>(
+    tabs: &'a mut toml_edit::ArrayOfTables,
+    id: &str,
+) -> Option<&'a mut toml_edit::Table> {
+    tabs.iter_mut()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(id))
+}
+
+/// 往某个页签的 `sections` 末尾追加一张表。
+///
+/// 缺键、或那一格不是表数组时**就地换成表数组** —— 与 `layout_push_item` 同一套写法。
+fn push_section_table(tab: &mut toml_edit::Table, tbl: toml_edit::Table) {
+    match tab.get_mut("sections") {
+        Some(item) if item.is_array_of_tables() => {
+            if let Some(arr) = item.as_array_of_tables_mut() {
+                arr.push(tbl);
+            }
+        }
+        Some(item) => {
+            let mut arr = toml_edit::ArrayOfTables::new();
+            arr.push(tbl);
+            *item = toml_edit::Item::ArrayOfTables(arr);
+        }
+        None => {
+            let mut arr = toml_edit::ArrayOfTables::new();
+            arr.push(tbl);
+            tab.insert("sections", toml_edit::Item::ArrayOfTables(arr));
+        }
+    }
+}
+
+/// 某个页签里某一张 `[[tabs.sections]]` 表（注册表与布局两份文件同一套写法）。
+/// 找不到就 `None` —— 调用方多半只是"这一份里没有"，不是错误
+fn section_table_mut<'a>(
+    doc: &'a mut DocumentMut,
+    tab_id: &str,
+    section_id: &str,
+) -> Option<&'a mut toml_edit::Table> {
+    let tabs = doc.get_mut("tabs")?.as_array_of_tables_mut()?;
+    let tab = find_table_mut(tabs, tab_id)?;
+    let arr = tab.get_mut("sections")?.as_array_of_tables_mut()?;
+    arr.iter_mut()
+        .find(|t| t.get("id").and_then(|v| v.as_str()) == Some(section_id))
+}
+
+/// 把某个页签里 `[[tabs.sections]]` 的第 `from` / `to` **整块**对调。
+///
+/// # 为什么按文本块换，而不是挪 `Table`
+///
+/// `toml_edit` 0.22 里 section 表**自带嵌套的 `[[tabs.sections.items]]`**（一个
+/// `ArrayOfTables` 套着另一个）。两条路都试过，都会坏数据：
+///
+///   · `mem::take` 出来再 `push` 回去 —— 表带着旧 span，序列化时**丢表**；
+///   · 把两张表的**内容**对调 —— `items` 这个子表留在原地，只有 `id` 换过去，
+///     于是 A 的名字挂上了 B 的参数。**2026-11-01 真发生过**：布局文件被搅成
+///     `custom_1` 名下挂着 `safety_advanced` 的 7 条参数，`presets check` 报
+///     「两侧的参数数对不上」。
+///
+/// 换文本块最稳：块里的注释、`items`、空行都原样跟着走，解析结果不可能错位。
+/// 代价是要把整个文档重新 parse 一次 —— 但这条命令本来就不在热路径上。
+fn swap_section_blocks(
+    doc: &mut DocumentMut,
+    tab_id: &str,
+    from: usize,
+    to: usize,
+) -> Result<(), AppError> {
+    if from == to {
+        return Ok(());
+    }
+    let text = doc.to_string();
+    let region = tab_region(&text, tab_id).ok_or_else(|| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id)],
+        ))
+    })?;
+    let (head, body) = text.split_at(region.start);
+    let (chunk, tail) = body.split_at(region.len());
+
+    /* 切块：每个 `[[tabs.sections]]` 是一块的开始，块到下一个开始（或区域尾）为止 */
+    let marker = "[[tabs.sections]]";
+    let mut cuts: Vec<usize> = Vec::new();
+    let mut at = 0;
+    while let Some(i) = chunk[at..].find(marker) {
+        cuts.push(at + i);
+        at += i + marker.len();
+    }
+    if from >= cuts.len() || to >= cuts.len() {
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id)],
+        )));
+    }
+    let mut blocks: Vec<&str> = Vec::new();
+    for (i, cut) in cuts.iter().enumerate() {
+        let end = cuts.get(i + 1).copied().unwrap_or(chunk.len());
+        blocks.push(&chunk[*cut..end]);
+    }
+    blocks.swap(from, to);
+
+    let new_chunk = format!("{}{}{}", &chunk[..cuts[0]], blocks.concat(), "");
+    let new_text = format!("{head}{new_chunk}{tail}");
+    *doc = new_text.parse::<DocumentMut>().map_err(|e| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id), ("id", &e.to_string())],
+        ))
+    })?;
+    Ok(())
+}
+
+/// `[[tabs]] id = '<tab_id>'` 那一段在全文里的位置（到下一个 `[[tabs]]` 为止）
+fn tab_region(text: &str, tab_id: &str) -> Option<std::ops::Range<usize>> {
+    let header = "[[tabs]]";
+    let mut from = 0;
+    while let Some(i) = text[from..].find(header) {
+        let start = from + i;
+        let next = text[start + header.len()..]
+            .find(header)
+            .map_or(text.len(), |j| start + header.len() + j);
+        let chunk = &text[start..next];
+        let hit = chunk.lines().any(|l| {
+            let l = l.trim();
+            l == format!("id = '{tab_id}'") || l == format!("id = \"{tab_id}\"")
+        });
+        if hit {
+            return Some(start..next);
+        }
+        from = next;
+    }
+    None
+}
+
+/// 把某个页签里第 `at` 个 `[[tabs.sections]]` **整块**删掉（文本块级，不动兄弟）。
+///
+/// 与 [`swap_section_blocks`] 同一套切块法：一个块从 `[[tabs.sections]]` 起到下一个
+/// 同样的表头（或页签区域结束）为止 —— 嵌套的 `[[tabs.sections.items]]` 是**同一块**
+/// 里的子表头，不是新的切点，所以整块删才不可能只删掉表头留下孤儿 items。
+///
+/// 要防的一个坑：块尾可能连着下一条 section 前的空行 / 注释，删多了会把下一条的
+/// 隔行注释带走。所以删完一段后把**尾部只到最后一个非空行为止**，剩下的留给下一条。
+fn remove_section_block(doc: &mut DocumentMut, tab_id: &str, at: usize) -> Result<(), AppError> {
+    let text = doc.to_string();
+    let region = tab_region(&text, tab_id).ok_or_else(|| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id)],
+        ))
+    })?;
+    let (head, body) = text.split_at(region.start);
+    let (chunk, tail) = body.split_at(region.len());
+
+    let marker = "[[tabs.sections]]";
+    let mut cuts: Vec<usize> = Vec::new();
+    let mut from = 0;
+    while let Some(i) = chunk[from..].find(marker) {
+        cuts.push(from + i);
+        from += i + marker.len();
+    }
+    if at >= cuts.len() {
+        return Err(AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id)],
+        )));
+    }
+    let start = cuts[at];
+    let end = cuts.get(at + 1).copied().unwrap_or(chunk.len());
+
+    /*
+     * 整块删掉，**连它后面的空行一起收**。
+     *
+     * 早先写的是"只吃到最后一个非空行"，想给下一条留隔行空行 —— 那个想法本身没错，
+     * 但它和后一句 `&chunk[start + keep..]` 合起来是错的：`keep` 停在块尾的换行处，
+     * 于是剩下的 `"\n\n[[tabs.sections]]"` 被接在了**块的起点**上，多出来的空行堆在
+     * 上一条与下一条之间。几百行之后 `parse` 还能过，但 `check_consistency` 那条
+     * 「items 顺序 == 按 order 升序」按文本块切的时候就会被空行搅乱 ——
+     * 真机表现是**删完之后命令一直不回来**（重新加载时卡在校验里）。
+     *
+     * 现在：块连同它后面的空白行一起收掉，下一条自己的换行由它自己带。
+     */
+    let mut stop = end;
+    while stop < chunk.len() && (chunk.as_bytes()[stop] == b'\n' || chunk.as_bytes()[stop] == b'\r')
+    {
+        stop += 1;
+    }
+    let new_chunk = format!("{}{}", &chunk[..start], &chunk[stop..]);
+    let new_text = format!("{head}{new_chunk}{tail}");
+    *doc = new_text.parse::<DocumentMut>().map_err(|e| {
+        AppError::corrupted(messages::text(
+            "ui.presetdata.registry.349",
+            &[("tab", tab_id), ("id", &e.to_string())],
+        ))
+    })?;
+    Ok(())
+}
+
+/// 按**新次序**把这个页签每个分组的 `order` 逐张写回（`orders[i]` 对应第 i 张表）
+fn set_section_orders(doc: &mut DocumentMut, tab_id: &str, orders: &[f64]) {
+    let Some(tabs) = doc
+        .get_mut("tabs")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    else {
+        return;
+    };
+    let Some(tab) = find_table_mut(tabs, tab_id) else {
+        return;
+    };
+    let Some(arr) = tab
+        .get_mut("sections")
+        .and_then(toml_edit::Item::as_array_of_tables_mut)
+    else {
+        return;
+    };
+    for (i, tbl) in arr.iter_mut().enumerate() {
+        if let Some(o) = orders.get(i) {
+            tbl.insert("order", toml_edit::value(*o));
+        }
+    }
+}
+
 fn layout_section_mut<'a>(
     doc: &'a mut DocumentMut,
     section_id: &str,
@@ -2469,6 +3346,38 @@ mod tests {
         assert_eq!(tabs[0].label, "页签一", "中文名取 [[tabs]]");
     }
 
+    /// 分组抽屉要的是**全部分组**（含 `component` 整块组件卡）：
+    /// 组件卡的卡头也点得开，看不见就问不出"它在哪儿"。
+    /// 「所属分组」下拉仍然走 `layout_sections()`（组件卡不许当搬家目标）。
+    #[test]
+    fn layout_sections_all_keeps_component_cards() {
+        let (mut p, mut l) = good();
+        p["tabs"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "settings", "label": "软件设置", "order": 80,
+            "sections": [{ "id": "appearance", "label": "外观", "order": 100 }]
+        }));
+        l["tabs"].as_array_mut().unwrap().push(serde_json::json!({
+            "id": "settings",
+            "sections": [{ "id": "appearance", "items": [], "component": "appearance-card" }]
+        }));
+        let (_d, r) = load(p, l);
+        let r = r.unwrap();
+
+        let all = r.layout_sections_all();
+        let card = all
+            .iter()
+            .find(|(_, _, id, _, _)| id == "appearance")
+            .expect("组件卡没进全量表 —— 它的卡头就点不开了");
+        assert_eq!(card.4.as_deref(), Some("appearance-card"), "组件名要带出去");
+        assert_eq!(card.3, "外观", "名字取 [[tabs.sections]] 的中文名");
+
+        let plain = r.layout_sections();
+        assert!(
+            !plain.iter().any(|(_, _, id, _)| id == "appearance"),
+            "普通那份不能把组件卡混进来 —— 后端 move_param 拒收，下拉里不许摆它"
+        );
+    }
+
     /// 分组元数据：中文名与组内序都从 `[[tabs]]` 来，查不到就是 `None`。
     /// 调用方拿 `None` 退化成显示 section id，而不是显示一个空字符串
     #[test]
@@ -2719,6 +3628,8 @@ mod tests {
             "descJa",
             "descTw",
             "desc",
+            /* 译文台账（2026-11-02）：中文改了、那册没重写时登记在这 */
+            "staleTranslations",
             "tomlComment",
             "valueType",
             "uiComponent",
@@ -3369,6 +4280,7 @@ mod tests {
             choices: Vec::new(),
             machine_filter: Vec::new(),
             section_id: None,
+            new_section: None,
             order: None,
         }
     }
@@ -3453,6 +4365,186 @@ mod tests {
         assert!(
             !inserted.contains("[[params]]"),
             "插入段跨到了别的字段：{inserted:?}"
+        );
+    }
+
+    /// **译文台账**（2026-11-02，作者：「我改了中文，但是其他没有改，这种能不能记录下来」）。
+    ///
+    /// 改中文、译文没跟着重写 ⇒ 登记到 `staleTranslations`（三册各一行、名称与说明分开）；
+    /// 同一笔里把某一册重写了 ⇒ 那一册不欠账；重写的第二次保存 ⇒ 摘掉那一笔。
+    /// 只改单位 / 分组（中文没动）时台账一个字节都不变。
+    #[test]
+    fn changing_chinese_registers_stale_translations() {
+        let (mut p, l) = editable();
+        p["params"][1]["labelEn"] = serde_json::json!("X offset");
+        p["params"][1]["labelJa"] = serde_json::json!("X オフセット");
+        p["params"][1]["descEn"] = serde_json::json!("offset");
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // 一改：只改中文说明 —— 只有 desc 那三册欠账，label 那三册不动
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "a.x".into(),
+                desc: "新的说明".into(),
+                ..meta_edit("a.x")
+            },
+        )
+        .expect("改得动");
+        assert_eq!(
+            r.param("a.x").unwrap().stale_translations,
+            vec!["descEn".to_owned()],
+            "没写译文的两册（Ja/Tw 说明）没有「过期」可言 —— 它们只是还没译"
+        );
+        assert!(
+            r.to_toml().contains("staleTranslations"),
+            "台账得落进文件，不然下次打开就丢了"
+        );
+
+        // 二改：中文名也改 —— label 那两册有译文的跟着登记
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "横移".into(),
+                desc: "新的说明".into(),
+                ..meta_edit("横移")
+            },
+        )
+        .expect("改得动");
+        let mut got = r.param("a.x").unwrap().stale_translations.clone();
+        got.sort();
+        assert_eq!(got, vec!["descEn", "labelEn", "labelJa"]);
+
+        // 三改：同一笔里把英文说明重写了 ⇒ 那一笔摘掉（作者：「我改了所有的都可以用公共的方法」）
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "横移".into(),
+                desc: "新的说明".into(),
+                desc_en: Some("a brand new description".into()),
+                ..meta_edit("横移")
+            },
+        )
+        .expect("改得动");
+        let mut got = r.param("a.x").unwrap().stale_translations.clone();
+        got.sort();
+        assert_eq!(
+            got,
+            vec!["labelEn", "labelJa"],
+            "重写过的 descEn 不该还挂着"
+        );
+
+        // 四改：重放同一笔（撤销/重做）—— 幂等，台账不增不减
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "横移".into(),
+                desc: "新的说明".into(),
+                desc_en: Some("a brand new description".into()),
+                ..meta_edit("横移")
+            },
+        )
+        .expect("改得动");
+        let mut got = r.param("a.x").unwrap().stale_translations.clone();
+        got.sort();
+        assert_eq!(got, vec!["labelEn", "labelJa"]);
+
+        // 五改：只改单位 —— 中文没动，台账原样
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                label: "横移".into(),
+                desc: "新的说明".into(),
+                unit: Some("mm".into()),
+                ..meta_edit("横移")
+            },
+        )
+        .expect("改得动");
+        assert_eq!(r.param("a.x").unwrap().stale_translations.len(), 2);
+
+        // 落盘再读回：台账是数据，不是内存里的临时标记
+        r.write_back().expect("落盘");
+        let again = ParamRegistry::load_from(d.path()).expect("读得通");
+        let mut got = again.param("a.x").unwrap().stale_translations.clone();
+        got.sort();
+        assert_eq!(got, vec!["labelEn", "labelJa"]);
+        assert!(
+            r.to_toml().contains("staleTranslations"),
+            "台账在写回之后也得留着"
+        );
+    }
+
+    /// **译文台账的逃生通道**（2026-11-02）：点名清，不看你改了没有。
+    ///
+    /// 这条路是给"译文由别处写好"用的（直接改文件、或按待办清单整批改）——
+    /// 那种改不经过 `set_param_meta`，老判据（值变了才摘）永远不认。
+    /// 同时钉住两件事：**名字写错整笔拒收**（不做"能清几个算几个"）、
+    /// **`set_param_meta` 那条老规矩没被放宽**（原值重存仍是幂等的）。
+    #[test]
+    fn stale_translations_can_be_cleared_explicitly() {
+        let (mut p, l) = editable();
+        p["params"][1]["labelEn"] = serde_json::json!("X offset");
+        p["params"][1]["descEn"] = serde_json::json!("offset");
+        p["params"][1]["staleTranslations"] = serde_json::json!(["labelEn", "descEn", "descJa"]);
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        // 名字写错 ⇒ 整笔拒收，一格都不许清
+        let e = r
+            .clear_stale_translations("a.x", &["labelEn".into(), "labelEN".into()])
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            e.message.contains("labelEN"),
+            "拒收要说清是哪一格写错了：{}",
+            e.message
+        );
+        assert_eq!(
+            r.param("a.x").unwrap().stale_translations,
+            vec![
+                "labelEn".to_owned(),
+                "descEn".to_owned(),
+                "descJa".to_owned()
+            ],
+            "被拒的那一笔动到了台账"
+        );
+
+        // 点名清两格 ⇒ 只剩没点的那一格；文件中同步少两个
+        let left = r
+            .clear_stale_translations("a.x", &["labelEn".into(), "descEn".into()])
+            .expect("清得动");
+        assert_eq!(left, vec!["descJa".to_owned()]);
+
+        // 清空 ⇒ 键整个从文件里消失（与 `skip_serializing_if` 同一口径）
+        r.clear_stale_translations("a.x", &["descJa".into()])
+            .expect("清得动");
+        r.write_back().expect("落盘");
+        let again = ParamRegistry::load_from(d.path()).expect("读得通");
+        assert!(again.param("a.x").unwrap().stale_translations.is_empty());
+        assert!(
+            !again.to_toml().contains("staleTranslations"),
+            "台账清空了还留着键"
+        );
+
+        // 老判据没被放宽：原样重存（值没变）不许凭空清掉台账
+        let (mut p2, l2) = editable();
+        p2["params"][1]["descEn"] = serde_json::json!("offset");
+        p2["params"][1]["staleTranslations"] = serde_json::json!(["descEn"]);
+        let (_d2, r2) = load(p2, l2);
+        let mut r2 = r2.unwrap();
+        r2.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                desc_en: Some("offset".into()),
+                ..meta_edit("a.x")
+            },
+        )
+        .expect("改得动");
+        assert_eq!(
+            r2.param("a.x").unwrap().stale_translations,
+            vec!["descEn".to_owned()],
+            "值没变的保存不许清账 —— 撤销/重做要靠这条才幂等"
         );
     }
 
@@ -3581,6 +4673,59 @@ mod tests {
         assert_eq!(again.param("a.x").unwrap().choices.len(), 2);
     }
 
+    /// 空分组删得掉（两份文件一起删、order 重排）；有参数 / 组件卡 / 条件组拦住
+    #[test]
+    fn an_empty_section_can_be_removed_but_never_one_in_use() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        /* 先建两个空组（作者 2026-11-01：「不小心建多了也可以删除」） */
+        r.ensure_section("t1", "custom_1", "多建的一").unwrap();
+        r.ensure_section("t1", "custom_2", "多建的二").unwrap();
+        r.write_back().unwrap();
+
+        /* 有参数的那一组删不动 —— 参数会成孤儿 */
+        let err = r.set_param_meta("a.y", meta_edit("a.y"));
+        assert!(err.is_ok(), "先确认这一笔无关的编辑不受影响");
+        let e = r.remove_section("s1").expect_err("s1 还有 3 条参数");
+        assert!(
+            e.to_string().contains("s1") || e.to_string().contains("参数"),
+            "拒绝的理由要说清楚：{e}"
+        );
+        assert!(r.param("a.y").is_some(), "被拒之后一个字都不许动");
+
+        /* 删空组：两份文件都要少一条，order 重排成 0..n-1 */
+        r.remove_section("custom_1").expect("空组删得掉");
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("删完还得读得通");
+        let ids: Vec<&str> = again
+            .tabs
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .map(|s| s.id.as_str())
+            .collect();
+        assert!(
+            !ids.contains(&"custom_1"),
+            "注册表里还留着被删的组：{ids:?}"
+        );
+        assert!(ids.contains(&"custom_2"), "别的空组被误删了：{ids:?}");
+        let layout_ids: Vec<&str> = again
+            .layout
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .map(|s| s.id.as_str())
+            .collect();
+        assert!(
+            !layout_ids.contains(&"custom_1"),
+            "布局那份还留着被删的组：{layout_ids:?}"
+        );
+        let orders: Vec<f64> = again.tabs[0].sections.iter().map(|s| s.order).collect();
+        assert_eq!(orders, [0.0, 1.0], "order 没按新次序重排：{orders:?}");
+        assert_eq!(again.param_section_ids().len(), 2, "参数一条都不许少");
+    }
+
     /// 弃用可以**只对某几台机型**生效：显式清单落盘、判据按机型分叉、
     /// 全机型并集仍旧认得它（注册表视图划线要用）
     #[test]
@@ -3691,6 +4836,237 @@ mod tests {
         };
         assert_eq!(section_of("s2"), ["a.x"]);
         assert_eq!(section_of("s1"), ["a.mode", "a.y"], "旧组没摘干净");
+    }
+
+    /// 定义框分组下拉里那个「＋ 新增分组」：**同一笔载荷**把分组建出来、把参数放进去。
+    ///
+    /// 顺带钉住「重放不算第二次」—— 撤销 → 重做交回的是同一份载荷，
+    /// 那时分组已经在了，`ensure_section` 得认出它就是自己建的那个。
+    #[test]
+    fn a_new_section_is_created_and_the_param_moves_into_it() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+        let fresh = NewSection {
+            id: "custom_1".into(),
+            tab_id: "t1".into(),
+            label: "试验分组".into(),
+        };
+
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                new_section: Some(fresh.clone()),
+                ..meta_edit("a.x")
+            },
+        )
+        .expect("建得动，也搬得动");
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("建完还得读得通");
+        assert_eq!(again.param("a.x").unwrap().layout.section_id, "custom_1");
+        let hit = again
+            .layout_sections()
+            .into_iter()
+            .find(|(_, _, id, _)| id == "custom_1")
+            .expect("新分组没进 layout_sections —— 界面上就选不到它");
+        assert_eq!(hit.0, "t1", "挂错页签");
+        assert_eq!(hit.3, "试验分组");
+
+        // 重放同一笔：不许建出第二个（否则 check_consistency ④ 下次加载就红）
+        r.set_param_meta(
+            "a.x",
+            ParamMetaEdit {
+                new_section: Some(fresh),
+                ..meta_edit("a.x")
+            },
+        )
+        .expect("重放也该没事");
+        r.write_back().unwrap();
+        let again = ParamRegistry::load_from(d.path()).expect("重放完还得读得通");
+        let n = again
+            .layout_sections()
+            .iter()
+            .filter(|(_, _, id, _)| id == "custom_1")
+            .count();
+        assert_eq!(n, 1, "同一笔载荷重放，分组建了两份");
+    }
+
+    /// id 不合规的分组**不许落盘** —— 它要进两份 TOML，还会进客户端目录
+    #[test]
+    fn a_bad_section_id_is_rejected() {
+        let (p, l) = editable();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+        let before = r.to_toml();
+        let e = r
+            .set_param_meta(
+                "a.x",
+                ParamMetaEdit {
+                    new_section: Some(NewSection {
+                        id: "试验".into(),
+                        tab_id: "t1".into(),
+                        label: "试验分组".into(),
+                    }),
+                    ..meta_edit("a.x")
+                },
+            )
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert_eq!(r.to_toml(), before, "被拒的载荷改到了文档");
+        // 盘上也一个字没变
+        let again = ParamRegistry::load_from(d.path()).expect("拒了也得读得通");
+        assert_eq!(again.param("a.x").unwrap().layout.section_id, "s1");
+    }
+
+    /// **前端发的那个 JSON 形状**能不能解出来（2026-11-01 现场：点上下箭头一点反应
+    /// 都没有，也没报错 —— 先钉死"载荷名字对不对"，别再靠推）。
+    ///
+    /// 前端发的是 `{ label: null, move: 'up' | 'down' }`（`workbench/api.ts` 的
+    /// `SectionMetaEdit`）。这里三样都试：只有方向、只有名字、都没有。
+    #[test]
+    fn the_section_edit_payload_round_trips_from_the_frontend_shape() {
+        let only_move: SectionMetaEdit =
+            serde_json::from_value(serde_json::json!({ "label": null, "move": "up" }))
+                .expect("`move: 'up'` 解不出来 —— 前端点了箭头后端就当成没改");
+        assert_eq!(only_move.label, None);
+        assert_eq!(only_move.move_dir, Some(SectionMove::Up));
+
+        let down: SectionMetaEdit =
+            serde_json::from_value(serde_json::json!({ "label": null, "move": "down" })).unwrap();
+        assert_eq!(down.move_dir, Some(SectionMove::Down));
+
+        let rename: SectionMetaEdit =
+            serde_json::from_value(serde_json::json!({ "label": "支撑", "move": null })).unwrap();
+        assert_eq!(rename.label.as_deref(), Some("支撑"));
+        assert_eq!(rename.move_dir, None);
+
+        let nothing: SectionMetaEdit =
+            serde_json::from_value(serde_json::json!({ "label": null, "move": null })).unwrap();
+        assert_eq!(nothing.label, None);
+        assert_eq!(nothing.move_dir, None);
+    }
+
+    /// 夹具：三个分组（s1 装参数，s2 / s3 是空的 —— 空组不该被 `param_tabs` 滤掉
+    /// 这件事不在这一条里，这里只借它们当"能挪的邻居"）
+    fn three_sections() -> (Value, Value) {
+        let (mut p, mut l) = editable();
+        for (i, id) in ["s2", "s3"].iter().enumerate() {
+            p["tabs"][0]["sections"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({
+                    "id": id,
+                    "label": format!("分组{}", i + 2),
+                    "order": (i + 1) as f64,
+                }));
+            l["tabs"][0]["sections"]
+                .as_array_mut()
+                .unwrap()
+                .push(serde_json::json!({ "id": id, "items": [] }));
+        }
+        (p, l)
+    }
+
+    /// 卡片头：**改名**与**换位置**（2026-11-01 作者：「这个标题这些能点击吧……
+    /// 而且没办法去换它那个上下位置」）。
+    ///
+    /// 位置这件事有两个读者、两把尺子，所以一条测试同时钉住两边：
+    /// 客户端按 `[[tabs.sections]]` 的**数组次序**排，工作台卡片按 `order` 排；
+    /// 布局文件那份数组也跟着换（「所属分组」下拉按它出）。
+    #[test]
+    fn a_group_can_be_renamed_and_moved_within_its_tab() {
+        let (p, l) = three_sections();
+        let (d, r) = load(p, l);
+        let mut r = r.unwrap();
+
+        r.set_section_meta(
+            "s2",
+            SectionMetaEdit {
+                label: Some("试验分组".into()),
+                move_dir: None,
+                new_section: None,
+            },
+        )
+        .expect("改得动");
+        r.set_section_meta(
+            "s2",
+            SectionMetaEdit {
+                label: None,
+                move_dir: Some(SectionMove::Up),
+                new_section: None,
+            },
+        )
+        .expect("挪得动");
+        r.write_back().unwrap();
+
+        let again = ParamRegistry::load_from(d.path()).expect("改完还得读得通");
+        assert_eq!(again.section_meta("s2").unwrap().label, "试验分组");
+        /* 注册表数组：s2 与 s1 换了位（读的是落盘那份文本，不是内存） */
+        let toml = again.to_toml();
+        let at = |id: &str| {
+            /* 夹具写出来的引号风格不定，两种都认 */
+            toml.find(&format!("id = '{id}'"))
+                .or_else(|| toml.find(&format!("id = \"{id}\"")))
+                .unwrap_or_else(|| panic!("{id} 在注册表里不见了"))
+        };
+        assert!(
+            at("s2") < at("s1") && at("s1") < at("s3"),
+            "注册表的数组次序没换 —— 客户端是按它排的\n{toml}"
+        );
+        let orders: Vec<f64> = ["s2", "s1", "s3"]
+            .iter()
+            .map(|id| again.section_meta(id).unwrap().order)
+            .collect();
+        assert_eq!(
+            orders,
+            [0.0, 1.0, 2.0],
+            "order 没跟着数组位置重排 —— 卡片头会跟客户端各排各的"
+        );
+        let lorder: Vec<&str> = again
+            .layout()
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(
+            lorder,
+            ["s2", "s1", "s3"],
+            "布局那份数组没跟着换 —— 「所属分组」下拉还是旧次序"
+        );
+
+        /* 已经在这一页的第一个了：要明说挪不动，不许默默不动 */
+        let e = r
+            .set_section_meta(
+                "s2",
+                SectionMetaEdit {
+                    label: None,
+                    move_dir: Some(SectionMove::Up),
+                    new_section: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            e.message.contains("试验分组"),
+            "报错没点名是哪个分组挪不动：{}",
+            e.message
+        );
+
+        /* 名字空着也不许落盘 */
+        let before = r.to_toml();
+        let e = r
+            .set_section_meta(
+                "s1",
+                SectionMetaEdit {
+                    label: Some("  ".into()),
+                    move_dir: None,
+                    new_section: None,
+                },
+            )
+            .unwrap_err();
+        assert_eq!(e.code, crate::error::ErrorCode::InvalidArgument);
+        assert_eq!(r.to_toml(), before, "被拒的改名改到了文档");
     }
 
     /// 组内顺序：给一个新的 `order` 就换位置，**两份文件一起动**

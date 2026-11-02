@@ -29,7 +29,8 @@
     "check:release-source": "node scripts/check-release-source.mjs",
     "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
     "check:artifacts": "node scripts/check-artifact-boundary.mjs",
-    "check:i18n": "node scripts/check-i18n.mjs"
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "translations:todo": "node scripts/stale-translations.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

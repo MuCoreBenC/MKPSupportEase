@@ -348,15 +348,23 @@ export const bridgeApi: MkpApi = {
   getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),
   setCopiesFollowCloud: (enabled) =>
     call('setCopiesFollowCloud', 'set_copies_follow_cloud', { enabled }),
+  /* 预设页偏好第二项（2026-11-01）：「使用之后自动复制后处理脚本」—— 同一格 presets。
+     后端只保管这一档；换完「使用中」要不要顺手抄一遍，判断在前端 `autoCopy.ts` */
+  getAutoCopyScript: () => call('getAutoCopyScript', 'get_auto_copy_script'),
+  setAutoCopyScript: (enabled) =>
+    call('setAutoCopyScript', 'set_auto_copy_script', { enabled }),
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
   setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
   /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
   resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),
-  /* 应用本体那两条（2026-10-17）：「预设位置」打开目录；「卸载」删程序本体、数据不动 */
+  /* 应用本体那三条（2026-10-17 两条 / 2026-11-01 加「清理数据」）：
+     「预设位置」打开目录；「清理数据」删数据、本体留着；「卸载」删本体、
+     `cleanData` 点名时连数据一起删。清理与卸载后端都是**删完就退**。 */
   openPresetFolder: () => call('openPresetFolder', 'open_preset_folder'),
-  uninstall: () => call('uninstall', 'uninstall'),
+  clearAppData: () => call<void>('clearAppData', 'clear_app_data'),
+  uninstall: (cleanData) => call<void>('uninstall', 'uninstall', { cleanData }),
   /* 界面语言（2026-10-25）：落 locale 格；只换文案，不动任何业务判据 */
   getLocale: () => call('getLocale', 'get_locale'),
   setLocale: (locale) => call('setLocale', 'set_locale', { locale }),

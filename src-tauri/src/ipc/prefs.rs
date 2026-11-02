@@ -286,8 +286,35 @@ pub async fn set_copies_follow_cloud(app: AppHandle, enabled: bool) -> Result<bo
     })
 }
 
-/* ---------- 后处理偏好（2026-10-17）：设置页那一整块 ---------- */
+/// **使用一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+///
+/// ★ 回的是**解析后的 `bool`**，与上面那条同一条口径（盘上"没选过"是 `None`）。
+///
+/// 读者**只有前端那一处**（`src/app/postprocess/autoCopy.ts`）：换完「使用中」之后
+/// 要不要顺手抄一遍脚本，是界面的事 —— 后端不读这一格，也不因为这一格改任何产物。
+#[tauri::command]
+pub async fn get_auto_copy_script(app: AppHandle) -> Result<bool, AppError> {
+    traced("getAutoCopyScript", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::auto_copy_script(&root)
+    })
+}
 
+/// 开关「使用之后自动复制后处理脚本」。
+///
+/// 落盘后照常广播（AppState 的写命令一律如此）—— 这一格有消费者，
+/// 只是不在后端：前端那一条 effect 读的是后端真值，不自己留副本。
+#[tauri::command]
+pub async fn set_auto_copy_script(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    traced("setAutoCopyScript", |_| {
+        let root = internal_root(&app)?;
+        let got = runtime::app_state::set_auto_copy_script(&root, enabled)?;
+        notify_app_state(&app);
+        Ok(got)
+    })
+}
+
+/* ---------- 后处理偏好（2026-10-17）：设置页那一整块 ---------- */
 /// 读后处理偏好 —— 回的是**解析后**的值（`None` 已经解成出厂档、量程已经夹住）。
 ///
 /// 与自动清理那一条同一条口径：**"没选过"该怎么解释是后端的事**，

@@ -717,19 +717,37 @@ export default function PresetTable({
 
   return (
     <div className={s.hold}>
-      <div
-        className={s.wrap}
-        ref={wrapRef}
-        /*
-         * 一直在记"当前这一档停在哪儿"。不靠换 scope 那一刻去读：那一刻读到的
-         * 已经是新内容夹过的数字了（见上面 `scrollMemo` 那段）。
-         */
-        onScroll={(e) => {
-          scrollMemo.current[scope] = e.currentTarget.scrollTop
-        }}
-      >
-        {/* `data-selecting` 只给 CSS 用：多选时名称列让出左内衬给复选框那一列 */}
-        <table className={s.table} data-selecting={select !== null}>
+      {/*
+       * ============ 表头**不在滚动容器里**（2026-11-01 第六次改） ============
+       *
+       * 作者连着四张截图：「上沿偶尔露出一条背景」「整行那么高、还是被压扁的」。
+       * 前三版都在给 **sticky** 打补丁（`top: -1px`、`thead` 加底色、负层级底色带），
+       * 越补越糟 —— 因为问题不在那几像素：sticky 在 WKWebView 里会被单独合成，
+       * 滚动时那张层缓存不失效就闪残影，遮罩层与表体重绘不同步就露出半张表。
+       *
+       * 现在**不用 sticky 了**：表头一张表、正文一张表，两张共用同一份 `<colgroup>`
+       * （`table-layout: fixed` + 同一套列宽 ⇒ 列必然对齐）。表头是普通元素，永远
+       * 待在滚动容器上方 —— 没有粘性层，也就没有残影可留。
+       *
+       * 附带好处：滚动容器里只剩一个孩子，`glideIntoView` 的「定位」动画又能用了
+       * （有 sticky 时被 `hasSticky` 守卫挡掉，只能瞬跳）。
+       */}
+      <table className={`${s.table} ${s.headTable}`} data-selecting={select !== null}>
+        <colgroup>
+          {select !== null && <col className={s.thCheck} />}
+          <col />
+          <col className={s.thMachine} />
+          {mkp ? (
+            <col className={s.thVersion} />
+          ) : (
+            <>
+              <col className={s.thNum} />
+              <col className={s.thNum} />
+            </>
+          )}
+          <col className={scope === 'cloud' ? s.thTimeCloud : s.thTime} />
+          <col className={s.thAct} />
+        </colgroup>
           <thead className={s.head}>
             <tr>
               {/*
@@ -803,6 +821,35 @@ export default function PresetTable({
               </th>
             </tr>
           </thead>
+      </table>
+
+      <div
+        className={s.wrap}
+        ref={wrapRef}
+        /*
+         * 一直在记"当前这一档停在哪儿"。不靠换 scope 那一刻去读：那一刻读到的
+         * 已经是新内容夹过的数字了（见上面 `scrollMemo` 那段）。
+         */
+        onScroll={(e) => {
+          scrollMemo.current[scope] = e.currentTarget.scrollTop
+        }}
+      >
+        <table className={s.table} data-selecting={select !== null}>
+        <colgroup>
+          {select !== null && <col className={s.thCheck} />}
+          <col />
+          <col className={s.thMachine} />
+          {mkp ? (
+            <col className={s.thVersion} />
+          ) : (
+            <>
+              <col className={s.thNum} />
+              <col className={s.thNum} />
+            </>
+          )}
+          <col className={scope === 'cloud' ? s.thTimeCloud : s.thTime} />
+          <col className={s.thAct} />
+        </colgroup>
 
           <tbody>
             {rows.map((row) => {

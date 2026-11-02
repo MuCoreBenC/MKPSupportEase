@@ -369,7 +369,6 @@ body[data-window-dragging='true'] .logo[data-clickable='true']:active {
   display: grid;
   place-items: center;
   color: var(--text-2);
-  transition: background 0.12s ease, color 0.12s ease;
 }
 
 /* 贴边之后 global.css 那个外扩 2px 的焦点环会被窗口边缘裁掉，改成内描边 */

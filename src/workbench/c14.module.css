@@ -3229,6 +3229,19 @@
   align-items: baseline;
 }
 
+/*
+ * 同一行的第二种写法（2026-11-02）：**直接在那一行上**标 `data-form="wide"`，
+ * 而不是靠祖先 `[data-form='wide']` 传下来。
+ *
+ * 机型多选器（`MachinePicker`）不在 `pRailBody` 里，但它要的正是这一种：
+ * 名字 + 浅色 id 并排一行。原来只能整段竖排，八台机型撑出一屏。
+ */
+.pVtext[data-form='wide'] {
+  flex-direction: row;
+  gap: 5px;
+  align-items: baseline;
+}
+
 .pVname {
   overflow: hidden;
   white-space: nowrap;
@@ -3820,6 +3833,70 @@
   overflow: hidden;
 }
 
+/*
+ * 带画布的分组卡（组件卡，2026-11-01）。
+ *
+ * 三条定死（作者反复挑了三回）：
+ *   ① 占位块**永远在左边**（客户端 `tower-map` 就是左图右参数）——
+ *      **包括正文只剩一列的时候**。作者 2026-11-01 看到它跑到正上方：
+ *      「为什么这个画布现在在正上方了，而不是在正左方」。那是我让它掉上去
+ *      "让路"的；现在改成**窄了只压窄它、绝不换位置**；
+ *   ② 占位块**跟右边那列参数一样高**，不是一小块浮在上头；
+ *   ③ **窗口尺寸怎么变都不许走样**。
+ *
+ * # 为什么两栏都得用 calc 算宽度（踩过的坑）
+ *
+ * 参数行自己有 `content-visibility: auto` + `contain-intrinsic-size`（C14 为拖窗口
+ * 做的性能优化）。被它跳过的行，宽度参与不了外层分配 —— 结果右列在 483px 的卡里
+ * 只分到 349px，卡右半边一直空着。grid 换 flex 都一样，问题在行的固有宽度不可知。
+ */
+.pGroupSplit {
+  /* 占位块宽度：两列 132px（作者："宽度不用占据很多"），单列压到 104px */
+  --slot-w: 132px;
+
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+/* 占位块那一栏：宽度跟着 `--slot-w`，右列按 `calc(100% - var(--slot-w))` 让位 */
+.pGroupAside {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  box-sizing: border-box;
+  width: var(--slot-w);
+  padding: 8px;
+  border-right: 1px solid var(--line);
+}
+
+/*
+ * 右列（参数行）：宽度**自己算**，不靠 `flex: 1` 分 —— 行被 `content-visibility`
+ * 跳过时固有宽度不可知，`flex` 分出来的就是错的（实测 349px，卡宽 483px）。
+ */
+.pGroupRows {
+  flex: none;
+  box-sizing: border-box;
+  width: calc(100% - var(--slot-w));
+  min-width: 0;
+}
+
+/* 画布在右侧的组件（以后真有的话）：两栏换个方向，分隔线跟着换边 */
+.pGroupSplit[data-side='right'] .pGroupAside {
+  order: 2;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+
+/*
+ * 正文只剩一列（`data-cols='1'`，页面那个 ResizeObserver 写）：
+ * **只把占位块压窄**，不改成上下排 —— 位置就是它的意义。
+ * 104px 里放得下「画布」两个字，组件名那行会省略（`ComponentSlot` 已带 ellipsis）。
+ */
+.pScroll[data-cols='1'] .pGroupSplit {
+  --slot-w: 104px;
+}
+
 .pGroupHead {
   display: flex;
   gap: 8px;
@@ -3852,6 +3929,30 @@
 .pFoldBtn:hover {
   color: var(--text-1);
   border-color: var(--line-strong);
+}
+
+/*
+ * 卡头标题 = 打开分组抽屉的那一颗（2026-11-01 第三稿）。
+ *
+ * 作者：「我不要点击的改名，我要点击的打开右侧的抽屉……」—— 卡头里不再有输入框、
+ * 也不再有上下箭头（一个误触就把顺序改了）。标题平时长得跟原来那行字一模一样，
+ * 悬停才给一条虚线下划线，暗示"这里点得动"。
+ */
+.pGroupName {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  cursor: pointer;
+}
+
+.pGroupName:hover {
+  color: var(--text-1);
+  border-bottom-color: var(--line-strong);
 }
 
 /*

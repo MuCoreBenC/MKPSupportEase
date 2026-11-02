@@ -199,12 +199,16 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     // 装渲染器：审计里的"产物是否跟上"用的就是 `build_state`（2026-11-01）
     let probe = super::build::renderer_for(ctx);
     let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
-    // ★ 根从**会话那份 presets 的根**派生（`*_at`，与生成 / 发布同一条派生）——
-    // 审计查的就是这个会话要发的那一棵交付树
-    let delivery_root = paths::delivery_root_at(ctx.presets.root());
+    /* ★ 根从**真仓库**（`ctx.real_root`）派生（2026-11-01）。
+     *
+     * 不能再拿 `ctx.presets.root()`：会话的 `Presets` 现在永远读**影子树**
+     * （那里才是编辑态）。影子里最多只有开场时拷过去的那一份 `delivery/`，
+     * 生成之后就成了旧拷贝 —— 审计会拿着旧产物报"都待更新"。
+     * 交付树 / 载荷根都住在真仓库，与生成 / 发布同一条派生（`*_at`）。 */
+    let delivery_root = paths::delivery_root_at(ctx.real_root());
     // ★ 只读定位，不 `create_dir_all` —— 一个自称「只读：不写盘」的闸
     // 不该顺手造出一个目录
-    let asset_root = paths::assets_root_at(ctx.presets.root());
+    let asset_root = paths::assets_root_at(ctx.real_root());
 
     let mut items: Vec<AuditItem> = Vec::with_capacity(17);
 

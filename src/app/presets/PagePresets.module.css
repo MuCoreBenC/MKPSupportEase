@@ -157,20 +157,6 @@
 
 /* ---------- 轻筛选 / 状态区（在同一个换行容器里） ---------- */
 
-/*
- * 「定位」的闪烁层：**一块盖在行上的普通 div**，不进表格 ——
- * 折叠边框表内部（tr/td 背景）跑任何 keyframes，适配缩放下合成层缓存都会留
- * 旧帧，读起来就是行里若隐若现的白带。div 的终态是 display:none，缓存与否
- * 无关紧要。位置由 locateApplied 现量现设（相对 .page，它本就是 relative）。
- * 入口现在是融合 pill 的左拍（G07-1 收编）—— 原来那颗「定位」按钮退场。
- */
-.locateFlash {
-  position: absolute;
-  left: 0;
-  display: none;
-  background: rgb(32 178 90 / 20%);
-  pointer-events: none;
-}
 
 /*
  * 切片器的筛选区（`filterRow`，机型 + 喷嘴 + 层高三颗下拉）2026-10-10 **退役**：

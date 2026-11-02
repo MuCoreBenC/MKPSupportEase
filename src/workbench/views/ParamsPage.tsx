@@ -51,7 +51,12 @@
  *     收起来的那几行留一个 「仍然展开看」（词从后端来：`words.relate.showAnyway`）。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties } from 'react'
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+} from 'react'
 
 import {
   isAppError,
@@ -70,6 +75,7 @@ import {
   type Refresh,
   type RegistryView,
   type Row,
+  type SectionMetaEdit,
   type Words,
 } from '../api'
 import type { GotoFocus } from '../c14/types'
@@ -89,12 +95,22 @@ import {
   type EditEntry,
 } from '../editQueue'
 import type { ParamView } from '../api'
+/* 行右键菜单：与资产页 / 机型页同一套（见 `components/menu`） */
+import { ContextMenu } from '../components/menu'
+import type { ContextMenuEntry } from '../components/menu/types'
+import { useContextMenu } from '../components/menu/useContextMenu'
 import BatchEdit from './BatchEdit'
 import type { BatchTarget } from './BatchEdit'
 import CellEditor from './CellEditor'
 import CompareMatrix from './CompareMatrix'
 import ParamDefModal from './ParamDefModal'
+import { nextSectionId } from './sectionId'
 import ParamDetail, { StatusTag } from './ParamDetail'
+/* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
+/* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
+import ComponentSlot from './ComponentSlot'
+import { slotSideOf } from './componentSide'
+import SectionDrawer from './SectionDrawer'
 import s from '../c14.module.css'
 
 /**
@@ -115,6 +131,23 @@ const colSplit = (id: string): { m: string; uid: string } => {
 /** 两条竖线的可拖范围（C14 第三/四轮的量）。默认 176 / 320，min 是「读得出名字」那条线 */
 const RAIL = { dft: 176, min: 152, max: 320 }
 const ASIDE = { dft: 320, min: 240, max: 620 }
+
+/**
+ * 「页面上的行」有多少条。与表头那个 `total` **不是**一个数 ——
+ * 表头的 `total` 是这一页的参数条数（`Desk.total`），这里数的是眼下真被画出来的行：
+ * 收起来的卡一行都不画，条件关着的行算的也是"没画"。
+ *
+ * 用它判"某一组现在页面上有没有东西"，抽屉里那句「页面上看不到它」就是按它算的。
+ */
+function drawnRowCount(desk: Desk, cur: number, searching: boolean, opened: string[]): number {
+  let n = 0
+  for (const g of desk.groups) {
+    /* 与渲染那一支同一条判据（`collapseNoteOf`）：搜的时候卡不收起 */
+    if (collapseNoteOf(g, cur, searching) !== null && !opened.includes(g.sectionId)) continue
+    n += g.items.reduce((m, it) => m + 1 + it.children.length, 0)
+  }
+  return n
+}
 
 interface Props {
   book: BookView
@@ -140,6 +173,11 @@ interface Props {
   ) => Promise<{ ok: boolean; desk: Desk | null; matrix: Matrix | null }>
   /** 「编辑定义」保存成功后交一条给外壳 —— 压进撤销栈（改前/改后整包） */
   onMetaApplied: (m: MetaApplied) => void
+  /**
+   * 别的结构编辑（分组改名 / 换位）落进草稿之后，让外壳把事务状态刷一下 ——
+   * 状态栏那条「未保存改动（N）」是服务器侧那条栈的数字，前端不自己记
+   */
+  onEditApplied: () => void
   /** 外壳的保存 / 撤销（「放弃」也归外壳那对按钮 —— 这一页不再画自己的一对） */
   onSave: () => void
   onUndo: () => void
@@ -149,7 +187,7 @@ interface Props {
 
 export default memo(ParamsPage)
 
-function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onSave, onUndo, onGoto }: Props) {
+function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onEditApplied, onSave, onUndo, onGoto }: Props) {
   /* 定位只看挂载时的那一次 —— 之后就是普通的本页状态 */
   const init = initialFocus ?? null
   /*
@@ -179,8 +217,34 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
    * 长一颗「收起来」，点了就把这一张从这里请出去（收起判据照旧在后端字段里）。
    */
   const [openedCards, setOpenedCards] = useState<string[]>([])
+  /** 分组抽屉开着的是哪一组（`null` = 关着）。改名 / 换位 / 参数清单都在抽屉里 */
+  const [drawerSection, setDrawerSection] = useState<string | null>(null)
+  /*
+   * 抽屉里那颗「当前」标记住的是哪一组 —— **不一定是 `drawerSection`**。
+   *
+   * 作者 2026-11-01 指着截图问：「我的里面没有这个了但是侧边抽屉还有这个，是谁错了」。
+   * 图里抽屉顶上是 `glue_advanced_motion`、页面上亮着的是「高级运动调控」那一行，
+   * 而右边那棵分组清单里却把「高级运动调控」也标成了当前 —— 同一屏两个"当前"。
+   *
+   * 根源是**两件事被塞进了一个变量**：抽屉是"你点开的哪一张卡"，"当前"是"页面此刻
+   * 把哪一组当主体"（高亮、页头的「第 N / 共 M 组」）。`onShowSection` 每次都会把
+   * `sectionId` 一并改掉，于是"看别的组"这个动作顺手把"当前"也挪走了；未落盘的
+   * 新组、组件卡（注册表里查不到）更明显 —— 抽屉退回"第一个组"当当前。
+   *
+   * 现在分开：`drawerAnchor` 才是当前（打开抽屉时同步成你点的那一组），抽屉标题与
+   * 那个「当前」标记都跟着它；换看另一组只换抽屉内容，不换当前。
+   */
+  const [drawerAnchor, setDrawerAnchor] = useState<string | null>(null)
   /** 正在编辑定义的参数（2026-10-03。「编辑定义」模态框，null = 关着） */
   const [defEditKey, setDefEditKey] = useState<string | null>(null)
+  /**
+   * 参数行的右键菜单（2026-11-02 作者：「帮我加上右键菜单，可以直接右键编辑」）。
+   *
+   * 与资产页 / 机型页同一套 `useContextMenu`：熟手的第二条路，**不引入新动作** ——
+   * 菜单里每一项在界面上都已经有对应入口（右栏「编辑定义」、右栏各版本取值…），
+   * 文案照抄那些按钮，不另起说法。
+   */
+  const rowMenu = useContextMenu<string>()
   /**
    * 定义落盘的计数。定义一变，行的分组/文案/可改性都可能变 —— 挂进三处
    * 派生数据的 effect 里当一次「手动 tick」（`tick` 是外壳的，只管值）
@@ -296,6 +360,27 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   const shownDrawerDesk = useMemo(() => patchDesk(drawerDesk, overlay), [drawerDesk, overlay])
   const matrixOv = useMemo(() => patchMatrix(matrix, overlay), [matrix, overlay])
 
+  /*
+   * 抽屉里那句「页面上看不到它」用的是**页面自己那两个数**（参数条数 / 画出来的行数），
+   * 不从注册表另算一遍 —— 表头写着 74 条、底下只有 18 行，差的那些就是收起或关掉的。
+   */
+  const pageTotal = shownDesk?.total ?? 0
+  const pageDrawn = useMemo(
+    () =>
+      shownDesk === null
+        ? 0
+        : drawnRowCount(shownDesk, shownDesk.cur, q.trim() !== '', openedCards),
+    [shownDesk, q, openedCards],
+  )
+
+  /** 抽屉里「这一组有哪些参数」：行序与卡片里一致（父项在前、子项紧跟） */
+  const drawerRows = useMemo(() => {
+    const g = shownDesk?.groups.find((x) => x.sectionId === drawerSection) ?? null
+    if (g === null) return []
+    return g.items.flatMap((it) => [it.row, ...it.children]).map((r) => ({ key: r.key, label: r.label }))
+  }, [shownDesk, drawerSection])
+
+
   /**
    * 队列把一批排好的改动交到这里 —— **一次 `apply_draft` 落完**，回来顺手把那一页
    * 派生收下（后端按 `refresh` 现算，省掉事后再问一次）。
@@ -361,6 +446,40 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   }, [init, desk, mode])
 
   /*
+   * 「刚改完，带我去看它落在哪」（作者 2026-11-01：「改到这个位置，不用我关掉那个
+   * 编辑模态框它就帮我切换过来」）。
+   *
+   * 锚点 id 在写成功那一刻就算好（行 `t-param-<key>` / 卡 `t-sec-<id>`），
+   * **等这一屏重取回来**再滚 —— 换组之后那一行在新卡里，旧 DOM 已经不在了。
+   * 只做一次：之后用户自己滚，不该被拽回去。
+   *
+   * ★ 2026-11-01 第二轮：**锚点找不到就先留着**。抽屉里「点另一组」时，那一组可能
+   *   在**别的领域（tab）**下 —— 这里先把 `tabSel` 切过去，可这一趟 `desk` 还是旧
+   *   领域的那份（后端刚从搜索态回来也一样）：此刻 `getElementById` 是空的，旧写法
+   *   把 `pendingLocateRef` 一清，锚点就永远没人滚了。现在留着等下一份 `desk`。
+   */
+  const pendingLocateRef = useRef<string | null>(null)
+
+  /*
+   * 打开抽屉（任何入口）⇒ 把「当前」同步成这一组。
+   *
+   * 同步只发生在**抽屉换了主人**这一刻：`onShowSection` 是"在抽屉里换看另一组"，
+   * 它不该改当前（那只管抽屉里看什么）—— 所以它把 `drawerAnchor` 再写回旧的。
+   * 挂在 effect 上是为了覆盖所有入口（卡头、收起卡、抽屉里的换组），不必每处都记得。
+   */
+  useEffect(() => {
+    if (drawerSection === null) return
+    setDrawerAnchor((prev) => (prev === drawerSection ? prev : drawerSection))
+  }, [drawerSection])
+  useEffect(() => {
+    const anchor = pendingLocateRef.current
+    if (anchor === null || desk === null) return
+    if (document.getElementById(anchor) === null) return
+    pendingLocateRef.current = null
+    locateAnchor(anchor, { row: anchor.startsWith('t-param-') })
+  }, [desk])
+
+  /*
    * 对照一屏：差异/行序/not_own 全部由后端按基准机型判（C14 第四轮）。
    * **tab 不递给后端**（2026-10-03）：矩阵一律取全量行，领域过滤挪到下面
    * `shownMatrix` 与「仅显示差异」同一处做 —— 之前 tab 一递，页签计数只能
@@ -411,7 +530,159 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     setRegistry(next)
     setDefEditKey(null)
     setMetaTick((t) => t + 1)
-    toasts.push(`定义已写回 param_registry.toml · ${edit.label}`, { label: '撤销', run: onUndo })
+    /*
+     * 定义框里那颗「确认保存」**也只是应用**（2026-11-01 作者定的口径：
+     * 「只有右上角的保存才是真的保存，其他的都只是那种应用……我点了右上角的放弃，
+     * 那就真的是放弃，点了保存才真的是保存」）。
+     *
+     * 所以这里有两件事不能漏：
+     *   · 别叫"写回文件" —— 它此刻只进了草稿（要看真落盘没有，看右上角那颗）；
+     *   · 把状态栏那颗红色的「未保存改动（N）」与它的撤销栈刷出来 —— 不刷的话
+     *     界面上写着"已保存 / 未保存改动（0）"，而草稿里已经躺着两笔。
+     */
+    onEditApplied()
+    /*
+     * 存完就带人去看它落在哪（作者 2026-11-01：「改到这个位置，它好像没帮我自动
+     * 切换到对应的位置」）：
+     *
+     *   · 切到**目标分组所在的页签**（新建的分组就切它挂的那个）；
+     *   · 搜索框里有字就先清掉 —— 搜不到等于没跳；
+     *   · 锚点记下来，等这一屏重取回来再滚 + 闪（换组之后那一行在新卡里）。
+     */
+    const tabId =
+      edit.newSection?.tabId ?? next.sections.find((x) => x.id === edit.sectionId)?.tabId ?? null
+    if (tabId !== null) setTabSel(tabId)
+    if (q.trim() !== '') setQ('')
+    pendingLocateRef.current = `t-param-${key}`
+    toasts.push(`定义已应用（保存才落盘）· ${edit.label}`, { label: '撤销', run: onUndo })
+  }
+
+  /**
+   * 译文台账被清了几格（定义框里那颗「已经改好过」，2026-11-02）。
+   *
+   * 和 `commitDef` 同一副骨架，但**不压撤销栈**：这一笔改的是"台账"这件记账，
+   * 不是参数定义；撤销一条"我把标记清了"的条目没有意义（真要回退，工作台「放弃」兜着）。
+   * 唯一不许省的还是那一句：刷「未保存改动（N）」—— 它此刻只进了草稿。
+   */
+  const applyStaleCleared = (next: RegistryView, key: string) => {
+    setRegistry(next)
+    setMetaTick((t) => t + 1)
+    onEditApplied()
+    toasts.push(`译文标记已清（保存才落盘）· ${key}`)
+  }
+
+  /**
+   * 卡片头交上来的：改分组名 / 换这一组在页签里的位置。
+   *
+   * 位置只给方向 —— 后端一次写完两处（注册表数组次序给客户端、`order` 给卡片），
+   * 回来的是整份注册表视图；桌面重取一次，然后滚到那张卡上闪一下，好让人看见
+   * 它挪到哪儿去了（作者原话：「没办法去换它那个上下位置」）。
+   */
+  /**
+   * 删掉一个空分组。
+   *
+   * 与改名、换位走**同一条路**（作者 2026-11-01：「删除的操作也是一样的，需要点保存或者
+   * 放弃」）：这一笔只是应用进草稿，右上角「保存」才真落盘，那之前「放弃」就退回来。
+   *
+   * 三道门在后端（还有参数 / 是组件卡 / 带 showWhen）—— 这里不预判，拒了就把那句话
+   * 原样报出来。
+   *
+   * # 抽屉不关（2026-11-02 作者：「删除之后的刷新，不要关闭我的抽屉」）
+   *
+   * 早先是"先关抽屉再重取"，理由是抽屉正对着的对象已经没了。但那是把**界面反应**
+   * 当成**删除本身**：用户正在这一栏里做一串整理（删一个、改一个名、再挪一位），
+   * 每删一个就把抽屉关掉，等于每次都把他踢出工作区。
+   *
+   * 现在：抽屉留着，由**这里**把它跟到同一页签的下一个还在的组（见下面那段），
+   * 页面重取一次，其余什么都不动。`SectionDrawer` 里那段 `deletedFallback` 只是
+   * 兜底（撤销/重做等别的路径把 id 弄丢时用），主路径在这里。
+   */
+  const removeSection = async (sectionId: string) => {
+    try {
+      /* 名字、页签、以及"下一站在哪一组"**都要先取**：`next` 里这一组已经没了 */
+      const before = registry?.sections ?? []
+      const gone = before.find((x) => x.id === sectionId) ?? null
+      const name = gone?.label ?? sectionId
+      const next = await wb.removeSection(sectionId)
+
+      /*
+       * ★ 删完把抽屉**挪到还在的那一组**（2026-11-02 作者：「删除了之后出现这个」——
+       * 抽屉顶上写着 `glue_advanced_motion`、副标题写「注册表里没有这一组」）。
+       *
+       * 原因是抽屉正对着的 id 已经不存在，而标题取 `here?.label ?? fallbackLabel ??
+       * mark ?? sectionId` —— 查不到就退回**id 原文**。`SectionDrawer` 里那个
+       * `deletedFallbackRef` 只在"上一帧还认得"时才有值，首帧就是删除后那次渲染，
+       * 它还没来得及记，所以兜不住。
+       *
+       * 只靠组件内部兜底是猜的；**宿主知道得更多**：删除只少一条，同一页签里紧邻的
+       * 那一组就是"同一位置上的下一组"（删的是最后一个就退到前一个）。
+       * 这里直接把两个 id 都拨过去，「当前」与抽屉内容一起跟过去，界面不出现空洞。
+       */
+      if (drawerSection === sectionId) {
+        const sibs = before.filter((x) => x.tabId === (gone?.tabId ?? ''))
+        const at = sibs.findIndex((x) => x.id === sectionId)
+        const nextOne = sibs[at + 1] ?? sibs[at - 1] ?? null
+        setDrawerSection(nextOne?.id ?? null)
+        setDrawerAnchor(nextOne?.id ?? null)
+      }
+
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      if (sel === sectionId) setSel(null)
+      toasts.push(`分组已删除（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /**
+   * 新建一个空分组（抽屉里每个页签那一行右边的「＋ 新增分组」）。
+   *
+   * 与删除对称：**只进草稿**，右上角「保存」才落盘。`id` 前端给（`custom_N`），
+   * 与参数定义框那条同一条口径 —— 撤销/重做把同一笔载荷原样重放时，后端按
+   * 「确保这个分组在」处理（`ensure_section` 幂等）。
+   *
+   * 建完把抽屉切到新组上：那正是"我刚建的那个"，列在它自己名下（0 条参数）、
+   * 也就立刻能删（误建的情形）。不关抽屉。
+   */
+  const addSection = async (tabId: string, label: string) => {
+    try {
+      /*
+       * id 的挑法与参数定义框**同一份实现**（`nextSectionId` 从 `ParamDefModal`
+       * 导出，这里 import）—— 作者 2026-11-02：「复用我说的是新增的方法复用」。
+       * 两个入口建的是同一种东西（`custom_N` + `ensure_section` 幂等），规则只能有一处。
+       */
+      const id = nextSectionId(registry?.sections ?? [])
+      const next = await wb.setSectionMeta(id, { label, move: null, newSection: { id, tabId, label } })
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      setDrawerSection(id)
+      setDrawerAnchor(id)
+      toasts.push(`已新建分组「${label}」（保存才落盘）`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  const saveSection = async (sectionId: string, edit: SectionMetaEdit) => {
+    try {
+      const next = await wb.setSectionMeta(sectionId, edit)
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+      onEditApplied()
+      pendingLocateRef.current = `t-sec-${sectionId}`
+      const name = next.sections.find((x) => x.id === sectionId)?.label ?? sectionId
+      const what = edit.label !== null ? '分组改名' : '分组换位'
+      /*
+       * 说清"只是应用了"—— 落盘仍归右上角那颗「保存」（作者 2026-11-01 的口径）。
+       * 一句话说完：toast 是浮在小卡片上的，末尾那截会被挤到屏幕外。
+       */
+      toasts.push(`${what}已应用（保存才落盘）· ${name}`, { label: '撤销', run: onUndo })
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    }
   }
 
   /**
@@ -623,6 +894,62 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
 
   /* 右栏按需出现：选了参数就有。没选参数时整栏收起，不摆一块空面板占位置 */
   const selParam = sel !== null ? (paramOf(sel) ?? null) : null
+
+  /**
+   * 「组内顺序」那一格的数据（2026-11-02）：这一条在**它所属分组**里的同级清单。
+   *
+   * 与编辑定义框里的 `siblings` 同一条口径：按 `[params.layout].order` 排，
+   * 拿注册表那份（右栏读的是已落盘的定义，草稿只存在于定义框里）。
+   * 取不到（注册表还没回来 / 这条不在里面）就返回 `null`，那一格不画 ——
+   * 空着一张表比不给更让人困惑。
+   */
+  const siblingsOf = (key: string): { key: string; label: string }[] | null => {
+    if (registry === null) return null
+    const self = registry.params.find((p) => p.key === key)
+    if (self === undefined) return null
+    return registry.params
+      .filter((p) => p.sectionId === self.sectionId)
+      .map((p) => ({ key: p.key, label: p.label, order: p.order }))
+      .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+      .map(({ key: k, label }) => ({ key: k, label }))
+  }
+
+  /**
+   * 把这一条在组里上 / 下挪一位。
+   *
+   * ★ 用词：这里**不是**"直接落盘"（2026-11-02 作者纠正：「会进影子树对吧，我放弃
+   * 也能成功取消修改」）。所有 `wb_*` 命令写到的都是影子树 `workbench/.draft/presets/`，
+   * 右上角「保存」才 commit 到 `presets/`，「放弃」一定撤得掉。
+   * 与编辑定义框的区别只在**前端撤销栈的粒度**：那边攒一次「确认」发一笔，
+   * 这边每点一下箭头发一笔（连挪三次要撤三次）。
+   *
+   * 顺序值与编辑定义框里那条 `moveOrder` 用同一个算法：取两个邻居的中点，
+   * 到头就往外扩一格。两处各算一套的话，同一次挪动在不同入口下会得到不同的
+   * `order`，`layout_schema` 的 items 顺序就飘了。
+   */
+  const moveOrderOf = async (key: string, dir: -1 | 1) => {
+    if (registry === null) return
+    const self = registry.params.find((p) => p.key === key)
+    if (self === undefined) return
+    const list = registry.params
+      .filter((p) => p.sectionId === self.sectionId)
+      .sort((a, b) => a.order - b.order || a.key.localeCompare(b.key))
+    const at = list.findIndex((p) => p.key === key)
+    if (at < 0) return
+    const other = list[at + dir]
+    if (other === undefined) return
+    const outer = list[at + dir * 2]
+    const nextOrder =
+      outer === undefined ? other.order + dir : (other.order + outer.order) / 2
+    try {
+      const next = await wb.setParamMeta(key, { ...metaOf(self), order: nextOrder })
+      setRegistry(next)
+      setMetaTick((t) => t + 1)
+    } catch {
+      /* 失败就让下一次重取把状态拉回来（不静默改界面） */
+      setMetaTick((t) => t + 1)
+    }
+  }
   /** 「编辑定义」正在改的那条（null = 关着） */
   const defParam = defEditKey !== null ? paramOf(defEditKey) : null
   /*
@@ -652,6 +979,46 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         ? rowOf(shownDesk, sel)
         : rowOf(shownDrawerDesk, sel)
       : null
+
+  /*
+   * 行右键菜单的条目（2026-11-02 作者：「帮我加上右键菜单，可以直接右键编辑，
+   * 就和这个一样的打开模态框」）。
+   *
+   * 三条自我约束：
+   *
+   *   · **不引入新动作**：每一项在界面上都已经有入口（右栏那颗「编辑定义」、
+   *     行本身的写值），文案照抄那个按钮，不另起说法；
+   *   · **禁用要给原因**：用 `disabled` 那一句把"为什么这行不能编辑定义"说出来
+   *     （弃用 / 是 G-code / 注册表里查不到），不灰着不解释；
+   *   · **图标交替**：通用件的硬约定（见 `components/menu/types.ts` 头注），
+   *     这里首项挂、次项不挂，隔开就有节奏。
+   */
+  const rowEntries: ContextMenuEntry[] = (() => {
+    const key = rowMenu.target
+    if (key === null) return []
+    const p = paramOf(key)
+    return [
+      {
+        id: 'def',
+        label: '编辑定义…',
+        icon: 'params',
+        /* 与右栏那颗「编辑定义」同一条判据：拿不到 `ParamView` 就没得改 */
+        disabled: p === null ? '注册表里没有这一条（派生数据还没回来）' : undefined,
+        onSelect: () => {
+          setSel(key)
+          setDefEditKey(key)
+        },
+      },
+      {
+        id: 'focus',
+        label: '选中并跳到这一行',
+        onSelect: () => {
+          setSel(key)
+          locateAnchor(`t-param-${key}`, { row: true })
+        },
+      },
+    ]
+  })()
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
   const asideShown =
     sel !== null &&
@@ -1104,12 +1471,17 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                               note={note}
                               words={words}
                               onOpen={() => setOpenedCards((prev) => [...prev, g.sectionId])}
+                              onOpenDrawer={() => setDrawerSection(g.sectionId)}
                             />
                           )
                         }
                         return (
                           <GroupCard
                             key={g.sectionId}
+                            component={
+                              (registry?.sections ?? []).find((x) => x.id === g.sectionId)
+                                ?.component ?? null
+                            }
                             group={g}
                             cur={shownDesk.cur}
                             uid={target === BASE ? null : target}
@@ -1118,6 +1490,14 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                             paramOf={paramOf}
                             sel={sel}
                             onPick={(key) => setSel(key)}
+                            /* 右键某一行 = 打开它自己的菜单（编辑定义等），见文件末尾 `ParamLine` */
+                            rowMenu={(key) => rowMenu.triggerProps(key)}
+                            /* 卡头点开抽屉时顺手把「当前很亮的那一行」换成这一组 ——
+                               抽屉里那颗圆点与页面上的亮行必须是同一件事（见抽屉那节注释） */
+                            onOpenDrawer={() => {
+                              setDrawerSection(g.sectionId)
+                              setDrawerAnchor(g.sectionId)
+                            }}
                             onWrite={writeValue}
                             onOpenGcode={(key) =>
                               setGcodeOpen({
@@ -1312,6 +1692,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
                   }
                   words={words}
                   groupLabel={groupLabelOf(registry, selRow)}
+                  /*
+                   * 「组内顺序」（2026-11-02）：这一条在它所属分组里的同级清单，
+                   * 按 `order` 排好（含自己）。右栏那一格与编辑定义框里那座下拉
+                   * 长相一致、数据同源（`[params.layout].order`）。
+                   */
+                  siblings={siblingsOf(sel)}
+                  /* 每点一下箭头就发一条 `wb_set_param_meta` —— 进的是**影子树 + 事务**，
+                     「放弃」照样撤得掉；与定义框的差别只是撤销栈粒度（它攒一次「确认」发一笔） */
+                  onMoveOrder={(dir) => void moveOrderOf(sel, dir)}
                   onClose={() => setSel(null)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
@@ -1439,6 +1828,83 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
       )}
 
       {/*
+        分组抽屉（2026-11-01）：点卡片头进来。改名 / 换位 / 这一组的参数清单都在
+        里头 —— 卡头不再放输入框与箭头（作者：「上下这些……很容易不小心点到的
+        就是排序」）。里面每一次改动都只是**应用**：进草稿、进撤销栈，落盘仍归
+        右上角那颗「保存」，点了「放弃」就全不算。
+
+        ★ 2026-11-02 直接挂在 `.pBody` 里（它本来就有 `position: relative`），
+        **不再 portal 到 `FieldLayer`**：抽屉要能被"抽屉开着时弹出的对话框"压住，
+        而对话框住 `.shellBody` —— 两者必须同一条链上（谁后画谁在上），
+        不能隔着一个 z 90 的层，也不能是两个并排的容器。
+        理由与四次失败的过程见 `SectionDrawer.tsx` 的文件头。
+      */}
+        <SectionDrawer
+          sectionId={drawerSection}
+          /* 抽屉里那颗「当前」要跟页面看齐（未落盘的新组、组件卡都算） */
+          markId={drawerAnchor}
+          registry={registry}
+          rows={drawerRows}
+          /*
+           * 「这一组现在页面上到底有没有东西」—— 作者 2026-11-01 的疑问是
+           * 「主要页面看不到了，但抽屉能看到，所以他没有真的删掉？客户端会不会消费到一个空的」。
+           * 两个计数都从页面自己那份派生里数（表头 74 条 / 真画出来的 18 行），
+           * 抽屉据此把那句话写出来，而不是让人自己猜。
+           */
+          pageTotal={pageTotal}
+          pageDrawn={pageDrawn}
+          onRemove={(id) => void removeSection(id)}
+          onAddSection={(tabId, label) => void addSection(tabId, label)}
+          onClose={() => setDrawerSection(null)}
+          onApply={(id, edit) => void saveSection(id, edit)}
+          /* 点一条既选中它、也滚到那一行（抽屉留着 —— 顺手接着改这一组），要关自己按 × */
+          onPickParam={setSel}
+          /*
+           * 行的锚点 `t-param-<key>`：卡片是按「全部 / 某个领域」画出来的，点之前先确认
+           * 它在树上；不在就先切到「全部」（搜索态一并清掉），等新的 desk 回来再滚
+           * —— 与 `commitDef` 之后的定位同一条路（`pendingLocateRef`）。
+           */
+          jumpToParam={(key) => {
+            if (document.getElementById(`t-param-${key}`) !== null) {
+              locateAnchor(`t-param-${key}`, { row: true })
+              return
+            }
+            pendingLocateRef.current = `t-param-${key}`
+            if (q.trim() !== '') setQ('')
+            setTabSel(null)
+          }}
+          /* 抽屉里换一组看：抽屉跟着换内容，页面滚到那张卡上闪一下（等于在左树里点它） */
+          onShowSection={(id) => {
+            /*
+             * 「当前」不动 —— 这里只是**看**另一组（抽屉内容跟着换）。上面的 effect 会在
+             * `drawerSection` 变的那一刻把它拨成新的，所以先把「当前」钉回原值。
+             */
+            setDrawerAnchor(drawerSection)
+            setDrawerSection(id)
+            pendingLocateRef.current = `t-sec-${id}`
+            /*
+             * ★ 目标那一组**不一定在当前领域里**（「全部」之外只列一个 tab 的卡）。
+             * 只 `setMetaTick` 不换 tab 的话，`desk` 重取回来还是同一个领域、同一批卡，
+             * 那张卡根本没被画出来 ⇒ 锚点找不到 ⇒ 什么都没发生（作者：「点了没反应」）。
+             * 这里与 `commitDef` 同一条口径：先切到它挂的那个页签，滚的动作由
+             * `pendingLocateRef` 那个 effect 在**新的** `desk` 到了之后做。
+             *
+             * ★★ 但在「全部」下**不切 tab**（2026-11-01 作者第二次点明）：
+             *   「我在全部的 tab 下点击，就不要切换 tab 只是滚动」—— 全部本来就列着
+             *   每一个领域的卡，切过去等于把人从"看得见全部"的视图里踢出去。
+             *   只有当前收窄在某个领域、而目标不在那个领域时才切。
+             */
+            const tabId = registry?.sections.find((x) => x.id === id)?.tabId ?? null
+            if (tabId !== null && tabSel !== null && tabSel !== tabId) setTabSel(tabId)
+            setMetaTick((t) => t + 1)
+          }}
+          /* 注册表里查不到时用卡片自己的名字兜底（组件卡的卡头也点得开） */
+          fallbackLabel={
+            shownDesk?.groups.find((g) => g.sectionId === drawerSection)?.label ?? null
+          }
+        />
+
+      {/*
         参数定义编辑（2026-10-03）：名称/单位/值类型/控件/范围/步进/出厂默认/
         可选项（含逐条弃用）/适用机型/属于/前置条件/弃用。确认保存才落盘 ——
         落盘成功把改前/改后整包交给外壳压撤销栈；回来的注册表直接顶掉旧的，
@@ -1453,8 +1919,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
           sections={registry?.sections ?? []}
           onClose={() => setDefEditKey(null)}
           onCommit={(edit) => commitDef(defEditKey, defParam, edit)}
+          onStaleCleared={applyStaleCleared}
         />
       )}
+
+      {/*
+        参数行的右键菜单（2026-11-02）。排在所有模态框之后 —— 它自己 portal 到
+        `FieldLayer`，层级跟这里无关；放最后只为读起来跟其它页一致。
+      */}
+      <ContextMenu at={rowMenu.at} entries={rowEntries} onClose={rowMenu.close} />
     </div>
   )
 }
@@ -1470,24 +1943,63 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
  * 「仍然展开看」这个入口（`words.relate.showAnyway`）。整张卡无声消失的话，
  * 人要翻半天才知道「原来有这么一组、只是现在不生效」。
  */
+/**
+ * 卡片头（2026-11-01 第三稿）。
+ *
+ * 作者看前两稿的原话：「我不要点击的改名，我要点击的打开右侧的抽屉呀，我在抽屉
+ * 里面去做改名呀，上下这些因为如果标题就能上下的话，很容易不小心点到的就是排序。
+ * 我希望都在抽屉里面，而且抽屉里面可以展示更多的信息。」
+ *
+ * 所以卡头**只留一件事**：点标题 = 打开右侧抽屉（改名 / 换位 / 这一组的参数清单
+ * 全在里头）。卡头里不再有输入框、也不再有箭头 —— 一个误触就把顺序改了，
+ * 那是这条界面上最不该发生的事。
+ *
+ * 锚点 `t-sec-<id>` 挂在 `<header>` 上：改完滚过去闪一下就是靠它（见 `locateAnchor`）。
+ */
+function GroupHead({
+  group,
+  onOpen,
+  trailing,
+}: {
+  group: DeskGroup
+  /** 点标题 = 打开分组抽屉 */
+  onOpen: () => void
+  /** 卡头右端别的东西（摊开的卡有颗「收起来」） */
+  trailing?: ReactNode
+}) {
+  return (
+    <header className={s.pGroupHead} id={`t-sec-${group.sectionId}`}>
+      <button
+        type="button"
+        className={s.pGroupName}
+        title="打开分组抽屉：改名、换位置、看这一组里都有什么"
+        onClick={onOpen}
+      >
+        {group.label}
+      </button>
+      <em>{group.count}</em>
+      {trailing}
+    </header>
+  )
+}
+
 function CollapsedCard({
   group,
   note,
   words,
   onOpen,
+  onOpenDrawer,
 }: {
   group: DeskGroup
   /** 后端那一句（`offNote` 优先，退回第一行的 `blockedHint`） */
   note: string
   words: Words
   onOpen: () => void
+  onOpenDrawer: () => void
 }) {
   return (
     <section className={s.pGroup} data-off="true">
-      <header className={s.pGroupHead}>
-        <span>{group.label}</span>
-        <em>{group.count}</em>
-      </header>
+      <GroupHead group={group} onOpen={onOpenDrawer} />
       <div className={s.pOffRow}>
         <span className={s.pOffNote} data-tip={note}>
           {note}
@@ -1518,6 +2030,9 @@ function GroupCard({
   onWrite,
   onOpenGcode,
   onCollapse,
+  onOpenDrawer,
+  component,
+  rowMenu,
 }: {
   group: DeskGroup
   cur: number
@@ -1543,41 +2058,75 @@ function GroupCard({
    * 点了回到收起态。条件已经变回来了（`offNote` 没了）就不给：正常卡没有「收」可言
    */
   onCollapse?: () => void
+  /** 点卡头 = 打开分组抽屉（改名 / 换位 / 参数清单都在里头） */
+  onOpenDrawer: () => void
+  /** 这一组的整块组件名（`tower-map` 这种）；`null` = 普通参数分组 */
+  component: string | null
+  /**
+   * 行右键要摊上去的属性（2026-11-02）。
+   *
+   * 收成一个**函数**而不是"已算好的 props"：右键的 `target` 是点下去才知道的，
+   * 每个行 key 各自一份；`useContextMenu` 的 `triggerProps(key)` 本来就是这形状。
+   */
+  rowMenu: (key: string) => {
+    tabIndex: number
+    onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void
+    onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void
+  }
 }) {
+  /* 这一组卡里有没有画布、在哪一侧（`tower-map` 就是左图右参数） */
+  const slot = slotSideOf(component)
   return (
     <section className={s.pGroup}>
-      <header className={s.pGroupHead}>
-        <span>{group.label}</span>
-        <em>{group.count}</em>
-        {onCollapse && (
-          <button
-            type="button"
-            className={s.pFoldBtn}
-            title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
-            onClick={onCollapse}
-          >
-            {words.relate.foldBack}
-          </button>
+      <GroupHead
+        group={group}
+        onOpen={onOpenDrawer}
+        trailing={
+          onCollapse !== undefined ? (
+            <button
+              type="button"
+              className={s.pFoldBtn}
+              title="这一卡现在一行都改不动 —— 收回去，要看了再摊开"
+              onClick={onCollapse}
+            >
+              {words.relate.foldBack}
+            </button>
+          ) : undefined
+        }
+      />
+      {/*
+        带画布的组件卡：**行与占位块并排**，占位块在哪一侧由 `slotSideOf` 说
+        （`tower-map` 在左 —— 客户端就是左图右参数）。占位块只占位置、不画内容，
+        见 `ComponentSlot` 头注。
+      */}
+      <div className={slot !== null ? s.pGroupSplit : undefined} data-side={slot ?? undefined}>
+        {slot !== null && (
+          <div className={s.pGroupAside}>
+            <ComponentSlot component={component ?? ''} />
+          </div>
         )}
-      </header>
-      {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
-      {group.items
-        .flatMap((it) => [it.row, ...it.children])
-        .map((row) => (
-          <ParamLine
-            key={row.key}
-            row={row}
-            cur={cur}
-            uid={uid}
-            ownerMachineId={ownerMachineId}
-            words={words}
-            param={paramOf(row.key)}
-            on={sel === row.key}
-            onPick={onPick}
-            onWrite={onWrite}
-            onOpenGcode={onOpenGcode}
-          />
-        ))}
+        <div className={s.pGroupRows}>
+          {/* 父项在前、子项紧跟 —— 与后端排好的顺序一致 */}
+          {group.items
+            .flatMap((it) => [it.row, ...it.children])
+            .map((row) => (
+              <ParamLine
+                key={row.key}
+                row={row}
+                cur={cur}
+                uid={uid}
+                ownerMachineId={ownerMachineId}
+                words={words}
+                param={paramOf(row.key)}
+                on={sel === row.key}
+                onPick={onPick}
+                onWrite={onWrite}
+                onOpenGcode={onOpenGcode}
+                menu={rowMenu(row.key)}
+              />
+            ))}
+        </div>
+      </div>
     </section>
   )
 }
@@ -1597,6 +2146,7 @@ function ParamLine({
   onPick,
   onWrite,
   onOpenGcode,
+  menu,
 }: {
   row: Row
   cur: number
@@ -1617,6 +2167,12 @@ function ParamLine({
     beforeRaw?: string,
   ) => void
   onOpenGcode: (key: string) => void
+  /** 右键（`useContextMenu` 的 `triggerProps`）—— 摊在整行上，鼠标与 Shift+F10 都认 */
+  menu: {
+    tabIndex: number
+    onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void
+    onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void
+  }
 }) {
   const cell = row.cells[cur]
   if (!cell || !param) return null
@@ -1628,6 +2184,7 @@ function ParamLine({
     <div
       /* 「去处理」定位的锚点（locateAnchor 按它滚 + 闪） */
       id={`t-param-${row.key}`}
+      {...menu}
       className={`${s.pRow} ${on ? s.pRowOn : ''} ${off ? s.pRowOff : ''} ${dep ? s.pRowDep : ''}`}
       onClick={() => onPick(row.key)}
       data-tip={
@@ -1823,3 +2380,5 @@ function groupLabelOf(registry: RegistryView | null, row: Row): string {
   const tab = registry?.tabs.find((t) => t.id === row.tabId)?.label
   return [tab, row.sectionLabel].filter(Boolean).join(' · ')
 }
+
+

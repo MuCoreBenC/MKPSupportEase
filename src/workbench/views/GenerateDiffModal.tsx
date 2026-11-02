@@ -78,6 +78,7 @@ import c from '../c14.module.css'
 import Icon from '../../app/shell/icons'
 import ui from '../../app/ui/ui.module.css'
 import s from './GenerateDiffModal.module.css'
+import { glideIntoView } from '../../components/scroll/glide'
 
 interface Props {
   /** 预演报告；null = 还没预演出来（正在算） */
@@ -198,7 +199,9 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   /** 点概览条的标记：滚到那一行（块居中）—— 与 IDE 里点 overview ruler 同一种手感 */
   const jumpToRow = (row: number) => {
     const el = diffRef.current?.querySelector<HTMLElement>(`[data-row="${row}"]`)
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    /* `behavior: 'smooth'` 在 WKWebView 上对元素级滚动容器等于瞬跳（本仓踩过），
+       走全仓那一套（演 transform）；容器没有"唯一内容层"时它自己退回瞬时。 */
+    if (el !== null && el !== undefined) glideIntoView(el, { align: 'center' })
   }
 
   /**
@@ -297,10 +300,28 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
                   </li>
                 ))}
               </ul>
+              {/* 三个数各说一件事：写了 / 未变 / 失败。
+                  以前只显示 `written/total`，导致 `0/9` 既可能是"全都没变"
+                  也可能是"全都失败"—— 两种完全相反的情况长得一模一样。 */}
               <p className={s.summary}>
-                交付 <b>{done.receipt.delivery.written}/{done.receipt.delivery.total}</b>
-                {' · '}内核 <b>{done.receipt.assets.written}/{done.receipt.assets.total}</b>
-                {' · '}基线 <b>{done.receipt.baseline.written}/{done.receipt.baseline.total}</b>
+                {[
+                  ['交付', done.receipt.delivery],
+                  ['内核', done.receipt.assets],
+                  ['基线', done.receipt.baseline],
+                ].map(([label, c]) => {
+                  const counts = c as typeof done.receipt.delivery
+                  return (
+                    <span key={label as string}>
+                      {label as string}{' '}
+                      <b>写 {counts.written}</b>
+                      {' / '}未变 {counts.unchanged}
+                      {counts.failed > 0 && (
+                        <b style={{ color: '#dc2626' }}> / 失败 {counts.failed}</b>
+                      )}
+                      {'　'}
+                    </span>
+                  )
+                })}
               </p>
               {done.receipt.error !== null && (
                 <p className={s.footNote} style={{ margin: '4px 0 0', color: '#dc2626' }}>

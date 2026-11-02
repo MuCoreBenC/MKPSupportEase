@@ -44,6 +44,10 @@ const PRE_HEAT_TEMP: i64 = 50;
 /// 涂胶笔的写 Z 温度 —— 挂上笔之后走路径时用的 Z（`Toolhead.ZOffset + Glue.ZOffset`）。
 const GLUE_Z_MARGIN: f64 = 0.0;
 
+/// 挂笔/预抬高度：`Toolhead.ZOffset` 之上 4mm。挂笔那行（`L801`）与进块前的
+/// 预抬都取这一个值 —— 于是装笔时 Z 不用再动，也不会出现两个数各说各话。
+const MOUNT_Z_LIFT: f64 = 4.0;
+
 /// 涂胶块那三段标记（判据与排查都靠它）。
 pub const BLOCK_START: &str = ";===== pre-print bed glue =================";
 pub const BLOCK_END: &str = ";===== pre-print bed glue end ============";
@@ -197,6 +201,15 @@ fn build_block(
         /* 起始标记：判据与排查都靠它认这一块从哪开始 */
         BLOCK_START.to_owned(),
     ];
+    /* 先抬 Z，再平移 —— **顺序不可合并、不可颠倒**。
+    `G1 X100 Y100` 只写 XY，打印机就在「当前 Z」上平移；进块时 Z 还停在首层高度
+    （实测 0.2），于是这一路是喷嘴贴着板面拖过去的（校准块踩过同一个坑，
+    见 `calibration` 的 `CALIBRATION_PRELIFT`）。抬到装笔高度，坐标一个不改。 */
+    block.push(format!(
+        "G1 Z{} F{}",
+        format_z(ir.toolhead.z_offset + MOUNT_Z_LIFT),
+        format_speed(ir.machine.travel_speed * 60.0)
+    ));
     /* 给切片器的预览器一个"这里有动作"的锚点：纯虚拟挤出，不改实际耗材 */
     block.push(
         "G1 X100 Y100 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility"
@@ -207,7 +220,7 @@ fn build_block(
     block.push(";Mounting Toolhead".to_owned());
     block.extend(filter_mount_gcode_lines(
         &ir.toolhead.custom_mount_gcode,
-        ir.toolhead.z_offset + 4.0,
+        ir.toolhead.z_offset + MOUNT_Z_LIFT,
     ));
     block.push(";Toolhead Mounted".to_owned());
 
@@ -328,16 +341,10 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
     };
 
     let writing_z = ir.toolhead.z_offset + ir.glue.z_offset + GLUE_Z_MARGIN;
+    let lift_z = ir.toolhead.z_offset + MOUNT_Z_LIFT;
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
 
-    let mut out = Vec::new();
-    /* 显式把 Z 定到写胶高度：后面每一行的 Z 都被剥掉了，靠这一行定住 */
-    out.push(format!(
-        "G1 Z{} F{} ;Print Z",
-        format_z(writing_z),
-        travel_speed
-    ));
-
+    let mut xy: Vec<String> = Vec::new();
     for line in &sheath_lines {
         let t = line.trim();
         /* 只要 XY 运动：纯 Z 那些是原轨迹的抬升/换层，涂胶时 Z 恒定 */
@@ -354,9 +361,23 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
             ir,
         ) && !p.is_empty()
         {
-            out.push(p);
+            xy.push(p);
         }
     }
+    let Some(first) = xy.first() else {
+        return Vec::new();
+    };
+
+    /* 顺序是死的：**先在抬高处平飞到起点，再落到写胶高度**。
+    Z 全被剥掉了，落笔那一行就是块里最早的那个 Z —— 要是把它摆在平移之前，
+    刚装好的笔会带着板面从挂笔位（X≈260）一路拖到塔心，拖出一整条胶痕。
+    原轨迹（`GenerateSheathGCode`）本来就是「Safe Z → 飞到塔心 → Print Z」。 */
+    let mut out = vec![
+        format!("G1 Z{} F{} ;Safe Z", format_z(lift_z), travel_speed),
+        first.clone(),
+        format!("G1 Z{} F{} ;Print Z", format_z(writing_z), travel_speed),
+    ];
+    out.extend(xy.into_iter().skip(1));
     out
 }
 
@@ -372,16 +393,15 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
 
     let mut out = Vec::new();
-    for (i, seg) in segments.iter().enumerate() {
-        /* 段间走一个"抬起来 → 平移到下一段起点 → 落下去"，不然会拖一条横穿床面的胶痕 */
-        if i > 0 {
-            let (nx, ny) = extract_first_xy(&seg[0]);
-            out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
-            if !nx.is_empty() && !ny.is_empty() {
-                out.push(format!("G1 X{nx} Y{ny} F{travel_speed}"));
-            }
-            out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
+    for seg in &segments {
+        /* 每一段（**含第一段**）都走「抬起来 → 平移到起点 → 落下去」：
+        第一段之前笔还停在塔心那个写胶高度上，不抬就是一条横穿床面的胶痕。 */
+        let (nx, ny) = extract_first_xy(&seg[0]);
+        out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
+        if !nx.is_empty() && !ny.is_empty() {
+            out.push(format!("G1 X{nx} Y{ny} F{travel_speed}"));
         }
+        out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
         for line in seg {
             let stripped = strip_z(line);
             if let Ok(p) = process_gcode_offset(
@@ -604,6 +624,89 @@ mod tests {
             .expect("原点还在");
         assert!(start < end, "标记顺序反了");
         assert!(end < nozzle, "涂胶块必须插在检测条之前");
+    }
+
+    /// 平移之前必须先抬 Z：虚拟挤出那行只有 XY，写在低 Z 上就是喷嘴贴板拖过去
+    /// （校准块同一个坑，见 `calibration::CALIBRATION_PRELIFT`）。
+    #[test]
+    fn lifts_z_before_the_virtual_travel() {
+        let src = lines(&[
+            "; EXECUTABLE_BLOCK_START",
+            "M190 S30",
+            ";===== nozzle load line",
+        ]);
+        let mut ir = Ir::default();
+        ir.prefs.bed_glue_enabled = true;
+        ir.toolhead.z_offset = 4.0;
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
+
+        let lift = out
+            .iter()
+            .position(|l| l.starts_with("G1 Z"))
+            .expect("进块先抬 Z");
+        let travel = out
+            .iter()
+            .position(|l| l.contains("virtual extrusion"))
+            .expect("虚拟挤出那行还在");
+        assert!(lift < travel, "先抬 Z 再平移，顺序反了");
+        assert_eq!(
+            out[lift], "G1 Z8.0 F0.0",
+            "抬到 Toolhead.ZOffset + 4（与挂笔同一高度）"
+        );
+    }
+
+    /// 擦料塔那条涂胶路径：**先在高处飞到塔心，再落笔** —— 顺序反了就是从挂笔位
+    /// （X≈260）贴着板面拖一条胶痕到塔心。
+    #[test]
+    fn tower_path_flies_high_before_descending() {
+        let mut ir = Ir::default();
+        ir.sheath.base_expand = 1.0;
+        ir.machine.travel_speed = 300.0;
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.first_layer_height = 0.2;
+        ir.machine.retract_length = 0.8;
+        ir.tower.sheath_speed = 100.0;
+        ir.tower.first_layer_flow = 1.0;
+        ir.toolhead.z_offset = 4.0;
+        ir.glue.z_offset = -0.05;
+
+        let path = prime_tower_glue_path(&ir);
+        assert!(path.len() > 3, "路径没生成：{path:?}");
+        assert_eq!(path[0], "G1 Z8.0 F18000.0 ;Safe Z", "先抬到装笔高度");
+        assert!(
+            path[1].contains('X') && path[1].contains('Y'),
+            "第二行才是平飞：{}",
+            path[1]
+        );
+        assert_eq!(path[2], "G1 Z3.95 F18000.0 ;Print Z", "到了起点才落笔");
+    }
+
+    /// 「所有模型首层也涂」的第一段同样要先抬再飞：它前面笔还停在塔心的写胶高度上。
+    #[test]
+    fn all_models_path_lifts_before_the_first_segment() {
+        let content = lines(&[
+            ";LAYER:0",
+            "G1 X10 Y10 E0.5",
+            "G1 X20 Y10 E0.5",
+            ";LAYER:1",
+            "G1 X30 Y30 E0.5",
+        ]);
+        let mut ir = Ir::default();
+        ir.machine.travel_speed = 300.0;
+        ir.toolhead.z_offset = 4.0;
+        ir.glue.z_offset = -0.05;
+
+        let out = all_models_glue_path(&ir, &content);
+        /* 段内那几行会被 `process_gcode_offset` 过一遍（空机的默认参数下会被剔掉），
+        这里只咬这一段的开门三步。 */
+        assert!(out.len() >= 3, "路径没生成：{out:?}");
+        assert_eq!(out[0], "G1 Z5.95 F18000.0");
+        assert!(
+            out[1].contains("X10") && out[1].contains("Y10"),
+            "{}",
+            out[1]
+        );
+        assert_eq!(out[2], "G1 Z3.95 F18000.0");
     }
 
     /// `CONFIG_BLOCK` 里那句 `machine_start_gcode = "..."` 内嵌着

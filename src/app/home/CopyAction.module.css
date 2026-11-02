@@ -28,7 +28,6 @@
   border-radius: 999px;
   color: var(--text-1);
   font-size: 12.5px;
-  transition: background 0.14s ease, color 0.14s ease;
 }
 
 .btn:hover {

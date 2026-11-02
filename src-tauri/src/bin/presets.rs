@@ -75,13 +75,15 @@ fn run_cli() -> Result<i32, AppError> {
     let dry_run = rest.iter().any(|a| a == "--dry-run");
     /* 内容一字未改时仍然重发（会推进序号）—— 默认不发，见 `TxOptions::republish` */
     let republish = rest.iter().any(|a| a == "--republish");
+    /* `reload --force`：确认丢弃影子树里未保存的编辑（2026-11-01） */
+    let force = rest.iter().any(|a| a == "--force");
 
     match cmd.as_str() {
         "check" => cmd_check(),
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
-        "reload" => cmd_reload(),
+        "reload" => cmd_reload(force),
         "publish" => cmd_publish(dry_run, republish),
         "-h" | "--help" | "help" => {
             usage();
@@ -135,20 +137,59 @@ fn open_ctx() -> Result<Ctx, AppError> {
 /// 那条闸故意**不自动对齐**，因为影子可能含着用户还没保存的编辑。CLI 这边要往下走，
 /// 就得显式说一句"放弃影子里的编辑态，回到磁盘那一版"。
 /// 与 `wb_reload` 是同一件事（`txn::mirror(real → shadow)`），不是第二套逻辑。
-fn cmd_reload() -> Result<i32, AppError> {
+fn cmd_reload(force: bool) -> Result<i32, AppError> {
     let real = mkp_support_ease_lib::workbench::paths::presets_root()
         .ok_or_else(|| AppError::not_found("找不到 <repo>/presets"))?;
     let wb = mkp_support_ease_lib::workbench::paths::real_workbench_root();
     let shadow = mkp_support_ease_lib::workbench::domain::txn::shadow_root(&wb);
+
+    /* **有未保存草稿时要先确认**（2026-11-01）。
+    以前这条下去就丢，谁点一下用户的编辑就没了。`--force` 才是"我知道，丢吧"。
+    注意只拦"影子里有、真源里没有"的那种（用户的草稿）；
+    外部改了 presets/ 时影子是落后的，那不算草稿，直接对齐就是正确动作。 */
+    let edited = mkp_support_ease_lib::workbench::domain::txn::snapshot(&shadow)
+        .ok()
+        .zip(mkp_support_ease_lib::workbench::domain::txn::snapshot(&real).ok())
+        .map_or(0, |(sh, rl)| sh.edited_against(&rl));
+    if edited > 0 && !force {
+        let msg = postprocess::diag::messages::text(
+            "ui.workbench.reload.drafts",
+            &[("count", &edited.to_string())],
+        );
+        let _ = emit(
+            json!({
+                "command": "reload",
+                "ok": false,
+                "changed": false,
+                "drafts": edited,
+                "error": msg,
+                "summary": format!("影子树里有 {edited} 处未保存的改动；确认要丢弃请加 --force"),
+            }),
+            1,
+        );
+        return Ok(1);
+    }
+
     std::fs::create_dir_all(&shadow)
         .map_err(|e| AppError::io("建不出影子树").with_detail(e.to_string()))?;
     mkp_support_ease_lib::workbench::domain::txn::mirror(&real, &shadow)?;
+    /* 基准也一起铺（与 `Ctx::open` 那条同一条语义）：铺影子 = 记下"从哪一份真源铺的"。
+    不铺它，下次判"有没有草稿"就失去锚点，会把用户改过的既有文件当成没草稿。 */
+    let base = mkp_support_ease_lib::workbench::domain::txn::base_root(&wb);
+    std::fs::create_dir_all(&base)
+        .map_err(|e| AppError::io("建不出基准快照目录").with_detail(e.to_string()))?;
+    mkp_support_ease_lib::workbench::domain::txn::mirror(&real, &base)?;
     emit(
         json!({
             "command": "reload",
             "ok": true,
             "changed": true,
-            "summary": "影子树已对齐到 presets/（影子里的编辑态已放弃）",
+            "drafts": edited,
+            "summary": if edited > 0 {
+                format!("影子树已对齐到 presets/（已丢弃 {edited} 处未保存的改动）")
+            } else {
+                "影子树已对齐到 presets/".to_owned()
+            },
         }),
         0,
     )

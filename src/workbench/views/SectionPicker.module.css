@@ -1,0 +1,89 @@
+/*
+ * 「所属分组」自绘下拉的**壳**（触发器 + 浮层）。面板本身见 `SectionList`。
+ */
+
+.wrap {
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.trigger {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--wb-primary);
+}
+
+.text {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 页签名比分组名轻一档：一眼看出「这是哪一页的」而不抢分组名 */
+.tabOf {
+  color: var(--text-3);
+}
+
+.dot {
+  color: var(--text-3);
+}
+
+.caret,
+.caretUp {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+
+.caretUp {
+  transform: rotate(180deg);
+  color: var(--text-2);
+}
+
+/* 面板在 FieldPopover 里，定位由它给；宽度自己定（触发器那一格太窄，按名单走） */
+.panel {
+  width: 320px;
+  max-height: min(440px, 60vh);
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface-solid);
+  box-shadow: var(--shadow-lift);
+}
+
+/* 触发器上那颗「待保存」——面板里那一颗在 SectionList 里 */
+.badge {
+  flex: none;
+  padding: 0 5px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-radius: 999px;
+}

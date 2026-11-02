@@ -24,6 +24,8 @@ import { useEffect, useRef } from 'react'
 
 import type { Cell, Col, MachineNode, ParamView, Row, Words } from '../api'
 import CellEditor from './CellEditor'
+import GroupPicker from './GroupPicker'
+import type { GroupedGroup } from './GroupPicker'
 import s from '../c14.module.css'
 
 export type ParamStatusId = 'factory' | 'machine' | 'version' | 'dirty'
@@ -101,6 +103,22 @@ interface Props {
   onEditDef?: () => void
   /** 某一层那枚「打开编辑器」按钮 —— 每层各一枚，开的都是自己那层 */
   onOpenGcode?: (key: string, uid: string | null) => void
+  /**
+   * 这一条在**它所属分组里**的同级清单（已按 `layout.order` 排好，含自己）。
+   *
+   * 给「组内顺序」那一格用（2026-11-02 作者：右栏也要一个，长得跟编辑定义框里
+   * 那座下拉一样）。`null` / 空 = 算不出来（还没取到注册表），那一格就不画。
+   */
+  siblings?: { key: string; label: string }[] | null
+  /**
+   * 把这一条在组里上 / 下挪一位 —— 传 `-1` / `+1`。
+   *
+   * 与编辑定义框里的 `moveOrder` 是**同一条数据**（`[params.layout].order`），
+   * 只是入口不同：那边先改前端草稿、按「确认」发一笔；这边每点一下箭头就发一笔。
+   * **两边写到的都是影子树**（`workbench/.draft/presets/`），「放弃」都撤得掉 ——
+   * 区别只在撤销栈的粒度（这边连挪三次 = 三笔）。
+   */
+  onMoveOrder?: (dir: -1 | 1) => void
   /** 写某一层的值。`null` = 挂回继承（删键）。弃用闸在那条路上 */
   onWriteLayer: (uid: string | null, next: string | null) => void
 }
@@ -121,6 +139,8 @@ export default function ParamDetail({
   onEditDef,
   onOpenGcode,
   onWriteLayer,
+  siblings = null,
+  onMoveOrder,
 }: Props) {
   /*
    * 「各版本取值」的行形态跟着**这块面板的实际宽度**走（C14 第十二轮，
@@ -473,6 +493,41 @@ export default function ParamDetail({
             )}
           </div>
         </section>
+
+        {/* 组内顺序（2026-11-02 作者：「这右侧也加一个组内排序的，就跟这些长得很像」）。
+             与编辑定义框里那座下拉**同一个长相、同一条数据**（`[params.layout].order`）：
+             展开后整组按当下顺序列出来，每行右边常驻上下箭头，就地挪。
+             右栏不经过前端草稿：每点一下箭头发一条 `wb_set_param_meta`。
+             但它进的是**影子树 + 事务**，右上角「保存」才写 `presets/`，「放弃」撤得掉。 */}
+        {siblings !== null && siblings.length > 1 && onMoveOrder !== undefined && (() => {
+          const at = siblings.findIndex((x) => x.key === param.key)
+          const orderGroups: GroupedGroup[] = [
+            {
+              title: null,
+              options: siblings.map((sib, i) => ({
+                value: sib.key,
+                label: sib.label,
+                by: `第 ${i + 1} / ${siblings.length} 位`,
+                ...(sib.key === param.key
+                  ? { move: { up: at > 0, down: at >= 0 && at < siblings.length - 1, onMove: onMoveOrder } }
+                  : { move: { up: false, down: false, onMove: () => undefined }, note: '只能挪这一条' }),
+              })),
+            },
+          ]
+          return (
+            <section className={s.pDSection}>
+              <div className={s.pDSecTitle}>组内顺序</div>
+              <GroupPicker
+                label="组内顺序"
+                groups={orderGroups}
+                value={param.key}
+                onChange={() => undefined}
+                width={300}
+              />
+              <p className={s.pDesc}>同一分组里的先后 — 客户端那一列也照这个排。</p>
+            </section>
+          )
+        })()}
 
         {/* 技术信息：最底部、最弱的一档。**默认展开**（作者：就这些字，折叠反而
             多一下点击）—— 弱化靠位置与颜色，不靠藏起来。

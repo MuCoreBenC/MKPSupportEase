@@ -1,0 +1,266 @@
+/*
+ * 分组下拉（2026-11-02）：触发器 + 浮层面板。
+ *
+ * 触发器那一套照抄 `SectionPicker.module.css`（同一个尺寸、同一种描边、同一个
+ * 12px 描边箭头）—— 作者要的是「都复用所属分组那样的」，两者站在一起必须分不出
+ * 是两套代码。面板那一套照 `SectionList.module.css`：分组标题 + 行 + 圆点 + 选中态。
+ */
+
+.wrap {
+  display: inline-flex;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ——— 触发器 ——— */
+
+.trigger,
+.triggerOff {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--fs-body);
+  color: var(--text-1);
+  text-align: left;
+  background: var(--surface-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.trigger:hover {
+  border-color: var(--line-strong);
+}
+
+.trigger:focus-visible {
+  outline: none;
+  border-color: var(--wb-primary);
+}
+
+.triggerOff {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.text {
+  display: flex;
+  gap: 5px;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 名字后面那截浅色旁注（键名 / 页签名）—— 与 `SectionPicker` 的 `.tabOf` 同一档 */
+.by {
+  flex: none;
+  color: var(--text-3);
+}
+
+.caret,
+.caretUp {
+  flex: none;
+  color: var(--text-3);
+  transition: transform 0.15s ease;
+}
+
+.caretUp {
+  transform: rotate(180deg);
+  color: var(--text-2);
+}
+
+/* ——— 面板 ——— */
+
+.panel {
+  max-height: min(420px, 56vh);
+  padding: 4px;
+  overflow-y: auto;
+  background: var(--surface-solid);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-lift);
+}
+
+.group + .group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.groupTitle {
+  padding: 4px 10px 3px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+/*
+ * 一行 = 圆点 + 名字 + 旁注 + 右侧小字。
+ * 圆点与 `SectionList` 同尺寸同画法：只有选中时才是实心 ——
+ * 一屏几十项里，一颗实心圆点比加粗的字更容易找到"现在在哪"。
+ */
+/*
+ * 一行。既能是 `<button>`（普通选项），也能是 `<div role="option">`（带箭头的），
+ * 所以这里只写两副共用的排布，交互细节交给各自的子元素。
+ */
+.row,
+.rowOn {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 4px 6px 4px 8px;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.row:hover {
+  background: var(--card-face);
+}
+
+.rowOn {
+  position: relative;
+  background: var(--accent-soft);
+}
+
+/* 选中行左边那道竖标（与 `SectionList` 的 `.secOn::before` 同一处细节） */
+.rowOn::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 2px;
+  width: 2px;
+  background: var(--wb-primary);
+  border-radius: 2px;
+}
+
+.row:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+.row:disabled:hover {
+  background: transparent;
+}
+
+.dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-top: 3px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 999px;
+}
+
+.rowOn .dot {
+  background: var(--wb-primary);
+  border-color: var(--wb-primary);
+}
+
+.rowOn .label {
+  font-weight: 600;
+}
+
+/* 名字可以省略，但旁注与小字不参与压缩（它们本来就是"多出来的那点信息"） */
+.label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  flex: none;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+}
+
+/*
+ * 带排序箭头的那种行（「组内顺序」，2026-11-02）。
+ *
+ * 行本身是 `<div role="option">`：里面一枚"选中"按钮吃掉整行剩余宽度，
+ * 右端两颗箭头**常驻**（作者要的是"右侧常驻复用箭头，上下点击切换排序"）。
+ * 箭头必须自己接点击并 `stopPropagation` —— 否则点箭头会连带选中那一行。
+ */
+.pickArea {
+  display: flex;
+  flex: 1;
+  gap: 8px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  font-size: inherit;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.moves {
+  display: inline-flex;
+  flex: none;
+  gap: 1px;
+  padding-left: 6px;
+}
+
+/*
+ * 与 `SectionList.module.css` 的 `.op` 同一副：淡淡的常显，悬停才亮，到头就灰。
+ *
+ * ★ 2026-11-02 修：这两颗箭头原来画成"上面那颗亮、下面那颗灰"（作者看出来了）。
+ * 原因不在 `disabled`，在**图标用错了类**：行内用的是触发器那枚 `Chevron`，它的
+ * `s.caretUp` 带 `color: var(--text-2)` 与转动，跟"按钮是否可用"完全无关；
+ * 而朝下的那颗 `s.caret` 是 `--text-3`，两相一叠就成了"上亮下灰"的错觉。
+ * 现在行内用 `MoveArrow`（`s.moveIcon`，颜色只跟按钮走），可用不可用只看 `disabled`。
+ */
+.moveBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  color: var(--text-2);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.moveBtn:hover:not(:disabled) {
+  color: var(--text-1);
+  background: var(--card-face);
+  border-color: var(--line);
+}
+
+.moveBtn:disabled {
+  color: var(--text-3);
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 行内箭头：颜色一律继承按钮（`currentColor`），不许自己带色 */
+.moveIcon {
+  display: block;
+  color: inherit;
+}
+
+.moveIcon[data-up='true'] {
+  transform: rotate(180deg);
+}

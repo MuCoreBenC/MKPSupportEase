@@ -106,3 +106,28 @@ export const STORAGE = {
   clientPostProcessPace: 'mkp.A40.postprocess.pace',
 } as const
 
+/**
+ * 抹掉**本程序写下的全部 localStorage 偏好**（设置页「清理数据」用，2026-11-01）。
+ *
+ * ★ 为什么要它：盘上那棵树由后端 `clear_app_data` 删，但"置顶哪些行 / 抽屉多宽 /
+ *   切片器指到哪儿"这些是 WebView 自己的，Rust 那侧碰不到。不一起清的话，
+ *   重开之后预设全没了、置顶表却还在——那是最难解释的一种"没清干净"。
+ *
+ * ★ 按前缀扫而不是逐个键名删：`STORAGE` 里以后加一格不必记得来这里补一句。
+ *   本程序写下的键一律以 `mkp` 开头（`mkp.A40.…` / `mkp.wb.…` / `mkpse.boot.…`）。
+ *
+ * 存的是**纯前端偏好**，丢了只是下次回到出厂摆法 —— 不属于业务数据。
+ */
+export function clearClientPrefs(): void {
+  try {
+    const doomed: string[] = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (key !== null && key.startsWith('mkp')) doomed.push(key)
+    }
+    for (const key of doomed) localStorage.removeItem(key)
+  } catch {
+    /* 存储不可用（隐私模式 / 配额满）就没有东西要清 —— 不挡"清理数据"这一步 */
+  }
+}
+

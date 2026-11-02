@@ -108,3 +108,54 @@
   font-size: var(--fs-label);
   color: var(--text-3);
 }
+
+/* ---------- 生成记录（GenHistoryModal） ----------
+ * 与发布历史共用同一张"时间 + 正文"的行版式，只多出「步骤条」这一块。
+ */
+
+/* 一次生成的标题行：事务 ID + 结论 */
+.title {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+/* 步骤条：一步一个胶囊，绿=过了、红=卡在这里 */
+.steps {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 2px 0;
+}
+
+.stepOk,
+.stepBad {
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: var(--fs-label);
+  white-space: nowrap;
+}
+
+.stepOk {
+  color: var(--text-2);
+  background: var(--surface);
+}
+
+/* 红的那一步要跳出来 —— 它就是"失败卡在哪"的答案 */
+.stepBad {
+  color: var(--danger, #c0392b);
+  border-color: currentcolor;
+  background: color-mix(in srgb, currentcolor 8%, transparent);
+  font-weight: 600;
+}
+
+.stepOk em,
+.stepBad em {
+  font-style: normal;
+  color: var(--text-3);
+  margin-left: 2px;
+}

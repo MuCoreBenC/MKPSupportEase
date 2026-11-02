@@ -705,6 +705,7 @@ export default function CompareModal({
               ))}
               <span className={s.hst}>{tr('presets.cmp.statusHeader')}</span>
             </div>
+            <div className={s.gridBody}>
 
             {groups.map((g) => {
               const visible = g.rows.filter(rowMatches)
@@ -794,6 +795,7 @@ export default function CompareModal({
                 </Fragment>
               )
             })}
+            </div>
           </div>
         </>
       )}

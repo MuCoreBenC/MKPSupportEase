@@ -101,7 +101,14 @@ export default function MachinePicker({
             <path d="m2.6 6.3 2.4 2.4L9.5 3.9" />
           </svg>
         </span>
-        <span className={c.pVtext}>
+        {/*
+          名字与副标题（id）**同一行**、浅色跟在后面（2026-11-02 作者：
+          「副标题的跟在后面浅色字，一行比较好」）。
+          原来 `pVtext` 在窄栏里是竖排（名字一行、id 一行），一个型号占两行 ——
+          多选框里八台机型就撑出一屏。这里显式 `data-form="wide"` 让那一行的
+          排版与参数台宽栏一致（`c14.module.css` 里那条 `[data-form='wide']`）。
+        */}
+        <span className={c.pVtext} data-form="wide">
           <span className={c.pVname}>{display || id}</span>
           <span className={c.pVid}>{id}</span>
         </span>
