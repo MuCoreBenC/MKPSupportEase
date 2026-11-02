@@ -534,62 +534,201 @@ fn diff(before: &Snapshot, after: &Snapshot, root: &Path) -> Result<Changes, App
     Ok(out)
 }
 
-/// 把影子树对齐到磁盘。
+/// 把 `dst` 整份对齐到 `src`（放弃 / 对齐 / 换根都走这一条）。
 ///
-/// - 目标里多出来的文件删掉；
-/// - 源里有、目标没有（或内容不同）的写过去。
+/// # 为什么不再逐份复制（2026-11-02 改）
 ///
-/// **逐份复制，不用硬链接**（2026-10-31 实测）：硬链接只有在「所有写都是
-/// `atomic_write`（临时文件 + rename）」时才安全 —— 任何一处 `std::fs::write`
-/// 都会顺着链接把**真仓库**改了，事务边界当场失效。5.9 MB 复制几十毫秒，
-/// 换一条不会破的边界，值。
+/// 老实现是「先删 `dst` 多出来的 → 再逐份 `remove_file` + `copy`」。它在两处不安全：
+///
+/// 1. **非原子**：中途失败 ⇒ `dst` 半新半旧，而调用方（放弃）没有第二份快照可回退；
+/// 2. **`remove_file` 成功、`copy` 失败 ⇒ 那份文件直接没了**（删除错误还被 `let _ =` 吞掉）。
+///
+/// 而「放弃 = 把编辑树拉回基准」正是这个函数 —— 用户最需要可靠的一步，
+/// 不该建在最不可靠的机制上。
+///
+/// # 四步：让旧目录整体让位，而不是一件件改
+///
+/// ```text
+/// ① 整份拷到 <dst>.reset/        dst 一个字节没动
+/// ② 校验 <dst>.reset/ ≡ src      （快照逐份比对，不只看长度）
+/// ③ rename(<dst> → <dst>.old)    原子
+/// ④ rename(<dst>.reset → <dst>)  原子
+/// ⑤ 删 <dst>.old                 删不掉不算失败（下次启动回收）
+/// ```
+///
+/// ①② 失败 ⇒ `dst` 还是原来那一份（只多一个 `.reset` 残片，见 [`recover_dir_replace`]）。
+/// ③④ 是 `rename`，同卷内原子 ⇒ 「半新半旧」这个状态在磁盘上**观察不到**。
+///
+/// **不用硬链接**（2026-10-31 实测）：硬链接只有在「所有写都是 `atomic_write`」时才安全 ——
+/// 任何一处 `std::fs::write` 都会顺着链接把真仓库改了。整份复制几十毫秒，换一条不会破的边界，值。
+///
+/// `src` / `dst` 必须是两个**平级**目录（真实调用都是 `presets/` ↔ `.draft/presets/`
+/// ↔ `.draft/base/`）。一个是另一个的祖先时 rename 语义会变，这里显式拒绝。
 pub fn mirror(src: &Path, dst: &Path) -> Result<(), AppError> {
-    let mut want = Vec::new();
-    walk(src, src, &mut want)?;
-    let want_set: std::collections::BTreeSet<&String> = want.iter().collect();
-
-    let mut have = Vec::new();
-    walk(dst, dst, &mut have)?;
-    for rel in &have {
-        if !want_set.contains(rel) {
-            let path = dst.join(rel);
-            let _ = std::fs::remove_file(&path);
-            prune_empty_parents(&path, dst);
-        }
+    if dst.starts_with(src) || src.starts_with(dst) {
+        return Err(AppError::internal(format!(
+            "目录替换要求两个平级目录：{} / {}",
+            src.display(),
+            dst.display()
+        )));
+    }
+    // 已经一致就一个字节都不写 —— 启动时 `settle_shadow` 会走这条，
+    // 不能每次开工作台都整份拷一遍
+    let same = matches!((snapshot(src), snapshot(dst)), (Ok(a), Ok(b)) if equal(&a, &b));
+    if same {
+        return Ok(());
     }
 
-    for rel in &want {
-        let to = dst.join(rel);
-        if let Some(parent) = to.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AppError::io(format!("建不出影子目录：{}", parent.display()))
-                    .with_detail(e.to_string())
+    let reset = sidecar(dst, ".reset")?;
+    let old = sidecar(dst, ".old")?;
+
+    // 上一轮失败留下的残片：dst 还在，说明那次替换没生效，残片无价值
+    remove_dir_all_if_exists(&reset)?;
+
+    // ① 整份拷（dst 一个字节没动）
+    copy_tree(src, &reset)?;
+
+    // ② 校验：拷坏了就不许往下走（此时 dst 完好，等于什么都没发生）
+    let want = snapshot(src)?;
+    let got = snapshot(&reset)?;
+    if !equal(&want, &got) {
+        let _ = std::fs::remove_dir_all(&reset);
+        return Err(AppError::io(format!(
+            "目录替换校验失败，已停在原状：{}",
+            dst.display()
+        )));
+    }
+
+    // ③ 旧的整体让开（先清上一轮留下的 .old）
+    remove_dir_all_if_exists(&old)?;
+    if dst.exists() {
+        std::fs::rename(dst, &old).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&reset);
+            AppError::io(format!("旧目录让位失败：{}", dst.display())).with_detail(e.to_string())
+        })?;
+    }
+
+    // ④ 新的就位
+    if let Err(e) = std::fs::rename(&reset, dst) {
+        // 让位之后没换成 ⇒ 必须把旧的搬回来，否则 dst 就没了
+        let _ = std::fs::rename(&old, dst);
+        let _ = std::fs::remove_dir_all(&reset);
+        return Err(
+            AppError::io(format!("新目录就位失败：{}", dst.display())).with_detail(e.to_string())
+        );
+    }
+
+    // ⑤ 回收旧的（失败不算错：`recover_dir_replace` 下次会清）
+    let _ = std::fs::remove_dir_all(&old);
+    Ok(())
+}
+
+/// `<dst>.reset` / `<dst>.old` 这种同级旁路名（必须与 `dst` **同卷**才谈得上 rename）。
+fn sidecar(dst: &Path, suffix: &str) -> Result<PathBuf, AppError> {
+    let parent = dst
+        .parent()
+        .ok_or_else(|| AppError::internal(format!("目录没有父级：{}", dst.display())))?;
+    let name = dst
+        .file_name()
+        .ok_or_else(|| AppError::internal(format!("目录没有名字：{}", dst.display())))?
+        .to_string_lossy()
+        .into_owned();
+    Ok(parent.join(format!("{name}{suffix}")))
+}
+
+fn copy_tree(src: &Path, dst: &Path) -> Result<(), AppError> {
+    std::fs::create_dir_all(dst).map_err(|e| {
+        AppError::io(format!("建不出目录：{}", dst.display())).with_detail(e.to_string())
+    })?;
+    let entries = match std::fs::read_dir(src) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(
+                AppError::io(format!("读不出目录：{}", src.display())).with_detail(e.to_string())
+            )
+        }
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else { continue };
+        let to = dst.join(entry.file_name());
+        if meta.is_dir() {
+            copy_tree(&path, &to)?;
+        } else if meta.is_file() {
+            std::fs::copy(&path, &to).map_err(|e| {
+                AppError::io(format!("复制失败：{}", to.display())).with_detail(e.to_string())
             })?;
         }
-        let from = src.join(rel);
-        if same_file(&from, &to, rel) {
-            continue;
-        }
-        let _ = std::fs::remove_file(&to);
-        std::fs::copy(&from, &to).map_err(|e| {
-            AppError::io(format!("复制到影子树失败：{}", to.display())).with_detail(e.to_string())
-        })?;
     }
     Ok(())
 }
 
-fn same_file(a: &Path, b: &Path, rel: &str) -> bool {
-    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
-        return false;
-    };
-    if ma.len() != mb.len() {
-        return false;
+fn remove_dir_all_if_exists(path: &Path) -> Result<(), AppError> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => {
+            Err(AppError::io(format!("删不掉目录：{}", path.display())).with_detail(e.to_string()))
+        }
     }
-    match (std::fs::read(a), std::fs::read(b)) {
-        (Ok(x), Ok(y)) if is_text(rel) => x == y,
-        (Ok(x), Ok(y)) => head_fingerprint(&x) == head_fingerprint(&y),
-        _ => false,
+}
+
+/// 启动时收拾「上次目录替换没做完」的现场。返回做了哪些动作（给日志用，空 `Vec` = 很干净）。
+///
+/// 判据来自四步的**可观察中间态**：
+///
+/// | 磁盘上看到 | 崩在哪 | 动作 |
+/// |---|---|---|
+/// | `dst` + `.reset` | ①② | 删 `.reset`（编辑态完整，替换未生效） |
+/// | `dst` + `.old` | ④之后⑤之前 | 删 `.old` ⇒ 完成 |
+/// | `.reset` + `.old`，没有 `dst` | ③之后④之前 | `rename(.reset → dst)` ⇒ **完成替换** |
+/// | 只有 `.old` | `dst` 被外部删了 | `rename(.old → dst)` ⇒ **回滚** |
+/// | 只有 `.reset` | 理论上不会出现 | `rename(.reset → dst)` ⇒ 恢复 |
+///
+/// **为什么③④之间选「完成」而不是回滚**：`.reset` 已经校验过（与 `src` 逐份相同），
+/// 完成是用户点下那个动作的本意；`.old` 里那一份仍留在盘上可人工捞回。
+pub fn recover_dir_replace(dst: &Path) -> Result<Vec<String>, AppError> {
+    let reset = sidecar(dst, ".reset")?;
+    let old = sidecar(dst, ".old")?;
+    let mut log = Vec::new();
+
+    match (dst.exists(), reset.exists(), old.exists()) {
+        // 崩在 ③④ 之间：旧的整体让开了、新的还没进来
+        (false, true, true) => {
+            std::fs::rename(&reset, dst).map_err(|e| {
+                AppError::io(format!("完成上次替换失败：{}", dst.display()))
+                    .with_detail(e.to_string())
+            })?;
+            let _ = std::fs::remove_dir_all(&old);
+            log.push(format!("完成上次未做完的目录替换：{}", dst.display()));
+        }
+        // dst 被外部删了，只剩旧的一份 ⇒ 回滚
+        (false, false, true) => {
+            std::fs::rename(&old, dst).map_err(|e| {
+                AppError::io(format!("回滚上次替换失败：{}", dst.display()))
+                    .with_detail(e.to_string())
+            })?;
+            log.push(format!("回滚上次未完成的目录替换：{}", dst.display()));
+        }
+        // 只有 .reset（④ 已把 reset 换进来却又消失？保守：搬回来）
+        (false, true, false) => {
+            std::fs::rename(&reset, dst).map_err(|e| {
+                AppError::io(format!("恢复目录失败：{}", dst.display())).with_detail(e.to_string())
+            })?;
+            log.push(format!("恢复目录：{}", dst.display()));
+        }
+        // 正常 / 崩在 ①② / 崩在 ④⑤ 之间
+        (true, has_reset, has_old) => {
+            if has_reset || has_old {
+                log.push(format!("清理目录替换残片：{}", dst.display()));
+            }
+            remove_dir_all_if_exists(&reset)?;
+            remove_dir_all_if_exists(&old)?;
+        }
+        (false, false, false) => {}
     }
+    Ok(log)
 }
 
 fn prune_empty_parents(path: &Path, stop: &Path) {
@@ -932,6 +1071,133 @@ mod tests {
         std::fs::create_dir_all(&shadow).unwrap();
         mirror(&real, &shadow).unwrap();
         (d, real, shadow, trash)
+    }
+
+    /* ---------- 目录替换：故障注入（刀 2，2026-11-02） ----------
+     *
+     * 这一组钉的不是「能不能换」，而是**换到一半崩了会怎样**。
+     * 老实现（逐份 remove_file + copy）在这里一条都过不了：
+     * 它没有任何可观察的中间态，崩了就是半新半旧。
+     */
+
+    /// 正常路径：整份对齐 + 不留残片
+    #[test]
+    fn mirror_replaces_the_whole_directory_and_leaves_no_residue() {
+        let (_d, real, shadow, _trash) = setup();
+        write(&shadow, "only-in-shadow.toml", "x = 1\n");
+        write(&shadow, "machines/A1.toml", "id = 'A1'\nname = '改过的'\n");
+        std::fs::remove_file(shadow.join("bundles.toml")).unwrap();
+
+        mirror(&real, &shadow).unwrap();
+
+        assert!(
+            equal(&snapshot(&shadow).unwrap(), &snapshot(&real).unwrap()),
+            "整份对齐"
+        );
+        assert!(
+            !shadow.join("only-in-shadow.toml").exists(),
+            "多出来的要删掉"
+        );
+        assert!(shadow.join("bundles.toml").exists(), "缺的要补回");
+        assert!(
+            !sidecar(&shadow, ".reset").unwrap().exists(),
+            "不许留 .reset 残片"
+        );
+        assert!(
+            !sidecar(&shadow, ".old").unwrap().exists(),
+            "不许留 .old 残片"
+        );
+    }
+
+    /// 崩在 ①②（拷/校验阶段）：`.reset` 是半份、`dst` 完好 ⇒ 恢复后 dst 一个字节没变
+    #[test]
+    fn a_crash_before_the_swap_leaves_the_old_directory_intact() {
+        let (_d, _real, shadow, _trash) = setup();
+        let before = snapshot(&shadow).unwrap();
+        let reset = sidecar(&shadow, ".reset").unwrap();
+        write(&reset, "half.toml", "拷了一半\n");
+
+        let log = recover_dir_replace(&shadow).unwrap();
+        assert!(!log.is_empty(), "该报告清了一次残片");
+        assert!(!reset.exists(), "残片要删掉");
+        assert!(
+            equal(&snapshot(&shadow).unwrap(), &before),
+            "dst 必须一个字节没变 —— 替换未生效时用户的编辑态不能被动"
+        );
+    }
+
+    /// 崩在 ③ 之后 ④ 之前：`dst` 不在，`.reset` + `.old` 都在 ⇒ 恢复后**完成替换**
+    #[test]
+    fn a_crash_between_the_two_renames_finishes_the_replacement() {
+        let (_d, real, shadow, _trash) = setup();
+        let reset = sidecar(&shadow, ".reset").unwrap();
+        let old = sidecar(&shadow, ".old").unwrap();
+        // 新版（= 真源）落在 .reset，旧编辑态落在 .old，dst 不存在 —— 正是 ③④ 之间的形状
+        mirror(&real, &reset).unwrap();
+        std::fs::rename(&shadow, &old).unwrap();
+
+        let log = recover_dir_replace(&shadow).unwrap();
+        assert!(
+            log.iter().any(|l| l.contains("完成")),
+            "该报告完成了一次替换：{log:?}"
+        );
+        assert!(shadow.exists(), "dst 必须回来");
+        assert!(
+            equal(&snapshot(&shadow).unwrap(), &snapshot(&real).unwrap()),
+            "进来的是 .reset 那一份（已校验过）"
+        );
+        assert!(!old.exists(), ".old 要回收");
+        assert!(!reset.exists(), ".reset 已经换进来了");
+    }
+
+    /// 崩在 ④ 之后 ⑤ 之前：`dst` 已是新版，`.old` 还在 ⇒ 只清 `.old`
+    #[test]
+    fn a_crash_after_the_swap_only_reclaims_the_old_copy() {
+        let (_d, real, shadow, _trash) = setup();
+        let old = sidecar(&shadow, ".old").unwrap();
+        write(&old, "旧版.toml", "旧\n");
+
+        let log = recover_dir_replace(&shadow).unwrap();
+        assert!(!old.exists(), ".old 要回收");
+        assert!(
+            equal(&snapshot(&shadow).unwrap(), &snapshot(&real).unwrap()),
+            "dst 不受影响"
+        );
+        assert!(log.iter().any(|l| l.contains("残片")), "{log:?}");
+    }
+
+    /// 只有 `.old`（dst 被外部删了）⇒ 回滚，**不许把编辑态丢掉**
+    #[test]
+    fn a_lost_directory_is_rolled_back_from_the_old_copy() {
+        let (_d, _real, shadow, _trash) = setup();
+        let old = sidecar(&shadow, ".old").unwrap();
+        std::fs::rename(&shadow, &old).unwrap();
+
+        let log = recover_dir_replace(&shadow).unwrap();
+        assert!(
+            log.iter().any(|l| l.contains("回滚")),
+            "该报告回滚：{log:?}"
+        );
+        assert!(shadow.exists(), "编辑态必须搬回来");
+        assert!(!old.exists());
+    }
+
+    /// 什么都没发生 ⇒ 不报、不建目录（全新会话走这条）
+    #[test]
+    fn a_clean_directory_reports_nothing() {
+        let (d, _real, _shadow, _trash) = setup();
+        let nowhere = d.path().join("nothing-here");
+        let log = recover_dir_replace(&nowhere).unwrap();
+        assert!(log.is_empty(), "{log:?}");
+        assert!(!nowhere.exists(), "不许顺手把目录建出来");
+    }
+
+    /// 自己套自己 / 祖先关系必须拒绝 —— rename 在那两种形状下语义会变
+    #[test]
+    fn replacing_a_directory_into_itself_is_refused() {
+        let (_d, real, _shadow, _trash) = setup();
+        assert!(mirror(&real, &real.join("sub")).is_err());
+        assert!(mirror(&real, &real).is_err());
     }
 
     #[test]

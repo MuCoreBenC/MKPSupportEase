@@ -490,6 +490,20 @@ impl Ctx {
     pub(super) fn open_at(store: Store, real_root: PathBuf) -> Result<Self, AppError> {
         store.bootstrap()?;
         let shadow_root = crate::workbench::domain::txn::shadow_root(&store.root);
+        /* 上次「整目录替换」没做完（崩溃/强杀）⇒ 先收拾现场，再让 `settle_shadow` 去看。
+         *
+         * 顺序是死的：`settle_shadow` 判「影子里有没有草稿」要读影子树，
+         * 而影子的完整性正由这一步保证。两个根都要收拾 —— `save_in` 会
+         * `mirror(real → base)`，`wb_generate` 会 `mirror(real → shadow)`，
+         * 两处都可能停在「旧的让开了、新的没进来」。 */
+        for line in crate::workbench::domain::txn::recover_dir_replace(&shadow_root)? {
+            tracing::warn!("{line}");
+        }
+        for line in
+            crate::workbench::domain::txn::recover_dir_replace(&txn::base_root(&store.root))?
+        {
+            tracing::warn!("{line}");
+        }
         let recovered = settle_shadow(&store.root, &real_root)?;
         /* ★ **读影子树，不读真源**（2026-11-01 悬案的正解）。
          *
