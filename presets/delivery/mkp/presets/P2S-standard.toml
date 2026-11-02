@@ -1,6 +1,6 @@
+# release_time: 2026-10-27 15:25:50
 # machine: P2S
 # variant: standard
-# generated_at: 2026-11-01T12:53:32+08:00
 
 [wiping]
 disable_front_cover_alarm = false # 关闭第三层裹头检测(A1/A1 mini)
@@ -42,7 +42,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
 swap_hop_height = 1 # 换笔脱层高度(mm) 范围:0.2~3
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率

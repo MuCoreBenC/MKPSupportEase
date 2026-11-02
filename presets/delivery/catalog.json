@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "f4aa8ab91bdc2ace",
+  "revision": "c03b5304a766f173",
   "publishedAt": "2026-10-31T12:17:42Z",
   "brands": [
     {
@@ -3829,7 +3829,7 @@
         "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 0.7,
+        "defaultValue": 0.8,
         "scope": "universal",
         "section": "wiping",
         "layout": {
@@ -3846,9 +3846,7 @@
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {
-          "A1": 0.75
-        },
+        "machineVariants": {},
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
@@ -3962,7 +3960,7 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 1.0
+          "A1": 0.9
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -5798,8 +5796,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "b27b569cbf0b4de669e94208e5286a40aa62ac407a3adec590b8ab76aec4684a",
-      "size": 4346
+      "sha256": "629d88729e58e5092a321f94ae5cdca7b1a2b08bcf98b9aa56413d6ef8ed4d20",
+      "size": 4341
     },
     {
       "kind": "mkp_preset",
@@ -5807,8 +5805,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "47b505f24c23e66323bfd61ea97621e41537367749330a2f6d45c95f2a74dd14",
-      "size": 4344
+      "sha256": "dcc2d62be4e63f72fb4378ba7177fadd548129b9a940e6970c1fea7e2a82d935",
+      "size": 4339
     },
     {
       "kind": "mkp_preset",
@@ -5816,8 +5814,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "c3d3af94c8f868abbd74e6e9d6c3e52d8ce8901ee768e1394dbae2396bb47082",
-      "size": 4348
+      "sha256": "a3c52ffeed798a57784c8987d2a1962315e188a3fe16597ec9b4e27cc70fe2e2",
+      "size": 4343
     },
     {
       "kind": "mkp_preset",
@@ -5825,8 +5823,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "ccb06ad602b1e4efd20206dd58c8bcaf0f7296af52f6337e24d6d13ca7495bec",
-      "size": 4351
+      "sha256": "eb3e6f9f61e7b55c531d94f210f72271a26be2751bc98b4fa60faefa88b7c684",
+      "size": 4345
     },
     {
       "kind": "mkp_preset",
@@ -5834,8 +5832,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "ea35f3c9e1fdfe6aa6ef497ec670ccfe9f98b97447752a2190582654e3760643",
-      "size": 4345
+      "sha256": "e7c222021034d78e706102fcffa3dcf1a2f4e66cce74445371841cc6ac3cf1b5",
+      "size": 4339
     },
     {
       "kind": "mkp_preset",
@@ -5843,8 +5841,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "c71469054b7fa140865c02e54704a0aaa7da0dc2a90ca4c7c88485345c10d489",
-      "size": 4350
+      "sha256": "5da29bdf3eb17ce9f63741b694a958ed1be29c35d309af5f37c3341c75c7fe30",
+      "size": 4344
     },
     {
       "kind": "mkp_preset",
@@ -5852,8 +5850,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "9f09b38adfa571489d2cdc307ec73a92dad6675a401403b1f052e57dc9438b85",
-      "size": 4481
+      "sha256": "723d39c3d1795e2fdc2120eeed1b7a7b4ceee1123093fba7d234549dff3890d1",
+      "size": 4475
     },
     {
       "kind": "mkp_preset",
@@ -5861,8 +5859,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "0385c11a96e6c59ddec910d5f3ad871d42163395e6a23110bc04529472e6cfbf",
-      "size": 4485
+      "sha256": "eede0d4ed874cdb2df3c5dfb9c4012ef7bfb47be18c09352fb005b4e92015803",
+      "size": 4479
     },
     {
       "kind": "mkp_preset",
@@ -5870,8 +5868,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "db14cf5771b0ceb5800f0fed8ec6cb4ddc6b246fa77c8649c9d4a48647bf02c4",
-      "size": 4481
+      "sha256": "69cde252d626753c463ec2f97a5136c51e552802f830031e814d1e1f91eac371",
+      "size": 4475
     },
     {
       "kind": "icon",
