@@ -43,7 +43,7 @@
 //! 但没有逐条撤销（那些 op 的字节没持久化）。这是刻意的：宁可说「有一次未保存的改动」，
 //! 也不假装能撤销一个已经不在内存里的操作。
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
@@ -81,12 +81,53 @@ pub struct Op {
 /// 一个文件的「改前 / 改后」字节。两侧 `None` 同时成立是不可能的（那说明没变）
 type BeforeAfter = (String, Option<Vec<u8>>, Option<Vec<u8>>);
 
+/// **合并窗口**：同一格在这段时间里的连续编辑并成一条（2026-11-02 作者定案）。
+///
+/// 作者原话：「就像那个撤销堆栈一样，他只记一次……5 秒内的算一条」。
+/// 连点步进器改涂胶速度 `65 → 64 → … → 50`，是**改了一次**，不是改了十几次 ——
+/// 栈里只留一条，撤一次就回到最初那个值。
+pub const MERGE_MS: u64 = 5_000;
+
+/// 一次编辑作用在**哪一格**（只有值编辑有；结构编辑给 `None` ⇒ 永不合并）。
+///
+/// 三样一起才构成"同一格"：层（机型基底 / 某个版本）+ 归属（机型 id / 版本 uid）+ 参数键。
+/// 换个版本改同一个参数是**另一格**，不该合进上一条。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditKey {
+    pub level: crate::workbench::domain::Level,
+    pub owner: String,
+    pub key: String,
+}
+
 /// 一条编辑的**完整载荷**：前后字节都在，撤销/重做靠它
 #[derive(Debug, Clone)]
 struct Payload {
     label: String,
     at: String,
     files: Vec<BeforeAfter>,
+    /// 同一格的连续编辑会**合并进这一条**（见 [`MERGE_MS`]）；`None` = 结构编辑，永不合并
+    key: Option<EditKey>,
+    /// 合并窗口的计时锚点。`Instant` 而不是系统时钟 —— 改系统时间不该让撤销栈错乱
+    last_at: std::time::Instant,
+}
+
+impl Payload {
+    /// 把这一笔并进自己：**`before` 保留最初那份**，`after` 换成最新那份。
+    ///
+    /// 于是「撤一次」回的是"我开始动手之前"，而不是"上一步"。这也正是合并的意义 ——
+    /// 连点十下之后按一下撤销，人期待的是回到原值，不是退一格。
+    fn absorb(&mut self, files: Vec<BeforeAfter>, label: String) {
+        for (rel, _, after) in files {
+            match self.files.iter_mut().find(|(r, _, _)| *r == rel) {
+                /* 同一份文件：只换 `after`，`before` 一个字都不动 */
+                Some(slot) => slot.2 = after,
+                None => self.files.push((rel, None, after)),
+            }
+        }
+        /* 标签取**最新**那一笔的：连点过程中人看的最后一格才是他印象里改的东西 */
+        self.label = label;
+        self.last_at = std::time::Instant::now();
+    }
 }
 
 impl Payload {
@@ -135,6 +176,31 @@ fn head_fingerprint(bytes: &[u8]) -> u64 {
     hash
 }
 
+/// 影子 / 真源 / 基准 三方对账的结果（见 [`Snapshot::reconcile`]）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ShadowVerdict {
+    /// **用户的未保存草稿**（影子相对基准改了、真源没改）
+    pub drafts: Vec<String>,
+    /// **外部修改**（真源相对基准改了、影子没改）—— 不算草稿，直接读真源即可
+    pub external: Vec<String>,
+    /// **冲突**（同一个文件两边都改过）—— 不能自动选边，必须让人定
+    pub conflicts: Vec<String>,
+}
+
+impl ShadowVerdict {
+    /// 有没有需要人处理的东西（有草稿或有冲突）。
+    pub fn needs_attention(&self) -> bool {
+        !self.drafts.is_empty() || !self.conflicts.is_empty()
+    }
+
+    /// 能不能安全地按真源重建（没有草稿、没有冲突）。
+    ///
+    /// `true` 时影子最多是"旧拷贝"，对齐到真源不丢任何人的东西。
+    pub fn safe_to_reset(&self) -> bool {
+        !self.needs_attention()
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Snapshot {
     map: BTreeMap<String, Entry>,
@@ -162,6 +228,122 @@ impl Snapshot {
 
     pub fn is_empty(&self) -> bool {
         self.map.is_empty()
+    }
+
+    /// 这份快照里有、而 `other` 里没有（或内容不同）的**源**文件数。
+    ///
+    /// 注意：**单靠"内容不同"分不出方向**。影子因为落后而不同、和因为用户编辑
+    /// 而不同，这个函数都数成 1。要判"是不是用户的草稿"，用
+    /// [`Self::has_drafts_over`]。
+    ///
+    /// `delivery/` 不参与（它是生成产物，每次生成都会变，不是用户的编辑）。
+    pub fn edited_against(&self, other: &Snapshot) -> usize {
+        self.map
+            .iter()
+            .filter(|(rel, _)| !rel.starts_with("delivery/"))
+            .filter(|(rel, entry)| other.map.get(*rel) != Some(*entry))
+            .count()
+    }
+
+    /// 一份文件相对另一份快照**变没变**（只看源，`delivery/` 不算）。
+    ///
+    /// "变了"包括：内容不同、一边有另一边没有。
+    fn changed_between(a: &Snapshot, b: &Snapshot, rel: &str) -> bool {
+        a.map.get(rel) != b.map.get(rel)
+    }
+
+    /// 所有**源**路径的并集（不看 `delivery/`）。
+    fn source_paths_of(&self, other: &Snapshot) -> BTreeSet<String> {
+        self.map
+            .keys()
+            .chain(other.map.keys())
+            .filter(|rel| !rel.starts_with("delivery/"))
+            .cloned()
+            .collect()
+    }
+
+    /// 与 `other` 的**源**文件并集（不看 `delivery/`）。
+    ///
+    /// 基准缺失时用它兜底：把所有可能的路径都当成"要看的"，宁可多问一句。
+    pub fn source_paths_union(&self, other: &Snapshot) -> BTreeSet<String> {
+        self.source_paths_of(other)
+    }
+
+    /// 两份快照的**源**内容是否逐字节相同（不看 `delivery/`）。
+    ///
+    /// 这是"能安全重建基准"的唯一证明：影子与真源完全一致 ⇒ 影子没有任何独有内容
+    /// ⇒ 重建基准不会抹掉任何人的改动。只要有一处不同就不能下这个结论 ——
+    /// 不同可能是"用户改了没存"，也可能是"外部改了真源"，靠字节分不出方向，
+    /// 而基准的作用恰恰是分出方向，缺了基准就无法证明。
+    pub fn identical_sources(&self, other: &Snapshot) -> bool {
+        let mine: BTreeSet<&String> = self
+            .map
+            .keys()
+            .filter(|r| !r.starts_with("delivery/"))
+            .collect();
+        let theirs: BTreeSet<&String> = other
+            .map
+            .keys()
+            .filter(|r| !r.starts_with("delivery/"))
+            .collect();
+        mine == theirs
+            && mine
+                .iter()
+                .all(|rel| self.map.get(*rel) == other.map.get(*rel))
+    }
+
+    /// **影子 / 真源 / 基准 三方对账**：谁改了什么，有没有撞车。
+    ///
+    /// 这是"有没有用户的草稿"的**完整**判据（2026-11-01 第二轮）。
+    /// 上一轮只用"影子独有文件"，认不出"用户改了既有文件"——
+    /// 真源也被外部改过时，用户的改动会被静默丢掉。
+    pub fn reconcile(&self, real: &Snapshot, base: &Snapshot) -> ShadowVerdict {
+        let mut verdict = ShadowVerdict::default();
+        for rel in self.source_paths_of(real) {
+            let shadow_changed = Self::changed_between(self, base, rel.as_str());
+            let real_changed = Self::changed_between(real, base, rel.as_str());
+            match (shadow_changed, real_changed) {
+                // 只有影子动了 → 用户的未保存草稿
+                (true, false) => verdict.drafts.push(rel),
+                // 只有真源动了 → 外部修改，影子是旧拷贝，不是草稿
+                (false, true) => verdict.external.push(rel),
+                // 两边都动过 → **冲突**，不许自动选边
+                (true, true) => verdict.conflicts.push(rel),
+                (false, false) => {}
+            }
+        }
+        verdict
+    }
+
+    /// **`self` 里有没有 `base`（真源）里不存在的编辑** —— 即"用户还没保存的草稿"。
+    ///
+    /// 为什么不能直接用 [`Self::edited_against`]（2026-11-01 踩过）：
+    ///
+    /// ```text
+    /// 真源 A1 = 0.85（AI 刚改的）   影子 A1 = 0.8（旧拷贝）
+    /// edited_against → 1             ← 但这不是用户的草稿！
+    /// has_drafts_over → false        ← 这才是事实
+    /// ```
+    ///
+    /// 区别在**方向**：影子落后（外部改了真源）还是影子超前（用户改了没存）。
+    ///
+    /// 判法：**影子里的内容，在真源里找不到** ⇒ 那是影子里独有的东西 = 用户的编辑。
+    /// 影子只是旧版时，它的每一份内容在真源的历史里也都有过 —— 但这里没有历史，
+    /// 所以退一步用一条更保守、也更实用的判据：
+    ///
+    /// · 真源里**没有这个文件**，影子里有 → 草稿（用户新建的）
+    /// · 两边都有但内容不同 → **看哪边"更新"**做不到（没有时间轴），
+    ///   所以交给调用方：`Ctx::open` 用"影子是否含有真源没有的文件"这一条，
+    ///   加上 `txn` 的 dirty 计数（真正在本次会话里改过的）来判断。
+    ///
+    /// 这里只回答最确定的那一问：**影子里有没有真源完全不知道的文件**。
+    pub fn has_files_absent_from(&self, base: &Snapshot) -> Vec<String> {
+        self.map
+            .keys()
+            .filter(|rel| !rel.starts_with("delivery/"))
+            .filter(|rel| !base.map.contains_key(*rel))
+            .cloned()
+            .collect()
     }
 }
 
@@ -252,6 +434,75 @@ pub fn snapshot(root: &Path) -> Result<Snapshot, AppError> {
 /// 两份快照是不是同一份（开场判「有没有上次遗留的改动」、保存前判「要不要写」）
 pub fn equal(a: &Snapshot, b: &Snapshot) -> bool {
     a == b
+}
+
+/// 两份树里一份文件的关系（**给界面看的方向**，与撤销栈里的 before/after 不是一个东西）。
+///
+/// 口径固定成「左边那份有 / 右边那份有」：对 [`changed_files`] 来说
+/// 左边 = 盘上的真源、右边 = 影子树，所以 `Added` = **保存会新建它**。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileState {
+    /// 右边有、左边没有
+    Added,
+    /// 两边都有、字节不同
+    Modified,
+    /// 左边有、右边没有
+    Removed,
+}
+
+/// 两份快照之间**有变化的文件**（连同两侧字节）。
+///
+/// 与 [`diff`] 的差别只有一个：`diff(before, after, root)` 只用**一个**根读二进制，
+/// 而这里两侧住在两棵不同的树（盘上 / 影子）。未保存改动的文本 diff 要它 ——
+/// 见 [`super::shadow_diff`]。
+///
+/// `delivery/` 由调用方先用 [`Snapshot::without_products`] 滤掉，这里不重复判。
+pub type ChangedFiles = Vec<(String, FileState, Option<Vec<u8>>, Option<Vec<u8>>)>;
+
+pub fn changed_files(
+    left: &Snapshot,
+    right: &Snapshot,
+    left_root: &Path,
+    right_root: &Path,
+) -> Result<ChangedFiles, AppError> {
+    let mut rels: Vec<&String> = left.map.keys().chain(right.map.keys()).collect();
+    rels.sort();
+    rels.dedup();
+
+    let mut out: ChangedFiles = Vec::new();
+    for rel in rels {
+        let l = left.map.get(rel);
+        let r = right.map.get(rel);
+        if l == r {
+            continue;
+        }
+        let state = match (l, r) {
+            (None, _) => FileState::Added,
+            (_, None) => FileState::Removed,
+            _ => FileState::Modified,
+        };
+        out.push((
+            rel.clone(),
+            state,
+            read_side(l, left_root, rel)?,
+            read_side(r, right_root, rel)?,
+        ));
+    }
+    Ok(out)
+}
+
+/// 从某一侧读出这一份的字节（`None` = 那一侧没有这个文件）。
+///
+/// 二进制（`Entry::Stamp`）要落地去读 —— 快照里只有长度与头部指纹。
+fn read_side(entry: Option<&Entry>, root: &Path, rel: &str) -> Result<Option<Vec<u8>>, AppError> {
+    match entry {
+        None => Ok(None),
+        Some(Entry::Bytes(bytes)) => Ok(Some(bytes.clone())),
+        Some(Entry::Stamp { .. }) => std::fs::read(root.join(rel))
+            .map(Some)
+            .map_err(|e| AppError::io(format!("读不出改动文件：{rel}")).with_detail(e.to_string())),
+    }
 }
 
 /// 两次快照的差集。`root` 用来在**变化时**才把二进制读进来（没变的不读）。
@@ -518,9 +769,19 @@ impl Txn {
 
     /// 记一条编辑：调用方已经**在影子树上**执行完写盘，这里只收差集。
     /// 没有实际变化时返回 `None`（不占撤销栈）。
+    ///
+    /// # 合并（2026-11-02）
+    ///
+    /// `key: Some(k)` 且**栈顶同 `k`、距今不到 [`MERGE_MS`]** ⇒ 并进栈顶，不新增一条。
+    /// 这是作者报的那一幕的解药：连点涂胶速度十几次，栈里只该有一条，
+    /// 「未保存」也不该跟着涨十几次。
+    ///
+    /// 只判栈顶，不往下找：中途改过别的地方（`A1` 改完去改 `A1_MINI`，再回来改 `A1`）
+    /// 就是**两次**编辑 —— 后一次必须能单独撤销，否则撤一次会把中间那个也带走。
     pub fn record(
         &mut self,
         label: impl Into<String>,
+        key: Option<EditKey>,
         before: &Snapshot,
         after: &Snapshot,
         root: &Path,
@@ -529,10 +790,26 @@ impl Txn {
         if files.is_empty() {
             return Ok(None);
         }
+        let label = label.into();
+
+        /* ★ 合并：栈顶还是同一格、还在窗口里 ⇒ 只更新它 */
+        if let (Some(k), Some(top)) = (&key, self.payloads.last_mut()) {
+            if top.key.as_ref() == Some(k)
+                && top.last_at.elapsed().as_millis() < u128::from(MERGE_MS)
+            {
+                top.absorb(files, label);
+                self.redo.clear();
+                self.recovered = false;
+                return Ok(Some(top.view()));
+            }
+        }
+
         let payload = Payload {
-            label: label.into(),
+            label,
             at: clock::now_iso8601(),
             files,
+            key,
+            last_at: std::time::Instant::now(),
         };
         let view = payload.view();
         self.payloads.push(payload);
@@ -542,6 +819,15 @@ impl Txn {
         self.redo.clear();
         self.recovered = false;
         Ok(Some(view))
+    }
+
+    /// 栈里所有编辑碰过的文件（去重、排序）。**与 [`changed_files`] 口径分开**：
+    /// 这个只回答"撤销栈碰过哪些文件"，不回答"现在差几份"（前者不会因撤销变少）。
+    pub fn touched_files(&self) -> BTreeSet<String> {
+        self.payloads
+            .iter()
+            .flat_map(|p| p.files.iter().map(|(rel, _, _)| rel.clone()))
+            .collect()
     }
 
     /// 撤销一条：把 `before` 写回影子树。返回被撤销那条的标签
@@ -598,6 +884,32 @@ pub fn shadow_root(workbench_root: &Path) -> PathBuf {
     workbench_root.join(".draft").join("presets")
 }
 
+/// **基准快照**：影子树是"从哪一份真源铺出来的"。
+///
+/// 为什么必须有它（2026-11-01）：判"影子有没有用户的草稿"不能只看"影子里有没有
+/// 真源没有的文件" —— 那只认得**新增**，认不出**改既有文件**：
+///
+/// ```text
+/// 基准（铺影子时）  0.8
+/// 影子（用户改）    0.9   ← 未保存的草稿
+/// 真源（AI 改）    0.85  ← 外部修改
+/// ```
+///
+/// 只看"影子独有文件"会得出"没草稿"，于是切回真源、用户的 0.9 就没了。
+/// 有基准才能同时回答两个问题，并识别"两边都改了同一个文件"的冲突：
+///
+/// | 影子 vs 基准 | 真源 vs 基准 | 判定 |
+/// |---|---|---|
+/// | 变了 | 没变 | 用户的草稿 |
+/// | 没变 | 变了 | 外部修改（直接读真源） |
+/// | 变了 | 变了 | **冲突**，不能自动选边 |
+/// | 都没变 | — | 干净 |
+///
+/// 它住 `<workbench>/.draft/base/`（与影子树同一族，不进 git）。
+pub fn base_root(workbench_root: &Path) -> PathBuf {
+    workbench_root.join(".draft").join("base")
+}
+
 #[cfg(test)]
 // 测试要造夹具：`std::fs::write` 在这里是正当用法（写盘纪律管的是生产代码）
 #[allow(clippy::disallowed_methods)]
@@ -630,7 +942,9 @@ mod tests {
         let after = snapshot(&shadow).unwrap();
 
         let mut txn = Txn::new();
-        let op = txn.record("停用 A1", &before, &after, &shadow).unwrap();
+        let op = txn
+            .record("停用 A1", None, &before, &after, &shadow)
+            .unwrap();
         assert!(op.is_some());
         assert_eq!(txn.dirty_count(), 1);
 
@@ -651,7 +965,8 @@ mod tests {
         let after = snapshot(&shadow).unwrap();
 
         let mut txn = Txn::new();
-        txn.record("新增版本", &before, &after, &shadow).unwrap();
+        txn.record("新增版本", None, &before, &after, &shadow)
+            .unwrap();
         assert!(shadow.join("machines/A1-NEW.toml").is_file());
 
         txn.undo(&shadow).unwrap();
@@ -676,7 +991,7 @@ mod tests {
         let after = snapshot(&shadow).unwrap();
 
         let mut txn = Txn::new();
-        txn.record("删除套餐文件", &before, &after, &shadow)
+        txn.record("删除套餐文件", None, &before, &after, &shadow)
             .unwrap();
         assert!(!shadow.join("bundles.toml").exists());
 
@@ -738,7 +1053,7 @@ mod tests {
             let before = snapshot(&shadow).unwrap();
             edit(&shadow);
             let after = snapshot(&shadow).unwrap();
-            txn.record(label, &before, &after, &shadow).unwrap();
+            txn.record(label, None, &before, &after, &shadow).unwrap();
         };
 
         // ① 关掉 enabled
@@ -835,5 +1150,88 @@ mod tests {
         assert!(safe_rel("/etc/passwd").is_err());
         assert!(safe_rel("machines/A1.toml").is_ok());
         let _ = d;
+    }
+
+    /// 同一格 5 秒内连改 ⇒ **只留一条**，且撤一次回到最初那个值。
+    ///
+    /// 作者 2026-11-02：「就像那个撤销堆栈一样，他只记一次……5 秒内的算一条」。
+    /// 连点步进器 `65 → 64 → … → 60` 之后按一下撤销，人期待的是回到 `65`，不是退到 `61`。
+    #[test]
+    fn the_same_cell_within_the_window_collapses_into_one_op() {
+        let (_d, _real, shadow, _trash) = setup();
+        let key = EditKey {
+            level: crate::workbench::domain::Level::Version,
+            owner: "A1/STANDARD".to_owned(),
+            key: "glue.speed_limit".to_owned(),
+        };
+        let mut txn = Txn::new();
+
+        /* 改五次，每次都是一整轮「拍快照 → 写盘 → 记事务」 */
+        for value in ["64\n", "63\n", "62\n", "61\n", "60\n"] {
+            let before = snapshot(&shadow).unwrap();
+            write(&shadow, "bundles.toml", value);
+            let after = snapshot(&shadow).unwrap();
+            txn.record("改参数值", Some(key.clone()), &before, &after, &shadow)
+                .unwrap();
+        }
+
+        assert_eq!(txn.undo_depth(), 1, "同一格连改五次只该留一条撤销");
+        assert_eq!(txn.ops().len(), 1);
+
+        txn.undo(&shadow).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(shadow.join("bundles.toml")).unwrap(),
+            "bundles = []\n",
+            "撤一次必须回到**最初**那一份，不是上一步"
+        );
+        assert_eq!(txn.undo_depth(), 0);
+
+        // 重做把五次的结果一次补回来
+        txn.redo(&shadow).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(shadow.join("bundles.toml")).unwrap(),
+            "60\n"
+        );
+    }
+
+    /// 换了格（另一个 owner / 另一个键）⇒ 不许合并，那是两件事
+    #[test]
+    fn a_different_cell_is_a_separate_op() {
+        let (_d, _real, shadow, _trash) = setup();
+        let a = EditKey {
+            level: crate::workbench::domain::Level::Version,
+            owner: "A1/STANDARD".to_owned(),
+            key: "glue.speed_limit".to_owned(),
+        };
+        let b = EditKey {
+            owner: "A1/FAST".to_owned(),
+            ..a.clone()
+        };
+        let mut txn = Txn::new();
+        /* 写不同的内容：同一份文件写两遍同样的字节，第二遍的差集是空的 ——
+        那不会记成一条（`record` 见到空差集直接返回 `None`），测的就不是合并了 */
+        for (i, k) in [a, b].into_iter().enumerate() {
+            let before = snapshot(&shadow).unwrap();
+            write(&shadow, "bundles.toml", &format!("x = {}\n", i + 1));
+            let after = snapshot(&shadow).unwrap();
+            txn.record("改参数值", Some(k), &before, &after, &shadow)
+                .unwrap();
+        }
+        assert_eq!(txn.undo_depth(), 2, "两格就是两条，撤销要能分开回退");
+    }
+
+    /// 结构编辑（`key: None`）永不合并 —— 建一个版本和删一个版本不是"同一件事的延续"
+    #[test]
+    fn structural_edits_never_merge() {
+        let (_d, _real, shadow, _trash) = setup();
+        let mut txn = Txn::new();
+        for name in ["X-A.toml", "X-B.toml"] {
+            let before = snapshot(&shadow).unwrap();
+            write(&shadow, &format!("machines/{name}"), "id = 'X'\n");
+            let after = snapshot(&shadow).unwrap();
+            txn.record("新增版本", None, &before, &after, &shadow)
+                .unwrap();
+        }
+        assert_eq!(txn.undo_depth(), 2);
     }
 }

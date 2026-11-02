@@ -143,6 +143,21 @@ const PUBLISH_CHANNEL: &str = "stable";
 
 /* ---------- 校验 ---------- */
 
+/// **历次生成的回执**（2026-11-01）：新的在前。
+///
+/// 回执住应用数据目录（不进仓库），按份数自动清理。它只记录**生成**这一件事
+/// —— 保存 / 发布 / 外部改文件都不在这里，别把它们塞进同一套机制。
+///
+/// 界面上「生成与发布」页可以翻它，回答"上一次生成到底做了什么、为什么失败"。
+#[tauri::command]
+pub fn wb_receipts(
+    limit: Option<usize>,
+) -> Result<Vec<super::receipt::GenerationReceipt>, AppError> {
+    Ok(super::receipt::history(
+        limit.unwrap_or(super::receipt::KEEP),
+    ))
+}
+
 /// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
 ///
 /// 配方正文直接取 `preset::PRESET_RECIPES_TOML`（编进二进制的真源，与 `gen-presets`
@@ -593,6 +608,26 @@ pub(super) fn require_shadow_in_sync(ctx: &super::Ctx) -> Result<(), AppError> {
     Ok(())
 }
 
+/// 这一次生成**依据哪一份源**（给人看的一句话依据）。
+///
+/// 2026-11-01 作者要求：`generate` 不得仅因"影子树与真源不同"就拒绝，
+/// 并且必须**明确说清用的是哪一份**，不许静默混用。
+///
+/// 判据是**两棵树的内容**，不是"`Presets` 的根指哪"：会话永远读影子树
+/// （见 `Ctx::open_at`），拿根路径比会永远得出"按草稿生成"。正常路径上
+/// [`require_clean`] + [`require_shadow_in_sync`] 已经保证两者逐字节相同 ——
+/// 这里如实说"按 presets/ 生成"；真有分叉（调用方绕过了闸）就把话说破，别静默混用。
+///
+/// 快照失败按"有分叉"算：宁可把依据说得保守，也不能替它宣称"用的是权威源"。
+pub(super) fn generation_source_note(ctx: &super::Ctx) -> String {
+    let diverged = super::shadow_differs(&ctx.real_root, &ctx.shadow_root).unwrap_or(true);
+    if diverged {
+        "按工作台草稿生成（presets/ 上有未保存的编辑态）".to_owned()
+    } else {
+        "按 presets/（磁盘上的权威源）生成".to_owned()
+    }
+}
+
 /// **生成/发布只在「已保存」的那一版上跑**（2026-10-31 统一编辑事务）。
 ///
 /// 草稿是编辑态，产物是发布态 —— 拿编辑态去生成，产物里就会混进一批
@@ -635,9 +670,37 @@ pub(super) fn generate_with(
         super::receipt::GenerationReceipt::start(&receipts_root, clock::now_iso8601());
     match generate_inner(ctx, scope, force, &mut receipt) {
         Ok(mut out) => {
-            receipt.status = super::receipt::ReceiptStatus::Passed;
-            receipt.step("commit", true, "catalog + 台账已落盘");
-            if let Err(e) = super::receipt::save(&receipts_root, &receipt) {
+            /* **`passed` 不能只看"流程没报错"**（2026-11-01）。
+             *
+             * 三组计数里只要有一个 `failed > 0`，就不是通过 —— 哪怕主流程走完了。
+             * 反过来，三条全 0 写也**不是失败**：那是"内容都没变"，是正常结果，
+             * 但要在 `commit` 这一步里明说，不能让人以为"什么都没干"。 */
+            let failed = receipt.delivery.failed + receipt.assets.failed + receipt.baseline.failed;
+            if failed == 0 {
+                receipt.status = super::receipt::ReceiptStatus::Passed;
+                let nothing_changed = receipt.delivery.written == 0
+                    && receipt.assets.written == 0
+                    && receipt.baseline.written == 0;
+                receipt.step(
+                    "commit",
+                    true,
+                    if nothing_changed {
+                        // 明确说"没变"，不许让它看起来像"跑了个寂寞"
+                        format!(
+                            "全部 {} 份内容均未变化，没有写任何文件",
+                            receipt.delivery.total
+                        )
+                    } else {
+                        "catalog + 台账已落盘".to_owned()
+                    },
+                );
+            } else {
+                receipt.status = super::receipt::ReceiptStatus::Failed;
+                let msg = format!("有 {failed} 份文件没有写成");
+                receipt.error = Some(msg.clone());
+                receipt.step("commit", false, msg);
+            }
+            if let Err(e) = super::receipt::save(&receipt) {
                 tracing::warn!(error = %e, "回执没写下来（不影响这次生成）");
             }
             out.receipt = Some(receipt);
@@ -646,7 +709,7 @@ pub(super) fn generate_with(
         Err(e) => {
             receipt.error = Some(e.message.clone());
             receipt.step("commit", false, e.message.clone());
-            if let Err(werr) = super::receipt::save(&receipts_root, &receipt) {
+            if let Err(werr) = super::receipt::save(&receipt) {
                 tracing::warn!(error = %werr, "失败回执也没写下来");
             }
             Err(e)
@@ -668,7 +731,10 @@ fn generate_inner(
 ) -> Result<GenerateReport, AppError> {
     let (c, d, _) = state(ctx)?;
     /* 第 1 步：输入冻结。`ctx.presets` 已在内存里，`require_clean` 已保证它 == 磁盘 */
-    receipt.step("frozen", true, "presets/");
+    /* **明确记下这次按哪一份源生成**（2026-11-01 作者要求）：
+    不许静默混用真源与影子树。正常是 `presets/`；真有未保存草稿时上面的闸
+    已经先拦下了，能走到这里就说明用的是磁盘上的权威源。 */
+    receipt.step("frozen", true, generation_source_note(ctx));
     // 装渲染器：`planned_todos` 走 `build_rows`，那里的「待更新」是拿当前渲染
     // 跟盘上字节比出来的（与本次要写的判据同一台渲染器）
     let probe = renderer_for(ctx);
@@ -696,7 +762,8 @@ fn generate_inner(
     // 必须落在 git 看得见的那棵树上。生成前 `require_clean` 已保证影子树 == 真仓库，
     // 所以这里不会把未保存的编辑带进产物。
     let presets_root = ctx.real_root.as_path();
-    let delivery_root = paths::delivery_root_at(presets_root).join(super::delivery::MKP_DIR);
+    let delivery_root =
+        paths::delivery_root_at(presets_root).join(crate::workbench::app::delivery::MKP_DIR);
     let delivery_mkp = delivery_root.join("presets");
     let mut written = Vec::new();
     let mut unchanged = Vec::new();
@@ -755,16 +822,17 @@ fn generate_inner(
         }
     }
 
-    receipt.delivery = super::receipt::Counts {
-        written: written.len(),
-        total: rendered.len(),
-    };
-    receipt.files = written.clone();
-    receipt.step(
-        "delivery",
-        true,
-        format!("{}/{}", written.len(), rendered.len()),
-    );
+    /* 三个数各记各的（2026-11-01）：`written` 只数**真写了盘**的。
+    `written 0/9` 到底意味着"9 份都没变"还是"9 份都失败了"，
+    只有把 unchanged / failed 分开才答得出来。 */
+    receipt.delivery = super::receipt::Counts::of(written.len(), unchanged.len(), 0);
+    /* 回执点名的是**文件名**（能直接定位到盘上那份），不是 uid */
+    receipt.files = rendered
+        .iter()
+        .filter(|r| written.contains(&r.uid))
+        .map(|r| r.file_name.clone())
+        .collect();
+    receipt.step("delivery", true, receipt.delivery.summary());
 
     /*
      * ★ 第 3–5 步只在**真仓库会话**上做。
@@ -785,22 +853,31 @@ fn generate_inner(
          * 配方那条链已删，`presets/` 是唯一权威源 —— 改参数只改一处，两边同时变。
          */
         let assets_dir = preset::generate::assets_dir();
-        let mut n_assets = 0usize;
+        let mut n_written = 0usize;
+        let mut n_same = 0usize;
         for r in &rendered {
             let target = assets_dir.join(&r.file_name);
-            n_assets += 1;
-            // 内容相同就不写（与交付产物同一条口径：字节比较，不碰 mtime）
-            if std::fs::read_to_string(&target).ok().as_deref() == Some(r.text.as_str()) {
+            /* **内核产物与交付产物是同一份内容**（2026-11-01 单一源）：
+            所以它也盖同一个 `# generated_at:`，判据也一样（剥掉时间再比）。
+            两边都从同一个 `render()` 出来、只差写盘时刻 —— 时间不同不算漂移。 */
+            let body = stamp(&r.text);
+            /* 「内容没变」= 剥掉时间后相同**且**盘上那份已经带着生成时间。
+            后半句不能省：没有 `# generated_at:` 时，光比内容会得出"没变 → 不写"，
+            那一行就永远补不上（自锁）。与交付那条同一条口径。 */
+            let same = std::fs::read_to_string(&target).ok().is_some_and(|old| {
+                old.contains(crate::workbench::GENERATED_AT_PREFIX)
+                    && crate::workbench::strip_generated_at(&old) == r.text
+            });
+            if same {
+                n_same += 1;
                 continue;
             }
-            crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())
+            crate::fsx::atomic::atomic_write(&target, body.as_bytes())
                 .map_err(|e| AppError::io("内核产物写不出来").with_detail(e.to_string()))?;
+            n_written += 1;
         }
-        receipt.assets = super::receipt::Counts {
-            written: n_assets,
-            total: n_assets,
-        };
-        receipt.step("assets", true, format!("{n_assets}/{n_assets}"));
+        receipt.assets = super::receipt::Counts::of(n_written, n_same, 0);
+        receipt.step("assets", true, receipt.assets.summary());
 
         /* ★ **单一源的判据**（2026-11-01）：内核产物与交付产物必须逐字节相同。
          *
@@ -809,7 +886,7 @@ fn generate_inner(
          * `tower_extrude_ratio` 一边 1.0 一边 0.9 的成因。当场报错，别让它进 git。
          */
         let delivery_mkp_dir = paths::delivery_root_at(presets_root)
-            .join(super::delivery::MKP_DIR)
+            .join(crate::workbench::app::delivery::MKP_DIR)
             .join("presets");
         if let Some((name, ours, theirs)) = first_drift(&delivery_mkp_dir, &assets_dir, &rendered) {
             return Err(AppError::internal(messages::text(
@@ -824,11 +901,11 @@ fn generate_inner(
         let fixtures_dir = preset::generate::fixtures_dir();
         let n_base = preset::generate::sync_baseline(&assets_dir, &fixtures_dir)
             .map_err(|e| AppError::io("测试基线同步失败").with_detail(e))?;
-        receipt.baseline = super::receipt::Counts {
-            written: n_base,
-            total: n_assets,
-        };
-        receipt.step("baseline", true, format!("{n_base}/{n_assets}"));
+        /* `sync_baseline` 返回"这次真写了几份"；总数是那份目录里应有的份数，
+        未变数由它自己算 —— 不拿上面 assets 的计数冒充（那是另一个东西）。 */
+        let base_total = rendered.len();
+        receipt.baseline = super::receipt::Counts::of(n_base, base_total.saturating_sub(n_base), 0);
+        receipt.step("baseline", true, receipt.baseline.summary());
 
         /* 第 5 步：内嵌目录重建 —— 读的就是刚写出去的那批入库产物 */
         /* `build_from_repo` 收的是**仓库根**（它自己会拼 `presets/`），不是 presets 那一层 */
@@ -965,12 +1042,27 @@ pub struct DiffLine {
     pub no: usize,
 }
 
+/// 前端那边叫 `PreviewDiffLine`（同一条 wire 形状）。
+///
+/// 单独起个别名只是为了让「一份未保存改动的 diff」读起来不串到"预演"上 ——
+/// **不再是第二套结构**，字段与上面那个逐项相同。
+pub type PreviewDiffLine = DiffLine;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffLineKind {
     Context,
     Added,
     Removed,
+}
+
+/// 行级 diff 的**唯一实现**（`pub` 是为了给未保存改动的 diff 用 ——
+/// 别处再写一份 LCS 迟早两边给出的红绿不一样）。
+///
+/// 未保存改动那边（`domain::shadow_diff`）调的就是它：算法、行号口径、
+/// 「删在前、增在后」的顺序与生成前确认框**逐字相同**。
+pub(crate) fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
+    diff_lines(old, new)
 }
 
 /// 一份产物的预演：状态 + 行级差异 + 计数。
@@ -1061,7 +1153,9 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
 
     let (todo, skipped) = planned_todos(&book, scope);
     let delivery = paths::delivery_root_path();
-    let presets_dir = delivery.join(super::delivery::MKP_DIR).join("presets");
+    let presets_dir = delivery
+        .join(crate::workbench::app::delivery::MKP_DIR)
+        .join("presets");
 
     let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
     let mut to_write = 0usize;
@@ -1146,8 +1240,14 @@ fn first_drift(
         let delivery = std::fs::read_to_string(delivery_dir.join(&r.file_name)).ok();
         let assets = std::fs::read_to_string(assets_dir.join(&r.file_name)).ok();
         match (delivery, assets) {
-            // 两边都读得到且相同 → 继续看下一份
-            (Some(a), Some(b)) if a == b => continue,
+            /* 两边都读得到、**剥掉生成时间**后相同 → 继续看下一份。
+            时间戳各记各的写盘时刻，两侧必然不同，那不是"第二个数据源"。 */
+            (Some(a), Some(b))
+                if crate::workbench::strip_generated_at(&a)
+                    == crate::workbench::strip_generated_at(&b) =>
+            {
+                continue
+            }
             // 有一侧读不到 / 两侧不同：都算漂移，把看到的东西如实带回
             (a, b) => {
                 return Some((
@@ -1357,6 +1457,18 @@ fn lcs_diff(a: &[&str], b: &[&str], a_base: usize, b_base: usize, out: &mut Vec<
         j += 1;
     }
 }
+
+/*
+ * 曾有「配对」这一层（把「整块删 + 整块增」读成一行「旧 → 新」），2026-11-02 删掉。
+ *
+ * 起因是作者看到"只加了一条却在概览条上冒出两道 −"—— 那其实是 LCS 的"删一段 + 增一段"，
+ * 文件里并没有少东西。配对的思路没错，但渲染成「旧 → 新」一行在长行上读不动
+ * （作者原话：「到时候长一点可能就不太好接受了」），他自己要的是
+ * **生成前确认那种上红下绿两行**。既然界面要的就是 LCS 的原样，那这一层就没有载荷了。
+ *
+ * 别再加回来：真要"改一行读成一行"，那是编辑器（VSCode 那种 inline diff）的活，
+ * 不是这个只读确认框的事。
+ */
 
 /* ---------- 恢复配方 ---------- */
 
@@ -1974,6 +2086,139 @@ mod tests {
         assert_eq!(before, after, "no-op 生成不许动台账（逐字节）");
     }
 
+    /* ---------- 验收：回执只报告真实结果（2026-11-01） ---------- */
+
+    /// **全部无变化**：`written=0`、`unchanged=total`、`failed=0`，
+    /// 并且 `commit` 那一步要**明说"都没变"**，不许让它看起来像"什么都没干"。
+    #[test]
+    fn a_noop_generate_says_nothing_changed_instead_of_faking_writes() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("二次生成");
+        let r = report.receipt.expect("该有回执");
+
+        assert_eq!(r.status, super::super::receipt::ReceiptStatus::Passed);
+        assert_eq!(r.delivery.written, 0, "内容没变，交付一份都不许写");
+        assert_eq!(
+            r.delivery.unchanged, r.delivery.total,
+            "没写的那几份要记成「未变」，不是消失"
+        );
+        assert_eq!(r.delivery.failed, 0);
+        assert_eq!(r.assets.written, 0, "内核同样一份都不许写");
+        // `written/total` 相加必须等于总数 —— 三个数不许对不上
+        for c in [r.delivery, r.assets, r.baseline] {
+            assert_eq!(
+                c.written + c.unchanged + c.failed,
+                c.total,
+                "写/未变/失败 三个数必须加起来等于总数"
+            );
+        }
+        let commit = r.steps.iter().find(|s| s.key == "commit").unwrap();
+        assert!(commit.ok);
+        assert!(
+            commit.detail.contains("未变化"),
+            "全部没变时要明说，别让人以为写过了：{}",
+            commit.detail
+        );
+    }
+
+    /// **部分变化**：`written` 必须等于**实际写盘的文件数**，不是"处理了几个"。
+    ///
+    /// 这正是 2026-11-01 那个假 `9/9` 的来源：旧代码 `n_assets += 1` 无条件累加，
+    /// 于是"一份都没写"也报 `9/9`。
+    #[test]
+    fn written_counts_real_writes_not_files_visited() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        // 改一个版本的值 → 只该有那一份变
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("改后生成");
+        let r = report.receipt.expect("该有回执");
+
+        assert!(r.delivery.written >= 1, "改过的版本必须真写");
+        assert_eq!(
+            r.delivery.written,
+            report.written.len(),
+            "回执里的写入数必须与真写盘的那份清单逐项一致"
+        );
+        assert!(
+            r.delivery.unchanged > 0,
+            "没改的那些要计入「未变」，它们确实没写"
+        );
+        /* 内核那条链**只在真实仓库会话**里跑（`ctx.real_root == 真 presets 根`）；
+        测试夹具是临时根，所以这里它整段跳过 —— `assets` 三个数都该是 0，
+        而不是"跟交付一样"（那个假设只在生产里成立）。 */
+        assert_eq!(
+            (r.assets.written, r.assets.unchanged, r.assets.total),
+            (0, 0, 0),
+            "临时会话不写内核产物，计数就该如实是 0"
+        );
+    }
+
+    /// **回执与磁盘逐项一致**：回执说写了哪些，盘上就真的变了哪些。
+    #[test]
+    fn the_receipt_matches_what_actually_landed_on_disk() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        let dir = paths::delivery_root_at(&ctx.real_root)
+            .join(crate::workbench::app::delivery::MKP_DIR)
+            .join("presets");
+        let before: Vec<(String, std::time::SystemTime)> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    e.metadata().unwrap().modified().unwrap(),
+                )
+            })
+            .collect();
+
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("改后生成");
+        let r = report.receipt.expect("该有回执");
+
+        // 回执点名的文件，mtime 必须是新的；没点名的必须是旧的
+        for (name, old_mtime) in before {
+            let now = std::fs::metadata(dir.join(&name))
+                .unwrap()
+                .modified()
+                .unwrap();
+            let named = r.files.iter().any(|f| f == &name);
+            if named {
+                assert!(now > old_mtime, "{name} 回执说写了，盘上却没变");
+            } else {
+                assert_eq!(now, old_mtime, "{name} 回执说没写，盘上却被动过");
+            }
+        }
+    }
+
     /* ---------- `# generated_at:` 只记时间，不参与判断（2026-11-01） ---------- */
 
     /// 时间戳插在头注释块末尾，**紧挨着业务内容之前**；剥掉它又回到原样。
@@ -2384,6 +2629,9 @@ mod tests {
                     let t = l.trim();
                     !l.starts_with("# uuid:")
                         && !l.starts_with("# release_time:")
+                        /* 生成时刻不表达内容：基线里那份是它被写出去的时刻，
+                           我们这边 render() 根本不产这一行 —— 两者只差这里 */
+                        && !l.starts_with(crate::workbench::GENERATED_AT_PREFIX)
                         && t != "#胶笔配置"
                         && t != "# 胶笔配置"
                 })

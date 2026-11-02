@@ -458,8 +458,14 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
+        // 「使用之后自动复制后处理脚本」（2026-11-01）：同一格的第两项。
+        // 读者是前端那一条"换完使用中之后顺手抄一遍"，后端不读它
+        ipc::prefs::get_auto_copy_script,
+        ipc::prefs::set_auto_copy_script,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
+        // 清理数据（只清不卸）/ 卸载（可点名连数据一起清）—— 两条都清完就退
+        ipc::app::clear_app_data,
         ipc::app::uninstall,
         ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗。落 AppState 的
@@ -634,8 +640,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 预设页偏好（2026-10-20）：与上面那份清单一字不差
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
+        // 「使用之后自动复制后处理脚本」（2026-11-01）—— 与上面那份清单一字不差
+        ipc::prefs::get_auto_copy_script,
+        ipc::prefs::set_auto_copy_script,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
+        // 清理数据 / 卸载 —— 与上面那份清单一字不差
+        ipc::app::clear_app_data,
         ipc::app::uninstall,
         ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：与上面那份清单一字不差
@@ -664,6 +675,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
         // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿
         app::wb_set_param_meta,
+        // 分组本身（名字 / 上下位置，2026-11-01 作者：「这个标题这些能点击吧，
+        // 点了就可以改名字……而且没办法去换它那个上下位置」）：
+        // 名字写 `[[tabs.sections]].label`，位置 = 数组换位 + `order` 重排，
+        // 布局文件那份数组同步换（「所属分组」下拉按它出）
+        app::wb_set_section_meta,
+        app::wb_remove_section,
+        app::wb_clear_stale_translations,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
         app::words::wb_words,
@@ -740,6 +758,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_save_ui,
         app::wb_preview_bulk,
         app::wb_diff_draft,
+        // 未保存改动的**逐行** diff（盘上 presets/ ↔ 影子树）。只读
+        app::wb_shadow_diff,
         app::wb_apply_draft,
         app::wb_save,
         app::wb_discard,
@@ -754,6 +774,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
         app::wb_app_version,
         app::build::wb_generate,
+        // 历次生成的回执（应用数据目录，按份数自动清理）
+        app::build::wb_receipts,
         app::build::wb_revert_preview,
         // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
         app::build::wb_publish_audit,

@@ -35,6 +35,9 @@ export interface AppError {
   message: string
   traceId: string
   detail?: string
+  /** 稳定码（`W_*` / `E_*`）。后端 `AppError::text_err` 会带上；
+   *  界面按它分派特殊交互（例如"重新加载会丢草稿"要先问人） */
+  messageCode?: string
 }
 
 /** Tauri 把 `Err(AppError)` 原样序列化过来，所以 catch 到的就是它 */
@@ -262,6 +265,14 @@ export interface ParamView {
   deprecated: boolean
   /** **只在这些机型上**弃用（与 `deprecated` 叠加） */
   deprecatedMachines: string[]
+  /**
+   * **哪几册译文跟着旧中文一起过期了**（2026-11-02，键名形如 `labelEn` / `descJa`）。
+   *
+   * 作者：「我改了中文，但是其他没有改，这种能不能记录下来，让 AI 去改」——
+   * 后端在 `set_param_meta` 里中文一变就登记，重写那一册才摘掉。
+   * 空 = 没问题。**客户端不读这一格**；工作台用它标格 + 出待办清单。
+   */
+  staleTranslations: string[]
 }
 
 /** `app::SectionTarget` —— 「所属分组」下拉的一行 */
@@ -270,6 +281,35 @@ export interface SectionTarget {
   label: string
   tabId: string
   tabLabel: string
+  /**
+   * 整块组件卡（`layout_schema` 的 `component`），`null` = 普通参数分组。
+   *
+   * 组件卡里也可能有参数（`tower-map` 那种），所以它出现在清单里但它**不能当
+   * 搬家目标**（后端 `move_param` 拒收）—— 「所属分组」下拉要把它筛掉，
+   * 分组抽屉反过来要把它显示出来（否则那张卡的卡头点了没反应）。
+   */
+  component: string | null
+  /**
+   * **整块卡**（`layout = 'component'`）：设置页那 11 张（外观 / 软件更新 / 卸载清理…）。
+   * 客户端那边是固定长好的，工作台既不改它的名、也不列进分组抽屉
+   * （作者 2026-11-01：「我的新版里面是另外的，好像是固定下来的，不需要在这里面去改」）。
+   */
+  standalone: boolean
+}
+
+/**
+ * `registry::NewSection` —— 「保存这一趟顺手新建一个分组」。
+ *
+ * 它**不是**一次单独的写盘：跟着 `ParamMetaEdit` 一起交，后端在同一笔里
+ * 把分组建出来、把参数放进去（取消 = 一个字都没动）。`id` 由前端给：
+ * 撤销 / 重做会原样重放同一笔载荷，那时分组已经在了，后端按「确保它在」处理。
+ */
+export interface NewSection {
+  /** 只许 a-z / 0-9 / `_`（它会进两份 TOML，也会进客户端目录） */
+  id: string
+  tabId: string
+  /** 中文显示名；另外三册留空 = 回落中文 */
+  label: string
 }
 
 /** `app::RegistryView` */
@@ -320,9 +360,16 @@ export interface ParamMetaEdit {
   machineFilter: string[]
   /**
    * 搬到哪个分组（`layout_schema` 的 section id）。`null` = 不动 ——
-   * 后端把它读成「保持原位」，不是「搬回默认组」
+   * 后端把它读成「保持原位」，不是「搬回默认组」。
+   * 带 `newSection` 时这一格被忽略（目标是那个新分组）
    */
   sectionId: string | null
+  /**
+   * 这一笔顺手新建的分组（`null` / 省略 = 不建）。
+   *
+   * 只在「真的选中了它」时才带 —— 建了又改选别的组，那些字一个都不会落盘
+   */
+  newSection?: NewSection | null
   /**
    * 组内顺序（`[params.layout].order`）。`null` = 不动。
    *
@@ -341,6 +388,27 @@ export interface MetaApplied {
   key: string
   before: ParamMetaEdit
   after: ParamMetaEdit
+}
+
+/**
+ * `registry::SectionMetaEdit` —— 分组自己那一笔（名字 / 上下位置），2026-11-01。
+ *
+ * 位置只给**方向**：显示顺序在两个地方各存一份（注册表的数组次序给客户端，
+ * `order` 给工作台卡片），怎么掰由后端一次写完才算得对 —— 前端算不出中点，
+ * 也不该算。
+ */
+export interface SectionMetaEdit {
+  /** 新名字（`null` = 不动）。**只写中文那一册**，另外三册留在原处 */
+  label: string | null
+  /** 往哪边挪一格（`null` = 不动） */
+  move: 'up' | 'down' | null
+  /**
+   * 顺手新建这一组（`null` / 不传 = 不建）。
+   *
+   * 与 `ParamMetaEdit.newSection` 同一条口径：**幂等**（撤销 / 重做原样重放时
+   * 按「确保它在」处理）。分组抽屉那颗「＋ 新增分组」走这条。
+   */
+  newSection?: NewSection | null
 }
 
 /* ---------- 矩阵 ---------- */
@@ -566,6 +634,15 @@ export interface DiffLine {
   before: string
   after: string
   kind: string
+  /**
+   * **这一笔落在哪一份文件**（相对预设根）。
+   *
+   * 值改动一律 `registry/param_registry.toml`（三层取值都在那张表的
+   * `[params.machineVariants]` 下）；可见性 → `assets/assets.toml`；套餐 → `bundles.toml`。
+   * 「改了什么」按它过滤 —— 之前拿文件名去猜归属，`param_registry` 猜不出任何 owner，
+   * 于是切到那一栏永远显示 0 格（作者 2026-11-02 报的就是这个）。
+   */
+  file: string
 }
 
 /* ---------- 写 ---------- */
@@ -682,9 +759,17 @@ export interface ReceiptStep {
   detail: string
 }
 
-/** `receipt::Counts` */
+/**
+ * `receipt::Counts` —— **按真实写入结果计数**（2026-11-01）。
+ *
+ * `written` 只数"真写了盘"的。`written 0 / total 9` 到底意味着
+ * "9 份都没变"（正常）还是"9 份都失败"（坏事），只有把 `unchanged` /
+ * `failed` 分开才答得出来 —— 这也是它取代旧 `{written,total}` 的原因。
+ */
 export interface ReceiptCounts {
   written: number
+  unchanged: number
+  failed: number
   total: number
 }
 
@@ -692,8 +777,10 @@ export interface ReceiptCounts {
  * `receipt::GenerationReceipt` —— **一次生成留下的结构化结果**（2026-11-01）。
  *
  * 工作台模态框、CLI 的 JSON、AI 的报告读的都是它：不是三套说法。
- * **只在内存**（2026-11-01 起不落盘）：它就是"刚才那次生成做了什么"的临时说明，
- * 生成结束后随返回值到界面，进程退出即消失。
+ *
+ * **落应用数据目录**（`workbench/receipts/<id>.json`，不进仓库、只留最近 50 份）：
+ * 关掉工作台之后仍能查"上一次生成做了什么、为什么失败"（`wb.receipts()`）。
+ * 它只记**生成**这一件事 —— 保存 / 发布 / 外部改文件都不在这里。
  */
 export interface GenerationReceipt {
   /** `GEN-20261101-001` */
@@ -768,6 +855,47 @@ export interface PreviewReport {
   unchanged: number
   /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
   blocked: string | null
+}
+
+/* ---------- 未保存改动的逐行 diff（`wb_shadow_diff`，2026-11-02） ---------- */
+
+/** `txn::FileState` —— 方向是「盘上 → 影子」：`added` = 保存会新建这份 */
+export type ShadowFileState = 'added' | 'modified' | 'removed'
+
+/**
+ * `domain::shadow_diff::ShadowFileDiff` —— 一份文件的文本 diff。
+ *
+ * 行的形状与生成前确认框**同一条**（`PreviewDiffLine`），所以红绿底、语法上色、
+ * 行号口径、右侧概览条全部复用 `DiffLines` / `DiffRuler`，不另养一套。
+ */
+export interface ShadowFileDiff {
+  /** 相对预设根的路径（`registry/param_registry.toml` / `machines/A1.toml` …） */
+  rel: string
+  /** `added` = 保存会新建 / `modified` 改写 / `removed` 删掉 */
+  state: ShadowFileState
+  /**
+   * 行级差异（含未变的上下文行），**就是 LCS 原样**：删的行在前、增的行在后。
+   * 渲染与生成前确认同一套（`DiffLines` 的 `view="diff"`）—— 上红下绿两行。
+   *
+   * 曾有一层"配对"（把删+增折成一行「旧 → 新」），2026-11-02 按作者要求删掉：
+   * 折起来在长行上读不动，他要的就是「上面红、下面绿」。
+   */
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+  /** 非文本（webp / png 那批）：只有"变了"，没有行 */
+  binary: boolean
+}
+
+/**
+ * `domain::shadow_diff::ShadowDiff` —— **盘上的 `presets/` ↔ 影子树**。
+ *
+ * 摊开的就是"点一次右上角保存会改掉的字节"。`files` 空 = 没有未保存的改动。
+ */
+export interface ShadowDiff {
+  files: ShadowFileDiff[]
+  shadowRoot: string
+  realRoot: string
 }
 
 /** `build::RevertChange` */
@@ -2037,7 +2165,6 @@ export interface BaselineDiffEntry {
 export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
-  reload: () => invoke<Boot>('wb_reload'),
   /**
    * 盘上的 `presets/` 跟这个会话手里那一份对不上了吗（外部改过 / 别处写过）。
    * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
@@ -2076,6 +2203,27 @@ export const wb = {
    */
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
     invoke<RegistryView>('wb_set_param_meta', { key, edit }),
+  /**
+   * **清掉译文台账里的几格**（逃生通道，2026-11-02）。
+   *
+   * 台账平日的摘法只有一条：`setParamMeta` 里"这一笔把值改了"。可译文也能从别的
+   * 路写好 —— 直接改文件、或按 `scripts/stale-translations.mjs` 的清单整批改。
+   * 那种"改"后端看不见，标记就永远摘不掉，所以这条**点名清**：清哪几格由调用方说，
+   * 判据不在这里重算（放宽"必须值变"会让撤销/重做也清账，那是另一个 Bug）。
+   *
+   * 只动台账、不碰译文本身。名字写错一个整笔拒收。
+   */
+  clearStaleTranslations: (key: string, keys: string[]) =>
+    invoke<RegistryView>('wb_clear_stale_translations', { key, keys }),
+  /** 分组自己的那一笔（改名 / 上下移一格）。撤销走服务器侧那条栈，前端不记反向 */
+  setSectionMeta: (sectionId: string, edit: SectionMetaEdit) =>
+    invoke<RegistryView>('wb_set_section_meta', { sectionId, edit }),
+  /**
+   * **删掉一个空分组**。后端把三道门（还有参数 / 是组件卡 / 带条件）挡完才动手，
+   * 只删没有参数归它的组；同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
+   */
+  removeSection: (sectionId: string) =>
+    invoke<RegistryView>('wb_remove_section', { sectionId }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
@@ -2309,6 +2457,14 @@ export const wb = {
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),
 
   /**
+   * **未保存改动的逐行 diff**：盘上 `presets/` ↔ 影子树。只读。
+   *
+   * 与 `diffDraft` 并列：那个答"我动了哪些格子"，这个答"文件因此变成什么样"。
+   * 每次打开现取一份 —— 影子是被编辑的那个，缓存它就是演出过期内容。
+   */
+  shadowDiff: () => invoke<ShadowDiff>('wb_shadow_diff'),
+
+  /**
    * **唯一的写入口。** `label` 是给撤销按钮显示的一句话
    * （`撤销：A1 基底 · X 轴偏移`），所以它必须是人话，不是命令名。
    *
@@ -2318,6 +2474,14 @@ export const wb = {
   applyDraft: (label: string, patches: Patch[], refresh?: Refresh) =>
     invoke<ApplyResult>('wb_apply_draft', { label, patches, refresh: refresh ?? null }),
   save: () => invoke<SaveResult>('wb_save'),
+  /**
+   * 重新加载 = 按磁盘上的 `presets/` 重建会话。
+   *
+   * `discardDrafts` 必须显式为 `true` 才能在有未保存草稿时执行；
+   * 否则后端返回 `W_WB_RELOAD_DRAFTS_001`，由界面问人。默认不丢东西。
+   */
+  reload: (discardDrafts?: boolean) =>
+    invoke<Boot>('wb_reload', { discardDrafts: discardDrafts ?? null }),
   discard: () => invoke<BookView>('wb_discard'),
   /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
   txnState: () => invoke<TxnState>('wb_txn_state'),
@@ -2328,7 +2492,11 @@ export const wb = {
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
   generatePreview: (scope: BuildScope) =>
     invoke<PreviewReport>('wb_generate_preview', { scope }),
-  generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
+  generate: (scope: BuildScope, force?: boolean) =>
+    invoke<GenerateReport>('wb_generate', { scope, force: force ?? null }),
+  /** 历次生成的回执（新的在前；应用数据目录，按份数自动清理） */
+  receipts: (limit?: number) =>
+    invoke<GenerationReceipt[]>('wb_receipts', { limit: limit ?? null }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   /**
    * **发布闸**（第二刀）：十五项逐项结果。

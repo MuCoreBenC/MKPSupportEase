@@ -15,6 +15,7 @@
 export interface RulerMark {
   top: number
   height: number
+  /** `add` 只在增 / `del` 只在删（配对那一档 `chg` 已随它一起删掉，2026-11-02） */
   kind: 'add' | 'del'
   row: number
   line: number

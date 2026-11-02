@@ -29,6 +29,9 @@ pub mod issues;
 pub use crate::presetdata::resolve as layer;
 pub mod patch;
 pub mod preview;
+/// **未保存改动的文本 diff**（2026-11-02）：盘上 `presets/` ↔ 影子树，逐行摊开。
+/// 与 `txn`（"哪些文件变了"）分工：那个管路由与撤销，这个只管"改成什么样"。
+pub mod shadow_diff;
 /// **统一编辑事务**（2026-10-31）：影子工作树 + 文件级操作日志。
 /// 所有编辑都只写影子树，「保存」是唯一落盘边界 —— 见模块头注。
 pub mod txn;

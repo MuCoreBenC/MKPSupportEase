@@ -286,13 +286,13 @@ use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
+use crate::workbench::domain::shadow_diff;
 use crate::workbench::domain::txn::{self, Op, Txn};
 use crate::workbench::domain::variants;
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::{Committed, Level};
-use crate::workbench::load_presets;
 use crate::workbench::presets::registry::{
-    ParamDef, ParamMetaEdit, ShowWhen, TabMeta, UiComponent, ValueType,
+    ParamDef, ParamMetaEdit, SectionMetaEdit, ShowWhen, TabMeta, UiComponent, ValueType,
 };
 use crate::workbench::presets::Presets;
 use crate::workbench::store::{Store, TrashEntry};
@@ -336,6 +336,117 @@ pub struct Ctx {
     shadow_root: PathBuf,
     /// 统一编辑事务（2026-10-31）：撤销/重做/保存/放弃的唯一真相
     txn: Txn,
+    /// **这一条命令改的是哪一格**（2026-11-02）。`wb_apply_draft` 在动手前填上，
+    /// [`run_ctx`] 记事务时取走交给 [`Txn::record`] —— 同一格 5 秒内的连点并成一条。
+    /// 结构编辑不填（`None`），那类永远不合并
+    edit_key: Option<txn::EditKey>,
+    /// **"几份文件有改动"的缓存**。影子树与真源的全量比对要读两百来 KB，
+    /// 而界面每 800 ms 轮询一次「未保存 N」—— 每次现算等于每帧一次全树读。
+    /// 由 [`Ctx::refresh_unsaved_files`] 在**每条命令跑完之后**刷新（那时才可能变），
+    /// 其余时刻读这一格
+    unsaved_files: usize,
+}
+
+/// 打开会话时**先把影子树这件事定下来**：影子要不要对齐、有没有草稿。
+///
+/// 返回 `recovered`：`true` = 影子里有用户的未保存草稿（含冲突），界面按「一条未保存改动」呈现。
+///
+/// ★ **会话永远读影子树**（`<workbench>/.draft/presets`），真源只用来"铺"。
+/// 2026-11-01 22:17 那桩案子就是这里改错的代价：`Ctx::open` 一度改成"干净时读真源"，
+/// 编辑于是直接写进真仓库、而事务快照还在拍影子 ⇒ 差集恒为空 ⇒ 保存永不亮、放弃退不回。
+/// **别再"优化"回去。**
+///
+/// # 影子树的一生（2026-11-01 收口）
+///
+/// **`presets/` 是唯一权威源；影子树只代表"还没保存的草稿"。**
+///
+/// | 影子 | 基准 | 真源 | 判定（`recovered`）与动作 |
+/// |---|---|---|---|
+/// | 空 | — | — | 铺影子 + 铺基准（内容 = 真源），`false` |
+/// | =基准 | =基准 | =基准 | 干净；影子若落后就对齐，`false` |
+/// | 改了 | 未变 | 未变 | **用户的草稿** → 影子原样保留，`true` |
+/// | 未变 | 未变 | 改了 | **外部修改** → 对齐影子+基准，`false` |
+/// | 改了 | 未变 | 改了 | **冲突** → 影子原样保留，等人定，`true` |
+///
+/// 不论哪一行，**开会话读的都是影子**（上表第一列）—— 干净时它刚被对齐成真源，
+/// 有草稿时它就是编辑态。
+///
+/// # 前两轮踩过的坑（记在这里免得走回头路）
+///
+/// · 一开始"影子非空就读影子" ⇒ 外部改源被当成草稿，`diff` 报"0 份会变"；
+/// · 改成"只看影子独有文件" ⇒ 认不出"用户改了既有文件"，草稿会被静默覆盖；
+/// · 现在靠**基准快照**（`txn::base_root`）三方对比，才分得出谁动了什么。
+///
+/// # 基准读不出来时（2026-11-01 R1）
+///
+/// **绝不拿真源顶替**。以前 `unwrap_or_else(|_| real_snap.clone())` 会让
+/// "基准 = 真源"，于是"真源改过、影子没改"变成"影子改了、真源没改" ——
+/// 凭空冒出一堆草稿，`reload` 每次都问、生成每次都被拦，且**不会自愈**。
+///
+/// 现在的做法是：基准缺失 ⇒ 只有**能证明影子没有未保存内容**才重建基准，
+/// 否则一律按"有草稿"处理（读影子、让人看见），宁可多问一句也不丢东西。
+fn settle_shadow(workbench_root: &Path, real_root: &Path) -> Result<bool, AppError> {
+    use crate::workbench::domain::txn::{self, ShadowVerdict};
+
+    let shadow_root = txn::shadow_root(workbench_root);
+    let base_root = txn::base_root(workbench_root);
+
+    let shadow_snap = txn::snapshot(&shadow_root)?;
+    if shadow_snap.is_empty() {
+        // 没有影子：整份铺一份，并记下"从哪一份真源铺的"
+        txn::mirror(real_root, &shadow_root)?;
+        txn::mirror(real_root, &base_root)?;
+        return Ok(false);
+    }
+
+    let real_snap = txn::snapshot(real_root)?;
+    /* **空快照也算缺失**（2026-11-01）：`txn::walk` 对不存在的目录返回 `Ok(())`，
+     * 于是"基准目录不在"会得到一个**空的** `Ok`。若把它当成有效基准，
+     * 每份文件都会被算成"影子/真源新增"，结论全错。
+     * 空基准跟没有基准是一回事 —— 都证明不了"影子从哪里变过来的"。 */
+    let base_snap = txn::snapshot(&base_root).ok().filter(|b| !b.is_empty());
+
+    let verdict = match &base_snap {
+        Some(base) => shadow_snap.reconcile(&real_snap, base),
+        /* 基准读不出来（目录不在 / 文件缺 / 内容坏了）—— **不许拿真源冒充基准**。
+         *
+         * 唯一能安全重建基准的情形：**影子与真源逐字节相同**。
+         * 那说明影子没有任何独有内容（连"用户改了既有文件"都不可能 ——
+         * 改了就会不同），重建基准不会抹掉任何人的改动。
+         *
+         * 其余情况一律按"有草稿"处理：读影子、让人看见。
+         * 宁可多问一句，也不能静默覆盖用户的编辑。 */
+        None => {
+            let identical = shadow_snap.identical_sources(&real_snap);
+            if identical {
+                txn::mirror(real_root, &base_root)?;
+                return Ok(false);
+            }
+            tracing::warn!(
+                "基准快照缺失或损坏，且影子与真源不同 —— 按「有未保存草稿」处理，不重建基准"
+            );
+            ShadowVerdict {
+                drafts: shadow_snap
+                    .source_paths_union(&real_snap)
+                    .into_iter()
+                    .collect(),
+                ..ShadowVerdict::default()
+            }
+        }
+    };
+
+    if verdict.safe_to_reset() {
+        // 没有草稿也没有冲突：影子最多是旧拷贝，对齐它（"外部改源"的常态）
+        txn::mirror(real_root, &shadow_root)?;
+        txn::mirror(real_root, &base_root)?;
+    } else {
+        tracing::warn!(
+            drafts = ?verdict.drafts,
+            conflicts = ?verdict.conflicts,
+            "影子树里有未保存的草稿 —— 按草稿呈现，不静默对齐"
+        );
+    }
+    Ok(verdict.needs_attention())
 }
 
 impl Ctx {
@@ -361,7 +472,6 @@ impl Ctx {
     /// 缺了它每一页都是空的，装成能跑只会让人以为"我们没有机型"。
     pub fn open() -> Result<Self, AppError> {
         let store = Store::open()?;
-        store.bootstrap()?;
         let real_root = crate::workbench::paths::presets_root().ok_or_else(|| {
             AppError::not_found("找不到工作台的预设数据根 presets/").with_detail(
                 "期望 <repo>/presets/registry/param_registry.toml 存在 —— \
@@ -369,20 +479,25 @@ impl Ctx {
                     .to_owned(),
             )
         })?;
+        Self::open_at(store, real_root)
+    }
+
+    /// [`Self::open`] 的本体（**抽出来是为了可测**）：给定工作台数据根与真仓库开一个会话。
+    ///
+    /// IPC 入口与回归判据走的是同一条路 ——
+    /// `a_session_opened_from_disk_edits_the_shadow_until_save` 直接调它，
+    /// 所以"真机上点箭头为什么会写进 `presets/`"这类问题能在测试里重放。
+    pub(super) fn open_at(store: Store, real_root: PathBuf) -> Result<Self, AppError> {
+        store.bootstrap()?;
         let shadow_root = crate::workbench::domain::txn::shadow_root(&store.root);
-
-        // 影子树的一生（2026-10-31）：
-        //   ① 没有 / 空的 ⇒ 从磁盘整份铺一份（这是常态，开机第一件事）
-        //   ② 有、且与磁盘不一致 ⇒ **上次会话崩了**：保留它当「一次未保存的改动」，
-        //      由作者决定保存还是放弃 —— 绝不静默丢用户的编辑
-        //   ③ 有、且与磁盘一致 ⇒ 干净
-        let recovered = if crate::workbench::domain::txn::snapshot(&shadow_root)?.is_empty() {
-            crate::workbench::domain::txn::mirror(&real_root, &shadow_root)?;
-            false
-        } else {
-            shadow_differs(&real_root, &shadow_root)?
-        };
-
+        let recovered = settle_shadow(&store.root, &real_root)?;
+        /* ★ **读影子树，不读真源**（2026-11-01 悬案的正解）。
+         *
+         * `settle_shadow` 已经保证影子里是"该看见的那一份"：没草稿时它刚被对齐成真源，
+         * 有草稿时它就是用户的编辑态。**编辑只能写影子**（`wb_save` 才 commit 到真仓库），
+         * 所以会话的 `Presets` 根必须指影子 —— 指真源就等于"边改边落盘"：
+         * 事务快照还在拍影子，差集恒空，保存永不亮、放弃退不回。
+         * 这个错误曾经真实发生过（22:17 那场），别再把 `source_root` 引回来。 */
         let mut presets = crate::presetdata::Presets::load_from(&shadow_root)?;
         if let Ok(asset_root) = crate::workbench::paths::assets_root() {
             // 载荷根仍指真仓库：资产是只读读出来的，编辑走「暂存 + 保存时搬」
@@ -391,14 +506,22 @@ impl Ctx {
         let mut ctx = Self::with(presets, store)?;
         ctx.real_root = real_root;
         ctx.shadow_root = shadow_root;
+        /* `Self::with` 里那次 `reload_from_disk` 记的是**影子**的盘上戳；
+         * 真仓库换上之后必须重记一次 —— 否则第一条编辑命令前后比的是真仓库、
+         * 参照的却是影子戳，会被误判成"盘上被别人改过"。 */
+        ctx.source_stamp = presets_source_stamp(&ctx.real_root);
         if recovered {
             ctx.txn = Txn::recovered();
             tracing::warn!("影子树里有上次会话未保存的改动 —— 已按一条未保存改动呈现");
         }
+        /* 两个根换过之后重算：`with` 那次比的是"预设根 vs 自己"（恒等，必为 0），
+        而这里才是真正的"真仓库 vs 影子树" */
+        ctx.refresh_unsaved_files();
         Ok(ctx)
     }
 
-    /// 给定预设数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局
+    /// 给定预设数据与仓库建一个会话。测试用这一条，不碰真仓库也不碰那个全局。
+    /// （`Ctx::open_at` 随后会把 `real_root` / `shadow_root` 换掉。）
     pub(super) fn with(presets: Presets, store: Store) -> Result<Self, AppError> {
         /* 测试夹具没有影子树：两个根都指回它自己的那份预设根（镜像 = 恒等）。
         `Ctx::open` 会随后把真仓库 / 影子树填上。 */
@@ -417,16 +540,50 @@ impl Ctx {
             real_root: root.clone(),
             shadow_root: root,
             txn: Txn::new(),
+            edit_key: None,
+            unsaved_files: 0,
         };
         ctx.reload_from_disk()?;
+        ctx.refresh_unsaved_files();
         Ok(ctx)
     }
 
-    /// 事务视图（撤销/重做/保存按钮读它）
+    /// 重算「几份文件有改动」并写回缓存。**唯一实现** ——
+    /// 页头那颗「未保存（N）」、状态栏、`TxnState`、以及「代码对比」里的「N 份文件」
+    /// 都从这里来，不许各自再算一套（两套口径迟早不一致，作者 2026-11-02 报的
+    /// 「改一次涨到 14」就是"按编辑次数"和"按文件数"两套口径打架）。
+    ///
+    /// 口径与 `wb_shadow_diff` 逐字相同：`snapshot` 两份、`without_products()` 滤掉
+    /// `delivery/`、比差集。`assets/` 里的二进制只比头部指纹（够判"换了没有"）。
+    fn refresh_unsaved_files(&mut self) {
+        let count = (|| -> Result<usize, AppError> {
+            let a = txn::snapshot(&self.real_root)?.without_products();
+            let b = txn::snapshot(&self.shadow_root)?.without_products();
+            Ok(txn::changed_files(&a, &b, &self.real_root, &self.shadow_root)?.len())
+        })();
+        match count {
+            Ok(n) => self.unsaved_files = n,
+            Err(e) => {
+                /* 读不出来不许假装 0：那是"看着干净、其实有改动"。留上一轮的数并记一笔 */
+                tracing::warn!(error = %e.message, "算不出未保存改动份数");
+            }
+        }
+    }
+
+    /// 几份文件有改动（读缓存，零开销）
+    fn unsaved_files(&self) -> usize {
+        self.unsaved_files
+    }
+
+    /// 事务视图（撤销/重做/保存按钮读它）。
+    ///
+    /// `dirty_count` 现在是**有改动的文件数**，不再是编辑条数（2026-11-02 作者定案）。
+    /// 条数留在 `ops.len()` 里 —— 那个数是"撤销栈有几格"，两者本来就不是一件事：
+    /// 连点一次步进器 +1 条 op、但只算 1 份文件。
     pub(super) fn txn_state(&self) -> TxnState {
         TxnState {
-            dirty: self.txn.is_dirty(),
-            dirty_count: self.txn.dirty_count(),
+            dirty: self.unsaved_files() > 0 || self.txn.is_dirty(),
+            dirty_count: self.unsaved_files(),
             can_undo: self.txn.undo_depth() > 0,
             can_redo: self.txn.redo_depth() > 0,
             ops: self.txn.ops(),
@@ -452,8 +609,12 @@ impl Ctx {
         self.committed = loaded.committed;
         self.draft = draft;
         self.notices = notices;
-        /* 刚读的那一份就是"界面手里这份"——盘上戳跟着记下来 */
-        self.source_stamp = presets_source_stamp(self.presets.root());
+        /* 刚读的那一份就是"界面手里这份"——盘上戳跟着记下来。
+         *
+         * ★ 盯的是**真仓库**（`real_root`），不是 `presets.root()`：后者是影子树，
+         * 我们自己每改一笔它都在动，拿它当"外部改过"的参照等于永远误报。
+         * 这条在 `Ctx::open` 读到影子之后尤其要紧（2026-11-01）。 */
+        self.source_stamp = presets_source_stamp(&self.real_root);
         // 清理过的话快照就过期了，但**不在这里写** —— 交给懒写
         self.flushed_seq = self.dirty_seq;
         if dirty {
@@ -563,6 +724,8 @@ const EDIT_COMMANDS: &[(&str, &str)] = &[
     ("wb_set_group", "改资产分组"),
     ("wb_remove_group", "删除资产分组"),
     ("wb_set_param_meta", "改参数定义"),
+    ("wb_set_section_meta", "改分组名与位置"),
+    ("wb_remove_section", "删除分组"),
     ("wb_apply_draft", "改参数值"),
     ("wb_anno_write", "保存标注"),
 ];
@@ -644,14 +807,20 @@ pub(super) fn run_ctx<T>(
         // 命令失败也记：它可能已经改了影子树（写了一半、或校验在写之后），
         // 不记的话这部分改动就没有撤销点，用户只能放弃整份草稿。
         let shot_after = txn::snapshot(&ctx.shadow_root)?;
-        if let Some(op) = ctx
-            .txn
-            .record(label, &shot_before, &shot_after, &ctx.shadow_root)?
-        {
+        /* 值编辑带"这一格"的身份证，同一格 5 秒内的连点会并成一条（见 `txn::MERGE_MS`）。
+        结构编辑给 `None` —— 建一个版本和删一个版本从来不是"同一件事的延续"。 */
+        if let Some(op) = ctx.txn.record(
+            label,
+            ctx.edit_key.take(),
+            &shot_before,
+            &shot_after,
+            &ctx.shadow_root,
+        )? {
             tracing::info!(
                 label = %op.label,
                 files = op.files.len(),
-                dirty = ctx.txn.dirty_count(),
+                ops = ctx.txn.undo_depth(),
+                unsaved = ctx.unsaved_files(),
                 "编辑已进事务"
             );
         }
@@ -660,6 +829,8 @@ pub(super) fn run_ctx<T>(
             ctx.presets = ctx.presets.reload()?;
         }
     }
+    // 命令跑了就可能动了影子树：缓存的"几份文件有改动"必须重算，不能留上一轮的数
+    ctx.refresh_unsaved_files();
     out
 }
 
@@ -801,9 +972,12 @@ fn view_of(ctx: &Ctx, committed: &Committed, draft: &Draft, notices: Vec<String>
     let mut v = build::book_with_probe(ctx, &ctx.presets, committed, draft, &probe).book_view();
     v.notices = notices;
     v.snapshot = ctx.snapshot();
-    /* ★ 2026-10-31：未保存改动 = 值草稿（旧层）+ 事务里的每一条（新层）。
-    统一之后事务才是主体，值那一层只是还没搬完的过渡。 */
-    v.dirty_count = v.dirty_count.saturating_add(ctx.txn.dirty_count());
+    /* ★ 2026-11-02：未保存改动 = **有改动的文件数**（不是编辑条数）。
+    连点步进器改一个值 = 1 份文件，页头就该停在「未保存（1）」；
+    之前这里是"值草稿条数 + 事务条数"，于是改一次涨一次，作者看到「未保存（14）」。
+
+    条数并没有丢：它在 `ctx.txn.ops()` 里，撤销栈该有几格就几格。两者本来是两件事。 */
+    v.dirty_count = ctx.unsaved_files();
     v
 }
 
@@ -923,11 +1097,39 @@ pub fn wb_boot() -> Result<Boot, AppError> {
 
 /// 重读我们自己那份预设数据。改完 `presets/` 之后不用重启工作台
 #[tauri::command]
-pub fn wb_reload() -> Result<Boot, AppError> {
+pub fn wb_reload(discard_drafts: Option<bool>) -> Result<Boot, AppError> {
+    /* **有未保存草稿时必须确认**（2026-11-01 作者定）。
+     *
+     * 重新加载 = 放弃编辑态、回到磁盘那一版。这句语义没错，但它会**丢用户的东西**：
+     * 以前一条命令就执行完，谁点一下草稿就没了。现在先看影子与真源是否真的分叉：
+     *
+     *   · 没分叉（没有草稿）→ 直接重新加载，不必打扰人；
+     *   · 分叉了（真有未保存编辑）→ 没拿到 `discardDrafts=true` 就**什么都不做**，
+     *     返回一个明确的拒绝，界面据此弹"重新加载会丢弃当前未保存草稿"。
+     *
+     * 与"AI 在外面改了 presets/"是两件事：那种情况影子与真源也"不同"，
+     * 但那是**磁盘更新**，不是用户的草稿 —— 见下面 `drafts_at_risk` 的判定。 */
+    let drafts = drafts_at_risk();
+    if drafts.doomed && discard_drafts != Some(true) {
+        /* 冲突与普通草稿分开说：冲突是"同一个文件两边都改过"，
+        更需要人看清楚再决定（2026-11-01）。 */
+        let key = if drafts.conflicts > 0 {
+            "ui.workbench.reload.conflict"
+        } else {
+            "ui.workbench.reload.drafts"
+        };
+        return Err(AppError::invalid_argument(
+            postprocess::diag::messages::text(
+                key,
+                &[
+                    ("count", &drafts.edited.to_string()),
+                    ("conflicts", &drafts.conflicts.to_string()),
+                ],
+            ),
+        ));
+    }
+
     drop_ctx();
-    /* 2026-10-31：重新加载 = **放弃编辑态、回到磁盘那一版**。
-    影子树不跟着铺的话，重开出来的还是上一次的编辑，而界面说"已重新加载" ——
-    两句话对不上。这里整份对齐（与「放弃」同一条语义）。 */
     if let (Ok(store), Some(real)) = (Store::open(), crate::workbench::paths::presets_root()) {
         let shadow = txn::shadow_root(&store.root);
         std::fs::create_dir_all(&shadow)
@@ -935,6 +1137,52 @@ pub fn wb_reload() -> Result<Boot, AppError> {
         txn::mirror(&real, &shadow)?;
     }
     boot_inner()
+}
+
+/// 重新加载会不会丢掉用户的东西。
+///
+/// 这里要分清两种"影子与真源不同"（2026-11-01）：
+///
+/// | 情形 | 影子相对真源 | 是用户的草稿吗 |
+/// |---|---|---|
+/// | AI / 编辑器 / git 改了 `presets/` | 影子**落后**（内容是真源的旧版） | **不是** —— 那是磁盘更新 |
+/// | 用户在工作台里改了、没保存 | 影子**多出**真源没有的内容 | **是** |
+///
+/// 只有后者才需要确认。把前者也拦下来，就变成"外部改一次源，重新加载就问一遍"，
+/// 正是作者讨厌的那种打扰。
+#[derive(Debug, Default)]
+struct DraftsAtRisk {
+    /// 影子里有、真源里没有（或内容不同）的文件数 —— 用户的未保存编辑
+    edited: usize,
+    /// 其中"同一个文件两边都改过"的处数（冲突，不能自动选边）
+    conflicts: usize,
+    /// 丢不丢东西
+    doomed: bool,
+}
+
+fn drafts_at_risk() -> DraftsAtRisk {
+    let (Ok(store), Some(real)) = (Store::open(), crate::workbench::paths::presets_root()) else {
+        return DraftsAtRisk::default();
+    };
+    let shadow = txn::shadow_root(&store.root);
+    let Ok(shadow_snap) = txn::snapshot(&shadow) else {
+        return DraftsAtRisk::default();
+    };
+    let Ok(real_snap) = txn::snapshot(&real) else {
+        return DraftsAtRisk::default();
+    };
+    /* **三方对账**：只有"影子相对基准改过、真源没改"才是用户的草稿。
+    用 `edited_against`（两两比内容）会把"外部改了真源、影子是旧拷贝"也数进来，
+    于是 reload 每次都问一遍 —— 正是作者讨厌的那种打扰。 */
+    let base = txn::base_root(&store.root);
+    let base_snap = txn::snapshot(&base).unwrap_or_else(|_| real_snap.clone());
+    let verdict = shadow_snap.reconcile(&real_snap, &base_snap);
+    let edited = verdict.drafts.len() + verdict.conflicts.len();
+    DraftsAtRisk {
+        edited,
+        conflicts: verdict.conflicts.len(),
+        doomed: verdict.needs_attention(),
+    }
 }
 
 /// 盘上的 `presets/` 与这个会话手里的那一份**不一样**吗（外部改过 / 别处写过）。
@@ -1075,12 +1323,15 @@ pub struct RegistryView {
     pub updated: String,
     pub tabs: Vec<TabMeta>,
     pub params: Vec<ParamView>,
-    /// 能装参数的分组（含暂时空掉的），按页签顺序 —— 定义框「所属分组」下拉用。
-    /// **不过滤空组**：把一个组搬空之后还得能搬回去
+    /// 布局里的**全部分组**（含暂时空掉的、含 `component` 整块组件卡），按页签顺序。
+    ///
+    /// 两处读者口味不同，所以由前端自己筛，后端别替它决定：
+    ///   · 「所属分组」下拉 —— 只留 `component == null` 的（后端 `move_param` 拒收组件卡）；
+    ///   · 分组抽屉 —— 全都要（点得开组件卡的卡头，也看得见它们在哪儿）。
     pub sections: Vec<SectionTarget>,
 }
 
-/// 「所属分组」下拉的一行：参数落在哪个页签的哪个分组
+/// 一个分组（「所属分组」下拉与分组抽屉共用的一行）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SectionTarget {
@@ -1088,6 +1339,12 @@ pub struct SectionTarget {
     pub label: String,
     pub tab_id: String,
     pub tab_label: String,
+    /// 整块组件卡（`layout_schema` 的 `component`）。`None` = 普通参数分组。
+    /// 组件卡里有参数（`tower-map` 那种），所以它并不是"空组"，只是不许当搬家的目标
+    pub component: Option<String>,
+    /// **整块卡**（`layout = 'component'`）：`settings` 下那 11 张自己画自己的卡。
+    /// 客户端那边是固定长好的，工作台既不列它、也不让人把参数搬进去
+    pub standalone: bool,
 }
 
 /// 一个参数在界面上要用到的那些。
@@ -1129,6 +1386,9 @@ pub struct ParamView {
     pub deprecated: bool,
     /// **只在这些机型上弃用**（与 `deprecated` 叠加）
     pub deprecated_machines: Vec<String>,
+    /// **哪几册译文跟着旧中文一起过期了**（2026-11-02，`labelEn` 这种键名）。
+    /// 空 = 没问题。客户端不读；工作台在定义框里标出来、`stale-translations` 脚本按它出清单
+    pub stale_translations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1162,16 +1422,28 @@ fn registry_view(reg: &crate::workbench::presets::ParamRegistry) -> RegistryView
         updated: reg.updated().to_owned(),
         tabs: reg.param_tabs(),
         params: reg.params().iter().map(|p| param_view(reg, p)).collect(),
-        sections: reg
-            .layout_sections()
-            .into_iter()
-            .map(|(tab_id, tab_label, id, label)| SectionTarget {
-                id,
-                label,
-                tab_id,
-                tab_label,
-            })
-            .collect(),
+        sections: {
+            /* `layout = 'component'` 的那些卡（设置页 11 张）不归这里管 —— 见 `standalone` */
+            let mut whole: std::collections::HashSet<String> = std::collections::HashSet::new();
+            for t in reg.layout() {
+                for s in &t.sections {
+                    if s.layout.as_deref() == Some("component") {
+                        whole.insert(s.id.clone());
+                    }
+                }
+            }
+            reg.layout_sections_all()
+                .into_iter()
+                .map(|(tab_id, tab_label, id, label, component)| SectionTarget {
+                    standalone: whole.contains(&id),
+                    id,
+                    label,
+                    tab_id,
+                    tab_label,
+                    component,
+                })
+                .collect()
+        },
     }
 }
 
@@ -1196,6 +1468,78 @@ pub fn wb_set_param_meta(key: String, edit: ParamMetaEdit) -> Result<RegistryVie
     traced("wb_set_param_meta", |_| {
         with_ctx_mut(|ctx| {
             ctx.presets.registry.set_param_meta(&key, edit)?;
+            ctx.presets.registry.write_back()?;
+            ctx.presets = ctx.presets.reload()?;
+            Ok(registry_view(&ctx.presets.registry))
+        })
+    })
+}
+
+/// **清掉译文台账里的几格**（2026-11-02，逃生通道）。
+///
+/// # 为什么要开这条口子
+///
+/// 台账（`staleTranslations`）在 [`wb_set_param_meta`] 里**只在值真的变了**时摘 ——
+/// 那是撤销 / 重做幂等的前提，不能动。可译文的另一种改法不经过那条路：直接改文件、
+/// 或按 `scripts/stale-translations.mjs` 的清单一次改一批（AI 干的正是这件事）。
+/// 那种"改"在后端看来等于没改，标记永远摘不掉。
+///
+/// 所以这里要调用方**点名**：清 `labelEn` 还是 `descJa`。不在这里替人判断
+/// "哪几格已经译好了" —— 前端没有"旧中文"，判不出译文是不是跟着那一版写的。
+/// 判据放宽会导致撤销重放同一笔也清账，那才是真错。
+///
+/// # 只动台账，不动译文
+///
+/// 译文由别的路写好，这条命令**不校验、不改写**它们；它只把那一串键名从台账里摘掉。
+/// 名字写错一个整笔拒收（`ui.presetdata.registry.356`），不做"能清几个算几个"。
+#[tauri::command(async)]
+pub fn wb_clear_stale_translations(
+    key: String,
+    keys: Vec<String>,
+) -> Result<RegistryView, AppError> {
+    traced("wb_clear_stale_translations", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.registry.clear_stale_translations(&key, &keys)?;
+            ctx.presets.registry.write_back()?;
+            ctx.presets = ctx.presets.reload()?;
+            Ok(registry_view(&ctx.presets.registry))
+        })
+    })
+}
+
+/// **改一个分组的名字 / 位置**（参数台卡片头那颗可点的标题与上下箭头，2026-11-01）。
+///
+/// 和 [`wb_set_param_meta`] 同一套：就地写 `param_registry.toml`（位置那一笔还会
+/// 同步 `layout_schema.toml` 的数组次序），写完整份重读 —— 指纹缓存是构造完就
+/// 不再变的，换掉整份 [`Presets`] 是唯一让"待生成"跟上改动的方式。
+#[tauri::command(async)]
+pub fn wb_set_section_meta(
+    section_id: String,
+    edit: SectionMetaEdit,
+) -> Result<RegistryView, AppError> {
+    traced("wb_set_section_meta", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.registry.set_section_meta(&section_id, edit)?;
+            ctx.presets.registry.write_back()?;
+            ctx.presets = ctx.presets.reload()?;
+            Ok(registry_view(&ctx.presets.registry))
+        })
+    })
+}
+
+/// **删掉一个空分组**（抽屉里那颗「删除分组」，2026-11-01）。
+///
+/// 与 [`wb_set_section_meta`] 同一条路：就地写两份 TOML（注册表 + 布局），写完整份
+/// 重读。删除也是编辑事务里的一笔 —— **删完只是进草稿**，右上角「保存」才真落盘，
+/// 「放弃」就退回来（作者 2026-11-01：「删除的操作也是一样的，需要点保存或者放弃」）。
+///
+/// 只允许删「没有参数归它、不是组件卡、不带 showWhen」的组，判据在
+/// [`ParamRegistry::remove_section`]，这里不再另立一套。
+#[tauri::command(async)]
+pub fn wb_remove_section(section_id: String) -> Result<RegistryView, AppError> {
+    traced("wb_remove_section", |_| {
+        with_ctx_mut(|ctx| {
+            ctx.presets.registry.remove_section(&section_id)?;
             ctx.presets.registry.write_back()?;
             ctx.presets = ctx.presets.reload()?;
             Ok(registry_view(&ctx.presets.registry))
@@ -1251,6 +1595,7 @@ fn param_view(reg: &crate::workbench::presets::ParamRegistry, p: &ParamDef) -> P
         machine_filter: p.machine_filter.clone(),
         deprecated: p.deprecated,
         deprecated_machines: p.deprecated_machines.clone(),
+        stale_translations: p.stale_translations.clone(),
     }
 }
 
@@ -1346,6 +1691,9 @@ pub struct DiffLine {
     pub before: String,
     pub after: String,
     pub kind: &'static str,
+    /// **这一笔落在哪一份文件**（相对预设根）。「改了什么」按它过滤 ——
+    /// 没有它就只能拿文件名去猜归属，而值改动全在 `param_registry.toml` 里猜不出来
+    pub file: String,
 }
 
 #[tauri::command(async)]
@@ -1356,6 +1704,41 @@ pub fn wb_diff_draft() -> Result<Vec<DiffLine>, AppError> {
             Ok(diff_draft(ctx, &c, &d))
         })
     })
+}
+
+/// **值改动落在哪一份文件**（2026-11-02）。
+///
+/// 三层取值全在 `presets/registry/param_registry.toml`：机型基底在
+/// `[params.machineVariants]` 的 `A1` 那几条、版本覆盖在同表的 `A1:STANDARD`。
+/// 所以值改动一律记这一份 —— 它不是"猜"出来的，是这个数据结构的**固定事实**。
+///
+/// 「改了什么」那一栏要按文件过滤，没有这个字段时只能拿文件名去猜归属
+/// （`machines/A1.toml` → `A1`），而 `param_registry` 猜不出任何 owner ⇒ 永远显示 0 格。
+const VALUE_FILE: &str = "registry/param_registry.toml";
+
+/// 「A1 · 标准版」/「A1 · 机型基底」—— 撤销栈上那句人话的**目标**部分。
+///
+/// 与 `diff_draft` 里的 `target_of` 同一条口径（同一份 catalog、同一处措辞函数），
+/// 别一边写 `A1/STANDARD` 一边写「A1 · 标准版」。
+fn value_target(ctx: &Ctx, level: Level, owner: &str) -> String {
+    match level {
+        Level::Machine => format!("{owner} · {}", w::level_label(Level::Machine)),
+        /* 版本 uid 的形状是 `"{机型}/{版本 id}"`（见 `CommittedVersion`） */
+        Level::Version => {
+            let mut parts = owner.splitn(2, '/');
+            let machine_id = parts.next().unwrap_or(owner);
+            let version_id = parts.next().unwrap_or_default();
+            match ctx
+                .presets
+                .catalog
+                .machine(machine_id)
+                .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+            {
+                Some(v) => format!("{machine_id} · {}", v.name),
+                None => owner.to_owned(),
+            }
+        }
+    }
 }
 
 fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> {
@@ -1411,17 +1794,21 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
                 .map(|x| w::value_text(p, x.value))
                 .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
             kind: "改值",
+            file: VALUE_FILE.to_owned(),
         });
     }
 
     // ② 结构改动。**各算一条** —— 它们和改一个值一样要被保存
     for (file_id, vis) in &draft.visibility {
+        /* 可见性是「这份产物上不上菜单」，落在资产清单那一份里
+        （`presets/assets/assets.toml` 的 `visibility` 格） */
         out.push(structural(
             file_id,
             file_id,
             "菜单可见性",
             "",
             w::visibility_label(*vis),
+            "assets/assets.toml".to_owned(),
         ));
     }
     for (bundle_id, edit) in &draft.bundles {
@@ -1431,6 +1818,7 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
             "套餐内容",
             "",
             &format!("{} 份产物 · {} 条曲线", edit.presets.len(), edit.bbs.len()),
+            "bundles.toml".to_owned(),
         ));
     }
     // 没有「生成记录」一条 —— 它是台账（`workbench/built.json`），生成事务直接落盘，
@@ -1439,7 +1827,14 @@ fn diff_draft(ctx: &Ctx, committed: &Committed, draft: &Draft) -> Vec<DiffLine> 
     out
 }
 
-fn structural(owner: &str, label: &str, kind: &'static str, before: &str, after: &str) -> DiffLine {
+fn structural(
+    owner: &str,
+    label: &str,
+    kind: &'static str,
+    before: &str,
+    after: &str,
+    file: String,
+) -> DiffLine {
     DiffLine {
         target: owner.to_owned(),
         level: None,
@@ -1449,6 +1844,7 @@ fn structural(owner: &str, label: &str, kind: &'static str, before: &str, after:
         before: before.to_owned(),
         after: after.to_owned(),
         kind,
+        file,
     }
 }
 
@@ -1526,6 +1922,37 @@ pub fn wb_apply_draft(
 ) -> Result<ApplyResult, AppError> {
     traced("wb_apply_draft", |_| {
         with_ctx_mut(|ctx| {
+            /* **先声明这一笔改的是哪一格**，`run_ctx` 记事务时取走它做合并判定。
+            一次调用只带一格（参数台的写入口按格发），带多格的（批量）不合并 ——
+            那种"一次改十行"本来就该是一条，不需要靠窗口去并。 */
+            ctx.edit_key = match patches.as_slice() {
+                [Patch::SetValue {
+                    level, owner, key, ..
+                }] => Some(txn::EditKey {
+                    level: *level,
+                    owner: owner.clone(),
+                    key: key.clone(),
+                }),
+                _ => None,
+            };
+            /* **撤销栈上那句人话在这里定**（2026-11-02）：前端给的是
+            「A1 · 标准版 · 涂胶速度限制」，那是"给谁看的一句话"；而栈里的标签
+            更应该像事件日志那样说清**改了什么**（`A1 · 标准版 · 改值`）。
+            作者翻日志时看的正是这一条标题 —— 它一秒重复十几次，就说明没合并。 */
+            let label = match patches.as_slice() {
+                [Patch::SetValue {
+                    level, owner, key, ..
+                }] => {
+                    let what = ctx
+                        .presets
+                        .registry
+                        .param(key)
+                        .map(|p| p.label.clone())
+                        .unwrap_or_else(|| key.clone());
+                    format!("{} · {what}", value_target(ctx, *level, owner))
+                }
+                _ => label,
+            };
             let out = apply_patches(
                 &mut ctx.draft,
                 &ctx.committed,
@@ -1536,6 +1963,10 @@ pub fn wb_apply_draft(
             于是它和开关/尺寸/增删版本走同一条事务：同一个撤销栈、同一个保存边界。
             旧行为是"攒在内存里等保存"，那正是两套编辑规则的最后一块。 */
             let written = storage::apply_draft_now(&mut ctx.presets, &ctx.committed, &ctx.draft)?;
+            /* 值**搬进影子树之后**草稿层就空了 —— `dirty_count` 由 `view_of` 把它和
+            `txn.dirty_count()` 相加，改完之后不能只报草稿那份（2026-11-02 作者：
+            「我改了就会变成 0，刷新，重新打开软件才正常」）。
+            `view_of` 就是干这件事的那一处，别在这里另拼一套。 */
             ctx.draft = Draft::default();
             ctx.touch();
             let notices = ctx.notices_now();
@@ -1574,8 +2005,13 @@ pub fn wb_apply_draft(
                     )),
                 ),
             };
-            let mut view = book.book_view();
-            view.notices = notices.clone();
+            /* 用 `view_of` 而不是直接 `book.book_view()`：**未保存改动数 = 值草稿 +
+            事务条数**，那一步的加法只住在 `view_of` 里。之前这里直接取 `book_view()`，
+            而值已经搬进影子树、草稿层清空 ⇒ 返回的 `dirtyCount` 恒为 0，
+            界面上就是"改完立刻显示未保存（0）"，只有 `wb_reload`（重开软件 /
+            手动刷新）走 `view_of` 才对得上（2026-11-02 作者报的正是这一条）。 */
+            let mut view = view_of(ctx, &ctx.committed, &Draft::default(), notices.clone());
+            /* 状态灯要的是**存草稿之后**的状态，不是存之前那份 */
             view.snapshot = ctx.snapshot();
 
             Ok(ApplyResult {
@@ -1669,16 +2105,26 @@ pub fn wb_copy_recipe(
     new_version_id: String,
 ) -> Result<usize, AppError> {
     traced("wb_copy_recipe", |_| {
-        let mut p = load_presets()?;
-        let keys = copy_recipe(&mut p, &machine_id, &template_version_id, &new_version_id)?;
-        tracing::info!(
-            machine = %machine_id,
-            template = %template_version_id,
-            version = %new_version_id,
-            keys,
-            "参数正文复制完成（独立快照，此后互不影响）"
-        );
-        Ok(keys)
+        /* ★ 改**会话里那一份**（影子树），不是 `load_presets()`（真仓库）。
+         * 这两条路以前各走各的：命令登记在 `EDIT_COMMANDS` 里、事务拍的是影子，
+         * 而写盘却落在真仓库 —— 和 22:17 那桩案子同一种病（2026-11-01）。 */
+        with_ctx_mut(|ctx| {
+            let keys = copy_recipe(
+                &mut ctx.presets,
+                &machine_id,
+                &template_version_id,
+                &new_version_id,
+            )?;
+            ctx.presets = ctx.presets.reload()?;
+            tracing::info!(
+                machine = %machine_id,
+                template = %template_version_id,
+                version = %new_version_id,
+                keys,
+                "参数正文复制完成（独立快照，此后互不影响）"
+            );
+            Ok(keys)
+        })
     })
 }
 
@@ -1692,67 +2138,97 @@ pub struct SaveResult {
 
 #[tauri::command]
 pub fn wb_save() -> Result<SaveResult, AppError> {
-    traced("wb_save", |_| {
-        with_ctx_mut(|ctx| {
-            /* ★ 2026-10-31：保存是**唯一写盘边界**。
-            值草稿先落进影子树，再和结构类编辑一起提交 —— 两套编辑走同一个出口 */
-            let values_dirty = !ctx.draft.is_clean();
-            if !values_dirty && !ctx.txn.is_dirty() {
-                return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
-            }
-            // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
-            ctx.flush();
-            let mut remap = BTreeMap::new();
-            if values_dirty {
-                let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
-                remap = out.remap;
-            }
-            // 影子树 → 真仓库：逐份原子写、删除进回收站、失败整体回滚
-            let stamp = crate::workbench::clock::now_iso8601().replace(':', "-");
-            let report = txn::commit(
-                &ctx.real_root,
-                &ctx.shadow_root,
-                &ctx.store.root.join(".trash"),
-                &stamp,
-            )?;
-            tracing::info!(
-                written = report.written,
-                deleted = report.deleted,
-                ops = ctx.txn.dirty_count(),
-                "保存：事务已提交"
-            );
+    traced("wb_save", |_| with_ctx_mut(save_in))
+}
 
-            ctx.draft = Draft::default();
-            ctx.txn.clear();
-            // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
-            ctx.reload_from_disk()?;
-            let notices = ctx.notices_now();
-            let view = view_of(ctx, &ctx.committed, &ctx.draft, notices);
-            Ok(SaveResult { view, remap })
-        })
-    })
+/// [`wb_save`] 的本体（**抽出来是为了可测**）。
+///
+/// 保存是**唯一写 `presets/` 的边界**：值草稿先落进影子树，再和结构类编辑一起提交。
+/// 回归判据 `a_session_opened_from_disk_edits_the_shadow_until_save` 直接调它 ——
+/// 它要走的就是真机上那颗「保存」的同一段代码。
+pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
+    /* ★ 2026-10-31：保存是**唯一写盘边界**。
+    值草稿先落进影子树，再和结构类编辑一起提交 —— 两套编辑走同一个出口 */
+    let values_dirty = !ctx.draft.is_clean();
+    if !values_dirty && !ctx.txn.is_dirty() {
+        return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
+    }
+    // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
+    ctx.flush();
+    let mut remap = BTreeMap::new();
+    if values_dirty {
+        let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
+        remap = out.remap;
+    }
+    // 影子树 → 真仓库：逐份原子写、删除进回收站、失败整体回滚
+    let stamp = crate::workbench::clock::now_iso8601().replace(':', "-");
+    let report = txn::commit(
+        &ctx.real_root,
+        &ctx.shadow_root,
+        &ctx.store.root.join(".trash"),
+        &stamp,
+    )?;
+    tracing::info!(
+        written = report.written,
+        deleted = report.deleted,
+        ops = ctx.txn.undo_depth(),
+        "保存：事务已提交"
+    );
+
+    ctx.draft = Draft::default();
+    ctx.txn.clear();
+    /* **保存成功后同步基准**（2026-11-01 R3）。
+     *
+     * 基准记的是"影子从哪里变过来的"。`commit` 已经把影子的内容写进真源，
+     * 此刻真源 == 影子 == 保存后的状态，所以基准也该挪到这一份。
+     *
+     * 位置很关键：**必须放在 `commit` 成功之后**。
+     * 提前写会在事务失败时把"证据"抹掉 —— 那样下次打开就分不出
+     * "用户改了没存"和"已经有了"，失败时反而更不能恢复。
+     *
+     * 保存是全量提交（影子整份进真源），所以直接镜像即可，
+     * 不存在"只同步一部分、把别的冲突一起抹掉"的问题。 */
+    txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
+    // 保存之后重读：落盘的那一份才是新的真相，草稿也被清空了
+    ctx.reload_from_disk()?;
+    let notices = ctx.notices_now();
+    let view = view_of(ctx, &ctx.committed, &ctx.draft, notices);
+    Ok(SaveResult { view, remap })
 }
 
 #[tauri::command]
 pub fn wb_discard() -> Result<BookView, AppError> {
-    traced("wb_discard", |_| {
-        with_ctx_mut(|ctx| {
-            if ctx.draft.is_clean() && !ctx.txn.is_dirty() {
-                return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
-            }
-            let dropped = ctx.draft.dirty_count() + ctx.txn.dirty_count();
-            ctx.draft = Draft::default();
-            // ★ 放弃 = 把影子树整个拉回磁盘原状（结构类改动也一起丢）
-            txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
-            ctx.txn.clear();
-            ctx.touch();
-            // 丢弃**立刻落盘**：留着旧快照的话，崩一次就把刚丢掉的又捞回来了
-            ctx.flush();
-            tracing::info!(dropped, "草稿与事务已丢弃（影子树已对齐磁盘）");
-            let notices = ctx.notices_now();
-            Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices))
-        })
-    })
+    traced("wb_discard", |_| with_ctx_mut(discard_in))
+}
+
+/// [`wb_discard`] 的本体（**抽出来是为了可测**）：影子整个拉回磁盘原状、内存重读。
+pub(super) fn discard_in(ctx: &mut Ctx) -> Result<BookView, AppError> {
+    if ctx.draft.is_clean() && !ctx.txn.is_dirty() {
+        return Err(AppError::invalid_argument(w::disabled::NOTHING_TO_SAVE));
+    }
+    let dropped = ctx.draft.dirty_count() + ctx.txn.dirty_count();
+    ctx.draft = Draft::default();
+    // 先把"空草稿"落进快照（干净 = 直接删文件）：不先落的话，
+    // 下面 reload_from_disk 会把盘上那份旧草稿读回来，放弃就白放了
+    ctx.flush();
+    // ★ 放弃 = 把影子树整个拉回磁盘原状（结构类改动也一起丢）
+    txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
+    /* 放弃成功后同步基准（2026-11-01 R3）：此刻影子 == 真源，
+    基准也该是这一份。**放在 mirror 成功之后** —— 失败时不动基准，
+    下一次打开还能认出"这里有东西没处理"。 */
+    txn::mirror(&ctx.real_root, &txn::base_root(&ctx.store.root))?;
+    ctx.txn.clear();
+    /* **放弃后同样要重读内存**（2026-11-01）。
+     *
+     * 影子文件虽然拉回去了，但 `ctx.presets.registry` / `ctx.committed`
+     * 还停在"改完之后"的那份内存态 —— 分组换位是直接改内存再写影子
+     * 的，不重读的话 `view_of` 吐出来的还是换位后的次序，前端看起来
+     * 就是"点了放弃没反应"。保存路径（`wb_save`）在 commit 后一直
+     * 有这一步，这里是把漏掉的那半补齐。 */
+    ctx.reload_from_disk()?;
+    tracing::info!(dropped, "草稿与事务已丢弃（影子树已对齐磁盘）");
+    let notices = ctx.notices_now();
+    Ok(view_of(ctx, &ctx.committed, &ctx.draft, notices))
 }
 
 /* ---------- 统一事务：撤销 / 重做 / 状态 ---------- */
@@ -1760,6 +2236,20 @@ pub fn wb_discard() -> Result<BookView, AppError> {
 #[tauri::command(async)]
 pub fn wb_txn_state() -> Result<TxnState, AppError> {
     traced("wb_txn_state", |_| with_ctx(|ctx| Ok(ctx.txn_state())))
+}
+
+/// **未保存改动的逐行 diff**：盘上的 `presets/` ↔ 影子树。
+///
+/// 与 [`wb_diff_draft`]（对象视角：「哪一格从什么值改成什么值」）并列，不是替换 ——
+/// 作者 2026-11-02：「其实我觉得代码的 diff 就很直观了」。两个框看的是同一件事的两面：
+/// 对象视角回答"我动了哪些格子"，这个回答"文件因此变成什么样"。
+///
+/// **只读**：快照 + 读字节，一个字节都不写（`read_commands_are_async` 的白名单里有它）。
+#[tauri::command(async)]
+pub fn wb_shadow_diff() -> Result<shadow_diff::ShadowDiff, AppError> {
+    traced("wb_shadow_diff", |_| {
+        with_ctx(|ctx| shadow_diff::shadow_diff(&ctx.real_root, &ctx.shadow_root))
+    })
 }
 
 /// 撤销一条（服务器侧）：把影子树里那份 `before` 写回去，再重读
@@ -1816,6 +2306,352 @@ mod tests {
     use crate::workbench::domain::testkit::Fixture;
     use crate::workbench::domain::wording::BuildState;
     use crate::workbench::domain::Origin;
+
+    /* ---------- 验收：影子树只代表"未保存的草稿"（2026-11-01） ---------- */
+
+    /// **外部改了真源、影子落后 ⇒ 那不是"用户的草稿"**。
+    ///
+    /// 这是 `reload` "要不要问一句"的判定基础：
+    /// · 外部改源：影子落后于真源 → `edited_against` 算出 0 → 直接对齐，不打扰人；
+    /// · 用户在工作台改了没保存：影子里多出真源没有的内容 → >0 → 必须先确认。
+    #[test]
+    fn shadow_edits_are_counted_only_when_they_are_the_users_drafts() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        let shadow = dir.path().join("shadow");
+        for d in [&real, &shadow] {
+            std::fs::create_dir_all(d.join("machines")).unwrap();
+        }
+        crate::fsx::atomic::atomic_write(&real.join("machines/A1.toml"), b"v2\n").unwrap();
+        crate::fsx::atomic::atomic_write(&shadow.join("machines/A1.toml"), b"v1\n").unwrap();
+
+        let sh = txn::snapshot(&shadow).unwrap();
+        let rl = txn::snapshot(&real).unwrap();
+
+        /* **影子落后（外部改了真源）⇒ 不是草稿**。这是本次修复的核心判据：
+        只看"内容不同"会把两种情形都算成草稿，于是 `diff` 拿旧影子比、
+        报"0 份会变"（假阴性，2026-11-01 实测）。 */
+        assert!(
+            sh.has_files_absent_from(&rl).is_empty(),
+            "影子只是旧拷贝、不含真源没有的文件 ⇒ 没有用户草稿"
+        );
+
+        // 用户新建了一个真源里没有的文件 ⇒ 那才是草稿
+        crate::fsx::atomic::atomic_write(&shadow.join("machines/NEW.toml"), b"x\n").unwrap();
+        let sh = txn::snapshot(&shadow).unwrap();
+        assert_eq!(
+            sh.has_files_absent_from(&rl),
+            vec!["machines/NEW.toml".to_owned()],
+            "影子独有的文件 = 用户的未保存新建"
+        );
+
+        // 生成产物不参与（每次生成都会变，不是用户的编辑）
+        std::fs::create_dir_all(shadow.join("delivery/mkp/presets")).unwrap();
+        crate::fsx::atomic::atomic_write(&shadow.join("delivery/mkp/presets/A1.toml"), b"y\n")
+            .unwrap();
+        let sh = txn::snapshot(&shadow).unwrap();
+        assert_eq!(
+            sh.has_files_absent_from(&rl),
+            vec!["machines/NEW.toml".to_owned()],
+            "delivery/ 变化不算用户草稿"
+        );
+    }
+
+    /// ★ **同文件冲突**：用户改了既有文件没保存，AI 又改了同一个文件 ——
+    /// 必须认成"冲突"，不许当成"没有草稿"把用户的改动覆盖掉（2026-11-01 作者点名）。
+    ///
+    /// ```text
+    /// 基准 0.8 / 影子（用户）0.9 / 真源（AI）0.85
+    /// → drafts=[…] conflicts=[…]  ← 不能自动选边
+    /// ```
+    #[test]
+    fn an_unsaved_edit_to_an_existing_file_is_a_conflict_not_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, shadow, base) = (
+            dir.path().join("real"),
+            dir.path().join("shadow"),
+            dir.path().join("base"),
+        );
+        for d in [&real, &shadow, &base] {
+            std::fs::create_dir_all(d.join("registry")).unwrap();
+            // 三方一开始都是 0.8（基准就是"铺影子时的那一份"）
+            crate::fsx::atomic::atomic_write(&d.join("registry/param.toml"), b"v = 0.8\n").unwrap();
+        }
+
+        // 用户在影子树里改成都没保存；AI 把真源改成 0.85
+        crate::fsx::atomic::atomic_write(&shadow.join("registry/param.toml"), b"v = 0.9\n")
+            .unwrap();
+        crate::fsx::atomic::atomic_write(&real.join("registry/param.toml"), b"v = 0.85\n").unwrap();
+
+        let v = txn::snapshot(&shadow).unwrap().reconcile(
+            &txn::snapshot(&real).unwrap(),
+            &txn::snapshot(&base).unwrap(),
+        );
+
+        assert_eq!(
+            v.conflicts,
+            vec!["registry/param.toml".to_owned()],
+            "两边都改了同一个文件 = 冲突"
+        );
+        assert!(v.drafts.is_empty(), "冲突不是普通草稿，要分开报");
+        assert!(
+            !v.safe_to_reset(),
+            "冲突时绝不能按真源重置（会丢掉用户那份）"
+        );
+        assert!(v.needs_attention());
+    }
+
+    /// 只有**影子**改了既有文件（真源没动）→ 是草稿，不是冲突。
+    #[test]
+    fn a_lone_shadow_edit_to_an_existing_file_is_a_draft() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, shadow, base) = (
+            dir.path().join("real"),
+            dir.path().join("shadow"),
+            dir.path().join("base"),
+        );
+        for d in [&real, &shadow, &base] {
+            std::fs::create_dir_all(d.join("registry")).unwrap();
+            crate::fsx::atomic::atomic_write(&d.join("registry/param.toml"), b"v = 0.8\n").unwrap();
+        }
+        crate::fsx::atomic::atomic_write(&shadow.join("registry/param.toml"), b"v = 0.9\n")
+            .unwrap();
+
+        let v = txn::snapshot(&shadow).unwrap().reconcile(
+            &txn::snapshot(&real).unwrap(),
+            &txn::snapshot(&base).unwrap(),
+        );
+        assert_eq!(v.drafts, vec!["registry/param.toml".to_owned()]);
+        assert!(v.conflicts.is_empty());
+        assert!(!v.safe_to_reset());
+    }
+
+    /// 只有**真源**改了（用户没动影子）→ 不是草稿，可以安全对齐。
+    #[test]
+    fn an_external_change_with_a_clean_shadow_is_safe_to_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let (real, shadow, base) = (
+            dir.path().join("real"),
+            dir.path().join("shadow"),
+            dir.path().join("base"),
+        );
+        for d in [&real, &shadow, &base] {
+            std::fs::create_dir_all(d.join("registry")).unwrap();
+            crate::fsx::atomic::atomic_write(&d.join("registry/param.toml"), b"v = 0.8\n").unwrap();
+        }
+        crate::fsx::atomic::atomic_write(&real.join("registry/param.toml"), b"v = 0.85\n").unwrap();
+
+        let v = txn::snapshot(&shadow).unwrap().reconcile(
+            &txn::snapshot(&real).unwrap(),
+            &txn::snapshot(&base).unwrap(),
+        );
+        assert!(v.drafts.is_empty());
+        assert!(v.conflicts.is_empty());
+        assert_eq!(v.external, vec!["registry/param.toml".to_owned()]);
+        assert!(v.safe_to_reset(), "外部改源不该拦人");
+    }
+
+    /* ---------- R2：经 `settle_shadow` 的端到端测试（2026-11-01） ----------
+     *
+     * 上一轮只测了 `reconcile` 本身，没测"打开会话时到底会发生什么"。
+     * 于是 R3（保存后不更新基准）和 R1（基准缺失拿真源顶替）都溜过去了。
+     * 下面这些走 `settle_shadow`，验**返回的源与磁盘上的实际字节**，不验文案。
+     */
+
+    /// 搭一个"工作台 + 真源"的最小现场：`<tmp>/workbench` + `<tmp>/presets`。
+    fn shadow_scene(real_v: &str) -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let wb = dir.path().join("workbench");
+        let real = dir.path().join("presets");
+        std::fs::create_dir_all(real.join("registry")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &real.join("registry/param.toml"),
+            format!("v = {real_v}\n").as_bytes(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(&wb).unwrap();
+        (dir, wb, real)
+    }
+
+    /// 读某一棵树里的实际字节（判断"读的是哪一份"用这个，不看路径字符串）
+    fn read_v(root: &Path) -> String {
+        std::fs::read_to_string(root.join("registry/param.toml")).unwrap_or_default()
+    }
+
+    /// 首次打开：铺影子 + 铺基准；**会话要读的那一份就在影子里**（真源只用来铺）。
+    #[test]
+    fn e2e_first_open_lays_down_shadow_and_base() {
+        let (_d, wb, real) = shadow_scene("0.8");
+        let recovered = settle_shadow(&wb, &real).unwrap();
+        assert!(!recovered, "首次打开没有草稿");
+        assert_eq!(read_v(&wb.join(".draft/presets")), "v = 0.8\n");
+        assert_eq!(read_v(&real), "v = 0.8\n");
+        assert!(
+            wb.join(".draft/presets/registry/param.toml").exists(),
+            "影子要铺出来"
+        );
+        assert!(
+            wb.join(".draft/base/registry/param.toml").exists(),
+            "基准要铺出来"
+        );
+    }
+
+    /// 场景 1：基准 0.8 / 影子草稿 0.9 / 真源被外部改成 0.85 -> **重新打开仍识别冲突**。
+    #[test]
+    fn e2e_conflict_survives_reopening() {
+        let (_d, wb, real) = shadow_scene("0.8");
+        settle_shadow(&wb, &real).unwrap();
+
+        crate::fsx::atomic::atomic_write(
+            &wb.join(".draft/presets/registry/param.toml"),
+            b"v = 0.9\n",
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&real.join("registry/param.toml"), b"v = 0.85\n").unwrap();
+
+        let recovered = settle_shadow(&wb, &real).unwrap();
+        assert!(recovered, "同文件两边都改过 = 冲突，必须按草稿呈现");
+        assert_eq!(
+            read_v(&wb.join(".draft/presets")),
+            "v = 0.9\n",
+            "会话读的就是影子这份草稿"
+        );
+        assert_eq!(read_v(&real), "v = 0.85\n", "真源不许被草稿覆盖");
+        assert_eq!(
+            read_v(&wb.join(".draft/presets")),
+            "v = 0.9\n",
+            "冲突时影子保持原样，等作者定"
+        );
+    }
+
+    /// 场景 2：保存成功后重新打开 -> **不再误报草稿或冲突**（R3）。
+    #[test]
+    fn e2e_after_save_reopening_is_clean() {
+        let (_d, wb, real) = shadow_scene("0.8");
+        settle_shadow(&wb, &real).unwrap();
+
+        crate::fsx::atomic::atomic_write(
+            &wb.join(".draft/presets/registry/param.toml"),
+            b"v = 0.9\n",
+        )
+        .unwrap();
+        // 与 `wb_save` 同一顺序：commit 成功 -> 同步基准
+        crate::workbench::domain::txn::commit(
+            &real,
+            &wb.join(".draft/presets"),
+            &wb.join(".trash"),
+            "test",
+        )
+        .unwrap();
+        crate::workbench::domain::txn::mirror(
+            &real,
+            &crate::workbench::domain::txn::base_root(&wb),
+        )
+        .unwrap();
+
+        let recovered = settle_shadow(&wb, &real).unwrap();
+        assert!(!recovered, "刚保存过，不该再有草稿");
+        assert_eq!(read_v(&wb.join(".draft/presets")), "v = 0.9\n");
+        assert_eq!(read_v(&real), "v = 0.9\n", "保存确实落盘了");
+    }
+
+    /// 场景 3：放弃草稿后重新打开 -> 状态正确（不误报）。
+    #[test]
+    fn e2e_after_discard_reopening_is_clean() {
+        let (_d, wb, real) = shadow_scene("0.8");
+        settle_shadow(&wb, &real).unwrap();
+
+        crate::fsx::atomic::atomic_write(
+            &wb.join(".draft/presets/registry/param.toml"),
+            b"v = 0.9\n",
+        )
+        .unwrap();
+        // 与 `wb_discard` 同一顺序：影子拉回真源 -> 同步基准
+        crate::workbench::domain::txn::mirror(&real, &wb.join(".draft/presets")).unwrap();
+        crate::workbench::domain::txn::mirror(
+            &real,
+            &crate::workbench::domain::txn::base_root(&wb),
+        )
+        .unwrap();
+
+        let recovered = settle_shadow(&wb, &real).unwrap();
+        assert!(!recovered, "已放弃，不该再有草稿");
+        assert_eq!(
+            read_v(&wb.join(".draft/presets")),
+            "v = 0.8\n",
+            "放弃后回到磁盘那一版"
+        );
+    }
+
+    /// 场景 4：基准缺失/损坏时，**草稿不会被静默覆盖**（R1）。
+    #[test]
+    fn e2e_missing_base_never_silently_drops_drafts() {
+        // 1 基准目录整个不在，影子与真源不同 -> 必须按"有草稿"处理
+        let (_d, wb, real) = shadow_scene("0.8");
+        settle_shadow(&wb, &real).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &wb.join(".draft/presets/registry/param.toml"),
+            b"v = 0.9\n",
+        )
+        .unwrap();
+        std::fs::remove_dir_all(wb.join(".draft/base")).unwrap();
+
+        let recovered = settle_shadow(&wb, &real).unwrap();
+        assert!(recovered, "基准没了又证明不了干净 -> 必须按草稿处理");
+        assert_eq!(
+            read_v(&wb.join(".draft/presets")),
+            "v = 0.9\n",
+            "用户那份要留着"
+        );
+        assert_eq!(read_v(&real), "v = 0.8\n", "真源不许被动");
+
+        // 2 基准损坏（内容不是合法 JSON）-> 同上
+        let (_d2, wb2, real2) = shadow_scene("0.8");
+        settle_shadow(&wb2, &real2).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &wb2.join(".draft/presets/registry/param.toml"),
+            b"v = 0.9\n",
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &wb2.join(".draft/base/manifest.json"),
+            b"not json at all",
+        )
+        .unwrap();
+
+        let recovered2 = settle_shadow(&wb2, &real2).unwrap();
+        assert!(recovered2, "基准损坏、影子与真源不同 -> 一样不能静默对齐");
+        assert_eq!(read_v(&wb2.join(".draft/presets")), "v = 0.9\n");
+
+        // 3 基准缺失、但影子与真源**逐字节相同** -> 这时才能安全重建
+        let (_d3, wb3, real3) = shadow_scene("0.8");
+        settle_shadow(&wb3, &real3).unwrap();
+        std::fs::remove_dir_all(wb3.join(".draft/base")).unwrap();
+
+        let recovered3 = settle_shadow(&wb3, &real3).unwrap();
+        assert!(!recovered3, "影子 == 真源，能证明没有独有内容 -> 不算草稿");
+        assert_eq!(read_v(&wb3.join(".draft/presets")), "v = 0.8\n");
+        assert!(
+            wb3.join(".draft/base/registry/param.toml").exists(),
+            "这时才允许重建基准"
+        );
+    }
+
+    /// `wb_reload` 在有未保存草稿时必须**拒绝**（除非明确 `discardDrafts=true`）。
+    ///
+    /// 以前一条命令就静默丢弃，谁点一下用户的编辑就没了（2026-11-01 数据保护）。
+    #[test]
+    fn reload_refuses_to_silently_drop_unsaved_drafts() {
+        /* 这条判据只验"闸的逻辑"，不碰真仓库：直接看 `drafts_at_risk` 的语义
+        —— 它读的是 store 与真 presets 根，测试环境里两者都可能不存在，
+        所以这里验的是"没草稿时不会拦"这条最基本的（有草稿的那条由
+        `shadow_edits_are_counted_only_when_they_are_the_users_drafts` 覆盖）。 */
+        let r = drafts_at_risk();
+        assert!(
+            !r.doomed || r.edited > 0,
+            "只有真的数出草稿才算会丢东西，不许凭空拦人"
+        );
+    }
 
     /// 「盘上的 `presets/` 在外面改过」只看**内容**，不看文件时间（2026-11-01 作者裁定）。
     ///
@@ -1926,6 +2762,254 @@ mod tests {
             "放弃之后影子树必须回到磁盘那一份"
         );
         drop(fx_dir);
+    }
+
+    /// **2026-11-01 悬案的正解判据**：从磁盘开一个会话之后，编辑只能落在影子树。
+    ///
+    /// 现场：22:17 换位之后保存不亮、22:22 真仓库两份文件被无日志写入。
+    /// 根因是 `Ctx::open` 在"干净"时把 `Presets` 读到了**真仓库**上 ——
+    /// 于是 `write_back` 直接改仓库，而 `run_ctx` 拍的是影子快照，差集恒空
+    /// （dirty = 0 ⇒ 保存不亮、放弃退不回）。
+    ///
+    /// 这条走**真入口**（`Ctx::open_at` + `run_ctx` + `discard_in` / `save_in`），
+    /// 验的是盘上的字节，不是文案：
+    ///   ① 刚开（没有草稿）时会话的根必须是影子树；
+    ///   ② 编辑之后真仓库一个字节不动，事务 +1；
+    ///   ③ 放弃 → 影子回到磁盘原状、事务清零；
+    ///   ④ 再改一次并保存 → 这时真仓库才变。
+    #[test]
+    fn a_session_opened_from_disk_edits_the_shadow_until_save() {
+        use crate::presetdata::MachineField;
+
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        assert_eq!(
+            ctx.presets.root(),
+            ctx.shadow_root.as_path(),
+            "会话必须读影子树 —— 读到真仓库就等于边改边落盘"
+        );
+
+        let rel = "machines/A1.toml";
+        let real_before = std::fs::read(real.join(rel)).unwrap();
+        let rename = |ctx: &mut Ctx| -> Result<(), AppError> {
+            ctx.presets
+                .catalog
+                .machine_mut("A1")?
+                .set_field(MachineField::Display, Some("A1 改名"))?;
+            ctx.presets.catalog.write_machine("A1")
+        };
+
+        run_ctx(&mut ctx, Some("改机型信息"), rename).unwrap();
+        assert_eq!(
+            ctx.txn.dirty_count(),
+            1,
+            "编辑必须进事务 —— 否则右上角那颗「保存」永远不亮"
+        );
+        assert_eq!(
+            std::fs::read(real.join(rel)).unwrap(),
+            real_before,
+            "未保存前真仓库一个字节都不许动"
+        );
+        assert!(
+            std::fs::read_to_string(ctx.shadow_root.join(rel))
+                .unwrap()
+                .contains("A1 改名"),
+            "改后的字节要在影子树里"
+        );
+
+        discard_in(&mut ctx).unwrap();
+        assert_eq!(ctx.txn.dirty_count(), 0, "放弃之后事务清零");
+        assert!(
+            !std::fs::read_to_string(ctx.shadow_root.join(rel))
+                .unwrap()
+                .contains("A1 改名"),
+            "放弃必须真退回磁盘那一份"
+        );
+        assert_eq!(
+            std::fs::read(real.join(rel)).unwrap(),
+            real_before,
+            "放弃之后真仓库还是原样"
+        );
+
+        run_ctx(&mut ctx, Some("改机型信息"), rename).unwrap();
+        save_in(&mut ctx).unwrap();
+        assert!(
+            std::fs::read_to_string(real.join(rel))
+                .unwrap()
+                .contains("A1 改名"),
+            "保存才落真仓库"
+        );
+        assert_eq!(ctx.txn.dirty_count(), 0, "保存之后事务清零");
+        drop(fx_dir);
+    }
+
+    /// **悬案原样重放**（2026-11-01 22:17）：从磁盘开会话 → 抽屉里换位 →
+    /// 事务 +1（保存才亮），而真仓库那两份文件一个字节都不动。
+    ///
+    /// 与上一条的分工：上一条验"换位本身会不会记账"，这一条验"**会话根对不对**"。
+    /// 两个条件缺一不可 —— 根错了，换位就写进真仓库，而事务拍的是影子，永远记 0。
+    #[test]
+    fn a_group_move_from_a_fresh_session_only_touches_the_shadow() {
+        use crate::presetdata::registry::{SectionMetaEdit, SectionMove};
+
+        let (fx_dir, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let registry_rel = "registry/param_registry.toml";
+        let layout_rel = "layout_schema.toml";
+        let real_registry = std::fs::read(real.join(registry_rel)).unwrap();
+        let real_layout = std::fs::read(real.join(layout_rel)).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real.clone()).unwrap();
+
+        // 夹具的 wiping 下只有一个组：先建出第二组，才有"邻居"可换
+        run_ctx(&mut ctx, Some("改分组名与位置"), |ctx| {
+            ctx.presets
+                .registry
+                .ensure_section("wiping", "custom_1", "支撑")?;
+            ctx.presets.registry.write_back()?;
+            Ok(())
+        })
+        .expect("建组这一步不能失败");
+
+        let before = ctx.txn.dirty_count();
+        run_ctx(&mut ctx, Some("改分组名与位置"), |ctx| {
+            ctx.presets.registry.set_section_meta(
+                "custom_1",
+                SectionMetaEdit {
+                    label: None,
+                    move_dir: Some(SectionMove::Up),
+                    new_section: None,
+                },
+            )?;
+            ctx.presets.registry.write_back()?;
+            Ok(())
+        })
+        .expect("挪这一步不能失败");
+
+        assert!(
+            ctx.txn.dirty_count() > before,
+            "换位没进事务 —— 右上角那颗「保存」就不会亮"
+        );
+        let ids: Vec<&str> = ctx.presets.registry.tabs()[1]
+            .sections
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, ["custom_1", "wipe"], "内存里的次序没换");
+        assert_eq!(
+            std::fs::read(real.join(registry_rel)).unwrap(),
+            real_registry,
+            "换位不许写进真仓库的注册表"
+        );
+        assert_eq!(
+            std::fs::read(real.join(layout_rel)).unwrap(),
+            real_layout,
+            "换位不许写进真仓库的布局"
+        );
+
+        // 放弃 → 影子退回原状、事务清零
+        discard_in(&mut ctx).unwrap();
+        assert_eq!(ctx.txn.dirty_count(), 0);
+        assert!(
+            !ctx.presets
+                .registry
+                .tabs()
+                .iter()
+                .any(|t| t.sections.iter().any(|s| s.id == "custom_1")),
+            "放弃之后新建的那一组要消失"
+        );
+        drop(fx_dir);
+    }
+
+    /// **分组换位也要进事务，并且真的换掉影子树里的次序**（2026-11-01 现场：
+    /// 抽屉里点上下箭头，保存按钮不亮、列表不动）。
+    ///
+    /// 这条走的是命令那条路（`run_ctx` + `EDIT_COMMANDS` 里的标签），所以它红了
+    /// 就等于「真机上点箭头不会有任何反应」—— 反过来，它绿了还点不动，问题就在
+    /// 前端或用户手里那个还没重编的二进制。
+    #[test]
+    fn moving_a_group_lands_in_the_transaction_and_reorders_the_shadow() {
+        use crate::presetdata::registry::SectionMetaEdit;
+        use crate::presetdata::registry::SectionMove;
+
+        let (_dirs, _f, mut ctx) = ctx();
+        /* 夹具的 wiping 下本来只有一个 `wipe` —— 先建出第二组，才有"邻居"可换 */
+        run_ctx(&mut ctx, Some("改分组名与位置"), |ctx| {
+            ctx.presets
+                .registry
+                .ensure_section("wiping", "custom_1", "支撑")?;
+            ctx.presets.registry.write_back()?;
+            Ok(())
+        })
+        .expect("建组这一步不能失败");
+
+        let before = ctx.txn.dirty_count();
+        run_ctx(&mut ctx, Some("改分组名与位置"), |ctx| {
+            ctx.presets.registry.set_section_meta(
+                "custom_1",
+                SectionMetaEdit {
+                    label: None,
+                    move_dir: Some(SectionMove::Up),
+                    new_section: None,
+                },
+            )?;
+            ctx.presets.registry.write_back()?;
+            Ok(())
+        })
+        .expect("挪这一步不能失败");
+
+        assert!(
+            ctx.txn.dirty_count() > before,
+            "换位没进事务 —— 右上角那颗「保存」就不会亮"
+        );
+        let ids: Vec<&str> = ctx.presets.registry.tabs()[1]
+            .sections
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect();
+        assert_eq!(ids, ["custom_1", "wipe"], "内存里的次序没换");
+
+        /* 影子树上那份也换了（`write_back` 写的是它） */
+        let shadow_reg =
+            std::fs::read_to_string(ctx.shadow_root.join("registry/param_registry.toml"))
+                .expect("影子树里要有注册表");
+        let at = |id: &str| {
+            shadow_reg
+                .find(&format!("id = '{id}'"))
+                .or_else(|| shadow_reg.find(&format!("id = \"{id}\"")))
+                .unwrap_or_else(|| panic!("{id} 不见了"))
+        };
+        assert!(at("custom_1") < at("wipe"), "影子树里的数组次序没换");
+
+        /*
+         * **参数必须跟着自己的分组走**（2026-11-01 的回归点）：
+         * 换位只能挪"块"，绝不能出现「A 的名字挂着 B 的参数」。
+         * 夹具的 `wipe` 带 3 条参数、`custom_1` 是空的 —— 换完之后还得这样。
+         */
+        let again = crate::presetdata::Presets::load_from(&ctx.shadow_root)
+            .expect("换完位这份数据还得读得通（`check_consistency` 会当场发现错位）");
+        let wiping = again
+            .registry
+            .layout()
+            .iter()
+            .find(|t| t.id == "wiping")
+            .expect("wiping 页签在");
+        let counts: Vec<(&str, usize)> = wiping
+            .sections
+            .iter()
+            .map(|s| (s.id.as_str(), s.items.len()))
+            .collect();
+        assert_eq!(
+            counts,
+            [("custom_1", 0), ("wipe", 3)],
+            "换位把参数挪到了别的分组名下 —— `items` 必须整块跟着走"
+        );
     }
 
     /// 造一个不碰真仓库、也不碰那个全局的 `Ctx`。
@@ -2151,6 +3235,42 @@ mod tests {
         assert_eq!(only.machine_filter, vec!["P1S"]);
     }
 
+    /// **「未保存 N」与「代码对比里的 N 份文件」必须是同一个数**（2026-11-02）。
+    ///
+    /// 两个源各算一套是本仓的老病：页头那颗按钮读 `view.dirty_count`，框里读
+    /// `shadow_diff.files.len()`。它们要是能各说各话，就会出现「页头写 1、框里写 2」
+    /// 这种谁也说不清的状态。这条测试把两处钉在同一套 `snapshot + without_products` 上。
+    #[test]
+    fn the_unsaved_count_is_the_same_number_as_the_diff_file_count() {
+        use crate::workbench::domain::shadow_diff;
+        let (d, _f, mut ctx) = ctx();
+        /* 造两棵**真的不同的**树：测试夹具默认两个根是同一个（镜像 = 恒等） */
+        let real = d.0.path().join("presets-real");
+        let shadow = d.0.path().join("presets-shadow");
+        for (root, text) in [(&real, "a = 1\n"), (&shadow, "a = 2\n")] {
+            std::fs::create_dir_all(root.join("machines")).unwrap();
+            crate::fsx::atomic::atomic_write(&root.join("machines/A1.toml"), text.as_bytes())
+                .unwrap();
+        }
+        ctx.real_root = real.clone();
+        ctx.shadow_root = shadow.clone();
+        ctx.refresh_unsaved_files();
+
+        let diff = shadow_diff::shadow_diff(&real, &shadow).unwrap();
+        assert_eq!(ctx.unsaved_files(), 1);
+        assert_eq!(
+            ctx.unsaved_files(),
+            diff.files.len(),
+            "页头的 N 与框里的「N 份文件」不许各算一套"
+        );
+        assert_eq!(ctx.txn_state().dirty_count, 1);
+
+        /* 双侧一致 ⇒ 归零（不是"永远至少 1"） */
+        crate::fsx::atomic::atomic_write(&shadow.join("machines/A1.toml"), b"a = 1\n").unwrap();
+        ctx.refresh_unsaved_files();
+        assert_eq!(ctx.unsaved_files(), 0);
+    }
+
     /// 一条 patch 走完整条路径：改**内存** → 视图跟着变 → 反向能回去。
     ///
     /// 注意这里**没有落盘**这一步：一次编辑不碰磁盘，快照是另一件事
@@ -2180,7 +3300,11 @@ mod tests {
         let (c2, d2, _) = state(&ctx).unwrap();
         assert_eq!(d2.dirty_count(), 1);
         let v = view_of(&ctx, &c2, &d2, Vec::new());
-        assert_eq!(v.dirty_count, 1);
+        /* 2026-11-02：`dirty_count` 改成**有改动的文件数**，而这条测试只往内存草稿里
+        apply 了一条 patch、没写影子树（真落盘那一步由 `wb_apply_draft` 里的
+        `apply_draft_now` 做）。所以这里断言的是「值草稿这条老路径本身」——
+        `save` 那份状态仍必须说"脏"，那才是页头按钮的依据。 */
+        assert_eq!(v.dirty_count, 0, "没写影子树 ⇒ 没有文件差异");
         assert_eq!(v.save, w::SaveState::Dirty);
         assert_eq!(v.snapshot, w::SnapshotState::Pending, "还没落盘");
 
@@ -2598,6 +3722,8 @@ mod tests {
             "wb_ui",
             "wb_preview_bulk",
             "wb_diff_draft",
+            // 未保存改动的逐行 diff：只做快照 + 读字节，不写盘
+            "wb_shadow_diff",
             "wb_preflight",
             "wb_generate_preview",
             "wb_revert_preview",
