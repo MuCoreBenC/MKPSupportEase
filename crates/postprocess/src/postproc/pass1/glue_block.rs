@@ -444,10 +444,23 @@ fn write_glue_lines(
     let mut pen_z = start_z;
     let pen_is_up = |z: f64| z > land_z + 1e-6;
 
+    /*
+     * 段尾的多余空走：最后一条涂胶行之后的空走没有任何用处（收笔由 `;Glueing Finished`
+     * 前的那次抬升负责），发出去只会多一段空驶 —— 作者 2026-11-04 截图里的 310078。
+     */
+    let last_glue = lines.iter().rposition(|l| {
+        let t = l.trim();
+        (t.starts_with("G1 ") || t.starts_with("G2 ") || t.starts_with("G3 ")) && t.contains(" E")
+    });
     let mut emitted_move = skip_leading > 0;
     let mut idx = skip_leading;
     while idx < lines.len() {
         let il = lines[idx].trim().to_string();
+        // 只丢「段尾的空走」，其余（`M204` 之类的状态行）照旧发出去
+        if last_glue.is_some_and(|i| idx > i) && is_travel_line(&il) {
+            idx += 1;
+            continue;
+        }
         if il.contains(MARKER_ZJUMP_START) {
             let mut next_start_idx: isize = -1;
             for ni in idx + 1..lines.len() {
@@ -854,6 +867,14 @@ pub(crate) fn emit_glue_block(
 
     for (seg_idx, seg) in segments.iter().enumerate() {
         // Go 侧此处先累计 segESum，但该值从未被消费（死存储），未移植。
+
+        /*
+         * 整段没有一条挤出移动 ⇒ 它只是段尾剩下的空走（切段时被 `;ZJUMP_START` 分出来的）。
+         * 发出去就是「涂完了还空驶一段」（作者 2026-11-04 截图 310078）。
+         */
+        if !seg.iter().any(|l| l.contains(" E")) {
+            continue;
+        }
 
         // 段首若是「先飞到特征前、再飞到起点」的两段空走，回位直接取后者（见 leading_travel_run）
         let (seg_start_cmd, skip_leading) = match leading_travel_run(seg) {
