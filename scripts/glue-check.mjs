@@ -51,6 +51,7 @@ function scan(text) {
   const lines = text.split('\n')
   const events = []
   let inPaint = false
+  let block = -1
   let x = 0
   let y = 0
   let z = NaN
@@ -60,6 +61,7 @@ function scan(text) {
     const s = lines[i].trim()
     if (s.startsWith(';MKP_BEGIN paint')) {
       inPaint = true
+      block += 1
       const m = /z=([\d.]+)/.exec(s)
       layer = m ? Number(m[1]) : NaN
       continue
@@ -89,7 +91,7 @@ function scan(text) {
     if (nz !== null) {
       const dir = nz > z + EPS ? 'up' : nz < z - EPS ? 'down' : 'same'
       z = nz
-      events.push({ kind: 'z', line: i + 1, z: nz, dir, layer })
+      events.push({ kind: 'z', line: i + 1, z: nz, dir, layer, block })
       continue
     }
     if (nx === null && ny === null) continue
@@ -106,6 +108,7 @@ function scan(text) {
       dist: Math.hypot(px - x, py - y),
       arc: cmd === 'G2' || cmd === 'G3',
       layer,
+      block,
     })
     x = px
     y = py
@@ -115,13 +118,32 @@ function scan(text) {
 
 function check(events) {
   const findings = []
+  // 每个涂胶块的「落笔高度」= 块内最低 Z。逐块先扫一遍，避免把
+  // 「63.71 → 60.71」这种段间抬升当成落笔（60.71 其实是抬升高度）。
+  const landByLayer = new Map()
+  const lastXyOfBlock = new Map()
+  for (const e of events) {
+    if (e.kind === 'xy') lastXyOfBlock.set(e.block, e.line)
+  }
+
+  for (const e of events) {
+    if (e.kind !== 'z') continue
+    const cur = landByLayer.get(e.layer)
+    landByLayer.set(e.layer, cur === undefined ? e.z : Math.min(cur, e.z))
+  }
+  const isLandedZ = (e) => {
+    const land = landByLayer.get(e.layer)
+    return land !== undefined && e.z <= land + 1e-6
+  }
   let landed = false
   let land = null // 当前这次落笔：{ line, moved }
   let lift = null // 当前这次抬笔：{ line, moved }
   let arcCount = 0
 
+  // 只有「落笔之后又抬起来」才算白落。涂胶块结尾那次落笔是必须的
+  // （`;Glueing Finished` 之前要落），不算多余，所以 `end` 不报。
   const closeLand = (why) => {
-    if (land && land.moved < EPS) {
+    if (why !== 'end' && land && land.moved < EPS) {
       findings.push({
         rule: 'R1',
         line: land.line,
@@ -133,7 +155,7 @@ function check(events) {
 
   for (const e of events) {
     if (e.kind === 'z') {
-      if (e.dir === 'down') {
+      if (e.dir === 'down' && isLandedZ(e)) {
         closeLand('down')
         if (lift) {
           if (lift.moved < EPS) {
@@ -148,7 +170,9 @@ function check(events) {
         landed = true
         land = { line: e.line, moved: 0 }
       } else if (e.dir === 'up') {
-        closeLand('up')
+        // 块内最后一次抬升是收笔（`;Glueing Finished` 之前必须抬），不算白落
+        const tail = lastXyOfBlock.get(e.block)
+        closeLand(tail !== undefined && tail < e.line ? 'end' : 'up')
         landed = false
         lift = { line: e.line, moved: 0 }
       }
@@ -159,7 +183,8 @@ function check(events) {
     if (lift) lift.moved += e.dist
     if (land) land.moved += e.dist
 
-    if (landed && e.dist > LANDING_TRAVEL_MM) {
+    // 圆弧的「弦长」不是位移：笔是沿弧走的，弧再长也不算贴面飞。
+    if (landed && !e.arc && e.dist > LANDING_TRAVEL_MM) {
       findings.push({
         rule: 'R2',
         line: e.line,

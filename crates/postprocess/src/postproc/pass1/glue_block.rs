@@ -150,9 +150,12 @@ fn emit_jump_run(
     current_layer_height: f64,
     last_layer_height: f64,
     already_up: bool,
-) -> Result<(usize, f64, f64, bool), PostprocError> {
+) -> Result<(usize, f64, f64, f64), PostprocError> {
     let lift_height = ir_data.glue.inter_model_lift_height;
-    if !already_up {
+    let mut cur_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop);
+    if already_up {
+        cur_z = f64::NAN; // 交给调用方保持它自己记的那个值
+    } else {
         sink.push_str(&format!(
             "G1 F{}",
             format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
@@ -213,8 +216,14 @@ fn emit_jump_run(
      * `delete_wipe` 又在中间插了标记）。此时**不许落**：保持抬着，由下一个标记接着走，
      * 直到真正出现涂胶行再落。返回 `false` 表示「还抬着」。
      */
+    // 往后看穿空行/注释：中间夹一句注释不代表这次跳转结束了
     let next_is_marker = lines
-        .get(i)
+        .iter()
+        .skip(i)
+        .find(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with(';')
+        })
         .map(|l| {
             let t = l.trim();
             t.contains(crate::gcode::MARKER_ZJUMP_START)
@@ -223,18 +232,16 @@ fn emit_jump_run(
         })
         .unwrap_or(false);
     if next_is_marker {
-        return Ok((i, last.0, last.1, false));
+        return Ok((i, last.0, last.1, cur_z));
     }
 
-    sink.push_str(&format!(
-        "G1 Z{}",
-        format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
-    ));
+    let landed_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    sink.push_str(&format!("G1 Z{}", format_z(landed_z)));
     sink.push_str(&format!(
         "G1 F{}",
         format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
     ));
-    Ok((i, last.0, last.1, true))
+    Ok((i, last.0, last.1, landed_z))
 }
 
 /// 这一段连续空走是否真的把笔挪了位置（零长度重复句不算）。
@@ -278,7 +285,7 @@ fn write_glue_lines(
     ir_data: &Ir,
     current_layer_height: f64,
     last_layer_height: f64,
-    start_lifted: bool,
+    start_z: f64,
 ) -> Result<(), PostprocError> {
     use crate::gcode::MARKER_MICRO_LIFT;
     use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START};
@@ -366,9 +373,14 @@ fn write_glue_lines(
         }
     }
 
-    // 笔是否「抬着还没落」——被标记切开的一串空走之间不落，到涂胶行才落。
-    // 段首回位若已经把它抬起来了（`start_lifted`），这里就别再抬一次。
-    let mut pen_up = start_lifted;
+    /*
+     * 笔的**实际喷嘴 Z**。所有「要不要抬 / 要不要落」都从这一格推出来，
+     * 不用布尔假设 —— 之前用「以为抬着」的标志，会在笔其实已经落到落笔高度时
+     * 仍然跳过抬升，直接把那段空走放到贴面高度飞（实测 R2 从 24 反弹到 113）。
+     */
+    let land_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+    let mut pen_z = start_z;
+    let pen_is_up = |z: f64| z > land_z + 1e-6;
 
     let mut idx = 0usize;
     while idx < lines.len() {
@@ -391,18 +403,20 @@ fn write_glue_lines(
                 idx = next_start_idx as usize;
                 continue;
             }
-            let (next, lx, ly, landed) = emit_jump_run(
+            let (next, lx, ly, z_after) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
-                pen_up,
+                pen_is_up(pen_z),
             )?;
             prev_x = lx;
             prev_y = ly;
-            pen_up = !landed;
+            if !z_after.is_nan() {
+                pen_z = z_after;
+            }
             idx = next;
             continue;
         }
@@ -428,18 +442,20 @@ fn write_glue_lines(
                 idx = next_start_idx as usize;
                 continue;
             }
-            let (next, lx, ly, landed) = emit_jump_run(
+            let (next, lx, ly, z_after) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
-                pen_up,
+                pen_is_up(pen_z),
             )?;
             prev_x = lx;
             prev_y = ly;
-            pen_up = !landed;
+            if !z_after.is_nan() {
+                pen_z = z_after;
+            }
             idx = next;
             continue;
         }
@@ -461,35 +477,39 @@ fn write_glue_lines(
                 idx = next_start_idx as usize;
                 continue;
             }
-            let (next, lx, ly, landed) = emit_jump_run(
+            let (next, lx, ly, z_after) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
-                pen_up,
+                pen_is_up(pen_z),
             )?;
             prev_x = lx;
             prev_y = ly;
-            pen_up = !landed;
+            if !z_after.is_nan() {
+                pen_z = z_after;
+            }
             idx = next;
             continue;
         }
         if is_travel_line(&il) && travel_run_moves(lines, idx, prev_x, prev_y) {
             // 笔还在落笔状态而下一段是空走 —— 先抬起来再走（同标记分支的抬法）
-            let (next, lx, ly, landed) = emit_jump_run(
+            let (next, lx, ly, z_after) = emit_jump_run(
                 sink,
                 lines,
                 idx,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
-                pen_up,
+                pen_is_up(pen_z),
             )?;
             prev_x = lx;
             prev_y = ly;
-            pen_up = !landed;
+            if !z_after.is_nan() {
+                pen_z = z_after;
+            }
             idx = next;
             continue;
         }
@@ -497,7 +517,7 @@ fn write_glue_lines(
         let is_move_cmd = il.starts_with("G1 ") || il.starts_with("G2 ") || il.starts_with("G3 ");
         if is_move_cmd && !il.contains("G1 F") {
             // 抬着走过来、终于遇到涂胶行 ⇒ 先落再涂
-            if pen_up && il.contains(" E") {
+            if pen_is_up(pen_z) && il.contains(" E") {
                 sink.push_str(&format!(
                     "G1 Z{}",
                     format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
@@ -506,7 +526,7 @@ fn write_glue_lines(
                     "G1 F{}",
                     format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
                 ));
-                pen_up = false;
+                pen_z = land_z;
             }
             let mut glue_line = il.clone();
             if glue_line.contains(" E") {
@@ -764,21 +784,18 @@ pub(crate) fn emit_glue_block(
 
         let seg_start_cmd = find_seg_start_cmd(seg);
 
-        let start_lifted = false;
+        // 回位结束时笔**实际**在哪一格（喷嘴 Z）。发射层据此判断要不要再抬。
+        let land_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
+        let mut start_z = land_z;
         if !seg_start_cmd.is_empty() {
             let repos_cmd = strip_z_and_e(&seg_start_cmd);
             /*
-             * 段首那一句如果是**空走**，说明这一段的第一个动作是「跳到某处」，
-             * 而不是「就在起点涂」。此时回位不该先落一次笔 —— 落了又立刻为同一次
-             * 跳转抬起来，就是成品里「点一下又抬」的来源（一段一处）。
+             * 段首那一句如果是**空走**，说明这一段的第一个动作是「跳到某处」而不是
+             * 「就在起点涂」。此时回位不该先落一次笔：落了又立刻为同一次跳转抬起，
+             * 就是成品里「点一下又抬」的来源（一段一处，实测 135 处）。
              * 保持抬着交给 `write_glue_lines`，由它在真正的涂胶行之前落。
              */
-            /*
-             * 2026-11-03 第一阶段**不启用**「段首空走就不落笔」：它会让每一层的涂胶块
-             * 都少一对 Z、golden 全动，而第一阶段的验收口径是「不改跨特征行为、不动
-             * golden」。这一格留给第二阶段（笔画分段时一起做），现在恒为 false。
-             */
-            let _starts_with_travel = is_travel_line(seg_start_cmd.trim());
+            let starts_with_jump = is_travel_line(seg_start_cmd.trim());
             if seg_idx == 0 {
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -793,7 +810,9 @@ pub(crate) fn emit_glue_block(
                     ir_data,
                 )?;
                 sink.push_str(&offset_result);
-                if !start_lifted {
+                if starts_with_jump {
+                    start_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Travel);
+                } else {
                     sink.push_str(&format!(
                         "G1 Z{}",
                         format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
@@ -823,14 +842,20 @@ pub(crate) fn emit_glue_block(
                     ir_data,
                 )?;
                 sink.push_str(&offset_result);
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
-                ));
-                sink.push_str(&format!(
-                    "G1 F{}",
-                    format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
-                ));
+                if starts_with_jump {
+                    start_z = glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop);
+                } else {
+                    sink.push_str(&format!(
+                        "G1 Z{}",
+                        format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
+                    ));
+                    sink.push_str(&format!(
+                        "G1 F{}",
+                        format_speed(
+                            ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor
+                        )
+                    ));
+                }
             } else {
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -1017,7 +1042,7 @@ pub(crate) fn emit_glue_block(
             ir_data,
             current_layer_height,
             last_layer_height,
-            start_lifted,
+            start_z,
         )?;
 
         for pass_idx in 1..ir_data.glue.pass_count {
@@ -1072,13 +1097,14 @@ pub(crate) fn emit_glue_block(
                     format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
                 ));
             }
+            // 多遍涂胶：每遍都从落笔开始（Q7：第二阶段之前不改这个语义）
             write_glue_lines(
                 sink,
                 &mut seg_owned,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
-                false,
+                glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed),
             )?;
         }
 
@@ -1229,13 +1255,14 @@ mod continuity_tests {
     fn emit(iface: &[String]) -> Vec<String> {
         let mut lines = iface.to_vec();
         let mut sink = LineSink { lines: Vec::new() };
+        let ir = test_ir();
         write_glue_lines(
             &mut sink,
             &mut lines,
-            &test_ir(),
+            &ir,
             LAYER_Z,
             LAST_LAYER_Z,
-            false,
+            glue_nozzle_z(&ir, LAST_LAYER_Z, PenZ::Landed),
         )
         .expect("write_glue_lines 失败");
         sink.lines
