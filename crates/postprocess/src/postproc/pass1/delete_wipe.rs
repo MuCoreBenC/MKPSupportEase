@@ -131,6 +131,17 @@ pub(crate) fn delete_wipe(iface: &[String]) -> Vec<String> {
                 result.push(iface[i].clone());
                 i += 1;
                 continue;
+            } else if (trimmed.contains("G1 X") || trimmed.contains("G1 Y"))
+                && !trimmed.contains('E')
+            {
+                // 连续空走：切片器把一次长跳转拆成多条首尾相接的空走。旧实现只留
+                // WIPE_END 后第一条、其余静默丢弃，下一条涂胶行便从「第一条的终点」
+                // 直飞自己的终点 —— 这段位移落在落笔高度，笔尖压着模型表面走
+                // （2026-11-03：真实件 78 处，最长 65mm）。几何必须保留，Z 由发射
+                // 层按笔尖净空统一给。
+                result.push(strip_z_from_line(&trimmed));
+                i += 1;
+                continue;
             } else {
                 i += 1;
                 continue;
@@ -234,6 +245,13 @@ pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
                 continue;
             } else if trimmed.starts_with("M204") {
                 result.push(iface[i].clone());
+                i += 1;
+                continue;
+            } else if (trimmed.contains("G1 X") || trimmed.contains("G1 Y"))
+                && !trimmed.contains('E')
+            {
+                // 同 `delete_wipe`：连续空走保留几何，抬升交给发射层
+                result.push(strip_z_from_line(&trimmed));
                 i += 1;
                 continue;
             } else {

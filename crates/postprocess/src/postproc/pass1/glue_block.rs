@@ -101,14 +101,55 @@ pub(crate) fn calc_glue_z(
     base_z + comp
 }
 
-/// `applyMicroLift`：段间跳转 / 支撑面微抬（pass1_emit.go:88）。
-fn apply_micro_lift(
+/// 笔的姿态。**所有** 涂胶高度都必须经过这里，避免同一公式散落成多份。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PenZ {
+    /// 段间跳转：笔尖离层顶 `inter_model_lift_height`
+    Hop,
+    /// 平飞 / 收笔 / 装笔：笔尖离层顶 `z_lift_height`（首层分支用 `_first_layers`，判据是层顶高度）
+    Travel,
+    /// 落笔：笔尖压进上一层 `glue_z_offset`
+    Landed,
+}
+
+/// 笔尖相对给定层顶的目标高度。
+///
+/// `Z_t = Z_n - offset_z`，`Z_n = 层顶 + offset_z + 净空` ⇒ `Z_t = 层顶 + 净空`。
+/// 净空与笔伸多长无关；界面上的「涂胶区域间 Z 轴抬升高度」就是这个净空。
+fn glue_pen_z(ir_data: &Ir, layer_z: f64, kind: PenZ) -> f64 {
+    let clearance = match kind {
+        PenZ::Hop => ir_data.glue.inter_model_lift_height,
+        PenZ::Travel => {
+            if layer_z < 3.0 {
+                ir_data.glue.z_lift_height_first_layers
+            } else {
+                ir_data.glue.z_lift_height
+            }
+        }
+        PenZ::Landed => ir_data.glue.z_offset,
+    };
+    layer_z + clearance
+}
+
+/// 喷嘴（G-code 里的 Z）目标高度 = 笔尖高度 + 笔的机械偏移。
+fn glue_nozzle_z(ir_data: &Ir, layer_z: f64, kind: PenZ) -> f64 {
+    glue_pen_z(ir_data, layer_z, kind) + ir_data.toolhead.z_offset
+}
+
+/// 一段跳转：抬一次 → 走完整段空走 → 只在涂胶行之前落一次（`pass1_emit.go:88`）。
+///
+/// 切片器在长跳转上会把移动拆成**多条首尾相接的空走**（实测最多两条，都带 Z）。
+/// 旧实现只把标记后**紧邻的一条**交出去，后面的空走要么被 `delete_wipe` 丢弃、
+/// 要么按涂胶线原样发出 —— 两者都会让笔在落笔高度飞过一段距离。
+/// 这里按「连续空走」整段抬着走完，返回第一条未消费的下标。
+fn emit_jump_run(
     sink: &mut LineSink,
-    jump_cmd: &str,
+    lines: &[String],
+    from: usize,
     ir_data: &Ir,
     current_layer_height: f64,
     last_layer_height: f64,
-) -> Result<(), PostprocError> {
+) -> Result<(usize, f64, f64), PostprocError> {
     let lift_height = ir_data.glue.inter_model_lift_height;
     sink.push_str(&format!(
         "G1 F{}",
@@ -116,26 +157,92 @@ fn apply_micro_lift(
     ));
     sink.push_str(&format!(
         "G1 Z{}",
-        format_z(current_layer_height + ir_data.toolhead.z_offset + lift_height)
+        format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
     ));
-    let processed = crate::postproc::offset::process_gcode_offset(
-        jump_cmd,
-        ir_data.toolhead.x_offset,
-        ir_data.toolhead.y_offset,
-        ir_data.toolhead.z_offset + lift_height,
-        crate::gcode::OffsetMode::Normal,
-        ir_data,
-    )?;
-    sink.push_str(&processed);
+
+    let mut i = from;
+    let mut moved = 0usize;
+    let mut last = (f64::NAN, f64::NAN);
+    while i < lines.len() {
+        let tl = lines[i].trim();
+        if !is_travel_line(tl) {
+            break;
+        }
+        let jump_cmd = strip_z_and_e(tl);
+        let processed = crate::postproc::offset::process_gcode_offset(
+            &jump_cmd,
+            ir_data.toolhead.x_offset,
+            ir_data.toolhead.y_offset,
+            ir_data.toolhead.z_offset + lift_height,
+            crate::gcode::OffsetMode::Normal,
+            ir_data,
+        )?;
+        sink.push_str(&processed);
+        let (lx, ly, ok) = parse_xy_from_g1(&jump_cmd);
+        if ok {
+            if jump_cmd.contains('X') {
+                last.0 = lx;
+            }
+            if jump_cmd.contains('Y') {
+                last.1 = ly;
+            }
+        }
+        moved += 1;
+        i += 1;
+    }
+    if moved == 0 {
+        // 标记后面不是空走（少见）：退回「一条」的旧行为，别把涂胶行吞掉
+        let jump_cmd = strip_z_and_e(lines[from].trim());
+        let processed = crate::postproc::offset::process_gcode_offset(
+            &jump_cmd,
+            ir_data.toolhead.x_offset,
+            ir_data.toolhead.y_offset,
+            ir_data.toolhead.z_offset + lift_height,
+            crate::gcode::OffsetMode::Normal,
+            ir_data,
+        )?;
+        sink.push_str(&processed);
+        i = from + 1;
+    }
+
     sink.push_str(&format!(
         "G1 Z{}",
-        format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
+        format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
     ));
     sink.push_str(&format!(
         "G1 F{}",
         format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
     ));
-    Ok(())
+    Ok((i, last.0, last.1))
+}
+
+/// 这一段连续空走是否真的把笔挪了位置（零长度重复句不算）。
+fn travel_run_moves(lines: &[String], from: usize, cur_x: f64, cur_y: f64) -> bool {
+    let (mut x, mut y) = (cur_x, cur_y);
+    let mut i = from;
+    while i < lines.len() {
+        let tl = lines[i].trim();
+        if !is_travel_line(tl) {
+            break;
+        }
+        let (nx, ny, ok) = parse_xy_from_g1(&strip_z_and_e(tl));
+        if ok {
+            if tl.contains('X') {
+                x = nx;
+            }
+            if tl.contains('Y') {
+                y = ny;
+            }
+        }
+        i += 1;
+    }
+    (x - cur_x).abs() > 1e-9 || (y - cur_y).abs() > 1e-9
+}
+
+/// 只移动不挤出的一行（空走）。判据是语法：`G1` + 有 X/Y + 没有 `E`。
+fn is_travel_line(line: &str) -> bool {
+    let code = line.split(';').next().unwrap_or("").trim();
+    code.starts_with("G1 ") && (code.contains('X') || code.contains('Y')) && !code.contains(" E")
 }
 
 /// `writeGlueLines`（pass1_emit.go:120）：发射一个段的涂胶移动。
@@ -216,9 +323,22 @@ fn write_glue_lines(
         }
     }
 
-    // prevX/prevY 维护当前涂胶笔位置（G1 可能只含单轴）
+    // prevX/prevY 维护笔当前所在点（G1 可能只含单轴）。段首由 `emit_glue_block`
+    // 回位并落笔到段起点，所以起点取 iface 里第一处 XY 的落点 —— 否则那句与回位
+    // 重复的零长度空走会被误判成「需要抬一次」。
     let mut prev_x = 0.0;
     let mut prev_y = 0.0;
+    for l in lines.iter() {
+        let t = l.trim();
+        if is_travel_line(t) || (t.starts_with("G1 ") && t.contains(" E")) {
+            let (x, y, ok) = parse_xy_from_g1(t);
+            if ok {
+                prev_x = x;
+                prev_y = y;
+            }
+            break;
+        }
+    }
 
     let mut idx = 0usize;
     while idx < lines.len() {
@@ -235,51 +355,17 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let nsi = next_start_idx as usize;
-            if ir_data.glue.inter_model_lift_height > 0.0 {
-                sink.push_str(&format!(
-                    "G1 F{}",
-                    format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
-                ));
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(
-                        current_layer_height
-                            + ir_data.toolhead.z_offset
-                            + ir_data.glue.inter_model_lift_height
-                    )
-                ));
-                let jump_cmd = strip_z_and_e(lines[nsi].trim());
-                let processed = crate::postproc::offset::process_gcode_offset(
-                    &jump_cmd,
-                    ir_data.toolhead.x_offset,
-                    ir_data.toolhead.y_offset,
-                    ir_data.toolhead.z_offset + ir_data.glue.inter_model_lift_height,
-                    crate::gcode::OffsetMode::Normal,
-                    ir_data,
-                )?;
-                sink.push_str(&processed);
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
-                ));
-                sink.push_str(&format!(
-                    "G1 F{}",
-                    format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
-                ));
-            } else {
-                let jump_cmd = strip_z_and_e(lines[nsi].trim());
-                if jump_cmd.contains('X') || jump_cmd.contains('Y') {
-                    apply_micro_lift(
-                        sink,
-                        &jump_cmd,
-                        ir_data,
-                        current_layer_height,
-                        last_layer_height,
-                    )?;
-                }
-            }
-            idx = nsi + 1;
+            let (next, lx, ly) = emit_jump_run(
+                sink,
+                lines,
+                next_start_idx as usize,
+                ir_data,
+                current_layer_height,
+                last_layer_height,
+            )?;
+            prev_x = lx;
+            prev_y = ly;
+            idx = next;
             continue;
         }
         if il.contains(MARKER_ZJUMP_INTERNAL) {
@@ -298,18 +384,17 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let nsi = next_start_idx as usize;
-            let jump_cmd = strip_z_and_e(lines[nsi].trim());
-            if jump_cmd.contains('X') || jump_cmd.contains('Y') {
-                apply_micro_lift(
-                    sink,
-                    &jump_cmd,
-                    ir_data,
-                    current_layer_height,
-                    last_layer_height,
-                )?;
-            }
-            idx = nsi + 1;
+            let (next, lx, ly) = emit_jump_run(
+                sink,
+                lines,
+                next_start_idx as usize,
+                ir_data,
+                current_layer_height,
+                last_layer_height,
+            )?;
+            prev_x = lx;
+            prev_y = ly;
+            idx = next;
             continue;
         }
         if il.contains(MARKER_MICRO_LIFT) {
@@ -324,18 +409,32 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let nsi = next_start_idx as usize;
-            let jump_cmd = strip_z_and_e(lines[nsi].trim());
-            if jump_cmd.contains('X') || jump_cmd.contains('Y') {
-                apply_micro_lift(
-                    sink,
-                    &jump_cmd,
-                    ir_data,
-                    current_layer_height,
-                    last_layer_height,
-                )?;
-            }
-            idx = nsi + 1;
+            let (next, lx, ly) = emit_jump_run(
+                sink,
+                lines,
+                next_start_idx as usize,
+                ir_data,
+                current_layer_height,
+                last_layer_height,
+            )?;
+            prev_x = lx;
+            prev_y = ly;
+            idx = next;
+            continue;
+        }
+        if is_travel_line(&il) && travel_run_moves(lines, idx, prev_x, prev_y) {
+            // 笔还在落笔状态而下一段是空走 —— 先抬起来再走（同标记分支的抬法）
+            let (next, lx, ly) = emit_jump_run(
+                sink,
+                lines,
+                idx,
+                ir_data,
+                current_layer_height,
+                last_layer_height,
+            )?;
+            prev_x = lx;
+            prev_y = ly;
+            idx = next;
             continue;
         }
         if il.starts_with("G1 ") && !il.contains("G1 F") {
@@ -409,12 +508,7 @@ pub(crate) fn custom_unmount_gcode_has_extrude(ir_data: &Ir) -> bool {
 /// 与笔伸多长无关；与 RiseNozzle / GlueEnd 同公式、同分支，避免出现两套基准。
 /// `< 3.0` 的判据是**层顶高度**，不是层序号。
 fn extended_travel_z(ir_data: &Ir, layer_z: f64) -> f64 {
-    let lift_height = if layer_z < 3.0 {
-        ir_data.glue.z_lift_height_first_layers
-    } else {
-        ir_data.glue.z_lift_height
-    };
-    layer_z + ir_data.toolhead.z_offset + lift_height
+    glue_nozzle_z(ir_data, layer_z, PenZ::Travel)
 }
 
 /// `mountToolhead`（glue_block.go:376）：custom_mount_gcode 切换下笔。
@@ -618,7 +712,7 @@ pub(crate) fn emit_glue_block(
                 sink.push_str(&offset_result);
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
+                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
                 ));
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -631,11 +725,7 @@ pub(crate) fn emit_glue_block(
                 ));
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(
-                        current_layer_height
-                            + ir_data.toolhead.z_offset
-                            + ir_data.glue.inter_model_lift_height
-                    )
+                    format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
                 ));
                 let offset_result = crate::postproc::offset::process_gcode_offset(
                     &repos_cmd,
@@ -648,7 +738,7 @@ pub(crate) fn emit_glue_block(
                 sink.push_str(&offset_result);
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
+                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
                 ));
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -789,11 +879,7 @@ pub(crate) fn emit_glue_block(
             if ir_data.glue.inter_model_lift_height > 0.0 {
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(
-                        current_layer_height
-                            + ir_data.toolhead.z_offset
-                            + ir_data.glue.inter_model_lift_height
-                    )
+                    format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
                 ));
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -810,7 +896,7 @@ pub(crate) fn emit_glue_block(
                 sink.push_str(&offset_result);
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
+                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
                 ));
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -860,11 +946,7 @@ pub(crate) fn emit_glue_block(
                 ));
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(
-                        current_layer_height
-                            + ir_data.toolhead.z_offset
-                            + ir_data.glue.inter_model_lift_height
-                    )
+                    format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
                 ));
                 let offset_result = crate::postproc::offset::process_gcode_offset(
                     &inpos_cmd,
@@ -877,7 +959,7 @@ pub(crate) fn emit_glue_block(
                 sink.push_str(&offset_result);
                 sink.push_str(&format!(
                     "G1 Z{}",
-                    format_z(last_layer_height + ir_data.toolhead.z_offset + ir_data.glue.z_offset)
+                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
                 ));
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -989,4 +1071,204 @@ pub(crate) fn emit_glue_block(
     }
 
     Ok(())
+}
+
+/// 涂胶路径连续性回归（2026-11-03）。
+///
+/// 病灶：切片器在两段涂胶之间写的是「空走1（带 Z）+ 空走2（带 Z）+ 一条微小
+/// 涂胶行（离空走2 终点 0.15~0.4mm）」。`delete_wipe` 只保留 `WIPE_END` 之后
+/// 第一条空走，第二条被静默丢弃；发射层又只把标记后**紧邻的一条**交给抬升。
+/// 于是涂胶行从空走1 的终点直飞自己的终点 —— 这段位移在落笔高度完成，笔尖
+/// 压着模型表面走（真实导出件里最长 65mm，打印时撞件）。
+///
+/// 判据不看距离：只要求「两条空走都在抬升高度上走完，之后才落笔」。
+#[cfg(test)]
+mod continuity_tests {
+    use super::*;
+    use crate::postproc::pass1::delete_wipe::{delete_wipe, delete_wipe_continuous};
+
+    const LAYER_Z: f64 = 40.84;
+    const LAST_LAYER_Z: f64 = 40.68;
+
+    fn test_ir() -> Ir {
+        let mut ir = Ir::default();
+        ir.machine.nozzle_diameter = 0.4;
+        ir.machine.travel_speed = 700.0;
+        ir.machine.max_x = 256.0;
+        ir.machine.max_y = 256.0;
+        ir.machine.glue_max_x = 256.0;
+        ir.machine.glue_max_y = 256.0;
+        ir.machine.min_support_interface_enabled = true;
+        ir.toolhead.x_offset = -0.7;
+        ir.toolhead.y_offset = 24.4;
+        ir.toolhead.z_offset = 3.95;
+        ir.toolhead.glue_z_offset = -0.05;
+        ir.glue.z_offset = -0.05;
+        ir.glue.z_lift_height = 5.0;
+        ir.glue.z_lift_height_first_layers = 6.0;
+        ir.glue.inter_model_lift_height = 2.0;
+        ir.machine.support_interface_speed = 70.0;
+        ir.machine.wall_print_speed = 200.0;
+        ir
+    }
+
+    /// 真实切片器（BambuStudio 02.08）在这类边界上的原样写法。
+    fn raw_iface() -> Vec<String> {
+        [
+            "; WIPE_END",
+            "G1 E-.04 F1800",
+            "M204 S10000",
+            "G1 X173.56 Y126.782 Z41.08 F42000",
+            "G1 X108.902 Y124.207 Z41.08",
+            "G1 Z40.68",
+            "G1 E.8 F1800",
+            "G1 X108.532 Y124.075 E.00154",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    fn hop_z() -> f64 {
+        LAYER_Z + 3.95 + 2.0
+    }
+
+    fn land_z() -> f64 {
+        LAST_LAYER_Z + 3.95 + -0.05
+    }
+
+    fn emit(iface: &[String]) -> Vec<String> {
+        let mut lines = iface.to_vec();
+        let mut sink = LineSink { lines: Vec::new() };
+        write_glue_lines(&mut sink, &mut lines, &test_ir(), LAYER_Z, LAST_LAYER_Z)
+            .expect("write_glue_lines 失败");
+        sink.lines
+    }
+
+    fn z_moves(out: &[String]) -> Vec<f64> {
+        out.iter()
+            .filter_map(|l| {
+                let (_, _, z) = parse_xy_from_g1(l.trim());
+                let _ = z;
+                if l.trim().starts_with("G1 Z") || l.trim().contains(" Z") {
+                    l.split_whitespace()
+                        .find_map(|t| t.strip_prefix('Z'))
+                        .and_then(|v| v.parse::<f64>().ok())
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn has_xy(out: &[String], x: f64, y: f64) -> bool {
+        out.iter().any(|l| {
+            let line = l.trim();
+            line.contains(&format!("X{x}")) && line.contains(&format!("Y{y}"))
+        })
+    }
+
+    /// 抬升 / 落笔各一次，且两条空走都在抬升高度上。
+    fn assert_single_lift_and_both_travels(iface: &[String]) {
+        let out = emit(iface);
+
+        assert!(
+            // 成品坐标 = 原始坐标 − (x_offset, y_offset)
+            has_xy(&out, 172.86, 151.182),
+            "空走1 丢了，输出：\n{}",
+            out.join("\n")
+        );
+        assert!(
+            has_xy(&out, 108.202, 148.607),
+            "空走2 被吞掉了 —— 涂胶行会从空走1 的终点直飞，落笔高度横移 \
+             （输出：\n{}\n）",
+            out.join("\n")
+        );
+
+        let zs = z_moves(&out);
+        let ups = zs.iter().filter(|z| (**z - hop_z()).abs() < 1e-6).count();
+        let downs = zs.iter().filter(|z| (**z - land_z()).abs() < 1e-6).count();
+        assert_eq!(
+            ups,
+            1,
+            "抬升应恰好 1 次，实际 Z 序列 {zs:?}（hop={}）",
+            hop_z()
+        );
+        assert_eq!(
+            downs,
+            1,
+            "落笔应恰好 1 次，实际 Z 序列 {zs:?}（land={}）",
+            land_z()
+        );
+
+        // 两条空走之间不许落笔：落笔只能发生在最后一条涂胶行之前
+        let land_at = out
+            .iter()
+            .position(|l| {
+                l.split_whitespace()
+                    .find_map(|t| t.strip_prefix('Z'))
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .is_some_and(|z| (z - land_z()).abs() < 1e-6)
+            })
+            .expect("找不到落笔指令");
+        let second_travel = out
+            .iter()
+            .position(|l| l.contains("108.202"))
+            .expect("找不到空走2");
+        assert!(
+            second_travel < land_at,
+            "落笔早于空走2 —— 空走2 是在落笔高度走的，输出：\n{}",
+            out.join("\n")
+        );
+    }
+
+    #[test]
+    fn two_consecutive_travels_lift_once() {
+        assert_single_lift_and_both_travels(&delete_wipe(&raw_iface()));
+    }
+
+    #[test]
+    fn two_consecutive_travels_lift_once_continuous() {
+        assert_single_lift_and_both_travels(&delete_wipe_continuous(&raw_iface()));
+    }
+
+    /// 只有一条空走时，输出必须与修复前逐字相同（防止改动波及正常涂胶）。
+    fn single_travel_iface() -> Vec<String> {
+        [
+            "; WIPE_END",
+            "G1 E-.04 F1800",
+            "M204 S10000",
+            "G1 X173.56 Y126.782 Z41.08 F42000",
+            "G1 Z40.68",
+            "G1 E.8 F1800",
+            "G1 X173.1 Y126.4 E.00154",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    #[test]
+    fn single_travel_keeps_previous_behaviour() {
+        let out = emit(&delete_wipe(&single_travel_iface()));
+        let zs = z_moves(&out);
+        assert_eq!(
+            zs.iter().filter(|z| (**z - hop_z()).abs() < 1e-6).count(),
+            1,
+            "单条空走仍应抬一次，输出：\n{}",
+            out.join("\n")
+        );
+        assert_eq!(
+            zs.iter().filter(|z| (**z - land_z()).abs() < 1e-6).count(),
+            1,
+            "单条空走仍应落一次，输出：\n{}",
+            out.join("\n")
+        );
+        // 涂胶行终点 173.1 − x_offset 0.7 = 172.4
+        assert!(
+            out.iter().any(|l| l.contains("X172.4")),
+            "涂胶行丢了，输出：\n{}",
+            out.join("\n")
+        );
+    }
 }

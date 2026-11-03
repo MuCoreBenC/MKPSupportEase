@@ -142,13 +142,24 @@ fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_swap_travel_blocks(bytes)
 }
 
+/// 剔除涂胶段内的抬笔/落笔与走速（2026-11-03 起由发射层按笔尖净空给出，
+/// 与 `mkp-sr` 参考必然不同）；XY 与 E 仍要求逐字节一致。
+fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_glue_section_vertical_moves(bytes)
+}
+
+/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去标记行。
+fn normalize(bytes: &[u8]) -> Vec<u8> {
+    strip_mkp_marks(&strip_glue_section_vertical_moves(
+        &strip_swap_travel_blocks(bytes),
+    ))
+}
+
 /// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。
 #[test]
 fn output_is_byte_identical_to_the_mkp_sr_reference() {
-    let got = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read("same", &[])));
-    let want = strip_swap_travel_blocks(
-        &std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"),
-    );
+    let got = normalize(&run_and_read("same", &[]));
+    let want = normalize(&std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"));
 
     // 先报长度，再逐字节定位——直接 assert_eq! 两个 668KB 的 Vec 会刷屏。
     assert_eq!(
@@ -189,14 +200,9 @@ fn the_reference_is_not_just_a_copy_of_the_input() {
 /// 上一条判据就只是在比较「两个固定文件」。
 #[test]
 fn the_byte_comparison_is_sensitive_to_the_config() {
-    let baseline = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read("baseline", &[])));
-    let perturbed = strip_swap_travel_blocks(&strip_mkp_marks(&run_and_read(
-        "perturbed",
-        &["--set", "Glue.PassCount=2"],
-    )));
-    let want = strip_swap_travel_blocks(
-        &std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"),
-    );
+    let baseline = normalize(&run_and_read("baseline", &[]));
+    let perturbed = normalize(&run_and_read("perturbed", &["--set", "Glue.PassCount=2"]));
+    let want = normalize(&std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"));
 
     // 用 assert!(a == b) 而不是 assert_eq!：后者失败时会把两个 668KB 的 Vec 原样打出来
     // （实测 5.2MB 输出，真正的原因反而被埋了）。
