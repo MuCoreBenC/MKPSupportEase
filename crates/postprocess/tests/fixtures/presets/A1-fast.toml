@@ -1,6 +1,6 @@
 # machine: A1
 # variant: fast
-# generated_at: 2026-11-01T14:58:37+08:00
+# generated_at: 2026-11-03T12:34:19+08:00
 
 [toolhead]
 # 自定义工具头获取 G-code
@@ -35,9 +35,9 @@ glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
 MKP_retract = 0 # 回抽长度(mm)
 offset_x = -0.7 # 笔尖偏移
 offset_y = 26.3 # 笔尖偏移
-offset_z = 3.9 # 笔尖偏移
+offset_z = 3.85 # 笔尖偏移
 prime_length = 100 # 预涂长度(mm) 范围:0~500
-speed_limit = 70 # 涂胶速度限制 (mm/s)
+speed_limit = 60 # 涂胶速度限制 (mm/s)
 
 [wiping]
 disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)

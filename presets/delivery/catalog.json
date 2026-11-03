@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "c03b5304a766f173",
+  "revision": "c362da385ca74d94",
   "publishedAt": "2026-10-31T12:17:42Z",
   "brands": [
     {
@@ -1104,9 +1104,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
           "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
           "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
           "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+          "A1_MINI": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
           "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
           "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
           "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
@@ -1160,9 +1162,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
           "A1:FAST": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
           "A1:FASTV3.3": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X273 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
           "A1:STANDARD": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1_MINI": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
           "A1_MINI:FAST": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
           "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
           "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
@@ -1174,6 +1178,395 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.first_pen_revitalization_flag",
+        "configKey": "FirstPenRevitalizationFlag",
+        "tomlKey": "first_pen_revitalization_flag",
+        "jsonKey": "first_pen_revitalization_flag",
+        "label": "首笔活化",
+        "labelEn": "First-pen priming",
+        "labelJa": "初回筆の活性化",
+        "labelTw": "首筆活化",
+        "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效",
+        "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled",
+        "descJa": "ワイプタワーの 1 層目で塗布しながらペンを活性化します。ワイプタワー有効時のみ働きます",
+        "descTw": "在擦拭塔的首層塗膠時活化膠筆出膠，僅在開啟擦拭塔時有效",
+        "tomlComment": "首笔活化标志",
+        "valueType": "bool",
+        "uiComponent": "switch",
+        "defaultValue": false,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": null,
+        "max": null,
+        "step": null,
+        "unit": null,
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [
+          {
+            "label": "关闭",
+            "labelEn": "Off",
+            "labelJa": "オフ",
+            "labelTw": "關閉",
+            "value": "off",
+            "deprecated": false
+          },
+          {
+            "label": "开启",
+            "labelEn": "On",
+            "labelJa": "オン",
+            "labelTw": "開啟",
+            "value": "on",
+            "deprecated": false
+          }
+        ],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.glue_z_offset",
+        "configKey": "GlueZOffset",
+        "tomlKey": "glue_z_offset",
+        "jsonKey": "glue_z_offset",
+        "label": "涂胶Z偏移",
+        "labelEn": "Glue Z offset",
+        "labelJa": "塗布 Z オフセット",
+        "labelTw": "塗膠 Z 偏移",
+        "desc": "涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面",
+        "descEn": "Extra Z offset while gluing; negative brings the pen closer to the model surface",
+        "descJa": "塗布時の Z 軸の追加オフセット。負値にするとペン先がモデル表面に近づきます",
+        "descTw": "塗膠時 Z 軸額外偏移，負值使筆尖更靠近模型表面",
+        "tomlComment": "涂胶Z偏移(mm) 范围:-5~2",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": -0.05,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.0,
+          "sectionId": "glue_params"
+        },
+        "min": -1.0,
+        "max": 5.0,
+        "step": 0.01,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.offset.x",
+        "configKey": "XOffset",
+        "tomlKey": "offset_x",
+        "jsonKey": "x",
+        "label": "X 轴偏移",
+        "labelEn": "X offset",
+        "labelJa": "X 軸オフセット",
+        "labelTw": "X 軸偏移",
+        "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
+        "descEn": "X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right",
+        "descJa": "ノズルに対する塗布ペン先の X 方向オフセット（mm）。負値は左、正値は右",
+        "descTw": "塗膠筆尖相對噴嘴的 X 方向偏移量（mm），負值向左正值向右",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 149.0,
+          "sectionId": "space_offset"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": -0.7,
+          "A1:FASTV3.3": -0.7,
+          "A1:STANDARD": -1.0,
+          "A1_MINI:FAST": -0.5,
+          "A1_MINI:FASTV3.3": -0.9,
+          "A1_MINI:STANDARD": -0.3,
+          "P1S": -25.9,
+          "P1S:LITE": -25.9,
+          "P2S": -25.9,
+          "P2S:STANDARD": -25.9,
+          "X1C": -25.9,
+          "X1C:LITE": -25.9
+        },
+        "machineMinVariants": {
+          "P1S:LITE": -50.0,
+          "P2S:STANDARD": -50.0,
+          "X1C:LITE": -50.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 50.0,
+          "P2S:STANDARD": 50.0,
+          "X1C:LITE": 50.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": {
+          "subfieldsOrder": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      },
+      {
+        "key": "toolhead.offset.y",
+        "configKey": "YOffset",
+        "tomlKey": "offset_y",
+        "jsonKey": "y",
+        "label": "Y 轴偏移",
+        "labelEn": "Y offset",
+        "labelJa": "Y 軸オフセット",
+        "labelTw": "Y 軸偏移",
+        "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，负值向前正值向后",
+        "descEn": "Y offset of the glue pen tip relative to the nozzle in mm; negative moves it forward, positive moves it backward",
+        "descJa": "ノズルに対する塗布ペン先の Y 方向オフセット（mm）。負の値は前方向、正の値は後ろ方向へ移動します",
+        "descTw": "塗膠筆尖相對噴嘴的 Y 方向偏移量（mm），負值向前、正值向後",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 150.0,
+          "sectionId": "space_offset"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 26.3,
+          "A1:FASTV3.3": 24.4,
+          "A1:STANDARD": 18.6,
+          "A1_MINI:FAST": 24.0,
+          "A1_MINI:FASTV3.3": 23.0,
+          "A1_MINI:STANDARD": 18.1,
+          "P1S": 14.0,
+          "P1S:LITE": 14.0,
+          "P2S": 14.0,
+          "P2S:STANDARD": 14.0,
+          "X1C": 14.0,
+          "X1C:LITE": 14.0
+        },
+        "machineMinVariants": {
+          "P1S:LITE": -50.0,
+          "P2S:STANDARD": -50.0,
+          "X1C:LITE": -50.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 50.0,
+          "P2S:STANDARD": 50.0,
+          "X1C:LITE": 50.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.offset.z",
+        "configKey": "ZOffset",
+        "tomlKey": "offset_z",
+        "jsonKey": "z",
+        "label": "Z 轴偏移",
+        "labelEn": "Z offset",
+        "labelJa": "Z 軸オフセット",
+        "labelTw": "Z 軸偏移",
+        "desc": "涂胶笔尖相对喷嘴的 Z 方向偏移量 (mm)，校准的时候左侧为正（向上抬）右侧为负（向下压），一般不允许小于0。",
+        "descEn": "Z offset of the glue pen tip relative to the nozzle in mm. During calibration the left side is positive (lifted up) and the right side is negative (pressed down); values below 0 are normally not allowed",
+        "descJa": "ノズルに対する塗布ペン先の Z 方向オフセット（mm）。キャリブレーション時は左側が正（上方向）、右側が負（下方向）となり、通常 0 未満は許可されません",
+        "descTw": "塗膠筆尖相對噴嘴的 Z 方向偏移量（mm），校準時左側為正（向上抬）、右側為負（向下壓），一般不允許小於 0",
+        "tomlComment": "笔尖偏移",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 4.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 200.0,
+          "sectionId": "space_offset"
+        },
+        "min": 0.5,
+        "max": 20.0,
+        "step": 0.05,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1": 3.85,
+          "A1_MINI": 3.9,
+          "A1_MINI:FAST": 3.9,
+          "A1_MINI:FASTV3.3": 3.9,
+          "A1_MINI:STANDARD": 3.9,
+          "P1S": 1.1,
+          "P1S:LITE": 1.1,
+          "P2S": 1.1,
+          "P2S:STANDARD": 1.1,
+          "X1C": 1.1,
+          "X1C:LITE": 1.1
+        },
+        "machineMinVariants": {
+          "P1S:LITE": 0.0,
+          "P2S:STANDARD": 0.0,
+          "X1C:LITE": 0.0
+        },
+        "machineMaxVariants": {
+          "P1S:LITE": 20.0,
+          "P2S:STANDARD": 20.0,
+          "X1C:LITE": 20.0
+        },
+        "mergeGroup": "offset",
+        "pinned": true,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.prime_length",
+        "configKey": "PrimeLength",
+        "tomlKey": "prime_length",
+        "jsonKey": "prime_length",
+        "label": "润笔路径长度",
+        "labelEn": "Priming path length",
+        "labelJa": "プライミング経路長",
+        "labelTw": "潤筆路徑長度",
+        "desc": "长时间未涂胶后重新润笔的路径长度，确保胶水充分流出",
+        "descEn": "Path length of a re-prime after a long time without gluing, ensuring the glue flows",
+        "descJa": "長時間塗布しなかった後に再プライミングする経路長。接着剤が十分に出るようにします",
+        "descTw": "長時間未塗膠後重新潤筆的路徑長度，確保膠水充分流出",
+        "tomlComment": "预涂长度(mm) 范围:0~500",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 100.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 2.0,
+          "sectionId": "pen_revitalization"
+        },
+        "min": 0.0,
+        "max": 500.0,
+        "step": 10.0,
+        "unit": "mm",
+        "parentKey": "wiping.prime_enabled",
+        "showWhen": {
+          "key": "wiping.prime_enabled",
+          "op": "eq",
+          "value": true
+        },
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.speed_limit",
+        "configKey": "MaxSpeed",
+        "tomlKey": "speed_limit",
+        "jsonKey": "speed_limit",
+        "label": "涂胶速度限制",
+        "labelEn": "Glue speed limit",
+        "labelJa": "塗布速度の上限",
+        "labelTw": "塗膠速度限制",
+        "desc": "涂胶笔的移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步",
+        "descEn": "Travel speed of the glue pen in mm/s; too high may cause uneven glue application or lost steps",
+        "descJa": "塗布ペンの移動速度（mm/s）。高すぎると塗布ムラや脱調が発生することがあります",
+        "descTw": "塗膠筆的移動速度（mm/s），過高可能導致塗膠不均勻或丟步",
+        "tomlComment": "涂胶速度限制 (mm/s)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 70.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 100.0,
+          "sectionId": "motion"
+        },
+        "min": 10.0,
+        "max": 500.0,
+        "step": 5.0,
+        "unit": "mm/s",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {
+          "A1": 60.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": true,
         "serialization": null
       },
       {
@@ -1224,14 +1617,14 @@
         "configKey": "DisableFrontCoverAlarm",
         "tomlKey": "disable_front_cover_alarm",
         "jsonKey": "disable_front_cover_alarm",
-        "label": "强制关闭前盖脱落报警",
-        "labelEn": "Force-off front cover alarm",
-        "labelJa": "前面カバー警告を強制オフ",
-        "labelTw": "強制關閉前蓋警報",
-        "desc": "开启后将强制关闭前盖脱落报警。仅对P1系列机型有效",
-        "descEn": "Forces the front cover detached alarm off. Only applies to the P1 series",
-        "descJa": "前面カバー取り外しの警告を強制的にオフにします。P1 シリーズのみ有効です",
-        "descTw": "強制關閉前蓋拆卸警報。僅適用於 P1 系列",
+        "label": "强制关闭前盖脱落报警（有效性存疑）",
+        "labelEn": "Force-disabling the front cover alarm (unverified)",
+        "labelJa": "前面カバー脱落警告の強制オフ（有効性は未確認）",
+        "labelTw": "強制關閉前蓋脫落警報（有效性存疑）",
+        "desc": "开启后将强制关闭前盖脱落报警。仅对X1、P1系列机型有效，民间流传方法，有效性存疑。",
+        "descEn": "Turns off the front cover detached alarm in the generated G-code. Only takes effect on the X1 and P1 series. This is a community-known method whose effectiveness is unverified.",
+        "descJa": "有効にすると、前面カバー脱落警告を強制的にオフにします。X1・P1 シリーズのみ有効です。コミュニティで知られている方法で、有効性は未確認です。",
+        "descTw": "開啟後將強制關閉前蓋脫落警報。僅對 X1、P1 系列機型有效，為社群流傳方法，有效性存疑。",
         "tomlComment": "关闭第三层裹头检测(A1/A1 mini)",
         "valueType": "bool",
         "uiComponent": "switch",
@@ -1620,63 +2013,6 @@
             "labelJa": "カスタム",
             "labelTw": "自訂",
             "value": "custom",
-            "deprecated": false
-          }
-        ],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "serialization": null
-      },
-      {
-        "key": "toolhead.first_pen_revitalization_flag",
-        "configKey": "FirstPenRevitalizationFlag",
-        "tomlKey": "first_pen_revitalization_flag",
-        "jsonKey": "first_pen_revitalization_flag",
-        "label": "首笔活化",
-        "labelEn": "First-pen priming",
-        "labelJa": "初回筆の活性化",
-        "labelTw": "首筆活化",
-        "desc": "在擦料塔的首层涂胶激活胶笔出胶，仅在开启擦料塔时有效",
-        "descEn": "Activates the glue pen while gluing the first layer of the wipe tower; only effective when the tower is enabled",
-        "descJa": "ワイプタワーの 1 層目で塗布しながらペンを活性化します。ワイプタワー有効時のみ働きます",
-        "descTw": "在擦拭塔的首層塗膠時活化膠筆出膠，僅在開啟擦拭塔時有效",
-        "tomlComment": "首笔活化标志",
-        "valueType": "bool",
-        "uiComponent": "switch",
-        "defaultValue": false,
-        "scope": "universal",
-        "section": "toolhead",
-        "layout": {
-          "order": 0.0,
-          "sectionId": "pen_revitalization"
-        },
-        "min": null,
-        "max": null,
-        "step": null,
-        "unit": null,
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [
-          {
-            "label": "关闭",
-            "labelEn": "Off",
-            "labelJa": "オフ",
-            "labelTw": "關閉",
-            "value": "off",
-            "deprecated": false
-          },
-          {
-            "label": "开启",
-            "labelEn": "On",
-            "labelJa": "オン",
-            "labelTw": "開啟",
-            "value": "on",
             "deprecated": false
           }
         ],
@@ -2348,86 +2684,6 @@
         "serialization": null
       },
       {
-        "key": "wiping.swap_hop_height",
-        "configKey": "SwapHopHeight",
-        "tomlKey": "swap_hop_height",
-        "jsonKey": "swap_hop_height",
-        "label": "换笔脱层高度",
-        "labelEn": "Pen swap hop height",
-        "labelJa": "ペン交換時の剥離高さ",
-        "labelTw": "換筆脫層高度",
-        "desc": "换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度",
-        "descEn": "How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height",
-        "descJa": "ペン交換時にノズルを印刷直後の面から離す高さ（z-hop）。この小さなスパイラル剥離だけに効き、ペンの持ち上げ高さとは別です",
-        "descTw": "換筆時噴嘴離開剛列印表面的高度（z-hop）。只影響那次小螺旋脫層，不是抬筆高度",
-        "tomlComment": "换笔脱层高度(mm) 范围:0.2~3",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 1.0,
-        "scope": "universal",
-        "section": "wiping",
-        "layout": {
-          "order": 2.0,
-          "sectionId": "z_lift"
-        },
-        "min": 0.2,
-        "max": 3.0,
-        "step": 0.1,
-        "unit": "mm",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "serialization": null
-      },
-      {
-        "key": "toolhead.glue_z_offset",
-        "configKey": "GlueZOffset",
-        "tomlKey": "glue_z_offset",
-        "jsonKey": "glue_z_offset",
-        "label": "涂胶Z偏移",
-        "labelEn": "Glue Z offset",
-        "labelJa": "塗布 Z オフセット",
-        "labelTw": "塗膠 Z 偏移",
-        "desc": "涂胶时Z轴额外偏移，负值使笔尖更靠近模型表面",
-        "descEn": "Extra Z offset while gluing; negative brings the pen closer to the model surface",
-        "descJa": "塗布時の Z 軸の追加オフセット。負値にするとペン先がモデル表面に近づきます",
-        "descTw": "塗膠時 Z 軸額外偏移，負值使筆尖更靠近模型表面",
-        "tomlComment": "涂胶Z偏移(mm) 范围:-5~2",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": -0.05,
-        "scope": "universal",
-        "section": "toolhead",
-        "layout": {
-          "order": 1.0,
-          "sectionId": "glue_params"
-        },
-        "min": -1.0,
-        "max": 5.0,
-        "step": 0.01,
-        "unit": "mm",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "serialization": null
-      },
-      {
         "key": "wiping.have_wiping_components",
         "configKey": "UseWipingTowers",
         "tomlKey": "have_wiping_components",
@@ -2436,10 +2692,10 @@
         "labelEn": "Wipe method",
         "labelJa": "ワイプ方式",
         "labelTw": "擦料方式",
-        "desc": "选择擦料方式：擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭使用打印机自带圆盘",
-        "descEn": "How to wipe: the wipe tower builds a tower at a fixed position; disc wiping uses the printer built-in disc",
-        "descJa": "ワイプ方法：ワイプタワーは固定位置に塔を建てます。ディスクワイプはプリンター内蔵のディスクを使います",
-        "descTw": "擦料方式：擦拭塔在固定位置建塔；圓盤擦拭使用印表機內建圓盤",
+        "desc": "擦料塔在指定位置生成塔体进行擦拭；圆盘擦拭为测试方案，禁用。",
+        "descEn": "Wipe method: the wipe tower builds a tower at a fixed position and wipes there; disc wiping is an experimental option and is disabled",
+        "descJa": "ワイプ方法：ワイプタワーは指定位置に塔を建てて拭き取ります。ディスクワイプは試験的な方式で、使用できません",
+        "descTw": "擦料方式：擦拭塔在指定位置建塔進行擦拭；圓盤擦拭為測試方案，已停用",
         "tomlComment": "使用擦嘴塔而非擦嘴组件",
         "valueType": "string",
         "uiComponent": "segmented",
@@ -2862,207 +3118,6 @@
         "serialization": null
       },
       {
-        "key": "toolhead.offset.x",
-        "configKey": "XOffset",
-        "tomlKey": "offset_x",
-        "jsonKey": "x",
-        "label": "X 轴偏移",
-        "labelEn": "X offset",
-        "labelJa": "X 軸オフセット",
-        "labelTw": "X 軸偏移",
-        "desc": "涂胶笔尖相对喷嘴的 X 方向偏移量 (mm)，负值向左正值向右",
-        "descEn": "X offset of the glue pen tip relative to the nozzle (mm); negative is left, positive is right",
-        "descJa": "ノズルに対する塗布ペン先の X 方向オフセット（mm）。負値は左、正値は右",
-        "descTw": "塗膠筆尖相對噴嘴的 X 方向偏移量（mm），負值向左正值向右",
-        "tomlComment": "笔尖偏移",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 0.0,
-        "scope": "machine_specific",
-        "section": "toolhead",
-        "layout": {
-          "order": 100.0,
-          "sectionId": "space_offset"
-        },
-        "min": -50.0,
-        "max": 50.0,
-        "step": 0.05,
-        "unit": "mm",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": "per_variant",
-        "machineFilter": [
-          "A1",
-          "A1_MINI",
-          "P1S",
-          "P2S",
-          "X1C"
-        ],
-        "deprecated": false,
-        "machineVariants": {
-          "A1:FAST": -0.7,
-          "A1:FASTV3.3": -0.7,
-          "A1:STANDARD": -1.0,
-          "A1_MINI:FAST": -0.5,
-          "A1_MINI:FASTV3.3": -0.9,
-          "A1_MINI:STANDARD": -0.3,
-          "P1S:LITE": -25.9,
-          "P2S:STANDARD": -25.9,
-          "X1C:LITE": -25.9
-        },
-        "machineMinVariants": {
-          "P1S:LITE": -50.0,
-          "P2S:STANDARD": -50.0,
-          "X1C:LITE": -50.0
-        },
-        "machineMaxVariants": {
-          "P1S:LITE": 50.0,
-          "P2S:STANDARD": 50.0,
-          "X1C:LITE": 50.0
-        },
-        "mergeGroup": "offset",
-        "pinned": true,
-        "serialization": {
-          "subfieldsOrder": [
-            "x",
-            "y",
-            "z"
-          ]
-        }
-      },
-      {
-        "key": "toolhead.offset.y",
-        "configKey": "YOffset",
-        "tomlKey": "offset_y",
-        "jsonKey": "y",
-        "label": "Y 轴偏移",
-        "labelEn": "Y offset",
-        "labelJa": "Y 軸オフセット",
-        "labelTw": "Y 軸偏移",
-        "desc": "涂胶笔尖相对喷嘴的 Y 方向偏移量 (mm)，根据实际机械结构校准",
-        "descEn": "Y offset of the glue pen tip relative to the nozzle (mm); calibrate against the real hardware",
-        "descJa": "ノズルに対する塗布ペン先の Y 方向オフセット（mm）。実際の機械構成に合わせて校正します",
-        "descTw": "塗膠筆尖相對噴嘴的 Y 方向偏移量（mm），根據實際機械結構校準",
-        "tomlComment": "笔尖偏移",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 0.0,
-        "scope": "machine_specific",
-        "section": "toolhead",
-        "layout": {
-          "order": 150.0,
-          "sectionId": "space_offset"
-        },
-        "min": -50.0,
-        "max": 50.0,
-        "step": 0.05,
-        "unit": "mm",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": "per_variant",
-        "machineFilter": [
-          "A1",
-          "A1_MINI",
-          "P1S",
-          "P2S",
-          "X1C"
-        ],
-        "deprecated": false,
-        "machineVariants": {
-          "A1:FAST": 26.3,
-          "A1:FASTV3.3": 24.4,
-          "A1:STANDARD": 18.6,
-          "A1_MINI:FAST": 24.0,
-          "A1_MINI:FASTV3.3": 23.0,
-          "A1_MINI:STANDARD": 18.1,
-          "P1S:LITE": 14.0,
-          "P2S:STANDARD": 14.0,
-          "X1C:LITE": 14.0
-        },
-        "machineMinVariants": {
-          "P1S:LITE": -50.0,
-          "P2S:STANDARD": -50.0,
-          "X1C:LITE": -50.0
-        },
-        "machineMaxVariants": {
-          "P1S:LITE": 50.0,
-          "P2S:STANDARD": 50.0,
-          "X1C:LITE": 50.0
-        },
-        "mergeGroup": "offset",
-        "pinned": true,
-        "serialization": null
-      },
-      {
-        "key": "toolhead.offset.z",
-        "configKey": "ZOffset",
-        "tomlKey": "offset_z",
-        "jsonKey": "z",
-        "label": "Z 轴偏移",
-        "labelEn": "Z offset",
-        "labelJa": "Z 軸オフセット",
-        "labelTw": "Z 軸偏移",
-        "desc": "涂胶笔尖相对喷嘴的高度偏移 (mm)，影响笔尖与模型的距离",
-        "descEn": "Height offset of the glue pen tip (mm); affects the distance between the pen and the model",
-        "descJa": "塗布ペン先の高さオフセット（mm）。ペン先とモデルの距離に影響します",
-        "descTw": "塗膠筆尖相對噴嘴的高度偏移（mm），影響筆尖與模型的距離",
-        "tomlComment": "笔尖偏移",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 4.0,
-        "scope": "machine_specific",
-        "section": "toolhead",
-        "layout": {
-          "order": 200.0,
-          "sectionId": "space_offset"
-        },
-        "min": 0.0,
-        "max": 20.0,
-        "step": 0.05,
-        "unit": "mm",
-        "parentKey": null,
-        "showWhen": null,
-        "choices": [],
-        "variantMode": "per_variant",
-        "machineFilter": [
-          "A1",
-          "A1_MINI",
-          "P1S",
-          "P2S",
-          "X1C"
-        ],
-        "deprecated": false,
-        "machineVariants": {
-          "A1:FAST": 3.9,
-          "A1:FASTV3.3": 3.9,
-          "A1:STANDARD": 3.9,
-          "A1_MINI:FAST": 3.9,
-          "A1_MINI:FASTV3.3": 3.9,
-          "A1_MINI:STANDARD": 3.9,
-          "P1S": 1.1,
-          "P1S:LITE": 1.1,
-          "P2S": 1.1,
-          "P2S:STANDARD": 1.1,
-          "X1C": 1.1,
-          "X1C:LITE": 1.1
-        },
-        "machineMinVariants": {
-          "P1S:LITE": 0.0,
-          "P2S:STANDARD": 0.0,
-          "X1C:LITE": 0.0
-        },
-        "machineMaxVariants": {
-          "P1S:LITE": 20.0,
-          "P2S:STANDARD": 20.0,
-          "X1C:LITE": 20.0
-        },
-        "mergeGroup": "offset",
-        "pinned": true,
-        "serialization": null
-      },
-      {
         "key": "wiping.outer_structure",
         "configKey": "OuterStructure",
         "tomlKey": "outer_structure",
@@ -3222,50 +3277,6 @@
             "deprecated": false
           }
         ],
-        "variantMode": null,
-        "machineFilter": [],
-        "deprecated": false,
-        "machineVariants": {},
-        "machineMinVariants": {},
-        "machineMaxVariants": {},
-        "mergeGroup": null,
-        "pinned": false,
-        "serialization": null
-      },
-      {
-        "key": "toolhead.prime_length",
-        "configKey": "PrimeLength",
-        "tomlKey": "prime_length",
-        "jsonKey": "prime_length",
-        "label": "润笔路径长度",
-        "labelEn": "Priming path length",
-        "labelJa": "プライミング経路長",
-        "labelTw": "潤筆路徑長度",
-        "desc": "长时间未涂胶后重新润笔的路径长度，确保胶水充分流出",
-        "descEn": "Path length of a re-prime after a long time without gluing, ensuring the glue flows",
-        "descJa": "長時間塗布しなかった後に再プライミングする経路長。接着剤が十分に出るようにします",
-        "descTw": "長時間未塗膠後重新潤筆的路徑長度，確保膠水充分流出",
-        "tomlComment": "预涂长度(mm) 范围:0~500",
-        "valueType": "float",
-        "uiComponent": "number",
-        "defaultValue": 100.0,
-        "scope": "universal",
-        "section": "toolhead",
-        "layout": {
-          "order": 2.0,
-          "sectionId": "pen_revitalization"
-        },
-        "min": 0.0,
-        "max": 500.0,
-        "step": 10.0,
-        "unit": "mm",
-        "parentKey": "wiping.prime_enabled",
-        "showWhen": {
-          "key": "wiping.prime_enabled",
-          "op": "eq",
-          "value": true
-        },
-        "choices": [],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
@@ -3774,72 +3785,74 @@
         "serialization": null
       },
       {
-        "key": "toolhead.speed_limit",
-        "configKey": "MaxSpeed",
-        "tomlKey": "speed_limit",
-        "jsonKey": "speed_limit",
-        "label": "涂胶速度限制",
-        "labelEn": "Glue speed limit",
-        "labelJa": "塗布速度の上限",
-        "labelTw": "塗膠速度限制",
-        "desc": "涂胶笔的最大移动速度 (mm/s)，过高可能导致涂胶不均匀或丢步",
-        "descEn": "Maximum travel speed of the glue pen (mm/s); too high may cause uneven glue or lost steps",
-        "descJa": "塗布ペンの最大移動速度（mm/s）。高すぎると塗布ムラや脱調の原因になります",
-        "descTw": "塗膠筆的最大移動速度（mm/s），過高可能導致塗膠不均勻或丟步",
-        "tomlComment": "涂胶速度限制 (mm/s)",
+        "key": "wiping.support_extrusion_multiplier",
+        "configKey": "SupportExtrusionMultiplier",
+        "tomlKey": "support_extrusion_multiplier",
+        "jsonKey": "support_extrusion_multiplier",
+        "label": "支撑体挤出倍率",
+        "labelEn": "Support body extrusion multiplier",
+        "labelJa": "サポート本体の押し出し倍率",
+        "labelTw": "支撐體擠出倍率",
+        "desc": "支撑体的挤出倍率，影响支撑硬度和拆除难度",
+        "descEn": "Extrusion multiplier for the support body; affects how hard the support is and how hard it is to remove",
+        "descJa": "サポート本体の押し出し倍率。サポートの硬さと取り外しやすさに影響します",
+        "descTw": "支撐體的擠出倍率，影響支撐硬度和拆除難度",
+        "tomlComment": "支撑体挤出倍率",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 70.0,
+        "defaultValue": 0.7,
         "scope": "universal",
-        "section": "toolhead",
+        "section": "wiping",
         "layout": {
-          "order": 100.0,
-          "sectionId": "motion"
+          "order": 1.0,
+          "sectionId": "custom_1"
         },
-        "min": 10.0,
-        "max": 500.0,
-        "step": 5.0,
-        "unit": "mm/s",
+        "min": 0.1,
+        "max": 3.0,
+        "step": 0.05,
+        "unit": null,
         "parentKey": null,
         "showWhen": null,
         "choices": [],
         "variantMode": null,
         "machineFilter": [],
         "deprecated": false,
-        "machineVariants": {},
+        "machineVariants": {
+          "A1": 0.8
+        },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
-        "pinned": true,
+        "pinned": false,
         "serialization": null
       },
       {
-        "key": "wiping.support_extrusion_multiplier",
-        "configKey": "SupportExtrusionMultiplier",
-        "tomlKey": "support_extrusion_multiplier",
-        "jsonKey": "support_extrusion_multiplier",
-        "label": "支撑挤出倍率",
-        "labelEn": "Support extrusion multiplier",
-        "labelJa": "サポートの押し出し倍率",
-        "labelTw": "支撐擠出倍率",
-        "desc": "支撑材料的挤出倍率，影响支撑密度和拆除难度",
-        "descEn": "Extrusion multiplier for support material; affects support density and how easy it is to remove",
-        "descJa": "サポート材の押し出し倍率。サポート密度と取り外しやすさに影響します",
-        "descTw": "支撐材料的擠出倍率，影響支撐密度和拆除難度",
-        "tomlComment": "支撑体挤出倍率",
+        "key": "wiping.swap_hop_height",
+        "configKey": "SwapHopHeight",
+        "tomlKey": "swap_hop_height",
+        "jsonKey": "swap_hop_height",
+        "label": "换笔脱层高度",
+        "labelEn": "Pen swap hop height",
+        "labelJa": "ペン交換時の剥離高さ",
+        "labelTw": "換筆脫層高度",
+        "desc": "换笔时喷嘴离开刚打完表面的高度（z-hop）。只影响那一次小螺旋脱层，不是抬笔高度",
+        "descEn": "How far the nozzle leaves the freshly printed surface during a pen swap (z-hop). Affects only that small spiral detach, not the pen lift height",
+        "descJa": "ペン交換時にノズルを印刷直後の面から離す高さ（z-hop）。この小さなスパイラル剥離だけに効き、ペンの持ち上げ高さとは別です",
+        "descTw": "換筆時噴嘴離開剛列印表面的高度（z-hop）。只影響那次小螺旋脫層，不是抬筆高度",
+        "tomlComment": "换笔脱层高度(mm) 范围:0.2~3",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 0.8,
+        "defaultValue": 1.0,
         "scope": "universal",
         "section": "wiping",
         "layout": {
-          "order": 0.0,
-          "sectionId": "glue_advanced_motion"
+          "order": 2.0,
+          "sectionId": "z_lift"
         },
-        "min": 0.1,
+        "min": 0.2,
         "max": 3.0,
-        "step": 0.05,
-        "unit": null,
+        "step": 0.1,
+        "unit": "mm",
         "parentKey": null,
         "showWhen": null,
         "choices": [],
@@ -3960,7 +3973,7 @@
         "machineFilter": [],
         "deprecated": false,
         "machineVariants": {
-          "A1": 0.9
+          "A1": 1.0
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -4810,6 +4823,18 @@
             "order": 1.0
           },
           {
+            "id": "custom_1",
+            "label": "支撑",
+            "labelEn": "Support",
+            "labelJa": "サポート",
+            "labelTw": "支撐",
+            "description": null,
+            "descriptionEn": null,
+            "descriptionJa": null,
+            "descriptionTw": null,
+            "order": 2.0
+          },
+          {
             "id": "safety_advanced",
             "label": "安全与高级参数",
             "labelEn": "Safety and advanced",
@@ -4819,18 +4844,6 @@
             "descriptionEn": "Safety and advanced wipe tower parameters",
             "descriptionJa": "ワイプタワーの安全・詳細パラメータ",
             "descriptionTw": "擦拭塔安全與進階參數",
-            "order": 2.0
-          },
-          {
-            "id": "tower_structure",
-            "label": "塔结构加强",
-            "labelEn": "Tower structure",
-            "labelJa": "タワー構造の補強",
-            "labelTw": "塔結構加強",
-            "description": "擦料塔结构加强参数",
-            "descriptionEn": "Wipe tower structural reinforcement parameters",
-            "descriptionJa": "ワイプタワーの構造補強パラメータ",
-            "descriptionTw": "擦拭塔結構加強參數",
             "order": 3.0
           },
           {
@@ -4844,6 +4857,18 @@
             "descriptionJa": "ディスクワイプの動作制御パラメータ",
             "descriptionTw": "圓盤擦拭動作控制參數",
             "order": 4.0
+          },
+          {
+            "id": "tower_structure",
+            "label": "塔结构加强",
+            "labelEn": "Tower structure",
+            "labelJa": "タワー構造の補強",
+            "labelTw": "塔結構加強",
+            "description": "擦料塔结构加强参数",
+            "descriptionEn": "Wipe tower structural reinforcement parameters",
+            "descriptionJa": "ワイプタワーの構造補強パラメータ",
+            "descriptionTw": "擦拭塔結構加強參數",
+            "order": 5.0
           }
         ]
       },
@@ -4880,18 +4905,6 @@
         "icon": "paintbrush",
         "sections": [
           {
-            "id": "glue_advanced_motion",
-            "label": "高级运动调控",
-            "labelEn": "Advanced motion",
-            "labelJa": "詳細な動作制御",
-            "labelTw": "進階運動調控",
-            "description": "涂胶高级运动调控参数",
-            "descriptionEn": "Advanced glue motion parameters",
-            "descriptionJa": "塗布の詳細な動作制御パラメータ",
-            "descriptionTw": "塗膠進階運動調控參數",
-            "order": 0.0
-          },
-          {
             "id": "glue_ironing",
             "label": "支撑面熨烫",
             "labelEn": "Support ironing",
@@ -4901,7 +4914,7 @@
             "descriptionEn": "Support surface ironing and sparse glue parameters",
             "descriptionJa": "サポート面のアイロニングと間引き塗布のパラメータ",
             "descriptionTw": "支撐面熨燙與稀疏塗膠參數",
-            "order": 1.0
+            "order": 0.0
           },
           {
             "id": "glue_z_compensation",
@@ -4913,7 +4926,7 @@
             "descriptionEn": "Glue Z directional compensation parameters",
             "descriptionJa": "塗布の Z 方向補正パラメータ",
             "descriptionTw": "塗膠 Z 方向補償參數",
-            "order": 2.0
+            "order": 1.0
           }
         ]
       },
@@ -5020,137 +5033,6 @@
         "order": 70.0,
         "icon": "settings",
         "sections": []
-      },
-      {
-        "id": "settings",
-        "label": "软件设置",
-        "labelEn": "Settings",
-        "labelJa": "ソフトウェア設定",
-        "labelTw": "軟體設定",
-        "order": 80.0,
-        "icon": null,
-        "sections": [
-          {
-            "id": "appearance",
-            "label": "外观",
-            "labelEn": "Appearance",
-            "labelJa": "外観",
-            "labelTw": "外觀",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 100.0
-          },
-          {
-            "id": "update",
-            "label": "软件更新",
-            "labelEn": "Software update",
-            "labelJa": "ソフトウェア更新",
-            "labelTw": "軟體更新",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 200.0
-          },
-          {
-            "id": "interaction",
-            "label": "辅助交互",
-            "labelEn": "Interaction",
-            "labelJa": "補助操作",
-            "labelTw": "輔助互動",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 300.0
-          },
-          {
-            "id": "slicer",
-            "label": "切片器",
-            "labelEn": "Slicer",
-            "labelJa": "スライサー",
-            "labelTw": "切片器",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 400.0
-          },
-          {
-            "id": "post_process",
-            "label": "后处理",
-            "labelEn": "Post-processing",
-            "labelJa": "後処理",
-            "labelTw": "後處理",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 500.0
-          },
-          {
-            "id": "bed_glue",
-            "label": "热床预涂胶",
-            "labelEn": "Bed pre-glue",
-            "labelJa": "ベッド予備塗布",
-            "labelTw": "熱床預塗膠",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 700.0
-          },
-          {
-            "id": "cache_management",
-            "label": "缓存管理",
-            "labelEn": "Cache management",
-            "labelJa": "キャッシュ管理",
-            "labelTw": "快取管理",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 800.0
-          },
-          {
-            "id": "data_maintenance",
-            "label": "数据维护",
-            "labelEn": "Data maintenance",
-            "labelJa": "データメンテナンス",
-            "labelTw": "資料維護",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 900.0
-          },
-          {
-            "id": "uninstall_cleanup",
-            "label": "卸载清理",
-            "labelEn": "Uninstall cleanup",
-            "labelJa": "アンインストール時のクリーンアップ",
-            "labelTw": "解除安裝清理",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 1000.0
-          },
-          {
-            "id": "performance",
-            "label": "性能（DEV）",
-            "labelEn": "Performance (DEV)",
-            "labelJa": "パフォーマンス（DEV）",
-            "labelTw": "效能（DEV）",
-            "description": null,
-            "descriptionEn": null,
-            "descriptionJa": null,
-            "descriptionTw": null,
-            "order": 1100.0
-          }
-        ]
       }
     ],
     "layout": [
@@ -5339,6 +5221,20 @@
             "visible": null
           },
           {
+            "id": "custom_1",
+            "items": [
+              {
+                "id": "item_custom_1_support_extrusion_multiplier",
+                "paramKey": "wiping.support_extrusion_multiplier"
+              }
+            ],
+            "component": null,
+            "showWhen": null,
+            "layout": null,
+            "width": null,
+            "visible": null
+          },
+          {
             "id": "disk_action",
             "items": [
               {
@@ -5396,20 +5292,6 @@
       {
         "id": "glue",
         "sections": [
-          {
-            "id": "glue_advanced_motion",
-            "items": [
-              {
-                "id": "item_3_0_0",
-                "paramKey": "wiping.support_extrusion_multiplier"
-              }
-            ],
-            "component": null,
-            "showWhen": null,
-            "layout": null,
-            "width": null,
-            "visible": null
-          },
           {
             "id": "glue_ironing",
             "items": [
@@ -5661,101 +5543,6 @@
       {
         "id": "internal",
         "sections": []
-      },
-      {
-        "id": "settings",
-        "sections": [
-          {
-            "id": "appearance",
-            "items": [],
-            "component": "appearance-section",
-            "showWhen": null,
-            "layout": "component",
-            "width": "full",
-            "visible": null
-          },
-          {
-            "id": "update",
-            "items": [],
-            "component": "update-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "interaction",
-            "items": [],
-            "component": "interaction-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "slicer",
-            "items": [],
-            "component": "slicer-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "post_process",
-            "items": [],
-            "component": "post-process-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "bed_glue",
-            "items": [],
-            "component": "bed-glue-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "cache_management",
-            "items": [],
-            "component": "cache-management-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "data_maintenance",
-            "items": [],
-            "component": "data-maintenance-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "uninstall_cleanup",
-            "items": [],
-            "component": "uninstall-cleanup-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": null
-          },
-          {
-            "id": "performance",
-            "items": [],
-            "component": "performance-card",
-            "showWhen": null,
-            "layout": "component",
-            "width": "half",
-            "visible": "DEV"
-          }
-        ]
       }
     ]
   },
@@ -5796,8 +5583,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "629d88729e58e5092a321f94ae5cdca7b1a2b08bcf98b9aa56413d6ef8ed4d20",
-      "size": 4341
+      "sha256": "a6bd2bee370684ed7a9dcf539d6e2ab3c3ecefb090d91d95c101024ca0c883b2",
+      "size": 4346
     },
     {
       "kind": "mkp_preset",
@@ -5805,8 +5592,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "dcc2d62be4e63f72fb4378ba7177fadd548129b9a940e6970c1fea7e2a82d935",
-      "size": 4339
+      "sha256": "e9c483a692b2f0ec3932a516a671f678289559c543042fed277e6ff93ce6d012",
+      "size": 4344
     },
     {
       "kind": "mkp_preset",
@@ -5814,8 +5601,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "a3c52ffeed798a57784c8987d2a1962315e188a3fe16597ec9b4e27cc70fe2e2",
-      "size": 4343
+      "sha256": "67fc58a5636527ad71c54ac0a10fa1950ca447d9939f64c5e63a62207cfc7e02",
+      "size": 4348
     },
     {
       "kind": "mkp_preset",
@@ -5823,8 +5610,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "eb3e6f9f61e7b55c531d94f210f72271a26be2751bc98b4fa60faefa88b7c684",
-      "size": 4345
+      "sha256": "d54f1d1e0c05b40cef04da4e348b3e66579e6214c0992ec54c03e1b7d96e51f5",
+      "size": 4351
     },
     {
       "kind": "mkp_preset",
@@ -5832,8 +5619,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "e7c222021034d78e706102fcffa3dcf1a2f4e66cce74445371841cc6ac3cf1b5",
-      "size": 4339
+      "sha256": "21619b726ebdf037200df595ed03ea3f9c31caff7966b13f70b9f0de7b6dbe1a",
+      "size": 4345
     },
     {
       "kind": "mkp_preset",
@@ -5841,8 +5628,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "5da29bdf3eb17ce9f63741b694a958ed1be29c35d309af5f37c3341c75c7fe30",
-      "size": 4344
+      "sha256": "7668d7188ed7b08e9821c7cd281dc5c9ff11cd2e58dac8a4bc3564456fe7f2de",
+      "size": 4350
     },
     {
       "kind": "mkp_preset",
@@ -5850,8 +5637,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "723d39c3d1795e2fdc2120eeed1b7a7b4ceee1123093fba7d234549dff3890d1",
-      "size": 4475
+      "sha256": "40c7d20535a8723c28f9bf3f503e2632375042b5262063af22314703cc9f43a1",
+      "size": 4481
     },
     {
       "kind": "mkp_preset",
@@ -5859,8 +5646,8 @@
       "path": "delivery/mkp/presets/P2S-standard.toml",
       "machineId": "P2S",
       "versionId": "STANDARD",
-      "sha256": "eede0d4ed874cdb2df3c5dfb9c4012ef7bfb47be18c09352fb005b4e92015803",
-      "size": 4479
+      "sha256": "ba9f162e0609d7c1ab10877829815f0187cde8ba47ca6aca6ee6360c972a4f01",
+      "size": 4485
     },
     {
       "kind": "mkp_preset",
@@ -5868,8 +5655,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "69cde252d626753c463ec2f97a5136c51e552802f830031e814d1e1f91eac371",
-      "size": 4475
+      "sha256": "3c5ff0790e638ce40f92e0328281063d6cae0dcd8458b2b7a2572c0b03e30429",
+      "size": 4481
     },
     {
       "kind": "icon",

@@ -1,5 +1,6 @@
 # machine: A1_MINI
 # variant: fast
+# generated_at: 2026-11-03T12:34:19+08:00
 
 [toolhead]
 # 自定义工具头获取 G-code
