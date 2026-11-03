@@ -610,15 +610,29 @@ export function WorkbenchApp() {
   const undo = useCallback(async (): Promise<boolean> => {
     /* 飞在空中的值写先落完 —— 否则撤销撤的是"落完之前的那一半" */
     await settleAll()
+    /* ★ 参数台 v2 那一条队列也得先排空（2026-11-03）。它不走 `editQueue`：
+       还在队列里的那几笔**还没进事务栈**，直接撤会撤到更早的一笔，而它们随后
+       照样落进影子树 —— 用户看到的就是「撤了，一秒后又自己弹回来」。
+       `drop()` 只清草稿，救不了已经在路上的那一条。 */
+    await sheetWrites.settle().catch(() => undefined)
     editQueue.clear()
     setBusy(true)
     try {
       const st = await wb.txnUndo()
       applyTxn(st)
-      /* 后端那一笔被撤掉了，参数台 v2 手里的草稿就不再是真话 —— 让它丢掉
-         （`tick` 干不了：它在窗口聚焦时也会 +1） */
+      /* 后端那一笔被撤掉了，参数台 v2 手里的草稿就不再是真话 —— 让它丢掉 */
       sheetWrites.drop()
       await refreshBook()
+      /*
+       * ★ **必须让参数台那一屏重取自己的 desk**（2026-11-03 作者：按 Cmd+Z 撤不掉）。
+       *
+       * `refreshBook()` 只刷外壳那份 `book`（整本 / 事务状态），而参数台 v2 的每一格
+       * 读的是它自己 `wb.desk(...)` 拿回来的那一份。`drop()` 又把本地草稿清了 ⇒
+       * 界面回落到**撤销之前**的 desk，看起来就是"撤了等于没撤"，而且接着一碰输入框
+       * 就把那个旧数又写回去（作者日志里 `3.95 → 3.9` 紧跟在一笔撤销后面）。
+       * `discard` 一直是对的（它 `setTick`），撤销 / 重做漏了这一格。
+       */
+      setTick((n) => n + 1)
       refreshReport()
       return true
     } catch (e) {
@@ -631,6 +645,8 @@ export function WorkbenchApp() {
 
   const redo = useCallback(async (): Promise<boolean> => {
     await settleAll()
+    /* 同 `undo`：队列里没落的写先发完，否则它们会落在重做之后 */
+    await sheetWrites.settle().catch(() => undefined)
     editQueue.clear()
     setBusy(true)
     try {
@@ -638,6 +654,8 @@ export function WorkbenchApp() {
       applyTxn(st)
       sheetWrites.drop()
       await refreshBook()
+      /* 同 `undo`：重做也改了影子树，参数台那一屏必须重取 desk */
+      setTick((n) => n + 1)
       refreshReport()
       return true
     } catch (e) {
