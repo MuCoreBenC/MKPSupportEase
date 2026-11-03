@@ -316,6 +316,12 @@ pub struct Applied {
 ///
 /// 三段用 `:` 分隔是安全的：机型 id 与版本 id 走 `store::validate_id` 的白名单
 /// （字母数字 `-` `_` `.`，没有冒号），参数 key 也只有点号
+/// 公开的合并键（`domain::history` 用它当"哪一格"）—— 与内部 `value_key` 同一个写法，
+/// **只有这一个出口**，别处不许自己拼字符串。
+pub fn value_key_public(level: Level, owner: &str, key: &str) -> String {
+    value_key(level, owner, key)
+}
+
 fn value_key(level: Level, owner: &str, key: &str) -> String {
     let tag = match level {
         Level::Machine => "m",

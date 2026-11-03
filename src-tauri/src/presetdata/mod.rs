@@ -468,6 +468,19 @@ impl Presets {
     where
         T: Clone + Into<ValueEdit>,
     {
+        self.cast_values(edits)?;
+        self.registry.write_back()
+    }
+
+    /// **只改内存里的文档，不写文件**（2026-11-03，内存编辑模型）。
+    ///
+    /// 校验规则、值与跟随状态一起落地，都与 [`Self::apply_values`] 逐字相同；
+    /// 唯一差别是最后那一步 `write_back` 不在这里 —— 编辑时改内存、保存时才写盘。
+    /// 见 `docs/WORKBENCH-EDITOR-MODEL.md` §1 / §3。
+    pub fn cast_values<T>(&mut self, edits: &[T]) -> Result<(), AppError>
+    where
+        T: Clone + Into<ValueEdit>,
+    {
         let edits: Vec<ValueEdit> = edits.iter().cloned().map(Into::into).collect();
         if edits.is_empty() {
             return Ok(());
@@ -492,6 +505,15 @@ impl Presets {
                 self.registry.set_following(&e.key, &e.owner, on)?;
             }
         }
+        Ok(())
+    }
+
+    /// **把内存里的文档写回盘**（2026-11-03）：保存那一步唯一的写文件动作。
+    ///
+    /// 与 [`Self::apply_values`] 拆开，是因为编辑期只改内存（[`Self::cast_values`]），
+    /// 写盘只发生在「保存」。两者合起来才是老 `apply_values` 的语义 ——
+    /// 谁要是把 `cast_values` 单独当保存用，改的东西就只停在内存里。
+    pub fn write_back(&self) -> Result<(), AppError> {
         self.registry.write_back()
     }
 

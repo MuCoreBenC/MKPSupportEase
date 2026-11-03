@@ -266,9 +266,89 @@ pub fn apply_draft_now_traced(
     committed: &Committed,
     draft: &Draft,
 ) -> Result<(usize, Vec<logging::KeyChange>), AppError> {
+    let staged = stage_value_edits(presets, committed, draft);
+    stage_into(presets, &staged)
+}
+
+/// **算出来的那一批值改动**（还没应用）：`ValueEdit` + 日志 + 「写了几行」。
+///
+/// # 为什么拆出这一层（2026-11-03，内存编辑模型）
+///
+/// 上一代 `apply_draft_now_traced` 把"算"和"写"焊在一起：算完立刻 `apply_values`
+/// 写进文档（然后由调用方再写文件）。新模型里编辑**只动内存**，但"算"这一步
+/// （归并连带、跟随状态、`changes` 日志）一个字都不能少 —— 所以把它单独抽出来，
+/// 写不写由调用方决定。见 `docs/WORKBENCH-EDITOR-MODEL.md`。
+///
+/// 按**单条 `ValueEdit`** 存而不是按整批：撤销一条命令时只回退那一条，
+/// 不能把同一格里别的改动一起抹掉。
+#[derive(Debug, Clone, Default)]
+pub struct StagedEdits {
+    /// 逐条算好的改动（顺序即写盘顺序）
+    pub edits: Vec<ValueEdit>,
+    /// 日志：每一条"哪个键、哪一层、从什么到什么、为什么"
+    pub changes: Vec<logging::KeyChange>,
+    /// 真的写了行的条数（`ValueAction::Keep` 不算 —— 只改跟随状态时值没动）
+    pub written: usize,
+}
+
+impl StagedEdits {
+    pub fn is_empty(&self) -> bool {
+        self.edits.is_empty()
+    }
+}
+
+/// `changes` 与 `edits` 一一对应（同一个下标是同一件事）
+fn unstage(staged: &[StagedEdits]) -> StagedEdits {
+    let mut out = StagedEdits::default();
+    for one in staged {
+        out.edits.extend(one.edits.iter().cloned());
+        out.changes.extend(one.changes.iter().cloned());
+        out.written += one.written;
+    }
+    out
+}
+
+/// 把一批算好的改动应用进文档，并回「写了几行 + 日志」。
+///
+/// 空 ⇒ 什么都不做（也算成功：`Keep` 之外的零改动是合法的"没变化"）。
+pub fn stage_into(
+    presets: &mut Presets,
+    staged: &StagedEdits,
+) -> Result<(usize, Vec<logging::KeyChange>), AppError> {
+    if staged.edits.is_empty() {
+        return Ok((0, Vec::new()));
+    }
+    /* **只改内存**（`cast_values`，不写文件）。写文件只剩「保存」那一刻，
+    由 `app::save_in` 一次性 `presets.write_back()`。 */
+    presets.cast_values(&staged.edits)?;
+    Ok((staged.written, staged.changes.clone()))
+}
+
+/// [`stage_value_edits`] 的批量版：一次调用里的多条命令各自算一份（撤销时逐条回退）
+pub fn stage_value_edits_for(
+    presets: &Presets,
+    committed: &Committed,
+    drafts: &[Draft],
+) -> Vec<StagedEdits> {
+    drafts
+        .iter()
+        .map(|d| stage_value_edits(presets, committed, d))
+        .collect()
+}
+
+/// 批量应用（保存路径用：一次 `apply_values`，沿用原来的整批校验语义）
+pub fn stage_into_all(
+    presets: &mut Presets,
+    staged: &[StagedEdits],
+) -> Result<(usize, Vec<logging::KeyChange>), AppError> {
+    stage_into(presets, &unstage(staged))
+}
+
+/// **只算不写**：草稿里的值改动 → [`StagedEdits`]。
+pub fn stage_value_edits(presets: &Presets, committed: &Committed, draft: &Draft) -> StagedEdits {
     let planned = plan_value_edits_why(presets, committed, draft);
     if planned.is_empty() {
-        return Ok((0, Vec::new()));
+        return StagedEdits::default();
     }
     /* `written` 只数**真的写了行**的那些：「点跟随」当值本来就等于基底时一个字节的
     值都没动，把它算进去会让日志里的 `written=n` 对不上 `changes=` 里的条数 */
@@ -326,8 +406,11 @@ pub fn apply_draft_now_traced(
             follows: e.follows,
         })
         .collect();
-    presets.apply_values(&edits)?;
-    Ok((written, changes))
+    StagedEdits {
+        edits,
+        changes,
+        written,
+    }
 }
 
 /// 这一格**盘上**跟不跟基底；机型层没有这个概念（`None`）。
@@ -380,7 +463,22 @@ pub fn save(
 ) -> Result<SaveOutcome, AppError> {
     /* 「写过就留」：保存不再做同值归一化（见 `apply_draft_now_traced` 上方那段注释） */
     let edits = plan_value_edits(presets, committed, draft);
+    /*
+     * ★ **`save()` 是"保存"那一刻，本来就要写文件**（2026-11-03 新编辑器模型）。
+     *
+     * 热路径（`wb_apply_draft`）走的是 `stage_into` → `cast_values`（只改内存），
+     * 一个字节都不碰盘。写盘只发生在这一条路上：
+     *   · `app::save_in` 先 `presets.write_back()`（历史里的命令一次落影子树）；
+     *   · 这里再 `apply_values` 收尾"还有草稿没搬进文档"的残留（正常为空）。
+     * 见 `docs/WORKBENCH-EDITOR-MODEL.md` §3。
+     */
     presets.apply_values(&edits)?;
+    /* ★ **保存边界上必须真的写文件**（2026-11-03）。`cast_values` 只改内存 ——
+    以前这里有 `write_back`（在 `apply_values` 里），值编辑迁到内存之后
+    它被挪到调用方，所以这里得补回来，否则"保存"只改内存不落盘。
+    生产路径上 `app::save_in` 已经先写过一次（它要知道有哪些命令），
+    这里多写一次同样的字节无害（原子写、内容一致）。 */
+    presets.write_back()?;
 
     // ② 菜单 / 套餐
     if !draft.visibility.is_empty() || !draft.bundles.is_empty() {
@@ -1196,7 +1294,7 @@ mod tests {
         let c = load(&s, &presets).unwrap().committed;
         let key = "toolhead.offset.x";
 
-        let mut step = |presets: &mut Presets, patch: Patch| {
+        let step = |presets: &mut Presets, patch: Patch| {
             let mut draft = Draft::default();
             apply(&mut draft, &c, &presets.registry, &[patch]).unwrap();
             apply_draft_now(presets, &c, &draft).unwrap();

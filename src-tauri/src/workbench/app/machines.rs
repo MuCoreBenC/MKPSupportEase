@@ -25,7 +25,7 @@ use crate::workbench::presets::{
     BrandField, Dimensions, MachineField, Presets, VersionField, Zone,
 };
 
-use super::with_ctx_mut;
+use super::with_struct_ctx;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,17 +154,21 @@ pub fn wb_add_version(
     name: String,
 ) -> Result<MachineList, AppError> {
     traced("wb_add_version", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .add_version(&id, &name)?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
-            // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
-            // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .add_version(&id, &name)?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                tracing::info!(machine = %machine_id, version = %id, "加了一个版本");
+                // 从盘上重读再返回：**界面看到的应该是落盘的结果**，不是内存里的样子。
+                // 这两者不一致的话（写失败但界面显示成功），是最难查的一类
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -183,24 +187,28 @@ pub fn wb_copy_version(
     description: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_copy_version", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.catalog.machine_mut(&machine_id)?.copy_version(
-                &template_version_id,
-                &id,
-                &name,
-                tag.as_deref(),
-                description.as_deref(),
-            )?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            tracing::info!(
-                machine = %machine_id,
-                template = %template_version_id,
-                version = %id,
-                "从模板复制了一个版本（只写版本定义）"
-            );
-            // 从盘上重读再返回：**界面看到的应该是落盘的结果**
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                ctx.presets.catalog.machine_mut(&machine_id)?.copy_version(
+                    &template_version_id,
+                    &id,
+                    &name,
+                    tag.as_deref(),
+                    description.as_deref(),
+                )?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                tracing::info!(
+                    machine = %machine_id,
+                    template = %template_version_id,
+                    version = %id,
+                    "从模板复制了一个版本（只写版本定义）"
+                );
+                // 从盘上重读再返回：**界面看到的应该是落盘的结果**
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -212,13 +220,17 @@ pub fn wb_copy_version(
 #[tauri::command]
 pub fn wb_add_machine(id: String, brand: String, display: String) -> Result<MachineList, AppError> {
     traced("wb_add_machine", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.catalog.add_machine(&id, &brand, &display)?;
-            tracing::info!(machine = %id, "建了一台机型");
-            // 重读盘再返回：**界面看到的是落盘的结果**。
-            // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec![format!("machines/{id}.toml")],
+            |ctx| {
+                ctx.presets.catalog.add_machine(&id, &brand, &display)?;
+                tracing::info!(machine = %id, "建了一台机型");
+                // 重读盘再返回：**界面看到的是落盘的结果**。
+                // 这一条尤其重要 —— 新建文件比改文件更容易出现"内存里成了、盘上没成"
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -240,30 +252,34 @@ pub fn wb_version_orphans(machine_id: String, version_id: String) -> Result<Vec<
 #[tauri::command]
 pub fn wb_remove_version(machine_id: String, version_id: String) -> Result<MachineList, AppError> {
     traced("wb_remove_version", |_| {
-        with_ctx_mut(|ctx| {
-            // 先记下来再删 —— 删完就查不出它被谁引用了
-            let orphans = ctx
-                .presets
-                .orphans_if_version_removed(&machine_id, &version_id);
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .remove_version(&version_id)?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            if orphans.is_empty() {
-                tracing::info!(machine = %machine_id, version = %version_id, "删了一个版本");
-            } else {
-                // 留下孤儿是**要留痕**的事，不能只在界面上闪一下
-                tracing::warn!(
-                    machine = %machine_id,
-                    version = %version_id,
-                    orphans = orphans.len(),
-                    keys = %orphans.join(","),
-                    "删了一个版本，留下了孤儿引用"
-                );
-            }
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                // 先记下来再删 —— 删完就查不出它被谁引用了
+                let orphans = ctx
+                    .presets
+                    .orphans_if_version_removed(&machine_id, &version_id);
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .remove_version(&version_id)?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                if orphans.is_empty() {
+                    tracing::info!(machine = %machine_id, version = %version_id, "删了一个版本");
+                } else {
+                    // 留下孤儿是**要留痕**的事，不能只在界面上闪一下
+                    tracing::warn!(
+                        machine = %machine_id,
+                        version = %version_id,
+                        orphans = orphans.len(),
+                        keys = %orphans.join(","),
+                        "删了一个版本，留下了孤儿引用"
+                    );
+                }
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -279,35 +295,39 @@ pub fn wb_set_version_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_version_field", |_| {
-        with_ctx_mut(|ctx| {
-            /* 改之前那一格要抄下来 —— 「改了什么」显示 `tag: → 推荐` 这种真实前后值 */
-            let before = ctx
-                .presets
-                .catalog
-                .machine(&machine_id)
-                .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
-                .and_then(|v| version_field_text(v, field));
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .set_version_field(&version_id, field, value.as_deref())?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            ctx.presets = ctx.presets.reload()?;
-            let after = ctx
-                .presets
-                .catalog
-                .machine(&machine_id)
-                .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
-                .and_then(|v| version_field_text(v, field));
-            ctx.pending_fields = vec![super::one_field(
-                format!("{machine_id}:{version_id}"),
-                field.key(),
-                version_name_of(ctx, &machine_id, &version_id),
-                before,
-                after,
-            )];
-            Ok(list_of(&ctx.presets))
-        })
+        with_struct_ctx(
+            field.key(),
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                /* 改之前那一格要抄下来 —— 「改了什么」显示 `tag: → 推荐` 这种真实前后值 */
+                let before = ctx
+                    .presets
+                    .catalog
+                    .machine(&machine_id)
+                    .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+                    .and_then(|v| version_field_text(v, field));
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .set_version_field(&version_id, field, value.as_deref())?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                ctx.reload_presets()?;
+                let after = ctx
+                    .presets
+                    .catalog
+                    .machine(&machine_id)
+                    .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+                    .and_then(|v| version_field_text(v, field));
+                ctx.pending_fields = vec![super::one_field(
+                    format!("{machine_id}:{version_id}"),
+                    field.key(),
+                    version_name_of(ctx, &machine_id, &version_id),
+                    before,
+                    after,
+                )];
+                Ok(list_of(&ctx.presets))
+            },
+        )
     })
 }
 
@@ -319,32 +339,36 @@ pub fn wb_set_machine_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_field", |_| {
-        with_ctx_mut(|ctx| {
-            let before = ctx
-                .presets
-                .catalog
-                .machine(&machine_id)
-                .and_then(|m| machine_field_text(m, field));
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .set_field(field, value.as_deref())?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            ctx.presets = ctx.presets.reload()?;
-            let after = ctx
-                .presets
-                .catalog
-                .machine(&machine_id)
-                .and_then(|m| machine_field_text(m, field));
-            ctx.pending_fields = vec![super::one_field(
-                machine_id.clone(),
-                field.key(),
-                machine_id.clone(),
-                before,
-                after,
-            )];
-            Ok(list_of(&ctx.presets))
-        })
+        with_struct_ctx(
+            field.key(),
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                let before = ctx
+                    .presets
+                    .catalog
+                    .machine(&machine_id)
+                    .and_then(|m| machine_field_text(m, field));
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .set_field(field, value.as_deref())?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                ctx.reload_presets()?;
+                let after = ctx
+                    .presets
+                    .catalog
+                    .machine(&machine_id)
+                    .and_then(|m| machine_field_text(m, field));
+                ctx.pending_fields = vec![super::one_field(
+                    machine_id.clone(),
+                    field.key(),
+                    machine_id.clone(),
+                    before,
+                    after,
+                )];
+                Ok(list_of(&ctx.presets))
+            },
+        )
     })
 }
 
@@ -361,13 +385,17 @@ pub fn wb_set_brand_field(
     value: Option<String>,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_brand_field", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets
-                .catalog
-                .set_brand_field(&brand_id, field, value.as_deref())?;
-            ctx.presets.catalog.write_brands()?;
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            field.key(),
+            |_| vec!["brands.toml".to_owned()],
+            |ctx| {
+                ctx.presets
+                    .catalog
+                    .set_brand_field(&brand_id, field, value.as_deref())?;
+                ctx.presets.catalog.write_brands()?;
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -387,22 +415,26 @@ pub fn wb_move_machine_to_brand(
     brand_id: String,
 ) -> Result<MachineList, AppError> {
     traced("wb_move_machine_to_brand", |_| {
-        with_ctx_mut(|ctx| {
-            let target = brand_id.trim();
-            let brand = ctx
-                .presets
-                .catalog
-                .brand(target)
-                .ok_or_else(|| AppError::not_found(format!("没有品牌 {target}")))?;
-            // 写进文件的是品牌**自己的 id 写法**（大小写可能与传进来的不同）
-            let canonical = brand.id.clone();
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .set_field(MachineField::Brand, Some(&canonical))?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "brand",
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                let target = brand_id.trim();
+                let brand = ctx
+                    .presets
+                    .catalog
+                    .brand(target)
+                    .ok_or_else(|| AppError::not_found(format!("没有品牌 {target}")))?;
+                // 写进文件的是品牌**自己的 id 写法**（大小写可能与传进来的不同）
+                let canonical = brand.id.clone();
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .set_field(MachineField::Brand, Some(&canonical))?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -458,37 +490,41 @@ pub fn wb_set_machine_dimensions(
     dimensions: Dimensions,
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_dimensions", |_| {
-        with_ctx_mut(|ctx| {
-            /* ★ **改之前的尺寸要抄下来**（2026-11-03）：`set_dimensions` 是整张替换，
-            写完就再也拿不到旧的那一组。而「改了什么」要显示
-            `bedSize.depth: 256 → 250` 这种真实前后值。 */
-            let before = ctx
-                .presets
-                .catalog
-                .machine(&machine_id)
-                .and_then(|m| m.dimensions.clone());
-            ctx.presets
-                .catalog
-                .machine_mut(&machine_id)?
-                .set_dimensions(dimensions)?;
-            ctx.presets.catalog.write_machine(&machine_id)?;
-            ctx.presets = ctx.presets.reload()?;
-            if let Some(old) = before {
-                if let Some(now) = ctx
+        with_struct_ctx(
+            "dimensions",
+            |_| vec![format!("machines/{machine_id}.toml")],
+            |ctx| {
+                /* ★ **改之前的尺寸要抄下来**（2026-11-03）：`set_dimensions` 是整张替换，
+                写完就再也拿不到旧的那一组。而「改了什么」要显示
+                `bedSize.depth: 256 → 250` 这种真实前后值。 */
+                let before = ctx
                     .presets
                     .catalog
                     .machine(&machine_id)
-                    .and_then(|m| m.dimensions.clone())
-                {
-                    /* `summary(&old)` 拿**现在这份**去比 `old`，返回的是
-                    `bedSize.depth: 256 → 250` 这样的字段差 */
-                    let fields = now.summary(&old);
-                    ctx.pending_fields =
-                        super::structural_fields(&machine_id, machine_id.clone(), fields);
+                    .and_then(|m| m.dimensions.clone());
+                ctx.presets
+                    .catalog
+                    .machine_mut(&machine_id)?
+                    .set_dimensions(dimensions)?;
+                ctx.presets.catalog.write_machine(&machine_id)?;
+                ctx.reload_presets()?;
+                if let Some(old) = before {
+                    if let Some(now) = ctx
+                        .presets
+                        .catalog
+                        .machine(&machine_id)
+                        .and_then(|m| m.dimensions.clone())
+                    {
+                        /* `summary(&old)` 拿**现在这份**去比 `old`，返回的是
+                        `bedSize.depth: 256 → 250` 这样的字段差 */
+                        let fields = now.summary(&old);
+                        ctx.pending_fields =
+                            super::structural_fields(&machine_id, machine_id.clone(), fields);
+                    }
                 }
-            }
-            Ok(list_of(&ctx.presets))
-        })
+                Ok(list_of(&ctx.presets))
+            },
+        )
     })
 }
 
@@ -533,10 +569,14 @@ pub fn wb_set_machine_zones(
                 points: z.points.clone(),
             });
         }
-        with_ctx_mut(|ctx| {
-            ctx.presets.catalog.set_zones(&machine_id, out)?;
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "zones",
+            |_| vec![format!("forbidden_zones/{machine_id}.toml")],
+            |ctx| {
+                ctx.presets.catalog.set_zones(&machine_id, out)?;
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 
@@ -547,11 +587,15 @@ pub fn wb_set_machine_zones(
 #[tauri::command]
 pub fn wb_add_brand(id: String, name: String) -> Result<MachineList, AppError> {
     traced("wb_add_brand", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.catalog.add_brand(&id, &name)?;
-            ctx.presets.catalog.write_brands()?;
-            Ok(list_of(&ctx.presets.reload()?))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["brands.toml".to_owned()],
+            |ctx| {
+                ctx.presets.catalog.add_brand(&id, &name)?;
+                ctx.presets.catalog.write_brands()?;
+                Ok(list_of(&ctx.presets.reload()?))
+            },
+        )
     })
 }
 

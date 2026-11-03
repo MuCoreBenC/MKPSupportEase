@@ -141,6 +141,14 @@ pub struct FieldEntry {
 }
 
 impl FieldEntry {
+    /// 这两条是不是**同一格**（`(层, 归属, 键)` 相同）。**不同归属不许合并** —— 见类型注。
+    ///
+    /// `pub(crate)` 而不是私有：编辑历史（`domain::history`）用**同一个去重口径**
+    /// 数「未保存 N」，两套口径就是两个数。
+    pub(crate) fn same_cell(&self, other: &Self) -> bool {
+        self.level == other.level && self.owner == other.owner && self.key == other.key
+    }
+
     /// 去重键：`(层, 归属, 键)`。**不同归属不许合并** —— 见类型注。
     fn dedup_key(&self) -> (String, String, String) {
         (
@@ -151,7 +159,7 @@ impl FieldEntry {
     }
 
     /// 真的变了没有（`before == after` 的条目不算改动）
-    fn changed(&self) -> bool {
+    pub(crate) fn changed(&self) -> bool {
         self.before != self.after
     }
 }
@@ -1217,6 +1225,17 @@ impl Txn {
     /// 能逐条撤销的深度（崩溃恢复那一条不算）
     pub fn undo_depth(&self) -> usize {
         self.payloads.len()
+    }
+
+    /// 栈顶那条的时刻（`None` = 空栈）—— 迁移期与 `domain::history` 的同名方法
+    /// 一起决定"撤销该退哪条栈"，见那边的注。
+    pub fn undo_last_at(&self) -> Option<std::time::Instant> {
+        self.payloads.last().map(|p| p.last_at)
+    }
+
+    /// 重做栈顶那条的时刻
+    pub fn redo_last_at(&self) -> Option<std::time::Instant> {
+        self.redo.last().map(|p| p.last_at)
     }
 
     pub fn redo_depth(&self) -> usize {

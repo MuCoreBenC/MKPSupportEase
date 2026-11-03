@@ -22,6 +22,9 @@
 //! 先写好才不用把同一批文案写两遍再搬一次）。
 
 pub mod derive;
+/// **编辑历史**（2026-11-03）：撤销 / 重做记的是**用户操作**，不是文件字节。
+/// 见 `docs/WORKBENCH-EDITOR-MODEL.md`；与 [`txn`] 的编辑栈在迁移期并存（值编辑走这里）。
+pub mod history;
 pub mod issues;
 /// 三层取值。**它住在 [`crate::presetdata::resolve`]** —— 客户端预设页要同一份算法，
 /// 而这一整棵子树是 feature gate 的。这里只是别名回原来的名字，
