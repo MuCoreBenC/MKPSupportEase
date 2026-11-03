@@ -119,38 +119,37 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 /* ---------- 构建指纹（2026-11-02） ----------
  *
- * build.rs 在**编译那一刻**把这三格刻进来。它们的唯一用途是回答
- * 「现在跑的这个进程，是哪一次编译出来的」—— 以前这个问题只能靠猜，
+ * 唯一用途：回答「现在跑的这个进程，是哪一次编译出来的」—— 以前这个问题只能靠猜，
  * 于是反复出现「你是不是没重新编译后端」这种没有证据的互疑。
  *
  * 三格都要一起看，单看一格会骗人：
  * - `编译时刻` 比源码 / 提交都晚 ⇒ 这一次确实重编了（不管 `target` 目录的 mtime 多旧）；
  * - `提交` 带 `-dirty` ⇒ 编的时候工作区有未提交改动（改完没提交也能对上）；
  * - `档位` ⇒ 两档共用可执行文件名，光看进程名分不出是客户端还是工作台。
+ *
+ * 后两格由 `build.rs` 刻进来；**编译时刻不刻** —— 运行时读 exe 的 mtime（见下），
+ * 所以它不可能是"build.rs 那一刻"，也不会因为 build.rs 没重跑而过期。
  */
-pub const BUILD_TIME: &str = env!("MKPSE_BUILD_TIME");
 pub const GIT_COMMIT: &str = env!("MKPSE_GIT_COMMIT");
 pub const BUILD_TIER: &str = env!("MKPSE_BUILD_TIER");
 
 /// 一行人读的指纹（日志用）。
 ///
-/// # 时间的那一格为什么**运行时**读，不用 `BUILD_TIME`
+/// # 时间的那一格为什么**运行时**读文件，不用 build.rs 刻的常量
 ///
-/// `BUILD_TIME` 是 `build.rs` 跑的时刻，而 `build.rs` 只在**它监视的东西**变了
-/// 才跑。Cargo 判定"这套产物已是最新"时根本不调它 —— 于是 `cargo build` 明明
-/// 重新链接了二进制，`BUILD_TIME` 还是上一次的。
+/// 以前用 `MKPSE_BUILD_TIME`（build.rs 跑的时刻）当这一格，作者实测到两层误差：
 ///
-/// 作者实测到的两层误差：
-///
-/// 1. 指纹印 `11-02T15:59Z`，二进制其实是 `11-03 11:13`（差 11 小时）；
-/// 2. 修了 `rerun-if-changed` 之后还差 1 分钟（`12:58:22` vs `12:59:37`）
+/// 1. 指纹印 `11-02T15:59Z`，二进制其实是 `11-03 11:13`（差 11 小时）——
+///    cargo 判定"产物已是最新"时根本不跑 build.rs；
+/// 2. 给它加了 `rerun-if-changed` 之后还差 1 分钟（`12:58:22` vs `12:59:37`）
 ///    —— 因为 build script 跑在**链接之前**。
 ///
 /// **`编译于` 想回答的其实是"这个 exe 是何时生成的"**，那就直接问文件：
-/// 读 `current_exe()` 的 mtime。它是链接完成那一刻，不会早。
+/// 读 `current_exe()` 的 mtime。它是链接完成那一刻，不会早、也不会过期。
 ///
-/// `BUILD_TIME` 仍然保留（构建脚本跑的时刻也有信息量：能看出
-/// "build script 这次跑没跑"），只是不再拿它冒充二进制的时间。
+/// 而那个 `rustc-env` 还有个贵得多的副作用：它一变，整个 app crate 就失效重编
+/// （改一行 Rust 要全量 codegen 一遍，作者：「我感觉我每次编译时间也挺长的」）。
+/// 时间既然改读文件，这个常量就**删掉**了 —— 它不提供任何信息，只拖慢编译。
 pub fn build_fingerprint() -> String {
     format!(
         "{BUILD_TIER} · {GIT_COMMIT} · 编译于 {}",
@@ -160,7 +159,8 @@ pub fn build_fingerprint() -> String {
 
 /// 当前可执行文件的 mtime，按**中国时间**（`+08:00` 明写）印成人读的形状。
 ///
-/// 读不到就退回 `BUILD_TIME`（那是构建脚本那一刻，比二进制早，但至少是真的）。
+/// 读不到就写 `unknown` —— **不许**退回去拿别的时刻充当。一个"看起来像真的"
+/// 的时间正是这套指纹反复说谎的来源，比 `unknown` 害处大得多。
 ///
 /// # 为什么走 `date` 而不是自己算
 ///
@@ -171,16 +171,16 @@ pub fn build_fingerprint() -> String {
 /// 不用 `-v`（BSD 专有）也不用 `--date`（GNU 专有）—— `-r` 两边同名。
 fn exe_modified_local() -> String {
     let Ok(exe) = std::env::current_exe() else {
-        return BUILD_TIME.to_owned();
+        return "unknown".to_owned();
     };
     let Ok(meta) = std::fs::metadata(&exe) else {
-        return BUILD_TIME.to_owned();
+        return "unknown".to_owned();
     };
     let Ok(modified) = meta.modified() else {
-        return BUILD_TIME.to_owned();
+        return "unknown".to_owned();
     };
     let Ok(epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
-        return BUILD_TIME.to_owned();
+        return "unknown".to_owned();
     };
 
     let wall = std::process::Command::new("date")
@@ -193,7 +193,7 @@ fn exe_modified_local() -> String {
         .filter(|s| !s.is_empty());
     match wall {
         Some(s) => format!("{s} +08:00"),
-        None => BUILD_TIME.to_owned(),
+        None => "unknown".to_owned(),
     }
 }
 

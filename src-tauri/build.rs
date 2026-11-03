@@ -31,30 +31,34 @@
  * 光看文件日期也不可靠（`target/debug` 与 `target-workbench/debug` 是两份，
  * 谁新谁旧一眼看不出来，而且「编了但没重启」的进程还在跑旧字节）。
  *
- * 所以每次编译把三格刻进二进制，启动时打一行日志：
+ * 所以每次编译把两格刻进二进制，启动时打一行日志：
  *
  * | 格 | 回答什么 |
  * |---|---|
- * | `BUILD_TIME` | **这一次**是什么时候编的（不是源码时间，是 build.rs 跑的时间） |
  * | `GIT_COMMIT` | 编的是哪个提交（`-dirty` 后缀 = 有未提交改动） |
  * | `FEATURES` | 带没带 `workbench` —— 两档是同一个可执行文件名，光看名字分不出 |
  *
- * # ★ 2026-11-03 修：以前这一格**会过期**，读者因此反复说"你没重编"
+ * # ★ 时间那格的三次迭代（2026-11-03 很重要，别再往回改）
  *
- * 第一版只在 `.git/HEAD` 与 `.git/index` 变了才重跑 build.rs。于是：
- *
- * ```text
- * 改 Rust 源码 → cargo 重编了 lib → 但 build.rs 没跑 → BUILD_TIME 还是上一次的
- * ```
- *
- * 作者实测：二进制是 `11-03 11:13`，指纹却印 `11-02T15:59Z` —— **差 11 小时**。
- * 而「你是不是没重新编译」这个问题**正是靠这一格回答的**，它一过期，
- * 这句问话就变成没有证据的指责（作者原话：「我实际上早就编译了，
+ * **第一版**：build.rs 跑的那一刻当「编译于」。两个死穴 ——
+ * ① 它跑在**链接之前**，必然比 exe 早（实测差 1 分钟）；
+ * ② cargo 判定"产物已是最新"时**根本不跑它** ⇒ 印出来的是上一次的时间
+ *    （实测差 11 小时）。而「你是不是没重新编译」正是靠这一格回答的，
+ * 它一过期，这句话就变成没有证据的指责（作者原话：「我实际上早就编译了，
  * 只不过它的时间是错的」）。
  *
- * 现在 `rerun-if-changed` **登记所有 Rust 源码**：源码一动，build.rs 就重跑，
- * 时间戳跟着刷新。代价是每次改代码多跑一次 build script（它只做几次
- * `date` / `git` 调用，毫秒级），换来的是这一格**永远不会说谎**。
+ * **第二版**：改成运行时读 `current_exe()` 的 mtime
+ * （`lib.rs::exe_modified_local`）—— 那是链接完成那一刻，不会过期。
+ *
+ * **第三版（现在）**：把 `MKPSE_BUILD_TIME` 这个 `rustc-env` **删掉**。
+ * 理由：`rustc-env` 一变，整个 app crate 就失效重编；而下面
+ * `rerun-if-changed=src` 让 build.rs 每次改 Rust 都跑 ⇒ 每次注入的时间戳都不同
+ * ⇒ **改一行 Rust 就要把 `mkp_support_ease_lib` 全量 codegen 一遍**。
+ * 作者原话：「我感觉我每次编译时间也挺长的」—— 就是它。
+ * 时间那格既然改由运行时读 exe，这条注入已经没有任何用处，只剩拖慢编译。
+ *
+ * 源码登记（`src` / `../crates`）**保留**：build.rs 重跑只做几次 `git` 调用
+ * （毫秒级）；只要它输出的 `GIT_COMMIT` 不变，cargo 就不会因此重编。
  *
  * 另两个"时刻会漂"的地方也一并登记：
  * - `.git/HEAD` / `.git/index`：切分支、暂存、提交后提交号要能反映出来；
@@ -67,8 +71,8 @@ fn main() {
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/index");
     println!("cargo:rerun-if-changed=Cargo.toml");
-    /* ★ **源码**也登记：这一条是"编译时刻不许过期"的实现（见上）。
-    `src/` 是整目录 —— cargo 会递归看它下面所有文件。 */
+    // 源码也登记：build.rs 因此会随源码重跑（它只做几次 git 调用，毫秒级）。
+    // **但它不再注入时间戳** —— 所以这个重跑不会让整个 crate 失效重编（见上）。
     println!("cargo:rerun-if-changed=src");
     println!("cargo:rerun-if-changed=../crates");
     emit_build_fingerprint();
@@ -89,31 +93,13 @@ fn main() {
     tauri_build::build()
 }
 
-/// 把「这一次编译」的三格刻进二进制（见 [`emit_build_fingerprint`] 上方那段说明）。
+/// 把「这一次编译」的两格刻进二进制（见上方那段说明）。
 ///
+/// **时间那格故意不在这里**：它由 `lib.rs::exe_modified_local` 在运行时读 exe 的
+/// mtime —— 那是链接完成那一刻，既不会早、也不会因为 build.rs 没跑而过期。
 /// 全部失败都不挡构建：拿不到就用 `unknown`，**绝不编一个看起来像真的值**。
 fn emit_build_fingerprint() {
-    // ① 编译时刻（build.rs 真正跑起来的这一刻，秒级）
-    //
-    // **中国时间**（2026-11-03 作者：「时间记得用中国时区的」）：
-    // 印 UTC 的话，每次看都要在脑子里 +8 小时，而这一格的全部用途就是
-    // 「跟源码 / 提交时间比一比」—— 那两种时间也是本地时间，三方必须同一套钟。
-    // 附一个 `+08:00` 偏移，跨时区看的人也不会误读。
-    let stamp = std::process::Command::new("date")
-        // macOS / BSD 的 date 用 `-v`，GNU 用 `TZ=`；这里选**两条都通**的写法：
-        // 显式给 TZ，再让 date 按那个时区格式化。
-        .env("TZ", "Asia/Shanghai")
-        .args(["+%Y-%m-%d %H:%M:%S"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty())
-        .map(|s| format!("{s} +08:00"))
-        .unwrap_or_else(|| "unknown".to_owned());
-    println!("cargo:rustc-env=MKPSE_BUILD_TIME={stamp}");
-
-    // ② 提交号 + 有没有未提交改动。`--always` 让无 tag 的浅克隆也给短 sha
+    // ① 提交号 + 有没有未提交改动。`--always` 让无 tag 的浅克隆也给短 sha
     let git = |args: &[&str]| -> Option<String> {
         let out = std::process::Command::new("git")
             .args(args)
@@ -136,7 +122,7 @@ fn emit_build_fingerprint() {
     }
     println!("cargo:rustc-env=MKPSE_GIT_COMMIT={commit}");
 
-    // ③ 这一档带没带 workbench。两档共用可执行文件名，光看进程名分不出
+    // ② 这一档带没带 workbench。两档共用可执行文件名，光看进程名分不出
     let features = std::env::var("CARGO_FEATURE_WORKBENCH").is_ok();
     println!(
         "cargo:rustc-env=MKPSE_BUILD_TIER={}",
