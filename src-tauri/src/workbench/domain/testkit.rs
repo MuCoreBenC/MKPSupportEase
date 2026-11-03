@@ -258,6 +258,15 @@ fn params() -> serde_json::Value {
                     "A1:STANDARD": -1.0,
                     "A1:FAST": -0.7,
                     "P1S:LITE": -25.9
+                },
+                // **状态与值分开写**（2026-11-03）：
+                //   · A1 两版各有各的值 ⇒ 不跟随（文件里那句 `= false`）
+                //   · P1S 只有 LITE 一版、值就是基底 ⇒ **跟随**（表里没有这个键）
+                //     —— 这正是"上提过的版本键"的形状：`machineVariants` 里那一行
+                //     只是基底的影子，改基底必须把它一起改写（Task 12.3 那条回归）
+                "follows": {
+                    "A1:STANDARD": false,
+                    "A1:FAST": false
                 }
             },
             {

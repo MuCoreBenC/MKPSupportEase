@@ -384,6 +384,48 @@
   left: calc(var(--nav-w, 216px) - 4.5px);
 }
 
+/*
+ * 导航折叠把手（2026-11-03 作者：「不管窗口宽度大小，我都能主动把侧边栏折起来」）。
+ *
+ * 它只改**宽度**：折到 64px 之后 `.nav` 的容器查询（≤ 88px）自己换成图标列 ——
+ * 与「拖窄」「窄档」共用同一份形态 CSS，这里不再写第二套。
+ * 图标方向跟着 `data-icon`：展开时指左（收起），收起时指右（展开）。
+ */
+.navCollapse {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 26px;
+  margin: 6px 8px 0;
+  padding: 0 6px;
+  color: var(--text-3);
+  border-radius: var(--r-sm);
+}
+
+.navCollapse:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.navCollapse[data-icon='true'] {
+  justify-content: center;
+  margin: 6px 4px 0;
+  padding: 0;
+}
+
+.navCollapse[data-icon='true'] svg {
+  transform: rotate(180deg);
+}
+
+@container shell-nav (max-width: 88px) {
+  .navCollapse {
+    justify-content: center;
+    margin: 6px 4px 0;
+    padding: 0;
+  }
+}
+
 .navList {
   flex: 1;
   min-height: 0;
@@ -3659,6 +3701,39 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * 状态图标（2026-11-03 作者：「我看不懂空心实心，用图标吧」）——
+ * 列表行右列那枚 4 字徽章换成名字前面这枚 13px 图标（形状 + 颜色，两道保险）：
+ *
+ *   链条（灰）跟随基底 · 图钉（蓝）这一层自己钉着 · 禁止（红）已弃用 · 斜线（灰）不适用
+ *
+ * 颜色只作第二层意思，别让它承担判读 —— 作者第一版就是靠空心/实心没读出来。
+ */
+.pDot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  color: var(--text-3);
+  /* 悬停有话说（TipLayer 2026-11-03 才在工作台挂上） */
+  cursor: help;
+}
+
+.pDot[data-s='own'] {
+  color: var(--wb-primary);
+}
+
+.pDot[data-s='dep'] {
+  color: var(--dep-red);
+}
+
+.pDot[data-s='off'] {
+  color: var(--line-strong);
+}
+
 /* 状态标签：灰 = 跟别人走，主色 = 这台机器/这个版本自己定的，橙 = 手上还没交出去。
    2px 圆角 —— 徽章几乎直角（b03 的 --w-r-tag 同值）。
 
@@ -4277,27 +4352,47 @@
   color: var(--text-3);
 }
 
-/* 「怎么改」：控件 + ↶，也是一个整体 —— 手势 / 布局都当它是一块 */
+/*
+ * 「怎么改」：**两颗回退按钮在左、控件在右**，一个整体（2026-11-03 作者裁定）。
+ *
+ * 以前是 `row-reverse` + `space-between` 的「一左一右摊开」，跟随/取消跟随那两颗
+ * 还会跑到控件的**后方**（作者：「不要显示在右侧，都放左边固定」）。现在：
+ *
+ *   窄                按钮组                    —— 第一行（放不下就自己换行）
+ *                     控件（贴右）
+ *   宽（面板 ≥ 400）  按钮组 |            控件  —— 一行
+ *
+ * `flex-wrap` 是作者点名要的兜底：「实在不行的话，你就换行」—— 按钮不压缩、
+ * 不截字、也不为了省地方退回图标。`
+ */
 .pEdEditor {
   grid-area: ed;
   display: flex;
-  /* 窄态：↶ 在左、控件在右（作者圈的那张图），输入框仍然贴右缘 */
-  flex-direction: row-reverse;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   min-width: 0;
 }
 
-/* 宽态：控件在前、↶ 在后，整块贴右 —— 不再一左一右摊开 */
-.pEdRows[data-form='wide'] .pEdEditor {
-  flex-direction: row;
-  justify-content: flex-end;
+/* 按钮组：两颗回退按钮，永远挨在一起、永远在最左边 */
+.pEdActs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
 }
 
-/* 控件本体：与中间列表同一个组件（form="row"），宽度交给控件自己 */
+/* 空的时候不占位（基底那一行没有自己的一行值时） */
+.pEdActs:empty {
+  display: none;
+}
+
+/* 控件本体：与中间列表同一个组件（form="row"），宽度交给控件自己；贴右缘 */
 .pEdCtl {
   display: flex;
+  flex: none;
+  margin-left: auto;
   min-width: 0;
 }
 
@@ -4339,6 +4434,52 @@
   background: var(--surface-sunken);
 }
 
+/*
+ * 「跟随 x.xx」chip（2026-11-03）。
+ *
+ * 与橙色 `.pRevert`（回到保存值）成对出现，两者的区别必须一眼看得出来：
+ *   `↩ 保存值 3.85` = 上次保存那一刻的数 ⇒ 从此**不跟随**
+ *   `↶ 跟随 3.95`   = 交回基底，跟到**基底的当前值**（可能还没保存）
+ * 以前这里是一枚 18px 的 `↶` 图标，只在"不跟随"时渲染 —— 跟随之后想再点没有入口。
+ * 跟随时整颗变灰（`disabled`），并把"它跟的是哪个数"写在脸上。
+ */
+.pFollow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--wb-primary);
+  border-radius: 4px;
+  background: var(--wb-primary-soft);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--wb-primary-deep);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pFollow:hover:not(:disabled) {
+  background: var(--surface-solid);
+}
+
+.pFollow[data-kind='factory'] {
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+
+.pFollow[data-kind='factory']:hover {
+  color: var(--text-1);
+}
+
+.pFollow:disabled {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text-3);
+  cursor: default;
+}
+
 /* 没有可恢复层的行占住同一个位置 */
 .pEdResetPh {
   flex: none;
@@ -4363,7 +4504,8 @@
   align-items: center;
   gap: 3px;
   height: 20px;
-  margin-right: 6px;
+  /* 与右边那枚步进器拉开一点（作者 2026-11-03：「太贴近我的文本框了」） */
+  margin-right: 10px;
   padding: 0 7px;
   border: 1px solid var(--warn-line);
   border-radius: 4px;
@@ -5351,20 +5493,20 @@
   }
 }
 
-.shell[data-density='compact'] .navItem {
+.shell[data-density='compact']:not([data-nav='text']) .navItem {
   justify-content: center;
   padding: 0;
 }
 
-.shell[data-density='compact'] .navLabel {
+.shell[data-density='compact']:not([data-nav='text']) .navLabel {
   display: none;
 }
 
-.shell[data-density='compact'] .navIcon {
+.shell[data-density='compact']:not([data-nav='text']) .navIcon {
   display: block;
 }
 
-.shell[data-density='compact'] .navBadge {
+.shell[data-density='compact']:not([data-nav='text']) .navBadge {
   position: absolute;
   top: 3px;
   right: 7px;
@@ -5374,16 +5516,16 @@
   font-size: 9px;
 }
 
-.shell[data-density='compact'] .upstream {
+.shell[data-density='compact']:not([data-nav='text']) .upstream {
   justify-content: center;
   padding: 6px 0;
 }
 
-.shell[data-density='compact'] .upText {
+.shell[data-density='compact']:not([data-nav='text']) .upText {
   display: none;
 }
 
-.shell[data-density='compact'] .upDot {
+.shell[data-density='compact']:not([data-nav='text']) .upDot {
   margin-top: 0;
 }
 
@@ -5396,12 +5538,13 @@
  *   （`--nav-w` 不是继承属性：`.nav` 上写的值，父元素 `.body` 读不到）——
  *   所以网格列宽这里单独钉一次，否则窄档导航会按外壳上那个拖过的值走。
  */
-.shell[data-density='compact'] .nav,
-.shell[data-density='compact'] .navItem {
+.shell[data-density='compact']:not([data-nav='text']) .nav,
+.shell[data-density='compact']:not([data-nav='text']) .navItem {
   --nav-w: 64px !important;
 }
 
-.shell[data-density='compact'] .body {
+/* 窄档的列宽：**用户明确要文字档时不算数**（窗口小也要能展开，2026-11-03 作者） */
+.shell[data-density='compact']:not([data-nav='text']) .body {
   grid-template-columns: 64px 1fr;
 }
 

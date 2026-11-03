@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "9e4e2e19d8bfaec9",
+  "revision": "8a1eeb626d2a6b2a",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1456,7 +1456,10 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": 3.85,
+          "A1": 3.9,
+          "A1:FAST": 3.9,
+          "A1:FASTV3.3": 3.9,
+          "A1:STANDARD": 3.9,
           "A1_MINI": 3.9,
           "A1_MINI:FAST": 3.9,
           "A1_MINI:FASTV3.3": 3.9,

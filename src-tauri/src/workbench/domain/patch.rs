@@ -92,7 +92,17 @@ pub struct BuiltRecord {
 ///
 /// 两条语义写死：
 /// - **`SetValue` 必须带 `level`**，不许由后端猜；
-/// - **`value: None` = 删键 = 挂回继承**，不是"值设成空"。
+/// - **`value: None` = 「跟随基底」（版本层）/ 删键（机型层）**，不是"值设成空"。
+///
+/// `value: None` 按层分家（2026-11-03，作者：「值虽然一直存在，但状态是跟随」）：
+///
+/// ```text
+/// Version 层：值留着、同步成当前基底的有效值，跟随状态置 true
+/// Machine 层：删掉那一行（＝回到出厂默认）
+/// ```
+///
+/// 前端因此**一个字段都不用改**：右键「跟随默认基底」与抽屉里的 `↶` 本来就发
+/// `value: null`，变的是后端怎么理解它。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum Patch {
@@ -101,7 +111,7 @@ pub enum Patch {
         /// `Machine` 时是机型 id，`Version` 时是版本 uid
         owner: String,
         key: String,
-        /// `None` = 删键 = 挂回继承
+        /// `None` = 版本层「跟随基底」/ 机型层「删键回出厂」
         value: Option<Value>,
     },
     /// **「固定为当前值」/「取消固定」**（2026-11-02 作者裁定）。
@@ -136,6 +146,18 @@ pub struct Draft {
     /// **值为 `None` 表示"这一层的这个键被删了"**，与"没有这一条草稿"不同
     pub values: BTreeMap<String, Option<Value>>,
 
+    /// **跟随状态**的草稿（2026-11-03）。键与 `values` **同一套**（`v:uid:key`），
+    /// 值 = 这一格要变成的跟随状态（`true` = 跟随基底）。
+    ///
+    /// # 为什么它必须住在草稿里，而不是写值时顺手改注册表
+    ///
+    /// 值与状态是**同一笔事务**：撤销 / 放弃草稿时两者一起回退，`wb_save` 时
+    /// 一起落盘。分开做的话中途失败会留下"值改了、状态还是跟随"，
+    /// 下一次改基底就把它覆盖回去 —— 那正是作者报的那个 bug 的形状。
+    ///
+    /// 表里挂着的键 = **这一格的跟随状态待改**；没挂着 = 不动。
+    pub follows: BTreeMap<String, bool>,
+
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
     // 没有 `built`：生成记录是台账（`workbench/built.json`），生成事务直接落盘，
@@ -152,7 +174,11 @@ impl Draft {
     ///
     /// `visibility` / `bundles` 各是一条记录、各对应一处改动，也同量纲。
     pub fn dirty_count(&self) -> usize {
-        self.values.len() + self.visibility.len() + self.bundles.len()
+        /* 值与跟随状态挂**同一格的两本账**：`70 → 75` 又点了「跟随」时，
+        `values` 与 `follows` 各有一条 —— 那是**一处**改动，不是两处。
+        所以按去重后的键数算，不按表长相加。 */
+        let cells: BTreeSet<&String> = self.values.keys().chain(self.follows.keys()).collect();
+        cells.len() + self.visibility.len() + self.bundles.len()
     }
 
     pub fn is_clean(&self) -> bool {
@@ -164,6 +190,11 @@ impl Draft {
         self.values.get(&value_key(level, owner, key))
     }
 
+    /// 某一层在草稿里挂着的**跟随状态**改动。`None` = 这一笔不动状态。
+    pub fn pending_follows(&self, level: Level, owner: &str, key: &str) -> Option<bool> {
+        self.follows.get(&value_key(level, owner, key)).copied()
+    }
+
     /// 丢掉指向已经不存在的版本的草稿条目（doc §15 那条）。
     ///
     /// **不让整本草稿失效**：上游删掉一个版本之后，用户在别的九个版本上的改动
@@ -171,27 +202,34 @@ impl Draft {
     pub fn prune(&mut self, committed: &Committed) -> Vec<String> {
         let mut gone: BTreeSet<String> = BTreeSet::new();
 
-        self.values.retain(|k, _| match parse_value_key(k) {
-            Some((Level::Version, owner, _)) => {
-                let ok = committed.has_version(owner);
-                if !ok {
-                    gone.insert(owner.to_owned());
+        /* 值与跟随状态**同一套键**、同一套存活判据 —— 一条判据只写一处，
+        免得哪天只清了一本账，另一本还挂着一个已经不存在的版本 */
+        let alive = |k: &String, gone: &mut BTreeSet<String>| -> bool {
+            match parse_value_key(k) {
+                Some((Level::Version, owner, _)) => {
+                    let ok = committed.has_version(owner);
+                    if !ok {
+                        gone.insert(owner.to_owned());
+                    }
+                    ok
                 }
-                ok
-            }
-            Some((Level::Machine, owner, _)) => {
-                let ok = committed.has_machine(owner);
-                if !ok {
-                    gone.insert(owner.to_owned());
+                Some((Level::Machine, owner, _)) => {
+                    let ok = committed.has_machine(owner);
+                    if !ok {
+                        gone.insert(owner.to_owned());
+                    }
+                    ok
                 }
-                ok
+                // 解析不出来的键：丢掉。留着它既进不了任何一层，也会让脏计数虚高
+                None => {
+                    gone.insert(k.clone());
+                    false
+                }
             }
-            // 解析不出来的键：丢掉。留着它既进不了任何一层，也会让脏计数虚高
-            None => {
-                gone.insert(k.clone());
-                false
-            }
-        });
+        };
+
+        self.values.retain(|k, _| alive(k, &mut gone));
+        self.follows.retain(|k, _| alive(k, &mut gone));
 
         // （生成记录曾经也在这里清——它现在不住在草稿里了，见模块文档「状态机修正」。）
         gone.into_iter()
@@ -527,49 +565,89 @@ fn apply_one(
             key,
             value,
         } => {
-            let before = own_value(draft, registry, *level, owner, key);
-            if &before == value {
+            let vk = value_key(*level, owner, key);
+            /* ---------- 现在这一格是什么样（草稿优先，其次盘上） ---------- */
+            let at_rest_value = at_rest(registry, *level, owner, key);
+            let cur_value = draft
+                .values
+                .get(&vk)
+                .cloned()
+                .unwrap_or_else(|| at_rest_value.clone());
+            let at_rest_follow = following_at_rest(registry, *level, owner, key);
+            let cur_follow = draft.follows.get(&vk).copied().or(at_rest_follow);
+
+            /* ---------- 这一笔要把它变成什么样 ---------- */
+            /*
+             * ★ 2026-11-03：`value: None` 的语义按层分开。
+             *
+             * **版本层**：`None` 不再是"删键"，而是**「跟随基底」**——
+             *   值留着（同步成当前基底的有效值），状态置 `follows = true`。
+             *   作者的原话：「值虽然一直存在，但状态是跟随」。删键那条老路会把
+             *   "这一版的值"抹掉，而跟随不该等于"没有值"。
+             *
+             * **机型层**：`None` 仍是**删键 = 回到出厂默认**。基底是这条链的根，
+             *   没有"跟随"可言（`badge_at` 也从不给基底列挂徽章）。
+             */
+            let (tgt_value, tgt_follow) = match (level, value) {
+                (Level::Version, None) => {
+                    if cur_follow == Some(true) {
+                        /* **已经跟随**：值本来就该等于基底（跟随的格子由写值那条路
+                        守恒），点一下不该在文件里凭空多写一行 —— 否则"点跟随"
+                        这个动作在已经跟随的格子上也算一次改动，未保存数会无故 +1 */
+                        (cur_value.clone(), Some(true))
+                    } else {
+                        (base_value_of(registry, owner, key), Some(true))
+                    }
+                }
+                (Level::Version, Some(v)) => (
+                    Some(normalize_value(registry, key, v)),
+                    /* 用户直接改这一版的值 ⇒ 它归自己（「改过就不跟随」） */
+                    Some(false),
+                ),
+                (Level::Machine, v) => (v.clone(), None),
+            };
+
+            if cur_value == tgt_value && cur_follow == tgt_follow {
                 return; // 没变化：不记草稿、不产反向，脏计数也不该涨
             }
-            let vk = value_key(*level, owner, key);
-            /*
-             * 「这一处还算不算改动」= **这一层钉完之后，和它原本的样子是不是一致**：
+
+            /* ---------- 值与状态**同时**写进草稿 ----------
              *
-             *   写 `None`（删键）→ 本层原来就没钉着它，才叫一致；
-             *   写值 `v`        → `v` 等于本层**不钉它**时会拿到的那个值
-             *                     （版本 → 机型 → 出厂），才叫一致。
-             *
-             * 后半句是唯一有内容的那半（作者实测报的那条）：版本层一直继承着机型层
-             * 时，本层盘上什么都没有 —— 光比本层（只有 [`at_rest`] 的话）会说「改了」，
-             * 于是"改成开启、再改回关闭"在草稿里留下一枚多余的 `关闭`，
-             * 界面就一直显示「已修改」、保存按钮一直亮。
+             * 判"还算不算改动"的口径：**这一层和它原本那一行是否一致**。
+             * 一致就从草稿里拿掉（否则"改了又改回来"会让保存按钮一直亮），
+             * 不一致就记下来。值与状态各判各的：只点了「跟随」（值本来就等于基底）
+             * 时，`values` 里什么都不该留，`follows` 里留一条。
              */
-            /* 「这一处还算不算改动」= **这一层和它原本那一行是否一致**。
-             *
-             * ★ 2026-11-02 换了口径之后，判据从 `at_rest_effective`（含继承）
-             * 收成 `at_rest`（**只看本层那一行**）。两者的差别正是作者要的那件事：
-             *
-             *   · 本层**原本没有**这一行，用户写了个与继承值相同的值
-             *     ⇒ 旧口径判"改回原样"（因为等于继承值）而吞掉这一笔；
-             *     新口径判"**写过**"（本层从无到有）⇒ 记下来，徽章显示「不跟随」；
-             *   · 本层**原本有**这一行，用户改回那一行的值
-             *     ⇒ 两边都判"改回原样" ⇒ 草稿条目拿掉，未保存数不涨。
-             *
-             * 「回到跟随」不是写一个相同的值，而是删键（右键「跟随默认基底」）。
-             */
-            let settled = at_rest(registry, *level, owner, key).as_ref() == value.as_ref();
-            if settled {
-                // 改回了这一层原本的样子 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
-                // 否则"改了又改回来"会让保存按钮一直亮着
+            if at_rest_value == tgt_value {
                 draft.values.remove(&vk);
             } else {
-                draft.values.insert(vk, value.clone());
+                draft.values.insert(vk.clone(), tgt_value);
             }
+            if let Some(on) = tgt_follow {
+                if at_rest_follow == Some(on) {
+                    draft.follows.remove(&vk);
+                } else {
+                    draft.follows.insert(vk, on);
+                }
+            }
+
+            /* ---------- 反向：把**值和状态**一起送回原样 ----------
+             *
+             * 版本层原来处于"跟随"时，反向发 `None`（= 跟随 + 值同步成基底），
+             * 而不是"写回那个数" —— 写回一个数的意思是不跟随，状态就丢了。
+             * 原来"不跟随"时反向只能写回它那一行的值（`value: None` 在这里
+             * 表达不了"不跟随但没值"，而那个状态在数据里不存在：不跟随的格子
+             * 一定有一行值，见 `apply_one` 的所有入口）。
+             */
+            let inverse_value = match (level, cur_follow) {
+                (Level::Version, Some(true)) => None,
+                _ => cur_value,
+            };
             inverse.push(Patch::SetValue {
                 level: *level,
                 owner: owner.clone(),
                 key: key.clone(),
-                value: before,
+                value: inverse_value,
             });
         }
 
@@ -645,18 +723,36 @@ pub fn variant_key(level: Level, owner: &str) -> String {
     }
 }
 
-/// 这一层**现在**这一项是什么值（草稿优先）。`None` = 这一层没钉着它 = 继承
-fn own_value(
-    draft: &Draft,
-    registry: &Registry,
-    level: Level,
-    owner: &str,
-    key: &str,
-) -> Option<Value> {
-    if let Some(pending) = draft.values.get(&value_key(level, owner, key)) {
-        return pending.clone();
+/// 这一格**盘上**的跟随状态。`None` = 与跟随无关（机型基底那一条链的根）。
+///
+/// 只有版本层有意义：`[params.follows]` 里没有这个 uid = 跟随（见
+/// [`crate::presetdata::follows::is_following`]）。
+fn following_at_rest(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<bool> {
+    if level == Level::Machine {
+        return None;
     }
-    at_rest(registry, level, owner, key)
+    let p = registry.param(key)?;
+    Some(crate::presetdata::follows::is_following(
+        p,
+        &variant_key(level, owner),
+    ))
+}
+
+/// 这一版**跟随的那个基底值**：机型裸键 → 出厂默认。
+///
+/// 点「跟随基底」时用它把值同步过去（值要留着，且等于基底）。
+fn base_value_of(registry: &Registry, owner: &str, key: &str) -> Option<Value> {
+    let p = registry.param(key)?;
+    /* ⚠ 版本 owner 到这一层还是 `A1/STANDARD`（`machineVariants` 里才写成
+    `A1:STANDARD`），所以**两种分隔符都要认** —— 只认 `:` 会把机型名取成
+    `A1/STANDARD`，于是"跟随"同步出来的是出厂默认而不是机型基底 */
+    let machine = owner.split(['/', ':']).next().unwrap_or(owner);
+    Some(
+        p.machine_variants
+            .get(machine)
+            .cloned()
+            .unwrap_or_else(|| p.default_value.clone()),
+    )
 }
 
 /// `machineVariants` 里**此刻写着**的那一个值 —— 这是这一层唯一的盘上真相。
@@ -688,14 +784,28 @@ mod tests {
     /// （真出过一次，见 [`normalize`]）
     fn registry() -> (tempfile::TempDir, Registry) {
         let d = tempfile::tempdir().unwrap();
+        /* 夹具里**写了版本行 ⇒ 那一版不跟随** —— 与 `presets follows-migrate`
+        同一口径（`machineVariants` 里那一行就是"这一版自己定的值"）。
+        不带上这句，版本会被当成"跟随基底"（文件里没有状态 = 跟随），
+        于是"改一个值"顺带改了状态，下面一半的断言就测不到原本那件事了。 */
         let p = |key: &str, order: f64, variants: serde_json::Value| {
+            let follows: serde_json::Map<String, serde_json::Value> = variants
+                .as_object()
+                .map(|m| {
+                    m.keys()
+                        .filter(|k| k.contains(':'))
+                        .map(|k| (k.clone(), serde_json::json!(false)))
+                        .collect()
+                })
+                .unwrap_or_default();
             serde_json::json!({
                 "key": key, "configKey": "X", "tomlKey": key, "jsonKey": key,
                 "label": key, "desc": "", "tomlComment": "",
                 "valueType": "float", "uiComponent": "number", "defaultValue": 4.0,
                 "scope": "universal", "section": "toolhead",
                 "layout": { "order": order, "sectionId": "s1" },
-                "machineVariants": variants
+                "machineVariants": variants,
+                "follows": follows
             })
         };
         let params = serde_json::json!({
@@ -824,9 +934,12 @@ mod tests {
         );
     }
 
-    /// `value: None` = 删键 = 挂回继承。**与"写空串"是两回事**
+    /// **`value: None` 在版本层 = 「跟随基底」**（2026-11-03 改判）：值留着，
+    /// 同步成当前基底；状态置跟随。**与"写空串"是两回事**（空串是一个值）。
+    ///
+    /// 机型层的 `None` 仍是删键（回到出厂默认）—— 基底是这条链的根，没有"跟谁"。
     #[test]
-    fn none_deletes_the_key_while_empty_string_is_a_value() {
+    fn none_means_follow_on_a_version_and_delete_on_a_machine() {
         let (_d, reg) = registry();
         let c = committed();
 
@@ -845,8 +958,66 @@ mod tests {
         .unwrap();
         assert_eq!(
             draft.pending(Level::Version, "A1/STANDARD", "toolhead.offset.x"),
+            Some(&Some(serde_json::json!(4.0))),
+            "跟随：那一行值留着，并同步成当前基底（offset.x 没有 A1 裸键 ⇒ 出厂 4.0）"
+        );
+        assert_eq!(
+            draft.pending_follows(Level::Version, "A1/STANDARD", "toolhead.offset.x"),
+            Some(true),
+            "值与状态是同一笔草稿：这一版从此跟随基底"
+        );
+
+        /* 「同步成基底」同步的是**机型那一层**，不是出厂默认：
+        `offset.z` 在 A1 有裸键 1.1，而版本 owner 到这一层还写着 `A1/STANDARD` */
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                Some(serde_json::json!(9)),
+            )],
+        )
+        .unwrap();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(
+                Level::Version,
+                "A1/STANDARD",
+                "toolhead.offset.z",
+                None,
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            draft.pending(Level::Version, "A1/STANDARD", "toolhead.offset.z"),
+            Some(&Some(serde_json::json!(1.1))),
+            "跟随同步的是机型基底（A1 = 1.1），不是出厂默认 4.0"
+        );
+
+        /* 机型层：`None` 还是删键，且不挂状态 */
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &reg,
+            &[set(Level::Machine, "A1", "toolhead.offset.z", None)],
+        )
+        .unwrap();
+        assert_eq!(
+            draft.pending(Level::Machine, "A1", "toolhead.offset.z"),
             Some(&None),
-            "草稿里记的是「这个键被删了」"
+            "机型层的 None 是删掉那一行 = 回到出厂默认"
+        );
+        assert_eq!(
+            draft.pending_follows(Level::Machine, "A1", "toolhead.offset.z"),
+            None,
+            "基底没有「跟不跟」可言"
         );
 
         let mut draft = Draft::default();
@@ -1042,7 +1213,9 @@ mod tests {
                 "valueType": declared, "uiComponent": "number", "defaultValue": 0,
                 "scope": "universal", "section": "toolhead",
                 "layout": { "order": 1.0, "sectionId": "s1" },
-                "machineVariants": { "A1:STANDARD": disk }
+                "machineVariants": { "A1:STANDARD": disk },
+                /* 有版本行 ⇒ 那一版不跟随（与 `presets follows-migrate` 同一口径） */
+                "follows": { "A1:STANDARD": false }
             }],
             "tabs": [{ "id": "t1", "label": "偏移", "order": 10,
                        "sections": [{ "id": "s1", "label": "空间偏移", "order": 0 }] }],

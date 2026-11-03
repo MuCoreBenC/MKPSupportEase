@@ -30,6 +30,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { CSSProperties, ReactNode } from 'react'
 
 
+/* 气泡层：全站唯一一份（客户端 `src/app/App.tsx` 早就挂了，工作台一直漏着） */
+import { TipLayer } from '../components/tooltip'
 import { FieldLayer } from './components/field'
 import PageSkeleton from './components/Skeleton'
 import { modalShortcutGate } from './components/modal'
@@ -201,7 +203,13 @@ const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
 ])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
-const NAVW = { dft: 236, min: 64, max: 320 }
+const NAVW = { dft: 236, min: 64, max: 320, storeKey: 'mkp.wb.nav', iconW: 64 }
+
+/**
+ * 导航的三档：`auto`（跟着窗口走，默认）/ `text`（明确要名字，窗口再窄也展开）/
+ * `icon`（明确只要图标）。**用户的点击一旦发生就记住**，不再被窗口宽度改回去。
+ */
+type NavMode = 'auto' | 'text' | 'icon'
 
 /** 跨页定位载荷（C14 语义）：`key` 给套餐/资产页落到某一项（机型页 ④ 关联在用） */
 interface Focus {
@@ -307,6 +315,43 @@ export function WorkbenchApp() {
   const [assetAssign, setAssetAssign] = useState<string | null>(null)
 
   const [navW, setNavW] = useSplitWidth('nav', NAVW.dft, NAVW.min, NAVW.max)
+  /*
+   * **导航折叠**（2026-11-03 作者）：「不管窗口宽度大小，我都能主动把侧边栏折起来」，
+   * 而且要记住 —— 以前它只跟着窗口宽度走（< 640 自动变图标列），宽窗口里没有入口。
+   *
+   * 实现上**不新造一套形态**：宽度给到 64，`.nav` 的容器查询（≤ 88px）自己把
+   * 名字换图标、徽标压角 —— 与「拖窄」「窄档」是同一份 CSS，改一处三处都跟着对。
+   * `navW` 不动，展开时回到用户拖过的那个宽度。
+   */
+  const [navMode, setNavMode] = useState<NavMode>(() => {
+    try {
+      const v = localStorage.getItem(NAVW.storeKey)
+      return v === 'icon' || v === 'text' ? v : 'auto'
+    } catch {
+      return 'auto'
+    }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem(NAVW.storeKey, navMode)
+    } catch {
+      /* 隐私模式 / 配额满：记不住不算错误 */
+    }
+  }, [navMode])
+  /*
+   * **现在是不是图标档**（一个判据，三处用：宽度、把手方向、拖线给不给）。
+   *
+   *   显式收起                  ⇒ 图标
+   *   自动档 + 窗口窄（compact） ⇒ 图标（这就是原来"窄了自动变图标"那档）
+   *   自动档 + 被拖到 ≤ 88       ⇒ 图标（容器查询已经把它画成图标了，把手得跟着翻）
+   *
+   * `text` 档**压过窗口窄**：作者 2026-11-03「窗口比较小的时候，也要能把它展开」。
+   */
+  const navIcon =
+    navMode === 'icon' ||
+    (navMode === 'auto' && density === 'compact') ||
+    /* 拖到最窄：容器查询已经把它画成图标列了 —— 不论哪一档，把手都得跟着翻 */
+    navW <= NAVW.min + 24
   const [historyOpen, setHistoryOpen] = useState(false)
 
   /** 模态框遮罩宿主（`.shellBody`）与当前页滚动区（页头按钮靠它对齐 `--sbw`） */
@@ -942,6 +987,47 @@ export function WorkbenchApp() {
 
   const nav = (
     <nav className={s.nav} aria-label="一级导航">
+      {/*
+        折叠把手（2026-11-03 作者）：「不管窗口宽度大小，我都能主动折叠 / 展开」。
+        **方向跟的是"现在到底是不是图标档"**，不是那个开关变量 —— 以前把栏拖到最窄，
+        屏幕上已经变成图标列了，箭头还指向左（作者报的第一条）。
+      */}
+      {density !== 'mini' && (
+        <button
+          type="button"
+          className={s.navCollapse}
+          data-icon={navIcon}
+          aria-expanded={!navIcon}
+          data-tip={
+            navIcon
+              ? '展开侧边栏（窗口小也能展开）'
+              : '收起侧边栏 —— 只留图标（记着我这次的选择）'
+          }
+          onClick={() => {
+            if (navIcon) {
+              /* 展开：栏被拖到 ≤ 88 时一并回到默认宽，否则"展开了"看不出变化 */
+              if (navW <= NAVW.min + 24) setNavW(NAVW.dft)
+              setNavMode('text')
+            } else {
+              setNavMode('icon')
+            }
+          }}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+        </button>
+      )}
       <div className={s.navList}>
         {NAV.map((it) => {
           const bd = badgeOf(it.badge)
@@ -1009,7 +1095,7 @@ export function WorkbenchApp() {
         </span>
       </div>
 
-      {density !== 'compact' && density !== 'mini' && (
+      {!navIcon && density !== 'mini' && (
         <SplitterC14
           bodyRef={rootRef}
           side="nav"
@@ -1035,8 +1121,15 @@ export function WorkbenchApp() {
       data-no-chrome="yes"
       data-page={page}
       data-density={density}
+      /* `text` 档要压过窄档那套图标规则（见 css 里 `.shell[data-nav='text']` 那一段） */
+      data-nav={navIcon ? 'icon' : 'text'}
       /* 测试模式整窗换一层色（`c14tokens.css` 只改那几个变量，C14 的内衬全跟着走） */
-      style={{ '--nav-w': `${navW}px` } as CSSProperties}
+      style={
+        {
+          '--nav-w': `${navIcon ? NAVW.iconW : navW}px`,
+          '--nav-w-text': `${navW}px`,
+        } as CSSProperties
+      }
     >
       {/*
         * 严重错误横幅（z 60，盖在页头之上 ⇒ **会挡住保存按钮**）。
@@ -1431,6 +1524,14 @@ export function WorkbenchApp() {
             </div>
           </div>
         </FieldLayer>
+
+        {/*
+         * **气泡层**（2026-11-03）。工作台以前**没有挂** `<TipLayer>` —— 它只装在
+         * 客户端 `src/app/App.tsx` 里，于是工作台里所有 `data-tip` 都是**死属性**：
+         * 悬停什么都不出（作者：「我悬停了也没有出现字呀」）。
+         * 挂上之后沿用全站那一套：跟光标、出框平移、`z-index 96`、只认 `data-tip`。
+         */}
+        <TipLayer />
       </OverlayHostCtx>
     </div>
   )

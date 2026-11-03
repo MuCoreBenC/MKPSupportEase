@@ -93,6 +93,7 @@ fn run_cli() -> Result<i32, AppError> {
         "reload" => cmd_reload(force),
         "publish" => cmd_publish(dry_run, republish),
         "normalize" => cmd_normalize(dry_run),
+        "follows-migrate" => cmd_follows_migrate(dry_run),
         "-h" | "--help" | "help" => {
             usage();
             Ok(0)
@@ -116,6 +117,8 @@ fn usage() {
   presets reload                把工作台影子树对齐到 presets/（= 工作台「重新加载」）
   presets normalize --dry-run   预演源 TOML 重排：说差多少，一个字节都不写
   presets normalize             把 presets/registry/param_registry.toml 重排成机械序
+  presets follows-migrate --dry-run  预演「跟随状态」迁移：说会有几条，不写任何文件
+  presets follows-migrate       把存量版本键补成显式的「不跟随」+ 写迁移台账
   presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写
   presets publish               执行正式发布事务（唯一能让序号 +1 的动作）
 
@@ -452,6 +455,101 @@ fn cmd_normalize(dry_run: bool) -> Result<i32, AppError> {
             "params": report.params,
             "tabs": report.tabs,
             "summary": if changed { "已重排" } else { "已是最新形态" },
+        }),
+        0,
+    )
+}
+
+/// **一次性的「跟随状态」迁移**（2026-11-03）。
+///
+/// # 为什么要有它
+///
+/// 2026-11-03 之前，"这一版跟不跟基底"没有写在文件里 —— 靠"`machineVariants`
+/// 里有没有 `机型:版本` 那一行"推断。现在它是 `[params.follows]` 里的一句
+/// `= false`。存量文件里没有这句话，含义就变成了"全部跟随"，那会让今天显示
+/// 「不跟随」的格子当场变脸。
+///
+/// 所以迁移做的就是**把推断变成写下来的状态**：有版本行 ⇒ `= false`（不跟随），
+/// 没有 ⇒ 什么都不写（跟随）。一格的表现都不变。
+///
+/// # 台账
+///
+/// `presets/registry/follows-migration.json` 记「值恰好等于基底」的那些格：
+/// 它们当初是自己定的还是跟随过来的，已经无法证明。记下来是为了日后能回答
+/// 「为什么这一版不跟随」，不改判定。
+///
+/// # 幂等
+///
+/// 只补没有状态记录的键，第二遍是空操作。
+fn cmd_follows_migrate(dry_run: bool) -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let root = ctx.real_root().to_path_buf();
+    let mut p = mkp_support_ease_lib::presetdata::Presets::load_from(&root)?;
+    let before = p.registry.to_toml();
+
+    let at = mkp_support_ease_lib::workbench::clock::now_iso8601();
+    let ledger = mkp_support_ease_lib::presetdata::follows::migrate(&mut p.registry, &at)?;
+
+    let after = p.registry.to_toml();
+    let changed = before != after;
+    let mut total_versions = 0usize;
+    for param in p.registry.params() {
+        total_versions += param.follows.len();
+    }
+
+    if dry_run {
+        eprintln!(
+            "{}：会给 {} 个版本键写上「不跟随」（其中 {} 个「值恰好等于基底」，进台账）",
+            if changed {
+                "会有改动"
+            } else {
+                "已经是迁移后的形态"
+            },
+            ledger.marked,
+            ledger.ambiguous.len()
+        );
+        return emit(
+            json!({
+                "command": "follows-migrate",
+                "ok": true,
+                "changed": changed,
+                "marked": ledger.marked,
+                "ambiguous": ledger.ambiguous.len(),
+                "followsEntries": total_versions,
+                "summary": if changed { "会写迁移结果（未写盘）" } else { "已经迁过，空操作" },
+            }),
+            0,
+        );
+    }
+
+    if changed {
+        p.registry.write_back()?;
+    }
+    let ledger_file = root.join("registry").join("follows-migration.json");
+    if changed {
+        let text = serde_json::to_string_pretty(&ledger).unwrap_or_else(|_| "{}".to_owned());
+        mkp_support_ease_lib::fsx::atomic::atomic_write(
+            &ledger_file,
+            format!("{text}\n").as_bytes(),
+        )?;
+        eprintln!(
+            "✓ 迁完：{} 个版本键标成「不跟随」，台账 {} 条 → {}",
+            ledger.marked,
+            ledger.ambiguous.len(),
+            ledger_file.display()
+        );
+    } else {
+        eprintln!("✓ 已经迁过，未写盘");
+    }
+    emit(
+        json!({
+            "command": "follows-migrate",
+            "ok": true,
+            "changed": changed,
+            "marked": ledger.marked,
+            "ambiguous": ledger.ambiguous.len(),
+            "followsEntries": total_versions,
+            "summary": if changed { "已迁移" } else { "已经迁过" },
         }),
         0,
     )

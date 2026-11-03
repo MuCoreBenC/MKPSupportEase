@@ -289,7 +289,7 @@ use crate::ipc::traced;
 use crate::workbench::domain::derive::{Book, BookView, ColRef, Desk, Matrix};
 
 use crate::workbench::domain::layer::Layers;
-use crate::workbench::domain::patch::{apply as apply_patches, variant_key, Draft, Patch};
+use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
 use crate::workbench::domain::preview::BulkPreview;
 use crate::workbench::domain::shadow_diff;
 use crate::workbench::domain::txn::{self, Op, Txn};
@@ -2131,9 +2131,12 @@ fn fields_after_model(ctx: &Ctx, written: &[txn::FieldEntry]) -> Vec<txn::FieldE
         });
 
         for v in &m.versions {
-            /* 这个版本有自己的值 ⇒ 基底怎么改都动不到它 */
-            let uid = format!("{}/{}", e.owner, v.id);
-            if has_own_value(&param.machine_variants, &uid) {
+            /* 这一版**不跟随** ⇒ 基底怎么改都动不到它。
+            判据与徽章、写值路径**同一份**（`presetdata::follows::is_following`）——
+            以前这里读"`machineVariants` 里有没有这一格"，而跟随的版本现在也会
+            留着自己那一行（值同步成基底的那个数），拿行判会把它当成独立值。 */
+            let uid_key = crate::presetdata::follows::uid_of(&e.owner, &v.id);
+            if !crate::presetdata::follows::is_following(param, &uid_key) {
                 continue;
             }
             let owner = format!("{}:{}", e.owner, v.id);
@@ -2166,15 +2169,6 @@ fn fields_after_model(ctx: &Ctx, written: &[txn::FieldEntry]) -> Vec<txn::FieldE
         }
     }
     out
-}
-
-/// 这个版本**自己有没有值**（`machine_variants` 里有 `机型:版本` 这一格）。
-///
-/// 与 [`crate::presetdata::resolve::Layers::has_own`] 同一判据的
-/// `machine_variants` 版本 —— 那边看的是运行期图层，这里看的是注册表原始表。
-fn has_own_value(table: &std::collections::BTreeMap<String, serde_json::Value>, uid: &str) -> bool {
-    let key = variant_key(Level::Version, uid);
-    table.contains_key(&key)
 }
 
 /// 界面要显示的**值**：`None` 那种"删键"的动作，换成读出来的有效值。
@@ -3782,15 +3776,13 @@ mod tests {
         };
 
         for e in fields_after_model(&ctx, &[del, base]) {
-            for v in [&e.before, &e.after] {
-                if let Some(text) = v {
-                    assert!(
-                        !text.contains("跟随上一层"),
-                        "界面上不该出现日志写法：{} · {:?}",
-                        e.owner,
-                        text
-                    );
-                }
+            for text in [&e.before, &e.after].into_iter().flatten() {
+                assert!(
+                    !text.contains("跟随上一层"),
+                    "界面上不该出现日志写法：{} · {:?}",
+                    e.owner,
+                    text
+                );
             }
         }
     }

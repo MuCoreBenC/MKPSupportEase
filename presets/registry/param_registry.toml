@@ -334,6 +334,17 @@ pinned = false
 "P2S:STANDARD" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
 "X1C:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
 
+[params.follows]
+"A1:FAST" = false
+"A1:FASTV3.3" = false
+"A1:STANDARD" = false
+"A1_MINI:FAST" = false
+"A1_MINI:FASTV3.3" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+
 [[params]]
 key = "toolhead.custom_unmount_gcode"
 configKey = "CustomUnmountGcode"
@@ -374,6 +385,17 @@ pinned = false
 "P1S:LITE" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
 "P2S:STANDARD" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
 "X1C:LITE" = "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+
+[params.follows]
+"A1:FAST" = false
+"A1:FASTV3.3" = false
+"A1:STANDARD" = false
+"A1_MINI:FAST" = false
+"A1_MINI:FASTV3.3" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
 
 [[params]]
 key = "toolhead.first_pen_revitalization_flag"
@@ -479,6 +501,17 @@ serialization = { "subfieldsOrder" = ["x", "y", "z"] }
 "X1C" = -25.9
 "X1C:LITE" = -25.9
 
+[params.follows]
+"A1:FAST" = false
+"A1:FASTV3.3" = false
+"A1:STANDARD" = false
+"A1_MINI:FAST" = false
+"A1_MINI:FASTV3.3" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+
 [[params]]
 key = "toolhead.offset.y"
 configKey = "YOffset"
@@ -526,6 +559,17 @@ pinned = true
 "X1C" = 14.0
 "X1C:LITE" = 14.0
 
+[params.follows]
+"A1:FAST" = false
+"A1:FASTV3.3" = false
+"A1:STANDARD" = false
+"A1_MINI:FAST" = false
+"A1_MINI:FASTV3.3" = false
+"A1_MINI:STANDARD" = false
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
+
 [[params]]
 key = "toolhead.offset.z"
 configKey = "ZOffset"
@@ -560,7 +604,7 @@ mergeGroup = "offset"
 pinned = true
 
 [params.machineVariants]
-"A1" = 3.85
+"A1" = 3.9
 "A1_MINI" = 3.9
 "A1_MINI:FAST" = 3.9
 "A1_MINI:FASTV3.3" = 3.9
@@ -571,6 +615,14 @@ pinned = true
 "P2S:STANDARD" = 1.1
 "X1C" = 1.1
 "X1C:LITE" = 1.1
+"A1:STANDARD" = 3.9
+"A1:FAST" = 3.9
+"A1:FASTV3.3" = 3.9
+
+[params.follows]
+"P1S:LITE" = false
+"P2S:STANDARD" = false
+"X1C:LITE" = false
 
 [[params]]
 key = "toolhead.prime_length"
@@ -1479,6 +1531,11 @@ pinned = false
 "A1:FASTV3.3" = "auto"
 "A1:STANDARD" = "auto"
 "A1_MINI:FASTV3.3" = "auto"
+
+[params.follows]
+"A1:FASTV3.3" = false
+"A1:STANDARD" = false
+"A1_MINI:FASTV3.3" = false
 
 [[params]]
 key = "wiping.ironing_suppress_expand"

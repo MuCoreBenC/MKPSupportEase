@@ -83,7 +83,13 @@ pub fn normalize_registry(src: &str) -> Result<String, AppError> {
 
     for p in &file.params {
         let v = serde_json::to_value(p).map_err(json_err)?;
-        render_head(&mut out, "[[params]]", &v, &["machineVariants"])?;
+        render_head(
+            &mut out,
+            "[[params]]",
+            &v,
+            /* 这两张都是子表，各写在下面 */
+            &["machineVariants", "follows"],
+        )?;
         /* 子表：`[params.machineVariants]` —— 变体键一律双引号（作者：「都用引号也可以」） */
         if let Some(mv) = v.get("machineVariants").and_then(|x| x.as_object()) {
             if !mv.is_empty() {
@@ -93,6 +99,20 @@ pub fn normalize_registry(src: &str) -> Result<String, AppError> {
                 keys.sort();
                 for k in keys {
                     out.push_str(&format!("{} = {}\n", quote(k), scalar(&mv[k])));
+                }
+            }
+        }
+        /* 子表：`[params.follows]` —— **跟不跟基底**（2026-11-03）。
+        只有 `false`（不跟随）会在这儿，跟随 = 没有这个键。
+        ⚠ 重排必须认识它：不认就会在 `render_head` 里被当成"内联表"摊成一行，
+        读回来还能读，但作者看不出它在说什么，而且第二次重排会再变一遍。 */
+        if let Some(fw) = v.get("follows").and_then(|x| x.as_object()) {
+            if !fw.is_empty() {
+                out.push_str("\n[params.follows]\n");
+                let mut keys: Vec<&String> = fw.keys().collect();
+                keys.sort();
+                for k in keys {
+                    out.push_str(&format!("{} = {}\n", quote(k), scalar(&fw[k])));
                 }
             }
         }

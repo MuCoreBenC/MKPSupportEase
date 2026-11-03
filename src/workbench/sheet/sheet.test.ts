@@ -5,6 +5,7 @@ import {
   applyDraftToDesk,
   cellKeyOf,
   dirtyOf,
+  draftAfterWrite,
   rawOf,
   savedRawOf,
   settleDraft,
@@ -109,6 +110,21 @@ describe('rawOf —— 值到 TOML 原文的唯一转换点', () => {
     expect(rawOf(0.15)).toBe('0.15')
     expect(rawOf(true)).toBe('true')
     expect(rawOf('tower')).toBe('tower')
+  })
+})
+
+/* ---------- 写完之后本地挂什么 ---------- */
+
+describe('draftAfterWrite —— 「跟随基底」不钉值（2026-11-03 作者报的那条）', () => {
+  it('写值：钉我的原文', () => {
+    expect(draftAfterWrite('90')).toEqual({ raw: '90' })
+  })
+
+  it('跟随基底（null）：**什么也不挂** —— 值由后端同步成基底那个数', () => {
+    /* 以前挂的是 `rawOf(cell.rest)`（保存值）：后端写进去的是基底值，二者
+       永远不相等 ⇒ `settleDraft` 收不掉 ⇒ 徽章写着「跟随基底」，数字却停在
+       三步以前那个，改基底一动不动。 */
+    expect(draftAfterWrite(null)).toBeNull()
   })
 })
 

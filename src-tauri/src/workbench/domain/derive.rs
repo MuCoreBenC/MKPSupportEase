@@ -863,7 +863,31 @@ impl<'a> Book<'a> {
             return Cell::not_applicable();
         };
         let blocked = gate.map(|g| g.blocked(key)).unwrap_or_default();
-        let own = layers.has_own(col.level, key);
+        /* ---------- 徽章的唯一判据（2026-11-03） ----------
+         *
+         * 版本列：**只读 `[params.follows]`**，不看值、也不看"文件里有没有那一行" ——
+         * 那两个都是推断，而作者报的正是推断与行为对不上（写着「不跟随」，
+         * 改基底却跟着变）。判据的唯一实现是 `presetdata::follows::is_following`。
+         *
+         * 基底列：`badge_at` 本来就不给它挂徽章，这里保持 `has_own` ——
+         * 那个值只决定「↶ 挂回出厂」能不能点，与"跟谁"无关。
+         */
+        let own = match col.level {
+            Level::Version => {
+                let at = &col.key_of_level();
+                /* 草稿里挂着的那一条优先：`Book::new(..., &draft)` 这条路上
+                状态还没写进注册表（生产路径是"先 apply 到影子树、再画"，
+                草稿是空的，所以这里读到的就是文件里那句话） */
+                match self.draft.pending_follows(Level::Version, at, key) {
+                    Some(on) => !on,
+                    None => !crate::workbench::presets::follows::is_following(
+                        p,
+                        &variant_key(Level::Version, at),
+                    ),
+                }
+            }
+            Level::Machine => layers.has_own(col.level, key),
+        };
 
         // 「谁把我关了」的整句 + 跳转目标。`blocked` 是**根在前**排的，
         // 所以取第一条就是"最上游那个要先动的东西"，中间环节不必全列出来
@@ -990,6 +1014,32 @@ impl<'a> Book<'a> {
         {
             return true;
         }
+        /* **跟随状态变了也算改过**（2026-11-03）。点了「跟随基底」而值本来就等于
+        基底时，行里一个字节都没变 —— 只比值的话这一格会显示"没动过"，
+        可它真的有一条状态改动等着保存。判据与徽章同一份。 */
+        if col.level == Level::Version {
+            let uid = variant_key(Level::Version, &col.key_of_level());
+            if self
+                .draft
+                .pending_follows(col.level, &col.key_of_level(), key)
+                .is_some()
+            {
+                return true;
+            }
+            let before = self
+                .rest()
+                .registry
+                .param(key)
+                .map(|p| crate::workbench::presets::follows::is_following(p, &uid));
+            let now = self
+                .presets
+                .registry
+                .param(key)
+                .map(|p| crate::workbench::presets::follows::is_following(p, &uid));
+            if before != now {
+                return true;
+            }
+        }
         /* 这一层"自己那一行"的两份值：盘上（`rest_base`）与现在（`layers`） */
         let own_before = self.base_own_at(col, key);
         let own_now = col
@@ -1017,12 +1067,19 @@ impl<'a> Book<'a> {
     }
 
     /// 盘上那一份里，**这一层自己钉着吗**（只决定还原怎么写，见 [`Cell::rest_pinned`]）。
+    ///
+    /// 版本列问的是"盘上当时跟不跟"（`follows`），不是"有没有那一行"：
+    /// 跟随的版本现在也会有自己的一行值（同步成基底的那个数），
+    /// 拿行判会把「↶ 还原」写成"写回一个数"，于是还原之后状态从不跟随开始。
     fn base_pinned_at(&self, col: &ResolvedCol<'_>, key: &str) -> bool {
         let Some(p) = self.rest().registry.param(key) else {
             return false;
         };
-        p.machine_variants
-            .contains_key(&variant_key(col.level, &col.key_of_level()))
+        let uid = variant_key(col.level, &col.key_of_level());
+        match col.level {
+            Level::Version => !crate::workbench::presets::follows::is_following(p, &uid),
+            Level::Machine => p.machine_variants.contains_key(&uid),
+        }
     }
 
     /// 这一格挂哪档徽章：**跟不跟基底**（见 [`Cell::badge`]）。
@@ -1776,22 +1833,23 @@ pub struct Cell {
     /// （`variants.rs:28`），于是「你点的那一层有没有钉」跟「值变没变」会分叉 ——
     /// 作者在「A1 / 标准版」列改值、值落到机型基底，那一列就永远判不脏。
     pub rest: Option<Value>,
-    /// 盘上那一份里，**这一层自己钉着吗**。
+    /// 盘上那一份里，**这一层自己钉着吗**（版本列问的是"盘上当时跟不跟"）。
     ///
-    /// 只用于**还原动作怎么写**：
-    /// - `true` ⇒ 写回 `rest` 那个值（磁盘上本来就有这一层，恢复它的钉状态）；
-    /// - `false` ⇒ 写 `null` **删键**（磁盘上这层是空的，恢复它的"没钉"状态）。
+    /// ★ **2026-11-03：它不再决定「回到保存值」怎么写。** 那颗按钮（`↩ 保存值 X`）
+    /// 现在**总是写回 `rest` 那个数** —— 点完这一层就是不跟随、值就是保存值。
+    /// 以前它按这里分叉（没钉 ⇒ 发 `null` 挂回继承），于是"点保存值"变成了
+    /// "跟随基底"（作者报的「按了保存值它却变成了跟随值」）。
     ///
-    /// 不能只看 `rest` 有没有值来决定：版本层继承机型层时 `rest` 有值但这一层没钉，
-    /// 写一个值回去就把继承钉死了。
+    /// 留着它是因为别处还要答"保存的那一份里这层本来有没有自己的一行"
+    /// （见 `app::sheet` 的 `saved_pinned`）。
     pub rest_pinned: bool,
     /// 这一格挂哪档徽章：**跟不跟基底**（2026-11-02 作者定稿，只剩两档）。
     ///
     /// `None` = **基底列**，不挂 —— 基底是根，谈不上跟不跟谁。
     ///
-    /// 判据只有一条：这一层归并后**有没有自己的一行**（`has_own`）。
-    /// 有就是「不跟随」，**不管值和基底是否相同** —— 作者的口径是
-    /// 「改过就不跟随」，`70 → 75 → 70` 之后那一行照样留着，照样算不跟随。
+    /// 判据只有一条：注册表 `[params.follows]` 里那句状态（`follows::is_following`，
+    /// 2026-11-03）。**与值是否等于基底无关、与归并后有没有自己那一行也无关** ——
+    /// 跟随的版本现在照样会留着自己的一行（同步成基底的那个数）。
     ///
     /// 「改了还没保存」不在这档里：徽章不随保存状态跳，未保存由还原按钮表达。
     pub badge: Option<ParamStatus>,
@@ -2516,9 +2574,13 @@ mod tests {
         assert_eq!(moved, 2, "两个版本都没写过它，所以两个都该跟着变");
     }
 
-    /// 草稿里删键（挂回继承）**在保存之前就要看得出效果**
+    /// **「跟随基底」在保存之前就要看得出效果**（2026-11-03 改判）。
+    ///
+    /// 与旧的"删键"不同：**值留着**并同步成当前基底（作者：「值虽然一直存在，
+    /// 但状态是跟随」），变的是**状态** —— 于是这一格从此跟着基底走，
+    /// 徽章报「跟随」而不是「不跟随」。
     #[test]
-    fn a_pending_delete_shows_up_before_saving() {
+    fn following_the_base_keeps_the_value_and_shows_up_before_saving() {
         // 「已经写过的那一条」只能造在 registry 里 —— 值在这一层唯一的落盘处
         let (_dir, presets) =
             saved_values(&[("wiping.child", "A1:STANDARD", serde_json::json!(99))]);
@@ -2533,7 +2595,7 @@ mod tests {
         );
         assert!(
             l.has_own(Level::Version, "wiping.child"),
-            "这一层自己钉着它"
+            "这一层自己写着它（`saved_values` 写值 ⇒ 不跟随）"
         );
 
         apply(
@@ -2549,18 +2611,39 @@ mod tests {
         )
         .unwrap();
 
-        // 挂回继承在这台机型上一路退到出厂默认：版本层删掉之后机型层那一项也不存在
-        // （有落差时它只退一层，见 `domain::layer` 的 detaching_falls_back_one_level_at_a_time）
+        /* 值同步成基底：版本层没有值 → 机型层也没有 → 出厂 20。
+        跟随这个状态**不删那一行**，所以值确实写在这一版的行里（来源 = 版本层）；
+        "跟不跟随"由状态回答，不由有没有那一行回答 */
         let b = Book::new(&presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             *l.effective("wiping.child").unwrap().value,
-            serde_json::json!(20.0)
+            serde_json::json!(20.0),
+            "值留着，同步成当前基底"
         );
-        assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
+        assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Version);
         assert!(
-            !l.has_own(Level::Version, "wiping.child"),
-            "自有那一项该没了"
+            l.has_own(Level::Version, "wiping.child"),
+            "「跟随」不等于「删掉这一行」—— 值还在"
+        );
+
+        /* 状态在草稿里：值与状态是**同一笔**（撤销一起回退、保存一起落盘） */
+        assert_eq!(
+            d.pending_follows(Level::Version, "A1/STANDARD", "wiping.child"),
+            Some(true),
+            "状态与值同一笔草稿"
+        );
+        let cell = b
+            .matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None)
+            .rows
+            .into_iter()
+            .find(|r| r.key == "wiping.child")
+            .unwrap()
+            .cells[0]
+            .clone();
+        assert!(
+            !cell.own,
+            "徽章报「跟随基底」—— 判据是草稿里那句状态，不是有没有那一行"
         );
     }
 

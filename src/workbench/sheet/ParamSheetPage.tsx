@@ -90,6 +90,7 @@ import {
   applyDraftToDesk,
   applyDraftToMatrix,
   cellKeyOf,
+  draftAfterWrite,
   rawOf,
   settleDraft,
   type DraftEntry,
@@ -106,7 +107,7 @@ import CellEditor from '../views/CellEditor'
 import CompareMatrix from '../views/CompareMatrix'
 import ParamDefModal from '../views/ParamDefModal'
 import { nextSectionId } from '../views/sectionId'
-import ParamDetail, { StatusTag } from '../views/ParamDetail'
+import ParamDetail, { StatusDot } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
 import ComponentSlot from '../views/ComponentSlot'
@@ -130,8 +131,12 @@ const colSplit = (id: string): { m: string; uid: string } => {
 }
 
 /** 两条竖线的可拖范围（C14 第三/四轮的量）。默认 176 / 320，min 是「读得出名字」那条线 */
+/** 左栏「钉住 / 收起」记在哪（`'0'` = 收起；没有这个键 = 钉住） */
+const RAIL_PIN_KEY = 'mkp.wb.pRail.pinned'
+
 const RAIL = { dft: 176, min: 152, max: 320 }
-const ASIDE = { dft: 320, min: 240, max: 620 }
+/* max 620 → 760（2026-11-03）：详情栏那几行要摆两颗回退按钮 + 控件，620 常常不够 */
+const ASIDE = { dft: 320, min: 240, max: 760 }
 
 /**
  * 「页面上的行」有多少条。与表头那个 `total` **不是**一个数 ——
@@ -287,9 +292,28 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
    * 不用先去点页头那枚把手。点把手仍可收起 —— 收起后鼠标扫过把手临时浮出，
    * 切版本照样零点击。
    */
-  const [railPinned, setRailPinned] = useState(true)
+  /*
+   * ★ 折叠状态**记在本地**（2026-11-03 作者：「不管窗口宽度大小，我都能主动折叠，
+   * 而且记住」）。以前是裸 `useState(true)`：切页 / 重开软件就自己弹回来，
+   * 每次都要重新收一遍。与栏宽同一个命名空间（`mkp.wb.…`）。
+   * **没有任何宽度条件** —— 窗口多小都折得动。
+   */
+  const [railPinned, setRailPinned] = useState(() => {
+    try {
+      return localStorage.getItem(RAIL_PIN_KEY) !== '0'
+    } catch {
+      return true
+    }
+  })
   const [railFloat, setRailFloat] = useState(false)
   const railOpen = railPinned || railFloat
+  useEffect(() => {
+    try {
+      localStorage.setItem(RAIL_PIN_KEY, railPinned ? '1' : '0')
+    } catch {
+      /* 隐私模式 / 配额满：记不住不算错误 */
+    }
+  }, [railPinned])
   /* 把手在页头：离开后延时 220ms 收起（够走过去、又不至于赖着不走） */
   const railTimer = useRef<number | null>(null)
   const openFloat = () => {
@@ -840,15 +864,16 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
      * 脏不脏**由值决定**（`draftOverlay.dirtyOf`：显示值 ≠ 保存值），所以
      * "改回原值"这一刻徽章就灭了，不必等后端把值写回去。
      *
-     * ★ `next === null` = **删键挂回继承**，不是"值变成空"（2026-11-02 作者：
-     * 「我点了那一个徽章，它就变成了零，并且是红色的」）。删键之后的有效值就是
-     * 保存值（`cell.rest` 本来就是三层算完的那一份），所以草稿要记它 ——
-     * 记成空串的话，数字控件 `Number('') === 0` 会把这一格显示成 0 并标红。
+     * ★ `next === null` = **「跟随基底」**（不是"值变成空"）：这一笔之后的值是
+     * **基底的当前值**，只有后端知道 —— 所以本地**一个数都不钉**（见
+     * `draftAfterWrite`）。以前钉的是 `cell.rest`（保存值），结果徽章写着跟随、
+     * 数字永远停在旧值上，改基底一动不动（2026-11-03 作者报的）。
      */
-    const nextRaw = next ?? (cell !== undefined && cell !== null ? rawOf(cell.rest) : '')
+    const entry = draftAfterWrite(next)
     setDraft((prev) => {
       const copy = new Map(prev)
-      copy.set(cellKey, { raw: nextRaw })
+      if (entry === null) copy.delete(cellKey)
+      else copy.set(cellKey, entry)
       return copy
     })
 
@@ -2354,6 +2379,12 @@ function ParamLine({
           {Array.from({ length: row.depth }, (_, i) => (
             <i key={i} className={s.pIndent} aria-hidden />
           ))}
+          {/*
+            状态**在名字前面**（2026-11-03 作者：「不要占位置，放到左边字段那边，
+            靠颜色就行」）—— 一小枚点：蓝实心=自己钉着、蓝空心=跟随、红=已弃用、
+            灰空心=不适用；全称与解释在悬停里（见 `StatusDot`）。
+          */}
+          <StatusDot cell={cell} words={words} dep={dep} />
           <span className={s.pRowText}>{row.label}</span>
           {/* 单位不写在这里：数字控件的单位本来就在框里（C14 第十四轮） */}
         </span>
@@ -2368,34 +2399,37 @@ function ParamLine({
           **这一格改了才出来**（`cell.dirty`，含还没落库的乐观那几格）；点它 = 把这层
           写回**盘上钉着的那个值**（`Cell.rest`，草稿不算）。
 
-          与右栏那枚 `↶`（挂回继承、写 `null` 删键）**不是一回事**：那枚是"跟随别人"，
-          这枚是"退回我原来的"。title 里把这条差别说清。
+          与右栏那颗蓝色「跟随 x」（写 `null` ⇒ 跟随基底，值变成**基底的当前值**）
+          **不是一回事**：那颗是"交给基底"，这颗是"退回我上次保存的数"。
         */}
         {cell.dirty && before !== null && cell.editable && !dep && (
           <button
             type="button"
             className={s.pRevert}
-            data-tip={`恢复修改前的值：${String(before)}（这一层保存前是多少，不是「恢复出厂默认」）`}
+            data-tip={`回到保存值 ${String(before)} —— 上次保存时这一层是多少。点了它就是「不跟随」（自己钉住这个数）；想让值跟着基底走，用右栏那颗「跟随」`}
             onClick={() =>
               onWrite(
                 row,
                 param,
                 ownerMachineId,
                 uid,
-                /* 盘上这一层本来钉着 ⇒ 写回那个值；没钉 ⇒ 写 null **删键**挂回继承。
-                   写值会把继承钉死（`A1:STANDARD` 那格会从此不再跟随 `defaultValue`）。
+                /* **总是写回那个值**（2026-11-03 作者裁定）：这颗按钮叫「回到保存值」，
+                   点完这一层就是 `rest` 那个数、并且**不跟随**。
+                   以前这里还看 `restPinned`（这一层在保存的那一份里钉着没），没钉就
+                   发 null 挂回继承 —— 于是"点保存值"反而变成了"跟随基底"，正是作者
+                   报的「按了保存值它却变成了跟随值」。
 
-                   ★ 这里**不许**再写 `String(cell.rest)`：`rest` 为 `null` 时它得到
-                   `"null"`，数字控件解析失败就回落成 `0` —— 作者看到的「点 ↩ 70
-                   变 0」正是这一行。`rawOf` 把 null 显式落成空串。 */
-                cell.restPinned && cell.rest !== null ? rawOf(cell.rest) : null,
+                   `rest` 为 `null` 的说法不在这一支（按钮由 `before !== null` 挡着），
+                   但仍用 `rawOf`：`String(null)` 会得到 `"null"`，数字控件回落成 0
+                   （作者看到过的「点 ↩ 70 变 0」）。 */
+                rawOf(cell.rest),
                 undefined,
                 String(cell.raw ?? ''),
                 cell,
               )
             }
           >
-            ↩ {String(before)}
+            保存值 {rawOf(before)}
           </button>
         )}
         <CellEditor
@@ -2408,20 +2442,14 @@ function ParamLine({
           onOpenGcode={() => onOpenGcode(row.key)}
         />
       </span>
-      {cell.editable ? (
-        <StatusTag cell={cell} words={words} />
-      ) : dep ? (
-        /* 「已弃用」借用状态徽章那副长相 —— 与「出厂默认 / 机型默认 / 本版修改 /
-           已修改」占同一列，行尾的竖线不会因为它参差 */
-        <span
-          className={`${s.pStatus} ${s.pStatusDep}`}
-          data-tip={words.paramDeprecated.explain ?? undefined}
-        >
-          {words.paramDeprecated.label}
-        </span>
-      ) : (
+      {/*
+        ★ 右列那枚状态徽章**没了**（2026-11-03 作者：「不要在右侧占位置」）：
+        跟不跟随 / 已弃用 / 不适用都收进名字前那枚点里，值那一格因此宽出一截。
+        只有"要 X 才可改"那句还留在右边 —— 它是操作指引，不是状态。
+      */}
+      {!cell.editable && !dep && cell.blockedHint !== null && (
         <span className={s.pRowBlock} data-tip={cell.blockedNote ?? undefined}>
-          {cell.blockedHint ?? words.placeholder.notApplicable}
+          {cell.blockedHint}
         </span>
       )}
     </div>

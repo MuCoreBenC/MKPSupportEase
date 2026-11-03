@@ -241,6 +241,24 @@ pub struct ParamDef {
     #[serde(default)]
     pub machine_variants: BTreeMap<String, Value>,
 
+    /// **这一版跟不跟基底**（2026-11-03）。与 `machine_variants` 并列、互不推导。
+    ///
+    /// 键只有一种形状：`"A1:STANDARD"`（见 [`super::follows::uid_of`]）。
+    /// **表里没有这个键 = 跟随**，只有 `false`（不跟随）会落盘 ——
+    /// 跟随是绝大多数格子的常态，写进文件会凭空多出几百行。
+    ///
+    /// 为什么它必须单独存在：值与状态是两件事。写了 `3.85` 的版本，
+    /// 可能是"跟着基底变过来的"，也可能是"自己定在 3.85" —— 靠值反推这一条
+    /// 正是作者报的「显示不跟随、改基底却跟着变」。判据唯一实现是
+    /// [`super::follows::is_following`]，徽章 / 写值 / 日志三处共用。
+    ///
+    /// ★ **不进 catalog**（2026-11-03）：交付目录与 `catalog.generated.json` 是
+    /// **客户端**读的那一份，客户端只认值、不关心"这一行是不是影子"。把它序列化
+    /// 出去会让每次改这条状态都动交付字节（闸要求发布才能提交），而客户端一个字节
+    /// 也用不上。`skip_serializing` 只关出口，读（TOML / 旧 catalog）照旧。
+    #[serde(default, skip_serializing)]
+    pub follows: BTreeMap<String, bool>,
+
     /// 按机型/版本的**范围**覆盖。这两张表是字段定义的机型特化，**不是配方值**，
     /// 所以不能走 `machine_variants` 那套归并（doc §3.2）
     #[serde(default)]
@@ -1392,6 +1410,56 @@ impl ParamRegistry {
         }
 
         self.params[at].machine_variants.remove(owner);
+        Ok(())
+    }
+
+    /// 改一个版本的**跟随状态**，落在 `[params.follows]` 里。
+    ///
+    /// `on = true`（跟随）**删掉那个键**：文件的默认形状就是跟随，写 `= true`
+    /// 只是多一行噪音，而且会让"表里没有"与"写着 true"变成两种同义写法
+    /// （同一条判据两个源）。`on = false` 才写 `= false`。
+    ///
+    /// 表被删空时**连表头一起删** —— 与 [`Self::clear_variant`] 同一口径：
+    /// 留一个空的 `[params.follows]` 读起来像"这里有状态"，而其实一条都没有。
+    ///
+    /// **只改状态，不碰值**：值同步是调用方（`app::storage` 那条写值路）的事，
+    /// 它会在**同一次** `apply_values` 里把两件事一起落盘。
+    pub fn set_following(&mut self, key: &str, uid: &str, on: bool) -> Result<(), AppError> {
+        let at = *self.index.get(key).ok_or_else(|| {
+            AppError::invalid_argument(messages::text(
+                "ui.presetdata.registry.300",
+                &[("key", key)],
+            ))
+        })?;
+        check_owner(uid)?;
+
+        let t = self.param_table_mut(at, key)?;
+        if on {
+            let left = match t.get_mut("follows").and_then(|i| i.as_table_mut()) {
+                Some(table) => {
+                    table.remove(uid);
+                    table.len()
+                }
+                None => 0,
+            };
+            if left == 0 {
+                t.remove("follows");
+            }
+        } else {
+            let table = t
+                .entry("follows")
+                .or_insert(toml_edit::Item::Table(toml_edit::Table::new()))
+                .as_table_mut()
+                .ok_or_else(|| {
+                    AppError::corrupted(messages::text(
+                        "ui.presetdata.registry.301",
+                        &[("key", key)],
+                    ))
+                })?;
+            table[uid] = toml_edit::value(false);
+        }
+
+        super::follows::set_following(&mut self.params[at], uid, on);
         Ok(())
     }
 
@@ -4024,6 +4092,8 @@ mod tests {
             "machineVariants",
             "machineMinVariants",
             "machineMaxVariants",
+            // 「这一版跟不跟基底」（2026-11-03）；读进 `ParamDef::follows`
+            "follows",
             "mergeGroup",
             "pinned",
             "serialization",
@@ -4513,6 +4583,81 @@ mod tests {
         assert_eq!(t["A1"], serde_json::json!(-3.5), "顺带把别的键改了");
     }
 
+    /// **值与「跟不跟基底」同一次落盘**（2026-11-03 的验收点）。
+    ///
+    /// 分成两次写的话，中途失败会留下"值改了、状态还是跟随"——
+    /// 下一次改基底就把它覆盖回去，而界面从头到尾没报过一句错。
+    ///
+    /// 这里盯三件事：
+    /// 1. 写值 ⇒ 同一笔里 `[params.follows]` 写上 `= false`（写过就是自己的值）；
+    /// 2. `follows: Some(true)` 的连带写**不会**把跟随项翻成独立值；
+    /// 3. 改回跟随 = 表里删掉那个键（文件回到默认形状，不留 `= true`）。
+    #[test]
+    fn value_and_follow_state_go_out_in_the_same_write() {
+        let Some(root) = crate::presetdata::repo_presets_root() else {
+            eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        copy_tree(&root, tmp.path());
+        let mut p = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+
+        /* ① 写值：一笔里同时带 `不跟随` */
+        p.apply_values(&[crate::presetdata::ValueEdit::write(
+            "toolhead.MKP_retract",
+            "A1:FAST",
+            serde_json::json!(-5.0),
+        )])
+        .unwrap();
+        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let q = again.registry.param("toolhead.MKP_retract").unwrap();
+        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-5.0));
+        assert!(
+            !crate::presetdata::follows::is_following(q, "A1:FAST"),
+            "写值与状态必须同一笔落地"
+        );
+
+        /* ② 连带写（改基底时跟着变的那些）：显式 `跟随` ⇒ 还是跟随 */
+        p.apply_values(&[crate::presetdata::ValueEdit::write(
+            "toolhead.MKP_retract",
+            "A1:FAST",
+            serde_json::json!(-6.0),
+        )
+        .with_follows(true)])
+            .unwrap();
+        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let q = again.registry.param("toolhead.MKP_retract").unwrap();
+        assert_eq!(q.machine_variants["A1:FAST"], serde_json::json!(-6.0));
+        assert!(
+            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            "连带写不许把跟随项翻成独立值"
+        );
+
+        /* ③ 改回跟随 = 删键（不留 `= true` 这种同义写法） */
+        p.apply_values(&[crate::presetdata::ValueEdit::keep(
+            "toolhead.MKP_retract",
+            "A1:FAST",
+            true,
+        )])
+        .unwrap();
+        let again = crate::presetdata::Presets::load_from(tmp.path()).unwrap();
+        let q = again.registry.param("toolhead.MKP_retract").unwrap();
+        assert!(
+            q.follows.is_empty(),
+            "跟随 = 表里没有这个键，实际：{:?}",
+            q.follows
+        );
+        assert!(
+            crate::presetdata::follows::is_following(q, "A1:FAST"),
+            "跟随"
+        );
+        assert_eq!(
+            q.machine_variants["A1:FAST"],
+            serde_json::json!(-6.0),
+            "只改状态不许碰值"
+        );
+    }
+
     /// **一条不合法 → 整批不写。**
     ///
     /// 这一条盯的是"部分成功"这种状态。它比失败更糟：失败能重试，
@@ -4579,7 +4724,8 @@ mod tests {
         let path = p.registry.file().to_path_buf();
         let before = std::fs::metadata(&path).unwrap().modified().unwrap();
 
-        p.apply_values(&[]).expect("空批次是合法的");
+        p.apply_values::<(String, String, Option<serde_json::Value>)>(&[])
+            .expect("空批次是合法的");
 
         assert_eq!(
             before,

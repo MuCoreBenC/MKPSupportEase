@@ -63,6 +63,24 @@ export const shownRawOf = (cell: Cell, e: DraftEntry | undefined): string =>
 export const dirtyOf = (cell: Cell, e: DraftEntry | undefined): boolean =>
   shownRawOf(cell, e) !== savedRawOf(cell)
 
+/**
+ * 写完一笔之后，这一格该在本地草稿里挂什么 —— `null` = **什么也别挂**。
+ *
+ * # 为什么要单列一条（2026-11-03 作者报的「显示跟随却不会跟着走」）
+ *
+ * 「跟随默认基底」在数据里的意思是**值会变成基底的当前值**，而那个数只有后端知道：
+ * 前端手里只有 `cell.rest`（**保存值**）。以前这里给它钉了 `rawOf(cell.rest)`，
+ * 于是本地永远显示那个旧数字 —— 后端写进去的是基底值，永远不等于 rest，
+ * `settleDraft` 一次也收不掉，格子就永远停在旧值上（作者截图：徽章「跟随基底」、
+ * 数字还是三步以前那个，改基底一动不动）。
+ *
+ * 「点徽章变 0 并标红」那个老坑不靠钉值解决：不挂草稿时 `shownRawOf` 读的是
+ * `cell.raw`（后端那份；跟随之后它一定是个数），根本走不到 `''` → `Number('')`。
+ */
+export function draftAfterWrite(next: string | null): DraftEntry | null {
+  return next === null ? null : { raw: next }
+}
+
 function patchRow(row: Row, cols: Col[], draft: ReadonlyMap<string, DraftEntry>): Row {
   let any = false
   const cells = row.cells.map((cell, i) => {

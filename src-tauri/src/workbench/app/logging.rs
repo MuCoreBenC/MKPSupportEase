@@ -59,6 +59,9 @@ impl KeyChange {
 pub enum Why {
     /// 用户直接改的那一格
     UserEdit,
+    /// **随基底生效**：这一版的状态是"跟随"，改机型基底时它跟着一起变
+    /// （2026-11-03 起判据是 `[params.follows]`，不是"值等于旧基底"）
+    Follows,
     /// 归并上提：改机型基底时，被一起写下去的版本键（本次会话没有直接改它们）
     Promoted,
     /// 复制配方 / 新建版本时铺的整批独立快照
@@ -74,6 +77,7 @@ impl Why {
     pub fn suffix(self) -> &'static str {
         match self {
             Self::UserEdit => "",
+            Self::Follows => "（随基底生效）",
             Self::Promoted => "（归并连带）",
             Self::CopySnapshot => "（复制快照）",
             Self::EmptyVariantsDropped => "（空表清理）",
@@ -85,6 +89,7 @@ impl Why {
     pub fn tag(self) -> &'static str {
         match self {
             Self::UserEdit => "user",
+            Self::Follows => "follows",
             Self::Promoted => "promoted",
             Self::CopySnapshot => "copy",
             Self::EmptyVariantsDropped => "empty",

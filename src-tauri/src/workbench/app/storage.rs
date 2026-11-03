@@ -48,11 +48,11 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
+use crate::presetdata::{ValueAction, ValueEdit};
 use crate::workbench::clock;
 use crate::workbench::domain::layer::Level;
 use crate::workbench::domain::patch::{
-    variant_key, BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft,
-    Visibility,
+    BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft, Visibility,
 };
 
 use crate::workbench::presets::Presets;
@@ -270,28 +270,83 @@ pub fn apply_draft_now_traced(
     if planned.is_empty() {
         return Ok((0, Vec::new()));
     }
-    let written = planned.len();
+    /* `written` 只数**真的写了行**的那些：「点跟随」当值本来就等于基底时一个字节的
+    值都没动，把它算进去会让日志里的 `written=n` 对不上 `changes=` 里的条数 */
+    let written = planned
+        .iter()
+        .filter(|e| !matches!(e.action, ValueAction::Keep))
+        .count();
     /* ★ `before` 必须**现在**取：`apply_values` 之后就问到刚写进去的值了 */
     let changes: Vec<logging::KeyChange> = planned
         .iter()
-        .map(|e| logging::KeyChange {
-            key: e.key.clone(),
-            owner: e.owner.clone(),
-            before: presets
+        .map(|e| {
+            let at_rest = presets
                 .registry
                 .param(&e.key)
                 .and_then(|p| p.machine_variants.get(&e.owner))
-                .cloned(),
-            after: e.value.clone(),
-            why: e.why,
+                .cloned();
+            let after = match &e.action {
+                ValueAction::Write(v) => Some(v.clone()),
+                ValueAction::Clear => None,
+                ValueAction::Keep => at_rest.clone(),
+            };
+            /* **只改了状态**（值本来就等于基底）：前后的值一模一样，那样的条目会被
+            事务当成"没变"剔掉 —— 于是「未保存 N」不动、撤销栈也没有这一笔。
+            这里把它写成**状态的前后**：「不跟随 → 跟随基底」。
+            这是界面上真实发生的事，也正是作者点下去想看到的那一行。 */
+            let (before, after) = if at_rest == after {
+                match e.follows {
+                    Some(on) if was_following(presets, &e.key, &e.owner) != Some(on) => {
+                        let was = was_following(presets, &e.key, &e.owner).unwrap_or(true);
+                        (
+                            Some(serde_json::Value::String(state_label(was).to_owned())),
+                            Some(serde_json::Value::String(state_label(on).to_owned())),
+                        )
+                    }
+                    _ => (at_rest.clone(), after),
+                }
+            } else {
+                (at_rest, after)
+            };
+            logging::KeyChange {
+                key: e.key.clone(),
+                owner: e.owner.clone(),
+                before,
+                after,
+                why: e.why,
+            }
         })
         .collect();
-    let edits: Vec<_> = planned
+    let edits: Vec<ValueEdit> = planned
         .into_iter()
-        .map(|e| (e.key, e.owner, e.value))
+        .map(|e| ValueEdit {
+            key: e.key,
+            owner: e.owner,
+            action: e.action,
+            follows: e.follows,
+        })
         .collect();
     presets.apply_values(&edits)?;
     Ok((written, changes))
+}
+
+/// 这一格**盘上**跟不跟基底；机型层没有这个概念（`None`）。
+fn was_following(presets: &Presets, key: &str, owner: &str) -> Option<bool> {
+    if !owner.contains(':') {
+        return None;
+    }
+    let p = presets.registry.param(key)?;
+    Some(crate::presetdata::follows::is_following(p, owner))
+}
+
+/// 状态在界面上怎么说 —— 与徽章同一套字（[`crate::workbench::domain::wording`]）
+fn state_label(following: bool) -> &'static str {
+    use crate::workbench::domain::wording::param_status;
+    if following {
+        param_status::FOLLOW_LABEL
+    } else {
+        param_status::OWN_LABEL
+    }
 }
 
 /* ★ **这里原来有一条 `normalize_same_as_inherited`，2026-11-02 删掉了。**
@@ -300,7 +355,9 @@ pub fn apply_draft_now_traced(
  * 「我的值改过之后，就不跟随基底了……改动过的都不跟随，除非右键改成跟随默认基底」。
  *
  * 于是 `70 → 75 → 70` 之后文件里留着那一行 `= 70`，界面显示「不跟随」。
- * 要让某格回到跟随，走「跟随默认基底」（`SetValue { value: None }` 删键）。
+ * 要让某格回到跟随，走「跟随默认基底」（`SetValue { value: None }`）——
+ * 2026-11-03 起它不再删键，而是把状态写成 `[params.follows]` 里的"跟随"
+ * 并把值同步成基底，见 `patch::apply_one` 里那段「值与状态同时写进草稿」。
  *
  * 代价是文件里会多出一些"值与基底相同"的行 —— 作者已知并接受。
  * 换来的是**没有隐含规则**：写过的就是写过的，界面不会再自己跳回「跟随」。 */
@@ -351,7 +408,7 @@ pub fn save(
     })
 }
 
-/// 草稿里的值改动 → [`Presets::apply_values`] 要写的那一批 `(字段 key, owner, 值)`。
+/// 草稿里的值改动 → [`Presets::apply_values`] 要写的那一批。
 ///
 /// # 为什么机型层的一条改动可能要落好几个键
 ///
@@ -363,14 +420,15 @@ pub fn save(
 /// 值又变回去了，而且没有任何一步报错** —— 这正是 Task 12.3 要处理的第一件事。
 /// 反过来，版本层的一条改动**只写一个键**：`A1:FAST` 之外一个都不动 ——
 /// 顺手删掉裸键 `A1` 会让别的版本失去它们继承来的那个值。
-fn plan_value_edits(
-    presets: &Presets,
-    committed: &Committed,
-    draft: &Draft,
-) -> Vec<(String, String, Option<serde_json::Value>)> {
+fn plan_value_edits(presets: &Presets, committed: &Committed, draft: &Draft) -> Vec<ValueEdit> {
     plan_value_edits_why(presets, committed, draft)
         .into_iter()
-        .map(|e| (e.key, e.owner, e.value))
+        .map(|e| ValueEdit {
+            key: e.key,
+            owner: e.owner,
+            action: e.action,
+            follows: e.follows,
+        })
         .collect()
 }
 
@@ -378,16 +436,29 @@ fn plan_value_edits(
 struct PlannedEdit {
     key: String,
     owner: String,
-    value: Option<serde_json::Value>,
+    action: ValueAction,
+    /// `Some(..)` = 这一笔同时把跟随状态改成它；`None` = 按
+    /// [`ValueEdit::resolved_follows`] 的默认规则
+    follows: Option<bool>,
     why: logging::Why,
 }
 
 /// 同 [`plan_value_edits`]，但每条都带着 `why`。
 ///
-/// 机型层那一步会**连带**写出上提过的版本键 —— 那些键用户这一笔没碰过，
-/// 只是"不写就会被下一次归并抹掉"。这正是作者最困惑的
-/// 「改一次基底，几个版本跟着动」，所以它们必须标成 [`Why::Promoted`]，
-/// 不许混成"用户改的"。
+/// # 判据只有一个：`follows` 状态（**不看值、不看有没有那一行**）
+///
+/// ```text
+/// 改机型基底
+///   ├─ 写基底那一条（why = 用户改）
+///   └─ 遍历该机型所有版本：
+///        ├─ is_following(uid) == true  → 写新值（why = 随基底生效）
+///        └─ is_following == false      → 一个字节都不写
+/// ```
+///
+/// 这条判据就是徽章那条（[`crate::presetdata::follows::is_following`]）。
+/// 作者 2026-11-03 的原话：「它显示了不跟随，但我改基底的时候它还是一样跟着变……
+/// 它应该跟徽章一样的状态」。以前这里读的是"文件里有没有 `机型:版本` 那一行"、
+/// 更早还读过"值等不等于旧基底" —— 两个都是推断，而状态现在真的写在文件里。
 fn plan_value_edits_why(
     presets: &Presets,
     committed: &Committed,
@@ -401,85 +472,62 @@ fn plan_value_edits_why(
     用旧清单算，新版本上改的值会被静默丢掉。 */
     for m in presets.catalog.machines() {
         let version_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
-        for (key, value) in pending_of(draft, Level::Machine, &m.id) {
-            /* ★ 2026-11-03 重写（作者：「同样操作不该因机型不同而行为不同」）。
-            旧代码只看 `promoted_to_base()` —— 那个判据读的是**文件里有没有版本键**，
-            于是同一套模型（基底 + 三版本继承）在 A1 与 A1_MINI 上写成不同的键数：
-            A1 没版本键 ⇒ 只写 1 个；A1_MINI 有冗余版本键 ⇒ 写 4 个。
-            这是拿"历史文件长什么样"当业务规则。
-
-            现在按**模型**算：这一格的基底变了，每个版本自己的那一行要不要跟着动，
-            取决于**它有没有自己那一行**：
-
-            - 有自己那一行 ⇒ 保持它的旧值（用户钉过的独立值不许被基底抹掉），
-              只把**已经等于旧基底**的那些跟着改（它们本来就等于基底，不改就会被
-              下一次归并重新提上来，把这一刀抹回去）。
-            - 没有自己那一行 ⇒ 什么都不写，它继承基底，行为上已经跟着变了。
-
-            文件里写几行（存储归并）与用户看到几处变化（有效字段）是两件事 ——
-            后者由 `app::effective_fields` 按继承关系展开，不靠这里复制键。 */
+        for p in pending_edits(draft, Level::Machine, &m.id) {
+            /* 基底那一条本身没有"跟随"可言（它是这条链的根），状态不动 */
+            let action = p.action.clone().unwrap_or(ValueAction::Keep);
             out.push(PlannedEdit {
-                key: key.clone(),
+                key: p.key.clone(),
                 owner: m.id.clone(),
-                value: value.clone(),
+                action: action.clone(),
+                follows: None,
                 why: logging::Why::UserEdit,
             });
-            let Some(param) = presets.registry.param(&key) else {
+            let Some(param) = presets.registry.param(&p.key) else {
                 continue;
             };
-            /* 旧基底：这一笔落笔之前**界面上显示的那个基底值**。
-            没有裸键时（P1S 那种：只有一个版本，值全写在 `P1S:LITE` 上，
-            归并把它当成基底显示）要拿"版本键里那个共同值"当旧基底 ——
-            否则 `old_base = None` 会让每个版本键都判成"用户钉过"，
-            于是值改了、版本键不动，保存之后又被版本键盖回去。 */
-            let old_base = param
-                .machine_variants
-                .get(&variant_key(Level::Machine, &m.id))
-                .cloned()
-                .or_else(|| {
-                    /* 所有版本键都写了同一个值 ⇒ 那就是原基底 */
-                    let mut it = version_ids.iter().filter_map(|vid| {
-                        param
-                            .machine_variants
-                            .get(&variant_key(Level::Version, &format!("{}:{}", m.id, vid)))
-                    });
-                    let first = it.next()?;
-                    /* 只要有一个版本是别的值，就没有"统一基底"可言 */
-                    version_ids
-                        .iter()
-                        .all(|vid| {
-                            param
-                                .machine_variants
-                                .get(&variant_key(Level::Version, &format!("{}:{}", m.id, vid)))
-                                == Some(first)
-                        })
-                        .then(|| first.clone())
-                });
+            /* 版本那条：**跟随的才写**。
+            写进去之后必须显式 `follows: Some(true)` —— 默认规则是"写值 ⇒ 不跟随"，
+            不显式的话这一笔会把所有跟随项变成独立值，下一次改基底就再也带不动它们了。 */
             for vid in &version_ids {
-                let vk = variant_key(Level::Version, &format!("{}:{}", m.id, vid));
-                let Some(own) = param.machine_variants.get(&vk) else {
-                    continue;
-                };
-                /* 有独立值且不等于旧基底 ⇒ 用户钉过，保住它 */
-                if old_base.as_ref() != Some(own) {
+                let uid = crate::presetdata::follows::uid_of(&m.id, vid);
+                if !crate::presetdata::follows::is_following(param, &uid) {
                     continue;
                 }
                 out.push(PlannedEdit {
-                    key: key.clone(),
-                    owner: format!("{}:{}", m.id, vid),
-                    value: value.clone(),
-                    why: logging::Why::Promoted,
+                    key: p.key.clone(),
+                    owner: uid,
+                    action: action.clone(),
+                    follows: Some(true),
+                    why: logging::Why::Follows,
                 });
             }
         }
 
         for vid in &version_ids {
-            let uid = format!("{}/{}", m.id, vid);
-            for (key, value) in pending_of(draft, Level::Version, &uid) {
+            let uid_slash = format!("{}/{}", m.id, vid);
+            let uid = crate::presetdata::follows::uid_of(&m.id, vid);
+            for p in pending_edits(draft, Level::Version, &uid_slash) {
+                let Some(action) = p.action else {
+                    /* 只改状态、不动值：点「跟随基底」时那一行本来就等于基底，
+                    值不用重写（重写只会让数字的写法漂一遍） */
+                    if let Some(on) = p.follows {
+                        out.push(PlannedEdit {
+                            key: p.key,
+                            owner: uid.clone(),
+                            action: ValueAction::Keep,
+                            follows: Some(on),
+                            why: logging::Why::UserEdit,
+                        });
+                    }
+                    continue;
+                };
+                /* 用户直接改这一版的值 ⇒ 它归自己（草稿层已经记了 `false`，
+                这里只把它带下去；没有记录时按同一条模型补上） */
                 out.push(PlannedEdit {
-                    key,
-                    owner: format!("{}:{}", m.id, vid),
-                    value,
+                    key: p.key,
+                    owner: uid.clone(),
+                    action,
+                    follows: p.follows.or(Some(false)),
                     why: logging::Why::UserEdit,
                 });
             }
@@ -489,16 +537,35 @@ fn plan_value_edits_why(
     out
 }
 
-/// 草稿里属于 `(level, owner)` 的那些值改动
-fn pending_of<'a>(
-    draft: &'a Draft,
-    level: crate::workbench::domain::Level,
-    owner: &'a str,
-) -> impl Iterator<Item = (String, Option<serde_json::Value>)> + 'a {
-    draft.values.iter().filter_map(move |(raw, v)| {
-        crate::workbench::domain::patch::split_value_key(raw, level, owner)
-            .map(|key| (key, v.clone()))
-    })
+/// 草稿里属于 `(level, owner)` 的那些格子 —— **值与状态合成一条**。
+///
+/// 两本账（`Draft::values` / `Draft::follows`）挂的是同一批键：
+/// 「改值 ⇒ 不跟随」与「点跟随 ⇒ 值同步」都是一处改动，分批写会让它们
+/// 落在两次 `write_back` 里 —— 那正是要避免的"值变了状态没变"。
+struct PendingEdit {
+    key: String,
+    /// `None` = 这一笔不动值
+    action: Option<ValueAction>,
+    follows: Option<bool>,
+}
+
+fn pending_edits(draft: &Draft, level: Level, owner: &str) -> Vec<PendingEdit> {
+    let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for raw in draft.values.keys().chain(draft.follows.keys()) {
+        if let Some(key) = crate::workbench::domain::patch::split_value_key(raw, level, owner) {
+            keys.insert(key);
+        }
+    }
+    keys.into_iter()
+        .map(|key| PendingEdit {
+            action: draft.pending(level, owner, &key).map(|v| match v {
+                Some(v) => ValueAction::Write(v.clone()),
+                None => ValueAction::Clear,
+            }),
+            follows: draft.pending_follows(level, owner, &key),
+            key,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -1000,6 +1067,230 @@ mod tests {
         let e = load(&s, &f.presets).unwrap_err();
         assert_eq!(e.code, crate::error::ErrorCode::Corrupted);
         assert!(e.detail.unwrap_or_default().contains("99"));
+    }
+
+    /* ---------- 「跟随状态」与值同一条事务（2026-11-03） ---------- */
+
+    /// **版本层写值 ⇒ 值与状态在同一条改动里**，不是两次 `write_back`。
+    ///
+    /// 作者要的验收点：不许出现"值变了、状态没变"（下一次改基底就会把它覆盖回去）。
+    #[test]
+    fn a_version_edit_carries_its_follow_state_in_one_edit() {
+        let (_dir, mut presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let c = load(&s, &presets).unwrap().committed;
+        let mut draft = Draft::default();
+
+        apply(
+            &mut draft,
+            &c,
+            &presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(7)),
+            }],
+        )
+        .unwrap();
+
+        let planned = plan_value_edits_why(&presets, &c, &draft);
+        assert_eq!(planned.len(), 1, "版本层一条改动只落一个键");
+        assert_eq!(
+            planned[0].action,
+            ValueAction::Write(serde_json::json!(7.0)),
+            "值在同一笔里"
+        );
+        assert_eq!(
+            planned[0].follows,
+            Some(false),
+            "状态也在同一笔里：写过就是自己的值"
+        );
+
+        save(&s, &mut presets, &c, &draft).unwrap();
+        let fresh = Presets::load_from(presets.root()).expect("重读");
+        assert!(
+            !crate::presetdata::follows::is_following(
+                fresh.registry.param("toolhead.offset.x").unwrap(),
+                "A1:STANDARD"
+            ),
+            "落盘之后这一版仍然是不跟随"
+        );
+    }
+
+    /// 点「跟随基底」：**值不动**（行本来就等于基底），状态和值同一批走
+    #[test]
+    fn following_the_base_keeps_the_value_and_flips_the_state() {
+        let (_dir, mut presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let c = load(&s, &presets).unwrap().committed;
+
+        /* 造一个"值等于基底、但不跟随"的格子：A1 没有裸键 ⇒ 基底是出厂 0.0，
+        于是给 A1:STANDARD 写同一个 0.0（写值本身就会把它标成不跟随） */
+        presets
+            .set_variant("toolhead.offset.x", "A1:STANDARD", &serde_json::json!(0.0))
+            .unwrap();
+        assert!(!crate::presetdata::follows::is_following(
+            presets.registry.param("toolhead.offset.x").unwrap(),
+            "A1:STANDARD"
+        ));
+
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: None,
+            }],
+        )
+        .unwrap();
+
+        let planned = plan_value_edits_why(&presets, &c, &draft);
+        assert_eq!(planned.len(), 1);
+        assert_eq!(
+            planned[0].action,
+            ValueAction::Keep,
+            "值本来就等于基底 ⇒ 一个字节都不重写"
+        );
+        assert_eq!(planned[0].follows, Some(true));
+
+        /* 只改了状态：事务里要留一条**看得懂**的记录，否则「未保存 N」不涨、
+        撤销栈里也没有这一笔（前后值一模一样时会被 `changed()` 剔掉） */
+        let (written, changes) = apply_draft_now_traced(&mut presets, &c, &draft).unwrap();
+        assert_eq!(written, 0, "一个字节的值都没写");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0].after.as_ref().and_then(|v| v.as_str()),
+            Some(crate::workbench::domain::wording::param_status::FOLLOW_LABEL),
+            "记的是「跟随基底」这一步，不是空改动"
+        );
+
+        let p = presets.registry.param("toolhead.offset.x").unwrap();
+        assert!(
+            crate::presetdata::follows::is_following(p, "A1:STANDARD"),
+            "状态翻成跟随"
+        );
+        assert_eq!(
+            p.machine_variants["A1:STANDARD"],
+            serde_json::json!(0.0),
+            "值留着（没有被删掉）"
+        );
+    }
+
+    /// **作者 2026-11-03 报的复现路径**（必须逐笔过，中间要刷影子树）。
+    ///
+    /// 1. 改 STANDARD 的值 → 它变成不跟随；
+    /// 2. 点它的徽章「跟随默认基底」→ 值同步成基底、状态变跟随；
+    /// 3. 再改基底 → **它必须跟着走**。
+    ///
+    /// 第 2 笔是"只改状态、不改值"（`ValueAction::Keep`）—— 这一笔要是没落地，
+    /// 第 3 笔的判据读到的还是 `false`，于是徽章写着跟随、值却一动不动。
+    #[test]
+    fn following_a_version_then_editing_the_base_carries_it_along() {
+        let (_dir, mut presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let c = load(&s, &presets).unwrap().committed;
+        let key = "toolhead.offset.x";
+
+        let mut step = |presets: &mut Presets, patch: Patch| {
+            let mut draft = Draft::default();
+            apply(&mut draft, &c, &presets.registry, &[patch]).unwrap();
+            apply_draft_now(presets, &c, &draft).unwrap();
+        };
+
+        /* ① 改这一版的值 ⇒ 不跟随 */
+        step(
+            &mut presets,
+            Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: key.to_owned(),
+                value: Some(serde_json::json!(2)),
+            },
+        );
+        let p = presets.registry.param(key).unwrap();
+        assert_eq!(p.machine_variants["A1:STANDARD"], serde_json::json!(2.0));
+        assert!(!crate::presetdata::follows::is_following(p, "A1:STANDARD"));
+
+        /* ② 点徽章「跟随默认基底」⇒ 值同步成基底（A1 没有裸键 ⇒ 出厂 0）、状态跟随 */
+        step(
+            &mut presets,
+            Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: key.to_owned(),
+                value: None,
+            },
+        );
+        let p = presets.registry.param(key).unwrap();
+        assert!(
+            crate::presetdata::follows::is_following(p, "A1:STANDARD"),
+            "第②笔之后必须真的跟随（不是只在草稿里）"
+        );
+        assert_eq!(p.machine_variants["A1:STANDARD"], serde_json::json!(0.0));
+
+        /* ③ 改基底 ⇒ 它跟着走 */
+        step(
+            &mut presets,
+            Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: key.to_owned(),
+                value: Some(serde_json::json!(5)),
+            },
+        );
+        let p = presets.registry.param(key).unwrap();
+        assert_eq!(p.machine_variants["A1"], serde_json::json!(5.0));
+        assert_eq!(
+            p.machine_variants["A1:STANDARD"],
+            serde_json::json!(5.0),
+            "跟随的那一版必须跟着基底走"
+        );
+        assert!(
+            crate::presetdata::follows::is_following(p, "A1:STANDARD"),
+            "跟着走之后仍然是跟随"
+        );
+    }
+
+    /// 改基底只带**正在跟随**的版本；不跟随的一个字节都不写
+    #[test]
+    fn a_machine_edit_only_rewrites_following_versions() {
+        let (_dir, presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let c = load(&s, &presets).unwrap().committed;
+        let mut draft = Draft::default();
+
+        apply(
+            &mut draft,
+            &c,
+            &presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "toolhead.offset.x".to_owned(),
+                value: Some(serde_json::json!(-30)),
+            }],
+        )
+        .unwrap();
+
+        let planned = plan_value_edits_why(&presets, &c, &draft);
+        let base = planned
+            .iter()
+            .find(|e| e.owner == "A1")
+            .expect("基底那一条");
+        assert_eq!(base.why, logging::Why::UserEdit);
+        assert_eq!(base.follows, None, "基底没有「跟不跟」可言");
+
+        /* 夹具里 A1 两版都是不跟随（各有各的值）⇒ 一个都不该被带写 */
+        assert!(
+            planned.iter().all(|e| !e.owner.starts_with("A1:")),
+            "不跟随的版本不许跟着变：{:?}",
+            planned.iter().map(|e| &e.owner).collect::<Vec<_>>()
+        );
     }
 
     /// 界面状态**后端不解析**：前端加一个开关不该需要动 Rust
