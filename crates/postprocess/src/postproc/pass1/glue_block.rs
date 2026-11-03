@@ -283,6 +283,52 @@ fn is_travel_line(line: &str) -> bool {
     code.starts_with("G1 ") && (code.contains('X') || code.contains('Y')) && !code.contains(" E")
 }
 
+/// 段首的**前导空走**：连续若干条不带 `E` 的移动。返回 (最后一条命令, 跳过几条)。
+///
+/// 这些点是切片器从**上一个特征**出发时的路径（它会先飞到特征前的位置、再飞到涂胶
+/// 起点）。我们的笔是从换笔位飞过来的，逐点复刻只会多绕一段 —— 作者 2026-11-04 指出的
+/// 「为什么先去 X137.456 而不直接到 X155.812」就是这一段。回位直接取这段的终点。
+fn leading_travel_run(seg: &[String]) -> Option<(String, usize)> {
+    let is_marker = |t: &str| {
+        t.contains(crate::gcode::MARKER_ZJUMP_START)
+            || t.contains(crate::gcode::MARKER_ZJUMP_INTERNAL)
+            || t.contains(crate::gcode::MARKER_MICRO_LIFT)
+    };
+    let mut i = 0;
+    while i < seg.len() {
+        let t = seg[i].trim();
+        if t.is_empty() || t.starts_with(';') {
+            i += 1;
+            continue;
+        }
+        break;
+    }
+    if i >= seg.len() {
+        return None;
+    }
+    // 第一条必须是空走；第一条就是涂胶行 ⇒ 没有前导段
+    let first = &seg[i];
+    if !(first.contains("G1 X") || first.contains("G1 Y")) || first.contains(" E") {
+        return None;
+    }
+    let mut end = i;
+    let mut j = i;
+    while j < seg.len() {
+        let t = seg[j].trim();
+        if t.is_empty() || is_marker(t) || t.starts_with("; FEATURE") || t.starts_with(";FEATURE") {
+            j += 1;
+            continue;
+        }
+        if (t.contains("G1 X") || t.contains("G1 Y")) && !t.contains(" E") {
+            end = j;
+            j += 1;
+            continue;
+        }
+        break;
+    }
+    Some((seg[end].trim().to_string(), end + 1))
+}
+
 /// `writeGlueLines`（pass1_emit.go:120）：发射一个段的涂胶移动。
 /// 注意：稀疏化分支会**修改** `lines`（Go 同名行为，调用方负责传拷贝）。
 fn write_glue_lines(
@@ -292,6 +338,7 @@ fn write_glue_lines(
     current_layer_height: f64,
     last_layer_height: f64,
     start_z: f64,
+    skip_leading: usize,
 ) -> Result<(), PostprocError> {
     use crate::gcode::MARKER_MICRO_LIFT;
     use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START};
@@ -367,7 +414,16 @@ fn write_glue_lines(
     // 重复的零长度空走会被误判成「需要抬一次」。
     let mut prev_x = 0.0;
     let mut prev_y = 0.0;
-    for l in lines.iter() {
+    if skip_leading > 0 {
+        if let Some(l) = lines.get(skip_leading - 1) {
+            let (x, y, ok) = parse_xy_from_g1(l.trim());
+            if ok {
+                prev_x = x;
+                prev_y = y;
+            }
+        }
+    }
+    for l in lines.iter().skip(skip_leading) {
         let t = l.trim();
         if is_travel_line(t) || (t.starts_with("G1 ") && t.contains(" E")) {
             let (x, y, ok) = parse_xy_from_g1(t);
@@ -388,8 +444,8 @@ fn write_glue_lines(
     let mut pen_z = start_z;
     let pen_is_up = |z: f64| z > land_z + 1e-6;
 
-    let mut emitted_move = false;
-    let mut idx = 0usize;
+    let mut emitted_move = skip_leading > 0;
+    let mut idx = skip_leading;
     while idx < lines.len() {
         let il = lines[idx].trim().to_string();
         if il.contains(MARKER_ZJUMP_START) {
@@ -799,7 +855,11 @@ pub(crate) fn emit_glue_block(
     for (seg_idx, seg) in segments.iter().enumerate() {
         // Go 侧此处先累计 segESum，但该值从未被消费（死存储），未移植。
 
-        let seg_start_cmd = find_seg_start_cmd(seg);
+        // 段首若是「先飞到特征前、再飞到起点」的两段空走，回位直接取后者（见 leading_travel_run）
+        let (seg_start_cmd, skip_leading) = match leading_travel_run(seg) {
+            Some((cmd, n)) => (cmd, n),
+            None => (find_seg_start_cmd(seg), 0),
+        };
 
         // 回位结束时笔**实际**在哪一格（喷嘴 Z）。发射层据此判断要不要再抬。
         let land_z = glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed);
@@ -1060,6 +1120,7 @@ pub(crate) fn emit_glue_block(
             current_layer_height,
             last_layer_height,
             start_z,
+            skip_leading,
         )?;
 
         for pass_idx in 1..ir_data.glue.pass_count {
@@ -1122,6 +1183,7 @@ pub(crate) fn emit_glue_block(
                 current_layer_height,
                 last_layer_height,
                 glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed),
+                0,
             )?;
         }
 
@@ -1280,6 +1342,7 @@ mod continuity_tests {
             LAYER_Z,
             LAST_LAYER_Z,
             glue_nozzle_z(&ir, LAST_LAYER_Z, PenZ::Landed),
+            0,
         )
         .expect("write_glue_lines 失败");
         sink.lines
