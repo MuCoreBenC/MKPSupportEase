@@ -322,9 +322,14 @@ pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
 /// `insertFeatureTransitionJumps`（delete_wipe.go:118）：在「非打印移动的间隙」
 /// 处插入 `;ZJUMP_INTERNAL[ ; FEATURE: ...]`，压缩特征过渡段。
 fn insert_feature_transition_jumps(lines: Vec<String>) -> Vec<String> {
+    /*
+     * 圆弧（`G2/G3 … E`）也是挤出移动。旧实现只认 `G1`，于是支撑面里成片的
+     * 圆弧被当成「非打印的间隙」整体替换成 `;ZJUMP_INTERNAL` —— 涂胶路径因此
+     * 丢了圆弧、只剩端点之间的直线（2026-11-03 作者看俯视图发现）。
+     */
     let is_print_move = |line: &str| -> bool {
         let trimmed = line.trim();
-        trimmed.starts_with("G1 ")
+        (trimmed.starts_with("G1 ") || trimmed.starts_with("G2 ") || trimmed.starts_with("G3 "))
             && (trimmed.contains('X') || trimmed.contains('Y'))
             && trimmed.contains(" E")
     };

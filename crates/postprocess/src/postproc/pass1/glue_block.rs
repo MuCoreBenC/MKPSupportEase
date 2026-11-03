@@ -149,16 +149,19 @@ fn emit_jump_run(
     ir_data: &Ir,
     current_layer_height: f64,
     last_layer_height: f64,
-) -> Result<(usize, f64, f64), PostprocError> {
+    already_up: bool,
+) -> Result<(usize, f64, f64, bool), PostprocError> {
     let lift_height = ir_data.glue.inter_model_lift_height;
-    sink.push_str(&format!(
-        "G1 F{}",
-        format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
-    ));
-    sink.push_str(&format!(
-        "G1 Z{}",
-        format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
-    ));
+    if !already_up {
+        sink.push_str(&format!(
+            "G1 F{}",
+            format_speed(ir_data.machine.travel_speed * super::MM_PER_MINUTE)
+        ));
+        sink.push_str(&format!(
+            "G1 Z{}",
+            format_z(glue_nozzle_z(ir_data, current_layer_height, PenZ::Hop))
+        ));
+    }
 
     let mut i = from;
     let mut moved = 0usize;
@@ -205,6 +208,24 @@ fn emit_jump_run(
         i = from + 1;
     }
 
+    /*
+     * 后面紧跟的仍然是标记 ⇒ 说明这一跳还没结束（切片器把一次跳转拆成多行，
+     * `delete_wipe` 又在中间插了标记）。此时**不许落**：保持抬着，由下一个标记接着走，
+     * 直到真正出现涂胶行再落。返回 `false` 表示「还抬着」。
+     */
+    let next_is_marker = lines
+        .get(i)
+        .map(|l| {
+            let t = l.trim();
+            t.contains(crate::gcode::MARKER_ZJUMP_START)
+                || t.contains(crate::gcode::MARKER_ZJUMP_INTERNAL)
+                || t.contains(crate::gcode::MARKER_MICRO_LIFT)
+        })
+        .unwrap_or(false);
+    if next_is_marker {
+        return Ok((i, last.0, last.1, false));
+    }
+
     sink.push_str(&format!(
         "G1 Z{}",
         format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
@@ -213,10 +234,13 @@ fn emit_jump_run(
         "G1 F{}",
         format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
     ));
-    Ok((i, last.0, last.1))
+    Ok((i, last.0, last.1, true))
 }
 
 /// 这一段连续空走是否真的把笔挪了位置（零长度重复句不算）。
+///
+/// **看每一个点，不只看终点**：`A → B → A` 这种来回，终点等于起点，但中间
+/// 确实飞出去过一段——只看终点会把它当成「没动」，于是这段就落在落笔高度上。
 fn travel_run_moves(lines: &[String], from: usize, cur_x: f64, cur_y: f64) -> bool {
     let (mut x, mut y) = (cur_x, cur_y);
     let mut i = from;
@@ -225,18 +249,19 @@ fn travel_run_moves(lines: &[String], from: usize, cur_x: f64, cur_y: f64) -> bo
         if !is_travel_line(tl) {
             break;
         }
-        let (nx, ny, ok) = parse_xy_from_g1(&strip_z_and_e(tl));
-        if ok {
-            if tl.contains('X') {
-                x = nx;
-            }
-            if tl.contains('Y') {
-                y = ny;
-            }
+        let (nx, ny, _) = parse_xy_from_g1(&strip_z_and_e(tl));
+        if tl.contains('X') {
+            x = nx;
+        }
+        if tl.contains('Y') {
+            y = ny;
+        }
+        if (x - cur_x).abs() > 1e-6 || (y - cur_y).abs() > 1e-6 {
+            return true;
         }
         i += 1;
     }
-    (x - cur_x).abs() > 1e-9 || (y - cur_y).abs() > 1e-9
+    false
 }
 
 /// 只移动不挤出的一行（空走）。判据是语法：`G1` + 有 X/Y + 没有 `E`。
@@ -253,6 +278,7 @@ fn write_glue_lines(
     ir_data: &Ir,
     current_layer_height: f64,
     last_layer_height: f64,
+    start_lifted: bool,
 ) -> Result<(), PostprocError> {
     use crate::gcode::MARKER_MICRO_LIFT;
     use crate::gcode::{MARKER_ZJUMP_INTERNAL, MARKER_ZJUMP_START};
@@ -340,6 +366,10 @@ fn write_glue_lines(
         }
     }
 
+    // 笔是否「抬着还没落」——被标记切开的一串空走之间不落，到涂胶行才落。
+    // 段首回位若已经把它抬起来了（`start_lifted`），这里就别再抬一次。
+    let mut pen_up = start_lifted;
+
     let mut idx = 0usize;
     while idx < lines.len() {
         let il = lines[idx].trim().to_string();
@@ -355,16 +385,24 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let (next, lx, ly) = emit_jump_run(
+            // 空走没有实际位移（段首那句与回位重复的零长度移动）⇒ 不抬不落，
+            // 原样交给下面的普通分支发出。上游多插一个标记也不会多一次抬落。
+            if !travel_run_moves(lines, next_start_idx as usize, prev_x, prev_y) {
+                idx = next_start_idx as usize;
+                continue;
+            }
+            let (next, lx, ly, landed) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
+                pen_up,
             )?;
             prev_x = lx;
             prev_y = ly;
+            pen_up = !landed;
             idx = next;
             continue;
         }
@@ -384,16 +422,24 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let (next, lx, ly) = emit_jump_run(
+            // 空走没有实际位移（段首那句与回位重复的零长度移动）⇒ 不抬不落，
+            // 原样交给下面的普通分支发出。上游多插一个标记也不会多一次抬落。
+            if !travel_run_moves(lines, next_start_idx as usize, prev_x, prev_y) {
+                idx = next_start_idx as usize;
+                continue;
+            }
+            let (next, lx, ly, landed) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
+                pen_up,
             )?;
             prev_x = lx;
             prev_y = ly;
+            pen_up = !landed;
             idx = next;
             continue;
         }
@@ -409,35 +455,59 @@ fn write_glue_lines(
                 idx += 1;
                 continue;
             }
-            let (next, lx, ly) = emit_jump_run(
+            // 空走没有实际位移（段首那句与回位重复的零长度移动）⇒ 不抬不落，
+            // 原样交给下面的普通分支发出。上游多插一个标记也不会多一次抬落。
+            if !travel_run_moves(lines, next_start_idx as usize, prev_x, prev_y) {
+                idx = next_start_idx as usize;
+                continue;
+            }
+            let (next, lx, ly, landed) = emit_jump_run(
                 sink,
                 lines,
                 next_start_idx as usize,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
+                pen_up,
             )?;
             prev_x = lx;
             prev_y = ly;
+            pen_up = !landed;
             idx = next;
             continue;
         }
         if is_travel_line(&il) && travel_run_moves(lines, idx, prev_x, prev_y) {
             // 笔还在落笔状态而下一段是空走 —— 先抬起来再走（同标记分支的抬法）
-            let (next, lx, ly) = emit_jump_run(
+            let (next, lx, ly, landed) = emit_jump_run(
                 sink,
                 lines,
                 idx,
                 ir_data,
                 current_layer_height,
                 last_layer_height,
+                pen_up,
             )?;
             prev_x = lx;
             prev_y = ly;
+            pen_up = !landed;
             idx = next;
             continue;
         }
-        if il.starts_with("G1 ") && !il.contains("G1 F") {
+        // `G2/G3` 是圆弧挤出移动，必须和 `G1` 一样发出去（I/J 是相对量，偏移不影响）。
+        let is_move_cmd = il.starts_with("G1 ") || il.starts_with("G2 ") || il.starts_with("G3 ");
+        if is_move_cmd && !il.contains("G1 F") {
+            // 抬着走过来、终于遇到涂胶行 ⇒ 先落再涂
+            if pen_up && il.contains(" E") {
+                sink.push_str(&format!(
+                    "G1 Z{}",
+                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
+                ));
+                sink.push_str(&format!(
+                    "G1 F{}",
+                    format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
+                ));
+                pen_up = false;
+            }
             let mut glue_line = il.clone();
             if glue_line.contains(" E") {
                 let e_idx = glue_line.find(" E").unwrap();
@@ -694,8 +764,21 @@ pub(crate) fn emit_glue_block(
 
         let seg_start_cmd = find_seg_start_cmd(seg);
 
+        let start_lifted = false;
         if !seg_start_cmd.is_empty() {
             let repos_cmd = strip_z_and_e(&seg_start_cmd);
+            /*
+             * 段首那一句如果是**空走**，说明这一段的第一个动作是「跳到某处」，
+             * 而不是「就在起点涂」。此时回位不该先落一次笔 —— 落了又立刻为同一次
+             * 跳转抬起来，就是成品里「点一下又抬」的来源（一段一处）。
+             * 保持抬着交给 `write_glue_lines`，由它在真正的涂胶行之前落。
+             */
+            /*
+             * 2026-11-03 第一阶段**不启用**「段首空走就不落笔」：它会让每一层的涂胶块
+             * 都少一对 Z、golden 全动，而第一阶段的验收口径是「不改跨特征行为、不动
+             * golden」。这一格留给第二阶段（笔画分段时一起做），现在恒为 false。
+             */
+            let _starts_with_travel = is_travel_line(seg_start_cmd.trim());
             if seg_idx == 0 {
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -710,14 +793,18 @@ pub(crate) fn emit_glue_block(
                     ir_data,
                 )?;
                 sink.push_str(&offset_result);
-                sink.push_str(&format!(
-                    "G1 Z{}",
-                    format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
-                ));
-                sink.push_str(&format!(
-                    "G1 F{}",
-                    format_speed(ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor)
-                ));
+                if !start_lifted {
+                    sink.push_str(&format!(
+                        "G1 Z{}",
+                        format_z(glue_nozzle_z(ir_data, last_layer_height, PenZ::Landed))
+                    ));
+                    sink.push_str(&format!(
+                        "G1 F{}",
+                        format_speed(
+                            ir_data.toolhead.max_speed * ir_data.wiping.small_feature_factor
+                        )
+                    ));
+                }
             } else if ir_data.glue.inter_model_lift_height > 0.0 {
                 sink.push_str(&format!(
                     "G1 F{}",
@@ -930,6 +1017,7 @@ pub(crate) fn emit_glue_block(
             ir_data,
             current_layer_height,
             last_layer_height,
+            start_lifted,
         )?;
 
         for pass_idx in 1..ir_data.glue.pass_count {
@@ -990,6 +1078,7 @@ pub(crate) fn emit_glue_block(
                 ir_data,
                 current_layer_height,
                 last_layer_height,
+                false,
             )?;
         }
 
@@ -1140,8 +1229,15 @@ mod continuity_tests {
     fn emit(iface: &[String]) -> Vec<String> {
         let mut lines = iface.to_vec();
         let mut sink = LineSink { lines: Vec::new() };
-        write_glue_lines(&mut sink, &mut lines, &test_ir(), LAYER_Z, LAST_LAYER_Z)
-            .expect("write_glue_lines 失败");
+        write_glue_lines(
+            &mut sink,
+            &mut lines,
+            &test_ir(),
+            LAYER_Z,
+            LAST_LAYER_Z,
+            false,
+        )
+        .expect("write_glue_lines 失败");
         sink.lines
     }
 
@@ -1222,6 +1318,62 @@ mod continuity_tests {
         );
     }
 
+    /// 段首那句与回位重复的零长度空走，不许再抬一次（成品里 382 处「落→抬→落」的来源）。
+    #[test]
+    fn zero_length_travel_after_marker_never_lifts() {
+        let iface: Vec<String> = [
+            ";ZJUMP_START",
+            "G1 X173.56 Y126.782",
+            "G1 X173.56 Y126.782",
+            "G1 X173.1 Y126.4 E.00154",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let out = emit(&iface);
+        let zs = z_moves(&out);
+        assert!(
+            zs.is_empty(),
+            "零长度空走不该产生任何 Z 动作，实际 {zs:?}，输出：\n{}",
+            out.join("\n")
+        );
+        assert!(
+            out.iter().any(|l| l.contains("172.4")),
+            "涂胶行丢了，输出：\n{}",
+            out.join("\n")
+        );
+    }
+
+    /// 两个标记背靠背（段首重复一次）时，只许为真正的那次跳转抬落一次。
+    #[test]
+    fn duplicated_marker_lifts_once() {
+        let iface: Vec<String> = [
+            ";ZJUMP_START",
+            "G1 X173.56 Y126.782",
+            ";ZJUMP_START",
+            "G1 X173.56 Y126.782",
+            "G1 X108.902 Y124.207",
+            "G1 X108.532 Y124.075 E.00154",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let out = emit(&iface);
+        let zs = z_moves(&out);
+        assert_eq!(
+            zs.iter().filter(|z| (**z - hop_z()).abs() < 1e-6).count(),
+            1,
+            "抬升应恰好 1 次，实际 {zs:?}，输出：\n{}",
+            out.join("\n")
+        );
+        assert_eq!(
+            zs.iter().filter(|z| (**z - land_z()).abs() < 1e-6).count(),
+            1,
+            "落笔应恰好 1 次，实际 {zs:?}，输出：\n{}",
+            out.join("\n")
+        );
+    }
+
     #[test]
     fn two_consecutive_travels_lift_once() {
         assert_single_lift_and_both_travels(&delete_wipe(&raw_iface()));
@@ -1233,41 +1385,34 @@ mod continuity_tests {
     }
 
     /// 只有一条空走时，输出必须与修复前逐字相同（防止改动波及正常涂胶）。
-    fn single_travel_iface() -> Vec<String> {
-        [
-            "; WIPE_END",
-            "G1 E-.04 F1800",
-            "M204 S10000",
-            "G1 X173.56 Y126.782 Z41.08 F42000",
-            "G1 Z40.68",
-            "G1 E.8 F1800",
+    /// 段中段的真实空走（不靠标记）：落笔态下仍必须先抬后走。
+    ///
+    /// 旧的 `single_travel_keeps_previous_behaviour` 要求「只有一条空走也抬一次」，
+    /// 但那一条其实是**段首与回位重复的零长度移动**——抬起来走 0mm 再落下，
+    /// 正是成品里 382 处「落→抬→落」的形状。段首那条不抬，中段的真实位移照抬。
+    #[test]
+    fn mid_segment_travel_still_lifts_once() {
+        let iface: Vec<String> = [
+            "G1 X173.56 Y126.782",
             "G1 X173.1 Y126.4 E.00154",
+            "G1 X150.0 Y120.0",
+            "G1 X149.5 Y119.5 E.00154",
         ]
         .iter()
         .map(|s| s.to_string())
-        .collect()
-    }
-
-    #[test]
-    fn single_travel_keeps_previous_behaviour() {
-        let out = emit(&delete_wipe(&single_travel_iface()));
+        .collect();
+        let out = emit(&iface);
         let zs = z_moves(&out);
         assert_eq!(
             zs.iter().filter(|z| (**z - hop_z()).abs() < 1e-6).count(),
             1,
-            "单条空走仍应抬一次，输出：\n{}",
+            "段中段空走应抬一次，实际 {zs:?}，输出：\n{}",
             out.join("\n")
         );
         assert_eq!(
             zs.iter().filter(|z| (**z - land_z()).abs() < 1e-6).count(),
             1,
-            "单条空走仍应落一次，输出：\n{}",
-            out.join("\n")
-        );
-        // 涂胶行终点 173.1 − x_offset 0.7 = 172.4
-        assert!(
-            out.iter().any(|l| l.contains("X172.4")),
-            "涂胶行丢了，输出：\n{}",
+            "段中段空走应落一次，实际 {zs:?}，输出：\n{}",
             out.join("\n")
         );
     }
