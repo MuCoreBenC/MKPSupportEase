@@ -77,6 +77,40 @@
 
       #boot {
         --boot-card: #fff;
+        /*
+         * ★★ 以下四个变量由 body 末尾那段内联脚本**同步**算出来（2026-11-03）：
+         *
+         *   --boot-fill  大图尺寸倍率（真页面写的是 `--hero-fill`）
+         *   --boot-nx/ny 微移（真页面写的是 `--nx` / `--ny`，单位是包围盒的 %）
+         *   --boot-page-w 卡片内容区宽度（真页面里 `cqw` 的那个基准，见 `.boot-model`）
+         *
+         * 值是**作者调好的那六条曲线**在"当前窗口"上的求值结果，与
+         * `src/app/home/heroCurves.ts` 同一份数据（`heroCurves.test.ts` 逐字比对）。
+         * 这里给的默认值只是"脚本没跑到"时的兜底，正常一帧都用不上。
+         */
+        --boot-fill: 0.75;
+        --boot-nx: 0;
+        --boot-ny: 0;
+        /* 长度（不是数值）：`.boot-model` 要拿它乘 0.036 */
+        --boot-page-w: 900px;
+
+        /*
+         * 真页面的盒子（见 `.boot-body` 那条）：两侧 `--chrome-x`、信息列宽
+         * `clamp(300px, 34vw, 480px)`、图槽左内衬 `clamp(16px, 2vw, 32px)`。
+         * 同样由脚本算好下发，这里是兜底。
+         */
+        --boot-page-l: 45px;
+        --boot-page-r: 45px;
+        --boot-info-w: 306px;
+        --boot-slot-pad: 18px;
+
+        /*
+         * 真首页整张摘要卡上抬的量 —— 逐字同一句 `PageHome.module.css` 的 `--home-lift`
+         * （那边 2026-10-30 把它从 3.4vh 收到 1.7vh，骨架这边当时没跟，于是机器和参数
+         * 都比终态高一截）。`vh` 在 `#boot` 里就是应用窗口高度，与真页面同一个基准。
+         */
+        --boot-lift: clamp(0px, 1.7vh, 20px);
+
         /* 机型剪影的填充：比其他占位块略深一档（4% 在整块轮廓上太淡，见深色那段注释） */
         --boot-printer: rgba(16, 24, 32, 0.065);
         --boot-figure: rgba(16, 24, 32, 0.04);
@@ -311,16 +345,34 @@
        *
        *   ★ 左列那 5vw 必须**合成进第一列**（`+ 5vw`），不能写成 `padding-left` ——
        *     写成 padding 会从 34vw 里扣，窄窗下图槽白多 35px。
+       *
+       * ★★ 2026-11-03：左右两条内衬换成**真页面那一套**（都是 `--chrome-x` =
+       *   `clamp(20px, 5vw, 96px)`），信息列宽也换成 `.info` 那条 34vw 的式子。
+       *
+       *   写死 120 的时候，图槽比真页面窄了一截（900 宽：骨架 351…780，真页面
+       *   351…855），**居中出来的机器就跟着偏**；再叠上原来那条 `margin-left: 6vw`，
+       *   交接那一帧整整横跳 52px —— 作者说的「骨架屏的机器位置和最终的不一样」
+       *   量下来就是这个数。
+       *
+       *   三个量由脚本算好下发（`--boot-page-l` / `--boot-page-r` / `--boot-info-w`），
+       *   公式抄自 `CardFrame.module.css` 与 `PageHome.module.css`。
+       *
+       *   ★ 右边**不加** `--chrome-peek`（露出卡让位那一截）：`CardFrame` 那条只在
+       *     `[data-peek='true']` 的层里生效，实机与浏览器里量到的 `.slot` 右缘都停在
+       *     `窗口宽 − chrome-x`（900 / 1200 两档都量过）。骨架若多让那 151px，
+       *     机器反而会往左偏 75px。
        */
       #boot .boot-body {
         flex: 1;
         min-height: 0;
         display: grid;
         position: relative;
-        grid-template-columns: calc(clamp(300px, 34vw, 480px) + 5vw) minmax(0, 1fr);
+        grid-template-columns:
+          calc(var(--boot-page-l) + var(--boot-info-w))
+          minmax(0, 1fr);
         align-items: stretch;
-        /* 右边留 120（与真页面 `.page` 的右内边距同宽）：图槽到这里为止，抽屉越过去 */
-        padding: 0 120px 14px 0;
+        /* 右边让到"露出卡"之前为止：图槽到这里为止，抽屉越过去 */
+        padding: 0 var(--boot-page-r) 14px 0;
         box-sizing: border-box;
       }
 
@@ -329,8 +381,8 @@
         display: flex;
         flex-direction: column;
         justify-content: center;
-        /* 左缘 5vw 已经算在第一列里（见 `.boot-body` 的注释），这里只留出那一格 */
-        padding-left: 5vw;
+        /* 左缘与页边同一条（见 `.boot-body` 的注释），这里只留出那一格 */
+        padding-left: var(--boot-page-l);
         box-sizing: border-box;
       }
 
@@ -346,45 +398,60 @@
        *   机型名行高 3.6vw → 9 → 版本胶囊 29 → 9 → 文件名 → 20 → 复制钮 48 → 14 →
        *   四行 4×33（行高与真 `.row` 一致）。整叠在竖直中线上再抬 3.6vh
        *   （真首页 `--home-lift` 的等效值，四种尺寸实测误差 ≤1px）。
+       *
+       * ★★ 2026-11-03 第二遍（作者录屏：「参数和图片」在骨架退场那一帧跳一下）：
+       *   上面那组数是按旧的 `--home-lift`（3.4vh）配的，而真页面 10-30 已经收到
+       *   1.7vh；再加上一个 1px 的累计误差 —— 四行参数在交接那一帧整体下移
+       *   3.5…6.5px、行距还多 1px。这次按同一档窗口（900×640）把**每一个块**的
+       *   y 区间对着终态帧量了一遍，改成下面这组：整叠只吃 `--boot-lift`（与
+       *   `.info:has(+ .slot)` 同一条），块与块之间的间距逐条对齐实测值。
        */
       #boot .boot-stack {
         display: flex;
         flex-direction: column;
         align-items: flex-start;
-        transform: translateY(calc(-3.6vh + 11px));
+        /* 与真首页 `.info:has(+ .slot)` 同一条：整叠吃 `--home-lift`。
+           原来那句 `-3.6vh + 11px` 是 10-30 之前的等效值，已经过期。 */
+        transform: translateY(calc(-1 * var(--boot-lift)));
       }
 
-      /* 机型名（截图里那枚 `A1`）：上下留白把这一格撑到真字号那一行的高度，条本身居中 */
+      /*
+       * 机型名（截图里那枚 `A1`）：真页面的字号是 `clamp(26px, 3.6cqw, 48px)`、
+       * line-height 1，`A1` 这种大写+数字的墨高约为字号的 0.72
+       * （实测 900 宽：字号 32.4、墨高 23.3）。`3.6cqw` 的容器是 `.page`（整扇窗），
+       * 脚本把这个宽放进 `--boot-page-w`。
+       */
       #boot .boot-model {
         width: 56px;
-        height: 26px;
+        height: calc(clamp(26px, 0.036 * var(--boot-page-w), 48px) * 0.72);
         border-radius: 3px;
         background: var(--boot-line-strong);
-        margin-top: calc((clamp(26px, 3.6vw, 48px) - 26px) / 2);
-        margin-bottom: calc((clamp(26px, 3.6vw, 48px) - 26px) / 2);
       }
 
+      /* 版本胶囊：真 `.variant` = 5+1 内衬 + 12.5px 行盒 ⇒ 27 */
       #boot .boot-picker {
         width: 124px;
-        height: 29px;
-        margin-top: 9px;
+        height: 27px;
+        margin-top: 13px;
       }
 
+      /* 文件名那一行（真 `.path`，11px 等宽） */
       #boot .boot-file {
         width: 98px;
-        height: 8px;
+        height: 9px;
         margin-top: 11px;
       }
 
+      /* 「复制后处理脚本」那颗：真按钮实测 35 高（骨架原来画 48，比真按钮高一圈） */
       #boot .boot-action {
         width: 168px;
-        height: 48px;
-        margin-top: 22px;
+        height: 35px;
+        margin-top: 29px;
       }
 
-      /* 四行参数：左右各一条，行间一条发丝线。行高 33 = 真首页 `.row` 的实测高度 */
+      /* 四行参数：左右各一条，行间一条发丝线。行高 32 = 真首页四行的实测行距 */
       #boot .boot-params {
-        margin-top: 20px;
+        margin-top: 23px;
         width: 216px;
         max-width: 100%;
         display: flex;
@@ -392,7 +459,7 @@
       }
 
       #boot .boot-param {
-        height: 33px;
+        height: 32px;
         box-sizing: border-box;
         display: flex;
         align-items: center;
@@ -423,12 +490,16 @@
       #boot .boot-switch {
         position: absolute;
         /* ★ 左缘要跟信息列对齐：绝对定位是相对**padding box**，写 `left: 0` 会贴到
-           窗口左缘（作者的录屏里那颗压到了窗口边），所以这里补上 5vw */
-        left: 5vw;
-        /* 量出来的：1080×928 下真页面那颗在 y 851..884，栏底 914 ⇒ 离底 30 */
-        bottom: 30px;
+           窗口左缘（作者的录屏里那颗压到了窗口边），所以这里补上页边那一条 */
+        left: var(--boot-page-l);
+        /*
+         * 离窗口底 30（真页面那颗实测 579..610，窗口高 640）。
+         * 这里的定位父级 `.boot-left` 底边本身离窗口底还有 `.boot-body` 的 14px 下内衬，
+         * 所以写 16 —— 原来写 30，等于 44，交接那一帧这颗胶囊会往下一跳 14px。
+         */
+        bottom: 16px;
         width: 96px;
-        height: 33px;
+        height: 31px;
         max-width: 100%;
       }
 
@@ -444,62 +515,70 @@
         flex: 1;
         min-width: 0;
         min-height: 0;
-        /* 剪影的宽度按**槽宽**算（`100cqw`，见 `.boot-printer`）：所以这里是尺寸容器 */
-        container-type: size;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 8px 10px;
+        /*
+         * ★ 必须是 **grid + place-items: center**，不能是 flex 居中（2026-11-03 实测）。
+         *   真页面那条链是 `.slot`（grid，place-items:center）→ `.box`（grid 同款）→ 图。
+         *   大图**比图槽宽**的时候（窄窗就是），grid 会把溢出全放到右边、左缘贴住内容盒；
+         *   flex 的 `justify-content: center` 却是两边各溢一半 —— 700×520 那一档量下来
+         *   两者差 54px。所以这里照抄 grid，不用 flex。
+         */
+        display: grid;
+        place-items: center;
+        /*
+         * 与真首页 `.slot` 同一套内衬：左 `clamp(16px, 2vw, 32px)`、右 0。
+         * 图槽的**内容盒**因此在两个界面上是同一条中线 —— 机器居中的位置就跟着对了。
+         */
+        padding: 8px 0 8px var(--boot-slot-pad);
         box-sizing: border-box;
+        /*
+         * 与真首页 `.slot` 同一条：整个图槽吃 `--home-lift`。
+         *
+         * 后面那半截（`- 1.6vh + 7px`）是**实测**的残差补正：真卡片的内容区不在窗口正中
+         * （上面让出眉标题那条带、下面让出胶囊那条带，两条都按窗口高度缩放），而骨架
+         * 这一格铺的是整扇窗 —— 两边中线本来就差一小截，而且随窗口高度一起长。
+         * 700×520 / 900×640 / 1080×768 / 1200×800 / 1500×900 五档同时量，反推出来就是
+         * 这条直线（带它之后图槽 y 与终态差 ≤0.3px）；不带它的话 640 高差 1px、800 高差 4px。
+         *
+         * ★ 换窗口尺寸不用动它；但改了 CardFrame 的内衬或 deck 的留白，这条要重量。
+         */
+        transform: translateY(calc(-1 * var(--boot-lift) - 1.6vh + 7px));
+      }
+
+      /*
+       * 大图那一格：**逐条复刻真页面的 `<figure class=hero>`**（2026-11-03）。
+       *
+       * 真页面（`HeroFade.module.css`）：
+       *   width: calc(640px * var(--hero-fill, 1));
+       *   aspect-ratio: 1303 / 942;
+       *   transform: translate(calc(var(--nx, 0) * 1%), calc(var(--ny, 0) * 1%));
+       * 三个量都是**作者调好的那六条曲线**在"当前窗口"上的求值结果（`heroCurves.ts`）。
+       *
+       * 骨架原来是自己拟合出来的一条直线（`width: 9vw + 207px`、`translateY(-2.4vh)`、
+       * 再手工 `margin-left: 6vw`），900×640 那档刚好撞对宽度，位置却整整偏右 52px
+       * —— 作者 2026-11-03 的录屏里，骨架退场那一帧机器就是这么横着跳一下的。
+       * 现在不拟合了：曲线算什么，骨架就画什么，**尺寸和位置都跟终态同一个来源**。
+       *
+       * `preserveAspectRatio` 默认 `xMidYMid meet`，与真图的 `object-fit: contain`
+       * 同义 —— 所以宽图撑满宽、方盒子撑满高，一台机器都不用另配系数。
+       */
+      #boot .boot-hero {
+        width: calc(640px * var(--boot-fill, 0.75));
+        aspect-ratio: 1303 / 942;
+        /*
+         * 与真页面同一条上限。真页面写的是 `min(300%, 100cqw)`，而那边 `cqw` 的容器是
+         * **整页**（`.page`，= 窗口宽）—— 骨架这里没有 `container-type`，`100cqw` 会退到
+         * 视口，语义正好一样；写 `100vw` 是为了不依赖"有没有建容器"这件事。
+         */
+        max-width: min(300%, 100vw);
+        /* 槽位窄的时候**不许被 flex 压小**：真页面那张图也是溢出图槽的 */
+        flex: none;
+        transform: translate(calc(var(--boot-nx, 0) * 1%), calc(var(--boot-ny, 0) * 1%));
       }
 
       #boot .boot-printer {
-        /*
-         * ★★ 2026-10-31 第四遍（作者：「这个骨架的还是缩小了。我不知道你为什么要缩小，
-         *   把这个缩小撤销掉，它就和最终显示的一样大就可以了」）。
-         *
-         * 之前几版都在"按什么定尺寸"上打转（按宽、按高、按槽位百分比），结果总有一档偏小。
-         * 现在不再拟合，直接**复刻真图那一格**：
-         *
-         *   真页面：`<figure class=hero>` 宽 = 640px × 曲线、长宽比固定 **1303 / 942**，
-         *   图在里面 `object-fit: contain`（所以宽的 A1 撑满宽、方盒子的 P1S 撑满高）。
-         *
-         *   这里给 SVG 同一个盒子（同宽、同 1303/942 的比例），`preserveAspectRatio` 默认
-         *   就是 `xMidYMid meet` —— 与 `contain` 同义。于是**任何机型、任何窗口**，
-         *   骨架里画出来的大小都与真图一致，不用再为每台机器对系数。
-         *
-         * 盒子宽 = 0.158 × 窗口宽 + 337（1080→508、1280→539、900→479，三档实测拟合）。
-         */
-        /*
-         * ★ 2026-10-31 第六遍（作者：「能不能用那个小一点的窗口去测试」）。
-         *
-         * 在 800×620 / 900×700 / 1080×928 三档窗口下**同时**量真页面画出来的那张图：
-         *   真图宽 277 / 287 / 304（高 = 宽 / 0.828，因为 A1 那张是 994×1200）
-         *   ⇒ 宽 = 9vw + 207px（三点误差 ≤2px）
-         *
-         * 上一版写的 `64vh` 是我按作者截图里的比例反推的，那两张图是放大过的，
-         * 结果在 928 高的窗口里画到 594（真图只有 367）—— 过头了，改回这条线性。
-         *
-         * 封顶只用"图槽放不放得下"，不再加别的上限（那正是之前一直偏小的来源）。
-         */
-        /*
-         * ★ 不要用"图槽放不下就缩"来封顶（2026-10-31 第七遍，作者：「小的时候窗口就不行了」）：
-         *   真页面那张图本来就**允许溢出图槽**（600 宽窗口里图槽只有 150，图照样画 251）。
-         *   一旦给 `max-width: 100%`，小窗就被压成 82（实测），大窗却刚好 —— 这就是"大的时候
-         *   还行、小的不行"。所以这里只按窗口宽定尺寸，溢出就溢出，与真页面同一行为。
-         */
-        width: calc(9vw + 207px);
-        height: auto;
-        /* 槽位窄的时候**不许被 flex 压小**（`flex: none`）：真页面那张图也是溢出图槽的 */
-        flex: none;
-        /*
-         * 真页面那张图：整体被 `--home-lift` 抬一档（≈2.4vh），还被曲线往左推了一点点
-         * （`NUDGE_X` 约 -5% 的框宽）。骨架按作者的意思往右让 3vw（`margin-left: 6vw`）。
-         */
-        transform: translateY(-2.4vh);
-        /* 2026-10-31（作者：抽屉伸出来的长度和真页面不一样，"机器可以往右，压住也没关系"）：
-           真图那台比骨架更靠右 —— 直接往右让 5vw，右侧被抽屉压住不管 */
-        margin-left: 6vw;
+        /* 铺满 `.boot-hero` 那一格，由 `meet` 自己缩 —— 与 `object-fit: contain` 等价 */
+        width: 100%;
+        height: 100%;
         /* 默认藏起来，下面按机型放一张（见 `data-machine` 那几条） */
         display: none;
       }
@@ -841,6 +920,8 @@
 
           <!-- 中：产品图占位 -->
           <div class="boot-stage">
+            <!-- 大图那一格：宽高与微移全由曲线给（见 `.boot-hero`） -->
+            <div class="boot-hero">
             <!-- A1：轮廓来自 `presets/assets/printers/` 里对应那张的透明通道 -->
             <svg
               class="boot-printer"
@@ -891,6 +972,7 @@
             >
               <path fill-rule="evenodd" d="M111.5,0 120,-0.5 122,0.5 126.5,5 126.5,10 125.5,11 125.5,15 124.5,16 125,20.5 133,20.5 134,19.5 146,19.5 146.5,17 144.5,16 145,13.5 168,13.5 169,18.5 184,18.5 185,17.5 210,17.5 211,16.5 234,16.5 235,15.5 261,15.5 262,14.5 288,14.5 289,15.5 297,15.5 298,16.5 305,16.5 306,17.5 321,18.5 322,19.5 328,19.5 329,20.5 336,20.5 337,21.5 352,22.5 353,23.5 359,23.5 360,24.5 367,24.5 368,25.5 383,26.5 384,27.5 390,27.5 391,28.5 399,28.5 400,29.5 406,29.5 407,30.5 414,30.5 415,31.5 418.5,32 419.5,34 419.5,378 418.5,379 418.5,382 415,382.5 412,385.5 392,385.5 390,384.5 389,385.5 379,385.5 378,386.5 366,386.5 365,387.5 355,387.5 354,388.5 343,388.5 342,389.5 332,389.5 331,390.5 320,390.5 319,391.5 308,391.5 307,392.5 287,393.5 286.5,395 284,396.5 264,396.5 261,393.5 227,393.5 226,392.5 192,392.5 191,391.5 156,391.5 155,390.5 120,390.5 119,389.5 49,388.5 48,387.5 47,387.5 46,389.5 43,389.5 42,390.5 32,390.5 31,389.5 24,389.5 23,387.5 18.5,386 18.5,382 17.5,381 17.5,138 18.5,137 17.5,136 18.5,134 17.5,133 18.5,132 18.5,26 20,24.5 32.5,24 33.5,22 33.5,18 34.5,17 34.5,13 35.5,12 35.5,8 37.5,6 37.5,5 40,3.5 43,3.5 44,2.5 66,2.5 67,1.5 88,1.5 89,0.5 111,0.5 111.5,0Z" />
             </svg>
+            </div>
           </div>
 
           <!-- 右：抽屉（品牌 / 机型 / 打印件版本 / 预设文件 / 我的副本） -->
@@ -943,6 +1025,96 @@
       } catch (err) {
         /* 隐私模式 / 存储被禁：不写就不写，骨架中间空着，绝不猜一台给用户看 */
       }
+    </script>
+    <!--
+      ★★ 骨架中间那台机器的**尺寸与位置**（2026-11-03）。
+
+      作者：「骨架屏的机器位置和最终的不一样呀，你也按照我设置的曲线显示可以吗」
+      —— 真页面那张大图是**六条曲线**算出来的（`src/app/home/heroCurves.ts`：
+      尺寸两条相乘、微移四条相加，横轴是应用窗口的逻辑宽高），骨架原来却是自己拟合的
+      一条直线（`9vw + 207px`），900×640 那档宽度刚好撞对，横向整整偏右 52px
+      （作者的录屏里，骨架退场那一帧机器横着跳了一下）。
+
+      这里把同一组曲线在**当前窗口**上求一遍值，写进三个 CSS 变量（boot-fill /
+      boot-nx / boot-ny），剩下的交给 CSS（`.boot-hero` 逐条照抄真 figure 的写法）。
+
+      为什么抄一份数据而不是 import：骨架必须在**任何模块加载之前**就成形（它是
+      `#root` 外面的静态 HTML，Vite 的 module 是异步的，等它就等于让骨架先画错一帧
+      再跳）。所以这份数组是 `heroCurves.ts` 的**镜像** —— `src/app/home/heroCurves.test.ts`
+      逐字比对面这两个文件，改一边不改另一边会红。
+    -->
+    <script id="boot-hero">
+      ;(function () {
+        /* @@HERO-CURVES-BEGIN@@ */
+        var C = {
+          "fillW": [[360, 0.706], [680, 0.7], [1920, 1]],
+          "fillH": [[420, 0.804], [560, 0.991], [1200, 1]],
+          "nudgeXW": [[360, -40], [600, -32.982], [646, -40], [777, -19.748], [960, -12.717], [1360, -14.371], [1920, 0]],
+          "nudgeXH": [[420, 0], [1200, -0.724]],
+          "nudgeYW": [[360, 0], [1360, 0], [1920, 0]],
+          "nudgeYH": [[420, 0], [560, 0], [760, -0.31], [1200, -9.409]]
+        }
+        /* @@HERO-CURVES-END@@ */
+
+        /* 线性插值，两端取端点值 —— 与 `heroCurves.ts` 的 `evalCurve` 同一条 */
+        function evalCurve(points, at) {
+          var i
+          if (at <= points[0][0]) return points[0][1]
+          var last = points[points.length - 1]
+          if (at >= last[0]) return last[1]
+          for (i = 0; i < points.length - 1; i += 1) {
+            var x1 = points[i][0]
+            var y1 = points[i][1]
+            var x2 = points[i + 1][0]
+            var y2 = points[i + 1][1]
+            if (at >= x1 && at <= x2) {
+              var t = x2 === x1 ? 0 : (at - x1) / (x2 - x1)
+              return y1 + (y2 - y1) * t
+            }
+          }
+          return last[1]
+        }
+
+        /* CSS 的 `clamp(min, val, max)` == `max(min, min(val, max))` —— 抄同一个语义，
+           否则 min > max 的边界（窄窗里 `--chrome-peek` 的上限会变成负数）两边会不一样 */
+        function clamp(min, val, max) {
+          return Math.max(min, Math.min(val, max))
+        }
+
+        function bootCurves() {
+          var el = document.getElementById('boot')
+          if (!el) return
+          var w = window.innerWidth
+          var h = window.innerHeight
+          if (!(w > 0) || !(h > 0)) return
+
+          /* ① 大图：尺寸倍率与微移（作者调好的六条曲线） */
+          el.style.setProperty('--boot-fill', evalCurve(C.fillW, w) * evalCurve(C.fillH, h))
+          el.style.setProperty('--boot-nx', evalCurve(C.nudgeXW, w) + evalCurve(C.nudgeXH, h))
+          el.style.setProperty('--boot-ny', evalCurve(C.nudgeYW, w) + evalCurve(C.nudgeYH, h))
+
+          /*
+           * ② 版面那几条：真页面里 `3.6cqw` / `34cqw` 的容器是 `.page`（铺满整扇窗），
+           *    所以这里的基准就是窗口宽。
+           */
+          el.style.setProperty('--boot-page-w', w + 'px')
+
+          /* ③ 页边与图槽（公式分别抄自 CardFrame.module.css / PageHome.module.css） */
+          var chromeX = clamp(20, 0.05 * w, 96) /* --chrome-x（左右两侧都是它） */
+          var infoW = clamp(300, 0.34 * w, 480) /* .info 的宽 */
+          var slotPad = clamp(16, 0.02 * w, 32) /* .slot 的左内衬 */
+          /* 卡片本身限宽 1400 并居中（`.frame` 的 max-width + margin-inline: auto） */
+          var shift = Math.max(0, (w - 1400) / 2)
+
+          el.style.setProperty('--boot-page-l', shift + chromeX + 'px')
+          el.style.setProperty('--boot-page-r', shift + chromeX + 'px')
+          el.style.setProperty('--boot-info-w', infoW + 'px')
+          el.style.setProperty('--boot-slot-pad', slotPad + 'px')
+        }
+
+        bootCurves()
+        window.addEventListener('resize', bootCurves)
+      })()
     </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>

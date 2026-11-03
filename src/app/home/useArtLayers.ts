@@ -35,7 +35,16 @@ export function useArtLayers(art: HeroArt | null) {
       const cur = prev[prev.length - 1]
       if (cur && cur.src === src) return prev
       seq.current += 1
-      const next: ArtLayer = { id: seq.current, fresh: true, src, kind }
+      /*
+       * ★★ 2026-11-03：**第一层不淡入**（`fresh` 只在"换图"时才是 true）。
+       *
+       * 首屏那张大图挂上时，页面其实还压在骨架底下 —— 淡入是给眼睛看的过场，可
+       * 骨架什么时候收掉由图片解码决定（见 PageHome 的 `heroReady`），两者没有先后
+       * 关系：解码比动画慢就"露出来就是完整的"，快一点就是"骨架一收、机器才慢慢浮出来"
+       * （作者：「不稳定触发的开屏跳动」「加载完就是正常显示」）。
+       * 第一层直接以终态出现在骨架后面，收掉那一刻看到的就是完整的一屏。
+       */
+      const next: ArtLayer = { id: seq.current, fresh: cur !== undefined, src, kind }
       // 最多两层：一层在淡出、一层在淡入
       return cur ? [cur, next] : [next]
     })
