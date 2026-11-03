@@ -650,15 +650,35 @@ pub struct TabMeta {
 }
 
 /// `param_registry.toml` 的反序列化目标
-#[derive(Debug, Deserialize)]
+///
+/// `pub(crate)` + `Serialize`（2026-11-03）：[`super::normalize`] 要拿它做
+/// **无损检查** —— 重排前后各读一遍、逐字段比。给它单独写一套解析就等于
+/// 在仓里立了第二个真值，比出来的"一致"毫无意义。
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct RegistryFile {
+pub(crate) struct RegistryFile {
     #[serde(default)]
-    updated: String,
+    pub(crate) updated: String,
     #[serde(default)]
-    tabs: Vec<TabMeta>,
+    pub(crate) tabs: Vec<TabMeta>,
     #[serde(default)]
-    params: Vec<ParamDef>,
+    pub(crate) params: Vec<ParamDef>,
+}
+
+impl RegistryFile {
+    /// 从**文本**解析（不从盘上读）。规范化那一侧要用它比对两份字节。
+    ///
+    /// 与 [`Registry::load_from`] 共用 `toml_edit::de` 这一条路 —— 两边读法不一致的
+    /// 话，"数据一样"这个结论就只对我们自己的读法成立。
+    pub(crate) fn parse_str(text: &str) -> Result<Self, AppError> {
+        toml_edit::de::from_str(text).map_err(|e| {
+            AppError::corrupted(messages::text(
+                "ui.presetdata.registry.292",
+                &[("v1", "<内存>")],
+            ))
+            .with_detail(e.to_string())
+        })
+    }
 }
 
 /* ---------- 参数摆放 ---------- */
@@ -4302,14 +4322,16 @@ mod tests {
 
         let text =
             std::fs::read_to_string(tmp.path().join("registry/param_registry.toml")).unwrap();
-        // 真数据的口径（实测）：纯机型键**不加引号**（`P1S = 1.1`），
-        // 带冒号的键只能加引号（`'P1S:LITE' = 1.1`）。写回要跟着这个口径
-        assert!(text.contains("A1 = 3.0"), "float 字段没写成 3.0");
-        assert!(text.contains("A1 = 3\n"), "int 字段被写成了浮点");
-        assert!(
-            !text.contains("'A1' = ") && !text.contains("\"A1\" = "),
-            "纯机型键被加上了引号 —— 真数据里它是裸键"
-        );
+        // 这条测试钉的是**值的表示**：int 留 `3`、float 留 `3.0` —— 那是数据。
+        //
+        // 引号不在这条的射程内（2026-11-03 作者：「没必要特殊，都用引号也可以」）。
+        // 这里走的是 `write_back` 的就地写回（`toml_edit` 保留原引号风格），
+        // 与 `presets normalize` 的整体重排是**两条路**：前者只改被编辑那一格，
+        // 后者才重排全文。所以这里用"键 + 值"匹配，不管有没有引号。
+        let has_float = text.contains("A1\" = 3.0") || text.contains("A1 = 3.0");
+        let has_int = text.contains("A1\" = 3\n") || text.contains("A1 = 3\n");
+        assert!(has_float, "float 字段没写成 3.0：\n{text}");
+        assert!(has_int, "int 字段被写成了浮点：\n{text}");
 
         // 读回来两个都是 3（数值相等），但表示不同 —— 这正是这条判据要的
         let again = ParamRegistry::load_from(tmp.path()).unwrap();

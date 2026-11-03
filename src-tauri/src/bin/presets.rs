@@ -92,6 +92,7 @@ fn run_cli() -> Result<i32, AppError> {
         "verify" => cmd_verify(),
         "reload" => cmd_reload(force),
         "publish" => cmd_publish(dry_run, republish),
+        "normalize" => cmd_normalize(dry_run),
         "-h" | "--help" | "help" => {
             usage();
             Ok(0)
@@ -113,6 +114,8 @@ fn usage() {
   presets diff                  报盘上与真生成结果的差异（只读）
   presets verify                核对 catalog / manifest / 账本 / SHA（只读）
   presets reload                把工作台影子树对齐到 presets/（= 工作台「重新加载」）
+  presets normalize --dry-run   预演源 TOML 重排：说差多少，一个字节都不写
+  presets normalize             把 presets/registry/param_registry.toml 重排成机械序
   presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写
   presets publish               执行正式发布事务（唯一能让序号 +1 的动作）
 
@@ -361,6 +364,96 @@ fn cmd_verify() -> Result<i32, AppError> {
             },
         }),
         if report.problems.is_empty() { 0 } else { 1 },
+    )
+}
+
+/// **源 TOML 的机械化重排**（2026-11-03 作者拍板）。
+///
+/// # 为什么单独一条命令，而不是放进 `generate`
+///
+/// `generate` 只碰**产物**（`presets/delivery/` 与 `crates/preset/assets/`），
+/// **从不改源**。重排源文件是另一件事：它会把整份 `param_registry.toml` 重写一遍，
+/// 那个 diff 必须单独成一次提交，否则 review 时分不清"格式变了"与"数据变了"。
+///
+/// # 闸：结构无损才写
+///
+/// 重排后按**同一个解析器**再读一遍，与原文逐字段比（[`normalize::check_roundtrip`]）。
+/// 比不过就一个字节都不写 —— 注释、引号、顺序允许变，数据不许变。
+fn cmd_normalize(dry_run: bool) -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let file = ctx.real_root().join("registry").join("param_registry.toml");
+    let src = std::fs::read_to_string(&file).map_err(|e| {
+        AppError::not_found(format!("读不到 {}", file.display())).with_detail(e.to_string())
+    })?;
+
+    let out = mkp_support_ease_lib::presetdata::normalize::normalize_registry(&src)?;
+    let report = mkp_support_ease_lib::presetdata::normalize::check_roundtrip(&src, &out)?;
+
+    /* 结构化数据的闸：不通过就停在这里，别写 */
+    if !report.ok {
+        eprintln!("✗ 重排会改变数据，拒绝写入：");
+        for p in &report.problems {
+            eprintln!("  · {p}");
+        }
+        return emit(
+            json!({
+                "command": "normalize",
+                "ok": false,
+                "changed": false,
+                "problems": report.problems,
+                "summary": "重排会改变结构化数据，已拒绝写盘",
+            }),
+            2,
+        );
+    }
+
+    let changed = out != src;
+    if dry_run {
+        eprintln!(
+            "{}（{} 个参数 / {} 个分组，结构无损）：",
+            if changed {
+                "会有改动"
+            } else {
+                "已经是最新形态"
+            },
+            report.params,
+            report.tabs
+        );
+        if changed {
+            /* 不打整份 diff（三千多行），只报行数与首位差异 —— 真要看得自己跑 diff */
+            let a: Vec<&str> = src.lines().collect();
+            let b: Vec<&str> = out.lines().collect();
+            eprintln!("  原文 {} 行 → 重排后 {} 行", a.len(), b.len());
+        }
+        return emit(
+            json!({
+                "command": "normalize",
+                "ok": true,
+                "changed": changed,
+                "params": report.params,
+                "tabs": report.tabs,
+                "summary": if changed { "会重排（未写盘）" } else { "已是最新形态" },
+            }),
+            0,
+        );
+    }
+
+    if changed {
+        mkp_support_ease_lib::fsx::atomic::atomic_write(&file, out.as_bytes())?;
+        eprintln!("✓ 已重排 {}", file.display());
+    } else {
+        eprintln!("✓ 已经是最新形态，未写盘");
+    }
+    emit(
+        json!({
+            "command": "normalize",
+            "ok": true,
+            "changed": changed,
+            "params": report.params,
+            "tabs": report.tabs,
+            "summary": if changed { "已重排" } else { "已是最新形态" },
+        }),
+        0,
     )
 }
 
