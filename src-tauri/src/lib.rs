@@ -133,8 +133,112 @@ pub const GIT_COMMIT: &str = env!("MKPSE_GIT_COMMIT");
 pub const BUILD_TIER: &str = env!("MKPSE_BUILD_TIER");
 
 /// 一行人读的指纹（日志用）。
+///
+/// # 时间的那一格为什么**运行时**读，不用 `BUILD_TIME`
+///
+/// `BUILD_TIME` 是 `build.rs` 跑的时刻，而 `build.rs` 只在**它监视的东西**变了
+/// 才跑。Cargo 判定"这套产物已是最新"时根本不调它 —— 于是 `cargo build` 明明
+/// 重新链接了二进制，`BUILD_TIME` 还是上一次的。
+///
+/// 作者实测到的两层误差：
+///
+/// 1. 指纹印 `11-02T15:59Z`，二进制其实是 `11-03 11:13`（差 11 小时）；
+/// 2. 修了 `rerun-if-changed` 之后还差 1 分钟（`12:58:22` vs `12:59:37`）
+///    —— 因为 build script 跑在**链接之前**。
+///
+/// **`编译于` 想回答的其实是"这个 exe 是何时生成的"**，那就直接问文件：
+/// 读 `current_exe()` 的 mtime。它是链接完成那一刻，不会早。
+///
+/// `BUILD_TIME` 仍然保留（构建脚本跑的时刻也有信息量：能看出
+/// "build script 这次跑没跑"），只是不再拿它冒充二进制的时间。
 pub fn build_fingerprint() -> String {
-    format!("{BUILD_TIER} · {GIT_COMMIT} · 编译于 {BUILD_TIME}")
+    format!(
+        "{BUILD_TIER} · {GIT_COMMIT} · 编译于 {}",
+        exe_modified_local()
+    )
+}
+
+/// 当前可执行文件的 mtime，按**中国时间**（`+08:00` 明写）印成人读的形状。
+///
+/// 读不到就退回 `BUILD_TIME`（那是构建脚本那一刻，比二进制早，但至少是真的）。
+///
+/// # 为什么走 `date` 而不是自己算
+///
+/// "UTC 秒 → 年月日时分秒" 要一张历法表与闰年规则，手写一遍就是把这套逻辑
+/// 在仓里抄第二份（而 `build.rs` 已经在用系统 `date`）。所以两边共用**同一套钟**：
+/// `date -u -r <epoch>` 收的是 epoch 秒，BSD / GNU 都认这个形式。
+///
+/// 不用 `-v`（BSD 专有）也不用 `--date`（GNU 专有）—— `-r` 两边同名。
+fn exe_modified_local() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return BUILD_TIME.to_owned();
+    };
+    let Ok(meta) = std::fs::metadata(&exe) else {
+        return BUILD_TIME.to_owned();
+    };
+    let Ok(modified) = meta.modified() else {
+        return BUILD_TIME.to_owned();
+    };
+    let Ok(epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return BUILD_TIME.to_owned();
+    };
+
+    let wall = std::process::Command::new("date")
+        .env("TZ", "CST-8") /* 中国标准时间 +08:00（POSIX 的写法是反的） */
+        .args(["-r", &epoch.as_secs().to_string(), "+%Y-%m-%d %H:%M:%S"])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty());
+    match wall {
+        Some(s) => format!("{s} +08:00"),
+        None => BUILD_TIME.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    /// **指纹那一格必须是可读的中国时间**（2026-11-03 作者：
+    /// 「如果这个时间是错的话……他总是说我没编译，那我实际上早就编译了」）。
+    ///
+    /// 这条钉四件事：
+    /// 1. 走的是**运行时读 exe mtime**（不是 `build.rs` 那一刻）——
+    ///    `build.rs` 跑在链接之前，且 Cargo 判定"无需重建"时根本不跑它；
+    /// 2. 格式带 `+08:00`，不是裸 UTC 的 `Z`（不必读者自己换算）；
+    /// 3. 不是 `unknown`；
+    /// 4. 指纹里带档位（两档共用可执行文件名）。
+    #[test]
+    fn fingerprint_time_comes_from_the_exe_and_is_local() {
+        let shown = exe_modified_local();
+        assert_ne!(shown, "unknown", "读不到 exe mtime：检查 date 调用");
+        assert!(
+            shown.contains("+08:00"),
+            "编译时刻必须是带偏移的中国时间，实际是 `{shown}`"
+        );
+        assert!(
+            !shown.ends_with('Z'),
+            "不许退回 UTC（作者每次都要自己 +8 小时）：`{shown}`"
+        );
+        /* 形状必须是 `YYYY-MM-DD HH:MM:SS +08:00` —— 26 个字符
+        （19 个日期时间 + 空格 + 6 个偏移）。数字写错没有代价：这条只在
+        "格式被改宽/改窄"时才红，而那正是要拦的。 */
+        assert_eq!(
+            shown.len(),
+            26,
+            "时间是 `YYYY-MM-DD HH:MM:SS +08:00`，实际 `{shown}`"
+        );
+        assert!(
+            build_fingerprint().contains(BUILD_TIER),
+            "指纹里必须带档位 —— 两档共用可执行文件名"
+        );
+        assert!(
+            build_fingerprint().contains(&shown),
+            "指纹里那格必须就是 exe 的 mtime"
+        );
+    }
 }
 
 pub fn run() {

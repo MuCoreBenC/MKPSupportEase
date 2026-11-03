@@ -39,8 +39,26 @@
  * | `GIT_COMMIT` | 编的是哪个提交（`-dirty` 后缀 = 有未提交改动） |
  * | `FEATURES` | 带没带 `workbench` —— 两档是同一个可执行文件名，光看名字分不出 |
  *
- * `rerun-if-changed` 不登记任何源码：否则每改一行都要重跑 build.rs。
- * 只有 `.git/HEAD` 与 `.git/index` 变了才重算这三格（切分支 / 提交后要能反映出来）。
+ * # ★ 2026-11-03 修：以前这一格**会过期**，读者因此反复说"你没重编"
+ *
+ * 第一版只在 `.git/HEAD` 与 `.git/index` 变了才重跑 build.rs。于是：
+ *
+ * ```text
+ * 改 Rust 源码 → cargo 重编了 lib → 但 build.rs 没跑 → BUILD_TIME 还是上一次的
+ * ```
+ *
+ * 作者实测：二进制是 `11-03 11:13`，指纹却印 `11-02T15:59Z` —— **差 11 小时**。
+ * 而「你是不是没重新编译」这个问题**正是靠这一格回答的**，它一过期，
+ * 这句问话就变成没有证据的指责（作者原话：「我实际上早就编译了，
+ * 只不过它的时间是错的」）。
+ *
+ * 现在 `rerun-if-changed` **登记所有 Rust 源码**：源码一动，build.rs 就重跑，
+ * 时间戳跟着刷新。代价是每次改代码多跑一次 build script（它只做几次
+ * `date` / `git` 调用，毫秒级），换来的是这一格**永远不会说谎**。
+ *
+ * 另两个"时刻会漂"的地方也一并登记：
+ * - `.git/HEAD` / `.git/index`：切分支、暂存、提交后提交号要能反映出来；
+ * - `Cargo.toml`：改了依赖或版本，指纹也该更新。
  */
 fn main() {
     println!("cargo:rerun-if-env-changed=MKPSE_PRESET_SOURCE");
@@ -48,6 +66,11 @@ fn main() {
     println!("cargo:rerun-if-changed=../workbench/bootstrap.json");
     println!("cargo:rerun-if-changed=../.git/HEAD");
     println!("cargo:rerun-if-changed=../.git/index");
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    /* ★ **源码**也登记：这一条是"编译时刻不许过期"的实现（见上）。
+    `src/` 是整目录 —— cargo 会递归看它下面所有文件。 */
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=../crates");
     emit_build_fingerprint();
 
     let configured = bootstrap_urls_from_workbench();
@@ -70,14 +93,23 @@ fn main() {
 ///
 /// 全部失败都不挡构建：拿不到就用 `unknown`，**绝不编一个看起来像真的值**。
 fn emit_build_fingerprint() {
-    // ① 编译时刻（build.rs 真正跑起来的这一刻，UTC，秒级）
+    // ① 编译时刻（build.rs 真正跑起来的这一刻，秒级）
+    //
+    // **中国时间**（2026-11-03 作者：「时间记得用中国时区的」）：
+    // 印 UTC 的话，每次看都要在脑子里 +8 小时，而这一格的全部用途就是
+    // 「跟源码 / 提交时间比一比」—— 那两种时间也是本地时间，三方必须同一套钟。
+    // 附一个 `+08:00` 偏移，跨时区看的人也不会误读。
     let stamp = std::process::Command::new("date")
-        .args(["-u", "+%Y-%m-%dT%H:%M:%SZ"])
+        // macOS / BSD 的 date 用 `-v`，GNU 用 `TZ=`；这里选**两条都通**的写法：
+        // 显式给 TZ，再让 date 按那个时区格式化。
+        .env("TZ", "Asia/Shanghai")
+        .args(["+%Y-%m-%d %H:%M:%S"])
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
+        .map(|s| format!("{s} +08:00"))
         .unwrap_or_else(|| "unknown".to_owned());
     println!("cargo:rustc-env=MKPSE_BUILD_TIME={stamp}");
 

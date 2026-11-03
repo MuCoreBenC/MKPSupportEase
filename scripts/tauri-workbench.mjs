@@ -26,6 +26,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 
@@ -72,11 +73,53 @@ try {
   fingerprint = ''
 }
 if (fingerprint) {
-  console.log(`\n  运行的是：${fingerprint}`)
+  console.log(`\n  盘上现有：${fingerprint}`)
 } else {
-  console.log(`\n  运行的是：${shown}（还没编过 —— 本命令会先编一次）`)
+  console.log(`\n  盘上现有：${shown}（还没编过 —— 本命令会先编一次）`)
 }
-console.log(`  （改 Rust 必须 Ctrl+C 后重跑本命令；改前端走 HMR 不用）\n`)
+console.log(`  （改 Rust 必须 Ctrl+C 后重跑本命令；改前端走 HMR 不用）`)
+/* 2026-11-03：指纹里的「编译于」是**中国时间**，且 build.rs 现在登记了源码
+   （改一行 Rust 就会重跑它、刷新时间戳）。所以这一格能直接跟 `git log` 的
+   时间对照 —— 以前它印 UTC 且不随源码更新，作者因此被反复误判成"没重编"。 */
+console.log(`  （时间是中国时区；编译完成后会再打一行「编译完」）\n`)
+
+/**
+ * ★ 2026-11-03：**编译之后再打一次指纹**。
+ *
+ * 上面那一行说的是"盘上现在这个 exe 是谁"，而 `tauri dev` 之后才真正编译 ——
+ * 于是刚改完 Rust 重跑本命令时，作者看到的是**上一版**的时间，
+ * 反而更像"没重编"（作者实拍：命令行里明明在 `Compiling`，
+ * 上面那行还印着 11-02）。
+ *
+ * 这里等主程序二进制的 mtime 变一次（= 这次真的编出了新的），再读一眼指纹。
+ * 只等第一次变化，之后不再打（`tauri dev` 自己会接管输出）。
+ */
+function announceAfterBuild() {
+  const stamp = () => {
+    try {
+      return statSync(shown).mtimeMs
+    } catch {
+      return 0
+    }
+  }
+  const before = stamp()
+  /* 最长等 10 分钟（首次全量编译可能很久），之后安静放弃 —— 这不是闸 */
+  const deadline = Date.now() + 10 * 60 * 1000
+  const timer = setInterval(() => {
+    const now = stamp()
+    if (now !== 0 && now !== before) {
+      clearInterval(timer)
+      try {
+        const after = (spawnSync(probe, ['build'], { encoding: 'utf8' }).stdout || '').trim()
+        if (after) console.log(`\n  ✔ 编译完：${after}\n`)
+      } catch {
+        /* 读不到就安静 —— 上面那行已经说了盘上是什么 */
+      }
+      return
+    }
+    if (Date.now() > deadline) clearInterval(timer)
+  }, 500)
+}
 
 const child = spawn(cmd, {
   cwd: REPO_ROOT,
@@ -85,6 +128,7 @@ const child = spawn(cmd, {
   shell: true,
   env: { ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
 })
+announceAfterBuild()
 
 /* Ctrl+C 由子进程（tauri → cargo / vite）自己处理；父进程先退会把它们留成孤儿 */
 process.on('SIGINT', () => {})
