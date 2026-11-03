@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "c362da385ca74d94",
+  "revision": "f09e702350d00942",
   "publishedAt": "2026-10-31T12:17:42Z",
   "brands": [
     {
@@ -1457,7 +1457,10 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": 3.85,
+          "A1": 3.9,
+          "A1:FAST": 3.9,
+          "A1:FASTV3.3": 3.9,
+          "A1:STANDARD": 3.9,
           "A1_MINI": 3.9,
           "A1_MINI:FAST": 3.9,
           "A1_MINI:FASTV3.3": 3.9,
@@ -5583,8 +5586,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "a6bd2bee370684ed7a9dcf539d6e2ab3c3ecefb090d91d95c101024ca0c883b2",
-      "size": 4346
+      "sha256": "99619ec3278740bbcf117744f2a6dbc3990111b855cfc92f681fa4782b12c39d",
+      "size": 4345
     },
     {
       "kind": "mkp_preset",
@@ -5592,8 +5595,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "e9c483a692b2f0ec3932a516a671f678289559c543042fed277e6ff93ce6d012",
-      "size": 4344
+      "sha256": "6e94e00f4122c88aa6b49788c223931cce89c07d68c8ecec0e3c4098210ab505",
+      "size": 4343
     },
     {
       "kind": "mkp_preset",
@@ -5601,8 +5604,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "67fc58a5636527ad71c54ac0a10fa1950ca447d9939f64c5e63a62207cfc7e02",
-      "size": 4348
+      "sha256": "c6e71dd6231e4189e28cde2c15add167dc80d75acc93a1e9834e11cbce5e4b9e",
+      "size": 4347
     },
     {
       "kind": "mkp_preset",
