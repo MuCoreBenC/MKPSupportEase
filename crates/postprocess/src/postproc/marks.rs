@@ -144,6 +144,7 @@ pub fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
     let text = String::from_utf8_lossy(bytes);
     let mut out = String::with_capacity(text.len());
     let mut in_glue = false;
+    let mut last_xy: Option<(f64, f64)> = None;
     for line in text.split_inclusive('\n') {
         let t = line.trim_end();
         if t == ";Glueing Finished" {
@@ -153,6 +154,31 @@ pub fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
         }
         if in_glue {
             let code = t.split(';').next().unwrap_or("").trim();
+            /*
+             * 0mm 移动也是噪声：2026-11-03 起发射层会把「与回位同点的定位行」丢掉，
+             * 参考物里还留着它们。两边都不看，判据仍然咬住真实几何。
+             */
+            let zero_len = {
+                let mut nx = None::<f64>;
+                let mut ny = None::<f64>;
+                for tok in code.split_whitespace().skip(1) {
+                    if let Some(v) = tok.strip_prefix('X').and_then(|v| v.parse::<f64>().ok()) {
+                        nx = Some(v);
+                    }
+                    if let Some(v) = tok.strip_prefix('Y').and_then(|v| v.parse::<f64>().ok()) {
+                        ny = Some(v);
+                    }
+                }
+                match (nx, ny, last_xy) {
+                    (Some(x), Some(y), Some((px, py))) => {
+                        (x - px).abs() < 1e-6 && (y - py).abs() < 1e-6
+                    }
+                    _ => false,
+                }
+            };
+            if zero_len {
+                continue;
+            }
             let z_only = code.starts_with("G1 Z") && !code.contains('X') && !code.contains('Y');
             let f_only = code.starts_with("G1 F")
                 && !code.contains('X')
@@ -162,9 +188,26 @@ pub fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
                 continue;
             }
         }
+        if in_glue {
+            let code = t.split(';').next().unwrap_or("").trim();
+            let mut nx = None::<f64>;
+            let mut ny = None::<f64>;
+            for tok in code.split_whitespace().skip(1) {
+                if let Some(v) = tok.strip_prefix('X').and_then(|v| v.parse::<f64>().ok()) {
+                    nx = Some(v);
+                }
+                if let Some(v) = tok.strip_prefix('Y').and_then(|v| v.parse::<f64>().ok()) {
+                    ny = Some(v);
+                }
+            }
+            if let (Some(x), Some(y)) = (nx, ny) {
+                last_xy = Some((x, y));
+            }
+        }
         out.push_str(line);
         if t == ";Glueing Started" {
             in_glue = true;
+            last_xy = None;
         }
     }
     out.into_bytes()

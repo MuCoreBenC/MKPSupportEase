@@ -32,6 +32,18 @@
 //! - **缺件照实说**：失败的那一次不会有"处理后的文件"（`<id>.gcode` 根本没落盘），
 //!   计划里照实报缺哪几份，不编、也不假装三件套都全。
 //!
+//! # 压缩与信息页（2026-11-03）
+//!
+//! 导出框左下角那颗「信息」翻到另一页时，要能看清**这些文件在归档里的真实位置**，
+//! 并且不导出也能在系统文件管理器里定位它们 —— 于是：
+//!
+//! - 计划里每一份带上 `path`（归档里的绝对路径，只读展示，界面不拿它拼任何写路径）；
+//! - [`reveal_report_source`] 只认 `id + kind`，路径由后端自己算（与「打开位置」同一条
+//!   纪律：不给前端传任意路径的机会）；
+//! - [`export_report_archive`] 多一格 `compress`：真时打成一个 `<基名>.zip`
+//!   （三件套原样进包，不重新编码），假时还是散着复制三份。
+//!   **压缩是导出框那一格的偏好**（默认开、用户关过就记住），这一层只照办。
+//!
 //! ★ 这一处是**全仓唯一一处往数据根以外写盘**（前端其它写动作全走
 //! `fsx::atomic` + `resolve_in`，路径被夹在两个根里）。它越界的理由只有一条：
 //! **目的是把那几份文件交到用户手里**，而"交到哪儿"是用户当场点出来的绝对路径 ——
@@ -453,9 +465,23 @@ pub struct ReportExportFile {
     pub kind: &'static str,
     /// 落到用户目录里叫什么（`<基名>_original.gcode` 这种，完整不省略）
     pub name: String,
+    /// **归档里那一份的绝对路径**（信息页要显示、复制、在访达里定位它）。
+    ///
+    /// 只给界面**看** —— 定位那条命令收的是 `id + kind`，不收这个路径
+    /// （同 `reveal_report_export`：路径只许后端自己算）。
+    ///
+    /// 这一份**不在盘上**时也照给（那正是它本该在的位置）：界面上那一行要划线，
+    /// 划完还得能复制到那串路径（"它本来该在这儿"）。
+    pub path: String,
+    /// 这一份**真在盘上**吗。
+    ///
+    /// 2026-11-04（作者：失败的可以加上徽章，第三个也显示出来然后灰色划线意思没有这个文件）：
+    /// 计划**恒报三份**，缺的那份由这一格说明 —— 原来缺的那份整行不出现，
+    /// 界面上只剩一句"归档里没有…"，看着像清单少了一行。
+    pub exists: bool,
 }
 
-/// 一次导出的计划：三件套叫什么、默认落到哪、哪几份归档里没有。
+/// 一次导出的计划：三件套叫什么、默认落到哪、哪几份真在盘上。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReportExportPlan {
@@ -464,10 +490,12 @@ pub struct ReportExportPlan {
     /// 默认落点的**父目录**（`<用户根>/exports`）。界面显示时自己拼上 `<基名>/` ——
     /// 导出命令收的也是这个父目录，两处口径一致。
     pub default_dir: String,
-    /// 真在盘上、会跟着导出的那几份（顺序见 [`EXPORT_PARTS`]）
+    /// **恒为三份**（顺序见 [`EXPORT_PARTS`]）；哪一份不在盘上由 [`ReportExportFile::exists`] 说。
+    ///
+    /// 2026-11-04 改：原来是"只列真在盘上的那几份 + 另给一份 `missing`"，
+    /// 于是失败那一次界面上少一行、还要在底下补一句话解释少的是哪一份 ——
+    /// 作者要的是**三行都在**、缺的那行灰掉划线。两套说法（行 + 那句话）也就并成了一套。
     pub files: Vec<ReportExportFile>,
-    /// 归档里没有的那几份（失败的那次不落 `<id>.gcode`）：界面对此说一句实话
-    pub missing: Vec<&'static str>,
 }
 
 /// 归档里真在盘上的一份源文件 + 它导出后叫什么。
@@ -563,12 +591,19 @@ fn parts_of(day_dir: &Path, id: &str, base: &str) -> Vec<ExportPart> {
         .collect()
 }
 
-/// 计划里那三份都该有 —— 缺的是哪几个（`missing` 的取值顺序同 [`EXPORT_PARTS`]）。
-fn missing_parts(parts: &[ExportPart]) -> Vec<&'static str> {
+/// 计划里的那三份（**恒为三份**，顺序同 [`EXPORT_PARTS`]）。
+///
+/// 缺的那份也照给名字与位置（名字由基名 + 后缀算，位置就是"它本该在的地方"），
+/// `exists` 说明它在不在盘上 —— 界面据此把那行灰掉划线，而不是整行不出现。
+fn files_of(parts: &[ExportPart], day_dir: &Path, id: &str, base: &str) -> Vec<ReportExportFile> {
     EXPORT_PARTS
         .iter()
-        .map(|(_, kind)| *kind)
-        .filter(|kind| !parts.iter().any(|p| p.kind == *kind))
+        .map(|(suffix, kind)| ReportExportFile {
+            kind,
+            name: format!("{base}{suffix}"),
+            path: day_dir.join(format!("{id}{suffix}")).display().to_string(),
+            exists: parts.iter().any(|p| p.kind == *kind),
+        })
         .collect()
 }
 
@@ -598,19 +633,39 @@ fn record_paths(root: &Path, id: &str) -> Result<(PathBuf, PathBuf), AppError> {
     Ok((day_dir, meta_path))
 }
 
+/// 「位置里已经有这一份」——**带稳定码**，界面据此摆出「重新导出」。
+///
+/// 2026-11-04（作者问「位置已有怎么办？是显示一个打开文件夹的按钮还是干脆重新覆盖一次」）：
+/// 界面要能分得清"这是撞名，可以覆盖"和"这是别的失败"，而它拿到的只有一句话。
+/// 判句子是最脆的写法（翻译一改就失效），所以把码挂在这条错上，
+/// 界面只认 `E_REPORT_EXPORT_EXISTS_001`。
+fn export_exists(name: &str) -> AppError {
+    AppError::invalid_argument(messages::text("ui.ipc.report.139", &[("v1", name)]))
+        .with_message_code(EXPORT_EXISTS_CODE)
+}
+
+/// 「位置里已经有这一份」的稳定码（界面按它摆「重新导出」，见 [`export_exists`]）。
+const EXPORT_EXISTS_CODE: &str = "E_REPORT_EXPORT_EXISTS_001";
+
 /// 把这几份**复制**到 `target` 里（`target` 由调用方给出，含基名那一层）。
 ///
 /// 三道闸，缺一道都出事：
 /// 1. **目标不许就是归档自己那一天** —— `fs::copy` 源与目标同一个文件时会先把
 ///    目标截断，三件套当场互相吃掉（用户把"保存位置"指到归档里就中了）；
-/// 2. **不覆盖**：目标里已经有同名的那一份就整批拒绝 —— 一次落三件套，撞名整批不落
-///    （免得留个"三份里成了一份"的半批）；那份可能被用户改过，静默盖掉等于删用户数据；
+/// 2. **默认不覆盖**：目标里已经有同名的那一份就整批拒绝，并挂上
+///    [`EXPORT_EXISTS_CODE`] —— 一次落三件套，撞名整批不落（免得留个"三份里成了一份"
+///    的半批）；那份可能被用户改过，**没问过就不许盖**；
 /// 3. **半路失败整批收回**：已经落下的删掉（"任何一项失败整批不落"），宁可什么都不
 ///    留，也不留一个"三份里成了一份"的残局。
+///
+/// `overwrite = true`（界面在那条撞名错误上问过用户、他点了「重新导出」）时改走第二条路：
+/// **先把几份全写成同目录下的临时名，齐了再逐个改名换上去** —— 中途失败只删临时件，
+/// 位置上原来那几份一个字节不动。不做"边查边盖"：那样八成就留下一份新两份旧的。
 fn copy_parts(
     src_dir: &Path,
     parts: &[ExportPart],
     target: &Path,
+    overwrite: bool,
 ) -> Result<Vec<String>, AppError> {
     std::fs::create_dir_all(target).map_err(|e| {
         AppError::io(messages::text(
@@ -629,32 +684,133 @@ fn copy_parts(
         }
     }
 
-    for part in parts {
-        let dest = target.join(&part.name);
-        if dest.exists() {
-            return Err(AppError::invalid_argument(messages::text(
-                "ui.ipc.report.139",
-                &[("v1", &part.name.to_string())],
-            )));
+    if !overwrite {
+        for part in parts {
+            if target.join(&part.name).exists() {
+                return Err(export_exists(&part.name));
+            }
         }
+
+        let mut written: Vec<String> = Vec::new();
+        for part in parts {
+            let dest = target.join(&part.name);
+            if let Err(e) = std::fs::copy(&part.src, &dest) {
+                for done in &written {
+                    let _ = std::fs::remove_file(done);
+                }
+                return Err(AppError::io(messages::text(
+                    "ui.ipc.report.140",
+                    &[("v1", &part.name.to_string())],
+                ))
+                .with_detail(e.to_string()));
+            }
+            written.push(dest.display().to_string());
+        }
+        return Ok(written);
     }
 
-    let mut written: Vec<String> = Vec::new();
+    /* 覆盖这一档：先落临时件（同目录，改名才是原子的），全齐了再换上去 */
+    let mut staged: Vec<(PathBuf, PathBuf)> = Vec::new();
     for part in parts {
-        let dest = target.join(&part.name);
-        if let Err(e) = std::fs::copy(&part.src, &dest) {
-            for done in &written {
-                let _ = std::fs::remove_file(done);
+        let tmp = target.join(format!(".{}.partial", part.name));
+        if let Err(e) = std::fs::copy(&part.src, &tmp) {
+            for (left, _) in &staged {
+                let _ = std::fs::remove_file(left);
             }
+            let _ = std::fs::remove_file(&tmp);
             return Err(AppError::io(messages::text(
                 "ui.ipc.report.140",
                 &[("v1", &part.name.to_string())],
             ))
             .with_detail(e.to_string()));
         }
+        staged.push((tmp, target.join(&part.name)));
+    }
+
+    let mut written: Vec<String> = Vec::new();
+    for (at, (tmp, dest)) in staged.iter().enumerate() {
+        if let Err(e) = std::fs::rename(tmp, dest) {
+            /* 还没换上去的那几份临时件清掉；已经换上去的留着（用户要的就是新的） */
+            for (left, _) in &staged[at..] {
+                let _ = std::fs::remove_file(left);
+            }
+            return Err(AppError::io(messages::text(
+                "ui.ipc.report.140",
+                &[("v1", &dest.display().to_string())],
+            ))
+            .with_detail(e.to_string()));
+        }
         written.push(dest.display().to_string());
     }
     Ok(written)
+}
+
+/// **压成一包**：`<父目录>/<基名>.zip`，里面就是那几份（包里的名字与散着导出去的一样）。
+///
+/// 三道闸与 [`copy_parts`] 同一条，只是"一份一份地查"换成"整包查"：
+/// 1. **父目录不许就是归档自己那一天**（不然等于把包写进原件旁边，之后还认不出谁是谁）；
+/// 2. **默认不覆盖**：`<基名>.zip` 已经在就整批拒绝（那份可能是用户自己压的），
+///    并挂 [`EXPORT_EXISTS_CODE`]；`overwrite = true` 时才换掉它；
+/// 3. **半路失败不留半个包** —— 走 `atomic_write_stream`：临时文件写坏了它自己删，
+///    改名成功才算数，盘上永远不会出现"能打开但少一半"的 zip（覆盖那一档也一样：
+///    `persist` 是原子换名）。
+///
+/// 压缩只做 deflate，**不重新编码任何内容**（G-code 与 JSON 都是原字节进包）。
+fn export_zip(
+    src_dir: &Path,
+    parts: &[ExportPart],
+    parent: &Path,
+    base: &str,
+    overwrite: bool,
+) -> Result<Vec<String>, AppError> {
+    let zip_name = format!("{base}.zip");
+    let target = parent.join(&zip_name);
+
+    if let (Ok(dest), Ok(src)) = (parent.canonicalize(), src_dir.canonicalize()) {
+        if dest == src {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.report.138",
+                &[],
+            )));
+        }
+    }
+
+    if target.exists() && !overwrite {
+        return Err(export_exists(&zip_name));
+    }
+
+    crate::fsx::atomic::atomic_write_stream(&target, |file| {
+        let mut zip = zip::ZipWriter::new(file);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        for part in parts {
+            zip.start_file(part.name.as_str(), opts)
+                .map_err(|e| zip_write_err(&zip_name, e))?;
+            let mut reader = std::fs::File::open(&part.src).map_err(|e| {
+                AppError::io(messages::text(
+                    "ui.ipc.report.140",
+                    &[("v1", &part.name.to_string())],
+                ))
+                .with_detail(e.to_string())
+            })?;
+            std::io::copy(&mut reader, &mut zip).map_err(|e| {
+                AppError::io(messages::text(
+                    "ui.ipc.report.140",
+                    &[("v1", &part.name.to_string())],
+                ))
+                .with_detail(e.to_string())
+            })?;
+        }
+        zip.finish().map_err(|e| zip_write_err(&zip_name, e))?;
+        Ok(())
+    })?;
+
+    Ok(vec![target.display().to_string()])
+}
+
+/// 写 zip 时那几处出错：一律说"写不出这个包"（带上包名），细节原样留着排查。
+fn zip_write_err(name: &str, e: zip::result::ZipError) -> AppError {
+    AppError::io(messages::text("ui.ipc.report.140", &[("v1", name)])).with_detail(e.to_string())
 }
 
 /// 导出的默认父目录（`<用户根>/exports`，`fsx::paths::EXPORTS_DIR`）。
@@ -675,33 +831,39 @@ pub fn get_report_export_plan(app: AppHandle, id: String) -> Result<ReportExport
         let base = export_base(&id, model_name_of(&meta_path).as_deref());
         let parts = parts_of(&day_dir, &id, &base);
         Ok(ReportExportPlan {
-            files: parts
-                .iter()
-                .map(|p| ReportExportFile {
-                    kind: p.kind,
-                    name: p.name.clone(),
-                })
-                .collect(),
-            missing: missing_parts(&parts),
+            files: files_of(&parts, &day_dir, &id, &base),
             base,
             default_dir: default_export_dir(&app)?.display().to_string(),
         })
     })
 }
 
-/// **把这一条的三件套导出去**（本模块唯一的写口）：复制到 `dir/<基名>/` 下。
+/// **把这一条的三件套导出去**（本模块唯一的写口）。
 ///
 /// `dir` 是**父目录**（默认值由 [`get_report_export_plan`] 给，用户可以在界面上改）；
 /// 必须是绝对路径 —— 相对路径会落到进程自己的当前目录，那不是用户点过的任何一个地方。
 ///
-/// 返回真正落盘的路径（按 [`EXPORT_PARTS`] 的顺序）。缺的那几份不在这里报错：
-/// 计划里已经说过缺哪个了（失败的那一次本来就没有"处理后的文件"），
+/// `compress` 由导出框那一格决定（默认开，用户关过就记住）：
+///
+/// - `true` ⇒ 打成一个 `<基名>.zip` 落在 `dir` 下；
+/// - `false` ⇒ 散着复制到 `dir/<基名>/` 里（原来那一条）。
+///
+/// 返回真正落盘的路径（散着时按 [`EXPORT_PARTS`] 的顺序；压缩时就是那个 zip）。
+/// 缺的那几份不在这里报错：计划里已经说过缺哪个了（失败的那一次本来就没有"处理后的文件"），
 /// 一条记录一份都不在盘上才是错误（那时什么也导不出来）。
+///
+/// `overwrite`（2026-11-04 作者问「位置已有怎么办」）：
+///
+/// - `false` ⇒ 位置上已经有同名的那一份就**整批拒绝**，错里带 [`EXPORT_EXISTS_CODE`]；
+/// - `true` ⇒ 盖掉它。界面从不默认传 `true`：它只在那条撞名错误上问过用户、
+///   他点了「重新导出」之后才带 —— 那份可能是他自己动过的唯一一份。
 #[tauri::command]
 pub fn export_report_archive(
     app: AppHandle,
     id: String,
     dir: String,
+    compress: bool,
+    overwrite: bool,
 ) -> Result<Vec<String>, AppError> {
     traced("exportReportArchive", |_| {
         check_id(&id)?;
@@ -722,7 +884,10 @@ pub fn export_report_archive(
                 &[("id", &id.to_string())],
             )));
         }
-        copy_parts(&day_dir, &parts, &parent.join(&base))
+        if compress {
+            return export_zip(&day_dir, &parts, &parent, &base, overwrite);
+        }
+        copy_parts(&day_dir, &parts, &parent.join(&base), overwrite)
     })
 }
 
@@ -754,31 +919,102 @@ pub async fn reveal_report_export(app: AppHandle, id: String, dir: String) -> Re
         let (_day_dir, meta_path) = record_paths(&root, &id)?;
         let base = export_base(&id, model_name_of(&meta_path).as_deref());
         let target = export_target(&parent, &base)?;
+        let opener = tauri_plugin_opener::OpenerExt::opener(&app);
+        /*
+         * 两种落点两种开法（2026-11-03，加了压缩那一条）：
+         *   · 散着导出去 ⇒ 落点是一个**目录**，"去那儿看看"就是把文件夹打开；
+         *   · 压成一包 ⇒ 落点是一个 **zip**，没有"那个文件夹"可开 —— 在父目录里
+         *     把它**选中**才是用户点「打开位置」时想看的东西（`.zip` 交给系统会被
+         *     解压成一个新目录，那是另一个意思）。
+         */
+        if target.is_dir() {
+            opener
+                .open_path(target.to_string_lossy().into_owned(), None::<&str>)
+                .map_err(|e| {
+                    AppError::io(messages::text("ui.ipc.report.144", &[]))
+                        .with_detail(e.to_string())
+                })
+        } else {
+            opener.reveal_item_in_dir(&target).map_err(|e| {
+                AppError::io(messages::text("ui.ipc.report.144", &[])).with_detail(e.to_string())
+            })
+        }
+    })
+}
+
+/// 这次导出的落点：`<父目录>/<基名>`（目录）或 `<父目录>/<基名>.zip`（压缩），
+/// 而且**必须真的在**才给。
+///
+/// 不在就如实拒绝并附上期望路径（与 `wb_reveal_asset` 的 `reveal_target` 同一条：
+/// 不去猜、也不打开一个不存在的东西）。两种都不在时口径仍然是"这个位置里还没有它"——
+/// 名字里那个 `<基名>.zip` 由调用方按需拼（这里只判在不在）。
+fn export_target(parent: &Path, base: &str) -> Result<PathBuf, AppError> {
+    let dir = parent.join(base);
+    if dir.is_dir() {
+        return Ok(dir);
+    }
+    let zipped = parent.join(format!("{base}.zip"));
+    if zipped.is_file() {
+        return Ok(zipped);
+    }
+    Err(
+        AppError::not_found(messages::text("ui.ipc.report.145", &[("base", base)])).with_detail(
+            ::postprocess::diag::messages::text(
+                "ui.ipc.report.why_expected_path",
+                &[("path", &dir.display().to_string())],
+            ),
+        ),
+    )
+}
+
+/// **在系统文件管理器里定位归档里的那一份**（导出框信息页那颗「定位」，2026-11-03）。
+///
+/// 作者的原话是「不导出直接定位这个文件」—— 那一页要回答的是"这些文件此刻在盘上
+/// 哪儿"，所以开的是**归档里那一份**，不是导出去的副本（那时可能还没导出过）。
+///
+/// 闸门与 [`reveal_report_export`] 同一条：
+///
+/// - 前端只给 `id + kind`，路径由后端自己算（不许拿一个路径来"打开它"）；
+/// - 那一份必须**真的在**（失败的那一次没有 `<id>.gcode`）—— 不在就如实拒绝并附期望路径；
+/// - 只读、只开系统文件管理器、一个应用状态都不碰。
+#[tauri::command]
+pub async fn reveal_report_source(
+    app: AppHandle,
+    id: String,
+    kind: String,
+) -> Result<(), AppError> {
+    traced("revealReportSource", |_| {
+        check_id(&id)?;
+        let suffix = export_suffix(&kind).ok_or_else(|| {
+            AppError::invalid_argument(messages::text("ui.ipc.report.146", &[("kind", &kind)]))
+        })?;
+        let root = history_root(&app)?;
+        let (day_dir, _meta_path) = record_paths(&root, &id)?;
+        let target = day_dir.join(format!("{id}{suffix}"));
+        if !target.is_file() {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.report.147",
+                &[("name", &target.display().to_string())],
+            ))
+            .with_detail(::postprocess::diag::messages::text(
+                "ui.ipc.report.why_expected_path",
+                &[("path", &target.display().to_string())],
+            )));
+        }
         tauri_plugin_opener::OpenerExt::opener(&app)
-            .open_path(target.to_string_lossy().into_owned(), None::<&str>)
+            .reveal_item_in_dir(&target)
             .map_err(|e| {
                 AppError::io(messages::text("ui.ipc.report.144", &[])).with_detail(e.to_string())
             })
     })
 }
 
-/// 这次导出的落点：`<父目录>/<基名>`，而且**必须真是一个目录**才给。
-///
-/// 不在就如实拒绝并附上期望路径（与 `wb_reveal_asset` 的 `reveal_target` 同一条：
-/// 不去猜、也不打开一个不存在的目录）。同名的是一个**文件**时同样拒绝 —— 交给系统的
-/// 路径是"打开它"，而一个文件会被**启动**（`.exe` 尤其），那不是用户点「打开位置」的意思。
-fn export_target(parent: &Path, base: &str) -> Result<PathBuf, AppError> {
-    let target = parent.join(base);
-    if !target.is_dir() {
-        return Err(
-            AppError::not_found(messages::text("ui.ipc.report.145", &[("base", base)]))
-                .with_detail(::postprocess::diag::messages::text(
-                    "ui.ipc.report.why_expected_path",
-                    &[("path", &target.display().to_string())],
-                )),
-        );
-    }
-    Ok(target)
+/// `kind`（机器名）→ 归档里的后缀。只认 [`EXPORT_PARTS`] 那三个。
+fn export_suffix(kind: &str) -> Option<&'static str> {
+    EXPORT_PARTS
+        .iter()
+        .find(|(_, k)| *k == kind)
+        .map(|(suffix, _)| *suffix)
 }
 
 #[cfg(test)]
@@ -1044,25 +1280,38 @@ mod tests {
         );
     }
 
-    /// 跑失败的那一次：归档里**没有** `<id>.gcode` —— 计划照实报缺哪一份，不假装齐。
+    /// 跑失败的那一次：归档里**没有** `<id>.gcode` —— 计划里三份照列，那一份 `exists=false`。
+    ///
+    /// 2026-11-04 改口径：原来缺的那份整行不出现（`parts.len() == 2`），界面上就得靠
+    /// 底下一句话解释"少的是哪一份"。现在恒报三份、缺的由 `exists` 说明。
     #[test]
-    fn a_failed_run_misses_only_the_processed_file() {
+    fn a_failed_run_marks_only_the_processed_file_as_absent() {
         let dir = tempfile::tempdir().unwrap();
         let day = dir.path().join("2026-10-11");
 
         record(dir.path(), "ok_20261011_142431", None, true);
         let parts = parts_of(&day, "ok_20261011_142431", "ok_20261011_142431");
         assert_eq!(parts.len(), 3);
-        assert!(missing_parts(&parts).is_empty());
-        assert_eq!(parts[1].name, "ok_20261011_142431.gcode");
+        let files = files_of(&parts, &day, "ok_20261011_142431", "ok_20261011_142431");
+        assert_eq!(files.len(), 3);
+        assert!(files.iter().all(|f| f.exists), "三份都在盘上");
+        assert_eq!(files[1].name, "ok_20261011_142431.gcode");
 
         let failed = "63288.1_20261011_142431";
         record(dir.path(), failed, Some("帕姆"), false);
         let parts = parts_of(&day, failed, "帕姆_20261011142431");
         assert_eq!(parts.len(), 2);
-        assert_eq!(missing_parts(&parts), vec!["processed"]);
-        assert_eq!(parts[0].name, "帕姆_20261011142431_original.gcode");
-        assert_eq!(parts[1].name, "帕姆_20261011142431_meta.json");
+        let files = files_of(&parts, &day, failed, "帕姆_20261011142431");
+        assert_eq!(files.len(), 3, "计划恒报三份");
+        assert_eq!(
+            files.iter().map(|f| (f.kind, f.exists)).collect::<Vec<_>>(),
+            vec![("original", true), ("processed", false), ("meta", true)],
+        );
+        assert_eq!(files[0].name, "帕姆_20261011142431_original.gcode");
+        assert_eq!(files[1].name, "帕姆_20261011142431.gcode");
+        assert_eq!(files[2].name, "帕姆_20261011142431_meta.json");
+        /* 缺的那份也带着"它本该在哪儿"—— 信息页那一行要能复制这串路径 */
+        assert!(files[1].path.ends_with("63288.1_20261011_142431.gcode"));
     }
 
     /// 三件套按基名落到目标目录里，**归档那一份一个字节不动**（复制不是移动）。
@@ -1076,7 +1325,7 @@ mod tests {
 
         let parts = parts_of(&day, id, "帕姆_20261011142431");
         let target = out.path().join("帕姆_20261011142431");
-        let written = copy_parts(&day, &parts, &target).unwrap();
+        let written = copy_parts(&day, &parts, &target, false).unwrap();
 
         assert_eq!(written.len(), 3);
         assert_eq!(
@@ -1108,15 +1357,53 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         std::fs::write(target.join("帕姆_20261011142431.gcode"), "用户自己改过的").unwrap();
 
-        let err = copy_parts(&day, &parts, &target).unwrap_err();
+        let err = copy_parts(&day, &parts, &target, false).unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
         assert!(err.message.contains("已经有"), "{}", err.message);
+        /* 界面按这个码摆「重新导出」（不认句子：翻译一改就失效） */
+        assert_eq!(err.message_code.as_deref(), Some(EXPORT_EXISTS_CODE));
         /* 那一份没被动过，别的也一份都没落（先过一遍地雷再写） */
         assert_eq!(
             std::fs::read_to_string(target.join("帕姆_20261011142431.gcode")).unwrap(),
             "用户自己改过的"
         );
         assert!(!target.join("帕姆_20261011142431_meta.json").exists());
+    }
+
+    /// 点了「重新导出」（`overwrite = true`）⇒ 盖掉，且**只有那三份**被动过：
+    /// 目录里别的东西（用户自己放的）一个不动，半成品临时件也不留。
+    #[test]
+    fn export_overwrites_only_the_three_names_when_asked() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let day = src.path().join("2026-10-11");
+        let id = "63288.1_20261011_142431";
+        record(src.path(), id, Some("帕姆"), true);
+
+        let parts = parts_of(&day, id, "帕姆_20261011142431");
+        let target = out.path().join("帕姆_20261011142431");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("帕姆_20261011142431.gcode"), "旧的那一份").unwrap();
+        std::fs::write(target.join("用户自己的笔记.txt"), "别动我").unwrap();
+
+        let written = copy_parts(&day, &parts, &target, true).unwrap();
+        assert_eq!(written.len(), 3);
+        assert_eq!(
+            std::fs::read_to_string(target.join("帕姆_20261011142431.gcode")).unwrap(),
+            "; 处理后"
+        );
+        /* 目录里别的东西没被卷进来 */
+        assert_eq!(
+            std::fs::read_to_string(target.join("用户自己的笔记.txt")).unwrap(),
+            "别动我"
+        );
+        /* 临时件一个不剩 */
+        let leftovers = std::fs::read_dir(&target)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".partial"))
+            .count();
+        assert_eq!(leftovers, 0);
     }
 
     /// 保存位置指到归档自己那一天 ⇒ 拒绝（`fs::copy` 源与目标同一个文件会先把目标截断，
@@ -1129,7 +1416,7 @@ mod tests {
         record(src.path(), id, Some("帕姆"), true);
 
         let parts = parts_of(&day, id, "帕姆_20261011142431");
-        let err = copy_parts(&day, &parts, &day).unwrap_err();
+        let err = copy_parts(&day, &parts, &day, false).unwrap_err();
         assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
         assert_eq!(
             std::fs::read_to_string(day.join(format!("{id}.gcode"))).unwrap(),
@@ -1137,11 +1424,13 @@ mod tests {
         );
     }
 
-    /// 「打开位置」只认**真在的那个导出目录**：还没导出过就如实拒绝（附期望路径），
+    /// 「打开位置」只认**真在的那个导出落点**：还没导出过就如实拒绝（附期望路径），
     /// 同名的是一个**文件**也拒绝 —— 交给系统的那条路径是"打开它"，
     /// 而一个文件会被**启动**（`.exe` 尤其），那不是用户点「打开位置」的意思。
+    ///
+    /// ★ 2026-11-03：压缩导出之后落点是一个 `<基名>.zip`（不是目录），它照样认。
     #[test]
-    fn reveal_only_opens_a_real_export_directory() {
+    fn reveal_only_opens_a_real_export_target() {
         let out = tempfile::tempdir().unwrap();
         let base = "帕姆_20261011142431";
 
@@ -1153,8 +1442,106 @@ mod tests {
         std::fs::create_dir_all(&target).unwrap();
         assert_eq!(export_target(out.path(), base).unwrap(), target);
 
+        /* 压成一包：落点就是那个 zip 文件（选中它，而不是把它解压成一个新目录） */
+        let zip_base = "帕姆_zip_20261011142431";
+        let zipped = out.path().join(format!("{zip_base}.zip"));
+        std::fs::write(&zipped, "PK").unwrap();
+        assert_eq!(export_target(out.path(), zip_base).unwrap(), zipped);
+
         std::fs::write(out.path().join("帕姆.exe"), "x").unwrap();
         assert!(export_target(out.path(), "帕姆.exe").is_err(), "文件不给");
+    }
+
+    /// 压缩导出：**一个** `<基名>.zip`，里面就是那三份（名字与散着导出去的一样），
+    /// 归档里那几份一个字节不动。
+    #[test]
+    fn export_zipped_writes_one_package_with_the_three_files() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let day = src.path().join("2026-10-11");
+        let id = "63288.1_20261011_142431";
+        let base = "帕姆_20261011142431";
+        record(src.path(), id, Some("帕姆"), true);
+
+        let parts = parts_of(&day, id, base);
+        let written = export_zip(&day, &parts, out.path(), base, false).unwrap();
+
+        assert_eq!(written.len(), 1, "压缩就是一个包：{written:?}");
+        assert_eq!(
+            written[0],
+            out.path().join(format!("{base}.zip")).display().to_string()
+        );
+
+        let file = std::fs::File::open(&written[0]).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        assert_eq!(archive.len(), 3);
+        let mut names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_owned())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                format!("{base}.gcode"),
+                format!("{base}_meta.json"),
+                format!("{base}_original.gcode"),
+            ]
+        );
+
+        let mut packed = String::new();
+        {
+            use std::io::Read as _;
+            archive
+                .by_name(&format!("{base}.gcode"))
+                .unwrap()
+                .read_to_string(&mut packed)
+                .unwrap();
+        }
+        assert_eq!(packed, "; 处理后", "包里的字节必须与归档一致");
+
+        /* 原件毫发无损（压缩只是读） */
+        assert_eq!(
+            std::fs::read_to_string(day.join(format!("{id}.gcode"))).unwrap(),
+            "; 处理后"
+        );
+    }
+
+    /// 压缩导出**不许覆盖**已有的那个包（与散着导同一道闸：静默盖掉等于删用户数据）。
+    #[test]
+    fn a_zipped_export_refuses_to_overwrite() {
+        let src = tempfile::tempdir().unwrap();
+        let out = tempfile::tempdir().unwrap();
+        let day = src.path().join("2026-10-11");
+        let id = "63288.1_20261011_142431";
+        let base = "帕姆_20261011142431";
+        record(src.path(), id, Some("帕姆"), true);
+
+        let already = out.path().join(format!("{base}.zip"));
+        std::fs::write(&already, "用户自己的包").unwrap();
+
+        let parts = parts_of(&day, id, base);
+        let err = export_zip(&day, &parts, out.path(), base, false).unwrap_err();
+        /* 撞名这一档也带码（界面据此摆「重新导出」） */
+        assert_eq!(err.message_code.as_deref(), Some(EXPORT_EXISTS_CODE));
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(err.message.contains("已经"), "{}", err.message);
+        assert_eq!(
+            std::fs::read_to_string(&already).unwrap(),
+            "用户自己的包",
+            "那一份不许被动过"
+        );
+    }
+
+    /// 定位只认三件套的机器名（`original` / `processed` / `meta`）——
+    /// 别的串一律在门口拦掉，不拿它去拼路径。
+    #[test]
+    fn export_suffix_only_knows_the_three_parts() {
+        assert_eq!(export_suffix("original"), Some("_original.gcode"));
+        assert_eq!(export_suffix("processed"), Some(".gcode"));
+        assert_eq!(export_suffix("meta"), Some("_meta.json"));
+        for bad in ["", "..", "processed/../../x", "ORIGINAL"] {
+            assert_eq!(export_suffix(bad), None, "{bad:?} 该被拦下");
+        }
     }
 
     /// id 是拼路径的那一段：带分隔符 / 全是点的一律在门口拦掉。

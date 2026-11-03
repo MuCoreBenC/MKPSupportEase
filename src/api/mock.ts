@@ -1,6 +1,15 @@
 import { t } from '../i18n'
 import { NotImplementedError } from './errors'
 
+/**
+ * 演示环境里"已经落过的导出落点"（2026-11-04）。
+ *
+ * 真机上"位置里已经有那一份"是一次真实的 `Path::exists`；假后端没有盘，
+ * 只能记在内存里 —— 同一个落点第二次导出就回一条撞名错，让「重新导出」那条路
+ * 在浏览器里也点得到。刷新页面即清空（演示不 pretending 盘上有东西）。
+ */
+const demoLanded = new Set<string>()
+
 /*
  * **探针用的假后处理快照**（2026-10-18）。
  *
@@ -2323,8 +2332,29 @@ export const mockApi: MkpApi = {
    * 「已导出」）。真机上这一步是 [`crate::ipc::report::export_report_archive`] 的真复制，
    * 拒绝规则（不覆盖 / 不许指到归档自己）也都在那一侧。
    */
-  async exportReportArchive(id, dir) {
-    return reportExportPaths(id, dir)
+  /**
+   * 演示导出。假后端没有文件系统，但**撞名这一条要能演**（2026-11-04）：
+   * 同一个落点第二次导出时回一条带 `E_REPORT_EXPORT_EXISTS_001` 的错，
+   * 界面上「重新导出」那条路才点得到；`overwrite = true` 时放行。
+   *
+   * 记的是"这次会话里已经落过的落点"（模块级 Set）：刷新页面就清空 —— 演示环境
+   * 里没有必要 pretending 盘上有东西。
+   */
+  async exportReportArchive(id, dir, compress, overwrite) {
+    const paths = reportExportPaths(id, dir, compress)
+    const at = paths[0] ?? ''
+    if (!overwrite && demoLanded.has(at)) {
+      const name = at.split('/').pop() ?? at
+      return Promise.reject({
+        code: 'INVALID_ARGUMENT',
+        /* 句子住字典（假后端也不写死中文），码挂在末尾 —— 与真机 `AppError::text` 同一个形状 */
+        message: t('mock.report.exists', { name, code: 'E_REPORT_EXPORT_EXISTS_001' }),
+        messageCode: 'E_REPORT_EXPORT_EXISTS_001',
+        traceId: '-',
+      })
+    }
+    demoLanded.add(at)
+    return paths
   },
 
   /**
@@ -2335,6 +2365,15 @@ export const mockApi: MkpApi = {
     throw new Error(
       t('mock.reveal.folder', { dir: dir + '\\<基名>\\' }),
     )
+  },
+
+  /**
+   * 信息页那颗「定位」（归档里那一份）。同上：假后端没有文件系统，
+   * **照实说它在真机上会选中哪一份** —— 不假装打开了文件管理器。
+   */
+  async revealReportSource(id, kind) {
+    const file = reportExportPlan(id).files.find((f) => f.kind === kind)
+    throw new Error(t('mock.reveal.finder', { path: file?.path ?? '' }))
   },
 
   /**

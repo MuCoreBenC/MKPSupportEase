@@ -137,6 +137,11 @@ const EXPORT_SUFFIX: Record<ReportExportKind, string> = {
 }
 const EXPORT_KINDS: ReportExportKind[] = ['original', 'processed', 'meta']
 
+/** 归档里那一天的目录（真机上是 `<数据根>/gcode_history/<日>/`） */
+function archiveDay(): string {
+  return `${USER_ROOT}/gcode_history/${DAY}`
+}
+
 /**
  * **参数快照**（2026-10-21）的形状 —— 预览里给成功那几趟都摆一份。
  *
@@ -212,20 +217,30 @@ export function reportExportPlan(id: string): ReportExportPlan {
   const idx = rows.findIndex((r) => idOf(r) === id)
   const r = rows[Math.max(idx, 0)]
   const base = r.modelName === undefined ? idOf(r) : `${r.modelName}_${stampOf(r)}`
-  const kinds = EXPORT_KINDS.filter((k) => r.ok || k !== 'processed')
   return {
     base,
     /* 默认落点：用户根下的 `exports/`（真机上由 `fsx::paths::EXPORTS_DIR` 给） */
     defaultDir: `${USER_ROOT}/exports`,
-    files: kinds.map((kind) => ({ kind, name: `${base}${EXPORT_SUFFIX[kind]}` })),
-    missing: r.ok ? [] : ['processed'],
+    /* 与真机同一条：**恒报三份**，失败那一次「处理后的文件」也在，只是 `exists=false` */
+    files: EXPORT_KINDS.map((kind) => ({
+      kind,
+      name: `${base}${EXPORT_SUFFIX[kind]}`,
+      /* 信息页要的那一串：归档里那一份的真实位置（形状照真机写；缺的那份就是它本该在的位置） */
+      path: `${archiveDay()}/${idOf(r)}${EXPORT_SUFFIX[kind]}`,
+      exists: r.ok || kind !== 'processed',
+    })),
   }
 }
 
-/** 演示导出：假后端没有文件系统 —— 只把"会落到哪几个路径"算出来（真机上那步是真复制） */
-export function reportExportPaths(id: string, dir: string): string[] {
+/**
+ * 演示导出：假后端没有文件系统 —— 只把"会落到哪几个路径"算出来（真机上那步是真复制）。
+ * `compress` 与真机同义：真 ⇒ 一个 `<基名>.zip`，假 ⇒ 逐份落在 `<基名>/` 里。
+ */
+export function reportExportPaths(id: string, dir: string, compress: boolean): string[] {
   const plan = reportExportPlan(id)
-  return plan.files.map((f) => `${dir}/${plan.base}/${f.name}`)
+  if (compress) return [`${dir}/${plan.base}.zip`]
+  /* 只导**真在盘上**的那几份（假后端里就是 `exists`）—— 与真机 `copy_parts` 同一条 */
+  return plan.files.filter((f) => f.exists).map((f) => `${dir}/${plan.base}/${f.name}`)
 }
 
 /* ---------- 详情 ---------- */

@@ -175,6 +175,12 @@ fn emit_jump_run(
             break;
         }
         let jump_cmd = strip_z_and_e(tl);
+        // 与上一句同点 ⇒ 0mm 移动，发出去只会多一根竖线，跳过
+        let (px, py, pok) = parse_xy_from_g1(&jump_cmd);
+        if pok && moved > 0 && (px - last.0).abs() < 1e-9 && (py - last.1).abs() < 1e-9 {
+            i += 1;
+            continue;
+        }
         let processed = crate::postproc::offset::process_gcode_offset(
             &jump_cmd,
             ir_data.toolhead.x_offset,
@@ -382,6 +388,7 @@ fn write_glue_lines(
     let mut pen_z = start_z;
     let pen_is_up = |z: f64| z > land_z + 1e-6;
 
+    let mut emitted_move = false;
     let mut idx = 0usize;
     while idx < lines.len() {
         let il = lines[idx].trim().to_string();
@@ -494,6 +501,15 @@ fn write_glue_lines(
             idx = next;
             continue;
         }
+        // 段首那句与回位同点的定位行：只在「本段还没发出任何移动」时丢，
+        // 0mm 空操作，发出去只会在预览里多一根竖线。
+        if !emitted_move && is_travel_line(&il) {
+            let (tx, ty, ok) = parse_xy_from_g1(&il);
+            if ok && (tx - prev_x).abs() < 1e-9 && (ty - prev_y).abs() < 1e-9 {
+                idx += 1;
+                continue;
+            }
+        }
         if is_travel_line(&il) && travel_run_moves(lines, idx, prev_x, prev_y) {
             // 笔还在落笔状态而下一段是空走 —— 先抬起来再走（同标记分支的抬法）
             let (next, lx, ly, z_after) = emit_jump_run(
@@ -516,6 +532,7 @@ fn write_glue_lines(
         // `G2/G3` 是圆弧挤出移动，必须和 `G1` 一样发出去（I/J 是相对量，偏移不影响）。
         let is_move_cmd = il.starts_with("G1 ") || il.starts_with("G2 ") || il.starts_with("G3 ");
         if is_move_cmd && !il.contains("G1 F") {
+            emitted_move = true;
             // 抬着走过来、终于遇到涂胶行 ⇒ 先落再涂
             if pen_is_up(pen_z) && il.contains(" E") {
                 sink.push_str(&format!(
@@ -1295,12 +1312,10 @@ mod continuity_tests {
     fn assert_single_lift_and_both_travels(iface: &[String]) {
         let out = emit(iface);
 
-        assert!(
-            // 成品坐标 = 原始坐标 − (x_offset, y_offset)
-            has_xy(&out, 172.86, 151.182),
-            "空走1 丢了，输出：\n{}",
-            out.join("\n")
-        );
+        /*
+         * 段首那句「与回位同点」的空走会被去重丢掉（0mm，发出去也是白走），
+         * 所以这里不再要求它出现；要保证的是**真正移动的那一段**在，且只抬落一次。
+         */
         assert!(
             has_xy(&out, 108.202, 148.607),
             "空走2 被吞掉了 —— 涂胶行会从空走1 的终点直飞，落笔高度横移 \

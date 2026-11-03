@@ -433,10 +433,12 @@ export const bridgeApi: MkpApi = {
   getReportList: () => call('getReportList', 'get_report_list'),
   getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
   getReportExportPlan: (id) => call('getReportExportPlan', 'get_report_export_plan', { id }),
-  exportReportArchive: (id, dir) =>
-    call('exportReportArchive', 'export_report_archive', { id, dir }),
+  exportReportArchive: (id, dir, compress, overwrite) =>
+    call('exportReportArchive', 'export_report_archive', { id, dir, compress, overwrite }),
   revealReportExport: (id, dir) =>
     call('revealReportExport', 'reveal_report_export', { id, dir }),
+  revealReportSource: (id, kind) =>
+    call('revealReportSource', 'reveal_report_source', { id, kind }),
   /*
    * 导出框那颗「更改位置」：与 `pickImportFiles` 同一半权限（`dialog:allow-open` ——
    * 选目录与选文件在插件里是同一个 `open`，这里只是多个 `directory`）。

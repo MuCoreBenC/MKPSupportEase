@@ -846,6 +846,7 @@ export const ja: Record<StringKey, string> = {
   'mock.preset.unreadable': '{file} を読み取れません：{why} —— このプリセットは現在適用も編集もできません',
   'mock.reveal.folder':
     'モックバックエンドにはファイルシステムがありません —— 実機ではファイルマネージャーを {dir} で開きます',
+  'mock.report.exists': '保存先にすでに {name} があります（{code}）',
   'mock.files.noPreset':
     '{machine} / {version} に MKP プリセットファイルが設定されていません（カタログに見つかりません）',
   'mock.files.noBundle':
@@ -1041,13 +1042,24 @@ export const ja: Record<StringKey, string> = {
   'report.export.finish': '完了',
   'report.export.cancel': 'キャンセル',
   'report.export.confirm': '書き出しを実行',
+  'report.export.busy': '書き出し中',
   'report.export.planErr': '書き出しリストを読み取れません：{err}',
   'report.export.failExport': '書き出しに失敗：',
   'report.export.failOpen': '開けませんでした：',
   'report.export.loading': '書き出しリストを読み込み中…',
-  'report.export.missing': 'アーカイブに{names}がありません — 書き出しリストには出ません。',
+  'report.export.failed': '処理失敗',
   'report.export.open': '場所を開く',
   'report.export.change': '場所を変更',
+  'report.export.info': '情報',
+  'report.export.files': 'ファイル',
+  'report.export.doneZip': 'zip を書き出しました（{n} ファイルを収録）',
+  'report.export.overwrite': '上書きして書き出す',
+  'report.export.zip': '書き出し時に圧縮',
+  'report.export.zipHint': 'これらのファイルを 1 つの zip にまとめます',
+  'report.export.copyPath': 'パスをコピー',
+  'report.export.copied': 'コピーしました',
+  'report.export.reveal': 'ファイルの場所を開く',
+  'report.export.failReveal': '場所を開けませんでした：',
 
   /* Presets page (PagePresets) */
 

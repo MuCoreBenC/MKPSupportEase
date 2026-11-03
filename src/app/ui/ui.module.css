@@ -203,3 +203,24 @@
   background: none;
   cursor: default;
 }
+
+/*
+ * 灰着就不许再变脸（2026-11-04 作者：「确认导出的灰色的时候悬停不要变色」）。
+ *
+ * 病根是**层叠**：`[data-theme='dark'] .btnAccent:hover` 的特异性比 `.btn:disabled` 高，
+ * 于是"导完灰掉的那颗"一悬停就亮回实心绿 —— 看着像又能点了，点下去却什么都不发生。
+ * 这里把 `:disabled` 的两档（含 hover）都钉死在禁用那一套上。
+ *
+ * 放在文件末尾是为了压过上面那几条 `[data-theme]` 的 hover —— 同特异性下后写的赢。
+ */
+.btn:disabled:hover,
+.btn:disabled:active,
+[data-theme='dark'] .btnAccent:disabled,
+[data-theme='dark'] .btnAccent:disabled:hover,
+.btnAccent:disabled,
+.btnAccent:disabled:hover {
+  border-color: var(--line);
+  background: none;
+  color: var(--text-3);
+  cursor: default;
+}

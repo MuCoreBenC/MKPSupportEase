@@ -879,6 +879,7 @@ export const zhCN = {
   'mock.preview.cannotWriteBody': '浏览器预览里读不到 {file} 的正文，写不回去 —— 用桌面版就能存',
   'mock.preset.unreadable': '{file} 读不出来：{why} —— 这一份现在不能应用、也不能改',
   'mock.reveal.folder': '假后端没有文件系统 —— 真机上这一步会打开文件管理器，停在 {dir}',
+  'mock.report.exists': '保存位置里已经有 {name} 了（{code}）',
   'mock.files.noPreset': '{machine} / {version} 没有配 MKP 预设文件（目录里查不到）',
   'mock.files.noBundle': '{machine} / {version} 没有配 bundle，取不到切片器配置',
   'mock.files.bundleMissing': '{machine} / {version} 指向的 bundle 不存在：{bundle}',
@@ -1071,13 +1072,37 @@ export const zhCN = {
   'report.export.finish': '完成',
   'report.export.cancel': '取消',
   'report.export.confirm': '确认导出',
+  /*
+   * 正在导的那一瞬（2026-11-04）：老版本按钮上没字、也没有任何动静，
+   * 作者的原话是「好像卡住一样」，而且连点几次之后手一滑就点到了刚翻脸的「完成」。
+   */
+  'report.export.busy': '导出中',
   'report.export.planErr': '导出清单读不出来：{err}',
-  'report.export.failExport': '导出没成：',
-  'report.export.failOpen': '打开没成：',
+  'report.export.failExport': '导出失败：',
+  'report.export.failOpen': '打开失败：',
   'report.export.loading': '正在读导出清单…',
-  'report.export.missing': '归档里没有{names} —— 它不会出现在导出清单里。',
+  'report.export.failed': '处理失败',
   'report.export.open': '打开位置',
   'report.export.change': '更改位置',
+  /*
+   * 信息页（2026-11-03）：导出框左下角那颗「信息」翻过去的另一页 ——
+   * 压缩开关（默认开、关过就记住）、归档里那几份的真实路径（可复制 / 在访达里定位）。
+   * 两颗按钮的字都短：它们只是「说明」这一页上的小动作，不该抢页脚的戏。
+   */
+  'report.export.info': '信息',
+  'report.export.files': '文件',
+  'report.export.doneZip': '已导出压缩包（含 {n} 个文件）',
+  /*
+   * 撞名（2026-11-04）：位置上已经有那一份了 —— 按钮就地翻成「重新导出」。
+   * 那一句问话在页脚左边那颗「打开位置」上配着：先去看看，或直接盖掉。
+   */
+  'report.export.overwrite': '重新导出',
+  'report.export.zip': '导出时启用压缩',
+  'report.export.zipHint': '把这些文件打成一个 zip 包再保存',
+  'report.export.copyPath': '复制路径',
+  'report.export.copied': '已复制',
+  'report.export.reveal': '定位文件位置',
+  'report.export.failReveal': '定位没成：',
 
   /* 预设页 PagePresets */
 

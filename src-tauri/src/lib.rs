@@ -559,6 +559,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::export_report_archive,
         // 导出之后那颗「打开位置」：打开系统文件管理器，落在**后端自己算出来的**那个目录
         ipc::report::reveal_report_export,
+        // 导出框信息页那颗「定位」：不导出也能在文件管理器里选中归档里的那一份
+        ipc::report::reveal_report_source,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
@@ -745,6 +747,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::get_report_export_plan,
         ipc::report::export_report_archive,
         ipc::report::reveal_report_export,
+        ipc::report::reveal_report_source,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用

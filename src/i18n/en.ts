@@ -847,6 +847,7 @@ export const en: Record<StringKey, string> = {
   'mock.preset.unreadable': 'Cannot read {file}: {why} — this preset cannot be applied or edited right now',
   'mock.reveal.folder':
     'The mock backend has no file system — on a real machine this opens the file manager at {dir}',
+  'mock.report.exists': 'The save location already has {name} ({code})',
   'mock.files.noPreset': '{machine} / {version} has no MKP preset file (not found in the catalog)',
   'mock.files.noBundle': '{machine} / {version} has no bundle; the slicer profile is unavailable',
   'mock.files.bundleMissing': '{machine} / {version} points to a bundle that does not exist: {bundle}',
@@ -1042,13 +1043,24 @@ export const en: Record<StringKey, string> = {
   'report.export.finish': 'Done',
   'report.export.cancel': 'Cancel',
   'report.export.confirm': 'Export',
+  'report.export.busy': 'Exporting',
   'report.export.planErr': 'Could not read the export list: {err}',
   'report.export.failExport': 'Export failed: ',
   'report.export.failOpen': 'Could not open: ',
   'report.export.loading': 'Reading the export list…',
-  'report.export.missing': 'Not in the archive: {names} — it will not appear in the export list.',
+  'report.export.failed': 'Processing failed',
   'report.export.open': 'Open location',
   'report.export.change': 'Change location',
+  'report.export.info': 'Info',
+  'report.export.files': 'Files',
+  'report.export.doneZip': 'Exported one zip ({n} files inside)',
+  'report.export.overwrite': 'Replace and export',
+  'report.export.zip': 'Compress on export',
+  'report.export.zipHint': 'Pack these files into a single zip',
+  'report.export.copyPath': 'Copy path',
+  'report.export.copied': 'Copied',
+  'report.export.reveal': 'Show file location',
+  'report.export.failReveal': 'Could not show the location: ',
 
   /* Presets page (PagePresets) */
 

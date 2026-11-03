@@ -1400,7 +1400,9 @@ text_zh_tw = "儲存位置就是歸檔自己的目錄 —— 換一個地方（�
 text_ja = "保存先がアーカイブ自身のディレクトリです — 別の場所を選んでください（ここでは原本を上書きします）"
 
 ["ui.ipc.report.139"]
-text = "保存位置里已经有 {v1} 了 —— 换个位置，或先把那一份挪走"
+# 撞名（2026-11-04）：界面按这个码摆「重新导出」——不认句子，翻译一改就失效
+code = "E_REPORT_EXPORT_EXISTS_001"
+text = "保存位置里已经有 {v1} 了 —— 换个位置，或先在「重新导出」里覆盖掉它"
 text_en = "The save location already has {v1} — choose another place, or move that file away first"
 text_zh_tw = "儲存位置裡已經有 {v1} 了 —— 換個位置，或先把那一份挪走"
 text_ja = "保存先にすでに {v1} があります — 場所を変えるか、先にそれをどかしてください"
@@ -1444,6 +1446,20 @@ text_en = "There is no “{base}” in this location yet"
 text_zh_tw = "這個位置裡還沒有「{base}」"
 text_ja = "この場所にはまだ「{base}」がありません"
 params = ["base"]
+
+["ui.ipc.report.146"]
+text = "不认识的导出项：{kind}"
+text_en = "Unknown export item: {kind}"
+text_zh_tw = "不認識的匯出項目：{kind}"
+text_ja = "不明なエクスポート項目：{kind}"
+params = ["kind"]
+
+["ui.ipc.report.147"]
+text = "归档里没有这一份：{name}"
+text_en = "This file is not in the archive: {name}"
+text_zh_tw = "歸檔裡沒有這一份：{name}"
+text_ja = "アーカイブにこのファイルがありません：{name}"
+params = ["name"]
 
 ["ui.ipc.slicer.146"]
 text = "不认识的切片软件：{other}（只有 system / bambu / orca / custom 四档）"
