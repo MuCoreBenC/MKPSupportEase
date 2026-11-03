@@ -51,10 +51,13 @@ use crate::error::AppError;
 use crate::workbench::clock;
 use crate::workbench::domain::layer::Level;
 use crate::workbench::domain::patch::{
-    BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft, Visibility,
+    variant_key, BuiltRecord, BundleEdit, CatalogMachine, Committed, CommittedVersion, Draft,
+    Visibility,
 };
-use crate::workbench::domain::variants;
+
 use crate::workbench::presets::Presets;
+
+use super::logging;
 use crate::workbench::store::Store;
 
 /// 结构版本。读到更大的数字就拒绝，而不是硬着头皮解析
@@ -250,47 +253,57 @@ pub fn apply_draft_now(
     committed: &Committed,
     draft: &Draft,
 ) -> Result<usize, AppError> {
-    let mut edits = plan_value_edits(presets, committed, draft);
-    normalize_same_as_inherited(presets, &mut edits);
-    if edits.is_empty() {
-        return Ok(0);
-    }
-    let written = edits.len();
-    presets.apply_values(&edits)?;
-    Ok(written)
+    apply_draft_now_traced(presets, committed, draft).map(|(n, _)| n)
 }
 
-/// **用户改一格值时，同值不落键**（2026-11-02，作者实测逼出来的）。
+/// 同上，另外告诉调用方**这 N 个键落在哪些 owner 上**。
 ///
-/// 把一个值与「它本来就会继承到的值」写成一样，等于铺一层**同值副本**：
-/// 信息量是 0，但文件字节变了 ⇒ 右上角「未保存 N」+1、行上徽章也不消失。
-///
-/// 作者那天的病历：在机型基底上把 `toolhead.speed_limit` 改成 70，而 70 就是
-/// `defaultValue` —— 于是 `[params.machineVariants]` 里多出 `A1 = 70.0`，
-/// 文件从「没有这一层」变成「有这一层」，界面上就成了「改过了，而且改不回去」。
-///
-/// 注册表 2026-10-06 就给过这个立场：「要改全局值请改上面的 `defaultValue`，
-/// 别在这儿铺一层同值副本」。那句话当时只管住版本层（归并时同值会被上提掉）。
-///
-/// ★ **只在这一条路上做**：`Registry::set_variant` 还被「复制配方 / 新建版本」用，
-/// 那些场景里显式写一个相同值正是**独立快照**的语义，删了副本就不再独立
-/// （`copied_recipe_is_an_independent_snapshot` 钉着）。
-fn normalize_same_as_inherited(
-    presets: &Presets,
-    edits: &mut [(String, String, Option<serde_json::Value>)],
-) {
-    for (key, owner, value) in edits.iter_mut() {
-        let Some(v) = value.as_ref() else { continue };
-        if presets
-            .registry
-            .inherited_value_for(key, owner)
-            .is_some_and(|inherited| &inherited == v)
-        {
-            // `None` = 删键，让它挂回继承
-            *value = None;
-        }
+/// 作者 2026-11-02：「改一次基底」日志里写着 `written=3`，可谁也看不出那 3 个是谁 ——
+/// 而"改基底会连版本键一起改"恰恰是最容易让人以为改动丢了的一处。
+/// 日志里把 owner 列出来，一眼就能对上。
+pub fn apply_draft_now_traced(
+    presets: &mut Presets,
+    committed: &Committed,
+    draft: &Draft,
+) -> Result<(usize, Vec<logging::KeyChange>), AppError> {
+    let planned = plan_value_edits_why(presets, committed, draft);
+    if planned.is_empty() {
+        return Ok((0, Vec::new()));
     }
+    let written = planned.len();
+    /* ★ `before` 必须**现在**取：`apply_values` 之后就问到刚写进去的值了 */
+    let changes: Vec<logging::KeyChange> = planned
+        .iter()
+        .map(|e| logging::KeyChange {
+            key: e.key.clone(),
+            owner: e.owner.clone(),
+            before: presets
+                .registry
+                .param(&e.key)
+                .and_then(|p| p.machine_variants.get(&e.owner))
+                .cloned(),
+            after: e.value.clone(),
+            why: e.why,
+        })
+        .collect();
+    let edits: Vec<_> = planned
+        .into_iter()
+        .map(|e| (e.key, e.owner, e.value))
+        .collect();
+    presets.apply_values(&edits)?;
+    Ok((written, changes))
 }
+
+/* ★ **这里原来有一条 `normalize_same_as_inherited`，2026-11-02 删掉了。**
+ *
+ * 它的规则是"写一个与继承值相同的值 ⇒ 不落键"。作者的定稿是反过来的：
+ * 「我的值改过之后，就不跟随基底了……改动过的都不跟随，除非右键改成跟随默认基底」。
+ *
+ * 于是 `70 → 75 → 70` 之后文件里留着那一行 `= 70`，界面显示「不跟随」。
+ * 要让某格回到跟随，走「跟随默认基底」（`SetValue { value: None }` 删键）。
+ *
+ * 代价是文件里会多出一些"值与基底相同"的行 —— 作者已知并接受。
+ * 换来的是**没有隐含规则**：写过的就是写过的，界面不会再自己跳回「跟随」。 */
 
 /// 把草稿写回仓库。
 ///
@@ -308,9 +321,8 @@ pub fn save(
     committed: &Committed,
     draft: &Draft,
 ) -> Result<SaveOutcome, AppError> {
-    let mut edits = plan_value_edits(presets, committed, draft);
-    /* 保存也走同一条归一化：草稿里那些"改回原值"的项不该在真仓库里留下副本 */
-    normalize_same_as_inherited(presets, &mut edits);
+    /* 「写过就留」：保存不再做同值归一化（见 `apply_draft_now_traced` 上方那段注释） */
+    let edits = plan_value_edits(presets, committed, draft);
     presets.apply_values(&edits)?;
 
     // ② 菜单 / 套餐
@@ -356,6 +368,31 @@ fn plan_value_edits(
     committed: &Committed,
     draft: &Draft,
 ) -> Vec<(String, String, Option<serde_json::Value>)> {
+    plan_value_edits_why(presets, committed, draft)
+        .into_iter()
+        .map(|e| (e.key, e.owner, e.value))
+        .collect()
+}
+
+/// 一条算好的值改动，外加**它为什么被写**（日志用）。
+struct PlannedEdit {
+    key: String,
+    owner: String,
+    value: Option<serde_json::Value>,
+    why: logging::Why,
+}
+
+/// 同 [`plan_value_edits`]，但每条都带着 `why`。
+///
+/// 机型层那一步会**连带**写出上提过的版本键 —— 那些键用户这一笔没碰过，
+/// 只是"不写就会被下一次归并抹掉"。这正是作者最困惑的
+/// 「改一次基底，几个版本跟着动」，所以它们必须标成 [`Why::Promoted`]，
+/// 不许混成"用户改的"。
+fn plan_value_edits_why(
+    presets: &Presets,
+    committed: &Committed,
+    draft: &Draft,
+) -> Vec<PlannedEdit> {
     let _ = committed;
     let mut out = Vec::new();
 
@@ -365,23 +402,86 @@ fn plan_value_edits(
     for m in presets.catalog.machines() {
         let version_ids: Vec<String> = m.versions.iter().map(|v| v.id.clone()).collect();
         for (key, value) in pending_of(draft, Level::Machine, &m.id) {
-            // 上提过的那几条版本键此刻还钉着旧值 —— 它们的新值得跟着一起写，
-            // 否则下一次归并又把它们提上来，把这一刀抹掉
-            let mut owners = vec![m.id.clone()];
-            if let Some(param) = presets.registry.param(&key) {
-                if variants::promoted_to_base(param, &m.id, &version_ids) {
-                    owners.extend(version_ids.iter().map(|v| format!("{}:{}", m.id, v)));
+            /* ★ 2026-11-03 重写（作者：「同样操作不该因机型不同而行为不同」）。
+            旧代码只看 `promoted_to_base()` —— 那个判据读的是**文件里有没有版本键**，
+            于是同一套模型（基底 + 三版本继承）在 A1 与 A1_MINI 上写成不同的键数：
+            A1 没版本键 ⇒ 只写 1 个；A1_MINI 有冗余版本键 ⇒ 写 4 个。
+            这是拿"历史文件长什么样"当业务规则。
+
+            现在按**模型**算：这一格的基底变了，每个版本自己的那一行要不要跟着动，
+            取决于**它有没有自己那一行**：
+
+            - 有自己那一行 ⇒ 保持它的旧值（用户钉过的独立值不许被基底抹掉），
+              只把**已经等于旧基底**的那些跟着改（它们本来就等于基底，不改就会被
+              下一次归并重新提上来，把这一刀抹回去）。
+            - 没有自己那一行 ⇒ 什么都不写，它继承基底，行为上已经跟着变了。
+
+            文件里写几行（存储归并）与用户看到几处变化（有效字段）是两件事 ——
+            后者由 `app::effective_fields` 按继承关系展开，不靠这里复制键。 */
+            out.push(PlannedEdit {
+                key: key.clone(),
+                owner: m.id.clone(),
+                value: value.clone(),
+                why: logging::Why::UserEdit,
+            });
+            let Some(param) = presets.registry.param(&key) else {
+                continue;
+            };
+            /* 旧基底：这一笔落笔之前**界面上显示的那个基底值**。
+            没有裸键时（P1S 那种：只有一个版本，值全写在 `P1S:LITE` 上，
+            归并把它当成基底显示）要拿"版本键里那个共同值"当旧基底 ——
+            否则 `old_base = None` 会让每个版本键都判成"用户钉过"，
+            于是值改了、版本键不动，保存之后又被版本键盖回去。 */
+            let old_base = param
+                .machine_variants
+                .get(&variant_key(Level::Machine, &m.id))
+                .cloned()
+                .or_else(|| {
+                    /* 所有版本键都写了同一个值 ⇒ 那就是原基底 */
+                    let mut it = version_ids.iter().filter_map(|vid| {
+                        param
+                            .machine_variants
+                            .get(&variant_key(Level::Version, &format!("{}:{}", m.id, vid)))
+                    });
+                    let first = it.next()?;
+                    /* 只要有一个版本是别的值，就没有"统一基底"可言 */
+                    version_ids
+                        .iter()
+                        .all(|vid| {
+                            param
+                                .machine_variants
+                                .get(&variant_key(Level::Version, &format!("{}:{}", m.id, vid)))
+                                == Some(first)
+                        })
+                        .then(|| first.clone())
+                });
+            for vid in &version_ids {
+                let vk = variant_key(Level::Version, &format!("{}:{}", m.id, vid));
+                let Some(own) = param.machine_variants.get(&vk) else {
+                    continue;
+                };
+                /* 有独立值且不等于旧基底 ⇒ 用户钉过，保住它 */
+                if old_base.as_ref() != Some(own) {
+                    continue;
                 }
-            }
-            for owner in owners {
-                out.push((key.clone(), owner, value.clone()));
+                out.push(PlannedEdit {
+                    key: key.clone(),
+                    owner: format!("{}:{}", m.id, vid),
+                    value: value.clone(),
+                    why: logging::Why::Promoted,
+                });
             }
         }
 
         for vid in &version_ids {
             let uid = format!("{}/{}", m.id, vid);
             for (key, value) in pending_of(draft, Level::Version, &uid) {
-                out.push((key, format!("{}:{}", m.id, vid), value));
+                out.push(PlannedEdit {
+                    key,
+                    owner: format!("{}:{}", m.id, vid),
+                    value,
+                    why: logging::Why::UserEdit,
+                });
             }
         }
     }
@@ -435,42 +535,86 @@ mod tests {
     use crate::workbench::domain::testkit::Fixture;
     use crate::workbench::domain::Level;
 
-    /// **同值不落键**（2026-11-02 作者实测逼出来的）。
+    /// **写过就留**：写一个与继承值相同的值，文件里照样留一行（2026-11-02 定稿）。
     ///
-    /// 他那天做的事：在机型基底上把涂胶速度限制改成 70，而 70 就是出厂值。
-    /// 结果 `[params.machineVariants]` 里多出 `A1 = 70.0` —— 文件字节变了，
-    /// 于是「未保存（1）」不归零、徽章也不消失，看着像"改过了却改不回去"。
+    /// 这条取代了旧的「同值不落键」。作者的规矩是「改过就不跟随」——
+    /// 而"改回原值就自动变回跟随"会让界面自己跳，他不要那个。
+    /// 想回到跟随，走「跟随默认基底」（`SetValue { value: None }` 删键）。
     #[test]
-    fn a_value_equal_to_the_inherited_one_is_turned_into_a_delete() {
-        let f = Fixture::load();
-        let key = "toolhead.offset.x";
-        let factory = f
-            .presets
+    fn a_value_equal_to_the_inherited_one_still_lands_in_the_file() {
+        let (_dir, mut presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let c = load(&s, &presets).unwrap().committed;
+        let key = "wiping.child";
+        let factory = presets
             .registry
             .param(key)
             .expect("夹具里该有这一项")
             .default_value
             .clone();
 
-        // 写成出厂值 ⇒ 转成删键
-        let mut edits = vec![(key.to_owned(), "A1".to_owned(), Some(factory.clone()))];
-        normalize_same_as_inherited(&f.presets, &mut edits);
-        assert_eq!(
-            edits[0].2, None,
-            "与出厂同值 ⇒ 删键（铺同值副本是零信息量，却会让文件字节变）"
-        );
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: key.to_owned(),
+                value: Some(factory.clone()),
+            }],
+        )
+        .unwrap();
+        save(&s, &mut presets, &c, &draft).unwrap();
 
-        // 真的改了 ⇒ 原样保留
-        let mut edits = vec![(
-            key.to_owned(),
-            "A1".to_owned(),
-            Some(serde_json::json!(999.0)),
-        )];
-        normalize_same_as_inherited(&f.presets, &mut edits);
+        let fresh = Presets::load_from(presets.root()).expect("重读");
         assert_eq!(
-            edits[0].2,
-            Some(serde_json::json!(999.0)),
-            "真的改了就不许动它"
+            fresh
+                .registry
+                .param(key)
+                .unwrap()
+                .machine_variants
+                .get("A1"),
+            Some(&factory),
+            "改过的值哪怕和出厂一样，也要留在文件里 —— 界面据此显示「不跟随」"
+        );
+    }
+
+    /// 反过来：**「跟随默认基底」就是把那一行删掉**，不是写个空值。
+    #[test]
+    fn following_the_base_again_drops_the_row() {
+        let (_dir, mut presets) = Fixture::load().into_parts();
+        let (_d, s) = store();
+        let key = "wiping.child";
+        let factory = presets.registry.param(key).unwrap().default_value.clone();
+        presets.set_variant(key, "A1", &factory).unwrap();
+
+        let c = load(&s, &presets).unwrap().committed;
+        let mut draft = Draft::default();
+        apply(
+            &mut draft,
+            &c,
+            &presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: key.to_owned(),
+                value: None,
+            }],
+        )
+        .unwrap();
+        save(&s, &mut presets, &c, &draft).unwrap();
+
+        let fresh = Presets::load_from(presets.root()).expect("重读");
+        assert!(
+            !fresh
+                .registry
+                .param(key)
+                .unwrap()
+                .machine_variants
+                .contains_key("A1"),
+            "跟随基底 = 这一层没有那一行"
         );
     }
 

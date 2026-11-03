@@ -99,6 +99,63 @@ pub struct EditKey {
     pub key: String,
 }
 
+/// 这次写入**为什么**发生 —— 从日志层 [`crate::workbench::app::logging::Why`] 搬过来？
+/// 不，日志层要用它的 `suffix()` / `tag()`，这里只借它的语义标签。
+///
+/// 直接复用 [`crate::workbench::app::logging::Why`] 会让 `domain` 依赖 `app`
+/// （分层是反的）。所以这里**只要一个字符串标签**：产生方（`app` 层）按自己的
+/// 枚举填 `tag()`，`domain` 只管把它带下去。
+pub type WhyTag = &'static str;
+
+/// **一个字段的变化** —— 「改了什么」列表里的一行，也是「未保存 N」数的那个 1。
+///
+/// # 为什么是"字段"而不是"文件"或"手势"（2026-11-03 作者定稿）
+///
+/// 作者：「我改了 A1 基底的 Z，也改了 A1 标准版的 Z，也改了 A1 快拆版的 Z，
+/// 那就算三个改动，都显示出来」。而一次 `setValue` 会**归并连带**写出好几格
+/// （日志里的"（归并连带）"）—— 所以这个集合必须由**写盘那一刻的事实**产出，
+/// 不能由"用户点了哪一格"推断。
+///
+/// # 去重键 = `(层, 归属, 键)`
+///
+/// 不同归属**不许合并**：`A1`、`A1:STANDARD`、`A1:FAST` 是三处改动，不是一处。
+/// 同一格连续改两次（`0 → 0.05 → 0.1`）只留一条，`before` 保最初、`after` 换最新
+/// —— 页头那个数不随操作次数膨胀。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FieldEntry {
+    /// 层（出厂 / 机型 / 版本）。结构编辑没有"层"（改的是定义本身）⇒ `None`
+    pub level: Option<String>,
+    /// 归属：`A1` / `A1:STANDARD`（机型 id 或版本 uid）
+    pub owner: String,
+    /// 参数键；结构编辑填字段路径（`label` / `bedSize.depth`）
+    pub key: String,
+    /// 给人看的名字（参数中文名 / 字段中文名）。查不到时等于 `key`
+    pub label: String,
+    /// 改前（已格式化）。`None` = 原本没有这一行
+    pub before: Option<String>,
+    /// 改后（已格式化）。`None` = 这一行被删掉
+    pub after: Option<String>,
+    /// 来源标签：`user` / `promoted` / `copy` / `empty` / `unknown` / `structural`
+    pub why: WhyTag,
+}
+
+impl FieldEntry {
+    /// 去重键：`(层, 归属, 键)`。**不同归属不许合并** —— 见类型注。
+    fn dedup_key(&self) -> (String, String, String) {
+        (
+            self.level.clone().unwrap_or_default(),
+            self.owner.clone(),
+            self.key.clone(),
+        )
+    }
+
+    /// 真的变了没有（`before == after` 的条目不算改动）
+    fn changed(&self) -> bool {
+        self.before != self.after
+    }
+}
+
 /// 一条编辑的**完整载荷**：前后字节都在，撤销/重做靠它
 #[derive(Debug, Clone)]
 struct Payload {
@@ -109,6 +166,14 @@ struct Payload {
     key: Option<EditKey>,
     /// 合并窗口的计时锚点。`Instant` 而不是系统时钟 —— 改系统时间不该让撤销栈错乱
     last_at: std::time::Instant,
+    /// **这一笔真的改了哪些字段**（去重键 = `层, 归属, 键`）。
+    ///
+    /// 用 `BTreeMap` 而不是 `Vec`：合并语义直接由 `insert` / `entry().or_insert()`
+    /// 天然实现 —— 同一格连续改两次只留一条，`before` 保最初、`after` 换最新。
+    ///
+    /// 这是「未保存 N」与「改了什么」的**唯一数据源**（作者 2026-11-03 定稿：
+    /// 「让事务本身成为唯一的数据源」）。不再有 `cells` / `lines` 那两套并存的口径。
+    fields: BTreeMap<(String, String, String), FieldEntry>,
 }
 
 impl Payload {
@@ -116,7 +181,7 @@ impl Payload {
     ///
     /// 于是「撤一次」回的是"我开始动手之前"，而不是"上一步"。这也正是合并的意义 ——
     /// 连点十下之后按一下撤销，人期待的是回到原值，不是退一格。
-    fn absorb(&mut self, files: Vec<BeforeAfter>, label: String) {
+    fn absorb(&mut self, files: Vec<BeforeAfter>, label: String, fields: Vec<FieldEntry>) {
         for (rel, _, after) in files {
             match self.files.iter_mut().find(|(r, _, _)| *r == rel) {
                 /* 同一份文件：只换 `after`，`before` 一个字都不动 */
@@ -124,9 +189,52 @@ impl Payload {
                 None => self.files.push((rel, None, after)),
             }
         }
+        self.merge_fields(fields);
+        /* ★ **改回原值 ⇒ 这一份不差了，别留在栈里**（2026-11-02）。
+        没有这一句，`70 → 80 → 70` 之后这条 op 的 `before` 与 `after` 是同一份字节，
+        ⇒ 界面上「未保存 (1)」永远挂着，点开「查看改动」却说「影子与盘上一模一样」。
+        两个数从此对不上。
+
+        `merge_fields` 里已经做过净零剔除，这里再剔一次是为了 `files` 本身
+        （字段账与文件字节是两本账，一边归零不代表另一边也归零 —— 例如只改注释）。 */
+        self.files.retain(|(_, before, after)| before != after);
         /* 标签取**最新**那一笔的：连点过程中人看的最后一格才是他印象里改的东西 */
         self.label = label;
         self.last_at = std::time::Instant::now();
+    }
+
+    /// 并进一批字段变化：**`before` 保最初、`after` 换最新**，净零的剔掉。
+    ///
+    /// 这就是作者要的「同一格连续修改两次只显示最终变化」：
+    /// `0 → 0.05 → 0.1` 并完之后是 `0 → 0.1`，页头那个数不随操作次数膨胀。
+    fn merge_fields(&mut self, incoming: Vec<FieldEntry>) {
+        for e in incoming {
+            match self.fields.entry(e.dedup_key()) {
+                std::collections::btree_map::Entry::Occupied(mut slot) => {
+                    /* `before` 一个字都不动（那是"我开始动手之前"），只换 `after`
+                    与来源标签（最后一次写入的原因才是这一笔现在的样子） */
+                    let cur = slot.get_mut();
+                    cur.after = e.after;
+                    cur.why = e.why;
+                    cur.label = e.label;
+                    /*
+                     * ★ 2026-11-03：净零时**不删，只记下"回到原点了"**。
+                     *
+                     * 以前这里 `slot.remove()`。可 `3.9 → 3.95`（脏）再来一笔
+                     * `3.95 → 3.9`（净零）之后如果又改回去，条目重新插入时
+                     * `before` 变成第二次的那个 `3.95` —— 屏幕上显示
+                     * `3.95 → 3.8`，而人记得自己是从 `3.9` 开始的。
+                     *
+                     * 现在保留原文：`before` 始终是**这一格在事务开始时**的值，
+                     * 净零的条目由 `field_changes()` 的 `retain` 过滤掉，
+                     * 不进页头那个数。
+                     */
+                }
+                std::collections::btree_map::Entry::Vacant(slot) => {
+                    slot.insert(e);
+                }
+            }
+        }
     }
 }
 
@@ -1040,13 +1148,70 @@ impl Txn {
         out
     }
 
-    /// 未保存的改动条数（界面上那个 N）
-    pub fn dirty_count(&self) -> usize {
-        self.payloads.len() + usize::from(self.recovered)
+    /// **唯一统计来源**：所有 payload 的字段变化并集（去重键 `层, 归属, 键`）。
+    ///
+    /// 作者 2026-11-03：「你要是做这个，就把事务本身当唯一数据源」——
+    /// 页头那个 N、「改了什么」那张表，都读这一份，物理上不可能各说各话。
+    ///
+    /// # 只收"现在仍与盘上不同"的 payload
+    ///
+    /// 合并只发生在栈顶，非栈顶那条仍可能是 `70 → 80 → 70` 之后净零的样子
+    /// （`files` 已剔但字段账在另一条 payload 里）。数它会让「未保存 (1)」与
+    /// 「查看改动：一模一样」同时出现在一屏上。
+    pub fn field_changes(&self) -> Vec<FieldEntry> {
+        let mut merged: BTreeMap<(String, String, String), FieldEntry> = BTreeMap::new();
+        for p in self.payloads.iter() {
+            /* ★ 2026-11-03 修：**不再按 payload 的字节差整条跳过**。
+            以前这里写着 `if !p.files.any(before != after) { continue }` ——
+            而 `files` 是**整份文件**的前后字节：改一格又改回来之后，`absorb`
+            会把这一份从 `files` 里剔掉，于是**整条 payload 的字段全被跳过**。
+            作者连点几下之后 `fields=3 → 2 → 1` 越改越少，就是这么来的
+            （日志：`ops=4 fields=2`、`ops=5 fields=1`）。
+
+            正确的过滤在**字段自己**身上：`changed()` 已经排除净零的条目，
+            下面 `retain` 再兜一次。payload 有没有字节差与"它的字段还算不算数"
+            是两件事。 */
+            for (k, e) in &p.fields {
+                match merged.get_mut(k) {
+                    /* 同一格在**另一条 payload** 里又改了一次（两条之间隔了别的编辑，
+                    或都不是单个 `SetValue` ⇒ 合并不生效）——`before` 保最初、
+                    `after` 换最新，与 `Payload::merge_fields` 同一套语义。
+                    只留 `or_insert` 的话，`0 → 0.05 → 0.1` 会停在 `0 → 0.05`。 */
+                    Some(cur) => {
+                        cur.after = e.after.clone();
+                        cur.why = e.why;
+                        cur.label = e.label.clone();
+                    }
+                    None => {
+                        merged.insert(k.clone(), e.clone());
+                    }
+                }
+            }
+        }
+        /* 净零的剔掉（跨 payload 合并之后才可能出现的 `0 → 0.05 → 0`） */
+        merged.retain(|_, e| e.changed());
+        merged.into_values().collect()
     }
 
+    /// 未保存的改动**处数**（界面上那个 N）= [`Self::field_changes`] 的条数。
+    ///
+    /// 这就是「页头 N 与框里条数严格相等」的实现 —— 同一个函数，不是两套算法。
+    pub fn dirty_count(&self) -> usize {
+        self.field_changes().len() + usize::from(self.recovered)
+    }
+
+    /// 影子树与磁盘**有没有字节差别**（`dirty_count()` 答的是"改了几处字段"）。
+    ///
+    /// 两个问题必须分开：`dirty_count()` 是**显示用**（数得出来给人看，
+    /// 没填字段账的命令不虚构处数）；`is_dirty()` 是**判定用**
+    /// （能不能保存、要不要弹「未保存」）—— 它只认字节，认字段账会把
+    /// "改了但没记字段"的那一笔当成没改，保存按钮就点不动了。
     pub fn is_dirty(&self) -> bool {
-        self.dirty_count() > 0
+        self.recovered
+            || self
+                .payloads
+                .iter()
+                .any(|p| p.files.iter().any(|(_, before, after)| before != after))
     }
 
     /// 能逐条撤销的深度（崩溃恢复那一条不算）
@@ -1083,6 +1248,26 @@ impl Txn {
         after: &Snapshot,
         root: &Path,
     ) -> Result<Option<Op>, AppError> {
+        self.record_with_fields(label, key, before, after, root, Vec::new())
+    }
+
+    /// 同上，另外收下**这一笔真的改了哪些字段**。
+    ///
+    /// 结构编辑（改说明 / 改尺寸 / 改机型信息）走这一条 —— 它们没有"格"，
+    /// 但每一处字段变化都要进账，否则「改了什么」对那一类改动仍然是空的。
+    ///
+    /// `fields` 由**写盘那一刻的事实**产出（值类来自 `apply_draft_now_traced` 的
+    /// `KeyChange`，结构类来自 `ParamDef::summary` / `Dimensions::summary` 的
+    /// `FieldChange`），不是事后从影子树反推 —— 作者 2026-11-03 定的第 8 条硬约束。
+    pub fn record_with_fields(
+        &mut self,
+        label: impl Into<String>,
+        key: Option<EditKey>,
+        before: &Snapshot,
+        after: &Snapshot,
+        root: &Path,
+        fields: Vec<FieldEntry>,
+    ) -> Result<Option<Op>, AppError> {
         let files = diff(before, after, root)?;
         if files.is_empty() {
             return Ok(None);
@@ -1094,20 +1279,28 @@ impl Txn {
             if top.key.as_ref() == Some(k)
                 && top.last_at.elapsed().as_millis() < u128::from(MERGE_MS)
             {
-                top.absorb(files, label);
+                top.absorb(files, label, fields);
                 self.redo.clear();
                 self.recovered = false;
+                /* 合并完这一条已经**不差任何字节**（改回原值）⇒ 整条丢掉，
+                否则它会以"一条改动"的身份一直留在栈里（见 `absorb` 的注释） */
+                if top.files.is_empty() {
+                    self.payloads.pop();
+                    return Ok(None);
+                }
                 return Ok(Some(top.view()));
             }
         }
 
-        let payload = Payload {
+        let mut payload = Payload {
             label,
             at: clock::now_iso8601(),
             files,
             key,
             last_at: std::time::Instant::now(),
+            fields: BTreeMap::new(),
         };
+        payload.merge_fields(fields);
         let view = payload.view();
         self.payloads.push(payload);
         if self.payloads.len() > MAX_OPS {
@@ -1178,7 +1371,13 @@ impl Txn {
 
 /// 影子树在会话目录下的固定落点（`workbench/.draft/presets/`）
 pub fn shadow_root(workbench_root: &Path) -> PathBuf {
-    workbench_root.join(".draft").join("presets")
+    /* ★ 工作区**不跟数据根走**（2026-11-02 作者裁定）：注入了就落应用数据目录，
+    仓库里只剩正式预设。没注入（`cargo test` / CLI）才退回数据根下的 `.draft`,
+    测试因此照旧用临时目录。 */
+    match crate::fsx::paths::workspace_root() {
+        Some(w) => w.join("presets"),
+        None => workbench_root.join(".draft").join("presets"),
+    }
 }
 
 /// **基准快照**：影子树是"从哪一份真源铺出来的"。
@@ -1204,7 +1403,11 @@ pub fn shadow_root(workbench_root: &Path) -> PathBuf {
 ///
 /// 它住 `<workbench>/.draft/base/`（与影子树同一族，不进 git）。
 pub fn base_root(workbench_root: &Path) -> PathBuf {
-    workbench_root.join(".draft").join("base")
+    /* 与 `shadow_root` 同一条：工作区在应用数据目录，不跟数据根走 */
+    match crate::fsx::paths::workspace_root() {
+        Some(w) => w.join("base"),
+        None => workbench_root.join(".draft").join("base"),
+    }
 }
 
 #[cfg(test)]
@@ -1217,6 +1420,19 @@ mod tests {
         let path = root.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, text).unwrap();
+    }
+
+    /// 造一条字段变化（生产链路由 `KeyChange` / `FieldChange` 转过来）
+    fn field(owner: &str, key: &str, before: &str, after: &str) -> FieldEntry {
+        FieldEntry {
+            level: Some("Machine".to_owned()),
+            owner: owner.to_owned(),
+            key: key.to_owned(),
+            label: key.to_owned(),
+            before: Some(before.to_owned()).filter(|s| !s.is_empty()),
+            after: Some(after.to_owned()).filter(|s| !s.is_empty()),
+            why: "user",
+        }
     }
 
     fn setup() -> (tempfile::TempDir, PathBuf, PathBuf, PathBuf) {
@@ -1367,10 +1583,20 @@ mod tests {
 
         let mut txn = Txn::new();
         let op = txn
-            .record("停用 A1", None, &before, &after, &shadow)
+            .record_with_fields(
+                "停用 A1",
+                None,
+                &before,
+                &after,
+                &shadow,
+                vec![field("A1", "enabled", "true", "false")],
+            )
             .unwrap();
         assert!(op.is_some());
-        assert_eq!(txn.dirty_count(), 1);
+        /* **一处**（2026-11-03 定稿：按字段计）——`enabled` 这一格从 true 变 false，
+        就是一处在界面上。按行数会写成 2（旧行没了 + 新行来了），那是 diff 框的口径，
+        不是"改了几处"。 */
+        assert_eq!(txn.dirty_count(), 1, "改了一个字段就是一处");
 
         // 真实树一个字节都没变
         let real_text = std::fs::read_to_string(real.join("machines/A1.toml")).unwrap();
@@ -1473,59 +1699,102 @@ mod tests {
         let real_before = snapshot(&real).unwrap();
 
         let mut txn = Txn::new();
-        let step = |txn: &mut Txn, label: &str, edit: &dyn Fn(&Path)| {
+        /* `fields` 在真实链路里由写盘那一刻产出（`KeyChange` / `FieldChange`）；
+        这里手工给，模拟"这一步真的改了哪几个字段"。 */
+        let step = |txn: &mut Txn, label: &str, fields: Vec<FieldEntry>, edit: &dyn Fn(&Path)| {
             let before = snapshot(&shadow).unwrap();
             edit(&shadow);
             let after = snapshot(&shadow).unwrap();
-            txn.record(label, None, &before, &after, &shadow).unwrap();
+            txn.record_with_fields(label, None, &before, &after, &shadow, fields)
+                .unwrap();
         };
 
         // ① 关掉 enabled
-        step(&mut txn, "停用 A1", &|s: &Path| {
-            write(
-                s,
-                "machines/A1.toml",
-                "id = 'A1'\nname = 'A1'\nenabled = false\n",
-            );
-        });
+        step(
+            &mut txn,
+            "停用 A1",
+            vec![field("A1", "enabled", "true", "false")],
+            &|s: &Path| {
+                write(
+                    s,
+                    "machines/A1.toml",
+                    "id = 'A1'\nname = 'A1'\nenabled = false\n",
+                );
+            },
+        );
         // ② 改显示名
-        step(&mut txn, "改显示名", &|s: &Path| {
-            write(
-                s,
-                "machines/A1.toml",
-                "id = 'A1'\nname = 'A1 新版'\nenabled = false\n",
-            );
-        });
+        step(
+            &mut txn,
+            "改显示名",
+            vec![field("A1", "name", "A1", "A1 新版")],
+            &|s: &Path| {
+                write(
+                    s,
+                    "machines/A1.toml",
+                    "id = 'A1'\nname = 'A1 新版'\nenabled = false\n",
+                );
+            },
+        );
         // ③ 改床身尺寸
-        step(&mut txn, "改尺寸", &|s: &Path| {
-            write(
+        step(
+            &mut txn,
+            "改尺寸",
+            vec![
+                field("A1", "bedSize.width", "0", "256.0"),
+                field("A1", "bedSize.depth", "0", "256.0"),
+            ],
+            &|s: &Path| {
+                write(
                 s,
                 "machines/A1.toml",
                 "id = 'A1'\nname = 'A1 新版'\nenabled = false\n[dimensions.bedSize]\nwidth = 256.0\ndepth = 256.0\n",
             );
-        });
+            },
+        );
         // ④ 删一个禁区文件
-        step(&mut txn, "删禁区", &|s: &Path| {
-            std::fs::remove_file(s.join("forbidden_zones/A1.toml")).unwrap();
-        });
+        step(
+            &mut txn,
+            "删禁区",
+            vec![field("A1", "zones", "['keep-out']", "")],
+            &|s: &Path| {
+                std::fs::remove_file(s.join("forbidden_zones/A1.toml")).unwrap();
+            },
+        );
         // ⑤ 新增一个版本（同一份机型文件里多一节）
-        step(&mut txn, "新增版本", &|s: &Path| {
-            write(
+        step(
+            &mut txn,
+            "新增版本",
+            vec![
+                field("A1:STANDARD", "version", "", "标准版"),
+                field("A1:FAST", "version", "", "快拆版"),
+            ],
+            &|s: &Path| {
+                write(
                 s,
                 "machines/A1.toml",
                 "id = 'A1'\nname = 'A1 新版'\nenabled = false\n[dimensions.bedSize]\nwidth = 256.0\ndepth = 256.0\n[[versions]]\nid = 'STANDARD'\nname = '标准版'\n[[versions]]\nid = 'FAST'\nname = '快拆版'\n",
             );
-        });
+            },
+        );
         // ⑥ 改新版本参数
-        step(&mut txn, "改新版本参数", &|s: &Path| {
-            write(
+        step(
+            &mut txn,
+            "改新版本参数",
+            vec![field("A1:FAST", "wiping.ironing_mode", "", "auto")],
+            &|s: &Path| {
+                write(
                 s,
                 "registry/param_registry.toml",
                 "params = [{ key = 'wiping.ironing_mode', machineVariants = { 'A1:FAST' = 'auto' } }]\n",
             );
-        });
+            },
+        );
 
-        assert_eq!(txn.dirty_count(), 6);
+        /* **六步 = 8 处字段**（2026-11-03 定稿：按字段计）：停用 1、改显示名 1、
+        改尺寸 2（width + depth）、删禁区 1、新增两个版本 2、改参数 1。
+        这个数是"改了哪几处"，不是步数（看下一句），也不是 diff 行数。 */
+        assert_eq!(txn.dirty_count(), 8, "六步编辑改了 8 处字段");
+        assert_eq!(txn.undo_depth(), 6, "撤销栈仍然按步（6 步）");
         assert_eq!(
             snapshot(&real).unwrap(),
             real_before,
@@ -1536,7 +1805,9 @@ mod tests {
         txn.undo(&shadow).unwrap();
         txn.undo(&shadow).unwrap();
         txn.undo(&shadow).unwrap();
-        assert_eq!(txn.dirty_count(), 3);
+        /* 撤销三步之后剩前三步：停用 1 + 改显示名 1 + 改尺寸 2 = 4 处。
+         **别在这里凭印象写数** —— 口径换一次就得重数一遍。 */
+        assert_eq!(txn.dirty_count(), 4, "撤销三步之后剩 4 处");
         assert!(
             shadow.join("forbidden_zones/A1.toml").is_file(),
             "撤销到第 3 步之后，被删的禁区文件必须回来"
@@ -1552,7 +1823,7 @@ mod tests {
         txn.redo(&shadow).unwrap();
         txn.redo(&shadow).unwrap();
         txn.redo(&shadow).unwrap();
-        assert_eq!(txn.dirty_count(), 6);
+        assert_eq!(txn.dirty_count(), 8, "重做回到六步的 8 处");
         assert!(!shadow.join("forbidden_zones/A1.toml").exists());
 
         // 保存：这时才动磁盘
@@ -1618,6 +1889,171 @@ mod tests {
         );
     }
 
+    /// **改回原值 ⇒ 「未保存」必须归零**（2026-11-02 作者：「上面显示的不正常，
+    /// 还会出现没有未保存的改动这个提示一直不消失」）。
+    ///
+    /// 现象是一屏上三个说法：页头「未保存 (0)」、状态栏「未保存改动 (1)」、
+    /// 「查看改动」框里「影子与盘上一模一样」。根子就是这里 ——
+    /// `70 → 80 → 70` 合并之后这条 op 的 `before` 与 `after` 是同一份字节，
+    /// 而 `dirty_count` 数的是**条数**。
+    #[test]
+    fn editing_back_to_the_original_value_clears_the_unsaved_count() {
+        let (_d, _real, shadow, _trash) = setup();
+        let key = EditKey {
+            level: crate::workbench::domain::Level::Version,
+            owner: "A1/STANDARD".to_owned(),
+            key: "glue.speed_limit".to_owned(),
+        };
+        let mut txn = Txn::new();
+
+        /* 70 → 80：一条 */
+        let before = snapshot(&shadow).unwrap();
+        write(&shadow, "bundles.toml", "80\n");
+        let after = snapshot(&shadow).unwrap();
+        txn.record_with_fields(
+            "改参数值",
+            Some(key.clone()),
+            &before,
+            &after,
+            &shadow,
+            vec![field("A1:STANDARD", "glue.speed_limit", "70", "80")],
+        )
+        .unwrap();
+        assert_eq!(txn.dirty_count(), 1, "一个字段变了一次就是一处");
+
+        /* 80 → 70（改回原值）：净零，整条丢掉 */
+        let before = snapshot(&shadow).unwrap();
+        write(&shadow, "bundles.toml", "bundles = []\n");
+        let after = snapshot(&shadow).unwrap();
+        let op = txn
+            .record_with_fields(
+                "改参数值",
+                Some(key),
+                &before,
+                &after,
+                &shadow,
+                vec![field("A1:STANDARD", "glue.speed_limit", "80", "70")],
+            )
+            .unwrap();
+        assert!(op.is_none(), "净零的这一笔不该记成一条改动");
+        assert_eq!(txn.dirty_count(), 0, "改回原值之后不该还有未保存改动");
+        assert!(!txn.is_dirty());
+        assert_eq!(txn.undo_depth(), 0, "净零的那条也不该留在撤销栈里");
+    }
+
+    /// **不同归属算不同处**（2026-11-03 作者定稿）：
+    ///
+    /// > 「我改了 A1 基底的 Z，也改了 A1 标准版的 Z，也改了 A1 快拆版的 Z，
+    /// > 那就算三个改动，都显示出来」
+    ///
+    /// 一次手势连带写出三格 ⇒ 页头就是 3，`ops()` 仍然只有 1 条（撤销一次全回去）。
+    #[test]
+    fn three_owners_of_the_same_key_are_three_changes() {
+        let (_d, _real, shadow, _trash) = setup();
+        write(
+            &shadow,
+            "bundles.toml",
+            "a = 1
+",
+        );
+        let before = snapshot(&shadow).unwrap();
+        write(
+            &shadow,
+            "bundles.toml",
+            "a = 2
+",
+        );
+        let after = snapshot(&shadow).unwrap();
+
+        let mut txn = Txn::new();
+        txn.record_with_fields(
+            "改参数值",
+            None,
+            &before,
+            &after,
+            &shadow,
+            vec![
+                field("A1", "toolhead.offset.z", "3.9", "3.95"),
+                field("A1:STANDARD", "toolhead.offset.z", "3.9", "3.95"),
+                field("A1:FAST", "toolhead.offset.z", "3.9", "3.95"),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(txn.ops().len(), 1, "一次手势只有一条撤销");
+        assert_eq!(txn.dirty_count(), 3, "但三处归属都算改动");
+
+        /* 条目也要原样给出来（界面上那三行），顺序按 (层, 归属, 键) */
+        let got: Vec<(String, String)> = txn
+            .field_changes()
+            .into_iter()
+            .map(|e| (e.owner, e.key))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("A1".to_owned(), "toolhead.offset.z".to_owned()),
+                ("A1:FAST".to_owned(), "toolhead.offset.z".to_owned()),
+                ("A1:STANDARD".to_owned(), "toolhead.offset.z".to_owned()),
+            ]
+        );
+    }
+
+    /// **同一格连改两次只显示最终变化**（作者定稿：`0 → 0.05 → 0.1` 只显示 `0 → 0.1`）
+    #[test]
+    fn editing_the_same_field_twice_keeps_one_entry_with_first_before_and_last_after() {
+        let (_d, _real, shadow, _trash) = setup();
+        write(
+            &shadow,
+            "bundles.toml",
+            "a = 0
+",
+        );
+
+        let mut txn = Txn::new();
+        /* 第一次：0 → 0.05 */
+        let before = snapshot(&shadow).unwrap();
+        write(
+            &shadow,
+            "bundles.toml",
+            "a = 0.05
+",
+        );
+        let after = snapshot(&shadow).unwrap();
+        txn.record_with_fields(
+            "改参数值",
+            None,
+            &before,
+            &after,
+            &shadow,
+            vec![field("A1", "k", "0", "0.05")],
+        )
+        .unwrap();
+        /* 第二次：0.05 → 0.1（同一格，同一笔事务里继续改） */
+        let before = snapshot(&shadow).unwrap();
+        write(
+            &shadow,
+            "bundles.toml",
+            "a = 0.1
+",
+        );
+        let after = snapshot(&shadow).unwrap();
+        txn.record_with_fields(
+            "改参数值",
+            None,
+            &before,
+            &after,
+            &shadow,
+            vec![field("A1", "k", "0.05", "0.1")],
+        )
+        .unwrap();
+
+        let entries = txn.field_changes();
+        assert_eq!(entries.len(), 1, "同一格还是 1 处，不随操作次数膨胀");
+        assert_eq!(entries[0].before.as_deref(), Some("0"), "before 保最初");
+        assert_eq!(entries[0].after.as_deref(), Some("0.1"), "after 换最新");
+    }
+
     /// 换了格（另一个 owner / 另一个键）⇒ 不许合并，那是两件事
     #[test]
     fn a_different_cell_is_a_separate_op() {
@@ -1657,5 +2093,132 @@ mod tests {
                 .unwrap();
         }
         assert_eq!(txn.undo_depth(), 2);
+    }
+
+    /// **改着改着「未保存」越来越少**（2026-11-03 作者报：`ops=5 fields=1`）。
+    ///
+    /// 现场日志：
+    /// ```text
+    /// ops=3 fields=3
+    /// ops=4 fields=2    ← 又改了一格，反而变少
+    /// ops=5 fields=1
+    /// ```
+    ///
+    /// 根因在 `field_changes` 开头那句 `if !p.files.any(before != after) { continue }`：
+    /// `files` 是**整份文件**的前后字节，用户把某一格改回原值之后 `absorb` 会把这一份
+    /// 从 `files` 里剔掉，于是**整条 payload 的字段全被跳过** —— 哪怕里面还有别的格是脏的。
+    #[test]
+    fn one_cell_returning_to_its_old_value_does_not_erase_the_others() {
+        let (_d, _real, shadow, _trash) = setup();
+        write(&shadow, "registry/param_registry.toml", "a = 1\nb = 2\n");
+        let s0 = snapshot(&shadow).unwrap();
+        write(&shadow, "registry/param_registry.toml", "a = 9\nb = 8\n");
+        let s1 = snapshot(&shadow).unwrap();
+        write(&shadow, "registry/param_registry.toml", "a = 9\nb = 2\n");
+        let s2 = snapshot(&shadow).unwrap();
+
+        let f = |key: &str, before: &str, after: &str| FieldEntry {
+            level: Some("Machine".to_owned()),
+            owner: "A1".to_owned(),
+            key: key.to_owned(),
+            label: key.to_owned(),
+            before: Some(before.to_owned()),
+            after: Some(after.to_owned()),
+            why: "user",
+        };
+
+        let mut txn = Txn::new();
+        txn.record_with_fields(
+            "改两格",
+            None,
+            &s0,
+            &s1,
+            &shadow,
+            vec![f("a", "1", "9"), f("b", "2", "8")],
+        )
+        .unwrap();
+        assert_eq!(txn.dirty_count(), 2, "两格都是脏的");
+
+        txn.record_with_fields("b 改回去", None, &s1, &s2, &shadow, vec![f("b", "8", "2")])
+            .unwrap();
+
+        let keys: Vec<String> = txn.field_changes().into_iter().map(|e| e.key).collect();
+        assert_eq!(keys, vec!["a"], "只剩 a 一处，b 已回到原值：实际 {keys:?}");
+    }
+
+    /// **净零之后又改脏，`before` 必须还是最初那个值**（2026-11-03）。
+    ///
+    /// `3.9 → 3.95`（脏）→ `3.95 → 3.9`（净零）→ `3.9 → 3.8`。
+    /// 净零那一刻条目必须消失（页头判 0），再改脏时要重新出现且 `before = 3.9`。
+    #[test]
+    fn a_cell_that_goes_back_and_forth_keeps_the_original_before() {
+        let (_d, _real, shadow, _trash) = setup();
+        write(&shadow, "registry/param_registry.toml", "z = 3.9\n");
+        let s0 = snapshot(&shadow).unwrap();
+        write(&shadow, "registry/param_registry.toml", "z = 3.95\n");
+        let s1 = snapshot(&shadow).unwrap();
+        write(&shadow, "registry/param_registry.toml", "z = 3.9\n");
+        let s2 = snapshot(&shadow).unwrap();
+        write(&shadow, "registry/param_registry.toml", "z = 3.8\n");
+        let s3 = snapshot(&shadow).unwrap();
+
+        let f = |before: &str, after: &str| FieldEntry {
+            level: Some("Machine".to_owned()),
+            owner: "A1".to_owned(),
+            key: "z".to_owned(),
+            label: "Z".to_owned(),
+            before: Some(before.to_owned()),
+            after: Some(after.to_owned()),
+            why: "user",
+        };
+
+        let mut txn = Txn::new();
+        txn.record_with_fields("z=3.95", None, &s0, &s1, &shadow, vec![f("3.9", "3.95")])
+            .unwrap();
+        txn.record_with_fields("z=3.9", None, &s1, &s2, &shadow, vec![f("3.95", "3.9")])
+            .unwrap();
+        assert_eq!(txn.dirty_count(), 0, "回到原值 ⇒ 没有未保存改动");
+
+        txn.record_with_fields("z=3.8", None, &s2, &s3, &shadow, vec![f("3.9", "3.8")])
+            .unwrap();
+        let got = txn.field_changes();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].before.as_deref(), Some("3.9"), "改之前是 3.9");
+        assert_eq!(got[0].after.as_deref(), Some("3.8"));
+    }
+
+    /// **同一台机型的基底改动，按继承展开成"受影响的每一格"**
+    /// （2026-11-03 作者：「修改 A1 基底 Z，基底和三个继承版本都能看到变化」）。
+    ///
+    /// 关键：这是**展开**，不是复制。判据是 `machine_variants` 里有没有
+    /// `机型:版本` 这个键 —— 有独立值的不受影响，所以不该被算进来。
+    /// 展开后的条目 `why = "inherited"`，与真写了版本键的 `"promoted"` 分开。
+    #[test]
+    fn a_base_edit_expands_into_the_versions_that_inherit_it() {
+        /* 这条只看 `inherited_fields` 的规则，不碰真数据 —— 放在 app 层测更合适，
+        这里用 domain 层的纯逻辑验算 dedup_key 不冲突即可。 */
+        let e = FieldEntry {
+            level: Some("Machine".to_owned()),
+            owner: "A1".to_owned(),
+            key: "toolhead.offset.z".to_owned(),
+            label: "Z 轴偏移".to_owned(),
+            before: Some("3.85".to_owned()),
+            after: Some("3.9".to_owned()),
+            why: "user",
+        };
+        let inherited = FieldEntry {
+            level: Some("Version".to_owned()),
+            owner: "A1:STANDARD".to_owned(),
+            key: "toolhead.offset.z".to_owned(),
+            label: "Z 轴偏移".to_owned(),
+            before: e.before.clone(),
+            after: e.after.clone(),
+            why: "inherited",
+        };
+        assert_ne!(
+            e.dedup_key(),
+            inherited.dedup_key(),
+            "基底那一格与继承的版本格是两个归属，不许合并成一条"
+        );
     }
 }

@@ -25,6 +25,31 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
+/* ---------- 工作台工作区（2026-11-02 作者裁定，独立于数据根） ---------- */
+
+/// 工作台的工作区根。**它不跟数据根走** —— 见 [`workspace_root`]。
+static WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// 由 Tauri 的 `setup` 注入一次（`<appDataDir>/workbench/workspace`）。
+///
+/// # 为什么单独一格，而不是从数据根派生
+///
+/// 开发模式下**数据根就是仓库**（`workbench/`），草稿于是长期住在仓库里
+/// （`.draft/presets`）。作者 2026-11-02 的原话：「不应该在仓库里留一份长期存在的
+/// `.draft/presets`」—— AI 和自己都会被两份 TOML 搞混，分不清哪份是正式预设。
+///
+/// 所以工作区固定落应用数据目录：**仓库里只有正式预设**，草稿是本机状态。
+/// 没注入时（`cargo test` / CLI）退回各调用方自己给的兜底路径 —— 测试因此
+/// 仍然用临时目录，一个字节都不用改。
+pub fn set_workspace_root(root: PathBuf) {
+    let _ = WORKSPACE_ROOT.set(root);
+}
+
+/// 注入了没有（`None` = 不在 Tauri 里跑，调用方退回自己的兜底）
+pub fn workspace_root() -> Option<&'static Path> {
+    WORKSPACE_ROOT.get().map(PathBuf::as_path)
+}
+
 /// 内部根下首次启动就建齐的子目录
 ///
 /// `index/` 2026-10-08 退役：它唯一住过的东西是 `offsets.json`（校准偏移的孤岛，

@@ -28,22 +28,16 @@ import GroupPicker from './GroupPicker'
 import type { GroupedGroup } from './GroupPicker'
 import s from '../c14.module.css'
 
-export type ParamStatusId = 'factory' | 'machine' | 'version' | 'dirty'
+export type ParamStatusId = 'follow' | 'own'
 
 /**
- * 各版本行里的两字缩写 —— 完整词（出厂默认/机型默认/本版修改/已修改）在
- * 行内占得太宽（作者），缩成两字，悬停仍是全称与解释。
+ * 两字缩写 —— 完整词（跟随基底 / 不跟随）在行内占得太宽，缩成两字，
+ * 悬停仍是全称与解释。
  */
 const ST_SHORT: Record<ParamStatusId, string> = {
-  factory: '默认',
-  machine: '机型',
-  version: '本版',
-  dirty: '已改',
+  follow: '跟随',
+  own: '不跟',
 }
-
-/** 一格的状态 id：dirty 压过 origin —— 一笔没交出去的改动才是现在最要紧的事实 */
-const statusIdOf = (cell: Cell | undefined): ParamStatusId =>
-  !cell ? 'factory' : cell.dirty ? 'dirty' : (cell.origin ?? 'factory')
 
 /**
  * 行上与编辑区共用同一枚状态标签 —— 两处说的是同一个事实，就不该有两份判据。
@@ -58,7 +52,9 @@ export function StatusTag({
   words: Words
   short?: boolean
 }) {
-  const id = statusIdOf(cell)
+  /* 基底列不挂徽章（`badge` 为 null）—— 基底是根，谈不上跟不跟谁 */
+  const id = cell?.badge ?? null
+  if (id === null) return null
   const w = words.paramStatus[id]
   return (
     <span
@@ -71,10 +67,8 @@ export function StatusTag({
 }
 
 const ST_CLASS: Record<ParamStatusId, string> = {
-  factory: s.stFactory,
-  machine: s.stMachine,
-  version: s.stVersion,
-  dirty: s.stDirty,
+  follow: s.stFollow,
+  own: s.stOwn,
 }
 
 interface Props {

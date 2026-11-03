@@ -485,6 +485,13 @@ export interface Cell {
    * 写一个值回去就把继承钉死了。
    */
   restPinned: boolean
+  /**
+   * 这一格挂哪档徽章：**跟不跟基底**（2026-11-02 两档定稿）。
+   *
+   * `null` = 基底列，不挂 —— 基底是根，谈不上跟不跟谁。
+   * 判据只有一条：这一层有没有自己的一行（和值是否等于基底无关）。
+   */
+  badge: 'follow' | 'own' | null
   /** 这条参数**在这一列这台机型上**已弃用。`Row.deprecated` 是全机型口径 */
   deprecated: boolean
   /** 这台机型上不能写的选项值（后端算好的，含推定）。控件划线、手势前拦人都读它 */
@@ -517,6 +524,93 @@ export interface Row {
    */
   impact: DeskImpact | null
   cells: Cell[]
+}
+
+/* ---------- 参数台 v2（`app::sheet`，2026-11-02） ---------- */
+
+/**
+ * 一列：机型基底（`versionUid === null`）或某个版本。
+ *
+ * `level` 由**后端**给出，前端不许从 `versionUid` 反推 —— 弄反 = 静默打破继承。
+ */
+export interface SheetCol {
+  /** `A1` / `A1/STANDARD`。格子靠它与 `key` 拼成 `CellKey` */
+  key: string
+  machineId: string
+  versionUid: string | null
+  level: Level
+  label: string
+}
+
+/** `registry::Choice` 里这一屏用得上的那几格 */
+export interface SheetChoice {
+  label: string
+  value: unknown
+  /** 全局弃用。**按机型弃用看 `SheetCell.deadChoices`**（后端算好的） */
+  deprecated: boolean
+}
+
+/** 一行的定义。**没有值** —— 值在 `SheetCell` */
+export interface SheetDef {
+  key: string
+  label: string
+  desc: string
+  unit: string | null
+  sectionId: string
+  /** 组的中文名。与上一行不同就插一条分组表头（分组是后端排的） */
+  sectionLabel: string
+  tabId: string | null
+  depth: number
+  parentKey: string | null
+  parentLabel: string | null
+  controlNote: string | null
+  gcode: boolean
+  /** 全局弃用。**这一列弃没弃用看 `SheetCell.deprecated`** */
+  deprecated: boolean
+  valueType: ValueType
+  uiComponent: UiComponent
+  min: number | null
+  max: number | null
+  step: number | null
+  /** 出厂默认的显示文本（后端格式化） */
+  defaultText: string
+  choices: SheetChoice[]
+}
+
+/**
+ * 一格。**只有保存态，没有「当前值」** —— 这是新页与旧 `Cell` 的唯一区别，
+ * 也是「徽章乱跳」不可能再发生的原因：结构上没有第二个"现在是多少"可填。
+ */
+export interface SheetCell {
+  key: string
+  colKey: string
+  /** 保存值 = BASE 在这一格的有效值（版本覆盖 → 机型基底 → 出厂）。`null` ⇒ 不可写 */
+  saved: unknown
+  /** BASE 里**这一层**自己钉着吗。只决定「还原」是写值还是删键，**不判脏** */
+  savedPinned: boolean
+  /** 保存值的显示文本（后端格式化；前端不拼字符串） */
+  savedText: string
+  /** 保存值来自哪一层（后端只说"哪张表里写着它"） */
+  savedOrigin: Origin
+  editable: boolean
+  /** 这一列这台机型上已弃用 */
+  deprecated: boolean
+  /** 这一列这台机型上不许再选的档（含推定） */
+  deadChoices: string[]
+  /** 点开灰格子时的整句（「由「X」控制，需 Y」） */
+  blockedNote: string | null
+  /** 行上那句短提示（「要 X 才可改」）—— 行里放不下整句 */
+  blockedHint: string | null
+}
+
+/** `app::sheet::ParamSheet` —— 新页整屏数据，一次取全 */
+export interface ParamSheet {
+  cols: SheetCol[]
+  defs: SheetDef[]
+  cells: SheetCell[]
+  totalRows: number
+  note: string | null
+  emptyReason: string | null
 }
 
 /** `derive::DeskImpact` —— 版本层编辑 targets 只有自己，followers 是跟着基底的其它版本 */
@@ -658,6 +752,37 @@ export interface DiffLine {
    * 于是切到那一栏永远显示 0 格（作者 2026-11-02 报的就是这个）。
    */
   file: string
+  /**
+   * **来源标签**（2026-11-03）：`user` / `promoted` / `copy` / `empty` /
+   * `unknown` / `structural`。
+   *
+   * 作者定稿要「平铺 + 标签」：改一次 Z 连带写三个版本键，四条全列出来，
+   * 只有一条是 `user`，其余是 `promoted` —— 一眼看出哪条是自己点的。
+   * 界面照 `WHY_LABEL` 显示人话，**不自己推断来源**。
+   */
+  why: string
+}
+
+/**
+ * 来源标签 → 界面上那两个字。
+ *
+ * 唯一出口：`HistoryModal` 只查这张表，不在渲染里写 if。
+ * 加新来源（`Why` 每加一个变体）时只改这里一处 —— 后端 `Why::suffix()`
+ * 与它说的必须是同一件事，改一处忘另一处就会一屏两个说法。
+ */
+export const WHY_LABEL: Record<string, string> = {
+  user: '用户修改',
+  /* **2026-11-03 起不再单独显示**：它是"我们为保住这个值多写了几个版本键"的
+     存储解释，用户不关心。后端已统一归成 `follows`；留在这里只为兼容老数据。 */
+  promoted: '随基底生效',
+  copy: '复制快照',
+  empty: '空表清理',
+  unknown: '来源不明',
+  structural: '改定义',
+  /* 跟着基底变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
+     用户看到的都是"我改了基底，这一圈跟着变"。 */
+  follows: '随基底生效',
+  inherited: '随基底生效',
 }
 
 /* ---------- 写 ---------- */
@@ -708,12 +833,29 @@ export interface TxnOp {
   files: { rel: string; before?: number; after?: number }[]
 }
 
+/**
+ * 一笔命令的回执（2026-11-02）：**只是给"去日志里找这次点击"用的号**。
+ *
+ * 一次点击会打七八行日志（写队列 → IPC → 值进影子树 → 参数定义已改 → 派生 → 事务），
+ * 每行都带同一个 `req=`。状态栏把这个号显示出来，作者复制去日志里 grep 就是完整一条线。
+ */
+export interface CommandReceipt {
+  /** 请求号（`r0000002a`） */
+  req: string
+  /** 命令名（`wb_apply_draft`），与日志里的写法一致 */
+  command: string
+  /** 成功还是报错。报错时日志里有同一个号的 `warn` */
+  ok: boolean
+}
+
 export interface TxnState {
   dirty: boolean
   dirtyCount: number
   canUndo: boolean
   canRedo: boolean
   ops: TxnOp[]
+  /** 刚跑完那一笔的回执；`null` = 这一轮没跑过命令（取走即清，不会重复） */
+  receipt: CommandReceipt | null
 }
 
 export interface SaveResult {
@@ -1577,8 +1719,15 @@ export interface Words {
   relate: Record<'goFixIt' | 'showAnyway' | 'foldBack', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
-  /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
-  paramStatus: Record<'factory' | 'machine' | 'version' | 'dirty', Word>
+  /**
+   * 参数台一格的状态：**只有两档 —— 跟不跟随基底**（2026-11-02 作者定稿）。
+   *
+   * 「出厂默认 / 机型默认 / 本版修改」那三分已退役：它们答的是"值从哪来"，
+   * 而作者看屏幕时问的是"我改过它没有"。
+   * 「改了还没保存」不在这两档里 —— 徽章不随保存状态跳，
+   * 未保存由那一格的还原按钮 + 右上角「未保存 N」表达。
+   */
+  paramStatus: Record<'follow' | 'own', Word>
   /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
@@ -2467,6 +2616,21 @@ export const wb = {
   /** 默认视角：一个版本的分组列表 */
   desk: (machineId: string, uid: string | null, tab: string | null, query: string) =>
     invoke<Desk>('wb_desk', { machineId, uid, tab, query }),
+
+  /**
+   * **参数台 v2 的整屏数据**（只读，2026-11-02）。
+   *
+   * 与 `matrix` 并行存在：返回值里**没有「当前值」**，只有 `saved`（保存值）与
+   * `savedPinned`。所以新页只能算 `draft ?? saved` —— 值和保存值不可能再被折叠成
+   * 同一份数据（旧页三次「徽章乱跳」的病根）。
+   */
+  paramSheet: (cols: ColRef[], tab?: string | null, query?: string, baseMachineId?: string | null) =>
+    invoke<ParamSheet>('wb_param_sheet', {
+      cols,
+      tab: tab ?? null,
+      query: query ?? null,
+      baseMachineId: baseMachineId ?? null,
+    }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
     invoke<BulkPreview>('wb_preview_bulk', { key, value, cols }),
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),

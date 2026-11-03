@@ -280,12 +280,33 @@ pub fn wb_set_version_field(
 ) -> Result<MachineList, AppError> {
     traced("wb_set_version_field", |_| {
         with_ctx_mut(|ctx| {
+            /* 改之前那一格要抄下来 —— 「改了什么」显示 `tag: → 推荐` 这种真实前后值 */
+            let before = ctx
+                .presets
+                .catalog
+                .machine(&machine_id)
+                .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+                .and_then(|v| version_field_text(v, field));
             ctx.presets
                 .catalog
                 .machine_mut(&machine_id)?
                 .set_version_field(&version_id, field, value.as_deref())?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&ctx.presets.reload()?))
+            ctx.presets = ctx.presets.reload()?;
+            let after = ctx
+                .presets
+                .catalog
+                .machine(&machine_id)
+                .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+                .and_then(|v| version_field_text(v, field));
+            ctx.pending_fields = vec![super::one_field(
+                format!("{machine_id}:{version_id}"),
+                field.key(),
+                version_name_of(ctx, &machine_id, &version_id),
+                before,
+                after,
+            )];
+            Ok(list_of(&ctx.presets))
         })
     })
 }
@@ -299,12 +320,30 @@ pub fn wb_set_machine_field(
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_field", |_| {
         with_ctx_mut(|ctx| {
+            let before = ctx
+                .presets
+                .catalog
+                .machine(&machine_id)
+                .and_then(|m| machine_field_text(m, field));
             ctx.presets
                 .catalog
                 .machine_mut(&machine_id)?
                 .set_field(field, value.as_deref())?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&ctx.presets.reload()?))
+            ctx.presets = ctx.presets.reload()?;
+            let after = ctx
+                .presets
+                .catalog
+                .machine(&machine_id)
+                .and_then(|m| machine_field_text(m, field));
+            ctx.pending_fields = vec![super::one_field(
+                machine_id.clone(),
+                field.key(),
+                machine_id.clone(),
+                before,
+                after,
+            )];
+            Ok(list_of(&ctx.presets))
         })
     })
 }
@@ -367,6 +406,45 @@ pub fn wb_move_machine_to_brand(
     })
 }
 
+/// 机型某一格现在是什么（给人看的字符串）。`None` = 这一格空着
+fn machine_field_text(m: &crate::presetdata::catalog::Machine, f: MachineField) -> Option<String> {
+    match f {
+        MachineField::Display => Some(m.display.clone()).filter(|s| !s.is_empty()),
+        MachineField::Name => Some(m.name.clone()).filter(|s| !s.is_empty()),
+        MachineField::Brand => Some(m.brand.clone()).filter(|s| !s.is_empty()),
+        MachineField::Image => m.image.clone(),
+        MachineField::ImageVariant => m.image_variant.clone(),
+        MachineField::Icon => m.icon.clone(),
+        MachineField::Enabled => Some(if m.enabled { "启用" } else { "停用" }.to_owned()),
+    }
+}
+
+/// 版本某一格现在是什么。`None` = 这一格空着
+fn version_field_text(
+    v: &crate::presetdata::catalog::MachineVersion,
+    f: VersionField,
+) -> Option<String> {
+    let text = match f {
+        VersionField::Name => v.name.clone(),
+        VersionField::NameEn => v.name_en.clone().unwrap_or_default(),
+        VersionField::NameTw => v.name_tw.clone().unwrap_or_default(),
+        VersionField::NameJa => v.name_ja.clone().unwrap_or_default(),
+        VersionField::RecommendedBundle => v.recommended_bundle.clone().unwrap_or_default(),
+        _ => String::new(),
+    };
+    Some(text).filter(|s| !s.is_empty())
+}
+
+/// 版本的使用名（给字段账的 `label` 用）
+fn version_name_of(ctx: &super::Ctx, machine_id: &str, version_id: &str) -> String {
+    ctx.presets
+        .catalog
+        .machine(machine_id)
+        .and_then(|m| m.versions.iter().find(|v| v.id == version_id))
+        .map(|v| v.name.clone())
+        .unwrap_or_else(|| version_id.to_owned())
+}
+
 /// **写一台机型的整张 `[dimensions]`**（六组：床身 / 移动范围 / 边缘 / 涂胶 / 标定点 / 标志位）。
 ///
 /// 写命令（不带 `async`，与这一页其余几条一致）：落盘 + 回一份新清单。
@@ -381,12 +459,35 @@ pub fn wb_set_machine_dimensions(
 ) -> Result<MachineList, AppError> {
     traced("wb_set_machine_dimensions", |_| {
         with_ctx_mut(|ctx| {
+            /* ★ **改之前的尺寸要抄下来**（2026-11-03）：`set_dimensions` 是整张替换，
+            写完就再也拿不到旧的那一组。而「改了什么」要显示
+            `bedSize.depth: 256 → 250` 这种真实前后值。 */
+            let before = ctx
+                .presets
+                .catalog
+                .machine(&machine_id)
+                .and_then(|m| m.dimensions.clone());
             ctx.presets
                 .catalog
                 .machine_mut(&machine_id)?
                 .set_dimensions(dimensions)?;
             ctx.presets.catalog.write_machine(&machine_id)?;
-            Ok(list_of(&ctx.presets.reload()?))
+            ctx.presets = ctx.presets.reload()?;
+            if let Some(old) = before {
+                if let Some(now) = ctx
+                    .presets
+                    .catalog
+                    .machine(&machine_id)
+                    .and_then(|m| m.dimensions.clone())
+                {
+                    /* `summary(&old)` 拿**现在这份**去比 `old`，返回的是
+                    `bedSize.depth: 256 → 250` 这样的字段差 */
+                    let fields = now.summary(&old);
+                    ctx.pending_fields =
+                        super::structural_fields(&machine_id, machine_id.clone(), fields);
+                }
+            }
+            Ok(list_of(&ctx.presets))
         })
     })
 }

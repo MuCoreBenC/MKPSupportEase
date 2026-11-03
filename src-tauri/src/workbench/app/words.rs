@@ -247,26 +247,18 @@ fn words() -> Words {
         .map(|(k, v)| (k, Word::new(v.label(), v.explain())))
         .collect(),
 
+        /* 两档：这一层跟不跟基底。没有「出厂默认 / 机型默认 / 本版修改」那三分 ——
+        它们说的是"值从哪来"，不是"我改过没有"，作者要的是后者 */
         param_status: [
             (
-                "factory",
-                w::param_status::FACTORY_LABEL,
-                w::param_status::FACTORY_EXPLAIN,
+                "follow",
+                w::param_status::FOLLOW_LABEL,
+                w::param_status::FOLLOW_EXPLAIN,
             ),
             (
-                "machine",
-                w::param_status::MACHINE_LABEL,
-                w::param_status::MACHINE_EXPLAIN,
-            ),
-            (
-                "version",
-                w::param_status::VERSION_LABEL,
-                w::param_status::VERSION_EXPLAIN,
-            ),
-            (
-                "dirty",
-                w::param_status::DIRTY_LABEL,
-                w::param_status::DIRTY_EXPLAIN,
+                "own",
+                w::param_status::OWN_LABEL,
+                w::param_status::OWN_EXPLAIN,
             ),
         ]
         .into_iter()
@@ -425,9 +417,14 @@ mod tests {
         assert_eq!(v["placeholder"]["blank"], "空");
         // `save` 这一档没有解释句 —— 为 null 而不是空串，前端才好判
         assert!(v["save"]["saved"]["explain"].is_null());
-        // 「已弃用」两档（C14 §五）：参数级说「这个参数在退场」，选项级说
-        // 「这一档通向的东西已经在退场」—— 两句话不能混成一句
-        assert_eq!(v["paramStatus"]["dirty"]["label"], "已修改");
+        // 参数台只有两档：跟不跟随（2026-11-02 作者定稿）。
+        // 「出厂默认 / 机型默认 / 本版修改」那三分已退役 —— 它们答的是"值从哪来"
+        assert_eq!(v["paramStatus"]["follow"]["label"], "跟随基底");
+        assert_eq!(v["paramStatus"]["own"]["label"], "不跟随");
+        assert!(
+            v["paramStatus"]["dirty"].is_null(),
+            "「未保存」不再是一档：徽章只描述跟不跟随，未保存由还原按钮表达"
+        );
         assert_eq!(v["paramDeprecated"]["label"], "已弃用");
         assert!(v["paramDeprecated"]["explain"].is_string());
         assert_eq!(v["paramDeprecatedChoice"]["label"], "已弃用");

@@ -52,7 +52,7 @@ export const cellKeyOf = (machineId: string, versionUid: string | null, key: str
 /**
  * `Refresh` 的记号：响应回来拿它跟"当前页"比 —— 对不上就是过期派生，丢弃。
  *
- * 写法与 `ParamsPage` 里那个 `refresh` / `compareColRefs` 一一对应；
+ * 写法与参数台（`sheet/ParamSheetPage.tsx`）里那个 `refresh` / `compareColRefs` 一一对应；
  * `Matrix` 那一支按列序列拼（列序变了就是另一次派生）。
  */
 export const refreshKeyOf = (r: Refresh): string =>

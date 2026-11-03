@@ -230,6 +230,85 @@ pub struct Dimensions {
 }
 
 impl Dimensions {
+    /// **这一笔改了哪几个数**（2026-11-02，给写盘日志用）。
+    ///
+    /// 整张 `[dimensions]` 是一次提交（六组二十来个数），逐格手写对比迟早漏一格 ——
+    /// 所以扫全表。
+    pub fn summary(&self, before: &Dimensions) -> Vec<crate::logfmt::FieldChange> {
+        use crate::logfmt::{note, note_bool};
+
+        let mut out: Vec<crate::logfmt::FieldChange> = Vec::new();
+        note(
+            &mut out,
+            "bedSize.width",
+            before.bed_size.width,
+            self.bed_size.width,
+        );
+        note(
+            &mut out,
+            "bedSize.depth",
+            before.bed_size.depth,
+            self.bed_size.depth,
+        );
+        note(&mut out, "edgeZone", before.edge_zone, self.edge_zone);
+        let (a, b) = (&before.movement_range, &self.movement_range);
+        note(&mut out, "movementRange.minX", a.min_x, b.min_x);
+        note(&mut out, "movementRange.maxX", a.max_x, b.max_x);
+        note(&mut out, "movementRange.minY", a.min_y, b.min_y);
+        note(&mut out, "movementRange.maxY", a.max_y, b.max_y);
+        note(&mut out, "movementRange.maxZ", a.max_z, b.max_z);
+        let (a, b) = (&before.glue_area, &self.glue_area);
+        note(&mut out, "glueArea.glueMinX", a.glue_min_x, b.glue_min_x);
+        note(&mut out, "glueArea.glueMaxX", a.glue_max_x, b.glue_max_x);
+        note(&mut out, "glueArea.glueMinY", a.glue_min_y, b.glue_min_y);
+        note(&mut out, "glueArea.glueMaxY", a.glue_max_y, b.glue_max_y);
+        note(&mut out, "glueArea.wipeX", a.wipe_x, b.wipe_x);
+        let (a, b) = (&before.calibration, &self.calibration);
+        note(
+            &mut out,
+            "calibration.lShapeBaseX",
+            a.l_shape_base_x,
+            b.l_shape_base_x,
+        );
+        note(
+            &mut out,
+            "calibration.lShapeBaseY",
+            a.l_shape_base_y,
+            b.l_shape_base_y,
+        );
+        note(&mut out, "calibration.xLineX", a.x_line_x, b.x_line_x);
+        note(&mut out, "calibration.xLineY", a.x_line_y, b.x_line_y);
+        note(
+            &mut out,
+            "calibration.xLineYEnd",
+            a.x_line_y_end,
+            b.x_line_y_end,
+        );
+        note(&mut out, "calibration.yLineX", a.y_line_x, b.y_line_x);
+        note(
+            &mut out,
+            "calibration.yLineXEnd",
+            a.y_line_x_end,
+            b.y_line_x_end,
+        );
+        note(&mut out, "calibration.yLineY", a.y_line_y, b.y_line_y);
+        note(&mut out, "calibration.zStartX", a.z_start_x, b.z_start_x);
+        note(&mut out, "calibration.zStartY", a.z_start_y, b.z_start_y);
+        note(
+            &mut out,
+            "flags.gcodeMarker",
+            &before.flags.gcode_marker,
+            &self.flags.gcode_marker,
+        );
+        note_bool(
+            &mut out,
+            "flags.hasSecondFan",
+            before.flags.has_second_fan,
+            self.flags.has_second_fan,
+        );
+        out
+    }
+
     /// **剔全零的可选组**（2026-10-03，作者照旧面板移植）。
     ///
     /// `bedSize` 与 `edgeZone` 恒留（前者是这台机器有没有床身的唯一凭据，后者是 0 也
@@ -478,7 +557,7 @@ pub enum VersionField {
 }
 
 impl VersionField {
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
             Self::NameEn => "nameEn",
@@ -521,7 +600,7 @@ pub enum MachineField {
 }
 
 impl MachineField {
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::Display => "display",
             Self::Brand => "brand",
@@ -555,7 +634,7 @@ pub enum BrandField {
 }
 
 impl BrandField {
-    fn key(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::Name => "name",
             Self::NameEn => "nameEn",
@@ -927,6 +1006,24 @@ impl Machine {
         }
 
         let v = &mut self.versions[at];
+        /* 改前那一格（下面马上就被换掉了）—— 日志说的是"从多少变到多少" */
+        let was = match field {
+            VersionField::Name => Some(v.name.clone()),
+            VersionField::NameEn => v.name_en.clone(),
+            VersionField::NameTw => v.name_tw.clone(),
+            VersionField::NameJa => v.name_ja.clone(),
+            VersionField::RecommendedBundle => v.recommended_bundle.clone(),
+            VersionField::Tag => v.tag.clone(),
+            VersionField::TagEn => v.tag_en.clone(),
+            VersionField::TagTw => v.tag_tw.clone(),
+            VersionField::TagJa => v.tag_ja.clone(),
+            VersionField::Description => v.description.clone(),
+            VersionField::DescriptionEn => v.description_en.clone(),
+            VersionField::DescriptionTw => v.description_tw.clone(),
+            VersionField::DescriptionJa => v.description_ja.clone(),
+            VersionField::Remark => v.remark.clone(),
+            VersionField::Image => v.image.clone(),
+        };
         let owned = val.map(str::to_owned);
         match field {
             VersionField::Name => v.name = owned.unwrap_or_default(),
@@ -945,6 +1042,13 @@ impl Machine {
             VersionField::Remark => v.remark = owned,
             VersionField::Image => v.image = owned,
         }
+        log_field_change(
+            "版本信息",
+            &format!("{}/{}", self.id, version),
+            field.key(),
+            was.as_deref(),
+            val,
+        );
         Ok(())
     }
 
@@ -964,6 +1068,18 @@ impl Machine {
     /// 整表替换动不到它；表内部的注释按"整节替换"的口径走（旧面板同口径）。
     pub fn set_dimensions(&mut self, dims: Dimensions) -> Result<(), AppError> {
         dims.check_finite()?;
+        /* 日志要"哪几个数变了"（文件面马上就被整表替换，之后问不到旧值） */
+        if let Some(before) = &self.dimensions {
+            let fields = dims.summary(before);
+            if !fields.is_empty() {
+                tracing::info!(
+                    machine = %self.id,
+                    count = fields.len(),
+                    fields = %crate::logfmt::render(&fields),
+                    "机型尺寸已改"
+                );
+            }
+        }
         // 文档面：整表替换（先算，`to_table` 借用 `dims`，之后才把它移进值面）
         self.doc["dimensions"] = dims.clone().trimmed().to_table().into();
         // 值面：`dimensions` 与 `has_dimensions` 一起
@@ -999,14 +1115,32 @@ impl Machine {
         if field == MachineField::Enabled {
             let raw = value.map(str::trim).unwrap_or("");
             let on = !matches!(raw, "false" | "0" | "no" | "off");
+            let was = self.enabled;
             if on {
                 self.doc.remove("enabled");
             } else {
                 self.doc["enabled"] = toml_edit::value(false);
             }
             self.enabled = on;
+            if was != on {
+                tracing::info!(
+                    machine = %self.id,
+                    change = %format!("enabled: {was} → {on}"),
+                    "机型信息已改"
+                );
+            }
             return Ok(());
         }
+        /* 日志要的是"改前是什么"（下面 `doc` 与值面都已经被写过了） */
+        let was = match field {
+            MachineField::Display => Some(self.display.clone()),
+            MachineField::Brand => Some(self.brand.clone()),
+            MachineField::Name => Some(self.name.clone()),
+            MachineField::Image => self.image.clone(),
+            MachineField::ImageVariant => self.image_variant.clone(),
+            MachineField::Icon => self.icon.clone(),
+            MachineField::Enabled => None,
+        };
         let val = value.map(str::trim).filter(|s| !s.is_empty());
         if val.is_none() && field.required() {
             return Err(AppError::invalid_argument(messages::text(
@@ -1038,8 +1172,40 @@ impl Machine {
             // 布尔那一格在本函数开头就写完了（写 `false` / 删键），到不了这里
             MachineField::Enabled => {}
         }
+        log_field_change("机型信息", &self.id, field.key(), was.as_deref(), val);
         Ok(())
     }
+}
+
+/// 机型 / 版本 / 品牌"改一格"之后那一行日志。
+///
+/// **只有真变了才打**：界面上很多单元格是"离开输入框就发一次"，内容没动也发 ——
+/// 每次都记一行的话，日志里全是 `x → x`，反而盖住真改动。
+pub(crate) fn log_field_change(
+    what: &str,
+    target: &str,
+    field: &str,
+    before: Option<&str>,
+    after: Option<&str>,
+) {
+    let before = before.unwrap_or("").trim();
+    let after = after.unwrap_or("").trim();
+    if before == after {
+        return;
+    }
+    let v = |s: &str| {
+        if s.is_empty() {
+            "(空)".to_owned()
+        } else {
+            s.to_owned()
+        }
+    };
+    tracing::info!(
+        target = %target,
+        field = %field,
+        change = %format!("{field}: {} → {}", v(before), v(after)),
+        "{what}已改"
+    );
 }
 
 /// 机型目录

@@ -941,6 +941,7 @@ impl<'a> Book<'a> {
             raw: hit.value.clone(),
             rest: self.base_effective_at(col, key),
             rest_pinned: self.base_pinned_at(col, key),
+            badge: self.badge_at(col, own),
             deprecated,
             dead_choices,
         }
@@ -968,7 +969,19 @@ impl<'a> Book<'a> {
     /// 归并会把同值从版本层上提到机型基底，于是用户在版本列改值、记录落在机型层，
     /// 版本列 `own` 永远是 `false` ⇒ **徽章永不出现**（作者连报三次的就是这个）。
     /// 用户看得见的是**值**，所以判据也只能是值。
-    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, now: Option<&Value>) -> bool {
+    ///
+    /// ★★ 2026-11-03 又收窄：上面那条改成"比有效值"之后走过了头 ——
+    /// 改 `A1` 基底的 Z，三个版本列的有效值跟着变（它们继承基底），
+    /// 于是**三列全亮「↩ 3.9」**，可文件里一行都没多写（日志 `written=1`）。
+    /// 作者看到的就是「四个格子都显示改过，页头却说 1 处」。
+    ///
+    /// 现在按**这一层自己的行**判：与盘上那一份比，**这一层有没有写着自己的一行、
+    /// 那一行的值一不一样**。跟随基底的格子（`over` 里没有它）永远不算脏 ——
+    /// 它本来就该跟着基底走，这正是「跟随」的意思。
+    ///
+    /// 归并那种情形（用户在版本列改，值被提到机型层）仍然判得对：那一笔在
+    /// `draft` 里留了 `pending` 记录，下面第一条就返回 `true`。
+    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, _now: Option<&Value>) -> bool {
         /* 还在草稿里（值那套老路径 / 结构编辑）—— 先认这一条，别让判据退化 */
         if self
             .draft
@@ -977,14 +990,19 @@ impl<'a> Book<'a> {
         {
             return true;
         }
-        match (now, self.base_effective_at(col, key)) {
+        /* 这一层"自己那一行"的两份值：盘上（`rest_base`）与现在（`layers`） */
+        let own_before = self.base_own_at(col, key);
+        let own_now = col
+            .layers
+            .as_ref()
+            .and_then(|l| l.own_value(col.level, key));
+        match (own_before, own_now) {
             (None, None) => false,
-            (Some(now), Some(before)) => now != &before,
-            // 盘上那份里这一项不适用（弃用 / 不在这台机型上），而这一格现在有值 ⇒ 变了。
+            /* 原来没自己那一行、现在有了 ⇒ 从"跟随"变成"不跟随"，是改过 */
+            (None, Some(_)) => true,
+            /* 原来有、现在没了 ⇒ 挂回继承了，也是改过 */
             (Some(_), None) => true,
-            // 盘上那份有这个值、这一格现在算不出来 —— 走不到：`cell()` 早在
-            // `view_effective` 返回 `None` 时就 `not_applicable()` 了。保守判不脏。
-            (None, Some(_)) => false,
+            (Some(before), Some(now)) => *now != before,
         }
     }
 
@@ -1005,6 +1023,21 @@ impl<'a> Book<'a> {
         };
         p.machine_variants
             .contains_key(&variant_key(col.level, &col.key_of_level()))
+    }
+
+    /// 这一格挂哪档徽章：**跟不跟基底**（见 [`Cell::badge`]）。
+    ///
+    /// **基底列没有徽章**（2026-11-02 作者定稿）：基底是根，不跟谁，
+    /// 给它挂「跟随 / 不跟随」只会让人问"它跟随谁"。
+    fn badge_at(&self, col: &ResolvedCol<'_>, own: bool) -> Option<ParamStatus> {
+        match col.level {
+            Level::Machine => None,
+            Level::Version => Some(if own {
+                ParamStatus::Own
+            } else {
+                ParamStatus::Follow
+            }),
+        }
     }
 
     /// 盘上那一份里，这一格的**有效值** —— 三层依次：版本覆盖 → 机型基底 → 出厂。
@@ -1035,6 +1068,24 @@ impl<'a> Book<'a> {
         }
         // ③ 出厂
         Some(p.default_value.clone())
+    }
+
+    /// **盘上那一份里，这一层自己写着的值**（不往上找继承）。`None` = 那一层没有它。
+    ///
+    /// 与 [`Self::base_effective_at`] 的区别就是这个"不往上找"：
+    /// 有效值是"算完继承之后是多少"（改基底，子层跟着变），
+    /// 而这一格**自己那一行**只有这一层写了才有。
+    ///
+    /// [`Self::dirty_of`] 要的是后者 —— 判"这一格改没改过"，
+    /// 问的是"这一行变了没"，不是"继承出来的结果变了没"。
+    fn base_own_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
+        let p = self.rest().registry.param(key)?;
+        if p.deprecated_for(&col.machine_id) || !p.applies_to(&col.machine_id) {
+            return None;
+        }
+        p.machine_variants
+            .get(&variant_key(col.level, &col.key_of_level()))
+            .cloned()
     }
 
     /// 行头常驻的那一句：这一项归谁管。
@@ -1669,6 +1720,19 @@ pub enum CellKind {
     Value,
 }
 
+/// 参数台一格的状态：**跟不跟基底**。只有两档（2026-11-02 作者定稿）。
+///
+/// 它刻意不回答"值从哪来"（出厂 / 机型 / 版本）—— 那是实现细节，
+/// 作者看屏幕时问的是「我改过它没有」。基底列干脆不挂（`Cell::badge == None`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ParamStatus {
+    /// 这一层没有自己的值 —— 基底改了它跟着改
+    Follow,
+    /// 这一层自己写了值（**哪怕和基底相同**）—— 基底改了它不动
+    Own,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cell {
@@ -1721,6 +1785,16 @@ pub struct Cell {
     /// 不能只看 `rest` 有没有值来决定：版本层继承机型层时 `rest` 有值但这一层没钉，
     /// 写一个值回去就把继承钉死了。
     pub rest_pinned: bool,
+    /// 这一格挂哪档徽章：**跟不跟基底**（2026-11-02 作者定稿，只剩两档）。
+    ///
+    /// `None` = **基底列**，不挂 —— 基底是根，谈不上跟不跟谁。
+    ///
+    /// 判据只有一条：这一层归并后**有没有自己的一行**（`has_own`）。
+    /// 有就是「不跟随」，**不管值和基底是否相同** —— 作者的口径是
+    /// 「改过就不跟随」，`70 → 75 → 70` 之后那一行照样留着，照样算不跟随。
+    ///
+    /// 「改了还没保存」不在这档里：徽章不随保存状态跳，未保存由还原按钮表达。
+    pub badge: Option<ParamStatus>,
     /// 这条参数**在这台机型上**已弃用（全局或点名这台机型）。`Row.deprecated` 是
     /// 全机型口径，答不了「这一格」—— 一行跨多台机型时两者会不同
     pub deprecated: bool,
@@ -1750,6 +1824,7 @@ impl Cell {
             raw: Value::Null,
             rest: None,
             rest_pinned: false,
+            badge: None,
             deprecated: false,
             dead_choices: Vec::new(),
         }
@@ -1896,6 +1971,60 @@ mod tests {
         // ③ 改回去 ⇒ 不脏，徽章消失
         let clean = cell_of(&f.presets);
         assert!(!clean.dirty, "没改过就是干净的");
+    }
+
+    /// **写过就不跟随**：哪怕写的就是基底那个值（2026-11-02 作者定稿，只剩两档）。
+    ///
+    /// 这条取代了之前的「出厂默认 / 机型默认 / 本版修改 / 已固定」四分 ——
+    /// 那四档答的是"值从哪来"，作者问的是"我改过它没有"。
+    ///
+    /// 判据只有一条：这一层有没有自己的一行（`has_own`）。值等于不等于基底，
+    /// **完全不参与判断** —— 写过的就是自己定的。
+    #[test]
+    fn a_written_value_is_marked_own_even_when_it_equals_the_inherited() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        /* 版本列才挂徽章（基底列 `badge` 恒为 None） */
+        let cols = cols(&[("A1", Some("A1/STANDARD"))]);
+        let key = "wiping.child";
+        let factory = f
+            .presets
+            .registry
+            .param(key)
+            .expect("夹具里该有这一项")
+            .default_value
+            .clone();
+
+        let cell_of = |work: &crate::workbench::presets::Presets| {
+            Book::new(work, &c, &d)
+                .matrix(&cols, Some("wiping"), "", None)
+                .rows
+                .iter()
+                .find(|r| r.key == key)
+                .map(|r| r.cells[0].clone())
+                .expect("这一行该在矩阵里")
+        };
+
+        /* ① 没写过 ⇒ 跟随基底 */
+        let plain = f.presets.reload().unwrap();
+        let cell = cell_of(&plain);
+        assert_eq!(
+            cell.badge,
+            Some(ParamStatus::Follow),
+            "没有自己的一行 ⇒ 跟随基底"
+        );
+
+        /* ② 写了个和出厂一样的值 ⇒ **仍然是不跟随**（写过就是写过） */
+        let mut same = f.presets.reload().unwrap();
+        same.set_variant(key, "A1:STANDARD", &factory).unwrap();
+        let cell = cell_of(&same);
+        assert!(cell.own, "前提：这一层现在有自己的行了");
+        assert_eq!(
+            cell.badge,
+            Some(ParamStatus::Own),
+            "值等于出厂也算自己定的 —— 只看有没有那一行"
+        );
     }
 
     /// 盘上**钉着**时，`rest` 就是那个钉值 —— 与编辑树无关。
@@ -3056,6 +3185,57 @@ mod tests {
         assert!(mode.cells[0].dirty, "草稿里改过的格子要能标出来");
         assert_eq!(mode.cells[0].text, "圆盘擦拭", "枚举显示中文选项名");
         assert!(mode.cells[0].own, "我们在这一层写过它 → 挂回继承可点");
+    }
+
+    /// **改机型基底，不该让跟着它的版本列显成"改过"**（2026-11-03 作者报的）。
+    ///
+    /// 现场：改 `A1 · Z 轴偏移 3.9 → 3.95`，右侧「各版本取值」四行全亮 `↩ 3.9`，
+    /// 可文件里只多写了一行（日志 `written=1`），页头也说 1 处。
+    ///
+    /// 根因：`dirty_of` 当时比的是**有效值**（继承算完的结果）——
+    /// 版本列继承基底，基底一变它们的有效值全变，于是全判脏。
+    /// 正确判据是**这一层自己那一行**变没变：跟随基底的格子（`over` 里没有它）
+    /// 永远不该算改过，"跟随"就是这个意思。
+    #[test]
+    fn changing_the_base_does_not_make_following_versions_dirty() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        /* 同一个枚举格：基底改值，版本列跟着走 */
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "wiping.mode".to_owned(),
+                value: Some(serde_json::json!("disk")),
+            }],
+        )
+        .unwrap();
+
+        let b = Book::new(&f.presets, &c, &d);
+        /* 一列基底 + 一列版本：版本列在当前树里**没有自己那一行** */
+        let m = b.matrix(
+            &cols(&[("A1", None), ("A1", Some("A1/STANDARD"))]),
+            None,
+            "",
+            None,
+        );
+        let row = m.rows.iter().find(|r| r.key == "wiping.mode").unwrap();
+
+        assert!(row.cells[0].dirty, "改的就是基底这一格，必须标脏");
+        assert!(row.cells[0].own, "基底那一行确实写进去了");
+
+        let ver = &row.cells[1];
+        assert!(
+            !ver.dirty,
+            "版本列只是跟随基底 —— 文件里没多写它那一行，不该标成改过"
+        );
+        assert!(!ver.own, "版本列没有自己那一行");
+        /* 但它的**有效值**确实跟着变了 —— 界面靠这个显示 3.95 */
+        assert_eq!(ver.text, "圆盘擦拭", "跟随后的值要显示出来");
     }
 
     /// 分类过滤；**搜索一开分类让开**，并且说明条上写明这件事

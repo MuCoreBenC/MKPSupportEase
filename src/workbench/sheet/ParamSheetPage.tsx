@@ -50,7 +50,7 @@
  *   · 单行被关着仍是「看得见、改不动」：藏起来的后果是用户以为这个参数不存在。
  *     收起来的那几行留一个 「仍然展开看」（词从后端来：`words.relate.showAnyway`）。
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   CSSProperties,
   KeyboardEvent as ReactKeyboardEvent,
@@ -85,32 +85,33 @@ import GcodeModal from '../c14/GcodeModal'
 import SplitterC14 from '../c14/SplitterC14'
 import { useSplitWidth } from '../c14/useSplitWidth'
 import { usePaintSelectC14 as usePaintSelect } from '../c14/usePaintSelect'
+import { refreshKeyOf, type EditEntry } from '../editQueue'
 import {
+  applyDraftToDesk,
+  applyDraftToMatrix,
   cellKeyOf,
-  editQueue,
-  overlayOf,
-  patchDesk,
-  patchMatrix,
-  refreshKeyOf,
-  type EditEntry,
-} from '../editQueue'
+  rawOf,
+  settleDraft,
+  type DraftEntry,
+} from './draftOverlay'
+import { sheetWrites, WriteQueue } from './writeQueue'
 import type { ParamView } from '../api'
 /* 行右键菜单：与资产页 / 机型页同一套（见 `components/menu`） */
 import { ContextMenu } from '../components/menu'
 import type { ContextMenuEntry } from '../components/menu/types'
 import { useContextMenu } from '../components/menu/useContextMenu'
-import BatchEdit from './BatchEdit'
-import type { BatchTarget } from './BatchEdit'
-import CellEditor from './CellEditor'
-import CompareMatrix from './CompareMatrix'
-import ParamDefModal from './ParamDefModal'
-import { nextSectionId } from './sectionId'
-import ParamDetail, { StatusTag } from './ParamDetail'
+import BatchEdit from '../views/BatchEdit'
+import type { BatchTarget } from '../views/BatchEdit'
+import CellEditor from '../views/CellEditor'
+import CompareMatrix from '../views/CompareMatrix'
+import ParamDefModal from '../views/ParamDefModal'
+import { nextSectionId } from '../views/sectionId'
+import ParamDetail, { StatusTag } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
-import ComponentSlot from './ComponentSlot'
-import { slotSideOf } from './componentSide'
-import SectionDrawer from './SectionDrawer'
+import ComponentSlot from '../views/ComponentSlot'
+import { slotSideOf } from '../views/componentSide'
+import SectionDrawer from '../views/SectionDrawer'
 import s from '../c14.module.css'
 
 /**
@@ -185,9 +186,9 @@ interface Props {
   onGoto: (view: string, focus?: GotoFocus) => void
 }
 
-export default memo(ParamsPage)
+export default memo(ParamSheetPage)
 
-function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onEditApplied, onSave, onUndo, onGoto }: Props) {
+function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApplied, onEditApplied, onSave, onUndo, onGoto }: Props) {
   /* 定位只看挂载时的那一次 —— 之后就是普通的本页状态 */
   const init = initialFocus ?? null
   /*
@@ -261,6 +262,19 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   /** 对照模式右栏「参数详情」用的那一屏（基准机型的全部层） */
   const [drawerDesk, setDrawerDesk] = useState<Desk | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  /**
+   * **本地草稿层**（这一页的内核，2026-11-02）。
+   *
+   * 键是 `cellKey`（机型|版本|参数），值是 TOML 原文 + 一个 `clean` 标记
+   * （用户已经改回保存值、只等后端跟上）。它替换了旧页的 `editQueue` 乐观层：
+   *
+   *   · 显示与徽章**只看它**，不等后端往返（点下去立刻就变）；
+   *   · 后端把值写回来之后（`cell.raw` 与它相等）整条删掉 —— 见 `settleDraft`；
+   *   · 保存 / 放弃 / 撤销 / 换目标时整层清掉。
+   */
+  const [draft, setDraft] = useState<Map<string, DraftEntry>>(() => new Map())
+
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -348,17 +362,25 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   const refreshKeyRef = useRef('')
 
   /*
-   * 乐观覆盖层（`editQueue` 头注第 1 条）：还没落库的那几格，用队列里的值盖在 base
-   * 上显示 —— 点下去就看得见，不等后端往返。队列空时 `patchDesk` 原样返回旧引用
-   * ⇒ 不额外重渲染。
+   * 草稿层（新内核）：改过的格子在**后端跟上之前**一直显示我的值。
    *
-   * `queued` 只喂这一处派生；`shown*` 是**只画不改**的副本，base 仍由响应与 effect 写。
+   * 与旧页那套乐观层（`editQueue` 里的条目落地也不撤）的区别只有一条但很关键：
+   * 这里会在后端把值写回来之后**把这一条删掉**（`settleDraft`），所以"草稿"
+   * 与"后端已经一致"是两件事，不会出现"徽章要等保存才灭"。
+   *
+   * `shown*` 是**只画不改**的副本，base 仍由响应与 effect 写。
    */
-  const queued = useSyncExternalStore(editQueue.subscribe, editQueue.snapshot)
-  const overlay = useMemo(() => overlayOf(queued), [queued])
-  const shownDesk = useMemo(() => patchDesk(desk, overlay), [desk, overlay])
-  const shownDrawerDesk = useMemo(() => patchDesk(drawerDesk, overlay), [drawerDesk, overlay])
-  const matrixOv = useMemo(() => patchMatrix(matrix, overlay), [matrix, overlay])
+  const shownDesk = useMemo(() => applyDraftToDesk(desk, draft), [desk, draft])
+  const shownDrawerDesk = useMemo(() => applyDraftToDesk(drawerDesk, draft), [drawerDesk, draft])
+  const matrixOv = useMemo(() => applyDraftToMatrix(matrix, draft), [matrix, draft])
+
+  /* 后端跟上来了的那几条草稿可以收掉（判据见 `settleDraft`） */
+  useEffect(() => {
+    setDraft((prev) => {
+      const next = settleDraft(desk, prev)
+      return next === prev ? prev : next
+    })
+  }, [desk])
 
   /*
    * 抽屉里那句「页面上看不到它」用的是**页面自己那两个数**（参数条数 / 画出来的行数），
@@ -415,9 +437,74 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
   )
 
   /* 与 `onWrite` 递出去的 `pageRefresh` 用同一套构造（page / 列序 / 查询都要一字不差） */
-  refreshKeyRef.current = refreshKeyOf(
-    mode === 'compare' ? { page: 'matrix', cols: compareColRefs, tab: null, query: q } : refresh,
+  const refreshOfPage: Refresh = useMemo(
+    () =>
+      mode === 'compare'
+        ? { page: 'matrix', cols: compareColRefs, tab: null, query: q }
+        : refresh,
+    [mode, compareColRefs, refresh, q],
   )
+  refreshKeyRef.current = refreshKeyOf(refreshOfPage)
+
+  /*
+   * **写入队列（新内核）**：单飞 —— 前一发没回来，后一发根本不会发。
+   *
+   * 旧页那条队列是"120ms 尾随合批 + 一次发一批"：连点同一个步进器时会攒成一批，
+   * 但跨格并发那一路（80 发出、90 发出、后者先回来）靠 `seq` 兜不住。这里一次只放
+   * 一条出去，顺序就是发起顺序，落盘结果不可能被旧值覆盖。
+   */
+  const sendRef = useRef(sendEdits)
+  sendRef.current = sendEdits
+  const refreshRef = useRef(refreshOfPage)
+  refreshRef.current = refreshOfPage
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+
+  const [queue] = useState(
+    () =>
+      new WriteQueue({
+        send: async (e) => {
+          const entry: EditEntry = {
+            cellKey: e.cellKey,
+            label: e.label,
+            patch: e.patch,
+            raw: draftRef.current.get(e.cellKey)?.raw ?? '',
+            refresh: refreshRef.current,
+            refreshKey: refreshKeyOf(refreshRef.current),
+            sent: false,
+          }
+          const ok = await sendRef.current([entry])
+          if (!ok) throw new Error(entry.label)
+        },
+        onFail: (cellKey, err) => {
+          /* 这一格的草稿退回后端那份（不是"上一次成功的值"—— 那个可能已经过期） */
+          setDraft((prev) => {
+            if (!prev.has(cellKey)) return prev
+            const next = new Map(prev)
+            next.delete(cellKey)
+            return next
+          })
+          toasts.push(isAppError(err) ? err.message : String(err))
+        },
+      }),
+  )
+
+  /**
+   * 把这一页的队列挂到外壳上（见 `sheetWrites`）：**保存前必须排空**，
+   * 后端把改动撤掉了（放弃 / 撤销 / 重做）就丢草稿。页头一个字不动。
+   */
+  useEffect(() => {
+    sheetWrites.register(
+      async () => {
+        await queue.drain(5000)
+      },
+      () => {
+        queue.cancelAll()
+        setDraft(new Map())
+      },
+    )
+    return () => sheetWrites.unregister()
+  }, [queue])
 
   /* 一屏配方台。tab / 搜索的过滤在后端（搜索跨分类，B02 的行为） */
   useEffect(() => {
@@ -699,10 +786,15 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     ownerMachineId: string,
     layerUid: string | null,
     next: string | null,
-    refreshKind: 'desk' | 'matrix' = 'desk',
+    /**
+     * 旧页用它决定这一笔回哪一页的派生；新内核统一由 `refreshOfPage` 现算。
+     * 留着这个位置只为**调用点签名不变**（三个模式各传一个，位置不能错）。
+     */
+    _refreshKind: 'desk' | 'matrix' = 'desk',
     beforeRaw?: string,
     cell?: Cell | null,
   ) => {
+    void _refreshKind
     const before = beforeRaw ?? String(row.cells[0]?.raw ?? '')
     /*
      * 已弃用的不许写（C14 §五）。判据**按机型**：优先读这一格的后端派生态
@@ -738,40 +830,36 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     }
 
     /* 原文进原文出，但落库按注册表的值类型归位 —— 否则 true 和 'true' 是两回事 */
-    let value: unknown = next
-    if (next !== null) {
-      if (param.valueType === 'bool') value = next === 'true'
-      else if ((param.valueType === 'float' || param.valueType === 'int') && next !== '')
-        value = Number(next)
-    }
+    const value: unknown = next === null ? null : valueOfRaw(next, param)
 
     const owner = layerUid ?? ownerMachineId
+    const cellKey = cellKeyOf(ownerMachineId, layerUid, row.key)
     /*
-     * 矩阵的刷新同样取全量（tab 过滤在前端）—— 写一笔回来要是带着旧 tab，
-     * 页签条立刻又塌回「全部 + 当前」两个了。
+     * ① 本地草稿立刻生效 —— 显示与徽章不等这一发。
+     *
+     * 脏不脏**由值决定**（`draftOverlay.dirtyOf`：显示值 ≠ 保存值），所以
+     * "改回原值"这一刻徽章就灭了，不必等后端把值写回去。
+     *
+     * ★ `next === null` = **删键挂回继承**，不是"值变成空"（2026-11-02 作者：
+     * 「我点了那一个徽章，它就变成了零，并且是红色的」）。删键之后的有效值就是
+     * 保存值（`cell.rest` 本来就是三层算完的那一份），所以草稿要记它 ——
+     * 记成空串的话，数字控件 `Number('') === 0` 会把这一格显示成 0 并标红。
      */
-    const pageRefresh: Refresh =
-      refreshKind === 'matrix'
-        ? { page: 'matrix', cols: compareColRefs, tab: null, query: q }
-        : refresh
-    editQueue.push(
-      {
-        cellKey: cellKeyOf(ownerMachineId, layerUid, row.key),
-        label: `${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`,
-        patch: {
-          kind: 'setValue',
-          level: layerUid !== null ? 'version' : 'machine',
-          owner,
-          key: row.key,
-          value,
-        },
-        /* 乐观显示值：TOML 原文（`null` = 挂回继承，框里就是空的） */
-        raw: next ?? '',
-        refresh: pageRefresh,
-        refreshKey: refreshKeyOf(pageRefresh),
-      },
-      sendEdits,
-    )
+    const nextRaw = next ?? (cell !== undefined && cell !== null ? rawOf(cell.rest) : '')
+    setDraft((prev) => {
+      const copy = new Map(prev)
+      copy.set(cellKey, { raw: nextRaw })
+      return copy
+    })
+
+    /* ② 单飞队列：这一条落地之前，下一条不会发 */
+    queue.enqueue(cellKey, `${layerLabelOf(ownerMachineId, layerUid)} · ${param.label}`, {
+      kind: 'setValue',
+      level: layerUid !== null ? 'version' : 'machine',
+      owner,
+      key: row.key,
+      value,
+    })
 
     /*
      * 一次点击 = 一次改动的提示（开关与枚举手滑改错是重灾区）；给一条能撤回的。
@@ -789,6 +877,38 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         (next === 'true' ? '开' : next === 'false' ? '关' : next)
       toasts.push(`${param.label} 改成 ${label}`, { label: '撤销', run: onUndo })
     }
+  }
+
+  /**
+   * **「跟随默认基底」**（2026-11-02 定稿）：把这一层自己写的那一行删掉。
+   *
+   * # 为什么只有这一个方向
+   *
+   * 两档口径是「改过就不跟随」—— 只要是**写值**，这一层就永远算「不跟随」，
+   * 哪怕写的就是基底那个数。所以要"回去"，只能显式删掉那一行，没有别的入口
+   * （作者：「除非右键改成跟随默认基底，否则改动过的就不管了」）。
+   *
+   * 发 `setValue { value: null }`，不是写一个"等于基底的值"：写值只会让它继续不跟随。
+   */
+  const followBase = (key: string) => {
+    if (mode !== 'single') return
+    const col = shownDesk?.cols[shownDesk.cur]
+    if (col === undefined) return
+    const layerUid = col.versionUid ?? null
+    const cellKey = cellKeyOf(col.machineId, layerUid, key)
+    /* 本地草稿直接丢掉：那一层没有自己的值了，显示该回落到继承来的那个 */
+    setDraft((prev) => {
+      const copy = new Map(prev)
+      copy.delete(cellKey)
+      return copy
+    })
+    queue.enqueue(cellKey, `跟随基底 · ${paramOf(key)?.label ?? key}`, {
+      kind: 'setValue',
+      level: layerUid !== null ? 'version' : 'machine',
+      owner: layerUid ?? col.machineId,
+      key,
+      value: null,
+    })
   }
 
   /*
@@ -997,6 +1117,22 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
     const key = rowMenu.target
     if (key === null) return []
     const p = paramOf(key)
+    /* 右键那一行的**当前格**：单列模式 = 正对着的那一列。对照模式一次改多列，
+       「跟随基底」在那里没有单一目标 —— 所以那一档不给，并说清为什么 */
+    const cell =
+      mode === 'single' ? (rowOf(shownDesk, key)?.cells[shownDesk?.cur ?? 0] ?? null) : null
+    const followWhy =
+      mode !== 'single'
+        ? '对照模式一次看多列，先切回单列再操作'
+        : cell === null
+          ? '这一行还没有格子（矩阵还在拉）'
+          : !cell.own
+            ? '这一层本来就没有自己的值 —— 它已经在跟随基底'
+            : !cell.editable
+              ? cell.deprecated
+                ? '这一项在这台机型上已弃用'
+                : '这一格现在改不了'
+              : undefined
     return [
       {
         id: 'def',
@@ -1007,6 +1143,16 @@ function ParamsPage({ book, words, initialFocus, tick, dirty, onApply, onMetaApp
         onSelect: () => {
           setSel(key)
           setDefEditKey(key)
+        },
+      },
+      {
+        id: 'follow',
+        /* 只有"这一层写过"时才可用：删掉那一行，让它重新跟着基底 */
+        label: '跟随默认基底',
+        disabled: followWhy,
+        onSelect: () => {
+          setSel(key)
+          followBase(key)
         },
       },
       {
@@ -2051,6 +2197,8 @@ function GroupCard({
     next: string | null,
     refreshKind?: 'desk' | 'matrix',
     beforeRaw?: string,
+    /** 这一格（`writeValue` 要拿它的 `rest` 判"改回原值"） */
+    cell?: Cell | null,
   ) => void
   onOpenGcode: (key: string) => void
   /**
@@ -2165,6 +2313,8 @@ function ParamLine({
     next: string | null,
     refreshKind?: 'desk' | 'matrix',
     beforeRaw?: string,
+    /** 这一格（`writeValue` 要拿它的 `rest` 判"改回原值"） */
+    cell?: Cell | null,
   ) => void
   onOpenGcode: (key: string) => void
   /** 右键（`useContextMenu` 的 `triggerProps`）—— 摊在整行上，鼠标与 Shift+F10 都认 */
@@ -2233,10 +2383,15 @@ function ParamLine({
                 ownerMachineId,
                 uid,
                 /* 盘上这一层本来钉着 ⇒ 写回那个值；没钉 ⇒ 写 null **删键**挂回继承。
-                   写值会把继承钉死（`A1:STANDARD` 那格会从此不再跟随 `defaultValue`）。 */
-                cell.restPinned ? String(cell.rest) : null,
+                   写值会把继承钉死（`A1:STANDARD` 那格会从此不再跟随 `defaultValue`）。
+
+                   ★ 这里**不许**再写 `String(cell.rest)`：`rest` 为 `null` 时它得到
+                   `"null"`，数字控件解析失败就回落成 `0` —— 作者看到的「点 ↩ 70
+                   变 0」正是这一行。`rawOf` 把 null 显式落成空串。 */
+                cell.restPinned && cell.rest !== null ? rawOf(cell.rest) : null,
                 undefined,
                 String(cell.raw ?? ''),
+                cell,
               )
             }
           >
@@ -2248,7 +2403,8 @@ function ParamLine({
           cell={cell}
           form="row"
           disabled={!cell.editable}
-          onWrite={(next) => onWrite(row, param, ownerMachineId, uid, next)}
+          /* `cell` 必须一起递下去：`writeValue` 要拿它的 `rest` 判"改回原值" */
+          onWrite={(next) => onWrite(row, param, ownerMachineId, uid, next, undefined, undefined, cell)}
           onOpenGcode={() => onOpenGcode(row.key)}
         />
       </span>
@@ -2273,6 +2429,20 @@ function ParamLine({
 }
 
 /* ---------- 纯函数小工具 ---------- */
+
+/**
+ * 控件原文 → 注册表类型上的值。**改值与「固定」共用这一处**。
+ *
+ * 两处各写一遍的话，同一次输入在"写值"与"固定"两条路上会落成不同的 JSON：
+ * `'true'` 与 `true`、`'74'` 与 `74` 在盘上是两种东西，
+ * 而比较用的是 `serde_json::Value` 的相等 —— 差一位就变成"永远改不回去"。
+ */
+function valueOfRaw(raw: string, param: ParamView | null): unknown {
+  if (param === null) return raw
+  if (param.valueType === 'bool') return raw === 'true'
+  if ((param.valueType === 'float' || param.valueType === 'int') && raw !== '') return Number(raw)
+  return raw
+}
 
 /**
  * 「这条参数现在的定义」→ 一份整包载荷。`commitDef` 在保存前拿它拍**改前**

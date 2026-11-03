@@ -1,0 +1,110 @@
+/*
+ * 参数台 v2 自己的布局（2026-11-02）。
+ *
+ * **只放这一页多出来的那几样**：左栏宽度、搜索行的小字、徽章行的竖标、
+ * 右栏详情的内衬。颜色 / 间距 / 字号一律读 `c14tokens.css` 的变量 ——
+ * 长相必须与旧页一致，差别只该在"状态表达"上（协议 §「版式」）。
+ *
+ * 行、分组卡、状态徽标、橙色还原 chip 全部直接复用 `c14.module.css` 的类，
+ * 不在这里复制一份。复制一份就是两套长相，改一边忘一边。
+ */
+
+/* ---------- 三段式的左栏 ---------- */
+
+.rail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: 244px;
+  min-height: 0;
+  padding-right: 8px;
+  border-right: 1px solid var(--line);
+}
+
+/* ---------- 页头那一行 ---------- */
+
+.ctxSub {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.count {
+  margin-left: auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* 分组卡之间留一口气 —— `.pGroup` 自己不管外边距（它在旧页由父容器给） */
+.group {
+  margin-bottom: 10px;
+}
+
+.group:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------- 「已改未保存」这一档（协议里的三档之一） ---------- */
+
+/*
+ * 行左侧一道 2px 品牌蓝竖线。用 `inset box-shadow` 而不是 `border-left`：
+ * 后者会把这一行的内容整体右移 2px，扫一列过去时正文会跳。
+ */
+.rowDirty {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.statusDirty {
+  color: var(--accent-deep);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+/* ---------- 右栏详情 ---------- */
+
+.detailTitle {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.detailRevert {
+  flex: none;
+  margin-left: auto;
+  color: var(--warn-ink);
+  border-color: var(--warn-line);
+  background: var(--warn-surface);
+}
+
+.detailScroll {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 10px;
+  overflow: auto;
+}
+
+.detailLabel {
+  margin: 14px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 改了之后保存值仍然照实显示，但划一道线 —— 一眼看得出"这是旧的" */
+.savedStruck {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+
+/* ---------- G-code（新页第一版只读） ---------- */
+
+.gcodeNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}

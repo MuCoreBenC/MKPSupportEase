@@ -175,15 +175,19 @@
 }
 
 /*
- * 一格一行：`.fieldWhat`（名字 + 归属）吃掉余量，值 → 值贴右，撤销在最右。
+ * **三列表格**（2026-11-03 作者定稿：平铺 + 标签）：归属 / 字段变化 / 来源。
  *
- * **用 grid 不用 flex**：三列宽度（名字 / 值对 / 按钮）在整列里要一致，flex 各算各的
- * 会让每行的「→」左右错开（`ParamDefModal` 的版式教训）。
+ * 为什么是表格而不是"一条一句人话"：一次改 `A1` 的 Z 会归并连带写出
+ * `A1:STANDARD` / `A1:FAST` / `A1:FASTV3.3` 三格，四条都平铺 —— 列表格
+ * 才好一眼扫出"哪几处、各自什么来源"，也才好对数（页头那个 N 就是行数）。
+ *
+ * **用 grid 不用 flex**：三列宽度在整列里必须一致，flex 各算各的会让每行的
+ * 「→」与标签左右错开（`ParamDefModal` 的版式教训）。
  */
 .field {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 16px auto auto;
-  gap: 10px;
+  grid-template-columns: minmax(96px, 0fr) minmax(0, 1fr) auto;
+  gap: 12px;
   align-items: baseline;
   padding: 7px 14px;
   border-bottom: 1px solid var(--w-line);
@@ -194,40 +198,109 @@
   background: var(--w-hover);
 }
 
-/* 名字 + 归属：归属用小字跟在后面，不另占一行（行高会被它顶起来） */
+/* 表头：与数据行同一套列宽，只是字更小更淡 —— 两处改一处就会错列 */
+.fieldHead {
+  display: grid;
+  grid-template-columns: minmax(96px, 0fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--w-line-strong);
+  font-size: 11px;
+  color: var(--w-t3);
+  letter-spacing: 0.02em;
+}
+
+/*
+ * ① 归属：`A1` / `A1:STANDARD`。
+ *
+ * **等宽**是硬要求 —— `A1:FASTV3.3` 这种带冒号的标识，比例字体下根本扫不出来。
+ * 基底（无冒号）用主色，版本（带冒号）用次级色：一眼分出"我点的"和"被带连的"。
+ */
+.fieldOwner {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--w-t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldOwnerVer {
+  color: var(--w-t3);
+}
+
+/* ② 字段变化：名字在前，值对在后；值太长时截断（G-code 那种），悬停看全文 */
 .fieldWhat {
   display: flex;
   gap: 6px;
   align-items: baseline;
   min-width: 0;
   overflow: hidden;
-  color: var(--w-t1);
-  text-overflow: ellipsis;
+  color: var(--w-t2);
   white-space: nowrap;
 }
 
-.fieldTarget {
-  flex: none;
-  font-style: normal;
-  font-size: 11px;
-  color: var(--w-t3);
+.fieldName {
+  flex: 0 0 auto;
+  color: var(--w-t1);
 }
 
 .fieldFrom {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--w-t3);
   text-decoration: line-through;
   font-variant-numeric: tabular-nums;
 }
 
 .fieldArrow {
+  flex: none;
   color: var(--w-line-strong);
   text-align: center;
 }
 
 .fieldTo {
+  flex: 0 0 auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
   color: var(--w-t1);
   font-variant-numeric: tabular-nums;
+}
+
+/* ③ 来源：一行里既有标签又有撤销按钮，右对齐 */
+.fieldWhyCol {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+
+/*
+ * 来源标签。**是标签不是文字**：`用户修改` 主色描边（自己点的，强调），
+ * 连带/复制/清理由默认中性底（弱化），`来源不明` 用警示色 —— 那个词出来
+ * 就说明有地方该查了。
+ */
+.why {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--w-t3);
+  white-space: nowrap;
+}
+
+.whyUser {
+  border-color: var(--w-primary);
+  color: var(--w-primary);
+}
+
+.whyWarn {
+  border-color: var(--w-warn);
+  color: var(--w-warn);
 }
 
 /* 就地撤销：平时不显形，悬停这一行才亮 —— 与参数行右键菜单同一条口径

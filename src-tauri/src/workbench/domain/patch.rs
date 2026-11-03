@@ -104,6 +104,11 @@ pub enum Patch {
         /// `None` = 删键 = 挂回继承
         value: Option<Value>,
     },
+    /// **「固定为当前值」/「取消固定」**（2026-11-02 作者裁定）。
+    ///
+    /// 与 [`Patch::SetValue`] 的唯一差别：**写在存的值等于"这一层不钉时会继承到的值"
+    /// 时，也不许归一化成删键**。
+    ///
     /// 蛇形字段要用 `rename` 逐个指到 camelCase —— 枚举上的 `rename_all`
     /// 只作用于**变体名**，管不到变体的字段（前端发 `fileId`，漏了它就是
     /// 「missing field file_id」，资产库的设归档整个是坏的）
@@ -130,6 +135,7 @@ pub struct Draft {
     /// `"m:A1:toolhead.offset.x"` / `"v:A1/STANDARD:toolhead.offset.x"`。
     /// **值为 `None` 表示"这一层的这个键被删了"**，与"没有这一条草稿"不同
     pub values: BTreeMap<String, Option<Value>>,
+
     pub visibility: BTreeMap<String, Visibility>,
     pub bundles: BTreeMap<String, BundleEdit>,
     // 没有 `built`：生成记录是台账（`workbench/built.json`），生成事务直接落盘，
@@ -137,7 +143,14 @@ pub struct Draft {
 }
 
 impl Draft {
-    /// 未保存的改动有几处
+    /// 草稿层里有几处改动 —— **一「处」= 一格字段**（2026-11-03）。
+    ///
+    /// 口径必须与 [`crate::workbench::domain::txn::Txn::dirty_count`] 一致
+    /// （那个数的是"改了几个字段"），因为界面把两者**相加**成页头那个 N。
+    /// 相加就要求同量纲：草稿层的一格（`m:A1:toolhead.offset.z`）落进文件
+    /// 就是一个字段，与事务记的那一条正好对应。
+    ///
+    /// `visibility` / `bundles` 各是一条记录、各对应一处改动，也同量纲。
     pub fn dirty_count(&self) -> usize {
         self.values.len() + self.visibility.len() + self.bundles.len()
     }
@@ -372,20 +385,19 @@ fn as_int(v: &Value) -> Option<i64> {
 }
 
 fn normalize(registry: &Registry, patch: &Patch) -> Patch {
-    let Patch::SetValue {
-        level,
-        owner,
-        key,
-        value: Some(v),
-    } = patch
-    else {
-        return patch.clone();
-    };
-    Patch::SetValue {
-        level: *level,
-        owner: owner.clone(),
-        key: key.clone(),
-        value: Some(normalize_value(registry, key, v)),
+    match patch {
+        Patch::SetValue {
+            level,
+            owner,
+            key,
+            value: Some(v),
+        } => Patch::SetValue {
+            level: *level,
+            owner: owner.clone(),
+            key: key.clone(),
+            value: Some(normalize_value(registry, key, v)),
+        },
+        _ => patch.clone(),
     }
 }
 
@@ -410,6 +422,8 @@ fn validate(committed: &Committed, registry: &Registry, patches: &[Patch]) -> Re
 
     for p in patches {
         match p {
+            /* 「固定」与「写值」的目标层、弃用闸、存在性**完全同一套** ——
+            合并成一条分支，两条路各写一遍迟早会只改一边 */
             Patch::SetValue {
                 level, owner, key, ..
             } => {
@@ -530,10 +544,20 @@ fn apply_one(
              * 于是"改成开启、再改回关闭"在草稿里留下一枚多余的 `关闭`，
              * 界面就一直显示「已修改」、保存按钮一直亮。
              */
-            let settled = match value {
-                None => at_rest(registry, *level, owner, key).is_none(),
-                Some(v) => at_rest_effective(registry, *level, owner, key).as_ref() == Some(v),
-            };
+            /* 「这一处还算不算改动」= **这一层和它原本那一行是否一致**。
+             *
+             * ★ 2026-11-02 换了口径之后，判据从 `at_rest_effective`（含继承）
+             * 收成 `at_rest`（**只看本层那一行**）。两者的差别正是作者要的那件事：
+             *
+             *   · 本层**原本没有**这一行，用户写了个与继承值相同的值
+             *     ⇒ 旧口径判"改回原样"（因为等于继承值）而吞掉这一笔；
+             *     新口径判"**写过**"（本层从无到有）⇒ 记下来，徽章显示「不跟随」；
+             *   · 本层**原本有**这一行，用户改回那一行的值
+             *     ⇒ 两边都判"改回原样" ⇒ 草稿条目拿掉，未保存数不涨。
+             *
+             * 「回到跟随」不是写一个相同的值，而是删键（右键「跟随默认基底」）。
+             */
+            let settled = at_rest(registry, *level, owner, key).as_ref() == value.as_ref();
             if settled {
                 // 改回了这一层原本的样子 = 这一处不再是改动。**从草稿里拿掉而不是记一条**，
                 // 否则"改了又改回来"会让保存按钮一直亮着
@@ -644,29 +668,6 @@ fn at_rest(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<
     let variant = variant_key(level, owner);
     let raw = registry.param(key)?.machine_variants.get(&variant)?;
     Some(normalize_value(registry, key, raw))
-}
-
-/// 「这一层**不钉这个键**时会拿到的值」—— 三层查找的后两档：机型 → 出厂。
-///
-/// 与 [`at_rest`] 只差一处：`at_rest` 只看**本层**钉着的键。版本层一直继承着机型层时
-/// 它什么都没有（`None`），于是"改成开启、再改回关闭"拿 `None == Some(关闭)` 去比 ——
-/// 比不中，草稿里留下一枚多余的草稿，界面一直显示「已修改」（作者实测）。
-fn at_rest_effective(registry: &Registry, level: Level, owner: &str, key: &str) -> Option<Value> {
-    if let Some(v) = at_rest(registry, level, owner, key) {
-        return Some(v);
-    }
-    // 版本 uid 的形状是 `机型/版本`（见 [`variant_key`] 的反方向）
-    if matches!(level, Level::Version) {
-        if let Some(mid) = owner.split('/').next() {
-            if let Some(v) = at_rest(registry, Level::Machine, mid, key) {
-                return Some(v);
-            }
-        }
-    }
-    // 出厂那一档同样归一到声明类型，理由见 [`at_rest`]
-    registry
-        .param(key)
-        .map(|p| normalize_value(registry, key, &p.default_value))
 }
 
 /// 只留下 uid 还活着的条目，被丢掉的记进 `gone`。
@@ -926,12 +927,13 @@ mod tests {
         assert_eq!(draft.dirty_count(), 0, "改回去就不该再算一处未保存改动");
     }
 
-    /// **改回「本层原来那个值」也要清干净 —— 哪怕本层压根没钉过它。**
+    /// **改回「与继承值相同」仍然是一笔改动**（2026-11-02 换口径后）。
     ///
-    /// 作者实测的那条：版本层一直是继承机型层的（本层 `machineVariants` 里什么都没有），
-    /// 改成别的、再改回继承来的那个值，界面却一直挂着「已修改」。
+    /// 旧口径把"值等于继承值"当成"改回原样"，于是这一笔被吞掉，界面回到「跟随」。
+    /// 作者定稿是反过来的：只要这一层从"没有"变成"有"，就是「不跟随」——
+    /// 哪怕写的就是基底那个数。想回到跟随，是**删键**（右键「跟随默认基底」）。
     #[test]
-    fn changing_back_to_the_inherited_value_clears_the_dirty_mark() {
+    fn changing_back_to_the_inherited_value_is_still_a_change() {
         let (_d, reg) = registry();
         let c = committed();
         let mut draft = Draft::default();
@@ -951,6 +953,9 @@ mod tests {
         .unwrap();
         assert_eq!(draft.dirty_count(), 1);
 
+        /* ★ 2026-11-02 换口径：改回"与继承值相同"**仍然是一笔改动**。
+        作者的原话是「改过就不跟随」—— 这一层从"没有"变成"有"了，
+        哪怕值恰好等于基底，界面也该显示「不跟随」。想回到跟随是删键，不是写同值。 */
         apply(
             &mut draft,
             &c,
@@ -963,10 +968,11 @@ mod tests {
             )],
         )
         .unwrap();
+        assert_eq!(draft.dirty_count(), 1, "写过就是写过：值等于继承值也不例外");
         assert_eq!(
-            draft.dirty_count(),
-            0,
-            "改回机型层继承来的值 = 没改过，草稿不该留下那一笔"
+            draft.pending(Level::Version, "A1/STANDARD", "toolhead.offset.z"),
+            Some(&Some(serde_json::json!(1.1))),
+            "草稿里留着这一笔，保存后那一行才会落到文件里"
         );
     }
 
@@ -1121,14 +1127,17 @@ mod tests {
         );
     }
 
-    /// 机型层同理：钉回落盘那个值、或钉回出厂默认（= 有效值没变）都不算改动
+    /// 机型层：写回**它本来那一行**的值不算改动；写一个等于出厂值的新行**算**。
+    ///
+    /// 两段的差别正是新口径的落点：判断依据是「本层有没有那一行」，
+    /// 不是「值等不等于继承/出厂」。
     #[test]
-    fn pinning_the_value_a_layer_already_effectively_has_is_not_a_change() {
+    fn writing_back_the_same_row_is_not_a_change_but_creating_one_is() {
         let (_d, reg) = registry();
         let c = committed();
         let mut draft = Draft::default();
 
-        // 机型层本来就钉着 1.1
+        // 机型层本来就钉着 1.1 ⇒ 写 1.1 是"改回原样"
         apply(
             &mut draft,
             &c,
@@ -1141,9 +1150,10 @@ mod tests {
             )],
         )
         .unwrap();
-        assert_eq!(draft.dirty_count(), 0, "钉着同样的值不是改动");
+        assert_eq!(draft.dirty_count(), 0, "本来就是这一行的值，不是改动");
 
-        // `toolhead.offset.x` 在机型层没有条目 → 有效值就是出厂默认 4
+        // `toolhead.offset.x` 在机型层没有条目，出厂值是 4
+        // ⇒ 写一个 4 —— 本层从"没有"变成"有"，**算改动**（界面显示「不跟随」）
         apply(
             &mut draft,
             &c,
@@ -1156,7 +1166,11 @@ mod tests {
             )],
         )
         .unwrap();
-        assert_eq!(draft.dirty_count(), 0, "钉回出厂默认值 = 有效值没变");
+        assert_eq!(
+            draft.dirty_count(),
+            1,
+            "值等于出厂也算改过：这一层现在有自己的一行了"
+        );
     }
 
     /// 删键（`None`）的判据仍是**本层**：本层本来就没有它 → 删了也没变

@@ -41,7 +41,7 @@ interface Props {
    *
    * ★ 它**不是**「当前」：当前住 `markId`。作者 2026-11-01：「我的里面没有这个了
    * 但是侧边抽屉还有这个，是谁错了」—— 一屏出现两个"当前"，就是因为这两个概念
-   * 曾经共用一个变量（见 `ParamsPage` 里 `drawerAnchor` 的注释）。
+   * 曾经共用一个变量（见参数台 `drawerAnchor` 那一处的注释）。
    */
   sectionId: string | null
   /**
@@ -351,7 +351,7 @@ export default function SectionDrawer({
               onPick={onShowSection}
               onRename={(id, label) => onApply(id, { label, move: null })}
               onMove={(id, dir) => onApply(id, { label: null, move: dir < 0 ? 'up' : 'down' })}
-              /* 「＋ 新增分组」：只进草稿，建完切到新组上（见 `ParamsPage.addSection`） */
+              /* 「＋ 新增分组」：只进草稿，建完切到新组上（见参数台 `addSection`） */
               onAdd={onAddSection}
               hint="位置只在自己的页签里挪：客户端按这一页的顺序排，卡片也跟着它。"
             />

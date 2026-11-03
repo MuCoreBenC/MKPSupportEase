@@ -9,8 +9,6 @@
 //! 启动顺序有讲究：**先建数据根，再装日志**（日志要写进 `internal_root/logs`），
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
-/// **后处理执行归档**：原文件 / 输出文件 / 执行记录（`_meta.json`）三件套。
-/// 落点 `<用户根>/gcode_history/<日期>/` —— 报告页的数据源（见 [`archive`] 模块头）。
 pub mod archive;
 /// **参数分流**：切片器（BambuStudio）带 `--Toml/--Gcode` 调我们时走钩子，否则开界面
 /// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
@@ -51,6 +49,10 @@ pub mod hook_ui;
 pub mod ipc;
 /// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
 pub mod legacy;
+/// **后处理执行归档**：原文件 / 输出文件 / 执行记录（`_meta.json`）三件套。
+/// 落点 `<用户根>/gcode_history/<日期>/` —— 报告页的数据源（见 [`archive`] 模块头）。
+/// 写盘日志的字段拼装（两档共用；工作台的值类日志复用它的 `FieldChange`）
+pub mod logfmt;
 /// 系统通知（2026-10-17）：设置页「处理完成发送系统通知」那一格的真实现。
 pub mod notify;
 pub mod obs;
@@ -157,6 +159,15 @@ pub fn run() {
                 Ok(root) => {
                     obs::tracing::init_tracing(&root.join("logs"));
                     tracing::info!(root = %root.display(), "内部数据根就位");
+                    /* ★ **工作台的工作区不跟数据根走**（2026-11-02 作者裁定）。
+                    开发模式的数据根是仓库（`workbench/`），草稿留在那里就会长期存在
+                    一份 `.draft/presets` —— AI 和自己都分不清哪份是正式预设。
+                    工作区固定落应用数据目录，仓库里只剩正式预设。 */
+                    fsx::paths::set_workspace_root(root.join("workbench").join("workspace"));
+                    tracing::info!(
+                        "工作台工作区：{}",
+                        root.join("workbench/workspace").display()
+                    );
                     /* 第一句就说清「这是哪一次编译出来的」——
                     见 `build_fingerprint` 上方那段。以后别再用「你是不是没重编」猜。 */
                     tracing::info!("构建指纹：{}", build_fingerprint());
@@ -777,6 +788,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
         app::wb_desk,
         app::wb_matrix,
+        // 参数台 v2 的只读数据面（2026-11-02）：与 `wb_matrix` **并行存在**，旧页照旧用它、
+        // 新页只走这一条。返回值里没有「当前值」，前端只能算 `draft ?? saved`
+        app::wb_param_sheet,
         app::wb_trash,
         app::wb_ui,
         app::wb_save_ui,

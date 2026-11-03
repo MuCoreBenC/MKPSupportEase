@@ -54,7 +54,8 @@ import HistoryModal from './c14/HistoryModal'
 import SplitterC14 from './c14/SplitterC14'
 import { useSplitWidth } from './c14/useSplitWidth'
 import MachinesPage from './views/MachinesPage'
-import ParamsPage from './views/ParamsPage'
+import ParamSheetPage from './sheet/ParamSheetPage'
+import { sheetWrites } from './sheet/writeQueue'
 import BundlesPage from './views/BundlesPage'
 import AssetsPage from './views/AssetsPage'
 import AnnotatePage from './views/AnnotatePage'
@@ -90,7 +91,15 @@ const NAV: NavItem[] = [
       </>
     ),
   },
-  /* 两根带滑块的横杆 = 调参数 */
+  /*
+   * 两根带滑块的横杆 = 调参数。
+   *
+   * **只有这一个参数台**（2026-11-03 作者：「可以去掉一个参数台了，因为我发现他们
+   * 一模一样了」）。此前并存过「参数台」与「参数台（新）」两项：新版是旧页 UI 的
+   * 整份复制 + 新内核（本地草稿 + 单飞写队列），版式一字不差，**留的是新版**。
+   * 旧页 `views/ParamsPage.tsx` 已删 —— 它那套 `editQueue` 乐观层正是"连点步进器
+   * 打出一串 apply_draft"的来源，新版按值判脏、单飞发送，没有第二个真值。
+   */
   {
     id: 'params',
     label: '参数台',
@@ -184,7 +193,12 @@ type NavId = NavItem['id']
  * 其余：套餐页是即时落盘、设置页只读、开发台不落盘 ⇒ 页头不摆这一槽。
  * ★ 草稿非空时**无论在哪一页都摆**（见 `headOpsVisible` 的 ③）—— 别让改动存不下去。
  */
-const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>(['machines', 'params', 'assets', 'build'])
+const DRAFT_PAGES: ReadonlySet<NavId> = new Set<NavId>([
+  'machines',
+  'params',
+  'assets',
+  'build',
+])
 
 /** 导航宽度的三档（C14 第十七轮）：默认 236，可拖 64（图标档）~ 320（再宽只是挤正文） */
 const NAVW = { dft: 236, min: 64, max: 320 }
@@ -236,6 +250,19 @@ export function WorkbenchApp() {
    */
   const [txn, setTxn] = useState<TxnState | null>(null)
   /**
+   * **「未保存 N」只有一个源**（2026-11-02）。
+   *
+   * `book.dirtyCount` 与 `txn.dirtyCount` 是两个字段、两次 setState，谁晚一拍
+   * 界面就会出现「页头写 0、状态栏写 1」，或者保存完了还挂着数字。
+   * 事务状态是唯一真值 —— 每次拿到它都把整本那个数覆盖掉。
+   */
+  const applyTxn = useCallback((st: TxnState) => {
+    setTxn(st)
+    setBook((b) =>
+      b === null || b.dirtyCount === st.dirtyCount ? b : { ...b, dirtyCount: st.dirtyCount },
+    )
+  }, [])
+  /**
    * 事务状态**只读内存**（后端那份 `Txn` 的条数），几乎不花代价。
    *
    * 为什么不靠各页面上报：工作台有二十多条写命令，页面各自拿自己的返回值刷新，
@@ -247,7 +274,7 @@ export function WorkbenchApp() {
     const pull = () => {
       wb.txnState()
         .then((st) => {
-          if (alive) setTxn(st)
+          if (alive) applyTxn(st)
         })
         .catch(() => undefined)
     }
@@ -257,7 +284,7 @@ export function WorkbenchApp() {
       alive = false
       window.clearInterval(timer)
     }
-  }, [])
+  }, [applyTxn])
   const [report, setReport] = useState<IssueReport | null>(null)
   const [fatal, setFatal] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -288,6 +315,7 @@ export function WorkbenchApp() {
 
   /** 「后端状态变过了」计数器：每写一次 +1，页面据此重取（理由见旧版的教训注释） */
   const [tick, setTick] = useState(0)
+
 
   /* 页面常驻（C14 第十八轮）：第一次去才挂载，切走只藏起来 */
   const [visited, setVisited] = useState<NavId[]>([page])
@@ -475,9 +503,19 @@ export function WorkbenchApp() {
       try {
         const out = await wb.applyDraft(label, patches, refresh)
         setBook(out.view)
-        /* 2026-10-31：撤销不再由前端记账 —— 后端已把这次编辑记成一条事务 */
+        /*
+         * 2026-10-31：撤销不再由前端记账 —— 后端已把这次编辑记成一条事务。
+         *
+         * ★ **返回的那份 view 里 `dirtyCount` 慢一笔**（2026-11-02）：事务是在命令
+         * 业务体**跑完之后**才记的（`run_ctx` 拍 before、调 `f`、再 `record`），
+         * 所以 `view_of` 算账时这一笔还没进栈。页头于是出现「未保存（0）」而状态栏
+         * 写着「未保存改动（1）」—— 同一屏两个数。
+         *
+         * 账以 `txn` 为准（它就是那唯一一份），拿到之后回填给 `book`，
+         * 别让两个数各说各话。
+         */
         wb.txnState()
-          .then(setTxn)
+          .then(applyTxn)
           .catch(() => undefined)
         if (!quiet) setTick((n) => n + 1)
         if (quiet) refreshReportSoon()
@@ -490,7 +528,7 @@ export function WorkbenchApp() {
         if (!quiet) setBusy(false)
       }
     },
-    [fail, refreshReport, refreshReportSoon],
+    [applyTxn, fail, refreshReport, refreshReportSoon],
   )
 
   /**
@@ -531,7 +569,10 @@ export function WorkbenchApp() {
     setBusy(true)
     try {
       const st = await wb.txnUndo()
-      setTxn(st)
+      applyTxn(st)
+      /* 后端那一笔被撤掉了，参数台 v2 手里的草稿就不再是真话 —— 让它丢掉
+         （`tick` 干不了：它在窗口聚焦时也会 +1） */
+      sheetWrites.drop()
       await refreshBook()
       refreshReport()
       return true
@@ -541,7 +582,7 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [fail, refreshBook, refreshReport])
+  }, [applyTxn, fail, refreshBook, refreshReport])
 
   const redo = useCallback(async (): Promise<boolean> => {
     await settleAll()
@@ -549,7 +590,8 @@ export function WorkbenchApp() {
     setBusy(true)
     try {
       const st = await wb.txnRedo()
-      setTxn(st)
+      applyTxn(st)
+      sheetWrites.drop()
       await refreshBook()
       refreshReport()
       return true
@@ -559,16 +601,24 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [fail, refreshBook, refreshReport])
+  }, [applyTxn, fail, refreshBook, refreshReport])
 
   const save = useCallback(async (): Promise<boolean> => {
     if (busy) return false
     /* 飞在空中的值写先落完：`dirtyCount` 得是落完之后的账 ——
        否则"刚点完步进器马上点保存"会静默丢掉那一笔（读的是旧整本） */
     await settleAll()
+    /* ★ 参数台 v2 那一页的写入队列也要排空（它不走 `editQueue`）。
+       排不空就**拒绝保存**：带着未确认的编辑去落盘等于把那几笔抹掉。 */
+    try {
+      await sheetWrites.settle()
+    } catch (e) {
+      fail(e)
+      return false
+    }
     /* 现问一次（别信上一次轮询的那份）：刚改完就按 Cmd+S 时它可能还没刷新 */
     const fresh = await wb.txnState()
-    setTxn(fresh)
+    applyTxn(fresh)
     const cur = bookRef.current
     if (!fresh.dirty && (cur?.dirtyCount ?? 0) === 0) return false
     /* 保存 = 提交点：本地草稿层整层丢掉，显示交回写进仓库的那份 */
@@ -577,7 +627,9 @@ export function WorkbenchApp() {
     try {
       const out = await wb.save()
       setBook(out.view)
-      setTxn(await wb.txnState())
+      /* 保存成功 ⇒ 参数台 v2 的本地草稿作废（它们已经成了新的保存值） */
+      sheetWrites.drop()
+      applyTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
       toasts.push('已保存 —— 改动已写进仓库文件')
@@ -588,14 +640,17 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [busy, fail, refreshReport])
+  }, [applyTxn, busy, fail, refreshReport])
 
   const discard = useCallback(async () => {
     if (busy) return
     /* 同 `save`：先把在飞的写落完再判脏 —— 跳到一半的改动也得算进来 */
     await settleAll()
+    /* 参数台 v2 的队列：放弃不因"没发完"而拒绝，但也别让它们落在 `wb_discard` 之后 */
+    await sheetWrites.settle().catch(() => undefined)
+    sheetWrites.drop()
     const fresh = await wb.txnState()
-    setTxn(fresh)
+    applyTxn(fresh)
     const cur = bookRef.current
     if (!fresh.dirty && (cur?.dirtyCount ?? 0) === 0) return
     /* 放弃 = 整条草稿丢：影子树整个拉回磁盘原状 */
@@ -603,7 +658,7 @@ export function WorkbenchApp() {
     setBusy(true)
     try {
       setBook(await wb.discard())
-      setTxn(await wb.txnState())
+      applyTxn(await wb.txnState())
       setTick((n) => n + 1)
       refreshReport()
     } catch (e) {
@@ -611,7 +666,7 @@ export function WorkbenchApp() {
     } finally {
       setBusy(false)
     }
-  }, [busy, fail, refreshReport])
+  }, [applyTxn, busy, fail, refreshReport])
 
   /** 跨页定位（C14 语义）：跳过去并落上主选中；那一页重挂一次去读它 */
   const goto = useCallback((view: string, foc?: GotoFocus) => {
@@ -651,12 +706,17 @@ export function WorkbenchApp() {
         void redo()
       } else if (k === 's') {
         e.preventDefault()
-        void save()
+        /* ★ 当前页若接管了页头那一槽，**Cmd+S 必须跟它走**（2026-11-02）。
+           参数台 v2 保存前要先排空写入队列；绕过页面直接调外壳的 `save()` 会
+           带着还没落完的编辑去落盘 —— 那一笔会落在 `wb_save` 之后，
+           表现就是"点了保存，右上角还写着未保存"。 */
+        if (pageActions.viewFor(page) !== null) pageActions.run('save')
+        else void save()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, save])
+  }, [undo, redo, save, page])
 
   /* 草稿不干净时，刷新前用浏览器原生弹窗问一嘴（自绘模态框弹出来时刷新已经走了） */
   /* 脏 = 整本里记的（值草稿 + 事务）+ 事务自己那份。两处都看，切页瞬间也不会闪「已保存」 */
@@ -735,7 +795,7 @@ export function WorkbenchApp() {
       case 'machines':
         return `${book.badges.machines} 台机型 · ${book.badges.versions} 个版本`
       case 'params':
-        return '改了先进草稿，保存才落盘'
+        return '保存值由后端按三层算好 —— 徽章只在「现在」与它不同时出现'
       case 'bundles':
         return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
       case 'build':
@@ -808,8 +868,10 @@ export function WorkbenchApp() {
           />
         )
       case 'params':
+        /* 参数台只剩这一个（2026-11-03）。它是旧页 UI 的整份复制 + 新内核
+           「本地草稿 + 单飞写队列」；保存前的排空经 `sheetWrites` 挂到外壳（见 `save`） */
         return (
-          <ParamsPage
+          <ParamSheetPage
             key={focusGen}
             book={book}
             words={words}
@@ -818,7 +880,6 @@ export function WorkbenchApp() {
             dirty={dirty}
             onApply={async (label, patches, refresh, opts) => {
               const out = await run(label, patches, refresh, opts)
-              /* `ok` 让参数台那一层知道这笔到底写进去没有（失败时 overlay 要回落） */
               return { ok: out !== null, desk: out?.desk ?? null, matrix: out?.matrix ?? null }
             }}
             onMetaApplied={pushMeta}
@@ -977,12 +1038,28 @@ export function WorkbenchApp() {
       /* 测试模式整窗换一层色（`c14tokens.css` 只改那几个变量，C14 的内衬全跟着走） */
       style={{ '--nav-w': `${navW}px` } as CSSProperties}
     >
+      {/*
+        * 严重错误横幅（z 60，盖在页头之上 ⇒ **会挡住保存按钮**）。
+        *
+        * ★ 必须有一颗「关闭」（2026-11-02 作者：「它永远不消失，除非我重新打开软件，
+        *   不能点穿」）。`fatal` 以前**只设不清**：任何一次性错误都会变成一块永久
+        *   挡路的板子。那些"其实没出错"的情形（点了没有改动的放弃）现在已在后端
+        *   改成幂等，但**真出错时人也得能把它关掉**继续干活。
+        */}
       {fatal && (
         <div
           className="wb-banner"
           data-tone="danger"
           style={{ position: 'absolute', top: 8, left: 12, right: 12, zIndex: 60 }}
         >
+          <button
+            type="button"
+            className="wb-link"
+            style={{ float: 'right', marginLeft: 12 }}
+            onClick={() => setFatal(null)}
+          >
+            关闭
+          </button>
           {fatal}
         </div>
       )}
@@ -1263,6 +1340,31 @@ export function WorkbenchApp() {
                   未保存改动（{book?.dirtyCount ?? 0}）
                 </button>
               </span>
+              {/*
+                * **刚跑完那一笔的请求号**（2026-11-02）。
+                *
+                * 一次点击会打七八行日志（写队列 → IPC → 值进影子树 → 参数定义已改 →
+                * 派生 → 事务），每行都带同一个 `req=`。把它摊在状态栏上，作者复制去
+                * 日志里 grep 就是完整一条线 —— 不用再拿时间戳一个个猜。
+                *
+                * 取走即清（后端 `take_receipt`）：同一个号不会在一屏里重复出现，
+                * 所以这里不用做"多久之后隐藏"。
+                */}
+              {txn?.receipt != null && (
+                <>
+                  <span className={`${s.sbBar} ${s.sbMinor}`}>|</span>
+                  <span
+                    className={`${s.sbSeg} ${s.sbMinor}`}
+                    data-tip={
+                      `日志里搜 ${txn.receipt.req} 就是这个动作的全部行` +
+                      `（${txn.receipt.command}${txn.receipt.ok ? '' : '，失败了'}）`
+                    }
+                    style={{ fontFamily: 'ui-monospace, monospace', userSelect: 'text' }}
+                  >
+                    {txn.receipt.req}
+                  </span>
+                </>
+              )}
             </div>
 
             {/*

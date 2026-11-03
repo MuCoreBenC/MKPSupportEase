@@ -35,7 +35,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { wb, type DiffLine, type ShadowDiff, type ShadowFileDiff } from '../api'
+import { WHY_LABEL, wb, type DiffLine, type ShadowDiff, type ShadowFileDiff } from '../api'
 import { settleAll } from '../editQueue'
 import { isAppError } from '../api'
 import ModalC14 from './ModalC14'
@@ -406,7 +406,8 @@ export default function HistoryModal({
                     )}
                   </>
                 ) : (
-                  <span className={d.detailCount}>{shownLines.length} 格</span>
+                  /* **与页头「未保存 N」同一个数**（后端同一个 `Txn::dirty_count`） */
+                  <span className={d.detailCount}>{shownLines.length} 处</span>
                 )}
               </span>
             </header>
@@ -440,47 +441,84 @@ export default function HistoryModal({
                 {err}
               </p>
             ) : lines === null ? (
-              <p className={d.empty}>正在读草稿…</p>
+              <p className={d.empty}>正在读改动…</p>
             ) : shownLines.length === 0 ? (
+              /* 2026-11-03 起这一页**不会再"无缘无故空"**：数据来自事务里的字段账，
+              真改了东西就一定有条目。剩下的空格只有两种情况，分开说清楚 —— */
               <p className={d.empty}>
                 {focusKeys === null
-                  ? '这几份文件改的是结构（新增 / 删除 / 换位），没有"哪一格"的说法 —— 看「代码对比」。'
-                  : '这一份里没有格子级的改动（新增 / 删除 / 换位那类），看「代码对比」的逐行差异。'}
+                  ? '这一笔改动还没进事务 —— 改一格参数、或改一次说明，这里就会列出来。'
+                  : '这一份文件这一次没有字段级改动（只动了注释 / 空行那类），看「代码对比」的逐行差异。'}
               </p>
             ) : (
               <div className={d.fields}>
+                {/*
+                 * **三列表格**（2026-11-03 作者定稿：平铺 + 标签）。
+                 *
+                 * 为什么不像以前那样"一条一句人话"：一次改 `A1` 的 Z 会**归并连带**
+                 * 写出 `A1:STANDARD` / `A1:FAST` / `A1:FASTV3.3` 三格 —— 四条都要
+                 * 平铺出来（作者：「都显示出来噢」，页头那个数就是这四条的条数）。
+                 * 表格让人一眼扫出"哪几处、各自什么来源"。
+                 */}
+                <div className={d.fieldHead}>
+                  <span>归属</span>
+                  <span>字段变化</span>
+                  <span>来源</span>
+                </div>
                 {shownLines.map((l, i) => {
                   const mark = `${l.owner}:${l.key ?? ''}`
+                  const whyLabel = WHY_LABEL[l.why] ?? l.why
                   /* 撤销按钮挂在**这一格**上，撤的是栈顶那一条编辑。
                      2026-11-02 起同一格 5 秒内的连点并成一条（`txn::MERGE_MS`），
                      所以按一下回到的是"我开始动手之前"，不是退一小步 —— 那正是
                      作者要的粒度。重做按钮放在底部：重做按栈的顺序来，不该逐行给。 */
                   return (
                     <div key={`${mark}-${i}`} className={d.field}>
+                      {/* ① 归属：等宽的 `A1:STANDARD` 才好扫；基底与版本分色 */}
+                      <span
+                        className={`${d.fieldOwner} ${l.owner.includes(':') ? d.fieldOwnerVer : ''}`}
+                        data-tip={l.target}
+                      >
+                        {l.owner}
+                      </span>
+                      {/* ② 字段变化：名字 + `旧 → 新`，值太长时截断、悬停看全文 */}
                       <span className={d.fieldWhat}>
-                        {l.label}
-                        <em className={d.fieldTarget}>{l.target}</em>
+                        <span className={d.fieldName}>{l.label}</span>
+                        <span className={d.fieldFrom} title={l.before}>
+                          {l.before === '' ? '（空）' : l.before}
+                        </span>
+                        <span className={d.fieldArrow} aria-hidden>
+                          →
+                        </span>
+                        <span className={d.fieldTo} title={l.after}>
+                          {l.after === '' ? '（空）' : l.after}
+                        </span>
                       </span>
-                      <span className={d.fieldFrom}>{l.before === '' ? '（空）' : l.before}</span>
-                      <span className={d.fieldArrow} aria-hidden>
-                        →
-                      </span>
-                      <span className={d.fieldTo}>{l.after === '' ? '（空）' : l.after}</span>
-                      {onUndo !== undefined && (
-                        <button
-                          type="button"
-                          className={d.fieldUndo}
-                          disabled={!canUndo || pendingKey !== null}
-                          data-tip={
-                            canUndo
-                              ? '撤掉这一格所在的编辑（同一格 5 秒内的连点算一条，撤一次回到最初）'
-                              : '没有可撤销的改动'
-                          }
-                          onClick={() => void run('undo', mark)}
+                      {/* ③ 来源：用户自己点的用主色描边，连带/复制用中性底 */}
+                      <span className={d.fieldWhyCol}>
+                        <span
+                          className={`${d.why} ${l.why === 'user' ? d.whyUser : ''} ${
+                            l.why === 'unknown' ? d.whyWarn : ''
+                          }`}
                         >
-                          {pendingKey === mark ? '撤销中…' : '撤销'}
-                        </button>
-                      )}
+                          {whyLabel}
+                        </span>
+                        {onUndo !== undefined && (
+                          <button
+                            type="button"
+                            className={d.fieldUndo}
+                            disabled={!canUndo || pendingKey !== null}
+                            data-tip={
+                              canUndo
+                                ? '撤掉这一格所在的编辑（同一格 5 秒内的连点算一条，撤一次回到最初）'
+                                : '没有可撤销的改动'
+                            }
+                            onClick={() => void run('undo', mark)}
+                          >
+                            {pendingKey === mark ? '撤销中…' : '撤销'}
+                          </button>
+                        )}
+                      </span>
                     </div>
                   )
                 })}

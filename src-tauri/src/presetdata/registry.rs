@@ -240,6 +240,7 @@ pub struct ParamDef {
     /// 它**不属于出厂层** —— 由 `domain::variants` 按三步归并消化进机型基底与版本覆盖（doc §3.3）
     #[serde(default)]
     pub machine_variants: BTreeMap<String, Value>,
+
     /// 按机型/版本的**范围**覆盖。这两张表是字段定义的机型特化，**不是配方值**，
     /// 所以不能走 `machine_variants` 那套归并（doc §3.2）
     #[serde(default)]
@@ -330,6 +331,153 @@ impl ParamDef {
             self.stale_translations.push(key_name.to_owned());
         }
     }
+
+    /// **这一笔改了哪几格**（2026-11-02，给写盘日志用）。
+    ///
+    /// `ParamMetaEdit` 是整包提交（二十几格），逐格手写对比迟早漏一格，所以这里
+    /// **扫全表**。只列真的变了的：定义框点「确认」但一个字没改时 `fields=` 是空的，
+    /// 那一笔在日志里就长成"没有字段差异"，一眼能看出它不是一次改动。
+    ///
+    /// 键名用文件里的写法（`labelEn` / `staleTranslations`），与 `param_registry.toml`
+    /// 对齐 —— 排查时可以直接照着去 `diff`。
+    pub fn summary(&self, before: &ParamDef) -> Vec<crate::logfmt::FieldChange> {
+        use crate::logfmt::{note, note_bool, note_opt, FieldChange};
+
+        let mut out: Vec<FieldChange> = Vec::new();
+        let s = |v: &str| v.to_owned();
+        note(&mut out, "label", &before.label, &self.label);
+        note(&mut out, "labelEn", &before.label_en, &self.label_en);
+        note(&mut out, "labelJa", &before.label_ja, &self.label_ja);
+        note(&mut out, "labelTw", &before.label_tw, &self.label_tw);
+        note(&mut out, "desc", &before.desc, &self.desc);
+        note(&mut out, "descEn", &before.desc_en, &self.desc_en);
+        note(&mut out, "descJa", &before.desc_ja, &self.desc_ja);
+        note(&mut out, "descTw", &before.desc_tw, &self.desc_tw);
+        note(
+            &mut out,
+            "valueType",
+            format!("{:?}", before.value_type),
+            format!("{:?}", self.value_type),
+        );
+        note(
+            &mut out,
+            "uiComponent",
+            format!("{:?}", before.ui_component),
+            format!("{:?}", self.ui_component),
+        );
+        note(
+            &mut out,
+            "defaultValue",
+            before.default_value.to_string(),
+            self.default_value.to_string(),
+        );
+        note_opt(
+            &mut out,
+            "unit",
+            json_opt(&before.unit),
+            json_opt(&self.unit),
+        );
+        note_opt(&mut out, "min", num_opt(before.min), num_opt(self.min));
+        note_opt(&mut out, "max", num_opt(before.max), num_opt(self.max));
+        note_opt(&mut out, "step", num_opt(before.step), num_opt(self.step));
+        note_opt(
+            &mut out,
+            "parentKey",
+            json_opt(&before.parent_key),
+            json_opt(&self.parent_key),
+        );
+        note_opt(
+            &mut out,
+            "showWhen",
+            before
+                .show_when
+                .as_ref()
+                .map(|w| Value::String(format!("{} {} {}", w.key, show_op_text(w.op), w.value))),
+            self.show_when
+                .as_ref()
+                .map(|w| Value::String(format!("{} {} {}", w.key, show_op_text(w.op), w.value))),
+        );
+        note_bool(&mut out, "deprecated", before.deprecated, self.deprecated);
+        note(
+            &mut out,
+            "deprecatedMachines",
+            before.deprecated_machines.join(","),
+            self.deprecated_machines.join(","),
+        );
+        note(
+            &mut out,
+            "machineFilter",
+            before.machine_filter.join(","),
+            self.machine_filter.join(","),
+        );
+        note(
+            &mut out,
+            "choices",
+            choice_digest(&before.choices),
+            choice_digest(&self.choices),
+        );
+        /* 分组与组内顺序住在**另一份文件**（`layout_schema.toml`），但它们是
+        定义框同一笔提交的一部分 —— 日志里不分文件，只分字段 */
+        note(
+            &mut out,
+            "sectionId",
+            s(&before.layout.section_id),
+            s(&self.layout.section_id),
+        );
+        note(
+            &mut out,
+            "order",
+            before.layout.order.to_string(),
+            self.layout.order.to_string(),
+        );
+        note(
+            &mut out,
+            "staleTranslations",
+            before.stale_translations.join(","),
+            self.stale_translations.join(","),
+        );
+        out
+    }
+}
+
+/// 可空字符串 → 日志里的 `Option<Value>`（`None` = 这一格没填）
+fn json_opt(v: &Option<String>) -> Option<Value> {
+    v.as_ref().map(|s| Value::String(s.clone()))
+}
+
+/// 可空数字同上（`3.0` 与 `3` 印成同一个样子，别因为格式差异报假改动）
+fn num_opt(v: Option<f64>) -> Option<Value> {
+    v.map(|n| {
+        if n.fract() == 0.0 && n.abs() < 1e15 {
+            Value::String(format!("{}", n as i64))
+        } else {
+            Value::String(n.to_string())
+        }
+    })
+}
+
+/// [`ShowOp`] 的人话（日志里写 `eq` 比 `Eq` 好读）
+pub fn show_op_text(op: ShowOp) -> &'static str {
+    match op {
+        ShowOp::Eq => "eq",
+        ShowOp::Neq => "neq",
+        ShowOp::Gt => "gt",
+    }
+}
+
+/// 可选项整表压成一行，`foo=1|bar=2`；顺带带上弃用标记才有区分度
+fn choice_digest(choices: &[Choice]) -> String {
+    choices
+        .iter()
+        .map(|c| {
+            let mut one = format!("{}={}", c.label, c.value);
+            if c.deprecated {
+                one.push_str("(停用)");
+            }
+            one
+        })
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 /// 「保存这一趟顺手新建一个分组」—— 定义框分组下拉里每个页签右边那个「＋」。
@@ -1195,15 +1343,31 @@ impl ParamRegistry {
         })?;
         check_owner(owner)?;
 
+        /* ★ **"原文里真有覆盖"= 这张表里还有别的机型键**（2026-11-02）。
+        作者的原始要求：「70 → 75 → 70 之后，文件应恢复到原始字节状态，不应因为格式
+        归一化产生『未保存 1』」；后来又补了一条口子：临时建的表保存一轮之后也不能
+        变成"原文就有"。
+        两版判据都试过（打开时的键集合 / 打开时的表内容），都会被**自己上一轮漏出来的
+        空表头**喂大。现在只看**当前** doc：表里还有别的键才算"原文真有这一层"；
+        只剩这一个键 ⇒ 这张表就是这个参数一个人写的，清空后整段删。 */
+        let siblings = self
+            .param_table_mut(at, key)
+            .ok()
+            .and_then(|t| t.get("machineVariants")?.as_table().map(|m| m.len()))
+            .unwrap_or(0);
+        let keep_empty = siblings > 1;
+
         let t = self.param_table_mut(at, key)?;
-        let empty_now = match t.get_mut("machineVariants").and_then(|i| i.as_table_mut()) {
+        let left = match t.get_mut("machineVariants").and_then(|i| i.as_table_mut()) {
             Some(table) => {
                 table.remove(owner);
-                table.is_empty()
+                table.len()
             }
-            None => false,
+            None => return Ok(()),
         };
-        if empty_now {
+        /* 表空了：还有别的覆盖时留表头（下面常挂着作者写的说明注释），
+        否则整段删掉 —— 这就是"临时建出来的表不许留在文件里"。 */
+        if left == 0 && !keep_empty {
             t.remove("machineVariants");
         }
 
@@ -1807,6 +1971,10 @@ impl ParamRegistry {
         }
 
         /* ---------- 内存 ---------- */
+        /* ★ **改前整份**留一份（2026-11-02）：日志要说出"这一笔改了哪几格"，
+        逐格手抄二十几次迟早漏一格，而且文件面已经被上面改掉了 —— 那一份只在内存里。
+        取在这里而不是函数开头：中间那些校验失败时它一次都用不上。 */
+        let before_def = self.params[at].clone();
         /*
          * 中文与六格译文**改前**各留一份：下面把它们换掉之后，判「中文变了没有」
          * 「旧译文有没有」全靠这几份（见 `mark_translations_stale`）。
@@ -1893,6 +2061,18 @@ impl ParamRegistry {
                 }
                 t["staleTranslations"] = toml_edit::value(arr);
             }
+        }
+        /* **这一笔改了哪几格**写进日志（2026-11-02）。以前这条命令在日志里只有一句
+        「编辑已进事务 files=1 ops=1」，看不出改的是说明还是出厂默认 ——
+        作者排查「我改了没反应」时最缺的正是这一句。 */
+        let fields = self.params[at].summary(&before_def);
+        if !fields.is_empty() {
+            tracing::info!(
+                key = %key,
+                count = fields.len(),
+                fields = %crate::logfmt::render(&fields),
+                "参数定义已改"
+            );
         }
         Ok(())
     }
@@ -3093,6 +3273,149 @@ pub fn load_from_json_fixture(
 mod tests {
     use super::*;
     use crate::presetdata::one_edit_only;
+
+    /* ---------- 改回去不许留下字节差（2026-11-02） ---------- */
+
+    /// **70 → 75 → 70 之后，文件必须一字不差地回到原样。**
+    ///
+    /// 作者的原话：「改回原值之后，文件应恢复到原始字节状态，不应因为格式归一化产生
+    /// 『未保存 1』」。这条咬的正是那个副产物：归一化删键之后表空了，以前会把
+    /// `[params.machineVariants]` 这个**原文里就有的空表头**（下面还挂着一行说明注释）
+    /// 一起删掉 ⇒ 文件少两行 ⇒ 事务记一条改动，而值一点没变。
+    #[test]
+    fn writing_a_value_and_clearing_it_again_restores_the_original_bytes() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+        let mut reg = ParamRegistry::load_from(&root).expect("真仓库的注册表要读得通");
+        /* 这一项原文里带空表 + 一段「空表是刻意的」注释 —— 正是最容易丢表头的那一类 */
+        let key = "toolhead.speed_limit";
+        let owner = "A1:FASTV3.3";
+        let before = reg.to_toml();
+        assert!(
+            before.contains("[params.machineVariants]"),
+            "夹具前提变了：这一项本来该有一个空表头"
+        );
+
+        reg.set_variant(key, owner, &serde_json::json!(75.0))
+            .expect("写一个与继承值不同的值");
+        assert_ne!(reg.to_toml(), before, "写了值之后文件应当变了");
+
+        reg.clear_variant(key, owner).expect("删键挂回继承");
+        assert_eq!(
+            reg.to_toml(),
+            before,
+            "改回去之后字节该一模一样 —— 差一行就会变成一条假的「未保存改动」"
+        );
+    }
+
+    /// **临时建出来的表，保存一轮之后也得能删干净**（2026-11-02）。
+    ///
+    /// 第一版判据是"原文里有没有这张表"，于是留了个口子：
+    ///
+    /// ```
+    /// ① 某参数原文里没有表 → set_variant 临时建表 → 写进 A1
+    /// ② 保存 → reload → 重建判据，此时文件里**有**这张表 ⇒ 记成"原文就有"
+    /// ③ 再改回去 → 认为"原文就有" ⇒ 留下 `[params.machineVariants]` 空表头
+    /// ```
+    ///
+    /// 现在只有**原文里真有机型键**才留表头；空表头一律当"本次临时建的"删掉。
+    #[test]
+    fn a_table_built_by_this_session_is_removed_even_after_a_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("registry")).unwrap();
+        /* 手写一份最小注册表：一个参数，**没有** machineVariants 表 */
+        crate::fsx::atomic::atomic_write(
+            &root.join("registry/param_registry.toml"),
+            b"updated = '2026-11-02'\n\
+             \n\
+             [[params]]\n\
+             key = 'a.b'\n\
+             label = 'B'\n\
+             desc = ''\n\
+             configKey = 'B'\n\
+             tomlKey = 'b'\n\
+             jsonKey = 'b'\n\
+             tomlComment = ''\n\
+             valueType = 'float'\n\
+             uiComponent = 'number'\n\
+             defaultValue = 70.0\n\
+             section = 'motion'\n\
+             scope = 'universal'\n\
+             \n\
+             [params.layout]\n\
+             sectionId = 'motion'\n\
+             order = 0.0\n",
+        )
+        .unwrap();
+        /* 布局里得有一张 section 收下这条参数，否则一致性校验会拦（"有参数没有被任何
+        section 收下"） */
+        crate::fsx::atomic::atomic_write(
+            &root.join("layout_schema.toml"),
+            b"[[tabs]]\n\
+             id = 't'\n\
+             label = 'T'\n\
+             \n\
+             [[tabs.sections]]\n\
+             id = 'motion'\n\
+             label = 'Motion'\n\
+             \n\
+             [[tabs.sections.items]]\n\
+             id = 'a.b'\n\
+             key = 'a.b'\n\
+             paramKey = 'a.b'\n",
+        )
+        .unwrap();
+
+        let mut reg = ParamRegistry::load_from(root).expect("最小注册表要读得通");
+        let clean = reg.to_toml();
+        assert!(!clean.contains("machineVariants"), "前提：原文里没有这张表");
+
+        /* ① 临时建表 + 写值 */
+        reg.set_variant("a.b", "A1", &serde_json::json!(75.0))
+            .unwrap();
+        assert!(reg.to_toml().contains("machineVariants"));
+
+        /* ② 保存一轮：把内容写回盘、再重新 load（正是 `Presets::reload` 做的事）。
+        这里直接**写注册表文件**：`write_back` 会连布局一起写，而这份夹具的布局是手写的
+        最小版，写回去会被布局模型挑出缺字段 —— 与本节要验的东西无关。
+        写文件走 `fsx::atomic::atomic_write`：生产代码禁用裸写（写盘纪律），
+        测试也不必破例。 */
+        crate::fsx::atomic::atomic_write(
+            &root.join("registry/param_registry.toml"),
+            reg.to_toml().as_bytes(),
+        )
+        .unwrap();
+        let mut reg = ParamRegistry::load_from(root).expect("写回去的那份要能再读");
+
+        /* ③ 改回去 —— 这时表头必须整段消失 */
+        reg.clear_variant("a.b", "A1").unwrap();
+        let text = reg.to_toml();
+        assert!(
+            !text.contains("machineVariants"),
+            "本次临时建出来的表，清空后要连表头一起删 —— 否则每存一轮就多一处空表头\n{text}"
+        );
+    }
+
+    /// 反方向：**原文里真有覆盖**的参数，清空最后一条也要把表头留着（作者手写的注释跟着走）。
+    #[test]
+    fn a_table_that_really_had_values_keeps_its_header() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../presets");
+        let mut reg = ParamRegistry::load_from(&root).expect("真仓库的注册表要读得通");
+        let key = "toolhead.speed_limit";
+        let before = reg.to_toml();
+        let owner = reg
+            .param(key)
+            .and_then(|p| p.machine_variants.keys().next().cloned());
+        let Some(owner) = owner else {
+            return; /* 这一项手上没有覆盖 —— 换一条也无所谓，本条判据的前提不成立 */
+        };
+        reg.clear_variant(key, &owner).unwrap();
+        assert!(
+            reg.to_toml().contains("[params.machineVariants]"),
+            "原文里真有覆盖的参数，清空后表头要留（注释跟着走）"
+        );
+        let _ = before;
+    }
 
     /* ---------- 夹具上的门禁（任何机器上都执行） ---------- */
 

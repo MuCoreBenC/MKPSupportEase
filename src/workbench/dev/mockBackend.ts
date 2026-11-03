@@ -333,6 +333,25 @@ type ShadowFixtures = {
 let shadowSnap: ShadowFixtures | null = null
 /** 结构类改动计几笔 —— `wb_txn_state` 用它把保存/放弃点亮（真机走 txn::record） */
 let structDirty = 0
+/**
+ * 「改了什么」的假账 —— 桩里没有真事务，但界面不该因此永远显示空白。
+ *
+ * 每写一笔就把命令名记成一条 `structural` 字段变化。这不是"猜用户改了哪一格"
+ * （桩里也没有影子文件可读），只是让**版式**能验收：归属 / 字段变化 / 来源三列。
+ * 真机上这一格由 `Txn::field_changes()` 填 —— 桩只负责形状对得上。
+ */
+let mockFields: Array<{
+  target: string
+  level: string | null
+  owner: string
+  key: string | null
+  label: string
+  before: string
+  after: string
+  kind: string
+  file: string
+  why: string
+}> = []
 /** 会写「影子树」的命令名单 —— 桩里据此决定要不要先拍快照 */
 const SHADOW_MUTATORS = new Set([
   'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
@@ -1206,6 +1225,8 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
     raw: raw ?? null,
     /* 盘上钉着的那个值（草稿不算）—— 「恢复修改前的」据此写回，没钉着就写 null 删键 */
     rest: atRestOf(uid !== null ? 'version' : 'machine', uid ?? machineId, pdef.key),
+    /* 徽章两档：版本列按"有没有自己的一行"；基底列不挂（`null`） */
+    badge: uid === null ? null : hit?.own ? 'own' : 'follow',
     deprecated,
     deadChoices,
   }
@@ -2570,8 +2591,12 @@ export function installMockBackend() {
           const before = pending.has(vk) ? pending.get(vk) : atRestOf(level, owner, key)
           if (before === value) continue
           inverse.push({ kind: 'setValue', level, owner, key, value: before })
-          // 改回了盘上那个值 = 从草稿里拿掉（照后端 apply_one 的规矩）
-          if (atRestOf(level, owner, key) === value) pending.delete(vk)
+          /*
+           * 只有**删键**才算"回到跟随"（2026-11-02 两档口径）。
+           * 写一个与盘上相同的值**也要留在草稿里**：那一层从"没有"变成"有"了，
+           * 界面显示「不跟随」—— 旧的"同值就删"会让这一笔凭空消失。
+           */
+          if (value === null) pending.delete(vk)
           else pending.set(vk, value)
         }
         inverse.reverse()
@@ -2594,12 +2619,14 @@ export function installMockBackend() {
         /* 保存过的状态就是新基线：快照换成当前份（真机是 mirror real → base） */
         shadowSnap = captureShadow()
         structDirty = 0
+        mockFields = []
         return Promise.resolve({ view: buildBook(), remap: {} })
       }
       case 'wb_discard':
         pending.clear()
         restoreShadow()
         structDirty = 0
+        mockFields = []
         return Promise.resolve(buildBook())
       case 'wb_txn_state':
         /*
@@ -2615,7 +2642,7 @@ export function installMockBackend() {
           ops: [],
         })
       case 'wb_diff_draft':
-        return Promise.resolve([])
+        return Promise.resolve(mockFields)
       /*
        * 未保存改动的逐行 diff：桩里**没有两棵树**（影子是内存里的 `pending` 覆盖表，
        * 不是真的文件），所以老老实实给一份空清单 —— 界面会说「没有未保存的改动」。
@@ -2717,6 +2744,21 @@ export function installMockBackend() {
     /* 成功一条记一笔「结构脏」；失败不记 —— 命令没写成，影子树没变 */
     return out.then((v) => {
       structDirty += 1
+      mockFields = [
+        ...mockFields,
+        {
+          target: cmd,
+          level: null,
+          owner: cmd,
+          key: null,
+          label: cmd,
+          before: '',
+          after: '（演示桩不记录具体值）',
+          kind: '改定义',
+          file: 'registry/param_registry.toml',
+          why: 'structural',
+        },
+      ]
       return v
     })
   }
