@@ -2115,6 +2115,20 @@ export interface WindowPrefs {
 export type PostprocUiMode = 'silent' | 'gui'
 
 /**
+ * **智能塔位置**三档（2026-11-04 由 `boolean` 换掉）。
+ *
+ * | 档 | 模型与擦料塔相撞时 |
+ * |---|---|
+ * | `off`（出厂） | 按碰撞停下，原文件不动 |
+ * | `auto` | **不问**，直接把塔挪到不撞的位置，挪完复检、跑完这一趟 |
+ * | `ask` | 停下问一句（「自动挪塔 / 我自己挪模型」），用户点了才挪 |
+ *
+ * ★ 三档互斥，不是"开关 + 还问不问"两个布尔 —— 后者能拼出"关着又问"这种非法态。
+ * ★ 线上字符串是契约（盘上 / DTO / 前端共用）：`TowerRelocateMode::wire()`。
+ */
+export type TowerRelocateMode = 'off' | 'auto' | 'ask'
+
+/**
  * 设置页里那几档的**解析后**值（`null` 已解、量程已夹）。
  *
  * 管线读的就是这一份（经 `runtime::postproc_prefs::apply_to_ir` 写进 `ir.prefs`）——
@@ -2131,8 +2145,8 @@ export interface ResolvedPostprocPrefs {
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
-  /** **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才改这一趟的塔位置 */
-  autoTowerPosition: boolean
+  /** **智能塔位置**（2026-11-04 三档）：撞了是停下、直接挪、还是问一句 */
+  autoTowerPosition: TowerRelocateMode
 }
 
 /**
@@ -2153,8 +2167,8 @@ export interface PostprocPrefsWire {
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
-  /** **自动摆塔**（2026-10-18）：`null` = 回到出厂档（关） */
-  autoTowerPosition?: boolean | null
+  /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
+  autoTowerPosition?: TowerRelocateMode | null
 }
 
 /** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */

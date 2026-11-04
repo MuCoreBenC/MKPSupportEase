@@ -62,9 +62,12 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use postprocess::diag::{messages, CancelToken, PostprocError};
+use postprocess::ir::TowerRelocateModeIr;
 use postprocess::pipeline::{self, IrProcessRequest, NoProgress, ProgressEvent, ProgressSink};
 use postprocess::postproc::calibration;
 use postprocess::postproc::disk::{CollisionFacts, TowerAsk, TowerAskOutcome};
+
+use crate::runtime::app_state::TowerRelocateMode;
 
 use crate::archive::{ArchivePaths, Detail, FileFact, Meta, PipelineStatus, PipelineStep};
 use crate::args::HookJob;
@@ -447,6 +450,19 @@ pub trait Asker {
     /// 默认实现给"没有界面"那一档用：不会替用户决定，一律 `None`。
     fn ask_calibration(&mut self, _question: &str) -> Option<String> {
         None
+    }
+}
+
+/// 内核那三档 → 交互侧那三档（2026-11-04）。
+///
+/// ★ 逐档列出、**不许** `_ => Off`：内核与客户端各有一份枚举（内核不许反向依赖
+///   客户端），所以这种转换函数是唯一的对账点，糊一个兜底臂就等于给"新档位"留了个
+///   静默变"关"的后门。
+fn tower_mode_of(mode: TowerRelocateModeIr) -> TowerRelocateMode {
+    match mode {
+        TowerRelocateModeIr::Off => TowerRelocateMode::Off,
+        TowerRelocateModeIr::Auto => TowerRelocateMode::Auto,
+        TowerRelocateModeIr::Ask => TowerRelocateMode::Ask,
     }
 }
 
@@ -916,21 +932,26 @@ pub fn run(
     }
 
     /*
-     * **第 6 步那一问的钩子侧**（2026-10-18 方案 B）：内核在 `Step::Collision` 撞了会
-     * 回调它 —— 界面交互、选择记账都留在这边，内核只认 `TowerAsk` 那条缝。
+     * **第 6 步撞塔的钩子侧**（2026-10-18 方案 B；2026-11-04 改成三档）：内核在
+     * `Step::Collision` 撞了会回调它 —— 界面交互、选择记账都留在这边，内核只认
+     * `TowerAsk` 那条缝。
      *
-     * 只在**装了界面 + 设置页开关开着**时才递进去：
-     *   · 没界面（无头 / 静默档）/ 开关关着 ⇒ `None` ⇒ 内核走"没人问"那条短路，
-     *     行为与改造前一字不差；
-     *   · 递进去之后，等不到答复由这边收成 `Declined`（超时）或 `Cancelled`（按了停止）。
+     * 三档各递什么（判据在 `ChannelTowerAsk::ask`，这里只决定"递不递"）：
+     *   · `off`：`None` ⇒ 内核走"没人问"那条短路，行为与引入这一格之前一字不差；
+     *   · `auto`（**开**）：有界面也递 —— 内核在 `Auto` 档不问话，但复检结果要回告，
+     *     "塔被挪过、挪到哪"那笔账才能落进归档（没界面就不记账，照样挪）；
+     *   · `ask`：与 `auto` 一样递，内核在 `Ask` 档真的停下来问。
+     *
+     * 递进去之后，等不到答复由这边收成 `Declined`（超时）或 `Cancelled`（按了停止）。
      *
      * ★ 这里**不再**预检：擦料决策 / 碰撞扫描都只由管线各跑一次。
      */
-    let mut tower_ask = if ir.prefs.auto_tower_position {
+    let mut tower_ask = if ir.prefs.auto_tower_position != TowerRelocateModeIr::Off {
         ui.client().map(|client| ChannelTowerAsk {
             client,
             cancel,
             record: None,
+            mode: tower_mode_of(ir.prefs.auto_tower_position),
         })
     } else {
         None
@@ -1902,6 +1923,8 @@ struct ChannelTowerAsk<'a> {
     cancel: &'a CancelToken,
     /// 这一趟的选择与几何 —— `run` 在管线返回后 `take_record()` 走归档。
     record: Option<crate::archive::RelocationRecord>,
+    /// 这一趟的档（2026-11-04）：`auto` 时不问话，**直接**把候选位置当成答复。
+    mode: TowerRelocateMode,
 }
 
 impl ChannelTowerAsk<'_> {
@@ -1922,6 +1945,39 @@ impl TowerAsk for ChannelTowerAsk<'_> {
         use crate::hook_ipc::{
             QuestionChoice, CHOICE_MODEL, CHOICE_RELOCATE, CHOICE_STOP, QKIND_TOWER_RELOCATION,
         };
+        /*
+         * **开（auto）档不问话**（2026-11-04 作者：「真正的开是直接替用户确认了直接移动塔
+         * 的位置」）—— 候选位置就是答案，连问句都不往界面上推。板上一处都摆不下时
+         * 才落到 `Declined`（"挪不动"，外层按 `W_COLLISION_RELOCATE_003` 收场）。
+         *
+         * ★ 记账照旧：`choice = "relocate"` ⇒ 归档里那笔"塔被挪过"与点按钮那一趟同构，
+         *   成功句也走 `N_COLLISION_RELOCATE_001`（用户下次打开记录能看见挪了多少）。
+         */
+        if self.mode == TowerRelocateMode::Auto {
+            let relocated = candidate;
+            self.record = Some(crate::archive::RelocationRecord {
+                choice: if relocated.is_some() {
+                    "relocate"
+                } else {
+                    "unavailable"
+                }
+                .to_owned(),
+                from: current,
+                to: relocated,
+                moved_mm: relocated
+                    .map(|p| ((p[0] - current[0]).powi(2) + (p[1] - current[1]).powi(2)).sqrt()),
+                before_conflict_count: facts.conflict_count,
+                after_conflict_count: None,
+                verified: None,
+                tower_height_mm,
+                before: Some(facts.clone()),
+            });
+            return match relocated {
+                Some(pos) => TowerAskOutcome::Moved(pos),
+                None => TowerAskOutcome::Declined,
+            };
+        }
+
         /* 摆得下才给"自动挪塔"这颗按钮；摆不下 ⇒ 只给"自己去挪模型" */
         let mut choices = Vec::new();
         if candidate.is_some() {

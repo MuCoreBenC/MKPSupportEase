@@ -112,7 +112,17 @@ export const ja: Record<StringKey, string> = {
   'settings.postproc.glueBottom': 'サポート下面への接着剤塗布',
   'settings.postproc.glueBottomNote': 'サポート面の 1 つ下のレイヤーにも接着剤を塗布します（主塗布より 1 レイヤー下）',
   'settings.postproc.tower': 'スマートタワーの位置',
-  'settings.postproc.towerNote': 'モデルとパージタワーが衝突するときに確認します：タワーを自動で衝突しない位置に移動するか、自分でスライサーでモデルを移動するか。自動移動は今回の実行だけに適用され、プリセットファイルは変更されません。',
+  'settings.postproc.towerNote': 'モデルとパージタワーが衝突したときの動作です。いずれも今回の実行だけタワー位置を変え、プリセットファイルは変更しません。',
+  'settings.postproc.towerAria': 'パージタワーと衝突したときの動作',
+  'settings.postproc.towerModeAsk': '毎回確認',
+  'settings.postproc.towerModeAuto': '自動で移動',
+  'settings.postproc.towerModeOff': '何もしない',
+  'settings.postproc.towerAskHint':
+    '毎回確認（インストール後の既定）：衝突したら停止して選んでもらいます — 「タワーを自動で移動」か「自分でモデルを移動」。自動移動も今回の実行だけに適用されます。',
+  'settings.postproc.towerOnHint':
+    '自動で移動：衝突したら衝突しない位置へタワーを自動で移動し、そのまま処理を続けます。今回の実行だけに適用され、プリセットファイルは変更されません。',
+  'settings.postproc.towerOffHint':
+    '何もしない：衝突しても何も調整せず、今回の処理は衝突で停止します。元のファイルは変更されません — スライサーでモデルを少し動かしてから再度書き出してください。',
   'settings.postproc.reset': '後処理の状態をリセット',
   'settings.postproc.resetNote': 'フックが回答待ちで止まっている、画面が前回のままになっている場合にここをクリックしてください。完了済みの処理は変更されません。',
   'settings.postproc.resetting': 'リセット中…',
@@ -981,6 +991,9 @@ export const ja: Record<StringKey, string> = {
   'report.advice.model': 'モデルを移動',
   'report.g.collision': '衝突位置',
   'report.collision.sum': 'ヒートベッドの俯瞰',
+  'report.collision.hintTower':
+    '毎回自分で動かすのが面倒なときは、「設定 → 後処理モード → スマートタワーの位置」をオンにすると、次回から衝突時にタワーを自動で衝突しない位置へ移動します。',
+  'report.collision.hintGo': '設定を開く',
   'report.g.reloc': 'タワーを移動',
   'report.reloc.choiceAuto': '自動でタワーを移動',
   'report.reloc.choiceModel': '自分でモデルを移動',

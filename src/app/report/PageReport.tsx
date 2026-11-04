@@ -415,6 +415,14 @@ interface Group {
   /** 组名后面那句摘要（横线上跟在标题后） */
   sum: string
   cells: [string, string][]
+  /**
+   * 组**末尾**那一句提示 + 可选的去处（2026-11-04）。
+   *
+   * 目前只有「碰撞位置」用：撞了之后告诉用户"设置里能打开智能塔位置，下次就不用手动挪"。
+   * ★ 之所以挂在组上而不是散在渲染分支里：组是数据（`buildGroups` 算出来的），
+   *   渲染那一层只负责摆 —— 文案与"有没有这一句"的判据都留在同一个函数里。
+   */
+  hint?: { text: string; action?: { label: string; run: () => void } }
 }
 
 function elapsedText(tr: Tr, ms: number | null): string {
@@ -696,8 +704,17 @@ function hasAnyValue(cells: [string, string][]): boolean {
   return cells.some(([, v]) => v !== '—')
 }
 
-/** 把详情摊成几组（键与 `_meta.json` 同名，值一律按"有没有"说话） */
-function buildGroups(tr: Tr, detail: ReportDetail): Group[] {
+/**
+ * 把详情摊成几组（键与 `_meta.json` 同名，值一律按"有没有"说话）。
+ *
+ * `onOpenSettings`：碰撞那一组的"去设置里打开智能塔位置"要有去处；外壳没给
+ * 就只留句子、不留按钮（与预设页那条横幅同一条规矩：出口由外壳给）。
+ */
+function buildGroups(
+  tr: Tr,
+  detail: ReportDetail,
+  onOpenSettings?: () => void,
+): Group[] {
   const st = detail.summary
   const stats = detail.stats ?? {}
   const groups: Group[] = []
@@ -833,11 +850,38 @@ function buildGroups(tr: Tr, detail: ReportDetail): Group[] {
         cells: adviceCells,
       })
     }
+    /*
+     * **撞了之后去哪儿**（2026-11-04 作者：关掉智能塔位置之后，碰撞失败页要提示可以去
+     * 设置里打开）。判据是「这一趟真的撞停了」—— 也就是有这个 `collision` 事实。
+     *
+     * ★ 只在那两档"没帮上忙"的情形才提示：`off`（关着 ⇒ 压根不问）与没人答/答了不挪。
+     *   已经挪过塔的记录走的是 `relocation` 那条路，`verified` / `to` 说得很清楚，
+     *   这里再劝一句"去把它打开"就是噪音。
+     * ★ 不去读用户当前的设置来判"关没关"（报告页没有那份状态，也不该为了这一句多拉一次
+     *   IPC）；措辞写成"可以"而不是"你现在是关着的"，两种情况都不说谎。
+     */
+    const relocatedAlready =
+      detail.relocation != null && detail.relocation.to != null
     groups.push({
       id: 'collision',
       title: tr('report.g.collision'),
       sum: tr('report.collision.sum'),
       cells: [],
+      ...(relocatedAlready
+        ? {}
+        : {
+            hint: {
+              text: tr('report.collision.hintTower'),
+              ...(onOpenSettings !== undefined
+                ? {
+                    action: {
+                      label: tr('report.collision.hintGo'),
+                      run: onOpenSettings,
+                    },
+                  }
+                : {}),
+            },
+          }),
     })
   }
 
@@ -1337,7 +1381,16 @@ function FileName({ name }: { name: string | null }) {
   )
 }
 
-export default function PageReport() {
+export default function PageReport({
+  onOpenSettings,
+}: {
+  /**
+   * 「去设置里打开智能塔位置」的出口（2026-11-04）。
+   * 由外壳给（`App.tsx` 的 `openSettings`），与预设页那条"去更新"横幅同一条规矩。
+   * 不给 ⇒ 只留句子、不留按钮。
+   */
+  onOpenSettings?: () => void
+} = {}) {
   const tr = useT()
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
   const [rows, setRows] = useState<ReportSummary[] | null>(null)
@@ -1705,7 +1758,7 @@ export default function PageReport() {
     })
   }
 
-  const groups = detail === null ? [] : buildGroups(tr, detail)
+  const groups = detail === null ? [] : buildGroups(tr, detail, onOpenSettings)
   const activeTab = groups.some((g) => g.id === tab) ? tab : TAB_ALL
   const sel = (rows ?? []).find((r) => r.id === selId) ?? null
 
@@ -2111,12 +2164,29 @@ export default function PageReport() {
                               ) : null
                             ) : g.id === 'collision' ? (
                               /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
-                              detail.collision !== null ? (
-                                <CollisionMap
-                                  collision={detail.collision}
-                                  machineType={detail.summary.machineType}
-                                />
-                              ) : null
+                              <>
+                                {detail.collision !== null && (
+                                  <CollisionMap
+                                    collision={detail.collision}
+                                    machineType={detail.summary.machineType}
+                                  />
+                                )}
+                                {/* 撞停之后去哪儿（2026-11-04）：一句话 + 一个去处 */}
+                                {g.hint !== undefined && (
+                                  <p className={s.collisionHint}>
+                                    <span>{g.hint.text}</span>
+                                    {g.hint.action !== undefined && (
+                                      <button
+                                        type="button"
+                                        className={s.collisionHintGo}
+                                        onClick={g.hint.action.run}
+                                      >
+                                        {g.hint.action.label}
+                                      </button>
+                                    )}
+                                  </p>
+                                )}
+                              </>
                             ) : (
                               <>
                                 <dl className={s.kv}>

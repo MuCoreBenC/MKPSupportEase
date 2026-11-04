@@ -120,7 +120,17 @@ export const zhCN = {
   'settings.postproc.glueBottom': '支撑面底面涂胶',
   'settings.postproc.glueBottomNote': '在支撑面下方一层也执行涂胶（比主涂胶低一个层高）',
   'settings.postproc.tower': '智能塔位置',
-  'settings.postproc.towerNote': '模型与擦料塔相撞时问一句：自动把塔挪到不撞的位置，还是你自己回切片器挪模型。选自动挪塔只改这一趟，预设文件不动。',
+  'settings.postproc.towerNote': '模型与擦料塔相撞时怎么办。三种都只改这一趟的塔位置，预设文件不动。',
+  'settings.postproc.towerAria': '碰撞擦料塔时怎么办',
+  'settings.postproc.towerModeAsk': '每次提问',
+  'settings.postproc.towerModeAuto': '自动挪塔',
+  'settings.postproc.towerModeOff': '不处理',
+  'settings.postproc.towerAskHint':
+    '每次提问（安装后的默认）：相撞时停下来等你选 ——「自动挪塔」还是「我自己挪模型」。选了自动挪也只改这一趟。',
+  'settings.postproc.towerOnHint':
+    '自动挪塔：相撞时直接替你把塔挪到不撞的位置，然后接着跑完，不再打扰你。只改这一趟，预设文件不动。',
+  'settings.postproc.towerOffHint':
+    '不处理：相撞时什么都不做，这一趟按碰撞停下，原文件不动 —— 回切片器把模型挪开一点再切。',
   'settings.postproc.reset': '重置后处理状态',
   'settings.postproc.resetNote': '钩子卡在等答复、界面这一屏还是上次的时点这里。已经跑完的处理不会被改。',
   'settings.postproc.resetting': '正在重置…',
@@ -1011,6 +1021,9 @@ export const zhCN = {
   'report.advice.model': '挪模型',
   'report.g.collision': '碰撞位置',
   'report.collision.sum': '热床俯视',
+  'report.collision.hintTower':
+    '不想每次自己挪：在「设置 → 后处理模式 → 智能塔位置」打开它，之后相撞会直接替你把塔挪到不撞的位置。',
+  'report.collision.hintGo': '去设置',
   'report.g.reloc': '挪塔',
   'report.reloc.choiceAuto': '自动挪塔',
   'report.reloc.choiceModel': '自己挪模型',

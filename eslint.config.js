@@ -72,6 +72,45 @@ const POSTPROC_FIXED_HEIGHTS = [
   },
 ]
 
+/*
+ * **设置页每一行的标题旁边都必须有一颗 `?`**（2026-11-04）。
+ *
+ * 作者看到「智能塔位置」那行没有 `?`，原话是：「为什么不能放？缺少了？你写一种那种
+ * eslint 那种？机械性的检查要用我们自己的 tooltips」。
+ *
+ * 起因不是"好看"，而是**一致性**：这一页 27 个 `fieldTitle` 里有 25 个都写着
+ * `<Tip text=… />`，缺的那一个会让人以为"这一项没有说明"，而不是"这一项的说明藏起来了"。
+ * 上一版这里手写了 `data-tip`（气泡能出来，但没有那颗圈）—— 正是这条要挡掉的那类
+ * 半成品：气泡归 `TipLayer` 画，`data-tip` 是它的**认领标记**，不是对外接口。
+ *
+ * 判据（机器可判、不需要读心）：`className` 是 `s.fieldTitle` 的那个 `div`，
+ * 孩子里必须有 `Tip`。两种形态都算：
+ *   · `<Tip text={…} />`                      —— 常见形态
+ *   · `{cond && <Tip text={…} />}`            —— 条件渲染（`PageSettings` 的主题 / 语言两行）
+ *
+ * ★ 声明：**设置页之外**不套这条 —— 那里 `data-tip` 挂在按钮 / 文件名 / 路径上是
+ *   正当用法（触发物就是那个元素自己，在 `Tip` 的头注释里写着）。这条只管设置页。
+ */
+const SETTINGS_TITLE_NEEDS_TIP = [
+  {
+    /*
+     * `className={s.fieldTitle}` 的 AST 是
+     * `JSXExpressionContainer > MemberExpression[object.name='s'][property.name='fieldTitle']`
+     * —— 不是嵌套的 object/property。
+     *
+     * ★ 两处踩过的坑（都是"规则写了但一条都不报"，靠探针文件才验出来）：
+     *   ① `.right.object.name` 是写错的结构（MemberExpression 直接带 `object` / `property`）；
+     *   ② `:has(> JSXOpeningElement …)` **不成立** —— `JSXOpeningElement` 不是 `JSXElement`
+     *      的 child（esquery 的 `:has(>)` 只看 `children`）。要摸开头标签上的属性，
+     *      直接把它写进同一条 descendant 链里。
+     */
+    selector:
+      "JSXElement:not(:has(JSXElement[openingElement.name.name='Tip'])):has(JSXOpeningElement > JSXAttribute[name.name='className'] > JSXExpressionContainer > MemberExpression[object.name='s'][property.name='fieldTitle'])",
+    message:
+      '设置页的行标题必须带一颗 `<Tip text={…} />`（2026-11-04）：漏了它，用户看到的是"这一项没有说明"',
+  },
+]
+
 export default tseslint.config(
   /* 构建产物一律不扫。
      target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
@@ -133,6 +172,21 @@ export default tseslint.config(
         ...INLINE_OVERFLOW,
         ...NATIVE_CHOICE,
         ...POSTPROC_FIXED_HEIGHTS,
+      ],
+    },
+  },
+  /*
+   * 设置页多一条：行标题旁边必须有那颗 `?`（见上面 `SETTINGS_TITLE_NEEDS_TIP`）。
+   * ★ 同样要把前几组**一起带上** —— flat config 里后一块会把同一条规则整条覆盖掉。
+   */
+  {
+    files: ['src/app/settings/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        ...INLINE_OVERFLOW,
+        ...NATIVE_CHOICE,
+        ...SETTINGS_TITLE_NEEDS_TIP,
       ],
     },
   }

@@ -18,7 +18,7 @@
 use std::path::PathBuf;
 
 use postprocess::diag::{CancelToken, PostprocError};
-use postprocess::ir::Ir;
+use postprocess::ir::{Ir, TowerRelocateModeIr};
 use postprocess::pipeline::{
     self, IrProcessRequest, ProgressEvent, ProgressSink, STEPS, Step,
     process_with_ir_with_tower_ask,
@@ -54,6 +54,7 @@ fn ir_at(wiper: [f64; 2]) -> Ir {
 }
 
 fn write_input(tag: &str) -> PathBuf {
+    /* ★ 每个用例换一份独有输入：管线**原地覆盖**，同名文件会被上一轮的产物顶掉 */
     let path = std::env::temp_dir().join(format!("mkpse-pp-tower-ask-{tag}.gcode"));
     std::fs::write(&path, GCODE).expect("写临时输入");
     path
@@ -145,13 +146,24 @@ fn run_with(
     tag: &str,
     ask: Option<&mut dyn TowerAsk>,
 ) -> Result<pipeline::ProcessResult, PostprocError> {
+    run_with_mode(tag, TowerRelocateModeIr::Off, ask)
+}
+
+/// 同上，但明说这一趟是**哪一档**（2026-11-04：三档各有各的语义）。
+fn run_with_mode(
+    tag: &str,
+    mode: TowerRelocateModeIr,
+    ask: Option<&mut dyn TowerAsk>,
+) -> Result<pipeline::ProcessResult, PostprocError> {
     let path = write_input(tag);
     let mut sink = Recorder::default();
     let cancel = CancelToken::new();
+    let mut ir = ir_at([20.0, 20.0]);
+    ir.prefs.auto_tower_position = mode;
     pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
             gcode_path: path,
-            ir: ir_at([20.0, 20.0]),
+            ir,
             output_path: None,
             calibration: Default::default(),
         },
@@ -201,7 +213,8 @@ fn no_asker_keeps_the_old_behaviour() {
 #[test]
 fn a_moved_tower_passes_the_recheck_and_the_pipeline_finishes() {
     let mut ask = FakeAsk::new(Reply::UseCandidate);
-    let done = run_with("moved", Some(&mut ask)).expect("挪到候选位置应当跑完");
+    let done = run_with_mode("moved", TowerRelocateModeIr::Ask, Some(&mut ask))
+        .expect("挪到候选位置应当跑完");
     assert_eq!(ask.asked, 1, "只问一次");
     assert_eq!(ask.verified.len(), 1, "复检回告只来一次（挪了才复检）");
     assert!(
@@ -225,7 +238,7 @@ fn a_moved_tower_passes_the_recheck_and_the_pipeline_finishes() {
 #[test]
 fn a_position_that_still_collides_is_refused() {
     let mut ask = FakeAsk::new(Reply::MoveTo([30.0, 30.0]));
-    let outcome = run_with("still", Some(&mut ask));
+    let outcome = run_with_mode("still", TowerRelocateModeIr::Ask, Some(&mut ask));
     match outcome {
         Err(PostprocError::Collision { facts }) => {
             assert!(
@@ -248,7 +261,7 @@ fn a_position_that_still_collides_is_refused() {
 #[test]
 fn cancelling_while_asking_is_a_cancellation() {
     let mut ask = FakeAsk::new(Reply::Cancel);
-    match run_with("cancel", Some(&mut ask)) {
+    match run_with_mode("cancel", TowerRelocateModeIr::Ask, Some(&mut ask)) {
         Err(PostprocError::Cancelled { .. }) => {}
         Err(e) => panic!("取消必须收成 Cancelled，却是别的错：{e:?}"),
         Ok(_) => panic!("取消却跑完了"),
@@ -261,7 +274,7 @@ fn cancelling_while_asking_is_a_cancellation() {
 #[test]
 fn a_declined_answer_stops_with_a_collision() {
     let mut ask = FakeAsk::new(Reply::Decline);
-    match run_with("declined", Some(&mut ask)) {
+    match run_with_mode("declined", TowerRelocateModeIr::Ask, Some(&mut ask)) {
         Err(PostprocError::Collision { .. }) => {}
         Err(e) => panic!("不挪必须收成碰撞，却是别的错：{e:?}"),
         Ok(_) => panic!("不挪却跑完了"),
@@ -274,7 +287,7 @@ fn a_declined_answer_stops_with_a_collision() {
 #[test]
 fn a_broken_asker_is_an_explicit_failure() {
     let mut ask = FakeAsk::new(Reply::Fail);
-    match run_with("fail", Some(&mut ask)) {
+    match run_with_mode("fail", TowerRelocateModeIr::Ask, Some(&mut ask)) {
         Err(PostprocError::Processing { message }) => assert_eq!(message, "通道断了"),
         Err(e) => panic!("交互失败必须明确报出来，却是别的错：{e:?}"),
         Ok(_) => panic!("交互失败却跑完了"),
@@ -291,10 +304,14 @@ fn progress_never_goes_backwards() {
     let mut sink = Recorder::default();
     let mut ask = FakeAsk::new(Reply::UseCandidate);
     let cancel = CancelToken::new();
+    /* ★ 这一档必须是 `Ask`：`Off` 一律按碰撞收场（那才是"关就是关"），
+    否则这条判据测的就不是"问完挪完接着跑"那条路 */
+    let mut ir = ir_at([20.0, 20.0]);
+    ir.prefs.auto_tower_position = TowerRelocateModeIr::Ask;
     let done = pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {
             gcode_path: path,
-            ir: ir_at([20.0, 20.0]),
+            ir,
             output_path: None,
             calibration: Default::default(),
         },
@@ -324,4 +341,65 @@ fn progress_never_goes_backwards() {
         done.executed_steps.contains(&Step::Collision),
         "步骤账里要能看见第 6 步（失败记录也靠它说\"停在哪\"）"
     );
+}
+
+/*
+ * ============ 2026-11-04：`Auto`（"开"）那一档不问话 ============
+ *
+ * 作者把设置页那颗开关的口径改了：「关就是关，开就是开」「真正的开是直接替用户确认了
+ * 直接移动塔的位置」。所以下面两条钉的是**同一份会撞的输入，两档两种行为**：
+ *   · `Auto`：一次 `ask` 都不发生，塔照样被挪开、这一趟跑完；
+ *   · `Off`：与引入这一格之前一字不差 —— 递了回调也不许问（关就是关）。
+ */
+
+/// **7. 开 = 不问、直接挪、跑完**。
+///
+/// ★ 这是这一代最要紧的一条：用户抱怨的正是"我没开它却还弹"，反过来"开了就不该弹"。
+#[test]
+fn the_auto_mode_moves_the_tower_without_asking() {
+    let mut ask = FakeAsk::new(Reply::Decline);
+    let done = run_with_mode("auto", TowerRelocateModeIr::Auto, Some(&mut ask))
+        .expect("开那一档应当直接把塔挪开、跑完");
+    assert_eq!(ask.asked, 0, "开就是开 —— 一声都不许问");
+    assert_eq!(ask.verified.len(), 1, "挪了就要复检回告（归档那笔账靠它）");
+    assert!(ask.verified[0].is_none(), "复检必须干净");
+
+    /* 拿管线交出来的最终 IR 再验一遍，而不是信回告 */
+    let out = std::fs::read_to_string(&done.output_path).expect("读输出");
+    let lines: Vec<String> = out.lines().map(str::to_string).collect();
+    let after = detect_tower_collision(&lines, &done.detail_facts.ir);
+    assert!(
+        !after.has_collision,
+        "输出里仍然撞：{:?}",
+        after.facts(&done.detail_facts.ir)
+    );
+}
+
+// **8. 开 + 有没有位置都不问**：`Auto` 只有一条路 —— 有位置就挪，没位置就按
+// 碰撞收场；**永远不换成"那就问一句"**（那正是上一代口径最招人烦的态）。
+#[test]
+fn the_auto_mode_never_falls_back_to_asking() {
+    let mut ask = FakeAsk::new(Reply::UseCandidate);
+    let outcome = run_with_mode("auto-loop", TowerRelocateModeIr::Auto, Some(&mut ask));
+    /* 这条输入板上还有地方 ⇒ 应当跑完；要紧的是下面那两条断言 */
+    if let Err(e) = &outcome {
+        assert!(
+            matches!(e, PostprocError::Collision { .. }),
+            "开那一档只允许两种收场：跑完 / 碰撞，却是：{e:?}"
+        );
+    }
+    assert_eq!(ask.asked, 0, "开那一档永远不问");
+}
+
+/// **9. 关 = 关**：递了回调也不许问，行为与"没人问"一字不差。
+#[test]
+fn the_off_mode_never_asks_even_when_an_asker_is_given() {
+    let mut ask = FakeAsk::new(Reply::UseCandidate);
+    match run_with_mode("off-with-asker", TowerRelocateModeIr::Off, Some(&mut ask)) {
+        Err(PostprocError::Collision { .. }) => {}
+        Err(e) => panic!("关那一档应当报碰撞，却是别的错：{e:?}"),
+        Ok(_) => panic!("关那一档却跑完了（塔不许被动）"),
+    }
+    assert_eq!(ask.asked, 0, "关就是关 —— 有回调也不问");
+    assert!(ask.verified.is_empty(), "没挪，就没有复检");
 }

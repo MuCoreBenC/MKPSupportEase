@@ -1541,7 +1541,16 @@ export default function PageSettings() {
         {/* 2026-10-30：三行竖排单选 → 一行分段。下面那句就是"现在用的是哪一个"（原在章末） */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
-            <div className={s.fieldTitle}>{tr('settings.advanced.sourceLabel')}</div>
+            <div className={s.fieldTitle}>
+              {tr('settings.advanced.sourceLabel')}
+              {/*
+                2026-11-04：补上那颗 `?`（闸 `SETTINGS_TITLE_NEEDS_TIP` 抓出来的）。
+                上一版这里一个说明都没有 —— 因为"现在用的是哪一个"已经常显在下面，
+                就没有再加一句。但那行常显说的是**状态**，不是**这一项怎么用**
+                （内置地址 / 自定义地址各是什么、换源会不会重下），两件事，不是一回事。
+              */}
+              <Tip text={tr('settings.advanced.sourceNote')} />
+            </div>
             {/* 「现在用的是哪一个」要**常显**（不是说明），所以不走气泡 */}
             <p className={s.current}>
               {tr('settings.advanced.current', { text: currentText })}

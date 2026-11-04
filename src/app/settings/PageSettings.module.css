@@ -564,6 +564,8 @@
   padding: 0 12px;
 }
 
+
+
 /* 卸载那块的风险条：左右跟着 12px 内衬走，上下各留一点 */
 .section > .dangerNote {
   margin: 8px 12px 6px;
@@ -948,6 +950,8 @@
   font-size: var(--fs-label);
   color: var(--text-3);
 }
+
+
 
 /* ---- 分段控件（2026-10-30）----
  * 主题 / 界面语言 / 预设数据源原来是"三行竖排单选 + 每行一条小字"，

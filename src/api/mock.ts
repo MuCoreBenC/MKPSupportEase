@@ -2706,7 +2706,7 @@ export const mockApi: MkpApi = {
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
       bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
-      autoTowerPosition: mockPostproc.autoTowerPosition ?? false,
+      autoTowerPosition: mockPostproc.autoTowerPosition ?? 'ask',
     }
     return {
       raw: mockPostproc,

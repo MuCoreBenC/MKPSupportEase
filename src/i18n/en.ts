@@ -109,7 +109,17 @@ export const en: Record<StringKey, string> = {
   'settings.postproc.glueBottom': 'Glue under support surfaces',
   'settings.postproc.glueBottomNote': 'Also apply glue one layer below support surfaces (one layer height lower than the main glue)',
   'settings.postproc.tower': 'Smart tower position',
-  'settings.postproc.towerNote': 'When the model collides with the wipe tower, ask once: move the tower automatically, or move the model back in the slicer. Auto-move changes this run only — the preset file is untouched.',
+  'settings.postproc.towerNote': 'What to do when the model collides with the wipe tower. All three change this run only — the preset file is untouched.',
+  'settings.postproc.towerAria': 'What to do on a wipe-tower collision',
+  'settings.postproc.towerModeAsk': 'Ask each time',
+  'settings.postproc.towerModeAuto': 'Move it',
+  'settings.postproc.towerModeOff': 'Do nothing',
+  'settings.postproc.towerAskHint':
+    'Ask each time (the default after installation): on a collision it stops and lets you choose — move the tower automatically, or move the model yourself. Auto-move still changes this run only.',
+  'settings.postproc.towerOnHint':
+    'Move it: on a collision the tower is moved to a clear spot for you and the run continues without bothering you. This run only; the preset file is untouched.',
+  'settings.postproc.towerOffHint':
+    'Do nothing: a collision is left alone — the run stops and the original file is untouched. Move the model a little in the slicer and export again.',
   'settings.postproc.reset': 'Reset post-processing state',
   'settings.postproc.resetNote': 'Click here if the hook is stuck waiting for an answer, or this screen still shows the previous run. Finished runs are not changed.',
   'settings.postproc.resetting': 'Resetting…',
@@ -982,6 +992,9 @@ export const en: Record<StringKey, string> = {
   'report.advice.model': 'Move model',
   'report.g.collision': 'Collision location',
   'report.collision.sum': 'Bed top view',
+  'report.collision.hintTower':
+    'Tired of moving it yourself? Turn on Settings → Post-processing → Smart tower position, and the tower will be moved to a clear spot automatically next time.',
+  'report.collision.hintGo': 'Open settings',
   'report.g.reloc': 'Tower relocation',
   'report.reloc.choiceAuto': 'Relocate tower automatically',
   'report.reloc.choiceModel': 'You moved the model yourself',

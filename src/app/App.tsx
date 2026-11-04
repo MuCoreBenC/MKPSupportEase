@@ -403,7 +403,8 @@ export default function App() {
               />
             </PageSlot>
             <PageSlot hidden={tab !== 'report'} page="report" layout="list">
-              <PageReport />
+              {/* 碰撞那一趟会多一句"去设置里打开智能塔位置"—— 出口由外壳给，与预设页同一条规矩 */}
+              <PageReport onOpenSettings={openSettings} />
             </PageSlot>
             <PageSlot hidden={tab !== 'settings'} page="settings" layout="form">
               <PageSettings />

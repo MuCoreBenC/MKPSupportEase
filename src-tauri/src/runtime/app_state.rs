@@ -310,10 +310,62 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
-    /// **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才按算出来的
-    /// 位置跑完这一趟（只改这一趟，不动预设文件）。`None` = 出厂关。
+    /// **智能塔位置**（2026-10-18 引入，2026-11-04 改成三档）：模型与擦料塔相撞时怎么办。
+    ///
+    /// | 档 | 撞了之后 | 用户看到 |
+    /// |---|---|---|
+    /// | `ask`（**出厂**） | 停下问一句（"自动挪塔 / 我自己挪模型"） | 那一屏两幅俯视图 |
+    /// | `auto`（开关的"开"） | **不问**，直接按算出来的位置挪塔，挪完复检，接着跑完这一趟 | 进度条停一下就走 |
+    /// | `off` | 停下、原文件不动 | 与没有这一格时一字不差 |
+    ///
+    /// ★ 语义是**互斥三档**，不是两个布尔：`(开关 × 还问不问)` 能拼出"关着又问"这种
+    ///   非法态。与 [`PinPref`] 同一条理由（作者 2026-11-04：「做成切换的开关，
+    ///   就是关就是关，开就是开」—— 真正的开 = 直接替用户确认、直接挪）。
+    /// ★ 出厂是 `ask`（2026-11-04 作者：「软件安装的时候默认就是问」）—— 新装用户第一次
+    ///   撞上时能看见"可以自动挪"这件事，而不是静默停下。
+    /// ★ 旧盘上的 `true` 读不出枚举 ⇒ 落到出厂 `ask`（保留弹问，不替用户做决定）。
+    ///   只改这一趟的 IR，预设文件一个字不动。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_tower_position: Option<bool>,
+    pub auto_tower_position: Option<TowerRelocateMode>,
+}
+
+/// 「模型与擦料塔相撞时怎么办」三档（2026-11-04 把原来的 `bool` 换成它）。
+///
+/// ★ 线上字符串是**契约**：`off` / `auto` / `ask`，盘上、DTO、前端共用同一个字面量。
+///   `auto` 才是"开" —— 不开就问是上一代的口径，作者明确否掉了（"开就是开"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TowerRelocateMode {
+    /// 关：撞了就按碰撞停下
+    Off,
+    /// 开：撞了就**直接**把塔挪到不撞的位置（不问），挪完复检、接着跑完
+    Auto,
+    /// 问：撞了就停下来问一句「自动挪塔 / 我自己挪模型」——
+    /// **出厂档**（2026-11-04 作者：「软件安装的时候默认就是问」）
+    #[default]
+    Ask,
+}
+
+impl TowerRelocateMode {
+    /// 枚举 → 线上字符串。只写这一处（盘上 / DTO / 前端共用同一个字面量）
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Auto => "auto",
+            Self::Ask => "ask",
+        }
+    }
+
+    /// 线上字符串 → 枚举；认不出给 `None`（**不静默回落到某一档** ——
+    /// 旧盘上的 `true` / `false` 也走这里，由调用方自己决定怎么收场）。
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "off" => Some(Self::Off),
+            "auto" => Some(Self::Auto),
+            "ask" => Some(Self::Ask),
+            _ => None,
+        }
+    }
 }
 
 /// 「跑完这一趟界面怎么摆」。
@@ -372,7 +424,7 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
-            auto_tower_position: self.auto_tower_position.unwrap_or(false),
+            auto_tower_position: self.auto_tower_position.unwrap_or_default(),
         }
     }
 }
@@ -443,7 +495,8 @@ pub struct ResolvedPostprocPrefs {
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
-    pub auto_tower_position: bool,
+    /// 撞塔三档（见 [`TowerRelocateMode`]）：`Off` / `Auto` / `Ask`
+    pub auto_tower_position: TowerRelocateMode,
 }
 
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。

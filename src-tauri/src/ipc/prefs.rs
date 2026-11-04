@@ -340,6 +340,8 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "xyCalibrationDwellSec": r.xy_calibration_dwell_sec,
                 "bedGlueEnabled": r.bed_glue_enabled,
                 "bedGlueAllModels": r.bed_glue_all_models,
+                /* 智能塔位置三档（2026-11-04）：`off` / `auto` / `ask` */
+                "autoTowerPosition": r.auto_tower_position.wire(),
             },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
             "limits": {
