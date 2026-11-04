@@ -52,7 +52,7 @@
   任一侧缺值 = 说不清 = 不算冲突），DTO 加 `conflict`。
 - `ipc/catalog.rs`：`fetch_official_preset` 加 `rename_if_taken` —— 撞名时默认不动它，
   返回 `takenBy` + `suggestedName`（`untaken_name()` 找 `<名>-2<后缀>`…）；用户同意后自动改名落新的。
-- 身份账本 = **派生视图**（盘上文件 + 血统 → 云端那一版），**不设持久化账本**
+- 身份账本 = **派生视图**（盘上文件 + 来源记录 → 云端那一版），**不设持久化账本**
   （「盘就是底账」；期望值只来自当前目录）。`UserPresetIdentity = {id, path, fileName, cloudSource}`。
 
 ### 段 6 · 预设页 + 参数页

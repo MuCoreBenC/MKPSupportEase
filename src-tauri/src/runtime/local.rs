@@ -21,11 +21,14 @@
 //! （理由见 [`crate::fsx::paths`] 的模块头 —— 一碰 Documents，macOS 就要弹「访问你的
 //! 文稿文件夹」的授权框，而这个文件本来就不是用户摆进文稿里的）。
 //!
-//! # 用户那份与云端的关系：**血统写在文件里**
+//! # 用户那份与云端的关系：**来源记录写在文件里**
 //!
-//! 它从哪一份云端、哪一版拷出来的（`# based_on*` 三行）随文件走，见 [`super::lineage`]。
+//! 它从哪一份云端、哪一版来的（尾部 `[mkp_source]` 表）随文件走，见 [`super::provenance`]。
 //! 于是"云端换版了、你这份还是基于旧版"这件事，**换一台电脑也认得出** ——
 //! 不需要程序另记一份账（作者 2026-10-02 定的原则：文件本身的信息随文件走）。
+//!
+//! 2026-11-04：详情页的「来源 / 来源版本」**只读这一份记录**，
+//! `run/provenance.json` 只是程序自己的运行索引，不进展示链。
 //!
 //! # 第九层：文件级的"能不能用"（**不复制 Preset schema**）
 //!
@@ -42,19 +45,19 @@
 //!
 //! # 读在上面，写只有三条（都是"写我自己的文件"）
 //!
-//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读血统）；**写用户根只有三个函数**，
+//! 这一层读用户目录（列出 / 认类别 / 读正文 / 读来源记录）；**写用户根只有三个函数**，
 //! 对应三件**不同**的事，不许合并成一个"存一下"：
 //!
 //! ```text
-//! save_cloud_as_new 另存：云端模板 → presets-local/<你起的名字>（带血统三行，撞名就拒）
+//! save_cloud_as_new 另存：云端模板 → presets-local/<你起的名字>（带来源记录，撞名就拒）
 //! commit_draft         另存：云端那份改出来的 → presets-local/<原名>（已修改）.toml（第 5 层）
 //! save_back            写回自己：我那份打开再存 → 同一个路径，不产生第二份（第 8 层）
 //! ```
 //!
 //! 三条共用一句话：**云端基线（按 `catalog.path` 落盘的那一份）一概不碰**。
-//! 区别只在"落点是谁"与"那三行血统从哪来"：下载收尾与另存都是新的一份、血统从
-//! **来源**算；写回还是同一份、血统
-//! **照抄文件里原来那三行**（出处没变 —— 见 [`super::lineage::rewrite_keeping_lineage`]）。
+//! 区别只在"落点是谁"与"那三行来源记录从哪来"：下载收尾与另存都是新的一份、来源记录从
+//! **来源**算；写回还是同一份、来源记录
+//! **照抄文件里原来那一段**（出处没变 —— 见 [`super::source_record::rewrite_keeping_lineage`]）。
 //! 于是"改我那份 → 保存"不会产出 `（已修改）2.toml`，也不会把出处改成"基于我自己"。
 
 use postprocess::diag::messages;
@@ -66,13 +69,14 @@ use crate::fsx::paths::LOCAL_DIR;
 
 use super::catalog::kind::PRESET;
 use super::catalog::{Catalog, CatalogFile};
-use super::lineage::{self, Lineage};
+use super::provenance as source_record;
 use super::source_identity::SourceIdentity;
 use super::source_ledger::{LocalProvenance, OriginKind};
+use preset::model::{SourceProvenance, SourceRef};
 
-/// 读血统时最多看文件头这么多字节。
+/// 读来源记录时最多看文件头这么多字节。
 ///
-/// 三行血统住在**文件头注释块**里（头几行），所以够用；而用户目录是**用户自己的地盘**，
+/// 三行来源记录住在**文件头注释块**里（头几行），所以够用；而用户目录是**用户自己的地盘**，
 /// 他可能往里扔一个几百 MB 的文件 —— 为了读三行注释把整份读进内存不是这一层该干的事。
 pub const LINEAGE_READ_LIMIT: u64 = 8 * 1024;
 
@@ -89,9 +93,9 @@ pub struct LocalFile {
     pub modified_unix: Option<u64>,
     /// 认得出是哪一类就给（见 [`kind_of`]）；**认不出是 `None`**，不猜
     pub kind: Option<&'static str>,
-    /// 它从哪一份云端、哪一版拷出来的（文件头那三行）。`None` = 这份没有血统
-    /// （手工拷的、或别的程序写出来的）—— **不是错误**
-    pub lineage: Option<Lineage>,
+    /// 它从哪一份云端、哪一版来的（尾部 `[mkp_source]`）。`None` = 这份没有来源记录
+    /// （用户手动拖进来的、或别的程序写出来的）—— **不是错误**
+    pub source: Option<SourceProvenance>,
     /// 文件头的 `# machine:` 行（原样，不归一化）。没有就是 `None`
     ///
     /// 副本按字节拷自云端产物，头里本来就带着这两行 —— **它自己就说得出它属于哪台机型
@@ -120,9 +124,9 @@ pub struct LocalFile {
 ///
 /// | 问题 | 用什么回答 | 在哪 |
 /// |---|---|---|
-/// | ① 是不是同一条发布线 | `catalogId` | 血统 `# based_on_catalog` vs 目录 `catalogId` |
-/// | ② 发布有没有往前走 | `publishSerial`（单调） | 血统 `# based_on_serial` vs 目录 `publishSerial` |
-/// | ③ 这一份内容一不一样 | 文件 SHA-256 | 血统 `based_on_sha256` vs 目录 `files[].sha256` |
+/// | ① 是不是同一条发布线 | `catalogId` | 来源记录 `catalog` vs 目录 `catalogId` |
+/// | ② 发布有没有往前走 | `publishSerial`（单调） | 来源记录 `serial` vs 目录 `publishSerial` |
+/// | ③ 这一份内容一不一样 | 文件 SHA-256 | 来源记录 `sha256` vs 目录 `files[].sha256` |
 ///
 /// 于是 `publishedAt` 与 `release_time` 退回**只做展示**，不再决定更新方向。
 /// 不回答"这份用户文件好不好"（它是用户自己的文件，从来不是"坏文件"）。
@@ -148,7 +152,7 @@ pub enum BasedOn {
     /// 与 [`Outdated`](BasedOn::Outdated) 的区别只在动作：**不给按钮**。
     /// 一次发布改了 3 份，剩下 6 份落在这里 —— 不许笼统地说"每份都有新版"。
     Unchanged,
-    /// **说不清版本关系**：血统缺发布线 / 序号（老副本、老目录），或指的那一份已经
+    /// **说不清版本关系**：来源记录缺发布线 / 序号（老副本、老目录），或指的那一份已经
     /// 不在目录里。**不声称有新版、不给更新**，也不替用户补字段（作者定死：
     /// 只有他明确"接受当前版本"才建立新基线）。
     Unverified,
@@ -184,32 +188,37 @@ impl BasedOn {
 
 /// 判据要摆给详情面板看的那几格事实（界面只说事实，不自己重算）。
 ///
-/// 一律 `Option`：不知道就是 `null`，**不编**（"血统源未知"与"云端源未知"
+/// 一律 `Option`：不知道就是 `null`，**不编**（"来源记录源未知"与"云端源未知"
 /// 是两件事，界面各说各的）。
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerdictFacts {
-    /// 这份本地文件**怎么来的**（下载 / 拷贝 / 导入 / 旧账未知）。账上没记 ⇒ `None`
-    pub lineage_kind: Option<OriginKind>,
-    /// 这份副本**建的时候**哪个源在生效（[`SourceIdentity::key`]；账上没记 ⇒ None）
-    pub lineage_source: Option<String>,
-    /// 血统里记的来源版本标记（文件头的 `# release_time`，可能是版本号不是时间）。
-    /// **只做展示**：它是配方的写作日期，不是发布顺序。
-    pub lineage_release: Option<String>,
-    /// ★ 这份**对应的那个云端版本**实际发布的时刻（下载那一刻目录的 `publishedAt`，
-    /// 记在本地来路账里）。老文件没有这一格 ⇒ `None`，**不许拿 `release_time` 顶**。
-    pub lineage_published_at: Option<String>,
-    /// 血统记的**来源那一版云端原文**的 SHA-256（不是本地文件此刻的字节）
-    pub lineage_sha256: Option<String>,
+    /// 这份本地文件**怎么来的**（下载 / 用户复制 / 内部拷贝 / 导入）。没有记录 ⇒ `None`
+    pub source_kind: Option<OriginKind>,
+    /// 这份副本**建的时候**哪个源在生效（[`SourceIdentity::key`]）。
+    ///
+    /// ★ 唯一来源：文件尾部 `[mkp_source]` 记录里的 `platform` + `repo` + `branch`
+    /// （2026-11-04 起**只读文件**，不再读 `run/` 的账）。
+    pub source_ref: Option<String>,
+    /// 来源的配方版本标记（记录里的 `origin.at` 或文件头 `# release_time`）。
+    /// **只做展示**：它不是发布顺序。
+    pub source_release: Option<String>,
+    /// ★ **来源版本时间**：这份对应那个云端版本**实际发布**的时刻。
+    ///
+    /// 唯一来源 = 记录里履历最后一条的 `at`（接受/下载那一刻由客户端写入）。
+    /// 没有记录 ⇒ `None`（界面写「未知」），**不许拿写盘记录 `generated_at` 顶**。
+    pub source_version_at: Option<String>,
+    /// 来源那一版云端**原文**的 SHA-256（不是本地文件此刻的字节）
+    pub source_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
     pub cloud_published_at: Option<String>,
     /// 当前云端这一份的原文摘要（目录里登记的 sha256）—— 「更多」里对照用
     pub cloud_sha256: Option<String>,
-    /// 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `None`
-    pub lineage_catalog: Option<String>,
-    /// 血统认定自己基于那一条线的第几号（`# based_on_serial`）。老副本 ⇒ `None`
-    pub lineage_serial: Option<u64>,
+    /// 来源认定自己属于哪条发布线。没有记录 ⇒ `None`
+    pub source_catalog: Option<String>,
+    /// 来源认定自己基于那一条线的第几号。没有记录 ⇒ `None`
+    pub source_serial: Option<u64>,
     /// 当前目录的发布线（`catalog.catalogId`）。老目录 / 随包旧版 ⇒ `None`
     pub cloud_catalog: Option<String>,
     /// 当前目录是那一条线的第几号（`catalog.publishSerial`）
@@ -256,12 +265,13 @@ impl LocalState {
     }
 }
 
-/// 读一份文件的头注释（最多 [`LINEAGE_READ_LIMIT`] 字节）拿血统。
+/// 读一份文件的来源记录（`[mkp_source]` 在**尾部**，所以要整份读）。
 ///
-/// 读不出来（不是文本、没权限、文件太大被截断而三行不在前面）⇒ `None`：
-/// 这一层不为此报错 —— 血统是**附加信息**，缺了不影响这份文件被认成用户的预设。
-pub fn lineage_of_file(path: &Path) -> Option<Lineage> {
-    head_text(path).and_then(|t| lineage::parse_lineage_from_content(&t))
+/// 读不出来（不是文本、没权限）⇒ `None`：这一层不为此报错 —— 来源是**附加信息**，
+/// 缺了不影响这份文件被认成用户的预设。
+pub fn source_of_file(path: &Path) -> Option<SourceProvenance> {
+    let text = std::fs::read_to_string(path).ok()?;
+    source_record::parse(&text)
 }
 
 /// 读一份文件的头注释原文（最多 [`LINEAGE_READ_LIMIT`] 字节，UTF-8 读不进就 `None`）。
@@ -281,12 +291,12 @@ fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
 
 /// **这份用户文件是从哪一份云端派生的、那一版现在还在不在**。
 ///
-/// 血统里存的是 `based_on`（**`catalog.path`**，形如 `delivery/mkp/presets/A1-standard.toml`；
+/// 来源记录里存的是 `file`（**`catalog.path`**，形如 `delivery/mkp/presets/A1-standard.toml`；
 /// 2026-10-04 前是 `mkp/presets/…`，那种老形状**认不出就是 Unknown**，不回填）
-/// 与 `based_on_sha256`（那时候云端那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
+/// 与 `sha256`（那时候云端那一版**全文**的摘要）。拿它跟目录里现在登记的那一份比：
 ///
 /// ```text
-/// 没有血统 / 目录里没有那份路径      ⇒ Unknown
+/// 没有来源记录 / 目录里没有那份路径      ⇒ Unknown
 /// 不是同一个源（账上没有源身份）      ⇒ Elsewhere   ← 只给「下载」，不给「更新」
 /// 同一个源 + 摘要一样                ⇒ Current
 /// 同一个源 + 摘要不同 + 云端更旧      ⇒ Newer       ← 只显示「云端较旧」，不给任何动作
@@ -297,36 +307,52 @@ fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
 /// 反过来（先比 SHA）就是那个已经被推翻的行为 —— 从 GitHub 切到旧一版的 Gitee，
 /// 每一份派生过的文件都变成「有新版」，把用户往回带。
 ///
-/// 只看血统里记的那一份，**不看用户文件自己的字节**：用户改过的东西必然与云端不同，
+/// 只看来源记录里记的那一份，**不看用户文件自己的字节**：用户改过的东西必然与云端不同，
 /// 拿它去比只会得出"永远不一样"这种废话。
 pub fn based_on(
     judge: &Judge<'_>,
-    lineage: Option<&Lineage>,
-    provenance: Option<&LocalProvenance>,
+    source: Option<&SourceProvenance>,
+    ledger: Option<&LocalProvenance>,
 ) -> Verdict {
-    judge_against(judge, lineage, provenance)
+    judge_against(judge, source, ledger)
 }
 
 /// 判定本体（[`based_on`] 是它唯一的公开出口）。
+///
+/// `source` = 文件尾部 `[mkp_source]` 记录（**判定与展示都只认它**）；
+/// `ledger` = `run/provenance.json` 的运行索引，**只用来补"我怎么来的"这一格**，
+/// 不再参与"来源版本时间 / 发布线 / 序号"（2026-11-04 作者裁定：展示链只认文件）。
 fn judge_against(
     judge: &Judge<'_>,
-    lineage: Option<&Lineage>,
-    provenance: Option<&LocalProvenance>,
+    source: Option<&SourceProvenance>,
+    ledger: Option<&LocalProvenance>,
 ) -> Verdict {
+    /* 「来源版本」= 履历最后一条（接受/下载的那一版）；没有履历才退到 origin */
+    let version = source.and_then(|p| p.latest_version());
+    let origin = source.and_then(|p| p.origin.as_ref());
     let mut facts = VerdictFacts {
-        lineage_kind: provenance.map(|p| p.kind),
-        lineage_source: provenance
-            .and_then(|p| p.identity.as_ref())
-            .map(SourceIdentity::key),
-        lineage_release: lineage.and_then(|l| l.based_on_release_time.clone()),
-        /* ★ 这一格只认**下载那一刻定格**的目录发布时刻；老账没有 ⇒ None（界面写「未知」） */
-        lineage_published_at: provenance.and_then(|p| p.published_at.clone()),
-        lineage_sha256: lineage.and_then(|l| l.based_on_sha256.clone()),
+        source_kind: ledger
+            .map(|p| p.kind)
+            .or_else(|| origin.and_then(|o| origin_kind_of(o.kind.as_deref()))),
+        /* 源身份：优先文件里记的（换电脑也说得清），账只能补空缺 */
+        source_ref: address_of(origin).or_else(|| {
+            ledger
+                .and_then(|p| p.identity.as_ref())
+                .map(SourceIdentity::key)
+        }),
+        source_release: version.and_then(|v| v.at.clone()).or_else(|| {
+            source
+                .and_then(|p| p.origin.as_ref())
+                .and_then(|o| o.at.clone())
+        }),
+        /* ★ 「来源版本时间」只认履历里那一格；没有就是未知（不拿写盘记录顶） */
+        source_version_at: version.and_then(|v| v.at.clone()),
+        source_sha256: version.and_then(|v| v.sha256.clone()),
         cloud_source: judge.cloud.map(SourceIdentity::key),
         cloud_published_at: judge.catalog.published_at.clone(),
         cloud_sha256: None,
-        lineage_catalog: lineage.and_then(|l| l.based_on_catalog.clone()),
-        lineage_serial: lineage.and_then(|l| l.based_on_serial),
+        source_catalog: version.and_then(|v| v.catalog.clone()),
+        source_serial: version.and_then(|v| v.serial),
         cloud_catalog: judge.catalog.catalog_id.clone(),
         cloud_serial: judge.catalog.publish_serial,
         unverified_reason: None,
@@ -355,7 +381,7 @@ fn judge_against(
     /*
      * ★ **判定顺序**（2026-10-28 三问题模型）：
      *
-     *   ① 血统有没有发布线身份      —— 没有 ⇒ `Unverified`（不知道，不猜）
+     *   ① 来源记录有没有发布线身份      —— 没有 ⇒ `Unverified`（不知道，不猜）
      *   ② 两条线是不是同一条        —— 不同 ⇒ `Elsewhere`（不给更新）
      *   ③ 序号谁大                  —— 云端小 ⇒ `Newer`；一样 ⇒ 只可能是 `Current` /
      *                                  `Inconsistent`；云端大 ⇒ 看内容
@@ -365,27 +391,33 @@ fn judge_against(
      * `serial` 只回答"发布有没有往前走"，**不回答"这一份要不要更新"** ——
      * 那是第 ④ 步的事（一次发布改了 3 份，另外 6 份就是 `Unchanged`）。
      */
-    let Some(lineage) = lineage else {
-        return unknown!("no_lineage");
-    };
-    let Some(source) = lineage.based_on.as_deref() else {
-        return unknown!("no_lineage");
+    let Some(source_file) = source
+        .and_then(|p| p.latest_version())
+        .and_then(|v| v.file.as_deref())
+    else {
+        return unknown!("no_source_record");
     };
     let known = judge
         .catalog
         .files
         .iter()
-        .find(|f| f.path == source)
-        .or_else(|| judge.catalog.files.iter().find(|f| f.file_name == source));
+        .find(|f| f.path == source_file)
+        .or_else(|| {
+            judge
+                .catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == source_file)
+        });
     let Some(file) = known else {
-        /* 血统指的那一份根本不在当前目录里（换源 / 下线 / 改过名）—— 说不清 */
+        /* 来源指的那一份根本不在当前目录里（换源 / 下线 / 改过名）—— 说不清 */
         return unknown!("not_in_catalog");
     };
     /* 目录里登记的云端原文摘要：给「更多」对照用 */
     facts.cloud_sha256 = file.expected_sha().map(str::to_owned);
 
-    /* ① 血统有没有发布线 / 序号：老副本没有，老目录也没有 */
-    let (Some(lineage_line), Some(lineage_serial)) = (&facts.lineage_catalog, facts.lineage_serial)
+    /* ① 来源有没有发布线 / 序号：老副本没有，老目录也没有 */
+    let (Some(source_line), Some(source_serial)) = (&facts.source_catalog, facts.source_serial)
     else {
         return unknown!("no_release_line");
     };
@@ -407,7 +439,7 @@ fn judge_against(
      * 就不再"退回只按发布线判" —— 两个分支各自数号，序号根本不在一条数轴上，
      * 硬比出来的 `outdated` / `newer` 都是编的。说不清就 `Unverified`。
      */
-    let Some(mine) = facts.lineage_source.as_deref() else {
+    let Some(mine) = facts.source_ref.as_deref() else {
         return unknown!("no_source_identity");
     };
     if let Some(theirs) = facts.cloud_source.as_deref() {
@@ -429,20 +461,20 @@ fn judge_against(
     }
 
     /* ② 同不同一条线 —— 不同线时序号毫无可比性（两条线各自数各自的号） */
-    if lineage_line != cloud_line {
+    if source_line != cloud_line {
         return verdict!(BasedOn::Elsewhere, None);
     }
 
     /* ③ 发布顺序 */
-    if cloud_serial < lineage_serial {
+    if cloud_serial < source_serial {
         return verdict!(BasedOn::Newer, None);
     }
 
     /*
-     * ④ 内容：血统记的是**它当时基于的那一版**的摘要，不是这份文件现在的字节
+     * ④ 内容：来源记的是**它当时基于的那一版**的摘要，不是这份文件现在的字节
      *   （用户改过的东西必然与云端不同，拿它比只会得出"永远不一样"这种废话）。
      */
-    let same_content = match (lineage.based_on_sha256.as_deref(), file.expected_sha()) {
+    let same_content = match (facts.source_sha256.as_deref(), file.expected_sha()) {
         (Some(a), Some(b)) => a == b,
         /*
          * 缺摘要就说不清 —— 尤其**随包 bootstrap 目录不登记期望值**，
@@ -451,7 +483,7 @@ fn judge_against(
         _ => return unknown!("no_sha"),
     };
 
-    if cloud_serial == lineage_serial {
+    if cloud_serial == source_serial {
         return verdict!(
             if same_content {
                 BasedOn::Current
@@ -482,7 +514,7 @@ fn judge_against(
 ///
 /// # 它**不再参与**"谁新"的判定（2026-10-28）
 ///
-/// 曾经 `cloud_direction` 拿它比对血统的 `# release_time` 与目录的 `publishedAt`
+/// 曾经 `cloud_direction` 拿它比对来源记录的 `# release_time` 与目录的 `publishedAt`
 /// —— 那是两个不同性质的数（配方写作日期 vs 发布时刻），比出来的"云端永远更新"
 /// 正是这次要根治的误报。现在"谁新"由 `publishSerial` 回答（见 [`based_on`]），
 /// 时间只做展示。
@@ -492,7 +524,7 @@ fn judge_against(
 fn moment_of(raw: &str) -> Option<i64> {
     let s = raw.trim();
     /*
-     * 血统那一行 `# release_time` 写的是 `2026-10-15 09:00:00`（空格），目录里是
+     * 来源记录那一行 `# release_time` 写的是 `2026-10-15 09:00:00`（空格），目录里是
      * RFC3339（`T`）。同一件事的两种写法都得认 —— 只有认得出才能回答"云端是不是更旧"。
      */
     let normalized = s.replacen(' ', "T", 1);
@@ -548,18 +580,20 @@ fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
     era * 146_097 + doe - 719_468
 }
 
-/// 血统指的那一份云端，现在**对应哪台机型的哪个版本**（界面要说人话用）。
+/// 来源记录指的那一份云端，现在**对应哪台机型的哪个版本**（界面要说人话用）。
 /// 说不清就 `None` —— 不猜。
-pub fn source_of<'a>(
+pub fn source_file_in<'a>(
     catalog: &'a Catalog,
-    lineage: Option<&Lineage>,
+    source: Option<&SourceProvenance>,
 ) -> Option<&'a super::catalog::CatalogFile> {
-    let source = lineage?.based_on.as_deref()?;
+    let file = source
+        .and_then(|p| p.latest_version())
+        .and_then(|v| v.file.as_deref())?;
     catalog
         .files
         .iter()
-        .find(|f| f.path == source)
-        .or_else(|| catalog.files.iter().find(|f| f.file_name == source))
+        .find(|f| f.path == file)
+        .or_else(|| catalog.files.iter().find(|f| f.file_name == file))
 }
 
 /// 按扩展名认类别。**只认 `.toml`（MKP 预设）**。
@@ -667,41 +701,42 @@ pub fn local_files(user_root: &Path) -> Vec<LocalFile> {
             let kind = kind_of(&file_name);
             /*
              * 第九层：先过"路径合法"这道闸（与读正文 / 应用 / 编辑同一道 `resolve_in`）——
-             * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（血统也一样不读）。
+             * 符号链接指向用户根外面的，在这里拦下，**一个字节都不读**（来源记录也一样不读）。
              * 只对预设候选暴露状态：别的文件本来就没有"能不能当预设用"这一档。
              */
-            let (head, state, state_detail) = match crate::fsx::paths::resolve_in(user_root, &rel) {
-                Err(_) => (
-                    None,
-                    (kind == Some(PRESET)).then_some(LocalState::Unreadable),
-                    (kind == Some(PRESET)).then(|| {
-                        "它指向 presets-local/ 外面 —— 程序不读用户根外面的东西".to_owned()
-                    }),
-                ),
-                Ok(real) => {
-                    let (state, detail) = if kind == Some(PRESET) {
-                        preset_file_state(&real)
-                    } else {
-                        (None, None)
-                    };
-                    (head_text(&real), state, detail)
-                }
-            };
-            /* 血统（三行）与归属（machine / variant 两行）读的是**同一段头注释** ——
-            一次读出，不许为省一次文件头 IO 把两处事实抄成两份 */
-            let lineage = head
-                .as_deref()
-                .and_then(lineage::parse_lineage_from_content);
+            let (head, source, state, state_detail) =
+                match crate::fsx::paths::resolve_in(user_root, &rel) {
+                    Err(_) => (
+                        None,
+                        None,
+                        (kind == Some(PRESET)).then_some(LocalState::Unreadable),
+                        (kind == Some(PRESET)).then(|| {
+                            "它指向 presets-local/ 外面 —— 程序不读用户根外面的东西".to_owned()
+                        }),
+                    ),
+                    Ok(real) => {
+                        let (state, detail) = if kind == Some(PRESET) {
+                            preset_file_state(&real)
+                        } else {
+                            (None, None)
+                        };
+                        /* 来源记录在**尾部**，头注释（machine / variant）在前面 ——
+                        一次读整份文本，两处各取所需，不许为省一次 IO 抄成两份事实 */
+                        let full = std::fs::read_to_string(&real).ok();
+                        let source = full.as_deref().and_then(source_record::parse);
+                        (head_text(&real), source, state, detail)
+                    }
+                };
             let machine = head
                 .as_deref()
-                .and_then(lineage::parse_machine_from_content);
+                .and_then(source_record::parse_machine_from_content);
             let variant = head
                 .as_deref()
-                .and_then(lineage::parse_variant_from_content);
+                .and_then(source_record::parse_variant_from_content);
             out.push(LocalFile {
                 path: rel,
                 kind,
-                lineage,
+                source,
                 machine,
                 variant,
                 state,
@@ -760,8 +795,8 @@ pub struct Committed {
 /// 云端原件（按 `catalog.path` 落盘的那一份）**一概不碰**（只有云端换版本能替换它）。
 /// 再存一次就是**覆盖它自己**：用户改的是"我那份"，不该越存越多。
 ///
-/// 写下去的是**副本的形状**：`text` + 头注释块里三行血统（[`super::lineage::make_copy`]）——
-/// `based_on` = 来源那份的 **`catalog.path`**（`delivery/mkp/presets/A1-standard.toml`，
+/// 写下去的是**副本的形状**：`text` + 尾部来源记录（[`super::provenance::copy_from_cloud`]）——
+/// `file` = 来源那份的 **`catalog.path`**（`delivery/mkp/presets/A1-standard.toml`，
 /// 与工作台建副本的"哪一版"同一形状）。于是这份文件拷到哪台电脑上都说得清
 /// 自己从哪来、基于哪一版（第七层：「云端换版了、你这份还是基于旧版」就靠它判）。
 pub fn commit_draft(
@@ -775,7 +810,7 @@ pub fn commit_draft(
     /* 名字是从目录里的文件名派生的，但仍然过一遍防穿越闸 */
     let target = crate::fsx::paths::resolve_in(user_root, &rel)?;
     let replaced = target.exists();
-    let body = super::lineage::make_copy(text, based_on);
+    let body = source_record::commit_text(text, based_on);
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
     Ok(Committed {
         path: rel,
@@ -791,10 +826,10 @@ pub fn commit_draft(
 ///
 /// - **落点是原来那条路径**，不是派生的新名字 —— 用户改的就是"我那份"，
 ///   所以不会出现 `（已修改）2.toml` / `（再次修改）.toml` 这种越改越多的名字；
-/// - **三行血统照抄文件里原来那三行**（出处没变，见
-///   [`super::lineage::rewrite_keeping_lineage`]）—— 保存之后它仍然说得清
+/// - **来源记录原样保留**（出处没变，见
+///   [`super::provenance::rewrite_keeping_provenance`]）—— 保存之后它仍然说得清
 ///   "我从哪一版云端派生"，也不会因为重算摘要变成"基于我自己改过的字节"。
-///   这份本来就没有血统（手工拷的 / 别的程序写出来的）⇒ 照实不写，**不编一个出处**。
+///   这份本来就没有记录（手工拖进来的 / 别的程序写出来的）⇒ 照实不写，**不编一个出处**。
 ///
 /// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**：不去别处新建一份（那不是用户点的
 /// 那个"保存"），也不假装存成了。
@@ -807,9 +842,9 @@ pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, A
             &[("rel", rel)],
         )));
     }
-    /* 血统是**这份文件自己的属性**：先读出来再照抄回去（读不出来 = 它本来就没有） */
-    let lineage = lineage_of_file(&target);
-    let body = super::lineage::rewrite_keeping_lineage(text, lineage.as_ref());
+    /* 来源是**这份文件自己的属性**：先读出来再原样写回（读不出来 = 它本来就没有） */
+    let source = source_of_file(&target);
+    let body = source_record::rewrite_keeping_provenance(text, source.as_ref());
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
     Ok(Committed {
         path: rel.to_owned(),
@@ -826,8 +861,9 @@ pub fn save_back(user_root: &Path, rel: &str, text: &str) -> Result<Committed, A
 /// **改一份用户预设的归属**（2026-10-07 作者要的）：把文件头的 `# machine:` /
 /// `# variant:` 两行换成新值 —— 复制出来的那份从此自己说得出它属于哪台机型哪一版。
 ///
-/// 与血统同一族文本手术：**只动那两行注释，正文一个字节不动**（[`super::lineage::
-/// rewrite_machine_variant`]），写盘走 [`crate::fsx::atomic::atomic_write`]。
+/// 与来源记录同一族文本手术：**只动那两行注释，正文一个字节不动**
+/// （[`super::provenance::rewrite_machine_variant`]），写盘走
+/// [`crate::fsx::atomic::atomic_write`]。
 /// 归属是**文件自己的属性** —— 它随文件走，不记在程序账上。
 pub fn set_machine_variant(
     user_root: &Path,
@@ -844,7 +880,7 @@ pub fn set_machine_variant(
         )));
     }
     let text = read_text(user_root, rel)?;
-    let body = super::lineage::rewrite_machine_variant(&text, machine_id, version_id);
+    let body = source_record::rewrite_machine_variant(&text, machine_id, version_id);
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())
 }
 
@@ -881,9 +917,9 @@ pub fn read_preset_text(user_root: &Path, rel: &str) -> Result<String, AppError>
 
 /// 把新的正文**原子写回同一份**用户文件（读-改-写的收尾）。
 ///
-/// 与 [`save_back`] 的分工：那个走编辑器那条链（正文由用户改、血统照抄回去）；
+/// 与 [`save_back`] 的分工：那个走编辑器那条链（正文由用户改、来源记录照抄回去）；
 /// 这个是"正文已经处理好了、只管落盘"的裸写 —— **校准写回**（[`calibration_of`]
-/// 是它的读侧）用它，血统三行原样留在 `text` 里。门槛与读侧同一条（前缀 + 防穿越），
+/// 是它的读侧）用它，来源记录原样留在 `text` 里。门槛与读侧同一条（前缀 + 防穿越），
 /// 文件被移走 / 删掉了照实拒绝，不去别处新建一份。
 pub fn write_text(user_root: &Path, rel: &str, text: &str) -> Result<(), AppError> {
     check_local_prefix(rel)?;
@@ -1173,7 +1209,7 @@ pub enum LegacyOutcome {
     Failed(String),
 }
 
-/// **重命名**一份用户文件（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+/// **重命名**一份用户文件（第十层）：只改名字，**字节一个不动** —— 内容、那三行来源记录、
 /// TOML 都不重写（判据逐字节盯着）。改完还是同一份 Preset、还是同一类。
 ///
 /// ★ 名字**先被修好**（[`normalize_new_name`]：剔不合规字符、超长截到上限），
@@ -1251,10 +1287,10 @@ pub fn apply_rename(user_root: &Path, from_rel: &str, to_rel: &str) -> Result<()
 
 /// **另存为一份新的**（第十一层）：把 `rel` 那一份**按字节**复制成同一格里另一份新的用户文件。
 ///
-/// 与第八层"云端 → 本地文件"那条另存分开（那条改的是内容、要重写血统）—— 这一层是
+/// 与第八层"云端 → 本地文件"那条另存分开（那条改的是内容、要重写来源记录）—— 这一层是
 /// **本地文件 → 本地文件**，而且**不做任何"智能"**：
 ///
-/// - **字节复制**：内容与那三行 `# based_on*` 血统**原样带过去**，不重算
+/// - **字节复制**：内容与那三行 `# based_on*` 来源记录**原样带过去**，不重算
 ///   （来源已经是用户文件，重算会把"从哪一版云端派生"说错）；原文件一个字节不动；
 /// - 新名字过[同一套门槛](normalize_new_name)（能修的修好、后缀保持原样）；
 ///   落点已有东西就**拒绝**（不覆盖、也**不自动改名** —— 名字由用户自己换）；
@@ -1314,9 +1350,9 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 /// - **名字**：传什么写什么，只过"是不是一个像样的名字"那道门槛
 ///   （[`normalize_new_name`]：能修的修好、后缀保持原样）；**撞名就拒** ——
 ///   不覆盖、也不自动改名（调用方先看盘上有没有，有就一个字节都不碰）；
-/// - 写下去的是**副本的形状**：云端原文 + 头注释块里三行血统
-///   （[`super::lineage::make_copy`]，`based_on` 指向来源交付文件的 `catalog.path`，
-///   `based_on_sha256` 就是这一版云端的唯一身份 —— 逐参数云端更新那一套
+/// - 写下去的是**副本的形状**：云端原文 + 尾部来源记录
+///   （[`super::provenance::copy_from_cloud`]，`file` 指向来源交付文件的 `catalog.path`，
+///   `sha256` 就是这一版云端的唯一身份 —— 逐参数云端更新那一套
 ///   就是拿它当"我上次处理到哪一版"的起点）；
 /// - **一个状态都不碰**：不改使用中指针、不建草稿、不进 archive。
 ///
@@ -1325,12 +1361,11 @@ pub fn copy_as_new(user_root: &Path, rel: &str, new_name: &str) -> Result<FileId
 ///
 /// # 「下载」写什么、不写什么（2026-10-28 定死的一条边界）
 ///
-/// 写：`based_on`（哪一份）+ `based_on_sha256`（那一刻的字节）+ 目录有身份时的
-/// `based_on_catalog` / `based_on_serial`。
+/// 写：`file`（哪一份）+ `sha256`（那一刻的字节）+ 目录有身份时的 `catalog` / `serial`。
 ///
 /// **不写**：任何"我已经接受了第 N 号发布"的意思。下载 ≠ 接受版本 ——
 /// 用户只是把云端那份取下来看一眼，之后还得自己决定要不要「更新」。
-/// 所以判定里"对齐到哪一号"只看血统里的那两行，而这两行**取的是目录当刻的值**：
+/// 所以判定里"对齐到哪一号"只看记录里的那两格，而这两格**取的是目录当刻的值**：
 /// 若下载后云端又发了一版，那份副本相对新目录就还是 `Outdated`，
 /// 不会因为"我是从云端下的"就谎称自己是最新的。
 pub fn save_cloud_as_new(
@@ -1356,11 +1391,26 @@ pub fn save_cloud_as_new(
             &[("name", &name.to_string())],
         )));
     }
-    let body = super::lineage::make_copy_with_line(
+    /* 来源身份（平台 / 仓库 / 分支）从当前生效的源取；没配置源就不写 —— 不编 */
+    let identity = identity_here(user_root);
+    let source_ref = SourceRef {
+        file: Some(file.path.clone()),
+        platform: identity.as_ref().map(|i| i.platform.clone()),
+        repo: identity.as_ref().map(|i| i.repo.clone()),
+        branch: identity.as_ref().map(|i| i.git_ref.clone()),
+        at: line.and_then(|l| l.published_at.clone()),
+        sha256: Some(source_record::sha256_hex(cloud_text)),
+        catalog: line.map(|l| l.catalog_id.clone()),
+        serial: line.and_then(|l| l.serial),
+        ..SourceRef::default()
+    };
+    let body = source_record::copy_from_cloud(
         cloud_text,
-        &file.path,
-        line.map(|l| l.catalog_id.as_str()),
-        line.and_then(|l| l.serial),
+        SourceRef {
+            kind: Some("download".to_owned()),
+            ..source_ref.clone()
+        },
+        source_ref,
     );
     crate::fsx::atomic::atomic_write(&target, body.as_bytes())?;
     Ok(FileIdentity {
@@ -1370,14 +1420,55 @@ pub fn save_cloud_as_new(
     })
 }
 
-/// **一份目录自报的发布身份**（`catalogId` + `publishSerial`），下载时抄进血统用。
+/// 把来源记录里的「平台 + 仓库 + 分支」拼回 `平台#仓库@分支`（与 [`SourceIdentity::key`] 同形），
+/// 供"能不能比较"那道闸复用同一把尺子。缺任一段 ⇒ `None`（不猜）。
+fn address_of(r: Option<&SourceRef>) -> Option<String> {
+    let r = r?;
+    let platform = r.platform.as_deref()?.trim();
+    let repo = r.repo.as_deref()?.trim();
+    let git_ref = r
+        .branch
+        .as_deref()
+        .unwrap_or(super::source_identity::NO_REF);
+    if platform.is_empty() || repo.is_empty() {
+        return None;
+    }
+    Some(format!("{platform}#{repo}@{git_ref}"))
+}
+
+/// 记录里的 `kind` 串 → [`OriginKind`]。认不出 ⇒ `None`（不猜一个默认档）。
+fn origin_kind_of(raw: Option<&str>) -> Option<OriginKind> {
+    Some(match raw? {
+        "download" => OriginKind::Download,
+        /* 用户手动「复制」与内部自动「拷贝」在来路上都是派生，界面文案分开，
+        枚举不拆：既有前端契约按 download / copy / import / unknown 四档展示 */
+        "copy" | "duplicate" => OriginKind::Copy,
+        "import" => OriginKind::Import,
+        "builtin" => OriginKind::Download,
+        _ => return None,
+    })
+}
+
+/// 当前生效的源身份（`平台#仓库@分支` 那个结构的原身）。没配置源 / 内置地址未注入
+/// ⇒ `None`：来源记录里那几格就**不写**，不编一个"大概是官方"。
+fn identity_here(root: &Path) -> Option<SourceIdentity> {
+    crate::runtime::app_state::preset_source(root)
+        .ok()
+        .flatten()
+        .and_then(|s| crate::runtime::source_identity::identity_of(&s))
+}
+
+/// **一份目录自报的发布身份**（`catalogId` + `publishSerial` + 发布时刻），
+/// 下载时抄进来源记录。
 ///
 /// 单独一个结构是为了让"目录有没有身份"这件事在类型上就看得见：老目录 / 随包旧版
-/// 传 `None`，于是血统里那两行**根本不写** —— 而不是写一个"大概是官方线"。
+/// 传 `None`，于是记录里那两格**根本不写** —— 而不是写一个"大概是官方线"。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogLine {
     pub catalog_id: String,
     pub serial: Option<u64>,
+    /// 这一代目录的**发布时刻**（来源版本时间的唯一合法来源之一：下载那一刻定格）。
+    pub published_at: Option<String>,
 }
 
 impl CatalogLine {
@@ -1386,6 +1477,7 @@ impl CatalogLine {
         Some(Self {
             catalog_id: catalog.catalog_id.clone()?,
             serial: catalog.publish_serial,
+            published_at: catalog.published_at.clone(),
         })
     }
 }
@@ -1456,7 +1548,7 @@ mod tests {
             path: format!("{}/{name}", super::super::catalog::PRESET_DEST_DIR),
             machine_id: "A1".to_owned(),
             version_id: "STANDARD".to_owned(),
-            sha256: Some(lineage::sha256_hex(content)),
+            sha256: Some(source_record::sha256_hex(content)),
             size: Some(content.len() as u64),
         }
     }
@@ -1653,7 +1745,7 @@ mod tests {
     /// **这一层的核心不变式**：另存只写用户根 —— 云端原件（`mkp/`）字节不变、
     /// 下载区里不会多出文件（临时文件不住那儿）。再存一次是覆盖它自己。
     ///
-    /// 写下去的是**副本的形状**：正文 + 头注释里三行血统（剪掉三行必须与正文逐字节相同）。
+    /// 写下去的是**副本的形状**：正文 + 头注释里三行来源记录（剪掉三行必须与正文逐字节相同）。
     #[test]
     fn commit_writes_the_edited_copy_and_leaves_the_official_alone() {
         let user = tempfile::tempdir().unwrap();
@@ -1675,12 +1767,16 @@ mod tests {
         assert!(!done.replaced, "第一次另存没有盖掉谁");
         let saved = std::fs::read_to_string(user.path().join(&done.path)).unwrap();
         assert_eq!(
-            crate::runtime::lineage::strip_lineage_for_compare(&saved),
-            "涂胶宽度 = 1.4",
-            "剪掉血统三行就是用户改过的正文"
+            crate::runtime::provenance::strip_for_compare(&saved),
+            "涂胶宽度 = 1.4\n",
+            "剥掉尾部来源记录就是用户改过的正文"
         );
-        let got = crate::runtime::lineage::parse_lineage_from_content(&saved).expect("该带上血统");
-        assert_eq!(got.based_on.as_deref(), Some(label), "说得出是从哪一份拷的");
+        let got = crate::runtime::provenance::parse(&saved).expect("该带上来源记录");
+        assert_eq!(
+            got.latest_version().and_then(|v| v.file.as_deref()),
+            Some(label),
+            "说得出是从哪一份来的"
+        );
 
         assert_eq!(
             std::fs::read(cloud.path().join("mkp/presets/A1-fast.toml")).unwrap(),
@@ -1695,19 +1791,28 @@ mod tests {
             "下载区里不会多出东西：临时文件不住 mkp/"
         );
 
-        /* 再存一次：还是同一个名字，盖掉它自己（血统也还是三行，不叠加） */
+        /* 再存一次：还是同一个名字，盖掉它自己（来源记录也只有一段，不叠加） */
         let again = commit_draft(user.path(), "A1-fast.toml", label, "涂胶宽度 = 1.5").unwrap();
         assert!(again.replaced, "第二次是覆盖");
         assert_eq!(local_files(user.path()).len(), 1, "不会越存越多");
         let saved = std::fs::read_to_string(user.path().join(&again.path)).unwrap();
         assert_eq!(
-            crate::runtime::lineage::strip_lineage_for_compare(&saved),
-            "涂胶宽度 = 1.5"
+            crate::runtime::provenance::strip_for_compare(&saved),
+            "涂胶宽度 = 1.5\n"
         );
-        assert_eq!(saved.matches("# based_on:").count(), 1, "血统不叠加");
+        assert_eq!(
+            saved.matches("[mkp_source]").count(),
+            1,
+            "来源记录不许叠加成两段"
+        );
+        assert_eq!(
+            saved.matches("# based_on:").count(),
+            0,
+            "旧的头部 based_on 不许再写回来"
+        );
     }
 
-    /// 另存出来的那份，接着就能被用户线列出来、血统也读得回来（一条链的收尾连上了）
+    /// 另存出来的那份，接着就能被用户线列出来、来源记录也读得回来（一条链的收尾连上了）
     #[test]
     fn the_committed_copy_shows_up_in_local_files() {
         let user = tempfile::tempdir().unwrap();
@@ -1725,11 +1830,12 @@ mod tests {
         );
         assert_eq!(
             listed[0]
-                .lineage
+                .source
                 .as_ref()
-                .and_then(|l| l.based_on.as_deref()),
+                .and_then(|p| p.latest_version())
+                .and_then(|v| v.file.as_deref()),
             Some(label),
-            "列出来的时候就把血统读出来了"
+            "列出来的时候就把来源记录读出来了"
         );
         assert!(check_local_prefix(&done.path).is_ok(), "落点在那一格里");
     }
@@ -1737,13 +1843,13 @@ mod tests {
     /* ---------- 写回自己（第八层：改我那份 → 保存） ---------- */
 
     /// **这一层的核心不变式**：改我那份 → 保存 = **写回同一份** ——
-    /// 不产生 `（已修改）2.toml`，血统还是当初那三行（出处没变）
+    /// 不产生 `（已修改）2.toml`，来源记录还是当初那三行（出处没变）
     #[test]
-    fn saving_back_writes_the_same_file_and_keeps_the_lineage() {
+    fn saving_back_writes_the_same_file_and_keeps_the_provenance() {
         let user = tempfile::tempdir().unwrap();
         let label = "delivery/mkp/presets/A1-standard.toml";
         let done = commit_draft(user.path(), "A1-standard.toml", label, "涂胶宽度 = 1.0").unwrap();
-        let lineage = lineage_of_file(&user.path().join(&done.path)).expect("副本该有血统");
+        let lineage = source_of_file(&user.path().join(&done.path)).expect("副本该有来源记录");
         let edited = "涂胶宽度 = 1.4";
 
         let back = save_back(user.path(), &done.path, edited).unwrap();
@@ -1755,12 +1861,12 @@ mod tests {
 
         let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
         assert_eq!(
-            lineage::strip_lineage_for_compare(&after),
-            edited,
-            "正文就是改过的那份"
+            source_record::strip_for_compare(&after),
+            format!("{edited}\n"),
+            "正文就是改过的那份（剥掉尾部记录后只多一个行尾换行）"
         );
         assert_eq!(
-            lineage_of_file(&user.path().join(&back.path)),
+            source_of_file(&user.path().join(&back.path)),
             Some(lineage),
             "出处那三行一个字都没变 —— 不会变成\"基于我自己改过的字节\""
         );
@@ -1778,7 +1884,7 @@ mod tests {
         )
         .unwrap();
         let before = std::fs::read(user.path().join(&done.path)).unwrap();
-        let body = lineage::strip_lineage_for_compare(&String::from_utf8_lossy(&before));
+        let body = source_record::strip_for_compare(&String::from_utf8_lossy(&before));
 
         save_back(user.path(), &done.path, &body).unwrap();
 
@@ -1789,17 +1895,17 @@ mod tests {
         );
     }
 
-    /// 本来就没有血统的那份（手工拷的 / 别的程序写的）写回时**不编一个出处**
+    /// 本来就没有来源记录的那份（手工拷的 / 别的程序写的）写回时**不编一个出处**
     #[test]
-    fn saving_back_a_file_without_lineage_invents_none() {
+    fn saving_back_a_file_without_provenance_invents_none() {
         let user = tempfile::tempdir().unwrap();
         write(user.path(), "presets-local/本地.toml", "涂胶宽度 = 1.0");
 
         let back = save_back(user.path(), "presets-local/本地.toml", "涂胶宽度 = 1.2").unwrap();
 
         let after = std::fs::read_to_string(user.path().join(&back.path)).unwrap();
-        assert_eq!(after, "涂胶宽度 = 1.2", "没有血统就不写血统");
-        assert_eq!(lineage_of_file(&user.path().join(&back.path)), None);
+        assert_eq!(after, "涂胶宽度 = 1.2", "没有来源记录就不写来源记录");
+        assert_eq!(source_of_file(&user.path().join(&back.path)), None);
     }
 
     /// 编辑期间这份被移走 / 删掉了 ⇒ **拒绝并说清**，不去别处新建一份
@@ -1829,14 +1935,19 @@ mod tests {
     fn the_official_update_shows_up_as_based_on_an_old_version() {
         let v1 = entry_bytes("A1-standard.toml", "云端第一版");
         let mut v2 = entry_bytes("A1-standard.toml", "云端第二版");
-        let based_on_v1 = lineage_at(11, "云端第一版");
+        let source_v1 = source_at(11, "云端第一版");
         let gh = github();
 
         /* 目录里还是 v1：基于当前版 */
         let mut c1 = catalog_with(vec![v1.clone()]);
         stamp(&mut c1, 11);
         assert_eq!(
-            based_on_id(&judge(&c1, Some(&gh)), Some(&based_on_v1), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&c1, Some(&gh)),
+                Some(&record_of(&source_v1)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Current
         );
 
@@ -1845,12 +1956,17 @@ mod tests {
         let mut c2 = catalog_with(vec![v2.clone()]);
         stamp(&mut c2, 12);
         assert_eq!(
-            based_on_id(&judge(&c2, Some(&gh)), Some(&based_on_v1), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&c2, Some(&gh)),
+                Some(&record_of(&source_v1)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Outdated,
             "云端换版了，用户那份还是基于旧版"
         );
         assert_eq!(
-            source_of(&c2, Some(&based_on_v1)).map(|f| f.machine_id.as_str()),
+            source_file_in(&c2, Some(&record_of(&source_v1))).map(|f| f.machine_id.as_str()),
             Some("A1"),
             "界面要说得出它是哪台机型哪一版改出来的"
         );
@@ -1862,18 +1978,18 @@ mod tests {
         catalog.publish_serial = Some(serial);
     }
 
-    /// 一份"基于第 serial 号发布的 `text` 那一版"的血统。
-    fn lineage_at(serial: u64, text: &str) -> Lineage {
-        Lineage {
-            based_on: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
-            based_on_release_time: None,
-            based_on_sha256: Some(lineage::sha256_hex(text)),
-            based_on_catalog: Some("support-ease".to_owned()),
-            based_on_serial: Some(serial),
+    /// 一份"基于第 serial 号发布的 `text` 那一版"的来源记录。
+    fn source_at(serial: u64, text: &str) -> SourceRef {
+        SourceRef {
+            file: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
+            sha256: Some(source_record::sha256_hex(text)),
+            catalog: Some("support-ease".to_owned()),
+            serial: Some(serial),
+            ..SourceRef::default()
         }
     }
 
-    /// 说不清那几档：没有血统 / 血统里没摘要 / 来源已经不在目录里（换源、下线）
+    /// 说不清那几档：没有来源记录 / 来源记录里没摘要 / 来源已经不在目录里（换源、下线）
     #[test]
     fn unknown_when_the_source_cannot_be_resolved() {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端")]);
@@ -1882,33 +1998,29 @@ mod tests {
         let j = judge(&catalog, Some(&gh));
 
         assert_eq!(
-            based_on_id(&j, None, Some(&gh)).based_on,
+            source_verdict(&j, None, Some(&gh)).based_on,
             BasedOn::Unverified,
-            "没有血统"
+            "没有来源记录"
         );
 
-        let no_sha = Lineage {
-            based_on_release_time: None,
-            ..lineage_at(7, "云端")
-        };
-        let mut no_sha = no_sha;
-        no_sha.based_on_sha256 = None;
+        let mut no_sha = source_at(7, "云端");
+        no_sha.sha256 = None;
         assert_eq!(
-            based_on_id(&j, Some(&no_sha), Some(&gh)).based_on,
+            source_verdict(&j, Some(&record_of(&no_sha)), Some(&gh)).based_on,
             BasedOn::Unverified,
             "记了来源没记摘要 —— 比不了就是比不了"
         );
 
-        let gone = Lineage {
-            based_on: Some("delivery/mkp/presets/A1-gone.toml".to_owned()),
-            ..lineage_at(7, "云端")
+        let gone = SourceRef {
+            file: Some("delivery/mkp/presets/A1-gone.toml".to_owned()),
+            ..source_at(7, "云端")
         };
         assert_eq!(
-            based_on_id(&j, Some(&gone), Some(&gh)).based_on,
+            source_verdict(&j, Some(&record_of(&gone)), Some(&gh)).based_on,
             BasedOn::Unverified,
             "来源不在目录里（换源或下线）"
         );
-        assert!(source_of(&catalog, Some(&gone)).is_none());
+        assert!(source_file_in(&catalog, Some(&record_of(&gone))).is_none());
 
         /* 随包 bootstrap 目录没登记期望值 ⇒ 拼不出摘要 ⇒ 也是 Unverified（不许报假更新） */
         let mut bare = entry_bytes("A1-standard.toml", "云端");
@@ -1916,9 +2028,9 @@ mod tests {
         let mut catalog = catalog_with(vec![bare]);
         stamp(&mut catalog, 7);
         let j = judge(&catalog, Some(&gh));
-        let sha = lineage_at(7, "云端第一版");
+        let sha = source_at(7, "云端第一版");
         assert_eq!(
-            based_on_id(&j, Some(&sha), Some(&gh)).based_on,
+            source_verdict(&j, Some(&record_of(&sha)), Some(&gh)).based_on,
             BasedOn::Unverified,
             "目录没登记期望值 —— 不许当成过期"
         );
@@ -1936,9 +2048,9 @@ mod tests {
         /* 镜像落后一版：云端 39 号、我基于 42 号 ⇒ 云端较旧，不给更新 */
         let mut behind = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut behind, 39);
-        let v = based_on_id(
+        let v = source_verdict(
             &judge(&behind, Some(&gt)),
-            Some(&lineage_at(42, "云端第一版")),
+            Some(&record_of(&source_at(42, "云端第一版"))),
             Some(&gh),
         );
         assert_eq!(
@@ -1956,15 +2068,15 @@ mod tests {
             "详情照实说当前云端是哪个源"
         );
         assert_eq!(
-            v.facts.lineage_source.as_deref(),
+            v.facts.source_ref.as_deref(),
             Some("github#o/r@main"),
             "以及这一份当初来自哪个源"
         );
 
         /* 两镜像同一代：39 号 + 同一份字节 ⇒ 已是最新 */
-        let same = based_on_id(
+        let same = source_verdict(
             &judge(&behind, Some(&gt)),
-            Some(&lineage_at(39, "云端第二版")),
+            Some(&record_of(&source_at(39, "云端第二版"))),
             Some(&gh),
         );
         assert_eq!(same.based_on, BasedOn::Current);
@@ -1979,9 +2091,9 @@ mod tests {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         catalog.catalog_id = Some("someone-else".to_owned());
         catalog.publish_serial = Some(99);
-        let v = based_on_id(
+        let v = source_verdict(
             &judge(&catalog, Some(&gh)),
-            Some(&lineage_at(42, "云端第一版")),
+            Some(&record_of(&source_at(42, "云端第一版"))),
             Some(&gh),
         );
         assert_eq!(v.based_on, BasedOn::Elsewhere);
@@ -1997,9 +2109,9 @@ mod tests {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut catalog, 43);
 
-        let same_bytes = based_on_id(
+        let same_bytes = source_verdict(
             &judge(&catalog, Some(&gh)),
-            Some(&lineage_at(42, "云端第一版")),
+            Some(&record_of(&source_at(42, "云端第一版"))),
             Some(&gh),
         );
         assert_eq!(
@@ -2009,9 +2121,9 @@ mod tests {
         );
         assert!(!same_bytes.based_on.allows_update());
 
-        let changed_bytes = based_on_id(
+        let changed_bytes = source_verdict(
             &judge(&catalog, Some(&gh)),
-            Some(&lineage_at(42, "云端第零版")),
+            Some(&record_of(&source_at(42, "云端第零版"))),
             Some(&gh),
         );
         assert_eq!(changed_bytes.based_on, BasedOn::Outdated);
@@ -2026,9 +2138,9 @@ mod tests {
          */
         let mut same_serial = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut same_serial, 43);
-        let conflict = based_on_id(
+        let conflict = source_verdict(
             &judge(&same_serial, Some(&gh)),
-            Some(&lineage_at(43, "另一个字节")),
+            Some(&record_of(&source_at(43, "另一个字节"))),
             Some(&gh),
         );
         assert_eq!(
@@ -2041,7 +2153,7 @@ mod tests {
 
     /// **老副本 / 老目录缺发布身份** ⇒ `Unverified`：不声称有新版、不给更新。
     ///
-    /// 四种缺法一起咬（缺发布线、缺序号、目录缺身份、血统只有老的三行）。
+    /// 四种缺法一起咬（缺发布线、缺序号、目录缺身份、来源记录只有老的三行）。
     /// 重点是：**内容相同也不能因此说"你已是最新"** —— 那等于把"不知道"说成"知道"。
     #[test]
     fn without_a_release_baseline_nothing_is_claimed() {
@@ -2049,25 +2161,25 @@ mod tests {
         let mut identified = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut identified, 43);
 
-        /* 血统只有老的三行（这一版之前建的副本） */
-        let old_three = Lineage {
-            based_on: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
-            based_on_release_time: Some("2026-08-19 01:38:13".to_owned()),
-            based_on_sha256: Some(lineage::sha256_hex("云端第一版")),
+        /* 来源记录只有老的三行（这一版之前建的副本） */
+        let old_three = record_of(&SourceRef {
+            file: Some("delivery/mkp/presets/A1-standard.toml".to_owned()),
+            at: Some("2026-08-19 01:38:13".to_owned()),
+            sha256: Some(source_record::sha256_hex("云端第一版")),
             ..Default::default()
-        };
+        });
         assert_eq!(
-            based_on_id(&judge(&identified, Some(&gh)), Some(&old_three), Some(&gh)).based_on,
+            source_verdict(&judge(&identified, Some(&gh)), Some(&old_three), Some(&gh)).based_on,
             BasedOn::Unverified,
-            "老血统没有发布线 —— 内容恰好相同也不许说已是最新"
+            "老来源记录没有发布线 —— 内容恰好相同也不许说已是最新"
         );
 
         /* 目录没有身份（随包旧目录 / 手工拼的目录） */
         let bare = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         assert_eq!(
-            based_on_id(
+            source_verdict(
                 &judge(&bare, Some(&gh)),
-                Some(&lineage_at(43, "云端第一版")),
+                Some(&record_of(&source_at(43, "云端第一版"))),
                 Some(&gh)
             )
             .based_on,
@@ -2075,46 +2187,46 @@ mod tests {
             "目录没说是哪条线 —— 比不了"
         );
 
-        /* 序号认不出（被手工改成非数字）时，血统里那一格是 None ⇒ 同样 Unverified */
-        let half = Lineage {
-            based_on_serial: None,
-            ..lineage_at(43, "云端第一版")
-        };
+        /* 序号认不出（被手工改成非数字）时，来源记录里那一格是 None ⇒ 同样 Unverified */
+        let half = record_of(&SourceRef {
+            serial: None,
+            ..source_at(43, "云端第一版")
+        });
         assert_eq!(
-            based_on_id(&judge(&identified, Some(&gh)), Some(&half), Some(&gh)).based_on,
+            source_verdict(&judge(&identified, Some(&gh)), Some(&half), Some(&gh)).based_on,
             BasedOn::Unverified
         );
     }
 
-    /// **用户改过的派生文件仍按血统判**（不按文件自己的字节）。
+    /// **用户改过的派生文件仍按来源记录判**（不按文件自己的字节）。
     ///
-    /// 血统记的是"我基于哪一版"，用户改了正文不会改变这一点 —— 所以云端换了版，
+    /// 来源记录记的是"我基于哪一版"，用户改了正文不会改变这一点 —— 所以云端换了版，
     /// 这份照样是 `Outdated`；而如果云端没换，它就是 `Current`（尽管字节早不同了）。
     #[test]
-    fn a_user_edited_copy_is_judged_by_its_lineage_not_its_bytes() {
+    fn a_user_edited_copy_is_judged_by_its_provenance_not_its_bytes() {
         let gh = github();
 
         /* 云端还在第 42 号、字节也没变 ⇒ 我这份就是当前版（哪怕正文早被我改过） */
         let mut same = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut same, 42);
         assert_eq!(
-            based_on_id(
+            source_verdict(
                 &judge(&same, Some(&gh)),
-                Some(&lineage_at(42, "云端第一版")),
+                Some(&record_of(&source_at(42, "云端第一版"))),
                 Some(&gh)
             )
             .based_on,
             BasedOn::Current,
-            "用户改过的正文不参与判定 —— 只看血统记的那一版"
+            "用户改过的正文不参与判定 —— 只看来源记录记的那一版"
         );
 
-        /* 云端换到第 43 号、字节也变了 ⇒ 我这份是基于旧版的（照样按血统，不看我的字节） */
+        /* 云端换到第 43 号、字节也变了 ⇒ 我这份是基于旧版的（照样按来源记录，不看我的字节） */
         let mut moved = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut moved, 43);
         assert_eq!(
-            based_on_id(
+            source_verdict(
                 &judge(&moved, Some(&gh)),
-                Some(&lineage_at(42, "云端第一版")),
+                Some(&record_of(&source_at(42, "云端第一版"))),
                 Some(&gh)
             )
             .based_on,
@@ -2132,7 +2244,7 @@ mod tests {
     /// 那一条由 `a_mirror_switch_is_judged_by_the_line_and_serial_not_the_host` 咬住。
     ///
     /// 三支一起咬：同分支 ⇒ 照常判；异分支 ⇒ `Elsewhere`；不知道地址（文件搬到
-    /// 别的机器，`run/lineage-source.json` 不在）⇒ 退回只按发布线判，不凭空说"不同"。
+    /// 别的机器，`run/provenance.json` 不在）⇒ 退回只按发布线判，不凭空说"不同"。
     #[test]
     fn another_address_is_not_compared_even_on_the_same_release_line() {
         let gh = github();
@@ -2143,35 +2255,49 @@ mod tests {
 
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut catalog, 43);
-        let lineage = lineage_at(42, "云端第一版");
+        let lineage = source_at(42, "云端第一版");
 
         /* 同一个地址：照常按发布顺序判 */
         assert_eq!(
-            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&catalog, Some(&gh)),
+                Some(&record_of(&lineage)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Outdated,
             "同一地址、云端号更大、字节变了 ⇒ 就是有新版"
         );
 
         /* 地址不同：序号再比也没意义 */
         assert_eq!(
-            based_on_id(&judge(&catalog, Some(&branch)), Some(&lineage), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&catalog, Some(&branch)),
+                Some(&record_of(&lineage)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Elsewhere,
-            "血统来自 main、现在指向 feat/x —— 不比较，也不声称有新版"
+            "来源记录来自 main、现在指向 feat/x —— 不比较，也不声称有新版"
         );
 
         /*
-         * 不知道血统地址（老文件 / 跨机器那份）：**不再**退回按序号判 ——
+         * 不知道来源记录地址（老文件 / 跨机器那份）：**不再**退回按序号判 ——
          * 两个分支各数各的号，硬比出来的新旧是编的。说不清就 Unverified，
          * 并带上原因，界面据此说「无法确认」而不是「已是最新」。
          */
-        let unknown = based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), None);
+        let unknown = source_verdict(
+            &judge(&catalog, Some(&gh)),
+            Some(&record_of(&lineage)),
+            None,
+        );
         assert_eq!(unknown.based_on, BasedOn::Unverified);
         assert_eq!(unknown.facts.unverified_reason, Some("no_source_identity"));
     }
 
     /// **`release_time` 与 `publishedAt` 不再决定更新方向**（这次要根治的那一条）。
     ///
-    /// 现场：血统里 `# release_time` 是**配方写作日期**（2026-08-19），目录的
+    /// 现场：来源记录里 `# release_time` 是**配方写作日期**（2026-08-19），目录的
     /// `publishedAt` 是**发布时刻**（2026-10-19）。旧判定拿这两个数比大小 ⇒
     /// 云端永远"更新" ⇒ 每份文件都挂「有新版」。现在两者都不参与判定。
     #[test]
@@ -2179,15 +2305,20 @@ mod tests {
         let gh = github();
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第二版")]);
         stamp(&mut catalog, 43);
-        /* 目录发布时刻比血统里那个写作日期晚两个月 —— 旧代码据此判 Outdated */
+        /* 目录发布时刻比来源记录里那个写作日期晚两个月 —— 旧代码据此判 Outdated */
         catalog.published_at = Some("2026-10-19T14:12:29Z".to_owned());
-        let lineage = Lineage {
-            based_on_release_time: Some("2026-08-19 01:38:13".to_owned()),
-            ..lineage_at(42, "云端第一版")
+        let lineage = SourceRef {
+            at: Some("2026-08-19 01:38:13".to_owned()),
+            ..source_at(42, "云端第一版")
         };
 
         assert_eq!(
-            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&catalog, Some(&gh)),
+                Some(&record_of(&lineage)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Outdated,
             "序号真的前进了、字节真的变了 ⇒ 有新版（这次结论靠序号 + 字节）"
         );
@@ -2195,7 +2326,12 @@ mod tests {
         /* 反过来：目录发布时刻早得离谱，但序号确实更大、字节确实变了 ⇒ 照样给更新 */
         catalog.published_at = Some("2020-01-01T00:00:00Z".to_owned());
         assert_eq!(
-            based_on_id(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&catalog, Some(&gh)),
+                Some(&record_of(&lineage)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Outdated,
             "发布时间只做展示 —— 它早不等于云端旧"
         );
@@ -2205,24 +2341,27 @@ mod tests {
         stamp(&mut same_serial, 42);
         same_serial.published_at = Some("2030-01-01T00:00:00Z".to_owned());
         assert_eq!(
-            based_on_id(&judge(&same_serial, Some(&gh)), Some(&lineage), Some(&gh)).based_on,
+            source_verdict(
+                &judge(&same_serial, Some(&gh)),
+                Some(&record_of(&lineage)),
+                Some(&gh)
+            )
+            .based_on,
             BasedOn::Current,
             "同一条线同一号、字节一样 ⇒ 已是最新"
         );
     }
 
-    /// **「本地版本时间」只认下载那一刻定格的目录发布时刻**。
+    /// **「来源版本时间」只认文件尾部记录里那一格**（2026-11-04 作者裁定）。
     ///
-    /// 老账没有这一格 ⇒ `None`（界面写「未知」），**绝不回落**血统里的
-    /// `# release_time` —— 那是配方写作日期，正是上一代"云端永远更新"的误报来源。
+    /// - 有记录 ⇒ 用履历里那一刻（接受/下载时客户端写进去的目录发布时刻）；
+    /// - 没有记录 / 那一格空 ⇒ `None`（界面写「未知」）；
+    /// - **绝不回落**头注释 `# release_time`（配方写作日期），也**不再读** `run/` 的账
+    ///   —— 两件事都不代表"这一版什么时候发布"。
     #[test]
-    fn the_local_version_time_comes_from_the_download_stamp() {
+    fn the_source_version_time_comes_from_the_file_record() {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端第一版")]);
         stamp(&mut catalog, 42);
-        let lineage = Lineage {
-            based_on_release_time: Some("2026-08-19 01:38:13".to_owned()),
-            ..lineage_at(42, "云端第一版")
-        };
         let gh = github();
         let provenance = LocalProvenance {
             path: "presets-local/A1-standard.toml".to_owned(),
@@ -2234,33 +2373,44 @@ mod tests {
             serial: Some(42),
             revision: Some("rev-42".to_owned()),
             published_at: Some("2026-10-27T07:25:50Z".to_owned()),
-            source_sha256: Some(lineage::sha256_hex("云端第一版")),
+            source_sha256: Some(source_record::sha256_hex("云端第一版")),
             at: 1,
+        };
+        /*
+         * 记录里那一刻来自**下载/接受时写进文件**的目录发布时刻 ——
+         * 注意它与 `run/` 账上的 `published_at` 刻意不同：展示只认文件那份。
+         */
+        let version = SourceRef {
+            at: Some("2026-10-27T07:25:50Z".to_owned()),
+            ..source_at(42, "云端第一版")
         };
         let v = based_on(
             &judge(&catalog, Some(&gh)),
-            Some(&lineage),
+            Some(&record_of(&version)),
             Some(&provenance),
         );
         assert_eq!(
-            v.facts.lineage_published_at.as_deref(),
+            v.facts.source_version_at.as_deref(),
             Some("2026-10-27T07:25:50Z"),
-            "下载那一刻的目录发布时间"
+            "来源版本时间 = 文件记录里那一刻"
         );
-        assert_eq!(v.facts.lineage_kind, Some(OriginKind::Download));
+        assert_eq!(v.facts.source_kind, Some(OriginKind::Download));
 
-        /* 旧账（只有源身份、没有下载时刻）⇒ 未知，不拿 release_time 顶 */
-        let old = LocalProvenance {
-            kind: OriginKind::Unknown,
-            published_at: None,
-            ..provenance
+        /* 记录里那一格空 ⇒ 未知：账上有下载时刻也不拿来顶 */
+        let no_time = SourceRef {
+            at: None,
+            ..source_at(42, "云端第一版")
         };
-        let v = based_on(&judge(&catalog, Some(&gh)), Some(&lineage), Some(&old));
-        assert_eq!(
-            v.facts.lineage_published_at, None,
-            "老账没有下载时刻 ⇒ 未知，不许拿 release_time 顶"
+        let v = based_on(
+            &judge(&catalog, Some(&gh)),
+            Some(&record_of(&no_time)),
+            Some(&provenance),
         );
-        assert_eq!(v.facts.lineage_kind, Some(OriginKind::Unknown));
+        assert_eq!(
+            v.facts.source_version_at, None,
+            "文件记录没有那一刻 ⇒ 未知，账上的时刻不许顶上来"
+        );
+        assert_eq!(v.facts.source_kind, Some(OriginKind::Download));
     }
 
     fn github() -> SourceIdentity {
@@ -2277,9 +2427,17 @@ mod tests {
 
     /// 老测试只关心"这一份当初从哪个源来"：包一条等价于下载件的来路账，
     /// 其余四格留空（判定不看它们）。
-    fn based_on_id(
+    fn record_of(r: &SourceRef) -> SourceProvenance {
+        SourceProvenance {
+            schema: 1,
+            origin: None,
+            history: vec![r.clone()],
+        }
+    }
+
+    fn source_verdict(
         judge: &Judge<'_>,
-        lineage: Option<&Lineage>,
+        source: Option<&SourceProvenance>,
         id: Option<&SourceIdentity>,
     ) -> Verdict {
         let p = id.map(|id| LocalProvenance {
@@ -2295,74 +2453,83 @@ mod tests {
             source_sha256: None,
             at: 0,
         });
-        judge_against(judge, lineage, p.as_ref())
+        judge_against(judge, source, p.as_ref())
     }
 
     /// ★ **老形状的 `based_on` 认不出就是认不出**（2026-10-04 作者裁决：**不引兼容层**）。
     ///
     /// 两次改名（2026-10-04 发布根基准：`mkp/…` → `dist/…`；2026-10-05 寻址改造：
-    /// `dist/…` → `delivery/…`）都不改写老血统。老用户文件里那三行记的仍是旧值 ——
+    /// `dist/…` → `delivery/…`）都不改写老来源记录。老用户文件里那三行记的仍是旧值 ——
     /// **不为它写改写规则**（不按文件名回填、不做前缀映射）：认不出就落 `Unknown`
     /// （"说不出新旧"），绝不能猜出一份云端然后声称它是最新版或过期版。
     ///
     /// 老文件一个字节都不动，照旧能读、能改、能应用 —— 掉的只是「基于哪一版」那句判断。
-    /// 这条判据钉的就是"不伪造"：下面这份血统的摘要**与新目录里那一份完全相同**，
+    /// 这条判据钉的就是"不伪造"：下面这份来源记录的摘要**与新目录里那一份完全相同**，
     /// 只因路径形状是旧的，答案也必须是 `Unknown`。
     #[test]
     fn an_old_shaped_based_on_is_unverified_and_never_guessed() {
         let mut catalog = catalog_with(vec![entry_bytes("A1-standard.toml", "云端")]);
         stamp(&mut catalog, 43);
-        let old = Lineage {
-            based_on: Some("mkp/presets/A1-standard.toml".to_owned()),
-            based_on_release_time: None,
+        let old = SourceRef {
+            file: Some("mkp/presets/A1-standard.toml".to_owned()),
             // 摘要与目录里那一份**逐字节相同** —— 所以唯一能让答案"说不清"的
             // 就是"路径形状对不上"，而不是"字节变了"
-            based_on_sha256: Some(lineage::sha256_hex("云端")),
+            sha256: Some(source_record::sha256_hex("云端")),
             ..Default::default()
         };
         let gh = github();
         let judge = judge(&catalog, Some(&gh));
         assert_eq!(
-            based_on_id(&judge, Some(&old), Some(&gh)).based_on,
+            source_verdict(&judge, Some(&record_of(&old)), Some(&gh)).based_on,
             BasedOn::Unverified,
             "老形状的 based_on 不许被猜成 Current / Outdated"
         );
         // 2026-10-05 的第二次改名同理：`dist/…` 形状也落 Unverified（不迁移、不猜）
-        let dist_shaped = Lineage {
-            based_on: Some("dist/mkp/presets/A1-standard.toml".to_owned()),
+        let dist_shaped = SourceRef {
+            file: Some("dist/mkp/presets/A1-standard.toml".to_owned()),
             ..old.clone()
         };
         assert_eq!(
-            based_on_id(&judge, Some(&dist_shaped), Some(&gh)).based_on,
+            source_verdict(&judge, Some(&record_of(&dist_shaped)), Some(&gh)).based_on,
             BasedOn::Unverified,
             "上一代形状（dist/…）同样不猜"
         );
         assert!(
-            source_of(&catalog, Some(&old)).is_none(),
+            source_file_in(&catalog, Some(&record_of(&old))).is_none(),
             "认不出就是认不出 —— 不回填一份云端给它"
         );
     }
 
-    /// 读血统只看文件头那一小段：一个几百 MB 的文件不许为了让界面读三行注释就整份读进来
+    /// 来源记录住在**尾部**（2026-11-04 迁过去）：头再大也读得到；
+    /// 反过来，**只有头注释 `# based_on*` 的旧文件读不出记录** —— 那是破坏性重构的代价，
+    /// 界面照实说「来源未知」，不猜。
     #[test]
-    fn lineage_is_read_from_the_head_only() {
+    fn provenance_is_read_from_the_tail_not_the_head() {
         let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("big.toml");
-        let mut text = String::from("# based_on: mkp/presets/A1-standard.toml\n");
-        text.push_str(&"x".repeat((LINEAGE_READ_LIMIT as usize) * 2));
-        crate::fsx::atomic::atomic_write(&path, text.as_bytes()).unwrap();
-
+        let path = root.path().join("tail.toml");
+        let body = format!("# machine: A1\n[toolhead]\n{}\n", "x".repeat(4 * 1024));
+        let with_tail = source_record::commit_text(&body, "mkp/presets/A1-standard.toml");
+        crate::fsx::atomic::atomic_write(&path, with_tail.as_bytes()).unwrap();
         assert!(
-            lineage_of_file(&path).is_some(),
-            "三行在文件头，头 8 KB 里就读得到"
+            source_of_file(&path).is_some(),
+            "记录在尾部，正文多大都读得到"
+        );
+
+        /* 旧形状：只有头注释，没有尾部记录 ⇒ 读不出来（旧副本来源退回未知） */
+        let legacy = root.path().join("legacy.toml");
+        let old = format!("# based_on: mkp/presets/A1-standard.toml\n{body}");
+        crate::fsx::atomic::atomic_write(&legacy, old.as_bytes()).unwrap();
+        assert!(
+            source_of_file(&legacy).is_none(),
+            "旧的头注释不再被读取 —— 不许把 based_on 头当成来源记录"
         );
     }
 
-    /// 不是文本 / 读不出来 ⇒ 没有血统（**不是错误**：血统是附加信息）
+    /// 不是文本 / 读不出来 ⇒ 没有来源记录（**不是错误**：来源记录是附加信息）
     #[test]
-    fn an_unreadable_head_is_just_no_lineage() {
+    fn an_unreadable_head_is_just_no_provenance() {
         let root = tempfile::tempdir().unwrap();
-        assert!(lineage_of_file(&root.path().join("根本没有这个文件")).is_none());
+        assert!(source_of_file(&root.path().join("根本没有这个文件")).is_none());
     }
 
     /// 读正文只认用户自己那一格：别的地方（`exports/`、`../`）一概不碰
@@ -2401,7 +2568,7 @@ mod tests {
         assert!(why.contains("第 2 行"), "原因要说得出在哪一行：{why}");
     }
 
-    /// 非 UTF-8 的那一份：也是"读不出来"（不是"没血统"那种附加信息的缺 —— 这份是用不了）
+    /// 非 UTF-8 的那一份：也是"读不出来"（不是"没来源记录"那种附加信息的缺 —— 这份是用不了）
     #[test]
     fn a_non_utf8_file_is_unreadable_too() {
         let root = tempfile::tempdir().unwrap();
@@ -2420,7 +2587,7 @@ mod tests {
             .contains("UTF-8"));
     }
 
-    /// 符号链接**指向用户根外面**：认得出名字，但**一个字节都不读**（血统也不读），
+    /// 符号链接**指向用户根外面**：认得出名字，但**一个字节都不读**（来源记录也不读），
     /// 状态是"读不出来"并说清为什么；根**内**的链接不算逃逸，照常能用
     #[cfg(unix)]
     #[test]
@@ -2457,13 +2624,16 @@ mod tests {
             "原因要说清它指向外面"
         );
         assert_eq!(
-            escaping.lineage, None,
-            "根外的头一个字节都不读（血统也不许读出来）"
+            escaping.source, None,
+            "根外的头一个字节都不读（来源记录也不许读出来）"
         );
 
         let inside = got.iter().find(|f| f.file_name == "指回自己.toml").unwrap();
         assert_eq!(inside.state, Some(LocalState::Ok), "根内链接照常能用");
-        assert_eq!(inside.lineage, None, "那份没有血统，链接也变不出血统来");
+        assert_eq!(
+            inside.source, None,
+            "那份没有来源记录，链接也变不出来源记录来"
+        );
     }
 
     /// 应用 / 编辑那一道读：坏 TOML 被拦下（带着原因），但**看正文照旧**读得出来
@@ -2517,7 +2687,7 @@ mod tests {
 
     /* ---------- 第十层：改名 / 删除（只动名字或删掉，不动字节） ---------- */
 
-    /// 改名：**字节一个不动**（血统原样），旧名字没了、新名字在；
+    /// 改名：**字节一个不动**（来源记录原样），旧名字没了、新名字在；
     /// 子目录里的那份改完还在同一个子目录
     #[test]
     fn renaming_keeps_the_bytes_and_the_lineage() {
@@ -2526,7 +2696,7 @@ mod tests {
         write(root.path(), "presets-local/本地 A1.toml", with_lineage);
         let before = format!(
             "{:?}",
-            lineage_of_file(&root.path().join("presets-local/本地 A1.toml"))
+            source_of_file(&root.path().join("presets-local/本地 A1.toml"))
         );
 
         let done =
@@ -2544,9 +2714,9 @@ mod tests {
             "字节一个不动"
         );
         assert_eq!(
-            format!("{:?}", lineage_of_file(&new_path)),
+            format!("{:?}", source_of_file(&new_path)),
             before,
-            "血统跟着文件走，改名动不了它"
+            "来源记录跟着文件走，改名动不了它"
         );
 
         /* 子目录里的那份：改完还在同一个子目录 */
@@ -2683,7 +2853,7 @@ mod tests {
 
     /* ---------- 第十一层：另存为一份新的（本地文件 → 本地文件，字节复制） ---------- */
 
-    /// 复制是**字节复制**：新文件与原来那份逐字节相同（内容与血统原样带过去）、
+    /// 复制是**字节复制**：新文件与原来那份逐字节相同（内容与来源记录原样带过去）、
     /// 原文件不动；子目录里的那份复制出来还在同一个子目录
     #[test]
     fn copying_keeps_the_bytes_and_the_lineage() {
@@ -2703,7 +2873,7 @@ mod tests {
         assert_eq!(
             std::fs::read(&new_path).unwrap(),
             with_lineage.as_bytes(),
-            "字节复制：内容与血统一个字节不差"
+            "字节复制：内容与来源记录一个字节不差"
         );
         assert_eq!(
             std::fs::read(root.path().join("presets-local/本地 A1.toml")).unwrap(),
@@ -2711,12 +2881,12 @@ mod tests {
             "原文件一个字节不动"
         );
         assert_eq!(
-            format!("{:?}", lineage_of_file(&new_path)),
+            format!("{:?}", source_of_file(&new_path)),
             format!(
                 "{:?}",
-                lineage_of_file(&root.path().join("presets-local/本地 A1.toml"))
+                source_of_file(&root.path().join("presets-local/本地 A1.toml"))
             ),
-            "血统原样带过去（不重算）"
+            "来源记录原样带过去（不重算）"
         );
 
         /* 子目录里的那份：复制出来还在同一个子目录 */
@@ -2852,10 +3022,10 @@ mod tests {
 
     /* ---------- 另存为我的预设：save_cloud_as_new（2026-10-08 资源库改判） ---------- */
 
-    /// 正路：云端那一份另存成本地这份 —— 云端原文 + 血统三行（`based_on` 指向来源
+    /// 正路：云端那一份另存成本地这份 —— 云端原文 + 尾部来源记录（`file` 指向来源
     /// 交付文件）；落点用**用户起的名字**（不自动加日期、也不自动编号）
     #[test]
-    fn saving_official_as_new_writes_a_copy_with_lineage() {
+    fn saving_official_as_new_writes_a_copy_with_provenance() {
         let user = tempfile::tempdir().unwrap();
         let file = entry_bytes("A1-standard.toml", "涂胶宽度 = 1.0\n");
 
@@ -2870,13 +3040,16 @@ mod tests {
         assert_eq!(done.path, "presets-local/本地 A1 标准版.toml");
 
         let text = String::from_utf8(std::fs::read(user.path().join(&done.path)).unwrap()).unwrap();
-        assert!(
-            text.contains("# based_on: delivery/mkp/presets/A1-standard.toml"),
-            "血统要指向来源交付文件：{text}"
+        let prov = source_record::parse(&text).expect("另存出来的必须有来源记录");
+        let latest = prov.latest_version().expect("有一条来源版本");
+        assert_eq!(
+            latest.file.as_deref(),
+            Some("delivery/mkp/presets/A1-standard.toml"),
+            "来源要指向那份交付文件：{text}"
         );
         assert!(
-            text.contains("# based_on_sha256:"),
-            "摘要那行也要在：{text}"
+            latest.sha256.is_some(),
+            "摘要那一格也要在（判「云端变了没有」靠它）：{text}"
         );
         assert!(
             text.contains("涂胶宽度 = 1.0"),

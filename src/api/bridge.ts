@@ -256,7 +256,7 @@ export const bridgeApi: MkpApi = {
   checkPresetText: (path, text) =>
     call('checkPresetText', 'check_preset_text', { path, text }),
   discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
-  /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
+  /* 身份账本（派生视图：盘上文件 + 来源记录 → 云端那一版） */
   getLocalPresetIndex: () => call('getLocalPresetIndex', 'get_local_preset_index'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
   renameLocalPreset: (path, newName) =>
@@ -270,7 +270,7 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：本地文件 → 本地文件（字节复制；不覆盖、不碰任何状态） */
   copyLocalPreset: (path, newName) =>
     call('copyLocalPreset', 'copy_local_preset', { path, newName }),
-  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带来源记录）+ 按机型/版本找它（校准页） */
 
   getLocalCopyFor: (machineId, versionId) =>
     call('getLocalCopyFor', 'get_local_copy_for', { machineId, versionId }),

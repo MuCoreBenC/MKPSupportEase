@@ -15,7 +15,7 @@
 //!
 //! - **源文件只读**：不改、不删、不移；复制是"读出字节 → 原子写进用户根"；
 //! - **落点固定 `presets-local/`**，不给用户选目录（跨目录 = 文件夹管理，不在这层）；
-//! - **内容按字节复制**：已有血统三行原样带过去，没有血统**允许导入、不编造来源**；
+//! - **内容按字节复制**：已有来源记录原样带过去，没有来源记录**允许导入、不编造来源**；
 //! - **不校验 TOML 内容**：能不能当 Preset 用是后面 Preset 语义入口的事 ——
 //!   导入只是"把外部文件纳入本地文件所有权范围"，**不是"安装 Preset"**；
 //! - **不覆盖**：重名进改名流程，名字的门槛与第十层改名 / 第十一层另存为
@@ -357,23 +357,23 @@ mod tests {
             "源文件只读：一个字节不动"
         );
 
-        /* 进来之后就是一份正常的用户文件：能列出来、血统原样（没有就不编造） */
+        /* 进来之后就是一份正常的用户文件：能列出来、来源记录原样（没有就不编造） */
         let listed = super::super::local::local_files(user.path());
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].state, Some(super::super::local::LocalState::Ok));
         assert_eq!(
-            format!("{:?}", listed[0].lineage),
+            format!("{:?}", listed[0].source),
             format!(
                 "{:?}",
-                super::super::local::lineage_of_file(&ext.path().join("外部 A1.toml"))
+                super::super::local::source_of_file(&ext.path().join("外部 A1.toml"))
             ),
-            "血统原样带过去"
+            "来源记录原样带过去"
         );
     }
 
-    /// 没有血统的那份：**允许导入、不编造来源**（血统就是"没有"）
+    /// 没有来源记录的那份：**允许导入、不编造来源**（来源记录就是"没有"）
     #[test]
-    fn importing_does_not_invent_a_lineage() {
+    fn importing_does_not_invent_a_provenance() {
         let user = tempfile::tempdir().unwrap();
         let ext = tempfile::tempdir().unwrap();
         write(ext.path(), "光秃秃.toml", VALID_TOML);
@@ -387,7 +387,7 @@ mod tests {
         );
         assert!(outcomes[0].ok, "{}", outcomes[0].message);
         let listed = super::super::local::local_files(user.path());
-        assert_eq!(listed[0].lineage, None, "不编造来源");
+        assert_eq!(listed[0].source, None, "不编造来源");
     }
 
     /// **不校验 TOML 内容**：语法坏的那份照样进得来（能不能当 Preset 用是语义入口的事）

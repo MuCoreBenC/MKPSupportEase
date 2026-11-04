@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use preset::generate::{assets_dir, check_baseline, fixtures_dir, write_all};
-use preset::lineage::sha256_hex;
+use preset::provenance::sha256_hex;
 use preset::recipe::Recipe;
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");

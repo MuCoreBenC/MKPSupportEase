@@ -643,7 +643,7 @@ pub fn delete_downloaded(
         })?;
     /*
      * 预设：删的是**本机索引里这一条**，字节留在内容仓库（还可能被别的 path /
-     * 用户血统 / 回收记录引用）。`gc` 会按引用关系决定内容去留。
+     * 用户来源记录 / 回收记录引用）。`gc` 会按引用关系决定内容去留。
      */
     if is_preset(file) {
         delivery_index::remove(internal_root, &file.path)?;

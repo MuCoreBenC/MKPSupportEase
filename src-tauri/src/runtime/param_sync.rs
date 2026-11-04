@@ -9,7 +9,7 @@
 //! ```
 //!
 //! 「我上次处理到的那一版」由 **逐参数决定账**（[`ParamDecision`]）回答：
-//! 某一项处理过就把它的水位推到当时的云端版摘要；没处理过的项退回整份的血统
+//! 某一项处理过就把它的水位推到当时的云端版摘要；没处理过的项退回整份的来源记录
 //! `based_on_sha256`。于是：
 //!
 //! ```text
@@ -27,10 +27,10 @@
 //!
 //! # 这里只算，不读盘
 //!
-//! 参数值、baseline 正文、血统、决定账全部由调用方（`ipc::param_sync`）读好之后交进来。
+//! 参数值、baseline 正文、来源记录、决定账全部由调用方（`ipc::param_sync`）读好之后交进来。
 //! 纯函数才好摆判据：三方各摆一份 map，断言直接落在结果上。
 //!
-//! 一份预设**没有血统**（导入的 / 手工拷的）时 `based_on_sha256` 是 `None`：
+//! 一份预设**没有来源记录**（导入的 / 手工拷的）时 `based_on_sha256` 是 `None`：
 //! 那就没有"云端旧值"可比，任何一项都不进待处理 —— **不猜它从哪一版来**。
 
 use std::collections::BTreeMap;
@@ -47,7 +47,7 @@ pub struct ParamSyncEntry {
     /// 我这份文件里现在写着的值。文件里没有这一项 ⇒ `None`
     /// （"不含这个参数"与"这个参数是空值"是两件事）
     pub local: Option<String>,
-    /// 云端**旧值**（我上次处理到的那一版）。没有血统 / 拿不到那一版 ⇒ `None`
+    /// 云端**旧值**（我上次处理到的那一版）。没有来源记录 / 拿不到那一版 ⇒ `None`
     ///
     /// ★ 它是"待处理"的判据，**不是**界面那个「上次云端」—— 采用/保持会把水位推到
     /// 当前版，于是它等于新值。界面要显示的那一格看 [`Self::origin`]。
@@ -92,7 +92,7 @@ pub struct SyncInput<'a> {
     pub local: &'a BTreeMap<String, String>,
     /// 逐参数决定账（这本是某一份预设的）
     pub decisions: &'a BTreeMap<String, ParamDecision>,
-    /// 这份预设的血统里记的"从哪一版云端来"
+    /// 这份预设的来源记录里记的"从哪一版云端来"
     pub based_on_sha256: Option<&'a str>,
     /// 云端当前版的正文摘要（目录登记的那一版）
     pub current_sha256: Option<&'a str>,
@@ -116,7 +116,7 @@ pub fn diff(input: &SyncInput<'_>) -> (Vec<ParamSyncEntry>, usize) {
     for def in input.defs {
         let key = def.key.as_str();
         /*
-         * 参考版 = **这一项**处理到的那一版（有决定账）否则整份的血统。
+         * 参考版 = **这一项**处理到的那一版（有决定账）否则整份的来源记录。
          * 决定账里那串摘要来自盘上的状态文件 —— 拿不到那一版就把这一项当"比不出来"，
          * 不报错（宁可少报一项，也不许瞎猜一个值）。
          */
@@ -157,7 +157,7 @@ pub fn diff(input: &SyncInput<'_>) -> (Vec<ParamSyncEntry>, usize) {
 
 /// 这一份的参数里，**要用到的云端版本摘要**都有哪些 —— 调用方据此决定从 baseline 读哪几份。
 ///
-/// 含义与 [`diff`] 里那条一致：逐项决定账上的水位，加上整份血统里那一版。
+/// 含义与 [`diff`] 里那条一致：逐项决定账上的水位，加上整份来源记录里那一版。
 /// 去重；**不含当前版**（当前版由调用方单独保证：它可能是刚按需取回来的那一份）。
 pub fn needed_shas(
     defs: &[ParamDef],
@@ -378,7 +378,7 @@ mod tests {
         assert_eq!(out[0].local.as_deref(), Some("-1"), "保持 = 文件一个字没动");
     }
 
-    /// 场景 C（续）/ E：云端又发一版 —— 旧值取的是「我处理到的那一版」，不是更早的血统
+    /// 场景 C（续）/ E：云端又发一版 —— 旧值取的是「我处理到的那一版」，不是更早的来源记录
     #[test]
     fn after_another_release_the_old_value_follows_the_watermark() {
         let mut by_sha = BTreeMap::new();
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(
             out[0].cloud_old.as_deref(),
             Some("-1.5"),
-            "旧值是「我上次处理到的那一版」，不是血统里那一版"
+            "旧值是「我上次处理到的那一版」，不是来源记录里那一版"
         );
         assert_eq!(out[0].cloud_new.as_deref(), Some("-2"));
         assert_eq!(
@@ -451,7 +451,7 @@ mod tests {
         assert_eq!(out[2].cloud_old, None, "云端旧版里没有它");
     }
 
-    /// 没有血统（导入的 / 手工拷的）⇒ 没有云端旧值可比，任何一项都不进待处理
+    /// 没有来源记录（导入的 / 手工拷的）⇒ 没有云端旧值可比，任何一项都不进待处理
     #[test]
     fn a_preset_without_lineage_has_no_updates() {
         let mut by_sha = BTreeMap::new();
@@ -513,7 +513,7 @@ mod tests {
         assert_eq!(out[0].decided, None);
     }
 
-    /// 要读哪几份 baseline：逐项水位 + 血统，去重
+    /// 要读哪几份 baseline：逐项水位 + 来源记录，去重
     #[test]
     fn needed_shas_collects_watermarks_and_lineage() {
         let defs = defs_of(&[K1, K2, K3]);

@@ -76,7 +76,7 @@
  *
  *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
  *           MKP：只有你自己那份本地文件（`presets-local/`）；切片器：云端副本 + 本地文件
- *   云端表  云端现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
+ *   云端表  云端现在提供什么 —— MKP：目录里每一份预设一行，按来源记录说"我这边怎么样"
  *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
  *           切片器：菜单上的云端文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
  *
@@ -129,7 +129,7 @@
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=进回收站，可恢复；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **复制**（本地文件）      `api.copyLocalPreset()`                        真（第十一层：本地文件 → 本地文件，
- *                            按字节复制、血统原样带过去；名字由程序起 `<原名> copy.toml`
+ *                            按字节复制、来源记录原样带过去；名字由程序起 `<原名> copy.toml`
  *                            （重名依次 `copy 2`…，见 `duplicateNameOf`）；不覆盖、不碰使用中指针与草稿）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
@@ -1490,7 +1490,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 三步：
    *   ① 读逐参数三方账（`presetSync`，允许后端顺手把云端新版字节取回来）；
    *   ② **没有要改值的项** ⇒ 直接「应用 0 项」：值一个不动，云端的注释 / 新字段 /
-   *      时间戳与血统跟着新版走 —— 「有新版」就此消失（原来这一步什么都不写，
+   *      时间戳与来源记录跟着新版走 —— 「有新版」就此消失（原来这一步什么都不写，
    *      于是注释级换版永远挂着「有新版」）；
    *   ③ **有要改值的项** ⇒ 顺势打开「修改参数 → 选择要更新的参数」那一屏，
    *      由用户勾（采用云端新值）/ 不勾（保持我的值）后一次落下去。
@@ -1537,7 +1537,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const pending = sync.entries.filter((e) => e.pending)
     /*
      * ③a **没有要改值的项** ⇒ 直接「应用 0 项」（= 把这一版收进来）：
-     *    值一个不动，云端的注释 / 新字段 / 时间戳与血统跟着新版走 ——
+     *    值一个不动，云端的注释 / 新字段 / 时间戳与来源记录跟着新版走 ——
      *    「有新版」就此消失（原来这一步什么都不写，于是它永远挂着）。
      */
     if (pending.length === 0) {
@@ -1545,7 +1545,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       /*
        * ★ **措辞要说实话**（2026-10-29 作者截图：提示"已经是最新"，行上却仍挂着「更新」）。
        *
-       * 这一趟写的是血统三行 + **发布线与序号**（`param_sync::apply_at` 里 `remaining == 0`
+       * 这一趟写的是来源记录 + **发布线与序号**（`param_sync::apply_at` 里 `remaining == 0`
        * 那一支）。而目录还没有发布身份时（`catalogId` / `publishSerial` 都是空），那两格
        * 没东西可写 ⇒ 判定仍是 `unverified` ⇒ 按钮还在。这时候说"已经是最新"就是在骗人：
        * 内容确实按云端处理完了，但**基线记不下来**。
@@ -1630,7 +1630,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **云端行的「更新」**（2026-10-10 作者规格；2026-10-20 改过一遍走法）。
    *
-   * 「更新谁」：**血统指向这个云端条目、还没跟上当前版的那一份本地文件**
+   * 「更新谁」：**来源记录指向这个云端条目、还没跟上当前版的那一份本地文件**
    * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的；复制件不在账本里，
    * 永远不会被当成"要更新的那一份"）。找到之后交给 [`applyCloudUpdate`] 落地。
    *
@@ -2338,7 +2338,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 从云端下来的 ⇒ 云端那份的名字。撞名时按 `A1-standard 2.toml` 依次让开，不报错
    * （用户要的是"改回正常名字"这件事本身）。
    *
-   * 走的是**与重命名同一条路**（`data.rename`）：只换名字，内容与血统一个字节不动。
+   * 走的是**与重命名同一条路**（`data.rename`）：只换名字，内容与来源记录一个字节不动。
    */
   const runRestoreDefaultName = (row: PresetTableRow) => {
     menu.close()
@@ -2396,7 +2396,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 名字**由程序起**（`duplicateNameOf`：`<原名> copy.toml`，重名依次 `copy 2`…）——
    * 作者 2026-10-10：「主要是它的文案太长了……要不然就叫复制，就自动复制出一份」，
    * 所以这一层**不再弹框问名字**（原来那口"起名字抽屉"的 copy 分支整个退场）。
-   * 别的规矩没变：血统原样带过去、不覆盖、不碰使用中指针与草稿。
+   * 别的规矩没变：来源记录原样带过去、不覆盖、不碰使用中指针与草稿。
    */
   const runDuplicate = (row: PresetTableRow) => {
     menu.close()
@@ -2881,7 +2881,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * 「复制」为什么不能点（第十一层）：
    *
-   * - **本地文件**：本来就开放（本地 → 本地，按字节复制、血统原样带过去）；
+   * - **本地文件**：本来就开放（本地 → 本地，按字节复制、来源记录原样带过去）；
    * - 其余（切片器交付行 / 云端仓库文件）：不是"本地文件"，另行处置 ——
    *   切片器自有「复制到切片器目录」那条路。
    */
@@ -3405,7 +3405,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         id: 'copy',
         /* ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）—— 与 MKP 档那一项同一条 */
         label: tr(LOCAL_COPY.cell),
-        /* 本地文件 → 本地文件（第十一层，按字节复制、血统原样带过去）；
+        /* 本地文件 → 本地文件（第十一层，按字节复制、来源记录原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? tr(PRESET_SUSPECT_WHY) : copyWhyNot(row),
         onSelect: () => runDuplicate(row),

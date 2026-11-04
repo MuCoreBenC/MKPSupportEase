@@ -12,7 +12,7 @@
 
 | 群 | 位置 | 数量 | 性质 |
 | --- | --- | --- | --- |
-| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md)（**活台账**，清过三次：历史部分搬进 [`HANDOFF-ARCHIVE-2026-10-19.md`](HANDOFF-ARCHIVE-2026-10-19.md) / [`HANDOFF-ARCHIVE-2026-10-20.md`](HANDOFF-ARCHIVE-2026-10-20.md) / [`HANDOFF-ARCHIVE-2026-11-01.md`](HANDOFF-ARCHIVE-2026-11-01.md)，**没删**） | 约 13 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
+| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md)（**活台账**） | 约 13 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
 | 记录与计划 | `docs/` 顶层（带日期的那些） | 约 19 份 | 裁决记录 / 台账 / 施工计划 / 测试协议 |
 | 审计基线 | `docs/audit-current-state/` | 9 md + data/map | 重写前的只读审计（"建议，不是现状"） |
 | 移植方案 | 根 [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) / [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 2 份 | 被 `src/workbench` 现行代码引用（方案 / 待裁决清单），保留 |
@@ -64,7 +64,7 @@
 | [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md) | 2026-10-08 | 下载即得工作副本 | **已被同日第三次改判退役**（"下载不再自动产生副本"，见 `PRESET-PRODUCT-RULES.md` ⚠️ 三条） |
 | [`PRESET-MULTI-VERSION.md`](PRESET-MULTI-VERSION.md) | 2026-10-08 | 多版本「我的预设」+ 参数对比台 | **已被取代**（文首自标：被 `PRESET-ASSET-LIBRARY.md` 改判） |
 | [`PRESET-LIST-UX-ISSUES-2026-10-08.md`](PRESET-LIST-UX-ISSUES-2026-10-08.md) | 2026-10-08 | 预设列表问题清单 | **已闭环**（文首自标：模型已定并已实施，指向资产库） |
-| [`PRESET-COPY-LINEAGE.md`](PRESET-COPY-LINEAGE.md) | 2026-10-06 | 复制与身世（另存放开 · 归属继承）设计稿 | 部分已被 10-08 改判取代（自标） |
+| [`PRESET-COPY-PROVENANCE.md`](PRESET-COPY-PROVENANCE.md) | 2026-10-06 | 复制与身世（另存放开 · 归属继承）设计稿 | 部分已被 10-08 改判取代（自标） |
 | [`PRESET-TIME-SEMANTICS.md`](PRESET-TIME-SEMANTICS.md) | 2026-10-06 | 时间语义与删除策略梳理 | 已升级（自标：改定义为事件模型 → 见下一行） |
 | [`PRESET-EVENT-TIME-MODEL.md`](PRESET-EVENT-TIME-MODEL.md) | 2026-10-06 | 预设事件时间模型（设计与实现） | 该主题的落地版（推断） |
 | [`REMARK-SUBTITLE-2026-10-07.md`](REMARK-SUBTITLE-2026-10-07.md) | 2026-10-07 | 副标题 = 备注 + 复制件归属 | 已实施（自标：台账与代码同一 commit） |
@@ -129,7 +129,7 @@
 | `PRESET-MULTI-VERSION.md` | 文首已自标"已被取代"，指向下面那份 |
 | `PRESET-ASSET-LIBRARY.md` | 10-08 的最后一次裁决；但它与现在代码里的"本地/云端"两轴是否完全一致，**待核**（推断：之后又有微调） |
 | `PRESET-LIST-UX-ISSUES-2026-10-08.md` | 已闭环，正文大多过时，靠文首一句指向资产库 |
-| `PRESET-COPY-LINEAGE.md` / `REMARK-SUBTITLE-2026-10-07.md` | 归属/身世主题的两份；10-08 改判后各有一部分退役，台账价值仍在 |
+| `PRESET-COPY-PROVENANCE.md` / `REMARK-SUBTITLE-2026-10-07.md` | 归属/身世主题的两份；10-08 改判后各有一部分退役，台账价值仍在 |
 | `PRESET-TIME-SEMANTICS.md` → `PRESET-EVENT-TIME-MODEL.md` | 前后两篇同一主题，后者是落地版；前者留着当梳理稿 |
 
 > 合并锚点（供参考，不代你决定）：这一簇看起来以 `PRESET-PRODUCT-RULES.md`（现行）+ `PRESET-ASSET-LIBRARY.md`（最后一次裁决）为轴，其余按"过程记录"处理。

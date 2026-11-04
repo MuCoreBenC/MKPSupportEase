@@ -33,9 +33,10 @@
 //! 加上落盘前的 `read_preset` + `load_ir` 复检与写前备份。
 
 pub mod build;
+pub mod diff;
 pub mod generate;
-pub mod lineage;
 pub mod model;
+pub mod provenance;
 pub mod read;
 pub mod recipe;
 pub mod recipe_edit;
@@ -52,10 +53,11 @@ pub use build::{CalibrationExecMode, build};
 /// 而不是各拼一遍字符串。
 pub use generate::file_name as preset_file_name;
 pub use model::{
-    IntOrFloat, Lineage, PresetFile, PresetKey, TomlConfig, ToolheadConfig, WipingConfig,
+    IntOrFloat, PresetFile, PresetKey, SourceProvenance, SourceRef, TomlConfig, ToolheadConfig,
+    WipingConfig,
 };
 pub use read::{
-    parse_lineage_from_content, parse_variant_from_content, read_preset, read_preset_from_bytes,
+    parse_provenance_from_content, parse_variant_from_content, read_preset, read_preset_from_bytes,
 };
 pub use registry::{
     EffectiveRange, MachineBounds, ParamEntry, RangeSource, Registry, load_param_registry,

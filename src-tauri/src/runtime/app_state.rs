@@ -59,7 +59,7 @@ use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft, Preset
 /// 用户世界里只有一份自己的预设；云端那一版默认值住在**隐藏 baseline** 里
 /// （[`super::baseline`]，按摘要寻址）。于是"这一项我处理过了"这件事盘上不存在，
 /// 只能记在这里 —— 它回答的是**程序当前怎么管理这一份**（不是"这个预设文件是什么"），
-/// 所以照 [`super::lineage`] 定的那条界，它属于 `run/`。
+/// 所以照 [`super::provenance`] 定的那条界，它属于 `run/`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamDecisionKind {
@@ -429,7 +429,7 @@ pub struct PresetPrefs {
     ///
     /// 关 ⇒ 复制件是独立的一份：它不认领任何云端条目（预设页不出「有新版 / 更新」），
     /// 参数页打开它时整段「云端更新」不画，点「更新」也永远不会动它。
-    /// 开 ⇒ 复制件与原件同权（血统照旧指向那个云端条目）。
+    /// 开 ⇒ 复制件与原件同权（来源记录照旧指向那个云端条目）。
     ///
     /// ★ 判据落在身份账本那一道闸上（[`crate::ipc::local::get_local_preset_index`]），
     ///   **前端不按名字猜**（名字改了就失效）。
@@ -557,7 +557,7 @@ pub struct AppStateFile {
     /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
     ///
     /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
-    /// [`super::lineage`] 那条界住在这里；前端也不另存副本（读口只有
+    /// [`super::provenance`] 那条界住在这里；前端也不另存副本（读口只有
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,

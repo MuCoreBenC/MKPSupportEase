@@ -984,7 +984,7 @@ export interface PresetFileInfo {
  * 留一个永远空的字段就是在编形状（需要它的那一步再加）。
  */
 /**
- * 用户自己那份**基于的云端那一版**现在怎么样了（第七层）。
+ * 用户自己那份**来源版本**与云端当前版的关系（第七层）。
  *
  * # 三个问题，各答各的（2026-10-28 重写）
  *
@@ -994,8 +994,8 @@ export interface PresetFileInfo {
  *
  * | 问题 | 谁来答 |
  * |---|---|
- * | 是不是同一条发布线 | `catalogId`（`lineageCatalog` vs `cloudCatalog`） |
- * | 发布有没有往前走 | `publishSerial`（`lineageSerial` vs `cloudSerial`） |
+ * | 是不是同一条发布线 | `catalogId`（`sourceCatalog` vs `cloudCatalog`） |
+ * | 发布有没有往前走 | `publishSerial`（`sourceSerial` vs `cloudSerial`） |
  * | 这一份内容一不一样 | 文件 SHA-256 |
  *
  * 判定唯一出口是 Rust 侧 `runtime::local::based_on`，前端不重算。
@@ -1018,29 +1018,37 @@ export type BasedOn =
   | 'inconsistent'
 
 /**
- * 「基于哪一版」这个结论**摆事实**用的那几格（全可空）。
+ * 「来源版本」这个结论**摆事实**用的那几格（全可空）。
+ *
+ * 每一格都只有一个数据来源（2026-11-04 定的维护规则：**界面上的时间 / 来源 / 版本
+ * 身份，都必须能指出唯一来源，并有测试证明它不会被相邻概念替代**）。
  *
  * 界面只负责把这几行原样摆出来 —— 判定全在 Rust 侧（`runtime::local::based_on`），
  * 前端不再自己拼第二套判据。
  */
 export interface BasedOnFacts {
-  /** 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null` */
-  lineageKind: 'download' | 'copy' | 'import' | 'unknown' | null
-  /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
-  lineageSource: string | null
+  /** 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。没记录 ⇒ `null` */
+  sourceKind: 'download' | 'copy' | 'import' | 'unknown' | null
   /**
-   * 血统里记的来源版本标记（文件头 `# release_time`）—— 界面「配方版本时间」就是它。
+   * 来源是哪个源（`github#owner/repo@ref`）。
+   * 唯一来源：文件尾部 `[mkp_source]` 记录里的 `platform` / `repo` / `branch`。
+   * 没记录 ⇒ `null`（界面主信息显示「未知」，不编）。
+   */
+  sourceRef: string | null
+  /**
+   * 来源的配方版本标记（`# release_time` 那一行的原样值）。
    * **只做展示**：那是配方自己写下的时间，不是发布顺序，**更不是「云端发布时刻」**。
    */
-  lineageRelease: string | null
+  sourceRelease: string | null
   /**
-   * ★ 「云端发布时刻」的真值：这份**对应的那一代目录**实际发布的时刻。
-   * 它只说明目录什么时候发布，**不代表内容变过**。
-   * 从没记过 ⇒ `null` → 界面写「未知」，**不回落** `lineageRelease` / mtime。
+   * ★ **来源版本时间**：这份对应的那个云端版本**实际发布**的时刻。
+   *
+   * 唯一来源 = 文件尾部来源记录里履历最后一条的 `at`（接受 / 下载那一刻写入）。
+   * 没有记录 ⇒ `null` → 界面写「未知」，**绝不拿写盘记录 `generated_at` 或 mtime 顶**。
    */
-  lineagePublishedAt: string | null
-  /** 血统记的来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
-  lineageSha256: string | null
+  sourceVersionAt: string | null
+  /** 来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
+  sourceSha256: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
   /**
@@ -1050,16 +1058,19 @@ export interface BasedOnFacts {
   cloudPublishedAt: string | null
   /** 当前云端这一份的原文摘要（目录登记值）—— 「更多」里与本地对照 */
   cloudSha256: string | null
-  /** 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null` */
-  lineageCatalog: string | null
-  /** 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null` */
-  lineageSerial: number | null
+  /**
+   * 来源记录里那条发布线（`catalogId`）。
+   * **只在技术详情的「溯源记录」里出现** —— 它不是用户要看的主信息。没记录 ⇒ `null`
+   */
+  sourceCatalog: string | null
+  /** 来源记录里那条线的第几号（`publishSerial`）。没记录 ⇒ `null` */
+  sourceSerial: number | null
   /** 当前目录的发布线（`catalogId`）。老目录 / 随包旧版 ⇒ `null` */
   cloudCatalog: string | null
   /** 当前目录是那条线的第几号（`publishSerial`） */
   cloudSerial: number | null
   /**
-   * `unverified` 时为什么说不清：`no_lineage` / `no_release_line` /
+   * `unverified` 时为什么说不清：`no_source_record` / `no_release_line` /
    * `catalog_without_identity` / `not_in_catalog` / `no_sha` / `no_source_identity`。
    * 其余档位是 `null`。
    */
@@ -1068,7 +1079,7 @@ export interface BasedOnFacts {
 
 /** 说不清的原因（跨 IPC 的稳定词；界面翻成人话，不自己判） */
 export type UnverifiedReason =
-  | 'no_lineage'
+  | 'no_source_record'
   | 'no_release_line'
   | 'catalog_without_identity'
   | 'not_in_catalog'
@@ -1113,11 +1124,11 @@ export interface LocalPresetFile {
   /**
    * 上面那个结论**摆事实**的那几格（详情面板直接显示，前端不重算）。
    *
-   * 全部可空：`null` = 不知道（血统源没记账 / 目录没发布时刻），**不编**。
+   * 全部可空：`null` = 不知道（来源记录源没记账 / 目录没发布时刻），**不编**。
    * 源身份是规范化过的 `平台#仓库@ref`（`github#owner/repo@main`、`custom#host@-`）。
    */
   basedOnFacts: BasedOnFacts
-  /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
+  /** 来源记录里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有来源记录是 `null`** */
   basedOnLabel: string | null
   /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */
   basedOnRelease: string | null
@@ -1368,7 +1379,7 @@ export interface PresetDraftSummary {
   sourceFileName: string
   /** **用户线**的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
-  /** 「真改过才算」：与来源现在的字节比（只差血统处置 / 换行的差异不算改动） */
+  /** 「真改过才算」：与来源现在的字节比（只差来源记录处置 / 换行的差异不算改动） */
   dirty: boolean
   /** 最后改动时刻（UTC epoch 秒） */
   updatedUnix: number
@@ -1867,7 +1878,7 @@ export interface ActivePreset {
   /** 用户线的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
   sha256: string
-  /** 认不出是哪台机型哪一版时是空串（用户那份没有血统、或目录里已经没有来源那份） */
+  /** 认不出是哪台机型哪一版时是空串（用户那份没有来源记录、或目录里已经没有来源那份） */
   machineId: string
   versionId: string
   intact: boolean
@@ -2756,7 +2767,7 @@ export interface MkpApi {
    *
    * `path` 来自 [`getLocalCopyFor`]（或用户线列表）—— 必须是 `presets-local/…` 里
    * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
-   * （注释、键序、血统三行一个字节不动）。
+   * （注释、键序、来源记录一个字节不动）。
    * 云端那一份是模板、永远不可变：还没有你的一份就先「另存为本地预设」。
    */
   savePresetCalibration(path: string, axes: Axes): Promise<void>
@@ -2923,7 +2934,7 @@ export interface MkpApi {
    * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
    * 一份都没有 = 空数组，**不是错误**。
    *
-   * 每一份都带上**血统**（如果它带着 `# based_on*` 三行）与它对应的判定
+   * 每一份都带上**来源记录**（如果它带着 `# mkp_source` 三行）与它对应的判定
    * （[`BasedOn`]）—— 那是"云端换版了、你这份还是基于旧版"这件事的判据。
    */
   getLocalPresetFiles(): Promise<LocalPresetFile[]>
@@ -3016,7 +3027,7 @@ export interface MkpApi {
    * `beginPresetEdit` 虽然答 `reused`（还是这一份的草稿），但"改了哪几项"没有别的来源：
    * 不补这一条，参数弹窗就会"盘上有草稿、摘要说脏，界面一个改动都看不见"。
    *
-   * 判据是**参数值**，不是字节：注释 / 空行 / 血统那几行不算改动。
+   * 判据是**参数值**，不是字节：注释 / 空行 / 来源记录那几行不算改动。
    */
   readPresetDraftChanges(): Promise<Record<string, string>>
 
@@ -3075,10 +3086,10 @@ export interface MkpApi {
    * 云端线**另存**成 `presets-local/<原名>（已修改）<后缀>`（原件全程不动）；
    * 用户线**写回它自己** —— 同一个路径、同一份文件，不产生第二份（第八层）。
    *
-   * 云端线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
-   * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
+   * 云端线写下去的 = 草稿正文 + **尾部 `[mkp_source]` 来源记录**（`origin` 一节；
+   * 另存本身**不新增履历**）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
    * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）；
-   * 用户线写回时那三行**照抄原来那三行**（出处没变）。
+   * 用户线写回时那三行**照抄原来那一段**（出处没变）。
    *
    * 不碰云端原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
    * 云端线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
@@ -3097,7 +3108,7 @@ export interface MkpApi {
 
   /**
    * **开始改一份用户预设的正文**（预设页「编辑文件」）。与上面参数页那条链（`beginPresetEdit`）
-   * 不是一回事 —— 这里返回的正文**带着这一份的血统三行**（只在这份文件上有效），
+   * 不是一回事 —— 这里返回的正文**带着这一份的来源记录**（只在这份文件上有效），
    * 且要带着 **这份文件的 sha256**（保存时比一下有没有被别人抢先改）。
    */
   beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
@@ -3147,7 +3158,7 @@ export interface MkpApi {
   getLocalPresetIndex(): Promise<LocalPresetIdentity[]>
 
   /**
-   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行来源记录、
    * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-local/` 那一格内）；
    * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
    * 落点已经有东西就拒绝（**不覆盖**）。
@@ -3160,8 +3171,8 @@ export interface MkpApi {
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
    *
-   * **本地文件 → 本地文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
-   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版云端派生"说错）。
+   * **本地文件 → 本地文件**：原文件一个字节不动；内容与那三行 `mkp_source` 来源记录
+   * **原样带过去**（来源已经是用户文件，不重算来源记录 —— 重算会把"从哪一版云端派生"说错）。
    * 新名字过同一套门槛、落点已有东西就拒绝（**不覆盖、也不自动改名** —— 名字由用户自己换）。
    *
    * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
@@ -3173,7 +3184,7 @@ export interface MkpApi {
    * **这台机型 / 这个版本，本地那份在哪**（校准页：初值从它读、保存写它）。
    *
    * 找法（有先后）：底账正用着的那一份（origin=local 且归属匹配）> 用户目录里
-   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落血统
+   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落来源记录
    * （与用户线列表同一套口径）。
    *
    * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示云端默认值，保存被拦。
@@ -3193,7 +3204,7 @@ export interface MkpApi {
    * **导入第二段：真的复制进 `presets-local/`**。逐份独立（一份出错不拖累别人）：
    * 源文件只读；**不覆盖**（`newName` 走改名那套名字门槛）；**内容按字节复制、不校验 TOML**
    * （能不能当 Preset 用是后面 Preset 语义入口的事 —— 导入不是"安装 Preset"；
-   * 有血统三行原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
+   * 有来源记录原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
    * 不迁移 / 不建草稿、不进 archive）。
    */
   commitImport(items: ImportItem[]): Promise<ImportOutcome[]>
@@ -3770,7 +3781,7 @@ export interface MkpApi {
    *
    * ```text
    *   ① 云端当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
-   *   ② 本地工作副本       presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 血统三行）
+   *   ② 本地工作副本       presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 来源记录）
    *                       已经在了 → **一个字节都不动**（我改过的东西不许被云端原件顶掉）
    * ```
    *
@@ -3859,7 +3870,7 @@ export interface MkpApi {
    * 两条判据：云端登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
    * 下过没有 = 隐藏 baseline 里有没有那一版的摘要。
    *
-   * ★ **它不是"过时判定"**：不读用户预设的字节、不看血统，也**不会**说"你那份该更新了"。
+   * ★ **它不是"过时判定"**：不读用户预设的字节、不看来源记录，也**不会**说"你那份该更新了"。
    * `fileName` 给了就只返回那一个预设的版本。
    */
   getCloudVersions(fileName?: string | null): Promise<CloudVersion[]>

@@ -1,17 +1,13 @@
 # 交接台账（活）
 
-> 更新时间：2026-11-01（增量之六十四）· 分支：`feat/workbench-gen-receipt`
+> 更新时间：2026-11-04 · 分支：`feat/workbench-gen-receipt`
 > **本文只装"现在还用得上的东西"**：怎么验证、纪律、判据、仓库状态、**未结账**、最近约六条增量。
-> 更早的增量（整段搬、没删没改字）：
-> 二十五 ~ 三十五 + 第一/二/三圈 → [`docs/HANDOFF-ARCHIVE-2026-10-19.md`](docs/HANDOFF-ARCHIVE-2026-10-19.md)；
-> 三十六 ~ 四十四 → [`docs/HANDOFF-ARCHIVE-2026-10-20.md`](docs/HANDOFF-ARCHIVE-2026-10-20.md)；
-> **四十五 ~ 五十八（2026-11-01 搬走）→ [`docs/HANDOFF-ARCHIVE-2026-11-01.md`](docs/HANDOFF-ARCHIVE-2026-11-01.md)**。
+> 更早的增量（25 圈之前 / 36~44 / 45~58）已于 2026-11-04 清理，git 历史里可查。
 > 总纲：`DATA-ARCHITECTURE` / `PUBLISH-ARCHITECTURE` / `RELEASE-TRANSACTIONS` / `APP-STATE` /
 > `HOOK-ERRORS-AND-MESSAGES` / `ARCHITECTURE §7.5`；全仓文档索引 `docs/DOC-INDEX.md`。
 >
-> **防再乱的规矩**：新东西一律写在 §3；**增量只留最近约 6 条**，更旧的搬成**一份新的归档**
-> （整段搬、不改字；老归档件自标只读、不追加），本文只留一句指向；
-> 搬走段里凡是「待验收 / 待拍板 / 已知红」的，**必须抄进 §2.4**，否则跟着搬丢。
+> **防再乱的规矩**：新东西一律写在 §3；**增量只留最近约 6 条**，更旧的直接清掉（git 历史可查），本文只留一句说明；
+> 清理之前，段里凡是「待验收 / 待拍板 / 已知红」的，**必须先抄进 §2.4**，否则跟着丢。
 > §1/§2 是活规则，改了要回头看有没有别处引用它的章节号。
 
 ## 1. 怎么验证（每一轮都要全绿才推）
@@ -108,27 +104,27 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 | `runtime::delivery` 归档 3 条 | `archived_files_is_empty_before_anything_was_archived`（没归档过 = 空表，不是错误）/ `…lists_what_the_update_pushed_aside`（列出来的按它自己的路径能读回**旧版本的原字节**）/ `…reflects_the_single_archive_slot`（连升两版仍只列一份 = 最早那份：**归档 ≠ 每次更新的历史**） |
 | `runtime::mine` 用户线 4 条 | `mine_files_is_empty_when_the_user_has_nothing`（一份都没有 = 空表，不是错误）/ `…lists_what_the_user_put_there`（路径相对用户根、按升序、子目录也算、只出 `presets-mine/`）/ `kind_is_only_claimed_when_the_extension_says_so`（`.json` **照实认不出**）/ `only_the_mine_subdir_is_readable`（读正文只认那一格：`exports/`、`..`、目录本身都拒） |
 | `runtime::mine` 另存 2 条 | `commit_writes_the_edited_copy_and_leaves_the_official_alone`（**核心不变式**：另存只写用户根、官方原件字节不变、下载区文件数不变、再存是覆盖它自己）/ `the_committed_copy_shows_up_in_mine_files`（另存出来的那份接着就能被列出来、读得回来） |
-| `runtime::mine` 写回 5 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_lineage`（**核心不变式**：**同一路径、不产生第二份**，血统照抄 —— 摘要不许变成"我自己改过的字节"）/ `saving_back_an_untouched_file_changes_nothing`（没改就逐字节不变）/ `saving_back_a_file_without_lineage_invents_none`（本来没血统就不编一个）/ `saving_back_refuses_when_the_file_is_gone`（被移走了**拒绝且不新建**）/ `saving_back_stays_in_the_mine_dir` |
-| `runtime::mine` 第九层 5 条（文件级：能读 + UTF-8 + TOML 语法） | `a_broken_toml_shows_up_as_unreadable`（坏 TOML → `unreadable`，原因**报得出第几行**）/ `a_non_utf8_file_is_unreadable_too` / `an_escaping_symlink_is_never_read`（**指向用户根外的链接一个字节都不读**（血统也不读）；根内链接照常能用）/ `read_preset_text_blocks_the_broken_one_but_viewing_still_works`（应用 · 编辑两个入口共用这一处闸；**看正文照旧** —— 读它不算"用"）/ `an_external_edit_that_still_parses_is_fine`（**不比 SHA**：外部改过但仍是能读的 TOML = 正常）。既有 `mine_files_lists…` / `the_committed_copy_shows_up_in_mine_files` 搭上 `state` 断言 |
-| `runtime::mine` 第十层 9 条（改名 / 删除） | `renaming_keeps_the_bytes_and_the_lineage`（**核心不变式**：**字节一个不动**、血统原样、旧名字没了新名字在；子目录里的份留在子目录）/ `renaming_refuses_a_name_that_changes_the_kind_or_has_a_path`（换后缀 / 带路径 / `.` / `..` / 空全拒，原文件原地不动）/ `renaming_never_overwrites`（落点有东西就拒，被撞的那份一个字节没动）/ `renaming_to_the_same_name_is_a_no_op` / `deleting_really_deletes`（**真删除**：不在了，而且没有多出旁的东西）/ `deleting_refuses_while_it_is_the_active_one`（正在使用的拒；正在使用的是**别人**照删）/ `deleting_refuses_while_a_draft_is_open`（有草稿的拒；草稿改的是**别人**照删）/ `the_delete_gates_only_apply_to_the_mine_line`（官方线的指针 / 草稿挡不住）/ `deleting_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::mine` 写回 5 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_provenance`（**核心不变式**：**同一路径、不产生第二份**，来源记录原样保留 —— 摘要不许变成"我自己改过的字节"）/ `saving_back_an_untouched_file_changes_nothing`（没改就逐字节不变）/ `saving_back_a_file_without_provenance_invents_none`（本来没记录就不编一个）/ `saving_back_refuses_when_the_file_is_gone`（被移走了**拒绝且不新建**）/ `saving_back_stays_in_the_mine_dir` |
+| `runtime::mine` 第九层 5 条（文件级：能读 + UTF-8 + TOML 语法） | `a_broken_toml_shows_up_as_unreadable`（坏 TOML → `unreadable`，原因**报得出第几行**）/ `a_non_utf8_file_is_unreadable_too` / `an_escaping_symlink_is_never_read`（**指向用户根外的链接一个字节都不读**（来源记录也不读）；根内链接照常能用）/ `read_preset_text_blocks_the_broken_one_but_viewing_still_works`（应用 · 编辑两个入口共用这一处闸；**看正文照旧** —— 读它不算"用"）/ `an_external_edit_that_still_parses_is_fine`（**不比 SHA**：外部改过但仍是能读的 TOML = 正常）。既有 `mine_files_lists…` / `the_committed_copy_shows_up_in_mine_files` 搭上 `state` 断言 |
+| `runtime::mine` 第十层 9 条（改名 / 删除） | `renaming_keeps_the_bytes_and_the_provenance`（**核心不变式**：**字节一个不动**、来源记录原样、旧名字没了新名字在；子目录里的份留在子目录）/ `renaming_refuses_a_name_that_changes_the_kind_or_has_a_path`（换后缀 / 带路径 / `.` / `..` / 空全拒，原文件原地不动）/ `renaming_never_overwrites`（落点有东西就拒，被撞的那份一个字节没动）/ `renaming_to_the_same_name_is_a_no_op` / `deleting_really_deletes`（**真删除**：不在了，而且没有多出旁的东西）/ `deleting_refuses_while_it_is_the_active_one`（正在使用的拒；正在使用的是**别人**照删）/ `deleting_refuses_while_a_draft_is_open`（有草稿的拒；草稿改的是**别人**照删）/ `the_delete_gates_only_apply_to_the_mine_line`（官方线的指针 / 草稿挡不住）/ `deleting_stays_in_the_mine_dir`（越界路径拒） |
 | `runtime::state` 跟改名 3 条（第十层） | `the_active_pointer_follows_a_rename`（路径与文件名换新、**指纹原样**；不指着它的、官方线的指针一概不动）/ `the_draft_follows_a_rename`（草稿路径与来源名换新，**正文与打开时指纹原样**；换完再点「改这份」还是接上这一份）/ `repointing_nothing_is_a_no_op`（没有那两本账 = 没跟，不是错误） |
-| `runtime::mine` 第十一层 6 条（另存为一份新的） | `copying_keeps_the_bytes_and_the_lineage`（**核心不变式**：新的一份与原来**逐字节相同**（血统原样带过去）、原文件一个字节不动；子目录里的份复制出来还在子目录）/ `copying_uses_the_same_name_gate`（与改名同一套：换后缀 / 带路径 / `.` / `..` / 空全拒）/ `copying_never_overwrites_and_never_renames_itself`（**不覆盖**（被撞的与源都一个字节没动）、**也不自动改名**（名字和原来一样也拒））/ `copying_touches_no_state_at_all`（**一个状态都不碰**：使用中指针与草稿都还在原来那份上）/ `copying_does_not_require_readable_text`（不读内容：二进制那份照样原样复制）/ `copying_stays_in_the_mine_dir`（越界路径拒） |
-| `runtime::import` 第十二层 8 条（通用导入入口） | `staging_says_ready_collision_and_rejected`（能收 / 重名 / 收不了各带原因；**同一批里重名的也认**）/ `importing_copies_the_bytes_and_leaves_the_source_alone`（**核心不变式**：字节复制、**源文件一个字节不动**；进来就是一份正常用户文件）/ `importing_does_not_invent_a_lineage`（没有血统**不编造**）/ `importing_does_not_reject_invalid_toml`（**不校验内容**：坏的照样进得来，第九层再如实说它读不出来）/ `importing_never_overwrites`（不覆盖，被撞的与源都一个字节没动）/ `importing_uses_the_same_name_gate_for_a_new_name`（重名改名走同一套门槛）/ `importing_touches_no_state`（使用中指针与草稿都不动）/ `importing_creates_the_mine_dir_when_missing`（全新安装也能进） |
+| `runtime::mine` 第十一层 6 条（另存为一份新的） | `copying_keeps_the_bytes_and_the_provenance`（**核心不变式**：新的一份与原来**逐字节相同**（来源记录原样带过去）、原文件一个字节不动；子目录里的份复制出来还在子目录）/ `copying_uses_the_same_name_gate`（与改名同一套：换后缀 / 带路径 / `.` / `..` / 空全拒）/ `copying_never_overwrites_and_never_renames_itself`（**不覆盖**（被撞的与源都一个字节没动）、**也不自动改名**（名字和原来一样也拒））/ `copying_touches_no_state_at_all`（**一个状态都不碰**：使用中指针与草稿都还在原来那份上）/ `copying_does_not_require_readable_text`（不读内容：二进制那份照样原样复制）/ `copying_stays_in_the_mine_dir`（越界路径拒） |
+| `runtime::import` 第十二层 8 条（通用导入入口） | `staging_says_ready_collision_and_rejected`（能收 / 重名 / 收不了各带原因；**同一批里重名的也认**）/ `importing_copies_the_bytes_and_leaves_the_source_alone`（**核心不变式**：字节复制、**源文件一个字节不动**；进来就是一份正常用户文件）/ `importing_does_not_invent_a_provenance`（没有来源记录**不编造**）/ `importing_does_not_reject_invalid_toml`（**不校验内容**：坏的照样进得来，第九层再如实说它读不出来）/ `importing_never_overwrites`（不覆盖，被撞的与源都一个字节没动）/ `importing_uses_the_same_name_gate_for_a_new_name`（重名改名走同一套门槛）/ `importing_touches_no_state`（使用中指针与草稿都不动）/ `importing_creates_the_mine_dir_when_missing`（全新安装也能进） |
 | `runtime::mine` 第十三层 3 条（在文件管理器里显示） | `revealing_resolves_the_file_inside_the_user_root`（**核心不变式**：解析出用户根里那个**绝对路径**；**读不出来的也能显示**（文件管理同族）；子目录里的也认）/ `revealing_stays_in_the_mine_dir`（`exports/`、`../` 一概拒 —— 与改名 / 删除同一道闸）/ `revealing_a_missing_file_says_so`（外面删了就说找不到，不去猜） |
 | `runtime::state` 草稿两条线 2 条（第八层） | `a_draft_knows_which_line_it_belongs_to`（**同名不同线 ≠ 同一份**：「接着改」不许接错）/ `an_older_draft_file_is_still_the_official_line`（旧档 = 官方线，**不升 schema**） |
-| `runtime::lineage` 写回 4 条（第八层） | `saving_back_keeps_the_original_lineage` / `saving_an_untouched_copy_changes_nothing` / `saving_back_without_lineage_writes_no_lineage` / `saving_back_keeps_the_line_endings` |
+| `runtime::provenance` 写回 4 条（第八层） | `saving_back_writes_the_same_file_and_keeps_the_provenance` / `saving_back_an_untouched_file_changes_nothing` / `saving_back_a_file_without_provenance_invents_none` / `saving_back_keeps_the_line_endings` |
 | `runtime::delivery` 可信度 5 条（第 6 层） | `a_clean_copy_is_current_and_not_reported`（没问题就不报警）/ `tampered_bytes_are_not_recognized`（哪儿都对不上 = 异常，且没有证据可指）/ `a_copy_of_the_archived_version_is_recognized_as_old`（**认得出旧版本**，证据是归档里那条路径）/ `a_version_from_the_archived_catalog_is_recognized_as_old`（归档槽被占了也认得出更早那一版）/ `official_text_refuses_bytes_that_drifted`（**不许拿漂了的字节当原文改**） |
 | `runtime::state` 草稿 4 条 | `draft_roundtrips_and_clears`（存/读/丢，丢是幂等）/ `absent_draft_is_none_not_error` / `corrupted_draft_is_an_error`（坏档不静默）/ `draft_and_active_are_separate_files`（**改一份 ≠ 在用它**：两个状态文件互不干扰） |
-| `runtime::lineage` 7 条（第七层，客户端那份血统） | `the_copy_is_the_source_plus_three_lines`（**副本 = 来源 + 三行**，剪掉逐字节相同）/ `copying_a_copy_replaces_the_old_lineage`（不叠加）/ `crlf_source_keeps_crlf` / `a_source_without_release_time_gets_two_lines`（不知道就别写）/ `lineage_roundtrips_and_absence_is_none`（没有血统 = `None`，不是空壳）/ `a_half_lineage_is_still_a_lineage` / `a_lookalike_key_is_not_matched`（`# based_on_extra` 不许被当成 `based_on`） |
-| `workbench::lineage_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出血统三项相同（含"官方原件没有血统"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
+| `runtime::provenance` 7 条（第七层，客户端那份来源记录） | `ko2_a_copy_differs_from_its_source_only_by_the_provenance_block`（**副本 = 来源 + 尾部 `[mkp_source]`**，剥掉逐字节相同）/ `writing_twice_is_idempotent`（同一份记录写两遍逐字节相同，不叠加）/ `crlf_is_preserved` / `origin_only_writes_no_history`（另存只写来源、不长履历）/ `a_file_without_a_block_parses_as_none`（没有记录 = `None`，不是空壳）/ `history_appends_without_touching_old_entries`（只追加，旧条目一个字不改）/ `ko3_history_only_grows_when_a_cloud_version_is_merged_in`（另存不生长、合并才生长） |
+| `workbench::provenance_parity` 3 条（**两端一致性**，只在 workbench feature 下编） | 客户端与工作台对 9 份入库产物给出**逐字节相同**的副本 / 读出来源记录相同（含"官方原件没有来源记录"两边都是 `None`）/ 摘要算法相同 —— 两份实现之间没有编译器，靠这三条钉住 |
 | `workbench::app::build` 生成前预演 7 条（2026-10-02） | **`preview_never_touches_the_disk`（核心不变式：预演一个字节都不写 —— 新增的那份不被创建、已有的原字节不动）** / `a_new_file_shows_every_line_as_added`（新增全绿）/ `an_identical_file_has_no_diff_lines` / `a_changed_line_shows_one_removed_and_one_added`（删在前增在后，与 git 同序）/ `an_inserted_line_shows_only_an_added` / `a_deleted_line_shows_only_a_removed` / `the_counts_match_the_line_kinds`（新增/修改/无变化三档 + `+N −N` 计数） |
 | `scripts/probes/workbench-build.mjs`（**手工**，非 CI） | 生成与发布页（① 生成 / ② 数据包 / 查看 JSON / 查看 TOML / 版本轴 / 云端那一格）· **切页立刻显示（2026-10-02）：整本没回来时先画骨架屏（不是黑屏）+ 导航已在** · **生成页放开选择：已生成的行也能勾（0 个被禁）+「全选」勾满 N/N** · **生成前确认：点「生成」先弹 diff 确认框（不是直接覆盖）· 确认**之前**不写盘 · 确认之后框内换结果页 · 确认之后产物名单才跟上** · 参数台增量。**注意**：`button[title*="钉住"]` 那一处是**预存红**（按钮已删，见 §3.5 整理那一刀）—— 不是本文改动引入的 |
-| `runtime::mine` 血统 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上血统 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有血统 / 没记摘要 / 来源已不在目录里）/ `lineage_is_read_from_the_head_only`（**只看头 8 KB**，用户目录里可能有几百 MB 的文件）/ `an_unreadable_head_is_just_no_lineage` |
+| `runtime::mine` 来源记录 3 条 | `the_committed_copy_shows_up_in_mine_files` 里带上来源记录 / `the_official_update_shows_up_as_based_on_an_old_version`（**官方换版 → `outdated`**，且说得出机型）/ `unknown_when_the_source_cannot_be_resolved`（没有记录 / 没记摘要 / 来源已不在目录里）/ `provenance_is_read_from_the_tail_not_the_head`（记录在尾部；旧的头注释不再读）/ `an_unreadable_head_is_just_no_provenance` |
 | `runtime::state` 两条线 5 条（第七层） | `the_official_pointer_resolves_through_the_catalog`（**落点由目录给**，`mkp/presets/…` 真布局下 `intact` 才是 true；目录里没有了 ⇒ 漂了）/ `an_older_pointer_file_still_means_the_official_line`（**旧档不迁移**）/ `the_users_own_copy_can_be_the_active_one`（用户线按用户根解析；用户再改它算"漂了"）/ `a_pointer_pointing_outside_the_mine_dir_is_not_resolved` / `applying_one_line_replaces_the_other`（唯一性） |
 | `scripts/probes/params-settings.mjs`（**手工**，非 CI） | 参数页 + 设置页：参数页照目录画（分类 / 卡片 / 行 / 底栏）· **① 弃用字段显示但只读（摊开的弃用行有「已弃用」徽章 + 控件全 disabled）** · **④ 塔地图按默认板画出板轮廓并替下 X/Y 行（svg「塔」+ 板 evenodd 路径 + 槽位含坐标行）** · 设置页「高级设置 → 预设数据源」全流程（当前状态如实 / 手动指定应用（尾斜杠砍掉）/ 非法地址如实拒 / 恢复内置默认能撤回）；两档尺寸 0 console error / 0 个 ≥400。**原 `params-sync.mjs`** ——「同步」页退役那一刀改名重写 |
 | `scripts/probes/machines-dims-zones.mjs`（**手工**，非 CI） | 机型与版本页的**品牌树 + 尺寸六组 + 禁区编辑器**（2026-10-03 增量之十三）：品牌是父节点（可点收、折叠后机型行消失、带台数）· 机型缩进当子节点且**确实嵌在品牌分组里** · 筛选同时管两边 · 新增品牌 → 树里多一棵 · 机型行右键「移到品牌…」→ 选一家 → **原来那家台数 −1、新家 +1** · 尺寸卡六组读数与源文件**逐格一致**（床身 260×255 / 标定点 68.21 与 126.373 / G-code 标记）· 尺寸模态框 43 格数字、改床身宽保存后**卡上跟着变** · 禁区编辑器 `viewBox` 就是**床身尺寸**（不是可打印区）、两块多边形 **6 + 4 点**、`(0,0)` 落在**画布左下角**（Y 翻转的定点）、右侧列表点数 · 清到 0 块保存 → 那一格变「没有禁区文件」。跑法见文件头（同 asset-preview 三步） |
 | `scripts/probes/brands-bundles.mjs`（**手工**，非 CI） | 机型与版本页的**品牌** + 套餐页可读性 + 状态栏（2026-10-03 增量之十二）：左列有品牌段（显示名 / id / 台数）· 点品牌开品牌卡（显示名可改且**改了跟着变**、品牌图那枚 `<img>` **真解码**、列出「这个品牌下的机型」）· 新增品牌 → 左列多一行且右侧切过去、**撞名（只差大小写）当场被拒** · 机型卡「品牌」格显示的是**显示名**且「看品牌」跳得过去 · 套餐左列两行读法（显示名不被省略、下行是 id + 装了 N 个文件）· 卡头大标题 = 显示名、附注 = id · 「选择版本…」是**树状**（机型组头 + 缩进版本行）且**行没有垫背景色** · 待确认 chip 里 uid 与「它现在指着谁」有间距（不粘连）· 状态栏只摆 `仓库名/目录名`、导航缩到 150px 也不越界。跑法见文件头（同 asset-preview 三步） |
-| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、血统还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与血统原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / **第十三层：右键「在 Finder 中显示」只给「我的文件」（官方那份灰掉带原因）、点了如实说失败（浏览器里没有文件管理器、真机上的样子说清楚）、不碰「已应用」** / **第十五层：分类边界（MKP 档不许有 `.svg` 与 `MKPProcess` 切片器配置、切片器档要出现 catalog 交付行且动作是「下载」、台账「仓库 N」跟着档走两档不同数）** / 控制台无 error、无 ≥400 响应。跑法见 §2.3；截图落 `tmp-shots/`（已 gitignore） |
+| `scripts/probes/presets.mjs`（**手工**，非 CI） | 预设页探针：两轴可点 / 四张表可读 / 点行展开 / 右键菜单 / BBS 入口跨页 / **交付行的四态与动作（已下载·灰字、旧版本·「更新」、内容异常·「重新下载」）** / **存疑那两档没有「应用」也没有「改这份」、右键「另存为一份新的」带原因灰掉** / **批量那一层（批次行只含未下载+旧版本+内容异常、逐份结局各占一行且不许伪装成功）** / **我那份能被应用并说得出「基于旧版官方」** / **改我那份 → 保存回它自己（不产生第二份、来源记录还在）** / **第九层：读不出来的那份照常列在表里、画得出「文件无法读取」（角标带原因）、没有「应用」也没有「改这份」，能读的那份不受牵连** / **第十层：改名只动名字（坏的那份改完还是「文件无法读取」）、删除有二次确认且删完行没了、正在使用的那份「删除」灰掉带原因、改名不断「已应用」、草稿跟着走（再点「改这份」说「上次改到一半的那一份」）** / **第十一层：另存为一份新的只给「我的文件」（官方那份灰掉带原因）、名字不预填、字节复制（新那份正文带着原来改过的字）与来源记录原样带过去、撞名被拒不覆盖不自动改名、不碰使用中与草稿** / **第十二层：工具栏「导入文件…」选择器能进（结果条 + 列表立刻重读）、拖到窗口上有提示且重名进改名格（输入框预填原名）、改名后进来而原来那份不动、再撞被拒、取消不多出东西、`.zip` 收不了且不许被复制进来、导入不碰「已应用」** / **第十三层：右键「在 Finder 中显示」只给「我的文件」（官方那份灰掉带原因）、点了如实说失败（浏览器里没有文件管理器、真机上的样子说清楚）、不碰「已应用」** / **第十五层：分类边界（MKP 档不许有 `.svg` 与 `MKPProcess` 切片器配置、切片器档要出现 catalog 交付行且动作是「下载」、台账「仓库 N」跟着档走两档不同数）** / 控制台无 error、无 ≥400 响应。跑法见 §2.3；截图落 `tmp-shots/`（已 gitignore） |
 
 ### 2.3 仓库状态速记
 
@@ -150,17 +146,17 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   用户线**写回它自己**（同一路径，不产生第二份）。
 - **用户自己那一份住哪**：`~/Documents/SupportEase/presets-mine/`（**用户根**，与内部根分开 ——
   程序管的数据不放 Documents，因为 iCloud 会把文件驱逐成占位 stub，见 `fsx::paths`）。
-  两条只读命令：`get_user_preset_files`（列，**带血统、"基于哪一版官方"的判定与
+  两条只读命令：`get_user_preset_files`（列，**带来源记录、"基于哪一版官方"的判定与
   第九层的文件级状态 `state` / `stateDetail`**）/ `read_user_preset_text`（读正文，
   **只认那一格**）；**写用户根只有两条**
   （都在 `runtime::mine`，官方原件与下载区一概不碰）：`commit_draft`（另存，第 5 层）/
   `save_back`（写回自己，第 8 层）。
   界面上它在本地表里（「我的文件」那一半，展开详情里有「看正文」与「改这份」）。
   认不出的类别（`.json`）照实写「认不出是哪一类」，在任何类型档下都列。
-- **血统三行写在文件里**（第七层）：另存出来的那份 = 草稿正文 + 头注释块里三行
+- **来源记录三行写在文件里**（第七层）：另存出来的那份 = 草稿正文 + 头注释块里三行
   （`# based_on: mkp/presets/A1-standard.toml` / `# based_on_release_time:` / `# based_on_sha256:`），
-  **正文逐字节不动**，与工作台建副本同一形状。客户端那份实现在 `runtime::lineage`
-  （默认构建不编 `mkpse-preset`，所以是重写），两端靠 `workbench::lineage_parity` 逐字节钉住。
+  **正文逐字节不动**，与工作台建副本同一形状。客户端那份实现在 `runtime::provenance`
+  （默认构建不编 `mkpse-preset`，所以是重写），两端靠 `workbench::provenance_parity` 逐字节钉住。
   **不许改用 `[metadata]` 表**：`TomlConfig` 是 `deny_unknown_fields`，多一张表 = 我们自己的
   读取面报"这份预设比本程序新"（作者原话里的例子按这条换了载体，原则没变）。
 - **两条线都能成为"使用中"**（第七层）：`run/active-preset.json` 的 `origin` 说这一份住哪条线
@@ -168,7 +164,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   分文件夹 ⇒ 认路径；官方线**仍不存路径**，落点由目录给）。落点解析只有一处
   （`state::active_target`），应用只有一个入口（`apply_active_preset(fileName, origin?, path?)`），
   两道闸各按自己的线；`applyActivePreset` 的 `origin` 缺省 `official`，老的调用点不用改。
-- **"基于旧版官方"不是坏文件**：`mine::based_on` 拿血统里的 `based_on_sha256` 与目录里
+- **"基于旧版官方"不是坏文件**：`mine::based_on` 拿来源记录里的 `based_on_sha256` 与目录里
   来源那一份比，得 `current` / `outdated` / `unknown`；`outdated` 的行上多一枚中性徽章
   （不是警示色），详情里那格写全来源。**"把改动挪到新版"（合并）作者 2026-10-02 已降级为
   暂不做的高级功能**（见 §3.5 第 8 条之后那一段）；第八层现在是"继续编辑我自己那份"。
@@ -197,7 +193,7 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
   用户线三份演示：`我的 A1 涂胶.toml`（基于旧版官方、能应用能改、能改名）、`Process_0.2mm.json`
   （认不出哪一类）、**`坏了的涂胶.toml`（第九层：画「文件无法读取」、不给应用 / 改这份）**；
   右键「我的文件」还有**重命名**（只动名字，字节一个不动）与**删除**（二次确认；正在使用的不给删）
-  —— 第十层；以及**另存为一份新的**（字节复制、血统原样带过去、不覆盖、不自动改名）—— 第十一层；
+  —— 第十层；以及**另存为一份新的**（字节复制、来源记录原样带过去、不覆盖、不自动改名）—— 第十一层；
   工具栏「**导入文件…**」与**把文件拖进窗口**走的是通用导入入口（第十二层，假后端给演示路径 /
   假路径）：重名的会开「导入：有同名文件」改名格，ZIP 如实说收不了；
   右键「**在 Finder 中显示**」在浏览器里会如实说"没有文件管理器"（真机上打开并选中，
@@ -271,12 +267,8 @@ npx eslint <改过的文件>                       # CI 跑全量 lint
 
 ## 3. 最近的增量
 
-> **更早的增量已归档**（整段搬走、一个字没改）：
-> 四十五 ~ 五十八（2026-10-19 ~ 10-29）→
-> [`docs/HANDOFF-ARCHIVE-2026-11-01.md`](docs/HANDOFF-ARCHIVE-2026-11-01.md)；
-> 三十六 ~ 四十四 → [`docs/HANDOFF-ARCHIVE-2026-10-20.md`](docs/HANDOFF-ARCHIVE-2026-10-20.md)；
-> 再往前 → [`docs/HANDOFF-ARCHIVE-2026-10-19.md`](docs/HANDOFF-ARCHIVE-2026-10-19.md)。
-> 搬走段里的"待验收 / 待拍板 / 未做 / 已知红"都抄进了 **§2.4**；这里只留最近六条。
+> **更早的增量已清理**（2026-11-04，git 历史可查）：
+> 清理前段里的"待验收 / 待拍板 / 未做 / 已知红"都抄进了 **§2.4**；这里只留最近六条。
 
 ## 增量之五十九 · 客户端看不见「只盖身份」的那次发布（2026-10-29）
 

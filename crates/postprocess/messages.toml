@@ -5078,3 +5078,10 @@ text_en = "Another preset still has unsaved changes — save or discard those fi
 text_zh_tw = "另一份預設還有沒儲存的改動 —— 先在那份裡儲存或放棄，再來存這一份"
 text_ja = "別のプリセットに未保存の変更があります — 先にそちらを保存するか破棄してから、これを保存してください"
 params = []
+
+["ui.ipc.local.152"]
+text = "{rel} 读不出来，没法记下它是从哪一份复制来的 —— 这次复制已撤销，母本没有动过"
+text_en = "{rel} could not be read, so its origin could not be recorded — the copy was rolled back and the original is untouched"
+text_zh_tw = "{rel} 讀不出來，沒法記下它是從哪一份複製來的 —— 這次複製已撤銷，母本沒有動過"
+text_ja = "{rel} を読み取れないため、どのファイルから複製したかを記録できませんでした — この複製は取り消され、元のファイルは変更されていません"
+params = ["rel"]

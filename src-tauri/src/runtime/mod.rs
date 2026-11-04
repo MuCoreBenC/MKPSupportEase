@@ -47,8 +47,6 @@ pub mod history;
 /// 共用这一层，Preset 只是第一个消费者。与云端线 / 用户线都分开：
 /// 它只管"进来"，不碰"使用"（不校验内容、不碰状态）。
 pub mod import;
-/// **血统三行**（用户那份是从哪份云端、哪一版拷出来改的）—— 写在文件头注释里
-pub mod lineage;
 /// **用户线**：用户自己的预设（`presets-local/`）—— 与云端线（[`content`] /
 /// [`delivery_index`] / `archive/`）分开
 pub mod local;
@@ -64,6 +62,8 @@ pub mod postproc_prefs;
 /// **预设事件时间模型**（下载 / 替换落账，发布反查目录与版本链）：凡是界面上要
 /// "永久解释"的时间，先定义成事件、发生那一刻定格 —— mtime 从此只归文件系统
 pub mod preset_events;
+/// **来源记录**（用户那份是从哪份云端、哪一版拷出来改的）—— 写在文件头注释里
+pub mod provenance;
 pub mod recovery;
 pub mod release;
 /// **软件发布信息**（`release.json`）：「有没有新版本的 SupportEase」这条链的信息源。
@@ -79,7 +79,7 @@ pub mod source;
 /// 「云端变了」与「两边本来就不是一回事」。见 [`source_identity`] 的模块头。
 pub mod source_identity;
 /// **源身份账**（2026-10-27）：`run/source-ledger.json`（见过哪些源、各自发布时刻）与
-/// `run/lineage-source.json`（哪份副本是在哪个源下建的）。**不动用户的 preset 文件**，
+/// `run/provenance.json`（哪份副本是在哪个源下建的）。**不动用户的 preset 文件**，
 /// 坏档按空账。见 [`source_ledger`] 的模块头。
 pub mod source_ledger;
 pub mod state;

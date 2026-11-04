@@ -155,7 +155,7 @@ export interface PresetData {
    * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**
    * （「已下载 / 新版本」）。
    *
-   * ★ 它**不是"过时判定"**：不读用户预设的字节、不看血统，也不在任何一行上说"该更新了"。
+   * ★ 它**不是"过时判定"**：不读用户预设的字节、不看来源记录，也不在任何一行上说"该更新了"。
    */
   cloudVersions: CloudVersion[]
 
@@ -846,7 +846,7 @@ export function usePresetData(importRevision = 0): PresetData {
              *
              * 云端那一表每行的三态（未获取 / 本地已有 / 有新版）是
              * "本地文件 × 身份账本"算出来的，而账本**按当前目录**判
-             * （血统指的那一版还在目录里才算数）。原来这里只重读"机型树 + 交付"，
+             * （来源记录指的那一版还在目录里才算数）。原来这里只重读"机型树 + 交付"，
              * 账本还拿着换版之前那一套 ⇒ 用户第一次切进云端页看到的是旧判定，
              * 直到别处碰巧重读一次才对上（作者图 7：「一开始的时候都没看到有更新按钮，
              * 第二次点开才有」）。
@@ -1104,7 +1104,7 @@ export function usePresetData(importRevision = 0): PresetData {
     async (path: string, decisions: ParamDecision[]) => {
       /*
        * `decisions` 可以是空的（2026-10-20「应用 0 项」）—— 那一样是写：
-       * 值一个不动，云端的注释 / 新字段 / 时间戳与血统推进（「有新版」就此收场）。
+       * 值一个不动，云端的注释 / 新字段 / 时间戳与来源记录推进（「有新版」就此收场）。
        */
       await api.applyPresetParamDecisions(path, decisions)
       await readLocalPresets()

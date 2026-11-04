@@ -2,12 +2,15 @@
 //!
 //! ```text
 //! run/source-ledger.json   每次换源、成功拿到一份目录 ⇒ 记一笔（源身份 + 发布时刻 + 目录指纹）
-//! run/lineage-source.json  用户线每建一份副本 ⇒ 记一笔（副本相对路径 + 那时生效的源身份）
+//! run/provenance.json  用户线每建一份副本 ⇒ 记一笔（副本相对路径 + 那时生效的源身份）
+//!
+//! 2026-11-04：文件名从 `lineage-source.json` 改成 `provenance.json`（术语统一）。
+//! 旧文件**不读、不迁移**：它只是程序自己的运行索引，丢了不影响文件里的来源记录。
 //! ```
 //!
 //! # 为什么必须记在 `run/` 而不是 preset 文件里
 //!
-//! 血统三行（`# based_on*`）是**文件内容**，跟着文件走、用户能看见、也能自己删。
+//! 来源记录（`# based_on*`）是**文件内容**，跟着文件走、用户能看见、也能自己删。
 //! 作者 2026-10-27 定：**不许为了记账去改用户的 preset 文件** —— 所以源身份另存。
 //! 这两本都是**附加信息**：丢了、坏了、从来没记过，都只让判定退回「说不清」
 //! （[`super::local::BasedOn::Unknown`] / `Elsewhere`），**绝不影响文件本身能不能用**。
@@ -15,7 +18,7 @@
 //! # 两本各管什么
 //!
 //! - **目录账**（[`SourceNote`]）：这个源我见过几次、每次的发布时刻与目录指纹。
-//!   用途是"当前这一份目录，跟血统里那一版比，谁更早"（`publishedAt` 只做辅助，
+//!   用途是"当前这一份目录，跟来源记录里那一版比，谁更早"（`publishedAt` 只做辅助，
 //!   见 [`super::local::BasedOn`] 的判定顺序）。
 //! - **副本账**（[`CopySource`]）：某份用户文件是**在哪个源生效时**建出来的。
 //!   用途是回答"我这份与当前云端是不是同一个源" —— 没有它，换源之后所有文件
@@ -39,7 +42,7 @@ use super::source_identity::SourceIdentity;
 /// 目录账落点（内部根的 `run/` 下，与 `app-state.json` 同一层）
 const NOTES_FILE: &str = "run/source-ledger.json";
 /// 副本账落点
-const COPIES_FILE: &str = "run/lineage-source.json";
+const COPIES_FILE: &str = "run/provenance.json";
 /// 目录账最多留几条。换源不频繁，几十条足够回看；再多也没人看，白占盘
 const MAX_NOTES: usize = 40;
 
@@ -90,7 +93,7 @@ impl OriginKind {
     }
 }
 
-/// **一份本地文件的完整来路**（`run/lineage-source.json` 的一条）。
+/// **一份本地文件的完整来路**（`run/provenance.json` 的一条）。
 ///
 /// 它回答四件不同的事，一格都不许互相顶替：
 ///
@@ -201,7 +204,7 @@ pub fn load_notes(root: &Path) -> Vec<SourceNote> {
 /// 记一笔「现在这个源长这样」。
 ///
 /// 同一个身份**覆盖**成最新一条（账是"这个源最近一次见到的样子"，不是流水账：
-/// 流水账会让"血统那一版对应哪次发布"变得要靠猜）。写不进去返回错误，由调用方
+/// 流水账会让"来源记录那一版对应哪次发布"变得要靠猜）。写不进去返回错误，由调用方
 /// 决定是否咽掉 —— 记账失败不该让换源失败。
 pub fn note_seen(
     root: &Path,
