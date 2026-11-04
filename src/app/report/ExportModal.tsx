@@ -291,7 +291,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   )
   /** 成了：出了几份（框留着，见文件头第 3 条）。`null` = 还没导 */
   const [done, setDone] = useState<number | null>(null)
-  /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`） */
+  /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<桌面>/MKP-导出报告`） */
   const [picked, setPicked] = useStickyState<string>(STORAGE.clientReportExportDir, '')
   /**
    * 框身现在摆哪一页：`files` = 三件套清单 + 保存位置；`info` = 压缩开关 + 归档路径。

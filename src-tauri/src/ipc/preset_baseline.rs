@@ -15,8 +15,9 @@
 //! ★ **它不是"过时判定"**：这里不读用户预设的字节、不看血统，也**不会**在任何一行上
 //! 说"你的那份该更新了"。用户自己那份是完整的、可继续使用的一份，系统不替他更新。
 //!
-//! 日期：已下载的那一版有**真值**（content 文件头的 `# release_time`）；
-//! 没下载的只有目录代时间（`catalog.publishedAt`），界面按"目录发布时间"如实标注。
+//! 日期：每一版都有**目录代时间**（`catalog.publishedAt`）—— 那是发布事件真值；
+//! 配方自己写了 `# release_time` 的老件另带一格配方版本标记，新产物只有
+//! `# generated_at` 写盘记录，**不把它当版本时间**。
 //!
 //! # 二、「恢复默认」的基准值 —— **已退役**（2026-10-08 资源库改判）
 //!
@@ -40,7 +41,8 @@ pub struct CloudVersionDto {
     /// 内容摘要（版本的唯一身份，**界面不显示**）
     pub sha256: String,
     /// 云端**发布日期真值**（该版正文文件头的 `# release_time`）。
-    /// `null` = 还没下载（拿不到真值，界面不编）
+    /// `null` = 还没下载，或这一版没有配方自己写的 `# release_time`（新产物只有
+    /// `# generated_at` 写盘记录）—— 两种都照实写「未知」，**不拿 generated_at 顶**。
     pub release_time: Option<String>,
     /// 目录代时间（`catalog.publishedAt`）—— 兜底，界面上标明是"目录发布时间"
     pub published_at: Option<String>,

@@ -881,6 +881,9 @@ impl HookView {
                 warnings: Vec::new(),
                 result: None,
                 calib_choice: None,
+                /* 重置收场：没有挪塔这回事 */
+                relocation: None,
+                geo: None,
             },
         );
 
@@ -1300,6 +1303,8 @@ mod tests {
             /* 失败没有读数（与真钩子同一个形状） */
             result: None,
             calib_choice: None,
+            relocation: None,
+            geo: None,
         });
         let snap = view.snapshot().expect("结论也在快照里");
         assert!(snap.question.is_none());

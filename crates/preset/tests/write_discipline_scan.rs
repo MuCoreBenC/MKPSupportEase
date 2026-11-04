@@ -50,8 +50,9 @@ const ALLOWED: &[(&str, &str)] = &[
     ),
     (
         "preset/src/generate.rs",
-        "gen-presets 这个仓库内开发工具：write_all 写自己的 assets/presets/（默认动作是 --check）；\
-         sync_baseline 写内核判据夹具，另有落点断言只允许真基线目录或临时目录",
+        "工作台 `wb_generate` / `wb_sync_baseline` 走这里的 sync_baseline 写内核判据夹具\
+         （落点断言只允许真基线目录或临时目录）；write_all 只剩测试与只读诊断用，\
+         旧 gen-presets bin 已于 2026-11-04 退役",
     ),
     (
         "postprocess/src/pipeline/mod.rs",
@@ -267,12 +268,12 @@ fn the_scan_would_catch_a_write() {
     );
 }
 
-/// **对照基线的写入口只许是「显式人工同步」**（b05 Task 6，14.9 扩展）。
+/// **对照基线的写入口只许是「显式人工同步」**（b05 Task 6，14.9 扩展；2026-11-04 收口）。
 ///
-/// 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：能改它的动作只有两个 ——
-/// `gen-presets --sync-baseline`（CLI，原始入口）与工作台的 `wb_sync_baseline`
-/// （b05 Task 14.9：§10.6 预留的「显式、带 diff 确认的独立入口」，2026-09-24 授权落地）。
-/// 两者都走 `generate::sync_baseline`，落点闸（`check_baseline_target`）在函数内部，
+/// 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：`gen-presets --sync-baseline` 已随
+/// 旧生成器退役，现在能改它的**只有**工作台的 `wb_sync_baseline`
+/// （b05 Task 14.9：§10.6 预留的「显式、带 diff 确认的独立入口」）。
+/// 它走 `generate::sync_baseline`，落点闸（`check_baseline_target`）在函数内部，
 /// 谁也绕不过。**生成路径、发布路径、其余任何命令都不许碰它** ——
 /// 防的是"同步变成生成/发布的自动步骤"，不是"人看过了 diff 再点的那一下"。
 ///
@@ -286,11 +287,11 @@ fn the_scan_would_catch_a_write() {
 /// 两条一起才算拦得住：一条证明没有别的入口，一条证明真跑起来没动。
 #[test]
 fn the_baseline_has_exactly_one_write_path() {
-    /// 允许出现 `sync_baseline` 的文件：定义处 + 两个显式入口 + lib.rs 的
+    /// 允许出现 `sync_baseline` 的文件：定义处 + 工作台唯一显式入口 + lib.rs 的
     /// 命令注册清单（`generate_handler!` 只引用名字，不是写路径）。**别的都算违规。**
+    /// `gen-presets --sync-baseline` 随旧 bin 于 2026-11-04 退役，故不再列入。
     const ALLOWED: &[&str] = &[
         "crates/preset/src/generate.rs",
-        "crates/preset/src/bin/gen_presets.rs",
         "src-tauri/src/lib.rs",
         "src-tauri/src/workbench/app/build.rs",
     ];
@@ -326,7 +327,7 @@ fn the_baseline_has_exactly_one_write_path() {
     //（函数改名/入口搬走时这里会红，而不是变成一张永远绿的白名单）
     assert_eq!(
         hits, want,
-        "对照基线的写入口不止一个了 —— 它只能被 `gen-presets --sync-baseline` 显式改；\
+        "对照基线的写入口不止一个了 —— 它只能被工作台 `wb_sync_baseline` 显式改；\
          生成与发布路径都该只读它（`docs/ARCHITECTURE.md` §10.6）"
     );
     // 反空转：扫不到文件的话上面那条永远是绿的

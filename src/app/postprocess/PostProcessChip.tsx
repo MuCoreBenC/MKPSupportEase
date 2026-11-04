@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from 'react'
 
 import TitlebarChip from '../components/TitlebarChip'
 import { useT } from '../../i18n'
+import { showsPostProcessChip } from './facts'
 import { percentOf, stepName } from './steps'
 import type { PostProcessRunView } from './usePostProcessRun'
 import s from './PostProcessChip.module.css'
@@ -79,7 +80,7 @@ function Dots() {
 
 export default function PostProcessChip({ view }: { view: PostProcessRunView }) {
   const tr = useT()
-  const { run, dismissed, reopen, quietUntil } = view
+  const { run, dismissed, reopen, quietUntil, parked } = view
   /*
    * 「这枚胶囊在不在」—— **两档同一套逻辑**（2026-10-17 作者：
    * 「静默的他们的逻辑都一样复用的，一分钟自动消失，除非遇到下一个又刷新一分钟的，
@@ -88,6 +89,8 @@ export default function PostProcessChip({ view }: { view: PostProcessRunView }) 
    *   · **跑着**：`dismissed`（那一屏没在眼前 —— 静默档恒如此，GUI 档点了「后台运行」）
    *     ⇒ 显示三颗点 + 百分比；
    *   · **跑完**：`quietUntil` 有值 ⇒ 显示结论（已完成 / 没成），到点自己消失；
+   *   · **停驻**（2026-11-04）：弹窗里点「去设置」之后 `parked` 有值 ⇒ 结论胶囊
+   *     **不过期**，点它随时把原样那一屏叫回来，直到用户点「关闭」才真的撤掉；
    *   · **点它**（`reopen`）⇒ 那一屏出来，`quietUntil` 立刻清掉，胶囊随之不见。
    *
    * ★ 60 秒的账记在 `usePostProcessRun` 的 `quietUntil`（结论到达那一刻定下），
@@ -97,14 +100,13 @@ export default function PostProcessChip({ view }: { view: PostProcessRunView }) 
    */
   const expired = useRunExpiry(run, quietUntil)
 
+  /*
+   * 「在不在」的判据抽到 `./facts`（有回归）：停驻那一档不看 `quietUntil`、
+   * 不看 60 秒过期，直到用户点「关闭」（`close` 清 `parked`）；且要 `dismissed`，
+   * 免得点胶囊把模态框翻回来时两处同框。
+   */
   if (run === null) return null
-  if (run.finished === null) {
-    /* 跑着：只在那一屏没摆在眼前时才需要这一枚 */
-    if (!dismissed) return null
-  } else if (quietUntil === null || expired) {
-    /* 跑完了但没有"留一会儿"的账（GUI 档下那一屏正在显示结论）⇒ 不摆 */
-    return null
-  }
+  if (!showsPostProcessChip({ run, dismissed, quietUntil, expired, parked })) return null
 
   /* ---- 跑着：三颗点 + 百分比 ---- */
   if (run.finished === null) {

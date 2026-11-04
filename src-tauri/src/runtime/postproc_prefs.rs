@@ -213,29 +213,13 @@ mod tests {
         assert_eq!(TowerRelocateMode::Off.wire(), "off");
         assert_eq!(TowerRelocateMode::Auto.wire(), "auto");
         assert_eq!(TowerRelocateMode::Ask.wire(), "ask");
-        assert_eq!(
-            TowerRelocateMode::parse("off"),
-            Some(TowerRelocateMode::Off)
-        );
-        assert_eq!(
-            TowerRelocateMode::parse("auto"),
-            Some(TowerRelocateMode::Auto)
-        );
-        assert_eq!(
-            TowerRelocateMode::parse("ask"),
-            Some(TowerRelocateMode::Ask)
-        );
-        /* 旧盘上那一格是 `true` / `false`：认不出（**不静默回落到某一档**），
-        由 `resolved()` 按**出厂 `ask`** 收场（2026-11-04：装好就是"问"） */
-        assert_eq!(TowerRelocateMode::parse("true"), None);
         assert_eq!(TowerRelocateMode::default(), TowerRelocateMode::Ask);
     }
 
     /// **出厂就是"问"**（2026-11-04 作者：「软件安装的时候默认就是问」）。
     ///
-    /// 这一条钉三件事：① 盘上没这一格 ⇒ `resolved()` 给 `ask`；② 内核出厂也是 `ask`
-    /// （两边一致见上一条判据）；③ 旧盘上的布尔值认不出 ⇒ 落到 `ask`，**不许**悄悄变成
-    /// "不问也不挪"或"直接挪"—— 前者让新装用户看不到这个能力，后者替他做了决定。
+    /// 这一条钉两件事：① 盘上没这一格 ⇒ `resolved()` 给 `ask`；② 内核出厂也是 `ask`
+    /// （两边一致见上一条判据）。
     #[test]
     fn the_factory_mode_is_ask() {
         let fresh = PostprocPrefs::default().resolved();
@@ -246,14 +230,10 @@ mod tests {
             "内核出厂档也要是 ask —— 管线读的是它"
         );
 
-        /* 旧盘：这一格是 `true` / `false`，serde 读不出 ⇒ 走 `default` ⇒ 出厂 `ask` */
-        let old: PostprocPrefs =
-            serde_json::from_str(r#"{"auto_tower_position": true}"#).unwrap_or_default();
-        assert_eq!(
-            old.auto_tower_position, None,
-            "旧值认不出，不许硬塞成某一档"
-        );
-        assert_eq!(old.resolved().auto_tower_position, TowerRelocateMode::Ask);
+        /* 盘上没这一格（老档案 / 新装）⇒ 出厂 `ask` */
+        let empty: PostprocPrefs = serde_json::from_str("{}").expect("空对象也要读得动");
+        assert_eq!(empty.auto_tower_position, None);
+        assert_eq!(empty.resolved().auto_tower_position, TowerRelocateMode::Ask);
     }
 
     /// 量程夹住：界面上万一传了越界值，管线拿到的一定是合法值。

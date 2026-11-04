@@ -227,8 +227,15 @@ function carrierOf(box: HTMLElement, el: HTMLElement): HTMLElement | null {
  * 把一个元素滚进视口（`center` 对中 / `start` 对顶）—— 全仓"定位到某处"都走这一条。
  *
  * 不传滚动容器：自己往上找（同一页里那几层 `overflow` 各不相同，调用方拿不到类名）。
+ *
+ * ★ 业务侧**不直接调它**：`components/scroll/locate` 是它唯一的调用方（滚 + 落位 +
+ *   绿底是一整套，拆开就会出现"有的定位不亮、有的亮法不一样"）。`offset` 是 2026-11-04
+ *   为设置页左目录 / 深链那几 px 让位加的，缺省 0 ⇒ 原有判据一个字节没变。
  */
-export function glideIntoView(el: HTMLElement, opts: GlideOptions & { align?: Align } = {}): () => void {
+export function glideIntoView(
+  el: HTMLElement,
+  opts: GlideOptions & { align?: Align; offset?: number } = {},
+): () => void {
   const box = scrollParentOf(el)
   if (box === null) return () => undefined
 
@@ -243,8 +250,8 @@ export function glideIntoView(el: HTMLElement, opts: GlideOptions & { align?: Al
       ? at - (box.clientHeight - elRect.height) / 2
       : at
   const room = Math.max(0, box.scrollHeight - box.clientHeight)
-  const { duration, easing, onFrame, onDone } = opts
-  return glideTo(box, carrier, Math.min(Math.max(raw, 0), room), {
+  const { duration, easing, onFrame, onDone, offset } = opts
+  return glideTo(box, carrier, Math.min(Math.max(raw + (offset ?? 0), 0), room), {
     duration,
     easing,
     onFrame,

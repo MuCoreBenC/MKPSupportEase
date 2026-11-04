@@ -16,7 +16,7 @@
  *
  * ```text
  * presets/…（源：配方 / registry / machines / 资产表）
- *     │ gen-presets
+ *     │ 工作台 wb_generate（2026-11-04 起唯一写入方；旧 gen-presets 已退役）
  *     ▼
  * crates/preset/assets/presets/*.toml   ← include_str! 进内核，随包预设在客户端解析的就是它
  *     │ 工作台/CLI 生成

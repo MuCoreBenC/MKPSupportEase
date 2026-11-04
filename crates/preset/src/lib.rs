@@ -91,10 +91,11 @@ pub const PRESET_RECIPES_TOML: &str = include_str!("../assets/preset_recipes.tom
 /// 换预设 = 出新版本，零网络）。消费方是 `src-tauri` 的 `builtin::sync_builtin_presets`，
 /// 它把这些内容铺到 `<数据根>/presets/builtin/` —— 那是只读目录，整体覆盖是安全的。
 ///
-/// **这张表是手写的**（`include_str!` 的路径必须是字面量），漏一份不会报错，
-/// 所以判据咬两头：`gen-presets --check` 保证入库产物与配方一致，
-/// `tests/builtin_presets_match_dir.rs` 保证这张表与入库目录**一份不差**
-/// （文件名集合相同 + 每条内容与同名文件逐字节相等 + 无重名）。
+/// **这张表是手写的**（`include_str!` 的路径必须是字面量），漏一份不会报错。
+/// 2026-11-04 起 `gen-presets` 退役，正式产物由工作台生成并由 `presets diff` /
+/// `check:artifacts` 守；这里靠 `tests/builtin_presets_match_dir.rs` 咬两头：
+/// 这张表与入库目录**一份不差**（名字集合 + 逐字节内容 + 无重名），
+/// 且每一份都能被客户端读取面按新头部解析。
 pub const BUILTIN_PRESETS: &[(&str, &str)] = &[
     (
         "A1-standard.toml",

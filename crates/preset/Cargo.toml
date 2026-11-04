@@ -50,9 +50,9 @@ tempfile.workspace = true
 [lints]
 workspace = true
 
-# 预设生成器 —— **仓库内的开发工具**，`src-tauri` 不依赖它，`tauri build` 也不打包它。
-# AGENTS.md 的「零第二可执行物」管的是**分发物**；开发工具不在其列（理由记在诚实边界里）。
-# 显式声明是为了要一个带连字符的命令名（默认会是文件名 `gen_presets`）。
-[[bin]]
-name = "gen-presets"
-path = "src/bin/gen_presets.rs"
+# `gen-presets` 已于 2026-11-04 退役（作者裁定：正式产物以工作台这一代为准）。
+# 它渲染的四行头带 `# uuid` / `# release_time`，而现役产物按 2026-10-05 / 11-01 的裁定
+# 只有 `# machine` / `# variant` / `# generated_at`；两个出口共写 assets/presets/ 会互相覆盖。
+# 现在这个目录的**唯一写入方**是工作台 `wb_generate` / `wb_sync_baseline`（走
+# `preset::generate::sync_baseline`）。配方正文 `PRESET_RECIPES_TOML` 仍被工作台预检使用，
+# 所以只删 bin，不动配方与读取面。

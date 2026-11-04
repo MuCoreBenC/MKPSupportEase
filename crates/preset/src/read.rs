@@ -41,12 +41,14 @@ pub fn read_preset_from_bytes(raw: String) -> Result<PresetFile, PostprocError> 
             path: String::new(),
         })?;
     let release_time = parse_release_time_from_content(&raw);
+    let generated_at = parse_generated_at_from_content(&raw);
     let variant = parse_variant_from_content(&raw);
     let lineage = parse_lineage_from_content(&raw);
 
     Ok(PresetFile {
         config,
         release_time,
+        generated_at,
         machine,
         variant,
         lineage,
@@ -90,13 +92,18 @@ fn unknown_field_name(message: &str) -> Option<String> {
 /// `^#\s*release_time\s*:\s*(.+)$`（read.go:205 的正则，trim 后逐行匹配）。
 /// 手写匹配器（无 regex 依赖）：'#'、任意空白、字面量、任意空白、':'、
 /// 任意空白、至少一个字符的捕获（TrimSpace 后为空视同未命中）。
+///
+/// ★ 只认 `release_time`（2026-11-04 改）：它回答「这是配方里的哪一版」，由配方自己写。
+/// `generated_at` 回答「这份字节什么时候落盘」—— **两件事，不许互相顶替**
+/// （`AGENTS.md` §6）。新产物没有这一行 ⇒ `None`，界面照实写「未知」。
 pub fn parse_release_time_from_content(content: &str) -> Option<String> {
-    /* 两个名字都认（2026-11-01）：
-    · `generated_at` —— 现在产物写的（ISO 8601 + 偏移，如 `2026-11-01T12:30:00+08:00`）
-    · `release_time` —— 老产物写的（`2026-08-19 01:38:13`，空格分隔无时区）
-    老件照样读得出来，不逼着谁去改历史文件；新件优先。 */
+    parse_header_value(content, "release_time")
+}
+
+/// `^#\s*generated_at\s*:\s*(.+)$`：**写盘记录**，不是发布时刻、也不是配方版本时间。
+/// 单独成一个字段，避免被拿去顶 `release_time`（2026-11-04）。
+pub fn parse_generated_at_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "generated_at")
-        .or_else(|| parse_header_value(content, "release_time"))
 }
 
 /// `^#\s*machine\s*:\s*(.+)$`（read.go:219；actualMachine 的 SSOT 数据源）。
@@ -215,6 +222,35 @@ glue_z_compensation_enabled = false
         assert_eq!(f.config.toolhead.offset_y, 18.6);
         assert_eq!(f.config.wiping.wiper_x, 20.0);
         assert!(f.config.wiping.rib_fillet_wall);
+    }
+
+    /// 两个时间各归各（2026-11-04）：写盘记录不许顶替配方版本标记。
+    #[test]
+    fn generated_at_is_not_a_release_time() {
+        let only_generated = MINIMAL.replace(
+            "# release_time: 2026-08-19 01:38:13\n",
+            "# generated_at: 2026-11-01T12:30:00+08:00\n",
+        );
+        let f = read_preset_from_bytes(only_generated).unwrap();
+        assert_eq!(
+            f.release_time, None,
+            "只有写盘记录时，配方版本时间必须未知（不许拿 generated_at 顶）"
+        );
+        assert_eq!(
+            f.generated_at.as_deref(),
+            Some("2026-11-01T12:30:00+08:00"),
+            "写盘记录要单独读出来，不能丢"
+        );
+
+        // 两行都在：各读各的，互不覆盖
+        let both = MINIMAL.replacen(
+            "# machine: A1\n",
+            "# machine: A1\n# generated_at: 2026-11-01T12:30:00+08:00\n",
+            1,
+        );
+        let f = read_preset_from_bytes(both).unwrap();
+        assert_eq!(f.release_time.as_deref(), Some("2026-08-19 01:38:13"));
+        assert_eq!(f.generated_at.as_deref(), Some("2026-11-01T12:30:00+08:00"));
     }
 
     #[test]

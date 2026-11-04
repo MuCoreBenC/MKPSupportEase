@@ -360,10 +360,62 @@
   min-width: 0;
 }
 
+
 /* 藏起来的那一页仍然占格（高度不被抽走），只是看不见也点不到 */
 .relocatePageOff {
   visibility: hidden;
   pointer-events: none;
+}
+
+/*
+ * **碰撞失败那一页的说明**（2026-11-04）—— 陈述句，不是问句。
+ *
+ * 与 `.relocateNote`（问句那一屏）**共用左对齐那一列**，但语气不同：
+ * 那屏是"要不要挪"（居中、问句）；这屏是"撞了 / 怎么办"（左对齐、陈述）。
+ * 所以这里不套卡片、不套警示色 —— 红已经在「失败」那一页里说过了，
+ * 这一页只负责**说清下一步**。字号与页内其它小字同档。
+ */
+/*
+ * ★ **整块靠左、占满整行**（2026-11-04 作者：「这句话紧贴左侧的，不要居中」）。
+ *
+ * 说明页里这几句是**读的**，不是"要你决定的一句话"—— 与问句那一屏
+ * （`.relocateNote` 居中、主色）刻意相反：
+ *   · `align-items: stretch`：块本身撑满，不跟着外层的居中跑；
+ *   · `text-align: left`：句子从左边起排（中文长句居中很难读）；
+ *   · 段与段之间用间距分层，不缩进、不加引用线。
+ */
+.collisionNote {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  color: var(--text-2);
+}
+
+.collisionNoteLead {
+  margin: 0;
+  text-align: left;
+  color: var(--text-1);
+  font-size: var(--fs-body);
+  font-weight: 600;
+}
+
+.collisionNoteBody {
+  margin: 0;
+  text-align: left;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  font-size: var(--fs-label);
+  line-height: 1.75;
+}
+
+/* 那颗「去设置」贴着句子尾巴走（折行时也不掉到单独一行） */
+.collisionNoteGo {
+  flex-shrink: 0;
 }
 
 /*
@@ -542,7 +594,6 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-right: auto;
   padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -1128,10 +1179,37 @@
  * 摆在页脚最左边（真业务按钮原来待的位置）—— 它要一眼看出"这不是真跑"：
  * 那几颗真按钮在预览里一个都不摆（见组件里 `preview` 那一支）。
  */
+
+/*
+ * **页脚靠左那一排**（翻页钮 + 回放/预览/机型不一致那枚小字）。
+ *
+ * ★ 它整块带 `margin-right: auto`：页脚是 `justify-content: flex-end`，
+ *   只有"第一个元素把右边的空白全吃掉"才会把这一排顶到最左、动作按钮留在右边。
+ *   上一版把这个 auto 分散挂在里面的两颗元素上（还试过 `:has(~ …)` 判断"后面还有没有
+ *   小字"）—— 模块类名一编译那条选择器就匹配不上，auto 全丢，整排便贴到右边
+ *   （2026-11-04 作者截图：「这怎么靠右了呀」）。结构定死之后不再有这个问题。
+ */
+/*
+ * 页脚左侧那枚小字（「回放 · 当时的那一趟，不接真实后处理」/「预览」/「机型不一致」）。
+ *
+ * ★ **不带 `margin-right: auto`**：靠左是外面 `.footLead` 整块负责的。
+ *   这里只管字号与省略 —— 句子长的时候截断，别把右边的动作按钮挤出去。
+ */
 .previewTag {
-  margin-right: auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--fs-label);
   color: var(--text-3);
+}
+
+.footLead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-right: auto;
 }
 
 /* ============================================================

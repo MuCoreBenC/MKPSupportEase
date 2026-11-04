@@ -152,13 +152,12 @@ pub fn make_copy_with_line(
     let body = strip_lineage_lines(src_text);
     let lineage = Lineage {
         based_on: Some(based_on.to_owned()),
-        /* 血统里那个"哪一版"的日期，来源换成产物头的 `# generated_at:`
-        （2026-11-01 改名：原来叫 `release_time`）。
-        它仍是产物自己记录的时间，但语义收窄成"这份产物何时生成" ——
-        "这是哪个云端版本"由 `based_on_catalog` + `based_on_serial` +
-        `based_on_sha256` 三行唯一定，日期只做展示。
-        老文件里若只有旧的 `release_time`，照样读得到（[`parse_release_time_from_content`]）。 */
-        based_on_release_time: parse_release_time_from_content(src_text),
+        /* 血统里那个"哪一版"的日期只抄来源的 `# release_time`（配方自己写的标记）。
+        2026-11-04 改：不再拿 `# generated_at`（写盘时刻）顶替 —— 那是两件事，
+        AGENTS.md §6 不许互相顶替。来源没有这一行就不写（这一项留 None）。
+        "这是哪个云端版本"由 `based_on_catalog` + `based_on_serial` + `based_on_sha256`
+        三行唯一定，日期只做展示。 */
+        based_on_release_time: preset::read::parse_release_time_from_content(src_text),
         based_on_sha256: Some(sha256_hex(src_text)),
         based_on_catalog: catalog.map(str::to_owned),
         based_on_serial: serial,
@@ -343,25 +342,17 @@ pub fn parse_lineage_from_content(content: &str) -> Option<Lineage> {
     Some(lineage)
 }
 
-/// 产物头里"这份是何时生成的"。**两个名字都认**（2026-11-01）：
-///
-/// · `generated_at` —— 现在产物写的（ISO 8601 + 偏移，如 `2026-11-01T12:30:00+08:00`）
-/// · `release_time` —— 老产物写的（`2026-08-19 01:38:13`，空格分隔、无时区）
-///
-/// 老件照样读得出来，不逼着谁去改历史文件；新件优先。
-fn parse_release_time_from_content(content: &str) -> Option<String> {
-    parse_header_value(content, "generated_at")
-        .or_else(|| parse_header_value(content, "release_time"))
-}
-
 /// **这一版云端是什么时候发的**（文件头 `# release_time` 的原样值，如
 /// `2026-08-19 01:38:13`）。
 ///
 /// 它是"这是哪个云端版本"的日期真值（血统三行里的 `based_on_release_time` 也用它）——
-/// **不许**拿下载时刻 / 文件 mtime / 目录代时间冒充它：那些回答的是"我什么时候拿到它"，
-/// 不是"这是哪个云端版本"。没有这一行就返回 `None`（不知道就不编一个）。
+/// **不许**拿下载时刻 / 文件 mtime / 目录代时间 / 写盘记录 `generated_at` 冒充它：
+/// 那些回答的是"我什么时候拿到它 / 什么时候落盘"，不是"这是哪个云端版本"。
+/// 没有这一行就返回 `None`（不知道就不编一个）。
+///
+/// 实现只有 `preset::read` 那一份（2026-11-04：删掉这里的第二份，两处不再各认一套）。
 pub fn parse_release_time(content: &str) -> Option<String> {
-    parse_release_time_from_content(content)
+    preset::read::parse_release_time_from_content(content)
 }
 
 /// 逐行找 `# <key>: <值>`，返回第一个非空值。
@@ -540,6 +531,27 @@ offset_z = 4 # 笔尖偏移
         assert!(!copy.contains("based_on_release_time"));
         assert!(copy.contains("# based_on: mkp/presets/A1-standard.toml"));
         assert_eq!(strip_lineage_for_compare(&copy), no_rt);
+    }
+
+    /// 写盘记录不许变成「哪一版」的日期（2026-11-04）
+    #[test]
+    fn generated_at_does_not_become_a_based_on_release_time() {
+        let only_generated = SRC.replacen(
+            "# release_time: 2026-08-19 01:38:13\n",
+            "# generated_at: 2026-11-01T12:30:00+08:00\n",
+            1,
+        );
+        let copy = make_copy(&only_generated, "mkp/presets/A1-standard.toml");
+        assert!(
+            !copy.contains("based_on_release_time"),
+            "写盘记录不许被抄成「哪一版」的日期：{copy}"
+        );
+        assert!(copy.contains("# based_on: mkp/presets/A1-standard.toml"));
+        assert_eq!(
+            parse_release_time(&only_generated),
+            None,
+            "没有 # release_time 就是未知，不许拿 generated_at 顶"
+        );
     }
 
     /// 读得回来；**没有血统 = `None`**（不是三项全空的空壳）

@@ -5245,7 +5245,26 @@ mod tests {
         );
         let orders: Vec<f64> = again.tabs[0].sections.iter().map(|s| s.order).collect();
         assert_eq!(orders, [0.0, 1.0], "order 没按新次序重排：{orders:?}");
-        assert_eq!(again.param_section_ids().len(), 2, "参数一条都不许少");
+        // 「参数一条都不许少」查的是三条参数与它们的归属，不是组数：
+        // fixture 只有 s1 装参数，custom_2 是空组（param_section_ids 只数有 items 的组）。
+        for key in ["a.mode", "a.x", "a.y"] {
+            let p = again
+                .param(key)
+                .unwrap_or_else(|| panic!("参数 {key} 被删掉了"));
+            assert_eq!(p.layout.section_id, "s1", "{key} 的分组被挪走了");
+        }
+        let s1_items = again
+            .layout
+            .iter()
+            .flat_map(|t| t.sections.iter())
+            .find(|s| s.id == "s1")
+            .map(|s| s.items.len());
+        assert_eq!(s1_items, Some(3), "s1 的布局条目不许少");
+        assert_eq!(
+            again.param_section_ids().len(),
+            1,
+            "空组不许被算成装参数的组"
+        );
     }
 
     /// 弃用可以**只对某几台机型**生效：显式清单落盘、判据按机型分叉、

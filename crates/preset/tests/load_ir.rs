@@ -428,6 +428,10 @@ fn the_chain_is_deterministic_and_structurally_sound() {
 /// ```text
 /// MKPSE_RECORD_PRESET_GOLDEN=1 cargo test -p mkpse-preset --test load_ir preset_chain_matches_the_support_ease_golden
 /// ```
+///
+/// 2026-11-04 重录过一次（人工审查）：差异 191 行，全是涂胶段的 `G1 Z` / `G1 F` /
+/// `M204 S` 与少量 XY 行顺序 —— 对应 `6a3f7aa`（记账真实 Z）与 `1038c7b`（删 0mm
+/// 定位行）这两笔已批准的 11-03 改动；冻结输入未动、无参数相关行变化。
 #[test]
 fn preset_chain_matches_the_support_ease_golden() {
     let _seq = lock_sequence();

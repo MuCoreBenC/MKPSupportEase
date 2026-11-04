@@ -23,6 +23,8 @@ import type {
 
 /** 真机上的用户数据根（路径也照真机写，排查时才像真的） */
 const USER_ROOT = '/Users/wzy/Library/Application Support/SupportEase/user'
+/** 桌面（导出默认落点的父目录在这儿，见 `reportExportPlan`） */
+const HOME = '/Users/wzy'
 const TEMP_ROOT =
   '/var/folders/xq/p1zkn4ms2klgwpvrh2nwhsh40000gq/T/bamboo_model'
 const DAY = '2026-10-10'
@@ -219,8 +221,8 @@ export function reportExportPlan(id: string): ReportExportPlan {
   const base = r.modelName === undefined ? idOf(r) : `${r.modelName}_${stampOf(r)}`
   return {
     base,
-    /* 默认落点：用户根下的 `exports/`（真机上由 `fsx::paths::EXPORTS_DIR` 给） */
-    defaultDir: `${USER_ROOT}/exports`,
+    /* 默认落点：桌面的 `MKP-导出报告/`（真机上由 `ipc::report::default_export_dir` 给） */
+    defaultDir: `${HOME}/Desktop/MKP-导出报告`,
     /* 与真机同一条：**恒报三份**，失败那一次「处理后的文件」也在，只是 `exists=false` */
     files: EXPORT_KINDS.map((kind) => ({
       kind,
@@ -577,21 +579,28 @@ function genericDetail(summary: ReportSummary, r: FixtureRow): ReportDetail {
           fastTowerMode: 'fast',
         }
       : null,
-    slicer: r.ok
-      ? {
-          slicerVersion: 'BambuStudio 02.08.02.60',
-          machinePresetName:
-            r.machine === 'A1' ? 'Bambu Lab A1 0.4 nozzle' : 'Bambu Lab A1 mini 0.4 nozzle',
-          processPresetName: '0.20mm Standard @BBL A1M',
-          filamentType: 'PETG',
-          nozzleDiameter: 0.4,
-          slicerIroningEnabled: false,
-          ironingMode: 'auto',
-          ironingThreshold: 7.9,
-          treeSupport: false,
-          useDiskWipe: false,
-        }
-      : null,
+    /*
+     * 切片这一组**失败也写**（2026-11-04）：耗材 / 喷嘴 / 层高 / 切片软件 / 熨烫 /
+     * 支撑类型全是开跑之前就读到的 —— 失败只说明后面没走完，不说明前面没读。
+     * 夹具照真机 `FailureFacts` 那一份，不再给失败记录塞 `null`（回放屏以前因此
+     * 是一排横杠，作者：「像这些信息，就算是失败的，也能显示出来呀」）。
+     *
+     * ★ 喷嘴尤其取自"输入头自报优先"那条链（真机 0.40mm 就在头行里），不是预设 IR。
+     */
+    slicer: {
+      slicerVersion: 'BambuStudio 02.08.02.60',
+      machinePresetName:
+        r.machine === 'A1' ? 'Bambu Lab A1 0.4 nozzle' : 'Bambu Lab A1 mini 0.4 nozzle',
+      processPresetName: '0.20mm Standard @BBL A1M',
+      filamentType: 'PETG',
+      nozzleDiameter: 0.4,
+      layerHeight: 0.2,
+      slicerIroningEnabled: false,
+      ironingMode: 'auto',
+      ironingThreshold: 7.9,
+      treeSupport: false,
+      useDiskWipe: false,
+    },
     /* 同上：夹具照真机，碰撞那一格没有就是 null（预览里那两块整组不摆） */
     collision: null,
     /* 模型俯视几何：演示里成功那几趟都有（预览要能看见"板上哪块是模型"） */

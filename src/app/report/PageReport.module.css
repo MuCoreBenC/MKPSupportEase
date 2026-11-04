@@ -791,22 +791,50 @@
 }
 
 /*
+ * 碰撞组那一格：**左图右话**（2026-11-04 作者：「右侧有空位，你可以把这些文案呀，
+ * 那个设置按钮啊，也放到右侧了」）。
+ *
+ * 俯视图从 2026-10-18 起就只画到 240 宽（缩略图，细节走点击放大），而这一栏有
+ * 六百多像素 —— 右边半屏原本是空的。这一句提示正好填那儿：不再占掉横下一整条。
+ *
+ * ★ `flex-wrap`：窄窗里右边塞不下就掉到图下面（原来的样子），不挤成一条细缝。
+ */
+.collisionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px 18px;
+}
+
+.collisionMapCell {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/*
  * 碰撞组的收尾提示（2026-11-04 作者：「碰撞失败的页面可以加一个提示，在设置可以打开
- * 智能塔位置」）：一句小字 + 一个去处。
+ * 智能塔位置」）：一句小字 + 一个去处，住在俯视图右边那一半。
  *
  * ★ 不画成警示条：这一页已经用红/橙说清了"失败了"，这一句是**下次怎么办**，
- *   语气要平（`--text-3`、小字、贴着俯视图走）。
+ *   语气要平（`--text-3`、小字）。
  * ★ 按钮用 `currentcolor` 描边（与预设页横幅那颗同一条做法），深浅色都不写死。
  */
 .collisionHint {
+  flex: 1 1 220px;
+  min-width: 0;
+  /* 图下面那条基线：与左栏俯视图的上沿齐平，不要吊在半空 */
+  padding-top: 2px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 10px;
-  margin: 10px 0 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   font-size: var(--fs-label);
   line-height: 1.7;
   color: var(--text-3);
+}
+
+.collisionHintText {
+  margin: 0;
 }
 
 .collisionHintGo {

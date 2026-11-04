@@ -17,6 +17,7 @@ import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import { Btn } from '../ui/Controls'
+import { SETTINGS_TARGET_TOWER } from './targets'
 import s from './PageSettings.module.css'
 
 /**
@@ -70,6 +71,13 @@ const TOWER_MODES: {
   },
 ]
 
+/**
+ * 「智能塔位置」那一行是**深链落点**（2026-11-04）。
+ *
+ * 这一行只负责挂一个 id（常量住在 `settings/targets.ts`）：滚过去、铺绿底、停 6 秒
+ * 淡出全部由 `components/scroll/locate` 一件办完。这里不再接 `flash` prop、也不挂
+ * `data-flash` —— 高亮是共用件直接演在这行自己的背景上，组件不参与时序。
+ */
 export default function PostprocModeSection() {
   const tr = useT()
   const say = useText()
@@ -176,7 +184,11 @@ export default function PostprocModeSection() {
             这一页**每一行标题都有一颗 `?`**，挨着的是上一行「支撑面底面涂胶」——
             那一行少一颗，读起来就像"这一项没有说明"。走同一个 `Tip` 组件
             （它自己会带 `?` 圈并把句子写进 `data-tip`），别手写 `data-tip` 顶替。 */}
-      <div className={`${s.field} ${s.fieldRow}`}>
+      <div
+        className={`${s.field} ${s.fieldRow}`}
+        /* 报告页 / 后处理弹窗那条「去设置」的落点（唯一出处：settings/targets.ts） */
+        id={SETTINGS_TARGET_TOWER}
+      >
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
             {tr('settings.postproc.tower')}

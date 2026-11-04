@@ -21,9 +21,11 @@
 //!
 //! 「导出执行报告」把这一条的三件套**复制**到用户选定的目录，一字不改。
 //!
-//! - **落点**：默认 `<用户根>/exports/<基名>/`（`fsx::paths::EXPORTS_DIR`）——
-//!   导出的东西是"用户自己要看要拷的"，所以住用户根；界面里的「更改位置」可以
-//!   指到任何地方（桌面、U 盘、网盘目录都行）。
+//! - **落点**：默认 `<桌面>/MKP-导出报告/<基名>/`（[`DESKTOP_EXPORT_DIR`]）。
+//!   ★ 2026-11-04 改判（作者：「我希望这个默认的导出位置不要放在它原本的那个下面……
+//!   我希望它能放到桌面，不然的话，我清理的时候一下就把它清理掉了」）：原来住
+//!   `<用户根>/exports`，用户根会跟着「清理数据」整批删掉 —— 而导出的报告正是他要
+//!   留着的那一份。界面里的「更改位置」仍可以指到任何地方（U 盘、网盘目录都行）。
 //! - **基名**：`<模型名 或 归档自己的名字>_<切片时刻>`（`帕姆_20261011142431`）。
 //!   时刻取归档名尾巴上那一段，与切片写进 `_meta.json` 的时间同源。
 //! - **不覆盖**：目标里已经有同名的那一份就**整批拒绝**（导出是"往你挑的文件夹里
@@ -68,7 +70,7 @@ use postprocess::diag::messages;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
@@ -487,7 +489,7 @@ pub struct ReportExportFile {
 pub struct ReportExportPlan {
     /// 基名：`<模型名 或 归档自己的名字>_<切片时刻>`
     pub base: String,
-    /// 默认落点的**父目录**（`<用户根>/exports`）。界面显示时自己拼上 `<基名>/` ——
+    /// 默认落点的**父目录**（`<桌面>/MKP-导出报告`）。界面显示时自己拼上 `<基名>/` ——
     /// 导出命令收的也是这个父目录，两处口径一致。
     pub default_dir: String,
     /// **恒为三份**（顺序见 [`EXPORT_PARTS`]）；哪一份不在盘上由 [`ReportExportFile::exists`] 说。
@@ -813,9 +815,44 @@ fn zip_write_err(name: &str, e: zip::result::ZipError) -> AppError {
     AppError::io(messages::text("ui.ipc.report.140", &[("v1", name)])).with_detail(e.to_string())
 }
 
-/// 导出的默认父目录（`<用户根>/exports`，`fsx::paths::EXPORTS_DIR`）。
+/// 默认落点在**桌面**上的那个文件夹名（2026-11-04 作者改判）。
+///
+/// 作者原话：「我希望这个默认的导出位置不要放在它原本的那个下面……我希望它能放到桌面，
+/// 不然的话，我清理的时候一下就把它清理掉了」—— 落在用户根里的东西会跟着「清理数据」
+/// 一起没，而导出的报告正是他**要留**的那一份，所以默认挪到桌面。
+pub const DESKTOP_EXPORT_DIR: &str = "MKP-导出报告";
+
+/// 导出的默认父目录：`<桌面>/MKP-导出报告`。
+///
+/// 三道兜底，逐级退，**退到哪儿就在界面上照实显示哪儿**（界面上那串路径就是它算出来的，
+/// 不另说一套）：
+/// 1. Tauri 认得的桌面（macOS / Windows / Linux 各按自己的规则）；
+/// 2. 桌面在盘上还不存在 ⇒ **建出来**（全新用户 / 刚重装过系统）；
+/// 3. 连桌面都问不到（无桌面环境、`HOME` 都没有）⇒ 退回用户根下的 `exports/`
+///    （`fsx::paths::EXPORTS_DIR`）—— 宁可回到老地方，也不让"导出"这件事没法做。
+///
+/// 这一层**不判**"桌面被 iCloud / OneDrive 接管"这类事：那是系统的桌面，用户自己知道
+/// 它同步到哪儿；我们只负责把报告放在他点得到的地方。
 fn default_export_dir(app: &AppHandle) -> Result<PathBuf, AppError> {
-    Ok(crate::fsx::paths::user_root(app)?.join(crate::fsx::paths::EXPORTS_DIR))
+    let desktop = app
+        .path()
+        .desktop_dir()
+        .ok()
+        .filter(|d| d.is_absolute())
+        .map(|d| d.join(DESKTOP_EXPORT_DIR));
+    match desktop {
+        Some(dir) => {
+            std::fs::create_dir_all(&dir).map_err(|e| {
+                AppError::io(messages::text(
+                    "ui.ipc.report.137",
+                    &[("v1", &dir.display().to_string())],
+                ))
+                .with_detail(e.to_string())
+            })?;
+            Ok(dir)
+        }
+        None => Ok(crate::fsx::paths::user_root(app)?.join(crate::fsx::paths::EXPORTS_DIR)),
+    }
 }
 
 /// **导出计划**：三件套叫什么、默认落到哪、缺哪几份。

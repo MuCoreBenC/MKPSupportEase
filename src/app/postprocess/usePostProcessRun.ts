@@ -69,6 +69,20 @@ export interface PostProcessRunView {
   /** 把那一屏叫回来（点那条窄条） */
   reopen: () => void
   /**
+   * **停驻**（2026-11-04）：「去设置」把这一屏收进右上角胶囊，胶囊**不过期**，
+   * 点它随时能把原样的模态框叫回来，直到用户点「关闭」才真的消失。
+   *
+   * ★ 与 `quietUntil` 那条 60 秒结论胶囊是两件事：那条是"静默档跑完了，给你一分钟
+   *   看个结果"；这条是"人主动跳去改设置，回来还要接着看"。所以另立一个标志，
+   *   不复用会自己过期的计时。
+   *
+   * ★ 可选：报告页的「回放」和开发台「预览」是手写的 view 字面量（不跑这套状态机），
+   *   它们不必实现；`PostProcessModal` 里没有这两个出口时退回 `dismiss` / `reopen`。
+   */
+  parked?: boolean
+  park?: () => void
+  close?: () => void
+  /**
    * **静默档**（设置页「后处理模式」选了静默）。
    *
    * `true` 时这一屏**永远不会自己弹出来**：不是"弹了再收"，是压根不弹 ——
@@ -109,6 +123,15 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
   const [sinceMs, setSinceMs] = useState<number | null>(null)
   /* 静默档：结论胶囊留到哪一刻（见 `quietUntil` 的注释） */
   const [quietUntil, setQuietUntil] = useState<number | null>(null)
+  /*
+   * 「去设置」把这一屏停驻在右上角胶囊（2026-11-04）。
+   * 它**没有到期时间**：作者要的是"用户点了这个关闭的时候它才消失"，
+   * 所以不能塞进 quietUntil 那条 60 秒自动过期的结论胶囊。
+   */
+  const [parked, setParked] = useState(false)
+  /* 结论到达那条回调只装一次，也要读得到"这一趟是不是停驻在后台" */
+  const parkedRef = useRef(false)
+  parkedRef.current = parked
   /*
    * 静默档下用户**主动点开过**那一屏。
    *
@@ -225,9 +248,11 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
          这里仍然写 `false`：它是"用户没关过这一趟"的事实，与档位无关。 */
       setDismissed(false)
       setSinceMs(Date.now())
-      /* 新一趟开始：上一趟那枚"已完成"的账清掉，静默档下也重新"收着" */
+      /* 新一趟开始：上一趟那枚"已完成"的账清掉，静默档下也重新"收着"；
+         上一趟停在后台的那一屏也一并清掉（不然新一趟会莫名其妙冒出一枚旧胶囊） */
       setQuietUntil(null)
       setForcedOpen(false)
+      setParked(false)
     }).then((off) => {
       if (alive) offs.push(off)
       else off()
@@ -298,7 +323,11 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
        *   于是 `PostProcessChip` 那一侧不用分两套逻辑，只认 `quietUntil` 有没有值。
        */
       if (!alive) return
-      if (silentRef.current || dismissedRef.current) {
+      if (parkedRef.current) {
+        /* 「去设置」停驻在后台的那一趟：胶囊**不设 60 秒过期**，也不自己弹回来。
+           用户点胶囊随时能看，点「关闭」才真的收场（见 `park` / `close`）。 */
+        setForcedOpen(false)
+      } else if (silentRef.current || dismissedRef.current) {
         setQuietUntil(Date.now() + SILENT_KEEP_MS)
         /* 跑完也不许自己弹出来（哪怕中途点开看过） */
         setForcedOpen(false)
@@ -333,6 +362,31 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
   }, [])
 
   /*
+   * **停驻**：弹窗里点「去设置」走这一条（2026-11-04）。
+   *
+   * 作者：「它就跳转过去，然后它就变成那种后台运行的效果……在右上角收起来的，
+   * 用户点了还可以继续展开恢复这个模态框」「等用户点了这个关闭的时候它才消失」。
+   *
+   * 与 `dismiss` 的分别不在"收不收"（都收），而在**右上角的胶囊留不留**：
+   * `dismiss` 是普通「后台运行」，跑完那枚结论胶囊 60 秒后自己消失；
+   * `park` 停驻的这一趟没有到期时间，直到 `close` 才撤。
+   */
+  const park = useCallback(() => {
+    setDismissed(true)
+    setForcedOpen(false)
+    setParked(true)
+    setQuietUntil(null)
+  }, [])
+
+  /** 「关闭」= 真的收场：模态框与右上角胶囊一起撤（停驻标志也清掉） */
+  const close = useCallback(() => {
+    setDismissed(true)
+    setForcedOpen(false)
+    setParked(false)
+    setQuietUntil(null)
+  }, [])
+
+  /*
    * 点胶囊 = 用户主动要看 ⇒ 立刻把那一屏叫回来，那枚「已完成」不再留着等满一分钟。
    *
    * ★ `forcedOpen` 只顶开"这一下"，不是永久开关：它要在
@@ -340,6 +394,10 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
    *   · 下一趟开场（`Hello` 里清）、
    *   · 结论到达（`Finished` 里清）
    *   这三处复位。否则静默档一旦点开过，之后就再也收不回去了。
+   *
+   * ★ **不清 `parked`**：胶囊的判据是 `parked && dismissed`，展开时 `dismissed`
+   *   自然变 false、胶囊随之收起；再点「后台运行」它又会回来。真正的收场只有
+   *   `close`（用户点「关闭」）或下一趟开场。
    */
   const reopen = useCallback(() => {
     setDismissed(false)
@@ -365,5 +423,8 @@ export function usePostProcessRun(silent = false): PostProcessRunView {
     reopen,
     silent,
     quietUntil,
+    parked,
+    park,
+    close,
   }
 }

@@ -2351,35 +2351,14 @@
   color: var(--text-1);
 }
 
-/* 「去处理」定位的闪烁（2 秒后由 React 摘掉类） */
-@keyframes c14-flash-card {
-  0%, 55% {
-    background: var(--wb-primary-soft);
-    border-color: var(--wb-primary);
-  }
-
-  100% {
-    background: var(--surface-solid);
-  }
-}
-
-@keyframes c14-flash-row {
-  0%, 55% {
-    background: var(--wb-primary-soft);
-  }
-
-  100% {
-    background: transparent;
-  }
-}
-
-.flashIt {
-  animation: c14-flash-card 1.8s ease-out;
-}
-
-.rowFlash {
-  animation: c14-flash-row 1.8s ease-out;
-}
+/*
+ * 「去处理」定位的绿底（2026-11-04 收口）：这里**不再有 keyframes / flashIt /
+ * rowFlash**。原先这两条动画一条带描边、一条只铺底、都是 1.8 秒；设置页与预设表又
+ * 各有一套，三处时长各不相同。作者：「定位的就是绿色的背景……大家都用一样的」。
+ *
+ * 现在由 `components/scroll/locate` 一件负责：滚完给目标元素演 `--accent-soft` 淡绿底，
+ * 停 6 秒再淡出（WAAPI，WKWebView 上 CSS `@keyframes` 本来就不播）。
+ */
 
 /*
  * 生成与发布的版式（C14，作者：「我还是喜欢左旧的那种，左右分布的，左边是那些

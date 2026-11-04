@@ -78,7 +78,7 @@ import c from '../c14.module.css'
 import Icon from '../../app/shell/icons'
 import ui from '../../app/ui/ui.module.css'
 import s from './GenerateDiffModal.module.css'
-import { glideIntoView } from '../../components/scroll/glide'
+import { locateIntoView } from '../../components/scroll/locate'
 
 interface Props {
   /** 预演报告；null = 还没预演出来（正在算） */
@@ -200,8 +200,8 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   const jumpToRow = (row: number) => {
     const el = diffRef.current?.querySelector<HTMLElement>(`[data-row="${row}"]`)
     /* `behavior: 'smooth'` 在 WKWebView 上对元素级滚动容器等于瞬跳（本仓踩过），
-       走全仓那一套（演 transform）；容器没有"唯一内容层"时它自己退回瞬时。 */
-    if (el !== null && el !== undefined) glideIntoView(el, { align: 'center' })
+       走共用定位件（底层演 transform）；这一处是"跳到 diff 行"，不铺绿底。 */
+    if (el !== null && el !== undefined) locateIntoView(el, { flash: false })
   }
 
   /**

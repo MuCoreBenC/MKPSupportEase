@@ -269,6 +269,11 @@ export interface ReportSlicerFacts {
   processPresetName?: string
   filamentType?: string
   nozzleDiameter?: number
+  /**
+   * 层高（2026-11-04）：原来只在 `snapshot.ir` 里（PascalCase），失败那趟没有快照 ⇒
+   * 回放屏永远是「—」。现在随这一组一起写，成功 / 失败都读得到。
+   */
+  layerHeight?: number
   slicerIroningEnabled?: boolean
   ironingMode?: string
   ironingThreshold?: number
@@ -480,7 +485,8 @@ export interface ReportExportPlan {
   /** 基名：`<模型名 或 归档自己的名字>_<切片时刻>`（`帕姆_20261011142431`） */
   base: string
   /**
-   * 默认落点的**父目录**（`<用户根>/exports`）。界面显示时自己拼上 `<基名>/`，
+   * 默认落点的**父目录**（`<桌面>/MKP-导出报告`；2026-11-04 由 `<用户根>/exports` 改判，
+   * 桌面问不到时才退回老地方）。界面显示时自己拼上 `<基名>/`，
    * 导出时交回去的也是这个父目录 —— 两处口径一致。
    */
   defaultDir: string
@@ -2500,6 +2506,24 @@ export interface PostProcessFinished {
    * 两种**都是成功**，界面同一个成功屏，只有那一句结论文案按它分开说。
    */
   calibChoice?: 'print' | 'direct'
+  /**
+   * **碰撞那一趟的画布几何**（2026-11-04）：失败那屏的「说明」页要把上面那张红卡
+   * 换成"现在 / 挪后"两幅俯视图 —— 画它要塔框 / 模型框 / 可打印区这一整套，
+   * 与「每次提问」那张卡**同一份结构**（`RelocateGeo`）。
+   *
+   * ★ 不是撞塔的趟 ⇒ 缺省，那一块不摆（与从前一字不差）。
+   */
+  geo?: RelocateGeo | null
+  /**
+   * **这一趟挪过塔的记录**（2026-11-04）。
+   *
+   * 与归档 `_meta.json` 的 `relocation` **同一份**（Rust `archive::RelocationRecord`）。
+   * 有它 ⇒ 那一屏摆「现在 / 挪后」两幅俯视图 + 挪动距离；没有 ⇒ 那一块不摆（旧记录一字不差）。
+   *
+   * ★ 为什么要走结算消息：`auto`（开）档**不弹问句**，界面上没有 `question.geo`，
+   *   于是"塔被挪到哪"只有这条消息带得来（作者：开了自动也得把塔的移动显示出来）。
+   */
+  relocation?: RelocationRecord | null
   /**
    * **结果读数**（那一屏「结果」几扇要摆的读数：指标条 + 擦料与胶水消耗那几格）。
    *

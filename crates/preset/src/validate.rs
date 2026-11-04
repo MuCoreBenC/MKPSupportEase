@@ -393,13 +393,13 @@ mod tests {
             "param toolhead.offset.y value -50.5 is out of range [-50, 50]"
         );
 
-        // offset.z：注册表比原来的硬编码**更严**（`0..20` vs `|z| ≤ 20`）——
-        // 负值现在会被拒，这是收紧，照实断言。
+        // offset.z：注册表比原来的硬编码**更严**（`0.5..20` vs `|z| ≤ 20`）——
+        // 负值现在会被拒，这是收紧，照实断言。真源 min 一直是 0.5，别按 0 写期望。
         let mut cfg = cfg_from("");
         cfg.toolhead.offset_z = -0.1;
         assert_eq!(
             msg(validate_against_registry(&cfg, &reg, "A1", None).unwrap_err()),
-            "param toolhead.offset.z value -0.1 is out of range [0, 20]"
+            "param toolhead.offset.z value -0.1 is out of range [0.5, 20]"
         );
 
         let mut cfg = cfg_from("");

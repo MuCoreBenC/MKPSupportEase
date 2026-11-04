@@ -367,6 +367,10 @@ pub struct SlicerFacts {
     pub process_preset_name: String,
     pub filament_type: String,
     pub nozzle_diameter: f64,
+    /// **层高**（2026-11-04）：原来这一格只在 `snapshot.ir` 里（回放那条链去解
+    /// PascalCase 才拿得到），失败那趟没有快照 ⇒ 回放屏一直是「—」。
+    /// 现在随切片组一起写 —— 它本来就是"切片那一刻的工艺参数"，与预报名/耗材同一类。
+    pub layer_height: f64,
     pub slicer_ironing_enabled: bool,
     pub ironing_mode: String,
     pub ironing_threshold: f64,
@@ -496,7 +500,11 @@ pub struct CalibrationFacts {
 /// 就是怎么移动，多少距离，用户选择自动移动吗？还是选了自己去移动模型停止了」。
 ///
 /// 只有真的走到那一问时才落；别的记录 `null`（旧记录读到 `null` ⇒ 整块不摆）。
-#[derive(Debug, Clone, serde::Serialize)]
+///
+/// ★ `Deserialize` 是给**通道**用的（2026-11-04）：结算消息 [`crate::hook_ipc::FinishedPayload`]
+///   也带这一份，而那条消息两头都要能读（判据 `every_message_survives_the_wire`）。
+///   字段是**同一份**，不是给界面另造一个同形的影子结构。
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RelocationRecord {
     /// 用户选了什么：`relocate`（自动挪塔）/ `model`（自己挪模型）/ `timeout`（没答）/ `unavailable`（板上没位）
@@ -605,9 +613,30 @@ pub struct ReportFacts<'a> {
     /// IR 终态（内核 `DetailFacts.ir`）。
     pub ir: &'a postprocess::ir::Ir,
     /// pass1 统计（`ProcessStats`）。
-    pub stats: &'a postprocess::postproc::pass1::ProcessStats,
+    ///
+    /// **`None` = 这一趟没跑到 pass1**（失败 / 取消那一条，2026-11-04）：那些统计
+    /// 本来就还没算出来 —— 靠它的两行（层索引 / 涂胶遍数）与整组 `glue`/`tower`
+    /// 一律不写，**不拿默认值凑数**。
+    pub stats: Option<&'a postprocess::postproc::pass1::ProcessStats>,
     /// pass2 口径的塔高（内核 `Stats.tower_height`）。
     pub tower_height: f64,
+    /// 切片软件那一格（**两条出口各算一次、由调用方递进来**）：
+    /// 成功 = pass1 认出来的那串；失败 = 头部自报的那串 / 预设里那个名字。
+    /// 与开场那张表（`hook::facts_from`）同一条优先链，回放屏才能和当时看到的一致。
+    pub slicer_version: String,
+    /// 层高（同上：头部自报的优先，其次预设 IR 里那一格）。
+    pub layer_height: f64,
+    /// **喷嘴直径**（2026-11-04）：与切片软件 / 层高完全同构 —— 也由调用方从开场
+    /// 那张表（`hook::facts_from`）递进来。
+    ///
+    /// ★ 为什么不能读 `ir.machine.nozzle_diameter`：真机那个 0.40mm 来自输入头
+    ///   `; nozzle_diameter = 0.4`，是 pass1 才认进 IR 的（见
+    ///   `pass1::adopt_nozzle_and_layer_height`）。**失败那趟根本没跑到 pass1**，
+    ///   手里是"进管线之前"那份 IR，喷嘴多半还是 0 ⇒ 回放屏 `PETG · —`
+    ///   （作者 2026-11-04 截图：「怎么那个喷嘴的尺寸还是没有啊」）。
+    ///   开场表本来就是"头部自报优先、其次预设 IR"，把它的结果搬过来即可，
+    ///   不新造第二条判据。
+    pub nozzle_diameter: f64,
     /// 输入头部刮出来的 5 个事实（内核 `HeaderFacts`）。
     pub header: &'a postprocess::pipeline::HeaderFacts,
     /// 校准模式串（非校准模式是空串）。
@@ -621,6 +650,12 @@ pub struct ReportFacts<'a> {
     pub preset_missing: &'a [String],
     /// 第 7 步认档的回执（实测尺寸 / 命中档 / 容差）。非校准件是 `None`。
     pub calibration_receipt: Option<&'a postprocess::postproc::calibration::CalibrationReceipt>,
+    /// **这一趟挪过塔的记录**（2026-11-04）—— 「避让检查」那一组据此多一行
+    /// 「已挪塔 X/Y → X/Y（多少 mm）」。
+    ///
+    /// ★ 与 [`Meta::relocation`] **同一份**（调用方递进来的就是它），不另算：
+    ///   作者要的是「挪过就记一次」，两处各写一份判据迟早有一处漏。
+    pub relocation: Option<&'a RelocationRecord>,
 }
 
 /// 涂胶速度（mm/s）：内核里 `toolhead.max_speed` 是 mm/min（= SpeedLimit × 60），
@@ -648,12 +683,16 @@ impl ReportFacts<'_> {
     }
 
     /// 涂胶组。
-    pub fn glue(&self) -> GlueFacts {
+    ///
+    /// `stats` 由调用方递进来（**不读 `self.stats`**）：这一组要的是 pass1 扫出来的
+    /// 涂胶总长 / 换笔次数，失败那趟根本没有 —— 那种记录压根不该调用这个函数，
+    /// 用参数逼调用方先拿到真数，比在组里塞一排 `unwrap_or(0)` 老实。
+    pub fn glue(&self, stats: &postprocess::postproc::pass1::ProcessStats) -> GlueFacts {
         let ir = self.ir;
         GlueFacts {
-            glue_total_length: self.stats.glue_total_length,
+            glue_total_length: stats.glue_total_length,
             // 旧版 `gluePenSwitches` ← `GlueCutterChanges`（换笔 = 切刀次数）。
-            glue_pen_switches: self.stats.glue_cutter_changes,
+            glue_pen_switches: stats.glue_cutter_changes,
             glue_pass_count: ir.glue.pass_count,
             glue_speed: glue_speed_of(ir),
             pen_offset_x: ir.toolhead.x_offset,
@@ -664,7 +703,7 @@ impl ReportFacts<'_> {
             glue_inter_model_lift_height: ir.glue.inter_model_lift_height,
             glue_z_offset: ir.glue.z_offset,
             prime_trigger_layers: ir.prime.trigger_layers,
-            prime_total_length: self.stats.prime_total_length,
+            prime_total_length: stats.prime_total_length,
         }
     }
 
@@ -685,14 +724,20 @@ impl ReportFacts<'_> {
     }
 
     /// 切片工艺组。
+    ///
+    /// ★ 这一组**失败那趟也写**（2026-11-04 作者：「像这些信息，就算是失败的，也能显示
+    ///   出来呀，因为你读取进去了，知道了呀」）：耗材 / 喷嘴 / 层高 / 切片软件 / 熨烫 /
+    ///   支撑类型全是**开跑之前**就读到的（预设 + 输入头部），撞停在那之前一步也不影响。
+    ///   真正要等跑完的（涂胶总长、塔层数、打印时间）不在这一组里。
     pub fn slicer(&self) -> SlicerFacts {
         let ir = self.ir;
         SlicerFacts {
-            slicer_version: self.stats.slicer_version.clone(),
+            slicer_version: self.slicer_version.clone(),
             machine_preset_name: self.header.machine_preset_name.clone(),
             process_preset_name: self.header.process_preset_name.clone(),
             filament_type: ir.filament.filament_type.clone(),
-            nozzle_diameter: ir.machine.nozzle_diameter,
+            nozzle_diameter: self.nozzle_diameter,
+            layer_height: self.layer_height,
             slicer_ironing_enabled: self.header.slicer_ironing_enabled,
             ironing_mode: ir.ironing.mode.clone(),
             ironing_threshold: ir.ironing.e_sum_threshold,
@@ -809,6 +854,37 @@ impl ReportFacts<'_> {
                 // 过到这儿就是没碰撞 —— 校准模式没跑过，不许写这句结论。
                 if self.calibration_mode.is_empty() {
                     lines.push(plain("report.line.collisionOk"));
+                    /*
+                     * **这一趟挪过塔就单独说一行**（2026-11-04 作者：「管线里面也得记录一次
+                     * 移动了的呀」）。
+                     *
+                     * ★ 为什么单独一行而不是把数字塞进 `collisionOk`：那一句是"**现在**没撞"
+                     *   （结论），这一句是"**怎么**才没撞"（过程）。合成一句的话，用户没法
+                     *   一眼看出"我这趟是不是被自动挪过"——那正是他要的信息。
+                     * ★ 与下面 `towerPos` 不矛盾：那里写的是**终态坐标**，这里是"从哪到哪"。
+                     */
+                    if let Some(rec) = self.relocation {
+                        if let Some(to) = rec.to {
+                            lines.push(line(
+                                "report.line.towerMoved",
+                                &[
+                                    ("fromX", &format!("{:.1}", rec.from[0])),
+                                    ("fromY", &format!("{:.1}", rec.from[1])),
+                                    ("toX", &format!("{:.1}", to[0])),
+                                    ("toY", &format!("{:.1}", to[1])),
+                                    ("moved", &format!("{:.1}", rec.moved_mm.unwrap_or(0.0))),
+                                ],
+                            ));
+                            lines.push(match rec.verified {
+                                Some(true) => plain("report.line.towerMovedOk"),
+                                Some(false) => line(
+                                    "report.line.towerMovedStill",
+                                    &[("n", &rec.after_conflict_count.unwrap_or(0).to_string())],
+                                ),
+                                None => plain("report.line.towerMovedUnchecked"),
+                            });
+                        }
+                    }
                     lines.push(plain("report.line.inRange"));
                 }
                 lines.push(line(
@@ -866,10 +942,13 @@ impl ReportFacts<'_> {
                 Some(lines)
             }
             Step::Pass1 => {
+                /* 没跑到 pass1（失败 / 取消那一条）⇒ 这一组事实根本还不存在 ——
+                一行都不写，别拿 0 凑（`stats` 的 `None` 就是"没算"这件事本身） */
+                let stats = self.stats?;
                 let mut lines = vec![
                     line(
                         "report.line.layersIndexed",
-                        &[("count", &self.stats.total_layer_number.to_string())],
+                        &[("count", &stats.total_layer_number.to_string())],
                     ),
                     line(
                         "report.line.passes",
@@ -889,40 +968,44 @@ impl ReportFacts<'_> {
                 });
                 Some(lines)
             }
-            Step::Pass2 => Some(vec![
-                line(
-                    "report.line.towerLayers",
-                    &[("count", &self.ir.tower.layer_count.to_string())],
-                ),
-                line(
-                    "report.line.towerHeight",
-                    &[("v", &format!("{:.2}", self.tower_height))],
-                ),
-                line(
-                    "report.line.towerType",
-                    &[(
-                        "type",
-                        if self.use_disk_wipe() {
-                            "disk"
-                        } else {
-                            "tower"
-                        },
-                    )],
-                ),
-                line(
-                    "report.line.lift",
-                    &[("v", &format!("{:.1}", self.ir.tower.safe_z_offset))],
-                ),
-                line(
-                    "report.line.rib",
-                    &[("on", yes_no_raw(self.ir.wiping.outer_structure == "rib"))],
-                ),
-                line(
-                    "report.line.disc",
-                    &[("on", yes_no_raw(self.use_disk_wipe()))],
-                ),
-                plain("report.line.writeDone"),
-            ]),
+            Step::Pass2 => {
+                /* 同 pass1：塔层数 / 塔高是 pass2 写出来的终态，这一轮没跑到就没有 */
+                self.stats?;
+                Some(vec![
+                    line(
+                        "report.line.towerLayers",
+                        &[("count", &self.ir.tower.layer_count.to_string())],
+                    ),
+                    line(
+                        "report.line.towerHeight",
+                        &[("v", &format!("{:.2}", self.tower_height))],
+                    ),
+                    line(
+                        "report.line.towerType",
+                        &[(
+                            "type",
+                            if self.use_disk_wipe() {
+                                "disk"
+                            } else {
+                                "tower"
+                            },
+                        )],
+                    ),
+                    line(
+                        "report.line.lift",
+                        &[("v", &format!("{:.1}", self.ir.tower.safe_z_offset))],
+                    ),
+                    line(
+                        "report.line.rib",
+                        &[("on", yes_no_raw(self.ir.wiping.outer_structure == "rib"))],
+                    ),
+                    line(
+                        "report.line.disc",
+                        &[("on", yes_no_raw(self.use_disk_wipe()))],
+                    ),
+                    plain("report.line.writeDone"),
+                ])
+            }
             Step::Calibration => {
                 let mut lines = vec![line(
                     "report.line.calibMode",
@@ -936,14 +1019,13 @@ impl ReportFacts<'_> {
                 lines.push(plain("report.line.calibInserted"));
                 Some(lines)
             }
+            /* 没写出文件（失败 / 取消那一条）⇒ 这一行不写：`in_place` 是 false、
+            `output_bytes` 是 `None`，照原先那样硬写会说成"新建了一个 0 MB 文件" */
             Step::Write => Some(vec![line(
                 "report.line.write",
                 &[
                     ("how", if self.in_place { "inPlace" } else { "newFile" }),
-                    (
-                        "size",
-                        &format!("{:.2}", mib(self.output_bytes.unwrap_or(0))),
-                    ),
+                    ("size", &format!("{:.2}", mib(self.output_bytes?))),
                 ],
             )]),
             Step::PrintTime => None,
@@ -1291,6 +1373,8 @@ mod tests {
         header: postprocess::pipeline::HeaderFacts,
         preset_name: String,
         sha: String,
+        /// 挪塔记录（`None` = 这一趟没挪过 —— 大部分判据用这个）
+        relocation: Option<RelocationRecord>,
     }
 
     impl Sample {
@@ -1303,14 +1387,20 @@ mod tests {
                 output_bytes: Some(24_000_000),
                 in_place: true,
                 ir: &self.ir,
-                stats: &self.stats,
+                stats: Some(&self.stats),
                 tower_height: 6.46,
+                slicer_version: self.stats.slicer_version.clone(),
+                layer_height: 0.2,
+                /* 与 hook 那条"头部自报优先"同值：这份夹具的 IR 里是 0.4 */
+                nozzle_diameter: self.ir.machine.nozzle_diameter,
                 header: &self.header,
                 calibration_mode: "",
                 calibration_receipt: None,
                 /* 判据不摆快照（要摆的那条专门测，见 `snapshot_carries_toml_and_ir`） */
                 preset_params: None,
                 preset_missing: &[],
+                /* 没挪过塔 ⇒ 明细里不多那一行（要测的那条见 `pipeline_lists_the_move`） */
+                relocation: self.relocation.as_ref(),
             }
         }
     }
@@ -1364,7 +1454,58 @@ mod tests {
             },
             preset_name: "A1MF.toml".into(),
             sha: "dea417626c060af54c11e3613468153148046c81a57f358ea86d63805aacd771".into(),
+            relocation: None,
         }
+    }
+
+    /// **挪过塔的那一趟，「避让检查」里要记一次**（2026-11-04 作者：「管线里面也得记录
+    /// 一次移动了的呀」）。
+    ///
+    /// 三件事一起钉：① 那一行在；② 四个坐标与"挪了多少"都在参数里（报告页直接照它渲染，
+    /// 少一个就出来 `{fromX}` 这种裸花括号）；③ 紧跟一句复检结论 —— 作者要的是"挪了"，
+    /// 但读者还要知道"挪完到底行不行"。
+    #[test]
+    fn pipeline_lists_the_move() {
+        let mut s = sample();
+        s.relocation = Some(RelocationRecord {
+            choice: "relocate".to_owned(),
+            from: [174.0, 113.0],
+            to: Some([190.1, 116.4]),
+            moved_mm: Some(16.4),
+            before_conflict_count: 13907,
+            after_conflict_count: Some(0),
+            verified: Some(true),
+            tower_height_mm: 62.4,
+            before: None,
+        });
+        let facts = s.facts();
+        let lines = facts.step_detail_lines(Step::Collision).unwrap();
+
+        let moved = lines
+            .iter()
+            .find(|l| l.key == "report.line.towerMoved")
+            .expect("挪过塔就必须有这一行");
+        for (k, want) in [
+            ("fromX", "174.0"),
+            ("fromY", "113.0"),
+            ("toX", "190.1"),
+            ("toY", "116.4"),
+            ("moved", "16.4"),
+        ] {
+            assert_eq!(
+                moved.args.get(k).map(String::as_str),
+                Some(want),
+                "{k} 没带上"
+            );
+        }
+
+        /* 复检过 ⇒ 紧跟一句"没问题"（不复检 / 仍撞是另外两句，见上面那三支） */
+        assert!(
+            lines.iter().any(|l| l.key == "report.line.towerMovedOk"),
+            "复检干净时要跟一句"
+        );
+        /* 「无碰撞」那句仍在（结论与过程分开说，谁也不替谁） */
+        assert!(lines.iter().any(|l| l.key == "report.line.collisionOk"));
     }
 
     /// 三组分包（`detail.glue/tower/slicer`）的键名照旧版 `_meta.json` **逐字搬** ——
@@ -1374,7 +1515,7 @@ mod tests {
         let s = sample();
         let facts = s.facts();
 
-        let glue = serde_json::to_value(facts.glue()).unwrap();
+        let glue = serde_json::to_value(facts.glue(&s.stats)).unwrap();
         for key in [
             "glueTotalLength",
             "gluePenSwitches",
@@ -1461,6 +1602,8 @@ mod tests {
         let collision = keys(Step::Collision);
         assert!(collision.contains(&"report.line.collisionOk"));
         assert!(collision.contains(&"report.line.towerPos"));
+        /* 没挪过塔（`relocation: None`）⇒ **不许**多那一行（旧记录行为一字不差） */
+        assert!(!collision.contains(&"report.line.towerMoved"));
 
         let pass2 = keys(Step::Pass2);
         assert!(pass2.contains(&"report.line.towerLayers"));
@@ -1682,7 +1825,7 @@ mod tests {
                 print_time: None,
                 print_time_status: None,
                 estimated_print_seconds: Some(2530.5),
-                glue: Some(facts.glue()),
+                glue: Some(facts.glue(&s.stats)),
                 tower: Some(facts.tower()),
                 slicer: Some(facts.slicer()),
                 calibration: None,

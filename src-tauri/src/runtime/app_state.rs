@@ -323,8 +323,7 @@ pub struct PostprocPrefs {
     ///   就是关就是关，开就是开」—— 真正的开 = 直接替用户确认、直接挪）。
     /// ★ 出厂是 `ask`（2026-11-04 作者：「软件安装的时候默认就是问」）—— 新装用户第一次
     ///   撞上时能看见"可以自动挪"这件事，而不是静默停下。
-    /// ★ 旧盘上的 `true` 读不出枚举 ⇒ 落到出厂 `ask`（保留弹问，不替用户做决定）。
-    ///   只改这一趟的 IR，预设文件一个字不动。
+    /// ★ 只改这一趟的 IR，预设文件一个字不动。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_tower_position: Option<TowerRelocateMode>,
 }
@@ -353,17 +352,6 @@ impl TowerRelocateMode {
             Self::Off => "off",
             Self::Auto => "auto",
             Self::Ask => "ask",
-        }
-    }
-
-    /// 线上字符串 → 枚举；认不出给 `None`（**不静默回落到某一档** ——
-    /// 旧盘上的 `true` / `false` 也走这里，由调用方自己决定怎么收场）。
-    pub fn parse(raw: &str) -> Option<Self> {
-        match raw.trim() {
-            "off" => Some(Self::Off),
-            "auto" => Some(Self::Auto),
-            "ask" => Some(Self::Ask),
-            _ => None,
         }
     }
 }

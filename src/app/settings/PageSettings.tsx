@@ -127,8 +127,12 @@ import { useCatalog } from '../home/useCatalog'
 import { Btn } from '../ui/Controls'
 /* 左目录那 12 枚图标走全站同一张 path 表（`theme` 是 2026-10-30 为「外观」加的） */
 import Icon, { type IconName } from '../../components/Icon'
-/* 「滚到某一处」的唯一实现（2026-11-01）：全仓的定位动画都走它，见那个文件的头注 */
-import { glideTo } from '../../components/scroll/glide'
+/*
+ * 「滚到某处 + 铺绿底」的唯一出口（2026-11-04）：全仓滚动定位都走这一件，
+ * 见 `components/scroll/locate` 的头注。底层 `glide.ts` 只由它调用，业务层不碰。
+ */
+import { locateAnchor, locateIntoView } from '../../components/scroll/locate'
+import type { SettingsTarget } from './targets'
 import s from './PageSettings.module.css'
 
 /*
@@ -412,11 +416,14 @@ function SideNav({
   }, [boxRef, contentRef])
 
   /*
-   * 点目录 = `glideTo`（全仓唯一那条"演 transform"的实现，见 `components/scroll/glide`）。
+   * 点目录 = 共用定位件（2026-11-04 起）；底层仍是 `glide.ts` 那条"演 transform"
+   * 的做法，滚过去 / 落位补测由共用件统一负责。
    *
-   * 这套做法 2026-11-01 在这里定下来，然后才推广到别处：真位置先落终点 → 内容整块
-   * 推回起点 → 位移演到 0（合成器线程）。走的弯路与原因都写在那个文件的头注里，
-   * **别再回到"逐帧写 scrollTop"那条路**（作者：「以后不要再回归」）。
+   * 这一趟**不铺绿底**（`flash: false`）：左目录的高亮本来就是 `.navGlow` 那一块滑块，
+   * 再给正文铺一层绿就成了两条高亮抢眼睛。滚动定位的"同一套"指的是同一件实现，
+   * 不是每一处都必须闪光。
+   *
+   * ★ `onDone` 必须透传：演完要放开 spy 的锁、记下"停在点击那一项"的位置。
    */
   const jump = (id: string) => (e: MouseEvent<HTMLAnchorElement>) => {
     e.preventDefault()
@@ -429,12 +436,13 @@ function SideNav({
     glowMsRef.current = GLOW_CLICK_MS
     setActive(id)
 
-    const at = box.scrollTop + el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8
-    const room = Math.max(0, box.scrollHeight - box.clientHeight)
     /* 演的那一段来源不明地"占着"spy：高亮按点击定案，路上不许被"到底算最后一章"抢走 */
     lockRef.current = Number.POSITIVE_INFINITY
     holdTopRef.current = null
-    glideRef.current = glideTo(box, contentRef.current, Math.min(Math.max(at, 0), room), {
+    glideRef.current = locateIntoView(el, {
+      align: 'start',
+      offset: -8,
+      flash: false,
       onDone: () => {
         lockRef.current = 0
         /* 停在点击那一项上（到底的章节按"顶线"算不出来，位置没动之前不许改） */
@@ -496,7 +504,16 @@ const LOCALE_CHOICES: { id: LocalePref; label: StringKey; hint: StringKey }[] = 
   { id: 'en', label: 'settings.locale.en', hint: 'settings.locale.enHint' },
 ]
 
-export default function PageSettings() {
+/*
+ * 深链落点的类型与常量都住在 `settings/targets.ts`（唯一出处）。这一页只消费：
+ * `id` 写错字过不了类型检查，也过不了 `check-locate.mjs`。
+ */
+export default function PageSettings({
+  target,
+}: {
+  /** 外壳给的落点：切到这一页来时滚到它、并铺绿底。`null` = 正常进页面 */
+  target?: SettingsTarget | null
+} = {}) {
   const [source, setSource] = useState<PresetSource | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [mode, setMode] = useState<Mode>('github')
@@ -1074,6 +1091,22 @@ export default function PageSettings() {
   const mainRef = useRef<HTMLElement | null>(null)
   /* 右栏里那层**整块正文**：点目录的动画在这层上做 `transform`（见 `SideNav` 的 `glide`） */
   const mainBodyRef = useRef<HTMLDivElement | null>(null)
+
+  /*
+   * **从别处跳进来的落点**（2026-11-04 作者：「点了之后是跳过去，然后滚动定位到那个
+   * 开关位置」）。
+   *
+   * 全部交给 `locateAnchor`：按帧等这一页真的在屏上（`PageSlot` 常驻挂着 `hidden`，
+   * 切页签那一刻量到的 rect 全是 0）→ 滚到那一行 → 铺绿底 → 停 6 秒淡出。
+   * 等不到（搜索把它筛掉了 / id 写错）它自己会放弃，不猜、不滚错位置。
+   *
+   * ★ 返回的叫停函数交给 effect 的清理：连点两下、或直接切走页签都不会留着旧的
+   *   高亮动画和 rAF。
+   */
+  useEffect(() => {
+    if (target == null) return
+    return locateAnchor(target.id, { align: 'start', offset: -28 })
+  }, [target])
 
   /* 分段控件下面那句小字：只说**当前选中的那一档**是什么意思（三档的说明不再同时铺开） */
   const themeRow = THEME_CHOICES.find((c) => c.id === currentTheme)

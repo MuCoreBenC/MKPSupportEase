@@ -111,6 +111,45 @@ const SETTINGS_TITLE_NEEDS_TIP = [
   },
 ]
 
+/*
+ * **滚动定位只许有一套**（2026-11-04 作者：「大家都用一样的」）。
+ *
+ * 三件事都是"编译能过、跑起来看着也能用"的坏法，所以按本仓老规矩用 eslint 硬拦
+ * （与 `NATIVE_CHOICE` 同一层）：
+ *
+ *  ① `onClick={onOpenSettings}` 裸传 —— React 把 MouseEvent 当第一个参数塞给
+ *     `openSettings(target?: SettingsTargetId)`，`settingsTarget.id` 变成事件对象，
+ *     结果就是"跳过去了但没定位"。必须包一层并显式带落点常量。
+ *  ② 业务层 import 底层 `glideTo` —— 滚过去/落位补测/绿底/6 秒淡出是一整套，
+ *     拆开就会出现"有的定位不亮、有的亮法不一样"。`locate.ts` 自己不 import `glideTo`
+ *     （它用 `glideIntoView`），所以这条不需要给自己开后门。
+ *  ③ `openSettings('postproc-tower')` 这种字面量落点 —— 落点常量只有
+ *     `settings/targets.ts` 一处；三个入口各写一个字符串，漏改一处就静默失效。
+ *
+ * ★ 整套判据（含"定位件唯一 / 绿底唯一 / 例外白名单"）在 `scripts/check-locate.mjs`，
+ *   挂在 `npm run lint` 末尾，CI 已在跑这条命令 —— 自动生效、不需要人工跑。
+ */
+const LOCATE_SINGLE_ENTRY = [
+  {
+    selector:
+      "JSXAttribute[name.name='onClick'] > JSXExpressionContainer > Identifier[name='onOpenSettings']",
+    message:
+      '「去设置」的 onClick 必须包一层并带落点常量（onClick={() => onOpenSettings(SETTINGS_TARGET_TOWER)}）—— 裸传会把鼠标事件当成落点 id',
+  },
+  {
+    selector:
+      "ImportDeclaration[source.value=/components\\/scroll\\/glide$/] ImportSpecifier[imported.name='glideTo']",
+    message:
+      '业务层不许直接调底层 glideTo —— 滚动定位走 components/scroll/locate.ts（滚 + 落位 + 绿底是一整套）',
+  },
+  {
+    selector:
+      "CallExpression[callee.name=/^(openSettings|onOpenSettings)$/] Literal[value='postproc-tower']",
+    message:
+      '落点 id 不许写字面量 —— 从 settings/targets.ts 引 SETTINGS_TARGET_TOWER（唯一出处）',
+  },
+]
+
 export default tseslint.config(
   /* 构建产物一律不扫。
      target 是 `tauri build` 之后才出现的 —— 里面有 tauri-codegen 生成的资产 .js
@@ -144,7 +183,7 @@ export default tseslint.config(
     rules: {
       ...reactHooks.configs.recommended.rules,
       'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
-      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW],
+      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW, ...LOCATE_SINGLE_ENTRY],
     },
   },
   /*
@@ -157,7 +196,7 @@ export default tseslint.config(
   {
     files: ['src/app/**/*.{ts,tsx}', 'src/components/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW, ...NATIVE_CHOICE],
+      'no-restricted-syntax': ['error', ...INLINE_OVERFLOW, ...NATIVE_CHOICE, ...LOCATE_SINGLE_ENTRY],
     },
   },
   /*
@@ -172,6 +211,7 @@ export default tseslint.config(
         ...INLINE_OVERFLOW,
         ...NATIVE_CHOICE,
         ...POSTPROC_FIXED_HEIGHTS,
+        ...LOCATE_SINGLE_ENTRY,
       ],
     },
   },
@@ -187,6 +227,7 @@ export default tseslint.config(
         ...INLINE_OVERFLOW,
         ...NATIVE_CHOICE,
         ...SETTINGS_TITLE_NEEDS_TIP,
+        ...LOCATE_SINGLE_ENTRY,
       ],
     },
   }

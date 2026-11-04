@@ -52,8 +52,12 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
 ];
 
 /// 注册表里出现过、但 `ParamEntry` 不认识的键 → 出现次数。
-/// **快照**：今天是这 5 个。多出新键说明云端加了东西，得有人看一眼是不是该读。
+/// **快照**：今天是这 6 个。多出新键说明云端加了东西，得有人看一眼是不是该读。
+/// `follows`（6 处）是 11-03 工作台的「跟不跟基底」状态，只对编辑面有意义；
+/// 客户端 preset 层按 `#[serde(skip_serializing)]` 不读它 —— 确认无用后登记在此，
+/// 不是静默丢弃。
 const UNKNOWN_SNAPSHOT: &[(&str, usize)] = &[
+    ("follows", 6),
     ("jsonKey", 75),
     ("mergeGroup", 5),
     ("parentKey", 43),
@@ -138,6 +142,11 @@ fn kr2b_which_overrides_actually_differ_from_global() {
     assert_eq!(
         differs,
         vec![
+            // 真源 `machineMinVariants` 里这三台机型把 offset.z 的下限从 0.5 放回 0
+            // （允许零偏移）—— 覆盖会放宽校验，照实列进差量清单，别当作回归。
+            "toolhead.offset.z min@P1S:LITE Some(0.5)→0".to_string(),
+            "toolhead.offset.z min@P2S:STANDARD Some(0.5)→0".to_string(),
+            "toolhead.offset.z min@X1C:LITE Some(0.5)→0".to_string(),
             "wiping.wiper_x max@A1_MINI:FAST Some(226.0)→150".to_string(),
             "wiping.wiper_x max@A1_MINI:FASTV3.3 Some(226.0)→150".to_string(),
             "wiping.wiper_x max@A1_MINI:STANDARD Some(226.0)→150".to_string(),

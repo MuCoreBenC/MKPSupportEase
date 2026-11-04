@@ -176,7 +176,7 @@ catalog 是 OTA 数据，**随包那份只是起点，不是最终资源**。三
    只有两个 revision 相同却字节不符，才是真的源头坏件。
 
 **构建链的双身份（欠账，见 §4）**：`crates/preset/assets/presets/*.toml` 是 ① 的**构建输入**
-（`gen-presets --write` → `gen-catalog` → `catalog.generated.json`），它**不是**"客户端内置的最终
+（工作台 `wb_generate` → `gen-catalog` → `catalog.generated.json`；旧 `gen-presets` 于 2026-11-04 退役），它**不是**"客户端内置的最终
 MKP TOML"（落点 = `catalog.path`，铁律 3）。工作台生成的是 ③ 的交付根 `presets/delivery/mkp/presets/*.toml`，
 两批字节不同**本身不构成下载失败** —— 真正的失败只来自 ② 落后于 ③。
 

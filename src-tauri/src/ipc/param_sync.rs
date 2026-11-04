@@ -21,7 +21,8 @@
 //! ```text
 //!   骨架 = 云端当前版正文（注释 / 时间戳 / 新字段都在里面）
 //!   值    采用(adopt) → 云端新值；其余 → **我这份文件里现在写着的值**（一个不许被顶掉）
-//!   血统  换成云端当前版：based_on / based_on_release_time / based_on_sha256
+//!   血统  换成云端当前版：based_on / based_on_sha256 / based_on_release_time
+//!         （后者写的是目录 `publishedAt`，不是文件头；新产物没有 `# release_time`）
 //! ```
 //!
 //! 于是 **0 项也是一次真写**（"自动应用 0 项"）：值一个不动，注释 / 时间戳 /
@@ -99,9 +100,11 @@ pub struct PresetParamSyncDto {
     pub cloud_file_name: Option<String>,
     /// 云端当前版的正文摘要（**界面不显示**，它只是"是哪一版"的身份）
     pub current_sha256: Option<String>,
-    /// 我这份当初基于的那一版云端（血统里的 `based_on_release_time`，给人看的）
+    /// 「我这份当初基于的那一版」发布时刻：血统里有就用（用户接受某一版时写的是
+    /// 目录 `publishedAt`），否则取来路账（下载那一刻定格）。都没有 ⇒ `None`。
     pub based_on_release_time: Option<String>,
-    /// 我这份当初基于的那一版云端的 `# release_time`
+    /// 「云端当前这一版」的发布时刻 = 当前目录的 `catalog.publishedAt`。
+    /// 认不出云端文件 ⇒ `None`。
     pub current_release_time: Option<String>,
     /// 云端当前版的字节**在本机可用**（读得到就能逐项比）
     pub cloud_ready: bool,
@@ -198,10 +201,19 @@ fn sync_at(
 
     let text = runtime::local::read_text(user, path)?;
     let lineage = runtime::lineage::parse_lineage_from_content(&text);
-    /* 读得出来就顺带把"这份当初基于哪一版"的日期给人看（读不出来就是不写，不编） */
+    /*
+     * 「我这份当初基于哪一版」的发布时刻（2026-11-04 接上真值）：
+     *   · 血统里有 `based_on_release_time` ⇒ 用它（用户接受某一版时写的就是目录
+     *     `publishedAt`，见 `apply_at`）；
+     *   · 否则读来路账 `run/lineage-source.json`——那是**下载那一刻定格**的目录发布时刻；
+     *   · 两处都没有（导入 / 老副本）⇒ `None`，界面照实说未知。
+     * 不许拿文件头的 `generated_at`（写盘时刻）顶。
+     */
+    let provenance = runtime::source_ledger::provenance_of(root, path);
     let based_on_release_time = lineage
         .as_ref()
-        .and_then(|l| l.based_on_release_time.clone());
+        .and_then(|l| l.based_on_release_time.clone())
+        .or_else(|| provenance.and_then(|p| p.published_at));
     let based_on_sha256 = lineage
         .as_ref()
         .and_then(|l| l.based_on_sha256.as_deref())
@@ -225,9 +237,16 @@ fn sync_at(
         }
         None => (None, None),
     };
-    let current_release_time = cloud_text
-        .as_deref()
-        .and_then(runtime::lineage::parse_release_time);
+    /*
+     * 「云端当前这一版」的发布时刻（2026-11-04 接上）：目录代的 `publishedAt` 才是
+     * 发布事件真值。文件头的 `# release_time` 只是配方自己的标记，新产物已不再写它，
+     * 不许拿它冒充。认不出云端文件（`cloud == None`）⇒ 未知。
+     */
+    let current_release_time = if cloud.is_some() {
+        catalog.published_at.clone()
+    } else {
+        None
+    };
 
     let defs = &catalog.registry.params;
     let decisions = decisions_of(root, path)?;
@@ -983,9 +1002,9 @@ offset_x = -1
 
             let defs = defs();
             /* 这一份目录代表"云端发布出来的那一版"，所以带上发布时刻 ——
-            血统里的"基于哪一版"读的就是它（2026-11-01 起不再读文件头的渲染时刻）。 */
+            「云端当前版」那一格读的就是它（2026-11-04 起）。 */
             let mut catalog = catalog_with_shas();
-            catalog.published_at = Some("2026-10-31T00:00:00Z".to_owned());
+            catalog.published_at = Some("2026-11-01T00:00:00Z".to_owned());
             crate::fsx::atomic::atomic_write(
                 &root.join("catalog.json"),
                 catalog.to_pretty_json().unwrap().as_bytes(),
@@ -1017,6 +1036,30 @@ offset_x = -1
             let local =
                 param_alg::apply_param_edits(&copy, &defs, &[FieldEdit::new(KEY, "-5")]).unwrap();
             crate::fsx::atomic::atomic_write(&user.join(LOCAL), local.as_bytes()).unwrap();
+
+            /* 真实下载会在 `run/lineage-source.json` 记一笔「下载那一刻目录的 publishedAt」。
+            测试也走这本真账 —— 「基于哪一版」不能只靠文件头（新产物没有 release_time）。 */
+            std::fs::create_dir_all(root.join("run")).unwrap();
+            let identity = crate::runtime::source_identity::SourceIdentity {
+                platform: "github".to_owned(),
+                repo: "mucoreben/mkpsupportease".to_owned(),
+                git_ref: "main".to_owned(),
+            };
+            let stamp = crate::runtime::source_ledger::CatalogStamp {
+                catalog_id: Some("support-ease"),
+                serial: Some(1),
+                revision: "rev-1",
+                published_at: Some("2026-10-31T00:00:00Z"),
+            };
+            crate::runtime::source_ledger::record_download(
+                &root,
+                LOCAL,
+                Some(&identity),
+                "A1-fast.toml",
+                &stamp,
+                Some(based_sha.as_str()),
+            )
+            .unwrap();
 
             Self {
                 _dir: dir,
@@ -1076,7 +1119,7 @@ offset_x = -1
             let mut catalog = catalog_with_shas();
             /* 模拟一次**发布**：发布事件会盖 `publishedAt`（生成不会）。
             血统里"基于哪一版"现在读的就是它（2026-11-01 起不再读文件头那个渲染时刻）。 */
-            catalog.published_at = Some("2026-10-31T00:00:00Z".to_owned());
+            catalog.published_at = Some("2026-11-02T00:00:00Z".to_owned());
             for f in catalog.files.iter_mut() {
                 if f.file_name == "A1-fast.toml" {
                     f.sha256 = Some(sha.clone());
@@ -1101,9 +1144,15 @@ offset_x = -1
         assert_eq!(report.cloud_file_name.as_deref(), Some("A1-fast.toml"));
         assert_eq!(report.machine_id.as_deref(), Some("A1"));
         assert_eq!(report.version_id.as_deref(), Some("FAST"));
-        assert!(
-            report.based_on_release_time.is_some(),
-            "血统里那行日期该读得到"
+        assert_eq!(
+            report.based_on_release_time.as_deref(),
+            Some("2026-10-31T00:00:00Z"),
+            "「基于哪一版」取来路账里下载那一刻的目录发布时刻（不是写盘记录）"
+        );
+        assert_eq!(
+            report.current_release_time.as_deref(),
+            Some("2026-11-01T00:00:00Z"),
+            "「云端当前版」取当前目录的 publishedAt —— 与「基于哪一版」是两个版本各自的时间"
         );
 
         let e = w.at(KEY);

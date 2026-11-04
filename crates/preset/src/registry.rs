@@ -337,9 +337,10 @@ mod tests {
             "快照应有 ~74 条，实测 {}",
             reg.params.len()
         );
+        // c888a5e（分组结构编辑）删掉了 settings tab 与它的组件卡，真源现在是 7 个。
         assert!(
-            reg.tabs.len() >= 8,
-            "快照应有 8 个 tabs，实测 {}",
+            reg.tabs.len() >= 7,
+            "快照应有 7 个 tabs，实测 {}",
             reg.tabs.len()
         );
 

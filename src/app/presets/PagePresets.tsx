@@ -259,7 +259,7 @@ import { usePresetData, usePresetPage } from './usePresetData'
 /* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
 import { splitHeader, tomlTokens } from './tomlPaint'
 /* 「滚到某一行」：全仓那一套（演 transform），见那个文件的头注 */
-import { glideIntoView } from '../../components/scroll/glide'
+import { locateIntoView } from '../../components/scroll/locate'
 import s from './PagePresets.module.css'
 
 
@@ -581,8 +581,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     rootRef.current = el
     setPageEl(el)
   }
-  /** 那一趟的"跟着滚动走"监听，下一次定位 / 动画结束时撤掉（见 `flashRow`） */
-  const stopFlash = useRef<(() => void) | null>(null)
+  /**
+   * 上一次「定位」的叫停函数（2026-11-04）。连着定位两行时先叫停上一条滚动 / 高亮。
+   * 时序与绿底都在 `components/scroll/locate` 里，这里只留一个句柄。
+   */
+  const stopLocate = useRef<(() => void) | null>(null)
 
   /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
   const menu = useContextMenu<PresetTableRow>()
@@ -1313,45 +1316,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /*
    * 「定位」：把目标行滚到视口中央，然后**这一行自己**亮一下绿。
    *
-   * ★ 2026-11-01（作者看截图定的）：「这个绿色的不是背景的，你把它做成背景的，这样就
-   *   不会出现跟随的情况了 —— 现在两个滚动速度不一样，绿条跟不上列表」。
-   *   那块绿原来是页面根上一块绝对定位的 div，每帧量行的位置再摆过去；浮层与列表是
-   *   两条独立的运动，滚起来必然差半拍。现在它是 `tr` 自己的底色（`data-flash`，
-   *   见 `PresetTable.module.css`）——**行怎么动它怎么动**，跟不跟得上这件事不存在了。
-   *   顺带省掉一条 scroll 监听 + 一条 rAF。
+   * ★ 2026-11-01（作者看截图定的）：「这个绿色的不是背景的，你把它做成背景的」——
+   *   那块绿原来是页面根上一块绝对定位的 div，每帧量行的位置再摆过去，浮层与列表
+   *   两条独立的运动，滚起来必然差半拍。现在它是行自己的底色，行怎么动它怎么动。
    *
-   * ★ 底色用 `data-flash` 两段（`in` / `out`）+ CSS `transition` 淡，**不用 @keyframes**：
-   *   这张折叠边框表早先在行背景上跑关键帧，适配缩放下合成层缓存会留旧帧，行里多出
-   *   一条若隐若现的白带（作者：「有时候窗口比较矮就没有，比较高就出现」）。
+   * ★ 2026-11-04 收口：滚 / 落位补测 / 绿底 / **停 6 秒淡出**全部交给共用件
+   *   （`components/scroll/locate`）。这一页不再管时序、不再挂 `data-flash`、
+   *   也不再自己 import 底层滚动函数。原先 `data-flash` + `transition` 那套（淡入
+   *   160 / 停 1000 / 淡出 620）与工作台那套 `@keyframes` 一并退休 —— 作者：
+   *   「大家都用一样的」。
    *
-   * 两个入口共用（状态条的「定位已应用」与来源格的「复制自 X → 定位」）。
+   * 三个入口共用（状态条「定位已应用」、来源格「复制自 X → 定位」、右键定位）。
    */
-  const FLASH_IN_MS = 160
-  const FLASH_HOLD_MS = 1000
-  const FLASH_OUT_MS = 620
-
   const flashRow = (row: HTMLElement) => {
-    /* 滚过去走全仓那一套（演 transform，见 `components/scroll/glide`）。
-       这里**不再需要 onFrame 跟随** —— 绿色就是行的底色。 */
-    glideIntoView(row, { align: 'center' })
-
-    /* 上一趟没退完的（连着定位两行）：先摘干净，否则上一层还挂着 */
-    stopFlash.current?.()
-    row.dataset.flash = 'in'
-    const t1 = window.setTimeout(() => {
-      row.dataset.flash = 'out'
-    }, FLASH_IN_MS + FLASH_HOLD_MS)
-    const t2 = window.setTimeout(() => {
-      delete row.dataset.flash
-      stopFlash.current = null
-    }, FLASH_IN_MS + FLASH_HOLD_MS + FLASH_OUT_MS)
-
-    stopFlash.current = () => {
-      window.clearTimeout(t1)
-      window.clearTimeout(t2)
-      delete row.dataset.flash
-      stopFlash.current = null
-    }
+    /* 连着定位两行：先叫停上一条（滚动动画 + 绿底一起收） */
+    stopLocate.current?.()
+    stopLocate.current = locateIntoView(row)
   }
 
   /*
@@ -3684,7 +3664,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           {tr('presets.page.banner.needsNewer')}
         </span>
         {onOpenSettings !== undefined && (
-          <button type="button" className={s.noteAction} onClick={onOpenSettings}>
+          /* ★ 必须包一层：`openSettings` 收的是「落点 id」，裸传会把鼠标事件当 id
+             塞进 `settingsTarget`（2026-11-04 收口时顺手修的，见 check-locate.mjs） */
+          <button type="button" className={s.noteAction} onClick={() => onOpenSettings()}>
             {tr('presets.page.banner.goUpdate')}
           </button>
         )}

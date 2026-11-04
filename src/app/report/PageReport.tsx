@@ -99,6 +99,7 @@ import { api, errorText, listen } from '../../api'
 import { msg, useLocale, useT, type StringKey, type Tr } from '../../i18n'
 import type {
   CatalogParamDef,
+  PostProcessFacts,
   PostProcessPrintTime,
   ReportBox4,
   ReportCollision,
@@ -124,6 +125,8 @@ import ExportModal from './ExportModal'
 import PostProcessModal from '../postprocess/PostProcessModal'
 import CollisionMap from './CollisionMap'
 import RelocationBoards from './RelocationBoards'
+import { SETTINGS_TARGET_TOWER } from '../settings/targets'
+import type { SettingsTargetId } from '../settings/targets'
 import { useDevPreview } from '../dev/useDevPreview'
 import s from './PageReport.module.css'
 
@@ -211,37 +214,141 @@ function replayRunOf(d: ReportDetail): PostProcessRun {
   return {
     presetName: d.summary.presetName ?? '',
     gcodeName: d.summary.gcodeName ?? d.summary.modelName ?? '',
-    /* 开场事实那一栏是钩子当场报的，归档里没有同形状的一份 —— 不给，卡片自己会省掉 */
-    facts: null,
+    /*
+     * **两栏事实从记录里还原**（2026-11-04 作者：「这些内容要显示得跟当时一模一样呀，
+     * 我都说了回放它就是真的回放，但是他不处理他的信息要是真的呀」）。
+     *
+     * 上一版这里是 `null` ⇒ 回放时四格全是 `—`，看着像"这一趟什么都没读到"。
+     * 其实归档里那几格都在，只是散在三个地方：
+     *   · `header`（切片器头部）→ 机型 / 工艺预设名
+     *   · `snapshot.ir`（IR 终态，PascalCase）→ 耗材 / 喷嘴 / 层高 / 涂胶速度
+     *   · `inputFile.size` → 文件大小
+     * 组装口径与钩子开场报的那一份**同一个形状**（`PostProcessFacts`），
+     * 所以回放屏与当时那一屏摆的是同一套字段、同一个格式化函数。
+     */
+    facts: replayFactsOf(d),
     question: null,
     progress: null,
     finished: {
       ok: d.summary.ok,
       cancelled: false,
       message: d.summary.error ?? '',
-      code: null,
+      /*
+       * **码从结论那句里取回来**（2026-11-04）：`_meta` 顶层没有单独的码字段，
+       * 但钩子写结论时一定把码写在方括号/圆括号里（`… [E_GCODE_COLLISION_001]`）。
+       * 没有它，回放屏认不出"这是不是撞塔那一趟" ⇒ 既不摆那两幅图、也不给「说明」页
+       * （作者：「这个回放的话也要可以切换呀」）。
+       */
+      code: /\b([ENWQ]_[A-Z0-9_]+_\d{3})\b/.exec(d.summary.error ?? '')?.[1] ?? null,
       stage: null,
       exitCode: d.summary.ok ? 0 : 1,
       elapsedMs: d.summary.elapsedMs ?? 0,
       output: d.outputFile?.path ?? null,
       warnings: d.warnings ?? [],
-      result:
-        g == null
-          ? undefined
+      /*
+       * 右栏那几格：**有一格给一格**（2026-11-04）。
+       *
+       * 上一版是 `g == null ? undefined : {...}` —— 失败那趟没有涂胶组 ⇒ 整包 `undefined`
+       * ⇒ 回放屏「预估打印时间 / 涂胶总长 / 处理耗时·大小 / 切片软件」四格全 `—`，
+       * 可那四格里有三格记录里明明有（打印时长、文件大小、切片软件版本）。
+       * 现在按格取：涂胶组缺就缺那一格，别的照给。
+       */
+      result: {
+        penX: g?.penOffsetX ?? 0,
+        penY: g?.penOffsetY ?? 0,
+        penZ: g?.penOffsetZ ?? 0,
+        glueSpeed: g?.glueSpeed ?? 0,
+        glueLengthMm: g?.glueTotalLength,
+        printTimeSeconds: d.printTime?.totalSeconds,
+        slicer: d.slicer?.slicerVersion,
+      },
+      /*
+       * **挪塔那一笔照记录给**（2026-11-04）—— 回放也要能摆"现在 / 挪后"两幅图、
+       * 也能在「说明」页翻页。没有这一格（没挪过塔 / 旧记录）⇒ 缺省，那一块不摆。
+       */
+      relocation: d.relocation ?? null,
+      /* **碰撞几何照记录给**：失败那趟的「说明」页要拿它画两幅俯视图 */
+      geo:
+        d.collision == null
+          ? null
           : {
-            penX: g.penOffsetX,
-            penY: g.penOffsetY,
-            penZ: g.penOffsetZ,
-            glueSpeed: g.glueSpeed,
-            glueLengthMm: g.glueTotalLength,
-            printTimeSeconds: d.printTime?.totalSeconds,
-            slicer: d.slicer?.slicerVersion,
+            collision: d.collision,
+            candidate: d.relocation?.to ?? null,
+            current: [
+              d.relocation?.from?.[0] ?? d.collision.towerBbox?.xMin ?? 0,
+              d.relocation?.from?.[1] ?? d.collision.towerBbox?.yMin ?? 0,
+            ],
           },
     },
     preview: false,
     replay: true,
     questionEmitted: true,
   }
+}
+
+/**
+ * 从归档记录还原**开场那两栏事实**（`PostProcessFacts` 同一形状）。
+ *
+ * 一格都读不到就返回 `null` ⇒ 卡片退回"没给就不摆"的老口径（不编数）。
+ *
+ * ★ 为什么读 `snapshot.ir`（PascalCase 的 IR 终态）而不是 `snapshot.params`：
+ *   那才是"程序实际认成了什么"。参数表是"用户给的"，IR 是"读出来的" ——
+ *   回放要的是**当时那一屏真显示过的数**，也就是 IR 这一份。
+ */
+function replayFactsOf(d: ReportDetail): PostProcessFacts | null {
+  const sl = d.slicer
+  const num = (v: unknown): number =>
+    typeof v === 'number' && Number.isFinite(v) ? v : 0
+
+  /*
+   * ★ 全部取自**归档里已经摊好的那几组**（`detail.slicer` / `detail.stats` /
+   *   `detail.header` / `inputFile`），不去解 `snapshot.ir` 的 PascalCase 原样 ——
+   *   那两份说的是同一件事，但这一份已经是"读出来的结论"，与报告页显示的数**同源**。
+   *   （`snapshot.ir` 只在缺上面那几组时兜底。）
+   */
+  /* IR 终态是内核原样序列化的 JSON（PascalCase 键）—— 只读其中两格，按 unknown 收窄 */
+  const ir = (d.snapshot?.ir ?? {}) as Record<string, unknown>
+  const irFilament = (ir.Filament ?? {}) as Record<string, unknown>
+  const machinePreset = sl?.machinePresetName ?? ''
+  const facts: PostProcessFacts = {
+    /*
+     * ★ **`presetMachine` 是机型 id，不是预设名**（2026-11-04）：回放那两幅俯视图
+     *   要靠它去机型表里找板子轮廓（`CollisionMap` 的 `machineType`）。
+     *   上一版填的是 `machinePresetName`（`Bambu Lab A1 0.4 nozzle`）—— 表里按 `id`
+     *   找，找不到就退回一张通用网格，作者看到的就是"怎么不是具体某个板子的样子"。
+     *   归档顶层 `machineType` 才是 id（钩子写的是 `ir.machine.machine_type`）。
+     */
+    gcodeMachine: d.summary.machineType ?? machinePreset,
+    presetMachine: d.summary.machineType ?? machinePreset,
+    filamentType: sl?.filamentType ?? String(irFilament.filamentType ?? ''),
+    fileSizeBytes: d.inputFile?.sizeBytes ?? 0,
+    /*
+     * 喷嘴（2026-11-04）：`0` 是"没有值"的哨兵，不是 0.00 mm。
+     *
+     * 老记录（11-04 之前写的失败那条）里这一格没写 / 是 0，直接 `??` 是退不回
+     * 快照 IR 的 —— 回放屏就停在 `PETG · —`。现在把 0 当缺值，再退到 IR 终态；
+     * 新记录由钩子从输入头自报的那一行写进来（见 `archive::ReportFacts`）。
+     */
+    nozzleDiameter: (sl?.nozzleDiameter ?? 0) > 0
+      ? (sl?.nozzleDiameter ?? 0)
+      : num(irFilament.nozzleDiameter),
+    /*
+     * 层高：先看切片组那一格（2026-11-04 起有 —— **失败那趟也写**），
+     * 老记录没有这一格才退到 IR 终态的 PascalCase 那一份。
+     */
+    layerHeight: sl?.layerHeight ?? num(irFilament.layerHeight),
+    glueSpeed: d.glue?.glueSpeed,
+    slicer: sl?.slicerVersion,
+    slicerPrintTimeSeconds: undefined,
+  }
+  /* 一格真值都没有 ⇒ 当作"没给"（别摆一排空串当数据） */
+  const hasAny =
+    facts.gcodeMachine !== '' ||
+    facts.presetMachine !== '' ||
+    facts.filamentType !== '' ||
+    facts.layerHeight > 0 ||
+    facts.fileSizeBytes > 0
+  return hasAny ? facts : null
 }
 
 /**
@@ -605,17 +712,20 @@ function towerGroup(tr: Tr, tower: ReportTowerFacts): Group | null {
 function slicerGroup(tr: Tr, slicer: ReportSlicerFacts): Group | null {
   const onOff = (v: boolean | undefined): string =>
     v === undefined ? '—' : tr(v ? 'report.slicer.on' : 'report.slicer.off')
+  /* 0 是"没有值"的哨兵（内核缺值一律 0）—— 别把它印成 `0 mm`，与回放屏同一口径 */
+  const nozzle: number | undefined =
+    slicer.nozzleDiameter !== undefined && slicer.nozzleDiameter > 0
+      ? slicer.nozzleDiameter
+      : undefined
   const cells: [string, string][] = [
     [tr('report.slicer.software'), slicer.slicerVersion ?? '—'],
     [tr('report.slicer.machinePreset'), slicer.machinePresetName ?? '—'],
     [tr('report.slicer.processPreset'), slicer.processPresetName ?? '—'],
     [
       tr('report.slicer.filament'),
-      slicer.filamentType === undefined && slicer.nozzleDiameter === undefined
+      slicer.filamentType === undefined && nozzle === undefined
         ? '—'
-        : `${slicer.filamentType ?? '—'} · ${
-            slicer.nozzleDiameter === undefined ? '—' : `${fmtNum(slicer.nozzleDiameter)} mm`
-          }`,
+        : `${slicer.filamentType ?? '—'} · ${nozzle === undefined ? '—' : `${fmtNum(nozzle)} mm`}`,
     ],
     [
       tr('report.slicer.ironing'),
@@ -713,7 +823,7 @@ function hasAnyValue(cells: [string, string][]): boolean {
 function buildGroups(
   tr: Tr,
   detail: ReportDetail,
-  onOpenSettings?: () => void,
+  onOpenSettings?: (target: SettingsTargetId) => void,
 ): Group[] {
   const st = detail.summary
   const stats = detail.stats ?? {}
@@ -876,7 +986,9 @@ function buildGroups(
                 ? {
                     action: {
                       label: tr('report.collision.hintGo'),
-                      run: onOpenSettings,
+                      /* 带上目标：设置页要滚到「智能塔位置」那一行（不再只是把页签切过去，
+                         2026-11-04 作者：「点了之后是跳过去，然后滚动定位到那个开关位置」） */
+                      run: () => onOpenSettings(SETTINGS_TARGET_TOWER),
                     },
                   }
                 : {}),
@@ -1388,8 +1500,12 @@ export default function PageReport({
    * 「去设置里打开智能塔位置」的出口（2026-11-04）。
    * 由外壳给（`App.tsx` 的 `openSettings`），与预设页那条"去更新"横幅同一条规矩。
    * 不给 ⇒ 只留句子、不留按钮。
+   *
+   * 参数是**设置页里的落点 id**（唯一出处 `settings/targets.ts`）：点下去不只切页签，
+   * 还要滚到那一行（2026-11-04 作者：「点了之后是跳过去，然后滚动定位到那个开关位置」）。
+   * ★ 必填、且只认合法落点：以前弹窗那颗「去设置」漏带参数，只切了页签。
    */
-  onOpenSettings?: () => void
+  onOpenSettings?: (target: SettingsTargetId) => void
 } = {}) {
   const tr = useT()
   /* null = 还在读；读失败是另一格（err），不与空列表混 */
@@ -2163,18 +2279,24 @@ export default function PageReport({
                                 <ParamSnapshotPanel snap={detail.snapshot} />
                               ) : null
                             ) : g.id === 'collision' ? (
-                              /* 碰撞位置：一张俯视图（几何缺了就整块不画，组件自己判） */
-                              <>
+                              /*
+                               * 碰撞位置：左边一张俯视图，右边（那半屏原本空着）摆
+                               * 「撞停之后去哪儿」—— 一句话 + 一个去处（2026-11-04 作者：
+                               * 「右侧有空位，你可以把这些文案呀，那个设置按钮啊，也放到右侧了」）。
+                               * 图缺了就只摆右半边（组件自己判有没有几何）。
+                               */
+                              <div className={s.collisionRow}>
                                 {detail.collision !== null && (
-                                  <CollisionMap
-                                    collision={detail.collision}
-                                    machineType={detail.summary.machineType}
-                                  />
+                                  <div className={s.collisionMapCell}>
+                                    <CollisionMap
+                                      collision={detail.collision}
+                                      machineType={detail.summary.machineType}
+                                    />
+                                  </div>
                                 )}
-                                {/* 撞停之后去哪儿（2026-11-04）：一句话 + 一个去处 */}
                                 {g.hint !== undefined && (
-                                  <p className={s.collisionHint}>
-                                    <span>{g.hint.text}</span>
+                                  <div className={s.collisionHint}>
+                                    <p className={s.collisionHintText}>{g.hint.text}</p>
                                     {g.hint.action !== undefined && (
                                       <button
                                         type="button"
@@ -2184,9 +2306,9 @@ export default function PageReport({
                                         {g.hint.action.label}
                                       </button>
                                     )}
-                                  </p>
+                                  </div>
                                 )}
-                              </>
+                              </div>
                             ) : (
                               <>
                                 <dl className={s.kv}>

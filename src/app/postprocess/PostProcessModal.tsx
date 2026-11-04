@@ -39,13 +39,21 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 
 
 import { api, errorText } from '../../api'
-import { t, useT, type Tr } from '../../i18n'
-import type { PostProcessFacts, PostProcessFinished, PostProcessResult } from '../../api/contract'
+import { t, useT, type StringKey, type Tr } from '../../i18n'
+import type {
+  PostProcessFacts,
+  PostProcessFinished,
+  PostProcessResult,
+  RelocationRecord,
+} from '../../api/contract'
 import { detectPlatform } from '../../hooks/usePlatform'
 import { Btn } from '../ui/Controls'
 import { HeadNote, Modal, summarizeNotes } from '../../components/modal'
 import { useTitlebarDrag } from '../useTitlebarDrag'
 import { questionUiState } from './questionUi'
+import { estimatedPrintTimeSeconds } from './facts'
+import { SETTINGS_TARGET_TOWER } from '../settings/targets'
+import type { SettingsTargetId } from '../settings/targets'
 import { percentOf, stepName } from './steps'
 import { SETTLE_MS, useSmoothPercent } from './useSmoothPercent'
 import type { PostProcessRunView } from './usePostProcessRun'
@@ -79,6 +87,15 @@ export interface PostProcessModalProps {
   view: PostProcessRunView
   /** 「查看详情」：跨页跳转的出口由外壳给（页面 / 浮层不该伸手改页签） */
   onOpenReport: () => void
+  /**
+   * 「去设置里打开智能塔位置」的出口（2026-11-04）：碰撞失败那一页给用户一条明路。
+   * 同样由外壳给 —— 这一屏不伸手改页签；不给就不摆那颗钮（只剩句子）。
+   *
+   * ★ **必须带落点**（`SETTINGS_TARGET_TOWER`，唯一出处 `settings/targets.ts`）：
+   *   2026-11-04 截图里那一版是 `onOpenSettings()` 空参数，只切了页签、没滚到开关。
+   *   除了跳过去，这一下还要把本屏**停驻**成右上角胶囊（见 `view.park`）。
+   */
+  onOpenSettings?: (target: SettingsTargetId) => void
 }
 
 /* ---- 小工具 ---- */
@@ -307,13 +324,25 @@ function runGroup(tr: Tr, facts: PostProcessFacts | null): FactGroup {
 function doneGroup(tr: Tr, finished: PostProcessFinished, facts: PostProcessFacts | null): FactGroup {
   const res = finished.result
   const rows: FactRow[] = []
-  /* 打印时间**常常是后到的**（有界面时延后算）：先空着，`postprocess-print-time` 到了再补；
-   * 失败 / 取消时退回开场那一格（切片器自报的）—— 有就摆，比空着强 */
-  const printSec = res?.printTimeSeconds ?? facts?.slicerPrintTimeSeconds
-  rows.push({
-    label: tr('postproc.facts.printTime'),
-    value: printSec === undefined ? '—' : printTimeText(printSec),
-  })
+  /*
+   * 「预估打印时间」**行永远在**，右侧的值看结论（2026-11-04 作者两句话定的口径）：
+   * 先说「失败不显示」，后补「是那个预估打印时间字段还在，只是右侧的参数是用那个横杠-」。
+   *
+   * 所以失败 / 取消那一趟右侧是「—」，**不拿**开场事实里切片器自报的时长顶上
+   * （原来那一退就是失败屏「1 小时 58 分」的来源）；成功那趟内核重算的优先，
+   * 还没算出来先摆切片器自报的。取值抽到 `./facts`（有回归测试），这里不再自己定。
+   */
+  {
+    const printSec = estimatedPrintTimeSeconds({
+      finished,
+      resultSeconds: res?.printTimeSeconds,
+      slicerSeconds: facts?.slicerPrintTimeSeconds,
+    })
+    rows.push({
+      label: tr('postproc.facts.printTime'),
+      value: printSec === undefined ? '—' : printTimeText(printSec),
+    })
+  }
   rows.push({
     label: tr('report.glue.total'),
     value: res?.glueLengthMm === undefined ? '—' : mm2(res.glueLengthMm),
@@ -653,6 +682,44 @@ function SquareMark() {
  * 形状 = 四条内凹的边（每边一个控制点拉向圆心），比正菱形更像"闪光"，与 `✦` 同一种感觉。
  */
 /**
+ * 下面那一块**能翻到哪几页**（2026-10-18 起两页，2026-11-04 扩成三页）。
+ *
+ * - `facts`：两栏事实（机型与切片基础 / 擦料与胶水消耗）—— 每一屏都有
+ * - `note` ：说明页。挪塔那一问是"要不要挪"的问句；**碰撞失败是陈述句**（见 `CollisionNote`）
+ * - `fail` ：红卡（只有失败那几屏有）
+ */
+type RelocateTab = 'note' | 'fail' | 'facts'
+
+/**
+ * 每一页在**左下角那颗钮**上怎么写（钮上写的是**点它会去哪一页**）。
+ *
+ * ★ 与「每次提问」那一屏原来那两颗文案同一个口径（钮上写目标页，`aria`/`data-tip`
+ *   说全"切到哪儿"）—— 三档共用一张表，才不会一屏一个说法。
+ */
+const TAB_META: Record<
+  RelocateTab,
+  { label: StringKey; toAria: StringKey; toTip: StringKey }
+> = {
+  /* 挪塔那一屏叫「信息」（那两栏是"数据"）；失败那一屏叫「返回」（那一页是"结论"） */
+  facts: {
+    label: 'postproc.relocate.facts',
+    toAria: 'postproc.relocate.toFacts',
+    toTip: 'postproc.relocate.toFactsTitle',
+  },
+  note: {
+    label: 'postproc.relocate.note',
+    toAria: 'postproc.relocate.toNote',
+    toTip: 'postproc.relocate.toNoteTitle',
+  },
+  /* 失败那屏的默认页 = 那两栏事实（红卡不参与翻页）⇒ 词与 `facts` 同一套 */
+  fail: {
+    label: 'postproc.relocate.facts',
+    toAria: 'postproc.relocate.toFacts',
+    toTip: 'postproc.relocate.toFactsTitle',
+  },
+}
+
+/**
  * 翻页那颗钮上的记号：一个 i（"信息"）—— 画成 SVG，与全站「圈里记号一律 SVG」同一条。
  */
 function InfoGlyph() {
@@ -683,6 +750,82 @@ function SparkMark() {
  * 失败（§5 定稿 = `.failWarn`）：照「机型不匹配」那一张红卡 —— 图标在板外、
  * 文案直接落在红卡上；那枚叹号是 24px 粗体**文字**（与机型不匹配那一枚逐字一样）。
  */
+/**
+ * **碰撞失败那一页的说明**（2026-11-04）—— 陈述句，不是问句。
+ *
+ * 作者原话：「它不是这种疑问句了，不是这种问句，而是说这次发生碰撞，然后要去设置里面
+ * 开自动塔位置，可以帮你去改位置啊」。
+ *
+ * ★ 与「每次提问」那一屏的 `RelocateNote`（问"要不要挪"）**语气上分开**：
+ *   那屏是**还没决定**，这屏是**已经失败了**。所以这里是三句陈述：
+ *   撞了什么 → 现在怎么办 → 不想每次自己挪就这么设。
+ *
+ * `relocated`：这一趟其实挪过塔（`Auto` 档挪了但复检仍撞）—— 那时"回切片器把模型挪开"
+ * 这一句要换成"塔已经挪到 X/Y 了，但还是撞"，别让人以为它没动。
+ */
+function CollisionNote({
+  relocated,
+  onGoSettings,
+}: {
+  relocated: boolean
+  /**
+   * 「去设置」这一下：跳设置页 + 滚到开关 + **把本屏收进右上角胶囊**
+   * （三件由外壳那一层合成，见主件里的 `goTowerSettings`）。不给就不摆那颗钮。
+   */
+  onGoSettings?: () => void
+}) {
+  const tr = useT()
+  return (
+    <div className={s.collisionNote}>
+      <p className={s.collisionNoteLead}>
+        {tr(relocated ? 'postproc.collision.triedTitle' : 'postproc.collision.title')}
+      </p>
+      <p className={s.collisionNoteBody}>
+        {tr(relocated ? 'postproc.collision.triedBody' : 'postproc.collision.body')}
+      </p>
+      <p className={s.collisionNoteBody}>
+        {tr('postproc.collision.tip')}
+        {onGoSettings !== undefined && (
+          /* ★ 包一层：别把鼠标事件当成落点 id（见 check-locate.mjs / eslint 那两道闸） */
+          <Btn className={s.collisionNoteGo} onClick={() => onGoSettings()}>
+            {tr('postproc.collision.go')}
+          </Btn>
+        )}
+      </p>
+    </div>
+  )
+}
+
+/**
+ * **成功且挪过塔**那一屏的说明页（2026-11-04）。
+ *
+ * 与 `CollisionNote` 的分工：
+ *   · `CollisionNote` 说的是"**撞了**，这次没成"—— 只有失败那屏用；
+ *   · 这里说的是"**挪了**，成这一次"—— 成功那屏用。
+ *
+ * ★ 上一版成功那屏也复用了 `CollisionNote`，于是成功的记录里写出"塔已经挪过，
+ *   但挪完还是撞"（作者截图）。判据要按**这一屏是不是失败**分，不能只看"有没有挪过塔"。
+ */
+function RelocateDoneNote({ record }: { record: RelocationRecord | null }) {
+  const tr = useT()
+  const to = record?.to ?? null
+  return (
+    <div className={s.collisionNote}>
+      <p className={s.collisionNoteLead}>{tr('postproc.relocate.doneTitle')}</p>
+      <p className={s.collisionNoteBody}>
+        {to !== null && record != null
+          ? tr('postproc.relocate.doneBody', {
+            from: `(${record.from[0].toFixed(1)}, ${record.from[1].toFixed(1)})`,
+            to: `(${to[0].toFixed(1)}, ${to[1].toFixed(1)})`,
+            moved: (record.movedMm ?? 0).toFixed(1),
+          })
+          : tr('postproc.relocate.doneBodyNoMove')}
+      </p>
+      <p className={s.collisionNoteBody}>{tr('postproc.relocate.doneTip')}</p>
+    </div>
+  )
+}
+
 function ResultHero({
   cancelled,
   title,
@@ -733,9 +876,32 @@ function ResultHero({
 
 /* ---- 主件 ---- */
 
-export default function PostProcessModal({ view, onOpenReport }: PostProcessModalProps) {
+export default function PostProcessModal({
+  view,
+  onOpenReport,
+  onOpenSettings,
+}: PostProcessModalProps) {
   const tr = useT()
   const { run, dismiss } = view
+  /*
+   * 「关闭」= 真的收场（2026-11-04）：模态框与右上角那枚停驻胶囊一起撤。
+   * 回放 / 预览是手写的 view 字面量（没有这套状态机），那时退回原来的 `dismiss`。
+   */
+  const finishForGood = view.close ?? dismiss
+  /*
+   * 「去设置」= 跳到「智能塔位置」那一行 **+ 把本屏停驻成后台胶囊**。
+   *
+   * 作者：「它就跳转过去，然后它就变成那种后台运行的效果……用户点了还可以继续
+   * 展开恢复这个模态框」「等用户点了这个关闭的时候它才消失」。
+   * ★ 顺序无关（两笔都是 React state），但两件必须一起发生：只跳不收，弹窗就会
+   *   压在设置页上（2026-11-04 第二张截图）；只收不跳，落点就丢了。
+   */
+  const goTowerSettings = () => {
+    if (onOpenSettings === undefined) return
+    const parkAway = view.park ?? dismiss
+    parkAway()
+    onOpenSettings(SETTINGS_TARGET_TOWER)
+  }
   const [busy, setBusy] = useState(false)
   /*
    * **已经点过答复、钩子还没把问句收掉**（2026-10-18 作者：「点击把塔挪到不撞的位置之后
@@ -1034,11 +1200,26 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   }, [running])
 
   /*
-   * **挪塔那一问的两页**（2026-10-18）：上面是示意图，下面那块位置在
-   * 「挪塔说明」与「原始两栏信息」之间翻页 —— 左下角那颗很小的按钮切。
-   * 两页占**同一块高度**（`.relocateSlot` 定高），所以模态框不跟着变大小。
+   * **那一块的两页**（2026-10-18 起；2026-11-04 泛化成三档）
+   *
+   *   `note`  = 挪塔说明 / 碰撞说明（说什么、为什么、下一步怎么办）
+   *   `facts` = 原来那两栏事实（机型与切片基础 / 擦料与胶水消耗）
+   *   `fail`  = 「处理失败」那张红卡（只有失败那几屏有）
+   *
+   * 三页**叠在同一格里**（`.relocateSlot`），页高 = 较高那一页 ⇒ 翻页不跳、框不变大。
+   * 左下角那颗小钮切；页脚在那里统一渲染（见下面 footer 那段注释）。
+   *
+   * ★ 2026-11-04 作者：「我点击这个信息，又切换回原本的那一个，然后点击了说明就切换成
+   *   这一个碰撞的」—— **碰撞失败那几屏也归这套翻页管**，不再只在"有问句"时才有那颗钮。
    */
-  const [relocateTab, setRelocateTab] = useState<'note' | 'facts'>('note')
+  /*
+   * **默认落在"信息"那一页**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）。
+   *
+   * ★ 初值原来是 `'note'` —— 那是挪塔那一问的合理默认（问句本身就摆在说明页上），
+   *   但它同时让失败 / 成功那两屏一进来就停在说明页。现在统一以"信息"开场：
+   *   问句那一屏的正文行仍然在 `note` 页，可答的按钮在页脚，翻不翻都看得见。
+   */
+  const [relocateTab, setRelocateTab] = useState<RelocateTab>('facts')
   const questionKind = run?.question?.questionKind
   useEffect(() => {
     /* 换一问（或这一问结束）就翻回"说明"那页 —— 别把上一问的翻页状态带过来 */
@@ -1064,11 +1245,123 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
   const facts = run.facts
 
   /** 挪塔那一问、且几何真带出来了 —— 这一屏的版式与别处不同（见上面的翻页状态） */
-  const isRelocate =
+  const isAskingRelocate =
     showAsk &&
     run.question !== null &&
     run.question.questionKind === 'tower-relocation' &&
     run.question.geo?.collision != null
+
+  /**
+   * **这一趟挪塔的账**（2026-11-04）：问句带着的那份，或者结算消息带回来的那份。
+   *
+   * ★ 只有真挪过（`to != null`）才算"要摆两幅图" —— 用户选了自己挪模型 / 没答 /
+   *   板上摆不下时，塔没动，摆一幅"现在 / 挪后"只会让人以为它挪了。
+   */
+  const movedRelocation: RelocationRecord | null =
+    run.question?.geo?.relocation?.to != null
+      ? run.question.geo.relocation
+      : finished?.relocation?.to != null
+        ? finished.relocation
+        : null
+
+  /**
+   * **要摆"现在 / 挪后"两幅图**：问句那一档，或者**已经挪过塔**（`auto` 档走这条）。
+   *
+   * ★ 上一版判据是 `isRelocate`（必须"有问句"）—— 于是「自动挪塔」档永远走不到这条
+   *   版式，作者看到的只有一句"已挪到 …"，看不到塔到底挪到哪（2026-11-04）。
+   */
+  const showsRelocateMaps = isAskingRelocate || movedRelocation !== null
+
+  /**
+   * **碰撞失败**这一屏（2026-11-04）：`E_GCODE_COLLISION_001` 那一条。
+   *
+   * 给它的多一页「碰撞说明」—— 陈述句（"这次撞了 / 想避免就这么做"），不是问句。
+   * 判据用**码**而不是文案：码是契约，句子随语言变。
+   */
+  const isCollisionFail =
+    finished !== null &&
+    !finished.ok &&
+    !finished.cancelled &&
+    finished.code === 'E_GCODE_COLLISION_001'
+
+  /**
+   * 这一屏下面那块**有哪几页**（按翻页顺序）。
+   *
+   * | 这一屏 | 页 |
+   * |---|---|
+   * | 挪过塔（问句中 / 结完账） | 说明 ↔ 信息 |
+   * | **碰撞失败** | **红卡 + 信息（同一页） ↔ 碰撞说明** |
+   * | 别的失败 | 不翻（红卡 + 信息，一颗钮都不摆） |
+   * | 跑着 / 普通成功 | 只有信息 |
+   *
+   * ★ 失败**只有两页**（2026-11-04 作者第二次纠正：「我说的失败还是这样子，我不要 3 种切换，
+   *   我就要两种切换」，并贴了老样子那张图）：红卡与两栏事实本来就在**同一屏**上下摆着，
+   *   是这块的"原样"——所以"失败"不是一个单独的页，它就是**默认那一页**。
+   *   翻页钮只在那两页之间转：默认 ←→ 说明。
+   */
+  /*
+   * ★ **信息永远排第一**（2026-11-04 作者：「默认显示信息呀，不要默认显示说明」）——
+   *   `activeTab` 落回 `pages[0]`，所以顺序就是把默认页定死的那一格。
+   *   失败那屏的"信息"就是老样子那两栏（红卡在顶部 hero，不参与翻页）。
+   */
+  const pages: RelocateTab[] = isCollisionFail
+    ? ['fail', 'note']
+    : showsRelocateMaps
+      ? ['facts', 'note']
+      : []
+
+  /** 当前这一页不在这一屏的页表里（换了屏）⇒ 落回第一页，别停在空白页上 */
+  /*
+   * ★ 问句那一屏**强制停在说明页**：问句正文就住在 `note` 页，翻到"信息"去看两栏数字
+   *   反而看不到"它在问什么"（作者 2026-10-18 定过：那一屏就是"说明 + 选项"）。
+   *   别的屏一律按 `relocateTab`（默认 `facts` = 信息）。
+   */
+  const wantTab: RelocateTab = isAskingRelocate ? 'note' : relocateTab
+  const activeTab: RelocateTab = pages.includes(wantTab) ? wantTab : (pages[0] ?? 'facts')
+
+  /** 下一颗钮转到哪一页（按 `pages` 轮转） */
+  const nextTab: RelocateTab | null =
+    pages.length < 2
+      ? null
+      : pages[(pages.indexOf(activeTab) + 1) % pages.length] ?? null
+
+  /**
+   * 钮上的词（`TAB_META` 一张表）：默认页写「说明」，说明页写「信息」。
+   *
+   * ★ 挪塔那屏与失败那屏的词**一样**了（2026-11-04）：失败页的红卡不参与翻页，
+   *   翻的只是"两栏事实 ↔ 说明"，与挪塔那屏同构 ⇒ 不必再分两张表。
+   */
+  const tabMeta = TAB_META
+
+  /**
+   * 红卡那两行（原因 + 码/退出码）—— 失败那几页共用一份。
+   *
+   * 第 46 轮定的口径：失败**不说"停在哪一步"**（只说"失败了"等于让人从头猜，
+   * 但那一行用户点名不要）；错误码与退出码并成一行，跟切片器那个框对得上号。
+   */
+  const failLines: string[] = []
+  if (finished !== null && !finished.ok) {
+    failLines.push(
+      /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」。
+         ★ 后端句子随语言走（2026-10-26）⇒ 两种语言的前缀都要剥 */
+      finished.message.replace(/^(已停止 —— |Stopped — )/, ''),
+    )
+    const codes: string[] = []
+    if (finished.code !== null) codes.push(tr('postproc.err.code', { code: finished.code }))
+    if (finished.exitCode !== 0) codes.push(tr('postproc.err.exit', { code: finished.exitCode }))
+    if (codes.length > 0) failLines.push(codes.join(' · '))
+  }
+
+  /**
+   * 「信息」那一页摆什么 —— 跑着 / 问着走前两组，结完账走"基础 + 结果"。
+   *
+   * ★ 挪过塔的成功趟（`auto` 档）四格读数**仍在 hero 位**（两幅图在它上面一格，
+   *   用的是同一块 `lead` 槽，见上面那段），所以这里不用另加 `MetricsStrip`。
+   */
+  const factsPageGroups =
+    asking || running
+      ? [baseGroup(tr, facts), runGroup(tr, facts)]
+      : [baseGroup(tr, facts), doneGroup(tr, finished as PostProcessFinished, facts)]
 
   /** 两条命令（停止 / 答复）都要等后端，失败要说出来 —— 界面不许"点了没反应" */
   const act = (fn: () => Promise<void>) => {
@@ -1095,7 +1388,7 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       .catch(() => {
         /* 钩子已经不在了 —— 正是这一颗按钮要处理的那种局面，不往界面上抛 */
       })
-      .finally(() => dismiss())
+      .finally(() => finishForGood())
   }
 
 
@@ -1110,8 +1403,12 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
      * 容器、高度跟 hero 那一带对齐），文案挪到下面"原本两栏事实"的位置（可翻页，
      * 见下面的 `relocateTab`）。几何没带出来（旧钩子 / 解析丢格）就退回三行字。
      */
-    lead = isRelocate ? (
-      <RelocateMaps question={run.question} machineType={run.facts?.presetMachine ?? null} />
+    lead = isAskingRelocate ? (
+      <RelocateMaps
+        question={run.question}
+        record={movedRelocation}
+        machineType={run.facts?.presetMachine ?? null}
+      />
     ) : (
       <AskHero
         questionKind={run.question.questionKind}
@@ -1149,9 +1446,24 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
     )
   } else if (finished !== null) {
     if (finished.ok) {
-      /* 双击四格 ⇒ 翻回 100% 的 hero（作者：「双击之后显示 100% 那个 hero」） */
-      lead = metricsReady(finished.result) ? (
-        /* 出场（淡入 / 弹上来）由主件那个 effect 用 WAAPI 驱动 —— 同上；
+      /*
+       * **挪过塔的成功趟**（2026-11-04 作者：「如果我开了自动的话，它也得把那个塔的移动的
+       * 显示出来呀」）—— 上摆放两幅俯视图，四格读数挪到下面那块（可翻页回来看）。
+       *
+       * ★ 与「每次提问」那一屏**同一套高地、同一套画法**：那一屏答完也走这里
+       *   （它的 `relocation` 同样由结算消息带回），所以两种档位看到的图一模一样。
+       */
+      lead = showsRelocateMaps ? (
+        <div ref={leadBoxRef} key="relocateLead">
+          <RelocateMaps
+            record={movedRelocation}
+            question={run.question}
+            machineType={run.facts?.presetMachine ?? null}
+          />
+        </div>
+      ) : metricsReady(finished.result) ? (
+        /* 双击四格 ⇒ 翻回 100% 的 hero（作者：「双击之后显示 100% 那个 hero」）。
+           出场（淡入 / 弹上来）由主件那个 effect 用 WAAPI 驱动 —— 同上；
            `key` 与 hero 那一层必须不同（见那边注释） */
         <div ref={leadBoxRef} key="leadBox">
           <MetricsStrip res={finished.result} onDoubleTap={() => startFlip('hero')} />
@@ -1170,24 +1482,40 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
         </div>
       ) : null
     } else {
-      const lines = [
-        /* 「已停止 —— 」那半句前缀不用再摆：标题那行就是「已停止」。
-           ★ 后端句子随语言走（2026-10-26）⇒ 两种语言的前缀都要剥 */
-        finished.message.replace(/^(已停止 —— |Stopped — )/, ''),
-      ]
-      const codes: string[] = []
-      if (finished.code !== null) codes.push(tr('postproc.err.code', { code: finished.code }))
-      if (finished.exitCode !== 0) codes.push(tr('postproc.err.exit', { code: finished.exitCode }))
-      /* 第 46 轮定的口径：失败**不说"停在哪一步"** —— 只说"失败了"等于让人从头猜，
-       * 但那一行用户点名不要；错误码与退出码并成一行，跟切片器那个框对得上号 */
-      if (codes.length > 0) lines.push(codes.join(' · '))
-      lead = (
-        <ResultHero
-          cancelled={finished.cancelled}
-          title={finished.cancelled ? tr('postproc.result.stopped') : tr('postproc.result.failed')}
-          lines={lines}
-        />
-      )
+      /*
+       * 失败那屏**上面那块**（2026-11-04）：
+       *
+       * | 现在翻到哪一页 | 上面那一格 |
+       * |---|---|
+       * | 默认页（两栏事实） | **红卡 —— 老样子，一动不动** |
+       * | 说明页 | **两幅俯视图**（现在 / 挪后），跟着说明一起换掉 |
+       *
+       * ★ 作者原话：「原本那个失败页完全不用动，它这个说明页上面的那个处理失败的 hero
+       *   就要变」。所以红卡只在**默认页**摆，翻到说明就换成图 —— 那里读者要看的是
+       *   "撞在哪、本来该挪到哪"，不是再说一遍"失败了"。
+       * ★ 没有几何（不是撞塔 / 老回执）⇒ 说明页仍是红卡，不许摆两张空板。
+       */
+      lead =
+        activeTab === 'note' && finished.geo != null ? (
+          <div ref={leadBoxRef} key="leadFailMaps">
+            <RelocateMaps
+              question={null}
+              record={movedRelocation}
+              geo={finished.geo}
+              machineType={run.facts?.presetMachine ?? null}
+            />
+          </div>
+        ) : (
+          <div ref={leadBoxRef} key="leadFail">
+            <ResultHero
+              cancelled={finished.cancelled}
+              title={
+                finished.cancelled ? tr('postproc.result.stopped') : tr('postproc.result.failed')
+              }
+              lines={failLines}
+            />
+          </div>
+        )
     }
   }
 
@@ -1211,150 +1539,147 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
       hideClose
       /* Esc 也一样收进那条口径：跑着的时候"收起来"只有「后台运行」这一条明路 */
       closeOnEsc={!running}
-      onClose={dismiss}
+      onClose={finishForGood}
       footer={
-        replay ? (
-          /* 回放：与预览同一套——真业务按钮一个都不摆，只留「关闭回放」 */
-          <>
-            <span className={s.previewTag}>{tr('postproc.replay.tag')}</span>
-            <Btn variant="accent" onClick={dismiss}>
-              {tr('postproc.replay.close')}
-            </Btn>
-          </>
-        ) : preview ? (
-          /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
-             只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
-          <>
-            <span className={s.previewTag}>{tr('postproc.preview.tag')}</span>
-            <Btn variant="accent" onClick={dismiss}>
-              {tr('postproc.preview.close')}
-            </Btn>
-          </>
-        ) : offerStopAndClose ? (
-          /*
-           * **逃生通道**（2026-10-19，作者：「出错的时候加一个停止并关闭的按钮，
-           * 这样就不用管多的操作了」）。只摆这一颗 —— 报错之后那些正常按钮
-           * （强制继续 / 终止 / 停止）都已经没意义，多摆一颗只会让人以为还能继续答。
-           */
-          <>
-            <span className={s.previewTag}>{tr('postproc.mismatch.tag')}</span>
-            <Btn variant="accent" onClick={stopAndClose}>
-              {tr('postproc.stopClose')}
-            </Btn>
-          </>
-        ) : showAsk && run.question !== null ? (
-          /*
-           * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
-           * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
-           * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
-           */
-          <>
-            {/*
-             * 挪塔那一问：右下是动作按钮，**左下这片空白**摆一颗很小的翻页钮
-             * （作者 2026-10-18：「我点击很小的切换信息按钮，这个按钮可以放在左下角空白的位置」）。
-             * `margin-right: auto` 把它顶到最左，动作按钮仍靠右。
-             */}
-            {isRelocate && (
+        /*
+         * 页脚 = **[靠左那一排] + [靠右的动作按钮]**（2026-11-04）。
+         *
+         * ★ 页脚是 `justify-content: flex-end`，所以"靠左"这件事只能由**第一颗元素**的
+         *   `margin-right: auto` 来做。上一版把这个 auto 分散挂在翻页钮与小字 tag 上
+         *   （还试过 `:has(~ …)` 判断后面还有没有小字）—— 模块类名一编译那条选择器就
+         *   匹配不上，auto 全丢，整排贴着右边（作者截图：「这怎么靠右了呀」）。
+         *
+         *   现在结构写死：左排（翻页钮 / 回放小字 / 预览小字）包在一个 `footLead` 里，
+         *   由**它**顶开；动作按钮一律排在它外面，自然靠右。
+         */
+        <>
+          <div className={s.footLead}>
+            {pages.length > 1 && nextTab !== null && (
               <button
                 type="button"
                 className={s.slotToggle}
-                onClick={() => setRelocateTab((t) => (t === 'note' ? 'facts' : 'note'))}
-                aria-label={
-                  relocateTab === 'note'
-                    ? tr('postproc.relocate.toFacts')
-                    : tr('postproc.relocate.toNote')
-                }
-                data-tip={relocateTab === 'note' ? tr('postproc.relocate.toFactsTitle') : tr('postproc.relocate.toNoteTitle')}
+                onClick={() => setRelocateTab(nextTab)}
+                aria-label={tr(tabMeta[nextTab].toAria)}
+                data-tip={tr(tabMeta[nextTab].toTip)}
               >
                 <InfoGlyph />
-                {relocateTab === 'note' ? tr('postproc.relocate.facts') : tr('postproc.relocate.note')}
+                {tr(tabMeta[nextTab].label)}
               </button>
             )}
-          {run.question.choices !== undefined && run.question.choices.length > 0 ? (
-            /* `data-choices` = 「问句自带选项」那一档：页脚**允许折行**（见 `.footChoices`）。
-               ★ 原来的样子（作者 2026-10-17 截图）：两颗长按钮都不许收缩（全局
-               `button { white-space: nowrap }`），中号框装不下 ⇒ 第二颗被推出框外看不见。
-               `hint` 只是补充说明，**不再塞进按钮里**：按钮的字 = `label`，
-               后果交给 `title`（悬停可读），按钮本身短了才排得下。 */
-            <span className={s.footChoices} data-choices>
-              {/*
-               * ★★ **主按钮恒在右**（2026-10-18 作者：「一般来说有颜色的都在右侧的…
-               *   左边的按钮优先级低，右边的高，有背景颜色的」）。
-               * 后端给的是"主在前"（主 = `accent`），这里**稳定排序**把 accent 挪到最后
-               * ⇒ 绿按钮永远是最右那颗，别处（校准件那一问）同一份规则。
-               */}
-              {[...run.question.choices]
-                .sort((a, b) => Number(a.accent === true) - Number(b.accent === true))
-                .map((c) => (
-                /* 外观 = 全站那颗 `Btn`（深浅两套都在 `ui.module.css` 里，
-                   深色下 accent 是实心绿白字）；这里只**借**一个布局类让它能折行收缩。
-                   `hint` 挂 `title`：后果说明不该挤在按钮上（按钮越长越排不下）。 */
+            {replay && (
+              <span className={s.previewTag}>{tr('postproc.replay.tag')}</span>
+            )}
+            {!replay && preview && (
+              <span className={s.previewTag}>{tr('postproc.preview.tag')}</span>
+            )}
+            {!replay && !preview && offerStopAndClose && (
+              <span className={s.previewTag}>{tr('postproc.mismatch.tag')}</span>
+            )}
+          </div>
+          {replay ? (
+            /* 回放：与预览同一套——真业务按钮一个都不摆，只留「关闭回放」 */
+            <Btn variant="accent" onClick={finishForGood}>
+              {tr('postproc.replay.close')}
+            </Btn>
+          ) : preview ? (
+            /* 预览模式：真业务按钮**一个都不摆**（它们走真钩子回写线，这里没有那条线）。
+               只留「关闭」—— 关掉预览、回工作台选下一屏（作者 2026-10-14 裁定）。 */
+            <Btn variant="accent" onClick={finishForGood}>
+              {tr('postproc.preview.close')}
+            </Btn>
+          ) : offerStopAndClose ? (
+            /*
+             * **逃生通道**（2026-10-19，作者：「出错的时候加一个停止并关闭的按钮，
+             * 这样就不用管多的操作了」）。只摆这一颗 —— 报错之后那些正常按钮
+             * （强制继续 / 终止 / 停止）都已经没意义，多摆一颗只会让人以为还能继续答。
+             */
+            <Btn variant="accent" onClick={stopAndClose}>
+              {tr('postproc.stopClose')}
+            </Btn>
+          ) : showAsk && run.question !== null ? (
+            /*
+             * 那一问的按钮（2026-10-17 泛化）：**问句自带选项表就照它画**，没有就还是
+             * 机型那一问的老两颗（强制继续不强调 / 终止占强调位 —— 第 9~11 轮定的）。
+             * 按钮皮肤是全站那一套（`.btn` 默认胶囊），这里不加任何 className。
+             */
+            run.question.choices !== undefined && run.question.choices.length > 0 ? (
+              /* `data-choices` = 「问句自带选项」那一档：页脚**允许折行**（见 `.footChoices`）。
+                 ★ 原来的样子（作者 2026-10-17 截图）：两颗长按钮都不许收缩（全局
+                 `button { white-space: nowrap }`），中号框装不下 ⇒ 第二颗被推出框外看不见。
+                 `hint` 只是补充说明，**不再塞进按钮里**：按钮的字 = `label`，
+                 后果交给 `title`（悬停可读），按钮本身短了才排得下。 */
+              <span className={s.footChoices} data-choices>
+                {/*
+                 * ★★ **主按钮恒在右**（2026-10-18 作者：「一般来说有颜色的都在右侧的…
+                 *   左边的按钮优先级低，右边的高，有背景颜色的」）。
+                 * 后端给的是"主在前"（主 = `accent`），这里**稳定排序**把 accent 挪到最后
+                 * ⇒ 绿按钮永远是最右那颗，别处（校准件那一问）同一份规则。
+                 */}
+                {[...run.question.choices]
+                  .sort((a, b) => Number(a.accent === true) - Number(b.accent === true))
+                  .map((c) => (
+                    /* 外观 = 全站那颗 `Btn`（深浅两套都在 `ui.module.css` 里，
+                       深色下 accent 是实心绿白字）；这里只**借**一个布局类让它能折行收缩。
+                       `hint` 挂 `title`：后果说明不该挤在按钮上（按钮越长越排不下）。 */
+                    <Btn
+                      key={c.id}
+                      variant={c.accent ? 'accent' : 'default'}
+                      className={s.choiceBtn}
+                      disabled={busy}
+                      title={c.hint}
+                      onClick={() => {
+                        void act(() => api.answerPostProcess(run.question?.questionKind ?? '', c.id))
+                      }}
+                    >
+                      {c.label}
+                    </Btn>
+                  ))}
+              </span>
+            ) : (
+              <>
                 <Btn
-                  key={c.id}
-                  variant={c.accent ? 'accent' : 'default'}
-                  className={s.choiceBtn}
                   disabled={busy}
-                  title={c.hint}
-                  onClick={() => {
-                    setAnswering({
-                      kind: run.question?.questionKind ?? '',
-                      deadline: run.question?.deadlineUnixMs ?? 0,
-                      from: percent,
-                    })
-                    void act(() =>
-                      api.answerPostProcess(run.question?.questionKind ?? '', c.id),
-                    )
-                  }}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
+                  }
                 >
-                  {c.label}
+                  {tr('postproc.choice.keep')}
                 </Btn>
-              ))}
-            </span>
+                <Btn
+                  variant="accent"
+                  disabled={busy}
+                  onClick={() =>
+                    act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
+                  }
+                >
+                  {tr('postproc.choice.stop')}
+                </Btn>
+              </>
+            )
+          ) : running ? (
+            <>
+              <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
+                {tr('postproc.stop')}
+              </Btn>
+              <Btn variant="accent" onClick={dismiss}>
+                {tr('postproc.background')}
+              </Btn>
+            </>
           ) : (
             <>
-              <Btn
-                disabled={busy}
-                onClick={() =>
-                  act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'keep'))
-                }
-              >
-                {tr('postproc.choice.keep')}
-              </Btn>
+              <Btn onClick={finishForGood}>{tr('tabs.close')}</Btn>
               <Btn
                 variant="accent"
-                disabled={busy}
-                onClick={() =>
-                  act(() => api.answerPostProcess(run.question?.questionKind ?? '', 'stop'))
-                }
+                onClick={() => {
+                  finishForGood()
+                  onOpenReport()
+                }}
               >
-                {tr('postproc.choice.stop')}
+                {tr('postproc.openReport')}
               </Btn>
             </>
           )}
-          </>
-        ) : running ? (
-          <>
-            <Btn disabled={busy} onClick={() => act(() => api.cancelPostProcess())}>
-              {tr('postproc.stop')}
-            </Btn>
-            <Btn variant="accent" onClick={dismiss}>
-              {tr('postproc.background')}
-            </Btn>
-          </>
-        ) : (
-          <>
-            <Btn onClick={dismiss}>{tr('tabs.close')}</Btn>
-            <Btn
-              variant="accent"
-              onClick={() => {
-                dismiss()
-                onOpenReport()
-              }}
-            >
-              {tr('postproc.openReport')}
-            </Btn>
-          </>
-        )
+        </>
       }
     >
       <div className={s.body}>
@@ -1369,40 +1694,51 @@ export default function PostProcessModal({ view, onOpenReport }: PostProcessModa
          * 口径反过来：**框一打开就是完整的**，没到手的值一律 `—`（两组里每一格都有固定标签，
          * 所以不会"少一格"，只会有"暂时是 —"），值到了原地换掉。
          */}
-        {isRelocate && run.question !== null ? (
+        {pages.length > 1 ? (
           /*
-           * 挪塔那一问：这一格在「说明」与「原始两栏信息」之间**翻页**（左下角那颗小钮切）。
+           * 下面这块**两页叠在同一格**（见上面 `pages` 那段）。
            *
-           * ★★ **两页都挂着、叠在同一格里**（2026-10-18 第三次修）：前一版给槽写死一个
+           * ★ **两页都挂着、叠在同一格里**（2026-10-18 第三次修）：前一版给槽写死一个
            *   高度，可"四行两栏"的真实高度随主题/字体变 ⇒ 要么底下留一大片空、要么
            *   撑高框。叠起来之后槽高 = **较高的那一页**（就是两栏事实），于是：
            *     · 信息页零留空（它就是定高的那一页）；
            *     · 翻页不跳（另一页被 `visibility: hidden` 藏住，但**仍占格**）。
+           *
+           * ★ 失败那屏的默认页 = **就是那两栏事实**（红卡不动，仍钉在顶部 hero 槽）——
+           *   翻页只翻"事实 ↔ 说明"，红卡不参与翻页（2026-11-04 作者：失败页不用动）。
            */
           <div className={s.relocateSlot}>
             <div
-              className={`${s.relocatePage} ${relocateTab === 'note' ? '' : s.relocatePageOff}`}
+              className={`${s.relocatePage} ${activeTab !== 'note' ? '' : s.relocatePageOff}`}
+              aria-hidden={activeTab === 'note'}
             >
-              <RelocateNote
-                question={run.question}
-                countdown={countdownText(run.question.deadlineUnixMs)}
-              />
+              <FactsGroups groups={factsPageGroups} />
             </div>
             <div
-              className={`${s.relocatePage} ${relocateTab === 'facts' ? '' : s.relocatePageOff}`}
-              aria-hidden={relocateTab !== 'facts'}
+              className={`${s.relocatePage} ${activeTab === 'note' ? '' : s.relocatePageOff}`}
+              aria-hidden={activeTab !== 'note'}
             >
-              <FactsGroups groups={[baseGroup(tr, facts), runGroup(tr, facts)]} />
+              {isAskingRelocate && run.question !== null ? (
+                <RelocateNote
+                  question={run.question}
+                  countdown={countdownText(run.question.deadlineUnixMs)}
+                />
+              ) : isCollisionFail ? (
+                /* **只有失败那屏**才说"撞了、下次怎么办" —— 2026-11-04 作者截图：
+                   成功那一趟也摆出了这句，因为说明页原来只看"有没有挪过塔" */
+                <CollisionNote
+                  relocated={finished?.relocation?.to != null}
+                  onGoSettings={onOpenSettings !== undefined ? goTowerSettings : undefined}
+                />
+              ) : (
+                /* 成功且挪过塔：说明页说的是**这一趟挪了塔**，不是"撞了" */
+                <RelocateDoneNote record={finished?.relocation ?? null} />
+              )}
             </div>
           </div>
         ) : (
-          <FactsGroups
-            groups={
-              asking || running
-                ? [baseGroup(tr, facts), runGroup(tr, facts)]
-                : [baseGroup(tr, facts), doneGroup(tr, finished as PostProcessFinished, facts)]
-            }
-          />
+          /* 只有一页（跑着 / 普通成功）：不摆翻页槽，直接一组事实 */
+          <FactsGroups groups={factsPageGroups} />
         )}
         {/*
           内核那几条警告（"这一盘没有支撑"之类）：

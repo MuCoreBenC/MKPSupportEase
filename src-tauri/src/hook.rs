@@ -267,6 +267,14 @@ pub struct HookError {
     /// 于是每个 `Result<Outcome, HookError>` 都跟着变大（clippy `result_large_err`
     /// 当场红，内核那个 `PostprocError::Collision` 也是同一个原因装箱）。
     collision: Option<Box<postprocess::postproc::disk::collision::CollisionFacts>>,
+    /// **撞塔那一趟的挪塔记录**（2026-11-04）—— 与 `collision` 同一档：只有走到
+    /// 撞塔那一步才有，别的失败一律 `None`。
+    ///
+    /// ★ 为什么挂在错误上而不是另开一条旁路：失败出口（`run` → `run_with_channel`）
+    ///   之间只传这个 `Result`，`relocation` 是**失败的原因之一**（"摆不下 / 挪了还撞"），
+    ///   它本来就该跟原因一起走。`Box` 的理由同 `collision`：撑大 `HookError` 会让
+    ///   每个 `Result<Outcome, HookError>` 一起变大（clippy `result_large_err`）。
+    relocation: Option<Box<crate::archive::RelocationRecord>>,
 }
 
 impl HookError {
@@ -275,6 +283,7 @@ impl HookError {
             kind: HookErrorKind::BadInput,
             reason,
             collision: None,
+            relocation: None,
         }
     }
 
@@ -283,6 +292,7 @@ impl HookError {
             kind: HookErrorKind::Failed,
             reason,
             collision: None,
+            relocation: None,
         }
     }
 
@@ -294,6 +304,7 @@ impl HookError {
             kind: HookErrorKind::Cancelled,
             reason,
             collision: None,
+            relocation: None,
         }
     }
 
@@ -301,6 +312,20 @@ impl HookError {
     /// 报告页据此给"往哪挪多少"的建议并画俯视图。
     pub fn collision(&self) -> Option<&postprocess::postproc::disk::collision::CollisionFacts> {
         self.collision.as_ref().map(|b| b.as_ref())
+    }
+
+    /// 把撞塔那一趟的挪塔记录挂上来（2026-11-04，链式构造：`e.with_relocation(r)`）。
+    ///
+    /// 失败出口要把"本来想挪到哪 / 挪了还撞"带给界面 —— 那条结算消息里
+    /// `FinishedPayload.relocation` 读的就是它。
+    pub fn with_relocation(mut self, record: crate::archive::RelocationRecord) -> Self {
+        self.relocation = Some(Box::new(record));
+        self
+    }
+
+    /// 撞塔那一趟的挪塔记录（没走到那一步 ⇒ `None`）。
+    pub fn relocation(&self) -> Option<&crate::archive::RelocationRecord> {
+        self.relocation.as_ref().map(|b| b.as_ref())
     }
 
     pub fn exit_code(&self) -> u8 {
@@ -700,6 +725,8 @@ pub fn run(
                 started,
                 Vec::new(),
                 None,
+                /* 预设都没读出来 ⇒ 没有 IR，也就没有可搬的事实（如实空着） */
+                None,
                 relocation.as_ref(),
                 // 预设都读不出来 ⇒ 没有 IR ⇒ 画不出模型几何（不编）
                 None,
@@ -734,7 +761,22 @@ pub fn run(
      * ★ 位置就在**机型核对之前**：这一刻两个机型都在手上，而下面那一问正是拿它俩比 ——
      *   用户看着表上那两行答"要不要继续"才答得明白（旧世代那屏也是这么摆的）。
      */
-    say_hello(Some(facts_from(&ir, &raw, raw.len() as u64)));
+    let opening = facts_from(&ir, &raw, raw.len() as u64);
+    /*
+     * 归档那两笔（成功 / 失败）也要这几格，且必须与这张表**同一个值** ——
+     * 回放屏摆的就是"当时那一屏显示过的数"，两处各取各的迟早对不上：
+     *   · `slicer`       切片软件（失败那趟没有 pass1，只能从这儿来）
+     *   · `layerHeight`  层高（原来只有成功那条能从 `stats` / 快照里拿到）
+     *   · `nozzleDiameter` 喷嘴（2026-11-04：真机 0.40mm 是**输入头自报**的，
+     *     pass1 才认进 IR；失败那趟没跑到 pass1，归档只读 IR 就成了 0 ⇒ 回放
+     *     显示 `PETG · —`，作者：「怎么那个喷嘴的尺寸还是没有啊」）
+     *
+     * ★ 三个都是「头部自报优先、其次预设 IR」这同一条链上的结果，别在归档里另写一份。
+     */
+    let opening_slicer = opening.slicer.clone().unwrap_or_default();
+    let opening_layer_height = opening.layer_height;
+    let opening_nozzle = opening.nozzle_diameter;
+    say_hello(Some(opening));
 
     /*
      * 校准件身份探测（2026-10-18）：**必须在这里跑，且只跑这一次**。
@@ -773,6 +815,17 @@ pub fn run(
                 let err = HookError::stopped(
                     Reason::new(keys::MACHINE_DISABLED).with("machine", preset_machine.clone()),
                 );
+                /* 停用也是"读到了、只是没跑"：耗材 / 层高 / 切片软件照样摆得出来 */
+                let ff = FailureFacts::capture(
+                    &ir,
+                    &content,
+                    &raw,
+                    job,
+                    "",
+                    &opening_slicer,
+                    opening_layer_height,
+                    opening_nozzle,
+                );
                 archive_failure(
                     &archived,
                     job,
@@ -785,6 +838,7 @@ pub fn run(
                     /* 管线还没进（机型停用），没有步骤账 */
                     Vec::new(),
                     None,
+                    Some(&ff),
                     relocation.as_ref(),
                     model_map_from(&content, Some(&ir)),
                     &identity_probe,
@@ -807,6 +861,16 @@ pub fn run(
             MismatchPolicy::Ask(asker) => {
                 if !asker.confirm(&question) {
                     let err = HookError::stopped(with_machines(keys::MISMATCH_STOPPED));
+                    let ff = FailureFacts::capture(
+                        &ir,
+                        &content,
+                        &raw,
+                        job,
+                        "",
+                        &opening_slicer,
+                        opening_layer_height,
+                        opening_nozzle,
+                    );
                     archive_failure(
                         &archived,
                         job,
@@ -819,6 +883,7 @@ pub fn run(
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
                         None,
+                        Some(&ff),
                         relocation.as_ref(),
                         model_map_from(&content, Some(&ir)),
                         &identity_probe,
@@ -828,6 +893,16 @@ pub fn run(
             }
             MismatchPolicy::Refuse => {
                 let err = HookError::bad_input(with_machines(keys::MISMATCH_REFUSE));
+                let ff = FailureFacts::capture(
+                    &ir,
+                    &content,
+                    &raw,
+                    job,
+                    "",
+                    &opening_slicer,
+                    opening_layer_height,
+                    opening_nozzle,
+                );
                 archive_failure(
                     &archived,
                     job,
@@ -840,6 +915,7 @@ pub fn run(
                     /* 管线还没进（停在机型那一问），没有步骤账 */
                     Vec::new(),
                     None,
+                    Some(&ff),
                     relocation.as_ref(),
                     model_map_from(&content, Some(&ir)),
                     &identity_probe,
@@ -909,6 +985,16 @@ pub fn run(
                 None => {
                     let err =
                         HookError::stopped(Reason::new(keys::CALIB_STOPPED).with("kind", kind));
+                    let ff = FailureFacts::capture(
+                        &ir,
+                        &content,
+                        &raw,
+                        job,
+                        "",
+                        &opening_slicer,
+                        opening_layer_height,
+                        opening_nozzle,
+                    );
                     archive_failure(
                         &archived,
                         job,
@@ -921,6 +1007,7 @@ pub fn run(
                         /* 管线还没进（预设错 / 停在问句），没有步骤账 */
                         Vec::new(),
                         None,
+                        Some(&ff),
                         relocation.as_ref(),
                         model_map_from(&content, Some(&ir)),
                         &identity_probe,
@@ -972,6 +1059,12 @@ pub fn run(
      * 失败 / 取消那几条出口用 —— 那时手里只剩下"进管线之前"的这一份。
      */
     let model_map = model_map_from(&content, Some(&ir));
+    /*
+     * **同一份"进管线之前"的 IR 再抄一遍**（2026-11-04）：失败 / 取消那一条记录也要
+     * 每一步的小字与切片那一组（见 [`FailureFacts`]）—— 而 `ir` 下一行就被按值搬走了。
+     * 抄的是一份克隆，**不重读预设**：这一趟跑的确实是这一份。
+     */
+    let ir_before = ir.clone();
     let outcome = if defer_print_time {
         pipeline::process_with_ir_deferred_print_time_with_tower_ask(
             IrProcessRequest {
@@ -1012,7 +1105,9 @@ pub fn run(
              */
             if let Some(record) = relocation.as_ref() {
                 if let Some(facts) = e.collision().cloned() {
-                    e = tower_failure_error(record, facts);
+                    /* 记录同时挂到错误上：结算消息与归档都要它（挑句子只用得着 `record`，
+                    但界面要画"本来想挪到哪"） */
+                    e = tower_failure_error(record, facts).with_relocation(record.clone());
                 }
             }
             let failed_pipeline = steps.finish(if e.cancelled() {
@@ -1023,6 +1118,20 @@ pub fn run(
             /* 碰撞那一趟把"撞在哪 + 建议"一起归档（报告页据此给建议、画俯视图）；
             别的失败 `None` —— 那一格照旧是 `null` */
             let collision = e.collision().cloned();
+            /*
+             * 这一条记录也要把**已经读到的东西**摆出来（2026-11-04）：撞停在第 6 步，
+             * 前五步的账（读了几行 / 认得哪台机 / 耗材 / 层高 / 切片软件）一样不少。
+             */
+            let ff = FailureFacts::capture(
+                &ir_before,
+                &content,
+                &raw,
+                job,
+                postprocess::postproc::calibration::mode_to_calibration_string(calib_mode),
+                &opening_slicer,
+                opening_layer_height,
+                opening_nozzle,
+            );
             archive_failure(
                 &archived,
                 job,
@@ -1034,6 +1143,7 @@ pub fn run(
                 started,
                 failed_pipeline,
                 collision,
+                Some(&ff),
                 relocation.as_ref(),
                 model_map,
                 &identity_probe,
@@ -1053,6 +1163,9 @@ pub fn run(
             raw.lines().count() as u64,
             /* 模型俯视几何要扫 G-code 正文（板上那批挤出点）—— 正文在这里才在手上 */
             &content,
+            &opening_slicer,
+            opening_layer_height,
+            opening_nozzle,
             started_at,
             started,
             &mut archive_warnings,
@@ -1164,6 +1277,15 @@ fn archive_success(
     input_lines: u64,
     // 输入正文（已按行切好）—— 模型俯视几何要扫它（板上那批挤出点）
     content: &[String],
+    /*
+     * 开场那张表里的三格（切片软件 / 层高 / 喷嘴），**与失败那趟同一份来源**
+     * （`run` 里的 `opening_slicer` / `opening_layer_height` / `opening_nozzle`，
+     * 取自输入头 + 预设 IR）：回放屏摆的必须是"当时那一屏显示过的数"，
+     * 两处各取各的迟早对不上。
+     */
+    opening_slicer: &str,
+    opening_layer_height: f64,
+    opening_nozzle: f64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
     warnings: &mut Vec<String>,
@@ -1257,11 +1379,20 @@ fn archive_success(
         output_bytes,
         in_place: done.output_path == job.gcode,
         ir: &done.detail_facts.ir,
-        stats: &done.stats.pass1,
+        stats: Some(&done.stats.pass1),
         tower_height: done.stats.tower_height,
+        /* 这三格与开场那张表同源（失败那趟也吃同一份），见 `run` 里的 `opening_*`。
+        ★ 喷嘴尤其不能读 `done.detail_facts.ir`：成功那趟 pass1 认过头部（值一样），
+          但改成读它就是给两条出口埋下两条判据 —— 统一用开场表那一份。 */
+        slicer_version: opening_slicer.to_string(),
+        layer_height: opening_layer_height,
+        nozzle_diameter: opening_nozzle,
         header: &done.header_facts,
         calibration_mode: &done.detail_facts.calibration_mode,
         calibration_receipt: done.calibration_receipt.as_ref(),
+        /* 这一趟挪过塔 ⇒ 「避让检查」多一行"已挪塔 A → B"（与 `Meta.relocation` 同一份）。
+        ★ `archive_success` 的入参本来就是 `Option<&RelocationRecord>`，别再 `as_ref()` */
+        relocation,
     };
     let pipeline: Vec<PipelineStep> = done
         .step_timings
@@ -1295,7 +1426,7 @@ fn archive_success(
             None
         },
         estimated_print_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
-        glue: Some(facts.glue()),
+        glue: Some(facts.glue(&done.stats.pass1)),
         tower: Some(facts.tower()),
         slicer: Some(facts.slicer()),
         // 证据链：**成功那一趟也写**（原来这些值在 `resolve_profile` 之后就被消费掉了，
@@ -1343,6 +1474,102 @@ fn archive_success(
     }
 }
 
+/// **失败 / 取消那几条出口**也要的那几格报告事实（2026-11-04）。
+///
+/// 作者：「失败的管线也要写清楚呀，这些都需要呀，不然他回放的时候，这些内容都还是
+/// 一条横杠」「像这些信息，就算是失败的，也能显示出来呀，因为你读取进去了，知道了呀」。
+///
+/// 那些格子里的值（耗材 / 喷嘴 / 层高 / 切片软件 / 机型维度 / 禁区数 / 读了几行…）
+/// **开跑之前就已经读到了** —— 失败只说明后面没走完，不说明前面没读。
+///
+/// # 为什么是「进管线之前」那一份 IR
+///
+/// 内核按值收 IR（`IrProcessRequest.ir`），搬走之后钩子这边再也借不到 ——
+/// 与 `model_map` 同一条理由。抄的是**同一份**（`ir.clone()`），不是重读预设：
+/// 重读会跟着盘上的新内容走，而这一趟跑的确实是旧的那份。
+///
+/// # 只写"确凿的"那几步
+///
+/// 每步明细走的还是 [`crate::archive::ReportFacts::step_detail_lines`]（成功 / 失败
+/// **同一个出口**）：pass1 之后那几步要靠跑完才有的统计，这里 `stats: None` 让它们
+/// 返回 `None` —— 记录里不会冒出"层索引 0"这种拿默认值凑出来的假数。
+struct FailureFacts {
+    ir: postprocess::ir::Ir,
+    preset_name: String,
+    input_lines: u64,
+    input_bytes: u64,
+    input_sha256: String,
+    calibration_mode: String,
+    header: postprocess::pipeline::HeaderFacts,
+    slicer_version: String,
+    layer_height: f64,
+    /// 开场表里那个「头部自报优先」的喷嘴（**不是** `ir.machine.nozzle_diameter`）——
+    /// 失败那趟没跑到 pass1，IR 里这一格还是 0，见 `archive::ReportFacts` 的头注。
+    nozzle_diameter: f64,
+}
+
+impl FailureFacts {
+    /// 抄一份"进管线之前"的事实。**只在那几条失败出口调用** —— 里面要算一次输入 sha。
+    ///
+    /// 参数多是这一层的性质（同一时刻的七八格事实要一次抄齐），不是拆得不够：
+    /// 与 `archive_success` / `archive_failure` 同一条理由，就地放行（这两处已有）。
+    #[allow(clippy::too_many_arguments)]
+    fn capture(
+        ir: &postprocess::ir::Ir,
+        content: &[String],
+        raw: &str,
+        job: &HookJob,
+        calibration_mode: &str,
+        slicer_version: &str,
+        layer_height: f64,
+        nozzle_diameter: f64,
+    ) -> Self {
+        Self {
+            ir: ir.clone(),
+            preset_name: file_name_of(&job.toml),
+            input_lines: raw.lines().count() as u64,
+            input_bytes: raw.len() as u64,
+            /* sha 只在这几条出口现算：成功那趟由内核算过、也写进记录了，别为存档再跑一遍 */
+            input_sha256: postprocess::pipeline::sha256_hex(raw.as_bytes()),
+            calibration_mode: calibration_mode.to_string(),
+            /* 头部那 5 个事实（机型预设名 / 工艺预设名 / 熨烫开关）——
+            与内核 parse 步**同一个函数**，不是另写一份解析 */
+            header: postprocess::pipeline::header_facts(content, &job.gcode.display().to_string()),
+            slicer_version: slicer_version.to_string(),
+            layer_height,
+            nozzle_diameter,
+        }
+    }
+
+    /// 拼成归档那一层要的形状（`stats: None` = 这一趟没跑到 pass1）。
+    fn report<'a>(
+        &'a self,
+        relocation: Option<&'a crate::archive::RelocationRecord>,
+    ) -> crate::archive::ReportFacts<'a> {
+        crate::archive::ReportFacts {
+            preset_name: &self.preset_name,
+            input_lines: self.input_lines,
+            input_bytes: self.input_bytes,
+            input_sha256: &self.input_sha256,
+            /* 这一趟没写出文件 ⇒ `Write` 那一步的明细整行不写（见 `step_detail_lines`） */
+            output_bytes: None,
+            in_place: false,
+            ir: &self.ir,
+            stats: None,
+            tower_height: 0.0,
+            slicer_version: self.slicer_version.clone(),
+            layer_height: self.layer_height,
+            nozzle_diameter: self.nozzle_diameter,
+            header: &self.header,
+            calibration_mode: &self.calibration_mode,
+            preset_params: None,
+            preset_missing: &[],
+            calibration_receipt: None,
+            relocation,
+        }
+    }
+}
+
 /// 归档第三笔（失败 / 取消）：写 error 记录（没有输出件）。
 ///
 /// 这里的失败只进日志（`tracing::warn`）—— 调用点马上就要把 `Err` 返回给切片器，
@@ -1361,6 +1588,9 @@ fn archive_failure(
     pipeline: Vec<PipelineStep>,
     // 碰撞那一趟的事实（`HookError::collision()`）—— 不是碰撞就是 `None`。
     collision: Option<postprocess::postproc::disk::collision::CollisionFacts>,
+    // 报告页那几格事实（切片组 + 每步明细）。**读输入都读不成的那条出口给 `None`**
+    // （那时手里确实什么都没有）—— 见 [`FailureFacts`]。
+    facts: Option<&FailureFacts>,
     // 挪塔那一趟的记录（2026-10-18）—— 没走到那一问就是 `None`。
     relocation: Option<&crate::archive::RelocationRecord>,
     // **模型俯视几何**（2026-10-27）：失败那趟没有 IR 终态，由调用方拿"当时那份 IR 的
@@ -1372,6 +1602,23 @@ fn archive_failure(
 ) {
     let Some(paths) = archived else { return };
     let error = conclusion_line(err);
+    /*
+     * **每一步的小字**（2026-11-04）：跑完的那几步从同一份事实里摊出来
+     * （`step_detail_lines` 与成功那趟同一个出口）。停在这一步的不摊 —— 那一步的
+     * 结论在结论组/红卡里，硬摊会摊出"没撞到"这种与事实相反的句子。
+     */
+    let report = facts.map(|f| f.report(relocation));
+    let mut pipeline = pipeline;
+    if let Some(r) = report.as_ref() {
+        for step in pipeline
+            .iter_mut()
+            .filter(|s| s.status == PipelineStatus::Complete)
+        {
+            if let Some(id) = postprocess::pipeline::Step::from_id(step.id) {
+                step.detail_lines = r.step_detail_lines(id);
+            }
+        }
+    }
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
         started_at: crate::archive::display_stamp(started_at),
@@ -1426,10 +1673,16 @@ fn archive_failure(
             print_time: None,
             print_time_status: None, // 失败/取消不算估算，不写状态
             estimated_print_seconds: None,
-            // 失败 / 取消没有 IR 终态 ⇒ 三组分包整组不写（页面口径：没给就不摆）
+            // 失败 / 取消没有 IR 终态 ⇒ 这两组整组不写（页面口径：没给就不摆）。
+            // ★ 它们要的是**跑完才有的数**（涂胶总长 / 塔层数），失败那趟本来就没有。
             glue: None,
             tower: None,
-            slicer: None,
+            /*
+             * 切片这一组**照写**（2026-11-04）：耗材 / 喷嘴 / 层高 / 切片软件 / 熨烫 /
+             * 支撑类型全是开跑之前就读到的 —— 回放屏不再是一排横杠
+             * （作者：「像这些信息，就算是失败的，也能显示出来呀」）。
+             */
+            slicer: report.as_ref().map(|r| r.slicer()),
             calibration: calibration_facts_failed(identity),
             /* 失败 / 取消没有 IR 终态 ⇒ 快照整组不摆（不编） */
             snapshot: None,
@@ -1731,6 +1984,8 @@ pub fn run_with_channel(job: &HookJob) -> ExitCode {
         started.elapsed().as_millis(),
         sink.last_step(),
         watch.reason(),
+        /* 失败出口那份记录挂在错误上（成功出口读 `Outcome.relocation`） */
+        done.as_ref().err().and_then(HookError::relocation),
     );
     client.send(&crate::hook_ipc::FromHook::Finished(Box::new(payload)));
 
@@ -2177,6 +2432,9 @@ fn finished_payload(
     elapsed_ms: u128,
     stage: Option<String>,
     stop_reason: Option<Reason>,
+    /* 撞塔那一趟落下的记录 —— 上面两个出口一个读 `Outcome.relocation`（成功），
+    一个用这份（失败 / 取消）。两条路都**只写这一处**，不许各拼一遍 */
+    stop_relocation: Option<&crate::archive::RelocationRecord>,
 ) -> crate::hook_ipc::FinishedPayload {
     match done {
         Ok(out) => crate::hook_ipc::FinishedPayload {
@@ -2216,6 +2474,11 @@ fn finished_payload(
             result: Some(out.result.clone()),
             /* 校准件那一趟选了哪种跑法 —— 界面与报告据此分开说"两种成功" */
             calib_choice: out.calib_choice.clone(),
+            /* **挪过塔就把记录带上**（2026-11-04）：Auto 档不弹问句，界面唯一的
+            "塔从哪挪到哪"就在这一份里 —— 没有它，那两幅俯视图永远出不来 */
+            relocation: out.relocation.clone(),
+            /* 成功的趟一律不带画布几何（它走 `relocation` 那条路摆图） */
+            geo: None,
         },
         Err(err) => {
             /* 原因与码分家：界面把原因摆正中、码摆小字。
@@ -2238,6 +2501,36 @@ fn finished_payload(
                 warnings: Vec::new(),
                 result: None,
                 calib_choice: None,
+                /*
+                 * **失败也要带**（2026-11-04）：`Auto` 档在板上摆不下、或挪了复检仍撞，
+                 * 界面要能说清"本来想挪到哪儿、为什么没成"—— 那份几何只有这里带着。
+                 * 记录为空（没走到撞塔那一步）⇒ `null`，与从前一字不差。
+                 */
+                relocation: stop_relocation.cloned(),
+                /*
+                 * **撞塔那两幅俯视图要的几何**（2026-11-04）：失败那屏的「说明」页
+                 * 把上面那张红卡换成"现在 / 挪后"—— 画它要塔框 / 模型框 / 可打印区，
+                 * 与问句那张卡同一份结构。
+                 *
+                 * ★ `candidate` 取**当时算出来的那个**（`RelocationRecord.to`）：
+                 *   撞停那趟"本该挪到哪"正是用户要看的；没有记录（比如板上摆不下、
+                 *   或压根没走到撞塔）⇒ `None`，两幅图退化成"只有现在"。
+                 */
+                geo: err
+                    .collision()
+                    .map(|facts| crate::hook_ipc::RelocateGeoPayload {
+                        collision: Some(facts.clone()),
+                        candidate: stop_relocation.and_then(|r| r.to),
+                        /* 「现在」= 记录里的起点；没有记录就退回塔框左下角（同一处定义） */
+                        current: [
+                            stop_relocation
+                                .map(|r| r.from[0])
+                                .unwrap_or(facts.tower_bbox.x_min),
+                            stop_relocation
+                                .map(|r| r.from[1])
+                                .unwrap_or(facts.tower_bbox.y_min),
+                        ],
+                    }),
             }
         }
     }
@@ -2966,6 +3259,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             &postprocess::gcode::IdentityProbe::default(),
         );
 
@@ -2983,6 +3277,137 @@ mod tests {
                 .unwrap_or_default()
                 .contains("W_CFG_MISMATCH_001"),
             "原句照旧留着（老读者 / 日志还要看）：{raw}"
+        );
+    }
+
+    /// **失败那一条也要把"已经读到的东西"写进记录**（2026-11-04）。
+    ///
+    /// 作者：「失败的管线也要写清楚呀……不然他回放的时候，这些内容都还是一条横杠」
+    /// 「像这些信息，就算是失败的，也能显示出来呀，因为你读取进去了，知道了呀」。
+    ///
+    /// 判据看的是**落盘的那份 JSON**（不是内存里的中间量）：
+    ///   · `detail.slicer` 有耗材 / 层高 / 切片软件（撞停在第 6 步，这三格早读到了）；
+    ///   · 跑完的那几步有 `detailLines`（读输入那三行在）；
+    ///   · **停在这一步的那一步不摊小字** —— 那一步的结论在结论组里，
+    ///     硬摊会摊出"没撞到"这种与事实相反的句子。
+    #[test]
+    fn a_failed_archive_still_carries_what_was_already_read() {
+        let dir = tempfile::tempdir().expect("临时目录");
+        let toml = dir.path().join("A1-fast.toml");
+        let gcode = dir.path().join("a.gcode");
+        std::fs::write(&toml, "").expect("写预设");
+        /* ★ 这一份头里自报 0.4，而**预设 IR 里还是 0**（真机就是这样：喷嘴是 pass1
+        才从头行认进 IR 的，撞停那趟根本没跑到 pass1）。作者 2026-11-04 截图里
+        回放显示 `PETG · —`，就是归档去读 IR 那一格读出来的 0。 */
+        let raw = "; printer_model = A1\n; filament_type = PETG\n; nozzle_diameter = 0.4\n; BambuStudio 02.08.02.60\nG1 X1\n";
+        std::fs::write(&gcode, raw).expect("写 G-code");
+        let paths = ArchivePaths {
+            original: dir.path().join("a_original.gcode"),
+            output: dir.path().join("a_out.gcode"),
+            meta: dir.path().join("a_meta.json"),
+        };
+
+        let mut ir = postprocess::ir::Ir::default();
+        ir.filament.filament_type = "PETG".into();
+        ir.machine.machine_type = "A1".into();
+        /* 故意**不**设 nozzle_diameter：进管线之前的 IR 里它就是 0 */
+        let content: Vec<String> = raw.lines().map(str::to_string).collect();
+        let job = HookJob {
+            toml: toml.clone(),
+            gcode: gcode.clone(),
+        };
+        /* 与真机 `run()` 同一条：开场表「头部自报优先」 */
+        let opening = facts_from(&ir, raw, raw.len() as u64);
+        assert_eq!(opening.nozzle_diameter, 0.4, "头行自报的喷嘴优先于 IR");
+        let ff = FailureFacts::capture(
+            &ir,
+            &content,
+            raw,
+            &job,
+            "",
+            "BambuStudio 02.08.02.60",
+            0.2,
+            opening.nozzle_diameter,
+        );
+
+        /* 跑到第 6 步撞停：前 5 步跑完、避让检查那一步是 Error */
+        let pipeline: Vec<PipelineStep> = [
+            ("input", PipelineStatus::Complete),
+            ("config", PipelineStatus::Complete),
+            ("machine-detect", PipelineStatus::Complete),
+            ("parse", PipelineStatus::Complete),
+            ("support", PipelineStatus::Complete),
+            ("collision", PipelineStatus::Error),
+        ]
+        .into_iter()
+        .map(|(id, status)| PipelineStep {
+            id,
+            message: String::new(),
+            elapsed_ms: 1,
+            status,
+            detail: None,
+            detail_lines: None,
+        })
+        .collect();
+
+        let err = HookError::stopped(Reason::new(keys::MISMATCH_STOPPED));
+        archive_failure(
+            &Some(paths.clone()),
+            &job,
+            "A1",
+            &err,
+            false,
+            raw.len() as u64,
+            time::OffsetDateTime::now_utc(),
+            std::time::Instant::now(),
+            pipeline,
+            None,
+            Some(&ff),
+            None,
+            None,
+            &postprocess::gcode::IdentityProbe::default(),
+        );
+
+        let text = std::fs::read_to_string(&paths.meta).expect("读回记录");
+        let meta: serde_json::Value = serde_json::from_str(&text).expect("记录是 JSON");
+
+        /* ① 切片那一组：开着跑之前就认定的四格 */
+        assert_eq!(meta["detail"]["slicer"]["filamentType"], "PETG", "{text}");
+        assert_eq!(meta["detail"]["slicer"]["layerHeight"], 0.2, "{text}");
+        assert_eq!(
+            meta["detail"]["slicer"]["slicerVersion"], "BambuStudio 02.08.02.60",
+            "{text}"
+        );
+        /* ★ 2026-11-04 回归：喷嘴 = 头行自报的 0.4，**不是** IR 里那个 0。
+        回放屏读这一格，`0` 会被当成"没有值"显示成 `PETG · —`。 */
+        assert_eq!(meta["detail"]["slicer"]["nozzleDiameter"], 0.4, "{text}");
+        /* ② 涂胶 / 擦料塔这两组要跑完才有数 —— 失败那趟**不许**凭空出现 */
+        assert!(meta["detail"]["glue"].is_null(), "{text}");
+        assert!(meta["detail"]["tower"].is_null(), "{text}");
+
+        /* ③ 跑完的那几步有小字；停下来的那一步没有 */
+        let steps = meta["pipeline"].as_array().expect("pipeline 是数组");
+        let lines_of = |i: usize| {
+            steps[i]["detailLines"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert!(
+            lines_of(0)
+                .iter()
+                .any(|l| l["key"] == "report.line.readLines"),
+            "读输入那一步该有「读取 N 行」：{text}"
+        );
+        assert!(
+            lines_of(3)
+                .iter()
+                .any(|l| l["key"] == "report.line.filament"),
+            "解析那一步该有耗材：{text}"
+        );
+        assert!(
+            steps[5]["detailLines"].is_null(),
+            "停在这一步的不摊小字（会摊出与事实相反的结论）：{text}"
         );
     }
 

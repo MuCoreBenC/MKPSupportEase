@@ -13,7 +13,12 @@
  * ★ 报告页那支箭头说的是"建议挪**模型**多少"，**不能**拿到这里用；
  *   这一屏要表达的是"**塔**从这挪到那"—— 由两幅图和中间那支箭头说，画布里不画箭头。
  */
-import type { PostProcessQuestion, RelocateGeo, ReportCollision } from '../../api/contract'
+import type {
+  PostProcessQuestion,
+  RelocationRecord,
+  RelocateGeo,
+  ReportCollision,
+} from '../../api/contract'
 import { useT } from '../../i18n'
 import CollisionMap from '../report/CollisionMap'
 import { HERO_H, MAP_CHROME } from './metrics'
@@ -45,8 +50,15 @@ function movedCollision(c: ReportCollision | null, geo: RelocateGeo): ReportColl
   }
 }
 
-function parts(question: PostProcessQuestion) {
-  const geo = question.geo ?? null
+/**
+ * 从**一份几何**取那两幅图要的东西。
+ *
+ * ★ 入参只收 `{ geo }` 而不是整个问句：几何有三个来源（问句 / 挪塔记录 / 结算回执的
+ *   `geo`），只要那一份 `RelocateGeo` 就够 —— 收窄成这个形状，第三种来源就不用
+ *   硬编一个假问句出来。
+ */
+function parts(src: { geo?: RelocateGeo | null }) {
+  const geo = src.geo ?? null
   const c = geo?.collision ?? null
   return {
     c,
@@ -57,16 +69,66 @@ function parts(question: PostProcessQuestion) {
 }
 
 /**
+ * 同上的几何，**从挪塔记录里取**（2026-11-04）。
+ *
+ * ★ 为什么要有这一份：`auto`（"开"）档**不弹问句**，界面上没有 `question.geo`，
+ *   但内核照样把塔挪了 —— 它把账记在 `RelocationRecord` 里：`before` 是挪之前那份
+ *   碰撞事实（含塔框与冲突点），`from` / `to` 是塔左下角的前后。
+ *   于是"现在 / 挪后"两幅图**完全可以从记录还原**，与问句那一屏用的是同一个组件、
+ *   同一套画法（作者：做成统一的，大家都一样地显示）。
+ *
+ * ★ `to == null`（摆不下 / 用户自己挪模型 / 没答）⇒ 没有"挪后"这一幅，
+ *   调用方据此只画"现在"那一张或者干脆不摆这一块。
+ */
+function partsOfRecord(record: RelocationRecord) {
+  const c = record.before ?? null
+  const current: [number, number] | null = record.from ?? null
+  const candidate: [number, number] | null = record.to ?? null
+  const geo: RelocateGeo | null =
+    current === null ? null : { collision: c, candidate, current }
+  return {
+    c,
+    candidate,
+    current,
+    after: geo !== null && candidate !== null ? movedCollision(c, geo) : null,
+  }
+}
+
+/**
  * 上：两幅俯视图 + 中间一支箭头。**不带标题**，两块高度都由 `MAP_H` 钉死。
  */
 export function RelocateMaps({
   question,
+  record,
+  geo: bareGeo,
   machineType,
 }: {
-  question: PostProcessQuestion
+  /** 问句那一档（`每次提问`）用它取几何 */
+  question?: PostProcessQuestion | null
+  /** 结账那一档（`自动挪塔` / 问完答了）用它取几何 —— 与 `question` 二选一 */
+  record?: RelocationRecord | null
+  /**
+   * **裸几何**（2026-11-04）：碰撞失败那一趟没有问句、也不一定有挪塔记录，
+   * 但结算回执带着 `geo` —— 说明页那两幅图就从这里取。
+   *
+   * 优先级：`record` > `geo` > `question`（记录最完整：它连"复检结果"都有）。
+   */
+  geo?: RelocateGeo | null
   machineType: string | null
 }) {
-  const { c, after, candidate, current } = parts(question)
+  /*
+   * 两个来源二选一：**这一次真的挪过塔**（记录）优先，其次才是问句那张卡。
+   * 都没有几何 ⇒ 两块板全空（调用方本来就不该在这种情况下渲染它）。
+   */
+  const data =
+    record != null
+      ? partsOfRecord(record)
+      : bareGeo != null
+        ? parts({ geo: bareGeo })
+        : question != null
+          ? parts(question)
+          : { c: null, candidate: null, current: null, after: null }
+  const { c, after, candidate, current } = data
   const tr = useT()
 
   /*

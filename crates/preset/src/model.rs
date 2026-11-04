@@ -285,8 +285,15 @@ impl PresetKey {
 pub struct PresetFile {
     pub config: TomlConfig,
 
-    /// `# release_time: <v>` 头注释（可能缺失）。
+    /// `# release_time: <v>` 头注释（可能缺失）—— **配方自己写的版本标记**。
+    ///
+    /// 新产物只写 `generated_at` 不写这一行 ⇒ `None`（不知道就是不知道，
+    /// 不拿写盘时刻顶，见 `AGENTS.md` §6）。
     pub release_time: Option<String>,
+    /// `# generated_at: <v>` 头注释（可能缺失）—— **这份字节什么时候落盘**。
+    ///
+    /// 它不是发布时刻、也不是配方版本时间；单独成一个字段，禁止拿去顶 `release_time`。
+    pub generated_at: Option<String>,
     /// `# machine: <v>` 头注释；缺失即硬错误（见 lib.rs 文档）。
     pub machine: String,
     /// `# variant: <v>` 头注释（可能缺失）。
