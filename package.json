@@ -17,7 +17,7 @@
     "lint": "eslint . && stylelint \"src/**/*.css\"",
     "test": "vitest run",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri-dev.mjs",
     "icons": "node scripts/gen-icons.mjs",
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
     "dev:test-update": "node scripts/preset-test-server/dev.mjs",

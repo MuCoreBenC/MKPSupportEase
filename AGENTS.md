@@ -119,8 +119,10 @@ publishSerial  → 发布有没有往前走（单调，回滚也 +1；从 1 开�
 
 ```text
 ./target-workbench/debug/presets build      # 工作台这一档
-./src-tauri/target/debug/presets build      # 客户端那一档
 ```
+
+客户端那档**编不出 `presets`**（它挂着 `required-features = workbench`），所以它的指纹
+只能读**启动日志第一行**（`构建指纹：client · <sha> · 编译于 …`）。
 
 输出形如 `workbench · cb31830-dirty · 编译于 2026-11-03 14:56:12 +08:00`，三格各有各的意思：
 
@@ -134,13 +136,20 @@ publishSerial  → 发布有没有往前走（单调，回滚也 +1；从 1 开�
 `Compiling …` / `Building [====] 450/452` **都不算** —— cargo 可以编完某个 bin 却不重链
 主程序，也可以编到一半报错或被 Ctrl+C 掐掉，这两种情况下 exe 都还是旧的。
 
-启动日志第一行也会打同一句（`构建指纹：…`）；`npm run tauri:workbench:dev` 开跑前打三行：
-`本次启动`（永远是当下）/ `这次要跑`（盘上那份是谁 + 源码比它新还是旧）/ `✔ 编译完`
-（**这一行才是本趟的编译时刻**；等不到就直说「这一趟没有重编」）。
+启动日志第一行也会打同一句（`构建指纹：…`）。**两个入口**开跑前都打同样三行
+（客户端走 `scripts/tauri-dev.mjs`、工作台走 `scripts/tauri-workbench.mjs`，实现共用
+`scripts/build-stamp.mjs`，两处不会各说各话）：`本次启动`（永远是当下）/
+`这次要跑`（盘上那份是谁 + 源码比它新还是旧）/ `✔ 编译完`（**这一行才是本趟的编译时刻**；
+等不到就直说「这一趟没有重编」）。
 
-**注意两件事**：
+**注意三件事**：
 
 - `target/` 与 `target-workbench/` 是**两份产物**，比较日期时别拿错目录；
+- ★ **客户端的产物在仓库根 `target/`，不是 `src-tauri/target/`**。根 `Cargo.toml` 是
+  workspace，`cargo metadata` 的 `target_directory` 就是仓库根。`src-tauri/target/` 是
+  2026-09-21 留下的死目录（约 3.4GB）：2026-11-04 实测，`tauri dev` 不带
+  `CARGO_TARGET_DIR` 时会去那里取 exe，而 cargo 编在根 `target/` —— 两边差六周，
+  症状是「改了没反应」，不报任何错。`scripts/tauri-dev.mjs` 现在显式钉死同一个目录。
 - `tauri-workbench.mjs` 给 dev 加了 `--no-watch`，所以**改 Rust 必须手动重启**；
   但「重启了没重编」与「重编了没重启」在界面上长得一样 —— 只有指纹能分开。
 

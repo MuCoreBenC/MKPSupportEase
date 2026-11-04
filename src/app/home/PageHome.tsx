@@ -577,6 +577,24 @@ export default function PageHome({ density }: PageHomeProps) {
     (heroSrc === null || heroReady)
 
   /*
+   * ★★ 闸门**只放行一次**（2026-11-04 作者真机：「在选机型页点一下机型就跳回首页」）。
+   *
+   * `heroReady` 与 `preset.status` 在**换机型 / 换版本**时会重新回到"没就绪"
+   * （新机器图要解码、新一份预设要读盘）—— 那不是启动，是页面里的一次普通操作。
+   * 还拿它们当闸门，下面那句 `return null` 就会把整棵首页卸掉再挂回来；
+   * `SlideDeck` 的页码是它自己的 `index` state，一卸就归零 —— 用户看到的就是
+   * "点一下机型，跳回第一页（首页那张卡）"。
+   *
+   * 所以闸门只回答"**这一次启动**落地了没有"：一旦放行过就永远放行。后续等待
+   * 交给各自那一层（图有 `HeroFade` 的交叉淡入，预设读数有 `PresetStack` 的态）。
+   *
+   * 用 ref 落闸而不是 state：它必须在 `booted` 变 true 的**同一帧**生效；
+   * 晚一帧（effect 之后）就是骨架已经收掉、页面还是空的。
+   */
+  const landed = useRef(false)
+  if (booted) landed.current = true
+
+  /*
    * ★★ 收骨架（2026-10-31）：**就绪或明确失败**那一刻才收，而且放在 layout effect 里 ——
    *   它在浏览器绘制之前跑，所以"骨架消失"与"终态版面出现"是**同一帧**，
    *   中间不会空一下（作者：「就直接用骨架」，别再出现第二个加载画面）。
@@ -1648,8 +1666,11 @@ export default function PageHome({ density }: PageHomeProps) {
    * 未就绪：**什么都不画** —— 屏幕上这会儿是 `index.html` 那具骨架（`#boot`），
    * 它压在应用上面（见 `bootSkeleton.ts`）。就绪时这里返回真版面、同时把骨架收掉，
    * 两者是同一帧。失败时换成 `BootFailure`（骨架同一帧收掉，换成一句说明 + 重试）。
+   *
+   * 判据是 `landed` 而不是 `booted`：启动之后换机型 / 换版本会让 `booted` 再变回
+   * false，那时**不许**再卸页面（见上面 `landed` 那段注释）。
    */
-  if (!booted) {
+  if (!landed.current) {
     return catalog.failed ? <BootFailure onRetry={retryBoot} /> : null
   }
 
