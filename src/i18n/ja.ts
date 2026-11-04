@@ -1268,6 +1268,7 @@ export const ja: Record<StringKey, string> = {
   'presets.table.empty.slicerLocal': '本機にこの組み合わせの「{kind}」がありません — クラウドファイルをダウンロードするか、自分でプリセットフォルダーに置くと表示されます',
   'presets.table.empty.slicerCloud': 'クラウドにこの組み合わせの「{kind}」がありません — メニューにないものは取得できません',
   'presets.table.empty.filtered': 'この分類の {total} 件はすべて検索語「{query}」で除外されました',
+  'presets.table.unsaved.label': '未保存',
   'presets.table.unsaved.aria': '未保存のパラメーター変更があります',
   'presets.table.unsaved.title': '未保存のパラメーター変更があります — 「パラメーターを変更」を開いて続きを編集',
   'presets.table.olderVersions': '旧版 ×{count}',

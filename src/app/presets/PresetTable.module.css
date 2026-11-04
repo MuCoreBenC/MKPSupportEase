@@ -415,12 +415,15 @@
  * 不是徽章（作者：「不想用徽章……太占位置」）—— 它不占宽度、不带字，
  * 全文在 `title` 里。琥珀 = 仓库里"要注意但没坏"的那一档色（`.localState` 同色）。
  */
-.unsavedDot {
+.unsavedTag {
   flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warn);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-label);
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .localState[data-state='has'] {

@@ -1080,11 +1080,11 @@ export default function PresetTable({
                       */}
                       {row.unsaved && (
                         <span
-                          className={s.unsavedDot}
-                          role="img"
-                          aria-label={tr('presets.table.unsaved.aria')}
+                          className={s.unsavedTag}
                           data-tip={tr('presets.table.unsaved.title')}
-                        />
+                        >
+                          {tr('presets.table.unsaved.label')}
+                        </span>
                       )}
                       {/*
                         云端表：**下过几代旧版**（2026-10-08）。

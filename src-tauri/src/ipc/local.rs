@@ -539,6 +539,12 @@ pub struct PresetDraftSummaryDto {
     pub path: Option<String>,
     /// **真改过才算**：与来源现在的字节比（只差换行/来源记录处置的差异不算改动）
     pub dirty: bool,
+    /// **参数级的改动处数**（值不同才算；注释 / 空行 / 来源记录不进账）。
+    ///
+    /// 列表行上的「未保存」用它 —— 只比字节的 `dirty` 会把「文件被应用/同步改过、
+    /// 草稿还是旧正文」也算成脏；`changed > 0` 才是"用户真的改了参数还没保存"。
+    /// 来源读不出来时保守记 `1`（有草稿在，别瞒）。
+    pub changed: usize,
     pub updated_unix: u64,
 }
 
@@ -945,10 +951,16 @@ pub async fn get_preset_draft_summary(
         let Some(draft) = runtime::app_state::draft(&root)? else {
             return Ok(None);
         };
+        let catalog = runtime::load_released_catalog(&root)?;
+        /*
+         * ★ 列表行上那枚「未保存」只看 `changed`（2026-11-04）：
+         * `dirty` 是"与来源字节不同"，文件被应用 / 同步改过、草稿还是旧正文时它也会真，
+         * 但用户一个字都没改。`changed` 是参数级差异（值不同才算），才是"改了没保存"。
+         */
+        let changed = draft_changes(&root, &user_root, &catalog, &draft).map_or(1, |m| m.len());
 
         let dirty = match draft.origin {
             runtime::state::ActiveOrigin::Preset => {
-                let catalog = runtime::load_released_catalog(&root)?;
                 match catalog
                     .files
                     .iter()
@@ -977,6 +989,7 @@ pub async fn get_preset_draft_summary(
             source_file_name: draft.source_file_name,
             path: draft.path,
             dirty,
+            changed,
             updated_unix: draft.updated_unix,
         }))
     })
@@ -1090,31 +1103,43 @@ pub async fn read_preset_draft_changes(
             return Ok(std::collections::BTreeMap::new());
         };
         let catalog = runtime::load_released_catalog(&root)?;
-
-        /* 来源正文：与 `begin_preset_edit` 开场那一刻给草稿的那一份**同一副样子** ——
-        云端线是下载区的字节，用户线是去掉来源记录之后的正文 */
-        let base = match draft.origin {
-            runtime::state::ActiveOrigin::Preset => {
-                let file = catalog
-                    .files
-                    .iter()
-                    .find(|f| f.file_name == draft.source_file_name)
-                    .ok_or_else(|| {
-                        AppError::not_found(messages::text(
-                            "ui.ipc.local.093",
-                            &[("v1", &draft.source_file_name.to_string())],
-                        ))
-                    })?;
-                runtime::delivery::cloud_text(&root, file)?
-            }
-            runtime::state::ActiveOrigin::Local => {
-                let rel = draft.path.as_deref().unwrap_or_default();
-                runtime::provenance::strip_for_compare(&runtime::local::read_text(&user_root, rel)?)
-            }
-        };
-
-        crate::presetdata::params::diff_param_values(&base, &draft.text, &catalog.registry.params)
+        draft_changes(&root, &user_root, &catalog, &draft)
     })
+}
+
+/// 草稿相对来源的**参数级**差异（值不同才算；注释 / 空行 / 来源记录不进账）。
+///
+/// **唯一实现**：列表行的「未保存」数 `changed`（[`get_preset_draft_summary`]）与
+/// 参数页摊开"改了哪几项"（[`read_preset_draft_changes`]）都走这里 ——
+/// 两处各写一套迟早漂（一个说"改了 0 处"、另一个亮着未保存）。
+fn draft_changes(
+    root: &std::path::Path,
+    user_root: &std::path::Path,
+    catalog: &runtime::catalog::Catalog,
+    draft: &runtime::state::PresetDraft,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    /* 来源正文：与 `begin_preset_edit` 开场那一刻给草稿的那一份**同一副样子** ——
+    云端线是下载区的字节，用户线是去掉来源记录之后的正文 */
+    let base = match draft.origin {
+        runtime::state::ActiveOrigin::Preset => {
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == draft.source_file_name)
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.local.093",
+                        &[("v1", &draft.source_file_name.to_string())],
+                    ))
+                })?;
+            runtime::delivery::cloud_text(root, file)?
+        }
+        runtime::state::ActiveOrigin::Local => {
+            let rel = draft.path.as_deref().unwrap_or_default();
+            runtime::provenance::strip_for_compare(&runtime::local::read_text(user_root, rel)?)
+        }
+    };
+    crate::presetdata::params::diff_param_values(&base, &draft.text, &catalog.registry.params)
 }
 
 /// **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：

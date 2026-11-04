@@ -1381,6 +1381,12 @@ export interface PresetDraftSummary {
   path: string | null
   /** 「真改过才算」：与来源现在的字节比（只差来源记录处置 / 换行的差异不算改动） */
   dirty: boolean
+  /**
+   * **参数级改动处数**（值不同才算；注释 / 空行 / 来源记录不进账）。
+   * 列表行上的「未保存」只看它 —— `dirty` 会把"文件被应用/同步改过、草稿还是旧正文"
+   * 也算脏，`changed > 0` 才是"用户真的改了参数还没保存"。
+   */
+  changed: number
   /** 最后改动时刻（UTC epoch 秒） */
   updatedUnix: number
 }

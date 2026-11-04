@@ -1902,16 +1902,22 @@ export const mockApi: MkpApi = {
      *       （2026-10-19 探针 `params-draft-dot.mjs` 抓到的就是这个）。
      *   云端线：草稿正文 vs 云端原件字节。
      */
-    const clean =
+    const base =
       mockDraft.origin === 'preset'
-        ? mockDraft.text === MOCK_PRESET_TEXT
-        : withoutProvenance(mockLocalText.get(mockDraft.path ?? '') ?? '') === mockDraft.text
+        ? MOCK_PRESET_TEXT
+        : withoutProvenance(mockLocalText.get(mockDraft.path ?? '') ?? '')
+    const clean = base === mockDraft.text
+    /* 参数级改动处数（与真机 `draft_changes` 同一口径：值不同才算） */
+    const before = readMockParams(base)
+    const after = readMockParams(mockDraft.text)
+    const changed = Object.keys(after).filter((k) => before[k] !== after[k]).length
     return {
       origin: mockDraft.origin,
       sourceFileName: mockDraft.sourceFileName,
       path: mockDraft.path,
       /* 比不出来（演示里读不到这一份）时保守算脏 */
       dirty: !clean,
+      changed: clean ? 0 : Math.max(1, changed),
       updatedUnix: mockDraft.updatedUnix,
     }
   },

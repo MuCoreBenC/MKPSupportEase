@@ -767,7 +767,9 @@ export function usePresetData(importRevision = 0): PresetData {
       setLocalPresets(localPresets)
       setLocalIndex(index)
       setRemarks(marks)
-      setDraftPath(draft !== null && draft.dirty ? (draft.path ?? null) : null)
+      setDraftPath(
+        draft !== null && draft.dirty && draft.changed > 0 ? (draft.path ?? null) : null,
+      )
 
       /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
       const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
@@ -933,7 +935,9 @@ export function usePresetData(importRevision = 0): PresetData {
       /* `dirty` 这一道**必须**在（2026-10-19）：`begin_preset_edit` 一打开就写出草稿文件，
          "只打开过、一个字没改"也会有一份摘要 —— 不看不脏，那枚橙点会当场误亮。
          契约与头注的口径都是"**真改过才算**"（`PresetDraftSummary.dirty`）。 */
-      .then((d) => setDraftPath(d !== null && d.dirty ? (d.path ?? null) : null))
+      .then((d) =>
+        setDraftPath(d !== null && d.dirty && d.changed > 0 ? (d.path ?? null) : null),
+      )
       .catch(() => {
         /* 读不到就保持上一眼看到的 —— 一个标记不值得把列表带崩 */
       })

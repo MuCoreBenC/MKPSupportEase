@@ -71,6 +71,16 @@
  * ★ 2026-11-04 去掉了两条多余的发丝线（作者圈出来的）：清单**顶上那条**与
  *   **最后一行下面那条**。行与行之间那几条留着 —— 它们是"一份一份"的分隔，
  *   首尾两条只是把清单框起来，念出来是"这里还有个表格"，而它并不是。
+ *
+ * # 翻到哪一页，只在「这一次打开软件」里记着（2026-11-04）
+ *
+ * 作者：「点了信息，下次打开别的那个文件的导出就还是显示信息……只是这一次
+ * 打开软件的时候记住」。
+ *
+ * ⇒ 左下角那颗翻页钮改过的那一页，是**本次运行**的默认页：这一趟里再打开任何
+ *   一条记录的导出框，都从用户最后翻到的那一页起；软件关掉再开回到「文件」。
+ *   落点是模块级变量（`sessionTab`），**不写 localStorage、不写 app-state** ——
+ *   它和旁边那颗压缩开关不是一回事：那一格是跨重启的偏好，这一格是临时习惯。
  */
 
 import { useEffect, useRef, useState } from 'react'
@@ -115,6 +125,18 @@ const EXPORT_EXISTS_CODE = 'E_REPORT_EXPORT_EXISTS_001'
  * 让手指头停下来。900ms 是"看得出在忙、又不觉得卡"的那一档。
  */
 const SETTLE_MS = 900
+
+/** 框身两页：`files` = 三件套清单；`info` = 同一份清单 + 归档路径与两颗按钮 */
+type ExportTab = 'files' | 'info'
+
+/**
+ * 本次运行里用户最后翻到的那一页（默认「文件」）。
+ *
+ * ★ 为什么不放在组件 state 里：这个框每次开 / 关都要把内务清干净，页面切走再回来
+ *   还可能重挂 —— state 会跟着重来。模块级变量活到这份前端 bundle 被卸载为止，
+ *   正好是「这一次打开软件」：不落任何盘，关掉软件再开自然回到 `files`。
+ */
+let sessionTab: ExportTab = 'files'
 
 /**
  * 忙的时候那颗转圈（**WAAPI，不是 CSS 动画**）。
@@ -294,10 +316,19 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
   /* 上一个选过的保存位置；空串 = 还没选过 ⇒ 用后端给的默认值（`<桌面>/MKP-导出报告`） */
   const [picked, setPicked] = useStickyState<string>(STORAGE.clientReportExportDir, '')
   /**
-   * 框身现在摆哪一页：`files` = 三件套清单 + 保存位置；`info` = 压缩开关 + 归档路径。
-   * 两页**同时挂着**（见下面 `.page`），所以翻页不改变框的尺寸。
+   * 框身现在摆哪一页：`files` = 三件套清单 + 保存位置；`info` = 同一份清单 +
+   * 归档路径与两颗按钮。两页**同时挂着**（见下面 `.page`），所以翻页不改变框的尺寸。
+   *
+   * 初值取 `sessionTab`：本次运行里用户翻过页，下一趟开框首帧就得是那一页
+   * （等 effect 再改会闪一帧）。
    */
-  const [tab, setTab] = useState<'files' | 'info'>('files')
+  const [tab, setTab] = useState<ExportTab>(sessionTab)
+
+  /** 翻页 = 改这一屏 + 记下本次运行的习惯（**只记这一下，不改别的内务**） */
+  const chooseTab = (next: ExportTab) => {
+    sessionTab = next
+    setTab(next)
+  }
   /** 「导出时启用压缩」：默认开，用户关过一次就记住（见 `STORAGE.clientReportExportZip`） */
   const [zip, setZip] = useStickyState<boolean>(STORAGE.clientReportExportZip, true)
   /** 刚复制过哪一份的路径（1.4 秒后自己熄掉，那颗小按钮上就一句「已复制」） */
@@ -337,8 +368,8 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     setPlanErr(null)
     setFail(null)
     setDone(null)
-    /* 每次都从「文件清单」那一页开：信息页是用户自己翻过去的，不该被上一次带过来 */
-    setTab('files')
+    /* 开框照本次运行里用户最后翻到的那一页起（没翻过 = 「文件清单」） */
+    setTab(sessionTab)
     setCopied(null)
     /* 撞名那条问句属于**上一次那一下**，开框时一律收起来 */
     setOverwrite(false)
@@ -370,7 +401,8 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
     setDone(null)
     setBusy(false)
     setFetched(null)
-    setTab('files')
+    /* 关框也不把它掰回「文件」：下次开框的首帧要就是用户上次那一页 */
+    setTab(sessionTab)
     setCopied(null)
     setSettling(false)
     setOverwrite(false)
@@ -721,7 +753,7 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
               type="button"
               className={s.tabToggle}
               aria-pressed={tab === 'info'}
-              onClick={() => setTab((now) => (now === 'files' ? 'info' : 'files'))}
+              onClick={() => chooseTab(tab === 'files' ? 'info' : 'files')}
             >
               <InfoGlyph />
               {tab === 'files' ? tr('report.export.info') : tr('report.export.files')}

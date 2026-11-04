@@ -1318,6 +1318,7 @@ export const zhCN = {
   'presets.table.empty.slicerLocal': '本机还没有这个组合的「{kind}」—— 云端文件下载之后会出现在这里，你自己放进预设目录的也会',
   'presets.table.empty.slicerCloud': '云端没有这个组合的「{kind}」—— 菜单上没有，就下不到',
   'presets.table.empty.filtered': '这一档的 {total} 条都被搜索词「{query}」筛掉了',
+  'presets.table.unsaved.label': '未保存',
   'presets.table.unsaved.aria': '有未保存的参数改动',
   'presets.table.unsaved.title': '有未保存的参数改动 —— 打开「修改参数」接着改',
   'presets.table.olderVersions': '旧版 ×{count}',

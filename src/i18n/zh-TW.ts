@@ -1296,6 +1296,7 @@ export const zhTW: Record<StringKey, string> = {
   'presets.table.empty.slicerLocal': '本機還沒有這個組合的「{kind}」—— 雲端檔案下載之後會出現在這裡，你自己放進預設目錄的也會',
   'presets.table.empty.slicerCloud': '雲端沒有這個組合的「{kind}」—— 選單上沒有，就下不到',
   'presets.table.empty.filtered': '這一檔的 {total} 條都被搜尋詞「{query}」篩掉了',
+  'presets.table.unsaved.label': '未儲存',
   'presets.table.unsaved.aria': '有未儲存的參數改動',
   'presets.table.unsaved.title': '有未儲存的參數改動 —— 開啟「修改參數」接著改',
   'presets.table.olderVersions': '舊版 ×{count}',

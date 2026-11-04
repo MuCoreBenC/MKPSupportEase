@@ -1270,6 +1270,7 @@ export const en: Record<StringKey, string> = {
   'presets.table.empty.slicerLocal': 'No “{kind}” for this combination on this machine yet — cloud files appear here after download, and so will ones you put in the preset folder',
   'presets.table.empty.slicerCloud': 'The cloud has no “{kind}” for this combination — not in the menu, so it cannot be downloaded',
   'presets.table.empty.filtered': 'All {total} rows here are filtered out by the search “{query}”',
+  'presets.table.unsaved.label': 'Unsaved',
   'presets.table.unsaved.aria': 'Has unsaved parameter changes',
   'presets.table.unsaved.title': 'Has unsaved parameter changes — open “Edit parameters” to continue',
   'presets.table.olderVersions': 'Old ×{count}',
