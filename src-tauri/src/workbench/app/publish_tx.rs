@@ -267,7 +267,7 @@ fn plan_only(
     book_state: super::publish_book::State,
     passed: usize,
     failed: usize,
-    _opts: &TxOptions,
+    opts: &TxOptions,
 ) -> Result<PublishTxReport, AppError> {
     let (c, d, _) = state(ctx)?;
     // 装渲染器：发布要判"产物是否跟上源"，走的是 `build_state`（2026-11-01）
@@ -306,6 +306,49 @@ fn plan_only(
         .filter_map(|f| f.sha256.clone().map(|s| (f.path.clone(), s)))
         .collect();
     let (changes, changed_files) = diff_fingerprints(&before, &after);
+
+    /*
+     * ★ **预演必须与真发同一判定**（2026-11-04 修）。
+     *
+     * 真发在 `generate` **之后**看账本是不是仍然 `InSync`：是就 `NoChange`、
+     * 不分配序号（见上面 ⓪½）。预演不 generate，所以用等价条件替代：
+     * 「盘上这一代 = 已发布那一代（InSync）」+「这次算出来的产物字节没变」。
+     * 少了这一支，`publish --dry-run` 会说"会写成第 N 号"，真发却回 `NoChange`
+     * —— 同一条命令的两个口径打架，人就没法靠预演判断这次会不会推进序号。
+     *
+     * `--republish` 是显式重发，不分流（与真发一致）。
+     */
+    if !opts.republish {
+        if let super::publish_book::State::InSync(b) = &book_state {
+            if changes.added + changes.changed + changes.removed == 0 {
+                if let Some(serial) = super::delivery::PublishIdentity::inherit_from(root).serial {
+                    return Ok(PublishTxReport {
+                        stage: PublishStage::NoChange,
+                        audit_passed: passed,
+                        audit_failed: failed,
+                        generated: 0,
+                        unchanged: 0,
+                        committed_paths: Vec::new(),
+                        review: None,
+                        branch: None,
+                        commit: None,
+                        files: 0,
+                        summary: format!(
+                            "没有可发的变化：盘上这一代内容与已发布的 {} 第 {serial} 号完全相同 —— \
+                             序号不推进、不提交（确实要重发请加 --republish）。（演练：未写入任何文件）",
+                            b.catalog_id
+                        ),
+                        published_at: None,
+                        revision: None,
+                        changes: None,
+                        changed_files: Vec::new(),
+                        publish_serial: Some(serial),
+                        catalog_id: Some(b.catalog_id.clone()),
+                    });
+                }
+            }
+        }
+    }
 
     Ok(PublishTxReport {
         stage: PublishStage::Generated,

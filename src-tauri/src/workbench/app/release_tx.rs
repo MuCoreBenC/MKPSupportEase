@@ -424,6 +424,12 @@ pub fn run(
     /* ---------- ② 预检（**没有任何写操作**） ---------- */
 
     let mut blocked = Vec::new();
+    /* 发出去的必须是正式版：`-dev` 只是开发期的占位，去掉它才是「这一版定稿」。 */
+    if !version::is_semver(&version) {
+        blocked.push(format!(
+            "发布版本必须是正式版 x.y.z（不能带 -dev）：{version} —— 先 npm run version:release"
+        ));
+    }
     let branch = git.branch().unwrap_or_default();
     if branch == base {
         blocked.push(format!(

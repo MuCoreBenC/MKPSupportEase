@@ -42,6 +42,11 @@ jobs:
       # 那个脚本的第一条约束就是"任何情况下都不能让 npm install 失败"，这一步顺带天天在验它。
       - run: npm ci
 
+      # 版本号：已发布的号永不再用；开发版本必须是下一个号的 `-dev`
+      # （2026-11-04 作者裁定。发布 = 去掉 -dev + 打不可变 tag；发完立刻 next）。
+      - name: 版本号（已发布号不许再用）
+        run: npm run version:check
+
       - name: eslint + stylelint
         run: npm run lint
 

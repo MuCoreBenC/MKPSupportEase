@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.9",
+  "version": "0.0.10-dev",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -22,6 +22,10 @@
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
     "dev:test-update": "node scripts/preset-test-server/dev.mjs",
     "release": "node scripts/release.mjs",
+    "version:check": "node scripts/version.mjs check",
+    "version:dev": "node scripts/version.mjs bump-dev",
+    "version:release": "node scripts/version.mjs release",
+    "version:next": "node scripts/version.mjs next",
     "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",

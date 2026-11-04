@@ -154,7 +154,13 @@ if (existsSync(bypassLog)) {
 
 const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '0.0.0'
 
-step(`版本号（当前 ${current}）`)
+/*
+ * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
+ * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
+ */
+const suggested = current.replace(/-dev$/, '')
+
+step(`版本号（当前 ${current}，发布会写成 ${suggested}）`)
 
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
@@ -166,18 +172,27 @@ let summary = argSummary?.trim()
 
 if (!version || !summary) {
   const rl = createInterface({ input, output })
-  version = version || (await rl.question(`  新版本号（不带 v，回车沿用 ${current}）: `)).trim() || current
+  version =
+    version ||
+    (await rl.question(`  新版本号（不带 v，回车沿用 ${suggested}）: `)).trim() ||
+    suggested
   summary = summary || (await rl.question('  一句话说明（会成为 Release 正文）: ')).trim()
   rl.close()
 } else {
   info(`版本 ${version}；说明「${summary}」（来自命令行参数）`)
 }
 
-if (!/^\d+\.\d+\.\d+$/.test(version)) die(`版本号格式不对：${version}（要 x.y.z）`)
+/* 允许把 `0.0.10-dev` 原样传进来：发布就是去掉 `-dev` */
+version = version.replace(/-dev$/, '')
+if (!/^\d+\.\d+\.\d+$/.test(version)) die(`版本号格式不对：${version}（要 x.y.z 或 x.y.z-dev）`)
 if (!summary) die('说明不能为空 —— 它是 Release 正文，也是以后 git log 上唯一能看到的东西')
 
 if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {
-  die(`tag v${version} 已经存在。换一个版本号，或先确认那一版发到哪了`)
+  die(
+    `tag v${version} 已经存在 —— 已发布的号永远不再用` +
+      '（同一个号两种内容，客户端与回滚都说不清）。\n' +
+      `    下一个开发号：npm run version:next（当前 ${current}）`,
+  )
 }
 
 /* ---------- 3. 校验链（**没有任何写操作**） ---------- */
@@ -286,6 +301,7 @@ console.log(`
 
   ★ **客户端要等 release.json 那个 PR 合并**才看得到新版本（GitHub raw 只吐 main 上的东西）。
 
-  下一步开新分支继续：
+  下一步（发布号已固定，别再动它）：
+    npm run version:next      # 把工作区版本换成下一个 -dev（如 0.0.10 → 0.0.11-dev）
     git switch -c feat/<next>
 `)
