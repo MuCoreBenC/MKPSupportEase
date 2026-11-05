@@ -91,3 +91,37 @@ jobs:
             target/release/bundle/nsis/*.exe
             target/release/SupportEase_*_x64-portable.exe
           if-no-files-found: error
+
+      # ★ 发版那一趟（tag push）把 setup.exe 送进 **Gitee 那个 Release**
+      #   （2026-11-06 双平台发布）：macOS 包由内核在本机构建并上传，Windows 包在这台
+      #   runner 上构建 —— 两台机器两个进程，必须有一个人把它们放进**同一个** Release。
+      #   让 Windows 自己送过去，比"人下载 Artifact 再补包"少一次手工，也少一次版本错配。
+      #
+      #   · 内核建 Release 比这一步晚几分钟，所以脚本会**等**（默认 20 分钟）；
+      #   · 同名附件已存在就跳过 ⇒ 重跑幂等；
+      #   · 没配 `GITEE_TOKEN` 时**只告警不红**：包已经在 Artifacts 里，构建本身的
+      #     契约已经完成；缺凭据是配置问题，不该把一次成功的构建判成失败。
+      - name: 送 Windows 包进 Gitee Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_OWNER: MuCoreBenC
+          GITEE_REPO: MKPSupportEase
+        run: |
+          set -euo pipefail
+          if [ -z "${GITEE_TOKEN}" ]; then
+            echo "::warning::没配 GITEE_TOKEN —— Windows 包只留在 Artifacts，没进 Release"
+            exit 0
+          fi
+          shopt -s nullglob
+          files=(target/release/bundle/nsis/*.exe)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "::error::没找到 NSIS 安装包"
+            exit 1
+          fi
+          # 一个文件一对参数（`--file <路径>`）。别用 `${files[@]/#/--file }` ——
+          # 那样会拼成 "‑‑file 路径" 一个词，解析时整段被当成文件名。
+          args=()
+          for f in "${files[@]}"; do args+=(--file "$f"); done
+          node scripts/gitee-release.mjs upload --tag "${GITHUB_REF_NAME}" "${args[@]}"

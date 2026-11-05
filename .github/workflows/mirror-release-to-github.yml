@@ -1,0 +1,209 @@
+# Gitee Release → GitHub Release 的**镜像**（2026-11-06 双平台发布）。
+#
+# 口径（作者 2026-11-06 拍定）：
+#   · GitHub 是主仓库：PR、代码合并、tag 都从 GitHub 出发；
+#   · Gitee 是**国内下载源**，清单（`release.json` / `release-preview.json`）里的下载地址
+#     **继续只指 Gitee**（总纲 §5-M6 不动，一条闸都没放宽）；
+#   · 同一个版本在两边都有 Release、同一组安装包、同一个 tag —— 但**只构建一次**，
+#     GitHub 这边是**复制字节**，绝不重新打包（重打就会出现两个 SHA256）。
+#
+# # 方向为什么是 Gitee → GitHub
+#
+# 清单指 Gitee ⇒ 客户端的"点一下就能下"落在 Gitee。所以**Gitee 必须先有资产**，
+# 内核才允许把清单写出去（`write_release_info` 的顺序纪律：先说有新版再上传，
+# 用户会撞上空下载页）。于是收货方只能是 Gitee，GitHub 是事后复制。
+# 反过来做（GitHub 先、Gitee 后）会产生"清单已经宣告、Gitee 还没有包"的窗口。
+#
+# # 触发
+#
+#   · `push` tag `v*`：内核刚打完 tag，本工作流**等** Gitee Release 出现（内核在本机
+#     构建 macOS 包要几分钟），出现后立刻镜像；
+#   · `workflow_run`（windows-build 跑完）：Windows 包这时才进 Gitee Release，
+#     再复制一次把 `.exe` 带上（同名资产 `--clobber`，幂等）；
+#   · `workflow_dispatch`：人主动补一次。
+#
+# # 一致性怎么保证（三道，缺一不可）
+#
+#   ① tag 指向同一提交：两边 `git ls-remote refs/tags/<tag>` 必须同 sha；
+#   ② 版本与预发布标记：从 Gitee Release **原样搬**（不重新推导）；
+#   ③ 资产字节：从 Gitee 下载 → 算 sha256 → 原样传 GitHub → 读 GitHub 的
+#      `digest: sha256:…` 比对。Gitee 的附件 API **不返回 size / sha**
+#      （2026-11-06 实测只有 name + 下载地址），所以基准只能是"下载回来的字节"。
+#
+# 失败一律红：不吞错、不"看起来成功"。
+
+name: mirror-release-to-github
+
+on:
+  push:
+    tags: ['v*']
+  workflow_run:
+    workflows: [windows-build]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要镜像的 tag（形如 v0.0.10-preview.1）'
+        required: true
+
+permissions:
+  contents: write
+
+# 同一个 tag 的镜像串行；后到的排队（不取消前一次 —— 两次的资产集合可能不同）
+concurrency:
+  group: mirror-release-${{ inputs.tag || github.event.workflow_run.head_branch || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: mirror-release
+    runs-on: ubuntu-latest
+    env:
+      GITEE_OWNER: MuCoreBenC
+      GITEE_REPO: MKPSupportEase
+      TAG: ${{ inputs.tag || github.event.workflow_run.head_branch || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      EVENT_NAME: ${{ github.event_name }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # `workflow_run` 也会被 `feat/**` 的构建触发 —— 那些不是发版，直接跳过。
+      - name: 认一认这次是不是发版
+        id: guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "${TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::notice::这次不是 tag 发版（TAG='${TAG}'），跳过镜像"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "要镜像的 tag：${TAG}"
+
+      # 等 Gitee 那侧齐了：Release 存在，且至少有一个 `SupportEase_*` 资产。
+      # 发布内核是"建 Release → 传包"两步，中间有个空 Release 的瞬间，不能一见到就复制。
+      - name: 等 Gitee Release 齐
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          api="https://gitee.com/api/v5/repos/${GITEE_OWNER}/${GITEE_REPO}/releases/tags/${TAG}"
+          deadline=$(( $(date +%s) + 1500 ))
+          while :; do
+            code=$(curl -sS -o rel.json -w '%{http_code}' "${api}" || echo 000)
+            if [ "${code}" = "200" ]; then
+              n=$(jq '[.assets[] | select(.name | startswith("SupportEase_"))] | length' rel.json)
+              if [ "${n}" -gt 0 ]; then
+                echo "✓ Gitee Release 已就绪，${n} 个安装包资产"
+                break
+              fi
+            fi
+            if [ "$(date +%s)" -gt "${deadline}" ]; then
+              echo "::error::等了 25 分钟，Gitee 上 ${TAG} 的 Release 还是没齐（HTTP ${code}）"
+              exit 1
+            fi
+            sleep 15
+          done
+
+      - name: 建 GitHub Release（同 tag / 同标题 / 同正文 / 同预发布标记）
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          name=$(jq -r '.name // empty' rel.json)
+          tag=$(jq -r '.tag_name' rel.json)
+          pre=$(jq -r '.prerelease // false' rel.json)
+
+          # ★ 版本号必须与 tag 一致：Gitee 那边写歪了，这里就停，不复制一个身份不明的版本
+          if [ "${tag}" != "${TAG}" ]; then
+            echo "::error::Gitee 返回的 tag（${tag}）与要镜像的（${TAG}）不一致"
+            exit 1
+          fi
+
+          jq -r '.body // ""' rel.json > notes.md
+          [ -n "${name}" ] || name="SupportEase ${tag}"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "= GitHub 上已经有 ${TAG} 的 Release（重跑），接着补资产"
+            exit 0
+          fi
+
+          args=(--verify-tag --title "${name}" --notes-file notes.md)
+          [ "${pre}" = "true" ] && args+=(--prerelease)
+          gh release create "${TAG}" "${args[@]}"
+          echo "✓ 已建 GitHub Release ${TAG}（prerelease=${pre}）"
+
+      - name: 下载 Gitee 资产 → 原样上传 GitHub
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          : > sha256.txt
+
+          # 只要自己的安装包：Gitee 会额外挂两个自动生成的源码包（v*.zip / v*.tar.gz），
+          # 那玩意儿 GitHub 自己也会生成，复制过去只是噪音。
+          jq -r '.assets[] | select(.name | startswith("SupportEase_")) | "\(.name)\t\(.browser_download_url)"' rel.json |
+          while IFS=$'\t' read -r name url; do
+            curl -sSL --retry 3 -o "dist/${name}" "${url}"
+            sha=$(sha256sum "dist/${name}" | cut -d' ' -f1)
+            echo "${sha}  ${name}" | tee -a sha256.txt
+          done
+
+          # `--clobber`：重跑时覆盖同名资产 ⇒ 幂等，不会出现 `xxx (1).exe`
+          gh release upload "${TAG}" dist/* --clobber
+          echo "✓ 已把 $(ls -1 dist | wc -l | tr -d ' ') 个资产复制到 GitHub"
+
+      - name: 校验（tag 同 sha · 资产同 sha256）
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ① tag 指向同一提交
+          gh_sha=$(git ls-remote origin "refs/tags/${TAG}" | cut -f1)
+          gt_sha=$(git ls-remote "https://gitee.com/${GITEE_OWNER}/${GITEE_REPO}.git" "refs/tags/${TAG}" | cut -f1)
+          if [ -z "${gh_sha}" ] || [ -z "${gt_sha}" ]; then
+            echo "::error::有一边没有 tag ${TAG}（GitHub=${gh_sha:-无} Gitee=${gt_sha:-无}）"
+            exit 1
+          fi
+          if [ "${gh_sha}" != "${gt_sha}" ]; then
+            echo "::error::两边的 ${TAG} 指向不同提交：GitHub=${gh_sha} Gitee=${gt_sha}"
+            exit 1
+          fi
+          echo "✓ tag 同 sha：${gh_sha}"
+
+          # ② 资产字节：GitHub 的 digest 必须逐条命中本地算出来的 sha256
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+            --jq '.assets[] | "\(.digest // "none")\t\(.name)"' > gh-digests.txt
+          bad=0
+          while read -r sha name; do
+            got=$(awk -F'\t' -v n="${name}" '$2 == n {print $1}' gh-digests.txt)
+            if [ "${got}" != "sha256:${sha}" ]; then
+              echo "::error::${name} 的 sha256 对不上（GitHub=${got:-缺失} 应为=sha256:${sha}）"
+              bad=1
+            else
+              echo "✓ ${name}  sha256 一致"
+            fi
+          done < sha256.txt
+          exit "${bad}"
+
+      - name: 小结
+        if: steps.guard.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pre=$(jq -r '.prerelease // false' rel.json)
+          {
+            echo "### ${TAG} 已镜像到 GitHub"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "|---|---|"
+            echo "| 预发布标记 | \`${pre}\`（与 Gitee 相同） |"
+            echo "| 资产 | $(tr '\n' ' ' < sha256.txt | sed 's/[0-9a-f]\{64\}  //g') |"
+            echo "| 清单下载地址 | 仍指 Gitee（未改） |"
+          } >> "$GITHUB_STEP_SUMMARY"
