@@ -115,8 +115,14 @@ function die(message, rollback = []) {
  */
 function core(args) {
   if (!humanConfirmed) die('内核拒绝：真发版没拿到人类确认（交互跑要敲 yes，非交互跑要带 --confirm）')
+  /* ★ 演练必须**真的**演练（2026-11-06 真机事故）：这一行以前无条件送 `--confirm`，
+   * 而 `--dry-run` 从来没被传下去 —— 于是 `release.mjs --dry-run` 会真的推进版本号、
+   * 提交、推送（"演练"把分支写了）。模式只认一个：
+   *   · `--dry-run` → 给内核 `--dry-run`（零写入），**绝不给 `--confirm`**；
+   *   · 否则 → 给 `--confirm`。 */
+  const mode = flagDryRun ? ['--dry-run'] : ['--confirm']
   const bin = ['run', '--bin', 'release', '--features', 'workbench', '--']
-  const out = execFileSync('cargo', [...bin, ...args, '--confirm'], {
+  const out = execFileSync('cargo', [...bin, ...args, ...mode], {
     encoding: 'utf8',
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -323,6 +329,16 @@ ok(`阶段 ${first.stage}：${first.summary}`)
 
 if (first.stage === 'blockedPreflight') {
   die(`预检没过（内核一个字节都没动）：\n    ${first.blockedReasons.join('\n    ')}`)
+}
+
+/* ★ 演练到预检为止（2026-11-06）：`--dry-run` 的契约是"一个字节都不动"，
+ * 而后面那半段（等 CI / 合并 / 打 tag / 构建 / 上传）每一步都是实写。所以这里
+ * **必须停**：把内核报告原样打出来就结束，不往下走。 */
+if (flagDryRun) {
+  step('演练到此为止（--dry-run）')
+  console.log(JSON.stringify(first, null, 2))
+  info('版本号、tag、Release、清单：一个字节都没动。')
+  process.exit(0)
 }
 
 const rollback = [
