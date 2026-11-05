@@ -960,6 +960,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::publish_tx::wb_publish_status,
         // 合并（作者 2026-10-04 拍：squash、不强制等 CI）—— 用户显式点过才走
         app::publish_tx::wb_merge_review,
+        // 手动补同步（正常镜像由 GitHub Actions 负责；这条只在人主动点时才写远端）
+        app::publish_tx::wb_sync_mirror,
         // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
         app::build::wb_publish_history,
         // 发布历史第三栏：本分支最近提交（只读、不联网）

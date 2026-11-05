@@ -1,0 +1,96 @@
+# GitHub main → Gitee main 的**自动镜像**（2026-11-05 第一轮）。
+#
+# 口径（作者拍定）：
+#   · GitHub 是唯一开发源，Gitee 只是只读镜像；PR 只在 GitHub 开，Gitee 不再走一遍审查。
+#   · 只同步 `main` 一条分支：**不推 tag、不推别的分支、不开 PR、不用 force**。
+#   · 不启用 Gitee 官方 Pull 镜像 —— 两套同步机制同时跑会互相覆盖。
+#   · 工作台的 `wb_merge_review` 已不再自动推镜像；这里才是正常路径。
+#
+# 触发：
+#   · `push` 到 main：合并之后自动跟上。凭据还没配时**跳过并写明原因**（不红、不写远端）——
+#     这样"先把工作流合进 main"这一步不会偷偷向 Gitee 写入。
+#   · `workflow_dispatch`：人主动点的一次。凭据缺失或推送失败**一律红**，这一步才是
+#     明确授权的写入（第一次补齐 Gitee 就走它）。
+#
+# 凭据（GitHub 仓库 Settings → Secrets and variables → Actions → Secrets）：
+#   · `GITEE_USERNAME`  Gitee 账号名
+#   · `GITEE_TOKEN`     Gitee 私人令牌（专用、只给仓库写权限）
+#
+# ★ 为什么是 URL 内嵌凭据、不是 `http.extraHeader` 的 Basic 头：
+#   `src-tauri/src/workbench/app/git.rs` 有 2026-10-06 的**真机实测**判据
+#   `gitee_push_target_gets_url_credentials` —— Gitee 的 git-http 不吃先发式 Basic 头，
+#   只认 URL 内嵌。所以这里沿用同一形状；令牌、编码后的令牌、整条带凭据的 URL
+#   三者全部 `::add-mask::`，git 的报错也不会把凭据漏进日志。
+#
+# ★ 不跑 `npm ci`：`scripts/setup-hooks.mjs` 会把 `core.hooksPath` 指到 `scripts/hooks`，
+#   其中 `pre-push` 闸②见到推 main 就拦（本机 PR-only 规矩）。这里同步的是 CI 自己的
+#   干净 checkout，推送时显式 `-c core.hooksPath=/dev/null` 绕开本地钩子。
+#
+# 失败语义：push 非零即红，不吞错、不重试到"看起来成功"；`up to date` 是幂等成功。
+# 验收步骤见 `docs/RELEASE-TRANSACTIONS.md` 的「自动镜像与验收」一节。
+
+name: mirror-to-gitee
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# 两次 main 更新连着来时不许并发推同一条引用（后者排队，不取消前一次）
+concurrency:
+  group: mirror-to-gitee-main
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    name: mirror
+    runs-on: ubuntu-latest
+    env:
+      MIRROR_HOST: gitee.com/MuCoreBenC/MKPSupportEase.git
+      EVENT_NAME: ${{ github.event_name }}
+      GITEE_USERNAME: ${{ secrets.GITEE_USERNAME }}
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # 全历史：Gitee 那边已有旧提交，浅克隆推送会被拒（shallow update not allowed）
+          fetch-depth: 0
+
+      - name: 同步 main 到 Gitee
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -z "${GITEE_USERNAME}" ] || [ -z "${GITEE_TOKEN}" ]; then
+            if [ "${EVENT_NAME}" = "workflow_dispatch" ]; then
+              echo "::error::手动触发却没有配置 GITEE_USERNAME / GITEE_TOKEN —— 没有向 Gitee 写入任何东西"
+              exit 1
+            fi
+            echo "::notice::凭据还没配：这次 push 触发跳过镜像同步，没有向 Gitee 写入任何东西。配好 Secret 后手动触发一次本工作流即可补齐。"
+            exit 0
+          fi
+
+          # 用户名 / 令牌做 percent-encoding，避免特殊字符把 URL 拆歪
+          U="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${GITEE_USERNAME}")"
+          T="$(python3 -c 'import sys,urllib.parse;print(urllib.parse.quote(sys.argv[1],safe=""))' "${GITEE_TOKEN}")"
+          PUSH_URL="https://${U}:${T}@${MIRROR_HOST}"
+
+          # 三个形态全遮罩：明文、编码后、整条 URL（git 报错里可能带其中任意一种）
+          echo "::add-mask::${GITEE_TOKEN}"
+          echo "::add-mask::${T}"
+          echo "::add-mask::${PUSH_URL}"
+
+          export GIT_TERMINAL_PROMPT=0
+          LOCAL_SHA="$(git rev-parse HEAD)"
+          echo "本次要同步的 main tip：${LOCAL_SHA}"
+
+          # 只推 main 这一个 refspec；不带 --force ⇒ 非快进会直接失败（这正是要的红灯）
+          git -c core.hooksPath=/dev/null \
+              -c credential.helper= \
+              push "${PUSH_URL}" "HEAD:refs/heads/main"
+
+          echo "✓ 已把 main 推到 Gitee（${LOCAL_SHA}）；无 --force、无 tag、无第二个 PR"

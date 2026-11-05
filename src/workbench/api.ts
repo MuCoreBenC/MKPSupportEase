@@ -1226,8 +1226,13 @@ export interface FileChange {
   after: string | null
 }
 
-/** `publish_tx::MirrorStatus` —— 「把主线同步到第二个云端源」那一步的结论 */
-export type MirrorStatus = 'pushed' | 'upToDate' | 'skipped' | 'failed'
+/**
+ * `publish_tx::MirrorStatus` —— 镜像跟没跟上。
+ *
+ * ★ `notSynced`（2026-11-05）：正常合并不推镜像，同步由 GitHub Actions 负责。
+ *   这一档是「尚未同步」，**不是「已一致」** —— 界面不许把它画成绿的。
+ */
+export type MirrorStatus = 'pushed' | 'upToDate' | 'skipped' | 'notSynced' | 'failed'
 
 /**
  * `publish_tx::MirrorSync` —— 合并之后把主线推给**第二个云端源**的结果。
@@ -2757,6 +2762,12 @@ export const wb = {
    */
   mergeReview: (number: number, platform?: string | null) =>
     invoke<MergeOutcome>('wb_merge_review', { number, platform: platform ?? null }),
+  /**
+   * **手动补同步**：把 GitHub main 补推到 Gitee main。
+   * 正常路径是 GitHub Actions 自动镜像；这条只在人主动点「手动补同步」时才调，
+   * 结果（已推 / 已是同一版 / 未配置 / 失败）如实回显，不许静默当成功。
+   */
+  syncMirror: () => invoke<MirrorSync>('wb_sync_mirror'),
   /** 发布历史（只读）：最近若干次「交付预设」事务的回执，**最新在前** */
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */

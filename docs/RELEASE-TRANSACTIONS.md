@@ -283,3 +283,80 @@ IPC / API 契约变化
 > **发预设** = 把数据送进仓库、合并即生效，**不开新版本**。
 > **发软件版本** = 打 tag、出安装包、更新 `release.json`，**用户才能升级**。
 > 合并 ≠ 发布软件版本。两条链各走各的，**不许混**。
+
+---
+
+## 10. 自动镜像与验收（2026-11-05 追加）
+
+**GitHub 是唯一开发源，Gitee 是只读镜像。** 代码合并只走 GitHub 的 PR；Gitee 不再开 PR、
+不再重复审查。合并之后由 `.github/workflows/mirror-to-gitee.yml` 把 `main` 快进同步过去：
+只推 `main` 一个 refspec、不推 tag、不推别的分支、不用 `--force`、不开 PR。
+
+工作台里 `wb_merge_review` **不再自动推镜像**（回执如实显示「未同步 · 由自动流程负责」）。
+旧能力保留成「手动补同步」按钮，只有人主动点才推，成功 / 已是同一版 / 未配置 / 失败
+四种结果如实回显。正常同步状态以 GitHub Actions 为准。
+
+### 10.1 一次性配置
+
+1. 在 **Gitee** 生成一枚**专用**私人令牌（只给这个仓库的写权限）。
+2. 在 **GitHub 仓库 → Settings → Secrets and variables → Actions → Secrets** 加两条：
+
+   | Secret | 值 |
+   | --- | --- |
+   | `GITEE_USERNAME` | Gitee 账号名 |
+   | `GITEE_TOKEN` | 上面那枚令牌 |
+
+3. **不启用** Gitee 官方 Pull 镜像 —— 两套同步机制同时跑会互相覆盖。Actions 不稳时
+   才考虑用它**替代**，不是并行。
+
+> 凭据走 URL 内嵌（`https://user:token@gitee.com/...`），不是 `http.extraHeader` 的 Basic 头：
+> `src-tauri/src/workbench/app/git.rs` 有 2026-10-06 真机实测，Gitee 的 git-http 不吃先发式
+> Basic 头。工作流里令牌、编码后的令牌、整条带凭据的 URL 三者都 `::add-mask::`。
+>
+> 工作流**不跑 `npm ci`**：`scripts/setup-hooks.mjs` 会把 `core.hooksPath` 装成本地的
+> `scripts/hooks`，其中 `pre-push` 闸②见到推 main 就拦。同步时显式
+> `-c core.hooksPath=/dev/null`。
+
+### 10.2 两种触发，别混
+
+| 触发 | 凭据没配时 | 凭据齐了 |
+| --- | --- | --- |
+| `push` 到 `main`（合并之后自动跑） | **跳过**并打印原因，不红、不写远端 | 自动同步 |
+| `workflow_dispatch`（人主动点） | **直接红**（手动触发就是明确授权） | 执行一次同步 |
+
+所以「先把工作流合进 main」那一笔 push 会跳过 —— 这正是"配置阶段不偷偷写远端"的保证。
+推送失败一律红；`up to date` 是幂等成功。
+
+### 10.3 第一次补齐与验收
+
+配好 Secret 之后**手动触发一次**（这一步才向 Gitee `main` 写入）：
+
+```bash
+gh workflow run mirror-to-gitee.yml --ref main
+gh run list --workflow mirror-to-gitee.yml --limit 1
+```
+
+验收判据（两条都要成立）：
+
+```bash
+# ① 两端 main 指向同一个 commit
+git ls-remote origin refs/heads/main
+git ls-remote gitee  refs/heads/main
+
+# ② Gitee 能读到这一代目录
+curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/catalog.json \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["revision"])'
+# ⇒ dc0884e1b1b0c421（第 7 号）
+```
+
+2026-11-05 那一轮的基准：GitHub main `cbb80e0c3c94…`、第 7 号目录
+`dc0884e1b1b0c421`；同步前 Gitee main 是 `3babb63…`（第 4 号 `c03b5304a766f173`）。
+后续每一轮以「两端 `git ls-remote` 相同」为准，别写死 sha。
+
+### 10.4 失败与边界
+
+- Actions 红了：先看 job 日志；**不要**改用本地 `git push gitee main`（PR-only 闸②会拦、
+  服务端 ruleset 也拒），也不要用 `ALLOW_PUSH_MAIN=1` / `--no-verify` 绕。
+- 需要立刻补一次又不想等 CI：用工作台「手动补同步」按钮，它同样会如实回报结果。
+- 本机制**不碰** `release.json`、不打 tag、不建 Release、不跑 `presets publish`。
+  软件发版那条链（§1 第二层）照旧。

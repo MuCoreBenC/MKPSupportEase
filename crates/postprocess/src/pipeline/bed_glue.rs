@@ -13,7 +13,8 @@
 //!
 //! 「在自动调平后、检测条前执行涂胶（降温到30°C → 换笔 → 涂胶 → 收笔）」
 //!
-//! 落成 G-code 就是：把热床降到 30°C 并等待 → 挂上笔 → 沿擦料塔位置（或所有模型
+//! 落成 G-code 就是：把热床降到预设的涂胶温度并等待（本机 50°C，只有原目标更高时才降）
+//! → 喷嘴目标压到 30°C（`M104`，**不等待**）→ 挂上笔 → 沿擦料塔位置（或所有模型
 //! 首层）走一遍涂胶路径 → 抬 Z → 卸笔 → 把热床升回用户原本的目标温度。
 //!
 //! # 两条安全边界（都有意保留）
@@ -258,9 +259,9 @@ fn find_insertion_point(lines: &[String]) -> Option<usize> {
         + 1;
     /* ★ 优先插在 `M104 S… ; prepare to print` **之前**（2026-11-05，作者：
     「预涂胶的，是不是应该去掉他多余的升温」）。
-    插在 load line 之前的话，切片器会先 `M104 S245` 把喷嘴烧到 245，
-    紧接着我们那块又 `M109 S30` 等它凉到 30 —— 一烧一凉白等好几分钟（A1 上尤其明显）。
-    往前挪一行，涂胶从头到尾喷嘴都是冷的，`M104` 等涂完再执行。 */
+    插在 load line 之前的话，切片器会先 `M104 S245` 把喷嘴烧到 245，胶还没涂喷嘴就是热的
+    —— 涂胶过程盯着一个 245°C 的喷嘴，与"涂胶时喷嘴该是冷的"相悖。
+    往前挪一行，涂胶从头到尾喷嘴都没被加热，`M104 S245` 等涂完再执行。 */
     if let Some(i) = (exec_start..lines.len()).find(|&i| {
         let t = lines[i].trim();
         t.starts_with("M104 S") && t.contains("prepare to print")
@@ -411,7 +412,18 @@ fn build_block(
         anchor_feed
     ));
     block.push(format!("G0 Z{} F{}", format_z(mount_z), travel));
-    block.push("M109 S30 ; 降温到30°C并等待".to_owned());
+    /* ★ 2026-11-05 作者定案：**这里不许阻塞**。
+     *
+     * 原来写的是 `M109 S30` —— M109 会停在原地等喷嘴真的凉到 30°C，而这一块在
+     * 第一层之前，胶涂完紧接着就要升温打印首层，"先烧到 245 再等凉到 30" 那几分钟
+     * 全是白等（A1 上尤其明显）。`M104` 只设目标、不等待：涂胶期间喷嘴自然降温，
+     * 块后切片器自己那句 `M104 S245 ; prepare to print` 再把目标改回来。
+     *
+     * 温度值本身不重要（作者：「到 30 到多少度都无所谓，到 50 都可以」），
+     * 保留 30 只是沿用旧参数；判据只有一条 —— **这一行不许阻塞**。
+     * 同一口径见 `postproc/calibration.rs::should_preserve_nozzle_load_line_line`
+     * （那边也是 `M109` → `M104`，2026-10-19 真机踩过）。 */
+    block.push("M104 S30 ; 降温到30°C（不等待，涂完还要升温）".to_owned());
 
     block.push(";Mounting Toolhead".to_owned());
     block.extend(filter_mount_gcode_lines(
@@ -1117,6 +1129,41 @@ mod tests {
             waited
                 .iter()
                 .filter(|l| l.starts_with("G4"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 涂胶块里**不许有阻塞式 `M109`**（2026-11-05 作者：胶涂完紧接着要升温，
+    /// 停在那儿等喷嘴凉到 30 是白等）。喷嘴目标降温只能写 `M104`。
+    #[test]
+    fn nozzle_cooling_is_not_blocking() {
+        let src = lines(&[
+            "; EXECUTABLE_BLOCK_START",
+            "M190 S70",
+            ";===== nozzle load line",
+        ]);
+        let mut ir = Ir::default();
+        ir.prefs.bed_glue_enabled = true;
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
+
+        let start = out.iter().position(|l| l == BLOCK_START).expect("有起始标记");
+        let end = out.iter().position(|l| l == BLOCK_END).expect("有结束标记");
+        assert!(
+            !out[start..end].iter().any(|l| l.trim_start().starts_with("M109")),
+            "涂胶块里出现了阻塞式 M109：{:?}",
+            out[start..end]
+                .iter()
+                .filter(|l| l.contains("M10"))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            out[start..end]
+                .iter()
+                .any(|l| l.trim_start().starts_with("M104 S30")),
+            "喷嘴降温该用不等待的 M104：{:?}",
+            out[start..end]
+                .iter()
+                .filter(|l| l.contains("M10"))
                 .collect::<Vec<_>>()
         );
     }
