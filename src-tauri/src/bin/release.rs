@@ -17,6 +17,8 @@
 //! ```text
 //! cargo run --bin release --features workbench -- 0.0.2 "修了 X" --confirm        # 第一阶段：预检 → 版本 → 提交 → 推送 → PR
 //! cargo run --bin release --features workbench -- 0.0.2 "修了 X" --merge --confirm # 第二阶段：合并 → 打 tag → 构建 → Release → 上传 → release.json
+//! cargo run --bin release --features workbench -- 0.0.10-preview.1 "试试" --channel=preview --merge --confirm
+//!                                                                                 # 预览通道：只写 release-preview.json，Release 标 prerelease
 //! cargo run --bin release --features workbench -- --dry-run                       # 只看预检结论，一个字节都不动（不需确认）
 //!
 //! ★ `--confirm` 是**真发版的人类确认位**（2026-11-05 硬约束，见 `AGENTS.md`）：
@@ -82,17 +84,38 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
     /* **人类确认位**（2026-11-05 硬约束）：真发版缺 `--confirm` 会被内核零副作用拒绝。
      * 人当次明确许可才拿得到这个 flag（交互脚本里是一句明确的 yes，非交互要显式带）。 */
     let mut confirmed = false;
+    /* 通道（2026-11-05 预览发布事务）：缺省 = 正式版。
+     * `--preview` 是 `--channel=preview` 的短写法 —— 这条命令将来会被反复敲，
+     * 少打几个字不容易敲错。 */
+    let mut channel = mkp_support_ease_lib::runtime::release_info::UpdateChannel::Stable;
 
-    for a in &args {
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        i += 1;
         match a.as_str() {
             "--merge" => merge = true,
             "--no-build" => build = false,
             "--dry-run" => dry_run = true,
             "--no-review" => open_review = false,
             "--confirm" => confirmed = true,
+            "--preview" => channel = parse_channel("preview")?,
+            "--stable" => channel = parse_channel("stable")?,
+            "--channel" => {
+                // `--channel preview`（空格写法）：值在下一个参数里
+                let Some(v) = args.get(i) else {
+                    return Err(AppError::invalid_argument(
+                        "--channel 后面要跟 stable 或 preview".to_owned(),
+                    ));
+                };
+                i += 1;
+                channel = parse_channel(v)?;
+            }
             _ => {
                 if let Some(v) = a.strip_prefix("--base=") {
                     base = v.to_owned();
+                } else if let Some(v) = a.strip_prefix("--channel=") {
+                    channel = parse_channel(v)?;
                 } else if !a.starts_with('-') {
                     positional.push(a.clone());
                 } else {
@@ -114,6 +137,7 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
         build,
         open_review,
         confirmed,
+        channel,
     };
 
     let (target, hosting) = resolve_from_env();
@@ -135,6 +159,15 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
     )?;
     record_history(&opts, &report);
     Ok(report)
+}
+
+/// 解析 `--channel` 的值。**认不出就报错，不兜底**（兜成 stable 会把预览版发成全量通知）。
+fn parse_channel(
+    raw: &str,
+) -> Result<mkp_support_ease_lib::runtime::release_info::UpdateChannel, AppError> {
+    mkp_support_ease_lib::runtime::release_info::UpdateChannel::parse(raw).ok_or_else(|| {
+        AppError::invalid_argument(format!("认不出的更新通道：{raw}（只认 stable / preview）"))
+    })
 }
 
 /// 把这一趟记进**发布历史**（`<appDataDir>/release-history.json`，与工作台同一个文件）。

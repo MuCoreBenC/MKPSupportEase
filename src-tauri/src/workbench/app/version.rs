@@ -39,8 +39,8 @@ pub const LOCK_PACKAGE_NAME: &str = "mkp-support-ease";
 
 /// 三段版本号 `x.y.z`。**只认这一种形状** —— 带 `v` 前缀、带 `-dev` 后缀的都不算。
 ///
-/// 它守的是**发布写入**（`write_derived` / `bump` 的目标）：发出去的版本必须是正式版。
-/// 读真值用 [`is_version_text`]（开发中允许 `x.y.z-dev`）。
+/// ★ 2026-11-05 起它只管"**纯正式版**"这一档：发布写入要放行预览号，走
+///   [`is_release_version`]；读真值走 [`is_version_text`]（允许 `-dev` / 预览号）。
 pub fn is_semver(v: &str) -> bool {
     let v = v.trim();
     if v.is_empty() || v.ends_with('.') || v.starts_with('.') {
@@ -53,14 +53,82 @@ pub fn is_semver(v: &str) -> bool {
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// **版本文本**：`x.y.z`（已发布 / 待发布）或 `x.y.z-dev`（开发中）。
+/// 预览版版本号 `x.y.z-preview.N`（N ≥ 1）。**发布写入**的第二档形状。
+///
+/// 2026-11-05 补预览发布事务时新增：预览版是"发出去过的号"，但它**不消耗正式号** ——
+/// `0.0.10-preview.1` 发出去之后，`0.0.10` 仍然可以照常发正式版。
+///
+/// ★ 序号必须显式：`-preview` 不带数字不是合法发布号（客户端
+///   [`crate::runtime::release_info::parse_software_version`] 认 `preview.1` 这种形状，
+///   不带序号的写法没有"谁更新"可言）。
+pub fn is_preview_version(v: &str) -> bool {
+    let v = v.trim();
+    let Some((core, pre)) = v.rsplit_once("-preview.") else {
+        return false;
+    };
+    if !is_semver(core) {
+        return false;
+    }
+    // 序号：纯数字且 ≥ 1（`preview.0` 与 `preview.01` 都不认 —— 前者没有意义，后者两种写法同号）
+    !pre.is_empty()
+        && pre.bytes().all(|b| b.is_ascii_digit())
+        && !pre.starts_with('0')
+        && pre.parse::<u64>().is_ok()
+}
+
+/// **发布写入**允许的形状：正式版 `x.y.z` **或** 预览版 `x.y.z-preview.N`。
+///
+/// 与 [`is_semver`] 的分工：`is_semver` 是"纯正式版"这一档（旧判据原样保留，
+/// 判据与文档都指着它）；发布写入要按通道放行预览号，用这一条。
+pub fn is_release_version(v: &str) -> bool {
+    is_semver(v) || is_preview_version(v)
+}
+
+/// **版本文本**：`x.y.z`（已发布 / 待发布）、`x.y.z-preview.N`（预览已发布）或
+/// `x.y.z-dev`（开发中）。
 ///
 /// 2026-11-04 作者裁定：发过的号永不再用；开发分支永远拿着下一个号的 `-dev`，
-/// 发布时才去掉。所以**真值那一格允许 `-dev`**，而发布写入仍只走 [`is_semver`]。
+/// 发布时才去掉。所以**真值那一格允许 `-dev` 与预览号**。
 pub fn is_version_text(v: &str) -> bool {
     let v = v.trim();
     v.strip_suffix("-dev")
-        .map_or_else(|| is_semver(v), is_semver)
+        .map_or_else(|| is_release_version(v), is_semver)
+}
+
+/// 预览号的基础版本（`0.0.10-preview.1` → `0.0.10`）。不是预览号就 `None`。
+pub fn preview_base(v: &str) -> Option<&str> {
+    let v = v.trim();
+    let (core, _) = v.rsplit_once("-preview.")?;
+    is_semver(core).then_some(core)
+}
+
+/// `next` 是不是**严格新于** `current`（软件版本口径）。
+///
+/// 口径与客户端的 `release_info::parse_software_version` 一致：
+/// 三段数字优先，同基础时 **正式版 > 预览版 > dev**，预览之间序号大者新。
+///
+/// ★ 为什么不直接用 `release_info::compare`：那条判据带着"预发布绝不提醒正式版用户"
+///   的守卫（`0.0.10-preview.1` 对 `0.0.9` 返回 false）—— 那个守卫服务的是**通知**，
+///   而这里问的是**版本序**。两件事，各用各的。
+pub fn is_newer(next: &str, current: &str) -> bool {
+    use crate::runtime::release_info::parse_software_version as parse;
+    use std::cmp::Ordering;
+
+    let (Some(a), Some(b)) = (parse(next.trim()), parse(current.trim())) else {
+        // 认不出的形状退回三段数字比较（老数据 / 脏值不静默判"更新"）
+        return crate::runtime::structure::version_at_least(next, current)
+            && next.trim() != current.trim();
+    };
+    match (a.major, a.minor, a.patch).cmp(&(b.major, b.minor, b.patch)) {
+        Ordering::Greater => true,
+        Ordering::Less => false,
+        Ordering::Equal => match (a.pre, b.pre) {
+            (None, None) => false,
+            (None, Some(_)) => true,  // 正式版比同基础预发布新
+            (Some(_), None) => false, // 预发布从不是"比正式版新"
+            (Some(x), Some(y)) => x > y,
+        },
+    }
 }
 
 /// **版本真值**：读 `src-tauri/Cargo.toml` 的 `[package].version`。
@@ -81,7 +149,7 @@ pub fn app_version(repo_root: &Path) -> Result<String, AppError> {
     let v = v.trim().to_owned();
     if !is_version_text(&v) {
         return Err(AppError::corrupted(format!(
-            "版本真值不是 x.y.z 或 x.y.z-dev 形状：{v}"
+            "版本真值不是 x.y.z / x.y.z-dev / x.y.z-preview.N 形状：{v}"
         )));
     }
     Ok(v)
@@ -166,9 +234,9 @@ pub fn derived_mismatch(repo_root: &Path) -> Result<Vec<String>, AppError> {
 /// ★ 只改 `version` 那一格：两个 JSON 用 `serde_json::Value` 读回再写，
 /// `preserve_order` 已开（见根 `Cargo.toml`）⇒ 其余键与键序原样保留。
 pub fn write_derived(repo_root: &Path, version: &str) -> Result<Vec<String>, AppError> {
-    if !is_semver(version) {
+    if !is_release_version(version) {
         return Err(AppError::invalid_argument(format!(
-            "版本号不是 x.y.z 形状：{version}"
+            "版本号不是 x.y.z 或 x.y.z-preview.N 形状：{version}"
         )));
     }
     let mut changed = Vec::new();
@@ -268,9 +336,9 @@ pub fn refresh_lock(repo_root: &Path) -> Result<(), AppError> {
 /// 版本号只往前走，"原地重写一遍"没有意义还平白弄脏工作区。
 pub fn bump(repo_root: &Path, next: &str) -> Result<Vec<String>, AppError> {
     let next = next.trim();
-    if !is_semver(next) {
+    if !is_release_version(next) {
         return Err(AppError::invalid_argument(format!(
-            "版本号不是 x.y.z 形状：{next}"
+            "版本号不是 x.y.z 或 x.y.z-preview.N 形状：{next}"
         )));
     }
     let current = app_version(repo_root)?;
@@ -279,9 +347,13 @@ pub fn bump(repo_root: &Path, next: &str) -> Result<Vec<String>, AppError> {
             "版本号已经是 {current} —— 换一个再发"
         )));
     }
-    if !crate::runtime::structure::version_at_least(next, &current) {
+    /* ★ 只能往前走，且按**软件版本口径**比（2026-11-05 补预览通道时改口）：
+     * 旧口径 `version_at_least` 只比三段数字，会把"正式版 0.0.10 → 预览版
+     * 0.0.10-preview.1"也放过去 —— 那是**往旧**走（正式版比同基础预览版新），
+     * 发出去客户端永远看不到更新。 */
+    if !is_newer(next, &current) {
         return Err(AppError::invalid_argument(format!(
-            "版本号只能往前走：{current} → {next} 是回退"
+            "版本号只能往前走：{current} → {next} 不是更新"
         )));
     }
 
@@ -378,6 +450,99 @@ mod tests {
         for no in ["", "v0.0.1", "0.0", "0.0.1-dev", "0.0.a", ".0.1", "0.0."] {
             assert!(!is_semver(no), "{no} 不该认");
         }
+    }
+
+    /// ★ **预览号是发布写入的第二档形状**（2026-11-05 预览发布事务）。
+    ///
+    /// 钉住三件事：合法的认；序号必须显式且从 1 起（`-preview` / `-preview.0` /
+    /// `-preview.01` 都不认 —— 三种写法都会让"谁更新"说不清）；`-dev` 仍然只读不写。
+    #[test]
+    fn preview_versions_are_a_release_shape() {
+        for ok in [
+            "0.0.10-preview.1",
+            "0.0.10-preview.12",
+            "1.20.300-preview.1",
+        ] {
+            assert!(is_preview_version(ok), "{ok} 该认");
+            assert!(is_release_version(ok), "{ok} 该是发布形状");
+            assert!(is_version_text(ok), "{ok} 该能当版本文本");
+        }
+        for no in [
+            "0.0.10-preview",    // 没有序号 = 没有"谁更新"可言
+            "0.0.10-preview.0",  // 序号从 1 起
+            "0.0.10-preview.01", // 两种写法同号
+            "0.0.10-preview.x",
+            "v0.0.10-preview.1",
+            "0.0.10-alpha.1", // 别的预发布档次不在本轮范围
+            "0.0.10-preview.1-dev",
+        ] {
+            assert!(!is_preview_version(no), "{no} 不该认");
+            assert!(!is_release_version(no), "{no} 不该是发布形状");
+        }
+        assert_eq!(preview_base("0.0.10-preview.3"), Some("0.0.10"));
+        assert_eq!(preview_base("0.0.10"), None, "正式版没有预览基础可谈");
+
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            write_derived(dir.path(), "0.0.10-preview").is_err(),
+            "没有序号的预览号不许落盘"
+        );
+    }
+
+    /// ★ **版本序**：正式版 > 同基础预览版 > dev；预览之间序号大者新。
+    ///
+    /// 这条服务的不是"通知"而是"能不能往这个号发"（`bump` 的前进判定）——
+    /// 用 `release_info::compare` 会错，它带着"预览不提醒正式版用户"的守卫。
+    #[test]
+    fn newer_follows_the_software_version_order() {
+        assert!(
+            is_newer("0.0.10-preview.1", "0.0.10-dev"),
+            "开发版 → 预览版是往前走"
+        );
+        assert!(is_newer("0.0.10-preview.2", "0.0.10-preview.1"));
+        assert!(is_newer("0.0.10", "0.0.10-preview.2"), "正式版比预览版新");
+        assert!(
+            is_newer("0.0.11-preview.1", "0.0.10"),
+            "基础版本更高就算更新"
+        );
+        assert!(
+            !is_newer("0.0.10-preview.1", "0.0.10"),
+            "★ 正式版之后不许再往同基础发预览版（那是往回走）"
+        );
+        assert!(!is_newer("0.0.10", "0.0.10"), "相等不是更新");
+        assert!(!is_newer("0.0.9", "0.0.10"), "回退不是更新");
+    }
+
+    /// `bump` 认预览号：四处一起落盘，真值读回来就是预览号。
+    #[test]
+    fn bump_can_move_a_dev_tree_onto_a_preview_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("src-tauri")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.join(MANIFEST_REL),
+            b"[package]\nname = \"mkp-support-ease\"\nversion = \"0.0.10-dev\"\n",
+        )
+        .unwrap();
+        crate::fsx::atomic::atomic_write(&root.join(PACKAGE_REL), b"{\"version\":\"0.0.10-dev\"}")
+            .unwrap();
+        crate::fsx::atomic::atomic_write(&root.join(CONF_REL), b"{\"version\":\"0.0.10-dev\"}")
+            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &root.join(LOCK_REL),
+            b"[[package]]\nname = \"mkp-support-ease\"\nversion = \"0.0.10-dev\"\n",
+        )
+        .unwrap();
+
+        let changed = bump(root, "0.0.10-preview.1").expect("开发版 → 预览版该走得通");
+        assert_eq!(changed.len(), 4, "真值 + 三处派生：{changed:?}");
+        assert_eq!(app_version(root).unwrap(), "0.0.10-preview.1");
+        assert!(derived_mismatch(root).unwrap().is_empty());
+
+        // 同一个号再发一次 = 不许（"已发布的号永不再用"落到版本层）
+        assert!(bump(root, "0.0.10-preview.1").is_err(), "同号不许重发");
+        // 预览号不能倒回开发版
+        assert!(bump(root, "0.0.10-dev").is_err(), "预览 → 开发是回退");
     }
 
     /// **派生是纯文件操作**（临时仓库里验）：改完 manifest 再 `write_derived`，

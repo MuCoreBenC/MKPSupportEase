@@ -201,6 +201,9 @@ impl Hosting for Gitee {
             "target_commitish": "main",
             "name": spec.name,
             "body": spec.body,
+            // ★ 预览版必须标成 prerelease（2026-11-05）：正式版用户不该在
+            //   "最新版"位置看到它。Gitee 这一格叫 `prerelease`，与 GitHub 同名。
+            "prerelease": spec.prerelease,
         });
         match self.post(
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),
@@ -513,6 +516,7 @@ mod tests {
             tag_name: "v0.0.3".to_owned(),
             name: "SupportEase v0.0.3".to_owned(),
             body: "b".to_owned(),
+            prerelease: false,
         };
         // 不真发请求：只验证它**不是**默认实现那个错误
         let err = g.create_release(&spec).unwrap_err();

@@ -34,6 +34,19 @@
  *   · 非交互跑（版本与说明都由命令行给了）：必须显式带 `--confirm`；
  *   · 两条路最后都把 `--confirm` 交给内核，内核缺了会零副作用地拒绝。
  * AI / CI 没拿到人**当次**的明确许可，不许自己跑完这一趟。
+ *
+ * ## 2026-11-05：预览通道（`--channel preview`）
+ *
+ * 正式版与预览版是**两条通道、两份清单**：
+ *
+ * ```text
+ * 正式通道（缺省）  版本 x.y.z          写 presets/delivery/release.json          Release 不标 prerelease
+ * 预览通道          版本 x.y.z-preview.N 写 presets/delivery/release-preview.json  Release 标 prerelease
+ * ```
+ *
+ * 发预览时**正式版那一份一个字节都不动** —— 正式版用户不会收到任何通知，
+ * 只有主动点「检查更新」的人才看得到。预览号也**不消耗**正式号：发过
+ * `0.0.10-preview.1` 之后，`0.0.10` 仍可照常发。
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -171,17 +184,56 @@ const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '
 /*
  * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
  * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
+ *
+ * ★ 预览通道（2026-11-05）默认给 `x.y.z-preview.1`：序号从 1 起，人只在发第二个
+ *   预览时改数字。发了这个号**不会**消耗 `x.y.z` 正式版。
  */
-const suggested = current.replace(/-dev$/, '')
+const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
+const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
 
-step(`版本号（当前 ${current}，发布会写成 ${suggested}）`)
+step(
+  `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
+)
 
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
 const cliArgs = process.argv.slice(2)
 const flagConfirmed = cliArgs.includes('--confirm')
-const [argVersion, argSummary] = cliArgs.filter((a) => a !== '--confirm')
+
+/* 通道（2026-11-05 预览发布事务）：`--channel=preview` / `--channel preview` / `--preview`。
+   缺省 = 正式版；认不出的值**当场停**（兜成 stable 会把预览版发成全量通知）。 */
+function parseChannel(raw) {
+  const v = String(raw ?? '').trim()
+  if (v === 'stable' || v === 'preview') return v
+  die(`认不出的更新通道：${v || '(空)'}（只认 stable / preview）`)
+}
+
+let channel = 'stable'
+const positionalArgs = []
+for (let i = 0; i < cliArgs.length; i += 1) {
+  const a = cliArgs[i]
+  if (a === '--confirm') continue
+  if (a === '--preview') {
+    channel = 'preview'
+    continue
+  }
+  if (a === '--stable') {
+    channel = 'stable'
+    continue
+  }
+  if (a === '--channel') {
+    channel = parseChannel(cliArgs[i + 1])
+    i += 1
+    continue
+  }
+  if (a.startsWith('--channel=')) {
+    channel = parseChannel(a.slice('--channel='.length))
+    continue
+  }
+  positionalArgs.push(a)
+}
+const [argVersion, argSummary] = positionalArgs
 
 let version = argVersion?.trim()
 let summary = argSummary?.trim()
@@ -207,9 +259,20 @@ if (!version || !summary) {
   humanConfirmed = true
 }
 
-/* 允许把 `0.0.10-dev` 原样传进来：发布就是去掉 `-dev` */
-version = version.replace(/-dev$/, '')
-if (!/^\d+\.\d+\.\d+$/.test(version)) die(`版本号格式不对：${version}（要 x.y.z 或 x.y.z-dev）`)
+/* 允许把 `0.0.10-dev` 原样传进来：正式发布就是去掉 `-dev`；
+ * 预览号（`0.0.10-preview.1`）原样保留 —— 它本身就是要发出去的号。 */
+version = channel === 'preview' ? version : version.replace(/-dev$/, '')
+if (!/^\d+\.\d+\.\d+(-preview\.[1-9]\d*)?$/.test(version)) {
+  die(`版本号格式不对：${version}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+}
+/* 通道与版本身份必须一致：串台的两边后果都很难撤（内核里还会再判一次，这里只为早停） */
+const isPreviewVersion = /-preview\.\d+$/.test(version)
+if (channel === 'preview' && !isPreviewVersion) {
+  die(`预览通道要发预览号（x.y.z-preview.N），现在是 ${version}`)
+}
+if (channel === 'stable' && isPreviewVersion) {
+  die(`★ 预览号不能走正式通道（${version}）—— 全量用户会收到这条通知；加 --channel preview`)
+}
 if (!summary) die('说明不能为空 —— 它是 Release 正文，也是以后 git log 上唯一能看到的东西')
 
 if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {
@@ -243,7 +306,7 @@ info('版本号只改 src-tauri/Cargo.toml 一处，其余（package.json / taur
 
 let first
 try {
-  first = core([version, summary])
+  first = core([version, summary, `--channel=${channel}`])
 } catch (e) {
   die(`内核第一趟没跑通：${e.message ?? e}`)
 }
@@ -298,13 +361,21 @@ if (!prNumber) {
 
 /* ---------- 6. 第二趟：合并 → 打 tag → 构建 → Release → 上传 → release.json（**内核**） ---------- */
 
-step('内核：合并 → tag → 构建 → Release → 上传 → release.json')
+const manifestRel =
+  channel === 'preview' ? 'presets/delivery/release-preview.json' : 'presets/delivery/release.json'
+
+step(`内核：合并 → tag → 构建 → Release → 上传 → ${manifestRel}`)
 info('★ 内核会切到 main、在 main 的 tip 上打 tag、构建 macOS 安装包、建 Release 并上传')
-info('★ release.json 那一笔会开**第二个 PR** —— 合并它之后客户端才看得到新版本')
+if (channel === 'preview') {
+  info('★ 预览通道：Release 标 prerelease，只写 release-preview.json —— **release.json 一个字节都不动**')
+  info('★ 那份清单会开**第二个 PR** —— 合并它之后，主动点「检查更新」的人才看得到这个预览版')
+} else {
+  info(`★ ${manifestRel} 那一笔会开**第二个 PR** —— 合并它之后客户端才看得到新版本`)
+}
 
 let second
 try {
-  second = core([version, summary, '--merge'])
+  second = core([version, summary, `--channel=${channel}`, '--merge'])
 } catch (e) {
   die(
     `内核第二趟没跑通：${e.message ?? e}`,
@@ -317,16 +388,23 @@ try {
 ok(`阶段 ${second.stage}：${second.summary}`)
 
 console.log(`
-\u001b[32m发完了：v${version}\u001b[0m
+\u001b[32m发完了：v${version}（${channel === 'preview' ? '预览通道' : '正式通道'}）\u001b[0m
 
   tag：      ${second.tag ?? `v${version}`}
   Release：  ${second.release?.url ?? '（这一趟没建 Release）'}
   安装包：   ${second.artifact?.name ?? '（这一趟没构建）'}
-  release.json 的 PR：${second.infoReview?.url ?? '（没有 —— 可能上传没走到）'}
+  ${manifestRel} 的 PR：${second.infoReview?.url ?? '（没有 —— 可能上传没走到）'}
 
-  ★ **客户端要等 release.json 那个 PR 合并**才看得到新版本（GitHub raw 只吐 main 上的东西）。
-
+  ★ **要等 ${manifestRel} 那个 PR 合并**才生效（客户端只读 main 上的东西）。
+${
+  channel === 'preview'
+    ? `
+  ★ 这一趟**没有**改动 release.json —— 正式版用户不会收到任何通知。
+    验证：装 0.0.9 的机器打开软件，不该出现"有新版"；点「检查更新」能看到这个预览版。
+`
+    : ''
+}
   下一步（发布号已固定，别再动它）：
-    npm run version:next      # 把工作区版本换成下一个 -dev（如 0.0.10 → 0.0.11-dev）
+    npm run version:next      # 预览版会回到同一基础的 -dev（0.0.10-preview.1 → 0.0.10-dev）
     git switch -c feat/<next>
 `)

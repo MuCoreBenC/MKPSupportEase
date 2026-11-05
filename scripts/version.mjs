@@ -19,10 +19,13 @@
  *
  * 用法：
  *   node scripts/version.mjs check       三处一致 + 号没被发过（CI / pre-push 跑）
- *   node scripts/version.mjs bump-dev    从已发布最高 tag 推下一个 `-dev`
+ *   node scripts/version.mjs bump-dev    推下一个 `-dev`（按**正式版**走，预览版不算）
  *   node scripts/version.mjs release     把当前 `-dev` 去掉（发布前用）
- *   node scripts/version.mjs next        发布后 → 下一个 `-dev`
+ *   node scripts/version.mjs next        发布后 → 下一个 `-dev`（预览版回到同一基础）
  *   node scripts/version.mjs current     打印当前版本（给别的脚本取）
+ *
+ * ★ **预览号**（2026-11-05）：`x.y.z-preview.N` 是**发布**的一种，但它**不消耗**正式号 ——
+ *   发过 `0.0.10-preview.1` 之后，`0.0.10` 仍可照常发正式版；同一个预览序号不许发两次。
  */
 import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -49,23 +52,42 @@ function readVersions() {
   }
 }
 
-/** `x.y.z` / `x.y.z-dev` → `{ text, base, major, minor, patch, dev }`；不合法返回 null */
+/**
+ * `x.y.z` / `x.y.z-dev` / `x.y.z-preview.N` → `{ text, base, major, minor, patch, kind, seq }`；
+ * 不合法返回 null。
+ *
+ * ★ `kind` 三档（2026-11-05 预览通道）：
+ *   - `stable` 正式版：**消耗这个号**，之后同基础不许再发任何东西；
+ *   - `preview` 预览版：发出去过，但**不消耗正式号** —— `0.0.10-preview.1` 之后
+ *     `0.0.10` 仍可照常发；
+ *   - `dev` 开发占位：从没发出去过。
+ */
 function parse(text) {
-  const m = /^(\d+)\.(\d+)\.(\d+)(-dev)?$/.exec(String(text ?? '').trim())
+  const t = String(text ?? '').trim()
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(dev)|-preview\.(\d+))?$/.exec(t)
   if (!m) return null
+  // `-preview.01` 与 `-preview.1` 是同一个号，却有两种写法 —— 直接判非法
+  if (m[5] !== undefined && (m[5].startsWith('0') || Number(m[5]) < 1)) return null
+  const kind = m[4] ? 'dev' : m[5] !== undefined ? 'preview' : 'stable'
   return {
     text,
     base: `${m[1]}.${m[2]}.${m[3]}`,
     major: Number(m[1]),
     minor: Number(m[2]),
     patch: Number(m[3]),
-    dev: m[4] === '-dev',
+    kind,
+    seq: m[5] !== undefined ? Number(m[5]) : 0,
   }
 }
 
 const cmp = (a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patch
 
-/** 已发布的 tag（`v*`，只认合法 semver），按版本升序 */
+/**
+ * 已发布的 tag（`v*`，只认合法形状），按版本升序。
+ *
+ * ★ 预览 tag（`v0.0.10-preview.1`）也在里面（2026-11-05）：不认它的话，
+ *   "这个预览号发过没有"就永远答"没有"，同一个号能被发第二次。
+ */
 function publishedTags() {
   return execFileSync('git', ['tag', '--list', 'v*'], { cwd: ROOT, encoding: 'utf8' })
     .trim()
@@ -73,10 +95,18 @@ function publishedTags() {
     .filter(Boolean)
     .map((tag) => ({ tag, v: parse(tag.slice(1)) }))
     .filter((x) => x.v !== null)
-    .sort((a, b) => cmp(a.v, b.v))
+    .sort((a, b) => cmp(a.v, b.v) || a.v.seq - b.v.seq)
 }
 
-const highestPublished = () => publishedTags().at(-1)?.v ?? null
+/** 这个基础版本有没有发过**正式版**（预览版不算 —— 它不消耗正式号） */
+const stableReleased = (base) =>
+  publishedTags().some((x) => x.v.kind === 'stable' && x.v.base === base)
+
+/** `0.0.10` → `0.0.11`（补丁号 +1，只改最后一段） */
+function bumpPatch(base) {
+  const [major, minor, patch] = base.split('.').map(Number)
+  return `${major}.${minor}.${patch + 1}`
+}
 
 const fail = (message, hint) => {
   console.error(`\n\u001b[31m版本号闸红：${message}\u001b[0m`)
@@ -122,7 +152,9 @@ function assertConsistent() {
     )
   }
   const parsed = parse(v.pkg)
-  if (!parsed) fail(`版本号格式不对：${v.pkg}（要 x.y.z 或 x.y.z-dev）`)
+  if (!parsed) {
+    fail(`版本号格式不对：${v.pkg}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+  }
   return parsed
 }
 
@@ -131,12 +163,15 @@ function assertConsistent() {
 function check() {
   const version = assertConsistent()
   const published = publishedTags()
-  const already = published.some((x) => x.v.base === version.base)
+  const byBase = published.filter((x) => x.v.base === version.base)
 
-  if (version.dev) {
-    if (already) {
+  /* 开发占位：只有**正式版**发过才算"这个号用掉了"。
+   * 预览版发过不影响 `0.0.10-dev` 继续开发 —— 这正是双通道要的样子
+   * （先前这里按 base 一刀切，发过预览就再也回不到开发版）。 */
+  if (version.kind === 'dev') {
+    if (byBase.some((x) => x.v.kind === 'stable')) {
       fail(
-        `v${version.base} 已经发布过，开发版本不能再用这个号`,
+        `v${version.base} 已经发过正式版，开发版本不能再用这个号`,
         '跑 node scripts/version.mjs next 取下一个补丁号（例如 0.0.11-dev）',
       )
     }
@@ -144,7 +179,21 @@ function check() {
     return
   }
 
-  if (already) {
+  /* 预览版：同一个**完整号**不许发两次；同基础的下一个序号随便发。 */
+  if (version.kind === 'preview') {
+    const same = byBase.find((x) => x.v.kind === 'preview' && x.v.seq === version.seq)
+    if (same) {
+      warn(
+        `当前是已发布过的预览版 v${version.text} —— 它在 main 上合法（发布提交），` +
+          '但开发新东西前必须先换成 -dev，或发下一个预览序号',
+      )
+      return
+    }
+    ok(`预览版 ${version.text}（tag 还没打 —— 这是发布流程中的状态）`)
+    return
+  }
+
+  if (byBase.some((x) => x.v.kind === 'stable')) {
     warn(
       `当前是已发布版本 v${version.text} —— 它在 main 上合法（发布提交），` +
         '但开发新东西前必须换成下一个 -dev',
@@ -159,36 +208,42 @@ function check() {
 
 function bumpDev() {
   const version = assertConsistent()
-  const published = publishedTags()
-  const already = published.some((x) => x.v.base === version.base)
 
-  if (version.dev && !already) {
+  if (version.kind === 'dev' && !stableReleased(version.base)) {
     ok(`已经是开发版本 ${version.text}，不用动`)
     return
   }
 
-  const highest = highestPublished()
-  const next = highest
-    ? `${highest.major}.${highest.minor}.${highest.patch + 1}-dev`
-    : '0.0.1-dev'
-  writeAll(next)
+  /* 分两种（2026-11-05 预览通道）：
+   *   · 当前号的**正式版已经发出去** → 换下一个补丁号的 -dev（`0.0.10` → `0.0.11-dev`）；
+   *   · 正式号还没被消耗（当前是预览版 / 开发版）→ **停在同一个基础**
+   *     （`0.0.10-preview.1` → `0.0.10-dev`），不然 `0.0.10` 正式版会被永远跳过去。 */
+  const nextBase = stableReleased(version.base) ? bumpPatch(version.base) : version.base
+  writeAll(`${nextBase}-dev`)
 }
 
 function release() {
   const version = assertConsistent()
-  if (!version.dev) {
+  if (version.kind !== 'dev') {
     fail(`当前 ${version.text} 不是 -dev`, '发布版本由 scripts/release.mjs 显式给出')
   }
-  if (publishedTags().some((x) => x.v.base === version.base)) {
-    fail(`v${version.base} 已经发布过，不能再用同一个号`)
+  if (stableReleased(version.base)) {
+    fail(`v${version.base} 已经发过正式版，不能再用同一个号`)
   }
   writeAll(version.base)
 }
 
 function next() {
   const version = assertConsistent()
-  if (version.dev) {
+  if (version.kind === 'dev') {
     fail(`当前已经是开发版本 ${version.text}`, '先发布，再 next')
+  }
+  /* ★ 预览版发完之后回到**同一个基础**的 -dev（2026-11-05）：
+   *   正式号还没被消耗，开发继续朝 `0.0.10` 走；
+   *   直接跳 `0.0.11-dev` 会把还没发的正式版 0.0.10 永远跳过去。 */
+  if (version.kind === 'preview') {
+    writeAll(`${version.base}-dev`)
+    return
   }
   writeAll(`${version.major}.${version.minor}.${version.patch + 1}-dev`)
 }
