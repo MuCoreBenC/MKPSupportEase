@@ -52,6 +52,36 @@ use crate::error::AppError;
 
 use super::structure::{version_at_least, APP_VERSION};
 
+/// 软件更新通道（2026-11-05 双通道）。
+///
+/// 逐档 match，不许 `_ =>` 兜底成某一档：认不出的通道名要**显式报错**，
+/// 否则一句拼错的 `channel` 会悄悄把用户点中的预览版下成正式版。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UpdateChannel {
+    /// 正式版：会主动通知
+    Stable,
+    /// 预览版：只在用户主动点「重新检查」时出现
+    Preview,
+}
+
+impl UpdateChannel {
+    pub fn parse(raw: &str) -> Option<Self> {
+        match raw.trim() {
+            "stable" => Some(Self::Stable),
+            "preview" => Some(Self::Preview),
+            _ => None,
+        }
+    }
+
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Stable => "stable",
+            Self::Preview => "preview",
+        }
+    }
+}
+
 /// `release.json` 的协议代次。**加字段不升号、改语义才升**（与 source / catalog 同一条）。
 pub const RELEASE_SCHEMA: u32 = 1;
 
@@ -74,6 +104,12 @@ pub struct ReleaseInfo {
     /// 老发布物天生如此，客户端会照旧退回那条路（不是错误状态）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub asset: Option<ReleaseAsset>,
+    /// **双平台资产**（2026-11-05，可选格，加它不升 `releaseSchema`）。
+    ///
+    /// `asset` 保留为老客户端的**单资产入口**（macOS `.app.zip`），不删不改语义。
+    /// 新客户端在 `assets[]` 里按当前平台挑一份；没给 `assets` 就照旧用 `asset`。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assets: Option<Vec<ReleaseAsset>>,
 }
 
 /// 发布出去的**安装包**（应用内下载这一刀新增，可选格）。
@@ -90,6 +126,34 @@ pub struct ReleaseAsset {
     /// 校验和。**有就校验**（没有就只验大小 —— 那是弱一档，但不是没有）
     #[serde(default)]
     pub sha256: String,
+    /// 适用平台（`macos` / `windows`）。老发布物没这一格 ⇒ 按「macOS 老入口」处理。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+    /// 资产种类：`appZip`（macOS 解包替换）/ `nsis`（Windows 静默安装）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+impl ReleaseInfo {
+    /// 挑**当前平台**能用的安装包。
+    ///
+    /// 优先在 `assets[]` 里按 `platform` 找；没给 `assets` 就退回老的单 `asset`
+    /// （macOS `.app.zip` 那条路，0.0.2 起一直成立）。`platform` 缺省的资产
+    /// 视为「不挑平台」，也能被选中。找不到就 `None` —— 界面退回「打开下载页」。
+    pub fn asset_for_host(&self) -> Option<ReleaseAsset> {
+        if let Some(list) = &self.assets {
+            let here = host_platform();
+            let picked = list
+                .iter()
+                .find(|a| a.platform.as_deref() == Some(here))
+                .or_else(|| list.iter().find(|a| a.platform.is_none()))
+                .cloned();
+            if picked.is_some() {
+                return picked.filter(|a| a.is_downloadable());
+            }
+        }
+        self.asset.clone().filter(|a| a.is_downloadable())
+    }
 }
 
 impl ReleaseAsset {
@@ -152,32 +216,178 @@ pub struct SoftwareUpdate {
     pub asset: Option<ReleaseAsset>,
 }
 
+/// **软件版本**专用解析（`major.minor.patch` + 可选预发布标识）。
+///
+/// 2026-11-05 之前这里只有 `structure::version_parts`：按非数字切开、取前三段，
+/// 于是 `0.0.10-preview.1` 与 `0.0.10` 都变成 `[0,0,10]`，`compare` 只要
+/// 字符串不等就判「有新版」—— 预览版会被当成比正式版还新，0.0.9 也会被它打扰。
+///
+/// ★ `structure::version_parts` / `version_at_least` **保持不动**：它们服务
+///   `can_read()` / `minClient`（预设数据能不能读），属另一条链。软件版本比较
+///   从这里另起一套，不牵动数据链。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SoftwareVersion {
+    pub major: u64,
+    pub minor: u64,
+    pub patch: u64,
+    /// `None` = 正式版（同基础版本里最高）；`Some` = 预发布，序号越大越新
+    pub pre: Option<(u8, u64)>,
+}
+
+/// 预发布标识的档次（SemVer 惯例）：dev < alpha < beta < preview < rc。
+/// 认不出的标识一律按 `dev` 这一档（保守：不会把它拔高成正式版）。
+fn pre_rank(kind: &str) -> u8 {
+    match kind {
+        "alpha" | "a" => 1,
+        "beta" | "b" => 2,
+        "preview" | "pre" => 3,
+        "rc" => 4,
+        _ => 0, // dev / dev2 / 未知后缀
+    }
+}
+
+/// 解析 `v0.0.10-preview.1` / `0.0.10-dev2` / `0.0.10` 这类软件版本号。
+/// 解不出就 `None`（调用方退回旧的数字比较，不静默编一个版本）。
+pub fn parse_software_version(raw: &str) -> Option<SoftwareVersion> {
+    let t = raw.trim().trim_start_matches('v');
+    let (core, suffix) = match t.split_once('-') {
+        Some((c, s)) => (c, Some(s)),
+        None => (t, None),
+    };
+    let mut parts = core.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    let pre = suffix.map(|s| {
+        let (kind, seq) = match s.rsplit_once('.') {
+            Some((k, n)) => match n.parse::<u64>() {
+                Ok(v) => (k, v),
+                Err(_) => (s.trim_end_matches(|c: char| c.is_ascii_digit()), 0),
+            },
+            // `dev2` 这种把数字粘在词尾的写法也认
+            None => {
+                let cut = s.find(|c: char| c.is_ascii_digit()).unwrap_or(s.len());
+                let n = s[cut..].parse::<u64>().unwrap_or(0);
+                (&s[..cut], n)
+            }
+        };
+        (pre_rank(kind), seq)
+    });
+    Some(SoftwareVersion {
+        major,
+        minor,
+        patch,
+        pre,
+    })
+}
+
+/// 这是不是预发布版本（`dev` / `preview.N` / `rc.N` / `alpha.N` / `beta.N`）。
+pub fn is_prerelease(raw: &str) -> bool {
+    parse_software_version(raw).is_some_and(|v| v.pre.is_some())
+}
+
 /// 比较"当前构建版本"与"远端发布版本"。
 ///
-/// 用 [`version_at_least`] 反向复用（同一套 `major.minor.patch`、同一套 `-dev` 忽略规则）——
-/// **版本比较只有一处实现**，这里不另写一遍。
+/// 旧口径：`version_parts` 只取前三段数字 + 字符串不等就算更新 —— 会把
+/// `0.0.10-preview.1` 判成比 `0.0.10` 新，也会让 0.0.9 正式版用户收到预览版提示。
+/// 新口径：软件版本专用解析，正式版 > 同基础版本的任何预发布；
+/// **预发布版绝不主动提醒正式版用户**（哪怕它的数字段更大）。
 ///
-/// `latest` 比当前**严格新**才算有更新（相等不是更新）；比当前旧（回退发布 / 误配）也不算
-/// "有更新" —— 提示一个更旧的版本没有任何意义。
+/// 保住的：`latest` 严格新才算更新、相等不是更新、回退发布不算更新、
+/// `-dev` 后缀不干扰三段比较、`compare("9.9.9", …)` 仍然为真。
+/// 放弃的：把预发布版当"新版本"提示给正式版用户 —— 那正是本次要消灭的事故。
+/// 为什么：预览版只该在用户主动打开更新页时并列出现，通道切换由用户点选决定。
 pub fn compare(latest: &str, current: &str) -> bool {
     let l = latest.trim();
     let c = current.trim();
     if l == c {
         return false;
     }
-    version_at_least(l, c)
+    let (Some(lv), Some(cv)) = (parse_software_version(l), parse_software_version(c)) else {
+        // 认不出的形状：退回原来那套数字比较（老发布物/脏数据仍按旧口径走，不静默改判）
+        return version_at_least(l, c);
+    };
+    /* ★ 守卫必须在**数字比较之前**：`0.0.10-preview.1` 的基础数字比 `0.0.9` 大，
+     * 若先比数字就会返回 true，把预览版推给正式版用户 —— 正是本次要消灭的事故。
+     * 也不能用 `#[derive(Ord)]` 直接比 `Option<pre>`（`None < Some(_)`）。 */
+    if lv.pre.is_some() && cv.pre.is_none() {
+        return false;
+    }
+    let base = (lv.major, lv.minor, lv.patch).cmp(&(cv.major, cv.minor, cv.patch));
+    if base != std::cmp::Ordering::Equal {
+        return base == std::cmp::Ordering::Greater;
+    }
+    match (lv.pre, cv.pre) {
+        (Some(_), None) => false, // 预发布不提醒正式版用户（本次要消灭的事故）
+        (None, Some(_)) => true,  // 正式版比同基础的预览版新（预览 → 正式可切回）
+        (Some(a), Some(b)) => a > b,
+        (None, None) => false,
+    }
 }
 
-/// 由一份发布信息得出给界面的更新状态（`current` 缺省 = 本构建的 [`APP_VERSION`]）。
-pub fn to_update(info: &ReleaseInfo) -> SoftwareUpdate {
+/// 一份**可主动选择的更新候选**（2026-11-05 双通道）。
+///
+/// 与 `SoftwareUpdate` 的区别：那是「自动通知」的结论（只看正式版）；
+/// 这是「用户主动刷新时能看见什么」（正式版 + 预览版并列）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateCandidate {
+    pub channel: UpdateChannel,
+    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset: Option<ReleaseAsset>,
+}
+
+impl UpdateCandidate {
+    pub fn from_info(channel: UpdateChannel, info: &ReleaseInfo) -> Self {
+        Self {
+            channel,
+            version: info.version.clone(),
+            notes: non_empty(&info.notes),
+            url: non_empty(&info.url),
+            asset: info.asset_for_host(),
+        }
+    }
+}
+
+/* --------------------------- 双平台资产（可选，加字段不升代次） --------------------------- */
+
+/// 当前构建的平台名（写进 `assets[]` 的 `platform` 用同一个词表）。
+#[cfg(target_os = "windows")]
+pub fn host_platform() -> &'static str {
+    "windows"
+}
+#[cfg(target_os = "macos")]
+pub fn host_platform() -> &'static str {
+    "macos"
+}
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+pub fn host_platform() -> &'static str {
+    "other"
+}
+
+/// 由一份发布信息得出给界面的更新状态（`current` 可注入，判据用）。
+pub fn to_update_for(info: &ReleaseInfo, current: &str) -> SoftwareUpdate {
     SoftwareUpdate {
-        has_update: compare(&info.version, APP_VERSION),
-        current_version: APP_VERSION.to_owned(),
+        has_update: compare(&info.version, current),
+        current_version: current.to_owned(),
         latest_version: info.version.clone(),
         notes: non_empty(&info.notes),
         url: non_empty(&info.url),
-        asset: info.asset.clone().filter(|a| a.is_downloadable()),
+        asset: info.asset_for_host(),
     }
+}
+
+/// 用本构建版本 [`APP_VERSION`] 判定（生产路径）。
+pub fn to_update(info: &ReleaseInfo) -> SoftwareUpdate {
+    to_update_for(info, APP_VERSION)
 }
 
 /// 「没有发布信息源 / 还没部署」时的状态：如实报"已是最新"（**不是更新**），
@@ -280,13 +490,83 @@ mod tests {
         assert_eq!(up.latest_version, "999.0.0");
     }
 
+    /// **旧判据 → 新判据**（2026-11-05）。
+    ///
+    /// 旧：`-dev` 后缀不干扰三段数字比较，所以 `0.1.0-dev` 比 `0.0.9` 新就算更新。
+    /// 新：软件版本真正识别预发布标识，**任何预发布版都不主动提醒正式版用户**
+    ///     （作者：「dev 是我自己测试用，不想让用户收到」）。
+    /// 保住：三段数字比较、相等 / 回退不提示；正式版升级照旧。
+    /// 放弃：「预发布版只要数字更大就当普通新版提示」—— 那正是本次要消灭的事故。
+    /// 为什么：预览 / dev 只该在用户主动打开更新页时并列出现。
     #[test]
     fn software_version_compares_by_semver_and_ignores_dev_suffix() {
         assert!(compare("0.0.2", "0.0.1"), "更高 = 有更新");
         assert!(!compare("0.0.1", "0.0.1"), "相等 = 没有更新");
         assert!(!compare("0.0.0", "0.0.1"), "更低（回退）不算有更新");
-        // `-dev` 后缀不干扰三段比较（与 struct 的 version_at_least 同一套规则）
-        assert!(compare("0.1.0-dev", "0.0.9"), "-dev 后缀不该干扰");
+        assert!(
+            !compare("0.1.0-dev", "0.0.9"),
+            "★ 开发构建再新也不主动提醒正式版用户"
+        );
+        assert!(
+            compare("0.1.0", "0.0.9-dev"),
+            "正式版比旧的开发构建新 —— 主动切回正式版成立"
+        );
+    }
+
+    /// **软件版本真正识别预发布标识**（2026-11-05 双通道）。
+    ///
+    /// 旧判据：只测三段数字 + `-dev` 不干扰，`0.0.10-preview.1` 与 `0.0.10`
+    /// 都变成 `[0,0,10]`，字符串不等就判「有新版」。
+    /// 新判据：正式版 > 同基础版本任何预发布；预发布绝不主动提醒正式版用户。
+    /// 保住的：三段数字比较、相等/回退不提示、`-dev` 不干扰基础版本比较。
+    /// 放弃的：把预发布版当「新版本」提示 —— 那正是本次要消灭的事故。
+    /// 为什么：预览版只该在用户主动打开更新页时并列出现，通道切换靠用户点选。
+    #[test]
+    fn prerelease_versions_are_recognized_and_never_announced_to_stable_users() {
+        assert!(
+            !compare("0.0.10-preview.1", "0.0.9"),
+            "★ 0.0.9 正式版用户绝不能被预览版打扰"
+        );
+        assert!(
+            !compare("0.0.10-preview.1", "0.0.10"),
+            "预览版不能被判成比同基础正式版新"
+        );
+        assert!(
+            compare("0.0.10", "0.0.10-preview.1"),
+            "正式版比同基础预览版新（预览 → 正式可以切回）"
+        );
+        assert!(
+            compare("0.0.10-preview.2", "0.0.10-preview.1"),
+            "同一预览通道里序号大的更新"
+        );
+        assert!(!compare("0.0.10-preview.1", "0.0.10-preview.1"));
+        assert!(
+            !compare("0.0.11-preview.1", "0.0.10"),
+            "哪怕基础版本更高，预览版也不主动提醒正式版用户"
+        );
+        assert!(compare("999.0.0", "0.0.10-dev"), "正式版远高于开发构建");
+    }
+
+    /// 解析形状：`v` 前缀、`.N` 序号、`dev2` 粘连写法、未知后缀一律按预发布处理。
+    #[test]
+    fn software_version_parser_shapes() {
+        assert_eq!(
+            parse_software_version("v0.0.10"),
+            Some(SoftwareVersion {
+                major: 0,
+                minor: 0,
+                patch: 10,
+                pre: None,
+            })
+        );
+        let p = parse_software_version("0.0.10-preview.1").unwrap();
+        assert_eq!(p.pre, Some((3, 1)));
+        let d = parse_software_version("0.0.10-dev2").unwrap();
+        assert_eq!(d.pre, Some((0, 2)));
+        assert!(is_prerelease("0.0.10-rc.1"));
+        assert!(!is_prerelease("0.0.10"));
+        assert_eq!(parse_software_version("not-a-version"), None);
+        assert_eq!(parse_software_version("1.2.3.4"), None);
     }
 
     /// 没有信息源时：如实报"已是最新"，但当前版本照给 —— 界面不会因此出现空白

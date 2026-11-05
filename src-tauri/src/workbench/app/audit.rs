@@ -979,6 +979,11 @@ fn source_correct(delivery_root: &std::path::Path) -> AuditItem {
     if let Some(rel) = &manifest.manifest {
         must_exist(rel, "manifest");
     }
+    /* 声明了预览清单就必须在交付根里（2026-11-05 双通道）；
+     * 没声明是合法老档，不查 —— 与 Resolver 的"可选格"口径一致。 */
+    if let Some(rel) = &manifest.release_preview {
+        must_exist(rel, "releasePreview");
+    }
     if missing.is_empty() {
         item.pass(format!(
             "v2 寻址规则声明认得出来（catalog={}，filesRoot={}），声明的东西都在交付根里",
@@ -1122,12 +1127,14 @@ fn client_url_reconciliation(
                 Err(e) => bad.push(format!("{} · {}：{}", f.kind, f.file_name, e.message)),
             }
         }
-        // 固定物：catalog / manifest / release / content/*
+        // 固定物：catalog / manifest / release / releasePreview / content/*
         use crate::runtime::resolver::ResourceRef;
         let fixed = [
             (ResourceRef::Catalog, "catalog"),
             (ResourceRef::Manifest, "manifest"),
             (ResourceRef::Release, "release"),
+            /* 预览清单是可选资源：未声明在这里照样不算错（2026-11-05 双通道） */
+            (ResourceRef::ReleasePreview, "releasePreview"),
         ];
         for (r, what) in fixed {
             match resolver.resolve(r) {

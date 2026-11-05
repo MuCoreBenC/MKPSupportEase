@@ -3,6 +3,7 @@
   "catalog": "catalog.json",
   "manifest": "manifest.json",
   "release": "release.json",
+  "releasePreview": "release-preview.json",
   "content": "content/",
   "filesRoot": ".."
 }

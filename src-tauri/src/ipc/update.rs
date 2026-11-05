@@ -85,20 +85,55 @@ pub async fn update_info(app: AppHandle) -> Result<UpdateInfoDto, AppError> {
 
 /// 开始下载安装包。**秒回**（下载在后台跑）。
 ///
-/// ★ 界面**只在 `asset` 存在时**才摆这颗按钮 —— 没有安装包就别给一个点了会报错的按钮。
-/// 进度靠 `software-update-progress` 事件推。
+/// ★ 2026-11-05 双通道：`channel` 决定下**用户点中的那一路**的资产。
+///   - `None` / `"stable"`：旧的单一入口（标题栏 `UpdateIndicator` 仍无参调用）；
+///   - `"preview"`：预览版那一档；
+///   - 认不出的字符串**显式报错**，不悄悄兜底成正式版 —— 否则「尝试测试版」
+///     会把正式版包下下来，用户还以为自己在试预览。
+///
+/// ★ 界面**只在候选的 `asset` 存在时**才摆这颗按钮。进度靠事件推。
 #[tauri::command]
-pub async fn start_update(app: AppHandle) -> Result<(), AppError> {
+pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
-    let update = software_update(&root);
-    if !update.has_update {
+    let channel = match channel.as_deref().map(str::trim) {
+        None | Some("") | Some("stable") => crate::runtime::release_info::UpdateChannel::Stable,
+        Some("preview") => crate::runtime::release_info::UpdateChannel::Preview,
+        Some(other) => {
+            return Err(AppError::invalid_argument(format!(
+                "认不出的更新通道 {other:?}（只认 stable / preview）"
+            )))
+        }
+    };
+
+    /* 一次取两份清单（最多两次 GET），资产按用户点中的那一路挑。
+     * 取不到候选集时退回旧的「单一正式版」口子 —— 标题栏 / 老前端不传 channel
+     * 时行为与改造前逐字一致，不会多打一次网络请求。 */
+    let candidates =
+        crate::runtime::update_check::fetch_update_candidates(&root).unwrap_or_else(|e| {
+            tracing::debug!("候选集没取到，退回单一正式版资产：{}", e.message);
+            Vec::new()
+        });
+    let chosen = candidates.iter().find(|c| c.channel == channel);
+    let asset = chosen.and_then(|c| c.asset.clone()).or_else(|| {
+        (channel == crate::runtime::release_info::UpdateChannel::Stable && candidates.is_empty())
+            .then(|| software_update(&root).asset)
+            .flatten()
+    });
+
+    if channel == crate::runtime::release_info::UpdateChannel::Stable
+        && chosen.is_some_and(|c| {
+            !crate::runtime::release_info::compare(
+                &c.version,
+                crate::runtime::structure::APP_VERSION,
+            )
+        })
+    {
         return Err(AppError::invalid_argument(messages::text(
             "ui.ipc.update.156",
             &[],
         )));
     }
-    let asset = update
-        .asset
+    let asset = asset
         .ok_or_else(|| AppError::invalid_argument(messages::text("ui.ipc.update.157", &[])))?;
 
     let emit_app = app.clone();
@@ -146,27 +181,49 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
         )));
     };
     let staged = std::path::PathBuf::from(&path);
-    let target = updater::running_app()?;
-    let script = updater::install_script(
-        &root,
-        &target,
-        &staged,
-        crate::runtime::structure::APP_VERSION,
-        &now_iso8601_local(),
-    );
-    std::process::Command::new("sh")
-        .arg("-c")
-        .arg(&script)
-        .spawn()
-        .map_err(|e| {
+    let version = crate::runtime::structure::APP_VERSION;
+    let at = now_iso8601_local();
+
+    /* ★ 平台分流（2026-11-05）：
+     * macOS 沿用「替换 .app + open」，Windows 走「NSIS /S 静默安装 + 拉起 exe」。
+     * 两边都把结果写进同一份 `run/update-result.json`，下次启动由 update_info 读。 */
+    #[cfg(target_os = "windows")]
+    {
+        let new_exe = updater::running_exe()?;
+        let script = updater::windows_install_script(&root, &staged, &new_exe, version, &at);
+        let mut cmd = std::process::Command::new("powershell");
+        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+        // 不弹控制台窗口（DETACHED_PROCESS | CREATE_NO_WINDOW 的形状由 Windows SDK 常量给）
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.spawn().map_err(|e| {
             AppError::io(messages::text("ui.ipc.update.159", &[])).with_detail(e.to_string())
         })?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let target = updater::running_app()?;
+        let script = updater::install_script(&root, &target, &staged, version, &at);
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .spawn()
+            .map_err(|e| {
+                AppError::io(messages::text("ui.ipc.update.159", &[])).with_detail(e.to_string())
+            })?;
+    }
     // 给脚本一点时间把最后一句排进 shell（★ 退出后这一段才真正开始）。
     // 客户端**不带 tokio**：`block_on` 一个"睡 200ms"是这里最省事、也不引依赖的做法。
     tauri::async_runtime::block_on(async {
         std::thread::sleep(std::time::Duration::from_millis(200));
     });
-    updater::cleanup_stage(&root);
+    /* ★ 不在这里 `cleanup_stage`（2026-11-05 修掉的时序 bug）：
+     * 后台脚本 `sleep 1` 之后才 `mv` 暂存里的 `.app` / 才 `/S` 装 setup.exe，
+     * 而本进程只等 200ms 就退出 —— 立刻清暂存等于把脚本要用的东西删了。
+     * 清理交给下一次 `download`（它开头会先清旧暂存），与「失败即停、如实说」不冲突。 */
     app.exit(0);
     Ok(())
 }

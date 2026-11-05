@@ -418,7 +418,7 @@ export const bridgeApi: MkpApi = {
   checkSoftwareUpdate: () => call('checkSoftwareUpdate', 'check_software_update'),
   /* 应用内更新（第五刀）：命令名与前端一一对应，后端在 `ipc/update.rs` */
   updateInfo: () => call('updateInfo', 'update_info'),
-  startUpdate: () => call('startUpdate', 'start_update'),
+  startUpdate: (channel) => call('startUpdate', 'start_update', { channel: channel ?? null }),
   pauseUpdate: () => call('pauseUpdate', 'pause_update'),
   resumeUpdate: () => call('resumeUpdate', 'resume_update'),
   cancelUpdate: () => call('cancelUpdate', 'cancel_update'),

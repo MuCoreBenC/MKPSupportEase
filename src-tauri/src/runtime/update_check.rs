@@ -31,23 +31,111 @@ static CHECKED: AtomicBool = AtomicBool::new(false);
 
 /// 推给前端的那点信息。**版本号以外都不带** —— 通知只负责"有新版、点我过去"，
 /// 详情（说明 / 下载地址 / 更新按钮）由设置页「软件更新」那一块自己读。
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateAvailable {
     pub version: String,
 }
 
-/// 取一份「有没有新版本」的结论。
+/// 取**正式版**清单内容（自动通知与标题栏供数的唯一取数口子）。
 ///
-/// 地址从 Source Manifest 的 `release_url()` 来（不许从 base_url 上跳一级去猜），
-/// 版本比较用 [`release_info::to_update`]（`-dev` 后缀忽略、严格新才算）。
-/// 设置页手动检查与自动顺路查**共用这一处**，避免两条链各读一份 release.json。
-pub fn fetch_update(root: &Path) -> Result<release_info::SoftwareUpdate, AppError> {
+/// 地址从 Source Manifest 的 `release_url()` 来（不许从 base_url 上跳一级去猜）。
+/// ★ 这里**只读 `ResourceRef::Release`**，不碰 preview：老客户端与新版客户端
+///   的自动通知都只能是正式版，结构上就不可能把预览版推给人。
+pub fn fetch_stable_info(root: &Path) -> Result<release_info::ReleaseInfo, AppError> {
     let resolved = source::resolve_source(root)?;
     let release_url = resolved.release_url()?;
     let bytes = net::get_release(&release_url)?;
-    let info = release_info::parse(&bytes)?;
-    Ok(release_info::to_update(&info))
+    release_info::parse(&bytes)
+}
+
+/// 取一份「有没有新版本」的结论（正式版，自动通知与标题栏共用这一处）。
+pub fn fetch_update(root: &Path) -> Result<release_info::SoftwareUpdate, AppError> {
+    Ok(release_info::to_update(&fetch_stable_info(root)?))
+}
+
+/// 由两份清单拼出**用户主动检查**时并列展示的候选（纯函数，判据不联网）。
+///
+/// - 正式版永远排第一（作者：正式版优先排序）；
+/// - 预览版与正式版同版本号 = 占位清单（"当前没有预览版"），不摆第二张卡；
+/// - 预览版仍可主动选择，即便它的基础版本号更低 —— 那是**通道选择**，不靠大小推断。
+pub fn candidates_from_infos(
+    stable: &release_info::ReleaseInfo,
+    preview: Option<&release_info::ReleaseInfo>,
+) -> Vec<release_info::UpdateCandidate> {
+    let mut list = vec![release_info::UpdateCandidate::from_info(
+        release_info::UpdateChannel::Stable,
+        stable,
+    )];
+    if let Some(p) = preview {
+        if p.version.trim() != stable.version.trim() {
+            list.push(release_info::UpdateCandidate::from_info(
+                release_info::UpdateChannel::Preview,
+                p,
+            ));
+        }
+    }
+    list
+}
+
+/// **用户主动点「重新检查」**才走这里：正式版 + 预览版**各取一次**
+/// （一次手势最多两次 GET，不逐版本串行、不重复取正式清单）。
+///
+/// 返回顶层正式版结论 + 并列候选，供 `check_software_update` 一次用掉 ——
+/// 免得「先 fetch_update 再 fetch_update_candidates」把正式清单取两遍。
+/// 预览通道是可选能力：没声明 / 取不到 / 解析不了都不算故障，正式版结论照给。
+pub fn fetch_update_bundle(
+    root: &Path,
+) -> Result<
+    (
+        release_info::SoftwareUpdate,
+        Vec<release_info::UpdateCandidate>,
+    ),
+    AppError,
+> {
+    let resolved = source::resolve_source(root)?;
+    let stable_url = resolved.release_url()?;
+    let stable = release_info::parse(&net::get_release(&stable_url)?)?;
+
+    let preview = match resolved.release_preview_url()? {
+        None => None,
+        Some(url) => match net::get_release(&url) {
+            Ok(bytes) => release_info::parse(&bytes).ok(),
+            Err(e) => {
+                tracing::debug!("预览清单这次没取到（不算故障）：{}", e.message);
+                None
+            }
+        },
+    };
+    Ok((
+        release_info::to_update(&stable),
+        candidates_from_infos(&stable, preview.as_ref()),
+    ))
+}
+
+/// 只要候选集时用这个（下载按通道挑资产）。
+pub fn fetch_update_candidates(
+    root: &Path,
+) -> Result<Vec<release_info::UpdateCandidate>, AppError> {
+    Ok(fetch_update_bundle(root)?.1)
+}
+
+/// **自动通知的纯判定**：只吃正式版清单，预览版在类型上就进不来。
+///
+/// 再加一道保险：即便有人把预览清单误塞进正式版入口，预发布版也不会
+/// 触发事件（[`release_info::compare`] 已保证预发布不提醒正式版用户）。
+pub fn auto_notification(
+    stable: &release_info::ReleaseInfo,
+    current: &str,
+) -> Option<UpdateAvailable> {
+    let u = release_info::to_update_for(stable, current);
+    if u.has_update {
+        Some(UpdateAvailable {
+            version: u.latest_version,
+        })
+    } else {
+        None
+    }
 }
 
 /// 拉目录成功之后调用：**能查就查，不能查就当没这回事**。
@@ -78,20 +166,106 @@ pub fn maybe_check_after_catalog(app: &AppHandle) {
         return;
     }
 
-    /* ③ 查 —— 失败静默，且把名额放回去（离线时别把这辈子的一次机会用掉） */
-    match fetch_update(&root) {
-        Ok(update) if update.has_update => {
-            let payload = UpdateAvailable {
-                version: update.latest_version,
-            };
-            if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
-                tracing::warn!("自动检查更新：通知事件没发出去：{e}");
+    /* ③ 查 —— **只读正式版清单**；失败静默，且把名额放回去（离线时别把机会用掉） */
+    match fetch_stable_info(&root) {
+        Ok(stable) => {
+            if let Some(payload) =
+                auto_notification(&stable, crate::runtime::structure::APP_VERSION)
+            {
+                if let Err(e) = app.emit(UPDATE_AVAILABLE_EVENT, payload) {
+                    tracing::warn!("自动检查更新：通知事件没发出去：{e}");
+                }
             }
         }
-        Ok(_) => {} // 已是最新
         Err(e) => {
             tracing::debug!("自动检查更新静默跳过：{}", e.message);
             CHECKED.store(false, Ordering::Release);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::release_info::{self, UpdateChannel};
+
+    fn info(version: &str) -> release_info::ReleaseInfo {
+        release_info::parse(
+            format!(
+                r#"{{"releaseSchema":1,"version":"{version}","notes":"","url":"https://gitee.com/o/r/releases"}}"#
+            )
+            .as_bytes(),
+        )
+        .unwrap()
+    }
+
+    /// ★ **作者点名的独立判据**（2026-11-05）：`0.0.9` 不会收到
+    /// `0.0.10-preview.1` 的自动更新通知。
+    ///
+    /// 旧判据：只测 `compare()` 的三段数字比较，预发布标识被吃掉，
+    /// `0.0.10-preview.1` 与 `0.0.10` 都变成 `[0,0,10]`，字符串不等就算有新版。
+    /// 新判据：直接钉**自动通知这条链** —— 给定正式版 0.0.6、预览版
+    /// 0.0.10-preview.1、当前 0.0.9，断言不推 `software-update-available`；
+    /// 同时断言主动检查的候选集里预览版仍然看得见（不是把预览版藏了）。
+    /// 保住的：正式版真的更新时照样通知；主动检查仍能看到两个候选。
+    /// 放弃的：「任何版本号字符串不等就算有新版」这一条旧口径。
+    /// 为什么：预览版只该在用户主动打开更新页时并列出现。
+    #[test]
+    fn a_stable_0_0_9_is_never_notified_about_a_preview_release() {
+        let stable = info("0.0.6");
+        let preview = info("0.0.10-preview.1");
+
+        // ① 自动通知入口只吃正式版清单；正式版没动 ⇒ 不推事件
+        assert_eq!(
+            auto_notification(&stable, "0.0.9"),
+            None,
+            "正式版还停在 0.0.6，0.0.9 不该收到任何通知"
+        );
+        // ② 就算有人把预览清单误塞进自动入口，也不许推
+        assert_eq!(
+            auto_notification(&preview, "0.0.9"),
+            None,
+            "预览版绝不能触发自动通知事件"
+        );
+        // ③ 源码判据：自动路径不许引用预览取数口子
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/runtime/update_check.rs"
+        ))
+        .unwrap();
+        let start = src.find("pub fn maybe_check_after_catalog").unwrap();
+        let body = &src[start..src.find("#[cfg(test)]").unwrap()];
+        assert!(
+            !body.contains("release_preview_url") && !body.contains("fetch_update_candidates"),
+            "自动通知路径不许读预览清单（启动零网络 + 预览不主动通知）"
+        );
+        assert!(body.contains("fetch_stable_info"));
+
+        // ④ 用户主动刷新时两个候选都在，正式版优先
+        let cs = candidates_from_infos(&stable, Some(&preview));
+        assert_eq!(cs.len(), 2);
+        assert_eq!(cs[0].channel, UpdateChannel::Stable);
+        assert_eq!(cs[0].version, "0.0.6");
+        assert_eq!(cs[1].channel, UpdateChannel::Preview);
+        assert_eq!(cs[1].version, "0.0.10-preview.1");
+    }
+
+    /// 占位预览清单（与正式版同版本号）不该凭空多出一张「预览版」卡。
+    #[test]
+    fn a_placeholder_preview_list_does_not_create_a_card() {
+        let stable = info("0.0.6");
+        let placeholder = info("0.0.6");
+        let cs = candidates_from_infos(&stable, Some(&placeholder));
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].channel, UpdateChannel::Stable);
+        assert_eq!(candidates_from_infos(&stable, None).len(), 1);
+    }
+
+    /// 正式版真的更新了 ⇒ 自动通知照旧推（别把功能一起改没了）。
+    #[test]
+    fn a_newer_stable_release_still_notifies() {
+        let stable = info("0.0.11");
+        let n = auto_notification(&stable, "0.0.9").expect("该通知");
+        assert_eq!(n.version, "0.0.11");
     }
 }

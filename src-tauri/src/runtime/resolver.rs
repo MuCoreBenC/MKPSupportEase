@@ -69,6 +69,12 @@ pub struct SourceManifest {
     pub manifest: Option<String>,
     /// 软件发布信息相对引用；未声明 = 该交付面不提供软件更新检查
     pub release: Option<String>,
+    /// **预览版发布信息**相对引用（2026-11-05 双通道）。
+    ///
+    /// ★ 这是**可选格**：`sourceSchema` 保持 2（加字段不升号）。老交付面没有它，
+    /// 老客户端的二进制里也根本没有解析分支 —— 它们永远不会发起这次请求，
+    /// 结构上就不会被预览版打扰。未声明 = 这个交付面不提供预览通道。
+    pub release_preview: Option<String>,
     /// 目录类 JSON 的目录相对引用；未声明 = 客户端暂不读
     pub content: Option<String>,
     /// **全局锚点规则**：`catalog.files[].path` 的锚。只认 `"."`（交付根自己）
@@ -89,6 +95,8 @@ impl SourceManifest {
             manifest: Option<String>,
             #[serde(default)]
             release: Option<String>,
+            #[serde(default)]
+            release_preview: Option<String>,
             #[serde(default)]
             content: Option<String>,
             files_root: String,
@@ -116,6 +124,7 @@ impl SourceManifest {
         for (what, opt) in [
             ("manifest", &raw.manifest),
             ("release", &raw.release),
+            ("releasePreview", &raw.release_preview),
             ("content", &raw.content),
         ] {
             if let Some(rel) = opt {
@@ -133,6 +142,7 @@ impl SourceManifest {
             catalog: raw.catalog,
             manifest: raw.manifest,
             release: raw.release,
+            release_preview: raw.release_preview,
             content: raw.content,
             files_root: raw.files_root,
         })
@@ -149,8 +159,10 @@ pub enum ResourceRef<'a> {
     Catalog,
     /// 发布账本（manifest.json）
     Manifest,
-    /// 软件发布信息（release.json）
+    /// 正式版软件发布信息（release.json）—— 自动通知只读这一份
     Release,
+    /// 预览版软件发布信息（release-preview.json）—— **只在用户主动检查时**读
+    ReleasePreview,
     /// 目录类 JSON（content/ 下，如 `machine_catalog.json`）
     Content(&'a str),
     /// 一份交付文件（预设 / BBS / 图标 / 模型……全走这一支）
@@ -256,6 +268,14 @@ impl SourceResolver {
                     .release
                     .as_deref()
                     .ok_or_else(undeclared("release"))?;
+                Ok(self.answer(join(&self.delivery, rel), None))
+            }
+            ResourceRef::ReleasePreview => {
+                let rel = self
+                    .manifest
+                    .release_preview
+                    .as_deref()
+                    .ok_or_else(undeclared("releasePreview"))?;
                 Ok(self.answer(join(&self.delivery, rel), None))
             }
             ResourceRef::Content(rel) => {
@@ -420,6 +440,7 @@ mod tests {
         "catalog": "catalog.json",
         "manifest": "manifest.json",
         "release": "release.json",
+        "releasePreview": "release-preview.json",
         "content": "content/",
         "filesRoot": ".."
     }"#;
@@ -519,6 +540,12 @@ mod tests {
         assert_eq!(
             r.resolve(ResourceRef::Release).expect("该解析得出").remote(),
             Some("https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/delivery/release.json")
+        );
+        assert_eq!(
+            r.resolve(ResourceRef::ReleasePreview)
+                .expect("该解析得出")
+                .remote(),
+            Some("https://raw.githubusercontent.com/MuCoreBenC/MKPSupportEase/main/presets/delivery/release-preview.json")
         );
         assert_eq!(
             r.resolve(ResourceRef::Content("machine_catalog.json"))
@@ -631,6 +658,30 @@ mod tests {
         let r = SourceResolver::from_bootstrap(GITHUB_DELIVERY, bytes).expect("该解析得出");
         let e = r.resolve(ResourceRef::Release).expect_err("未声明该报");
         assert!(e.message.contains("没有声明 release"), "{}", e.message);
+        let e = r
+            .resolve(ResourceRef::ReleasePreview)
+            .expect_err("老交付面没这一格，也该如实报未声明");
+        assert!(
+            e.message.contains("没有声明 releasePreview"),
+            "{}",
+            e.message
+        );
+    }
+
+    /// **双通道的兼容底线**（2026-11-05）：不加 `releasePreview` 这一格的 v2 老档
+    /// 照样解析得动；地址只在声明了的时候才存在，绝不猜一个默认文件名。
+    #[test]
+    fn the_preview_channel_is_optional_and_never_guessed() {
+        let old = br#"{"sourceSchema":2,"catalog":"catalog.json","release":"release.json","filesRoot":".."}"#;
+        let r = SourceResolver::from_bootstrap(GITHUB_DELIVERY, old).expect("老档照样解析得动");
+        assert!(r.manifest().release_preview.is_none());
+        assert!(r.resolve(ResourceRef::ReleasePreview).is_err());
+
+        let bad = br#"{"sourceSchema":2,"catalog":"catalog.json","releasePreview":"../secrets.json","filesRoot":".."}"#;
+        assert!(
+            SourceResolver::from_bootstrap(GITHUB_DELIVERY, bad).is_err(),
+            "预览声明也走同一套相对引用校验，不许跳目录"
+        );
     }
 
     /// 交付根没有上一层可退时（host 根）如实拒

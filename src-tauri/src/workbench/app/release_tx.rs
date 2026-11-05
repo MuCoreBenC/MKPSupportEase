@@ -869,6 +869,8 @@ pub fn run(
                             url,
                             size: put.size,
                             sha256: sha,
+                            platform: Some("macos".to_owned()),
+                            kind: Some("appZip".to_owned()),
                         });
                         report.summary.push_str(&format!(
                             "已上传 {zip_name}（{} 字节，应用内更新用）。",
@@ -912,6 +914,7 @@ pub fn run(
         &info_notes,
         &info_url,
         report.zip.as_ref(),
+        None, // 双平台资产：下一轮预览发布事务才写
         previous.as_ref(),
     )?;
     /* ⓪ 「动了 tag 的版本号，就必须让 release.json 跟着动」（2026-11-05 作者原话）。
@@ -1201,6 +1204,9 @@ fn release_info_text(
     notes: &str,
     url: &str,
     asset: Option<&crate::runtime::release_info::ReleaseAsset>,
+    // **双平台资产**（2026-11-05，可选）。本轮发布侧一律传 `None` —— 能力先具备，
+    // 真正写 Windows 包要等下一轮「预览版发布事务」一起做，现有 `release.json` 一个字节不动。
+    assets: Option<&[crate::runtime::release_info::ReleaseAsset]>,
     previous: Option<&release_info::ReleaseInfo>,
 ) -> Result<String, AppError> {
     let kept = asset.or_else(|| {
@@ -1223,8 +1229,23 @@ fn release_info_text(
             "sha256": a.sha256,
         });
     }
-    // ★ 断代校验在**写盘之前**：坏 URL 不许落盘（总纲 §5-M6）
+    if let Some(list) = assets {
+        value["assets"] = serde_json::json!(list
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "name": a.name, "url": a.url, "size": a.size, "sha256": a.sha256,
+                    "platform": a.platform, "kind": a.kind,
+                })
+            })
+            .collect::<Vec<_>>());
+    }
+    // ★ 断代校验在**写盘之前**：坏 URL 不许落盘（总纲 §5-M6）。
+    //   两份清单（正式 / 预览）与双平台资产走同一条判定，不另立一套。
     validate_release_source(version, url, kept)?;
+    for a in assets.unwrap_or(&[]) {
+        validate_release_source(version, "", Some(a))?;
+    }
     Ok(serde_json::to_string_pretty(&value)
         .map_err(|e| AppError::internal("发布信息序列化失败").with_detail(e.to_string()))?
         + "\n")
@@ -1242,7 +1263,7 @@ fn write_release_info(
     asset: Option<&crate::runtime::release_info::ReleaseAsset>,
 ) -> Result<String, AppError> {
     let previous = previous_release_info(repo_root);
-    let text = release_info_text(version, notes, url, asset, previous.as_ref())?;
+    let text = release_info_text(version, notes, url, asset, None, previous.as_ref())?;
     let path = repo_root.join(RELEASE_INFO_REL);
     fsx::atomic::atomic_write(&path, text.as_bytes())?;
     // 写完立刻自己解析一遍：**写进去的东西必须是客户端读得懂的东西**（代次 / 版本形状）
@@ -2295,6 +2316,8 @@ mod tests {
             url: "https://github.com/o/r/releases/download/v0.0.6/x.zip".to_owned(),
             size: 1,
             sha256: "ab".to_owned(),
+            platform: None,
+            kind: None,
         };
         let e = validate_release_source(
             "0.0.6",
@@ -2328,6 +2351,8 @@ mod tests {
             url: "https://gitee.com/o/r/releases/download/v0.0.6/x.zip".to_owned(),
             size: 1,
             sha256: "ab".to_owned(),
+            platform: None,
+            kind: None,
         };
         validate_release_source(
             "0.0.6",
@@ -2587,6 +2612,8 @@ mod tests {
             url: "https://gitee.com/o/r/releases/download/v0.0.6/x.app.zip".to_owned(),
             size: 7,
             sha256: "ab".to_owned(),
+            platform: None,
+            kind: None,
         };
         let prev = release_info::ReleaseInfo {
             version: "0.0.6".to_owned(),
@@ -2594,18 +2621,20 @@ mod tests {
             url: "https://gitee.com/o/r/releases/tag/v0.0.6".to_owned(),
             release_schema: RELEASE_SCHEMA,
             asset: Some(mac.clone()),
+            assets: None,
         };
         let url = "https://gitee.com/o/r/releases/tag/v0.0.6";
 
         // 这一趟没有新的 zip（Windows）⇒ 留住上一份那一格
-        let text = release_info_text("0.0.6", "补一个 Windows 包", url, None, Some(&prev)).unwrap();
+        let text =
+            release_info_text("0.0.6", "补一个 Windows 包", url, None, None, Some(&prev)).unwrap();
         let parsed = release_info::parse(text.as_bytes()).unwrap();
         assert_eq!(parsed.asset, Some(mac), "补平台把 macOS 那一格抹掉了");
         assert_eq!(parsed.version, "0.0.6");
 
         // **别的版本**那份不搬过来（0.0.7 是另一版，它的 asset 该由它自己那一趟写）
         let next = "https://gitee.com/o/r/releases/tag/v0.0.7";
-        let text = release_info_text("0.0.7", "", next, None, Some(&prev)).unwrap();
+        let text = release_info_text("0.0.7", "", next, None, None, Some(&prev)).unwrap();
         assert_eq!(release_info::parse(text.as_bytes()).unwrap().asset, None);
 
         // 这一趟有新的 zip（macOS 补包）⇒ 用新的
@@ -2614,8 +2643,10 @@ mod tests {
             url: "https://gitee.com/o/r/releases/download/v0.0.6/y.app.zip".to_owned(),
             size: 8,
             sha256: "cd".to_owned(),
+            platform: None,
+            kind: None,
         };
-        let text = release_info_text("0.0.6", "", url, Some(&new), Some(&prev)).unwrap();
+        let text = release_info_text("0.0.6", "", url, Some(&new), None, Some(&prev)).unwrap();
         assert_eq!(
             release_info::parse(text.as_bytes()).unwrap().asset,
             Some(new)

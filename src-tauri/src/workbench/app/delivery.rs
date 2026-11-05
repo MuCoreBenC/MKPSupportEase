@@ -126,6 +126,10 @@ pub fn bootstrap_json() -> serde_json::Value {
         "catalog": NEW_CATALOG_FILE,
         "manifest": MANIFEST_FILE,
         "release": crate::runtime::source::RELEASE_FILE,
+        /* 预览清单（2026-11-05 双通道）：可选格，加它不升 `sourceSchema`。
+         * 老客户端的二进制里没有解析分支，永远不会读这份 —— 结构上就不会被预览版打扰。
+         * 只由用户主动点「重新检查」时读。 */
+        "releasePreview": crate::runtime::source::RELEASE_PREVIEW_FILE,
         "content": format!("{CONTENT_DIR}/"),
         "filesRoot": "..",
     })
@@ -635,6 +639,10 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     //   不把它算进应有集合，发布闸的残留审计会永远拦着预设发布 —— 而且点「清理残留」
     //   会把客户端检查软件更新要用的那份扔进回收站（真机踩过，2026-10-06）。
     set.insert(crate::runtime::source::RELEASE_FILE.to_owned());
+    /* ★ 预览清单也住交付根（2026-11-05 双通道）。同样必须算进应有集合：
+     * 不然发布闸的残留审计会把它当多余文件、点「清理残留」会把它扔进回收站，
+     * 客户端主动检查预览版就会扑空。它是软件发布链，与预设产物不同链。 */
+    set.insert(crate::runtime::source::RELEASE_PREVIEW_FILE.to_owned());
     for v in book.versions() {
         // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
         if book.build_state(&v.uid) == BuildState::NoResources {
@@ -772,7 +780,9 @@ pub struct DeliveryStatus {
 fn stage_of(rel: &str) -> DeliveryStage {
     if rel == MANIFEST_FILE || rel == SOURCE_FILE {
         DeliveryStage::Publish
-    } else if rel == crate::runtime::source::RELEASE_FILE {
+    } else if rel == crate::runtime::source::RELEASE_FILE
+        || rel == crate::runtime::source::RELEASE_PREVIEW_FILE
+    {
         DeliveryStage::Software
     } else {
         DeliveryStage::Generate
@@ -2400,10 +2410,11 @@ mod tests {
         let expected = delivery_expected_set(&book);
         assert_eq!(
             expected.len(),
-            11,
+            12,
             "content 3 + manifest 1 + catalog.json 1 + source.json 1 + **release.json 1（M6 起\
-             住交付根）** + **publish-serial.json 1（2026-10-28 起发布账本也住交付根）**\
-             + mkp 产物 3 = 11（A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
+             住交付根）** + **release-preview.json 1（2026-11-05 双通道）**\
+             + **publish-serial.json 1（2026-10-28 起发布账本也住交付根）**\
+             + mkp 产物 3 = 12（A 类不在 delivery 面：它原地住在发布根的 assets/ 下）"
         );
         assert!(expected.contains("mkp/presets/A1-standard.toml"));
         assert!(
@@ -2637,10 +2648,11 @@ mod tests {
         // 反空转锚点（2026-10-04 改口径后）：content 3 + manifest 1 + catalog.json 1
         // + source.json 1 + **release.json 1（M6 起软件发布信息也住交付根）**
         // + **publish-serial.json 1（2026-10-28 起发布账本也住交付根）** + mkp 9
-        // （五台机型全部有套餐）= 17 —— **A 类资产不在 delivery 面**
+        // + **release-preview.json 1（2026-11-05 双通道）**
+        // （五台机型全部有套餐）= 18 —— **A 类资产不在 delivery 面**
         assert_eq!(
             expected.len(),
-            17,
+            18,
             "delivery 面条数变了 —— 说清为什么（裁决 C/甲后 A 类资产原地交付，不再进 delivery）"
         );
         assert!(
@@ -2928,6 +2940,11 @@ mod tests {
         assert_eq!(v["catalog"], NEW_CATALOG_FILE);
         assert_eq!(v["catalog"], crate::runtime::source::CATALOG_FILE);
         assert_eq!(v["release"], crate::runtime::source::RELEASE_FILE);
+        assert_eq!(
+            v["releasePreview"],
+            crate::runtime::source::RELEASE_PREVIEW_FILE,
+            "双通道：预览清单也在寻址声明里（相对引用，不写绝对 URL）"
+        );
         assert_eq!(v["filesRoot"], "..");
         let text = v.to_string();
         assert!(

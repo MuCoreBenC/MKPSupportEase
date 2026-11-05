@@ -86,6 +86,13 @@ pub const CATALOG_FILE: &str = "catalog.json";
 /// （2026-10-05 起住交付根 `presets/delivery/` 里，与其他交付元数据同边界）。
 pub const RELEASE_FILE: &str = "release.json";
 
+/// **预览版**软件发布信息的文件名（2026-11-05 双通道）。
+///
+/// 形状与 `release.json` 完全一致（`releaseSchema` 仍 1），只放预览版；
+/// 具体**位置**仍由 Source Manifest 的 `releasePreview` 声明，这里只是进度名，
+/// 客户端不拿它去拼地址。
+pub const RELEASE_PREVIEW_FILE: &str = "release-preview.json";
+
 /// 构建方可注入的默认地址（`MKPSE_PRESET_SOURCE`）—— **第十七刀起语义是 Bootstrap
 /// 地址**（指向 `source.json` 的文件地址）。**变量没设就再看工作台
 /// 配置**（那是 build.rs 的事，到这里时已经被合并成一个值）。
@@ -271,6 +278,18 @@ impl ResolvedSource {
         self.resolver
             .resolve(ResourceRef::Release)?
             .remote_or("软件发布信息（release）")
+    }
+
+    /// **预览版**发布信息的完整 URL（`release-preview.json`）。
+    ///
+    /// 与 `release_url()` 同一条寻址规则、同一个 Resolver —— 不另拼 URL。
+    /// ★ 「未声明」返回 `Ok(None)`：预览通道是可选能力，缺它不是错误。
+    ///   自动通知**不调这个方法**；只有用户主动点「重新检查」才会走这里。
+    pub fn release_preview_url(&self) -> Result<Option<String>, AppError> {
+        match self.resolver.resolve(ResourceRef::ReleasePreview) {
+            Ok(addr) => Ok(addr.remote().map(str::to_owned)),
+            Err(_) => Ok(None),
+        }
     }
 }
 
@@ -1222,6 +1241,34 @@ mod tests {
             r.release_url().expect("声明了就该给"),
             "https://host/a/presets/delivery/release.json"
         );
+        assert_eq!(
+            r.release_preview_url().expect("可选格不该抛错"),
+            None,
+            "老档没声明预览通道 ⇒ 没有这个资源，不是故障"
+        );
+    }
+
+    /// **预览地址同样只从声明来**；两个镜像共用同一份相对声明，换 host 只换 host。
+    #[test]
+    fn preview_url_comes_from_the_manifest_declaration() {
+        let bytes = br#"{"sourceSchema":2,"catalog":"catalog.json","release":"release.json","releasePreview":"release-preview.json","filesRoot":".."}"#;
+        for (host, want) in [
+            (
+                "https://raw.githubusercontent.com/o/r/main",
+                "https://raw.githubusercontent.com/o/r/main/presets/delivery/release-preview.json",
+            ),
+            (
+                "https://gitee.com/o/r/raw/main",
+                "https://gitee.com/o/r/raw/main/presets/delivery/release-preview.json",
+            ),
+        ] {
+            let r = parse_manifest_at(&format!("{host}/presets/delivery/source.json"), bytes)
+                .expect("好档该解析得动");
+            assert_eq!(
+                r.release_preview_url().expect("该给").as_deref(),
+                Some(want)
+            );
+        }
     }
 
     /// 代次认不得 / catalog 越过目录 / catalog 写成绝对 URL / 缺 filesRoot / 不是 JSON ——
