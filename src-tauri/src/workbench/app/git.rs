@@ -54,12 +54,17 @@ pub const STAGE_ALLOWLIST: [&str; 4] = [
 /// 其余三个是它的派生结果（见 [`super::version`]），`presets/delivery/release.json` 是
 /// 上传成功后才写的发布信息（2026-10-05 起住交付根，总纲 §1②）。
 /// 源码（`src/**` / `src-tauri/src/**`）一个都不在里头。
-pub const RELEASE_STAGE_ALLOWLIST: [&str; 5] = [
+pub const RELEASE_STAGE_ALLOWLIST: [&str; 6] = [
     "src-tauri/Cargo.toml",
     "src-tauri/tauri.conf.json",
     "package.json",
     "Cargo.lock",
     "presets/delivery/release.json",
+    // ★ 2026-11-06 真机：预览通道写的是 `release-preview.json`，它不在这张表里 ——
+    //   `stage_allowed_in` 把它过滤掉，于是"写好了但没 stage"，事务接着报
+    //   "没有变化，没有可提交的"，**清单 PR 开不出来**。两条通道各有一份清单，
+    //   这里就得两行；`release_tx::tests` 有一条判据盯着"每个通道的落点都在表里"。
+    "presets/delivery/release-preview.json",
 ];
 
 /// 一次 ref 推送的结果（**从 git 自己的推送摘要里读出来**，不另加网络往返）。

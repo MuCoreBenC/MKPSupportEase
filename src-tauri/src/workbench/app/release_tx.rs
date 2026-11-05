@@ -2980,4 +2980,25 @@ mod tests {
             "同一版同一说明重写一次，内容必须一模一样（否则会多开一份空 PR）"
         );
     }
+
+    /// ★ **每个通道的清单落点都必须在暂存白名单里**（2026-11-06 真机事故）。
+    ///
+    /// 不在表里时 `stage_allowed_in` 会**静默过滤掉**（返回空列表、不报错），于是
+    /// "文件写好了但没 stage" → 事务接着报"没有变化，没有可提交的" → **清单 PR 开不出来**。
+    /// 发版当天才发现的代价是：tag 已经打了、包已经传了，而用户永远看不到这个版本。
+    /// 这条判据把"加通道忘了加白名单"提前成一次编译后的红。
+    #[test]
+    fn every_channel_manifest_is_stageable() {
+        for ch in [
+            release_info::UpdateChannel::Stable,
+            release_info::UpdateChannel::Preview,
+        ] {
+            let rel = info_rel_for(ch);
+            assert!(
+                crate::workbench::app::git::is_allowed_in(rel, &RELEASE_STAGE_ALLOWLIST),
+                "{} 通道的清单 {rel} 不在 RELEASE_STAGE_ALLOWLIST 里 —— 写好了也 stage 不上",
+                ch.wire()
+            );
+        }
+    }
 }

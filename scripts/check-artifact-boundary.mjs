@@ -83,11 +83,23 @@ const isForbidden = (p) =>
     ? { prefix: p, why: '编辑器 / 系统的残留文件' }
     : null)
 
-const isDelivery = (p) => p === DELIVERY || p.startsWith(`${DELIVERY}/`)
+/**
+ * 交付目录里**不属于预设数据**的两份文件：软件版本的发布清单。
+ *
+ * ★ 它们是**发布内核**（`release_tx`）在发软件版本时写的，与「这批预设数据发到第几号」
+ *   毫无关系 —— 所以不能拿 R1（"交付目录变了必须带发布账本"）去管。2026-11-06 真机：
+ *   预览版发布把 `release-preview.json` 写好了，推送被 R1 拦下，清单 PR 开不出来。
+ *   同一个坑对 `release.json` 一直存在，只是 0.0.6 那次还没这条闸。
+ */
+const RELEASE_MANIFESTS = [`${DELIVERY}/release.json`, `${DELIVERY}/release-preview.json`]
+
+const isReleaseManifest = (p) => RELEASE_MANIFESTS.includes(p)
+const isDelivery = (p) =>
+  (p === DELIVERY || p.startsWith(`${DELIVERY}/`)) && !isReleaseManifest(p)
 const isLedger = (p) => p === LEDGER
 const isKernelArtifact = (p) => KERNEL_ARTIFACTS.some((k) => p === k || p.startsWith(k))
-/** 权威源 = `presets/` 下除交付目录之外的一切（配方 / registry / machines / 资产表 / 预设施加源） */
-const isSource = (p) => p.startsWith('presets/') && !isDelivery(p)
+/** 权威源 = `presets/` 下除交付目录（与发布清单）之外的一切（配方 / registry / machines / 资产表 / 预设施加源） */
+const isSource = (p) => p.startsWith('presets/') && !isDelivery(p) && !isReleaseManifest(p)
 
 /* ---------- git ---------- */
 
@@ -142,6 +154,8 @@ const delivery = files.filter(isDelivery)
 const ledger = files.filter(isLedger)
 const kernel = files.filter(isKernelArtifact)
 const source = files.filter(isSource)
+/** 软件发布清单（`release.json` / `release-preview.json`）—— 不计入交付 / 源，单独报数 */
+const releaseManifests = files.filter(isReleaseManifest)
 const forbidden = files.map((p) => [p, isForbidden(p)]).filter(([, f]) => f !== null)
 
 const problems = []
@@ -197,7 +211,7 @@ for (const [p, f] of forbidden) {
 const total = files.length
 if (problems.length === 0) {
   console.log(
-    `✓ 产物边界干净（${scope}：${total} 个变更文件；交付 ${delivery.length} / 内核产物 ${kernel.length} / 源 ${source.length}）`,
+    `✓ 产物边界干净（${scope}：${total} 个变更文件；交付 ${delivery.length} / 内核产物 ${kernel.length} / 源 ${source.length} / 发布清单 ${releaseManifests.length}）`,
   )
   process.exit(0)
 }
