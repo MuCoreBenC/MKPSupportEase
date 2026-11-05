@@ -181,20 +181,6 @@ if (existsSync(bypassLog)) {
 
 const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '0.0.0'
 
-/*
- * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
- * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
- *
- * ★ 预览通道（2026-11-05）默认给 `x.y.z-preview.1`：序号从 1 起，人只在发第二个
- *   预览时改数字。发了这个号**不会**消耗 `x.y.z` 正式版。
- */
-const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
-const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
-
-step(
-  `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
-)
-
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
@@ -237,6 +223,25 @@ const [argVersion, argSummary] = positionalArgs
 
 let version = argVersion?.trim()
 let summary = argSummary?.trim()
+
+/*
+ * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
+ * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
+ *
+ * ★ 预览通道（2026-11-05）默认给 `x.y.z-preview.1`：序号从 1 起，人只在发第二个
+ *   预览时改数字。发了这个号**不会**消耗 `x.y.z` 正式版。
+ *
+ * ★ **顺序在这里是有意义的**（2026-11-06 真机踩过）：`channel` 必须先解析出来，
+ *   这两行才能算。先前把解析块放在下面，`npm run release -- … --channel preview`
+ *   在 `suggested` 那一行直接 `Cannot access 'channel' before initialization` ——
+ *   而 `--dry-run` 走不到这里，所以只有真发版才炸。
+ */
+const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
+const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
+
+step(
+  `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
+)
 
 /* ★ 真发版的人当次许可：交互跑要亲口敲 yes；非交互跑必须显式带 `--confirm`。
    只给了版本号和说明**不算**许可 —— 那两样 AI 自己就能凑出来。 */
