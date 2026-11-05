@@ -2342,17 +2342,37 @@ export function installMockBackend() {
           base: 'main',
         })
       }
-      /* 合并（演示）：一律 squash，回读后落到 merged —— 与真机同一条口径 */
+      /* 合并（演示）：一律 squash，回读后落到 merged —— 与真机同一条口径。
+       * ★ 返回 `MergeOutcome`（review + mirror），别只给裸 review —— 前端读 out.review / out.mirror。
+       * 2026-11-05：正常合并的 mirror 是 `notSynced`（同步归 GitHub Actions），不是「已一致」。 */
       case 'wb_merge_review':
         return Promise.resolve({
-          platform: 'github',
-          number: Number(args?.number ?? 128),
-          url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${Number(args?.number ?? 128)}`,
-          state: 'merged',
-          checks: 'passed',
-          title: '发布：交付产物 21 份',
-          head: 'publish/0.0.2',
-          base: 'main',
+          review: {
+            platform: 'github',
+            number: Number(args?.number ?? 128),
+            url: `https://github.com/MuCoreBenC/MKPSupportEase/pull/${Number(args?.number ?? 128)}`,
+            state: 'merged',
+            checks: 'passed',
+            title: '发布：交付产物 21 份',
+            head: 'publish/0.0.2',
+            base: 'main',
+          },
+          mirror: {
+            platform: 'gitee',
+            repositoryUrl: '',
+            branch: 'main',
+            status: 'notSynced',
+            detail: '正常同步由 GitHub Actions 负责；如需立即补同步请点「手动补同步」',
+          },
+        })
+      /* 手动补同步（演示）：浏览器里没有仓库也没有发布账户，如实回「未配置」，不假装成功 */
+      case 'wb_sync_mirror':
+        return Promise.resolve({
+          platform: 'gitee',
+          repositoryUrl: '',
+          branch: 'main',
+          status: 'skipped',
+          detail: '演示环境未配置 Gitee 发布账户 —— 没有向任何远端写入',
         })
       /*
        * 发布历史（演示）：三条 —— 已合并 / 等待合并 / 停在发布检查。

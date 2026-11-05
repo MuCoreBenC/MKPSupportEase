@@ -132,13 +132,16 @@ const REVIEW_TEXT: Record<RemoteReview['state'], string> = {
 /**
  * 镜像同步结论 → 一个词。
  *
- * ★ 四档**不能压成一个布尔**：「推上去了」与「那边本来就是这一版」是两件事，
- * 「没做这一步」与「做失败了」更是两件事（前者是配置，后者是故障）。
+ * ★ 五档**不能压成一个布尔**：「推上去了」与「那边本来就是这一版」是两件事，
+ * 「正常合并不推（由自动流程负责）」「没做这一步」「做失败了」更是三件不同的事。
+ *
+ * 2026-11-05：`notSynced` 是**尚未同步**，绝不是「已一致」—— 不许画成绿的。
  */
 const MIRROR_TEXT: Record<MirrorSync['status'], string> = {
   pushed: '已跟上',
   upToDate: '本来就是这一版',
   skipped: '没做这一步',
+  notSynced: '未同步（由自动流程负责）',
   failed: '同步失败',
 }
 
@@ -230,7 +233,7 @@ function receiptSteps(
             ? 'stop'
             : mirror.status === 'pushed' || mirror.status === 'upToDate'
               ? 'done'
-              : 'todo',
+              : 'todo', // notSynced / skipped 都不算「已同步」
       })
     }
   }
@@ -274,6 +277,14 @@ function clientVerdict(
     return {
       tone: 'warn',
       text: `已合进 ${base}；${mirror.platform} 这一步没做 —— 读 ${mirror.platform} 的客户端看不到这一版（${mirror.detail}）`,
+    }
+  }
+  if (mirror.status === 'notSynced') {
+    /* ★ 2026-11-05：正常同步归 GitHub Actions，这里**不许**说"两边已一致"。
+     * 明确告诉人「尚未同步」+ 补救入口（手动补同步按钮在页脚）。 */
+    return {
+      tone: 'warn',
+      text: `已合进 ${base}，${mirror.platform} 尚未同步 —— 正常由 GitHub Actions 在 main 更新后自动镜像；如需立即补上请点「手动补同步」`,
     }
   }
   return {
@@ -324,6 +335,8 @@ export default function PublishGateModal({
   const [mirror, setMirror] = useState<MirrorSync | null>(initialMirror)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [mergeBusy, setMergeBusy] = useState(false)
+  /** 「手动补同步」正在跑（按钮防连点：这一趟会真的写远端） */
+  const [syncBusy, setSyncBusy] = useState(false)
   const [confirming, setConfirming] = useState(false)
   /** 回执上的一句状态话（合并完成 / 回读结果） */
   const [notice, setNotice] = useState<string | null>(null)
@@ -418,8 +431,8 @@ export default function PublishGateModal({
     setMergeBusy(true)
     setError(null)
     try {
-      /* ★ 合完后端会顺手把**主线同步到第二个云端源**（幂等、不额外开 PR），
-       *   结论一起返回 —— 那一格就是"客户端读的那个源跟上了没有"的答案。 */
+      /* ★ 合完后端**不再推镜像**（2026-11-05）：只返回一条 `notSynced` 回执，
+       *   正常同步由 GitHub Actions 在 main 更新后完成。 */
       const out = await wb.mergeReview(review.number)
       const merged = out.review
       setReview(merged)
@@ -437,6 +450,32 @@ export default function PublishGateModal({
       setError(isAppError(e) ? e.message : String(e))
     } finally {
       setMergeBusy(false)
+    }
+  }
+
+  /**
+   * **手动补同步**（2026-11-05）：只有人主动点这颗按钮才写 Gitee main。
+   * 正常路径是 GitHub Actions 自动镜像；这里是 Actions 挂了 / 想立刻补一次时的补救工具。
+   * 结果照单收下并立刻刷新阶段条与结论 —— 不许把"未配置 / 失败"说成成功。
+   */
+  const doSyncMirror = async () => {
+    setSyncBusy(true)
+    setError(null)
+    try {
+      const out = await wb.syncMirror()
+      setMirror(out)
+      const tone =
+        out.status === 'pushed' || out.status === 'upToDate'
+          ? `已同步到 ${out.platform}`
+          : out.status === 'failed'
+            ? `同步失败：${out.detail}`
+            : `未同步：${out.detail}`
+      setNotice(`手动补同步 · ${tone}`)
+      if (review !== null) onMerged?.(review, out)
+    } catch (e) {
+      setError(isAppError(e) ? e.message : String(e))
+    } finally {
+      setSyncBusy(false)
     }
   }
 
@@ -483,13 +522,30 @@ export default function PublishGateModal({
               <button
                 type="button"
                 className={c.btn}
-                disabled={refreshBusy || mergeBusy}
+                disabled={refreshBusy || mergeBusy || syncBusy}
                 title="手动回读一次这个 PR/MR 的当下状态（不做轮询）"
                 onClick={() => void refresh()}
               >
                 {refreshBusy ? '正在回读…' : '刷新状态'}
               </button>
             )}
+            {/* 只有「已合并且还没同步」才摆这颗按钮：它点了会真的写 Gitee main */}
+            {review !== null &&
+              review.state === 'merged' &&
+              mirror !== null &&
+              (mirror.status === 'notSynced' ||
+                mirror.status === 'skipped' ||
+                mirror.status === 'failed') && (
+                <button
+                  type="button"
+                  className={c.btn}
+                  disabled={syncBusy || mergeBusy || refreshBusy}
+                  title="把 GitHub main 补推到 Gitee main（正常由 GitHub Actions 自动完成；这里只在需要立刻补一次时用）"
+                  onClick={() => void doSyncMirror()}
+                >
+                  {syncBusy ? '补同步中…' : '手动补同步'}
+                </button>
+              )}
             <button type="button" className={c.btn} onClick={onClose} disabled={mergeBusy}>
               关闭
             </button>

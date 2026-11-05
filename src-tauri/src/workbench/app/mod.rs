@@ -5571,6 +5571,8 @@ mod tests {
             "wb_clear_publish_account",
             "wb_publish_status",
             "wb_merge_review",
+            // 手动补同步：同样要等网络（git fetch + push），不许占主线程
+            "wb_sync_mirror",
         ];
 
         // 路径用 CARGO_MANIFEST_DIR 拼（不用 file!()：建了 workspace 之后它的基准会变）

@@ -1238,6 +1238,9 @@ pub enum MirrorStatus {
     UpToDate,
     /// 没做这一步，原因在 `detail` 里（没配那个源 / 这一笔是反向）
     Skipped,
+    /// **正常合并不推镜像**（2026-11-05 起）：同步由 GitHub Actions 负责，
+    /// 这一格只说明"尚未同步"，绝不是"已一致"。
+    NotSynced,
     /// 试过、失败了。★ **不回滚"已合并"这个既成事实**，只如实报
     Failed,
 }
@@ -1275,44 +1278,69 @@ pub struct MirrorSync {
 ///    而不是去撞一次必然失败的推送。
 fn sync_mirror_after_merge(
     root: &std::path::Path,
-    merged_on: &PublishTarget,
+    merged_on: Option<&PublishTarget>,
     base: &str,
 ) -> MirrorSync {
-    let platform = if merged_on.platform == "github" {
-        "gitee"
-    } else {
-        "github"
-    };
+    // 手动补同步（`None`）固定 GitHub → Gitee；从合并路径进来（`Some`）才判方向。
+    if let Some(t) = merged_on {
+        if t.platform != "github" {
+            return MirrorSync {
+                platform: "github".to_owned(),
+                repository_url: String::new(),
+                branch: base.to_owned(),
+                status: MirrorStatus::Skipped,
+                detail: format!(
+                    "这一笔合在 {} 上 —— 代码主线在 GitHub 上只有 PR 一条路，这里不反向裸推。\
+                     要让另一个源也跟上，把发布目标切到 GitHub 走一次发布。",
+                    t.platform
+                ),
+            };
+        }
+    }
+    sync_mirror_kernel(
+        root,
+        "gitee",
+        base,
+        merged_on.map(|t| t.repository_url.as_str()),
+    )
+}
+
+/// **手动补同步**与旧「合并后同步」共用的一段推送逻辑（2026-11-05 拆出来）。
+///
+/// `mirror_platform` 固定由调用方给：正常方向是 `gitee`。`forbid_url` 是可选的
+/// "别推回自己"守卫 —— 从合并事务进来时传发布目标仓库，手动补同步传 `None`
+/// （手动那一趟的源是 `origin/main`，不存在把自己推给自己的歧义）。
+fn sync_mirror_kernel(
+    root: &std::path::Path,
+    mirror_platform: &str,
+    base: &str,
+    forbid_url: Option<&str>,
+) -> MirrorSync {
     let mut out = MirrorSync {
-        platform: platform.to_owned(),
+        platform: mirror_platform.to_owned(),
         repository_url: String::new(),
         branch: base.to_owned(),
         status: MirrorStatus::Skipped,
         detail: String::new(),
     };
 
-    if merged_on.platform != "github" {
-        out.detail = format!(
-            "这一笔合在 {} 上 —— 代码主线在 GitHub 上只有 PR 一条路，这里不反向裸推。\
-             要让另一个源也跟上，把发布目标切到 GitHub 走一次发布。",
-            merged_on.platform
-        );
-        return out;
-    }
-
     // 镜像目标从**同一份发布账户配置**里取（与发布目标是同一个真值来源）。
-    // 没配就不是"失败"，是"没这一步" —— 如实标跳过。
-    let mirror = match resolve_target(root, Some(platform)) {
+    // 没配就不是"失败"，是"未配置" —— 如实标跳过，绝不静默当成功。
+    let mirror = match resolve_target(root, Some(mirror_platform)) {
         Ok(t) => t,
         Err(e) => {
-            out.detail = format!("没有可用的 {platform} 发布账户，这一步跳过（{e}）");
+            out.detail = format!(
+                "未配置可用的 {mirror_platform} 发布账户（{e}）—— 这一步跳过，没有向任何远端写入；\
+                 请先配置，或改用 GitHub Actions 自动镜像"
+            );
             return out;
         }
     };
     out.repository_url = mirror.repository_url.clone();
-    if super::git::normalize_repo_url_for_compare(&mirror.repository_url)
-        == super::git::normalize_repo_url_for_compare(&merged_on.repository_url)
-    {
+    if forbid_url.is_some_and(|u| {
+        super::git::normalize_repo_url_for_compare(&mirror.repository_url)
+            == super::git::normalize_repo_url_for_compare(u)
+    }) {
         out.detail = "镜像目标与发布目标是同一个仓库，这一步没有意义，跳过".to_owned();
         return out;
     }
@@ -1343,20 +1371,20 @@ fn sync_mirror_after_merge(
     ) {
         Ok(p) if p.up_to_date => {
             out.status = MirrorStatus::UpToDate;
-            out.detail = format!("{platform} 上已经是这一版（幂等空操作）");
+            out.detail = format!("{mirror_platform} 上已经是这一版（幂等空操作）");
         }
         Ok(p) => {
             out.status = MirrorStatus::Pushed;
             out.detail = match mirror_gap(&git, &source, &p.detail) {
                 /* 首次补齐要给个数：落后几个提交就是几个（那是"补了多少"，不是"改了什么"） */
-                Some(n) => format!("已把 {base} 推到 {platform}（补了 {n} 个提交）"),
-                None if p.detail.is_empty() => format!("已把 {base} 推到 {platform}"),
-                None => format!("已把 {base} 推到 {platform}：{}", p.detail),
+                Some(n) => format!("已把 {base} 推到 {mirror_platform}（补了 {n} 个提交）"),
+                None if p.detail.is_empty() => format!("已把 {base} 推到 {mirror_platform}"),
+                None => format!("已把 {base} 推到 {mirror_platform}：{}", p.detail),
             };
         }
         Err(e) => {
             out.status = MirrorStatus::Failed;
-            out.detail = format!("{platform} 同步失败 —— 已合并这件事不受影响：{e}");
+            out.detail = format!("{mirror_platform} 同步失败 —— 已合并这件事不受影响：{e}");
         }
     }
     out
@@ -1375,6 +1403,39 @@ fn mirror_gap(git: &super::git::Git, source_ref: &str, detail: &str) -> Option<u
     }
     let (ahead, _) = git.ahead_behind(source_ref, old).ok()?;
     Some(ahead)
+}
+
+/// 合并之后的镜像回执：**没推**，且明确说"没推"。
+///
+/// 旧口径把"没做这一步"塞进 `None` 或 `Skipped`，界面上很容易被读成"已一致"。
+/// 现在单独一档 `NotSynced`，指向真正负责同步的地方与补救入口。
+fn mirror_not_synced(base: &str) -> MirrorSync {
+    MirrorSync {
+        platform: "gitee".to_owned(),
+        repository_url: String::new(),
+        branch: base.to_owned(),
+        status: MirrorStatus::NotSynced,
+        detail:
+            "正常同步由 GitHub Actions（main 更新后自动镜像）负责；如需立即补同步请点「手动补同步」"
+                .to_owned(),
+    }
+}
+
+/// **手动补同步**（2026-11-05）—— 工作台回执屏上那颗按钮，只有人主动点才调。
+///
+/// 正常路径是 GitHub Actions 自动镜像；这里只作**补救工具**保留（Actions 挂了、
+/// 或想立刻补一次时用）。固定方向 `origin/main → Gitee main`，与自动镜像同一方向、
+/// 同一段推送内核 `sync_mirror_kernel`，不是第二套实现。
+///
+/// ★ `(async)`：碰网络（IO 单子），不许占主线程。
+/// ★ 没配 Gitee 发布账户 ⇒ `Skipped` + "未配置"理由，**不静默当成功**。
+#[tauri::command(async)]
+pub fn wb_sync_mirror(app: tauri::AppHandle) -> Result<MirrorSync, AppError> {
+    crate::ipc::traced("wb_sync_mirror", |_| {
+        let root = crate::fsx::paths::internal_root(&app)?;
+        // `None` = 手动路径：不判"这一笔合在哪个平台"，固定把 GitHub main 补到 Gitee
+        Ok(sync_mirror_after_merge(&root, None, "main"))
+    })
 }
 
 /// **合并**一份 PR/MR（squash）—— 用户在回执屏上**显式点过「合并」**才调。
@@ -1409,21 +1470,20 @@ pub fn wb_merge_review(
                 other => Err(AppError::invalid_argument(format!("不认识的平台：{other}"))),
             }?;
 
-        /* ★ 合并成功之后**把主线同步到第二个云端源**（2026-10-06 加）。
+        /* ★ 2026-11-05：**正常合并不再自动推镜像**（作者拍定）。
          *
-         * 为什么必须在这里：客户端的数据源读的是**仓库里的 `presets/delivery/`**，
-         * 而"合进 GitHub 的 main"与"客户端读的那个源上的 main 也有这一版"是两件事。
-         * 2026-10-06 那次事故正是前者成了、后者没成，而回执七步全绿 —— 用户看不出区别。
+         * 同步责任交给 `.github/workflows/mirror-to-gitee.yml`：GitHub main 一更新，
+         * 工作流就把 main 快进推到 Gitee。旧路径 `sync_mirror_after_merge` 降级成
+         * **手动补同步**（见 [`wb_sync_mirror`]），只有人主动点才写远端。
          *
-         * ★ 只有**真合上了**才做：平台回读不是 `merged`（比如只关了 PR）时主线没动，
-         *   推镜像就是无意义甚至有害的动作。
+         * 这里**必须**返回一条 `NotSynced` 而不是 `None`：回执与发布历史要如实说
+         * "尚未同步"，不能让空白被读成"两边已经一致"。
          */
-        let mirror = (merged.state == ReviewState::Merged)
-            .then(|| sync_mirror_after_merge(&root, &target, &merged.base));
+        let mirror = (merged.state == ReviewState::Merged).then(|| mirror_not_synced(&merged.base));
 
         // 合并是**我们亲手造成的状态变化** —— 顺手把它记回发布历史（记账不必问网络）。
         // 记不上不影响结论：已经合了就是合了；下次「刷新」还能看到真状态。
-        // 镜像那一条一起记进同一批记录（刷新不会把它抹掉，见 `history::update_review`）。
+        // 「未同步」这一条一起记进同一批记录（刷新不会把它抹掉，见 `history::update_review`）。
         let _ = super::history::update_review(&root, &merged, mirror.as_ref());
         Ok(MergeOutcome {
             review: merged,
@@ -1724,7 +1784,11 @@ mod tests {
             repo: "r".to_owned(),
         };
         // root 随便给：这条路径**在碰 root 之前就该返回**（否则下面这几句断言就没意义了）
-        let out = sync_mirror_after_merge(std::path::Path::new("/nonexistent"), &on_gitee, "main");
+        let out = sync_mirror_after_merge(
+            std::path::Path::new("/nonexistent"),
+            Some(&on_gitee),
+            "main",
+        );
         assert_eq!(out.platform, "github", "本该去的是另一个方向");
         assert_eq!(out.status, MirrorStatus::Skipped);
         assert!(
@@ -1750,13 +1814,68 @@ mod tests {
             owner: "o".to_owned(),
             repo: "r".to_owned(),
         };
-        let out = sync_mirror_after_merge(d.path(), &on_github, "main");
+        let out = sync_mirror_after_merge(d.path(), Some(&on_github), "main");
         assert_eq!(out.platform, "gitee");
         assert_eq!(out.status, MirrorStatus::Skipped, "没配 ≠ 失败");
         assert!(
-            out.detail.contains("跳过"),
-            "要说清是跳过、为什么：{}",
+            out.detail.contains("跳过") && out.detail.contains("未配置"),
+            "要说清是未配置而跳过、且一个字节都没写：{}",
             out.detail
+        );
+    }
+
+    /// **正常合并不再自动推镜像**（2026-11-05 作者拍定）。
+    ///
+    /// 旧判据只钉「反向不推」「没配置不判失败」；这一条钉的是**正常路径**：
+    /// `wb_merge_review` 里不许再出现对同步内核的调用，只返回 `NotSynced` 回执。
+    /// 同步责任在 `.github/workflows/mirror-to-gitee.yml`，旧能力降级成
+    /// `wb_sync_mirror` 手动补同步 —— 只有人点才写远端。
+    #[test]
+    fn a_normal_merge_never_pushes_the_mirror_itself() {
+        let out = mirror_not_synced("main");
+        assert_eq!(out.status, MirrorStatus::NotSynced);
+        assert_eq!(out.branch, "main");
+        assert!(
+            out.detail.contains("GitHub Actions"),
+            "要指到真正负责同步的地方"
+        );
+        assert!(out.detail.contains("手动补同步"), "要给出补救入口");
+
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let src = std::fs::read_to_string(manifest.join("src/workbench/app/publish_tx.rs"))
+            .expect("本文件读得到");
+        let start = src.find("pub fn wb_merge_review").expect("合并命令在");
+        let end = src
+            .find("/// **合并**这一步的完整结论")
+            .expect("回执结构在");
+        let body = &src[start..end];
+        // 去掉注释行：文档里会提到旧函数名字，那不算调用
+        let code: String = body
+            .lines()
+            .filter(|l| !l.trim_start().starts_with("//") && !l.trim_start().starts_with('*'))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            !code.contains("sync_mirror_kernel(") && !code.contains("sync_mirror_after_merge("),
+            "正常合并路径里不许再调同步内核 —— 那是自动流程的事：\n{code}"
+        );
+        assert!(
+            code.contains("mirror_not_synced"),
+            "合并回执要如实说「未同步」"
+        );
+    }
+
+    /// **手动补同步固定 GitHub main → Gitee main**，不做反向、也不推 tag。
+    #[test]
+    fn the_manual_sync_uses_the_same_kernel_and_direction() {
+        let d = tempfile::tempdir().unwrap();
+        let out = sync_mirror_after_merge(d.path(), None, "main");
+        assert_eq!(out.platform, "gitee");
+        assert_eq!(out.branch, "main");
+        assert_eq!(out.status, MirrorStatus::Skipped, "临时目录没配账户 ⇒ 跳过");
+        assert!(
+            out.detail.contains("未配置"),
+            "没账户要说清，不许静默当成功"
         );
     }
 
