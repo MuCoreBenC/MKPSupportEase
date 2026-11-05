@@ -6,6 +6,22 @@
 # 早先这里有一段"探测 + 跳过"的逻辑，用来在前端 / Rust 侧还没搬进来的阶段放行。
 # 现在两边都在了，那段整个删掉 —— "允许跳过"与试验场那七道空转的闸是同一个失效模式，
 # 留着一天就有一天会骗过人。
+#
+# ## 2026-11-05：数据发布不陪跑 Rust 编译
+#
+# 「发布一批预设」改的是 `presets/delivery/` 下的产物字节：没有一行 Rust，没有一行 TS。
+# 让它等 macOS + Windows 两套 clippy/test，是在用错闸门（作者："为什么就发布一个预设，
+# 他就要走这么完整的 PR"）。所以每个重 job 先做一次**变更分类**：
+#
+# · 只动交付产物 / 文档 ⇒ 跳过编译与测试，job 仍以 success 收尾；
+# · 有任何代码变更（`src/`、`src-tauri/`、`scripts/`、`.github/`、`Cargo.*` …）⇒ 全套照跑。
+#
+# ★ **不能**用 workflow 级的 `paths` 过滤：那样 workflow 根本不触发，
+#   而 ruleset 要求的 `rust` / `rust-windows` 是**必需检查**——检查永远不出现，
+#   PR 就永远合不了。必须让 job 跑起来、只是不做重活。
+# ★ 判定拿不到基线（首次 push / 全 0 的 before）时**按代码变更处理**：宁可多跑，不放行。
+# ★ 交付闸（`check:artifacts`）在 `web` 里照常跑 —— 数据 PR 的"产物必须与账本同批"
+#   正是那条闸在管，一条都不能省。
 
 name: ci
 
@@ -105,15 +121,44 @@ jobs:
     # 代价是 `--features` 在 virtual 根上不合法，工作台那两条要带 `-p` 指定包。
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 变更分类要比 `base...HEAD`（浅克隆里 base 不存在 ⇒ 判定退化成"全跑"，
+          # 白等一场 —— 那不是误报，是白跑）
+          fetch-depth: 0
+
+      - name: 变更分类（数据发布不陪跑编译）
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          [ -n "$base" ] || base="${{ github.event.before }}"
+          if [ -z "$base" ] || ! git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
+            echo "code=1" >> "$GITHUB_OUTPUT"
+            echo "拿不到基线 ⇒ 按代码变更处理（宁可多跑，不放行）"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" HEAD)
+          # 数据面：交付目录 / 文档 / 图片。**其余一切都算代码**（含 .github 与 scripts）
+          rest=$(printf '%s\n' "$files" | grep -vE '^(presets/delivery/|docs/)|\.(md|png|jpe?g|gif|svg|webp)$' || true)
+          if [ -z "$rest" ]; then
+            echo "code=0" >> "$GITHUB_OUTPUT"
+            echo "只动交付产物 / 文档 ⇒ 跳过 Rust 编译与测试"
+          else
+            echo "code=1" >> "$GITHUB_OUTPUT"
+            echo "有代码变更 ⇒ 跑全套"
+          fi
 
       # runner 自带 rustup，不引第三方 action —— 少一个供应链入口
       - name: 准备工具链
+        if: steps.scope.outputs.code == '1'
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
           rustc -V && cargo -V
 
       - name: 缓存 cargo registry 与 target
+        if: steps.scope.outputs.code == '1'
         uses: actions/cache@v4
         with:
           path: |
@@ -125,6 +170,7 @@ jobs:
             cargo-${{ runner.os }}-
 
       - name: 格式
+        if: steps.scope.outputs.code == '1'
         run: cargo fmt --all -- --check
 
       # --all-targets 让测试代码也过 clippy；clippy.toml 的 disallowed-methods 在这里生效。
@@ -134,15 +180,19 @@ jobs:
       # 它的 264 条判据，在 CI 里等于从来没有被检过。这不是覆盖率的小数点问题，
       # 而是唯一会写 `presets/`（用户数据）的那棵树整个不在场。
       - name: clippy（默认 feature）
+        if: steps.scope.outputs.code == '1'
         run: cargo clippy --all-targets -- -D warnings
 
       - name: clippy（workbench）
+        if: steps.scope.outputs.code == '1'
         run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
 
       - name: 测试（默认 feature）
+        if: steps.scope.outputs.code == '1'
         run: cargo test
 
       - name: 测试（workbench）
+        if: steps.scope.outputs.code == '1'
         run: cargo test -p mkp-support-ease --features workbench
 
       # 资源寻址立法（`docs/RESOURCE-ADDRESSING-ROADMAP.md` §6.4）：
@@ -175,8 +225,34 @@ jobs:
     # 同 `rust`：在仓库根跑，覆盖全部成员（理由写在那边）。
     steps:
       - uses: actions/checkout@v5
+        with:
+          # 同 `rust`：变更分类要比 `base...HEAD`
+          fetch-depth: 0
+
+      - name: 变更分类（数据发布不陪跑编译）
+        id: scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          [ -n "$base" ] || base="${{ github.event.before }}"
+          if [ -z "$base" ] || ! git rev-parse --verify "$base^{commit}" >/dev/null 2>&1; then
+            echo "code=1" >> "$GITHUB_OUTPUT"
+            echo "拿不到基线 ⇒ 按代码变更处理（宁可多跑，不放行）"
+            exit 0
+          fi
+          files=$(git diff --name-only "$base" HEAD)
+          rest=$(printf '%s\n' "$files" | grep -vE '^(presets/delivery/|docs/)|\.(md|png|jpe?g|gif|svg|webp)$' || true)
+          if [ -z "$rest" ]; then
+            echo "code=0" >> "$GITHUB_OUTPUT"
+            echo "只动交付产物 / 文档 ⇒ 这台 Windows runner 不做编译"
+          else
+            echo "code=1" >> "$GITHUB_OUTPUT"
+            echo "有代码变更 ⇒ 跑全套"
+          fi
 
       - name: 准备工具链
+        if: steps.scope.outputs.code == '1'
         run: |
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
@@ -184,6 +260,7 @@ jobs:
           cargo -V
 
       - name: 缓存 cargo registry 与 target
+        if: steps.scope.outputs.code == '1'
         uses: actions/cache@v4
         with:
           path: |
@@ -203,13 +280,17 @@ jobs:
       #   **只有这里能替它们把关**。当初那句"哪天工作台里出现了平台分支，这里要跟着加上"
       #   就是这条改动的由来。
       - name: clippy（默认 feature）
+        if: steps.scope.outputs.code == '1'
         run: cargo clippy --all-targets -- -D warnings
 
       - name: clippy（workbench）
+        if: steps.scope.outputs.code == '1'
         run: cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings
 
       - name: 测试（默认 feature）
+        if: steps.scope.outputs.code == '1'
         run: cargo test
 
       - name: 测试（workbench）
+        if: steps.scope.outputs.code == '1'
         run: cargo test -p mkp-support-ease --features workbench

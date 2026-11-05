@@ -20,6 +20,13 @@ on:
   push:
     tags: ['v*']
     branches: ['feat/**']
+    # 2026-11-05：只动交付产物 / 文档的分支不 Trigger 这一趟——
+    # 没有一行代码变化，出包验证不出新信息，白占一台 Windows runner。
+    # ★ `paths-ignore` 对 tag push 不生效（GitHub 的既定行为），发版那条路不受影响。
+    paths-ignore:
+      - 'presets/delivery/**'
+      - 'docs/**'
+      - '**/*.md'
 
 permissions:
   contents: read
