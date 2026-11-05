@@ -989,6 +989,7 @@ export function WorkbenchApp() {
             onGoto={goto}
             onSave={save}
             onBookRefresh={refreshBook}
+            onReportRefresh={refreshReport}
           />
         )
       case 'settings':

@@ -1604,6 +1604,10 @@ export function installMockBackend() {
             (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
           ),
         )
+      /* 内嵌目录重算：浏览器里没有仓库、没有文件可写 —— 只回报一次"已重算"，
+         让按钮的交互（禁用 / toast / 重取报告）可以照着点 */
+      case 'wb_regen_embedded_catalog':
+        return Promise.resolve({ changed: true, files: 26, revision: 'mock' })
       case 'wb_preflight':
         return Promise.resolve({
           issues: [
@@ -2414,6 +2418,33 @@ export function installMockBackend() {
             },
           ],
         })
+      /* 软件版本发布历史（演示）：真机读 `release-history.json` */
+      case 'wb_release_history':
+        return Promise.resolve({
+          historySchema: 1,
+          records: [
+            {
+              at: '2026-10-31T20:17:00+08:00',
+              stage: 'infoPushed',
+              version: '0.0.9',
+              tag: 'v0.0.9',
+              branch: 'release/0.0.9',
+              commit: 'c03b530',
+              review: null,
+              release: null,
+              artifact: { name: 'SupportEase_0.0.9_aarch64.dmg', size: 42_000_000 },
+              infoBranch: 'release/0.0.9-info',
+              infoReview: null,
+              summary: '已打 tag、已建 Release、已写 release.json，等信息那笔 PR 合并。',
+            },
+          ],
+        })
+      /* 本分支最近提交（演示）：真机读 `git log`，这里给两条样子货 */
+      case 'wb_recent_commits':
+        return Promise.resolve([
+          { short: '6894f33', author: 'wzy', at: '2026-11-05T11:57:00+08:00', subject: '发布：交付产物 17 份' },
+          { short: '919c632', author: 'wzy', at: '2026-11-05T10:31:00+08:00', subject: 'feat(glue/report): 预涂胶 8 格参数可调' },
+        ])
       /* 打开系统浏览器（演示）：桩里只记一笔，不真开 */
       case 'wb_open_external':
         console.info('[mock] openExternal', args?.url)

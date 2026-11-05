@@ -320,6 +320,8 @@ let mockTheme: ThemePref | null = null
  * 演示里给"开着"——与真机同一个出厂默认（没选过 = 开），别在这里另立一套。
  */
 let mockAutoClean = true
+/** 自动检查软件更新（2026-11-05）：出厂 = 开，与真机 app_state 同一档 */
+let mockAutoCheckUpdate = true
 
 /** 后处理偏好（2026-10-17）：内存镜像，形状就是盘上那一格 */
 let mockPostproc: PostprocPrefsWire = {}
@@ -2755,6 +2757,16 @@ export const mockApi: MkpApi = {
   async setAutoCleanHistory(enabled) {
     mockAutoClean = enabled
     return mockAutoClean
+  },
+
+  /* 自动检查软件更新（2026-11-05）：与自动清理同一套口径 —— 内存镜像、回解析后的 boolean */
+  async getAutoCheckUpdate() {
+    return mockAutoCheckUpdate
+  },
+
+  async setAutoCheckUpdate(enabled) {
+    mockAutoCheckUpdate = enabled
+    return mockAutoCheckUpdate
   },
 
   /*

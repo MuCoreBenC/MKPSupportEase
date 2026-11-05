@@ -8,10 +8,12 @@ import {
   type ReactNode,
 } from 'react'
 
-import { api } from '../api'
+import { api, listen } from '../api'
 import { FieldLayer } from '../components/field'
-import { useT } from '../i18n'
+import { msg, useT } from '../i18n'
 import NotifyHost from './notify/NotifyHost'
+import { dismiss, notify } from './notify/notify'
+import { SETTINGS_TARGET_UPDATE } from './settings/targets'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
@@ -343,6 +345,51 @@ export default function App() {
     setTab('settings')
     setSettingsTarget(target === undefined ? null : { id: target, nonce: Date.now() })
   }, [])
+
+  /*
+   * 右上角「有新版本」通知（2026-11-05，作者：「点击了就跳转过去定位」）。
+   *
+   * 后端只在「设置页开关开着 + 成功拉到云端目录 + 查到严格更新的版本」时推这一个
+   * 事件（runtime::update_check），所以这里不需要再判一次开关，也不需要在页面里
+   * 各挂一份 —— **外壳挂一次**，与 `listen` 那条「只订阅这一处」同款纪律。
+   *
+   * ★ 同一个版本号一次会话只弹一条（后端已按会话去重，这里再挡一道，防重复订阅）。
+   * ★ 8 秒自己走（纯提示 + 一颗按钮，不做 sticky，别把右上角钉死）。
+   */
+  const lastNotifiedVersion = useRef<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    let stop: (() => void) | undefined
+    void listen<{ version: string }>('software-update-available', (payload) => {
+      const version = payload?.version
+      if (!alive || !version || lastNotifiedVersion.current === version) return
+      lastNotifiedVersion.current = version
+      let id = ''
+      id = notify({
+        kind: 'info',
+        title: msg('notify.update.title'),
+        text: msg('notify.update.text', { version }),
+        ttl: 8,
+        actions: [
+          {
+            label: msg('notify.update.view'),
+            primary: true,
+            onClick: () => {
+              if (id !== '') dismiss(id)
+              openSettings(SETTINGS_TARGET_UPDATE)
+            },
+          },
+        ],
+      })
+    }).then((un) => {
+      if (alive) stop = un
+      else un()
+    })
+    return () => {
+      alive = false
+      stop?.()
+    }
+  }, [openSettings])
 
   /*
    * 后处理那一屏的「看报告」出口（跨页跳转的出口由外壳给，与 `openBbs` / `openSettings` 同类）。

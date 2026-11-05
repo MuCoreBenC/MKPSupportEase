@@ -3549,6 +3549,18 @@ export interface MkpApi {
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
 
   /**
+   * **自动检查软件更新**开着吗（2026-11-05；出厂 = 开）。
+   *
+   * 开 = 客户端成功拉到云端目录之后，顺路查一次 `release.json`；有新版在右上角
+   * 通知里弹一条。**不进启动 / 首屏路径**，也不做定时轮询。查失败一律静默。
+   * 关掉只影响这条顺路检查，设置页手动点「重新检查」照旧可用。
+   */
+  getAutoCheckUpdate(): Promise<boolean>
+
+  /** 开关自动检查：立即生效并落盘（`run/app-state.json` 的 `autoCheckUpdate` 格）。 */
+  setAutoCheckUpdate(enabled: boolean): Promise<boolean>
+
+  /**
    * **复制出来的那一份跟不跟云端**（2026-10-20；出厂 = 关）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，"没选过怎么解释"

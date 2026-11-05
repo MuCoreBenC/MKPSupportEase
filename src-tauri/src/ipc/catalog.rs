@@ -1198,6 +1198,10 @@ pub struct RemoteUpdateDto {
 /// 地址概念——不会出现"清单在这个源、文件在另一个源"的错位。比较逻辑见 [`runtime::update`]。
 #[tauri::command]
 pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppError> {
+    /* 「自动检查软件更新」挂在**成功**之后（A 方案）：拉目录本来就要联网，顺路多问一句
+     * release.json。放在独立的阻塞任务里，不拖慢这次目录检查；失败/离线一律静默。
+     * 不进启动 / 首屏路径（铁律 2）。见 runtime::update_check 的模块头。 */
+    let notify_app = app.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
@@ -1214,9 +1218,15 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
             })
         })
     });
-    task.await.map_err(|e| {
+    let out: Result<RemoteUpdateDto, AppError> = task.await.map_err(|e| {
         AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
-    })?
+    })?;
+    if out.is_ok() {
+        tauri::async_runtime::spawn_blocking(move || {
+            runtime::update_check::maybe_check_after_catalog(&notify_app);
+        });
+    }
+    out
 }
 
 /// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
@@ -1305,18 +1315,11 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkSoftwareUpdate", |_| {
             let root = internal_root(&app)?;
-            let resolved = runtime::source::resolve_source(&root)?;
-
-            /* release.json 住发布根（presets/）之外：从 base_url（文件下载根 = presets/delivery）
-            上去两级就是仓库根发布位置。手写死三级最容易在换部署时错位，
-            所以用 source 的目录回退规矩，从 base_url 推它自己的"上一级" */
-            /* release.json 的地址由 Source Manifest 声明（不再从 base"上跳一级"去猜） */
-            let release_url = resolved.release_url()?;
-            let bytes = runtime::net::get_release(&release_url)?;
-            let info = runtime::release_info::parse(&bytes)?;
-            Ok(SoftwareUpdateDto::from(runtime::release_info::to_update(
-                &info,
-            )))
+            /* 与「拉目录成功后顺路查」共用同一个口子：地址解析 / 版本比较只有一份。
+             * 手动检查失败**如实拒绝**（设置页要显示错误）；自动那条才静默。 */
+            Ok(SoftwareUpdateDto::from(
+                runtime::update_check::fetch_update(&root)?,
+            ))
         })
     });
     task.await.map_err(|e| {

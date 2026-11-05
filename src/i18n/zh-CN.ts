@@ -236,6 +236,11 @@ export const zhCN = {
   'settings.update.recheck': '重新检查',
   'settings.update.view': '查看更新',
   'settings.update.install': '更新',
+'settings.update.autoCheck': '自动检查更新',
+'settings.update.autoCheckHint': '打开后，每次成功同步云端目录时顺路查一次新版；不会在启动时联网，也不会反复查。',
+'notify.update.title': '有新版本',
+'notify.update.text': 'SupportEase {version} 已发布',
+'notify.update.view': '去看看',
 
   /* 设置页：切片 */
   'settings.slicer.title': '切片',

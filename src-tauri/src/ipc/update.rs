@@ -53,18 +53,15 @@ pub struct UpdateInfoDto {
 }
 
 /// 读当前数据源、问一次更新（**命令壳与 `update_info` 共用这一处**）。
+///
+/// 2026-11-05：地址解析 / 版本比较收口到 `runtime::update_check::fetch_update` ——
+/// 设置页手动检查、拉目录后的自动检查、这里给标题栏更新面板供数，**三处同一份**。
+/// 差别只在失败口径：这里是标题栏那一格，问不到就说"问不到"（不弹错、不打扰）。
 pub(crate) fn software_update(
     root: &std::path::Path,
 ) -> crate::runtime::release_info::SoftwareUpdate {
-    match crate::runtime::source::resolve_source(root)
-        .and_then(|resolved| resolved.release_url())
-        .and_then(|url| crate::runtime::net::get_release(&url))
-        .and_then(|bytes| crate::runtime::release_info::parse(&bytes))
-    {
-        Ok(info) => crate::runtime::release_info::to_update(&info),
-        // 问不到就说问不到（`SoftwareUpdate::none_available` = 已是最新 + 无新版）
-        Err(_) => crate::runtime::release_info::none_available(),
-    }
+    crate::runtime::update_check::fetch_update(root)
+        .unwrap_or_else(|_| crate::runtime::release_info::none_available())
 }
 
 /// 一次问全。**只读**（不联网之外什么都不做；联网那部分与检查更新同一条）。

@@ -3936,12 +3936,12 @@ mod tests {
     /// 75 条字段全读到，而且关键字段真的落进模型 ——
     /// 只断言条数的话，一个全是默认值的空壳也能通过
     #[test]
-    fn all_seventy_five_params_load_with_their_fields() {
+    fn all_registry_params_load_with_their_fields() {
         let Some(r) = real() else {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert_eq!(r.params().len(), 75, "字段条数");
+        assert_eq!(r.params().len(), 83, "字段条数");
         assert!(!r.tabs().is_empty());
         assert!(!r.updated().is_empty(), "updated 没读到");
 

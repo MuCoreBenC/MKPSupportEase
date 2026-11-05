@@ -214,6 +214,11 @@ export const en: Record<StringKey, string> = {
   'settings.update.recheck': 'Check again',
   'settings.update.view': 'View update',
   'settings.update.install': 'Update',
+'settings.update.autoCheck': 'Check automatically',
+'settings.update.autoCheckHint': 'When on, a single check rides along after a successful cloud catalog sync. Never on startup, never on a timer.',
+'notify.update.title': 'Update available',
+'notify.update.text': 'SupportEase {version} is now available',
+'notify.update.view': 'View',
 
   'settings.slicer.title': 'Slicer',
   'settings.slicer.label': 'Default app for opening models',

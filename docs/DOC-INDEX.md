@@ -26,6 +26,7 @@
 | 文档 | 管什么 | 状态 |
 | --- | --- | --- |
 | [`README.md`](../README.md) | 入口：项目一句话 / 跑法 / 文档地图 | 现行（首段的"报告页"口径已于 2026-10-11 修正） |
+| [`docs/WORK-STRATEGY.md`](WORK-STRATEGY.md) | **干活顺序**：先看一条跑通的链路 → 先圈影响范围 → 一次改完源 → 统一生成 → 集中验证；调查只作辅助。不含命令与项目操作细节 | 现行（2026-11-05 新建） |
 | [`docs/PRESET-WORKFLOW.md`](PRESET-WORKFLOW.md) | **预设怎么做**：命令 / 状态顺序 / 失败恢复 / 验收五项（`AGENTS.md` 的"怎么做"那一半） | 现行 |
 | [`docs/DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) | **根规则**：四层世界 + 四铁律 + 十问 + 准入问句 | 现行 |
 | [`docs/PRESET-PRODUCT-RULES.md`](PRESET-PRODUCT-RULES.md) | 产品规则：本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 | 现行（正文已就地吸收 2026-10-08 三次改判，含三条 ⚠️ 注记） |

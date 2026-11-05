@@ -216,6 +216,11 @@ export const ja: Record<StringKey, string> = {
   'settings.update.recheck': '再確認',
   'settings.update.view': '更新を見る',
   'settings.update.install': '更新',
+'settings.update.autoCheck': '自動で更新を確認',
+'settings.update.autoCheckHint': 'オンにすると、クラウドの目録を同期できたときに一度だけ確認します。起動時や定期的な通信はありません。',
+'notify.update.title': '新しいバージョン',
+'notify.update.text': 'SupportEase {version} が公開されました',
+'notify.update.view': '見る',
 
   'settings.slicer.title': 'スライス',
   'settings.slicer.label': 'モデルを開く既定のスライサー',

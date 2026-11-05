@@ -94,6 +94,36 @@
   align-items: center;
 }
 
+/* 三本账各自一段（2026-11-05）：标题 + 各自空态/报错 + 自己滚的短列表 */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.group:last-child {
+  margin-bottom: 0;
+}
+
+.groupTitle {
+  margin: 0;
+  font-size: var(--fs-body, 13px);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.groupNote {
+  margin: -4px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 三段并列时每段都别把整屏吃掉 */
+.listShort {
+  max-height: min(28vh, 240px);
+}
+
 .empty {
   margin: 0;
   color: var(--text-3);

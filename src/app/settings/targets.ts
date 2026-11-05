@@ -13,8 +13,14 @@
 /** 智能塔位置那一行（`PostprocModeSection` 里那个 `<div>` 的 DOM id） */
 export const SETTINGS_TARGET_TOWER = 'postproc-tower'
 
+/**
+ * 设置页「软件更新」那一块（2026-11-05，DOM id 就叫 `upd`，早就挂在那儿了）。
+ * 右上角「有新版本」通知点一下就来这里 —— 与塔那格同一条滚动定位管道。
+ */
+export const SETTINGS_TARGET_UPDATE = 'upd'
+
 /** 目前所有合法的落点。新增落点 = 在这里加一格 + 在设置页挂同名的 id */
-export type SettingsTargetId = typeof SETTINGS_TARGET_TOWER
+export type SettingsTargetId = typeof SETTINGS_TARGET_TOWER | typeof SETTINGS_TARGET_UPDATE
 
 /**
  * 外壳交给设置页的深链落点。

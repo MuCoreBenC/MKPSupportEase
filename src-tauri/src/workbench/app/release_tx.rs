@@ -276,6 +276,13 @@ pub struct ReleaseOptions {
     /// 建了 PR 之后**接着合并**它（人在界面上点过「确认发布」才给 true）
     #[serde(default)]
     pub merge: bool,
+    /// **人类确认位**（2026-11-05 硬约束，见 AGENTS.md）：真发版必须显式给 true。
+    ///
+    /// 这一条会打 tag、构建并上传安装包、写 `release.json` —— 用户能收到"有新版"、
+    /// 老版本会被要求升级，是**最难撤回的那一种动作**。工作台「确认发布」按钮、
+    /// CLI 的 `--confirm` 才是这个 `true` 的来源；`dry_run` 只是预演，不需要确认。
+    #[serde(default)]
+    pub confirmed: bool,
     /// 构建 macOS 安装包（**默认开**：发软件版本就是要有安装包）
     #[serde(default = "default_build")]
     pub build: bool,
@@ -301,6 +308,7 @@ impl Default for ReleaseOptions {
             merge: false,
             build: true,
             open_review: true,
+            confirmed: false,
         }
     }
 }
@@ -390,6 +398,21 @@ fn tag_of(version: &str) -> String {
     format!("{TAG_PREFIX}{version}")
 }
 
+/// **打了 tag 就得让 `release.json` 同代**（2026-11-05）。
+///
+/// 纯函数、只读一串文本：判据不用真仓库、不碰网络。版本号与 tag 必须互相推得出来
+/// （`v0.0.10` ↔ `0.0.10`），否则"有新版"这件事客户端永远看不到。
+fn assert_release_info_matches_tag(text: &str, version: &str, tag: &str) -> Result<(), AppError> {
+    let info = release_info::parse(text.as_bytes())?;
+    if info.version.trim() != version.trim() || tag_of(info.version.trim()) != tag {
+        return Err(AppError::invalid_argument(format!(
+            "release.json 的版本号（{}）与本次 tag（{tag}）不是同一代 —— 不许打了 tag 却让客户端看不到新版",
+            info.version
+        )));
+    }
+    Ok(())
+}
+
 /// **事务内核**：走完"预检 → 版本号 → 提交推送 → PR → 合并 → tag → 构建 → Release
 /// → 上传 → 写 `release.json` → 它的 PR"，停在它能停的地方并如实报。
 ///
@@ -406,6 +429,15 @@ pub fn run(
     hosting: Option<&dyn Hosting>,
     release: Option<&ReleaseChannel<'_>>,
 ) -> Result<ReleaseTxReport, AppError> {
+    /* ⓪ **没有人类当次确认 = 不许真发版**（2026-11-05 硬约束）。
+     * 放在所有写盘 / 打 tag / 建 Release / 联网之前，零副作用。预演不要确认。 */
+    if !opts.dry_run && !opts.confirmed {
+        return Err(AppError::invalid_argument(
+            "真发版需要显式确认：请在工作台点「确认发布」，或在命令行加 --confirm；\
+             只想看会做什么请用 --dry-run。",
+        ));
+    }
+
     let git = Git::open(repo_root);
     let base = opts.base_or_main();
 
@@ -882,6 +914,11 @@ pub fn run(
         report.zip.as_ref(),
         previous.as_ref(),
     )?;
+    /* ⓪ 「动了 tag 的版本号，就必须让 release.json 跟着动」（2026-11-05 作者原话）。
+     * 这条本来靠"两个地方都传 version"维持；加一道纯读判据，将来谁绕开写文件、
+     * 或改了版本号却没同步信息源，事务会在这一步红，而不是"打了 tag 客户端永远
+     * 不知道有新版"。`want_info` 就是这一趟该写/该保留的那份，早退分支也过这道。 */
+    assert_release_info_matches_tag(&want_info, &version, &tag)?;
     if std::fs::read_to_string(repo_root.join(RELEASE_INFO_REL))
         .ok()
         .as_deref()
@@ -2172,7 +2209,11 @@ mod tests {
         crate::fsx::atomic::atomic_write(&root.join("dirty.txt"), b"x").unwrap();
         assert!(!git.is_clean().unwrap());
 
-        let report = run(root, &ReleaseOptions::default(), None, None, None).expect("该返回报告");
+        let confirmed = ReleaseOptions {
+            confirmed: true,
+            ..Default::default()
+        };
+        let report = run(root, &confirmed, None, None, None).expect("该返回报告");
         assert_eq!(report.stage, ReleaseStage::BlockedPreflight);
         assert!(
             report.blocked_reasons.iter().any(|r| r.contains("不干净")),
@@ -2188,7 +2229,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         init_repo(root, "main");
-        let report = run(root, &ReleaseOptions::default(), None, None, None).expect("该返回报告");
+        let confirmed = ReleaseOptions {
+            confirmed: true,
+            ..Default::default()
+        };
+        let report = run(root, &confirmed, None, None, None).expect("该返回报告");
         assert_eq!(report.stage, ReleaseStage::BlockedPreflight);
         assert!(
             report.blocked_reasons.iter().any(|r| r.contains("主线")),
@@ -2348,6 +2393,7 @@ mod tests {
             notes: "第一版之后的第一个小修".to_owned(),
             merge: true,
             build: false, // 构建要几分钟，这一条只验编排；构建与上传在真机上验
+            confirmed: true,
             ..ReleaseOptions::default()
         };
         let report = run(root, &opts, Some(&target), Some(&fake), None).expect("该跑通");
@@ -2630,5 +2676,51 @@ mod tests {
             .unwrap();
         git.commit("初始").unwrap();
         git
+    }
+
+    /// **真发版不带确认 = 零副作用地拒绝**（2026-11-05 硬约束）。
+    /// 预演不需要确认；带确认才往下走预检（临时仓库预检本来就会停在 blockedPreflight）。
+    #[test]
+    fn a_real_software_release_needs_an_explicit_confirmation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        crate::fsx::atomic::atomic_write(&root.join("Cargo.toml"), b"version = \"0.0.1\"\n")
+            .unwrap();
+        let err = run(root, &ReleaseOptions::default(), None, None, None)
+            .expect_err("没确认的真发版必须被拦下");
+        assert!(
+            err.message.contains("确认") || err.message.contains("confirm"),
+            "拒绝理由得说清缺了什么：{}",
+            err.message
+        );
+
+        let confirmed = ReleaseOptions {
+            confirmed: true,
+            ..Default::default()
+        };
+        match run(root, &confirmed, None, None, None) {
+            Ok(_) => {}
+            Err(e) => assert!(
+                !e.message.contains("显式确认"),
+                "带确认就不该再被确认闸拦下（临时仓库预检红是另一回事）：{}",
+                e.message
+            ),
+        }
+    }
+
+    /// **动了 tag 就得让 release.json 同代**（2026-11-05 作者原话）。
+    #[test]
+    fn the_release_info_must_travel_with_the_tag() {
+        let good = r#"{"version":"0.0.10","notes":"","url":"","releaseSchema":1}"#;
+        assert!(assert_release_info_matches_tag(good, "0.0.10", "v0.0.10").is_ok());
+
+        let stale = r#"{"version":"0.0.6","notes":"","url":"","releaseSchema":1}"#;
+        let err = assert_release_info_matches_tag(stale, "0.0.10", "v0.0.10")
+            .expect_err("打了 0.0.10 的 tag 却还留着 0.0.6 的信息源，必须红");
+        assert!(
+            err.message.contains("0.0.6"),
+            "要说清是哪一代：{}",
+            err.message
+        );
     }
 }

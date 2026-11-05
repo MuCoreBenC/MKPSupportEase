@@ -152,15 +152,20 @@ pub fn generate_preview(ctx: &Ctx) -> Result<PreviewReport, AppError> {
     self::build::preview_with(ctx, &Scope::Stale)
 }
 
-/// 发布事务（工作台那颗按钮的内核）。
+/// 发布事务（工作台那颗按钮 / CLI `presets publish` 共用的内核）。
+///
+/// `history_root` = 发布回执要落进哪个应用数据根。CLI 传
+/// [`crate::fsx::paths::internal_root_headless`] 的结果 —— 与工作台同一个目录，
+/// 于是「AI 替我发过什么」在发布历史面板里看得见。
 pub fn publish_tx(
     ctx: &mut Ctx,
     opts: &TxOptions,
     target: Option<&PublishTarget>,
     hosting: Option<&dyn self::platform::Hosting>,
     repo_root: Option<std::path::PathBuf>,
+    history_root: Option<&std::path::Path>,
 ) -> Result<self::publish_tx::PublishTxReport, AppError> {
-    self::publish_tx::run(ctx, opts, target, hosting, repo_root)
+    self::publish_tx::run(ctx, opts, target, hosting, repo_root, history_root)
 }
 
 /// 解析发布账户配置（没配 ⇒ `None`，退化成纯本地推送）。与工作台同一条。

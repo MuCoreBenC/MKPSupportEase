@@ -75,6 +75,9 @@ fn run_cli() -> Result<i32, AppError> {
     let dry_run = rest.iter().any(|a| a == "--dry-run");
     /* 内容一字未改时仍然重发（会推进序号）—— 默认不发，见 `TxOptions::republish` */
     let republish = rest.iter().any(|a| a == "--republish");
+    /* **人类确认位**（2026-11-05 硬约束）：真发布缺 `--confirm` 会被内核零副作用拒绝。
+     * 只有人当次明确许可，AI / CI 才拿得到这个 flag。dry-run 不需要。 */
+    let confirmed = rest.iter().any(|a| a == "--confirm");
     /* `reload --force`：确认丢弃影子树里未保存的编辑（2026-11-01） */
     let force = rest.iter().any(|a| a == "--force");
 
@@ -91,7 +94,7 @@ fn run_cli() -> Result<i32, AppError> {
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
         "reload" => cmd_reload(force),
-        "publish" => cmd_publish(dry_run, republish),
+        "publish" => cmd_publish(dry_run, republish, confirmed),
         "normalize" => cmd_normalize(dry_run),
         "follows-migrate" => cmd_follows_migrate(dry_run),
         "-h" | "--help" | "help" => {
@@ -119,8 +122,9 @@ fn usage() {
   presets normalize             把 presets/registry/param_registry.toml 重排成机械序
   presets follows-migrate --dry-run  预演「跟随状态」迁移：说会有几条，不写任何文件
   presets follows-migrate       把存量版本键补成显式的「不跟随」+ 写迁移台账
-  presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写
-  presets publish               执行正式发布事务（唯一能让序号 +1 的动作）
+  presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写（不需要确认）
+  presets publish --confirm     执行正式发布事务（唯一能让序号 +1 的动作）
+                                ★ 真发布必须人当次明确许可；缺 --confirm 直接拒绝
 
 退出码：0 成功 · 1 执行失败 / 校验未通过 · 2 闸门拦下（要人处理）"
     );
@@ -556,7 +560,7 @@ fn cmd_follows_migrate(dry_run: bool) -> Result<i32, AppError> {
 }
 
 /// **发布**：`--dry-run` 只说不写；不带就走正式事务。
-fn cmd_publish(dry_run: bool, republish: bool) -> Result<i32, AppError> {
+fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, AppError> {
     let mut ctx = open_ctx()?;
     /*
      * ★ 发布事务用 `TxOptions::default()` 的 dry_run / republish 开关 —— **与工作台同一个
@@ -565,11 +569,23 @@ fn cmd_publish(dry_run: bool, republish: bool) -> Result<i32, AppError> {
     let opts = app_pkg::TxOptions {
         dry_run,
         republish,
+        confirmed,
         ..Default::default()
     };
     let target = app_pkg::resolve_target_opt(&ctx)?;
     let hosting = app_pkg::hosting_for(&target)?;
-    let report = app_pkg::publish_tx(&mut ctx, &opts, target.as_ref(), hosting.as_deref(), None)?;
+    /* 与工作台**同一个应用数据根**，好让 CLI 这一趟也进「发布历史」面板。
+     * `internal_root_headless` 在没窗口时按 APP_IDENTIFIER 认门；取不到就跳过记账
+     * （不把一次成功的发布说成失败）。 */
+    let history_root = mkp_support_ease_lib::fsx::paths::internal_root_headless();
+    let report = app_pkg::publish_tx(
+        &mut ctx,
+        &opts,
+        target.as_ref(),
+        hosting.as_deref(),
+        None,
+        history_root.as_deref(),
+    )?;
 
     eprintln!("{}", report.summary);
     /*

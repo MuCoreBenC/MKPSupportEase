@@ -162,6 +162,7 @@ export default function ReleaseGateModal({ onClose, currentVersion }: Props) {
         version: version.trim() === '' ? null : version.trim(),
         notes: notes.trim(),
         merge: true,
+        confirmed: true,
       })
       setReport(rep)
       setTab('receipt')

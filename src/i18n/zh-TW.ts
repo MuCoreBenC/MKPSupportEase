@@ -227,6 +227,11 @@ export const zhTW: Record<StringKey, string> = {
   'settings.update.recheck': '重新檢查',
   'settings.update.view': '查看更新',
   'settings.update.install': '更新',
+'settings.update.autoCheck': '自動檢查更新',
+'settings.update.autoCheckHint': '開啟後，每次成功同步雲端目錄時順路查一次新版；不會在啟動時連網，也不會反覆查。',
+'notify.update.title': '有新版本',
+'notify.update.text': 'SupportEase {version} 已發布',
+'notify.update.view': '去看看',
 
   /* 設定頁：切片 */
   'settings.slicer.title': '切片',

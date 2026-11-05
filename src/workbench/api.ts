@@ -909,6 +909,16 @@ export interface IssueReport {
 
 /* ---------- 生成 / 恢复 / 发布 ---------- */
 
+/**
+ * 内嵌目录重算的结局（`wb_regen_embedded_catalog`）。
+ * `changed=false` = 盘上那份已经是最新的，一个字节都没写。
+ */
+export interface EmbeddedCatalogReport {
+  changed: boolean
+  files: number
+  revision: string
+}
+
 /** `build::Scope` —— 三个生成入口 */
 export type BuildScope = 'stale' | 'all' | { picked: string[] }
 
@@ -1284,6 +1294,11 @@ export interface TxOptions {
   base?: string
   /** 发到哪个平台（`github` / `gitee`）；不填 = 自动挑（见发布账户配置） */
   platform?: string | null
+  /**
+   * **人类确认位**（2026-11-05 硬约束）：真发布必须显式给 `true`，内核缺了直接拒绝。
+   * 工作台那颗「确认发布」按钮是它的唯一来源；预演（`dryRun`）不需要。
+   */
+  confirmed?: boolean
 }
 
 /**
@@ -1377,6 +1392,8 @@ export interface ReleaseOptions {
   /** 构建**本平台**的安装包（macOS → dmg / Windows → NSIS；默认开） */
   build?: boolean
   openReview?: boolean
+  /** **人类确认位**（2026-11-05）：真发版必须显式给 `true`（打 tag / 写 release.json 那一趟） */
+  confirmed?: boolean
 }
 
 /** `release_tx::PreflightItem` —— 闸里的一格 */
@@ -1440,6 +1457,14 @@ export interface ReleaseRecord {
 export interface ReleaseHistory {
   historySchema: number
   records: ReleaseRecord[]
+}
+
+/** `git::CommitRow` —— 本分支最近的一条提交（**本机仓库视图**，不代表线上已合并） */
+export interface CommitRow {
+  short: string
+  author: string
+  at: string
+  subject: string
 }
 
 /** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
@@ -2672,6 +2697,12 @@ export const wb = {
   txnRedo: () => invoke<TxnState>('wb_txn_redo'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
+  /**
+   * 内嵌目录的**修复动作**（检查卡那条「内嵌目录落后」的待办）：
+   * 按当前 `presets/` 重算 `src-tauri/src/runtime/catalog.generated.json`。
+   * 内容一样就不写 —— 与生成「没变不重写」同一口径。
+   */
+  regenEmbeddedCatalog: () => invoke<EmbeddedCatalogReport>('wb_regen_embedded_catalog'),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
   generatePreview: (scope: BuildScope) =>
     invoke<PreviewReport>('wb_generate_preview', { scope }),
@@ -2748,6 +2779,9 @@ export const wb = {
     invoke<ReleaseTxReport>('wb_release_software', { opts }),
   /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
   releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
+  /** 本分支最近提交（发布历史第三栏；只读、不联网，`limit` 后端夹到 1..=20） */
+  recentCommits: (limit?: number) =>
+    invoke<CommitRow[]>('wb_recent_commits', limit === undefined ? {} : { limit }),
   /**
    * **杀掉 dev 监视进程**（run-env 拦下时的一键解法）—— 后端先验明正身（命令行
    * 得像 tauri dev）再动手；只杀 CLI 本尊，应用窗口与 vite 都活着。

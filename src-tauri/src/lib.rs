@@ -595,6 +595,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
+        ipc::prefs::get_auto_check_update,
+        ipc::prefs::set_auto_check_update,
         // 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」——
         // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
         ipc::prefs::get_copies_follow_cloud,
@@ -779,6 +782,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
+        ipc::prefs::get_auto_check_update,
+        ipc::prefs::set_auto_check_update,
         // 预设页偏好（2026-10-20）：与上面那份清单一字不差
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
@@ -914,6 +920,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
+        // 内嵌目录的**修复动作**：检查卡那条「内嵌目录落后」的待办就地重算，不必去终端
+        app::build::wb_regen_embedded_catalog,
         // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
@@ -938,6 +946,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::publish_tx::wb_merge_review,
         // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
         app::build::wb_publish_history,
+        // 发布历史第三栏：本分支最近提交（只读、不联网）
+        app::build::wb_recent_commits,
         app::build::wb_open_external,
         // ★ **应用内更新 + 打开外链**（第五刀）：`open_url` 修的是「查看更新点了没反应」
         ipc::update::update_info,

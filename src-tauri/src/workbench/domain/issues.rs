@@ -217,7 +217,12 @@ pub fn preflight(
             // （安装包里编译死的那份 catalog）。重新生成是修复动作，别把路堵死。
             severity: Severity::Todo,
             title: "内嵌目录落后于仓库数据".to_owned(),
-            detail: "跑 `cargo run --bin gen-catalog` 重新生成，再重新构建安装包。".to_owned(),
+            /* 2026-11-05 作者：「不许只剩终端那条路」—— 这条待办右边有「重新生成」按钮，
+             * 点它就按当前 `presets/` 重算这份文件（`wb_regen_embedded_catalog`）。
+             * 文案里点名那颗按钮，别让人再去翻命令。 */
+            detail: "点这一条右边的「重新生成」，按当前 presets/ 重算这份文件。\
+                     重新生成之后还要重新编译客户端，新目录才会随安装包走。"
+                .to_owned(),
             at: Where::view(View::Build),
         }),
     }
@@ -1005,8 +1010,8 @@ uuid = '33333333-3333-3333-3333-333333333333'
             "不挡生成 —— 修复动作是重新生成，别把路堵死"
         );
         assert!(
-            todo.detail.contains("gen-catalog"),
-            "要把修复动作写清楚：{}",
+            todo.detail.contains("重新生成"),
+            "要把修复动作（那条待办右边的按钮）写清楚：{}",
             todo.detail
         );
 

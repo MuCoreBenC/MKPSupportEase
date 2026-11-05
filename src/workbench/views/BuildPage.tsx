@@ -105,6 +105,11 @@ interface Props {
   onSave: () => Promise<boolean>
   /** 生成之后让外壳重取整本（buildRows 的状态跟着走） */
   onBookRefresh: () => void
+  /**
+   * 重取检查报告（外壳那份账）。修复动作（如内嵌目录重算）做完要立刻重取 ——
+   * 不然待办还挂在列表上，人会以为没生效。
+   */
+  onReportRefresh: () => void
 }
 
 /** 检查项的「去处理」映射。产品的一份账里，不是每一条都有地方可去 */
@@ -141,12 +146,24 @@ function localStamp(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function BuildPage({ boot, book, words, report, tick, onGoto, onSave, onBookRefresh }: Props) {
+export default function BuildPage({
+  boot,
+  book,
+  words,
+  report,
+  tick,
+  onGoto,
+  onSave,
+  onBookRefresh,
+  onReportRefresh,
+}: Props) {
   const rows = book.buildRows
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)
   /** 检查卡里展开着长描述的条目（2026-10-19：默认只留两行，按需展开） */
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
+  /** 「内嵌目录落后」那条待办的修复动作正在跑（按钮防连点） */
+  const [regenBusy, setRegenBusy] = useState(false)
   const [lastPublish, setLastPublish] = useState<PublishTxReport | null>(null)
   /**
    * 发布闸开着没有（第二刀）。**点「发布」不再直接发** —— 先过这一道：
@@ -417,7 +434,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
      * ★ 返回值交回给闸那屏：它拿这份快照就地切成**发布回执**（阶段链 + PR 地址 + 合并）。
      * 这一屏也留一份 —— 关掉模态框之后，②卡还能「查看发布结果」再打开。
      */
-    const rep = await wb.publish()
+    /* `confirmed` = 人刚点过这颗「确认发布」按钮（2026-11-05 硬约束）。
+       内核默认 false，缺了会零副作用地拒绝 —— CLI / CI 那条路必须显式带 --confirm。 */
+    const rep = await wb.publish({ confirmed: true })
     setLastPublish(rep)
     /* 发布改了交付目录 → 让外壳重取（④ 残留与 ③ 基线跟着刷新） */
     onBookRefresh()
@@ -444,6 +463,28 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       setStrays(await wb.distStrays())
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /*
+   * **内嵌目录重算**（2026-11-05，作者：「这条待办不该只剩终端那条路」）。
+   * 按当前 `presets/` 重算 `src-tauri/src/runtime/catalog.generated.json`，
+   * 完事立刻重取检查报告 —— 报告绿了、待办消失，才算真修好了。
+   */
+  const regenEmbeddedCatalog = async () => {
+    setRegenBusy(true)
+    try {
+      const r = await wb.regenEmbeddedCatalog()
+      toasts.push(
+        r.changed
+          ? `内嵌目录已重算（${r.files} 份文件 · revision ${r.revision}）—— 重新编译客户端后才随包生效`
+          : '内嵌目录本来就是最新的，一个字节都没写',
+      )
+      onReportRefresh()
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    } finally {
+      setRegenBusy(false)
     }
   }
 
@@ -505,6 +546,18 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                       }
                     >
                       {open ? '收起' : '展开'}
+                    </button>
+                  )}
+                  {/* 「内嵌目录落后」自带修复动作：不是跳到别的页，而是就地重算那份文件 */}
+                  {i.id === 'embedded.catalog_stale' && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      disabled={regenBusy}
+                      title="按当前 presets/ 重算 src-tauri/src/runtime/catalog.generated.json（内容一样就不写）；重新编译客户端后才随安装包生效"
+                      onClick={() => void regenEmbeddedCatalog()}
+                    >
+                      {regenBusy ? '重算中…' : '重新生成'}
                     </button>
                   )}
                   {/* 每一条都要说清去哪儿处理（issues.rs 的规矩），所以每一条都有这颗按钮 */}

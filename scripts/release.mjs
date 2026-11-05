@@ -25,6 +25,15 @@
  * 版本号、提交、推送、PR、合并、tag、构建、Release、上传、release.json —— **全部在内核里**，
  * 本文件只负责"内核做不了、也不该做的那几件"（交互提问、npm/cargo 校验链、等 CI、
  * 失败时把回退命令打印给人看）。**不废弃、不复制**：两个入口，一条路。
+ *
+ * ## 2026-11-05：真发版必须先问人（作者定的硬约束）
+ *
+ * 这一趟会打 tag、上传安装包、写 `release.json`，用户随后就会收到"有新版"——
+ * 是**最难撤回**的动作。所以：
+ *   · 交互跑：末尾要人亲口敲一句 `yes`；
+ *   · 非交互跑（版本与说明都由命令行给了）：必须显式带 `--confirm`；
+ *   · 两条路最后都把 `--confirm` 交给内核，内核缺了会零副作用地拒绝。
+ * AI / CI 没拿到人**当次**的明确许可，不许自己跑完这一趟。
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -66,6 +75,10 @@ function tryRun(cmd, args, opts = {}) {
 
 ROOT = run('git', ['rev-parse', '--show-toplevel'])
 
+/* 真发版的人类确认位：交互跑由末尾那句 `yes` 给，非交互跑由 `--confirm` 给。
+   放在 `core` 之前声明 —— 它读这个变量，不能等到 TDZ 里才出生。 */
+let humanConfirmed = false
+
 const step = (m) => console.log(`\n\u001b[36m▶ ${m}\u001b[0m`)
 const ok = (m) => console.log(`  \u001b[32mok\u001b[0m    ${m}`)
 const info = (m) => console.log(`        ${m}`)
@@ -88,8 +101,9 @@ function die(message, rollback = []) {
  * 不解析人类语言。内核失败时 `cargo run` 带非零退出码，这里如实把消息抛上去。
  */
 function core(args) {
+  if (!humanConfirmed) die('内核拒绝：真发版没拿到人类确认（交互跑要敲 yes，非交互跑要带 --confirm）')
   const bin = ['run', '--bin', 'release', '--features', 'workbench', '--']
-  const out = execFileSync('cargo', [...bin, ...args], {
+  const out = execFileSync('cargo', [...bin, ...args, '--confirm'], {
     encoding: 'utf8',
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -165,11 +179,15 @@ step(`版本号（当前 ${current}，发布会写成 ${suggested}）`)
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
-const [argVersion, argSummary] = process.argv.slice(2)
+const cliArgs = process.argv.slice(2)
+const flagConfirmed = cliArgs.includes('--confirm')
+const [argVersion, argSummary] = cliArgs.filter((a) => a !== '--confirm')
 
 let version = argVersion?.trim()
 let summary = argSummary?.trim()
 
+/* ★ 真发版的人当次许可：交互跑要亲口敲 yes；非交互跑必须显式带 `--confirm`。
+   只给了版本号和说明**不算**许可 —— 那两样 AI 自己就能凑出来。 */
 if (!version || !summary) {
   const rl = createInterface({ input, output })
   version =
@@ -177,9 +195,16 @@ if (!version || !summary) {
     (await rl.question(`  新版本号（不带 v，回车沿用 ${suggested}）: `)).trim() ||
     suggested
   summary = summary || (await rl.question('  一句话说明（会成为 Release 正文）: ')).trim()
+  const answer = (await rl.question('  确认发布？会打 tag、上传安装包、写 release.json（输入 yes 继续）: ')).trim()
   rl.close()
+  if (answer !== 'yes') die('没拿到确认 —— 一个字节都没动')
+  humanConfirmed = true
 } else {
   info(`版本 ${version}；说明「${summary}」（来自命令行参数）`)
+  if (!flagConfirmed) {
+    die('非交互真发版必须显式带 --confirm（人当次明确许可）；只看预检请用 --dry-run')
+  }
+  humanConfirmed = true
 }
 
 /* 允许把 `0.0.10-dev` 原样传进来：发布就是去掉 `-dev` */

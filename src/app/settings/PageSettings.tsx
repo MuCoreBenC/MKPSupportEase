@@ -602,6 +602,15 @@ export default function PageSettings({
   const [autoCleanErr, setAutoCleanErr] = useState<Text | null>(null)
 
   /*
+   * 「自动检查更新」那一格（2026-11-05）：与自动清理同一条口径 ——
+   * `null` = 还没读到（控件先禁用，**不拿猜出来的默认值顶上去**），
+   * 点一下立即落盘，失败不改开关、只把原因摆出来。
+   */
+  const [autoCheckUpdate, setAutoCheckUpdate] = useState<boolean | null>(null)
+  const [autoCheckBusy, setAutoCheckBusy] = useState(false)
+  const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
+
+  /*
    * **备份与恢复**（2026-10-17）：两个动作都要先问系统要一个位置（文件夹 / 那份 zip）。
    *
    * ★ 「恢复」是**不可撤销**的（它把现在的数据换掉）⇒ 与「清空历史」同一条规矩：
@@ -745,6 +754,21 @@ export default function PageSettings({
     void readAutoClean()
   }, [readAutoClean])
 
+  /** 自动检查那一格：打开这一页时读一次（不联网）。 */
+  const readAutoCheckUpdate = useCallback(async () => {
+    try {
+      setAutoCheckUpdate(await api.getAutoCheckUpdate())
+      setAutoCheckErr(null)
+    } catch (e) {
+      setAutoCheckUpdate(null)
+      setAutoCheckErr(msg('settings.history.readFailed', { detail: errorText(e) }))
+    }
+  }, [])
+
+  useEffect(() => {
+    void readAutoCheckUpdate()
+  }, [readAutoCheckUpdate])
+
   /** 在系统浏览器里打开 Release 页（**走命令**，不走 `<a>`） */
   const openReleasePage = async (url: string) => {
     try {
@@ -858,6 +882,20 @@ export default function PageSettings({
       setAutoCleanErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
     } finally {
       setAutoCleanBusy(false)
+    }
+  }
+
+  /** 开关自动检查：立即生效并落盘，写完拿回传值校准这一格。 */
+  const pickAutoCheckUpdate = async (next: boolean) => {
+    if (autoCheckBusy) return
+    setAutoCheckBusy(true)
+    setAutoCheckErr(null)
+    try {
+      setAutoCheckUpdate(await api.setAutoCheckUpdate(next))
+    } catch (e) {
+      setAutoCheckErr(msg('settings.history.writeFailed', { detail: errorText(e) }))
+    } finally {
+      setAutoCheckBusy(false)
     }
   }
 
@@ -1257,6 +1295,29 @@ export default function PageSettings({
             )}
           </div>
         </div>
+
+        {/*
+         * 「自动检查更新」（2026-11-05）：作者截图里右上角那块空位。
+         * 不塞进右上的动作条（那条是「重新检查 / 查看更新 / 更新」三颗按钮的），
+         * 单独一行放在卡片下沿 —— 开关是**偏好**，按钮是**动作**，别混。
+         */}
+        <div className={`${s.field} ${s.fieldRow} ${s.autoCheckRow}`}>
+          <div className={s.fieldText}>
+            <div className={s.fieldTitle}>
+              {tr('settings.update.autoCheck')}
+              <Tip text={tr('settings.update.autoCheckHint')} />
+            </div>
+          </div>
+          <Switch
+            checked={autoCheckUpdate ?? false}
+            ariaLabel={tr('settings.update.autoCheck')}
+            onChange={(v) => void pickAutoCheckUpdate(v)}
+            disabled={autoCheckUpdate === null || autoCheckBusy}
+          />
+        </div>
+        {autoCheckErr !== null && (
+          <p className={`${s.note} ${s.noteBad}`}>{say(autoCheckErr)}</p>
+        )}
       </section>
 
       {/*

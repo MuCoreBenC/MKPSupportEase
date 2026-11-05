@@ -196,13 +196,13 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     })
 }
 
-/// 内嵌目录自查：`catalog.generated.json`（编译进二进制、客户端首启释放的那份）
-/// 与当前仓库重新构建出来的那份是否**逐字节一致**。
+/// 内嵌目录自查：盘上的 `catalog.generated.json`（下次构建会编进二进制、
+/// 客户端首启释放的那份）与按当前仓库重新构建出来的是否**逐字节一致**。
 ///
 /// 之前只有一条 Rust 单测（`runtime::tests::embedded_matches_rebuild`）盯着 ——
 /// 红在 `cargo test` 里，检查页上没人提。现在预检把这件事摆上桌面：
-/// 改了 presets/（或交付产物）没跑 `cargo run --bin gen-catalog`，装出来的
-/// 客户端首屏拿的还是旧数据 —— 这是发布前该知道的事。
+/// 改了 presets/ 没重算这份文件，装出来的客户端首屏拿的还是旧数据 ——
+/// 这是发布前该知道的事，而且**这条待办能就地修**（见 [`wb_regen_embedded_catalog`]）。
 fn audit_embedded_catalog() -> Result<(), String> {
     let repo = crate::workbench::paths::repo_root();
     let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)
@@ -210,10 +210,65 @@ fn audit_embedded_catalog() -> Result<(), String> {
     let json = catalog
         .to_pretty_json()
         .map_err(|e| format!("内嵌目录序列化失败：{}", e.message))?;
-    if json.as_bytes() == crate::runtime::EMBEDDED_CATALOG {
+    /* 比的是**盘上那份文件**，不是 `EMBEDDED_CATALOG`（编进当前这个二进制的字节）。
+     *
+     * 2026-11-05 作者拍板改口径：比编译进去的那份，这条待办在界面上就**修不了** ——
+     * 文件写对了也不会绿，非得重新编译；等于把修复动作关在终端里。而"下次构建会编
+     * 进去什么"才是这一层的真问题，那份字节就在盘上。旧口径仍由
+     * `runtime::tests::embedded_matches_rebuild` 在 `cargo test` 里守着。 */
+    let path = embedded_catalog_path();
+    let on_disk = std::fs::read(&path).map_err(|e| format!("读不回来 {}：{e}", path.display()))?;
+    if json.as_bytes() == on_disk.as_slice() {
         return Ok(());
     }
-    Err("安装包里编译的那份，与按当前 presets/ 重新构建出来的不一致".to_owned())
+    Err("catalog.generated.json 与按当前 presets/ 重新构建出来的不一致".to_owned())
+}
+
+/// 内嵌目录文件在某个仓库根下的落点。`gen-catalog` / 生成第 5 步 / 这条修复动作
+/// **同一个落点** —— 路径只在这一处拼，别再复写第三份。
+fn embedded_catalog_path_at(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("src-tauri/src/runtime/catalog.generated.json")
+}
+
+/// 当前仓库根下的那一份
+fn embedded_catalog_path() -> std::path::PathBuf {
+    embedded_catalog_path_at(&crate::workbench::paths::repo_root())
+}
+
+/// 内嵌目录的**修复动作**（检查卡那条待办上的「重新生成」按钮）。
+///
+/// 与 `cargo run --bin gen-catalog` 的前半程同一条内核（`Catalog::build_from_repo`）——
+/// 作者的要求：这条待办得能在工作台里就地修掉，不许只剩「去终端敲命令」这一条路。
+///
+/// **只写内嵌目录这一份**：交付面的 `catalog.json` 归 `wb_generate` / 发布事务，
+/// 这里不动它（那是另一条链，混进来就成了第二个源）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedCatalogReport {
+    /// 这次真重写了吗（内容一样就不写，与生成的「没变不重写」同一口径）
+    pub changed: bool,
+    pub files: usize,
+    pub revision: String,
+}
+
+#[tauri::command(async)]
+pub fn wb_regen_embedded_catalog() -> Result<EmbeddedCatalogReport, AppError> {
+    traced("wb_regen_embedded_catalog", |_| {
+        // 落点跟**仓库**走（会话根），与应用数据目录无关 —— 这份文件是要进 git 的
+        let repo = crate::workbench::paths::repo_root();
+        let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)?;
+        let json = catalog.to_pretty_json()?;
+        let path = embedded_catalog_path_at(&repo);
+        let changed = std::fs::read(&path).ok().as_deref() != Some(json.as_bytes());
+        if changed {
+            crate::fsx::atomic::atomic_write(&path, json.as_bytes())?;
+        }
+        Ok(EmbeddedCatalogReport {
+            changed,
+            files: catalog.files.len(),
+            revision: catalog.revision.clone(),
+        })
+    })
 }
 
 /* ---------- 渲染 ---------- */
@@ -916,8 +971,7 @@ fn generate_inner(
             crate::runtime::Catalog::build_from_repo(&crate::workbench::paths::repo_root())?;
         let embedded_json = embedded.to_pretty_json()?;
         crate::fsx::atomic::atomic_write(
-            &ctx.real_root
-                .join("src-tauri/src/runtime/catalog.generated.json"),
+            &embedded_catalog_path_at(&ctx.real_root),
             embedded_json.as_bytes(),
         )?;
         receipt.step("embedded", true, format!("{} 份文件", embedded.files.len()));
@@ -1619,6 +1673,9 @@ pub fn wb_publish(
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
+        /* 数据根也在锁外取：内核只收一个 `&Path`，不碰 AppHandle（锁纪律）。
+         * 记账本身在内核里 —— CLI `presets publish` 走同一个内核，所以两条路都留痕。 */
+        let history_root = crate::fsx::paths::internal_root(&app).ok();
         let report = with_ctx_mut(|ctx| {
             // 发布只认「已保存」那一版：草稿混进产物 = 发出去的东西没人审过
             require_clean(ctx)?;
@@ -1628,36 +1685,12 @@ pub fn wb_publish(
                 target.as_ref(),
                 hosting.as_ref().map(|h| h.as_ref()),
                 None,
+                history_root.as_deref(),
             )?;
             /* 发布写了交付产物 / 账本（真仓库）；影子树跟着换到新一代 */
             crate::workbench::domain::txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
             Ok::<_, AppError>(out)
         })?;
-
-        // 收尾：把这次回执落进**发布历史**（作者 2026-10-04）。
-        // - 壳层做：写历史要 `AppHandle` 拿 appDataDir，而事务内核不碰 AppHandle（锁纪律）；
-        // - **只记真发生过的**：被闸拦下（零写入）与 `dry_run`（演练）都不记 —— 回执不是"我点过"，
-        //   是"发生过什么"；
-        // - 历史写失败**不许**把一次成功的发布说成失败：如实在 summary 上补一句，照样返回。
-        let mut report = report;
-        if !opts.dry_run && report.stage != super::publish_tx::PublishStage::BlockedAudit {
-            match crate::fsx::paths::internal_root(&app) {
-                Ok(root) => {
-                    let record = super::history::PublishRecord::from_report(
-                        &report,
-                        crate::workbench::clock::now_iso8601(),
-                    );
-                    if let Err(e) = super::history::append(&root, record) {
-                        report
-                            .summary
-                            .push_str(&format!("（发布历史没记上：{}）", e.message));
-                    }
-                }
-                Err(e) => report
-                    .summary
-                    .push_str(&format!("（发布历史没记上：{}）", e.message)),
-            }
-        }
         Ok(report)
     })
 }
@@ -1673,6 +1706,18 @@ pub fn wb_publish_history(
     traced("wb_publish_history", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
         super::history::load(&root)
+    })
+}
+
+/// **本分支最近的提交**（只读、`async`、不联网）——「发布历史」第三栏。
+///
+/// 作者 2026-11-05：「AI 用 CI 做了什么我不知道，但我不要很详细的」——
+/// 只给最近 20 条 `短 sha / 作者 / 时间 / 标题`，不 diff、不查远端。
+/// 读的是**本机仓库**，没推上去的提交也在里面（界面要写清这一句）。
+#[tauri::command(async)]
+pub fn wb_recent_commits(limit: Option<usize>) -> Result<Vec<super::git::CommitRow>, AppError> {
+    traced("wb_recent_commits", |_| {
+        super::git::Git::at_repo_root().recent_commits(limit.unwrap_or(20))
     })
 }
 

@@ -574,6 +574,15 @@ pub struct AppStateFile {
     /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clean_history: Option<bool>,
+    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ **开着**（出厂默认）。
+    ///
+    /// 开 = 客户端**成功拉到云端目录之后**，顺路查一次 `release.json`；发现新版
+    /// 在右上角通知里弹一条（点击跳设置页「软件更新」）。查失败一律静默。
+    /// **不进启动 / 首屏路径**（铁律 2：启动零网络），也不做定时轮询 ——
+    /// 拉目录本来就要联网，搭这一趟，用户多了也不会把公共仓库打爆。
+    /// 读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs` 的命令。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_check_update: Option<bool>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
     ///
     /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
@@ -628,6 +637,7 @@ impl Default for AppStateFile {
             theme: None,
             locale: None,
             auto_clean_history: None,
+            auto_check_update: None,
             pin: None,
             compact: None,
             last_window_box: None,
@@ -810,6 +820,8 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         locale: None,
         /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_clean_history: None,
+        /* 自动检查更新是 2026-11-05 才有的：旧档里本来就没有它（没选过 = 开着） */
+        auto_check_update: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
         pin: None,
         compact: None,
@@ -1247,6 +1259,23 @@ pub fn auto_clean_history(root: &Path) -> Result<bool, AppError> {
 pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppError> {
     with_state(root, |state| {
         state.auto_clean_history = Some(enabled);
+        Ok(enabled)
+    })
+}
+
+/* ---------- autoCheckUpdate：软件更新的自动检查开关 ---------- */
+
+/// 自动检查开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+///
+/// 读者是 [`crate::runtime::update_check`] —— 界面不直接读它，设置页那格走 `ipc::prefs`。
+pub fn auto_check_update(root: &Path) -> Result<bool, AppError> {
+    Ok(load(root)?.auto_check_update.unwrap_or(true))
+}
+
+/// 记下自动检查开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_auto_check_update(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        state.auto_check_update = Some(enabled);
         Ok(enabled)
     })
 }
@@ -1986,6 +2015,25 @@ mod tests {
         assert!(auto_clean_history(d.path()).unwrap());
         /* 与主题那格互不踩：关掉自动清理不该动主题 */
         assert_eq!(theme(d.path()).unwrap(), None);
+    }
+
+    /* ---------- autoCheckUpdate（2026-11-05） ---------- */
+
+    /// **没选过 = 开着**（出厂默认）；关掉能记住、能再打开，且**不踩**自动清理那格
+    #[test]
+    fn auto_check_update_starts_on_and_roundtrips() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(auto_check_update(d.path()).unwrap(), "没选过就该是开着");
+
+        assert!(!set_auto_check_update(d.path(), false).unwrap());
+        assert!(!auto_check_update(d.path()).unwrap());
+        assert!(
+            auto_clean_history(d.path()).unwrap(),
+            "关自动检查不该顺手把自动清理也关了"
+        );
+
+        assert!(set_auto_check_update(d.path(), true).unwrap());
+        assert!(auto_check_update(d.path()).unwrap());
     }
 
     /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），

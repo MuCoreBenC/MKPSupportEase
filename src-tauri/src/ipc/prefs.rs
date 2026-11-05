@@ -211,6 +211,30 @@ pub async fn set_auto_clean_history(app: AppHandle, enabled: bool) -> Result<boo
     })
 }
 
+/* ---------- 自动检查软件更新（2026-11-05）：设置页「软件更新」那一块 ---------- */
+
+/// **自动检查**开着吗（出厂 = 开）。`None` ⇒ 开，界面不拿 `null` 自己猜默认档。
+#[tauri::command]
+pub async fn get_auto_check_update(app: AppHandle) -> Result<bool, AppError> {
+    traced("getAutoCheckUpdate", |_| {
+        let root = internal_root(&app)?;
+        runtime::app_state::auto_check_update(&root)
+    })
+}
+
+/// 开关自动检查。落盘成功后广播一声 —— 前端那一格显示的永远是盘上真账。
+///
+/// 关掉只影响「拉目录之后顺路查」；设置页手动点「重新检查」照旧可用。
+#[tauri::command]
+pub async fn set_auto_check_update(app: AppHandle, enabled: bool) -> Result<bool, AppError> {
+    traced("setAutoCheckUpdate", |_| {
+        let root = internal_root(&app)?;
+        let got = runtime::app_state::set_auto_check_update(&root, enabled)?;
+        notify_app_state(&app);
+        Ok(got)
+    })
+}
+
 /* ---------- 界面语言（2026-10-25）：设置页「界面语言」那一块 ---------- */
 
 /// 当前界面语言。`null` = **还没选过** ⇒ 界面按"跟随系统"（与 `get_theme` 同一口径）。

@@ -566,6 +566,14 @@
   margin-top: 2px;
 }
 
+/* 软件更新卡里那一格「自动检查更新」：与上面「状态 + 三颗按钮」分开一行，
+   不与动作条挤在一起（开关是偏好、按钮是动作）。 */
+.autoCheckRow {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 /* 卡片没了之后，章节里那些"整行之外"的句子（错误提示 / 隐私小字 / 当前值）要自己带内衬，
    否则会贴着页边、跟行里的人错开 12px */
 .section > .note,

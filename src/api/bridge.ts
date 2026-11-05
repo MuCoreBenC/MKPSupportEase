@@ -343,6 +343,11 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 界面偏好第三格（2026-11-05）：自动检查软件更新 —— 落 autoCheckUpdate 格。
+     开（出厂）⇒ 成功拉到云端目录之后顺路查一次 release.json，有新版才推通知 */
+  getAutoCheckUpdate: () => call('getAutoCheckUpdate', 'get_auto_check_update'),
+  setAutoCheckUpdate: (enabled) =>
+    call('setAutoCheckUpdate', 'set_auto_check_update', { enabled }),
   /* 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」—— 落 presets 格。
      关（出厂）⇒ 复制件不认云端：账本与逐参数更新账两个出口都把它滤掉 */
   getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),

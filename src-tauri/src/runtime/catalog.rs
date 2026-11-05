@@ -1286,7 +1286,7 @@ mod tests {
             9,
             "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一（照 C15 模型重排）"
         );
-        assert_eq!(catalog.registry.params.len(), 75, "实测 75 条字段定义");
+        assert_eq!(catalog.registry.params.len(), 83, "实测 83 条字段定义");
         assert!(
             !catalog.registry.tabs.is_empty() && !catalog.registry.layout.is_empty(),
             "页签元数据与参数摆放都该在"
