@@ -145,13 +145,30 @@ fn bundle_dir(repo_root: &Path, sub: &str) -> Option<PathBuf> {
         .find(|dir| dir.is_dir())
 }
 /// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
-/// `release.json` 相对仓库根的落点。**它是客户端"有没有新版本"的唯一正式信息源**。
 ///
 /// ★ 2026-10-05 寻址改造（总纲 §1②）：从 `presets/release.json` 入住交付根
 /// `presets/delivery/` —— 它本来就是客户端消费的交付元数据，与 catalog / manifest /
 /// source 同边界；客户端按 Source Manifest 的 `release` 声明取它（旧的"上跳一级"
 /// 推导已废除）。测试钉位见 `runtime::release_info`。
 pub const RELEASE_INFO_REL: &str = "presets/delivery/release.json";
+
+/// **预览版**发布信息的落点（`release-preview.json`，2026-11-05 预览发布事务）。
+///
+/// 与 [`RELEASE_INFO_REL`] **同一个交付根、同一条代次、同一套断代校验**，只是**两条通道**：
+/// 正式版用户只读 `release.json`（会主动通知），预览版候选只在用户主动点「重新检查」时
+/// 从这一份里取。两份清单互不覆盖 —— 发预览**不许**动正式版那一份。
+pub const RELEASE_PREVIEW_REL: &str = "presets/delivery/release-preview.json";
+
+/// 这一趟该写哪一份清单（**只此一处映射**）。
+///
+/// 让"写正式版"与"写预览版"共用同一条写盘链（同一个形状、同一条断代校验、同一套
+/// 原子写），只在**落点**上分叉 —— 两份清单各写各的代码，迟早一份跟着另一份漂。
+fn info_rel_for(channel: release_info::UpdateChannel) -> &'static str {
+    match channel {
+        release_info::UpdateChannel::Stable => RELEASE_INFO_REL,
+        release_info::UpdateChannel::Preview => RELEASE_PREVIEW_REL,
+    }
+}
 
 /// **断代线**（M6，总纲 §5-M6）：从这个版本起，`release.json` 里的 URL 一律来自
 /// **Gitee Release**（发布仓库），`github.com/.../releases` 只允许出现在断代前的
@@ -289,6 +306,15 @@ pub struct ReleaseOptions {
     /// 提交推送之后要不要建 PR
     #[serde(default = "default_open_review")]
     pub open_review: bool,
+    /// **发哪一条通道**（2026-11-05 预览发布事务）。
+    ///
+    /// - `stable`（缺省）：写 `release.json`，Release 不标 prerelease —— 会主动通知所有用户；
+    /// - `preview`：写 `release-preview.json`，Release 标 prerelease —— **正式版那一份一个
+    ///   字节都不动**，只有主动点「重新检查」的人才看得到。
+    ///
+    /// 缺省是 `stable`：老调用方（旧前端 / 不带 `--channel` 的脚本）语义不变。
+    #[serde(default)]
+    pub channel: release_info::UpdateChannel,
 }
 
 fn default_build() -> bool {
@@ -309,6 +335,7 @@ impl Default for ReleaseOptions {
             build: true,
             open_review: true,
             confirmed: false,
+            channel: release_info::UpdateChannel::Stable,
         }
     }
 }
@@ -341,7 +368,10 @@ pub struct ArtifactInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ReleaseTxReport {
     pub stage: ReleaseStage,
-    /// 这一轮的版本号（`x.y.z`，不带 v）
+    /// 这一轮走的是哪条通道（`stable` / `preview`）—— 回执里必须能看出来，
+    /// 否则"我这一趟到底动没动正式版那一份"事后只能靠翻 git log
+    pub channel: release_info::UpdateChannel,
+    /// 这一轮的版本号（`x.y.z` / `x.y.z-preview.N`，不带 v）
     pub version: String,
     /// tag（`v0.0.2`）
     pub tag: String,
@@ -373,9 +403,15 @@ pub struct ReleaseTxReport {
 }
 
 impl ReleaseTxReport {
-    fn blocked(version: String, tag: String, reasons: Vec<String>) -> Self {
+    fn blocked(
+        version: String,
+        tag: String,
+        channel: release_info::UpdateChannel,
+        reasons: Vec<String>,
+    ) -> Self {
         Self {
             stage: ReleaseStage::BlockedPreflight,
+            channel,
             version,
             tag,
             branch: None,
@@ -398,16 +434,35 @@ fn tag_of(version: &str) -> String {
     format!("{TAG_PREFIX}{version}")
 }
 
-/// **打了 tag 就得让 `release.json` 同代**（2026-11-05）。
+/// **打了 tag 就得让清单同代，且通道身份一致**（2026-11-05；预览通道同日补）。
 ///
-/// 纯函数、只读一串文本：判据不用真仓库、不碰网络。版本号与 tag 必须互相推得出来
-/// （`v0.0.10` ↔ `0.0.10`），否则"有新版"这件事客户端永远看不到。
-fn assert_release_info_matches_tag(text: &str, version: &str, tag: &str) -> Result<(), AppError> {
+/// 纯函数、只读一串文本：判据不用真仓库、不碰网络。三条一起钉：
+/// 1. 清单版本号 == 这一趟的版本号；
+/// 2. 由它推出来的 tag（`v` + 版本号）== 这一趟的 tag；
+/// 3. **通道身份**：预览通道写出来的必须是预发布版本号，正式通道写出来的必须不是。
+///    第 3 条防的是"预览版清单里写着正式号"（客户端会把它当成正式版候选）与反过来
+///    "正式版清单里写着预览号"（全量用户收到预览通知）这两种串台。
+fn assert_release_info_matches_tag(
+    text: &str,
+    version: &str,
+    tag: &str,
+    channel: release_info::UpdateChannel,
+) -> Result<(), AppError> {
     let info = release_info::parse(text.as_bytes())?;
     if info.version.trim() != version.trim() || tag_of(info.version.trim()) != tag {
         return Err(AppError::invalid_argument(format!(
-            "release.json 的版本号（{}）与本次 tag（{tag}）不是同一代 —— 不许打了 tag 却让客户端看不到新版",
+            "发布清单的版本号（{}）与本次 tag（{tag}）不是同一代 —— 不许打了 tag 却让客户端看不到新版",
             info.version
+        )));
+    }
+    let is_pre = release_info::is_prerelease(&info.version);
+    let want_pre = channel == release_info::UpdateChannel::Preview;
+    if is_pre != want_pre {
+        return Err(AppError::invalid_argument(format!(
+            "通道与版本身份不一致：{:?} 通道写出来的版本号是 {}（{}预发布号）",
+            channel.wire(),
+            info.version,
+            if is_pre { "是" } else { "不是" }
         )));
     }
     Ok(())
@@ -456,11 +511,28 @@ pub fn run(
     /* ---------- ② 预检（**没有任何写操作**） ---------- */
 
     let mut blocked = Vec::new();
-    /* 发出去的必须是正式版：`-dev` 只是开发期的占位，去掉它才是「这一版定稿」。 */
-    if !version::is_semver(&version) {
-        blocked.push(format!(
-            "发布版本必须是正式版 x.y.z（不能带 -dev）：{version} —— 先 npm run version:release"
-        ));
+    /* **版本形状按通道判**（2026-11-05 预览发布事务）：
+     *   · 正式通道：只认 `x.y.z`（`-dev` 只是开发期占位，去掉才是「定稿」）；
+     *   · 预览通道：只认 `x.y.z-preview.N`（没有序号的预览号说不清谁更新）。
+     * ★ 交叉约束两条，都是"一发出去就难撤"的那一类，所以放在**零写入**的预检里：
+     *   · 预览号走正式通道 —— 全量用户会收到一个预览版的"有新版"通知；
+     *   · 正式号走预览通道 —— 它不会通知任何人，白占一个正式号。 */
+    match opts.channel {
+        release_info::UpdateChannel::Stable => {
+            if !version::is_semver(&version) {
+                blocked.push(format!(
+                    "正式通道的发布版本必须是 x.y.z（不能带 -dev / -preview）：{version}\
+                     —— 先 npm run version:release"
+                ));
+            }
+        }
+        release_info::UpdateChannel::Preview => {
+            if !version::is_preview_version(&version) {
+                blocked.push(format!(
+                    "预览通道的发布版本必须是 x.y.z-preview.N（序号从 1 起）：{version}"
+                ));
+            }
+        }
     }
     let branch = git.branch().unwrap_or_default();
     if branch == base {
@@ -500,11 +572,17 @@ pub fn run(
         }
     }
     if !blocked.is_empty() {
-        return Ok(ReleaseTxReport::blocked(version, tag, blocked));
+        return Ok(ReleaseTxReport::blocked(
+            version,
+            tag,
+            opts.channel,
+            blocked,
+        ));
     }
 
     let mut report = ReleaseTxReport {
         stage: ReleaseStage::Ready,
+        channel: opts.channel,
         version: version.clone(),
         tag: tag.clone(),
         branch: Some(branch.clone()),
@@ -808,7 +886,10 @@ pub fn run(
         repo: g.repo.clone(),
         tag_name: tag.clone(),
         name: format!("{PRODUCT} {tag}"),
-        body: release_body(&opts.notes),
+        body: release_body(&opts.notes, opts.channel),
+        // ★ 预览版**必须**标 prerelease：不标的话它会以"最新正式版"的身份挂在仓库首页，
+        //   而正式版用户根本没被通知过 —— 那是这一整套双通道要避免的事故。
+        prerelease: opts.channel == release_info::UpdateChannel::Preview,
     })?;
     report.release = Some(release.clone());
     report.stage = ReleaseStage::ReleaseCreated;
@@ -892,15 +973,20 @@ pub fn run(
             .push_str("应用内更新（.app.zip）只对 macOS 包做 —— 这一版客户端走「打开下载页」。");
     }
 
-    /* ---------- ⑨ 写 `release.json` → 它自己的分支与 PR（**合并留给人**） ---------- */
+    /* ---------- ⑨ 写清单（`release.json` / `release-preview.json`）→ 它自己的分支与 PR
+     *          （**合并留给人**） ---------- */
+
+    // ★ **落点按通道选**（2026-11-05）：正式版写 `release.json`，预览版写
+    //   `release-preview.json`。两条通道**各写各的**，发预览时正式版那一份一个字节都不动。
+    let info_rel = info_rel_for(opts.channel);
 
     // ★ 先算一遍"它该长什么样"（**纯函数**，不落盘）：与盘上那份一字不差就**不动分支、
     //   不开 PR**（2026-10-07）。补平台那一趟正是这种情况 —— asset 保留的是上一份，
     //   内容一个字节都不变；照老写法会切到一条不相干的分支上、再开一份空的 PR。
-    let previous = previous_release_info(repo_root);
+    let previous = previous_release_info(repo_root, info_rel);
     // ★ 补平台那一趟**不改软件发布信息**：`notes` / `url` 沿用盘上那一份 —— 人这一趟填的
     //   说明只进 Release 正文那一步，而那一步对**已经存在**的 Release 本来就不改
-    //   （`create_release` 是回读，不是改）。于是 release.json 一个字节都不动：
+    //   （`create_release` 是回读，不是改）。于是清单一个字节都不动：
     //   既不会多开一份 PR，也不会把上一趟发布的那句话悄悄换掉。
     let (info_notes, info_url) = match previous
         .as_ref()
@@ -917,24 +1003,25 @@ pub fn run(
         None, // 双平台资产：下一轮预览发布事务才写
         previous.as_ref(),
     )?;
-    /* ⓪ 「动了 tag 的版本号，就必须让 release.json 跟着动」（2026-11-05 作者原话）。
+    /* ⓪ 「动了 tag 的版本号，就必须让清单跟着动」（2026-11-05 作者原话）。
      * 这条本来靠"两个地方都传 version"维持；加一道纯读判据，将来谁绕开写文件、
      * 或改了版本号却没同步信息源，事务会在这一步红，而不是"打了 tag 客户端永远
      * 不知道有新版"。`want_info` 就是这一趟该写/该保留的那份，早退分支也过这道。 */
-    assert_release_info_matches_tag(&want_info, &version, &tag)?;
-    if std::fs::read_to_string(repo_root.join(RELEASE_INFO_REL))
+    assert_release_info_matches_tag(&want_info, &version, &tag, opts.channel)?;
+    if std::fs::read_to_string(repo_root.join(info_rel))
         .ok()
         .as_deref()
         == Some(want_info.as_str())
     {
-        report
-            .summary
-            .push_str("release.json 与盘上那份一字不差（这一趟不改软件发布信息），没有要提交的。");
+        report.summary.push_str(&format!(
+            "{info_rel} 与盘上那份一字不差（这一趟不改软件发布信息），没有要提交的。"
+        ));
         return Ok(report);
     }
 
-    let info_rel = write_release_info(
+    let written_rel = write_release_info(
         repo_root,
+        info_rel,
         &version,
         &info_notes,
         &info_url,
@@ -951,12 +1038,13 @@ pub fn run(
         // 新分支从**当前**提交起（此刻人在 main 上、main 已含 ① 的合并结果）
         git.switch_new(&info_branch)?;
     }
-    let staged = git.stage_allowed_in(std::slice::from_ref(&info_rel), &RELEASE_STAGE_ALLOWLIST)?;
+    let staged =
+        git.stage_allowed_in(std::slice::from_ref(&written_rel), &RELEASE_STAGE_ALLOWLIST)?;
     if !git.has_staged()? {
         report.info_branch = Some(info_branch);
         report
             .summary
-            .push_str("release.json 没有变化，没有可提交的。");
+            .push_str(&format!("{written_rel} 没有变化，没有可提交的。"));
         return Ok(report);
     }
     git.commit(&format!("发布信息：{tag}"))?;
@@ -981,8 +1069,12 @@ pub fn run(
         base: base.to_owned(),
         title: format!("发布信息：{tag}"),
         body: format!(
-            "由 SupportEase 发布软件版本后写。\n\n{}\n\n★ 合并之后客户端才看得到新版本。",
-            notes_line(&opts.notes)
+            "由 SupportEase 发布软件版本后写。\n\n{}\n\n★ 合并之后客户端才看得到{}。",
+            notes_line(&opts.notes),
+            match opts.channel {
+                release_info::UpdateChannel::Stable => "新版本",
+                release_info::UpdateChannel::Preview => "这个预览版",
+            }
         ),
     };
     let info_review = match hosting.create_review(&spec) {
@@ -996,9 +1088,17 @@ pub fn run(
     };
     report.info_review = Some(info_review);
     report.stage = ReleaseStage::InfoReviewOpened;
-    report.summary.push_str(
-        "已写 presets/delivery/release.json 并开了 PR —— **合并它之后客户端才看得到新版本**。",
-    );
+    report.summary.push_str(&format!(
+        "已写 {written_rel} 并开了 PR —— **合并它之后{}才看得到{}**。",
+        match opts.channel {
+            release_info::UpdateChannel::Stable => "客户端",
+            release_info::UpdateChannel::Preview => "主动检查更新的人",
+        },
+        match opts.channel {
+            release_info::UpdateChannel::Stable => "新版本",
+            release_info::UpdateChannel::Preview => "这个预览版",
+        }
+    ));
 
     Ok(report)
 }
@@ -1187,9 +1287,9 @@ fn arch_name() -> &'static str {
     }
 }
 
-/// 上一份 `release.json`（读不到 / 读不懂 = `None` —— 那不是错误：第一次发就是没有）。
-fn previous_release_info(repo_root: &Path) -> Option<release_info::ReleaseInfo> {
-    let bytes = std::fs::read(repo_root.join(RELEASE_INFO_REL)).ok()?;
+/// 上一份清单（`rel` 由通道决定；读不到 / 读不懂 = `None` —— 那不是错误：第一次发就是没有）。
+fn previous_release_info(repo_root: &Path, rel: &str) -> Option<release_info::ReleaseInfo> {
+    let bytes = std::fs::read(repo_root.join(rel)).ok()?;
     release_info::parse(&bytes).ok()
 }
 
@@ -1251,28 +1351,29 @@ fn release_info_text(
         + "\n")
 }
 
-/// 写 `presets/delivery/release.json`（**上传成功之后才写**）。
+/// 写清单（`rel` 由通道决定：`release.json` 或 `release-preview.json`，**上传成功之后才写**）。
 ///
 /// ★ 顺序的意义：先说"有新版"再上传，用户点进去会撞上一个空的下载页。
 /// 这里是"安装包已经在 Release 上了"之后才宣告。
 fn write_release_info(
     repo_root: &Path,
+    rel: &str,
     version: &str,
     notes: &str,
     url: &str,
     asset: Option<&crate::runtime::release_info::ReleaseAsset>,
 ) -> Result<String, AppError> {
-    let previous = previous_release_info(repo_root);
+    let previous = previous_release_info(repo_root, rel);
     let text = release_info_text(version, notes, url, asset, None, previous.as_ref())?;
-    let path = repo_root.join(RELEASE_INFO_REL);
+    let path = repo_root.join(rel);
     fsx::atomic::atomic_write(&path, text.as_bytes())?;
     // 写完立刻自己解析一遍：**写进去的东西必须是客户端读得懂的东西**（代次 / 版本形状）
     let bytes = std::fs::read(&path)?;
     release_info::parse(&bytes)?;
-    Ok(RELEASE_INFO_REL.to_owned())
+    Ok(rel.to_owned())
 }
 
-fn release_body(notes: &str) -> String {
+fn release_body(notes: &str, channel: release_info::UpdateChannel) -> String {
     let n = notes.trim();
     // 未签名那句**按平台说**（2026-10-07）：两边的拦截不是同一件事，给同一句等于给错解法
     let unsigned = if cfg!(target_os = "macos") {
@@ -1282,10 +1383,18 @@ fn release_body(notes: &str) -> String {
     } else {
         "（未签名的构建。）"
     };
+    // ★ 通道要说在正文第一行（2026-11-05）：下载页上"预览版"与"正式版"长得一样，
+    //   只有这句能让人在装之前知道自己拿的是什么。
+    let kind = match channel {
+        release_info::UpdateChannel::Stable => "正式版本",
+        release_info::UpdateChannel::Preview => {
+            "**预览版**（只在软件里主动点「检查更新」才看得到；正式版用户不会收到通知）"
+        }
+    };
     if n.is_empty() {
-        format!("{PRODUCT} 的正式版本。\n\n{unsigned}")
+        format!("{PRODUCT} 的{kind}。\n\n{unsigned}")
     } else {
-        format!("{n}\n\n{unsigned}")
+        format!("{n}\n\n{kind}。\n\n{unsigned}")
     }
 }
 
@@ -2287,6 +2396,7 @@ mod tests {
         std::fs::create_dir_all(root.join("presets")).unwrap();
         let rel = write_release_info(
             root,
+            RELEASE_INFO_REL,
             "0.0.2",
             "修了几个问题",
             "https://host/r/tag/v0.0.2",
@@ -2742,16 +2852,132 @@ mod tests {
     /// **动了 tag 就得让 release.json 同代**（2026-11-05 作者原话）。
     #[test]
     fn the_release_info_must_travel_with_the_tag() {
+        let stable = release_info::UpdateChannel::Stable;
         let good = r#"{"version":"0.0.10","notes":"","url":"","releaseSchema":1}"#;
-        assert!(assert_release_info_matches_tag(good, "0.0.10", "v0.0.10").is_ok());
+        assert!(assert_release_info_matches_tag(good, "0.0.10", "v0.0.10", stable).is_ok());
 
         let stale = r#"{"version":"0.0.6","notes":"","url":"","releaseSchema":1}"#;
-        let err = assert_release_info_matches_tag(stale, "0.0.10", "v0.0.10")
+        let err = assert_release_info_matches_tag(stale, "0.0.10", "v0.0.10", stable)
             .expect_err("打了 0.0.10 的 tag 却还留着 0.0.6 的信息源，必须红");
         assert!(
             err.message.contains("0.0.6"),
             "要说清是哪一代：{}",
             err.message
+        );
+    }
+
+    /// ★ **通道身份不许串台**（2026-11-05 预览通道）：
+    /// 预览通道写出正式号 = 客户端会把它当正式版候选；正式通道写出预览号 = 全量用户
+    /// 收到预览通知。两种都是"发出去就难撤"的事故，所以在这一步纯函数里红。
+    #[test]
+    fn a_channel_never_writes_the_other_channels_version() {
+        let stable = release_info::UpdateChannel::Stable;
+        let preview = release_info::UpdateChannel::Preview;
+
+        // 正常两条：各写各的
+        assert!(assert_release_info_matches_tag(
+            r#"{"version":"0.0.10","releaseSchema":1}"#,
+            "0.0.10",
+            "v0.0.10",
+            stable
+        )
+        .is_ok());
+        assert!(assert_release_info_matches_tag(
+            r#"{"version":"0.0.10-preview.1","releaseSchema":1}"#,
+            "0.0.10-preview.1",
+            "v0.0.10-preview.1",
+            preview
+        )
+        .is_ok());
+
+        // 串台两种：都该红
+        let err = assert_release_info_matches_tag(
+            r#"{"version":"0.0.10-preview.1","releaseSchema":1}"#,
+            "0.0.10-preview.1",
+            "v0.0.10-preview.1",
+            stable,
+        )
+        .expect_err("正式通道不许写预览号");
+        assert!(err.message.contains("通道与版本身份"), "{}", err.message);
+
+        let err = assert_release_info_matches_tag(
+            r#"{"version":"0.0.10","releaseSchema":1}"#,
+            "0.0.10",
+            "v0.0.10",
+            preview,
+        )
+        .expect_err("预览通道不许写正式号");
+        assert!(err.message.contains("通道与版本身份"), "{}", err.message);
+    }
+
+    /// ★ **预览版写预览清单，正式版那份一个字节都不动**（本轮的核心约束）。
+    ///
+    /// 用临时目录直接调写盘链：两条通道各写一份，落点必须分开、内容各自读得懂，
+    /// 而且**正式版那份保持原样**（连注释外的一个空格都没变）。
+    #[test]
+    fn a_preview_publish_never_touches_the_stable_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
+
+        // 盘上先有一份正式清单（模拟已经发过的 0.0.6）
+        let stable_before = r#"{
+  "releaseSchema": 1,
+  "version": "0.0.6",
+  "notes": "旧",
+  "url": "https://gitee.com/o/r/releases/tag/v0.0.6"
+}
+"#;
+        crate::fsx::atomic::atomic_write(&root.join(RELEASE_INFO_REL), stable_before.as_bytes())
+            .unwrap();
+
+        // 预览通道：写预览清单
+        let rel = write_release_info(
+            root,
+            info_rel_for(release_info::UpdateChannel::Preview),
+            "0.0.10-preview.1",
+            "试试新东西",
+            "https://gitee.com/o/r/releases/tag/v0.0.10-preview.1",
+            None,
+        )
+        .expect("预览清单该写得出来");
+        assert_eq!(rel, RELEASE_PREVIEW_REL, "预览通道的落点");
+        assert_ne!(rel, RELEASE_INFO_REL, "两条通道不许写同一份");
+
+        // 预览那份读得懂，版本是预览号
+        let bytes = std::fs::read(root.join(&rel)).unwrap();
+        let info = release_info::parse(&bytes).expect("客户端该读得懂预览清单");
+        assert_eq!(info.version, "0.0.10-preview.1");
+        assert!(release_info::is_prerelease(&info.version));
+
+        // ★ 正式版那一份**逐字未变**
+        assert_eq!(
+            std::fs::read_to_string(root.join(RELEASE_INFO_REL)).unwrap(),
+            stable_before,
+            "发预览不许动正式版的 release.json"
+        );
+    }
+
+    /// **同一条通道重复发布**：盘上那份已经一模一样时，写盘链返回的内容不变
+    /// （事务据此"不切分支、不开 PR"）—— 这是重跑 / 补平台那一趟的依据。
+    #[test]
+    fn republishing_the_same_preview_version_is_a_no_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("presets/delivery")).unwrap();
+        let rel = info_rel_for(release_info::UpdateChannel::Preview);
+        let url = "https://gitee.com/o/r/releases/tag/v0.0.10-preview.1";
+
+        let first =
+            write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None).expect("第一次写");
+        let text_first = std::fs::read_to_string(root.join(&first)).unwrap();
+
+        let second =
+            write_release_info(root, rel, "0.0.10-preview.1", "说明", url, None).expect("第二次写");
+        let text_second = std::fs::read_to_string(root.join(&second)).unwrap();
+        assert_eq!(
+            text_first, text_second,
+            "同一版同一说明重写一次，内容必须一模一样（否则会多开一份空 PR）"
         );
     }
 }

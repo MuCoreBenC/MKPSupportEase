@@ -1425,6 +1425,12 @@ export interface ReleasePreflight {
 /** `release_tx::ReleaseTxReport` —— 一轮「发布软件版本」的结果（阶段快照） */
 export interface ReleaseTxReport {
   stage: ReleaseStage
+  /**
+   * 这一趟走的是哪条通道（`stable` / `preview`）。
+   *
+   * 回执里必须能看出来：只有它能回答"我这一趟到底动没动正式版那份 release.json"。
+   */
+  channel: 'stable' | 'preview'
   version: string
   tag: string
   branch: string | null

@@ -372,7 +372,7 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
   独立判据 `a_stable_0_0_9_is_never_notified_about_a_preview_release` 直接钉住
   自动通知链路，不靠版本号规则推断。
 - 预览清单本轮是**占位**（版本与正式版相同 `0.0.6`、无 `asset`），
-  界面不会凭空多出一张预览卡。预览版的生成与发布事务留到下一轮。
+  界面不会凭空多出一张预览卡。预览版的生成与发布事务见 **§10.8**（2026-11-05 补齐）。
 - 自动检查（拉目录成功后顺路）**一次网络请求都不新增**，仍只读正式清单；
   主动检查最多两次 GET（正式 + 预览）。预览清单缺失 / 解析失败不算故障，
   正式版结论照给。
@@ -422,3 +422,58 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
 - 需要立刻补一次又不想等 CI：用工作台「手动补同步」按钮，它同样会如实回报结果。
 - 本机制**不碰** `release.json`、不打 tag、不建 Release、不跑 `presets publish`。
   软件发版那条链（§1 第二层）照旧。
+
+### 10.8 预览版发布事务（2026-11-05）
+
+预览版走的是**同一条内核**（`release_tx::run`），只多一个 `channel` 参数。不是第二套流程。
+
+| | 正式通道（缺省） | 预览通道 `--channel preview` |
+| --- | --- | --- |
+| 版本号 | `x.y.z` | `x.y.z-preview.N`（N ≥ 1） |
+| 写入清单 | `presets/delivery/release.json` | `presets/delivery/release-preview.json` |
+| Release 标记 | 普通 | `prerelease: true` |
+| 谁会知道 | 所有客户端（标题栏会提示） | **只有**主动点「检查更新」的人 |
+
+一条命令（`MKPSE_APP_DIR` 指向工作台应用数据目录，复用发布账户与凭据）：
+
+```bash
+MKPSE_APP_DIR="$HOME/Library/Application Support/SupportEase-Workbench" \
+  npm run release -- 0.0.10-preview.1 "试试双通道更新" --channel preview
+```
+
+底层等价：`cargo run --bin release --features workbench -- 0.0.10-preview.1 "…" --channel=preview --merge --confirm`
+
+**五条硬约束**（都有判据钉着，不是口头约定）：
+
+1. **版本形状按通道判**。正式通道只认 `x.y.z`；预览通道只认 `x.y.z-preview.N`。
+   `-preview` / `-preview.0` / `-preview.01` 都不合法 —— 三种写法都会让"谁更新"说不清。
+2. **预览不消耗正式号**。发过 `0.0.10-preview.1` 之后，`0.0.10` 仍可照常发；
+   `version.mjs check` 只把**正式版** tag 当作"这个号用掉了"。
+3. **发预览不动正式版那份清单**。`release.json` 一个字节都不改 ——
+   判据 `a_preview_publish_never_touches_the_stable_manifest` 逐字比对盘上内容。
+4. **通道与版本身份不许串台**。预览通道写正式号、正式通道写预览号，事务在写盘前红
+   （`a_channel_never_writes_the_other_channels_version`）。理由是后果都很难撤：
+   前者会让人把预览当正式候选，后者会让全量用户收到预览通知。
+5. **重复发布是 no-op**。同一版同一说明重写一次，清单内容逐字相同，事务据此
+   不切分支、不开 PR（`republishing_the_same_preview_version_is_a_no_op`）。
+
+**重复发布与补包**：`release_slot` 按「tag × 本平台」判 —— 预览 tag 与正式 tag 走同一套。
+已经发过本平台 = `Taken`（换号）；tag 在而本平台没包 = `Append`（只补包，不动版本号）。
+
+**回滚的现实**：远端已经发生的事（tag、Release、上传的包）内核**不回滚** ——
+它会如实报出停在哪一步，并把回退命令打印给人看。特别地，服务端 ruleset
+`tags-v-no-delete` 生效在 `refs/tags/v*` 上：**预览 tag 推上去也删不掉**，
+打错号只能往前发新号，不能收回。
+
+**发完之后怎么验**：
+
+```bash
+# ① 正式版那一份没动
+git show main:presets/delivery/release.json | grep version      # 应仍是上一版正式号
+# ② 预览清单已更新（合并 PR 之后）
+curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/release-preview.json
+# ③ 0.0.9 不被通知：release.json 的版本低于 0.0.9 ⇒ 自动通知链自然不响
+```
+
+**边界**：这一节只谈软件版本。预览发布**不碰** `presets/delivery/catalog.json` 与
+`publish-serial.json`，不跑 `presets publish`，不推进预设数据序号。

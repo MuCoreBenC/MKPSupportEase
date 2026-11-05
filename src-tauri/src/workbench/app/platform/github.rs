@@ -191,7 +191,9 @@ impl Hosting for GitHub {
             "name": spec.name,
             "body": spec.body,
             "draft": false,
-            "prerelease": false,
+            // 预览版标 prerelease（2026-11-05）—— GitHub 这条发布面在断代后只作历史，
+            // 但同一套 spec 喂进来时语义必须一致。
+            "prerelease": spec.prerelease,
         });
         let v = self.post(
             &format!("/repos/{}/{}/releases", spec.owner, spec.repo),

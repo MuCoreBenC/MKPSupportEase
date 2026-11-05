@@ -65,6 +65,17 @@ pub enum UpdateChannel {
     Preview,
 }
 
+/// 缺省通道 = 正式版。
+///
+/// 存在的理由：发布事务的入参里 `channel` 是可省的一格（`#[serde(default)]`）——
+/// 老调用方（工作台旧前端、老 CLI 参数）不带它，语义必须还是"发正式版"，
+/// 而不是编译不过或者悄悄变成别的通道。
+impl Default for UpdateChannel {
+    fn default() -> Self {
+        Self::Stable
+    }
+}
+
 impl UpdateChannel {
     pub fn parse(raw: &str) -> Option<Self> {
         match raw.trim() {
@@ -538,6 +549,10 @@ mod tests {
         assert!(
             compare("0.0.10-preview.2", "0.0.10-preview.1"),
             "同一预览通道里序号大的更新"
+        );
+        assert!(
+            compare("0.0.10-preview.1", "0.0.10-dev"),
+            "★ 装的是 0.0.10-dev 的人要能看到这个预览版（两边都是预发布 → 比档次与序号）"
         );
         assert!(!compare("0.0.10-preview.1", "0.0.10-preview.1"));
         assert!(
