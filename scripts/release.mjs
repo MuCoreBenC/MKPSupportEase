@@ -115,8 +115,14 @@ function die(message, rollback = []) {
  */
 function core(args) {
   if (!humanConfirmed) die('内核拒绝：真发版没拿到人类确认（交互跑要敲 yes，非交互跑要带 --confirm）')
+  /* ★ 演练必须**真的**演练（2026-11-06 真机事故）：这一行以前无条件送 `--confirm`，
+   * 而 `--dry-run` 从来没被传下去 —— 于是 `release.mjs --dry-run` 会真的推进版本号、
+   * 提交、推送（"演练"把分支写了）。模式只认一个：
+   *   · `--dry-run` → 给内核 `--dry-run`（零写入），**绝不给 `--confirm`**；
+   *   · 否则 → 给 `--confirm`。 */
+  const mode = flagDryRun ? ['--dry-run'] : ['--confirm']
   const bin = ['run', '--bin', 'release', '--features', 'workbench', '--']
-  const out = execFileSync('cargo', [...bin, ...args, '--confirm'], {
+  const out = execFileSync('cargo', [...bin, ...args, ...mode], {
     encoding: 'utf8',
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'inherit'],
@@ -181,25 +187,12 @@ if (existsSync(bypassLog)) {
 
 const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '0.0.0'
 
-/*
- * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
- * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
- *
- * ★ 预览通道（2026-11-05）默认给 `x.y.z-preview.1`：序号从 1 起，人只在发第二个
- *   预览时改数字。发了这个号**不会**消耗 `x.y.z` 正式版。
- */
-const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
-const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
-
-step(
-  `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
-)
-
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
 const cliArgs = process.argv.slice(2)
 const flagConfirmed = cliArgs.includes('--confirm')
+const flagDryRun = cliArgs.includes('--dry-run')
 
 /* 通道（2026-11-05 预览发布事务）：`--channel=preview` / `--channel preview` / `--preview`。
    缺省 = 正式版；认不出的值**当场停**（兜成 stable 会把预览版发成全量通知）。 */
@@ -238,6 +231,25 @@ const [argVersion, argSummary] = positionalArgs
 let version = argVersion?.trim()
 let summary = argSummary?.trim()
 
+/*
+ * 开发版本带 `-dev`（2026-11-04 作者裁定：发过的号永不再用；开发永远拿下一个号的
+ * `-dev`）。发布就是把 `-dev` 去掉 —— 所以默认值取去掉后的那个，人只按回车就行。
+ *
+ * ★ 预览通道（2026-11-05）默认给 `x.y.z-preview.1`：序号从 1 起，人只在发第二个
+ *   预览时改数字。发了这个号**不会**消耗 `x.y.z` 正式版。
+ *
+ * ★ **顺序在这里是有意义的**（2026-11-06 真机踩过）：`channel` 必须先解析出来，
+ *   这两行才能算。先前把解析块放在下面，`npm run release -- … --channel preview`
+ *   在 `suggested` 那一行直接 `Cannot access 'channel' before initialization` ——
+ *   而 `--dry-run` 走不到这里，所以只有真发版才炸。
+ */
+const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
+const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
+
+step(
+  `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
+)
+
 /* ★ 真发版的人当次许可：交互跑要亲口敲 yes；非交互跑必须显式带 `--confirm`。
    只给了版本号和说明**不算**许可 —— 那两样 AI 自己就能凑出来。 */
 if (!version || !summary) {
@@ -253,8 +265,11 @@ if (!version || !summary) {
   humanConfirmed = true
 } else {
   info(`版本 ${version}；说明「${summary}」（来自命令行参数）`)
-  if (!flagConfirmed) {
-    die('非交互真发版必须显式带 --confirm（人当次明确许可）；只看预检请用 --dry-run')
+  /* `--dry-run` 是**零写入**的预演，内核那一层也明说不必确认（`run()` 第一句
+   * 只在 `!dry_run` 时才要 `confirmed`）。所以这里不能拿 `--confirm` 把它挡住 ——
+   * 否则"只看预检请用 --dry-run"这句话自成矛盾（2026-11-06 真机踩到）。 */
+  if (!flagConfirmed && !flagDryRun) {
+    die('非交互真发版必须显式带 --confirm（人当次明确许可）；只看预检请加 --dry-run')
   }
   humanConfirmed = true
 }
@@ -314,6 +329,16 @@ ok(`阶段 ${first.stage}：${first.summary}`)
 
 if (first.stage === 'blockedPreflight') {
   die(`预检没过（内核一个字节都没动）：\n    ${first.blockedReasons.join('\n    ')}`)
+}
+
+/* ★ 演练到预检为止（2026-11-06）：`--dry-run` 的契约是"一个字节都不动"，
+ * 而后面那半段（等 CI / 合并 / 打 tag / 构建 / 上传）每一步都是实写。所以这里
+ * **必须停**：把内核报告原样打出来就结束，不往下走。 */
+if (flagDryRun) {
+  step('演练到此为止（--dry-run）')
+  console.log(JSON.stringify(first, null, 2))
+  info('版本号、tag、Release、清单：一个字节都没动。')
+  process.exit(0)
 }
 
 const rollback = [
