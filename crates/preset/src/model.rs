@@ -114,6 +114,31 @@ pub struct WipingConfig {
     pub glue_z_lift_height_first_layers: f64,
     #[serde(default)]
     pub glue_inter_model_lift_height: f64,
+    /* ---- 预涂胶（2026-11-05 新增，作者：预涂胶速度/段间横移/预热温度/等待/擦笔占位） ---- */
+    /// 预涂胶速度档：`follow`（跟随机型移动速度）/ `glue`（涂胶速度限制）/ `custom`。
+    #[serde(default)]
+    pub bed_glue_speed_mode: String,
+    /// `custom` 档下的速度（mm/s）。
+    #[serde(default)]
+    pub bed_glue_speed: f64,
+    /// 段间横移速度档：同上三档。
+    #[serde(default)]
+    pub glue_travel_speed_mode: String,
+    /// `custom` 档下的段间横移速度（mm/s）。
+    #[serde(default)]
+    pub glue_travel_speed: f64,
+    /// 涂胶前热床预热温度（°C）—— 原来是写死的 50。
+    #[serde(default)]
+    pub bed_glue_preheat_temp: f64,
+    /// 涂完胶、笔抬起之后先停多久（秒）；0 = 不停。
+    #[serde(default)]
+    pub bed_glue_wait_seconds: f64,
+    /// 擦笔模式：`off` / `auto` / `custom`。**预留参数，当前版本不产生动作。**
+    #[serde(default)]
+    pub tower_pen_wipe_mode: String,
+    /// 擦笔间隔层数（`custom` 档用）。**预留参数。**
+    #[serde(default)]
+    pub tower_pen_wipe_interval: i64,
     /// 换笔脱层（z-hop）高度；0 时由 `build.rs` 回落到注册表默认 1.0。
     #[serde(default)]
     pub swap_hop_height: f64,
@@ -186,28 +211,73 @@ pub struct WipingConfig {
     pub tower_first_layer_flow: f64,
 }
 
-/// 一份**用户副本**的血统：它是从哪一份、哪个版本拷出来的。
+/// **一条来源版本**：某一个云端版本在哪、什么时候发的、内容摘要是什么。
 ///
-/// 三项各自 `Option`：老副本可能只有一半（比如手工拷的只有 `based_on`）。
-/// **缺谁就是谁不知道，不许拿默认值假装知道** —— 基线摘要缺失时差异只能保守地
-/// 按「两边都变了」算，那只是多问一句；假装知道会丢用户的值。
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Lineage {
-    /// 来源，形如 `mkp/A1MF_260628.toml`（角色目录 + 文件名，**不写绝对路径** ——
-    /// 数据根可能被搬走，绝对路径会失效）。
-    pub based_on: Option<String>,
-    /// 建副本那一刻，来源文件头的 `# release_time`（给人看的版本号）。
-    pub based_on_release_time: Option<String>,
-    /// 建副本那一刻，来源文件**全文的 sha256**（给程序判「云端变了没有」）。
-    pub based_on_sha256: Option<String>,
+/// 同一个形状两处用：`origin`（我从哪来）与 `history[]`（我经历过哪几版）。
+///
+/// 各项都是 `Option`：**不知道就不写**，绝不拿相邻的字段顶
+/// （`AGENTS.md` §6 的「两格不许互相顶替」在这里是硬规矩）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct SourceRef {
+    /// 怎么来的：`download`（下载）/ `duplicate`（用户手动复制）/ `copy`（内部拷贝）/
+    /// `import`（导入）/ `builtin`（随包）。**只有 `duplicate` 带 `mother`。**
+    pub kind: Option<String>,
+    /// 用户手动复制时的母本（相对用户根）。内部自动拷贝**不写**。
+    pub mother: Option<String>,
+    /// 云端文件路径（`mkp/presets/A1-fast.toml`），不写绝对路径。
+    pub file: Option<String>,
+    /// 平台短名（`github` / `gitee` / 自建源主机名）。
+    pub platform: Option<String>,
+    /// `owner/repo`。
+    pub repo: Option<String>,
+    /// 分支 / ref（`main`）。
+    pub branch: Option<String>,
+    /// **这一版的发布时间**（目录 `catalog.publishedAt`）。这是「来源版本时间」的唯一来源。
+    pub at: Option<String>,
+    /// 这一版云端原文的 sha256（判「云端后来变了没有」）。
+    pub sha256: Option<String>,
+    /// 发布线（`catalogId`）。
+    pub catalog: Option<String>,
+    /// 发布序号（`publishSerial`，判「发布有没有往前走」）。
+    pub serial: Option<u64>,
+    /// 目录指纹。
+    pub revision: Option<String>,
 }
 
-impl Lineage {
-    /// 三项全空 = 没有血统（不是「血统未知」）。
+impl SourceRef {
+    /// 三样齐了才能判「谁新」：发布线 + 序号 + 内容摘要。
+    pub fn has_release_baseline(&self) -> bool {
+        self.catalog.is_some() && self.serial.is_some() && self.sha256.is_some()
+    }
+}
+
+/// 一份预设的**溯源记录**（文件尾部 `[mkp_source]`）。
+///
+/// - `origin`：我从哪来；
+/// - `history`：只追加的履历，每接受 / 下载一版云端就多一条，**旧条目不改**。
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "snake_case")]
+pub struct SourceProvenance {
+    /// 结构版本（今天只有 1）。
+    pub schema: u32,
+    pub origin: Option<SourceRef>,
+    #[serde(default)]
+    pub history: Vec<SourceRef>,
+}
+
+impl SourceProvenance {
+    /// 一条都没有 = 这份文件没有来源记录（手工拖进来 / 老文件）。
     pub fn is_empty(&self) -> bool {
-        self.based_on.is_none()
-            && self.based_on_release_time.is_none()
-            && self.based_on_sha256.is_none()
+        self.origin.is_none() && self.history.is_empty()
+    }
+
+    /// **来源版本**：履历最后一条（最新接受的那一版）。
+    ///
+    /// 判「我这份基于哪一版」用它 —— 不是 `origin`（那是「我从哪来」，
+    /// 复制出来的文件两者可能不同）。
+    pub fn latest_version(&self) -> Option<&SourceRef> {
+        self.history.last().or(self.origin.as_ref())
     }
 }
 
@@ -285,8 +355,15 @@ impl PresetKey {
 pub struct PresetFile {
     pub config: TomlConfig,
 
-    /// `# release_time: <v>` 头注释（可能缺失）。
+    /// `# release_time: <v>` 头注释（可能缺失）—— **配方自己写的版本标记**。
+    ///
+    /// 新产物只写 `generated_at` 不写这一行 ⇒ `None`（不知道就是不知道，
+    /// 不拿写盘时刻顶，见 `AGENTS.md` §6）。
     pub release_time: Option<String>,
+    /// `# generated_at: <v>` 头注释（可能缺失）—— **这份字节什么时候落盘**。
+    ///
+    /// 它不是发布时刻、也不是配方版本时间；单独成一个字段，禁止拿去顶 `release_time`。
+    pub generated_at: Option<String>,
     /// `# machine: <v>` 头注释；缺失即硬错误（见 lib.rs 文档）。
     pub machine: String,
     /// `# variant: <v>` 头注释（可能缺失）。
@@ -295,9 +372,12 @@ pub struct PresetFile {
     /// 值保持文件里的原样（实测是小写，如 `fastv3.3`），大小写归一在查表那一侧做
     /// （`Registry::lookup_range_for`）—— 这里不改用户文件里的字。
     pub variant: Option<String>,
-    /// `# based_on*` 三行（可能缺失）。**今天磁盘上所有预设都没有这三行** ⇒ `None`，
-    /// 界面按「没有血统」显示；它只出现在我们自己建的副本上。
-    pub lineage: Option<Lineage>,
+    /// 文件尾部 `[mkp_source]` 溯源记录（可能缺失）。
+    ///
+    /// **详情页显示的来源信息一律以它为准**（2026-11-04 作者裁定）：
+    /// 不再用 `run/` 下的账去顶。没有记录 ⇒ `None`，界面照实「未知」
+    /// （用户手动拖进来的文件只有落地时间，来源就是未知）。
+    pub provenance: Option<SourceProvenance>,
     /// 原始文本（CRLF 未归一的形态，供写回）。
     pub raw: String,
 }

@@ -78,9 +78,19 @@ export const STORAGE = {
    *
    * 纯前端偏好，不是底账：它只决定框打开时路径胶囊里先写哪一串。真正往哪儿写由
    * 后端说了算（目录不在了会照实报"建不出保存位置"），所以记住一个失效的路径不会骗人。
-   * 空串 = 还没选过 ⇒ 用后端给的默认值（`<用户根>/exports`，见 `fsx::paths::EXPORTS_DIR`）。
+   * 空串 = 还没选过 ⇒ 用后端给的默认值（`<桌面>/MKP-导出报告`，见 `ipc::report::DESKTOP_EXPORT_DIR`）。
    */
   clientReportExportDir: 'mkp.A40.report.exportDir',
+
+  /**
+   * 导出框信息页那颗「导出时启用压缩」（布尔，2026-11-03）。纯前端偏好，**默认开**。
+   *
+   * 真 ⇒ 三件套打成一个 `<基名>.zip`；假 ⇒ 散着复制到 `<基名>/` 里。
+   * 作者：默认打开，**用户关了一次就记住他的改动** —— 这里存的就是用户改过之后的那一格
+   * （没存过 = 开）。与上一格同理：它只决定界面上那颗开关打开时的样子，
+   * 真正往盘上写什么由后端照这一格办。
+   */
+  clientReportExportZip: 'mkp.A40.report.exportZip',
 
   /**
    * **要不要弹"保存之后的引导提示"**（布尔，2026-10-17）。纯前端偏好。
@@ -105,4 +115,29 @@ export const STORAGE = {
    */
   clientPostProcessPace: 'mkp.A40.postprocess.pace',
 } as const
+
+/**
+ * 抹掉**本程序写下的全部 localStorage 偏好**（设置页「清理数据」用，2026-11-01）。
+ *
+ * ★ 为什么要它：盘上那棵树由后端 `clear_app_data` 删，但"置顶哪些行 / 抽屉多宽 /
+ *   切片器指到哪儿"这些是 WebView 自己的，Rust 那侧碰不到。不一起清的话，
+ *   重开之后预设全没了、置顶表却还在——那是最难解释的一种"没清干净"。
+ *
+ * ★ 按前缀扫而不是逐个键名删：`STORAGE` 里以后加一格不必记得来这里补一句。
+ *   本程序写下的键一律以 `mkp` 开头（`mkp.A40.…` / `mkp.wb.…` / `mkpse.boot.…`）。
+ *
+ * 存的是**纯前端偏好**，丢了只是下次回到出厂摆法 —— 不属于业务数据。
+ */
+export function clearClientPrefs(): void {
+  try {
+    const doomed: string[] = []
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i)
+      if (key !== null && key.startsWith('mkp')) doomed.push(key)
+    }
+    for (const key of doomed) localStorage.removeItem(key)
+  } catch {
+    /* 存储不可用（隐私模式 / 配额满）就没有东西要清 —— 不挡"清理数据"这一步 */
+  }
+}
 

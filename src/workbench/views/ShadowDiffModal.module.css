@@ -1,0 +1,400 @@
+/*
+ * 未保存改动的**代码对比**（`c14/HistoryModal` 的「代码对比」那一格，2026-11-02）。
+ *
+ * 两栏（文件清单 + 行级 diff）与生成前确认（`GenerateDiffModal`）同构 —— 作者要的就是
+ * 「看记录、看对比」这一种手感，长得不一样反而是负担。
+ * 与那边不同的是：这里的清单只有**有改动的文件**，所以没有"无变化折叠组"。
+ *
+ * diff 行本体住在 `DiffView.module.css`（不在这里再画一遍）。
+ */
+
+.panes {
+  container-type: inline-size;
+  display: flex;
+  gap: 0;
+  /* 框内高度封顶、两栏各自滚 —— 不与 `Modal` 的 `max-height` 抢（见 GenerateDiffModal 注释） */
+  max-height: min(74vh, 760px);
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  overflow: hidden;
+}
+
+/* ---------- 左：有改动的文件清单 ---------- */
+
+.list {
+  flex: 0 1 300px;
+  display: flex;
+  flex-direction: column;
+  min-width: 230px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-right: 1px solid var(--w-line);
+  background: var(--w-card-inner);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--w-line);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--w-hover);
+}
+
+.itemOn,
+.itemOn:hover {
+  background: var(--w-primary-soft);
+  box-shadow: inset 2px 0 0 var(--w-primary);
+}
+
+/* 路径可能很长（`registry/param_registry.toml`）—— 省略号，完整路径在悬停说明里 */
+.itemName {
+  overflow: hidden;
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12px;
+  color: var(--w-t1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.itemMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.counts {
+  display: inline-flex;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 增 / 删的字色取 `--w-diff-*-ink`（深色那边提亮过） */
+.add {
+  color: var(--w-diff-add-ink);
+}
+
+.del {
+  color: var(--w-diff-del-ink);
+}
+
+/* 三档状态：与生成前确认同一支 token，两处读起来一致 */
+.state_added {
+  font-weight: 500;
+  color: var(--w-diff-add-ink);
+}
+
+.state_modified {
+  font-weight: 500;
+  color: var(--w-diff-mod-ink);
+}
+
+.state_removed {
+  font-weight: 500;
+  color: var(--w-diff-del-ink);
+}
+
+.binary {
+  color: var(--w-t3);
+}
+
+/* ---------- 右：详情（行级 diff） ---------- */
+
+.detail {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  /* 滚的是里面那层 —— 概览条要固定在右侧，不跟着内容滚 */
+  overflow: hidden;
+}
+
+.detailScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.detailHead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--w-line);
+  background: var(--w-card);
+}
+
+.detailName {
+  font-family: var(--w-mono, ui-monospace, Menlo, monospace);
+  font-size: 12.5px;
+  color: var(--w-t1);
+}
+
+.detailMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12.5px;
+  color: var(--w-t3);
+}
+
+.detailCount {
+  font-size: 11px;
+  color: var(--w-t3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 右：改了什么（对象视角，可就地撤销） ---------- */
+
+/* 与代码视图共用同一个滚动外壳，所以这里只排内容 —— 不要自己再套一层滚动 */
+.fields {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+}
+
+/*
+ * **三列表格**（2026-11-03 作者定稿：平铺 + 标签）：归属 / 字段变化 / 来源。
+ *
+ * 为什么是表格而不是"一条一句人话"：一次改 `A1` 的 Z 会归并连带写出
+ * `A1:STANDARD` / `A1:FAST` / `A1:FASTV3.3` 三格，四条都平铺 —— 列表格
+ * 才好一眼扫出"哪几处、各自什么来源"，也才好对数（页头那个 N 就是行数）。
+ *
+ * **用 grid 不用 flex**：三列宽度在整列里必须一致，flex 各算各的会让每行的
+ * 「→」与标签左右错开（`ParamDefModal` 的版式教训）。
+ */
+.field {
+  display: grid;
+  grid-template-columns: minmax(96px, 0fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--w-line);
+  font-size: 12.5px;
+}
+
+.field:hover {
+  background: var(--w-hover);
+}
+
+/* 表头：与数据行同一套列宽，只是字更小更淡 —— 两处改一处就会错列 */
+.fieldHead {
+  display: grid;
+  grid-template-columns: minmax(96px, 0fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--w-line-strong);
+  font-size: 11px;
+  color: var(--w-t3);
+  letter-spacing: 0.02em;
+}
+
+/*
+ * ① 归属：`A1` / `A1:STANDARD`。
+ *
+ * **等宽**是硬要求 —— `A1:FASTV3.3` 这种带冒号的标识，比例字体下根本扫不出来。
+ * 基底（无冒号）用主色，版本（带冒号）用次级色：一眼分出"我点的"和"被带连的"。
+ */
+.fieldOwner {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 11.5px;
+  color: var(--w-t1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fieldOwnerVer {
+  color: var(--w-t3);
+}
+
+/* ② 字段变化：名字在前，值对在后；值太长时截断（G-code 那种），悬停看全文 */
+.fieldWhat {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--w-t2);
+  white-space: nowrap;
+}
+
+.fieldName {
+  flex: 0 0 auto;
+  color: var(--w-t1);
+}
+
+.fieldFrom {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--w-t3);
+  text-decoration: line-through;
+  font-variant-numeric: tabular-nums;
+}
+
+.fieldArrow {
+  flex: none;
+  color: var(--w-line-strong);
+  text-align: center;
+}
+
+.fieldTo {
+  flex: 0 0 auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--w-t1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ③ 来源：一行里既有标签又有撤销按钮，右对齐 */
+.fieldWhyCol {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: flex-end;
+}
+
+/*
+ * 来源标签。**是标签不是文字**：`用户修改` 主色描边（自己点的，强调），
+ * 连带/复制/清理由默认中性底（弱化），`来源不明` 用警示色 —— 那个词出来
+ * 就说明有地方该查了。
+ */
+.why {
+  flex: none;
+  padding: 1px 7px;
+  border: 1px solid var(--w-line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--w-t3);
+  white-space: nowrap;
+}
+
+.whyUser {
+  border-color: var(--w-primary);
+  color: var(--w-primary);
+}
+
+.whyWarn {
+  border-color: var(--w-warn);
+  color: var(--w-warn);
+}
+
+/* 就地撤销：平时不显形，悬停这一行才亮 —— 与参数行右键菜单同一条口径
+   （格子里已经显示了信息，按钮不该抢读） */
+.fieldUndo {
+  padding: 2px 8px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: 11px;
+  color: var(--w-t2);
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.field:hover .fieldUndo,
+.fieldUndo:focus-visible {
+  opacity: 1;
+}
+
+.fieldUndo:hover:not(:disabled) {
+  color: var(--w-t1);
+  border-color: var(--w-line-strong);
+}
+
+.fieldUndo:disabled {
+  color: var(--w-t-off);
+  cursor: default;
+}
+
+/* 底部：重做那颗 + 一句口径说明（重做是栈顺序的事，不按行位置） */
+.fieldFoot {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 14px;
+}
+
+.fieldHint {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-label, 11px);
+  color: var(--w-t3);
+}
+
+/* ---------- 头部：「代码对比 / 改了什么」两段切换 ---------- */
+
+/* 住在 `Modal` 的 `headerExtra` 工具位 —— 与生成前确认的「完整 / 对比」同一个长相 */
+.viewToggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn, 6px);
+}
+
+.viewBtn {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--w-card);
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-t2);
+  cursor: pointer;
+}
+
+.viewBtn + .viewBtn {
+  border-left: 1px solid var(--w-line);
+}
+
+.viewBtn:hover {
+  color: var(--w-t1);
+}
+
+.viewBtnOn,
+.viewBtnOn:hover {
+  background: var(--w-primary-soft);
+  font-weight: 500;
+  color: var(--w-primary);
+}
+
+/* ---------- 窄框：两栏退成一栏 ---------- */
+
+@container (max-width: 560px) {
+  .panes {
+    flex-direction: column;
+    max-height: none;
+  }
+
+  .list {
+    flex: none;
+    max-height: 180px;
+    border-right: 0;
+    border-bottom: 1px solid var(--w-line);
+  }
+}

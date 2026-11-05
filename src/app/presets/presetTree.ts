@@ -231,7 +231,7 @@ export const ORIGIN_WHY: Record<PresetOrigin, StringKey> = {
  *   preset    交付预设：从**当前数据源**的目录下载的（`GitHub` / `Gitee` / `自定义源`）
  *   local      本地：再分三档 ——
  *             `复制自 <文件名>`（出处账记的用户文件复制，**可点击定位**到那一份）
- *             `复制自 <文件名>`（云端另存出来的，血统说的；定位到云端那一份云端）
+ *             `复制自 <文件名>`（云端另存出来的，来源记录说的；定位到云端那一份云端）
  *             `导入`（出处账记的导入档）
  *             都没有 ⇒ 「本地」（手工放进目录的）
  *
@@ -250,7 +250,7 @@ export interface LocateTarget {
 export interface OriginCell {
   /** 主值：`云端 · main` / `本地 · 母本名` / `导入` / `未知` */
   text: string
-  /** 来源预设文件名（云端下载 / 云端血统才有） */
+  /** 来源预设文件名（云端下载 / 云端来源记录才有） */
   ref: string | null
   title: string
   locate?: LocateTarget
@@ -268,7 +268,7 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
    */
   if (row.origin === 'local') {
     const kind = row.provenanceKind ?? null
-    const full = row.basedOnFacts?.lineageSource ?? null
+    const full = row.basedOnFacts?.sourceRef ?? null
     const ref = row.cloudFile ?? (row.basedOnSource?.split('/').pop() ?? null)
 
     /* 用户自己另存出来的：指向母本那一份（可点） */
@@ -335,8 +335,8 @@ export function originCellOf(tr: Tr, row: PresetTableRow): OriginCell {
     }
 
     /*
-     * 旧账 / 只有血统：**不假装知道当时是从哪个分支下载的**。
-     * 血统能证明"它基于云端哪一份"，证明不了"哪一次下载、从哪个源"。
+     * 旧账 / 只有来源记录：**不假装知道当时是从哪个分支下载的**。
+     * 来源记录能证明"它基于云端哪一份"，证明不了"哪一次下载、从哪个源"。
      */
     if (kind === 'unknown' || row.basedOnSource) {
       return {
@@ -529,7 +529,7 @@ export const UPDATE_ACTION_TEXT: Record<PresetUpdateState, StringKey> = {
  *   我有没有一份**基于它**的本地文件（`presets-local/` 里那个能改能用的）
  *   云端有没有换过版（换了 = 我那份的默认值来源旧了，有「有新版」）
  *
- * 判据只认**来源关系**（文件头血统里记的 `based_on`），不认文件名 ——
+ * 判据只认**来源关系**（尾部来源记录里的 `file`），不认文件名 ——
  * 导入的同名文件不会被误认成"本地已有"。
  *
  * **「有新版」的判据**（2026-10-10 改口）：只看**我那份跟不跟得上云端当前版** ——
@@ -656,7 +656,7 @@ export function identityDisplayOf(tr: Tr, key: string | null | undefined): strin
 
 /** 说不清的原因 → 人话（后端给稳定词，界面只翻词） */
 export const UNVERIFIED_WHY: Record<UnverifiedReason, StringKey> = {
-  no_lineage: 'presets.tree.unverified.noLineage',
+  no_source_record: 'presets.tree.unverified.noSourceRecord',
   no_release_line: 'presets.tree.unverified.noReleaseLine',
   catalog_without_identity: 'presets.tree.unverified.catalogWithoutIdentity',
   not_in_catalog: 'presets.tree.unverified.notInCatalog',
@@ -861,8 +861,8 @@ export const EDIT_TEXT = {
 
 /**
  * **文件头那几行不给改**（2026-10-16 作者：「这上面这一些灰色的，有没有可能说不让用户更改
- * 呀？」）：`# release_time` / `# machine` / `# variant` / 段落标签 / `# based_on*` 血统三行
- * —— 它们不是"用户的正文"，是程序写、程序读的事实（归属 + 血统）。
+ * 呀？」）：`# release_time` / `# machine` / `# variant` / 段落标签 / `# mkp_source` 来源记录
+ * —— 它们不是"用户的正文"，是程序写、程序读的事实（归属 + 来源记录）。
  * 分界在 `tomlPaint.ts` 的 `splitHeader`；拦下那一刻说一句就走（`PagePresets` 的
  * `notifyHeadLocked`）。
  */
@@ -890,7 +890,7 @@ export const IMPORT_TAKEN_TEXT = {
 /**
  * **第十层**：重命名那一口框的话（删除的二次确认在菜单里，话术在菜单项上）。
  *
- * 只改名、不动字节：内容 / 那三行血统 / TOML 都不重写 —— 改完还是同一份预设。
+ * 只改名、不动字节：内容 / 那三行来源记录 / TOML 都不重写 —— 改完还是同一份预设。
  * 正在使用的那一份也能改名（使用中指针跟着走，不断）；有草稿的那一份也能改名
  * （草稿跟着走，「接着上次改」不接丢）。删除另说 —— 那两道闸在菜单与后端。
  *
@@ -954,11 +954,11 @@ export function isDetachedCopy(row: PresetTableRow, copiesFollow: boolean): bool
  *   复制件（`provenance === 'copy'`）     ⇒ 来源那一份现在的文件名
  *                                          （`A1-fast copy 2.toml` → `A1-fast.toml`）
  *   导入的（`provenance === 'import'`）   ⇒ 没有默认名（`null`：它本来就不叫这个名字）
- *   从云端另存 / 下载出来的（血统指云端） ⇒ 云端那一份的文件名（`A1-standard.toml`）
+ *   从云端另存 / 下载出来的（来源记录指云端） ⇒ 云端那一份的文件名（`A1-standard.toml`）
  *
  * 三样都没有就 `null` —— **不猜**（拿当前名字当默认名是自欺：那等于"恢复"什么都不做）。
  *
- * 后缀跟着**来路**走：复制件的后缀与来源一致；血统那一档取血统路径的尾段。
+ * 后缀跟着**来路**走：复制件的后缀与来源一致；来源记录那一档取来源记录路径的尾段。
  * 名字撞了怎么办由后端那道「不覆盖」闸回答（这里不替它改名）。
  */
 export function defaultNameOf(row: PresetTableRow): string | null {
@@ -995,7 +995,7 @@ export function defaultNameAvoiding(defaultName: string, taken: ReadonlyArray<st
 /**
  * **第十一层**：复制出一份新的（2026-10-10 作者改判 —— 菜单里就叫「复制」）。
  *
- * 本地文件 → 本地文件（第十一层的边界）：**按字节复制**、那三行 `# based_on` 血统
+ * 本地文件 → 本地文件（第十一层的边界）：**按字节复制**、尾部 `[mkp_source]` 来源记录
  * **原样带过去**（不重算 —— 来源已经是用户文件）；原文件一个字节不动。
  *
  * ★ 名字**由程序自己起**（见 `duplicateNameOf`）：作者 2026-10-10 把原来那套
@@ -1787,7 +1787,7 @@ export interface PresetLocalRow extends PresetRowBase {
   /**
    * **用户自己那份**基于云端哪一版（只有 `origin === 'local'` 的行有它）。
    *
-   * 它是"文件头血统 + 目录现况"比出来的一个事实，不是"这份文件好不好"——
+   * 它是"文件头来源记录 + 目录现况"比出来的一个事实，不是"这份文件好不好"——
    * `outdated` 的那份照常能用能改，见 [`BASED_ON_WHY`]。
    */
   /**
@@ -1799,7 +1799,7 @@ export interface PresetLocalRow extends PresetRowBase {
   basedOnFacts?: BasedOnFacts
   basedOn?: BasedOn
   /**
-   * 血统里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`。
+   * 来源记录里记的来源原文（`delivery/mkp/presets/A1-standard.toml`）。没有来源记录是 `null`。
    * **老文件里可能记着旧形状（`mkp/presets/…`）** —— 那种认不出就是 `unknown`，
    * 不回填、不猜（文件本身照旧能读能改能应用）。
    */
@@ -1906,7 +1906,7 @@ export interface PresetRowsInput {
    * **身份账本**（`api.getLocalPresetIndex()`，a04 新增）：哪几份本地文件跟云端有关系。
    *
    * 云端行那三态（未获取 / 本地已有 / 有新版）的"认亲"**只看它** ——
-   * **不看文件头那三行血统**：血统复制也会照抄（副本会跟着一起认领云端条目），
+   * **不看文件头那三行来源记录**：来源记录复制也会照抄（副本会跟着一起认领云端条目），
    * 而账本条目的**只有"从云端下载"建**的一条（复制 / 拖回 / 导入 / 恢复都建不了）。
    */
   localIndex: LocalPresetIdentity[]
@@ -2397,7 +2397,7 @@ function versionRemarkLookup(
 
 /**
  * 一份**本地文件**自己说属于哪个「机型 · 版本」：文件头 `# machine:` / `# variant:`
- * 两行（后端已归一化）；头里没有 / 认不出就**回落到血统**那份。都没有 = `null`
+ * 两行（后端已归一化）；头里没有 / 认不出就**回落到来源记录**那份。都没有 = `null`
  * （导入的裸文件 —— 在列表里照常列，只是不对应任何 combo）。
  */
 export function ownComboOf(f: LocalPresetFile): { machineId: string; versionId: string } | null {
@@ -2473,7 +2473,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
        */
       const canApply = f.kind === 'mkp_preset'
       const live = canApply && active?.path === f.path
-      /* 血统里的来源，现在对应哪台机型的哪一版（人话）。认不出就不写 */
+      /* 来源记录里的来源，现在对应哪台机型的哪一版（人话）。认不出就不写 */
       const source =
         f.basedOnMachineId === null || f.basedOnVersionId === null
           ? null
@@ -2484,7 +2484,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
       /*
        * **自己的归属**（2026-10-07 作者要的：复制出来的那份也要显示机型 / 版本，
        * 而且能改）：文件头 `# machine:` / `# variant:` 两行（后端已归一化，
-       * 头里没有 / 认不出回落血统那份）。副标题的版本备注也按它查。
+       * 头里没有 / 认不出回落来源记录那份）。副标题的版本备注也按它查。
        */
       const ownMachine = f.machineId ?? f.basedOnMachineId
       const ownVersion = f.versionId ?? f.basedOnVersionId
@@ -2527,7 +2527,7 @@ function localHalf(input: PresetRowsInput): PresetLocalRow[] {
         /* 归属都没有（导入的裸文件）才挂「未标机型」—— 有归属的那份现在自己说得出 */
         untagged: ownMachine === null,
         live,
-        /* 血统：它当初基于云端哪一版、那一版现在还在不在（第七层） */
+        /* 来源记录：它当初基于云端哪一版、那一版现在还在不在（第七层） */
         basedOn: f.basedOn,
         basedOnFacts: f.basedOnFacts,
         basedOnSource: f.basedOnLabel,
@@ -2836,12 +2836,12 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
   /*
    * **"我这边有没有一份基于它的本地文件"**（MKP 档，2026-10-09）。
    *
-   * 认亲只认**来源关系**：我那份文件头血统里的 `based_on` 末段就是云端那个文件名
+   * 认亲只认**来源关系**：我那份尾部溯源记录里的 `file` 末段就是云端那个文件名
    * （`delivery/mkp/presets/A1-fast.toml` → `A1-fast.toml`）。**不按文件名认** ——
    * 用户导入一份同名文件不会被当成"本地已有"（自己拉进来的东西没有来源关系，
    * 它在本列表里就是"未获取"，而他那份照常在本地表里列着）。
    *
-   * 一个云端条目可能被我好几份认领（「另存为一份新的」造出来的副本血统照抄）。
+   * 一个云端条目可能被我好几份认领（「另存为一份新的」造出来的副本来源记录照抄）。
    * 这一行只回答"有没有、新不新"，所以取其中**最好的那一个**：
    * 只要有一份跟得上当前版就算「本地已有」。
    *
@@ -2850,14 +2850,14 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
    * 而默默说"跟得上"却让用户错过云端改动，是这一轮要根治的那类毛病。
    */
   /*
-   * ★ 2026-10-11（a04）：认亲**改成只认身份账本**（不再看血统）。
+   * ★ 2026-10-11（a04）：认亲**改成只认身份账本**（不再看来源记录）。
    *
-   *   为什么改：血统那三行**复制也会照抄** —— 于是"另存为一份新的"造出来的副本
+   *   为什么改：来源记录那三行**复制也会照抄** —— 于是"另存为一份新的"造出来的副本
    *   会跟着一起认领云端条目，云端的"有新版 / 更新"就落到副本身上了（那些副本
    *   其实跟云端没关系）。账本一条一份、**只有下载建**，正好是"这一份跟云端有关吗"
    *   这件事的唯一凭据（口径见 `lab/preset-identity-and-update-spec.md` §6）。
    *
-   *   血统照旧留在文件头 —— 它管的是"这一份从哪一版派生"（展开详情那一格），
+   *   来源记录照旧留在文件头 —— 它管的是"这一份从哪一版派生"（展开详情那一格），
    *   与"跟不跟云端"是两件事。
    */
   /*
@@ -2865,7 +2865,7 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
    *
    * 以前只存 `BasedOn` 一个枚举，云端行的 `basedOnFacts` 就在下面被整套写死成 null
    * （作者截图：云端详情里「本地发布线 / 本地 SHA-256」全是「未知（当时没有记录）」，
-   * 而那份本地文件的血统头里明明写着 `# based_on_catalog` / `# based_on_serial`）。
+   * 而那份本地文件的来源记录头里明明写着 `catalog` / `serial`）。
    * 结论与它的事实必须**同源同份**，否则详情会自相矛盾。
    */
   const claims = new Map<string, { basedOn: BasedOn; facts: BasedOnFacts }>()
@@ -3068,17 +3068,17 @@ export function cloudRows(tr: Tr, input: PresetRowsInput): PresetTableData<Prese
            * 现在结论与事实同源：认领者是谁，事实就是谁的；没有认领者（`localState='none'`）
            * 才照实留空 —— 那是"我这儿没有这份"，不是"记不清"。
            */
-          lineageKind: claim?.facts.lineageKind ?? null,
-          lineageSource: claim?.facts.lineageSource ?? null,
-          lineageRelease: claim?.facts.lineageRelease ?? null,
-          lineagePublishedAt: claim?.facts.lineagePublishedAt ?? null,
-          lineageSha256: claim?.facts.lineageSha256 ?? null,
+          sourceKind: claim?.facts.sourceKind ?? null,
+          sourceRef: claim?.facts.sourceRef ?? null,
+          sourceRelease: claim?.facts.sourceRelease ?? null,
+          sourceVersionAt: claim?.facts.sourceVersionAt ?? null,
+          sourceSha256: claim?.facts.sourceSha256 ?? null,
           cloudSource: sourceIdentity,
           cloudPublishedAt: releaseAt,
           /* 目录登记值就摆在这儿 —— 不再因为"前端没搬"而写未知 */
           cloudSha256: p.sha256,
-          lineageCatalog: claim?.facts.lineageCatalog ?? null,
-          lineageSerial: claim?.facts.lineageSerial ?? null,
+          sourceCatalog: claim?.facts.sourceCatalog ?? null,
+          sourceSerial: claim?.facts.sourceSerial ?? null,
           /*
            * **这一份目录的发布身份**（2026-10-28）：详情里「发布线 · 第几号」那一行。
            * 两格同生同死；老目录 / 随包旧版都是 null ⇒ 那一行不渲染。

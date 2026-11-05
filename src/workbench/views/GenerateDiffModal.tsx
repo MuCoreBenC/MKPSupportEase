@@ -78,6 +78,7 @@ import c from '../c14.module.css'
 import Icon from '../../app/shell/icons'
 import ui from '../../app/ui/ui.module.css'
 import s from './GenerateDiffModal.module.css'
+import { locateIntoView } from '../../components/scroll/locate'
 
 interface Props {
   /** 预演报告；null = 还没预演出来（正在算） */
@@ -96,6 +97,24 @@ const STATE_TEXT: Record<PreviewFile['state'], string> = {
   added: '新增',
   modified: '修改',
   unchanged: '无变化',
+}
+
+/**
+ * 生成事务回执里每一步的说法。
+ *
+ * **键在后端、句子在前端**（`receipt::StepRow.key`）：后端不写死用户能读的中文，
+ * 换语言 / 改措辞只改这张表。
+ */
+const RECEIPT_STEP_LABEL: Record<string, string> = {
+  frozen: '读取并冻结源数据',
+  delivery: '生成交付文件',
+  assets: '生成内核产物',
+  baseline: '生成测试基线',
+  embedded: '重建内嵌目录',
+  ledger: '写生成台账',
+  catalog: '重算交付目录',
+  verify: '核对三组产物',
+  commit: '提交本次事务',
 }
 
 
@@ -180,7 +199,9 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
   /** 点概览条的标记：滚到那一行（块居中）—— 与 IDE 里点 overview ruler 同一种手感 */
   const jumpToRow = (row: number) => {
     const el = diffRef.current?.querySelector<HTMLElement>(`[data-row="${row}"]`)
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    /* `behavior: 'smooth'` 在 WKWebView 上对元素级滚动容器等于瞬跳（本仓踩过），
+       走共用定位件（底层演 transform）；这一处是"跳到 diff 行"，不铺绿底。 */
+    if (el !== null && el !== undefined) locateIntoView(el, { flash: false })
   }
 
   /**
@@ -252,6 +273,63 @@ export default function GenerateDiffModal({ report, error, busy, done, onConfirm
             )}
             {done.unchanged.length > 0 && <> · 内容没变、跳过：{done.unchanged.length} 份</>}
           </p>
+
+          {/*
+            **生成事务回执**（2026-11-01）：这是后端的正式返回值，不是这里另拼的
+            一份总结 —— 工作台、CLI、AI 读的是同一个 `receipt`。
+            步骤顺序 = 真执行顺序；失败的步子由后端带着 `ok: false` 一起出门。
+          */}
+          {done.receipt !== null && (
+            <section className={s.resultGroup}>
+              <h3 style={{ margin: '0 0 4px', fontSize: 13 }}>生成事务回执</h3>
+              <p className={s.footNote} style={{ margin: '0 0 6px' }}>
+                事务 ID <code>{done.receipt.id}</code> · {done.receipt.stamp}（UTC）·
+                <b>
+                  {done.receipt.status === 'passed' ? ' 全部通过' : ' 有失败'}
+                </b>
+              </p>
+              <ul style={{ listStyle: 'none', margin: '0 0 8px', padding: 0, fontSize: 12 }}>
+                {done.receipt.steps.map((st) => (
+                  <li
+                    key={st.key}
+                    style={{ display: 'flex', gap: 8, alignItems: 'baseline', padding: '2px 0' }}
+                  >
+                    <span style={{ color: st.ok ? '#16a34a' : '#dc2626' }}>{st.ok ? '✓' : '✗'}</span>
+                    <span style={{ flex: 1 }}>{RECEIPT_STEP_LABEL[st.key] ?? st.key}</span>
+                    <span style={{ opacity: 0.65 }}>{st.detail}</span>
+                  </li>
+                ))}
+              </ul>
+              {/* 三个数各说一件事：写了 / 未变 / 失败。
+                  以前只显示 `written/total`，导致 `0/9` 既可能是"全都没变"
+                  也可能是"全都失败"—— 两种完全相反的情况长得一模一样。 */}
+              <p className={s.summary}>
+                {[
+                  ['交付', done.receipt.delivery],
+                  ['内核', done.receipt.assets],
+                  ['基线', done.receipt.baseline],
+                ].map(([label, c]) => {
+                  const counts = c as typeof done.receipt.delivery
+                  return (
+                    <span key={label as string}>
+                      {label as string}{' '}
+                      <b>写 {counts.written}</b>
+                      {' / '}未变 {counts.unchanged}
+                      {counts.failed > 0 && (
+                        <b style={{ color: '#dc2626' }}> / 失败 {counts.failed}</b>
+                      )}
+                      {'　'}
+                    </span>
+                  )
+                })}
+              </p>
+              {done.receipt.error !== null && (
+                <p className={s.footNote} style={{ margin: '4px 0 0', color: '#dc2626' }}>
+                  {done.receipt.error}
+                </p>
+              )}
+            </section>
+          )}
 
           {/* 作者 2026-10-19 问的那件事：生成 ≠ 发布 —— 在这里再说一遍 */}
           <p className={s.footNote} style={{ margin: 0 }}>

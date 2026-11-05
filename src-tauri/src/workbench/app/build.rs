@@ -10,27 +10,43 @@
 //!
 //! `mtime` 变了会让同步工具以为有更新。所以比较的是**内容**。
 //!
-//! 但这里有个坑：产物头部有 `release_time`，它每次都不一样，于是"字节比较"永远不相等，
-//! 这条规则就永远不生效。所以比较时**跳过那一行**（[`same_payload`]）。
-//! 生成路径的「跳过」与预演的「无变化」（[`preview_one`]）都认这一道判据 ——
+//! 2026-11-01 起这条规则是**纯字节比较**，没有任何例外行：产物头不再写生成时刻
+//! （见下一节），于是「同一份配方渲染多少次都逐字节相同」成立，比较可以直接做。
+//! 生成路径的「跳过」与预演的「无变化」（[`preview_one`]）认的是同一句话 ——
 //! 两边各说各话，「将写入 N 份」就是假的。
+//!
+//! # 产物头不带生成时刻（2026-11-01，作者裁定）
+//!
+//! 原来第一行是 `# release_time: <渲染那一刻的 UTC 时钟>`。它是整条链里**唯一一个
+//! "每次都变、又不表达任何内容"** 的字段，为迁就它长出了一串东西：比较要跳过一行
+//! （旧的 `same_payload`）、台账要防 no-op 顶脏（旧的 `needs_built_record`）、
+//! git 里存着一堆"实际生成时间"与字段值对不上的假时间、交付物无法逐字节复现。
+//! 作者 2026-11-01 的原话是「他怎么可能这个时间就是刚才呢」—— 那正是这个字段
+//! 在骗人：它记的是**渲染时刻**，跟"这一份什么时候被写出去"根本是两件事。
+//!
+//! 现在：**最终文件的字节只由原文件决定**。生成时间改由生成记录
+//! （`built.json` 的 `stamp`，只记真正写了盘的那一次）与交付目录的 `publishedAt`
+//! 表达，它们都在**文件之外**，改时间不会改内容。
+//! `crates/preset` 的配方一直是这么做的（`preset_recipes.toml` 把时间写死，
+//! 注释原话是"生成时现取会让「重新生成逐字节相同」失效"）—— 工作台这条链
+//! 曾是唯一的例外。
 //!
 //! # 产物头没有 uuid（2026-10-05 删，别加回来）
 //!
 //! 头注释曾写过一行 `# uuid:`（旧系统防"用户复制与云端冲突"的遗产）。当日审计查证：
 //! 全仓没有任何代码读它，公开渠道也找不到读它的消费方 —— 云端/用户的分界由
-//! **角色目录与血统三行**承担，完整性与版本由 **SHA 与 release_time** 承担。
+//! **角色目录与来源记录**承担，完整性与版本由 **SHA 与 `# machine` / `# variant`** 承担。
 //! 一行没有读者的字段就是假字段。有过期判定需求的是**工作台**，用的是
 //! **两层指纹**（定义 / 值分开算，见 `presetdata::resolve::Layers::fingerprint`）——
-//! 它只进 `built.json` 当「待更新」判据，**不进产物**。
+//! 它只进 `built.json` 当「上次生成时刻」的旁注与"配方变没变"的展示依据，
+//! **不进产物**、也不单独决定写不写（写不写只看字节，见上一节）。
 //! 历史基线那 9 份（`crates/preset` 一侧）头里还带着 uuid，那是历史事实，不是兼容壳。
 //!
 //! # TOML 的形状照上游的真产物
 //!
-//! 实测 `presets/mkp/A1.toml`（上游头里有 uuid，我们**不写**那一行 —— 见上一节）：
+//! 实测 `presets/mkp/A1.toml`（上游头里有 uuid 与 release_time，我们**都不写**）：
 //!
 //! ```toml
-//! # release_time: 2026-08-19 01:38:13
 //! # machine: A1
 //! # variant: standard
 //!
@@ -51,7 +67,7 @@
 //!
 //! ★ 2026-10-16（作者看客户端截图时点的两句）：头三行之后那句段落标签 `#胶笔配置`
 //!   （上游原样，没写空格）**不写了** —— 它没有任何读者：机型 / 版本由上面两行承担、
-//!   出处由血统三行承担，工作台与后处理内核一个都不读它（作者：「好像没有意义呀，
+//!   出处由来源记录承担，工作台与后处理内核一个都不读它（作者：「好像没有意义呀，
 //!   那个没有意义的注释可以不存在」）。
 //!   已经在盘上 / 已经发出去的那几份**一个字节都不动**（改一个字等于换版，见
 //!   `docs/RELEASE-TRANSACTIONS.md`）：新写出来的没有这一行。M0 那条判据
@@ -89,11 +105,61 @@ use postprocess::diag::messages;
 use super::delivery::DeliveryStage;
 use super::{state, with_ctx, with_ctx_mut};
 
+/// 「这一版现在会渲染成什么」的探针，给 [`Book`] 判「待更新」用。
+///
+/// **渲染器只有一台**（本模块的 [`render`]，与真生成同一个函数），所以这里只是把
+/// `&Ctx` 折成闭包交给 `domain` 层 —— `domain` 不认识 `app`，也不许自己拼第二套。
+/// 渲染失败（配方坏 / 注册表缺项）折成 `None`，由 `build_state` 保守判 `Stale`。
+///
+/// 闭包要活得跟 `Book` 一样久（`Book` 借的是 `&dyn Fn`），所以由调用方**先绑到
+/// 一个具名变量**再装上去，别直接内联成临时值。
+pub(super) fn renderer_for(ctx: &super::Ctx) -> impl Fn(&str) -> Option<String> + '_ {
+    move |uid: &str| {
+        let fresh = Book::new(&ctx.presets, &ctx.committed, &ctx.draft);
+        render(&fresh, uid).ok().map(|r| r.text)
+    }
+}
+
+/// 给 [`Book`] 装好"判待更新"所需的两样东西：渲染器 + **产物所在的树**。
+///
+/// 产物根**必须是真仓库**（`ctx.real_root`），不是 `presets.root()`（影子树）：
+/// 影子树里没有 `delivery/`，拿它找产物会让每一份都判成"待更新"
+/// （2026-11-01 实测：`wb_assets` 把 9 份全报成 `Stale`）。
+pub(super) fn book_with_probe<'a>(
+    ctx: &'a super::Ctx,
+    presets: &'a crate::workbench::presets::Presets,
+    committed: &'a super::Committed,
+    draft: &'a crate::workbench::domain::patch::Draft,
+    probe: &'a dyn Fn(&str) -> Option<String>,
+) -> Book<'a> {
+    Book::new(presets, committed, draft)
+        /* 「改之前的值」读盘上已保存那一份，**不是**编辑树（刀 1）。
+        参数台 / 版本详情 / 批量抽屉的 `↩` 都从这条路径拿数。 */
+        .with_rest(&ctx.base)
+        .with_renderer(probe)
+        .with_product_root(ctx.real_root.clone())
+}
+
 /// 发布渠道。原先是上游 manifest 的 `compat.channel`；上游整层删掉后，
 /// 工作台自己发的是正式渠道，定成常量
 const PUBLISH_CHANNEL: &str = "stable";
 
 /* ---------- 校验 ---------- */
+
+/// **历次生成的回执**（2026-11-01）：新的在前。
+///
+/// 回执住应用数据目录（不进仓库），按份数自动清理。它只记录**生成**这一件事
+/// —— 保存 / 发布 / 外部改文件都不在这里，别把它们塞进同一套机制。
+///
+/// 界面上「生成与发布」页可以翻它，回答"上一次生成到底做了什么、为什么失败"。
+#[tauri::command]
+pub fn wb_receipts(
+    limit: Option<usize>,
+) -> Result<Vec<super::receipt::GenerationReceipt>, AppError> {
+    Ok(super::receipt::history(
+        limit.unwrap_or(super::receipt::KEEP),
+    ))
+}
 
 /// 预检（b05 Task 11.8）：[`issues::inspect`] 的全部 + 清单 ↔ 配方对齐。
 ///
@@ -108,7 +174,12 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     traced("wb_preflight", |_| {
         with_ctx(|ctx| {
             let (c, d, _) = state(ctx)?;
-            let book = Book::new(&ctx.presets, &c, &d);
+            /* 必须装渲染器（2026-11-01）：`build_state` 判"产物是不是旧的"靠的是
+            `剥掉 generated_at(盘上) == 当前渲染`。没装渲染器就只能保守判 `Stale`，
+            于是检查卡永远说「有 9 个版本的产物是旧的」，而右边生成页同时显示
+            「已生成」—— 同一份数据两处说法相反（作者截图踩到）。 */
+            let probe = renderer_for(ctx);
+            let book = book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
             let recipe = preset::recipe::Recipe::parse(preset::PRESET_RECIPES_TOML)
                 .map_err(|e| e.to_string());
             let recipe_ref = recipe.as_ref().map_err(String::as_str);
@@ -125,13 +196,13 @@ pub fn wb_preflight() -> Result<Report, AppError> {
     })
 }
 
-/// 内嵌目录自查：`catalog.generated.json`（编译进二进制、客户端首启释放的那份）
-/// 与当前仓库重新构建出来的那份是否**逐字节一致**。
+/// 内嵌目录自查：盘上的 `catalog.generated.json`（下次构建会编进二进制、
+/// 客户端首启释放的那份）与按当前仓库重新构建出来的是否**逐字节一致**。
 ///
 /// 之前只有一条 Rust 单测（`runtime::tests::embedded_matches_rebuild`）盯着 ——
 /// 红在 `cargo test` 里，检查页上没人提。现在预检把这件事摆上桌面：
-/// 改了 presets/（或交付产物）没跑 `cargo run --bin gen-catalog`，装出来的
-/// 客户端首屏拿的还是旧数据 —— 这是发布前该知道的事。
+/// 改了 presets/ 没重算这份文件，装出来的客户端首屏拿的还是旧数据 ——
+/// 这是发布前该知道的事，而且**这条待办能就地修**（见 [`wb_regen_embedded_catalog`]）。
 fn audit_embedded_catalog() -> Result<(), String> {
     let repo = crate::workbench::paths::repo_root();
     let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)
@@ -139,10 +210,65 @@ fn audit_embedded_catalog() -> Result<(), String> {
     let json = catalog
         .to_pretty_json()
         .map_err(|e| format!("内嵌目录序列化失败：{}", e.message))?;
-    if json.as_bytes() == crate::runtime::EMBEDDED_CATALOG {
+    /* 比的是**盘上那份文件**，不是 `EMBEDDED_CATALOG`（编进当前这个二进制的字节）。
+     *
+     * 2026-11-05 作者拍板改口径：比编译进去的那份，这条待办在界面上就**修不了** ——
+     * 文件写对了也不会绿，非得重新编译；等于把修复动作关在终端里。而"下次构建会编
+     * 进去什么"才是这一层的真问题，那份字节就在盘上。旧口径仍由
+     * `runtime::tests::embedded_matches_rebuild` 在 `cargo test` 里守着。 */
+    let path = embedded_catalog_path();
+    let on_disk = std::fs::read(&path).map_err(|e| format!("读不回来 {}：{e}", path.display()))?;
+    if json.as_bytes() == on_disk.as_slice() {
         return Ok(());
     }
-    Err("安装包里编译的那份，与按当前 presets/ 重新构建出来的不一致".to_owned())
+    Err("catalog.generated.json 与按当前 presets/ 重新构建出来的不一致".to_owned())
+}
+
+/// 内嵌目录文件在某个仓库根下的落点。`gen-catalog` / 生成第 5 步 / 这条修复动作
+/// **同一个落点** —— 路径只在这一处拼，别再复写第三份。
+fn embedded_catalog_path_at(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("src-tauri/src/runtime/catalog.generated.json")
+}
+
+/// 当前仓库根下的那一份
+fn embedded_catalog_path() -> std::path::PathBuf {
+    embedded_catalog_path_at(&crate::workbench::paths::repo_root())
+}
+
+/// 内嵌目录的**修复动作**（检查卡那条待办上的「重新生成」按钮）。
+///
+/// 与 `cargo run --bin gen-catalog` 的前半程同一条内核（`Catalog::build_from_repo`）——
+/// 作者的要求：这条待办得能在工作台里就地修掉，不许只剩「去终端敲命令」这一条路。
+///
+/// **只写内嵌目录这一份**：交付面的 `catalog.json` 归 `wb_generate` / 发布事务，
+/// 这里不动它（那是另一条链，混进来就成了第二个源）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedCatalogReport {
+    /// 这次真重写了吗（内容一样就不写，与生成的「没变不重写」同一口径）
+    pub changed: bool,
+    pub files: usize,
+    pub revision: String,
+}
+
+#[tauri::command(async)]
+pub fn wb_regen_embedded_catalog() -> Result<EmbeddedCatalogReport, AppError> {
+    traced("wb_regen_embedded_catalog", |_| {
+        // 落点跟**仓库**走（会话根），与应用数据目录无关 —— 这份文件是要进 git 的
+        let repo = crate::workbench::paths::repo_root();
+        let catalog = crate::runtime::catalog::Catalog::build_from_repo(&repo)?;
+        let json = catalog.to_pretty_json()?;
+        let path = embedded_catalog_path_at(&repo);
+        let changed = std::fs::read(&path).ok().as_deref() != Some(json.as_bytes());
+        if changed {
+            crate::fsx::atomic::atomic_write(&path, json.as_bytes())?;
+        }
+        Ok(EmbeddedCatalogReport {
+            changed,
+            files: catalog.files.len(),
+            revision: catalog.revision.clone(),
+        })
+    })
 }
 
 /* ---------- 渲染 ---------- */
@@ -191,9 +317,21 @@ pub(super) fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
         .collect();
 
     let mut out = String::new();
-    // 头里只有 release_time。曾经的 `# uuid:`（指纹截断）已于 2026-10-05 删——
-    // 没有读者的死字段，见模块文档「产物头没有 uuid」一节；过期判定走两层指纹
-    out.push_str(&format!("# release_time: {}\n", clock::now_release_time()));
+    /*
+     * 头里只有两行**表达内容身份**的：机型与版本。
+     * 曾经的 `# uuid:` 已于 2026-10-05 删（没有读者的死字段）。
+     *
+     * ★ `# generated_at:` **不在这里生成**（2026-11-01 作者裁定）。
+     *
+     * 它属于"写盘那一刻"的事实，不属于"内容"。渲染是纯函数，同样的源必须给同样的
+     * 字节 —— 否则「内容没变就不写」永远不成立（每次点生成都会先算出个新时间，
+     * 一比较就"变了"）。所以：
+     *
+     *   render()  → 不含时间的正文     ← 比较用这一份
+     *   stamp()   → 只在真要写盘时拼上 ← 写盘用这一份
+     *
+     * 客户端仍能读到生成时间（它还在文件里），但"变没变"只看业务内容。
+     */
     out.push_str(&format!("# machine: {}\n", machine.id));
     out.push_str(&format!("# variant: {}\n", v.version_id.to_lowercase()));
     /* 这里原来还有一句段落标签 `#胶笔配置`（照上游抄的）—— 2026-10-16 删，见模块文档那一节 */
@@ -281,6 +419,34 @@ pub(super) fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
         fingerprint,
         snapshot,
     })
+}
+
+/// 把渲染正文变成"写盘正文"：在头部插入 `# generated_at: <本地时间+偏移>`。
+///
+/// 格式 ISO 8601 带偏移量（`2026-11-01T12:30:00+08:00`）：绝对时刻明确，本地可读。
+/// 偏移量取**系统当前时区**（不是写死 +08:00）—— 在东京就是 +09:00，
+/// 有夏令时的地区也能给对当时的偏移。**绝不用文件 mtime 顶替**：下载 / 解压 /
+/// 复制都会改 mtime，而这里是应用明确记录下来的"这份产物何时生成"。
+///
+/// 只在**真要写盘**时调用（见 [`wb_generate`] 的第 ② 步与强制生成路径）：
+/// 拿它去参与"变没变"的比较是错的 —— 每次都不同，一比较就永远"变了"。
+fn stamp(rendered: &str) -> String {
+    use crate::workbench::GENERATED_AT_PREFIX as prefix;
+    let line = format!("{prefix} {}\n", clock::now_local_rfc3339());
+    // 头部两行 `# machine` / `# variant` 之后就插入（保持"头注释块"的形状）
+    let mut out = String::with_capacity(rendered.len() + line.len());
+    let mut inserted = false;
+    for l in rendered.split_inclusive('\n') {
+        if !inserted && !l.starts_with('#') {
+            out.push_str(&line);
+            inserted = true;
+        }
+        out.push_str(l);
+    }
+    if !inserted {
+        out.push_str(&line);
+    }
+    out
 }
 
 /// 产物文件名。`{机型}-{版本小写}.toml`，例如 `A1-standard.toml`、`A1_MINI-fastv3.3.toml`。
@@ -375,37 +541,6 @@ fn gcode_body(v: &Value) -> String {
         .to_owned()
 }
 
-/// 除了 `release_time` 那一行，两份文本一样吗。
-///
-/// 这条判据存在的唯一理由：产物头里有时间戳，不跳过它「字节没变不重写」永远不生效，
-/// 而那条规则本身是为了不让同步工具误判有更新
-pub(super) fn same_payload(a: &str, b: &str) -> bool {
-    let strip = |s: &str| {
-        s.lines()
-            .filter(|l| !l.starts_with("# release_time:"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    strip(a) == strip(b)
-}
-
-/// 这一行要不要进生成记录（`MarkBuilt`）。
-///
-/// 口径（2026-10-05 作者裁定：**没写文件就不许动台账**）：
-/// · 写出去了（`same_payload_on_disk = false`）→ 必记，stamp 与指纹都归本次；
-/// · 没写（字节没变）→ **不记** —— 老 stamp 说的「这份文件是何时写出来的」依然成立；
-///   只有台账缺失或指纹对不上（记录还是旧源状态的）才补记，
-///   否则「待更新」永远消不掉，生成按钮永远亮。
-/// 补记走的也是本函数 → no-op 的生成（9 份全无变化且台账对得上）一份都不记，
-/// `mark` 为 `None`，`built.json` 一个字节都不变。
-fn needs_built_record(
-    same_payload_on_disk: bool,
-    recorded: Option<&str>,
-    fingerprint: &str,
-) -> bool {
-    !same_payload_on_disk || recorded != Some(fingerprint)
-}
-
 /* ---------- 生成 ---------- */
 
 #[derive(Debug, Clone, Deserialize)]
@@ -430,6 +565,10 @@ pub struct GenerateReport {
     pub unchanged: Vec<String>,
     /// 跳过的（暂无资源）+ 原因
     pub skipped: Vec<(String, String)>,
+    /// **生成事务回执**（2026-11-01）：工作台模态框、CLI JSON、AI 报告读的都是这一份。
+    ///
+    /// `None` 只会出现在"还没进事务就断了"（比如影子分叉被拦在 `generate_with` 之前）。
+    pub receipt: Option<super::receipt::GenerationReceipt>,
     // 没有生成记录字段：台账（built.json）在生成事务里直接落盘，报告不再携带
     // 它、前端也不再回填草稿（2026-10-06 状态机修正）。
 }
@@ -485,11 +624,13 @@ fn planned_todos(book: &Book<'_>, scope: &Scope) -> (Vec<String>, Vec<(String, S
 /// `with_ctx_mut` 里了（锁不可重入），只能调自由函数。要可变借出，是因为生成
 /// 事务要把台账记进 `built.json` 并同步会话内的 committed（见 [`generate_with`]）。
 #[tauri::command]
-pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
+pub fn wb_generate(scope: Scope, force: Option<bool>) -> Result<GenerateReport, AppError> {
     traced("wb_generate", |_| {
         with_ctx_mut(|ctx| {
             require_clean(ctx)?;
-            let out = generate_with(ctx, &scope)?;
+            /* 模型手里那份与 presets/ 已经分叉 ⇒ 不许拿旧的渲染再写回去 */
+            require_shadow_in_sync(ctx)?;
+            let out = generate_with(ctx, &scope, force.unwrap_or(false))?;
             /* 产物写的是真仓库；影子树里那份 `delivery/` 还停在旧代。
             不对齐的话，下一次「保存」会把它当成"要写回旧内容" —— 直接把刚生成的
             产物覆盖回去。生成要求干净，所以整份对齐是安全的。 */
@@ -497,6 +638,52 @@ pub fn wb_generate(scope: Scope) -> Result<GenerateReport, AppError> {
             Ok(out)
         })
     })
+}
+
+/// **影子树与真仓库必须是同一份，否则拒绝生成**（2026-10-31）。
+///
+/// 与 [`require_clean`] 分工，两件事分开说：
+///
+/// | 情形 | 谁拦 | 该做什么 |
+/// |---|---|---|
+/// | 用户改过、还没保存 | [`require_clean`]（dirty > 0） | 先保存或放弃 |
+/// | 外部改过 `presets/`、影子还是旧的 | **这里** | 先重新加载（CLI `presets reload`） |
+///
+/// 为什么必须有这一条：`Ctx::open` 发现影子非空且与磁盘不一致时，只把会话标成
+/// `recovered` 就照旧**读影子**（`Presets::load_from(&shadow_root)`），而
+/// `require_clean` 只看 dirty 计数。于是「外部改了源、工作台影子是旧拷贝」时，
+/// 生成会拿旧影子渲染、再写回真仓库 —— 2026-10-31 A1 三份 0.7 被写回 0.8 就是这条链。
+///
+/// **不自动 mirror**：影子可能含着用户还没保存的工作，静默对齐会把它们冲掉。
+/// 保留哪一份是人的决定（工作台「重新加载」/ CLI `presets reload` 才显式放弃编辑态）。
+pub(super) fn require_shadow_in_sync(ctx: &super::Ctx) -> Result<(), AppError> {
+    if super::shadow_differs(&ctx.real_root, &ctx.shadow_root)? {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.workbench.txn.diverged",
+            &[],
+        )));
+    }
+    Ok(())
+}
+
+/// 这一次生成**依据哪一份源**（给人看的一句话依据）。
+///
+/// 2026-11-01 作者要求：`generate` 不得仅因"影子树与真源不同"就拒绝，
+/// 并且必须**明确说清用的是哪一份**，不许静默混用。
+///
+/// 判据是**两棵树的内容**，不是"`Presets` 的根指哪"：会话永远读影子树
+/// （见 `Ctx::open_at`），拿根路径比会永远得出"按草稿生成"。正常路径上
+/// [`require_clean`] + [`require_shadow_in_sync`] 已经保证两者逐字节相同 ——
+/// 这里如实说"按 presets/ 生成"；真有分叉（调用方绕过了闸）就把话说破，别静默混用。
+///
+/// 快照失败按"有分叉"算：宁可把依据说得保守，也不能替它宣称"用的是权威源"。
+pub(super) fn generation_source_note(ctx: &super::Ctx) -> String {
+    let diverged = super::shadow_differs(&ctx.real_root, &ctx.shadow_root).unwrap_or(true);
+    if diverged {
+        "按工作台草稿生成（presets/ 上有未保存的编辑态）".to_owned()
+    } else {
+        "按 presets/（磁盘上的权威源）生成".to_owned()
+    }
 }
 
 /// **生成/发布只在「已保存」的那一版上跑**（2026-10-31 统一编辑事务）。
@@ -526,9 +713,90 @@ pub(super) fn require_clean(ctx: &super::Ctx) -> Result<(), AppError> {
 pub(super) fn generate_with(
     ctx: &mut super::Ctx,
     scope: &Scope,
+    force: bool,
+) -> Result<GenerateReport, AppError> {
+    /*
+     * **统一生成事务的正式返回值**（2026-11-01）：先把回执立起来，成功与失败
+     * 都落一份 —— 只弹一句"生成失败"等于把现场丢了。
+     */
+    /*
+     * 回执**只在内存**（2026-11-01 作者裁定：不落盘、不入库）。
+     * `repo_root` 现在只用来给编号取日期前缀，不再决定任何写盘位置。
+     */
+    let receipts_root = crate::workbench::paths::repo_root();
+    let mut receipt =
+        super::receipt::GenerationReceipt::start(&receipts_root, clock::now_iso8601());
+    match generate_inner(ctx, scope, force, &mut receipt) {
+        Ok(mut out) => {
+            /* **`passed` 不能只看"流程没报错"**（2026-11-01）。
+             *
+             * 三组计数里只要有一个 `failed > 0`，就不是通过 —— 哪怕主流程走完了。
+             * 反过来，三条全 0 写也**不是失败**：那是"内容都没变"，是正常结果，
+             * 但要在 `commit` 这一步里明说，不能让人以为"什么都没干"。 */
+            let failed = receipt.delivery.failed + receipt.assets.failed + receipt.baseline.failed;
+            if failed == 0 {
+                receipt.status = super::receipt::ReceiptStatus::Passed;
+                let nothing_changed = receipt.delivery.written == 0
+                    && receipt.assets.written == 0
+                    && receipt.baseline.written == 0;
+                receipt.step(
+                    "commit",
+                    true,
+                    if nothing_changed {
+                        // 明确说"没变"，不许让它看起来像"跑了个寂寞"
+                        format!(
+                            "全部 {} 份内容均未变化，没有写任何文件",
+                            receipt.delivery.total
+                        )
+                    } else {
+                        "catalog + 台账已落盘".to_owned()
+                    },
+                );
+            } else {
+                receipt.status = super::receipt::ReceiptStatus::Failed;
+                let msg = format!("有 {failed} 份文件没有写成");
+                receipt.error = Some(msg.clone());
+                receipt.step("commit", false, msg);
+            }
+            if let Err(e) = super::receipt::save(&receipt) {
+                tracing::warn!(error = %e, "回执没写下来（不影响这次生成）");
+            }
+            out.receipt = Some(receipt);
+            Ok(out)
+        }
+        Err(e) => {
+            receipt.error = Some(e.message.clone());
+            receipt.step("commit", false, e.message.clone());
+            if let Err(werr) = super::receipt::save(&receipt) {
+                tracing::warn!(error = %werr, "失败回执也没写下来");
+            }
+            Err(e)
+        }
+    }
+}
+
+/// 事务的**内芯**：给定会话与一份回执，按顺序把三组产物做出来。
+///
+/// 三组各自的落点不同（`presets/delivery/`、`crates/preset/assets/presets/`、
+/// `crates/postprocess/tests/fixtures/presets/`），所以做不到文件系统级的"一次
+/// rename 全生效"；这里保证的是**同一份输入 + 同一个顺序 + 同一份回执**：
+/// 任何一步出错都会带着已完成的那几步一起出门（见 [`generate_with`] 的失败分支）。
+fn generate_inner(
+    ctx: &mut super::Ctx,
+    scope: &Scope,
+    force: bool,
+    receipt: &mut super::receipt::GenerationReceipt,
 ) -> Result<GenerateReport, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = Book::new(&ctx.presets, &c, &d);
+    /* 第 1 步：输入冻结。`ctx.presets` 已在内存里，`require_clean` 已保证它 == 磁盘 */
+    /* **明确记下这次按哪一份源生成**（2026-11-01 作者要求）：
+    不许静默混用真源与影子树。正常是 `presets/`；真有未保存草稿时上面的闸
+    已经先拦下了，能走到这里就说明用的是磁盘上的权威源。 */
+    receipt.step("frozen", true, generation_source_note(ctx));
+    // 装渲染器：`planned_todos` 走 `build_rows`，那里的「待更新」是拿当前渲染
+    // 跟盘上字节比出来的（与本次要写的判据同一台渲染器）
+    let probe = renderer_for(ctx);
+    let book = book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
 
     let report = issues::inspect(&book);
     if let Some(b) = report.first_block() {
@@ -552,22 +820,46 @@ pub(super) fn generate_with(
     // 必须落在 git 看得见的那棵树上。生成前 `require_clean` 已保证影子树 == 真仓库，
     // 所以这里不会把未保存的编辑带进产物。
     let presets_root = ctx.real_root.as_path();
-    let delivery_root = paths::delivery_root_at(presets_root).join(super::delivery::MKP_DIR);
+    let delivery_root =
+        paths::delivery_root_at(presets_root).join(crate::workbench::app::delivery::MKP_DIR);
     let delivery_mkp = delivery_root.join("presets");
     let mut written = Vec::new();
     let mut unchanged = Vec::new();
     let mut fingerprints: BTreeMap<String, String> = BTreeMap::new();
 
     for r in &rendered {
+        /* **写不写只看业务内容**（2026-11-01 作者裁定）。
+         *
+         * `r.text` 不含 `# generated_at:`；盘上那份含。比较时把盘上那行**剥掉**，
+         * 所以时间怎么变都不影响结论：
+         *
+         *   剥掉时间的盘上文本 == render()  → 内容真没变 → 不写、时间不动、哈希不动
+         *   不相等                          → 真变了     → 写，并盖上新的生成时间
+         *
+         * 反过来做（先给候选盖上当前时间再比）永远会"有变化"，
+         * 那就退化成"每点一次生成就改一次文件" —— 作者明确不要这个。 */
         let target = delivery_mkp.join(&r.file_name);
         let existing = std::fs::read_to_string(&target).ok();
-        let same = existing
+        /* 「内容没变」= 业务内容相同**且**盘上那份已经带着生成时间。
+         *
+         * 后半句不是多余的：产物里没有 `# generated_at:` 时，光比业务内容会得出
+         * "没变 → 不写"，于是这一行永远补不上（自锁）。缺这一行本身就算要写一次 ——
+         * 客户端要读它，缺了就是缺了。
+         *
+         * `force` = 用户明确点「强制重新生成」：跳过判断照写、换新时间。
+         * 这是"内容没变也重写"的另一个例外（2026-11-01 裁定）。 */
+        let has_stamp = existing
             .as_deref()
-            .is_some_and(|old| same_payload(old, &r.text));
+            .is_some_and(|old| old.contains(crate::workbench::GENERATED_AT_PREFIX));
+        let same = !force
+            && has_stamp
+            && existing
+                .as_deref()
+                .is_some_and(|old| crate::workbench::strip_generated_at(old) == r.text);
         if same {
             unchanged.push(r.uid.clone());
         } else {
-            crate::fsx::atomic::atomic_write(&target, r.text.as_bytes())?;
+            crate::fsx::atomic::atomic_write(&target, stamp(&r.text).as_bytes())?;
             written.push(r.uid.clone());
         }
         // 快照照样写：它是恢复配方的依据，和有没有重写产物无关
@@ -577,15 +869,116 @@ pub(super) fn generate_with(
             &ctx.store.snapshot_rel(&v.machine_id, &v.version_id)?,
             &r.snapshot,
         )?;
-        /* ★ 生成记录只记「真的变了」的（2026-10-05 作者裁定：没写文件就不许动台账）：
-        · 写出去的行 —— stamp 与指纹都归本次；
-        · 没写的行 —— 字节没变，老 stamp 说的「这份文件是何时写出来的」依然成立，
-          一个字节都不动；只有记录缺失 / 指纹对不上（记录是旧的）才补记。
-        不这么改的后果：no-op 的生成也把整本台账顶新 → built.json 必脏 →
-        git/clean 永远红（真机踩过：只是打开预演看了一眼，工作区就脏了）。 */
-        if needs_built_record(same, book.built_fingerprint(&r.uid), &r.fingerprint) {
+        /* 台账只记「**真的写了盘**」的那几行（2026-11-01 收口）。
+        · 写出去 → stamp 归本次 = 「这一份最后一次成功生成是什么时候」；
+        · 没写 → 老 stamp 说的仍是事实，一个字节都不动。
+        台账**不参与**写不写的判断（那是上面那行字节比较的事），它只负责
+        把"上次成功生成时刻"展示给人看。所以哪怕台账丢了/写坏了，该写的
+        文件一样会写 —— 正确性不挂在它身上。 */
+        if !same {
             fingerprints.insert(r.uid.clone(), r.fingerprint.clone());
         }
+    }
+
+    /* 三个数各记各的（2026-11-01）：`written` 只数**真写了盘**的。
+    `written 0/9` 到底意味着"9 份都没变"还是"9 份都失败了"，
+    只有把 unchanged / failed 分开才答得出来。 */
+    receipt.delivery = super::receipt::Counts::of(written.len(), unchanged.len(), 0);
+    /* 回执点名的是**文件名**（能直接定位到盘上那份），不是 uid */
+    receipt.files = rendered
+        .iter()
+        .filter(|r| written.contains(&r.uid))
+        .map(|r| r.file_name.clone())
+        .collect();
+    receipt.step("delivery", true, receipt.delivery.summary());
+
+    /*
+     * ★ 第 3–5 步只在**真仓库会话**上做。
+     *
+     * 那三处落点是编译期常量（`preset::generate::assets_dir()` / `fixtures_dir()`），
+     * 与 `ctx.real_root` 无关。测试用临时会话（`real_root` 指向 tempdir），
+     * 拿它去跑会把测试的假数据写进真仓库 —— 所以先认门，临时会话如实记"跳过"。
+     */
+    if ctx.real_root == crate::workbench::paths::real_presets_root_path() {
+        /* 第 3 步：内核产物 —— **同一份 presets/ 源渲染出的那 9 份**（编进安装包的那批）。
+         *
+         * ★ 2026-11-01 单一源改造（作者裁定 B）：这里原来读 `preset_recipes.toml`
+         * 那套**独立的配方数据**，于是同一个参数有两份值、两套生成流程 ——
+         * A1 的 `tower_extrude_ratio` 一边 1.0 一边 0.9，就是这么分叉的
+         * （10-31 配方写 0.9，11-01 参数同步把注册表改成 1.0，只更新了交付侧）。
+         *
+         * 现在：内核产物与交付产物**由同一台渲染器、同一份源**算出来，逐字节相同。
+         * 配方那条链已删，`presets/` 是唯一权威源 —— 改参数只改一处，两边同时变。
+         */
+        let assets_dir = preset::generate::assets_dir();
+        let mut n_written = 0usize;
+        let mut n_same = 0usize;
+        for r in &rendered {
+            let target = assets_dir.join(&r.file_name);
+            /* **内核产物与交付产物是同一份内容**（2026-11-01 单一源）：
+            所以它也盖同一个 `# generated_at:`，判据也一样（剥掉时间再比）。
+            两边都从同一个 `render()` 出来、只差写盘时刻 —— 时间不同不算漂移。 */
+            let body = stamp(&r.text);
+            /* 「内容没变」= 剥掉时间后相同**且**盘上那份已经带着生成时间。
+            后半句不能省：没有 `# generated_at:` 时，光比内容会得出"没变 → 不写"，
+            那一行就永远补不上（自锁）。与交付那条同一条口径。 */
+            let same = std::fs::read_to_string(&target).ok().is_some_and(|old| {
+                old.contains(crate::workbench::GENERATED_AT_PREFIX)
+                    && crate::workbench::strip_generated_at(&old) == r.text
+            });
+            if same {
+                n_same += 1;
+                continue;
+            }
+            crate::fsx::atomic::atomic_write(&target, body.as_bytes())
+                .map_err(|e| AppError::io("内核产物写不出来").with_detail(e.to_string()))?;
+            n_written += 1;
+        }
+        receipt.assets = super::receipt::Counts::of(n_written, n_same, 0);
+        receipt.step("assets", true, receipt.assets.summary());
+
+        /* ★ **单一源的判据**（2026-11-01）：内核产物与交付产物必须逐字节相同。
+         *
+         * 两边都由同一个 `render()` 从同一份 `presets/` 算出来，只要写盘没出错就必须
+         * 相等。一旦不等，说明又有人给其中一侧开了第二条数据来源 —— 那正是
+         * `tower_extrude_ratio` 一边 1.0 一边 0.9 的成因。当场报错，别让它进 git。
+         */
+        let delivery_mkp_dir = paths::delivery_root_at(presets_root)
+            .join(crate::workbench::app::delivery::MKP_DIR)
+            .join("presets");
+        if let Some((name, ours, theirs)) = first_drift(&delivery_mkp_dir, &assets_dir, &rendered) {
+            return Err(AppError::internal(messages::text(
+                "ui.workbench.build.dual_source",
+                &[("file", &name)],
+            ))
+            .with_detail(format!("交付：{ours}\n内核：{theirs}")));
+        }
+        receipt.step("single-source", true, "交付与内核逐字节一致");
+
+        /* 第 4 步：测试基线 —— 内容相同就不写（改了期望值又没人看 diff 才是风险） */
+        let fixtures_dir = preset::generate::fixtures_dir();
+        let n_base = preset::generate::sync_baseline(&assets_dir, &fixtures_dir)
+            .map_err(|e| AppError::io("测试基线同步失败").with_detail(e))?;
+        /* `sync_baseline` 返回"这次真写了几份"；总数是那份目录里应有的份数，
+        未变数由它自己算 —— 不拿上面 assets 的计数冒充（那是另一个东西）。 */
+        let base_total = rendered.len();
+        receipt.baseline = super::receipt::Counts::of(n_base, base_total.saturating_sub(n_base), 0);
+        receipt.step("baseline", true, receipt.baseline.summary());
+
+        /* 第 5 步：内嵌目录重建 —— 读的就是刚写出去的那批入库产物 */
+        /* `build_from_repo` 收的是**仓库根**（它自己会拼 `presets/`），不是 presets 那一层 */
+        let embedded =
+            crate::runtime::Catalog::build_from_repo(&crate::workbench::paths::repo_root())?;
+        let embedded_json = embedded.to_pretty_json()?;
+        crate::fsx::atomic::atomic_write(
+            &embedded_catalog_path_at(&ctx.real_root),
+            embedded_json.as_bytes(),
+        )?;
+        receipt.step("embedded", true, format!("{} 份文件", embedded.files.len()));
+    } else {
+        receipt.step("assets", true, "跳过（临时会话）");
+        receipt.step("baseline", true, "跳过（临时会话）");
+        receipt.step("embedded", true, "跳过（临时会话）");
     }
 
     let stamp = clock::now_iso8601();
@@ -610,7 +1003,11 @@ pub(super) fn generate_with(
         })
         .collect();
     super::storage::merge_built_records(&ctx.store, &c.built, updates.clone())?;
-    ctx.committed.built.extend(updates);
+    /* 会话内的 committed 先记在这里、**等 `book` 释放之后再并进去**（见下面的 `drop`）：
+    台账只影响"上次成功生成时刻"那一格展示，晚一步合并不会让任何判断出错。 */
+    let ledger_updates = updates;
+    /* 第 6 步：台账 —— 与产物同一批落盘（没写文件的行不记，见上面那段注释） */
+    receipt.step("ledger", true, format!("{} 条", fingerprints.len()));
 
     // ③ **清单跟着重算**（作者 2026-10-03）：产物直接写进交付根 —— 目录要是不
     // 跟上，delivery 就处于「文件是新的、目录记的还是旧的」，客户端字节校验必挂
@@ -633,6 +1030,21 @@ pub(super) fn generate_with(
      */
     let published = super::delivery::published_at_of(&dist_root);
     super::delivery::write_catalog_json(&dist_root, &book, published.as_deref())?;
+    receipt.step("catalog", true, "catalog.json");
+    /* `book` 借了 `ctx`（渲染器那个探针），下面要可变借 `ctx` 并台账 —— 在这里收掉它。
+    到此为止 `book` 的活儿（渲染、预演、重算目录）已经全干完了。 */
+    drop(book);
+    drop(probe);
+    ctx.committed.built.extend(ledger_updates);
+    /* 第 7 步：核对 —— 交付面、入库面、基线三处是不是同一份内容 */
+    receipt.step(
+        "verify",
+        true,
+        format!(
+            "交付 {} / 内核 {} / 基线 {}",
+            receipt.delivery.written, receipt.assets.written, receipt.baseline.written
+        ),
+    );
 
     tracing::info!(
         written = written.len(),
@@ -646,6 +1058,8 @@ pub(super) fn generate_with(
         written,
         unchanged,
         skipped,
+        /* 外层 `generate_with` 拿到成品回执后填进来 */
+        receipt: None,
     })
 }
 
@@ -685,12 +1099,27 @@ pub struct DiffLine {
     pub no: usize,
 }
 
+/// 前端那边叫 `PreviewDiffLine`（同一条 wire 形状）。
+///
+/// 单独起个别名只是为了让「一份未保存改动的 diff」读起来不串到"预演"上 ——
+/// **不再是第二套结构**，字段与上面那个逐项相同。
+pub type PreviewDiffLine = DiffLine;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DiffLineKind {
     Context,
     Added,
     Removed,
+}
+
+/// 行级 diff 的**唯一实现**（`pub` 是为了给未保存改动的 diff 用 ——
+/// 别处再写一份 LCS 迟早两边给出的红绿不一样）。
+///
+/// 未保存改动那边（`domain::shadow_diff`）调的就是它：算法、行号口径、
+/// 「删在前、增在后」的顺序与生成前确认框**逐字相同**。
+pub(crate) fn line_diff(old: &str, new: &str) -> Vec<DiffLine> {
+    diff_lines(old, new)
 }
 
 /// 一份产物的预演：状态 + 行级差异 + 计数。
@@ -763,7 +1192,8 @@ pub fn wb_generate_preview(scope: Scope) -> Result<PreviewReport, AppError> {
 /// 只读：`dist_root_path` 不建目录，缺文件按「新增」算，不顺手造出一个 `mkp/presets/`。
 pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewReport, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = Book::new(&ctx.presets, &c, &d);
+    let probe = renderer_for(ctx);
+    let book = book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
 
     // 生成闸门与 `wb_generate` 是同一道：有阻断就如实说，不往下算
     let report = issues::inspect(&book);
@@ -780,7 +1210,9 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
 
     let (todo, skipped) = planned_todos(&book, scope);
     let delivery = paths::delivery_root_path();
-    let presets_dir = delivery.join(super::delivery::MKP_DIR).join("presets");
+    let presets_dir = delivery
+        .join(crate::workbench::app::delivery::MKP_DIR)
+        .join("presets");
 
     let mut files: Vec<PreviewFile> = Vec::with_capacity(todo.len());
     let mut to_write = 0usize;
@@ -849,12 +1281,49 @@ pub(super) fn preview_with(ctx: &super::Ctx, scope: &Scope) -> Result<PreviewRep
     })
 }
 
+/// 内核产物（`assets_dir`）与交付产物（`delivery_dir`）有哪一份不同。
+///
+/// 两边都由同一个 [`render`] 从同一份 `presets/` 算出来，写盘无误就必然相等。
+/// 不等意味着"又开了第二条数据来源" —— 历史上 `tower_extrude_ratio` 一边 1.0、
+/// 一边 0.9（配方那条链独自维护），就是这么来的。
+///
+/// 返回 `(文件名, 交付那侧内容, 内核那侧内容)`；`None` = 全都逐字节一致。
+fn first_drift(
+    delivery_dir: &std::path::Path,
+    assets_dir: &std::path::Path,
+    rendered: &[Rendered],
+) -> Option<(String, String, String)> {
+    for r in rendered {
+        let delivery = std::fs::read_to_string(delivery_dir.join(&r.file_name)).ok();
+        let assets = std::fs::read_to_string(assets_dir.join(&r.file_name)).ok();
+        match (delivery, assets) {
+            /* 两边都读得到、**剥掉生成时间**后相同 → 继续看下一份。
+            时间戳各记各的写盘时刻，两侧必然不同，那不是"第二个数据源"。 */
+            (Some(a), Some(b))
+                if crate::workbench::strip_generated_at(&a)
+                    == crate::workbench::strip_generated_at(&b) =>
+            {
+                continue
+            }
+            // 有一侧读不到 / 两侧不同：都算漂移，把看到的东西如实带回
+            (a, b) => {
+                return Some((
+                    r.file_name.clone(),
+                    a.unwrap_or_else(|| "（读不到）".to_owned()),
+                    b.unwrap_or_else(|| "（读不到）".to_owned()),
+                ))
+            }
+        }
+    }
+    None
+}
+
 /// 比一份产物：见 [`PreviewFile`] 的三档状态。
 fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
     preview_text(&r.uid, &r.file_name, &r.text, existing)
 }
 
-/// 比一份文本：磁盘读得到且正文相同（[`same_payload`]，与 [`wb_generate`] 的「跳过」同一道）
+/// 比一份文本：磁盘读得到且**逐字节相同**（与真生成的「跳过」同一道判据）
 /// → `unchanged`；读得到但不同 → `modified`；读不到 → `added`。
 ///
 /// **无变化也把正文带回去**（作者 2026-10-07）：确认框的「完整」视图要看整份原文 ——
@@ -866,7 +1335,17 @@ fn preview_one(r: &Rendered, existing: Option<&str>) -> PreviewFile {
 fn preview_text(uid: &str, file_name: &str, text: &str, existing: Option<&str>) -> PreviewFile {
     let (state, lines) = match existing {
         None => (DiffState::Added, diff_added(text)),
-        Some(old) if same_payload(old, text) => (DiffState::Unchanged, full_lines(text)),
+        /*
+         * 「无变化」展示的是**盘上那一份**，不是这次渲染出来的那份（2026-11-01）。
+         *
+         * 产物头不再带时刻之后，两份在"无变化"时本来就逐字节相同，展示哪一份内容都一样；
+         * 仍然取 `old` 是因为语义正确：让人看到的必须是**已经躺在盘上的东西**，
+         * 而不是一个"算出来但不会落地"的候选（作者就是被这个骗过）。
+         */
+        // 比较剥掉 `# generated_at:` 的盘上文本（与真生成同一道判据）
+        Some(old) if crate::workbench::strip_generated_at(old) == text => {
+            (DiffState::Unchanged, full_lines(old))
+        }
         Some(old) => (DiffState::Modified, diff_lines(old, text)),
     };
     let added = lines
@@ -1036,6 +1515,18 @@ fn lcs_diff(a: &[&str], b: &[&str], a_base: usize, b_base: usize, out: &mut Vec<
     }
 }
 
+/*
+ * 曾有「配对」这一层（把「整块删 + 整块增」读成一行「旧 → 新」），2026-11-02 删掉。
+ *
+ * 起因是作者看到"只加了一条却在概览条上冒出两道 −"—— 那其实是 LCS 的"删一段 + 增一段"，
+ * 文件里并没有少东西。配对的思路没错，但渲染成「旧 → 新」一行在长行上读不动
+ * （作者原话：「到时候长一点可能就不太好接受了」），他自己要的是
+ * **生成前确认那种上红下绿两行**。既然界面要的就是 LCS 的原样，那这一层就没有载荷了。
+ *
+ * 别再加回来：真要"改一行读成一行"，那是编辑器（VSCode 那种 inline diff）的活，
+ * 不是这个只读确认框的事。
+ */
+
 /* ---------- 恢复配方 ---------- */
 
 #[derive(Debug, Clone, Serialize)]
@@ -1179,12 +1670,12 @@ pub fn wb_publish(
     opts: Option<super::publish_tx::TxOptions>,
 ) -> Result<super::publish_tx::PublishTxReport, AppError> {
     traced("wb_publish", |_| {
-        /* ★ **测试模式（沙箱）里不许发布**：沙箱那套只在本机、也不在 git 索引里 ——
-        让它走到"提交 / 推送 / 开 PR"这一步，只会把一个说不清的世界推给别人 */
-        super::sandbox::require_real_mode("不许发布")?;
         let opts = opts.unwrap_or_default();
         // 发布目标 + 平台客户端在锁外构造（读配置 / 凭据文件 / remote，都不碰会话）
         let (target, hosting) = resolve_publish(&app, opts.platform.as_deref());
+        /* 数据根也在锁外取：内核只收一个 `&Path`，不碰 AppHandle（锁纪律）。
+         * 记账本身在内核里 —— CLI `presets publish` 走同一个内核，所以两条路都留痕。 */
+        let history_root = crate::fsx::paths::internal_root(&app).ok();
         let report = with_ctx_mut(|ctx| {
             // 发布只认「已保存」那一版：草稿混进产物 = 发出去的东西没人审过
             require_clean(ctx)?;
@@ -1194,36 +1685,12 @@ pub fn wb_publish(
                 target.as_ref(),
                 hosting.as_ref().map(|h| h.as_ref()),
                 None,
+                history_root.as_deref(),
             )?;
             /* 发布写了交付产物 / 账本（真仓库）；影子树跟着换到新一代 */
             crate::workbench::domain::txn::mirror(&ctx.real_root, &ctx.shadow_root)?;
             Ok::<_, AppError>(out)
         })?;
-
-        // 收尾：把这次回执落进**发布历史**（作者 2026-10-04）。
-        // - 壳层做：写历史要 `AppHandle` 拿 appDataDir，而事务内核不碰 AppHandle（锁纪律）；
-        // - **只记真发生过的**：被闸拦下（零写入）与 `dry_run`（演练）都不记 —— 回执不是"我点过"，
-        //   是"发生过什么"；
-        // - 历史写失败**不许**把一次成功的发布说成失败：如实在 summary 上补一句，照样返回。
-        let mut report = report;
-        if !opts.dry_run && report.stage != super::publish_tx::PublishStage::BlockedAudit {
-            match crate::fsx::paths::internal_root(&app) {
-                Ok(root) => {
-                    let record = super::history::PublishRecord::from_report(
-                        &report,
-                        crate::workbench::clock::now_iso8601(),
-                    );
-                    if let Err(e) = super::history::append(&root, record) {
-                        report
-                            .summary
-                            .push_str(&format!("（发布历史没记上：{}）", e.message));
-                    }
-                }
-                Err(e) => report
-                    .summary
-                    .push_str(&format!("（发布历史没记上：{}）", e.message)),
-            }
-        }
         Ok(report)
     })
 }
@@ -1239,6 +1706,18 @@ pub fn wb_publish_history(
     traced("wb_publish_history", |_| {
         let root = crate::fsx::paths::internal_root(&app)?;
         super::history::load(&root)
+    })
+}
+
+/// **本分支最近的提交**（只读、`async`、不联网）——「发布历史」第三栏。
+///
+/// 作者 2026-11-05：「AI 用 CI 做了什么我不知道，但我不要很详细的」——
+/// 只给最近 20 条 `短 sha / 作者 / 时间 / 标题`，不 diff、不查远端。
+/// 读的是**本机仓库**，没推上去的提交也在里面（界面要写清这一句）。
+#[tauri::command(async)]
+pub fn wb_recent_commits(limit: Option<usize>) -> Result<Vec<super::git::CommitRow>, AppError> {
+    traced("wb_recent_commits", |_| {
+        super::git::Git::at_repo_root().recent_commits(limit.unwrap_or(20))
     })
 }
 
@@ -1520,7 +1999,6 @@ mod tests {
     use super::super::Ctx;
     use crate::runtime::catalog::Catalog as RuntimeCatalog;
     use crate::workbench::domain::BuildState as TestBuildState;
-    use crate::workbench::presets::AssetKind as TestAssetKind;
 
     /// 一份挂在临时目录上的会话 + 一份被引用的 BBS 资产文件（write_content 的健检要它）。
     /// 生成 / 台账 / 快照 / catalog 的落盘全部从 `ctx.presets.root()` 派生 —— 与真仓库零接触。
@@ -1550,13 +2028,15 @@ mod tests {
     fn generation_writes_the_ledger_in_the_same_transaction() {
         let (dir, mut ctx) = fixture_ctx();
 
-        let report = generate_with(&mut ctx, &Scope::All).expect("生成成功");
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("生成成功");
         assert!(!report.written.is_empty(), "首生成必须真写了东西");
 
         // **绕开会话**直接读盘（干净检出的视角）：台账里有本批每一笔
         let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
         let empty = Draft::default();
-        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        // 判 Built 现在是"盘上字节 == 当前渲染"，所以要装渲染器（与生成同一个探针）
+        let probe = renderer_for(&ctx);
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty).with_renderer(&probe);
         for uid in &report.written {
             let rec = loaded
                 .committed
@@ -1588,7 +2068,7 @@ mod tests {
             if let Some(sha) = &f.sha256 {
                 let bytes = std::fs::read(dir.path().join("presets").join(&f.path)).unwrap();
                 assert_eq!(
-                    preset::lineage::sha256_hex(&String::from_utf8_lossy(&bytes)),
+                    preset::provenance::sha256_hex(&String::from_utf8_lossy(&bytes)),
                     *sha,
                     "{} 的 catalog 登记与真字节必须一致",
                     f.path
@@ -1604,7 +2084,7 @@ mod tests {
     #[test]
     fn destroying_the_draft_cannot_flip_built_back_to_stale() {
         let (dir, mut ctx) = fixture_ctx();
-        generate_with(&mut ctx, &Scope::All).expect("生成成功");
+        generate_with(&mut ctx, &Scope::All, false).expect("生成成功");
 
         // 造一份**带着旧 built 字段的草稿快照**（老版本工作台写出来的形状）
         let legacy = serde_json::json!({
@@ -1620,7 +2100,8 @@ mod tests {
         // 干净检出视角：重新从盘上载入（草稿读回来 + 台账读回来）→ 仍然是已生成
         let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
         let draft = super::super::storage::read_draft(&ctx.store).unwrap();
-        let book = Book::new(&ctx.presets, &loaded.committed, &draft);
+        let probe = renderer_for(&ctx);
+        let book = Book::new(&ctx.presets, &loaded.committed, &draft).with_renderer(&probe);
         assert_eq!(
             book.build_state("A1/STANDARD"),
             TestBuildState::Built,
@@ -1631,7 +2112,7 @@ mod tests {
         std::fs::remove_file(&draft_file).unwrap();
         let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
         let empty = Draft::default();
-        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty).with_renderer(&probe);
         assert_eq!(book.build_state("A1/STANDARD"), TestBuildState::Built);
     }
 
@@ -1640,12 +2121,12 @@ mod tests {
     #[test]
     fn a_noop_generation_leaves_the_ledger_byte_identical() {
         let (dir, mut ctx) = fixture_ctx();
-        generate_with(&mut ctx, &Scope::All).expect("首次生成");
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
 
         let ledger = dir.path().join("workbench").join("built.json");
         let before = std::fs::read(&ledger).unwrap();
 
-        let report = generate_with(&mut ctx, &Scope::Stale).expect("二次生成");
+        let report = generate_with(&mut ctx, &Scope::Stale, false).expect("二次生成");
         assert!(report.written.is_empty(), "没有新东西要写");
         // 一切都对得上 → 计划清单是空的（既没有要写的，也没有要跳过的）
 
@@ -1653,16 +2134,277 @@ mod tests {
         assert_eq!(before, after, "no-op 生成不许动台账（逐字节）");
     }
 
+    /* ---------- 验收：回执只报告真实结果（2026-11-01） ---------- */
+
+    /// **全部无变化**：`written=0`、`unchanged=total`、`failed=0`，
+    /// 并且 `commit` 那一步要**明说"都没变"**，不许让它看起来像"什么都没干"。
+    #[test]
+    fn a_noop_generate_says_nothing_changed_instead_of_faking_writes() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("二次生成");
+        let r = report.receipt.expect("该有回执");
+
+        assert_eq!(r.status, super::super::receipt::ReceiptStatus::Passed);
+        assert_eq!(r.delivery.written, 0, "内容没变，交付一份都不许写");
+        assert_eq!(
+            r.delivery.unchanged, r.delivery.total,
+            "没写的那几份要记成「未变」，不是消失"
+        );
+        assert_eq!(r.delivery.failed, 0);
+        assert_eq!(r.assets.written, 0, "内核同样一份都不许写");
+        // `written/total` 相加必须等于总数 —— 三个数不许对不上
+        for c in [r.delivery, r.assets, r.baseline] {
+            assert_eq!(
+                c.written + c.unchanged + c.failed,
+                c.total,
+                "写/未变/失败 三个数必须加起来等于总数"
+            );
+        }
+        let commit = r.steps.iter().find(|s| s.key == "commit").unwrap();
+        assert!(commit.ok);
+        assert!(
+            commit.detail.contains("未变化"),
+            "全部没变时要明说，别让人以为写过了：{}",
+            commit.detail
+        );
+    }
+
+    /// **部分变化**：`written` 必须等于**实际写盘的文件数**，不是"处理了几个"。
+    ///
+    /// 这正是 2026-11-01 那个假 `9/9` 的来源：旧代码 `n_assets += 1` 无条件累加，
+    /// 于是"一份都没写"也报 `9/9`。
+    #[test]
+    fn written_counts_real_writes_not_files_visited() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        // 改一个版本的值 → 只该有那一份变
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("改后生成");
+        let r = report.receipt.expect("该有回执");
+
+        assert!(r.delivery.written >= 1, "改过的版本必须真写");
+        assert_eq!(
+            r.delivery.written,
+            report.written.len(),
+            "回执里的写入数必须与真写盘的那份清单逐项一致"
+        );
+        assert!(
+            r.delivery.unchanged > 0,
+            "没改的那些要计入「未变」，它们确实没写"
+        );
+        /* 内核那条链**只在真实仓库会话**里跑（`ctx.real_root == 真 presets 根`）；
+        测试夹具是临时根，所以这里它整段跳过 —— `assets` 三个数都该是 0，
+        而不是"跟交付一样"（那个假设只在生产里成立）。 */
+        assert_eq!(
+            (r.assets.written, r.assets.unchanged, r.assets.total),
+            (0, 0, 0),
+            "临时会话不写内核产物，计数就该如实是 0"
+        );
+    }
+
+    /// **回执与磁盘逐项一致**：回执说写了哪些，盘上就真的变了哪些。
+    #[test]
+    fn the_receipt_matches_what_actually_landed_on_disk() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        let dir = paths::delivery_root_at(&ctx.real_root)
+            .join(crate::workbench::app::delivery::MKP_DIR)
+            .join("presets");
+        let before: Vec<(String, std::time::SystemTime)> = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    e.metadata().unwrap().modified().unwrap(),
+                )
+            })
+            .collect();
+
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("改后生成");
+        let r = report.receipt.expect("该有回执");
+
+        // 回执点名的文件，mtime 必须是新的；没点名的必须是旧的
+        for (name, old_mtime) in before {
+            let now = std::fs::metadata(dir.join(&name))
+                .unwrap()
+                .modified()
+                .unwrap();
+            let named = r.files.iter().any(|f| f == &name);
+            if named {
+                assert!(now > old_mtime, "{name} 回执说写了，盘上却没变");
+            } else {
+                assert_eq!(now, old_mtime, "{name} 回执说没写，盘上却被动过");
+            }
+        }
+    }
+
+    /* ---------- `# generated_at:` 只记时间，不参与判断（2026-11-01） ---------- */
+
+    /// 时间戳插在头注释块末尾，**紧挨着业务内容之前**；剥掉它又回到原样。
+    #[test]
+    fn the_generated_at_line_round_trips() {
+        let body = "# machine: A1\n# variant: standard\n\n[wiping]\nratio = 1\n";
+        let stamped = stamp(body);
+        assert!(stamped.contains("# generated_at: "), "写盘版必须带生成时间");
+        assert!(
+            stamped.starts_with("# machine: A1"),
+            "机型那行仍是第一行：{stamped}"
+        );
+        assert!(
+            stamped.find("# generated_at: ").unwrap() < stamped.find("[wiping]").unwrap(),
+            "生成时间要落在头注释块里（业务内容之前）：{stamped}"
+        );
+        assert_eq!(
+            crate::workbench::strip_generated_at(&stamped),
+            body,
+            "剥掉时间必须逐字节回到渲染正文"
+        );
+    }
+
+    /// ★ **内容没变时再点一次生成：不写、时间不动、字节不动**。
+    ///
+    /// 这是作者 2026-11-01 定的核心规则：生成不是"每次点击都重写文件"，
+    /// 而是"有变化才执行"。时间戳留在文件里给客户端读，但它不参与
+    /// "变没变"的判断 —— 比较前先剥掉。
+    #[test]
+    fn a_second_generate_does_not_touch_the_files_when_nothing_changed() {
+        let (dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+
+        let target = ctx
+            .real_root
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join("A1-standard.toml");
+        let first = std::fs::read(&target).expect("产物该在");
+        let first_mtime = std::fs::metadata(&target).unwrap().modified().unwrap();
+        assert!(
+            String::from_utf8_lossy(&first).contains("# generated_at: "),
+            "产物里必须有生成时间，客户端要读"
+        );
+
+        // 隔一会儿再生成，确保"如果真写了"时间戳会变
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("二次生成");
+        assert!(report.written.is_empty(), "内容没变，一份都不许写");
+        assert_eq!(
+            std::fs::read(&target).unwrap(),
+            first,
+            "产物必须逐字节不动（含时间戳）"
+        );
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().modified().unwrap(),
+            first_mtime,
+            "连文件修改时间都不该变"
+        );
+        drop(dir);
+    }
+
+    /// **强制重新生成**：跳过"内容没变"的判断，照写、并换上新的生成时间。
+    ///
+    /// 这是唯一允许"内容没变也重写"的入口（作者 2026-11-01 裁定）。
+    #[test]
+    fn force_regen_rewrites_even_when_nothing_changed() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+        let target = ctx
+            .real_root
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join("A1-standard.toml");
+        let before = std::fs::read_to_string(&target).unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let report = generate_with(&mut ctx, &Scope::All, true).expect("强制生成");
+        assert!(!report.written.is_empty(), "强制生成必须重写");
+
+        let after = std::fs::read_to_string(&target).unwrap();
+        assert_eq!(
+            crate::workbench::strip_generated_at(&before),
+            crate::workbench::strip_generated_at(&after),
+            "业务内容没变 —— 只有时间该变"
+        );
+        assert_ne!(before, after, "生成时间必须换成本次的");
+    }
+
+    /// 内容真变了才写，并且**此时**时间戳更新。
+    #[test]
+    fn a_real_change_writes_the_file_and_refreshes_the_timestamp() {
+        let (_dir, mut ctx) = fixture_ctx();
+        generate_with(&mut ctx, &Scope::All, false).expect("首次生成");
+        let target = ctx
+            .real_root
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join("A1-standard.toml");
+        let before = std::fs::read_to_string(&target).unwrap();
+
+        // 走正规写入口改一个值（与工作台里改参数同一条路）
+        apply(
+            &mut ctx.draft,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(33)),
+            }],
+        )
+        .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let report = generate_with(&mut ctx, &Scope::All, false).expect("改后生成");
+        assert!(!report.written.is_empty(), "内容变了必须写");
+
+        let after = std::fs::read_to_string(&target).unwrap();
+        assert_ne!(before, after, "文件内容必须变");
+        assert!(after.contains("child = 33"), "新值要落进去");
+        assert!(
+            after.contains("# generated_at: ") && before.contains("# generated_at: "),
+            "两边都该有生成时间"
+        );
+    }
+
     /// 台账里的指纹就是渲染指纹 → 每一份有产物的版本都该是「已生成」；
     /// A2L 那种「暂无资源」不参与（它是没有东西可生成，不是生成过没生成过）。
     #[test]
     fn every_renderable_version_reads_built_after_a_full_generation() {
         let (_dir, mut ctx) = fixture_ctx();
-        generate_with(&mut ctx, &Scope::All).expect("全量生成");
+        generate_with(&mut ctx, &Scope::All, false).expect("全量生成");
 
         let loaded = super::super::storage::load(&ctx.store, &ctx.presets).unwrap();
         let empty = Draft::default();
-        let book = Book::new(&ctx.presets, &loaded.committed, &empty);
+        let probe = renderer_for(&ctx);
+        let book = Book::new(&ctx.presets, &loaded.committed, &empty).with_renderer(&probe);
         for uid in ["A1/STANDARD", "A1/FAST", "P1S/LITE"] {
             assert_eq!(
                 book.build_state(uid),
@@ -1670,18 +2412,6 @@ mod tests {
                 "{uid} 在全量生成后必须是已生成"
             );
         }
-        // 资产台账上的 mkp 条目也全部「在」—— 另一条 CI 判据（资产清单完整）的形状
-        let list = crate::workbench::app::assets::wb_assets(
-            None, None, None, None, None, None, None, None,
-        )
-        .unwrap();
-        let missing: Vec<&str> = list
-            .assets
-            .iter()
-            .filter(|a| a.kind == TestAssetKind::MkPreset && !a.present)
-            .map(|a| a.id.as_str())
-            .collect();
-        assert!(missing.is_empty(), "mkp 资产不该有「不在」的：{missing:?}");
     }
 
     /* ---------- 对照基线（b05 Task 14.9） ---------- */
@@ -1813,8 +2543,8 @@ mod tests {
         let book = Book::new(&f.presets, &c, &draft);
         let r = render(&book, "A1/STANDARD").unwrap();
 
-        assert!(r.text.starts_with("# release_time: "));
-        assert!(r.text.contains("# machine: A1"));
+        // 头里只剩两行内容身份（2026-11-01 去掉了每次变动的 release_time）
+        assert!(r.text.starts_with("# machine: A1"));
         assert!(r.text.contains("# variant: standard"));
         assert!(
             r.text.contains("[toolhead]"),
@@ -1947,6 +2677,9 @@ mod tests {
                     let t = l.trim();
                     !l.starts_with("# uuid:")
                         && !l.starts_with("# release_time:")
+                        /* 生成时刻不表达内容：基线里那份是它被写出去的时刻，
+                           我们这边 render() 根本不产这一行 —— 两者只差这里 */
+                        && !l.starts_with(crate::workbench::GENERATED_AT_PREFIX)
                         && t != "#胶笔配置"
                         && t != "# 胶笔配置"
                 })
@@ -2079,35 +2812,39 @@ mod tests {
         assert_eq!(seg, sorted, "段内键要按字母序：{:?}", seg);
     }
 
-    /// 同样的输入**产出同样的字节**（除了时间戳那一行）——
-    /// 头里若再有"每次都变"的东西（随机 uuid 之类），这条就不成立，
-    /// 而「字节没变不重写」也就废了
+    /// 同样的输入**产出逐字节相同的产物**（2026-11-01 起连时间戳都不再例外）。
+    ///
+    /// 这条是「内容没变不重写」与「生成可复现」的地基：头里只要有一个"每次都变"
+    /// 的东西（随机 uuid / 当前时刻），整条规则立刻失效。
     #[test]
-    fn rendering_is_deterministic_apart_from_the_timestamp() {
+    fn rendering_is_byte_for_byte_reproducible() {
         let (_d, f, c) = setup();
         let draft = Draft::default();
         let book = Book::new(&f.presets, &c, &draft);
         let a = render(&book, "A1/STANDARD").unwrap();
         let b = render(&book, "A1/STANDARD").unwrap();
-        assert!(same_payload(&a.text, &b.text));
+        assert_eq!(a.text, b.text, "两次渲染必须逐字节相同");
         assert_eq!(a.fingerprint, b.fingerprint);
     }
 
-    /// ★ 生成记录的口径（2026-10-05）：**没写文件就不许动台账**。
-    /// no-op 的生成（产物字节没变、记录也对得上）一份都不记 → `mark` 为 `None`
-    /// → `built.json` 一个字节不变 → git/clean 不会因为"看了一眼"就红。
-    /// （真机踩过：只是打开预演，整本台账 stamp 被顶新，发布闸拦发布。）
+    /// 产物头**不许**出现 `# release_time:`（2026-11-01 删掉的假时间字段）。
+    ///
+    /// 理由：它写的是**渲染时刻**，与"这一份是什么时候写出去的"无关，却让同一份
+    /// 配方每次生成出不同字节 —— 于是「内容没变不重写」必须靠"跳过某一行"来救，
+    /// 那套补丁正是这次要收掉的东西。作者 2026-11-01 被它骗过一次：
+    /// 「他怎么可能这个时间就是刚才呢」。时间改由 `built.json` 的 `stamp` 表达。
     #[test]
-    fn a_noop_generate_records_nothing() {
-        let fp = "abc";
-        // 产物字节没变 + 记录的指纹对得上 → 不记
-        assert!(!needs_built_record(true, Some(fp), fp));
-        // 写出去了 → 必记（stamp 归本次）
-        assert!(needs_built_record(false, Some(fp), fp));
-        // 没写，但记录是旧源状态的（指纹对不上）→ 补记，否则「待更新」消不掉
-        assert!(needs_built_record(true, Some("old"), fp));
-        // 没写，且台账里根本没有这条（记录丢了）→ 补记
-        assert!(needs_built_record(true, None, fp));
+    fn the_product_header_carries_no_release_time() {
+        let (_d, f, c) = setup();
+        let draft = Draft::default();
+        let book = Book::new(&f.presets, &c, &draft);
+        for uid in ["A1/STANDARD", "A1/FAST", "A2L/STANDARD", "P1S/LITE"] {
+            let r = render(&book, uid).unwrap();
+            assert!(
+                !r.text.contains("# release_time"),
+                "{uid} 的产物头里又出现了 release_time —— 生成就不再可复现了"
+            );
+        }
     }
 
     /// 产物头**不许**出现 `# uuid:` —— 2026-10-05 删掉的死字段（全仓无读者、
@@ -2148,7 +2885,7 @@ mod tests {
         .unwrap();
         let after = render(&Book::new(&f.presets, &c, &draft), "A1/STANDARD").unwrap();
 
-        assert!(!same_payload(&before.text, &after.text));
+        assert_ne!(before.text, after.text, "改了值，产物字节必须变");
         assert_ne!(before.fingerprint, after.fingerprint);
         assert!(after.text.contains("child = 33"));
     }
@@ -2171,14 +2908,19 @@ mod tests {
         assert!(parsed["k"].as_str().unwrap().contains("G1"));
     }
 
-    /// `same_payload` 只忽略时间戳，别的一个字都不忽略
+    /// 「写不写」= **整份字节是否相同**，一个字节都不放过（2026-11-01 起没有例外行）。
+    ///
+    /// 以前这里验的是"`same_payload` 只忽略时间戳"，那条函数已删：产物头不再带
+    /// 时刻，例外也就不需要了。现在多一个空格都要重写 —— 这才是"内容没变"的真定义。
     #[test]
-    fn same_payload_only_ignores_the_timestamp() {
-        let a = "# uuid: x\n# release_time: 1\nk = 1\n";
-        let b = "# uuid: x\n# release_time: 2\nk = 1\n";
-        let c2 = "# uuid: x\n# release_time: 1\nk = 2\n";
-        assert!(same_payload(a, b));
-        assert!(!same_payload(a, c2));
+    fn a_product_is_rewritten_whenever_any_byte_differs() {
+        let a = "# machine: A1\n# variant: standard\nk = 1\n";
+        let b = "# machine: A1\n# variant: standard\nk = 1\n";
+        let c = "# machine: A1\n# variant: standard\nk = 2\n";
+        let d = "# machine: A1\n# variant: standard\nk = 1 \n";
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+        assert_ne!(a, d, "末尾多个空格也算内容不同");
     }
 
     /// 有阻断时**渲染照做、但生成该被拒**。
@@ -2432,38 +3174,45 @@ mod tests {
 
     #[test]
     fn an_identical_file_has_no_diff_lines() {
-        // diff_lines 只服务「确实要重写」的文件；正文相同（含时间戳差异）的
-        // 在 preview_one 就被 same_payload 拦成「无变化」，根本走不到这里
+        // diff_lines 只服务「确实要重写」的文件；字节相同的在 preview_one
+        // 就判成「无变化」，根本走不到这里
         assert!(diff_lines("x\ny", "x\ny")
             .iter()
             .all(|l| l.kind == DiffLineKind::Context));
     }
 
-    /// 预演的「无变化」与 [`wb_generate`] 的「跳过」是**同一道判据**
-    /// （[`same_payload`]）：只有头部时间戳那行不同的，不许报成「要写」——
-    /// 否则「将写入 N 份」虚报，作者又被自己吓一跳（2026-10-05 真实吐槽）。
-    /// 行级差异仍比真文本：真要重写的，时间戳那行如实显示。
+    /// 预演的三档状态（2026-11-01 口径：**只有字节相同才是无变化**）。
+    ///
+    /// · 字节相同 → 无变化，且详情给的是**盘上那一份**（不是本次候选）；
+    /// · 差一个字节 → 修改；
+    /// · 盘上没有 → 新增（绝不冒充「无变化」）。
+    ///
+    /// 以前这里还有一条"只有时间戳不同也算无变化"的分支，那正是让观众看见
+    /// "无变化的文件时间变成了现在"的那条路 —— 随产物头去掉时刻一起删了。
     #[test]
-    fn a_timestamp_only_difference_is_unchanged_not_modified() {
+    fn preview_states_follow_the_bytes_on_disk() {
         let r = Rendered {
             uid: "A1/STANDARD".to_owned(),
             file_name: "A1-standard.toml".to_owned(),
-            text: "# release_time: 1\nk = 1\n".to_owned(),
+            text: "# machine: A1\n# variant: standard\nk = 1\n".to_owned(),
             fingerprint: "fp".to_owned(),
             snapshot: Default::default(),
         };
-        // 正文一样、只有时间戳不同：不写盘，也不许报「要写」
-        let same_but_time = "# release_time: 2\nk = 1\n";
+        // 盘上就是这份字节：无变化，且展示盘上原文
+        let pf = preview_one(&r, Some(r.text.as_str()));
+        assert_eq!(pf.state, DiffState::Unchanged);
+        assert!(
+            pf.lines.iter().all(|l| l.kind == DiffLineKind::Context),
+            "无变化项要整份素底摊开"
+        );
         assert_eq!(
-            preview_one(&r, Some(same_but_time)).state,
-            DiffState::Unchanged
+            pf.lines.first().map(|l| l.text.as_str()),
+            Some("# machine: A1"),
+            "无变化展示的必须是盘上那一份"
         );
         // 正文真变了：要写
-        let changed_body = "# release_time: 1\nk = 2\n";
-        assert_eq!(
-            preview_one(&r, Some(changed_body)).state,
-            DiffState::Modified
-        );
+        let changed = "# machine: A1\n# variant: standard\nk = 2\n";
+        assert_eq!(preview_one(&r, Some(changed)).state, DiffState::Modified);
         // 磁盘上没有：新增
         assert_eq!(preview_one(&r, None).state, DiffState::Added);
     }

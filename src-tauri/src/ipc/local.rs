@@ -11,7 +11,7 @@
 //! - 编辑走 `begin_preset_edit`（**临时文件账**：AppState 的 draft 格，`run/app-state.json`）
 //!   → `commit_preset_draft`（**写回我那份自己**，第八层：同一路径、不产生第二份）；
 //! - 校准值也写进同一份工作副本（`save_preset_calibration`：按注册表定位改
-//!   `toolhead.offset.x/y/z`，注释 / 键序 / 血统一个字节不动）。
+//!   `toolhead.offset.x/y/z`，注释 / 键序 / 来源记录一个字节不动）。
 //!
 //! 第十层再加两条**管理**命令：`rename_local_preset`（只改名字，字节一个不动；正指着它的
 //! 使用中指针与该份的草稿跟着改）与 `delete_local_preset`（**真删除** —— 没有垃圾桶、
@@ -38,33 +38,34 @@ use crate::runtime::source_ledger::OriginKind;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalBasedOnFactsDto {
-    /// 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null`
-    pub lineage_kind: Option<String>,
+    /// 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。没有记录 ⇒ `null`
+    pub source_kind: Option<String>,
     /// 这份副本建的时候哪个源在生效（`github#owner/repo@ref` 那种规范化身份）
-    pub lineage_source: Option<String>,
-    /// 血统里记的来源版本标记（文件头 `# release_time`，可能是版本号不是时刻）。
+    pub source_ref: Option<String>,
+    /// 来源的配方版本标记（`# release_time`，可能是版本号不是时刻）。
     /// **只做展示**：它是配方的写作日期，不是发布顺序。
-    pub lineage_release: Option<String>,
-    /// ★ 这份**对应的那个云端版本**实际发布的时刻（下载那一刻目录的 `publishedAt`）。
-    /// 老文件没记过 ⇒ `null`，界面写「未知」，**不许拿 `release_time` 顶**
-    pub lineage_published_at: Option<String>,
-    /// 血统记的来源那一版云端原文的 SHA-256（不是本地文件此刻的字节）
-    pub lineage_sha256: Option<String>,
+    pub source_release: Option<String>,
+    /// ★ **来源版本时间**：这份对应那个云端版本实际发布的时刻。
+    /// 唯一来源 = 文件尾部来源记录里履历最后一条的 `at`。
+    /// 没有记录 ⇒ `null`，界面写「未知」，**不许拿写盘记录 `generated_at` 顶**
+    pub source_version_at: Option<String>,
+    /// 来源那一版云端原文的 SHA-256（不是本地文件此刻的字节）
+    pub source_sha256: Option<String>,
     /// 当前生效的源身份
     pub cloud_source: Option<String>,
     /// 当前这份目录的发布时刻（随包 bootstrap 目录没有）
     pub cloud_published_at: Option<String>,
     /// 当前云端这一份的原文摘要（目录登记的 sha256）—— 「更多」里与本地对照
     pub cloud_sha256: Option<String>,
-    /// 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null`
-    pub lineage_catalog: Option<String>,
-    /// 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null`
-    pub lineage_serial: Option<u64>,
+    /// 来源记录里那条发布线。没有记录 ⇒ `null`
+    pub source_catalog: Option<String>,
+    /// 来源记录里那条线的第几号。没有记录 ⇒ `null`
+    pub source_serial: Option<u64>,
     /// 当前目录的发布线（`catalog.catalogId`）。老目录 / 随包旧版 ⇒ `null`
     pub cloud_catalog: Option<String>,
     /// 当前目录是那条线的第几号（`catalog.publishSerial`）
     pub cloud_serial: Option<u64>,
-    /// `unverified` 时为什么说不清：`no_lineage` / `no_release_line` /
+    /// `unverified` 时为什么说不清：`no_source` / `no_release_line` /
     /// `catalog_without_identity` / `not_in_catalog` / `no_sha` / `no_source_identity`。
     /// 其余档位是 `null`
     pub unverified_reason: Option<String>,
@@ -102,7 +103,7 @@ pub struct LocalPresetFileDto {
     pub based_on: String,
     /// 上面那个结论**摆事实**的那几格（详情面板直接显示，界面不重算）
     pub based_on_facts: LocalBasedOnFactsDto,
-    /// 血统里记的来源（`delivery/mkp/presets/A1-standard.toml`）。没有血统是 `null`
+    /// 来源记录里记的来源（`delivery/mkp/presets/A1-standard.toml`）。没有来源记录是 `null`
     pub based_on_label: Option<String>,
     /// 建副本那一刻来源文件头的版本号（给人看的，形如 `2026-08-19 01:38:13`）
     pub based_on_release: Option<String>,
@@ -136,7 +137,7 @@ pub struct LocalPresetFileDto {
 /// 用户自己有哪些文件（`presets-local/` 里躺着什么）。
 ///
 /// **盘就是底账**：扫盘，不记账本 —— 这一份的主人就是用户，他随时可能在 Finder 里改它。
-/// 它没有"云端身份"（云端没有它），但**可能带着血统**（`# based_on*` 三行，写在文件里）：
+/// 它没有"云端身份"（云端没有它），但**可能带着来源记录**（`# based_on*` 三行，写在文件里）：
 /// 从哪一份云端、哪一版拷出来改的 —— 于是"云端换版了没有"换台电脑也认得出。
 #[tauri::command]
 pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFileDto>, AppError> {
@@ -184,34 +185,39 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
         Ok(runtime::local::local_files(&root)
             .into_iter()
             .map(|f| {
-                let source = runtime::local::source_of(&catalog, f.lineage.as_ref());
-                /* 自己的归属（头两行优先、回落血统，见 [`owner_of`]） */
+                let source = runtime::local::source_file_in(&catalog, f.source.as_ref());
+                /* 自己的归属（头两行优先、回落来源记录，见 [`owner_of`]） */
                 let (owner_machine, owner_version) = owner_of(&catalog, &f);
-                /* 本地来路账：这一份是谁、怎么来的（没记过 ⇒ None，界面照实写「未知」） */
+                /* 本地来路账：只用来补"我怎么来的"这一格，不再顶来源版本 / 发布线 */
                 let entry = by_path.get(f.path.as_str()).copied();
-                let verdict = runtime::local::based_on(&judge, f.lineage.as_ref(), entry);
+                let verdict = runtime::local::based_on(&judge, f.source.as_ref(), entry);
                 LocalPresetFileDto {
                     based_on: verdict.based_on.as_str().to_owned(),
                     based_on_facts: LocalBasedOnFactsDto {
-                        lineage_kind: verdict.facts.lineage_kind.map(|k| k.as_str().to_owned()),
-                        lineage_source: verdict.facts.lineage_source,
-                        lineage_release: verdict.facts.lineage_release,
-                        lineage_published_at: verdict.facts.lineage_published_at,
-                        lineage_sha256: verdict.facts.lineage_sha256,
+                        source_kind: verdict.facts.source_kind.map(|k| k.as_str().to_owned()),
+                        source_ref: verdict.facts.source_ref,
+                        source_release: verdict.facts.source_release,
+                        source_version_at: verdict.facts.source_version_at,
+                        source_sha256: verdict.facts.source_sha256,
                         cloud_source: verdict.facts.cloud_source,
                         cloud_published_at: verdict.facts.cloud_published_at,
                         cloud_sha256: verdict.facts.cloud_sha256,
-                        lineage_catalog: verdict.facts.lineage_catalog,
-                        lineage_serial: verdict.facts.lineage_serial,
+                        source_catalog: verdict.facts.source_catalog,
+                        source_serial: verdict.facts.source_serial,
                         cloud_catalog: verdict.facts.cloud_catalog,
                         cloud_serial: verdict.facts.cloud_serial,
                         unverified_reason: verdict.facts.unverified_reason.map(str::to_owned),
                     },
-                    based_on_label: f.lineage.as_ref().and_then(|l| l.based_on.clone()),
-                    based_on_release: f
-                        .lineage
+                    based_on_label: f
+                        .source
                         .as_ref()
-                        .and_then(|l| l.based_on_release_time.clone()),
+                        .and_then(|p| p.latest_version())
+                        .and_then(|v| v.file.clone()),
+                    based_on_release: f
+                        .source
+                        .as_ref()
+                        .and_then(|p| p.latest_version())
+                        .and_then(|v| v.at.clone()),
                     based_on_machine_id: source.map(|s| s.machine_id.clone()),
                     based_on_version_id: source.map(|s| s.version_id.clone()),
                     /*
@@ -249,7 +255,7 @@ pub async fn get_local_preset_files(app: AppHandle) -> Result<Vec<LocalPresetFil
 /// 文件头 `# machine:` / `# variant:` 两行优先 —— variant 在 B 类产物里写的是版本
 /// id 的小写（`fast`），所以对着目录登记**大小写无关**地找同一台机型下的版本，
 /// 取目录里的规范写法（`FAST`），界面拿它查显示名才查得到；头里没有 / 认不出就
-/// 回落到**血统指向的那份云端**的归属（不猜、也不编）。
+/// 回落到**来源记录指向的那份云端**的归属（不猜、也不编）。
 ///
 /// 用户线列表的机型 / 版本两列与校准页"找哪一份"读的都是它 —— 只有这一处口径。
 fn owner_of(
@@ -268,7 +274,7 @@ fn owner_of(
     if let Some((machine, version)) = own {
         return (Some(machine), Some(version));
     }
-    let source = runtime::local::source_of(catalog, f.lineage.as_ref());
+    let source = runtime::local::source_file_in(catalog, f.source.as_ref());
     (
         source.map(|s| s.machine_id.clone()),
         source.map(|s| s.version_id.clone()),
@@ -394,7 +400,7 @@ pub async fn begin_preset_edit(
                  * 读出来的字节本来就是权威（这一层就在读它），就地算一次两种目录下语义一致。
                  */
                 let raw = runtime::delivery::cloud_text(&root, file)?;
-                let sha = runtime::lineage::sha256_hex(&raw);
+                let sha = runtime::provenance::sha256_hex(&raw);
                 (raw, sha)
             }
             /* 用户线：正文就是我那份现在的字节（它本来就在用户的地盘里） */
@@ -408,14 +414,14 @@ pub async fn begin_preset_edit(
                 }
                 /* 第九层：读不出来（编码 / TOML 语法）就不许改 —— 检查在读的那一步里 */
                 let raw = runtime::local::read_preset_text(&user_root, rel)?;
-                let sha = runtime::lineage::sha256_hex(&raw);
+                let sha = runtime::provenance::sha256_hex(&raw);
                 /*
-                 * 编辑器里给的是**正文**（那三行血统是程序的元数据，不是用户该改的内容）——
+                 * 编辑器里给的是**正文**（那三行来源记录是程序的元数据，不是用户该改的内容）——
                  * 与云端线同一副样子：两条线打开编辑器看到的都是"预设本身"。
                  * 保存时 `save_back` 会照抄文件里原来那三行，所以用户在编辑器里删掉它们
                  * 也不会把出处弄丢。
                  */
-                let text = runtime::lineage::strip_lineage_lines(&raw);
+                let text = runtime::provenance::strip_for_compare(&raw);
                 (text, sha)
             }
         };
@@ -456,7 +462,7 @@ pub struct PresetTextDraftDto {
     pub file_name: String,
     /// 相对**用户根**的路径（保存就写回这里）
     pub path: String,
-    /// 正文（**带着这一份自己的血统三行**）
+    /// 正文（**带着这一份自己的来源记录**）
     pub text: String,
     pub updated_unix: u64,
     /// 这次打开是**接着上次改**（草稿本来就是这一份的），不是新建的
@@ -531,8 +537,14 @@ pub struct PresetDraftSummaryDto {
     pub origin: runtime::state::ActiveOrigin,
     pub source_file_name: String,
     pub path: Option<String>,
-    /// **真改过才算**：与来源现在的字节比（只差换行/血统处置的差异不算改动）
+    /// **真改过才算**：与来源现在的字节比（只差换行/来源记录处置的差异不算改动）
     pub dirty: bool,
+    /// **参数级的改动处数**（值不同才算；注释 / 空行 / 来源记录不进账）。
+    ///
+    /// 列表行上的「未保存」用它 —— 只比字节的 `dirty` 会把「文件被应用/同步改过、
+    /// 草稿还是旧正文」也算成脏；`changed > 0` 才是"用户真的改了参数还没保存"。
+    /// 来源读不出来时保守记 `1`（有草稿在，别瞒）。
+    pub changed: usize,
     pub updated_unix: u64,
 }
 
@@ -760,7 +772,7 @@ pub async fn check_preset_text(
 /// **开始改一份用户预设的正文**（预设页「编辑文件」）：把当前字节复制进 AppState 的
 /// `text_draft` 格，**盘上那份一动不动**。已经有同一份（同路径）的草稿就**接着改**。
 ///
-/// 与 [`begin_preset_edit`] 的两处不同：**正文带着这一份自己的血统三行**（编辑这份时
+/// 与 [`begin_preset_edit`] 的两处不同：**正文带着这一份自己的来源记录**（编辑这份时
 /// 它们就在文件里，保存时照写回），以及**入口只收用户线**（云端那份要先拷成自己的）。
 #[tauri::command]
 pub async fn begin_text_edit(
@@ -939,10 +951,16 @@ pub async fn get_preset_draft_summary(
         let Some(draft) = runtime::app_state::draft(&root)? else {
             return Ok(None);
         };
+        let catalog = runtime::load_released_catalog(&root)?;
+        /*
+         * ★ 列表行上那枚「未保存」只看 `changed`（2026-11-04）：
+         * `dirty` 是"与来源字节不同"，文件被应用 / 同步改过、草稿还是旧正文时它也会真，
+         * 但用户一个字都没改。`changed` 是参数级差异（值不同才算），才是"改了没保存"。
+         */
+        let changed = draft_changes(&root, &user_root, &catalog, &draft).map_or(1, |m| m.len());
 
         let dirty = match draft.origin {
             runtime::state::ActiveOrigin::Preset => {
-                let catalog = runtime::load_released_catalog(&root)?;
                 match catalog
                     .files
                     .iter()
@@ -959,8 +977,8 @@ pub async fn get_preset_draft_summary(
             runtime::state::ActiveOrigin::Local => {
                 let rel = draft.path.clone().unwrap_or_default();
                 match runtime::local::read_preset_text(&user_root, &rel) {
-                    /* 打开那一刻给的是**去了血统**的正文（两侧同一副样子） */
-                    Ok(raw) => draft.text != runtime::lineage::strip_lineage_lines(&raw),
+                    /* 打开那一刻给的是**去了来源记录**的正文（两侧同一副样子） */
+                    Ok(raw) => draft.text != runtime::provenance::strip_for_compare(&raw),
                     Err(_) => true,
                 }
             }
@@ -971,6 +989,7 @@ pub async fn get_preset_draft_summary(
             source_file_name: draft.source_file_name,
             path: draft.path,
             dirty,
+            changed,
             updated_unix: draft.updated_unix,
         }))
     })
@@ -981,12 +1000,12 @@ pub async fn get_preset_draft_summary(
 ///
 /// **派生视图，不设持久化账本**（有一条纪律：期望值只来自当前目录）。所以：
 /// 只有**现在目录里还活着**的那一版才进账 —— 那一版已被移出版次的（用户文件自己
-/// 还能用，只是"跟不上更新"了）不进；没有血统的（手工拷的 / 自己写的）也不进。
+/// 还能用，只是"跟不上更新"了）不进；没有来源记录的（手工拷的 / 自己写的）也不进。
 ///
 /// # 复制出来的那一份不进（2026-10-20）
 ///
-/// 第十一层「另存为一份新的」是**按字节**复制，那三行 `# based_on*` 血统
-/// **原样带过去** —— 于是副本光看血统与原件一模一样、必然进账，云端行的
+/// 第十一层「另存为一份新的」是**按字节**复制，那三行 `# based_on*` 来源记录
+/// **原样带过去** —— 于是副本光看来源记录与原件一模一样、必然进账，云端行的
 /// 「有新版 / 更新」与参数页那整段「云端更新」就落到副本身上了（那些副本
 /// 其实跟云端没关系）。
 ///
@@ -1022,11 +1041,11 @@ pub async fn get_local_preset_index(
                 }
                 /*
                  * 认亲优先用账上记的云端文件名 —— 目录换路径也还认得出是同一份；
-                 * 只有旧账 / 没账时才回落到血统解析。
+                 * 只有旧账 / 没账时才回落到来源记录解析。
                  */
                 let cloud_source = match entry.and_then(|e| e.cloud_file.clone()) {
                     Some(name) => name,
-                    None => runtime::local::source_of(&catalog, f.lineage.as_ref())?
+                    None => runtime::local::source_file_in(&catalog, f.source.as_ref())?
                         .file_name
                         .clone(),
                 };
@@ -1069,7 +1088,7 @@ pub async fn discard_preset_draft(app: AppHandle) -> Result<(), AppError> {
 /// 而界面那一层（`useParams` 的 `draft`）是**进程内存**，关掉就没了 —— `begin_preset_edit`
 /// 答 `reused` 只说"还是这一份的草稿"，没说"改了哪几项"。这条命令把参数级差异补上：
 /// 判据与参数页的显示层同一套（[`crate::presetdata::params::diff_param_values`]），
-/// **值不同才算**，注释 / 空行 / 血统那几行都不进账。
+/// **值不同才算**，注释 / 空行 / 来源记录那几行都不进账。
 ///
 /// 没有草稿 ⇒ 空表（不是错误）。来源读不出来（云端那份已经不在下载区 / 本地那份被移走）
 /// 照实报错：这时"改了什么都算不清"，编一份差异出来比空着更坏。
@@ -1084,31 +1103,43 @@ pub async fn read_preset_draft_changes(
             return Ok(std::collections::BTreeMap::new());
         };
         let catalog = runtime::load_released_catalog(&root)?;
-
-        /* 来源正文：与 `begin_preset_edit` 开场那一刻给草稿的那一份**同一副样子** ——
-        云端线是下载区的字节，用户线是去掉血统三行之后的正文 */
-        let base = match draft.origin {
-            runtime::state::ActiveOrigin::Preset => {
-                let file = catalog
-                    .files
-                    .iter()
-                    .find(|f| f.file_name == draft.source_file_name)
-                    .ok_or_else(|| {
-                        AppError::not_found(messages::text(
-                            "ui.ipc.local.093",
-                            &[("v1", &draft.source_file_name.to_string())],
-                        ))
-                    })?;
-                runtime::delivery::cloud_text(&root, file)?
-            }
-            runtime::state::ActiveOrigin::Local => {
-                let rel = draft.path.as_deref().unwrap_or_default();
-                runtime::lineage::strip_lineage_lines(&runtime::local::read_text(&user_root, rel)?)
-            }
-        };
-
-        crate::presetdata::params::diff_param_values(&base, &draft.text, &catalog.registry.params)
+        draft_changes(&root, &user_root, &catalog, &draft)
     })
+}
+
+/// 草稿相对来源的**参数级**差异（值不同才算；注释 / 空行 / 来源记录不进账）。
+///
+/// **唯一实现**：列表行的「未保存」数 `changed`（[`get_preset_draft_summary`]）与
+/// 参数页摊开"改了哪几项"（[`read_preset_draft_changes`]）都走这里 ——
+/// 两处各写一套迟早漂（一个说"改了 0 处"、另一个亮着未保存）。
+fn draft_changes(
+    root: &std::path::Path,
+    user_root: &std::path::Path,
+    catalog: &runtime::catalog::Catalog,
+    draft: &runtime::state::PresetDraft,
+) -> Result<std::collections::BTreeMap<String, String>, AppError> {
+    /* 来源正文：与 `begin_preset_edit` 开场那一刻给草稿的那一份**同一副样子** ——
+    云端线是下载区的字节，用户线是去掉来源记录之后的正文 */
+    let base = match draft.origin {
+        runtime::state::ActiveOrigin::Preset => {
+            let file = catalog
+                .files
+                .iter()
+                .find(|f| f.file_name == draft.source_file_name)
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.local.093",
+                        &[("v1", &draft.source_file_name.to_string())],
+                    ))
+                })?;
+            runtime::delivery::cloud_text(root, file)?
+        }
+        runtime::state::ActiveOrigin::Local => {
+            let rel = draft.path.as_deref().unwrap_or_default();
+            runtime::provenance::strip_for_compare(&runtime::local::read_text(user_root, rel)?)
+        }
+    };
+    crate::presetdata::params::diff_param_values(&base, &draft.text, &catalog.registry.params)
 }
 
 /// **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：
@@ -1135,10 +1166,10 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
         let done = match draft.origin {
             runtime::state::ActiveOrigin::Preset => {
                 /*
-                 * 血统要写进那份用户文件里：来源 = 目录里那一份的 **`catalog.path`**
+                 * 来源记录要写进那份用户文件里：来源 = 目录里那一份的 **`catalog.path`**
                  * （`delivery/mkp/presets/A1-standard.toml`，与工作台建副本的"哪一版"同一形状）。
                  *
-                 * 目录里已经没有它了（编辑期间换源 / 下线）就只写文件名本身 —— 血统还认得出
+                 * 目录里已经没有它了（编辑期间换源 / 下线）就只写文件名本身 —— 来源记录还认得出
                  * "从哪一份"，只是少了"在哪"。**不为这个拦住保存**：用户改了半天的东西
                  * 不该被一个地址问题卡住。
                  */
@@ -1191,7 +1222,7 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
             }
             /*
              * 用户线：**写回它自己**（第八层）—— 同一个路径、同一份文件，
-             * 血统照抄原来那三行（出处没变）。这一条不查目录、也不需要目录：
+             * 来源记录照抄原来那三行（出处没变）。这一条不查目录、也不需要目录：
              * 我那份的出处写在它自己身上。
              */
             runtime::state::ActiveOrigin::Local => {
@@ -1205,6 +1236,11 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
                 runtime::local::save_back(&user_root, &rel, &draft.text)?
             }
         };
+        /*
+         * **「上次云端值」的第一笔**：这次保存里凡是"与手上那版云端不同"的项，
+         * 记下那一版是多少（已有记录的不覆盖）。记不上不影响保存。
+         */
+        note_first_divergence(&root, &done.path, &draft.text);
         /* 存完就该丢掉草稿：它会盖住下一次「改这份」的"接着上次改" */
         runtime::app_state::clear_draft(&root)?;
         /*
@@ -1223,8 +1259,65 @@ pub async fn commit_preset_draft(app: AppHandle) -> Result<CommittedDraftDto, Ap
     })
 }
 
+/// **「上次云端值」的第一笔**（2026-10-31）：这次保存里凡是"与手上那版云端不同"的项，
+/// 记下那一版是多少。
+///
+/// 为什么比的是**来源记录那一版**而不是"当前云端最新"：用户手上这份是从哪一版来的，
+/// 才是他改动之前看到的那个数 —— 云端后来发了什么，这一格不该替它改口（那由
+/// `apply_at` 的滚动负责，见 `ipc::param_sync::roll_origins`）。
+///
+/// 三条边界：只记**没有记录**的项（已有记录是更早的那一版，保存不许覆盖）；
+/// 没有来源记录 / 那一版正文不在本机 ⇒ 整件事跳过（不编）；记不上不影响保存本身
+/// （附加信息，与原文镜像 / 出处账同口径）。
+fn note_first_divergence(root: &std::path::Path, rel: &str, text: &str) {
+    use crate::presetdata::params as param_alg;
+
+    let Some(sha) = runtime::provenance::parse(text)
+        .and_then(|p| p.latest_version().and_then(|v| v.sha256.clone()))
+    else {
+        return;
+    };
+    let Ok(Some(base_text)) = runtime::content::read(root, &sha) else {
+        return;
+    };
+    let Ok(catalog) = runtime::load_released_catalog(root) else {
+        return;
+    };
+    let defs = &catalog.registry.params;
+    let Ok(local) = param_alg::read_param_values(text, defs) else {
+        return;
+    };
+    let Ok(base) = param_alg::read_param_values(&base_text, defs) else {
+        return;
+    };
+    let existing = runtime::app_state::param_origins(root, rel).unwrap_or_default();
+    let mut entries = Vec::new();
+    for def in defs {
+        let key = def.key.as_str();
+        if existing.contains_key(key) {
+            continue;
+        }
+        let (Some(current), Some(before)) = (local.get(key), base.get(key)) else {
+            continue;
+        };
+        if current == before {
+            continue;
+        }
+        entries.push((
+            key.to_owned(),
+            runtime::app_state::ParamOrigin {
+                sha256: Some(sha.clone()),
+                value: before.clone(),
+            },
+        ));
+    }
+    if let Err(e) = runtime::app_state::record_param_origins(root, rel, &entries) {
+        tracing::warn!(error = %e, "「上次云端值」没记上（不影响本次保存）");
+    }
+}
+
 /// **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** ——
-/// 内容、那三行血统、TOML 都不重写；改完还是同一份 Preset（判据逐字节盯着）。
+/// 内容、那三行来源记录、TOML 都不重写；改完还是同一份 Preset（判据逐字节盯着）。
 ///
 /// 三件事按顺序做：
 /// ① 文件改名（[`runtime::local::rename_file`]：名字的门槛、"不覆盖"、只换名字不换目录都在那里）；
@@ -1260,7 +1353,7 @@ pub async fn rename_local_preset(
             user_root.join(&planned.path),
             runtime::app_state::file_path(&root),
             root.join("run/source-ledger.json"),
-            root.join("run/lineage-source.json"),
+            root.join("run/provenance.json"),
         ];
         // 原文镜像跟着搬家（没有镜像就没什么可搬的；路径先算出来，事务才不会漏它）
         if let Ok(p) = runtime::baseline::origin_path(&root, &path) {
@@ -1299,8 +1392,8 @@ pub async fn rename_local_preset(
 /// **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
 ///
 /// 与第八层"云端 → 本地文件"那条另存分开：这一层是**本地文件 → 本地文件** ——
-/// 原文件一个字节不动；内容与那三行 `# based_on*` 血统**原样带过去**（来源已经是用户文件，
-/// 不重算血统 —— 重算会把"从哪一版云端派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
+/// 原文件一个字节不动；内容与那三行 `# based_on*` 来源记录**原样带过去**（来源已经是用户文件，
+/// 不重算来源记录 —— 重算会把"从哪一版云端派生"说错）。新名字过同一套门槛、落点已有东西就拒绝
 /// （不覆盖、也不自动改名 —— 名字由用户自己换）。
 ///
 /// **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive。
@@ -1324,12 +1417,26 @@ pub async fn copy_local_preset(
          * 就把它们当成同一次提交的一部分 —— 失败时把刚写的那份删掉、镜像也撤掉。
          */
         let after = (|| -> Result<(), AppError> {
+            /*
+             * ★ **用户手动「复制」**：新文件要自己说得出「我是从哪一份复制来的」，
+             * 所以母本写进**文件尾部**的来源记录（2026-11-04 裁定：详情页只认文件）。
+             * 只有这一条路写 `mother` —— 软件内部的自动拷贝不捏造母本。
+             */
+            let copied = crate::fsx::paths::resolve_in(&user_root, &done.path)?;
+            let text = std::fs::read_to_string(&copied).map_err(|_| {
+                AppError::internal(messages::text(
+                    "ui.ipc.local.152",
+                    &[("rel", &done.path.to_string())],
+                ))
+            })?;
+            let with_mother = runtime::provenance::duplicate_from_local(&text, &path);
+            crate::fsx::atomic::atomic_write(&copied, with_mother.as_bytes())?;
+
             /* 原文镜像：副本**落盘之后**存一份（副本的"最初那样"= 它诞生那一刻的字节） */
             runtime::baseline::ensure_origin_copy(&internal, &user_root, &done.path)?;
             /*
-             * 来路账：副本从**母本**来的，母本账上有多少格就继承多少格
-             * （源身份 / 云端文件名 / 目录四格 / 云端摘要）；母本没有 ⇒ 副本也没有 ——
-             * 「不知道」一路传下去，比猜一个当前源更诚实。
+             * 来路账（程序自己的运行索引）：仍记一笔，供排查与"我怎么来的"那一格；
+             * 详情页的来源版本 / 发布线只读文件尾部记录，不读这本账。
              */
             let mother = runtime::source_ledger::provenance_of(&internal, &path);
             runtime::source_ledger::record_copy(&internal, &done.path, &path, mother.as_ref())?;
@@ -1368,7 +1475,7 @@ pub struct LocalCopyCalibrationDto {
 /// **这台机型 / 这个版本，「本地那份」在哪**（按归属匹配，盘当底账）。
 ///
 /// 找法（有先后）：**底账正用着的那一份**（origin=local 且归属匹配）> 用户目录里
-/// 第一份匹配的。匹配按**归属**（`# machine:` / `# variant:` 归一化后回落血统，
+/// 第一份匹配的。匹配按**归属**（`# machine:` / `# variant:` 归一化后回落来源记录，
 /// 见 [`owner_of`]）；只有能读的 TOML 预设算数（读不出来的那份即便归属对得上也不能用）。
 ///
 /// 两个消费者**共用这一处口径**：校准页取初值 / 存回（[`get_local_copy_for`]）与
@@ -1458,7 +1565,7 @@ pub async fn get_local_copy_for(
 /// `index/offsets.json` 那个只写不读的孤岛退役）。
 ///
 /// 三个值都从**注册表派生**的位置改（`toolhead.offset.x/y/z` → 对应 TOML 键），
-/// [`crate::presetdata::patch`] 只换那个值 —— 注释、键序、血统三行全程一个字节不动；
+/// [`crate::presetdata::patch`] 只换那个值 —— 注释、键序、来源记录全程一个字节不动；
 /// 写完就是那份工作副本的新内容（原子替换）。
 ///
 /// 只认「本地文件」那一格（[`runtime::local::read_text`] / [`runtime::local::write_text`]
@@ -1663,7 +1770,7 @@ pub async fn set_local_preset_machine_version(
     })
 }
 
-/// 目录里按文件名找一份交付文件（用来给血统写上"来源的落点"）。
+/// 目录里按文件名找一份交付文件（用来给来源记录写上"来源的落点"）。
 /// 读不到目录就 `None` —— 那不该拦住一次保存。
 fn catalog_lookup(
     root: &std::path::Path,

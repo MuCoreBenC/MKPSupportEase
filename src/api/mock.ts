@@ -1,6 +1,15 @@
 import { t } from '../i18n'
 import { NotImplementedError } from './errors'
 
+/**
+ * 演示环境里"已经落过的导出落点"（2026-11-04）。
+ *
+ * 真机上"位置里已经有那一份"是一次真实的 `Path::exists`；假后端没有盘，
+ * 只能记在内存里 —— 同一个落点第二次导出就回一条撞名错，让「重新导出」那条路
+ * 在浏览器里也点得到。刷新页面即清空（演示不 pretending 盘上有东西）。
+ */
+const demoLanded = new Set<string>()
+
 /*
  * **探针用的假后处理快照**（2026-10-18）。
  *
@@ -311,6 +320,8 @@ let mockTheme: ThemePref | null = null
  * 演示里给"开着"——与真机同一个出厂默认（没选过 = 开），别在这里另立一套。
  */
 let mockAutoClean = true
+/** 自动检查软件更新（2026-11-05）：出厂 = 开，与真机 app_state 同一档 */
+let mockAutoCheckUpdate = true
 
 /** 后处理偏好（2026-10-17）：内存镜像，形状就是盘上那一格 */
 let mockPostproc: PostprocPrefsWire = {}
@@ -320,6 +331,12 @@ let mockPostproc: PostprocPrefsWire = {}
  * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.copiesFollowCloud`）。
  */
 let mockCopiesFollowCloud = false
+
+/*
+ * 「使用之后自动复制后处理脚本」那一档（2026-11-01）：内存镜像，出厂 = 关
+ * （真数据在 Rust 侧 `run/app-state.json` 的 `presets.autoCopyScript`）。
+ */
+let mockAutoCopyScript = false
 
 /*
  * **出处账**（2026-10-20）：真机那一本在用户根 `provenance.json`（`runtime::provenance`），
@@ -354,17 +371,17 @@ let mockPinBeforeCompact: PinPref | null = null
  * 照实留空，不在演示数据里编一个 `github#…` 出来（那会让人以为判据在跑）。
  */
 const MOCK_FACTS: BasedOnFacts = {
-  lineageKind: null,
-  lineageSource: null,
-  lineageRelease: null,
-  lineagePublishedAt: null,
-  lineageSha256: null,
+  sourceKind: null,
+  sourceRef: null,
+  sourceRelease: null,
+  sourceVersionAt: null,
+  sourceSha256: null,
   cloudSource: null,
   cloudPublishedAt: null,
   cloudSha256: null,
   /* 发布线 / 序号：演示数据里也没有真目录身份 —— 照样留空（老目录那种"说不清"） */
-  lineageCatalog: null,
-  lineageSerial: null,
+  sourceCatalog: null,
+  sourceSerial: null,
   cloudCatalog: null,
   cloudSerial: null,
   unverifiedReason: null,
@@ -373,14 +390,14 @@ const MOCK_FACTS: BasedOnFacts = {
 /** 演示里的"从 main 下载"那一档：源身份 + 对应版本的发布时间都定格在下载那一刻 */
 const MOCK_DOWNLOAD_FACTS: BasedOnFacts = {
   ...MOCK_FACTS,
-  lineageKind: 'download',
-  lineageSource: 'github#MuCoreBenC/MKPSupportEase@main',
-  lineagePublishedAt: '2026-10-15T05:46:00Z',
-  lineageSha256: 'a2'.padEnd(64, '0'),
+  sourceKind: 'download',
+  sourceRef: 'github#MuCoreBenC/MKPSupportEase@main',
+  sourceVersionAt: '2026-10-15T05:46:00Z',
+  sourceSha256: 'a2'.padEnd(64, '0'),
   cloudSource: 'github#MuCoreBenC/MKPSupportEase@main',
   cloudPublishedAt: '2026-10-15T05:46:00Z',
-  lineageCatalog: 'support-ease',
-  lineageSerial: 1,
+  sourceCatalog: 'support-ease',
+  sourceSerial: 1,
   cloudCatalog: 'support-ease',
   cloudSerial: 1,
 }
@@ -391,18 +408,18 @@ const mockLocal: LocalPresetFile[] = [
    *
    * 改动前这里是一批**与目录毫无关系**的名字（`A1 涂胶.toml` 之类），而云端表列的是
    * `A1-standard.toml` / `A1-fast.toml` —— 于是浏览器演示里"我下过的那份"与"云端那一份"
-   * 看不出是同一份，血统还写着早就过时的 `delivery/mkp/presets/…`。
+   * 看不出是同一份，来源记录还写着早就过时的 `delivery/mkp/presets/…`。
    *
-   * 现在：本地表 = 目录那 9 份的**一份镜像**（名字 / 机型 / 版本 / 血统与目录逐条对上），
+   * 现在：本地表 = 目录那 9 份的**一份镜像**（名字 / 机型 / 版本 / 来源记录与目录逐条对上），
    * 外加两份**用户自己造的**（`A1 涂胶.toml` = 另存改名、`Process_0.2mm.json` = 手工导入的
    * 认不出类别的那份）—— 镜像的那几份才是"云端下载来的"，那两份才是"我自己的"。
    *
-   * 为什么"照铺"而不是"只改血统"：真机上 `presets-local/` 里**确实**躺着下载来的那几份
+   * 为什么"照铺"而不是"只改来源记录"：真机上 `presets-local/` 里**确实**躺着下载来的那几份
    * （下载 / 另存都落在这一格），演示要与真机同形 —— 数字（云端 9 · 本地 N）也才对得上。
    */
   {
     /*
-     * 云端那份下载到本机（血统 = 它自己那一版，`current`）。
+     * 云端那份下载到本机（来源记录 = 它自己那一版，`current`）。
      * 这条是所有后续操作的基准：参数页 / 校准页都从它读。
      */
     path: 'presets-local/A1-standard.toml',
@@ -453,7 +470,7 @@ const mockLocal: LocalPresetFile[] = [
   },
   {
     /*
-     * 用户自己那一份：**从 `A1-fast.toml` 另存改名的**（血统指向目录里真有的那份，
+     * 用户自己那一份：**从 `A1-fast.toml` 另存改名的**（来源记录指向目录里真有的那份，
      * 名字是用户自己起的）—— 演示"另存为一份新的"之后长什么样。
      */
     path: 'presets-local/A1 涂胶.toml',
@@ -543,7 +560,7 @@ const mockRemarks = new Map<string, string>()
 
 /**
  * 改文件头的 `# machine:` / `# variant:` 两行（假后端版，与 Rust
- * `lineage::rewrite_machine_variant` 同一套规矩：原位换值，缺哪行补哪行，
+ * `provenance::rewrite_machine_variant` 同一套规矩：原位换值，缺哪行补哪行，
  * 正文一个字节不动）。
  */
 function rewriteMockMachineVariant(text: string, machineId: string, versionId: string): string {
@@ -720,72 +737,138 @@ const MOCK_PRESET_TEXT =
     '',
   ].join('\n')
 
-/** 假后端给"导入进来的那份"种的演示正文：**没有血统** —— 外部文件没有 based_on，也不编造 */
+/** 假后端给"导入进来的那份"种的演示正文：**没有来源记录** —— 外部文件没有来源记录，也不编造 */
 const MOCK_IMPORTED_TEXT = '# 从外部导进来的（假后端演示正文）\n"涂胶宽度" = 1.0\n'
 
 /*
- * 三行血统（真机上由 `runtime::lineage` 管：另存时写、写回时照抄）。
- * 假后端没有那一套，只做**文本形状上的同一件事**：编辑器里给正文、保存时把原来那三行抄回去。
+ * 来源记录（真机上由 `runtime::provenance` 管：另存时写 origin、合并时追加 history）。
+ * 假后端没有那一套，只做**文本形状上的同一件事**：记录住在**文件尾部**、形状是
+ * `[mkp_source]` 表 —— 正文里一个字都不掺。
  */
-const lineageLinesOf = (text: string) =>
-  text.split('\n').filter((line) => line.startsWith('# based_on'))
-const withoutLineage = (text: string) =>
-  text.split('\n').filter((line) => !line.startsWith('# based_on')).join('\n')
+const ORIGIN_HEADER = '# ===== 来源记录（程序维护；用户编辑不会改动它） ====='
 
-/* 演示那份 `.toml` 种一份正文（带血统，与它条目里 `basedOnLabel` 说的那份对上）。
+/** 从全文里切出尾部那段记录（`[mkp_source]` 起、到文末） */
+const provenanceBlockOf = (text: string): string => {
+  const at = text.indexOf(ORIGIN_HEADER)
+  return at < 0 ? '' : text.slice(at).replace(/\n+$/, '')
+}
+/** 只留正文（剥掉尾部记录），与真机 `preset::provenance::strip` 同义 */
+const withoutProvenance = (text: string): string => {
+  const at = text.indexOf(ORIGIN_HEADER)
+  const body = at < 0 ? text : text.slice(0, at)
+  return body.replace(/\n+$/, '')
+}
+/** 正文 + 尾部记录（记录为空 ⇒ 只有正文） */
+const withProvenance = (body: string, block: string): string =>
+  block === '' ? body : `${body.replace(/\n+$/, '')}\n\n${block}\n`
+
+/** 一条来源身份渲染成 TOML 行（缩进留着，好读） */
+const sourceRefLines = (
+  indent: string,
+  r: { file?: string; platform?: string; repo?: string; branch?: string; at?: string; sha256?: string },
+): string[] =>
+  [
+    `${indent}file = ${JSON.stringify(r.file ?? '')}`,
+    `${indent}platform = ${JSON.stringify(r.platform ?? 'github')}`,
+    `${indent}repo = ${JSON.stringify(r.repo ?? 'mock/mkpsupportease')}`,
+    `${indent}branch = ${JSON.stringify(r.branch ?? 'main')}`,
+    `${indent}at = ${JSON.stringify(r.at ?? '')}`,
+    `${indent}sha256 = ${JSON.stringify(r.sha256 ?? '')}`,
+  ].filter((line) => !line.endsWith(': ""'))
+
+/** 尾部记录：origin（我从哪来）+ history（接受过哪几版，可空） */
+const provenanceBlock = (
+  r: { file?: string; platform?: string; repo?: string; branch?: string; at?: string; sha256?: string },
+  history: string[] = [],
+): string =>
+  [
+    ORIGIN_HEADER,
+    '[mkp_source]',
+    'schema = 1',
+    '',
+    '[mkp_source.origin]',
+    'kind = "download"',
+    ...sourceRefLines('', r),
+    ...history.flatMap((h) => ['', '[[mkp_source.history]]', ...sourceRefLines('', h ? { at: h } : {})]),
+  ].join('\n')
+
+/* 演示那份 `.toml` 种一份正文（带来源记录，与它条目里 `basedOnLabel` 说的那份对上）。
    键带引号是因为它得**真的是 TOML** —— 它那条 state 说 `ok`，演示也要自洽 */
-/* 血统那几行的落点写**真实目录形状**（`delivery/mkp/presets/…`），与 catalog 的 path 同形 ——
+/* 来源记录那几行的落点写**真实目录形状**（`delivery/mkp/presets/…`），与 catalog 的 path 同形 ——
    老板本写的是 `delivery/mkp/presets/…`（那是更早一代的发布根） */
 mockLocalText.set(
   'presets-local/A1-standard.toml',
-  [
-    '# 云端那份下载到本机（假后端演示正文）',
-    '# machine: A1',
-    '# variant: standard',
-    '# based_on: delivery/mkp/presets/A1-standard.toml',
-    '# based_on_release_time: 2026-10-05 08:00:00',
-    `# based_on_sha256: ${'0'.repeat(64)}`,
-    /* 键用**注册表里的真名字**（`[toolhead]` + `offset_y`）：对比台按注册表认参数，
-       编一套假键的话那一列会全是"—"，等于把要验的东西绕开了 */
-    '[toolhead]',
-    'offset_y = 20.0 # 笔尖偏移',
-    'speed_limit = 60 # 涂胶速度限制 (mm/s)',
-    '',
-  ].join('\n'),
+  withProvenance(
+    [
+      '# 云端那份下载到本机（假后端演示正文）',
+      '# machine: A1',
+      '# variant: standard',
+      /* 键用**注册表里的真名字**（`[toolhead]` + `offset_y`）：对比台按注册表认参数，
+         编一套假键的话那一列会全是"—"，等于把要验的东西绕开了 */
+      '[toolhead]',
+      'offset_y = 20.0 # 笔尖偏移',
+      'speed_limit = 60 # 涂胶速度限制 (mm/s)',
+      '',
+    ].join('\n'),
+    provenanceBlock(
+      {
+        file: 'delivery/mkp/presets/A1-standard.toml',
+        at: '2026-10-05T08:00:00Z',
+        sha256: '0'.repeat(64),
+      },
+      ['2026-10-05T08:00:00Z'],
+    ),
+  ),
 )
 mockLocalText.set(
   'presets-local/A1-fast.toml',
-  [
-    '# 云端新版落下来的那一份（假后端演示正文）',
-    '# machine: A1',
-    '# variant: fast',
-    '# based_on: delivery/mkp/presets/A1-fast.toml',
-    '# based_on_release_time: 2026-10-15 09:00:00',
-    `# based_on_sha256: ${'1'.repeat(64)}`,
-    '[toolhead]',
-    'offset_y = 26.8 # 笔尖偏移',
-    'speed_limit = 70 # 涂胶速度限制 (mm/s)',
-    '',
-  ].join('\n'),
+  withProvenance(
+    [
+      '# 云端新版落下来的那一份（假后端演示正文）',
+      '# machine: A1',
+      '# variant: fast',
+      '[toolhead]',
+      'offset_y = 26.8 # 笔尖偏移',
+      'speed_limit = 70 # 涂胶速度限制 (mm/s)',
+      '',
+    ].join('\n'),
+    provenanceBlock(
+      {
+        file: 'delivery/mkp/presets/A1-fast.toml',
+        at: '2026-10-15T09:00:00Z',
+        sha256: '1'.repeat(64),
+      },
+      ['2026-10-15T09:00:00Z'],
+    ),
+  ),
 )
-/* 用户从 `A1-fast.toml` 另存改名出来的那一份：血统照抄来源，名字是用户起的 */
+/* 用户从 `A1-fast.toml` 另存改名出来的那一份：来源记录照抄来源，名字是用户起的 */
 mockLocalText.set(
   'presets-local/A1 涂胶.toml',
-  [
-    '# 我另存出来的一份（假后端演示正文）',
-    '# machine: A1',
-    '# variant: fast',
-    '# based_on: delivery/mkp/presets/A1-fast.toml',
-    '# based_on_release_time: 2026-05-29 04:26:12',
-    /* ★ 基于**旧版**那一档（`SHA_BASED_OLD`）：云端当前版（基准那版改过两项）比它新 ——
-       于是这一份真的挂两条待处理（上面「真有两条待处理」那一句就是它），
-       演示里才能看见「选择要更新的参数」那一屏 */
-    `# based_on_sha256: ${'0'.repeat(64)}`,
-    '[toolhead]',
-    'offset_y = 22.4 # 笔尖偏移',
-    'speed_limit = 64 # 涂胶速度限制 (mm/s)',
-    '',
-  ].join('\n'),
+  withProvenance(
+    [
+      '# 我另存出来的一份（假后端演示正文）',
+      '# machine: A1',
+      '# variant: fast',
+      /* ★ 来源版本是**旧版**那一档（`SHA_BASED_OLD`）：云端当前版（基准那版改过两项）比它新 ——
+         于是这一份真的挂两条待处理（上面「真有两条待处理」那一句就是它），
+         演示里才能看见「选择要更新的参数」那一屏。 */
+      '[toolhead]',
+      'offset_y = 22.4 # 笔尖偏移',
+      'speed_limit = 64 # 涂胶速度限制 (mm/s)',
+      '',
+    ].join('\n'),
+    /* 另存件：`kind = "duplicate"` + `mother` 指向母本；履历是**母本那一刻的快照**，
+       另存本身**不新增**履历（2026-11-04 裁定） */
+    provenanceBlock(
+      {
+        file: 'delivery/mkp/presets/A1-fast.toml',
+        at: '2026-05-29T04:26:12Z',
+        sha256: '0'.repeat(64),
+      },
+      ['2026-05-29T04:26:12Z'],
+    ).replace('kind = "download"', 'kind = "duplicate"\nmother = "presets-local/A1-fast.toml"'),
+  ),
 )
 /* 坏了那份也种一份正文：**看正文照旧读得出来**（用户要能看着它去修）——
    只有「应用 / 改这份」被拦（真机上是后端的文件级检查拦的） */
@@ -837,7 +920,7 @@ const mockRecoveryOrigins = new Map<string, string>()
  * `offset_y` 18.6→19.0）—— 于是演示那份 `A1 涂胶.toml` 真有两条待处理。
  */
 
-/** 与演示正文里那两行 `# based_on_sha256` 对上（`A1 涂胶.toml` / `…-2026-10-15.toml`） */
+/** 与演示正文尾部记录里那几个 `sha256` 对上（`A1 涂胶.toml` / `…-2026-10-15.toml`） */
 const SHA_BASED_OLD = '0'.repeat(64)
 const SHA_BASED_NEW = '1'.repeat(64)
 
@@ -871,7 +954,27 @@ const mockParamDecisions = new Map<
   Map<string, { sha256: string; kind: ParamDecisionKind }>
 >()
 
-/** 文件头 `# <key>: <值>`（与真机 `runtime::lineage` 同一条解析规矩：键后必须是冒号） */
+/** 尾部来源记录里的某一格（origin / 履历末条），与真机 `preset::provenance` 同一份解析口径 */
+function mockSourceField(text: string, key: string): string | null {
+  const block = provenanceBlockOf(text)
+  if (block === '') return null
+  const all = [...block.matchAll(new RegExp(`^${key}\\s*=\\s*"(.*)"$`, 'gm'))]
+  /* 履历末条优先（`file` / `sha256` / `at` 三格在 origin 与 history 里同名） */
+  const hit = all.length > 0 ? all[all.length - 1] : null
+  if (hit === null) {
+    const num = new RegExp(`^${key}\\s*=\\s*(\\d+)$`, 'm').exec(block)
+    return num === null ? null : num[1]!
+  }
+  const v = hit[1]!.trim()
+  return v === '' ? null : v
+}
+
+/** 这一版云端的发布时刻（演示里就是那一版登记的时间；**不是**文件的写盘时间） */
+function mockCloudPublishedAt(): string {
+  return '2026-10-20T02:15:00Z'
+}
+
+/** 文件头 `# <key>: <值>`（与真机 `runtime::provenance` 同一条解析规矩：键后必须是冒号） */
 function mockHeaderOf(text: string, key: string): string | null {
   const re = new RegExp(`^#\\s*${key}\\s*:\\s*(.+)$`)
   for (const line of text.split('\n')) {
@@ -889,10 +992,10 @@ function mockSyncOf(path: string): PresetParamSync {
   const text = mockLocalText.get(path)
   if (text === undefined) throw new Error(t('mock.err.notFound', { path }))
   const fileName = path.split('/').pop() ?? path
-  const basedOn = mockHeaderOf(text, 'based_on')
+  const basedOn = mockSourceField(text, 'file')
   const cloudFileName = basedOn === null ? null : (basedOn.split('/').pop() ?? null)
   const current = cloudFileName === null ? undefined : mockParamCurrent.get(cloudFileName)
-  const basedSha = mockHeaderOf(text, 'based_on_sha256')
+  const basedSha = mockSourceField(text, 'sha256')
   const localValues = readMockParams(text)
   const currentValues = current === undefined ? undefined : readMockParams(current.text)
   const book = mockParamDecisions.get(path)
@@ -913,6 +1016,8 @@ function mockSyncOf(path: string): PresetParamSync {
       local: localValue,
       baselineOld: old ?? null,
       cloudNew: neu ?? null,
+      /* mock 不做「上次云端」的滚动记账，和旧档一样走 baselineOld 回退 */
+      origin: null,
       pending,
       /* 冲突：云端改过它、**我也改过它**，两边的值还不一样（与 Rust 同一式子） */
       conflict:
@@ -935,8 +1040,10 @@ function mockSyncOf(path: string): PresetParamSync {
     machineId: mockHeaderOf(text, 'machine'),
     versionId: mockHeaderOf(text, 'variant'),
     cloudFileName,
-    basedOnReleaseTime: mockHeaderOf(text, 'based_on_release_time'),
-    currentReleaseTime: current === undefined ? null : mockHeaderOf(current.text, 'release_time'),
+    /* 「我这份来源版本」= 尾部记录里履历末条的时间；「云端当前版」= 目录发布时刻。
+       两者都不读文件头 `# release_time`（那是配方自己的标记） */
+    basedOnReleaseTime: mockSourceField(text, 'at'),
+    currentReleaseTime: current === undefined ? null : mockCloudPublishedAt(),
     cloudReady: current !== undefined,
     versionAdvanced: basedSha !== null && current !== undefined && basedSha !== current.sha256,
     pendingCount,
@@ -977,7 +1084,7 @@ const mockPresetFile = (fileName: string) =>
 
 /**
  * 改演示正文里的三轴偏移（真机上是 `presetdata::patch` 按注册表定位：只换那个值，
- * 注释、键序、血统三行一个字节不动）。行尾注释保留。
+ * 注释、键序、来源记录一个字节不动）。行尾注释保留。
  */
 const patchMockOffsets = (text: string, axes: Axes): string =>
   text
@@ -1579,12 +1686,12 @@ export const mockApi: MkpApi = {
           t('mock.preview.cannotEditBody', { file: rel }),
         )
       }
-      /* 编辑器里给的是正文：那三行血统是程序的元数据，不是用户该改的内容 */
+      /* 编辑器里给的是正文：那三行来源记录是程序的元数据，不是用户该改的内容 */
       mockDraft = {
         origin,
         sourceFileName: fileName,
         path: rel,
-        text: withoutLineage(raw),
+        text: withoutProvenance(raw),
         updatedUnix: nowSec(),
       }
       return { ...mockDraft, reused: false }
@@ -1637,7 +1744,7 @@ export const mockApi: MkpApi = {
     const base =
       mockDraft.origin === 'preset'
         ? MOCK_PRESET_TEXT
-        : withoutLineage(mockLocalText.get(mockDraft.path ?? '') ?? '')
+        : withoutProvenance(mockLocalText.get(mockDraft.path ?? '') ?? '')
     const before = readMockParams(base)
     const out: Record<string, string> = {}
     for (const [key, value] of Object.entries(readMockParams(mockDraft.text))) {
@@ -1705,7 +1812,7 @@ export const mockApi: MkpApi = {
 
     /*
      * 用户线（第八层）：**写回它自己** —— 同一个路径、同一份文件，不产生第二份；
-     * 血统**照抄原来那三行**（出处没变）。与 Rust 侧 `local::save_back` 同一件事。
+     * 来源记录**照抄原来那一段**（出处没变）。与 Rust 侧 `local::save_back` 同一件事。
      */
     if (mockDraft.origin === 'local') {
       const rel = mockDraft.path ?? ''
@@ -1716,7 +1823,7 @@ export const mockApi: MkpApi = {
           t('mock.preview.cannotWriteBody', { file: rel }),
         )
       }
-      const text = [...lineageLinesOf(old), withoutLineage(mockDraft.text)].join('\n')
+      const text = withProvenance(withoutProvenance(mockDraft.text), provenanceBlockOf(old))
       const fileName = rel.slice(rel.lastIndexOf('/') + 1)
       const at = mockLocal.findIndex((f) => f.path === rel)
       if (at >= 0) mockLocal[at] = { ...mockLocal[at], size: text.length, modifiedUnix: nowSec() }
@@ -1727,9 +1834,13 @@ export const mockApi: MkpApi = {
 
     const fileName = mockDraft.sourceFileName.replace(/\.toml$/i, '（已修改）.toml')
     const path = `presets-local/${fileName}`
-    /* 与真机同形：写下去的正文 = 草稿 + 文件头三行血统（真机上那三行由 `lineage::make_copy` 生成） */
+    /* 与真机同形：写下去的 = 草稿正文 + 尾部来源记录。
+       另存**只写 origin、不写履历**（真机 `preset::provenance::write_origin_only`） */
     const label = `delivery/mkp/presets/${mockDraft.sourceFileName}`
-    const text = `# based_on: ${label}\n# based_on_sha256: ${'0'.repeat(64)}\n${mockDraft.text}`
+    const text = withProvenance(
+      withoutProvenance(mockDraft.text),
+      provenanceBlock({ file: label, sha256: '0'.repeat(64) }),
+    )
     const size = text.length
     const replaced = mockLocal.some((f) => f.path === path)
     const entry: LocalPresetFile = {
@@ -1751,7 +1862,7 @@ export const mockApi: MkpApi = {
       /* 归属与来源那份一致（正文头里也是这两行） */
       machineId: 'A1',
       versionId: 'STANDARD',
-      /* 云端另存出来的：出处走 based_on 血统（界面上显示"复制自云端 X"），账本不重复记 */
+      /* 云端另存出来的：出处走尾部来源记录（界面上显示"复制自云端 X"），账本不重复记 */
       provenanceKind: null,
       originPath: null,
       originName: null,
@@ -1786,23 +1897,29 @@ export const mockApi: MkpApi = {
     /*
      * 「真改过才算」的比法**与真机同一口径**（`ipc/local.rs` 的 `get_preset_draft_summary`）：
      *
-     *   用户线：草稿正文 vs **去掉血统三行之后**的盘上正文。
-     *     ★ 直接拿盘上那份（带着 `# based_on…`）去比会**恒判脏** —— `beginPresetEdit`
-     *       给编辑器的就是去血统的正文（`withoutLineage`，与真机 `strip_lineage_lines` 同义），
+     *   用户线：草稿正文 vs **去掉来源记录之后**的盘上正文。
+     *     ★ 直接拿盘上那份（带着尾部 `[mkp_source]`）去比会**恒判脏** —— `beginPresetEdit`
+     *       给编辑器的就是去来源记录的正文（`withoutLineage`，与真机 `strip_for_compare` 同义），
      *       于是"只打开过、一个字没改"也会报未保存，行上那枚橙点当场误亮
      *       （2026-10-19 探针 `params-draft-dot.mjs` 抓到的就是这个）。
      *   云端线：草稿正文 vs 云端原件字节。
      */
-    const clean =
+    const base =
       mockDraft.origin === 'preset'
-        ? mockDraft.text === MOCK_PRESET_TEXT
-        : withoutLineage(mockLocalText.get(mockDraft.path ?? '') ?? '') === mockDraft.text
+        ? MOCK_PRESET_TEXT
+        : withoutProvenance(mockLocalText.get(mockDraft.path ?? '') ?? '')
+    const clean = base === mockDraft.text
+    /* 参数级改动处数（与真机 `draft_changes` 同一口径：值不同才算） */
+    const before = readMockParams(base)
+    const after = readMockParams(mockDraft.text)
+    const changed = Object.keys(after).filter((k) => before[k] !== after[k]).length
     return {
       origin: mockDraft.origin,
       sourceFileName: mockDraft.sourceFileName,
       path: mockDraft.path,
       /* 比不出来（演示里读不到这一份）时保守算脏 */
       dirty: !clean,
+      changed: clean ? 0 : Math.max(1, changed),
       updatedUnix: mockDraft.updatedUnix,
     }
   },
@@ -1831,7 +1948,7 @@ export const mockApi: MkpApi = {
         t('mock.preview.cannotEditBody', { file: path }),
       )
     }
-    /* 编辑器里这份**带着它自己的血统三行**（在这一份上有效，保存时照写回） */
+    /* 编辑器里这份**带着它自己的来源记录**（在这一份上有效，保存时照写回） */
     mockTextDraft = { fileName, path, text: raw, updatedUnix: nowSec() }
     /* 新建的草稿 = 盘上字节本身，不脏；浏览器里没有 TOML 解析器 ⇒ problem / missing 恒空 */
     return { ...mockTextDraft, reused: false, dirty: false, problem: null, missing: [], changed: [] }
@@ -1870,12 +1987,12 @@ export const mockApi: MkpApi = {
   },
 
   /**
-   * **身份账本**（派生视图）：只给**血统还指着目录里活着的那一版**的那几份 ——
+   * **身份账本**（派生视图）：只给**来源记录还指着目录里活着的那一版**的那几份 ——
    * 与后端同一条口径（不用持久化账本，"盘就是底账"）。
    */
   async getLocalPresetIndex() {
     return mockLocal
-      /* 只有**血统还指着目录里活着的那一版**的那几份才进账 */
+      /* 只有**来源记录还指着目录里活着的那一版**的那几份才进账 */
       .filter((f) => f.basedOn === 'current' || f.basedOn === 'outdated')
       /* 复制出来的那一份不认领（开关开着时才让它进 —— 与真机同一道闸） */
       .filter((f) => mockCopiesFollowCloud || !mockCopyTargets.has(f.path))
@@ -1939,7 +2056,7 @@ export const mockApi: MkpApi = {
 
   /*
    * 第十一层：另存为一份新的（本地文件 → 本地文件）。与真机同一套规矩：
-   * **字节复制**（正文与血统原样带过去）→ 新的一份从诞生起就是独立的；
+   * **字节复制**（正文与来源记录原样带过去）→ 新的一份从诞生起就是独立的；
    * 名字由用户自己起（不自动改名）：和原来一样 / 已存在同名都拒；
    * **一个状态都不碰** —— 使用中指针与草稿都还留在原来那份上。
    */
@@ -1982,8 +2099,8 @@ export const mockApi: MkpApi = {
 
   /*
    * 这台机型 / 这个版本，「本地那份」在哪（校准页：初值从它读、保存写它）。
-   * 与真机同一套匹配（归属优先、回落血统）—— 演示数据里 `A1 涂胶.toml` 就是
-   * 血统指向 `A1-fast` 的那一份，所以选 A1/快拆版能读到它。
+   * 与真机同一套匹配（归属优先、回落来源记录）—— 演示数据里 `A1 涂胶.toml` 就是
+   * 来源记录指向 `A1-fast` 的那一份，所以选 A1/快拆版能读到它。
    */
   async getLocalCopyFor(machineId, versionId) {
     const owned = (f: LocalPresetFile) =>
@@ -2315,8 +2432,29 @@ export const mockApi: MkpApi = {
    * 「已导出」）。真机上这一步是 [`crate::ipc::report::export_report_archive`] 的真复制，
    * 拒绝规则（不覆盖 / 不许指到归档自己）也都在那一侧。
    */
-  async exportReportArchive(id, dir) {
-    return reportExportPaths(id, dir)
+  /**
+   * 演示导出。假后端没有文件系统，但**撞名这一条要能演**（2026-11-04）：
+   * 同一个落点第二次导出时回一条带 `E_REPORT_EXPORT_EXISTS_001` 的错，
+   * 界面上「重新导出」那条路才点得到；`overwrite = true` 时放行。
+   *
+   * 记的是"这次会话里已经落过的落点"（模块级 Set）：刷新页面就清空 —— 演示环境
+   * 里没有必要 pretending 盘上有东西。
+   */
+  async exportReportArchive(id, dir, compress, overwrite) {
+    const paths = reportExportPaths(id, dir, compress)
+    const at = paths[0] ?? ''
+    if (!overwrite && demoLanded.has(at)) {
+      const name = at.split('/').pop() ?? at
+      return Promise.reject({
+        code: 'INVALID_ARGUMENT',
+        /* 句子住字典（假后端也不写死中文），码挂在末尾 —— 与真机 `AppError::text` 同一个形状 */
+        message: t('mock.report.exists', { name, code: 'E_REPORT_EXPORT_EXISTS_001' }),
+        messageCode: 'E_REPORT_EXPORT_EXISTS_001',
+        traceId: '-',
+      })
+    }
+    demoLanded.add(at)
+    return paths
   },
 
   /**
@@ -2327,6 +2465,15 @@ export const mockApi: MkpApi = {
     throw new Error(
       t('mock.reveal.folder', { dir: dir + '\\<基名>\\' }),
     )
+  },
+
+  /**
+   * 信息页那颗「定位」（归档里那一份）。同上：假后端没有文件系统，
+   * **照实说它在真机上会选中哪一份** —— 不假装打开了文件管理器。
+   */
+  async revealReportSource(id, kind) {
+    const file = reportExportPlan(id).files.find((f) => f.kind === kind)
+    throw new Error(t('mock.reveal.finder', { path: file?.path ?? '' }))
   },
 
   /**
@@ -2612,6 +2759,16 @@ export const mockApi: MkpApi = {
     return mockAutoClean
   },
 
+  /* 自动检查软件更新（2026-11-05）：与自动清理同一套口径 —— 内存镜像、回解析后的 boolean */
+  async getAutoCheckUpdate() {
+    return mockAutoCheckUpdate
+  },
+
+  async setAutoCheckUpdate(enabled) {
+    mockAutoCheckUpdate = enabled
+    return mockAutoCheckUpdate
+  },
+
   /*
    * 「复制出来的也跟着云端更新」（2026-10-20）：与自动清理同一套口径 —— 内存镜像，
    * 回解析后的 boolean。演示里照抄真机的出厂档（关）。
@@ -2623,6 +2780,23 @@ export const mockApi: MkpApi = {
   async setCopiesFollowCloud(enabled) {
     mockCopiesFollowCloud = enabled
     return mockCopiesFollowCloud
+  },
+
+  /*
+   * 「使用之后自动复制后处理脚本」（2026-11-01）：与上面那条同一套口径 ——
+   * 内存镜像、回解析后的 boolean、出厂 = 关。
+   *
+   * ★ 浏览器里它**真的会生效**（换「使用中」之后抄脚本那条链是前端的），
+   *   但 preview 里没有本机可执行物与预设文件，`getPostProcessCommand` 会照实
+   *   回 "抄不了" —— 与真机上"没下载就应用"同一条路，不假装抄到了。
+   */
+  async getAutoCopyScript() {
+    return mockAutoCopyScript
+  },
+
+  async setAutoCopyScript(enabled) {
+    mockAutoCopyScript = enabled
+    return mockAutoCopyScript
   },
 
   /*
@@ -2642,7 +2816,7 @@ export const mockApi: MkpApi = {
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,
       bedGlueAllModels: mockPostproc.bedGlueAllModels ?? false,
-      autoTowerPosition: mockPostproc.autoTowerPosition ?? false,
+      autoTowerPosition: mockPostproc.autoTowerPosition ?? 'ask',
     }
     return {
       raw: mockPostproc,
@@ -2666,19 +2840,25 @@ export const mockApi: MkpApi = {
   },
 
   /*
-   * 应用本体那两条（2026-10-17）。
+   * 应用本体那三条（2026-10-17 两条 / 2026-11-01 加「清理数据」）。
    *
    * `openPresetFolder` 给一个**像样的假路径**：这一行要显示"东西放哪"，
    * 空字符串会让界面画出一个没有意义的空行。
    *
-   * `uninstall` **不许在浏览器里演成功** —— 那是不可逆动作，在预览里"假装卸掉了"
-   * 比报错更糟（用户会以为真卸了）。照实抛 `NotImplementedError`。
+   * `clearAppData` 与 `uninstall` **都不许在浏览器里演成功** —— 那是不可逆动作，
+   * 在预览里"假装清掉了 / 卸掉了"比报错更糟（用户会以为真清了）。
+   * 照实抛 `NotImplementedError`。
    */
   async openPresetFolder() {
     return '/Users/you/Library/Application Support/MKPSupportEase/presets-local'
   },
 
-  async uninstall() {
+  async clearAppData() {
+    throw new NotImplementedError(t('mock.preview.noClearData'))
+  },
+
+  async uninstall(cleanData: boolean) {
+    void cleanData
     throw new NotImplementedError(t('mock.preview.noUninstall'))
   },
 
@@ -2787,7 +2967,7 @@ export const mockApi: MkpApi = {
     /*
      * 与真机同一条写规矩（2026-10-20）：**以云端当前版正文为骨架**重写这一份 ——
      * 注释 / 时间戳 / 云端新增的字段跟着新版进来，值按决定填（采用 = 云端新值，
-     * 其余 = 我这份现在写着的值）。于是"应用 0 项"也真写：值一个不动，血统推进。
+     * 其余 = 我这份现在写着的值）。于是"应用 0 项"也真写：值一个不动，来源记录推进。
      */
     const kinds = new Map<string, ParamDecisionKind>()
     const book = mockParamDecisions.get(path) ?? new Map()
@@ -2814,25 +2994,44 @@ export const mockApi: MkpApi = {
       skeleton = patchMockParam(skeleton, def, want)
     }
     /*
-     * 血统：这一批之后**还有落下的待处理项**就不推（那几项还得挂着）；
+     * 来源记录：这一批之后**还有落下的待处理项**就不推（那几项还得挂着）；
      * 都处理了（包括"一项都没有"）⇒ 出处换成云端当前版，「有新版」收场。
      */
     const remaining = before.entries.filter((e) => e.pending && !kinds.has(e.key)).length
-    const lineage =
+    /*
+     * 整份接受这一版 ⇒ **追加一条履历**（真机 `apply_at` 那支）。
+     * 履历的时间是**这一版云端发布时刻**；`generated_at` / mtime 一律不拿来顶。
+     * 部分更新（还剩待处理项）⇒ 记录原样保留，序号不前进。
+     */
+    const block =
       remaining === 0
-        ? [
-            `# based_on: delivery/mkp/presets/${before.cloudFileName ?? ''}`,
-            `# based_on_release_time: ${mockHeaderOf(current.text, 'release_time') ?? ''}`,
-            `# based_on_sha256: ${current.sha256}`,
-          ].filter((line) => !line.endsWith(': '))
-        : lineageLinesOf(text)
-    const next = [...lineage, withoutLineage(skeleton)].join('\n')
+        ? ((): string => {
+            const prev = provenanceBlockOf(text)
+            const historyEntry = provenanceBlock(
+              {
+                file: `delivery/mkp/presets/${before.cloudFileName ?? ''}`,
+                at: mockCloudPublishedAt(),
+                sha256: current.sha256,
+              },
+              [mockCloudPublishedAt()],
+            )
+              .split('\n')
+              .filter((line) => line.startsWith('[[mkp_source.history]]') || line.startsWith('at =') || line.startsWith('sha256 =') || line.startsWith('file ='))
+              .filter((line) => !line.startsWith('[[mkp_source.history]]'))
+              .join('\n')
+            /* 同一版重复合并不重复记：末条摘要相同就原样保留 */
+            return prev.includes(`sha256 = "${current.sha256}"`)
+              ? prev
+              : `${prev}\n[[mkp_source.history]]\n${historyEntry}`
+          })()
+        : provenanceBlockOf(text)
+    const next = withProvenance(skeleton, block)
     const at = mockLocal.findIndex((f) => f.path === path)
     if (next !== text) {
       mockLocalText.set(path, next)
       if (at >= 0) mockLocal[at] = { ...mockLocal[at]!, size: next.length, modifiedUnix: nowSec() }
     }
-    /* 清单上那一格「基于哪一版」跟着走（真机上它就是从文件头血统算出来的） */
+    /* 清单上那一格「基于哪一版」跟着走（真机上它就是从文件头来源记录算出来的） */
     if (at >= 0 && remaining === 0) {
       mockLocal[at] = {
         ...mockLocal[at]!,
@@ -2989,14 +3188,14 @@ export const mockApi: MkpApi = {
     const created = existing === undefined
     if (created) {
       const label = `delivery/mkp/presets/${fileName}`
-      const text = [
-        `# machine: ${hit.machineId}`,
-        `# variant: ${hit.versionId.toLowerCase()}`,
-        `# based_on: ${label}`,
-        `# based_on_release_time: 2026-10-06 03:34:17`,
-        `# based_on_sha256: ${'0'.repeat(64)}`,
-        MOCK_PRESET_TEXT,
-      ].join('\n')
+      const text = withProvenance(
+        [
+          `# machine: ${hit.machineId}`,
+          `# variant: ${hit.versionId.toLowerCase()}`,
+          MOCK_PRESET_TEXT,
+        ].join('\n'),
+        provenanceBlock({ file: label, at: '2026-10-06T03:34:17Z', sha256: '0'.repeat(64) }),
+      )
       mockLocalText.set(path, text)
       mockLocal.push({
         path,
@@ -3035,14 +3234,14 @@ export const mockApi: MkpApi = {
       const name = mockUntakenName(fileName)
       const newPath = `presets-local/${name}`
       const label = `delivery/mkp/presets/${fileName}`
-      const text = [
-        `# machine: ${hit.machineId}`,
-        `# variant: ${hit.versionId.toLowerCase()}`,
-        `# based_on: ${label}`,
-        `# based_on_release_time: 2026-10-06 03:34:17`,
-        `# based_on_sha256: ${'0'.repeat(64)}`,
-        MOCK_PRESET_TEXT,
-      ].join('\n')
+      const text = withProvenance(
+        [
+          `# machine: ${hit.machineId}`,
+          `# variant: ${hit.versionId.toLowerCase()}`,
+          MOCK_PRESET_TEXT,
+        ].join('\n'),
+        provenanceBlock({ file: label, at: '2026-10-06T03:34:17Z', sha256: '0'.repeat(64) }),
+      )
       mockLocalText.set(newPath, text)
       mockLocal.push({
         path: newPath,

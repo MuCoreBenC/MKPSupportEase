@@ -40,6 +40,10 @@
 pub mod assets;
 pub mod bundles;
 pub mod catalog;
+/// **「这一版跟不跟基底」的唯一判据**（2026-11-03）。徽章 / 写值 / 日志三处共用
+pub mod follows;
+/// **源 TOML 的机械化重排**（2026-11-03）。纯计算，不碰盘；写盘由 `presets normalize` 做
+pub mod normalize;
 /// 参数值的**只读抽取**与批量结构保真写回（对比台与「恢复默认」共用）。**纯计算**，不碰盘
 pub mod params;
 /// 按**参数 key** 改一份 MKP 预设 TOML 里的一个值（保真写回）。参数页底座 ②
@@ -251,6 +255,99 @@ pub struct AssetUsage {
 /// 机型文件里的 `defaultBundle` / `recommendedBundle` 在 Task 10 之前是**刻意的悬空引用**
 /// （只是字符串）；现在它们必须能解析到 `bundles.toml` 里的一条套餐，
 /// 加载期查（[`Self::check_bundle_refs`]）。
+/// 一次值写入要**对那一行做什么**。
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueAction {
+    /// 写这个值（`machineVariants` 里那一行就变成它）
+    Write(serde_json::Value),
+    /// 删掉这一行（＝回到上一层的继承）
+    Clear,
+    /// 不动这一行的值 —— 只改跟随状态时用它
+    Keep,
+}
+
+/// 一条值改动：**写什么** + 要不要同时改「这一版跟不跟基底」。
+///
+/// 两件事写在同一个结构里，是因为它们必须**同一次落盘**（见 [`Presets::apply_values`]）。
+/// 老代码那种 `(key, owner, Option<值>)` 三元组仍能传：`Some` → [`ValueAction::Write`]、
+/// `None` → [`ValueAction::Clear`]，跟随状态按下面的默认规则补。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValueEdit {
+    pub key: String,
+    pub owner: String,
+    pub action: ValueAction,
+    /// 显式指定的跟随状态。`None` = 按 [`Self::resolved_follows`] 的默认规则
+    pub follows: Option<bool>,
+}
+
+impl ValueEdit {
+    pub fn write(key: impl Into<String>, owner: impl Into<String>, v: serde_json::Value) -> Self {
+        Self {
+            key: key.into(),
+            owner: owner.into(),
+            action: ValueAction::Write(v),
+            follows: None,
+        }
+    }
+
+    /// 只改跟随状态，一个字节的值都不动
+    pub fn keep(key: impl Into<String>, owner: impl Into<String>, follows: bool) -> Self {
+        Self {
+            key: key.into(),
+            owner: owner.into(),
+            action: ValueAction::Keep,
+            follows: Some(follows),
+        }
+    }
+
+    pub fn with_follows(mut self, on: bool) -> Self {
+        self.follows = Some(on);
+        self
+    }
+
+    /// 这一笔到底要不要改跟随状态；`None` = 不动。
+    ///
+    /// 默认规则只有两条（**写值 = 这一格归自己；删行 = 回到继承**）：
+    ///
+    /// ```text
+    /// 版本层写值（Write）  ⇒ 不跟随  —— 「改过就不跟随」的老口径，现在写进状态里
+    /// 版本层删键（Clear）  ⇒ 跟随    —— 删掉的意思是"回到上一层"
+    /// 机型基底 / Keep      ⇒ 不动    —— 基底是根，谈不上跟谁
+    /// ```
+    ///
+    /// **归并连带那一条必须显式写 `with_follows(true)`**：改基底时跟着变的版本
+    /// 本来就处于"跟随"，让默认规则（写值 ⇒ 不跟随）套上去会把它们全变成独立值，
+    /// 下一次改基底就再也带不动了。所以"写值"与"改状态"这两件事在
+    /// `app::storage::plan_value_edits_why` 里是分开决定的。
+    pub fn resolved_follows(&self) -> Option<bool> {
+        if let Some(on) = self.follows {
+            return Some(on);
+        }
+        if !self.owner.contains(':') {
+            return None; // 机型基底不参与（那是这条链的根）
+        }
+        match self.action {
+            ValueAction::Write(_) => Some(false),
+            ValueAction::Clear => Some(true),
+            ValueAction::Keep => None,
+        }
+    }
+}
+
+impl From<(String, String, Option<serde_json::Value>)> for ValueEdit {
+    fn from((key, owner, value): (String, String, Option<serde_json::Value>)) -> Self {
+        Self {
+            key,
+            owner,
+            action: match value {
+                Some(v) => ValueAction::Write(v),
+                None => ValueAction::Clear,
+            },
+            follows: None,
+        }
+    }
+}
+
 pub struct Presets {
     pub catalog: Catalog,
     /// 资产域①层（b05 Task 8）
@@ -346,7 +443,8 @@ impl Presets {
         self.apply_values(&[(key.to_owned(), owner.to_owned(), None)])
     }
 
-    /// 一批值一次落盘。`(字段 key, owner, 值)`，值为 `None` = 清空（删键）。
+    /// 一批值一次落盘。元素可以是老式的 `(字段 key, owner, 值)` 三元组，
+    /// 也可以是带跟随状态的 [`ValueEdit`]。
     ///
     /// # 为什么要有批量入口
     ///
@@ -358,28 +456,64 @@ impl Presets {
     /// 这里的做法是：**先把 owner 全部校验完，再改内存里的文档，最后写一次**。
     /// 任何一条 owner 不合法 → 一个字节都不写。
     ///
+    /// # 值与本版状态必须同一次落盘（2026-11-03）
+    ///
+    /// 「这一版跟不跟基底」现在是一条**写在文件里的状态**（`[params.follows]`），
+    /// 它必须和值走**同一个 `write_back`**：分成两次写的话，中途失败会留下
+    /// "值改了、状态还是跟随"，下一次改基底就把它覆盖回去 —— 那正是作者报的那个 bug。
+    ///
     /// 注意「改内存」这一步之后若写盘失败，内存与盘会不一致 ——
     /// 调用方（`app::Ctx`）在保存后一律重读盘，所以那个窗口不会被看见
-    pub fn apply_values(
-        &mut self,
-        edits: &[(String, String, Option<serde_json::Value>)],
-    ) -> Result<(), AppError> {
+    pub fn apply_values<T>(&mut self, edits: &[T]) -> Result<(), AppError>
+    where
+        T: Clone + Into<ValueEdit>,
+    {
+        self.cast_values(edits)?;
+        self.registry.write_back()
+    }
+
+    /// **只改内存里的文档，不写文件**（2026-11-03，内存编辑模型）。
+    ///
+    /// 校验规则、值与跟随状态一起落地，都与 [`Self::apply_values`] 逐字相同；
+    /// 唯一差别是最后那一步 `write_back` 不在这里 —— 编辑时改内存、保存时才写盘。
+    /// 见 `docs/WORKBENCH-EDITOR-MODEL.md` §1 / §3。
+    pub fn cast_values<T>(&mut self, edits: &[T]) -> Result<(), AppError>
+    where
+        T: Clone + Into<ValueEdit>,
+    {
+        let edits: Vec<ValueEdit> = edits.iter().cloned().map(Into::into).collect();
         if edits.is_empty() {
             return Ok(());
         }
         // **先全查一遍再动手**：一条不合法就整批不写
-        for (key, owner, _) in edits {
-            self.check_owner_exists(owner)?;
-            if self.registry.param(key).is_none() {
-                return Err(AppError::invalid_argument(format!("字段定义里没有 {key}")));
+        for e in &edits {
+            self.check_owner_exists(&e.owner)?;
+            if self.registry.param(&e.key).is_none() {
+                return Err(AppError::invalid_argument(format!(
+                    "字段定义里没有 {}",
+                    e.key
+                )));
             }
         }
-        for (key, owner, value) in edits {
-            match value {
-                Some(v) => self.registry.set_variant(key, owner, v)?,
-                None => self.registry.clear_variant(key, owner)?,
+        for e in &edits {
+            match &e.action {
+                ValueAction::Write(v) => self.registry.set_variant(&e.key, &e.owner, v)?,
+                ValueAction::Clear => self.registry.clear_variant(&e.key, &e.owner)?,
+                ValueAction::Keep => {}
+            }
+            if let Some(on) = e.resolved_follows() {
+                self.registry.set_following(&e.key, &e.owner, on)?;
             }
         }
+        Ok(())
+    }
+
+    /// **把内存里的文档写回盘**（2026-11-03）：保存那一步唯一的写文件动作。
+    ///
+    /// 与 [`Self::apply_values`] 拆开，是因为编辑期只改内存（[`Self::cast_values`]），
+    /// 写盘只发生在「保存」。两者合起来才是老 `apply_values` 的语义 ——
+    /// 谁要是把 `cast_values` 单独当保存用，改的东西就只停在内存里。
+    pub fn write_back(&self) -> Result<(), AppError> {
         self.registry.write_back()
     }
 
@@ -1056,6 +1190,20 @@ impl Presets {
         self.check_bundle_refs()?;
 
         for p in self.registry.params() {
+            /* `[params.follows]` 与 `machineVariants` 同一口径：认不出的版本写在里面，
+            界面会显示「跟随」而作者以为他刚点了「不跟随」—— 静默的错状态比报错更贵 */
+            if let Some(uid) =
+                crate::presetdata::follows::unknown_uids(&p.follows, |u| keys.contains(u)).first()
+            {
+                return Err(AppError::corrupted(format!(
+                    "{} 的 follows 里有一个认不出的版本：{uid}",
+                    p.key
+                ))
+                .with_detail(
+                    "只有真机型版本能记跟随状态（形状是 `机型:版本id`）。\
+                     认不出的 uid 永远不会生效，界面上会显示「跟随基底」，而其实那条记录谁都不读",
+                ));
+            }
             for (name, map) in [
                 ("machineVariants", &p.machine_variants),
                 ("machineMinVariants", &p.machine_min_variants),
@@ -1100,7 +1248,7 @@ impl Presets {
         self.registry
             .params()
             .iter()
-            .filter(|p| p.machine_variants.contains_key(&needle))
+            .filter(|p| p.machine_variants.contains_key(&needle) || p.follows.contains_key(&needle))
             .map(|p| p.key.clone())
             .collect()
     }

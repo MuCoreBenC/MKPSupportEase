@@ -287,9 +287,11 @@ export default function ParamSyncModal({
                     const def = defOf(e.key)
                     const on = checked[e.key] === true
                     const localText = e.local === null ? null : text(e.key, e.local)
+                    /* 「上次云端」用滚动记录；没有才退回水位那格（2026-10-31） */
+                    const cloudOld = e.origin ?? e.baselineOld
                     const diff =
-                      e.baselineOld !== null && e.cloudNew !== null
-                        ? `${text(e.key, e.baselineOld)} → ${text(e.key, e.cloudNew)}`
+                      cloudOld !== null && e.cloudNew !== null
+                        ? `${text(e.key, cloudOld)} → ${text(e.key, e.cloudNew)}`
                         : tr('params.sync.unknownCloud')
                     return (
                       <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
@@ -304,7 +306,7 @@ export default function ParamSyncModal({
                             {def?.unit !== undefined && <span className={s.unit}>{def.unit}</span>}
                           </div>
                           <div className={s.vals}>
-                            {localText !== null && e.local !== e.baselineOld && (
+                            {localText !== null && e.local !== cloudOld && (
                               <>
                                 {tr('params.sync.local')}{' '}
                                 <span className={s.local}>{localText}</span>

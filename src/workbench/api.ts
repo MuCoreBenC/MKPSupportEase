@@ -35,6 +35,9 @@ export interface AppError {
   message: string
   traceId: string
   detail?: string
+  /** 稳定码（`W_*` / `E_*`）。后端 `AppError::text_err` 会带上；
+   *  界面按它分派特殊交互（例如"重新加载会丢草稿"要先问人） */
+  messageCode?: string
 }
 
 /** Tauri 把 `Err(AppError)` 原样序列化过来，所以 catch 到的就是它 */
@@ -262,6 +265,14 @@ export interface ParamView {
   deprecated: boolean
   /** **只在这些机型上**弃用（与 `deprecated` 叠加） */
   deprecatedMachines: string[]
+  /**
+   * **哪几册译文跟着旧中文一起过期了**（2026-11-02，键名形如 `labelEn` / `descJa`）。
+   *
+   * 作者：「我改了中文，但是其他没有改，这种能不能记录下来，让 AI 去改」——
+   * 后端在 `set_param_meta` 里中文一变就登记，重写那一册才摘掉。
+   * 空 = 没问题。**客户端不读这一格**；工作台用它标格 + 出待办清单。
+   */
+  staleTranslations: string[]
 }
 
 /** `app::SectionTarget` —— 「所属分组」下拉的一行 */
@@ -270,6 +281,35 @@ export interface SectionTarget {
   label: string
   tabId: string
   tabLabel: string
+  /**
+   * 整块组件卡（`layout_schema` 的 `component`），`null` = 普通参数分组。
+   *
+   * 组件卡里也可能有参数（`tower-map` 那种），所以它出现在清单里但它**不能当
+   * 搬家目标**（后端 `move_param` 拒收）—— 「所属分组」下拉要把它筛掉，
+   * 分组抽屉反过来要把它显示出来（否则那张卡的卡头点了没反应）。
+   */
+  component: string | null
+  /**
+   * **整块卡**（`layout = 'component'`）：设置页那 11 张（外观 / 软件更新 / 卸载清理…）。
+   * 客户端那边是固定长好的，工作台既不改它的名、也不列进分组抽屉
+   * （作者 2026-11-01：「我的新版里面是另外的，好像是固定下来的，不需要在这里面去改」）。
+   */
+  standalone: boolean
+}
+
+/**
+ * `registry::NewSection` —— 「保存这一趟顺手新建一个分组」。
+ *
+ * 它**不是**一次单独的写盘：跟着 `ParamMetaEdit` 一起交，后端在同一笔里
+ * 把分组建出来、把参数放进去（取消 = 一个字都没动）。`id` 由前端给：
+ * 撤销 / 重做会原样重放同一笔载荷，那时分组已经在了，后端按「确保它在」处理。
+ */
+export interface NewSection {
+  /** 只许 a-z / 0-9 / `_`（它会进两份 TOML，也会进客户端目录） */
+  id: string
+  tabId: string
+  /** 中文显示名；另外三册留空 = 回落中文 */
+  label: string
 }
 
 /** `app::RegistryView` */
@@ -320,9 +360,16 @@ export interface ParamMetaEdit {
   machineFilter: string[]
   /**
    * 搬到哪个分组（`layout_schema` 的 section id）。`null` = 不动 ——
-   * 后端把它读成「保持原位」，不是「搬回默认组」
+   * 后端把它读成「保持原位」，不是「搬回默认组」。
+   * 带 `newSection` 时这一格被忽略（目标是那个新分组）
    */
   sectionId: string | null
+  /**
+   * 这一笔顺手新建的分组（`null` / 省略 = 不建）。
+   *
+   * 只在「真的选中了它」时才带 —— 建了又改选别的组，那些字一个都不会落盘
+   */
+  newSection?: NewSection | null
   /**
    * 组内顺序（`[params.layout].order`）。`null` = 不动。
    *
@@ -341,6 +388,27 @@ export interface MetaApplied {
   key: string
   before: ParamMetaEdit
   after: ParamMetaEdit
+}
+
+/**
+ * `registry::SectionMetaEdit` —— 分组自己那一笔（名字 / 上下位置），2026-11-01。
+ *
+ * 位置只给**方向**：显示顺序在两个地方各存一份（注册表的数组次序给客户端，
+ * `order` 给工作台卡片），怎么掰由后端一次写完才算得对 —— 前端算不出中点，
+ * 也不该算。
+ */
+export interface SectionMetaEdit {
+  /** 新名字（`null` = 不动）。**只写中文那一册**，另外三册留在原处 */
+  label: string | null
+  /** 往哪边挪一格（`null` = 不动） */
+  move: 'up' | 'down' | null
+  /**
+   * 顺手新建这一组（`null` / 不传 = 不建）。
+   *
+   * 与 `ParamMetaEdit.newSection` 同一条口径：**幂等**（撤销 / 重做原样重放时
+   * 按「确保它在」处理）。分组抽屉那颗「＋ 新增分组」走这条。
+   */
+  newSection?: NewSection | null
 }
 
 /* ---------- 矩阵 ---------- */
@@ -398,10 +466,36 @@ export interface Cell {
   /** 原始值。受控控件用它，不能拿格式化过的文本回填 */
   raw: unknown
   /**
-   * 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
-   * 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+   * **盘上那一份里，这一格的有效值** —— 用户看得见的那个数。
+   *
+   * 三层依次：版本覆盖 → 机型基底 → 出厂 `defaultValue`。`null` 只有一种情况：
+   * 这一项在这台机型上不适用 / 已弃用。
+   *
+   * 它是「改没改」（`dirty`）与橙色 `↩ 保存值` 那颗按钮的唯一依据。**不要**改成
+   * 「这一层钉着的值」：归并会把同值从版本层上提到机型基底，那时「你点的那一层
+   * 没有钉」而「值确实变了」，两者必须以后者为准。
+   *
+   * **它不是「跟随」跟到的那个数**：跟随跟的是基底的当前值（`raw`），基底自己
+   * 可能还有未保存的改动 —— 两个数不同时，`↩ 保存值` 与 `↶ 跟随` 各写各的。
    */
   rest: unknown
+  /**
+   * 盘上那一份里，**这一层自己钉着吗**。只决定还原怎么写：
+   * - `true` ⇒ 写回 `rest` 那个值；
+   * - `false` ⇒ 写 `null` 删键（挂回继承）。
+   *
+   * 不能只看 `rest` 有没有值：版本层继承机型层时 `rest` 有值但这层没钉，
+   * 写一个值回去就把继承钉死了。
+   */
+  restPinned: boolean
+  /**
+   * 这一格挂哪档徽章：**跟不跟基底**（2026-11-02 两档定稿）。
+   *
+   * `null` = 基底列，不挂 —— 基底是根，谈不上跟不跟谁。
+   * 判据只有一条：注册表 `[params.follows]` 里那句状态（`is_following`）——
+   * **与值是否等于基底无关，与"这一层有没有自己的一行"也无关**（2026-11-03）。
+   */
+  badge: 'follow' | 'own' | null
   /** 这条参数**在这一列这台机型上**已弃用。`Row.deprecated` 是全机型口径 */
   deprecated: boolean
   /** 这台机型上不能写的选项值（后端算好的，含推定）。控件划线、手势前拦人都读它 */
@@ -434,6 +528,93 @@ export interface Row {
    */
   impact: DeskImpact | null
   cells: Cell[]
+}
+
+/* ---------- 参数台 v2（`app::sheet`，2026-11-02） ---------- */
+
+/**
+ * 一列：机型基底（`versionUid === null`）或某个版本。
+ *
+ * `level` 由**后端**给出，前端不许从 `versionUid` 反推 —— 弄反 = 静默打破继承。
+ */
+export interface SheetCol {
+  /** `A1` / `A1/STANDARD`。格子靠它与 `key` 拼成 `CellKey` */
+  key: string
+  machineId: string
+  versionUid: string | null
+  level: Level
+  label: string
+}
+
+/** `registry::Choice` 里这一屏用得上的那几格 */
+export interface SheetChoice {
+  label: string
+  value: unknown
+  /** 全局弃用。**按机型弃用看 `SheetCell.deadChoices`**（后端算好的） */
+  deprecated: boolean
+}
+
+/** 一行的定义。**没有值** —— 值在 `SheetCell` */
+export interface SheetDef {
+  key: string
+  label: string
+  desc: string
+  unit: string | null
+  sectionId: string
+  /** 组的中文名。与上一行不同就插一条分组表头（分组是后端排的） */
+  sectionLabel: string
+  tabId: string | null
+  depth: number
+  parentKey: string | null
+  parentLabel: string | null
+  controlNote: string | null
+  gcode: boolean
+  /** 全局弃用。**这一列弃没弃用看 `SheetCell.deprecated`** */
+  deprecated: boolean
+  valueType: ValueType
+  uiComponent: UiComponent
+  min: number | null
+  max: number | null
+  step: number | null
+  /** 出厂默认的显示文本（后端格式化） */
+  defaultText: string
+  choices: SheetChoice[]
+}
+
+/**
+ * 一格。**只有保存态，没有「当前值」** —— 这是新页与旧 `Cell` 的唯一区别，
+ * 也是「徽章乱跳」不可能再发生的原因：结构上没有第二个"现在是多少"可填。
+ */
+export interface SheetCell {
+  key: string
+  colKey: string
+  /** 保存值 = BASE 在这一格的有效值（版本覆盖 → 机型基底 → 出厂）。`null` ⇒ 不可写 */
+  saved: unknown
+  /** BASE 里**这一层**自己钉着吗。只决定「还原」是写值还是删键，**不判脏** */
+  savedPinned: boolean
+  /** 保存值的显示文本（后端格式化；前端不拼字符串） */
+  savedText: string
+  /** 保存值来自哪一层（后端只说"哪张表里写着它"） */
+  savedOrigin: Origin
+  editable: boolean
+  /** 这一列这台机型上已弃用 */
+  deprecated: boolean
+  /** 这一列这台机型上不许再选的档（含推定） */
+  deadChoices: string[]
+  /** 点开灰格子时的整句（「由「X」控制，需 Y」） */
+  blockedNote: string | null
+  /** 行上那句短提示（「要 X 才可改」）—— 行里放不下整句 */
+  blockedHint: string | null
+}
+
+/** `app::sheet::ParamSheet` —— 新页整屏数据，一次取全 */
+export interface ParamSheet {
+  cols: SheetCol[]
+  defs: SheetDef[]
+  cells: SheetCell[]
+  totalRows: number
+  note: string | null
+  emptyReason: string | null
 }
 
 /** `derive::DeskImpact` —— 版本层编辑 targets 只有自己，followers 是跟着基底的其它版本 */
@@ -566,6 +747,46 @@ export interface DiffLine {
   before: string
   after: string
   kind: string
+  /**
+   * **这一笔落在哪一份文件**（相对预设根）。
+   *
+   * 值改动一律 `registry/param_registry.toml`（三层取值都在那张表的
+   * `[params.machineVariants]` 下）；可见性 → `assets/assets.toml`；套餐 → `bundles.toml`。
+   * 「改了什么」按它过滤 —— 之前拿文件名去猜归属，`param_registry` 猜不出任何 owner，
+   * 于是切到那一栏永远显示 0 格（作者 2026-11-02 报的就是这个）。
+   */
+  file: string
+  /**
+   * **来源标签**（2026-11-03）：`user` / `promoted` / `copy` / `empty` /
+   * `unknown` / `structural`。
+   *
+   * 作者定稿要「平铺 + 标签」：改一次 Z 连带写三个版本键，四条全列出来，
+   * 只有一条是 `user`，其余是 `promoted` —— 一眼看出哪条是自己点的。
+   * 界面照 `WHY_LABEL` 显示人话，**不自己推断来源**。
+   */
+  why: string
+}
+
+/**
+ * 来源标签 → 界面上那两个字。
+ *
+ * 唯一出口：`HistoryModal` 只查这张表，不在渲染里写 if。
+ * 加新来源（`Why` 每加一个变体）时只改这里一处 —— 后端 `Why::suffix()`
+ * 与它说的必须是同一件事，改一处忘另一处就会一屏两个说法。
+ */
+export const WHY_LABEL: Record<string, string> = {
+  user: '用户修改',
+  /* **2026-11-03 起不再单独显示**：它是"我们为保住这个值多写了几个版本键"的
+     存储解释，用户不关心。后端已统一归成 `follows`；留在这里只为兼容老数据。 */
+  promoted: '随基底生效',
+  copy: '复制快照',
+  empty: '空表清理',
+  unknown: '来源不明',
+  structural: '改定义',
+  /* 跟着基底变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
+     用户看到的都是"我改了基底，这一圈跟着变"。 */
+  follows: '随基底生效',
+  inherited: '随基底生效',
 }
 
 /* ---------- 写 ---------- */
@@ -616,12 +837,29 @@ export interface TxnOp {
   files: { rel: string; before?: number; after?: number }[]
 }
 
+/**
+ * 一笔命令的回执（2026-11-02）：**只是给"去日志里找这次点击"用的号**。
+ *
+ * 一次点击会打七八行日志（写队列 → IPC → 值进影子树 → 参数定义已改 → 派生 → 事务），
+ * 每行都带同一个 `req=`。状态栏把这个号显示出来，作者复制去日志里 grep 就是完整一条线。
+ */
+export interface CommandReceipt {
+  /** 请求号（`r0000002a`） */
+  req: string
+  /** 命令名（`wb_apply_draft`），与日志里的写法一致 */
+  command: string
+  /** 成功还是报错。报错时日志里有同一个号的 `warn` */
+  ok: boolean
+}
+
 export interface TxnState {
   dirty: boolean
   dirtyCount: number
   canUndo: boolean
   canRedo: boolean
   ops: TxnOp[]
+  /** 刚跑完那一笔的回执；`null` = 这一轮没跑过命令（取走即清，不会重复） */
+  receipt: CommandReceipt | null
 }
 
 export interface SaveResult {
@@ -671,8 +909,63 @@ export interface IssueReport {
 
 /* ---------- 生成 / 恢复 / 发布 ---------- */
 
+/**
+ * 内嵌目录重算的结局（`wb_regen_embedded_catalog`）。
+ * `changed=false` = 盘上那份已经是最新的，一个字节都没写。
+ */
+export interface EmbeddedCatalogReport {
+  changed: boolean
+  files: number
+  revision: string
+}
+
 /** `build::Scope` —— 三个生成入口 */
 export type BuildScope = 'stale' | 'all' | { picked: string[] }
+
+/** `receipt::StepRow` —— 事务里的一步 */
+export interface ReceiptStep {
+  /** 步骤键（文案在前端查表，后端不写死句子） */
+  key: string
+  ok: boolean
+  detail: string
+}
+
+/**
+ * `receipt::Counts` —— **按真实写入结果计数**（2026-11-01）。
+ *
+ * `written` 只数"真写了盘"的。`written 0 / total 9` 到底意味着
+ * "9 份都没变"（正常）还是"9 份都失败"（坏事），只有把 `unchanged` /
+ * `failed` 分开才答得出来 —— 这也是它取代旧 `{written,total}` 的原因。
+ */
+export interface ReceiptCounts {
+  written: number
+  unchanged: number
+  failed: number
+  total: number
+}
+
+/**
+ * `receipt::GenerationReceipt` —— **一次生成留下的结构化结果**（2026-11-01）。
+ *
+ * 工作台模态框、CLI 的 JSON、AI 的报告读的都是它：不是三套说法。
+ *
+ * **落应用数据目录**（`workbench/receipts/<id>.json`，不进仓库、只留最近 50 份）：
+ * 关掉工作台之后仍能查"上一次生成做了什么、为什么失败"（`wb.receipts()`）。
+ * 它只记**生成**这一件事 —— 保存 / 发布 / 外部改文件都不在这里。
+ */
+export interface GenerationReceipt {
+  /** `GEN-20261101-001` */
+  id: string
+  /** 生成时刻（UTC，与产物头同一个时钟） */
+  stamp: string
+  status: 'passed' | 'failed'
+  steps: ReceiptStep[]
+  delivery: ReceiptCounts
+  assets: ReceiptCounts
+  baseline: ReceiptCounts
+  files: string[]
+  error: string | null
+}
 
 /** `build::GenerateReport` */
 export interface GenerateReport {
@@ -682,6 +975,8 @@ export interface GenerateReport {
    *  不说的话「点了生成但文件时间没变」看起来像失败了 */
   unchanged: string[]
   skipped: [string, string][]
+  /** 生成事务回执（`null` = 还没进事务就被拦下了） */
+  receipt: GenerationReceipt | null
   // 没有生成记录字段：台账（built.json）由生成事务直接落盘，生成完成 = 台账已是这一代
 }
 
@@ -731,6 +1026,47 @@ export interface PreviewReport {
   unchanged: number
   /** 非空 = 生成会被拒（与 generate 同一道闸），界面照它压按钮 */
   blocked: string | null
+}
+
+/* ---------- 未保存改动的逐行 diff（`wb_shadow_diff`，2026-11-02） ---------- */
+
+/** `txn::FileState` —— 方向是「盘上 → 影子」：`added` = 保存会新建这份 */
+export type ShadowFileState = 'added' | 'modified' | 'removed'
+
+/**
+ * `domain::shadow_diff::ShadowFileDiff` —— 一份文件的文本 diff。
+ *
+ * 行的形状与生成前确认框**同一条**（`PreviewDiffLine`），所以红绿底、语法上色、
+ * 行号口径、右侧概览条全部复用 `DiffLines` / `DiffRuler`，不另养一套。
+ */
+export interface ShadowFileDiff {
+  /** 相对预设根的路径（`registry/param_registry.toml` / `machines/A1.toml` …） */
+  rel: string
+  /** `added` = 保存会新建 / `modified` 改写 / `removed` 删掉 */
+  state: ShadowFileState
+  /**
+   * 行级差异（含未变的上下文行），**就是 LCS 原样**：删的行在前、增的行在后。
+   * 渲染与生成前确认同一套（`DiffLines` 的 `view="diff"`）—— 上红下绿两行。
+   *
+   * 曾有一层"配对"（把删+增折成一行「旧 → 新」），2026-11-02 按作者要求删掉：
+   * 折起来在长行上读不动，他要的就是「上面红、下面绿」。
+   */
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+  /** 非文本（webp / png 那批）：只有"变了"，没有行 */
+  binary: boolean
+}
+
+/**
+ * `domain::shadow_diff::ShadowDiff` —— **盘上的 `presets/` ↔ 影子树**。
+ *
+ * 摊开的就是"点一次右上角保存会改掉的字节"。`files` 空 = 没有未保存的改动。
+ */
+export interface ShadowDiff {
+  files: ShadowFileDiff[]
+  shadowRoot: string
+  realRoot: string
 }
 
 /** `build::RevertChange` */
@@ -837,16 +1173,6 @@ export interface PublishAudit {
    */
   minVersion: string | null
   canPublish: boolean
-  /**
-   * **当前模式让不让发布**：测试模式（沙箱）里这条路整个关着，这里是那句原因；
-   * 正式模式是 `null`。
-   *
-   * ★ 它与 `canPublish` 答的是两件事：`canPublish` = "这一版东西能不能发出去"
-   * （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
-   * 那颗「确认发布」不许画亮 —— 点下去只会被后端如实拒掉，而**一颗点了会被拒的
-   * 按钮比没有按钮更坏**（人会以为是自己点错了）。
-   */
-  publishClosed: string | null
 }
 
 /* ---------- 发布事务（`app::publish_tx`，第三刀下半） ---------- */
@@ -968,6 +1294,11 @@ export interface TxOptions {
   base?: string
   /** 发到哪个平台（`github` / `gitee`）；不填 = 自动挑（见发布账户配置） */
   platform?: string | null
+  /**
+   * **人类确认位**（2026-11-05 硬约束）：真发布必须显式给 `true`，内核缺了直接拒绝。
+   * 工作台那颗「确认发布」按钮是它的唯一来源；预演（`dryRun`）不需要。
+   */
+  confirmed?: boolean
 }
 
 /**
@@ -1061,6 +1392,8 @@ export interface ReleaseOptions {
   /** 构建**本平台**的安装包（macOS → dmg / Windows → NSIS；默认开） */
   build?: boolean
   openReview?: boolean
+  /** **人类确认位**（2026-11-05）：真发版必须显式给 `true`（打 tag / 写 release.json 那一趟） */
+  confirmed?: boolean
 }
 
 /** `release_tx::PreflightItem` —— 闸里的一格 */
@@ -1126,6 +1459,14 @@ export interface ReleaseHistory {
   records: ReleaseRecord[]
 }
 
+/** `git::CommitRow` —— 本分支最近的一条提交（**本机仓库视图**，不代表线上已合并） */
+export interface CommitRow {
+  short: string
+  author: string
+  at: string
+  subject: string
+}
+
 /** `credentials::CredentialStatus` —— **只有"有没有"+尾号，没有 Token 原值** */
 export interface CredentialStatus {
   platform: string
@@ -1176,28 +1517,6 @@ export interface PortConflict {
   text: string
 }
 
-/**
- * `sandbox::SandboxStatus` —— **测试模式（沙箱）**现在什么样。
- *
- * 作者 2026-10-08：「我希望它是完全另起炉灶那种……测试的归测试的，而且我测试的随时
- * 可以把这些清空，从正式的复制一份过去，再进行测试」「我不能迷迷糊糊的，不知道我在
- * 测试版还是正式版」。所以这一格数字要一直摆在界面上（横幅 + 设置页那张卡）。
- */
-export interface SandboxStatus {
-  /** 测试模式开着吗（= 整套数据根现在指着沙箱） */
-  enabled: boolean
-  /** 沙箱根：`<repo>/workbench/.sandbox` */
-  sandboxRoot: string
-  /** 沙箱里那份 `presets/` 建起来了吗（没建 = 刚打开、还没拷） */
-  ready: boolean
-  /** 沙箱这一棵里有几个文件 / 几字节（"真拷了东西"的读数） */
-  files: number
-  bytes: number
-  /** 正式那一份的预设根（界面上摆出"从哪儿拷的"） */
-  realPresetsRoot: string
-  /** 上一次动作的结果（"已从正式拷了一份：54 个文件 4.4 MB"） */
-  note: string | null
-}
 
 /**
  * `devsim::DevScene` —— **开发台**上一个可点的场景。
@@ -1429,8 +1748,15 @@ export interface Words {
   relate: Record<'goFixIt' | 'showAnyway' | 'foldBack', string>
   /** 崩溃快照三态。**与 `save` 不是一回事** */
   snapshot: Record<SnapshotState, Word>
-  /** 参数台一行上的状态四档（C14）。dirty 压过 origin —— 改了还没保存是最要紧的事实 */
-  paramStatus: Record<'factory' | 'machine' | 'version' | 'dirty', Word>
+  /**
+   * 参数台一格的状态：**只有两档 —— 跟不跟随基底**（2026-11-02 作者定稿）。
+   *
+   * 「出厂默认 / 机型默认 / 本版修改」那三分已退役：它们答的是"值从哪来"，
+   * 而作者看屏幕时问的是"我改过它没有"。
+   * 「改了还没保存」不在这两档里 —— 徽章不随保存状态跳，
+   * 未保存由那一格的还原按钮 + 右上角「未保存 N」表达。
+   */
+  paramStatus: Record<'follow' | 'own', Word>
   /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */
@@ -2032,7 +2358,6 @@ export interface BaselineDiffEntry {
 export const wb = {
   open: () => invoke<void>('wb_open'),
   boot: () => invoke<Boot>('wb_boot'),
-  reload: () => invoke<Boot>('wb_reload'),
   /**
    * 盘上的 `presets/` 跟这个会话手里那一份对不上了吗（外部改过 / 别处写过）。
    * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
@@ -2071,6 +2396,27 @@ export const wb = {
    */
   setParamMeta: (key: string, edit: ParamMetaEdit) =>
     invoke<RegistryView>('wb_set_param_meta', { key, edit }),
+  /**
+   * **清掉译文台账里的几格**（逃生通道，2026-11-02）。
+   *
+   * 台账平日的摘法只有一条：`setParamMeta` 里"这一笔把值改了"。可译文也能从别的
+   * 路写好 —— 直接改文件、或按 `scripts/stale-translations.mjs` 的清单整批改。
+   * 那种"改"后端看不见，标记就永远摘不掉，所以这条**点名清**：清哪几格由调用方说，
+   * 判据不在这里重算（放宽"必须值变"会让撤销/重做也清账，那是另一个 Bug）。
+   *
+   * 只动台账、不碰译文本身。名字写错一个整笔拒收。
+   */
+  clearStaleTranslations: (key: string, keys: string[]) =>
+    invoke<RegistryView>('wb_clear_stale_translations', { key, keys }),
+  /** 分组自己的那一笔（改名 / 上下移一格）。撤销走服务器侧那条栈，前端不记反向 */
+  setSectionMeta: (sectionId: string, edit: SectionMetaEdit) =>
+    invoke<RegistryView>('wb_set_section_meta', { sectionId, edit }),
+  /**
+   * **删掉一个空分组**。后端把三道门（还有参数 / 是组件卡 / 带条件）挡完才动手，
+   * 只删没有参数归它的组；同样是编辑事务里的一笔 —— 进草稿，等右上角「保存」。
+   */
+  removeSection: (sectionId: string) =>
+    invoke<RegistryView>('wb_remove_section', { sectionId }),
   matrix: (cols: ColRef[], tab: string | null, query: string, baseMachineId?: string | null) =>
     invoke<Matrix>('wb_matrix', { cols, tab, query, baseMachineId: baseMachineId ?? null }),
   trash: () => invoke<TrashEntry[]>('wb_trash'),
@@ -2299,9 +2645,32 @@ export const wb = {
   /** 默认视角：一个版本的分组列表 */
   desk: (machineId: string, uid: string | null, tab: string | null, query: string) =>
     invoke<Desk>('wb_desk', { machineId, uid, tab, query }),
+
+  /**
+   * **参数台 v2 的整屏数据**（只读，2026-11-02）。
+   *
+   * 与 `matrix` 并行存在：返回值里**没有「当前值」**，只有 `saved`（保存值）与
+   * `savedPinned`。所以新页只能算 `draft ?? saved` —— 值和保存值不可能再被折叠成
+   * 同一份数据（旧页三次「徽章乱跳」的病根）。
+   */
+  paramSheet: (cols: ColRef[], tab?: string | null, query?: string, baseMachineId?: string | null) =>
+    invoke<ParamSheet>('wb_param_sheet', {
+      cols,
+      tab: tab ?? null,
+      query: query ?? null,
+      baseMachineId: baseMachineId ?? null,
+    }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
     invoke<BulkPreview>('wb_preview_bulk', { key, value, cols }),
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),
+
+  /**
+   * **未保存改动的逐行 diff**：盘上 `presets/` ↔ 影子树。只读。
+   *
+   * 与 `diffDraft` 并列：那个答"我动了哪些格子"，这个答"文件因此变成什么样"。
+   * 每次打开现取一份 —— 影子是被编辑的那个，缓存它就是演出过期内容。
+   */
+  shadowDiff: () => invoke<ShadowDiff>('wb_shadow_diff'),
 
   /**
    * **唯一的写入口。** `label` 是给撤销按钮显示的一句话
@@ -2313,6 +2682,14 @@ export const wb = {
   applyDraft: (label: string, patches: Patch[], refresh?: Refresh) =>
     invoke<ApplyResult>('wb_apply_draft', { label, patches, refresh: refresh ?? null }),
   save: () => invoke<SaveResult>('wb_save'),
+  /**
+   * 重新加载 = 按磁盘上的 `presets/` 重建会话。
+   *
+   * `discardDrafts` 必须显式为 `true` 才能在有未保存草稿时执行；
+   * 否则后端返回 `W_WB_RELOAD_DRAFTS_001`，由界面问人。默认不丢东西。
+   */
+  reload: (discardDrafts?: boolean) =>
+    invoke<Boot>('wb_reload', { discardDrafts: discardDrafts ?? null }),
   discard: () => invoke<BookView>('wb_discard'),
   /* —— 统一编辑事务（2026-10-31）：撤销/重做/状态在服务器侧，前端只按结果重取 —— */
   txnState: () => invoke<TxnState>('wb_txn_state'),
@@ -2320,10 +2697,20 @@ export const wb = {
   txnRedo: () => invoke<TxnState>('wb_txn_redo'),
 
   preflight: () => invoke<IssueReport>('wb_preflight'),
+  /**
+   * 内嵌目录的**修复动作**（检查卡那条「内嵌目录落后」的待办）：
+   * 按当前 `presets/` 重算 `src-tauri/src/runtime/catalog.generated.json`。
+   * 内容一样就不写 —— 与生成「没变不重写」同一口径。
+   */
+  regenEmbeddedCatalog: () => invoke<EmbeddedCatalogReport>('wb_regen_embedded_catalog'),
   /** 生成前预演：**只算不写**，界面上「点生成 → 看 diff → 确认」的中间那一步 */
   generatePreview: (scope: BuildScope) =>
     invoke<PreviewReport>('wb_generate_preview', { scope }),
-  generate: (scope: BuildScope) => invoke<GenerateReport>('wb_generate', { scope }),
+  generate: (scope: BuildScope, force?: boolean) =>
+    invoke<GenerateReport>('wb_generate', { scope, force: force ?? null }),
+  /** 历次生成的回执（新的在前；应用数据目录，按份数自动清理） */
+  receipts: (limit?: number) =>
+    invoke<GenerationReceipt[]>('wb_receipts', { limit: limit ?? null }),
   revertPreview: (uid: string) => invoke<RevertPreview>('wb_revert_preview', { uid }),
   /**
    * **发布闸**（第二刀）：十五项逐项结果。
@@ -2392,6 +2779,9 @@ export const wb = {
     invoke<ReleaseTxReport>('wb_release_software', { opts }),
   /** 软件版本发布历史（**与 `publishHistory` 不是同一本账** —— 两条链分开记） */
   releaseHistory: () => invoke<ReleaseHistory>('wb_release_history'),
+  /** 本分支最近提交（发布历史第三栏；只读、不联网，`limit` 后端夹到 1..=20） */
+  recentCommits: (limit?: number) =>
+    invoke<CommitRow[]>('wb_recent_commits', limit === undefined ? {} : { limit }),
   /**
    * **杀掉 dev 监视进程**（run-env 拦下时的一键解法）—— 后端先验明正身（命令行
    * 得像 tauri dev）再动手；只杀 CLI 本尊，应用窗口与 vite 都活着。
@@ -2427,9 +2817,9 @@ export const wb = {
    * 被占着时**如实拒绝**并点名那个端口（`conflicts` 摆着是谁）；
    * `stop` 收掉**整棵进程树**，把端口让出来。三条都**不写任何配置**。
    *
-   * ★ 端的只有 **`delivery` = 当前交付**：**测试模式开着就端沙箱里那份**，于是
-   * 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通，
-   * 而且正式那份从头到尾不参与。端出去时发布序号**自动 +1**（见 `dev_source` 的
+   * ★ 端的只有 **`delivery` = 当前交付**（就是你刚生成出来的那一份），于是
+   * 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通。
+   * 端出去时发布序号**自动 +1**（见 `dev_source` 的
    * `BUMP_ENV`）—— 客户端看到的就是正常的"云端发了下一版"。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
@@ -2444,20 +2834,6 @@ export const wb = {
    */
   devSourceClearConflict: (port: number, pid: number | null) =>
     invoke<DevSourceStatus>('wb_dev_source_clear_conflict', { port, pid }),
-
-  /**
-   * **测试模式（沙箱）** —— 整套数据根切到 `<repo>/workbench/.sandbox` 那一棵树，
-   * 正式目录一个字节都不碰（作者：「完全另起炉灶」「测试的归测试的」）。
-   *
-   * - `sandboxSet(true)`：沙箱不齐就先**从正式拷一份**（`presets/` 整棵，含 3MF /
-   *   模型 / 图片），然后把根切过去；**有未保存的改动时如实拒绝**（草稿是两套）；
-   * - `sandboxRefill()`：清空沙箱再从正式重新拷一份；
-   * - `sandboxWipe()`：只清空（留在当前模式）。
-   */
-  sandboxStatus: () => invoke<SandboxStatus>('wb_sandbox_status'),
-  sandboxSet: (enabled: boolean) => invoke<SandboxStatus>('wb_sandbox_set', { enabled }),
-  sandboxRefill: () => invoke<SandboxStatus>('wb_sandbox_refill'),
-  sandboxWipe: () => invoke<SandboxStatus>('wb_sandbox_wipe'),
 
   /**
    * **开发台**（`app::devsim`）—— 客户端界面触发器。

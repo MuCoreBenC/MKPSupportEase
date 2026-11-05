@@ -40,7 +40,7 @@ use crate::workbench::load_session_presets;
 use crate::workbench::paths;
 use crate::workbench::presets::{AssetKind, Presets};
 
-use super::{state, with_ctx, with_ctx_mut};
+use super::{state, with_ctx, with_struct_ctx};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -600,8 +600,11 @@ pub fn wb_assets(
             let (committed, draft, _) = state(ctx)?;
             let kind = kind.as_deref().and_then(parse_kind);
             let identity = identity.as_deref().and_then(parse_identity);
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 判 `present`（MKP 预设看 `build_state`）要的是"盘上产物与当前渲染是否一致"，
+            所以必须装渲染器 —— 不装的话 `build_state` 只能保守说 `Stale`，
+            界面就会把明明生成好的产物标成"不在"（2026-11-01 改判后需同步此处）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -632,20 +635,24 @@ pub fn wb_set_group(
     members: Vec<GroupMemberInput>,
 ) -> Result<AssetList, AppError> {
     traced("wb_set_group", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.set_group(crate::presetdata::Group {
-                id,
-                name,
-                members: members
-                    .into_iter()
-                    .map(|m| crate::presetdata::GroupMember {
-                        asset: m.asset,
-                        role: m.role,
-                    })
-                    .collect(),
-            })?;
-            list_now(ctx)
-        })
+        with_struct_ctx(
+            "group",
+            |_| vec!["assets.toml".to_owned()],
+            |ctx| {
+                ctx.presets.set_group(crate::presetdata::Group {
+                    id,
+                    name,
+                    members: members
+                        .into_iter()
+                        .map(|m| crate::presetdata::GroupMember {
+                            asset: m.asset,
+                            role: m.role,
+                        })
+                        .collect(),
+                })?;
+                list_now(ctx)
+            },
+        )
     })
 }
 
@@ -653,10 +660,14 @@ pub fn wb_set_group(
 #[tauri::command]
 pub fn wb_remove_group(id: String) -> Result<AssetList, AppError> {
     traced("wb_remove_group", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.remove_group(&id)?;
-            list_now(ctx)
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["assets.toml".to_owned()],
+            |ctx| {
+                ctx.presets.remove_group(&id)?;
+                list_now(ctx)
+            },
+        )
     })
 }
 
@@ -664,7 +675,8 @@ pub fn wb_remove_group(id: String) -> Result<AssetList, AppError> {
 /// 界面拿到它自己重筛，免得"改完才发现筛选条件变了"）
 fn list_now(ctx: &mut super::Ctx) -> Result<AssetList, AppError> {
     let (committed, draft, _) = state(ctx)?;
-    let book = crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
     Ok(list_of(
         &ctx.presets,
         &book,
@@ -748,43 +760,53 @@ pub fn wb_set_calibration_identity(
     value: Option<String>,
 ) -> Result<AssetList, AppError> {
     traced("wb_set_calibration_identity", |_| {
-        with_ctx_mut(|ctx| {
-            let asset =
-                ctx.presets.assets.get(&asset_id).cloned().ok_or_else(|| {
+        with_struct_ctx(
+            "",
+            |ctx| {
+                ctx.presets
+                    .assets
+                    .get(&asset_id)
+                    .and_then(|a| ctx.presets.assets.resolve(a).ok())
+                    .map(|p| vec![p.to_string_lossy().into_owned()])
+                    .unwrap_or_default()
+            },
+            |ctx| {
+                let asset = ctx.presets.assets.get(&asset_id).cloned().ok_or_else(|| {
                     AppError::invalid_argument(format!("没有这条资产：{asset_id}"))
                 })?;
-            if asset.kind != AssetKind::Model {
-                return Err(AppError::invalid_argument(
-                    "只有模型（3MF）才有校准身份，这条不是模型".to_string(),
-                ));
-            }
-            let abs = ctx.presets.assets.resolve(&asset)?;
+                if asset.kind != AssetKind::Model {
+                    return Err(AppError::invalid_argument(
+                        "只有模型（3MF）才有校准身份，这条不是模型".to_string(),
+                    ));
+                }
+                let abs = ctx.presets.assets.resolve(&asset)?;
 
-            match value.as_deref() {
-                Some(raw) => {
-                    /* 只认四个身份 —— 非法值直接拒绝，一个字节都不写 */
-                    let mode = postprocess::calibration_asset::validate_identity(raw)
+                match value.as_deref() {
+                    Some(raw) => {
+                        /* 只认四个身份 —— 非法值直接拒绝，一个字节都不写 */
+                        let mode = postprocess::calibration_asset::validate_identity(raw)
                         .ok_or_else(|| {
                             AppError::invalid_argument(format!(
                                 "「{raw}」不是合法身份（只认 ZOffset / Precise / Rough / Repetition）"
                             ))
                         })?;
-                    postprocess::calibration_asset::keep_backup(&abs)
-                        .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
-                    postprocess::calibration_asset::write_identity(&abs, mode)
-                        .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
+                        postprocess::calibration_asset::keep_backup(&abs)
+                            .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
+                        postprocess::calibration_asset::write_identity(&abs, mode)
+                            .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
+                    }
+                    None => {
+                        postprocess::calibration_asset::keep_backup(&abs)
+                            .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
+                        postprocess::calibration_asset::remove_identity(&abs)
+                            .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
+                    }
                 }
-                None => {
-                    postprocess::calibration_asset::keep_backup(&abs)
-                        .map_err(|e| AppError::io("留备份失败").with_detail(e))?;
-                    postprocess::calibration_asset::remove_identity(&abs)
-                        .map_err(|e| AppError::io("写 3MF 失败").with_detail(e))?;
-                }
-            }
 
-            /* 写完重新读盘，回全新清单（不手工改内存视图） */
-            list_now(ctx)
-        })
+                /* 写完重新读盘，回全新清单（不手工改内存视图） */
+                list_now(ctx)
+            },
+        )
     })
 }
 
@@ -796,10 +818,14 @@ pub fn wb_set_calibration_identity(
 #[tauri::command]
 pub fn wb_set_asset_delivery(asset_id: String, delivery: String) -> Result<AssetList, AppError> {
     traced("wb_set_asset_delivery", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.set_asset_delivery(&asset_id, &delivery)?;
-            list_now(ctx)
-        })
+        with_struct_ctx(
+            "delivery",
+            |_| vec!["assets.toml".to_owned()],
+            |ctx| {
+                ctx.presets.set_asset_delivery(&asset_id, &delivery)?;
+                list_now(ctx)
+            },
+        )
     })
 }
 
@@ -808,10 +834,14 @@ pub fn wb_set_asset_delivery(asset_id: String, delivery: String) -> Result<Asset
 #[tauri::command]
 pub fn wb_remove_asset(asset_id: String) -> Result<AssetList, AppError> {
     traced("wb_remove_asset", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.remove_asset(&asset_id)?;
-            list_now(ctx)
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["assets.toml".to_owned()],
+            |ctx| {
+                ctx.presets.remove_asset(&asset_id)?;
+                list_now(ctx)
+            },
+        )
     })
 }
 

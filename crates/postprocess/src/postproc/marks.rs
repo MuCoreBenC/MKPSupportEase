@@ -128,6 +128,128 @@ pub fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// 剔除涂胶段（`;Glueing Started` ~ `;Glueing Finished`）里的**抬笔/落笔与走速**。
+///
+/// 2026-11-03 起涂胶段内的 `G1 Z`（抬笔/落笔）与配对 `G1 F` 由发射层按「笔尖净空」
+/// 统一给出：每段空走先抬后走，落笔后才涂，并保留切片器拆开的多条空走。这使输出
+/// 与 `mkp-sr` 参考在涂胶段内必然不同（实测 42274.2：只增不减 Z/F，**XY 与 E 一字不动**）。
+///
+/// 所以整链判据改问「涂胶段的几何有没有变」：两边都剔掉 Z/F 再逐字节比，
+/// XY/E 仍然要求完全一致。抬升高度由 `travel_clearance` 管，块内连续性由
+/// `glue_block::continuity_tests` 与离线诊断管。
+///
+/// 分隔符用 `;Glueing Started/Finished`（两侧都有），不能用 `;MKP_BEGIN paint`
+/// —— 参考物是外部产物，里面没有 MKP 标记。
+pub fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut in_glue = false;
+    let mut last_xy: Option<(f64, f64)> = None;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_end();
+        if t == ";Glueing Finished" {
+            in_glue = false;
+            out.push_str(line);
+            continue;
+        }
+        if in_glue {
+            let code = t.split(';').next().unwrap_or("").trim();
+            /*
+             * 0mm 移动也是噪声：2026-11-03 起发射层会把「与回位同点的定位行」丢掉，
+             * 参考物里还留着它们。两边都不看，判据仍然咬住真实几何。
+             */
+            let zero_len = {
+                let mut nx = None::<f64>;
+                let mut ny = None::<f64>;
+                for tok in code.split_whitespace().skip(1) {
+                    if let Some(v) = tok.strip_prefix('X').and_then(|v| v.parse::<f64>().ok()) {
+                        nx = Some(v);
+                    }
+                    if let Some(v) = tok.strip_prefix('Y').and_then(|v| v.parse::<f64>().ok()) {
+                        ny = Some(v);
+                    }
+                }
+                match (nx, ny, last_xy) {
+                    (Some(x), Some(y), Some((px, py))) => {
+                        (x - px).abs() < 1e-6 && (y - py).abs() < 1e-6
+                    }
+                    _ => false,
+                }
+            };
+            if zero_len {
+                continue;
+            }
+            let z_only = code.starts_with("G1 Z") && !code.contains('X') && !code.contains('Y');
+            let f_only = code.starts_with("G1 F")
+                && !code.contains('X')
+                && !code.contains('Y')
+                && !code.contains('Z');
+            if z_only || f_only {
+                continue;
+            }
+        }
+        if in_glue {
+            let code = t.split(';').next().unwrap_or("").trim();
+            let mut nx = None::<f64>;
+            let mut ny = None::<f64>;
+            for tok in code.split_whitespace().skip(1) {
+                if let Some(v) = tok.strip_prefix('X').and_then(|v| v.parse::<f64>().ok()) {
+                    nx = Some(v);
+                }
+                if let Some(v) = tok.strip_prefix('Y').and_then(|v| v.parse::<f64>().ok()) {
+                    ny = Some(v);
+                }
+            }
+            if let (Some(x), Some(y)) = (nx, ny) {
+                last_xy = Some((x, y));
+            }
+        }
+        out.push_str(line);
+        if t == ";Glueing Started" {
+            in_glue = true;
+            last_xy = None;
+        }
+    }
+    out.into_bytes()
+}
+
+/// 剔除「塔块结束后的 feature 恢复行」。
+///
+/// 2026-11-04 起：塔块写了自己的 `; FEATURE: Inner wall`（预览里那个黄，用户明确要留），
+/// 而原文回到模型段时**不重发** `; FEATURE:`（Bambu 只在 feature 变化时才写）。
+/// 于是从塔块到本层结束的所有模型走线都挂在「内墙」名下 —— 预览里模型支撑被染成内墙黄，
+/// `切片结果` 面板的内墙占比也跟着虚高。修法是塔块末尾补一条
+/// `; FEATURE: <切片器当前那一档>`，位置正好是 Bambu 自己会写的那一处。
+///
+/// 这一条是本侧**有意新增**的行：整链参考物由来源仓库的 CLI 生成、本仓无法复现，
+/// 不能拿本侧输出覆盖它，所以判据先把它剔掉，再要求其余仍逐字节一致。
+///
+/// 认法只认 MKP 自己写的锚，三行紧邻：
+/// `;Leaving Wiping Tower` → `; LAYER_HEIGHT:` → `; FEATURE: <name>`。
+/// 切片器原生的 `; FEATURE:` 前面没有这个组合，不会误伤。
+pub fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    let mut prev1 = String::new();
+    let mut prev2 = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim_end();
+        /* 两种锚，都只认 MKP 自己的组合，切片器原生注释旁边没有它们：
+        ① 塔层块收尾：`;Leaving Wiping Tower` → `; LAYER_HEIGHT:` → `; FEATURE:`
+        ② 护套首层开头：`; FEATURE: …` 的**下一行**是 `; === Trapezoidal Sheath Start ===` */
+        let next = lines.get(i + 1).map(|l| l.trim_end()).unwrap_or_default();
+        let restore = t.starts_with("; FEATURE: ")
+            && ((prev1.starts_with("; LAYER_HEIGHT:") && prev2.contains(";Leaving Wiping Tower"))
+                || next.starts_with("; === Trapezoidal Sheath Start ==="));
+        if !restore {
+            out.push_str(line);
+        }
+        prev2 = std::mem::replace(&mut prev1, t.to_string());
+    }
+    out.into_bytes()
+}
+
 /// 落盘前的收尾。**必须是最后一道行变换** —— STATS 数的就是落盘的那份，
 /// `STATS_MATCH` 靠这个保证。
 ///

@@ -195,6 +195,15 @@ export interface ReportCollision {
    *  ★ 键名是 `Bbox` 不是 `BBox`：Rust 侧 `tower_bbox` 走 camelCase 就长这样 ——
    *  第一稿写成 `towerBBox`，大小写对不上 ⇒ 俯视图整块退掉（2026-10-18 真机踩的）。 */
   towerBbox?: ReportBox4
+  /**
+   * **切片器自己的擦料塔**的俯视包围盒（2026-11-04）。
+   *
+   * 与 `towerBbox`（MKP 塔的判据框）是两件事：这一格来自 G-code 里
+   * `; FEATURE: Prime tower` 段的真实走线并集，形状随盘变（有时又长又宽、有时很小），
+   * 所以只画矩形，不套 `TowerCoreSvg`。
+   * 老记录 / 没开官方塔 ⇒ `undefined`，那一层不画。
+   */
+  slicerTowerBbox?: ReportBox4
   /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0）。**只给"挪模型"建议方向用**——
    *  画图请用下面的 `modelBoxes`（每个模型各一个框）。 */
   modelBbox?: ReportBox4
@@ -260,6 +269,35 @@ export interface ReportTowerFacts {
   towerSafeZOffset?: number
   towerTravelSpeed?: number
   fastTowerMode?: string
+  /**
+   * **切片器自己的擦料塔**（2026-11-04）。
+   *
+   * 与上面那几格（MKP 擦料塔）是两件事：这里讲的是 Bambu 的 prime tower。
+   * 老记录没有这一格 ⇒ `undefined`，界面按「未知」降级（不假装它是「关」）。
+   */
+  slicerTower?: ReportSlicerTowerFacts | null
+}
+
+/** 切片器擦料塔（`detail.tower.slicerTower`） */
+export interface ReportSlicerTowerFacts {
+  /** G-code 头部 `; enable_prime_tower` */
+  enabled?: boolean
+  /** 有塔块的层数 */
+  layers?: number
+  /** 塔块首末 Z 之差（mm） */
+  height?: number
+  /** 耗材克数（E 总量 × 截面积 × 密度，与切片器面板同口径） */
+  filamentGrams?: number
+  /** 俯视包围盒（mm，机器坐标）；没塔块走线时是 `null` */
+  bbox?: ReportSlicerTowerBBox | null
+}
+
+/** 切片器擦料塔的俯视矩形（mm）。前端按它实时画框，**不套** MKP 塔的固定形状。 */
+export interface ReportSlicerTowerBBox {
+  minX?: number
+  maxX?: number
+  minY?: number
+  maxY?: number
 }
 
 /** 切片工艺组（`detail.slicer`） */
@@ -269,6 +307,11 @@ export interface ReportSlicerFacts {
   processPresetName?: string
   filamentType?: string
   nozzleDiameter?: number
+  /**
+   * 层高（2026-11-04）：原来只在 `snapshot.ir` 里（PascalCase），失败那趟没有快照 ⇒
+   * 回放屏永远是「—」。现在随这一组一起写，成功 / 失败都读得到。
+   */
+  layerHeight?: number
   slicerIroningEnabled?: boolean
   ironingMode?: string
   ironingThreshold?: number
@@ -450,10 +493,28 @@ export interface ReportExportFile {
   kind: ReportExportKind
   /** 落地时的文件名（`<基名>_original.gcode` 这种，**完整不省略** —— 框里要照实显示） */
   name: string
+  /**
+   * **归档里那一份的绝对路径**（`<数据根>/gcode_history/<日>/<id>_original.gcode`）。
+   *
+   * 信息页拿它显示 / 复制 / 交给「在访达中显示」；**只读** —— 定位那条命令收的是
+   * `id + kind`，路径永远由后端自己算（同「打开位置」那条纪律）。
+   *
+   * 这一份**不在盘上**时也照给（那正是它本该在的位置）—— 那一行虽然灰着，
+   * 路径仍然可以复制、可以定位到"它本该在这儿"。
+   */
+  path: string
+  /**
+   * 这一份**真在盘上**吗。
+   *
+   * 2026-11-04 起计划**恒报三份**：处理失败的那一次没有「处理后的文件」，
+   * 那一行照样出现、`exists=false` —— 界面把它灰掉划线（作者：「第三个也显示出来
+   * 然后灰色划线意思没有这个文件」），底下那句"归档里没有…"因此可以省掉。
+   */
+  exists: boolean
 }
 
 /**
- * 「导出执行报告」的计划：三件套叫什么、默认落到哪、哪几份归档里没有。
+ * 「导出执行报告」的计划：三件套叫什么、默认落到哪、哪几份真在盘上。
  *
  * 界面拿它画那个导出框（逐行文件名 + 路径胶囊），确认时才真写盘
  * （[`MkpApi.exportReportArchive`]）—— 两侧的基名由 Rust 侧同一个纯函数算，不会漂。
@@ -462,14 +523,18 @@ export interface ReportExportPlan {
   /** 基名：`<模型名 或 归档自己的名字>_<切片时刻>`（`帕姆_20261011142431`） */
   base: string
   /**
-   * 默认落点的**父目录**（`<用户根>/exports`）。界面显示时自己拼上 `<基名>/`，
+   * 默认落点的**父目录**（`<桌面>/MKP-导出报告`；2026-11-04 由 `<用户根>/exports` 改判，
+   * 桌面问不到时才退回老地方）。界面显示时自己拼上 `<基名>/`，
    * 导出时交回去的也是这个父目录 —— 两处口径一致。
    */
   defaultDir: string
-  /** 真在盘上、会跟着导出的那几份（顺序固定：原始 / 处理后 / 元数据） */
+  /**
+   * **恒为三份**（顺序固定：原始 / 处理后 / 元数据）。
+   *
+   * 缺的那一份也在里面（`exists=false`）：界面把那行灰掉划线，
+   * 而不是整行消失、再在底下补一句话解释少了什么。
+   */
   files: ReportExportFile[]
-  /** 归档里没有的那几份 —— 失败的那一次**不会有**「处理后的文件」，照实说，不假装齐 */
-  missing: ReportExportKind[]
 }
 
 
@@ -957,7 +1022,7 @@ export interface PresetFileInfo {
  * 留一个永远空的字段就是在编形状（需要它的那一步再加）。
  */
 /**
- * 用户自己那份**基于的云端那一版**现在怎么样了（第七层）。
+ * 用户自己那份**来源版本**与云端当前版的关系（第七层）。
  *
  * # 三个问题，各答各的（2026-10-28 重写）
  *
@@ -967,8 +1032,8 @@ export interface PresetFileInfo {
  *
  * | 问题 | 谁来答 |
  * |---|---|
- * | 是不是同一条发布线 | `catalogId`（`lineageCatalog` vs `cloudCatalog`） |
- * | 发布有没有往前走 | `publishSerial`（`lineageSerial` vs `cloudSerial`） |
+ * | 是不是同一条发布线 | `catalogId`（`sourceCatalog` vs `cloudCatalog`） |
+ * | 发布有没有往前走 | `publishSerial`（`sourceSerial` vs `cloudSerial`） |
  * | 这一份内容一不一样 | 文件 SHA-256 |
  *
  * 判定唯一出口是 Rust 侧 `runtime::local::based_on`，前端不重算。
@@ -991,29 +1056,37 @@ export type BasedOn =
   | 'inconsistent'
 
 /**
- * 「基于哪一版」这个结论**摆事实**用的那几格（全可空）。
+ * 「来源版本」这个结论**摆事实**用的那几格（全可空）。
+ *
+ * 每一格都只有一个数据来源（2026-11-04 定的维护规则：**界面上的时间 / 来源 / 版本
+ * 身份，都必须能指出唯一来源，并有测试证明它不会被相邻概念替代**）。
  *
  * 界面只负责把这几行原样摆出来 —— 判定全在 Rust 侧（`runtime::local::based_on`），
  * 前端不再自己拼第二套判据。
  */
 export interface BasedOnFacts {
-  /** 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。账上没记 ⇒ `null` */
-  lineageKind: 'download' | 'copy' | 'import' | 'unknown' | null
-  /** 这份副本建的时候哪个源在生效（`github#owner/repo@ref`）。没记账 ⇒ `null` */
-  lineageSource: string | null
+  /** 这份本地文件怎么来的：`download` / `copy` / `import` / `unknown`。没记录 ⇒ `null` */
+  sourceKind: 'download' | 'copy' | 'import' | 'unknown' | null
   /**
-   * 血统里记的来源版本标记（文件头 `# release_time`）—— 界面「配方版本时间」就是它。
+   * 来源是哪个源（`github#owner/repo@ref`）。
+   * 唯一来源：文件尾部 `[mkp_source]` 记录里的 `platform` / `repo` / `branch`。
+   * 没记录 ⇒ `null`（界面主信息显示「未知」，不编）。
+   */
+  sourceRef: string | null
+  /**
+   * 来源的配方版本标记（`# release_time` 那一行的原样值）。
    * **只做展示**：那是配方自己写下的时间，不是发布顺序，**更不是「云端发布时刻」**。
    */
-  lineageRelease: string | null
+  sourceRelease: string | null
   /**
-   * ★ 「云端发布时刻」的真值：这份**对应的那一代目录**实际发布的时刻。
-   * 它只说明目录什么时候发布，**不代表内容变过**。
-   * 从没记过 ⇒ `null` → 界面写「未知」，**不回落** `lineageRelease` / mtime。
+   * ★ **来源版本时间**：这份对应的那个云端版本**实际发布**的时刻。
+   *
+   * 唯一来源 = 文件尾部来源记录里履历最后一条的 `at`（接受 / 下载那一刻写入）。
+   * 没有记录 ⇒ `null` → 界面写「未知」，**绝不拿写盘记录 `generated_at` 或 mtime 顶**。
    */
-  lineagePublishedAt: string | null
-  /** 血统记的来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
-  lineageSha256: string | null
+  sourceVersionAt: string | null
+  /** 来源那一版云端原文 SHA-256（不是本地文件此刻的字节） */
+  sourceSha256: string | null
   /** 当前生效的源身份 */
   cloudSource: string | null
   /**
@@ -1023,16 +1096,19 @@ export interface BasedOnFacts {
   cloudPublishedAt: string | null
   /** 当前云端这一份的原文摘要（目录登记值）—— 「更多」里与本地对照 */
   cloudSha256: string | null
-  /** 血统认定自己属于哪条发布线（`# based_on_catalog`）。老副本 ⇒ `null` */
-  lineageCatalog: string | null
-  /** 血统认定自己基于那条线的第几号（`# based_on_serial`）。老副本 ⇒ `null` */
-  lineageSerial: number | null
+  /**
+   * 来源记录里那条发布线（`catalogId`）。
+   * **只在技术详情的「溯源记录」里出现** —— 它不是用户要看的主信息。没记录 ⇒ `null`
+   */
+  sourceCatalog: string | null
+  /** 来源记录里那条线的第几号（`publishSerial`）。没记录 ⇒ `null` */
+  sourceSerial: number | null
   /** 当前目录的发布线（`catalogId`）。老目录 / 随包旧版 ⇒ `null` */
   cloudCatalog: string | null
   /** 当前目录是那条线的第几号（`publishSerial`） */
   cloudSerial: number | null
   /**
-   * `unverified` 时为什么说不清：`no_lineage` / `no_release_line` /
+   * `unverified` 时为什么说不清：`no_source_record` / `no_release_line` /
    * `catalog_without_identity` / `not_in_catalog` / `no_sha` / `no_source_identity`。
    * 其余档位是 `null`。
    */
@@ -1041,7 +1117,7 @@ export interface BasedOnFacts {
 
 /** 说不清的原因（跨 IPC 的稳定词；界面翻成人话，不自己判） */
 export type UnverifiedReason =
-  | 'no_lineage'
+  | 'no_source_record'
   | 'no_release_line'
   | 'catalog_without_identity'
   | 'not_in_catalog'
@@ -1086,11 +1162,11 @@ export interface LocalPresetFile {
   /**
    * 上面那个结论**摆事实**的那几格（详情面板直接显示，前端不重算）。
    *
-   * 全部可空：`null` = 不知道（血统源没记账 / 目录没发布时刻），**不编**。
+   * 全部可空：`null` = 不知道（来源记录源没记账 / 目录没发布时刻），**不编**。
    * 源身份是规范化过的 `平台#仓库@ref`（`github#owner/repo@main`、`custom#host@-`）。
    */
   basedOnFacts: BasedOnFacts
-  /** 血统里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有血统是 `null`** */
+  /** 来源记录里记的来源（`dist/mkp/presets/A1-standard.toml`）。**没有来源记录是 `null`** */
   basedOnLabel: string | null
   /** 建副本那一刻来源文件头的版本号（给人看的）。不知道就是 `null` */
   basedOnRelease: string | null
@@ -1341,8 +1417,14 @@ export interface PresetDraftSummary {
   sourceFileName: string
   /** **用户线**的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
-  /** 「真改过才算」：与来源现在的字节比（只差血统处置 / 换行的差异不算改动） */
+  /** 「真改过才算」：与来源现在的字节比（只差来源记录处置 / 换行的差异不算改动） */
   dirty: boolean
+  /**
+   * **参数级改动处数**（值不同才算；注释 / 空行 / 来源记录不进账）。
+   * 列表行上的「未保存」只看它 —— `dirty` 会把"文件被应用/同步改过、草稿还是旧正文"
+   * 也算脏，`changed > 0` 才是"用户真的改了参数还没保存"。
+   */
+  changed: number
   /** 最后改动时刻（UTC epoch 秒） */
   updatedUnix: number
 }
@@ -1840,7 +1922,7 @@ export interface ActivePreset {
   /** 用户线的落点（相对用户根）；云端线是 `null`（落点由目录给） */
   path: string | null
   sha256: string
-  /** 认不出是哪台机型哪一版时是空串（用户那份没有血统、或目录里已经没有来源那份） */
+  /** 认不出是哪台机型哪一版时是空串（用户那份没有来源记录、或目录里已经没有来源那份） */
   machineId: string
   versionId: string
   intact: boolean
@@ -2094,6 +2176,20 @@ export interface WindowPrefs {
 export type PostprocUiMode = 'silent' | 'gui'
 
 /**
+ * **智能塔位置**三档（2026-11-04 由 `boolean` 换掉）。
+ *
+ * | 档 | 模型与擦料塔相撞时 |
+ * |---|---|
+ * | `off`（出厂） | 按碰撞停下，原文件不动 |
+ * | `auto` | **不问**，直接把塔挪到不撞的位置，挪完复检、跑完这一趟 |
+ * | `ask` | 停下问一句（「自动挪塔 / 我自己挪模型」），用户点了才挪 |
+ *
+ * ★ 三档互斥，不是"开关 + 还问不问"两个布尔 —— 后者能拼出"关着又问"这种非法态。
+ * ★ 线上字符串是契约（盘上 / DTO / 前端共用）：`TowerRelocateMode::wire()`。
+ */
+export type TowerRelocateMode = 'off' | 'auto' | 'ask'
+
+/**
  * 设置页里那几档的**解析后**值（`null` 已解、量程已夹）。
  *
  * 管线读的就是这一份（经 `runtime::postproc_prefs::apply_to_ir` 写进 `ir.prefs`）——
@@ -2110,8 +2206,8 @@ export interface ResolvedPostprocPrefs {
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
   bedGlueAllModels: boolean
-  /** **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才改这一趟的塔位置 */
-  autoTowerPosition: boolean
+  /** **智能塔位置**（2026-11-04 三档）：撞了是停下、直接挪、还是问一句 */
+  autoTowerPosition: TowerRelocateMode
 }
 
 /**
@@ -2132,8 +2228,8 @@ export interface PostprocPrefsWire {
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
   bedGlueAllModels?: boolean | null
-  /** **自动摆塔**（2026-10-18）：`null` = 回到出厂档（关） */
-  autoTowerPosition?: boolean | null
+  /** **智能塔位置**（2026-11-04 三档）：`null` = 回到出厂档（`off`） */
+  autoTowerPosition?: TowerRelocateMode | null
 }
 
 /** `getPostprocPrefs` 的回执：盘上原样 + 解析后 + 量程。 */
@@ -2236,8 +2332,21 @@ export interface ParamSyncEntry {
   key: string
   /** 我这份文件里现在写着的值 */
   local: string | null
-  /** 云端**旧值**：我上次处理到的那一版云端里这一项是什么 */
+  /**
+   * 云端**旧值**：我上次处理到的那一版云端里这一项是什么。
+   *
+   * ★ 它跟着"处理水位"走 —— 采用/保持之后水位推到当前版，这一格就等于 `cloudNew`。
+   * 所以它**不拿来当界面上的「上次云端」**：那一格看 `origin`。
+   */
   baselineOld: string | null
+  /**
+   * **上次云端值**（2026-10-31 的滚动记录）：我上次从云端拿到的那一版里这一项是多少。
+   *
+   * 只在两个时刻动：① 用户第一次把这一项改得与云端不同（记那版的值）；
+   * ② 整份对齐到新云端（滚成被换下来的那版）。**不会被采用/保持推进**。
+   * `null` = 还没记过（旧档 / 从没改过）⇒ 界面退回 `baselineOld`。
+   */
+  origin: string | null
   /** 云端**当前最新值**。云端当前版字节不在本机 ⇒ `null`（界面照实说"还没取回来"） */
   cloudNew: string | null
   /** 云端改过这一项、而我还没处理 */
@@ -2452,6 +2561,24 @@ export interface PostProcessFinished {
    * 两种**都是成功**，界面同一个成功屏，只有那一句结论文案按它分开说。
    */
   calibChoice?: 'print' | 'direct'
+  /**
+   * **碰撞那一趟的画布几何**（2026-11-04）：失败那屏的「说明」页要把上面那张红卡
+   * 换成"现在 / 挪后"两幅俯视图 —— 画它要塔框 / 模型框 / 可打印区这一整套，
+   * 与「每次提问」那张卡**同一份结构**（`RelocateGeo`）。
+   *
+   * ★ 不是撞塔的趟 ⇒ 缺省，那一块不摆（与从前一字不差）。
+   */
+  geo?: RelocateGeo | null
+  /**
+   * **这一趟挪过塔的记录**（2026-11-04）。
+   *
+   * 与归档 `_meta.json` 的 `relocation` **同一份**（Rust `archive::RelocationRecord`）。
+   * 有它 ⇒ 那一屏摆「现在 / 挪后」两幅俯视图 + 挪动距离；没有 ⇒ 那一块不摆（旧记录一字不差）。
+   *
+   * ★ 为什么要走结算消息：`auto`（开）档**不弹问句**，界面上没有 `question.geo`，
+   *   于是"塔被挪到哪"只有这条消息带得来（作者：开了自动也得把塔的移动显示出来）。
+   */
+  relocation?: RelocationRecord | null
   /**
    * **结果读数**（那一屏「结果」几扇要摆的读数：指标条 + 擦料与胶水消耗那几格）。
    *
@@ -2684,7 +2811,7 @@ export interface MkpApi {
    *
    * `path` 来自 [`getLocalCopyFor`]（或用户线列表）—— 必须是 `presets-local/…` 里
    * 真在的那一份。三个值一起写、不按页分；后端只改注册表派生的那三处值
-   * （注释、键序、血统三行一个字节不动）。
+   * （注释、键序、来源记录一个字节不动）。
    * 云端那一份是模板、永远不可变：还没有你的一份就先「另存为本地预设」。
    */
   savePresetCalibration(path: string, axes: Axes): Promise<void>
@@ -2851,7 +2978,7 @@ export interface MkpApi {
    * 盘就是底账（扫盘）：用户随时可能在 Finder 里改这个目录，所以没有账本可记。
    * 一份都没有 = 空数组，**不是错误**。
    *
-   * 每一份都带上**血统**（如果它带着 `# based_on*` 三行）与它对应的判定
+   * 每一份都带上**来源记录**（如果它带着 `# mkp_source` 三行）与它对应的判定
    * （[`BasedOn`]）—— 那是"云端换版了、你这份还是基于旧版"这件事的判据。
    */
   getLocalPresetFiles(): Promise<LocalPresetFile[]>
@@ -2944,7 +3071,7 @@ export interface MkpApi {
    * `beginPresetEdit` 虽然答 `reused`（还是这一份的草稿），但"改了哪几项"没有别的来源：
    * 不补这一条，参数弹窗就会"盘上有草稿、摘要说脏，界面一个改动都看不见"。
    *
-   * 判据是**参数值**，不是字节：注释 / 空行 / 血统那几行不算改动。
+   * 判据是**参数值**，不是字节：注释 / 空行 / 来源记录那几行不算改动。
    */
   readPresetDraftChanges(): Promise<Record<string, string>>
 
@@ -3003,10 +3130,10 @@ export interface MkpApi {
    * 云端线**另存**成 `presets-local/<原名>（已修改）<后缀>`（原件全程不动）；
    * 用户线**写回它自己** —— 同一个路径、同一份文件，不产生第二份（第八层）。
    *
-   * 云端线写下去的正文 = 草稿 + **文件头三行血统**（`# based_on` / `# based_on_release_time` /
-   * `# based_on_sha256`）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
+   * 云端线写下去的 = 草稿正文 + **尾部 `[mkp_source]` 来源记录**（`origin` 一节；
+   * 另存本身**不新增履历**）—— 于是这份文件**拷到哪台电脑上都说得清自己从哪来、基于哪一版**。
    * 那是"文件本身的信息"（随文件走），所以**不**另写进 `run/`（第七层作者定的原则）；
-   * 用户线写回时那三行**照抄原来那三行**（出处没变）。
+   * 用户线写回时那三行**照抄原来那一段**（出处没变）。
    *
    * 不碰云端原件、不碰下载区、也**不碰使用中指针**（生效走 [`applyActivePreset`]）。
    * 云端线再存一次就是覆盖它自己（`replaced` 说出来这次是不是盖掉了上一次那份）；
@@ -3025,7 +3152,7 @@ export interface MkpApi {
 
   /**
    * **开始改一份用户预设的正文**（预设页「编辑文件」）。与上面参数页那条链（`beginPresetEdit`）
-   * 不是一回事 —— 这里返回的正文**带着这一份的血统三行**（只在这份文件上有效），
+   * 不是一回事 —— 这里返回的正文**带着这一份的来源记录**（只在这份文件上有效），
    * 且要带着 **这份文件的 sha256**（保存时比一下有没有被别人抢先改）。
    */
   beginTextEdit(fileName: string, path: string): Promise<PresetTextDraft>
@@ -3075,7 +3202,7 @@ export interface MkpApi {
   getLocalPresetIndex(): Promise<LocalPresetIdentity[]>
 
   /**
-   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行血统、
+   * **重命名一份用户文件**（第十层）：只改名字，**字节一个不动** —— 内容、那三行来源记录、
    * TOML 都不重写；改完还是同一份 Preset。只换名字不换目录（`presets-local/` 那一格内）；
    * 新名字不许带路径分隔符、不许空、**后缀保持原样**（改名不改它是哪一类）；
    * 落点已经有东西就拒绝（**不覆盖**）。
@@ -3088,8 +3215,8 @@ export interface MkpApi {
   /**
    * **另存为一份新的**（第十一层）：把我自己那一份**按字节**复制成同一格里另一份新的用户文件。
    *
-   * **本地文件 → 本地文件**：原文件一个字节不动；内容与那三行 `based_on*` 血统
-   * **原样带过去**（来源已经是用户文件，不重算血统 —— 重算会把"从哪一版云端派生"说错）。
+   * **本地文件 → 本地文件**：原文件一个字节不动；内容与那三行 `mkp_source` 来源记录
+   * **原样带过去**（来源已经是用户文件，不重算来源记录 —— 重算会把"从哪一版云端派生"说错）。
    * 新名字过同一套门槛、落点已有东西就拒绝（**不覆盖、也不自动改名** —— 名字由用户自己换）。
    *
    * **一个状态都不碰**：不改使用中指针、不迁移草稿、不建草稿、不进 archive ——
@@ -3101,7 +3228,7 @@ export interface MkpApi {
    * **这台机型 / 这个版本，本地那份在哪**（校准页：初值从它读、保存写它）。
    *
    * 找法（有先后）：底账正用着的那一份（origin=local 且归属匹配）> 用户目录里
-   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落血统
+   * 第一份匹配的。归属 = 文件头 `# machine:` / `# variant:` 归一化后回落来源记录
    * （与用户线列表同一套口径）。
    *
    * 一份都没有 / 都读不出来 ⇒ `null`：校准页照旧显示云端默认值，保存被拦。
@@ -3121,7 +3248,7 @@ export interface MkpApi {
    * **导入第二段：真的复制进 `presets-local/`**。逐份独立（一份出错不拖累别人）：
    * 源文件只读；**不覆盖**（`newName` 走改名那套名字门槛）；**内容按字节复制、不校验 TOML**
    * （能不能当 Preset 用是后面 Preset 语义入口的事 —— 导入不是"安装 Preset"；
-   * 有血统三行原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
+   * 有来源记录原样带过去，没有也不编造）；**不碰任何状态**（不改使用中指针、
    * 不迁移 / 不建草稿、不进 archive）。
    */
   commitImport(items: ImportItem[]): Promise<ImportOutcome[]>
@@ -3262,25 +3389,49 @@ export interface MkpApi {
   getReportExportPlan(id: string): Promise<ReportExportPlan>
 
   /**
-   * **把这一条的三件套导出去**（报告页唯一的写口）：复制到 `dir/<基名>/` 下，一字不改。
+   * **把这一条的三件套导出去**（报告页唯一的写口），一字不改。
    *
    * `dir` 是**父目录**（默认值来自 [`MkpApi.getReportExportPlan`]），必须是绝对路径 ——
    * 相对路径会落到进程的当前目录，那不是用户点过的任何一个地方。
+   *
+   * `compress` = 导出框那颗「导出时启用压缩」（默认开、用户关过就记住）：
+   * 真 ⇒ 打成一个 `<基名>.zip` 落在 `dir` 下；假 ⇒ 散着复制到 `dir/<基名>/` 里。
+   *
+   * `overwrite` = 用户**明确点了「重新导出」**（2026-11-04 作者问「位置已有怎么办」）：
+   * 假 ⇒ 撞名整批不落，抛的那条错带 `E_REPORT_EXPORT_EXISTS_001`，界面据此把
+   * 「重新导出」摆出来；真 ⇒ 盖掉位置上同名的那几份（只动那三份 / 那个 zip，
+   * 目录里别的东西一概不碰）。**不许默认传真**：那份可能是用户自己改过的唯一一份。
+   *
    * 返回真正落盘的路径。三种拒绝都是照实抛，不吞：
-   * 目标里已经有同名的那一份（**整批不落**，不覆盖）、保存位置就是归档自己的目录、
+   * 目标里已经有同名的那一份（"整批不落"，见 `overwrite`）、保存位置就是归档自己的目录、
    * 这条记录一份文件都不在盘上。
    */
-  exportReportArchive(id: string, dir: string): Promise<string[]>
+  exportReportArchive(
+    id: string,
+    dir: string,
+    compress: boolean,
+    overwrite: boolean,
+  ): Promise<string[]>
 
   /**
-   * **打开这次导出的那个文件夹**（导出框上那颗「打开位置」）。
+   * **打开这次导出的那个落点**（导出框上那颗「打开位置」）。
    *
    * 导出成功之后用户要做的事只剩一件：去那个文件夹里看一眼 —— 所以那一刻
    * 「更改位置」换成它。`dir` 与 [`MkpApi.exportReportArchive`] 收到的是**同一个**
-   * 父目录，基名由后端算；**只有那个目录真在**才开（还没导出过就如实报找不到），
-   * 也绝不把一个文件交给系统（那是"启动它"，不是"打开位置"）。
+   * 父目录，基名由后端算；两种落点两种开法：散着导出的是一个目录（打开它），
+   * 压成一包时是一个 zip（在父目录里选中它）。**只有那个落点真在**才开
+   * （还没导出过就如实报找不到）。
    */
   revealReportExport(id: string, dir: string): Promise<void>
+
+  /**
+   * **在系统文件管理器里定位归档里的那一份**（导出框信息页那颗「定位」）。
+   *
+   * 作者要的是"不导出直接定位这个文件"：不写盘、不复制，打开文件管理器并**选中**
+   * `gcode_history/<日>/` 下的那一份。前端只给 `id + kind`，路径由后端自己算；
+   * 那一份不在（失败那一次没有「处理后的文件」）就照实拒绝并附期望路径。
+   */
+  revealReportSource(id: string, kind: ReportExportKind): Promise<void>
 
   /**
    * 选一个目录（导出框那颗「更改位置」）。走系统目录选择器，`current` 是打开时停在的
@@ -3398,6 +3549,18 @@ export interface MkpApi {
   setAutoCleanHistory(enabled: boolean): Promise<boolean>
 
   /**
+   * **自动检查软件更新**开着吗（2026-11-05；出厂 = 开）。
+   *
+   * 开 = 客户端成功拉到云端目录之后，顺路查一次 `release.json`；有新版在右上角
+   * 通知里弹一条。**不进启动 / 首屏路径**，也不做定时轮询。查失败一律静默。
+   * 关掉只影响这条顺路检查，设置页手动点「重新检查」照旧可用。
+   */
+  getAutoCheckUpdate(): Promise<boolean>
+
+  /** 开关自动检查：立即生效并落盘（`run/app-state.json` 的 `autoCheckUpdate` 格）。 */
+  setAutoCheckUpdate(enabled: boolean): Promise<boolean>
+
+  /**
    * **复制出来的那一份跟不跟云端**（2026-10-20；出厂 = 关）。
    *
    * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，"没选过怎么解释"
@@ -3416,6 +3579,27 @@ export interface MkpApi {
    * 而账本的出口正看这一格，所以写完后端广播一次 AppState 变更。
    */
   setCopiesFollowCloud(enabled: boolean): Promise<boolean>
+
+  /**
+   * **使用一份预设之后自动复制它的后处理脚本**（2026-11-01；出厂 = 关）。
+   *
+   * 回的是**解析后的 `boolean`**：盘上那一格"没选过"是 `null`，
+   * "没选过怎么解释"是后端的事（与上面两条同一条口径）。
+   *
+   * ★ 这一档**不改任何产物**：它只决定"换上一份之后要不要顺手把它的后处理命令
+   *   抄进剪贴板"这一个动作。判据的唯一读者是 `app/postprocess/autoCopy.ts`。
+   */
+  getAutoCopyScript(): Promise<boolean>
+
+  /**
+   * 开关「使用之后自动复制后处理脚本」：**立即生效并落盘**
+   * （写 `run/app-state.json` 的 `presets.autoCopyScript` 格）。
+   *
+   * 开 ⇒ 只要「使用中」从一个文件换成另一个文件，就把**新的那一份**的后处理命令
+   * 抄进剪贴板并发一条通知（通知口径与手动那颗「复制脚本」同一套，见
+   * `app/postprocess/copyScript.ts`）。
+   */
+  setAutoCopyScript(enabled: boolean): Promise<boolean>
 
   /**
    * 设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块的当前值（2026-10-17）。
@@ -3452,9 +3636,26 @@ export interface MkpApi {
   openPresetFolder(): Promise<string>
 
   /**
+   * **清理数据**（2026-11-01，作者：「还有一个清理数据的，就是只清理不卸载」）：
+   * 把 `AppData` 那一整棵树删掉（预设、云端原文、归档、回收站、执行记录、偏好、日志），
+   * **程序本体留着**，然后退出。
+   *
+   * ★ 不可逆。清完**一定退出** —— 状态文件被删了，进程要是继续活着，界面上
+   *   那个"当前状态"下一次任何写都会把刚清掉的文件原样写回去（= 清了个寂寞）。
+   * ★ 失败**原样报错**（detail 里带 `E_SYS_CLEAR_DATA_001`）。
+   *
+   * 界面必须**两段式确认**之后再调它（与卸载同一颗 3 秒回退的按钮）。
+   */
+  clearAppData(): Promise<void>
+
+  /**
    * **卸载应用**（2026-10-17）：删程序本体，然后退出。
    *
-   * ★ 不可逆，且**用户数据一个不碰**（预设 / 执行记录 / 备份原样留着）。
+   * `cleanData` 点名时**连数据一起删**（先在同一个命令里清数据、再删本体）——
+   * 界面上那颗「卸载时一并删除数据」的开关说的就是这一句，
+   * 两条路必须与界面上那几个字一致。
+   *
+   * ★ 不点名时**用户数据一个不碰**（预设 / 执行记录 / 备份原样留着）。
    * ★ 后端会先把 `.app` 删掉再 `exit`：删完这一下进程就没了。
    *   Windows 上交给一个 detach 的 `cmd` 等我们退出后再删（正在跑的 exe 删不掉）。
    * ★ 失败**原样报错**（detail 里带 `E_SYS_UNINSTALL_001`）——
@@ -3462,7 +3663,7 @@ export interface MkpApi {
    *
    * 界面必须**两段式确认**之后再调它（见设置页那个 3 秒回退的按钮）。
    */
-  uninstall(): Promise<void>
+  uninstall(cleanData: boolean): Promise<void>
 
   /**
    * 当前界面语言偏好（2026-10-25）。`null` = **还没选过** ⇒ 按"跟随系统"。
@@ -3636,7 +3837,7 @@ export interface MkpApi {
    *
    * ```text
    *   ① 云端当前版的字节   没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
-   *   ② 本地工作副本       presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 血统三行）
+   *   ② 本地工作副本       presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 来源记录）
    *                       已经在了 → **一个字节都不动**（我改过的东西不许被云端原件顶掉）
    * ```
    *
@@ -3725,7 +3926,7 @@ export interface MkpApi {
    * 两条判据：云端登记过哪几版 = 当前目录 + 版本链（按内容摘要去重）；
    * 下过没有 = 隐藏 baseline 里有没有那一版的摘要。
    *
-   * ★ **它不是"过时判定"**：不读用户预设的字节、不看血统，也**不会**说"你那份该更新了"。
+   * ★ **它不是"过时判定"**：不读用户预设的字节、不看来源记录，也**不会**说"你那份该更新了"。
    * `fileName` 给了就只返回那一个预设的版本。
    */
   getCloudVersions(fileName?: string | null): Promise<CloudVersion[]>

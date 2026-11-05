@@ -28,6 +28,7 @@
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
+import { announceBuild } from './build-stamp.mjs'
 
 const REPO_ROOT = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const TARGET_DIR = join(REPO_ROOT, 'target-workbench')
@@ -48,6 +49,27 @@ if (action !== 'dev' && action !== 'build') {
 const isDev = action === 'dev'
 const cmd = `tauri ${action}${isDev ? ' --no-watch' : ''} --config src-tauri/tauri.workbench.conf.json --features workbench`
 
+/* 开跑前的指纹提示 —— 与 `npm run tauri dev` **共用一份实现**（`scripts/build-stamp.mjs`）。
+ *
+ * 判据是**主程序 exe 的 mtime**：命令行里出现 `Compiling …` / `Building 450/452` 都不算
+ * 重编（可以编到一半报错，也可以只编某个 bin 却不重链主程序）。三行各有分工：
+ * `本次启动`（永远是当下）/ `这次要跑`（盘上那份是谁 + 源码比它新还是旧）/
+ * `✔ 编译完`（**这行才是本趟的编译时刻**；等不到就直说「这一趟没有重编」）。
+ */
+const exe = process.platform === 'win32' ? '.exe' : ''
+/* `presets` 只用来问「档位 · 提交」（主程序收到参数会直接起窗口）；
+ 它只在 workbench 这一档编得出来，客户端那个入口没有探针。 */
+/* 只有 `dev` 打这套：`build` 的产物在 `release/`，"等 debug exe 的 mtime 变"不适用。 */
+const announce = isDev
+  ? announceBuild({
+      repoRoot: REPO_ROOT,
+      targetDir: TARGET_DIR,
+      exeName: `mkp-support-ease${exe}`,
+      probe: `presets${exe}`,
+      restartNote: '改 Rust 必须 Ctrl+C 后重跑本命令；改前端走 HMR 不用',
+    })
+  : () => {}
+
 const child = spawn(cmd, {
   cwd: REPO_ROOT,
   stdio: 'inherit',
@@ -55,6 +77,7 @@ const child = spawn(cmd, {
   shell: true,
   env: { ...process.env, CARGO_TARGET_DIR: TARGET_DIR },
 })
+announce()
 
 /* Ctrl+C 由子进程（tauri → cargo / vite）自己处理；父进程先退会把它们留成孤儿 */
 process.on('SIGINT', () => {})

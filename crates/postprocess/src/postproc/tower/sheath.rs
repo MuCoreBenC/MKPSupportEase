@@ -114,6 +114,11 @@ pub fn generate_sheath_gcode(
     };
 
     let mut lines: Vec<String> = Vec::new();
+    /* 预览归类（2026-11-04）：护套首层是 MKP 塔的一部分，但它在第一层的 `; FEATURE:` 之前
+    就落笔了 —— 不声明的话，切片器把它算进上文那个 `Custom`，塔底那一圈就被画成绿色
+    （作者：「擦料塔底层，首层出现的问题」）。这里按塔自己的档声明一次，
+    后面塔层块每层都会再写一遍。 */
+    lines.push("; FEATURE: Inner wall".to_string());
     lines.push("; === Trapezoidal Sheath Start ===".to_string());
     lines.push(format!("; Sheath Expansion: {expansion:.3}mm"));
     lines.push(format!("; LINE_WIDTH: {line_width:.3}"));
@@ -152,7 +157,16 @@ pub fn generate_sheath_gcode(
         let mut bottom = cy;
         let mut top = cy;
 
-        loop {
+        /* 螺旋靠 `line_width` 一圈圈往外推，四边同时到位才 break。行距为 0（喷嘴直径 0
+        这种坏 IR）时**永远推不出去** —— 2026-11-01 一次单测就是这么把内存吃光、整机卡死的。
+        区间有限、每圈必推一步 ⇒ 圈数必有上界，撞上它就收，宁可画得糙也不许空转。 */
+        let span = (sheath_max_x - sheath_min_x).max(sheath_max_y - sheath_min_y);
+        let max_rings = if line_width > 0.0 {
+            (span / line_width).ceil() as usize + 2
+        } else {
+            0
+        };
+        for _ in 0..max_rings {
             let mut seg_length = right - left;
             let mut seg_e = (seg_length * lh * spacing) / filament_area * first_layer_flow_ratio;
             last_x = right;

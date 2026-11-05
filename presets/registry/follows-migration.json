@@ -1,0 +1,181 @@
+{
+  "at": "2026-11-03T06:02:02Z",
+  "marked": 45,
+  "ambiguous": [
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1:FAST",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1:FASTV3.3",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1:STANDARD",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1_MINI:FAST",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1_MINI:FASTV3.3",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_mount_gcode",
+      "uid": "A1_MINI:STANDARD",
+      "value": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "baseValue": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_unmount_gcode",
+      "uid": "A1:FAST",
+      "value": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+      "baseValue": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_unmount_gcode",
+      "uid": "A1:STANDARD",
+      "value": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+      "baseValue": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_unmount_gcode",
+      "uid": "A1_MINI:FAST",
+      "value": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "baseValue": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_unmount_gcode",
+      "uid": "A1_MINI:FASTV3.3",
+      "value": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "baseValue": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.custom_unmount_gcode",
+      "uid": "A1_MINI:STANDARD",
+      "value": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "baseValue": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.x",
+      "uid": "P1S:LITE",
+      "value": -25.9,
+      "baseValue": -25.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.x",
+      "uid": "P2S:STANDARD",
+      "value": -25.9,
+      "baseValue": -25.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.x",
+      "uid": "X1C:LITE",
+      "value": -25.9,
+      "baseValue": -25.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.y",
+      "uid": "P1S:LITE",
+      "value": 14.0,
+      "baseValue": 14.0,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.y",
+      "uid": "P2S:STANDARD",
+      "value": 14.0,
+      "baseValue": 14.0,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.y",
+      "uid": "X1C:LITE",
+      "value": 14.0,
+      "baseValue": 14.0,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "A1_MINI:FAST",
+      "value": 3.9,
+      "baseValue": 3.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "A1_MINI:FASTV3.3",
+      "value": 3.9,
+      "baseValue": 3.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "A1_MINI:STANDARD",
+      "value": 3.9,
+      "baseValue": 3.9,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "P1S:LITE",
+      "value": 1.1,
+      "baseValue": 1.1,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "P2S:STANDARD",
+      "value": 1.1,
+      "baseValue": 1.1,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "toolhead.offset.z",
+      "uid": "X1C:LITE",
+      "value": 1.1,
+      "baseValue": 1.1,
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "wiping.ironing_mode",
+      "uid": "A1:FASTV3.3",
+      "value": "auto",
+      "baseValue": "auto",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    },
+    {
+      "paramKey": "wiping.ironing_mode",
+      "uid": "A1:STANDARD",
+      "value": "auto",
+      "baseValue": "auto",
+      "reason": "值恰好等于基底：历史状态无法确认（可能是跟随，也可能自己定过），按保守口径判「不跟随」"
+    }
+  ]
+}

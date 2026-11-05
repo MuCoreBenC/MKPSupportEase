@@ -1,4 +1,5 @@
 === CASE sheath/first_layer_sheath ===
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 2.000mm
 ; LINE_WIDTH: 0.500
@@ -119,6 +120,7 @@ G17
 G3 Z0.800 I1.217 J0 P1 F42000
 G1 X26.250 Y22.250 F9000.0
 === CASE sheath/first_layer_brim ===
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 2.000mm
 ; LINE_WIDTH: 0.500
@@ -239,6 +241,7 @@ G17
 G3 Z0.800 I1.217 J0 P1 F42000
 G1 X26.250 Y22.250 F9000.0
 === CASE sheath/first_layer_rib_clamp ===
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 2.000mm
 ; LINE_WIDTH: 0.500
@@ -343,6 +346,7 @@ G17
 G3 Z0.800 I1.217 J0 P1 F42000
 G1 X28.040 Y24.040 F9000.0
 === CASE sheath/layer1_sheath_rect_lowaccel ===
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 1.600mm
 ; LINE_WIDTH: 0.500
@@ -371,6 +375,7 @@ G17
 G3 Z1.000 I1.217 J0 P1 F42000
 G1 X26.650 Y22.650 F9000.0
 === CASE sheath/layer3_sheath_rect_highaccel ===
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 1.600mm
 ; LINE_WIDTH: 0.500

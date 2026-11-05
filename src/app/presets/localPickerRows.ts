@@ -15,7 +15,7 @@
  *
  * # 归属怎么认（与参数页 `editTargetByCombo` 同一套，别另立一套）
  *
- * - 用户那份的机型 / 版本从**血统**认（`basedOnMachineId` / `basedOnVersionId`）；
+ * - 用户那份的机型 / 版本从**来源记录**认（`basedOnMachineId` / `basedOnVersionId`）；
  *   认不出的（手工拷的 / 导入的 / 自己写的）**不进抽屉** —— 它不对应任何组合，
  *   硬塞一格会让"选中哪一版"这件事失去依据。它们在**预设页**照常列着。
  * - 只有 `kind === 'mkp_preset'` 的能进（`.json` 之类不是校准 / 参数的对象）。
@@ -47,7 +47,7 @@ export function localPickerRows(files: LocalPresetFile[], machines: Machine[]): 
     if (f.kind !== 'mkp_preset') continue
 
     /*
-     * 归属：**血统优先**（它就是"从哪一版来的"），其次是文件头那两行 `# machine/# variant`
+     * 归属：**来源记录优先**（它就是"从哪一版来的"），其次是文件头那两行 `# machine/# variant`
      * （`machineId` / `versionId` —— 复制出来的那份会带上它）。都没有就不进抽屉。
      */
     const machineId = f.basedOnMachineId ?? f.machineId

@@ -1,8 +1,8 @@
-//! **普通生成 / 检查路径不写对照基线**（b05 Task 6.5）。
+//! **普通生成 / 检查路径不写对照基线**（b05 Task 6.5；2026-11-04 随旧生成器收口）。
 //!
-//! 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：唯一能改它的动作是
-//! `gen-presets --sync-baseline`，而它要求人先看过差异。这条判据把
-//! 「其余路径一个字节都不碰它」变成一句可执行的话 —— 真跑一遍生成与检查，
+//! 基线是判据资产（`docs/ARCHITECTURE.md` §10.6）：唯一能改它的动作是工作台的
+//! `wb_sync_baseline`（原 `gen-presets --sync-baseline` 已退役），且要求人先看过差异。
+//! 这条判据把「其余路径一个字节都不碰它」变成一句可执行的话 —— 真跑一遍生成与检查，
 //! 再逐份比基线的内容哈希。
 //!
 //! # 口径
@@ -24,8 +24,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use preset::generate::{assets_dir, check_all, check_baseline, fixtures_dir, write_all};
-use preset::lineage::sha256_hex;
+use preset::generate::{assets_dir, check_baseline, fixtures_dir, write_all};
+use preset::provenance::sha256_hex;
 use preset::recipe::Recipe;
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");
@@ -86,13 +86,9 @@ fn the_generate_and_check_paths_do_not_touch_the_baseline() {
     let assets = assets_dir();
     let r = recipe();
 
-    // ① 两条只读检查：产物 vs 配方（K-G7）、产物 vs 基线（K-G0'）
-    let report = check_all(&r, &assets).expect("检查能跑完");
-    assert_eq!(
-        report.checked, 9,
-        "只比了 {} 份（产物 vs 配方）—— 这条判据在空转，K-G7 那边会先红",
-        report.checked
-    );
+    // ① 只读检查：产物 vs 基线（K-G0'）。
+    //    「产物 vs 配方」的 K-G7 已随 gen-presets 退役 —— 两种头部格式逐字节比必然假红；
+    //    正式产物由工作台 presets diff / check:artifacts 守。
     let report = check_baseline(&assets, &base).expect("检查能跑完");
     assert_eq!(
         report.checked, 9,
@@ -100,15 +96,15 @@ fn the_generate_and_check_paths_do_not_touch_the_baseline() {
         report.checked
     );
 
-    // ② 生成路径：写进**临时目录**（真 `--write` 写的是 assets/，这里不碰仓库；
-    //    工作台那条 `wb_generate` 写的是 presets/delivery/ —— 两者都不该碰基线）
+    // ② 生成路径：写进**临时目录**（工作台 `wb_generate` 写的是 presets/delivery/，
+    //    两者都不该碰基线）
     let tmp = tempfile::tempdir().expect("临时目录");
     assert_eq!(write_all(&r, tmp.path()).expect("写产物"), 9);
 
     let after = snapshot(&base);
     assert_eq!(
         before, after,
-        "普通生成 / 检查路径动了对照基线 —— 它只能被 `gen-presets --sync-baseline` \
+        "普通生成 / 检查路径动了对照基线 —— 它只能被工作台 `wb_sync_baseline` \
          显式改（人先看过差异），见 `docs/ARCHITECTURE.md` §10.6"
     );
 }

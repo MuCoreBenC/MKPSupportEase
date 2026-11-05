@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.9"
+version = "0.0.10-dev"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
@@ -41,6 +41,16 @@ required-features = ["workbench"]
 [[bin]]
 name = "presets"
 path = "src/bin/presets.rs"
+required-features = ["workbench"]
+
+# 清译文台账（2026-11-02）：按 `key=labelEn,descJa` 点名摘掉「待重译」标记。
+#
+# ★ 必须显式写出来，否则 cargo 会把 `src/bin/clear-stale.rs` 当自动发现的 bin
+#   一起编进默认 feature —— 而它 import 的 `presetdata` 那条线在默认 feature 下
+#   编不出来，`cargo clippy --all-targets`（不带 workbench）会 E0433 红掉。
+[[bin]]
+name = "clear-stale"
+path = "src/bin/clear-stale.rs"
 required-features = ["workbench"]
 
 [build-dependencies]

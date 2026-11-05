@@ -24,6 +24,23 @@ pub mod app;
 pub mod clock;
 pub mod domain;
 pub mod paths;
+
+/// 产物头那一行的前缀。**全仓只有这一处**定义它（读、写、剥离都走这里）。
+///
+/// 它记的是"这份产物最近一次成功生成"的时刻（ISO 8601 + 偏移，本地可读），
+/// 客户端会读它显示。但它**不参与"内容变没变"的判断** —— 判断前先剥掉这一行
+/// （[`strip_generated_at`]），否则每点一次生成都会"有变化"。
+pub const GENERATED_AT_PREFIX: &str = "# generated_at:";
+
+/// 从文本里剥掉 `# generated_at:` 行，得到"业务内容"。
+///
+/// 这是"变没变"的唯一口径：生成、预演、待更新标记、交付判定全都用它，
+/// 不许有第二套（各写一套迟早有一边把"没变"报成"变了"）。
+pub fn strip_generated_at(text: &str) -> String {
+    text.split_inclusive('\n')
+        .filter(|l| !l.starts_with(GENERATED_AT_PREFIX))
+        .collect()
+}
 /// 预设真相源。**它不住在这里** —— 代码搬去了 [`crate::presetdata`]（客户端也要读预设，
 /// 而这一整棵子树是 feature gate 的），这里只是把它**别名**回 `presets`：
 /// 工作台侧几十处 `crate::workbench::presets::X` 因此一个都不用改。
@@ -33,9 +50,9 @@ pub mod paths;
 pub use crate::presetdata as presets;
 pub mod store;
 
-/// 两端一致性判据：客户端那份「血统三行」与这里那份必须逐字节一样（**只在测试里编**）
+/// 两端一致性判据：客户端那层来源记录封装与库里那份必须给出同样的结果（**只在测试里编**）
 #[cfg(test)]
-mod lineage_parity;
+mod provenance_parity;
 
 use serde::Serialize;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
@@ -96,27 +113,9 @@ pub fn load_session_presets() -> Result<crate::presetdata::Presets, AppError> {
 /// ★ `pub`：换主题那一档要按它找到这扇窗（见 [`crate::ipc::prefs::set_theme`]）。
 pub const WINDOW_LABEL: &str = "workbench";
 
-/// 窗口标题。**测试模式那一份带前缀** —— 标题栏是唯一一处"切到别的窗口也还看得见"
-/// 的地方（任务栏、Alt+Tab、截图里都在），作者要的"时时刻刻知道我在哪一边"就靠它兜底。
+/// 工作台窗口标题。一度带「【测试模式】」前缀，沙箱删掉之后只剩这一个名字。
 fn window_title() -> String {
-    if paths::sandbox_on() {
-        format!("{SANDBOX_TITLE_PREFIX}SupportEase 工作台")
-    } else {
-        "SupportEase 工作台".to_owned()
-    }
-}
-
-/// 测试模式下标题的前缀（一眼分得开）
-const SANDBOX_TITLE_PREFIX: &str = "【测试模式】";
-
-/// 把窗口标题按**现在**的模式写一遍。
-///
-/// 开窗时用 [`window_title`]，切换模式时由那几条命令调这里 —— 标题不是启动一次的
-/// 快照，它得跟着模式走，否则人会对着一个说"正式"的标题栏看沙箱。
-pub fn refresh_window_title(app: &AppHandle) {
-    if let Some(win) = app.get_webview_window(WINDOW_LABEL) {
-        let _ = win.set_title(&window_title());
-    }
+    "SupportEase 工作台".to_owned()
 }
 
 /// 开工作台窗口。已经开着就聚焦，不重复开第二个。

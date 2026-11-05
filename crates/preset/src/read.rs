@@ -19,11 +19,19 @@ pub fn read_preset(path: &Path) -> Result<PresetFile, PostprocError> {
 /// `ReadTomlFromBytes` 的逐字复刻：先原样 Unmarshal，失败则把 `\r\n`/`\r`
 /// 归一为 `\n` 再试一次，仍失败才报 `E_TOML_PARSE_001`。
 pub fn read_preset_from_bytes(raw: String) -> Result<PresetFile, PostprocError> {
-    let parsed: Result<TomlConfig, _> = toml::from_str(&raw);
+    /*
+     * `[mkp_source]` 是**程序写的溯源记录**，不是用户参数：先剥掉再喂给
+     * `TomlConfig`（它是 `deny_unknown_fields`，不剥就会被判「这份预设比本程序新」）。
+     * 剥的是逐行整段，正文与头注释一个字节不动。
+     */
+    let provenance = crate::provenance::parse(&raw);
+    let body = crate::provenance::strip(&raw);
+
+    let parsed: Result<TomlConfig, _> = toml::from_str(&body);
     let config = match parsed {
         Ok(cfg) => cfg,
         Err(first_err) => {
-            let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+            let normalized = body.replace("\r\n", "\n").replace('\r', "\n");
             match toml::from_str(&normalized) {
                 Ok(cfg) => cfg,
                 Err(second_err) => {
@@ -41,15 +49,16 @@ pub fn read_preset_from_bytes(raw: String) -> Result<PresetFile, PostprocError> 
             path: String::new(),
         })?;
     let release_time = parse_release_time_from_content(&raw);
+    let generated_at = parse_generated_at_from_content(&raw);
     let variant = parse_variant_from_content(&raw);
-    let lineage = parse_lineage_from_content(&raw);
 
     Ok(PresetFile {
         config,
         release_time,
+        generated_at,
         machine,
         variant,
-        lineage,
+        provenance,
         raw,
     })
 }
@@ -90,8 +99,18 @@ fn unknown_field_name(message: &str) -> Option<String> {
 /// `^#\s*release_time\s*:\s*(.+)$`（read.go:205 的正则，trim 后逐行匹配）。
 /// 手写匹配器（无 regex 依赖）：'#'、任意空白、字面量、任意空白、':'、
 /// 任意空白、至少一个字符的捕获（TrimSpace 后为空视同未命中）。
+///
+/// ★ 只认 `release_time`（2026-11-04 改）：它回答「这是配方里的哪一版」，由配方自己写。
+/// `generated_at` 回答「这份字节什么时候落盘」—— **两件事，不许互相顶替**
+/// （`AGENTS.md` §6）。新产物没有这一行 ⇒ `None`，界面照实写「未知」。
 pub fn parse_release_time_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "release_time")
+}
+
+/// `^#\s*generated_at\s*:\s*(.+)$`：**写盘记录**，不是发布时刻、也不是配方版本时间。
+/// 单独成一个字段，避免被拿去顶 `release_time`（2026-11-04）。
+pub fn parse_generated_at_from_content(content: &str) -> Option<String> {
+    parse_header_value(content, "generated_at")
 }
 
 /// `^#\s*machine\s*:\s*(.+)$`（read.go:219；actualMachine 的 SSOT 数据源）。
@@ -107,26 +126,12 @@ pub fn parse_variant_from_content(content: &str) -> Option<String> {
     parse_header_value(content, "variant")
 }
 
-/// `# based_on` / `# based_on_release_time` / `# based_on_sha256` 三行。
+/// 读尾部 `[mkp_source]` 溯源记录（实现只有 [`crate::provenance::parse`] 一处）。
 ///
-/// 三项**全都缺** ⇒ 返回 `None`（"这份预设没有血统"，今天磁盘上所有预设都是这样）；
-/// 只缺其中几项 ⇒ 返回 `Some`，缺的那几项是 `None`（"这几项不知道"）。
-/// 这两种情况在界面上说的话不一样，所以类型上必须分得开。
-///
-/// **匹配顺序有讲究**：`based_on_release_time` 必须比 `based_on` 先试 ——
-/// `match_header_key` 只要求键后跟可选空白 + 冒号，而 `based_on_release_time` 这一行
-/// 用 `based_on` 去匹配时，键后紧跟的是 `_`（不是冒号）⇒ 不会误命中。
-/// 这条已经由判据钉住（`# based_on_x: v` 不许被当成 `based_on`）。
-pub fn parse_lineage_from_content(content: &str) -> Option<crate::model::Lineage> {
-    let lineage = crate::model::Lineage {
-        based_on: parse_header_value(content, "based_on"),
-        based_on_release_time: parse_header_value(content, "based_on_release_time"),
-        based_on_sha256: parse_header_value(content, "based_on_sha256"),
-    };
-    if lineage.is_empty() {
-        return None;
-    }
-    Some(lineage)
+/// 没有记录 ⇒ `None`。**旧的头注释 `# based_on*` 不再读取**（2026-11-04 破坏性重构：
+/// 溯源记录已迁到文件尾部的表里，头注释那几个键彻底弃用）。
+pub fn parse_provenance_from_content(content: &str) -> Option<crate::model::SourceProvenance> {
+    crate::provenance::parse(content).filter(|p| !p.is_empty())
 }
 
 /// 逐行找 `# <key>: <值>`，返回第一个非空值。四个头注释字段共用这一条路
@@ -210,6 +215,35 @@ glue_z_compensation_enabled = false
         assert_eq!(f.config.toolhead.offset_y, 18.6);
         assert_eq!(f.config.wiping.wiper_x, 20.0);
         assert!(f.config.wiping.rib_fillet_wall);
+    }
+
+    /// 两个时间各归各（2026-11-04）：写盘记录不许顶替配方版本标记。
+    #[test]
+    fn generated_at_is_not_a_release_time() {
+        let only_generated = MINIMAL.replace(
+            "# release_time: 2026-08-19 01:38:13\n",
+            "# generated_at: 2026-11-01T12:30:00+08:00\n",
+        );
+        let f = read_preset_from_bytes(only_generated).unwrap();
+        assert_eq!(
+            f.release_time, None,
+            "只有写盘记录时，配方版本时间必须未知（不许拿 generated_at 顶）"
+        );
+        assert_eq!(
+            f.generated_at.as_deref(),
+            Some("2026-11-01T12:30:00+08:00"),
+            "写盘记录要单独读出来，不能丢"
+        );
+
+        // 两行都在：各读各的，互不覆盖
+        let both = MINIMAL.replacen(
+            "# machine: A1\n",
+            "# machine: A1\n# generated_at: 2026-11-01T12:30:00+08:00\n",
+            1,
+        );
+        let f = read_preset_from_bytes(both).unwrap();
+        assert_eq!(f.release_time.as_deref(), Some("2026-08-19 01:38:13"));
+        assert_eq!(f.generated_at.as_deref(), Some("2026-11-01T12:30:00+08:00"));
     }
 
     #[test]
@@ -306,18 +340,41 @@ glue_z_compensation_enabled = false
         }
     }
 
-    /// K-O2a：血统三行读得回来，缺一行只让那一项 `None`，三行全缺 ⇒ `lineage` 是 `None`。
+    /// 溯源记录：没有记录 ⇒ `None`；带 `[mkp_source]` ⇒ 读得出来，
+    /// 且**带上它仍能读预设**（`TomlConfig` 是 `deny_unknown_fields`，靠先剥再解析）。
     #[test]
-    fn ko2a_lineage_header_is_optional_per_line() {
-        // 今天磁盘上所有预设都没有这三行 ⇒ 必须是 None（不是空 Lineage）
+    fn provenance_tail_block_is_readable_and_does_not_break_the_config() {
         let plain = read_preset_from_bytes(MINIMAL.to_string()).unwrap();
-        assert_eq!(
-            plain.lineage, None,
-            "K-O2a 红：没有血统的预设不该带一个空壳 Lineage —— \
-             『没有血统』与『血统未知』在界面上说的话不一样"
-        );
+        assert_eq!(plain.provenance, None, "没有记录就是 None，不是空壳");
 
-        let full = MINIMAL.replacen(
+        let with_block = format!(
+            "{MINIMAL}\n[mkp_source]\nschema = 1\n\
+             [mkp_source.origin]\nkind = \"download\"\n\
+             file = \"mkp/presets/A1-fast.toml\"\nplatform = \"github\"\n\
+             repo = \"owner/repo\"\nbranch = \"main\"\n\
+             at = \"2026-10-31T00:00:00Z\"\nsha256 = \"{}\"\n\
+             catalog = \"support-ease\"\nserial = 5\nrevision = \"f09e\"\n",
+            "a".repeat(64)
+        );
+        let f = read_preset_from_bytes(with_block)
+            .expect("带溯源记录必须仍读得出来（不能被 deny_unknown_fields 拒掉）");
+        let prov = f.provenance.clone().expect("有 [mkp_source] 就得有记录");
+        let origin = prov.origin.expect("有 origin");
+        assert_eq!(origin.platform.as_deref(), Some("github"));
+        assert_eq!(origin.branch.as_deref(), Some("main"));
+        assert_eq!(origin.serial, Some(5));
+        assert!(origin.has_release_baseline(), "三样齐了才能判谁新");
+        // 正文与头字段照旧
+        assert_eq!(f.machine, "A1");
+        assert_eq!(f.release_time.as_deref(), Some("2026-08-19 01:38:13"));
+        assert_eq!(f.config.toolhead.speed_limit, 70.0);
+    }
+
+    /// 旧的头注释 `# based_on*` 已彻底弃读（破坏性重构）：
+    /// 有它们也不产生溯源记录，正文照常读。
+    #[test]
+    fn legacy_based_on_headers_are_no_longer_read() {
+        let legacy = MINIMAL.replacen(
             "# machine: A1\n",
             "# machine: A1\n\
              # based_on: mkp/A1MF_260628.toml\n\
@@ -325,54 +382,13 @@ glue_z_compensation_enabled = false
              # based_on_sha256: 115e061f00\n",
             1,
         );
-        let f = read_preset_from_bytes(full.clone()).unwrap();
-        let l = f.lineage.clone().expect("三行都在，血统必须有");
-        assert_eq!(l.based_on.as_deref(), Some("mkp/A1MF_260628.toml"));
+        let f = read_preset_from_bytes(legacy).unwrap();
         assert_eq!(
-            l.based_on_release_time.as_deref(),
-            Some("2026-08-19 01:38:13")
+            f.provenance, None,
+            "旧 based_on 头注释不再产生来源记录 —— 旧副本来源退回未知"
         );
-        assert_eq!(l.based_on_sha256.as_deref(), Some("115e061f00"));
-        // 血统注释不许影响原有的头字段与 serde 面（回归）
-        assert_eq!(f.machine, "A1");
-        assert_eq!(f.release_time.as_deref(), Some("2026-08-19 01:38:13"));
+        assert_eq!(f.machine, "A1", "正文与头字段照旧");
         assert_eq!(f.config.toolhead.speed_limit, 70.0);
-
-        // 逐行删掉一行：该项 None，其余照旧，read_preset 仍成功
-        for (line, name) in [
-            ("# based_on: mkp/A1MF_260628.toml\n", "based_on"),
-            (
-                "# based_on_release_time: 2026-08-19 01:38:13\n",
-                "based_on_release_time",
-            ),
-            ("# based_on_sha256: 115e061f00\n", "based_on_sha256"),
-        ] {
-            let partial = full.replacen(line, "", 1);
-            assert_ne!(partial, full, "构造失败：没找到 {name} 那一行");
-            let l = read_preset_from_bytes(partial)
-                .unwrap_or_else(|e| panic!("K-O2a 红：少一行血统不该读不出来（{name}）：{e}"))
-                .lineage
-                .unwrap_or_else(|| panic!("K-O2a 红：还剩两行，血统不该是 None（删的是 {name}）"));
-            let missing = match name {
-                "based_on" => l.based_on.is_none(),
-                "based_on_release_time" => l.based_on_release_time.is_none(),
-                _ => l.based_on_sha256.is_none(),
-            };
-            assert!(missing, "K-O2a 红：{name} 删了却还读出了值：{l:?}");
-        }
-    }
-
-    /// `based_on` 不许把 `based_on_x` 那一行吃掉（前缀撞键）。
-    #[test]
-    fn ko2a_based_on_does_not_swallow_longer_keys() {
-        assert_eq!(
-            parse_lineage_from_content("# based_on_x: v"),
-            None,
-            "`based_on_x` 不是我们认的键，不许被当成 based_on"
-        );
-        let l = parse_lineage_from_content("# based_on_sha256: abc").expect("只有摘要那一行");
-        assert_eq!(l.based_on, None, "摘要那一行不许被 based_on 吃掉");
-        assert_eq!(l.based_on_sha256.as_deref(), Some("abc"));
     }
 
     #[test]

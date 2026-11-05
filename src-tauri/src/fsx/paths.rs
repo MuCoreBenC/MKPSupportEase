@@ -25,6 +25,31 @@ use tauri::{AppHandle, Manager};
 
 use crate::error::AppError;
 
+/* ---------- 工作台工作区（2026-11-02 作者裁定，独立于数据根） ---------- */
+
+/// 工作台的工作区根。**它不跟数据根走** —— 见 [`workspace_root`]。
+static WORKSPACE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// 由 Tauri 的 `setup` 注入一次（`<appDataDir>/workbench/workspace`）。
+///
+/// # 为什么单独一格，而不是从数据根派生
+///
+/// 开发模式下**数据根就是仓库**（`workbench/`），草稿于是长期住在仓库里
+/// （`.draft/presets`）。作者 2026-11-02 的原话：「不应该在仓库里留一份长期存在的
+/// `.draft/presets`」—— AI 和自己都会被两份 TOML 搞混，分不清哪份是正式预设。
+///
+/// 所以工作区固定落应用数据目录：**仓库里只有正式预设**，草稿是本机状态。
+/// 没注入时（`cargo test` / CLI）退回各调用方自己给的兜底路径 —— 测试因此
+/// 仍然用临时目录，一个字节都不用改。
+pub fn set_workspace_root(root: PathBuf) {
+    let _ = WORKSPACE_ROOT.set(root);
+}
+
+/// 注入了没有（`None` = 不在 Tauri 里跑，调用方退回自己的兜底）
+pub fn workspace_root() -> Option<&'static Path> {
+    WORKSPACE_ROOT.get().map(PathBuf::as_path)
+}
+
 /// 内部根下首次启动就建齐的子目录
 ///
 /// `index/` 2026-10-08 退役：它唯一住过的东西是 `offsets.json`（校准偏移的孤岛，
@@ -44,11 +69,15 @@ pub const LOCAL_DIR: &str = "presets-local";
 /// （`crate::ipc::report`）都要认它，字面量只许有这一处。
 pub const GCODE_HISTORY_DIR: &str = "gcode_history";
 
-/// **导出**的落点：`<用户根>/exports`。
+/// **导出**的兜底落点：`<用户根>/exports`。
 ///
-/// 报告页的「导出执行报告」默认写到这儿（`<用户根>/exports/<基名>/三件套`）——
-/// 它是"用户自己要看要拷的东西"，所以住用户根（见模块头那条分层的理由）。
-/// `pub`：报告页那个写口（`crate::ipc::report`）要认它，字面量只许有这一处。
+/// ★ 2026-11-04 改判：导出默认落到**桌面**的 `MKP-导出报告/`（见
+/// [`crate::ipc::report::DESKTOP_EXPORT_DIR`]）—— 作者：「要不然我清理的时候，
+/// 一下就把它清理掉了」。用户根会跟着「清理数据」整批删，而导出的报告是他要留的。
+///
+/// 这一格因此只剩一个职责：**问不到桌面时**（无桌面环境 / `HOME` 都没有）的兜底，
+/// 以及老版本留在 `<用户根>/exports` 下的那批文件**照样按原路径可读**。目录首启动
+/// 仍旧建齐（不留一个"老路径突然不存在"的坑）。
 pub const EXPORTS_DIR: &str = "exports";
 
 /// 用户根下首次启动就建齐的子目录

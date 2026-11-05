@@ -791,6 +791,73 @@
 }
 
 /*
+ * 碰撞组那一格：**左图右话**（2026-11-04 作者：「右侧有空位，你可以把这些文案呀，
+ * 那个设置按钮啊，也放到右侧了」）。
+ *
+ * 俯视图从 2026-10-18 起就只画到 240 宽（缩略图，细节走点击放大），而这一栏有
+ * 六百多像素 —— 右边半屏原本是空的。这一句提示正好填那儿：不再占掉横下一整条。
+ *
+ * ★ `flex-wrap`：窄窗里右边塞不下就掉到图下面（原来的样子），不挤成一条细缝。
+ */
+.collisionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 14px 18px;
+}
+
+.collisionMapCell {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/*
+ * 碰撞组的收尾提示（2026-11-04 作者：「碰撞失败的页面可以加一个提示，在设置可以打开
+ * 智能塔位置」）：一句小字 + 一个去处，住在俯视图右边那一半。
+ *
+ * ★ 不画成警示条：这一页已经用红/橙说清了"失败了"，这一句是**下次怎么办**，
+ *   语气要平（`--text-3`、小字）。
+ * ★ 按钮用 `currentcolor` 描边（与预设页横幅那颗同一条做法），深浅色都不写死。
+ */
+.collisionHint {
+  flex: 1 1 220px;
+  min-width: 0;
+  /* 图下面那条基线：与左栏俯视图的上沿齐平，不要吊在半空 */
+  padding-top: 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: var(--fs-label);
+  line-height: 1.7;
+  color: var(--text-3);
+}
+
+.collisionHintText {
+  margin: 0;
+}
+
+.collisionHintGo {
+  flex-shrink: 0;
+  padding: 2px 10px 3px;
+  border: 1px solid currentcolor;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.collisionHintGo:hover {
+  color: var(--text-1);
+}
+
+.collisionHintGo:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
+}
+
+/*
  * 键值表（作者 2026-10-11：「左侧是字段，右侧是参数」）—— **一张两列表**：
  * 字段一列、参数一列，同一组里的值从同一条竖线起排。
  *
@@ -817,6 +884,25 @@
 /* 行盒只剩分组的意思（dt/dd 得成对儿）：下场，格子由它俩当 */
 .kvRow {
   display: contents;
+}
+
+/* 组内小节标题（2026-11-04，只给「擦料塔」用：MKP 一框、切片软件一框）。
+   `.kv` 是两列网格、`.kvRow` 是 `display: contents` —— 这一格必须自己跨满两列，
+   否则它会缩在左列里、右边空一大块。 */
+.subTitle {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.subTitle:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
 }
 
 .kvRow dt {

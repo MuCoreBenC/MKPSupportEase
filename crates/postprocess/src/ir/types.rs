@@ -184,6 +184,31 @@ pub struct GlueIr {
     pub z_lift_height: f64,
     pub z_lift_height_first_layers: f64,
     pub inter_model_lift_height: f64,
+    /* ---- 预涂胶（2026-11-05）---- */
+    /// 预涂胶速度档：`follow` / `glue` / `custom`（空串按 `follow`，见 `bed_glue::glue_feed_of`）。
+    #[serde(default)]
+    pub bed_glue_speed_mode: String,
+    /// `custom` 档的速度（mm/s）。
+    #[serde(default)]
+    pub bed_glue_speed: f64,
+    /// 段间横移速度档：同上三档。
+    #[serde(default)]
+    pub glue_travel_speed_mode: String,
+    /// `custom` 档的段间横移速度（mm/s）。
+    #[serde(default)]
+    pub glue_travel_speed: f64,
+    /// 涂胶前热床预热温度（°C）。
+    #[serde(default)]
+    pub bed_glue_preheat_temp: f64,
+    /// 涂胶结束后等待秒数（0 = 不停）。
+    #[serde(default)]
+    pub bed_glue_wait_seconds: f64,
+    /// 擦笔模式（**预留，不产生动作**）。
+    #[serde(default)]
+    pub tower_pen_wipe_mode: String,
+    /// 擦笔间隔层数（**预留**）。
+    #[serde(default)]
+    pub tower_pen_wipe_interval: i64,
     /// 换笔脱层（z-hop）高度：只负责「离开刚打完的表面」，不是抬笔高度。
     #[serde(default = "default_swap_hop_height")]
     pub swap_hop_height: f64,
@@ -388,11 +413,22 @@ pub struct PrefsIr {
     pub bed_glue_enabled: bool,
     /// 热床涂胶是只涂擦料塔位置（false）还是所有模型首层（true）。
     pub bed_glue_all_models: bool,
-    /// **自动摆塔**（2026-10-18 作者定的口径）：模型与塔相撞时问一句
-    /// "自动把塔挪到不撞的地方 / 你自己去挪模型"；选前者才按自动摆出来的位置跑完
-    /// 这一趟（**只改这一趟，不落盘**）。出厂关 —— 塔摆哪儿是用户 / 套餐定的，
-    /// 没有用户点头，内核不自作主张挪。
-    pub auto_tower_position: bool,
+    /// **智能塔位置**（2026-11-04 换成三档）：模型与擦料塔相撞时怎么办。
+    ///
+    /// - [`TowerRelocateModeIr::Ask`]（**出厂档**，2026-11-04 作者定：软件装好就是"问"）：
+    ///   停下来问一句（界面侧才有"问"这件事，无界面时与 `Off` 等价）；
+    /// - [`TowerRelocateModeIr::Auto`]：直接挪到自动摆出来的位置、复检、跑完这一趟；
+    /// - [`TowerRelocateModeIr::Off`]：撞了就按碰撞停下 —— 塔摆哪儿是用户 / 套餐定的，
+    ///   内核不自作主张挪。
+    ///
+    /// **只改这一趟，不落盘**。
+    ///
+    /// ★ `#[serde(default)]`（2026-11-04）：这一格是**客户端偏好**，不是 `.toml`
+    ///   结构的一部分 —— 本仓真预设与 `preset` 解析器都没有这个键，手写的测试夹具
+    ///   也不该被迫带上它。缺键 ⇒ 出厂 `Ask`（与 [`PrefsIr::default`] 同一个值，
+    ///   不在这里另写一份字面量）。
+    #[serde(default)]
+    pub auto_tower_position: TowerRelocateModeIr,
 }
 
 impl Default for PrefsIr {
@@ -411,7 +447,24 @@ impl Default for PrefsIr {
             xy_calibration_dwell_sec: 3,
             bed_glue_enabled: false,
             bed_glue_all_models: false,
-            auto_tower_position: false,
+            auto_tower_position: TowerRelocateModeIr::Ask,
         }
     }
+}
+
+/// 「模型与擦料塔相撞时怎么办」三档 —— 内核这一侧的镜像。
+///
+/// ★ 与客户端 `runtime::app_state::TowerRelocateMode` **一一对应、默认一致**
+///   （判据 `postproc_prefs::tests::the_two_default_sets_agree` 咬着）。
+///   内核不许反向依赖客户端，所以两份 + 一条判据 —— 与 [`PrefsIr`] 其它格同一条理。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TowerRelocateModeIr {
+    /// 关：撞了就按碰撞停下
+    Off,
+    /// 开：直接挪塔、复检、跑完（**不问**）
+    Auto,
+    /// 问：停下来问人（那件事住在界面侧）—— **出厂档**（2026-11-04 作者：装好就是"问"）
+    #[default]
+    Ask,
 }

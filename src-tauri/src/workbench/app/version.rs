@@ -37,8 +37,10 @@ pub const LOCK_REL: &str = "Cargo.lock";
 /// `Cargo.lock` 里本 crate 的名字（找它的 version 用）
 pub const LOCK_PACKAGE_NAME: &str = "mkp-support-ease";
 
-/// 三段版本号 `x.y.z`。**只认这一种形状** —— 带 `v` 前缀、带 `-dev` 后缀的都不算
-/// （它们只在"比较"里出现，不是真值那一格该有的样子）。
+/// 三段版本号 `x.y.z`。**只认这一种形状** —— 带 `v` 前缀、带 `-dev` 后缀的都不算。
+///
+/// 它守的是**发布写入**（`write_derived` / `bump` 的目标）：发出去的版本必须是正式版。
+/// 读真值用 [`is_version_text`]（开发中允许 `x.y.z-dev`）。
 pub fn is_semver(v: &str) -> bool {
     let v = v.trim();
     if v.is_empty() || v.ends_with('.') || v.starts_with('.') {
@@ -49,6 +51,16 @@ pub fn is_semver(v: &str) -> bool {
         && parts
             .iter()
             .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// **版本文本**：`x.y.z`（已发布 / 待发布）或 `x.y.z-dev`（开发中）。
+///
+/// 2026-11-04 作者裁定：发过的号永不再用；开发分支永远拿着下一个号的 `-dev`，
+/// 发布时才去掉。所以**真值那一格允许 `-dev`**，而发布写入仍只走 [`is_semver`]。
+pub fn is_version_text(v: &str) -> bool {
+    let v = v.trim();
+    v.strip_suffix("-dev")
+        .map_or_else(|| is_semver(v), is_semver)
 }
 
 /// **版本真值**：读 `src-tauri/Cargo.toml` 的 `[package].version`。
@@ -67,8 +79,10 @@ pub fn app_version(repo_root: &Path) -> Result<String, AppError> {
         .and_then(|v| v.as_str())
         .ok_or_else(|| AppError::corrupted("src-tauri/Cargo.toml 里没有 [package].version"))?;
     let v = v.trim().to_owned();
-    if !is_semver(&v) {
-        return Err(AppError::corrupted(format!("版本真值不是 x.y.z 形状：{v}")));
+    if !is_version_text(&v) {
+        return Err(AppError::corrupted(format!(
+            "版本真值不是 x.y.z 或 x.y.z-dev 形状：{v}"
+        )));
     }
     Ok(v)
 }
@@ -310,7 +324,10 @@ mod tests {
     fn the_app_version_has_one_source_of_truth() {
         let root = crate::workbench::paths::repo_root();
         let truth = app_version(&root).expect("读得到版本真值");
-        assert!(is_semver(&truth), "真值该是 x.y.z 形状：{truth}");
+        assert!(
+            is_version_text(&truth),
+            "真值该是 x.y.z 或 x.y.z-dev 形状：{truth}"
+        );
 
         assert_eq!(
             package_version(&root).expect("package.json"),
@@ -332,6 +349,23 @@ mod tests {
         assert!(
             derived_mismatch(&root).expect("一致性检查").is_empty(),
             "真仓库该是四處一致的"
+        );
+    }
+
+    /// 开发版：真值允许 `x.y.z-dev`，但**发布写入**仍只认正式版
+    /// （不然后果是发一个 `-dev` 出去，安装包与 tag 都会带着它）。
+    #[test]
+    fn a_dev_version_is_readable_but_never_written() {
+        for ok in ["0.0.10-dev", "1.2.3-dev"] {
+            assert!(is_version_text(ok), "{ok} 该认");
+        }
+        for no in ["", "v0.0.10-dev", "0.0-dev", "0.0.10-alpha", "0.0.10-dev.1"] {
+            assert!(!is_version_text(no), "{no} 不该认");
+        }
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            write_derived(dir.path(), "0.0.10-dev").is_err(),
+            "发布写入不许带 -dev"
         );
     }
 

@@ -1,31 +1,21 @@
 /*
- * 「去处理」的定位 —— 滚到目标锚点 + 闪一下。
+ * 工作台「去处理」定位 —— 2026-11-04 起只是共用件的**一层转发**。
  *
- * 判据与行为与 C14/C15 那一版一致：滚动用**即时**（`block: 'center'`，不用 smooth ——
- * 低帧率 / 无头环境下 smooth 可能一帧都不跑，等于没滚）；闪烁是给元素挂一个
- * 动画类（`.flashIt` 卡 / `.rowFlash` 行），1.8s 后摘掉。
+ * # 历史（别再抄回来）
  *
- * 瞬态 DOM 效果**不进 React 状态**：进状态只会逼整页重渲染；classList 直改，
- * 打断正在播的同款动画（读一次 offsetWidth）后从头再闪。
+ * 这里原先自己写了一套：`glideIntoView` + `onDone` 里落位补测（`content-visibility`
+ * 的行渲染晚一帧，不补就会"好像滚到了、又突然闪到别的地方"）+ 挂 `.flashIt` /
+ * `.rowFlash` 两条 CSS `@keyframes`、1.8 秒后摘类。同时设置页用绿描边圈 1.4 秒、
+ * 预设表用 `data-flash` 两段过渡 1.78 秒 —— 同一个动作三时长相。
+ *
+ * 作者 2026-11-04：「消失得太快了」「能不能是绿色背景，而不是这种圈起来的呀」
+ * 「以后我还有什么需求，只要是滚动定位，大家都用一样的」。
+ *
+ * ⇒ 现在滚 / 补测 / 绿底 / 停 6 秒淡出**全在** `components/scroll/locate`；
+ *   工作台这一层只保留 `locateAnchor` 这个名字与 `{ row }` 参数，免得
+ *   `ParamSheetPage` / `BuildPage` / `BundlesPage` / `AssetsPage` 那几个调用点
+ *   为了改个 import 路径白改一遍。`row` 现在也不再区分卡/行形态：两种都只铺绿底。
+ *
+ * ★ 新写的定位**直接 import 共用件**，不要再经这一层转发（它只是迁移期的别名）。
  */
-import s from '../c14.module.css'
-
-/** 闪烁类摘掉的延时（与 keyframes 的时长一致） */
-const FLASH_MS = 1800
-
-/**
- * 按锚点 id 定位：滚到视口中央 + 闪一下。
- *
- * `row` 用行上那条动画（只铺底色），默认用卡上那条（底色 + 描边）。
- * 找不到元素就什么都不做 —— 目标项可能在某台机型/某一版上不存在，那不是错误。
- */
-export function locateAnchor(id: string, opts?: { row?: boolean }): void {
-  const el = document.getElementById(id)
-  if (!el) return
-  el.scrollIntoView({ block: 'center' })
-  const cls = opts?.row ? s.rowFlash : s.flashIt
-  el.classList.remove(s.flashIt, s.rowFlash)
-  void (el as HTMLElement).offsetWidth /* 打断正在播的同款动画，从头再闪 */
-  el.classList.add(cls)
-  window.setTimeout(() => el.classList.remove(s.flashIt, s.rowFlash), FLASH_MS)
-}
+export { locateAnchor } from '../../components/scroll/locate'

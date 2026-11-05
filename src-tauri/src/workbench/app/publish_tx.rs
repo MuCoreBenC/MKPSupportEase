@@ -267,10 +267,12 @@ fn plan_only(
     book_state: super::publish_book::State,
     passed: usize,
     failed: usize,
-    _opts: &TxOptions,
+    opts: &TxOptions,
 ) -> Result<PublishTxReport, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
+    // 装渲染器：发布要判"产物是否跟上源"，走的是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
     let asset_root = root
         .parent()
         .map(|p| p.join("assets"))
@@ -304,6 +306,49 @@ fn plan_only(
         .filter_map(|f| f.sha256.clone().map(|s| (f.path.clone(), s)))
         .collect();
     let (changes, changed_files) = diff_fingerprints(&before, &after);
+
+    /*
+     * ★ **预演必须与真发同一判定**（2026-11-04 修）。
+     *
+     * 真发在 `generate` **之后**看账本是不是仍然 `InSync`：是就 `NoChange`、
+     * 不分配序号（见上面 ⓪½）。预演不 generate，所以用等价条件替代：
+     * 「盘上这一代 = 已发布那一代（InSync）」+「这次算出来的产物字节没变」。
+     * 少了这一支，`publish --dry-run` 会说"会写成第 N 号"，真发却回 `NoChange`
+     * —— 同一条命令的两个口径打架，人就没法靠预演判断这次会不会推进序号。
+     *
+     * `--republish` 是显式重发，不分流（与真发一致）。
+     */
+    if !opts.republish {
+        if let super::publish_book::State::InSync(b) = &book_state {
+            if changes.added + changes.changed + changes.removed == 0 {
+                if let Some(serial) = super::delivery::PublishIdentity::inherit_from(root).serial {
+                    return Ok(PublishTxReport {
+                        stage: PublishStage::NoChange,
+                        audit_passed: passed,
+                        audit_failed: failed,
+                        generated: 0,
+                        unchanged: 0,
+                        committed_paths: Vec::new(),
+                        review: None,
+                        branch: None,
+                        commit: None,
+                        files: 0,
+                        summary: format!(
+                            "没有可发的变化：盘上这一代内容与已发布的 {} 第 {serial} 号完全相同 —— \
+                             序号不推进、不提交（确实要重发请加 --republish）。（演练：未写入任何文件）",
+                            b.catalog_id
+                        ),
+                        published_at: None,
+                        revision: None,
+                        changes: None,
+                        changed_files: Vec::new(),
+                        publish_serial: Some(serial),
+                        catalog_id: Some(b.catalog_id.clone()),
+                    });
+                }
+            }
+        }
+    }
 
     Ok(PublishTxReport {
         stage: PublishStage::Generated,
@@ -377,6 +422,16 @@ pub struct TxOptions {
     /// 真要重发（例如远端目录被手工改坏、要重新盖一次戳）时显式打开它。
     #[serde(default)]
     pub republish: bool,
+    /// **人类确认位**（2026-11-05，作者定的硬约束）：真发布必须有它，缺了直接拒绝。
+    ///
+    /// - 工作台那颗「确认发布」按钮 = 人当次点的确认 ⇒ 显式传 `true`；
+    /// - CLI / CI 必须显式带 `--confirm` ⇒ 也就是"人当次答应过"才拿得到；
+    /// - `dry_run` 只是预演，一个字节都不写 ⇒ **不需要**确认。
+    ///
+    /// 为什么放在选项里而不是"命令壳自己填 true"：AI 走 CLI 时同样要过这道闸，
+    /// 而 CLI 直达内核、不经过任何 GUI 命令壳。默认值 `false` 就是"没问过人"。
+    #[serde(default)]
+    pub confirmed: bool,
 }
 
 fn default_open_review() -> bool {
@@ -391,6 +446,7 @@ impl Default for TxOptions {
             base: "main".to_owned(),
             platform: None,
             republish: false,
+            confirmed: false,
         }
     }
 }
@@ -425,13 +481,63 @@ impl TxOptions {
 /// 走 [`super::git::Git::at_repo_root`]）。
 ///
 /// ★ 步骤 1 的 `publish_audit` 是**纯读**（不写盘）—— 它红了这里一个字节都不落。
+///
+/// ## 记账为什么在这一层（2026-11-05 修）
+///
+/// 以前「发布历史」写在 `wb_publish` 这个 **GUI 专属命令壳**里。而
+/// `npm run presets -- publish`（`bin/presets.rs`）直达本内核、根本不经过那个壳
+/// —— 于是「AI / CI 替我发过什么」在工作台里永远查无此次（作者截图：0 条回执）。
+/// 现在把记账收进**两条路都必经的内核**，数据根由调用方注入：
+///
+/// | 入口 | 传进来的 `history_root` |
+/// |---|---|
+/// | 工作台 `wb_publish` | `fsx::paths::internal_root(&app)` |
+/// | CLI `presets publish` | `fsx::paths::internal_root_headless()` |
+/// | 判据（临时仓库） | `None` —— 不许往真人目录里写 |
+///
+/// 只记「真发生过」的：预演与被闸拦下都不记；记账失败**不许**把一次成功的
+/// 发布说成失败，只在 summary 上如实补一句。
 pub fn run(
     ctx: &mut Ctx,
     opts: &TxOptions,
     target: Option<&PublishTarget>,
     hosting: Option<&dyn Hosting>,
     repo_root: Option<PathBuf>,
+    history_root: Option<&std::path::Path>,
 ) -> Result<PublishTxReport, AppError> {
+    let mut report = run_inner(ctx, opts, target, hosting, repo_root)?;
+    if !opts.dry_run && report.stage != PublishStage::BlockedAudit {
+        if let Some(root) = history_root {
+            let record = super::history::PublishRecord::from_report(
+                &report,
+                crate::workbench::clock::now_iso8601(),
+            );
+            if let Err(e) = super::history::append(root, record) {
+                report
+                    .summary
+                    .push_str(&format!("（发布历史没记上：{}）", e.message));
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// 事务本体。[`run`] 是它的薄壳（只多做一步记账），判据与两个入口都走 `run`。
+fn run_inner(
+    ctx: &mut Ctx,
+    opts: &TxOptions,
+    target: Option<&PublishTarget>,
+    hosting: Option<&dyn Hosting>,
+    repo_root: Option<PathBuf>,
+) -> Result<PublishTxReport, AppError> {
+    // ⓪⓪ **没有人类当次确认 = 不许真发布**（2026-11-05 硬约束，见 AGENTS.md）。
+    //     放在所有检查之前：一个字节都不写、一条网络请求都不发。预演不需要确认。
+    if !opts.dry_run && !opts.confirmed {
+        return Err(AppError::invalid_argument(
+            "真发布需要显式确认：请在工作台点「确认发布」，或在命令行加 --confirm；\
+             只想看会做什么请用 --dry-run。",
+        ));
+    }
     // ⓪ **草稿里挂着未保存的编辑 = 不许发布**（2026-10-06 状态机修正）。
     //    发布渲染的是会话态 —— 草稿不干净时，渲染结果里会混进没保存过的值，
     //    而 registry（值的真源）还是旧的：发出去的产物与提交进 git 的数据分属两代。
@@ -526,7 +632,7 @@ pub fn run(
     }
 
     let before = catalog_fingerprints(&root.join(super::delivery::NEW_CATALOG_FILE));
-    let gen = super::build::generate_with(ctx, &super::build::Scope::Stale)?;
+    let gen = super::build::generate_with(ctx, &super::build::Scope::Stale, false)?;
 
     /*
      * ⓪½ **什么都没有改 ⇒ 不发**（2026-10-29 作者：「我一点击它就要变成 2 了，
@@ -574,7 +680,9 @@ pub fn run(
 
     // 定稿要一份 `&Book`（与生成算的是同一份内存状态）。
     let (c, d, _) = state(ctx)?;
-    let book = super::super::domain::derive::Book::new(&ctx.presets, &c, &d);
+    // 装渲染器：发布要判"产物是否跟上源"，走的是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
     let asset_root = super::super::paths::assets_root_at(&presets_root);
     std::fs::create_dir_all(&asset_root).map_err(|e| {
         AppError::io("建不出资产目录").with_detail(format!("{}：{e}", asset_root.display()))
@@ -1459,8 +1567,11 @@ mod tests {
         .unwrap();
         assert!(!ctx.draft.is_clean());
 
-        let err =
-            run(&mut ctx, &TxOptions::default(), None, None, None).expect_err("脏草稿必须被拒");
+        let confirmed = TxOptions {
+            confirmed: true,
+            ..Default::default()
+        };
+        let err = run(&mut ctx, &confirmed, None, None, None, None).expect_err("脏草稿必须被拒");
         assert!(
             err.message.contains(w::PUBLISH_BLOCKED_BY_UNSAVED_EDITS),
             "拒绝话术要直接说清「先保存再发布」：{}",
@@ -1475,8 +1586,12 @@ mod tests {
     fn a_clean_draft_reaches_the_audit() {
         let (_dir, mut ctx) = fixture_ctx();
         assert!(ctx.draft.is_clean());
+        let confirmed = TxOptions {
+            confirmed: true,
+            ..Default::default()
+        };
         let out =
-            run(&mut ctx, &TxOptions::default(), None, None, None).expect("干净草稿不该在闸上被拒");
+            run(&mut ctx, &confirmed, None, None, None, None).expect("干净草稿不该在闸上被拒");
         assert_eq!(
             out.stage,
             PublishStage::BlockedAudit,
@@ -1680,5 +1795,62 @@ mod tests {
         let touched = map(&[("a.toml", "9999")]);
         let (sum2, _) = diff_fingerprints(&before, &touched);
         assert_eq!((sum2.changed, sum2.unchanged), (1, 0));
+    }
+
+    /// **真发布不带确认一律拒绝**（2026-11-05 作者定的硬约束）。
+    ///
+    /// 旧判据：谁都能用 `TxOptions::default()` 直接调内核真发一次（AI 走 CLI 时
+    /// 更是绕过了所有 GUI 确认）。新判据：默认 `false` = "没问过人"，零写入、零网络
+    /// 地拒绝；带 `confirmed: true` 才继续往下走审计；`dry_run` 不需要确认。
+    #[test]
+    fn a_real_publish_needs_an_explicit_human_confirmation() {
+        let (_dir, mut ctx) = fixture_ctx();
+        let err = run(&mut ctx, &TxOptions::default(), None, None, None, None)
+            .expect_err("没确认的真发布必须被拦下");
+        assert!(
+            err.message.contains("确认") || err.message.contains("confirm"),
+            "拒绝理由得说清缺了什么：{}",
+            err.message
+        );
+
+        let preview = TxOptions {
+            dry_run: true,
+            ..Default::default()
+        };
+        assert!(
+            run(&mut ctx, &preview, None, None, None, None).is_ok(),
+            "预演一个字节不写，不需要人确认"
+        );
+
+        let confirmed = TxOptions {
+            confirmed: true,
+            ..Default::default()
+        };
+        assert!(
+            run(&mut ctx, &confirmed, None, None, None, None).is_ok(),
+            "带确认才走到审计（临时仓库的审计本来就停在 BlockedAudit）"
+        );
+    }
+
+    /// **两条发布入口都必须把数据根传进内核**（2026-11-05）。
+    ///
+    /// 以前记账只写在 GUI 命令壳里，CLI `presets publish` 直达内核 → 发完工作台
+    /// 历史还是 0 条。现在记账收进 `run`，但两边都得把 `history_root` 递进来才生效。
+    /// 这道源码判据盯「不许哪条路悄悄变成 `None`」—— 与本仓其它链路判据同款。
+    #[test]
+    fn both_publish_entrypoints_pass_a_history_root() {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let cli =
+            std::fs::read_to_string(manifest.join("src/bin/presets.rs")).expect("CLI 入口读得到");
+        let gui = std::fs::read_to_string(manifest.join("src/workbench/app/build.rs"))
+            .expect("工作台命令壳读得到");
+        assert!(
+            cli.contains("internal_root_headless") && cli.contains("history_root.as_deref()"),
+            "CLI 必须按 APP_IDENTIFIER 认出应用数据根并传给内核"
+        );
+        assert!(
+            gui.contains("internal_root(&app)") && gui.contains("history_root.as_deref()"),
+            "工作台必须把 AppHandle 的数据根传给内核"
+        );
     }
 }

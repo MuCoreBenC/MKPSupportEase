@@ -242,6 +242,25 @@ pub struct FinishedPayload {
     /// 两种**都是成功**，界面同一个成功屏，只有那一句结论按它分文案；报告用同一个键。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub calib_choice: Option<String>,
+    /// **这一趟挪过塔的记录**（2026-11-04）。
+    ///
+    /// 界面「后处理屏」拿它摆「现在 / 挪后」两幅俯视图 + 挪动距离 —— 从前只有
+    /// `Ask` 档那张问句卡带几何，`Auto` 档（"开"）不弹问句，于是**用户看不到塔被挪了**。
+    /// 作者 2026-11-04：「如果我开了自动的话，它也得把那个塔的移动的显示出来呀」。
+    ///
+    /// ★ 与归档那份 `Meta.relocation` **同一个结构体**（[`crate::archive::RelocationRecord`]）：
+    ///   界面与报告页说的是同一笔账，不许两边各造一份。没挪过塔 = `null` ⇒ 那一块不摆。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relocation: Option<crate::archive::RelocationRecord>,
+    /// **碰撞那一趟的画布几何**（2026-11-04）。
+    ///
+    /// 失败那屏的「说明」页要把上面那张红卡换成"现在 / 挪后"两幅俯视图 ——
+    /// 画那两幅图要的是塔框、模型框、可打印区这一整套，与问句那张卡**同一份结构**
+    /// （`RelocateGeoPayload`）。从前只有问句带它，撞停那一趟界面手上什么都没有。
+    ///
+    /// ★ 不是撞塔的失败 / 成功的趟 ⇒ `null`，与从前一字不差。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo: Option<RelocateGeoPayload>,
 }
 
 /// **结果读数** —— 成功那一趟的几格读数（界面「结果 · 成功」要摆的）。
@@ -843,6 +862,8 @@ mod tests {
                 warnings: Vec::new(),
                 result: None,
                 calib_choice: None,
+                relocation: None,
+                geo: None,
             })),
             FromHook::DevScene {
                 scene: "question".to_owned(),
@@ -917,6 +938,8 @@ mod tests {
             /* 线上那条只验"载得动"：读数那一包不是这一条测的东西 */
             result: None,
             calib_choice: None,
+            relocation: None,
+            geo: None,
         })));
 
         assert!(

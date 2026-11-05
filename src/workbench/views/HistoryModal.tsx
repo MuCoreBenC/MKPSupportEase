@@ -1,8 +1,12 @@
 /**
- * 发布历史 —— 本地回执日志（`<appDataDir>/publish-history.json`）。
+ * 发布历史 —— **三本账并列**（2026-11-05 作者：「什么时候发布了什么，我都不记得」）。
  *
- * 一次「交付预设」事务留一条：时间 / 走到哪一阶段 / commit / PR 号与状态 / 产物份数 /
- * 一句话结论。**最新在前**（后端保证顺序，这里不重排）。
+ * 1. **交付预设**：`<appDataDir>/publish-history.json`，一次事务一条回执；
+ * 2. **软件发版**：`release-history.json`，打了 tag / 出了安装包 / 写了 release.json 那条链；
+ * 3. **本分支最近提交**：`git log`（只读、本机仓库视图、最多 20 条）——
+ *    用来回答「AI 在 CI 里替我做了什么」。
+ *
+ * 三本账**各自空态、各自报错**：一本读不出来不许假装另外两本也没有。
  *
  * # 状态是快照，刷新是手动（作者 2026-10-04 定死）
  *
@@ -13,13 +17,14 @@
  * # 它不是什么
  *
  * 不是发布配置（那是设置里的「发布账户」）、不是审计账本（最多留 100 条）。
- * 删掉这个文件不影响发布能力，只丢展示 —— 坏了会**如实报错**，不静默当"没发过"。
+ * 删掉这些文件不影响发布能力，只丢展示 —— 坏了会**如实报错**，不静默当"没发过"。
+ * 第三栏尤其是**本机**的提交列表：没推上去 / 没合进主线的也在里面。
  */
 
 import { useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
-import type { PublishHistory, PublishRecord, RemoteReview } from '../api'
+import type { CommitRow, PublishHistory, PublishRecord, ReleaseHistory, RemoteReview } from '../api'
 import ModalC14 from '../c14/ModalC14'
 import c from '../c14.module.css'
 import h from './HistoryModal.module.css'
@@ -69,21 +74,41 @@ interface Props {
 
 export default function HistoryModal({ onClose }: Props) {
   const [history, setHistory] = useState<PublishHistory | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [releases, setReleases] = useState<ReleaseHistory | null>(null)
+  const [commits, setCommits] = useState<CommitRow[] | null>(null)
+  /** 三本账各自记自己的错：一本读坏不许连累另外两本的展示 */
+  const [errors, setErrors] = useState<{ publish?: string; release?: string; commits?: string }>({})
   /** 正在刷新哪一条（同一时刻只会有一次） */
   const [busy, setBusy] = useState<string | null>(null)
   /** 刷新回来的当下状态（只活在这次打开里；记录本身是快照） */
   const [live, setLive] = useState<Record<string, RemoteReview>>({})
 
-  /** 打开时读一次（**只读一次** —— 不做轮询） */
+  /** 打开时各读一次（**只读一次** —— 不做轮询） */
   useEffect(() => {
     let alive = true
+    const fail = (e: unknown) => (isAppError(e) ? e.message : String(e))
     void (async () => {
       try {
         const got = await wb.publishHistory()
         if (alive) setHistory(got)
       } catch (e) {
-        if (alive) setError(isAppError(e) ? e.message : String(e))
+        if (alive) setErrors((prev) => ({ ...prev, publish: fail(e) }))
+      }
+    })()
+    void (async () => {
+      try {
+        const got = await wb.releaseHistory()
+        if (alive) setReleases(got)
+      } catch (e) {
+        if (alive) setErrors((prev) => ({ ...prev, release: fail(e) }))
+      }
+    })()
+    void (async () => {
+      try {
+        const got = await wb.recentCommits()
+        if (alive) setCommits(got)
+      } catch (e) {
+        if (alive) setErrors((prev) => ({ ...prev, commits: fail(e) }))
       }
     })()
     return () => {
@@ -95,12 +120,15 @@ export default function HistoryModal({ onClose }: Props) {
   const refresh = async (r: PublishRecord, key: string) => {
     if (r.review === null) return
     setBusy(key)
-    setError(null)
+    setErrors((prev) => ({ ...prev, publish: undefined }))
     try {
       const now = await wb.publishStatus(r.review.number)
       setLive((prev) => ({ ...prev, [key]: now }))
     } catch (e) {
-      setError(isAppError(e) ? e.message : String(e))
+      setErrors((prev) => ({
+        ...prev,
+        publish: isAppError(e) ? e.message : String(e),
+      }))
     } finally {
       setBusy(null)
     }
@@ -113,6 +141,15 @@ export default function HistoryModal({ onClose }: Props) {
   const records: PublishRecord[] = (history?.records ?? []).map((r) =>
     r.review === undefined ? { ...r, review: null } : r,
   )
+  const releaseRows = releases?.records ?? []
+  const commitRows = commits ?? []
+
+  const sectionError = (which: 'publish' | 'release' | 'commits') =>
+    errors[which] !== undefined ? (
+      <p className={h.error} role="alert">
+        {errors[which]}
+      </p>
+    ) : null
 
   return (
     <ModalC14
@@ -120,18 +157,16 @@ export default function HistoryModal({ onClose }: Props) {
       size="lg"
       title="发布历史"
       subtitle={
-        history === null
-          ? error === null
-            ? '正在读……'
-            : '没读出来'
-          : `${records.length} 条回执 · 打开时读一次，每条可手动刷新（不轮询）`
+        history === null && errors.publish === undefined
+          ? '正在读……'
+          : `${records.length} 条预设回执 · ${releaseRows.length} 次软件发版 · ${commitRows.length} 条本分支提交（打开时各读一次，不轮询）`
       }
       onClose={onClose}
       footer={
         <>
           <span className={h.footNote}>
-            回执日志住 <span className={c.mono}>publish-history.json</span>（应用数据目录）；
-            删掉只丢展示，不影响发布
+            前两栏住应用数据目录的 <span className={c.mono}>publish-history.json</span> /{' '}
+            <span className={c.mono}>release-history.json</span>；第三栏读本机仓库
           </span>
           <span className={c.grow} />
           <button type="button" className={c.btn} onClick={onClose}>
@@ -140,18 +175,14 @@ export default function HistoryModal({ onClose }: Props) {
         </>
       }
     >
-      {error !== null && (
-        <p className={h.error} role="alert">
-          {error}
-        </p>
-      )}
-
-      {history !== null && records.length === 0 && (
-        <p className={h.empty}>还没有发布记录 —— 发布一次就会出现一条。</p>
-      )}
-
-      {records.length > 0 && (
-        <div className={h.list} role="list">
+      <section className={h.group}>
+        <h3 className={h.groupTitle}>① 交付预设发布</h3>
+        {sectionError('publish')}
+        {history !== null && records.length === 0 && errors.publish === undefined && (
+          <p className={h.empty}>还没有预设发布回执 —— 走一次「交付预设」就会出现一条。</p>
+        )}
+        {records.length > 0 && (
+        <div className={`${h.list} ${h.listShort}`} role="list">
           {records.map((r) => {
             const key = keyOf(r)
             const rev = live[key] ?? r.review
@@ -212,7 +243,71 @@ export default function HistoryModal({ onClose }: Props) {
             )
           })}
         </div>
-      )}
+        )}
+      </section>
+
+      <section className={h.group}>
+        <h3 className={h.groupTitle}>② 软件发版</h3>
+        {sectionError('release')}
+        {releases !== null && releaseRows.length === 0 && errors.release === undefined && (
+          <p className={h.empty}>还没有发过软件版本 —— 走过「发布软件版本」才会留下 tag 与安装包。</p>
+        )}
+        {releaseRows.length > 0 && (
+          <div className={`${h.list} ${h.listShort}`} role="list">
+            {releaseRows.map((r) => (
+              <div key={`${r.at}#${r.tag}`} className={h.row} role="listitem">
+                <div className={h.when}>{whenText(r.at)}</div>
+                <div className={h.body}>
+                  <div className={h.head}>
+                    <b>{r.version}</b>
+                    <span className={h.pr}>{r.tag}</span>
+                    {r.artifact !== null && r.artifact !== undefined && (
+                      <span className={h.checks}>{r.artifact.name}</span>
+                    )}
+                  </div>
+                  <div className={h.meta}>
+                    {r.commit !== null && <span className={c.mono}>{r.commit}</span>}
+                    {r.infoReview !== null && r.infoReview !== undefined && (
+                      <span>信息 PR #{r.infoReview.number}</span>
+                    )}
+                    <span>{r.stage}</span>
+                  </div>
+                  <div className={h.summary}>{r.summary}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className={h.group}>
+        <h3 className={h.groupTitle}>③ 本分支最近提交</h3>
+        <p className={h.groupNote}>
+          本机仓库视图，<b>不代表线上已合并</b>；没推上去的提交也会出现在这里。
+        </p>
+        {sectionError('commits')}
+        {commits !== null && commitRows.length === 0 && errors.commits === undefined && (
+          <p className={h.empty}>这个仓库还没有提交。</p>
+        )}
+        {commitRows.length > 0 && (
+          <div className={`${h.list} ${h.listShort}`} role="list">
+            {commitRows.map((r) => (
+              <div key={`${r.at}#${r.short}`} className={h.row} role="listitem">
+                <div className={h.when}>{whenText(r.at)}</div>
+                <div className={h.body}>
+                  <div className={h.head}>
+                    <b className={c.mono}>{r.short}</b>
+                    <span>{r.subject}</span>
+                  </div>
+                  <div className={h.meta}>
+                    <span>{r.author}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
     </ModalC14>
   )
 }

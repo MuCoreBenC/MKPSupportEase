@@ -533,7 +533,7 @@ fn untaken_name(user_root: &Path, wanted: &str) -> String {
 ///
 /// ```text
 ///   ① 云端当前版的字节  没有（或盘上那份与目录对不上）→ 取回（同一条下载管道，旧份进 archive）
-///   ② 本地工作副本      presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 血统那三行）
+///   ② 本地工作副本      presets-local/<原名>.toml 还没有 → 落一份（云端原文 + 来源记录那三行）
 ///                      已经在了 → **一个字节都不动**（我改过的东西不许被云端原件顶掉）
 /// ```
 ///
@@ -584,7 +584,7 @@ pub async fn fetch_cloud_preset(
             deliver_cloud_bytes(&root, file)?;
             /*
              * 这一代目录自报的发布身份（`catalogId` + `publishSerial`）。老目录没有 ⇒
-             * `None` ⇒ 血统不写那两行 ⇒ 判定走 `Unverified`。**不猜**成官方线。
+             * `None` ⇒ 来源记录不写那两行 ⇒ 判定走 `Unverified`。**不猜**成官方线。
              */
             let line = runtime::local::CatalogLine::of(&catalog);
             /*
@@ -1004,7 +1004,7 @@ pub struct ActivePresetDto {
     /// 用户线的落点（相对用户根）；云端线是 `null`（落点由目录给）
     pub path: Option<String>,
     pub sha256: String,
-    /// 认不出是哪台机型的哪一版时是空串（用户自己那份没有血统、或目录里已经没有来源那份）
+    /// 认不出是哪台机型的哪一版时是空串（用户自己那份没有来源记录、或目录里已经没有来源那份）
     pub machine_id: String,
     pub version_id: String,
     /// 盘上的文件还是不是应用时刻的那份。
@@ -1034,15 +1034,15 @@ fn active_dto(
         }
         ActiveOrigin::Local => {
             /*
-             * 用户那份**自己说了**它从哪台机型的哪一版派生（血统三行写在文件头），
+             * 用户那份**自己说了**它从哪台机型的哪一版派生（来源记录写在文件头），
              * 这里只把那个来源翻成机型 / 版本。认不出来就留空 —— 不猜一个。
              */
             let lineage = state
                 .path
                 .as_deref()
                 .and_then(|rel| crate::fsx::paths::resolve_in(user_root, rel).ok())
-                .and_then(|path| runtime::local::lineage_of_file(&path));
-            let source = runtime::local::source_of(catalog, lineage.as_ref());
+                .and_then(|path| runtime::local::source_of_file(&path));
+            let source = runtime::local::source_file_in(catalog, lineage.as_ref());
             (
                 source.map(|f| f.machine_id.clone()).unwrap_or_default(),
                 source.map(|f| f.version_id.clone()).unwrap_or_default(),
@@ -1198,6 +1198,10 @@ pub struct RemoteUpdateDto {
 /// 地址概念——不会出现"清单在这个源、文件在另一个源"的错位。比较逻辑见 [`runtime::update`]。
 #[tauri::command]
 pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppError> {
+    /* 「自动检查软件更新」挂在**成功**之后（A 方案）：拉目录本来就要联网，顺路多问一句
+     * release.json。放在独立的阻塞任务里，不拖慢这次目录检查；失败/离线一律静默。
+     * 不进启动 / 首屏路径（铁律 2）。见 runtime::update_check 的模块头。 */
+    let notify_app = app.clone();
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkRemoteUpdate", |_| {
             let root = internal_root(&app)?;
@@ -1214,9 +1218,15 @@ pub async fn check_remote_update(app: AppHandle) -> Result<RemoteUpdateDto, AppE
             })
         })
     });
-    task.await.map_err(|e| {
+    let out: Result<RemoteUpdateDto, AppError> = task.await.map_err(|e| {
         AppError::internal(messages::text("ui.ipc.catalog.077", &[])).with_detail(e.to_string())
-    })?
+    })?;
+    if out.is_ok() {
+        tauri::async_runtime::spawn_blocking(move || {
+            runtime::update_check::maybe_check_after_catalog(&notify_app);
+        });
+    }
+    out
 }
 
 /// 应用远端目录：旧目录归档（release 管道）、新目录生效。之后 Stale 文件照常出现在
@@ -1305,18 +1315,11 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkSoftwareUpdate", |_| {
             let root = internal_root(&app)?;
-            let resolved = runtime::source::resolve_source(&root)?;
-
-            /* release.json 住发布根（presets/）之外：从 base_url（文件下载根 = presets/delivery）
-            上去两级就是仓库根发布位置。手写死三级最容易在换部署时错位，
-            所以用 source 的目录回退规矩，从 base_url 推它自己的"上一级" */
-            /* release.json 的地址由 Source Manifest 声明（不再从 base"上跳一级"去猜） */
-            let release_url = resolved.release_url()?;
-            let bytes = runtime::net::get_release(&release_url)?;
-            let info = runtime::release_info::parse(&bytes)?;
-            Ok(SoftwareUpdateDto::from(runtime::release_info::to_update(
-                &info,
-            )))
+            /* 与「拉目录成功后顺路查」共用同一个口子：地址解析 / 版本比较只有一份。
+             * 手动检查失败**如实拒绝**（设置页要显示错误）；自动那条才静默。 */
+            Ok(SoftwareUpdateDto::from(
+                runtime::update_check::fetch_update(&root)?,
+            ))
         })
     });
     task.await.map_err(|e| {

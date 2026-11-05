@@ -70,6 +70,8 @@
 /* ---------- 左目录 ---------- */
 
 .side {
+  /* 高亮块（`.navGlow`）以这条目录为坐标原点 */
+  position: relative;
   flex: 0 0 216px;
   display: flex;
   flex-direction: column;
@@ -78,7 +80,33 @@
   overflow-y: auto;
 }
 
+/*
+ * 高亮块（2026-11-01）：**整条目录只有这一块**，跟着选中项上下滑 ——
+ * 原来是每行自己换底色，切章时"啪"地跳一下，作者说「背景的变化不流畅」。
+ * 位置由 TSX 的 `moveGlow` 写 inline `transform`（WAAPI 动，不是 CSS transition：
+ * WKWebView 上 transition 不播，见 `postprocess/HANDOVER.md` §4）。
+ *
+ * 左右内衬与 `.side` 的 12px 对齐（`position: absolute` 的 0 点是 padding box 边）；
+ * 高度由脚本按实测行高写，这里给的是第一帧的兜底。
+ */
+.navGlow {
+  position: absolute;
+  top: 0;
+  left: 12px;
+  right: 12px;
+  height: 34px;
+  border-radius: var(--r-sm);
+  background: var(--accent-soft);
+  pointer-events: none;
+  will-change: transform;
+  z-index: 0;
+}
+
 .navLink {
+  /* 压在 `.navGlow` 之上（否则 abspos 的块会盖住字）；行高固定，测量才对得上 */
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -100,10 +128,11 @@
   color: var(--text-1);
 }
 
-/* 当前这一块：绿字 + 淡绿底（作者：「悬停上去的都不知道选择了哪一个」） */
+/* 当前这一块：只换**字色**（作者：「悬停上去的都不知道选择了哪一个」）——
+   底色那一块归 `.navGlow`，这里再画一层就会和滑块打架 */
 .navOn,
 .navOn:hover {
-  background: var(--accent-soft);
+  background: transparent;
   color: var(--accent-deep);
 }
 
@@ -166,6 +195,19 @@
   flex-direction: column;
   gap: 6px;
 }
+
+/*
+ * 定位高亮（2026-11-04 改判）：**不再有这一条 outline 规则**。
+ *
+ * 作者看到绿圈之后说「能不能是绿色背景，而不是这种圈起来的呀？……像我这个悬停的
+ * 时候会出现这个背景」—— 定位要和表格行一样是**行自己的底色**，不是描边。
+ * 现在由 `components/scroll/locate` 一件负责：滚完给目标行演一层 `--accent-soft`
+ * 淡绿底，停 6 秒再淡出（WAAPI，动画值在级联里压过 `:hover` / `[data-selected]`，
+ * 演完自动把底色还给 CSS）。这里只留 `.fieldRow:hover` 那条普通行底色 ——
+ * 悬停与定位从此是同一类视觉（整行底色），不再一个画圈一个铺底。
+ *
+ * ★ 别在这页再写定位相关的 class / 属性：绿底与时序只有一处定义（同上）。
+ */
 
 .fieldTitle {
   font-size: var(--fs-body);
@@ -399,8 +441,9 @@
   border-radius: var(--r-sm);
   color: var(--text-1);
   font-size: var(--fs-body);
-  /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来） */
-  transition: background-color 0.12s ease;
+  /* 悬停整行轻微提亮（作者看的时候"整行可点"这件事要看得出来）
+   * ★ 不给过渡：悬停底色必须是**即时**的（作者 2026-11-01：「悬停的时候背景不跟手」）——
+   *   120ms 的淡入在鼠标扫过一串行时就是"底色追着手跑"。桌面软件都不这么做。 */
 }
 
 .choiceRow:hover {
@@ -523,6 +566,14 @@
   margin-top: 2px;
 }
 
+/* 软件更新卡里那一格「自动检查更新」：与上面「状态 + 三颗按钮」分开一行，
+   不与动作条挤在一起（开关是偏好、按钮是动作）。 */
+.autoCheckRow {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
 /* 卡片没了之后，章节里那些"整行之外"的句子（错误提示 / 隐私小字 / 当前值）要自己带内衬，
    否则会贴着页边、跟行里的人错开 12px */
 .section > .note,
@@ -534,6 +585,8 @@
   padding: 0 12px;
 }
 
+
+
 /* 卸载那块的风险条：左右跟着 12px 内衬走，上下各留一点 */
 .section > .dangerNote {
   margin: 8px 12px 6px;
@@ -542,8 +595,18 @@
 /* 分出来的那五块（后处理/校准/涂胶/预设/数据）住在自己的文件里，
    PageSettings 只给它们套了一层带 id 的 div —— 用 flow-root 兜住里面
    `.section` 的下边距（否则相邻 margin 一塌陷，块之间的 26px 就少了） */
-.main > div[data-sec] {
+.mainBody > div[data-sec] {
   display: flow-root;
+}
+
+/*
+ * 正文那一层（2026-11-01）：只为了给"点目录"的位移动画当载体 —— 平时它就是个普通块，
+ * 一点样式都不许加（`transform` 是脚本临时写的，`will-change` 也是演的时候才挂）。
+ * 刻意**不**常驻 `will-change`：那会把这整块（两千多像素高）长久栅格化成一张大位图。
+ */
+.mainBody {
+  /* 什么都不写：它只是动画的载体。**别在这里加 `position`** —— 那会改掉章节里任何
+     绝对定位东西的锚点；`transform` 只在演的那 0.5 秒里临时生效，够用了。 */
 }
 
 /*
@@ -908,6 +971,8 @@
   font-size: var(--fs-label);
   color: var(--text-3);
 }
+
+
 
 /* ---- 分段控件（2026-10-30）----
  * 主题 / 界面语言 / 预设数据源原来是"三行竖排单选 + 每行一条小字"，

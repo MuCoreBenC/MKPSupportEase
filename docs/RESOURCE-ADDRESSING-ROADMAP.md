@@ -150,7 +150,7 @@ presets/                          ← Publish Root（catalog.files[].path 的锚
 - 可停点：若 M3 暂缓，M2 单独发一版客户端，线上即恢复。
 
 ### M3 · 重排（delivery / release 入场 / Manifest v2）
-- `presets/dist/` → `presets/delivery/`（mv）；`release.json` 入场；`bootstrap_json()` 升 v2；`workbench/bootstrap.json` 两地址换 `…/presets/delivery/source.json`；`STRUCTURE_EPOCH 1→2` + 规则表登记（新签名 `2242174c52e8a9b6`，minClient 0.0.6）；`gen-catalog` 重建 embedded **并新增交付面 catalog 重算出口**；血统 `based_on` **不迁移**（按既有裁决降级 Unknown）；模块/函数改名 `app::dist → app::delivery`、`dist_root → delivery_root`（**编译器兜底，改名漏不了**）。
+- `presets/dist/` → `presets/delivery/`（mv）；`release.json` 入场；`bootstrap_json()` 升 v2；`workbench/bootstrap.json` 两地址换 `…/presets/delivery/source.json`；`STRUCTURE_EPOCH 1→2` + 规则表登记（新签名 `2242174c52e8a9b6`，minClient 0.0.6）；`gen-catalog` 重建 embedded **并新增交付面 catalog 重算出口**；来源记录 `based_on` **不迁移**（按既有裁决降级 Unknown）；模块/函数改名 `app::dist → app::delivery`、`dist_root → delivery_root`（**编译器兜底，改名漏不了**）。
 - 验收：发布事务全链真跑到 GitHub；Gitee 手动同步后 delivery 全族 200；Fixture v2 全绿；闸 16 项全绿。
 
 ### M4 · 立法（防复发三层）
@@ -206,7 +206,7 @@ Resolver 管"source.json 声明的资源在哪"；Release Asset 是另一条链�
 | 4 | workbench/bootstrap.json 两个 URL | `…/presets/dist/source.json` → `…/presets/delivery/source.json` | build.rs `rerun-if-changed` + 真机 + 闸⑯ |
 | 5 | release.json 位置与钉位测试 | `presets/release.json` → `presets/delivery/release.json` | `release_info.rs` 钉位测试（需同步改写断言） |
 | 6 | content/ 三件 | 随目录改名 | 闸⑯ 固定物对账 |
-| 7 | 血统 based_on 字符串 | 旧形状（`dist/…` / `mkp/…`）**不迁移** —— 按 2026-10-04 既有裁决（`runtime::mine` "老形状认不出就是认不出，绝不猜"）优雅降级为 `Unknown`；field 数据为空，零实际影响 | `an_old_shaped_based_on_is_unknown_and_never_guessed`（已扩展覆盖两代旧形状） |
+| 7 | 来源记录 based_on 字符串 | 旧形状（`dist/…` / `mkp/…`）**不迁移** —— 按 2026-10-04 既有裁决（`runtime::mine` "老形状认不出就是认不出，绝不猜"）优雅降级为 `Unknown`；field 数据为空，零实际影响 | `an_old_shaped_based_on_is_unknown_and_never_guessed`（已扩展覆盖两代旧形状） |
 | 8 | 模块与函数名 | `app::dist` / `dist_root` / `DIST_REL_PATH` / `PRESET_DEST_DIR` 值 | **编译器**（改模块名全仓编译失败，漏不了——这是主动选择把名字一起改的原因） |
 | 9 | scripts/publish-presets.mjs | 12 处 dist 引用；第二生成出口 | **已删除（2026-10-28）** |
 | 10 | .gitignore | `/dist` 锚定规则保留（vite 输出仍叫 dist）；注释里 presets/dist 表述更新 | 人工（CI 无法盯注释） |
@@ -292,7 +292,7 @@ SHA 校验
 | M0 | 总纲入库 + 闸⑯ + Golden Fixture | ✅ 完成 | 2026-10-05 | 闸⑯直接落在目标态（含 bootstrap 反推 + 生产 Resolver 对账）；Golden Fixture = `resolver::tests::golden_addresses_match_the_address_table` |
 | M1 | Resolver 引入（收编 4 个拼接点） | ✅ 完成 | 2026-10-05 | `runtime/resolver.rs`；`join_url`/`directory_of` 已从业务面消失（directory_of 留在 source 内部做"Manifest 所在目录"这一件事） |
 | M2 | 修锚（Entry 锚由 Manifest `filesRoot` 声明决定） | ✅ 完成 | 2026-10-05 | 端到端验收由闸⑯在真仓库上完成：catalog 24 条 + 固定物逐条对上磁盘 |
-| M3 | delivery 重排 + release 入场 + Manifest v2 + epoch 2 | ✅ 完成 | 2026-10-05 | 新结构签名 `2242174c52e8a9b6`（minClient 0.0.6）；embedded + 交付面 catalog 由 gen-catalog 重建；血统不迁移（见 §6.1-7 修正） |
+| M3 | delivery 重排 + release 入场 + Manifest v2 + epoch 2 | ✅ 完成 | 2026-10-05 | 新结构签名 `2242174c52e8a9b6`（minClient 0.0.6）；embedded + 交付面 catalog 由 gen-catalog 重建；来源记录不迁移（见 §6.1-7 修正） |
 | M4 | 立法（CI 绊线 + 交付面无绝对 URL + 文档修正） | ✅ 完成 | 2026-10-05 | `ci.yml` 寻址立法扫描；PUBLISH-ARCHITECTURE §0/§2.2/§5.3.1/§6 重写 + 历史教训钉防重犯 |
 | M5 | 清算（脚本收敛 / mock 对齐 / 术语清扫 / HANDOFF 头注） | ✅ 完成 | 2026-10-05 | `publish-presets.mjs` 加清算中头注并跟新路径（该脚本已于 2026-10-28 删除）；HANDOFF 系加历史快照头注 |
 | M6 | Gitee Release 发布链路（release.asset.url 全量切 Gitee） | ✅ 完成 | 2026-10-05 | 四件事查清（写入点 ⑨ / 建释放 ⑧ / 上传 ⑧+⑧之二 / asset.url=平台返回值）；`ReleaseChannel` 与 PR/tag 的 target 刻意分开；⑥½ 把 tag+main 推到发布仓库（数据源主线同步）；`validate_release_source` 写盘前拦 + CI `check:release-source`（断代线 0.0.6 双侧同值）；preflight 新增 `release-channel` 项。**Gitee 适配层字段名待真机核对**（#32 既有免责）；CI 的 JS 判据从 0.0.6 起真正咬人 |

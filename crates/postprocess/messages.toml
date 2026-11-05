@@ -733,6 +733,12 @@ text_en = "This build is not running from an .app bundle"
 text_zh_tw = "這個程序不是從 .app 裡跑的"
 text_ja = "このプログラムは .app から実行されていません"
 
+["ui.ipc.app.038"]
+text = "删不掉数据目录"
+text_en = "Cannot delete the data folder"
+text_zh_tw = "刪不掉資料目錄"
+text_ja = "データディレクトリを削除できません"
+
 ["ui.ipc.backup.038"]
 text = "没说备份放哪 —— 先挑一个文件夹"
 text_en = "No location was given for the backup — pick a folder first"
@@ -1394,7 +1400,9 @@ text_zh_tw = "儲存位置就是歸檔自己的目錄 —— 換一個地方（�
 text_ja = "保存先がアーカイブ自身のディレクトリです — 別の場所を選んでください（ここでは原本を上書きします）"
 
 ["ui.ipc.report.139"]
-text = "保存位置里已经有 {v1} 了 —— 换个位置，或先把那一份挪走"
+# 撞名（2026-11-04）：界面按这个码摆「重新导出」——不认句子，翻译一改就失效
+code = "E_REPORT_EXPORT_EXISTS_001"
+text = "保存位置里已经有 {v1} 了 —— 换个位置，或先在「重新导出」里覆盖掉它"
 text_en = "The save location already has {v1} — choose another place, or move that file away first"
 text_zh_tw = "儲存位置裡已經有 {v1} 了 —— 換個位置，或先把那一份挪走"
 text_ja = "保存先にすでに {v1} があります — 場所を変えるか、先にそれをどかしてください"
@@ -1438,6 +1446,20 @@ text_en = "There is no “{base}” in this location yet"
 text_zh_tw = "這個位置裡還沒有「{base}」"
 text_ja = "この場所にはまだ「{base}」がありません"
 params = ["base"]
+
+["ui.ipc.report.146"]
+text = "不认识的导出项：{kind}"
+text_en = "Unknown export item: {kind}"
+text_zh_tw = "不認識的匯出項目：{kind}"
+text_ja = "不明なエクスポート項目：{kind}"
+params = ["kind"]
+
+["ui.ipc.report.147"]
+text = "归档里没有这一份：{name}"
+text_en = "This file is not in the archive: {name}"
+text_zh_tw = "歸檔裡沒有這一份：{name}"
+text_ja = "アーカイブにこのファイルがありません：{name}"
+params = ["name"]
 
 ["ui.ipc.slicer.146"]
 text = "不认识的切片软件：{other}（只有 system / bambu / orca / custom 四档）"
@@ -2789,6 +2811,89 @@ text_en = "The value of option {n} of {key} may only be a string / number / bool
 text_zh_tw = "{key} 第 {n} 條可選項的值只能是字元串 / 數字 / 布爾，見到 {v}"
 text_ja = "{key} の {n} 番目の選択肢の値は文字列 / 数値 / 真偽値のみ、{v} が渡されました"
 params = ["key", "n", "v"]
+
+["ui.presetdata.registry.345"]
+text = "新分组的 id「{id}」不合规：只许 a-z、0-9 与下划线，最长 48"
+text_en = "The new group id “{id}” is not valid: only a-z, 0-9 and underscore, at most 48 characters"
+text_zh_tw = "新分組的 id「{id}」不合規：只許 a-z、0-9 與下劃線，最長 48"
+text_ja = "新しいグループの id「{id}」が不正です：a-z、0-9、アンダースコアのみ、最大 48 文字"
+params = ["id"]
+
+["ui.presetdata.registry.346"]
+text = "新分组得有个名字（不超过 24 个字）"
+text_en = "The new group needs a name (up to 24 characters)"
+text_zh_tw = "新分組得有名字（不超過 24 個字）"
+text_ja = "新しいグループには名前が必要です（24 文字まで）"
+
+["ui.presetdata.registry.347"]
+text = "注册表里没有页签 {tab}，新分组挂不上去"
+text_en = "The registry has no tab {tab}, so a new group cannot be attached"
+text_zh_tw = "註冊表裡沒有頁籤 {tab}，新分組掛不上去"
+text_ja = "レジストリにタブ {tab} がないため、新しいグループを追加できません"
+params = ["tab"]
+
+["ui.presetdata.registry.348"]
+text = "分组 id「{id}」在 {tab} 下已经占着了，换一个"
+text_en = "The group id “{id}” is already taken under {tab}, pick another"
+text_zh_tw = "分組 id「{id}」在 {tab} 底下已經佔用了，換一個"
+text_ja = "グループ id「{id}」は {tab} で既に使われています。別の名前にしてください"
+params = ["id", "tab"]
+
+["ui.presetdata.registry.349"]
+text = "注册表的 [[tabs]] 里找不到 {tab} 这一张表"
+text_en = "The registry’s [[tabs]] has no table for {tab}"
+text_zh_tw = "註冊表的 [[tabs]] 裡找不到 {tab} 這一張表"
+text_ja = "レジストリの [[tabs]] に {tab} のテーブルがありません"
+params = ["tab"]
+
+["ui.presetdata.registry.350"]
+text = "布局文件的 [[tabs]] 里找不到 {tab} 这一张表"
+text_en = "The layout file’s [[tabs]] has no table for {tab}"
+text_zh_tw = "佈局檔的 [[tabs]] 裡找不到 {tab} 這一張表"
+text_ja = "レイアウトファイルの [[tabs]] に {tab} のテーブルがありません"
+params = ["tab"]
+
+["ui.presetdata.registry.351"]
+text = "注册表里没有分组 {id}，改不了"
+text_en = "The registry has no group {id}, so it cannot be edited"
+text_zh_tw = "註冊表裡沒有分組 {id}，改不了"
+text_ja = "レジストリにグループ {id} がないため変更できません"
+params = ["id"]
+
+["ui.presetdata.registry.352"]
+text = "分组 {id} 是整块组件（设置页那类），不在参数页里，不能改名或换位置"
+text_en = "Group {id} is a whole-block component (settings-page kind); it is not on the parameters page and cannot be renamed or moved"
+text_zh_tw = "分組 {id} 是整塊組件（設定頁那類），不在參數頁裡，不能改名或換位置"
+text_ja = "グループ {id} はブロック単位のコンポーネント（設定ページ系）で、パラメータページには無いため改名も移動もできません"
+params = ["id"]
+
+["ui.presetdata.registry.353"]
+text = "分组「{label}」已经在这一页的边上，挪不动了"
+text_en = "Group “{label}” is already at the edge of this page and cannot move further"
+text_zh_tw = "分組「{label}」已經在這一頁的邊上，挪不動了"
+text_ja = "グループ「{label}」はこのページの端にあるため、これ以上移動できません"
+params = ["label"]
+
+["ui.presetdata.registry.354"]
+text = "分组「{label}」里还有 {n} 条参数，不能删 —— 先把它们搬到别的分组"
+text_en = "Group “{label}” still holds {n} parameter(s) and cannot be deleted — move them to another group first"
+text_zh_tw = "分組「{label}」裡還有 {n} 條參數，不能刪 —— 先把它們搬到別的分組"
+text_ja = "グループ「{label}」にはまだ {n} 件のパラメータがあるため削除できません。先に別のグループへ移動してください"
+params = ["label", "n"]
+
+["ui.presetdata.registry.355"]
+text = "「{label}」是功能卡（组件 / 条件分组），不是参数分组，不能删"
+text_en = "“{label}” is a feature card (component / conditional group), not a parameter group, and cannot be deleted"
+text_zh_tw = "「{label}」是功能卡（組件 / 條件分組），不是參數分組，不能刪"
+text_ja = "「{label}」は機能カード（コンポーネント / 条件グループ）であり、パラメータグループではないため削除できません"
+params = ["label"]
+
+["ui.presetdata.registry.356"]
+text = "译文台账里没有「{k}」这一格 —— 只认这六册：{names}"
+text_en = "“{k}” is not a translation slot in the ledger — only these six exist: {names}"
+text_zh_tw = "譯文台帳裡沒有「{k}」這一格 —— 只認這六冊：{names}"
+text_ja = "翻訳台帳に「{k}」という枠はありません。指定できるのは次の 6 つです：{names}"
+params = ["k", "names"]
 
 ["ui.runtime.app_state.345"]
 text = "读不到应用状态"
@@ -4916,6 +5021,50 @@ text_ja = "{count} 件の変更が未保存です — 生成・公開の前に�
 params = ["count"]
 note = "2026-10-31 统一编辑事务：生成与发布都要求在「已保存」状态上跑 —— 不自动替用户保存"
 
+["ui.workbench.txn.diverged"]
+text = "工作台手里那份源文件与 presets/ 已经不是同一份 —— 可能是外部改过源，或上次留下了没保存的改动。先「重新加载」（CLI：presets reload），确认保留哪一份，再生成"
+text_en = "What the workbench has loaded no longer matches presets/ — the sources may have been changed outside, or a previous session left unsaved changes. Reload first (CLI: presets reload), decide which copy to keep, then generate"
+text_zh_tw = "工作台手裡那份來源檔與 presets/ 已經不是同一份 —— 可能是外部改過來源，或上次留下了沒儲存的改動。先「重新載入」（CLI：presets reload），確認保留哪一份，再產生"
+text_ja = "ワークベンチが読み込んでいる内容は presets/ と一致しません — 外部でソースが変更されたか、前回の未保存の変更が残っています。先に「再読み込み」（CLI: presets reload）でどちらを残すか決めてから生成してください"
+params = []
+note = "2026-10-31 影子分叉闸：生成不许拿旧影子渲染再写回真仓库（A1 三份 0.7 被写回 0.8 那次）。不自动 mirror —— 影子可能含着用户没保存的工作"
+
+["ui.workbench.reload.drafts"]
+code = "W_WB_RELOAD_DRAFTS_001"
+text = "重新加载会丢掉 {count} 处未保存的改动 —— 先确认（保存或放弃），再重新加载"
+text_en = "Reloading will discard {count} unsaved change(s) — confirm first (save or discard), then reload"
+text_zh_tw = "重新載入會丟掉 {count} 處未儲存的變更 —— 先確認（儲存或放棄），再重新載入"
+text_ja = "再読み込みすると未保存の変更 {count} 件が失われます — 先に確認（保存または破棄）してから再読み込みしてください"
+params = ["count"]
+note = "2026-11-01 数据保护：wb_reload 以前一条命令就丢草稿。现在有未保存编辑时必须显式确认（discardDrafts=true）。注意只拦『用户的草稿』，不拦『外部改了 presets/』—— 后者重新加载正是正确动作"
+
+["ui.workbench.reload.conflict"]
+code = "W_WB_RELOAD_CONFLICT_001"
+text = "{count} 处改动里，有 {conflicts} 处是同一个文件被两边同时改过（你在工作台改了没保存、磁盘上又被外部改过）—— 重新加载会丢掉你那一份，先确认保留哪一份"
+text_en = "Of {count} change(s), {conflicts} are files edited on both sides (your unsaved edit and an external change) — reloading would discard yours; confirm which side to keep"
+text_zh_tw = "{count} 處變更裡，有 {conflicts} 處是同一個檔案被兩邊同時改過（你在工作台改了未儲存、磁碟上又被外部改過）—— 重新載入會丟掉你那份，先確認保留哪一份"
+text_ja = "{count} 件の変更のうち {conflicts} 件は同じファイルが両側で変更されています（未保存の編集と外部からの変更）— 再読み込みするとあなたの変更が失われます。どちらを残すか確認してください"
+params = ["count", "conflicts"]
+note = "2026-11-01 数据保护：三方对账（影子/真源/基准）发现『同一个文件两边都改过』时单独提示。这类冲突不能自动选边 —— 自动用真源覆盖会丢掉用户的未保存编辑"
+
+["ui.workbench.save.stale"]
+code = "E_WB_SAVE_STALE_001"
+text = "磁盘上的 presets/ 在你会话期间被外部改过 —— 直接保存会把它盖掉。先「重新加载」看清磁盘那一份，再决定保留谁"
+text_en = "presets/ was changed outside this session — saving now would overwrite that. Reload first to see the on-disk copy, then decide which side to keep"
+text_zh_tw = "磁碟上的 presets/ 在你會話期間被外部改過 —— 直接儲存會把它蓋掉。先「重新載入」看清磁碟那一份，再決定保留誰"
+text_ja = "ディスク上の presets/ がこのセッション中に外部で変更されました — このまま保存すると上書きされます。先に「再読み込み」でディスク側を確認し、どちらを残すか決めてください"
+params = []
+note = "2026-11-02 刀 6：保存前比 session.json 的 diskStamp 与 presets/ 当前指纹。不一致 = 外部改过，**不许静默覆盖**（2026-10-31「A1 三份 0.7 被写回 0.8」就是这条没拦）。空 diskStamp（老账本/测试夹具）跳过校验"
+
+["ui.workbench.build.dual_source"]
+code = "E_PRESET_DUAL_SOURCE_001"
+text = "生成没完成：{file} 在「安装包内置」和「云端交付」两边算出来不一样 —— 这说明又有人给其中一侧开了第二个数据源。先修掉那处，再生成"
+text_en = "Generation stopped: {file} differs between the built-in copy and the delivered copy — something has introduced a second data source for one of them. Fix that first, then generate again"
+text_zh_tw = "產生沒有完成：{file} 在「安裝包內建」與「雲端交付」兩邊算出來不一樣 —— 這表示又有人替其中一側開了第二個資料來源。先修掉那處，再產生"
+text_ja = "生成が完了しませんでした：{file} は「内蔵」と「配信」で算出結果が異なります — どちらかに第二のデータソースが追加された可能性があります。まずそこを直してから再生成してください"
+params = ["file"]
+note = "2026-11-01 单一源闸：交付产物与内核产物必须逐字节相同（都由 presets/ 同一台渲染器算出）。历史上 tower_extrude_ratio 一边 1.0 一边 0.9 就是第二条数据源造成的"
+
 ["ui.ipc.local.150"]
 text = "这份预设的路径不对，存不回去"
 text_en = "That preset path is invalid, so it cannot be saved back"
@@ -4929,3 +5078,10 @@ text_en = "Another preset still has unsaved changes — save or discard those fi
 text_zh_tw = "另一份預設還有沒儲存的改動 —— 先在那份裡儲存或放棄，再來存這一份"
 text_ja = "別のプリセットに未保存の変更があります — 先にそちらを保存するか破棄してから、これを保存してください"
 params = []
+
+["ui.ipc.local.152"]
+text = "{rel} 读不出来，没法记下它是从哪一份复制来的 —— 这次复制已撤销，母本没有动过"
+text_en = "{rel} could not be read, so its origin could not be recorded — the copy was rolled back and the original is untouched"
+text_zh_tw = "{rel} 讀不出來，沒法記下它是從哪一份複製來的 —— 這次複製已撤銷，母本沒有動過"
+text_ja = "{rel} を読み取れないため、どのファイルから複製したかを記録できませんでした — この複製は取り消され、元のファイルは変更されていません"
+params = ["rel"]

@@ -28,11 +28,28 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
 
+/*
+ * 窗底那三层渐变（2026-11-01 从这里搬出来，原来写在 `.shell` 自己身上）。
+ *
+ * ★ 为什么不在 `.shell` 上：`.shell` 是所有内容的父层，它自己的背景**和内容画在
+ *   同一张位图里** —— 内容只要重画（滚一帧、悬停一行），这三层渐变就跟着重画一遍。
+ *   1080×628 的窗在 Retina 上是 2.7M 像素 × 三层渐变，一帧就是几毫秒起步。
+ *   搬到 `::before` 并 `translateZ(0)`（确定的层提升）之后：渐变只栅格化一次，
+ *   之后由合成器贴上去。像素一个都不变（同一个盒子、同样的三层）。
+ */
+.shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
   background:
     radial-gradient(120% 90% at 18% 0%, #fdfefe 0%, transparent 55%),
     radial-gradient(90% 80% at 92% 100%, #e2e7ea 0%, transparent 60%),
     linear-gradient(135deg, #f7f9fa 0%, #eceff1 100%);
+  transform: translateZ(0);
 }
 
 .shell::after {
@@ -44,6 +61,20 @@
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 90%),
     inset 0 0 60px rgb(20 32 45 / 4%);
+  /*
+   * ★★ **整窗的装饰必须待在自己那一层里**（2026-11-01，作者报「滚起来帧率很低、
+   *   到处悬停都不跟手」）。
+   *
+   * 这一层是**铺满整扇窗、还盖在所有内容之上**的：一条 60px 的内阴影 + 一条白高光。
+   * 不给它单独一层，WebKit 就把它和它底下的内容画在同一张位图里 —— 内容每重画一次
+   * （滚一帧、悬停一行），整窗那片 60px 模糊就要连着重栅格化一次。1080×628 的窗在
+   * Retina 上是 2.7M 像素，一帧几十毫秒 ⇒ 表现就是"整机帧率低 + 悬停发钝"，
+   * 而且**和哪一页无关**（这正是作者说的"好多地方都不跟手"）。
+   *
+   * `translateZ(0)` 是**确定的层提升**（`will-change` 只是提示，WebKit 可以不理）：
+   * 装饰只栅格化一次，之后滚动/悬停由合成器把这一层贴上去。像素一点没变。
+   */
+  transform: translateZ(0);
 }
 
 .shell[data-density='mini']::after {
@@ -63,7 +94,7 @@
  *   `#151517→#151515`）——窗底和页面是相邻的画布，一个中性、一个带蓝偏，摆在一起就又
  *   成了"差几阶又差色相"。理由都记在 tokens.css 那条"面族去蓝"里。
  */
-[data-theme='dark'] .shell {
+[data-theme='dark'] .shell::before {
   background:
     radial-gradient(120% 90% at 18% 0%, #232323 0%, transparent 55%),
     radial-gradient(90% 80% at 92% 100%, #191919 0%, transparent 60%),

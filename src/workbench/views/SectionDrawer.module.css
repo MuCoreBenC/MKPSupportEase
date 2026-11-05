@@ -1,0 +1,238 @@
+/*
+ * 分组抽屉：贴着内容区右缘通高，盖在参数区之上。
+ *
+ * ★ 2026-11-02 重做：它**不住 `FieldLayer` 了**，而是 `.pBody`（参数页里那块
+ * `position: relative` 的 flex 区，左 rail / 卡阵 / 右侧详情栏都在里面）的一个
+ * 绝对定位子元素。理由见 `SectionDrawer.tsx` 的文件头 —— 抽屉挂在 `FieldLayer`
+ * （z 90）里时，"对话框压不住它"这个问题在结构上就无解，调了四次 z 都没用。
+ * 搬回来之后，对话框住 `.shellBody`、整层排在页面之后画，谁都不用比 z。
+ *
+ * 几何：`.pBody` 自己就是 `flex: 1` 撑满页头以下，所以 `top: 0 / bottom: 0` 通到
+ * 页头下沿与状态栏上沿，`right: 0` 是内容区右缘 —— 与原来贴在 `FieldLayer` 上
+ * 看到的通高一致。它会盖住右侧详情栏（预览区），这正是原来要的效果。
+ */
+
+/*
+ * 没有遮罩（2026-11-01）：作者要「滚动可以穿透」—— 抽屉开着时左侧列表还得能滚。
+ * 一层半透明背景会把滚轮全吃掉，所以抽屉只占自己那 380px，其余地方照样能操作。
+ */
+
+.drawer {
+  /*
+   * 这是**页面内部**的序，不是全站的序：`.pBody` 里还有收窄的详情栏与拖动条，
+   * 20 足以压住它们。
+   *
+   * 与对话框的关系**不归这个数管**：对话框在 `.shellBody` 的宿主里、整层排在
+   * 页面之后画，天然在上面。所以这里不许为了"让对话框压住抽屉"再加码 ——
+   * 那正是前四次越修越乱的地方。
+   */
+  z-index: 20;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  background: var(--surface-solid);
+  border-left: 1px solid var(--line-strong);
+  box-shadow: var(--shadow-lift);
+}
+
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.titleRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+/*
+ * 标题那支笔与「关闭」那颗 ×：**同一个 22×22 的方框**，才谈得上对齐
+ * （2026-11-01 作者：「那个编辑的图标没对齐吧，它和那个叉叉都没对齐」）。
+ * 之前笔是 13px 图标 + 2px 内衬、× 是 16px 字，两个盒子的高矮本来就不同。
+ */
+.titlePen,
+.trash,
+.close {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-3);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+}
+
+.titlePen:hover {
+  color: var(--text-1);
+  border-color: var(--line);
+}
+
+.titleInput {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font: inherit;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--text-1);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.close {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.close:hover,
+.titlePen:hover {
+  color: var(--text-1);
+  border-color: var(--line);
+}
+
+/*
+ * 删除那颗（只在空组上出现）。与笔 / × 同一个 22×22 方框 —— 三个按钮并排，
+ * 高矮不一致立刻看得出来。红只给 hover：常驻红会把"删"变成最显眼的那一颗，
+ * 而它其实是这一排里最不常用的。
+ */
+.trash:hover {
+  color: var(--danger, #e5484d);
+  border-color: var(--danger, #e5484d);
+}
+
+.sub {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 14px;
+  padding: 12px 10px 16px;
+  overflow-y: auto;
+}
+
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.blockTitle {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-2);
+}
+
+.note {
+  margin: 0 0 2px;
+  padding: 0 4px;
+  font-size: calc(var(--fs-label) - 1px);
+  line-height: 1.6;
+  color: var(--text-3);
+}
+
+.empty {
+  margin: 0;
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/*
+ * 「删除这个分组？」模态框里那张小清单：左边标签一列、右边值一列。
+ * 用 `grid` 而不是两栏 flex —— 名字长短不一，flex 会让值那一列参差不齐。
+ */
+.confirmList {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 0;
+  font-size: var(--fs-label);
+}
+
+.confirmList dt {
+  color: var(--text-3);
+}
+
+.confirmList dd {
+  margin: 0;
+  color: var(--text-1);
+}
+
+/* id 这种要一眼看出"是个标识符"的：等宽、可选中复制 */
+.mono {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  user-select: text;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rowBtn {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  width: 100%;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.rowBtn:hover {
+  background: var(--card-face);
+}
+
+.rowLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowKey {
+  flex: none;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+}

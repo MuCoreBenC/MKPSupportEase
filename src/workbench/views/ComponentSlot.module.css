@@ -1,0 +1,42 @@
+/*
+ * 画布占位：一块窄虚线框，撑住位置就行。
+ *
+ * 作者：「它的宽度不用占据很多」「他就占个位置就可以了」——
+ * 所以宽度是定值（那一列由卡片定 132px），高度**跟着右边那列参数长**。
+ *
+ * 2026-11-01 修：原来这里只有 `min-height: 96px`，交付过一版只有 96 高的矮块，
+ * 上方空出半张卡 —— 那是一次 `height: 100%` / 后来又删掉的来回改留下的。
+ * 现在靠 `flex: 1`（父级是 flex 列且 `stretch`）无条件拉满，不再依赖谁写死高度。
+ */
+
+.slot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  /* 96px 只是下限：一列的参数再少也不至于把它压成一条 */
+  min-height: 96px;
+  padding: 8px;
+  color: var(--text-3);
+  text-align: center;
+  background: var(--surface-sunken);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--r-sm);
+}
+
+.badge {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: calc(var(--fs-label) - 1px);
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  word-break: break-all;
+}

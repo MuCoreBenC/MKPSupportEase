@@ -24,10 +24,10 @@
 # 覆盖表**只有变体级**（键一律 `机型:变体`）：机型级那一层已经取消，
 # 一台机型共用的值就写在它自己的正文里。
 #
-# 改它 = 出新一批预设。改完要走完这条链，否则判据会红：
-#   ① 这个文件           ← 真源（手改，或用 `--recipe-window` 那扇工作台）
-#   ② crates/preset/assets/presets/            ← 生成物：`gen-presets --write`（判据 K-G7）
-#   ③ crates/postprocess/tests/fixtures/presets/ ← 对照基线：确认 diff 是你要的之后再同步（K-G0'）
+# 改它 = 出新一批预设。2026-11-04 起旧 `gen-presets` 已退役，下游只由工作台写：
+#   ① 这个文件           ← 配方正文真源（工作台预检仍读它）
+#   ② crates/preset/assets/presets/            ← 工作台 `wb_generate`（闸：presets diff / check:artifacts）
+#   ③ crates/postprocess/tests/fixtures/presets/ ← 对照基线：看过 diff 后由 `wb_sync_baseline` 显式同步（K-G0'）
 #
 # ②③ 两边同名（`{机型 id}-{版本 id 小写}.toml`，`generate::file_name` 算出，b05 Task 5）。
 #
@@ -127,7 +127,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
@@ -234,7 +234,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
@@ -344,7 +344,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
@@ -454,7 +454,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
@@ -564,7 +564,7 @@ rib_extra_length = 0 # 斜肋额外长度(mm) 范围:0~300
 rib_fillet_wall = true # 外墙倒圆角
 rib_width = 8 # 斜肋宽度(mm) 范围:0~300
 small_feature_factor = 1 # 小特征因子 范围:0~2
-support_extrusion_multiplier = 0.8 # 支撑体挤出倍率
+support_extrusion_multiplier = 0.7 # 支撑体挤出倍率
 tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2

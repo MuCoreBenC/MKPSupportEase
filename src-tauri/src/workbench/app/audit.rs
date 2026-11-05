@@ -143,13 +143,6 @@ pub struct PublishAudit {
     pub min_version: Option<String>,
     /// 全部 Blocker 都 Pass 才是 true —— **这是能不能往下走的唯一答案**
     pub can_publish: bool,
-    /// **当前模式让不让发布**：测试模式（沙箱）里这条路关着，这里是那句原因；
-    /// 正式模式是 `None`。
-    ///
-    /// ★ 它与 `can_publish` 答的是两件事：`can_publish` = "这一版东西能不能发出去"
-    /// （闸那十六项），这里 = "**现在这个模式**允不允许发"。闸全绿但模式关着时，
-    /// 界面不许把那颗按钮画亮 —— 点下去只会被后端如实拒掉。
-    pub publish_closed: Option<String>,
     /*
      * ---- **这次真要发出去的东西**（2026-10-29） ----
      *
@@ -203,13 +196,19 @@ pub fn publish_audit() -> Result<PublishAudit, AppError> {
 /// 与 `build::preview_with` / `generate_with` 同一条纪律，`publish_tx` 的源码扫描判据钉住它。
 pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
     let (c, d, _) = state(ctx)?;
-    let book = Book::new(&ctx.presets, &c, &d);
-    // ★ 根从**会话那份 presets 的根**派生（`*_at`，与生成 / 发布同一条派生）——
-    // 审计查的就是这个会话要发的那一棵交付树
-    let delivery_root = paths::delivery_root_at(ctx.presets.root());
+    // 装渲染器：审计里的"产物是否跟上"用的就是 `build_state`（2026-11-01）
+    let probe = super::build::renderer_for(ctx);
+    let book = super::build::book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
+    /* ★ 根从**真仓库**（`ctx.real_root`）派生（2026-11-01）。
+     *
+     * 不能再拿 `ctx.presets.root()`：会话的 `Presets` 现在永远读**影子树**
+     * （那里才是编辑态）。影子里最多只有开场时拷过去的那一份 `delivery/`，
+     * 生成之后就成了旧拷贝 —— 审计会拿着旧产物报"都待更新"。
+     * 交付树 / 载荷根都住在真仓库，与生成 / 发布同一条派生（`*_at`）。 */
+    let delivery_root = paths::delivery_root_at(ctx.real_root());
     // ★ 只读定位，不 `create_dir_all` —— 一个自称「只读：不写盘」的闸
     // 不该顺手造出一个目录
-    let asset_root = paths::assets_root_at(ctx.presets.root());
+    let asset_root = paths::assets_root_at(ctx.real_root());
 
     let mut items: Vec<AuditItem> = Vec::with_capacity(17);
 
@@ -325,27 +324,12 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         files_removed: removed,
         min_version,
         can_publish,
-        publish_closed: closed_reason(),
         catalog_id,
         publish_serial,
         ledger_exists,
         identity_now: identity_now.catalog_id,
         serial_now: identity_now.serial,
         nothing_to_publish,
-    })
-}
-
-/// 当前模式**让不让发布**：测试模式（沙箱）里这条路整个关着
-/// （`wb_publish` 起手就是 [`super::sandbox::require_real_mode`]）。
-///
-/// ★ 为什么闸要把这句话**自己说出来**：闸全绿时那颗「确认发布」是亮的，而测试模式下
-/// 点下去只会换来一句"这条路是关着的" —— **一颗点了会被拒的按钮比没有按钮更坏**，
-/// 人会以为是自己点错了地方。判据取自**同一个函数**，不在这里重写一遍模式判断。
-fn closed_reason() -> Option<String> {
-    let e = super::sandbox::require_real_mode("发布").err()?;
-    Some(match e.detail {
-        Some(d) => format!("{} —— {d}", e.message),
-        None => e.message,
     })
 }
 

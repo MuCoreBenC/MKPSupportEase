@@ -46,7 +46,7 @@ A 的真实数据链（catalog / 草稿链 / 编辑目标 / 操作记录）
 | 12 | 板轮廓几何（`bedOutline`） | `bedOutlineA43.ts` 手写的 `A1`/`A1_MINI` 路径 | ❌ **A 没有** | **补**（§4） |
 | 13 | 塔的尺寸 / 位置 | `useParamsA43` / `PageParamsA43` 里**按参数值现算** | ⚠️ 取决于参数是否在真注册表里（见 §5） | **接 A 的参数值** |
 | 14 | 模型 / STL / 3MF | **A43 参数页不读任何模型**（只有文案提到） | ⚠️ **有资产、契约弱、UI 全缺**（见 §6） | **单独一刀** |
-| 15 | preset 状态 / 两条线 / 草稿 | localStorage（假） | ✅ **真**：`run/active-preset.json` + `run/draft-preset.json` + 血统 | **接 A 的**（A 更全） |
+| 15 | preset 状态 / 两条线 / 草稿 | localStorage（假） | ✅ **真**：`run/active-preset.json` + `run/draft-preset.json` + 来源记录 | **接 A 的**（A 更全） |
 | 16 | mock 数据（`mockA43.ts`） | 手编演示数据 | — | ❌ **不搬** |
 
 ---

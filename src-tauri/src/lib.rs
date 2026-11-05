@@ -9,8 +9,6 @@
 //! 启动顺序有讲究：**先建数据根，再装日志**（日志要写进 `internal_root/logs`），
 //! 而这两步失败都不阻断启动 —— 用户要的是软件能开，不是日志齐全。
 
-/// **后处理执行归档**：原文件 / 输出文件 / 执行记录（`_meta.json`）三件套。
-/// 落点 `<用户根>/gcode_history/<日期>/` —— 报告页的数据源（见 [`archive`] 模块头）。
 pub mod archive;
 /// **参数分流**：切片器（BambuStudio）带 `--Toml/--Gcode` 调我们时走钩子，否则开界面
 /// （见 [`args::Mode`]）。它是本程序"一个可执行物两种角色"的那半张脸。
@@ -51,6 +49,10 @@ pub mod hook_ui;
 pub mod ipc;
 /// 旧世代（`mkp-ssr`）数据根的只读入口 —— 报告页的执行账与模型缓存的唯一真实来源
 pub mod legacy;
+/// **后处理执行归档**：原文件 / 输出文件 / 执行记录（`_meta.json`）三件套。
+/// 落点 `<用户根>/gcode_history/<日期>/` —— 报告页的数据源（见 [`archive`] 模块头）。
+/// 写盘日志的字段拼装（两档共用；工作台的值类日志复用它的 `FieldChange`）
+pub mod logfmt;
 /// 系统通知（2026-10-17）：设置页「处理完成发送系统通知」那一格的真实现。
 pub mod notify;
 pub mod obs;
@@ -115,6 +117,146 @@ use tauri::Manager;
 /// [`crate::hook::run_with_channel`]（干活 + 退出码，不开窗、不建 Tauri 应用）；
 /// 窗口留在**这个**常驻进程里，靠 [`hook_ipc`] 那条通道喂它（见 [`hook_ui`] 模块头）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/* ---------- 构建指纹（2026-11-02） ----------
+ *
+ * 唯一用途：回答「现在跑的这个进程，是哪一次编译出来的」—— 以前这个问题只能靠猜，
+ * 于是反复出现「你是不是没重新编译后端」这种没有证据的互疑。
+ *
+ * 三格都要一起看，单看一格会骗人：
+ * - `编译时刻` 比源码 / 提交都晚 ⇒ 这一次确实重编了（不管 `target` 目录的 mtime 多旧）；
+ * - `提交` 带 `-dirty` ⇒ 编的时候工作区有未提交改动（改完没提交也能对上）；
+ * - `档位` ⇒ 两档共用可执行文件名，光看进程名分不出是客户端还是工作台。
+ *
+ * 后两格由 `build.rs` 刻进来；**编译时刻不刻** —— 运行时读 exe 的 mtime（见下），
+ * 所以它不可能是"build.rs 那一刻"，也不会因为 build.rs 没重跑而过期。
+ */
+pub const GIT_COMMIT: &str = env!("MKPSE_GIT_COMMIT");
+pub const BUILD_TIER: &str = env!("MKPSE_BUILD_TIER");
+
+/// 一行人读的指纹（日志用）。
+///
+/// # 时间的那一格为什么**运行时**读文件，不用 build.rs 刻的常量
+///
+/// 以前用 `MKPSE_BUILD_TIME`（build.rs 跑的时刻）当这一格，作者实测到两层误差：
+///
+/// 1. 指纹印 `11-02T15:59Z`，二进制其实是 `11-03 11:13`（差 11 小时）——
+///    cargo 判定"产物已是最新"时根本不跑 build.rs；
+/// 2. 给它加了 `rerun-if-changed` 之后还差 1 分钟（`12:58:22` vs `12:59:37`）
+///    —— 因为 build script 跑在**链接之前**。
+///
+/// **`编译于` 想回答的其实是"这个 exe 是何时生成的"**，那就直接问文件：
+/// 读 `current_exe()` 的 mtime。它是链接完成那一刻，不会早、也不会过期。
+///
+/// 而那个 `rustc-env` 还有个贵得多的副作用：它一变，整个 app crate 就失效重编
+/// （改一行 Rust 要全量 codegen 一遍，作者：「我感觉我每次编译时间也挺长的」）。
+/// 时间既然改读文件，这个常量就**删掉**了 —— 它不提供任何信息，只拖慢编译。
+pub fn build_fingerprint() -> String {
+    format!(
+        "{BUILD_TIER} · {GIT_COMMIT} · 编译于 {}",
+        exe_modified_local()
+    )
+}
+
+/// 当前可执行文件的 mtime，按**中国时间**（`+08:00` 明写）印成人读的形状。
+///
+/// 读不到就写 `unknown` —— **不许**退回去拿别的时刻充当。一个"看起来像真的"
+/// 的时间正是这套指纹反复说谎的来源，比 `unknown` 害处大得多。
+///
+/// # 为什么不再是系统 `date`（2026-11-05，Windows CI 逼出来的）
+///
+/// 原先 shell 出去跑 `date -r <epoch>`，理由是"别在仓里抄第二份历法表"。
+/// 但 `-r` 是 BSD/GNU 的形状：Windows 上 `date` 是 cmd 内建命令，直接给不出
+/// 东西，指纹那格退化成 `unknown` —— 生产包同样受影响，只是 CI 的必经判据
+/// `fingerprint_time_comes_from_the_exe_and_is_local` 先把它抓出来了。
+///
+/// 现在用已在依赖里的 `time` 做 epoch → 固定 `+08:00` 的换算：**只有一套钟**
+/// （`UNIX_EPOCH` + 恒定 8 小时），没有历法表、不依赖宿主有没有 `date`，
+/// 三个平台同一串字节。
+fn exe_modified_local() -> String {
+    let Ok(exe) = std::env::current_exe() else {
+        return "unknown".to_owned();
+    };
+    let Ok(meta) = std::fs::metadata(&exe) else {
+        return "unknown".to_owned();
+    };
+    let Ok(modified) = meta.modified() else {
+        return "unknown".to_owned();
+    };
+    let Ok(epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return "unknown".to_owned();
+    };
+    let Ok(secs) = i64::try_from(epoch.as_secs()) else {
+        return "unknown".to_owned();
+    };
+    east_8_wall(secs).unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// epoch 秒 → `YYYY-MM-DD HH:MM:SS +08:00`。纯函数，判据不靠机器上的时区。
+fn east_8_wall(secs: i64) -> Option<String> {
+    let utc = time::OffsetDateTime::from_unix_timestamp(secs).ok()?;
+    let local = utc.to_offset(time::UtcOffset::from_hms(8, 0, 0).ok()?);
+    let fmt = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    local.format(fmt).ok().map(|s| format!("{s} +08:00"))
+}
+
+#[cfg(test)]
+mod fingerprint_tests {
+    use super::*;
+
+    /// **指纹那一格必须是可读的中国时间**（2026-11-03 作者：
+    /// 「如果这个时间是错的话……他总是说我没编译，那我实际上早就编译了」）。
+    ///
+    /// 这条钉四件事：
+    /// 1. 走的是**运行时读 exe mtime**（不是 `build.rs` 那一刻）——
+    ///    `build.rs` 跑在链接之前，且 Cargo 判定"无需重建"时根本不跑它；
+    /// 2. 格式带 `+08:00`，不是裸 UTC 的 `Z`（不必读者自己换算）；
+    /// 3. 不是 `unknown`；
+    /// 4. 指纹里带档位（两档共用可执行文件名）。
+    #[test]
+    fn fingerprint_time_comes_from_the_exe_and_is_local() {
+        let shown = exe_modified_local();
+        assert_ne!(shown, "unknown", "读不到 exe mtime：检查 fingerprint 换算");
+        assert!(
+            shown.contains("+08:00"),
+            "编译时刻必须是带偏移的中国时间，实际是 `{shown}`"
+        );
+        assert!(
+            !shown.ends_with('Z'),
+            "不许退回 UTC（作者每次都要自己 +8 小时）：`{shown}`"
+        );
+        /* 形状必须是 `YYYY-MM-DD HH:MM:SS +08:00` —— 26 个字符
+        （19 个日期时间 + 空格 + 6 个偏移）。数字写错没有代价：这条只在
+        "格式被改宽/改窄"时才红，而那正是要拦的。 */
+        assert_eq!(
+            shown.len(),
+            26,
+            "时间是 `YYYY-MM-DD HH:MM:SS +08:00`，实际 `{shown}`"
+        );
+        assert!(
+            build_fingerprint().contains(BUILD_TIER),
+            "指纹里必须带档位 —— 两档共用可执行文件名"
+        );
+        assert!(
+            build_fingerprint().contains(&shown),
+            "指纹里那格必须就是 exe 的 mtime"
+        );
+    }
+
+    /// **三个平台同一串字节**：换算不认宿主时区、也不认宿主有没有 `date`。
+    /// `1793850332` = 2026-11-05 03:45:32 UTC ⇒ 中国时间 11:45:32。
+    #[test]
+    fn the_wall_clock_is_a_fixed_offset_not_a_host_timezone() {
+        assert_eq!(
+            east_8_wall(1_793_850_332).as_deref(),
+            Some("2026-11-05 11:45:32 +08:00")
+        );
+        assert_eq!(
+            east_8_wall(0).as_deref(),
+            Some("1970-01-01 08:00:00 +08:00")
+        );
+    }
+}
+
 pub fn run() {
     let view = hook_ui::HookView::new();
     let for_setup = view.clone();
@@ -137,6 +279,18 @@ pub fn run() {
                 Ok(root) => {
                     obs::tracing::init_tracing(&root.join("logs"));
                     tracing::info!(root = %root.display(), "内部数据根就位");
+                    /* ★ **工作台的工作区不跟数据根走**（2026-11-02 作者裁定）。
+                    开发模式的数据根是仓库（`workbench/`），草稿留在那里就会长期存在
+                    一份 `.draft/presets` —— AI 和自己都分不清哪份是正式预设。
+                    工作区固定落应用数据目录，仓库里只剩正式预设。 */
+                    fsx::paths::set_workspace_root(root.join("workbench").join("workspace"));
+                    tracing::info!(
+                        "工作台工作区：{}",
+                        root.join("workbench/workspace").display()
+                    );
+                    /* 第一句就说清「这是哪一次编译出来的」——
+                    见 `build_fingerprint` 上方那段。以后别再用「你是不是没重编」猜。 */
+                    tracing::info!("构建指纹：{}", build_fingerprint());
                     /* 界面语言先落地：后端这一侧的话术（`messages::text`）从这一句起
                     才跟界面同一种语言。读不出来就按"跟随系统"（`apply_lang(None)`），
                     不挡启动 —— 一句英文/中文不该让程序起不来 */
@@ -152,6 +306,7 @@ pub fn run() {
                     eprintln!("[setup] 内部数据根建不出来，日志只写 stderr：{e}");
                     obs::tracing::init_tracing(std::path::Path::new("/tmp/supportease-logs"));
                     tracing::warn!("内部数据根不可用：{e}");
+                    tracing::info!("构建指纹：{}", build_fingerprint());
                 }
             }
 
@@ -238,14 +393,6 @@ pub fn run() {
             若改成在配置里声明窗口，windows 数组是整体覆盖的，就得把客户端那份也抄一遍，
             两份声明迟早漂移；写在这里，窗口的存在与 feature 严格同生共死。
             开不出来只警告不中止：工作台开不出来是开发者的事，不该让进程也起不来 */
-            /* ★ **测试模式要在开窗口之前装好**：模式档记着"这台机器现在是不是测试环境"，
-            它决定整套数据根指哪儿（`workbench::paths` 那一个开关）。装晚了的话，
-            第一屏读的是正式、之后的命令读沙箱 —— 那种"我到底在看哪一个"的错位
-            正是作者点名不要的（「我不能迷迷糊糊的，不知道我在测试版还是正式版」）。
-            读不出来只告警并退回正式：正式那边的东西永远是真的 */
-            #[cfg(feature = "workbench")]
-            workbench::app::sandbox::install_at_startup(&handle);
-
             #[cfg(feature = "workbench")]
             if let Err(e) = workbench::open_window(&handle) {
                 tracing::warn!("工作台窗口开不出来：{e}");
@@ -289,9 +436,8 @@ pub fn run() {
              * 几个文件大小是毫秒级的事，但"启动该快的绝对不慢"这条不给例外）。
              * 开关读不出来 / 清理失败都只写日志，用户侧完全静默（见 `crate::retention`）。
              *
-             * ★ 摆在整个 setup 的**末尾**（而不是"用户根就位"那一处）：上面这些步骤里
-             * 有会动**数据根 / 模式**的动作（工作台那个沙箱开关就在上面），清理要按
-             * **最终的**那一棵树去算 —— 摆早了，哪天有人真把根接上，这里就会清错树。
+             * ★ 摆在整个 setup 的**末尾**（而不是"用户根就位"那一处）：上面这些步骤
+             * 可能动数据根，清理要按**最终的**那一棵树去算 —— 摆早了就会清错树。
              *
              * 每次后处理跑完那一趟不在这一侧：切片器拉起的钩子进程自己清
              * （`hook::run_with_channel` 里那个调用点）—— 界面可能开在别的页面、甚至没开。
@@ -429,6 +575,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::export_report_archive,
         // 导出之后那颗「打开位置」：打开系统文件管理器，落在**后端自己算出来的**那个目录
         ipc::report::reveal_report_export,
+        // 导出框信息页那颗「定位」：不导出也能在文件管理器里选中归档里的那一份
+        ipc::report::reveal_report_source,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
@@ -463,12 +611,21 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 落 AppState 的 autoCleanHistory 格；真动手清理的是 `retention`，不联网
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
+        ipc::prefs::get_auto_check_update,
+        ipc::prefs::set_auto_check_update,
         // 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」——
         // 落 AppState 的 presets 格；判据在身份账本与逐参数更新账那两个出口，不联网
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
+        // 「使用之后自动复制后处理脚本」（2026-11-01）：同一格的第两项。
+        // 读者是前端那一条"换完使用中之后顺手抄一遍"，后端不读它
+        ipc::prefs::get_auto_copy_script,
+        ipc::prefs::set_auto_copy_script,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
+        // 清理数据（只清不卸）/ 卸载（可点名连数据一起清）—— 两条都清完就退
+        ipc::app::clear_app_data,
         ipc::app::uninstall,
         ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：置顶三档 + 窄窗。落 AppState 的
@@ -609,6 +766,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::report::get_report_export_plan,
         ipc::report::export_report_archive,
         ipc::report::reveal_report_export,
+        ipc::report::reveal_report_source,
         ipc::catalog::get_active_preset,
         ipc::catalog::apply_active_preset,
         // 资源库那一条路（2026-10-08 改判）：交付预设「使用」= 按需取回 + 写成当前使用
@@ -640,11 +798,19 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 界面偏好第二格（2026-10-13）：自动清理开关 —— 与上面那份清单一字不差
         ipc::prefs::get_auto_clean_history,
         ipc::prefs::set_auto_clean_history,
+        // 自动检查软件更新（设置页「软件更新」那一格；读口在 runtime::update_check）
+        ipc::prefs::get_auto_check_update,
+        ipc::prefs::set_auto_check_update,
         // 预设页偏好（2026-10-20）：与上面那份清单一字不差
         ipc::prefs::get_copies_follow_cloud,
         ipc::prefs::set_copies_follow_cloud,
+        // 「使用之后自动复制后处理脚本」（2026-11-01）—— 与上面那份清单一字不差
+        ipc::prefs::get_auto_copy_script,
+        ipc::prefs::set_auto_copy_script,
         ipc::prefs::get_postproc_prefs,
         ipc::app::open_preset_folder,
+        // 清理数据 / 卸载 —— 与上面那份清单一字不差
+        ipc::app::clear_app_data,
         ipc::app::uninstall,
         ipc::prefs::set_postproc_prefs,
         // 主窗怎么摆（2026-10-17）：与上面那份清单一字不差
@@ -673,6 +839,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 名称 / 单位 / 值类型 / 控件 / 范围 / 步进 / 出厂默认 / 属于 / 前置条件 / 弃用，
         // 就地写进 param_registry.toml 的 [[params]] 本体 —— 即时落盘，不走参数草稿
         app::wb_set_param_meta,
+        // 分组本身（名字 / 上下位置，2026-11-01 作者：「这个标题这些能点击吧，
+        // 点了就可以改名字……而且没办法去换它那个上下位置」）：
+        // 名字写 `[[tabs.sections]].label`，位置 = 数组换位 + `order` 重排，
+        // 布局文件那份数组同步换（「所属分组」下拉按它出）
+        app::wb_set_section_meta,
+        app::wb_remove_section,
+        app::wb_clear_stale_translations,
         // 状态词的唯一出处。开场取一次，前端按枚举值查 ——
         // 不给它的话，同一个词会在 TSX 里再写一遍（doc §13）
         app::words::wb_words,
@@ -744,11 +917,16 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 默认视角是分组列表（`wb_desk`）；矩阵退成「同时看几台机器的同一项」那个对比工具
         app::wb_desk,
         app::wb_matrix,
+        // 参数台 v2 的只读数据面（2026-11-02）：与 `wb_matrix` **并行存在**，旧页照旧用它、
+        // 新页只走这一条。返回值里没有「当前值」，前端只能算 `draft ?? saved`
+        app::wb_param_sheet,
         app::wb_trash,
         app::wb_ui,
         app::wb_save_ui,
         app::wb_preview_bulk,
         app::wb_diff_draft,
+        // 未保存改动的**逐行** diff（盘上 presets/ ↔ 影子树）。只读
+        app::wb_shadow_diff,
         app::wb_apply_draft,
         app::wb_save,
         app::wb_discard,
@@ -758,11 +936,15 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 生成 / 校验 / 恢复 / 发布。**恢复走 wb_revert_preview 只算不写** ——
         // 算出来的 patch 交给 wb_apply_draft，于是恢复也是一条撤销、也进同一份差异清单
         app::build::wb_preflight,
+        // 内嵌目录的**修复动作**：检查卡那条「内嵌目录落后」的待办就地重算，不必去终端
+        app::build::wb_regen_embedded_catalog,
         // 生成前预演（只算不写）：界面上「点生成 → 先看 diff → 再确认」的那一步
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
         app::wb_app_version,
         app::build::wb_generate,
+        // 历次生成的回执（应用数据目录，按份数自动清理）
+        app::build::wb_receipts,
         app::build::wb_revert_preview,
         // 发布闸（第二刀）：逐项打勾的结果；`can_publish` 是"能不能往下走"的唯一答案
         app::build::wb_publish_audit,
@@ -780,6 +962,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::publish_tx::wb_merge_review,
         // 发布收尾（含回执屏）：历史只读一份；「查看 PR」把地址交给系统浏览器
         app::build::wb_publish_history,
+        // 发布历史第三栏：本分支最近提交（只读、不联网）
+        app::build::wb_recent_commits,
         app::build::wb_open_external,
         // ★ **应用内更新 + 打开外链**（第五刀）：`open_url` 修的是「查看更新点了没反应」
         ipc::update::update_info,
@@ -809,12 +993,6 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 端口被占着时的那一下：起之前就探（谁占着、PID 多少），界面摆出来问一句
         // 「要不要把它停了」—— 停的那一条单独给，先验明正身再动手
         app::dev_source::wb_dev_source_clear_conflict,
-        // **测试模式（沙箱）**：整套数据根切到 `<repo>/workbench/.sandbox` 那一棵，
-        // 正式目录一个字节都不碰。四条：现状 / 开关 / 清空并重拷 / 清空
-        app::sandbox::wb_sandbox_status,
-        app::sandbox::wb_sandbox_set,
-        app::sandbox::wb_sandbox_refill,
-        app::sandbox::wb_sandbox_wipe,
         // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
         // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。

@@ -37,7 +37,7 @@
 //! <repo>/target/dev-run/matrix/
 //! ├── <档 id>-<时间戳>/
 //! │   ├── run/hook.port          # 抄自客户端（消息发给它）
-//! │   ├── run/app-state.json     # 抄自客户端（偏好跟着走，如 autoTowerPosition）
+//! │   ├── run/app-state.json     # 抄自客户端（偏好跟着走，如 autoTowerPosition 三档）
 //! │   ├── in.gcode               # 夹具副本（真后处理原地覆盖的是它，源夹具不动）
 //! │   ├── verdict.json           # 这一档的判定（本模块写，界面读）
 //! │   ├── logs/                  # 钩子自己的日志（自动创建）
@@ -357,7 +357,7 @@ fn prepare(row: &Spec, client: &Path) -> Result<(PathBuf, PathBuf), AppError> {
     std::fs::copy(&port, dir.join(crate::hook_ipc::PORT_FILE))
         .map_err(|e| AppError::io("抄不出端点端口号").with_detail(e.to_string()))?;
 
-    /* 偏好跟着走：没有它，`autoTowerPosition` 回到出厂关（false）⇒ 碰撞档就不问了 */
+    /* 偏好跟着走：没有它，`autoTowerPosition` 回到出厂那一档（`off`）⇒ 碰撞档就不问了 */
     let state = client.join("run/app-state.json");
     if state.is_file() {
         let _ = std::fs::copy(&state, dir.join("run/app-state.json"));

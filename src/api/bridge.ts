@@ -256,7 +256,7 @@ export const bridgeApi: MkpApi = {
   checkPresetText: (path, text) =>
     call('checkPresetText', 'check_preset_text', { path, text }),
   discardTextDraft: () => call('discardTextDraft', 'discard_text_draft'),
-  /* 身份账本（派生视图：盘上文件 + 血统 → 云端那一版） */
+  /* 身份账本（派生视图：盘上文件 + 来源记录 → 云端那一版） */
   getLocalPresetIndex: () => call('getLocalPresetIndex', 'get_local_preset_index'),
   /* 第十层：用户文件管理（改名 / 删除）—— 只动名字或删掉，字节一个不动 */
   renameLocalPreset: (path, newName) =>
@@ -270,7 +270,7 @@ export const bridgeApi: MkpApi = {
   /* 第十一层：本地文件 → 本地文件（字节复制；不覆盖、不碰任何状态） */
   copyLocalPreset: (path, newName) =>
     call('copyLocalPreset', 'copy_local_preset', { path, newName }),
-  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带血统）+ 按机型/版本找它（校准页） */
+  /* 另存为本地预设：云端那一份 → 本地这份（撞名就拒、带来源记录）+ 按机型/版本找它（校准页） */
 
   getLocalCopyFor: (machineId, versionId) =>
     call('getLocalCopyFor', 'get_local_copy_for', { machineId, versionId }),
@@ -343,20 +343,33 @@ export const bridgeApi: MkpApi = {
   getAutoCleanHistory: () => call('getAutoCleanHistory', 'get_auto_clean_history'),
   setAutoCleanHistory: (enabled) =>
     call('setAutoCleanHistory', 'set_auto_clean_history', { enabled }),
+  /* 界面偏好第三格（2026-11-05）：自动检查软件更新 —— 落 autoCheckUpdate 格。
+     开（出厂）⇒ 成功拉到云端目录之后顺路查一次 release.json，有新版才推通知 */
+  getAutoCheckUpdate: () => call('getAutoCheckUpdate', 'get_auto_check_update'),
+  setAutoCheckUpdate: (enabled) =>
+    call('setAutoCheckUpdate', 'set_auto_check_update', { enabled }),
   /* 预设页偏好（2026-10-20）：「复制出来的也跟着云端更新」—— 落 presets 格。
      关（出厂）⇒ 复制件不认云端：账本与逐参数更新账两个出口都把它滤掉 */
   getCopiesFollowCloud: () => call('getCopiesFollowCloud', 'get_copies_follow_cloud'),
   setCopiesFollowCloud: (enabled) =>
     call('setCopiesFollowCloud', 'set_copies_follow_cloud', { enabled }),
+  /* 预设页偏好第二项（2026-11-01）：「使用之后自动复制后处理脚本」—— 同一格 presets。
+     后端只保管这一档；换完「使用中」要不要顺手抄一遍，判断在前端 `autoCopy.ts` */
+  getAutoCopyScript: () => call('getAutoCopyScript', 'get_auto_copy_script'),
+  setAutoCopyScript: (enabled) =>
+    call('setAutoCopyScript', 'set_auto_copy_script', { enabled }),
   /* 后处理偏好（2026-10-17）：设置页「后处理模式 / 校准与补偿 / 热床预涂胶」那几块。
      读回的是**解析后**的值 + 量程；写是**整格覆盖**（改一项传全量） */
   getPostprocPrefs: () => call('getPostprocPrefs', 'get_postproc_prefs'),
   setPostprocPrefs: (prefs) => call('setPostprocPrefs', 'set_postproc_prefs', { prefs }),
   /* 重置后处理状态（设置页那一颗按钮）：先让钩子别等，再清界面状态 */
   resetPostProcessState: () => call('resetPostProcessState', 'reset_post_process_state'),
-  /* 应用本体那两条（2026-10-17）：「预设位置」打开目录；「卸载」删程序本体、数据不动 */
+  /* 应用本体那三条（2026-10-17 两条 / 2026-11-01 加「清理数据」）：
+     「预设位置」打开目录；「清理数据」删数据、本体留着；「卸载」删本体、
+     `cleanData` 点名时连数据一起删。清理与卸载后端都是**删完就退**。 */
   openPresetFolder: () => call('openPresetFolder', 'open_preset_folder'),
-  uninstall: () => call('uninstall', 'uninstall'),
+  clearAppData: () => call<void>('clearAppData', 'clear_app_data'),
+  uninstall: (cleanData) => call<void>('uninstall', 'uninstall', { cleanData }),
   /* 界面语言（2026-10-25）：落 locale 格；只换文案，不动任何业务判据 */
   getLocale: () => call('getLocale', 'get_locale'),
   setLocale: (locale) => call('setLocale', 'set_locale', { locale }),
@@ -425,10 +438,12 @@ export const bridgeApi: MkpApi = {
   getReportList: () => call('getReportList', 'get_report_list'),
   getReportDetail: (id) => call('getReportDetail', 'get_report_detail', { id }),
   getReportExportPlan: (id) => call('getReportExportPlan', 'get_report_export_plan', { id }),
-  exportReportArchive: (id, dir) =>
-    call('exportReportArchive', 'export_report_archive', { id, dir }),
+  exportReportArchive: (id, dir, compress, overwrite) =>
+    call('exportReportArchive', 'export_report_archive', { id, dir, compress, overwrite }),
   revealReportExport: (id, dir) =>
     call('revealReportExport', 'reveal_report_export', { id, dir }),
+  revealReportSource: (id, kind) =>
+    call('revealReportSource', 'reveal_report_source', { id, kind }),
   /*
    * 导出框那颗「更改位置」：与 `pickImportFiles` 同一半权限（`dialog:allow-open` ——
    * 选目录与选文件在插件里是同一个 `open`，这里只是多个 `directory`）。

@@ -238,7 +238,7 @@ pub struct PresetTextDraft {
     pub file_name: String,
     /// 相对**用户根**的路径（`presets-local/A1-fast（已修改）.toml`）
     pub path: String,
-    /// 正文：**带这一份自己的血统三行**（编辑这份时它们就在文件里，保存时照写回）
+    /// 正文：**带这一份自己的来源记录**（编辑这份时它们就在文件里，保存时照写回）
     pub text: String,
     /// 最后改动时刻（UTC epoch 秒）
     pub updated_unix: u64,

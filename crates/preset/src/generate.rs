@@ -378,17 +378,12 @@ mod tests {
         assert_eq!(file_name("A1", "fast"), file_name("A1", "FaSt"));
     }
 
-    /// 入库产物与配方一致（与 `gen-presets --check` 同一条结论，这里从库里咬一次）。
-    #[test]
-    fn stored_presets_match_the_recipe() {
-        let report = check_all(&recipe(), &assets_dir()).expect("检查能跑完");
-        assert_eq!(
-            report.first_diff, None,
-            "入库产物与配方生成的结果不同：{:?}",
-            report.first_diff
-        );
-        assert_eq!(report.checked, 9, "9 个组合都要比过");
-    }
+    // K-G7（入库产物与配方渲染逐字节一致）已于 2026-11-04 随 `gen-presets` 退役：
+    // 现役产物由工作台按新头部生成，配方渲染仍带 `# uuid` / `# release_time`，
+    // 再比必然是两种格式打架的假红。正式产物由工作台 `presets diff` / `check:artifacts`
+    // 与 `tests/builtin_presets_match_dir.rs` 守着；这里只留生成器自身的幂等判据。
+    //
+    // `check_all` 保留作**只读诊断**（看配方渲染与盘上差在哪），不再是发布闸门。
 
     /// 写盘是幂等的：写两次、内容不变（防 uuid/时间溜进渲染路径）。
     #[test]

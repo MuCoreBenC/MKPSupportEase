@@ -268,6 +268,26 @@ impl<'a> Layers<'a> {
         }
     }
 
+    /// 这一层**自己写着的值**（没写就是 `None`）。与 [`Self::has_own`] 同一份判据。
+    pub fn own_value(&self, level: Level, key: &str) -> Option<&'a Value> {
+        match level {
+            Level::Machine => self.base.get(key),
+            Level::Version => self.over.get(key),
+        }
+    }
+
+    /// 这一层**不写时会拿到的值** —— 版本层看机型基底、机型层看出厂默认。
+    ///
+    /// 给「固定成同值」的判据用：`own_value == inherited_value` 就说明这一行为什么
+    /// 都不改，它存在只因为有人要它。
+    pub fn inherited_value(&self, level: Level, key: &str) -> Option<&'a Value> {
+        let param = self.registry.param(key)?;
+        match level {
+            Level::Machine => Some(&param.default_value),
+            Level::Version => Some(self.base.get(key).unwrap_or(&param.default_value)),
+        }
+    }
+
     /// 这一层钉着几项。以前这一列的台词是「N 项（自有 M 项）」——
     /// 那时候每层有两半，得分开数。**现在每层只有一张表，钉着几项就是几项**，
     /// 所以这一个数同时是界面上的「项数」和「自有项数」

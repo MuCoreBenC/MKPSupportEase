@@ -441,7 +441,6 @@
   border-radius: 999px;
   background: var(--hover-2);
   cursor: pointer;
-  transition: background 0.14s ease;
 }
 
 .seg:hover {

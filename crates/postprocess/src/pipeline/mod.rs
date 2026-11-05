@@ -45,7 +45,7 @@ use sha2::{Digest, Sha256};
 
 use crate::config;
 use crate::diag::{CancelToken, PostprocError};
-use crate::ir::Ir;
+use crate::ir::{Ir, TowerRelocateModeIr};
 use crate::postproc::calibration::Mode;
 use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 
@@ -222,6 +222,13 @@ pub struct HeaderFacts {
     /// `_temp_1.config` 三级兜底，三级都没有 ⇒ `None`（执行记录里落 `null`，
     /// 报告页就只显示 G-code 名）。链路与形态见 [`crate::gcode::model_name`]。
     pub model_name: Option<String>,
+    /// **切片器自己的擦料塔**（`; FEATURE: Prime tower`）—— 开关 / 层数 / 高度 /
+    /// 耗材 / 俯视包围盒。
+    ///
+    /// 与上面几格不同，它不是"头部一行"刮出来的，要顺着全文找塔块；
+    /// 但同在**开跑之前就能定**的那一类里，所以搭同一趟车出门。
+    /// 见 [`crate::postproc::prime_tower`]。
+    pub slicer_tower: crate::postproc::prime_tower::SlicerTowerFacts,
 }
 
 /// 头部刮取。`path` 有两处用途：`; filename_format` 推 3MF 名时的兜底，以及
@@ -238,6 +245,7 @@ pub fn header_facts(content: &[String], path: &str) -> HeaderFacts {
         slicer_ironing_enabled: crate::gcode::slicer_ironing_enabled(content),
         three_mf_file_name: crate::gcode::three_mf_file_name(content, path),
         model_name: crate::gcode::model_name(std::path::Path::new(path)),
+        slicer_tower: crate::postproc::prime_tower::scan(content),
     }
 }
 
@@ -452,7 +460,7 @@ fn run(
         output_path,
         ir_source,
         compute_print_time,
-        mut tower_ask,
+        tower_ask,
         calibration: calib_mode,
     } = job;
     /// 步骤边界检查点：命中即中止，只返回、不写部分输出
@@ -557,32 +565,60 @@ fn run(
             /* 码仍是 `E_GCODE_COLLISION_001`，句子在 `messages.toml`（旧形态把码拼进正文，
             用户在一句话里读到两遍码 —— 见 `diag/error.rs` 的 `Collision`）。
             **2026-10-18**：这一支带上"撞在哪 + 建议挪多少 + 俯视图几何"，
-            让报告页能回答"挪多少、撞在哪"，不再只有"撞了"两个字。 */
-            let Some(ask) = tower_ask.as_mut() else {
-                /* **没人问**（CLI / 没装界面 / 设置页开关关着）⇒ 一字不差的原行为 */
-                return Err(PostprocError::Collision {
-                    facts: Box::new(collision.facts(&ir)),
-                });
-            };
-            let ask: &mut dyn TowerAsk = *ask;
+            让报告页能回答"挪多少、撞在哪"，不再只有"撞了"两个字。
+            **2026-11-04**：`auto_tower_position == Auto`（"开"那一档）时**不问** ——
+            直接把候选位置套上、复检、接着跑；只有 `Ask` 这一档才走下面那条问句。 */
             /*
-             * ★★ **停下来问人**（方案 B 的落点，2026-10-18）：进度条此刻停在第 6 步
-             * 入口那一帧（`timer.begin` 已经发过事件），等待期间**一条事件都不发** ——
-             * "停在这里等人"就是它该有的样子，前端不需要任何改动。
-             *
-             * 取消先看一眼：按了停止就别把问句推上去了。
+             * ★ **先算候选位置**（2026-11-04）：`Auto` 档直接用它，
+             * `Ask` 档把它作为"自动挪塔"那颗按钮的落点。摆在分岔之前算一次 ——
+             * 两条路用的是同一个函数（同一份 occupancy / 塔高）。
              */
-            checkpoint(cancel)?;
             let facts = collision.facts(&ir);
             let current = [ir.wiping.wiper_x, ir.wiping.wiper_y];
-            /* 候选位置与预检时代用的是同一个函数（同一份 occupancy / 塔高） */
             let candidate = crate::postproc::disk::auto_tower_position_for_facts(
                 &ir,
                 &facts,
                 &collision.occupancy,
                 collision.tower_height,
             );
-            match ask.ask(&facts, candidate, current, collision.tower_height) {
+            /*
+             * **开（Auto）**：不问，直接按候选位置挪 —— "开就是开"（作者 2026-11-04：
+             * 「真正的开是直接替用户确认了直接移动塔的位置」）。板上一处都摆不下时
+             * 没有位置可替用户确认，只能按"挪不动"收场（`Declined`）。
+             *
+             * ★ `ask` 在 Auto 档**只用来回告复检结果**（归档里那笔"挪过塔"），
+             *   一声都不问；没有界面时它是 `None`，Auto 照样挪（只是不记账）。
+             */
+            let mut ask = tower_ask;
+            let outcome = match (ir.prefs.auto_tower_position, candidate) {
+                /* 开 + 摆得下 ⇒ **替用户确认了**，直接挪 */
+                (TowerRelocateModeIr::Auto, Some(pos)) => TowerAskOutcome::Moved(pos),
+                (TowerRelocateModeIr::Off, _) => {
+                    /* 关：一律按碰撞收场 —— **不问**、也不许被谁挪（作者：「关就是关」） */
+                    return Err(PostprocError::Collision {
+                        facts: Box::new(facts),
+                    });
+                }
+                _ => {
+                    let Some(asker) = ask.as_deref_mut() else {
+                        /* **没人问**（CLI / 没装界面 / 设置页关着 / 开但板上摆不下）⇒
+                        一字不差的原行为 */
+                        return Err(PostprocError::Collision {
+                            facts: Box::new(facts),
+                        });
+                    };
+                    /*
+                     * ★★ **停下来问人**（方案 B 的落点，2026-10-18）：进度条此刻停在第 6 步
+                     * 入口那一帧（`timer.begin` 已经发过事件），等待期间**一条事件都没发** ——
+                     * "停在这里等人"就是它该有的样子，前端不需要任何改动。
+                     *
+                     * 取消先看一眼：按了停止就别把问句推上去了。
+                     */
+                    checkpoint(cancel)?;
+                    asker.ask(&facts, candidate, current, collision.tower_height)
+                }
+            };
+            match outcome {
                 /* 用户按了停止 ⇒ 取消，**不是**碰撞失败（外层按 `Cancelled` 归档） */
                 TowerAskOutcome::Cancelled => {
                     return Err(PostprocError::Cancelled {
@@ -610,12 +646,16 @@ fn run(
                     let after = crate::postproc::disk::detect_tower_collision(&content, &ir);
                     if after.has_collision {
                         let after_facts = after.facts(&ir);
-                        ask.verified(Some(&after_facts));
+                        if let Some(asker) = ask {
+                            asker.verified(Some(&after_facts));
+                        }
                         return Err(PostprocError::Collision {
                             facts: Box::new(after_facts),
                         });
                     }
-                    ask.verified(None);
+                    if let Some(asker) = ask {
+                        asker.verified(None);
+                    }
                 }
             }
         }

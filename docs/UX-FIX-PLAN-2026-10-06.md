@@ -1,7 +1,7 @@
 # UX 场景测试修复清单（2026-10-06）
 
 - 依据：[`UX-SCENARIO-FINDINGS-2026-10-06.md`](UX-SCENARIO-FINDINGS-2026-10-06.md) 首轮黑盒用户故事测试。
-- 范围：**只修三个 A 级**。B11（机型列继承）属身世那一批，按 [`PRESET-COPY-LINEAGE.md`](PRESET-COPY-LINEAGE.md) §3.2 另行施工；B8（时间词汇）跟时间语义那批走；C / D 不动。
+- 范围：**只修三个 A 级**。B11（机型列继承）属身世那一批，按 [`PRESET-COPY-PROVENANCE.md`](PRESET-COPY-PROVENANCE.md) §3.2 另行施工；B8（时间词汇）跟时间语义那批走；C / D 不动。
 - 施工顺序（作者定）：**A3 → A1 → A2**。修完跑一轮回归（探针 + cargo test），**不重跑用户故事**（那留到下一轮）。
 - 2026-10-06 第二轮（A3 数据链验收，不动代码）：A1 / A2 完结；A3 改记「**写链已收口，读链待收口**」，新增「A3 根治验收」与「A3 读链收口施工」两节 —— 施工前先钉死读取/订阅层设计，再一次性拆回页签对账，不打补丁。
 - 2026-10-06 第三轮（读链收口施工完成）：架构再上移一层 —— **推翻「一种状态一个文件」**，立 `AppState`（`run/app-state.json` + 唯一读写入口 + 事件广播，见 [`APP-STATE.md`](APP-STATE.md)）。A3 按「写链 ✅ + 读链 ✅」完结，状态见总表。
@@ -11,7 +11,7 @@
 | # | 问题（用户视角） | 根因（实现层） | 修法 | 状态 |
 | --- | --- | --- | --- | --- |
 | A3 | 应用了「我的 A1 涂胶.toml」，首页设备卡却说"预设文件 A1F.toml"；校准页 / 参数页同病 | 只有预设页横幅直接读唯一底账（`run/active-preset.json`）；首页 / 校准页 / 参数页显示的都是"选中 combo → 目录反查的官方文件名"，底账只用来反填三级选择。参数页更连"正在编辑哪一份"都不显示（编辑目标可能是我的文件，标签却永远是目录那份） | 三处显示统一规则：**底账命中当前 combo 时，显示底账那一份**（我的文件带「正在使用 · 我的文件」说明）；参数页的文件标签跟着**编辑目标**走（同 combo 我的文件优先——这条表本来就存在）；参数页保存确认框按编辑目标说清真实落点 | ✅ 读链已收口（AppState，见下） |
-| A1 | 官方预设想复制一份自己改：右键"另存为一份新的"灰掉、提示指向不存在的按钮；参数页确认框说"将写入官方文件"，用户不敢点 | 另存为对 release 行一律禁用（`copyWhyNot`）；正路（改这份→保存为用户文件）只在详情面板里且提示不说它在哪；参数页确认框说的落点（官方文件）与实际落盘（`presets-mine/…（已修改）.toml`）不一致 | 按 [`PRESET-COPY-LINEAGE.md`](PRESET-COPY-LINEAGE.md) §3.1 实施：**release 且 `releaseState === 'ok'` 的行放开「另存为一份新的」**——新命令 `copy_release_as_new(file_name, new_name)`（可信字节 + 血统三行 + 落 `presets-mine/`，不覆盖、不碰状态）；复用同一条命名抽屉；提示与 toast 改口；参数页确认 / 底栏按编辑目标说"另存成你自己的一份 / 写回你自己那一份" | ✅ |
+| A1 | 官方预设想复制一份自己改：右键"另存为一份新的"灰掉、提示指向不存在的按钮；参数页确认框说"将写入官方文件"，用户不敢点 | 另存为对 release 行一律禁用（`copyWhyNot`）；正路（改这份→保存为用户文件）只在详情面板里且提示不说它在哪；参数页确认框说的落点（官方文件）与实际落盘（`presets-mine/…（已修改）.toml`）不一致 | 按 [`PRESET-COPY-PROVENANCE.md`](PRESET-COPY-PROVENANCE.md) §3.1 实施：**release 且 `releaseState === 'ok'` 的行放开「另存为一份新的」**——新命令 `copy_release_as_new(file_name, new_name)`（可信字节 + 来源记录 + 落 `presets-mine/`，不覆盖、不碰状态）；复用同一条命名抽屉；提示与 toast 改口；参数页确认 / 底栏按编辑目标说"另存成你自己的一份 / 写回你自己那一份" | ✅ |
 | A2 | 失败提示是开发者聊天记录："没有 asset id —— 而契约的 applyPreset / copyToSlicer 只认 asset id。给一个点了必报错的按钮比不给糟"；且把登记在案的官方文件说成"你自己放进预设目录的" | `NO_ASSET_WHY` 是写给开发者的守卫文案，还被"理论不可达"的按钮分支（`PagePresets.tsx:889`）在演示数据的旧行形状下真实触发；`NotImplementedError` 渲染成"[API] 未实现的接口: xxx"；错误条没有"能怎么办"的后半句 | ① 文案全部改成"发生了什么 + 能干什么"，不再断言文件是谁放的；② 按钮层修缝：官方 MKP 行**没有交付身份（releaseUid）就不给「应用」按钮**（灰杠 + 人话原因），守卫退回真正的兜底；③ `NotImplementedError` 带人话 hint（"浏览器预览里没有下载区——下载要用桌面版"），技术形式只进控制台 | ✅ |
 
 ## A3 显示规则（一处规则、三个界面）
@@ -41,7 +41,7 @@ A3 的最终判据（本轮钉下，收口以此为准）：
 **写链 —— 已收口 ✅**
 - 后端：`save_active` / `save_active_mine` / `repoint_active_mine`（改名跟随）/ `clear_active`（删除撤指针）全部汇到私有 `write_active`，原子写同一个文件（`runtime/state.rs`）。
 - 前端：全 UI 唯一写入口 = 预设页 `applyActivePreset` / `clearActivePreset`（`usePresetData.ts`）。首页 / 校准页抽屉里的「应用」只是换选择、不写底账（应用只发生在预设页）。
-- 底账文件只存最小身份（origin / fileName / sha256 / path）；`machineId` / `versionId` / `intact` **读时现算**（官方线查目录登记、我的线读文件头血统，`ipc/catalog.rs` 的 `active_dto`）—— 手改底账也会被正确解析，不存在会陈旧的富化缓存。
+- 底账文件只存最小身份（origin / fileName / sha256 / path）；`machineId` / `versionId` / `intact` **读时现算**（官方线查目录登记、我的线读文件头来源记录，`ipc/catalog.rs` 的 `active_dto`）—— 手改底账也会被正确解析，不存在会陈旧的富化缓存。
 
 **读链 —— 待收口 ❌**
 - 每页各持一份快照：首页 `sel`、校准页 `sel`（另有模块级 `selCache`）、参数页 `pick` + `active`、预设页 `active`。除预设页外都靠「回页签读一次」对账（`useActivePresetOnTab` + 三处 effect）；预设页**不收 `active` prop、`load` 依赖不含页签** —— 启动快照 + 自己的写操作之外永不更新。
@@ -73,12 +73,12 @@ A3 的最终判据（本轮钉下，收口以此为准）：
 4. （可选增强）`write_active` / `clear_active` 之后 Rust `emit` 一个事件、订阅层接住 —— 这是「带外变化（手改底账 / 将来多窗口）不点任何东西就跟着变」的唯一通道。
 5. 上面两个滞留 bug 随第 1 条自然消失；注释失真随施工一并改；复验点见「验收判据」的 A3 收口条目。
 
-## A1 实施（= PRESET-COPY-LINEAGE.md §3.1 + §5）
+## A1 实施（= PRESET-COPY-PROVENANCE.md §3.1 + §5）
 
 **后端（Rust）**
 1. `runtime/mine.rs` 新增 `copy_release_as_new(root, user_root, file_name, new_name)`：
-   目录里得有它且是 MKP 预设 → `delivery::official_text` 取**可信字节**（SHA 闸在里面，与「改这份」同一条边界）→ 名字过 `check_new_name` 同一套门槛 → `lineage::make_copy` 写血统三行（`based_on` = 来源交付文件的 `catalog.path`）→ 落 `presets-mine/<new_name>`。不覆盖、不自动改名、**一个状态都不碰**、出处账不记（血统已经答了"从哪来"）。
-2. `ipc/mine.rs` 命令 `copy_release_as_new` + `lib.rs` 两份清单注册；带单测（血统头在、官方原件字节不动、撞名拒、非 TOML 拒、没下载拒）。
+   目录里得有它且是 MKP 预设 → `delivery::official_text` 取**可信字节**（SHA 闸在里面，与「改这份」同一条边界）→ 名字过 `check_new_name` 同一套门槛 → `lineage::make_copy` 写来源记录（`based_on` = 来源交付文件的 `catalog.path`）→ 落 `presets-mine/<new_name>`。不覆盖、不自动改名、**一个状态都不碰**、出处账不记（来源记录已经答了"从哪来"）。
+2. `ipc/mine.rs` 命令 `copy_release_as_new` + `lib.rs` 两份清单注册；带单测（来源记录头在、官方原件字节不动、撞名拒、非 TOML 拒、没下载拒）。
 
 **前端（TS / React）**
 3. 契约 `copyReleaseAsNew(fileName, newName)` + bridge + mock（演示口径：`A1-standard.toml` 可复制；旧版本 / 内容异常照实拒）+ `usePresetData.copyReleaseAsNew`（成功后重读用户线）。
@@ -97,7 +97,7 @@ A3 的最终判据（本轮钉下，收口以此为准）：
 
 ## 验收判据（对应原报告的故事 3 / 1 / 10）
 
-- 故事 3 复验点：右键官方 `A1-standard.toml` →「另存为一份新的」可点 → 起名 → 「我的文件」多一份、`看正文` 头三行血统指向来源、官方原件还在且状态不变；撞名被拒且说人话。
+- 故事 3 复验点：右键官方 `A1-standard.toml` →「另存为一份新的」可点 → 起名 → 「我的文件」多一份、`看正文` 头三行来源记录指向来源、官方原件还在且状态不变；撞名被拒且说人话。
 - 故事 1 复验点：任何失败提示不再出现 asset id / API / 契约字样；灰按钮悬停能说清"为什么不行 + 换哪条路"。
 - 故事 10 复验点：应用「我的 A1 涂胶.toml」后，首页设备卡、校准页 pill、参数页 pill 与预设页横幅说的是**同一个文件名**；参数页确认框不再说"写入官方文件"。
 - A3 收口复验点（2026-10-06 第二轮钉下，读链施工完成后跑）：① 手改 `run/active-preset.json` 指向另一份文件、**不碰任何界面**，四个页面自然跟着变（唯一真相源判据）→ **程序内的写已做到"不点任何东西同帧换账"**（事件广播）；带外手改按 [`APP-STATE.md`](APP-STATE.md) §7 的开放点在下一次读取时生效（要不要文件监听待作者定）；② 预设页删除「使用中」的用户文件 / 官方交付文件，横幅与表格立即回「未应用」✅（两个滞留 bug 随 `appStateMutated` 消灭）；③ `useActivePresetOnTab` 与三处回页签对账 effect 已退役 ✅（`selCache`、参数页回页签弹回一并拆掉）。
@@ -128,7 +128,7 @@ P1S-Lite.toml         P2S-Standard.toml     X1C-Lite.toml
 ```
 
 - 规则只改**工作台发布侧**（生成预设文件与 catalog 登记的那一步）；客户端只认 catalog 登记，一行不改；
-- 「我的文件」的另存 / 改名 / 血统不受影响（那是用户的名字，血统指向 `catalog.path`）；
+- 「我的文件」的另存 / 改名 / 来源记录不受影响（那是用户的名字，来源记录指向 `catalog.path`）；
 - 官方换版时旧名进归档、版本链照常（`publishedAt` 跟字节走，与名字无关）；
 - 实施时的连带：仓库内演示数据 / catalog.generated / 探针断言里的旧文件名跟到新名（一次性）；
 - **待作者确认提案**（或者直接在重新生成前给一版最终名单），确认后改生成规则。

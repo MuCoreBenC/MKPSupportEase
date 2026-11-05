@@ -40,6 +40,7 @@ import { measureRulerMarks } from './diffRuler'
 import type { RulerMark } from './diffRuler'
 import c from '../c14.module.css'
 import s from './DeliveryFilesModal.module.css'
+import { locateIntoView } from '../../components/scroll/locate'
 
 interface Props {
   status: DeliveryStatus
@@ -220,7 +221,9 @@ export default function DeliveryFilesModal({
 
   const jumpToRow = (row: number) => {
     const el = diffRef.current?.querySelector<HTMLElement>(`[data-row="${row}"]`)
-    el?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    /* `behavior: 'smooth'` 在 WKWebView 上对元素级滚动容器等于瞬跳（本仓踩过），
+       走共用定位件（底层演 transform）；这一处是"跳到 diff 行"，不铺绿底。 */
+    if (el !== null && el !== undefined) locateIntoView(el, { flash: false })
   }
 
   /** 左侧一行（文件 / 漂移共用一种长相） */

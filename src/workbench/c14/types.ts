@@ -27,6 +27,11 @@ export interface GotoFocus {
  * `annotate`（标注台）跟在资产库后面：它管的正是**资产里那些图**（今天主要是引导图
  * `type = 'guide'`）—— 作者 2026-10-16：「你要不做一个小工具吧，在工作台里面……
  * 让我可以去自己拖动框框」。见 `views/AnnotatePage.tsx` 的头注。
+ *
+ * `params`（参数台）**只剩一项**（2026-11-03 作者：「可以去掉一个参数台了，因为我
+ * 发现他们一模一样了」）。并存期那一项叫 `params2`，版式与旧页一字不差、内核是
+ * 新的（本地草稿 + 单飞写队列），验收通过后**留新删旧** —— 所以现在这个 id 底下
+ * 挂的是 `sheet/ParamSheetPage.tsx`，`views/ParamsPage.tsx` 已不存在。
  */
 export type PageId =
   | 'machines'

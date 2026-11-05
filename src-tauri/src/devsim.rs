@@ -548,6 +548,9 @@ fn finish(
             }),
             /* 校准件那几档演出：结论里也带上"选了哪种跑法" */
             calib_choice: calib_choice.map(std::string::ToString::to_string),
+            /* 这一档不演挪塔（要演就走真问句那一档）—— 与真钩子"没挪"同一个形状 */
+            relocation: None,
+            geo: None,
         }
     };
     sink.send(&FromHook::Finished(Box::new(payload)));
@@ -559,6 +562,10 @@ fn finished_payload(err: &HookError, stage: &str, elapsed_ms: u64) -> FinishedPa
     let (message, code) = err.describe();
     FinishedPayload {
         calib_choice: None,
+        /* 失败那两档：撞塔记录挂在错误上（`err.relocation()`），与真钩子同一个取法 */
+        relocation: err.relocation().cloned(),
+        /* 演出档不摆画布几何（真钩子那边由 `err.collision()` 给） */
+        geo: None,
         ok: false,
         cancelled: err.cancelled(),
         message,

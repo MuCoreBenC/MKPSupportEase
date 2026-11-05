@@ -75,13 +75,28 @@ fn run_cli() -> Result<i32, AppError> {
     let dry_run = rest.iter().any(|a| a == "--dry-run");
     /* 内容一字未改时仍然重发（会推进序号）—— 默认不发，见 `TxOptions::republish` */
     let republish = rest.iter().any(|a| a == "--republish");
+    /* **人类确认位**（2026-11-05 硬约束）：真发布缺 `--confirm` 会被内核零副作用拒绝。
+     * 只有人当次明确许可，AI / CI 才拿得到这个 flag。dry-run 不需要。 */
+    let confirmed = rest.iter().any(|a| a == "--confirm");
+    /* `reload --force`：确认丢弃影子树里未保存的编辑（2026-11-01） */
+    let force = rest.iter().any(|a| a == "--force");
 
     match cmd.as_str() {
+        /* 这一条**不读任何文件、不建任何目录**：它只回答「我这个二进制是哪次编的」。
+        用来分辨 `target/debug` 与 `target-workbench/debug` 里哪一份是最新的，
+        以及「编了但没重启」时窗里跑的是不是旧字节。 */
+        "build" => {
+            println!("{}", mkp_support_ease_lib::build_fingerprint());
+            Ok(0)
+        }
         "check" => cmd_check(),
         "generate" => cmd_generate(all),
         "diff" => cmd_diff(),
         "verify" => cmd_verify(),
-        "publish" => cmd_publish(dry_run, republish),
+        "reload" => cmd_reload(force),
+        "publish" => cmd_publish(dry_run, republish, confirmed),
+        "normalize" => cmd_normalize(dry_run),
+        "follows-migrate" => cmd_follows_migrate(dry_run),
         "-h" | "--help" | "help" => {
             usage();
             Ok(0)
@@ -97,12 +112,19 @@ fn run_cli() -> Result<i32, AppError> {
 fn usage() {
     eprintln!(
         "用法：
+  presets build                 说清这个二进制是哪次编译的（只读，不碰数据）
   presets check                 检查源 TOML / 引用 / 交付约束（只读）
   presets generate [--all]      跑生成器刷新交付产物（**不推进发布序号**）
   presets diff                  报盘上与真生成结果的差异（只读）
   presets verify                核对 catalog / manifest / 账本 / SHA（只读）
-  presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写
-  presets publish               执行正式发布事务（唯一能让序号 +1 的动作）
+  presets reload                把工作台影子树对齐到 presets/（= 工作台「重新加载」）
+  presets normalize --dry-run   预演源 TOML 重排：说差多少，一个字节都不写
+  presets normalize             把 presets/registry/param_registry.toml 重排成机械序
+  presets follows-migrate --dry-run  预演「跟随状态」迁移：说会有几条，不写任何文件
+  presets follows-migrate       把存量版本键补成显式的「不跟随」+ 写迁移台账
+  presets publish --dry-run     预演发布：说会写成第几号，一个字节都不写（不需要确认）
+  presets publish --confirm     执行正式发布事务（唯一能让序号 +1 的动作）
+                                ★ 真发布必须人当次明确许可；缺 --confirm 直接拒绝
 
 退出码：0 成功 · 1 执行失败 / 校验未通过 · 2 闸门拦下（要人处理）"
     );
@@ -125,6 +147,70 @@ fn emit(value: serde_json::Value, code: i32) -> Result<i32, AppError> {
 
 fn open_ctx() -> Result<Ctx, AppError> {
     Ctx::open()
+}
+
+/// **把工作台的影子树对齐到真仓库**（= 工作台那颗「重新加载」）。
+///
+/// 为什么需要它：影子与 `presets/` 分叉时生成会被拒（`ui.workbench.txn.diverged`）——
+/// 那条闸故意**不自动对齐**，因为影子可能含着用户还没保存的编辑。CLI 这边要往下走，
+/// 就得显式说一句"放弃影子里的编辑态，回到磁盘那一版"。
+/// 与 `wb_reload` 是同一件事（`txn::mirror(real → shadow)`），不是第二套逻辑。
+fn cmd_reload(force: bool) -> Result<i32, AppError> {
+    let real = mkp_support_ease_lib::workbench::paths::presets_root()
+        .ok_or_else(|| AppError::not_found("找不到 <repo>/presets"))?;
+    let wb = mkp_support_ease_lib::workbench::paths::real_workbench_root();
+    let shadow = mkp_support_ease_lib::workbench::domain::txn::shadow_root(&wb);
+
+    /* **有未保存草稿时要先确认**（2026-11-01）。
+    以前这条下去就丢，谁点一下用户的编辑就没了。`--force` 才是"我知道，丢吧"。
+    注意只拦"影子里有、真源里没有"的那种（用户的草稿）；
+    外部改了 presets/ 时影子是落后的，那不算草稿，直接对齐就是正确动作。 */
+    let edited = mkp_support_ease_lib::workbench::domain::txn::snapshot(&shadow)
+        .ok()
+        .zip(mkp_support_ease_lib::workbench::domain::txn::snapshot(&real).ok())
+        .map_or(0, |(sh, rl)| sh.edited_against(&rl));
+    if edited > 0 && !force {
+        let msg = postprocess::diag::messages::text(
+            "ui.workbench.reload.drafts",
+            &[("count", &edited.to_string())],
+        );
+        let _ = emit(
+            json!({
+                "command": "reload",
+                "ok": false,
+                "changed": false,
+                "drafts": edited,
+                "error": msg,
+                "summary": format!("影子树里有 {edited} 处未保存的改动；确认要丢弃请加 --force"),
+            }),
+            1,
+        );
+        return Ok(1);
+    }
+
+    std::fs::create_dir_all(&shadow)
+        .map_err(|e| AppError::io("建不出影子树").with_detail(e.to_string()))?;
+    mkp_support_ease_lib::workbench::domain::txn::mirror(&real, &shadow)?;
+    /* 基准也一起铺（与 `Ctx::open` 那条同一条语义）：铺影子 = 记下"从哪一份真源铺的"。
+    不铺它，下次判"有没有草稿"就失去锚点，会把用户改过的既有文件当成没草稿。 */
+    let base = mkp_support_ease_lib::workbench::domain::txn::base_root(&wb);
+    std::fs::create_dir_all(&base)
+        .map_err(|e| AppError::io("建不出基准快照目录").with_detail(e.to_string()))?;
+    mkp_support_ease_lib::workbench::domain::txn::mirror(&real, &base)?;
+    emit(
+        json!({
+            "command": "reload",
+            "ok": true,
+            "changed": true,
+            "drafts": edited,
+            "summary": if edited > 0 {
+                format!("影子树已对齐到 presets/（已丢弃 {edited} 处未保存的改动）")
+            } else {
+                "影子树已对齐到 presets/".to_owned()
+            },
+        }),
+        0,
+    )
 }
 
 /// 交付根（`<presets>/delivery`）—— **真仓库那一棵**（不是影子树）。
@@ -288,8 +374,193 @@ fn cmd_verify() -> Result<i32, AppError> {
     )
 }
 
+/// **源 TOML 的机械化重排**（2026-11-03 作者拍板）。
+///
+/// # 为什么单独一条命令，而不是放进 `generate`
+///
+/// `generate` 只碰**产物**（`presets/delivery/` 与 `crates/preset/assets/`），
+/// **从不改源**。重排源文件是另一件事：它会把整份 `param_registry.toml` 重写一遍，
+/// 那个 diff 必须单独成一次提交，否则 review 时分不清"格式变了"与"数据变了"。
+///
+/// # 闸：结构无损才写
+///
+/// 重排后按**同一个解析器**再读一遍，与原文逐字段比（[`normalize::check_roundtrip`]）。
+/// 比不过就一个字节都不写 —— 注释、引号、顺序允许变，数据不许变。
+fn cmd_normalize(dry_run: bool) -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let file = ctx.real_root().join("registry").join("param_registry.toml");
+    let src = std::fs::read_to_string(&file).map_err(|e| {
+        AppError::not_found(format!("读不到 {}", file.display())).with_detail(e.to_string())
+    })?;
+
+    let out = mkp_support_ease_lib::presetdata::normalize::normalize_registry(&src)?;
+    let report = mkp_support_ease_lib::presetdata::normalize::check_roundtrip(&src, &out)?;
+
+    /* 结构化数据的闸：不通过就停在这里，别写 */
+    if !report.ok {
+        eprintln!("✗ 重排会改变数据，拒绝写入：");
+        for p in &report.problems {
+            eprintln!("  · {p}");
+        }
+        return emit(
+            json!({
+                "command": "normalize",
+                "ok": false,
+                "changed": false,
+                "problems": report.problems,
+                "summary": "重排会改变结构化数据，已拒绝写盘",
+            }),
+            2,
+        );
+    }
+
+    let changed = out != src;
+    if dry_run {
+        eprintln!(
+            "{}（{} 个参数 / {} 个分组，结构无损）：",
+            if changed {
+                "会有改动"
+            } else {
+                "已经是最新形态"
+            },
+            report.params,
+            report.tabs
+        );
+        if changed {
+            /* 不打整份 diff（三千多行），只报行数与首位差异 —— 真要看得自己跑 diff */
+            let a: Vec<&str> = src.lines().collect();
+            let b: Vec<&str> = out.lines().collect();
+            eprintln!("  原文 {} 行 → 重排后 {} 行", a.len(), b.len());
+        }
+        return emit(
+            json!({
+                "command": "normalize",
+                "ok": true,
+                "changed": changed,
+                "params": report.params,
+                "tabs": report.tabs,
+                "summary": if changed { "会重排（未写盘）" } else { "已是最新形态" },
+            }),
+            0,
+        );
+    }
+
+    if changed {
+        mkp_support_ease_lib::fsx::atomic::atomic_write(&file, out.as_bytes())?;
+        eprintln!("✓ 已重排 {}", file.display());
+    } else {
+        eprintln!("✓ 已经是最新形态，未写盘");
+    }
+    emit(
+        json!({
+            "command": "normalize",
+            "ok": true,
+            "changed": changed,
+            "params": report.params,
+            "tabs": report.tabs,
+            "summary": if changed { "已重排" } else { "已是最新形态" },
+        }),
+        0,
+    )
+}
+
+/// **一次性的「跟随状态」迁移**（2026-11-03）。
+///
+/// # 为什么要有它
+///
+/// 2026-11-03 之前，"这一版跟不跟基底"没有写在文件里 —— 靠"`machineVariants`
+/// 里有没有 `机型:版本` 那一行"推断。现在它是 `[params.follows]` 里的一句
+/// `= false`。存量文件里没有这句话，含义就变成了"全部跟随"，那会让今天显示
+/// 「不跟随」的格子当场变脸。
+///
+/// 所以迁移做的就是**把推断变成写下来的状态**：有版本行 ⇒ `= false`（不跟随），
+/// 没有 ⇒ 什么都不写（跟随）。一格的表现都不变。
+///
+/// # 台账
+///
+/// `presets/registry/follows-migration.json` 记「值恰好等于基底」的那些格：
+/// 它们当初是自己定的还是跟随过来的，已经无法证明。记下来是为了日后能回答
+/// 「为什么这一版不跟随」，不改判定。
+///
+/// # 幂等
+///
+/// 只补没有状态记录的键，第二遍是空操作。
+fn cmd_follows_migrate(dry_run: bool) -> Result<i32, AppError> {
+    let ctx = open_ctx()?;
+    let root = ctx.real_root().to_path_buf();
+    let mut p = mkp_support_ease_lib::presetdata::Presets::load_from(&root)?;
+    let before = p.registry.to_toml();
+
+    let at = mkp_support_ease_lib::workbench::clock::now_iso8601();
+    let ledger = mkp_support_ease_lib::presetdata::follows::migrate(&mut p.registry, &at)?;
+
+    let after = p.registry.to_toml();
+    let changed = before != after;
+    let mut total_versions = 0usize;
+    for param in p.registry.params() {
+        total_versions += param.follows.len();
+    }
+
+    if dry_run {
+        eprintln!(
+            "{}：会给 {} 个版本键写上「不跟随」（其中 {} 个「值恰好等于基底」，进台账）",
+            if changed {
+                "会有改动"
+            } else {
+                "已经是迁移后的形态"
+            },
+            ledger.marked,
+            ledger.ambiguous.len()
+        );
+        return emit(
+            json!({
+                "command": "follows-migrate",
+                "ok": true,
+                "changed": changed,
+                "marked": ledger.marked,
+                "ambiguous": ledger.ambiguous.len(),
+                "followsEntries": total_versions,
+                "summary": if changed { "会写迁移结果（未写盘）" } else { "已经迁过，空操作" },
+            }),
+            0,
+        );
+    }
+
+    if changed {
+        p.registry.write_back()?;
+    }
+    let ledger_file = root.join("registry").join("follows-migration.json");
+    if changed {
+        let text = serde_json::to_string_pretty(&ledger).unwrap_or_else(|_| "{}".to_owned());
+        mkp_support_ease_lib::fsx::atomic::atomic_write(
+            &ledger_file,
+            format!("{text}\n").as_bytes(),
+        )?;
+        eprintln!(
+            "✓ 迁完：{} 个版本键标成「不跟随」，台账 {} 条 → {}",
+            ledger.marked,
+            ledger.ambiguous.len(),
+            ledger_file.display()
+        );
+    } else {
+        eprintln!("✓ 已经迁过，未写盘");
+    }
+    emit(
+        json!({
+            "command": "follows-migrate",
+            "ok": true,
+            "changed": changed,
+            "marked": ledger.marked,
+            "ambiguous": ledger.ambiguous.len(),
+            "followsEntries": total_versions,
+            "summary": if changed { "已迁移" } else { "已经迁过" },
+        }),
+        0,
+    )
+}
+
 /// **发布**：`--dry-run` 只说不写；不带就走正式事务。
-fn cmd_publish(dry_run: bool, republish: bool) -> Result<i32, AppError> {
+fn cmd_publish(dry_run: bool, republish: bool, confirmed: bool) -> Result<i32, AppError> {
     let mut ctx = open_ctx()?;
     /*
      * ★ 发布事务用 `TxOptions::default()` 的 dry_run / republish 开关 —— **与工作台同一个
@@ -298,11 +569,23 @@ fn cmd_publish(dry_run: bool, republish: bool) -> Result<i32, AppError> {
     let opts = app_pkg::TxOptions {
         dry_run,
         republish,
+        confirmed,
         ..Default::default()
     };
     let target = app_pkg::resolve_target_opt(&ctx)?;
     let hosting = app_pkg::hosting_for(&target)?;
-    let report = app_pkg::publish_tx(&mut ctx, &opts, target.as_ref(), hosting.as_deref(), None)?;
+    /* 与工作台**同一个应用数据根**，好让 CLI 这一趟也进「发布历史」面板。
+     * `internal_root_headless` 在没窗口时按 APP_IDENTIFIER 认门；取不到就跳过记账
+     * （不把一次成功的发布说成失败）。 */
+    let history_root = mkp_support_ease_lib::fsx::paths::internal_root_headless();
+    let report = app_pkg::publish_tx(
+        &mut ctx,
+        &opts,
+        target.as_ref(),
+        hosting.as_deref(),
+        None,
+        history_root.as_deref(),
+    )?;
 
     eprintln!("{}", report.summary);
     /*

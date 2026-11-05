@@ -22,26 +22,26 @@
 
 import { useEffect, useRef } from 'react'
 
+import type { ReactNode } from 'react'
+
 import type { Cell, Col, MachineNode, ParamView, Row, Words } from '../api'
+/* 值 → TOML 原文的唯一转换点（`String(null)` 会得到 "null"，数字控件回落成 0） */
+import { rawOf } from '../sheet/draftOverlay'
 import CellEditor from './CellEditor'
+import GroupPicker from './GroupPicker'
+import type { GroupedGroup } from './GroupPicker'
 import s from '../c14.module.css'
 
-export type ParamStatusId = 'factory' | 'machine' | 'version' | 'dirty'
+export type ParamStatusId = 'follow' | 'own'
 
 /**
- * 各版本行里的两字缩写 —— 完整词（出厂默认/机型默认/本版修改/已修改）在
- * 行内占得太宽（作者），缩成两字，悬停仍是全称与解释。
+ * 两字缩写 —— 完整词（跟随基底 / 不跟随）在行内占得太宽，缩成两字，
+ * 悬停仍是全称与解释。
  */
 const ST_SHORT: Record<ParamStatusId, string> = {
-  factory: '默认',
-  machine: '机型',
-  version: '本版',
-  dirty: '已改',
+  follow: '跟随',
+  own: '不跟',
 }
-
-/** 一格的状态 id：dirty 压过 origin —— 一笔没交出去的改动才是现在最要紧的事实 */
-const statusIdOf = (cell: Cell | undefined): ParamStatusId =>
-  !cell ? 'factory' : cell.dirty ? 'dirty' : (cell.origin ?? 'factory')
 
 /**
  * 行上与编辑区共用同一枚状态标签 —— 两处说的是同一个事实，就不该有两份判据。
@@ -56,7 +56,9 @@ export function StatusTag({
   words: Words
   short?: boolean
 }) {
-  const id = statusIdOf(cell)
+  /* 基底列不挂徽章（`badge` 为 null）—— 基底是根，谈不上跟不跟谁 */
+  const id = cell?.badge ?? null
+  if (id === null) return null
   const w = words.paramStatus[id]
   return (
     <span
@@ -69,10 +71,93 @@ export function StatusTag({
 }
 
 const ST_CLASS: Record<ParamStatusId, string> = {
-  factory: s.stFactory,
-  machine: s.stMachine,
-  version: s.stVersion,
-  dirty: s.stDirty,
+  follow: s.stFollow,
+  own: s.stOwn,
+}
+
+/**
+ * **状态图标**（2026-11-03 作者）：列表行右列那枚 4 个字的状态徽章收进名字前这枚
+ * 13px 的小图标 —— 一屏 70 多行，每行右边固定挂 60px，值那一格被压得很窄。
+ *
+ * 作者看过第一版（空心/实心圆点）说「我看不懂空心实心」⇒ 换成**形状不同**的图标，
+ * 颜色只是第二层意思：
+ *
+ *   链条（灰）  跟随基底 —— 与上面连着，值从基底来
+ *   图钉（蓝）  不跟随  —— 这一层自己钉着一个值（改基底不会带走它）
+ *   禁止（红）  已弃用
+ *   斜线（灰）  这台机型上不适用（前置条件不成立）
+ *
+ * 全称与解释在 `data-tip`（与徽章同一套 `words.paramStatus`；工作台 2026-11-03
+ * 才把 `<TipLayer>` 挂上，此前所有 `data-tip` 都是死属性）。
+ * **基底列不画**（`badge` 为 null）—— 基底是根，谈不上跟不跟谁。
+ */
+export function StatusDot({
+  cell,
+  words,
+  dep,
+}: {
+  cell: Cell | undefined
+  words: Words
+  dep: boolean
+}) {
+  if (cell === undefined) return null
+  const kind: 'own' | 'follow' | 'dep' | 'off' | null = dep
+    ? 'dep'
+    : !cell.editable
+      ? 'off'
+      : (cell.badge ?? null)
+  if (kind === null) return null
+  const tip =
+    kind === 'dep'
+      ? `${words.paramDeprecated.label} —— ${words.paramDeprecated.explain ?? ''}`
+      : kind === 'off'
+        ? (cell.blockedNote ?? words.placeholder.notApplicable)
+        : `${words.paramStatus[kind].label} —— ${words.paramStatus[kind].explain ?? ''}`
+  return (
+    <span className={s.pDot} data-s={kind} data-tip={tip} role="img" aria-label={tip}>
+      <svg
+        viewBox="0 0 24 24"
+        width="13"
+        height="13"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden
+      >
+        {MARK[kind]}
+      </svg>
+    </span>
+  )
+}
+
+/** 四种状态各一个**形状不同**的图标（颜色见 `.pDot[data-s=…]`） */
+const MARK: Record<'own' | 'follow' | 'dep' | 'off', ReactNode> = {
+  /* 链条：与基底连着 */
+  follow: (
+    <>
+      <path d="M9.6 14.4 14.4 9.6" />
+      <path d="M8.6 11.9 6.7 13.8a3.4 3.4 0 0 0 4.8 4.8l1.9-1.9" />
+      <path d="M15.4 12.1l1.9-1.9a3.4 3.4 0 0 0-4.8-4.8l-1.9 1.9" />
+    </>
+  ),
+  /* 图钉：这一层自己钉着一个值 */
+  own: (
+    <>
+      <path d="M12 14.5V21" />
+      <path d="M8.9 3.5h6.2l-.8 4.1 2.5 2.5H7.2l2.5-2.5z" />
+    </>
+  ),
+  /* 禁止：已弃用 */
+  dep: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M6 6l12 12" />
+    </>
+  ),
+  /* 斜线：这台机型上不适用 */
+  off: <path d="M5.5 18.5 18.5 5.5" />,
 }
 
 interface Props {
@@ -101,6 +186,22 @@ interface Props {
   onEditDef?: () => void
   /** 某一层那枚「打开编辑器」按钮 —— 每层各一枚，开的都是自己那层 */
   onOpenGcode?: (key: string, uid: string | null) => void
+  /**
+   * 这一条在**它所属分组里**的同级清单（已按 `layout.order` 排好，含自己）。
+   *
+   * 给「组内顺序」那一格用（2026-11-02 作者：右栏也要一个，长得跟编辑定义框里
+   * 那座下拉一样）。`null` / 空 = 算不出来（还没取到注册表），那一格就不画。
+   */
+  siblings?: { key: string; label: string }[] | null
+  /**
+   * 把这一条在组里上 / 下挪一位 —— 传 `-1` / `+1`。
+   *
+   * 与编辑定义框里的 `moveOrder` 是**同一条数据**（`[params.layout].order`），
+   * 只是入口不同：那边先改前端草稿、按「确认」发一笔；这边每点一下箭头就发一笔。
+   * **两边写到的都是影子树**（`workbench/.draft/presets/`），「放弃」都撤得掉 ——
+   * 区别只在撤销栈的粒度（这边连挪三次 = 三笔）。
+   */
+  onMoveOrder?: (dir: -1 | 1) => void
   /** 写某一层的值。`null` = 挂回继承（删键）。弃用闸在那条路上 */
   onWriteLayer: (uid: string | null, next: string | null) => void
 }
@@ -121,6 +222,8 @@ export default function ParamDetail({
   onEditDef,
   onOpenGcode,
   onWriteLayer,
+  siblings = null,
+  onMoveOrder,
 }: Props) {
   /*
    * 「各版本取值」的行形态跟着**这块面板的实际宽度**走（C14 第十二轮，
@@ -211,10 +314,19 @@ export default function ParamDetail({
   const layerRow = (layerUid: string | null) => {
     const cell = cellAt(layerUid)
     if (!cell) return null
+    /* 「改之前的值」= 盘上那一份里这一格的有效值（后端按版本→机型→出厂算好）。
+       `null` 才是"没有可回的值"（见 `Cell.rest` 的注）。 */
+    const before = cell.rest ?? null
     const on = cell.editable
     const isCur = layerUid === uid
     /* 「挂回继承」之后落到哪一层：版本层 → 机型基底那格；基底 → 出厂默认 */
     const below = layerUid !== null ? cellAt(null) : null
+    /* 已经在跟随（徽章那档）：版本层才有意义，基底列 `badge` 恒 null */
+    const following = cell.badge === 'follow'
+    /* 「跟随」会跟到哪个数 —— **基底的当前值**（可能还没保存），不是保存值。
+       **只取原文、不带单位**（作者 2026-11-03：「显示参数也不用显示单位」——
+       单位在控件框里已经有一份） */
+    const followTo = below != null ? rawOf(below.raw) : ''
     return (
       <div key={layerUid ?? 'base'} className={`${s.pEdRow} ${isCur ? s.pEdRowOn : ''}`}>
         {/* identity：我是谁。徽章 + 版本身份，**一个整体**，不拆散、不折行 */}
@@ -234,34 +346,82 @@ export default function ParamDetail({
             </em>
           </span>
         </span>
-        {/* editor：怎么改。**一个整体**（控件 + ↶）—— 窄态整块挪到第二行右对齐 */}
+        {/* editor：怎么改。**一个整体**（两颗回去 + 控件）—— 窄态整块挪到第二行右对齐 */}
         <span className={s.pEdEditor}>
           {on ? (
-            <span className={s.pEdCtl}>
+            <>
               {/*
-                橙色「改之前的值」（2026-10-19）—— 与中间列表那一枚同款。
-                点它 = 把这层写回**盘上钉着的值**（`cell.rest`）；右边那枚 `↶`
-                是"挂回继承"（写 null 删键）—— 两条语义不同，两枚并存。
+                **两颗「回去」的按钮，语义完全不同，名字必须写出来**（2026-11-03 作者裁定）。
+
+                ① 橙色「保存值 3.85」= 写回 `Cell.rest`（**上次保存**那一刻的数）。
+                   写值就等于"这一层自己钉住它" ⇒ 从此**不跟随**。只在脏的时候出现
+                   （没有可回的值就没得点）。
+
+                ② 蓝色「跟随 4.05」= 交回基底（写 null）。跟到的是**基底的当前值**，
+                   不是保存值 —— 基底自己也可能有未保存的改动（作者 2026-11-03 问的
+                   「为什么不是 3.85」就是这一条：3.85 是保存值，保存之后它就不存在了）。
+                   基底那一行没有"跟谁"可言，那一位换成「出厂 4」= 删掉基底这一行、
+                   回注册表的 `defaultValue`。
+
+                ★ 排版（2026-11-03 作者：「不要在控件的后方，都放左边、固定」）：
+                两颗**一律在控件左边**，`flex: none` 不参与压缩；文字只带数、不带单位
+                （单位在控件框里已经有一份）。放不下就整块换行，不截字、不缩成图标。
+                `↩` / `↶` 那类字形去掉了 —— 作者说"不要出现那么多奇怪的图标"。
               */}
-              {cell.dirty && cell.rest !== null && (
-                <button
-                  type="button"
-                  className={s.pRevert}
-                  data-tip={`恢复修改前的值：${String(cell.rest)}（这层盘上钉着的那个，不是「恢复默认」）`}
-                  onClick={() => onWriteLayer(layerUid, String(cell.rest))}
-                >
-                  ↩ {String(cell.rest)}
-                </button>
-              )}
+              <span className={s.pEdActs}>
+                {cell.dirty && before !== null && (
+                  <button
+                    type="button"
+                    className={s.pRevert}
+                    data-tip={`回到保存值 ${rawOf(before)} —— 上次保存时这一层是多少。点了它就是「不跟随」（这一层自己钉住这个数）`}
+                    onClick={() =>
+                      /* **总是写回那个值**：这颗叫「回到保存值」，点完就是那个数、且不跟随。
+                         以前还看 `restPinned`，没钉着就发 null（= 挂回继承 = 跟随）——
+                         于是"点保存值"变成了"跟随基底"（作者 2026-11-03 报的）。 */
+                      onWriteLayer(layerUid, rawOf(cell.rest))
+                    }
+                  >
+                    保存值 {rawOf(before)}
+                  </button>
+                )}
+                {layerUid !== null ? (
+                  <button
+                    type="button"
+                    className={s.pFollow}
+                    disabled={following}
+                    data-tip={
+                      following
+                        ? `已经在跟随${machineLabel(layerUid)}的基底 —— 值就是基底那格（${followTo}），不用再点`
+                        : `回到跟随的值 —— 跟到${words.level.machine.label}基底现在的 ${followTo}（基底自己还没保存的改动也算）`
+                    }
+                    aria-label={`让 ${machineLabel(layerUid)} 跟随基底`}
+                    onClick={() => onWriteLayer(layerUid, null)}
+                  >
+                    {following ? '已跟随' : `跟随 ${followTo}`}
+                  </button>
+                ) : cell.own ? (
+                  <button
+                    type="button"
+                    className={s.pFollow}
+                    data-kind="factory"
+                    data-tip={`恢复出厂默认 ${rawOf(param.defaultValue)} —— 删掉基底这一行，值回到注册表里的 defaultValue`}
+                    onClick={() => onWriteLayer(layerUid, null)}
+                  >
+                    出厂 {rawOf(param.defaultValue)}
+                  </button>
+                ) : null}
+              </span>
               {/* form="row"：与中间列表**同一个控件形态**（步进器、分段、开关长相一致） */}
-              <CellEditor
-                param={param}
-                cell={cell}
-                form="row"
-                onWrite={(next) => onWriteLayer(layerUid, next)}
-                onOpenGcode={onOpenGcode ? () => onOpenGcode(paramKey, layerUid) : undefined}
-              />
-            </span>
+              <span className={s.pEdCtl}>
+                <CellEditor
+                  param={param}
+                  cell={cell}
+                  form="row"
+                  onWrite={(next) => onWriteLayer(layerUid, next)}
+                  onOpenGcode={onOpenGcode ? () => onOpenGcode(paramKey, layerUid) : undefined}
+                />
+              </span>
+            </>
           ) : deprecated ? (
             /* 弃用不说「要 X 才可改」——那也是假话（C14 §五） */
             <span
@@ -274,23 +434,6 @@ export default function ParamDetail({
             <span className={s.pEdOff} data-tip={cell.blockedNote ?? undefined}>
               {cell.blocked[0]?.need ?? words.placeholder.notApplicable}
             </span>
-          )}
-          {cell.own && on ? (
-            <button
-              type="button"
-              className={s.pEdReset}
-              data-tip={
-                below
-                  ? `恢复默认 —— 跟随${words.level.machine.label}，值 ${below.text}`
-                  : '恢复出厂默认'
-              }
-              aria-label={`恢复 ${machineLabel(layerUid)} 的默认值`}
-              onClick={() => onWriteLayer(layerUid, null)}
-            >
-              ↶
-            </button>
-          ) : (
-            <span className={s.pEdResetPh} aria-hidden />
           )}
         </span>
       </div>
@@ -473,6 +616,41 @@ export default function ParamDetail({
             )}
           </div>
         </section>
+
+        {/* 组内顺序（2026-11-02 作者：「这右侧也加一个组内排序的，就跟这些长得很像」）。
+             与编辑定义框里那座下拉**同一个长相、同一条数据**（`[params.layout].order`）：
+             展开后整组按当下顺序列出来，每行右边常驻上下箭头，就地挪。
+             右栏不经过前端草稿：每点一下箭头发一条 `wb_set_param_meta`。
+             但它进的是**影子树 + 事务**，右上角「保存」才写 `presets/`，「放弃」撤得掉。 */}
+        {siblings !== null && siblings.length > 1 && onMoveOrder !== undefined && (() => {
+          const at = siblings.findIndex((x) => x.key === param.key)
+          const orderGroups: GroupedGroup[] = [
+            {
+              title: null,
+              options: siblings.map((sib, i) => ({
+                value: sib.key,
+                label: sib.label,
+                by: `第 ${i + 1} / ${siblings.length} 位`,
+                ...(sib.key === param.key
+                  ? { move: { up: at > 0, down: at >= 0 && at < siblings.length - 1, onMove: onMoveOrder } }
+                  : { move: { up: false, down: false, onMove: () => undefined }, note: '只能挪这一条' }),
+              })),
+            },
+          ]
+          return (
+            <section className={s.pDSection}>
+              <div className={s.pDSecTitle}>组内顺序</div>
+              <GroupPicker
+                label="组内顺序"
+                groups={orderGroups}
+                value={param.key}
+                onChange={() => undefined}
+                width={300}
+              />
+              <p className={s.pDesc}>同一分组里的先后 — 客户端那一列也照这个排。</p>
+            </section>
+          )
+        })()}
 
         {/* 技术信息：最底部、最弱的一档。**默认展开**（作者：就这些字，折叠反而
             多一下点击）—— 弱化靠位置与颜色，不靠藏起来。

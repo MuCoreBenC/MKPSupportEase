@@ -26,6 +26,11 @@ import type { ActiveOrigin, ActivePreset, LocalePref, PinPref, ThemePref } from 
 import { resolveLocale, setActiveLocale } from '../../i18n'
 import { inTauri } from '../window'
 /*
+ * 「换上一份预设之后自动抄一遍它的后处理脚本」（2026-11-01）。
+ * 它自己不读 AppState、只认"这份换了没有"，所以放在这里没有回头依赖。
+ */
+import { autoCopyOnUse } from '../postprocess/autoCopy'
+/*
  * 主题那一句（档位 + 系统深浅 ⇒ 是不是深色 ⇒ 落 `<html data-theme>`）住在
  * `./theme`：**引导窗口也要用同一句**，而它跑不起这一整个模块（见那个文件头）。
  */
@@ -98,6 +103,13 @@ prefersDark.addEventListener('change', () => {
 /** 重读 AppState（唯一的那次 IPC 读），落地后广播给订阅者 */
 export function appStateMutated(): void {
   if (inflight !== null) return
+  /*
+   * 这一次重读之前的那一份 + 首读落地了没有：两者合起来回答
+   * "用户真的换了一份预设吗"（见下面 `autoCopyOnUse` 那条）。
+   * 首读（`wasLoaded === false`）不算换 —— 那是启动时把盘上的账读进来。
+   */
+  const before = snapshot.active
+  const wasLoaded = loaded
   inflight = Promise.all([
     /*
      * 两格各读各的：一格失败**不把另一格打成"没有"**（读不到主题不该让
@@ -124,6 +136,14 @@ export function appStateMutated(): void {
       landTheme(theme)
       /* 语言落地：解析"跟随系统"，再通知所有 `useT()` 的组件重渲染 */
       setActiveLocale(resolveLocale(locale))
+      /*
+       * **换了一份预设之后顺手抄一遍它的后处理脚本**（2026-11-01，作者点名的那一档）。
+       *
+       * 挂在这儿而不是挂到五个「使用」按钮上：那五条入口最后都收敛成
+       * "「使用中」这一格变了"，判据只该有一处（见 `postprocess/autoCopy.ts` 头注）。
+       * 首读不抄（`wasLoaded`），撤销使用也不抄（那边 `next === null`）。
+       */
+      if (wasLoaded) autoCopyOnUse(before, active)
     })
     .finally(() => {
       loaded = true

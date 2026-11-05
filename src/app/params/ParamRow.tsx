@@ -9,14 +9,14 @@
  * 保存确认对话框栽过同一个坑（旧值拿了出厂值），后来是靠 `savedValueOf` 修的，这里同解。
  *
  * 顺带把文案也改了：chip 上只写一个数字说不清它是哪一个数 ——
- * 出厂值挪进展开的行详情里（那里两个值并排，「我改了多少」与「包里是多少」一眼可比）。
+ * 默认值挪进展开的行详情里（那里两个值并排，「我改了多少」与「默认是多少」一眼可比）。
  *
  * 作者又把它收短一次：**chip 上不再写「已保存的」四个字**，只留 `↩ 255`。
  * 他圈着那个胶囊的原话是「不要显示已保存的这些字也不要显示区间」—— 同一句话里的
  * 「区间」指的是 `0-255`（注册表把 min/max 塞进了 unit 位，见 `useParams` 的
  * `unitOf`：那一处修完，这个胶囊、行里的步进器、保存确认三处一起干净）。
  * 那四个字挪进 `title`：胶囊本身就是「退回上一个值」这个动作，行里只有一个数时
- * 不必再自我介绍一遍；悬停仍写全「还原为已保存的 255（数据包里是 255）」。
+ * 不必再自我介绍一遍；悬停仍写全「还原为已保存的 255（默认是 255）」。
  *
  * # 被 showWhen 关掉的行：看得见、改不动
  *
@@ -61,7 +61,7 @@ interface Props {
    * `null` = 没记录过（从没保存过它的改动 / 清过历史）—— 那就什么也不画。
    */
   prevSavedValue?: string | null
-  /** 出厂值 —— 只在展开的行详情里显示 */
+  /** 默认值（点「恢复默认值」回到的那个数）—— 只在展开的行详情里显示 */
   factoryValue: string
   dirty: boolean
   /**
@@ -214,11 +214,18 @@ export default function ParamRow({
   /** 草稿层的表态只对**还在待处理**的项有意义（保存过之后归 `sync.decided` 管） */
   const syncDraftKind = syncPending ? syncDraft : null
   const syncDecided = sync?.decided ?? null
+  /**
+   * 「上次云端」那一格 —— **滚动记录优先**（2026-10-31）。
+   *
+   * `origin` 不会被采用/保持推进，所以它永远说得清"我上次从云端拿到的是多少"；
+   * 没有记录（旧档 / 从没改过）才退回 `baselineOld`（水位那格，处理过就会等于新值）。
+   */
+  const cloudOld = sync?.origin ?? sync?.baselineOld ?? null
   /** 「云端 18.6 → 19.0」 */
   const diffText =
-    sync !== undefined && sync.baselineOld !== null && sync.cloudNew !== null
+    sync !== undefined && cloudOld !== null && sync.cloudNew !== null
       ? t('params.cloudArrow', {
-          before: valueText(def, sync.baselineOld, tr),
+          before: valueText(def, cloudOld, tr),
           after: valueText(def, sync.cloudNew, tr),
         })
       : null
@@ -524,9 +531,11 @@ export default function ParamRow({
             </>
           )}
           {/*
-            这一格原来叫「出厂值」。这一版的值只有一层：**包里的那一份**（下载来的
-            `values`）—— 客户端不做继承推导，包里也没有「出厂 / 机型 / 版本」这三层。
-            所以标签照实改成「数据包里的值」：它和「已保存值」比，正好说明本机改没改过。
+            这一格 = **点「恢复默认值」会回到的那个数**（`factoryByKey`）。
+            来源是**当前云端目录**里这个机型·版本的基准：被版本盖过的项取机型基底，
+            其余取版本有效值。它既不是安装包里的字节，也不是你那份文件里的数 ——
+            所以不能叫「包里的值」（作者 2026-10-31 指出：包里根本没有这份预设）。
+            标签定成「默认值」：与底栏那颗「恢复默认值」是同一个词，用户自己就能对上。
           */}
           <dt className={s.dt}>{tr('params.row.dt.package')}</dt>
           <dd className={s.dd}>
@@ -571,7 +580,7 @@ export default function ParamRow({
                   </>
                 )}
                 <dt>{tr('params.row.cloudOld')}</dt>
-                <dd>{sync.baselineOld === null ? '—' : valueText(def, sync.baselineOld, tr)}</dd>
+                <dd>{cloudOld === null ? '—' : valueText(def, cloudOld, tr)}</dd>
                 <dt>{tr('params.row.cloudNew')}</dt>
                 <dd>
                   {sync.cloudNew === null

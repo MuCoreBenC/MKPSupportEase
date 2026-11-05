@@ -131,6 +131,17 @@ pub(crate) fn delete_wipe(iface: &[String]) -> Vec<String> {
                 result.push(iface[i].clone());
                 i += 1;
                 continue;
+            } else if (trimmed.contains("G1 X") || trimmed.contains("G1 Y"))
+                && !trimmed.contains('E')
+            {
+                // 连续空走：切片器把一次长跳转拆成多条首尾相接的空走。旧实现只留
+                // WIPE_END 后第一条、其余静默丢弃，下一条涂胶行便从「第一条的终点」
+                // 直飞自己的终点 —— 这段位移落在落笔高度，笔尖压着模型表面走
+                // （2026-11-03：真实件 78 处，最长 65mm）。几何必须保留，Z 由发射
+                // 层按笔尖净空统一给。
+                result.push(strip_z_from_line(&trimmed));
+                i += 1;
+                continue;
             } else {
                 i += 1;
                 continue;
@@ -236,6 +247,13 @@ pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
                 result.push(iface[i].clone());
                 i += 1;
                 continue;
+            } else if (trimmed.contains("G1 X") || trimmed.contains("G1 Y"))
+                && !trimmed.contains('E')
+            {
+                // 同 `delete_wipe`：连续空走保留几何，抬升交给发射层
+                result.push(strip_z_from_line(&trimmed));
+                i += 1;
+                continue;
             } else {
                 i += 1;
                 continue;
@@ -304,9 +322,14 @@ pub(crate) fn delete_wipe_continuous(iface: &[String]) -> Vec<String> {
 /// `insertFeatureTransitionJumps`（delete_wipe.go:118）：在「非打印移动的间隙」
 /// 处插入 `;ZJUMP_INTERNAL[ ; FEATURE: ...]`，压缩特征过渡段。
 fn insert_feature_transition_jumps(lines: Vec<String>) -> Vec<String> {
+    /*
+     * 圆弧（`G2/G3 … E`）也是挤出移动。旧实现只认 `G1`，于是支撑面里成片的
+     * 圆弧被当成「非打印的间隙」整体替换成 `;ZJUMP_INTERNAL` —— 涂胶路径因此
+     * 丢了圆弧、只剩端点之间的直线（2026-11-03 作者看俯视图发现）。
+     */
     let is_print_move = |line: &str| -> bool {
         let trimmed = line.trim();
-        trimmed.starts_with("G1 ")
+        (trimmed.starts_with("G1 ") || trimmed.starts_with("G2 ") || trimmed.starts_with("G3 "))
             && (trimmed.contains('X') || trimmed.contains('Y'))
             && trimmed.contains(" E")
     };

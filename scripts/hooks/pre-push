@@ -27,6 +27,10 @@ tag_msg=
 
 VER=$(pkg_version)
 
+# 闸⑨：版本号策略（2026-11-04）—— 已发布的号永不再用；开发版本必须是下一个号的 -dev。
+# 只为拦「把开发版本写成已发布号 / 发布后忘了 next」，不判断本次推的是哪条分支。
+node scripts/version.mjs check || exit 1
+
 while read -r local_ref local_sha remote_ref remote_sha; do
   [ -z "$remote_ref" ] && continue
 

@@ -45,8 +45,16 @@ const SNAP_RADIUS = 8
 const BREAK_DISTANCE = 14
 const REARM_DISTANCE = 40
 const KEY_STEP = 16
-/** 正文栏无论如何要留下的宽度（px） */
+/** 正文栏**最多**留这么宽（px）：窗口够大时按这个扣 */
 const MAIN_MIN = 360
+/**
+ * 正文栏还要按比例留一点：`min(MAIN_MIN, 宿主宽 × 这个比例)`。
+ *
+ * 2026-11-03 作者：「窗口比较小的时候，它也允许我把它拓宽」。以前是死扣 360 ——
+ * 1080 的窗口里详情栏拖到 ~308 就到头（连默认的 320 都推不过去），等于拖不动。
+ * 改成两者取小：小窗口按 1/4 让位，大窗口仍然保 360。
+ */
+const MAIN_MIN_RATIO = 0.25
 
 interface Props {
   /**
@@ -126,7 +134,9 @@ export default function SplitterC14({
     (raw: number) => {
       const bodyW = bodyRef.current?.clientWidth
       /* 窗口不够宽（扣掉对侧与正文就没地方了）时不再压自己：拖到头就是 min/max 本身 */
-      const hi = bodyW && bodyW > 0 ? Math.max(min, Math.min(max, bodyW - otherW - MAIN_MIN)) : max
+      const reserve =
+        bodyW && bodyW > 0 ? Math.min(MAIN_MIN, Math.round(bodyW * MAIN_MIN_RATIO)) : MAIN_MIN
+      const hi = bodyW && bodyW > 0 ? Math.max(min, Math.min(max, bodyW - otherW - reserve)) : max
       return Math.round(Math.min(Math.max(raw, min), hi))
     },
     [bodyRef, max, min, otherW],

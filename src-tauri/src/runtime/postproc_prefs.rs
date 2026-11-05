@@ -26,9 +26,22 @@
 //!   `ir.state.glue_bottom_enabled`（给 pass1 看）与 `ir.prefs.glue_bottom_enabled`
 //!   （给"这一趟的偏好是什么"留个账）。两处不写成一致就会有一半生效一半不生效。
 
-use postprocess::ir::Ir;
+use postprocess::ir::{Ir, TowerRelocateModeIr};
 
-use super::app_state::ResolvedPostprocPrefs;
+use super::app_state::{ResolvedPostprocPrefs, TowerRelocateMode};
+
+/// 客户端那三档 → 内核那三档。
+///
+/// ★ 一一对应、**不许有默认档互相顶替**（`Off` 对 `Off`，不是"认不出就当关"）：
+///   两端枚举拆开写是因为内核不许反向依赖客户端，代价就是这里必须逐档列出 ——
+///   只写 `_ => Off` 的话，哪天新增一档会被静默当成"关"。
+fn tower_mode_to_ir(mode: TowerRelocateMode) -> TowerRelocateModeIr {
+    match mode {
+        TowerRelocateMode::Off => TowerRelocateModeIr::Off,
+        TowerRelocateMode::Auto => TowerRelocateModeIr::Auto,
+        TowerRelocateMode::Ask => TowerRelocateModeIr::Ask,
+    }
+}
 
 /// 把偏好写进 `ir`。**管线开跑之前调一次**（`ipc::postprocess` 与钩子两条入口都走它）。
 ///
@@ -43,7 +56,7 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.prefs.xy_calibration_dwell_sec = prefs.xy_calibration_dwell_sec;
     ir.prefs.bed_glue_enabled = prefs.bed_glue_enabled;
     ir.prefs.bed_glue_all_models = prefs.bed_glue_all_models;
-    ir.prefs.auto_tower_position = prefs.auto_tower_position;
+    ir.prefs.auto_tower_position = tower_mode_to_ir(prefs.auto_tower_position);
 
     /* 底面涂胶实际生效的那一格在 `state`（见模块头那条"特例"） */
     ir.state.glue_bottom_enabled = prefs.glue_bottom_enabled;
@@ -91,7 +104,10 @@ mod tests {
         );
         assert_eq!(kernel.bed_glue_enabled, client.bed_glue_enabled);
         assert_eq!(kernel.bed_glue_all_models, client.bed_glue_all_models);
-        assert_eq!(kernel.auto_tower_position, client.auto_tower_position);
+        assert_eq!(
+            kernel.auto_tower_position,
+            tower_mode_to_ir(client.auto_tower_position)
+        );
 
         /* 顺带把常量也咬住：改了默认值却忘了改 `PrefsIr::default()` 同样是红的 */
         assert_eq!(
@@ -146,7 +162,7 @@ mod tests {
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
             bed_glue_all_models: true,
-            auto_tower_position: true,
+            auto_tower_position: TowerRelocateMode::Auto,
         };
         let mut ir = Ir::default();
         apply_to_ir(&mut ir, &prefs);
@@ -163,10 +179,61 @@ mod tests {
         assert_eq!(ir.prefs.xy_calibration_dwell_sec, 9);
         assert!(ir.prefs.bed_glue_enabled);
         assert!(ir.prefs.bed_glue_all_models);
-        assert!(
+        assert_eq!(
             ir.prefs.auto_tower_position,
-            "自动摆塔那一档必须真的落到 IR —— 管线读的就是它"
+            TowerRelocateModeIr::Auto,
+            "智能塔位置那一档必须真的落到 IR —— 管线读的就是它"
         );
+    }
+
+    /// **三档逐档落地**（2026-11-04）：`Off` 不许被写成 `Auto`，`Ask` 也不许被当成"关"。
+    ///
+    /// 作者的原话是「关就是关，开就是开」—— 反过来说，中间那档（问一句）也必须是
+    /// 它自己，不能被相邻两档吞掉。这条判据比"开了就行"严一档。
+    #[test]
+    fn every_tower_mode_lands_as_itself() {
+        for (mode, want) in [
+            (TowerRelocateMode::Off, TowerRelocateModeIr::Off),
+            (TowerRelocateMode::Auto, TowerRelocateModeIr::Auto),
+            (TowerRelocateMode::Ask, TowerRelocateModeIr::Ask),
+        ] {
+            let prefs = ResolvedPostprocPrefs {
+                auto_tower_position: mode,
+                ..PostprocPrefs::default().resolved()
+            };
+            let mut ir = Ir::default();
+            apply_to_ir(&mut ir, &prefs);
+            assert_eq!(ir.prefs.auto_tower_position, want, "{mode:?} 落地不对");
+        }
+    }
+
+    /// 线上字符串是契约：盘上 / DTO / 前端共用这三个字面量。
+    #[test]
+    fn tower_mode_wire_names_are_stable() {
+        assert_eq!(TowerRelocateMode::Off.wire(), "off");
+        assert_eq!(TowerRelocateMode::Auto.wire(), "auto");
+        assert_eq!(TowerRelocateMode::Ask.wire(), "ask");
+        assert_eq!(TowerRelocateMode::default(), TowerRelocateMode::Ask);
+    }
+
+    /// **出厂就是"问"**（2026-11-04 作者：「软件安装的时候默认就是问」）。
+    ///
+    /// 这一条钉两件事：① 盘上没这一格 ⇒ `resolved()` 给 `ask`；② 内核出厂也是 `ask`
+    /// （两边一致见上一条判据）。
+    #[test]
+    fn the_factory_mode_is_ask() {
+        let fresh = PostprocPrefs::default().resolved();
+        assert_eq!(fresh.auto_tower_position, TowerRelocateMode::Ask);
+        assert_eq!(
+            postprocess::ir::PrefsIr::default().auto_tower_position,
+            TowerRelocateModeIr::Ask,
+            "内核出厂档也要是 ask —— 管线读的是它"
+        );
+
+        /* 盘上没这一格（老档案 / 新装）⇒ 出厂 `ask` */
+        let empty: PostprocPrefs = serde_json::from_str("{}").expect("空对象也要读得动");
+        assert_eq!(empty.auto_tower_position, None);
+        assert_eq!(empty.resolved().auto_tower_position, TowerRelocateMode::Ask);
     }
 
     /// 量程夹住：界面上万一传了越界值，管线拿到的一定是合法值。

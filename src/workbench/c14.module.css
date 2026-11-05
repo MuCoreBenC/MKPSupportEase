@@ -25,6 +25,14 @@
   /* 「要留意」那一档的字色（弃用徽章以外的几处提示行读它） */
   --wb-warn: #b45309;
   /*
+   * 「已固定」那一档（2026-11-02）—— 为什么是**紫**：
+   * 这一屏已经有蓝（主操作 / 机型默认）、绿（成功）、红（弃用 / 危险）、
+   * 橙（已修改）、灰（出厂默认）五族，剩下能一眼分开、又不带"错误"语气的只有紫。
+   * 语义上也对得上：紫在这套界面里没有别的活儿，一见就知道是"人做的决定"。
+   */
+  --wb-pin: #7c3aed;
+  --wb-pin-soft: rgba(124, 58, 237, 0.12);
+  /*
    * C14：圆角是**控件属性**，不是整个页面的建筑风格（作者原话：该直角的时候
    * 就要直角）。全局那套 --r-* 是给首页卡片墙的宽松量（8/12/16），C14 在稿内
    * 收紧：页面骨架、分组卡、表格一律近直角；输入框 4px；真正的浮层走 --r-lg。
@@ -149,6 +157,9 @@
   --wb-primary-press: rgba(75, 142, 247, 0.34);
   --wb-ok: #2f9e5b;
   --wb-warn: #d9942b;
+  /* 紫色在深底上要**提亮**（与蓝同一口径：原值发闷） */
+  --wb-pin: #a78bfa;
+  --wb-pin-soft: rgba(167, 139, 250, 0.18);
 
   --dep-red: #e09a92;
   --dep-red-soft: rgba(226, 104, 94, 0.16);
@@ -371,6 +382,48 @@
   top: 0;
   bottom: 0;
   left: calc(var(--nav-w, 216px) - 4.5px);
+}
+
+/*
+ * 导航折叠把手（2026-11-03 作者：「不管窗口宽度大小，我都能主动把侧边栏折起来」）。
+ *
+ * 它只改**宽度**：折到 64px 之后 `.nav` 的容器查询（≤ 88px）自己换成图标列 ——
+ * 与「拖窄」「窄档」共用同一份形态 CSS，这里不再写第二套。
+ * 图标方向跟着 `data-icon`：展开时指左（收起），收起时指右（展开）。
+ */
+.navCollapse {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 26px;
+  margin: 6px 8px 0;
+  padding: 0 6px;
+  color: var(--text-3);
+  border-radius: var(--r-sm);
+}
+
+.navCollapse:hover {
+  color: var(--text-1);
+  background: var(--surface-sunken);
+}
+
+.navCollapse[data-icon='true'] {
+  justify-content: center;
+  margin: 6px 4px 0;
+  padding: 0;
+}
+
+.navCollapse[data-icon='true'] svg {
+  transform: rotate(180deg);
+}
+
+@container shell-nav (max-width: 88px) {
+  .navCollapse {
+    justify-content: center;
+    margin: 6px 4px 0;
+    padding: 0;
+  }
 }
 
 .navList {
@@ -2298,35 +2351,14 @@
   color: var(--text-1);
 }
 
-/* 「去处理」定位的闪烁（2 秒后由 React 摘掉类） */
-@keyframes c14-flash-card {
-  0%, 55% {
-    background: var(--wb-primary-soft);
-    border-color: var(--wb-primary);
-  }
-
-  100% {
-    background: var(--surface-solid);
-  }
-}
-
-@keyframes c14-flash-row {
-  0%, 55% {
-    background: var(--wb-primary-soft);
-  }
-
-  100% {
-    background: transparent;
-  }
-}
-
-.flashIt {
-  animation: c14-flash-card 1.8s ease-out;
-}
-
-.rowFlash {
-  animation: c14-flash-row 1.8s ease-out;
-}
+/*
+ * 「去处理」定位的绿底（2026-11-04 收口）：这里**不再有 keyframes / flashIt /
+ * rowFlash**。原先这两条动画一条带描边、一条只铺底、都是 1.8 秒；设置页与预设表又
+ * 各有一套，三处时长各不相同。作者：「定位的就是绿色的背景……大家都用一样的」。
+ *
+ * 现在由 `components/scroll/locate` 一件负责：滚完给目标元素演 `--accent-soft` 淡绿底，
+ * 停 6 秒再淡出（WAAPI，WKWebView 上 CSS `@keyframes` 本来就不播）。
+ */
 
 /*
  * 生成与发布的版式（C14，作者：「我还是喜欢左旧的那种，左右分布的，左边是那些
@@ -3214,7 +3246,7 @@
  *                「FASTV…」），竖着排各自完整：上面名字、下面小字是 id；
  *   宽（≥ 200）  横排：名字 + id 实际只要约 144px 内容宽，栏宽了之后竖排
  *                的理由（同时完整放不下）不成立，还白占一倍行高。
- *   形态由 ParamsPageC14 的 ResizeObserver 写在 .pRailBody 上。
+ *   形态由参数台的 ResizeObserver 写在 .pRailBody 上。
  */
 .pVtext {
   display: flex;
@@ -3224,6 +3256,19 @@
 }
 
 .pRailBody[data-form='wide'] .pVtext {
+  flex-direction: row;
+  gap: 5px;
+  align-items: baseline;
+}
+
+/*
+ * 同一行的第二种写法（2026-11-02）：**直接在那一行上**标 `data-form="wide"`，
+ * 而不是靠祖先 `[data-form='wide']` 传下来。
+ *
+ * 机型多选器（`MachinePicker`）不在 `pRailBody` 里，但它要的正是这一种：
+ * 名字 + 浅色 id 并排一行。原来只能整段竖排，八台机型撑出一屏。
+ */
+.pVtext[data-form='wide'] {
   flex-direction: row;
   gap: 5px;
   align-items: baseline;
@@ -3405,7 +3450,7 @@
   /*
    * 两列还是一列看**正文的实际宽度**，不看窗口宽（rail 和外壳导航都要从总宽里扣）。
    * 这件事 C09 交给 CSS 容器查询（`container-type: inline-size` + `@container`），
-   * C14 改成 `ParamsPageC14` 里的 ResizeObserver 直接写 `data-cols`：
+   * C14 改成参数台里的 ResizeObserver 直接写 `data-cols`：
    *
    *   容器查询每次**尺寸变化**都要重新求值整棵子树 —— 实测拖窗口那一秒里，
    *   布局自 90ms 里有 45ms 花在它上面，而且 900px 附近来回穿越时列数反复翻。
@@ -3635,6 +3680,39 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * 状态图标（2026-11-03 作者：「我看不懂空心实心，用图标吧」）——
+ * 列表行右列那枚 4 字徽章换成名字前面这枚 13px 图标（形状 + 颜色，两道保险）：
+ *
+ *   链条（灰）跟随基底 · 图钉（蓝）这一层自己钉着 · 禁止（红）已弃用 · 斜线（灰）不适用
+ *
+ * 颜色只作第二层意思，别让它承担判读 —— 作者第一版就是靠空心/实心没读出来。
+ */
+.pDot {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  margin-right: 6px;
+  color: var(--text-3);
+  /* 悬停有话说（TipLayer 2026-11-03 才在工作台挂上） */
+  cursor: help;
+}
+
+.pDot[data-s='own'] {
+  color: var(--wb-primary);
+}
+
+.pDot[data-s='dep'] {
+  color: var(--dep-red);
+}
+
+.pDot[data-s='off'] {
+  color: var(--line-strong);
+}
+
 /* 状态标签：灰 = 跟别人走，主色 = 这台机器/这个版本自己定的，橙 = 手上还没交出去。
    2px 圆角 —— 徽章几乎直角（b03 的 --w-r-tag 同值）。
 
@@ -3658,25 +3736,22 @@
   border-radius: 2px;
 }
 
-.stFactory {
+/*
+ * 两档状态（2026-11-02 作者定稿）：**跟随基底 / 不跟随**。
+ *
+ * 「出厂默认 / 机型默认 / 本版修改 / 已固定」四分已退役 —— 它们答的是"值从哪来"，
+ * 而人看屏幕时问的是"我改过它没有"。基底列干脆不挂徽章（`Cell.badge` 为 null）。
+ *
+ * 灰 = 跟随（这一层空的，值来自上一层）；蓝 = 不跟随（这一层自己写了一行）。
+ * 蓝沿用了原来「机型默认」那一副，因为语义没变：都是"这一层有自己的值"。
+ */
+.stFollow {
   color: var(--text-3);
 }
 
-.stMachine {
+.stOwn {
   color: var(--wb-primary-deep);
   background: var(--wb-primary-soft);
-  border-color: transparent;
-}
-
-.stVersion {
-  color: var(--text-1);
-  background: var(--surface-solid);
-  border-color: var(--line-strong);
-}
-
-.stDirty {
-  color: var(--accent-deep);
-  background: var(--accent-soft);
   border-color: transparent;
 }
 
@@ -3820,6 +3895,70 @@
   overflow: hidden;
 }
 
+/*
+ * 带画布的分组卡（组件卡，2026-11-01）。
+ *
+ * 三条定死（作者反复挑了三回）：
+ *   ① 占位块**永远在左边**（客户端 `tower-map` 就是左图右参数）——
+ *      **包括正文只剩一列的时候**。作者 2026-11-01 看到它跑到正上方：
+ *      「为什么这个画布现在在正上方了，而不是在正左方」。那是我让它掉上去
+ *      "让路"的；现在改成**窄了只压窄它、绝不换位置**；
+ *   ② 占位块**跟右边那列参数一样高**，不是一小块浮在上头；
+ *   ③ **窗口尺寸怎么变都不许走样**。
+ *
+ * # 为什么两栏都得用 calc 算宽度（踩过的坑）
+ *
+ * 参数行自己有 `content-visibility: auto` + `contain-intrinsic-size`（C14 为拖窗口
+ * 做的性能优化）。被它跳过的行，宽度参与不了外层分配 —— 结果右列在 483px 的卡里
+ * 只分到 349px，卡右半边一直空着。grid 换 flex 都一样，问题在行的固有宽度不可知。
+ */
+.pGroupSplit {
+  /* 占位块宽度：两列 132px（作者："宽度不用占据很多"），单列压到 104px */
+  --slot-w: 132px;
+
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+}
+
+/* 占位块那一栏：宽度跟着 `--slot-w`，右列按 `calc(100% - var(--slot-w))` 让位 */
+.pGroupAside {
+  display: flex;
+  flex: none;
+  align-items: stretch;
+  box-sizing: border-box;
+  width: var(--slot-w);
+  padding: 8px;
+  border-right: 1px solid var(--line);
+}
+
+/*
+ * 右列（参数行）：宽度**自己算**，不靠 `flex: 1` 分 —— 行被 `content-visibility`
+ * 跳过时固有宽度不可知，`flex` 分出来的就是错的（实测 349px，卡宽 483px）。
+ */
+.pGroupRows {
+  flex: none;
+  box-sizing: border-box;
+  width: calc(100% - var(--slot-w));
+  min-width: 0;
+}
+
+/* 画布在右侧的组件（以后真有的话）：两栏换个方向，分隔线跟着换边 */
+.pGroupSplit[data-side='right'] .pGroupAside {
+  order: 2;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+
+/*
+ * 正文只剩一列（`data-cols='1'`，页面那个 ResizeObserver 写）：
+ * **只把占位块压窄**，不改成上下排 —— 位置就是它的意义。
+ * 104px 里放得下「画布」两个字，组件名那行会省略（`ComponentSlot` 已带 ellipsis）。
+ */
+.pScroll[data-cols='1'] .pGroupSplit {
+  --slot-w: 104px;
+}
+
 .pGroupHead {
   display: flex;
   gap: 8px;
@@ -3852,6 +3991,30 @@
 .pFoldBtn:hover {
   color: var(--text-1);
   border-color: var(--line-strong);
+}
+
+/*
+ * 卡头标题 = 打开分组抽屉的那一颗（2026-11-01 第三稿）。
+ *
+ * 作者：「我不要点击的改名，我要点击的打开右侧的抽屉……」—— 卡头里不再有输入框、
+ * 也不再有上下箭头（一个误触就把顺序改了）。标题平时长得跟原来那行字一模一样，
+ * 悬停才给一条虚线下划线，暗示"这里点得动"。
+ */
+.pGroupName {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  cursor: pointer;
+}
+
+.pGroupName:hover {
+  color: var(--text-1);
+  border-bottom-color: var(--line-strong);
 }
 
 /*
@@ -4168,27 +4331,47 @@
   color: var(--text-3);
 }
 
-/* 「怎么改」：控件 + ↶，也是一个整体 —— 手势 / 布局都当它是一块 */
+/*
+ * 「怎么改」：**两颗回退按钮在左、控件在右**，一个整体（2026-11-03 作者裁定）。
+ *
+ * 以前是 `row-reverse` + `space-between` 的「一左一右摊开」，跟随/取消跟随那两颗
+ * 还会跑到控件的**后方**（作者：「不要显示在右侧，都放左边固定」）。现在：
+ *
+ *   窄                按钮组                    —— 第一行（放不下就自己换行）
+ *                     控件（贴右）
+ *   宽（面板 ≥ 400）  按钮组 |            控件  —— 一行
+ *
+ * `flex-wrap` 是作者点名要的兜底：「实在不行的话，你就换行」—— 按钮不压缩、
+ * 不截字、也不为了省地方退回图标。`
+ */
 .pEdEditor {
   grid-area: ed;
   display: flex;
-  /* 窄态：↶ 在左、控件在右（作者圈的那张图），输入框仍然贴右缘 */
-  flex-direction: row-reverse;
-  justify-content: space-between;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 6px;
   min-width: 0;
 }
 
-/* 宽态：控件在前、↶ 在后，整块贴右 —— 不再一左一右摊开 */
-.pEdRows[data-form='wide'] .pEdEditor {
-  flex-direction: row;
-  justify-content: flex-end;
+/* 按钮组：两颗回退按钮，永远挨在一起、永远在最左边 */
+.pEdActs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+  align-items: center;
 }
 
-/* 控件本体：与中间列表同一个组件（form="row"），宽度交给控件自己 */
+/* 空的时候不占位（基底那一行没有自己的一行值时） */
+.pEdActs:empty {
+  display: none;
+}
+
+/* 控件本体：与中间列表同一个组件（form="row"），宽度交给控件自己；贴右缘 */
 .pEdCtl {
   display: flex;
+  flex: none;
+  margin-left: auto;
   min-width: 0;
 }
 
@@ -4230,6 +4413,52 @@
   background: var(--surface-sunken);
 }
 
+/*
+ * 「跟随 x.xx」chip（2026-11-03）。
+ *
+ * 与橙色 `.pRevert`（回到保存值）成对出现，两者的区别必须一眼看得出来：
+ *   `↩ 保存值 3.85` = 上次保存那一刻的数 ⇒ 从此**不跟随**
+ *   `↶ 跟随 3.95`   = 交回基底，跟到**基底的当前值**（可能还没保存）
+ * 以前这里是一枚 18px 的 `↶` 图标，只在"不跟随"时渲染 —— 跟随之后想再点没有入口。
+ * 跟随时整颗变灰（`disabled`），并把"它跟的是哪个数"写在脸上。
+ */
+.pFollow {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--wb-primary);
+  border-radius: 4px;
+  background: var(--wb-primary-soft);
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--wb-primary-deep);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.pFollow:hover:not(:disabled) {
+  background: var(--surface-solid);
+}
+
+.pFollow[data-kind='factory'] {
+  border-color: var(--line-strong);
+  background: var(--surface-sunken);
+  color: var(--text-2);
+}
+
+.pFollow[data-kind='factory']:hover {
+  color: var(--text-1);
+}
+
+.pFollow:disabled {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--text-3);
+  cursor: default;
+}
+
 /* 没有可恢复层的行占住同一个位置 */
 .pEdResetPh {
   flex: none;
@@ -4244,7 +4473,7 @@
  * （`--warn-line` 边框 / `--warn-surface` 底 / `--warn-ink` 字，两边的 token
  * 本来就是同一份），只是工作台这一档行更密 —— 高度收到 20px。
  *
- * **只在这一格真的改过时才画**（判据在 `ParamsPage` / `ParamDetail`：`cell.dirty`
+ * **只在这一格真的改过时才画**（判据在参数台 / `ParamDetail`：`cell.dirty`
  * + `cell.rest !== null`）。它是"退回我原来的值"，与右边那枚 `↶`（挂回继承）
  * 不是一回事。
  */
@@ -4254,7 +4483,8 @@
   align-items: center;
   gap: 3px;
   height: 20px;
-  margin-right: 6px;
+  /* 与右边那枚步进器拉开一点（作者 2026-11-03：「太贴近我的文本框了」） */
+  margin-right: 10px;
   padding: 0 7px;
   border: 1px solid var(--warn-line);
   border-radius: 4px;
@@ -5242,20 +5472,20 @@
   }
 }
 
-.shell[data-density='compact'] .navItem {
+.shell[data-density='compact']:not([data-nav='text']) .navItem {
   justify-content: center;
   padding: 0;
 }
 
-.shell[data-density='compact'] .navLabel {
+.shell[data-density='compact']:not([data-nav='text']) .navLabel {
   display: none;
 }
 
-.shell[data-density='compact'] .navIcon {
+.shell[data-density='compact']:not([data-nav='text']) .navIcon {
   display: block;
 }
 
-.shell[data-density='compact'] .navBadge {
+.shell[data-density='compact']:not([data-nav='text']) .navBadge {
   position: absolute;
   top: 3px;
   right: 7px;
@@ -5265,16 +5495,16 @@
   font-size: 9px;
 }
 
-.shell[data-density='compact'] .upstream {
+.shell[data-density='compact']:not([data-nav='text']) .upstream {
   justify-content: center;
   padding: 6px 0;
 }
 
-.shell[data-density='compact'] .upText {
+.shell[data-density='compact']:not([data-nav='text']) .upText {
   display: none;
 }
 
-.shell[data-density='compact'] .upDot {
+.shell[data-density='compact']:not([data-nav='text']) .upDot {
   margin-top: 0;
 }
 
@@ -5287,12 +5517,13 @@
  *   （`--nav-w` 不是继承属性：`.nav` 上写的值，父元素 `.body` 读不到）——
  *   所以网格列宽这里单独钉一次，否则窄档导航会按外壳上那个拖过的值走。
  */
-.shell[data-density='compact'] .nav,
-.shell[data-density='compact'] .navItem {
+.shell[data-density='compact']:not([data-nav='text']) .nav,
+.shell[data-density='compact']:not([data-nav='text']) .navItem {
   --nav-w: 64px !important;
 }
 
-.shell[data-density='compact'] .body {
+/* 窄档的列宽：**用户明确要文字档时不算数**（窗口小也要能展开，2026-11-03 作者） */
+.shell[data-density='compact']:not([data-nav='text']) .body {
   grid-template-columns: 64px 1fr;
 }
 

@@ -8,8 +8,9 @@
  *    行上小徽章全部安静化（去框、去底、去字重）；「文件无法读取」是唯一保留的实心徽章。
  * 3. **主操作立体**：actBtn / saveBtn 深色实心 + 底部暗边与柔影；空占位（—）不渲染。
  *
- * 表头 `position: sticky` 是**硬要求**：全局 CSS 把滚动条宽度置成 0（幽灵滚动条，
- * 见 src/styles/global.css），滚起来没有任何位置参照。
+ * 表头**必须一直可见**：全局 CSS 把滚动条宽度置成 0（幽灵滚动条，见
+ * src/styles/global.css），滚起来没有任何位置参照。做法是**表头一张表 + 正文一张表**
+ * （2026-11-01），**不是** `position: sticky` —— 为什么不用 sticky 见 `.head` 那段。
  *
  * 列宽用 `table-layout: fixed` 定死，名字那一列吃掉剩下的宽度并省略号截断 ——
  * 让浏览器自己算列宽的话，一个长文件名会把喷嘴层高挤成竖排。
@@ -22,6 +23,15 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * 表头那一张表（2026-11-01）：**它不在滚动容器里**，只是 `.hold` 的第一个孩子。
+ * 不收缩、不参与滚动 —— 没有 `position: sticky`，WKWebView 就没有粘性层可留残影
+ * （为什么不再用 sticky，见 `PresetTable.tsx` 那段长注释与这张表的历史）。
+ */
+.headTable {
+  flex: 0 0 auto;
 }
 
 .wrap {
@@ -41,30 +51,23 @@
 /* ---------- 表头 ---------- */
 
 /*
- * sticky **挂在 `thead` 上**（2026-10-29）。
+ * 表头（2026-11-01 第六版）：**不是粘性的了**。
  *
- * 只挂在 `th` 上是**不成立的** —— 两个引擎都实测过（Playwright 的 WebKit 与
- * Chromium 各跑一遍，量 `thead` / `th` / 滚动容器三条顶边）：
+ * 这张表的历史：2026-10-29 把 sticky 挂到 `thead` 上（挂 `th` 上在两个引擎里都不成立，
+ * 细节见 git 历史）；2026-11-01 作者连报四张截图 —— 上沿露背景、整行压扁的残影、
+ * 表只剩左半边。前三次都在 sticky 上打补丁（`top: -1px`、加底色、负层级遮罩），
+ * 越补越糟：**sticky 在 WKWebView 里会被单独合成，层缓存不失效就闪残影**。
  *
- *   · Chromium：`th` 的粘性约束框就是它所在的 `thead`（槽高 = `th` 高 ⇒ 一格都粘不动），
- *     于是表头**跟着内容一起滚出可视区** —— 工具栏底下直接露出滚上来的行；
- *   · WebKit：`th` 自己粘住了，可 `thead` 的**行槽**照旧往上走，表头与行因此错位
- *     整整一行（34px），行被表头吃掉一截。
- *
- * 挂在 `thead` 上：槽位与绘制不再分家，两个引擎都停在滚动容器的顶边。
- * `th` 那一份 sticky **留着兜底**（它相对已粘住的 `thead` 定位，没有可动的空间，
- * 哪个引擎都不受影响）。
+ * 现在表头在滚动容器外面（见 `PresetTable.tsx`），这里是普通块。**别再给它加
+ * `position: sticky`** —— 要"表头不滚"，靠的是它本来就不在滚动容器里。
  */
 .head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
+  /* 行组自己也要不透明底：`th` 只盖自己那一格，格与格之间的格线归表格画，
+     那零点几像素原来没有任何一层铺色（"上沿露背景"就是从这儿来的） */
+  background: var(--card-face);
 }
 
 .head th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
   height: 34px;
   padding: 0 clamp(4px, 0.9vw, 10px);
   /*
@@ -336,6 +339,22 @@
   background: var(--accent-soft);
 }
 
+/*
+ * ============ 「定位」的绿底（2026-11-04 收口） ============
+ *
+ * 这里**不再有 `data-flash` 规则**。以前这一段是表独有的两段过渡（淡入 160 / 停 1000 /
+ * 淡出 620），与设置页的绿描边、工作台的 `@keyframes` 各是各的 —— 作者：
+ * 「消失得太快了」「大家都用一样的」。
+ *
+ * 现在由 `components/scroll/locate` 一件负责：滚完给目标 `tr` 演一层 `--accent-soft`
+ * 淡绿底（与上面 `[data-selected]` 同一套绿），**停 6 秒**再淡出。用 WAAPI 是因为
+ * 动画值在级联里压得过 `:hover` / `[data-selected]` / `[data-pinned]` 这几条行底色规则，
+ * 演完自动把底色还给 CSS，不会留一层永远盖着悬停态的绿。
+ *
+ * ★ 行怎么动它怎么动这件事仍然成立：演的是 `tr` 自己的 `background-color`，
+ *   不是页面根上那块跟着滚的浮层（2026-11-01 那次踩的坑）。
+ */
+
 /* 聚焦不另画圈：行开合看内容就够了 */
 .row:focus-visible {
   outline: none;
@@ -396,12 +415,15 @@
  * 不是徽章（作者：「不想用徽章……太占位置」）—— 它不占宽度、不带字，
  * 全文在 `title` 里。琥珀 = 仓库里"要注意但没坏"的那一档色（`.localState` 同色）。
  */
-.unsavedDot {
+.unsavedTag {
   flex-shrink: 0;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--warn);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-label);
+  line-height: 18px;
+  white-space: nowrap;
 }
 
 .localState[data-state='has'] {

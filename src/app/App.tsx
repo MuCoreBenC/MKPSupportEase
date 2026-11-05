@@ -8,10 +8,12 @@ import {
   type ReactNode,
 } from 'react'
 
-import { api } from '../api'
+import { api, listen } from '../api'
 import { FieldLayer } from '../components/field'
-import { useT } from '../i18n'
+import { msg, useT } from '../i18n'
 import NotifyHost from './notify/NotifyHost'
+import { dismiss, notify } from './notify/notify'
+import { SETTINGS_TARGET_UPDATE } from './settings/targets'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
@@ -49,6 +51,8 @@ const PageSettings = lazy(() => import('./settings/PageSettings'))
 import { FileImportProvider, ImportBanner } from './import/FileImport'
 import { DevPreviewProvider } from './dev/preview'
 import { DevPreviewTabs } from './dev/DevPreviewTabs'
+/* 落点常量 / 类型（唯一出处）：报告页与后处理弹窗那两颗「去设置」都认它 */
+import type { SettingsTarget, SettingsTargetId } from './settings/targets'
 /* 钩子那一趟的那一屏（切片器导出 G-code 时，本程序被带参数拉起来的那一次）：
    普通模式里它读到 `null`，自己渲染空 —— 所以这里无条件挂一个就够。
    ★ 那一趟的状态**在 App 这一层读一次**（`usePostProcessRun`），同时喂给两处：
@@ -326,7 +330,66 @@ export default function App() {
    * ★ 它与 `openBbs` 同类 —— **跨页跳转的出口由外壳给**，页面只负责把"我要去"交出去。
    *   为什么不在预设页自己跳：页签状态住在外壳（`tab` 在这儿），页面不该伸手改它。
    */
-  const openSettings = useCallback(() => setTab('settings'), [])
+  /*
+   * `target` = 设置页里的落点 id（2026-11-04 作者：「点了之后是跳过去，然后滚动定位到
+   * 那个开关位置」）。报告页碰撞那格与后处理弹窗那颗「去设置」都给
+   * `SETTINGS_TARGET_TOWER`；`nonce` 让"同一个落点连点两下"也能再滚一次
+   * （值没变时 effect 不会重跑）。
+   *
+   * ★ 只收 `SettingsTargetId`（唯一出处 `settings/targets.ts`），不收裸 string：
+   *   以前弹窗那颗裸传 `onOpenSettings()` 只把页签切过去、没滚到开关，就是"漏带
+   *   落点"这一类坏法。现在类型 + `check-locate.mjs` 一起钉住。
+   */
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(null)
+  const openSettings = useCallback((target?: SettingsTargetId) => {
+    setTab('settings')
+    setSettingsTarget(target === undefined ? null : { id: target, nonce: Date.now() })
+  }, [])
+
+  /*
+   * 右上角「有新版本」通知（2026-11-05，作者：「点击了就跳转过去定位」）。
+   *
+   * 后端只在「设置页开关开着 + 成功拉到云端目录 + 查到严格更新的版本」时推这一个
+   * 事件（runtime::update_check），所以这里不需要再判一次开关，也不需要在页面里
+   * 各挂一份 —— **外壳挂一次**，与 `listen` 那条「只订阅这一处」同款纪律。
+   *
+   * ★ 同一个版本号一次会话只弹一条（后端已按会话去重，这里再挡一道，防重复订阅）。
+   * ★ 8 秒自己走（纯提示 + 一颗按钮，不做 sticky，别把右上角钉死）。
+   */
+  const lastNotifiedVersion = useRef<string | null>(null)
+  useEffect(() => {
+    let alive = true
+    let stop: (() => void) | undefined
+    void listen<{ version: string }>('software-update-available', (payload) => {
+      const version = payload?.version
+      if (!alive || !version || lastNotifiedVersion.current === version) return
+      lastNotifiedVersion.current = version
+      let id = ''
+      id = notify({
+        kind: 'info',
+        title: msg('notify.update.title'),
+        text: msg('notify.update.text', { version }),
+        ttl: 8,
+        actions: [
+          {
+            label: msg('notify.update.view'),
+            primary: true,
+            onClick: () => {
+              if (id !== '') dismiss(id)
+              openSettings(SETTINGS_TARGET_UPDATE)
+            },
+          },
+        ],
+      })
+    }).then((un) => {
+      if (alive) stop = un
+      else un()
+    })
+    return () => {
+      alive = false
+      stop?.()
+    }
+  }, [openSettings])
 
   /*
    * 后处理那一屏的「看报告」出口（跨页跳转的出口由外壳给，与 `openBbs` / `openSettings` 同类）。
@@ -403,13 +466,19 @@ export default function App() {
               />
             </PageSlot>
             <PageSlot hidden={tab !== 'report'} page="report" layout="list">
-              <PageReport />
+              {/* 碰撞那一趟会多一句"去设置里打开智能塔位置"—— 出口由外壳给，与预设页同一条规矩 */}
+              <PageReport onOpenSettings={openSettings} />
             </PageSlot>
             <PageSlot hidden={tab !== 'settings'} page="settings" layout="form">
-              <PageSettings />
+              {/* 落点：从报告页的「去设置」跳进来时滚到「智能塔位置」那一行并闪一下 */}
+              <PageSettings target={settingsTarget} />
             </PageSlot>
           </main>
-          <PostProcessModal view={postProcess} onOpenReport={openReport} />
+          <PostProcessModal
+            view={postProcess}
+            onOpenReport={openReport}
+            onOpenSettings={openSettings}
+          />
         </FieldLayer>
       </FileImportProvider>
       </DevPreviewProvider>

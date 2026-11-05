@@ -155,7 +155,7 @@ export interface PresetData {
    * 哪几版这一机已经下过。云端表 MKP 档按它把每个预设摊成**多行版本**
    * （「已下载 / 新版本」）。
    *
-   * ★ 它**不是"过时判定"**：不读用户预设的字节、不看血统，也不在任何一行上说"该更新了"。
+   * ★ 它**不是"过时判定"**：不读用户预设的字节、不看来源记录，也不在任何一行上说"该更新了"。
    */
   cloudVersions: CloudVersion[]
 
@@ -767,7 +767,9 @@ export function usePresetData(importRevision = 0): PresetData {
       setLocalPresets(localPresets)
       setLocalIndex(index)
       setRemarks(marks)
-      setDraftPath(draft !== null && draft.dirty ? (draft.path ?? null) : null)
+      setDraftPath(
+        draft !== null && draft.dirty && draft.changed > 0 ? (draft.path ?? null) : null,
+      )
 
       /* 10 个组合 × 2 个读一起发。顺序无所谓，结果按 machine:version 对回去 */
       const combos = list.flatMap((m) => m.versions.map((v) => ({ machineId: m.id, versionId: v.id })))
@@ -846,7 +848,7 @@ export function usePresetData(importRevision = 0): PresetData {
              *
              * 云端那一表每行的三态（未获取 / 本地已有 / 有新版）是
              * "本地文件 × 身份账本"算出来的，而账本**按当前目录**判
-             * （血统指的那一版还在目录里才算数）。原来这里只重读"机型树 + 交付"，
+             * （来源记录指的那一版还在目录里才算数）。原来这里只重读"机型树 + 交付"，
              * 账本还拿着换版之前那一套 ⇒ 用户第一次切进云端页看到的是旧判定，
              * 直到别处碰巧重读一次才对上（作者图 7：「一开始的时候都没看到有更新按钮，
              * 第二次点开才有」）。
@@ -933,7 +935,9 @@ export function usePresetData(importRevision = 0): PresetData {
       /* `dirty` 这一道**必须**在（2026-10-19）：`begin_preset_edit` 一打开就写出草稿文件，
          "只打开过、一个字没改"也会有一份摘要 —— 不看不脏，那枚橙点会当场误亮。
          契约与头注的口径都是"**真改过才算**"（`PresetDraftSummary.dirty`）。 */
-      .then((d) => setDraftPath(d !== null && d.dirty ? (d.path ?? null) : null))
+      .then((d) =>
+        setDraftPath(d !== null && d.dirty && d.changed > 0 ? (d.path ?? null) : null),
+      )
       .catch(() => {
         /* 读不到就保持上一眼看到的 —— 一个标记不值得把列表带崩 */
       })
@@ -1104,7 +1108,7 @@ export function usePresetData(importRevision = 0): PresetData {
     async (path: string, decisions: ParamDecision[]) => {
       /*
        * `decisions` 可以是空的（2026-10-20「应用 0 项」）—— 那一样是写：
-       * 值一个不动，云端的注释 / 新字段 / 时间戳与血统推进（「有新版」就此收场）。
+       * 值一个不动，云端的注释 / 新字段 / 时间戳与来源记录推进（「有新版」就此收场）。
        */
       await api.applyPresetParamDecisions(path, decisions)
       await readLocalPresets()

@@ -76,7 +76,7 @@
  *
  *   本地表  我这台机器上真有的东西 —— 没有网也看得见、改得动、用得上。
  *           MKP：只有你自己那份本地文件（`presets-local/`）；切片器：云端副本 + 本地文件
- *   云端表  云端现在提供什么 —— MKP：目录里每一份预设一行，按血统说"我这边怎么样"
+ *   云端表  云端现在提供什么 —— MKP：目录里每一份预设一行，按来源记录说"我这边怎么样"
  *           （未获取 / 本地已有 / 有新版），动作是「下载」/「更新」（都**不改当前使用**）；
  *           切片器：菜单上的云端文件，行尾标「已下载 / 未下载」。仅归档的一处都不出现
  *
@@ -129,7 +129,7 @@
  *                            字节一个不动；使用中指针与该份草稿跟着改名。删=进回收站，可恢复；
  *                            正在使用 / 还有草稿的不给删 —— 原因原话来自后端）
  *   **复制**（本地文件）      `api.copyLocalPreset()`                        真（第十一层：本地文件 → 本地文件，
- *                            按字节复制、血统原样带过去；名字由程序起 `<原名> copy.toml`
+ *                            按字节复制、来源记录原样带过去；名字由程序起 `<原名> copy.toml`
  *                            （重名依次 `copy 2`…，见 `duplicateNameOf`）；不覆盖、不碰使用中指针与草稿）
  *   **导入（第十二层）**      `FileImportProvider`（App 层）               真（通用导入入口 ——
  *                            **拖拽进窗口**；重名开改名那一格。工具栏的「导入文件…」
@@ -258,22 +258,10 @@ import type {
 import { usePresetData, usePresetPage } from './usePresetData'
 /* 正文的**语法着色**（自己写的词法，不引插件）—— 见那一份的文件头 */
 import { splitHeader, tomlTokens } from './tomlPaint'
+/* 「滚到某一行」：全仓那一套（演 transform），见那个文件的头注 */
+import { locateIntoView } from '../../components/scroll/locate'
 import s from './PagePresets.module.css'
 
-
-/**
- * 行所在的**滚动容器**：往上找第一个 `overflow-y: auto | scroll` 的祖先，到 `root` 为止。
- *
- * 为什么要有这一句：定位闪光那块 div 住在页面根（`.locateFlash`），而真正滚动的是表格
- * 里那一层 `.wrap` —— 调用处拿不到它的类名（CSS Modules 的哈希），只能按"谁在滚"找。
- */
-function scrollingParentOf(el: HTMLElement, root: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p !== null && p !== root; p = p.parentElement) {
-    const oy = getComputedStyle(p).overflowY
-    if (oy === 'auto' || oy === 'scroll') return p
-  }
-  return null
-}
 
 interface Props {
   density: Density
@@ -593,10 +581,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     rootRef.current = el
     setPageEl(el)
   }
-  /** 「定位」的闪烁层：盖在被定位那一行上的普通 div（见 s.locateFlash 的注释） */
-  const flashRef = useRef<HTMLDivElement>(null)
-  /** 那一趟的"跟着滚动走"监听，下一次定位 / 动画结束时撤掉（见 `flashRow`） */
-  const stopFlash = useRef<(() => void) | null>(null)
+  /**
+   * 上一次「定位」的叫停函数（2026-11-04）。连着定位两行时先叫停上一条滚动 / 高亮。
+   * 时序与绿底都在 `components/scroll/locate` 里，这里只留一个句柄。
+   */
+  const stopLocate = useRef<(() => void) | null>(null)
 
   /* 一个列表一个菜单。两张表同时只显示一张，所以一份就够 */
   const menu = useContextMenu<PresetTableRow>()
@@ -1325,89 +1314,24 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
 
 
   /*
-   * 「定位」的闪光本体：把目标行滚到视口中央，然后盖上 overlay 亮一下再退光。
-   * 两个入口共用（状态条的「定位已应用」与来源格的「复制自 X → 定位」）。
+   * 「定位」：把目标行滚到视口中央，然后**这一行自己**亮一下绿。
    *
-   * 闪烁本体是 `s.locateFlash` 那块**盖在行上的普通 div**：现量现设位置，
-   * Web Animations API 淡出（1.8s、先停在 55%）后隐藏。**不许**给行本身挂 class
-   * 跑 keyframes —— 这张折叠边框表在 tr/td 背景上跑动画，适配缩放下合成层缓存
-   * 会留旧帧，行里就多出一条若隐若现的白带（作者：「有时候窗口比较矮就没有，
-   * 比较高就出现」）。div 的终态是 display:none，缓存与否无关紧要。
+   * ★ 2026-11-01（作者看截图定的）：「这个绿色的不是背景的，你把它做成背景的」——
+   *   那块绿原来是页面根上一块绝对定位的 div，每帧量行的位置再摆过去，浮层与列表
+   *   两条独立的运动，滚起来必然差半拍。现在它是行自己的底色，行怎么动它怎么动。
    *
-   * ★ 2026-10-30（作者：「定位之后的这个绿色背景没有跟随着移动，很假，直接贴上去的，
-   *   很快滚一下列表就发现它错开了」）：这块 div 不再"定死一次"——
-   *   列表一滚就按行当前位置重摆（滚动事件里每帧对一次，1.8s 后随动画一起撤），
-   *   行滚出列表可视区就先藏起来（否则会画到表头上）。
+   * ★ 2026-11-04 收口：滚 / 落位补测 / 绿底 / **停 6 秒淡出**全部交给共用件
+   *   （`components/scroll/locate`）。这一页不再管时序、不再挂 `data-flash`、
+   *   也不再自己 import 底层滚动函数。原先 `data-flash` + `transition` 那套（淡入
+   *   160 / 停 1000 / 淡出 620）与工作台那套 `@keyframes` 一并退休 —— 作者：
+   *   「大家都用一样的」。
+   *
+   * 三个入口共用（状态条「定位已应用」、来源格「复制自 X → 定位」、右键定位）。
    */
   const flashRow = (row: HTMLElement) => {
-    const root = rootRef.current
-    const overlay = flashRef.current
-    if (!root || !overlay) return
-
-    /* 上一趟的跟随先撤（连着定位两行时不能留两条监听） */
-    stopFlash.current?.()
-
-    /* 即时滚（不用 smooth）：无头/低帧率环境下 smooth 可能一帧都不跑，等于没滚 */
-    row.scrollIntoView({ block: 'center' })
-
-    /* 位置按"行在 root 里的坐标"算 —— 这块 div 的定位祖先是页面根 */
-    const place = () => {
-      const rr = row.getBoundingClientRect()
-      const pr = root.getBoundingClientRect()
-      overlay.style.left = `${rr.left - pr.left}px`
-      overlay.style.width = `${rr.width}px`
-      overlay.style.top = `${rr.top - pr.top}px`
-      overlay.style.height = `${rr.height}px`
-    }
-
-    /*
-     * **跟着滚动走**：行在 `.wrap` 里滚、这块 div 不滚，闪的 1.8s 里一滚就露馅。
-     * 滚一次对一次（rAF 合并）；行离开列表可视区就藏 —— 那块 div 不受 `.wrap` 的
-     * `overflow` 裁切，不藏就会画到表头 / 页脚上。回到视野里再显示。
-     */
-    const scroller = scrollingParentOf(row, root)
-    const follow = () => {
-      place()
-      const rr = row.getBoundingClientRect()
-      const sr = scroller?.getBoundingClientRect()
-      const out = sr !== undefined && (rr.bottom <= sr.top || rr.top >= sr.bottom)
-      overlay.style.display = out ? 'none' : 'block'
-    }
-    let raf = 0
-    const onMove = () => {
-      if (raf !== 0) return
-      raf = window.requestAnimationFrame(() => {
-        raf = 0
-        follow()
-      })
-    }
-    const stop = () => {
-      scroller?.removeEventListener('scroll', onMove)
-      window.removeEventListener('resize', onMove)
-      if (raf !== 0) window.cancelAnimationFrame(raf)
-      raf = 0
-      stopFlash.current = null
-    }
-    scroller?.addEventListener('scroll', onMove, { passive: true })
-    window.addEventListener('resize', onMove)
-    stopFlash.current = stop
-
-    place()
-    overlay.style.display = 'block'
-    overlay.getAnimations().forEach((a) => a.cancel())
-    overlay
-      .animate(
-        [
-          { opacity: 1 },
-          { opacity: 1, offset: 0.55 },
-          { opacity: 0 },
-        ],
-        { duration: 1800, easing: 'ease-out' },
-      )
-      .onfinish = () => {
-        overlay.style.display = 'none'
-        stop()
-      }
+    /* 连着定位两行：先叫停上一条（滚动动画 + 绿底一起收） */
+    stopLocate.current?.()
+    stopLocate.current = locateIntoView(row)
   }
 
   /*
@@ -1566,7 +1490,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 三步：
    *   ① 读逐参数三方账（`presetSync`，允许后端顺手把云端新版字节取回来）；
    *   ② **没有要改值的项** ⇒ 直接「应用 0 项」：值一个不动，云端的注释 / 新字段 /
-   *      时间戳与血统跟着新版走 —— 「有新版」就此消失（原来这一步什么都不写，
+   *      时间戳与来源记录跟着新版走 —— 「有新版」就此消失（原来这一步什么都不写，
    *      于是注释级换版永远挂着「有新版」）；
    *   ③ **有要改值的项** ⇒ 顺势打开「修改参数 → 选择要更新的参数」那一屏，
    *      由用户勾（采用云端新值）/ 不勾（保持我的值）后一次落下去。
@@ -1613,7 +1537,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     const pending = sync.entries.filter((e) => e.pending)
     /*
      * ③a **没有要改值的项** ⇒ 直接「应用 0 项」（= 把这一版收进来）：
-     *    值一个不动，云端的注释 / 新字段 / 时间戳与血统跟着新版走 ——
+     *    值一个不动，云端的注释 / 新字段 / 时间戳与来源记录跟着新版走 ——
      *    「有新版」就此消失（原来这一步什么都不写，于是它永远挂着）。
      */
     if (pending.length === 0) {
@@ -1621,7 +1545,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       /*
        * ★ **措辞要说实话**（2026-10-29 作者截图：提示"已经是最新"，行上却仍挂着「更新」）。
        *
-       * 这一趟写的是血统三行 + **发布线与序号**（`param_sync::apply_at` 里 `remaining == 0`
+       * 这一趟写的是来源记录 + **发布线与序号**（`param_sync::apply_at` 里 `remaining == 0`
        * 那一支）。而目录还没有发布身份时（`catalogId` / `publishSerial` 都是空），那两格
        * 没东西可写 ⇒ 判定仍是 `unverified` ⇒ 按钮还在。这时候说"已经是最新"就是在骗人：
        * 内容确实按云端处理完了，但**基线记不下来**。
@@ -1706,7 +1630,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * **云端行的「更新」**（2026-10-10 作者规格；2026-10-20 改过一遍走法）。
    *
-   * 「更新谁」：**血统指向这个云端条目、还没跟上当前版的那一份本地文件**
+   * 「更新谁」：**来源记录指向这个云端条目、还没跟上当前版的那一份本地文件**
    * （同一云端条目下我可能有好几份 —— 取列表里第一份落后的；复制件不在账本里，
    * 永远不会被当成"要更新的那一份"）。找到之后交给 [`applyCloudUpdate`] 落地。
    *
@@ -2414,7 +2338,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 从云端下来的 ⇒ 云端那份的名字。撞名时按 `A1-standard 2.toml` 依次让开，不报错
    * （用户要的是"改回正常名字"这件事本身）。
    *
-   * 走的是**与重命名同一条路**（`data.rename`）：只换名字，内容与血统一个字节不动。
+   * 走的是**与重命名同一条路**（`data.rename`）：只换名字，内容与来源记录一个字节不动。
    */
   const runRestoreDefaultName = (row: PresetTableRow) => {
     menu.close()
@@ -2472,7 +2396,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 名字**由程序起**（`duplicateNameOf`：`<原名> copy.toml`，重名依次 `copy 2`…）——
    * 作者 2026-10-10：「主要是它的文案太长了……要不然就叫复制，就自动复制出一份」，
    * 所以这一层**不再弹框问名字**（原来那口"起名字抽屉"的 copy 分支整个退场）。
-   * 别的规矩没变：血统原样带过去、不覆盖、不碰使用中指针与草稿。
+   * 别的规矩没变：来源记录原样带过去、不覆盖、不碰使用中指针与草稿。
    */
   const runDuplicate = (row: PresetTableRow) => {
     menu.close()
@@ -2957,7 +2881,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   /**
    * 「复制」为什么不能点（第十一层）：
    *
-   * - **本地文件**：本来就开放（本地 → 本地，按字节复制、血统原样带过去）；
+   * - **本地文件**：本来就开放（本地 → 本地，按字节复制、来源记录原样带过去）；
    * - 其余（切片器交付行 / 云端仓库文件）：不是"本地文件"，另行处置 ——
    *   切片器自有「复制到切片器目录」那条路。
    */
@@ -3481,7 +3405,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         id: 'copy',
         /* ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）—— 与 MKP 档那一项同一条 */
         label: tr(LOCAL_COPY.cell),
-        /* 本地文件 → 本地文件（第十一层，按字节复制、血统原样带过去）；
+        /* 本地文件 → 本地文件（第十一层，按字节复制、来源记录原样带过去）；
            其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
         disabled: suspect ? tr(PRESET_SUSPECT_WHY) : copyWhyNot(row),
         onSelect: () => runDuplicate(row),
@@ -3740,7 +3664,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           {tr('presets.page.banner.needsNewer')}
         </span>
         {onOpenSettings !== undefined && (
-          <button type="button" className={s.noteAction} onClick={onOpenSettings}>
+          /* ★ 必须包一层：`openSettings` 收的是「落点 id」，裸传会把鼠标事件当 id
+             塞进 `settingsTarget`（2026-11-04 收口时顺手修的，见 check-locate.mjs） */
+          <button type="button" className={s.noteAction} onClick={() => onOpenSettings()}>
             {tr('presets.page.banner.goUpdate')}
           </button>
         )}
@@ -4776,10 +4702,6 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
           />
         </div>
       </FieldLayer>
-
-      {/* 「定位」的闪烁层：盖在被定位那一行上的普通 div，位置尺寸由 locateApplied
-          现量现设。为什么不闪行本身 —— 见 PagePresets.module.css 的 .locateFlash。 */}
-      <div ref={flashRef} className={s.locateFlash} />
     </div>
   )
 }

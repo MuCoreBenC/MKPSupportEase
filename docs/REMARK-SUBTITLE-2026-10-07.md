@@ -33,12 +33,12 @@
 - **归属是文件自己的属性**（随文件走，不记程序账）：复制件文件头本来就有
   `# machine:` / `# variant:` 两行（B 类产物按字节拷贝带过来的），此前只是没人读。
   - `MineFile` 增 `machine` / `variant`（`runtime/lineage.rs::parse_machine_from_content`
-    / `parse_variant_from_content`；与血统三行读**同一段头注释**，一次 IO）；
+    / `parse_variant_from_content`；与来源记录读**同一段头注释**，一次 IO）；
   - DTO 增 `machineId` / `versionId`：对着目录登记**大小写无关**归一化（B 类写的是版本 id
     小写），认不出回落 `basedOnMachineId` / `basedOnVersionId`；
   - **改归属** = `set_user_preset_machine_version`：`lineage::rewrite_machine_variant`
     原位换那两行（缺哪行补哪行、行尾跟文件自己、正文一个字节不动），机型 / 版本必须
-    目录里真有（对 catalog files 校验）。**写血统的那族文本手术**，测试对齐 `build9` 纪律之外新加 2 条。
+    目录里真有（对 catalog files 校验）。**写来源记录的那族文本手术**，测试对齐 `build9` 纪律之外新加 2 条。
 - 列表展示：mine 行的机型 / 版本两列改读**自己的归属**；`untagged`（未标机型角标）改为
   「归属都没有才挂」。展开详情给两个编辑格：**备注**（输入 + 保存 + 清除覆盖）、
   **归属**（机型 / 版本两个下拉 + 保存）。
@@ -50,7 +50,7 @@
 | Rust 数据 | `presetdata/catalog.rs` | `MachineVersion.remark` + `VersionField::Remark`（TOML 键 `remark`） |
 | Rust 工作台 | `workbench/app/machines.rs` | `VersionView.remark` |
 | Rust 客户端 | `ipc/presets.rs` | `VersionDto.remark` |
-| Rust 血统 | `runtime/lineage.rs` | `parse_machine/variant_from_content` + `rewrite_machine_variant` |
+| Rust 来源记录 | `runtime/lineage.rs` | `parse_machine/variant_from_content` + `rewrite_machine_variant` |
 | Rust 用户线 | `runtime/mine.rs` | `MineFile.machine/variant`、`head_text`、`set_machine_variant` |
 | Rust 覆盖账 | `runtime/remarks.rs`（新） | load / get / set / remove + 4 条测试 |
 | Rust IPC | `ipc/mine.rs`、`ipc/catalog.rs`、`lib.rs` | 3 条新命令（get/set_preset_remark、set_user_preset_machine_version）+ 删除时清备注 |

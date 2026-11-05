@@ -89,6 +89,7 @@ import DeliveryFilesModal from './DeliveryFilesModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
 import HistoryModal from './HistoryModal'
+import GenHistoryModal from './GenHistoryModal'
 import s from '../c14.module.css'
 
 interface Props {
@@ -104,6 +105,11 @@ interface Props {
   onSave: () => Promise<boolean>
   /** 生成之后让外壳重取整本（buildRows 的状态跟着走） */
   onBookRefresh: () => void
+  /**
+   * 重取检查报告（外壳那份账）。修复动作（如内嵌目录重算）做完要立刻重取 ——
+   * 不然待办还挂在列表上，人会以为没生效。
+   */
+  onReportRefresh: () => void
 }
 
 /** 检查项的「去处理」映射。产品的一份账里，不是每一条都有地方可去 */
@@ -140,12 +146,24 @@ function localStamp(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-export default function BuildPage({ boot, book, words, report, tick, onGoto, onSave, onBookRefresh }: Props) {
+export default function BuildPage({
+  boot,
+  book,
+  words,
+  report,
+  tick,
+  onGoto,
+  onSave,
+  onBookRefresh,
+  onReportRefresh,
+}: Props) {
   const rows = book.buildRows
   const [picked, setPicked] = useState<Record<string, boolean>>({})
   const [openRow, setOpenRow] = useState<string | null>(null)
   /** 检查卡里展开着长描述的条目（2026-10-19：默认只留两行，按需展开） */
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
+  /** 「内嵌目录落后」那条待办的修复动作正在跑（按钮防连点） */
+  const [regenBusy, setRegenBusy] = useState(false)
   const [lastPublish, setLastPublish] = useState<PublishTxReport | null>(null)
   /**
    * 发布闸开着没有（第二刀）。**点「发布」不再直接发** —— 先过这一道：
@@ -162,6 +180,8 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
   const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
+  /** 生成记录面板（历次生成的回执；住应用数据目录，不轮询） */
+  const [genHistoryOpen, setGenHistoryOpen] = useState(false)
   /*
    * **发布软件版本**的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条
    * 「交付预设」的闸（`gateOpen`）是**两道不同的闸**，各有各的账。
@@ -414,7 +434,9 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
      * ★ 返回值交回给闸那屏：它拿这份快照就地切成**发布回执**（阶段链 + PR 地址 + 合并）。
      * 这一屏也留一份 —— 关掉模态框之后，②卡还能「查看发布结果」再打开。
      */
-    const rep = await wb.publish()
+    /* `confirmed` = 人刚点过这颗「确认发布」按钮（2026-11-05 硬约束）。
+       内核默认 false，缺了会零副作用地拒绝 —— CLI / CI 那条路必须显式带 --confirm。 */
+    const rep = await wb.publish({ confirmed: true })
     setLastPublish(rep)
     /* 发布改了交付目录 → 让外壳重取（④ 残留与 ③ 基线跟着刷新） */
     onBookRefresh()
@@ -441,6 +463,28 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
       setStrays(await wb.distStrays())
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
+    }
+  }
+
+  /*
+   * **内嵌目录重算**（2026-11-05，作者：「这条待办不该只剩终端那条路」）。
+   * 按当前 `presets/` 重算 `src-tauri/src/runtime/catalog.generated.json`，
+   * 完事立刻重取检查报告 —— 报告绿了、待办消失，才算真修好了。
+   */
+  const regenEmbeddedCatalog = async () => {
+    setRegenBusy(true)
+    try {
+      const r = await wb.regenEmbeddedCatalog()
+      toasts.push(
+        r.changed
+          ? `内嵌目录已重算（${r.files} 份文件 · revision ${r.revision}）—— 重新编译客户端后才随包生效`
+          : '内嵌目录本来就是最新的，一个字节都没写',
+      )
+      onReportRefresh()
+    } catch (e) {
+      toasts.push(isAppError(e) ? e.message : String(e))
+    } finally {
+      setRegenBusy(false)
     }
   }
 
@@ -504,6 +548,18 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
                       {open ? '收起' : '展开'}
                     </button>
                   )}
+                  {/* 「内嵌目录落后」自带修复动作：不是跳到别的页，而是就地重算那份文件 */}
+                  {i.id === 'embedded.catalog_stale' && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      disabled={regenBusy}
+                      title="按当前 presets/ 重算 src-tauri/src/runtime/catalog.generated.json（内容一样就不写）；重新编译客户端后才随安装包生效"
+                      onClick={() => void regenEmbeddedCatalog()}
+                    >
+                      {regenBusy ? '重算中…' : '重新生成'}
+                    </button>
+                  )}
                   {/* 每一条都要说清去哪儿处理（issues.rs 的规矩），所以每一条都有这颗按钮 */}
                   <button
                     type="button"
@@ -535,13 +591,22 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
             >
               交付明细…
             </button>
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              onClick={() => setGenHistoryOpen(true)}
+              title="历次生成的回执：每一步做了什么、写了哪些文件、失败在哪（住应用数据目录，只留最近 50 份）"
+            >
+              生成记录
+            </button>
           </div>
           <div className={s.cardBody}>
             <p className={s.note} style={{ marginTop: 0 }}>
-              勾版本、按已保存的配方生成；字节没变的产物不重写。
+              勾版本、按已保存的源生成；<strong>内容没变的产物不重写</strong>
+              （时间戳跟着不动，连文件修改时间都不动）。
               <br />
-              这一列的「已生成」只比<strong>配方快照</strong>；交付文件与盘上 / 目录登记是否一致，
-              看「交付明细…」—— 两处判据不同，不是同一件事。
+              这一列的「已生成」比的是<strong>盘上那份产物</strong>与现在会算出来的那份是否一致
+              —— 时间不参与判断。交付文件与目录登记是否一致，看「交付明细…」。
             </p>
             {dirty && (
               <p className={s.note} style={{ marginTop: 0 }}>
@@ -1011,6 +1076,7 @@ export default function BuildPage({ boot, book, words, report, tick, onGoto, onS
 
       {/* 发布历史：本地回执日志（`publish-history.json`），最新在前 */}
       {historyOpen && <HistoryModal onClose={() => setHistoryOpen(false)} />}
+      {genHistoryOpen && <GenHistoryModal onClose={() => setGenHistoryOpen(false)} />}
 
       {/*
         发布软件版本的闸（第四刀）。点②卡的「发布软件版本」开它 —— 与上面那条

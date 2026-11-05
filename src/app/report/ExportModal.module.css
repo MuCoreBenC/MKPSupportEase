@@ -44,37 +44,125 @@
 }
 
 /*
+ * 两页（文件清单 / 信息）也叠在同一格（2026-11-03）。
+ *
+ * 与后处理挪塔那一问的 `.relocateSlot` 同一个做法：**藏起来的那一页仍然占格**，
+ * 于是槽高 = 两页里较高的那一页，翻页时框一动不动（作者：「换内容，不改变模态框尺寸」）。
+ * 不许改成"按条件只渲一页"—— 那样高度会跟着内容跳。
+ *
+ * ★ 2026-11-04：每一页都是**竖着的一条**（清单在上、压缩开关与保存位置钉在下沿）——
+ *   见 `.pageFoot` 的 `margin-top: auto`。
+ */
+.page {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 上面那一截：清单（或"正在读导出清单…"）。短了也不缩，空白全给这一截吃掉 */
+.pageTop {
+  min-width: 0;
+}
+
+/*
+ * 底下那一簇：缺件说明（如有）→「导出时启用压缩」→ 保存位置胶囊。
+ *
+ * `margin-top: auto` 把它**钉在框身下沿**（作者 2026-11-04：「失败的下面的也是
+ * 固定在下面的位置的」）—— 归档里只有两份（失败那一次没有「处理后的文件」）、
+ * 还多一句"归档里缺哪几份"的时候，这一簇的位置与三行时**一模一样**。
+ * 框身的高度由量尺（`.gauge`，三行 + 这一簇）撑住，所以它不会塌上来。
+ */
+.pageFoot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 藏起来的那一页：看不见、也点不到（但仍占高度） */
+.pageOff {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/*
  * 量尺：只占高度。
  * 不画（`visibility: hidden` 仍参与布局，但什么都不显示）、不读屏、不吃鼠标。
+ *
+ * 竖着一条（与真页同构）：清单在上、底下那一簇在下 —— 高度按"三行 + 开关 + 胶囊"算。
  */
 .gauge {
   visibility: hidden;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ---- 成的那一屏：不加一条新行，就着已有的几格说成功（见文件头第 3 条） ---- */
 
 /*
- * 页脚左边那句「已导出 N 个文件」。
+ * 页脚左边那一簇：**翻页那颗「信息」** + （成了之后）「已导出 N 个文件」。
  *
- * `margin-right: auto` 把它推到页脚的另一头（模态框的页脚是右对齐的一行按钮）——
+ * `margin-right: auto` 把它们推到页脚的另一头（模态框的页脚是右对齐的一行按钮）——
  * 它**不改变页脚高度**（高度由那几颗按钮撑着），所以框一点不动。
  */
-.footNote {
+.footLeft {
   margin-right: auto;
   display: inline-flex;
   align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/*
+ * 左下角那颗很小的翻页钮（作者 2026-11-03：「放在这，信息」「就像这个一样」）
+ * —— 形状照后处理挪塔那一问的 `.slotToggle`：细边胶囊 + 一枚圆 i。
+ *
+ * 尺寸刻意比页脚正按钮小一档（正按钮 32px 高）：它是个"翻过去看看"的小动作，
+ * 不该与「确认导出」抢同一档的分量。
+ */
+.tabToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+}
+
+.tabToggle:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+/*
+ * 页脚左边那句「已导出 N 个文件」。
+ *
+ * 它跟在那颗翻页钮右边（`margin-right` 已经由 `.footLeft` 顶出去了）——
+ * 同样的：**不改变页脚高度**，所以框一点不动。
+ */
+.footNote {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
   color: var(--accent-deep);
   font-size: var(--fs-label);
 }
 
 /* ---- 三件套：一行一个（平铺行 + 发丝线，不做卡片气泡） ---- */
 
+/*
+ * ★ 2026-11-04：清单**顶上那条线**去掉了（作者圈出来的"多余"那两条之一）。
+ *   行与行之间那几条留着（一份一份的分隔），首尾两条只是把清单框起来、
+ *   念出来像"这里有个表格"，而它并不是表格。
+ */
 .fileList {
   list-style: none;
-  margin: 0 0 14px;
+  margin: 0;
   padding: 0;
-  border-top: 1px solid var(--line);
 }
 
 .fileItem {
@@ -83,6 +171,11 @@
   gap: 10px;
   padding: 10px 2px;
   border-bottom: 1px solid var(--line);
+}
+
+/* 最后一行不留收口线（同上，作者圈掉的第二条）—— 它下面是那一簇"底下"的东西 */
+.fileItem:last-child {
+  border-bottom: 0;
 }
 
 .fileIcon {
@@ -108,30 +201,77 @@
 }
 
 /*
- * 文件名：**完整铺开**，长了换行，不打省略号 —— 框里这一行是给人核对"要导哪几份"的，
- * 省掉中间几个字就核对不成了（报告是给人抄的，所以这里也能拖选）。
+ * 文件名：**只占一行，长了中间省略**（2026-11-04 作者：「文件名字太长中间应该省略」，
+ * 「反正不要换行高度不要变化」）。
+ *
+ * 两段拼出来：`<nameHead>` 自己收省略号、`<nameTail>` 钉住不缩 ——
+ * 宽的时候两段拼回去就是原名；挤的时候头被吃掉、尾部（时间戳 + 扩展名）永远在。
+ * 原来是 `white-space: normal` 让它换行，长名字把那一行撑成两行 —— 框一下长高 20px。
+ *
+ * 仍然可拖选（这一行是给人核对 / 抄的）。
  */
 .fileName {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
   font-size: var(--fs-body);
   color: var(--text-1);
   line-height: 1.5;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
   user-select: text;
   -webkit-user-select: text;
 }
 
+.nameHead {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nameTail {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/*
+ * ★ 2026-11-04：这里必须写死 `line-height`。量尺那几行塞的是 `&nbsp;`，
+ *   而真行塞的是中文 —— 两者会落到不同的字体上（Inter / 苹方），
+ *   `line-height: normal` 各按各的字形框算，一行就差 3px，三行叠起来量尺矮 9px，
+ *   于是"框高度恒定"这件事在成功 / 失败两种记录之间破功（实测 285 vs 274）。
+ *   写死 1.5 之后两边逐行对齐，量与真一模一样。
+ */
 .fileKind {
+  flex-shrink: 0;
   font-size: var(--fs-label);
+  line-height: 1.5;
   color: var(--text-3);
 }
 
-/* 归档里缺的那几份：一句话说清（不占一行文件行） */
-.notFull {
-  margin: 0 0 14px;
-  font-size: var(--fs-label);
+/*
+ * 归档里缺的那一份（2026-11-04）：**行照出、灰掉、名字划线**，说明"没有这个文件"。
+ *
+ * 原来缺的那份整行不出现、由底下一句话解释 —— 作者要的是"第三个也显示出来然后灰色划线"。
+ * 划线只划名字那一段（种类那行不划，它还是一条有用的说明）。
+ */
+/* 划线要落在**文字那两段**上：`.fileName` 是 flex 容器，画在它身上的 `text-decoration`
+   不会传进 flex item（父级那条划过是空的，字一条线都没有） */
+.fileItem[data-missing] .fileName {
   color: var(--text-3);
-  line-height: 1.7;
+}
+
+.fileItem[data-missing] .nameHead,
+.fileItem[data-missing] .nameTail {
+  text-decoration: line-through;
+}
+
+.fileItem[data-missing] .fileKind {
+  opacity: 0.6;
+}
+
+/* 缺的那份连图标一起灰掉（勾永远不会出现在它身上） */
+.fileIcon[data-missing] {
+  opacity: 0.45;
 }
 
 /*
@@ -235,4 +375,196 @@
   background: var(--accent-soft);
   color: var(--accent-deep);
   font-weight: 600;
+}
+
+/* ---- 「导出时启用压缩」+ 信息页（2026-11-03 · 开关 2026-11-04 搬回第一页） ---- */
+
+/*
+ * 压缩那一行：左边两行字（题 + 一句说明），右边一颗共用件开关。
+ *
+ * 位置是文件清单下面、保存位置胶囊上面 —— 作者 2026-11-04 定死的那一版布局
+ * （「我希望还是这样的布局」）。**不留发丝线**：它上下都是"同一簇"的东西，
+ * 线一画就把清单与它切开了。
+ */
+.zipRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  /* 上面留一口气，与清单末行分开（去掉收口线之后全靠这点距离） */
+  padding: 12px 2px 0;
+}
+
+.zipText {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* 同上：量尺里这一行是 `&nbsp;`，真页是中文 —— 行高写死才对得上 */
+.zipTitle {
+  font-size: var(--fs-body);
+  line-height: 1.5;
+  color: var(--text-1);
+}
+
+.zipHint {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* 量尺里的那一格：开关是 36×20（见 `components/switch`），照着占位才量得准 */
+.zipKnob {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 20px;
+}
+
+/*
+ * 文件行第二行（只有信息页有）：`种类 | 归档路径` 并排。
+ *
+ * 种类那半截很短、钉住不缩；省略号只吃路径那一半（`.fileWhere` 的 `min-width: 0`）。
+ * 两段都在同一条 flex 里 —— 路径不再自己换行、也不会把文件名挤成两行。
+ */
+.fileSub {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+/*
+ * 信息页那一行多出来的"归档路径"小字（2026-11-04 第三件事）。
+ *
+ * 作者的口径是「要和文件页面一样的，就是多了按钮」—— 所以这一页**不是**一列路径，
+ * 而是与文件页逐行同构：同一枚图标、同一个文件名、同一个种类小字，多的只是右边两颗钮。
+ * 归档位置接在种类字右边，长了收省略号，全文在 `title` 上（那也拖得动）。
+ */
+.fileWhere {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/*
+ * 「确认导出」在忙（含刚成功那一下的僵住）时的样子：颜色暗一点 + 一颗转圈。
+ *
+ * ★ 2026-11-04 作者：「压缩的没有进度条没有动画，好像卡住一样」。
+ *   导出是同步命令（后端一个 IPC 跑完才回），**拿不到真实百分比** —— 所以不摆一根
+ *   假的进度条（那等于编数据），只把"确实在跑"这件事做成看得见：转圈 + 按钮上写字。
+ *   转圈用 SVG 的 `stroke-dashoffset` 动画而不是 CSS 关键帧（WKWebView 不播 CSS 动效）。
+ */
+/*
+ * ★ 2026-11-04 作者：「这个导出按钮变宽了，我希望改文案，导出中，尽量不要改宽度」。
+ *
+ * 病根是"转圈挤在字前面"：`正在导出…` 比 `确认导出` 多一个字，再塞一颗 12px 的圈，
+ * 按钮宽度就跟着跳。现在圈**绝对定位**在左内衬里（不占流），文案收成最短的
+ * 「导出中」（三个字，与「确认导出」四个字同宽），按钮只左右各让 1px。
+ */
+.btnBusy {
+  position: relative;
+  padding-left: 32px;
+  opacity: 0.9;
+  cursor: progress;
+}
+
+/*
+ * 那颗转圈（`Spinner`）。**只画形状，不写动画** —— 转起来靠 `element.animate`（WAAPI）：
+ * 项目铁律是 WKWebView 不播 CSS 关键帧动效，写 `@keyframes` 在真机上就是一张静止的图。
+ */
+.spin {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 50%;
+  border: 1.6px solid rgb(255 255 255 / 45%);
+  border-top-color: #fff;
+}
+
+/*
+ * 复制 / 定位那两颗：同一尺寸的小方钮，图标是通用那套（`components/Icon`）。
+ * 复制成功那一瞬 `data-done='true'` 换成强调色（一句话不摆，按钮上就够）。
+ */
+.srcAct {
+  flex-shrink: 0;
+  /* 行是 `align-items: flex-start`：这两颗要跟第一行字（文件名）对齐，别往下掉 */
+  margin-top: 1px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+.srcAct:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}
+
+.srcAct[data-done='true'] {
+  border-color: var(--accent);
+  color: var(--accent-deep);
+}
+
+/* 盘上没有这一份：「定位」点不了（复制路径仍然可以 —— 那串路径有意义） */
+.srcAct:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/*
+ * 标题右边那枚「处理失败」徽章（2026-11-04）。
+ *
+ * 与报告列表里那颗「成功 / 失败」是同一套形制（`PageReport.module.css` 的 `.chip`）：
+ * 细胶囊、`--fs-label`、失败走 `--danger-soft`。放在标题右边那一格里，
+ * 所以字数是零影响的（那一格 `nowrap + ellipsis`，见 `Modal.module.css`）。
+ */
+.badge {
+  flex-shrink: 0;
+  /*
+   * ★ 2026-11-04 第五遍（作者：「这两个地方的圈起来的间距做成一样的就可以」）：
+   *
+   *   标题 ──A── [处理失败] ──B── 导出失败：…
+   *
+   *   A = `.titleRow` 的 `gap: 12px` + 这里的 `margin-left`
+   *   B = 这里的 `margin-right`（回执紧跟着胶囊，中间没有别的盒）
+   *
+   * 两个都定成 **8px**：`margin-left: -4px`（12 − 4）、`margin-right: 8px`。
+   * 这样"标题→胶囊"和"胶囊→那句话"是同一个数，不再是"看着差不多"。
+   */
+  margin-left: -4px;
+  margin-right: 8px;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  /*
+   * ★ 2026-11-04 第四遍：`top: 1px` —— 整块徽章往下压一格（作者第四遍说"徽章可以了"，
+   *   就这么定的）。调的是**块**不是字：`relative` + `top` 只挪画面、不挪布局，
+   *   标题行高度与右侧动作簇一个像素都不动（也不触发回流）。
+   */
+  position: relative;
+  top: 1px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--fs-label);
+  font-weight: 500;
+  white-space: nowrap;
 }

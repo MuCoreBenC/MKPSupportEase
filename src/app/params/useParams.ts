@@ -1284,7 +1284,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       /*
        * 可编辑的文件身份（参数页底座 ③）：云端线从目录的 files 摊；用户线从
        * `getLocalPresetFiles` 来 —— **同一个 combo 用户线优先**（用户自己那份就是他实际在用的）。
-       * 用户文件没有机型/版本元数据，靠 `sourceOf` 的血统 / 文件名反推（与预设页同一套）。
+       * 用户文件没有机型/版本元数据，靠 `sourceOf` 的来源记录 / 文件名反推（与预设页同一套）。
        */
       const editTargetByCombo = new Map<
         string,
@@ -1304,7 +1304,7 @@ export function useParams(opts: UseParamsOptions = {}): Params {
       setLocalPresets(localPresets)
       for (const f of localPresets) {
         /*
-         * 我那份的机型/版本从**血统**认（`basedOn*` 指向云端来源那一版）；认不出就跳过 ——
+         * 我那份的机型/版本从**来源记录**认（`basedOn*` 指向云端来源那一版）；认不出就跳过 ——
          * 认不出的那份在预设页照常列，只是不对应任何 combo，所以不进这张表（别硬塞一格）。
          */
         const { basedOnMachineId: mid, basedOnVersionId: vid } = f

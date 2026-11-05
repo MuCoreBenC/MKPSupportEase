@@ -87,7 +87,7 @@
  * │   版本 / 更新状态   来源 / 来源预设   云端发布时刻 / 配方版本时间   │
  * ├ ② 版本判定（两列；本地与云端一致就合并）                           │
  * ├ ③ 文件信息（两列）                                                 │
- * ├ ④ 血统记录 · 共 N 项（默认收起，点开看 `# based_on` 原文）          │
+ * ├ ④ 来源记录记录 · 共 N 项（默认收起，点开看 `[mkp_source]` 原文）          │
  * │ 备注 空着 = 副标题留空                              [编辑]     │
  * │ 归属 机型 A1_MINI · 预设类型 FAST                   [编辑]     │
  * ├──────────────────────────────────────────────────────────────┤  ← 操作带 / 编辑带
@@ -97,9 +97,9 @@
  * ```
  *
  * ★ 第十五轮改的是**排列**，不是信息：作者的原话是「不是单纯的『行距太大』，而是所有
- *   信息都按同一种纵向表单排列了……基本信息、版本判定、文件路径、血统记录本来重要程度
+ *   信息都按同一种纵向表单排列了……基本信息、版本判定、文件路径、来源记录记录本来重要程度
  *   不同」。所以四组各占一段、组内两列；技术细节一项没删，只是把低频的原始证据
- *   （`# based_on*` 五行）折进血统记录。
+ *   （`# mkp_source` 五行）折进来源记录记录。
  *
  * 第五轮压高度、第六轮「文件详情」卡头、第七轮「名字回卡上」——都过了。第八轮照作者
  * 在 `lab/preset-edit-gallery.html` 第 11 条挑定的方案（原话：「现在你这个换的结构
@@ -511,7 +511,7 @@ interface Props {
    * 就出现一个更新按钮。我点了之后，它就跟云端一样更新了，就不用跳转到云端那边去更新」）。
    *
    * 走的是**与云端行同一个入口**（`PagePresets.runUpdate`）—— 只是行从本地那一份来：
-   * 「有新版」时给，点了就地消化（0 项直接落盘刷血统、有改动项顺势开「选择要更新的参数」）。
+   * 「有新版」时给，点了就地消化（0 项直接落盘刷来源记录、有改动项顺势开「选择要更新的参数」）。
    */
   onUpdateLocal: (row: PresetLocalRow) => void
   /**
@@ -567,7 +567,7 @@ interface Props {
    * 本地行不许挂「有新版」（作者：「我设置里面没开，它就不应该把那些复制出来的也显示，
    * 它就只显示那一个」）。**开**时与原件同权，照挂。
    *
-   * 判据只有这一格（后端 `presets.copiesFollowCloud`）：这里不按名字、不按血统自己猜。
+   * 判据只有这一格（后端 `presets.copiesFollowCloud`）：这里不按名字、不按来源记录自己猜。
    */
   copiesFollow: boolean
 }
@@ -717,19 +717,37 @@ export default function PresetTable({
 
   return (
     <div className={s.hold}>
-      <div
-        className={s.wrap}
-        ref={wrapRef}
-        /*
-         * 一直在记"当前这一档停在哪儿"。不靠换 scope 那一刻去读：那一刻读到的
-         * 已经是新内容夹过的数字了（见上面 `scrollMemo` 那段）。
-         */
-        onScroll={(e) => {
-          scrollMemo.current[scope] = e.currentTarget.scrollTop
-        }}
-      >
-        {/* `data-selecting` 只给 CSS 用：多选时名称列让出左内衬给复选框那一列 */}
-        <table className={s.table} data-selecting={select !== null}>
+      {/*
+       * ============ 表头**不在滚动容器里**（2026-11-01 第六次改） ============
+       *
+       * 作者连着四张截图：「上沿偶尔露出一条背景」「整行那么高、还是被压扁的」。
+       * 前三版都在给 **sticky** 打补丁（`top: -1px`、`thead` 加底色、负层级底色带），
+       * 越补越糟 —— 因为问题不在那几像素：sticky 在 WKWebView 里会被单独合成，
+       * 滚动时那张层缓存不失效就闪残影，遮罩层与表体重绘不同步就露出半张表。
+       *
+       * 现在**不用 sticky 了**：表头一张表、正文一张表，两张共用同一份 `<colgroup>`
+       * （`table-layout: fixed` + 同一套列宽 ⇒ 列必然对齐）。表头是普通元素，永远
+       * 待在滚动容器上方 —— 没有粘性层，也就没有残影可留。
+       *
+       * 附带好处：滚动容器里只剩一个孩子，`glideIntoView` 的「定位」动画又能用了
+       * （有 sticky 时被 `hasSticky` 守卫挡掉，只能瞬跳）。
+       */}
+      <table className={`${s.table} ${s.headTable}`} data-selecting={select !== null}>
+        <colgroup>
+          {select !== null && <col className={s.thCheck} />}
+          <col />
+          <col className={s.thMachine} />
+          {mkp ? (
+            <col className={s.thVersion} />
+          ) : (
+            <>
+              <col className={s.thNum} />
+              <col className={s.thNum} />
+            </>
+          )}
+          <col className={scope === 'cloud' ? s.thTimeCloud : s.thTime} />
+          <col className={s.thAct} />
+        </colgroup>
           <thead className={s.head}>
             <tr>
               {/*
@@ -803,6 +821,35 @@ export default function PresetTable({
               </th>
             </tr>
           </thead>
+      </table>
+
+      <div
+        className={s.wrap}
+        ref={wrapRef}
+        /*
+         * 一直在记"当前这一档停在哪儿"。不靠换 scope 那一刻去读：那一刻读到的
+         * 已经是新内容夹过的数字了（见上面 `scrollMemo` 那段）。
+         */
+        onScroll={(e) => {
+          scrollMemo.current[scope] = e.currentTarget.scrollTop
+        }}
+      >
+        <table className={s.table} data-selecting={select !== null}>
+        <colgroup>
+          {select !== null && <col className={s.thCheck} />}
+          <col />
+          <col className={s.thMachine} />
+          {mkp ? (
+            <col className={s.thVersion} />
+          ) : (
+            <>
+              <col className={s.thNum} />
+              <col className={s.thNum} />
+            </>
+          )}
+          <col className={scope === 'cloud' ? s.thTimeCloud : s.thTime} />
+          <col className={s.thAct} />
+        </colgroup>
 
           <tbody>
             {rows.map((row) => {
@@ -865,7 +912,7 @@ export default function PresetTable({
                     }
               const statusText = status.text === null ? null : tr(status.text, status.params)
               /*
-               * 「来源预设路径」只对**本地行**有意义（血统里的 `# based_on`，说明这份是从云端哪一份来的）。
+               * 「来源预设路径」只对**本地行**有意义（来源记录里的 `file`，说明这份是从云端哪一份来的）。
                *
                * 曾试图给云端行也填这一格（填 `p.path`），2026-10-29 作者否掉：
                * 「这个来源预设路径是什么意思？云端的仓库的还是本地的，感觉这个没必要出现」——
@@ -883,31 +930,31 @@ export default function PresetTable({
               /*
                * **版本判定那一组画不画**（2026-10-29 第十五轮）。
                *
-               * 五格全空（老文件没有血统、也没有目录登记值）时**整组不画** ——
+               * 五格全空（老文件没有来源记录、也没有目录登记值）时**整组不画** ——
                * 一列「未知（当时没有记录）」只是噪声；"说不清"这件事由基本信息里的
                * **更新状态**那一格说（它的文案里带着原因），不需要再说五遍。
                */
               const verdictFacts = row.basedOnFacts
               const verdictShown =
                 verdictFacts !== undefined &&
-                (verdictFacts.lineageCatalog !== null ||
+                (verdictFacts.sourceCatalog !== null ||
                   verdictFacts.cloudCatalog !== null ||
-                  verdictFacts.lineageSha256 !== null ||
+                  verdictFacts.sourceSha256 !== null ||
                   verdictFacts.cloudSha256 !== null)
               /*
-               * 血统记录里记着几项 —— 就是「共 N 项」那个 N。
-               * 数的是**六个格子里非空的那些**（`# based_on` 那五行原文 + 建副本时的源身份），
+               * 来源记录记录里记着几项 —— 就是「共 N 项」那个 N。
+               * 数的是**六个格子里非空的那些**（`[mkp_source]` 记录 + 建副本时的源身份），
                * 空的不算：写「共 0 项」比不写更让人以为记漏了（那种情况整块不渲染）。
                */
-              const lineageCount =
+              const provenanceCount =
                 row.origin === 'local' && verdictFacts !== undefined
                   ? [
-                      verdictFacts.lineageSource,
+                      verdictFacts.sourceRef,
                       basedOnLabel,
-                      verdictFacts.lineageRelease,
-                      verdictFacts.lineageSha256,
-                      verdictFacts.lineageCatalog,
-                      verdictFacts.lineageSerial,
+                      verdictFacts.sourceRelease,
+                      verdictFacts.sourceSha256,
+                      verdictFacts.sourceCatalog,
+                      verdictFacts.sourceSerial,
                     ].filter((item) => item !== null).length
                   : 0
               /* 云端较旧 ⇒ 一律不给更新（列表上也不显示任何徽章，详情里才说） */
@@ -1033,11 +1080,11 @@ export default function PresetTable({
                       */}
                       {row.unsaved && (
                         <span
-                          className={s.unsavedDot}
-                          role="img"
-                          aria-label={tr('presets.table.unsaved.aria')}
+                          className={s.unsavedTag}
                           data-tip={tr('presets.table.unsaved.title')}
-                        />
+                        >
+                          {tr('presets.table.unsaved.label')}
+                        </span>
                       )}
                       {/*
                         云端表：**下过几代旧版**（2026-10-08）。
@@ -1055,7 +1102,7 @@ export default function PresetTable({
                       )}
                       {/*
                         **本地行也有「有新版」**（2026-10-20 作者：「这种有新版的在本地也需要出现呀」）。
-                        判据就是这一份的血统（`basedOn === 'outdated'` = 它基于的那一版云端已经换代）——
+                        判据就是这一份的来源记录（`basedOn === 'outdated'` = 它基于的那一版云端已经换代）——
                         与云端行那枚徽章同一句话、同一个样式，紧跟文件名。
 
                         ★ **复制 / 导入出来的那几份不挂这一枚**（作者当天第二张图：
@@ -1114,7 +1161,7 @@ export default function PresetTable({
                        * ★ **"基于旧版官方"（现称交付预设）那枚徽章退役了**（2026-10-08 作者裁决）：
                        * 用户那份不是"过时文件"，它是一份完整、可继续使用的预设；
                        * 系统既不自动更新它，也不在列表上暗示"你落后了"。
-                       * 血统照旧写在文件头（展开详情「基于」那一格还答"从哪一版派生"），
+                       * 来源记录照旧写在文件头（展开详情「基于」那一格还答"从哪一版派生"），
                        * 只是不再据此给状态色。
                        */}
                       {/*
@@ -1504,11 +1551,11 @@ export default function PresetTable({
                          * —— 主体：纵向分组 × 组内两列（2026-10-29 第十五轮）——
                          *
                          * 作者看过真机后改判（原话）：「问题不是单纯的『行距太大』，而是所有
-                         * 信息都按同一种纵向表单排列了。基本信息、版本判定、文件路径、血统记录
+                         * 信息都按同一种纵向表单排列了。基本信息、版本判定、文件路径、来源记录记录
                          * 本来重要程度不同，现在却全部从上往下排，导致一份预设占掉几乎整个屏幕。」
                          *
                          * 所以「左栏基本信息 + 右栏快捷操作」这套撤了：**整卡宽度交给四组**
-                         * （基本信息 / 版本判定 / 文件信息 / 血统记录），组内两列。纪律仍按
+                         * （基本信息 / 版本判定 / 文件信息 / 来源记录记录），组内两列。纪律仍按
                          * 第六轮那条：组与组之间**只有间距** —— 不加分隔线、不加底纹、不往
                          * 组里再套一层小卡片（作者三次点名不要那种"很重的容器感"）。
                          * 快捷操作整块沉到卡底一条带（见 `.dMain` 之后的 `.dFoot`）。
@@ -1575,7 +1622,7 @@ export default function PresetTable({
                                 </span>
                               </div>
 
-                              {/* 来源预设：血统指向的云端那一份（只在本机那份上有意义） */}
+                              {/* 来源预设：来源记录指向的云端那一份（只在本机那份上有意义） */}
                               {row.origin === 'local' && origin.ref !== null && (
                                 <div className={s.dRow}>
                                   <span className={s.dKey}>
@@ -1720,10 +1767,11 @@ export default function PresetTable({
                             的发布一个字节都没改，写成「内容更新时间」就会编出假话。
                             缺记录写「未知」，不许拿 mtime 顶。
 
-                            ★ **「生成时间」不再显示**（原「配方版本时间」，2026-10-30 作者：
-                              「配方版本时间改叫生成时间，而且不用显示出来」）—— 它是文件头
-                              `# release_time`、由配方自己填，与"云端有没有新版"无关；要看的话
-                              在「来源记录」那一行 `# based_on_release_time` 里原样摆着。
+                            ★ **「生成时间」不再显示**（2026-10-30 作者：「配方版本时间改叫生成
+                              时间，而且不用显示出来」）—— 那是文件头 `# generated_at`，只说明
+                              这份字节何时写出来，与"云端有没有新版"无关。
+                              真正的「来源版本时间」在技术详情的「溯源记录」里
+                              （来自文件尾部 `[mkp_source]` 的履历末条）。
                           */}
                           <section className={s.dSec}>
                             <div className={s.dSecHead}>
@@ -1839,34 +1887,34 @@ export default function PresetTable({
                          </div>
 
                           {/*
-                            ⑤ 血统记录 —— **默认收起**（作者：「默认显示『血统记录 · 共 N 项』，
+                            ⑤ 溯源记录 —— **默认收起**（作者：「默认显示『溯源记录 · 共 N 项』，
                             点击后再查看完整内容……这里不是删除信息，而是让用户先看到结论，
                             需要追查时再展开原始证据」）。
 
-                            展开后是**原始证据**：建副本时的源身份、来源预设路径，以及文件头那
-                            五行 `# based_on*` 原文（那五行是 TOML 字段名，不翻译）。原件仍留在
-                            文件里，这一块只是照着念一遍。
+                            展开后是**原始证据**：来源身份、来源那一版的路径与发布时间、
+                            原文摘要、发布线与序号。全部来自**文件尾部** `[mkp_source]` 记录
+                            （2026-11-04：详情只认它，不读 `run/` 的账）。
                           */}
                           {row.origin === 'local' &&
                             verdictFacts !== undefined &&
-                            lineageCount > 0 && (
+                            provenanceCount > 0 && (
                               <details className={s.dLineage}>
                                 <summary>
-                                  <span>{tr('presets.table.detail.more.lineage')}</span>
+                                  <span>{tr('presets.table.detail.more.provenance')}</span>
                                   <span>
-                                    {tr('presets.table.detail.lineage.count', {
-                                      count: lineageCount,
+                                    {tr('presets.table.detail.provenance.count', {
+                                      count: provenanceCount,
                                     })}
                                   </span>
                                 </summary>
                                 <div className={s.dLineageBody}>
-                                  {verdictFacts.lineageSource !== null && (
+                                  {verdictFacts.sourceRef !== null && (
                                     <div className={s.dRow}>
                                       <span className={s.dKey}>
                                         {tr('presets.table.detail.more.fullOrigin')}
                                       </span>
                                       <span className={`${s.dVal} ${s.dMono}`}>
-                                        {verdictFacts.lineageSource}
+                                        {verdictFacts.sourceRef}
                                       </span>
                                     </div>
                                   )}
@@ -1880,31 +1928,35 @@ export default function PresetTable({
                                       </span>
                                     </div>
                                   )}
-                                  <div className={`${s.dLineageMono} ${s.dMono}`}>
-                                    <div>
-                                      # based_on:{' '}
-                                      {basedOnLabel ?? tr('presets.table.detail.more.none')}
-                                    </div>
-                                    <div>
-                                      # based_on_release_time:{' '}
-                                      {verdictFacts.lineageRelease ??
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.sourceVersionAt')}
+                                    </span>
+                                    <span className={s.dVal}>
+                                      {verdictFacts.sourceVersionAt ??
                                         tr('presets.table.detail.more.none')}
-                                    </div>
-                                    <div>
-                                      # based_on_sha256:{' '}
-                                      {verdictFacts.lineageSha256 ??
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.more.sourceSha')}
+                                    </span>
+                                    <span className={`${s.dVal} ${s.dMono}`}>
+                                      {verdictFacts.sourceSha256 ??
                                         tr('presets.table.detail.more.none')}
-                                    </div>
-                                    <div>
-                                      # based_on_catalog:{' '}
-                                      {verdictFacts.lineageCatalog ??
+                                    </span>
+                                  </div>
+                                  <div className={s.dRow}>
+                                    <span className={s.dKey}>
+                                      {tr('presets.table.detail.more.releaseIdentity')}
+                                    </span>
+                                    <span className={`${s.dVal} ${s.dMono}`}>
+                                      {verdictFacts.sourceCatalog ??
                                         tr('presets.table.detail.more.none')}
-                                    </div>
-                                    <div>
-                                      # based_on_serial:{' '}
-                                      {verdictFacts.lineageSerial ??
-                                        tr('presets.table.detail.more.none')}
-                                    </div>
+                                      {verdictFacts.sourceSerial !== null
+                                        ? ` #${verdictFacts.sourceSerial}`
+                                        : ''}
+                                    </span>
                                   </div>
                                 </div>
                               </details>
@@ -1913,7 +1965,7 @@ export default function PresetTable({
                           {/*
                             ⑥ 更多详情 —— **技术值也默认收起**（第十六轮）：原文镜像、
                             发布线、两边 SHA 都是排查时才看的数，摆在主区会把「文件位置」
-                            挤成半宽。与「血统记录」是两条**独立**折叠行，各说各的。
+                            挤成半宽。与「来源记录记录」是两条**独立**折叠行，各说各的。
                           */}
                           {(row.origin === 'local' || verdictFacts !== undefined) && (
                             <details className={s.dMore2}>
@@ -1960,20 +2012,7 @@ export default function PresetTable({
                                       </span>
                                     </div>
                                   )}
-                                {verdictFacts !== undefined && !noLocalCopy && (
-                                  <div className={s.dRow}>
-                                    <span className={s.dKey}>
-                                      {tr('presets.table.detail.more.localLine')}
-                                    </span>
-                                    <span className={s.dVal}>
-                                      {lineTextOf(
-                                        tr,
-                                        verdictFacts.lineageCatalog,
-                                        verdictFacts.lineageSerial,
-                                      ) ?? tr('presets.table.detail.more.none')}
-                                    </span>
-                                  </div>
-                                )}
+
                                 {verdictFacts?.cloudSha256 !== null &&
                                   verdictFacts?.cloudSha256 !== undefined && (
                                     <div
@@ -1991,13 +2030,13 @@ export default function PresetTable({
                                 {verdictFacts !== undefined && !noLocalCopy && (
                                   <div
                                     className={s.dRow}
-                                    data-tip={verdictFacts.lineageSha256 ?? undefined}
+                                    data-tip={verdictFacts.sourceSha256 ?? undefined}
                                   >
                                     <span className={s.dKey}>
                                       {tr('presets.table.detail.more.localSha')}
                                     </span>
                                     <span className={`${s.dVal} ${s.dMono}`}>
-                                      {shortSha(verdictFacts.lineageSha256) ??
+                                      {shortSha(verdictFacts.sourceSha256) ??
                                         tr('presets.table.detail.more.none')}
                                     </span>
                                   </div>

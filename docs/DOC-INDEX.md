@@ -12,7 +12,7 @@
 
 | 群 | 位置 | 数量 | 性质 |
 | --- | --- | --- | --- |
-| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md)（**活台账**，清过两次：历史部分搬进 [`HANDOFF-ARCHIVE-2026-10-19.md`](HANDOFF-ARCHIVE-2026-10-19.md) 与 [`HANDOFF-ARCHIVE-2026-10-20.md`](HANDOFF-ARCHIVE-2026-10-20.md)，**没删**） | 约 13 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
+| 现行规则 | `docs/` 顶层 + 根 `README.md` + [`HANDOFF.md`](../HANDOFF.md)（**活台账**） | 约 13 份 | 根规则 / 产品规则 / 工程约束 / 合同 |
 | 记录与计划 | `docs/` 顶层（带日期的那些） | 约 19 份 | 裁决记录 / 台账 / 施工计划 / 测试协议 |
 | 审计基线 | `docs/audit-current-state/` | 9 md + data/map | 重写前的只读审计（"建议，不是现状"） |
 | 移植方案 | 根 [`C14-PORT-PLAN.md`](../C14-PORT-PLAN.md) / [`C15-A40-PORT-PLAN.md`](../C15-A40-PORT-PLAN.md) | 2 份 | 被 `src/workbench` 现行代码引用（方案 / 待裁决清单），保留 |
@@ -26,6 +26,7 @@
 | 文档 | 管什么 | 状态 |
 | --- | --- | --- |
 | [`README.md`](../README.md) | 入口：项目一句话 / 跑法 / 文档地图 | 现行（首段的"报告页"口径已于 2026-10-11 修正） |
+| [`docs/WORK-STRATEGY.md`](WORK-STRATEGY.md) | **干活顺序**：先看一条跑通的链路 → 先圈影响范围 → 一次改完源 → 统一生成 → 集中验证；调查只作辅助。不含命令与项目操作细节 | 现行（2026-11-05 新建） |
 | [`docs/PRESET-WORKFLOW.md`](PRESET-WORKFLOW.md) | **预设怎么做**：命令 / 状态顺序 / 失败恢复 / 验收五项（`AGENTS.md` 的"怎么做"那一半） | 现行 |
 | [`docs/DATA-ARCHITECTURE.md`](DATA-ARCHITECTURE.md) | **根规则**：四层世界 + 四铁律 + 十问 + 准入问句 | 现行 |
 | [`docs/PRESET-PRODUCT-RULES.md`](PRESET-PRODUCT-RULES.md) | 产品规则：本地 / 云端 / 下载 / 更新 / 修改 / SHA / 归档 | 现行（正文已就地吸收 2026-10-08 三次改判，含三条 ⚠️ 注记） |
@@ -52,6 +53,9 @@
 | [`detail-card-mock.html`](detail-card-mock.html) | — | 详情卡抽卡的参考图复刻（mock，浏览器直接打开） | 素材（原型） |
 | [`I18N-MAP.md`](I18N-MAP.md) | 2026-10-26 | 文案对照表：四类「名字」各住哪、前缀 → 页面 → 文件、两本字典的分段约定 | 现行（本分支新增，随"英文界面还有中文"那一刀） |
 | [`GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`](GLUE-TRAVEL-Z-SAFETY-2026-10-20.md) | 2026-10-20 | **胶笔移动安全余量权威结论**（高层炒面事故归因）：伸缩笔两态模型 / 逐段公式 + 真实代码行 / 实机账本 / 风险排序 / 未实施的修复方案 | 现行·结论文档（改抬升逻辑前必读；**只记录结论，本节不改代码**） |
+| [`PRINT-FAILURE-2026-11-04-A1-46MM-CRASH.md`](PRINT-FAILURE-2026-11-04-A1-46MM-CRASH.md) | 2026-11-04 | **46mm 崩飞归因**：三次几何扫描证明「G-code 没压模型/没撞模型」；自适应层高（0.2/0.2744 混用）与塔层厚写死 0.28 越走越不同步（139mm 处差 0.98）；顺手排除「涂胶落笔压深」误读；塔 `towerPos` 是移动前 | 现行·结论文档（**只记录归因与教训，本轮不改代码**，等作者关自适应层高做对照） |
+| [`REPORT-TOWER-AND-PREVIEW-2026-11-04.md`](REPORT-TOWER-AND-PREVIEW-2026-11-04.md) | 2026-11-04 | **擦料塔两小节 + 官方塔包围盒 + 两处预览显示**：模型段支撑被算成内墙的根因与修复（feature 上下文复位）、`prime_tower.rs` 的口径（为何必须排除「只有 E」的吐料行）、热床预涂胶那条锚点为何在预览里成了一条高处的长条 | 现行·实现记录（**几何一行未改**；预涂胶那条的观感需在切片器里再验一次） |
+| [`WORKBENCH-STATE-REARCH-2026-11-02.md`](WORKBENCH-STATE-REARCH-2026-11-02.md) | 2026-11-02 | **工作台状态模型重构报告**：影子树退场、改成「打开时快照 BASE + 编辑树 WORK」；徽章 `↩` 读到上一个值的真因（`rest_at` 读影子）；**Git 归因：10-31 `3babb63` 引入的回归**；§4.2 硬约束（保存阶段机 / 原子换名 / 外部冲突三选 / 写入入口归属）；10 刀迁移表 + 20 条回归判据 | **报告，待作者裁决**：不含代码改动；获准后另开分支按第五部分分刀实施 |
 | [`GUIDE-IMAGE-HANDOFF-2026-10-16.md`](GUIDE-IMAGE-HANDOFF-2026-10-16.md) | 2026-10-16 | **图片引导交接**：现状口径六条 + 下一刀（① 图片按需下载 ② "一组/套装"三件裁决）+ 判据与探针清单 | 现行（本分支新增；对应 `HANDOFF.md` 增量之三十六） |
 | [`DEV-REAL-POSTPROCESS-HANDOFF-2026-10-19.md`](DEV-REAL-POSTPROCESS-HANDOFF-2026-10-19.md) | 2026-10-19 | **开发台「真实后处理」入口交接**：要什么 / 六条验收判据 / 三步路径 / 待核三件事。★ 文内 §4 现状是 10-19 快照，动手前须重核 | **② 已落地（2026-10-19 当日，见文内 §4.4）**：工作台 spawn 真钩子子进程跑真 G-code，**未加协议变体**；判据 1/2/5/6 达成、3 待人工点一次、**4「够慢」没达成（8.5MB 只 8.4s，待拍板）**；**§8 测试矩阵已扩到八档**（校准件两档 + 问句屏「停止并关闭」，§8.5）+ **后处理预览整组已撤**（§8.6）；对应增量之四十三 ~ 四十五 |
 | [`A05-PORT-LEDGER.md`](A05-PORT-LEDGER.md) | 2026-10-11 | a05 前端整份搬运台账（源 = frontend-lab） | 现行（本分支新增，对应"前端照搬 a05"提交） |
@@ -63,7 +67,7 @@
 | [`PRESET-WORKING-COPY-2026-10-08.md`](PRESET-WORKING-COPY-2026-10-08.md) | 2026-10-08 | 下载即得工作副本 | **已被同日第三次改判退役**（"下载不再自动产生副本"，见 `PRESET-PRODUCT-RULES.md` ⚠️ 三条） |
 | [`PRESET-MULTI-VERSION.md`](PRESET-MULTI-VERSION.md) | 2026-10-08 | 多版本「我的预设」+ 参数对比台 | **已被取代**（文首自标：被 `PRESET-ASSET-LIBRARY.md` 改判） |
 | [`PRESET-LIST-UX-ISSUES-2026-10-08.md`](PRESET-LIST-UX-ISSUES-2026-10-08.md) | 2026-10-08 | 预设列表问题清单 | **已闭环**（文首自标：模型已定并已实施，指向资产库） |
-| [`PRESET-COPY-LINEAGE.md`](PRESET-COPY-LINEAGE.md) | 2026-10-06 | 复制与身世（另存放开 · 归属继承）设计稿 | 部分已被 10-08 改判取代（自标） |
+| [`PRESET-COPY-PROVENANCE.md`](PRESET-COPY-PROVENANCE.md) | 2026-10-06 | 复制与身世（另存放开 · 归属继承）设计稿 | 部分已被 10-08 改判取代（自标） |
 | [`PRESET-TIME-SEMANTICS.md`](PRESET-TIME-SEMANTICS.md) | 2026-10-06 | 时间语义与删除策略梳理 | 已升级（自标：改定义为事件模型 → 见下一行） |
 | [`PRESET-EVENT-TIME-MODEL.md`](PRESET-EVENT-TIME-MODEL.md) | 2026-10-06 | 预设事件时间模型（设计与实现） | 该主题的落地版（推断） |
 | [`REMARK-SUBTITLE-2026-10-07.md`](REMARK-SUBTITLE-2026-10-07.md) | 2026-10-07 | 副标题 = 备注 + 复制件归属 | 已实施（自标：台账与代码同一 commit） |
@@ -128,7 +132,7 @@
 | `PRESET-MULTI-VERSION.md` | 文首已自标"已被取代"，指向下面那份 |
 | `PRESET-ASSET-LIBRARY.md` | 10-08 的最后一次裁决；但它与现在代码里的"本地/云端"两轴是否完全一致，**待核**（推断：之后又有微调） |
 | `PRESET-LIST-UX-ISSUES-2026-10-08.md` | 已闭环，正文大多过时，靠文首一句指向资产库 |
-| `PRESET-COPY-LINEAGE.md` / `REMARK-SUBTITLE-2026-10-07.md` | 归属/身世主题的两份；10-08 改判后各有一部分退役，台账价值仍在 |
+| `PRESET-COPY-PROVENANCE.md` / `REMARK-SUBTITLE-2026-10-07.md` | 归属/身世主题的两份；10-08 改判后各有一部分退役，台账价值仍在 |
 | `PRESET-TIME-SEMANTICS.md` → `PRESET-EVENT-TIME-MODEL.md` | 前后两篇同一主题，后者是落地版；前者留着当梳理稿 |
 
 > 合并锚点（供参考，不代你决定）：这一簇看起来以 `PRESET-PRODUCT-RULES.md`（现行）+ `PRESET-ASSET-LIBRARY.md`（最后一次裁决）为轴，其余按"过程记录"处理。

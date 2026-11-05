@@ -84,6 +84,12 @@ pub struct VersionIdentity {
 
 /* ---------- 整本 ---------- */
 
+/// 「这一版现在会渲染成什么」的探针（见 [`Book::renderer`]）。
+///
+/// 抽成别名而不是内联：`Option<&dyn Fn(&str) -> Option<String>>` 这种形状写在
+/// 结构体字段里，clippy 的 `type_complexity` 会拦。
+pub type RenderProbe<'a> = dyn Fn(&str) -> Option<String> + 'a;
+
 pub struct Book<'a> {
     /// 我们自己那份预设数据（`<repo>/presets`，**唯一的预设真相源**）。
     /// 字段定义与三层取值全走它
@@ -103,6 +109,26 @@ pub struct Book<'a> {
     versions: Vec<VersionIdentity>,
     built: BTreeMap<String, BuiltRecord>,
     bundles: BTreeMap<String, BundleEdit>,
+    /// 这一版现在会渲染成什么（判「待更新」要拿它跟盘上字节比）。
+    ///
+    /// **注入而不是自己拼**：渲染器住在 `app::build::render`（那层要用
+    /// `presets` / 注册表 / 版本层），本模块只认一个闭包。这样"界面说待更新"
+    /// 与"生成会不会写"用的是**同一台渲染器**，不会长出第二套口径。
+    /// `None`（默认）= 这一层不做字节比对，只按"盘上有没有"判。
+    renderer: Option<&'a RenderProbe<'a>>,
+    /// 产物（交付根）在哪棵树。默认 = `presets.root()`（即 `Book` 读的那棵）。
+    ///
+    /// **必须能分开**：`Book` 常读影子树，而产物写在真仓库。见 [`Self::product_bytes`]。
+    product_root: std::path::PathBuf,
+    /// 「改之前的值」从哪一份数据读（2026-11-02 刀 1）。
+    ///
+    /// **`None` = 退回 `self.presets`**，也就是「读到的就是当前树」。这在生产路径上
+    /// 等价于徽章永不亮 —— 2026-10-31 起的病就是这么来的：会话的 `presets` 指影子树，
+    /// 编辑先把值写进去、`rest_at` 再从同一棵树读，两者必然相等。
+    ///
+    /// 生产路径必须用 [`Self::with_rest`] 指到**盘上已保存那一份**（`Ctx::base`）。
+    /// 不指不是「兼容旧行为」，是「这一屏本来就不需要改之前的值」（如生成预演）。
+    rest_base: Option<&'a Presets>,
 }
 
 impl<'a> Book<'a> {
@@ -160,7 +186,37 @@ impl<'a> Book<'a> {
             versions,
             built,
             bundles,
+            renderer: None,
+            // 默认：产物与源同根（测试 / 独立使用时就是这个形状）
+            product_root: presets.root().to_path_buf(),
+            rest_base: None,
         }
+    }
+
+    /// 指定「改之前的值」读哪一份数据 —— **生产路径必须调**（见字段文档）。
+    ///
+    /// 语义：`base` 是**盘上已保存的那一份**（`Ctx::base`，打开工作台时的快照，
+    /// 保存成功后推进）。它与 `self.presets`（编辑树）必须是两份数据，
+    /// 否则 `rest_at` 与当前值同源，徽章永远不会亮。
+    pub fn with_rest(mut self, base: &'a Presets) -> Self {
+        self.rest_base = Some(base);
+        self
+    }
+
+    /// 装上"这一版现在会渲染成什么"的探针（判「待更新」用；见字段文档）。
+    ///
+    /// 只有 `app` 那一层能提供（渲染器在 `app::build`）—— `workbench::Book::new`
+    /// 就是替调用方装好再交出去的。
+    pub fn with_renderer(mut self, renderer: &'a RenderProbe<'a>) -> Self {
+        self.renderer = Some(renderer);
+        self
+    }
+
+    /// 指定产物（交付根）在哪棵树 —— `Book` 读影子树时**必须**调到真仓库，
+    /// 否则影子树里没有 `delivery/`，所有产物都会被判成"不在"。
+    pub fn with_product_root(mut self, root: impl Into<std::path::PathBuf>) -> Self {
+        self.product_root = root.into();
+        self
     }
 
     /* ---------- 清单 ---------- */
@@ -310,7 +366,20 @@ impl<'a> Book<'a> {
 
     /* ---------- 生成状态 ---------- */
 
-    /// 四档之一。判据是**指纹比对，不看文件时间**
+    /// 四档之一。判据**只看盘上产物与当前候选是否逐字节相同**（2026-11-01 收口）。
+    ///
+    /// 以前这里比的是"台账里记的配方指纹 == 现在算出来的指纹"。那有两个毛病：
+    /// ① 判的是**记录**而不是**文件** —— 记录一乱，界面上"待更新"就跟着乱；
+    /// ② 它和真生成用的判据（盘上字节）是两套口径，于是会出现"界面说待更新、
+    ///    生成却说无变化"这种自相矛盾。现在两边同一句话：
+    ///
+    /// | 盘上产物 | 判 |
+    /// |---|---|
+    /// | 没有 | `NeverBuilt` |
+    /// | 有、字节 == 现在算出来的 | `Built` |
+    /// | 有、字节不同 / 渲染不出来 | `Stale` |
+    ///
+    /// 台账（`built.json`）**不参与**：它只提供"上次成功生成时刻"那一格给人看。
     pub fn build_state(&self, uid: &str) -> BuildState {
         if self.version(uid).is_none() {
             return BuildState::NeverBuilt;
@@ -323,23 +392,22 @@ impl<'a> Book<'a> {
         if !self.has_any_recipe(uid) && !has_bbs {
             return BuildState::NoResources;
         }
-        let Some(rec) = self.built.get(uid) else {
-            // 生成记录里没有这一版 —— 但磁盘上可能躺着以前生成的产物
-            //（记录丢了：快照回退 / 换机器 / 清过 store）。这时候说「未生成」
-            // 是在撒谎：客户端现在就能下载到那份旧的。归成 Stale ——
-            // 有旧的，且至少对不上「现在会算出来的这份」，该重新生成。
-            // （真机踩过：预演说 9 份全是「修改」，版本行却全说「未生成」。）
-            if self.product_on_disk(uid) {
-                return BuildState::Stale;
-            }
+        // 盘上"有旧产物、但记录丢了"不构成另一档：下面是拿字节比的，
+        // 有旧产物且对不上自然就是 `Stale`，对得上就是 `Built` —— 不需要看台账。
+        let Some(on_disk) = self.product_bytes(uid) else {
             return BuildState::NeverBuilt;
         };
-        match self.version_layers(uid) {
-            Some(l) if l.fingerprint() == rec.fingerprint => BuildState::Built,
-            Some(_) => BuildState::Stale,
-            // 层都取不出来（机型被上游删了）—— 说"待生成"而不是"已生成"：
-            // 说错成"已生成"会让人以为客户端拿到的是对的
-            None => BuildState::Stale,
+        let Some(now) = self.render_text(uid) else {
+            // 没有渲染器（这一层不做字节比对）或渲染不出来：有产物就先按"可能过时"说，
+            // 不冒充 `Built` —— 说错成"已生成"会让人以为客户端拿到的是对的
+            return BuildState::Stale;
+        };
+        /* 剥掉 `# generated_at:` 再比：时间属于"何时写出去的"，不属于"内容"，
+        它变了不代表要重新生成（2026-11-01 作者裁定）。 */
+        if crate::workbench::strip_generated_at(&on_disk) == now {
+            BuildState::Built
+        } else {
+            BuildState::Stale
         }
     }
 
@@ -367,32 +435,50 @@ impl<'a> Book<'a> {
             .map_or(true, |l| l.effective_recipe().is_empty())
     }
 
+    /// 这一版**最后一次成功生成**的时刻（给人看的那一格）。`None` = 从没成功生成过。
+    ///
+    /// 它**不参与任何判断**（2026-11-01 收口）：写不写、待更新与否，只看盘上字节
+    /// 与当前候选是否相同（见 [`Self::build_state`]）。台账记错了只会让这一格显示错，
+    /// 不会让该写的文件被跳过 —— 正确性不挂在它身上。
     pub fn last_build(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.stamp.as_str())
     }
 
     /// 已生成记录里的配方指纹（没有记录 = `None`）。
     ///
-    /// 生成侧拿它决定「这一行要不要补记」：产物字节没变、记录也对得上，
-    /// 台账就不许动 —— no-op 的生成不该把 `built.json` 顶新（2026-10-05）。
+    /// 2026-11-01 起**生成侧不再读它**：写不写只看字节，"该不该补记台账"这个
+    /// 问题随 `needs_built_record` 一起删了。留着这个访问器是给展示层
+    /// （"记录里那一代的配方指纹"）用的，别拿它去判"要不要生成"。
     pub fn built_fingerprint(&self, uid: &str) -> Option<&str> {
         self.built.get(uid).map(|r| r.fingerprint.as_str())
     }
 
-    /// 磁盘的交付根里有没有这一版的产物文件（只 stat，不读内容、不算哈希）。
+    /// 磁盘的交付根里这一版产物的字节（读不出来 = `None`）。
     ///
     /// 路径与生成 / 发布写盘同源（`paths` 的 `DIST_SUBDIR` + `MKP_PRESETS_DIR`，
     /// 根用 `presets.root()` —— 与本 `Book` 读的数据同一棵树），不许第二处自拼。
-    fn product_on_disk(&self, uid: &str) -> bool {
-        let Some(v) = self.version(uid) else {
-            return false;
-        };
-        self.presets
-            .root()
+    fn product_bytes(&self, uid: &str) -> Option<String> {
+        let v = self.version(uid)?;
+        let path = self
+            .product_root
             .join(crate::workbench::paths::DELIVERY_SUBDIR)
             .join(crate::workbench::paths::MKP_PRESETS_DIR)
-            .join(&v.mkp_file)
-            .exists()
+            .join(&v.mkp_file);
+        std::fs::read_to_string(path).ok()
+    }
+
+    /// 这一版**现在**会渲染成什么（渲染不出来 = `None`）。
+    ///
+    /// 判"待更新"要拿它跟盘上字节比 —— 与真生成用的是同一台渲染器
+    /// （`app::build::render`），所以"界面说待更新"和"生成会不会写"永远是同一句话。
+    ///
+    /// ★ 为什么产物路径不能直接用 `presets.root()`（2026-11-01）：
+    /// `Book` 读的常常是**影子树**（`workbench/.draft/presets/`），而产物写在
+    /// **真仓库**（`presets/delivery/…`）。影子树里压根没有 `delivery/`，
+    /// 于是"盘上产物"永远读不到 → 全部判成待更新。所以产物根单独给
+    /// （[`Book::with_product_root`]），默认仍取 `presets.root()`。
+    fn render_text(&self, uid: &str) -> Option<String> {
+        (*self.renderer?)(uid)
     }
 
     /* ---------- 视图 ---------- */
@@ -777,7 +863,31 @@ impl<'a> Book<'a> {
             return Cell::not_applicable();
         };
         let blocked = gate.map(|g| g.blocked(key)).unwrap_or_default();
-        let own = layers.has_own(col.level, key);
+        /* ---------- 徽章的唯一判据（2026-11-03） ----------
+         *
+         * 版本列：**只读 `[params.follows]`**，不看值、也不看"文件里有没有那一行" ——
+         * 那两个都是推断，而作者报的正是推断与行为对不上（写着「不跟随」，
+         * 改基底却跟着变）。判据的唯一实现是 `presetdata::follows::is_following`。
+         *
+         * 基底列：`badge_at` 本来就不给它挂徽章，这里保持 `has_own` ——
+         * 那个值只决定「↶ 挂回出厂」能不能点，与"跟谁"无关。
+         */
+        let own = match col.level {
+            Level::Version => {
+                let at = &col.key_of_level();
+                /* 草稿里挂着的那一条优先：`Book::new(..., &draft)` 这条路上
+                状态还没写进注册表（生产路径是"先 apply 到影子树、再画"，
+                草稿是空的，所以这里读到的就是文件里那句话） */
+                match self.draft.pending_follows(Level::Version, at, key) {
+                    Some(on) => !on,
+                    None => !crate::workbench::presets::follows::is_following(
+                        p,
+                        &variant_key(Level::Version, at),
+                    ),
+                }
+            }
+            Level::Machine => layers.has_own(col.level, key),
+        };
 
         // 「谁把我关了」的整句 + 跳转目标。`blocked` 是**根在前**排的，
         // 所以取第一条就是"最上游那个要先动的东西"，中间环节不必全列出来
@@ -836,11 +946,7 @@ impl<'a> Book<'a> {
             origin_label: Some(w::origin_label(hit.origin).to_owned()),
             origin_explain: Some(w::origin_explain(hit.origin).to_owned()),
             own,
-            // 改动还在草稿里 —— 界面用蓝色描边标它，不换底色（doc §7 视觉规范）
-            dirty: self
-                .draft
-                .pending(col.level, &col.key_of_level(), key)
-                .is_some(),
+            dirty: self.dirty_of(col, key, Some(hit.value)),
             editable: blocked.is_empty() && !deprecated,
             reason: if !blocked.is_empty() {
                 Some(w::disabled::BLOCKED_BY_CONDITION.to_owned())
@@ -857,17 +963,183 @@ impl<'a> Book<'a> {
             differs: false,
             diff_tip: None,
             raw: hit.value.clone(),
-            rest: self.rest_at(col, key),
+            rest: self.base_effective_at(col, key),
+            rest_pinned: self.base_pinned_at(col, key),
+            badge: self.badge_at(col, own),
             deprecated,
             dead_choices,
         }
     }
 
-    /// 这一列**盘上**钉着的值（草稿不算）。`None` = 这一层没钉着它 ——
-    /// 界面上的「恢复修改前的」要据此写 `null` **删键**、让它挂回继承，
-    /// 而不是写回一个值（写回值会把继承钉死，那是另一回事）。
-    fn rest_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
-        let p = self.presets.registry.param(key)?;
+    /// 这一行的**当前值是不是与盘上已保存那一份不一样**。
+    ///
+    /// # 这条判据的历史（值得留着，因为它是本报告的病历）
+    ///
+    /// 最初判 `draft.pending(...)` —— 那是「改动还在内存草稿里」。可 2026-10-31 起
+    /// 值编辑**立刻写进影子树**、草稿随即清空（`wb_apply_draft` 里
+    /// `ctx.draft = Draft::default()`），于是这个判据恒为 `false`。
+    ///
+    /// 后来改成「算出来的值 vs `rest_at`」，但那时 `rest_at` 与 `hit.value`
+    /// **读的是同一棵树**（会话的 `presets` 指影子），两者必然相等 ⇒ 仍然恒 `false`。
+    /// 作者看到的就是「徽章闪一秒就消失」「改成 65 根本没出现」。
+    ///
+    /// 现在 `rest_at` 读的是 `rest_base`（盘上已保存那一份，见 [`Self::rest`]），
+    /// 两份数据真的不同源了，这条判据才成立。
+    ///
+    /// 盘上**没钉**时不能只靠值判：「算出来的值」永远有值（出厂默认也是一个值），
+    /// 那样整页工厂默认的格子会全亮 —— 所以要跟**盘上的有效值**比，而不是跟"空"比。
+    ///
+    /// ★ 2026-11-02 再改：以前判「这一层有没有钉记录」（`own`），那是**内部表示**。
+    /// 归并会把同值从版本层上提到机型基底，于是用户在版本列改值、记录落在机型层，
+    /// 版本列 `own` 永远是 `false` ⇒ **徽章永不出现**（作者连报三次的就是这个）。
+    /// 用户看得见的是**值**，所以判据也只能是值。
+    ///
+    /// ★★ 2026-11-03 又收窄：上面那条改成"比有效值"之后走过了头 ——
+    /// 改 `A1` 基底的 Z，三个版本列的有效值跟着变（它们继承基底），
+    /// 于是**三列全亮「↩ 3.9」**，可文件里一行都没多写（日志 `written=1`）。
+    /// 作者看到的就是「四个格子都显示改过，页头却说 1 处」。
+    ///
+    /// 现在按**这一层自己的行**判：与盘上那一份比，**这一层有没有写着自己的一行、
+    /// 那一行的值一不一样**。跟随基底的格子（`over` 里没有它）永远不算脏 ——
+    /// 它本来就该跟着基底走，这正是「跟随」的意思。
+    ///
+    /// 归并那种情形（用户在版本列改，值被提到机型层）仍然判得对：那一笔在
+    /// `draft` 里留了 `pending` 记录，下面第一条就返回 `true`。
+    fn dirty_of(&self, col: &ResolvedCol<'_>, key: &str, _now: Option<&Value>) -> bool {
+        /* 还在草稿里（值那套老路径 / 结构编辑）—— 先认这一条，别让判据退化 */
+        if self
+            .draft
+            .pending(col.level, &col.key_of_level(), key)
+            .is_some()
+        {
+            return true;
+        }
+        /* **跟随状态变了也算改过**（2026-11-03）。点了「跟随基底」而值本来就等于
+        基底时，行里一个字节都没变 —— 只比值的话这一格会显示"没动过"，
+        可它真的有一条状态改动等着保存。判据与徽章同一份。 */
+        if col.level == Level::Version {
+            let uid = variant_key(Level::Version, &col.key_of_level());
+            if self
+                .draft
+                .pending_follows(col.level, &col.key_of_level(), key)
+                .is_some()
+            {
+                return true;
+            }
+            let before = self
+                .rest()
+                .registry
+                .param(key)
+                .map(|p| crate::workbench::presets::follows::is_following(p, &uid));
+            let now = self
+                .presets
+                .registry
+                .param(key)
+                .map(|p| crate::workbench::presets::follows::is_following(p, &uid));
+            if before != now {
+                return true;
+            }
+        }
+        /* 这一层"自己那一行"的两份值：盘上（`rest_base`）与现在（`layers`） */
+        let own_before = self.base_own_at(col, key);
+        let own_now = col
+            .layers
+            .as_ref()
+            .and_then(|l| l.own_value(col.level, key));
+        match (own_before, own_now) {
+            (None, None) => false,
+            /* 原来没自己那一行、现在有了 ⇒ 从"跟随"变成"不跟随"，是改过 */
+            (None, Some(_)) => true,
+            /* 原来有、现在没了 ⇒ 挂回继承了，也是改过 */
+            (Some(_), None) => true,
+            (Some(before), Some(now)) => *now != before,
+        }
+    }
+
+    /// 「改之前的值」该读哪一份数据。
+    ///
+    /// 指定了 `rest_base` 就读它（生产路径：盘上已保存那一份 = `Ctx::base`）；
+    /// 没指定就退回 `self.presets` —— 那等于「读到的就是当前树」，
+    /// `rest_at` 与本格当前值必然相等，徽章不会亮。**这不是兼容旧行为**，
+    /// 是「这一屏不需要改之前的值」时的一个诚实默认（如生成预演）。
+    fn rest(&self) -> &Presets {
+        self.rest_base.unwrap_or(self.presets)
+    }
+
+    /// 盘上那一份里，**这一层自己钉着吗**（只决定还原怎么写，见 [`Cell::rest_pinned`]）。
+    ///
+    /// 版本列问的是"盘上当时跟不跟"（`follows`），不是"有没有那一行"：
+    /// 跟随的版本现在也会有自己的一行值（同步成基底的那个数），
+    /// 拿行判会把「↶ 还原」写成"写回一个数"，于是还原之后状态从不跟随开始。
+    fn base_pinned_at(&self, col: &ResolvedCol<'_>, key: &str) -> bool {
+        let Some(p) = self.rest().registry.param(key) else {
+            return false;
+        };
+        let uid = variant_key(col.level, &col.key_of_level());
+        match col.level {
+            Level::Version => !crate::workbench::presets::follows::is_following(p, &uid),
+            Level::Machine => p.machine_variants.contains_key(&uid),
+        }
+    }
+
+    /// 这一格挂哪档徽章：**跟不跟基底**（见 [`Cell::badge`]）。
+    ///
+    /// **基底列没有徽章**（2026-11-02 作者定稿）：基底是根，不跟谁，
+    /// 给它挂「跟随 / 不跟随」只会让人问"它跟随谁"。
+    fn badge_at(&self, col: &ResolvedCol<'_>, own: bool) -> Option<ParamStatus> {
+        match col.level {
+            Level::Machine => None,
+            Level::Version => Some(if own {
+                ParamStatus::Own
+            } else {
+                ParamStatus::Follow
+            }),
+        }
+    }
+
+    /// 盘上那一份里，这一格的**有效值** —— 三层依次：版本覆盖 → 机型基底 → 出厂。
+    ///
+    /// 这是「改之前是多少」与「改没改」的**唯一**真相。不能改成「这一层钉着的值」：
+    /// 归并会把同值从版本层上提到机型基底（`variants.rs:28`），那时
+    /// 「你点的那一层没有钉」而「值确实变了」—— 两者必须以前者为准的是值，不是记录。
+    fn base_effective_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
+        let p = self.rest().registry.param(key)?;
+        if p.deprecated_for(&col.machine_id) || !p.applies_to(&col.machine_id) {
+            return None;
+        }
+        // ① 版本层（只有版本列才查）
+        if col.level == Level::Version {
+            if let Some(v) = p
+                .machine_variants
+                .get(&variant_key(Level::Version, &col.key_of_level()))
+            {
+                return Some(v.clone());
+            }
+        }
+        // ② 机型基底
+        if let Some(v) = p
+            .machine_variants
+            .get(&variant_key(Level::Machine, &col.machine_id))
+        {
+            return Some(v.clone());
+        }
+        // ③ 出厂
+        Some(p.default_value.clone())
+    }
+
+    /// **盘上那一份里，这一层自己写着的值**（不往上找继承）。`None` = 那一层没有它。
+    ///
+    /// 与 [`Self::base_effective_at`] 的区别就是这个"不往上找"：
+    /// 有效值是"算完继承之后是多少"（改基底，子层跟着变），
+    /// 而这一格**自己那一行**只有这一层写了才有。
+    ///
+    /// [`Self::dirty_of`] 要的是后者 —— 判"这一格改没改过"，
+    /// 问的是"这一行变了没"，不是"继承出来的结果变了没"。
+    fn base_own_at(&self, col: &ResolvedCol<'_>, key: &str) -> Option<Value> {
+        let p = self.rest().registry.param(key)?;
+        if p.deprecated_for(&col.machine_id) || !p.applies_to(&col.machine_id) {
+            return None;
+        }
         p.machine_variants
             .get(&variant_key(col.level, &col.key_of_level()))
             .cloned()
@@ -1505,6 +1777,19 @@ pub enum CellKind {
     Value,
 }
 
+/// 参数台一格的状态：**跟不跟基底**。只有两档（2026-11-02 作者定稿）。
+///
+/// 它刻意不回答"值从哪来"（出厂 / 机型 / 版本）—— 那是实现细节，
+/// 作者看屏幕时问的是「我改过它没有」。基底列干脆不挂（`Cell::badge == None`）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ParamStatus {
+    /// 这一层没有自己的值 —— 基底改了它跟着改
+    Follow,
+    /// 这一层自己写了值（**哪怕和基底相同**）—— 基底改了它不动
+    Own,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Cell {
@@ -1538,9 +1823,36 @@ pub struct Cell {
     pub diff_tip: Option<String>,
     /// 原始值。受控控件要用它，不能拿格式化过的文本回填
     pub raw: Value,
-    /// 这一层**盘上**钉着的值（草稿不算）。`null` = 这一层没钉着它 ——
-    /// 「恢复修改前的」要写 `null` 删键、挂回继承（批量抽屉用）
+    /// **盘上那一份里，这一格的有效值**（= 用户看得见的那个数）。
+    ///
+    /// 三层依次找：版本覆盖 → 机型基底 → 出厂 `defaultValue`。`None` 只有一种情况：
+    /// 这一项在这台机型上不适用 / 已弃用。
+    ///
+    /// 它同时是**徽章显示什么**与**改没改的判据**（见 [`Book::dirty_of`]）。
+    /// 为什么不能用「这一层钉着的值」：归并会把同值从版本层**上提到机型基底**
+    /// （`variants.rs:28`），于是「你点的那一层有没有钉」跟「值变没变」会分叉 ——
+    /// 作者在「A1 / 标准版」列改值、值落到机型基底，那一列就永远判不脏。
     pub rest: Option<Value>,
+    /// 盘上那一份里，**这一层自己钉着吗**（版本列问的是"盘上当时跟不跟"）。
+    ///
+    /// ★ **2026-11-03：它不再决定「回到保存值」怎么写。** 那颗按钮（`↩ 保存值 X`）
+    /// 现在**总是写回 `rest` 那个数** —— 点完这一层就是不跟随、值就是保存值。
+    /// 以前它按这里分叉（没钉 ⇒ 发 `null` 挂回继承），于是"点保存值"变成了
+    /// "跟随基底"（作者报的「按了保存值它却变成了跟随值」）。
+    ///
+    /// 留着它是因为别处还要答"保存的那一份里这层本来有没有自己的一行"
+    /// （见 `app::sheet` 的 `saved_pinned`）。
+    pub rest_pinned: bool,
+    /// 这一格挂哪档徽章：**跟不跟基底**（2026-11-02 作者定稿，只剩两档）。
+    ///
+    /// `None` = **基底列**，不挂 —— 基底是根，谈不上跟不跟谁。
+    ///
+    /// 判据只有一条：注册表 `[params.follows]` 里那句状态（`follows::is_following`，
+    /// 2026-11-03）。**与值是否等于基底无关、与归并后有没有自己那一行也无关** ——
+    /// 跟随的版本现在照样会留着自己的一行（同步成基底的那个数）。
+    ///
+    /// 「改了还没保存」不在这档里：徽章不随保存状态跳，未保存由还原按钮表达。
+    pub badge: Option<ParamStatus>,
     /// 这条参数**在这台机型上**已弃用（全局或点名这台机型）。`Row.deprecated` 是
     /// 全机型口径，答不了「这一格」—— 一行跨多台机型时两者会不同
     pub deprecated: bool,
@@ -1569,6 +1881,8 @@ impl Cell {
             diff_tip: None,
             raw: Value::Null,
             rest: None,
+            rest_pinned: false,
+            badge: None,
             deprecated: false,
             dead_choices: Vec::new(),
         }
@@ -1651,6 +1965,191 @@ mod tests {
                 version_uid: v.map(str::to_owned),
             })
             .collect()
+    }
+
+    /* ---------- 「改之前的值」读哪一份（刀 1，2026-11-02） ----------
+     *
+     * 这三条钉住作者实测的两个现象：
+     *   70 → 65    徽章必须出现（以前根本不出现）
+     *   70 → 65 → 60  徽章仍是 70（以前显示 65，即"上一个值"）
+     */
+
+    /// `rest` 读的是**盘上那一份**，不随编辑树变化。
+    #[test]
+    fn the_rest_value_comes_from_the_saved_copy_not_the_editing_tree() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        // 盘上那一份（未编辑）
+        let base = f.presets.reload().unwrap();
+
+        let cell_of = |p: &Presets| {
+            Book::new(p, &c, &d)
+                .with_rest(&base)
+                .matrix(&cols, Some("wiping"), "", None)
+                .rows
+                .iter()
+                .find(|r| r.key == "wiping.mode")
+                .map(|r| r.cells[0].clone())
+                .expect("wiping.mode 该在 wiping 组里")
+        };
+
+        // ① 改一次
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+        let first = cell_of(&work);
+        assert!(first.dirty, "改过必须标脏（以前这里恒 false ⇒ 徽章不出现）");
+        assert_eq!(
+            first.rest,
+            base.registry
+                .param("wiping.mode")
+                .map(|p| p.default_value.clone()),
+            "盘上没钉 ⇒ 有效值退到出厂值 —— 这枚 `↩` 要把用户送回这里"
+        );
+        assert!(
+            !first.rest_pinned,
+            "盘上这一层没钉着它 ⇒ 还原时写 null 删键、挂回继承"
+        );
+
+        // ② 再改一次：`rest` 不许跟着跑
+        let mut work2 = f.presets.reload().unwrap();
+        work2
+            .set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
+            .unwrap();
+        let second = cell_of(&work2);
+        assert_eq!(
+            second.rest, first.rest,
+            "改第二次不许让「改之前的值」变成上一个值（2026-11-02 作者实测的 65 那个 bug）"
+        );
+        assert_eq!(second.rest_pinned, first.rest_pinned);
+
+        // ③ 改回去 ⇒ 不脏，徽章消失
+        let clean = cell_of(&f.presets);
+        assert!(!clean.dirty, "没改过就是干净的");
+    }
+
+    /// **写过就不跟随**：哪怕写的就是基底那个值（2026-11-02 作者定稿，只剩两档）。
+    ///
+    /// 这条取代了之前的「出厂默认 / 机型默认 / 本版修改 / 已固定」四分 ——
+    /// 那四档答的是"值从哪来"，作者问的是"我改过它没有"。
+    ///
+    /// 判据只有一条：这一层有没有自己的一行（`has_own`）。值等于不等于基底，
+    /// **完全不参与判断** —— 写过的就是自己定的。
+    #[test]
+    fn a_written_value_is_marked_own_even_when_it_equals_the_inherited() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        /* 版本列才挂徽章（基底列 `badge` 恒为 None） */
+        let cols = cols(&[("A1", Some("A1/STANDARD"))]);
+        let key = "wiping.child";
+        let factory = f
+            .presets
+            .registry
+            .param(key)
+            .expect("夹具里该有这一项")
+            .default_value
+            .clone();
+
+        let cell_of = |work: &crate::workbench::presets::Presets| {
+            Book::new(work, &c, &d)
+                .matrix(&cols, Some("wiping"), "", None)
+                .rows
+                .iter()
+                .find(|r| r.key == key)
+                .map(|r| r.cells[0].clone())
+                .expect("这一行该在矩阵里")
+        };
+
+        /* ① 没写过 ⇒ 跟随基底 */
+        let plain = f.presets.reload().unwrap();
+        let cell = cell_of(&plain);
+        assert_eq!(
+            cell.badge,
+            Some(ParamStatus::Follow),
+            "没有自己的一行 ⇒ 跟随基底"
+        );
+
+        /* ② 写了个和出厂一样的值 ⇒ **仍然是不跟随**（写过就是写过） */
+        let mut same = f.presets.reload().unwrap();
+        same.set_variant(key, "A1:STANDARD", &factory).unwrap();
+        let cell = cell_of(&same);
+        assert!(cell.own, "前提：这一层现在有自己的行了");
+        assert_eq!(
+            cell.badge,
+            Some(ParamStatus::Own),
+            "值等于出厂也算自己定的 —— 只看有没有那一行"
+        );
+    }
+
+    /// 盘上**钉着**时，`rest` 就是那个钉值 —— 与编辑树无关。
+    #[test]
+    fn a_pinned_value_is_reported_even_after_the_tree_changed() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        let mut base = f.presets.reload().unwrap();
+        base.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("wipe_tower"))
+            .unwrap();
+
+        let cell = Book::new(&work, &c, &d)
+            .with_rest(&base)
+            .matrix(&cols, Some("wiping"), "", None)
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.mode")
+            .map(|r| r.cells[0].clone())
+            .unwrap();
+
+        assert!(cell.dirty);
+        assert_eq!(
+            cell.rest,
+            Some(serde_json::json!("disk")),
+            "盘上钉着的那个才是「改之前的值」"
+        );
+    }
+
+    /// 不指定 `rest_base` 时退回编辑树 —— 两者同源，`dirty` 恒假。
+    ///
+    /// 这条**不是**在保护旧行为，是在钉住「为什么必须调 `with_rest`」：
+    /// 生产路径漏掉它，徽章就会退回 2026-10-31 的状态（永不亮）。
+    #[test]
+    fn without_a_saved_copy_the_rest_reads_the_editing_tree_and_never_dirties() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let cols = cols(&[("A1", None)]);
+
+        let mut work = f.presets.reload().unwrap();
+        work.set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+            .unwrap();
+
+        let cell = Book::new(&work, &c, &d)
+            .matrix(&cols, Some("wiping"), "", None)
+            .rows
+            .iter()
+            .find(|r| r.key == "wiping.mode")
+            .map(|r| r.cells[0].clone())
+            .unwrap();
+
+        assert_eq!(
+            cell.rest,
+            Some(serde_json::json!("disk")),
+            "同源 ⇒ rest 就是刚写进去的值"
+        );
+        assert!(
+            !cell.dirty,
+            "同源 ⇒ 永远不脏。这正是「徽章永不出现」的机制，with_rest 必须调"
+        );
     }
 
     /* ---------- 整本 ---------- */
@@ -1816,9 +2315,72 @@ mod tests {
         );
     }
 
-    /// 生成状态靠**指纹**，不靠文件时间
+    /// 生成状态靠**盘上产物字节**，不靠文件时间，也不靠台账。
+    ///
+    /// 2026-11-01 改判：原来是"台账指纹 == 现在算出来的指纹"。那是拿**记录**判**文件**，
+    /// 记录一乱界面就跟着乱，而且和真生成用的判据（盘上字节）是两套口径。
+    /// 现在两边同一句话：`盘上产物 == 现在渲染出的内容` 就是 `Built`。
+    ///
+    /// 这条测试因此不再摆弄 `c.built`，而是往交付根里放一份"渲染结果"，
+    /// 再改源看它变 `Stale`。
     #[test]
-    fn build_state_compares_fingerprints() {
+    fn build_state_compares_the_bytes_on_disk() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let probe = |uid: &str| {
+            // 测试用渲染器：把"现在会渲染成什么"固定成一段可预期的文本
+            Some(format!("machine = {uid}\n"))
+        };
+
+        // 盘上还没有产物 → 未生成
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::NeverBuilt
+        );
+
+        // 盘上放一份**与当前渲染相同**的产物 → 已生成
+        let mkp = {
+            let b = Book::new(&f.presets, &c, &d);
+            b.version("A1/STANDARD").unwrap().mkp_file.clone()
+        };
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp);
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\n".as_bytes()).unwrap();
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::Built
+        );
+
+        // 盘上那份与当前渲染不同（= 源改过、还没生成）→ 待生成
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\nold = 1\n".as_bytes())
+            .unwrap();
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::Stale
+        );
+
+        // 台账**完全不影响**判定：现在没记任何 built 记录，上面已经是 Built 了
+        assert!(c.built.is_empty(), "这条判据不该需要台账");
+    }
+
+    /// 旧口径（指纹比对）的回归点：**改源 → 待生成**。
+    ///
+    /// 现在判据是字节，所以"改源"必须体现为"渲染结果变了"。这里用一个会随草稿
+    /// 变化的渲染器模拟：源改了 → 渲染输出变了 → 与盘上那份不同 → `Stale`。
+    #[test]
+    fn editing_a_value_makes_the_product_stale() {
         let f = Fixture::load();
         let mut c = committed();
         let d = Draft::default();
@@ -1836,12 +2398,29 @@ mod tests {
                 fingerprint: fp,
             },
         );
+
+        // 盘上放一份与"改前"相同的产物 → 已生成
+        let mkp = {
+            let b = Book::new(&f.presets, &c, &d);
+            b.version("A1/STANDARD").unwrap().mkp_file.clone()
+        };
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp);
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        crate::fsx::atomic::atomic_write(&product, "machine = A1/STANDARD\n".as_bytes()).unwrap();
+        let before = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&before)
+                .build_state("A1/STANDARD"),
             BuildState::Built
         );
 
-        // 改一个值 → 指纹变 → 待生成
+        // 改一个值 → 渲染结果跟着变 → 与盘上那份不同 → 待生成
         let mut d = Draft::default();
         apply(
             &mut d,
@@ -1855,8 +2434,12 @@ mod tests {
             }],
         )
         .unwrap();
+        // 渲染器代表"源改过之后会算出来的东西"：内容变了
+        let after = |_: &str| Some("machine = A1/STANDARD\nchild = 33\n".to_owned());
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&after)
+                .build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -1872,9 +2455,13 @@ mod tests {
         let c = committed();
         let d = Draft::default();
 
+        let probe = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
+
         // 没记录、磁盘上也没有 → 未生成
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
             BuildState::NeverBuilt
         );
 
@@ -1893,8 +2480,14 @@ mod tests {
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         crate::fsx::atomic::atomic_write(&target, "# 以前生成的旧产物\n".as_bytes()).unwrap();
 
+        /* 有产物、但与现在会算出来的那份不同 → 待生成。
+         *
+         * 2026-11-01 起这条**不再需要**"台账丢了怎么办"的兜底：判据本来就是盘上字节，
+         * 台账有没有都不影响结论。`c.built` 在这里是空的，照样判得出 `Stale`。 */
         assert_eq!(
-            Book::new(&f.presets, &c, &d).build_state("A1/STANDARD"),
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
             BuildState::Stale
         );
     }
@@ -1981,9 +2574,13 @@ mod tests {
         assert_eq!(moved, 2, "两个版本都没写过它，所以两个都该跟着变");
     }
 
-    /// 草稿里删键（挂回继承）**在保存之前就要看得出效果**
+    /// **「跟随基底」在保存之前就要看得出效果**（2026-11-03 改判）。
+    ///
+    /// 与旧的"删键"不同：**值留着**并同步成当前基底（作者：「值虽然一直存在，
+    /// 但状态是跟随」），变的是**状态** —— 于是这一格从此跟着基底走，
+    /// 徽章报「跟随」而不是「不跟随」。
     #[test]
-    fn a_pending_delete_shows_up_before_saving() {
+    fn following_the_base_keeps_the_value_and_shows_up_before_saving() {
         // 「已经写过的那一条」只能造在 registry 里 —— 值在这一层唯一的落盘处
         let (_dir, presets) =
             saved_values(&[("wiping.child", "A1:STANDARD", serde_json::json!(99))]);
@@ -1998,7 +2595,7 @@ mod tests {
         );
         assert!(
             l.has_own(Level::Version, "wiping.child"),
-            "这一层自己钉着它"
+            "这一层自己写着它（`saved_values` 写值 ⇒ 不跟随）"
         );
 
         apply(
@@ -2014,18 +2611,39 @@ mod tests {
         )
         .unwrap();
 
-        // 挂回继承在这台机型上一路退到出厂默认：版本层删掉之后机型层那一项也不存在
-        // （有落差时它只退一层，见 `domain::layer` 的 detaching_falls_back_one_level_at_a_time）
+        /* 值同步成基底：版本层没有值 → 机型层也没有 → 出厂 20。
+        跟随这个状态**不删那一行**，所以值确实写在这一版的行里（来源 = 版本层）；
+        "跟不跟随"由状态回答，不由有没有那一行回答 */
         let b = Book::new(&presets, &c, &d);
         let l = b.version_layers("A1/STANDARD").unwrap();
         assert_eq!(
             *l.effective("wiping.child").unwrap().value,
-            serde_json::json!(20.0)
+            serde_json::json!(20.0),
+            "值留着，同步成当前基底"
         );
-        assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Factory);
+        assert_eq!(l.effective("wiping.child").unwrap().origin, Origin::Version);
         assert!(
-            !l.has_own(Level::Version, "wiping.child"),
-            "自有那一项该没了"
+            l.has_own(Level::Version, "wiping.child"),
+            "「跟随」不等于「删掉这一行」—— 值还在"
+        );
+
+        /* 状态在草稿里：值与状态是**同一笔**（撤销一起回退、保存一起落盘） */
+        assert_eq!(
+            d.pending_follows(Level::Version, "A1/STANDARD", "wiping.child"),
+            Some(true),
+            "状态与值同一笔草稿"
+        );
+        let cell = b
+            .matrix(&cols(&[("A1", Some("A1/STANDARD"))]), None, "", None)
+            .rows
+            .into_iter()
+            .find(|r| r.key == "wiping.child")
+            .unwrap()
+            .cells[0]
+            .clone();
+        assert!(
+            !cell.own,
+            "徽章报「跟随基底」—— 判据是草稿里那句状态，不是有没有那一行"
         );
     }
 
@@ -2652,6 +3270,57 @@ mod tests {
         assert!(mode.cells[0].own, "我们在这一层写过它 → 挂回继承可点");
     }
 
+    /// **改机型基底，不该让跟着它的版本列显成"改过"**（2026-11-03 作者报的）。
+    ///
+    /// 现场：改 `A1 · Z 轴偏移 3.9 → 3.95`，右侧「各版本取值」四行全亮 `↩ 3.9`，
+    /// 可文件里只多写了一行（日志 `written=1`），页头也说 1 处。
+    ///
+    /// 根因：`dirty_of` 当时比的是**有效值**（继承算完的结果）——
+    /// 版本列继承基底，基底一变它们的有效值全变，于是全判脏。
+    /// 正确判据是**这一层自己那一行**变没变：跟随基底的格子（`over` 里没有它）
+    /// 永远不该算改过，"跟随"就是这个意思。
+    #[test]
+    fn changing_the_base_does_not_make_following_versions_dirty() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        /* 同一个枚举格：基底改值，版本列跟着走 */
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "A1".to_owned(),
+                key: "wiping.mode".to_owned(),
+                value: Some(serde_json::json!("disk")),
+            }],
+        )
+        .unwrap();
+
+        let b = Book::new(&f.presets, &c, &d);
+        /* 一列基底 + 一列版本：版本列在当前树里**没有自己那一行** */
+        let m = b.matrix(
+            &cols(&[("A1", None), ("A1", Some("A1/STANDARD"))]),
+            None,
+            "",
+            None,
+        );
+        let row = m.rows.iter().find(|r| r.key == "wiping.mode").unwrap();
+
+        assert!(row.cells[0].dirty, "改的就是基底这一格，必须标脏");
+        assert!(row.cells[0].own, "基底那一行确实写进去了");
+
+        let ver = &row.cells[1];
+        assert!(
+            !ver.dirty,
+            "版本列只是跟随基底 —— 文件里没多写它那一行，不该标成改过"
+        );
+        assert!(!ver.own, "版本列没有自己那一行");
+        /* 但它的**有效值**确实跟着变了 —— 界面靠这个显示 3.95 */
+        assert_eq!(ver.text, "圆盘擦拭", "跟随后的值要显示出来");
+    }
+
     /// 分类过滤；**搜索一开分类让开**，并且说明条上写明这件事
     #[test]
     fn searching_overrides_the_tab_filter_and_says_so() {
@@ -2804,31 +3473,29 @@ mod tests {
             ArtifactState::Missing
         );
 
-        // 把三个有产物的版本都记成已生成（记进**台账**，2026-10-06 状态机修正）
+        // 三个有产物的版本：盘上摆一份与当前渲染**相同**的产物 → 已生成
         let uids = ["A1/STANDARD", "A1/FAST", "P1S/LITE"];
-        let fps: Vec<String> = {
+        let probe = |_: &str| Some("same\n".to_owned());
+        for u in uids {
             let b = Book::new(&f.presets, &c, &d);
-            uids.iter()
-                .map(|u| b.version_layers(u).unwrap().fingerprint())
-                .collect()
-        };
-        let mut c = c;
-        for (u, fp) in uids.iter().zip(fps) {
-            c.built.insert(
-                (*u).to_owned(),
-                BuiltRecord {
-                    stamp: "2026-01-01T00:00:00Z".to_owned(),
-                    fingerprint: fp,
-                },
-            );
+            let mkp = b.version(u).unwrap().mkp_file.clone();
+            let target = f
+                .presets
+                .root()
+                .join(crate::workbench::paths::DELIVERY_SUBDIR)
+                .join(crate::workbench::paths::MKP_PRESETS_DIR)
+                .join(&mkp);
+            std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+            crate::fsx::atomic::atomic_write(&target, "same\n".as_bytes()).unwrap();
         }
 
-        let view = Book::new(&f.presets, &c, &d).book_view();
+        let view = Book::new(&f.presets, &c, &d)
+            .with_renderer(&probe)
+            .book_view();
         assert_eq!(
             view.artifact,
             ArtifactState::Fresh,
             "A2L 还是「暂无资源」，但它不该拖住整本"
         );
-        assert_eq!(view.last_build.as_deref(), Some("2026-01-01T00:00:00Z"));
     }
 }

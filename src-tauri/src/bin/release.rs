@@ -15,9 +15,13 @@
 //! # 用法
 //!
 //! ```text
-//! cargo run --bin release --features workbench -- 0.0.2 "修了 X"        # 第一阶段：预检 → 版本 → 提交 → 推送 → PR
-//! cargo run --bin release --features workbench -- 0.0.2 "修了 X" --merge # 第二阶段：合并 → 打 tag → 构建 → Release → 上传 → release.json
-//! cargo run --bin release --features workbench -- --dry-run              # 只看预检结论，一个字节都不动
+//! cargo run --bin release --features workbench -- 0.0.2 "修了 X" --confirm        # 第一阶段：预检 → 版本 → 提交 → 推送 → PR
+//! cargo run --bin release --features workbench -- 0.0.2 "修了 X" --merge --confirm # 第二阶段：合并 → 打 tag → 构建 → Release → 上传 → release.json
+//! cargo run --bin release --features workbench -- --dry-run                       # 只看预检结论，一个字节都不动（不需确认）
+//!
+//! ★ `--confirm` 是**真发版的人类确认位**（2026-11-05 硬约束，见 `AGENTS.md`）：
+//!   缺了会被内核零副作用拒绝。它会打 tag、上传安装包、写 `release.json`，
+//!   是用户会收到"有新版"的那一步 —— AI / CI 没有当次许可不许自己跑。
 //! ```
 //!
 //! `--merge` 单独一趟是**刻意的**：合并之前要先看 CI（`scripts/release.mjs` 用
@@ -75,6 +79,9 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
     let mut dry_run = false;
     let mut open_review = true;
     let mut base = String::from("main");
+    /* **人类确认位**（2026-11-05 硬约束）：真发版缺 `--confirm` 会被内核零副作用拒绝。
+     * 人当次明确许可才拿得到这个 flag（交互脚本里是一句明确的 yes，非交互要显式带）。 */
+    let mut confirmed = false;
 
     for a in &args {
         match a.as_str() {
@@ -82,6 +89,7 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
             "--no-build" => build = false,
             "--dry-run" => dry_run = true,
             "--no-review" => open_review = false,
+            "--confirm" => confirmed = true,
             _ => {
                 if let Some(v) = a.strip_prefix("--base=") {
                     base = v.to_owned();
@@ -105,6 +113,7 @@ fn run_cli() -> Result<mkp_support_ease_lib::workbench::app::release_tx::Release
         merge,
         build,
         open_review,
+        confirmed,
     };
 
     let (target, hosting) = resolve_from_env();

@@ -69,10 +69,11 @@ fn the_only_source_actually_carries_the_registry() {
     let reg = preset::load_param_registry();
     assert_eq!(
         reg.params.len(),
-        75,
-        "真源应有 75 条 [[params]]（实测基线）；条数变了就该在提交里说清为什么"
+        83,
+        "真源应有 83 条 [[params]]（实测基线）；条数变了就该在提交里说清为什么"
     );
-    assert_eq!(reg.tabs.len(), 8, "真源应有 8 个 [[tabs]]（实测基线）");
+    // c888a5e 在工作台里删掉了 settings tab（分组结构编辑），实测基线同步成 7。
+    assert_eq!(reg.tabs.len(), 7, "真源应有 7 个 [[tabs]]（实测基线）");
 
     // 指纹：`wiping.disk_stagger_swing_mode` 在我们那份里是 `select`、来源仓库那份是
     // `segmented` —— 读到 `select` 就证明读到的是**我们那份**，不是来源仓库那份。

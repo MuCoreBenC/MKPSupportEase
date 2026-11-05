@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.9",
+  "version": "0.0.10-dev",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -14,14 +14,18 @@
     "tauri:workbench:dev": "node scripts/tauri-workbench.mjs dev",
     "tauri:workbench:build": "node scripts/tauri-workbench.mjs build",
     "preview": "vite preview",
-    "lint": "eslint . && stylelint \"src/**/*.css\"",
+    "lint": "eslint . && stylelint \"src/**/*.css\" && node scripts/check-locate.mjs",
     "test": "vitest run",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri-dev.mjs",
     "icons": "node scripts/gen-icons.mjs",
     "preset-source:dev": "node scripts/preset-test-server/server.mjs",
     "dev:test-update": "node scripts/preset-test-server/dev.mjs",
     "release": "node scripts/release.mjs",
+    "version:check": "node scripts/version.mjs check",
+    "version:dev": "node scripts/version.mjs bump-dev",
+    "version:release": "node scripts/version.mjs release",
+    "version:next": "node scripts/version.mjs next",
     "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",
     "check:bundle": "node scripts/check-bundle.mjs",
     "check:zero-network": "node scripts/check-zero-network.mjs",
@@ -29,7 +33,9 @@
     "check:release-source": "node scripts/check-release-source.mjs",
     "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
     "check:artifacts": "node scripts/check-artifact-boundary.mjs",
-    "check:i18n": "node scripts/check-i18n.mjs"
+    "check:i18n": "node scripts/check-i18n.mjs",
+    "translations:todo": "node scripts/stale-translations.mjs",
+    "glue:check": "node scripts/glue-check.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

@@ -1,86 +1,21 @@
-//! 判据 K-G1 / K-G2 / K-G3：配方生成的预设与**现有的 9 份逐字节相同**。
+//! 配方正文的判据（K-G2 / K-G3 / K-G4）。
 //!
-//! # 为什么这条是黄金判据
+//! 2026-11-04：旧 **K-G1**（配方渲染与现役 9 份逐字节相同）随 `gen-presets` 一起退役。
+//! 现役产物由工作台按新头部生成（`# machine` / `# variant` / `# generated_at`，
+//! 没有 `uuid` / `release_time`），而老配方渲染仍带那两行 —— 两边再逐字节比必然是假红。
+//! 正式产物的判据归工作台 `presets diff` / `check:artifacts` 与
+//! `tests/builtin_presets_match_dir.rs`（含客户端读取面闸门）。
 //!
-//! 生成器的产物会被烧进二进制、铺到用户机器上、交给打印机。那些数字（笔尖偏移、
-//! 驻点坐标、回抽量）错了不会报错，只会让笔尖撞喷嘴 —— 而错误要到真机打印才看得见。
-//! 所以生成器唯一可信的安全网就是：**它生成出来的东西必须与现在正在用的那 9 份一模一样**。
-//!
-//! K-G1 守的是「没有引入变化」，**不是**「参数正确」（参数对不对只有真机知道）。
+//! 这里保留的是**配方正文本身**还健康：幂等、渲染出的预设能被读取面消费、
+//! 每条覆盖真的生效。配方正文仍被工作台预检（`wb_preflight`）当机型清单用。
 
 // 测试写临时文件、造夹具是正当的：写盘纪律管的是**生产代码**
 // （与源码扫描断言只看 `#[cfg(test)]` 之前那部分同一口径）。
 #![allow(clippy::disallowed_methods)]
 
-use std::path::PathBuf;
-
-// 基线目录只认 `generate::fixtures_dir()` 那一处 —— 手写相对路径会在目录布局一变时
-// 悄悄指向别处，而「读不到就跳过」的判据看起来还是绿的。
-use preset::generate::fixtures_dir;
 use preset::recipe::{Recipe, render};
 
 const RECIPE: &str = include_str!("../assets/preset_recipes.toml");
-
-/// 一个 `(机型, 变体)` 对应的 fixture：路径与原文。
-///
-/// **按名字找，不读文件头**（b05 Task 5）：夹具已改成产物命名，名字由
-/// `preset::preset_file_name` 算出 —— 于是这条判据顺带钉住「配方里的机型变体
-/// 与夹具文件名对得上」，对不上时的表现是「找不到那份夹具」，指名道姓。
-fn fixture(machine: &str, variant: &str) -> (PathBuf, String) {
-    let path = fixtures_dir().join(preset::preset_file_name(machine, variant));
-    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| {
-        panic!(
-            "K-G1 红：读不到 {}（{machine}:{variant}）：{e}",
-            path.display()
-        )
-    });
-    (path, text)
-}
-
-/// 第一处不同在哪（行号 + 两边的原文）。判据红的时候要能直接照着修。
-fn first_diff(want: &str, got: &str) -> Option<String> {
-    for (i, (a, b)) in want.lines().zip(got.lines()).enumerate() {
-        if a != b {
-            return Some(format!("第 {} 行\n  现有的：{a}\n  生成的：{b}", i + 1));
-        }
-    }
-    if want.lines().count() != got.lines().count() {
-        return Some(format!(
-            "行数不同（现有 {} 行 / 生成 {} 行）",
-            want.lines().count(),
-            got.lines().count()
-        ));
-    }
-    (want != got).then(|| "只有行尾或结尾换行不同".to_string())
-}
-
-/// K-G1（黄金判据）：9 份全渲染，与现有预设逐字节相同。
-#[test]
-fn kg1_generated_presets_are_byte_identical_to_the_existing_ones() {
-    let recipe = Recipe::parse(RECIPE).expect("配方必须读得回来");
-
-    let combos = recipe.combos();
-    assert_eq!(
-        combos.len(),
-        9,
-        "K-G1 红：配方给出 {} 个机型变体，现有预设是 9 份",
-        combos.len()
-    );
-
-    for (machine, variant) in &combos {
-        let (path, want) = fixture(machine, variant);
-        let got = render(&recipe, machine, variant)
-            .unwrap_or_else(|e| panic!("K-G1 红：{machine}:{variant} 渲染失败：{e}"));
-        if let Some(where_) = first_diff(&want, &got) {
-            panic!(
-                "K-G1 红：{machine}:{variant} 与 {} 不同 —— {where_}",
-                path.file_name().unwrap().to_string_lossy()
-            );
-        }
-        assert_eq!(&got, &want, "K-G1 红：{machine}:{variant} 逐字节不同");
-    }
-    println!("K-G1 绿：{} 份生成物与现有预设逐字节相同", combos.len());
-}
 
 /// K-G2：幂等 —— 连渲染两次结果相同。
 ///
@@ -145,11 +80,15 @@ fn kg4_every_override_field_actually_lands_in_the_product() {
     for (machine, variant) in recipe.combos() {
         let text = render(&recipe, &machine, &variant).expect("渲染");
         let parsed: toml::Value = toml::from_str(&text).expect("产物是合法 TOML");
-        // 顺手确认一件事：生成的**云端**预设不该带副本的血统三行
+        // 顺手确认一件事：生成的**云端**预设不该带来源记录（那是客户端落地时写的）
         let file = preset::read_preset_from_bytes(text.clone()).expect("产物能读");
         assert!(
-            file.lineage.is_none(),
-            "K-G4 红：云端预设不该带 `# based_on*`"
+            file.provenance.is_none(),
+            "K-G4 红：云端预设不该带 `[mkp_source]` 来源记录"
+        );
+        assert!(
+            !text.contains("mkp_source"),
+            "K-G4 红：云端产物正文里不该出现来源记录"
         );
 
         for (path, want) in recipe.effective(&machine, &variant) {

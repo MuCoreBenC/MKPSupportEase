@@ -20,7 +20,7 @@
 //!
 //! # 清理
 //!
-//! 内容不是"当前版本就留、否则删"：同一个 SHA 可能同时被当前目录、用户血统、
+//! 内容不是"当前版本就留、否则删"：同一个 SHA 可能同时被当前目录、用户来源记录、
 //! 回收记录、逐参数更新账引用。清理前由 [`gc`] 统计引用，只删没人引用且超过保留期的。
 
 use postprocess::diag::messages;
@@ -243,17 +243,17 @@ fn archived_version(internal_root: &Path, path: &str, sha256: &str) -> Option<Ve
 ///
 /// 引用来源（任一成立就留）：
 /// 1. 当前目录索引里任一 `path → sha`（见 [`super::delivery_index`]）；
-/// 2. 任一用户正式预设血统里的 `based_on_sha256`；
+/// 2. 任一用户正式预设来源记录里的 `based_on_sha256`；
 /// 3. 任一回收记录带来的 `LocalProvenance.source_sha256`；
 /// 4. 逐参数「云端更新」账里的水位 `sha256`（[`pending_update_shas`]）；
-/// 5. 用户文件自己此刻的字节（下载件带血统头，通常由 2 覆盖）。
+/// 5. 用户文件自己此刻的字节（下载件带来源记录头，通常由 2 覆盖）。
 ///
 /// 数量闸（[`KEEP_COUNT`]）与时间闸（[`KEEP_DAYS`]）**只看无人引用的**内容：
 /// 被引用的旧版本再老也不删 —— 那是三方更新的依据。
 pub fn gc(internal_root: &Path) -> Result<usize, AppError> {
     let mut referenced = super::delivery_index::referenced_shas(internal_root);
     referenced.extend(super::recovery::referenced_shas(internal_root));
-    referenced.extend(local_lineage_shas(internal_root));
+    referenced.extend(local_provenance_shas(internal_root));
     referenced.extend(pending_update_shas(internal_root)?);
 
     let now = std::time::SystemTime::now()
@@ -302,11 +302,11 @@ fn pending_update_shas(
         .collect())
 }
 
-/// 扫描用户正式预设的血统头，收集 `based_on_sha256`。
+/// 扫描用户正式预设的来源记录头，收集 `based_on_sha256`。
 ///
-/// 只读每个文件的前 8KB：血统头在最前面，用户文件通常几 KB；读全量在文件多时
+/// 只读每个文件的前 8KB：来源记录头在最前面，用户文件通常几 KB；读全量在文件多时
 /// 也没问题，但这里按最保守的读法来。
-fn local_lineage_shas(internal_root: &Path) -> std::collections::HashSet<String> {
+fn local_provenance_shas(internal_root: &Path) -> std::collections::HashSet<String> {
     let user = internal_root.join("user");
     let mut out = std::collections::HashSet::new();
     let mut stack = vec![user.join("presets-local")];

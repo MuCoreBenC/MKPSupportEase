@@ -22,6 +22,9 @@
 //! 先写好才不用把同一批文案写两遍再搬一次）。
 
 pub mod derive;
+/// **编辑历史**（2026-11-03）：撤销 / 重做记的是**用户操作**，不是文件字节。
+/// 见 `docs/WORKBENCH-EDITOR-MODEL.md`；与 [`txn`] 的编辑栈在迁移期并存（值编辑走这里）。
+pub mod history;
 pub mod issues;
 /// 三层取值。**它住在 [`crate::presetdata::resolve`]** —— 客户端预设页要同一份算法，
 /// 而这一整棵子树是 feature gate 的。这里只是别名回原来的名字，
@@ -29,6 +32,9 @@ pub mod issues;
 pub use crate::presetdata::resolve as layer;
 pub mod patch;
 pub mod preview;
+/// **未保存改动的文本 diff**（2026-11-02）：盘上 `presets/` ↔ 影子树，逐行摊开。
+/// 与 `txn`（"哪些文件变了"）分工：那个管路由与撤销，这个只管"改成什么样"。
+pub mod shadow_diff;
 /// **统一编辑事务**（2026-10-31）：影子工作树 + 文件级操作日志。
 /// 所有编辑都只写影子树，「保存」是唯一落盘边界 —— 见模块头注。
 pub mod txn;

@@ -89,6 +89,35 @@ pub struct Git {
     repo: PathBuf,
 }
 
+/// 「发布历史」第三栏的一行：`git log` 的一条提交（短 sha / 作者 / ISO 时间 / 标题）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitRow {
+    pub short: String,
+    pub author: String,
+    pub at: String,
+    pub subject: String,
+}
+
+/// `git log --format` 的 `US`/`RS` 输出 → 行。纯函数，判据不依赖机器上有没有 git。
+fn parse_recent_log(out: &str) -> Vec<CommitRow> {
+    out.split('\u{1e}')
+        .filter_map(|rec| {
+            let mut fields = rec.trim().split('\u{1f}');
+            let short = fields.next()?.trim();
+            if short.is_empty() {
+                return None;
+            }
+            Some(CommitRow {
+                short: short.to_owned(),
+                author: fields.next().unwrap_or("").trim().to_owned(),
+                at: fields.next().unwrap_or("").trim().to_owned(),
+                subject: fields.next().unwrap_or("").trim().to_owned(),
+            })
+        })
+        .collect()
+}
+
 impl Git {
     /// 打开仓库根这一处的 git。**不检查它是不是仓库** —— 检查落在第一次命令上
     /// （`rev-parse`），那时才拿得到真实原因。
@@ -196,6 +225,25 @@ impl Git {
         let out = self.run(&["log", "-1", "--format=%h", "--", path]).ok()?;
         let sha = out.trim();
         (!sha.is_empty()).then(|| sha.to_owned())
+    }
+
+    /// **本分支最近的提交**（只读、不联网）——「发布历史」第三栏用。
+    ///
+    /// 用 `US`/`RS` 控制字符分隔字段/记录，不靠换行或逗号：提交说明与作者名里
+    /// 都可能出现这些字符。`limit` 在内核里夹到 1..=20（界面不许一次拖走整本 log）。
+    ///
+    /// ★ 这是**本机仓库**的视图：没推上去 / 没合进主线的提交一样会出现。
+    /// 界面必须写清这一句（作者 2026-11-05 要的是"看 AI 在 CI 干了什么"）。
+    pub fn recent_commits(&self, limit: usize) -> Result<Vec<CommitRow>, AppError> {
+        let n = limit.clamp(1, 20).to_string();
+        let out = self.run(&[
+            "log",
+            "-n",
+            n.as_str(),
+            "--format=%h%x1f%an%x1f%aI%x1f%s%x1e",
+            "HEAD",
+        ])?;
+        Ok(parse_recent_log(&out))
     }
 
     /// 推分支（`git push -u origin <branch>`）。`branch` 为空 = 用当前分支。
@@ -1127,5 +1175,21 @@ mod tests {
         git.commit("发布：演示").expect("commit");
         // 提交之后 src/lib.rs 仍是未跟踪 —— 它没被卷进去
         assert!(git.status_raw().unwrap().contains("src/lib.rs"));
+    }
+
+    /// 最近提交用的是 `US`/`RS` 分隔：提交说明里的冒号、逗号、换行都不许把字段拆歪。
+    #[test]
+    fn recent_commits_parser_keeps_the_fields_apart() {
+        let out = format!(
+            "abc1234\u{1f}张三\u{1f}2026-11-05T11:57:00+08:00\u{1f}发布：交付产物 17 份，含逗号\u{1e}\
+             919c632\u{1f}wzy\u{1f}2026-11-05T10:31:00+08:00\u{1f}{}\u{1e}",
+            "feat(glue): 8 格参数，含: 冒号"
+        );
+        let rows = parse_recent_log(&out);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].short, "abc1234");
+        assert_eq!(rows[0].subject, "发布：交付产物 17 份，含逗号");
+        assert_eq!(rows[1].subject, "feat(glue): 8 格参数，含: 冒号");
+        assert_eq!(rows[1].at, "2026-11-05T10:31:00+08:00");
     }
 }

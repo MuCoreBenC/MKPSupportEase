@@ -31,7 +31,7 @@
    │
    └── 用户工作副本  <appDataDir>/user/presets-mine/<file>.toml
           ↑ 用户看到、编辑、校准、另存、改名、删除、应用 —— **只有这一份**
-          ↑ 文件头带血统三行（`# based_on*`）：基于哪一份官方、哪一版、当时原文的 sha256
+          ↑ 文件头带来源记录（`# based_on*`）：基于哪一份官方、哪一版、当时原文的 sha256
 ```
 
 **基线就是现有的内部原件区**（`catalog.path` 指向的落点，`<appDataDir>/delivery/…`）。
@@ -52,17 +52,17 @@
 
 ## 3. 「官方换版了没有」怎么答（基线的用途）
 
-工作副本的血统三行记着**当初那份官方原文的 sha256**；目录（catalog）登记着**当前那一版**
+工作副本的来源记录记着**当初那份官方原文的 sha256**；目录（catalog）登记着**当前那一版**
 的期望 sha256。两者一比就是现成的三档（`runtime::mine::based_on`）：
 
 ```text
-血统 sha256 == 目录期望 sha256   → current（官方没换版）
-血统 sha256 != 目录期望 sha256   → outdated（官方换版了）：界面说「官方已换新版」
+来源记录 sha256 == 目录期望 sha256   → current（官方没换版）
+来源记录 sha256 != 目录期望 sha256   → outdated（官方换版了）：界面说「官方已换新版」
 目录里已经没有来源那份            → unknown（说不出新旧）
 ```
 
 **云端的"有没有新版"不看工作副本自己的字节**（用户改过，比它必然不同），
-只看这条血统比对 —— 这正是"基线只作与云端比对"那句话的兑现方式。
+只看这条来源记录比对 —— 这正是"基线只作与云端比对"那句话的兑现方式。
 
 ## 4. 交互现状（用户看到的）
 
@@ -86,7 +86,7 @@
 | `copy_release_as_new` | **退役**（下载即得工作副本，"官方 → 我的另存"没有存在理由了） |
 | `ensure_user_copy(fileName)` | **新增**：幂等补齐工作副本（下载收尾与首页应用前都用它）；基线不在 / 字节不干净 → 报错说清「先下载」 |
 | `get_user_copy_for(machineId, versionId)` | **新增**：这台机型 / 这个版本「我那一份」在哪 + 它带的校准值（校准页初值与保存落点） |
-| `save_preset_calibration(path, axes)` | **新增**：三个值按注册表定位写进工作副本（注释 / 键序 / 血统一个字节不动） |
+| `save_preset_calibration(path, axes)` | **新增**：三个值按注册表定位写进工作副本（注释 / 键序 / 来源记录一个字节不动） |
 
 Rust 判据：`runtime::mine` 的 `the_first_download_leaves_a_working_copy_and_never_overwrites_it`
 （首次生成 + 二次不动）、`ensure_working_copy_refuses_non_presets`、
@@ -119,7 +119,7 @@ Rust 判据：`runtime::mine` 的 `the_first_download_leaves_a_working_copy_and_
   用户世界**永远只有一份**"的模型**已被取代**：现在**每次下载各留一份**
   （文件名带官方发布日，旧的永不覆盖），上面那份"官方基线"同时按内容摘要
   在**隐藏 baseline 区**留一份 —— 它的职责收窄成「恢复默认」的取值依据与
-  `based_on_sha256` 的基准。规格见 [`PRESET-MULTI-VERSION.md`](PRESET-MULTI-VERSION.md)；
+  `history[].sha256` 的基准。规格见 [`PRESET-MULTI-VERSION.md`](PRESET-MULTI-VERSION.md)；
   「不做自动合并 / 不做数据迁移」这两条**不变**。
 - **基线没有用户可见的删除入口**：它是程序管理的内部内容（随检查更新自动换代）；
   要清理就删 `<appDataDir>/delivery/…` 里那份，程序会把它当"未下载"。

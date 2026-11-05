@@ -38,7 +38,7 @@ use crate::workbench::clock;
 use crate::workbench::domain::patch::Visibility;
 use crate::workbench::presets::{AssetKind, Presets};
 
-use super::{state, with_ctx, with_ctx_mut};
+use super::{state, with_ctx, with_struct_ctx};
 
 /// 资产在界面上的**真名**（与资产库同一处派生：MKP 预设 = 版本名、切片器 = 文件名）。
 /// 套餐里那些行显示的也是它 —— 两处不许各显示一份不一样的名字
@@ -229,8 +229,10 @@ pub fn wb_bundles(query: Option<String>) -> Result<BundleList, AppError> {
     traced("wb_bundles", |_| {
         with_ctx(|ctx| {
             let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
+            /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+            所以渲染器与产物根都要装好（2026-11-01）。 */
+            let probe = super::build::renderer_for(ctx);
+            let book = super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
             Ok(list_of(
                 &ctx.presets,
                 &book,
@@ -255,21 +257,28 @@ pub fn wb_set_bundle_refs(
     asset_ids: Vec<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_set_bundle_refs", |_| {
-        with_ctx_mut(|ctx| {
-            // 时间戳由工作台这一侧给（时间源只有 `clock` 一处，见它的模块头）
-            ctx.presets
-                .set_bundle_refs(&bundle_id, &asset_ids, &clock::now_iso8601())?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "refs",
+            |_| vec!["bundles.toml".to_owned()],
+            |ctx| {
+                // 时间戳由工作台这一侧给（时间源只有 `clock` 一处，见它的模块头）
+                ctx.presets
+                    .set_bundle_refs(&bundle_id, &asset_ids, &clock::now_iso8601())?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 
@@ -285,25 +294,32 @@ pub fn wb_add_bundle(
     asset_ids: Vec<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_add_bundle", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.add_bundle(
-                &id,
-                &machine_id,
-                &display,
-                &asset_ids,
-                &clock::now_iso8601(),
-            )?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["bundles.toml".to_owned()],
+            |ctx| {
+                ctx.presets.add_bundle(
+                    &id,
+                    &machine_id,
+                    &display,
+                    &asset_ids,
+                    &clock::now_iso8601(),
+                )?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 
@@ -316,24 +332,41 @@ pub fn wb_rename_bundle(
     display: Option<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_rename_bundle", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.rename_bundle(
-                &bundle_id,
-                &new_id,
-                display.as_deref(),
-                &clock::now_iso8601(),
-            )?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "name",
+            |ctx| {
+                let mut v = vec!["bundles.toml".to_owned()];
+                v.extend(
+                    ctx.presets
+                        .catalog
+                        .machines()
+                        .iter()
+                        .map(|m| format!("machines/{}.toml", m.id)),
+                );
+                v
+            },
+            |ctx| {
+                ctx.presets.rename_bundle(
+                    &bundle_id,
+                    &new_id,
+                    display.as_deref(),
+                    &clock::now_iso8601(),
+                )?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 
@@ -345,24 +378,31 @@ pub fn wb_copy_bundle(
     display: Option<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_copy_bundle", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.copy_bundle(
-                &bundle_id,
-                &new_id,
-                display.as_deref(),
-                &clock::now_iso8601(),
-            )?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["bundles.toml".to_owned()],
+            |ctx| {
+                ctx.presets.copy_bundle(
+                    &bundle_id,
+                    &new_id,
+                    display.as_deref(),
+                    &clock::now_iso8601(),
+                )?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 
@@ -375,19 +415,26 @@ pub fn wb_assign_bundle_versions(
     uids: Vec<String>,
 ) -> Result<BundleList, AppError> {
     traced("wb_assign_bundle_versions", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.assign_versions(&bundle_id, &uids)?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "members",
+            |_| vec!["bundles.toml".to_owned()],
+            |ctx| {
+                ctx.presets.assign_versions(&bundle_id, &uids)?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 
@@ -396,19 +443,26 @@ pub fn wb_assign_bundle_versions(
 #[tauri::command]
 pub fn wb_remove_bundle(bundle_id: String) -> Result<BundleList, AppError> {
     traced("wb_remove_bundle", |_| {
-        with_ctx_mut(|ctx| {
-            ctx.presets.remove_bundle(&bundle_id)?;
-            let (committed, draft, _) = state(ctx)?;
-            let book =
-                crate::workbench::domain::derive::Book::new(&ctx.presets, &committed, &draft);
-            Ok(list_of(
-                &ctx.presets,
-                &book,
-                &committed.visibility,
-                &draft.visibility,
-                None,
-            ))
-        })
+        with_struct_ctx(
+            "",
+            |_| vec!["bundles.toml".to_owned()],
+            |ctx| {
+                ctx.presets.remove_bundle(&bundle_id)?;
+                let (committed, draft, _) = state(ctx)?;
+                /* 套餐里的版本状态同样来自 `build_state`（盘上字节 vs 当前渲染），
+                所以渲染器与产物根都要装好（2026-11-01）。 */
+                let probe = super::build::renderer_for(ctx);
+                let book =
+                    super::build::book_with_probe(ctx, &ctx.presets, &committed, &draft, &probe);
+                Ok(list_of(
+                    &ctx.presets,
+                    &book,
+                    &committed.visibility,
+                    &draft.visibility,
+                    None,
+                ))
+            },
+        )
     })
 }
 

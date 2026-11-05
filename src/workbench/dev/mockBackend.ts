@@ -180,6 +180,8 @@ interface FixtureParam {
   deprecated: boolean
   /** 只在这些机型上弃用（与 `deprecated` 叠加） */
   deprecatedMachines?: string[]
+  /** 译文台账（2026-11-02）：哪几册还是旧中文的译本。空/缺省 = 没问题 */
+  staleTranslations?: string[]
 }
 
 const p = (over: Partial<FixtureParam> & { key: string; label: string }): FixtureParam => ({
@@ -302,7 +304,111 @@ const TABS = [
   { id: 'space', label: '偏移', order: 3, sections: [{ id: 'space', label: '空间偏移', order: 1 }] },
 ]
 
-const SECTION_LABEL = new Map(TABS.flatMap((t) => t.sections.map((s) => [s.id, `${t.label} · ${s.label}`])))
+/** 分组自己的名字（**不含页签**）—— 与真后端 `row.sectionLabel` 同口径 */
+const SECTION_LABEL = new Map(TABS.flatMap((t) => t.sections.map((s) => [s.id, s.label])))
+
+/*
+ * 「放弃 = 影子树整个拉回磁盘原状」在演示桩里的对应物（2026-11-01）。
+ *
+ * 真机里 `wb_set_*` / `wb_add_*` 那批命令写的是影子树里的 TOML，`wb_discard`
+ * 一个 mirror 就全回去了。桩里这批夹具是模块级单例、命令直接改本体 ——
+ * 不做快照的话，「分组换位 / 参数搬家 / 机器禁区 / 套餐……」点了放弃退不回去，
+ * 就成了真机没有的 Bug。
+ *
+ * 做法：第一条改动前把会动的夹具深拷贝一份；`wb_discard` 整体还原；
+ * `wb_save` 成功后把快照换成当前份（保存过的状态就是新基线，与真机
+ * `txn::mirror(real → base)` 同一个意思）。标注（`wb_anno_*`）不进来 ——
+ * 真机上标注有自己的落盘口径，不走影子树。
+ */
+type ShadowFixtures = {
+  params: FixtureParam[]
+  tabs: typeof TABS
+  views: typeof MACHINE_VIEWS
+  bundles: typeof BUNDLES
+  groups: typeof GROUPS
+  assets: typeof ASSETS
+  brands: typeof BRANDS
+  calib: typeof MOCK_CALIBRATION
+}
+let shadowSnap: ShadowFixtures | null = null
+/** 结构类改动计几笔 —— `wb_txn_state` 用它把保存/放弃点亮（真机走 txn::record） */
+let structDirty = 0
+/**
+ * 「改了什么」的假账 —— 桩里没有真事务，但界面不该因此永远显示空白。
+ *
+ * 每写一笔就把命令名记成一条 `structural` 字段变化。这不是"猜用户改了哪一格"
+ * （桩里也没有影子文件可读），只是让**版式**能验收：归属 / 字段变化 / 来源三列。
+ * 真机上这一格由 `Txn::field_changes()` 填 —— 桩只负责形状对得上。
+ */
+let mockFields: Array<{
+  target: string
+  level: string | null
+  owner: string
+  key: string | null
+  label: string
+  before: string
+  after: string
+  kind: string
+  file: string
+  why: string
+}> = []
+/** 会写「影子树」的命令名单 —— 桩里据此决定要不要先拍快照 */
+const SHADOW_MUTATORS = new Set([
+  'wb_set_brand_field', 'wb_add_brand', 'wb_move_machine_to_brand',
+  'wb_set_machine_dimensions', 'wb_set_section_meta', 'wb_set_param_meta', 'wb_remove_section',
+  'wb_clear_stale_translations',
+  'wb_set_machine_zones', 'wb_set_bundle_refs', 'wb_add_bundle',
+  'wb_rename_bundle', 'wb_copy_bundle', 'wb_assign_bundle_versions',
+  'wb_remove_bundle', 'wb_set_calibration_identity', 'wb_set_asset_delivery',
+  'wb_set_group', 'wb_remove_group', 'wb_remove_asset',
+])
+function captureShadow(): ShadowFixtures {
+  return structuredClone({
+    params: PARAMS, tabs: TABS, views: MACHINE_VIEWS, bundles: BUNDLES,
+    groups: GROUPS, assets: ASSETS, brands: BRANDS, calib: MOCK_CALIBRATION,
+  })
+}
+function ensureShadowSnap(): void {
+  if (shadowSnap === null) shadowSnap = captureShadow()
+}
+/** 把快照灌回夹具本体（数组原位重填，引用不动 —— 别处持有的旧引用照常有效） */
+function refill<T>(arr: T[], snap: T[]): void {
+  arr.length = 0
+  for (const x of snap) arr.push(x)
+}
+function restoreShadow(): void {
+  const s = shadowSnap
+  if (s === null) return
+  refill(PARAMS, s.params)
+  refill(TABS, s.tabs)
+  refill(MACHINE_VIEWS, s.views)
+  refill(BUNDLES, s.bundles)
+  refill(GROUPS, s.groups)
+  refill(ASSETS, s.assets)
+  refill(BRANDS, s.brands)
+  for (const k of Object.keys(MOCK_CALIBRATION)) delete MOCK_CALIBRATION[k]
+  Object.assign(MOCK_CALIBRATION, s.calib)
+  /* SECTION_LABEL 是从 TABS 派生的，跟着重建 */
+  SECTION_LABEL.clear()
+  for (const t of TABS) for (const sec of t.sections) SECTION_LABEL.set(sec.id, sec.label)
+  shadowSnap = null
+}
+
+/**
+ * 这个分组挂在哪个页签 —— 真后端由 `sectionId` 反查（`tab_of_section`），
+ * 不是读参数自己那一格。桩里也必须按分组算：把参数搬进别的页签的组之后，
+ * 它就该出现在那个页签下（否则"改了位置页面没跟过去"是桩在骗人）。
+ */
+function tabIdOfSection(sectionId: string): string | null {
+  return TABS.find((t) => t.sections.some((s) => s.id === sectionId))?.id ?? null
+}
+
+/** 桌面卡片头那一行「领域 · 分组」—— 与真后端 `DeskGroup.label` 同一拼法 */
+function groupLabelOf(sectionId: string): string {
+  const tab = TABS.find((t) => t.sections.some((s) => s.id === sectionId))
+  const label = SECTION_LABEL.get(sectionId) ?? sectionId
+  return tab === undefined ? label : `${tab.label} · ${label}`
+}
 
 /* ---------- 三层取值（夹具自己的值域；判定规则照后端文档，不算前端业务） ---------- */
 
@@ -1013,8 +1119,6 @@ function mockAudit(): Json {
     nothingToPublish: false,
     minVersion: '0.0.1',
     canPublish: !items.some((i) => i.severity === 'blocker' && i.status === 'fail'),
-    /* 桩里没有"测试模式"这回事（沙箱切不动，见 `wb_sandbox_*`），所以发布这门是开的 */
-    publishClosed: null,
   }
 }
 
@@ -1121,6 +1225,8 @@ function cellOf(machineId: string, uid: string | null, pdef: FixtureParam): Json
     raw: raw ?? null,
     /* 盘上钉着的那个值（草稿不算）—— 「恢复修改前的」据此写回，没钉着就写 null 删键 */
     rest: atRestOf(uid !== null ? 'version' : 'machine', uid ?? machineId, pdef.key),
+    /* 徽章两档：版本列按"有没有自己的一行"；基底列不挂（`null`） */
+    badge: uid === null ? null : hit?.own ? 'own' : 'follow',
     deprecated,
     deadChoices,
   }
@@ -1156,7 +1262,7 @@ function rowOf(machineId: string, uid: string | null, pdef: FixtureParam): Json 
     unit: pdef.unit,
     sectionId: pdef.sectionId,
     sectionLabel: SECTION_LABEL.get(pdef.sectionId) ?? pdef.sectionId,
-    tabId: pdef.tabId,
+    tabId: tabIdOfSection(pdef.sectionId) ?? pdef.tabId,
     depth: pdef.depth,
     parentKey: pdef.parentKey,
     parentLabel: parent?.label ?? null,
@@ -1181,14 +1287,15 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
   const q = query.trim().toLowerCase()
   const params = PARAMS.filter((pdef) => {
     if (q) return `${pdef.label} ${pdef.key}`.toLowerCase().includes(q)
-    return tab === null || pdef.tabId === tab
+    /* 页签按**分组**算（真机 `tab_of_section`）：搬进别的页签的组之后它就该在那一边 */
+    return tab === null || tabIdOfSection(pdef.sectionId) === tab
   })
   const groups: { sectionId: string; label: string; count: number; offNote: string | null; items: Json[] }[] = []
   for (const pdef of params) {
     const row = rowOf(machineId, uid, pdef)
     let group = groups[groups.length - 1]
     if (!group || group.sectionId !== pdef.sectionId) {
-      group = { sectionId: pdef.sectionId, label: SECTION_LABEL.get(pdef.sectionId) ?? pdef.sectionId, count: 0, offNote: null, items: [] }
+      group = { sectionId: pdef.sectionId, label: groupLabelOf(pdef.sectionId), count: 0, offNote: null, items: [] }
       groups.push(group)
     }
     group.count += 1
@@ -1201,10 +1308,24 @@ function buildDesk(machineId: string, uid: string | null, tab: string | null, qu
     }
     group.items.push({ row, children: [], offNote: null })
   }
+  /*
+   * 卡片次序跟着**分组自己的位置**走（真后端排的是注册表里的 `SectionMeta.order`；
+   * 桩里没有那一列，就用 `TABS` 里分组的次序）。不排的话卡片头那两颗上下箭头
+   * 挪完什么也看不出来 —— 假后端就骗人了。
+   */
+  const secAt = new Map(
+    TABS.flatMap((t) => t.sections.map((s, i) => [s.id, [t.order, i] as const] as const)),
+  )
+  const secKey = (id: string) => secAt.get(id) ?? [Number.MAX_SAFE_INTEGER, 0]
+  groups.sort((a, b) => {
+    const x = secKey(a.sectionId)
+    const y = secKey(b.sectionId)
+    return x[0] - y[0] || x[1] - y[1]
+  })
   const nav = TABS.map((t) => ({
     id: t.id,
     label: t.label,
-    count: PARAMS.filter((pdef) => pdef.tabId === t.id).length,
+    count: PARAMS.filter((pdef) => tabIdOfSection(pdef.sectionId) === t.id).length,
     sections: t.sections.map((s) => ({
       id: s.id,
       label: s.label,
@@ -1401,7 +1522,7 @@ function buildRegistry(): Json {
       key: pdef.key, label: pdef.label, desc: pdef.desc, tomlKey: pdef.key,
       /* 夹具不带译文：三册给空串（真数据里它们是可选册，空 = 回落中文） */
       labelEn: '', labelJa: '', labelTw: '', descEn: '', descJa: '', descTw: '',
-      sectionId: pdef.sectionId, tabId: pdef.tabId, order: pdef.order,
+      sectionId: pdef.sectionId, tabId: tabIdOfSection(pdef.sectionId) ?? pdef.tabId, order: pdef.order,
       valueType: pdef.valueType, uiComponent: pdef.uiComponent,
       defaultValue: pdef.defaultValue, defaultText: valueText(pdef, pdef.defaultValue),
       min: pdef.min, max: pdef.max, step: pdef.step, unit: pdef.unit,
@@ -1424,6 +1545,9 @@ function buildRegistry(): Json {
         label: sec.label,
         tabId: t.id,
         tabLabel: t.label,
+        /* 桩里只有塔位那一组是真的组件卡（真数据里它带 component = 'tower-map'） */
+        component: sec.id === 'tower_position' ? 'tower-map' : null,
+        standalone: false,
       })),
     ),
   }
@@ -1432,7 +1556,7 @@ function buildRegistry(): Json {
 /* ---------- 命令分发 ---------- */
 
 export function installMockBackend() {
-  const invoke = (cmd: string, args?: Json) => {
+  const dispatch = (cmd: string, args?: Json) => {
     const machineId = 'A1'
     switch (cmd) {
       case 'wb_boot':
@@ -1480,6 +1604,10 @@ export function installMockBackend() {
             (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
           ),
         )
+      /* 内嵌目录重算：浏览器里没有仓库、没有文件可写 —— 只回报一次"已重算"，
+         让按钮的交互（禁用 / toast / 重取报告）可以照着点 */
+      case 'wb_regen_embedded_catalog':
+        return Promise.resolve({ changed: true, files: 26, revision: 'mock' })
       case 'wb_preflight':
         return Promise.resolve({
           issues: [
@@ -1548,14 +1676,150 @@ export function installMockBackend() {
         m.hasDimensions = true
         return Promise.resolve(machineListOf())
       }
+      case 'wb_set_section_meta': {
+        /*
+         * 分组自己的那一笔（名字 / 上下位置）。真机里位置有两个真理（注册表数组次序
+         * 给客户端、`order` 给卡片），由后端一次写完；桩里只有 `TABS` 一份，两样都动。
+         */
+        const id = args?.sectionId as string
+        const e = args?.edit as {
+          label?: string | null
+          move?: 'up' | 'down' | null
+          newSection?: { id: string; tabId: string; label: string } | null
+        }
+        /*
+         * 「＋ 新增分组」：先确保它在（真机 `ensure_section` 同语义，幂等 ——
+         * 撤销 / 重做重放同一笔时它已经在了，不能报错）。
+         */
+        if (e.newSection != null) {
+          const fresh = e.newSection
+          const tab = TABS.find((t) => t.id === fresh.tabId)
+          if (tab === undefined) {
+            return Promise.reject({ code: 'INVALID', message: `没有页签 ${fresh.tabId}`, traceId: 'mock' })
+          }
+          if (!tab.sections.some((x) => x.id === fresh.id)) {
+            /* 桩里 `TABS` 那份是「注册表侧的 section 元数据」（id / label / order），
+               不是 `SectionTarget` —— 后者由 `buildRegistry()` 拼出来 */
+            tab.sections.push({
+              id: fresh.id,
+              label: fresh.label,
+              order: tab.sections.length,
+            })
+            SECTION_LABEL.set(fresh.id, fresh.label)
+          }
+        }
+        let hit: { tab: (typeof TABS)[number]; at: number } | null = null
+        for (const tab of TABS) {
+          const at = tab.sections.findIndex((s) => s.id === id)
+          if (at >= 0) {
+            hit = { tab, at }
+            break
+          }
+        }
+        if (hit === null) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有分组 ${id}`, traceId: 'mock' })
+        }
+        if (e.label !== null && e.label !== undefined) {
+          const label = e.label.trim()
+          if (label === '') {
+            return Promise.reject({ code: 'INVALID', message: '分组名不能为空', traceId: 'mock' })
+          }
+          hit.tab.sections[hit.at] = { ...hit.tab.sections[hit.at]!, label }
+          SECTION_LABEL.set(id, label)
+        }
+        const dir = e.move ?? null
+        if (dir !== null) {
+          const to = dir === 'up' ? hit.at - 1 : hit.at + 1
+          const arr = hit.tab.sections
+          if (to < 0 || to >= arr.length) {
+            return Promise.reject({ code: 'INVALID', message: '分组已经在边上了', traceId: 'mock' })
+          }
+          const moved = arr[hit.at]!
+          arr[hit.at] = arr[to]!
+          arr[to] = moved
+          arr.forEach((sec, i) => {
+            sec.order = i + 1
+          })
+        }
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_remove_section': {
+        /*
+         * 删一个空分组。真机的三道门（还有参数 / 组件卡 / 带 showWhen）在
+         * `ParamRegistry::remove_section`；桩里把**第一条**也挡上（它才是最容易被
+         * 误删的那一种），另外两道这堆夹具里本来就没有对应数据。
+         */
+        const id = args?.sectionId as string
+        let hit: { tab: (typeof TABS)[number]; at: number } | null = null
+        for (const tab of TABS) {
+          const at = tab.sections.findIndex((s) => s.id === id)
+          if (at >= 0) {
+            hit = { tab, at }
+            break
+          }
+        }
+        if (hit === null) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `演示桩里没有分组 ${id}`, traceId: 'mock' })
+        }
+        const used = PARAMS.filter((p) => p.sectionId === id).length
+        if (used > 0) {
+          return Promise.reject({ code: 'INVALID', message: `这一组里还有 ${used} 条参数，不能删`, traceId: 'mock' })
+        }
+        hit.tab.sections.splice(hit.at, 1)
+        SECTION_LABEL.delete(id)
+        hit.tab.sections.forEach((sec, i) => {
+          sec.order = i + 1
+        })
+        return Promise.resolve(buildRegistry())
+      }
+      case 'wb_clear_stale_translations': {
+        /*
+         * 逃生通道（2026-11-02）：点名清译文台账的几格。真机在
+         * `ParamRegistry::clear_stale_translations`（只摘键名、不碰译文、
+         * 名字写错整笔拒收）；桩里照同一条走，别再写第二套判据。
+         */
+        const key = args?.key as string
+        const keys = (args?.keys as string[] | undefined) ?? []
+        const target = PARAMS.find((x) => x.key === key)
+        if (!target) {
+          return Promise.reject({ code: 'NOT_FOUND', message: `字段定义里没有 ${key}`, traceId: 'mock' })
+        }
+        const NAMES = ['labelEn', 'labelJa', 'labelTw', 'descEn', 'descJa', 'descTw']
+        for (const k of keys) {
+          if (!NAMES.includes(k)) {
+            return Promise.reject({ code: 'INVALID', message: `译文台账里没有「${k}」这一格`, traceId: 'mock' })
+          }
+        }
+        target.staleTranslations = (target.staleTranslations ?? []).filter((x) => !keys.includes(x))
+        return Promise.resolve(buildRegistry())
+      }
       case 'wb_set_param_meta': {
         /* 演示桩：同名的那条改掉就回。真机的校验（类型门 / 两级层级 / 枚举默认）
            在 registry::set_param_meta —— 桩里不做第二套 */
         const key = args?.key as string
-        const e = args?.edit as Partial<FixtureParam>
+        const e = args?.edit as Partial<FixtureParam> & {
+          newSection?: { id: string; tabId: string; label: string } | null
+        }
         const target = PARAMS.find((x) => x.key === key)
         if (!target) return Promise.reject({ code: 'NOT_FOUND', message: `字段定义里没有 ${key}`, traceId: 'mock' })
+        /*
+         * 「保存这一趟顺手新建分组」：真机写进两份 TOML，桩里往夹具的页签上挂一条 ——
+         * 不然刷新出来的下拉里没有它，「新建完选不中」会看着像界面坏了。
+         */
+        const fresh = e.newSection ?? null
+        if (fresh !== null) {
+          const tab = TABS.find((t) => t.id === fresh.tabId)
+          if (!tab) {
+            return Promise.reject({ code: 'INVALID', message: `演示桩里没有页签 ${fresh.tabId}`, traceId: 'mock' })
+          }
+          if (!tab.sections.some((sec) => sec.id === fresh.id)) {
+            tab.sections.push({ id: fresh.id, label: fresh.label, order: tab.sections.length + 1 })
+            SECTION_LABEL.set(fresh.id, fresh.label)
+          }
+        }
         Object.assign(target, e)
+        /* 新分组是这一笔的目标：真机把参数搬进去，桩里也照办（`sectionId: null` 别盖上去） */
+        if (fresh !== null) target.sectionId = fresh.id
         return Promise.resolve(buildRegistry())
       }
       case 'wb_set_machine_zones': {
@@ -2154,6 +2418,33 @@ export function installMockBackend() {
             },
           ],
         })
+      /* 软件版本发布历史（演示）：真机读 `release-history.json` */
+      case 'wb_release_history':
+        return Promise.resolve({
+          historySchema: 1,
+          records: [
+            {
+              at: '2026-10-31T20:17:00+08:00',
+              stage: 'infoPushed',
+              version: '0.0.9',
+              tag: 'v0.0.9',
+              branch: 'release/0.0.9',
+              commit: 'c03b530',
+              review: null,
+              release: null,
+              artifact: { name: 'SupportEase_0.0.9_aarch64.dmg', size: 42_000_000 },
+              infoBranch: 'release/0.0.9-info',
+              infoReview: null,
+              summary: '已打 tag、已建 Release、已写 release.json，等信息那笔 PR 合并。',
+            },
+          ],
+        })
+      /* 本分支最近提交（演示）：真机读 `git log`，这里给两条样子货 */
+      case 'wb_recent_commits':
+        return Promise.resolve([
+          { short: '6894f33', author: 'wzy', at: '2026-11-05T11:57:00+08:00', subject: '发布：交付产物 17 份' },
+          { short: '919c632', author: 'wzy', at: '2026-11-05T10:31:00+08:00', subject: 'feat(glue/report): 预涂胶 8 格参数可调' },
+        ])
       /* 打开系统浏览器（演示）：桩里只记一笔，不真开 */
       case 'wb_open_external':
         console.info('[mock] openExternal', args?.url)
@@ -2331,8 +2622,12 @@ export function installMockBackend() {
           const before = pending.has(vk) ? pending.get(vk) : atRestOf(level, owner, key)
           if (before === value) continue
           inverse.push({ kind: 'setValue', level, owner, key, value: before })
-          // 改回了盘上那个值 = 从草稿里拿掉（照后端 apply_one 的规矩）
-          if (atRestOf(level, owner, key) === value) pending.delete(vk)
+          /*
+           * 只有**删键**才算"回到跟随"（2026-11-02 两档口径）。
+           * 写一个与盘上相同的值**也要留在草稿里**：那一层从"没有"变成"有"了，
+           * 界面显示「不跟随」—— 旧的"同值就删"会让这一笔凭空消失。
+           */
+          if (value === null) pending.delete(vk)
           else pending.set(vk, value)
         }
         inverse.reverse()
@@ -2352,13 +2647,40 @@ export function installMockBackend() {
           }
         }
         pending.clear()
+        /* 保存过的状态就是新基线：快照换成当前份（真机是 mirror real → base） */
+        shadowSnap = captureShadow()
+        structDirty = 0
+        mockFields = []
         return Promise.resolve({ view: buildBook(), remap: {} })
       }
       case 'wb_discard':
         pending.clear()
+        restoreShadow()
+        structDirty = 0
+        mockFields = []
         return Promise.resolve(buildBook())
+      case 'wb_txn_state':
+        /*
+         * 结构类改动（分组 / 参数定义 / 机器档案 / 套餐…）桩里没有逐条撤销栈，
+         * 只如实报「有没有脏、脏几笔」—— 保存/放弃按钮据此点亮；撤销/重做
+         * 两颗保持不可用（canUndo/canRedo = false，与桩里没实现 undo 一致）。
+         */
+        return Promise.resolve({
+          dirty: structDirty > 0,
+          dirtyCount: structDirty,
+          canUndo: false,
+          canRedo: false,
+          ops: [],
+        })
       case 'wb_diff_draft':
-        return Promise.resolve([])
+        return Promise.resolve(mockFields)
+      /*
+       * 未保存改动的逐行 diff：桩里**没有两棵树**（影子是内存里的 `pending` 覆盖表，
+       * 不是真的文件），所以老老实实给一份空清单 —— 界面会说「没有未保存的改动」。
+       * 不造的假 diff 比造一份"看着有改动"的假数据安全：后者会让人以为保存能改盘。
+       */
+      case 'wb_shadow_diff':
+        return Promise.resolve({ files: [], shadowRoot: '', realRoot: '' })
       case 'wb_ui':
         return Promise.resolve({})
       case 'wb_save_ui':
@@ -2368,29 +2690,6 @@ export function installMockBackend() {
        * 状态如实报"没在跑"；起 / 停如实拒绝，理由写在消息里 —— 照 `wb_reveal_asset`
        * 那条口径：演示里点它要说实话，不是静默成功。
        */
-      /*
-       * **测试模式（沙箱）**：桩里没有那个仓库 —— 沙箱那棵树（拷 `presets/`）建不出来，
-       * 于是"开关"这件事在浏览器里必须**如实拒绝**，不能假装切了根（那会让人以为
-       * 自己正站在沙箱里，而其实一个字都没动）。状态那一格报"没开"。
-       */
-      case 'wb_sandbox_status':
-        return Promise.resolve({
-          enabled: false,
-          sandboxRoot: 'C:\\dev\\MKPSupportEase\\workbench\\.sandbox',
-          ready: false,
-          files: 0,
-          bytes: 0,
-          realPresetsRoot: 'C:\\dev\\MKPSupportEase\\presets',
-          note: null,
-        })
-      case 'wb_sandbox_set':
-      case 'wb_sandbox_refill':
-      case 'wb_sandbox_wipe':
-        return Promise.reject({
-          code: 'NOT_IMPLEMENTED',
-          message: '浏览器演示里没有那个仓库 —— 沙箱（拷一份 presets/）建不出来，测试模式切不了',
-          traceId: 'mock',
-        })
       case 'wb_dev_source_status':
         return Promise.resolve({
           running: false,
@@ -2428,7 +2727,7 @@ export function installMockBackend() {
             {
               kind: 'delivery',
               label: '当前交付',
-              note: '端你生成出来的那一份（测试模式开着 = 沙箱那份）—— 验「我改的东西客户端拿不拿得到」',
+              note: '端你生成出来的那一份 —— 验「我改的东西客户端拿不拿得到」',
               root: 'C:\\dev\\MKPSupportEase\\presets',
               url: 'http://127.0.0.1:8787/delivery',
               ready: true,
@@ -2466,6 +2765,33 @@ export function installMockBackend() {
       default:
         return Promise.reject({ code: 'NOT_IMPLEMENTED', message: `开发桩没有实现 ${cmd}`, traceId: 'mock' })
     }
+  }
+  const invoke = (cmd: string, args?: Json) => {
+    /* 会写影子树的第一笔：先拍快照，「放弃」才有东西可退（真机是 mirror 现成文件） */
+    const mutator = SHADOW_MUTATORS.has(cmd)
+    if (mutator) ensureShadowSnap()
+    const out = dispatch(cmd, args)
+    if (!mutator) return out
+    /* 成功一条记一笔「结构脏」；失败不记 —— 命令没写成，影子树没变 */
+    return out.then((v) => {
+      structDirty += 1
+      mockFields = [
+        ...mockFields,
+        {
+          target: cmd,
+          level: null,
+          owner: cmd,
+          key: null,
+          label: cmd,
+          before: '',
+          after: '（演示桩不记录具体值）',
+          kind: '改定义',
+          file: 'registry/param_registry.toml',
+          why: 'structural',
+        },
+      ]
+      return v
+    })
   }
   ;(window as unknown as Json).__TAURI_INTERNALS__ = { invoke }
   console.info('[workbench] dev mock backend installed —— 没有 Tauri，写路径只落在内存里')

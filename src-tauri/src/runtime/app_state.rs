@@ -59,7 +59,7 @@ use super::state::{ActiveOrigin, ActivePreset, DraftSubject, PresetDraft, Preset
 /// 用户世界里只有一份自己的预设；云端那一版默认值住在**隐藏 baseline** 里
 /// （[`super::baseline`]，按摘要寻址）。于是"这一项我处理过了"这件事盘上不存在，
 /// 只能记在这里 —— 它回答的是**程序当前怎么管理这一份**（不是"这个预设文件是什么"），
-/// 所以照 [`super::lineage`] 定的那条界，它属于 `run/`。
+/// 所以照 [`super::provenance`] 定的那条界，它属于 `run/`。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ParamDecisionKind {
@@ -79,6 +79,31 @@ pub struct ParamDecision {
     /// 这一项就会重新进入待处理 —— 云端连着发几版也不需要在本地存历史。
     pub sha256: String,
     pub kind: ParamDecisionKind,
+}
+
+/// 一个参数的「**上次云端值**」（2026-10-31，作者定的滚动记账）。
+///
+/// 与 [`ParamDecision`] 回答的是两件事：那一格是"我处理到哪一版"（会被采用/保持推进），
+/// 这一格是"**我上次从云端拿到的是多少**"—— 它只在两个时刻动：
+///
+/// ```text
+/// ① 用户第一次把这一项改成与手上那版云端不同 ⇒ 记下那版的值（A）
+/// ② 整份对齐到新云端（下载/更新）            ⇒ 滚成"被换下来的那版"（A → … → C）
+/// ```
+///
+/// 例：下载 A → 改成 B（记 A）→ 云端发 C，界面「上次云端 A / 最新 C」
+///     → 云端发 D，界面「上次云端 C / 最新 D」。
+///
+/// 之所以不跟着决定账的水位走：水位一推到当前版，旧值就等于新值了，
+/// 界面上那两格变成同义反复（2026-10-31 排查确认）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParamOrigin {
+    /// 记下这一刻的那版云端摘要（排查 / 去重用；拿不到时为 `None`）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+    /// 那一刻云端里这一项的值 —— 界面「上次云端」显示的就是它
+    pub value: String,
 }
 
 /// **界面主题档位**（2026-10-12 整套客户端做深色模式那一刀）。
@@ -285,10 +310,50 @@ pub struct PostprocPrefs {
     /// 热床涂胶是**只涂擦料塔位置**（`false`，出厂）还是**所有模型首层都涂**（`true`）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bed_glue_all_models: Option<bool>,
-    /// **自动摆塔**（2026-10-18）：模型与塔相撞时问一句，选"自动挪塔"才按算出来的
-    /// 位置跑完这一趟（只改这一趟，不动预设文件）。`None` = 出厂关。
+    /// **智能塔位置**（2026-10-18 引入，2026-11-04 改成三档）：模型与擦料塔相撞时怎么办。
+    ///
+    /// | 档 | 撞了之后 | 用户看到 |
+    /// |---|---|---|
+    /// | `ask`（**出厂**） | 停下问一句（"自动挪塔 / 我自己挪模型"） | 那一屏两幅俯视图 |
+    /// | `auto`（开关的"开"） | **不问**，直接按算出来的位置挪塔，挪完复检，接着跑完这一趟 | 进度条停一下就走 |
+    /// | `off` | 停下、原文件不动 | 与没有这一格时一字不差 |
+    ///
+    /// ★ 语义是**互斥三档**，不是两个布尔：`(开关 × 还问不问)` 能拼出"关着又问"这种
+    ///   非法态。与 [`PinPref`] 同一条理由（作者 2026-11-04：「做成切换的开关，
+    ///   就是关就是关，开就是开」—— 真正的开 = 直接替用户确认、直接挪）。
+    /// ★ 出厂是 `ask`（2026-11-04 作者：「软件安装的时候默认就是问」）—— 新装用户第一次
+    ///   撞上时能看见"可以自动挪"这件事，而不是静默停下。
+    /// ★ 只改这一趟的 IR，预设文件一个字不动。
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_tower_position: Option<bool>,
+    pub auto_tower_position: Option<TowerRelocateMode>,
+}
+
+/// 「模型与擦料塔相撞时怎么办」三档（2026-11-04 把原来的 `bool` 换成它）。
+///
+/// ★ 线上字符串是**契约**：`off` / `auto` / `ask`，盘上、DTO、前端共用同一个字面量。
+///   `auto` 才是"开" —— 不开就问是上一代的口径，作者明确否掉了（"开就是开"）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TowerRelocateMode {
+    /// 关：撞了就按碰撞停下
+    Off,
+    /// 开：撞了就**直接**把塔挪到不撞的位置（不问），挪完复检、接着跑完
+    Auto,
+    /// 问：撞了就停下来问一句「自动挪塔 / 我自己挪模型」——
+    /// **出厂档**（2026-11-04 作者：「软件安装的时候默认就是问」）
+    #[default]
+    Ask,
+}
+
+impl TowerRelocateMode {
+    /// 枚举 → 线上字符串。只写这一处（盘上 / DTO / 前端共用同一个字面量）
+    pub fn wire(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Auto => "auto",
+            Self::Ask => "ask",
+        }
+    }
 }
 
 /// 「跑完这一趟界面怎么摆」。
@@ -347,7 +412,7 @@ impl PostprocPrefs {
                 .clamp(XY_DWELL_MIN, XY_DWELL_MAX),
             bed_glue_enabled: self.bed_glue_enabled.unwrap_or(false),
             bed_glue_all_models: self.bed_glue_all_models.unwrap_or(false),
-            auto_tower_position: self.auto_tower_position.unwrap_or(false),
+            auto_tower_position: self.auto_tower_position.unwrap_or_default(),
         }
     }
 }
@@ -364,12 +429,23 @@ pub struct PresetPrefs {
     ///
     /// 关 ⇒ 复制件是独立的一份：它不认领任何云端条目（预设页不出「有新版 / 更新」），
     /// 参数页打开它时整段「云端更新」不画，点「更新」也永远不会动它。
-    /// 开 ⇒ 复制件与原件同权（血统照旧指向那个云端条目）。
+    /// 开 ⇒ 复制件与原件同权（来源记录照旧指向那个云端条目）。
     ///
     /// ★ 判据落在身份账本那一道闸上（[`crate::ipc::local::get_local_preset_index`]），
     ///   **前端不按名字猜**（名字改了就失效）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub copies_follow_cloud: Option<bool>,
+
+    /// **换上一份预设之后，自动把它的后处理脚本复制到剪贴板**（出厂 = 关）。
+    ///
+    /// 开 ⇒ 只要「使用中」从一个文件换到另一个文件，就把**新的那一份**的后处理命令
+    /// 抄进剪贴板并发一条通知（作者 2026-11-01：「只要变了那个使用的状态，就从一个
+    /// 文件变成另外一个文件的时候，就复制那一个正在使用的后处理脚本」）。
+    ///
+    /// ★ 这一格**不改任何产物**：它只决定前端那一条"换完之后顺手抄一下"要不要跑。
+    ///   所以判据只有一个读者 —— `src/app/postprocess/autoCopy.ts`，后端不参与。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_copy_script: Option<bool>,
 }
 
 /// Z 轴校准停留时间的出厂值与量程（秒）。
@@ -407,7 +483,8 @@ pub struct ResolvedPostprocPrefs {
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,
     pub bed_glue_all_models: bool,
-    pub auto_tower_position: bool,
+    /// 撞塔三档（见 [`TowerRelocateMode`]）：`Off` / `Auto` / `Ask`
+    pub auto_tower_position: TowerRelocateMode,
 }
 
 /// 一次窗口几何（**逻辑点**，左上角 + 宽高）：`run/app-state.json` 的 `lastWindowBox` 格。
@@ -468,10 +545,19 @@ pub struct AppStateFile {
     /// 删掉/改名一份用户文件时这本账跟着走（[`forget_param_decisions`] / [`repoint_local`]）。
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub param_decisions: BTreeMap<String, BTreeMap<String, ParamDecision>>,
+    /// **逐参数「上次云端值」**：`presets-local/…` → `参数 key → 那一版的值`。
+    ///
+    /// 与上面那一格同族（都住 `run/`，都回答"程序怎么管理这一份"），但语义不同：
+    /// 决定账记"我处理到哪一版"（会被采用/保持推进），这一格记"我上次拿到的是多少"，
+    /// 只在"第一次改得与云端不同"与"整份对齐到新云端"两个时刻动 —— 见 [`ParamOrigin`]。
+    ///
+    /// 空的格不写进文件（`skip_serializing_if`）—— 没改过参数的应用，状态文件与以前一样。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub param_origins: BTreeMap<String, BTreeMap<String, ParamOrigin>>,
     /// **界面主题偏好**（浅 / 深 / 跟随系统）。`None` = 还没选过 ⇒ 界面按"跟随系统"。
     ///
     /// 它是"应用当前记着的界面状态"，不是另一份偏好文件 —— 所以照
-    /// [`super::lineage`] 那条界住在这里；前端也不另存副本（读口只有
+    /// [`super::provenance`] 那条界住在这里；前端也不另存副本（读口只有
     /// `src/app/state/appState.ts` 一处，与 activePreset 同一套广播）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub theme: Option<ThemePref>,
@@ -488,6 +574,15 @@ pub struct AppStateFile {
     /// 与"明确选了"要分得开），但默认值不同 —— 盘空间是稀缺的那一侧。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_clean_history: Option<bool>,
+    /// **自动检查软件更新**（2026-11-05）：`None` = 还没选过 ⇒ **开着**（出厂默认）。
+    ///
+    /// 开 = 客户端**成功拉到云端目录之后**，顺路查一次 `release.json`；发现新版
+    /// 在右上角通知里弹一条（点击跳设置页「软件更新」）。查失败一律静默。
+    /// **不进启动 / 首屏路径**（铁律 2：启动零网络），也不做定时轮询 ——
+    /// 拉目录本来就要联网，搭这一趟，用户多了也不会把公共仓库打爆。
+    /// 读者是 [`crate::runtime::update_check`]；设置页那一格走 `ipc::prefs` 的命令。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_check_update: Option<bool>,
     /// **主窗置顶档位**（2026-10-17）：`None` = 还没选过 ⇒ `off`。
     ///
     /// 它是"用户点出来的界面状态"，与 `theme` 同一族 —— 所以住在这里，
@@ -538,9 +633,11 @@ impl Default for AppStateFile {
             text_draft: None,
             preset_source: None,
             param_decisions: BTreeMap::new(),
+            param_origins: BTreeMap::new(),
             theme: None,
             locale: None,
             auto_clean_history: None,
+            auto_check_update: None,
             pin: None,
             compact: None,
             last_window_box: None,
@@ -715,12 +812,16 @@ fn legacy_snapshot(root: &Path) -> Result<AppStateFile, AppError> {
         preset_source: super::source::read_source_file(root)?,
         /* 逐参数决定账是 2026-10-09 才有的格：旧档里本来就没有它 */
         param_decisions: BTreeMap::new(),
+        /* 「上次云端值」是 2026-10-31 才有的格：旧档里本来就没有它 */
+        param_origins: BTreeMap::new(),
         /* 主题这一格是 2026-10-12 才有的：旧档里本来就没有它（没选过 = None） */
         theme: None,
         /* 界面语言这一格是 2026-10-25 才有的：旧档里本来就没有它（没选过 = 跟随系统） */
         locale: None,
         /* 自动清理这一格是 2026-10-13 才有的：旧档里本来就没有它（没选过 = 开着） */
         auto_clean_history: None,
+        /* 自动检查更新是 2026-11-05 才有的：旧档里本来就没有它（没选过 = 开着） */
+        auto_check_update: None,
         /* 窗口置顶 / 窄窗 / 上一次手动几何是 2026-10-17 才有的格：旧档里没有 */
         pin: None,
         compact: None,
@@ -1002,6 +1103,10 @@ pub fn repoint_local(
         if let Some(book) = state.param_decisions.remove(old_rel) {
             state.param_decisions.insert(new_rel.to_owned(), book);
         }
+        /* 「上次云端值」按同一条钥匙跟着走：改名不该让"我上次拿到的是 A"凭空消失 */
+        if let Some(book) = state.param_origins.remove(old_rel) {
+            state.param_origins.insert(new_rel.to_owned(), book);
+        }
         Ok((active_followed, draft_followed))
     })
 }
@@ -1045,6 +1150,41 @@ pub fn record_param_decisions(
 pub fn forget_param_decisions(root: &Path, rel: &str) -> Result<(), AppError> {
     with_state(root, |state| {
         state.param_decisions.remove(rel);
+        /* 「上次云端值」与它同生共死：文件都不在了，那一版的值也不该留着占位置 */
+        state.param_origins.remove(rel);
+        Ok(())
+    })
+}
+
+/* ---------- paramOrigins：逐参数「上次云端值」（2026-10-31） ---------- */
+
+/// 这一份用户预设上，**我上次从云端拿到的那些值**（参数 key → 那一版的值）。
+/// 没改过参数就是空表。
+pub fn param_origins(root: &Path, rel: &str) -> Result<BTreeMap<String, ParamOrigin>, AppError> {
+    Ok(load(root)?
+        .param_origins
+        .get(rel)
+        .cloned()
+        .unwrap_or_default())
+}
+
+/// 记下/覆盖若干项的「上次云端值」（同一份文件上的**合并写**，别的项一个不动）。
+///
+/// ★ **写不写由调用方判**（只有两个时刻，见 [`ParamOrigin`]）—— 这里只管合并与落盘，
+/// 不在这里另做一套"该不该"的判断（判据只留一处）。
+pub fn record_param_origins(
+    root: &Path,
+    rel: &str,
+    entries: &[(String, ParamOrigin)],
+) -> Result<(), AppError> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    with_state(root, |state| {
+        let book = state.param_origins.entry(rel.to_owned()).or_default();
+        for (key, origin) in entries {
+            book.insert(key.clone(), origin.clone());
+        }
         Ok(())
     })
 }
@@ -1123,6 +1263,23 @@ pub fn set_auto_clean_history(root: &Path, enabled: bool) -> Result<bool, AppErr
     })
 }
 
+/* ---------- autoCheckUpdate：软件更新的自动检查开关 ---------- */
+
+/// 自动检查开着吗。**`None` = 还没选过 ⇒ 开着**（出厂默认，见字段注释）。
+///
+/// 读者是 [`crate::runtime::update_check`] —— 界面不直接读它，设置页那格走 `ipc::prefs`。
+pub fn auto_check_update(root: &Path) -> Result<bool, AppError> {
+    Ok(load(root)?.auto_check_update.unwrap_or(true))
+}
+
+/// 记下自动检查开关（整份状态原子替换，别的格一个不动）。返回写进去的那一档。
+pub fn set_auto_check_update(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        state.auto_check_update = Some(enabled);
+        Ok(enabled)
+    })
+}
+
 /* ---------- postproc：后处理这一层怎么看、怎么跑（2026-10-17） ---------- */
 
 /// 读后处理偏好。**整格 `None` = 一项都没动过** —— 调用方用 [`PostprocPrefs::default`]
@@ -1165,6 +1322,24 @@ pub fn set_copies_follow_cloud(root: &Path, enabled: bool) -> Result<bool, AppEr
     with_state(root, |state| {
         let mut prefs = state.presets.clone().unwrap_or_default();
         prefs.copies_follow_cloud = Some(enabled);
+        state.presets = Some(prefs);
+        Ok(enabled)
+    })
+}
+
+/// **换上一份预设之后自动复制它的后处理脚本**（出厂 = 关）。
+///
+/// 与 [`copies_follow_cloud`] 同一条口径：盘上"没选过"是 `None`，
+/// "没选过怎么解释"是后端的事，界面不拿 `null` 去猜。
+pub fn auto_copy_script(root: &Path) -> Result<bool, AppError> {
+    Ok(preset_prefs(root)?.auto_copy_script.unwrap_or(false))
+}
+
+/// 记下「使用之后自动复制后处理脚本」（整份状态原子替换，别的格一个不动）。
+pub fn set_auto_copy_script(root: &Path, enabled: bool) -> Result<bool, AppError> {
+    with_state(root, |state| {
+        let mut prefs = state.presets.clone().unwrap_or_default();
+        prefs.auto_copy_script = Some(enabled);
         state.presets = Some(prefs);
         Ok(enabled)
     })
@@ -1840,6 +2015,25 @@ mod tests {
         assert!(auto_clean_history(d.path()).unwrap());
         /* 与主题那格互不踩：关掉自动清理不该动主题 */
         assert_eq!(theme(d.path()).unwrap(), None);
+    }
+
+    /* ---------- autoCheckUpdate（2026-11-05） ---------- */
+
+    /// **没选过 = 开着**（出厂默认）；关掉能记住、能再打开，且**不踩**自动清理那格
+    #[test]
+    fn auto_check_update_starts_on_and_roundtrips() {
+        let d = tempfile::tempdir().unwrap();
+        assert!(auto_check_update(d.path()).unwrap(), "没选过就该是开着");
+
+        assert!(!set_auto_check_update(d.path(), false).unwrap());
+        assert!(!auto_check_update(d.path()).unwrap());
+        assert!(
+            auto_clean_history(d.path()).unwrap(),
+            "关自动检查不该顺手把自动清理也关了"
+        );
+
+        assert!(set_auto_check_update(d.path(), true).unwrap());
+        assert!(auto_check_update(d.path()).unwrap());
     }
 
     /// **认字符串是契约**：只认三个字面量（盘上 / 界面 / 前端都认它），

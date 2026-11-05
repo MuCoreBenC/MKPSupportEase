@@ -120,30 +120,39 @@ pub struct CalibModel {
 ///
 /// `pub(crate)` 是为了让 `workbench` 模块也走同一层 —— 工作台出错时同样要能按
 /// traceId 去日志里捞，不该为它再造一套包装。
+///
+/// 成功与失败**都带一个请求号**进日志与会话层（见 `workbench/app/reqed.rs` 头注）——
+/// 一次点击打出来的七八行靠这个号串起来。返回值的形状不动。
 pub(crate) fn traced<T>(
     name: &'static str,
     f: impl FnOnce(&str) -> Result<T, AppError>,
 ) -> Result<T, AppError> {
-    let trace_id = new_trace_id();
-    let span = tracing::info_span!("ipc", command = name, trace_id = %trace_id);
-    let _guard = span.enter();
-    /* 2026-10-31：把"现在跑的是哪条命令"告诉会话层 —— 写命令要自动记一条编辑事务。
-    只在这一处设置，不在每条命令里各写一遍（漏一条就漏一条撤销）。 */
+    /* 非工作台档：整条链路一个字节都不变 —— 请求号是工作台的诊断工具，
+    客户端那 130 条命令的返回形状是 `src/api/contract.ts` 的契约，不该被搅动。 */
+    #[cfg(not(feature = "workbench"))]
+    {
+        traced_bare(name, f)
+    }
     #[cfg(feature = "workbench")]
-    let previous = crate::workbench::app::enter_command(name);
+    {
+        traced_with_req(name, f)
+    }
+}
 
+#[cfg(not(feature = "workbench"))]
+fn traced_bare<T>(
+    name: &'static str,
+    f: impl FnOnce(&str) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let trace_id = new_trace_id();
+    let span = tracing::debug_span!("ipc", command = name, trace_id = %trace_id);
+    let _guard = span.enter();
     let out = match f(&trace_id) {
         Ok(v) => {
-            tracing::info!("ok");
+            tracing::debug!("ok");
             Ok(v)
         }
         Err(e) => {
-            /*
-             * 错误进日志一次（带 detail 与稳定码），给前端的那份 message 保持可展示 ——
-             * ★ 2026-10-19：`message` 里现在**带着稳定码**（`（E_*_NNN）`，见 `AppError::text`）。
-             *   放进 message 而不是只给 `messageCode`：前端每个调用点都走 `errorText()`，
-             *   "天然带码"只能靠这一句自己带着（作者：不用错误码吗）。
-             */
             tracing::warn!(
                 code = ?e.code,
                 message_code = ?e.message_code,
@@ -154,8 +163,81 @@ pub(crate) fn traced<T>(
             Err(e.text_err().with_trace(&trace_id))
         }
     };
+    out
+}
 
+/// 把"刚跑完的这一笔"记进会话层（工作台档）。
+///
+/// 不 emit：`traced` 手上没有 `AppHandle`。写进会话层由前端**已经有的**轮询取走
+/// （`wb_txn_state` 每 800ms 一次）—— 反正作者要的就是"界面上那个号"，多等半秒无感。
+#[cfg(feature = "workbench")]
+fn emit_receipt(name: &'static str, req: &str, ok: bool) {
+    if req.is_empty() {
+        return;
+    }
+    crate::workbench::app::note_command(req, name, ok);
+}
+
+#[cfg(feature = "workbench")]
+fn traced_with_req<T>(
+    name: &'static str,
+    f: impl FnOnce(&str) -> Result<T, AppError>,
+) -> Result<T, AppError> {
+    let trace_id = new_trace_id();
+    let span = tracing::debug_span!("ipc", command = name, trace_id = %trace_id);
+    let _guard = span.enter();
+    /* 2026-10-31：把"现在跑的是哪条命令"告诉会话层 —— 写命令要自动记一条编辑事务。
+    只在这一处设置，不在每条命令里各写一遍（漏一条就漏一条撤销）。
+    2026-11-02：同一个口子顺手发一个**请求号**（`r0000002a`），成功与失败都带回给前端
+    —— 一次手势会打七八行日志，没有共同的号就串不起来。 */
     #[cfg(feature = "workbench")]
+    let previous = crate::workbench::app::enter_command(name);
+
+    /* 成功路径也把请求号带回去：`{"req": "...", "value": <原来的返回值>}`。
+    前端只在 `api.ts` 一处拆 —— 一次手势打出来的七八行日志靠这个号串起来。 */
+    #[cfg(feature = "workbench")]
+    let req = crate::workbench::app::current_req().unwrap_or_default();
+
+    let out = match f(&trace_id) {
+        Ok(v) => {
+            /* `debug!` 而不是 `info!`（2026-11-01 作者：「终端一直在滚动，
+            我没有任何操作，都一直有新内容」）—— 800ms 的 `wb_txn_state` 轮询是高频只读
+            命令，成功不是新闻，失败才是。 */
+            tracing::debug!("ok");
+            Ok(v)
+        }
+        Err(e) => {
+            /* ★ 2026-11-02：日志行与错误体都带**请求号** —— 失败的这一笔也能按同一个号
+            去捞前面的 `值已写进影子树` / `参数定义已改`。
+            `message` 里带着稳定码（`（E_*_NNN）`，见 `AppError::text`）：前端每个调用点
+            都走 `errorText()`，只能靠这一句自己带着（作者 2026-10-19：不用错误码吗）。 */
+            tracing::warn!(
+                req = %req,
+                code = ?e.code,
+                message_code = ?e.message_code,
+                detail = ?e.detail,
+                "{}",
+                e.text()
+            );
+            emit_receipt(name, &req, false);
+            /* 请求号**不塞进 AppError**（`AppError` 是几乎所有返回值的 `Err` 侧，
+            多一格就会跨过 clippy 的 `result_large_err` 门槛，把整个仓点红）。
+            它进 `detail` 的末尾：用户/作者贴错误文本时能直接看到号，
+            服务端日志里那一串也用同一个号。 */
+            let e = AppError {
+                detail: Some(match e.detail {
+                    Some(d) if !d.is_empty() => format!("{d}\n(req={req})"),
+                    _ => format!("req={req}"),
+                }),
+                ..e
+            };
+            Err(e.text_err().with_trace(&trace_id))
+        }
+    };
+
+    /* 把号留给外层信封（`workbench::app::reqed`）。写在这里而不是命令里：
+    只有 `traced` 知道这次是哪一笔。 */
+    crate::workbench::app::remember_req(&req);
     crate::workbench::app::leave_command(previous);
     out
 }

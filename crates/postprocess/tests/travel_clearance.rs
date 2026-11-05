@@ -158,7 +158,6 @@ fn swap_travel_keeps_pen_clearance() {
     let mut pre_mount = false; // 其中「到 `;Mounting Toolhead` 为止」那一段
     let mut pending_mounted_z = false; // 刚见 `;Toolhead Mounted`，等第一条 Z
     let mut in_paint = false;
-    let mut paint_landed = false; // paint 块里已经落笔（之后是涂胶路径，不再检查）
 
     let mut swap_blocks = 0usize;
     let mut checked_travels = 0usize;
@@ -204,7 +203,6 @@ fn swap_travel_keeps_pen_clearance() {
         }
         if line.starts_with(";MKP_BEGIN paint") {
             in_paint = true;
-            paint_landed = false;
             continue;
         }
         if line == ";MKP_END paint" {
@@ -276,7 +274,9 @@ fn swap_travel_keeps_pen_clearance() {
 
         // ① 去切笔位 / ③ 飞回涂胶点：长距离横移必须在各自的高度基准上
         let go_to_swap = in_swap_pen && pre_mount;
-        let go_to_glue = in_paint && !paint_landed;
+        // 落笔之后同样要查（2026-11-03：`paint_landed` 一置真就放行，
+        // 于是「第二条 Z-hop 空走被吞 ⇒ 涂胶行从旧位置直飞」整类缺陷测不出来）
+        let go_to_glue = in_paint;
         if (go_to_swap || go_to_glue) && dxy > LONG_TRAVEL_MM {
             // 两段同一个基准：平飞 / 装笔 / 飞回都是 `层顶 + offset_z + lift`
             // （`glue_z_lift_height` 一个参数说了算）。
@@ -288,10 +288,6 @@ fn swap_travel_keeps_pen_clearance() {
                 pos.z
             );
             checked_travels += 1;
-        }
-
-        if in_paint && !paint_landed && z.is_some() {
-            paint_landed = true;
         }
 
         if let Some(v) = x {

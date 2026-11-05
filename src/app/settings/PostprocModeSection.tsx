@@ -11,11 +11,13 @@
 import { useState, type ReactNode } from 'react'
 
 import { api, errorText } from '../../api'
+import type { TowerRelocateMode } from '../../api/contract'
 import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import { Btn } from '../ui/Controls'
+import { SETTINGS_TARGET_TOWER } from './targets'
 import s from './PageSettings.module.css'
 
 /**
@@ -39,6 +41,43 @@ const UI_MODES: { id: 'silent' | 'gui'; label: StringKey; hint: StringKey; icon:
   },
 ]
 
+/**
+ * 「智能塔位置」三档（与后端 `autoTowerPosition` 的线上字符串**逐字对应**，id 是契约）。
+ *
+ * 顺序按"人遇到的频率"排：安装后默认的「每次提问」放第一颗，用户一眼对得上现在的状态。
+ * ★ 措辞（2026-11-04 作者：「我觉得问这个字不好听」）：用**每次提问**而不是"问"——
+ *   与系统权限那种"每次询问 / 总是允许 / 不允许"同一个语汇，读起来是一件**事**，
+ *   不是一句问话。
+ */
+const TOWER_MODES: {
+  id: TowerRelocateMode
+  label: StringKey
+  hint: StringKey
+}[] = [
+  {
+    id: 'ask',
+    label: 'settings.postproc.towerModeAsk',
+    hint: 'settings.postproc.towerAskHint',
+  },
+  {
+    id: 'auto',
+    label: 'settings.postproc.towerModeAuto',
+    hint: 'settings.postproc.towerOnHint',
+  },
+  {
+    id: 'off',
+    label: 'settings.postproc.towerModeOff',
+    hint: 'settings.postproc.towerOffHint',
+  },
+]
+
+/**
+ * 「智能塔位置」那一行是**深链落点**（2026-11-04）。
+ *
+ * 这一行只负责挂一个 id（常量住在 `settings/targets.ts`）：滚过去、铺绿底、停 6 秒
+ * 淡出全部由 `components/scroll/locate` 一件办完。这里不再接 `flash` prop、也不挂
+ * `data-flash` —— 高亮是共用件直接演在这行自己的背景上，组件不参与时序。
+ */
 export default function PostprocModeSection() {
   const tr = useT()
   const say = useText()
@@ -96,11 +135,14 @@ export default function PostprocModeSection() {
       </div>
 
       {/* 2026-10-30：两张模式卡 → 一行分段（与主题/语言/数据源同一套）。
-          卡的说明不再铺在页面上，挪进 title（悬停看）。 */}
+          卡的说明不再铺在页面上，挪进 `Tip`（悬停看那颗 `?`）——
+          2026-11-04 从手写 `data-tip` 改回来：这一页每一行标题都有一颗 `?`，
+          光挂 `data-tip` 只有悬停才出气泡，视觉上像"这一行没说明"。 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
-          <div className={s.fieldTitle} data-tip={tr('settings.postproc.modeNote')}>
+          <div className={s.fieldTitle}>
             {tr('settings.postproc.mode')}
+            <Tip text={tr('settings.postproc.modeNote')} />
           </div>
         </div>
         <div className={s.seg} role="radiogroup" aria-label={tr('settings.postproc.modeAria')}>
@@ -133,18 +175,40 @@ export default function PostprocModeSection() {
         />
       </div>
 
-      <div className={`${s.field} ${s.fieldRow}`}>
+      {/* 智能塔位置（2026-11-04 第二版：**分段选择器**，三档并列）
+          作者：「它怎么还是开关呀，它应该像这个怎么显示啊…… 用那个选择切换器啊」——
+          三档是并列的选择，不是"开/关"两个方向，所以与上一行「这一趟怎么显示」
+          同一个控件、同一套排版（`UI_MODES` 那张表的弟弟）。
+
+          ★ 标题旁边那颗 `?`（2026-11-04 作者：「为什么不能放？缺少了？」）：
+            这一页**每一行标题都有一颗 `?`**，挨着的是上一行「支撑面底面涂胶」——
+            那一行少一颗，读起来就像"这一项没有说明"。走同一个 `Tip` 组件
+            （它自己会带 `?` 圈并把句子写进 `data-tip`），别手写 `data-tip` 顶替。 */}
+      <div
+        className={`${s.field} ${s.fieldRow}`}
+        /* 报告页 / 后处理弹窗那条「去设置」的落点（唯一出处：settings/targets.ts） */
+        id={SETTINGS_TARGET_TOWER}
+      >
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
             {tr('settings.postproc.tower')}
             <Tip text={tr('settings.postproc.towerNote')} />
           </div>
         </div>
-        <Switch
-          checked={r.autoTowerPosition}
-          ariaLabel={tr('settings.postproc.tower')}
-          onChange={(next) => void set({ autoTowerPosition: next }, on)}
-        />
+        <div className={s.seg} role="radiogroup" aria-label={tr('settings.postproc.towerAria')}>
+          {TOWER_MODES.map((m) => (
+            <button
+              key={m.id}
+              type="button"
+              role="radio"
+              aria-checked={r.autoTowerPosition === m.id}
+              data-tip={tr(m.hint)}
+              onClick={() => void set({ autoTowerPosition: m.id }, on)}
+            >
+              {tr(m.label)}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 次级行：附属动作，往右让一格、字灰一档 */}
