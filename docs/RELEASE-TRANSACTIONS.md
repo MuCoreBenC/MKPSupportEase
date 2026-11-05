@@ -395,7 +395,27 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
   而 `install_update` 原来 200ms 后就 `cleanup_stage()` 把暂存删了 ——
   现在清理交给下一次 `download` 开头。
 
-### 10.6 失败与边界
+### 10.6 数据发布与代码发布跑的不是同一套闸（2026-11-05）
+
+作者问过一句「为什么就发布一个预设，他就要走这么完整的 PR」——问得对。两者的
+风险面不一样，闸也该不一样：
+
+| 这次改了什么 | 必需检查实际做的事 |
+| --- | --- |
+| 只动 `presets/delivery/**`、`docs/**`、图片与 `*.md` | `web` 跑全套前端与交付闸；`rust` / `rust-windows` **只 checkout + 分类**就 success |
+| 动了任何代码（`src/`、`src-tauri/`、`scripts/`、`.github/`、`Cargo.*` …） | 全套照跑（fmt / clippy ×2 / test ×2） |
+
+- 分类住在 `ci.yml` 每个重 job 的第一步，比的是 `base...HEAD` 的文件清单。
+- **不能用 workflow 级 `paths` 过滤**：那会让 workflow 不触发，而 `rust` /
+  `rust-windows` 是 ruleset 的必需检查 —— 检查永远不出现，PR 永远合不了。
+  所以是「job 跑起来、只是不做重活」。
+- 拿不到基线（首次 push / 全 0 的 before）时**按代码变更处理**：宁可多跑，不放行。
+- 交付闸一条都没省：`check:artifacts` 仍在 `web` 里跑，数据 PR 的
+  「产物必须与账本同批」正是它在管。
+- `windows-build.yml` 对交付 / 文档变更不触发（`paths-ignore`；它对 tag push
+  不生效，所以发版那条路不受影响）。
+
+### 10.7 失败与边界
 
 - Actions 红了：先看 job 日志；**不要**改用本地 `git push gitee main`（PR-only 闸②会拦、
   服务端 ruleset 也拒），也不要用 `ALLOW_PUSH_MAIN=1` / `--no-verify` 绕。
