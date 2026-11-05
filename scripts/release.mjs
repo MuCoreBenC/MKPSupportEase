@@ -186,6 +186,7 @@ const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
 const cliArgs = process.argv.slice(2)
 const flagConfirmed = cliArgs.includes('--confirm')
+const flagDryRun = cliArgs.includes('--dry-run')
 
 /* 通道（2026-11-05 预览发布事务）：`--channel=preview` / `--channel preview` / `--preview`。
    缺省 = 正式版；认不出的值**当场停**（兜成 stable 会把预览版发成全量通知）。 */
@@ -258,8 +259,11 @@ if (!version || !summary) {
   humanConfirmed = true
 } else {
   info(`版本 ${version}；说明「${summary}」（来自命令行参数）`)
-  if (!flagConfirmed) {
-    die('非交互真发版必须显式带 --confirm（人当次明确许可）；只看预检请用 --dry-run')
+  /* `--dry-run` 是**零写入**的预演，内核那一层也明说不必确认（`run()` 第一句
+   * 只在 `!dry_run` 时才要 `confirmed`）。所以这里不能拿 `--confirm` 把它挡住 ——
+   * 否则"只看预检请用 --dry-run"这句话自成矛盾（2026-11-06 真机踩到）。 */
+  if (!flagConfirmed && !flagDryRun) {
+    die('非交互真发版必须显式带 --confirm（人当次明确许可）；只看预检请加 --dry-run')
   }
   humanConfirmed = true
 }
