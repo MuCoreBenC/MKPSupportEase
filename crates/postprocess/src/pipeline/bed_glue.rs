@@ -46,7 +46,66 @@ const GLUE_Z_MARGIN: f64 = 0.0;
 
 /// 挂笔/预抬高度：`Toolhead.ZOffset` 之上 4mm。挂笔那行（`L801`）与进块前的
 /// 预抬都取这一个值 —— 于是装笔时 Z 不用再动，也不会出现两个数各说各话。
-const MOUNT_Z_LIFT: f64 = 4.0;
+/// 涂胶相关运动的进给（mm/min）。三档：
+///
+/// - `follow` = 机型的移动速度（`machine.travel_speed`）
+/// - `glue`   = 「涂胶速度限制」那一档（`toolhead.max_speed`，已在 `build.rs` 里乘过 60）
+/// - `custom` = 参数页填的 mm/s（**这里才**乘 60）
+///
+/// 空串 / 未知值按 `follow`：老预设根本没有这两格，行为必须与加参数之前一致。
+/// 两格（预涂胶速度、段间横移速度）共用这一个出口 —— 不许两处各写一套 if-else，
+/// 否则又会出现"参数页一个数、gcode 另一个数"。
+fn glue_feed_of(ir: &Ir, mode: &str, custom_mm_s: f64) -> f64 {
+    match mode {
+        "glue" => ir.toolhead.max_speed,
+        "custom" => {
+            let v = if custom_mm_s > 0.0 {
+                custom_mm_s
+            } else {
+                ir.toolhead.max_speed / 60.0
+            };
+            v * 60.0
+        }
+        // "follow" 与空串 / 未知值都落这里：老预设没有这一格，不许因此改变行为。
+        "follow" | "" => ir.machine.travel_speed * 60.0,
+        _ => ir.machine.travel_speed * 60.0,
+    }
+}
+
+/// 涂胶块要抬多高（**不含** Z 偏移，调用处再加 `toolhead.z_offset`）。
+///
+/// 涂胶发生在第一层之前 —— 也就是"第 0 层"，所以用它的是预设里
+/// 「前 3 层抬升高度」（`z_lift_height_first_layers`，本机 6.00mm），
+/// 不是普通那档 5.00（那个给涂胶路径内部的 Safe Z 用）。
+///
+/// **不占用原文的前三层**：原文第一层照样享受它自己那份抬升，两件事互不影响。
+///
+/// 预设没填（旧配置 / `Ir::default()`）时退回 [`MOUNT_Z_LIFT`]，保持旧行为。
+/// 段间（模型之间 / 段与段之间）抬多高。
+///
+/// 预设值 `glue_inter_model_lift_height`（本机 2.00mm，范围 2~5）。
+/// **绝不允许是 0**：0 意味着笔尖贴着刚涂的胶面平移，直接拖出一条胶痕 ——
+/// 旧配置 / `Ir::default()` 没填时退回 2.0（预设的下限，也是旧硬编码的那个值）。
+fn inter_model_lift(ir: &Ir) -> f64 {
+    if ir.glue.inter_model_lift_height > 0.0 {
+        ir.glue.inter_model_lift_height
+    } else {
+        2.0
+    }
+}
+
+fn mount_lift(ir: &Ir) -> f64 {
+    /* 三级：前 3 层那档 → 普通那档 → 6.0（预设允许的下限）。
+    旧的 `MOUNT_Z_LIFT = 4.0` 常量已删（2026-11-05 作者：「这个不需要了吧」）——
+    它既不在预设里、也不是任何一档的合法值，留着只会让人以为 7.9 是"设计值"。 */
+    if ir.glue.z_lift_height_first_layers > 0.0 {
+        ir.glue.z_lift_height_first_layers
+    } else if ir.glue.z_lift_height > 0.0 {
+        ir.glue.z_lift_height
+    } else {
+        6.0
+    }
+}
 
 /// 涂胶块那三段标记（判据与排查都靠它）。
 pub const BLOCK_START: &str = ";===== pre-print bed glue =================";
@@ -78,19 +137,29 @@ pub fn apply_bed_glue(
 
     let target_bed_temp = extract_original_bed_temp(&lines);
     /* 只有真的更高才降；降过之后结尾得升回去 */
-    let lowered = target_bed_temp > PRE_HEAT_TEMP;
+    /* 涂胶前热床温度：原来是写死的 50，现随预设（`bed_glue_preheat_temp`）。
+    预设没填（0）⇒ 退回 50，不会因为老预设缺这一格就把热床关掉。 */
+    let pre_heat_temp = if ir.glue.bed_glue_preheat_temp > 0.0 {
+        ir.glue.bed_glue_preheat_temp.round() as i64
+    } else {
+        PRE_HEAT_TEMP
+    };
+    let lowered = target_bed_temp > pre_heat_temp;
     let working = if lowered {
-        lower_bed_temp_for_glue(&lines, PRE_HEAT_TEMP)
+        lower_bed_temp_for_glue(&lines, pre_heat_temp)
     } else {
         lines
     };
 
+    /* 进块前喷嘴停在哪 —— 卸完笔要送回这里。见 `build_block` 里那段回位注释。 */
+    let resume_xy = last_xy_before(&working, insert_idx);
     let block = build_block(
         ir,
         &working,
         ir.prefs.bed_glue_all_models,
         target_bed_temp,
         lowered,
+        resume_xy,
     );
     if block.is_empty() {
         return working;
@@ -103,6 +172,80 @@ pub fn apply_bed_glue(
     out
 }
 
+/// 把一行里已有的 `F<数字>` 换成指定进给；没有 F 就追加在注释之前。
+///
+/// 用途：涂胶行原本的进给是"塔护套的打印速度"，但胶笔的真实上限是
+/// 预设里的「涂胶速度限制」（`toolhead.speed_limit`，本机 70mm/s ⇒ `max_speed = 4200`）。
+/// 真机上超出这个上限的部分会被固件截掉，但 G-code 里写着 700mm/s 会让人误判。
+fn set_feed(line: &str, feed: f64) -> String {
+    let f = format!("F{}", format_speed(feed));
+    let head_end = line.find(';').unwrap_or(line.len());
+    let (head, tail) = line.split_at(head_end);
+    match head.find('F') {
+        Some(i) => {
+            let after = &head[i + 1..];
+            let end = after
+                .char_indices()
+                .find(|(_, c)| !c.is_ascii_digit() && *c != '.')
+                .map_or(after.len(), |(j, _)| j);
+            format!("{}{}{}{}", &head[..i], f, &after[end..], tail)
+        }
+        None => format!("{} {}{}", head.trim_end(), f, tail),
+    }
+}
+
+/// 把一串 `G1` 移动改写成 `G0`。
+///
+/// **为什么要改**（2026-11-04）：涂胶块里的移动**没有 E**（不是塑料），但切片器预览
+/// 会把 `Custom` 这一段里的 `G1` 逐条画出来 —— 于是塔心那圈涂胶路径、模型轮廓那圈，
+/// 全被画成一坨绿色实体压在塔首层和模型首层上（作者：「擦嘴条和擦料塔首层的显示
+/// 还是不正常」）。`G0` 在固件里与 `G1` 同一条直线插补（F 已给），只是预览把它归到
+/// 「空驶」—— 用户关掉空驶，这些就不画了。**坐标、Z、顺序一个都不动。**
+fn as_travel(lines: Vec<String>) -> Vec<String> {
+    /* ★ 2026-11-05 定案（照校准模式）：**只在一个点挤出，其余全是空驶**。
+     *
+     * 三种写法都试过：
+     *   · 路径写 `G1`（无 E）落在 `Custom` 里 → 预览画成一坨绿块压在塔首层/模型首层上
+     *   · 路径写 `G0`（纯空驶）           → 看不见（段落在 `nozzle load line` 之前，勾空驶也不渲染）
+     *   · 路径**每行** `E0.001`           → 连成一条横穿床面的粗绿棒（作者 2026-11-05 实测）
+     *
+     * 校准模式只有 `G1 X100 Y100 Z10 E0.001` **那一个点**带 E，后面图案全是无 E 移动 ——
+     * 于是预览只亮一个点，路径按空驶处理。这里照抄：锚点那一下带 E（在 `build_block` 里），
+     * 路径本身一律 `G0`。
+     */
+    lines
+        .into_iter()
+        .map(|l| match l.trim_start().strip_prefix("G1") {
+            Some(rest) => format!("G0{rest}"),
+            None => l,
+        })
+        .collect()
+}
+
+/// 进块前喷嘴停在哪：顺着可执行块走一遍，记最后一个 X、最后一个 Y。
+///
+/// 必须**逐行累积**（而不是找最后一条同时带 XY 的行）：收尾那几行常是
+/// `G1 X108.000 Y-0.500` 之后再来一条只改 Z 的抬升 —— 只看带齐 XY 的行会取错。
+fn last_xy_before(lines: &[String], end: usize) -> Option<(f64, f64)> {
+    let (mut x, mut y) = (None, None);
+    for line in &lines[..end] {
+        let t = line.trim();
+        if !(t.starts_with("G1") || t.starts_with("G0")) {
+            continue;
+        }
+        if let Some(v) = crate::gcode::coord::extract_coord(t.as_bytes(), b'X') {
+            x = Some(v);
+        }
+        if let Some(v) = crate::gcode::coord::extract_coord(t.as_bytes(), b'Y') {
+            y = Some(v);
+        }
+    }
+    match (x, y) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    }
+}
+
 /// 插入点：`EXECUTABLE_BLOCK_START` 之后、第一条 `nozzle load line` /
 /// `extrude cali test` 之前。
 ///
@@ -113,6 +256,17 @@ fn find_insertion_point(lines: &[String]) -> Option<usize> {
         .iter()
         .position(|l| l.contains("; EXECUTABLE_BLOCK_START"))?
         + 1;
+    /* ★ 优先插在 `M104 S… ; prepare to print` **之前**（2026-11-05，作者：
+    「预涂胶的，是不是应该去掉他多余的升温」）。
+    插在 load line 之前的话，切片器会先 `M104 S245` 把喷嘴烧到 245，
+    紧接着我们那块又 `M109 S30` 等它凉到 30 —— 一烧一凉白等好几分钟（A1 上尤其明显）。
+    往前挪一行，涂胶从头到尾喷嘴都是冷的，`M104` 等涂完再执行。 */
+    if let Some(i) = (exec_start..lines.len()).find(|&i| {
+        let t = lines[i].trim();
+        t.starts_with("M104 S") && t.contains("prepare to print")
+    }) {
+        return Some(i);
+    }
     (exec_start..lines.len()).find(|&i| {
         lines[i].contains(";===== nozzle load line")
             || lines[i].contains(";===== extrude cali test")
@@ -196,48 +350,102 @@ fn build_block(
     all_models: bool,
     target_bed_temp: i64,
     lowered: bool,
+    resume_xy: Option<(f64, f64)>,
 ) -> Vec<String> {
     let mut block: Vec<String> = vec![
         /* 起始标记：判据与排查都靠它认这一块从哪开始 */
         BLOCK_START.to_owned(),
     ];
-    /* 先抬 Z，再平移 —— **顺序不可合并、不可颠倒**。
-    `G1 X100 Y100` 只写 XY，打印机就在「当前 Z」上平移；进块时 Z 还停在首层高度
-    （实测 0.2），于是这一路是喷嘴贴着板面拖过去的（校准块踩过同一个坑，
-    见 `calibration` 的 `CALIBRATION_PRELIFT`）。抬到装笔高度，坐标一个不改。 */
+    /* ★ 锚点（2026-11-05 定稿，作者在切片器里逐个变体验过）：
+     *
+     *  **它是一个「假挤出」，只为让切片器预览认到"这里有动作"。** 真机上是胶笔在涂，
+     *  塑料一滴都不出 —— 总挤出量 0.001mm（线材），可以当 0 看。
+     *
+     *  Z 必须等于首层层高（`first_layer_height`）：切片器的「层高」是按相邻两个 Z
+     *  反推出来的，写成 0.3 / 0.8 / 1.5 都会让第一层显示成那个高度（实测 0.30）。
+     *
+     *  XY 只走 0.1mm：带 E 的移动在预览里一定被画成一条挤出线，太长就是一根横跨
+     *  床面的棒；0.1mm 短到看不出来，但足够让预览认到「这里有动作」。
+     *
+     *  `G92 E0` 不能省：换料/回抽之后 E 可能是 -1 这种负值，直接写 `E0.001`
+     *  会变成「挤出 1mm」，在原地堆出一坨料。
+     *
+     *  抬 Z 放在锚点**之后**：真机上只有那 0.1mm 贴着首层层高走，其余仍是高处空驶。
+     *
+     *  XY 取**进块前喷嘴停的那个点**（不是写死的 100/100）：既不会横穿床面，
+     *  也不会因为写死坐标而在别的机型 / 摆位上跑到无关的位置。 */
+    let travel = format_speed(ir.machine.travel_speed * 60.0);
+    let layer_z = ir.machine.first_layer_height;
+    /* 抬升高度（2026-11-05 作者指出）：涂胶块发生在**第一层之前**，也就是"第 0 层"，
+    用的是预设里「前 3 层抬升高度」（`z_lift_height_first_layers`，本机 6.00mm），
+    不是普通那档 5.00，也不是旧的写死 4.0。
+    它也不占用原文的「前三层」—— 原文第一层照样享受它自己的抬升。 */
+    let mount_z = ir.toolhead.z_offset + mount_lift(ir);
+    let (ax, ay) = resume_xy.unwrap_or((100.0, 100.0));
+    block.push(format!("G0 Z{} F{}", format_z(layer_z), travel));
+    block.push("G92 E0".to_owned());
+    /* 顺序是死的（2026-11-05 作者改法）：
+     * 抬到首层层高 → 归零 E → **空驶回到原位** → 从原位往外挤 0.1mm → 再回原位 → 抬 Z。
+     * 反过来（先到 ax+0.1、再挤回 ax）也是 0.1mm，但锚点会落在回来的路上，
+     * 预览会从上一条挤出终点连一条线头；先到位再往外挤，锚点才落在原位本身。 */
+    /* 速度跟机型走（空驶速度），不再写死 F30000 —— 换台机器 / 改速度参数时它也该跟着变。 */
+    let anchor_feed = format_speed(ir.machine.travel_speed * 60.0);
     block.push(format!(
-        "G1 Z{} F{}",
-        format_z(ir.toolhead.z_offset + MOUNT_Z_LIFT),
-        format_speed(ir.machine.travel_speed * 60.0)
+        "G1 X{} Y{} F{}",
+        format_z(ax),
+        format_z(ay),
+        anchor_feed
     ));
-    /* 给切片器的预览器一个"这里有动作"的锚点：纯虚拟挤出，不改实际耗材 */
-    block.push(
-        "G1 X100 Y100 E0.001 F3000 ; MKPSE: virtual extrusion for BBS G-code viewer compatibility"
-            .to_owned(),
-    );
+    block.push(format!(
+        "G1 X{} Y{} E0.001 F{} ; MKPSE: virtual extrusion for BBS G-code viewer compatibility",
+        format_z(ax + 0.1),
+        format_z(ay),
+        anchor_feed
+    ));
+    /* 挤完往回退 0.1mm，把喷嘴放回原位 —— 下一步 `G0 Z{装笔高度}` 才是纯垂直抬升，
+     * 不会顺带把喷嘴带偏；块尾的回位也因此能从同一个点出发（首尾一致）。 */
+    block.push(format!(
+        "G0 X{} Y{} F{}",
+        format_z(ax),
+        format_z(ay),
+        anchor_feed
+    ));
+    block.push(format!("G0 Z{} F{}", format_z(mount_z), travel));
     block.push("M109 S30 ; 降温到30°C并等待".to_owned());
 
     block.push(";Mounting Toolhead".to_owned());
     block.extend(filter_mount_gcode_lines(
         &ir.toolhead.custom_mount_gcode,
-        ir.toolhead.z_offset + MOUNT_Z_LIFT,
+        mount_z,
     ));
     block.push(";Toolhead Mounted".to_owned());
 
     block.push(";Bed Glueing Started".to_owned());
-    block.extend(prime_tower_glue_path(ir));
+    block.extend(as_travel(prime_tower_glue_path(ir)));
     if all_models {
-        block.extend(all_models_glue_path(ir, content));
+        block.extend(as_travel(all_models_glue_path(ir, content)));
     }
     block.push(";Bed Glueing Finished".to_owned());
 
-    /* 抬 Z 到笔尖离床 5mm（绝对量，不是相对上一行） */
-    let lift_z = ir.toolhead.z_offset + 5.0;
+    /* 抬 Z 到「笔尖离床 `z_lift_height`」（预设 5.00mm）—— 原来是写死的 5.0，
+    作者 2026-11-05：「这个抬升是不是没有按照涂胶 Z 轴抬升高度加 z 偏移高度去算」。 */
+    let lift_z = ir.toolhead.z_offset + ir.glue.z_lift_height;
     block.push(format!(
-        "G1 Z{} F{}",
+        "G0 Z{} F{}",
         format_z(lift_z),
         format_speed(ir.machine.travel_speed * 60.0)
     ));
+
+    /* 涂胶后静置（2026-11-05）：笔已抬到安全高度，胶也涂完了，再停一会儿让它贴住。
+    秒数 0（默认）时**一个字节都不输出** —— `end_to_end` 判据靠这个保证老预设逐字节不变。
+    `G4 P<毫秒>`：Bambu 固件的 G4 认毫秒（与仓内 `M400` 那条同一口径）。 */
+    let wait_ms = (ir.glue.bed_glue_wait_seconds * 1000.0).round();
+    if wait_ms > 0.0 {
+        block.push(format!(
+            "G4 P{} ; 涂胶后静置 {:?}s",
+            wait_ms as i64, ir.glue.bed_glue_wait_seconds
+        ));
+    }
 
     block.push(";Unmounting Toolhead".to_owned());
     block.extend(filter_unmount_lines(
@@ -245,6 +453,41 @@ fn build_block(
         ir.wiping.fan_speed,
     ));
     block.push(";Toolhead Unmounted".to_owned());
+
+    /* ★ **回位到涂胶前的落点**（2026-11-04，第四次修正，前面三种写法都错）：
+     *
+     * 紧跟其后的切片器「挤出校准」（`;===== extrude cali test =====`）第一条是
+     * `G0 X128 E8 F780` —— 带 E 的 G0，没有 Y。它的起点由**块结束时喷嘴停在哪**决定：
+     *
+     *   · 停在装配位 (256,51)  → (256,51)→(128,51)，一条 128mm 的斜棒
+     *   · 停在 (108,-0.5) Z8.9 → (108,-0.5)→(128,-0.5)，20mm 短棒，但**挂在 8.9mm 高处**
+     *   · 停在 (108,-0.5) Z0.2 → 就是切片器本来的样子：贴着床、床沿下方，看不见
+     *
+     * 所以回位必须**同时**满足三条：回进块前那个 XY、Z 压回首层层高、并且放在 M190 之后
+     * （M190 要阻塞等热床升温，那段时间喷嘴抬着更安全；抬这一下用 G0，不画形体）。
+     */
+    if let Some((rx, ry)) = resume_xy {
+        let travel = format_speed(ir.machine.travel_speed * 60.0);
+        if lowered {
+            block.push(format!(
+                "M190 S{target_bed_temp} ; 涂胶完成，阻塞等待热床升温到目标温度"
+            ));
+        }
+        block.push(format!(
+            "G0 X{} Y{} Z{} F{} ; 回到涂胶前的位置（校准时喷嘴就在这儿起笔）",
+            format_z(rx),
+            format_z(ry),
+            format_z(lift_z),
+            travel
+        ));
+        block.push(format!(
+            "G0 Z{} F{} ; 落回首层层高，校准线贴床画",
+            format_z(ir.machine.first_layer_height),
+            travel
+        ));
+        block.push(";===== pre-print bed glue end ============".to_owned());
+        return block;
+    }
 
     /* 温度降过才需要升回去；原本就 ≤50 的没降过，就不能在这儿多插一条 M190 */
     if lowered {
@@ -341,8 +584,10 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
     };
 
     let writing_z = ir.toolhead.z_offset + ir.glue.z_offset + GLUE_Z_MARGIN;
-    let lift_z = ir.toolhead.z_offset + MOUNT_Z_LIFT;
+    let lift_z = ir.toolhead.z_offset + mount_lift(ir);
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
+    /* 笔的速度：预涂胶速度那一格（`follow` / `glue` / `custom` 三档） */
+    let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
 
     let mut xy: Vec<String> = Vec::new();
     for line in &sheath_lines {
@@ -361,7 +606,9 @@ fn prime_tower_glue_path(ir: &Ir) -> Vec<String> {
             ir,
         ) && !p.is_empty()
         {
-            xy.push(p);
+            /* 笔的速度上限 = 预设「涂胶速度限制」（`toolhead.speed_limit`），
+            不是护套那档打印速度 —— 作者：「我的 MKP 笔涂胶就是用这个速度的」。 */
+            xy.push(set_feed(&p, glue_feed));
         }
     }
     let Some(first) = xy.first() else {
@@ -389,8 +636,17 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
     }
 
     let writing_z = ir.toolhead.z_offset + ir.glue.z_offset + GLUE_Z_MARGIN;
-    let lift_z = writing_z + 2.0;
+    /* 段间抬升用预设那一档（`glue_inter_model_lift_height`，本机 2.00mm）——
+    原来这里是写死的 `+ 2.0`，用户在参数页把这一格改成 3 / 4 时根本不生效。 */
+    let lift_z = writing_z + inter_model_lift(ir);
     let travel_speed = format_speed(ir.machine.travel_speed * 60.0);
+    let glue_feed = glue_feed_of(ir, &ir.glue.bed_glue_speed_mode, ir.glue.bed_glue_speed);
+    /* 段与段之间的横移：单独一格（默认 follow = 机型空驶速度） */
+    let travel_feed = glue_feed_of(
+        ir,
+        &ir.glue.glue_travel_speed_mode,
+        ir.glue.glue_travel_speed,
+    );
 
     let mut out = Vec::new();
     for seg in &segments {
@@ -399,7 +655,8 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
         let (nx, ny) = extract_first_xy(&seg[0]);
         out.push(format!("G1 Z{} F{}", format_z(lift_z), travel_speed));
         if !nx.is_empty() && !ny.is_empty() {
-            out.push(format!("G1 X{nx} Y{ny} F{travel_speed}"));
+            /* 这一段是笔在胶面之间横移（不是抬起来飞）：用「段间横移速度」那一格。 */
+            out.push(format!("G1 X{nx} Y{ny} F{}", format_speed(travel_feed)));
         }
         out.push(format!("G1 Z{} F{}", format_z(writing_z), travel_speed));
         for line in seg {
@@ -413,7 +670,8 @@ fn all_models_glue_path(ir: &Ir, content: &[String]) -> Vec<String> {
                 ir,
             ) && !p.is_empty()
             {
-                out.push(p);
+                /* 同塔那条：预涂胶速度那一格 */
+                out.push(set_feed(&p, glue_feed));
             }
         }
     }
@@ -640,18 +898,25 @@ mod tests {
         ir.toolhead.z_offset = 4.0;
         let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
 
-        let lift = out
-            .iter()
-            .position(|l| l.starts_with("G1 Z"))
-            .expect("进块先抬 Z");
-        let travel = out
+        /* 2026-11-05 起顺序改成「贴首层层高走 0.1mm → 再抬到装笔高度」：
+        锚点的 Z 必须等于首层层高，否则切片器会把第一层的层高显示成那个值
+        （作者实测 0.3/0.8/1.5 都会写进层高面板）。 */
+        let anchor = out
             .iter()
             .position(|l| l.contains("virtual extrusion"))
             .expect("虚拟挤出那行还在");
-        assert!(lift < travel, "先抬 Z 再平移，顺序反了");
+        let lift = out
+            .iter()
+            .position(|l| l == "G0 Z10.0 F0.0")
+            .expect("锚点之后要抬到装笔高度（默认兜底 6 + z_offset 4）");
+        assert!(
+            anchor < lift,
+            "先贴首层走完 0.1mm，再抬到 Toolhead.ZOffset + 4"
+        );
         assert_eq!(
-            out[lift], "G1 Z8.0 F0.0",
-            "抬到 Toolhead.ZOffset + 4（与挂笔同一高度）"
+            out[anchor - 3],
+            "G0 Z0.0 F0.0",
+            "锚点的 Z 用首层层高（默认 0 就是 0）"
         );
     }
 
@@ -672,7 +937,7 @@ mod tests {
 
         let path = prime_tower_glue_path(&ir);
         assert!(path.len() > 3, "路径没生成：{path:?}");
-        assert_eq!(path[0], "G1 Z8.0 F18000.0 ;Safe Z", "先抬到装笔高度");
+        assert_eq!(path[0], "G1 Z10.0 F18000.0 ;Safe Z", "先抬到装笔高度");
         assert!(
             path[1].contains('X') && path[1].contains('Y'),
             "第二行才是平飞：{}",
@@ -801,6 +1066,80 @@ mod tests {
         assert_eq!(
             extract_first_xy("G1 X34.5 Y58.4 E0.1 F300"),
             ("34.5".to_owned(), "58.4".to_owned())
+        );
+    }
+
+    /// 三档速度：follow=机型移动速度、glue=涂胶速度限制、custom=填的那个数。
+    /// 空串也落 follow —— 老预设没有这两格，行为必须和加参数之前一致。
+    #[test]
+    fn glue_feed_resolves_the_three_modes() {
+        let mut ir = Ir::default();
+        ir.machine.travel_speed = 200.0;
+        ir.toolhead.max_speed = 4200.0;
+
+        assert_eq!(
+            glue_feed_of(&ir, "follow", 70.0),
+            12000.0,
+            "机型移动 200mm/s"
+        );
+        assert_eq!(glue_feed_of(&ir, "", 70.0), 12000.0, "空串按 follow");
+        assert_eq!(glue_feed_of(&ir, "glue", 10.0), 4200.0, "涂胶速度 70mm/s");
+        assert_eq!(glue_feed_of(&ir, "custom", 25.0), 1500.0, "自定义 25mm/s");
+        assert_eq!(
+            glue_feed_of(&ir, "custom", 0.0),
+            4200.0,
+            "自定义填 0 ⇒ 退回涂胶速度，不许输出 F0"
+        );
+    }
+
+    /// 等待秒数 0（默认）时**一个字节都不输出**；填了才出 `G4 P<毫秒>`。
+    #[test]
+    fn wait_seconds_only_emit_when_positive() {
+        let src = lines(&[
+            "; EXECUTABLE_BLOCK_START",
+            "M190 S30",
+            ";===== nozzle load line",
+        ]);
+        let mut ir = Ir::default();
+        ir.prefs.bed_glue_enabled = true;
+
+        let quiet = apply_bed_glue(src.clone(), &ir, crate::postproc::calibration::Mode::None);
+        assert!(
+            !quiet.iter().any(|l| l.starts_with("G4 P")),
+            "0 秒不该有等待行"
+        );
+
+        ir.glue.bed_glue_wait_seconds = 1.5;
+        let waited = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
+        assert!(
+            waited.iter().any(|l| l.starts_with("G4 P1500")),
+            "1.5 秒 ⇒ G4 P1500，实际：{:?}",
+            waited
+                .iter()
+                .filter(|l| l.starts_with("G4"))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// 预热温度改成读预设：30 度时 `M190` 跟着变成 30，不再是写死的 50。
+    #[test]
+    fn preheat_temp_comes_from_the_preset() {
+        let src = lines(&[
+            "; EXECUTABLE_BLOCK_START",
+            "M190 S70",
+            ";===== nozzle load line",
+        ]);
+        let mut ir = Ir::default();
+        ir.prefs.bed_glue_enabled = true;
+        ir.glue.bed_glue_preheat_temp = 35.0;
+
+        let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
+        assert!(
+            out.iter().any(|l| l.starts_with("M190 S35")),
+            "热床降到预设的 35 度，实际：{:?}",
+            out.iter()
+                .filter(|l| l.starts_with("M190"))
+                .collect::<Vec<_>>()
         );
     }
 }

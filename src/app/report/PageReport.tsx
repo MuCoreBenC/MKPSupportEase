@@ -111,6 +111,7 @@ import type {
   ReportGlueFacts,
   ReportCalibrationFacts,
   ReportSlicerFacts,
+  ReportSlicerTowerFacts,
   ReportSnapshot,
   ReportSummary,
   ReportTowerFacts,
@@ -523,6 +524,14 @@ interface Group {
   sum: string
   cells: [string, string][]
   /**
+   * **组内小节**（2026-11-04）。
+   *
+   * 只给「擦料塔」用：作者要的是同一组里分成两框 ——「MKP 擦料塔」与
+   * 「切片软件擦料塔」，标题仍然只有一个。给了这一格就按小节渲染，
+   * `cells` 留作兜底（旧渲染路径 / 摘要仍读它）。
+   */
+  sections?: { title: string; cells: [string, string][] }[]
+  /**
    * 组**末尾**那一句提示 + 可选的去处（2026-11-04）。
    *
    * 目前只有「碰撞位置」用：撞了之后告诉用户"设置里能打开智能塔位置，下次就不用手动挪"。
@@ -696,7 +705,45 @@ function towerGroup(tr: Tr, tower: ReportTowerFacts): Group | null {
         : `${numCell(tower.towerTravelSpeed, ' mm/s')} · ${tower.fastTowerMode ?? '—'}`,
     ],
   ]
-  if (!hasAnyValue(cells)) return null
+  /*
+   * 切片软件自己的擦料塔（2026-11-04，作者：「就分成两框去显示他的和我的」）。
+   *
+   * 这一节讲的是 Bambu 的 prime tower：开关 / 层数 / 高度 / 耗材 / 位置。
+   * `slicerTower` 缺（老记录）⇒ 只留 MKP 那一节；`enabled=false` 时也只显示「关」，
+   * 不摆一排空数字。
+   */
+  const slicer = tower.slicerTower
+  const onOff = (v: boolean | undefined): string =>
+    v === undefined ? '—' : tr(v ? 'report.slicer.on' : 'report.slicer.off')
+  const sbox = slicer?.bbox ?? null
+  const slicerCells: [string, string][] = [
+    [tr('report.tower.slicerOnOff'), onOff(slicer?.enabled)],
+    [
+      tr('report.tower.layersHeight'),
+      slicer?.layers === undefined && slicer?.height === undefined
+        ? '—'
+        : `${
+            slicer?.layers === undefined
+              ? '—'
+              : tr('report.glue.unit.layers', { n: fmtNum(slicer.layers) })
+          } · ${slicer?.height === undefined ? '—' : `${fmtNum(slicer.height)} mm`}`,
+    ],
+    [
+      tr('report.tower.slicerFilament'),
+      slicer?.filamentGrams === undefined ? '—' : `${fmtNum(slicer.filamentGrams)} g`,
+    ],
+    [
+      tr('report.tower.slicerPosition'),
+      sbox === null ||
+      sbox.minX === undefined ||
+      sbox.maxX === undefined ||
+      sbox.minY === undefined ||
+      sbox.maxY === undefined
+        ? '—'
+        : `X ${fmtNum(sbox.minX)}–${fmtNum(sbox.maxX)} · Y ${fmtNum(sbox.minY)}–${fmtNum(sbox.maxY)}`,
+    ],
+  ]
+  if (!hasAnyValue(cells) && slicer === undefined) return null
   const sum = [
     tower.towerLayers === undefined
       ? null
@@ -705,7 +752,16 @@ function towerGroup(tr: Tr, tower: ReportTowerFacts): Group | null {
   ]
     .filter((x): x is string => x !== null)
     .join(' · ')
-  return { id: 'tower', title: tr('report.tower.title'), sum, cells }
+  return {
+    id: 'tower',
+    title: tr('report.tower.title'),
+    sum,
+    cells,
+    sections: [
+      { title: tr('report.tower.mkpSection'), cells },
+      { title: tr('report.tower.slicerSection'), cells: slicerCells },
+    ],
+  }
 }
 
 /** 切片工艺组（键与 `detail.slicer` 同名） */
@@ -1347,6 +1403,7 @@ function TowerPlate({
   snap,
   machineType,
   modelMap,
+  slicerTower,
 }: {
   snap: ReportSnapshot
   /** 报告行的机型 —— `CollisionMap` 按它查板规格（`A1_MINI` 这种） */
@@ -1357,6 +1414,11 @@ function TowerPlate({
    * —— 内核一个出口算出来）；`null` / 旧记录 ⇒ 只画塔（与从前一样）。
    */
   modelMap: ReportModelMap | null | undefined
+  /**
+   * **切片软件自己的擦料塔**（2026-11-04）。给了包围盒就在同一张俯视图上多画一个绿框
+   * ——形状按实测走线并集来，不是 MKP 塔那个固定长相。
+   */
+  slicerTower: ReportSlicerTowerFacts | null | undefined
 }) {
   const tr = useT()
   const ir = snap.ir
@@ -1410,8 +1472,20 @@ function TowerPlate({
    * 塔形状 / 判据框 / 放大层 —— 擦料塔这一栏不另写一套画法。
    * `printable` 故意不给：让画布按板规格的可打印区定（理由见上面那条）。
    */
+  /* 切片器擦料塔的矩形（实测包围盒直接换算，不做任何"补一圈"） */
+  const stb = slicerTower?.bbox ?? null
+  const slicerBox: ReportBox4 | null =
+    stb !== null &&
+    stb.minX !== undefined &&
+    stb.maxX !== undefined &&
+    stb.minY !== undefined &&
+    stb.maxY !== undefined
+      ? { xMin: stb.minX, xMax: stb.maxX, yMin: stb.minY, yMax: stb.maxY }
+      : null
+
   const collision: ReportCollision = {
     towerBbox: boxAt(at.x, at.y),
+    ...(slicerBox !== null ? { slicerTowerBbox: slicerBox } : null),
     /* 模型几何照抄后端那一格（同一个内核出口算的，不在这里推算）—— `null` 就什么都不加 */
     ...(modelMap != null
       ? {
@@ -2312,20 +2386,32 @@ export default function PageReport({
                             ) : (
                               <>
                                 <dl className={s.kv}>
-                                  {g.cells.map(([k, v], i) => (
-                                    <div className={s.kvRow} key={`${k}-${i}`}>
-                                      <dt>{k}</dt>
-                                      <dd
-                                        className={
-                                          k === tr('report.cell.invoke') || k === tr('report.cell.code')
-                                            ? s.mono
-                                            : undefined
-                                        }
-                                      >
-                                        {v}
-                                      </dd>
-                                    </div>
-                                  ))}
+                                  {(g.sections ?? [{ title: '', cells: g.cells }]).flatMap(
+                                    (sec, si) => [
+                                      ...(sec.title === ''
+                                        ? []
+                                        : [
+                                            <div className={s.subTitle} key={`sec-${si}`}>
+                                              {sec.title}
+                                            </div>,
+                                          ]),
+                                      ...sec.cells.map(([k, v], i) => (
+                                        <div className={s.kvRow} key={`${si}-${k}-${i}`}>
+                                          <dt>{k}</dt>
+                                          <dd
+                                            className={
+                                              k === tr('report.cell.invoke') ||
+                                              k === tr('report.cell.code')
+                                                ? s.mono
+                                                : undefined
+                                            }
+                                          >
+                                            {v}
+                                          </dd>
+                                        </div>
+                                      )),
+                                    ],
+                                  )}
                                 </dl>
                                 {/* 擦料塔那一组多一张俯视图：预设写的坐标 vs 程序认到的坐标 */}
                                 {g.id === 'tower' && detail.snapshot != null && (
@@ -2334,6 +2420,8 @@ export default function PageReport({
                                     machineType={detail.summary.machineType}
                                     /* 模型在板上占哪一块（成功那趟也有；旧记录 `null` ⇒ 只画塔） */
                                     modelMap={detail.modelMap}
+                                    /* 切片软件自己的擦料塔（同一张图上多一个绿框；旧记录没有） */
+                                    slicerTower={detail.tower?.slicerTower}
                                   />
                                 )}
                               </>

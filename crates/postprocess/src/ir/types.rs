@@ -184,6 +184,31 @@ pub struct GlueIr {
     pub z_lift_height: f64,
     pub z_lift_height_first_layers: f64,
     pub inter_model_lift_height: f64,
+    /* ---- 预涂胶（2026-11-05）---- */
+    /// 预涂胶速度档：`follow` / `glue` / `custom`（空串按 `follow`，见 `bed_glue::glue_feed_of`）。
+    #[serde(default)]
+    pub bed_glue_speed_mode: String,
+    /// `custom` 档的速度（mm/s）。
+    #[serde(default)]
+    pub bed_glue_speed: f64,
+    /// 段间横移速度档：同上三档。
+    #[serde(default)]
+    pub glue_travel_speed_mode: String,
+    /// `custom` 档的段间横移速度（mm/s）。
+    #[serde(default)]
+    pub glue_travel_speed: f64,
+    /// 涂胶前热床预热温度（°C）。
+    #[serde(default)]
+    pub bed_glue_preheat_temp: f64,
+    /// 涂胶结束后等待秒数（0 = 不停）。
+    #[serde(default)]
+    pub bed_glue_wait_seconds: f64,
+    /// 擦笔模式（**预留，不产生动作**）。
+    #[serde(default)]
+    pub tower_pen_wipe_mode: String,
+    /// 擦笔间隔层数（**预留**）。
+    #[serde(default)]
+    pub tower_pen_wipe_interval: i64,
     /// 换笔脱层（z-hop）高度：只负责「离开刚打完的表面」，不是抬笔高度。
     #[serde(default = "default_swap_hop_height")]
     pub swap_hop_height: f64,

@@ -195,6 +195,15 @@ export interface ReportCollision {
    *  ★ 键名是 `Bbox` 不是 `BBox`：Rust 侧 `tower_bbox` 走 camelCase 就长这样 ——
    *  第一稿写成 `towerBBox`，大小写对不上 ⇒ 俯视图整块退掉（2026-10-18 真机踩的）。 */
   towerBbox?: ReportBox4
+  /**
+   * **切片器自己的擦料塔**的俯视包围盒（2026-11-04）。
+   *
+   * 与 `towerBbox`（MKP 塔的判据框）是两件事：这一格来自 G-code 里
+   * `; FEATURE: Prime tower` 段的真实走线并集，形状随盘变（有时又长又宽、有时很小），
+   * 所以只画矩形，不套 `TowerCoreSvg`。
+   * 老记录 / 没开官方塔 ⇒ `undefined`，那一层不画。
+   */
+  slicerTowerBbox?: ReportBox4
   /** 模型挤出点的整体包围盒（禁区那一档没有 ⇒ 全 0）。**只给"挪模型"建议方向用**——
    *  画图请用下面的 `modelBoxes`（每个模型各一个框）。 */
   modelBbox?: ReportBox4
@@ -260,6 +269,35 @@ export interface ReportTowerFacts {
   towerSafeZOffset?: number
   towerTravelSpeed?: number
   fastTowerMode?: string
+  /**
+   * **切片器自己的擦料塔**（2026-11-04）。
+   *
+   * 与上面那几格（MKP 擦料塔）是两件事：这里讲的是 Bambu 的 prime tower。
+   * 老记录没有这一格 ⇒ `undefined`，界面按「未知」降级（不假装它是「关」）。
+   */
+  slicerTower?: ReportSlicerTowerFacts | null
+}
+
+/** 切片器擦料塔（`detail.tower.slicerTower`） */
+export interface ReportSlicerTowerFacts {
+  /** G-code 头部 `; enable_prime_tower` */
+  enabled?: boolean
+  /** 有塔块的层数 */
+  layers?: number
+  /** 塔块首末 Z 之差（mm） */
+  height?: number
+  /** 耗材克数（E 总量 × 截面积 × 密度，与切片器面板同口径） */
+  filamentGrams?: number
+  /** 俯视包围盒（mm，机器坐标）；没塔块走线时是 `null` */
+  bbox?: ReportSlicerTowerBBox | null
+}
+
+/** 切片器擦料塔的俯视矩形（mm）。前端按它实时画框，**不套** MKP 塔的固定形状。 */
+export interface ReportSlicerTowerBBox {
+  minX?: number
+  maxX?: number
+  minY?: number
+  maxY?: number
 }
 
 /** 切片工艺组（`detail.slicer`） */

@@ -1072,6 +1072,7 @@ G90
 G21
 M83 ; use relative distances for extrusion
 M981 S1 P20000 ;open spaghetti detector
+; FEATURE: Inner wall
 ; === Trapezoidal Sheath Start ===
 ; Sheath Expansion: 5.000mm
 ; LINE_WIDTH: 0.500
@@ -3578,6 +3579,7 @@ G3 Z1.080 I1.217 J0 P1 F42000
 G1 X47.564 Y52.537 F12000.0
 G1 X49.547 Y49.547 Z1.2 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.15
+; FEATURE: Support
 ; update layer progress
 M73 L3
 M991 S0 P2 ;notify layer change
@@ -5078,6 +5080,7 @@ G3 Z1.280 I1.217 J0 P1 F42000
 G1 X47.315 Y52.260 F12000.0
 G1 X49.547 Y49.547 Z1.4 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Support ironing
 ; update layer progress
 M73 L4
 M991 S0 P3 ;notify layer change
@@ -6700,6 +6703,7 @@ G3 Z1.480 I1.217 J0 P1 F42000
 G1 X47.000 Y51.910 F12000.0
 G1 X49.547 Y49.547 Z1.6 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Bottom surface
 ; update layer progress
 M73 L5
 M991 S0 P4 ;notify layer change
@@ -7939,6 +7943,7 @@ G3 Z1.680 I1.217 J0 P1 F42000
 G1 X46.685 Y51.559 F12000.0
 G1 X49.547 Y49.547 Z1.8 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Bridge
 ; update layer progress
 M73 L6
 M991 S0 P5 ;notify layer change
@@ -9190,6 +9195,7 @@ G3 Z1.880 I1.217 J0 P1 F42000
 G1 X46.369 Y51.206 F12000.0
 G1 X49.547 Y49.547 Z2.0 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Bridge
 ; update layer progress
 M73 L7
 M991 S0 P6 ;notify layer change
@@ -10234,6 +10240,7 @@ G3 Z2.080 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z2.2 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Internal solid infill
 ; update layer progress
 M73 L8
 M991 S0 P7 ;notify layer change
@@ -11511,6 +11518,7 @@ G3 Z2.280 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z2.4 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Internal solid infill
 ; update layer progress
 M73 L9
 M991 S0 P8 ;notify layer change
@@ -12780,6 +12788,7 @@ G3 Z2.480 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z2.6 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Sparse infill
 ; update layer progress
 M73 L10
 M991 S0 P9 ;notify layer change
@@ -14721,6 +14730,7 @@ G3 Z2.680 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z2.8 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Internal solid infill
 ; update layer progress
 M73 L11
 M991 S0 P10 ;notify layer change
@@ -16007,6 +16017,7 @@ G3 Z2.880 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z3.0 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Sparse infill
 ; update layer progress
 M73 L12
 M991 S0 P11 ;notify layer change
@@ -17907,6 +17918,7 @@ G3 Z3.080 I1.217 J0 P1 F42000
 G1 X46.043 Y50.828 F12000.0
 G1 X49.547 Y49.547 Z3.2 ;Leaving Wiping Tower ;MKP_STAGE: LeaveTower ; 离开擦料塔
 ; LAYER_HEIGHT: 0.2
+; FEATURE: Sparse infill
 ; update layer progress
 M73 L13
 M991 S0 P12 ;notify layer change

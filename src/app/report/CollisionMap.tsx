@@ -194,6 +194,13 @@ export default function CollisionMap({
    * 或者 24 边形」）—— 内核按占用格连通块切好、交给的是凸包（≤24 边）。
    * 空 / 旧记录 ⇒ 下面退回 `modelRects` 的矩形。
    */
+  /*
+   * 切片器自己的擦料塔（2026-11-04）：**只画包围盒**。
+   * 形状随盘变（又长又宽 / 很小都有），所以不套 MKP 塔那套固定长相，
+   * 就是一个按实测走线并集算出来的矩形。
+   */
+  const slicerTower = boxOf(collision.slicerTowerBbox)
+
   const modelPolys = (collision.modelPolygons ?? [])
     .map((poly) =>
       poly
@@ -404,6 +411,17 @@ export default function CollisionMap({
         />
       )}
 
+      {/* 切片器自己的擦料塔：一个实时包围盒（绿色，与 MKP 塔的红色判据框分开） */}
+      {slicerTower !== null && (
+        <rect
+          className={s.slicerTower}
+          x={bedPt(slicerTower.x, slicerTower.y + slicerTower.h)[0]}
+          y={bedPt(slicerTower.x, slicerTower.y + slicerTower.h)[1]}
+          width={slicerTower.w}
+          height={slicerTower.h}
+        />
+      )}
+
       {/* **塔的目标位置虚框**（挪塔那一屏）：箭头指过去时落点看得见 */}
       {ghost != null &&
         ghost.xMin !== undefined &&
@@ -596,6 +614,12 @@ export default function CollisionMap({
           <li>
             <span className={s.swTower} aria-hidden="true" />
             {tr('report.map.legendTower')}
+          </li>
+        )}
+        {slicerTower !== null && (
+          <li>
+            <span className={s.swSlicerTower} aria-hidden="true" />
+            {tr('report.map.legendSlicerTower')}
           </li>
         )}
         <li>

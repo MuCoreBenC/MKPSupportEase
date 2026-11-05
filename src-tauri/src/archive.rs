@@ -356,6 +356,37 @@ pub struct TowerFacts {
     pub tower_safe_z_offset: f64,
     pub tower_travel_speed: f64,
     pub fast_tower_mode: String,
+    /// **切片器自己的擦料塔**（2026-11-04）。
+    ///
+    /// 报告页「擦料塔」这一组原来只讲 MKP 那份；用户开了 Bambu 的 prime tower 之后
+    /// 界面上连开关都看不到。这一段随组出门，前端分两小节摊开
+    /// （MKP 擦料塔 / 切片软件擦料塔）。
+    ///
+    /// 老记录没有这一格 ⇒ 前端按「未知」降级，不假装它是「关」。
+    pub slicer_tower: Option<SlicerTowerFacts>,
+}
+
+/// 切片器擦料塔（`detail.tower.slicerTower`）。
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerTowerFacts {
+    /// 头部 `; enable_prime_tower`。
+    pub enabled: bool,
+    pub layers: i64,
+    pub height: f64,
+    pub filament_grams: f64,
+    /// 俯视包围盒；没塔块走线时为 `null`。
+    pub bbox: Option<SlicerTowerBBox>,
+}
+
+/// 俯视矩形（mm）。前端拿它画那个绿框，**不套** MKP 塔的固定形状。
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlicerTowerBBox {
+    pub min_x: f64,
+    pub max_x: f64,
+    pub min_y: f64,
+    pub max_y: f64,
 }
 
 /// 切片工艺组（`detail.slicer`）。
@@ -720,6 +751,18 @@ impl ReportFacts<'_> {
             tower_safe_z_offset: ir.tower.safe_z_offset,
             tower_travel_speed: ir.tower.travel_speed,
             fast_tower_mode: ir.tower.fast_mode.clone(),
+            slicer_tower: Some(SlicerTowerFacts {
+                enabled: self.header.slicer_tower.enabled,
+                layers: self.header.slicer_tower.layers,
+                height: self.header.slicer_tower.height,
+                filament_grams: self.header.slicer_tower.filament_grams,
+                bbox: self.header.slicer_tower.bbox.map(|b| SlicerTowerBBox {
+                    min_x: b.min_x,
+                    max_x: b.max_x,
+                    min_y: b.min_y,
+                    max_y: b.max_y,
+                }),
+            }),
         }
     }
 
@@ -1451,6 +1494,7 @@ mod tests {
                 slicer_ironing_enabled: false,
                 three_mf_file_name: ".65112.2_.gcode.3mf".into(),
                 model_name: Some("帕姆".into()),
+                slicer_tower: postprocess::postproc::prime_tower::scan(&[]),
             },
             preset_name: "A1MF.toml".into(),
             sha: "dea417626c060af54c11e3613468153148046c81a57f358ea86d63805aacd771".into(),
@@ -1551,6 +1595,11 @@ mod tests {
         }
         assert_eq!(tower["towerLayers"], 536, "塔层数认 IR 终态");
         assert_eq!(tower["towerHeight"], 6.46);
+        // 2026-11-04 新增：切片器自己那份擦料塔（报告页按它拆第二小节、画绿框）
+        let st = tower.get("slicerTower").expect("擦料塔组缺键：slicerTower");
+        for key in ["enabled", "layers", "height", "filamentGrams", "bbox"] {
+            assert!(st.get(key).is_some(), "切片器擦料塔缺键：{key}");
+        }
 
         let slicer = serde_json::to_value(facts.slicer()).unwrap();
         for key in [

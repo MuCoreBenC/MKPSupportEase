@@ -24,6 +24,7 @@ pub mod marks;
 pub mod offset;
 pub mod pass1;
 pub mod pass2;
+pub mod prime_tower;
 pub mod printtime;
 pub mod support;
 pub mod tower;

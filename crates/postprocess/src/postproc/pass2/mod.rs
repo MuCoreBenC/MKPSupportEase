@@ -278,6 +278,13 @@ struct Ctx<'a> {
     pending_finish_lines: Vec<String>,
     cached_layer_lines: Vec<CachedLine>,
     future_collision_layers: Vec<FutureCollisionLayer>,
+
+    /// 切片器原文当前生效的 `; FEATURE:` 名（MKP 自己写的塔块 `Inner wall` 不进这里）。
+    ///
+    /// 塔块写了自己的 `; FEATURE: Inner wall`（要那个黄），而原文回到模型段时
+    /// 并不重发 FEATURE（Bambu 只在"变了"时才写）—— 预览就会把整段模型算成内墙。
+    /// 塔块结束时用这一格把上下文还回去。
+    slicer_feature: Option<String>,
 }
 
 const MAX_RECENT_LINES: usize = 500;
@@ -680,6 +687,7 @@ pub fn second_pass(
         pending_paint_lines: Vec::new(),
         pending_finish_lines: Vec::new(),
         cached_layer_lines,
+        slicer_feature: None,
         future_collision_layers,
     };
     ctx.curr_max_tower_height = ctx.ir_data.machine.first_layer_height;
@@ -1373,6 +1381,19 @@ pub fn second_pass(
             ));
             ctx.remove_g3_flag = true;
 
+            // 把 feature 上下文还给切片器。
+            //
+            // 这一层最前面写的是塔块的 `; FEATURE: Inner wall`（要那个黄，不能改）；
+            // 而原文回到模型段时**不会**重发 FEATURE —— Bambu 只在 feature 变化时才写。
+            // 于是从塔块到本层结束的所有模型走线都会挂在「内墙」名下：
+            // 预览里模型支撑被染成内墙黄，`切片结果` 面板的内墙占比也跟着虚高。
+            // 这里补一条，位置就是 Bambu 自己会写的那一处（塔块之后、原文第一段之前）。
+            if let Some(feat) = ctx.slicer_feature.clone() {
+                if feat != "Inner wall" {
+                    ctx.write_line(&format!("; FEATURE: {feat}"));
+                }
+            }
+
             let layer_height = ctx.curr_max_tower_height - ctx.last_tower_z;
             let max_lh =
                 (TOWER_SUGGESTED_LAYER_COEFF * ctx.ir_data.machine.nozzle_diameter * 1000.0)
@@ -1519,6 +1540,14 @@ pub fn second_pass(
         };
         let h_prepare_next_tower = trimmed.contains(crate::gcode::MARKER_PREPARE_NEXT_TOWER);
         let h_adjust_cooling = trimmed.contains(crate::gcode::MARKER_ADJUST_COOLING);
+        // 记住切片器当前那一档 feature（只认原文里的 `; FEATURE:` 行；
+        // MKP 塔块自己写的那条走 `write_line`，不经过这里，不会污染这一格）。
+        // 塔块结束时靠它把上下文还回去 —— 见「把 feature 上下文还给切片器」。
+        if let Some(feat) = crate::gcode::is_feature_line(trimmed) {
+            if ctx.slicer_feature.as_deref() != Some(feat) {
+                ctx.slicer_feature = Some(feat.to_string());
+            }
+        }
         let out_line = adjusted.unwrap_or(line);
 
         if ctx.allow_print_flag {

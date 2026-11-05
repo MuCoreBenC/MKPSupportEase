@@ -58,11 +58,11 @@ const KNOWN_PARAM_KEYS: &[&str] = &[
 /// 不是静默丢弃。
 const UNKNOWN_SNAPSHOT: &[(&str, usize)] = &[
     ("follows", 6),
-    ("jsonKey", 75),
+    ("jsonKey", 83),
     ("mergeGroup", 5),
-    ("parentKey", 43),
+    ("parentKey", 46),
     ("serialization", 1),
-    ("showWhen", 43),
+    ("showWhen", 46),
 ];
 
 #[test]
@@ -281,7 +281,7 @@ fn kr4_unknown_registry_keys_stay_on_the_snapshot() {
         .get("params")
         .and_then(|v| v.as_array())
         .expect("params 是数组");
-    assert_eq!(params.len(), 75, "反空转：注册表应有 75 条参数");
+    assert_eq!(params.len(), 83, "反空转：注册表应有 83 条参数");
 
     let mut unknown: BTreeMap<String, usize> = BTreeMap::new();
     for p in params {

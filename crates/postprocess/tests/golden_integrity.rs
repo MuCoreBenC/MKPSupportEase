@@ -48,8 +48,8 @@ const VENDORED: &[(&str, &str, u64)] = &[
         // 选中互为镜像的起点，材料塔 G-code 两台机器对不上）。几何不变，只是接缝换位。
         // 人工逐块审查过：23 条用例仅起点旋转，坐标逐行一致。
         "tower_matrix.golden",
-        "dad4db0ec7414985d3e905362314bb2ccba0eae1b51c4be770c9c71ef72d4bbe",
-        129_583,
+        "b728eb05722761fd896df31d567b11d48a7615b77de358ee428670dfadf0eca6",
+        129_693,
     ),
 ];
 

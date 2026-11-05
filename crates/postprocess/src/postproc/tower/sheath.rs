@@ -114,6 +114,11 @@ pub fn generate_sheath_gcode(
     };
 
     let mut lines: Vec<String> = Vec::new();
+    /* 预览归类（2026-11-04）：护套首层是 MKP 塔的一部分，但它在第一层的 `; FEATURE:` 之前
+    就落笔了 —— 不声明的话，切片器把它算进上文那个 `Custom`，塔底那一圈就被画成绿色
+    （作者：「擦料塔底层，首层出现的问题」）。这里按塔自己的档声明一次，
+    后面塔层块每层都会再写一遍。 */
+    lines.push("; FEATURE: Inner wall".to_string());
     lines.push("; === Trapezoidal Sheath Start ===".to_string());
     lines.push(format!("; Sheath Expansion: {expansion:.3}mm"));
     lines.push(format!("; LINE_WIDTH: {line_width:.3}"));

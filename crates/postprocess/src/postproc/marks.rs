@@ -213,6 +213,43 @@ pub fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// 剔除「塔块结束后的 feature 恢复行」。
+///
+/// 2026-11-04 起：塔块写了自己的 `; FEATURE: Inner wall`（预览里那个黄，用户明确要留），
+/// 而原文回到模型段时**不重发** `; FEATURE:`（Bambu 只在 feature 变化时才写）。
+/// 于是从塔块到本层结束的所有模型走线都挂在「内墙」名下 —— 预览里模型支撑被染成内墙黄，
+/// `切片结果` 面板的内墙占比也跟着虚高。修法是塔块末尾补一条
+/// `; FEATURE: <切片器当前那一档>`，位置正好是 Bambu 自己会写的那一处。
+///
+/// 这一条是本侧**有意新增**的行：整链参考物由来源仓库的 CLI 生成、本仓无法复现，
+/// 不能拿本侧输出覆盖它，所以判据先把它剔掉，再要求其余仍逐字节一致。
+///
+/// 认法只认 MKP 自己写的锚，三行紧邻：
+/// `;Leaving Wiping Tower` → `; LAYER_HEIGHT:` → `; FEATURE: <name>`。
+/// 切片器原生的 `; FEATURE:` 前面没有这个组合，不会误伤。
+pub fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let lines: Vec<&str> = text.split_inclusive('\n').collect();
+    let mut out = String::with_capacity(text.len());
+    let mut prev1 = String::new();
+    let mut prev2 = String::new();
+    for (i, line) in lines.iter().enumerate() {
+        let t = line.trim_end();
+        /* 两种锚，都只认 MKP 自己的组合，切片器原生注释旁边没有它们：
+        ① 塔层块收尾：`;Leaving Wiping Tower` → `; LAYER_HEIGHT:` → `; FEATURE:`
+        ② 护套首层开头：`; FEATURE: …` 的**下一行**是 `; === Trapezoidal Sheath Start ===` */
+        let next = lines.get(i + 1).map(|l| l.trim_end()).unwrap_or_default();
+        let restore = t.starts_with("; FEATURE: ")
+            && ((prev1.starts_with("; LAYER_HEIGHT:") && prev2.contains(";Leaving Wiping Tower"))
+                || next.starts_with("; === Trapezoidal Sheath Start ==="));
+        if !restore {
+            out.push_str(line);
+        }
+        prev2 = std::mem::replace(&mut prev1, t.to_string());
+    }
+    out.into_bytes()
+}
+
 /// 落盘前的收尾。**必须是最后一道行变换** —— STATS 数的就是落盘的那份，
 /// `STATS_MATCH` 靠这个保证。
 ///

@@ -148,10 +148,17 @@ fn strip_glue_section_vertical_moves(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_glue_section_vertical_moves(bytes)
 }
 
-/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去标记行。
+/// 剔除塔块结束后的 feature 恢复行（2026-11-04 起塔块末尾会补一条
+/// `; FEATURE: <切片器当前那一档>`，否则模型段整段被预览算成「内墙」）。
+/// 判定锚与实现只有 `postprocess::postproc::marks::strip_tower_feature_restore` 一份。
+fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_tower_feature_restore(bytes)
+}
+
+/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 去标记行。
 fn normalize(bytes: &[u8]) -> Vec<u8> {
-    strip_mkp_marks(&strip_glue_section_vertical_moves(
-        &strip_swap_travel_blocks(bytes),
+    strip_mkp_marks(&strip_tower_feature_restore(
+        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
     ))
 }
 

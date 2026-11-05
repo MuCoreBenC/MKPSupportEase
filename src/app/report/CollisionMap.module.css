@@ -178,6 +178,17 @@
   fill: var(--danger);
 }
 
+/* 切片器自己的擦料塔（2026-11-04）：**一个实时包围盒**，不套 MKP 塔那个固定形状。
+   颜色刻意用切片器预览里那个绿（作者：「用它切片软件里的绿绿的不好看的绿色」）——
+   与 MKP 塔的判据框（红虚线）、模型（灰）都分得开。 */
+.slicerTower {
+  fill: rgb(0 192 0 / 12%);
+  stroke: #00b32d;
+  stroke-width: 1.4;
+  stroke-dasharray: 6 3;
+  opacity: 0.9;
+}
+
 /* 塔的真实形状：绝对定位盖在判据框上（百分比由组件按尺寸算） */
 .tower {
   position: absolute;
@@ -228,6 +239,11 @@
 
 .swHit {
   background: var(--danger);
+}
+
+.swSlicerTower {
+  background: rgb(0 192 0 / 22%);
+  border: 1px solid #00b32d;
 }
 
 .legendNum {

@@ -1,6 +1,6 @@
 # machine: A1_MINI
 # variant: standard
-# generated_at: 2026-11-03T12:34:19+08:00
+# generated_at: 2026-11-05T04:17:00+08:00
 
 [toolhead]
 # 自定义工具头获取 G-code
@@ -40,6 +40,10 @@ prime_length = 100 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 
 [wiping]
+bed_glue_preheat_temp = 50 # 涂胶前热床预热温度(°C) 范围:30~60
+bed_glue_speed = 70 # 预涂胶速度自定义值(mm/s) 范围:10~300
+bed_glue_speed_mode = "follow" # 预涂胶速度(follow/glue/custom)
+bed_glue_wait_seconds = 0 # 预涂胶等待时间(s) 范围:0~300
 disable_3rd_layer_clog_detect = true # 关闭第三层裹头检测(A1/A1 mini)
 disable_timelapse = true # 关闭延时摄影(A系列i3结构)
 disk_stagger_angle = 5 # 圆盘错开角度(度) 范围:0~30
@@ -51,6 +55,8 @@ fast_tower_mode = "fast" # 擦料塔模式
 glue_inter_model_lift_height = 2 # 模型间/段间跳转Z抬升高度(mm) 范围:2~5
 glue_pass_count = 1 # 涂胶次数 范围:1~10
 glue_sparse_ratio = 50 # 涂胶稀疏比(%)
+glue_travel_speed = 70 # 段间横移速度自定义值(mm/s) 范围:10~300
+glue_travel_speed_mode = "follow" # 段间横移速度(follow/glue/custom)
 glue_z_compensation_bed_bl = 0 # 热床后左角Z补偿 范围:-0.2~0.2
 glue_z_compensation_bed_br = 0 # 热床后右角Z补偿 范围:-0.2~0.2
 glue_z_compensation_bed_fl = 0 # 热床前左角Z补偿 范围:-0.2~0.2
@@ -86,6 +92,8 @@ tower_custom_layer_height = "auto" # 塔层高策略
 tower_extrude_ratio = 1 # 支撑体挤出倍率
 tower_first_layer_flow = 1 # 擦料塔首层流量 范围:0.5~2
 tower_glue_layer_speed = 35 # 涂胶面层速度
+tower_pen_wipe_interval = 5 # 擦笔间隔层数 范围:1~50
+tower_pen_wipe_mode = "off" # 擦笔模式(off/auto/custom)
 tower_rib_speed = "follow" # 斜肋打印速度模式
 tower_rib_speed_value = 40 # 斜肋自定义打印速度
 tower_safe_z_offset = 0.7 # 塔安全Z偏移(0.3~5.0mm)

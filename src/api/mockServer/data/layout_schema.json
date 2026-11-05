@@ -366,7 +366,40 @@
               "id": "item_5_1_2",
               "paramKey": "wiping.glue_pass_count"
             }
-          ]
+          ,
+          {
+            "id": "item_5_1_3",
+            "paramKey": "wiping.bed_glue_speed_mode"
+          },
+          {
+            "id": "item_5_1_4",
+            "paramKey": "wiping.bed_glue_speed"
+          },
+          {
+            "id": "item_5_1_5",
+            "paramKey": "wiping.glue_travel_speed_mode"
+          },
+          {
+            "id": "item_5_1_6",
+            "paramKey": "wiping.glue_travel_speed"
+          },
+          {
+            "id": "item_5_1_7",
+            "paramKey": "wiping.bed_glue_preheat_temp"
+          },
+          {
+            "id": "item_5_1_8",
+            "paramKey": "wiping.bed_glue_wait_seconds"
+          },
+          {
+            "id": "item_5_1_9",
+            "paramKey": "wiping.tower_pen_wipe_mode"
+          },
+          {
+            "id": "item_5_1_10",
+            "paramKey": "wiping.tower_pen_wipe_interval"
+          }
+        ]
         },
         {
           "id": "z_lift",

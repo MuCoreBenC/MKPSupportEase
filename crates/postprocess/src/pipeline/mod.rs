@@ -222,6 +222,13 @@ pub struct HeaderFacts {
     /// `_temp_1.config` 三级兜底，三级都没有 ⇒ `None`（执行记录里落 `null`，
     /// 报告页就只显示 G-code 名）。链路与形态见 [`crate::gcode::model_name`]。
     pub model_name: Option<String>,
+    /// **切片器自己的擦料塔**（`; FEATURE: Prime tower`）—— 开关 / 层数 / 高度 /
+    /// 耗材 / 俯视包围盒。
+    ///
+    /// 与上面几格不同，它不是"头部一行"刮出来的，要顺着全文找塔块；
+    /// 但同在**开跑之前就能定**的那一类里，所以搭同一趟车出门。
+    /// 见 [`crate::postproc::prime_tower`]。
+    pub slicer_tower: crate::postproc::prime_tower::SlicerTowerFacts,
 }
 
 /// 头部刮取。`path` 有两处用途：`; filename_format` 推 3MF 名时的兜底，以及
@@ -238,6 +245,7 @@ pub fn header_facts(content: &[String], path: &str) -> HeaderFacts {
         slicer_ironing_enabled: crate::gcode::slicer_ironing_enabled(content),
         three_mf_file_name: crate::gcode::three_mf_file_name(content, path),
         model_name: crate::gcode::model_name(std::path::Path::new(path)),
+        slicer_tower: crate::postproc::prime_tower::scan(content),
     }
 }
 

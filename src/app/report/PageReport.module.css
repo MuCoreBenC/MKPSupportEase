@@ -886,6 +886,25 @@
   display: contents;
 }
 
+/* 组内小节标题（2026-11-04，只给「擦料塔」用：MKP 一框、切片软件一框）。
+   `.kv` 是两列网格、`.kvRow` 是 `display: contents` —— 这一格必须自己跨满两列，
+   否则它会缩在左列里、右边空一大块。 */
+.subTitle {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline);
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.subTitle:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+
 .kvRow dt {
   font-size: var(--fs-label);
   color: var(--text-3);

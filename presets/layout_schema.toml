@@ -328,6 +328,38 @@ paramKey = 'toolhead.glue_z_offset'
 id = 'item_5_1_2'
 paramKey = 'wiping.glue_pass_count'
 
+[[tabs.sections.items]]
+id = 'item_5_1_3'
+paramKey = 'wiping.bed_glue_speed_mode'
+
+[[tabs.sections.items]]
+id = 'item_5_1_4'
+paramKey = 'wiping.bed_glue_speed'
+
+[[tabs.sections.items]]
+id = 'item_5_1_5'
+paramKey = 'wiping.glue_travel_speed_mode'
+
+[[tabs.sections.items]]
+id = 'item_5_1_6'
+paramKey = 'wiping.glue_travel_speed'
+
+[[tabs.sections.items]]
+id = 'item_5_1_7'
+paramKey = 'wiping.bed_glue_preheat_temp'
+
+[[tabs.sections.items]]
+id = 'item_5_1_8'
+paramKey = 'wiping.bed_glue_wait_seconds'
+
+[[tabs.sections.items]]
+id = 'item_5_1_9'
+paramKey = 'wiping.tower_pen_wipe_mode'
+
+[[tabs.sections.items]]
+id = 'item_5_1_10'
+paramKey = 'wiping.tower_pen_wipe_interval'
+
 [[tabs.sections]]
 id = 'z_lift'
 
