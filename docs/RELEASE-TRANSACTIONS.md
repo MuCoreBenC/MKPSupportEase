@@ -477,3 +477,51 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/r
 
 **边界**：这一节只谈软件版本。预览发布**不碰** `presets/delivery/catalog.json` 与
 `publish-serial.json`，不跑 `presets publish`，不推进预设数据序号。
+
+### 10.9 双平台下载：Gitee 收货、GitHub 镜像（2026-11-06）
+
+作者口径：**GitHub 是主仓库**（PR、合并、tag 都从这里出发），**Gitee 是国内下载源**，
+清单里的下载地址**继续只指 Gitee**（§5-M6 不动）。两边同一个版本、同一个 tag、同一组安装包。
+
+**方向为什么是 Gitee → GitHub，而不是反过来**
+
+清单指 Gitee ⇒ 客户端"点一下就能下"落在 Gitee ⇒ **Gitee 必须先有资产**，内核才允许把清单
+写出去（§10.8 的写入顺序：先宣告再上传，用户会撞上空下载页）。所以收货方只能是 Gitee，
+GitHub 事后复制。反过来会产生"清单已宣告、Gitee 还没有包"的窗口。
+
+| 环节 | 谁做 | 说明 |
+|---|---|---|
+| tag | 内核（本机） | 打在 GitHub 上，`--confirm` 之后 |
+| Gitee Release + macOS 包 | 内核（本机） | `prerelease` 按通道给 |
+| Gitee Release + Windows 包 | `windows-build.yml` | tag push 触发；脚本**等** Release 出现再传 |
+| GitHub Release + 资产 | `mirror-release-to-github.yml` | 从 Gitee **复制字节**，绝不重新打包 |
+
+**Windows 包怎么进 Release**：内核跑在 macOS 上，等不了一台 Windows 机器，所以让 Windows
+那侧自己送过来 —— `node scripts/gitee-release.mjs upload --tag vX --file …`。它等 Release
+出现（默认 20 分钟）、同名附件跳过（重跑幂等）、传完**回读**确认附件真的在。
+没配 `GITEE_TOKEN` 时只告警不红：包仍在 Artifacts 里，构建本身的契约已经完成。
+
+**一致性三道闸**（`mirror-release-to-github.yml` 的最后一个 step，任一不过即红）：
+
+1. **tag 同 sha** —— 两边 `git ls-remote refs/tags/<tag>` 必须一样；
+2. **版本与 `prerelease`** —— 从 Gitee Release **原样搬**，不重新推导。Gitee 返回的
+   `tag_name` 与要镜像的 tag 不一致就直接停；
+3. **资产同字节** —— 从 Gitee 下载 → 本地算 sha256 → 原样上传 → 读 GitHub 资产的
+   `digest: sha256:…` 逐条比对。
+
+★ **Gitee 的附件 API 不返回 `size` / `sha`**（2026-11-06 实测：只有 `name` 与
+`browser_download_url`）。所以"以 Gitee 为准"的校验只能靠**下载回来自己算**；
+清单里的 `sha256` 也一直是发布方本地算的（`release_tx` 的 `sha256_file`），不依赖回读。
+
+**触发**：`push` tag `v*`（内核刚打完 tag，先等 Gitee Release 齐）、`workflow_run`
+（windows-build 跑完，把 `.exe` 补上）、`workflow_dispatch`（人主动补）。
+同一个 tag 串行，`--clobber` 幂等，重跑不会出现两份同名资产。
+
+**已知边界（本轮没做）**：清单里的 **Windows 资产条目**（`assets[]` 里的 `windows` + `nsis`
+那一项）还没有人写 —— `release_info_text` 的第五格仍是 `None`（"双平台资产：下一轮"）。
+也就是说：Windows 包在两个 Release 上都能**手动下载**，但客户端不会**自动下载**它。
+补法是在内核里写双平台资产（那里已经留好位置），不在镜像这一层。
+
+**运维前提**：`mirror-release-to-github.yml` 只用仓库自带的 `GITHUB_TOKEN`（读 Gitee 是
+公开数据），**不需要额外 Secret**；但 `windows-build.yml` 那一步要 `GITEE_TOKEN`。
+本仓库当前 Secret 为 0 个，所以 Windows 自动化上传会跳过。
