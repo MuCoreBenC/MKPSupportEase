@@ -778,10 +778,15 @@ export default function PageSettings({
     }
   }
 
-  /** 开始在应用内下载（标题栏那枚环会接手；这一页只负责发起） */
-  const startDownload = async () => {
+  /**
+   * 开始在应用内下载（标题栏那枚环会接手；这一页只负责发起）。
+   *
+   * ★ 2026-11-05 双通道：`channel` 是**用户点中的那一路**，必须一路传到底，
+   *   否则「尝试测试版」会去下正式版。正式版卡片仍传 `'stable'`。
+   */
+  const startDownload = async (channel?: 'stable' | 'preview') => {
     try {
-      await api.startUpdate()
+      await api.startUpdate(channel)
     } catch (e) {
       setNote({ text: errorText(e), bad: true })
     }
@@ -1099,6 +1104,15 @@ export default function PageSettings({
   const hasUpdate = upd?.hasUpdate === true
   const notes = hasUpdate ? upd?.notes : undefined
   const releaseUrl = hasUpdate ? upd?.url : undefined
+  /**
+   * 双通道候选（2026-11-05）：**只有用户主动点「重新检查」才拿得到**。
+   * 后端已把正式版排第一，前端再排一次 —— 「正式版优先」是界面契约，
+   * 不依赖网络返回顺序。空数组 = 老后端 / 没查到，界面退回原来那一颗按钮。
+   */
+  const channels = (upd?.candidates ?? [])
+    .slice()
+    .sort((a, b) => (a.channel === 'stable' ? 0 : 1) - (b.channel === 'stable' ? 0 : 1))
+  const showChannelCards = channels.length > 0
 
   /*
    * 左列**只有两行**（状态 + 版本对照）⇒ 动作条竖向居中（2026-10-30 作者：
@@ -1287,14 +1301,76 @@ export default function PageSettings({
                 {tr('settings.update.view')}
               </Btn>
             )}
-            {/* 有安装包（release.json 给了 asset）才摆「更新」；没有就只留左边那两颗 */}
-            {hasUpdate && upd?.asset !== undefined && (
+            {/* 有安装包才摆「更新」。双通道开启后这颗收进卡片里，
+                免得同一版本出现两颗功能一样的按钮（卡片按通道各自发起下载）。 */}
+            {hasUpdate && upd?.asset !== undefined && !showChannelCards && (
               <Btn variant="accent" disabled={updateBusy} onClick={() => void startDownload()}>
                 {tr('settings.update.install')}
               </Btn>
             )}
           </div>
         </div>
+
+        {/*
+         * 双通道候选卡（2026-11-05）：正式版排第一、预览版排第二，颜色区分。
+         * ★ 只在 `checkSoftwareUpdate` 主动返回 `candidates` 时出现；
+         *   自动通知 / 标题栏那一路永远不带这数组，所以预览版不会主动冒出来。
+         * ★ 两张卡各自按自己的 `channel` 发起下载 —— 从预览版切回正式版是
+         *   **通道选择**，不靠版本号大小推断（预览版基础号可能更高）。
+         */}
+        {showChannelCards && (
+          <div className={s.channelList}>
+            {channels.map((c) => {
+              const stable = c.channel === 'stable'
+              const canInstall = c.asset !== undefined
+              return (
+                <div
+                  key={c.channel}
+                  className={`${s.channelCard} ${stable ? s.channelStable : s.channelPreview}`}
+                >
+                  <div className={s.channelBody}>
+                    <div className={s.channelHead}>
+                      <span className={`${s.channelTag} ${stable ? s.channelTagStable : s.channelTagPreview}`}>
+                        {tr(stable ? 'settings.update.candidateStable' : 'settings.update.candidatePreview')}
+                      </span>
+                      <span className={s.channelVersion}>{c.version}</span>
+                      {stable && (
+                        <span className={s.channelBadge}>{tr('settings.update.stableBadge')}</span>
+                      )}
+                      {!stable && (
+                        <span className={s.channelBadgeMuted}>{tr('settings.update.previewBadge')}</span>
+                      )}
+                    </div>
+                    {c.notes !== undefined && c.notes !== '' && (
+                      <p className={s.channelNote}>{c.notes}</p>
+                    )}
+                    {!stable && (
+                      <p className={s.channelNoteMuted}>{tr('settings.update.previewNote')}</p>
+                    )}
+                  </div>
+                  <div className={s.channelActions}>
+                    {canInstall ? (
+                      <Btn
+                        variant={stable ? 'accent' : 'default'}
+                        disabled={updateBusy}
+                        onClick={() => void startDownload(c.channel)}
+                      >
+                        {tr(stable ? 'settings.update.updateStable' : 'settings.update.tryPreview')}
+                      </Btn>
+                    ) : (
+                      c.url !== undefined && (
+                        <Btn onClick={() => void openReleasePage(c.url ?? '')}>
+                          {tr('settings.update.view')}
+                        </Btn>
+                      )
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+            <p className={s.channelHint}>{tr('settings.update.recheckHint')}</p>
+          </div>
+        )}
 
         {/*
          * 「自动检查更新」（2026-11-05）：作者截图里右上角那块空位。

@@ -353,7 +353,49 @@ curl -sL https://gitee.com/MuCoreBenC/MKPSupportEase/raw/main/presets/delivery/c
 `dc0884e1b1b0c421`；同步前 Gitee main 是 `3babb63…`（第 4 号 `c03b5304a766f173`）。
 后续每一轮以「两端 `git ls-remote` 相同」为准，别写死 sha。
 
-### 10.4 失败与边界
+### 10.4 双通道清单（2026-11-05）
+
+**语义先立住，命名押后**：`dev` 是作者本机自测用，绝不通知任何用户；对外只有
+「可主动查看的预览版」与「会主动通知的正式版」。预览版发布后不主动通知普通用户，
+只有用户点「重新检查」时才与正式版并列出现（正式版优先、颜色区分）。
+
+| 文件 | 谁读它 | 什么时候读 |
+| --- | --- | --- |
+| `release.json` | 所有客户端（含 0.0.9 老版） | 自动通知 / 标题栏 / 主动检查 |
+| `release-preview.json` | 只有带 `releasePreview` 解析分支的新客户端 | **仅**用户主动点「重新检查」 |
+
+- `release.json` 形状、`version`、单 `asset` **一个字节都没动**（仍 `0.0.6`）；
+  `source.json` 只加可选相对字段 `releasePreview`，`sourceSchema` 保持 2，
+  `releaseSchema` 保持 1 —— 加字段不升代次。
+- **老客户端结构上读不到预览清单**：0.0.9 的二进制里没有 `releasePreview`
+  这一格与 `ResourceRef::ReleasePreview` 分支，永远不会发起那次请求。
+  独立判据 `a_stable_0_0_9_is_never_notified_about_a_preview_release` 直接钉住
+  自动通知链路，不靠版本号规则推断。
+- 预览清单本轮是**占位**（版本与正式版相同 `0.0.6`、无 `asset`），
+  界面不会凭空多出一张预览卡。预览版的生成与发布事务留到下一轮。
+- 自动检查（拉目录成功后顺路）**一次网络请求都不新增**，仍只读正式清单；
+  主动检查最多两次 GET（正式 + 预览）。预览清单缺失 / 解析失败不算故障，
+  正式版结论照给。
+- `start_update` 按用户点中的 `channel` 取资产；认不出的通道显式报错，
+  不兜底成正式版 —— 否则「尝试测试版」会下成正式包。
+- `scripts/check-release-source.mjs` 用同一条 Gitee 断代线检查两份清单的
+  `url` / `asset.url` / `assets[].url`。
+
+### 10.5 Windows 应用内安装（2026-11-05）
+
+- `release.json` 可选 `assets[]`（`platform` / `kind` 标注），老的单 `asset`
+  保留为 macOS 入口；客户端按当前平台挑，`kind = nsis` 的 exe **不解压**，
+  验 size/sha 后直接进 `Ready`。
+- 退出后由 PowerShell 帮手 `Start-Process … -ArgumentList '/S' -Wait`
+  静默安装，写同一份 `run/update-result.json` 并拉起新 exe。
+- 本机是 macOS，帮手脚本做成纯函数并单测
+  （`the_windows_install_script_installs_silently_and_records`），
+  **真机行为只承诺 Windows CI 编译通过**，未在本机验证过。
+- 顺手修掉一个既有时序 bug：安装脚本 `sleep 1` 后才用暂存里的包，
+  而 `install_update` 原来 200ms 后就 `cleanup_stage()` 把暂存删了 ——
+  现在清理交给下一次 `download` 开头。
+
+### 10.6 失败与边界
 
 - Actions 红了：先看 job 日志；**不要**改用本地 `git push gitee main`（PR-only 闸②会拦、
   服务端 ruleset 也拒），也不要用 `ALLOW_PUSH_MAIN=1` / `--no-verify` 绕。

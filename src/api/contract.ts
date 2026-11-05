@@ -2003,6 +2003,23 @@ export interface SoftwareUpdate {
    *   （那是 0.0.2 / 0.0.3 的行为，仍然成立）。**有它才摆"在应用内下载"按钮。**
    */
   asset?: ReleaseAsset
+  /**
+   * **用户主动点「重新检查」才给的并列候选**（2026-11-05 双通道）。
+   *
+   * 正式版排第一、预览版排第二；空数组 = 这次没查到候选（不是「没有预览版」）。
+   * ★ 顶层 `hasUpdate` / `latestVersion` 仍只按**正式版**判定，
+   *   预览版不参与自动通知，也不改变主状态。
+   */
+  candidates?: UpdateCandidate[]
+}
+
+/** 一条可主动选择的更新通道（与 Rust `release_info::UpdateCandidate` 逐字对齐） */
+export interface UpdateCandidate {
+  channel: 'stable' | 'preview'
+  version: string
+  notes?: string
+  url?: string
+  asset?: ReleaseAsset
 }
 
 /** 发布出去的安装包（`release.json` 的可选 `asset` 格） */
@@ -2013,6 +2030,10 @@ export interface ReleaseAsset {
   size: number
   /** 小写十六进制；空 = 不校验 */
   sha256: string
+  /** 适用平台（`macos` / `windows`）；老发布物没这格 */
+  platform?: string
+  /** 资产种类：`appZip`（macOS 解包替换）/ `nsis`（Windows 静默安装） */
+  kind?: string
 }
 
 /**
@@ -3899,8 +3920,14 @@ export interface MkpApi {
    */
   updateInfo(): Promise<UpdateInfo>
 
-  /** 开始下载安装包（**秒回**；进度靠 `software-update-progress` 事件） */
-  startUpdate(): Promise<void>
+  /**
+   * 开始下载安装包（**秒回**；进度靠 `software-update-progress` 事件）。
+   *
+   * `channel` = 用户点中的那一路（`'stable'` / `'preview'`）；不传 = 正式版
+   * （标题栏 `UpdateIndicator` 仍按旧形状无参调用）。认不出的通道后端显式报错，
+   * 不会悄悄下成正式版。
+   */
+  startUpdate(channel?: 'stable' | 'preview' | null): Promise<void>
   pauseUpdate(): Promise<void>
   resumeUpdate(): Promise<void>
   cancelUpdate(): Promise<void>

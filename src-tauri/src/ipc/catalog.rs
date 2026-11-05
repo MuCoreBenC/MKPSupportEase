@@ -1315,11 +1315,12 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
     let task = tauri::async_runtime::spawn_blocking(move || {
         traced("checkSoftwareUpdate", |_| {
             let root = internal_root(&app)?;
-            /* 与「拉目录成功后顺路查」共用同一个口子：地址解析 / 版本比较只有一份。
+            /* ★ 用户**主动点「重新检查」**才走这里：正式版 + 预览版各取一次。
+             * 顶层那六个字段仍由「正式版」单独判定（标题栏 / 自动通知同一口径），
+             * 预览版只进 `candidates`，不改变 `hasUpdate`。
              * 手动检查失败**如实拒绝**（设置页要显示错误）；自动那条才静默。 */
-            Ok(SoftwareUpdateDto::from(
-                runtime::update_check::fetch_update(&root)?,
-            ))
+            let (stable, candidates) = runtime::update_check::fetch_update_bundle(&root)?;
+            Ok(SoftwareUpdateDto::from((stable, candidates)))
         })
     });
     task.await.map_err(|e| {
@@ -1331,6 +1332,7 @@ pub async fn check_software_update(app: AppHandle) -> Result<SoftwareUpdateDto, 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SoftwareUpdateDto {
+    /* 下面六个字段保持旧形状：标题栏 UpdateIndicator / 自动通知仍按「只看正式版」消费 */
     pub has_update: bool,
     pub current_version: String,
     pub latest_version: String,
@@ -1338,16 +1340,36 @@ pub struct SoftwareUpdateDto {
     pub notes: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// **主动检查**才给的并列候选（正式版排第一）。空 = 这次没查到候选，
+    /// 不是「没有预览版」—— 界面按空数组退回旧的单一卡片渲染。
+    pub candidates: Vec<runtime::release_info::UpdateCandidate>,
 }
 
 impl From<runtime::release_info::SoftwareUpdate> for SoftwareUpdateDto {
     fn from(u: runtime::release_info::SoftwareUpdate) -> Self {
+        Self::from((u, Vec::new()))
+    }
+}
+
+impl
+    From<(
+        runtime::release_info::SoftwareUpdate,
+        Vec<runtime::release_info::UpdateCandidate>,
+    )> for SoftwareUpdateDto
+{
+    fn from(
+        (u, candidates): (
+            runtime::release_info::SoftwareUpdate,
+            Vec<runtime::release_info::UpdateCandidate>,
+        ),
+    ) -> Self {
         Self {
             has_update: u.has_update,
             current_version: u.current_version,
             latest_version: u.latest_version,
             notes: u.notes,
             url: u.url,
+            candidates,
         }
     }
 }

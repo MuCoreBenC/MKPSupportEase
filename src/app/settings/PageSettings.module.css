@@ -1080,3 +1080,155 @@
     width: 100%;
   }
 }
+
+/* ==========================================================================
+ * 双通道候选卡（2026-11-05）：正式版优先 + 颜色区分
+ *
+ * 作者：「正式版可以通知，预览版在用户主动刷新的时候出现，而且可以和正式版
+ * 并列出现，用颜色区分一下，正式版优先排序」。
+ *
+ * · 正式版：白卡面 + 左侧 accent 绿竖条 + 绿色标签，主色实心按钮（视觉权重最高）
+ * · 预览版：暖色次级底 + 琥珀细边 + 琥珀标签，描边按钮（并列但不抢焦点）
+ * · 窄窗：卡片纵向堆叠，按钮仍靠右；说明文字收起来但版本号与按钮留着
+ * · WKWebView 不播 CSS 动效 —— 这里只有静态态，没有 transition / animation
+ * ========================================================================== */
+
+.channelList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 0 12px;
+}
+
+.channelCard {
+  display: flex;
+  align-items: center;
+  gap: 10px 16px;
+  flex-wrap: wrap;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.channelStable {
+  border-left: 3px solid var(--accent);
+  background: var(--surface-solid);
+}
+
+.channelPreview {
+  border: 1px solid var(--warn-line);
+  border-left: 3px solid var(--warn-ink);
+  background: var(--warn-surface);
+}
+
+.channelBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.channelHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.channelTag {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--r-xs, 4px);
+  white-space: nowrap;
+}
+
+.channelTagStable {
+  color: var(--accent-deep, var(--accent));
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+}
+
+.channelTagPreview {
+  color: var(--warn-ink);
+  background: var(--warn-surface);
+  border: 1px solid var(--warn-line);
+}
+
+.channelVersion {
+  font-size: calc(var(--fs-body) + 2px);
+  font-weight: 600;
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}
+
+.channelBadge,
+.channelBadgeMuted {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.channelBadgeMuted {
+  color: var(--warn-ink);
+}
+
+.channelNote {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.channelNoteMuted {
+  margin: 0;
+  font-size: var(--fs-label);
+  color: var(--warn-ink);
+}
+
+.channelActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.channelHint {
+  margin: 2px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 深色下把两档的「纸面」压回中性，只让边与标签保留语义色 ——
+   与上面 `.updateFresh` / `.noteBad` 的深色分支同一条纪律。 */
+[data-theme='dark'] .channelStable {
+  background: var(--surface);
+}
+
+[data-theme='dark'] .channelPreview {
+  background: var(--surface-sunken);
+}
+
+[data-theme='dark'] .channelTagStable {
+  color: var(--accent);
+}
+
+/* 窄窗：说明文字收起来，但版本号与按钮必须留着（作者：别把动作藏进折叠） */
+@container settings (width <= 620px) {
+  .channelActions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .channelNote,
+  .channelNoteMuted {
+    display: none;
+  }
+}

@@ -328,8 +328,69 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+/// 资产种类（2026-11-05 双平台）：显式 `kind` 优先，老档按文件名后缀兜底。
+///
+/// `kind` 只有两档，认不出的一律按 `appZip`（macOS 老路径）处理 —— 不猜第三套。
+pub fn asset_kind(asset: &ReleaseAsset) -> &str {
+    match asset.kind.as_deref().map(str::trim) {
+        Some("nsis") => "nsis",
+        Some("appZip") => "appZip",
+        _ if asset.name.to_ascii_lowercase().ends_with(".exe") => "nsis",
+        _ => "appZip",
+    }
+}
+
+/// **Windows 帮手脚本**（2026-11-05）：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
+///
+/// 返回 `powershell -Command` 的实参。与 macOS 的 [`install_script`] 同一套四件事：
+/// 等本进程退出 → 装 → 写 `run/update-result.json` → 拉起新版本。
+///
+/// ★ **纯函数**：本机 macOS 也能跑判据（不碰注册表、不碰系统）。真机行为只承诺
+///   Windows CI 编译通过 —— 作者已明确「本机没法真机验证」。
+/// ★ NSIS 的 `/S` 是静默开关，`/D=` 必须**最后一个参数且不加引号**；这里不指定
+///   `/D`，让安装器按自己的默认目录装（与用户第一次安装的目录一致）。
+/// ★ 路径用 PowerShell 单引号（里面单引号翻倍），带空格是常态。
+pub fn windows_install_script(
+    app_data: &Path,
+    setup: &Path,
+    new_exe: &Path,
+    version: &str,
+    at: &str,
+) -> String {
+    let q = |s: &str| format!("'{}'", s.replace('\'', "''"));
+    let result = UpdateResult {
+        version: version.to_owned(),
+        ok: true,
+        reason: String::new(),
+        at: at.to_owned(),
+    };
+    // 结果 JSON 由 `ConvertTo-Json` 生成，不手拼引号（PowerShell 里手拼极易错）
+    let ok_json = serde_json::to_string(&result).unwrap_or_default();
+    format!(
+        "Start-Sleep -Seconds 1; \
+         $p = Start-Process -FilePath {setup} -ArgumentList '/S' -Wait -PassThru; \
+         if ($p.ExitCode -ne 0) {{ exit 1 }}; \
+         {ok} | Set-Content -LiteralPath {r} -Encoding utf8; \
+         Start-Process -FilePath {exe}",
+        setup = q(&setup.display().to_string()),
+        ok = q(&ok_json),
+        r = q(&result_path(app_data).display().to_string()),
+        exe = q(&new_exe.display().to_string()),
+    )
+}
+
+/// Windows 上「装完之后拉起哪一个 exe」：NSIS 装到与**当前进程**同一目录，
+/// 所以直接从 `current_exe()` 反推，不猜 Program Files 的具体位置。
+pub fn running_exe() -> Result<PathBuf, AppError> {
+    std::env::current_exe().map_err(|e| {
+        AppError::io(messages::text("ui.runtime.updater.482", &[])).with_detail(e.to_string())
+    })
+}
+
 /// 从当前可执行文件反推**这次运行的那个 `.app`**（`.../SupportEase.app/Contents/MacOS/…`
 /// → `.../SupportEase.app`）。找不到就如实说"不在 .app 里"（那就不是安装版）。
+///
+/// ★ **macOS 专用**（2026-11-05）：Windows 走 [`running_exe`]，两边别混。
 pub fn running_app() -> Result<PathBuf, AppError> {
     let exe = std::env::current_exe().map_err(|e| {
         AppError::io(messages::text("ui.runtime.updater.482", &[])).with_detail(e.to_string())
@@ -392,6 +453,20 @@ pub fn download(
         let _ = std::fs::remove_file(&part_path);
     }
     result?;
+
+    /* ★ Windows（2026-11-05）：NSIS 安装包是**一个 .exe**，不解压。
+     * 下载阶段已验过 size / sha；这里直接把 exe 交给 `Ready`，
+     * 退出之后由帮手脚本 `/S` 静默安装并拉起新版本。
+     * macOS 那条「解压 → 找 .app → 替换」整段保持不动。 */
+    if asset_kind(asset) == "nsis" {
+        let size = std::fs::metadata(&zip_path).map(|m| m.len()).unwrap_or(0);
+        sess.set(UpdateState::Ready {
+            path: zip_path.display().to_string(),
+            size,
+        });
+        emit(sess.state());
+        return Ok(());
+    }
 
     // 解压 → 找那份 .app
     let unpacked = dir.join("unpacked");
@@ -655,5 +730,59 @@ mod tests {
         assert!(script.contains("mv"), "要把新的搬过去");
         assert!(script.contains("open"), "要重新拉起");
         assert!(script.contains(RESULT_FILE), "结果要落账（下次启动读）");
+    }
+
+    /// **Windows 帮手脚本**（2026-11-05）：本机是 macOS，只验**纯函数产出的形状** ——
+    /// 真机行为由 Windows CI 编译通过来守，不在这里假装跑过。
+    ///
+    /// 旧判据：只有 macOS 的 `install_script` 一条（替换 `.app` + `open`）。
+    /// 新判据：Windows 走 `Start-Process … /S` 静默安装 + 记账 + 拉起 exe。
+    /// 保住的：结果写同一份 `update-result.json`（下次启动读的是同一个口子）、
+    /// 先等本进程退出、路径带引号。放弃的：把 Windows 也当 `.app` 去解包替换。
+    /// 为什么：NSIS 是安装器，不是可直接替换的目录；`/S` 是它的静默开关。
+    #[test]
+    fn the_windows_install_script_installs_silently_and_records() {
+        let d = tempfile::tempdir().unwrap();
+        let setup = d.path().join("SupportEase_0.0.10_x64-setup.exe");
+        let exe = Path::new(r"C:\Program Files\SupportEase\SupportEase.exe");
+        let script =
+            windows_install_script(d.path(), &setup, exe, "0.0.10", "2026-11-05T00:00:00Z");
+        assert!(
+            script.contains("Start-Sleep -Seconds 1"),
+            "要先等本进程退出"
+        );
+        assert!(script.contains("-ArgumentList '/S'"), "NSIS 静默开关");
+        assert!(
+            script.contains("-Wait -PassThru"),
+            "要等安装结束并检查退出码"
+        );
+        assert!(script.contains("ExitCode -ne 0"), "安装失败不许写成成功");
+        assert!(script.contains(RESULT_FILE), "结果落同一份账");
+        assert!(
+            script.contains("Start-Process -FilePath"),
+            "要重新拉起新版本"
+        );
+        assert!(script.contains("SupportEase.exe"), "拉起的是 exe 不是 .app");
+        assert!(!script.contains("open "), "不该混进 macOS 的 open");
+    }
+
+    /// 资产种类：显式 `kind` 优先，老档按 `.exe` 后缀兜底；认不出一律走 macOS 老路径。
+    #[test]
+    fn asset_kind_decides_whether_to_unpack() {
+        let base = ReleaseAsset {
+            name: "SupportEase_0.0.10_x64-setup.exe".to_owned(),
+            url: "https://gitee.com/o/r/setup.exe".to_owned(),
+            size: 1,
+            sha256: String::new(),
+            platform: None,
+            kind: None,
+        };
+        assert_eq!(asset_kind(&base), "nsis", "老档没 kind 时按后缀认");
+        let mut zip = base.clone();
+        zip.name = "SupportEase.app.zip".to_owned();
+        assert_eq!(asset_kind(&zip), "appZip");
+        let mut explicit = base;
+        explicit.kind = Some("appZip".to_owned());
+        assert_eq!(asset_kind(&explicit), "appZip", "显式 kind 优先");
     }
 }

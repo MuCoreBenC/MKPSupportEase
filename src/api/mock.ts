@@ -3343,6 +3343,34 @@ export const mockApi: MkpApi = {
         size: 7_260_510,
         sha256: '',
       },
+      /* ★ 双通道演示：正式版排第一、预览版排第二，界面两张卡都能验。
+         预览版只在这里（主动检查）出现，自动通知永远不读它。 */
+      candidates: [
+        {
+          channel: 'stable',
+          version: MOCK_NEW_VERSION,
+          notes: t('mock.demo.updateChain'),
+          url: 'https://example.com/supportease/releases',
+          asset: {
+            name: 'SupportEase_demo.app.zip',
+            url: 'https://example.com/supportease/releases/download/demo/SupportEase_demo.app.zip',
+            size: 7_260_510,
+            sha256: '',
+          },
+        },
+        {
+          channel: 'preview',
+          version: '0.0.11-preview.1',
+          notes: t('mock.demo.previewHint'),
+          url: 'https://example.com/supportease/releases',
+          asset: {
+            name: 'SupportEase_0.0.11-preview.1_aarch64.app.zip',
+            url: 'https://example.com/supportease/releases/download/preview/SupportEase_preview.app.zip',
+            size: 7_300_000,
+            sha256: '',
+          },
+        },
+      ],
     }
   },
 
