@@ -1146,10 +1146,15 @@ mod tests {
         ir.prefs.bed_glue_enabled = true;
         let out = apply_bed_glue(src, &ir, crate::postproc::calibration::Mode::None);
 
-        let start = out.iter().position(|l| l == BLOCK_START).expect("有起始标记");
+        let start = out
+            .iter()
+            .position(|l| l == BLOCK_START)
+            .expect("有起始标记");
         let end = out.iter().position(|l| l == BLOCK_END).expect("有结束标记");
         assert!(
-            !out[start..end].iter().any(|l| l.trim_start().starts_with("M109")),
+            !out[start..end]
+                .iter()
+                .any(|l| l.trim_start().starts_with("M109")),
             "涂胶块里出现了阻塞式 M109：{:?}",
             out[start..end]
                 .iter()
