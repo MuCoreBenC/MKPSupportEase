@@ -162,13 +162,16 @@ pub fn build_fingerprint() -> String {
 /// 读不到就写 `unknown` —— **不许**退回去拿别的时刻充当。一个"看起来像真的"
 /// 的时间正是这套指纹反复说谎的来源，比 `unknown` 害处大得多。
 ///
-/// # 为什么走 `date` 而不是自己算
+/// # 为什么不再是系统 `date`（2026-11-05，Windows CI 逼出来的）
 ///
-/// "UTC 秒 → 年月日时分秒" 要一张历法表与闰年规则，手写一遍就是把这套逻辑
-/// 在仓里抄第二份（而 `build.rs` 已经在用系统 `date`）。所以两边共用**同一套钟**：
-/// `date -u -r <epoch>` 收的是 epoch 秒，BSD / GNU 都认这个形式。
+/// 原先 shell 出去跑 `date -r <epoch>`，理由是"别在仓里抄第二份历法表"。
+/// 但 `-r` 是 BSD/GNU 的形状：Windows 上 `date` 是 cmd 内建命令，直接给不出
+/// 东西，指纹那格退化成 `unknown` —— 生产包同样受影响，只是 CI 的必经判据
+/// `fingerprint_time_comes_from_the_exe_and_is_local` 先把它抓出来了。
 ///
-/// 不用 `-v`（BSD 专有）也不用 `--date`（GNU 专有）—— `-r` 两边同名。
+/// 现在用已在依赖里的 `time` 做 epoch → 固定 `+08:00` 的换算：**只有一套钟**
+/// （`UNIX_EPOCH` + 恒定 8 小时），没有历法表、不依赖宿主有没有 `date`，
+/// 三个平台同一串字节。
 fn exe_modified_local() -> String {
     let Ok(exe) = std::env::current_exe() else {
         return "unknown".to_owned();
@@ -182,19 +185,18 @@ fn exe_modified_local() -> String {
     let Ok(epoch) = modified.duration_since(std::time::UNIX_EPOCH) else {
         return "unknown".to_owned();
     };
+    let Ok(secs) = i64::try_from(epoch.as_secs()) else {
+        return "unknown".to_owned();
+    };
+    east_8_wall(secs).unwrap_or_else(|| "unknown".to_owned())
+}
 
-    let wall = std::process::Command::new("date")
-        .env("TZ", "CST-8") /* 中国标准时间 +08:00（POSIX 的写法是反的） */
-        .args(["-r", &epoch.as_secs().to_string(), "+%Y-%m-%d %H:%M:%S"])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().to_owned())
-        .filter(|s| !s.is_empty());
-    match wall {
-        Some(s) => format!("{s} +08:00"),
-        None => "unknown".to_owned(),
-    }
+/// epoch 秒 → `YYYY-MM-DD HH:MM:SS +08:00`。纯函数，判据不靠机器上的时区。
+fn east_8_wall(secs: i64) -> Option<String> {
+    let utc = time::OffsetDateTime::from_unix_timestamp(secs).ok()?;
+    let local = utc.to_offset(time::UtcOffset::from_hms(8, 0, 0).ok()?);
+    let fmt = time::macros::format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+    local.format(fmt).ok().map(|s| format!("{s} +08:00"))
 }
 
 #[cfg(test)]
@@ -213,7 +215,7 @@ mod fingerprint_tests {
     #[test]
     fn fingerprint_time_comes_from_the_exe_and_is_local() {
         let shown = exe_modified_local();
-        assert_ne!(shown, "unknown", "读不到 exe mtime：检查 date 调用");
+        assert_ne!(shown, "unknown", "读不到 exe mtime：检查 fingerprint 换算");
         assert!(
             shown.contains("+08:00"),
             "编译时刻必须是带偏移的中国时间，实际是 `{shown}`"
@@ -237,6 +239,20 @@ mod fingerprint_tests {
         assert!(
             build_fingerprint().contains(&shown),
             "指纹里那格必须就是 exe 的 mtime"
+        );
+    }
+
+    /// **三个平台同一串字节**：换算不认宿主时区、也不认宿主有没有 `date`。
+    /// `1793850332` = 2026-11-05 03:45:32 UTC ⇒ 中国时间 11:45:32。
+    #[test]
+    fn the_wall_clock_is_a_fixed_offset_not_a_host_timezone() {
+        assert_eq!(
+            east_8_wall(1_793_850_332).as_deref(),
+            Some("2026-11-05 11:45:32 +08:00")
+        );
+        assert_eq!(
+            east_8_wall(0).as_deref(),
+            Some("1970-01-01 08:00:00 +08:00")
         );
     }
 }
