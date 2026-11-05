@@ -1,6 +1,12 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.6",
-  "notes": "",
-  "url": ""
+  "version": "0.0.10-preview.1",
+  "notes": "双通道更新：预览版可以自己检查更新了",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.10-preview.1",
+  "asset": {
+    "name": "SupportEase_0.0.10-preview.1_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.10-preview.1/SupportEase_0.0.10-preview.1_aarch64.app.zip",
+    "size": 10954051,
+    "sha256": "cbda062d224a474b875ee1880e52d815a97daa1240da9a18f66ead6906df1a36"
+  }
 }
