@@ -272,10 +272,27 @@ function main() {
   mkdirSync(OUT, { recursive: true })
   const picked = pickAsset()
 
-  /* 包里真正的版本：`.app.zip` 这一档读不到，就退回 package.json —— 两者本该同源 */
+  /* 1. **产物自报的号必须等于仓库这个号**（2026-11-06 作者：「你这都是 0.0.4 了，
+        里面还显示 0.0.3，那不是很不合理吗？」）。
+        `.app.zip` 那一档读不到 Info.plist（它是别人打好的成品），只能退回 package.json ——
+        但**只要读得到就必须一致**，不一致说明"改了号没重编"。
+        `APP_VERSION` 是编译期常量：改了 `Cargo.toml` 不重编，包里还是旧号。 */
+  if (picked.appVersion !== null && picked.appVersion !== pkgVersion) {
+    die(
+      `产物自报 ${picked.appVersion}，而仓库版本是 ${pkgVersion} —— 两个号不是同一个。\n` +
+        '    多半是改了版本号却没重新编译（APP_VERSION 是编译期常量）。\n' +
+        '    重编一份再回来：npm run tauri -- build',
+    )
+  }
+
+  /* 2. **清单号 = 产物自己报的那个号**，不再另算。
+        以前默认取"包内版本的下一个预览号"，于是清单说 preview.4、包里是 preview.3，
+        客户端装完一看还是 3 —— 就是作者 2026-11-06 卡住的那件事。
+        要装上去之后号真的变了，就得**先抬号再重编**（`npm run preview` 会按顺序做完）。
+        真要手写一个号才用 `--version`。 */
   const appVersion = picked.appVersion ?? pkgVersion
-  const version = (argOf('--version') ?? nextPreview(appVersion) ?? '').trim()
-  if (parseVersion(version) === null) die(`版本号格式不对：${version}（要 x.y.z 或 x.y.z-preview.N）`)
+  const version = (argOf('--version') ?? appVersion).trim()
+  if (parseVersion(version) === null) die(`版本号格式不对：${version}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
 
   const name = `SupportEase_${version}_${ARCH}.app.zip`
   const zipPath = join(OUT, name)
@@ -309,18 +326,18 @@ function main() {
   }
   writeFileSync(join(OUT, manifestName), `${JSON.stringify(manifest, null, 2)}\n`)
 
-  const newer = isNewer(version, appVersion)
+  /* ★ 三处身份摆在同一行（2026-11-06）：仓库 / 包内 / 清单。
+     作者要的是"每个产物都报自己的真实身份" —— 那就让它们并排出现，
+     一眼看得出有没有谁在冒充别人。 */
+  const same = version === appVersion
   console.log('')
   console.log(`\u001b[32m✓ 本地发布就绪\u001b[0m  ${name}`)
   console.log(`  清单      ${join(OUT, manifestName)}`)
-  console.log(`  版本      ${version}（包里是 ${appVersion}）`)
-  if (!newer) {
-    /* 双版本测试（先装 preview.3、再拿 preview.4 去更新）正是这一档：
-       清单号与包里同号，但**正在跑的那一份更旧**，客户端照样摆卡。 */
-    console.log(
-      `  \u001b[33m注意\u001b[0m      清单号不比包里新：只有"正在跑的那一份比 ${version} 旧"时才会摆卡`,
-    )
-  }
+  console.log(`  版本      ${version}`)
+  console.log(
+    `  一致性    仓库 ${pkgVersion} · 包内 ${appVersion} · 清单 ${version}` +
+      (same ? '  \u001b[32m✓\u001b[0m' : `  \u001b[31m← 清单号与包内不符\u001b[0m`),
+  )
   console.log(`  大小/SHA  ${size} B / ${digest.slice(0, 16)}…`)
   console.log(`  下载地址  ${assetUrl}`)
   console.log('')

@@ -863,6 +863,10 @@ pub fn run(
         return Ok(report);
     }
     let built = build_installer(repo_root)?;
+    /* ★ **构建完先问一遍产物自己是谁**（2026-11-06 作者：「你这都是 0.0.4 了，
+    里面还显示 0.0.3，那不是很不合理吗？」）。核对不过就停在 Built 之前 ——
+    不建 Release、不上传、不写清单：宁可这一趟失败，也不发一个"名不副实"的包。 */
+    assert_artifact_speaks_version(repo_root, &version)?;
     report.artifact = Some(ArtifactInfo {
         name: built.name.clone(),
         size: built.size,
@@ -1125,6 +1129,61 @@ struct BuiltArtifact {
 ///
 /// ★ 产物**只认 `bundle/<本平台目录>` 下的唯一一份**：找到 0 份如实报（不猜别的目录），
 /// 找到多份也如实报（让人自己决定哪一份）—— "挑一个"这种事不该由程序偷偷做。
+/// **包里自报的版本必须就是这一次要发的号。**
+///
+/// 为什么非核不可：`APP_VERSION` 是 `env!("CARGO_PKG_VERSION")` —— **编译期**常量。
+/// 改了 `Cargo.toml` 却没重编，包里那个号还是旧的，而 tag / Release / 清单报的是新的。
+/// 发出去之后，"用户看到的版本"与"发布记录里的版本"永远对不上，而且**没有任何一处会报错**
+/// —— 作者 2026-11-06 说的"你这都是 0.0.4 了，里面还显示 0.0.3"正是这个。
+///
+/// 读的是 `.app/Contents/Info.plist` 的 `CFBundleShortVersionString`：Tauri 打包时从
+/// `tauri.conf.json` 取，那一处由内核从 `Cargo.toml` 派生 —— 三者本该相等。
+#[cfg(target_os = "macos")]
+fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
+    let dir = bundle_dir(repo_root, "macos").ok_or_else(|| {
+        AppError::io("找不到 .app（构建说成功，但 bundle/macos 下什么都没有）")
+            .with_detail(bundle_candidates_text(repo_root, "macos"))
+    })?;
+    let app = std::fs::read_dir(&dir)
+        .ok()
+        .and_then(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .find(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
+        })
+        .ok_or_else(|| AppError::io(format!("{} 下没有 .app", dir.display())))?;
+    let plist = app.join("Contents").join("Info.plist");
+    let out = std::process::Command::new("plutil")
+        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
+        .arg(&plist)
+        .output()
+        .map_err(|e| AppError::io("读不了包里的 Info.plist").with_detail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(AppError::io("包里没有 CFBundleShortVersionString")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    let got = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if got != want {
+        return Err(AppError::invalid_argument(format!(
+            "包内自报 {got}，这次要发的是 {want} —— 两个号不是同一个，发出去就对不上账"
+        ))
+        .with_detail(
+            "多半是改了版本号却没重新编译（`APP_VERSION` 是编译期常量）。\
+             重编一份再发：npm run tauri -- build"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Windows：`exe` 的版本资源这一刀不动（那边由 NSIS 安装器与 Release 说明保证），
+/// 保留同名空实现，让调用点不必再写一遍平台分支。
+#[cfg(not(target_os = "macos"))]
+fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
+    let _ = (repo_root, want);
+    Ok(())
+}
+
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
@@ -2181,6 +2240,46 @@ pub fn wb_release_open_bundle(app: tauri::AppHandle) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **包里自报的号必须等于要发的号**（2026-11-06 作者：「你这都是 0.0.4 了，
+    /// 里面还显示 0.0.3，那不是很不合理吗？」）。
+    ///
+    /// 造一份真的 `.app/Contents/Info.plist`（`plutil` 认这个形状），验两件事：
+    /// 一致时放行；不一致时**报错并且把两个号都写进那句话** —— 只说"不匹配"
+    /// 等于让人回去猜是哪一头不对。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_artifact_must_report_the_version_we_are_releasing() {
+        const PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>0.0.11</string>
+</dict></plist>
+"#;
+        let d = tempfile::tempdir().unwrap();
+        let contents = d
+            .path()
+            .join("target/release/bundle/macos/SupportEase.app/Contents");
+        std::fs::create_dir_all(&contents).unwrap();
+        crate::fsx::atomic::atomic_write(&contents.join("Info.plist"), PLIST.as_bytes()).unwrap();
+
+        assert!(
+            assert_artifact_speaks_version(d.path(), "0.0.11").is_ok(),
+            "一致就该放行"
+        );
+
+        let e = assert_artifact_speaks_version(d.path(), "0.0.12").unwrap_err();
+        assert!(
+            e.message.contains("0.0.11") && e.message.contains("0.0.12"),
+            "两个号都要写进那句话：{}",
+            e.message
+        );
+        assert!(
+            e.detail.as_deref().unwrap_or("").contains("重"),
+            "要指出多半是没重编：{:?}",
+            e.detail
+        );
+    }
 
     /// ★ **候选的第一优先是 `CARGO_TARGET_DIR`**（2026-10-07 真机踩出来的）：dev 下
     /// 工作台进程带着 `target-workbench` 在跑（`scripts/tauri-workbench.mjs` 设的），

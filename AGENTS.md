@@ -77,6 +77,33 @@ presets/…（源）
 
 "生成成功"≠"发布了"。AI **不得**因为检查通过、测试通过就自动升级为发布。
 
+## 4.5 软件版本（客户端 `.app`）：只有"发布成功"才递增
+
+上面那张表说的是**预设数据**（`publishSerial`）。**软件版本**是另一条线，口径同样只有一个递增点：
+
+| 动作 | 改版本号 | 打 tag | 产物自报的号 |
+|---|---|---|---|
+| 改代码 | 否 | 否 | — |
+| `npm run tauri -- build` | 否 | 否 | = 工作区那个号 |
+| `npm run preview:build` | **是**（预览序号 +1） | 否 | = 清单里的号 |
+| `npm run release` | **是**（去 `-dev`，冻结） | **是** | = tag 那个号 |
+
+- **唯一真值是 `src-tauri/Cargo.toml` 的 `version`**；`package.json` / `tauri.conf.json` /
+  `Cargo.lock` 都是派生（`npm run version:check` 是闸，四处不同就红）。
+- **包里自报的号必须等于要发的号**。发版内核在构建完之后核对 `Info.plist`
+  （`release_tx::assert_artifact_speaks_version`），不等就停在"已构建"之前 ——
+  不建 Release、不上传、不写清单。`APP_VERSION` 是 `env!("CARGO_PKG_VERSION")`，
+  **改了号不重编，包里还是旧号**，这正是"发的是 0.0.4、界面显示 0.0.3"的来源。
+- **`-dev.N` 里的 N 是构建号，不是版本号**：主版本（`0.0.11`）一整轮开发里恒定，
+  N 只在"生成一份可安装的预览产物"时 +1（`npm run preview:build` 自动做）。
+  没有它，本地就测不了"更新" —— 客户端只摆比自己新的候选，同号两个包分不出谁新。
+- **`npm run preview:build`** = `ensure-dev` → `next-preview` → `tauri build` → 写本地清单。
+  全程不发版、不打 tag，清单与包内同号；用来反复验证"改完 → 生成 → 装 → 测"。
+- 发布当天：`npm run release -- <号> "说明" --channel preview|stable --confirm`。
+  它拒绝已存在的 tag；失败**保留现场**，不许为了过去而改号或改测试。
+- `npm run version:ensure`（`ensure-dev`）是**幂等**的：已经是未发布的 `-dev` 就一个字不动；
+  当前号已发过正式版就自动进下一个补丁号的 `-dev`。发布后不必记得手动跑 `version:next`。
+
 ## 5. 发布前
 
 - 先看工作区有没有**无关改动**：发布只 stage 白名单里的路径，其余不许混进来。

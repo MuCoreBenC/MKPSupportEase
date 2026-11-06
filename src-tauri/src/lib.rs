@@ -995,6 +995,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 端口被占着时的那一下：起之前就探（谁占着、PID 多少），界面摆出来问一句
         // 「要不要把它停了」—— 停的那一条单独给，先验明正身再动手
         app::dev_source::wb_dev_source_clear_conflict,
+        // 「打开交付目录」—— 路径由后端 DTO 给，界面不自己拼（2026-11-06）
+        app::dev_source::wb_open_path,
         // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
         // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。

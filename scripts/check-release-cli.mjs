@@ -109,6 +109,22 @@ check('建议版本号按通道给', () => {
   if (/-/.test(s.suggested)) throw new Error(`正式建议值不该带后缀：${s.suggested}`)
 })
 
+/* ⑦ **`-dev.N` 也要能原样传进来**（2026-11-06 新增：本地预览会把构建号写进版本号，
+   发版时从工作区直接复制那个号过来，别让人先手改一遍） */
+check('正式通道把 0.0.10-dev.7 归一成 0.0.10', () => {
+  const r = run(['0.0.10-dev.7', 'x'])
+  eq(r.code, 0, '退出码')
+  eq(JSON.parse(r.out).version, '0.0.10', '版本号')
+})
+
+/* ⑧ 带构建号的开发号**不许**走预览通道：预览通道要发的是 `-preview.N`，
+   混着发会把"第几次本地构建"当成发布号写进 tag */
+check('预览通道拒绝 -dev.N', () => {
+  const r = run(['0.0.10-dev.7', 'x', '--channel=preview'])
+  if (r.code === 0) throw new Error('居然放行了')
+  match(r.err + r.out, /预览通道要发预览号/, '提示语')
+})
+
 if (failed > 0) {
   console.error(`\n发版脚本自检：${failed} 条没过`)
   process.exit(1)

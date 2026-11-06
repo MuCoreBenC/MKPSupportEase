@@ -1663,8 +1663,28 @@ export interface DevSourceStatus {
   note: string | null
   /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
   conflicts: PortConflict[]
-  /** 选项列表（2026-10-30 起只有「当前交付」一行）：名字 / 在哪儿 / 填什么地址 / 齐没齐 */
+  /** 那一行（2026-11-06 起**只有一条**，不是选项）：名字 / 在哪儿 / 填什么地址 / 齐没齐 */
   sources: SourceOption[]
+  /** 仓库里的开发版本（`src-tauri/Cargo.toml`，全仓唯一真值） */
+  devVersion: string
+  /** 最近一次已发布的号（git tag）；一个都没发过 = null */
+  publishedVersion: string | null
+  /** 安装包自己报的版本（`.app/Contents/Info.plist`）；没编过 = null */
+  buildVersion: string | null
+  /** 盘上真有什么（不存在就 `exists: false`，不摆假行） */
+  files: DeliveryDiskFile[]
+  /** 哪几处对不上（空 = 一致）。**判定在后端**，界面只渲染 */
+  issues: string[]
+}
+
+/** `dev_source::DeliveryFile` —— 交付面上一个真实文件（别与交付集合那个 `DeliveryFile` 混淆） */
+export interface DeliveryDiskFile {
+  name: string
+  /** 盘上实际大小；不存在 = null */
+  size: number | null
+  exists: boolean
+  /** 清单类文件才有的那一格 */
+  version: string | null
 }
 
 /**
@@ -1677,7 +1697,7 @@ export interface DevSourceStatus {
  * 2026-10-30 退役的是夹具那两代（`v1` / `v2`）：端真产物、发布序号在响应里 +1
  * 就够演"云端发了下一版"，还不会和源漂移。
  */
-export type DevSourceKind = 'delivery' | 'local-release'
+export type DevSourceKind = 'delivery'
 
 /** `dev_source::SourceOption` —— 那个选项，一行一份 */
 export interface SourceOption {
@@ -2782,6 +2802,8 @@ export const wb = {
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
+  /** 在文件管理器里打开一个**目录**（路径由后端 DTO 给，界面不自己拼） */
+  openPath: (path: string) => invoke<void>('wb_open_path', { path }),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
@@ -2844,8 +2866,9 @@ export const wb = {
    * `BUMP_ENV`）—— 客户端看到的就是正常的"云端发了下一版"。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
-  devSourceStart: (source: DevSourceKind) =>
-    invoke<DevSourceStatus>('wb_dev_source_start', { source }),
+  /* ★ 2026-11-06：不再收"端哪一份"—— 只有一条（当前交付），本地发布那层由后端
+     按"目录里有没有清单"自动叠。参数留着会让人以为还有得选。 */
+  devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
   devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
   /**
    * **停掉占着某个端口的那个进程**（那张卡上的「停掉它」）。
