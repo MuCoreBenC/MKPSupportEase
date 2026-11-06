@@ -2067,6 +2067,8 @@ export interface UpdateInfo {
   url?: string
   asset?: ReleaseAsset
   lastResult?: UpdateResult
+  /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
+  installLog: string
 }
 
 /**

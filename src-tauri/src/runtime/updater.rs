@@ -311,16 +311,67 @@ pub fn install_script(
     at: &str,
 ) -> String {
     let q = shell_quote;
+    let log = q(&install_log_path(app_data).display().to_string());
+    let res = q(&result_path(app_data).display().to_string());
+    let ok_line = q(&format!(
+        "{{\"version\":\"{version}\",\"ok\":true,\"reason\":\"\",\"at\":\"{at}\"}}"
+    ));
+    /* ★ 2026-11-06：作者「点了重启并安装，什么都没发生」—— 这条脚本以前**一个字都不留**，
+     * 而且用 `&&` 串联：`rm -rf` 或 `mv` 一失败，后面的写账与 `open` 全被跳过，
+     * 下次启动读不到账，也看不出断在哪一步。三处改动：
+     *   ① 每一步都往 `run/update-install.log` 追加一行（带时间、带实际路径）；
+     *   ② 失败要**写账**（`ok:false` + 原因），不再"没有账 = 没说"；
+     *   ③ 结尾把退出码记下来 —— 下次启动既能说清成没成，也能说清断在哪。 */
     format!(
-        "sleep 1; rm -rf {t} && mv {s} {t} && printf {ok} > {r} && open {t}",
+        "{{
+  L={log}
+  echo \"=== $(date -u +%Y-%m-%dT%H:%M:%SZ) install v{version}\" >> \"$L\"
+  echo \"pid=$$ uid=$(id -u) target={t} staged={s}\" >> \"$L\"
+  sleep 1
+  if [ ! -e {s} ]; then
+    echo \"✗ 暂存不存在：{s}\" >> \"$L\"
+    printf {fail} > {r}
+    exit 2
+  fi
+  rm -rf {t}
+  if [ -e {t} ]; then
+    echo \"✗ 删不掉旧应用（权限 / 正在被别的进程使用）：{t}\" >> \"$L\"
+    printf {fail} > {r}
+    exit 3
+  fi
+  if ! mv {s} {t}; then
+    echo \"✗ 移动失败（跨卷 / 权限）：{s} -> {t}\" >> \"$L\"
+    printf {fail} > {r}
+    exit 4
+  fi
+  echo \"✓ 已替换应用\" >> \"$L\"
+  printf {ok} > {r}
+  if ! open {t}; then
+    echo \"✗ 替换成功但重新拉起失败：{t}\" >> \"$L\"
+    exit 5
+  fi
+  echo \"✓ 已重新拉起\" >> \"$L\"
+}} >> \"$L\" 2>&1
+echo \"exit=$?\" >> \"$L\"
+",
         t = q(&target.display().to_string()),
         s = q(&staged.display().to_string()),
-        r = q(&result_path(app_data).display().to_string()),
-        // 成功才写账；失败时脚本以非 0 退出（下次启动看到"没有账" = 上次没成）
-        ok = q(&format!(
-            "{{\"version\":\"{version}\",\"ok\":true,\"reason\":\"\",\"at\":\"{at}\"}}"
+        r = res,
+        log = log,
+        ok = ok_line,
+        fail = q(&format!(
+            "{{\"version\":\"{version}\",\"ok\":false,\"reason\":\"见 run/update-install.log\",\"at\":\"{at}\"}}"
         )),
     )
+}
+
+/// **安装过程日志**（`<appData>/run/update-install.log`）。
+///
+/// 为什么要它：安装脚本在应用**退出之后**才跑，那时没有任何界面能显示错误。
+/// 作者 2026-11-06 点了「重启并安装」什么都没发生，而旧脚本一个字都不留 ——
+/// 只能靠猜。这份日志是他下次能直接发给我的东西：哪一步、什么路径、退出码多少。
+pub fn install_log_path(app_data: &Path) -> PathBuf {
+    app_data.join("run").join("update-install.log")
 }
 
 /// 单引号包一层（路径里有单引号时按 shell 的规矩转义）。
@@ -730,6 +781,39 @@ mod tests {
         assert!(script.contains("mv"), "要把新的搬过去");
         assert!(script.contains("open"), "要重新拉起");
         assert!(script.contains(RESULT_FILE), "结果要落账（下次启动读）");
+    }
+
+    /// ★ **安装脚本必须留下可查的证据**（2026-11-06 作者："点了重启并安装，什么都没发生"）。
+    ///
+    /// 旧脚本只有 `sleep; rm && mv && printf && open` 一条链，一个字都不留：
+    /// 任何一步失败，后面的写账与拉起全被 `&&` 跳过，下次启动既没账、也没线索。
+    ///
+    /// 这条判据钉三件事：① 有日志文件且每一步都写；② 失败也写账（`ok:false`）；
+    /// ③ **不再用 `&&` 串联**（否则失败静默）。
+    #[test]
+    fn the_install_script_leaves_a_trail_when_it_fails() {
+        let d = tempfile::tempdir().unwrap();
+        let staged = d.path().join("stage/SupportEase.app");
+        let target = Path::new("/Applications/SupportEase.app");
+        let script = install_script(d.path(), target, &staged, "0.0.11", "2026-11-06T00:00:00Z");
+
+        assert!(
+            script.contains(install_log_path(d.path()).to_str().unwrap()),
+            "要写 run/update-install.log"
+        );
+        for step in ["暂存不存在", "删不掉旧应用", "移动失败", "重新拉起失败"]
+        {
+            assert!(script.contains(step), "失败分支要留话：缺 {step}");
+        }
+        assert!(
+            script.contains("\"ok\":false"),
+            "失败也要写账 —— 否则下次启动分不清「没装」和「装了但失败」"
+        );
+        assert!(
+            !script.contains("&& mv"),
+            "别再用 && 串联：一步失败就静默跳过后面全部"
+        );
+        assert!(script.contains("exit="), "退出码要记下来");
     }
 
     /// **Windows 帮手脚本**（2026-11-05）：本机是 macOS，只验**纯函数产出的形状** ——

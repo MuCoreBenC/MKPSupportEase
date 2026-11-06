@@ -50,6 +50,12 @@ pub struct UpdateInfoDto {
     pub asset: Option<ReleaseAsset>,
     /// 上一次安装的结果（退出后那个脚本写的账，**下次启动**读）
     pub last_result: Option<updater::UpdateResult>,
+    /// **安装日志的绝对路径**（`<appData>/run/update-install.log`）。
+    ///
+    /// 作者 2026-11-06 点了「重启并安装」什么都没发生，而旧脚本一个字都不留 ——
+    /// 只能靠猜。把路径交给界面，就是为了让人能**一键把文件发出去**，
+    /// 而不是听我说"你去 ~/Library/Application Support/... 里找找"。
+    pub install_log: String,
 }
 
 /// 读当前数据源、问一次更新（**命令壳与 `update_info` 共用这一处**）。
@@ -79,6 +85,7 @@ pub async fn update_info(app: AppHandle) -> Result<UpdateInfoDto, AppError> {
             url: update.url,
             asset: update.asset,
             last_result: updater::last_result(&root),
+            install_log: updater::install_log_path(&root).display().to_string(),
         })
     })
 }

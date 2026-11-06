@@ -14,7 +14,7 @@
     "tauri:workbench:dev": "node scripts/tauri-workbench.mjs dev",
     "tauri:workbench:build": "node scripts/tauri-workbench.mjs build",
     "preview": "vite preview",
-    "lint": "eslint . && stylelint \"src/**/*.css\" && node scripts/check-locate.mjs",
+    "lint": "eslint . && stylelint \"src/**/*.css\" && node scripts/check-locate.mjs && node scripts/check-release-cli.mjs",
     "test": "vitest run",
     "lint:fix": "eslint . --fix && stylelint \"src/**/*.css\" --fix",
     "tauri": "node scripts/tauri-dev.mjs",

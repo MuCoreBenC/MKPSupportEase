@@ -3393,6 +3393,7 @@ export const mockApi: MkpApi = {
         sha256: '',
       },
       lastResult: mockUpdate.lastResult,
+      installLog: '/mock/run/update-install.log',
     }
   },
 
