@@ -136,26 +136,46 @@ function pickAsset() {
     die(`认不出这是什么：${p}（要 .app.zip / .app / .dmg）`)
   }
 
+  /*
+   * ★ 2026-11-06：以前**优先 `.app.zip`**，于是 `npm run tauri:build` 之后
+   *   `local-release` 会挑走 `scripts/release.mjs` 上次留下的那份旧 zip，
+   *   而刚编的 `.app` 就在旁边（症状：装上去的还是老代码，但日志一切正常）。
+   *   改成**按 mtime 取最新的一份**，并把挑中的是谁打出来。
+   */
+  const cands = []
   const zip = newest(join(BUNDLE, 'macos'), /\.app\.zip$/)
-  if (zip !== null) return { zip, appVersion: null }
-
+  if (zip !== null) cands.push({ kind: 'app.zip', path: zip, at: statSync(zip).mtimeMs })
   const appDir = join(BUNDLE, 'macos', 'SupportEase.app')
   if (existsSync(appDir)) {
-    mkdirSync(OUT, { recursive: true })
-    return { zip: zipApp(appDir, join(OUT, 'tmp-SupportEase.app.zip')), appVersion: plistVersion(appDir) }
+    /* 二进制那一刻才是"这一份是什么时候编的"；目录 mtime 会被别的写入带着跳 */
+    const macos = join(appDir, 'Contents', 'MacOS')
+    cands.push({
+      kind: 'app',
+      path: appDir,
+      at: statSync(existsSync(macos) ? macos : appDir).mtimeMs,
+    })
   }
-
   const dmg = newest(join(BUNDLE, 'dmg'), /\.dmg$/)
-  if (dmg !== null) {
-    mkdirSync(OUT, { recursive: true })
-    const app = appFromDmg(dmg)
-    return { zip: zipApp(app, join(OUT, `tmp-${basename(app)}.zip`)), appVersion: plistVersion(app) }
-  }
+  if (dmg !== null) cands.push({ kind: 'dmg', path: dmg, at: statSync(dmg).mtimeMs })
 
-  die(
-    '没找到构建产物（target/release/bundle 下没有 .app.zip / .app / .dmg）。\n' +
-      '    先编一份：npm run tauri:build（客户端；不要用工作台那一档）',
-  )
+  if (cands.length === 0) {
+    die(
+      '没找到构建产物（target/release/bundle 下没有 .app.zip / .app / .dmg）。\n' +
+        '    先编一份：npm run tauri:build（客户端；不要用工作台那一档）',
+    )
+  }
+  cands.sort((a, b) => b.at - a.at)
+  const best = cands[0]
+  console.log(`[local-release] 用最新的一份产物：${best.kind} · ${best.path}`)
+
+  if (best.kind === 'app.zip') return { zip: best.path, appVersion: null }
+
+  mkdirSync(OUT, { recursive: true })
+  const app = best.kind === 'app' ? best.path : appFromDmg(best.path)
+  return {
+    zip: zipApp(app, join(OUT, `tmp-${basename(app)}.zip`)),
+    appVersion: plistVersion(app),
+  }
 }
 
 /** 那个 .app 里写的版本（Tauri 从 Cargo.toml 取，等于编译进二进制的 APP_VERSION） */
