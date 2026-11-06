@@ -145,7 +145,7 @@ function pickAsset() {
   }
 
   /*
-   * ★ 2026-11-06：以前**优先 `.app.zip`**，于是 `npm run tauri:build` 之后
+   * ★ 2026-11-06：以前**优先 `.app.zip`**，于是 `npm run tauri -- build` 之后
    *   `local-release` 会挑走 `scripts/release.mjs` 上次留下的那份旧 zip，
    *   而刚编的 `.app` 就在旁边（症状：装上去的还是老代码，但日志一切正常）。
    *   改成**按 mtime 取最新的一份**，并把挑中的是谁打出来。

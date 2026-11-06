@@ -68,7 +68,7 @@ npm run dev:test-update          # 服务 + tauri dev（源自动指过来）
 现在：
 
 ```bash
-npm run tauri:build                   # 编一份真的 .app（已编过就跳过）
+npm run tauri -- build                   # 编一份真的 .app（已编过就跳过）
 npm run local-release                 # 把最新的 .app.zip 变成"一份本地发布"
 npm run preset-source:dev -- --local-release
 ```
