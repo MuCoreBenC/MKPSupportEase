@@ -1709,6 +1709,18 @@ export interface PreviewPlan {
   consistent: boolean
 }
 
+/** `preview_tx::PreviewProgress` —— 交付进行中的实时状态 */
+export interface PreviewProgress {
+  running: boolean
+  /** `preparing` / `committing` / `building` / `tagging` / `recording` / `rolling` */
+  stage: string
+  /** 日志最后一行（编译时是 `Building [=====> ] 515/520`） */
+  tail: string
+  /** 跑完时的阶段（`rolled` / `failed` / `blocked`） */
+  finished: string | null
+  error: string | null
+}
+
 /** `preview_tx::PreviewReport` —— 一趟交付的结果 */
 export interface PreviewReport {
   version: string
@@ -2870,9 +2882,10 @@ export const wb = {
   /** 交付前看一眼（只读）：会不会拦、会提交哪些文件 */
   previewPreflight: () => invoke<PreviewPlan>('wb_preview_preflight'),
   /** 生成并交付当前预览版本（= 授权这一趟的本地 commit + tag，不推送） */
-  previewDeliver: () => invoke<PreviewReport>('wb_preview_deliver'),
-  /** 交付日志最后一行（编译时能看见 Building 515/520 那种） */
-  previewLogTail: () => invoke<string>('wb_preview_log_tail'),
+  /** 派一趟交付到后台，**立刻返回**（进度靠 `previewProgress` 轮询 / 事件） */
+  previewDeliver: () => invoke<void>('wb_preview_deliver'),
+  /** 当前交付进度（不阻塞） */
+  previewProgress: () => invoke<PreviewProgress>('wb_preview_progress'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。

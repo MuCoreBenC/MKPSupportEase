@@ -243,28 +243,6 @@ pub fn wb_preview_preflight() -> Result<PreviewPlan, AppError> {
     crate::ipc::traced("wb_preview_preflight", |_| plan_of(&repo()))
 }
 
-/// 交付日志的**最后一行**（编译时就是 `Building [=====> ] 515/520` 那种）。
-///
-/// 一次交付要跑一两分钟，界面上按钮转起来时，这一行是唯一能说明"它还在动"的东西。
-#[tauri::command]
-pub fn wb_preview_log_tail() -> Result<String, AppError> {
-    crate::ipc::traced("wb_preview_log_tail", |_| {
-        let text = std::fs::read_to_string(repo().join(LOG)).unwrap_or_default();
-        let line = text
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("");
-        /* 编译的进度行带一堆 \r 与空格，压成一行再给界面 */
-        let clean = line
-            .replace('\r', " ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        Ok(clean.chars().take(160).collect())
-    })
-}
-
 /// 交付日志（追加语义，但走 `fsx::atomic` —— 本仓禁 `OpenOptions`）。
 ///
 /// 攒在内存里、每次全量落盘：日志在 `target/` 下，量级几 KB，重写一遍比开一个
@@ -727,10 +705,152 @@ pub fn recover(confirm: bool) -> Result<PreviewReport, AppError> {
     Ok(report)
 }
 
-/** **生成并交付当前预览版本**。工作台按钮点一次 = 授权这一次（`confirm=true`）。 */
+/// 交付进度推送的事件名（`stage` + 日志尾行，界面据此显示"它还在动"）。
+pub const PREVIEW_PROGRESS: &str = "preview-deliver-progress";
+
+/// 一次交付跑了多久的**跨进程可见**状态（界面每 1.5 秒轮询它）。
+///
+/// 为什么不只用事件：`invoke` 回来的那一刻窗口才解锁，而构建要一两分钟 ——
+/// 期间界面既没有返回值也没有事件，鼠标就一直转圈。轮询日志尾行是"它在动"的
+/// 唯一同步可见的东西。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewProgress {
+    /// 有没有一趟正在跑（含跑完但界面还没醒的那一小段）
+    pub running: bool,
+    /// 当前阶段（`preparing` / `committing` / `building` / `tagging` / `recording` / `rolling`）
+    pub stage: String,
+    /// 日志最后一行（编译时是 `Building [=====> ] 515/520`）
+    pub tail: String,
+    /// 跑完时的阶段（`rolled` / `failed` / `blocked`），跑着时为 null
+    pub finished: Option<String>,
+    /// 失败原因（只有 `failed` / `blocked` 时有）
+    pub error: Option<String>,
+}
+
+impl PreviewProgress {
+    fn idle() -> Self {
+        Self {
+            running: false,
+            stage: String::new(),
+            tail: String::new(),
+            finished: None,
+            error: None,
+        }
+    }
+}
+
+/// 进程内的当前进度。交付是在后台线程里跑的，界面只读这一份。
+static PROGRESS: std::sync::Mutex<Option<PreviewProgress>> = std::sync::Mutex::new(None);
+
+fn set_progress(p: PreviewProgress) {
+    if let Ok(mut g) = PROGRESS.lock() {
+        *g = Some(p);
+    }
+}
+
+/// 读当前进度（不阻塞：锁只用来换一个克隆）。
+fn read_progress() -> PreviewProgress {
+    PROGRESS
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_else(PreviewProgress::idle)
+}
+
+/// 日志尾行（压成一行、截断）—— 事件与轮询都复用它。
+fn tail_line(repo: &Path) -> String {
+    let text = std::fs::read_to_string(repo.join(LOG)).unwrap_or_default();
+    let line = text
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .unwrap_or("");
+    line.replace('\r', " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(160)
+        .collect()
+}
+
+/// **派一趟交付到后台线程**，立刻返回。
+///
+/// 结束（成功或失败）时把结论推一条 `PREVIEW_PROGRESS` 事件，界面据此解锁按钮；
+/// 期间界面靠 `wb_preview_progress` 轮询日志尾行 —— 构建要一两分钟，
+/// 同步 `invoke` 会让人对着转圈的鼠标等。
 #[tauri::command]
-pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
-    crate::ipc::traced("wb_preview_deliver", |_| deliver(true))
+pub fn wb_preview_deliver(app: tauri::AppHandle) -> Result<(), AppError> {
+    {
+        let mut g = PROGRESS.lock().map_err(|_| AppError::io("进度锁坏了"))?;
+        if g.as_ref().is_some_and(|p| p.running) {
+            return Err(AppError::invalid_argument("上一趟交付还在跑，等它结束"));
+        }
+        *g = Some(PreviewProgress {
+            running: true,
+            stage: "preparing".to_owned(),
+            tail: String::new(),
+            finished: None,
+            error: None,
+        });
+    }
+
+    std::thread::spawn(move || {
+        let root = crate::workbench::paths::repo_root();
+        let mut last_tail = String::new();
+        /* 后台盯日志尾行：每 400ms 把变化推给界面，这样不用等 invoke 返回 */
+        let watcher_root = root.clone();
+        let watcher_app = app.clone();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let stop_flag = stop.clone();
+        let watcher = std::thread::spawn(move || {
+            use tauri::Emitter as _;
+            while !stop_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                let tail = tail_line(&watcher_root);
+                if tail != last_tail {
+                    last_tail = tail.clone();
+                    let mut p = read_progress();
+                    p.tail = tail.clone();
+                    set_progress(p.clone());
+                    let _ = watcher_app.emit(PREVIEW_PROGRESS, &p);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(400));
+            }
+        });
+
+        let result = deliver(true);
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        let _ = watcher.join();
+
+        let mut p = read_progress();
+        p.running = false;
+        p.tail = tail_line(&root);
+        match &result {
+            Ok(r) => {
+                p.stage = r.stage.clone();
+                p.finished = Some(r.stage.clone());
+                p.error = None;
+            }
+            Err(e) => {
+                p.stage = "failed".to_owned();
+                p.finished = Some("failed".to_owned());
+                p.error = Some(e.message.clone());
+            }
+        }
+        set_progress(p.clone());
+
+        use tauri::Emitter as _;
+        let _ = app.emit(PREVIEW_PROGRESS, &p);
+    });
+
+    Ok(())
+}
+
+/// 当前交付进度（界面每 1.5 秒问一次；**不阻塞**，只读进程内那一份）。
+#[tauri::command]
+pub fn wb_preview_progress() -> Result<PreviewProgress, AppError> {
+    Ok(read_progress())
 }
 
 #[cfg(test)]

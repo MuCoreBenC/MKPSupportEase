@@ -333,33 +333,46 @@ export default function SettingsPage({ boot }: Props) {
   const deliverPreview = async () => {
     if (previewBusy) return
     setPreviewBusy(true)
-    setPreviewNote({ text: '正在编译并交付……（一两分钟，日志在 target/local-preview/deliver.log）', bad: false })
+    setPreviewNote({ text: '已开始编译并交付……（一两分钟）', bad: false })
     try {
-      const rep = await wb.previewDeliver()
-      setPreviewNote({ text: rep.message, bad: false })
+      /* 后端把它派到后台线程，**立刻返回** —— 构建期间界面不转圈 */
+      await wb.previewDeliver()
     } catch (e) {
-      setPreviewNote({ text: isAppError(e) ? e.message : String(e), bad: true })
-    } finally {
       setPreviewBusy(false)
-      await readDevSrc()
+      setPreviewNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     }
   }
 
+  /**
+   * 交付进行中：每 1.5 秒问一次后端（**不阻塞**），把阶段与日志尾行摆出来。
+   *
+   * 结束的那一刻由 `finished` 判定 —— 成功就刷新页面数据（开发版本会立刻变成下一版），
+   * 失败就把原因留下。不再靠 `invoke` 的返回值，那要等构建跑完才回来。
+   */
   useEffect(() => {
-    if (!previewBusy) {
-      setPreviewTail('')
-      return
-    }
-    const tick = () => {
+    if (!previewBusy) return
+    const timer = window.setInterval(() => {
       void wb
-        .previewLogTail()
-        .then(setPreviewTail)
-        .catch(() => setPreviewTail(''))
-    }
-    tick()
-    const timer = window.setInterval(tick, 1500)
-    return () => window.clearInterval(timer)
-  }, [previewBusy])
+        .previewProgress()
+        .then((p) => {
+          setPreviewTail(p.tail)
+          if (!p.running) {
+            window.clearInterval(timer)
+            setPreviewBusy(false)
+            setPreviewNote({
+              text:
+                p.finished === 'rolled'
+                  ? '交付完成，开发版本已滚到下一版。'
+                  : (p.error ?? `停在 ${p.finished ?? p.stage}`),
+              bad: p.finished !== 'rolled',
+            })
+            void readDevSrc()
+          }
+        })
+        .catch(() => undefined)
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [previewBusy, readDevSrc])
 
   /** 「在访达中打开安装包位置」：用后端给的绝对路径，界面不自己拼 */
   const openPackageDir = async () => {
