@@ -261,8 +261,10 @@ mod tests {
         //   `len()==1`，发版当天就有两条判据红在 tag 之前 —— 判据自己要跟版本无关。
         let cs = candidates_from_infos(&stable, Some(&preview));
         assert!(
-            cs.iter()
-                .all(|c| release_info::is_newer_version(&c.version, crate::runtime::structure::APP_VERSION)),
+            cs.iter().all(|c| release_info::is_newer_version(
+                &c.version,
+                crate::runtime::structure::APP_VERSION
+            )),
             "候选里不许出现比当前构建旧的：{cs:?}"
         );
         assert!(
@@ -270,7 +272,10 @@ mod tests {
             "旧正式版 0.0.6 一张卡都不摆"
         );
         // 预览版在不在，取决于当前构建与它的先后 —— 但不许"藏着更新的预览版"
-        if release_info::is_newer_version("0.0.10-preview.1", crate::runtime::structure::APP_VERSION) {
+        if release_info::is_newer_version(
+            "0.0.10-preview.1",
+            crate::runtime::structure::APP_VERSION,
+        ) {
             assert!(
                 cs.iter()
                     .any(|c| c.channel == UpdateChannel::Preview
@@ -311,7 +316,10 @@ mod tests {
 
         // ④ 同基础的**正式版**：当前构建是预发布（dev / preview）时算更新，
         //    当前构建本身就是正式版时不算。按 APP_VERSION 现算，不写死。
-        let base = crate::runtime::structure::APP_VERSION.split('-').next().unwrap();
+        let base = crate::runtime::structure::APP_VERSION
+            .split('-')
+            .next()
+            .unwrap();
         let same_base = info(base);
         let is_prerelease = crate::runtime::structure::APP_VERSION.contains('-');
         assert_eq!(
