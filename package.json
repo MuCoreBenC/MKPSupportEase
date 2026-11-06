@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.10-dev",
+  "version": "0.0.10-preview.6",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -24,10 +24,8 @@
     "dev:test-update": "node scripts/preset-test-server/dev.mjs",
     "release": "node scripts/release.mjs",
     "version:check": "node scripts/version.mjs check",
-    "version:ensure": "node scripts/version.mjs ensure-dev",
-    "version:preview": "node scripts/version.mjs next-preview",
-    "preview:build": "node scripts/version.mjs ensure-dev && node scripts/version.mjs next-preview && npm run tauri -- build && node scripts/local-release.mjs",
-    "version:dev": "node scripts/version.mjs bump-dev",
+    "version:ensure": "node scripts/version.mjs ensure-preview",
+    "preview:build": "node scripts/version.mjs ensure-preview && npm run tauri -- build && node scripts/local-release.mjs",
     "version:release": "node scripts/version.mjs release",
     "version:next": "node scripts/version.mjs next",
     "presets": "cargo run --quiet -p mkp-support-ease --features workbench --bin presets --",

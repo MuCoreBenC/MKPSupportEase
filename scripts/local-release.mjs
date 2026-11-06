@@ -326,6 +326,14 @@ function main() {
   }
   writeFileSync(join(OUT, manifestName), `${JSON.stringify(manifest, null, 2)}\n`)
 
+  /* ★ **历史交付要留得住**（2026-11-06 作者：「Preview 5 的安装包不能被 Preview 6 覆盖」）：
+     · 安装包 zip 名字里带版本号，天然不会被下一轮盖掉；
+     · 但清单每次都被**同名覆盖**（客户端只认 `release-preview.json` 这一份），
+       所以这里再存一份带版本号的副本 —— 想回滚、想查"第 3 轮那版的清单",都还找得到。 */
+  const history = join(OUT, 'history')
+  mkdirSync(history, { recursive: true })
+  copyFileSync(join(OUT, manifestName), join(history, `${version}.json`))
+
   /* ★ 三处身份摆在同一行（2026-11-06）：仓库 / 包内 / 清单。
      作者要的是"每个产物都报自己的真实身份" —— 那就让它们并排出现，
      一眼看得出有没有谁在冒充别人。 */

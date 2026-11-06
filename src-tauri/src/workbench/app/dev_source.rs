@@ -429,8 +429,8 @@ pub struct DevSourceStatus {
 
     /* ---------- 盘上有什么（不摆假行：不存在就 exists=false） ---------- */
     pub files: Vec<DeliveryFile>,
-    /// 哪几处对不上（空 = 一致）。**判定在后端**，前端只渲染
-    pub issues: Vec<String>,
+    /// 三格版本身份 + 结论。**判定在后端**，前端只按 `level` 上色
+    pub checks: Vec<CheckRow>,
 }
 
 /// 谁占着那个关键端口。**摆给人看的**（`text` 是那句人话）+
@@ -794,40 +794,54 @@ fn exit_text(st: ExitStatus) -> String {
     }
 }
 
-/// 哪几处对不上（空 = 一致）。**判定只在这里做一次**，前端不重算。
+/// 一条**结构化诊断**（作者 2026-11-06：把红字长句换成"哪一项 / 读到什么 / 要不要管"）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRow {
+    pub item: String,
+    pub value: String,
+    /// `ok` / `warn` / `error` —— 界面只按这一格上色，不重算
+    pub level: String,
+}
+
+/// 三格版本身份 + 结论。**判定只在这里做一次**，前端不重算。
 ///
-/// 三条判据都只问"两个号是不是同一个"，不问谁更新 —— 谁更新是客户端的活
-/// （`release_info::is_newer_version`），工作台不该替它算一遍。
-fn consistency_issues(served: &Served, dev: &str, build: Option<&str>) -> Vec<String> {
-    let mut issues: Vec<String> = Vec::new();
-    if let Some(b) = build {
-        if b != dev {
-            issues.push(format!(
-                "包内自报 {b}，仓库里是 {dev} —— 改了版本号却没重编？客户端会显示 {b}"
-            ));
-        }
-    }
-    let preview = json_version(
+/// ★ **三个号不一样是正常的**（作者那张表写得很清楚）：
+/// 仓库 `preview.6` / 已交付 `preview.5` / 客户端 `preview.5` —— 这叫"正在开发下一轮"，
+/// **不许**报成错误。真问题只有一条：**清单与安装包不是同一轮** ——
+/// 那会让客户端以为装上了新版本，实际装的是旧包。
+fn version_checks(served: &Served, dev: &str, build: Option<&str>) -> Vec<CheckRow> {
+    let delivered = json_version(
         &served
             .root
             .join(DELIVERY_SUBDIR)
             .join(LOCAL_RELEASE_MANIFESTS.0),
     );
-    match (&build, &preview) {
-        (Some(b), Some(p)) if b != p => issues.push(format!(
-            "预览清单写 {p}，包内是 {b} —— 装上去之后客户端仍显示 {b}"
-        )),
-        (None, Some(p)) => issues.push(format!(
-            "预览清单写 {p}，但还没有可核对的安装包（没编过？）"
-        )),
-        _ => {}
+    let mut rows = vec![CheckRow {
+        item: "仓库开发版本".to_owned(),
+        value: dev.to_owned(),
+        level: "ok".to_owned(),
+    }];
+    rows.push(CheckRow {
+        item: "本地已交付".to_owned(),
+        value: delivered.clone().unwrap_or_else(|| "还没交付过".to_owned()),
+        level: if delivered.is_some() { "ok" } else { "warn" }.to_owned(),
+    });
+    rows.push(CheckRow {
+        item: "安装包自报".to_owned(),
+        value: build.unwrap_or("还没编过").to_owned(),
+        level: if build.is_some() { "ok" } else { "warn" }.to_owned(),
+    });
+    if let (Some(d), Some(b)) = (&delivered, &build) {
+        if d != b {
+            rows.push(CheckRow {
+                item: "清单与安装包不是同一轮".to_owned(),
+                value: format!("清单 {d} · 安装包 {b}"),
+                level: "error".to_owned(),
+            });
+        }
     }
-    if preview.is_none() && local_release_dir(served).is_dir() {
-        issues.push(
-            "本地发布目录里没有 release-preview.json —— 客户端只会看到已发布的那一版".to_owned(),
-        );
-    }
-    issues
+    rows
 }
 
 fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
@@ -850,7 +864,7 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         published_version: published_version(repo),
         build_version: build.clone(),
         files: delivery_files(&served, repo),
-        issues: consistency_issues(&served, &dev, build.as_deref()),
+        checks: version_checks(&served, &dev, build.as_deref()),
     }
 }
 
@@ -1372,17 +1386,19 @@ mod tests {
         .unwrap();
         let served = serve(&presets);
 
-        let issues = consistency_issues(&served, "0.0.10-preview.5", Some("0.0.10-preview.3"));
+        let rows = version_checks(&served, "0.0.10-preview.6", Some("0.0.10-preview.3"));
         assert!(
-            issues
-                .iter()
-                .any(|i| i.contains("0.0.10-preview.3") && i.contains("0.0.10-preview.5")),
-            "两个号都要出现在那句话里：{issues:?}"
+            rows.iter().any(|r| r.level == "error"
+                && r.value.contains("0.0.10-preview.5")
+                && r.value.contains("0.0.10-preview.3")),
+            "两个号都要出现在那条 error 里：{rows:?}"
         );
 
+        /* ★ **开发版本领先不算错**（作者 2026-11-06 那张表）：仓库 6 / 已交付 5 / 包内 5 是常态 */
+        let normal = version_checks(&served, "0.0.10-preview.6", Some("0.0.10-preview.5"));
         assert!(
-            consistency_issues(&served, "0.0.10-preview.5", Some("0.0.10-preview.5")).is_empty(),
-            "三处同号时一句都不许报"
+            normal.iter().all(|r| r.level != "error"),
+            "只是轮到下一轮，不许报错：{normal:?}"
         );
     }
 

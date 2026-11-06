@@ -270,18 +270,48 @@ function check() {
  * `bump-dev` 与 `ensure-dev` 是同一件事的两种叫法（一个是"我主动推一把"，
  * 一个是"每次开跑前对齐一下"），共用这一份实现，不各写一套。
  */
-function convergeDev(label) {
-  const version = assertConsistent()
+/**
+ * 云端已经发过的预览序号（`v0.0.10-preview.2` → 2）。本地交付要排在它后面。
+ */
+function publishedPreviewSeq(base) {
+  return publishedTags()
+    .filter((x) => x.v.kind === 'preview' && x.v.base === base)
+    .reduce((max, x) => Math.max(max, x.v.seq), 0)
+}
 
-  if (version.kind === 'dev' && !stableReleased(version.base)) {
-    ok(`${label}：已经是开发版本 ${version.text}，不用动`)
-    reportIdentities(version.text)
+/**
+ * **收敛到"下一个待交付的预览号"**（2026-11-06 作者定的最终规则）。
+ *
+ * ```text
+ * 正式 0.0.11 已发  →  0.0.12-preview.1 → 交付 → 0.0.12-preview.2 → … → 0.0.12
+ * ```
+ *
+ * 三条判据，按顺序：
+ * 1. 当前号**已经排在已交付之后** ⇒ 一个字不动（改十次代码还是它）；
+ * 2. 当前号**已经被交付过**（或还是个历史遗留的 `-dev`）⇒ 抬到「已交付 + 1」；
+ * 3. 当前号是**已发布的正式版** ⇒ 进下一个补丁号的 `preview.1`。
+ *
+ * 「已交付」取 **云端 tag** 与 **本地清单**（`target/local-release/release-preview.json`）
+ * 两者的较大值 —— 本地交付不打 tag，只看 git 会漏。
+ *
+ * ★ **号在"交付成功"之后才算用掉**：`preview:build` 先收敛号、再编译、最后写清单；
+ *   编译挂了就没清单，下次收敛仍给同一个号 —— 符合"交付失败不递增"。
+ */
+function convergePreview() {
+  const version = assertConsistent()
+  const delivered = Math.max(publishedPreviewSeq(version.base), localPreviewSeq(version.base))
+  const base =
+    version.kind === 'stable' && stableReleased(version.base) ? bumpPatch(version.base) : version.base
+  const want = `${base}-preview.${delivered + 1}`
+
+  if (version.text === want) {
+    ok(`已经是待交付的预览号 ${want}，不用动`)
+    reportIdentities(want)
     return
   }
-
-  const nextBase = stableReleased(version.base) ? bumpPatch(version.base) : version.base
-  writeAll(`${nextBase}-dev`)
-  reportIdentities(`${nextBase}-dev`)
+  writeAll(want)
+  ok(`收敛到 ${want}（已交付到 ${delivered || '还没交付过'}）`)
+  reportIdentities(want)
 }
 
 /**
@@ -302,44 +332,6 @@ function localPreviewSeq(base) {
   }
 }
 
-/**
- * **生成一份可安装的预览产物之前**调一次：预览序号 +1
- * （`0.0.10-dev` → `0.0.10-preview.4` → `.5` …）。
- *
- * # 为什么是 `-preview.N` 而不是自造的 `-dev.N`
- *
- * 客户端比版本用的是 `release_info::is_newer_version`：同基础时
- * **正式版 > 预览版 > 开发版**。自造一个 `-dev.7` 会落在"开发版"那一档，
- * 比任何已发布的 `-preview.2` 都**旧** —— 客户端根本不会摆这张卡。
- *
- * # 号从哪儿来（不靠人填）
- *
- * 取「已发布的预览 tag」与「本地上一份清单」两者的较大值再 +1：
- * - 已发布的部分 git 说得清；
- * - 本地那几次没 tag（本地预览不发布），只能看 `target/local-release/` 里那份清单。
- *
- * 主版本**一个字都不动**（作者要的"连续改十次都还是同一个主版本"），
- * 变的只有预览序号 —— 那是"第几次生成可安装的预览产物"，不是版本升级。
- */
-function nextPreviewNumber() {
-  const version = assertConsistent()
-  if (version.kind !== 'dev') {
-    fail(
-      `当前 ${version.text} 不是开发版`,
-      '本地预览从 -dev 出发（npm run version:ensure）；真发版请用 npm run release',
-    )
-  }
-  if (stableReleased(version.base)) {
-    fail(`v${version.base} 已经发过正式版`, '先 npm run version:next 进下一个开发号')
-  }
-  const published = publishedTags()
-    .filter((x) => x.v.kind === 'preview' && x.v.base === version.base)
-    .reduce((max, x) => Math.max(max, x.v.seq), 0)
-  const seq = Math.max(published, localPreviewSeq(version.base)) + 1
-  const next = `${version.base}-preview.${seq}`
-  writeAll(next)
-  reportIdentities(next)
-}
 
 function release() {
   const version = assertConsistent()
@@ -377,11 +369,8 @@ switch (command) {
   case 'bump-dev':
     convergeDev('bump-dev')
     break
-  case 'ensure-dev':
-    convergeDev('ensure-dev')
-    break
-  case 'next-preview':
-    nextPreviewNumber()
+  case 'ensure-preview':
+    convergePreview()
     break
   case 'release':
     release()
@@ -394,6 +383,6 @@ switch (command) {
     break
   default:
     console.error(`不认识的命令：${command}`)
-    console.error('用法：check | ensure-dev | bump-dev | next-preview | release | next | current')
+    console.error('用法：check | ensure-preview | release | next | current')
     process.exit(2)
 }
