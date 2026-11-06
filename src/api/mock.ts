@@ -3406,7 +3406,13 @@ export const mockApi: MkpApi = {
       received = Math.min(total, received + Math.round(total / 24))
       if (received >= total) {
         mockUpdate.stopTimer()
-        mockUpdate.state = { state: 'ready', path: '/tmp/SupportEase.app', size: total }
+        mockUpdate.state = {
+          state: 'ready',
+          path: '/tmp/SupportEase.app',
+          size: total,
+          version: MOCK_NEW_VERSION,
+          channel: 'stable',
+        }
         mockUpdate.lastResult = undefined
         return
       }

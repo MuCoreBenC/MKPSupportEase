@@ -121,11 +121,17 @@ pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(),
             Vec::new()
         });
     let chosen = candidates.iter().find(|c| c.channel == channel);
-    let asset = chosen.and_then(|c| c.asset.clone()).or_else(|| {
-        (channel == crate::runtime::release_info::UpdateChannel::Stable && candidates.is_empty())
-            .then(|| software_update(&root).asset)
-            .flatten()
-    });
+    /* 版本号跟着**选中的那一版**走：`Ready` 要带着它，界面才能判"已就绪的是不是这张卡" */
+    let (asset, version) = match chosen {
+        Some(c) => (c.asset.clone(), c.version.clone()),
+        None if channel == crate::runtime::release_info::UpdateChannel::Stable
+            && candidates.is_empty() =>
+        {
+            let u = software_update(&root);
+            (u.asset.clone(), u.latest_version.clone())
+        }
+        None => (None, String::new()),
+    };
 
     if channel == crate::runtime::release_info::UpdateChannel::Stable
         && chosen.is_some_and(|c| {
@@ -150,7 +156,7 @@ pub async fn start_update(app: AppHandle, channel: Option<String>) -> Result<(),
                 use tauri::Emitter as _;
                 let _ = emit_app.emit(updater::PROGRESS_EVENT, &state);
             });
-            updater::download(&asset, &root, &*sink)
+            updater::download(&asset, &version, channel, &root, &*sink)
         })
     });
     Ok(())
@@ -181,14 +187,18 @@ pub fn cancel_update() {
 #[tauri::command]
 pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     let root = crate::fsx::paths::internal_root(&app)?;
-    let UpdateState::Ready { path, .. } = updater::session().state() else {
+    let UpdateState::Ready { path, version, .. } = updater::session().state() else {
         return Err(AppError::invalid_argument(messages::text(
             "ui.ipc.update.158",
             &[],
         )));
     };
     let staged = std::path::PathBuf::from(&path);
-    let version = crate::runtime::structure::APP_VERSION;
+    /* ★ 记的是**装上去的那一版**（2026-11-06 之前记的是本进程的 `APP_VERSION`：
+     *   装完 0.0.10-preview.2，账上却写 `0.0.10-preview.1`，看日志只会更糊涂）。
+     *   远端清单是外部输入 ⇒ 进脚本前先洗一遍。 */
+    let version = updater::safe_version(&version);
+    let version = version.as_str();
     let at = now_iso8601_local();
 
     /* ★ 平台分流（2026-11-05）：
@@ -213,7 +223,11 @@ pub async fn install_update(app: AppHandle) -> Result<(), AppError> {
     #[cfg(not(target_os = "windows"))]
     {
         let target = updater::running_app()?;
-        let script = updater::install_script(&root, &target, &staged, version, &at);
+        /* 把自己这一条的 PID 交给脚本：它要**等这个进程真的消失**才动手。
+         * 不传的话脚本只能盲等 1 秒，而旧实例还活着时 `open` 只会把它的窗口叫到前面
+         * —— 作者 2026-11-06 看到的"点了没反应"就是这个。 */
+        let script =
+            updater::install_script(&root, &target, &staged, version, &at, std::process::id());
         std::process::Command::new("sh")
             .arg("-c")
             .arg(&script)

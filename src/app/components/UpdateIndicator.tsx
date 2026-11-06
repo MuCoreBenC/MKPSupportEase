@@ -243,12 +243,14 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
     }
   }, [])
 
-  /* 装完重启：真机上本进程会退出；演示里只是把账记上 */
+  /* 装完重启：真机上本进程会退出；演示里只是把账记上。
+     ★ 报给外面的是 **`Ready` 里那一版**（后端从清单带过来的），不是 `updateInfo` 的
+       "最新版" —— 用户点的可能就是预览通道那一份。 */
   const install = () =>
     act(async () => {
-      const latest = info?.latestVersion ?? ''
+      const target = shown.state === 'ready' ? shown.version : (info?.latestVersion ?? '')
       await api.installUpdate()
-      onInstalled(latest)
+      onInstalled(target)
     })
 
   /*

@@ -23,6 +23,7 @@
  */
 
 import { spawn } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -41,6 +42,13 @@ const ORIGIN = `http://127.0.0.1:${PORT}`
 /* 交付根在预设根底下的 `delivery/`：客户端填的是 `<地址>/delivery`（`filesRoot: ".."`） */
 const DELIVERY_URL = `${ORIGIN}/delivery`
 
+/* 本地发布覆盖（2026-11-06）：`npm run local-release` 写过清单就顺带打开 ——
+   `dev:test-update` 本来就是"测更新"这一条命令，不该还要人记第二个开关。 */
+const LOCAL_RELEASE = join(REPO, 'target', 'local-release')
+const hasLocalRelease = ['release-preview.json', 'release.json'].some((n) =>
+  existsSync(join(LOCAL_RELEASE, n)),
+)
+
 const waitFor = async (url, tries = 40) => {
   for (let i = 0; i < tries; i += 1) {
     const ok = await fetch(url).then(
@@ -53,11 +61,17 @@ const waitFor = async (url, tries = 40) => {
   return false
 }
 
-const server = spawn(
-  process.execPath,
-  [join(HERE, 'server.mjs'), '--root', ROOT, '--port', String(PORT), '--bump-serial'],
-  { stdio: 'inherit' },
-)
+const serverArgs = [
+  join(HERE, 'server.mjs'),
+  '--root',
+  ROOT,
+  '--port',
+  String(PORT),
+  '--bump-serial',
+]
+if (hasLocalRelease) serverArgs.push('--local-release', LOCAL_RELEASE)
+
+const server = spawn(process.execPath, serverArgs, { stdio: 'inherit' })
 
 const stopServer = () => {
   if (!server.killed) server.kill()

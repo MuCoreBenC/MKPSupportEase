@@ -38,6 +38,19 @@
  * 起好之后可以把它填进「设置 → 高级设置 → 预设数据源 → 自定义地址」，
  * 或者用 `npm run dev:test-update` 让 dev 脚本自动注入。
  *
+ * # 本地发布覆盖（2026-11-06）
+ *
+ * `--local-release [目录]`（或 `PRESET_TEST_LOCAL_RELEASE`）打开一份**覆盖层**：
+ * 请求 `/delivery/<名字>` 时**先在本地发布目录里找**，找到就用它，找不到才回落到
+ * 仓库里的 `presets/delivery/`。默认目录是 `target/local-release`
+ * （由 `scripts/local-release.mjs` 写）。
+ *
+ * 这样"测一次更新"不用发版：本地清单里那支 zip 就是刚编出来的 `.app.zip`，
+ * 客户端照旧走 catalog / manifest / 寻址 / SHA / 下载 / 替换那条真链。
+ *
+ * ★ **只改响应，盘上一个字节不动**（与 `--bump-serial` 同一个口径）：
+ *   `presets/delivery/release-preview.json` 是发过的产物，不许为了测试去改它。
+ *
  * ★ **不引任何依赖**（`node:http` + `node:fs`）：它是个测试脚手架，不该进 package.json
  * 的依赖树，也不该被 `check-zero-network.mjs`（那份只扫 `src-tauri/src` 与 `src/api`）
  * 牵连 —— 客户端正式代码里一个网络符号都不多。
@@ -45,6 +58,7 @@
 
 import { createServer } from 'node:http'
 import { readFile } from 'node:fs/promises'
+import { existsSync, statSync } from 'node:fs'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -65,20 +79,56 @@ const ROOT = resolve(
 /* 发布序号 +1：见文件头那段 —— 只改响应，不改盘上的字节 */
 const BUMP = argv.includes('--bump-serial') || process.env.PRESET_TEST_BUMP_SERIAL === '1'
 
+/* 本地发布覆盖层：`--local-release [目录]` → `PRESET_TEST_LOCAL_RELEASE` → 关。
+   给了这一格，`/delivery/<名字>` 会**先**去那份目录里找（找到就顶掉仓库里那一份）。 */
+const LR_AT = argv.indexOf('--local-release')
+const LR_ENV = process.env.PRESET_TEST_LOCAL_RELEASE
+const LOCAL_ROOT = (() => {
+  const DEFAULT = join(HERE, '..', '..', 'target', 'local-release')
+  if (LR_AT >= 0) {
+    const next = argv[LR_AT + 1]
+    return resolve(next !== undefined && !next.startsWith('--') ? next : DEFAULT)
+  }
+  if (LR_ENV === undefined || LR_ENV === '') return ''
+  return resolve(LR_ENV === '1' ? DEFAULT : LR_ENV)
+})()
+
+/** `path` 是不是在 `dir` 底下（防穿越；`dir` 自身也算） */
+const inside = (path, dir) => path === dir || path.startsWith(dir + sep)
+
+/**
+ * 这一条请求本地有没有货。
+ *
+ * 只在 `/delivery/…` 这一层覆盖：`source.json` / `catalog.json` 仍然来自仓库那份
+ * ——本地发布只声明"软件新版本在哪儿"，不参与预设数据。
+ */
+function localOverride(rel) {
+  if (LOCAL_ROOT === '' || !rel.startsWith('delivery/')) return null
+  const cand = resolve(LOCAL_ROOT, normalize(rel.slice('delivery/'.length)))
+  if (!inside(cand, LOCAL_ROOT)) return null
+  if (!existsSync(cand) || !statSync(cand).isFile()) return null
+  return cand
+}
+
 const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.toml': 'text/plain; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
+  '.log': 'text/plain; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.zip': 'application/zip',
+  '.dmg': 'application/x-apple-diskimage',
 }
 
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', `http://${HOST}:${PORT}`)
   const rel = decodeURIComponent(url.pathname).replace(/^\/+/, '')
   /* 目录访问试 `source.json`：写地址时少写一截也能用（与客户端那两条读法同一套宽容） */
-  const target = resolve(ROOT, normalize(rel === '' || rel.endsWith('/') ? `${rel}source.json` : rel))
-  /* 防穿越：只端出 ROOT 底下的东西 */
-  if (target !== ROOT && !target.startsWith(ROOT + sep)) {
+  const target =
+    localOverride(rel) ??
+    resolve(ROOT, normalize(rel === '' || rel.endsWith('/') ? `${rel}source.json` : rel))
+  /* 防穿越：只端出 ROOT（或本地发布目录）底下的东西 */
+  if (!inside(target, ROOT) && !(LOCAL_ROOT !== '' && inside(target, LOCAL_ROOT))) {
     res.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end('只能读测试根底下的文件')
     return
   }
@@ -116,4 +166,16 @@ server.listen(PORT, HOST, () => {
   console.log(`[preset-test-server] 地址：http://${HOST}:${PORT}`)
   console.log('[preset-test-server] 填进「设置 → 高级设置 → 预设数据源 → 自定义地址」，')
   console.log('[preset-test-server] 或 `npm run dev:test-update` 自动注入（debug 构建才认）')
+  if (LOCAL_ROOT !== '') {
+    const has = ['release-preview.json', 'release.json'].filter((n) =>
+      existsSync(join(LOCAL_ROOT, n)),
+    )
+    if (has.length > 0) {
+      console.log(`[preset-test-server] ★ 本地发布覆盖：${LOCAL_ROOT}（${has.join('、')}）`)
+      console.log('[preset-test-server]   客户端「重新检查」看到的就是这一份，不用发版')
+    } else {
+      console.log(`[preset-test-server] 本地发布覆盖开着，但 ${LOCAL_ROOT} 里没有清单 ——`)
+      console.log('[preset-test-server]   先跑 npm run local-release')
+    }
+  }
 })
