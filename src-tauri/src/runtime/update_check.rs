@@ -254,46 +254,80 @@ mod tests {
         );
         assert!(body.contains("fetch_stable_info"));
 
-        // ④ 用户主动刷新时**预览版仍然看得见**（不是把预览版藏了）；
-        //    正式版 0.0.6 比当前 0.0.10-dev 旧，一张卡都不摆
+        // ④ **当前构建一定看不到比它旧的候选**（旧正式版 0.0.6 必然被滤掉）。
+        //
+        // ★ 这里不写死"几个候选"：`candidates_from_infos` 按**编译期 APP_VERSION** 判，
+        //   而这个值在发版前后是变的（`0.0.10-dev` → `0.0.10-preview.2`）。早先这里写死
+        //   `len()==1`，发版当天就有两条判据红在 tag 之前 —— 判据自己要跟版本无关。
         let cs = candidates_from_infos(&stable, Some(&preview));
-        assert_eq!(cs.len(), 1, "旧正式版不摆卡");
-        assert_eq!(cs[0].channel, UpdateChannel::Preview);
-        assert_eq!(cs[0].version, "0.0.10-preview.1");
+        assert!(
+            cs.iter().all(|c| release_info::is_newer_version(
+                &c.version,
+                crate::runtime::structure::APP_VERSION
+            )),
+            "候选里不许出现比当前构建旧的：{cs:?}"
+        );
+        assert!(
+            !cs.iter().any(|c| c.version == "0.0.6"),
+            "旧正式版 0.0.6 一张卡都不摆"
+        );
+        // 预览版在不在，取决于当前构建与它的先后 —— 但不许"藏着更新的预览版"
+        if release_info::is_newer_version(
+            "0.0.10-preview.1",
+            crate::runtime::structure::APP_VERSION,
+        ) {
+            assert!(
+                cs.iter()
+                    .any(|c| c.channel == UpdateChannel::Preview
+                        && c.version == "0.0.10-preview.1"),
+                "更新的预览版必须摆得出来"
+            );
+        }
     }
 
     /// ★ **只摆比当前构建新的候选**（2026-11-06 作者："不要显示旧版"）。
     ///
     /// 现场：装了 `0.0.10-dev`，正式版线上还是 `0.0.6` —— 设置页却把它摆在
-    /// "推荐 / 更新正式版"上。它不是更新，也不该给一颗"切回正式版"的按钮：
-    /// 回退是用户自己的决定，不该被摆成一个看起来像更新的选项。
+    /// "推荐 / 更新正式版"上。
     ///
-    /// 判据按编译期 `APP_VERSION` 算：测试构建是 `0.0.10-dev`。
+    /// ★ **判据不能写死版本号**（2026-11-06 发版当天踩到）：`APP_VERSION` 是编译期常量，
+    ///   发版时会从 `0.0.10-dev` 变成 `0.0.10-preview.2`，写死"0.0.10-preview.1 更新"
+    ///   的判据当场变红，把发版卡在 tag 之前。所以这里用**绝对更旧 / 绝对更新**的号，
+    ///   同基础那一条按 `APP_VERSION` 现算。
     #[test]
     fn only_newer_candidates_are_shown() {
-        let older_stable = info("0.0.6");
-        let newer_preview = info("0.0.10-preview.1");
+        let older_stable = info("0.0.1"); // 一定比任何 0.0.x 构建旧
+        let newer_stable = info("999.0.0"); // 一定更新
+        let newer_preview = info("999.0.0-preview.1");
 
-        // ① 旧正式版被滤掉，只剩更新的预览版
-        let cs = candidates_from_infos(&older_stable, Some(&newer_preview));
-        assert_eq!(cs.len(), 1);
-        assert_eq!(cs[0].channel, UpdateChannel::Preview);
+        // ① 一个都不新 → 空数组（界面退回"只有状态行、没有按钮"）
+        assert!(candidates_from_infos(&older_stable, None).is_empty());
 
         // ② 两个都比当前新 → 都在，正式版排第一
-        let newer_stable = info("0.0.11");
         let cs = candidates_from_infos(&newer_stable, Some(&newer_preview));
         assert_eq!(cs.len(), 2);
         assert_eq!(cs[0].channel, UpdateChannel::Stable);
         assert_eq!(cs[1].channel, UpdateChannel::Preview);
 
-        // ③ 一个都不新 → 空数组（界面退回"只有状态行、没有按钮"）
-        assert!(candidates_from_infos(&older_stable, None).is_empty());
-
-        // ④ 同基础的**正式版**对 dev 构建算更新（作者："0.0.10 的 pre 或者 dev 都把 0.0.10 当新版"）
-        let same_base = info("0.0.10");
-        let cs = candidates_from_infos(&same_base, None);
+        // ③ 旧的正式版 + 更新的预览版 → 只留预览版
+        let cs = candidates_from_infos(&older_stable, Some(&newer_preview));
         assert_eq!(cs.len(), 1);
-        assert_eq!(cs[0].channel, UpdateChannel::Stable);
+        assert_eq!(cs[0].channel, UpdateChannel::Preview);
+
+        // ④ 同基础的**正式版**：当前构建是预发布（dev / preview）时算更新，
+        //    当前构建本身就是正式版时不算。按 APP_VERSION 现算，不写死。
+        let base = crate::runtime::structure::APP_VERSION
+            .split('-')
+            .next()
+            .unwrap();
+        let same_base = info(base);
+        let is_prerelease = crate::runtime::structure::APP_VERSION.contains('-');
+        assert_eq!(
+            !candidates_from_infos(&same_base, None).is_empty(),
+            is_prerelease,
+            "同基础正式版对预发布构建是更新（{}），对正式版构建不是",
+            crate::runtime::structure::APP_VERSION
+        );
     }
 
     /// 占位预览清单（与正式版同版本号）不该凭空多出一张「预览版」卡。
