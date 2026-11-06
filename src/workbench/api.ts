@@ -1695,6 +1695,8 @@ export interface PreviewPlan {
   files: string[]
   strangers: string[]
   branch: string
+  /** 上一趟没跑完时的一句话（`null` = 上一趟跑完了） */
+  resume: string | null
 }
 
 /** `preview_tx::PreviewReport` —— 一趟交付的结果 */

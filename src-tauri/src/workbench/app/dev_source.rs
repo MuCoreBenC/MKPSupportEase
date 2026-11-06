@@ -300,6 +300,17 @@ fn delivery_files(served: &Served, repo: &Path) -> Vec<DeliveryFile> {
             version: json_version(&path),
         });
     }
+    /* 本地发布目录里那份清单：服务端**优先端它**（覆盖交付根里那份），
+    所以它才是"客户端会看到哪一版"的答案。 */
+    let overlay = local_release_dir(served).join(LOCAL_RELEASE_MANIFESTS.0);
+    if overlay.is_file() {
+        files.push(DeliveryFile {
+            name: format!("本地发布清单（{}）", LOCAL_RELEASE_MANIFESTS.0),
+            size: std::fs::metadata(&overlay).ok().map(|m| m.len()),
+            exists: true,
+            version: json_version(&overlay),
+        });
+    }
     /* 安装包：本地发布目录里最新的那一份 zip（没有就没有，不摆假行） */
     let dir = local_release_dir(served);
     if let Some(zip) = std::fs::read_dir(&dir).ok().and_then(|rd| {
@@ -804,13 +815,25 @@ pub struct CheckRow {
 /// 仓库 `preview.6` / 已交付 `preview.5` / 客户端 `preview.5` —— 这叫"正在开发下一轮"，
 /// **不许**报成错误。真问题只有一条：**清单与安装包不是同一轮** ——
 /// 那会让客户端以为装上了新版本，实际装的是旧包。
-fn version_checks(served: &Served, dev: &str, build: Option<&str>) -> Vec<CheckRow> {
-    let delivered = json_version(
+/// 客户端**实际会拿到**的那一版软件清单。
+///
+/// 服务端优先端 `target/local-release/` 里那份（覆盖层），没有覆盖层才用交付根里那份。
+/// 读错地方会让"本地已交付"永远停在已发布的那一版，并和包内版本互相对不上。
+fn delivered_version(served: &Served) -> Option<String> {
+    let overlay = local_release_dir(served).join(LOCAL_RELEASE_MANIFESTS.0);
+    if overlay.is_file() {
+        return json_version(&overlay);
+    }
+    json_version(
         &served
             .root
             .join(DELIVERY_SUBDIR)
             .join(LOCAL_RELEASE_MANIFESTS.0),
-    );
+    )
+}
+
+fn version_checks(served: &Served, dev: &str, build: Option<&str>) -> Vec<CheckRow> {
+    let delivered = delivered_version(served);
     let mut rows = vec![CheckRow {
         item: "仓库开发版本".to_owned(),
         value: dev.to_owned(),

@@ -63,6 +63,9 @@ pub struct PreviewPlan {
     pub strangers: Vec<String>,
     /// 当前分支（在 main 上交付会**只在本地**提交一次，绝不推送）
     pub branch: String,
+    /// 上一趟停在哪儿（`None` = 上一趟跑完了，或还没有过交付）。
+    /// 中断过的交付再点一次会**接着跑**：已完成且幂等的步骤不会重做。
+    pub resume: Option<String>,
 }
 
 /// 一趟交付的结果。
@@ -169,6 +172,21 @@ fn next_version(repo: &Path) -> String {
     }
 }
 
+/// 上一趟没跑完吗？返回一句话（版本 + 停在哪一步）。
+///
+/// 事务一开始就写一条 `started`，跑完才改成最终阶段 —— 所以"最后一条不是 `rolled`"
+/// 就是"上一次没走完"。再点一次是安全的：tag / commit 都幂等。
+fn unfinished_last(repo: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(repo.join(JOURNAL)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let stage = v.get("stage")?.as_str()?;
+    if stage == "rolled" {
+        return None;
+    }
+    let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("?");
+    Some(format!("上一趟（{version}）停在 {stage}"))
+}
+
 fn plan_of(repo: &Path) -> Result<PreviewPlan, AppError> {
     let version = cargo_version(repo)?;
     let (tracked, untracked) = status_paths(repo)?;
@@ -195,6 +213,7 @@ fn plan_of(repo: &Path) -> Result<PreviewPlan, AppError> {
         files: tracked,
         strangers: untracked,
         branch: current_branch(repo),
+        resume: unfinished_last(repo),
     })
 }
 
@@ -328,6 +347,11 @@ pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
             return Err(AppError::invalid_argument(report.message.clone())
                 .with_detail(format!("详细日志：{}", report.log)));
         }
+
+        /* ① 编译（失败 ⇒ 什么都没发生）。先记一条 started：中途被打断时，
+        下一次 preflight 靠它说"上一趟没跑完"，而不是让人对着半成品猜。 */
+        report.stage = "started".to_owned();
+        write_journal(&repo, &report);
 
         /* ① 编译（失败 ⇒ 什么都没发生） */
         if let Err(e) = run_logged(&repo, &mut log, &["npm", "run", "tauri", "--", "build"]) {

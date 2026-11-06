@@ -888,7 +888,7 @@ export default function SettingsPage({ boot }: Props) {
                 onClick={() => void deliverPreview()}
               >
                 {previewBusy
-                  ? '正在交付……'
+                  ? '正在编译并交付……'
                   : `生成并交付 ${previewPlan?.version ?? ''}`.trim()}
               </button>
               {devNote !== null && (
@@ -900,6 +900,16 @@ export default function SettingsPage({ boot }: Props) {
                 </span>
               )}
             </div>
+
+            {/* 交付的进行中 / 结果 —— 紧贴按钮，不用滚到卡片底部才看得见 */}
+            {previewNote !== null && (
+              <p
+                className={s.vhelp}
+                style={previewNote.bad ? { color: 'var(--danger)' } : undefined}
+              >
+                {previewNote.text}
+              </p>
+            )}
 
             {/*
               ——— 三格版本身份 + 结构化诊断 ———
@@ -1004,6 +1014,11 @@ export default function SettingsPage({ boot }: Props) {
               </div>
             )}
 
+            {previewPlan?.resume != null && previewPlan.resume !== '' && (
+              <p className={s.vhelp} style={{ color: 'var(--warn, #9a6700)' }}>
+                {previewPlan.resume} —— 再点一次会接着跑（已完成的步骤不会重做）。
+              </p>
+            )}
             {previewPlan !== null && previewPlan.blockedBy.length > 0 && (
               <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
                 {previewPlan.blockedBy.join('；')}
@@ -1014,14 +1029,6 @@ export default function SettingsPage({ boot }: Props) {
                 交付会提交 {previewPlan.files.length} 个文件（当前分支{' '}
                 <span className={s.mono}>{previewPlan.branch}</span>）—— <b>只在本地</b>
                 ，不推送、不建 Release。
-              </p>
-            )}
-            {previewNote !== null && (
-              <p
-                className={s.vhelp}
-                style={previewNote.bad ? { color: 'var(--danger)' } : undefined}
-              >
-                {previewNote.text}
               </p>
             )}
 
