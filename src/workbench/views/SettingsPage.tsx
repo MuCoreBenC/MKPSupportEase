@@ -244,6 +244,8 @@ export default function SettingsPage({ boot }: Props) {
   const [previewPlan, setPreviewPlan] = useState<PreviewPlan | null>(null)
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewNote, setPreviewNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /* 交付进行中时，后端日志的最后一行 —— 编译要一两分钟，得有东西在动 */
+  const [previewTail, setPreviewTail] = useState('')
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
   /**
    * 现读一次状态。
@@ -342,6 +344,22 @@ export default function SettingsPage({ boot }: Props) {
       await readDevSrc()
     }
   }
+
+  useEffect(() => {
+    if (!previewBusy) {
+      setPreviewTail('')
+      return
+    }
+    const tick = () => {
+      void wb
+        .previewLogTail()
+        .then(setPreviewTail)
+        .catch(() => setPreviewTail(''))
+    }
+    tick()
+    const timer = window.setInterval(tick, 1500)
+    return () => window.clearInterval(timer)
+  }, [previewBusy])
 
   /** 「打开交付目录」：路径用后端 DTO 里那一串（界面不自己拼） */
   const openDevRoot = async () => {
@@ -902,6 +920,11 @@ export default function SettingsPage({ boot }: Props) {
             </div>
 
             {/* 交付的进行中 / 结果 —— 紧贴按钮，不用滚到卡片底部才看得见 */}
+            {previewBusy && previewTail !== '' && (
+              <p className={`${s.vhelp} ${s.mono}`} style={{ opacity: 0.75 }}>
+                {previewTail}
+              </p>
+            )}
             {previewNote !== null && (
               <p
                 className={s.vhelp}

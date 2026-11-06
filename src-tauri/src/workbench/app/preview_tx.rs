@@ -223,6 +223,30 @@ pub fn wb_preview_preflight() -> Result<PreviewPlan, AppError> {
     crate::ipc::traced("wb_preview_preflight", |_| plan_of(&repo()))
 }
 
+/// 交付日志的**最后一行**（编译时就是 `Building [=====> ] 515/520` 那种）。
+///
+/// 界面上那颗按钮转起来的时候，这一行是唯一能说明"它还在动"的东西 ——
+/// 一次交付要跑一两分钟，没有反馈等于卡死。
+#[tauri::command]
+pub fn wb_preview_log_tail() -> Result<String, AppError> {
+    crate::ipc::traced("wb_preview_log_tail", |_| {
+        let path = repo().join("target/local-preview/deliver.log");
+        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let line = text
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        /* 编译的进度行会带一堆 \r 与空格，压成一行再给界面 */
+        let clean = line
+            .replace('\r', " ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        Ok(clean.chars().take(160).collect())
+    })
+}
+
 /// 跑一条命令，把 stdout / stderr 追加进日志；失败就带着**最后几行**报错。
 /// 交付日志（**追加语义**，但走 `fsx::atomic`）。
 ///

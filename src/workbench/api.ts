@@ -2841,6 +2841,8 @@ export const wb = {
   previewPreflight: () => invoke<PreviewPlan>('wb_preview_preflight'),
   /** 生成并交付当前预览版本（= 授权这一趟的本地 commit + tag，不推送） */
   previewDeliver: () => invoke<PreviewReport>('wb_preview_deliver'),
+  /** 交付日志最后一行（编译时能看见 Building 515/520 那种） */
+  previewLogTail: () => invoke<string>('wb_preview_log_tail'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
