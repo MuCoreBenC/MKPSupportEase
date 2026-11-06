@@ -1671,6 +1671,12 @@ export interface DevSourceStatus {
   publishedVersion: string | null
   /** 安装包自己报的版本（`.app/Contents/Info.plist`）；没编过 = null */
   buildVersion: string | null
+  /** 当前开发版本（`version.toml`）—— 主区那一格 */
+  devVersionText: string
+  /** 最近一次成功交付；null = 还没交付过 */
+  lastDelivered: DeliveredDto | null
+  /** 最新的本地安装包（生成过就有，**不代表已交付**） */
+  package: PackageDto | null
   /** 盘上真有什么（不存在就 `exists: false`，不摆假行） */
   files: DeliveryDiskFile[]
   /** 三格版本身份 + 结论。**判定在后端**，界面只按 `level` 上色 */
@@ -1692,11 +1698,15 @@ export interface PreviewPlan {
   tag: string
   ok: boolean
   blockedBy: string[]
-  files: string[]
+  /** **会被本次提交**的文件（已跟踪的改动；绝不 add -A） */
+  deliverable: string[]
+  /** **未跟踪**的文件 —— 构建可能读到它们却不在任何提交里，所以阻断 */
   strangers: string[]
   branch: string
   /** 上一趟没跑完时的一句话（`null` = 上一趟跑完了） */
   resume: string | null
+  /** `version.toml` 与四处派生文件是否一致 */
+  consistent: boolean
 }
 
 /** `preview_tx::PreviewReport` —— 一趟交付的结果 */
@@ -1708,6 +1718,26 @@ export interface PreviewReport {
   stage: string
   message: string
   log: string
+}
+
+/** `dev_source::DeliveredDto` —— 最近一次成功交付（tag 是冻结事实，账本是交付记录） */
+export interface DeliveredDto {
+  version: string
+  tag: string
+  commit: string
+  at: string
+  /** 账本里有没有这一版的 `ok`（false = tag 打了但没记账，可补） */
+  recorded: boolean
+}
+
+/** `dev_source::PackageDto` —— 最新的本地安装包 */
+export interface PackageDto {
+  name: string
+  size: number
+  path: string
+  version: string
+  /** 这一版**有没有 tag**。false ⇒ 只是生成过，不算已交付 */
+  frozen: boolean
 }
 
 /** `dev_source::DeliveryFile` —— 交付面上一个真实文件（别与交付集合那个 `DeliveryFile` 混淆） */

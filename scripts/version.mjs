@@ -32,6 +32,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
 
+/** 唯一版本源 —— 只有它能被改，其余四处是它的产物。 */
+const SOURCE = `${ROOT}/version.toml`
+
 const FILES = {
   pkg: `${ROOT}/package.json`,
   tauri: `${ROOT}/src-tauri/tauri.conf.json`,
@@ -42,9 +45,10 @@ const LOCK_PACKAGE = 'mkp-support-ease'
 
 const read = (path) => readFileSync(path, 'utf8')
 
-/** 三处版本号（缺一处就是 `undefined`，check 会报） */
+/** 版本号五处读数（缺一处就是 `undefined`，check 会报） */
 function readVersions() {
   return {
+    source: /^version\s*=\s*"([^"]+)"/m.exec(read(SOURCE))?.[1],
     pkg: /"version"\s*:\s*"([^"]+)"/.exec(read(FILES.pkg))?.[1],
     tauri: /"version"\s*:\s*"([^"]+)"/.exec(read(FILES.tauri))?.[1],
     cargo: /^version\s*=\s*"([^"]+)"/m.exec(read(FILES.cargo))?.[1],
@@ -163,14 +167,14 @@ const fail = (message, hint) => {
 const ok = (message) => console.log(`\u001b[32m✓\u001b[0m ${message}`)
 const warn = (message) => console.log(`\u001b[33m!\u001b[0m ${message}`)
 
-/** 把版本写进四处；只换值，不动格式 */
+/** 把版本写进**源 + 四处**；只换值，不动格式 */
 function writeAll(version) {
   const swap = (path, re, next) => {
     const before = read(path)
-    const after = before.replace(re, next)
-    if (after === before) throw new Error(`${path} 里没找到版本号，拒绝盲写`)
-    writeFileSync(path, after)
+    if (!re.test(before)) throw new Error(`${path} 里没找到版本号，拒绝盲写`)
+    writeFileSync(path, before.replace(re, next))
   }
+  /* 源**不动**（它就是权威）：只把同一份值铺到四处。 */
   swap(FILES.pkg, /"version"\s*:\s*"[^"]*"/, `"version": "${version}"`)
   swap(FILES.tauri, /"version"\s*:\s*"[^"]*"/, `"version": "${version}"`)
   swap(FILES.cargo, /^version\s*=\s*"[^"]*"/m, `version = "${version}"`)
@@ -179,7 +183,7 @@ function writeAll(version) {
     new RegExp(`(name = "${LOCK_PACKAGE}"\\nversion = ")[^"]*(")`),
     `$1${version}$2`,
   )
-  ok(`三处 + Cargo.lock 已写成 ${version}`)
+  ok(`version.toml + 四处已写成 ${version}`)
 }
 
 function assertConsistent() {
@@ -191,13 +195,13 @@ function assertConsistent() {
   const unique = [...new Set(Object.values(v))]
   if (unique.length !== 1) {
     fail(
-      `四处版本不一致：${Object.entries(v)
+      `版本不一致：${Object.entries(v)
         .map(([key, value]) => `${key}=${value}`)
         .join(' · ')}`,
-      '版本真值是 src-tauri/Cargo.toml；跑 node scripts/version.mjs ensure-preview 重新对齐',
+      '唯一源是 version.toml；跑 node scripts/version.mjs sync 把它同步到四处',
     )
   }
-  const parsed = parse(v.pkg)
+  const parsed = parse(v.source)
   if (!parsed) {
     fail(`版本号格式不对：${v.pkg}（要 x.y.z 或 x.y.z-preview.N）`)
   }
@@ -207,6 +211,25 @@ function assertConsistent() {
 /* ---------- check ---------- */
 
 function check() {
+  /* `--json`：给工作台读，一行 JSON，不打印人话（否则界面得解析配色符号）。 */
+  if (process.argv.includes('--json')) {
+    const v = readVersions()
+    const values = Object.values(v)
+    const parsed = parse(v.source ?? '')
+    console.log(
+      JSON.stringify({
+        source: v.source ?? null,
+        pkg: v.pkg ?? null,
+        cargo: v.cargo ?? null,
+        tauri: v.tauri ?? null,
+        lock: v.lock ?? null,
+        consistent: new Set(values).size === 1 && values.every(Boolean),
+        valid: parsed !== null,
+        reason: parsed === null ? '版本号形状不对（要 x.y.z 或 x.y.z-preview.N）' : '',
+      }),
+    )
+    return
+  }
   const version = assertConsistent()
   /* 身份三格一起摆出来："最新已发布"、"本地已交付"与"当前开发"同时出现，
      免得只看一句"开发版本 X"却不知道发到哪儿了。 */
@@ -300,6 +323,15 @@ function localPreviewSeq(base) {
 }
 
 
+/** 把 `version.toml` 的值同步到四处（人改过派生文件时用；不改源本身）。 */
+function sync() {
+  const v = readVersions()
+  if (!v.source) fail('读不到 version.toml 里的 version')
+  if (!parse(v.source)) fail(`版本号格式不对：${v.source}（要 x.y.z 或 x.y.z-preview.N）`)
+  writeAll(v.source)
+  reportIdentities(v.source)
+}
+
 function release() {
   const version = assertConsistent()
   if (version.kind !== 'preview') {
@@ -332,6 +364,9 @@ switch (command) {
   case 'check':
     check()
     break
+  case 'sync':
+    sync()
+    break
   case 'ensure-preview':
     convergePreview()
     break
@@ -346,6 +381,6 @@ switch (command) {
     break
   default:
     console.error(`不认识的命令：${command}`)
-    console.error('用法：check | ensure-preview | release | next | current')
+    console.error('用法：check [--json] | sync | ensure-preview | release | next | current')
     process.exit(2)
 }

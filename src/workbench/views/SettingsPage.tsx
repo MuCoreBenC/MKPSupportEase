@@ -361,6 +361,19 @@ export default function SettingsPage({ boot }: Props) {
     return () => window.clearInterval(timer)
   }, [previewBusy])
 
+  /** 「在访达中打开安装包位置」：用后端给的绝对路径，界面不自己拼 */
+  const openPackageDir = async () => {
+    const pkg = devSrc?.package
+    if (pkg === null || pkg === undefined) return
+    /* 给的是文件路径，打开它所在的目录 */
+    const dir = pkg.path.slice(0, pkg.path.lastIndexOf('/'))
+    try {
+      await wb.openPath(dir)
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
   /** 「打开交付目录」：路径用后端 DTO 里那一串（界面不自己拼） */
   const openDevRoot = async () => {
     const root = devSrc?.sourceRoot
@@ -895,7 +908,7 @@ export default function SettingsPage({ boot }: Props) {
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary}`}
-                disabled={previewBusy || previewPlan === null || !previewPlan.ok}
+                disabled={previewBusy}
                 title={
                   previewPlan === null
                     ? '正在读工作区……'
@@ -935,73 +948,104 @@ export default function SettingsPage({ boot }: Props) {
             )}
 
             {/*
-              ——— 三格版本身份 + 结构化诊断 ———
-              ★ 三个号不一样**是常态**：仓库 6 / 已交付 5 / 包内 5 = "正在开发下一轮"。
-                所以这里只按后端的 `level` 上色，不自己比大小 —— 正常差异是灰的，不报红。
+              ——— 主区五格：当前开发 / 最近成功交付 / Tag / 安装包 / 发布 ———
+              判定全部来自后端（tag 是冻结事实，账本是交付记录），这里只渲染。
             */}
             <div className={s.vhead}>
-              <b>版本</b>
-              <span className={s.vkey}>开发中 / 已交付 / 包内自报，各说各的</span>
+              <b>本地预览发布</b>
+              <span className={s.vkey}>
+                {devSrc?.package?.frozen === true ? '已冻结' : '正在开发 · 尚未冻结'}
+              </span>
             </div>
 
-            {(devSrc?.checks ?? []).map((row) => (
-              <div className={s.vrow} key={row.item}>
+            <div className={s.vrow}>
+              <span className={s.vlabel}>当前开发版本</span>
+              <span className={`${s.vstatic} ${s.mono}`} style={{ fontWeight: 600 }}>
+                {devSrc?.devVersionText ?? '—'}
+              </span>
+              <span className={s.grow} />
+            </div>
+
+            <div className={s.vrow}>
+              <span className={s.vlabel}>最近成功交付</span>
+              <span className={`${s.vstatic} ${s.mono}`}>
+                {devSrc?.lastDelivered?.version ?? '（还没交付过）'}
+              </span>
+              <span className={s.grow} />
+              {devSrc?.lastDelivered !== null && devSrc?.lastDelivered !== undefined && (
+                <span className={`${s.vkey} ${s.mono}`}>
+                  {devSrc.lastDelivered.tag}
+                  {devSrc.lastDelivered.recorded ? '' : '（账本缺记录，可补）'}
+                </span>
+              )}
+            </div>
+
+            {devSrc?.package !== null && devSrc?.package !== undefined && (
+              <div className={s.vrow}>
+                <span className={s.vlabel}>安装包</span>
+                <span className={`${s.vstatic} ${s.mono}`}>{devSrc.package.name}</span>
+                <span className={`${s.vkey} ${s.mono}`}>{sizeText(devSrc.package.size)}</span>
+                <span className={s.grow} />
                 <span
-                  className={s.vlabel}
+                  className={s.vhelp}
+                  style={{
+                    color: devSrc.package.frozen ? 'var(--ok, #1a7f37)' : 'var(--muted, #8c959f)',
+                  }}
+                >
+                  {devSrc.package.frozen ? '已冻结' : '尚未交付（文件仅生成）'}
+                </span>
+              </div>
+            )}
+
+            <div className={s.vrow}>
+              <span className={s.grow} />
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devSrc?.package === null || devSrc?.package === undefined}
+                onClick={() => void openPackageDir()}
+              >
+                在访达中打开安装包位置
+              </button>
+            </div>
+
+            {/* 诊断：只在这几处真有问题时出现，正常轮次差异不上来 */}
+            {(devSrc?.checks ?? [])
+              .filter((r) => r.level !== 'ok')
+              .map((row) => (
+                <p
+                  key={row.item}
+                  className={s.vhelp}
                   style={{
                     color:
                       row.level === 'error' || row.level === 'block'
                         ? 'var(--danger)'
-                        : row.level === 'warn'
-                          ? 'var(--warn, #9a6700)'
-                          : undefined,
+                        : 'var(--warn, #9a6700)',
                   }}
                 >
-                  {row.level === 'error' || row.level === 'block'
-                    ? '● '
-                    : row.level === 'warn'
-                      ? '○ '
-                      : ''}
-                  {row.item}
-                </span>
-                <span className={`${s.vstatic} ${s.mono}`}>{row.value}</span>
-                <span className={s.grow} />
-              </div>
-            ))}
-
-            {/* ——— 盘上有什么：文件 / 大小 / 状态（不摆假行） ——— */}
-            <div className={s.vhead}>
-              <b>交付文件</b>
-              <span className={`${s.vkey} ${s.mono}`}>{devSrc?.sourceRoot ?? '—'}</span>
-            </div>
-
-            {(devSrc?.files ?? []).map((f) => (
-              <div className={s.vrow} key={f.name}>
-                <span
-                  className={s.mono}
-                  style={{ flex: '0 0 auto', minWidth: 240, opacity: f.exists ? 1 : 0.45 }}
-                >
-                  {f.name}
-                </span>
-                <span className={`${s.vstatic} ${s.mono}`}>{sizeText(f.size)}</span>
-                <span className={s.grow} />
-                <span
-                  className={s.vhelp}
-                  style={{ color: f.exists ? 'var(--ok, #1a7f37)' : 'var(--muted, #8c959f)' }}
-                >
-                  {f.exists ? '存在' : '不存在'}
-                  {f.version !== null ? ` · ${f.version}` : ''}
-                </span>
-              </div>
-            ))}
+                  {row.item}：{row.value}
+                </p>
+              ))}
 
             <details>
-              <summary className={s.vhelp}>路径与命令</summary>
+              <summary className={s.vhelp}>详细信息</summary>
+              {(devSrc?.files ?? []).map((f) => (
+                <p className={`${s.vhelp} ${s.mono}`} key={f.name}>
+                  {f.name} · {sizeText(f.size)}
+                  {f.exists ? '' : ' · 不存在'}
+                  {f.version !== null ? ` · ${f.version}` : ''}
+                </p>
+              ))}
               <p className={`${s.vhelp} ${s.mono}`}>交付根：{devSrc?.sourceRoot ?? '—'}</p>
               <p className={`${s.vhelp} ${s.mono}`}>仓库根：{devSrc?.repoRoot ?? '—'}</p>
               <p className={`${s.vhelp} ${s.mono}`}>
                 命令：{devSrc?.command ?? 'npm run preset-source:dev'}
               </p>
+              {(devSrc?.checks ?? []).map((row) => (
+                <p className={`${s.vhelp} ${s.mono}`} key={`c-${row.item}`}>
+                  {row.item}：{row.value}
+                </p>
+              ))}
             </details>
 
             {devConflicts.length > 0 && (
@@ -1043,13 +1087,34 @@ export default function SettingsPage({ boot }: Props) {
               </p>
             )}
             {previewPlan !== null && previewPlan.blockedBy.length > 0 && (
-              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
-                {previewPlan.blockedBy.join('；')}
-              </p>
+              <div className={s.vfield}>
+                <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                  <b>本次发布已阻断</b>
+                </p>
+                {previewPlan.blockedBy.map((m) => (
+                  <p key={m} className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                    {m}
+                  </p>
+                ))}
+                {previewPlan.strangers.length > 0 && (
+                  <>
+                    <p className={s.vhelp}>以下文件尚未跟踪，无法确认是否属于本次构建：</p>
+                    {previewPlan.strangers.slice(0, 8).map((f) => (
+                      <p key={f} className={`${s.vhelp} ${s.mono}`}>
+                        · {f}
+                      </p>
+                    ))}
+                    {previewPlan.strangers.length > 8 && (
+                      <p className={s.vhelp}>…还有 {previewPlan.strangers.length - 8} 个</p>
+                    )}
+                    <p className={s.vhelp}>请先提交它们或加进 .gitignore，再重新执行。</p>
+                  </>
+                )}
+              </div>
             )}
             {previewPlan !== null && previewPlan.blockedBy.length === 0 && (
               <p className={s.vhelp}>
-                交付会提交 {previewPlan.files.length} 个文件（当前分支{' '}
+                交付会提交 {previewPlan.deliverable.length} 个文件（当前分支{' '}
                 <span className={s.mono}>{previewPlan.branch}</span>）—— <b>只在本地</b>
                 ，不推送、不建 Release。
               </p>

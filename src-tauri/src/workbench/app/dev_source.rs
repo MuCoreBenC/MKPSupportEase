@@ -214,14 +214,121 @@ fn json_version(path: &Path) -> Option<String> {
 }
 
 /// 仓库里那个**开发版本**（`src-tauri/Cargo.toml` 的 `version`，全仓唯一真值）。
+/// 当前开发版本：读唯一源 `version.toml`。
 fn dev_version(repo: &Path) -> String {
-    let toml =
-        std::fs::read_to_string(repo.join("src-tauri").join("Cargo.toml")).unwrap_or_default();
-    toml.lines()
-        .find_map(|line| line.strip_prefix("version = \""))
-        .and_then(|rest| rest.split('"').next())
+    std::fs::read_to_string(repo.join("version.toml"))
+        .ok()
+        .and_then(|toml| {
+            toml.lines()
+                .find_map(|line| line.strip_prefix("version = \""))
+                .and_then(|rest| rest.split('"').next())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "—".to_owned())
+}
+
+/// **最近一次成功交付**：`git tag` 里最新的预览 tag，且账本里有对应记录。
+///
+/// 两处必须对得上：tag 是冻结事实，账本是交付记录。只有 tag 没账本（事务中断在记账前）
+/// 也照样算数 —— 那时 `frozen=true`、`recorded=false`，界面据此提示"可补记账"。
+struct Delivered {
+    version: String,
+    tag: String,
+    commit: String,
+    at: String,
+    recorded: bool,
+}
+
+fn last_delivered(repo: &Path) -> Option<Delivered> {
+    let out = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["tag", "--sort=-creatordate", "--list", "v*-preview.*"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let tag = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .to_owned();
+    let commit = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["rev-parse", &format!("{tag}^{{commit}}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())?;
+    let at = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["log", "-1", "--format=%cI", &tag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    let version = tag.trim_start_matches('v').to_owned();
+    let recorded = ledger_has(repo, &version);
+    Some(Delivered {
+        version,
+        tag,
+        commit,
+        at,
+        recorded,
+    })
+}
+
+/// 账本里这一版有没有一条 `ok`。
+fn ledger_has(repo: &Path, version: &str) -> bool {
+    let Ok(text) = std::fs::read_to_string(repo.join("delivery/local-preview-history.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    v.get("items")
+        .and_then(|x| x.as_array())
+        .is_some_and(|items| {
+            items.iter().any(|e| {
+                e.get("version").and_then(|x| x.as_str()) == Some(version)
+                    && e.get("result").and_then(|x| x.as_str()) == Some("ok")
+            })
+        })
+}
+
+/// 本地发布目录里最新的安装包。
+struct Pkg {
+    name: String,
+    size: u64,
+    path: String,
+    version: String,
+}
+
+fn latest_package(served: &Served) -> Option<Pkg> {
+    let dir = local_release_dir(served);
+    let zip = std::fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("zip"))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())?;
+    let name = zip.file_name()?.to_string_lossy().into_owned();
+    /* 文件名里带版本：`SupportEase_0.0.10-preview.7_aarch64.app.zip` */
+    let version = name
+        .strip_prefix("SupportEase_")
+        .and_then(|rest| rest.split('_').next())
         .unwrap_or("—")
-        .to_owned()
+        .to_owned();
+    Some(Pkg {
+        size: std::fs::metadata(&zip).ok()?.len(),
+        path: zip.display().to_string(),
+        name,
+        version,
+    })
 }
 
 /// 最近一次**已发布**的号（`git tag --sort=-creatordate --list v*` 的第一条）。
@@ -433,7 +540,16 @@ pub struct DevSourceStatus {
     /// 安装包自己报的版本（`.app/Contents/Info.plist`）；没编过 = `None`
     pub build_version: Option<String>,
 
-    /* ---------- 盘上有什么（不摆假行：不存在就 exists=false） ---------- */
+    /* ---------- 主区三格（界面只看这三件） ---------- */
+    /// 当前开发版本（`version.toml`）
+    pub dev_version_text: String,
+    /// 最近一次成功交付；`None` = 还没交付过
+    pub last_delivered: Option<DeliveredDto>,
+    /// 最新的本地安装包（生成过就有，**不代表已交付**）
+    pub package: Option<PackageDto>,
+
+    /* ---------- 折叠详情 ---------- */
+    /// 盘上有什么（不摆假行：不存在就 exists=false）
     pub files: Vec<DeliveryFile>,
     /// 三格版本身份 + 结论。**判定在后端**，前端只按 `level` 上色
     pub checks: Vec<CheckRow>,
@@ -799,6 +915,31 @@ fn exit_text(st: ExitStatus) -> String {
     }
 }
 
+/// `dev_source::DeliveredDto` —— 最近一次成功交付（tag 是冻结事实，账本是交付记录）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveredDto {
+    pub version: String,
+    pub tag: String,
+    pub commit: String,
+    pub at: String,
+    /// 账本里有没有这一版的 `ok`（false = tag 打了但没记账，可补）
+    pub recorded: bool,
+}
+
+/// `dev_source::PackageDto` —— 最新的本地安装包。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageDto {
+    pub name: String,
+    pub size: u64,
+    pub path: String,
+    /// 文件名里的版本
+    pub version: String,
+    /// 这一版**有没有 tag**。false ⇒ 只是生成过，**不算已交付**
+    pub frozen: bool,
+}
+
 /// 一条**结构化诊断**：哪一项 / 读到什么 / 要不要管。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -878,6 +1019,32 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         conflicts: conflicts_of(),
         sources: sources_of(repo),
         dev_version: dev.clone(),
+        dev_version_text: dev.clone(),
+        last_delivered: last_delivered(repo).map(|d| DeliveredDto {
+            version: d.version,
+            tag: d.tag,
+            commit: d.commit,
+            at: d.at,
+            recorded: d.recorded,
+        }),
+        package: latest_package(&served).map(|p| {
+            /* "已冻结"问 tag，不问交付记录：tag 才是冻结事实 */
+            let frozen = Command::new("git")
+                .args(["-C"])
+                .arg(repo)
+                .args(["rev-parse", "--verify", "--quiet"])
+                .arg(format!("refs/tags/v{}^{{commit}}", p.version))
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            PackageDto {
+                name: p.name,
+                size: p.size,
+                path: p.path,
+                version: p.version,
+                frozen,
+            }
+        }),
         published_version: published_version(repo),
         build_version: build.clone(),
         files: delivery_files(&served, repo),

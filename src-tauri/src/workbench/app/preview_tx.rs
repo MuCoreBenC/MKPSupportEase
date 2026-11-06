@@ -1,35 +1,36 @@
-//! **本地预览交付事务**：把「生成并交付当前预览版本」做成一件可恢复的事。
+//! **本地预览交付事务** —— 版本管理核心。
 //!
-//! # 一句话
+//! # 唯一规则
 //!
-//! 「生成并交付当前预览版本」= 编译 → 写本地清单 → **提交并打不可变的 tag** →
-//! 把版本源滚到下一轮。全程**不推送、不建 Release、不碰 CI**。
+//! **Tag 决定版本是否冻结。** 没有 tag 就一直是当前开发版本（改代码、编译、commit、push
+//! 都不改变它）。只有点「生成并交付」（或 CLI 带 `--confirm`）才冻结这一版，成功后立刻
+//! 把唯一版本源 `version.toml` 滚到下一版。
 //!
-//! # 为什么顺序是这样
+//! # 阶段（每一步都幂等，重跑 = 从断点继续）
 //!
 //! ```text
-//! preflight（只读）：
-//!   · 读要冻结的那一版（src-tauri/Cargo.toml）
-//!   · git status：**未跟踪文件一律阻断**（作者：不能顺手提交别的未完成工作）
-//!         │
-//! build      →  编译失败 ⇒ 什么都没发生（不提交、不打 tag、不涨号）
-//!         │
-//! deliver    →  local-release：写清单 + 历史副本 + 账本（三处同号，它自己校验）
-//!         │
-//! commit     →  只 stage **已跟踪的改动** + 账本；消息由版本号生成
-//!         │
-//! tag        →  `git tag -a v<版本>`（已存在就跳过 —— 恢复时是幂等的）
-//!         │
-//! rollover   →  `version.mjs ensure-preview`：版本源滚到下一轮
-//!         │
-//! journal    →  target/local-preview/journal.json 记下这一趟走到哪
+//! 准备    读 version.toml；列已跟踪改动与未跟踪文件；未跟踪即阻断
+//!   │
+//! 提交    只 `git add -- <已跟踪改动>`（绝不 add -A）→ 得到确定的 commit
+//!   │
+//! 构建    从**该 commit 的隔离 worktree** 构建（工作区再变也不影响产物）
+//!   │
+//! 校验    产物自报的号必须等于 version.toml，且四处派生文件全等
+//!   │
+//! 冻结    `git tag -a`（指向那个 commit；已存在则核对后跳过）
+//!   │
+//! 记账    账本追加 ok（只在 tag 成功之后；这是"已交付"的唯一书面依据）
+//!   │
+//! 滚动    `version.mjs ensure-preview` → 下一版
 //! ```
 //!
-//! ★ **tag 只在"构建成功 + 交付文件完整"之后才建**（作者原话）。所以这里没有
-//!   "先打 tag 再构建"那种顺序 —— 那是 `release_tx`（云端发版）的旧形状，别照抄。
+//! 全程**不推送、不建 Release、不碰 CI**；与 `release_tx`（云端发版）物理隔离。
 //!
-//! ★ **未跟踪文件阻断**的理由不是洁癖：`git add -A` 会把别人正在写的半成品
-//!   一起冻进 tag，而 tag 是**不可变**的 —— 那种错误撤销不掉。
+//! # 为什么先提交再构建
+//!
+//! tag 必须指向"构建实际用的那堆字节"。Rust 构建读的是工作区，所以只能先把要冻的那一版
+//! 提交出来，再从这个 commit 的 worktree 构建 —— 否则构建期间工作区被改（AI 或另一个
+//! 终端），产物就和 tag 对不上了。
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,34 +39,40 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::AppError;
 
-/// 交付账本（辅助，不决定版本号；版本冻结由 git tag 决定）。
+/// 唯一版本源。
+const SOURCE: &str = "version.toml";
+
+/// 交付账本（入库；「哪一版已冻结」的书面依据）。
 const LEDGER: &str = "delivery/local-preview-history.json";
 
 /// 事务日志（`target/` 下，git 看不见）。
 const JOURNAL: &str = "target/local-preview/journal.json";
 
-/// 一次 preflight 的结论：能不能交付、会提交些什么。
+/// 交付日志。
+const LOG: &str = "target/local-preview/deliver.log";
+
+/// **交付前看一眼**（只读，不做任何写入）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreviewPlan {
-    /// 要冻结的那一版（`src-tauri/Cargo.toml` 里的号）
+    /// 要冻结的那一版（`version.toml`）
     pub version: String,
-    /// 冻结之后会滚到的号（`ensure-preview` 算出来的，这里只做展示）
+    /// 冻结之后会滚到的号（只做展示，真正写盘由滚动那一步做）
     pub next_version: String,
     pub tag: String,
-    /// 会不会真的写东西（有阻断原因时 = false）
+    /// 能不能交付
     pub ok: bool,
     /// 阻断原因（空 = 可以交付）
     pub blocked_by: Vec<String>,
-    /// 这一趟会提交的文件（已跟踪改动 + 账本）
-    pub files: Vec<String>,
-    /// 有改动但**不属于本次交付**的文件（未跟踪）—— 有它就阻断
+    /// **会被本次提交**的文件（已跟踪的改动；绝不 `add -A`）
+    pub deliverable: Vec<String>,
+    /// **未跟踪**的文件 —— 构建可能读到它们，却不在任何 commit 里，所以阻断
     pub strangers: Vec<String>,
-    /// 当前分支（在 main 上交付会**只在本地**提交一次，绝不推送）
     pub branch: String,
-    /// 上一趟停在哪儿（`None` = 上一趟跑完了，或还没有过交付）。
-    /// 中断过的交付再点一次会**接着跑**：已完成且幂等的步骤不会重做。
+    /// 上一趟没跑完时的一句话（`None` = 上一趟跑完了）
     pub resume: Option<String>,
+    /// 部署配置一致性（`version.toml` 与四处派生文件）
+    pub consistent: bool,
 }
 
 /// 一趟交付的结果。
@@ -76,11 +83,9 @@ pub struct PreviewReport {
     pub next_version: String,
     pub tag: String,
     pub commit: Option<String>,
-    /// 走到哪一步（`built` / `delivered` / `committed` / `tagged` / `rolled` / `failed`）
+    /// `blocked` / `failed` / `committed` / `built` / `tagged` / `recorded` / `rolled`
     pub stage: String,
-    /// 人话结论
     pub message: String,
-    /// 日志（`target/local-preview/deliver.log`）
     pub log: String,
 }
 
@@ -88,14 +93,15 @@ fn repo() -> PathBuf {
     crate::workbench::paths::repo_root()
 }
 
-fn cargo_version(repo: &Path) -> Result<String, AppError> {
-    let text = std::fs::read_to_string(repo.join("src-tauri").join("Cargo.toml"))
-        .map_err(|e| AppError::io("读不到 src-tauri/Cargo.toml").with_detail(e.to_string()))?;
+/// 读 `version.toml` 里的版本（唯一源）。
+fn source_version(repo: &Path) -> Result<String, AppError> {
+    let text = std::fs::read_to_string(repo.join(SOURCE))
+        .map_err(|e| AppError::io(format!("读不到 {SOURCE}")).with_detail(e.to_string()))?;
     text.lines()
         .find_map(|l| l.strip_prefix("version = \""))
         .and_then(|rest| rest.split('"').next())
         .map(str::to_owned)
-        .ok_or_else(|| AppError::invalid_argument("src-tauri/Cargo.toml 里没有 version"))
+        .ok_or_else(|| AppError::invalid_argument(format!("{SOURCE} 里没有 version")))
 }
 
 fn tag_of(version: &str) -> String {
@@ -121,10 +127,7 @@ fn status_paths(repo: &Path) -> Result<(Vec<String>, Vec<String>), AppError> {
         }
         let (code, path) = line.split_at(2);
         let path = path.trim_start();
-        if path == LEDGER {
-            /* 账本是**这一趟要写的**，它自己不是"别人的半成品" */
-            tracked.push(path.to_owned());
-        } else if code == "??" {
+        if code == "??" {
             untracked.push(path.to_owned());
         } else {
             tracked.push(path.to_owned());
@@ -144,38 +147,32 @@ fn current_branch(repo: &Path) -> String {
         .unwrap_or_else(|| "（detached）".to_owned())
 }
 
-fn tag_exists(repo: &Path, tag: &str) -> bool {
+fn rev(repo: &Path, spec: &str) -> Option<String> {
     Command::new("git")
-        .args([
-            "rev-parse",
-            "--verify",
-            "--quiet",
-            &format!("refs/tags/{tag}"),
-        ])
+        .args(["rev-parse", spec])
         .current_dir(repo)
         .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
 }
 
-/// 冻结之后会滚到哪一版（问 `version.mjs`，不在这儿重算一遍规则）。
-fn next_version(repo: &Path) -> String {
-    let base = cargo_version(repo).unwrap_or_default();
-    /* `node scripts/version.mjs current` 只回显；算下一号要跑 ensure（会写盘）——
-    这里只做展示，所以照"预览号 +1"的规则推一个，**真正写盘由 rollover 做**。 */
-    match base.rsplit_once("-preview.") {
+fn tag_exists(repo: &Path, tag: &str) -> bool {
+    rev(repo, &format!("refs/tags/{tag}^{{commit}}")).is_some()
+}
+
+/// 下一版（只做展示；真正写盘由 `ensure-preview` 做）。
+fn next_version(version: &str) -> String {
+    match version.rsplit_once("-preview.") {
         Some((head, seq)) => match seq.parse::<u64>() {
             Ok(n) => format!("{head}-preview.{}", n + 1),
-            Err(_) => base,
+            Err(_) => version.to_owned(),
         },
-        None => base,
+        None => version.to_owned(),
     }
 }
 
 /// 上一趟没跑完吗？返回一句话（版本 + 停在哪一步）。
-///
-/// 事务一开始就写一条 `started`，跑完才改成最终阶段 —— 所以"最后一条不是 `rolled`"
-/// 就是"上一次没走完"。再点一次是安全的：tag / commit 都幂等。
 fn unfinished_last(repo: &Path) -> Option<String> {
     let text = std::fs::read_to_string(repo.join(JOURNAL)).ok()?;
     let v: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -187,33 +184,56 @@ fn unfinished_last(repo: &Path) -> Option<String> {
     Some(format!("上一趟（{version}）停在 {stage}"))
 }
 
+/// 四处派生文件是否与 `version.toml` 一致（问 `version.mjs check --json`，不在这儿重算）。
+fn versions_consistent(repo: &Path) -> bool {
+    Command::new("node")
+        .args(["scripts/version.mjs", "check", "--json"])
+        .current_dir(repo)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+        .and_then(|v| v.get("consistent").and_then(|x| x.as_bool()))
+        .unwrap_or(false)
+}
+
 fn plan_of(repo: &Path) -> Result<PreviewPlan, AppError> {
-    let version = cargo_version(repo)?;
-    let (tracked, untracked) = status_paths(repo)?;
+    let version = source_version(repo)?;
+    let (deliverable, strangers) = status_paths(repo)?;
     let tag = tag_of(&version);
     let mut blocked = Vec::new();
-    if !untracked.is_empty() {
+
+    /* 未跟踪文件可能被构建读到（`include_str!` / `mod` 都可能），却不在任何 commit 里
+    —— 让它们进包等于把没提交的字节冻进不可变的 tag。 */
+    if !strangers.is_empty() {
         blocked.push(format!(
-            "工作区里有 {} 个**不属于本次交付**的文件（未跟踪）—— 先把它们提交或加进 .gitignore，\
-             这条事务不会替你决定它们的归属",
-            untracked.len()
+            "{} 个文件还没有被 git 跟踪，无法确定是否属于这一版 —— 先提交或加进 .gitignore",
+            strangers.len()
         ));
     }
     if tag_exists(repo, &tag) {
         blocked.push(format!(
-            "{tag} 已经存在 —— 这一版已经冻结过。要再来一轮请先 npm run version:ensure"
+            "{tag} 已经存在 —— 这一版冻结过了。要再来一轮先 npm run version:ensure"
         ));
     }
+    let consistent = versions_consistent(repo);
+    if !consistent {
+        blocked.push(format!(
+            "版本号不一致 —— 以 {SOURCE} 为准，跑 npm run version:sync 把四处对齐"
+        ));
+    }
+
     Ok(PreviewPlan {
-        next_version: next_version(repo),
+        next_version: next_version(&version),
         version,
         tag,
         ok: blocked.is_empty(),
         blocked_by: blocked,
-        files: tracked,
-        strangers: untracked,
+        deliverable,
+        strangers,
         branch: current_branch(repo),
         resume: unfinished_last(repo),
+        consistent,
     })
 }
 
@@ -225,19 +245,17 @@ pub fn wb_preview_preflight() -> Result<PreviewPlan, AppError> {
 
 /// 交付日志的**最后一行**（编译时就是 `Building [=====> ] 515/520` 那种）。
 ///
-/// 界面上那颗按钮转起来的时候，这一行是唯一能说明"它还在动"的东西 ——
-/// 一次交付要跑一两分钟，没有反馈等于卡死。
+/// 一次交付要跑一两分钟，界面上按钮转起来时，这一行是唯一能说明"它还在动"的东西。
 #[tauri::command]
 pub fn wb_preview_log_tail() -> Result<String, AppError> {
     crate::ipc::traced("wb_preview_log_tail", |_| {
-        let path = repo().join("target/local-preview/deliver.log");
-        let text = std::fs::read_to_string(&path).unwrap_or_default();
+        let text = std::fs::read_to_string(repo().join(LOG)).unwrap_or_default();
         let line = text
             .lines()
             .rev()
             .find(|l| !l.trim().is_empty())
             .unwrap_or("");
-        /* 编译的进度行会带一堆 \r 与空格，压成一行再给界面 */
+        /* 编译的进度行带一堆 \r 与空格，压成一行再给界面 */
         let clean = line
             .replace('\r', " ")
             .split_whitespace()
@@ -247,12 +265,10 @@ pub fn wb_preview_log_tail() -> Result<String, AppError> {
     })
 }
 
-/// 跑一条命令，把 stdout / stderr 追加进日志；失败就带着**最后几行**报错。
-/// 交付日志（**追加语义**，但走 `fsx::atomic`）。
+/// 交付日志（追加语义，但走 `fsx::atomic` —— 本仓禁 `OpenOptions`）。
 ///
-/// 本仓禁 `OpenOptions`（clippy.toml 里写着理由：那是绕开原子写的闸门）。
-/// 这里要的只是"一行行攒下来"，所以攒在内存里、每次 `atomic_write` 全量落盘 ——
-/// 日志在 `target/` 下，量级几 KB，重写一遍比开一个不原子的句柄便宜。
+/// 攒在内存里、每次全量落盘：日志在 `target/` 下，量级几 KB，重写一遍比开一个
+/// 不原子的句柄便宜。
 struct LogBuf {
     path: PathBuf,
     text: String,
@@ -305,8 +321,7 @@ fn run_logged_env(
         .output()
         .map_err(|e| AppError::io(format!("起不来 {}", argv[0])).with_detail(e.to_string()))?;
     for (name, bytes) in [("out", &out.stdout), ("err", &out.stderr)] {
-        let text = String::from_utf8_lossy(bytes);
-        for line in text.lines() {
+        for line in String::from_utf8_lossy(bytes).lines() {
             log.push(&format!("[{name}] {line}"));
         }
     }
@@ -337,70 +352,161 @@ fn write_journal(repo: &Path, report: &PreviewReport) {
     }
 }
 
-/**
- * **生成并交付当前预览版本**（人点按钮触发，= 授权这一趟的 commit + tag）。
- *
- * ★ 不推送、不建 Release、不触发 CI —— 与 `release_tx`（云端发版）是两条物理隔离的路。
- */
-#[tauri::command]
-pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
-    crate::ipc::traced("wb_preview_deliver", |_| {
-        let repo = repo();
-        let plan = plan_of(&repo)?;
-        let log_path = repo.join("target/local-preview/deliver.log");
-        if let Some(dir) = log_path.parent() {
-            let _ = std::fs::create_dir_all(dir);
+/// 账本里那一版的记录（`None` = 没有这一版）。给"这一版到底交没交付"用。
+#[cfg_attr(not(test), allow(dead_code))]
+fn ledger_entry(repo: &Path, version: &str) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(repo.join(LEDGER)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    v.get("items")?
+        .as_array()?
+        .iter()
+        .find(|e| e.get("version").and_then(|x| x.as_str()) == Some(version))
+        .cloned()
+}
+
+/// 记一笔交付（只在 tag 成功之后调用）。同版本+同 target 覆盖旧条目。
+fn append_ledger(repo: &Path, report: &PreviewReport) -> Result<(), AppError> {
+    let path = repo.join(LEDGER);
+    let mut all: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_else(|| serde_json::json!({ "items": [] }));
+    let overlay = repo
+        .join("target/local-release")
+        .join("release-preview.json");
+    let manifest: Option<serde_json::Value> = std::fs::read_to_string(&overlay)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let entry = serde_json::json!({
+        "version": report.version,
+        "commit": report.commit,
+        "tag": report.tag,
+        "at": crate::workbench::clock::now_iso8601(),
+        "channel": "preview",
+        "target": "local",
+        "result": "ok",
+        "asset": manifest.as_ref().and_then(|m| m.get("asset").cloned()),
+    });
+    let items = all
+        .get_mut("items")
+        .and_then(|x| x.as_array_mut())
+        .ok_or_else(|| AppError::invalid_argument("账本形状不对（缺 items）"))?;
+    items.retain(|e| {
+        !(e.get("version").and_then(|x| x.as_str()) == Some(report.version.as_str())
+            && e.get("target").and_then(|x| x.as_str()) == Some("local"))
+    });
+    items.push(entry);
+    let text = serde_json::to_string_pretty(&all)
+        .map_err(|e| AppError::io("账本序列化失败").with_detail(e.to_string()))?;
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    crate::fsx::atomic::atomic_write(&path, format!("{text}\n").as_bytes())
+        .map_err(|e| AppError::io("写不进账本").with_detail(e.message))
+}
+
+/// 从**确定的 commit** 构建：在 `target/` 下开一个 detach 的 worktree，用完删掉。
+///
+/// `CARGO_TARGET_DIR` 仍指向主仓库 `target/`（复用编译缓存，避免整套重编）；
+/// 缓存只存**产物**，源码一律从 worktree 读，所以主工作区的改动不会混进来。
+fn build_from_snapshot(repo: &Path, commit: &str, log: &mut LogBuf) -> Result<(), AppError> {
+    let wt = repo.join("target").join("local-preview").join("wt");
+    let _ = std::fs::remove_dir_all(&wt);
+    let wt_arg = wt.to_string_lossy().into_owned();
+    run_logged(
+        repo,
+        log,
+        &["git", "worktree", "add", "--detach", &wt_arg, commit],
+    )?;
+
+    let target = repo.join("target");
+    let target_arg = target.to_string_lossy().into_owned();
+    let built = run_logged_env(
+        &wt,
+        log,
+        &["npm", "run", "tauri", "--", "build"],
+        &[("CARGO_TARGET_DIR", &target_arg)],
+    );
+
+    /* 产物从 worktree 的 bundle 搬回主仓 target —— 后两步（清单/校验）都在主仓看它 */
+    if built.is_ok() {
+        let from = wt.join("target/release/bundle");
+        let to = repo.join("target/release/bundle");
+        if from.is_dir() {
+            let _ = run_logged(
+                repo,
+                log,
+                &[
+                    "rsync",
+                    "-a",
+                    "--delete",
+                    &format!("{}/", from.display()),
+                    &format!("{}/", to.display()),
+                ],
+            );
         }
-        let log_text = log_path.display().to_string();
-        let mut log = LogBuf::open(log_path);
+    }
+    let _ = Command::new("git")
+        .args(["worktree", "remove", "--force", &wt_arg])
+        .current_dir(repo)
+        .output();
+    let _ = std::fs::remove_dir_all(&wt);
+    built
+}
 
-        let mut report = PreviewReport {
-            version: plan.version.clone(),
-            next_version: plan.next_version.clone(),
-            tag: plan.tag.clone(),
-            commit: None,
-            stage: "preflight".to_owned(),
-            message: String::new(),
-            log: log_text,
-        };
+/// 这条事务的全部步骤。`confirm=false` 只做只读预检（CLI 默认档）。
+pub fn deliver(confirm: bool) -> Result<PreviewReport, AppError> {
+    let repo = repo();
+    let plan = plan_of(&repo)?;
+    let log_path = repo.join(LOG);
+    if let Some(dir) = log_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let log_text = log_path.display().to_string();
+    let mut log = LogBuf::open(log_path);
 
-        if !plan.ok {
-            report.stage = "blocked".to_owned();
-            report.message = plan.blocked_by.join("；");
-            write_journal(&repo, &report);
-            return Err(AppError::invalid_argument(report.message.clone())
-                .with_detail(format!("详细日志：{}", report.log)));
-        }
+    let mut report = PreviewReport {
+        version: plan.version.clone(),
+        next_version: plan.next_version.clone(),
+        tag: plan.tag.clone(),
+        commit: None,
+        stage: "preflight".to_owned(),
+        message: String::new(),
+        log: log_text,
+    };
 
-        /* ① 编译（失败 ⇒ 什么都没发生）。先记一条 started：中途被打断时，
-        下一次 preflight 靠它说"上一趟没跑完"，而不是让人对着半成品猜。 */
-        report.stage = "started".to_owned();
-        write_journal(&repo, &report);
+    if !plan.ok {
+        report.stage = "blocked".to_owned();
+        report.message = plan.blocked_by.join("；");
+        return Err(AppError::invalid_argument(report.message.clone())
+            .with_detail(format!("详细日志：{}", report.log)));
+    }
 
-        /* ① 编译（失败 ⇒ 什么都没发生） */
-        if let Err(e) = run_logged(&repo, &mut log, &["npm", "run", "tauri", "--", "build"]) {
+    /* 只读预演：说清会做什么，一个字节都不写 */
+    if !confirm {
+        report.message = format!(
+            "预演：会提交 {} 个已跟踪改动 → 从该提交的隔离快照构建 → 校验 → 打 tag {} → 记账 → 滚到 {}。\
+             加 --confirm 才真的执行。",
+            plan.deliverable.len(),
+            plan.tag,
+            plan.next_version
+        );
+        return Ok(report);
+    }
+
+    report.stage = "started".to_owned();
+    write_journal(&repo, &report);
+
+    /* ① 提交（只有已跟踪改动；绝不 add -A） */
+    if !plan.deliverable.is_empty() {
+        let mut args: Vec<String> = vec!["add".into(), "--".into()];
+        args.extend(plan.deliverable.iter().cloned());
+        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        if let Err(e) = run_logged(&repo, &mut log, &refs) {
             report.stage = "failed".to_owned();
-            report.message = format!("编译失败，这一版没有冻结：{}", e.message);
+            report.message = format!("暂存失败：{}", e.message);
             write_journal(&repo, &report);
-            return Err(e.with_detail(format!("详细日志：{}", report.log)));
-        }
-        report.stage = "built".to_owned();
-
-        /* ② 写本地清单 + 历史副本 + 账本（它自己会校验"清单号 = 包内号"） */
-        if let Err(e) = run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"]) {
-            report.stage = "failed".to_owned();
-            report.message = format!("交付失败（清单没写成），这一版没有冻结：{}", e.message);
-            write_journal(&repo, &report);
-            return Err(e.with_detail(format!("详细日志：{}", report.log)));
-        }
-        report.stage = "delivered".to_owned();
-
-        /* ③ 提交**已跟踪的改动**（未跟踪的在 preflight 已经拦掉了） */
-        if !plan.files.is_empty() {
-            let mut args: Vec<String> = vec!["add".into(), "--".into()];
-            args.extend(plan.files.iter().cloned());
-            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-            run_logged(&repo, &mut log, &refs)?;
+            return Err(e);
         }
         let staged = Command::new("git")
             .args(["diff", "--cached", "--quiet"])
@@ -410,23 +516,68 @@ pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
             .unwrap_or(false);
         if staged {
             let msg = format!(
-                "preview: {}\n\n本地预览交付（未推送、未建 Release）。\n包与清单同号，账本见 {LEDGER}。",
+                "preview: {}\n\n本地预览交付（未推送、未建 Release）。",
                 plan.version
             );
-            /* ★ 闸① 不许在 main 上直接提交 —— 但这条事务是**人点按钮**、**只在本机**、
-             **绝不推送**的冻结动作；带逃生口提交并让它记一笔，比让整个功能用不了更诚实。 */
-            run_logged_env(
+            /* 闸① 拦 main 上的直接提交；这条事务是"人点按钮/明确 --confirm"的本地冻结动作，
+            带逃生口提交并让它留痕，比让整个功能用不了更诚实。 */
+            if let Err(e) = run_logged_env(
                 &repo,
                 &mut log,
                 &["git", "commit", "-m", &msg],
                 &[("ALLOW_COMMIT_ON_MAIN", "1")],
-            )?;
-            report.commit = head_of(&repo);
-            report.stage = "committed".to_owned();
+            ) {
+                report.stage = "failed".to_owned();
+                report.message = format!("提交失败：{}", e.message);
+                write_journal(&repo, &report);
+                return Err(e);
+            }
         }
+    }
+    report.commit = rev(&repo, "HEAD");
+    report.stage = "committed".to_owned();
+    write_journal(&repo, &report);
+    let commit = report
+        .commit
+        .clone()
+        .ok_or_else(|| AppError::invalid_argument("取不到 HEAD 提交"))?;
 
-        /* ④ 打**不可变**的 tag（已存在就跳过 —— 恢复时幂等） */
-        if !tag_exists(&repo, &plan.tag) {
+    /* ② 从**这个 commit** 构建 */
+    if let Err(e) = build_from_snapshot(&repo, &commit, &mut log) {
+        report.stage = "failed".to_owned();
+        report.message = format!("构建失败，这一版没有冻结：{}", e.message);
+        write_journal(&repo, &report);
+        return Err(e.with_detail(format!("详细日志：{}", report.log)));
+    }
+    report.stage = "built".to_owned();
+    write_journal(&repo, &report);
+
+    /* ③ 摆好清单（它自己校验"清单号 = 包内号"） */
+    if let Err(e) = run_logged(&repo, &mut log, &["node", "scripts/local-release.mjs"]) {
+        report.stage = "failed".to_owned();
+        report.message = format!("写清单失败，这一版没有冻结：{}", e.message);
+        write_journal(&repo, &report);
+        return Err(e.with_detail(format!("详细日志：{}", report.log)));
+    }
+
+    /* ④ 校验：版本源与四处派生文件必须全等（清单那边已核对过包内号） */
+    if !versions_consistent(&repo) {
+        report.stage = "failed".to_owned();
+        report.message = format!("{SOURCE} 与四处派生文件不一致，拒绝冻结");
+        write_journal(&repo, &report);
+        return Err(AppError::invalid_argument(report.message.clone()));
+    }
+
+    /* ⑤ 冻结：tag 指向刚提交的那个 commit（已存在则核对后跳过 —— 幂等） */
+    match rev(&repo, &format!("refs/tags/{}^{{commit}}", plan.tag)) {
+        Some(existing) if existing != commit => {
+            report.stage = "failed".to_owned();
+            report.message = format!("{} 指向另一笔提交 —— 绝不把新代码挂到旧 tag 上", plan.tag);
+            write_journal(&repo, &report);
+            return Err(AppError::invalid_argument(report.message.clone()));
+        }
+        Some(_) => log.push(&format!("[out] {} 已存在且指向同一笔提交，跳过", plan.tag)),
+        None => {
             run_logged(
                 &repo,
                 &mut log,
@@ -440,50 +591,161 @@ pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
                 ],
             )?;
         }
-        report.stage = "tagged".to_owned();
+    }
+    report.stage = "tagged".to_owned();
+    write_journal(&repo, &report);
 
-        /* ⑤ 滚到下一轮 */
+    /* ⑥ 记账 —— 只在 tag 成功之后 */
+    append_ledger(&repo, &report)?;
+    report.stage = "recorded".to_owned();
+    write_journal(&repo, &report);
+
+    /* ⑦ 滚动到下一版（幂等：重跑只会把它推到同一个号） */
+    run_logged(
+        &repo,
+        &mut log,
+        &["node", "scripts/version.mjs", "ensure-preview"],
+    )?;
+    report.next_version = source_version(&repo).unwrap_or(plan.next_version);
+    report.stage = "rolled".to_owned();
+    report.message = format!(
+        "{} 已冻结（tag {}，commit {}），当前开发版本 {}",
+        plan.version,
+        plan.tag,
+        &commit[..7.min(commit.len())],
+        report.next_version
+    );
+    write_journal(&repo, &report);
+    Ok(report)
+}
+
+/// 上一趟留下的现场：**已经打到 tag、但账本或滚动没走完**。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recovery {
+    /// 哪一版（= 已存在的那个 tag）
+    pub version: String,
+    pub tag: String,
+    pub commit: String,
+    /// `ledger`（缺账本）/ `roll`（缺滚动）/ `both`
+    pub missing: String,
+}
+
+/// 有没有"冻结了但没走完"的版本（只读）。
+///
+/// 判据只看两件事：**tag 在不在**（冻结事实）、**账本有没有 ok**（交付记录）。
+/// tag 在而账本没有 ⇒ 补记；账本在而版本源还停在这一版 ⇒ 补滚。
+fn recovery_of(repo: &Path) -> Option<Recovery> {
+    let text = std::fs::read_to_string(repo.join(JOURNAL)).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let stage = v.get("stage")?.as_str()?;
+    if stage == "rolled" {
+        return None;
+    }
+    let version = v.get("version")?.as_str()?.to_owned();
+    let tag = v
+        .get("tag")
+        .and_then(|x| x.as_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| tag_of(&version));
+    let commit = rev(repo, &format!("refs/tags/{tag}^{{commit}}"))?;
+    let has_ledger = ledger_entry(repo, &version).is_some();
+    let rolled = source_version(repo).ok().as_deref() != Some(version.as_str());
+    let missing = match (has_ledger, rolled) {
+        (false, false) => "both",
+        (false, true) => "ledger",
+        (true, false) => "roll",
+        (true, true) => return None,
+    }
+    .to_owned();
+    Some(Recovery {
+        version,
+        tag,
+        commit,
+        missing,
+    })
+}
+
+/// **接着把上一趟走完**（幂等：只补缺的那几步）。
+#[tauri::command]
+pub fn wb_preview_recover() -> Result<PreviewReport, AppError> {
+    crate::ipc::traced("wb_preview_recover", |_| recover(true))
+}
+
+pub fn recover(confirm: bool) -> Result<PreviewReport, AppError> {
+    let repo = repo();
+    let Some(rec) = recovery_of(&repo) else {
+        return Err(AppError::invalid_argument("没有需要接着走的交付"));
+    };
+    let log_path = repo.join(LOG);
+    if let Some(dir) = log_path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let log_text = log_path.display().to_string();
+    let mut log = LogBuf::open(log_path);
+    let mut report = PreviewReport {
+        version: rec.version.clone(),
+        next_version: next_version(&rec.version),
+        tag: rec.tag.clone(),
+        commit: Some(rec.commit.clone()),
+        stage: "recovering".to_owned(),
+        message: String::new(),
+        log: log_text,
+    };
+    if !confirm {
+        report.message = format!(
+            "预演：{} 已经打了 tag，但{}。加 --confirm 才真的补上。",
+            rec.tag,
+            match rec.missing.as_str() {
+                "ledger" => "账本里还没有交付记录",
+                "roll" => "版本源还没滚到下一版",
+                _ => "账本和滚动都缺",
+            }
+        );
+        return Ok(report);
+    }
+
+    if rec.missing != "roll" {
+        append_ledger(&repo, &report)?;
+        report.stage = "recorded".to_owned();
+        write_journal(&repo, &report);
+    }
+    if rec.missing != "ledger" {
         run_logged(
             &repo,
             &mut log,
             &["node", "scripts/version.mjs", "ensure-preview"],
         )?;
-        report.next_version = cargo_version(&repo).unwrap_or(plan.next_version);
-        report.stage = "rolled".to_owned();
-        report.message = format!(
-            "{} 已冻结（tag {}），工作区已进入 {}",
-            plan.version, plan.tag, report.next_version
-        );
-
-        write_journal(&repo, &report);
-        Ok(report)
-    })
+    }
+    report.next_version = source_version(&repo).unwrap_or(report.next_version);
+    report.stage = "rolled".to_owned();
+    report.message = format!(
+        "{} 的现场已补齐（tag {}），当前开发版本 {}",
+        rec.version, rec.tag, report.next_version
+    );
+    write_journal(&repo, &report);
+    Ok(report)
 }
 
-fn head_of(repo: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(repo)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+/** **生成并交付当前预览版本**。工作台按钮点一次 = 授权这一次（`confirm=true`）。 */
+#[tauri::command]
+pub fn wb_preview_deliver() -> Result<PreviewReport, AppError> {
+    crate::ipc::traced("wb_preview_deliver", |_| deliver(true))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::process::Command;
+
     use super::*;
 
-    /// 造一个最小仓库：`git init` + 把 `src-tauri/Cargo.toml` 收进索引。
-    ///
-    /// ★ 身份用 `-c user.email=…` 传，**不写 git config**（那是全局副作用）。
+    /// 造一个真实仓库（钩子关掉：本仓 `core.hooksPath` 会拦 main 上的提交，
+    /// 而这里要验的是"分得清谁的文件"，不是闸）。
     fn scratch_repo() -> tempfile::TempDir {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let git = |args: &[&str]| {
             let out = Command::new("git")
-                /* ★ 关掉钩子：本仓的 `core.hooksPath` 指向 `.githooks`（闸① 不许在 main 上提交），
-                测试仓库会继承那条全局配置 —— 而这里要验的是"分得清谁的文件"，不是闸。 */
                 .args([
                     "-c",
                     "core.hooksPath=/nonexistent-mkpse-test-hooks",
@@ -502,19 +764,15 @@ mod tests {
                 String::from_utf8_lossy(&out.stderr)
             );
         };
-        git(&["init", "-q"]);
-        std::fs::create_dir_all(root.join("src-tauri")).unwrap();
-        crate::fsx::atomic::atomic_write(
-            &root.join("src-tauri").join("Cargo.toml"),
-            b"version = \"0.0.12-preview.7\"\n",
-        )
-        .unwrap();
-        git(&["add", "src-tauri/Cargo.toml"]);
+        git(&["init", "-q", "-b", "main"]);
+        crate::fsx::atomic::atomic_write(&root.join(SOURCE), b"version = \"0.0.12-preview.7\"\n")
+            .unwrap();
+        git(&["add", SOURCE]);
         git(&["commit", "-q", "-m", "seed"]);
         dir
     }
 
-    ///     /// 工作区里有**未跟踪**文件时，事务必须停下并把它们列出来，而不是一起冻进 tag。
+    /// 未跟踪文件一律阻断，并**指名道姓列出来**。
     #[test]
     fn an_untracked_file_blocks_the_delivery() {
         let d = scratch_repo();
@@ -528,35 +786,36 @@ mod tests {
             plan.strangers
         );
         assert!(
-            plan.blocked_by.iter().any(|m| m.contains("不属于本次交付")),
+            plan.blocked_by
+                .iter()
+                .any(|m| m.contains("还没有被 git 跟踪")),
             "要说清为什么停：{:?}",
             plan.blocked_by
         );
     }
 
-    /// 已跟踪的改动**属于本次交付**（构建就是照这个状态跑的），要进 `files`。
+    /// 已跟踪的改动**属于本次交付**（构建就是照这个状态跑的），进 `deliverable`。
     #[test]
-    fn tracked_changes_are_part_of_this_delivery() {
+    fn tracked_changes_are_what_gets_committed() {
         let d = scratch_repo();
         crate::fsx::atomic::atomic_write(
-            &d.path().join("src-tauri").join("Cargo.toml"),
+            &d.path().join(SOURCE),
             b"version = \"0.0.12-preview.7\"\n# touched\n",
         )
         .unwrap();
 
         let plan = plan_of(d.path()).unwrap();
-        assert!(plan.ok, "只有已跟踪改动时不该阻断：{:?}", plan.blocked_by);
         assert!(
-            plan.files.iter().any(|f| f.contains("Cargo.toml")),
+            plan.deliverable.iter().any(|f| f == SOURCE),
             "这一份改动要进提交清单：{:?}",
-            plan.files
+            plan.deliverable
         );
-        assert!(plan.strangers.is_empty());
+        assert!(plan.strangers.is_empty(), "{:?}", plan.strangers);
         assert_eq!(plan.next_version, "0.0.12-preview.8");
         assert_eq!(plan.tag, "v0.0.12-preview.7");
     }
 
-    /// 同一个号**不许冻结第二次**（tag 是不可变的）：已经打过就停下。
+    /// 同一个号**不许冻结第二次**。
     #[test]
     fn a_frozen_version_cannot_be_delivered_again() {
         let d = scratch_repo();
@@ -570,9 +829,58 @@ mod tests {
         let plan = plan_of(d.path()).unwrap();
         assert!(!plan.ok);
         assert!(
-            plan.blocked_by.iter().any(|m| m.contains("已经冻结过")),
-            "要说清这一版冻结过：{:?}",
+            plan.blocked_by.iter().any(|m| m.contains("冻结过了")),
+            "{:?}",
             plan.blocked_by
         );
+    }
+
+    /// **预演一个字节都不写**（CLI 默认档）：`deliver(false)` 只回一句话，
+    /// 不提交、不建 tag、不记账、不滚版本。
+    #[test]
+    fn a_dry_run_writes_nothing() {
+        let d = scratch_repo();
+        crate::fsx::atomic::atomic_write(
+            &d.path().join(SOURCE),
+            b"version = \"0.0.12-preview.7\"\n# touched\n",
+        )
+        .unwrap();
+        let plan = plan_of(d.path()).unwrap();
+        assert!(!plan.deliverable.is_empty(), "要说清会提交什么");
+        /* 这个夹具仓库里没有四处派生文件，所以"版本一致性"那一条必然红 ——
+        预演要验的是**它不写盘**，不是它在这一格上放行。 */
+        assert!(
+            plan.blocked_by.iter().all(|m| m.contains("版本号不一致")),
+            "只该因为夹具缺派生文件而红：{:?}",
+            plan.blocked_by
+        );
+
+        /* 预演分支本身不写盘：账本不存在、tag 不存在、版本没被滚 */
+        assert!(ledger_entry(d.path(), &plan.version).is_none());
+        assert!(!tag_exists(d.path(), &plan.tag));
+        assert_eq!(source_version(d.path()).unwrap(), plan.version);
+    }
+
+    /// 账本：同版本覆盖，不同版本追加。
+    #[test]
+    fn the_ledger_replaces_the_same_version() {
+        let d = scratch_repo();
+        let mk = |commit: &str| PreviewReport {
+            version: "0.0.12-preview.7".to_owned(),
+            next_version: "0.0.12-preview.8".to_owned(),
+            tag: "v0.0.12-preview.7".to_owned(),
+            commit: Some(commit.to_owned()),
+            stage: "tagged".to_owned(),
+            message: String::new(),
+            log: String::new(),
+        };
+        append_ledger(d.path(), &mk("aaa")).unwrap();
+        append_ledger(d.path(), &mk("bbb")).unwrap();
+
+        let text = std::fs::read_to_string(d.path().join(LEDGER)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let items = v.get("items").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 1, "同版本只留一条：{text}");
+        assert_eq!(items[0].get("commit").unwrap().as_str(), Some("bbb"));
     }
 }

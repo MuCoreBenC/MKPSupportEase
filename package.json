@@ -1,7 +1,7 @@
 {
   "name": "mkp-support-ease",
   "private": true,
-  "version": "0.0.10-preview.6",
+  "version": "0.0.10-preview.7",
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
@@ -37,7 +37,9 @@
     "check:artifacts": "node scripts/check-artifact-boundary.mjs",
     "check:i18n": "node scripts/check-i18n.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
-    "glue:check": "node scripts/glue-check.mjs"
+    "glue:check": "node scripts/glue-check.mjs",
+    "preview:deliver": "cargo run -q --bin preview --features workbench -- deliver",
+    "preview:recover": "cargo run -q --bin preview --features workbench -- recover"
   },
   "dependencies": {
     "@tauri-apps/api": "2.12.1",

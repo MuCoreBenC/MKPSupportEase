@@ -330,26 +330,8 @@ function main() {
   mkdirSync(history, { recursive: true })
   copyFileSync(join(OUT, manifestName), join(history, `${version}.json`))
 
-  /* ★ **交付账本**（辅助，不决定版本号 —— 那由 git tag 说了算）：
-     记下这一版交付了什么、对应哪个提交、字节指纹是多少。安装包删了也还查得到；
-     账本丢了也不影响"这一版冻结过没有"，那件事问 git tag。 */
-  const ledgerPath = join(REPO, 'delivery', 'local-preview-history.json')
-  const ledger = readJsonOr(ledgerPath)
-  ledger.items = [
-    ...ledger.items.filter((e) => !(e.version === version && e.target === 'local')),
-    {
-      version,
-      commit: gitHead(),
-      at: new Date().toISOString(),
-      channel,
-      target: 'local',
-      result: 'ok',
-      asset: { name, size, sha256: digest },
-      manifest: { name: manifestName, sha256: sha256(join(OUT, manifestName)) },
-    },
-  ]
-  mkdirSync(join(REPO, 'delivery'), { recursive: true })
-  writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`)
+  /* 账本不在这里写：**只有 Tag 打成功才算交付**，那件事由发布事务负责。
+     这个脚本只负责"把包和清单摆好"，它成功不代表这一版冻结了。 */
 
   /* ★ 三处身份摆在同一行：仓库 / 包内 / 清单。
      作者要的是"每个产物都报自己的真实身份" —— 那就让它们并排出现，
@@ -380,24 +362,7 @@ function main() {
   }
 }
 
-/** 读交付账本；没有 / 坏了都当空账本（账本是辅助，不该因为它丢了就交付不了）。 */
-function readJsonOr(path) {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    return Array.isArray(parsed.items) ? parsed : { items: [] }
-  } catch {
-    return { items: [] }
-  }
-}
 
-/** 这一笔交付对应的提交（没有 git / 还没提交就是 null，不编一个）。 */
-function gitHead() {
-  try {
-    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim()
-  } catch {
-    return null
-  }
-}
 
 /* 被当做模块 import 时（自检 / 别的脚本）不执行 —— 只有直接跑才动盘 */
 if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

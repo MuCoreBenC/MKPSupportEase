@@ -1001,6 +1001,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::preview_tx::wb_preview_preflight,
         app::preview_tx::wb_preview_deliver,
         app::preview_tx::wb_preview_log_tail,
+        app::preview_tx::wb_preview_recover,
         // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
         // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。

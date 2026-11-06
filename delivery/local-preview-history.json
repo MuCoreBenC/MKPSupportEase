@@ -2,19 +2,19 @@
   "items": [
     {
       "version": "0.0.10-preview.6",
-      "commit": "ab10655ac9a5f3a4c07b3427922c486f71675b0e",
-      "at": "2026-11-06T10:47:38.725Z",
+      "commit": "c554bad93cde642f27ba0ac3c1ee1eb4e3122fec",
+      "at": "2026-11-06T11:32:15.677Z",
       "channel": "preview",
       "target": "local",
       "result": "ok",
       "asset": {
         "name": "SupportEase_0.0.10-preview.6_aarch64.app.zip",
-        "size": 10931940,
-        "sha256": "9241936ccd68423a6d1c41f6f1577263a6fb226f584858471f9ca5918793eed7"
+        "size": 10931216,
+        "sha256": "81637ebbc008b97800f1280b5a4b38d26b371cf73487d947de2b7eab04b99c0b"
       },
       "manifest": {
         "name": "release-preview.json",
-        "sha256": "7406369e45891b849cf01c6173419e55730f38c748c27a3765363bc0ce241a76"
+        "sha256": "68727928f12e1e58c1f5f1b82b0d9ae3f88abc808ce33656d729cb8db0322d9d"
       }
     }
   ]
