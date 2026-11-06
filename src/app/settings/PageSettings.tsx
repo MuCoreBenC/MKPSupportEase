@@ -839,6 +839,16 @@ export default function PageSettings({
     setInstalling(true)
     try {
       await api.installUpdate()
+      /*
+       * 正常情况下这一行之后进程就没了，界面不复存在。**12 秒后自己回来了** =
+       * 进程没退出（或脚本没走到 `open`）—— 把按钮放开，并重新问一次账：
+       * 那本账（`run/update-result.json`）会带着失败原因与日志路径回来。
+       * 不这么做的话，一次没退出的安装会让按钮永远卡在「正在安装…」。
+       */
+      window.setTimeout(() => {
+        setInstalling(false)
+        void checkUpdate()
+      }, 12_000)
     } catch (e) {
       setInstalling(false)
       setNote({ text: errorText(e), bad: true })
