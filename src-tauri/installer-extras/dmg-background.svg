@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DMG 安装窗口的背景（660×430 pt；1× = 660×430，2× = 1320×860）。
+
+  ★ 用途：dmg 里除了应用本体，还有「安装说明.txt」和「终端」快捷方式（应用未签名，
+    首次打开会被 Gatekeeper 拦）。这张图用一支箭头讲清"拖过去"，
+    底下一句把"打不开怎么办"指到那两个辅助文件。
+
+  ★ 2026-11-06 第四版（作者逐条给了设计意见）：
+      · **背景只用一个连续渐变**：左上很浅的蓝 → 一路缓慢褪到右下接近纯白。
+        上一版是"蓝色块 + 四边白色叠加"，交界处看得出来，像一刀切；
+        这一版用一支 radialGradient 一次染完，边缘本身就是白，所以既没有分界线、
+        又能在窗口拖大时无缝接到 icon view 的白底（`.DS_Store` 里 backgroundColor=1,1,1）。
+      · **上面整组再上移**：标题 36、主图标 132 —— 给下面留出真正的空白。
+      · **去掉辅助区的白框**：改成留白 + 一条极淡竖线。框会把两个图标"装进去"，
+        反而显得局促；留白 + 细线才是克制的分组方式。
+      · ★ **轴对齐按算术排，不靠肉眼**：内容区中心 X = 660/2 = 330；
+        标题、主流程（210 与 450）、辅助组（253 与 407）、竖线、底注**全部落在 330**。
+        上一版辅助组在 255，比内容区中心偏左 75pt —— 整张图看着"往左沉"就是这一条。
+
+  ★ 一个 Finder 的硬限制：图标大小是**整个视图一个值**，不能单独把下面两个改小。
+    所以"上面大、下面小"的层级只能靠间距、留白、分隔线来表达，不靠尺寸。
+
+  ★ 图标坐标**写死**，必须与 `scripts/patch-dmg-extras.sh` 的 AppleScript 一致：
+      应用 210,132   应用程序 450,132   安装说明 253,300   终端 407,300
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="430" viewBox="0 0 660 430">
+  <defs>
+    <!-- 一支渐变染完：左上浅蓝 → 中段极淡 → 右下纯白 -->
+    <radialGradient id="bg" cx="0.10" cy="0.02" r="1.02">
+      <stop offset="0" stop-color="#DCE8F5"/>
+      <stop offset="0.28" stop-color="#E8F0F8"/>
+      <stop offset="0.55" stop-color="#F3F8FC"/>
+      <stop offset="0.78" stop-color="#FCFEFF"/>
+      <stop offset="0.90" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </radialGradient>
+    <linearGradient id="arrow" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#A6B8CB"/>
+      <stop offset="1" stop-color="#4C7BA8"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="660" height="430" fill="url(#bg)"/>
+
+  <!-- 标题 -->
+  <text x="330" y="36" text-anchor="middle"
+        font-family="-apple-system, 'Helvetica Neue', 'PingFang SC', sans-serif"
+        font-size="22" font-weight="600" fill="#1B2530" letter-spacing="0.3">SupportEase</text>
+  <text x="330" y="59" text-anchor="middle"
+        font-family="-apple-system, 'Helvetica Neue', 'PingFang SC', sans-serif"
+        font-size="12.5" fill="#5A6B7C">把左边的应用拖进右边的「应用程序」</text>
+
+  <!-- 一支拱起的弧线箭头（拖过去的手势） -->
+  <path d="M266 143 Q330 104 388 128" fill="none" stroke="url(#arrow)" stroke-width="3.6"
+        stroke-linecap="round"/>
+  <polygon points="396,131 378.4,132.6 383.2,121.8" fill="#4C7BA8"/>
+
+  <!-- 辅助区的分隔：一条极淡的竖线，不用框 -->
+  <line x1="330" y1="250" x2="330" y2="366" stroke="#98A9BA" stroke-width="1" stroke-opacity="0.45"/>
+
+  <!-- 底部一句：把动作说死 -->
+  <text x="330" y="400" text-anchor="middle"
+        font-family="-apple-system, 'Helvetica Neue', 'PingFang SC', sans-serif"
+        font-size="12.5" fill="#4A5A6A">双击「安装说明.txt」，把里面的命令粘到「终端」里执行</text>
+</svg>
