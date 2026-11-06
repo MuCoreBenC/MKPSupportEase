@@ -81,17 +81,23 @@ const BUMP = argv.includes('--bump-serial') || process.env.PRESET_TEST_BUMP_SERI
 
 /* 本地发布覆盖层：`--local-release [目录]` → `PRESET_TEST_LOCAL_RELEASE` → 关。
    给了这一格，`/delivery/<名字>` 会**先**去那份目录里找（找到就顶掉仓库里那一份）。 */
+const DEFAULT_LOCAL_ROOT = join(HERE, '..', '..', 'target', 'local-release')
 const LR_AT = argv.indexOf('--local-release')
 const LR_ENV = process.env.PRESET_TEST_LOCAL_RELEASE
 const LOCAL_ROOT = (() => {
-  const DEFAULT = join(HERE, '..', '..', 'target', 'local-release')
   if (LR_AT >= 0) {
     const next = argv[LR_AT + 1]
-    return resolve(next !== undefined && !next.startsWith('--') ? next : DEFAULT)
+    return resolve(next !== undefined && !next.startsWith('--') ? next : DEFAULT_LOCAL_ROOT)
   }
   if (LR_ENV === undefined || LR_ENV === '') return ''
-  return resolve(LR_ENV === '1' ? DEFAULT : LR_ENV)
+  return resolve(LR_ENV === '1' ? DEFAULT_LOCAL_ROOT : LR_ENV)
 })()
+
+/** 那份目录里有没有一份现成的清单（决定要不要提醒"你忘了打开覆盖"） */
+const localManifestName = () =>
+  ['release-preview.json', 'release.json'].find((n) =>
+    existsSync(join(DEFAULT_LOCAL_ROOT, n)),
+  ) ?? null
 
 /** `path` 是不是在 `dir` 底下（防穿越；`dir` 自身也算） */
 const inside = (path, dir) => path === dir || path.startsWith(dir + sep)
@@ -176,6 +182,22 @@ server.listen(PORT, HOST, () => {
     } else {
       console.log(`[preset-test-server] 本地发布覆盖开着，但 ${LOCAL_ROOT} 里没有清单 ——`)
       console.log('[preset-test-server]   先跑 npm run local-release')
+    }
+  } else {
+    /*
+     * ★ 2026-11-06 作者真踩过一次：`npm run local-release` 造好了 preview.4，
+     *   起服务时忘了 `--local-release`，客户端拿到的还是仓库里那份（preview.2），
+     *   界面上写着"已是最新" —— 而**终端里一个字都没有**，看不出来服务端给的是谁。
+     *   所以这里主动喊一声：清单在，只是这次没打开覆盖。
+     */
+    const manifest = localManifestName()
+    if (manifest !== null) {
+      console.log('')
+      console.log('\u001b[33m⚠ 本地发布已就绪，但这次**没打开覆盖**\u001b[0m')
+      console.log(`  ${DEFAULT_LOCAL_ROOT} 里有 ${manifest}，可是现在端的是仓库里那份`)
+      console.log('  presets/delivery/ —— 客户端「重新检查」看到的还是已发布的那一版。')
+      console.log('  要测更新请这样起：npm run preset-source:dev -- --local-release')
+      console.log('')
     }
   }
 })

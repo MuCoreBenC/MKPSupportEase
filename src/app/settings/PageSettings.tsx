@@ -85,7 +85,7 @@ import { api, errorText, isAppError } from '../../api'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
 import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
-import { deliveryMutated, sourceMutated } from '../state/deliveryState'
+import { deliveryMutated, sourceMutated, useSourceRevision } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
 import { appStateMutated, useLocalePref, useThemePref } from '../state/appState'
 import {
@@ -750,9 +750,21 @@ export default function PageSettings({
     }
   }, [refreshUpdate])
 
+  /*
+   * ★ 换源之后**必须重查一次**（2026-11-06 作者实测："我改了地址啊，为什么这上面还是写着…"）。
+   *
+   * 以前这个 effect 只依赖 `checkUpdate`（而它依赖的是模块级稳定函数）⇒ **一辈子只在挂载时跑一次**。
+   * 保存地址那一刻 `sourceChanged()` 确实广播了 `sourceMutated()`，但那是发给「读目录的那几页」的；
+   * **这一张卡没听**。于是换完源，界面上还挂着旧源（Gitee）问出来的「已是最新版本」。
+   *
+   * 这一格就是"保存即生效、不许要求重启"覆盖到更新检查的那一半：
+   * 代次一变 → 按新地址重问一次；`updateBusy` 会先把标题切成「正在检查…」，
+   * 旧结论不会赖在屏幕上装成新答案。
+   */
+  const sourceRevision = useSourceRevision()
   useEffect(() => {
     void checkUpdate()
-  }, [checkUpdate])
+  }, [checkUpdate, sourceRevision])
 
   /*
    * 自动清理那一格：**只在打开这一页时读一次**（它不参与首屏，也不联网）。
@@ -1345,11 +1357,16 @@ export default function PageSettings({
               {updateBusy ? tr('settings.update.checking') : tr('settings.update.recheck')}
             </Btn>
             {/*
-              ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
+             ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
               Tauri 的 webview 没开 opener 权限，`<a>` 点了**什么都不发生**
               （0.0.2 用户实测："点了没反应，没弹出浏览器"）。修法是走命令（第五刀）。
+
+             ★ **没有新版就不摆这颗**（2026-11-06 作者：「我只要一个检查更新，有新的版本
+              才应该显示查看呀」）。以前条件里只有 `jumpUrl !== undefined`，而 `jumpUrl`
+              在自定义源下恒等于数据源地址 ⇒ 明明"已是最新"，右边还杵着一颗「查看更新」；
+              点开还是个 API 地址。现在它只在**真有新版**时出现。
             */}
-            {jumpUrl !== undefined && (
+            {hasUpdate && jumpUrl !== undefined && (
               <Btn onClick={() => void openReleasePage(jumpUrl)}>
                 {tr('settings.update.view')}
               </Btn>
