@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SupportEase",
-  "version": "0.0.10-dev",
+  "version": "0.0.10-preview.2",
   "identifier": "SupportEase",
   "build": {
     "frontendDist": "../dist",
