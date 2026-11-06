@@ -314,6 +314,32 @@ pub fn is_prerelease(raw: &str) -> bool {
 pub fn compare(latest: &str, current: &str) -> bool {
     let l = latest.trim();
     let c = current.trim();
+    /* ★ 守卫必须在**数字比较之前**：`0.0.10-preview.1` 的基础数字比 `0.0.9` 大，
+     * 若先比数字就会返回 true，把预览版推给正式版用户 —— 正是本次要消灭的事故。 */
+    if let (Some(lv), Some(cv)) = (parse_software_version(l), parse_software_version(c)) {
+        if lv.pre.is_some() && cv.pre.is_none() {
+            return false;
+        }
+    }
+    is_newer_version(l, c)
+}
+
+/// **纯版本序**：`candidate` 是否真的比 `current` 新。
+///
+/// 三段数字 → 同基础时**正式版 > 任何预发布** → 同为预发布比档次与序号。
+/// **不带**"预发布不提醒正式版用户"那条**通知**守卫。
+///
+/// ★ 两个问题必须分开问（2026-11-06 作者点破："0.0.6 当成有新版了，实际上应该要比
+///   当前版本大才算"）：
+///   · **要不要通知他** —— [`compare`]，带守卫：预览版绝不主动提醒正式版用户；
+///   · **这张卡是不是"更新"** —— 本函数，不带守卫：0.0.9 上看到 0.0.10-preview.1，
+///     它是更新的版本（只是不会弹通知，要用户自己点开看）。
+///
+/// 混用两个问题会同时错两头：拿 `compare` 判展示 → 更新的预览版被标成"较旧"；
+/// 拿本函数判通知 → 预览版推给全量用户。所以这里只回答"谁大"，不掺通知策略。
+pub fn is_newer_version(candidate: &str, current: &str) -> bool {
+    let l = candidate.trim();
+    let c = current.trim();
     if l == c {
         return false;
     }
@@ -321,19 +347,14 @@ pub fn compare(latest: &str, current: &str) -> bool {
         // 认不出的形状：退回原来那套数字比较（老发布物/脏数据仍按旧口径走，不静默改判）
         return version_at_least(l, c);
     };
-    /* ★ 守卫必须在**数字比较之前**：`0.0.10-preview.1` 的基础数字比 `0.0.9` 大，
-     * 若先比数字就会返回 true，把预览版推给正式版用户 —— 正是本次要消灭的事故。
-     * 也不能用 `#[derive(Ord)]` 直接比 `Option<pre>`（`None < Some(_)`）。 */
-    if lv.pre.is_some() && cv.pre.is_none() {
-        return false;
-    }
     let base = (lv.major, lv.minor, lv.patch).cmp(&(cv.major, cv.minor, cv.patch));
     if base != std::cmp::Ordering::Equal {
         return base == std::cmp::Ordering::Greater;
     }
+    // 同基础：`#[derive(Ord)]` 直接比 `Option<pre>` 是错的（`None < Some(_)`），逐档写清
     match (lv.pre, cv.pre) {
-        (Some(_), None) => false, // 预发布不提醒正式版用户（本次要消灭的事故）
-        (None, Some(_)) => true,  // 正式版比同基础的预览版新（预览 → 正式可切回）
+        (Some(_), None) => false, // 预发布不比同基础的正式版新
+        (None, Some(_)) => true,  // 正式版比同基础的预发布新（pre/dev → 正式版算更新）
         (Some(a), Some(b)) => a > b,
         (None, None) => false,
     }
@@ -560,6 +581,36 @@ mod tests {
             "哪怕基础版本更高，预览版也不主动提醒正式版用户"
         );
         assert!(compare("999.0.0", "0.0.10-dev"), "正式版远高于开发构建");
+    }
+
+    /// ★ **"谁比谁新"与"要不要通知"是两个问题**（2026-11-06 作者点破）。
+    ///
+    /// 症状：装了 `0.0.10-dev`，设置页把正式版 `0.0.6` 摆在"推荐 / 更新正式版"上 ——
+    /// 它比当前版本**旧**，根本不是更新。
+    #[test]
+    fn is_newer_version_answers_size_only_and_ignores_the_notify_guard() {
+        // 比当前旧 ⇒ 不是更新（正是那条 bug）
+        assert!(!is_newer_version("0.0.6", "0.0.10-dev"));
+        assert!(!is_newer_version("0.0.9", "0.0.10"));
+        // 相等不是更新
+        assert!(!is_newer_version("0.0.10", "0.0.10"));
+        // 同基础：正式版比 pre / dev 新（用户："0.0.10 的 pre 或者 dev 都把 0.0.10 当新版"）
+        assert!(is_newer_version("0.0.10", "0.0.10-dev"));
+        assert!(is_newer_version("0.0.10", "0.0.10-preview.1"));
+        // 同基础：pre 比 dev 新，序号大者新
+        assert!(is_newer_version("0.0.10-preview.1", "0.0.10-dev"));
+        assert!(is_newer_version("0.0.10-preview.2", "0.0.10-preview.1"));
+        // 同基础：预发布不比正式版新（用户："0.0.11 不会把 0.0.11 的 pre/dev 当新版"）
+        assert!(!is_newer_version("0.0.11-preview.1", "0.0.11"));
+        // 更高基础：一律更新（用户："只会把 0.0.12 的 pre 或者 0.0.12 正式版当新版"）
+        assert!(is_newer_version("0.0.12-preview.1", "0.0.11-dev"));
+        assert!(is_newer_version("0.0.12", "0.0.11"));
+
+        /* ★ 不带通知守卫：0.0.9 正式版看到 0.0.10-preview.1 —— 它**是**更新的版本
+         *  （用户主动点开才看得到），只是不会被**通知**。两个函数刻意分开：
+         *  混用会一头把"较旧"标成"更新"，另一头把预览版推给全量用户。 */
+        assert!(is_newer_version("0.0.10-preview.1", "0.0.9"));
+        assert!(!compare("0.0.10-preview.1", "0.0.9"), "但绝不主动通知");
     }
 
     /// 解析形状：`v` 前缀、`.N` 序号、`dev2` 粘连写法、未知后缀一律按预发布处理。

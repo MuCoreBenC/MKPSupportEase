@@ -57,18 +57,31 @@ pub fn fetch_update(root: &Path) -> Result<release_info::SoftwareUpdate, AppErro
 /// 由两份清单拼出**用户主动检查**时并列展示的候选（纯函数，判据不联网）。
 ///
 /// - 正式版永远排第一（作者：正式版优先排序）；
-/// - 预览版与正式版同版本号 = 占位清单（"当前没有预览版"），不摆第二张卡；
-/// - 预览版仍可主动选择，即便它的基础版本号更低 —— 那是**通道选择**，不靠大小推断。
+/// - **只摆比当前构建新的**（[`release_info::is_newer_version`]）—— 旧版本一张卡都不出现，
+///   没有更新的正式版时那一栏就空着（2026-11-06 作者："不要显示旧版"）；
+/// - 预览版与正式版同版本号 = 占位清单（"当前没有预览版"），不摆第二张卡。
 pub fn candidates_from_infos(
     stable: &release_info::ReleaseInfo,
     preview: Option<&release_info::ReleaseInfo>,
 ) -> Vec<release_info::UpdateCandidate> {
-    let mut list = vec![release_info::UpdateCandidate::from_info(
-        release_info::UpdateChannel::Stable,
-        stable,
-    )];
+    /* ★ **只摆比当前版本新的**（2026-11-06 作者："没有新的正式版就不显示出来嘛，
+     * 不要显示旧版"）。装了 `0.0.10-dev` 时，正式版线上还是 `0.0.6` —— 它比当前旧，
+     * 不是"有新版"，也不该给一颗"切回正式版"的按钮：回退是用户自己要做的决定，
+     * 不该被摆成一个看起来像更新的选项。
+     *
+     * 过滤放在**后端这一处**：界面、标题栏、下载选址（`ipc::update` 按 channel 找候选）
+     * 从此共用同一个结论，不会出现"卡片藏了但按钮还在"的半截状态。 */
+    let mut list = Vec::new();
+    if release_info::is_newer_version(&stable.version, super::structure::APP_VERSION) {
+        list.push(release_info::UpdateCandidate::from_info(
+            release_info::UpdateChannel::Stable,
+            stable,
+        ));
+    }
     if let Some(p) = preview {
-        if p.version.trim() != stable.version.trim() {
+        if p.version.trim() != stable.version.trim()
+            && release_info::is_newer_version(&p.version, super::structure::APP_VERSION)
+        {
             list.push(release_info::UpdateCandidate::from_info(
                 release_info::UpdateChannel::Preview,
                 p,
@@ -241,20 +254,54 @@ mod tests {
         );
         assert!(body.contains("fetch_stable_info"));
 
-        // ④ 用户主动刷新时两个候选都在，正式版优先
+        // ④ 用户主动刷新时**预览版仍然看得见**（不是把预览版藏了）；
+        //    正式版 0.0.6 比当前 0.0.10-dev 旧，一张卡都不摆
         let cs = candidates_from_infos(&stable, Some(&preview));
+        assert_eq!(cs.len(), 1, "旧正式版不摆卡");
+        assert_eq!(cs[0].channel, UpdateChannel::Preview);
+        assert_eq!(cs[0].version, "0.0.10-preview.1");
+    }
+
+    /// ★ **只摆比当前构建新的候选**（2026-11-06 作者："不要显示旧版"）。
+    ///
+    /// 现场：装了 `0.0.10-dev`，正式版线上还是 `0.0.6` —— 设置页却把它摆在
+    /// "推荐 / 更新正式版"上。它不是更新，也不该给一颗"切回正式版"的按钮：
+    /// 回退是用户自己的决定，不该被摆成一个看起来像更新的选项。
+    ///
+    /// 判据按编译期 `APP_VERSION` 算：测试构建是 `0.0.10-dev`。
+    #[test]
+    fn only_newer_candidates_are_shown() {
+        let older_stable = info("0.0.6");
+        let newer_preview = info("0.0.10-preview.1");
+
+        // ① 旧正式版被滤掉，只剩更新的预览版
+        let cs = candidates_from_infos(&older_stable, Some(&newer_preview));
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].channel, UpdateChannel::Preview);
+
+        // ② 两个都比当前新 → 都在，正式版排第一
+        let newer_stable = info("0.0.11");
+        let cs = candidates_from_infos(&newer_stable, Some(&newer_preview));
         assert_eq!(cs.len(), 2);
         assert_eq!(cs[0].channel, UpdateChannel::Stable);
-        assert_eq!(cs[0].version, "0.0.6");
         assert_eq!(cs[1].channel, UpdateChannel::Preview);
-        assert_eq!(cs[1].version, "0.0.10-preview.1");
+
+        // ③ 一个都不新 → 空数组（界面退回"只有状态行、没有按钮"）
+        assert!(candidates_from_infos(&older_stable, None).is_empty());
+
+        // ④ 同基础的**正式版**对 dev 构建算更新（作者："0.0.10 的 pre 或者 dev 都把 0.0.10 当新版"）
+        let same_base = info("0.0.10");
+        let cs = candidates_from_infos(&same_base, None);
+        assert_eq!(cs.len(), 1);
+        assert_eq!(cs[0].channel, UpdateChannel::Stable);
     }
 
     /// 占位预览清单（与正式版同版本号）不该凭空多出一张「预览版」卡。
     #[test]
     fn a_placeholder_preview_list_does_not_create_a_card() {
-        let stable = info("0.0.6");
-        let placeholder = info("0.0.6");
+        // 用比当前构建（0.0.10-dev）新的号，才验得到"占位不摆卡"而不是"旧版被滤掉"
+        let stable = info("0.0.11");
+        let placeholder = info("0.0.11");
         let cs = candidates_from_infos(&stable, Some(&placeholder));
         assert_eq!(cs.len(), 1);
         assert_eq!(cs[0].channel, UpdateChannel::Stable);
