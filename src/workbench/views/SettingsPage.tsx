@@ -884,6 +884,15 @@ export default function SettingsPage({ boot }: Props) {
             </p>
 
             <p className={s.vhelp}>
+              「<b>本地发布（软件更新）</b>」那一行端的是<b>软件</b>：它把{' '}
+              <span className={s.mono}>/delivery/release-preview.json</span> 换成{' '}
+              <span className={s.mono}>target/local-release/</span> 里那份（<b>版本号就写在
+              上面那一行里</b>，和目录里实际有什么一起报）。选它启动之后，客户端
+              「设置 → 检查更新」看到的就是那一版 —— <b>不用发版、不用打 tag</b>。
+              那一行不齐时先去终端跑一次 <span className={s.mono}>npm run local-release</span>。
+            </p>
+
+            <p className={s.vhelp}>
               ★ <b>不用先去发布</b>：客户端判"有没有新版"看交付根里{' '}
               <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>{' '}
               与 <span className={s.mono}>publishSerial</span>，而<b>「生成」就已经把 revision

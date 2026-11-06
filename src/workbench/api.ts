@@ -1670,10 +1670,14 @@ export interface DevSourceStatus {
 /**
  * `dev_source::SourceKind` —— 测试源端哪一份。
  *
- * 2026-10-30 起**只剩「当前交付」**：夹具那两代（`v1` / `v2`）退役了 ——
- * 端真产物、发布序号在响应里 +1 就够演"云端发了下一版"，还不会和源漂移。
+ * - `delivery`：**当前交付**（`presets/delivery/`）—— 演"云端发了新**预设**"
+ * - `local-release`：**本地发布**（叠上 `target/local-release/` 里那份软件清单）——
+ *   演"云端发了新**软件**"，客户端「检查更新」看到的就是那一版（2026-11-06 加）
+ *
+ * 2026-10-30 退役的是夹具那两代（`v1` / `v2`）：端真产物、发布序号在响应里 +1
+ * 就够演"云端发了下一版"，还不会和源漂移。
  */
-export type DevSourceKind = 'delivery'
+export type DevSourceKind = 'delivery' | 'local-release'
 
 /** `dev_source::SourceOption` —— 那个选项，一行一份 */
 export interface SourceOption {

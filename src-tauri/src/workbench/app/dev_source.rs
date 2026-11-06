@@ -85,6 +85,16 @@ const ROOT_ENV: &str = "PRESET_TEST_ROOT";
 /// 判据照旧比 `publishSerial`，只是这份模拟源自称"刚发过一版"。
 const BUMP_ENV: &str = "PRESET_TEST_BUMP_SERIAL";
 
+/// 让 `server.mjs` 把 `/delivery/release-preview.json`（与 `release.json`）换成
+/// `target/local-release/` 里那一份（**只改响应，盘上一个字节不动**）。
+///
+/// 与 `--local-release` 参数是同一个开关的两档：这里走环境变量，因为工作台起的
+/// 永远是 `npm run preset-source:dev` 那一条命令（命令行不带参数，见 [`ROOT_ENV`]）。
+const LOCAL_RELEASE_ENV: &str = "PRESET_TEST_LOCAL_RELEASE";
+
+/// 本地发布目录里的两份清单（预览通道 / 正式通道各一份）。
+const LOCAL_RELEASE_MANIFESTS: (&str, &str) = ("release-preview.json", "release.json");
+
 /// 测试源的默认端口 —— 与 `scripts/preset-test-server/server.mjs` 同一个值。
 /// 它读 `PRESET_TEST_PORT`（见 [`port_from`]），这里只是那个变量的默认档。
 const DEFAULT_PORT: u16 = 8787;
@@ -97,9 +107,15 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 
 /// 测试源端哪一份。
 ///
-/// **只剩一项**（2026-10-30 作者：「我就不需要这些什么测试夹具一夹具二了，就直接是模拟的
-/// 不就可以了吗」）：端**当前交付** —— 你刚生成出来的那一份，于是
-/// 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通。
+/// **两件事分开摆**（2026-11-06；此前只有「当前交付」一项）：
+///
+/// - [`Self::Delivery`] 端**当前交付** —— 你刚生成出来的那一份，于是
+///   「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通；
+/// - [`Self::LocalRelease`] 叠上**本地发布**那份软件清单 ——
+///   「编一个 .app → local-release → 客户端点更新 → 装完自己回来」这条链在**不发版**的前提下走得通。
+///
+/// 为什么不能合成一项：一个问题问"云端发了新预设吗"，另一个问"云端发了新软件吗"。
+/// 合成一项的话，界面上就再也说不清"客户端看到的这一版是哪一类"。
 ///
 /// 原来那两代夹具是拿真交付根派生的副本，作用就一个：演"云端发了下一版"。现在那一层
 /// 由 [`BUMP_ENV`] 顶掉 —— 同一份真产物，端出去时把发布序号往前拨一格，比夹具更真
@@ -109,6 +125,17 @@ pub enum SourceKind {
     /// **当前交付**：仓库里 `presets/delivery/` 那一份
     #[serde(rename = "delivery")]
     Delivery,
+    /// **本地发布**（2026-11-06 作者要求）：叠上 `target/local-release/` 里那份
+    /// 软件更新清单，`/delivery/release-preview.json`（与 `release.json`）换成它。
+    ///
+    /// 为什么单开一行，而不是悄悄并进「当前交付」：这两件事回答的是**不同的问题**。
+    /// 「当前交付」演的是"云端发了新**预设**"；这一行演的是"云端发了新**软件**"。
+    /// 叠在一起的话，界面上就再也说不清"客户端看到的这一版是预设还是安装包"。
+    ///
+    /// 服务根与地址跟「当前交付」**一样**（`presets/` + `<地址>/delivery`）：本地发布只是
+    /// 一层覆盖 —— `source.json` / `catalog.json` / 交付文件照旧来自仓库那一份。
+    #[serde(rename = "local-release")]
+    LocalRelease,
 }
 
 /// 一份源**端出去时**的样子：服务根在哪、客户端该填哪个地址。
@@ -126,25 +153,39 @@ struct Served {
 
 impl SourceKind {
     /// 服务根与地址的**纯派生**（不碰磁盘，所以测试钉得住）。
+    ///
+    /// 两份**同一个根、同一个地址**：本地发布只是叠在交付根之上的一层覆盖
+    /// （`source.json` / `catalog.json` / 交付文件照旧来自仓库那一份），
+    /// 变的只有 `/delivery/release*.json` 那两份清单。
     fn derive(self, presets_root: &Path) -> Served {
-        match self {
-            SourceKind::Delivery => Served {
-                root: presets_root.to_path_buf(),
-                url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
-            },
+        Served {
+            root: presets_root.to_path_buf(),
+            url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
         }
     }
 
-    /// 「这一份齐了吗」的那个标志文件。不齐**不许起**：服务起得来、底下什么都没有的话，
+    /// 「这一份齐了吗」的那个标志路径。不齐**不许起**：服务起得来、底下什么都没有的话，
     /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远。
+    ///
+    /// 本地发布返回的是**目录**（清单是哪一份由 [`Self::ready`] 判，两份都可能只有一份）。
     fn marker(self, served: &Served) -> PathBuf {
         match self {
             SourceKind::Delivery => served.root.join(DELIVERY_SUBDIR).join(DELIVERY_MARKER),
+            SourceKind::LocalRelease => local_release_dir(served),
+        }
+    }
+
+    /// 这一份现在能不能端出去。
+    fn ready(self, served: &Served) -> bool {
+        match self {
+            SourceKind::Delivery => self.marker(served).is_file(),
+            SourceKind::LocalRelease => local_manifests(served).next().is_some(),
         }
     }
 
     /// 不齐时那句人话：**缺什么 + 怎么补**（界面直接摆，不重写措辞）。
-    fn missing(self, marker: &Path) -> AppError {
+    fn missing(self, served: &Served) -> AppError {
+        let marker = self.marker(served);
         match self {
             SourceKind::Delivery => {
                 AppError::invalid_argument(format!("还没有交付产物：{} 不在", marker.display()))
@@ -152,8 +193,70 @@ impl SourceKind {
                         "在「生成与发布」里点一次生成，端的就是刚生成出来的那一份".to_owned(),
                     )
             }
+            SourceKind::LocalRelease => AppError::invalid_argument(format!(
+                "还没有本地发布：{} 里没有 release-preview.json / release.json",
+                marker.display()
+            ))
+            .with_detail(
+                "在终端跑一次 `npm run local-release`（先把 .app 编出来）—— \
+                 它会把这个版本打进那份清单"
+                    .to_owned(),
+            ),
         }
     }
+}
+
+/// `target/local-release/` —— 本地发布目录（相对**仓库根**，不是预设根）。
+///
+/// 纯派生：`served.root` 是 `presets/`，往上一级就是仓库根。
+fn local_release_dir(served: &Served) -> PathBuf {
+    match served.root.parent() {
+        Some(repo) => repo.join("target").join("local-release"),
+        None => served.root.join("target").join("local-release"),
+    }
+}
+
+/// 本地发布目录里那两份清单（`release-preview.json` / `release.json`），有的才给。
+fn local_manifests(served: &Served) -> impl Iterator<Item = (String, PathBuf)> {
+    let dir = local_release_dir(served);
+    [LOCAL_RELEASE_MANIFESTS.0, LOCAL_RELEASE_MANIFESTS.1]
+        .into_iter()
+        .map(move |n| (n.to_owned(), dir.join(n)))
+        .filter(|(_, p)| p.is_file())
+}
+
+/// 「这个目录里到底有什么」—— 作者 2026-11-06：「工作台里面应该显示清楚啊，
+/// 那个目录下面有什么」。
+///
+/// 回一段能直接摆到界面上的字：每份清单的**版本号** + 安装包个数。
+/// 读不出 / 不存在都照实说，不编一个版本号。
+fn local_release_digest(served: &Served) -> String {
+    let dir = local_release_dir(served);
+    let mut rows: Vec<String> = Vec::new();
+    for (name, path) in local_manifests(served) {
+        let version = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(str::to_owned));
+        rows.push(match version {
+            Some(v) => format!("{name} → {v}"),
+            None => format!("{name}（读不出版本号）"),
+        });
+    }
+    if rows.is_empty() {
+        return format!(
+            "{} 里还没有清单 —— 先跑 npm run local-release",
+            dir.display()
+        );
+    }
+    let zips = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("zip"))
+                .count()
+        })
+        .unwrap_or(0);
+    format!("{}：{} · 安装包 {zips} 个", dir.display(), rows.join("，"))
 }
 
 /// 界面上那三行单选，一行一份。**名字与说法由后端给**（界面不自己拼一套措辞），
@@ -277,7 +380,7 @@ fn origin() -> String {
 ///
 /// ★ 发布序号 `+1` 由 [`BUMP_ENV`] 交下去：端出去的 `catalog.json` 自称"刚发过一版"，
 /// 于是客户端看到的是正常的「有新版本」，而不是同号改内容那种"那一代目录不再唯一"。
-fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
+fn spawn_server(repo: &Path, served: &Served, source: SourceKind) -> Result<Child, AppError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = Command::new("cmd");
         c.arg("/C").arg("npm");
@@ -288,9 +391,14 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     cmd.args(["run", NPM_SCRIPT])
         .current_dir(repo)
         .env(ROOT_ENV, &served.root)
-        .env(BUMP_ENV, "1")
-        /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
-        .stdout(Stdio::inherit())
+        .env(BUMP_ENV, "1");
+    /* ★ 只有「本地发布」那一行才叠这层覆盖：`/delivery/release*.json` 换成
+    `target/local-release/` 里那份。服务根不变 —— 覆盖的是清单，不是目录。 */
+    if source == SourceKind::LocalRelease {
+        cmd.env(LOCAL_RELEASE_ENV, "1");
+    }
+    /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
+    cmd.stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         /* stdin 给 null：父子都在读 stdin 的话，敲键归谁就成了碰运气
         （`tauri dev` 自己也读 stdin 做热重载） */
@@ -465,8 +573,8 @@ fn conflicts_of() -> Vec<PortConflict> {
 
 /// 「不齐」那句话说全（缺什么 + 怎么补）——给界面直接摆，不重写措辞。
 impl SourceKind {
-    fn missing_sentence(self, marker: &Path) -> String {
-        let e = self.missing(marker);
+    fn missing_sentence(self, served: &Served) -> String {
+        let e = self.missing(served);
         match e.detail {
             Some(d) => format!("{} —— {d}", e.message),
             None => e.message,
@@ -483,27 +591,37 @@ impl SourceKind {
 /// 界面那套单选不用为一个选项另写一版。
 fn sources_of(_repo: &Path) -> Vec<SourceOption> {
     let presets = crate::workbench::paths::presets_root_path();
-    [SourceKind::Delivery]
+    [SourceKind::Delivery, SourceKind::LocalRelease]
         .into_iter()
         .map(|kind| {
             let served = kind.derive(&presets);
-            let marker = kind.marker(&served);
-            let ready = marker.is_file();
-            let (label, note) = match kind {
+            let ready = kind.ready(&served);
+            let (label, base) = match kind {
                 SourceKind::Delivery => (
                     "当前交付",
                     "端你生成出来的那一份。端出去时发布序号自动 +1 \
-                     —— 客户端那边看到的就是「云端发了下一版」，和真发布一样",
+                     —— 客户端那边看到的就是「云端发了下一版」，和真发布一样"
+                        .to_owned(),
+                ),
+                SourceKind::LocalRelease => (
+                    "本地发布（软件更新）",
+                    format!(
+                        "叠在「当前交付」之上：/delivery/release-preview.json 换成下面这份，\
+                         客户端「检查更新」看到的就是它 —— **不用发版**。{}",
+                        local_release_digest(&served)
+                    ),
                 ),
             };
+            /* 先算完 missing 再搬 `served.url`：`missing_sentence` 还要借 `served` */
+            let missing = (!ready).then(|| kind.missing_sentence(&served));
             SourceOption {
                 kind,
                 label: label.to_owned(),
-                note: note.to_owned(),
+                note: base,
                 root: served.root.display().to_string(),
                 url: served.url,
                 ready,
-                missing: (!ready).then(|| kind.missing_sentence(&marker)),
+                missing,
             }
         })
         .collect()
@@ -642,9 +760,8 @@ pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppErr
         let repo = crate::workbench::paths::repo_root();
         let presets = crate::workbench::paths::presets_root_path();
         let served = source.derive(&presets);
-        let marker = source.marker(&served);
-        if !marker.is_file() {
-            return Err(source.missing(&marker));
+        if !source.ready(&served) {
+            return Err(source.missing(&served));
         }
 
         let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
@@ -681,7 +798,7 @@ pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppErr
                 ),
             );
         }
-        let child = spawn_server(&repo, &served)?;
+        let child = spawn_server(&repo, &served, source)?;
         let pid = child.id();
         tracing::info!(
             pid,
@@ -1036,30 +1153,35 @@ mod tests {
         );
     }
 
-    /// 不齐时那句人话要**指对方向**：交付产物缺了就去点「生成」。
+    /// 不齐时那句人话要**指对方向**：交付产物缺了就去点「生成」，
+    /// 本地发布缺了就去跑 `npm run local-release`。
     #[test]
     fn a_source_that_is_not_ready_says_how_to_make_it_ready() {
         let presets = Path::new("/tmp/repo/presets");
         let served = SourceKind::Delivery.derive(presets);
-        let delivery = SourceKind::Delivery
-            .missing_sentence(&served.root.join("delivery").join(DELIVERY_MARKER));
+        let delivery = SourceKind::Delivery.missing_sentence(&served);
         assert!(delivery.contains("生成"), "实测：{delivery}");
         assert!(
             !delivery.contains("preset-source:make"),
             "夹具那一套已经退役，别再把人指过去：{delivery}"
         );
+        /* ★ 本地发布那一行不许指去「生成」：那是预设，不是安装包 */
+        let local = SourceKind::LocalRelease.missing_sentence(&served);
+        assert!(local.contains("local-release"), "实测：{local}");
+        assert!(!local.contains("生成"), "别把人指去点生成：{local}");
     }
 
-    /// 那一行：**名字与说法由后端给**，带根与地址、齐没齐都说得出
+    /// 那几行：**名字与说法由后端给**，带根与地址、齐没齐都说得出
     /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）。
     ///
-    /// 2026-10-30 起只剩「当前交付」一行（夹具退役）—— 但接口仍是列表，
-    /// 界面那套单选不用为一个选项另写一版。
+    /// 2026-11-06 起是**两行**：「当前交付」（预设数据）+「本地发布」（软件更新）。
+    /// 作者当时的话：「工作台里面应该显示清楚啊，那个目录下面有什么」。
     #[test]
-    fn the_row_is_told_by_the_backend() {
+    fn the_rows_are_told_by_the_backend() {
         let rows = sources_of(Path::new("/tmp/repo"));
-        assert_eq!(rows.len(), 1, "只剩「当前交付」这一份");
+        assert_eq!(rows.len(), 2, "「当前交付」+「本地发布」");
         assert_eq!(rows[0].kind, SourceKind::Delivery);
+        assert_eq!(rows[1].kind, SourceKind::LocalRelease);
         for r in &rows {
             assert!(!r.label.is_empty() && !r.note.is_empty(), "{:?}", r.kind);
             assert!(r.url.starts_with("http://127.0.0.1:"), "{:?}", r.kind);
@@ -1077,6 +1199,36 @@ mod tests {
             "要说清端出去时序号自动 +1（否则人会以为客户端那边不该有新版）：{}",
             rows[0].note
         );
+        /* ★ 本地发布那一行必须**把目录里有什么说出来**：版本号是最要紧的那一格
+        （作者当时卡在"界面上看不出服务端给的是 preview.2 还是 preview.4"） */
+        assert!(
+            rows[1].note.contains("local-release"),
+            "要说清它叠的是哪个目录：{}",
+            rows[1].note
+        );
+        assert!(
+            rows[1].note.contains("release-preview.json") || rows[1].note.contains("还没有清单"),
+            "要么报出清单与版本，要么明说还没有：{}",
+            rows[1].note
+        );
+    }
+
+    /// 「本地发布」那一行与「当前交付」**同一个服务根、同一个地址** ——
+    /// 它只是叠一层清单覆盖，不是另起一个目录（另起的话 `source.json` 就没了）。
+    #[test]
+    fn the_local_release_row_serves_the_same_root_as_the_delivery_row() {
+        let presets = Path::new("/tmp/repo/presets");
+        let a = SourceKind::Delivery.derive(presets);
+        let b = SourceKind::LocalRelease.derive(presets);
+        assert_eq!(a.root, b.root);
+        assert_eq!(a.url, b.url);
+        /* 但"齐了吗"看的是**不同的东西**：一份看交付根，一份看本地发布目录 */
+        assert!(SourceKind::Delivery
+            .marker(&a)
+            .ends_with("delivery/source.json"));
+        assert!(SourceKind::LocalRelease
+            .marker(&b)
+            .ends_with("target/local-release"));
     }
 
     /// 三档说法：认得名 / 只有 PID / 认不出 —— **认不出时不许编一个名字出来**
@@ -1119,7 +1271,7 @@ mod tests {
         assert!(!st.running && st.pid.is_none());
         /* 从没起过：不谎报"端的是哪一份"（免得界面把某一行当成"正在端"） */
         assert!(st.source.is_none() && st.source_root.is_empty());
-        assert_eq!(st.sources.len(), 1, "夹具退役后只剩「当前交付」这一行");
+        assert_eq!(st.sources.len(), 2, "「当前交付」+「本地发布」");
     }
 
     /// **序号 +1 这个开关的名字得是 `server.mjs` 真读的那个** —— 与 `ROOT_ENV` 同一条理由：
