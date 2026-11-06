@@ -50,7 +50,13 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { ThemePref } from '../../api/contract'
 import { isAppError, wb } from '../api'
-import type { Boot, DevSourceStatus, PortConflict, PublishAccount } from '../api'
+import type {
+  Boot,
+  DevSourceStatus,
+  PortConflict,
+  PreviewPlan,
+  PublishAccount,
+} from '../api'
 /* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
 import { setTheme, useResolvedDark, useThemePref } from '../theme'
 import s from '../c14.module.css'
@@ -234,6 +240,10 @@ export default function SettingsPage({ boot }: Props) {
    */
   const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
   const [devBusy, setDevBusy] = useState(false)
+  /* 交付那一趟：计划（能不能交付 / 会提交什么）+ 进行中标记 + 一句反馈 */
+  const [previewPlan, setPreviewPlan] = useState<PreviewPlan | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewNote, setPreviewNote] = useState<{ text: string; bad: boolean } | null>(null)
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
   /**
    * 现读一次状态。
@@ -245,6 +255,8 @@ export default function SettingsPage({ boot }: Props) {
     try {
       const st = await wb.devSourceStatus()
       setDevSrc(st)
+      /* 顺带问一次"这一版能不能交付"：按钮上的版本号与阻断原因都来自它 */
+      setPreviewPlan(await wb.previewPreflight().catch(() => null))
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     }
@@ -311,6 +323,27 @@ export default function SettingsPage({ boot }: Props) {
    * 把**当时看到的 pid** 一起交回后端 —— 它会重新问一次"这个端口现在是谁的"，
    * 对不上就拒绝动手（PID 会被复用）。
    */
+  /**
+   * **生成并交付当前预览版本**（作者 2026-11-06 定的一颗主动作）。
+   *
+   * 点它 = 授权这一趟的本地 commit + tag（不推送、不建 Release、不触发 CI）。
+   * 未跟踪文件由后端在 preflight 里拦下 —— 界面只是把原因摆出来，不替人决定归属。
+   */
+  const deliverPreview = async () => {
+    if (previewBusy) return
+    setPreviewBusy(true)
+    setPreviewNote({ text: '正在编译并交付……（一两分钟，日志在 target/local-preview/deliver.log）', bad: false })
+    try {
+      const rep = await wb.previewDeliver()
+      setPreviewNote({ text: rep.message, bad: false })
+    } catch (e) {
+      setPreviewNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    } finally {
+      setPreviewBusy(false)
+      await readDevSrc()
+    }
+  }
+
   /** 「打开交付目录」：路径用后端 DTO 里那一串（界面不自己拼） */
   const openDevRoot = async () => {
     const root = devSrc?.sourceRoot
@@ -838,6 +871,27 @@ export default function SettingsPage({ boot }: Props) {
                 打开交付目录
               </button>
               <span className={s.grow} />
+              {/*
+                主操作：生成并交付当前预览版本（2026-11-06 作者要的那一颗）。
+                点它 = 授权这一趟的本地 commit + tag；未跟踪文件由后端拦。
+              */}
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnPrimary}`}
+                disabled={previewBusy || previewPlan === null || !previewPlan.ok}
+                title={
+                  previewPlan === null
+                    ? '正在读工作区……'
+                    : previewPlan.ok
+                      ? `编译 → 写清单 → 本地提交（${previewPlan.branch}）→ 打 tag → 滚到 ${previewPlan.nextVersion}`
+                      : previewPlan.blockedBy.join('；')
+                }
+                onClick={() => void deliverPreview()}
+              >
+                {previewBusy
+                  ? '正在交付……'
+                  : `生成并交付 ${previewPlan?.version ?? ''}`.trim()}
+              </button>
               {devNote !== null && (
                 <span
                   className={s.vhelp}
@@ -848,45 +902,40 @@ export default function SettingsPage({ boot }: Props) {
               )}
             </div>
 
-            {/* ——— 版本：三格并排（每格都是它自己的真实身份） ——— */}
+            {/*
+              ——— 三格版本身份 + 结构化诊断（2026-11-06 作者那张表） ———
+              ★ 三个号不一样**是常态**：仓库 6 / 已交付 5 / 包内 5 = "正在开发下一轮"。
+                所以这里只按后端的 `level` 上色，不自己比大小 —— 正常差异是灰的，不报红。
+            */}
             <div className={s.vhead}>
               <b>版本</b>
-              <span className={s.vkey}>开发中 / 已发布 / 包内自报，各说各的</span>
+              <span className={s.vkey}>开发中 / 已交付 / 包内自报，各说各的</span>
             </div>
 
-            <div className={s.vrow}>
-              <label className={s.vlabel}>开发中</label>
-              <span className={`${s.vstatic} ${s.mono}`}>{devSrc?.devVersion ?? '—'}</span>
-              <span className={s.grow} />
-            </div>
-            <div className={s.vrow}>
-              <label className={s.vlabel}>已发布</label>
-              <span className={`${s.vstatic} ${s.mono}`}>
-                {devSrc?.publishedVersion ?? '（还没发过）'}
-              </span>
-              <span className={s.grow} />
-            </div>
-            <div className={s.vrow}>
-              <label className={s.vlabel}>包内自报</label>
-              <span className={`${s.vstatic} ${s.mono}`}>
-                {devSrc?.buildVersion ?? '（还没编过）'}
-              </span>
-              <span className={s.grow} />
-            </div>
-
-            {(devSrc?.issues.length ?? 0) > 0 ? (
-              <div className={s.vfield}>
-                {devSrc?.issues.map((issue) => (
-                  <p key={issue} className={s.vhelp} style={{ color: 'var(--danger)' }}>
-                    {issue}
-                  </p>
-                ))}
+            {(devSrc?.checks ?? []).map((row) => (
+              <div className={s.vrow} key={row.item}>
+                <span
+                  className={s.vlabel}
+                  style={{
+                    color:
+                      row.level === 'error' || row.level === 'block'
+                        ? 'var(--danger)'
+                        : row.level === 'warn'
+                          ? 'var(--warn, #9a6700)'
+                          : undefined,
+                  }}
+                >
+                  {row.level === 'error' || row.level === 'block'
+                    ? '● '
+                    : row.level === 'warn'
+                      ? '○ '
+                      : ''}
+                  {row.item}
+                </span>
+                <span className={`${s.vstatic} ${s.mono}`}>{row.value}</span>
+                <span className={s.grow} />
               </div>
-            ) : (
-              <p className={s.vhelp} style={{ color: 'var(--ok, #1a7f37)' }}>
-                三处一致
-              </p>
-            )}
+            ))}
 
             {/* ——— 盘上有什么：文件 / 大小 / 状态（不摆假行） ——— */}
             <div className={s.vhead}>
@@ -954,6 +1003,27 @@ export default function SettingsPage({ boot }: Props) {
                   —— 同一端口上只能有一个。停掉它，再点「启动」。
                 </p>
               </div>
+            )}
+
+            {previewPlan !== null && previewPlan.blockedBy.length > 0 && (
+              <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                {previewPlan.blockedBy.join('；')}
+              </p>
+            )}
+            {previewPlan !== null && previewPlan.blockedBy.length === 0 && (
+              <p className={s.vhelp}>
+                交付会提交 {previewPlan.files.length} 个文件（当前分支{' '}
+                <span className={s.mono}>{previewPlan.branch}</span>）—— <b>只在本地</b>
+                ，不推送、不建 Release。
+              </p>
+            )}
+            {previewNote !== null && (
+              <p
+                className={s.vhelp}
+                style={previewNote.bad ? { color: 'var(--danger)' } : undefined}
+              >
+                {previewNote.text}
+              </p>
             )}
 
             <p className={s.vhelp}>

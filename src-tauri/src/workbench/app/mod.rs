@@ -92,6 +92,7 @@ pub mod machines;
 /// 代码托管平台出口（第三刀下半）：GitHub / Gitee 的 PR/MR + CI，**自持凭据**
 /// （被批准的第二个网络出口，见模块文档）
 pub mod platform;
+pub mod preview_tx;
 /// **发布账本**：`presets/delivery/publish-serial.json` —— 发布线身份 + 单调序号。
 /// 只有正式发布事务能推进它；生成 / 预演只沿用（见该文件头）
 pub mod publish_book;

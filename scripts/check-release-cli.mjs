@@ -94,35 +94,37 @@ check('认不出的通道直接报错', () => {
   match(r.err + r.out, /认不出的更新通道/, '提示语')
 })
 
-/* ⑤ 正式通道仍认 `-dev` 原样传（发布会去掉它） */
-check('正式通道把 0.0.10-dev 归一成 0.0.10', () => {
+/* ⑤ **没有 `-dev` 了**（2026-11-06 作者：「不要再出现 DEV」）：
+   形状不对就当场停，而不是悄悄归一成什么东西 */
+check('拒绝 -dev 形状的号', () => {
   const r = run(['0.0.10-dev', 'x'])
-  eq(r.code, 0, '退出码')
-  eq(JSON.parse(r.out).version, '0.0.10', '版本号')
+  if (r.code === 0) throw new Error('居然放行了')
+  match(r.err + r.out, /没有 -dev 了/, '提示语')
 })
 
-/* ⑥ 建议值：预览通道给 `-preview.1`，正式通道给裸号 */
+/* ⑥ 建议值：预览通道给 `-preview.N`，正式通道给裸号 */
 check('建议版本号按通道给', () => {
   const p = JSON.parse(run(['0.0.10-preview.2', 'x', '--preview']).out)
-  if (!/-preview\.1$/.test(p.suggested)) throw new Error(`预览建议值不对：${p.suggested}`)
-  const s = JSON.parse(run(['0.0.10-dev', 'x']).out)
+  if (!/-preview\.\d+$/.test(p.suggested)) throw new Error(`预览建议值不对：${p.suggested}`)
+  const s = JSON.parse(run(['0.0.12', 'x']).out)
   if (/-/.test(s.suggested)) throw new Error(`正式建议值不该带后缀：${s.suggested}`)
 })
 
-/* ⑦ **`-dev.N` 也要能原样传进来**（2026-11-06 新增：本地预览会把构建号写进版本号，
-   发版时从工作区直接复制那个号过来，别让人先手改一遍） */
-check('正式通道把 0.0.10-dev.7 归一成 0.0.10', () => {
-  const r = run(['0.0.10-dev.7', 'x'])
+/* ⑦ **大小写归一**（作者习惯写 `Preview.1`，历史 tag 是小写）：
+   同一个号只能有**一个** tag，否则 git 里两个都"合法"、谁也说不清谁是权威 */
+check('Preview 大写归一成小写', () => {
+  const r = run(['0.0.12-Preview.3', 'x', '--channel=preview'])
   eq(r.code, 0, '退出码')
-  eq(JSON.parse(r.out).version, '0.0.10', '版本号')
+  eq(JSON.parse(r.out).version, '0.0.12-preview.3', '版本号')
 })
 
-/* ⑧ 带构建号的开发号**不许**走预览通道：预览通道要发的是 `-preview.N`，
-   混着发会把"第几次本地构建"当成发布号写进 tag */
-check('预览通道拒绝 -dev.N', () => {
-  const r = run(['0.0.10-dev.7', 'x', '--channel=preview'])
-  if (r.code === 0) throw new Error('居然放行了')
-  match(r.err + r.out, /预览通道要发预览号/, '提示语')
+/* ⑧ 建议值要跟着**当前工作区的预览号**走，不是永远给 `.1` */
+check('预览建议值 = 当前预览号 + 1', () => {
+  const r = run(['0.0.12-preview.9', 'x', '--channel=preview'])
+  const j = JSON.parse(r.out)
+  if (!/-preview\.(\d+)$/.test(j.suggested)) throw new Error(`建议值形状不对：${j.suggested}`)
+  const n = Number(/-preview\.(\d+)$/.exec(j.suggested)[1])
+  if (n <= 1) throw new Error(`建议值该往后再给一个号：${j.suggested}`)
 })
 
 if (failed > 0) {

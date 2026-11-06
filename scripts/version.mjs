@@ -53,40 +53,37 @@ function readVersions() {
 }
 
 /**
- * `x.y.z` / `x.y.z-dev` / `x.y.z-dev.N` / `x.y.z-preview.N`
- * → `{ text, base, major, minor, patch, kind, seq }`；不合法返回 null。
+ * `x.y.z` / `x.y.z-preview.N` → `{ text, base, major, minor, patch, kind, seq }`；
+ * 不合法返回 null。
  *
- * ★ `kind` 三档（2026-11-05 预览通道）：
- *   - `stable` 正式版：**消耗这个号**，之后同基础不许再发任何东西；
- *   - `preview` 预览版：发出去过，但**不消耗正式号** —— `0.0.10-preview.1` 之后
- *     `0.0.10` 仍可照常发；
- *   - `dev` 开发占位：从没发出去过。
+ * ★ 2026-11-06 作者定的最终规则：**不再有 `-dev`**。
+ *   只有两档身份：
+ *   - `stable` 正式版（`0.0.11`）—— 发出去就冻结，这个号永远不再用；
+ *   - `preview` 预览版（`0.0.12-preview.3`）—— 本地/云端交付过就冻结，序号往后再加。
+ *   未交付的那一版**也是** preview 号（只是还没有 tag）；"有没有冻结"由 git tag 回答，
+ *   不由版本号的形状回答。
  *
- * ★ **`-dev.N` 的那个 N 是构建号，不是版本号**（2026-11-06）：
- *   主版本（`0.0.11`）在一整轮开发里**恒定**，N 只在"生成一份可安装的预览产物"时 +1。
- *   没有它的话，本地反复测"更新"是做不到的 —— 客户端只摆**比当前构建新**的候选，
- *   而 `APP_VERSION` 是编译进二进制的：同号两个包，它分不出谁是新的一份。
- *   发布时 N 整个去掉（`0.0.11-dev.7` → `0.0.11`），所以它不会泄漏到发布号里。
+ * ★ `preview` 的 N 是**第几次交付**，不是版本升级；主版本一整轮恒定，发布时整个去掉
+ *   （`0.0.12-preview.3` → `0.0.12`）。
+ *
+ * ★ 大小写不敏感：作者习惯写 `Preview.1`，历史 tag 是小写 `preview.1` —— 两种都认，
+ *   但**写出来的一律小写**（`text` 保留原样，比较只认 `base` + `seq`）。
  */
 function parse(text) {
   const t = String(text ?? '').trim()
-  const m = /^(\d+)\.(\d+)\.(\d+)(?:-(dev)(?:\.(\d+))?|-preview\.(\d+))?$/.exec(t)
+  const m = /^(\d+)\.(\d+)\.(\d+)(?:-[Pp]review\.(\d+))?$/.exec(t)
   if (!m) return null
-  const devSeq = m[5]
-  const preSeq = m[6]
+  const seqText = m[4]
   // `-preview.01` 与 `-preview.1` 是同一个号，却有两种写法 —— 直接判非法
-  for (const n of [devSeq, preSeq]) {
-    if (n !== undefined && (n.startsWith('0') || Number(n) < 1)) return null
-  }
-  const kind = m[4] ? 'dev' : preSeq !== undefined ? 'preview' : 'stable'
+  if (seqText !== undefined && (seqText.startsWith('0') || Number(seqText) < 1)) return null
   return {
-    text,
+    text: t,
     base: `${m[1]}.${m[2]}.${m[3]}`,
     major: Number(m[1]),
     minor: Number(m[2]),
     patch: Number(m[3]),
-    kind,
-    seq: Number(devSeq ?? preSeq ?? 0),
+    kind: seqText === undefined ? 'stable' : 'preview',
+    seq: Number(seqText ?? 0),
   }
 }
 
@@ -140,12 +137,15 @@ function latestPublished() {
 function reportIdentities(current) {
   const now = current ?? readVersions().pkg ?? ''
   const published = latestPublished()
+  const base = parse(now)?.base
+  /* ★ **三格身份**（2026-11-06 作者那张表）：已发布 / 已交付 / 正在开发。
+     这三个号不一样是常态 —— 界面上不许拿它当错误。 */
+  const delivered = base === undefined ? 0 : Math.max(publishedPreviewSeq(base), localPreviewSeq(base))
   console.log(`  最新已发布：${published ?? '（还没发过）'}`)
-  if (now === published) {
-    console.log(`  当前工作区：${now}  ← 与已发布同号（该进下一版了）`)
-  } else {
-    console.log(`  当前工作区：${now}`)
-  }
+  console.log(
+    `  本地已交付：${delivered === 0 || base === undefined ? '（还没交付过）' : `${base}-preview.${delivered}`}`,
+  )
+  console.log(`  当前开发：  ${now}${now === published ? '  ← 与已发布同号（该进下一版了）' : ''}`)
 }
 
 /** `0.0.10` → `0.0.11`（补丁号 +1，只改最后一段） */
@@ -194,12 +194,12 @@ function assertConsistent() {
       `四处版本不一致：${Object.entries(v)
         .map(([key, value]) => `${key}=${value}`)
         .join(' · ')}`,
-      '版本真值是 src-tauri/Cargo.toml；跑 node scripts/version.mjs bump-dev 重新对齐',
+      '版本真值是 src-tauri/Cargo.toml；跑 node scripts/version.mjs ensure-preview 重新对齐',
     )
   }
   const parsed = parse(v.pkg)
   if (!parsed) {
-    fail(`版本号格式不对：${v.pkg}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+    fail(`版本号格式不对：${v.pkg}（要 x.y.z 或 x.y.z-preview.N）`)
   }
   return parsed
 }
@@ -214,62 +214,29 @@ function check() {
   const published = publishedTags()
   const byBase = published.filter((x) => x.v.base === version.base)
 
-  /* 开发占位：只有**正式版**发过才算"这个号用掉了"。
-   * 预览版发过不影响 `0.0.10-dev` 继续开发 —— 这正是双通道要的样子
-   * （先前这里按 base 一刀切，发过预览就再也回不到开发版）。 */
-  if (version.kind === 'dev') {
-    if (byBase.some((x) => x.v.kind === 'stable')) {
-      fail(
-        `v${version.base} 已经发过正式版，开发版本不能再用这个号`,
-        '跑 node scripts/version.mjs next 取下一个补丁号（例如 0.0.11-dev）',
-      )
-    }
-    ok(`开发版本 ${version.text}（尚未发布）`)
-    return
-  }
-
-  /* 预览版：同一个**完整号**不许发两次；同基础的下一个序号随便发。 */
-  if (version.kind === 'preview') {
-    const same = byBase.find((x) => x.v.kind === 'preview' && x.v.seq === version.seq)
-    if (same) {
+  /* 这一号**已经冻结**（git tag 在）⇒ 工作区不该还停留在它上面：
+     要么已经滚到下一轮（`ensure-preview` 会做），要么是发布提交本身还没滚。 */
+  const frozen = byBase.find((x) => x.v.kind === version.kind && x.v.seq === version.seq)
+  if (frozen) {
+    if (version.kind === 'stable') {
       warn(
-        `当前是已发布过的预览版 v${version.text} —— 它在 main 上合法（发布提交），` +
-          '但开发新东西前必须先换成 -dev，或发下一个预览序号',
+        `当前是已发布版本 v${version.text} —— 它在 main 上合法（发布提交），` +
+          '但继续开发前必须进下一个补丁号的 preview.1（npm run version:ensure）',
       )
-      return
+    } else {
+      warn(
+        `当前 ${version.text} 已经冻结（tag 在）—— 工作区不该停在这一版；` +
+          '跑 npm run version:ensure 进下一轮',
+      )
     }
-    ok(`预览版 ${version.text}（tag 还没打 —— 这是发布流程中的状态）`)
     return
   }
 
-  if (byBase.some((x) => x.v.kind === 'stable')) {
-    warn(
-      `当前是已发布版本 v${version.text} —— 它在 main 上合法（发布提交），` +
-        '但开发新东西前必须换成下一个 -dev',
-    )
-    return
-  }
-
-  ok(`版本 ${version.text}（tag 还没打 —— 这是发布流程中的状态）`)
+  ok(`${version.kind === 'preview' ? '预览' : '正式'}版本 ${version.text}（还没冻结 —— 可以继续改、继续交付）`)
 }
 
 /* ---------- 写操作 ---------- */
 
-/**
- * 把工作区收敛到**一个未发布的开发号**（幂等）。
- *
- * 这是"版本只在发布时递增"那条规则的**执行处**：不管上一轮是发布成功、
- * 发布失败、还是有人手工写了一个号，调它一次就回到"当前该用的开发号"。
- *
- * - 已经是未发布的 `-dev` ⇒ **一个字都不动**（改代码 / 生成 / 打包都调它，
- *   版本号因此恒定 —— 作者要的正是这个）；
- * - 当前号已被**正式发布** ⇒ 进下一个补丁号的 `-dev`（`0.0.10` → `0.0.11-dev`）；
- * - 当前是预览号 / 正式号但**正式版还没发** ⇒ 停在同一个基础的 `-dev`
- *   （`0.0.10-preview.2` → `0.0.10-dev`），否则 `0.0.10` 正式版会被永远跳过去。
- *
- * `bump-dev` 与 `ensure-dev` 是同一件事的两种叫法（一个是"我主动推一把"，
- * 一个是"每次开跑前对齐一下"），共用这一份实现，不各写一套。
- */
 /**
  * 云端已经发过的预览序号（`v0.0.10-preview.2` → 2）。本地交付要排在它后面。
  */
@@ -288,7 +255,7 @@ function publishedPreviewSeq(base) {
  *
  * 三条判据，按顺序：
  * 1. 当前号**已经排在已交付之后** ⇒ 一个字不动（改十次代码还是它）；
- * 2. 当前号**已经被交付过**（或还是个历史遗留的 `-dev`）⇒ 抬到「已交付 + 1」；
+ * 2. 当前号**已经被交付过** ⇒ 抬到「已交付 + 1」；
  * 3. 当前号是**已发布的正式版** ⇒ 进下一个补丁号的 `preview.1`。
  *
  * 「已交付」取 **云端 tag** 与 **本地清单**（`target/local-release/release-preview.json`）
@@ -335,8 +302,8 @@ function localPreviewSeq(base) {
 
 function release() {
   const version = assertConsistent()
-  if (version.kind !== 'dev') {
-    fail(`当前 ${version.text} 不是 -dev`, '发布版本由 scripts/release.mjs 显式给出')
+  if (version.kind !== 'preview') {
+    fail(`当前 ${version.text} 不是预览号`, '正式发布由 scripts/release.mjs 显式给出号')
   }
   if (stableReleased(version.base)) {
     fail(`v${version.base} 已经发过正式版，不能再用同一个号`)
@@ -346,17 +313,16 @@ function release() {
 
 function next() {
   const version = assertConsistent()
-  if (version.kind === 'dev') {
-    fail(`当前已经是开发版本 ${version.text}`, '先发布，再 next')
+  const published = latestPublished()
+  if (published === null) {
+    fail('一个 tag 都没有，不知道从哪儿往下走')
   }
-  /* ★ 预览版发完之后回到**同一个基础**的 -dev（2026-11-05）：
-   *   正式号还没被消耗，开发继续朝 `0.0.10` 走；
-   *   直接跳 `0.0.11-dev` 会把还没发的正式版 0.0.10 永远跳过去。 */
-  if (version.kind === 'preview') {
-    writeAll(`${version.base}-dev`)
-    return
-  }
-  writeAll(`${version.major}.${version.minor}.${version.patch + 1}-dev`)
+  /* 发布成功之后：**下一个补丁号**的 preview.1（作者 2026-11-06 的规则表）。
+     例如 0.0.11 发完 → 0.0.12-preview.1；0.0.12-preview.3 发完 → 0.0.12-preview.4 由 ensure 处理，
+     这里只负责"正式版之后跳到下一个基础"。 */
+  const base = version.kind === 'stable' ? bumpPatch(version.base) : version.base
+  writeAll(`${base}-preview.1`)
+  reportIdentities(`${base}-preview.1`)
 }
 
 /* ---------- 入口 ---------- */
@@ -365,9 +331,6 @@ const command = process.argv[2] ?? 'check'
 switch (command) {
   case 'check':
     check()
-    break
-  case 'bump-dev':
-    convergeDev('bump-dev')
     break
   case 'ensure-preview':
     convergePreview()

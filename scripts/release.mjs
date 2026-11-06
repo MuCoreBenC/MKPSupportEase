@@ -199,8 +199,14 @@ let summary = argSummary?.trim()
  *   在 `suggested` 那一行直接 `Cannot access 'channel' before initialization` ——
  *   而 `--dry-run` 走不到这里，所以只有真发版才炸。
  */
-const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
-const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
+const currentBase = current.replace(/-preview\.\d+$/i, '')
+/* 预览建议值 = **当前工作区那个预览号的下一号**（2026-11-06：以前一律给 `-preview.1`，
+   工作区已经在 preview.6 时那句话就是错的 —— 会让人以为要发一个更旧的号）。 */
+const currentSeq = /-preview\.(\d+)$/i.exec(current)
+const suggested =
+  channel === 'preview'
+    ? `${currentBase}-preview.${currentSeq === null ? 1 : Number(currentSeq[1]) + 1}`
+    : currentBase
 
 /* ---------- 1. 前置检查（没有任何写操作） ---------- */
 
@@ -306,12 +312,13 @@ function resolveVersion(raw, ch) {
   // 允许把 `0.0.10-dev` / `0.0.10-dev.7` 原样传进来：正式发布就是去掉 `-dev[.N]`
   // （那个 N 只是**本地构建号**，不该跟着发出去）；
   // 预览号（`0.0.10-preview.1`）原样保留 —— 它本身就是要发出去的号。
-  /* 两个通道都先去掉 `-dev` / `-dev.N`（那是本地构建痕迹，永远不该发出去）：
-     这样 `0.0.10-dev` 走预览通道时会落到下面那句"预览通道要发预览号"，
-     而不是一句"格式不对" —— 后者会让人以为是自己写法错了。 */
-  const v = raw.replace(/-dev(\.\d+)?$/, '')
+  /* ★ 2026-11-06 起**没有 `-dev` 了**（作者：「不要再出现 DEV」）：
+    版本号只有两种形状 —— 正式 `x.y.z`、预览 `x.y.z-preview.N`。
+    大小写归一成小写：`Preview.2` 与 `preview.2` 必须是**同一个** tag，
+    否则同一个号会有两个 tag，git 那边再也说不清哪个是权威。 */
+  const v = raw.trim().replace(/-(preview)\./i, '-preview.')
   if (!/^\d+\.\d+\.\d+(-preview\.[1-9]\d*)?$/.test(v)) {
-    die(`版本号格式不对：${v}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+    die(`版本号格式不对：${v}（要 x.y.z 或 x.y.z-preview.N，没有 -dev 了）`)
   }
   /* 通道与版本身份必须一致：串台的两边后果都很难撤（内核里还会再判一次，这里只为早停） */
   const isPreview = /-preview\.\d+$/.test(v)

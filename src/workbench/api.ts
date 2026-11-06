@@ -1673,8 +1673,39 @@ export interface DevSourceStatus {
   buildVersion: string | null
   /** 盘上真有什么（不存在就 `exists: false`，不摆假行） */
   files: DeliveryDiskFile[]
-  /** 哪几处对不上（空 = 一致）。**判定在后端**，界面只渲染 */
-  issues: string[]
+  /** 三格版本身份 + 结论。**判定在后端**，界面只按 `level` 上色 */
+  checks: CheckRow[]
+}
+
+/** `dev_source::CheckRow` —— 一条结构化诊断（作者 2026-11-06：不要红字长句） */
+export interface CheckRow {
+  item: string
+  value: string
+  /** `ok` / `warn` / `error` / `block` */
+  level: string
+}
+
+/** `preview_tx::PreviewPlan` —— 交付前先看一眼：会不会拦、会提交什么 */
+export interface PreviewPlan {
+  version: string
+  nextVersion: string
+  tag: string
+  ok: boolean
+  blockedBy: string[]
+  files: string[]
+  strangers: string[]
+  branch: string
+}
+
+/** `preview_tx::PreviewReport` —— 一趟交付的结果 */
+export interface PreviewReport {
+  version: string
+  nextVersion: string
+  tag: string
+  commit: string | null
+  stage: string
+  message: string
+  log: string
 }
 
 /** `dev_source::DeliveryFile` —— 交付面上一个真实文件（别与交付集合那个 `DeliveryFile` 混淆） */
@@ -2804,6 +2835,10 @@ export const wb = {
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
   /** 在文件管理器里打开一个**目录**（路径由后端 DTO 给，界面不自己拼） */
   openPath: (path: string) => invoke<void>('wb_open_path', { path }),
+  /** 交付前看一眼（只读）：会不会拦、会提交哪些文件 */
+  previewPreflight: () => invoke<PreviewPlan>('wb_preview_preflight'),
+  /** 生成并交付当前预览版本（= 授权这一趟的本地 commit + tag，不推送） */
+  previewDeliver: () => invoke<PreviewReport>('wb_preview_deliver'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。

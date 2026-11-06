@@ -292,7 +292,7 @@ function main() {
         真要手写一个号才用 `--version`。 */
   const appVersion = picked.appVersion ?? pkgVersion
   const version = (argOf('--version') ?? appVersion).trim()
-  if (parseVersion(version) === null) die(`版本号格式不对：${version}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+  if (parseVersion(version) === null) die(`版本号格式不对：${version}（要 x.y.z 或 x.y.z-preview.N）`)
 
   const name = `SupportEase_${version}_${ARCH}.app.zip`
   const zipPath = join(OUT, name)
@@ -300,10 +300,9 @@ function main() {
   /* 临时 zip 只用来搬这一趟 */
   if (basename(picked.zip).startsWith('tmp-')) rmSync(picked.zip, { force: true })
 
-  /* 旧的那几支删掉：本地目录只保留"这一版"，免得客户端点到上一轮的包 */
-  for (const f of readdirSync(OUT)) {
-    if (/^SupportEase_.*\.app\.zip$/.test(f) && f !== name) rmSync(join(OUT, f), { force: true })
-  }
+  /* ★ **历史安装包一律保留**（2026-11-06 作者：「Preview 5 的安装包不能被 Preview 6 覆盖」，
+     而且"删掉安装包也要能认出它冻结过"）。以前这里会把别的版本删掉 —— 那等于把回滚路径
+     也删了。客户端只认清单里那一支，目录里多留几支不会让它点错。 */
 
   const size = statSync(zipPath).size
   const digest = sha256(zipPath)
@@ -334,6 +333,27 @@ function main() {
   mkdirSync(history, { recursive: true })
   copyFileSync(join(OUT, manifestName), join(history, `${version}.json`))
 
+  /* ★ **交付账本**（辅助，不决定版本号 —— 那由 git tag 说了算）：
+     记下这一版交付了什么、对应哪个提交、字节指纹是多少。安装包删了也还查得到；
+     账本丢了也不影响"这一版冻结过没有"，那件事问 git tag。 */
+  const ledgerPath = join(REPO, 'delivery', 'local-preview-history.json')
+  const ledger = readJsonOr(ledgerPath)
+  ledger.items = [
+    ...ledger.items.filter((e) => !(e.version === version && e.target === 'local')),
+    {
+      version,
+      commit: gitHead(),
+      at: new Date().toISOString(),
+      channel,
+      target: 'local',
+      result: 'ok',
+      asset: { name, size, sha256: digest },
+      manifest: { name: manifestName, sha256: sha256(join(OUT, manifestName)) },
+    },
+  ]
+  mkdirSync(join(REPO, 'delivery'), { recursive: true })
+  writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`)
+
   /* ★ 三处身份摆在同一行（2026-11-06）：仓库 / 包内 / 清单。
      作者要的是"每个产物都报自己的真实身份" —— 那就让它们并排出现，
      一眼看得出有没有谁在冒充别人。 */
@@ -360,6 +380,25 @@ function main() {
     )
     console.log('         只测安装链的话用缺省的 preview。')
     console.log('')
+  }
+}
+
+/** 读交付账本；没有 / 坏了都当空账本（账本是辅助，不该因为它丢了就交付不了）。 */
+function readJsonOr(path) {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'))
+    return Array.isArray(parsed.items) ? parsed : { items: [] }
+  } catch {
+    return { items: [] }
+  }
+}
+
+/** 这一笔交付对应的提交（没有 git / 还没提交就是 null，不编一个）。 */
+function gitHead() {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf8' }).trim()
+  } catch {
+    return null
   }
 }
 

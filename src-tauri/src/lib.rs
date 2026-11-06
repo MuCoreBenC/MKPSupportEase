@@ -997,6 +997,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::dev_source::wb_dev_source_clear_conflict,
         // 「打开交付目录」—— 路径由后端 DTO 给，界面不自己拼（2026-11-06）
         app::dev_source::wb_open_path,
+        // 本地预览交付事务：编译 → 清单 → 提交 → 打 tag → 滚到下一轮（不推送）
+        app::preview_tx::wb_preview_preflight,
+        app::preview_tx::wb_preview_deliver,
         // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
         // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。
