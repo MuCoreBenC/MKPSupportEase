@@ -98,9 +98,15 @@ function zipApp(app, out) {
   return out
 }
 
-/** 从 dmg 里拿出 `.app`（挂到临时挂载点，用完卸载） */
+/**
+ * 从 dmg 里拿出 `.app`（挂到临时挂载点，**先拷出来**，用完卸载）。
+ *
+ * ★ 2026-11-06 真跑才发现的：原来直接返回挂载点里的路径，`finally` 一 detach
+ *   那个路径就没了 —— 后面的 `ditto` 报 `Cannot get the real path`。
+ */
 function appFromDmg(dmg) {
   const mnt = join(tmpdir(), `mkpse-dmg-${process.pid}`)
+  const dest = join(tmpdir(), `mkpse-dmg-app-${process.pid}`)
   mkdirSync(mnt, { recursive: true })
   try {
     execFileSync('hdiutil', ['attach', '-nobrowse', '-readonly', '-mountpoint', mnt, dmg], {
@@ -108,7 +114,9 @@ function appFromDmg(dmg) {
     })
     const app = readdirSync(mnt).find((n) => n.endsWith('.app'))
     if (!app) die(`dmg 里没有 .app：${dmg}`)
-    return join(mnt, app)
+    rmSync(dest, { recursive: true, force: true })
+    run('ditto', [join(mnt, app), dest])
+    return dest
   } finally {
     try {
       execFileSync('hdiutil', ['detach', '-quiet', mnt], { stdio: 'ignore' })
@@ -155,15 +163,28 @@ function pickAsset() {
       at: statSync(existsSync(macos) ? macos : appDir).mtimeMs,
     })
   }
-  const dmg = newest(join(BUNDLE, 'dmg'), /\.dmg$/)
-  if (dmg !== null) cands.push({ kind: 'dmg', path: dmg, at: statSync(dmg).mtimeMs })
-
+  /*
+   * **dmg 不进这张候选表**：它是同一次构建的派生物，mtime 总比 `.app` 新，
+   * 拿它当候选只会把最可靠的那份挤掉（2026-11-06 第一次真跑就撞上了）。
+   * 只有 `.app` / `.app.zip` 都没有时，才拿 dmg 兜底。
+   */
   if (cands.length === 0) {
-    die(
-      '没找到构建产物（target/release/bundle 下没有 .app.zip / .app / .dmg）。\n' +
-        '    先编一份：npm run tauri:build（客户端；不要用工作台那一档）',
-    )
+    const dmg = newest(join(BUNDLE, 'dmg'), /\.dmg$/)
+    if (dmg === null) {
+      die(
+        '没找到构建产物（target/release/bundle 下没有 .app.zip / .app / .dmg）。\n' +
+          '    先编一份：npm run tauri -- build（客户端；不要用工作台那一档）',
+      )
+    }
+    console.log(`[local-release] 只有 dmg，从它里面取 .app：${dmg}`)
+    mkdirSync(OUT, { recursive: true })
+    const app = appFromDmg(dmg)
+    const version = plistVersion(app)
+    const zip = zipApp(app, join(OUT, `tmp-${basename(app)}.zip`))
+    rmSync(app, { recursive: true, force: true })
+    return { zip, appVersion: version }
   }
+
   cands.sort((a, b) => b.at - a.at)
   const best = cands[0]
   console.log(`[local-release] 用最新的一份产物：${best.kind} · ${best.path}`)
@@ -171,10 +192,9 @@ function pickAsset() {
   if (best.kind === 'app.zip') return { zip: best.path, appVersion: null }
 
   mkdirSync(OUT, { recursive: true })
-  const app = best.kind === 'app' ? best.path : appFromDmg(best.path)
   return {
-    zip: zipApp(app, join(OUT, `tmp-${basename(app)}.zip`)),
-    appVersion: plistVersion(app),
+    zip: zipApp(best.path, join(OUT, `tmp-${basename(best.path)}.zip`)),
+    appVersion: plistVersion(best.path),
   }
 }
 
@@ -293,7 +313,14 @@ function main() {
   console.log('')
   console.log(`\u001b[32m✓ 本地发布就绪\u001b[0m  ${name}`)
   console.log(`  清单      ${join(OUT, manifestName)}`)
-  console.log(`  版本      ${version}（包里是 ${appVersion}${newer ? '' : ' —— \u001b[31m不比它新，客户端不会摆这一版\u001b[0m'}）`)
+  console.log(`  版本      ${version}（包里是 ${appVersion}）`)
+  if (!newer) {
+    /* 双版本测试（先装 preview.3、再拿 preview.4 去更新）正是这一档：
+       清单号与包里同号，但**正在跑的那一份更旧**，客户端照样摆卡。 */
+    console.log(
+      `  \u001b[33m注意\u001b[0m      清单号不比包里新：只有"正在跑的那一份比 ${version} 旧"时才会摆卡`,
+    )
+  }
   console.log(`  大小/SHA  ${size} B / ${digest.slice(0, 16)}…`)
   console.log(`  下载地址  ${assetUrl}`)
   console.log('')
