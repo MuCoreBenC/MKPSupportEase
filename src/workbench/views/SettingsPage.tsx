@@ -248,8 +248,7 @@ export default function SettingsPage({ boot }: Props) {
   /**
    * 现读一次状态。
    *
-   * ★ 2026-11-06：没有"草稿选中项"了 —— 作者把那条选择撤了
-   * （「任何东西都不用选，它只是把它预览出来」）。这一页只读盘上的事实。
+   * 没有"草稿选中项"：这一页只读盘上的事实，不让人选。
    */
   const readDevSrc = useCallback(async () => {
     try {
@@ -324,7 +323,7 @@ export default function SettingsPage({ boot }: Props) {
    * 对不上就拒绝动手（PID 会被复用）。
    */
   /**
-   * **生成并交付当前预览版本**（作者 2026-11-06 定的一颗主动作）。
+   * **生成并交付当前预览版本** —— 这一页唯一的主动作。
    *
    * 点它 = 授权这一趟的本地 commit + tag（不推送、不建 Release、不触发 CI）。
    * 未跟踪文件由后端在 preflight 里拦下 —— 界面只是把原因摆出来，不替人决定归属。
@@ -872,7 +871,7 @@ export default function SettingsPage({ boot }: Props) {
               </button>
               <span className={s.grow} />
               {/*
-                主操作：生成并交付当前预览版本（2026-11-06 作者要的那一颗）。
+                主操作：生成并交付当前预览版本。
                 点它 = 授权这一趟的本地 commit + tag；未跟踪文件由后端拦。
               */}
               <button
@@ -903,7 +902,7 @@ export default function SettingsPage({ boot }: Props) {
             </div>
 
             {/*
-              ——— 三格版本身份 + 结构化诊断（2026-11-06 作者那张表） ———
+              ——— 三格版本身份 + 结构化诊断 ———
               ★ 三个号不一样**是常态**：仓库 6 / 已交付 5 / 包内 5 = "正在开发下一轮"。
                 所以这里只按后端的 `level` 上色，不自己比大小 —— 正常差异是灰的，不报红。
             */}

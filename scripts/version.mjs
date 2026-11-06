@@ -1,7 +1,7 @@
 /**
  * 版本号策略：**已发布的号永不再用；开发永远拿着下一个号的 `-dev`**。
  *
- * 为什么这么定（作者 2026-11-04）：
+ * 为什么这么定：
  * - 发过的版本是一份不可变的事实（tag + Release + 安装包都指向它），
  *   再改同一个号就变成"同一个名字两种内容" —— 客户端、issue、回滚全说不清；
  * - 所以开发分支上的版本**立刻**变成下一个补丁号的 `-dev`（如 `0.0.10-dev`），
@@ -24,7 +24,7 @@
  *   node scripts/version.mjs next        发布后 → 下一个 `-dev`（预览版回到同一基础）
  *   node scripts/version.mjs current     打印当前版本（给别的脚本取）
  *
- * ★ **预览号**（2026-11-05）：`x.y.z-preview.N` 是**发布**的一种，但它**不消耗**正式号 ——
+ * ★ **预览号**：`x.y.z-preview.N` 是发布的一种，但它**不消耗**正式号 ——
  *   发过 `0.0.10-preview.1` 之后，`0.0.10` 仍可照常发正式版；同一个预览序号不许发两次。
  */
 import { execFileSync } from 'node:child_process'
@@ -56,7 +56,7 @@ function readVersions() {
  * `x.y.z` / `x.y.z-preview.N` → `{ text, base, major, minor, patch, kind, seq }`；
  * 不合法返回 null。
  *
- * ★ 2026-11-06 作者定的最终规则：**不再有 `-dev`**。
+ * ★ **没有 `-dev`**。
  *   只有两档身份：
  *   - `stable` 正式版（`0.0.11`）—— 发出去就冻结，这个号永远不再用；
  *   - `preview` 预览版（`0.0.12-preview.3`）—— 本地/云端交付过就冻结，序号往后再加。
@@ -92,7 +92,7 @@ const cmp = (a, b) => a.major - b.major || a.minor - b.minor || a.patch - b.patc
 /**
  * 已发布的 tag（`v*`，只认合法形状），按版本升序。
  *
- * ★ 预览 tag（`v0.0.10-preview.1`）也在里面（2026-11-05）：不认它的话，
+ * ★ 预览 tag（`v0.0.10-preview.1`）也在里面：不认它的话，
  *   "这个预览号发过没有"就永远答"没有"，同一个号能被发第二次。
  */
 function publishedTags() {
@@ -129,7 +129,7 @@ function latestPublished() {
 }
 
 /**
- * 把"版本身份"那两格摊开（2026-11-06 作者：「每个产物都要报自己的真实身份」）。
+ * 把"版本身份"那几格摊开。
  *
  * 只打印，不改任何东西 —— `check` 与两个写操作最后都调它，于是
  * "最新已发布是谁 / 工作区现在是谁"永远同时出现在同一屏上，不会再各说各的。
@@ -138,7 +138,7 @@ function reportIdentities(current) {
   const now = current ?? readVersions().pkg ?? ''
   const published = latestPublished()
   const base = parse(now)?.base
-  /* ★ **三格身份**（2026-11-06 作者那张表）：已发布 / 已交付 / 正在开发。
+  /* **三格身份**：已发布 / 已交付 / 正在开发。
      这三个号不一样是常态 —— 界面上不许拿它当错误。 */
   const delivered = base === undefined ? 0 : Math.max(publishedPreviewSeq(base), localPreviewSeq(base))
   console.log(`  最新已发布：${published ?? '（还没发过）'}`)
@@ -208,8 +208,8 @@ function assertConsistent() {
 
 function check() {
   const version = assertConsistent()
-  /* ★ 两格身份先摆出来（2026-11-06）：作者要的是"最新已发布"与"当前工作区"
-     同时出现 —— 以前只有一句"开发版本 X（尚未发布）"，没人知道最新发到哪儿了。 */
+  /* 身份三格一起摆出来："最新已发布"、"本地已交付"与"当前开发"同时出现，
+     免得只看一句"开发版本 X"却不知道发到哪儿了。 */
   reportIdentities(version.text)
   const published = publishedTags()
   const byBase = published.filter((x) => x.v.base === version.base)
@@ -247,7 +247,7 @@ function publishedPreviewSeq(base) {
 }
 
 /**
- * **收敛到"下一个待交付的预览号"**（2026-11-06 作者定的最终规则）。
+ * **收敛到"下一个待交付的预览号"**。
  *
  * ```text
  * 正式 0.0.11 已发  →  0.0.12-preview.1 → 交付 → 0.0.12-preview.2 → … → 0.0.12
@@ -317,7 +317,7 @@ function next() {
   if (published === null) {
     fail('一个 tag 都没有，不知道从哪儿往下走')
   }
-  /* 发布成功之后：**下一个补丁号**的 preview.1（作者 2026-11-06 的规则表）。
+  /* 发布成功之后：**下一个补丁号**的 preview.1。
      例如 0.0.11 发完 → 0.0.12-preview.1；0.0.12-preview.3 发完 → 0.0.12-preview.4 由 ensure 处理，
      这里只负责"正式版之后跳到下一个基础"。 */
   const base = version.kind === 'stable' ? bumpPatch(version.base) : version.base

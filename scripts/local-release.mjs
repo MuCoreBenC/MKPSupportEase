@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * **本地发布**（2026-11-06，作者："我不希望每次都要发新版再测试"）。
+ * **本地发布**：一个版本一跑，不用发版就能测更新。
  *
  * # 它解决的那件事
  *
@@ -101,7 +101,7 @@ function zipApp(app, out) {
 /**
  * 从 dmg 里拿出 `.app`（挂到临时挂载点，**先拷出来**，用完卸载）。
  *
- * ★ 2026-11-06 真跑才发现的：原来直接返回挂载点里的路径，`finally` 一 detach
+ * ★ **必须先拷出来**：`finally` 一 detach，挂载点里的路径就没了
  *   那个路径就没了 —— 后面的 `ditto` 报 `Cannot get the real path`。
  */
 function appFromDmg(dmg) {
@@ -145,9 +145,8 @@ function pickAsset() {
   }
 
   /*
-   * ★ 2026-11-06：以前**优先 `.app.zip`**，于是 `npm run tauri -- build` 之后
-   *   `local-release` 会挑走 `scripts/release.mjs` 上次留下的那份旧 zip，
-   *   而刚编的 `.app` 就在旁边（症状：装上去的还是老代码，但日志一切正常）。
+   * ★ **按 mtime 取最新那一份**：`.app.zip` 可能是 `scripts/release.mjs` 上次留下的旧成品，
+   *   而刚编的 `.app` 就在旁边 —— 挑错了会"装上去还是老代码，日志一切正常"。
    *   改成**按 mtime 取最新的一份**，并把挑中的是谁打出来。
    */
   const cands = []
@@ -165,7 +164,7 @@ function pickAsset() {
   }
   /*
    * **dmg 不进这张候选表**：它是同一次构建的派生物，mtime 总比 `.app` 新，
-   * 拿它当候选只会把最可靠的那份挤掉（2026-11-06 第一次真跑就撞上了）。
+   * 拿它当候选只会把最可靠的那份挤掉。
    * 只有 `.app` / `.app.zip` 都没有时，才拿 dmg 兜底。
    */
   if (cands.length === 0) {
@@ -272,8 +271,7 @@ function main() {
   mkdirSync(OUT, { recursive: true })
   const picked = pickAsset()
 
-  /* 1. **产物自报的号必须等于仓库这个号**（2026-11-06 作者：「你这都是 0.0.4 了，
-        里面还显示 0.0.3，那不是很不合理吗？」）。
+  /* 1. **产物自报的号必须等于仓库这个号** —— 包里说 0.0.3、清单说 0.0.4 就是坏数据。
         `.app.zip` 那一档读不到 Info.plist（它是别人打好的成品），只能退回 package.json ——
         但**只要读得到就必须一致**，不一致说明"改了号没重编"。
         `APP_VERSION` 是编译期常量：改了 `Cargo.toml` 不重编，包里还是旧号。 */
@@ -286,9 +284,8 @@ function main() {
   }
 
   /* 2. **清单号 = 产物自己报的那个号**，不再另算。
-        以前默认取"包内版本的下一个预览号"，于是清单说 preview.4、包里是 preview.3，
-        客户端装完一看还是 3 —— 就是作者 2026-11-06 卡住的那件事。
-        要装上去之后号真的变了，就得**先抬号再重编**（`npm run preview` 会按顺序做完）。
+        清单号与包里不一致时，客户端装完看到的还是旧号。要号真的变，
+        就得**先抬号再重编**（`npm run preview:build` 按顺序做完）。
         真要手写一个号才用 `--version`。 */
   const appVersion = picked.appVersion ?? pkgVersion
   const version = (argOf('--version') ?? appVersion).trim()
@@ -300,7 +297,7 @@ function main() {
   /* 临时 zip 只用来搬这一趟 */
   if (basename(picked.zip).startsWith('tmp-')) rmSync(picked.zip, { force: true })
 
-  /* ★ **历史安装包一律保留**（2026-11-06 作者：「Preview 5 的安装包不能被 Preview 6 覆盖」，
+  /* ★ **历史安装包一律保留**（
      而且"删掉安装包也要能认出它冻结过"）。以前这里会把别的版本删掉 —— 那等于把回滚路径
      也删了。客户端只认清单里那一支，目录里多留几支不会让它点错。 */
 
@@ -325,7 +322,7 @@ function main() {
   }
   writeFileSync(join(OUT, manifestName), `${JSON.stringify(manifest, null, 2)}\n`)
 
-  /* ★ **历史交付要留得住**（2026-11-06 作者：「Preview 5 的安装包不能被 Preview 6 覆盖」）：
+  /* ★ **历史交付要留得住**：
      · 安装包 zip 名字里带版本号，天然不会被下一轮盖掉；
      · 但清单每次都被**同名覆盖**（客户端只认 `release-preview.json` 这一份），
        所以这里再存一份带版本号的副本 —— 想回滚、想查"第 3 轮那版的清单",都还找得到。 */
@@ -354,7 +351,7 @@ function main() {
   mkdirSync(join(REPO, 'delivery'), { recursive: true })
   writeFileSync(ledgerPath, `${JSON.stringify(ledger, null, 2)}\n`)
 
-  /* ★ 三处身份摆在同一行（2026-11-06）：仓库 / 包内 / 清单。
+  /* ★ 三处身份摆在同一行：仓库 / 包内 / 清单。
      作者要的是"每个产物都报自己的真实身份" —— 那就让它们并排出现，
      一眼看得出有没有谁在冒充别人。 */
   const same = version === appVersion

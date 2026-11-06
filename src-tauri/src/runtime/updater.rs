@@ -1,4 +1,4 @@
-//! **应用内更新**（2026-10-05 第五刀）：在程序里下载新版本、显示进度、下载完自动
+//! **应用内更新**：在程序里下载新版本、显示进度、下载完自动
 //! 替换 `/Applications/SupportEase.app` 并重启。
 //!
 //! # 形状：状态机 + 一个后台任务
@@ -72,7 +72,7 @@ pub enum UpdateState {
     /// 下完了，可以装了。
     ///
     /// ★ **`version` / `channel` 是给界面判"这是不是这张卡的那一版"用的**
-    /// （2026-11-06：下载完按钮还写着「尝试测试版」，再点又重下一遍）。
+    /// 界面据这两格判"已就绪的是不是这张卡" —— 只看 `path` 会把另一通道的就绪当成这一张的。
     /// 只有 `path` 时界面分不清"已就绪"和"就绪的是别的通道那一版"。
     Ready {
         path: String,
@@ -305,7 +305,7 @@ pub fn write_result(app_data: &Path, result: &UpdateResult) -> Result<(), AppErr
 
 /// 版本号进脚本 / 进账之前先洗一遍。
 ///
-/// ★ 它**不再是编译期常量**（2026-11-06：`Ready` 带上了清单里那一版的号）。
+/// ★ 它是**外部输入**：`Ready` 带的是清单里那一版的号，不是本进程编进去的那个。
 ///   远端清单是外部输入，一个带引号的"版本号"能改写脚本里的 JSON 乃至 `printf` 的参数。
 ///   只留 `A-Za-z0-9.-`，洗空了就退回本构建的版本（宁可记错号，也不让脚本被改写）。
 pub fn safe_version(raw: &str) -> String {
@@ -346,21 +346,15 @@ pub fn install_script(
             "{{\"version\":\"{version}\",\"ok\":{ok},\"reason\":\"{reason}\",\"at\":\"{at}\"}}"
         ))
     };
-    /* ★ 2026-11-06：作者「点了重启并安装，什么都没发生」。四条证据指向同一处：
-     *   · `run/update-result.json` 写着 `ok:true`（14:27）⇒ `rm -rf` / `mv` / 写账**都成了**；
-     *   · `run/update/unpacked/` 里只剩 `__MACOSX` ⇒ 新的 `.app` 确实被 `mv` 走了；
-     *   · `/Applications/SupportEase.app` 已经是新版本（mtime 14:11）；
-     *   · **可是还有一个 14:24 启动的旧实例在跑**。
-     *   ⇒ 装是装上了，但 `open <path>` 遇到"这个应用已经在跑"时**只把旧窗口叫到前面**，
-     *     不会拉起新进程。用户看到的正是"没反应"，而且那个旧窗口还是旧代码。
-     *
-     * 所以这一版钉三件事（每一件都是一个真失败模式）：
-     *   ① **等旧进程退出再动手**（最多 3s；还不走就 TERM → KILL，并记在日志里）；
+    /* 脚本钉四件事，每一件都对应一个真实的失败模式：
+     *   ① **等旧进程退出再动手**（最多 3s；还不走就 TERM → KILL，并记在日志里）——
+     *      `open <path>` 遇到"这个应用已经在跑"时只把旧窗口叫到前面，不会拉起新进程；
      *   ② **`open -n`** —— 即便还有别的实例在跑，也要拉起**新版本**这一个进程；
-     *   ③ 不再用 `&&` 串联 + 每一步都写日志 + 失败也写账（`ok:false` 带原因）。
+     *   ③ 不用 `&&` 串联：一步失败就把后面全静默跳过（写账与拉起都在后面）；
+     *   ④ 每一步写日志、失败也写账（`ok:false` 带原因），并把退出码记下来。
      *
      * ★ 模板用占位符替换而不是 `format!`：这段脚本满屏 `$` 与 `{}`，
-     *   塞进 `format!` 要转义一半的花括号，改一次错一次。 */
+     *   塞进 `format!` 要转义一半的花括号。 */
     let script = r#"
 # 日志目录必须**先**建出来：下面那条重定向在子 shell 起来之前就打开了文件，
 # 目录不存在时整段脚本会当场失败、一个字都不留（这是真跑一次才发现的）。
@@ -371,9 +365,9 @@ mkdir -p "$(dirname "$L")" 2>/dev/null
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) install v@@VERSION@@" >> "$L"
 echo "shell=$$ old_pid=@@PID@@ uid=$(id -u)" >> "$L"
 echo "target=@@TARGET@@ staged=@@STAGED@@" >> "$L"
-# ① 等旧进程真的退出：它还在时 `open` 只会把旧窗口叫到前面（2026-11-06 的真 bug）
-#    ★ 3 秒（15×0.2s）已经很大方：`app.exit(0)` 正常在 0.1~0.5s 内退干净。
-#      作者 2026-11-06：「不应该那么长」—— 原来那条是 10s + TERM 2s + KILL 1s。
+# ① 等旧进程真的退出：它还在时 `open` 只会把旧窗口叫到前面
+#    ★ 3 秒（15×0.2s）已经很大方：`app.exit(0)` 正常在 0.1~0.5s 内退干净，
+#      再久就该 TERM 了。
 i=0
 while [ "$i" -lt 15 ] && kill -0 @@PID@@ 2>/dev/null; do
   sleep 0.2
@@ -459,7 +453,7 @@ fn res_path(app_data: &Path) -> String {
 /// **安装过程日志**（`<appData>/run/update-install.log`）。
 ///
 /// 为什么要它：安装脚本在应用**退出之后**才跑，那时没有任何界面能显示错误。
-/// 作者 2026-11-06 点了「重启并安装」什么都没发生，而旧脚本一个字都不留 ——
+/// 安装发生在应用退出之后，界面上没有任何东西能报错，只剩这份日志 ——
 /// 只能靠猜。这份日志是他下次能直接发给我的东西：哪一步、什么路径、退出码多少。
 pub fn install_log_path(app_data: &Path) -> PathBuf {
     app_data.join("run").join("update-install.log")
@@ -470,7 +464,7 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// 资产种类（2026-11-05 双平台）：显式 `kind` 优先，老档按文件名后缀兜底。
+/// 资产种类：显式 `kind` 优先，老档按文件名后缀兜底。
 ///
 /// `kind` 只有两档，认不出的一律按 `appZip`（macOS 老路径）处理 —— 不猜第三套。
 pub fn asset_kind(asset: &ReleaseAsset) -> &str {
@@ -482,7 +476,7 @@ pub fn asset_kind(asset: &ReleaseAsset) -> &str {
     }
 }
 
-/// **Windows 帮手脚本**（2026-11-05）：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
+/// **Windows 帮手脚本**：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
 ///
 /// 返回 `powershell -Command` 的实参。与 macOS 的 [`install_script`] 同一套四件事：
 /// 等本进程退出 → 装 → 写 `run/update-result.json` → 拉起新版本。
@@ -532,7 +526,7 @@ pub fn running_exe() -> Result<PathBuf, AppError> {
 /// 从当前可执行文件反推**这次运行的那个 `.app`**（`.../SupportEase.app/Contents/MacOS/…`
 /// → `.../SupportEase.app`）。找不到就如实说"不在 .app 里"（那就不是安装版）。
 ///
-/// ★ **macOS 专用**（2026-11-05）：Windows 走 [`running_exe`]，两边别混。
+/// ★ **macOS 专用**：Windows 走 [`running_exe`]，两边别混。
 pub fn running_app() -> Result<PathBuf, AppError> {
     let exe = std::env::current_exe().map_err(|e| {
         AppError::io(messages::text("ui.runtime.updater.482", &[])).with_detail(e.to_string())
@@ -598,7 +592,7 @@ pub fn download(
     }
     result?;
 
-    /* ★ Windows（2026-11-05）：NSIS 安装包是**一个 .exe**，不解压。
+    /* ★ Windows：NSIS 安装包是**一个 .exe**，不解压。
      * 下载阶段已验过 size / sha；这里直接把 exe 交给 `Ready`，
      * 退出之后由帮手脚本 `/S` 静默安装并拉起新版本。
      * macOS 那条「解压 → 找 .app → 替换」整段保持不动。 */
@@ -785,7 +779,7 @@ mod tests {
     fn sha256_is_checked_only_when_given() {
         // ★ 用临时目录里的空文件，**不用 `/dev/null`** ——
         //   `/dev/null` 在 Windows 上不存在，这条判据在 rust-windows job 上真红过一次
-        //   （2026-10-05，作者贴的 CI 截图）。判据也守"跨平台"这一条。
+        //   判据也守"跨平台"这一条。
         let dir = tempfile::tempdir().unwrap();
         let empty = dir.path().join("empty.bin");
         crate::fsx::atomic::atomic_write(&empty, b"").unwrap();
@@ -887,7 +881,7 @@ mod tests {
         assert!(script.contains(RESULT_FILE), "结果要落账（下次启动读）");
     }
 
-    /// ★ **安装脚本必须留下可查的证据**（2026-11-06 作者："点了重启并安装，什么都没发生"）。
+    /// ★ **安装脚本必须留下可查的证据**：装完之后人要能回答"它到底做到哪一步"。
     ///
     /// 旧脚本只有 `sleep; rm && mv && printf && open` 一条链，一个字都不留：
     /// 任何一步失败，后面的写账与拉起全被 `&&` 跳过，下次启动既没账、也没线索。
@@ -927,7 +921,7 @@ mod tests {
         assert!(script.contains("exit="), "退出码要记下来");
     }
 
-    /// ★ **脚本得真的跑得起来**（2026-11-06）：以前只断言"字符串里有这几个字"，
+    /// ★ **脚本得真的跑得起来**：只断言"字符串里有这几个字"
     /// 而从没让 `sh` 执行过它 —— 真跑一次才发现 `run/` 不存在时 `echo >>` 与
     /// `printf >` 全部失败，脚本一个字都留不下（正是"没反应"最难看的那种）。
     ///
@@ -1050,7 +1044,7 @@ mod tests {
         assert!(
             opened.trim_start().starts_with("-n "),
             "★ 必须以 `open -n` 拉起：不带 -n 时，只要还有旧实例在跑，\n\
-             系统只会把那个旧窗口叫到前面，新版本一次都不会被启动（2026-11-06 的真 bug）：{opened}"
+             系统只会把那个旧窗口叫到前面，新版本一次都不会被启动：{opened}"
         );
         assert!(opened.contains("SupportEase.app"));
     }
@@ -1074,7 +1068,7 @@ mod tests {
         pid
     }
 
-    /// **Windows 帮手脚本**（2026-11-05）：本机是 macOS，只验**纯函数产出的形状** ——
+    /// **Windows 帮手脚本**：本机是 macOS，只验**纯函数产出的形状** ——
     /// 真机行为由 Windows CI 编译通过来守，不在这里假装跑过。
     ///
     /// 旧判据：只有 macOS 的 `install_script` 一条（替换 `.app` + `open`）。

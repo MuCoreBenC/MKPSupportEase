@@ -11,7 +11,7 @@
 //!            └─ 起 scripts/preset-test-server/ 在 127.0.0.1:8787
 //! ```
 //!
-//! # ★ 它**只起服务**，不碰客户端（作者 2026-10-08 裁决）
+//! # 它只起服务，不碰客户端
 //!
 //! 先前那一版按钮跑的是 `npm run dev:test-update`（连客户端 `tauri dev` 一起起、
 //! 用 `MKPSE_PRESET_SOURCE_URL` 把源指过去）。作者的判断很直接：**没必要** ——
@@ -32,7 +32,7 @@
 //!   那道闸后面），给用户的二进制里既没有这颗按钮，也没有这几条命令。
 //! - 输出**继承给终端**：服务的日志打在起工作台的那个终端里。
 //!   这个按钮只是"替你敲了那条命令"，不另造一套日志窗口充当真相。
-//! - **端口被占着时，先把占用者摆出来、问一句**（2026-10-08 踩出来的那条）：
+//! - **端口被占着时，先把占用者摆出来、问一句**：
 //!   8787 上已经有东西（上一轮留下的服务、或你手动起的 `preset-source:dev`）时，
 //!   这一份起不来。所以**起之前先探端口**（`conflicts_of`），把占用者连同 PID 摆到
 //!   界面上，问一句"要不要把它停掉"（`wb_dev_source_clear_conflict`）。
@@ -76,8 +76,7 @@ const ROOT_ENV: &str = "PRESET_TEST_ROOT";
 /// 让 `server.mjs` **把发布序号往前拨一格**（`catalog.json` 里 `publishSerial + 1`、
 /// `publishedAt` 换成此刻）。
 ///
-/// ★ 2026-10-30 作者：「我这一个模拟的你如果能加一就更好了，这样子就更真实了」。
-/// 不拨的话，测试源那份目录和客户端手上那份**同号**，而内容又不同 ⇒ 逐文件判据给
+/// 序号要拨一格：不拨的话，测试源那份目录和客户端手上那份**同号**，而内容又不同 ⇒ 逐文件判据给
 /// `Inconsistent`（"那一代目录不再唯一"）—— 看着像坏了。拨一格就成了正常的
 /// "云端发了下一版"，`Outdated` 才对得上真实使用。
 ///
@@ -107,7 +106,7 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 
 /// 测试源端哪一份。
 ///
-/// **两件事分开摆**（2026-11-06；此前只有「当前交付」一项）：
+/// **两件事分开摆**：
 ///
 /// - [`Self::Delivery`] 端**当前交付** —— 你刚生成出来的那一份，于是
 ///   「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通；
@@ -125,9 +124,8 @@ pub enum SourceKind {
     /// **当前交付**：仓库里 `presets/delivery/` 那一份
     #[serde(rename = "delivery")]
     Delivery,
-    /* ★ 2026-11-06 作者：「我不要多一个，这里不需要让我选择」——
-    「本地发布」那一项退役了。`target/local-release/` 里有清单时，服务端**自动**叠上
-    那层覆盖（见 [`spawn_server`]）；界面只负责把"叠上了什么、版本是多少"摆出来。
+    /* 只有一条。`target/local-release/` 里有清单时，服务端**自动**叠上那层覆盖
+    （见 [`spawn_server`]）；界面只负责把"叠上了什么、版本是多少"摆出来。
     有就叠、没有就不叠，不需要人来勾。 */
 }
 
@@ -180,9 +178,8 @@ impl SourceKind {
 
 /// 服务根与地址（**只剩一份**）。
 ///
-/// 2026-11-06 之前这里还有"选哪一份"的分叉（交付 / 本地发布）。作者把那条撤了：
-/// 「任何东西都不用选，它只是把它预览出来」—— 于是只剩这一条，本地发布那层
-/// 由 [`spawn_server`] 按"目录里有没有清单"自动叠。
+/// 只有这一条：本地发布那层由 [`spawn_server`] 按"目录里有没有清单"自动叠，
+/// 不给人选 —— 界面只负责把它摊开。
 fn serve(presets_root: &Path) -> Served {
     SourceKind::Delivery.derive(presets_root)
 }
@@ -197,8 +194,7 @@ fn local_release_dir(served: &Served) -> PathBuf {
     }
 }
 
-/// 交付面上**一个真实文件** —— 作者 2026-11-06：「你把那个它里面有的，我盘里面有的
-/// 内容显示出来呀」。名字 / 大小 / 在不在 / （清单类）版本号，就这四格。
+/// 交付面上一个真实文件：名字 / 大小 / 在不在 / （清单类）版本号，就这四格。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DeliveryFile {
@@ -335,8 +331,7 @@ fn local_manifests(served: &Served) -> impl Iterator<Item = (String, PathBuf)> {
         .filter(|(_, p)| p.is_file())
 }
 
-/// 「这个目录里到底有什么」—— 作者 2026-11-06：「工作台里面应该显示清楚啊，
-/// 那个目录下面有什么」。
+/// 「这个目录里到底有什么」：版本号与安装包个数。
 ///
 /// 回一段能直接摆到界面上的字：每份清单的**版本号** + 安装包个数。
 /// 读不出 / 不存在都照实说，不编一个版本号。
@@ -416,10 +411,10 @@ pub struct DevSourceStatus {
     /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 被别人占着的话，
     /// 点「启动」必死在那上面。空 = 端口干净
     pub conflicts: Vec<PortConflict>,
-    /// 那一行（2026-11-06 起只有「当前交付」一条，**不是选项**：界面照着摆状态即可）
+    /// 那一行（只有「当前交付」一条，不是选项：界面照着摆状态即可）
     pub sources: Vec<SourceOption>,
 
-    /* ---------- 版本身份（作者 2026-11-06：「每个产物都要报自己的真实身份」） ---------- */
+    /* ---------- 版本身份：每格报自己的真实身份 ---------- */
     /// 仓库里的开发版本（`src-tauri/Cargo.toml`，全仓唯一真值）
     pub dev_version: String,
     /// 最近一次已发布的号（`git tag`）
@@ -515,7 +510,7 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
         .current_dir(repo)
         .env(ROOT_ENV, &served.root)
         .env(BUMP_ENV, "1");
-    /* ★ **有就叠，不问人**（2026-11-06 作者：「任何东西都不用选，它只是把它预览出来」）：
+    /* **有就叠，不问人**：
     `target/local-release/` 里有清单 ⇒ `/delivery/release*.json` 换成那份；
     没有 ⇒ 什么都不做，客户端看到的就是已发布的那一版。
     服务根不变 —— 覆盖的是那两份清单，不是目录。 */
@@ -712,8 +707,7 @@ impl SourceKind {
 /// ★ 现算：每一行都从**当前预设根**推出来 —— 根一变，这一行的地址与"齐没齐"
 /// 立刻就是新的读数，界面不必自己推一遍。
 ///
-/// 2026-10-30 起只有一行（夹具已退役，见 [`SourceKind`]）—— 但仍按"列表"给，
-/// 界面那套单选不用为一个选项另写一版。
+/// 只有一行 —— 但仍按"列表"给，界面那套渲染不用为一个选项另写一版。
 fn sources_of(_repo: &Path) -> Vec<SourceOption> {
     let presets = crate::workbench::paths::presets_root_path();
     [SourceKind::Delivery]
@@ -794,7 +788,7 @@ fn exit_text(st: ExitStatus) -> String {
     }
 }
 
-/// 一条**结构化诊断**（作者 2026-11-06：把红字长句换成"哪一项 / 读到什么 / 要不要管"）。
+/// 一条**结构化诊断**：哪一项 / 读到什么 / 要不要管。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckRow {
@@ -933,7 +927,7 @@ pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
 
         let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
 
-        /* 已经在跑就是它 —— 幂等返回现状（2026-11-06 起没有"换源"这回事了，
+        /* 已经在跑就是它 —— 幂等返回现状（没有"换源"这回事：
         只剩一条：端当前交付） */
         if let Some(cur) = guard.as_mut() {
             refresh_exit(cur);
@@ -993,8 +987,7 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         "我杀掉的那个"和"刚好新起来的另一个" */
         let _ = cur.child.kill();
         /* ★ **不报退出码**：这一下是**我们**按的信号，那个码只是终止的结果，
-        摆到人眼前会被读成"出错了"（2026-10-08 烟测里读出来的原话：
-        「已停（它退出了（退出码 1）—— 刚才终端里那几条日志是原因）」）。
+        摆到人眼前会被读成"出错了"（「已停（它退出了（退出码 1）……）」。
         该说的是"端口让出来没有"——那才是人关心的那一件事 */
         let note = match cur.child.wait() {
             Ok(_) => {
@@ -1394,7 +1387,7 @@ mod tests {
             "两个号都要出现在那条 error 里：{rows:?}"
         );
 
-        /* ★ **开发版本领先不算错**（作者 2026-11-06 那张表）：仓库 6 / 已交付 5 / 包内 5 是常态 */
+        /* **开发版本领先不算错**：仓库 6 / 已交付 5 / 包内 5 是常态 */
         let normal = version_checks(&served, "0.0.10-preview.6", Some("0.0.10-preview.5"));
         assert!(
             normal.iter().all(|r| r.level != "error"),
@@ -1405,8 +1398,7 @@ mod tests {
     /// 那一行：**名字与说法由后端给**，带根与地址、齐没齐都说得出
     /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）。
     ///
-    /// ★ 2026-11-06 作者：「我不要多一个，这里不需要让我选择」——
-    ///   只剩「当前交付」这一项，而且它的说法里要把**本地发布叠没叠上**讲清楚。
+    /// 只剩「当前交付」这一项，说法里要把**本地发布叠没叠上**讲清楚。
     #[test]
     fn the_row_is_told_by_the_backend() {
         let rows = sources_of(Path::new("/tmp/repo"));
@@ -1468,7 +1460,7 @@ mod tests {
     }
 
     /// 报给界面的那条命令与真起的那条是同一个（界面不自己拼一遍，也就不该漂）——
-    /// **而且是"只起服务"的那一条**（作者 2026-10-08 裁决：别去动客户端）
+    /// **而且是"只起服务"的那一条**
     #[test]
     fn the_reported_command_is_the_one_we_spawn() {
         let st = base_status(Path::new("/tmp/repo"), None);
