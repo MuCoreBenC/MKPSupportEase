@@ -355,7 +355,7 @@ pub fn install_script(
      *     不会拉起新进程。用户看到的正是"没反应"，而且那个旧窗口还是旧代码。
      *
      * 所以这一版钉三件事（每一件都是一个真失败模式）：
-     *   ① **等旧进程退出再动手**（最多 10s；还不走就 TERM → KILL，并记在日志里）；
+     *   ① **等旧进程退出再动手**（最多 3s；还不走就 TERM → KILL，并记在日志里）；
      *   ② **`open -n`** —— 即便还有别的实例在跑，也要拉起**新版本**这一个进程；
      *   ③ 不再用 `&&` 串联 + 每一步都写日志 + 失败也写账（`ok:false` 带原因）。
      *
@@ -371,19 +371,22 @@ mkdir -p "$(dirname "$L")" 2>/dev/null
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) install v@@VERSION@@" >> "$L"
 echo "shell=$$ old_pid=@@PID@@ uid=$(id -u)" >> "$L"
 echo "target=@@TARGET@@ staged=@@STAGED@@" >> "$L"
-sleep 1
 # ① 等旧进程真的退出：它还在时 `open` 只会把旧窗口叫到前面（2026-11-06 的真 bug）
+#    ★ 3 秒（15×0.2s）已经很大方：`app.exit(0)` 正常在 0.1~0.5s 内退干净。
+#      作者 2026-11-06：「不应该那么长」—— 原来那条是 10s + TERM 2s + KILL 1s。
 i=0
-while [ "$i" -lt 50 ] && kill -0 @@PID@@ 2>/dev/null; do
+while [ "$i" -lt 15 ] && kill -0 @@PID@@ 2>/dev/null; do
   sleep 0.2
   i=$((i + 1))
 done
 if kill -0 @@PID@@ 2>/dev/null; then
-  echo "✗ 旧进程 @@PID@@ 10 秒还没退出 —— 先 TERM，再 KILL" >> "$L"
+  echo "✗ 旧进程 @@PID@@ 3 秒还没退出 —— 先 TERM，再 KILL" >> "$L"
   kill -TERM @@PID@@ 2>/dev/null
-  sleep 2
-  kill -KILL @@PID@@ 2>/dev/null
-  sleep 1
+  sleep 0.5
+  if kill -0 @@PID@@ 2>/dev/null; then
+    kill -KILL @@PID@@ 2>/dev/null
+    sleep 0.3
+  fi
   if kill -0 @@PID@@ 2>/dev/null; then
     echo "✗ 旧进程 @@PID@@ 杀不掉（权限 / 被别的进程托管）" >> "$L"
     printf %s @@FAIL_PID@@ > "$R"

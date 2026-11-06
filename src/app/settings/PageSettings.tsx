@@ -81,15 +81,8 @@ import {
 /* 系统文件选择框：挑"备份放哪个文件夹"与"恢复哪一份 zip" —— 位置一律由用户点名 */
 import { open } from '@tauri-apps/plugin-dialog'
 
-import { api, errorText, isAppError, listen } from '../../api'
-import type {
-  LocalePref,
-  PresetSource,
-  SoftwareUpdate,
-  ThemePref,
-  UpdateInfo,
-  UpdateState,
-} from '../../api/contract'
+import { api, errorText, isAppError } from '../../api'
+import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
 import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated } from '../state/deliveryState'
@@ -104,6 +97,8 @@ import {
   useSystemSlicerApp,
   type SlicerId,
 } from '../shared/slicer'
+/* 更新会话那一份事实（与标题栏指示器共用同一个快照；2026-11-06 合并两处入口） */
+import { useSoftwareUpdate } from '../shared/softwareUpdate'
 /* 自绘下拉共用件（#33）：项目里的下拉一律用它，原生 `<select>` 一个不留 */
 import { SelectField } from '../../components/field'
 import type { FieldOption } from '../../components/field'
@@ -544,30 +539,16 @@ export default function PageSettings({
   /*
    * **下载任务的状态**（2026-11-06 作者：下载完按钮还是「尝试测试版」，再点又重下一遍）。
    *
-   * 标题栏那枚指示器也有同一个状态，但它是另一个组件 —— 这一页要自己拿一份，
-   * 否则卡片根本不知道"已经下好了没有"。两个来源：
-   *   · `updateInfo()` 的快照（重新进这一页时把已在进行的任务捞回来）；
-   *   · `software-update-progress` 事件（后端每 120ms 推一次，与快照同一个形状）。
+   * 事实来自**全站那一份**（`shared/softwareUpdate`）—— 标题栏那枚指示器读的是同一个快照，
+   * 于是"设置页说有新版、标题栏没图标"这种事不会再出现。`state` 里带着
+   * `version`/`channel`，卡片才知道"已就绪的是不是这一版"。
    *
    * `pendingChannel` 只记"我点的是哪一路"：`downloading` 那一态里没有通道信息，
    * 而两张卡都可能摆进度条，不记就分不清该把进度画在哪张卡上。
    */
-  const [updateState, setUpdateState] = useState<UpdateState | null>(null)
+  const { state: updateState, info: installMeta, refresh: refreshUpdate } = useSoftwareUpdate()
   const [pendingChannel, setPendingChannel] = useState<'stable' | 'preview' | null>(null)
   const [installing, setInstalling] = useState(false)
-  /* 上次安装的账 + 安装日志的路径（`updateInfo` 单独给；`checkSoftwareUpdate` 只谈候选） */
-  const [installMeta, setInstallMeta] = useState<UpdateInfo | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    const stop = listen<UpdateState>('software-update-progress', (next) => {
-      if (alive) setUpdateState(next)
-    })
-    return () => {
-      alive = false
-      void stop
-    }
-  }, [])
 
 
 
@@ -748,17 +729,15 @@ export default function PageSettings({
     setUpdateBusy(true)
     setUpdateErr(null)
     try {
-      const [version, got, meta] = await Promise.all([
+      const [version, got] = await Promise.all([
         api.getAppVersion().catch(() => ''),
         api.checkSoftwareUpdate(),
-        /* 上次装成没成 + 日志路径：`checkSoftwareUpdate` 只谈候选，这两格它不带 */
-        api.updateInfo().catch(() => null),
       ])
       setAppVersion(version || got.currentVersion)
       setUpdate(got)
-      setInstallMeta(meta)
-      /* 快照里那格状态：下载到一半离开这一页、回来时不会以为"还没开始" */
-      if (meta !== null) setUpdateState(meta.state)
+      /* 顺手刷新共享快照：卡片要靠它判"已就绪的是不是这一版"，上次安装的账与
+         日志路径也在这份里（`checkSoftwareUpdate` 只谈候选，这几格它不带） */
+      await refreshUpdate()
     } catch (e) {
       /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 ——
          如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
@@ -769,7 +748,7 @@ export default function PageSettings({
     } finally {
       setUpdateBusy(false)
     }
-  }, [])
+  }, [refreshUpdate])
 
   useEffect(() => {
     void checkUpdate()
@@ -840,15 +819,18 @@ export default function PageSettings({
     try {
       await api.installUpdate()
       /*
-       * 正常情况下这一行之后进程就没了，界面不复存在。**12 秒后自己回来了** =
+       * 正常情况下这一行之后进程就没了，界面不复存在。**8 秒后自己回来了** =
        * 进程没退出（或脚本没走到 `open`）—— 把按钮放开，并重新问一次账：
        * 那本账（`run/update-result.json`）会带着失败原因与日志路径回来。
        * 不这么做的话，一次没退出的安装会让按钮永远卡在「正在安装…」。
+       *
+       * ★ 8s = 安装脚本那一头的上限（等 3s + TERM 0.5s + KILL 0.3s）再留一倍余量。
+       *   脚本一结束应用就该退，所以正常情况根本轮不到这颗定时器。
        */
       window.setTimeout(() => {
         setInstalling(false)
         void checkUpdate()
-      }, 12_000)
+      }, 8_000)
     } catch (e) {
       setInstalling(false)
       setNote({ text: errorText(e), bad: true })
