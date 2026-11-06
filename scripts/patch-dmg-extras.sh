@@ -35,7 +35,9 @@ trap cleanup EXIT
 hdiutil convert "$DMG" -format UDRW -o "$WORK/rw.dmg" -quiet
 # **不加 -nobrowse、不指定 mountpoint、也不加 -quiet**：要让它挂在 /Volumes 下
 # （Finder 才接管），而且挂载点是从 hdiutil 的输出里读出来的 —— 加 -quiet 就没得读了。
-MNT="$(hdiutil attach "$WORK/rw.dmg" | awk '/\/Volumes\// {print $NF; exit}')"
+# ★ 用**制表符**切字段：挂载点里可能有空格（重名时会是 `/Volumes/SupportEase 2`），
+#   按空白切 `$NF` 只会拿到最后那个 "2"，接着 `cp` 就报 "cp: 2: No such file or directory"。
+MNT="$(hdiutil attach "$WORK/rw.dmg" | awk -F'\t' '/\/Volumes\// {print $NF; exit}')"
 [ -n "$MNT" ] || { echo "挂载失败：$DMG" >&2; exit 1; }
 VOLNAME="$(basename "$MNT")"
 
