@@ -79,6 +79,9 @@ import type {
   PreviewReport,
   PublishTxReport,
   ReleaseHistory,
+  ReleaseLedger,
+  VersionCell,
+  VersionIdentity,
   Words,
 } from '../api'
 import { toasts } from '../c14/toast'
@@ -167,6 +170,53 @@ function localStamp(iso: string): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/**
+ * 一格版本身份：有值就等宽显示，读不到就把**原因**写在值的位置（不写「未知」）；
+ * 有出处就把出处标在下面，有落点就给一颗「打开位置」—— 没有落点的不摆按钮。
+ */
+function IdentityCell({ label, cell }: { label: string; cell?: VersionCell }) {
+  const text = cell?.value ?? `读不到${cell?.error === undefined ? '' : `：${cell.error}`}`
+  const open = cell?.open
+  return (
+    <div className={s.identityCell}>
+      <div className={s.identityTop}>
+        <span className={s.identityLabel}>{label}</span>
+        <span className={s.grow} />
+        {open !== undefined && (
+          <button
+            type="button"
+            className={`${s.btn} ${s.btnSm}`}
+            title={cell?.at === undefined ? open.label : `${open.label}：${cell.at}`}
+            onClick={() => {
+              /* 只传白名单键：具体路径由后端重算 */
+              wb.openVersionLocation(open.key).catch((e) =>
+                toasts.push(isAppError(e) ? e.message : String(e)),
+              )
+            }}
+          >
+            {open.label}
+          </button>
+        )}
+      </div>
+      <b className={cell?.value === undefined ? s.identityBad : s.mono} title={text}>
+        {text}
+      </b>
+      {cell?.at !== undefined && (
+        <span className={s.identityAt} title={cell.at}>
+          {cell.at}
+        </span>
+      )}
+    </div>
+  )
+}
+
+/** 对账一行的人话：缺哪边就说哪边缺 */
+function ledgerNote(row: ReleaseLedger['rows'][number]): { text: string; bad: boolean } {
+  if (row.status === 'tagOnly') return { text: '没有回执', bad: true }
+  if (row.status === 'recordOnly') return { text: '没有 tag', bad: true }
+  return { text: '两边都有', bad: false }
+}
+
 export default function BuildPage({
   boot,
   book,
@@ -230,9 +280,35 @@ export default function BuildPage({
       .then(setReleaseHistory)
       .catch(() => setReleaseHistoryErr(true))
   }, [])
+  /*
+   * 版本身份四格 + git 对账（2026-11-07）：与发布历史同一个节奏 —— 进页取一次、
+   * 点「刷新」重取。**两件事分两个请求**：四格永远读得出来（一格失败只写那一格），
+   * 对账要跑 git，取不到 git 时它自己报错，不该把四格一起拖黑。
+   */
+  const [versionId, setVersionId] = useState<VersionIdentity | null>(null)
+  const [ledger, setLedger] = useState<ReleaseLedger | null>(null)
+  const [ledgerErr, setLedgerErr] = useState<string | null>(null)
+  const [ledgerOpen, setLedgerOpen] = useState(false)
+  const reloadVersionFacts = useCallback(() => {
+    setLedgerErr(null)
+    wb.versionIdentity()
+      .then(setVersionId)
+      .catch(() => setVersionId(null))
+    wb.releaseLedger()
+      .then(setLedger)
+      .catch((e) => {
+        setLedger(null)
+        setLedgerErr(
+          isAppError(e)
+            ? `${e.message}${e.detail === undefined ? '' : ` —— ${e.detail}`}`
+            : String(e),
+        )
+      })
+  }, [])
   useEffect(() => {
     reloadReleaseHistory()
-  }, [reloadReleaseHistory])
+    reloadVersionFacts()
+  }, [reloadReleaseHistory, reloadVersionFacts])
   const [baseline, setBaseline] = useState<BaselineDiffEntry[] | null>(null)
   const [strays, setStrays] = useState<string[] | null>(null)
   const [trash, setTrash] = useState<Awaited<ReturnType<typeof wb.trash>> | null>(null)
@@ -966,7 +1042,8 @@ export default function BuildPage({
           <div className={s.cardBody}>
             <div className={s.bar}>
               <span className={s.cardNote}>
-                当前：已安装 <span className={s.mono}>{appVersion ?? '未知'}</span>
+                {/* 它只是"这个工作台二进制是哪一版"，不是"装的是哪一版" —— 后者在下面四格 */}
+                本工作台 <span className={s.mono}>{appVersion ?? '读不到'}</span>
               </span>
               <span className={s.grow} />
               <button
@@ -978,7 +1055,25 @@ export default function BuildPage({
                 发布软件版本
               </button>
             </div>
+
+            {/*
+              版本身份四格（2026-11-07）：四个号不一样是常态，不是错误 ——
+              改代码让"当前开发"往前走，打包让"本地已打包"变，打 tag 让"最新已发布"变，
+              装包让"已安装"变。读不到就写明读不到，**不拿别的号顶**。
+            */}
+            {versionId === null ? (
+              <div className={s.emptyHint}>正在读版本读数……</div>
+            ) : (
+              <div className={s.identityGrid}>
+                <IdentityCell label="已安装（安装包）" cell={versionId.installed} />
+                <IdentityCell label="本地已打包" cell={versionId.packaged} />
+                <IdentityCell label="最新已发布（tag）" cell={versionId.published} />
+                <IdentityCell label="当前开发" cell={versionId.developing} />
+              </div>
+            )}
             <p className={s.note}>
+              「已安装」读的是<b>本机</b> <span className={s.mono}>/Applications</span> 下那个{' '}
+              <span className={s.mono}>.app</span> 的 Info.plist —— 纯本地读取，不联网、不上传。
               预设更新不需要新安装包；改了程序本身才发。发完记得合并 release.json 的 PR。
             </p>
 
@@ -986,6 +1081,7 @@ export default function BuildPage({
               发布历史（2026-10-07 从发布框里挪到这）：本地回执日志，最新在前。
               ★ 这是「发布软件版本」那本账 —— 上面「交付预设」的回执在另一本里
                 （②卡顶上那枚「本次发布落下…」chip），两本账不混。
+              ★ 2026-11-07 起**两棵数据根一起读**（工作台 + 命令行），每条标来源。
             */}
             <div className={s.bar}>
               <span className={s.cardNote}>
@@ -1000,7 +1096,10 @@ export default function BuildPage({
               <button
                 type="button"
                 className={`${s.btn} ${s.btnSm}`}
-                onClick={() => reloadReleaseHistory()}
+                onClick={() => {
+                  reloadReleaseHistory()
+                  reloadVersionFacts()
+                }}
               >
                 刷新
               </button>
@@ -1017,6 +1116,11 @@ export default function BuildPage({
                   <div key={`${r.tag}-${i}`} className={s.vfield}>
                     <div className={s.vhead}>
                       <b className={s.mono}>{r.tag}</b>
+                      {r.source !== undefined && (
+                        <span className={s.tag} title={r.source === 'cli' ? '命令行发布写的那本账' : '本工作台写的那本账'}>
+                          {r.source === 'cli' ? '命令行' : '工作台'}
+                        </span>
+                      )}
                       <span className={s.vkey}>{RELEASE_STAGE_TEXT[r.stage] ?? r.stage}</span>
                       <span className={s.grow} />
                       <span className={s.rowMeta}>{localStamp(r.at)}</span>
@@ -1024,6 +1128,49 @@ export default function BuildPage({
                     <span className={s.vhelp}>{r.summary}</span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/*
+              git 对账（2026-11-07）：历史只记"从这条入口发过的"，而 tag 才是冻结的
+              唯一证据。表格把两边并起来，缺哪边就标哪边 —— **不从 git 编回执**。
+            */}
+            <button
+              type="button"
+              className={s.disclosure}
+              aria-expanded={ledgerOpen}
+              onClick={() => setLedgerOpen((v) => !v)}
+            >
+              {ledgerOpen ? '收起 git 对账' : '查看 git 对账'}
+            </button>
+            {ledgerOpen && (
+              <div className={s.ledgerBox}>
+                {ledgerErr !== null ? (
+                  <div className={s.emptyHint}>读不到 git：{ledgerErr}</div>
+                ) : ledger === null ? (
+                  <div className={s.emptyHint}>正在读……</div>
+                ) : (
+                  <>
+                    <p className={s.note} style={{ marginTop: 0 }}>
+                      当前开发 <span className={s.mono}>{ledger.developing}</span>
+                      {ledger.developingFrozen ? ' · 已冻结（有 tag）' : ' · 未冻结（还没有 tag）'} ·
+                      最新 tag <span className={s.mono}>{ledger.latestTag ?? '—'}</span> · 回执{' '}
+                      {ledger.receipts} 条
+                    </p>
+                    {ledger.rows.map((row) => {
+                      const note = ledgerNote(row)
+                      return (
+                        <div key={`${row.version}-${row.tag ?? ''}`} className={s.ledgerRow}>
+                          <b className={s.mono}>{row.version}</b>
+                          <span className={s.rowMeta}>{row.at}</span>
+                          <span className={`${s.mono} ${s.rowMeta}`}>{row.commit ?? '—'}</span>
+                          <span className={s.grow} />
+                          <span className={note.bad ? s.identityBad : s.rowMeta}>{note.text}</span>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
               </div>
             )}
           </div>

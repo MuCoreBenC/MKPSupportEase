@@ -79,6 +79,16 @@ presets/…（源）→ crates/preset/assets/presets/*（include_str! 进客户�
   发版内核构建后核对 `Info.plist`（`assert_artifact_speaks_version`），不等就停在"已构建"之前。
 - 发版：`npm run release -- <号> "说明" --channel preview|stable --confirm`。已存在的 tag 拒绝。
 
+## 4.6 客户端与工作台不同名、不同兜
+
+- 工作台那份配置的产物叫 `mkp-workbench`（`mainBinaryName`），客户端叫 `mkp-support-ease`。
+  两档 cargo 产物目录分开：客户端 `target/`，工作台 `target-workbench/`。
+- 不许绕过 `npm run tauri:workbench:build` 手敲
+  `tauri build --config src-tauri/tauri.workbench.conf.json`：工作台配置的 `app.windows`
+  是空数组，那颗二进制装上去进程起得来、没有窗。
+- `npm run tauri -- build` 开跑前两道闸：盘上 `target/release/mkp-support-ease` 带工作台标记
+  ⇒ 拒；工作区脏（版本派生那四个文件除外）⇒ 拒。要发出去的包必须对应一个提交。
+
 ## 5. 发布前与发布时
 
 - 发布只 stage 白名单路径；无关改动不许混进来。

@@ -2324,13 +2324,16 @@ pub async fn wb_release_software(
 }
 
 /// 读**软件版本**的发布历史。★ 与 `wb_publish_history`（预设那本）不是同一本账。
+///
+/// 读的是**全部数据根**（工作台那棵 + 命令行 / 钩子那棵，见
+/// [`super::history_roots`]）：命令行发的那几版同样算数，每条回执带 `source`。
 #[tauri::command(async)]
 pub fn wb_release_history(
     app: tauri::AppHandle,
-) -> Result<super::release_history::ReleaseHistory, AppError> {
+) -> Result<super::release_history::ReleaseHistoryView, AppError> {
     crate::ipc::traced("wb_release_history", |_| {
-        let root = crate::fsx::paths::internal_root(&app)?;
-        super::release_history::load(&root)
+        let roots = super::history_roots(&app)?;
+        super::release_history::load_merged(&roots)
     })
 }
 

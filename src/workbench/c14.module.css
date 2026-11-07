@@ -5831,3 +5831,108 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ---------- 软件版本：身份四格 + git 对账（2026-11-07） ---------- */
+
+/*
+ * 四格读数：四个号不一样是常态（开发 / 打包 / 冻结 / 装包各走一步），
+ * 所以并排摆、中间只用 1px 细线分隔，不画四个卡片框。
+ */
+.identityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.identityCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+/* 两列之间竖线；上一行与下一行之间横线 */
+.identityCell:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+
+.identityCell:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--line);
+}
+
+.identityLabel {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.identityCell > b {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 读不到的那一格：值的位置直接写原因，用警示色，不写「未知」 */
+.identityBad {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--w-warn);
+}
+
+/* 折叠开关：与交付检查的「查看详细差异」同一副长相 */
+.disclosure {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  color: var(--text-1);
+}
+
+.ledgerBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ledgerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.ledgerRow:last-child {
+  border-bottom: 0;
+}
+
+/* 格头一行：标签在左，右上角是「打开位置」那颗小按钮 */
+.identityTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 出处：单行省略，全文在 title 里 */
+.identityAt {
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -1340,12 +1340,19 @@ export interface PublishRecord {
    * 刷新拿到的是平台上的 PR 状态，与"镜像跟没跟上"是两件事。
    */
   mirror?: MirrorSync | null
+  /**
+   * 这条回执住在哪个数据根：`workbench`（本进程那棵）/ `cli`（命令行那棵）。
+   * `npm run presets -- publish` 写的是后者 —— 不合并就等于"那次发布没发生"。
+   */
+  source?: string
 }
 
-/** `history::PublishHistory` —— 回执日志（最新在前） */
+/** `history::PublishHistoryView` —— 回执日志（最新在前，多根合并） */
 export interface PublishHistory {
   historySchema: number
   records: PublishRecord[]
+  /** 这次实际读了哪几个数据根 */
+  roots: string[]
 }
 
 /* ---------- 第四刀：发布**软件版本**（与「交付预设」两条链，各有各的类型） ---------- */
@@ -1462,12 +1469,70 @@ export interface ReleaseRecord {
   infoBranch: string | null
   infoReview: RemoteReview | null
   summary: string
+  /**
+   * 这条回执住在哪个数据根：`workbench`（本进程那棵）/ `cli`（命令行那棵）。
+   *
+   * 工作台的 appDataDir 带 `-Workbench` 后缀，命令行固定用 `SupportEase` ——
+   * 两条入口都会发版，账各记各的目录，读的时候并起来。缺这一格 = 老形状。
+   */
+  source?: string
 }
 
-/** `release_history::ReleaseHistory` —— 软件版本发布历史（**最新在前**） */
+/** `release_history::ReleaseHistoryView` —— 软件版本发布历史（**最新在前**，多根合并） */
 export interface ReleaseHistory {
   historySchema: number
   records: ReleaseRecord[]
+  /** 这次实际读了哪几个数据根 */
+  roots: string[]
+}
+
+/** `version_id::VersionOpen` —— 有落点才给按钮；`key` 是白名单键，前端只传它 */
+export interface VersionOpen {
+  key: string
+  label: string
+}
+
+/** `version_id::VersionCell` —— 一格读数：值 / 缺失原因 / 出处 / 怎么去 */
+export interface VersionCell {
+  value?: string
+  error?: string
+  /** 这个读数从哪来：`.app` 路径 / 打包目录 / Release 地址 */
+  at?: string
+  /** 有可打开的位置才有 */
+  open?: VersionOpen
+}
+
+/** `version_id::VersionIdentity` —— 四个号 + 这个二进制自己的号 */
+export interface VersionIdentity {
+  /** 这个工作台二进制自报的号（编译期常量）—— **不是**安装包版本 */
+  build: string
+  installed: VersionCell
+  packaged: VersionCell
+  published: VersionCell
+  developing: VersionCell
+}
+
+/** `release_ledger::LedgerStatus` —— 对账结论 */
+export type LedgerStatus = 'both' | 'tagOnly' | 'recordOnly'
+
+/** `release_ledger::LedgerRow` —— 对账表的一行 */
+export interface LedgerRow {
+  version: string
+  tag: string | null
+  at: string
+  commit: string | null
+  receiptAt: string | null
+  receiptStage: string | null
+  status: LedgerStatus
+}
+
+/** `release_ledger::ReleaseLedger` —— git tag × 回执 × 开发号 */
+export interface ReleaseLedger {
+  developing: string
+  developingFrozen: boolean
+  latestTag: string | null
+  receipts: number
+  rows: LedgerRow[]
 }
 
 /** `git::CommitRow` —— 本分支最近的一条提交（**本机仓库视图**，不代表线上已合并） */
@@ -2604,8 +2669,24 @@ export const wb = {
    * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
    */
   presetsChanged: () => invoke<boolean>('wb_presets_changed'),
-  /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
+  /**
+   * **这个二进制**自报的版本号（编译期常量，只读）。**不是**安装包版本 ——
+   * 界面上要说清；要"装的是哪一版"看 [`wb.versionIdentity`] 的 `installed`
+   */
   appVersion: () => invoke<string>('wb_app_version'),
+  /** 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发 */
+  versionIdentity: () => invoke<VersionIdentity>('wb_version_identity'),
+  /**
+   * 打开某一格对应的位置（`installed` / `packaged` / `published`）。
+   * ★ 只传**白名单键**：具体路径由后端重算，前端没有机会指定任意路径。
+   */
+  openVersionLocation: (which: string) =>
+    invoke<void>('wb_open_version_location', { which }),
+  /**
+   * 发布对账（只读）：git tag × 回执 × 当前开发号。
+   * 缺回执 / 缺 tag 的行由后端给 `status`，前端不重算
+   */
+  releaseLedger: () => invoke<ReleaseLedger>('wb_release_ledger'),
   /**
    * 写云端源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
    * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。

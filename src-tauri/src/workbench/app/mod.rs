@@ -104,6 +104,8 @@ pub mod publish_tx;
 pub mod receipt;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与交付预设那本分开** —— 两条链不混
+/// **发布对账**（git tag × 回执 × 开发号）—— 只读
+pub mod release_ledger;
 pub mod release_history;
 /// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
@@ -290,6 +292,8 @@ pub mod storage;
 /// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
 /// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果
 pub mod version;
+/// **版本身份四格**（已安装 / 本地已打包 / 最新已发布 / 当前开发）—— 只读
+pub mod version_id;
 pub mod words;
 
 use std::collections::BTreeMap;
@@ -1538,18 +1542,45 @@ pub fn wb_presets_changed() -> Result<bool, AppError> {
     })
 }
 
-/// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
+/// **这个二进制**的版本号（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
 ///
-/// 「生成与发布」页那块**只读的「软件版本」**展示位用它 —— 与客户端 `get_app_version`
-/// **同一个常量**（[`crate::runtime::structure::APP_VERSION`]），不是第二处真值。
+/// ★ 它回答"**编译出这个二进制的源码**是哪一版"，**不是**"这台机器上装着哪一版"：
+/// 开发机上的工作台自报 8、`/Applications` 里装着 3 是常态。要后者看
+/// [`version_id::wb_version_identity`] 的 `installed`（读安装包的 `Info.plist`）。
 ///
-/// ★ 它只报"当前装的是哪一版"，**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
-/// （见 `docs/RELEASE-TRANSACTIONS.md`），本轮不实现。
+/// 它**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
+/// （见 `docs/RELEASE-TRANSACTIONS.md`）。
 #[tauri::command(async)]
 pub fn wb_app_version() -> Result<String, AppError> {
     traced("wb_app_version", |_| {
         Ok(crate::runtime::structure::APP_VERSION.to_owned())
     })
+}
+
+/// 发布回执的**全部**数据根：本进程那棵 + 命令行 / 钩子那棵，规范化后去重。
+///
+/// 工作台的 `app_data_dir()` 带 `-Workbench` 后缀，命令行固定用 `APP_IDENTIFIER`
+/// （`fsx::paths`）。两条入口都会发布（预设与软件版本各有一本账），账各记各的目录 ——
+/// **读的时候并起来**：否则命令行发的那几版在界面上等于没发生。写的时候仍只写本进程那一本。
+///
+/// `MKP_SUPPORT_EASE_DATA` 覆盖时两边会算成同一个路径，所以必须去重（否则同一条
+/// 回执会被合并两次）。
+pub fn history_roots(app: &tauri::AppHandle) -> Result<Vec<(String, PathBuf)>, AppError> {
+    let own = crate::fsx::paths::internal_root(app)?;
+    let mut roots = vec![("workbench".to_owned(), own.clone())];
+    if let Some(headless) = crate::fsx::paths::internal_root_headless() {
+        let same = match (
+            std::fs::canonicalize(&own),
+            std::fs::canonicalize(&headless),
+        ) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => own == headless,
+        };
+        if !same {
+            roots.push(("cli".to_owned(), headless));
+        }
+    }
+    Ok(roots)
 }
 
 /// 记下云端源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的

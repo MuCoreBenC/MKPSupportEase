@@ -945,6 +945,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
         app::wb_app_version,
+        // 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发
+        app::version_id::wb_version_identity,
+        // 「打开位置」：只收白名单键（installed / packaged / published），路径由后端重算
+        app::version_id::wb_open_version_location,
+        // 发布对账（只读）：git tag × 回执 × 开发号，缺哪一边就标出来
+        app::release_ledger::wb_release_ledger,
         app::build::wb_generate,
         // 历次生成的回执（应用数据目录，按份数自动清理）
         app::build::wb_receipts,

@@ -2526,6 +2526,10 @@ export function installMockBackend() {
       case 'wb_publish_history':
         return Promise.resolve({
           historySchema: 1,
+          roots: [
+            '/Users/demo/Library/Application Support/SupportEase-Workbench',
+            '/Users/demo/Library/Application Support/SupportEase',
+          ],
           records: [
             {
               at: '2026-10-04T14:02:00+08:00',
@@ -2583,10 +2587,14 @@ export function installMockBackend() {
             },
           ],
         })
-      /* 软件版本发布历史（演示）：真机读 `release-history.json` */
+      /* 软件版本发布历史（演示）：真机读两棵数据根下的 `release-history.json` 并合并 */
       case 'wb_release_history':
         return Promise.resolve({
           historySchema: 1,
+          roots: [
+            '/Users/demo/Library/Application Support/SupportEase-Workbench',
+            '/Users/demo/Library/Application Support/SupportEase',
+          ],
           records: [
             {
               at: '2026-10-31T20:17:00+08:00',
@@ -2601,6 +2609,82 @@ export function installMockBackend() {
               infoBranch: 'release/0.0.9-info',
               infoReview: null,
               summary: '已打 tag、已建 Release、已写 release.json，等信息那笔 PR 合并。',
+              source: 'workbench',
+            },
+            {
+              at: '2026-10-30T09:12:00+08:00',
+              stage: 'pushed',
+              version: '0.0.8',
+              tag: 'v0.0.8',
+              branch: 'feat/release-0.0.8',
+              commit: '9ad1120',
+              review: null,
+              release: null,
+              artifact: null,
+              infoBranch: null,
+              infoReview: null,
+              summary: '命令行发布：已提交并推送，未配置发布账户所以没建 PR。',
+              source: 'cli',
+            },
+          ],
+        })
+      /* 版本身份四格（演示）：四个号刻意各不相同 —— 这正是真机常见的形状 */
+      case 'wb_version_identity':
+        return Promise.resolve({
+          build: '0.0.10-preview.8',
+          installed: {
+            value: '0.0.10-preview.3',
+            at: '/Applications/SupportEase.app',
+            open: { key: 'installed', label: '在访达中显示' },
+          },
+          packaged: {
+            value: '0.0.10-preview.7',
+            at: 'target/local-release',
+            open: { key: 'packaged', label: '打开打包目录' },
+          },
+          published: {
+            value: '0.0.10-preview.7',
+            at: '这一版（v0.0.10-preview.7）的 Release 地址不在本机记录里',
+          },
+          developing: { value: '0.0.10-preview.8' },
+        })
+      /* 「打开位置」（演示）：真机打开访达 / 浏览器，桩里只说不做 */
+      case 'wb_open_version_location':
+        return Promise.resolve(undefined)
+      /* 发布对账（演示）：一版缺回执、一版缺 tag，正好把两种缺口都摆出来 */
+      case 'wb_release_ledger':
+        return Promise.resolve({
+          developing: '0.0.10-preview.8',
+          developingFrozen: false,
+          latestTag: 'v0.0.10-preview.7',
+          receipts: 2,
+          rows: [
+            {
+              version: '0.0.10-preview.7',
+              tag: 'v0.0.10-preview.7',
+              at: '2026-11-06',
+              commit: '0a88f70',
+              receiptAt: '2026-11-06T06:12:58Z',
+              receiptStage: 'infoPushed',
+              status: 'both',
+            },
+            {
+              version: '0.0.10-preview.2',
+              tag: 'v0.0.10-preview.2',
+              at: '2026-11-06',
+              commit: '45f0e70',
+              receiptAt: null,
+              receiptStage: null,
+              status: 'tagOnly',
+            },
+            {
+              version: '0.0.8',
+              tag: null,
+              at: '2026-10-30T09:12:00+08:00',
+              commit: null,
+              receiptAt: '2026-10-30T09:12:00+08:00',
+              receiptStage: 'pushed',
+              status: 'recordOnly',
             },
           ],
         })

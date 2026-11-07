@@ -1688,15 +1688,19 @@ pub fn wb_publish(
 
 /// **发布历史**（只读、`async`）：最近若干次「交付预设」事务的回执，**最新在前**。
 ///
+/// 读的是**全部数据根**（工作台那棵 + 命令行那棵，见 [`super::history_roots`]）：
+/// `npm run presets -- publish` 写的是 `APP_IDENTIFIER` 那棵树，不合并就等于"那次发布没发生"。
+/// 每条带 `source`，界面能说清它是从哪条入口发的。
+///
 /// 界面开场读一次；每条"现在走到哪"由 [`super::publish_tx::wb_publish_status`] **手动刷新**
 /// （作者定死：状态是"看一看"，不是常驻任务 —— **不做轮询**）。
 #[tauri::command(async)]
 pub fn wb_publish_history(
     app: tauri::AppHandle,
-) -> Result<super::history::PublishHistory, AppError> {
+) -> Result<super::history::PublishHistoryView, AppError> {
     traced("wb_publish_history", |_| {
-        let root = crate::fsx::paths::internal_root(&app)?;
-        super::history::load(&root)
+        let roots = super::history_roots(&app)?;
+        super::history::load_merged(&roots)
     })
 }
 
