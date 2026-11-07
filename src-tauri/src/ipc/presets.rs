@@ -1160,9 +1160,13 @@ mod tests {
     fn dto_builders_read_the_catalog_and_nothing_else() {
         let catalog = catalog();
 
-        // —— 机型清单：5 台，A1 带别名与尺寸，品牌是显示名 ——
+        // —— 机型清单：4 台（P2S 停用，不进客户端目录），A1 带别名与尺寸，品牌是显示名 ——
         let machines = machines_dto(&catalog);
-        assert_eq!(machines.len(), 5);
+        assert_eq!(machines.len(), 4);
+        assert!(
+            machines.iter().all(|m| m.id != "P2S"),
+            "P2S 停用 ⇒ 首屏不该出现它"
+        );
         let a1 = machines.iter().find(|m| m.id == "A1").expect("A1 必须在");
         assert_eq!(a1.display, "A1");
         assert_eq!(a1.brand, "拓竹 (Bambu Lab)", "品牌要显示名，不是 id");
