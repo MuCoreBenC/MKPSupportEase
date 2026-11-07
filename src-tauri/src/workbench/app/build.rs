@@ -3990,7 +3990,9 @@ mod tests {
                 if p.is_dir() {
                     walk(root, &p, out);
                 } else if let (Ok(rel), Ok(bytes)) = (p.strip_prefix(root), std::fs::read(&p)) {
-                    out.insert(rel.to_string_lossy().into_owned(), bytes);
+                    /* 分隔符统一成 `/`：调用方按仓库内的相对路径取条目，
+                    Windows 上原样给 `\` 会一条都取不中。 */
+                    out.insert(rel.to_string_lossy().replace('\\', "/"), bytes);
                 }
             }
         }

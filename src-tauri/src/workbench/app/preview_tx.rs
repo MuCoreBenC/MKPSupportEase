@@ -939,12 +939,28 @@ mod tests {
     #[test]
     fn a_frozen_version_cannot_be_delivered_again() {
         let d = scratch_repo();
+        /* 身份显式给：CI 的 Windows runner 上没有全局 user.name / user.email，
+        `git tag -a` 会因此失败（annotated tag 要记 tagger）。 */
         let out = Command::new("git")
-            .args(["tag", "-a", "v0.0.12-preview.7", "-m", "x"])
+            .args([
+                "-c",
+                "user.email=t@example.invalid",
+                "-c",
+                "user.name=t",
+                "tag",
+                "-a",
+                "v0.0.12-preview.7",
+                "-m",
+                "x",
+            ])
             .current_dir(d.path())
             .output()
             .unwrap();
-        assert!(out.status.success());
+        assert!(
+            out.status.success(),
+            "建 tag 失败：{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
 
         let plan = plan_of(d.path()).unwrap();
         assert!(!plan.ok);
