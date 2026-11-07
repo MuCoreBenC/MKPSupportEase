@@ -837,6 +837,7 @@
 .btn:disabled {
   color: var(--text-3);
   border-color: var(--line);
+  cursor: not-allowed;
 }
 
 .btnOn {
@@ -902,11 +903,17 @@
   border-color: var(--wb-primary-deep);
 }
 
-/* 禁用的主按钮不是「蓝底灰字」—— 底也一起灰下去，和 b03 的 .primary:disabled 一致 */
+/*
+ * 禁用的主按钮 = **一眼就看出是灰的**。
+ *
+ * 旧写法是白字压 `--line-strong`（深色下 18% 白）—— 远看仍是「深色实心按钮」，
+ * 作者截图点名「这个是灰色的吗？我也看不出来……灰色你就变成灰色」。
+ * 改法与普通按钮的禁用态同族：底降到沉降面、字降到第三级、边框用细线。
+ */
 .btnPrimary:disabled {
-  color: #fff;
-  background: var(--line-strong);
-  border-color: var(--line-strong);
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-color: var(--line);
 }
 
 /*
@@ -2371,7 +2378,8 @@
  */
 .colsRev {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  /* 右侧是产物状态主工作区，左侧只放检查与待办 */
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.6fr);
   gap: var(--gap);
   /* 与 .split 同一套（C14 第二十四轮）：整页定高，左栏检查清单、右栏三步各自滚
      （作者：「生成与发布左侧的检查还是会滚动的」）。compact / mini 退回随页滚。 */
@@ -5613,4 +5621,318 @@
 .shell[data-density='compact'] .dim,
 .shell[data-density='mini'] .dim {
   grid-template-columns: minmax(0, 1fr);
+}
+
+/*
+ * 交付目录：分组本身就是文件列表（工作台「生成与发布」①）。
+ * 组与组之间只用一条分隔线分层，不再给每层套卡片；文件名是主信息，
+ * 状态是克制的小徽标，待更新靠文字和浅底点出来，不铺大色块。
+ */
+/* ① 生成卡：标题不占满，历史/查看按钮留在左，主操作被 .grow 顶到最右 */
+.buildHead h2 {
+  flex: 0 0 auto;
+}
+
+.delStatusBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.delStatusBar strong {
+  color: var(--w-warn);
+  font-weight: 600;
+}
+
+/*
+ * 状态条里那颗可点的读数（如「发布凭据：已失效（9 条）」）—— 点开只读的交付定稿检查。
+ * 看着像文字、实际是按钮：它不改变任何状态，所以不做成按钮的样子。
+ */
+.linkBtn {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--w-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.linkBtn:hover {
+  color: var(--w-primary);
+  text-decoration-thickness: 2px;
+}
+
+/* 失效那一种读数：与 `.delStatusBar strong` 同一个警示色，但仍是可点的 */
+.linkWarn,
+.linkWarn:hover {
+  color: var(--w-warn);
+  font-weight: 600;
+}
+
+.delSep {
+  width: 1px;
+  height: 11px;
+  background: var(--w-line);
+}
+
+.delGroups {
+  margin-top: 12px;
+}
+
+.delGroup {
+  border-bottom: 1px solid var(--w-line);
+}
+
+.delGroup:last-child {
+  border-bottom: 0;
+}
+
+.delGroupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.delGroupHead:hover {
+  background: var(--w-hover);
+}
+
+.delGroupHead:active {
+  transform: translateY(1px);
+}
+
+.delCaret {
+  flex: none;
+  width: 12px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.delGroupTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+.delGroupTodo {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: var(--w-warn-soft);
+  color: var(--w-warn);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 折叠后仍显示完整摘要，不能只剩一个组名 */
+.delGroupSum {
+  flex: none;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.delGroupRows {
+  padding-bottom: 6px;
+}
+
+.delFileRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 4px 4px 4px 24px;
+  font-size: 12px;
+}
+
+.delFileRow:hover {
+  background: var(--w-hover);
+}
+
+/* 文件名占主位；状态、大小、操作都是右对齐的辅助格 */
+.delFileName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.delFileSize {
+  flex: none;
+  min-width: 62px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.delBadge {
+  flex: none;
+  min-width: 62px;
+  padding: 1px 6px;
+  border: 1px solid var(--w-line);
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.delBadgeOk {
+  color: var(--wb-ok);
+  background: var(--w-ok-soft);
+  border-color: transparent;
+}
+
+.delBadgeTodo {
+  color: var(--w-warn);
+  background: var(--w-warn-soft);
+  border-color: transparent;
+}
+
+.delBadgeMuted {
+  color: var(--text-3);
+  background: var(--surface-sunken);
+}
+
+.delRowBtn {
+  flex: none;
+  padding: 2px 6px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.delRowBtn:hover:not(:disabled) {
+  border-color: var(--w-line);
+  color: var(--text-1);
+}
+
+.delRowBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- 软件版本：身份四格 + git 对账（2026-11-07） ---------- */
+
+/*
+ * 四格读数：四个号不一样是常态（开发 / 打包 / 冻结 / 装包各走一步），
+ * 所以并排摆、中间只用 1px 细线分隔，不画四个卡片框。
+ */
+.identityGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+
+.identityCell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+}
+
+/* 两列之间竖线；上一行与下一行之间横线 */
+.identityCell:nth-child(odd) {
+  border-right: 1px solid var(--line);
+}
+
+.identityCell:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--line);
+}
+
+.identityLabel {
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.identityCell > b {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 读不到的那一格：值的位置直接写原因，用警示色，不写「未知」 */
+.identityBad {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--w-warn);
+}
+
+/* 折叠开关：与交付检查的「查看详细差异」同一副长相 */
+.disclosure {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  color: var(--text-1);
+}
+
+.ledgerBox {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ledgerRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.ledgerRow:last-child {
+  border-bottom: 0;
+}
+
+/* 格头一行：标签在左，右上角是「打开位置」那颗小按钮 */
+.identityTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 出处：单行省略，全文在 title 里 */
+.identityAt {
+  overflow: hidden;
+  font-size: 11px;
+  color: var(--text-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

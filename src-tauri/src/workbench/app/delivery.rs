@@ -1,5 +1,16 @@
 //! 交付层（b05 Task 12）：`presets/delivery/` 的**目录类 JSON** 与资产复制。
 //!
+//! # catalog.json 归生成管，不归发布管
+//!
+//! `catalog.json` 的 `files[]` 是**按候选字节**登记的（size / sha256），而"生成"正是
+//! 产生候选字节的那一步 —— 所以它是 `generate_transaction` 的写入项，与 TOML、三份
+//! content JSON 同一个事务。发布只**读**它（并把它一起推出去），不重算。
+//!
+//! 因此判断一份产物"要不要写"不能只看**内容**变没变：盘上那份如果还带着渲染器
+//! 已经不写的字段（`# generated_at:` 这类），内容一样、字节不一样，留着就与目录登记
+//! 永久差几个字节。生成说"没有哪一份会变"、检查卡同时报"清单和文件对不上"，
+//! 两边都自认为对，永不自愈。判据见 [`delivery_diffs`] 的 `stale_shape`。
+//!
 //! # 目录结构定稿（12.1；**2026-10-02 与客户端落点对齐**）
 //!
 //! 交付根就是「客户端拿 URL 直取的那个根」（数据源地址指向它）。所以这里的相对路径
@@ -79,7 +90,7 @@
 //!   `slicerProfile`），不用上游的 `bbs_profile` —— manifest 与 assets_index 是同一批
 //!   资产的两种视图，join 键（id + type）必须一致；旧词汇是迁移输入（doc §6.2）。
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
@@ -357,6 +368,10 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
         if !m.has_dimensions {
             continue;
         }
+        // 停用机型整支退出交付面（与 catalog 同一判据，判据在 presetdata 那一处）
+        if !m.enabled {
+            continue;
+        }
         if let Some(id) = m.image.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             used.insert(id.to_lowercase());
         }
@@ -364,15 +379,15 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
             used.insert(id.to_lowercase());
         }
     }
-    for b in book.presets.bundles.items() {
+    // 停用机型的套餐一起停用 —— 它引用的资产也就不再可达
+    for b in book.presets.delivery_bundles() {
         for r in &b.asset_refs {
             used.insert(r.trim().to_lowercase());
         }
     }
     book.presets
-        .assets
-        .items()
-        .iter()
+        .delivery_assets()
+        .into_iter()
         .filter(|a| used.contains(&a.id.to_lowercase()))
         .cloned()
         .collect()
@@ -383,11 +398,14 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
 /// 12.2：机型目录。**机型与版本的清单、关系全部来自 presets 域**，
 /// mkpPresetAssetId 是唯一一处从产物侧（manifest）带过来的连接键
 pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
+    /* 停用机型整支退出交付面（与 `catalog.json` 同一判据）：这份 content JSON
+    也是客户端可寻址的，留着它等于"目录里没有、文件里还在" */
     let machines: Vec<MachineEntry<'_>> = book
         .presets
         .catalog
         .machines()
         .iter()
+        .filter(|m| m.enabled)
         .map(|m| MachineEntry {
             id: &m.id,
             display: &m.display,
@@ -431,11 +449,11 @@ pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
 
 /// 12.3：套餐目录。`bundles.toml` 的直出 —— 那边五个字段 + `presets` 就是契约
 pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
+    /* 只编进**交付面**的套餐：停用机型的套餐一起停用（客户端看不到它） */
     let bundles: Vec<BundleEntry<'_>> = book
         .presets
-        .bundles
-        .items()
-        .iter()
+        .delivery_bundles()
+        .into_iter()
         .map(|b| BundleEntry {
             id: &b.id,
             display: &b.display,
@@ -533,8 +551,18 @@ pub fn write_content(
      * 发布闸的「登记面 == 实体面」那一项（`docs/PUBLISH-ARCHITECTURE.md` §5.2 ⑦）
      * 检查的就是这件事。
      */
+    let checked = check_referenced_assets(asset_root, &referenced)?;
+
+    Ok(DistContent {
+        content_files: 3,
+        assets_checked: checked,
+    })
+}
+
+/// 引用可达的 A 类资产在载荷根里真有文件（只读）。生成与发布共用这一处体检。
+fn check_referenced_assets(asset_root: &Path, referenced: &[Asset]) -> Result<usize, AppError> {
     let mut checked = 0usize;
-    for a in &referenced {
+    for a in referenced {
         // 不登记的那一类不进交付（与 catalog / 资产索引同一口径）
         if crate::runtime::catalog::dest_of_asset(a).is_none() {
             continue;
@@ -553,11 +581,7 @@ pub fn write_content(
         }
         checked += 1;
     }
-
-    Ok(DistContent {
-        content_files: 3,
-        assets_checked: checked,
-    })
+    Ok(checked)
 }
 
 /// **只读核对**：[`write_content`] 该写的东西现在都还在不在（一个字节都不写）。
@@ -653,6 +677,393 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     set
 }
 
+/// 这台机型在源里停用了吗（`enabled = false`）。
+///
+/// **停用只影响「发不发 / 显不显示」，不影响产物在不在**：客户端目录不列这台机型
+/// （`runtime::catalog` 是唯一解释这个开关的地方），发布清单也不登记它的产物。
+/// 交付目录里已经存在的产物字节**一个字节都不动** —— 不删、不改、不进回收站。
+pub(super) fn machine_disabled(book: &Book<'_>, machine_id: &str) -> bool {
+    book.presets
+        .catalog
+        .machine(machine_id)
+        .is_some_and(|m| !m.enabled)
+}
+
+/// 产物名（`mkp/presets/<file>` 里那一段）属于停用机型吗。
+///
+/// 反查不到版本 = 不是停用：把判定交回「漏登记」那条严格判据，不拿停用给它兜底。
+pub(super) fn product_disabled(book: &Book<'_>, mkp_file: &str) -> bool {
+    book.versions()
+        .iter()
+        .find(|v| v.mkp_file == mkp_file)
+        .is_some_and(|v| machine_disabled(book, &v.machine_id))
+}
+
+/* ---------- 候选集与受管范围 ---------- */
+
+/// 预设产物组的 id
+pub const GROUP_PRESETS: &str = "presets";
+/// 目录与清单一的组 id
+pub const GROUP_CATALOG: &str = "catalog";
+/// 发布定稿 / 版本交付独占的组 id
+pub const GROUP_FROZEN: &str = "frozen";
+/// 不在生成器管理范围内的组 id
+pub const GROUP_OTHER: &str = "other";
+
+/// **生成器独占管理清单**：只有命中这里的文件才允许由生成事务新增、修改或删除。
+///
+/// 判定依据的是「这一类路径由生成器产出」，不是「本次候选集里有没有它」——
+/// 源里删掉一个版本时，旧产物仍落在前缀内，才能据此判「待删除」。
+/// 发布凭据、软件发布清单、资产落点与用户文件都不在这里，一律不碰。
+pub fn is_managed(rel: &str) -> bool {
+    if CONTENT_FILES.contains(&rel) || rel == NEW_CATALOG_FILE {
+        return true;
+    }
+    let Some(rest) = rel.strip_prefix(&format!("{MKP_PRESETS_DIR}/")) else {
+        return false;
+    };
+    !rest.is_empty() && !rest.contains('/') && rest.ends_with(".toml")
+}
+
+/// 由发布定稿 / 版本交付事务独占的文件：不进候选集、不进生成事务、不判删除。
+fn is_frozen(rel: &str) -> bool {
+    rel == MANIFEST_FILE
+        || rel == SOURCE_FILE
+        || rel == super::publish_book::BOOK_FILE
+        || rel == crate::runtime::source::RELEASE_FILE
+        || rel == crate::runtime::source::RELEASE_PREVIEW_FILE
+}
+
+fn group_of(rel: &str) -> &'static str {
+    if rel.starts_with(&format!("{MKP_PRESETS_DIR}/")) {
+        GROUP_PRESETS
+    } else if is_frozen(rel) {
+        GROUP_FROZEN
+    } else if CONTENT_FILES.contains(&rel) || rel == NEW_CATALOG_FILE || rel == SOURCE_FILE {
+        GROUP_CATALOG
+    } else {
+        GROUP_OTHER
+    }
+}
+
+/// 一份产物相对当前源的比较结论。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum DiffKind {
+    /// 盘上没有，候选集里有
+    Added,
+    /// 盘上有，但字节与重算结果不同
+    Modified,
+    /// 盘上有、命中受管清单、候选集里没有
+    Removed,
+    /// 盘上字节与重算结果一致
+    Same,
+    /// 盘上有，但不在生成器管理范围内 —— 只报，绝不删
+    Unmanaged,
+    /// 由发布定稿 / 版本交付事务独占
+    Frozen,
+}
+
+/// 一份文件的逐字节比较结果。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileDiff {
+    pub rel: String,
+    pub kind: DiffKind,
+    pub before_size: Option<u64>,
+    pub after_size: Option<u64>,
+    /// 首处差异的人话（没有差异 = `None`）
+    pub first_diff: Option<String>,
+    /// 分组 id
+    pub group: String,
+}
+
+/// 一组产物的摘要。前端只按 `all_same` 决定默认折叠，不自己数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryGroup {
+    pub id: String,
+    pub label: String,
+    pub total: usize,
+    pub modified: usize,
+    pub added: usize,
+    pub removed: usize,
+    pub unmanaged: usize,
+    pub all_same: bool,
+}
+
+/// 从当前源机械性重算出的一份应有产物。`want` 就是不落任何时间字段的确定性字节。
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub rel: String,
+    pub want: Vec<u8>,
+    /// `false` = 只重算比对，由发布定稿负责写盘（今天只有 `source.json`）
+    pub writable: bool,
+}
+
+fn first_difference(old: &[u8], want: &[u8]) -> String {
+    let at = old
+        .iter()
+        .zip(want)
+        .position(|(a, b)| a != b)
+        .unwrap_or_else(|| old.len().min(want.len()));
+    format!(
+        "第 {at} 字节起不同（盘上 {} B / 应有 {} B）",
+        old.len(),
+        want.len()
+    )
+}
+
+/// 从 `artifacts` 目录里的产物字节构造这一代目录。
+/// [`built_catalog`] 与候选集重算共用这一处，区别只在产物字节来自盘上还是候选集。
+fn catalog_from_artifacts(
+    delivery_root: &Path,
+    book: &Book<'_>,
+    published_at: Option<&str>,
+    identity: &PublishIdentity,
+    artifacts: &Path,
+) -> Result<crate::runtime::catalog::Catalog, AppError> {
+    let mut catalog =
+        crate::runtime::catalog::Catalog::build_from_presets_lenient(book.presets, artifacts);
+    if let Some(publish_root) = delivery_root.parent() {
+        let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
+        catalog.apply_min_client(&rules);
+    }
+    catalog.published_at = published_at.map(str::to_owned);
+    catalog.catalog_id = identity.catalog_id.clone();
+    catalog.publish_serial = identity.serial;
+    Ok(catalog)
+}
+
+/// 算一遍候选集。**不读时钟、不写交付目录**：同一份源连算两遍必须逐字节相同。
+fn candidate_once(delivery_root: &Path, book: &Book<'_>) -> Result<Vec<Candidate>, AppError> {
+    let mut out: Vec<Candidate> = Vec::new();
+
+    // 预设 TOML：渲染器的纯正文，不含写盘时刻。
+    // 版本集合与 [`delivery_expected_set`] 同源，避免候选集另有一套「谁该有产物」。
+    for v in book.versions() {
+        if book.build_state(&v.uid) == BuildState::NoResources {
+            continue;
+        }
+        let rendered = super::build::render(book, &v.uid)?;
+        out.push(Candidate {
+            rel: format!("{MKP_PRESETS_DIR}/{}", v.mkp_file),
+            want: rendered.text.into_bytes(),
+            writable: true,
+        });
+    }
+
+    // 三份目录 JSON
+    for (rel, text) in content_json_texts(book)? {
+        out.push(Candidate {
+            rel: rel.to_owned(),
+            want: text.into_bytes(),
+            writable: true,
+        });
+    }
+
+    // catalog.json 的 files[] 登记的是产物真字节哈希 —— 必须按**候选** TOML 算，
+    // 不能按盘上那份旧产物算，否则"算出来的目录"与"写完之后该有的目录"是两代。
+    // 借一个临时目录走与真生成完全相同的目录构造路径，保证字节形状一致。
+    let tmp = tempfile::tempdir()
+        .map_err(|e| AppError::io("建不出候选集临时目录").with_detail(e.to_string()))?;
+    for c in &out {
+        if c.rel.starts_with(&format!("{MKP_PRESETS_DIR}/")) {
+            let name = c.rel.rsplit('/').next().unwrap_or(&c.rel);
+            crate::fsx::atomic::atomic_write(&tmp.path().join(name), &c.want)?;
+        }
+    }
+    let published = published_at_of(delivery_root);
+    let identity = PublishIdentity::inherit_from(delivery_root);
+    let catalog_text = catalog_from_artifacts(
+        delivery_root,
+        book,
+        published.as_deref(),
+        &identity,
+        tmp.path(),
+    )?
+    .to_pretty_json()?;
+    out.push(Candidate {
+        rel: NEW_CATALOG_FILE.to_owned(),
+        want: catalog_text.into_bytes(),
+        writable: true,
+    });
+
+    out.sort_by(|a, b| a.rel.cmp(&b.rel));
+    Ok(out)
+}
+
+/// **确定性硬闸**：同一份源连算两次，路径与字节必须逐份一致。
+/// 不一致就地失败 —— 不继续比较，也不允许写盘。
+pub fn candidate_set(delivery_root: &Path, book: &Book<'_>) -> Result<Vec<Candidate>, AppError> {
+    let first = candidate_once(delivery_root, book)?;
+    let second = candidate_once(delivery_root, book)?;
+    if first.len() != second.len() {
+        return Err(AppError::internal(format!(
+            "候选集不稳定：两次算出的份数不同（{} / {}）",
+            first.len(),
+            second.len()
+        )));
+    }
+    for (a, b) in first.iter().zip(&second) {
+        if a.rel != b.rel || a.want != b.want || a.writable != b.writable {
+            return Err(
+                AppError::internal(format!("候选集不稳定：{} 两次算出的字节不同", a.rel))
+                    .with_detail(first_difference(&a.want, &b.want)),
+            );
+        }
+    }
+    Ok(first)
+}
+
+/// 只读比较：候选集 vs 盘上字节，外加受管清单内的待删除与范围外的未纳管。
+/// 任何读不出来、算不出来的情况都明确失败，不退化成「大概一致」。
+pub fn delivery_diffs(
+    delivery_root: &Path,
+    book: &Book<'_>,
+) -> Result<(Vec<Candidate>, Vec<FileDiff>), AppError> {
+    let candidates = candidate_set(delivery_root, book)?;
+    let known: BTreeSet<&str> = candidates.iter().map(|c| c.rel.as_str()).collect();
+    let mut diffs: Vec<FileDiff> = Vec::new();
+
+    for c in &candidates {
+        let path = delivery_root.join(&c.rel);
+        let old = match std::fs::read(&path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(AppError::io(format!("读不出 {}，无法完成比较", c.rel))
+                    .with_detail(e.to_string()));
+            }
+        };
+        let (kind, before_size, first_diff) = match old {
+            None => (DiffKind::Added, None, Some("盘上还没有这一份".to_owned())),
+            Some(bytes) => {
+                /* 「要不要写」只有一处判据（[`crate::workbench::up_to_date`]）：同内容
+                 * **且**同形状。内容一致但盘上还带着已废弃的写盘字段时判「待更新」——
+                 * 不写的话那几个字节永远留着，而 `catalog.json` 按候选字节登记
+                 * size / sha，两边永久对不上。 */
+                if crate::workbench::up_to_date(&c.rel, &bytes, &c.want) {
+                    (DiffKind::Same, Some(bytes.len() as u64), None)
+                } else {
+                    let norm_old = crate::workbench::normalize_for_compare(&c.rel, &bytes);
+                    let norm_want = crate::workbench::normalize_for_compare(&c.rel, &c.want);
+                    let why = if norm_old == norm_want {
+                        "内容一致，盘上这份还带着已废弃的字段（写一次清掉）".to_owned()
+                    } else {
+                        first_difference(&norm_old, &norm_want)
+                    };
+                    (DiffKind::Modified, Some(bytes.len() as u64), Some(why))
+                }
+            }
+        };
+        diffs.push(FileDiff {
+            rel: c.rel.clone(),
+            kind,
+            before_size,
+            after_size: Some(c.want.len() as u64),
+            first_diff,
+            group: group_of(&c.rel).to_owned(),
+        });
+    }
+
+    // 盘上有、候选集里没有的：受管清单内才判待删除，范围外只报未纳管。
+    let mut found: Vec<PathBuf> = Vec::new();
+    collect_files(delivery_root, &mut found);
+    for path in found {
+        let Ok(rel_path) = path.strip_prefix(delivery_root) else {
+            return Err(AppError::internal(format!(
+                "交付根内的文件取不出相对路径：{}",
+                path.display()
+            )));
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if known.contains(rel.as_str()) || is_frozen(&rel) {
+            continue;
+        }
+        let size = std::fs::metadata(&path).ok().map(|m| m.len());
+        let kind = if is_managed(&rel) {
+            DiffKind::Removed
+        } else {
+            DiffKind::Unmanaged
+        };
+        diffs.push(FileDiff {
+            rel: rel.clone(),
+            kind,
+            before_size: size,
+            after_size: None,
+            first_diff: Some(if kind == DiffKind::Removed {
+                "当前源不再产出这一份".to_owned()
+            } else {
+                "不在生成器管理范围内，不会被删除".to_owned()
+            }),
+            group: group_of(&rel).to_owned(),
+        });
+    }
+
+    // 发布 / 版本交付独占的文件也照实列出来，但不参与比较、不进事务。
+    for rel in [
+        MANIFEST_FILE,
+        SOURCE_FILE,
+        super::publish_book::BOOK_FILE,
+        crate::runtime::source::RELEASE_FILE,
+        crate::runtime::source::RELEASE_PREVIEW_FILE,
+    ] {
+        let path = delivery_root.join(rel);
+        let size = std::fs::metadata(&path).ok().map(|m| m.len());
+        diffs.push(FileDiff {
+            rel: rel.to_owned(),
+            kind: DiffKind::Frozen,
+            before_size: size,
+            after_size: None,
+            first_diff: None,
+            group: GROUP_FROZEN.to_owned(),
+        });
+    }
+
+    diffs.sort_by(|a, b| a.rel.cmp(&b.rel));
+    Ok((candidates, diffs))
+}
+
+fn group_label(id: &str) -> &'static str {
+    match id {
+        GROUP_PRESETS => "MKP 预设",
+        GROUP_CATALOG => "目录与清单",
+        GROUP_FROZEN => "发布定稿",
+        _ => "范围外文件",
+    }
+}
+
+/// 分组摘要由后端算好，前端只按 `all_same` 决定折叠。
+pub fn delivery_groups(diffs: &[FileDiff]) -> Vec<DeliveryGroup> {
+    [GROUP_PRESETS, GROUP_CATALOG, GROUP_FROZEN, GROUP_OTHER]
+        .into_iter()
+        .filter_map(|id| {
+            let rows: Vec<&FileDiff> = diffs.iter().filter(|d| d.group == id).collect();
+            if rows.is_empty() {
+                return None;
+            }
+            let modified = rows.iter().filter(|d| d.kind == DiffKind::Modified).count();
+            let added = rows.iter().filter(|d| d.kind == DiffKind::Added).count();
+            let removed = rows.iter().filter(|d| d.kind == DiffKind::Removed).count();
+            let unmanaged = rows
+                .iter()
+                .filter(|d| d.kind == DiffKind::Unmanaged)
+                .count();
+            Some(DeliveryGroup {
+                id: id.to_owned(),
+                label: group_label(id).to_owned(),
+                total: rows.len(),
+                modified,
+                added,
+                removed,
+                unmanaged,
+                all_same: modified + added + removed + unmanaged == 0,
+            })
+        })
+        .collect()
+}
+
 /// 一份交付文件**是谁写的**（决定界面上那句"已生成 / 还没发布"）。
 ///
 /// 生成与发布是两道事务，写出的文件不是同一批 —— 界面上要分开说，人才知道
@@ -678,10 +1089,14 @@ pub enum DeliveryStage {
 pub enum DeliveryState {
     /// 还没有这一份（还没生成 / 还没发布）
     Missing,
-    /// 已生成 / 已发布，且与目录登记一致
+    /// 内容一致
     UpToDate,
-    /// 盘上有，但它和目录登记对不上（或目录里还没登记它）—— 需要重新生成一次
+    /// 盘上有，但字节与从当前源重算出的应有内容不同
     Pending,
+    /// 盘上有、命中受管清单、当前源不再产出 —— 待删除
+    Removed,
+    /// 盘上有，但不在生成器管理范围内 —— 只展示，不碰
+    Unmanaged,
 }
 
 /// 「交付预设」卡里的一份交付文件。
@@ -709,6 +1124,10 @@ pub struct DeliveryFile {
     /// 拆开之后界面能说实话：配方快照旧 → 「待更新」；台账跟上了但目录登记没跟上 →
     /// 「待重算目录」；重新渲染的字节不同 → 「待更新（模板改过）」
     pub pending_reason: Option<DeliveryPendingReason>,
+    /// 相对当前源重算后逐字节比出来的结论 —— 界面状态徽标只认这一格
+    pub diff: DiffKind,
+    /// 分组 id（见 [`DeliveryGroup`]）
+    pub group: String,
 }
 
 /// 一份交付文件为什么 `pending`
@@ -774,6 +1193,14 @@ pub struct DeliveryStatus {
     pub manifest_modified: Option<String>,
     /// `catalog.json` 读不出来时的原话（正常 = `None`）
     pub catalog_error: Option<String>,
+    /// 逐份逐字节比较的结论（含待删除与未纳管）
+    pub diffs: Vec<FileDiff>,
+    /// 分组摘要，后端算好；前端只按 `all_same` 决定折叠
+    pub groups: Vec<DeliveryGroup>,
+    /// 发布凭据是否已经失效（只读诊断）
+    pub manifest_stale: bool,
+    /// 失效条目，逐条点名
+    pub manifest_reasons: Vec<String>,
 }
 
 /// 交付文件的分类：只认那几个**固定名**，其余都算生成写的（含 `mkp/presets/*.toml`）。
@@ -794,10 +1221,13 @@ fn stage_of(rel: &str) -> DeliveryStage {
 /// 供「交付预设」卡展出 —— 作者 2026-10-07：「我现在只能知道这个 TOML 的生成，
 /// 我不知道这些其他的……还有什么文件需要生成的，我也想看到」；2026-10-19 起
 /// 页面只摆汇总，明细在模态框里看。
-pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus {
+pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> Result<DeliveryStatus, AppError> {
+    let (_candidates, diffs) = delivery_diffs(delivery_root, book)?;
+    let groups = delivery_groups(&diffs);
+    let (manifest_stale, manifest_reasons) = manifest_diagnosis(delivery_root)?;
+
     let catalog_path = delivery_root.join(NEW_CATALOG_FILE);
     let (catalog, catalog_error) = match std::fs::read(&catalog_path) {
-        // 目录还没立起来（没生成过也没发布过）—— 没有漂移可言
         Err(_) => (None, None),
         Ok(raw) => match serde_json::from_slice::<crate::runtime::catalog::Catalog>(&raw) {
             Ok(c) => (Some(c), None),
@@ -809,59 +1239,74 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
             ),
         },
     };
-
     let drift: Vec<DeliveryDrift> = match (catalog.as_ref(), delivery_root.parent()) {
         (Some(c), Some(publish_root)) => drift_of(c, publish_root)
             .into_iter()
             .map(|(d, _)| d)
             .collect(),
-        // 交付根没有父目录（布局不对）/ 目录不在：都给空漂移，由 catalog_error 说
         _ => Vec::new(),
     };
-    /*
-     * **版本产物要看三件事**：配方快照、目录登记、以及**重新渲染的字节**。
-     *
-     * 2026-10-19 作者截图：`A1-fast.toml` 右侧 diff 有 `+1 −2`（模板删了一行
-     * `#胶笔配置`），左边却显示「已生成」。原因是 `BuildState` 只比配方指纹 ——
-     * 模板/注释变化它看不见，而预演用 `render` 重算能看见。这里把预演的同一条
-     * 判据接进来：`same_payload(盘上, 重新渲染)` 为假 ⇒ 待更新。
-     */
-    let build_of: std::collections::HashMap<String, (String, BuildState)> = book
+
+    // 产物名 → 版本 uid，供生成队列反查
+    let uid_of: BTreeMap<String, String> = book
         .build_rows()
         .into_iter()
-        .filter_map(|r| r.mkp_file.map(|f| (f, (r.uid, r.state))))
+        .filter_map(|r| r.mkp_file.map(|f| (f, r.uid)))
         .collect();
+    let mut pending: BTreeSet<String> = BTreeSet::new();
+    let mut files: Vec<DeliveryFile> = Vec::with_capacity(diffs.len());
 
-    let expected = delivery_expected_set(book);
-    /*
-     * **第一遍只算 TOML**：`catalog.json` 自己的状态依赖"有没有产物待更新"，
-     * 不能在同一遍里边算边用。最多渲染 9 份 TOML，只在 focus / 进页时跑一次。
-     */
-    let mut toml_state: std::collections::HashMap<
-        String,
-        (DeliveryState, Option<u64>, Option<DeliveryPendingReason>),
-    > = std::collections::HashMap::new();
-    let mut pending: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for rel in expected.iter() {
-        if !rel.starts_with(&format!("{MKP_PRESETS_DIR}/")) {
-            continue;
-        }
-        let path = delivery_root.join(rel);
-        let bytes = std::fs::read(&path).ok();
-        let entry = catalog.as_ref().and_then(|c| registered_entry(c, rel));
-        let file = rel.rsplit('/').next().unwrap_or(rel.as_str());
-        let build = build_of.get(file);
-        let (state, why) = toml_state_of(book, build, bytes.as_deref(), entry);
-        if state != DeliveryState::UpToDate {
-            if let Some((uid, _)) = build {
-                pending.insert(uid.clone());
+    for d in &diffs {
+        let path = delivery_root.join(&d.rel);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => Some(b),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                return Err(AppError::io(format!("读不出 {}，交付状态判不了", d.rel))
+                    .with_detail(e.to_string()));
+            }
+        };
+        let exist = bytes.is_some();
+        let size = bytes.as_ref().map_or(0, |b| b.len() as u64);
+        let registered_size = catalog
+            .as_ref()
+            .and_then(|c| registered_entry(c, &d.rel))
+            .and_then(|e| e.size);
+
+        let (state, why) = match d.kind {
+            DiffKind::Same => (DeliveryState::UpToDate, None),
+            DiffKind::Added => (DeliveryState::Missing, None),
+            DiffKind::Modified => (DeliveryState::Pending, Some(DeliveryPendingReason::Content)),
+            DiffKind::Removed => (DeliveryState::Removed, Some(DeliveryPendingReason::Content)),
+            DiffKind::Unmanaged => (DeliveryState::Unmanaged, None),
+            DiffKind::Frozen => {
+                if exist {
+                    (DeliveryState::UpToDate, None)
+                } else {
+                    (DeliveryState::Missing, None)
+                }
+            }
+        };
+        if matches!(d.kind, DiffKind::Added | DiffKind::Modified) {
+            if let Some(name) = d.rel.strip_prefix(&format!("{MKP_PRESETS_DIR}/")) {
+                if let Some(uid) = uid_of.get(name) {
+                    pending.insert(uid.clone());
+                }
             }
         }
-        toml_state.insert(rel.clone(), (state, entry.and_then(|e| e.size), why));
+        files.push(DeliveryFile {
+            stage: stage_of(&d.rel),
+            rel: d.rel.clone(),
+            exist,
+            size,
+            state,
+            registered_size,
+            pending_reason: why,
+            diff: d.kind,
+            group: d.group.clone(),
+        });
     }
-    // 有产物待更新 / 未生成 ⇒ 重新生成会改目录，`catalog.json` 也该重算
-    let catalog_stale = !drift.is_empty() || !pending.is_empty();
-    // 按生成页的顺序给版本 uid（前端底部按钮直接拿去当队列）
+
     let pending_uids: Vec<String> = book
         .build_rows()
         .into_iter()
@@ -869,111 +1314,18 @@ pub fn delivery_status(delivery_root: &Path, book: &Book<'_>) -> DeliveryStatus 
         .filter(|uid| pending.contains(uid))
         .collect();
 
-    let files = expected
-        .into_iter()
-        .map(|rel| {
-            let path = delivery_root.join(&rel);
-            let bytes = std::fs::read(&path).ok();
-            let exist = bytes.is_some();
-            let size = bytes.as_ref().map_or(0, |b| b.len() as u64);
-            if let Some((state, registered_size, why)) = toml_state.get(&rel) {
-                return DeliveryFile {
-                    stage: stage_of(&rel),
-                    rel,
-                    exist,
-                    size,
-                    state: *state,
-                    registered_size: *registered_size,
-                    pending_reason: *why,
-                };
-            }
-            // 目录不登记自产 JSON / manifest / source：只看在不在（目录自己看有没有待更新）
-            let state = if rel == NEW_CATALOG_FILE {
-                if !exist {
-                    DeliveryState::Missing
-                } else if catalog_stale {
-                    DeliveryState::Pending
-                } else {
-                    DeliveryState::UpToDate
-                }
-            } else if exist {
-                DeliveryState::UpToDate
-            } else {
-                DeliveryState::Missing
-            };
-            DeliveryFile {
-                stage: stage_of(&rel),
-                rel,
-                exist,
-                size,
-                state,
-                registered_size: None,
-                /* catalog.json 自己是「有没有别的待更新」推出来的，不是三把尺子之一 */
-                pending_reason: (state == DeliveryState::Pending)
-                    .then_some(DeliveryPendingReason::Build),
-            }
-        })
-        .collect();
-
-    DeliveryStatus {
+    Ok(DeliveryStatus {
         files,
         drift,
         pending_uids,
         catalog_modified: mtime_of(&catalog_path),
         manifest_modified: mtime_of(&delivery_root.join(MANIFEST_FILE)),
         catalog_error,
-    }
-}
-
-/// 一份 `mkp/presets/*.toml` 的状态（配方快照 + 目录登记 + **重新渲染**）。
-///
-/// `build` 是 `(uid, BuildState)`；`None` = 交付集合里有这一份、但树上找不到对应版本
-/// （孤儿产物）—— 那种情况没有渲染依据，按字节判定，不硬报「待更新」。
-fn toml_state_of(
-    book: &Book<'_>,
-    build: Option<&(String, BuildState)>,
-    bytes: Option<&[u8]>,
-    entry: Option<&crate::runtime::catalog::CatalogFile>,
-) -> (DeliveryState, Option<DeliveryPendingReason>) {
-    use DeliveryPendingReason as Why;
-    let build_state = build.map(|(_, s)| *s);
-    match build_state {
-        /* 「没东西可产」（占位版本）→ 交付里就不该有它。
-         *
-         * 2026-11-01 起 `NeverBuilt` / `Stale` **都不再短路**：它们只是"还没生成过"
-         * 的粗判，可能因为调用方的 `Book` 没装渲染器而失真。本函数下面那段
-         * `render` + 字节比对才是权威，粗判盖住它就会把「全齐」误报成待更新。 */
-        Some(BuildState::NoResources) => (DeliveryState::Missing, None),
-        Some(BuildState::NeverBuilt) | Some(BuildState::Stale) | Some(BuildState::Built) | None => {
-            let Some(b) = bytes else {
-                return (DeliveryState::Missing, None);
-            };
-            // 目录里登记的那份与盘上对不上（或没登记）—— 生成一次才会重算登记
-            let registered = entry.is_some_and(|e| {
-                e.size == Some(b.len() as u64) && e.sha256.as_deref() == Some(sha256_of(b).as_str())
-            });
-            if !registered {
-                return (DeliveryState::Pending, Some(Why::Registry));
-            }
-            // 配方与登记都跟上了，再看**重新渲染**：模板/注释变化也算待更新
-            let Some((uid, _)) = build else {
-                return (DeliveryState::UpToDate, None);
-            };
-            match super::build::render(book, uid) {
-                Ok(r) => match std::str::from_utf8(b) {
-                    // 与真生成同一道判据：**逐字节相同**才算跟上（2026-11-01 起没有例外行）
-                    // 剥掉 `# generated_at:` 再比（与真生成同一道判据）
-                    Ok(text) if crate::workbench::strip_generated_at(text) == r.text => {
-                        (DeliveryState::UpToDate, None)
-                    }
-                    // 字节不是 UTF-8 / 渲染结果不同：不冒充「已生成」
-                    _ => (DeliveryState::Pending, Some(Why::Content)),
-                },
-                // 渲染不出来（配方/注册表坏了）：保守判待更新，等预演给阻断原因
-                Err(_) => (DeliveryState::Pending, Some(Why::Content)),
-            }
-        }
-    }
+        diffs,
+        groups,
+        manifest_stale,
+        manifest_reasons,
+    })
 }
 
 /// 目录里登记这一份交付文件的那一条（`catalog.path` 以**发布根**为基准，
@@ -1131,6 +1483,364 @@ pub fn clean_strays(
         moved += 1;
     }
     Ok(moved)
+}
+
+/* ---------- 发布凭据的只读诊断 ---------- */
+
+/// 一条凭据失效：哪一份、为什么。
+///
+/// 结构化的一份，人话由 [`manifest_diagnosis`] 折出来 —— 两处读同一份判据，
+/// 不会出现"界面说 9 条、诊断说 8 条"。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManifestDrift {
+    /// 发布根相对路径（`delivery/mkp/presets/A1-standard.toml`）
+    pub rel: String,
+    pub kind: ManifestDriftKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManifestDriftKind {
+    /// 登记了，盘上取不到
+    Missing,
+    /// 大小不符（登记多少 / 盘上多少）
+    Size { registered: u64, actual: u64 },
+    /// 大小相同但字节不同
+    Sha,
+    /// 字节对得上，但**这一代目录里已经没有它**（停用机型 / 退出交付面的资产）——
+    /// 定稿重写 manifest 时会被去掉，所以它同样属于「更新发布凭据」能修的那一类
+    Unlisted,
+}
+
+/// **只读**：`manifest.json` 登记的每条资产逐条与盘上真字节比，返回结构化的失效清单。
+///
+/// 生成 / 普通保存改变了最终文件之后，这里能点名哪一条失效。重算 sha / size / 内容
+/// 一致性仍归发布定稿；这里一个字节都不写，也不改发布清单。
+pub fn manifest_drift(delivery_root: &Path) -> Result<Vec<ManifestDrift>, AppError> {
+    let path = delivery_root.join(MANIFEST_FILE);
+    let raw = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => {
+            return Err(
+                AppError::io("manifest.json 读不出来，无法核对发布凭据").with_detail(e.to_string())
+            );
+        }
+    };
+    let value: serde_json::Value = serde_json::from_slice(&raw).map_err(|e| {
+        AppError::corrupted("manifest.json 解析不了，无法核对发布凭据").with_detail(e.to_string())
+    })?;
+    let Some(assets) = value.get("assets").and_then(serde_json::Value::as_array) else {
+        return Err(AppError::corrupted(
+            "manifest.json 没有 assets[]，无法核对发布凭据",
+        ));
+    };
+    let publish_root = delivery_root.parent().ok_or_else(|| {
+        AppError::invalid_argument("交付根没有父目录（发布根），核对不了发布凭据")
+    })?;
+    /* 这一代目录登记了哪些 path —— 用来认「manifest 还多登着一条」。
+    读不出来就只做字节核对（不拿"读不到目录"去判人多了几条）。 */
+    let registered: Option<std::collections::BTreeSet<String>> =
+        std::fs::read(delivery_root.join(NEW_CATALOG_FILE))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<crate::runtime::catalog::Catalog>(&b).ok())
+            .map(|c| c.files.into_iter().map(|f| f.path).collect());
+
+    let mut out: Vec<ManifestDrift> = Vec::new();
+    for a in assets {
+        let rel = a.get("relativePath").and_then(serde_json::Value::as_str);
+        let sha = a.get("sha256").and_then(serde_json::Value::as_str);
+        let size = a.get("size").and_then(serde_json::Value::as_u64);
+        let (Some(rel), Some(sha), Some(size)) = (rel, sha, size) else {
+            return Err(AppError::corrupted(
+                "manifest.assets[] 有一条缺 relativePath / sha256 / size，无法核对",
+            ));
+        };
+        let full = publish_root.join(rel);
+        let kind = match std::fs::read(&full) {
+            Err(_) => ManifestDriftKind::Missing,
+            Ok(bytes) if bytes.len() as u64 != size => ManifestDriftKind::Size {
+                registered: size,
+                actual: bytes.len() as u64,
+            },
+            Ok(bytes) if sha256_of(&bytes) != sha => ManifestDriftKind::Sha,
+            /* 字节对得上，但目录里已经没有这一条 —— 定稿重写会把它去掉 */
+            Ok(_) if registered.as_ref().is_some_and(|set| !set.contains(rel)) => {
+                ManifestDriftKind::Unlisted
+            }
+            Ok(_) => continue,
+        };
+        out.push(ManifestDrift {
+            rel: rel.to_owned(),
+            kind,
+        });
+    }
+    Ok(out)
+}
+
+/// [`manifest_drift`] 的人话版：`(有没有失效, 逐条原因)`。发布读数与交付检查读它。
+///
+/// 清单还不存在时**不算失效**（首次发布前就是这个状态），照实说一句。
+pub fn manifest_diagnosis(delivery_root: &Path) -> Result<(bool, Vec<String>), AppError> {
+    if !delivery_root.join(MANIFEST_FILE).is_file() {
+        return Ok((false, vec!["还没有发布清单，发布定稿后才有".to_owned()]));
+    }
+    let drift = manifest_drift(delivery_root)?;
+    let reasons = drift
+        .iter()
+        .map(|d| match d.kind {
+            ManifestDriftKind::Missing => format!("{}：登记了，盘上取不到", d.rel),
+            ManifestDriftKind::Size { registered, actual } => format!(
+                "{}：大小不符（登记 {registered} B，盘上 {actual} B）",
+                d.rel
+            ),
+            ManifestDriftKind::Sha => format!("{}：字节不符（SHA-256 对不上）", d.rel),
+            ManifestDriftKind::Unlisted => {
+                format!("{}：目录里已经没有这一条了（还登在清单里）", d.rel)
+            }
+        })
+        .collect();
+    Ok((!drift.is_empty(), reasons))
+}
+
+/* ---------- 生成事务 ---------- */
+
+/// 一次生成事务的结果。只有全量回读验证通过才交给调用方去记成功账。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GenerateOutcome {
+    /// 真写了盘的相对路径
+    pub written: Vec<String>,
+    /// 移进回收站的相对路径
+    pub removed: Vec<String>,
+    /// 内容一致、没动的相对路径
+    pub unchanged: Vec<String>,
+    /// 回读验证通过的份数（写入 + 删除）
+    pub verified: usize,
+}
+
+/// 生成事务的现场：写盘前的原字节，与已经移进回收站的文件。
+///
+/// 新增、修改、删除走的是同一个事务 —— 任何一步失败都按这份现场逐份还原。
+pub struct GenerateTx {
+    backup: BTreeMap<String, Option<Vec<u8>>>,
+    moved: Vec<(String, PathBuf)>,
+}
+
+impl GenerateTx {
+    /// 写盘**之前**把每一份受影响文件的原样读进内存。
+    /// 读不出来（权限 / 不是文件）就当场失败，不带着半份现场往下走。
+    pub fn backup(delivery_root: &Path, rels: &[String]) -> Result<Self, AppError> {
+        let mut backup = BTreeMap::new();
+        for rel in rels {
+            let path = delivery_root.join(rel);
+            let old = match std::fs::read(&path) {
+                Ok(bytes) => Some(bytes),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+                Err(e) => {
+                    return Err(AppError::io(format!("备份不了 {rel}，生成事务中止"))
+                        .with_detail(e.to_string()));
+                }
+            };
+            backup.insert(rel.clone(), old);
+        }
+        Ok(Self {
+            backup,
+            moved: Vec::new(),
+        })
+    }
+
+    /// 删除**只**对受管清单内的文件生效，且沿用 [`clean_strays`] 的回收站落点：
+    /// 不真删，出事能移回来。范围外文件在这里会被明确拒绝，不是静默跳过。
+    pub fn remove_managed(
+        &mut self,
+        delivery_root: &Path,
+        trash_root: &Path,
+        stamp: &str,
+        rels: &[String],
+    ) -> Result<Vec<String>, AppError> {
+        let mut removed = Vec::new();
+        for rel in rels {
+            if !is_managed(rel) || is_frozen(rel) {
+                return Err(AppError::invalid_argument(format!(
+                    "{rel} 不在生成器独占管理清单内，拒绝删除"
+                )));
+            }
+            let src = delivery_root.join(rel);
+            let dst = trash_root.join("delivery").join(stamp).join(rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| {
+                    AppError::io(format!("建不出回收目录 {}", parent.display()))
+                        .with_detail(e.to_string())
+                })?;
+            }
+            std::fs::rename(&src, &dst).map_err(|e| {
+                AppError::io(format!("移不动 {rel}，生成事务中止")).with_detail(e.to_string())
+            })?;
+            self.moved.push((rel.clone(), dst));
+            removed.push(rel.clone());
+        }
+        Ok(removed)
+    }
+
+    /// **回读验证**：写入的每一份逐字节等于候选字节（不剥任何字段），
+    /// 删除的每一份确实不在盘上。任何一份对不上都明确失败。
+    pub fn verify(
+        &self,
+        delivery_root: &Path,
+        expected: &[(String, Vec<u8>)],
+    ) -> Result<usize, AppError> {
+        let mut verified = 0usize;
+        for (rel, want) in expected {
+            let got = std::fs::read(delivery_root.join(rel)).map_err(|e| {
+                AppError::io(format!("回读验证失败：{rel} 读不出来")).with_detail(e.to_string())
+            })?;
+            if got != *want {
+                return Err(
+                    AppError::internal(format!("回读验证失败：{rel} 的字节与候选不一致"))
+                        .with_detail(first_difference(&got, want)),
+                );
+            }
+            verified += 1;
+        }
+        for (rel, _) in &self.moved {
+            if delivery_root.join(rel).exists() {
+                return Err(AppError::internal(format!(
+                    "回读验证失败：{rel} 删除后仍在盘上"
+                )));
+            }
+            verified += 1;
+        }
+        Ok(verified)
+    }
+
+    /// 这一轮事务实际影响的相对路径（写入 + 删除），供回执点名。
+    pub fn affected(&self) -> Vec<String> {
+        self.backup
+            .keys()
+            .cloned()
+            .chain(self.moved.iter().map(|(rel, _)| rel.clone()))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    /// 按现场逐份还原。还原本身失败也报错 —— 绝不把「回滚没成功」说成成功。
+    pub fn rollback(&self, delivery_root: &Path) -> Result<(), AppError> {
+        let mut errors: Vec<String> = Vec::new();
+        for (rel, old) in &self.backup {
+            let path = delivery_root.join(rel);
+            let result = match old {
+                Some(bytes) => crate::fsx::atomic::atomic_write(&path, bytes),
+                None => match std::fs::remove_file(&path) {
+                    Ok(()) => Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    Err(e) => Err(AppError::io(e.to_string())),
+                },
+            };
+            if let Err(e) = result {
+                errors.push(format!("{rel}：{e}"));
+            }
+        }
+        for (rel, dst) in &self.moved {
+            let src = delivery_root.join(rel);
+            if let Some(parent) = src.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    errors.push(format!("{rel}：建不回目录（{e}）"));
+                    continue;
+                }
+            }
+            if let Err(e) = std::fs::rename(dst, &src) {
+                errors.push(format!("{rel}：移不回来（{e}）"));
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(AppError::internal("生成事务回滚没有全部完成").with_detail(errors.join("；")))
+        }
+    }
+}
+
+/// **整批生成事务**：算完整候选集 → 备份 → 新增 / 修改 / 删除 → 失败整体回滚 →
+/// 成功后逐份回读验证。只有全量验证通过才把结果交给调用方去记成功账。
+///
+/// `allowed` 是本次用户确认写入的相对路径；`None` = 全部候选。`picked` 之外的
+/// 候选不写，但受管清单内不再产出的文件仍按同一事务删除。
+pub fn generate_transaction(
+    delivery_root: &Path,
+    trash_root: &Path,
+    asset_root: &Path,
+    book: &Book<'_>,
+    stamp: &str,
+    allowed: Option<&BTreeSet<String>>,
+    force: bool,
+) -> Result<GenerateOutcome, AppError> {
+    // 资产体检在写盘之前，与「生成不替发布补内容」同一道闸
+    check_referenced_assets(asset_root, &referenced_assets(book))?;
+    // 候选集自带连算两次的确定性硬闸；算不出来就不该动盘
+    let (candidates, diffs) = delivery_diffs(delivery_root, book)?;
+
+    let mut writes: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut unchanged: Vec<String> = Vec::new();
+    for c in &candidates {
+        if !c.writable {
+            continue;
+        }
+        let Some(d) = diffs.iter().find(|x| x.rel == c.rel) else {
+            return Err(AppError::internal(format!(
+                "候选 {} 没有比较结论，无法确认归属",
+                c.rel
+            )));
+        };
+        if !is_managed(&c.rel) || is_frozen(&c.rel) {
+            return Err(AppError::internal(format!(
+                "候选 {} 不在受管清单内，生成事务中止",
+                c.rel
+            )));
+        }
+        let permitted = allowed.map_or(true, |set| set.contains(&c.rel));
+        let needs_write = matches!(d.kind, DiffKind::Added | DiffKind::Modified) || force;
+        if permitted && needs_write {
+            writes.push((c.rel.clone(), c.want.clone()));
+        } else if permitted {
+            unchanged.push(c.rel.clone());
+        }
+    }
+    let removals: Vec<String> = diffs
+        .iter()
+        .filter(|d| d.kind == DiffKind::Removed)
+        .map(|d| d.rel.clone())
+        .collect();
+
+    let mut affected: Vec<String> = writes.iter().map(|(r, _)| r.clone()).collect();
+    affected.extend(removals.iter().cloned());
+    let mut tx = GenerateTx::backup(delivery_root, &affected)?;
+
+    let applied = (|| -> Result<Vec<String>, AppError> {
+        for (rel, want) in &writes {
+            crate::fsx::atomic::atomic_write(&delivery_root.join(rel), want)?;
+        }
+        tx.remove_managed(delivery_root, trash_root, stamp, &removals)
+    })();
+
+    let result = applied.and_then(|removed| {
+        let verified = tx.verify(delivery_root, &writes)?;
+        Ok(GenerateOutcome {
+            written: writes.iter().map(|(r, _)| r.clone()).collect(),
+            removed,
+            unchanged,
+            verified,
+        })
+    });
+
+    match result {
+        Ok(outcome) => Ok(outcome),
+        Err(e) => match tx.rollback(delivery_root) {
+            Ok(()) => Err(e),
+            Err(rollback_err) => Err(AppError::internal(format!("生成事务失败且回滚未完成：{e}"))
+                .with_detail(rollback_err.message)),
+        },
+    }
 }
 
 /// manifest 里一条资产。**两种命名空间共存**（见模块头「两类 id 的边界」）：
@@ -1321,6 +2031,11 @@ pub fn plan_publish(
         if book.build_state(&v.uid) == BuildState::NoResources {
             continue; // 暂无资源：跳过，不报错
         }
+        /* 停用的机型不进发布清单（客户端目录也不列它）—— 但它的产物**留在交付目录**，
+        这里只是不登记、不校验，不写也不删。 */
+        if machine_disabled(book, &v.machine_id) {
+            continue;
+        }
         // 产物名由命名规则算出（机型 id + 版本 id），不再查上游 manifest
         let name = v.mkp_file.clone();
         let rel = format!("{MKP_PRESETS_DIR}/{name}");
@@ -1503,6 +2218,10 @@ pub fn plan_publish(
         if book.build_state(&v.uid) == BuildState::NoResources {
             continue;
         }
+        /* 停用机型不在发布面里，也就不要求目录登记它（上面组装 manifest 时同样跳过）。 */
+        if machine_disabled(book, &v.machine_id) {
+            continue;
+        }
         let rel = format!("{MKP_PRESETS_DIR}/{}", v.mkp_file);
         let catalog_path = format!("delivery/{rel}");
         let on_disk = delivery_root.join(&rel);
@@ -1644,24 +2363,13 @@ pub fn built_catalog(
     published_at: Option<&str>,
     identity: &PublishIdentity,
 ) -> Result<crate::runtime::catalog::Catalog, AppError> {
-    let mut catalog = crate::runtime::catalog::Catalog::build_from_presets_lenient(
-        book.presets,
+    catalog_from_artifacts(
+        delivery_root,
+        book,
+        published_at,
+        identity,
         &delivery_root.join(MKP_PRESETS_DIR),
-    );
-    // 最低客户端版本与发布侧同一个来源（规则表）—— 生成与发布写出来的目录**同一代**，
-    // 不许因为"谁先跑"而一个带这一格一个不带
-    if let Some(publish_root) = delivery_root.parent() {
-        let rules = crate::runtime::structure::RuleTable::load(publish_root)?;
-        catalog.apply_min_client(&rules);
-    }
-    catalog.published_at = published_at.map(str::to_owned);
-    /*
-     * **发布身份三格同生同死**（与 `Catalog::parse` 的校验同一口径）：
-     * 只有 ID 没有序号（或反过来）的目录过不了解析，也就不该被写出来。
-     */
-    catalog.catalog_id = identity.catalog_id.clone();
-    catalog.publish_serial = identity.serial;
-    Ok(catalog)
+    )
 }
 
 /// **交付面的自查**（预检的「清单 ↔ 文件」一档）：三件事一起对 ——
@@ -1782,6 +2490,34 @@ mod tests {
             ids,
             vec!["a1-image", "a1-icon", "p1s-icon", "a1-bbs-04-020"],
             "可达集 = 机型 image/icon + 套餐 assetRefs；登记顺序输出"
+        );
+    }
+
+    /// **停用判据只认源里的开关**，而且反查不到版本时不许猜成停用。
+    ///
+    /// 停用 = 不发布、不在客户端显示；产物字节照留在交付目录（作者口径）。
+    /// 这条钉住"跳过"的边界：多跳一份就是把该发的东西弄丢，少跳一份就退回旧病。
+    #[test]
+    fn only_a_disabled_machine_leaves_the_publish_face() {
+        let mut f = Fixture::load();
+        f.presets
+            .catalog
+            .machine_mut("A1")
+            .expect("夹具里有 A1")
+            .enabled = false;
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        assert!(machine_disabled(&book, "A1"), "源里写了 enabled = false");
+        assert!(
+            product_disabled(&book, "A1-standard.toml"),
+            "产物名要能反查到那台停用机型"
+        );
+        assert!(!machine_disabled(&book, "P1S"), "没停用的机型不许被牵连");
+        assert!(
+            !product_disabled(&book, "no-such-version.toml"),
+            "反查不到版本 = 不是停用（交给漏登记那条严格判据）"
         );
     }
 
@@ -1919,19 +2655,20 @@ mod tests {
         let d = crate::workbench::domain::patch::Draft::default();
         let book = Book::new(&real, &c, &d);
 
-        // JSON 条数锚点：5 台机型、9 个版本、9 条套餐（一版一套）
+        // JSON 条数锚点：4 台机型、8 个版本、8 条套餐（一版一套）
+        // （2026-11-07：P2S 停用 —— `enabled = false` 的机型连同它的套餐一起退出交付面）
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().unwrap();
-        assert_eq!(machines.len(), 5, "真数据 5 台机型");
+        assert_eq!(machines.len(), 4, "真数据 4 台机型（P2S 已停用）");
         let versions: usize = machines
             .iter()
             .map(|m| m["versions"].as_array().unwrap().len())
             .sum();
-        assert_eq!(versions, 9, "版本总数变了 —— 说清为什么再改判据");
+        assert_eq!(versions, 8, "版本总数变了 —— 说清为什么再改判据");
         assert_eq!(
             bundles_json(&book)["bundles"].as_array().unwrap().len(),
-            9,
-            "一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一"
+            8,
+            "一版一套：A1 三版 + A1_MINI 三版 + P1S / X1C 各一（P2S_default 随机型停用）"
         );
 
         // 可达集 22 = 整机图 5（bundled 档：被机型 image 字段引用，但 dest 为 None ——
@@ -1941,9 +2678,10 @@ mod tests {
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            22,
+            19,
             "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么\
-             （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20）"
+             （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20；\
+             2026-11-07：P2S 停用 ⇒ 整机图 5→4、BBS 5→4、mkPreset 9→8，22 → 19）"
         );
         assert!(
             referenced.iter().all(|a| a.kind != AssetKind::Model),
@@ -1966,8 +2704,8 @@ mod tests {
             .filter(|a| a.kind == AssetKind::SlicerProfile)
             .count();
         assert_eq!(
-            bbs, 5,
-            "BBS 引用去重后 5 条（A1 / A1_MINI 各三份套餐共用一条）"
+            bbs, 4,
+            "BBS 引用去重后 4 条（A1 / A1_MINI 各三份套餐共用一条；P2S 停用后少一条）"
         );
 
         // 落盘（真资产根 → 临时交付根）：A 类**只体检不复制**（裁决 C/甲），
@@ -1975,8 +2713,8 @@ mod tests {
         let delivery = tempfile::tempdir().unwrap();
         let out = write_content(delivery.path(), &asset_root, &book).expect("真数据落盘");
         assert_eq!(
-            out.assets_checked, 8,
-            "有落点的可达资产 8 条（图标 3 + BBS 5），一条不少一条不多"
+            out.assets_checked, 7,
+            "有落点的可达资产 7 条（图标 3 + BBS 4），一条不少一条不多"
         );
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
@@ -2003,7 +2741,8 @@ mod tests {
             .iter()
             .map(|a| a["id"].as_str().unwrap())
             .collect();
-        for b in book.presets.bundles.items() {
+        // 只核对**进交付面**的套餐：停用机型的套餐连它引用的资产一起不发了
+        for b in book.presets.delivery_bundles() {
             for r in &b.asset_refs {
                 let Some(a) = book.presets.assets.get(r) else {
                     panic!("套餐 {} 引用不存在的资产 {r}", b.id);
@@ -2253,7 +2992,7 @@ mod tests {
         let a1 = preset_file_name("A1", "STANDARD");
         let rel = format!("mkp/presets/{a1}");
 
-        let status = delivery_status(&delivery, &book);
+        let status = delivery_status(&delivery, &book).expect("交付读数");
         assert!(status.catalog_error.is_none(), "目录读得出来");
         assert!(
             status.drift.is_empty(),
@@ -2280,7 +3019,7 @@ mod tests {
         assert_ne!(aged, a1_text, "模板行要真的删掉一行");
         crate::fsx::atomic::atomic_write(&delivery.join(&rel), aged.as_bytes()).unwrap();
         write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:01Z")).expect("目录重算");
-        let status = delivery_status(&delivery, &book);
+        let status = delivery_status(&delivery, &book).expect("交付读数");
         assert_eq!(
             state_of(&status, &rel),
             DeliveryState::Pending,
@@ -2294,25 +3033,27 @@ mod tests {
         assert_eq!(
             state_of(&status, "catalog.json"),
             DeliveryState::Pending,
-            "有产物待更新，目录也该重算"
+            "盘上目录登记的是被改坏产物的哈希，与按当前源重算的目录不同"
         );
 
         // 写回当前渲染器的那份 → 回到已生成
         crate::fsx::atomic::atomic_write(&delivery.join(&rel), a1_text.as_bytes()).unwrap();
         write_catalog_json(&delivery, &book, Some("2026-10-06T00:00:02Z")).expect("目录重算");
         assert_eq!(
-            state_of(&delivery_status(&delivery, &book), &rel),
+            state_of(&delivery_status(&delivery, &book).expect("交付读数"), &rel),
             DeliveryState::UpToDate
         );
 
-        // 改一份产物（大小也变）→ 它 Pending、目录也 Pending、漂移指着它
+        /* 改一份产物（大小也变）→ 那份 TOML 待更新，漂移指着它。
+         * `catalog.json` 的应有字节按**当前源**重算，盘上目录登记的就是这个值 ——
+         * 目录本身的内容没有过时，不需要跟着标待更新。待更新的是产物本身。 */
         crate::fsx::atomic::atomic_write(&delivery.join(&rel), b"# changed payload").unwrap();
-        let status = delivery_status(&delivery, &book);
+        let status = delivery_status(&delivery, &book).expect("交付读数");
         assert_eq!(state_of(&status, &rel), DeliveryState::Pending);
         assert_eq!(
             state_of(&status, "catalog.json"),
-            DeliveryState::Pending,
-            "有一条漂了，目录本身也该重算"
+            DeliveryState::UpToDate,
+            "目录登记的是应有字节，不该因为盘上产物被手改就说目录待重算"
         );
         assert!(
             status
@@ -2326,7 +3067,7 @@ mod tests {
         // 恢复内容再判：配方这一侧跟上时，字节一致 = 已生成
         crate::fsx::atomic::atomic_write(&delivery.join(&rel), a1_text.as_bytes()).unwrap();
         assert_eq!(
-            state_of(&delivery_status(&delivery, &book), &rel),
+            state_of(&delivery_status(&delivery, &book).expect("交付读数"), &rel),
             DeliveryState::UpToDate
         );
 
@@ -2338,7 +3079,7 @@ mod tests {
          * 台账不参与：这条断言在台账**为空**的情况下也必须成立。 */
         let tampered = format!("{a1_text}\n# 手改了一行\n");
         crate::fsx::atomic::atomic_write(&delivery.join(&rel), tampered.as_bytes()).unwrap();
-        let status = delivery_status(&delivery, &book);
+        let status = delivery_status(&delivery, &book).expect("交付读数");
         assert_eq!(
             state_of(&status, &rel),
             DeliveryState::Pending,
@@ -2346,8 +3087,8 @@ mod tests {
         );
         assert_eq!(
             state_of(&status, "catalog.json"),
-            DeliveryState::Pending,
-            "有产物待更新，目录也该重算"
+            DeliveryState::UpToDate,
+            "目录按当前源重算没变，待更新的是产物本身"
         );
 
         /* **没有生成记录、盘上也没有产物** → 未生成。
@@ -2357,13 +3098,13 @@ mod tests {
         std::fs::remove_file(delivery.join(&rel)).unwrap();
         let never = committed();
         let never_book = Book::new(&f.presets, &never, &d);
-        let status = delivery_status(&delivery, &never_book);
+        let status = delivery_status(&delivery, &never_book).expect("交付读数");
         assert_eq!(
             state_of(&status, &rel),
             DeliveryState::Missing,
             "盘上没有产物就是未生成（与台账无关）"
         );
-        let status = delivery_status(&delivery, &book);
+        let status = delivery_status(&delivery, &book).expect("交付读数");
         assert_eq!(state_of(&status, &rel), DeliveryState::Missing);
         assert!(
             status
@@ -2615,6 +3356,94 @@ mod tests {
         );
     }
 
+    /// **停用机型：产物留在盘上、但不进发布清单**（2026-11-07 作者口径）。
+    ///
+    /// 从前这一份会让 `plan_publish` 整笔报错（"产物发出来了，但说明书里没有登记"）——
+    /// 定稿清单算不出来，界面就把「更新发布凭据」按灰。这条钉住：算得出来，
+    /// 且产物字节一个字节都没动。
+    #[test]
+    fn a_disabled_machines_product_stays_on_disk_but_out_of_the_manifest() {
+        let mut f = Fixture::load();
+        f.presets
+            .catalog
+            .machine_mut("P1S")
+            .expect("夹具里有 P1S")
+            .enabled = false;
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        f.presets.set_asset_root(asset_root.path());
+        let book = Book::new(&f.presets, &c, &d);
+        assert!(machine_disabled(&book, "P1S"), "源里的开关要生效");
+
+        let publish_root = tempfile::tempdir().unwrap();
+        let delivery = publish_root.path().join("delivery");
+        std::fs::create_dir_all(&delivery).unwrap();
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            let dst = publish_root.path().join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+        }
+        /* 三个产物都照旧生成在盘上（含停用机型的 P1S-lite）—— 停用不删产物 */
+        for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
+            crate::fsx::atomic::atomic_write(
+                &delivery.join(MKP_PRESETS_DIR).join(name),
+                format!("# preset {name}").as_bytes(),
+            )
+            .unwrap();
+        }
+        let before =
+            std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap();
+
+        write_content(&delivery, asset_root.path(), &book).unwrap();
+        let meta = PublishMeta {
+            stamp: "2026-11-07T00:00:00Z".to_owned(),
+            channel: "stable".to_owned(),
+            version: String::new(),
+            identity: Some(PublishIdentity::new_line("support-ease", 1)),
+            commit_sha: None,
+        };
+        let out = publish_into(&delivery, asset_root.path(), &book, &meta)
+            .expect("停用机型的产物留在盘上，也不该让发布算不出来");
+
+        assert_eq!(out.presets, 2, "进发布面的只剩两台没停用的");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(delivery.join(MANIFEST_FILE)).unwrap()).unwrap();
+        let listed: Vec<&str> = manifest["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["relativePath"].as_str().unwrap())
+            .collect();
+        assert!(
+            !listed.contains(&"delivery/mkp/presets/P1S-lite.toml"),
+            "停用机型不进发布清单：{listed:?}"
+        );
+        assert!(
+            listed.contains(&"delivery/mkp/presets/A1-standard.toml"),
+            "没停用的照旧登记"
+        );
+        assert_eq!(
+            std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap(),
+            before,
+            "产物字节原地不动 —— 停用不是删除"
+        );
+    }
+
     /// **真数据上的交付集合**（13.1 的真数据版 + 防空转）：
     /// mkp 产物名 9 个（命名函数逐版算出）、资产 8 条（图标 3 + BBS 5；
     /// 整机图 2026-10-01 剥离台账后不再进交付）—— 集合计数锚点变了就说明清单或套餐变了
@@ -2794,8 +3623,9 @@ mod tests {
         // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
         assert_eq!(
             catalog.files.len(),
-            17,
-            "反空转：说明书登记台账全部 17 条（9 BBS + 3 图标 + 5 模型）；\
+            16,
+            "反空转：说明书登记台账全部 16 条（8 BBS + 3 图标 + 5 模型；\
+             P2S 停用后它的 BBS 那条也退出）；\
              没跑 wb_generate 所以没有 mkp 产物条目（宽松构建跳过）"
         );
         for f in &catalog.files {
@@ -3098,5 +3928,523 @@ mod tests {
             rebuilt.to_pretty_json().expect("该序列化得出").trim(),
             "交付面 catalog 与重建不一致 —— 改了源/产物后重跑 `cargo run --bin gen-catalog`"
         );
+    }
+
+    /* ---------- 候选集 / 受管范围 / 生成事务专项（2026-11-06） ---------- */
+
+    /// 一套能跑完整生成事务的夹具：源、资产、交付根、回收站都在临时目录里。
+    struct CandidateEnv {
+        dir: tempfile::TempDir,
+        presets: crate::workbench::presets::Presets,
+        committed: Committed,
+        draft: crate::workbench::domain::patch::Draft,
+        delivery: PathBuf,
+        asset_root: PathBuf,
+        trash: PathBuf,
+    }
+
+    impl CandidateEnv {
+        fn new() -> Self {
+            let (dir, mut presets) = Fixture::load().into_parts();
+            let asset_root = dir.path().join("assets");
+            for rel in [
+                "printers/a1.webp",
+                "icons/a1.svg",
+                "bbs/A1/process.json",
+                "icons/p1s.svg",
+            ] {
+                let p = asset_root.join(rel);
+                std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                crate::fsx::atomic::atomic_write(&p, b"payload").unwrap();
+            }
+            presets.set_asset_root(&asset_root);
+            let delivery = dir.path().join("delivery");
+            std::fs::create_dir_all(&delivery).unwrap();
+            let trash = dir.path().join(".trash");
+            Self {
+                dir,
+                presets,
+                committed: committed(),
+                draft: crate::workbench::domain::patch::Draft::default(),
+                delivery,
+                asset_root,
+                trash,
+            }
+        }
+
+        fn book(&self) -> Book<'_> {
+            Book::new(&self.presets, &self.committed, &self.draft)
+        }
+
+        /// 把源里的机型开关改掉，等价于作者关掉 P2S 启用那一笔。
+        fn disable_machine(&mut self, id: &str) {
+            let path = self
+                .dir
+                .path()
+                .join("presets")
+                .join(format!("machines/{id}.toml"));
+            let text = std::fs::read_to_string(&path).unwrap();
+            assert!(!text.contains("enabled = false"), "夹具本来是启用的");
+            let patched = text.replacen("\n[dimensions]", "\nenabled = false\n\n[dimensions]", 1);
+            crate::fsx::atomic::atomic_write(&path, patched.as_bytes()).unwrap();
+            self.presets =
+                crate::workbench::presets::Presets::load_from(&self.dir.path().join("presets"))
+                    .expect("改过的源还读得出来");
+            self.presets.set_asset_root(&self.asset_root);
+        }
+    }
+
+    /// **判据 1**：相同源连算两次，每份候选的相对路径与字节必须完全一致。
+    #[test]
+    fn candidate_set_is_byte_stable_across_two_runs() {
+        let env = CandidateEnv::new();
+        let book = env.book();
+        let first = candidate_once(&env.delivery, &book).expect("第一次算得出");
+        let second = candidate_once(&env.delivery, &book).expect("第二次算得出");
+        assert_eq!(first.len(), second.len(), "两次的份数必须相同");
+        for (a, b) in first.iter().zip(&second) {
+            assert_eq!(a.rel, b.rel, "第 {} 份换了路径", a.rel);
+            assert_eq!(a.want, b.want, "{} 两次的字节不同", a.rel);
+        }
+        assert!(
+            candidate_set(&env.delivery, &book).is_ok(),
+            "确定性硬闸放行"
+        );
+    }
+
+    /// 盘上那份带着渲染器已经不写的 `# generated_at:`：内容一样也判**待更新**，
+    /// 生成一次清掉之后才回到「一致」。
+    ///
+    /// 反空转：不清的话 `catalog.json` 是按候选字节登记大小 / 哈希的，
+    /// 与盘上那份永久差这一行 —— 检查卡报「清单和文件对不上」，
+    /// 而生成报「没有哪一份会变」，两边永远僵住。
+    #[test]
+    fn a_legacy_generated_at_line_is_rewritten_instead_of_ignored() {
+        let env = CandidateEnv::new();
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "baseline",
+            None,
+            false,
+        )
+        .expect("首次生成");
+
+        let a1 = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        let path = env.delivery.join(&a1);
+        let body = std::fs::read_to_string(&path).expect("产物该在");
+        assert!(
+            !body.contains(crate::workbench::GENERATED_AT_PREFIX),
+            "候选字节本身不带写盘记录"
+        );
+        // 复刻 11-05 那批产物的形态：写盘记录插在头注释块末尾
+        let legacy = body.replacen(
+            '\n',
+            &format!(
+                "\n{} 2026-11-05T04:17:00+08:00\n",
+                crate::workbench::GENERATED_AT_PREFIX
+            ),
+            2,
+        );
+        crate::fsx::atomic::atomic_write(&path, legacy.as_bytes()).expect("造一份历史产物");
+
+        let (candidates, diffs) = delivery_diffs(&env.delivery, &env.book()).expect("比较得出");
+        let d = diffs
+            .iter()
+            .find(|d| d.rel == a1)
+            .expect("候选里该有这一份");
+        assert_eq!(
+            d.kind,
+            DiffKind::Modified,
+            "带旧写盘记录 ⇒ 要重写，不能判「一致」"
+        );
+
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "cleanup",
+            None,
+            false,
+        )
+        .expect("生成一次把它清掉");
+
+        let want = candidates.iter().find(|c| c.rel == a1).expect("候选");
+        assert_eq!(
+            std::fs::read(&path).expect("重写后该在"),
+            want.want,
+            "重写后必须逐字节等于候选（旧行 gone）"
+        );
+        let (_, after) = delivery_diffs(&env.delivery, &env.book()).expect("二轮比较");
+        assert_eq!(
+            after.iter().find(|d| d.rel == a1).expect("候选").kind,
+            DiffKind::Same,
+            "清掉之后才允许判一致"
+        );
+    }
+
+    /// **判据 2**：关掉一台机型的启用后，所有受影响产物（目录数据、目录清单、
+    /// 相关 TOML）都识别变化，且不会出现"只更新一部分却显示成功"。
+    #[test]
+    fn disabling_a_machine_marks_every_affected_product() {
+        let mut env = CandidateEnv::new();
+        // 先按原源生成一次，落盘成"全一致"的基线
+        let first = generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "baseline",
+            None,
+            false,
+        )
+        .expect("首次生成");
+        assert!(!first.written.is_empty());
+        {
+            let (_, diffs) = delivery_diffs(&env.delivery, &env.book()).expect("首轮比较");
+            let changed: Vec<&str> = diffs
+                .iter()
+                .filter(|d| d.kind != DiffKind::Same && d.kind != DiffKind::Frozen)
+                .map(|d| d.rel.as_str())
+                .collect();
+            assert!(changed.is_empty(), "生成完就全一致：{changed:?}");
+        }
+
+        // 关掉 P1S 启用（等价于作者那笔 `enabled = false`），并改一格配方值 ——
+        // 前者影响目录清单，后者影响预设 TOML 与它登记进 catalog 的哈希。
+        env.disable_machine("P1S");
+        env.draft.values.insert(
+            "v:A1/STANDARD:toolhead.offset.x".to_owned(),
+            Some(serde_json::json!(-9.5)),
+        );
+        let (candidates, diffs) =
+            delivery_diffs(&env.delivery, &env.book()).expect("源变了还比得出");
+        let kind_of = |rel: &str| {
+            diffs
+                .iter()
+                .find(|d| d.rel == rel)
+                .unwrap_or_else(|| panic!("候选集里没有 {rel}"))
+                .kind
+        };
+        // 目录清单（catalog.json）按当前源重算，必然与盘上那份不同
+        assert_eq!(
+            kind_of(NEW_CATALOG_FILE),
+            DiffKind::Modified,
+            "目录清单要变"
+        );
+        // 配方改了 ⇒ 那一份预设 TOML 要待更新
+        let a1 = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        assert_eq!(kind_of(&a1), DiffKind::Modified, "改过的预设要待更新");
+        /* **如实的完整口径**：逐份核一遍 —— 凡是候选字节与盘上不同的，
+         * 必须被标成待更新；字节相同的，不许虚报成待更新。
+         * 不硬编码"哪一份该变"：源改动影响哪些产物由渲染器说了算。 */
+        for c in &candidates {
+            let on_disk = std::fs::read(env.delivery.join(&c.rel)).ok();
+            let really_changed = on_disk.as_deref() != Some(c.want.as_slice());
+            let marked = matches!(kind_of(&c.rel), DiffKind::Modified | DiffKind::Added);
+            assert_eq!(
+                marked,
+                really_changed,
+                "{} 的状态必须与逐字节比较一致（盘上 {} B / 候选 {} B）",
+                c.rel,
+                on_disk.as_ref().map_or(0, Vec::len),
+                c.want.len()
+            );
+        }
+
+        // 整批事务写完后，**全部**候选都回读验证通过、没有残留的待更新项
+        let outcome = generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "after-disable",
+            None,
+            false,
+        )
+        .expect("源变了也能整批生成");
+        assert!(outcome.written.contains(&NEW_CATALOG_FILE.to_owned()));
+        assert!(outcome.written.contains(&a1));
+        assert!(outcome.verified >= outcome.written.len() + outcome.removed.len());
+        for c in &candidates {
+            if c.writable {
+                assert_eq!(
+                    std::fs::read(env.delivery.join(&c.rel)).unwrap(),
+                    c.want,
+                    "{} 写盘字节必须与候选逐字节一致（不剥任何字段）",
+                    c.rel
+                );
+            }
+        }
+        for rel in &outcome.removed {
+            assert!(!env.delivery.join(rel).exists(), "{rel} 删除后要不在盘上");
+        }
+        let (_, after) = delivery_diffs(&env.delivery, &env.book()).expect("二轮比较");
+        let left: Vec<&str> = after
+            .iter()
+            .filter(|d| {
+                matches!(
+                    d.kind,
+                    DiffKind::Added | DiffKind::Modified | DiffKind::Removed
+                )
+            })
+            .map(|d| d.rel.as_str())
+            .collect();
+        assert!(left.is_empty(), "不允许部分成功：{left:?}");
+    }
+
+    /// **判据 3**：删除只在生成器独占管理清单内生效。范围外文件与发布定稿文件
+    /// 原样留在盘上，受管清单内的孤儿才进回收站，而且不是真删。
+    #[test]
+    fn deletion_never_touches_files_outside_the_managed_scope() {
+        let env = CandidateEnv::new();
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "seed",
+            None,
+            false,
+        )
+        .expect("先落一份全一致");
+        // 范围外的用户文件
+        crate::fsx::atomic::atomic_write(&env.delivery.join("notes.txt"), b"mine").unwrap();
+        crate::fsx::atomic::atomic_write(&env.delivery.join("assets/keep.bin"), b"keep").unwrap();
+        // 发布 / 版本交付独占
+        crate::fsx::atomic::atomic_write(&env.delivery.join(MANIFEST_FILE), b"publish-owned")
+            .unwrap();
+        crate::fsx::atomic::atomic_write(
+            &env.delivery.join(crate::runtime::source::RELEASE_FILE),
+            b"release-owned",
+        )
+        .unwrap();
+        // 受管清单内、当前源不再产出的孤儿
+        let orphan = format!("{MKP_PRESETS_DIR}/GONE-standard.toml");
+        crate::fsx::atomic::atomic_write(&env.delivery.join(&orphan), b"orphan").unwrap();
+
+        let (_, diffs) = delivery_diffs(&env.delivery, &env.book()).expect("比较得出");
+        let kind_of = |rel: &str| diffs.iter().find(|d| d.rel == rel).map(|d| d.kind);
+        assert_eq!(kind_of("notes.txt"), Some(DiffKind::Unmanaged));
+        assert_eq!(kind_of("assets/keep.bin"), Some(DiffKind::Unmanaged));
+        assert_eq!(kind_of(MANIFEST_FILE), Some(DiffKind::Frozen));
+        assert_eq!(
+            kind_of(crate::runtime::source::RELEASE_FILE),
+            Some(DiffKind::Frozen)
+        );
+        assert_eq!(kind_of(&orphan), Some(DiffKind::Removed));
+
+        let outcome = generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "prune",
+            None,
+            false,
+        )
+        .expect("事务成功");
+        assert_eq!(outcome.removed, vec![orphan.clone()], "只删这一个");
+        assert_eq!(
+            std::fs::read(env.delivery.join("notes.txt")).unwrap(),
+            b"mine"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join("assets/keep.bin")).unwrap(),
+            b"keep"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join(MANIFEST_FILE)).unwrap(),
+            b"publish-owned"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join(crate::runtime::source::RELEASE_FILE)).unwrap(),
+            b"release-owned"
+        );
+        assert!(!env.delivery.join(&orphan).exists(), "受管孤儿已移走");
+        assert_eq!(
+            std::fs::read(env.trash.join(format!("delivery/prune/{orphan}"))).unwrap(),
+            b"orphan",
+            "进的是回收站，不是真删"
+        );
+    }
+
+    /// **判据 4**：写盘失败必须整体回滚；回滚不了也明确失败，绝不伪装成功。
+    #[test]
+    fn a_failed_write_rolls_back_every_file_and_loudly_fails() {
+        let env = CandidateEnv::new();
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "seed",
+            None,
+            false,
+        )
+        .expect("先落一份全一致");
+        // 改两份产物，让这一轮至少有两处要写；事务开始前的现场就是 hand-edited
+        let toml_rel = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        let json_rel = CONTENT_FILES[0].to_owned();
+        crate::fsx::atomic::atomic_write(env.delivery.join(&toml_rel).as_path(), b"hand-edited")
+            .unwrap();
+        crate::fsx::atomic::atomic_write(env.delivery.join(&json_rel).as_path(), b"hand-edited")
+            .unwrap();
+        // 放一个受管孤儿：本轮还要删一份
+        let orphan = format!("{MKP_PRESETS_DIR}/GONE-standard.toml");
+        crate::fsx::atomic::atomic_write(&env.delivery.join(&orphan), b"orphan").unwrap();
+        // 回收站根是个文件 ⇒ 建回收目录失败。这一步在**所有写入之后**才发生，
+        // 正好让「写了几份才失败」的路径走到回滚，而不是在比较阶段就中止。
+        let broken_trash = env.dir.path().join("broken-trash");
+        crate::fsx::atomic::atomic_write(&broken_trash, b"not a dir").unwrap();
+
+        let err = generate_transaction(
+            &env.delivery,
+            &broken_trash,
+            &env.asset_root,
+            &env.book(),
+            "failing",
+            None,
+            false,
+        )
+        .expect_err("写不进去必须明确失败");
+        assert!(
+            !err.message.is_empty(),
+            "失败要说清是哪一步，不返回空成功：{err:?}"
+        );
+        // 回滚后，前面两份仍是事务开始前的原字节，孤儿也还在
+        assert_eq!(
+            std::fs::read(env.delivery.join(&toml_rel)).unwrap(),
+            b"hand-edited",
+            "写过的 TOML 要还原到事务前"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join(&json_rel)).unwrap(),
+            b"hand-edited",
+            "写过的目录 JSON 要还原到事务前"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join(&orphan)).unwrap(),
+            b"orphan",
+            "没删成的文件要留在盘上"
+        );
+    }
+
+    /// **判据 5**：旧格式里的 `# generated_at:` 只做比较兼容 —— 历史文件按「内容没变」
+    /// 处理（不因为时间戳不同就报内容改了），但**仍要重写一次**把这一行清掉；
+    /// 新写出的内容不含这个非确定性字段，回读验证用未剥离字节。
+    ///
+    /// 「重写」不是形式主义：`catalog.json` 的 size / sha 按候选字节登记，
+    /// 留着那一行就永久对不上（见 `a_legacy_generated_at_line_is_rewritten_instead_of_ignored`）。
+    #[test]
+    fn legacy_timestamp_is_comparison_only_and_new_bytes_are_deterministic() {
+        let env = CandidateEnv::new();
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "seed",
+            None,
+            false,
+        )
+        .expect("先落一份全一致");
+        let rel = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        let want = std::fs::read(env.delivery.join(&rel)).unwrap();
+        // 模拟历史格式：正文前插一行写盘时刻
+        let legacy = format!(
+            "# generated_at: 2020-01-01T00:00:00+00:00\n{}",
+            String::from_utf8(want.clone()).unwrap()
+        );
+        crate::fsx::atomic::atomic_write(&env.delivery.join(&rel), legacy.as_bytes()).unwrap();
+        let (_, diffs) = delivery_diffs(&env.delivery, &env.book()).expect("比较得出");
+        // 内容没变，但盘上那份形状过期 ⇒ 判待更新（清理一次），而不是判「一致」留着它
+        assert_eq!(
+            diffs.iter().find(|d| d.rel == rel).map(|d| d.kind),
+            Some(DiffKind::Modified),
+            "旧格式时间戳不制造「内容变了」，但那一行要清掉 ⇒ 判待更新"
+        );
+        // 强制重生成后，写出的是确定性正文，回读验证用未剥离字节
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "normalize",
+            None,
+            true,
+        )
+        .expect("整批重生成");
+        let got = std::fs::read(env.delivery.join(&rel)).unwrap();
+        assert_eq!(got, want, "写盘字节与候选逐字节一致");
+        assert!(
+            !String::from_utf8(got).unwrap().contains("# generated_at:"),
+            "新生成内容不写写盘时刻"
+        );
+    }
+
+    /// **判据 6**：发布凭据失效是只读诊断 —— 点名差异，不改 manifest 一个字节。
+    #[test]
+    fn manifest_diagnosis_is_read_only_and_names_the_difference() {
+        let env = CandidateEnv::new();
+        generate_transaction(
+            &env.delivery,
+            &env.trash,
+            &env.asset_root,
+            &env.book(),
+            "seed",
+            None,
+            false,
+        )
+        .expect("先落一份全一致");
+        let rel = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        let full_rel = format!("delivery/{rel}");
+        let bytes = std::fs::read(env.delivery.join(&rel)).unwrap();
+        let manifest = serde_json::json!({
+            "assets": [{
+                "relativePath": full_rel,
+                "sha256": sha256_of(&bytes),
+                "size": bytes.len(),
+            }]
+        });
+        let text = serde_json::to_string_pretty(&manifest).unwrap();
+        crate::fsx::atomic::atomic_write(&env.delivery.join(MANIFEST_FILE), text.as_bytes())
+            .unwrap();
+        assert!(!manifest_diagnosis(&env.delivery).unwrap().0, "起初有效");
+
+        crate::fsx::atomic::atomic_write(&env.delivery.join(&rel), b"changed").unwrap();
+        let (stale, reasons) = manifest_diagnosis(&env.delivery).expect("诊断得出");
+        assert!(stale, "最终文件变了，凭据必须失效");
+        assert!(
+            reasons.iter().any(|r| r.contains(&rel)),
+            "要点名是哪一条：{reasons:?}"
+        );
+        assert_eq!(
+            std::fs::read(env.delivery.join(MANIFEST_FILE)).unwrap(),
+            text.as_bytes(),
+            "诊断一个字节都不写"
+        );
+        assert!(
+            delivery_status(&env.delivery, &env.book())
+                .expect("读数")
+                .manifest_stale
+        );
+    }
+
+    /// **判据 7**：无法完成比较时明确失败，不静默兜底成"大概一致"。
+    #[test]
+    fn a_file_that_cannot_be_compared_is_a_hard_failure() {
+        let env = CandidateEnv::new();
+        // 候选路径上放一个目录：读不出字节，比较无法完成
+        let rel = format!("{MKP_PRESETS_DIR}/{}", preset_file_name("A1", "STANDARD"));
+        std::fs::create_dir_all(env.delivery.join(&rel)).unwrap();
+        assert!(
+            delivery_diffs(&env.delivery, &env.book()).is_err(),
+            "比较不了就该报错，不能当成已生成"
+        );
+        assert!(delivery_status(&env.delivery, &env.book()).is_err());
     }
 }

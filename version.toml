@@ -1,0 +1,8 @@
+# 唯一版本源：这里是「当前正在开发哪个号」。
+#
+# 其余四处（package.json / src-tauri/Cargo.toml / src-tauri/tauri.conf.json /
+# Cargo.lock 里本包那一段）都由 `scripts/version.mjs` 从这里生成，**不要手改**；
+# 手改会在 `npm run version:check` 里被抓出来。
+#
+# 只有「打 Tag 成功」才算这一版冻结。冻结之后由事务把这里滚到下一个号。
+version = "0.0.10-preview.8"

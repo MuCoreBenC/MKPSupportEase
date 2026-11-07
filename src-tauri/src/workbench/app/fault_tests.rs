@@ -269,3 +269,33 @@ fn f8_a_broken_ledger_is_corrupted_never_zero() {
         "体检也要如实报错，不许当没有账本"
     );
 }
+
+/* ---------- F9：同一个号、内容变了 = 待发布 ---------- */
+
+/// **生成改过目录、还没发过新版**：账本与目录停在同一个号，只是内容不同。
+///
+/// 这是常规中间态。判成"错代"会让人以为序号坏了（界面上一句
+/// 「发布账本与当前目录不是同一代」），实际发一次就回去了。
+#[test]
+fn f9_a_regenerated_catalog_at_the_same_serial_is_pending_not_stale() {
+    let dir = tmp();
+    write_catalog(dir.path(), Some(8), "rev-new");
+    write_book(dir.path(), 8, "rev-old", b"{}");
+
+    let plan = super::audit::identity_plan(dir.path());
+    assert!(plan.pending_publish, "同号 + 内容变了 ⇒ 待发布");
+    assert!(!plan.ledger_out_of_step, "它不是错代");
+    assert_eq!(plan.next_serial, 9, "发一次就往前走一号");
+}
+
+/// 目录的号已经跑到账本前面（上次写到 catalog 就断了）⇒ 那才是真错代。
+#[test]
+fn f10_a_catalog_that_outran_the_book_is_out_of_step() {
+    let dir = tmp();
+    write_catalog(dir.path(), Some(43), "rev-43");
+    write_book(dir.path(), 42, "rev-42", b"{}");
+
+    let plan = super::audit::identity_plan(dir.path());
+    assert!(plan.ledger_out_of_step, "目录露到 43、账本还停在 42");
+    assert!(!plan.pending_publish, "号都对不上就不叫待发布");
+}

@@ -161,14 +161,17 @@ const NAV: NavItem[] = [
       </>
     ),
   },
-  /* 齿轮 = 只读的设置（数据根与子目录职责） */
+  /* 齿轮 = 只读的设置（数据根与子目录职责）。
+     ★ 2026-11-06 作者：「左侧的那一个图标，设置的改成齿轮的图标啊」——
+        原来那个是"圆 + 八条射线"，看着像太阳/亮度，不像设置。换成标准齿形
+        （feather `settings` 那一套：外圈齿廓 + 中间那只眼）。 */
   {
     id: 'settings',
     label: '设置',
     icon: (
       <>
         <circle cx="12" cy="12" r="3" />
-        <path d="M12 3.5v2M12 18.5v2M3.5 12h2M18.5 12h2M6 6l1.4 1.4M16.6 16.6 18 18M18 6l-1.4 1.4M7.4 16.6 6 18" />
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
       </>
     ),
   },
@@ -414,6 +417,19 @@ export function WorkbenchApp() {
       .catch(() => undefined)
     refreshReport()
   }, [refreshReport])
+
+  /**
+   * 生成 / 发布**写了盘上的产物**之后：整本、检查报告、交付读数一起重取。
+   *
+   * `refreshBook` 只重取整本与报告，**不拨 `tick`**；而 ①生成卡那 9 行与交付明细挂在
+   * `tick` 上（`wb_delivery_files` 的 `useEffect` 依赖它）。只调 `refreshBook` 的话，
+   * 底栏已写「已生成」、检查卡待办已清零，右边那 9 行还是生成前的「待更新」与旧大小
+   * —— 同一屏两个时点，看起来就像"生成了但没刷新"。
+   */
+  const refreshAfterArtifacts = useCallback(() => {
+    refreshBook()
+    setTick((n) => n + 1)
+  }, [refreshBook])
 
   /**
    * 盘上的 `presets/` 被外部改过没有（2026-10-20，作者：「像你这种外部改的，
@@ -988,7 +1004,7 @@ export function WorkbenchApp() {
             tick={tick}
             onGoto={goto}
             onSave={save}
-            onBookRefresh={refreshBook}
+            onArtifactsRefresh={refreshAfterArtifacts}
             onReportRefresh={refreshReport}
           />
         )

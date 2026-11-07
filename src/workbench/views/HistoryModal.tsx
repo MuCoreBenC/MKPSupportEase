@@ -192,6 +192,10 @@ export default function HistoryModal({ onClose }: Props) {
                 <div className={h.body}>
                   <div className={h.head}>
                     <b>{STAGE_TEXT[r.stage] ?? r.stage}</b>
+                    {/* 这条回执住在哪条入口的账上（工作台 / 命令行）—— 合并读之后必须能分清 */}
+                    {r.source !== undefined && (
+                      <span className={h.pr}>{r.source === 'cli' ? '命令行' : '工作台'}</span>
+                    )}
                     {rev !== null && (
                       <>
                         <span className={h.pr}>PR #{rev.number}</span>
@@ -261,6 +265,9 @@ export default function HistoryModal({ onClose }: Props) {
                   <div className={h.head}>
                     <b>{r.version}</b>
                     <span className={h.pr}>{r.tag}</span>
+                    {r.source !== undefined && (
+                      <span className={h.checks}>{r.source === 'cli' ? '命令行' : '工作台'}</span>
+                    )}
                     {r.artifact !== null && r.artifact !== undefined && (
                       <span className={h.checks}>{r.artifact.name}</span>
                     )}

@@ -142,6 +142,34 @@ src-tauri/Cargo.toml  [package].version            ← 唯一真值（人只改�
 
 ---
 
+### 1.3 软件版本：唯一递增点是"发布成功"（2026-11-06 定）
+
+改代码 / 生成 / 打包 / 安装 / 反复测试 —— **版本号一个都不动**。只有发布成功才冻结这个号，
+随后自动进下一个。四条命令各干一件事，谁都不许替别人改号：
+
+```text
+version:ensure   把工作区收敛到一个"未发布的开发号"（幂等；已发正式版就进下一个补丁）
+        │
+preview:build    抬一次预览序号 → 编 .app → 写本地清单（三处同号，不发版、不打 tag）
+        │          → 用来反复验证「改完 → 生成 → 装 → 测」
+        │
+release          冻结这个号 → tag → 构建 → Release → 写 release.json（**唯一递增点**）
+        │
+version:next     发布之后再进下一个开发号（ensure-dev 也会替你做，忘了也不至于卡住）
+```
+
+版本号的**唯一真值**是 `src-tauri/Cargo.toml` 的 `version`（其余三处由 `version.mjs` 同步，
+`version:check` 是闸）。安装包自报的号读的是编译期常量 `APP_VERSION`，所以：
+
+- **改了号必须重编**，否则包里还是旧号。这一条不靠人记 —— 发版内核在构建完之后读
+  `.app/Contents/Info.plist` 核对（`assert_artifact_speaks_version`），不等就停在"已构建"之前，
+  不建 Release、不上传、不写清单。
+- 本地预览清单的号**取自产物本身**（`local-release.mjs` 会拒绝"清单号 ≠ 包内号"），
+  不再另算一个 preview 号 —— 那正是"清单说 preview.4、界面还是 preview.3"的来源。
+
+`-dev.N` 里的 **N 是构建号**，不是版本号：主版本一整轮开发恒定，N 只在生成可安装的
+预览产物时 +1（预览序号 `-preview.N` 走的是同一条道理）。发布时整个去掉。
+
 ## 2. 变更分类：哪些改动走哪条链
 
 ### 2.1 只需要「发布预设」（**不需要**软件版本）
@@ -525,3 +553,28 @@ GitHub 事后复制。反过来会产生"清单已宣告、Gitee 还没有包"�
 **运维前提**：`mirror-release-to-github.yml` 只用仓库自带的 `GITHUB_TOKEN`（读 Gitee 是
 公开数据），**不需要额外 Secret**；但 `windows-build.yml` 那一步要 `GITEE_TOKEN`。
 本仓库当前 Secret 为 0 个，所以 Windows 自动化上传会跳过。
+
+---
+
+## 11. 推 PR 之前：先在本地跑一遍 CI 那几条
+
+CI 的 rust job 会把 `cargo fmt --all -- --check` 与 `clippy -D warnings` 各跑一遍。这两样
+不打包、不跑测试，本地十几秒到一分钟就能出结论 —— 推到云端等三五分钟才发现"少一个换行"
+"测试里写了 `std::fs::write`"，代价全花在往返上。
+
+| 改动落在 | 推 PR 前跑 | 现在谁在跑 |
+|---|---|---|
+| `*.rs` / `Cargo.toml` / `Cargo.lock` | `npm run check:rust` | **pre-push 闸⑩自动跑**（只在本次推送范围动了 Rust 时） |
+| `src/**` 前端 | `npm run lint` | 人 / AI 手动 |
+| `presets/` 那三层生成物 | `npm run check:artifacts` | pre-push 闸⑧自动跑 |
+| 任何 | `npm test`（按改动范围挑） | 人 / AI 手动 |
+| 版本号 | `npm run version:check` | pre-push 闸⑨自动跑 |
+
+- **不要等 CI 红了才修格式。** 闸⑩ 与 CI 是同一份命令（`package.json` 的 `check:rust`），
+  本地红 == CI 红。改完再推，别拿 `ALLOW_RUST_CHECK=1` 混过去。
+- **clippy 那条最常踩的**：测试里造文件也要走 `crate::fsx::atomic::atomic_write`。
+  `clippy.toml` 把 `std::fs::write` / `File::create` 列进 `disallowed-methods`，
+  全仓只有 `fsx/atomic.rs` 开一个洞。
+- **打 tag 之前不用另记一份清单**：`npm run release` 自己会跑 `cargo fmt --all -- --check`
+  （`scripts/release.mjs`）、版本闸，并等 CI 全绿才建 Release。
+- `--no-verify` 只绕得过本地闸，绕不过 CI 与 main 的 ruleset。

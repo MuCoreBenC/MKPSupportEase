@@ -132,67 +132,23 @@ function core(args) {
   return JSON.parse(line)
 }
 
-/* ---------- 1. 前置检查（没有任何写操作） ---------- */
 
-step('前置检查')
-
-const branch = tryRun('git', ['symbolic-ref', '--short', 'HEAD'])
-if (!branch) die('当前是 detached HEAD。先切到一条 feat/ 分支上')
-if (branch === 'main') {
-  die(
-    'main 上不能发版。发版是"把分支上的改动发出去"，本身要从分支开始：\n' +
-      '    git switch -c feat/<something>',
-  )
-}
-ok(`分支 ${branch}`)
-
-if (tryRun('git', ['status', '--porcelain'])) {
-  die('工作区不干净。先提交或 stash —— 发版会改版本号并提交，混在一起说不清')
-}
-ok('工作区干净')
-
-const hooksPath = tryRun('git', ['config', '--get', 'core.hooksPath'])
-if (hooksPath !== 'scripts/hooks') {
-  die(
-    `闸门没装好（core.hooksPath = ${hooksPath ?? '(空)'}，应为 scripts/hooks）。\n` +
-      '    跑一次：npm install（或 node scripts/setup-hooks.mjs）',
-  )
-}
-ok('本地闸门已生效')
-
-const origin = tryRun('git', ['remote', 'get-url', 'origin'])
-if (!origin) die('没配 origin。PR-only 流程离不开远端：gh repo create --source . --remote origin')
-ok(`origin ${origin}`)
-
-if (!tryRun('gh', ['auth', 'status'])) {
-  die('gh 没登录（或没装）。等 CI 那一段要用它查状态：gh auth login')
-}
-ok('gh 可用')
-
-/* 复述上次 tag 之后的绕过记录 —— bypass.log 的全部价值在于有人真的念它 */
-const gitDir = run('git', ['rev-parse', '--absolute-git-dir'])
-const bypassLog = `${gitDir}/bypass.log`
-if (existsSync(bypassLog)) {
-  const lines = readFileSync(bypassLog, 'utf8').trim().split('\n').filter(Boolean)
-  if (lines.length) {
-    console.log(`\n  \u001b[33m.git/bypass.log 里有 ${lines.length} 条绕过记录：\u001b[0m`)
-    for (const l of lines) info(l)
-    info('开仓阶段应该只有两条（main 直提 + push main）。多出来的那些值得看一眼。')
-  }
-} else {
-  ok('没有绕过记录')
-}
-
-/* ---------- 2. 版本号与说明（先问，再花几分钟校验 —— 不让人干等着被提问） ---------- */
+/* ---------- 0. 参数与版本号（**必须最先算**：自检模式要据此跳过仓库检查） ---------- */
 
 const current = tryRun('node', ['-p', "require('./package.json').version"]) ?? '0.0.0'
+
+/* 参数先算：`--args-only` 决定后面要不要碰仓库状态。 */
+const cliArgs = process.argv.slice(2)
+const flagArgsOnly = cliArgs.includes('--args-only')
 
 /* 命令行给了就不问：`npm run release -- 0.0.1 "一句话说明"`。
    这条路存在的理由不是省事，而是让这个脚本能被非交互地跑一遍 ——
    只能人工敲的脚本没法进任何自动化，也就更容易长期带着 bug 不被发现。 */
-const cliArgs = process.argv.slice(2)
 const flagConfirmed = cliArgs.includes('--confirm')
 const flagDryRun = cliArgs.includes('--dry-run')
+/* 只解析参数、算出版本号就退出：**零写入、不联网、不碰 git**。
+ * 存在的理由：发版脚本的其余路径只有真发版才跑，bug 只能在那时候暴露。
+ * 这条路径进 `scripts/check-release-cli.mjs`，跟着每个 PR 跑一遍。 */
 
 /* 通道（2026-11-05 预览发布事务）：`--channel=preview` / `--channel preview` / `--preview`。
    缺省 = 正式版；认不出的值**当场停**（兜成 stable 会把预览版发成全量通知）。 */
@@ -243,8 +199,84 @@ let summary = argSummary?.trim()
  *   在 `suggested` 那一行直接 `Cannot access 'channel' before initialization` ——
  *   而 `--dry-run` 走不到这里，所以只有真发版才炸。
  */
-const currentBase = current.replace(/-dev$/, '').replace(/-preview\.\d+$/, '')
-const suggested = channel === 'preview' ? `${currentBase}-preview.1` : currentBase
+const currentBase = current.replace(/-preview\.\d+$/i, '')
+/* 预览建议值 = **当前工作区那个预览号的下一号**（2026-11-06：以前一律给 `-preview.1`，
+   工作区已经在 preview.6 时那句话就是错的 —— 会让人以为要发一个更旧的号）。 */
+const currentSeq = /-preview\.(\d+)$/i.exec(current)
+const suggested =
+  channel === 'preview'
+    ? `${currentBase}-preview.${currentSeq === null ? 1 : Number(currentSeq[1]) + 1}`
+    : currentBase
+
+/* ---------- 1. 前置检查（没有任何写操作） ---------- */
+
+/* ★ 自检模式（`--args-only`）**不碰仓库状态**：它只回答"这段参数会被解析成什么"。
+ *   2026-11-06 第一版把出口放在这一段之后，于是自检在 main 上永远对着
+ *   "main 上不能发版"失败 —— 那个理由和它要验的东西毫无关系。 */
+if (!flagArgsOnly) {
+step('前置检查')
+const branch = tryRun('git', ['symbolic-ref', '--short', 'HEAD'])
+if (!branch) die('当前是 detached HEAD。先切到一条 feat/ 分支上')
+if (branch === 'main') {
+  die(
+    'main 上不能发版。发版是"把分支上的改动发出去"，本身要从分支开始：\n' +
+      '    git switch -c feat/<something>',
+  )
+}
+ok(`分支 ${branch}`)
+
+if (tryRun('git', ['status', '--porcelain'])) {
+  die('工作区不干净。先提交或 stash —— 发版会改版本号并提交，混在一起说不清')
+}
+ok('工作区干净')
+
+const hooksPath = tryRun('git', ['config', '--get', 'core.hooksPath'])
+if (hooksPath !== 'scripts/hooks') {
+  die(
+    `闸门没装好（core.hooksPath = ${hooksPath ?? '(空)'}，应为 scripts/hooks）。\n` +
+      '    跑一次：npm install（或 node scripts/setup-hooks.mjs）',
+  )
+}
+ok('本地闸门已生效')
+
+const origin = tryRun('git', ['remote', 'get-url', 'origin'])
+if (!origin) die('没配 origin。PR-only 流程离不开远端：gh repo create --source . --remote origin')
+ok(`origin ${origin}`)
+
+if (!tryRun('gh', ['auth', 'status'])) {
+  die('gh 没登录（或没装）。等 CI 那一段要用它查状态：gh auth login')
+}
+ok('gh 可用')
+
+/* 复述上次 tag 之后的绕过记录 —— bypass.log 的全部价值在于有人真的念它 */
+const gitDir = run('git', ['rev-parse', '--absolute-git-dir'])
+const bypassLog = `${gitDir}/bypass.log`
+if (existsSync(bypassLog)) {
+  const lines = readFileSync(bypassLog, 'utf8').trim().split('\n').filter(Boolean)
+  if (lines.length) {
+    console.log(`\n  \u001b[33m.git/bypass.log 里有 ${lines.length} 条绕过记录：\u001b[0m`)
+    for (const l of lines) info(l)
+    info('开仓阶段应该只有两条（main 直提 + push main）。多出来的那些值得看一眼。')
+  }
+} else {
+  ok('没有绕过记录')
+}
+}
+
+/* ---------- 2. 版本号与说明（先问，再花几分钟校验 —— 不让人干等着被提问） ---------- */
+
+
+/* ★ **自检出口必须在前置检查之前**（2026-11-06 第一版写错了）：
+ *   放在后面时它要先过"分支是不是 main / 工作区干不干净"，于是自检在 main 上永远
+ *   跑不通，只能对着一个和它无关的理由失败。自检要完全不依赖仓库状态 ——
+ *   `--args-only` 只回答"这段参数会被解析成什么"，零写入、不联网、不碰 git。 */
+if (flagArgsOnly) {
+  if (!version) die('--args-only 需要显式给版本号')
+  console.log(
+    JSON.stringify({ channel, current, suggested, version: resolveVersion(version, channel) }),
+  )
+  process.exit(0)
+}
 
 step(
   `版本号（当前 ${current}，${channel === 'preview' ? '预览' : '正式'}发布会写成 ${suggested}）`,
@@ -274,20 +306,30 @@ if (!version || !summary) {
   humanConfirmed = true
 }
 
-/* 允许把 `0.0.10-dev` 原样传进来：正式发布就是去掉 `-dev`；
- * 预览号（`0.0.10-preview.1`）原样保留 —— 它本身就是要发出去的号。 */
-version = channel === 'preview' ? version : version.replace(/-dev$/, '')
-if (!/^\d+\.\d+\.\d+(-preview\.[1-9]\d*)?$/.test(version)) {
-  die(`版本号格式不对：${version}（要 x.y.z / x.y.z-dev / x.y.z-preview.N）`)
+/* 通道 + 版本号一起判，判不过就 die（退出码 1）。
+ * 抽成函数是为了让 `--args-only` 与真发版走**同一套**判定 —— 否则自检和实际行为会漂。 */
+function resolveVersion(raw, ch) {
+  // 允许把 `0.0.10-dev` / `0.0.10-dev.7` 原样传进来：正式发布就是去掉 `-dev[.N]`
+  // （那个 N 只是**本地构建号**，不该跟着发出去）；
+  // 预览号（`0.0.10-preview.1`）原样保留 —— 它本身就是要发出去的号。
+  /* ★ 2026-11-06 起**没有 `-dev` 了**（作者：「不要再出现 DEV」）：
+    版本号只有两种形状 —— 正式 `x.y.z`、预览 `x.y.z-preview.N`。
+    大小写归一成小写：`Preview.2` 与 `preview.2` 必须是**同一个** tag，
+    否则同一个号会有两个 tag，git 那边再也说不清哪个是权威。 */
+  const v = raw.trim().replace(/-(preview)\./i, '-preview.')
+  if (!/^\d+\.\d+\.\d+(-preview\.[1-9]\d*)?$/.test(v)) {
+    die(`版本号格式不对：${v}（要 x.y.z 或 x.y.z-preview.N，没有 -dev 了）`)
+  }
+  /* 通道与版本身份必须一致：串台的两边后果都很难撤（内核里还会再判一次，这里只为早停） */
+  const isPreview = /-preview\.\d+$/.test(v)
+  if (ch === 'preview' && !isPreview) die(`预览通道要发预览号（x.y.z-preview.N），现在是 ${v}`)
+  if (ch === 'stable' && isPreview) {
+    die(`★ 预览号不能走正式通道（${v}）—— 全量用户会收到这条通知；加 --channel preview`)
+  }
+  return v
 }
-/* 通道与版本身份必须一致：串台的两边后果都很难撤（内核里还会再判一次，这里只为早停） */
-const isPreviewVersion = /-preview\.\d+$/.test(version)
-if (channel === 'preview' && !isPreviewVersion) {
-  die(`预览通道要发预览号（x.y.z-preview.N），现在是 ${version}`)
-}
-if (channel === 'stable' && isPreviewVersion) {
-  die(`★ 预览号不能走正式通道（${version}）—— 全量用户会收到这条通知；加 --channel preview`)
-}
+
+version = resolveVersion(version, channel)
 if (!summary) die('说明不能为空 —— 它是 Release 正文，也是以后 git log 上唯一能看到的东西')
 
 if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {

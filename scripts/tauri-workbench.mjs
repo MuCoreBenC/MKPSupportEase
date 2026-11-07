@@ -6,10 +6,11 @@
  *
  * 为什么要分：
  *
- * 1. Windows 不给覆盖正在运行的可执行文件。工作台与客户端的 exe 是**同一个文件**
- *    （`target/debug/mkp-support-ease.exe` —— 名字来自 Cargo.toml 的 `default-run`，
- *    不是 productName，两档都一样）。客户端 `tauri dev` 还开着时起工作台，链接器
- *    覆盖写就被拒：`failed to remove file … 拒绝访问。(os error 5)`。
+ * 1. Windows 不给覆盖正在运行的可执行文件。**dev 下两档的 exe 是同一个文件**
+ *    （`target/debug/mkp-support-ease.exe` —— 名字来自 Cargo.toml 的 `default-run`；
+ *    打包时才由工作台配置里的 `mainBinaryName` 另起名叫 `mkp-workbench`，dev 不走那一步）。
+ *    客户端 `tauri dev` 还开着时起工作台，链接器覆盖写就被拒：
+ *    `failed to remove file … 拒绝访问。(os error 5)`。
  *    macOS 允许替换正在执行的文件，所以在 Mac 上"两边同时开"看不出问题 ——
  *    那是 OS 语义，不是配置对了。
  *

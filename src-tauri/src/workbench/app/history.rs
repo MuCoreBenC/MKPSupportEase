@@ -177,6 +177,63 @@ pub fn append(root: &Path, record: PublishRecord) -> Result<PublishHistory, AppE
     Ok(history)
 }
 
+/// 视图：一条预设发布回执 + 它住在**哪个数据根**。
+///
+/// `PublishRecord` 是盘上的持久形状，**不动它**；来源只在读侧加。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishRecordView {
+    #[serde(flatten)]
+    pub record: PublishRecord,
+    /// `workbench` = 本进程那棵树；`cli` = `APP_IDENTIFIER` 那棵树（命令行发布写这里）
+    pub source: String,
+}
+
+/// 合并后的预设发布历史（界面读这一份）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishHistoryView {
+    pub history_schema: u32,
+    pub records: Vec<PublishRecordView>,
+    /// 这次到底读了哪几个根
+    pub roots: Vec<String>,
+}
+
+/// **多根合并读**（与 `release_history::load_merged` 同一条规矩）：逐个 `load`
+/// （坏档照样报 `CORRUPTED`），按 `at` 倒序，`(at, stage, summary)` 去重。
+///
+/// 为什么需要：`npm run presets -- publish` 是命令行跑的，写的是
+/// `APP_IDENTIFIER` 那棵树；工作台读 `-Workbench` 那棵 —— 不合并就等于"那次发布没发生"。
+pub fn load_merged(roots: &[(String, PathBuf)]) -> Result<PublishHistoryView, AppError> {
+    let mut seen: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+    let mut records: Vec<PublishRecordView> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for (label, root) in roots {
+        labels.push(root.display().to_string());
+        for record in load(root)?.records {
+            let key = (
+                record.at.clone(),
+                record.stage.clone(),
+                record.summary.clone(),
+            );
+            if !seen.insert(key) {
+                continue;
+            }
+            records.push(PublishRecordView {
+                record,
+                source: label.clone(),
+            });
+        }
+    }
+    records.sort_by(|a, b| b.record.at.cmp(&a.record.at));
+    Ok(PublishHistoryView {
+        history_schema: HISTORY_SCHEMA,
+        records,
+        roots: labels,
+    })
+}
+
 /// 把某份 PR/MR 的**新状态**写回历史里对应那几条（同一个 platform + number）。
 ///
 /// 什么时候用：**合并成功之后**。那是我们亲手造成的状态变化，记账不需要问网络

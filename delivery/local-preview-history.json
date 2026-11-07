@@ -1,0 +1,38 @@
+{
+  "items": [
+    {
+      "version": "0.0.10-preview.6",
+      "commit": "c554bad93cde642f27ba0ac3c1ee1eb4e3122fec",
+      "at": "2026-11-06T11:32:15.677Z",
+      "channel": "preview",
+      "target": "local",
+      "result": "ok",
+      "asset": {
+        "name": "SupportEase_0.0.10-preview.6_aarch64.app.zip",
+        "size": 10931216,
+        "sha256": "81637ebbc008b97800f1280b5a4b38d26b371cf73487d947de2b7eab04b99c0b"
+      },
+      "manifest": {
+        "name": "release-preview.json",
+        "sha256": "68727928f12e1e58c1f5f1b82b0d9ae3f88abc808ce33656d729cb8db0322d9d"
+      }
+    },
+    {
+      "version": "0.0.10-preview.7",
+      "commit": "0a88f708063d6a2280a06eafbbefb1bbce04b63d",
+      "tag": "v0.0.10-preview.7",
+      "at": "2026-11-06T12:31:20Z",
+      "channel": "preview",
+      "target": "local",
+      "result": "ok",
+      "asset": {
+        "name": "SupportEase_0.0.10-preview.7_aarch64.app.zip",
+        "url": "http://127.0.0.1:8787/delivery/SupportEase_0.0.10-preview.7_aarch64.app.zip",
+        "size": 10930598,
+        "sha256": "4dc6e13be0d34deb927ca98ff0fc3e23595df90d4f39cfeae22f00cab187b7de",
+        "platform": "macos",
+        "kind": "appZip"
+      }
+    }
+  ]
+}

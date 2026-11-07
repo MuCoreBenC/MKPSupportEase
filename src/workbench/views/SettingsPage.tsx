@@ -52,9 +52,9 @@ import type { ThemePref } from '../../api/contract'
 import { isAppError, wb } from '../api'
 import type {
   Boot,
-  DevSourceKind,
   DevSourceStatus,
   PortConflict,
+  PreviewPlan,
   PublishAccount,
 } from '../api'
 /* 主题那一档与"现在到底深还是浅"都在 `theme.ts` —— 这一页不自己再落一次 `data-theme` */
@@ -240,30 +240,31 @@ export default function SettingsPage({ boot }: Props) {
    */
   const [devSrc, setDevSrc] = useState<DevSourceStatus | null>(null)
   const [devBusy, setDevBusy] = useState(false)
+  /* 交付那一趟：计划（能不能交付 / 会提交什么）+ 进行中标记 + 一句反馈 */
+  const [previewPlan, setPreviewPlan] = useState<PreviewPlan | null>(null)
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewNote, setPreviewNote] = useState<{ text: string; bad: boolean } | null>(null)
+  /* 交付进行中时，后端日志的最后一行 —— 编译要一两分钟，得有东西在动 */
+  const [previewTail, setPreviewTail] = useState('')
   const [devNote, setDevNote] = useState<{ text: string; bad: boolean } | null>(null)
   /**
-   * 起哪一份（**草稿**：点一下只是选，交出去是点「启动」那一下）。
+   * 现读一次状态。
    *
-   * 2026-10-30 起只有一项（夹具退役）—— 仍留成状态，是为了接口形状不为一处特例改窄。
+   * 没有"草稿选中项"：这一页只读盘上的事实，不让人选。
    */
-  const [devDraft, setDevDraft] = useState<DevSourceKind>('delivery')
-
-  /**
-   * 现读一次状态。`sync` 只在**第一次**读的时候为真：把"上次端的是哪一份"选中一次。
-   * 之后每次刷新都再同步的话，人刚点好的那一行会被轮询按回去 —— 那正是"点了没反应"。
-   */
-  const readDevSrc = useCallback(async (sync: boolean) => {
+  const readDevSrc = useCallback(async () => {
     try {
       const st = await wb.devSourceStatus()
       setDevSrc(st)
-      if (sync && st.source !== null) setDevDraft(st.source)
+      /* 顺带问一次"这一版能不能交付"：按钮上的版本号与阻断原因都来自它 */
+      setPreviewPlan(await wb.previewPreflight().catch(() => null))
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
     }
   }, [])
 
   useEffect(() => {
-    void readDevSrc(true)
+    void readDevSrc()
   }, [readDevSrc])
 
   const devWatch = devSrc?.running === true || (devSrc?.conflicts.length ?? 0) > 0
@@ -275,23 +276,20 @@ export default function SettingsPage({ boot }: Props) {
     return () => clearInterval(timer)
   }, [devWatch])
 
-  /** 「启动」= 以草稿那一份起。同一份幂等；换了源就是**换源重启**（后端先整棵收掉再起） */
+  /** 「启动」= 起服务（端当前交付；本地发布那层后端自动叠）。已经在跑就是幂等 */
   const startDevSrc = async () => {
     if (devBusy) return
     setDevBusy(true)
     setDevNote(null)
     try {
-      const next = await wb.devSourceStart(devDraft)
+      const next = await wb.devSourceStart()
       setDevSrc(next)
-      setDevNote({
-        text: `已启动（端的是 ${devLabel(next.source)}）—— 把 ${next.url} 填进客户端「设置 → 高级设置 → 预设数据源 → 自定义地址」（保存即生效）。`,
-        bad: false,
-      })
+      setDevNote({ text: `已启动 —— ${next.url}`, bad: false })
     } catch (e) {
-      /* 起不来时后端会把理由写进消息里（没派生 / 没生成 / 是谁占着那个端口），
+      /* 起不来时后端会把理由写进消息里（没生成 / 是谁占着那个端口），
          但状态也可能是旧的 —— 失败之后立刻重取一次，别让界面停在过期的读数上 */
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
-      await readDevSrc(false)
+      await readDevSrc()
     } finally {
       setDevBusy(false)
     }
@@ -312,12 +310,13 @@ export default function SettingsPage({ boot }: Props) {
     }
   }
 
-  /**
-   * 那一份的行名 —— **后端给的说法**（`sources[].label`），界面不自己拼一套。
-   * 还没读到状态时退回枚举值本身，总比空着强。
-   */
-  const devLabel = (k: DevSourceKind | null): string =>
-    devSrc?.sources.find((o) => o.kind === k)?.label ?? (k ?? '—')
+  /** 字节数 → 人话（文件表那一列） */
+  const sizeText = (v: number | null): string => {
+    if (v === null) return '—'
+    if (v >= 1024 * 1024) return `${(v / 1024 / 1024).toFixed(1)} MB`
+    if (v >= 1024) return `${Math.round(v / 1024)} KB`
+    return `${v} B`
+  }
 
   /**
    * 停掉占着某个端口的那个进程（那颗「停掉它」）。
@@ -325,6 +324,80 @@ export default function SettingsPage({ boot }: Props) {
    * 把**当时看到的 pid** 一起交回后端 —— 它会重新问一次"这个端口现在是谁的"，
    * 对不上就拒绝动手（PID 会被复用）。
    */
+  /**
+   * **生成并交付当前预览版本** —— 这一页唯一的主动作。
+   *
+   * 点它 = 授权这一趟的本地 commit + tag（不推送、不建 Release、不触发 CI）。
+   * 未跟踪文件由后端在 preflight 里拦下 —— 界面只是把原因摆出来，不替人决定归属。
+   */
+  const deliverPreview = async () => {
+    if (previewBusy) return
+    setPreviewBusy(true)
+    setPreviewNote({ text: '已开始编译并交付……（一两分钟）', bad: false })
+    try {
+      /* 后端把它派到后台线程，**立刻返回** —— 构建期间界面不转圈 */
+      await wb.previewDeliver()
+    } catch (e) {
+      setPreviewBusy(false)
+      setPreviewNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
+  /**
+   * 交付进行中：每 1.5 秒问一次后端（**不阻塞**），把阶段与日志尾行摆出来。
+   *
+   * 结束的那一刻由 `finished` 判定 —— 成功就刷新页面数据（开发版本会立刻变成下一版），
+   * 失败就把原因留下。不再靠 `invoke` 的返回值，那要等构建跑完才回来。
+   */
+  useEffect(() => {
+    if (!previewBusy) return
+    const timer = window.setInterval(() => {
+      void wb
+        .previewProgress()
+        .then((p) => {
+          setPreviewTail(p.tail)
+          if (!p.running) {
+            window.clearInterval(timer)
+            setPreviewBusy(false)
+            setPreviewNote({
+              text:
+                p.finished === 'rolled'
+                  ? '交付完成，开发版本已滚到下一版。'
+                  : (p.error ?? `停在 ${p.finished ?? p.stage}`),
+              bad: p.finished !== 'rolled',
+            })
+            void readDevSrc()
+          }
+        })
+        .catch(() => undefined)
+    }, 1500)
+    return () => clearInterval(timer)
+  }, [previewBusy, readDevSrc])
+
+  /** 「在访达中打开安装包位置」：用后端给的绝对路径，界面不自己拼 */
+  const openPackageDir = async () => {
+    const pkg = devSrc?.package
+    if (pkg === null || pkg === undefined) return
+    /* 给的是文件路径，打开它所在的目录 */
+    const dir = pkg.path.slice(0, pkg.path.lastIndexOf('/'))
+    try {
+      await wb.openPath(dir)
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
+  /** 「打开交付目录」：路径用后端 DTO 里那一串（界面不自己拼） */
+  const openDevRoot = async () => {
+    const root = devSrc?.sourceRoot
+    if (root === undefined || root === '') return
+    try {
+      await wb.openPath(root)
+    } catch (e) {
+      setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
+    }
+  }
+
   const clearConflict = async (c: PortConflict) => {
     if (devBusy) return
     setDevBusy(true)
@@ -342,17 +415,13 @@ export default function SettingsPage({ boot }: Props) {
       })
     } catch (e) {
       setDevNote({ text: isAppError(e) ? e.message : String(e), bad: true })
-      await readDevSrc(false)
+      await readDevSrc()
     } finally {
       setDevBusy(false)
     }
   }
 
-  /* 那一行结论：有动作反馈用动作的，否则用后端报的"为什么不在跑" */
-  const devLine =
-    devNote?.text ??
-    (devSrc !== null && !devSrc.running ? (devSrc.note ?? null) : null)
-  const devBad = devNote?.bad === true
+  /* 端口占用那几条（起服务之前要人处理掉的） */
   const devConflicts = devSrc?.conflicts ?? []
 
   /*
@@ -793,114 +862,204 @@ export default function SettingsPage({ boot }: Props) {
       {/* ——— 本地测试源（开发）：一颗按钮 = npm run preset-source:dev（只起服务） ——— */}
       <div className={s.card}>
         <div className={s.cardHead}>
-          <b>本地测试源（开发）</b>
-          <span className={s.cardNote}>
-            起本地假云端（只起服务，不碰你的客户端）—— 地址填进客户端设置页，保存即生效
-          </span>
+          <b>本地测试源</b>
+          <span className={s.cardNote}>只读 —— 下面每一格都是盘上与运行时的真实读数</span>
         </div>
         <div className={s.cardBody}>
           <div className={s.vfield}>
-            <p className={s.vhelp}>
-              点「启动」就是替你在这个仓库里敲
-              <span className={s.mono}>{devSrc?.command ?? 'npm run preset-source:dev'}</span>
-              ：把 <span className={s.mono}>scripts/preset-test-server</span>
-              起在下面这个地址上，端出去的是<b>已发布形状</b>的交付根
-              （<span className={s.mono}>source.json</span> +{' '}
-              <span className={s.mono}>catalog.json</span> + 交付文件）。
-            </p>
-            <p className={s.vhelp}>
-              客户端<b>不感知这是测试源</b> —— 它仍走 catalog / manifest / 寻址 / SHA 校验 /
-              下载那一条真链，换的只是"去哪儿取"；生产构建里这段代码整个不存在。日志打在
-              <b>起工作台的那个终端</b>里 —— 这个按钮只是替你敲了那条命令，不另造一套日志窗口。
-            </p>
-
             <div className={s.vhead}>
-              <b>状态</b>
+              <b>
+                {devSrc === null ? '读取中……' : devSrc.running ? '运行中' : '没在跑'}
+                {devSrc?.running === true && devSrc.pid !== null && (
+                  <span className={s.vkey}>· PID {devSrc.pid}</span>
+                )}
+              </b>
+              <span className={s.mono}>{devSrc?.url ?? 'http://127.0.0.1:8787'}</span>
+            </div>
+
+            <div className={s.vrow}>
+              {devSrc?.running === true ? (
+                <button
+                  type="button"
+                  className={s.btn}
+                  disabled={devBusy}
+                  onClick={() => void stopDevSrc()}
+                >
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnPrimary}`}
+                  disabled={devBusy || devSrc === null || devConflicts.length > 0}
+                  onClick={() => void startDevSrc()}
+                >
+                  启动
+                </button>
+              )}
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devBusy}
+                onClick={() => void readDevSrc()}
+              >
+                刷新状态
+              </button>
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devSrc === null}
+                onClick={() => void openDevRoot()}
+              >
+                打开交付目录
+              </button>
+              <span className={s.grow} />
+              {/*
+                主操作：生成并交付当前预览版本。
+                点它 = 授权这一趟的本地 commit + tag；未跟踪文件由后端拦。
+              */}
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnPrimary}`}
+                disabled={previewBusy}
+                title={
+                  previewPlan === null
+                    ? '正在读工作区……'
+                    : previewPlan.ok
+                      ? `编译 → 写清单 → 本地提交（${previewPlan.branch}）→ 打 tag → 滚到 ${previewPlan.nextVersion}`
+                      : previewPlan.blockedBy.join('；')
+                }
+                onClick={() => void deliverPreview()}
+              >
+                {previewBusy
+                  ? '正在编译并交付……'
+                  : `生成并交付 ${previewPlan?.version ?? ''}`.trim()}
+              </button>
+              {devNote !== null && (
+                <span
+                  className={s.vhelp}
+                  style={devNote.bad ? { color: 'var(--danger)' } : undefined}
+                >
+                  {devNote.text}
+                </span>
+              )}
+            </div>
+
+            {/* 交付的进行中 / 结果 —— 紧贴按钮，不用滚到卡片底部才看得见 */}
+            {previewBusy && previewTail !== '' && (
+              <p className={`${s.vhelp} ${s.mono}`} style={{ opacity: 0.75 }}>
+                {previewTail}
+              </p>
+            )}
+            {previewNote !== null && (
+              <p
+                className={s.vhelp}
+                style={previewNote.bad ? { color: 'var(--danger)' } : undefined}
+              >
+                {previewNote.text}
+              </p>
+            )}
+
+            {/*
+              ——— 主区五格：当前开发 / 最近成功交付 / Tag / 安装包 / 发布 ———
+              判定全部来自后端（tag 是冻结事实，账本是交付记录），这里只渲染。
+            */}
+            <div className={s.vhead}>
+              <b>本地预览发布</b>
               <span className={s.vkey}>
-                {devSrc === null
-                  ? '读取中……'
-                  : devSrc.running
-                    ? `运行中（PID ${devSrc.pid ?? '—'}）`
-                    : '没在跑'}
+                {devSrc?.package?.frozen === true ? '已冻结' : '正在开发 · 尚未冻结'}
               </span>
             </div>
 
             <div className={s.vrow}>
-              <label className={s.vlabel}>服务地址</label>
+              <span className={s.vlabel}>当前开发版本</span>
+              <span className={`${s.vstatic} ${s.mono}`} style={{ fontWeight: 600 }}>
+                {devSrc?.devVersionText ?? '—'}
+              </span>
+              <span className={s.grow} />
+            </div>
+
+            <div className={s.vrow}>
+              <span className={s.vlabel}>最近成功交付</span>
               <span className={`${s.vstatic} ${s.mono}`}>
-                {devSrc?.url ?? 'http://127.0.0.1:8787'}
+                {devSrc?.lastDelivered?.version ?? '（还没交付过）'}
               </span>
-            </div>
-
-            {/* ——— 端哪一份：一行（名字 / 说法 / 在哪儿 / 齐没齐都由后端给） ——— */}
-            <div className={s.vhead}>
-              <b>端哪一份</b>
-              <span className={s.vkey}>
-                {devSrc?.running === true ? '服务在跑着' : '点「启动」'}
-              </span>
-            </div>
-
-            {(devSrc?.sources ?? []).map((o) => (
-              <label
-                key={o.kind}
-                className={s.vrow}
-                style={{ alignItems: 'flex-start', cursor: 'pointer' }}
-              >
-                <input
-                  type="radio"
-                  name="dev-source-kind"
-                  value={o.kind}
-                  checked={devDraft === o.kind}
-                  onChange={() => setDevDraft(o.kind)}
-                />
-                <span className={s.grow}>
-                  <b>{o.label}</b>
-                  {devSrc?.running === true && devSrc.source === o.kind && '（正在端这一份）'}
-                  <span className={s.vhelp} style={{ display: 'block' }}>
-                    {o.note}
-                  </span>
-                  <span className={`${s.vhelp} ${s.mono}`} style={{ display: 'block' }}>
-                    {o.root}
-                  </span>
-                  {!o.ready && o.missing !== null && (
-                    <span className={s.vhelp} style={{ display: 'block', color: 'var(--danger)' }}>
-                      {o.missing}
-                    </span>
-                  )}
+              <span className={s.grow} />
+              {devSrc?.lastDelivered !== null && devSrc?.lastDelivered !== undefined && (
+                <span className={`${s.vkey} ${s.mono}`}>
+                  {devSrc.lastDelivered.tag}
+                  {devSrc.lastDelivered.recorded ? '' : '（账本缺记录，可补）'}
                 </span>
-                <span className={s.mono}>{o.url}</span>
-              </label>
-            ))}
+              )}
+            </div>
 
-            <p className={s.vhelp}>
-              「当前交付」那一份端的是<b>预设根</b>、地址要带{' '}
-              <span className={s.mono}>/delivery</span>：真交付那份的{' '}
-              <span className={s.mono}>source.json</span> 写着{' '}
-              <span className={s.mono}>filesRoot: &quot;..&quot;</span>（交付文件住在预设根底下），
-              所以地址那一串由后端按这个规矩给 —— 照抄。
-            </p>
-            <p className={s.vhelp}>
-              「当前交付」就是交付根里那一份 —— 界面不自己推，每读一次都是盘上的读数。
-            </p>
+            {devSrc?.package !== null && devSrc?.package !== undefined && (
+              <div className={s.vrow}>
+                <span className={s.vlabel}>安装包</span>
+                <span className={`${s.vstatic} ${s.mono}`}>{devSrc.package.name}</span>
+                <span className={`${s.vkey} ${s.mono}`}>{sizeText(devSrc.package.size)}</span>
+                <span className={s.grow} />
+                <span
+                  className={s.vhelp}
+                  style={{
+                    color: devSrc.package.frozen ? 'var(--ok, #1a7f37)' : 'var(--muted, #8c959f)',
+                  }}
+                >
+                  {devSrc.package.frozen ? '已冻结' : '尚未交付（文件仅生成）'}
+                </span>
+              </div>
+            )}
 
-            <p className={s.vhelp}>
-              ★ <b>不用先去发布</b>：客户端判"有没有新版"看交付根里{' '}
-              <span className={s.mono}>catalog.json</span> 的 <span className={s.mono}>revision</span>{' '}
-              与 <span className={s.mono}>publishSerial</span>，而<b>「生成」就已经把 revision
-              重算了</b>。发布序号则由这个测试源在响应里<b>自动 +1</b>（盘上一个字节不动）——
-              于是客户端看到的是正常的"云端发了下一版"，不会出现"同号改了内容"那种像坏了的读数。
-              发布才定稿的那两份（<span className={s.mono}>manifest.json</span> /{' '}
-              <span className={s.mono}>release.json</span>）不在客户端那条链上 ——
-              它们会一直停在上一版，发布闸因此报一条「待留意」，<b>那是正常的</b>，
-              不用为它去点发布。
-            </p>
+            <div className={s.vrow}>
+              <span className={s.grow} />
+              <button
+                type="button"
+                className={s.btn}
+                disabled={devSrc?.package === null || devSrc?.package === undefined}
+                onClick={() => void openPackageDir()}
+              >
+                在访达中打开安装包位置
+              </button>
+            </div>
 
-            <p className={s.vhelp}>
-              ★ 客户端那边的节奏：进「预设」页时它<b>自己查一次</b>远端目录（比 revision，
-              本次运行只查一次），查到就把本地那份目录换掉 —— 但<b>绝不自动下载预设文件</b>，
-              云端表里那几行要点「下载」才落进「本地预设」。所以"生成完看不到更新"通常只有两种原因：
-              地址填的不是上面这一串，或者这次运行已经查过了（重进页面 / 重启客户端再查一次）。
-            </p>
+            {/* 诊断：只在这几处真有问题时出现，正常轮次差异不上来 */}
+            {(devSrc?.checks ?? [])
+              .filter((r) => r.level !== 'ok')
+              .map((row) => (
+                <p
+                  key={row.item}
+                  className={s.vhelp}
+                  style={{
+                    color:
+                      row.level === 'error' || row.level === 'block'
+                        ? 'var(--danger)'
+                        : 'var(--warn, #9a6700)',
+                  }}
+                >
+                  {row.item}：{row.value}
+                </p>
+              ))}
+
+            <details>
+              <summary className={s.vhelp}>详细信息</summary>
+              {(devSrc?.files ?? []).map((f) => (
+                <p className={`${s.vhelp} ${s.mono}`} key={f.name}>
+                  {f.name} · {sizeText(f.size)}
+                  {f.exists ? '' : ' · 不存在'}
+                  {f.version !== null ? ` · ${f.version}` : ''}
+                </p>
+              ))}
+              <p className={`${s.vhelp} ${s.mono}`}>交付根：{devSrc?.sourceRoot ?? '—'}</p>
+              <p className={`${s.vhelp} ${s.mono}`}>仓库根：{devSrc?.repoRoot ?? '—'}</p>
+              <p className={`${s.vhelp} ${s.mono}`}>
+                命令：{devSrc?.command ?? 'npm run preset-source:dev'}
+              </p>
+              {(devSrc?.checks ?? []).map((row) => (
+                <p className={`${s.vhelp} ${s.mono}`} key={`c-${row.item}`}>
+                  {row.item}：{row.value}
+                </p>
+              ))}
+            </details>
 
             {devConflicts.length > 0 && (
               <div className={s.vfield}>
@@ -935,60 +1094,42 @@ export default function SettingsPage({ boot }: Props) {
               </div>
             )}
 
-            <div className={s.vrow}>
-              {devSrc?.running === true ? (
-                <button
-                  type="button"
-                  className={s.btn}
-                  disabled={devBusy}
-                  title="停掉这个服务，把端口让出来（只收它自己那一棵，不碰你的客户端 dev）"
-                  onClick={() => void stopDevSrc()}
-                >
-                  停止
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className={`${s.btn} ${s.btnPrimary}`}
-                  disabled={devBusy || devSrc === null || devConflicts.length > 0}
-                  data-tip={
-                    devConflicts.length > 0
-                      ? '先把上面那条端口占用处理掉'
-                      : `以「${devLabel(devDraft)}」这一份起`
-                  }
-                  onClick={() => void startDevSrc()}
-                >
-                  启动
-                </button>
-              )}
-              {/* 跑着的时候选了别的：换源要重启一次服务（后端先整棵收掉再起） */}
-              {devSrc?.running === true && devSrc.source !== devDraft && (
-                <button
-                  type="button"
-                  className={s.btn}
-                  disabled={devBusy || devConflicts.length > 0}
-                  data-tip={`现在端的是「${devLabel(devSrc.source)}」—— 换成「${devLabel(
-                    devDraft,
-                  )}」：先把它那棵进程树收掉再起，一次点击一件事`}
-                  onClick={() => void startDevSrc()}
-                >
-                  换源并重启
-                </button>
-              )}
-              <button
-                type="button"
-                className={s.btn}
-                disabled={devBusy}
-                title="现问一次后端 —— 状态是现问子进程得来的，不靠界面自己记"
-                onClick={() => void readDevSrc(false)}
-              >
-                刷新状态
-              </button>
-            </div>
-
-            {devLine !== null && (
-              <p className={s.vhelp} style={devBad ? { color: 'var(--danger)' } : undefined}>
-                {devLine}
+            {previewPlan?.resume != null && previewPlan.resume !== '' && (
+              <p className={s.vhelp} style={{ color: 'var(--warn, #9a6700)' }}>
+                {previewPlan.resume} —— 再点一次会接着跑（已完成的步骤不会重做）。
+              </p>
+            )}
+            {previewPlan !== null && previewPlan.blockedBy.length > 0 && (
+              <div className={s.vfield}>
+                <p className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                  <b>本次发布已阻断</b>
+                </p>
+                {previewPlan.blockedBy.map((m) => (
+                  <p key={m} className={s.vhelp} style={{ color: 'var(--danger)' }}>
+                    {m}
+                  </p>
+                ))}
+                {previewPlan.strangers.length > 0 && (
+                  <>
+                    <p className={s.vhelp}>以下文件尚未跟踪，无法确认是否属于本次构建：</p>
+                    {previewPlan.strangers.slice(0, 8).map((f) => (
+                      <p key={f} className={`${s.vhelp} ${s.mono}`}>
+                        · {f}
+                      </p>
+                    ))}
+                    {previewPlan.strangers.length > 8 && (
+                      <p className={s.vhelp}>…还有 {previewPlan.strangers.length - 8} 个</p>
+                    )}
+                    <p className={s.vhelp}>请先提交它们或加进 .gitignore，再重新执行。</p>
+                  </>
+                )}
+              </div>
+            )}
+            {previewPlan !== null && previewPlan.blockedBy.length === 0 && (
+              <p className={s.vhelp}>
+                交付会提交 {previewPlan.deliverable.length} 个文件（当前分支{' '}
+                <span className={s.mono}>{previewPlan.branch}</span>）—— <b>只在本地</b>
+                ，不推送、不建 Release。
               </p>
             )}
 

@@ -2,6 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SupportEase Workbench",
   "identifier": "SupportEase-Workbench",
+  "mainBinaryName": "mkp-workbench",
   "build": {
     "devUrl": "http://[::1]:5322",
     "beforeDevCommand": "npm run dev:workbench",

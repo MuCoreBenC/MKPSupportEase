@@ -55,15 +55,6 @@
       "profile": "process"
     },
     {
-      "id": "p2s-bbs-04-024",
-      "type": "slicerProfile",
-      "machineId": "P2S",
-      "name": "P2S：0.4 喷头 0.24 层高",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
-      "slicer": "bbs",
-      "profile": "process"
-    },
-    {
       "id": "x1c-bbs-04-024",
       "type": "slicerProfile",
       "machineId": "X1C",

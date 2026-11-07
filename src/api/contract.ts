@@ -2045,7 +2045,9 @@ export type UpdateState =
   | { state: 'idle' }
   | { state: 'downloading'; received: number; total: number }
   | { state: 'paused'; received: number; total: number }
-  | { state: 'ready'; path: string; size: number }
+  /* 已就绪：`version`/`channel` 是**这一份**的身份证 —— 界面要据此判"能不能点安装"
+     （只看 `path` 的话，下完预览版再去点正式版那张卡，会以为同一份已经就绪） */
+  | { state: 'ready'; path: string; size: number; version: string; channel: 'stable' | 'preview' }
   | { state: 'failed'; reason: string }
   | { state: 'cancelled' }
 
@@ -2067,6 +2069,8 @@ export interface UpdateInfo {
   url?: string
   asset?: ReleaseAsset
   lastResult?: UpdateResult
+  /** 安装日志的绝对路径（点「重启并安装」没反应时要看的就是它） */
+  installLog: string
 }
 
 /**

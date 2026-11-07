@@ -1340,12 +1340,19 @@ export interface PublishRecord {
    * 刷新拿到的是平台上的 PR 状态，与"镜像跟没跟上"是两件事。
    */
   mirror?: MirrorSync | null
+  /**
+   * 这条回执住在哪个数据根：`workbench`（本进程那棵）/ `cli`（命令行那棵）。
+   * `npm run presets -- publish` 写的是后者 —— 不合并就等于"那次发布没发生"。
+   */
+  source?: string
 }
 
-/** `history::PublishHistory` —— 回执日志（最新在前） */
+/** `history::PublishHistoryView` —— 回执日志（最新在前，多根合并） */
 export interface PublishHistory {
   historySchema: number
   records: PublishRecord[]
+  /** 这次实际读了哪几个数据根 */
+  roots: string[]
 }
 
 /* ---------- 第四刀：发布**软件版本**（与「交付预设」两条链，各有各的类型） ---------- */
@@ -1462,12 +1469,70 @@ export interface ReleaseRecord {
   infoBranch: string | null
   infoReview: RemoteReview | null
   summary: string
+  /**
+   * 这条回执住在哪个数据根：`workbench`（本进程那棵）/ `cli`（命令行那棵）。
+   *
+   * 工作台的 appDataDir 带 `-Workbench` 后缀，命令行固定用 `SupportEase` ——
+   * 两条入口都会发版，账各记各的目录，读的时候并起来。缺这一格 = 老形状。
+   */
+  source?: string
 }
 
-/** `release_history::ReleaseHistory` —— 软件版本发布历史（**最新在前**） */
+/** `release_history::ReleaseHistoryView` —— 软件版本发布历史（**最新在前**，多根合并） */
 export interface ReleaseHistory {
   historySchema: number
   records: ReleaseRecord[]
+  /** 这次实际读了哪几个数据根 */
+  roots: string[]
+}
+
+/** `version_id::VersionOpen` —— 有落点才给按钮；`key` 是白名单键，前端只传它 */
+export interface VersionOpen {
+  key: string
+  label: string
+}
+
+/** `version_id::VersionCell` —— 一格读数：值 / 缺失原因 / 出处 / 怎么去 */
+export interface VersionCell {
+  value?: string
+  error?: string
+  /** 这个读数从哪来：`.app` 路径 / 打包目录 / Release 地址 */
+  at?: string
+  /** 有可打开的位置才有 */
+  open?: VersionOpen
+}
+
+/** `version_id::VersionIdentity` —— 四个号 + 这个二进制自己的号 */
+export interface VersionIdentity {
+  /** 这个工作台二进制自报的号（编译期常量）—— **不是**安装包版本 */
+  build: string
+  installed: VersionCell
+  packaged: VersionCell
+  published: VersionCell
+  developing: VersionCell
+}
+
+/** `release_ledger::LedgerStatus` —— 对账结论 */
+export type LedgerStatus = 'both' | 'tagOnly' | 'recordOnly'
+
+/** `release_ledger::LedgerRow` —— 对账表的一行 */
+export interface LedgerRow {
+  version: string
+  tag: string | null
+  at: string
+  commit: string | null
+  receiptAt: string | null
+  receiptStage: string | null
+  status: LedgerStatus
+}
+
+/** `release_ledger::ReleaseLedger` —— git tag × 回执 × 开发号 */
+export interface ReleaseLedger {
+  developing: string
+  developingFrozen: boolean
+  latestTag: string | null
+  receipts: number
+  rows: LedgerRow[]
 }
 
 /** `git::CommitRow` —— 本分支最近的一条提交（**本机仓库视图**，不代表线上已合并） */
@@ -1663,15 +1728,114 @@ export interface DevSourceStatus {
   note: string | null
   /** **起之前该处理掉的占用者**（不在跑的时候才有）。空 = 端口干净 */
   conflicts: PortConflict[]
-  /** 选项列表（2026-10-30 起只有「当前交付」一行）：名字 / 在哪儿 / 填什么地址 / 齐没齐 */
+  /** 那一行（2026-11-06 起**只有一条**，不是选项）：名字 / 在哪儿 / 填什么地址 / 齐没齐 */
   sources: SourceOption[]
+  /** 仓库里的开发版本（`src-tauri/Cargo.toml`，全仓唯一真值） */
+  devVersion: string
+  /** 最近一次已发布的号（git tag）；一个都没发过 = null */
+  publishedVersion: string | null
+  /** 安装包自己报的版本（`.app/Contents/Info.plist`）；没编过 = null */
+  buildVersion: string | null
+  /** 当前开发版本（`version.toml`）—— 主区那一格 */
+  devVersionText: string
+  /** 最近一次成功交付；null = 还没交付过 */
+  lastDelivered: DeliveredDto | null
+  /** 最新的本地安装包（生成过就有，**不代表已交付**） */
+  package: PackageDto | null
+  /** 盘上真有什么（不存在就 `exists: false`，不摆假行） */
+  files: DeliveryDiskFile[]
+  /** 三格版本身份 + 结论。**判定在后端**，界面只按 `level` 上色 */
+  checks: CheckRow[]
+}
+
+/** `dev_source::CheckRow` —— 一条结构化诊断（作者 2026-11-06：不要红字长句） */
+export interface CheckRow {
+  item: string
+  value: string
+  /** `ok` / `warn` / `error` / `block` */
+  level: string
+}
+
+/** `preview_tx::PreviewPlan` —— 交付前先看一眼：会不会拦、会提交什么 */
+export interface PreviewPlan {
+  version: string
+  nextVersion: string
+  tag: string
+  ok: boolean
+  blockedBy: string[]
+  /** **会被本次提交**的文件（已跟踪的改动；绝不 add -A） */
+  deliverable: string[]
+  /** **未跟踪**的文件 —— 构建可能读到它们却不在任何提交里，所以阻断 */
+  strangers: string[]
+  branch: string
+  /** 上一趟没跑完时的一句话（`null` = 上一趟跑完了） */
+  resume: string | null
+  /** `version.toml` 与四处派生文件是否一致 */
+  consistent: boolean
+}
+
+/** `preview_tx::PreviewProgress` —— 交付进行中的实时状态 */
+export interface PreviewProgress {
+  running: boolean
+  /** `preparing` / `committing` / `building` / `tagging` / `recording` / `rolling` */
+  stage: string
+  /** 日志最后一行（编译时是 `Building [=====> ] 515/520`） */
+  tail: string
+  /** 跑完时的阶段（`rolled` / `failed` / `blocked`） */
+  finished: string | null
+  error: string | null
+}
+
+/** `preview_tx::PreviewReport` —— 一趟交付的结果 */
+export interface PreviewReport {
+  version: string
+  nextVersion: string
+  tag: string
+  commit: string | null
+  stage: string
+  message: string
+  log: string
+}
+
+/** `dev_source::DeliveredDto` —— 最近一次成功交付（tag 是冻结事实，账本是交付记录） */
+export interface DeliveredDto {
+  version: string
+  tag: string
+  commit: string
+  at: string
+  /** 账本里有没有这一版的 `ok`（false = tag 打了但没记账，可补） */
+  recorded: boolean
+}
+
+/** `dev_source::PackageDto` —— 最新的本地安装包 */
+export interface PackageDto {
+  name: string
+  size: number
+  path: string
+  version: string
+  /** 这一版**有没有 tag**。false ⇒ 只是生成过，不算已交付 */
+  frozen: boolean
+}
+
+/** `dev_source::DeliveryFile` —— 交付面上一个真实文件（别与交付集合那个 `DeliveryFile` 混淆） */
+export interface DeliveryDiskFile {
+  name: string
+  /** 盘上实际大小；不存在 = null */
+  size: number | null
+  exists: boolean
+  /** 清单类文件才有的那一格 */
+  version: string | null
 }
 
 /**
  * `dev_source::SourceKind` —— 测试源端哪一份。
  *
- * 2026-10-30 起**只剩「当前交付」**：夹具那两代（`v1` / `v2`）退役了 ——
- * 端真产物、发布序号在响应里 +1 就够演"云端发了下一版"，还不会和源漂移。
+ * - `delivery`：**当前交付**（`presets/delivery/`）—— 演"云端发了新**预设**"
+ * - `local-release`：**本地发布**（叠上 `target/local-release/` 里那份软件清单）——
+ *   演"云端发了新**软件**"，客户端「检查更新」看到的就是那一版（2026-11-06 加）
+ *
+ * 2026-10-30 退役的是夹具那两代（`v1` / `v2`）：端真产物、发布序号在响应里 +1
+ * 就够演"云端发了下一版"，还不会和源漂移。
  */
 export type DevSourceKind = 'delivery'
 
@@ -2289,7 +2453,35 @@ export type DeliveryStage = 'generate' | 'publish' | 'software'
  * 这个判"盘上字节与交付目录登记的对不对得上" —— 改 3MF 不会动任何版本的
  * `BuildState`，但会让对应条目变 `pending`。
  */
-export type DeliveryState = 'missing' | 'upToDate' | 'pending'
+export type DeliveryState = 'missing' | 'upToDate' | 'pending' | 'removed' | 'unmanaged'
+
+/**
+ * `delivery::DiffKind` —— 相对当前源重算后逐字节比较出来的结论。
+ * 界面状态徽标只认这一格，不再由 `stage` 或"文件在不在"推断。
+ */
+export type DiffKind = 'added' | 'modified' | 'removed' | 'same' | 'unmanaged' | 'frozen'
+
+/** `delivery::FileDiff` —— 一份文件的比较结论与首处差异 */
+export interface FileDiff {
+  rel: string
+  kind: DiffKind
+  beforeSize: number | null
+  afterSize: number | null
+  firstDiff: string | null
+  group: string
+}
+
+/** `delivery::DeliveryGroup` —— 后端算好的分组摘要；前端只按 allSame 决定折叠 */
+export interface DeliveryGroup {
+  id: string
+  label: string
+  total: number
+  modified: number
+  added: number
+  removed: number
+  unmanaged: number
+  allSame: boolean
+}
 
 /**
  * `delivery::DeliveryPendingReason` —— pending 的**原因**。
@@ -2315,6 +2507,10 @@ export interface DeliveryFile {
   registeredSize: number | null
   /** pending 的原因（null = 不是 pending） */
   pendingReason: DeliveryPendingReason | null
+  /** 逐字节比较出来的真实结论 —— 状态徽标读它，不读 stage */
+  diff: DiffKind
+  /** 分组 id（见 DeliveryGroup） */
+  group: string
 }
 
 /**
@@ -2356,6 +2552,105 @@ export interface DeliveryStatus {
   manifestModified: string | null
   /** `catalog.json` 读不出来时的原话（正常 = null） */
   catalogError: string | null
+  /** 逐份逐字节比较的结论（含待删除、未纳管与发布独占档） */
+  diffs: FileDiff[]
+  /** 分组摘要：有变化的组该展开，全一致的组可折叠成带数字的摘要 */
+  groups: DeliveryGroup[]
+  /** 发布凭据是否已失效（只读诊断，重算归发布定稿） */
+  manifestStale: boolean
+  /** 失效条目，逐条点名 */
+  manifestReasons: string[]
+}
+
+/* ---------- 交付定稿检查（②，只读） ---------- */
+
+/**
+ * `build::FinalizeState` —— 交付定稿检查的四态。**后端说了算**，前端不重算。
+ *
+ * · `matched`        —— manifest 与当前交付文件逐条一致
+ * · `stale`          —— 有 SHA / size 不一致（manifest 还停在上一次发布那一代）
+ * · `pendingPublish` —— 凭据齐了，但目录按当前源重算过、还没发过新版（同一个号）
+ * · `identityFailed` —— source / catalog / 账本的关系有问题（看 `checks`）
+ */
+export type FinalizeState = 'matched' | 'stale' | 'pendingPublish' | 'identityFailed'
+
+/** `build::FinalizeEntry` —— 定稿后 manifest 里的一条（新旧两套值都在） */
+export interface FinalizeEntry {
+  /** 发布根相对（`delivery/mkp/presets/A1-standard.toml`） */
+  relativePath: string
+  id: string
+  sha256: string
+  size: number
+  /** 盘上那份 manifest 登记的值（null = 这一条是新增的） */
+  beforeSha256: string | null
+  beforeSize: number | null
+}
+
+/** `build::FinalizeManifest` —— 定稿会把 `manifest.json` 写成什么 */
+export interface FinalizeManifest {
+  rel: string
+  state: DiffState
+  entries: FinalizeEntry[]
+  /** 有几条 sha / size 与盘上那份不同（含新增） */
+  changedEntries: number
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+}
+
+/** `build::FinalizeIssueKind` —— 这一条能不能在这里修 */
+export type FinalizeIssueKind = 'fixable' | 'source' | 'identity' | 'info'
+
+/** `build::FinalizeAction` —— 这一条上能点的那个动作（写盘动作只有 `updateCredentials`） */
+export type FinalizeAction = 'updateCredentials' | 'locateSource' | 'checkIdentity' | 'none'
+
+/** `build::FinalizeIssue` —— ② 的一条问题。分类与可否自动修都由后端说 */
+export interface FinalizeIssue {
+  id: string
+  title: string
+  kind: FinalizeIssueKind
+  /** 「怎么办」，不是把标题换个说法 */
+  detail: string
+  action: FinalizeAction
+  /** 涉及的文件（界面只数份数） */
+  files: string[]
+  /** 「定位源问题」落到哪一页 / 哪一版（null = 反查不到，只展示路径） */
+  at: IssueWhere | null
+}
+
+/**
+ * `build::FinalizePreview` —— 交付检查的返回值。**命令本身只读**：
+ * 不写盘、不分配序号、不碰账本。`serialNextPublish` 只是算术，不是分配结果。
+ */
+export interface FinalizePreview {
+  state: FinalizeState
+  /** true = 没有可修 / 需处理的问题（`info` 不算），可以进正式发布 */
+  ready: boolean
+  /** 逐条问题：能的直接修，不能的说去哪修 */
+  issues: FinalizeIssue[]
+  /** 凭据失效的逐条原因（后端原话） */
+  reasons: string[]
+  /** 复用发布闸 ⑬⑭ 的两格：source 正确 / manifest 与交付集合一致 */
+  checks: AuditItem[]
+  catalogId: string
+  /** 盘上这一代目录的号（null = 还没发过） */
+  serialOnDisk: number | null
+  /** 下一次正式发布会拿到的号（纯算术） */
+  serialNextPublish: number
+  /** 定稿后的 manifest（算不出来 = null，原因在 planError） */
+  manifest: FinalizeManifest | null
+  planError: string | null
+}
+
+/** `build::CredentialUpdate` —— 「更新发布凭据」的回执（更新后重新检查的那一份也在） */
+export interface CredentialUpdate {
+  /** false = 盘上那份本来就是最新的，一个字节都没写 */
+  written: boolean
+  /** 这次重算进 manifest 的条目数 */
+  entries: number
+  /** 有几条 SHA / size 与原来那份不同 */
+  changed: number
+  preview: FinalizePreview
 }
 
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
@@ -2374,8 +2669,24 @@ export const wb = {
    * 只回答"要不要重新加载"——重载仍然是人的动作（会话里可能正开着草稿）
    */
   presetsChanged: () => invoke<boolean>('wb_presets_changed'),
-  /** 当前安装的 SupportEase 版本号（只读）—— 仅供「软件版本」展示位；不发版本 */
+  /**
+   * **这个二进制**自报的版本号（编译期常量，只读）。**不是**安装包版本 ——
+   * 界面上要说清；要"装的是哪一版"看 [`wb.versionIdentity`] 的 `installed`
+   */
   appVersion: () => invoke<string>('wb_app_version'),
+  /** 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发 */
+  versionIdentity: () => invoke<VersionIdentity>('wb_version_identity'),
+  /**
+   * 打开某一格对应的位置（`installed` / `packaged` / `published`）。
+   * ★ 只传**白名单键**：具体路径由后端重算，前端没有机会指定任意路径。
+   */
+  openVersionLocation: (which: string) =>
+    invoke<void>('wb_open_version_location', { which }),
+  /**
+   * 发布对账（只读）：git tag × 回执 × 当前开发号。
+   * 缺回执 / 缺 tag 的行由后端给 `status`，前端不重算
+   */
+  releaseLedger: () => invoke<ReleaseLedger>('wb_release_ledger'),
   /**
    * 写云端源（Bootstrap）**双源**；返回存下去的规范化形状（仓库地址 → 默认发布入口的
    * raw；blob 页转 raw；Gitee 是同一座桥）。`giteeUrl` 传 null / 空串 = 清除 Gitee 档。
@@ -2778,6 +3089,15 @@ export const wb = {
   publishHistory: () => invoke<PublishHistory>('wb_publish_history'),
   /** 在系统浏览器里打开一个 **http(s)** 链接（回执屏的「查看 PR」；别的形状后端会拒） */
   openExternal: (url: string) => invoke<void>('wb_open_external', { url }),
+  /** 在文件管理器里打开一个**目录**（路径由后端 DTO 给，界面不自己拼） */
+  openPath: (path: string) => invoke<void>('wb_open_path', { path }),
+  /** 交付前看一眼（只读）：会不会拦、会提交哪些文件 */
+  previewPreflight: () => invoke<PreviewPlan>('wb_preview_preflight'),
+  /** 生成并交付当前预览版本（= 授权这一趟的本地 commit + tag，不推送） */
+  /** 派一趟交付到后台，**立刻返回**（进度靠 `previewProgress` 轮询 / 事件） */
+  previewDeliver: () => invoke<void>('wb_preview_deliver'),
+  /** 当前交付进度（不阻塞） */
+  previewProgress: () => invoke<PreviewProgress>('wb_preview_progress'),
 
   /**
    * **发布软件版本的闸**（第四刀）—— **只读**，一个字节都不写，点几次都没副作用。
@@ -2840,8 +3160,9 @@ export const wb = {
    * `BUMP_ENV`）—— 客户端看到的就是正常的"云端发了下一版"。
    */
   devSourceStatus: () => invoke<DevSourceStatus>('wb_dev_source_status'),
-  devSourceStart: (source: DevSourceKind) =>
-    invoke<DevSourceStatus>('wb_dev_source_start', { source }),
+  /* ★ 2026-11-06：不再收"端哪一份"—— 只有一条（当前交付），本地发布那层由后端
+     按"目录里有没有清单"自动叠。参数留着会让人以为还有得选。 */
+  devSourceStart: () => invoke<DevSourceStatus>('wb_dev_source_start'),
   devSourceStop: () => invoke<DevSourceStatus>('wb_dev_source_stop'),
   /**
    * **停掉占着某个端口的那个进程**（那张卡上的「停掉它」）。
@@ -2973,4 +3294,20 @@ export const wb = {
    * 盘上还没有（还没生成 / 还没发布）时如实报错
    */
   deliveryFile: (rel: string) => invoke<string>('wb_delivery_file', { rel }),
+  /**
+   * **交付检查**（②，只读）：交付文件具不具备定稿条件、定稿会把 `manifest.json`
+   * 改成什么、每条问题能不能在这里修。
+   *
+   * ★ 它**不是**发布阶段：不写 `manifest.json` / `source.json`、不动账本、
+   * 不推进 `publishSerial`、也不要求工作区干净。真正的确立身份只在发布事务里。
+   */
+  finalizePreview: () => invoke<FinalizePreview>('wb_finalize_preview'),
+  /**
+   * **更新发布凭据**（②，唯一会写盘的那一步）：按盘上真字节重算 SHA / size 并写回
+   * `manifest.json`。
+   *
+   * ★ 只动这一份：不写 `source.json`、不重算 `catalog.json`、不推进 `publishSerial`、
+   * 不提交 Git。交付集合没收敛 / 目录不是当前代时后端**整笔拒绝**，一个字节都不写。
+   */
+  updatePublishCredentials: () => invoke<CredentialUpdate>('wb_update_publish_credentials'),
 }

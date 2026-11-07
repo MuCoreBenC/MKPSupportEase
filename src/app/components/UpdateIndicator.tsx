@@ -21,10 +21,12 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { api, errorText, listen } from '../../api'
+import { api, errorText } from '../../api'
 import { msg, t, useT } from '../../i18n'
 import { dismiss, notify, update, type Notice, type NotifyAction } from '../notify/notify'
-import type { UpdateInfo, UpdateState } from '../../api/contract'
+import type { UpdateState } from '../../api/contract'
+/* 更新会话的那一份事实：设置页读的是同一个（2026-11-06 合并两处入口） */
+import { useSoftwareUpdate } from '../shared/softwareUpdate'
 import TitlebarChip from './TitlebarChip'
 
 /**
@@ -189,9 +191,9 @@ function buildActions(
 export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
   /* 订阅语言（2026-10-26）：下面那些 `t(...)` 是模块级取词，重渲由这一行触发 */
   const tr = useT()
-  const [state, setState] = useState<UpdateState>({ state: 'idle' })
-  /** 有新版吗 + 那个安装包（`null` = 还没问 / 问不到） */
-  const [info, setInfo] = useState<UpdateInfo | null>(null)
+  /* 状态与"有没有新版"来自**全站那一份**（设置页读到的是同一个快照），
+     这里不再自己订事件、也不再自己问一次 */
+  const { state, info, refresh } = useSoftwareUpdate()
   const [open, setOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -202,30 +204,15 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
     if (demo) setOpen(true)
   }, [demo])
 
-  /* 进度事件：后端每 120ms 推一次同一个 `UpdateState` 形状 */
-  useEffect(() => {
-    let alive = true
-    const stop = listen<UpdateState>('software-update-progress', (next) => {
-      if (alive) setState(next)
-    })
-    return () => {
-      alive = false
-      void stop
-    }
-  }, [])
-
   /* 问一次"有没有新版可下"。
      ★ **挂载后延迟 1.2s 再问**：首屏不等它（铁律 2 —— 云端不参与首屏），
      而它问回来的也只是"要不要在标题栏露一个图标"，晚一点毫无损失。 */
   useEffect(() => {
     const t = setTimeout(() => {
-      void api
-        .updateInfo()
-        .then(setInfo)
-        .catch(() => setInfo(null))
+      void refresh()
     }, 1200)
     return () => clearTimeout(t)
-  }, [])
+  }, [refresh])
 
   const idle: UpdateState = { state: 'idle' }
   /* 演示态优先（给了它就用它，不看真事件） */
@@ -243,12 +230,14 @@ export default function UpdateIndicator({ onInstalled, devPreview }: Props) {
     }
   }, [])
 
-  /* 装完重启：真机上本进程会退出；演示里只是把账记上 */
+  /* 装完重启：真机上本进程会退出；演示里只是把账记上。
+     ★ 报给外面的是 **`Ready` 里那一版**（后端从清单带过来的），不是 `updateInfo` 的
+       "最新版" —— 用户点的可能就是预览通道那一份。 */
   const install = () =>
     act(async () => {
-      const latest = info?.latestVersion ?? ''
+      const target = shown.state === 'ready' ? shown.version : (info?.latestVersion ?? '')
       await api.installUpdate()
-      onInstalled(latest)
+      onInstalled(target)
     })
 
   /*

@@ -92,6 +92,7 @@ pub mod machines;
 /// 代码托管平台出口（第三刀下半）：GitHub / Gitee 的 PR/MR + CI，**自持凭据**
 /// （被批准的第二个网络出口，见模块文档）
 pub mod platform;
+pub mod preview_tx;
 /// **发布账本**：`presets/delivery/publish-serial.json` —— 发布线身份 + 单调序号。
 /// 只有正式发布事务能推进它；生成 / 预演只沿用（见该文件头）
 pub mod publish_book;
@@ -101,9 +102,11 @@ pub mod publish_tx;
 /// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
 /// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
 pub mod receipt;
+pub mod release_history;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与交付预设那本分开** —— 两条链不混
-pub mod release_history;
+/// **发布对账**（git tag × 回执 × 开发号）—— 只读
+pub mod release_ledger;
 /// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
@@ -261,10 +264,20 @@ pub fn verify_delivery(
         }
         Some(book) => {
             if !book.matches_catalog(&bytes) {
-                report.problems.push(format!(
-                    "账本说的是第 {} 号（{}），与盘上这份目录不是同一代",
-                    book.serial, book.revision
-                ));
+                /* 同一个号、内容变了 = 生成过还没发布（常规中间态）；
+                号都对不上才是两处真的错代。两件事分开说，别都叫"不是同一代" */
+                let same_serial = catalog.publish_serial == Some(book.serial);
+                report.problems.push(if same_serial {
+                    format!(
+                        "第 {} 号已按当前源重算过，但还没发布（账本记的仍是上一代内容）—— 发一次就同一代",
+                        book.serial
+                    )
+                } else {
+                    format!(
+                        "账本说的是第 {} 号（{}），与盘上这份目录不是同一代",
+                        book.serial, book.revision
+                    )
+                });
             }
             if book.catalog_id != catalog.catalog_id.clone().unwrap_or_default() {
                 report
@@ -279,6 +292,8 @@ pub mod storage;
 /// **版本号：唯一真值 + 单向派生**（第四刀）：`src-tauri/Cargo.toml` 真身，
 /// `package.json` / `tauri.conf.json` / `Cargo.lock` 是派生结果
 pub mod version;
+/// **版本身份四格**（已安装 / 本地已打包 / 最新已发布 / 当前开发）—— 只读
+pub mod version_id;
 pub mod words;
 
 use std::collections::BTreeMap;
@@ -1527,18 +1542,45 @@ pub fn wb_presets_changed() -> Result<bool, AppError> {
     })
 }
 
-/// **当前安装的 SupportEase 版本号**（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
+/// **这个二进制**的版本号（构建期 `CARGO_PKG_VERSION`，全仓唯一真值）。
 ///
-/// 「生成与发布」页那块**只读的「软件版本」**展示位用它 —— 与客户端 `get_app_version`
-/// **同一个常量**（[`crate::runtime::structure::APP_VERSION`]），不是第二处真值。
+/// ★ 它回答"**编译出这个二进制的源码**是哪一版"，**不是**"这台机器上装着哪一版"：
+/// 开发机上的工作台自报 8、`/Applications` 里装着 3 是常态。要后者看
+/// [`version_id::wb_version_identity`] 的 `installed`（读安装包的 `Info.plist`）。
 ///
-/// ★ 它只报"当前装的是哪一版"，**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
-/// （见 `docs/RELEASE-TRANSACTIONS.md`），本轮不实现。
+/// 它**不发版本、不碰发布事务** —— 「发布软件版本」是另一套事务
+/// （见 `docs/RELEASE-TRANSACTIONS.md`）。
 #[tauri::command(async)]
 pub fn wb_app_version() -> Result<String, AppError> {
     traced("wb_app_version", |_| {
         Ok(crate::runtime::structure::APP_VERSION.to_owned())
     })
+}
+
+/// 发布回执的**全部**数据根：本进程那棵 + 命令行 / 钩子那棵，规范化后去重。
+///
+/// 工作台的 `app_data_dir()` 带 `-Workbench` 后缀，命令行固定用 `APP_IDENTIFIER`
+/// （`fsx::paths`）。两条入口都会发布（预设与软件版本各有一本账），账各记各的目录 ——
+/// **读的时候并起来**：否则命令行发的那几版在界面上等于没发生。写的时候仍只写本进程那一本。
+///
+/// `MKP_SUPPORT_EASE_DATA` 覆盖时两边会算成同一个路径，所以必须去重（否则同一条
+/// 回执会被合并两次）。
+pub fn history_roots(app: &tauri::AppHandle) -> Result<Vec<(String, PathBuf)>, AppError> {
+    let own = crate::fsx::paths::internal_root(app)?;
+    let mut roots = vec![("workbench".to_owned(), own.clone())];
+    if let Some(headless) = crate::fsx::paths::internal_root_headless() {
+        let same = match (
+            std::fs::canonicalize(&own),
+            std::fs::canonicalize(&headless),
+        ) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => own == headless,
+        };
+        if !same {
+            roots.push(("cli".to_owned(), headless));
+        }
+    }
+    Ok(roots)
 }
 
 /// 记下云端源（Bootstrap）**双源**地址 —— **工作台里唯一一处"发布到哪"**（写入库的
@@ -5540,6 +5582,8 @@ mod tests {
             // 交付文件清单（2026-10-07）：只读一份名单 + 读一份盘上原文，都不写盘
             "wb_delivery_files",
             "wb_delivery_file",
+            // 交付定稿检查（②）：纯算 —— 凭据核对 + 定稿后 manifest 的字节，一个都不写
+            "wb_finalize_preview",
             // 发布闸（第二刀）：只算不写 —— 与 `publish_audit` 是同一件事的两个壳
             "wb_publish_audit",
             "wb_baseline_diff",

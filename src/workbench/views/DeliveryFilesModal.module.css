@@ -30,12 +30,40 @@
 }
 
 .groupHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
   padding: 7px 10px 6px;
+  border: 0;
   border-bottom: 1px solid var(--w-line);
   background: var(--w-card-inner);
   font-size: 11px;
   letter-spacing: 0.06em;
   color: var(--w-t3);
+  text-align: left;
+  cursor: pointer;
+}
+
+.groupHead:hover {
+  background: var(--w-hover);
+}
+
+.groupHead:active {
+  transform: translateY(1px);
+}
+
+.groupTitle {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 折叠后仍显示完整摘要，不能只剩一个组名 */
+.groupSum {
+  flex: none;
+  color: var(--w-t3);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
 }
 
 .item {
@@ -62,13 +90,7 @@
   box-shadow: inset 2px 0 0 var(--w-primary);
 }
 
-.itemState {
-  flex: none;
-  min-width: 58px;
-  font-size: 11px;
-  font-weight: 500;
-}
-
+/* 文件名是主信息，状态与大小是右侧辅助格 —— 与生成页同一套布局 */
 .itemName {
   flex: 1 1 auto;
   min-width: 0;
@@ -79,11 +101,21 @@
   white-space: nowrap;
 }
 
+.itemState {
+  flex: none;
+  min-width: 62px;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: center;
+}
+
 .itemMeta {
   flex: none;
+  min-width: 54px;
   font-size: 11px;
   color: var(--w-t3);
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 /* 状态三档：与 GenerateDiffModal 的「待更新 / 已生成」同一族 token */

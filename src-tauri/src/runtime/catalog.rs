@@ -658,7 +658,7 @@ impl Catalog {
         // 资产载荷（第三圈第一刀：切片器预设 / BBS）。
         // **登记的是盘上真文件的字节**：定义说有、文件不在 = 缺失（交给调用方裁决严格还是宽松），
         // 绝不登记一个"应该在但没见到"的条目——那等于把期望值编进目录里。
-        for asset in presets.assets.items() {
+        for asset in presets.delivery_assets() {
             let Some(kind) = kind_of_asset(asset.kind) else {
                 continue;
             };
@@ -713,9 +713,11 @@ impl Catalog {
                 published_at: None,
                 brands: presets.catalog.brands().to_vec(),
                 machines,
-                assets: presets.assets.items().to_vec(),
+                /* 资产与套餐都收窄到**交付面**：停用机型连同它的套餐、它的独占资产
+                一起退出（作者口径 2026-11-07）。源文件照留，只是不进目录。 */
+                assets: presets.delivery_assets().into_iter().cloned().collect(),
                 groups: presets.assets.groups().to_vec(),
-                bundles: presets.bundles.items().to_vec(),
+                bundles: presets.delivery_bundles().into_iter().cloned().collect(),
                 registry: CatalogRegistry {
                     params: presets.registry.params().to_vec(),
                     tabs: presets.registry.tabs().to_vec(),
@@ -919,25 +921,30 @@ mod tests {
     #[test]
     fn builds_machines_and_files_of_every_kind() {
         let catalog = Catalog::build_from_repo(&repo_root()).expect("构建不该失败");
-        assert_eq!(catalog.machines.len(), 5, "5 台机型");
+        assert_eq!(
+            catalog.machines.len(),
+            4,
+            "4 台机型 —— `enabled = false` 的 P2S 整天不进目录"
+        );
         assert_eq!(
             catalog
                 .machines
                 .iter()
                 .map(|m| m.versions.len())
                 .sum::<usize>(),
-            9,
-            "9 个版本，每个版本一份交付产物"
+            8,
+            "8 个版本，每个版本一份交付产物"
         );
         assert_eq!(catalog.revision.len(), 16, "指纹取 16 位");
 
-        // 预设：9 份，落点 `delivery/mkp/presets/` 下（发布根基准，B 类）
+        // 预设：8 份，落点 `delivery/mkp/presets/` 下（发布根基准，B 类）
+        // （P2S 停用：它的产物文件仍留在交付目录里，但目录不登记它）
         let presets: Vec<&CatalogFile> = catalog
             .files
             .iter()
             .filter(|f| f.kind == kind::PRESET)
             .collect();
-        assert_eq!(presets.len(), 9, "每个版本一份预设");
+        assert_eq!(presets.len(), 8, "每个启用的版本一份预设");
         assert!(
             presets
                 .iter()
@@ -956,10 +963,11 @@ mod tests {
             crate::presetdata::AssetKind::Icon,
         ] {
             let want = kind_of_asset(asset_kind).expect("这一类是要登记的");
+            /* 比的是**交付面**那一份台账（停用机型独占的资产不进目录），
+            不是整本 assets.toml —— 拿全部条目比会永远差那几条 */
             let in_toml = source
-                .assets
-                .items()
-                .iter()
+                .delivery_assets()
+                .into_iter()
                 .filter(|a| a.kind == asset_kind)
                 .count();
             let got = catalog.files.iter().filter(|f| f.kind == want).count();
@@ -1018,13 +1026,14 @@ mod tests {
         //              + 5 模型（Z / XY 各多一版「加长版」）+ 2 引导图（bundled，2026-10-16）
         assert_eq!(
             catalog.assets.len(),
-            source.assets.items().len(),
-            "catalog 的资产定义与 presets/assets.toml 逐条对齐"
+            source.delivery_assets().len(),
+            "catalog 的资产定义与**交付面**台账逐条对齐（停用机型独占的不进）"
         );
         assert_eq!(
             catalog.assets.len(),
-            35,
-            "实测 35 条（9 MKP 预设 + 6 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型 + 2 引导图）——
+            32,
+            "实测 32 条（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 5 模型 + 2 引导图）——
+             2026-11-07：P2S 停用，归它的三条（p2s-image / P2S BBS / P2S MKP 预设）退出目录；
              2026-10-03 三类进台账（mkPreset / bundled image / 品牌图）、2026-10-16 加了引导图
              （`type = 'guide'`，bundled）、2026-10-18 加了 Z 校准加长版
              （`zoffset-calibration-ext`）、2026-10-19 加了 XY 校准加长版
@@ -1113,11 +1122,10 @@ mod tests {
             }
         }
 
-        // A43 的映射去重：四台同一块、A1_MINI 另一块
+        // A43 的映射去重：三台同一块、A1_MINI 另一块（P2S 停用后不在目录里）
         let expect: &[(&str, &str)] = &[
             ("A1", "single-latch-256"),
             ("P1S", "single-latch-256"),
-            ("P2S", "single-latch-256"),
             ("X1C", "single-latch-256"),
             ("A1_MINI", "dual-latch-180"),
         ];
@@ -1273,9 +1281,10 @@ mod tests {
         assert_eq!(catalog.brands.len(), 1, "实测 1 个品牌");
         assert_eq!(
             catalog.assets.len(),
-            35,
-            "实测 35 条资产定义（9 MKP 预设 + 6 整机图 + 1 品牌字标 + 9 BBS + 3 图标 + 5 模型
+            32,
+            "实测 32 条资产定义（8 MKP 预设 + 5 整机图 + 1 品牌字标 + 8 BBS + 3 图标 + 5 模型
              + 2 引导图）——
+             2026-11-07：P2S 停用 ⇒ 归它的三条（外观图 / BBS / MKP 预设）一起退出目录；
              2026-10-03：整机图回到台账（bundled 档）、MKP 预设也进了台账（mkPreset 类、
              登记归属不登记路径；两者都不进 files[]）；2026-10-16：引导图进台账（guide 类、bundled）；
              2026-10-18：Z 校准加长版进台账（model 类）；2026-10-19：XY 校准加长版进台账（model 类）；
@@ -1283,8 +1292,9 @@ mod tests {
         );
         assert_eq!(
             catalog.bundles.len(),
-            9,
-            "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一（照 C15 模型重排）"
+            8,
+            "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / X1C 各一（照 C15 模型重排）；\
+             2026-11-07：P2S 停用 ⇒ P2S_default 一起退出目录"
         );
         assert_eq!(catalog.registry.params.len(), 83, "实测 83 条字段定义");
         assert!(

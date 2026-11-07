@@ -1,4 +1,4 @@
-//! **应用内更新**（2026-10-05 第五刀）：在程序里下载新版本、显示进度、下载完自动
+//! **应用内更新**：在程序里下载新版本、显示进度、下载完自动
 //! 替换 `/Applications/SupportEase.app` 并重启。
 //!
 //! # 形状：状态机 + 一个后台任务
@@ -69,8 +69,17 @@ pub enum UpdateState {
     Downloading { received: u64, total: u64 },
     /// 用户按了暂停（**连接没断**，只是不往下写）
     Paused { received: u64, total: u64 },
-    /// 下完了，可以装了
-    Ready { path: String, size: u64 },
+    /// 下完了，可以装了。
+    ///
+    /// ★ **`version` / `channel` 是给界面判"这是不是这张卡的那一版"用的**
+    /// 界面据这两格判"已就绪的是不是这张卡" —— 只看 `path` 会把另一通道的就绪当成这一张的。
+    /// 只有 `path` 时界面分不清"已就绪"和"就绪的是别的通道那一版"。
+    Ready {
+        path: String,
+        size: u64,
+        version: String,
+        channel: super::release_info::UpdateChannel,
+    },
     /// 出错了（如实说，不装）
     Failed { reason: String },
     /// 用户按了取消（暂存目录已清）
@@ -294,13 +303,32 @@ pub fn write_result(app_data: &Path, result: &UpdateResult) -> Result<(), AppErr
     Ok(())
 }
 
-/// 安装脚本（**退出后**由它做：替换 + 重开 + 记结果）。
+/// 版本号进脚本 / 进账之前先洗一遍。
 ///
-/// 返回一段 `sh -c` 的实参。★ 四件事都在这里，别处不许另写一份：
-/// - `sleep 1`：**等本进程真的退出**（正在运行的 `.app` 换不掉，代码段在执行）；
+/// ★ 它是**外部输入**：`Ready` 带的是清单里那一版的号，不是本进程编进去的那个。
+///   远端清单是外部输入，一个带引号的"版本号"能改写脚本里的 JSON 乃至 `printf` 的参数。
+///   只留 `A-Za-z0-9.-`，洗空了就退回本构建的版本（宁可记错号，也不让脚本被改写）。
+pub fn safe_version(raw: &str) -> String {
+    let v: String = raw
+        .trim()
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-')
+        .collect();
+    if v.is_empty() {
+        crate::runtime::structure::APP_VERSION.to_owned()
+    } else {
+        v
+    }
+}
+
+/// 安装脚本（**退出后**由它做：等旧进程走 → 替换 → 重开 → 记结果）。
+///
+/// 返回一段 `sh -c` 的实参。★ 五件事都在这里，别处不许另写一份：
+/// - `sleep 1` + **等 `old_pid` 真的消失**：正在运行的 `.app` 换不掉（代码段在执行）；
 /// - `rm -rf` 旧的再 `mv` 新的（`mv` 同一卷、不拷内容，比 ditto 快）；
+/// - `open -n` 重新拉起（路径从参数来，不猜；`-n` 见下面那段）；
 /// - 结果写 `<appData>/run/update-result.json`，**下次启动**读它说清成没成；
-/// - `open` 重新拉起（路径从参数来，不猜）。
+/// - 每一步都往 `<appData>/run/update-install.log` 追加一行。
 ///
 /// 路径一律单引号包起来 —— `/Applications/SupportEase.app` 这种**带空格**是常态。
 pub fn install_script(
@@ -309,18 +337,126 @@ pub fn install_script(
     staged: &Path,
     version: &str,
     at: &str,
+    old_pid: u32,
 ) -> String {
     let q = shell_quote;
-    format!(
-        "sleep 1; rm -rf {t} && mv {s} {t} && printf {ok} > {r} && open {t}",
-        t = q(&target.display().to_string()),
-        s = q(&staged.display().to_string()),
-        r = q(&result_path(app_data).display().to_string()),
-        // 成功才写账；失败时脚本以非 0 退出（下次启动看到"没有账" = 上次没成）
-        ok = q(&format!(
-            "{{\"version\":\"{version}\",\"ok\":true,\"reason\":\"\",\"at\":\"{at}\"}}"
-        )),
-    )
+    let log = q(&install_log_path(app_data).display().to_string());
+    let record = |ok: bool, reason: &str| {
+        q(&format!(
+            "{{\"version\":\"{version}\",\"ok\":{ok},\"reason\":\"{reason}\",\"at\":\"{at}\"}}"
+        ))
+    };
+    /* 脚本钉四件事，每一件都对应一个真实的失败模式：
+     *   ① **等旧进程退出再动手**（最多 3s；还不走就 TERM → KILL，并记在日志里）——
+     *      `open <path>` 遇到"这个应用已经在跑"时只把旧窗口叫到前面，不会拉起新进程；
+     *   ② **`open -n`** —— 即便还有别的实例在跑，也要拉起**新版本**这一个进程；
+     *   ③ 不用 `&&` 串联：一步失败就把后面全静默跳过（写账与拉起都在后面）；
+     *   ④ 每一步写日志、失败也写账（`ok:false` 带原因），并把退出码记下来。
+     *
+     * ★ 模板用占位符替换而不是 `format!`：这段脚本满屏 `$` 与 `{}`，
+     *   塞进 `format!` 要转义一半的花括号。 */
+    let script = r#"
+# 日志目录必须**先**建出来：下面那条重定向在子 shell 起来之前就打开了文件，
+# 目录不存在时整段脚本会当场失败、一个字都不留（这是真跑一次才发现的）。
+L=@@LOG@@
+R=@@RESULT@@
+mkdir -p "$(dirname "$L")" 2>/dev/null
+(
+echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) install v@@VERSION@@" >> "$L"
+echo "shell=$$ old_pid=@@PID@@ uid=$(id -u)" >> "$L"
+echo "target=@@TARGET@@ staged=@@STAGED@@" >> "$L"
+# ① 等旧进程真的退出：它还在时 `open` 只会把旧窗口叫到前面
+#    ★ 3 秒（15×0.2s）已经很大方：`app.exit(0)` 正常在 0.1~0.5s 内退干净，
+#      再久就该 TERM 了。
+i=0
+while [ "$i" -lt 15 ] && kill -0 @@PID@@ 2>/dev/null; do
+  sleep 0.2
+  i=$((i + 1))
+done
+if kill -0 @@PID@@ 2>/dev/null; then
+  echo "✗ 旧进程 @@PID@@ 3 秒还没退出 —— 先 TERM，再 KILL" >> "$L"
+  kill -TERM @@PID@@ 2>/dev/null
+  sleep 0.5
+  if kill -0 @@PID@@ 2>/dev/null; then
+    kill -KILL @@PID@@ 2>/dev/null
+    sleep 0.3
+  fi
+  if kill -0 @@PID@@ 2>/dev/null; then
+    echo "✗ 旧进程 @@PID@@ 杀不掉（权限 / 被别的进程托管）" >> "$L"
+    printf %s @@FAIL_PID@@ > "$R"
+    exit 6
+  fi
+fi
+echo "✓ 旧进程已退出" >> "$L"
+# ② 换：先确认新的还在，再删旧的，再搬
+if [ ! -e @@STAGED@@ ]; then
+  echo "✗ 暂存不存在：@@STAGED@@" >> "$L"
+  printf %s @@FAIL_MISSING@@ > "$R"
+  exit 2
+fi
+rm -rf @@TARGET@@
+if [ -e @@TARGET@@ ]; then
+  echo "✗ 删不掉旧应用（权限 / 正在被别的进程使用）：@@TARGET@@" >> "$L"
+  printf %s @@FAIL_REMOVE@@ > "$R"
+  exit 3
+fi
+if ! mv @@STAGED@@ @@TARGET@@; then
+  echo "✗ 移动失败（跨卷 / 权限）：@@STAGED@@ -> @@TARGET@@" >> "$L"
+  printf %s @@FAIL_MOVE@@ > "$R"
+  exit 4
+fi
+echo "✓ 已替换应用" >> "$L"
+# ③ 拉起：`-n` 是必须的 —— 不带它时，只要还有别的实例在跑，LaunchServices
+#    就只把那个旧窗口叫到前面，新版本一次都没被启动过（作者看到的就是"没反应"）
+if ! open -n @@TARGET@@; then
+  echo "✗ 替换成功但重新拉起失败：@@TARGET@@" >> "$L"
+  printf %s @@FAIL_OPEN@@ > "$R"
+  exit 5
+fi
+echo "✓ 已重新拉起" >> "$L"
+printf %s @@OK@@ > "$R"
+) >> "$L" 2>&1
+# ★ 这三行是"断在哪一步"的最后一块拼图，且必须在**子 shell 外**：
+#   写在里面时 `exit 2` 会把整条脚本带走，这一行永远跑不到（第一版就这么错的）。
+code=$?
+echo "exit=$code" >> "$L"
+exit "$code"
+"#;
+    script
+        .replace("@@LOG@@", &log)
+        .replace("@@RESULT@@", &res_path(app_data))
+        .replace("@@VERSION@@", version)
+        .replace("@@PID@@", &old_pid.to_string())
+        .replace("@@TARGET@@", &q(&target.display().to_string()))
+        .replace("@@STAGED@@", &q(&staged.display().to_string()))
+        .replace("@@OK@@", &record(true, ""))
+        .replace("@@FAIL_PID@@", &record(false, "旧进程退不掉，安装没有开始"))
+        .replace(
+            "@@FAIL_MISSING@@",
+            &record(false, "暂存里的应用不见了（可能在退出前被清理）"),
+        )
+        .replace(
+            "@@FAIL_REMOVE@@",
+            &record(false, "删不掉旧应用（权限 / 被占用）"),
+        )
+        .replace("@@FAIL_MOVE@@", &record(false, "移动失败（跨卷 / 权限）"))
+        .replace("@@FAIL_OPEN@@", &record(false, "替换好了，但没能重新拉起"))
+        .trim()
+        .to_string()
+}
+
+/// 结果账的路径（单引号包好，直接进脚本）。
+fn res_path(app_data: &Path) -> String {
+    shell_quote(&result_path(app_data).display().to_string())
+}
+
+/// **安装过程日志**（`<appData>/run/update-install.log`）。
+///
+/// 为什么要它：安装脚本在应用**退出之后**才跑，那时没有任何界面能显示错误。
+/// 安装发生在应用退出之后，界面上没有任何东西能报错，只剩这份日志 ——
+/// 只能靠猜。这份日志是他下次能直接发给我的东西：哪一步、什么路径、退出码多少。
+pub fn install_log_path(app_data: &Path) -> PathBuf {
+    app_data.join("run").join("update-install.log")
 }
 
 /// 单引号包一层（路径里有单引号时按 shell 的规矩转义）。
@@ -328,7 +464,7 @@ pub fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-/// 资产种类（2026-11-05 双平台）：显式 `kind` 优先，老档按文件名后缀兜底。
+/// 资产种类：显式 `kind` 优先，老档按文件名后缀兜底。
 ///
 /// `kind` 只有两档，认不出的一律按 `appZip`（macOS 老路径）处理 —— 不猜第三套。
 pub fn asset_kind(asset: &ReleaseAsset) -> &str {
@@ -340,7 +476,7 @@ pub fn asset_kind(asset: &ReleaseAsset) -> &str {
     }
 }
 
-/// **Windows 帮手脚本**（2026-11-05）：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
+/// **Windows 帮手脚本**：退出后由 PowerShell 做静默安装 + 重启 + 记结果。
 ///
 /// 返回 `powershell -Command` 的实参。与 macOS 的 [`install_script`] 同一套四件事：
 /// 等本进程退出 → 装 → 写 `run/update-result.json` → 拉起新版本。
@@ -390,7 +526,7 @@ pub fn running_exe() -> Result<PathBuf, AppError> {
 /// 从当前可执行文件反推**这次运行的那个 `.app`**（`.../SupportEase.app/Contents/MacOS/…`
 /// → `.../SupportEase.app`）。找不到就如实说"不在 .app 里"（那就不是安装版）。
 ///
-/// ★ **macOS 专用**（2026-11-05）：Windows 走 [`running_exe`]，两边别混。
+/// ★ **macOS 专用**：Windows 走 [`running_exe`]，两边别混。
 pub fn running_app() -> Result<PathBuf, AppError> {
     let exe = std::env::current_exe().map_err(|e| {
         AppError::io(messages::text("ui.runtime.updater.482", &[])).with_detail(e.to_string())
@@ -417,6 +553,8 @@ pub fn stage_dir(app_data: &Path) -> PathBuf {
 /// `emit` 每收到一块就报一次进度（前端只管画环）。
 pub fn download(
     asset: &ReleaseAsset,
+    version: &str,
+    channel: super::release_info::UpdateChannel,
     app_data: &Path,
     emit: &dyn Fn(UpdateState),
 ) -> Result<(), AppError> {
@@ -454,7 +592,7 @@ pub fn download(
     }
     result?;
 
-    /* ★ Windows（2026-11-05）：NSIS 安装包是**一个 .exe**，不解压。
+    /* ★ Windows：NSIS 安装包是**一个 .exe**，不解压。
      * 下载阶段已验过 size / sha；这里直接把 exe 交给 `Ready`，
      * 退出之后由帮手脚本 `/S` 静默安装并拉起新版本。
      * macOS 那条「解压 → 找 .app → 替换」整段保持不动。 */
@@ -463,6 +601,8 @@ pub fn download(
         sess.set(UpdateState::Ready {
             path: zip_path.display().to_string(),
             size,
+            version: version.to_owned(),
+            channel,
         });
         emit(sess.state());
         return Ok(());
@@ -491,6 +631,8 @@ pub fn download(
     sess.set(UpdateState::Ready {
         path: app.display().to_string(),
         size,
+        version: version.to_owned(),
+        channel,
     });
     emit(sess.state());
     Ok(())
@@ -637,7 +779,7 @@ mod tests {
     fn sha256_is_checked_only_when_given() {
         // ★ 用临时目录里的空文件，**不用 `/dev/null`** ——
         //   `/dev/null` 在 Windows 上不存在，这条判据在 rust-windows job 上真红过一次
-        //   （2026-10-05，作者贴的 CI 截图）。判据也守"跨平台"这一条。
+        //   判据也守"跨平台"这一条。
         let dir = tempfile::tempdir().unwrap();
         let empty = dir.path().join("empty.bin");
         crate::fsx::atomic::atomic_write(&empty, b"").unwrap();
@@ -721,18 +863,212 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let new_app = d.path().join("staged/SupportEase.app");
         let target = Path::new("/Applications/SupportEase.app");
-        let script = install_script(d.path(), target, &new_app, "0.0.4", "2026-10-05T00:00:00Z");
+        let script = install_script(
+            d.path(),
+            target,
+            &new_app,
+            "0.0.4",
+            "2026-10-05T00:00:00Z",
+            dead_pid(),
+        );
         assert!(
             script.contains("'/Applications/SupportEase.app'"),
             "路径要带引号（带空格是常态）"
         );
         assert!(script.contains("rm -rf"), "要删掉旧的那份");
         assert!(script.contains("mv"), "要把新的搬过去");
-        assert!(script.contains("open"), "要重新拉起");
+        assert!(script.contains("open -n"), "要重新拉起（且必须是新进程）");
         assert!(script.contains(RESULT_FILE), "结果要落账（下次启动读）");
     }
 
-    /// **Windows 帮手脚本**（2026-11-05）：本机是 macOS，只验**纯函数产出的形状** ——
+    /// ★ **安装脚本必须留下可查的证据**：装完之后人要能回答"它到底做到哪一步"。
+    ///
+    /// 旧脚本只有 `sleep; rm && mv && printf && open` 一条链，一个字都不留：
+    /// 任何一步失败，后面的写账与拉起全被 `&&` 跳过，下次启动既没账、也没线索。
+    ///
+    /// 这条判据钉三件事：① 有日志文件且每一步都写；② 失败也写账（`ok:false`）；
+    /// ③ **不再用 `&&` 串联**（否则失败静默）。
+    #[test]
+    fn the_install_script_leaves_a_trail_when_it_fails() {
+        let d = tempfile::tempdir().unwrap();
+        let staged = d.path().join("stage/SupportEase.app");
+        let target = Path::new("/Applications/SupportEase.app");
+        let script = install_script(
+            d.path(),
+            target,
+            &staged,
+            "0.0.11",
+            "2026-11-06T00:00:00Z",
+            dead_pid(),
+        );
+
+        assert!(
+            script.contains(install_log_path(d.path()).to_str().unwrap()),
+            "要写 run/update-install.log"
+        );
+        for step in ["暂存不存在", "删不掉旧应用", "移动失败", "重新拉起失败"]
+        {
+            assert!(script.contains(step), "失败分支要留话：缺 {step}");
+        }
+        assert!(
+            script.contains("\"ok\":false"),
+            "失败也要写账 —— 否则下次启动分不清「没装」和「装了但失败」"
+        );
+        assert!(
+            !script.contains("&& mv"),
+            "别再用 && 串联：一步失败就静默跳过后面全部"
+        );
+        assert!(script.contains("exit="), "退出码要记下来");
+    }
+
+    /// ★ **脚本得真的跑得起来**：只断言"字符串里有这几个字"
+    /// 而从没让 `sh` 执行过它 —— 真跑一次才发现 `run/` 不存在时 `echo >>` 与
+    /// `printf >` 全部失败，脚本一个字都留不下（正是"没反应"最难看的那种）。
+    ///
+    /// 这里跑**失败分支**（暂存不存在）：不碰 `/Applications`、不 `open`、不杀进程，
+    /// 却把整条"写日志 → 判断 → 写账 → 退出码"的链路真的走一遍。
+    #[cfg(unix)]
+    #[test]
+    fn the_install_script_really_runs_and_records_a_failure() {
+        let d = tempfile::tempdir().unwrap();
+        /* 注意：tempdir 里**没有** `run/` —— 脚本必须自己把目录补出来 */
+        let staged = d.path().join("stage/SupportEase.app");
+        let target = d.path().join("Applications/SupportEase.app");
+        let script = install_script(
+            d.path(),
+            &target,
+            &staged,
+            "0.0.11",
+            "2026-11-06T00:00:00Z",
+            dead_pid(),
+        );
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .output()
+            .expect("sh 该起得来");
+        assert_eq!(out.status.code(), Some(2), "暂存不存在 ⇒ 退出码 2");
+
+        let log = std::fs::read_to_string(install_log_path(d.path()))
+            .expect("即使 run/ 原本不存在，日志也该被创建");
+        assert!(log.contains("暂存不存在"), "日志要写清断在哪一步：{log}");
+        assert!(log.contains("exit=2"), "退出码要记在日志里：{log}");
+
+        let res = read_result(d.path()).unwrap().expect("失败也要写账");
+        assert!(!res.ok, "这一趟没装成，账上不许写成功");
+        assert_eq!(res.version, "0.0.11", "账上记的是**要装的那一版**");
+        assert!(!res.reason.trim().is_empty(), "失败要有原因，不能空着");
+    }
+
+    /// 版本号来自远端清单 ⇒ 进脚本前必须洗过；洗空了退回本构建的版本。
+    #[test]
+    fn a_version_from_the_manifest_cannot_rewrite_the_script() {
+        assert_eq!(safe_version("0.0.11-preview.1"), "0.0.11-preview.1");
+        assert_eq!(safe_version(" 0.0.11 "), "0.0.11");
+        assert_eq!(safe_version("0.0.11'; rm -rf /"), "0.0.11rm-rf");
+        assert_eq!(
+            safe_version("''''"),
+            crate::runtime::structure::APP_VERSION,
+            "洗空了退回本构建的版本"
+        );
+    }
+
+    /// ★ **整趟真跑一遍**（替换 + 拉起 + 写账）：用一个假的 `open` 顶掉系统那一个，
+    /// 于是"新版本真的被搬到位、真的是**新进程**被拉起"这两件事都验证得到，
+    /// 又不会真的打开任何东西。
+    #[cfg(unix)]
+    #[test]
+    fn the_install_script_replaces_the_app_and_relaunches_a_new_process() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let d = tempfile::tempdir().unwrap();
+        /* 假的 `open`：把收到的参数记下来（顺便证明是 `-n`） */
+        let bin = d.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let stub = bin.join("open");
+        crate::fsx::atomic::atomic_write(
+            &stub,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$(dirname \"$0\")/open.log\"\n".as_bytes(),
+        )
+        .unwrap();
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let target = d.path().join("Applications/SupportEase.app");
+        std::fs::create_dir_all(&target).unwrap();
+        crate::fsx::atomic::atomic_write(&target.join("old.txt"), b"old").unwrap();
+
+        let staged = d.path().join("stage/SupportEase.app");
+        std::fs::create_dir_all(&staged).unwrap();
+        crate::fsx::atomic::atomic_write(&staged.join("new.txt"), b"new").unwrap();
+
+        let script = install_script(
+            d.path(),
+            &target,
+            &staged,
+            "0.0.11",
+            "2026-11-06T00:00:00Z",
+            dead_pid(),
+        );
+        let path = format!(
+            "{}:{}",
+            bin.display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&script)
+            .env("PATH", path)
+            .output()
+            .expect("sh 该起得来");
+        assert_eq!(
+            out.status.code(),
+            Some(0),
+            "整趟该成功：{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+
+        assert!(target.join("new.txt").exists(), "新的 .app 该被搬到位");
+        assert!(!target.join("old.txt").exists(), "旧的 .app 该被删掉");
+        assert!(!staged.exists(), "暂存该被搬走（不是复制）");
+
+        let res = read_result(d.path()).unwrap().expect("成功也要写账");
+        assert!(res.ok, "这一趟成了，账上要写成功");
+        assert_eq!(res.version, "0.0.11");
+
+        let log = std::fs::read_to_string(install_log_path(d.path())).unwrap();
+        for step in ["✓ 已替换应用", "✓ 已重新拉起", "exit=0"] {
+            assert!(log.contains(step), "日志里缺「{step}」：{log}");
+        }
+
+        let opened = std::fs::read_to_string(bin.join("open.log")).unwrap();
+        assert!(
+            opened.trim_start().starts_with("-n "),
+            "★ 必须以 `open -n` 拉起：不带 -n 时，只要还有旧实例在跑，\n\
+             系统只会把那个旧窗口叫到前面，新版本一次都不会被启动：{opened}"
+        );
+        assert!(opened.contains("SupportEase.app"));
+    }
+
+    /// 一个**确定已经退出**的 PID（`kill -0` 对它为假）—— 判据里代替"旧进程"。
+    ///
+    /// 不能传测试进程自己的 PID：脚本会先等 10 秒、再 TERM/KILL，那等于把测试进程杀了。
+    fn dead_pid() -> u32 {
+        let mut cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "exit 0"]);
+            c
+        } else {
+            let mut c = std::process::Command::new("sh");
+            c.args(["-c", "exit 0"]);
+            c
+        };
+        let mut child = cmd.spawn().expect("起个短命进程该成功");
+        let pid = child.id();
+        let _ = child.wait();
+        pid
+    }
+
+    /// **Windows 帮手脚本**：本机是 macOS，只验**纯函数产出的形状** ——
     /// 真机行为由 Windows CI 编译通过来守，不在这里假装跑过。
     ///
     /// 旧判据：只有 macOS 的 `install_script` 一条（替换 `.app` + `open`）。

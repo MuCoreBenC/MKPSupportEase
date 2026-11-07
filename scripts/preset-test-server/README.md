@@ -60,6 +60,41 @@ npm run dev:test-update          # 服务 + tauri dev（源自动指过来）
 
 ---
 
+## 本地发布：测「软件更新」也不发版（2026-11-06）
+
+上面那条链只演**预设数据**。演**软件自己升级**（下载 → 校验 → 解包 → 替换 → 重启）
+以前只有一条路：真发一版 —— 打不可退的 tag、传包、写清单、等镜像，二十分钟起步。
+
+现在：
+
+```bash
+npm run tauri -- build                   # 编一份真的 .app（已编过就跳过）
+npm run local-release                 # 把最新的 .app.zip 变成"一份本地发布"
+npm run preset-source:dev -- --local-release
+```
+
+`local-release` 做三件事（全部落在 `target/local-release/`，git 看不见）：
+
+1. 把 `target/release/bundle/macos/*.app.zip`（没有就从 `.app` / `.dmg` 里现打）拷过去；
+2. 算 size 与 SHA-256；
+3. 写 `release-preview.json`，`asset.url` 指向 `http://127.0.0.1:8787/delivery/<那支 zip>`。
+
+服务端带 `--local-release` 时对 `/delivery/<名字>` **先查这份目录**，查到就顶掉仓库里
+那一份 —— **只改响应，`presets/delivery/` 一个字节不动**。
+
+★ **版本号默认取"包里那个版本的下一个预览号"**（`0.0.10-preview.2` → `preview.3`）。
+不这么干的话界面上一张卡都不会出现：客户端只摆**比当前构建新**的候选，而
+`APP_VERSION` 是编进二进制的，包里那个号与当前构建一模一样。
+包里真正的版本仍是 `preview.2`，装完重启后界面也还是它 —— **这是本地测试的真相**，
+要"装完显示新号"只能真编一版新号。想手写号：`--version 0.0.11-preview.1`。
+
+★ 想演正式通道：`--channel stable` 会写 `release.json`（那份会**主动通知**，
+只测安装链的话用缺省的 preview）。
+
+★ `npm run dev:test-update` 也会自动带上这份覆盖（它本来就是"测更新"那条命令）。
+
+---
+
 ## 和「夹具」的区别（那套已经删了）
 
 以前有 `fixtures/v1`、`fixtures/v2` 两代派生产物（`make-fixtures.mjs` 从真交付根算），

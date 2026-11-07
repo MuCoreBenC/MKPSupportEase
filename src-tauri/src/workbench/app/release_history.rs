@@ -136,6 +136,62 @@ pub fn load(root: &Path) -> Result<ReleaseHistory, AppError> {
     Ok(history)
 }
 
+/// 视图：一条回执 + 它住在**哪个数据根**。
+///
+/// `ReleaseRecord` 是盘上的持久形状，**不动它**；来源只在读侧加（`#[serde(flatten)]`
+/// 展开，前端拿到的 JSON 仍是"回执的全部字段 + source"）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseRecordView {
+    #[serde(flatten)]
+    pub record: ReleaseRecord,
+    /// `workbench` = 本进程那棵树；`cli` = `APP_IDENTIFIER` 那棵树（命令行发布写这里）
+    pub source: String,
+}
+
+/// 合并后的历史（界面读这一份）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseHistoryView {
+    pub history_schema: u32,
+    pub records: Vec<ReleaseRecordView>,
+    /// 这次到底读了哪几个根 —— 界面要能说清"这些账是从哪儿看的"
+    pub roots: Vec<String>,
+}
+
+/// **多根合并读**：逐个 `load`（任一根坏档照样报 `CORRUPTED`，不静默），
+/// 按 `at` 倒序，`(at, tag, stage)` 去重。
+///
+/// 为什么会有两个根：工作台的 `app_data_dir()` 带 `-Workbench` 后缀，而命令行 / 钩子
+/// 那一侧固定用 `APP_IDENTIFIER`。两条入口都会发布软件版本，账各记各的目录 ——
+/// **读的时候并起来**，写的时候仍只写本进程那一本。
+pub fn load_merged(roots: &[(String, PathBuf)]) -> Result<ReleaseHistoryView, AppError> {
+    let mut seen: std::collections::BTreeSet<(String, String, String)> =
+        std::collections::BTreeSet::new();
+    let mut records: Vec<ReleaseRecordView> = Vec::new();
+    let mut labels: Vec<String> = Vec::new();
+    for (label, root) in roots {
+        labels.push(root.display().to_string());
+        for record in load(root)?.records {
+            let key = (record.at.clone(), record.tag.clone(), record.stage.clone());
+            if !seen.insert(key) {
+                continue;
+            }
+            records.push(ReleaseRecordView {
+                record,
+                source: label.clone(),
+            });
+        }
+    }
+    /* ISO8601 的字典序就是时间序；同刻的按写入顺序稳着来 */
+    records.sort_by(|a, b| b.record.at.cmp(&a.record.at));
+    Ok(ReleaseHistoryView {
+        history_schema: HISTORY_SCHEMA,
+        records,
+        roots: labels,
+    })
+}
+
 /// 追加一条（**插到最前**），超出 [`HISTORY_MAX`] 的从尾部丢掉。
 pub fn append(root: &Path, record: ReleaseRecord) -> Result<ReleaseHistory, AppError> {
     let mut history = load(root)?;
@@ -208,6 +264,31 @@ mod tests {
         let h = load(dir.path()).unwrap();
         assert_eq!(h.records.len(), HISTORY_MAX);
         assert_eq!(h.records[0].tag, format!("v0.0.{}", HISTORY_MAX + 4));
+    }
+
+    /// **两棵树并起来读**：工作台那本记 .2，命令行那本记 .9 —— 界面上要都看得见，
+    /// 每条带来源；同一份根被传两次（`MKP_SUPPORT_EASE_DATA` 覆盖时的常态）只算一次。
+    #[test]
+    fn reading_two_roots_merges_them_and_keeps_the_source() {
+        let workbench = tempfile::tempdir().unwrap();
+        let cli = tempfile::tempdir().unwrap();
+        append(workbench.path(), record("v0.0.10-preview.2")).unwrap();
+        let mut newer = record("v0.0.10-preview.9");
+        newer.at = "2026-11-08T00:00:00Z".to_owned();
+        append(cli.path(), newer).unwrap();
+
+        let out = load_merged(&[
+            ("workbench".to_owned(), workbench.path().to_path_buf()),
+            ("cli".to_owned(), cli.path().to_path_buf()),
+            ("cli".to_owned(), cli.path().to_path_buf()),
+        ])
+        .expect("两本账都读得出来");
+
+        assert_eq!(out.records.len(), 2, "重复传同一个根不许把同一条记两遍");
+        assert_eq!(out.records[0].record.tag, "v0.0.10-preview.9", "按时间倒序");
+        assert_eq!(out.records[0].source, "cli");
+        assert_eq!(out.records[1].source, "workbench");
+        assert_eq!(out.roots.len(), 3, "读了哪几个根要如实摆出来");
     }
 
     /// ★ **两条链的账是两本**：`release-history.json` 与 `publish-history.json`

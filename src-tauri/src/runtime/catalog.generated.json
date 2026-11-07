@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "2f66b5d90ced110a",
+  "revision": "92b14dfdb0f690ce",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -358,129 +358,6 @@
       ]
     },
     {
-      "id": "P2S",
-      "display": "P2S",
-      "name": "",
-      "brand": "拓竹 (Bambu Lab)",
-      "defaultBundle": "P2S_default",
-      "externalAliases": [
-        "P2"
-      ],
-      "image": "p2s-image",
-      "imageVariant": null,
-      "icon": "p1s-icon",
-      "plateIds": [
-        "single-latch-256"
-      ],
-      "defaultPlateId": "single-latch-256",
-      "dimensions": {
-        "bedSize": {
-          "width": 256.0,
-          "depth": 256.0
-        },
-        "movementRange": {
-          "minX": 0.0,
-          "maxX": 256.0,
-          "minY": 0.0,
-          "maxY": 265.0,
-          "maxZ": 999.0
-        },
-        "glueArea": {
-          "glueMinX": 0.0,
-          "glueMaxX": 256.0,
-          "glueMinY": 0.0,
-          "glueMaxY": 265.0,
-          "wipeX": 20.0
-        },
-        "calibration": {
-          "lShapeBaseX": 68.21,
-          "lShapeBaseY": 126.373,
-          "xLineX": 114.523,
-          "xLineY": 104.83,
-          "xLineYEnd": 114.83,
-          "yLineX": 104.53,
-          "yLineXEnd": 114.53,
-          "yLineY": 112.83,
-          "zStartX": 68.21,
-          "zStartY": 126.373
-        },
-        "edgeZone": 10.0,
-        "flags": {
-          "gcodeMarker": ";===== machine: P2",
-          "hasSecondFan": true
-        }
-      },
-      "versions": [
-        {
-          "id": "STANDARD",
-          "name": "标准版",
-          "nameEn": "Standard",
-          "nameTw": "標準版",
-          "nameJa": "スタンダード版",
-          "recommendedBundle": "P2S_default",
-          "tag": "推荐",
-          "tagEn": "Recommended",
-          "tagTw": "推薦",
-          "tagJa": "おすすめ",
-          "description": "未完成，没有打印机",
-          "descriptionEn": "Unfinished; no printer available",
-          "descriptionTw": "未完成，沒有印表機",
-          "descriptionJa": "未完成（プリンターが手元にないため）",
-          "image": null
-        }
-      ],
-      "zones": [
-        {
-          "points": [
-            [
-              0.0,
-              0.0
-            ],
-            [
-              240.0,
-              0.0
-            ],
-            [
-              240.0,
-              14.0
-            ],
-            [
-              238.0,
-              14.0
-            ],
-            [
-              238.0,
-              5.0
-            ],
-            [
-              0.0,
-              5.0
-            ]
-          ]
-        },
-        {
-          "points": [
-            [
-              0.0,
-              0.0
-            ],
-            [
-              18.0,
-              0.0
-            ],
-            [
-              18.0,
-              28.0
-            ],
-            [
-              0.0,
-              28.0
-            ]
-          ]
-        }
-      ]
-    },
-    {
       "id": "X1C",
       "display": "X1C",
       "name": "",
@@ -642,14 +519,6 @@
       "delivery": "bundled"
     },
     {
-      "id": "p2s-image",
-      "type": "image",
-      "machineId": "P2S",
-      "name": "P2S 外观图",
-      "path": "printers/p2s.webp",
-      "delivery": "bundled"
-    },
-    {
       "id": "x1c-image",
       "type": "image",
       "machineId": "X1C",
@@ -725,15 +594,6 @@
       "name": "P1S lite 版预设",
       "path": "",
       "versionId": "LITE",
-      "delivery": "download"
-    },
-    {
-      "id": "p2s-standard",
-      "type": "mkPreset",
-      "machineId": "P2S",
-      "name": "P2S 标准版预设",
-      "path": "",
-      "versionId": "STANDARD",
       "delivery": "download"
     },
     {
@@ -869,16 +729,6 @@
       "delivery": "download"
     },
     {
-      "id": "p2s-bbs-04-024",
-      "type": "slicerProfile",
-      "machineId": "P2S",
-      "name": "P2S：0.4 喷头 0.24 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
-      "slicer": "bbs",
-      "profile": "process",
-      "delivery": "download"
-    },
-    {
       "id": "x1c-bbs-02-010",
       "type": "slicerProfile",
       "machineId": "X1C",
@@ -997,16 +847,6 @@
       "assetRefs": [
         "p1s-lite",
         "p1s-bbs-04-024"
-      ],
-      "updatedAt": "2026-10-16"
-    },
-    {
-      "id": "P2S_default",
-      "display": "P2S 标准版",
-      "machineId": "P2S",
-      "assetRefs": [
-        "p2s-standard",
-        "p2s-bbs-04-024"
       ],
       "updatedAt": "2026-10-16"
     },
@@ -6069,13 +5909,6 @@
     },
     {
       "kind": "mkp_preset",
-      "fileName": "P2S-standard.toml",
-      "path": "delivery/mkp/presets/P2S-standard.toml",
-      "machineId": "P2S",
-      "versionId": "STANDARD"
-    },
-    {
-      "kind": "mkp_preset",
       "fileName": "X1C-lite.toml",
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
@@ -6177,13 +6010,6 @@
       "fileName": "MKPProcess P1S 0.4 0.24.json",
       "path": "assets/bbs/Process/0.4mm/MKPProcess P1S 0.4 0.24.json",
       "machineId": "P1S",
-      "versionId": ""
-    },
-    {
-      "kind": "bbs_config",
-      "fileName": "MKPProcess P2S 0.4 0.24.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
-      "machineId": "P2S",
       "versionId": ""
     },
     {

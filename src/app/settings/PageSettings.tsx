@@ -85,7 +85,7 @@ import { api, errorText, isAppError } from '../../api'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
 import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
-import { deliveryMutated, sourceMutated } from '../state/deliveryState'
+import { deliveryMutated, sourceMutated, useSourceRevision } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
 import { appStateMutated, useLocalePref, useThemePref } from '../state/appState'
 import {
@@ -97,6 +97,8 @@ import {
   useSystemSlicerApp,
   type SlicerId,
 } from '../shared/slicer'
+/* 更新会话那一份事实（与标题栏指示器共用同一个快照；2026-11-06 合并两处入口） */
+import { useSoftwareUpdate } from '../shared/softwareUpdate'
 /* 自绘下拉共用件（#33）：项目里的下拉一律用它，原生 `<select>` 一个不留 */
 import { SelectField } from '../../components/field'
 import type { FieldOption } from '../../components/field'
@@ -534,6 +536,20 @@ export default function PageSettings({
   /* 问更新读到的那份「当前版本」：即使远端问不到也要能显示它（它来自构建期，一定拿得到） */
   const [appVersion, setAppVersion] = useState('')
 
+  /*
+   * **下载任务的状态**（2026-11-06 作者：下载完按钮还是「尝试测试版」，再点又重下一遍）。
+   *
+   * 事实来自**全站那一份**（`shared/softwareUpdate`）—— 标题栏那枚指示器读的是同一个快照，
+   * 于是"设置页说有新版、标题栏没图标"这种事不会再出现。`state` 里带着
+   * `version`/`channel`，卡片才知道"已就绪的是不是这一版"。
+   *
+   * `pendingChannel` 只记"我点的是哪一路"：`downloading` 那一态里没有通道信息，
+   * 而两张卡都可能摆进度条，不记就分不清该把进度画在哪张卡上。
+   */
+  const { state: updateState, info: installMeta, refresh: refreshUpdate } = useSoftwareUpdate()
+  const [pendingChannel, setPendingChannel] = useState<'stable' | 'preview' | null>(null)
+  const [installing, setInstalling] = useState(false)
+
 
 
   /*
@@ -719,6 +735,9 @@ export default function PageSettings({
       ])
       setAppVersion(version || got.currentVersion)
       setUpdate(got)
+      /* 顺手刷新共享快照：卡片要靠它判"已就绪的是不是这一版"，上次安装的账与
+         日志路径也在这份里（`checkSoftwareUpdate` 只谈候选，这几格它不带） */
+      await refreshUpdate()
     } catch (e) {
       /* 没配源 / 离线 / 远端还没发 release.json：都不该让设置页出问题 ——
          如实留"没查到"，**并且把原因摆出来**（吞掉原因 = 失败和"没有新版"长一样） */
@@ -729,11 +748,23 @@ export default function PageSettings({
     } finally {
       setUpdateBusy(false)
     }
-  }, [])
+  }, [refreshUpdate])
 
+  /*
+   * ★ 换源之后**必须重查一次**（2026-11-06 作者实测："我改了地址啊，为什么这上面还是写着…"）。
+   *
+   * 以前这个 effect 只依赖 `checkUpdate`（而它依赖的是模块级稳定函数）⇒ **一辈子只在挂载时跑一次**。
+   * 保存地址那一刻 `sourceChanged()` 确实广播了 `sourceMutated()`，但那是发给「读目录的那几页」的；
+   * **这一张卡没听**。于是换完源，界面上还挂着旧源（Gitee）问出来的「已是最新版本」。
+   *
+   * 这一格就是"保存即生效、不许要求重启"覆盖到更新检查的那一半：
+   * 代次一变 → 按新地址重问一次；`updateBusy` 会先把标题切成「正在检查…」，
+   * 旧结论不会赖在屏幕上装成新答案。
+   */
+  const sourceRevision = useSourceRevision()
   useEffect(() => {
     void checkUpdate()
-  }, [checkUpdate])
+  }, [checkUpdate, sourceRevision])
 
   /*
    * 自动清理那一格：**只在打开这一页时读一次**（它不参与首屏，也不联网）。
@@ -786,8 +817,34 @@ export default function PageSettings({
    */
   const startDownload = async (channel?: 'stable' | 'preview') => {
     try {
+      if (channel !== undefined) setPendingChannel(channel)
       await api.startUpdate(channel)
     } catch (e) {
+      setNote({ text: errorText(e), bad: true })
+    }
+  }
+
+  /** 「重启并安装」：本进程随后会退出（装完由脚本重新拉起） */
+  const installDownloaded = async () => {
+    if (installing) return
+    setInstalling(true)
+    try {
+      await api.installUpdate()
+      /*
+       * 正常情况下这一行之后进程就没了，界面不复存在。**8 秒后自己回来了** =
+       * 进程没退出（或脚本没走到 `open`）—— 把按钮放开，并重新问一次账：
+       * 那本账（`run/update-result.json`）会带着失败原因与日志路径回来。
+       * 不这么做的话，一次没退出的安装会让按钮永远卡在「正在安装…」。
+       *
+       * ★ 8s = 安装脚本那一头的上限（等 3s + TERM 0.5s + KILL 0.3s）再留一倍余量。
+       *   脚本一结束应用就该退，所以正常情况根本轮不到这颗定时器。
+       */
+      window.setTimeout(() => {
+        setInstalling(false)
+        void checkUpdate()
+      }, 8_000)
+    } catch (e) {
+      setInstalling(false)
       setNote({ text: errorText(e), bad: true })
     }
   }
@@ -1114,6 +1171,14 @@ export default function PageSettings({
     .sort((a, b) => (a.channel === 'stable' ? 0 : 1) - (b.channel === 'stable' ? 0 : 1))
   const showChannelCards = channels.length > 0
 
+  /* 正在搬字节的那一态（有它就把所有下载入口禁掉：后端会如实拒第二遍） */
+  const transferring =
+    updateState?.state === 'downloading' || updateState?.state === 'paused' ? updateState : null
+  const transferredPct =
+    transferring !== null && transferring.total > 0
+      ? `${Math.round((transferring.received / transferring.total) * 100)}%`
+      : '…'
+
   /*
    * 左列**只有两行**（状态 + 版本对照）⇒ 动作条竖向居中（2026-10-30 作者：
    * 「这两行的时候，看起来是居中的」）。多出说明 / 失败原因 / 提示任何一段就退回
@@ -1292,11 +1357,16 @@ export default function PageSettings({
               {updateBusy ? tr('settings.update.checking') : tr('settings.update.recheck')}
             </Btn>
             {/*
-              ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
+             ★ 「查看更新」用 `api.openUrl`，**不用 `<a target="_blank">`**：
               Tauri 的 webview 没开 opener 权限，`<a>` 点了**什么都不发生**
               （0.0.2 用户实测："点了没反应，没弹出浏览器"）。修法是走命令（第五刀）。
+
+             ★ **没有新版就不摆这颗**（2026-11-06 作者：「我只要一个检查更新，有新的版本
+              才应该显示查看呀」）。以前条件里只有 `jumpUrl !== undefined`，而 `jumpUrl`
+              在自定义源下恒等于数据源地址 ⇒ 明明"已是最新"，右边还杵着一颗「查看更新」；
+              点开还是个 API 地址。现在它只在**真有新版**时出现。
             */}
-            {jumpUrl !== undefined && (
+            {hasUpdate && jumpUrl !== undefined && (
               <Btn onClick={() => void openReleasePage(jumpUrl)}>
                 {tr('settings.update.view')}
               </Btn>
@@ -1324,6 +1394,21 @@ export default function PageSettings({
             {channels.map((c) => {
               const stable = c.channel === 'stable'
               const canInstall = c.asset !== undefined
+              /*
+               * 三档判据（2026-11-06）：**这一份**下好了没有 → 正在为哪一路下载 → 要不要发起。
+               *
+               * `downloaded` 必须同时对上通道与版本：后端 `Ready` 现在带着这两格，
+               * 只判"有东西下好了"会让正式版那张卡也变成「重启并安装」，
+               * 而实际装的是预览版 —— 这正是作者看到"再点又下一遍"的另一面。
+               */
+              const downloaded =
+                updateState?.state === 'ready' &&
+                updateState.channel === c.channel &&
+                updateState.version === c.version
+              /* 通道未知时（离开页面又回来）宁可两张卡都显示进度，也不假装没在下 */
+              const movingHere =
+                transferring !== null &&
+                (pendingChannel === null || pendingChannel === c.channel)
               return (
                 <div
                   key={c.channel}
@@ -1350,10 +1435,22 @@ export default function PageSettings({
                     )}
                   </div>
                   <div className={s.channelActions}>
-                    {canInstall ? (
+                    {installing ? (
+                      <Btn disabled>{tr('settings.update.installing')}</Btn>
+                    ) : downloaded ? (
+                      /* 已就绪且就是这一版 ⇒ 只可能是「安装」；再点这里不会重新下载 */
+                      <Btn variant="accent" onClick={() => void installDownloaded()}>
+                        {tr('update.install')}
+                      </Btn>
+                    ) : movingHere ? (
+                      /* 正在为这张卡下载：禁用 + 进度（点第二遍后端会拒，别让人白点） */
+                      <Btn disabled>
+                        {tr('settings.update.downloading', { pct: transferredPct })}
+                      </Btn>
+                    ) : canInstall ? (
                       <Btn
                         variant={stable ? 'accent' : 'default'}
-                        disabled={updateBusy}
+                        disabled={updateBusy || transferring !== null}
                         onClick={() => void startDownload(c.channel)}
                       >
                         {tr(stable ? 'settings.update.updateStable' : 'settings.update.tryPreview')}
@@ -1371,6 +1468,23 @@ export default function PageSettings({
             })}
             <p className={s.channelHint}>{tr('settings.update.recheckHint')}</p>
           </div>
+        )}
+
+        {/*
+         * 「上次更新没成」+ **安装日志在哪儿**（2026-11-06）。
+         *
+         * 安装脚本在应用**退出之后**才跑，那时界面上没有任何东西能报错；下一次启动
+         * 只能靠 `run/update-result.json` 这一本账。以前这本账写是写了，**没人读** ——
+         * 作者点完「重启并安装」什么都没发生，界面上也永远查不到原因。
+         * 这里把那本账摊开，并把日志的绝对路径直接写出来（他可以整段发给我）。
+         */}
+        {installMeta?.lastResult !== undefined && !installMeta.lastResult.ok && (
+          <p className={s.fieldNote}>
+            {tr('settings.update.lastFailed', {
+              detail: installMeta.lastResult.reason,
+              log: installMeta.installLog,
+            })}
+          </p>
         )}
 
         {/*

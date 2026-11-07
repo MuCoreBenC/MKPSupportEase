@@ -104,6 +104,17 @@ pub struct CommitRow {
     pub subject: String,
 }
 
+/// 一个 tag —— 「这一版冻结过」的唯一证据（AGENTS §4.5）。
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TagRow {
+    pub tag: String,
+    /// tag 的创建日期（`YYYY-MM-DD`）
+    pub at: String,
+    /// 它指向的那一笔提交（annotated tag 取解引用后的短 sha）
+    pub commit: String,
+}
+
 /// `git log --format` 的 `US`/`RS` 输出 → 行。纯函数，判据不依赖机器上有没有 git。
 fn parse_recent_log(out: &str) -> Vec<CommitRow> {
     out.split('\u{1e}')
@@ -118,6 +129,29 @@ fn parse_recent_log(out: &str) -> Vec<CommitRow> {
                 author: fields.next().unwrap_or("").trim().to_owned(),
                 at: fields.next().unwrap_or("").trim().to_owned(),
                 subject: fields.next().unwrap_or("").trim().to_owned(),
+            })
+        })
+        .collect()
+}
+
+/// `git for-each-ref --format=名字:日期:对象:解引用对象` 的输出 → 行。纯函数。
+///
+/// 轻量 tag 的 `%(*objectname:short)` 是空串 ⇒ 退回 `%(objectname:short)`。
+fn parse_tags(out: &str) -> Vec<TagRow> {
+    out.lines()
+        .filter_map(|line| {
+            let mut it = line.split(':');
+            let tag = it.next()?.trim();
+            if tag.is_empty() {
+                return None;
+            }
+            let at = it.next().unwrap_or("").trim().to_owned();
+            let own = it.next().unwrap_or("").trim().to_owned();
+            let deref = it.next().unwrap_or("").trim().to_owned();
+            Some(TagRow {
+                tag: tag.to_owned(),
+                at,
+                commit: if deref.is_empty() { own } else { deref },
             })
         })
         .collect()
@@ -249,6 +283,23 @@ impl Git {
             "HEAD",
         ])?;
         Ok(parse_recent_log(&out))
+    }
+
+    /// **全部 tag**（只读、不联网），按创建时间倒序 —— 发布历史对账的主轴。
+    ///
+    /// 两个坑都实测过：
+    /// - `for-each-ref` **不认** `%x1f`（会原样打出 `%x1f` 五个字符），所以分隔符用 `:`；
+    ///   ref 名里不允许出现 `:`（`git check-ref-format` 的硬规则），切不歪。
+    /// - annotated tag 的 `%(objectname)` 是**标签对象**的 sha，不是提交；要对的是
+    ///   `%(*objectname)`（解引用）。轻量 tag 没有这一格 ⇒ 退回 tag 自己的 objectname。
+    pub fn tags(&self) -> Result<Vec<TagRow>, AppError> {
+        let out = self.run(&[
+            "for-each-ref",
+            "--sort=-creatordate",
+            "--format=%(refname:short):%(creatordate:short):%(objectname:short):%(*objectname:short)",
+            "refs/tags",
+        ])?;
+        Ok(parse_tags(&out))
     }
 
     /// 推分支（`git push -u origin <branch>`）。`branch` 为空 = 用当前分支。
@@ -1196,5 +1247,27 @@ mod tests {
         assert_eq!(rows[0].subject, "发布：交付产物 17 份，含逗号");
         assert_eq!(rows[1].subject, "feat(glue): 8 格参数，含: 冒号");
         assert_eq!(rows[1].at, "2026-11-05T10:31:00+08:00");
+    }
+
+    /// tag 行用 `:` 分隔（ref 名里不许有 `:`），annotated 取解引用后的提交、
+    /// 轻量 tag 退回自己的对象 —— 两格都对得上才是"这一版指向哪一笔"。
+    #[test]
+    fn the_tag_parser_prefers_the_dereferenced_commit() {
+        let out = "v0.0.10-preview.7:2026-11-06:cf02bfa:0a88f70\nv0.0.6:2026-10-30:1111222:\n";
+        let rows = parse_tags(out);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            rows[0],
+            TagRow {
+                tag: "v0.0.10-preview.7".to_owned(),
+                at: "2026-11-06".to_owned(),
+                commit: "0a88f70".to_owned(),
+            },
+            "annotated tag：要的是它指向的提交，不是标签对象"
+        );
+        assert_eq!(
+            rows[1].commit, "1111222",
+            "轻量 tag 没有解引用那一格 ⇒ 用自己的对象"
+        );
     }
 }

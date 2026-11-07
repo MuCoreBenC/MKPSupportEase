@@ -34,12 +34,84 @@ pub const GENERATED_AT_PREFIX: &str = "# generated_at:";
 
 /// 从文本里剥掉 `# generated_at:` 行，得到"业务内容"。
 ///
-/// 这是"变没变"的唯一口径：生成、预演、待更新标记、交付判定全都用它，
-/// 不许有第二套（各写一套迟早有一边把"没变"报成"变了"）。
+/// 它只回答"内容变没变"。**要不要写**是另一个问题，见 [`up_to_date`]。
 pub fn strip_generated_at(text: &str) -> String {
     text.split_inclusive('\n')
         .filter(|l| !l.starts_with(GENERATED_AT_PREFIX))
         .collect()
+}
+
+/// 把**不表达内容身份**的历史字段抹平，只留下业务字节。
+///
+/// | 文件 | 抹掉的 |
+/// |---|---|
+/// | `*.toml` | `# generated_at:` 那整行 |
+/// | 其它（`*.json`） | `"generatedAt"` / `"generated_at"` / `"updated"` 三个历史写盘键的值 |
+///
+/// 候选字节本身不含这些字段，所以对候选是恒等；对盘上的历史产物才会动字节。
+/// 相等的含义只有一条：**内容一样**。不要拿它回答"要不要写"（见 [`up_to_date`]）。
+pub fn normalize_for_compare(rel: &str, bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return bytes.to_vec();
+    };
+    if rel.ends_with(".toml") {
+        return strip_generated_at(text).into_bytes();
+    }
+    /* 历史 JSON 里可能带过写盘时刻；值归一成固定串，避免同一份内容因时间被判成两份。 */
+    let mut out = String::with_capacity(text.len());
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        let legacy = ["\"generatedAt\":", "\"generated_at\":", "\"updated\":"]
+            .iter()
+            .any(|k| trimmed.starts_with(k));
+        if legacy {
+            let indent = &line[..line.len() - trimmed.len()];
+            let key = trimmed.split_once(':').map_or(trimmed, |(k, _)| k);
+            let nl = if line.ends_with('\n') { "\n" } else { "" };
+            out.push_str(indent);
+            out.push_str(key);
+            out.push_str(": \"\",");
+            out.push_str(nl);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out.into_bytes()
+}
+
+/// 盘上这一份是不是**就是候选字节**：同内容**且**同形状 —— 「要不要写」的唯一判据。
+///
+/// [`normalize_for_compare`] 只回答"内容变没变"，这一处回答"要不要写"。两件事必须分开：
+///
+/// | 盘上那份 | 内容 | 要不要写 |
+/// |---|---|---|
+/// | 形状当前、正文相同 | 一致 | 不写 |
+/// | 带已废弃的写盘字段、正文相同 | 一致 | **要写**（清掉那几个字节） |
+///
+/// 为什么"内容一致"也得写：`catalog.json` 的 size / sha256 按**候选字节**登记，
+/// 盘上多一行就永远对不上 —— 生成说"没有哪一份会变"、核对说"清单和文件对不上"，
+/// 两边都自认为对，僵住不动。
+///
+/// 形状判据是**单向**的（只惩罚盘上旧）：候选自己还带这些字段时归一化对它是恒等，
+/// 不构成"盘上过期"，否则每次生成都会重写一遍。
+///
+/// # 谁会调它
+///
+/// 生成事务（[`crate::workbench::app::delivery::generate_transaction`]）、
+/// 生成前预演、待更新标记（[`crate::workbench::domain::derive`] 的 `build_state`）
+/// 全部走这一处。内核产物那条（`app::build` 写 `crates/preset/assets/…`）**不走**：
+/// 它写出去的字节自己带 `# generated_at:`，问题不是"候选字节"而是"补一行时间"。
+pub fn up_to_date(rel: &str, on_disk: &[u8], candidate: &[u8]) -> bool {
+    let norm_old = normalize_for_compare(rel, on_disk);
+    let norm_want = normalize_for_compare(rel, candidate);
+    if norm_old != norm_want {
+        return false;
+    }
+    /* 内容一致：形状也必须是当前的。候选自己带旧字段时（归一化对它不是恒等）
+    不能因为盘上也带就判"过期"—— 那种情况下重写也清不掉。 */
+    let candidate_needs_no_cleanup = norm_want == candidate;
+    let on_disk_is_already_clean = norm_old == on_disk;
+    !(candidate_needs_no_cleanup && !on_disk_is_already_clean)
 }
 /// 预设真相源。**它不住在这里** —— 代码搬去了 [`crate::presetdata`]（客户端也要读预设，
 /// 而这一整棵子树是 feature gate 的），这里只是把它**别名**回 `presets`：

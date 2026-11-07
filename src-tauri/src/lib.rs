@@ -902,6 +902,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付文件清单（2026-10-07）：「交付预设」卡看这次都会写出哪些文件 + 看某一份的原文
         app::build::wb_delivery_files,
         app::build::wb_delivery_file,
+        // 交付检查与修复（2026-11-07）：查是只读；「更新发布凭据」只重写 manifest.json
+        app::build::wb_finalize_preview,
+        app::build::wb_update_publish_credentials,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
         app::machines::wb_copy_version,
         app::wb_copy_recipe,
@@ -942,6 +945,12 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::build::wb_generate_preview,
         // 当前安装的版本号（只读）：仅用于「软件版本」展示位，不发版本
         app::wb_app_version,
+        // 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发
+        app::version_id::wb_version_identity,
+        // 「打开位置」：只收白名单键（installed / packaged / published），路径由后端重算
+        app::version_id::wb_open_version_location,
+        // 发布对账（只读）：git tag × 回执 × 开发号，缺哪一边就标出来
+        app::release_ledger::wb_release_ledger,
         app::build::wb_generate,
         // 历次生成的回执（应用数据目录，按份数自动清理）
         app::build::wb_receipts,
@@ -995,6 +1004,13 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 端口被占着时的那一下：起之前就探（谁占着、PID 多少），界面摆出来问一句
         // 「要不要把它停了」—— 停的那一条单独给，先验明正身再动手
         app::dev_source::wb_dev_source_clear_conflict,
+        // 「打开交付目录」—— 路径由后端 DTO 给，界面不自己拼（2026-11-06）
+        app::dev_source::wb_open_path,
+        // 本地预览交付事务：编译 → 清单 → 提交 → 打 tag → 滚到下一轮（不推送）
+        app::preview_tx::wb_preview_preflight,
+        app::preview_tx::wb_preview_deliver,
+        app::preview_tx::wb_preview_recover,
+        app::preview_tx::wb_preview_progress,
         // **开发台**：把"看不见的那几屏"按一下按钮显示出来（后处理 + 几个模态框）。
         // ★ 这两条命令**发给客户端进程**（走 hook 那条 loopback）—— 工作台这档没有
         // 客户端窗口，界面显示在**客户端窗口**里（见 `app::devsim` 模块头）。

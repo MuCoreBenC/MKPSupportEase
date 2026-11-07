@@ -11,7 +11,7 @@
 //!            └─ 起 scripts/preset-test-server/ 在 127.0.0.1:8787
 //! ```
 //!
-//! # ★ 它**只起服务**，不碰客户端（作者 2026-10-08 裁决）
+//! # 它只起服务，不碰客户端
 //!
 //! 先前那一版按钮跑的是 `npm run dev:test-update`（连客户端 `tauri dev` 一起起、
 //! 用 `MKPSE_PRESET_SOURCE_URL` 把源指过去）。作者的判断很直接：**没必要** ——
@@ -32,7 +32,7 @@
 //!   那道闸后面），给用户的二进制里既没有这颗按钮，也没有这几条命令。
 //! - 输出**继承给终端**：服务的日志打在起工作台的那个终端里。
 //!   这个按钮只是"替你敲了那条命令"，不另造一套日志窗口充当真相。
-//! - **端口被占着时，先把占用者摆出来、问一句**（2026-10-08 踩出来的那条）：
+//! - **端口被占着时，先把占用者摆出来、问一句**：
 //!   8787 上已经有东西（上一轮留下的服务、或你手动起的 `preset-source:dev`）时，
 //!   这一份起不来。所以**起之前先探端口**（`conflicts_of`），把占用者连同 PID 摆到
 //!   界面上，问一句"要不要把它停掉"（`wb_dev_source_clear_conflict`）。
@@ -76,14 +76,23 @@ const ROOT_ENV: &str = "PRESET_TEST_ROOT";
 /// 让 `server.mjs` **把发布序号往前拨一格**（`catalog.json` 里 `publishSerial + 1`、
 /// `publishedAt` 换成此刻）。
 ///
-/// ★ 2026-10-30 作者：「我这一个模拟的你如果能加一就更好了，这样子就更真实了」。
-/// 不拨的话，测试源那份目录和客户端手上那份**同号**，而内容又不同 ⇒ 逐文件判据给
+/// 序号要拨一格：不拨的话，测试源那份目录和客户端手上那份**同号**，而内容又不同 ⇒ 逐文件判据给
 /// `Inconsistent`（"那一代目录不再唯一"）—— 看着像坏了。拨一格就成了正常的
 /// "云端发了下一版"，`Outdated` 才对得上真实使用。
 ///
 /// **只改端出去的那一份响应，盘上一个字节都不动**，也不是给判据开口子：
 /// 判据照旧比 `publishSerial`，只是这份模拟源自称"刚发过一版"。
 const BUMP_ENV: &str = "PRESET_TEST_BUMP_SERIAL";
+
+/// 让 `server.mjs` 把 `/delivery/release-preview.json`（与 `release.json`）换成
+/// `target/local-release/` 里那一份（**只改响应，盘上一个字节不动**）。
+///
+/// 与 `--local-release` 参数是同一个开关的两档：这里走环境变量，因为工作台起的
+/// 永远是 `npm run preset-source:dev` 那一条命令（命令行不带参数，见 [`ROOT_ENV`]）。
+const LOCAL_RELEASE_ENV: &str = "PRESET_TEST_LOCAL_RELEASE";
+
+/// 本地发布目录里的两份清单（预览通道 / 正式通道各一份）。
+const LOCAL_RELEASE_MANIFESTS: (&str, &str) = ("release-preview.json", "release.json");
 
 /// 测试源的默认端口 —— 与 `scripts/preset-test-server/server.mjs` 同一个值。
 /// 它读 `PRESET_TEST_PORT`（见 [`port_from`]），这里只是那个变量的默认档。
@@ -97,9 +106,15 @@ const MAX_ANCESTOR_HOPS: usize = 32;
 
 /// 测试源端哪一份。
 ///
-/// **只剩一项**（2026-10-30 作者：「我就不需要这些什么测试夹具一夹具二了，就直接是模拟的
-/// 不就可以了吗」）：端**当前交付** —— 你刚生成出来的那一份，于是
-/// 「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通。
+/// **两件事分开摆**：
+///
+/// - [`Self::Delivery`] 端**当前交付** —— 你刚生成出来的那一份，于是
+///   「改参数 → 生成 → 客户端检查更新 → 看到本地新版」这条闭环在本地整条走得通；
+/// - [`Self::LocalRelease`] 叠上**本地发布**那份软件清单 ——
+///   「编一个 .app → local-release → 客户端点更新 → 装完自己回来」这条链在**不发版**的前提下走得通。
+///
+/// 为什么不能合成一项：一个问题问"云端发了新预设吗"，另一个问"云端发了新软件吗"。
+/// 合成一项的话，界面上就再也说不清"客户端看到的这一版是哪一类"。
 ///
 /// 原来那两代夹具是拿真交付根派生的副本，作用就一个：演"云端发了下一版"。现在那一层
 /// 由 [`BUMP_ENV`] 顶掉 —— 同一份真产物，端出去时把发布序号往前拨一格，比夹具更真
@@ -109,6 +124,9 @@ pub enum SourceKind {
     /// **当前交付**：仓库里 `presets/delivery/` 那一份
     #[serde(rename = "delivery")]
     Delivery,
+    /* 只有一条。`target/local-release/` 里有清单时，服务端**自动**叠上那层覆盖
+    （见 [`spawn_server`]）；界面只负责把"叠上了什么、版本是多少"摆出来。
+    有就叠、没有就不叠，不需要人来勾。 */
 }
 
 /// 一份源**端出去时**的样子：服务根在哪、客户端该填哪个地址。
@@ -126,34 +144,342 @@ struct Served {
 
 impl SourceKind {
     /// 服务根与地址的**纯派生**（不碰磁盘，所以测试钉得住）。
+    ///
+    /// 两份**同一个根、同一个地址**：本地发布只是叠在交付根之上的一层覆盖
+    /// （`source.json` / `catalog.json` / 交付文件照旧来自仓库那一份），
+    /// 变的只有 `/delivery/release*.json` 那两份清单。
     fn derive(self, presets_root: &Path) -> Served {
-        match self {
-            SourceKind::Delivery => Served {
-                root: presets_root.to_path_buf(),
-                url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
-            },
+        Served {
+            root: presets_root.to_path_buf(),
+            url: format!("{}/{}", origin(), DELIVERY_SUBDIR),
         }
     }
 
-    /// 「这一份齐了吗」的那个标志文件。不齐**不许起**：服务起得来、底下什么都没有的话，
+    /// 「这一份齐了吗」的那个标志路径。不齐**不许起**：服务起得来、底下什么都没有的话，
     /// 客户端那边只会说"取不到预设数据" —— 那句答案离原因太远。
+    ///
+    /// 本地发布返回的是**目录**（清单是哪一份由 [`Self::ready`] 判，两份都可能只有一份）。
     fn marker(self, served: &Served) -> PathBuf {
-        match self {
-            SourceKind::Delivery => served.root.join(DELIVERY_SUBDIR).join(DELIVERY_MARKER),
-        }
+        served.root.join(DELIVERY_SUBDIR).join(DELIVERY_MARKER)
+    }
+
+    /// 这一份现在能不能端出去。
+    fn ready(self, served: &Served) -> bool {
+        self.marker(served).is_file()
     }
 
     /// 不齐时那句人话：**缺什么 + 怎么补**（界面直接摆，不重写措辞）。
-    fn missing(self, marker: &Path) -> AppError {
-        match self {
-            SourceKind::Delivery => {
-                AppError::invalid_argument(format!("还没有交付产物：{} 不在", marker.display()))
-                    .with_detail(
-                        "在「生成与发布」里点一次生成，端的就是刚生成出来的那一份".to_owned(),
-                    )
-            }
-        }
+    fn missing(self, served: &Served) -> AppError {
+        let marker = self.marker(served);
+        AppError::invalid_argument(format!("还没有交付产物：{} 不在", marker.display()))
+            .with_detail("在「生成与发布」里点一次生成，端的就是刚生成出来的那一份".to_owned())
     }
+}
+
+/// 服务根与地址（**只剩一份**）。
+///
+/// 只有这一条：本地发布那层由 [`spawn_server`] 按"目录里有没有清单"自动叠，
+/// 不给人选 —— 界面只负责把它摊开。
+fn serve(presets_root: &Path) -> Served {
+    SourceKind::Delivery.derive(presets_root)
+}
+
+/// `target/local-release/` —— 本地发布目录（相对**仓库根**，不是预设根）。
+///
+/// 纯派生：`served.root` 是 `presets/`，往上一级就是仓库根。
+fn local_release_dir(served: &Served) -> PathBuf {
+    match served.root.parent() {
+        Some(repo) => repo.join("target").join("local-release"),
+        None => served.root.join("target").join("local-release"),
+    }
+}
+
+/// 交付面上一个真实文件：名字 / 大小 / 在不在 / （清单类）版本号，就这四格。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryFile {
+    pub name: String,
+    /// 盘上实际大小；不存在 = `None`
+    pub size: Option<u64>,
+    pub exists: bool,
+    /// 清单类文件才有的那一格（`release-preview.json` / `release.json` 里的 `version`）
+    pub version: Option<String>,
+}
+
+/// 读一份 JSON 清单里的 `version`（读不出 = `None`，不编）。
+fn json_version(path: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    value.get("version")?.as_str().map(str::to_owned)
+}
+
+/// 仓库里那个**开发版本**（`src-tauri/Cargo.toml` 的 `version`，全仓唯一真值）。
+/// 当前开发版本：读唯一源 `version.toml`。
+fn dev_version(repo: &Path) -> String {
+    std::fs::read_to_string(repo.join("version.toml"))
+        .ok()
+        .and_then(|toml| {
+            toml.lines()
+                .find_map(|line| line.strip_prefix("version = \""))
+                .and_then(|rest| rest.split('"').next())
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| "—".to_owned())
+}
+
+/// **最近一次成功交付**：`git tag` 里最新的预览 tag，且账本里有对应记录。
+///
+/// 两处必须对得上：tag 是冻结事实，账本是交付记录。只有 tag 没账本（事务中断在记账前）
+/// 也照样算数 —— 那时 `frozen=true`、`recorded=false`，界面据此提示"可补记账"。
+struct Delivered {
+    version: String,
+    tag: String,
+    commit: String,
+    at: String,
+    recorded: bool,
+}
+
+fn last_delivered(repo: &Path) -> Option<Delivered> {
+    let out = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["tag", "--sort=-creatordate", "--list", "v*-preview.*"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let tag = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())?
+        .to_owned();
+    let commit = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["rev-parse", &format!("{tag}^{{commit}}")])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())?;
+    let at = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["log", "-1", "--format=%cI", &tag])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned())
+        .unwrap_or_default();
+    let version = tag.trim_start_matches('v').to_owned();
+    let recorded = ledger_has(repo, &version);
+    Some(Delivered {
+        version,
+        tag,
+        commit,
+        at,
+        recorded,
+    })
+}
+
+/// 账本里这一版有没有一条 `ok`。
+fn ledger_has(repo: &Path, version: &str) -> bool {
+    let Ok(text) = std::fs::read_to_string(repo.join("delivery/local-preview-history.json")) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return false;
+    };
+    v.get("items")
+        .and_then(|x| x.as_array())
+        .is_some_and(|items| {
+            items.iter().any(|e| {
+                e.get("version").and_then(|x| x.as_str()) == Some(version)
+                    && e.get("result").and_then(|x| x.as_str()) == Some("ok")
+            })
+        })
+}
+
+/// 本地发布目录里最新的安装包。
+struct Pkg {
+    name: String,
+    size: u64,
+    path: String,
+    version: String,
+}
+
+fn latest_package(served: &Served) -> Option<Pkg> {
+    let dir = local_release_dir(served);
+    let zip = std::fs::read_dir(&dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("zip"))
+        .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())?;
+    let name = zip.file_name()?.to_string_lossy().into_owned();
+    /* 文件名里带版本：`SupportEase_0.0.10-preview.7_aarch64.app.zip` */
+    let version = name
+        .strip_prefix("SupportEase_")
+        .and_then(|rest| rest.split('_').next())
+        .unwrap_or("—")
+        .to_owned();
+    Some(Pkg {
+        size: std::fs::metadata(&zip).ok()?.len(),
+        path: zip.display().to_string(),
+        name,
+        version,
+    })
+}
+
+/// 最近一次**已发布**的号（`git tag --sort=-creatordate --list v*` 的第一条）。
+///
+/// 作者要「最新已发布版本与当前开发版本分别展示」—— 这一格只回答"最后发出去的是谁"。
+fn published_version(repo: &Path) -> Option<String> {
+    let out = Command::new("git")
+        .args(["-C"])
+        .arg(repo)
+        .args(["tag", "--sort=-creatordate", "--list", "v*"])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| line.len() > 1)
+        .map(|line| line.trim_start_matches('v').to_owned())
+}
+
+/// 安装包自己报的版本（`.app/Contents/Info.plist` 的 `CFBundleShortVersionString`）。
+///
+/// 与发布内核里那道 [`super::release_tx`] 的核对是**同一个事实**：包里的号
+/// 才是用户打开"关于"会看到的那个。读不到（没编过 / 不是 macOS）= `None`。
+fn build_version(repo: &Path) -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let app = repo
+        .join("target")
+        .join("release")
+        .join("bundle")
+        .join("macos")
+        .join("SupportEase.app");
+    let plist = app.join("Contents").join("Info.plist");
+    if !plist.is_file() {
+        return None;
+    }
+    let out = Command::new("plutil")
+        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
+        .arg(&plist)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
+/// 交付根里那几件东西 + 本地发布目录里的安装包。
+///
+/// 顺序固定（不按文件名排）：**读的人先看约定俗成的那几份**，再找安装包。
+fn delivery_files(served: &Served, repo: &Path) -> Vec<DeliveryFile> {
+    let delivery = served.root.join(DELIVERY_SUBDIR);
+    let mut files: Vec<DeliveryFile> = [DELIVERY_MARKER, "catalog.json", "manifest.json"]
+        .into_iter()
+        .map(|name| {
+            let path = delivery.join(name);
+            DeliveryFile {
+                name: name.to_owned(),
+                size: std::fs::metadata(&path).ok().map(|m| m.len()),
+                exists: path.is_file(),
+                version: None,
+            }
+        })
+        .collect();
+    /* 两份软件清单：名字 + 版本号（作者最关心的就是这两格） */
+    for name in [LOCAL_RELEASE_MANIFESTS.0, LOCAL_RELEASE_MANIFESTS.1] {
+        let path = delivery.join(name);
+        files.push(DeliveryFile {
+            name: name.to_owned(),
+            size: std::fs::metadata(&path).ok().map(|m| m.len()),
+            exists: path.is_file(),
+            version: json_version(&path),
+        });
+    }
+    /* 本地发布目录里那份清单：服务端**优先端它**（覆盖交付根里那份），
+    所以它才是"客户端会看到哪一版"的答案。 */
+    let overlay = local_release_dir(served).join(LOCAL_RELEASE_MANIFESTS.0);
+    if overlay.is_file() {
+        files.push(DeliveryFile {
+            name: format!("本地发布清单（{}）", LOCAL_RELEASE_MANIFESTS.0),
+            size: std::fs::metadata(&overlay).ok().map(|m| m.len()),
+            exists: true,
+            version: json_version(&overlay),
+        });
+    }
+    /* 安装包：本地发布目录里最新的那一份 zip（没有就没有，不摆假行） */
+    let dir = local_release_dir(served);
+    if let Some(zip) = std::fs::read_dir(&dir).ok().and_then(|rd| {
+        rd.flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("zip"))
+            .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+    }) {
+        files.push(DeliveryFile {
+            name: zip
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "安装包".to_owned()),
+            size: std::fs::metadata(&zip).ok().map(|m| m.len()),
+            exists: true,
+            version: None,
+        });
+    }
+    let _ = repo;
+    files
+}
+
+/// 本地发布目录里那两份清单（`release-preview.json` / `release.json`），有的才给。
+fn local_manifests(served: &Served) -> impl Iterator<Item = (String, PathBuf)> {
+    let dir = local_release_dir(served);
+    [LOCAL_RELEASE_MANIFESTS.0, LOCAL_RELEASE_MANIFESTS.1]
+        .into_iter()
+        .map(move |n| (n.to_owned(), dir.join(n)))
+        .filter(|(_, p)| p.is_file())
+}
+
+/// 「这个目录里到底有什么」：版本号与安装包个数。
+///
+/// 回一段能直接摆到界面上的字：每份清单的**版本号** + 安装包个数。
+/// 读不出 / 不存在都照实说，不编一个版本号。
+fn local_release_digest(served: &Served) -> String {
+    let dir = local_release_dir(served);
+    let mut rows: Vec<String> = Vec::new();
+    for (name, path) in local_manifests(served) {
+        let version = std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+            .and_then(|v| v.get("version").and_then(|x| x.as_str()).map(str::to_owned));
+        rows.push(match version {
+            Some(v) => format!("{name} → {v}"),
+            None => format!("{name}（读不出版本号）"),
+        });
+    }
+    if rows.is_empty() {
+        return format!(
+            "{} 里还没有清单 —— 先跑 npm run local-release",
+            dir.display()
+        );
+    }
+    let zips = std::fs::read_dir(&dir)
+        .map(|rd| {
+            rd.flatten()
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("zip"))
+                .count()
+        })
+        .unwrap_or(0);
+    format!("{}：{} · 安装包 {zips} 个", dir.display(), rows.join("，"))
 }
 
 /// 界面上那三行单选，一行一份。**名字与说法由后端给**（界面不自己拼一套措辞），
@@ -203,8 +529,30 @@ pub struct DevSourceStatus {
     /// **起之前该处理掉的占用者**（不在跑的时候才有）：8787 被别人占着的话，
     /// 点「启动」必死在那上面。空 = 端口干净
     pub conflicts: Vec<PortConflict>,
-    /// 三行单选：每一份的名字 / 在哪儿 / 填什么地址 / 齐没齐
+    /// 那一行（只有「当前交付」一条，不是选项：界面照着摆状态即可）
     pub sources: Vec<SourceOption>,
+
+    /* ---------- 版本身份：每格报自己的真实身份 ---------- */
+    /// 仓库里的开发版本（`src-tauri/Cargo.toml`，全仓唯一真值）
+    pub dev_version: String,
+    /// 最近一次已发布的号（`git tag`）
+    pub published_version: Option<String>,
+    /// 安装包自己报的版本（`.app/Contents/Info.plist`）；没编过 = `None`
+    pub build_version: Option<String>,
+
+    /* ---------- 主区三格（界面只看这三件） ---------- */
+    /// 当前开发版本（`version.toml`）
+    pub dev_version_text: String,
+    /// 最近一次成功交付；`None` = 还没交付过
+    pub last_delivered: Option<DeliveredDto>,
+    /// 最新的本地安装包（生成过就有，**不代表已交付**）
+    pub package: Option<PackageDto>,
+
+    /* ---------- 折叠详情 ---------- */
+    /// 盘上有什么（不摆假行：不存在就 exists=false）
+    pub files: Vec<DeliveryFile>,
+    /// 三格版本身份 + 结论。**判定在后端**，前端只按 `level` 上色
+    pub checks: Vec<CheckRow>,
 }
 
 /// 谁占着那个关键端口。**摆给人看的**（`text` 是那句人话）+
@@ -288,9 +636,16 @@ fn spawn_server(repo: &Path, served: &Served) -> Result<Child, AppError> {
     cmd.args(["run", NPM_SCRIPT])
         .current_dir(repo)
         .env(ROOT_ENV, &served.root)
-        .env(BUMP_ENV, "1")
-        /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
-        .stdout(Stdio::inherit())
+        .env(BUMP_ENV, "1");
+    /* **有就叠，不问人**：
+    `target/local-release/` 里有清单 ⇒ `/delivery/release*.json` 换成那份；
+    没有 ⇒ 什么都不做，客户端看到的就是已发布的那一版。
+    服务根不变 —— 覆盖的是那两份清单，不是目录。 */
+    if local_manifests(served).next().is_some() {
+        cmd.env(LOCAL_RELEASE_ENV, "1");
+    }
+    /* 输出继承下去：服务与客户端 dev 的日志就打在起工作台的那个终端里 */
+    cmd.stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         /* stdin 给 null：父子都在读 stdin 的话，敲键归谁就成了碰运气
         （`tauri dev` 自己也读 stdin 做热重载） */
@@ -465,8 +820,8 @@ fn conflicts_of() -> Vec<PortConflict> {
 
 /// 「不齐」那句话说全（缺什么 + 怎么补）——给界面直接摆，不重写措辞。
 impl SourceKind {
-    fn missing_sentence(self, marker: &Path) -> String {
-        let e = self.missing(marker);
+    fn missing_sentence(self, served: &Served) -> String {
+        let e = self.missing(served);
         match e.detail {
             Some(d) => format!("{} —— {d}", e.message),
             None => e.message,
@@ -479,31 +834,34 @@ impl SourceKind {
 /// ★ 现算：每一行都从**当前预设根**推出来 —— 根一变，这一行的地址与"齐没齐"
 /// 立刻就是新的读数，界面不必自己推一遍。
 ///
-/// 2026-10-30 起只有一行（夹具已退役，见 [`SourceKind`]）—— 但仍按"列表"给，
-/// 界面那套单选不用为一个选项另写一版。
+/// 只有一行 —— 但仍按"列表"给，界面那套渲染不用为一个选项另写一版。
 fn sources_of(_repo: &Path) -> Vec<SourceOption> {
     let presets = crate::workbench::paths::presets_root_path();
     [SourceKind::Delivery]
         .into_iter()
         .map(|kind| {
             let served = kind.derive(&presets);
-            let marker = kind.marker(&served);
-            let ready = marker.is_file();
-            let (label, note) = match kind {
-                SourceKind::Delivery => (
-                    "当前交付",
-                    "端你生成出来的那一份。端出去时发布序号自动 +1 \
-                     —— 客户端那边看到的就是「云端发了下一版」，和真发布一样",
-                ),
+            let ready = kind.ready(&served);
+            let label = "当前交付";
+            /* 本地发布不再是一行选项：有就自动叠，这里把"叠上了什么"说清楚 */
+            let overlay = match local_manifests(&served).next() {
+                Some(_) => format!("；已自动叠上本地发布（{}）", local_release_digest(&served)),
+                None => "；本地发布目录里没有清单（客户端只会看到已发布的那一版）".to_owned(),
             };
+            let base = format!(
+                "端你生成出来的那一份。端出去时发布序号自动 +1 \
+                 —— 客户端那边看到的就是「云端发了下一版」，和真发布一样{overlay}"
+            );
+            /* 先算完 missing 再搬 `served.url`：`missing_sentence` 还要借 `served` */
+            let missing = (!ready).then(|| kind.missing_sentence(&served));
             SourceOption {
                 kind,
                 label: label.to_owned(),
-                note: note.to_owned(),
+                note: base,
                 root: served.root.display().to_string(),
                 url: served.url,
                 ready,
-                missing: (!ready).then(|| kind.missing_sentence(&marker)),
+                missing,
             }
         })
         .collect()
@@ -557,7 +915,97 @@ fn exit_text(st: ExitStatus) -> String {
     }
 }
 
+/// `dev_source::DeliveredDto` —— 最近一次成功交付（tag 是冻结事实，账本是交付记录）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveredDto {
+    pub version: String,
+    pub tag: String,
+    pub commit: String,
+    pub at: String,
+    /// 账本里有没有这一版的 `ok`（false = tag 打了但没记账，可补）
+    pub recorded: bool,
+}
+
+/// `dev_source::PackageDto` —— 最新的本地安装包。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageDto {
+    pub name: String,
+    pub size: u64,
+    pub path: String,
+    /// 文件名里的版本
+    pub version: String,
+    /// 这一版**有没有 tag**。false ⇒ 只是生成过，**不算已交付**
+    pub frozen: bool,
+}
+
+/// 一条**结构化诊断**：哪一项 / 读到什么 / 要不要管。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckRow {
+    pub item: String,
+    pub value: String,
+    /// `ok` / `warn` / `error` —— 界面只按这一格上色，不重算
+    pub level: String,
+}
+
+/// 三格版本身份 + 结论。**判定只在这里做一次**，前端不重算。
+///
+/// ★ **三个号不一样是正常的**（作者那张表写得很清楚）：
+/// 仓库 `preview.6` / 已交付 `preview.5` / 客户端 `preview.5` —— 这叫"正在开发下一轮"，
+/// **不许**报成错误。真问题只有一条：**清单与安装包不是同一轮** ——
+/// 那会让客户端以为装上了新版本，实际装的是旧包。
+/// 客户端**实际会拿到**的那一版软件清单。
+///
+/// 服务端优先端 `target/local-release/` 里那份（覆盖层），没有覆盖层才用交付根里那份。
+/// 读错地方会让"本地已交付"永远停在已发布的那一版，并和包内版本互相对不上。
+fn delivered_version(served: &Served) -> Option<String> {
+    let overlay = local_release_dir(served).join(LOCAL_RELEASE_MANIFESTS.0);
+    if overlay.is_file() {
+        return json_version(&overlay);
+    }
+    json_version(
+        &served
+            .root
+            .join(DELIVERY_SUBDIR)
+            .join(LOCAL_RELEASE_MANIFESTS.0),
+    )
+}
+
+fn version_checks(served: &Served, dev: &str, build: Option<&str>) -> Vec<CheckRow> {
+    let delivered = delivered_version(served);
+    let mut rows = vec![CheckRow {
+        item: "仓库开发版本".to_owned(),
+        value: dev.to_owned(),
+        level: "ok".to_owned(),
+    }];
+    rows.push(CheckRow {
+        item: "本地已交付".to_owned(),
+        value: delivered.clone().unwrap_or_else(|| "还没交付过".to_owned()),
+        level: if delivered.is_some() { "ok" } else { "warn" }.to_owned(),
+    });
+    rows.push(CheckRow {
+        item: "安装包自报".to_owned(),
+        value: build.unwrap_or("还没编过").to_owned(),
+        level: if build.is_some() { "ok" } else { "warn" }.to_owned(),
+    });
+    if let (Some(d), Some(b)) = (&delivered, &build) {
+        if d != b {
+            rows.push(CheckRow {
+                item: "清单与安装包不是同一轮".to_owned(),
+                value: format!("清单 {d} · 安装包 {b}"),
+                level: "error".to_owned(),
+            });
+        }
+    }
+    rows
+}
+
 fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
+    let served = serve(&crate::workbench::paths::presets_root_path());
+    let dev = dev_version(repo);
+    let build = build_version(repo);
     DevSourceStatus {
         running: false,
         pid: None,
@@ -570,6 +1018,37 @@ fn base_status(repo: &Path, note: Option<String>) -> DevSourceStatus {
         /* 不在跑的时候才探端口：跑着的时候 8787 本来就是我们自己占着 */
         conflicts: conflicts_of(),
         sources: sources_of(repo),
+        dev_version: dev.clone(),
+        dev_version_text: dev.clone(),
+        last_delivered: last_delivered(repo).map(|d| DeliveredDto {
+            version: d.version,
+            tag: d.tag,
+            commit: d.commit,
+            at: d.at,
+            recorded: d.recorded,
+        }),
+        package: latest_package(&served).map(|p| {
+            /* "已冻结"问 tag，不问交付记录：tag 才是冻结事实 */
+            let frozen = Command::new("git")
+                .args(["-C"])
+                .arg(repo)
+                .args(["rev-parse", "--verify", "--quiet"])
+                .arg(format!("refs/tags/v{}^{{commit}}", p.version))
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            PackageDto {
+                name: p.name,
+                size: p.size,
+                path: p.path,
+                version: p.version,
+                frozen,
+            }
+        }),
+        published_version: published_version(repo),
+        build_version: build.clone(),
+        files: delivery_files(&served, repo),
+        checks: version_checks(&served, &dev, build.as_deref()),
     }
 }
 
@@ -610,19 +1089,7 @@ fn refresh_exit(cur: &mut DevSource) {
 
 /* ---------- 命令 ---------- */
 
-/// 等它真的走（最多 `timeout`）。**有界**：等不到就往下走 —— 端口那一眼会如实
-/// 报出"还占着"，而不是把界面卡在这儿。
-fn wait_gone(child: &mut Child, timeout: Duration) {
-    let deadline = Instant::now() + timeout;
-    while Instant::now() < deadline {
-        if !matches!(child.try_wait(), Ok(None)) {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-/// 起本地测试源（= `npm run preset-source:dev`，**只起服务**），端 `source` 那一份。
+/// 起本地测试源（= `npm run preset-source:dev`，**只起服务**），端当前交付。
 ///
 /// **同一份幂等**：已经在跑的就是它，那就不动，把现状报回去 —— 第二份会撞在 8787 上，
 /// 然后那个进程静悄悄地死掉，而人以为自己点了两下、起了两个。
@@ -637,37 +1104,25 @@ fn wait_gone(child: &mut Child, timeout: Duration) {
 /// PID 多少）交出去，界面据此摆出「停掉它」那颗按钮 —— 而不是硬起、让它撞死在那里、
 /// 只留一句"退出码 1"。
 #[tauri::command]
-pub fn wb_dev_source_start(source: SourceKind) -> Result<DevSourceStatus, AppError> {
+pub fn wb_dev_source_start() -> Result<DevSourceStatus, AppError> {
     crate::ipc::traced("wb_dev_source_start", |_| {
         let repo = crate::workbench::paths::repo_root();
         let presets = crate::workbench::paths::presets_root_path();
+        /* 只剩一条路：端当前交付。本地发布那层按"目录里有没有清单"自动叠 */
+        let source = SourceKind::Delivery;
         let served = source.derive(&presets);
-        let marker = source.marker(&served);
-        if !marker.is_file() {
-            return Err(source.missing(&marker));
+        if !source.ready(&served) {
+            return Err(source.missing(&served));
         }
 
         let mut guard = slot().lock().unwrap_or_else(|e| e.into_inner());
 
-        /* 手上那一份还在跑的：同一份 → 幂等；换了源 → 先整棵收掉 */
-        let stale = match guard.as_mut() {
-            Some(cur) => {
-                refresh_exit(cur);
-                if cur.running_now() {
-                    if cur.source == source {
-                        return Ok(status_of(cur, &repo));
-                    }
-                    Some(cur.pid)
-                } else {
-                    None
-                }
-            }
-            None => None,
-        };
-        if let Some(pid) = stale {
-            kill_process_tree(pid);
-            if let Some(mut cur) = guard.take() {
-                wait_gone(&mut cur.child, Duration::from_secs(5));
+        /* 已经在跑就是它 —— 幂等返回现状（没有"换源"这回事：
+        只剩一条：端当前交付） */
+        if let Some(cur) = guard.as_mut() {
+            refresh_exit(cur);
+            if cur.running_now() {
+                return Ok(status_of(cur, &repo));
             }
         }
 
@@ -722,8 +1177,7 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         "我杀掉的那个"和"刚好新起来的另一个" */
         let _ = cur.child.kill();
         /* ★ **不报退出码**：这一下是**我们**按的信号，那个码只是终止的结果，
-        摆到人眼前会被读成"出错了"（2026-10-08 烟测里读出来的原话：
-        「已停（它退出了（退出码 1）—— 刚才终端里那几条日志是原因）」）。
+        摆到人眼前会被读成"出错了"（「已停（它退出了（退出码 1）……）」。
         该说的是"端口让出来没有"——那才是人关心的那一件事 */
         let note = match cur.child.wait() {
             Ok(_) => {
@@ -745,6 +1199,36 @@ pub fn wb_dev_source_stop() -> Result<DevSourceStatus, AppError> {
         };
         tracing::info!(pid = cur.pid, "本地测试源已停（端口让出来了）");
         Ok(base_status(&repo, Some(note)))
+    })
+}
+
+/// **在文件管理器里打开一个目录**（界面上那颗「打开交付目录」）。
+///
+/// 只接受**已经存在**的目录：路径是从后端 DTO 里带回来的那一串，界面没有理由
+/// 自己拼；真不存在时如实拒绝，而不是让 `open` 在系统里弹一句看不懂的话。
+#[tauri::command]
+pub fn wb_open_path(path: String) -> Result<(), AppError> {
+    crate::ipc::traced("wb_open_path", |_| {
+        let p = PathBuf::from(&path);
+        if !p.is_dir() {
+            return Err(AppError::invalid_argument(format!(
+                "这个目录不在：{}",
+                p.display()
+            )));
+        }
+        #[cfg(target_os = "macos")]
+        let opener = "open";
+        #[cfg(target_os = "windows")]
+        let opener = "explorer";
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let opener = "xdg-open";
+        Command::new(opener)
+            .arg(&p)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| AppError::io("打不开文件管理器").with_detail(e.to_string()))?;
+        Ok(())
     })
 }
 
@@ -1036,13 +1520,13 @@ mod tests {
         );
     }
 
-    /// 不齐时那句人话要**指对方向**：交付产物缺了就去点「生成」。
+    /// 不齐时那句人话要**指对方向**：交付产物缺了就去点「生成」，
+    /// 本地发布缺了就去跑 `npm run local-release`。
     #[test]
     fn a_source_that_is_not_ready_says_how_to_make_it_ready() {
         let presets = Path::new("/tmp/repo/presets");
         let served = SourceKind::Delivery.derive(presets);
-        let delivery = SourceKind::Delivery
-            .missing_sentence(&served.root.join("delivery").join(DELIVERY_MARKER));
+        let delivery = SourceKind::Delivery.missing_sentence(&served);
         assert!(delivery.contains("生成"), "实测：{delivery}");
         assert!(
             !delivery.contains("preset-source:make"),
@@ -1050,15 +1534,65 @@ mod tests {
         );
     }
 
+    /// 盘上没有的东西**照实说没有**，不许摆一行"存在"（作者要的是真实状态）。
+    #[test]
+    fn missing_files_are_reported_as_missing() {
+        let repo = Path::new("/tmp/nonexistent-repo-for-mkpse");
+        let served = serve(&repo.join("presets"));
+        let files = delivery_files(&served, repo);
+        assert!(
+            files.iter().all(|f| !f.exists && f.size.is_none()),
+            "一个都不存在：{files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f.name == "catalog.json"),
+            "该列的那几份照列，只是状态为不存在"
+        );
+        assert!(
+            files
+                .iter()
+                .any(|f| f.name == LOCAL_RELEASE_MANIFESTS.0 && f.version.is_none()),
+            "读不出版本就别编一个"
+        );
+    }
+
+    /// 版本对不上要**把两个号都写出来**（作者：「你这都是 0.0.4 了，里面还显示 0.0.3」）。
+    #[test]
+    fn a_version_mismatch_is_spelled_out() {
+        let d = tempfile::tempdir().unwrap();
+        let presets = d.path().join("presets");
+        std::fs::create_dir_all(presets.join("delivery")).unwrap();
+        crate::fsx::atomic::atomic_write(
+            &presets.join("delivery").join(LOCAL_RELEASE_MANIFESTS.0),
+            br#"{"version":"0.0.10-preview.5"}"#,
+        )
+        .unwrap();
+        let served = serve(&presets);
+
+        let rows = version_checks(&served, "0.0.10-preview.6", Some("0.0.10-preview.3"));
+        assert!(
+            rows.iter().any(|r| r.level == "error"
+                && r.value.contains("0.0.10-preview.5")
+                && r.value.contains("0.0.10-preview.3")),
+            "两个号都要出现在那条 error 里：{rows:?}"
+        );
+
+        /* **开发版本领先不算错**：仓库 6 / 已交付 5 / 包内 5 是常态 */
+        let normal = version_checks(&served, "0.0.10-preview.6", Some("0.0.10-preview.5"));
+        assert!(
+            normal.iter().all(|r| r.level != "error"),
+            "只是轮到下一轮，不许报错：{normal:?}"
+        );
+    }
+
     /// 那一行：**名字与说法由后端给**，带根与地址、齐没齐都说得出
     /// （界面不自己拼一套措辞，也就不存在"两处说法不一样"）。
     ///
-    /// 2026-10-30 起只剩「当前交付」一行（夹具退役）—— 但接口仍是列表，
-    /// 界面那套单选不用为一个选项另写一版。
+    /// 只剩「当前交付」这一项，说法里要把**本地发布叠没叠上**讲清楚。
     #[test]
     fn the_row_is_told_by_the_backend() {
         let rows = sources_of(Path::new("/tmp/repo"));
-        assert_eq!(rows.len(), 1, "只剩「当前交付」这一份");
+        assert_eq!(rows.len(), 1, "只剩「当前交付」，没有可选项");
         assert_eq!(rows[0].kind, SourceKind::Delivery);
         for r in &rows {
             assert!(!r.label.is_empty() && !r.note.is_empty(), "{:?}", r.kind);
@@ -1075,6 +1609,12 @@ mod tests {
         assert!(
             rows[0].note.contains("+1"),
             "要说清端出去时序号自动 +1（否则人会以为客户端那边不该有新版）：{}",
+            rows[0].note
+        );
+        /* ★ 本地发布叠没叠上必须写在同一句话里（作者卡的就是"看不出服务端给的是谁"） */
+        assert!(
+            rows[0].note.contains("本地发布"),
+            "要把本地发布那一层说清楚：{}",
             rows[0].note
         );
     }
@@ -1110,7 +1650,7 @@ mod tests {
     }
 
     /// 报给界面的那条命令与真起的那条是同一个（界面不自己拼一遍，也就不该漂）——
-    /// **而且是"只起服务"的那一条**（作者 2026-10-08 裁决：别去动客户端）
+    /// **而且是"只起服务"的那一条**
     #[test]
     fn the_reported_command_is_the_one_we_spawn() {
         let st = base_status(Path::new("/tmp/repo"), None);
@@ -1119,7 +1659,9 @@ mod tests {
         assert!(!st.running && st.pid.is_none());
         /* 从没起过：不谎报"端的是哪一份"（免得界面把某一行当成"正在端"） */
         assert!(st.source.is_none() && st.source_root.is_empty());
-        assert_eq!(st.sources.len(), 1, "夹具退役后只剩「当前交付」这一行");
+        assert_eq!(st.sources.len(), 1, "只剩「当前交付」，没有可选项");
+        /* 版本那三格必须**永远有话说**：开发版本读不到就写「—」，不许空着 */
+        assert!(!st.dev_version.is_empty(), "开发版本那一格不许空");
     }
 
     /// **序号 +1 这个开关的名字得是 `server.mjs` 真读的那个** —— 与 `ROOT_ENV` 同一条理由：

@@ -1,0 +1,245 @@
+/*
+ * 交付检查与修复（②）独有的那几块：问题清单、分类 chip、详细差异开关、SHA 对照。
+ *
+ * 左右分栏（清单 / 详情）**不在这里**：直接复用 `DeliveryFilesModal.module.css`
+ * 那一套（同一个框、同一副长相），不另造第二套清单样式。行级 diff 本体仍在
+ * `DiffView.module.css`。
+ */
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: min(76vh, 760px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.summaryOk {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--w-diff-add-ink);
+}
+
+.summaryTodo {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--w-warn);
+}
+
+/* ---------- 问题清单 ---------- */
+
+.issues {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.issue {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--w-line);
+  border-radius: var(--w-r-card);
+  background: var(--w-card-inner);
+}
+
+.issueTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--w-t1);
+}
+
+.issueDetail {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--w-t2);
+}
+
+.issueFiles {
+  grid-column: 1 / -1;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--w-t3);
+  word-break: break-all;
+}
+
+.issueAction {
+  align-self: start;
+}
+
+/* 按钮 + 禁用原因竖排：原因必须贴在这颗按钮旁边，不能只活在 tooltip 里
+   （禁用的按钮弹不出 tooltip），也不能挪到列表最底下那句话里 */
+.actionRow {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.actionWhy {
+  max-width: 240px;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--w-warn);
+  text-align: right;
+}
+
+/* 分类 chip：可修 / 需处理源 / 身份 / 只是口径差异 */
+.chip {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--w-t3);
+}
+
+.chipFixable {
+  border-color: var(--w-primary);
+  color: var(--w-primary);
+}
+
+.chipSource {
+  border-color: var(--w-warn);
+  color: var(--w-warn);
+}
+
+.chipIdentity {
+  border-color: var(--dep-red-line);
+  color: var(--danger-ink);
+}
+
+/* ---------- 详细差异 ---------- */
+
+.disclosure {
+  align-self: flex-start;
+  padding: 3px 10px;
+  border: 1px solid var(--w-line-strong);
+  border-radius: var(--w-r-btn, 6px);
+  background: var(--w-card);
+  font: inherit;
+  font-size: 12px;
+  color: var(--w-t2);
+  cursor: pointer;
+}
+
+.disclosure:hover {
+  color: var(--w-t1);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--w-t2);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kvRow {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--w-t2);
+}
+
+.kvRow > span {
+  flex: none;
+  width: 96px;
+  color: var(--w-t3);
+}
+
+.kvRow > b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ok {
+  color: var(--w-diff-add-ink);
+}
+
+.warn {
+  color: var(--w-warn);
+}
+
+.bad {
+  color: var(--danger-ink);
+}
+
+.note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--w-t3);
+}
+
+/* 新旧 SHA 对照：等宽、可换行（64 位十六进制在窄框里不许撑破） */
+.shaRow {
+  display: flex;
+  gap: 10px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--w-t2);
+}
+
+.shaRow > span {
+  flex: none;
+  width: 96px;
+  color: var(--w-t3);
+}
+
+.sha {
+  word-break: break-all;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+.empty {
+  margin: 0;
+  padding: 16px 14px;
+  font-size: 12.5px;
+  color: var(--w-t3);
+}
+
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--dep-red-line);
+  border-radius: var(--w-r-card);
+  background: var(--danger-surface);
+  font-size: 12.5px;
+  color: var(--danger-ink);
+}
+
+/* 逐条失效原因（`planError` 那一档才会展开；能算出 manifest 时列表已经说清了） */
+.reasons {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--w-t2);
+}

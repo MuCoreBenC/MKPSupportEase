@@ -484,6 +484,36 @@ pub fn run(
     hosting: Option<&dyn Hosting>,
     release: Option<&ReleaseChannel<'_>>,
 ) -> Result<ReleaseTxReport, AppError> {
+    let res = run_inner(repo_root, opts, target, hosting, release);
+
+    /* **成功与失败都记一笔**：失败时只有 `Err` 一句话，事后想不起"上次停在哪一版"。
+    记录落在 `target/` 下（git 看不见）—— 它是运行痕迹，不是发布产物。 */
+    let version = match &res {
+        Ok(r) => r.version.clone(),
+        Err(_) => version::app_version(repo_root).unwrap_or_default(),
+    };
+    let entry = TxJournalEntry {
+        at: crate::workbench::clock::now_iso8601(),
+        tag: tag_of(&version),
+        version,
+        commit: Git::open(repo_root).head_short().unwrap_or_default(),
+        stage: match &res {
+            Ok(r) => format!("{:?}", r.stage),
+            Err(_) => "failed".to_owned(),
+        },
+        ok: res.is_ok(),
+    };
+    journal_append(repo_root, &entry);
+    res
+}
+
+fn run_inner(
+    repo_root: &Path,
+    opts: &ReleaseOptions,
+    target: Option<&PublishTarget>,
+    hosting: Option<&dyn Hosting>,
+    release: Option<&ReleaseChannel<'_>>,
+) -> Result<ReleaseTxReport, AppError> {
     /* ⓪ **没有人类当次确认 = 不许真发版**（2026-11-05 硬约束）。
      * 放在所有写盘 / 打 tag / 建 Release / 联网之前，零副作用。预演不要确认。 */
     if !opts.dry_run && !opts.confirmed {
@@ -562,6 +592,20 @@ pub fn run(
         blocked.push(format!(
             "tag `{tag}` 已经存在。换一个版本号，或先确认那一版发到哪了"
         ));
+    }
+    /* **tag 存在 ⇒ 必须指向当前 HEAD。**
+    续跑会沿用那个 tag、却从当前工作区构建；两者不是同一笔提交时，
+    新代码的包就会被挂到旧 tag 的 Release 上 —— 版本号还一样，事后查不出来。
+    `Taken` 已经报过更准的那句，这里不重复。 */
+    if slot != ReleaseSlot::Taken {
+        if let Some((at_tag, at_head)) = frozen_elsewhere(&git, &tag) {
+            blocked.push(format!(
+                "tag `{tag}` 指向 {}，当前 HEAD 是 {} —— 这一版冻结在另一笔提交上：\
+                 切回那笔提交再续跑，或换一个版本号",
+                short_sha(&at_tag),
+                short_sha(&at_head),
+            ));
+        }
     }
     let append = slot == ReleaseSlot::Append;
     // 版本派生不一致 = 有人手改了别处。给了新版本号的话 `bump` 会把它推平，
@@ -862,7 +906,39 @@ pub fn run(
         report.summary.push_str("（本次不构建安装包）");
         return Ok(report);
     }
+    /* **续跑只能补完已经冻结的那一版**：tag 在 ⇒ 它指向的提交就是这一版的代码，
+    而构建用的是当前工作区。预检里已经拦过一次，这里再核一次 ——
+    预检与构建之间工作区可能被动过。 */
+    let frozen_commit = match frozen_elsewhere(&git, &tag) {
+        Some((at_tag, at_head)) => {
+            return Err(AppError::invalid_argument(format!(
+                "{tag} 指向 {}，当前 HEAD 是 {} —— 这一版冻结在另一笔提交上，\
+                 不能拿现在的代码去补它的安装包；切回那笔提交续跑，或换一个版本号",
+                short_sha(&at_tag),
+                short_sha(&at_head),
+            )))
+        }
+        None => git
+            .tag_exists(&tag)?
+            .then(|| git.rev_parse(&format!("refs/tags/{tag}^{{commit}}")))
+            .transpose()?,
+    };
     let built = build_installer(repo_root)?;
+    /* ★ **构建完先问一遍产物自己是谁**（2026-11-06 作者：「你这都是 0.0.4 了，
+    里面还显示 0.0.3，那不是很不合理吗？」）。核对不过就停在 Built 之前 ——
+    不建 Release、不上传、不写清单：宁可这一趟失败，也不发一个"名不副实"的包。 */
+    assert_artifact_speaks_version(repo_root, &version)?;
+    /* 构建期间 HEAD 被切走 ⇒ 这个包已经不是冻结提交的产物了，不往上挂 */
+    if let Some(frozen) = &frozen_commit {
+        let now = git.rev_parse("HEAD")?;
+        if &now != frozen {
+            return Err(AppError::invalid_argument(format!(
+                "构建期间 HEAD 从 {} 变成了 {} —— 这个安装包不是冻结提交的产物，不往上挂",
+                short_sha(frozen),
+                short_sha(&now),
+            )));
+        }
+    }
     report.artifact = Some(ArtifactInfo {
         name: built.name.clone(),
         size: built.size,
@@ -1125,6 +1201,61 @@ struct BuiltArtifact {
 ///
 /// ★ 产物**只认 `bundle/<本平台目录>` 下的唯一一份**：找到 0 份如实报（不猜别的目录），
 /// 找到多份也如实报（让人自己决定哪一份）—— "挑一个"这种事不该由程序偷偷做。
+/// **包里自报的版本必须就是这一次要发的号。**
+///
+/// 为什么非核不可：`APP_VERSION` 是 `env!("CARGO_PKG_VERSION")` —— **编译期**常量。
+/// 改了 `Cargo.toml` 却没重编，包里那个号还是旧的，而 tag / Release / 清单报的是新的。
+/// 发出去之后，"用户看到的版本"与"发布记录里的版本"永远对不上，而且**没有任何一处会报错**
+/// —— 作者 2026-11-06 说的"你这都是 0.0.4 了，里面还显示 0.0.3"正是这个。
+///
+/// 读的是 `.app/Contents/Info.plist` 的 `CFBundleShortVersionString`：Tauri 打包时从
+/// `tauri.conf.json` 取，那一处由内核从 `Cargo.toml` 派生 —— 三者本该相等。
+#[cfg(target_os = "macos")]
+fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
+    let dir = bundle_dir(repo_root, "macos").ok_or_else(|| {
+        AppError::io("找不到 .app（构建说成功，但 bundle/macos 下什么都没有）")
+            .with_detail(bundle_candidates_text(repo_root, "macos"))
+    })?;
+    let app = std::fs::read_dir(&dir)
+        .ok()
+        .and_then(|rd| {
+            rd.flatten()
+                .map(|e| e.path())
+                .find(|p| p.extension().and_then(|s| s.to_str()) == Some("app"))
+        })
+        .ok_or_else(|| AppError::io(format!("{} 下没有 .app", dir.display())))?;
+    let plist = app.join("Contents").join("Info.plist");
+    let out = std::process::Command::new("plutil")
+        .args(["-extract", "CFBundleShortVersionString", "raw", "-o", "-"])
+        .arg(&plist)
+        .output()
+        .map_err(|e| AppError::io("读不了包里的 Info.plist").with_detail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(AppError::io("包里没有 CFBundleShortVersionString")
+            .with_detail(String::from_utf8_lossy(&out.stderr).trim().to_owned()));
+    }
+    let got = String::from_utf8_lossy(&out.stdout).trim().to_owned();
+    if got != want {
+        return Err(AppError::invalid_argument(format!(
+            "包内自报 {got}，这次要发的是 {want} —— 两个号不是同一个，发出去就对不上账"
+        ))
+        .with_detail(
+            "多半是改了版本号却没重新编译（`APP_VERSION` 是编译期常量）。\
+             重编一份再发：npm run tauri -- build"
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+/// Windows：`exe` 的版本资源这一刀不动（那边由 NSIS 安装器与 Release 说明保证），
+/// 保留同名空实现，让调用点不必再写一遍平台分支。
+#[cfg(not(target_os = "macos"))]
+fn assert_artifact_speaks_version(repo_root: &Path, want: &str) -> Result<(), AppError> {
+    let _ = (repo_root, want);
+    Ok(())
+}
+
 fn build_installer(repo_root: &Path) -> Result<BuiltArtifact, AppError> {
     let plan = installer_plan().ok_or_else(|| {
         AppError::invalid_argument(format!(
@@ -1412,6 +1543,61 @@ fn commit_suffix(commit: Option<&str>) -> String {
         Some(c) => format!(" {c}"),
         None => String::new(),
     }
+}
+
+/// 软件发版的事务记录（成功与失败都留），落在 `target/release/journal.json`。
+///
+/// 它回答"上一趟停在哪一版、有没有跑完"，**不参与**判断"这一版发过没有" ——
+/// 那件事由 tag 与 Release 回答。
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TxJournalEntry {
+    pub at: String,
+    pub version: String,
+    pub tag: String,
+    pub commit: String,
+    /// `started` / 具体 stage / `failed`
+    pub stage: String,
+    pub ok: bool,
+}
+
+/// 追加一条事务记录（保留最近 30 条；只追加，不改写历史条目）。
+fn journal_append(repo: &Path, entry: &TxJournalEntry) {
+    let path = repo.join("target").join("release").join("journal.json");
+    let mut all: Vec<TxJournalEntry> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok())
+        .unwrap_or_default();
+    all.push(entry.clone());
+    if all.len() > 30 {
+        let cut = all.len() - 30;
+        all.drain(..cut);
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(text) = serde_json::to_string_pretty(&all) {
+        let _ = crate::fsx::atomic::atomic_write(&path, text.as_bytes());
+    }
+}
+
+/// **这一版冻结在别的提交上**吗？`Some((tag 的提交, 当前 HEAD))` 表示是。
+///
+/// 续跑会沿用已存在的 tag、却从**当前工作区**构建 —— 两者不是同一笔提交时，
+/// 就会把新代码的包装到旧 tag 的 Release 上（版本号一样，事后查不出来）。
+/// 预检与事务共用这一份判断。
+fn frozen_elsewhere(git: &Git, tag: &str) -> Option<(String, String)> {
+    if !git.tag_exists(tag).ok()? {
+        return None;
+    }
+    let at_tag = git.rev_parse(&format!("refs/tags/{tag}^{{commit}}")).ok()?;
+    let at_head = git.rev_parse("HEAD").ok()?;
+    (at_tag != at_head).then_some((at_tag, at_head))
+}
+
+/// 短 sha（7 位）—— 只用于**给人看**的报错文案。
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(7).collect()
 }
 
 fn tag_points_at_head(git: &Git, tag: &str) -> bool {
@@ -2138,13 +2324,16 @@ pub async fn wb_release_software(
 }
 
 /// 读**软件版本**的发布历史。★ 与 `wb_publish_history`（预设那本）不是同一本账。
+///
+/// 读的是**全部数据根**（工作台那棵 + 命令行 / 钩子那棵，见
+/// [`super::history_roots`]）：命令行发的那几版同样算数，每条回执带 `source`。
 #[tauri::command(async)]
 pub fn wb_release_history(
     app: tauri::AppHandle,
-) -> Result<super::release_history::ReleaseHistory, AppError> {
+) -> Result<super::release_history::ReleaseHistoryView, AppError> {
     crate::ipc::traced("wb_release_history", |_| {
-        let root = crate::fsx::paths::internal_root(&app)?;
-        super::release_history::load(&root)
+        let roots = super::history_roots(&app)?;
+        super::release_history::load_merged(&roots)
     })
 }
 
@@ -2181,6 +2370,46 @@ pub fn wb_release_open_bundle(app: tauri::AppHandle) -> Result<(), AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **包里自报的号必须等于要发的号**（2026-11-06 作者：「你这都是 0.0.4 了，
+    /// 里面还显示 0.0.3，那不是很不合理吗？」）。
+    ///
+    /// 造一份真的 `.app/Contents/Info.plist`（`plutil` 认这个形状），验两件事：
+    /// 一致时放行；不一致时**报错并且把两个号都写进那句话** —— 只说"不匹配"
+    /// 等于让人回去猜是哪一头不对。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_artifact_must_report_the_version_we_are_releasing() {
+        const PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleShortVersionString</key><string>0.0.11</string>
+</dict></plist>
+"#;
+        let d = tempfile::tempdir().unwrap();
+        let contents = d
+            .path()
+            .join("target/release/bundle/macos/SupportEase.app/Contents");
+        std::fs::create_dir_all(&contents).unwrap();
+        crate::fsx::atomic::atomic_write(&contents.join("Info.plist"), PLIST.as_bytes()).unwrap();
+
+        assert!(
+            assert_artifact_speaks_version(d.path(), "0.0.11").is_ok(),
+            "一致就该放行"
+        );
+
+        let e = assert_artifact_speaks_version(d.path(), "0.0.12").unwrap_err();
+        assert!(
+            e.message.contains("0.0.11") && e.message.contains("0.0.12"),
+            "两个号都要写进那句话：{}",
+            e.message
+        );
+        assert!(
+            e.detail.as_deref().unwrap_or("").contains("重"),
+            "要指出多半是没重编：{:?}",
+            e.detail
+        );
+    }
 
     /// ★ **候选的第一优先是 `CARGO_TARGET_DIR`**（2026-10-07 真机踩出来的）：dev 下
     /// 工作台进程带着 `target-workbench` 在跑（`scripts/tauri-workbench.mjs` 设的），
@@ -3000,5 +3229,132 @@ mod tests {
                 ch.wire()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod frozen_tag_tests {
+    use std::process::Command;
+
+    use super::*;
+
+    /// 造一个真实仓库。钩子关掉：本仓的 `core.hooksPath` 会拦 main 上的提交，
+    /// 而这里要验的是"tag 与 HEAD 是不是同一笔"。
+    fn repo_with_commit() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args([
+                    "-c",
+                    "core.hooksPath=/nonexistent-mkpse-test-hooks",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "-c",
+                    "user.name=t",
+                ])
+                .args(args)
+                .current_dir(root)
+                .output()
+                .expect("起 git");
+            assert!(
+                out.status.success(),
+                "git {args:?} 失败：{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        run(&["init", "-q", "-b", "main"]);
+        crate::fsx::atomic::atomic_write(&root.join("a.txt"), b"1").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "one"]);
+        dir
+    }
+
+    /// **专项验收**：`Tag 已创建 → 构建失败 → 修改源码 → 重跑` 必须阻断。
+    ///
+    /// 重跑会沿用那个 tag、却从**当前工作区**构建 —— 必须在这里阻断，
+    /// 不能把新代码的安装包挂到旧 tag 的 Release 上。
+    #[test]
+    fn changing_code_after_the_tag_blocks_the_resume() {
+        let d = repo_with_commit();
+        let root = d.path();
+        let git = Git::open(root);
+        let tag = "v0.0.12-preview.7";
+        let run = |args: &[&str]| {
+            let out = Command::new("git")
+                .args([
+                    "-c",
+                    "core.hooksPath=/nonexistent-mkpse-test-hooks",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "-c",
+                    "user.name=t",
+                ])
+                .args(args)
+                .current_dir(root)
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+        };
+
+        /* ① 冻结这一版（= 上次已经打了 tag，构建才失败） */
+        run(&["tag", "-a", tag, "-m", "本地预览交付"]);
+        assert!(
+            frozen_elsewhere(&git, tag).is_none(),
+            "tag 就打在 HEAD 上 —— 此时续跑是安全的"
+        );
+
+        /* ② 改了代码并提交（= 作者发现 bug 改完再重跑） */
+        crate::fsx::atomic::atomic_write(&root.join("a.txt"), b"2").unwrap();
+        run(&["add", "a.txt"]);
+        run(&["commit", "-q", "-m", "two"]);
+
+        /* ③ 必须阻断，且两个提交都要写出来 */
+        let hit = frozen_elsewhere(&git, tag).expect("改了代码还放行 = 会把新包挂到旧 tag 上");
+        assert!(
+            hit.0 != hit.1,
+            "两笔提交要不一样：tag={} head={}",
+            hit.0,
+            hit.1
+        );
+        assert_eq!(short_sha(&hit.0).len(), 7);
+    }
+
+    /// 没有 tag（全新一版）不该被这条判据误伤。
+    #[test]
+    fn a_fresh_version_is_not_blocked() {
+        let d = repo_with_commit();
+        let git = Git::open(d.path());
+        assert!(frozen_elsewhere(&git, "v0.0.12-preview.8").is_none());
+    }
+
+    /// 事务记录：只追加、不改写，超过 30 条丢最旧的。
+    #[test]
+    fn the_journal_only_appends() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path();
+        for i in 0..33 {
+            journal_append(
+                root,
+                &TxJournalEntry {
+                    at: format!("t{i}"),
+                    version: format!("0.0.12-preview.{i}"),
+                    tag: format!("v0.0.12-preview.{i}"),
+                    commit: "abc".to_owned(),
+                    stage: if i % 2 == 0 { "failed" } else { "Built" }.to_owned(),
+                    ok: i % 2 == 1,
+                },
+            );
+        }
+        let all: Vec<TxJournalEntry> = serde_json::from_str(
+            &std::fs::read_to_string(root.join("target/release/journal.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(all.len(), 30, "只保留最近 30 条");
+        assert_eq!(all.last().unwrap().at, "t32", "最后一条是刚写的");
+        assert!(
+            all.iter().any(|e| !e.ok),
+            "失败那几笔也要留着 —— 那是恢复依据"
+        );
     }
 }

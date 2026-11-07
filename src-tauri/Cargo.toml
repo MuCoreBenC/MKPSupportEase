@@ -1,6 +1,6 @@
 [package]
 name = "mkp-support-ease"
-version = "0.0.10-preview.2"
+version = "0.0.10-preview.8"
 description = "SupportEase —— MKP 支撑辅助桌面端"
 authors = ["MuCoreBenC"]
 license = "AGPL-3.0-only"
@@ -41,6 +41,13 @@ required-features = ["workbench"]
 [[bin]]
 name = "presets"
 path = "src/bin/presets.rs"
+required-features = ["workbench"]
+
+# 本地预览交付（2026-11-06）：与工作台那颗「生成并交付」按钮**同一份事务**，
+# 只是多一个命令行入口。默认预演，带 `--confirm` 才真执行。
+[[bin]]
+name = "preview"
+path = "src/bin/preview.rs"
 required-features = ["workbench"]
 
 # 清译文台账（2026-11-02）：按 `key=labelEn,descJa` 点名摘掉「待重译」标记。

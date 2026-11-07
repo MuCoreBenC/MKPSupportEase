@@ -17,7 +17,8 @@
  * 2. **不设 `CARGO_TARGET_DIR`**：客户端用的就是 `src-tauri/target` 那一份产物。
  */
 
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { announceBuild } from './build-stamp.mjs'
@@ -51,6 +52,77 @@ if (args.length === 0) {
 
 const exe = process.platform === 'win32' ? '.exe' : ''
 
+/* ---------- `build` 开工前的两道闸（`dev` 不拦：开发期工作区本来就该是脏的） ----------
+ *
+ * ① **盘上那份二进制是谁编的。** 两档共用同一个 crate 与同一个 `default-run`，工作台
+ *    那份配置把 `app.windows` 写成空数组（它只开工作台那一页）。它的产物一旦顶掉
+ *    `target/release/mkp-support-ease`，`tauri build` 会原样复用它去封包 —— 外壳照客户端
+ *    配置写（名字、版本、图标都对），内核没有窗口：装上去进程起得来，就是没有窗。
+ *    工作台配置现在用 `mainBinaryName` 把自己那份改名 `mkp-workbench`，物理上不再同名；
+ *    这道闸留给盘上已经躺着的旧产物（cargo 会原样复用，不重编）。
+ *
+ * ② **工作区。** 编出来的包要发出去。脏树编出来的二进制不对应任何提交，启动指纹带
+ *    `-dirty`，发出去之后没法复现、也没法按提交还原。版本派生那四个文件除外 ——
+ *    `version:ensure-preview` 抬号时它们本来就会脏，那是这一趟要发的内容。
+ */
+const WORKBENCH_MARK = 'SupportEase-Workbench'
+const VERSION_DERIVED = [
+  'src-tauri/Cargo.toml',
+  'src-tauri/tauri.conf.json',
+  'package.json',
+  'Cargo.lock',
+]
+const CLIENT_BIN = join(TARGET_DIR, 'release', `mkp-support-ease${exe}`)
+
+/** 这一趟不该开工的理由；能开工就是 `null`。 */
+function refusalToBuild() {
+  try {
+    if (readFileSync(CLIENT_BIN).includes(WORKBENCH_MARK)) {
+      return (
+        `盘上的 ${CLIENT_BIN}\n` +
+        '  是拿工作台配置编出来的（内核里窗口清单是空的），cargo 会原样复用它去封包。\n' +
+        `  删掉它再跑：rm "${CLIENT_BIN}"`
+      )
+    }
+  } catch {
+    /* 还没编过：没有可复用的东西 */
+  }
+
+  let status
+  try {
+    status = execFileSync('git', ['status', '--porcelain'], {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+    })
+  } catch (e) {
+    return `问不了工作区状态（git 起不来）：${e.message}`
+  }
+  const dirty = status
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .filter((line) => {
+      const path = line.slice(3).split(' -> ').pop()
+      return !VERSION_DERIVED.includes(path)
+    })
+  if (dirty.length > 0) {
+    return (
+      `工作区不干净（${dirty.length} 处）—— 编出来的包对应不上任何提交：\n` +
+      dirty.map((line) => `    ${line}`).join('\n') +
+      '\n  先提交（或确认这些改动就是要发的），再来编。'
+    )
+  }
+  return null
+}
+
+if (args[0] === 'build') {
+  const why = refusalToBuild()
+  if (why !== null) {
+    console.error(`\n✗ 不开工：${why}\n`)
+    process.exit(1)
+  }
+}
+
 /* 只有 `dev` 打这套：`build` 的产物在 `release/`，"等 debug exe 的 mtime 变"不适用。 */
 const announce =
   args[0] === 'dev'
@@ -78,5 +150,20 @@ announce()
 process.on('SIGINT', () => {})
 
 child.on('exit', (code, signal) => {
+  /* 兜底：开工前那道闸拦的是"沿用旧产物"，这一道拦的是"这一趟真编出来的东西带工作台
+  标记"（主配置被谁改脏了）。编完了才发现，也比封成包发出去强。 */
+  if (code === 0 && args[0] === 'build') {
+    try {
+      if (readFileSync(CLIENT_BIN).includes(WORKBENCH_MARK)) {
+        console.error(
+          '\n✗ 刚编出来的这颗二进制带工作台配置的标记 —— 不要发它。' +
+            '检查 src-tauri/tauri.conf.json 的 app.windows 还在不在\n',
+        )
+        process.exit(1)
+      }
+    } catch {
+      /* 读不到产物就不在这里判（`--no-bundle` 之外的失败已由退出码带出去了） */
+    }
+  }
   process.exit(code ?? (signal ? 1 : 0))
 })
