@@ -108,7 +108,7 @@ pub fn up_to_date(rel: &str, on_disk: &[u8], candidate: &[u8]) -> bool {
         return false;
     }
     /* 内容一致：形状也必须是当前的。候选自己带旧字段时（归一化对它不是恒等）
-       不能因为盘上也带就判"过期"—— 那种情况下重写也清不掉。 */
+    不能因为盘上也带就判"过期"—— 那种情况下重写也清不掉。 */
     let candidate_needs_no_cleanup = norm_want == candidate;
     let on_disk_is_already_clean = norm_old == on_disk;
     !(candidate_needs_no_cleanup && !on_disk_is_already_clean)

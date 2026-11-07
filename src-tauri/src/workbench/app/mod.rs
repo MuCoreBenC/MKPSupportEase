@@ -102,11 +102,11 @@ pub mod publish_tx;
 /// **生成事务回执**（2026-11-01）：一次生成留下的一份结构化结果 ——
 /// 工作台模态框 / CLI JSON / AI 报告读的是同一份，不是三套说法。
 pub mod receipt;
+pub mod release_history;
 /// **软件版本发布历史**（第四刀）：`<appDataDir>/release-history.json`。
 /// ★ **与交付预设那本分开** —— 两条链不混
 /// **发布对账**（git tag × 回执 × 开发号）—— 只读
 pub mod release_ledger;
-pub mod release_history;
 /// **发布软件版本事务**（第四刀）：确认主线 → 版本号 → tag → 构建安装包 →
 /// Release → 上传 → 写 `release.json`。**锁无关内核**（不碰 `Presets`，因此不进 `with_ctx`），
 /// 工作台与 CLI 两个入口共用它
@@ -265,7 +265,7 @@ pub fn verify_delivery(
         Some(book) => {
             if !book.matches_catalog(&bytes) {
                 /* 同一个号、内容变了 = 生成过还没发布（常规中间态）；
-                   号都对不上才是两处真的错代。两件事分开说，别都叫"不是同一代" */
+                号都对不上才是两处真的错代。两件事分开说，别都叫"不是同一代" */
                 let same_serial = catalog.publish_serial == Some(book.serial);
                 report.problems.push(if same_serial {
                     format!(

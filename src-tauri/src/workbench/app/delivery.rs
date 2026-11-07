@@ -399,7 +399,7 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
 /// mkpPresetAssetId 是唯一一处从产物侧（manifest）带过来的连接键
 pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
     /* 停用机型整支退出交付面（与 `catalog.json` 同一判据）：这份 content JSON
-       也是客户端可寻址的，留着它等于"目录里没有、文件里还在" */
+    也是客户端可寻址的，留着它等于"目录里没有、文件里还在" */
     let machines: Vec<MachineEntry<'_>> = book
         .presets
         .catalog
@@ -1538,7 +1538,7 @@ pub fn manifest_drift(delivery_root: &Path) -> Result<Vec<ManifestDrift>, AppErr
         AppError::invalid_argument("交付根没有父目录（发布根），核对不了发布凭据")
     })?;
     /* 这一代目录登记了哪些 path —— 用来认「manifest 还多登着一条」。
-       读不出来就只做字节核对（不拿"读不到目录"去判人多了几条）。 */
+    读不出来就只做字节核对（不拿"读不到目录"去判人多了几条）。 */
     let registered: Option<std::collections::BTreeSet<String>> =
         std::fs::read(delivery_root.join(NEW_CATALOG_FILE))
             .ok()
@@ -1589,10 +1589,10 @@ pub fn manifest_diagnosis(delivery_root: &Path) -> Result<(bool, Vec<String>), A
         .iter()
         .map(|d| match d.kind {
             ManifestDriftKind::Missing => format!("{}：登记了，盘上取不到", d.rel),
-            ManifestDriftKind::Size {
-                registered,
-                actual,
-            } => format!("{}：大小不符（登记 {registered} B，盘上 {actual} B）", d.rel),
+            ManifestDriftKind::Size { registered, actual } => format!(
+                "{}：大小不符（登记 {registered} B，盘上 {actual} B）",
+                d.rel
+            ),
             ManifestDriftKind::Sha => format!("{}：字节不符（SHA-256 对不上）", d.rel),
             ManifestDriftKind::Unlisted => {
                 format!("{}：目录里已经没有这一条了（还登在清单里）", d.rel)
@@ -2032,7 +2032,7 @@ pub fn plan_publish(
             continue; // 暂无资源：跳过，不报错
         }
         /* 停用的机型不进发布清单（客户端目录也不列它）—— 但它的产物**留在交付目录**，
-           这里只是不登记、不校验，不写也不删。 */
+        这里只是不登记、不校验，不写也不删。 */
         if machine_disabled(book, &v.machine_id) {
             continue;
         }
@@ -3406,7 +3406,8 @@ mod tests {
             )
             .unwrap();
         }
-        let before = std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap();
+        let before =
+            std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap();
 
         write_content(&delivery, asset_root.path(), &book).unwrap();
         let meta = PublishMeta {
@@ -4047,10 +4048,13 @@ mod tests {
             ),
             2,
         );
-        std::fs::write(&path, &legacy).expect("造一份历史产物");
+        crate::fsx::atomic::atomic_write(&path, legacy.as_bytes()).expect("造一份历史产物");
 
         let (candidates, diffs) = delivery_diffs(&env.delivery, &env.book()).expect("比较得出");
-        let d = diffs.iter().find(|d| d.rel == a1).expect("候选里该有这一份");
+        let d = diffs
+            .iter()
+            .find(|d| d.rel == a1)
+            .expect("候选里该有这一份");
         assert_eq!(
             d.kind,
             DiffKind::Modified,

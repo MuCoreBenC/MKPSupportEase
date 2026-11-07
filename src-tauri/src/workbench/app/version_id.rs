@@ -175,7 +175,9 @@ fn installed_cell() -> VersionCell {
     let at = app.display().to_string();
     match plist_version(&app) {
         Ok(v) => VersionCell::ok(v).at(at).open("installed", "在访达中显示"),
-        Err(why) => VersionCell::err(why).at(at).open("installed", "在访达中显示"),
+        Err(why) => VersionCell::err(why)
+            .at(at)
+            .open("installed", "在访达中显示"),
     }
 }
 
@@ -304,12 +306,14 @@ pub fn wb_open_version_location(app: tauri::AppHandle, which: String) -> Result<
             Which::Installed => {
                 let home = std::env::var_os("HOME").map(PathBuf::from);
                 match pick_app(&app_candidates(home.as_deref())) {
-                    Some(app_path) => opener
-                        .reveal_item_in_dir(&app_path)
-                        .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string())),
+                    Some(app_path) => opener.reveal_item_in_dir(&app_path).map_err(|e| {
+                        AppError::io("打不开系统文件管理器").with_detail(e.to_string())
+                    }),
                     None => opener
                         .open_path("/Applications", None::<&str>)
-                        .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string())),
+                        .map_err(|e| {
+                            AppError::io("打不开系统文件管理器").with_detail(e.to_string())
+                        }),
                 }
             }
             Which::Packaged => {
@@ -333,12 +337,14 @@ pub fn wb_open_version_location(app: tauri::AppHandle, which: String) -> Result<
                     .map(|name| dir.join(name))
                     .filter(|p| p.is_file());
                 match asset {
-                    Some(file) => opener
-                        .reveal_item_in_dir(&file)
-                        .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string())),
+                    Some(file) => opener.reveal_item_in_dir(&file).map_err(|e| {
+                        AppError::io("打不开系统文件管理器").with_detail(e.to_string())
+                    }),
                     None => opener
                         .open_path(dir.to_string_lossy().into_owned(), None::<&str>)
-                        .map_err(|e| AppError::io("打不开系统文件管理器").with_detail(e.to_string())),
+                        .map_err(|e| {
+                            AppError::io("打不开系统文件管理器").with_detail(e.to_string())
+                        }),
                 }
             }
             Which::Published => {
@@ -409,7 +415,10 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let candidates = app_candidates(Some(home.path()));
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0], PathBuf::from("/Applications/SupportEase.app"));
+        assert_eq!(
+            candidates[0],
+            PathBuf::from("/Applications/SupportEase.app")
+        );
         assert_eq!(
             candidates[1],
             home.path().join("Applications/SupportEase.app"),
@@ -428,7 +437,7 @@ mod tests {
 
         let install = |p: &Path| {
             std::fs::create_dir_all(p.join("Contents")).unwrap();
-            std::fs::write(p.join("Contents/Info.plist"), b"plist").unwrap();
+            crate::fsx::atomic::atomic_write(&p.join("Contents/Info.plist"), b"plist").unwrap();
         };
         /* 只有第二份时取第二份 */
         install(&second);
@@ -460,7 +469,8 @@ mod tests {
             "清单里没有 .7 ⇒ 不给（不编）"
         );
 
-        crate::fsx::atomic::atomic_write(&delivery.join("release-preview.json"), b"{ broken").unwrap();
+        crate::fsx::atomic::atomic_write(&delivery.join("release-preview.json"), b"{ broken")
+            .unwrap();
         assert!(
             release_url_for(dir.path(), "v0.0.10-preview.2").is_none(),
             "坏清单不许 panic，也不许猜"

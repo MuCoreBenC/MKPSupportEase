@@ -4,9 +4,10 @@
 # 闸④：拒绝删除 main 与 tag（普通分支放行）
 # 闸⑤：推 tag 时，tag 名必须等于 v<package.json version>、必须 annotated、必须在 main 上
 # 闸⑧：产物边界 —— 开发时生成的东西不许混进正式交付（见 scripts/check-artifact-boundary.mjs）
+# 闸⑩：Rust 静态检查 —— fmt + clippy，与 CI 的 rust job 同一份命令
 #
 # 逃生开关：ALLOW_PUSH_MAIN=1  ALLOW_FORCE_PUSH=1  ALLOW_DELETE_REMOTE=1  ALLOW_TAG_MISMATCH=1
-#           ALLOW_PRESET_ARTIFACTS=1（只放掉闸⑧）
+#           ALLOW_PRESET_ARTIFACTS=1（只放掉闸⑧）  ALLOW_RUST_CHECK=1（只放掉闸⑩）
 #
 # 闸②在本仓库是**无条件拦截**，与试验场不同。试验场的判据是「结果校验」——
 # 推 main 时看 tip 有没有对应版本号的 annotated tag，因为那边 main 由本地合并推进。
@@ -161,6 +162,30 @@ if [ -n "$boundary_paths" ]; then
   else
     if [ "$ALLOW_PRESET_ARTIFACTS" = "1" ]; then
       pending_bypass="$pending_bypass ALLOW_PRESET_ARTIFACTS"
+    else
+      fail=1
+    fi
+  fi
+fi
+
+# ---------- 闸⑩：Rust 静态检查 ----------
+#
+# CI 里最先红的两样就是 `cargo fmt --check` 与 `clippy -D warnings`，而它们不跑测试、
+# 不打包 —— 本地十几秒到一分钟就能给结论。放在 push 之前，省掉"推上去等三五分钟才
+# 发现少一个换行 / 用了 std::fs::write"。
+#
+# 只在**本次推送范围里有 Rust 改动**时跑：纯前端 / 纯文档的推送不该被 clippy 拖慢。
+# 测试不在这里 —— 全量 cargo test 是分钟级，按 AGENTS.md §8.2 只跑改动相关的。
+rust_paths=$(git diff --name-only "origin/main...HEAD" 2>/dev/null \
+  | grep -E '(^|/)Cargo\.(toml|lock)$|\.rs$' || true)
+if [ -n "$rust_paths" ]; then
+  echo "" >&2
+  echo "  闸⑩：本次推送动了 Rust —— 跑 fmt + clippy（与 CI 同一条）" >&2
+  if ALLOW_RUST_CHECK="$ALLOW_RUST_CHECK" npm run --silent check:rust; then
+    :
+  else
+    if [ "$ALLOW_RUST_CHECK" = "1" ]; then
+      pending_bypass="$pending_bypass ALLOW_RUST_CHECK"
     else
       fail=1
     fi

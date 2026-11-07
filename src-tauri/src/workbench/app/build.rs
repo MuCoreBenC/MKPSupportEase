@@ -971,9 +971,9 @@ fn generate_inner(
         let embedded = crate::runtime::Catalog::build_from_repo(&repo)?;
         let embedded_json = embedded.to_pretty_json()?;
         /* ★ 落点也必须是**仓库根**（`<repo>/src-tauri/src/runtime/…`）。
-           `ctx.real_root()` 是 `presets/` 那一层 —— 拿它拼会写进
-           `presets/src-tauri/src/runtime/` 这个不存在的树里（2026-11-07 实测：
-           生成之后真正的内嵌目录还是旧的，错的树里多出一份）。 */
+        `ctx.real_root()` 是 `presets/` 那一层 —— 拿它拼会写进
+        `presets/src-tauri/src/runtime/` 这个不存在的树里（2026-11-07 实测：
+        生成之后真正的内嵌目录还是旧的，错的树里多出一份）。 */
         crate::fsx::atomic::atomic_write(
             &embedded_catalog_path_at(&repo),
             embedded_json.as_bytes(),
@@ -2065,13 +2065,13 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
     let (stale, reasons) = super::delivery::manifest_diagnosis(&delivery)?;
     let checks = super::audit::finalize_checks(&delivery);
     /* 身份那两格里只有 ⑬（source）是 Blocker 档；⑭ 是提示档，红了也不该把
-       一次"凭据失效"说成"身份坏了" —— 两者是不同的病。 */
+    一次"凭据失效"说成"身份坏了" —— 两者是不同的病。 */
     let identity_failed = checks
         .iter()
         .any(|i| i.status == super::audit::AuditStatus::Fail);
     let plan = super::audit::identity_plan(&delivery);
     /* 三件事分开说：身份坏了 / 凭据落后 / 只是还没发布。凭据落后比"待发布"更该先说 ——
-       它有一颗粒按钮能当场修。 */
+    它有一颗粒按钮能当场修。 */
     let state_word = if identity_failed {
         FinalizeState::IdentityFailed
     } else if stale {
@@ -2096,7 +2096,7 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
 
     let mut issues = build_issues(&delivery, &checks, &book)?;
     /* 账本与盘上目录不是同一代（或账本根本读不出来）：说不出"下一号是几号"，
-       这一类不在检查器里修 —— 列出来，交给发布闸判。 */
+    这一类不在检查器里修 —— 列出来，交给发布闸判。 */
     if plan.ledger_out_of_step {
         issues.insert(
             0,
@@ -2122,10 +2122,9 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
             id: "identity.pending".to_owned(),
             title: "这一代已经生成好，还没发布".to_owned(),
             kind: FinalizeIssueKind::Info,
-            detail:
-                "目录与账本停在同一个号（内容已按当前源重算）—— 发一次就回到同一代；\
+            detail: "目录与账本停在同一个号（内容已按当前源重算）—— 发一次就回到同一代；\
                  发布前客户端看到的还是上一代。"
-                    .to_owned(),
+                .to_owned(),
             action: FinalizeAction::CheckIdentity,
             files: Vec::new(),
             at: None,
@@ -2135,9 +2134,7 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
         state_word,
         FinalizeState::Matched | FinalizeState::PendingPublish
     ) && !plan.ledger_out_of_step
-        && issues
-            .iter()
-            .all(|i| i.kind == FinalizeIssueKind::Info)
+        && issues.iter().all(|i| i.kind == FinalizeIssueKind::Info)
         && manifest.is_some();
 
     Ok(FinalizePreview {
@@ -2155,9 +2152,7 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
 }
 
 /// 「更新发布凭据」的锁无关内核。**写在最后、只写一处**：`manifest.json`。
-pub(super) fn update_credentials_with(
-    ctx: &mut super::Ctx,
-) -> Result<CredentialUpdate, AppError> {
+pub(super) fn update_credentials_with(ctx: &mut super::Ctx) -> Result<CredentialUpdate, AppError> {
     let (c, d, _) = state(ctx)?;
     let probe = renderer_for(ctx);
     let book = book_with_probe(ctx, &ctx.presets, &c, &d, &probe);
@@ -2167,15 +2162,15 @@ pub(super) fn update_credentials_with(
     // 保护：集合没收敛 / 目录不是当前代 ⇒ 一个字节都不写
     let blockers = credential_blockers(&delivery, &book)?;
     if !blockers.is_empty() {
-        return Err(AppError::invalid_argument(
-            "交付集合还没准备好，不能更新发布凭据",
-        )
-        .with_detail(blockers.join("；")));
+        return Err(
+            AppError::invalid_argument("交付集合还没准备好，不能更新发布凭据")
+                .with_detail(blockers.join("；")),
+        );
     }
 
     let (_, old_value) = read_manifest(&delivery);
     /* 真定稿那一刻要盖新时间（与发布事务同一件事）；`channel` / `version` 沿用盘上。
-       `identity: None` = 不分配、也不改号 —— 这一笔不是发布。 */
+    `identity: None` = 不分配、也不改号 —— 这一笔不是发布。 */
     let field = |key: &str| {
         old_value
             .as_ref()
@@ -2211,7 +2206,7 @@ pub(super) fn update_credentials_with(
     }
 
     /* 写完立刻按盘上真字节重算一遍，把"更新后的一整份"交回去 —— 界面不用再拉一次，
-       也不会出现"回执说改了、屏幕还是旧的"。 */
+    也不会出现"回执说改了、屏幕还是旧的"。 */
     let preview = finalize_preview_with(ctx)?;
     Ok(CredentialUpdate {
         written,
@@ -2228,9 +2223,7 @@ fn read_manifest(delivery: &std::path::Path) -> (Option<String>, Option<Value>) 
         .as_deref()
         .and_then(|b| std::str::from_utf8(b).ok())
         .map(str::to_owned);
-    let value = text
-        .as_deref()
-        .and_then(|t| serde_json::from_str(t).ok());
+    let value = text.as_deref().and_then(|t| serde_json::from_str(t).ok());
     (text, value)
 }
 
@@ -2238,10 +2231,7 @@ fn read_manifest(delivery: &std::path::Path) -> (Option<String>, Option<Value>) 
 ///
 /// 只比 `assets[]` 里的 `relativePath` / `sha256` / `size` —— **不算 `updated`**：
 /// 真定稿那一刻它一定变，混进来的话真正的登记变化会被一行时间淹掉。
-fn entry_diff(
-    old: Option<&Value>,
-    manifest: &Value,
-) -> (Vec<FinalizeEntry>, usize) {
+fn entry_diff(old: Option<&Value>, manifest: &Value) -> (Vec<FinalizeEntry>, usize) {
     let mut before: BTreeMap<String, (String, u64)> = BTreeMap::new();
     for a in old
         .and_then(|v| v.get("assets"))
@@ -2298,13 +2288,10 @@ fn entry_diff(
         });
     }
     /* 旧清单里有、新清单里没有的也算"这一笔要动"：定稿会把它们**去掉**
-       （停用机型 / 退出交付面的资产）。不数它们，回执就会说"0 条"却真写了盘。 */
+    （停用机型 / 退出交付面的资产）。不数它们，回执就会说"0 条"却真写了盘。 */
     let kept: std::collections::BTreeSet<&str> =
         entries.iter().map(|e| e.relative_path.as_str()).collect();
-    changed += before
-        .keys()
-        .filter(|p| !kept.contains(p.as_str()))
-        .count();
+    changed += before.keys().filter(|p| !kept.contains(p.as_str())).count();
     (entries, changed)
 }
 
@@ -2337,8 +2324,9 @@ fn manifest_preview(
         commit_sha: None,
     };
     let plan = super::delivery::plan_publish(delivery, asset_root, book, &meta)?;
-    let new_text = String::from_utf8(serde_json::to_vec_pretty(&plan.manifest)?)
-        .map_err(|e| AppError::internal("定稿后的 manifest 不是 UTF-8").with_detail(e.to_string()))?;
+    let new_text = String::from_utf8(serde_json::to_vec_pretty(&plan.manifest)?).map_err(|e| {
+        AppError::internal("定稿后的 manifest 不是 UTF-8").with_detail(e.to_string())
+    })?;
 
     let (entries, changed_entries) = entry_diff(old_value.as_ref(), &plan.manifest);
 
@@ -2411,8 +2399,8 @@ fn build_issues(
     }
 
     /* 产物在盘上 / 在候选里，但 `catalog.json` 没登记它。
-       绝不"顺手塞进 manifest"：先重新生成让目录重算，或去源里确认它该不该发。
-       **停用机型豁免**：目录不登记它是设计（客户端不显示），产物照留在盘上。 */
+    绝不"顺手塞进 manifest"：先重新生成让目录重算，或去源里确认它该不该发。
+    **停用机型豁免**：目录不登记它是设计（客户端不显示），产物照留在盘上。 */
     let catalog = std::fs::read(delivery.join(super::delivery::NEW_CATALOG_FILE))
         .ok()
         .and_then(|b| serde_json::from_slice::<crate::runtime::catalog::Catalog>(&b).ok());
@@ -2674,7 +2662,7 @@ mod tests {
         std::fs::create_dir_all(&bbs).unwrap();
         crate::fsx::atomic::atomic_write(&bbs.join("process.json"), br#"{"x":1}"#).unwrap();
         /* 载荷根挂上：不挂的话发布侧构建目录时所有资产都算"载荷缺失"，
-           目录里就没有 A 类条目 —— 而 manifest 会照登它们，这本账从一开始就自相矛盾。 */
+        目录里就没有 A 类条目 —— 而 manifest 会照登它们，这本账从一开始就自相矛盾。 */
         let mut presets = presets;
         presets.set_asset_root(&dir.path().join("presets/assets"));
         let store = Store::at(dir.path().join("workbench"));
@@ -3886,7 +3874,10 @@ mod tests {
         let pf = preview_one(&r, Some(legacy.as_str()));
         assert_eq!(pf.state, DiffState::Modified, "带旧写盘记录 ⇒ 要重写");
         assert_eq!(
-            pf.lines.iter().filter(|l| l.kind == DiffLineKind::Removed).count(),
+            pf.lines
+                .iter()
+                .filter(|l| l.kind == DiffLineKind::Removed)
+                .count(),
             1,
             "如实显示被清掉的那一行"
         );
@@ -4032,7 +4023,7 @@ mod tests {
             super::super::delivery::publish_into(&delivery, &assets, &book, &meta).expect("定稿");
         }
         /* 真交付根里这两份由软件发版链写（`source.json` 声明了它们，发布闸 ⑬ 要求
-           声明的都得在）。夹具补上最小形状，别让"身份检查"红在一个与交付无关的缺口上。 */
+        声明的都得在）。夹具补上最小形状，别让"身份检查"红在一个与交付无关的缺口上。 */
         for rel in [
             crate::runtime::source::RELEASE_FILE,
             crate::runtime::source::RELEASE_PREVIEW_FILE,
@@ -4188,7 +4179,11 @@ mod tests {
         assert!(out.written, "凭据落后 ⇒ 必须真写一次");
         assert_eq!(out.changed, 1, "只有被改坏的那一条会重新登记");
         assert!(out.entries >= 1);
-        assert_eq!(untouched(dir.path()), before, "除 manifest 外一个字节都不许动");
+        assert_eq!(
+            untouched(dir.path()),
+            before,
+            "除 manifest 外一个字节都不许动"
+        );
 
         /* 更新之后的那份检查：凭据回到匹配、就绪 */
         assert_eq!(
@@ -4197,7 +4192,11 @@ mod tests {
             "更新后仍是失效：{:?}",
             out.preview.reasons
         );
-        assert!(out.preview.ready, "更新后该是交付就绪：{:?}", out.preview.issues);
+        assert!(
+            out.preview.ready,
+            "更新后该是交付就绪：{:?}",
+            out.preview.issues
+        );
         assert!(
             !out.preview
                 .issues

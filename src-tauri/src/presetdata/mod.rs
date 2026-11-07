@@ -396,9 +396,7 @@ impl Presets {
     /// 这台机型停用了吗（`enabled = false`）。查不到的机型**不算停用** ——
     /// "认不出这台"是加载期的错，不在这里兜底。
     pub fn machine_disabled(&self, machine_id: &str) -> bool {
-        self.catalog
-            .machine(machine_id)
-            .is_some_and(|m| !m.enabled)
+        self.catalog.machine(machine_id).is_some_and(|m| !m.enabled)
     }
 
     /// **进交付面的套餐**：停用机型的套餐一起停用。

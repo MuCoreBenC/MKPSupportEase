@@ -714,7 +714,7 @@ impl Catalog {
                 brands: presets.catalog.brands().to_vec(),
                 machines,
                 /* 资产与套餐都收窄到**交付面**：停用机型连同它的套餐、它的独占资产
-                   一起退出（作者口径 2026-11-07）。源文件照留，只是不进目录。 */
+                一起退出（作者口径 2026-11-07）。源文件照留，只是不进目录。 */
                 assets: presets.delivery_assets().into_iter().cloned().collect(),
                 groups: presets.assets.groups().to_vec(),
                 bundles: presets.delivery_bundles().into_iter().cloned().collect(),
@@ -964,7 +964,7 @@ mod tests {
         ] {
             let want = kind_of_asset(asset_kind).expect("这一类是要登记的");
             /* 比的是**交付面**那一份台账（停用机型独占的资产不进目录），
-               不是整本 assets.toml —— 拿全部条目比会永远差那几条 */
+            不是整本 assets.toml —— 拿全部条目比会永远差那几条 */
             let in_toml = source
                 .delivery_assets()
                 .into_iter()

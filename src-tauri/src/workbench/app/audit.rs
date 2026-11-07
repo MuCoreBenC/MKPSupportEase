@@ -360,7 +360,7 @@ pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
                 },
                 State::Stale(b) => {
                     /* 内容变了但**号还是同一个** ⇒ 生成改了目录、没发过新版：常规中间态。
-                       号一变（或盘上那份根本没号）⇒ 两处确实错代，那是真问题。 */
+                    号一变（或盘上那份根本没号）⇒ 两处确实错代，那是真问题。 */
                     let same_serial = on_disk == Some(b.serial);
                     IdentityPlan {
                         catalog_id: b.catalog_id.clone(),
@@ -390,7 +390,10 @@ pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
 /// **判据不在这里**：直接调发布闸那两处函数，所以"定稿检查说通过、发布闸说不过"
 /// 这种两套口径不会出现。⑭ 是提示档（生成过还没发是常规状态），不构成阻断。
 pub(super) fn finalize_checks(delivery_root: &std::path::Path) -> Vec<AuditItem> {
-    vec![source_correct(delivery_root), manifest_correct(delivery_root)]
+    vec![
+        source_correct(delivery_root),
+        manifest_correct(delivery_root),
+    ]
 }
 
 /* ---------- 事务的最后一道安全检查（③½） ---------- */

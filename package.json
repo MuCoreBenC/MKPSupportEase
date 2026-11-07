@@ -35,6 +35,7 @@
     "check:release-source": "node scripts/check-release-source.mjs",
     "check:calibration-assets": "node scripts/check-calibration-assets.mjs",
     "check:artifacts": "node scripts/check-artifact-boundary.mjs",
+    "check:rust": "cargo fmt --all -- --check && cargo clippy --all-targets -p mkp-support-ease --features workbench -- -D warnings",
     "check:i18n": "node scripts/check-i18n.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
     "glue:check": "node scripts/glue-check.mjs",

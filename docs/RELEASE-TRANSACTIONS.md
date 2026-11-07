@@ -553,3 +553,28 @@ GitHub 事后复制。反过来会产生"清单已宣告、Gitee 还没有包"�
 **运维前提**：`mirror-release-to-github.yml` 只用仓库自带的 `GITHUB_TOKEN`（读 Gitee 是
 公开数据），**不需要额外 Secret**；但 `windows-build.yml` 那一步要 `GITEE_TOKEN`。
 本仓库当前 Secret 为 0 个，所以 Windows 自动化上传会跳过。
+
+---
+
+## 11. 推 PR 之前：先在本地跑一遍 CI 那几条
+
+CI 的 rust job 会把 `cargo fmt --all -- --check` 与 `clippy -D warnings` 各跑一遍。这两样
+不打包、不跑测试，本地十几秒到一分钟就能出结论 —— 推到云端等三五分钟才发现"少一个换行"
+"测试里写了 `std::fs::write`"，代价全花在往返上。
+
+| 改动落在 | 推 PR 前跑 | 现在谁在跑 |
+|---|---|---|
+| `*.rs` / `Cargo.toml` / `Cargo.lock` | `npm run check:rust` | **pre-push 闸⑩自动跑**（只在本次推送范围动了 Rust 时） |
+| `src/**` 前端 | `npm run lint` | 人 / AI 手动 |
+| `presets/` 那三层生成物 | `npm run check:artifacts` | pre-push 闸⑧自动跑 |
+| 任何 | `npm test`（按改动范围挑） | 人 / AI 手动 |
+| 版本号 | `npm run version:check` | pre-push 闸⑨自动跑 |
+
+- **不要等 CI 红了才修格式。** 闸⑩ 与 CI 是同一份命令（`package.json` 的 `check:rust`），
+  本地红 == CI 红。改完再推，别拿 `ALLOW_RUST_CHECK=1` 混过去。
+- **clippy 那条最常踩的**：测试里造文件也要走 `crate::fsx::atomic::atomic_write`。
+  `clippy.toml` 把 `std::fs::write` / `File::create` 列进 `disallowed-methods`，
+  全仓只有 `fsx/atomic.rs` 开一个洞。
+- **打 tag 之前不用另记一份清单**：`npm run release` 自己会跑 `cargo fmt --all -- --check`
+  （`scripts/release.mjs`）、版本闸，并等 CI 全绿才建 Release。
+- `--no-verify` 只绕得过本地闸，绕不过 CI 与 main 的 ruleset。

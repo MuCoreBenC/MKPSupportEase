@@ -105,7 +105,7 @@ pub fn build(
             status: LedgerStatus::RecordOnly,
         });
         /* 同一版有多条回执：留**最新**那条的时间与阶段（回执本来是最新在前，
-           但合并读之后不保证顺序，所以自己比一次） */
+        但合并读之后不保证顺序，所以自己比一次） */
         #[allow(clippy::unnecessary_map_or)]
         if entry
             .receipt_at
@@ -186,7 +186,10 @@ mod tests {
     /// 三种状态各归各位：有 tag 无回执 / 有回执无 tag / 都有。
     #[test]
     fn the_ledger_names_the_missing_side() {
-        let tags = vec![tag("v0.0.10-preview.7", "2026-11-06"), tag("v0.0.6", "2026-10-30")];
+        let tags = vec![
+            tag("v0.0.10-preview.7", "2026-11-06"),
+            tag("v0.0.6", "2026-10-30"),
+        ];
         let receipts = vec![
             receipt("v0.0.10-preview.2", "2026-11-06T06:12:58Z"),
             receipt("v0.0.6", "2026-10-30T10:00:00Z"),
