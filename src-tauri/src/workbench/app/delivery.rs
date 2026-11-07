@@ -368,6 +368,10 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
         if !m.has_dimensions {
             continue;
         }
+        // 停用机型整支退出交付面（与 catalog 同一判据，判据在 presetdata 那一处）
+        if !m.enabled {
+            continue;
+        }
         if let Some(id) = m.image.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
             used.insert(id.to_lowercase());
         }
@@ -375,15 +379,15 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
             used.insert(id.to_lowercase());
         }
     }
-    for b in book.presets.bundles.items() {
+    // 停用机型的套餐一起停用 —— 它引用的资产也就不再可达
+    for b in book.presets.delivery_bundles() {
         for r in &b.asset_refs {
             used.insert(r.trim().to_lowercase());
         }
     }
     book.presets
-        .assets
-        .items()
-        .iter()
+        .delivery_assets()
+        .into_iter()
         .filter(|a| used.contains(&a.id.to_lowercase()))
         .cloned()
         .collect()
@@ -394,11 +398,14 @@ pub fn referenced_assets(book: &Book<'_>) -> Vec<Asset> {
 /// 12.2：机型目录。**机型与版本的清单、关系全部来自 presets 域**，
 /// mkpPresetAssetId 是唯一一处从产物侧（manifest）带过来的连接键
 pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
+    /* 停用机型整支退出交付面（与 `catalog.json` 同一判据）：这份 content JSON
+       也是客户端可寻址的，留着它等于"目录里没有、文件里还在" */
     let machines: Vec<MachineEntry<'_>> = book
         .presets
         .catalog
         .machines()
         .iter()
+        .filter(|m| m.enabled)
         .map(|m| MachineEntry {
             id: &m.id,
             display: &m.display,
@@ -442,11 +449,11 @@ pub fn machine_catalog_json(book: &Book<'_>) -> serde_json::Value {
 
 /// 12.3：套餐目录。`bundles.toml` 的直出 —— 那边五个字段 + `presets` 就是契约
 pub fn bundles_json(book: &Book<'_>) -> serde_json::Value {
+    /* 只编进**交付面**的套餐：停用机型的套餐一起停用（客户端看不到它） */
     let bundles: Vec<BundleEntry<'_>> = book
         .presets
-        .bundles
-        .items()
-        .iter()
+        .delivery_bundles()
+        .into_iter()
         .map(|b| BundleEntry {
             id: &b.id,
             display: &b.display,
@@ -668,6 +675,28 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
         set.insert(format!("{MKP_PRESETS_DIR}/{}", v.mkp_file));
     }
     set
+}
+
+/// 这台机型在源里停用了吗（`enabled = false`）。
+///
+/// **停用只影响「发不发 / 显不显示」，不影响产物在不在**：客户端目录不列这台机型
+/// （`runtime::catalog` 是唯一解释这个开关的地方），发布清单也不登记它的产物。
+/// 交付目录里已经存在的产物字节**一个字节都不动** —— 不删、不改、不进回收站。
+pub(super) fn machine_disabled(book: &Book<'_>, machine_id: &str) -> bool {
+    book.presets
+        .catalog
+        .machine(machine_id)
+        .is_some_and(|m| !m.enabled)
+}
+
+/// 产物名（`mkp/presets/<file>` 里那一段）属于停用机型吗。
+///
+/// 反查不到版本 = 不是停用：把判定交回「漏登记」那条严格判据，不拿停用给它兜底。
+pub(super) fn product_disabled(book: &Book<'_>, mkp_file: &str) -> bool {
+    book.versions()
+        .iter()
+        .find(|v| v.mkp_file == mkp_file)
+        .is_some_and(|v| machine_disabled(book, &v.machine_id))
 }
 
 /* ---------- 候选集与受管范围 ---------- */
@@ -1477,6 +1506,9 @@ pub enum ManifestDriftKind {
     Size { registered: u64, actual: u64 },
     /// 大小相同但字节不同
     Sha,
+    /// 字节对得上，但**这一代目录里已经没有它**（停用机型 / 退出交付面的资产）——
+    /// 定稿重写 manifest 时会被去掉，所以它同样属于「更新发布凭据」能修的那一类
+    Unlisted,
 }
 
 /// **只读**：`manifest.json` 登记的每条资产逐条与盘上真字节比，返回结构化的失效清单。
@@ -1505,6 +1537,13 @@ pub fn manifest_drift(delivery_root: &Path) -> Result<Vec<ManifestDrift>, AppErr
     let publish_root = delivery_root.parent().ok_or_else(|| {
         AppError::invalid_argument("交付根没有父目录（发布根），核对不了发布凭据")
     })?;
+    /* 这一代目录登记了哪些 path —— 用来认「manifest 还多登着一条」。
+       读不出来就只做字节核对（不拿"读不到目录"去判人多了几条）。 */
+    let registered: Option<std::collections::BTreeSet<String>> =
+        std::fs::read(delivery_root.join(NEW_CATALOG_FILE))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<crate::runtime::catalog::Catalog>(&b).ok())
+            .map(|c| c.files.into_iter().map(|f| f.path).collect());
 
     let mut out: Vec<ManifestDrift> = Vec::new();
     for a in assets {
@@ -1524,6 +1563,10 @@ pub fn manifest_drift(delivery_root: &Path) -> Result<Vec<ManifestDrift>, AppErr
                 actual: bytes.len() as u64,
             },
             Ok(bytes) if sha256_of(&bytes) != sha => ManifestDriftKind::Sha,
+            /* 字节对得上，但目录里已经没有这一条 —— 定稿重写会把它去掉 */
+            Ok(_) if registered.as_ref().is_some_and(|set| !set.contains(rel)) => {
+                ManifestDriftKind::Unlisted
+            }
             Ok(_) => continue,
         };
         out.push(ManifestDrift {
@@ -1551,6 +1594,9 @@ pub fn manifest_diagnosis(delivery_root: &Path) -> Result<(bool, Vec<String>), A
                 actual,
             } => format!("{}：大小不符（登记 {registered} B，盘上 {actual} B）", d.rel),
             ManifestDriftKind::Sha => format!("{}：字节不符（SHA-256 对不上）", d.rel),
+            ManifestDriftKind::Unlisted => {
+                format!("{}：目录里已经没有这一条了（还登在清单里）", d.rel)
+            }
         })
         .collect();
     Ok((!drift.is_empty(), reasons))
@@ -1985,6 +2031,11 @@ pub fn plan_publish(
         if book.build_state(&v.uid) == BuildState::NoResources {
             continue; // 暂无资源：跳过，不报错
         }
+        /* 停用的机型不进发布清单（客户端目录也不列它）—— 但它的产物**留在交付目录**，
+           这里只是不登记、不校验，不写也不删。 */
+        if machine_disabled(book, &v.machine_id) {
+            continue;
+        }
         // 产物名由命名规则算出（机型 id + 版本 id），不再查上游 manifest
         let name = v.mkp_file.clone();
         let rel = format!("{MKP_PRESETS_DIR}/{name}");
@@ -2165,6 +2216,10 @@ pub fn plan_publish(
      */
     for v in book.versions() {
         if book.build_state(&v.uid) == BuildState::NoResources {
+            continue;
+        }
+        /* 停用机型不在发布面里，也就不要求目录登记它（上面组装 manifest 时同样跳过）。 */
+        if machine_disabled(book, &v.machine_id) {
             continue;
         }
         let rel = format!("{MKP_PRESETS_DIR}/{}", v.mkp_file);
@@ -2438,6 +2493,34 @@ mod tests {
         );
     }
 
+    /// **停用判据只认源里的开关**，而且反查不到版本时不许猜成停用。
+    ///
+    /// 停用 = 不发布、不在客户端显示；产物字节照留在交付目录（作者口径）。
+    /// 这条钉住"跳过"的边界：多跳一份就是把该发的东西弄丢，少跳一份就退回旧病。
+    #[test]
+    fn only_a_disabled_machine_leaves_the_publish_face() {
+        let mut f = Fixture::load();
+        f.presets
+            .catalog
+            .machine_mut("A1")
+            .expect("夹具里有 A1")
+            .enabled = false;
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+
+        assert!(machine_disabled(&book, "A1"), "源里写了 enabled = false");
+        assert!(
+            product_disabled(&book, "A1-standard.toml"),
+            "产物名要能反查到那台停用机型"
+        );
+        assert!(!machine_disabled(&book, "P1S"), "没停用的机型不许被牵连");
+        assert!(
+            !product_disabled(&book, "no-such-version.toml"),
+            "反查不到版本 = 不是停用（交给漏登记那条严格判据）"
+        );
+    }
+
     /// 三份 JSON 的形状：字段、关系、连接键（夹具级）
     #[test]
     fn the_three_catalog_jsons_carry_the_relations() {
@@ -2572,19 +2655,20 @@ mod tests {
         let d = crate::workbench::domain::patch::Draft::default();
         let book = Book::new(&real, &c, &d);
 
-        // JSON 条数锚点：5 台机型、9 个版本、9 条套餐（一版一套）
+        // JSON 条数锚点：4 台机型、8 个版本、8 条套餐（一版一套）
+        // （2026-11-07：P2S 停用 —— `enabled = false` 的机型连同它的套餐一起退出交付面）
         let cat = machine_catalog_json(&book);
         let machines = cat["machines"].as_array().unwrap();
-        assert_eq!(machines.len(), 5, "真数据 5 台机型");
+        assert_eq!(machines.len(), 4, "真数据 4 台机型（P2S 已停用）");
         let versions: usize = machines
             .iter()
             .map(|m| m["versions"].as_array().unwrap().len())
             .sum();
-        assert_eq!(versions, 9, "版本总数变了 —— 说清为什么再改判据");
+        assert_eq!(versions, 8, "版本总数变了 —— 说清为什么再改判据");
         assert_eq!(
             bundles_json(&book)["bundles"].as_array().unwrap().len(),
-            9,
-            "一版一套：A1 三版 + A1_MINI 三版 + P1S / P2S / X1C 各一"
+            8,
+            "一版一套：A1 三版 + A1_MINI 三版 + P1S / X1C 各一（P2S_default 随机型停用）"
         );
 
         // 可达集 22 = 整机图 5（bundled 档：被机型 image 字段引用，但 dest 为 None ——
@@ -2594,9 +2678,10 @@ mod tests {
         let referenced = referenced_assets(&book);
         assert_eq!(
             referenced.len(),
-            22,
+            19,
             "可达集条数变了 —— 机型引用或套餐 assetRefs 动了，说清为什么\
-             （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20）"
+             （2026-10-03：套餐改一版一套并装上 mkPreset 登记，11 → 20；\
+             2026-11-07：P2S 停用 ⇒ 整机图 5→4、BBS 5→4、mkPreset 9→8，22 → 19）"
         );
         assert!(
             referenced.iter().all(|a| a.kind != AssetKind::Model),
@@ -2619,8 +2704,8 @@ mod tests {
             .filter(|a| a.kind == AssetKind::SlicerProfile)
             .count();
         assert_eq!(
-            bbs, 5,
-            "BBS 引用去重后 5 条（A1 / A1_MINI 各三份套餐共用一条）"
+            bbs, 4,
+            "BBS 引用去重后 4 条（A1 / A1_MINI 各三份套餐共用一条；P2S 停用后少一条）"
         );
 
         // 落盘（真资产根 → 临时交付根）：A 类**只体检不复制**（裁决 C/甲），
@@ -2628,8 +2713,8 @@ mod tests {
         let delivery = tempfile::tempdir().unwrap();
         let out = write_content(delivery.path(), &asset_root, &book).expect("真数据落盘");
         assert_eq!(
-            out.assets_checked, 8,
-            "有落点的可达资产 8 条（图标 3 + BBS 5），一条不少一条不多"
+            out.assets_checked, 7,
+            "有落点的可达资产 7 条（图标 3 + BBS 4），一条不少一条不多"
         );
         let idx = assets_index_json(&referenced);
         for a in idx["assets"].as_array().unwrap() {
@@ -2656,7 +2741,8 @@ mod tests {
             .iter()
             .map(|a| a["id"].as_str().unwrap())
             .collect();
-        for b in book.presets.bundles.items() {
+        // 只核对**进交付面**的套餐：停用机型的套餐连它引用的资产一起不发了
+        for b in book.presets.delivery_bundles() {
             for r in &b.asset_refs {
                 let Some(a) = book.presets.assets.get(r) else {
                     panic!("套餐 {} 引用不存在的资产 {r}", b.id);
@@ -3270,6 +3356,93 @@ mod tests {
         );
     }
 
+    /// **停用机型：产物留在盘上、但不进发布清单**（2026-11-07 作者口径）。
+    ///
+    /// 从前这一份会让 `plan_publish` 整笔报错（"产物发出来了，但说明书里没有登记"）——
+    /// 定稿清单算不出来，界面就把「更新发布凭据」按灰。这条钉住：算得出来，
+    /// 且产物字节一个字节都没动。
+    #[test]
+    fn a_disabled_machines_product_stays_on_disk_but_out_of_the_manifest() {
+        let mut f = Fixture::load();
+        f.presets
+            .catalog
+            .machine_mut("P1S")
+            .expect("夹具里有 P1S")
+            .enabled = false;
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+
+        let asset_root = tempfile::tempdir().unwrap();
+        for rel in [
+            "printers/a1.webp",
+            "icons/a1.svg",
+            "bbs/A1/process.json",
+            "icons/p1s.svg",
+        ] {
+            crate::fsx::atomic::atomic_write(&asset_root.path().join(rel), b"payload").unwrap();
+        }
+        f.presets.set_asset_root(asset_root.path());
+        let book = Book::new(&f.presets, &c, &d);
+        assert!(machine_disabled(&book, "P1S"), "源里的开关要生效");
+
+        let publish_root = tempfile::tempdir().unwrap();
+        let delivery = publish_root.path().join("delivery");
+        std::fs::create_dir_all(&delivery).unwrap();
+        for a in referenced_assets(&book) {
+            let Some(rel) = crate::runtime::catalog::dest_of_asset(&a) else {
+                continue;
+            };
+            let dst = publish_root.path().join(&rel);
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::copy(asset_root.path().join(&a.path), &dst).unwrap();
+        }
+        /* 三个产物都照旧生成在盘上（含停用机型的 P1S-lite）—— 停用不删产物 */
+        for name in ["A1-standard.toml", "A1-fast.toml", "P1S-lite.toml"] {
+            crate::fsx::atomic::atomic_write(
+                &delivery.join(MKP_PRESETS_DIR).join(name),
+                format!("# preset {name}").as_bytes(),
+            )
+            .unwrap();
+        }
+        let before = std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap();
+
+        write_content(&delivery, asset_root.path(), &book).unwrap();
+        let meta = PublishMeta {
+            stamp: "2026-11-07T00:00:00Z".to_owned(),
+            channel: "stable".to_owned(),
+            version: String::new(),
+            identity: Some(PublishIdentity::new_line("support-ease", 1)),
+            commit_sha: None,
+        };
+        let out = publish_into(&delivery, asset_root.path(), &book, &meta)
+            .expect("停用机型的产物留在盘上，也不该让发布算不出来");
+
+        assert_eq!(out.presets, 2, "进发布面的只剩两台没停用的");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(delivery.join(MANIFEST_FILE)).unwrap()).unwrap();
+        let listed: Vec<&str> = manifest["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["relativePath"].as_str().unwrap())
+            .collect();
+        assert!(
+            !listed.contains(&"delivery/mkp/presets/P1S-lite.toml"),
+            "停用机型不进发布清单：{listed:?}"
+        );
+        assert!(
+            listed.contains(&"delivery/mkp/presets/A1-standard.toml"),
+            "没停用的照旧登记"
+        );
+        assert_eq!(
+            std::fs::read(delivery.join(format!("{MKP_PRESETS_DIR}/P1S-lite.toml"))).unwrap(),
+            before,
+            "产物字节原地不动 —— 停用不是删除"
+        );
+    }
+
     /// **真数据上的交付集合**（13.1 的真数据版 + 防空转）：
     /// mkp 产物名 9 个（命名函数逐版算出）、资产 8 条（图标 3 + BBS 5；
     /// 整机图 2026-10-01 剥离台账后不再进交付）—— 集合计数锚点变了就说明清单或套餐变了
@@ -3449,8 +3622,9 @@ mod tests {
         // 而且 SHA / 大小与真字节一致 —— 客户端就是按那个路径拼 URL 去取的
         assert_eq!(
             catalog.files.len(),
-            17,
-            "反空转：说明书登记台账全部 17 条（9 BBS + 3 图标 + 5 模型）；\
+            16,
+            "反空转：说明书登记台账全部 16 条（8 BBS + 3 图标 + 5 模型；\
+             P2S 停用后它的 BBS 那条也退出）；\
              没跑 wb_generate 所以没有 mkp 产物条目（宽松构建跳过）"
         );
         for f in &catalog.files {

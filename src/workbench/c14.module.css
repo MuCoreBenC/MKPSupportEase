@@ -837,6 +837,7 @@
 .btn:disabled {
   color: var(--text-3);
   border-color: var(--line);
+  cursor: not-allowed;
 }
 
 .btnOn {
@@ -902,11 +903,17 @@
   border-color: var(--wb-primary-deep);
 }
 
-/* 禁用的主按钮不是「蓝底灰字」—— 底也一起灰下去，和 b03 的 .primary:disabled 一致 */
+/*
+ * 禁用的主按钮 = **一眼就看出是灰的**。
+ *
+ * 旧写法是白字压 `--line-strong`（深色下 18% 白）—— 远看仍是「深色实心按钮」，
+ * 作者截图点名「这个是灰色的吗？我也看不出来……灰色你就变成灰色」。
+ * 改法与普通按钮的禁用态同族：底降到沉降面、字降到第三级、边框用细线。
+ */
 .btnPrimary:disabled {
-  color: #fff;
-  background: var(--line-strong);
-  border-color: var(--line-strong);
+  color: var(--text-3);
+  background: var(--surface-sunken);
+  border-color: var(--line);
 }
 
 /*

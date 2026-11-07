@@ -391,6 +391,71 @@ impl Presets {
         &self.root
     }
 
+    /* ---------- 交付面：停用机型整支退出（2026-11-07 作者口径） ---------- */
+
+    /// 这台机型停用了吗（`enabled = false`）。查不到的机型**不算停用** ——
+    /// "认不出这台"是加载期的错，不在这里兜底。
+    pub fn machine_disabled(&self, machine_id: &str) -> bool {
+        self.catalog
+            .machine(machine_id)
+            .is_some_and(|m| !m.enabled)
+    }
+
+    /// **进交付面的套餐**：停用机型的套餐一起停用。
+    ///
+    /// 作者口径：「这个机型它包含套餐，包含文件 —— 停用机型，也就是说它的套餐也一起停用」。
+    /// 停用**不是删除**：`bundles.toml` 照留、工作台的套餐编辑照看得见，
+    /// 只有交付面（目录 / 内容 JSON / 清单）里不再有它们。
+    pub fn delivery_bundles(&self) -> Vec<&crate::presetdata::bundles::Bundle> {
+        self.bundles
+            .items()
+            .iter()
+            .filter(|b| !self.machine_disabled(&b.machine_id))
+            .collect()
+    }
+
+    /// **进交付面的资产**：归属机型停用的资产也不进 —— 除非启用侧还在引用它
+    /// （共享资产：`p1s-icon` 归 P1S，P2S / X1C 的 `icon` 也指向它）。
+    pub fn delivery_assets(&self) -> Vec<&crate::presetdata::assets::Asset> {
+        let used = self.referenced_by_enabled();
+        self.assets
+            .items()
+            .iter()
+            .filter(|a| {
+                let Some(owner) = a
+                    .machine_id
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                else {
+                    return true; // 全局资产（品牌图 / 模型）不归某台机型
+                };
+                !self.machine_disabled(owner) || used.contains(&a.id.to_lowercase())
+            })
+            .collect()
+    }
+
+    /// 启用侧还在引用哪些资产（机型的 image / icon / imageVariant + 进交付的套餐引用）。
+    fn referenced_by_enabled(&self) -> std::collections::BTreeSet<String> {
+        let mut used: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut push = |id: Option<&str>| {
+            if let Some(id) = id.map(str::trim).filter(|s| !s.is_empty()) {
+                used.insert(id.to_lowercase());
+            }
+        };
+        for m in self.catalog.machines().iter().filter(|m| m.enabled) {
+            push(m.image.as_deref());
+            push(m.icon.as_deref());
+            push(m.image_variant.as_deref());
+        }
+        for b in self.delivery_bundles() {
+            for r in &b.asset_refs {
+                push(Some(r));
+            }
+        }
+        used
+    }
+
     /// 重读**同一个根**，载荷根跟着走。
     ///
     /// 重读只有这一条出口：盘上刚被别处改过（机型页直接写 `presets/`）时要靠它刷新。

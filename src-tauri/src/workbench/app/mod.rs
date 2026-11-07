@@ -262,10 +262,20 @@ pub fn verify_delivery(
         }
         Some(book) => {
             if !book.matches_catalog(&bytes) {
-                report.problems.push(format!(
-                    "账本说的是第 {} 号（{}），与盘上这份目录不是同一代",
-                    book.serial, book.revision
-                ));
+                /* 同一个号、内容变了 = 生成过还没发布（常规中间态）；
+                   号都对不上才是两处真的错代。两件事分开说，别都叫"不是同一代" */
+                let same_serial = catalog.publish_serial == Some(book.serial);
+                report.problems.push(if same_serial {
+                    format!(
+                        "第 {} 号已按当前源重算过，但还没发布（账本记的仍是上一代内容）—— 发一次就同一代",
+                        book.serial
+                    )
+                } else {
+                    format!(
+                        "账本说的是第 {} 号（{}），与盘上这份目录不是同一代",
+                        book.serial, book.revision
+                    )
+                });
             }
             if book.catalog_id != catalog.catalog_id.clone().unwrap_or_default() {
                 report

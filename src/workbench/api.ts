@@ -2500,13 +2500,14 @@ export interface DeliveryStatus {
 /* ---------- 交付定稿检查（②，只读） ---------- */
 
 /**
- * `build::FinalizeState` —— 交付定稿检查的三态。**后端说了算**，前端不重算。
+ * `build::FinalizeState` —— 交付定稿检查的四态。**后端说了算**，前端不重算。
  *
  * · `matched`        —— manifest 与当前交付文件逐条一致
  * · `stale`          —— 有 SHA / size 不一致（manifest 还停在上一次发布那一代）
+ * · `pendingPublish` —— 凭据齐了，但目录按当前源重算过、还没发过新版（同一个号）
  * · `identityFailed` —— source / catalog / 账本的关系有问题（看 `checks`）
  */
-export type FinalizeState = 'matched' | 'stale' | 'identityFailed'
+export type FinalizeState = 'matched' | 'stale' | 'pendingPublish' | 'identityFailed'
 
 /** `build::FinalizeEntry` —— 定稿后 manifest 里的一条（新旧两套值都在） */
 export interface FinalizeEntry {

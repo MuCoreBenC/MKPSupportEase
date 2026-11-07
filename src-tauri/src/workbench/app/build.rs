@@ -967,11 +967,15 @@ fn generate_inner(
 
         /* 第 5 步：内嵌目录重建 —— 读的就是刚写出去的那批入库产物 */
         /* `build_from_repo` 收的是**仓库根**（它自己会拼 `presets/`），不是 presets 那一层 */
-        let embedded =
-            crate::runtime::Catalog::build_from_repo(&crate::workbench::paths::repo_root())?;
+        let repo = crate::workbench::paths::repo_root();
+        let embedded = crate::runtime::Catalog::build_from_repo(&repo)?;
         let embedded_json = embedded.to_pretty_json()?;
+        /* ★ 落点也必须是**仓库根**（`<repo>/src-tauri/src/runtime/…`）。
+           `ctx.real_root()` 是 `presets/` 那一层 —— 拿它拼会写进
+           `presets/src-tauri/src/runtime/` 这个不存在的树里（2026-11-07 实测：
+           生成之后真正的内嵌目录还是旧的，错的树里多出一份）。 */
         crate::fsx::atomic::atomic_write(
-            &embedded_catalog_path_at(&ctx.real_root),
+            &embedded_catalog_path_at(&repo),
             embedded_json.as_bytes(),
         )?;
         receipt.step("embedded", true, format!("{} 份文件", embedded.files.len()));
@@ -1896,7 +1900,7 @@ pub fn wb_delivery_file(rel: String) -> Result<String, AppError> {
 
 /* ---------- ② 交付定稿（只读检查器） ---------- */
 
-/// 交付定稿检查的三种结论。界面只认这三句 —— 不造第四种「发布状态」，
+/// 交付定稿检查的四种结论。界面只认这四句 —— 不造第五种「发布状态」，
 /// 也不用「已定稿」这种会被读成"已经写进去了"的词。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1905,6 +1909,8 @@ pub enum FinalizeState {
     Matched,
     /// 存在 SHA / size 不一致（manifest 还停在上一次发布那一代）
     Stale,
+    /// 凭据齐了，但目录按当前源重算过、还没发过新版（同一个号）
+    PendingPublish,
     /// source / catalog / 账本的关系有问题 —— 细节看 `checks`
     IdentityFailed,
 }
@@ -2059,15 +2065,18 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
     let identity_failed = checks
         .iter()
         .any(|i| i.status == super::audit::AuditStatus::Fail);
+    let plan = super::audit::identity_plan(&delivery);
+    /* 三件事分开说：身份坏了 / 凭据落后 / 只是还没发布。凭据落后比"待发布"更该先说 ——
+       它有一颗粒按钮能当场修。 */
     let state_word = if identity_failed {
         FinalizeState::IdentityFailed
     } else if stale {
         FinalizeState::Stale
+    } else if plan.pending_publish {
+        FinalizeState::PendingPublish
     } else {
         FinalizeState::Matched
     };
-
-    let plan = super::audit::identity_plan(&delivery);
     let serial_on_disk = super::delivery::PublishIdentity::inherit_from(&delivery).serial;
 
     let (manifest, plan_error) = match manifest_preview(&delivery, &asset_root, &book) {
@@ -2103,9 +2112,25 @@ pub(super) fn finalize_preview_with(ctx: &super::Ctx) -> Result<FinalizePreview,
                 at: None,
             },
         );
+    } else if plan.pending_publish {
+        /* 同一个号、内容变了：生成改过目录，还没发过新版。**不是故障**，只是"等发布" */
+        issues.push(FinalizeIssue {
+            id: "identity.pending".to_owned(),
+            title: "这一代已经生成好，还没发布".to_owned(),
+            kind: FinalizeIssueKind::Info,
+            detail:
+                "目录与账本停在同一个号（内容已按当前源重算）—— 发一次就回到同一代；\
+                 发布前客户端看到的还是上一代。"
+                    .to_owned(),
+            action: FinalizeAction::CheckIdentity,
+            files: Vec::new(),
+            at: None,
+        });
     }
-    let ready = state_word == FinalizeState::Matched
-        && !plan.ledger_out_of_step
+    let ready = matches!(
+        state_word,
+        FinalizeState::Matched | FinalizeState::PendingPublish
+    ) && !plan.ledger_out_of_step
         && issues
             .iter()
             .all(|i| i.kind == FinalizeIssueKind::Info)
@@ -2268,6 +2293,14 @@ fn entry_diff(
             before_size: old.map(|(_, n)| *n),
         });
     }
+    /* 旧清单里有、新清单里没有的也算"这一笔要动"：定稿会把它们**去掉**
+       （停用机型 / 退出交付面的资产）。不数它们，回执就会说"0 条"却真写了盘。 */
+    let kept: std::collections::BTreeSet<&str> =
+        entries.iter().map(|e| e.relative_path.as_str()).collect();
+    changed += before
+        .keys()
+        .filter(|p| !kept.contains(p.as_str()))
+        .count();
     (entries, changed)
 }
 
@@ -2353,8 +2386,8 @@ fn build_issues(
             id: "credentials.stale".to_owned(),
             title: format!("{} 份凭据", drift.len()),
             kind: FinalizeIssueKind::Fixable,
-            detail: "文件内容已经变了，manifest 里记的还是上一代的 SHA / size。\
-                     更新只重写 manifest.json —— 不动 source.json、不推进序号、不提交、不推送。"
+            detail: "manifest 与这一代的交付面对不上（SHA / size 落后，或还登着目录里已经没有的\
+                     条目）。更新只重写 manifest.json —— 不动 source.json、不推进序号、不提交、不推送。"
                 .to_owned(),
             action: FinalizeAction::UpdateCredentials,
             files: drift.iter().map(|d| d.rel.clone()).collect(),
@@ -2373,8 +2406,9 @@ fn build_issues(
         }
     }
 
-    /* 产物在盘上 / 在候选里，但 `catalog.json` 没登记它 —— P2S 那种就是这一格。
-       绝不"顺手塞进 manifest"：先重新生成让目录重算，或去源里确认它该不该发。 */
+    /* 产物在盘上 / 在候选里，但 `catalog.json` 没登记它。
+       绝不"顺手塞进 manifest"：先重新生成让目录重算，或去源里确认它该不该发。
+       **停用机型豁免**：目录不登记它是设计（客户端不显示），产物照留在盘上。 */
     let catalog = std::fs::read(delivery.join(super::delivery::NEW_CATALOG_FILE))
         .ok()
         .and_then(|b| serde_json::from_slice::<crate::runtime::catalog::Catalog>(&b).ok());
@@ -2382,6 +2416,7 @@ fn build_issues(
     let unlisted: Vec<String> = candidates
         .iter()
         .filter(|c| c.rel.starts_with(&preset_prefix))
+        .filter(|c| !super::delivery::product_disabled(book, &c.rel[preset_prefix.len()..]))
         .filter(|c| {
             let want = format!("delivery/{}", c.rel);
             !catalog
@@ -2511,7 +2546,12 @@ fn credential_blockers(
         .ok()
         .and_then(|b| serde_json::from_slice::<crate::runtime::catalog::Catalog>(&b).ok());
     let preset_prefix = format!("{}/", paths::MKP_PRESETS_DIR);
-    for c in candidates.iter().filter(|c| c.rel.starts_with(&preset_prefix)) {
+    for c in candidates
+        .iter()
+        .filter(|c| c.rel.starts_with(&preset_prefix))
+        /* 停用机型：目录本来就不登记它，产物留在盘上是设计，不是没准备交付 */
+        .filter(|c| !super::delivery::product_disabled(book, &c.rel[preset_prefix.len()..]))
+    {
         let want = format!("delivery/{}", c.rel);
         if !catalog
             .as_ref()
@@ -2629,6 +2669,10 @@ mod tests {
         let bbs = dir.path().join("presets/assets/bbs/A1");
         std::fs::create_dir_all(&bbs).unwrap();
         crate::fsx::atomic::atomic_write(&bbs.join("process.json"), br#"{"x":1}"#).unwrap();
+        /* 载荷根挂上：不挂的话发布侧构建目录时所有资产都算"载荷缺失"，
+           目录里就没有 A 类条目 —— 而 manifest 会照登它们，这本账从一开始就自相矛盾。 */
+        let mut presets = presets;
+        presets.set_asset_root(&dir.path().join("presets/assets"));
         let store = Store::at(dir.path().join("workbench"));
         store.bootstrap().unwrap();
         (dir, Ctx::with(presets, store).unwrap())
@@ -4143,7 +4187,12 @@ mod tests {
         assert_eq!(untouched(dir.path()), before, "除 manifest 外一个字节都不许动");
 
         /* 更新之后的那份检查：凭据回到匹配、就绪 */
-        assert_eq!(out.preview.state, FinalizeState::Matched);
+        assert_eq!(
+            out.preview.state,
+            FinalizeState::Matched,
+            "更新后仍是失效：{:?}",
+            out.preview.reasons
+        );
         assert!(out.preview.ready, "更新后该是交付就绪：{:?}", out.preview.issues);
         assert!(
             !out.preview

@@ -327,9 +327,12 @@ pub(super) struct IdentityPlan {
     pub ledger_exists: bool,
     /// 同一代 + 已有身份 ⇒ 发与不发没有区别（事务会判 `NoChange`）
     pub nothing_to_publish: bool,
-    /// 账本与盘上 catalog 不是同一代（`State::Stale`）—— 发布闸的 `publish/identity`
-    /// 会在发布时拦，这里只把它摆出来让人先去处理
+    /// 账本与盘上 catalog 不是同一代（`State::Stale`），**而且不是因为"还没发布"**
+    /// —— 号都对不上 / 盘上那份没有身份。发布闸的 `publish/identity` 会在发布时拦
     pub ledger_out_of_step: bool,
+    /// 目录比账本新：同一个号、内容变了 = 生成过、还没发布（常规中间态）。
+    /// 发布一次就回到同一代，所以它不算"错代"，只是"待发布"
+    pub pending_publish: bool,
 }
 
 pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
@@ -345,6 +348,7 @@ pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
                     ledger_exists: false,
                     nothing_to_publish: false,
                     ledger_out_of_step: false,
+                    pending_publish: false,
                 },
                 State::InSync(b) => IdentityPlan {
                     catalog_id: b.catalog_id.clone(),
@@ -352,14 +356,21 @@ pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
                     ledger_exists: true,
                     nothing_to_publish: identity.catalog_id.is_some() && on_disk.is_some(),
                     ledger_out_of_step: false,
+                    pending_publish: false,
                 },
-                State::Stale(b) => IdentityPlan {
-                    catalog_id: b.catalog_id.clone(),
-                    next_serial: b.next_after(on_disk),
-                    ledger_exists: true,
-                    nothing_to_publish: false,
-                    ledger_out_of_step: true,
-                },
+                State::Stale(b) => {
+                    /* 内容变了但**号还是同一个** ⇒ 生成改了目录、没发过新版：常规中间态。
+                       号一变（或盘上那份根本没号）⇒ 两处确实错代，那是真问题。 */
+                    let same_serial = on_disk == Some(b.serial);
+                    IdentityPlan {
+                        catalog_id: b.catalog_id.clone(),
+                        next_serial: b.next_after(on_disk),
+                        ledger_exists: true,
+                        nothing_to_publish: false,
+                        ledger_out_of_step: !same_serial,
+                        pending_publish: same_serial,
+                    }
+                }
             }
         }
         /* 账本坏了：闸别处会报，这里如实说"读不出来"，不编一个号 */
@@ -369,6 +380,7 @@ pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
             ledger_exists: false,
             nothing_to_publish: false,
             ledger_out_of_step: true,
+            pending_publish: false,
         },
     }
 }

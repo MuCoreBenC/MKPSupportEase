@@ -53,6 +53,7 @@ interface Props {
 const STATE_TEXT: Record<FinalizeState, string> = {
   matched: '凭据匹配',
   stale: '凭据失效',
+  pendingPublish: '待发布',
   identityFailed: '身份检查未通过',
 }
 
@@ -88,19 +89,30 @@ function entryText(e: FinalizeEntry): string {
 const isChanged = (e: FinalizeEntry) =>
   e.beforeSha256 !== e.sha256 || e.beforeSize !== e.size
 
+/**
+ * 禁用原因只留最短那一句：完整原因在列表底下那块 note 里。
+ *
+ * 不能靠 tooltip —— 禁用的按钮弹不出 tooltip（`workbench.css` 里那条注释已经写明），
+ * 于是"为什么点不动"必须摆在按钮旁边。
+ */
+function shortReason(text: string): string {
+  const head = text.split('：')[0]
+  return head.length > 46 ? `${head.slice(0, 46)}…` : head
+}
+
 /** 主视图那一行的按钮：写盘只有「更新发布凭据」一个 */
 function IssueAction({
   issue,
   busy,
-  canUpdate,
+  blockedReason,
   onUpdateCredentials,
   onLocate,
   onCheckIdentity,
 }: {
   issue: FinalizeIssue
   busy: boolean
-  /** 定稿那一步算不算得出来 —— 算不出来时写盘必然被后端拒绝，按钮就别装作能用 */
-  canUpdate: boolean
+  /** 非 null = 定稿那一步算不出来（后端会拒绝写盘），按钮灰掉并把原因写在旁边 */
+  blockedReason: string | null
   onUpdateCredentials: () => void
   onLocate: (at: IssueWhere) => void
   onCheckIdentity: () => void
@@ -108,19 +120,26 @@ function IssueAction({
   switch (issue.action) {
     case 'updateCredentials':
       return (
-        <button
-          type="button"
-          className={`${c.btn} ${c.btnPrimary} ${c.btnSm}`}
-          disabled={busy || !canUpdate}
-          data-tip={
-            canUpdate
-              ? '按盘上真字节重算 SHA / size 并写回 manifest.json；不动 source.json、不推进序号、不提交'
-              : '定稿这一步还算不出来（见下方说明）—— 先处理「需处理源」那一项'
-          }
-          onClick={onUpdateCredentials}
-        >
-          {busy ? '更新中…' : '更新发布凭据'}
-        </button>
+        <div className={s.actionRow}>
+          <button
+            type="button"
+            className={`${c.btn} ${c.btnPrimary} ${c.btnSm}`}
+            disabled={busy || blockedReason !== null}
+            data-tip={
+              blockedReason === null
+                ? '按盘上真字节重算 SHA / size 并写回 manifest.json；不动 source.json、不推进序号、不提交'
+                : undefined
+            }
+            onClick={onUpdateCredentials}
+          >
+            {busy ? '更新中…' : '更新发布凭据'}
+          </button>
+          {(busy || blockedReason !== null) && (
+            <span className={s.actionWhy}>
+              {busy ? '正在按盘上真字节重算…' : `暂时不能更新：${blockedReason}`}
+            </span>
+          )}
+        </div>
       )
     case 'locateSource':
       return issue.at === null ? null : (
@@ -251,7 +270,9 @@ export default function FinalizeModal({
                     <IssueAction
                       issue={issue}
                       busy={busy}
-                      canUpdate={preview.planError === null}
+                      blockedReason={
+                        preview.planError === null ? null : shortReason(preview.planError)
+                      }
                       onUpdateCredentials={onUpdateCredentials}
                       onLocate={onLocate}
                       onCheckIdentity={onCheckIdentity}
@@ -311,8 +332,9 @@ export default function FinalizeModal({
                   </div>
                   {setDiffs > 0 && (
                     <p className={s.note}>
-                      {setDiffs} 项是 manifest 里登记过的附属交付资产（图标 / 模型 / BBS
-                      配置）与 catalog 的口径差异，不与下面预设产物的凭据变化合并计数，也不算凭据失效。
+                      {setDiffs} 项是 manifest 与 catalog 对不上的条目（多登了一条、或 SHA
+                      还没跟上）—— 和上面那批凭据是同一件事的两个视角，点「更新发布凭据」后会一起归零，
+                      不用单独处理。
                     </p>
                   )}
                 </div>
