@@ -80,6 +80,7 @@ import type {
   PublishTxReport,
   ReleaseHistory,
   ReleaseLedger,
+  ReleasePackages,
   VersionCell,
   VersionIdentity,
   Words,
@@ -174,6 +175,13 @@ function localStamp(iso: string): string {
  * 一格版本身份：有值就等宽显示，读不到就把**原因**写在值的位置（不写「未知」）；
  * 有出处就把出处标在下面，有落点就给一颗「打开位置」—— 没有落点的不摆按钮。
  */
+/** 字节数 → 人读的大小。**只用于展示**，不拿它做任何判据（判据一律比字节） */
+function fmtBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`
+  return `${n} B`
+}
+
 function IdentityCell({ label, cell }: { label: string; cell?: VersionCell }) {
   const text = cell?.value ?? `读不到${cell?.error === undefined ? '' : `：${cell.error}`}`
   const open = cell?.open
@@ -286,6 +294,11 @@ export default function BuildPage({
    * 对账要跑 git，取不到 git 时它自己报错，不该把四格一起拖黑。
    */
   const [versionId, setVersionId] = useState<VersionIdentity | null>(null)
+  /*
+   * 发布包清单（2026-11-08）：本地留了几份、云端各平台攒了多少版。
+   * 与四格分开取 —— 它要联网读两个平台的 Release 列表，慢了 / 挂了不该把四格一起拖黑。
+   */
+  const [packages, setPackages] = useState<ReleasePackages | null>(null)
   const [ledger, setLedger] = useState<ReleaseLedger | null>(null)
   const [ledgerErr, setLedgerErr] = useState<string | null>(null)
   const [ledgerOpen, setLedgerOpen] = useState(false)
@@ -294,6 +307,9 @@ export default function BuildPage({
     wb.versionIdentity()
       .then(setVersionId)
       .catch(() => setVersionId(null))
+    wb.releasePackages()
+      .then(setPackages)
+      .catch(() => setPackages(null))
     wb.releaseLedger()
       .then(setLedger)
       .catch((e) => {
@@ -1071,6 +1087,54 @@ export default function BuildPage({
                 <IdentityCell label="当前开发" cell={versionId.developing} />
               </div>
             )}
+            {/*
+              发布包（2026-11-08）：本地留了几份、云端各平台攒了多少版。
+              只读 —— GitHub 有仓库容量的建议值，攒到一定数量该清；清理由是照这份清单
+              由人 / AI 去做的事，这里不摆删除按钮。
+            */}
+            {packages !== null && (
+              <>
+                <div className={s.bar}>
+                  <span className={s.cardNote}>发布包 · 本地 {packages.local.length} 份</span>
+                </div>
+                {packages.local.length > 0 && (
+                  <div className={s.pkgList}>
+                    {packages.local.map((p) => (
+                      <span key={p.file} className={s.tag} title={`${p.file} · ${p.at}`}>
+                        {p.version} · {fmtBytes(p.bytes)}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {packages.remote.map((r) => (
+                  <div key={r.platform}>
+                    <div className={s.bar}>
+                      <span className={s.cardNote}>
+                        {r.platform === 'github' ? 'GitHub' : 'Gitee'} ·{' '}
+                        {r.error === undefined ? `${r.releases.length} 版` : '读不到'}
+                      </span>
+                    </div>
+                    {r.error !== undefined ? (
+                      <p className={s.note}>{r.error}</p>
+                    ) : (
+                      <div className={s.pkgList}>
+                        {r.releases.map((v) => (
+                          <span
+                            key={v.tag}
+                            className={s.tag}
+                            title={`${v.at} · ${v.assets} 个资产${v.bytes === undefined ? '（平台不报大小）' : ''}`}
+                          >
+                            {v.tag}
+                            {v.bytes === undefined ? '' : ` · ${fmtBytes(v.bytes)}`}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+
             <p className={s.note}>
               「已安装」读的是<b>本机</b> <span className={s.mono}>/Applications</span> 下那个{' '}
               <span className={s.mono}>.app</span> 的 Info.plist —— 纯本地读取，不联网、不上传。

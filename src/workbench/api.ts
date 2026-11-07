@@ -1512,6 +1512,40 @@ export interface VersionIdentity {
   developing: VersionCell
 }
 
+/** `version_id::LocalPackage` —— 本地打包目录里的一份安装包 */
+export interface LocalPackage {
+  version: string
+  file: string
+  bytes: number
+  /** 文件 mtime（ISO8601） */
+  at: string
+}
+
+/** `platform::ReleaseSummary` —— 一个 Release 的摘要（列表用） */
+export interface ReleaseSummary {
+  tag: string
+  name: string
+  prerelease: boolean
+  assets: number
+  /** 资产总字节数；**平台不报就没有**（Gitee 的附件 API 不返回 size） */
+  bytes?: number
+  at: string
+  url: string
+}
+
+/** `version_id::RemotePackages` —— 某个平台上的 Release 清单；读不到带原因 */
+export interface RemotePackages {
+  platform: string
+  releases: ReleaseSummary[]
+  error?: string
+}
+
+/** `version_id::ReleasePackages` —— 本地留了几份、云端各平台攒了多少版 */
+export interface ReleasePackages {
+  local: LocalPackage[]
+  remote: RemotePackages[]
+}
+
 /** `release_ledger::LedgerStatus` —— 对账结论 */
 export type LedgerStatus = 'both' | 'tagOnly' | 'recordOnly'
 
@@ -2676,6 +2710,11 @@ export const wb = {
   appVersion: () => invoke<string>('wb_app_version'),
   /** 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发 */
   versionIdentity: () => invoke<VersionIdentity>('wb_version_identity'),
+  /**
+   * 发布包清单（只读）：本地留了几份、云端各平台攒了多少版。
+   * 只读 —— 清理由是照这份清单由人 / AI 去做的事
+   */
+  releasePackages: () => invoke<ReleasePackages>('wb_release_packages'),
   /**
    * 打开某一格对应的位置（`installed` / `packaged` / `published`）。
    * ★ 只传**白名单键**：具体路径由后端重算，前端没有机会指定任意路径。

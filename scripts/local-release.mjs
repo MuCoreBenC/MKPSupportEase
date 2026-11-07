@@ -330,6 +330,22 @@ function main() {
   mkdirSync(history, { recursive: true })
   copyFileSync(join(OUT, manifestName), join(history, `${version}.json`))
 
+  /* ★ **安装包只留最近几个**：一版 11 MB，攒几十个就是白占地方；回滚真正要的只是
+     上一两个，加上它们各自的清单。带版本号的清单副本（`history/`）一个不删 ——
+     几 KB，是"那一版当时宣告了什么"的证据，删了就查不回来。 */
+  const KEEP_PACKAGES = 3
+  const packages = readdirSync(OUT)
+    .filter((n) => /^SupportEase_.*\.app\.zip$/.test(n))
+    .map((n) => ({ name: n, at: statSync(join(OUT, n)).mtimeMs }))
+    .sort((a, b) => b.at - a.at)
+  const dropped = packages.slice(KEEP_PACKAGES)
+  for (const p of dropped) rmSync(join(OUT, p.name), { force: true })
+  if (dropped.length > 0) {
+    console.log(
+      `[local-release] 清理 ${dropped.length} 个更早的安装包（保留最近 ${KEEP_PACKAGES} 个），清单副本全留`,
+    )
+  }
+
   /* 账本不在这里写：**只有 Tag 打成功才算交付**，那件事由发布事务负责。
      这个脚本只负责"把包和清单摆好"，它成功不代表这一版冻结了。 */
 

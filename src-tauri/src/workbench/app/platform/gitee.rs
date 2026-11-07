@@ -26,7 +26,7 @@ use crate::error::AppError;
 
 use super::{
     collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
-    RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
+    ReleaseSummary, RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
 };
 
 fn api_base() -> String {
@@ -280,6 +280,48 @@ impl Hosting for Gitee {
             Err(e) if e.code == crate::error::ErrorCode::NotFound => Ok(Vec::new()),
             Err(e) => Err(e),
         }
+    }
+
+    fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<ReleaseSummary>, AppError> {
+        let v = self.get(&format!("/repos/{owner}/{repo}/releases?per_page=100"))?;
+        Ok(v.as_array()
+            .map(|list| list.iter().map(|r| summary_of(r, owner, repo)).collect())
+            .unwrap_or_default())
+    }
+}
+
+/// 一条 Release 摘要。**Gitee 的附件 API 不返回 size** —— 字节数如实给 `None`，
+/// 不写 0 冒充"零字节"。Release 页面地址 Gitee 不给，按仓库与 tag 拼出来。
+fn summary_of(v: &Value, owner: &str, repo: &str) -> ReleaseSummary {
+    let assets = v
+        .get("assets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let tag = v
+        .get("tag_name")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    ReleaseSummary {
+        name: v
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        prerelease: v
+            .get("prerelease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        assets: assets.len(),
+        bytes: None,
+        at: v
+            .get("created_at")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        url: format!("https://gitee.com/{owner}/{repo}/releases/tag/{tag}"),
+        tag,
     }
 }
 

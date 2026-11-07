@@ -266,6 +266,117 @@ pub fn wb_version_identity() -> Result<VersionIdentity, AppError> {
     })
 }
 
+/* ---------- 发布包清单（只读）：本地留了几份、云端攒了几版 ---------- */
+
+/// 本地 `target/local-release/` 里的一个安装包。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPackage {
+    /// 从文件名解析出来的版本号（`SupportEase_<版本>_<架构>.app.zip`）
+    pub version: String,
+    pub file: String,
+    pub bytes: u64,
+    /// 文件 mtime（ISO8601）—— 这一份是什么时候打出来的
+    pub at: String,
+}
+
+/// 某个平台上的 Release 清单；**读不到就带原因**（不假装空）。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePackages {
+    pub platform: String,
+    pub releases: Vec<super::platform::ReleaseSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// 发布包清单：本地 + 每个平台。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleasePackages {
+    pub local: Vec<LocalPackage>,
+    pub remote: Vec<RemotePackages>,
+}
+
+/// 扫本地打包目录。文件名不合形状的跳过（那不是我们打的包）。
+fn local_packages(repo: &Path) -> Vec<LocalPackage> {
+    let Ok(entries) = std::fs::read_dir(repo.join(LOCAL_RELEASE_DIR)) else {
+        return Vec::new();
+    };
+    let mut out: Vec<LocalPackage> = entries
+        .flatten()
+        .filter_map(|e| {
+            let path = e.path();
+            let file = path.file_name()?.to_str()?.to_owned();
+            let version = file
+                .strip_prefix("SupportEase_")?
+                .split('_')
+                .next()?
+                .to_owned();
+            if !file.ends_with(".app.zip") {
+                return None;
+            }
+            let meta = e.metadata().ok()?;
+            Some(LocalPackage {
+                version,
+                file,
+                bytes: meta.len(),
+                at: meta
+                    .modified()
+                    .map(crate::workbench::clock::iso8601_of)
+                    .unwrap_or_default(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.at.cmp(&a.at));
+    out
+}
+
+fn remote_packages(root: &Path, platform: &str) -> RemotePackages {
+    let blank = |why: String| RemotePackages {
+        platform: platform.to_owned(),
+        releases: Vec::new(),
+        error: Some(why),
+    };
+    let target = match super::publish_tx::resolve_target(root, Some(platform)) {
+        Ok(t) => t,
+        Err(e) => return blank(e.message),
+    };
+    let Some(hosting) = super::platform::hosting(&target.platform, target.token.clone()) else {
+        return blank(format!("不认识的平台：{}", target.platform));
+    };
+    match hosting.list_releases(&target.owner, &target.repo) {
+        Ok(releases) => RemotePackages {
+            platform: platform.to_owned(),
+            releases,
+            error: None,
+        },
+        Err(e) => blank(match e.detail {
+            Some(d) => format!("{} —— {d}", e.message),
+            None => e.message,
+        }),
+    }
+}
+
+/// **发布包清单**（只读）：本地留了几份、云端各平台攒了多少版。
+///
+/// 联网只做一件事：读两个平台的 Release 列表。读不到就在那一格里写明原因 ——
+/// "云端有几版"这种数不许拿空表冒充。
+#[tauri::command]
+pub async fn wb_release_packages(app: tauri::AppHandle) -> Result<ReleasePackages, AppError> {
+    let root = crate::fsx::paths::internal_root(&app)?;
+    let local = local_packages(&crate::workbench::paths::repo_root());
+    tauri::async_runtime::spawn_blocking(move || {
+        let remote = super::credentials::PLATFORMS
+            .iter()
+            .map(|p| remote_packages(&root, p))
+            .collect();
+        Ok(ReleasePackages { local, remote })
+    })
+    .await
+    .map_err(|e| AppError::internal("读发布包清单的任务挂了").with_detail(e.to_string()))?
+}
+
 /* ---------- 「打开位置」：前端只传白名单键 ---------- */
 
 /// 允许打开的三格。**认不出就拒绝** —— 这是个"把字符串变成系统动作"的口子。
@@ -475,6 +586,29 @@ mod tests {
             release_url_for(dir.path(), "v0.0.10-preview.2").is_none(),
             "坏清单不许 panic，也不许猜"
         );
+    }
+
+    /// 本地打包目录：只认 `SupportEase_<版本>_<架构>.app.zip`，临时 zip 不算。
+    #[test]
+    fn local_packages_read_the_name_and_bytes() {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join(LOCAL_RELEASE_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in [
+            ("SupportEase_0.0.10-preview.8_aarch64.app.zip", 12u8),
+            ("SupportEase_0.0.10-preview.7_aarch64.app.zip", 8),
+            ("tmp-SupportEase.app.zip", 4),
+            ("notes.txt", 2),
+        ] {
+            crate::fsx::atomic::atomic_write(&dir.join(name), &vec![b'a'; bytes as usize]).unwrap();
+        }
+        let list = local_packages(d.path());
+        assert_eq!(list.len(), 2, "临时 zip 与别的文件都不算：{list:?}");
+        assert!(
+            list.iter().any(|p| p.version == "0.0.10-preview.8"),
+            "版本号要从文件名里读出来：{list:?}"
+        );
+        assert!(list.iter().all(|p| p.bytes > 0));
     }
 
     /// 「打开位置」只认三个键；别的（含穿越路径）一律认不出。

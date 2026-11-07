@@ -50,6 +50,8 @@
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 
@@ -108,6 +110,31 @@ function die(message, rollback = []) {
 }
 
 /**
+ * 工作台的应用数据目录 —— 内核靠 `MKPSE_APP_DIR` 在那儿找**发布账户**（仓库地址 /
+ * 用户名）和凭据文件，与工作台 GUI 同一份。
+ *
+ * 不显式给的时候内核只会说"没有配置发布平台"：那句话读起来像没填账户，其实是它压根
+ * 没找到那个目录 —— 客户端与工作台是两个 identifier，各有各的 `appDataDir`。
+ *
+ * 三平台按 Tauri 的 `app_data_dir` 规则算，不猜：
+ * ```text
+ * macOS    ~/Library/Application Support/<identifier>
+ * Windows  %APPDATA%\<identifier>
+ * Linux    $XDG_DATA_HOME/<identifier>（没设就 ~/.local/share/<identifier>）
+ * ```
+ */
+function workbenchAppDir() {
+  const id = 'SupportEase-Workbench'
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', id)
+  }
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA ?? join(homedir(), 'AppData', 'Roaming'), id)
+  }
+  return join(process.env.XDG_DATA_HOME ?? join(homedir(), '.local', 'share'), id)
+}
+
+/**
  * 调**发布软件版本的内核**（`cargo run --bin release --features workbench -- …`）。
  *
  * 摘要走 stderr（直连终端），结果是一行 JSON（stdout）—— 这个脚本读 JSON，
@@ -126,6 +153,8 @@ function core(args) {
     encoding: 'utf8',
     cwd: ROOT,
     stdio: ['ignore', 'pipe', 'inherit'],
+    /* 显式给工作台数据目录：发布账户与凭据在那儿。调用方设过就以调用方为准 */
+    env: { ...process.env, MKPSE_APP_DIR: process.env.MKPSE_APP_DIR ?? workbenchAppDir() },
   })
   const line = out.trim().split('\n').filter(Boolean).pop()
   if (!line) throw new Error('内核没给出报告（stdout 是空的）')
@@ -247,6 +276,17 @@ if (!tryRun('gh', ['auth', 'status'])) {
   die('gh 没登录（或没装）。等 CI 那一段要用它查状态：gh auth login')
 }
 ok('gh 可用')
+
+/* 发布账户从哪儿读：调用方设了环境变量就用它，否则按平台规则算工作台的数据目录。
+   目录不存在 ⇒ 内核只会做本地那一半（推分支 / 打 tag / 构建），不建 Release ——
+   那句话说的是"没有配置发布平台"，容易被当成没填账户。 */
+const appDir = process.env.MKPSE_APP_DIR ?? workbenchAppDir()
+if (existsSync(appDir)) {
+  ok(`发布账户目录 ${appDir}`)
+} else {
+  info(`发布账户目录还不存在：${appDir}`)
+  info('（这一趟只会做本地那一半：推分支 / 打 tag / 构建，不建 Release）')
+}
 
 /* 复述上次 tag 之后的绕过记录 —— bypass.log 的全部价值在于有人真的念它 */
 const gitDir = run('git', ['rev-parse', '--absolute-git-dir'])

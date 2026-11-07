@@ -181,6 +181,28 @@ pub struct RemoteRelease {
     pub url: String,
 }
 
+/// 一个 Release 的**摘要**（列表用，不带资产明细）。
+///
+/// 工作台拿它回答"云端攒了多少版、占了多少地方" —— GitHub 有仓库容量的建议值，
+/// 攒到一定数量该清。删除不在这条接口上：清理由是人和 AI 按这份清单去做的事。
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseSummary {
+    /// tag 名（`v0.0.10-preview.8`）—— 要删 Release 时用它点名
+    pub tag: String,
+    pub name: String,
+    pub prerelease: bool,
+    /// 资产个数
+    pub assets: usize,
+    /// 资产总字节数；**平台不报就是 `None`**（Gitee 的附件 API 不返回 size）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// 平台给的时间（ISO8601，原样搬，不重算）
+    pub at: String,
+    /// 网页地址
+    pub url: String,
+}
+
 /// 上传一个安装包要的东西。**文件按路径给**（不把字节塞进这个结构）——
 /// dmg 有几十 MB，传引用而不是值，也让"上传前先确认文件在不在"有地方落。
 #[derive(Debug, Clone)]
@@ -294,6 +316,15 @@ pub trait Hosting {
     /// 而不是笼统地"tag 被占就不许发"。
     fn release_assets(&self, owner: &str, repo: &str, tag: &str) -> Result<Vec<String>, AppError> {
         let _ = (owner, repo, tag);
+        Err(platform_not_supported(self.kind()))
+    }
+
+    /// 列出仓库里的 Release（新的在前）。**只读**。
+    ///
+    /// 工作台拿它回答"云端攒了多少版、占了多少地方" —— 清理由是人和 AI 按这份清单
+    /// 去做的事，这条接口上没有删除动作。
+    fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<ReleaseSummary>, AppError> {
+        let _ = (owner, repo);
         Err(platform_not_supported(self.kind()))
     }
 }

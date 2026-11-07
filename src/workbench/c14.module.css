@@ -5838,6 +5838,14 @@
  * 四格读数：四个号不一样是常态（开发 / 打包 / 冻结 / 装包各走一步），
  * 所以并排摆、中间只用 1px 细线分隔，不画四个卡片框。
  */
+/* 发布包清单：一行徽章，放不下就换行（本地几份 / 云端几版各一组） */
+.pkgList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
 .identityGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

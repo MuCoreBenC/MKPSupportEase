@@ -23,7 +23,7 @@ use crate::error::AppError;
 
 use super::{
     collapse_checks, collapse_state, AssetUpload, ChecksSummary, Hosting, MergeMethod, ReleaseSpec,
-    RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
+    ReleaseSummary, RemoteRelease, RemoteReview, ReviewId, ReviewSpec, UploadedAsset,
 };
 
 /// GitHub API 基址（可用环境变量覆盖给企业版 / 测试假服务器）。
@@ -223,6 +223,13 @@ impl Hosting for GitHub {
         }
     }
 
+    fn list_releases(&self, owner: &str, repo: &str) -> Result<Vec<ReleaseSummary>, AppError> {
+        let v = self.get(&format!("/repos/{owner}/{repo}/releases?per_page=100"))?;
+        Ok(v.as_array()
+            .map(|list| list.iter().map(summary_of).collect())
+            .unwrap_or_default())
+    }
+
     fn upload_asset(&self, up: &AssetUpload) -> Result<UploadedAsset, AppError> {
         // `POST https://uploads.github.com/repos/{o}/{r}/releases/{id}/assets?name=<name>`
         // —— 文件名在**查询串**里，body 是裸字节。与 JSON 出口不是一回事：
@@ -404,6 +411,48 @@ fn transport(e: ureq::Error) -> AppError {
             }
         }
         other => AppError::io("连不上 GitHub").with_detail(other.to_string()),
+    }
+}
+
+/// 一条 Release 摘要。GitHub 的 `assets[].size` 是有值的（Gitee 那边没有）。
+fn summary_of(v: &Value) -> ReleaseSummary {
+    let assets = v
+        .get("assets")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    ReleaseSummary {
+        tag: v
+            .get("tag_name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        name: v
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        prerelease: v
+            .get("prerelease")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        assets: assets.len(),
+        bytes: Some(
+            assets
+                .iter()
+                .filter_map(|a| a.get("size").and_then(Value::as_u64))
+                .sum(),
+        ),
+        at: v
+            .get("created_at")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+        url: v
+            .get("html_url")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
     }
 }
 
