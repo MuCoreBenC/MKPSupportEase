@@ -174,7 +174,9 @@ function writeAll(version) {
     if (!re.test(before)) throw new Error(`${path} 里没找到版本号，拒绝盲写`)
     writeFileSync(path, before.replace(re, next))
   }
-  /* 源**不动**（它就是权威）：只把同一份值铺到四处。 */
+  /* 源**跟着写**：它就是"当前正在开发哪个号"，而这些入口改的正是这个号。
+     只铺四处会在 `version:check` 上立刻红成"版本不一致"（源还是旧号）。 */
+  swap(SOURCE, /^version\s*=\s*"[^"]*"/m, `version = "${version}"`)
   swap(FILES.pkg, /"version"\s*:\s*"[^"]*"/, `"version": "${version}"`)
   swap(FILES.tauri, /"version"\s*:\s*"[^"]*"/, `"version": "${version}"`)
   swap(FILES.cargo, /^version\s*=\s*"[^"]*"/m, `version = "${version}"`)
