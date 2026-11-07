@@ -1,12 +1,12 @@
 {
   "releaseSchema": 1,
-  "version": "0.0.10-preview.2",
-  "notes": "修好旧版本误报；新的安装窗口",
-  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.10-preview.2",
+  "version": "0.0.10-preview.8",
+  "notes": "修：构建线两档分开，工作台产物不再顶掉客户端",
+  "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/tag/v0.0.10-preview.8",
   "asset": {
-    "name": "SupportEase_0.0.10-preview.2_aarch64.app.zip",
-    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.10-preview.2/SupportEase_0.0.10-preview.2_aarch64.app.zip",
-    "size": 10956151,
-    "sha256": "f2d554142170d7de75a55f00c9b53dabb30c4740a2ef118f45fbfc1ff2ec04bc"
+    "name": "SupportEase_0.0.10-preview.8_aarch64.app.zip",
+    "url": "https://gitee.com/MuCoreBenC/MKPSupportEase/releases/download/v0.0.10-preview.8/SupportEase_0.0.10-preview.8_aarch64.app.zip",
+    "size": 10968380,
+    "sha256": "c652f77b053eacdab2513627036bc23c7a1e6dd99db3d3abd0b8aacc5312804e"
   }
 }
