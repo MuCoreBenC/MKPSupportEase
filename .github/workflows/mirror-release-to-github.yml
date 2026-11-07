@@ -96,7 +96,7 @@ jobs:
           while :; do
             code=$(curl -sS -o rel.json -w '%{http_code}' "${api}" || echo 000)
             if [ "${code}" = "200" ]; then
-              n=$(jq '[.assets[] | select(.name | startswith("SupportEase_"))] | length' rel.json)
+              n=$(jq '[(.assets // [])[] | select(.name | startswith("SupportEase_"))] | length' rel.json)
               if [ "${n}" -gt 0 ]; then
                 echo "✓ Gitee Release 已就绪，${n} 个安装包资产"
                 break
@@ -147,7 +147,7 @@ jobs:
 
           # 只要自己的安装包：Gitee 会额外挂两个自动生成的源码包（v*.zip / v*.tar.gz），
           # 那玩意儿 GitHub 自己也会生成，复制过去只是噪音。
-          jq -r '.assets[] | select(.name | startswith("SupportEase_")) | "\(.name)\t\(.browser_download_url)"' rel.json |
+          jq -r '(.assets // [])[] | select(.name | startswith("SupportEase_")) | "\(.name)\t\(.browser_download_url)"' rel.json |
           while IFS=$'\t' read -r name url; do
             curl -sSL --retry 3 -o "dist/${name}" "${url}"
             sha=$(sha256sum "dist/${name}" | cut -d' ' -f1)
