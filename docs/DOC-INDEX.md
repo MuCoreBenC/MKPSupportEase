@@ -43,11 +43,13 @@
 | [`docs/DATA-INVENTORY.md`](DATA-INVENTORY.md) | 总纲的对账单（43 件归位 + 收口日志） | 对账单：基准 2026-10-01 `58f4295`，收口一条勾一条（是否勾完没终检） |
 | [`docs/SMART-TOWER-RELOCATION-HANDOFF.md`](SMART-TOWER-RELOCATION-HANDOFF.md) | **智能塔位置**（2026-10-18）：碰撞时自动摆塔那一问的全链路交接（口径 / 数据流 / 文件 / 判据 / 还差什么 / 坑） | 现行：代码全绿，差「答 relocate 后跑完」一条真机验收 |
 | [`docs/PIPELINE-TOWER-ASK-HANDOFF.md`](PIPELINE-TOWER-ASK-HANDOFF.md) | **把"挪塔那一问"挪进内核第 6 步**（2026-10-18 夜，方案 B） | 已落地（文内落地记录与设计有差异，**以落地记录为准**） |
+| [`docs/kb/00-INDEX.md`](kb/00-INDEX.md) | **架构知识库**：五张地图（产品功能 / 业务流程 / 技术架构 / 数据生命周期 / 模块问题），主链（套餐→预设/参数→生成→后处理）已做深，其余为骨架；每条结论带 `文件:行`，每图附 5 个验收问题 | 现行·持续增量（2026-11-07 建立；技术/数据/问题三图仍是骨架，待补调用图与客户端本地数据） |
 
 ## 2. 记录与计划（docs/ 顶层带日期的那些）
 
 | 文档 | 日期 | 一句话 | 状态（自标优先） |
 | --- | --- | --- | --- |
+| [`DELIVERY-ARCHITECTURE-RESEARCH.md`](DELIVERY-ARCHITECTURE-RESEARCH.md) | 2026-11-07 | **交付架构调研与目标设计**：`manifest` 定位判定（仅工作台使用、客户端 0 处业务读取）、交付集合 5 处算法与 `enabled` 只在 catalog 生效、catalog/manifest/账本三处重复登记、开源对照（Helm / GoReleaser / OCI / Tauri Updater）、三个必答问题的架构答案、逐函数淘汰清单、分阶段迁移、Delivery Lab 设计（两案选型 / 四角色 / 八步闭环 / 四轮计划 / 破坏性矩阵） | **调研·设计，待作者裁决**：本轮零代码改动；取代此前未经验证的重构假设（`DELIVERY-PIPELINE-REFACTOR.md` 未创建）；Delivery Lab 尚未建仓 |
 | [`HOOK-ERRORS-AND-MESSAGES.md`](HOOK-ERRORS-AND-MESSAGES.md) | 2026-10-11 | 后处理的错误：切片器那一框吃什么（BBS 源码证据）+ 文案表 + 两条日志流 | 现行（本分支新增，随"切片器能显示什么"那一刀） |
 | [`NEED-BBS-INVALIDATE.md`](NEED-BBS-INVALIDATE.md) + [`INVESTIGATION-BBS-INVALIDATE.md`](INVESTIGATION-BBS-INVALIDATE.md) | 2026-10-15 | 需求：改了 MKP 参数后让 BBS 当前切片结果失效 → 技术调查 | **需求未实施**：BBS `02.08.02.60` 没有无侵入的外部入口（三个入口全排除、运行时注入被 entitlement 封死） |
 | [`detail-card-mock.html`](detail-card-mock.html) | — | 详情卡抽卡的参考图复刻（mock，浏览器直接打开） | 素材（原型） |

@@ -10,6 +10,7 @@ image = 'p2s-image'
 # 与 A1 同一块板（单卡舌 256）—— 塔地图按 defaultPlateId 选板
 plateIds = ['single-latch-256']
 defaultPlateId = 'single-latch-256'
+enabled = false
 
 [dimensions]
 edgeZone = 10.0

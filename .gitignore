@@ -67,6 +67,9 @@ tmp-shots/
 # 留在这儿是为了万一被忘掉时不会混进提交。
 tmp-port/
 
+# 走查现场：探针、日志、截图、取样文件（AGENTS.md §8.3）。本机状态，用完即弃。
+/.scratch/
+
 # 编辑器
 .vscode/*
 !.vscode/extensions.json

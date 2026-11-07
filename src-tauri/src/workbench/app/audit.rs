@@ -289,30 +289,13 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
      * 只读：`inspect` 读账本与 catalog，`next_after` 是纯算术 —— 预演与真发走同一处分配，
      * 所以这里说"第 1 号"，真发就一定是第 1 号。
      */
-    let (catalog_id, publish_serial, ledger_exists, nothing_to_publish) =
-        match super::publish_book::inspect(&delivery_root, super::delivery::NEW_CATALOG_FILE) {
-            Ok(state) => {
-                use super::publish_book::State;
-                let identity = super::delivery::PublishIdentity::inherit_from(&delivery_root);
-                let on_disk = identity.serial;
-                match state {
-                    State::NoBook => (
-                        super::publish_book::DEFAULT_LINE.to_owned(),
-                        1u64,
-                        false,
-                        false,
-                    ),
-                    State::InSync(b) => {
-                        /* 同一代 + 已有身份 ⇒ 发与不发没有区别（事务会判 `NoChange`） */
-                        let noop = identity.catalog_id.is_some() && on_disk.is_some();
-                        (b.catalog_id.clone(), b.next_after(on_disk), true, noop)
-                    }
-                    State::Stale(b) => (b.catalog_id.clone(), b.next_after(on_disk), true, false),
-                }
-            }
-            /* 账本坏了：闸别处会报，这里如实说"读不出来"，不编一个号 */
-            Err(_) => (String::new(), 0, false, false),
-        };
+    let plan = identity_plan(&delivery_root);
+    let (catalog_id, publish_serial, ledger_exists, nothing_to_publish) = (
+        plan.catalog_id,
+        plan.next_serial,
+        plan.ledger_exists,
+        plan.nothing_to_publish,
+    );
 
     /* 目录**现在**有没有身份 —— 与"这次将写成第几号"是两件事：老目录会从"无"变成"有" */
     let identity_now = super::delivery::PublishIdentity::inherit_from(&delivery_root);
@@ -331,6 +314,71 @@ pub(super) fn audit_with(ctx: &super::Ctx) -> Result<PublishAudit, AppError> {
         serial_now: identity_now.serial,
         nothing_to_publish,
     })
+}
+
+/* ---------- 交付定稿检查（②）与序号预演共用 ---------- */
+
+/// 「下一次正式发布会写成第几号」—— 发布闸与交付定稿检查**同一处算法**。
+///
+/// 纯读：`inspect` 读账本与 catalog，`next_after` 是纯算术。**不分配、不落盘**。
+pub(super) struct IdentityPlan {
+    pub catalog_id: String,
+    pub next_serial: u64,
+    pub ledger_exists: bool,
+    /// 同一代 + 已有身份 ⇒ 发与不发没有区别（事务会判 `NoChange`）
+    pub nothing_to_publish: bool,
+    /// 账本与盘上 catalog 不是同一代（`State::Stale`）—— 发布闸的 `publish/identity`
+    /// 会在发布时拦，这里只把它摆出来让人先去处理
+    pub ledger_out_of_step: bool,
+}
+
+pub(super) fn identity_plan(delivery_root: &std::path::Path) -> IdentityPlan {
+    use super::publish_book::State;
+    match super::publish_book::inspect(delivery_root, super::delivery::NEW_CATALOG_FILE) {
+        Ok(state) => {
+            let identity = super::delivery::PublishIdentity::inherit_from(delivery_root);
+            let on_disk = identity.serial;
+            match state {
+                State::NoBook => IdentityPlan {
+                    catalog_id: super::publish_book::DEFAULT_LINE.to_owned(),
+                    next_serial: 1,
+                    ledger_exists: false,
+                    nothing_to_publish: false,
+                    ledger_out_of_step: false,
+                },
+                State::InSync(b) => IdentityPlan {
+                    catalog_id: b.catalog_id.clone(),
+                    next_serial: b.next_after(on_disk),
+                    ledger_exists: true,
+                    nothing_to_publish: identity.catalog_id.is_some() && on_disk.is_some(),
+                    ledger_out_of_step: false,
+                },
+                State::Stale(b) => IdentityPlan {
+                    catalog_id: b.catalog_id.clone(),
+                    next_serial: b.next_after(on_disk),
+                    ledger_exists: true,
+                    nothing_to_publish: false,
+                    ledger_out_of_step: true,
+                },
+            }
+        }
+        /* 账本坏了：闸别处会报，这里如实说"读不出来"，不编一个号 */
+        Err(_) => IdentityPlan {
+            catalog_id: String::new(),
+            next_serial: 0,
+            ledger_exists: false,
+            nothing_to_publish: false,
+            ledger_out_of_step: true,
+        },
+    }
+}
+
+/// ② 交付定稿检查要复用的两格 —— ⑬ source 正确、⑭ manifest 与交付集合一致。
+///
+/// **判据不在这里**：直接调发布闸那两处函数，所以"定稿检查说通过、发布闸说不过"
+/// 这种两套口径不会出现。⑭ 是提示档（生成过还没发是常规状态），不构成阻断。
+pub(super) fn finalize_checks(delivery_root: &std::path::Path) -> Vec<AuditItem> {
+    vec![source_correct(delivery_root), manifest_correct(delivery_root)]
 }
 
 /* ---------- 事务的最后一道安全检查（③½） ---------- */

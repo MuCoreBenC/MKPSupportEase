@@ -2388,7 +2388,35 @@ export type DeliveryStage = 'generate' | 'publish' | 'software'
  * 这个判"盘上字节与交付目录登记的对不对得上" —— 改 3MF 不会动任何版本的
  * `BuildState`，但会让对应条目变 `pending`。
  */
-export type DeliveryState = 'missing' | 'upToDate' | 'pending'
+export type DeliveryState = 'missing' | 'upToDate' | 'pending' | 'removed' | 'unmanaged'
+
+/**
+ * `delivery::DiffKind` —— 相对当前源重算后逐字节比较出来的结论。
+ * 界面状态徽标只认这一格，不再由 `stage` 或"文件在不在"推断。
+ */
+export type DiffKind = 'added' | 'modified' | 'removed' | 'same' | 'unmanaged' | 'frozen'
+
+/** `delivery::FileDiff` —— 一份文件的比较结论与首处差异 */
+export interface FileDiff {
+  rel: string
+  kind: DiffKind
+  beforeSize: number | null
+  afterSize: number | null
+  firstDiff: string | null
+  group: string
+}
+
+/** `delivery::DeliveryGroup` —— 后端算好的分组摘要；前端只按 allSame 决定折叠 */
+export interface DeliveryGroup {
+  id: string
+  label: string
+  total: number
+  modified: number
+  added: number
+  removed: number
+  unmanaged: number
+  allSame: boolean
+}
 
 /**
  * `delivery::DeliveryPendingReason` —— pending 的**原因**。
@@ -2414,6 +2442,10 @@ export interface DeliveryFile {
   registeredSize: number | null
   /** pending 的原因（null = 不是 pending） */
   pendingReason: DeliveryPendingReason | null
+  /** 逐字节比较出来的真实结论 —— 状态徽标读它，不读 stage */
+  diff: DiffKind
+  /** 分组 id（见 DeliveryGroup） */
+  group: string
 }
 
 /**
@@ -2455,6 +2487,104 @@ export interface DeliveryStatus {
   manifestModified: string | null
   /** `catalog.json` 读不出来时的原话（正常 = null） */
   catalogError: string | null
+  /** 逐份逐字节比较的结论（含待删除、未纳管与发布独占档） */
+  diffs: FileDiff[]
+  /** 分组摘要：有变化的组该展开，全一致的组可折叠成带数字的摘要 */
+  groups: DeliveryGroup[]
+  /** 发布凭据是否已失效（只读诊断，重算归发布定稿） */
+  manifestStale: boolean
+  /** 失效条目，逐条点名 */
+  manifestReasons: string[]
+}
+
+/* ---------- 交付定稿检查（②，只读） ---------- */
+
+/**
+ * `build::FinalizeState` —— 交付定稿检查的三态。**后端说了算**，前端不重算。
+ *
+ * · `matched`        —— manifest 与当前交付文件逐条一致
+ * · `stale`          —— 有 SHA / size 不一致（manifest 还停在上一次发布那一代）
+ * · `identityFailed` —— source / catalog / 账本的关系有问题（看 `checks`）
+ */
+export type FinalizeState = 'matched' | 'stale' | 'identityFailed'
+
+/** `build::FinalizeEntry` —— 定稿后 manifest 里的一条（新旧两套值都在） */
+export interface FinalizeEntry {
+  /** 发布根相对（`delivery/mkp/presets/A1-standard.toml`） */
+  relativePath: string
+  id: string
+  sha256: string
+  size: number
+  /** 盘上那份 manifest 登记的值（null = 这一条是新增的） */
+  beforeSha256: string | null
+  beforeSize: number | null
+}
+
+/** `build::FinalizeManifest` —— 定稿会把 `manifest.json` 写成什么 */
+export interface FinalizeManifest {
+  rel: string
+  state: DiffState
+  entries: FinalizeEntry[]
+  /** 有几条 sha / size 与盘上那份不同（含新增） */
+  changedEntries: number
+  lines: PreviewDiffLine[]
+  added: number
+  removed: number
+}
+
+/** `build::FinalizeIssueKind` —— 这一条能不能在这里修 */
+export type FinalizeIssueKind = 'fixable' | 'source' | 'identity' | 'info'
+
+/** `build::FinalizeAction` —— 这一条上能点的那个动作（写盘动作只有 `updateCredentials`） */
+export type FinalizeAction = 'updateCredentials' | 'locateSource' | 'checkIdentity' | 'none'
+
+/** `build::FinalizeIssue` —— ② 的一条问题。分类与可否自动修都由后端说 */
+export interface FinalizeIssue {
+  id: string
+  title: string
+  kind: FinalizeIssueKind
+  /** 「怎么办」，不是把标题换个说法 */
+  detail: string
+  action: FinalizeAction
+  /** 涉及的文件（界面只数份数） */
+  files: string[]
+  /** 「定位源问题」落到哪一页 / 哪一版（null = 反查不到，只展示路径） */
+  at: IssueWhere | null
+}
+
+/**
+ * `build::FinalizePreview` —— 交付检查的返回值。**命令本身只读**：
+ * 不写盘、不分配序号、不碰账本。`serialNextPublish` 只是算术，不是分配结果。
+ */
+export interface FinalizePreview {
+  state: FinalizeState
+  /** true = 没有可修 / 需处理的问题（`info` 不算），可以进正式发布 */
+  ready: boolean
+  /** 逐条问题：能的直接修，不能的说去哪修 */
+  issues: FinalizeIssue[]
+  /** 凭据失效的逐条原因（后端原话） */
+  reasons: string[]
+  /** 复用发布闸 ⑬⑭ 的两格：source 正确 / manifest 与交付集合一致 */
+  checks: AuditItem[]
+  catalogId: string
+  /** 盘上这一代目录的号（null = 还没发过） */
+  serialOnDisk: number | null
+  /** 下一次正式发布会拿到的号（纯算术） */
+  serialNextPublish: number
+  /** 定稿后的 manifest（算不出来 = null，原因在 planError） */
+  manifest: FinalizeManifest | null
+  planError: string | null
+}
+
+/** `build::CredentialUpdate` —— 「更新发布凭据」的回执（更新后重新检查的那一份也在） */
+export interface CredentialUpdate {
+  /** false = 盘上那份本来就是最新的，一个字节都没写 */
+  written: boolean
+  /** 这次重算进 manifest 的条目数 */
+  entries: number
+  /** 有几条 SHA / size 与原来那份不同 */
+  changed: number
+  preview: FinalizePreview
 }
 
 /** `build::BaselineDiffEntry` —— 基线 diff 的一条（b05 Task 14.9）。两侧哈希前 16 位，不同就是变了 */
@@ -3082,4 +3212,20 @@ export const wb = {
    * 盘上还没有（还没生成 / 还没发布）时如实报错
    */
   deliveryFile: (rel: string) => invoke<string>('wb_delivery_file', { rel }),
+  /**
+   * **交付检查**（②，只读）：交付文件具不具备定稿条件、定稿会把 `manifest.json`
+   * 改成什么、每条问题能不能在这里修。
+   *
+   * ★ 它**不是**发布阶段：不写 `manifest.json` / `source.json`、不动账本、
+   * 不推进 `publishSerial`、也不要求工作区干净。真正的确立身份只在发布事务里。
+   */
+  finalizePreview: () => invoke<FinalizePreview>('wb_finalize_preview'),
+  /**
+   * **更新发布凭据**（②，唯一会写盘的那一步）：按盘上真字节重算 SHA / size 并写回
+   * `manifest.json`。
+   *
+   * ★ 只动这一份：不写 `source.json`、不重算 `catalog.json`、不推进 `publishSerial`、
+   * 不提交 Git。交付集合没收敛 / 目录不是当前代时后端**整笔拒绝**，一个字节都不写。
+   */
+  updatePublishCredentials: () => invoke<CredentialUpdate>('wb_update_publish_credentials'),
 }

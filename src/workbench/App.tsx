@@ -419,6 +419,19 @@ export function WorkbenchApp() {
   }, [refreshReport])
 
   /**
+   * 生成 / 发布**写了盘上的产物**之后：整本、检查报告、交付读数一起重取。
+   *
+   * `refreshBook` 只重取整本与报告，**不拨 `tick`**；而 ①生成卡那 9 行与交付明细挂在
+   * `tick` 上（`wb_delivery_files` 的 `useEffect` 依赖它）。只调 `refreshBook` 的话，
+   * 底栏已写「已生成」、检查卡待办已清零，右边那 9 行还是生成前的「待更新」与旧大小
+   * —— 同一屏两个时点，看起来就像"生成了但没刷新"。
+   */
+  const refreshAfterArtifacts = useCallback(() => {
+    refreshBook()
+    setTick((n) => n + 1)
+  }, [refreshBook])
+
+  /**
    * 盘上的 `presets/` 被外部改过没有（2026-10-20，作者：「像你这种外部改的，
    * 我这个软件完全没有看到改的呀」）。
    *
@@ -991,7 +1004,7 @@ export function WorkbenchApp() {
             tick={tick}
             onGoto={goto}
             onSave={save}
-            onBookRefresh={refreshBook}
+            onArtifactsRefresh={refreshAfterArtifacts}
             onReportRefresh={refreshReport}
           />
         )

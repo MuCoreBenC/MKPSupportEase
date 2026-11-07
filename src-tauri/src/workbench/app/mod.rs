@@ -5541,6 +5541,8 @@ mod tests {
             // 交付文件清单（2026-10-07）：只读一份名单 + 读一份盘上原文，都不写盘
             "wb_delivery_files",
             "wb_delivery_file",
+            // 交付定稿检查（②）：纯算 —— 凭据核对 + 定稿后 manifest 的字节，一个都不写
+            "wb_finalize_preview",
             // 发布闸（第二刀）：只算不写 —— 与 `publish_audit` 是同一件事的两个壳
             "wb_publish_audit",
             "wb_baseline_diff",

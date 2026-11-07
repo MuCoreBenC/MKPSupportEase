@@ -30,6 +30,7 @@ import { deliveryStageText as STAGE_TEXT } from '../c14/labels'
 import type {
   DeliveryDrift,
   DeliveryFile,
+  DeliveryGroup,
   DeliveryStatus,
   PreviewFile,
   PreviewReport,
@@ -38,6 +39,16 @@ import { DiffLines, DiffRuler } from './DiffView'
 import type { DiffViewMode } from './DiffView'
 import { measureRulerMarks } from './diffRuler'
 import type { RulerMark } from './diffRuler'
+import {
+  displayName,
+  fmtSize,
+  groupSummary,
+  groupTodo,
+  sortFiles,
+  stateText,
+  stateTone,
+  type StateTone,
+} from './deliveryStatus'
 import c from '../c14.module.css'
 import s from './DeliveryFilesModal.module.css'
 import { locateIntoView } from '../../components/scroll/locate'
@@ -56,41 +67,11 @@ interface Props {
   onClose: () => void
 }
 
-function fmtSize(n: number | null): string {
-  if (n === null) return '—'
-  if (n < 1024) return `${n} B`
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function baseName(rel: string): string {
-  return rel.split('/').pop() ?? rel
-}
-
-/**
- * 一行交付文件的状态文案：按“谁写的”换词，别让发布定稿的那几份说「已生成」。
- *
- * **`pending` 要分三种原因说**（2026-10-20）：配方快照旧 / 目录登记没跟上 /
- * 重新渲染的字节不同。混成一句「待更新」时，同一屏上会出现「左边待更新、
- * 右边说一模一样不会重写」—— 那不是矛盾，是两把尺子。
- */
-function stateText(f: DeliveryFile): string {
-  if (f.state === 'missing') {
-    return f.stage === 'publish' || f.stage === 'software' ? '还没发布' : '还没生成'
-  }
-  if (f.state === 'pending') {
-    if (f.rel === 'catalog.json') return '待重新生成'
-    if (f.stage === 'publish') return '待重新发布'
-    if (f.pendingReason === 'registry') return '待重算目录'
-    return '待更新'
-  }
-  return f.stage === 'publish' || f.stage === 'software' ? '已发布' : '已生成'
-}
-
-function stateClass(f: DeliveryFile): string {
-  if (f.state === 'pending') return s.statePending
-  if (f.state === 'missing') return s.stateMissing
-  return s.stateOk
+/** 与生成页同一套色调语义，只是这里用模态框自己的小徽标类名 */
+function toneClass(tone: StateTone): string {
+  if (tone === 'ok') return s.stateOk
+  if (tone === 'todo') return s.statePending
+  return s.stateMissing
 }
 
 /** 漂移那一行的人话：目录记多少、盘上多少，或者为什么取不到 */
@@ -119,13 +100,6 @@ function previewOf(rel: string, preview: PreviewReport | null): PreviewFile | nu
   return preview.aux.find((f) => f.fileName === rel || f.uid === rel) ?? null
 }
 
-/** 清单的排序权重：待更新 / 未生成在前，已生成最后 */
-function rankOf(state: DeliveryFile['state']): number {
-  if (state === 'pending') return 0
-  if (state === 'missing') return 1
-  return 2
-}
-
 export default function DeliveryFilesModal({
   status,
   preview,
@@ -135,32 +109,33 @@ export default function DeliveryFilesModal({
   onGenerate,
   onClose,
 }: Props) {
-  const tomls = useMemo(
-    () =>
-      status.files
-        .filter((f) => f.rel.startsWith('mkp/presets/'))
-        .slice()
-        .sort((a, b) => rankOf(a.state) - rankOf(b.state)),
-    [status.files],
-  )
-  const generated = useMemo(
-    () =>
-      status.files.filter(
-        (f) => !f.rel.startsWith('mkp/presets/') && f.stage === 'generate',
-      ),
-    [status.files],
-  )
-  const frozen = useMemo(
-    () => status.files.filter((f) => f.stage !== 'generate'),
-    [status.files],
-  )
-  const jsonCount = status.files.filter((f) => f.rel.endsWith('.json')).length
-  const pending = status.files.filter((f) => f.state === 'pending').length
-  const missing = status.files.filter((f) => f.state === 'missing').length
+  /** 按后端分组归行，组内按真实差异排序：要动手的在前 */
+  const rowsByGroup = useMemo(() => {
+    const map = new Map<string, DeliveryFile[]>()
+    for (const f of status.files) {
+      const list = map.get(f.group) ?? []
+      list.push(f)
+      map.set(f.group, list)
+    }
+    for (const [key, list] of map) map.set(key, sortFiles(list))
+    return map
+  }, [status.files])
+  /** 后端算好 allSame：有变化的组默认展开，全一致组默认折叠 */
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const isOpen = (g: DeliveryGroup) => collapsed[g.id] ?? !g.allSame
+  const toggle = (id: string, open: boolean) =>
+    setCollapsed((prev) => ({ ...prev, [id]: !open }))
 
-  /** 选中项：默认第一份待更新（没有就看第一条漂移，再没有就看第一份文件） */
+  const jsonCount = status.files.filter((f) => f.rel.endsWith('.json')).length
+  const pending = status.files.filter((f) => f.diff === 'modified' || f.diff === 'removed').length
+  const missing = status.files.filter((f) => f.diff === 'added').length
+  const unmanaged = status.files.filter((f) => f.diff === 'unmanaged').length
+
+  /** 选中项：默认第一份真实待更新（没有就看第一条漂移，再没有就看第一份文件） */
   const defaultSel = useMemo(() => {
-    const firstPending = status.files.find((f) => f.state === 'pending')
+    const firstPending = status.files.find(
+      (f) => f.diff === 'modified' || f.diff === 'removed' || f.diff === 'added',
+    )
     if (firstPending !== undefined) return fileKey(firstPending.rel)
     if (status.drift.length > 0) return driftKey(status.drift[0].path)
     const first = status.files[0]
@@ -243,8 +218,8 @@ export default function DeliveryFilesModal({
       data-tip={name}
       onClick={() => setSel(key)}
     >
-      <span className={`${s.itemState} ${stateCls}`}>{stateLabel}</span>
       <span className={s.itemName}>{name}</span>
+      <span className={`${s.itemState} ${stateCls}`}>{stateLabel}</span>
       <span className={s.itemMeta}>{meta}</span>
     </button>
   )
@@ -254,28 +229,30 @@ export default function DeliveryFilesModal({
       open
       size="xl"
       title="本次交付明细"
-      subtitle={`${status.files.length} 个文件 · TOML ${tomls.length} 份 · JSON ${jsonCount} 份${
-        pending > 0 ? ` · ${pending} 份待更新` : ''
-      }${missing > 0 ? ` · ${missing} 份未生成 / 未发布` : ''}`}
+      subtitle={`${status.files.length} 个文件 · JSON ${jsonCount} 份${
+        pending > 0 ? ` · ${pending} 份待更新 / 待删除` : ''
+      }${missing > 0 ? ` · ${missing} 份未生成` : ''}${
+        unmanaged > 0 ? ` · ${unmanaged} 份未纳管（不会删除）` : ''
+      }${status.manifestStale ? ' · 发布凭据已失效' : ''}`}
       onClose={onClose}
       footer={
         <>
+          <button type="button" className={c.btn} onClick={onClose}>
+            关闭
+          </button>
+          <span className={c.grow} />
           <button
             type="button"
             className={`${c.btn} ${c.btnPrimary}`}
             disabled={generateTargets.length === 0}
             data-tip={
               generateTargets.length === 0
-                ? '没有待更新 / 未生成的版本，也没有要重算的目录'
+                ? '当前没有待更新项，也没有要重算的目录'
                 : '自动带上待更新与未生成的版本，先预演、确认后才写盘'
             }
             onClick={onGenerate}
           >
             {generateLabel}
-          </button>
-          <span className={c.grow} />
-          <button type="button" className={c.btn} onClick={onClose}>
-            关闭
           </button>
         </>
       }
@@ -290,59 +267,72 @@ export default function DeliveryFilesModal({
           预演没算出来：{previewError}
         </p>
       )}
+      {status.manifestStale && (
+        <div className={s.driftBox} role="status">
+          <div className={s.kvRow}>
+            <span>发布凭据</span>
+            <b>已失效（{status.manifestReasons.length} 条）</b>
+          </div>
+          <p className={s.note}>
+            生成或保存改变了清单描述的最终文件。重新计算摘要、大小与内容一致性由发布定稿负责。
+          </p>
+          {status.manifestReasons.slice(0, 3).map((reason) => (
+            <div className={s.kvRow} key={reason}>
+              <span>差异</span>
+              <b>{reason}</b>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className={s.panes}>
-        {/* 左：清单（漂移 / 预设产物 / 目录与清单 / 发布时定稿） */}
+        {/* 左：清单（按后端分组；有变化的组默认展开，全一致组折叠成带数字的摘要） */}
         <nav className={s.list} aria-label="本次交付文件">
           {status.drift.length > 0 && (
-            <div className={s.groupHead}>资产字节漂移（{status.drift.length}）</div>
-          )}
-          {status.drift.map((d) =>
-            row(
-              driftKey(d.path),
-              s.statePending,
-              '待重新生成',
-              d.path,
-              driftText(d),
-            ),
-          )}
-
-          {tomls.length > 0 && <div className={s.groupHead}>预设产物（{tomls.length}）</div>}
-          {tomls.map((f) =>
-            row(
-              fileKey(f.rel),
-              stateClass(f),
-              stateText(f),
-              baseName(f.rel) || f.rel,
-              f.exist ? fmtSize(f.size) : '—',
-            ),
+            <>
+              <div className={s.groupHead}>资产字节漂移（{status.drift.length}）</div>
+              {status.drift.map((d) =>
+                row(
+                  driftKey(d.path),
+                  s.statePending,
+                  '待重新生成',
+                  d.path,
+                  driftText(d),
+                ),
+              )}
+            </>
           )}
 
-          {generated.length > 0 && (
-            <div className={s.groupHead}>目录与清单（{generated.length}）</div>
-          )}
-          {generated.map((f) =>
-            row(
-              fileKey(f.rel),
-              stateClass(f),
-              stateText(f),
-              f.rel,
-              f.exist ? fmtSize(f.size) : '—',
-            ),
-          )}
-
-          {frozen.length > 0 && (
-            <div className={s.groupHead}>发布时定稿（{frozen.length}）</div>
-          )}
-          {frozen.map((f) =>
-            row(
-              fileKey(f.rel),
-              stateClass(f),
-              stateText(f),
-              f.rel,
-              f.exist ? fmtSize(f.size) : '—',
-            ),
-          )}
+          {status.groups.map((g) => {
+            const files = rowsByGroup.get(g.id) ?? []
+            const open = isOpen(g)
+            const todo = groupTodo(g)
+            return (
+              <div key={g.id}>
+                <button
+                  type="button"
+                  className={s.groupHead}
+                  aria-expanded={open}
+                  onClick={() => toggle(g.id, open)}
+                >
+                  <span>{open ? '▾' : '▸'}</span>
+                  <span className={s.groupTitle}>{g.label}（{g.total}）</span>
+                  {todo > 0 && <span className={s.statePending}>{todo} 项待处理</span>}
+                  <span className={s.groupSum}>{groupSummary(g)}</span>
+                </button>
+                {open &&
+                  files.map((f) =>
+                    row(
+                      fileKey(f.rel),
+                      toneClass(stateTone(f)),
+                      stateText(f),
+                      displayName(f.rel),
+                      f.exist ? fmtSize(f.size) : '—',
+                    ),
+                  )}
+              </div>
+            )
+          })}
         </nav>
 
         {/* 右：选中那一份的 diff / 漂移说明 */}
@@ -380,7 +370,9 @@ export default function DeliveryFilesModal({
                 <header className={s.detailHead}>
                   <span className={`${s.detailName} ${c.mono}`}>{curFile.rel}</span>
                   <span className={s.detailMeta}>
-                    <span className={stateClass(curFile)}>{stateText(curFile)}</span>
+                    <span className={`${s.itemState} ${toneClass(stateTone(curFile))}`}>
+                      {stateText(curFile)}
+                    </span>
                     {curPreview !== null && curPreview.state !== 'unchanged' && (
                       <span className={s.counts}>
                         <span className={s.add}>+{curPreview.added}</span>
@@ -412,9 +404,22 @@ export default function DeliveryFilesModal({
                   </span>
                 </header>
 
-                {curFile.stage !== 'generate' ? (
+                {curFile.diff === 'frozen' ? (
                   <p className={s.empty}>
                     这一份由{STAGE_TEXT[curFile.stage]}负责 —— 本次生成不会动它。
+                  </p>
+                ) : curFile.diff === 'removed' ? (
+                  <p className={s.empty}>
+                    当前源不再产出这一份。它在生成器受管清单内，确认生成后移入回收站（不是真删）；
+                    发布定稿与版本交付的文件不受影响。
+                  </p>
+                ) : curFile.diff === 'unmanaged' ? (
+                  <p className={s.empty}>
+                    这一份不在生成器管理范围内，只展示、绝不删除。若它是你放进去的文件，会原样留在盘上。
+                  </p>
+                ) : curFile.diff === 'added' ? (
+                  <p className={s.empty}>
+                    盘上还没有这一份。确认生成后按当前源重算并写出，写完全量回读验证。
                   </p>
                 ) : curPreview === null ? (
                   <p className={s.empty}>

@@ -1028,6 +1028,151 @@ const TRASH = [
 /** delivery 面的残留（`wb_dist_strays` 读它、「清理残留」清它）—— 桩里可变，好让发布闸跟着动 */
 let mockStrays: string[] = ['mkp/presets/old_file.toml']
 
+/**
+ * 交付检查里的「凭据落后」还算不算数。
+ *
+ * 桩里可变：点一次「更新发布凭据」就置 false，下一次检查回到「凭据匹配」——
+ * 好让"修完 → 重新检查 → 就绪"这条链在浏览器里能真走一遍。
+ */
+let mockCredentialsStale = true
+
+/**
+ * 交付检查的桩（`wb_finalize_preview` 与「更新后重新检查」共用这一份，不写两处）。
+ *
+ * 演示两件不同的事：凭据落后（可在这里修）、P2S 产物未登记进 catalog（要去源里处理）。
+ * 后者**不会**因为更新凭据而消失 —— 界面上就该看见"修完这个、那个还在"。
+ */
+function finalizeDemo() {
+  const stale = mockCredentialsStale
+  const oldSha = '4f0e8b31d2a5c8f1b4e7d0a3c6f9b2e5d8a1c4f7b0e3d6a9c2f5b8e1d4a7c0f3'
+  const newSha = '9a41d2c7e8b05f36a1c4d7e0b2f5a8c1d4e7b0f3a6c9d2e5b8f1a4c7d0e3b6f9'
+  const same = '0b3c9f2a5d47c1e8b6a0d3f4c5e7a9b1d2c3e4f5061728394a5b6c7d8e9f0a1b'
+
+  const entries = [
+    {
+      relativePath: 'delivery/mkp/presets/A1-standard.toml',
+      id: 'A1-standard.toml',
+      sha256: same,
+      size: 2048,
+      beforeSha256: same,
+      beforeSize: 2048,
+    },
+    {
+      relativePath: 'delivery/mkp/presets/A1-fast.toml',
+      id: 'A1-fast.toml',
+      sha256: newSha,
+      size: 2112,
+      beforeSha256: stale ? oldSha : newSha,
+      beforeSize: stale ? 2048 : 2112,
+    },
+  ]
+
+  const diffLines = [
+    { kind: 'context', text: '{', no: 1 },
+    { kind: 'context', text: '  "manifestVersion": 3,', no: 2 },
+    { kind: 'context', text: '  "channel": "stable",', no: 3 },
+    { kind: 'context', text: '  "updated": "2026-10-19T00:00:00Z",', no: 4 },
+    { kind: 'context', text: '  "assets": [', no: 5 },
+    {
+      kind: 'context',
+      text: '      "relativePath": "delivery/mkp/presets/A1-fast.toml",',
+      no: 6,
+    },
+    { kind: 'removed', text: `      "sha256": "${oldSha}",`, no: 7 },
+    { kind: 'added', text: `      "sha256": "${newSha}",`, no: 7 },
+    { kind: 'removed', text: '      "size": 2048', no: 8 },
+    { kind: 'added', text: '      "size": 2112', no: 8 },
+    { kind: 'context', text: '  ]', no: 9 },
+    { kind: 'context', text: '}', no: 10 },
+  ]
+  const flatLines = diffLines
+    .filter((l) => l.kind !== 'removed')
+    .map((l) => (l.kind === 'added' ? { ...l, kind: 'context' } : l))
+
+  const issues = [
+    ...(stale
+      ? [
+          {
+            id: 'credentials.stale',
+            title: '1 份预设凭据',
+            kind: 'fixable',
+            detail:
+              '文件内容已经变了，manifest 里记的还是上一代的 SHA / size。更新只重写 manifest.json —— 不动 source.json、不推进序号、不提交、不推送。',
+            action: 'updateCredentials',
+            files: ['delivery/mkp/presets/A1-fast.toml'],
+            at: null,
+          },
+        ]
+      : []),
+    {
+      id: 'collection.unregistered',
+      title: '1 项交付集合需要处理',
+      kind: 'source',
+      detail:
+        '产物已经在盘上，但 catalog.json 没登记它。先回①卡「生成」一次，让目录按当前源重算；如果它本来就不该发布，去源配置里确认这台机型 / 这一版的启用状态。不要直接把它塞进 manifest。',
+      action: 'locateSource',
+      files: ['delivery/mkp/presets/P2S-standard.toml'],
+      at: { view: 'params', machineId: 'P2S', uid: 'P2S/STANDARD', key: null },
+    },
+    {
+      id: 'info.manifest/correct',
+      title: '3 项附属登记差异',
+      kind: 'info',
+      detail: '落后 3 处（上一版发布的账本）—— 定稿时重写对齐',
+      action: 'none',
+      files: [],
+      at: null,
+    },
+  ]
+
+  return {
+    state: stale ? 'stale' : 'matched',
+    ready: false, // 桩里 P2S 那一项一直需要人去源里处理
+    issues,
+    reasons: stale
+      ? ['delivery/mkp/presets/A1-fast.toml：大小不符（登记 2048 B，盘上 2112 B）']
+      : [],
+    checks: [
+      {
+        id: 'source/correct',
+        name: 'Source Manifest（source.json）正确',
+        status: 'pass',
+        severity: 'blocker',
+        details:
+          'v2 寻址规则声明认得出来（catalog=catalog.json，filesRoot=..），声明的东西都在交付根里',
+        affectedFiles: [],
+        fixHint: '重跑一次发布（`publish_into` 收尾会重写它）',
+      },
+      {
+        id: 'manifest/correct',
+        name: 'manifest 与交付集合一致',
+        status: 'warn',
+        severity: 'warning',
+        details: '落后 3 处（上一版发布的账本）—— 定稿时重写对齐',
+        affectedFiles: [
+          'assets/icons/a1.svg（manifest 有、catalog 里没有）',
+          'assets/printers/a1.webp（manifest 有、catalog 里没有）',
+          'assets/bbs/A1/process.json（manifest 有、catalog 里没有）',
+        ],
+        fixHint: '无需手工处理 —— 点「确认发布」，发布事务定稿时会重写 manifest',
+      },
+    ],
+    catalogId: 'support-ease',
+    serialOnDisk: 7,
+    serialNextPublish: 8,
+    manifest: {
+      rel: 'manifest.json',
+      state: stale ? 'modified' : 'unchanged',
+      entries,
+      changedEntries: stale ? 1 : 0,
+      lines: stale ? diffLines : flatLines,
+      added: stale ? 2 : 0,
+      removed: stale ? 2 : 0,
+    },
+    planError: null,
+  }
+}
+
 /** 发布闸一行（`audit::AuditItem` 的桩形状） */
 interface MockAuditItem {
   id: string
@@ -2504,22 +2649,26 @@ export function installMockBackend() {
         const templateStale = (uid: string) => uid === 'A1/FAST'
         const presets = rows
           .filter((r) => r.mkpFile !== null)
-          .map((r) => ({
-            rel: `mkp/presets/${r.mkpFile}`,
-            exist: r.state !== 'neverBuilt',
-            size: 2048,
-            stage: 'generate',
+          .map((r) => {
             // 与版本行同一套演示事实：已生成 / 待更新 / 还没生成
-            state:
-              templateStale(r.uid)
-                ? 'pending'
+            const diff =
+              templateStale(r.uid) || r.state === 'stale'
+                ? 'modified'
                 : r.state === 'built'
-                  ? 'upToDate'
-                  : r.state === 'stale'
-                    ? 'pending'
-                    : 'missing',
-            registeredSize: r.state === 'neverBuilt' ? null : 2048,
-          }))
+                  ? 'same'
+                  : 'added'
+            return {
+              rel: `mkp/presets/${r.mkpFile}`,
+              exist: r.state !== 'neverBuilt',
+              size: 2048,
+              stage: 'generate',
+              state: diff === 'modified' ? 'pending' : diff === 'added' ? 'missing' : 'upToDate',
+              diff,
+              group: 'presets',
+              registeredSize: r.state === 'neverBuilt' ? null : 2048,
+              pendingReason: diff === 'modified' ? 'content' : null,
+            }
+          })
         const pendingUids = rows
           .filter(
             (r) =>
@@ -2551,21 +2700,64 @@ export function installMockBackend() {
             reason: 'size',
           },
         ]
+        /* 演示真实状态：目录待更新、发布凭据失效、一份待删除、一份未纳管 */
         const others = [
-          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate', state: 'upToDate', registeredSize: null },
-          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate', state: 'upToDate', registeredSize: null },
-          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate', state: 'upToDate', registeredSize: null },
-          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate', state: 'pending', registeredSize: null },
-          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish', state: builtRecords.size > 1 ? 'upToDate' : 'missing', registeredSize: null },
-          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish', state: builtRecords.size > 1 ? 'upToDate' : 'missing', registeredSize: null },
+          { rel: 'content/machine_catalog.json', exist: true, size: 6421, stage: 'generate', state: 'upToDate', diff: 'same', group: 'catalog', pendingReason: null },
+          { rel: 'content/bundles.json', exist: true, size: 1204, stage: 'generate', state: 'upToDate', diff: 'same', group: 'catalog', pendingReason: null },
+          { rel: 'content/assets_index.json', exist: true, size: 3480, stage: 'generate', state: 'upToDate', diff: 'same', group: 'catalog', pendingReason: null },
+          { rel: 'catalog.json', exist: true, size: 9004, stage: 'generate', state: 'pending', diff: 'modified', group: 'catalog', pendingReason: 'content' },
+          { rel: 'source.json', exist: builtRecords.size > 1, size: 256, stage: 'publish', state: builtRecords.size > 1 ? 'upToDate' : 'missing', diff: 'frozen', group: 'frozen', pendingReason: null },
+          { rel: 'manifest.json', exist: builtRecords.size > 1, size: 512, stage: 'publish', state: 'upToDate', diff: 'frozen', group: 'frozen', pendingReason: null },
+          { rel: 'publish-serial.json', exist: builtRecords.size > 1, size: 192, stage: 'publish', state: 'upToDate', diff: 'frozen', group: 'frozen', pendingReason: null },
+          { rel: 'release.json', exist: true, size: 340, stage: 'software', state: 'upToDate', diff: 'frozen', group: 'frozen', pendingReason: null },
+          { rel: 'release-preview.json', exist: true, size: 318, stage: 'software', state: 'upToDate', diff: 'frozen', group: 'frozen', pendingReason: null },
+          { rel: 'mkp/presets/A2L-standard.toml', exist: true, size: 812, stage: 'generate', state: 'removed', diff: 'removed', group: 'presets', pendingReason: 'content' },
+          { rel: 'notes.txt', exist: true, size: 64, stage: 'generate', state: 'unmanaged', diff: 'unmanaged', group: 'other', pendingReason: null },
+        ].map((o) => ({ ...o, registeredSize: null }))
+        const files = [...presets, ...others]
+        const diffs = files.map((f) => ({
+          rel: f.rel,
+          kind: f.diff,
+          beforeSize: f.exist ? f.size : null,
+          afterSize: f.diff === 'removed' || f.diff === 'unmanaged' ? null : f.size,
+          firstDiff: f.diff === 'same' || f.diff === 'frozen' ? null : '演示：与当前源重算结果不同',
+          group: f.group,
+        }))
+        const groupDefs = [
+          { id: 'presets', label: 'MKP 预设' },
+          { id: 'catalog', label: '目录与清单' },
+          { id: 'frozen', label: '发布定稿' },
+          { id: 'other', label: '范围外文件' },
         ]
+        const groups = groupDefs
+          .map((g) => {
+            const rowsInGroup = diffs.filter((d) => d.group === g.id)
+            const modified = rowsInGroup.filter((d) => d.kind === 'modified').length
+            const added = rowsInGroup.filter((d) => d.kind === 'added').length
+            const removed = rowsInGroup.filter((d) => d.kind === 'removed').length
+            const unmanaged = rowsInGroup.filter((d) => d.kind === 'unmanaged').length
+            return {
+              ...g,
+              total: rowsInGroup.length,
+              modified,
+              added,
+              removed,
+              unmanaged,
+              allSame: modified + added + removed + unmanaged === 0,
+            }
+          })
+          .filter((g) => g.total > 0)
         return Promise.resolve({
-          files: [...presets, ...others],
+          files,
           drift,
           pendingUids,
           catalogModified: '2026-10-06T03:34:00Z',
           manifestModified: builtRecords.size > 1 ? '2026-10-06T03:41:00Z' : null,
           catalogError: null,
+          diffs,
+          groups,
+          manifestStale: true,
+          manifestReasons: ['delivery/mkp/presets/A1-fast.toml：字节不符（SHA-256 对不上）'],
         })
       }
       case 'wb_delivery_file': {
@@ -2592,6 +2784,22 @@ export function installMockBackend() {
           })
         }
         return Promise.resolve(text)
+      }
+      /*
+       * 交付检查（②）：桩里两件事分开 —— 凭据落后（可在这里修）、P2S 未登记（去源里处理）。
+       * 点「更新发布凭据」后 `mockCredentialsStale` 置 false，下一次检查回到「凭据匹配」。
+       */
+      case 'wb_finalize_preview':
+        return Promise.resolve(finalizeDemo())
+      case 'wb_update_publish_credentials': {
+        const before = finalizeDemo()
+        mockCredentialsStale = false
+        return Promise.resolve({
+          written: before.state === 'stale',
+          entries: before.manifest.entries.length,
+          changed: before.state === 'stale' ? 1 : 0,
+          preview: finalizeDemo(),
+        })
       }
       case 'wb_trash':
         return Promise.resolve(TRASH)

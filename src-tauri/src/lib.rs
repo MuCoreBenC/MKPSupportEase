@@ -902,6 +902,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 交付文件清单（2026-10-07）：「交付预设」卡看这次都会写出哪些文件 + 看某一份的原文
         app::build::wb_delivery_files,
         app::build::wb_delivery_file,
+        // 交付检查与修复（2026-11-07）：查是只读；「更新发布凭据」只重写 manifest.json
+        app::build::wb_finalize_preview,
+        app::build::wb_update_publish_credentials,
         // 版本复制与参数正文复制（b05 Task 14.3/14.5）：两步分离，各自单文件写入
         app::machines::wb_copy_version,
         app::wb_copy_recipe,

@@ -381,9 +381,9 @@ impl<'a> Book<'a> {
     ///
     /// 台账（`built.json`）**不参与**：它只提供"上次成功生成时刻"那一格给人看。
     pub fn build_state(&self, uid: &str) -> BuildState {
-        if self.version(uid).is_none() {
+        let Some(v) = self.version(uid) else {
             return BuildState::NeverBuilt;
-        }
+        };
         let has_bbs = !self.effective_bbs(uid).is_empty();
 
         // 产物名总是算得出来（命名规则只认机型 + 版本），所以「有没有可产出的东西」
@@ -402,9 +402,10 @@ impl<'a> Book<'a> {
             // 不冒充 `Built` —— 说错成"已生成"会让人以为客户端拿到的是对的
             return BuildState::Stale;
         };
-        /* 剥掉 `# generated_at:` 再比：时间属于"何时写出去的"，不属于"内容"，
-        它变了不代表要重新生成（2026-11-01 作者裁定）。 */
-        if crate::workbench::strip_generated_at(&on_disk) == now {
+        /* 同内容**且**同形状才算「已生成」（[`crate::workbench::up_to_date`]，与生成
+        事务同一道判据）：时间行不表达内容，但盘上留着它，生成就会重写一次 ——
+        那时这一格说「已生成」、生成页说「待更新」，两边对同一份文件给两个答案。 */
+        if crate::workbench::up_to_date(&v.mkp_file, on_disk.as_bytes(), now.as_bytes()) {
             BuildState::Built
         } else {
             BuildState::Stale
@@ -2373,6 +2374,43 @@ mod tests {
 
         // 台账**完全不影响**判定：现在没记任何 built 记录，上面已经是 Built 了
         assert!(c.built.is_empty(), "这条判据不该需要台账");
+    }
+
+    /// 盘上那份内容一样、但多一行 `# generated_at:` ⇒ **待更新**。
+    ///
+    /// 生成会重写它（候选字节里没有那行，`catalog.json` 也按候选登记），所以这一格
+    /// 不能还说「已生成」—— 否则版本树与生成页对同一份文件给两个答案。
+    #[test]
+    fn a_legacy_generated_at_line_keeps_the_product_stale() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let probe = |_: &str| Some("machine = A1/STANDARD\n".to_owned());
+
+        let mkp = Book::new(&f.presets, &c, &d)
+            .version("A1/STANDARD")
+            .unwrap()
+            .mkp_file
+            .clone();
+        let product = f
+            .presets
+            .root()
+            .join(crate::workbench::paths::DELIVERY_SUBDIR)
+            .join(crate::workbench::paths::MKP_PRESETS_DIR)
+            .join(&mkp);
+        std::fs::create_dir_all(product.parent().unwrap()).unwrap();
+        let legacy = format!(
+            "machine = A1/STANDARD\n{} 2026-11-05T04:17:00+08:00\n",
+            crate::workbench::GENERATED_AT_PREFIX
+        );
+        crate::fsx::atomic::atomic_write(&product, legacy.as_bytes()).unwrap();
+
+        assert_eq!(
+            Book::new(&f.presets, &c, &d)
+                .with_renderer(&probe)
+                .build_state("A1/STANDARD"),
+            BuildState::Stale
+        );
     }
 
     /// 旧口径（指纹比对）的回归点：**改源 → 待生成**。

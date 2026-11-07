@@ -62,7 +62,7 @@
  * 客户端根本不读，而且它的路径（`presets/mkp/…`）与真实发布契约（`catalog.path`）
  * 已经冲突 —— 留着只会让人误以为那种路径还合法。**没有迁移成兼容结构。**
  */
-import { Fragment, useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
@@ -70,9 +70,11 @@ import type {
   BookView,
   Boot,
   DeliveryStatus,
+  FinalizePreview,
   GenerateReport,
   Issue,
   IssueReport,
+  IssueWhere,
   MirrorSync,
   PreviewReport,
   PublishTxReport,
@@ -84,8 +86,19 @@ import type { GotoFocus } from '../c14/types'
 import { locateAnchor } from '../c14/locate'
 
 import { releaseStageText as RELEASE_STAGE_TEXT } from '../c14/labels'
+import {
+  displayName,
+  fmtSize,
+  groupSummary,
+  groupTodo,
+  sortFiles,
+  stateText,
+  stateTone,
+  type StateTone,
+} from './deliveryStatus'
 import GenerateDiffModal from './GenerateDiffModal'
 import DeliveryFilesModal from './DeliveryFilesModal'
+import FinalizeModal from './FinalizeModal'
 import PublishGateModal from './PublishGateModal'
 import ReleaseGateModal from './ReleaseGateModal'
 import HistoryModal from './HistoryModal'
@@ -103,13 +116,33 @@ interface Props {
   onGoto: (view: string, focus?: GotoFocus) => void
   /** 先落盘再生成的那个「落盘」 */
   onSave: () => Promise<boolean>
-  /** 生成之后让外壳重取整本（buildRows 的状态跟着走） */
-  onBookRefresh: () => void
+  /**
+   * 生成 / 发布**写了盘上产物**之后让外壳重取：整本（buildRows 的状态）+ 检查报告
+   * + 交付读数（①卡那 9 行与「N 组有变化」）。三样缺一样，同一屏就会给出两个时点。
+   */
+  onArtifactsRefresh: () => void
   /**
    * 重取检查报告（外壳那份账）。修复动作（如内嵌目录重算）做完要立刻重取 ——
    * 不然待办还挂在列表上，人会以为没生效。
    */
   onReportRefresh: () => void
+}
+
+/** 「去哪儿」的映射本体（检查项与交付问题共用一份，不各写一套） */
+function gotoOfWhere(at: IssueWhere): { view: string; focus?: GotoFocus } | null {
+  switch (at.view) {
+    case 'params':
+    case 'fields':
+      return { view: 'params', focus: { machineId: at.machineId ?? '', uid: at.uid, key: at.key } }
+    case 'menu':
+      return { view: 'bundles', focus: { machineId: null, uid: at.uid, key: null } }
+    case 'stock':
+      return { view: 'assets', focus: { machineId: null, uid: at.uid, key: null } }
+    case 'fallback':
+      return { view: 'assets', focus: { machineId: null, uid: null, key: null } }
+    default:
+      return null // build 视角的问题在本页就地滚过去，不跳页
+  }
 }
 
 /** 检查项的「去处理」映射。产品的一份账里，不是每一条都有地方可去 */
@@ -119,19 +152,7 @@ function gotoOf(i: Issue): { view: string; focus?: GotoFocus } | null {
        套餐页里根本没有那些文件，跳过去等于没指路 */
     return { view: 'assets', focus: { machineId: null, uid: null, key: 'optional' } }
   }
-  switch (i.at.view) {
-    case 'params':
-    case 'fields':
-      return { view: 'params', focus: { machineId: i.at.machineId ?? '', uid: i.at.uid, key: i.at.key } }
-    case 'menu':
-      return { view: 'bundles', focus: { machineId: null, uid: i.at.uid, key: null } }
-    case 'stock':
-      return { view: 'assets', focus: { machineId: null, uid: i.at.uid, key: null } }
-    case 'fallback':
-      return { view: 'assets', focus: { machineId: null, uid: null, key: null } }
-    default:
-      return null // build 视角的问题在本页就地滚过去，不跳页
-  }
+  return gotoOfWhere(i.at)
 }
 
 /**
@@ -154,12 +175,11 @@ export default function BuildPage({
   tick,
   onGoto,
   onSave,
-  onBookRefresh,
+  onArtifactsRefresh,
   onReportRefresh,
 }: Props) {
   const rows = book.buildRows
-  const [picked, setPicked] = useState<Record<string, boolean>>({})
-  const [openRow, setOpenRow] = useState<string | null>(null)
+
   /** 检查卡里展开着长描述的条目（2026-10-19：默认只留两行，按需展开） */
   const [expandedIssues, setExpandedIssues] = useState<Set<string>>(new Set())
   /** 「内嵌目录落后」那条待办的修复动作正在跑（按钮防连点） */
@@ -180,6 +200,16 @@ export default function BuildPage({
   const [gateMirror, setGateMirror] = useState<MirrorSync | null>(null)
   /** 发布历史面板（本地回执日志；每条一个手动刷新，不轮询） */
   const [historyOpen, setHistoryOpen] = useState(false)
+  /**
+   * 交付定稿检查（②，只读）。**随时可以开**：不看草稿脏不脏、不看工作区干不干净，
+   * 也不写任何凭据 —— 它只回答"现在具不具备定稿条件、定稿会把 manifest 改成什么"。
+   */
+  const [finalizeOpen, setFinalizeOpen] = useState(false)
+  const [finalizePreview, setFinalizePreview] = useState<FinalizePreview | null>(null)
+  const [finalizeErr, setFinalizeErr] = useState<string | null>(null)
+  const [finalizeBusy, setFinalizeBusy] = useState(false)
+  /** 「更新发布凭据」正在写盘（只有这一颗按钮会写） */
+  const [finalizeUpdating, setFinalizeUpdating] = useState(false)
   /** 生成记录面板（历次生成的回执；住应用数据目录，不轮询） */
   const [genHistoryOpen, setGenHistoryOpen] = useState(false)
   /*
@@ -212,6 +242,10 @@ export default function BuildPage({
    * 名单来自后端（与残留审计同一份交付集合），这一页只负责摆出来、点开看原文。
    */
   const [deliveries, setDeliveries] = useState<DeliveryStatus | null>(null)
+  /** 交付读数算不出来时明确报错，不伪装成"还在读" */
+  const [deliveryError, setDeliveryError] = useState<string | null>(null)
+  /** 交付分组折叠状态：缺省按后端 allSame 决定（有变化展开、全一致折叠） */
+  const [groupOpenState, setGroupOpenState] = useState<Record<string, boolean>>({})
   /** 交付明细模态框开着没（页面外只摆汇总，作者 2026-10-19） */
   const [deliveryListOpen, setDeliveryListOpen] = useState(false)
   /**
@@ -247,19 +281,22 @@ export default function BuildPage({
   const unsaved = book.dirtyCount > 0
   const blocked = (report?.blocks ?? 0) > 0
   const dirty = unsaved
-  const ids = Object.keys(picked).filter((k) => picked[k])
 
-  /*
-   * 「这一行能不能勾」= **不是「没有可生成的东西」那一档**（作者 2026-10-02）。
-   *
-   * 后端的 `row.buildable` 只覆盖 `stale | neverBuilt`（那是「要不要进**默认**生成队列」
-   * 的口径）；而**已生成也能重生成** —— `planned_todos` 在 `Scope::Picked` 下本来就收
-   * 任何 uid，内容没变就走 `unchanged`、不重写。作者要的是「就算没变化，我也想走一遍确认框」。
-   *
-   * 所以勾选只看 `NoResources`（这台压根没配方，生成出来是空的）。`buildable` 仍用于
-   * 「全选待生成」那颗按钮 —— 那两个是不同的问题，别合成一个。
-   */
+  /** 没配方的版本不能生成；其余（含已生成）都能主动重走一遍预演 → 确认 */
   const pickable = (r: (typeof rows)[number]) => r.state !== 'noResources'
+
+  /* 产物名 → 版本 uid：分组文件行上的「重新生成」与左侧「去处理」锚点都用它 */
+  const uidByRel = new Map<string, string>()
+  for (const r of rows) {
+    if (r.mkpFile !== null) uidByRel.set(`mkp/presets/${r.mkpFile}`, r.uid)
+  }
+  const relByUid = new Map<string, string>()
+  for (const [rel, uid] of uidByRel) relByUid.set(uid, rel)
+
+  /* 交付读数：数量直接取后端分组摘要，页面不再逐份判"谁该更新" */
+  const deliveryFiles = deliveries?.files ?? []
+  const deliveryPending =
+    deliveries?.groups.reduce((n, g) => n + g.modified + g.added + g.removed, 0) ?? 0
 
   /* 基线 / 残留 / 回收站：进页取一次，外壳每写一次（生成会改产物）重取 */
   useEffect(() => {
@@ -288,8 +325,14 @@ export default function BuildPage({
   useEffect(() => {
     void wb
       .deliveryFiles()
-      .then(setDeliveries)
-      .catch(() => setDeliveries(null))
+      .then((s) => {
+        setDeliveries(s)
+        setDeliveryError(null)
+      })
+      .catch((e: unknown) => {
+        setDeliveries(null)
+        setDeliveryError(isAppError(e) ? e.message : String(e))
+      })
   }, [tick])
 
   /*
@@ -298,7 +341,16 @@ export default function BuildPage({
    */
   const goTarget = (sel: string) => {
     const isRow = sel.startsWith('t-build-') && sel !== 't-build'
-    locateAnchor(sel, { row: isRow })
+    const rel = isRow ? relByUid.get(sel.slice('t-build-'.length)) : undefined
+    const group = deliveries?.files.find((f) => f.rel === rel)?.group
+    /* 有产物行就展开它所在的组、定位到那一行；没有产物行（如暂无资源的版本）
+       就落到①卡本身，不能让「去处理」点了没反应 */
+    if (group !== undefined) {
+      setGroupOpenState((prev) => ({ ...prev, [group]: true }))
+      locateAnchor(sel, { row: true })
+    } else {
+      locateAnchor('t-build', {})
+    }
   }
 
   const issueGoto = (i: Issue) => {
@@ -319,8 +371,7 @@ export default function BuildPage({
    * 作者 2026-10-02 定的规矩：点「生成」不许当场覆盖 —— 先看 diff、确认了才写。
    * 预演走 `wb_generate_preview`（后端只算不写），与真生成同一批 `todo`、同一道闸。
    */
-  const openGenerate = async (override?: string[]) => {
-    const list = override ?? ids
+  const openGenerate = async (list: string[]) => {
     if (!list.length) return
     /* 草稿不干净先落盘 —— 预演读的也是**已保存**的配方（与生成同一条顺序规矩） */
     if (dirty && !(await onSave())) return
@@ -348,7 +399,7 @@ export default function BuildPage({
    * `generate_with` 即使产物全是 unchanged，也会重算 `content` 与 `catalog.json`。
    * 这时队列带全部可生成版本 —— 产物不会重写，目录会更新。
    */
-  const needCatalog = deliveries?.files.some((f) => f.state === 'pending') ?? false
+  const needCatalog = deliveryPending > 0 || (deliveries?.drift.length ?? 0) > 0
   const generateTargets =
     pendingUids.length > 0
       ? pendingUids
@@ -356,11 +407,17 @@ export default function BuildPage({
         ? rows.filter((r) => pickable(r)).map((r) => r.uid)
         : []
   const generateLabel =
-    pendingUids.length > 0
-      ? `生成待更新项（${pendingUids.length}）`
-      : needCatalog
-        ? '重新生成目录'
-        : '没有待更新项'
+    deliveryPending > 0
+      ? `生成本次待更新（${deliveryPending} 份）`
+      : '重算目录与清单'
+
+  /** 单文件「重新生成」：预设按自己的 uid，目录类按整批（后端事务一次重算全部目录） */
+  const regenerateTargetsOf = (rel: string): string[] => {
+    const uid = uidByRel.get(rel)
+    if (uid !== undefined) return [uid]
+    if (generateTargets.length > 0) return generateTargets
+    return rows.filter((r) => pickable(r)).map((r) => r.uid)
+  }
 
   /**
    * 打开「本次交付明细」（2026-10-19）。
@@ -391,6 +448,57 @@ export default function BuildPage({
     await openGenerate(generateTargets)
   }
 
+  /**
+   * 拉一次交付检查（只读）。
+   *
+   * 与 `openGenerate` / `openDeliveryList` 不同，它**不先保存草稿** —— 交付检查看的是
+   * 盘上已生成的交付文件，与草稿无关；为了看一眼就把草稿写进仓库是副作用。
+   */
+  const loadFinalize = async () => {
+    setFinalizePreview(null)
+    setFinalizeErr(null)
+    setFinalizeBusy(true)
+    try {
+      setFinalizePreview(await wb.finalizePreview())
+    } catch (e) {
+      setFinalizeErr(isAppError(e) ? e.message : String(e))
+    } finally {
+      setFinalizeBusy(false)
+    }
+  }
+
+  const openFinalize = () => {
+    setFinalizeOpen(true)
+    void loadFinalize()
+  }
+
+  /**
+   * 「更新发布凭据」：只重写 `manifest.json`（后端整笔校验，集合没收敛就拒绝）。
+   *
+   * 回执里带**更新后重新检查的那一份**，直接换屏 —— 不出现"回执说改了、列表还是红的"。
+   */
+  const updateCredentials = async () => {
+    setFinalizeUpdating(true)
+    try {
+      const r = await wb.updatePublishCredentials()
+      setFinalizePreview(r.preview)
+      setFinalizeErr(null)
+      toasts.push(
+        r.written
+          ? `已更新发布凭据：${r.changed} 条登记按盘上真字节重算（共 ${r.entries} 条）`
+          : '发布凭据本来就是最新的，一个字节都没写',
+      )
+    } catch (e) {
+      toasts.push(
+        isAppError(e)
+          ? `${e.message}${e.detail === undefined ? '' : ` —— ${e.detail}`}`
+          : String(e),
+      )
+    } finally {
+      setFinalizeUpdating(false)
+    }
+  }
+
   /** 生成第二步：确认。真写盘，然后把框切成结果页 */
   const confirmGenerate = async () => {
     if (genPicked === null) return
@@ -400,8 +508,9 @@ export default function BuildPage({
       // 生成记录由**后端生成事务直接落进台账**（built.json）—— 前端不再回填草稿，
       // 生成完成 = 台账已是这一代（2026-10-06 状态机修正）。
       setGenDone(rep)
-      setPicked({})
-      onBookRefresh()
+      /* 状态不在这里改成「成功」：`onArtifactsRefresh` 会让外壳 +1 tick，
+         `wb_delivery_files` 那一趟 effect 按真实读数重算 ①卡 —— 别自己猜结论。 */
+      onArtifactsRefresh()
     } catch (e) {
       toasts.push(isAppError(e) ? e.message : String(e))
       /* 真写挂了就把框关了 —— 结果页是给"成功"用的，别拿它兜错误 */
@@ -438,8 +547,8 @@ export default function BuildPage({
        内核默认 false，缺了会零副作用地拒绝 —— CLI / CI 那条路必须显式带 --confirm。 */
     const rep = await wb.publish({ confirmed: true })
     setLastPublish(rep)
-    /* 发布改了交付目录 → 让外壳重取（④ 残留与 ③ 基线跟着刷新） */
-    onBookRefresh()
+    /* 发布改了交付目录 → 整本、报告、①卡交付读数一起重取（③ 基线 / ④ 残留也跟着 tick 走） */
+    onArtifactsRefresh()
     toasts.push(rep.summary)
     return rep
   }
@@ -488,15 +597,6 @@ export default function BuildPage({
     }
   }
 
-  /*
-   * **交付汇总**（2026-10-19）：页面上只摆"一共多少个文件、多少待更新"，
-   * 完整清单在 `DeliveryFilesModal` 里看 —— 作者：「后续预设会越来越多，
-   * 不可能都显示出来」。
-   */
-  const deliveryFiles = deliveries?.files ?? []
-  const tomlCount = deliveryFiles.filter((d) => d.rel.startsWith('mkp/presets/')).length
-  const jsonCount = deliveryFiles.filter((d) => d.rel.endsWith('.json')).length
-  const deliveryPending = deliveryFiles.filter((d) => d.state === 'pending').length
   const drift = deliveries?.drift ?? []
 
   const baselineDirty = baseline?.filter((b) => b.status !== 'same').length ?? 0
@@ -580,17 +680,9 @@ export default function BuildPage({
       <div className={s.flow}>
         {/* —— ① 生成 —— */}
         <div id="t-build" className={s.card}>
-          <div className={s.cardHead}>
+          <div className={`${s.cardHead} ${s.buildHead}`}>
             <h2>① 生成</h2>
-            <button
-              type="button"
-              className={`${s.btn} ${s.btnSm}`}
-              disabled={deliveries === null}
-              onClick={() => void openDeliveryList()}
-              title="看交付集合里的每一份：预设产物 / 目录与清单 / 发布时定稿，点一行看 diff"
-            >
-              交付明细…
-            </button>
+            {/* 查看 / 历史类放左侧，主操作独占右侧 */}
             <button
               type="button"
               className={`${s.btn} ${s.btnSm}`}
@@ -599,127 +691,158 @@ export default function BuildPage({
             >
               生成记录
             </button>
-          </div>
-          <div className={s.cardBody}>
-            <p className={s.note} style={{ marginTop: 0 }}>
-              勾版本、按已保存的源生成；<strong>内容没变的产物不重写</strong>
-              （时间戳跟着不动，连文件修改时间都不动）。
-              <br />
-              这一列的「已生成」比的是<strong>盘上那份产物</strong>与现在会算出来的那份是否一致
-              —— 时间不参与判断。交付文件与目录登记是否一致，看「交付明细…」。
-            </p>
-            {dirty && (
-              <p className={s.note} style={{ marginTop: 0 }}>
-                有<strong>未保存</strong>的改动 —— 生成前会先保存。
-              </p>
-            )}
-            {rows.map((r) => (
-              <Fragment key={r.uid}>
-                <div
-                  id={`t-build-${r.uid}`}
-                  onClick={() => setOpenRow(openRow === r.uid ? null : r.uid)}
-                  style={{ cursor: 'pointer' }}
-                  className={s.row}
-                >
-                  {/*
-                   * **已生成的行也能勾**（作者 2026-10-02）：后端本来就允许重生成 ——
-                   * 内容没变就是 unchanged、不重写；而作者要的是"就算没变化我也想走一遍
-                   * 确认框"。所以勾选只按 buildable 拦（机型没尺寸那种真不能生成），
-                   * 不再看 state。
-                   */}
-                  <input
-                    type="checkbox"
-                    checked={!!picked[r.uid]}
-                    disabled={!pickable(r)}
-                    data-tip={r.disabledReason ?? undefined}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => setPicked({ ...picked, [r.uid]: e.target.checked })}
-                    aria-label={`选择 ${r.uid}`}
-                  />
-                  <span className={`${s.mono} ${s.rowMeta}`}>{r.uid}</span>
-                  <span className={s.rowName}>{r.name}</span>
-                  {/* 状态签贴右（作者 2026-10-03：以前紧跟名字，名字一长一短就歪歪扭扭） */}
-                  <span className={s.grow} />
-                  <span
-                    className={`${s.tag} ${STATE_TAG[r.state]}`}
-                    data-tip={words.build[r.state].explain ?? undefined}
-                  >
-                    {words.build[r.state].label}
-                  </span>
-                  <span className={s.rowMeta}>{r.lastBuild ? localStamp(r.lastBuild) : '—'}</span>
-                </div>
-                {/* 详情是行的**兄弟**不是行里右侧的一个格（C14 第二十七轮） */}
-                {openRow === r.uid && (
-                  <div className={s.rowDetail}>
-                    <div>
-                      <b>{words.build[r.state].label}</b> —— {words.build[r.state].explain ?? ''}
-                    </div>
-                    {r.reason && <div>{r.reason}</div>}
-                    {r.disabledReason && <div>现在生成不了：{r.disabledReason}</div>}
-                    <div>
-                      产物：{r.mkpFile ?? '—'} · 配套切片器 {r.bbsCount} 份
-                    </div>
-                  </div>
-                )}
-              </Fragment>
-            ))}
-            <div className={s.bar} style={{ marginTop: 12 }}>
-              {/*
-               * 两颗全选（作者 2026-10-02）：
-               *   全选待生成  只勾 stale / neverBuilt —— 日常那一颗（`buildable` 的口径）
-               *   全选        勾**所有能勾的**（含已生成）—— 要"重走一遍确认框"时用它
-               * 两颗并存不是重复：一个问"哪些还没生成"，一个问"全部"。
-              */}
-              <button
-                type="button"
-                className={`${s.btn} ${s.btnSm}`}
-                onClick={() => {
-                  const next: Record<string, boolean> = {}
-                  for (const r of rows) {
-                    if (r.buildable) next[r.uid] = true
-                  }
-                  setPicked(next)
-                }}
-              >
-                全选待生成
-              </button>
-              <button
-                type="button"
-                className={`${s.btn} ${s.btnSm}`}
-                onClick={() => {
-                  const next: Record<string, boolean> = {}
-                  for (const r of rows) {
-                    if (pickable(r)) next[r.uid] = true
-                  }
-                  setPicked(next)
-                }}
-              >
-                全选
-              </button>
-              <button
-                type="button"
-                className={`${s.btn} ${s.btnSm}`}
-                onClick={() => setPicked({})}
-              >
-                全不选
-              </button>
-              <span className={s.grow} />
+            <button
+              type="button"
+              className={`${s.btn} ${s.btnSm}`}
+              disabled={deliveries === null}
+              onClick={() => void openDeliveryList()}
+              title="看每一份文件的逐行 diff：MKP 预设 / 目录与清单 / 发布定稿"
+            >
+              交付明细
+            </button>
+            <span className={s.grow} />
+            {deliveries === null ? (
+              <span className={s.cardNote}>正在读交付目录……</span>
+            ) : generateTargets.length > 0 ? (
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
-                disabled={!ids.length || blocked || unsaved}
+                disabled={blocked || unsaved}
                 data-tip={
                   unsaved
                     ? '有改动还没保存 —— 先保存或放弃，再生成'
                     : blocked
                       ? words.disabled.buildBlocked
-                      : undefined
+                      : `按当前源处理 ${deliveryPending} 份差异产物，先预演、确认后才写盘`
                 }
-                onClick={() => void openGenerate()}
+                onClick={() => void openGenerate(generateTargets)}
               >
-                生成 {ids.length} 项
+                {generateLabel}
               </button>
+            ) : (
+              <span className={s.cardNote}>没有需要生成的文件</span>
+            )}
+          </div>
+          <div className={s.cardBody}>
+            <div className={s.delStatusBar}>
+              <span>预设改完 → 生成 → 交付 → 版本交付</span>
+              {deliveries !== null && (
+                <>
+                  <span className={s.delSep} />
+                  <span>
+                    发布凭据：
+                    {/* 可点开「交付定稿」看逐条原因与定稿后的变化（只读，不写任何凭据） */}
+                    <button
+                      type="button"
+                      className={
+                        deliveries.manifestStale
+                          ? `${s.linkBtn} ${s.linkWarn}`
+                          : s.linkBtn
+                      }
+                      title="打开「交付定稿」：逐条凭据检查 + 定稿会把 manifest 改成什么（只读）"
+                      onClick={() => void openFinalize()}
+                    >
+                      {deliveries.manifestStale
+                        ? `已失效（${deliveries.manifestReasons.length} 条）`
+                        : '有效'}
+                    </button>
+                  </span>
+                  <span className={s.delSep} />
+                  <span>
+                    {deliveries.groups.filter((g) => !g.allSame).length} 组有变化 / 共{' '}
+                    {deliveries.groups.length} 组
+                  </span>
+                </>
+              )}
             </div>
+            {dirty && (
+              <div className={s.warn} style={{ marginTop: 8 }}>
+                <div className={s.warnDetail}>有改动还没保存 —— 生成前会先保存。</div>
+              </div>
+            )}
+            {deliveryError !== null && (
+              <div className={s.warn} style={{ marginTop: 8 }} role="alert">
+                <div className={s.warnTitle}>交付状态算不出来</div>
+                <div className={s.warnDetail}>
+                  {deliveryError}（候选集重算或逐字节比较失败，不猜测状态）
+                </div>
+              </div>
+            )}
+            {deliveries === null ? (
+              <div className={s.emptyHint}>正在读交付目录……</div>
+            ) : (
+              <div className={s.delGroups}>
+                {deliveries.groups.map((g) => {
+                  const open = groupOpenState[g.id] ?? !g.allSame
+                  const todo = groupTodo(g)
+                  const files = sortFiles(deliveryFiles.filter((f) => f.group === g.id))
+                  return (
+                    <section className={s.delGroup} key={g.id}>
+                      <button
+                        type="button"
+                        className={s.delGroupHead}
+                        aria-expanded={open}
+                        onClick={() =>
+                          setGroupOpenState((prev) => ({ ...prev, [g.id]: !open }))
+                        }
+                      >
+                        <span className={s.delCaret}>{open ? '▾' : '▸'}</span>
+                        <span className={s.delGroupTitle}>
+                          {g.label}（{g.total}）
+                        </span>
+                        {todo > 0 && (
+                          <span className={s.delGroupTodo}>{todo} 项待处理</span>
+                        )}
+                        <span className={s.delGroupSum}>{groupSummary(g)}</span>
+                      </button>
+                      {open && (
+                        <div className={s.delGroupRows}>
+                          {files.map((f) => {
+                            const uid = uidByRel.get(f.rel)
+                            const regen =
+                              f.diff !== 'frozen' &&
+                              f.diff !== 'removed' &&
+                              f.diff !== 'unmanaged'
+                            return (
+                              <div
+                                className={s.delFileRow}
+                                id={uid === undefined ? undefined : `t-build-${uid}`}
+                                key={f.rel}
+                              >
+                                <span className={`${s.mono} ${s.delFileName}`} title={f.rel}>
+                                  {displayName(f.rel)}
+                                </span>
+                                <span className={toneClass(stateTone(f))}>
+                                  {stateText(f)}
+                                </span>
+                                <span className={s.delFileSize}>
+                                  {f.exist ? fmtSize(f.size) : '不在盘上'}
+                                </span>
+                                {regen && (
+                                  <button
+                                    type="button"
+                                    className={s.delRowBtn}
+                                    disabled={blocked || unsaved}
+                                    title={
+                                      uid === undefined
+                                        ? '按当前源重算目录与清单（生成事务会一起核对预设）'
+                                        : '只重新生成这一份预设，先预演、确认后才写盘'
+                                    }
+                                    onClick={() => void openGenerate(regenerateTargetsOf(f.rel))}
+                                  >
+                                    {uid === undefined ? '重算目录' : '重新生成'}
+                                  </button>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </section>
+                  )
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -784,24 +907,15 @@ export default function BuildPage({
             </div>
 
             {/*
-              **本次交付文件**（2026-10-19 改为汇总 + 明细）：
-              页面外只留一行汇总与漂移提示；完整清单在①生成卡的「交付明细…」里看。
+              **发布前状态**：完整的文件清单在①生成卡的分组列表里，这里只留
+              发布独有的信息（资产漂移、目录登记、发布凭据），不重复数文件。
             */}
             <div className={s.group}>
-              <div className={s.groupHead}>本次交付文件</div>
+              <div className={s.groupHead}>发布前状态</div>
               {deliveries === null ? (
                 <div className={s.emptyHint}>正在读交付目录……</div>
               ) : (
                 <>
-                  <div className={s.chips}>
-                    <span className={s.chip}>
-                      本次交付 {deliveryFiles.length} 个文件（TOML {tomlCount} · JSON{' '}
-                      {jsonCount}）
-                    </span>
-                    {deliveryPending > 0 && (
-                      <span className={s.chip}>待更新 {deliveryPending} 份</span>
-                    )}
-                  </div>
                   {drift.length > 0 ? (
                     <p className={s.note} style={{ marginTop: 8 }}>
                       <span className={s.tagDanger}>{drift.length} 份资产字节变了</span>{' '}
@@ -1054,6 +1168,37 @@ export default function BuildPage({
         />
       )}
 
+      {/* 交付检查与修复（②）：能修的直接修（只写 manifest.json），不能修的说去哪修 */}
+      {finalizeOpen && (
+        <FinalizeModal
+          preview={finalizePreview}
+          error={finalizeErr}
+          loading={finalizeBusy}
+          busy={finalizeUpdating}
+          onReload={() => void loadFinalize()}
+          onUpdateCredentials={() => void updateCredentials()}
+          onLocate={(at: IssueWhere) => {
+            /* 关框再跳：定位是"去源的哪一版"，留在模态框里就看不清目标页 */
+            const g = gotoOfWhere(at)
+            if (g === null) return
+            setFinalizeOpen(false)
+            onGoto(g.view, g.focus)
+          }}
+          onCheckIdentity={() => {
+            setFinalizeOpen(false)
+            setGateReport(null)
+            setGateOpen(true)
+          }}
+          onClose={() => setFinalizeOpen(false)}
+          onPublish={() => {
+            /* 只是进正式发布界面 —— 一行都不写，发布仍要在闸里由人确认 */
+            setFinalizeOpen(false)
+            setGateReport(null)
+            setGateOpen(true)
+          }}
+        />
+      )}
+
       {/* 发布闸 + 回执（第二 / 四刀）：点「发布」先过闸；发完就地留在回执上 */}
       {gateOpen && (
         <PublishGateModal
@@ -1114,11 +1259,10 @@ export default function BuildPage({
   )
 }
 
-/** 生成态四档的样式（与机型页共用同一张类名表） */
-const STATE_TAG: Record<string, string> = {
-  built: s.tagBuildBuilt,
-  stale: s.tagBuildStale,
-  neverBuilt: s.tagBuildNever,
-  noResources: s.tagBuildNone,
+/** 色调语义 → 本页的状态徽标类名 */
+function toneClass(tone: StateTone): string {
+  if (tone === 'ok') return `${s.delBadge} ${s.delBadgeOk}`
+  if (tone === 'todo') return `${s.delBadge} ${s.delBadgeTodo}`
+  return `${s.delBadge} ${s.delBadgeMuted}`
 }
 
