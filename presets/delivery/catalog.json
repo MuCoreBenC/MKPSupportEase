@@ -1,7 +1,7 @@
 {
   "catalogSchema": 1,
-  "revision": "dc0884e1b1b0c421",
-  "publishedAt": "2026-11-05T14:31:21Z",
+  "revision": "68fc3568c0c8afc4",
+  "publishedAt": "2026-11-07T13:40:29Z",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -359,129 +359,6 @@
       ]
     },
     {
-      "id": "P2S",
-      "display": "P2S",
-      "name": "",
-      "brand": "拓竹 (Bambu Lab)",
-      "defaultBundle": "P2S_default",
-      "externalAliases": [
-        "P2"
-      ],
-      "image": "p2s-image",
-      "imageVariant": null,
-      "icon": "p1s-icon",
-      "plateIds": [
-        "single-latch-256"
-      ],
-      "defaultPlateId": "single-latch-256",
-      "dimensions": {
-        "bedSize": {
-          "width": 256.0,
-          "depth": 256.0
-        },
-        "movementRange": {
-          "minX": 0.0,
-          "maxX": 256.0,
-          "minY": 0.0,
-          "maxY": 265.0,
-          "maxZ": 999.0
-        },
-        "glueArea": {
-          "glueMinX": 0.0,
-          "glueMaxX": 256.0,
-          "glueMinY": 0.0,
-          "glueMaxY": 265.0,
-          "wipeX": 20.0
-        },
-        "calibration": {
-          "lShapeBaseX": 68.21,
-          "lShapeBaseY": 126.373,
-          "xLineX": 114.523,
-          "xLineY": 104.83,
-          "xLineYEnd": 114.83,
-          "yLineX": 104.53,
-          "yLineXEnd": 114.53,
-          "yLineY": 112.83,
-          "zStartX": 68.21,
-          "zStartY": 126.373
-        },
-        "edgeZone": 10.0,
-        "flags": {
-          "gcodeMarker": ";===== machine: P2",
-          "hasSecondFan": true
-        }
-      },
-      "versions": [
-        {
-          "id": "STANDARD",
-          "name": "标准版",
-          "nameEn": "Standard",
-          "nameTw": "標準版",
-          "nameJa": "スタンダード版",
-          "recommendedBundle": "P2S_default",
-          "tag": "推荐",
-          "tagEn": "Recommended",
-          "tagTw": "推薦",
-          "tagJa": "おすすめ",
-          "description": "未完成，没有打印机",
-          "descriptionEn": "Unfinished; no printer available",
-          "descriptionTw": "未完成，沒有印表機",
-          "descriptionJa": "未完成（プリンターが手元にないため）",
-          "image": null
-        }
-      ],
-      "zones": [
-        {
-          "points": [
-            [
-              0.0,
-              0.0
-            ],
-            [
-              240.0,
-              0.0
-            ],
-            [
-              240.0,
-              14.0
-            ],
-            [
-              238.0,
-              14.0
-            ],
-            [
-              238.0,
-              5.0
-            ],
-            [
-              0.0,
-              5.0
-            ]
-          ]
-        },
-        {
-          "points": [
-            [
-              0.0,
-              0.0
-            ],
-            [
-              18.0,
-              0.0
-            ],
-            [
-              18.0,
-              28.0
-            ],
-            [
-              0.0,
-              28.0
-            ]
-          ]
-        }
-      ]
-    },
-    {
       "id": "X1C",
       "display": "X1C",
       "name": "",
@@ -643,14 +520,6 @@
       "delivery": "bundled"
     },
     {
-      "id": "p2s-image",
-      "type": "image",
-      "machineId": "P2S",
-      "name": "P2S 外观图",
-      "path": "printers/p2s.webp",
-      "delivery": "bundled"
-    },
-    {
       "id": "x1c-image",
       "type": "image",
       "machineId": "X1C",
@@ -726,15 +595,6 @@
       "name": "P1S lite 版预设",
       "path": "",
       "versionId": "LITE",
-      "delivery": "download"
-    },
-    {
-      "id": "p2s-standard",
-      "type": "mkPreset",
-      "machineId": "P2S",
-      "name": "P2S 标准版预设",
-      "path": "",
-      "versionId": "STANDARD",
       "delivery": "download"
     },
     {
@@ -870,16 +730,6 @@
       "delivery": "download"
     },
     {
-      "id": "p2s-bbs-04-024",
-      "type": "slicerProfile",
-      "machineId": "P2S",
-      "name": "P2S：0.4 喷头 0.24 层高",
-      "path": "bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
-      "slicer": "bbs",
-      "profile": "process",
-      "delivery": "download"
-    },
-    {
       "id": "x1c-bbs-02-010",
       "type": "slicerProfile",
       "machineId": "X1C",
@@ -998,16 +848,6 @@
       "assetRefs": [
         "p1s-lite",
         "p1s-bbs-04-024"
-      ],
-      "updatedAt": "2026-10-16"
-    },
-    {
-      "id": "P2S_default",
-      "display": "P2S 标准版",
-      "machineId": "P2S",
-      "assetRefs": [
-        "p2s-standard",
-        "p2s-bbs-04-024"
       ],
       "updatedAt": "2026-10-16"
     },
@@ -6025,8 +5865,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "0ba0fbe5904e4311d11ed0e9161ebce6be627f1223f32dc6d07aee1098ca8e55",
-      "size": 4897
+      "sha256": "71c0b7b7bae8c48a8916f244882d01f80dba570ba9ef26781ea1588e1825ec46",
+      "size": 4855
     },
     {
       "kind": "mkp_preset",
@@ -6034,8 +5874,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "5772fa3c59dd6c1a2f0f1f6596f461bb7ba42247494f21328754003049bb0f21",
-      "size": 4895
+      "sha256": "f98ee1aeb75f8f014c1e3131e54c3773f9fe62d1dd3cd8a64293257148d5277b",
+      "size": 4853
     },
     {
       "kind": "mkp_preset",
@@ -6043,8 +5883,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "33d3a605f3428258ffb2ccf256b2a6bea2a89aae5c14ec47c495d70918578fa5",
-      "size": 4899
+      "sha256": "50e6d4b1408f3107677fb8d9dc5580d7dc95886bcbd19a5904a853dc4eac1864",
+      "size": 4857
     },
     {
       "kind": "mkp_preset",
@@ -6052,8 +5892,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "66d9240623db663e93ea655ded9d09c936418c6d5a6b5efb8b498ff98c7b5d68",
-      "size": 4903
+      "sha256": "a46bea0c78f5f6998711181585b3a6aec97b75a47abf4f257f5699afd882cf2f",
+      "size": 4861
     },
     {
       "kind": "mkp_preset",
@@ -6061,8 +5901,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "479b8505a8d501a68b3367471e36b7289b9dfbf0cfb08bb22022bcd7cab19abc",
-      "size": 4897
+      "sha256": "a1eeb70bdc2e462595c87f4e7e8e86e61edfd00b07c1dc2b0740929c8f758f52",
+      "size": 4855
     },
     {
       "kind": "mkp_preset",
@@ -6070,8 +5910,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "328ce4fe680096f1400945e8878cf04b6fdf922e16922e84a152049a6816fbdc",
-      "size": 4902
+      "sha256": "4d16ef6e4ae5a8de7e07d9090c605a714f8cc46f1841bef216e5ffcecc6e5ae6",
+      "size": 4860
     },
     {
       "kind": "mkp_preset",
@@ -6079,17 +5919,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "0a44a3d264ce0f03a51b27bca6196e21362d80dfda35371d9894912ed431b953",
-      "size": 5033
-    },
-    {
-      "kind": "mkp_preset",
-      "fileName": "P2S-standard.toml",
-      "path": "delivery/mkp/presets/P2S-standard.toml",
-      "machineId": "P2S",
-      "versionId": "STANDARD",
-      "sha256": "80df56de173a9078148ba81ea26853d2520c63174aa09956c15d2914b62d75e8",
-      "size": 5037
+      "sha256": "46908f3848566e970b87dc7acb2202771d7c568fa79305310b9bd3e1ef7f8a4d",
+      "size": 4991
     },
     {
       "kind": "mkp_preset",
@@ -6097,8 +5928,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "e55cb005a6e799d86335b4ebc88482ca7ec4a151af02781ddbde56b35818c30f",
-      "size": 5033
+      "sha256": "a729b9c8ac77768d5bd3d17744d44376ac46dd64db1b04cfa81d412ffb213030",
+      "size": 4991
     },
     {
       "kind": "icon",
@@ -6228,15 +6059,6 @@
     },
     {
       "kind": "bbs_config",
-      "fileName": "MKPProcess P2S 0.4 0.24.json",
-      "path": "assets/bbs/Process/0.4mm/MKPProcess P2S 0.4 0.24.json",
-      "machineId": "P2S",
-      "versionId": "",
-      "sha256": "124f8290aa007567af78d6058f95095e4787c02a30371acb56f489029168499e",
-      "size": 1264
-    },
-    {
-      "kind": "bbs_config",
       "fileName": "MKPProcess X1 0.2 0.10.json",
       "path": "assets/bbs/Process/0.2mm/MKPProcess X1 0.2 0.10.json",
       "machineId": "X1C",
@@ -6257,5 +6079,5 @@
   "structureSignature": "2242174c52e8a9b6",
   "minClientVersion": "0.0.6",
   "catalogId": "support-ease",
-  "publishSerial": 8
+  "publishSerial": 9
 }

@@ -107,27 +107,6 @@
       ]
     },
     {
-      "id": "P2S",
-      "display": "P2S",
-      "brand": "Bambu Lab",
-      "externalAliases": [
-        "P2"
-      ],
-      "image": "p2s-image",
-      "icon": "p1s-icon",
-      "defaultBundle": "P2S_default",
-      "hasDimensions": true,
-      "versions": [
-        {
-          "id": "STANDARD",
-          "name": "标准版",
-          "tag": "推荐",
-          "recommendedBundle": "P2S_default",
-          "mkpPresetAssetId": "P2S-standard.toml"
-        }
-      ]
-    },
-    {
       "id": "X1C",
       "display": "X1C",
       "brand": "Bambu Lab",

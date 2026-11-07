@@ -71,16 +71,6 @@
       "updatedAt": "2026-10-16"
     },
     {
-      "id": "P2S_default",
-      "display": "P2S 标准版",
-      "machineId": "P2S",
-      "assetRefs": [
-        "p2s-standard",
-        "p2s-bbs-04-024"
-      ],
-      "updatedAt": "2026-10-16"
-    },
-    {
       "id": "X1C_default",
       "display": "X1C lite版",
       "machineId": "X1C",

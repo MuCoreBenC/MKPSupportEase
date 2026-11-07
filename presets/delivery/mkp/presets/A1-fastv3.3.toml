@@ -1,6 +1,5 @@
 # machine: A1
 # variant: fastv3.3
-# generated_at: 2026-11-05T04:17:00+08:00
 
 [toolhead]
 # 自定义工具头获取 G-code
