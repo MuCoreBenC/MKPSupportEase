@@ -376,7 +376,7 @@ if (tryRun('git', ['rev-parse', '-q', '--verify', `refs/tags/v${version}`])) {
   die(
     `tag v${version} 已经存在 —— 已发布的号永远不再用` +
       '（同一个号两种内容，客户端与回滚都说不清）。\n' +
-      `    下一个开发号：npm run version:next（当前 ${current}）`,
+      `    下一个开发号：npm run version:ensure（当前 ${current}）`,
   )
 }
 
@@ -513,6 +513,10 @@ ${
     : ''
 }
   下一步（发布号已固定，别再动它）：
-    npm run version:next      # 预览版会回到同一基础的 -dev（0.0.10-preview.1 → 0.0.10-dev）
+${
+  channel === 'preview'
+    ? '    npm run version:ensure    # 预览版发完收敛到下一个预览号 —— next 只管"正式版跳基础版"'
+    : '    npm run version:next      # 正式版发完 → 下一个基础版的 preview.1'
+}
     git switch -c feat/<next>
 `)
