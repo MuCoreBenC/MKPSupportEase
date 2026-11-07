@@ -385,7 +385,8 @@ if (flagDryRun) {
 
 const rollback = [
   `git reset --hard HEAD   # 丢掉版本号提交（确认没有别的改动再跑）`,
-  `git push origin --delete ${branch}   # 如果已经推上去了`,
+  /* 分支名取内核报告里那一格：`branch` 只活在前面那个 `if` 块里，这里取不到 */
+  `git push origin --delete ${first.branch ?? '<发布分支>'}   # 如果已经推上去了`,
 ]
 
 const prNumber = first.review?.number
