@@ -947,6 +947,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_app_version,
         // 版本身份四格（只读）：已安装 / 本地已打包 / 最新已发布 / 当前开发
         app::version_id::wb_version_identity,
+        // 发布包清单（只读）：本地留了几份、云端各平台攒了多少版
+        app::version_id::wb_release_packages,
         // 「打开位置」：只收白名单键（installed / packaged / published），路径由后端重算
         app::version_id::wb_open_version_location,
         // 发布对账（只读）：git tag × 回执 × 开发号，缺哪一边就标出来
