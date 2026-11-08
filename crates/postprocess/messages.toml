@@ -188,6 +188,59 @@ text_ja = "モデルが接着剤の範囲を超えています、{sides}"
 slicer = "模型超出涂胶范围，{sides} —— 回切片器挪一下模型再切"
 params = ["sides"]
 
+# ---------------------------------------------------------------- 内核警告（W_*：跑完了，但有件事用户必须知道）
+#
+# 不是故障：这一趟成功了，句子进 `ir.warnings`，由钩子原样摆到模态框、执行记录、
+# 报告页。**不许**在业务代码里拼中文 —— 那样英文 / 日文界面会突然夹一句中文。
+
+["postproc.scarf_joint_seam"]
+code = "W_SCARF_JOINT_SEAM_001"
+text = "本次切片开启了斜拼接缝。Bambu Studio 2.7.1 及以后版本在后处理后不刷新层表，已确认会导致打印成品缺失。建议优先关闭斜拼接缝，或改用 2.6.0 及更早版本，或等待官方修复。"
+text_en = "Scarf joint seam is on. Bambu Studio 2.7.1+ leaves the layer table stale, so printed parts come out broken. Turn the seam off, use 2.6.0 or earlier, or wait for an official fix."
+text_zh_tw = "本次切片開啟了斜拼接縫。Bambu Studio 2.7.1 及以後版本在後處理後不更新層表，已確認會造成列印成品缺失。建議優先關閉斜拼接縫，或改用 2.6.0 及更早版本，或等待官方修復。"
+text_ja = "斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降は後処理後にレイヤー表を更新せず、印刷物が欠けます。斜め継ぎ目をオフにするか、2.6.0 以前を使うか、公式修正をお待ちください。"
+note = "三条处置的**顺序就是优先级**（先关开关 → 再退版本 → 最后等官方），别把换旧版排第一。四句话都压到「模态框那张 104px 的 hero 卡里放得下三行」为止 —— 每加一句都要回去量（`?pp=warn` 那一屏 + scripts/probes/pp-modal-height.mjs 同款量法）。分界 2.7.1 来自 BackgroundSlicingProcess.cpp 的比对；2.9.1 仍然坏，所以只说「等官方修复」，不许写「升级就好」。"
+
+["postproc.header_layer_declared"]
+code = "W_HEADER_LAYER_001"
+text = "G-code 头部没有 `; total layer number:` 声明，已按实测 {layers} 层补写。"
+text_en = "The G-code header had no `; total layer number:` declaration; it now states the measured {layers} layers."
+text_zh_tw = "G-code 頭部沒有 `; total layer number:` 宣告，已按實測 {layers} 層補寫。"
+text_ja = "G-code のヘッダーに `; total layer number:` の宣言がないため、実測値の {layers} 層で書き足しました。"
+params = ["layers"]
+note = "层数声明补写：采集侧按实测层数写回去，报告与文件说同一个数（见 pipeline 的 `finalized.layers`）"
+
+["postproc.range_check.first_pen"]
+code = "W_RANGE_FIRST_PEN_001"
+text = "首笔活化的路径超过工具头的最大运动范围"
+text_en = "The first-pen revitalization path exceeds the toolhead travel range"
+text_zh_tw = "首筆活化的路徑超過工具頭的最大運動範圍"
+text_ja = "ファーストペン活性化の経路がツールヘッドの最大移動範囲を超えています"
+note = "XY 越界那条警告的**主语**（下面是它的整句），参数 `{source}` 由这里给"
+
+["postproc.range_violation"]
+code = "W_RANGE_VIOLATION_001"
+text = "{source}，向 {dir} 方向移动（实际 {axis}={actual}，{limit}={bound}）"
+text_en = "{source}; the path moves toward {dir} (actual {axis}={actual}, {limit}={bound})"
+text_zh_tw = "{source}，向 {dir} 方向移動（實際 {axis}={actual}，{limit}={bound}）"
+text_ja = "{source}：{dir} 方向へ移動しています（実際 {axis}={actual}、{limit}={bound}）"
+params = ["source", "dir", "axis", "actual", "limit", "bound"]
+note = "XY 越界：`{dir}` 是 X+/X-/Y+/Y-，`{limit}` 是下面那两条之一，`{bound}` 是机型给的边界值"
+
+["postproc.range_limit.max"]
+text = "机型最大 {axis}"
+text_en = "machine max {axis}"
+text_zh_tw = "機型最大 {axis}"
+text_ja = "機種の最大 {axis}"
+params = ["axis"]
+
+["postproc.range_limit.min"]
+text = "机型最小 {axis}"
+text_en = "machine min {axis}"
+text_zh_tw = "機型最小 {axis}"
+text_ja = "機種の最小 {axis}"
+params = ["axis"]
+
 # 边界那一句的几个零件（合起来才是上面 `{sides}`）—— 它们同样是文案，所以也住这里
 ["boundary.clause"]
 text = "当前{axis}：{current}mm，允许范围：{limit}"
@@ -5085,3 +5138,194 @@ text_en = "{rel} could not be read, so its origin could not be recorded — the 
 text_zh_tw = "{rel} 讀不出來，沒法記下它是從哪一份複製來的 —— 這次複製已撤銷，母本沒有動過"
 text_ja = "{rel} を読み取れないため、どのファイルから複製したかを記録できませんでした — この複製は取り消され、元のファイルは変更されていません"
 params = ["rel"]
+
+# ---------------------------------------------------------------- 应用层（src-tauri）剩下的用户可见文案
+#
+# 这一批是 2026-11-08 补的：同批六百多条早已走表（`ui.ipc.*` / `ui.runtime.*` 那些），
+# 这几句是散在代码里没搬的。**日志 / CLI / 开发台 / `AppError.detail` 不在此列** ——
+# 那些是给开发看的，保持中文（作者 2026-11-08：「只是开发者看的话就不需要多语言了」）。
+
+["ui.guide.unavailable"]
+text = "屏幕引导只在 macOS / Windows 上有（要读切片器的窗口坐标）"
+text_en = "On-screen guidance is only available on macOS and Windows (it reads the slicer's window geometry)"
+text_zh_tw = "螢幕引導只在 macOS / Windows 上有（要讀切片器的視窗座標）"
+text_ja = "画面ガイドは macOS / Windows でのみ利用できます（スライサーのウィンドウ座標を読み取ります）"
+
+["ui.guide.no_ax_permission"]
+text = "还没有辅助功能权限：打开「系统设置 → 隐私与安全性 → 辅助功能」，把 SupportEase 勾上"
+text_en = "Accessibility permission is not granted yet: open System Settings → Privacy & Security → Accessibility and turn SupportEase on"
+text_zh_tw = "還沒有輔助使用權限：打開「系統設定 → 隱私權與安全性 → 輔助使用」，把 SupportEase 勾選"
+text_ja = "アクセシビリティ権限がありません：「システム設定 → プライバシーとセキュリティ → アクセシビリティ」で SupportEase をオンにしてください"
+
+["ui.guide.slicer_not_running"]
+text = "没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」"
+text_en = "The slicer does not seem to be running — open Bambu Studio first, then click “View guide”"
+text_zh_tw = "沒看到切片器在執行 —— 先打開 Bambu Studio，再點「查看引導」"
+text_ja = "スライサーが起動していないようです —— 先に Bambu Studio を開いてから「ガイドを見る」を押してください"
+
+["ui.guide.window_unreadable"]
+text = "读不到切片器的窗口（它可能正在启动，稍等一下再试）"
+text_en = "Cannot read the slicer window (it may still be starting; try again in a moment)"
+text_zh_tw = "讀不到切片器的視窗（它可能正在啟動，稍等一下再試）"
+text_ja = "スライサーのウィンドウを取得できません（起動中かもしれません。少し待って再試行してください）"
+
+["ui.guide.no_project_window"]
+text = "切片器没有打开的工程窗口"
+text_en = "The slicer has no project window open"
+text_zh_tw = "切片器沒有開啟的工程視窗"
+text_ja = "スライサーに開いているプロジェクトウィンドウがありません"
+
+["ui.guide.window_pos_unreadable"]
+text = "读不到窗口位置"
+text_en = "Cannot read the window position"
+text_zh_tw = "讀不到視窗位置"
+text_ja = "ウィンドウの位置を取得できません"
+
+["ui.guide.window_size_unreadable"]
+text = "读不到窗口大小"
+text_en = "Cannot read the window size"
+text_zh_tw = "讀不到視窗大小"
+text_ja = "ウィンドウのサイズを取得できません"
+
+["ui.guide.control_unreadable"]
+text = "读不到窗口里的控件"
+text_en = "Cannot read the controls inside the window"
+text_zh_tw = "讀不到視窗裡的控件"
+text_ja = "ウィンドウ内のコントロールを取得できません"
+
+["ui.guide.bed_type_missing"]
+text = "在窗口里没找到板子类型的位置（切片器界面换过了？）—— 这一版的引导暂时指不了"
+text_en = "Could not find the build-plate control in the window (has the slicer UI changed?) — guidance cannot point at it in this version"
+text_zh_tw = "在視窗裡沒找到板子類型的位置（切片器介面換過了？）—— 這一版的引導暫時指不了"
+text_ja = "ウィンドウ内にプレート種類の位置が見つかりません（スライサーの UI が変わった？）—— このバージョンのガイドでは指し示せません"
+
+["ui.guide.control_mismatch"]
+text = "挑出来的控件对不上（不该发生）"
+text_en = "The selected control does not match (this should not happen)"
+text_zh_tw = "挑出來的控件對不上（不該發生）"
+text_ja = "選択したコントロールが一致しません（本来起きないはずです）"
+
+["ui.runtime.path.empty"]
+text = "路径是空的"
+text_en = "The path is empty"
+text_zh_tw = "路徑是空的"
+text_ja = "パスが空です"
+
+["ui.runtime.path.absolute"]
+text = "路径是绝对地址（以 / 开头）"
+text_en = "The path is absolute (starts with /)"
+text_zh_tw = "路徑是絕對位址（以 / 開頭）"
+text_ja = "パスが絶対パスです（/ で始まっています）"
+
+["ui.runtime.path.backslash"]
+text = "路径里有反斜杠（Windows 写法不该出现在交付面）"
+text_en = "The path contains a backslash (Windows form must not appear in the delivery tree)"
+text_zh_tw = "路徑裡有反斜線（Windows 寫法不該出現在交付面）"
+text_ja = "パスにバックスラッシュが含まれています（配信面に Windows 形式は入れられません）"
+
+["ui.runtime.path.dotdot"]
+text = "路径里有 .. 段 —— 交付面禁止路径穿越"
+text_en = "The path contains a “..” segment — traversal is forbidden in the delivery tree"
+text_zh_tw = "路徑裡有 .. 段 —— 交付面禁止路徑穿越"
+text_ja = "パスに .. セグメントがあります（配信面ではパストラバーサル禁止）"
+
+["ui.runtime.path.absolute_url"]
+text = "路径里写的是绝对 URL —— 交付面只收相对路径"
+text_en = "The path is an absolute URL — the delivery tree only accepts relative paths"
+text_zh_tw = "路徑裡寫的是絕對 URL —— 交付面只收相對路徑"
+text_ja = "パスが絶対 URL です（配信面は相対パスのみ）"
+
+["ui.runtime.resolver.sub_path"]
+text = "content 子路径"
+text_en = "the content sub-path"
+text_zh_tw = "content 子路徑"
+text_ja = "content のサブパス"
+note = "`ui.runtime.resolver.443` 的 `{what}` 参数：要能直接接在那句里当主语"
+
+["ui.runtime.source.gitee"]
+text = "Gitee（国内直连）"
+text_en = "Gitee (direct in mainland China)"
+text_zh_tw = "Gitee（國內直連）"
+text_ja = "Gitee（中国国内から直結）"
+
+["ui.runtime.source.custom"]
+text = "自定义地址"
+text_en = "Custom URL"
+text_zh_tw = "自訂位址"
+text_ja = "カスタム URL"
+
+["ui.runtime.import.source_missing"]
+text = "找不到源文件 —— 它可能已经被移走或删掉"
+text_en = "Source file not found — it may have been moved or deleted"
+text_zh_tw = "找不到來源檔案 —— 它可能已經被移走或刪掉"
+text_ja = "元のファイルが見つかりません —— 移動または削除された可能性があります"
+
+["ui.runtime.local.toml_syntax_plain"]
+text = "TOML 语法不对"
+text_en = "TOML syntax error"
+text_zh_tw = "TOML 語法不對"
+text_ja = "TOML の構文エラーです"
+note = "`ui.runtime.local.toml_syntax` 认不出行列时的兜底句"
+
+["ui.runtime.local.unreadable"]
+text = "读不出来（文件不在了 / 读不动）"
+text_en = "Cannot read it (the file is gone or unreadable)"
+text_zh_tw = "讀不出來（檔案不在了 / 讀不動）"
+text_ja = "読み取れません（ファイルがない、または読み取れません）"
+
+["ui.runtime.local.not_utf8"]
+text = "不是 UTF-8 文本，读不出来"
+text_en = "Not UTF-8 text, so it cannot be read"
+text_zh_tw = "不是 UTF-8 文字，讀不出來"
+text_ja = "UTF-8 のテキストではないため読み取れません"
+
+["ui.runtime.delivery.sha_stale"]
+text = "{name} 的内容对不上 —— 本机目录停在 {local}，云端已是 {remote}，先点「检查更新」再重试"
+text_en = "{name} does not match — this machine is on {local} while the cloud is already at {remote}; click “Check for updates” and try again"
+text_zh_tw = "{name} 的內容對不上 —— 本機目錄停在 {local}，雲端已是 {remote}，先點「檢查更新」再重試"
+text_ja = "{name} の内容が一致しません —— この端末は {local}、クラウドは既に {remote} です。「アップデートを確認」を押してから再試行してください"
+params = ["name", "local", "remote"]
+
+["ui.runtime.delivery.sha_mismatch"]
+text = "{name} 的内容对不上（和本机目录登记的那份不是同一版）—— 文件可能在源头被改过或传坏了，先重下一遍；还不行就找我们要一份"
+text_en = "{name} does not match (it is not the version this machine has on record) — the file may have been changed or corrupted at the source; download it once more, and if that still fails, ask us for a copy"
+text_zh_tw = "{name} 的內容對不上（和本機目錄登記的那份不是同一版）—— 檔案可能在源頭被改過或傳壞了，先重新下載一遍；還不行就跟我們要一份"
+text_ja = "{name} の内容が一致しません（この端末に登録されている版と違います）—— 配布元で書き換えられたか破損した可能性があります。もう一度ダウンロードし、直らない場合はお問い合わせください"
+params = ["name"]
+
+["ui.presetdata.registry.want_number"]
+text = "要数字"
+text_en = "a number"
+text_zh_tw = "要數字"
+text_ja = "数値"
+note = "`ui.presetdata.registry.308` 的 `{v2}`：值类型要求，拼在括号里，所以要短"
+
+["ui.presetdata.registry.want_bool"]
+text = "要 true/false"
+text_en = "true or false"
+text_zh_tw = "要 true/false"
+text_ja = "true または false"
+
+["ui.presetdata.registry.want_text"]
+text = "要字符串"
+text_en = "text"
+text_zh_tw = "要字串"
+text_ja = "文字列"
+
+["ui.guide.no_project_window_open"]
+text = "切片器没有打开的工程窗口 —— 先打开一个工程，再点「查看引导」"
+text_en = "The slicer has no project window open — open a project first, then click “View guide”"
+text_zh_tw = "切片器沒有開啟的工程視窗 —— 先開啟一個工程，再點「查看引導」"
+text_ja = "スライサーに開いているプロジェクトウィンドウがありません —— 先にプロジェクトを開いてから「ガイドを見る」を押してください"
+
+["ui.guide.all_minimized"]
+text = "切片器在跑，但它的窗口都最小化了 —— 先还原 Bambu Studio 的窗口，再点「查看引导」"
+text_en = "The slicer is running but all of its windows are minimised — restore the Bambu Studio window first, then click “View guide”"
+text_zh_tw = "切片器在執行，但它的視窗都最小化了 —— 先還原 Bambu Studio 的視窗，再點「查看引導」"
+text_ja = "スライサーは起動していますが、ウィンドウがすべて最小化されています —— Bambu Studio のウィンドウを元に戻してから「ガイドを見る」を押してください"
+
+["ui.guide.window_minimized"]
+text = "切片器窗口最小化了 —— 先还原它，再点「查看引导」"
+text_en = "The slicer window is minimised — restore it first, then click “View guide”"
+text_zh_tw = "切片器視窗最小化了 —— 先還原它，再點「查看引導」"
+text_ja = "スライサーのウィンドウが最小化されています —— 元に戻してから「ガイドを見る」を押してください"

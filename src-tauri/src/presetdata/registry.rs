@@ -1541,20 +1541,21 @@ impl ParamRegistry {
             (Value::Bool(_), ValueType::Bool) => {}
             (Value::String(_), ValueType::Text) => {}
             (v, t) => {
+                /* 值类型要求的三个短语本身也是文案（它们会拼进上面那句的括号里） */
+                let want = match t {
+                    ValueType::Float | ValueType::Int => {
+                        messages::text("ui.presetdata.registry.want_number", &[])
+                    }
+                    ValueType::Bool => messages::text("ui.presetdata.registry.want_bool", &[]),
+                    ValueType::Text => messages::text("ui.presetdata.registry.want_text", &[]),
+                };
                 return Err(AppError::invalid_argument(messages::text(
                     "ui.presetdata.registry.308",
                     &[
                         ("key", key),
                         ("v", &v.to_string()),
                         ("v1", value_type_str(t)),
-                        (
-                            "v2",
-                            match t {
-                                ValueType::Float | ValueType::Int => "要数字",
-                                ValueType::Bool => "要 true/false",
-                                ValueType::Text => "要字符串",
-                            },
-                        ),
+                        ("v2", want.as_str()),
                     ],
                 )));
             }

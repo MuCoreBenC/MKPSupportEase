@@ -29,6 +29,11 @@ fs.mkdirSync(SHOTS, { recursive: true })
 
 const SCREENS = [
   { name: 'result', query: '?pp=result', title: '后处理结果' },
+  /*
+   * 带警告的结果屏（2026-11-08）：警告页 ↔ 信息页**只是上面那张 hero 换了**
+   * （下面还是那两栏事实）⇒ 框高必须与普通结果一模一样。
+   */
+  { name: 'warn', query: '?pp=warn', title: '后处理结果' },
   { name: 'relocate', query: '?pp=relocate', title: '后处理进度' },
   { name: 'mismatch', query: '?pp=mismatch', title: '后处理进度' },
 ]
@@ -46,10 +51,17 @@ const THEMES = [
 const got = []
 /* 另外两条：翻页槽与两栏事实的高度差（=作者说的"留空"） */
 const extras = []
+/* 翻页那一下框高了没有（警告页 → 信息页） */
+const flips = []
 /* 标题栏命中测试（拖窗能不能收到 mousedown） */
 const drags = []
 for (const env of THEMES) {
-  const page = await browser.newPage({ viewport: { width: env.width, height: env.height } })
+  /* ★ 语言钉成中文：下面那些 `aria-label` 是**中文那句标题**（界面文案随系统语言走，
+     不钉住的话英文机器上这条探针会一直等一个不存在的对话框标题） */
+  const page = await browser.newPage({
+    viewport: { width: env.width, height: env.height },
+    locale: 'zh-CN',
+  })
   for (const s of SCREENS) {
     await page.goto(BASE + s.query, { waitUntil: 'domcontentloaded' })
     const boxEl = page.locator(`div[role="dialog"][aria-label="${s.title}"]`)
@@ -89,14 +101,26 @@ for (const env of THEMES) {
      * 「关闭预览」，翻不了页 —— 但两页是**叠在同一格里**的，信息页的高度可以直接量：
      * 槽高必须等于两栏事实的自然高度（多出来那截就是作者说的"留空太多"）。
      */
-    if (s.name === 'relocate') {
+    if (s.name === 'relocate' || s.name === 'warn') {
       const slot = await page.evaluate(() => {
         const box = document.querySelector('[class*="relocateSlot"]')
         const groups = box?.querySelector('[class*="groups"]')
         const h = (el) => (el === null || el === undefined ? 0 : el.getBoundingClientRect().height)
         return { slot: Math.round(h(box)), groups: Math.round(h(groups)) }
       })
-      extras.push({ env: env.name, name: 'slot-vs-facts', gap: slot.slot - slot.groups })
+      extras.push({ env: env.name, name: `${s.name}-slot-vs-facts`, gap: slot.slot - slot.groups })
+    }
+
+    /*
+     * 警告那一屏有**两页**（警告 ↔ 信息，左下角那颗小钮翻）：翻一下再量 —— 上面那张
+     * hero 换了，框一个像素都不许动（作者 2026-11-08：「我这模态框也不会被撑得很开」）。
+     */
+    if (s.name === 'warn') {
+      await page.locator('[class*="footLead"] button').first().click()
+      await page.waitForTimeout(250)
+      await page.screenshot({ path: `${SHOTS}/pp-${env.name}-warn-info.png` })
+      const flipped = await boxEl.boundingBox()
+      flips.push({ env: env.name, d: Math.round(flipped.height - box.height) })
     }
   }
   await page.close()
@@ -115,8 +139,10 @@ for (const env of THEMES) {
 const heightOk = diffs.every((g) => Math.abs(g.d) <= 1)
 /* 翻页槽不许比两栏事实高（高了就是信息页底下那片空） */
 const slotOk = extras.every((g) => g.gap <= 1)
+/* 翻页那一下框不许动（警告 ↔ 信息：只是上面那张 hero 换了） */
+const flipOk = flips.length > 0 && flips.every((f) => Math.abs(f.d) <= 1)
 /* 模态框开着时，标题栏仍要收得到拖窗的 mousedown */
 const dragOk = drags.length > 0 && drags.every((d) => d.dragOk)
-const ok = heightOk && slotOk && dragOk
-console.log(JSON.stringify({ ok, got, diffs, extras, drags }, null, 2))
+const ok = heightOk && slotOk && flipOk && dragOk
+console.log(JSON.stringify({ ok, got, diffs, extras, flips, drags }, null, 2))
 process.exit(ok ? 0 : 1)

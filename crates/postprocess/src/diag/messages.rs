@@ -548,8 +548,13 @@ mod tests {
     }
 
     /// 没登记的键要**响亮**，不能返回空串（空串在界面上等于"这里本来没话"）。
+    ///
+    /// ★ 先把语言钉回中文：语言是**进程级活值**（`set_lang`），
+    /// `the_language_switch_is_process_wide_and_reversible` 会在别的线程上把它切成英文 ——
+    /// 并行跑时这条断言中文兜底句的用例就会偶发失败（本项目实测撞到过两次）。
     #[test]
     fn unknown_key_is_loud() {
+        set_lang(Lang::Zh);
         let got = text("E_THIS_KEY_DOES_NOT_EXIST_999", &[]);
         assert!(got.contains("未登记的文案"), "{got}");
         assert!(got.contains("E_THIS_KEY_DOES_NOT_EXIST_999"), "{got}");

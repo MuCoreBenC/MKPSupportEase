@@ -91,7 +91,7 @@ import { api, errorText, uiErrorOf } from '../../api'
 import type { ReportExportFile, ReportExportKind, ReportExportPlan } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import Icon from '../../components/Icon'
-import { HeadNote, Modal, useModalHeadNoteSlot } from '../../components/modal'
+import { HeadNote, Modal, PageToggle, useModalHeadNoteSlot } from '../../components/modal'
 import { Switch } from '../../components/switch'
 import { useStickyState } from '../../hooks/useStickyState'
 import { useT, type StringKey } from '../../i18n'
@@ -196,13 +196,6 @@ const CHECK_SHAPE = (
 )
 
 /**
- * 页脚那颗「信息」上的记号：圈里一个 i。
- *
- * 画成 SVG 而不是写 `ⓘ`：字体里那个符号自带基线偏移，`align-items: center` 居中的是
- * 行盒不是字形，看上去会偏低（与后处理那一颗同一条理由、同一个字形，见
- * `PostProcessModal.tsx` 的 `InfoGlyph`）。
- */
-/**
  * 文件名拆成"头 + 尾"两段 —— 为的是**中间省略**（2026-11-04 作者：「文件名字太长中间应该省略」，
  * 「反正不要换行高度不要变化」）。
  *
@@ -230,16 +223,6 @@ function HeadBadge({ label }: { label: string }) {
   const slot = useModalHeadNoteSlot()
   if (slot === null) return null
   return createPortal(<span className={s.badge}>{label}</span>, slot)
-}
-
-function InfoGlyph() {
-  return (
-    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
-      <path d="M6 5.4v3" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
-      <circle cx="6" cy="3.7" r="0.62" fill="currentColor" />
-    </svg>
-  )
 }
 
 /**
@@ -631,14 +614,14 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
         </span>
         <span className={s.fileMeta}>
           {/* 名字只占一行：宽了两段拼回原名，挤了中间省略（`middleName`） */}
-          <span className={s.fileName} title={f.name}>
+          <span className={s.fileName} data-tip={f.name}>
             <span className={s.nameHead}>{cut.head}</span>
             <span className={s.nameTail}>{cut.tail}</span>
           </span>
           <span className={s.fileSub}>
             <span className={s.fileKind}>{tr(KIND_LABEL[f.kind])}</span>
             {where && (
-              <span className={s.fileWhere} title={f.path}>
+              <span className={s.fileWhere} data-tip={f.path}>
                 {f.path}
               </span>
             )}
@@ -715,7 +698,9 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
               <path d="M3.5 6.5A2 2 0 0 1 5.5 4.5h4l2 2.5h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z" />
             </svg>
             <span className={s.pathText}>
-              <span className={s.pathHead}>{shown.dir}</span>
+              <span className={s.pathHead} data-tip={shown.dir}>
+                {shown.dir}
+              </span>
               <span className={s.pathTail}>{shown.tail}</span>
             </span>
             {/*
@@ -749,15 +734,13 @@ export default function ExportModal({ open, id, preload, onClose }: ExportModalP
            * 成了之后「已导出 N 个文件」跟在它右边 —— 两态页脚高度不变（按钮撑着）。
            */}
           <span className={s.footLeft}>
-            <button
-              type="button"
-              className={s.tabToggle}
-              aria-pressed={tab === 'info'}
+            {/* 翻页小钮走共用件（`PageToggle`）：钮上写"点它会去哪一页"，
+                形状 / 那颗圆 i 与后处理那一屏是同一份实现 */}
+            <PageToggle
+              label={tab === 'files' ? tr('report.export.info') : tr('report.export.files')}
+              pressed={tab === 'info'}
               onClick={() => chooseTab(tab === 'files' ? 'info' : 'files')}
-            >
-              <InfoGlyph />
-              {tab === 'files' ? tr('report.export.info') : tr('report.export.files')}
-            </button>
+            />
             {exported && (
               <span className={s.footNote}>
                 {/*

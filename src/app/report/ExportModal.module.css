@@ -114,29 +114,8 @@
   min-width: 0;
 }
 
-/*
- * 左下角那颗很小的翻页钮（作者 2026-11-03：「放在这，信息」「就像这个一样」）
- * —— 形状照后处理挪塔那一问的 `.slotToggle`：细边胶囊 + 一枚圆 i。
- *
- * 尺寸刻意比页脚正按钮小一档（正按钮 32px 高）：它是个"翻过去看看"的小动作，
- * 不该与「确认导出」抢同一档的分量。
- */
-.tabToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: none;
-  color: var(--text-2);
-  font-size: var(--fs-label);
-}
-
-.tabToggle:hover {
-  color: var(--text-1);
-  border-color: var(--text-3);
-}
+/* 翻页那颗小钮的形状在共用件里（`components/modal/PageToggle`）——
+   这里只管它站的位置：`footLeft` 那一簇的最左边。 */
 
 /*
  * 页脚左边那句「已导出 N 个文件」。

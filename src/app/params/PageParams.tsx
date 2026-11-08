@@ -1170,7 +1170,9 @@ export default function PageParams({
                     }
                     onClick={() => setPickerOpen((v) => !v)}
                   >
-                    <span className={s.presetName}>{pillLabel}</span>
+                    <span className={s.presetName} data-tip={pillLabel}>
+                      {pillLabel}
+                    </span>
                     <span className={s.presetSwitch}>{tr('params.pill.switch')}</span>
                   </button>
                 )}

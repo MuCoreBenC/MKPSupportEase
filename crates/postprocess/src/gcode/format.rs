@@ -198,6 +198,17 @@ mod tests {
         }
     }
 
+    /// 塔块写 Z 时喂进来的必须是**切片器原文那串数**：重新格式化一个 4 位小数的
+    /// `; Z_HEIGHT:` 会在半值处差 0.001，而 Bambu 的层判定容差只有 1e-4。
+    /// 这条钉住「原文那串数原样进、原样出」。
+    #[test]
+    fn formatting_a_slicer_z_literal_is_lossless() {
+        for lit in ["18.345", "17.255", "1.073", "0.2", "0.6", "168.6"] {
+            let v: f64 = lit.parse().expect("数字");
+            assert_eq!(format_z(v), lit, "format_z({lit})");
+        }
+    }
+
     #[test]
     fn format_speed_int_truncates_like_int64() {
         assert_eq!(format_speed_int(0.0), "0");

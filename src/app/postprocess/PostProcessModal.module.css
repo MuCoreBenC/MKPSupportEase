@@ -111,9 +111,10 @@
 
 /* ============================================================
  * ① 跑着：绿 hero（大数左 / 步骤 + 倒计时右 / 凹槽进度条嵌底）
- * ② 问句：**警告橙** hero（同一口尺寸：高 104 + 同内衬同圆角；内容多了在框内滚）
+ * ② 问句 / 警告：那张提示卡在共用件 `components/modal/NoticeHero`（高 104 + 同内衬同圆角，
+ *    内容多了在框内滚）—— 这一屏的页表里翻到「警告」时，上面换成它
  * ③ 成功：四格指标条（同高）
- * ④⑤ 结果 hero（同高）—— 四样都是同一口 104px 的框，切状态时不跳
+ * ④⑤ 结果 hero（同高）—— 这几样都是同一口 104px 的框，切状态 / 翻页时不跳
  * ============================================================ */
 
 .hero {
@@ -229,48 +230,12 @@
    `.leadOut` / `.leadIn` / `.popIn` 与三个 `@keyframes` 一并删除，别再往这里加 CSS 动画：
    加了也播不出来，只会让人以为"实现过了"。 */
 
-/* ---- ② 机型不匹配：**警告橙** hero（不是错误红，见下面那段） ---- */
-
-.warnHero {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 16px;
-  /*
-   * ★★ 定死高度之后，内衬不算在 104 里（`border-box` 才不算；而 flex 子项默认
-   *    按内容高度撑）—— 让 `.warnScroll` 的 `max-height: 100%` 真正等于"内容盒的高度"，
-   *    不然它按 104（含内衬 28）去算，一有滚动条就把最后一行切掉半截。
-   */
-  box-sizing: border-box;
-  /*
-   * ★★ 高度**与其它三扇一样定死 104**（作者 2026-10-17：「这个怎么 hero 这么高，
-   *    我不是固定了所有的 hero 高度吗，内容在里面滚动」）。
-   *
-   * 原来是 `min-height`：补了那两句说明之后这一扇自己长到 ~230px，整屏跟着跳，
-   * 与绿 hero / 结果 hero 齐平这件事就没了。现在框不动 —— 内容超高在 `.warnScroll`
-   * 里滚（与 `.failWarn .resCopy` 同一条：74 = 104 − 2 描边 − 28 内衬）。
-   */
-  height: 104px;
-  /* 上下各收 4px（14 → 10），给"标题 + 正文 + 倒计时"多让出 8px 的显示面积 */
-  padding: 10px 18px;
-  border-radius: var(--r-md);
-  overflow: hidden;
-}
-
-/*
- * ★★★ **警告用警告色，不用错误色**（作者 2026-10-17：「这个警告的有没有复用错误的？
- * 还有警告的到时候换成橙色，就是警告色的」）。
+/* ---- ② 那一问 / 警告：那张提示卡在共用件 `components/modal/NoticeHero` ----
  *
- * 这一张原来借的是 `--danger-soft` + 一圈 35% 红描边 —— 与「处理失败」那张长得一样，
- * 用户分不出"要你决定"和"已经坏了"。现在走 token 里现成那一套**整块浅底**：
- *   `--warn-surface` 块底 / `--warn-line` 描边 / `--warn-ink` 块里的字（深浅两套都有）。
- * 失败那扇（`.failWarn`）继续是红的 —— 两件事，两种颜色。
+ * 这里原来自己抄了一份（`.warnHero / .warnSoft / .askSoft / .warnBadge / .warnScroll …`）：
+ * 2026-11-08 起那一整张搬进共用件 —— 这一屏的问句卡与**警告页那张卡**是同一张，
+ * 别处再要"一段话占着 hero 说"也用它。这一屏只剩结果 hero（`.resHero` / `.failWarn`）。
  */
-.warnSoft {
-  background: var(--warn-surface);
-  border: 1px solid var(--warn-line);
-  color: var(--warn-ink);
-}
 
 /*
  * **挪塔那一问的那一屏**（2026-10-18 作者：「把画布居中显示或者左侧显示，右侧显示
@@ -585,117 +550,6 @@
   color: var(--ask-ink);
 }
 
-/*
- * 左下角那颗**很小的翻页钮**（作者 2026-10-18：「我点击很小的切换信息按钮，
- * 这个按钮可以放在左下角空白的位置」）——`margin-right: auto` 把它顶到最左，
- * 动作按钮照旧靠右。
- */
-.slotToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: none;
-  color: var(--ink-2);
-  font-size: var(--fs-label);
-  cursor: pointer;
-}
-
-.slotToggle:hover {
-  color: var(--ink-1);
-  border-color: var(--ink-3);
-}
-
-.warnGlyph {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 空心叹号圈：40px、2px currentColor 描边、24px 粗体文字「!」（颜色跟随 `.warnSoft` 的墨色） */
-.warnBadge {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  background: var(--warn-soft);
-  border: 2px solid currentcolor;
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.warnCopy {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-}
-
-/*
- * 可滚的那一叠（标题 + 问话 + 两句说明）。
- *
- * `margin-block: auto` = 内容短就居中、超高**就从第一行开始滚**（溢出时 auto 边距
- * 自己归零，不会像 `justify-content: center` 那样把顶上一截裁掉看不见）。
- */
-.warnScroll {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  align-self: stretch;
-  max-height: 100%;
-  margin-block: auto;
-  /* 右侧只留 8px：滚动条本身要占宽，别再让它挤掉正文的显示面积 */
-  padding-right: 8px;
-  overflow-y: auto;
-  /*
-   * ★ 这里**不许挂 `mask-image` 做"上下褪色"**（2026-10-17 作者：「这些字的上边缘下边缘
-   *   有点模糊」）：那一层渐变是**无条件**的，内容没有超高时也照样把第一行的上半截和
-   *   最后一行的下半截调成半透明 —— 看起来就是标题与倒计时那两行"发虚"。
-   *   要滚动提示就等真的溢出再说，别拿字迹的清晰度换。
-   */
-}
-
-.warnTitle {
-  flex-shrink: 0;
-  margin-bottom: 3px;
-  font-size: var(--fs-body);
-  font-weight: 600;
-  line-height: 1.4;
-  letter-spacing: 0.2px;
-}
-
-.warnLine {
-  font-size: var(--fs-label);
-  line-height: 1.65;
-  letter-spacing: 0.2px;
-  opacity: 0.85;
-}
-
-/*
- * 那一问下面的两句说明（2026-10-17）：怎么答 / 不答会怎样。
- * 比 `.warnLine` 再轻一档（它是"问句本身"的注），分隔靠间距不靠线。
- */
-.warnHint {
-  font-size: var(--fs-label);
-  line-height: 1.6;
-  letter-spacing: 0.2px;
-  opacity: 0.72;
-}
-
-.warnHint + .warnHint {
-  margin-top: 1px;
-}
-
 /* ---- 那一问的按钮簇（页脚，2026-10-17 修） ---- */
 
 /*
@@ -725,35 +579,6 @@
   max-width: 100%;
   white-space: normal;
   text-align: center;
-}
-
-/*
- * 校准件那一问（2026-10-17）：**中性绿**，不是警告橙。
- *
- * 这一问不是"出错了"，是"这一盘怎么跑"的流程选择（先打印再校准 / 直接校准）——
- * 拿 `--warn-*` 那一套去问，用户会以为出了故障。所以只换**这一块的三种颜色**
- * （`--ask-surface / --ask-ink / --ask-line`，深浅两套都在 `tokens.css`），
- * 骨架（104px、内衬、`.warnScroll` 内滚、字级）逐条沿用 `.warnHero`。
- */
-.askSoft {
-  background: var(--ask-surface);
-  border: 1px solid var(--ask-line);
-  color: var(--ask-ink);
-}
-
-/* 圈里那枚符号跟着绿：`✦` 是"一件要你挑的事"，不是「!」那种拦下来 */
-.askBadge {
-  background: var(--ask-line);
-}
-
-/*
- * 圈里那枚四角星是**画出来的 SVG**（见 `SparkMark`）：字体符号会偏低，几何坐标不会。
- * 19px 与 `.resBadge svg` 同值 —— 两种 hero 的记号看起来一样大。
- */
-.askBadge svg {
-  display: block;
-  width: 19px;
-  height: 19px;
 }
 
 /* ---- ③ 成功：四格指标条（笔偏移 X/Y/Z + 涂胶速度） ---- */
@@ -910,7 +735,8 @@
   word-break: break-word;
 }
 
-/* 空心圈：照 `.warnBadge` 的构造（2px currentColor 描边 + 浅底 + 居中符号） */
+/* 空心圈：照共用件提示卡那枚记号（`.badge`，`components/modal/NoticeHero.module.css`）的
+   构造 —— 2px currentColor 描边 + 浅底 + 居中符号 */
 .resBadge {
   display: flex;
   align-items: center;
@@ -992,9 +818,10 @@
  * （用户原话："算了算了，失败的也用这一种吧"）——
  * 同一件底（--danger-soft + 一圈 35% 描边）、同一个圈叹号、
  * **图标在板外**、文案直接落在卡上（没有白板）。
- * 盒子逐条照 `.warnSoft`：内衬 14/18 + 1px 描边、圈盒 40×40、板高 74（= 104 − 2 − 28）。
+ * 盒子逐条照共用件提示卡（`components/modal/NoticeHero.module.css` 的 `.hero` + `.warn`）：
+ * 内衬 14/18 + 1px 描边、圈盒 40×40、板高 74（= 104 − 2 − 28）。
  *
- * ★ 2026-10-17 起**只有这一扇是红的**：机型不匹配那一扇改成了警告橙（`--warn-*`）——
+ * ★ **只有这一扇是红的**：机型不匹配 / 警告那一扇是警告橙（`--warn-*`）——
  *   "要你决定"与"已经坏了"不该一个颜色。
  * ============================================================ */
 
@@ -1029,7 +856,7 @@
   box-shadow: none;
 }
 
-/* 标题 / 正文：字级与行距照 `.warnTitle` / `.warnLine` */
+/* 标题 / 正文：字级与行距照共用件提示卡的 `.title` / `.line` */
 .failWarn .resTitle {
   margin-bottom: 3px;
   font-size: var(--fs-body);
@@ -1047,7 +874,7 @@
   opacity: 0.85;
 }
 
-/* 红圈：逐条照 `.warnBadge` —— 圈里是 24px 粗体的**文字**「!」 */
+/* 红圈：逐条照共用件提示卡那枚记号（`.badge`）—— 圈里是 24px 粗体的**文字**「!」 */
 .failWarn .resBadge {
   width: 40px;
   height: 40px;
@@ -1065,8 +892,17 @@
 
 .groups {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px 24px;
+  /*
+   * ★★ `minmax(0, 1fr)` 而不是 `1fr`（2026-11-08）：`1fr` 的最小值是内容的
+   *   `min-content`，而值那一格是 `nowrap` ⇒ 一个长耗材名（多色件 `PLA;PETG;…`）
+   *   能把整栏撑宽，把右栏顶出卡片（日语实测溢出 51px）。`minmax(0, …)` 让栏
+   *   永远不会超过自己那一半，超出的部分由格子里那两个省略号收（见 `.factValue`）。
+   */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* 两栏间距 24 → 16（2026-11-08）：日语的「スライサー | BambuStudio 02.08.02.60」
+     那一行整行比栏宽多 3px（实测四语种里只有日语这一行），收 4px 让那串版本号
+     一个字符都不被省略号吃掉 —— 值那一格宁可窄一点也不许截数据。 */
+  gap: 18px 14px;
 }
 
 @media (width <= 560px) {
@@ -1128,8 +964,9 @@
   font-size: var(--fs-label);
   color: var(--text-3);
   white-space: nowrap;
-  /* 装不下时**标签**先让位（省略号），不许把右边的值挤成三行 */
-  flex: 0 1 auto;
+  /* 标签是自家写死的短词（各语言都压短），**不主动让位** —— 让位的是右边那格数据；
+     真碰上超长标签就自己收省略号（`min-width: 0` + `hidden`），绝不越出栏 */
+  flex: 0 0 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1141,7 +978,9 @@
  *
  * 上一版这里是 `overflow-wrap: anywhere` —— 于是 `BambuStudio 02.08.02.60`
  * 会被拆成三行、`118.54 秒 / 0.72 MB` 被拆成两行，行高跟着变（就是"突变"）。
- * 现在：值恒一行（`nowrap`），挤不下时由**标签**收省略号；字号一点不动。
+ * 现在：值恒一行（`nowrap`），挤不下就**自己收省略号**（2026-11-08：多色件的耗材名
+ * 能长到 `PLA;PETG;ABS;TPU;PA6-CF`，原来值不许缩 ⇒ 整栏被顶宽、把右栏挤出卡片）。
+ * 会很长的那两格（耗材 / 切片软件）带 `data-tip`，悬停能看全。
  */
 .factValue {
   font-size: var(--fs-label);
@@ -1149,21 +988,16 @@
   font-variant-numeric: tabular-nums;
   text-align: right;
   white-space: nowrap;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* 灰字行（切片软件这类「看一眼就行」的读数） */
 .factGrey .factValue {
   color: var(--text-3);
   font-weight: 400;
-}
-
-/* ---- 警告行 / 命令失败那一行 ---- */
-
-.warn {
-  margin: 0;
-  font-size: var(--fs-label);
-  color: var(--warn);
 }
 
 /*

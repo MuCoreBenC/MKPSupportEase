@@ -887,6 +887,14 @@ export interface IssueWhere {
   key: string | null
 }
 
+/**
+ * `issues::IssueAction` —— 这一条能不能就地修。
+ *
+ * 后端说，前端不按 id 猜：`fixable` 才带就地按钮，`none` 只告知，
+ * 其余给「去处理」。判据只在一处，加新检查项不必改视图。
+ */
+export type IssueAction = 'goto' | 'rerun' | 'fixable' | 'needsDecision' | 'none'
+
 /** `issues::Issue` */
 export interface Issue {
   id: string
@@ -895,6 +903,7 @@ export interface Issue {
   /** 「怎么办」。不是把标题换个说法重复一遍 */
   detail: string
   at: IssueWhere
+  action: IssueAction
 }
 
 /** `issues::Report`。`blocks > 0` = 生成该全禁用 */
@@ -1966,6 +1975,11 @@ export interface Words {
    * 未保存由那一格的还原按钮 + 右上角「未保存 N」表达。
    */
   paramStatus: Record<'follow' | 'own', Word>
+  /**
+   * 检查三档的中文标签（阻断 / 待办 / 提示）。**唯一出口** ——
+   * 检查卡与导航徽标都读它，不在视图里再写一遍 `block → '阻断'`
+   */
+  severity: Record<Severity, Word>
   /** 「已弃用」参数级那一枚（C14 §五）。判据来自上游注册表的 `deprecated` */
   paramDeprecated: Word
   /** 「已弃用」选项级那一枚。判据是后端推出来的（这一档放开的参数全弃用） */

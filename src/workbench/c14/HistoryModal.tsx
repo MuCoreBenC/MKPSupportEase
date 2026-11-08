@@ -67,6 +67,14 @@ interface Props {
   /** 正在保存或放弃 */
   busy?: boolean
   /**
+   * 页头那个「未保存 N」（与状态栏同一个数，来自后端 `Txn::dirty_count`）。
+   *
+   * 用它守住一条：**文件层面没有差异 ≠ 没有未保存改动**。值编辑会被入口写成影子字节，
+   * 但菜单 / 套餐 / 可见性写在 `workbench/` 自己的 json 里，永远进不了这份文件对比 ——
+   * 那几笔仍要在框里说出来，不许把「影子与盘上一模一样」当结论。
+   */
+  dirtyCount?: number
+  /**
    * 撤销 / 重做（2026-11-02 作者：「这个也加上功能」）。
    *
    * **不在这里自己发命令**：撤销栈是外壳那一份（`wb_txn_state` 里的 `canUndo/canRedo`），
@@ -97,6 +105,7 @@ export default function HistoryModal({
   canSave = false,
   canDiscard = false,
   busy = false,
+  dirtyCount = 0,
   onUndo,
   onRedo,
   canUndo = false,
@@ -259,12 +268,17 @@ export default function HistoryModal({
     return lines.filter((l) => focusKeys.has(`${l.owner}:${l.key ?? ''}`))
   }, [lines, focusKeys])
 
+  /* 文件对比是空的、页头却还挂着「未保存 N」—— 那几笔在内存里（菜单 / 套餐 / 可见性） */
+  const emptyButDirty = diff !== null && files.length === 0 && dirtyCount > 0
+
   const subtitle =
     view === 'code'
       ? diff === null
         ? '正在比对盘上的 presets/ 与影子树…'
         : files.length === 0
-          ? '影子与盘上一模一样 —— 没有未保存的改动'
+          ? emptyButDirty
+            ? `文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里，保存会一并写入`
+            : '影子与盘上一模一样 —— 没有未保存的改动'
           : `${files.length} 份文件有改动 · +${changeCount} 行 —— 比的是盘上的 presets/ 与影子树，保存就是把右边写成左边`
       : files.length === 0
         ? '保存 = 写进仓库文件（保存本身也能撤销），放弃 = 整条一起丢'
@@ -377,8 +391,15 @@ export default function HistoryModal({
       ) : diff === null ? (
         <p className={d.empty}>正在比对…</p>
       ) : noFiles ? (
-        /* 空态：不分栏。左边一栏空清单 + 右边一句"没有改动"没有意义 */
-        <p className={d.empty}>影子与盘上一模一样 —— 没有未保存的改动。</p>
+        /* 空态：不分栏。左边一栏空清单 + 右边一句"没有改动"没有意义。
+        但**空 diff 不等于干净** —— 还有 N 处就得说还有 N 处，不许报"一模一样"。 */
+        emptyButDirty ? (
+          <p className={d.empty}>
+            {`文件层面没有差异 —— 还有 ${dirtyCount} 处改动只活在内存里（菜单 / 套餐 / 可见性写在 workbench 自己的文件里），保存会一并写入。`}
+          </p>
+        ) : (
+          <p className={d.empty}>影子与盘上一模一样 —— 没有未保存的改动。</p>
+        )
       ) : (
         <div className={d.panes}>
           {/* 左：有改动的文件清单（两种视图共用；点进去 = 右边只谈这一份） */}

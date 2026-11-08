@@ -412,6 +412,20 @@ impl Presets {
             .collect()
     }
 
+    /// 被套餐引用到的资产 id（**小写**，与 `Asset.id` 比对时同一条口径）。
+    ///
+    /// 覆盖**全部**套餐，含停用机型的 —— 它答的是"这条资产进没进套餐"。
+    /// "这次会不会交付"是另一问（看 [`Self::delivery_bundles`] 那一侧）。
+    /// 交付检查与资产视图都读这一处：各写一遍的话，"不交付"与"检查说它已进套餐"
+    /// 会同时对同一份文件成立。
+    pub fn bundled_asset_ids(&self) -> std::collections::BTreeSet<String> {
+        self.bundles
+            .items()
+            .iter()
+            .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
+            .collect()
+    }
+
     /// **进交付面的资产**：归属机型停用的资产也不进 —— 除非启用侧还在引用它
     /// （共享资产：`p1s-icon` 归 P1S，P2S / X1C 的 `icon` 也指向它）。
     pub fn delivery_assets(&self) -> Vec<&crate::presetdata::assets::Asset> {

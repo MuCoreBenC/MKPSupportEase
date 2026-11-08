@@ -644,6 +644,38 @@ impl Ctx {
         Ok(ctx)
     }
 
+    /// 把**内存里的值编辑**一次写进影子树。
+    ///
+    /// 值编辑只改 `ctx.presets`（内存），影子树一个字节都不动；而
+    /// `txn::commit` 与 `shadow_diff` 比的都是「真源 ↔ 影子」两棵**磁盘**树。
+    /// 所以凡是靠影子树回答「保存会改什么」的时刻（保存本身、打开未保存改动框），
+    /// 都得先调这里把这批命令落成字节。
+    ///
+    /// 幂等：没有值编辑时什么都不做。保存与「看改动」共用这一处 —— 两处各写一份的话，
+    /// 迟早一处写了另一处忘，界面上就是「未保存 N」与「一模一样」同时成立。
+    fn flush_values_into_shadow(&mut self) -> Result<(), AppError> {
+        if self.history.is_empty() {
+            return Ok(());
+        }
+        self.presets.write_back()?;
+        tracing::info!(
+            commands = self.history.undo_depth(),
+            "值编辑：内存里的命令一次写进影子树"
+        );
+        Ok(())
+    }
+
+    /// 「未保存改了几处」—— **唯一实现**：值编辑历史 + 草稿层 + 结构编辑。
+    ///
+    /// 页头那个 N 与生成闸（`require_clean`）都读它。两处各算一遍的话会出现
+    /// "生成拦不拦取决于你看没看过未保存改动框"—— 那个框一打开就会把值编辑
+    /// 写成影子字节，而只看影子与草稿的旧判据读不到内存里的命令。
+    fn dirty_count(&self) -> usize {
+        edit_history::dirty_fields(&self.history.entries().cloned().collect::<Vec<_>>())
+            + self.draft.dirty_count()
+            + self.txn.dirty_count()
+    }
+
     /// 重算「几份文件有改动」并写回缓存。**唯一实现** ——
     /// 页头那颗「未保存（N）」、状态栏、`TxnState`、以及「代码对比」里的「N 份文件」
     /// 都从这里来，不许各自再算一套（两套口径迟早不一致，作者 2026-11-02 报的
@@ -697,10 +729,7 @@ impl Ctx {
             /* 「改了几处」= 历史里还剩几个字段 + 草稿里挂着的格 + 结构编辑的字段。
             **必须是同一个量纲（一格字段）**：历史那边按 `(层, 归属, 键)` 去重，
             与 `txn::FieldEntry` 同一把尺子。 */
-            dirty_count: edit_history::dirty_fields(
-                &self.history.entries().cloned().collect::<Vec<_>>(),
-            ) + self.draft.dirty_count()
-                + self.txn.dirty_count(),
+            dirty_count: self.dirty_count(),
             can_undo: self.history.undo_depth() > 0 || self.txn.undo_depth() > 0,
             can_redo: self.history.redo_depth() > 0 || self.txn.redo_depth() > 0,
             ops: self.txn.ops(),
@@ -2916,22 +2945,9 @@ pub(super) fn save_in(ctx: &mut Ctx) -> Result<SaveResult, AppError> {
     }
     // 保存前先有一份对得上的快照：万一 save 中途挂了，草稿还在
     ctx.flush();
-    /*
-     * ★★ **2026-11-03：先把历史里那些命令一次写进影子树**。
-     *
-     * 编辑态改了（值只落内存），所以影子树可能一个字节都没变过 —— 而
-     * `txn::commit` 比的是真源 ↔ 影子。不先写这一笔，保存就会写空。
-     *
-     * 这里的字节来源是 `ctx.presets`（已经含着全部命令），所以**一次 `write_back`**，
-     * 不是 N 次。仍然只有「保存」这一个时刻会碰文件。
-     */
-    if !ctx.history.is_empty() {
-        ctx.presets.write_back()?;
-        tracing::info!(
-            commands = ctx.history.undo_depth(),
-            "保存：历史里的命令一次写进影子树"
-        );
-    }
+    /* 值编辑只在内存里，影子树可能一个字节都没变过 —— 而 `txn::commit` 比的是
+    真源 ↔ 影子。不先写这一笔，保存就会写空。 */
+    ctx.flush_values_into_shadow()?;
     let mut remap = BTreeMap::new();
     if values_dirty {
         let out = storage::save(&ctx.store, &mut ctx.presets, &ctx.committed, &ctx.draft)?;
@@ -3067,12 +3083,19 @@ pub fn wb_txn_state() -> Result<TxnState, AppError> {
 /// 作者 2026-11-02：「其实我觉得代码的 diff 就很直观了」。两个框看的是同一件事的两面：
 /// 对象视角回答"我动了哪些格子"，这个回答"文件因此变成什么样"。
 ///
-/// **只读**：快照 + 读字节，一个字节都不写（`read_commands_are_async` 的白名单里有它）。
+/// **「保存会改什么」的唯一真值**：值编辑只在内存里，所以入口先把这批命令
+/// 写成影子字节（[`Ctx::flush_values_into_shadow`]），再摊两棵树。
+/// 不先写这一笔，框里就会说"影子与盘上一模一样"，而页头还挂着「未保存 N」。
+/// diff 本身只读两棵树；写只发生在"内存里确实有值编辑"时，写的就是保存要写的那批字节。
 #[tauri::command(async)]
 pub fn wb_shadow_diff() -> Result<shadow_diff::ShadowDiff, AppError> {
-    traced("wb_shadow_diff", |_| {
-        with_ctx(|ctx| shadow_diff::shadow_diff(&ctx.real_root, &ctx.shadow_root))
-    })
+    traced("wb_shadow_diff", |_| with_ctx_mut(shadow_diff_in))
+}
+
+/// [`wb_shadow_diff`] 的本体（**抽出来是为了可测**）。
+pub(super) fn shadow_diff_in(ctx: &mut Ctx) -> Result<shadow_diff::ShadowDiff, AppError> {
+    ctx.flush_values_into_shadow()?;
+    shadow_diff::shadow_diff(&ctx.real_root, &ctx.shadow_root)
 }
 
 /// 把一条结构命令的文件字节**换回去**（`undo=true` 换 `before`，`false` 换 `after`）。
@@ -3872,6 +3895,132 @@ mod tests {
         assert!(
             !saved.dirty,
             "保存后徽章必须消失（`Ctx::base` 要跟着搬，否则会一直亮着）"
+        );
+    }
+
+    /// **「未保存改动」框必须看得见值编辑**（2026-11-08）。
+    ///
+    /// 值编辑只落内存，影子树一个字节都不动。框里若直接摊两棵树，就会如实报告
+    /// "影子与盘上一模一样"，而页头挂着「未保存 N」—— 同一屏两个相反结论。
+    /// 所以入口要先 `flush_values_into_shadow`，本测试钉住这条接线。
+    #[test]
+    fn unsaved_value_edits_reach_the_shadow_diff() {
+        let (_fx, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real).unwrap();
+
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "刚打开、没有改动 ⇒ 框里是空的"
+        );
+        assert!(
+            super::build::require_clean(&ctx).is_ok(),
+            "刚打开 ⇒ 生成闸放行"
+        );
+
+        /* 值编辑的真实形状：内存文档改了 + 历史里记了一条，影子树没动 */
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+        let patch = crate::workbench::domain::patch::Patch::SetValue {
+            level: Level::Machine,
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            value: Some(serde_json::json!("disk")),
+        };
+        /* 字段账要一起记 —— 「未保存 N」与生成闸数的都是它，不是命令条数 */
+        let field = txn::FieldEntry {
+            level: Some("machine".to_owned()),
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            label: "擦拭模式".to_owned(),
+            before: Some("wipe_tower".to_owned()),
+            after: Some("disk".to_owned()),
+            why: "user",
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            vec![field],
+        );
+        assert!(
+            !ctx.history.is_empty(),
+            "这一笔进了历史（保存才落盘的那批）"
+        );
+        assert!(
+            super::build::require_clean(&ctx).is_err(),
+            "值编辑也算未保存 —— 否则生成拦不拦取决于看没看过改动框"
+        );
+
+        let d = super::shadow_diff_in(&mut ctx).unwrap();
+        assert!(
+            !d.files.is_empty(),
+            "值编辑必须落成影子字节，否则框里会说「一模一样」：{d:?}"
+        );
+        /* 改的是注册表里的值 —— 落点也钉住，免得将来写错了文件还以为对 */
+        assert!(
+            d.files
+                .iter()
+                .any(|f| f.rel.ends_with("param_registry.toml")),
+            "改值落在注册表那份文件上：{:?}",
+            d.files.iter().map(|f| f.rel.clone()).collect::<Vec<_>>()
+        );
+
+        /* 幂等：再问一次不该多出文件（开框可能被连点） */
+        let again = super::shadow_diff_in(&mut ctx).unwrap();
+        assert_eq!(again.files.len(), d.files.len(), "刷第二次不该多出文件");
+
+        save_in(&mut ctx).unwrap();
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "保存之后影子与真源一致，框里回空"
+        );
+    }
+
+    /// 看了一眼改动，不等于签了字：flush 写进影子的那些字节，**放弃必须整条退回去**。
+    #[test]
+    fn flushing_value_edits_stays_discardable() {
+        let (_fx, presets) = Fixture::load().into_parts();
+        let real = presets.root().to_path_buf();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::at(dir.path().join("workbench"));
+        let mut ctx = Ctx::open_at(store, real).unwrap();
+
+        run_ctx(&mut ctx, Some("改值"), |c| {
+            c.presets
+                .set_variant("wiping.mode", "A1", &serde_json::json!("disk"))
+        })
+        .unwrap();
+        let patch = crate::workbench::domain::patch::Patch::SetValue {
+            level: Level::Machine,
+            owner: "A1".to_owned(),
+            key: "wiping.mode".to_owned(),
+            value: Some(serde_json::json!("disk")),
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            Vec::new(),
+        );
+
+        assert!(
+            !super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "先有差异（看改动这一步会把它写成字节）"
+        );
+
+        discard_in(&mut ctx).unwrap();
+        assert!(ctx.history.is_empty(), "放弃清掉值编辑历史");
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "放弃之后影子回到真源，框里不该还剩东西"
         );
     }
 
@@ -5560,6 +5709,10 @@ mod tests {
     #[test]
     fn read_commands_are_async_so_they_never_freeze_the_window() {
         /// 这一批是**只读**（只算不写盘）的 —— 全部必须是 `(async)`。
+        ///
+        /// 唯一的例外是 `wb_shadow_diff`：它入口会把内存里的值编辑写成影子字节
+        /// （与保存写的是同一批），之后才摊两棵树。它留在这张单子里是因为**必须 async**
+        /// —— 摊两棵树 + 偶尔一次整份写回，占住主线程就是冻窗口。
         const READ: &[&str] = &[
             "wb_boot",
             "wb_words",
@@ -5573,7 +5726,7 @@ mod tests {
             "wb_ui",
             "wb_preview_bulk",
             "wb_diff_draft",
-            // 未保存改动的逐行 diff：只做快照 + 读字节，不写盘
+            // 未保存改动的逐行 diff：读两棵树（入口会先把内存值编辑落成影子字节）
             "wb_shadow_diff",
             "wb_preflight",
             "wb_generate_preview",

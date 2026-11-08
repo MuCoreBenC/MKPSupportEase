@@ -394,13 +394,8 @@ fn list_of(
     // 只看**没进任何组**的那些（作者：先按未分组筛一下，一起拉进新建的组）
     ungrouped: bool,
 ) -> AssetList {
-    // 装着它的套餐集合（bundles.toml 反查，大小写不敏感）
-    let bundled: std::collections::BTreeSet<String> = presets
-        .bundles
-        .items()
-        .iter()
-        .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
-        .collect();
+    // 装着它的套餐集合（bundles.toml 反查，大小写不敏感）—— 唯一实现见 `Presets::bundled_asset_ids`
+    let bundled = presets.bundled_asset_ids();
 
     // 选项表从全部切片器条目取 —— 不随筛选变
     let mut nozzles: Vec<String> = Vec::new();

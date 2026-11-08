@@ -128,11 +128,20 @@ const WORDS: Json = {
     pending: { label: '待落盘', explain: '刚改的还在内存里，停手 2 秒后会写一次快照' },
     failed: { label: '快照写不进去', explain: '快照写不进去，这会儿崩了会丢掉未保存的改动。改动本身没受影响' },
   },
+  /* 与后端 `words.rs` 的 `param_status` 同一副两档：徽章只说"跟不跟基底"，
+  「改了还没保存」由还原按钮与右上角「未保存 N」表达（`app/words.rs` 有断言拦这一条） */
   paramStatus: {
-    factory: { label: '出厂默认', explain: '注册表里的默认值，这台机器没改过、这个版本也没改过' },
-    machine: { label: '机型默认', explain: '来自这台机器的基底，这个版本自己没钉 —— 改基底它会跟着变' },
-    version: { label: '本版修改', explain: '这个版本自己钉着的值，不跟随机型基底' },
-    dirty: { label: '已修改', explain: '改了还没保存 —— 保存之后才会写进配方' },
+    follow: {
+      label: '跟随基底',
+      explain: '这一层没有自己的值，用的是基底的；基底以后改了它跟着改',
+    },
+    own: { label: '不跟随', explain: '这一层自己写了值；基底以后怎么改都不影响它' },
+  },
+  /* 三档检查标签，与后端 `Severity::label()` / `explain()` 逐字一致 */
+  severity: {
+    block: { label: '阻断', explain: '照这份数据生成，产出来的东西一定是坏的' },
+    todo: { label: '待办', explain: '有个空该人填。不挡生成' },
+    hint: { label: '提示', explain: '合法，但值得看一眼。不挡生成' },
   },
   paramDeprecated: {
     label: '已弃用',
@@ -1753,22 +1762,27 @@ export function installMockBackend() {
          让按钮的交互（禁用 / toast / 重取报告）可以照着点 */
       case 'wb_regen_embedded_catalog':
         return Promise.resolve({ changed: true, files: 26, revision: 'mock' })
-      case 'wb_preflight':
+      case 'wb_preflight': {
+        const issues = [
+          {
+            id: 'bundle.orphan_files',
+            severity: 'hint',
+            title: '有 2 个文件没进任何套餐',
+            detail:
+              'a1-mini-bbs-02-010、a1-orca-02-010 —— 客户看得到它们，只是没有套餐推荐。仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。',
+            at: { view: 'stock', machineId: null, uid: null, key: 'optional' },
+            action: 'goto',
+          },
+        ]
+        /* 三个数字一律由条目现算 —— 手写就会漂（这里曾经列表 1 条 hint、却报"待办 1"） */
         return Promise.resolve({
-          issues: [
-            {
-              id: 'bundle.orphan_files',
-              severity: 'hint',
-              title: '有 2 个文件没进任何套餐',
-              detail: 'a1-mini-bbs-02-010、a1-orca-02-010 —— 客户看得到它们，只是没有套餐推荐。仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。',
-              at: { view: 'menu', machineId: null, uid: null, key: null },
-            },
-          ],
-          blocks: 0,
-          todos: 1,
-          hints: 1,
+          issues,
+          blocks: issues.filter((i) => i.severity === 'block').length,
+          todos: issues.filter((i) => i.severity === 'todo').length,
+          hints: issues.filter((i) => i.severity === 'hint').length,
           emptyHint: '都过了 —— 没有阻断、没有待办、没有提示',
         })
+      }
       case 'wb_machines':
         return Promise.resolve(machineListOf())
       case 'wb_set_brand_field': {

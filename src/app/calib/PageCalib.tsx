@@ -790,7 +790,9 @@ export default function PageCalib({ initialStep }: PageCalibProps) {
               onMouseDown={noFocus}
               onClick={() => setPickerOpen(true)}
             >
-              <span className={s.presetName}>{pillFileName ?? tr('calib.pickPreset')}</span>
+              <span className={s.presetName} data-tip={pillFileName ?? tr('calib.pickPreset')}>
+                {pillFileName ?? tr('calib.pickPreset')}
+              </span>
             </button>
           )}
         </div>

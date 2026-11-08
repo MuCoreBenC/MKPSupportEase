@@ -285,6 +285,15 @@ pub struct ResultFacts {
     pub glue_length_mm: f64,
     /// 切片软件（`"BambuStudio 02.06.01.55"` —— pass1 从输入头行刮到的完整串）
     pub slicer: String,
+    /// 层厚的**最小 / 最大**（mm）—— 两个一样 = 固定层高；缺 = 层数太少量不出来，
+    /// 界面退回开场事实里切片器标称的那个 `layerHeight`。
+    ///
+    /// ★ 为什么跑完才知道：可变层高（自适应）在输入头里只写一个标称值（`; layer_height = 0.2`），
+    /// 真正的层厚要数 `; Z_HEIGHT:` 才看得出来 —— 那是 pass1 的活。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_height_min: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub layer_height_max: Option<f64>,
 }
 
 /// 钩子 → 界面。

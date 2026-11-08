@@ -96,7 +96,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::error::AppError;
-use crate::workbench::domain::derive::Book;
+use crate::workbench::domain::derive::{Book, VersionIdentity};
 use crate::workbench::domain::BuildState;
 use crate::workbench::presets::{Asset, AssetKind};
 
@@ -652,6 +652,7 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
     set.insert(MANIFEST_FILE.to_owned());
     set.insert(NEW_CATALOG_FILE.to_owned());
     set.insert(SOURCE_FILE.to_owned());
+    set.extend(expected_products(book));
     /*
      * ★ **发布账本也住交付根**（2026-10-28，`presets/delivery/publish-serial.json`）：
      * 序号与发布线身份。不把它算进应有集合，第二次发布就会被自己的残留扫描拦下
@@ -667,14 +668,40 @@ pub fn delivery_expected_set(book: &Book<'_>) -> BTreeSet<String> {
      * 不然发布闸的残留审计会把它当多余文件、点「清理残留」会把它扔进回收站，
      * 客户端主动检查预览版就会扑空。它是软件发布链，与预设产物不同链。 */
     set.insert(crate::runtime::source::RELEASE_PREVIEW_FILE.to_owned());
-    for v in book.versions() {
-        // 占位版本（没有可产出的东西）不进交付；其余产物名由命名规则算出
-        if book.build_state(&v.uid) == BuildState::NoResources {
-            continue;
-        }
-        set.insert(format!("{MKP_PRESETS_DIR}/{}", v.mkp_file));
-    }
     set
+}
+
+/// 交付目录里**该有产物**的那些版本 —— 「谁该有产物」的唯一出处。
+///
+/// 判据只有一条：占位版本（`NoResources`）没有可产出的东西，不进集合。
+/// **不认 `enabled`**（作者 2026-11-08 裁决）：停用只决定"读不读、登不登记"，
+/// 不决定产物在不在 —— 停用机型的产物字节留在交付目录，所以它们仍属于应有集合，
+/// `scan_strays` 才不会被指使去清掉它们。
+pub fn expected_versions<'a>(book: &'a Book<'_>) -> Vec<&'a VersionIdentity> {
+    book.versions()
+        .iter()
+        .filter(|v| book.build_state(&v.uid) != BuildState::NoResources)
+        .collect()
+}
+
+/// 交付目录里应有的产物路径（相对交付根）：[`expected_versions`] 的路径形态。
+pub fn expected_products(book: &Book<'_>) -> BTreeSet<String> {
+    expected_versions(book)
+        .into_iter()
+        .map(|v| format!("{MKP_PRESETS_DIR}/{}", v.mkp_file))
+        .collect()
+}
+
+/// 发布清单里**登记**的那些版本：在应有产物之上再滤掉停用机型。
+///
+/// 与 [`expected_versions`] 是两个视图、不是两套判据：同一批版本，一个答"盘上该有什么"
+/// （不认 `enabled`），一个答"清单登记谁"（认 `enabled`）。删除与清理只许按前者 ——
+/// 按后者收口就会把停用机型的产物删掉。
+pub fn published_versions<'a>(book: &'a Book<'_>) -> Vec<&'a VersionIdentity> {
+    expected_versions(book)
+        .into_iter()
+        .filter(|v| !machine_disabled(book, &v.machine_id))
+        .collect()
 }
 
 /// 这台机型在源里停用了吗（`enabled = false`）。
@@ -840,11 +867,8 @@ fn candidate_once(delivery_root: &Path, book: &Book<'_>) -> Result<Vec<Candidate
     let mut out: Vec<Candidate> = Vec::new();
 
     // 预设 TOML：渲染器的纯正文，不含写盘时刻。
-    // 版本集合与 [`delivery_expected_set`] 同源，避免候选集另有一套「谁该有产物」。
-    for v in book.versions() {
-        if book.build_state(&v.uid) == BuildState::NoResources {
-            continue;
-        }
+    // 版本集合与 [`expected_versions`] 同一处算 —— 候选集不再另有一套「谁该有产物」。
+    for v in expected_versions(book) {
         let rendered = super::build::render(book, &v.uid)?;
         out.push(Candidate {
             rel: format!("{MKP_PRESETS_DIR}/{}", v.mkp_file),
@@ -2027,15 +2051,9 @@ pub fn plan_publish(
     let mut assets: Vec<DistAsset> = Vec::new();
     let mut presets_count = 0usize;
 
-    for v in book.versions() {
-        if book.build_state(&v.uid) == BuildState::NoResources {
-            continue; // 暂无资源：跳过，不报错
-        }
-        /* 停用的机型不进发布清单（客户端目录也不列它）—— 但它的产物**留在交付目录**，
-        这里只是不登记、不校验，不写也不删。 */
-        if machine_disabled(book, &v.machine_id) {
-            continue;
-        }
+    /* 停用机型不在发布清单里（客户端目录也不列它）—— 但它的产物**留在交付目录**，
+    [`published_versions`] 只是不登记，不写也不删。 */
+    for v in published_versions(book) {
         // 产物名由命名规则算出（机型 id + 版本 id），不再查上游 manifest
         let name = v.mkp_file.clone();
         let rel = format!("{MKP_PRESETS_DIR}/{name}");
@@ -2214,14 +2232,7 @@ pub fn plan_publish(
      * 同样按 `catalog.path` 定位 —— 与 A 类同一条规则，只是根不同（发布根 vs delivery）。
      * 这一支跑完，`manifest` 才会写；任何一条取不到就是"发了一个取不到的 promise"。
      */
-    for v in book.versions() {
-        if book.build_state(&v.uid) == BuildState::NoResources {
-            continue;
-        }
-        /* 停用机型不在发布面里，也就不要求目录登记它（上面组装 manifest 时同样跳过）。 */
-        if machine_disabled(book, &v.machine_id) {
-            continue;
-        }
+    for v in published_versions(book) {
         let rel = format!("{MKP_PRESETS_DIR}/{}", v.mkp_file);
         let catalog_path = format!("delivery/{rel}");
         let on_disk = delivery_root.join(&rel);
@@ -2518,6 +2529,52 @@ mod tests {
         assert!(
             !product_disabled(&book, "no-such-version.toml"),
             "反查不到版本 = 不是停用（交给漏登记那条严格判据）"
+        );
+
+        /* 两个视图、一件事：盘上该有的仍在（不认 enabled），发布清单登记的不含它 */
+        assert!(
+            expected_products(&book).contains(&format!("{MKP_PRESETS_DIR}/A1-standard.toml")),
+            "停用不删产物：应有集合里仍要有它的产物"
+        );
+        assert!(
+            delivery_expected_set(&book).contains(&format!("{MKP_PRESETS_DIR}/A1-standard.toml")),
+            "残留扫描的应有集合也含它 —— 否则「清理残留」会把它删了"
+        );
+        assert!(
+            published_versions(&book)
+                .iter()
+                .all(|v| v.machine_id != "A1"),
+            "发布清单不登记停用机型"
+        );
+        assert!(
+            published_versions(&book)
+                .iter()
+                .any(|v| v.machine_id == "P1S"),
+            "没停用的机型照旧登记"
+        );
+    }
+
+    /// **「谁该有产物」只有一处算法**：候选集与应有集合逐项相等。
+    ///
+    /// 这两段以前是复制粘贴的两份代码，注释还自称"同源" —— 判据一旦漂，
+    /// 生成写的与残留扫描认为该有的就是两批文件。
+    #[test]
+    fn candidate_products_match_the_expected_set() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = crate::workbench::domain::patch::Draft::default();
+        let book = Book::new(&f.presets, &c, &d);
+        let dir = tempfile::tempdir().unwrap();
+        let got: BTreeSet<String> = candidate_once(dir.path(), &book)
+            .unwrap()
+            .into_iter()
+            .map(|x| x.rel)
+            .filter(|rel| rel.starts_with(&format!("{MKP_PRESETS_DIR}/")))
+            .collect();
+        assert_eq!(
+            got,
+            expected_products(&book),
+            "候选集与应有集合不许各算一套"
         );
     }
 

@@ -1070,7 +1070,7 @@ export default function PresetTable({
                      * 照旧（他要卡片显示名字）：两边都读得到，不再隐来隐去。
                      */}
                     <span className={s.nameLine}>
-                      <span className={s.nameText}>
+                      <span className={s.nameText} data-tip={row.fileName}>
                         {row.fileName}
                       </span>
                       {/*
@@ -1198,7 +1198,9 @@ export default function PresetTable({
                   */}
                   <td className={s.machine}>
                     {row.machineText !== DASH_ && (
-                      <span className={s.machineChip}>{row.machineText}</span>
+                      <span className={s.machineChip} data-tip={row.machineText}>
+                        {row.machineText}
+                      </span>
                     )}
                   </td>
 
@@ -1206,7 +1208,7 @@ export default function PresetTable({
                     /* a03：版本列空着不渲染「—」 */
                     <td className={s.version}>
                       {row.versions.length > 0 && (
-                        <span>{version.text}</span>
+                        <span data-tip={version.text}>{version.text}</span>
                       )}
                     </td>
                   ) : (

@@ -591,6 +591,13 @@ pub struct Meta {
     /// ★ **只加不改**：旧记录没有这个键 ⇒ 读到 `null` ⇒ 引导退回"最前那份"，
     /// 与 `collision` / `relocation` 同一套习惯。**拿不到就落 `null`，不编数**。
     pub slicer_pid: Option<i32>,
+    /// **写这一份产物的是哪一次编译**（`档位 · 提交 · 编译于 …`，与启动日志同一串）。
+    ///
+    /// 回答的是「这份文件是不是新代码处理的」—— 以前只能靠启动日志按时间反推，
+    /// 而日志会被轮转、会被同名进程搞混。落进记录之后，任意一份产物自己就能答。
+    ///
+    /// **只加不改**：旧记录没有这个键 ⇒ 读到 `null`。
+    pub build: Option<String>,
     pub invocation: Invocation,
     pub warnings: Vec<String>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
@@ -1825,6 +1832,7 @@ mod tests {
             gcode_path: "/tmp/.63288.1.gcode".into(),
             model_name: Some("帕姆".into()),
             slicer_pid: Some(4242),
+            build: Some("client · abc1234 · 编译于 2026-11-08 11:10:23 +08:00".into()),
             invocation: Invocation {
                 exe: "SupportEase.exe".into(),
                 args: vec!["--Gcode".into()],
@@ -1892,6 +1900,7 @@ mod tests {
             "presetPath",
             "gcodePath",
             "modelName",
+            "build",
             "invocation",
             "warnings",
             "error",
@@ -1901,6 +1910,10 @@ mod tests {
         ] {
             assert!(v.get(key).is_some(), "缺键：{key}");
         }
+        assert_eq!(
+            v["build"], "client · abc1234 · 编译于 2026-11-08 11:10:23 +08:00",
+            "构建指纹原样进记录（\"明明修了还在\"时看这一格）"
+        );
         assert_eq!(v["pipeline"][0]["id"], "input");
         assert_eq!(v["pipeline"][0]["elapsedMs"], 96);
         assert_eq!(v["pipeline"][0]["status"], "complete");
@@ -1945,6 +1958,8 @@ mod tests {
             // 三级兜底都没拿到 ⇒ 落 null（**不是缺键**：报告页读口按同一把尺子取它）
             model_name: None,
             slicer_pid: Some(99),
+            // 旧记录没有这一格 ⇒ 落 null（报告页读口按同一把尺子取它）
+            build: None,
             invocation: invocation(),
             warnings: Vec::new(),
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),

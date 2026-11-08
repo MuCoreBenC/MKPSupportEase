@@ -12,9 +12,9 @@ macOS 对"从浏览器下载的未签名应用"一律贴上隔离标记，打开
 1. 把 SupportEase.app 拖进「应用程序」文件夹（拖拽不会被拦）
 2. 双击本 dmg 里的「终端」图标 —— 终端窗口就打开了
    （找不到图标？启动台里搜"终端"，英文 Terminal，效果一样）
-3. 把下面这一行粘进终端，回车：
+3. 把下面这一行粘进终端，回车（在这行命令上点三下，整行选中）：
 
-   xattr -dr com.apple.quarantine "/Applications/SupportEase.app"
+xattr -dr com.apple.quarantine /Applications/SupportEase.app
 
 4. 回到「应用程序」，双击 SupportEase —— 能打开了 ✓
 

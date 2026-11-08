@@ -992,21 +992,29 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
     scrollRef.current?.scrollTo({ top: 0 })
   }, [tabSel, mode, machineId, target, bodyReady])
 
+  /*
+   * 换机型**不清右栏**：同一条参数在新机型上一样有各版本取值，面板跟着换过去即可；
+   * 只有新这一屏里查不到它（`selRow === null`）时，才由 `asideShown` 自然收起。
+   */
   const switchMachine = (next: string) => {
     const m = book.machines.find((x) => x.id === next)
     setMachineId(next)
     setTarget(m?.versions[0]?.uid ?? BASE)
     setCompareCols([])
-    setSel(null)
     setFocusUid(null)
     setBatchTab(false)
     setTabSel(null)
   }
 
-  /** 换正在改的那一版（`null` = 取消选择）。那枚「正在编辑」提示跟着作废 */
+  /**
+   * 换正在改的那一版（`null` = 取消选择）。那枚「正在编辑」提示跟着作废。
+   *
+   * 换到另一版时**留着右栏**（面板跟着换到那一版的取值）；取消选择则连它一起收掉 ——
+   * 那一屏已经没有版本，右栏也没有格子可显示。
+   */
   const switchTarget = (next: Target) => {
     setTarget(next)
-    setSel(null)
+    if (next === null) setSel(null)
     setFocusUid(null)
   }
 

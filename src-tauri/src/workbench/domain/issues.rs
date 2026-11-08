@@ -53,6 +53,15 @@ pub enum Severity {
 }
 
 impl Severity {
+    /// 与前端 `Severity` 同一套记号（serde 已经把枚举值序列化成这一套）
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Block => "block",
+            Self::Todo => "todo",
+            Self::Hint => "hint",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::Block => "阻断",
@@ -68,6 +77,25 @@ impl Severity {
             Self::Hint => "合法，但值得看一眼。不挡生成",
         }
     }
+}
+
+/// 这一条**能不能就地修**。由后端说，前端不按 id 猜。
+///
+/// 有了它，「能不能修」这条判据只有一处；前端不再写 `i.id === 'embedded.catalog_stale'`
+/// 那样的特判 —— 那种写法等于把判据抄进视图层，后端一加检查项，按钮给不给就得改前端。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum IssueAction {
+    /// 跳到落点看一眼就够，没有可执行的修法
+    Goto,
+    /// 跑一次生成 / 定稿即可对齐
+    Rerun,
+    /// 前端能就地调一条命令修掉（按钮名与命令写在 `detail` 里点名）
+    Fixable,
+    /// 要人裁决 —— 两套数据打架，留哪边是人的决定
+    NeedsDecision,
+    /// 只是告知，不需要动作
+    None,
 }
 
 /// 去哪儿处理。前端据此切视角 + 落主选中
@@ -128,6 +156,8 @@ pub struct Issue {
     /// 「怎么办」。不是把 title 换个说法重复一遍
     pub detail: String,
     pub at: Where,
+    /// 能不能就地修（见 [`IssueAction`]）。前端据此决定给哪颗按钮
+    pub action: IssueAction,
 }
 
 /// 一次校验的全部结果
@@ -185,6 +215,7 @@ pub fn preflight(
         Ok(r) => recipe_alignment(book, r, &mut issues),
         Err(e) => issues.push(Issue {
             id: "recipe.unreadable".to_owned(),
+            action: IssueAction::Goto,
             severity: Severity::Hint,
             title: "配方 preset_recipes.toml 读不回来".to_owned(),
             detail: format!(
@@ -198,6 +229,7 @@ pub fn preflight(
         Ok(()) => {}
         Err(detail) => issues.push(Issue {
             id: "delivery.catalog_mismatch".to_owned(),
+            action: IssueAction::Rerun,
             // **待办，不是阻断**（作者 2026-10-03 要求把这条升硬 —— 但不能是阻断）：
             // 阻断会压住生成与发布两颗按钮，而「重算清单」恰恰是修复动作 ——
             // 等于把修复的路堵死。待办显眼、进计数、不挡闸。
@@ -213,6 +245,7 @@ pub fn preflight(
         Ok(()) => {}
         Err(_) => issues.push(Issue {
             id: "embedded.catalog_stale".to_owned(),
+            action: IssueAction::Fixable,
             // 待办而不是阻断：它挡不住工作台生成任何产物 —— 伤的是**客户端首屏**
             // （安装包里编译死的那份 catalog）。重新生成是修复动作，别把路堵死。
             severity: Severity::Todo,
@@ -237,11 +270,12 @@ fn collect(book: &Book<'_>, out: &mut Vec<Issue>) {
     delivery(book, out);
 }
 
-/// 把 `audit_catalog` 的整串消息压成检查卡能读的一句（2026-10-19 文案瘦身）。
+/// 把 `audit_catalog` 的整串消息压成检查卡能读的一句。
 ///
-/// 原串形如 `3 处与目录登记不一致：a（…）；b（…）；c（…）`；这里只留前两条 +
-/// 「等 N 处」，完整清单由①生成卡的「交付明细…」承担。`audit_catalog` 本身
-/// **不改**（发布闸与既有测试仍读原文）。
+/// 原串形如 `3 处与目录登记不一致：a（…）；b（…）；c（…）`。
+/// **说几处就要看得到几处**：这里全量摊开，太长由检查卡自己折叠 + 「展开」
+/// （原来只留两条再说"等 N 处"，看到的与数出来的不是一件事）。
+/// `audit_catalog` 本身不改（发布闸与既有测试仍读原文）。
 fn summarize_mismatch(detail: &str) -> String {
     let (head, rest) = detail.split_once('：').unwrap_or((detail, ""));
     let items: Vec<&str> = rest
@@ -249,16 +283,10 @@ fn summarize_mismatch(detail: &str) -> String {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .collect();
-    let shown = items.iter().take(2).copied().collect::<Vec<_>>().join("；");
-    if items.len() > 2 {
-        format!(
-            "{head}：{shown} 等 {} 处。生成一次会重算登记。",
-            items.len()
-        )
-    } else if shown.is_empty() {
-        format!("{head}。生成一次会重算登记。")
+    if items.is_empty() {
+        head.to_owned()
     } else {
-        format!("{head}：{shown}。")
+        format!("{head}：{}", items.join("；"))
     }
 }
 
@@ -308,6 +336,7 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
         if !recipe.machines.iter().any(|r| r.name == m.id) {
             out.push(Issue {
                 id: format!("recipe.missing_machine.{}", m.id),
+                action: IssueAction::NeedsDecision,
                 severity: Severity::Todo,
                 title: format!("机型 {} 在配方 preset_recipes.toml 里没有条目", m.id),
                 detail: "内置预设那条链（gen-presets）生成不出这台的任何一份预设。\
@@ -321,6 +350,7 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
             if !combos.contains(&(m.id.clone(), vid.to_lowercase())) {
                 out.push(Issue {
                     id: format!("recipe.missing_variant.{}.{}", m.id, vid),
+                    action: IssueAction::NeedsDecision,
                     severity: Severity::Todo,
                     title: format!("版本 {}:{} 在配方里没有对应的变体", m.id, vid),
                     detail: "版本定义可以先存在，参数源后补（doc §9）—— 但补上之前 \
@@ -338,6 +368,7 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
         let Some(m) = delivered.iter().find(|m| m.id == r.name) else {
             out.push(Issue {
                 id: format!("recipe.unknown_machine.{}", r.name),
+                action: IssueAction::NeedsDecision,
                 severity: Severity::Todo,
                 title: format!("配方 preset_recipes.toml 里的 {} 不在机型清单里", r.name),
                 detail: "这份正文连它的全部变体，再也进不了任何清单认的产物 —— \
@@ -352,6 +383,7 @@ fn recipe_alignment(book: &Book<'_>, recipe: &Recipe, out: &mut Vec<Issue>) {
             if !m.version_ids.iter().any(|x| x.to_lowercase() == *v) {
                 out.push(Issue {
                     id: format!("recipe.orphan_variant.{}.{}", r.name, v),
+                    action: IssueAction::NeedsDecision,
                     severity: Severity::Todo,
                     title: format!("配方里的变体 {}:{} 没有任何版本定义指向", r.name, v),
                     detail: "它永远进不了产物：清单里没有那台机型的那一版。\
@@ -383,6 +415,7 @@ fn machines(book: &Book<'_>, out: &mut Vec<Issue>) {
         if !m.has_dimensions {
             out.push(Issue {
                 id: format!("machine.dimensions.{}", m.id),
+                action: IssueAction::Goto,
                 severity: Severity::Hint,
                 title: format!("{} 是占位机型，不参与交付", m.display),
                 detail: "机型文件里没有 [dimensions] —— 这台还没开始做，先占个名字。\
@@ -413,6 +446,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
         for c in gate.cycles() {
             out.push(Issue {
                 id: format!("cycle.{}.{}", v.uid, c.keys.join("+")),
+                action: IssueAction::NeedsDecision,
                 severity: Severity::Block,
                 title: "字段的显示条件成环".to_owned(),
                 detail: format!(
@@ -429,6 +463,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
         for u in gate.unsatisfiable() {
             out.push(Issue {
                 id: format!("unsatisfiable.{}.{}", v.uid, u.key),
+                action: IssueAction::NeedsDecision,
                 severity: Severity::Hint,
                 title: "有字段永久隐藏".to_owned(),
                 detail: format!(
@@ -445,6 +480,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
         if !orphans.is_empty() {
             out.push(Issue {
                 id: format!("orphan.{}", v.uid),
+                action: IssueAction::Goto,
                 severity: Severity::Todo,
                 title: format!("{} 有 {} 项改动已经失效", v.name, orphans.len()),
                 detail: format!(
@@ -472,6 +508,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
                 if low.is_some() || high.is_some() {
                     out.push(Issue {
                         id: format!("range.{}.{}", v.uid, key),
+                        action: IssueAction::Goto,
                         severity: Severity::Block,
                         title: format!("{} 超出范围", p.label),
                         detail: format!(
@@ -503,6 +540,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
             {
                 out.push(Issue {
                     id: format!("choice.{}.{}", v.uid, key),
+                    action: IssueAction::Goto,
                     severity: Severity::Block,
                     title: format!("{} 的值不在选项里", p.label),
                     detail: format!(
@@ -527,6 +565,7 @@ fn versions(book: &Book<'_>, out: &mut Vec<Issue>) {
             {
                 out.push(Issue {
                     id: format!("deprecated.{}.{}", v.uid, key),
+                    action: IssueAction::Goto,
                     severity: Severity::Hint,
                     title: format!("{} 用的是已废弃的选项", p.label),
                     detail: format!(
@@ -561,6 +600,7 @@ fn filter_ghosts(book: &Book<'_>, out: &mut Vec<Issue>) {
         }
         out.push(Issue {
             id: format!("filter_ghost.{}", p.key),
+            action: IssueAction::NeedsDecision,
             severity: Severity::Hint,
             title: format!("{} 的机型过滤里有认不出的机型", p.label),
             detail: format!(
@@ -584,10 +624,14 @@ fn filter_ghosts(book: &Book<'_>, out: &mut Vec<Issue>) {
 /// 旧产物客户端还能下载到，也不是坏数据 —— 但作者点名（2026-10-02）：
 /// 「有旧的、新的没生成」这件事该在检查卡里看见，不能只在生成页数出来。
 fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
-    let bundled: std::collections::BTreeSet<String> = book
+    /* 「进套餐」与「这一代交付」是两个问题（作者 2026-11-08：停用不删文件）：
+    · `bundled` = 全部套餐的引用（含停用机型）—— 文件有主，不算孤儿；
+    · `live`    = 停用机型之外的套餐引用 —— 这一代真会被交付。
+    夹在两者之间的那一批既不该报孤儿，也不该一声不吭 —— 下面单独说一句。 */
+    let bundled = book.presets.bundled_asset_ids();
+    let live: std::collections::BTreeSet<String> = book
         .presets
-        .bundles
-        .items()
+        .delivery_bundles()
         .iter()
         .flat_map(|b| b.asset_refs.iter().map(|r| r.trim().to_lowercase()))
         .collect();
@@ -603,6 +647,7 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
     if !orphan.is_empty() {
         out.push(Issue {
             id: "bundle.orphan_files".to_owned(),
+            action: IssueAction::Goto,
             severity: Severity::Hint,
             title: format!("有 {} 个切片器预设没进任何套餐", orphan.len()),
             detail: format!(
@@ -610,7 +655,44 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
                  仓库里放一个不分配给谁的 profile 是正常的交付身份，不是待修的事。",
                 orphan.join("、")
             ),
-            at: Where::view(View::Menu),
+            /* 落点在**资产库 + 「可选」筛选**：套餐页里根本没有这些文件，
+            跳过去等于没指路。这件事由后端说清，前端不再按 id 特判。 */
+            at: Where {
+                view: View::Stock,
+                machine_id: None,
+                uid: None,
+                key: Some("optional".to_owned()),
+            },
+        });
+    }
+
+    /* 只被停用机型的套餐引用：文件留在仓库里，但这一代不进交付目录。
+    这里必须出现一条 —— 否则"交付面不写它"与"检查面说它已进套餐"两边都不算账，
+    作者看到的就是"文件在那儿，客户端却没有"。 */
+    let parked: Vec<&str> = book
+        .presets
+        .assets
+        .items()
+        .iter()
+        .filter(|a| a.kind == AssetKind::SlicerProfile)
+        .filter(|a| {
+            let id = a.id.to_lowercase();
+            bundled.contains(&id) && !live.contains(&id)
+        })
+        .map(|a| a.path.as_str())
+        .collect();
+    if !parked.is_empty() {
+        out.push(Issue {
+            id: "bundle.parked_by_disabled_machine".to_owned(),
+            action: IssueAction::None,
+            severity: Severity::Hint,
+            title: format!("有 {} 个切片器预设只被停用机型的套餐引用", parked.len()),
+            detail: format!(
+                "{} —— 文件照留在仓库里，这一代不进交付目录（客户端取不到）。\
+                 重新启用那台机型，它们就跟着回到交付面。",
+                parked.join("、")
+            ),
+            at: Where::view(View::Stock),
         });
     }
 
@@ -626,6 +708,7 @@ fn delivery(book: &Book<'_>, out: &mut Vec<Issue>) {
     if !stale.is_empty() {
         out.push(Issue {
             id: "build.stale_versions".to_owned(),
+            action: IssueAction::Rerun,
             severity: Severity::Hint,
             title: format!("有 {} 个版本的产物是旧的", stale.len()),
             detail: format!(
@@ -917,6 +1000,47 @@ uuid = '33333333-3333-3333-3333-333333333333'
             .find(|i| i.id == "bundle.orphan_files")
             .expect("该有这一条");
         assert_eq!(hint.severity, Severity::Hint, "不分配给谁是正常的交付身份");
+
+        // 启用状态下一份都不该落进"只被停用机型引用"那一档
+        assert!(
+            r.issues
+                .iter()
+                .all(|i| i.id != "bundle.parked_by_disabled_machine"),
+            "没有停用机型时不该冒出这一条"
+        );
+    }
+
+    /// **停用机型的套餐引用着它 ⇒ 文件保留、这一代不交付，但原因要看得见**。
+    ///
+    /// 作者 2026-11-08 口径：停用不删文件。于是"交付面不写它"与"检查面说它已进套餐"
+    /// 会同时对同一份文件成立 —— 那两句都不算错，缺的是把这件事说出来。
+    #[test]
+    fn assets_kept_alive_only_by_a_disabled_machine_are_named() {
+        let mut f = Fixture::load();
+        f.presets
+            .catalog
+            .machine_mut("A1")
+            .expect("夹具里有 A1")
+            .enabled = false;
+        let c = committed();
+        let d = Draft::default();
+        let r = inspect(&Book::new(&f.presets, &c, &d));
+
+        let parked = r
+            .issues
+            .iter()
+            .find(|i| i.id == "bundle.parked_by_disabled_machine")
+            .expect("停用机型的套餐还引用着切片器预设 —— 这一条该在");
+        assert_eq!(
+            parked.severity,
+            Severity::Hint,
+            "文件留着是刻意行为，不是待修"
+        );
+        assert!(
+            parked.detail.contains("不进交付目录") && parked.detail.contains("重新启用"),
+            "要同时说清「现在取不到」与「怎么让它回来」：{}",
+            parked.detail
+        );
     }
 
     /// **阻断排在最前面**：待办排前面会让人先去填空，而填完照样生成不出来
@@ -1146,6 +1270,21 @@ uuid = '33333333-3333-3333-3333-333333333333'
                 assert!(i.at.uid.is_some(), "{} 的落点缺版本", i.id);
             }
         }
+        /* 「能不能就地修」由后端说：整份清单全落成 None 就说明回填漏了 */
+        assert!(
+            r.issues.iter().any(|i| i.action != IssueAction::None),
+            "每一条都是「只是告知」⇒ action 回填漏了"
+        );
+        /* 纯告知那一档本来就该没有 —— 现在清单里每一条都能去哪儿做点什么 */
+        assert!(
+            r.issues.iter().all(|i| i.action != IssueAction::None),
+            "夹具里的问题都是能处理的，不该有 None：{:?}",
+            r.issues
+                .iter()
+                .filter(|i| i.action == IssueAction::None)
+                .map(|i| i.id.clone())
+                .collect::<Vec<_>>()
+        );
     }
 
     /// 字段值不合法 → **阻断**，并且说得出来卡在哪一项上

@@ -12,8 +12,9 @@ import { t } from '../../i18n'
  *
  * 一条就原样；多条给 `N 条 · 第一条 …`，全文仍在 `title` 上。
  *
- * 明细（每条一行那种列表）**不归这里** —— 它该留在框身里，那是"要读全"的东西，
- * 而这一格回答的是"有没有事、什么事"。
+ * 明细（每条一段那种）**不归这里** —— 要读全的东西住上面那张 hero 卡
+ * （`NoticeHero`：卡高定死、内容在卡里滚），不在框身里另起一块；
+ * 这一格回答的是"有没有事、什么事"。
  */
 export function summarizeNotes(list: string[]): string {
   if (list.length <= 1) return list[0] ?? ''

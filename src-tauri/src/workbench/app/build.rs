@@ -692,7 +692,9 @@ pub(super) fn generation_source_note(ctx: &super::Ctx) -> String {
 /// 「还没决定要不要」的改动，而台账记的却是另一代。所以这里**拒绝**，并且
 /// **不自动保存**（保存是用户的边界，不是生成顺手的副作用）。
 pub(super) fn require_clean(ctx: &super::Ctx) -> Result<(), AppError> {
-    let dirty = ctx.txn.dirty_count() + ctx.draft.dirty_count();
+    /* 与页头那个 N 同一处算：值编辑只活在内存（`Ctx::history`），只看事务与草稿
+    会把"改了值还没保存"当成干净 —— 而生成拿的是编辑态。 */
+    let dirty = ctx.dirty_count();
     if dirty == 0 {
         return Ok(());
     }

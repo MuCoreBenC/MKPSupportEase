@@ -210,13 +210,15 @@ fn sha_mismatch_message(file: &CatalogFile, stale: Option<&(String, String)>) ->
 pub(crate) fn sha_mismatch_sentence(name: &str, stale: Option<&(String, String)>) -> String {
     match stale {
         // 已定位到目录过期：说清是哪一步，给一个动作
-        Some((remote, local)) => format!(
-            "{name} 的内容对不上 —— 本机目录停在 {local}，云端已是 {remote}，先点「检查更新」再重试"
+        Some((remote, local)) => ::postprocess::diag::messages::text(
+            "ui.runtime.delivery.sha_stale",
+            &[("name", name), ("local", local), ("remote", remote)],
         ),
         // 取不到远端（没配源 / 离线）时照保守说：**不拿本机目录当"远端"**，
         // 那会把"没联网"误报成"文件坏了"
-        None => format!(
-            "{name} 的内容对不上（和本机目录登记的那份不是同一版）—— 文件可能在源头被改过或传坏了，先重下一遍；还不行就找我们要一份"
+        None => ::postprocess::diag::messages::text(
+            "ui.runtime.delivery.sha_mismatch",
+            &[("name", name)],
         ),
     }
 }

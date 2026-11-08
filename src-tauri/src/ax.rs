@@ -371,7 +371,10 @@ pub fn locate_bed_type() -> GuideTargetDto {
             target: None,
             /* 屏幕引导走的是 macOS 的 Accessibility 与 Windows 的 Win32 窗口枚举；
             别处没有这一层，照实说"这一台上没有"，而不是给一组假的坐标 */
-            reason: Some("屏幕引导只在 macOS / Windows 上有（要读切片器的窗口坐标）".to_owned()),
+            reason: Some(::postprocess::diag::messages::text(
+                "ui.guide.unavailable",
+                &[],
+            )),
         }
     }
 }
@@ -803,30 +806,46 @@ mod mac {
 
     pub(super) fn locate() -> GuideTargetDto {
         if !unsafe { AXIsProcessTrusted() } {
-            return refused(
-                "还没有辅助功能权限：打开「系统设置 → 隐私与安全性 → 辅助功能」，把 SupportEase 勾上",
-            );
+            return refused(::postprocess::diag::messages::text(
+                "ui.guide.no_ax_permission",
+                &[],
+            ));
         }
 
         let Some(pid) = running_pid() else {
-            return refused("没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」");
+            return refused(::postprocess::diag::messages::text(
+                "ui.guide.slicer_not_running",
+                &[],
+            ));
         };
 
         unsafe {
             let app = AXUIElementCreateApplication(pid);
             let Some(windows) = attr(app, "AXWindows") else {
-                return refused("读不到切片器的窗口（它可能正在启动，稍等一下再试）");
+                return refused(::postprocess::diag::messages::text(
+                    "ui.guide.window_unreadable",
+                    &[],
+                ));
             };
             if CFArrayGetCount(windows.0 as CFArrayRef) < 1 {
-                return refused("切片器没有打开的工程窗口");
+                return refused(::postprocess::diag::messages::text(
+                    "ui.guide.no_project_window",
+                    &[],
+                ));
             }
             let win = CFArrayGetValueAtIndex(windows.0 as CFArrayRef, 0) as AXUIElementRef;
 
             let Some(pos) = attr(win, "AXPosition").and_then(|v| as_point(&v)) else {
-                return refused("读不到窗口位置");
+                return refused(::postprocess::diag::messages::text(
+                    "ui.guide.window_pos_unreadable",
+                    &[],
+                ));
             };
             let Some(size) = attr(win, "AXSize").and_then(|v| as_size(&v)) else {
-                return refused("读不到窗口大小");
+                return refused(::postprocess::diag::messages::text(
+                    "ui.guide.window_size_unreadable",
+                    &[],
+                ));
             };
             let window = RectDto {
                 x: pos.x,
@@ -836,7 +855,10 @@ mod mac {
             };
 
             let Some(children) = attr(win, "AXChildren") else {
-                return refused("读不到窗口里的控件");
+                return refused(::postprocess::diag::messages::text(
+                    "ui.guide.control_unreadable",
+                    &[],
+                ));
             };
             let count = CFArrayGetCount(children.0 as CFArrayRef);
 
@@ -862,16 +884,20 @@ mod mac {
             }
 
             match pick_bed_type(&candidates) {
-                None => refused(
-                    "在窗口里没找到板子类型的位置（切片器界面换过了？）—— 这一版的引导暂时指不了",
-                ),
+                None => refused(::postprocess::diag::messages::text(
+                    "ui.guide.bed_type_missing",
+                    &[],
+                )),
                 Some(abs_x) => {
                     let rel = candidates
                         .iter()
                         .find(|(_, x)| (*x - abs_x).abs() < 0.5)
                         .map(|(r, _)| *r);
                     let Some(rel) = rel else {
-                        return refused("挑出来的控件对不上（不该发生）");
+                        return refused(::postprocess::diag::messages::text(
+                            "ui.guide.control_mismatch",
+                            &[],
+                        ));
                     };
                     GuideTargetDto {
                         ready: true,
@@ -1395,13 +1421,22 @@ mod win {
              * 不在屏幕上），要照实说"先还原"，而不是摆一张随即被收掉的卡片。
              */
             return if slicer_pids().is_empty() {
-                refused("没看到切片器在跑 —— 先打开 Bambu Studio，再点「查看引导」")
+                refused(::postprocess::diag::messages::text(
+                    "ui.guide.slicer_not_running",
+                    &[],
+                ))
             } else {
-                refused("切片器在跑，但它的窗口都最小化了 —— 先还原 Bambu Studio 的窗口，再点「查看引导」")
+                refused(::postprocess::diag::messages::text(
+                    "ui.guide.all_minimized",
+                    &[],
+                ))
             };
         };
         let Some(hwnd) = main_window_of(pid as u32) else {
-            return refused("切片器没有打开的工程窗口 —— 先打开一个工程，再点「查看引导」");
+            return refused(::postprocess::diag::messages::text(
+                "ui.guide.no_project_window_open",
+                &[],
+            ));
         };
         /*
          * ★★ **最小化 / 隐藏着的窗口不给坐标**（2026-10-20）：
@@ -1411,10 +1446,16 @@ mod win {
          * （由 `decide` 那半去判）；这一档是**根本看不见**，直接给一句人话。
          */
         if unsafe { IsIconic(hwnd) != 0 || IsWindowVisible(hwnd) == 0 } {
-            return refused("切片器窗口最小化了 —— 先还原它，再点「查看引导」");
+            return refused(::postprocess::diag::messages::text(
+                "ui.guide.window_minimized",
+                &[],
+            ));
         }
         let Some(win_px) = rect_of(hwnd) else {
-            return refused("读不到窗口位置");
+            return refused(::postprocess::diag::messages::text(
+                "ui.guide.window_pos_unreadable",
+                &[],
+            ));
         };
         let scale = scale_of(hwnd);
         let window = to_logical(win_px, scale);
@@ -1433,9 +1474,10 @@ mod win {
         }
 
         match pick_bed_type_win(&ctx.candidates) {
-            None => refused(
-                "在窗口里没找到板子类型的位置（切片器界面换过了？）—— 这一版的引导暂时指不了",
-            ),
+            None => refused(::postprocess::diag::messages::text(
+                "ui.guide.bed_type_missing",
+                &[],
+            )),
             Some(c) => GuideTargetDto {
                 ready: true,
                 window: Some(window),

@@ -878,8 +878,9 @@ export function WorkbenchApp() {
       case 'bundles':
         return '套餐 = 交付的真源（bundles.toml）—— 装什么、谁在用、改指向，都在这一页'
       case 'build':
-        return report
-          ? `阻断 ${report.blocks} · 待办 ${report.todos} · 提示 ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
+        /* 三档的中文标签只有一个出口（后端词表）—— 这里不再写一遍 block→阻断 */
+        return report && words
+          ? `${words.severity.block.label} ${report.blocks} · ${words.severity.todo.label} ${report.todos} · ${words.severity.hint.label} ${report.hints}${report.hints > 0 && report.blocks === 0 && report.todos === 0 ? ' · 都过了' : ''}`
           : ''
       case 'assets':
         return '资产域定义 + 引用反查 —— 交付身份改了先进草稿'
@@ -890,7 +891,7 @@ export function WorkbenchApp() {
       case 'dev':
         return '把平时看不见的那几屏按按钮演出来（不读 G-code、不落记录）'
     }
-  }, [page, book, report])
+  }, [page, book, report, words])
 
   /* ---------- 页面渲染（挂载入口只有这一处） ---------- */
 
@@ -1506,6 +1507,8 @@ export function WorkbenchApp() {
               canSave={saveOn}
               canDiscard={dirty && !busy}
               busy={busy}
+              /* 与页头「未保存 N」同一个数：文件对比为空时也要能说清还有几处在内存里 */
+              dirtyCount={book?.dirtyCount ?? 0}
               onDiscard={() => {
                 setHistoryOpen(false)
                 void discard()

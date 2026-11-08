@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::config;
-use crate::diag::{CancelToken, PostprocError};
+use crate::diag::{CancelToken, PostprocError, messages};
 use crate::ir::{Ir, TowerRelocateModeIr};
 use crate::postproc::calibration::Mode;
 use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
@@ -708,7 +708,7 @@ fn run(
         cancel_check_interval,
     )?;
     let final_tower_height = p1.stats.max_z_height;
-    let pass1_stats = p1.stats.clone();
+    let mut pass1_stats = p1.stats.clone();
 
     // ---- step 9: pass2（消耗式吃 Pass1Output）----
     checkpoint(cancel)?;
@@ -778,9 +778,34 @@ fn run(
     /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
     out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
 
-    // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS。
+    // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS，
+    // 同时把层数声明改成与成品内容一致。
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。
-    out_lines = crate::postproc::marks::finalize(out_lines, &machine_type);
+    let finalized = crate::postproc::marks::finalize(out_lines, &machine_type)?;
+    if finalized.header_added {
+        ir.warnings.push(messages::text(
+            "postproc.header_layer_declared",
+            &[("layers", &finalized.layers.to_string())],
+        ));
+    }
+    /*
+     * **只在会踩到缺陷的那一侧才提醒**（2026-11-08 作者：「如果他能识别到的话，你就智能一点，
+     * 它没有这个错误，你就不用显示警告……如果不能识别到，你就只能按版本分」）。
+     *
+     * 判据 = 切片器版本：**2.7.1 起**那一侧后处理完只回填 `moves` / `lines_ends`，
+     * 漏了 `spiral_vase_layers` ⇒ 预览 / 打印沿用旧层表；2.6.0 及更早**没有这段刷新逻辑**，
+     * 按切片时那份层表画本来就自洽 ⇒ 不打扰用户。
+     *
+     * 文件本身照旧一律压平 `; has_scarf_joint_seam = 0`（`marks::finalize` 那一步）：
+     * 那是"以后任何版本重新打开都正确"的修法，与这一句提示是两件事。
+     */
+    if finalized.scarf_flattened && scarf_viewer_is_affected(&pass1_stats.slicer_version) {
+        ir.warnings
+            .push(messages::text("postproc.scarf_joint_seam", &[]));
+    }
+    // 报告与文件必须说同一个层数：采集侧改过声明，统计也跟着实测值走。
+    pass1_stats.total_layer_number = finalized.layers;
+    out_lines = finalized.lines;
 
     let final_output_path = match &output_path {
         Some(p) if p != &gcode_path => p.clone(),
@@ -1002,5 +1027,56 @@ pub fn assert_step_order(executed: &[Step]) {
             executed.contains(&required),
             "必含步骤 {required:?} 缺失（executed={executed:?}）"
         );
+    }
+}
+/// 斜拼接缝那个缺陷从哪一版开始（Bambu Studio）：**2.7.1 起**那一侧的后处理回填
+/// （`BackgroundSlicingProcess.cpp`）只搬 `moves` / `lines_ends`，漏了 `spiral_vase_layers`。
+const SCARF_STALE_LAYER_SINCE: (u32, u32, u32) = (2, 7, 1);
+
+/// 这个切片器版本会不会踩到「后处理完不刷新层表」（斜拼接缝那一条）。
+///
+/// 缺陷不在我们改的文件里，在读文件的那一侧 —— 我们看不见对方的代码，但**看得见它自报的
+/// 版本**（头里 `; BambuStudio 02.08.02.60`，pass1 已摘成 `stats.slicer_version`）。
+///
+/// - 认得出且 `< 2.7.1` ⇒ 那一侧没有这段刷新逻辑，预览按切片时那份层表画本来就自洽 ⇒ 不提醒；
+/// - 认得出且 `>= 2.7.1` ⇒ 会错层 / 被切半截 ⇒ 提醒；
+/// - **认不出**（老文件没写版本 / 写法不认得）⇒ 仍然提醒：宁可多一句话，
+///   也不要让人把可能残缺的件打到机器上。
+fn scarf_viewer_is_affected(slicer_version: &str) -> bool {
+    match version_triple(slicer_version) {
+        Some(v) => v >= SCARF_STALE_LAYER_SINCE,
+        None => true,
+    }
+}
+
+/// 从 `"BambuStudio 02.08.02.60"` 取 `(2, 8, 2)`；认不出就是 `None`（兜不兜由调用方定）。
+fn version_triple(raw: &str) -> Option<(u32, u32, u32)> {
+    let token = raw.split_whitespace().last()?;
+    let mut parts = token.split('.');
+    let major: u32 = parts.next()?.parse().ok()?;
+    let minor: u32 = parts.next()?.parse().ok()?;
+    /* 第三段缺省按 0（`2.7` 这种写法）：只会让判据更保守地"算旧" */
+    let patch: u32 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 版本分界：2.7.1 起才提醒 —— 2.6.0 的用户不该看见这句话（作者 2026-11-08：
+    /// 「它能识别到的话就智能一点，没有这个错误就不用显示警告」）。
+    #[test]
+    fn scarf_warning_follows_the_slicer_version() {
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.05.03.61"));
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.06.00.51"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.07.01.62"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.08.02.60"));
+        assert!(scarf_viewer_is_affected("BambuStudio 02.09.01.70"));
+        /* 版本认不出 ⇒ 宁可提醒，也别放过去 */
+        assert!(scarf_viewer_is_affected(""));
+        assert!(scarf_viewer_is_affected("BambuStudio"));
+        /* 两段式版本号：第三段按 0 算 */
+        assert!(!scarf_viewer_is_affected("BambuStudio 02.07"));
     }
 }

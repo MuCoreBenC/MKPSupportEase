@@ -260,7 +260,13 @@ export default function Modal({
               <strong className={s.title}>{title}</strong>
               <span ref={setHeadNoteSlot} className={s.headNote} />
             </span>
-            {subtitle !== undefined && <span className={s.sub}>{subtitle}</span>}
+            {/* 副标题恒是「文件名 / 预览 · 文件名」这类可长可短的动态文本：省略号截了就
+                悬停看全（2026-11-08 作者：「会被截断的长文本都用 data-tip」） */}
+            {subtitle !== undefined && (
+              <span className={s.sub} data-tip={subtitle}>
+                {subtitle}
+              </span>
+            )}
           </span>
           {/* 标题栏右边：**动作槽**（框里想往头上塞按钮就往这儿 portal）+ 关闭 */}
           <span className={s.headActs}>

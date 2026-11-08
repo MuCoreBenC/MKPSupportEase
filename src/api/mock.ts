@@ -66,6 +66,66 @@ function devPostProcessRun(): PostProcessRun | null {
     }
   }
 
+  /*
+   * 带警告的结果屏（2026-11-08）：警告住在**上面那张 hero 卡**里，框身里不再另起一块。
+   * 这一屏就是探针拿来量"多了一页警告，框还是一样高"的那一屏
+   * （`?pp=warn`；钮在左下角，警告 ↔ 信息）。
+   */
+  if (which === 'warn') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [
+          /* 与内核那一条**逐字一致**（`messages.toml` 的 `postproc.scarf_joint_seam`）：
+             这一屏就是量"那句话在这张卡里放不放得下"的，抄短了等于没量。
+             四本字典里都要同步（真机上这句由内核按语言给，这里只是浏览器里没有后端）。 */
+          t('mock.warn.scarf'),
+        ],
+        result: { penX: -1, penY: 18.6, penZ: 3.8, glueSpeed: 70 },
+      },
+    }
+  }
+
+  /*
+   * **可变层高**那一屏（2026-11-08）：`result.layerHeightMin/Max` 两头不一样 ⇒
+   * 「层高」那一格摆 `0.08 – 0.28 mm`；固定层高那几屏（`?pp=result` 等）不给这两格，
+   * 摆的就是标称的 `0.20 mm`。真机上这两个数由 pass1 数 `; Z_HEIGHT:` 量出来。
+   */
+  if (which === 'vh') {
+    return {
+      ...base,
+      question: null,
+      finished: {
+        ok: true,
+        cancelled: false,
+        message: t('mock.ask.done'),
+        code: null,
+        stage: null,
+        exitCode: 0,
+        elapsedMs: 11_840,
+        output: null,
+        warnings: [],
+        result: {
+          penX: -1,
+          penY: 18.6,
+          penZ: 3.8,
+          glueSpeed: 70,
+          layerHeightMin: 0.08,
+          layerHeightMax: 0.28,
+        },
+      },
+    }
+  }
+
   if (which === 'mismatch') {
     return {
       ...base,
@@ -1553,7 +1613,8 @@ export const mockApi: MkpApi = {
    *
    * ★ 只有 **dev 且 URL 带 `?pp=…`** 时给一份假快照 —— 那是给探针用的
    *   （`scripts/probes/pp-modal-height.mjs`：量「结果」与「挪塔那一问」两屏是不是一样高）。
-   *   `?pp=result` / `?pp=relocate` / `?pp=mismatch`。生产构建里这函数直接 `null`
+   *   `?pp=result` / `?pp=warn` / `?pp=vh`（可变层高）/ `?pp=relocate` / `?pp=mismatch`。
+   *   生产构建里这函数直接 `null`
    *   （`import.meta.env.DEV` 在 build 里是常量 false，整段被摇掉）。
    */
   async getPostProcessRun(): Promise<PostProcessRun | null> {

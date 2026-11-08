@@ -233,7 +233,10 @@ fn commit_one(user_root: &Path, item: &ImportItem) -> ImportOutcome {
     }
     let source = PathBuf::from(&item.source);
     if !source.is_file() {
-        return fail(name, "找不到源文件 —— 它可能已经被移走或删掉".to_owned());
+        return fail(
+            name,
+            ::postprocess::diag::messages::text("ui.runtime.import.source_missing", &[]),
+        );
     }
     let bytes = match std::fs::read(&source) {
         Ok(bytes) => bytes,

@@ -189,7 +189,9 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
             {entries.map((entry) => (
               <li key={entry.id} className={s.recItem}>
                 <div className={s.recText}>
-                  <div className={s.recName}>{entry.fileName}</div>
+                  <div className={s.recName} data-tip={entry.fileName}>
+                    {entry.fileName}
+                  </div>
                   {/* 时间在前：放不下时省略号吃掉的是**冗余的路径**（名字已经在上行），不是时间 */}
                   <div className={s.recMeta}>
                     {when(entry.deletedAt)} · {entry.path}

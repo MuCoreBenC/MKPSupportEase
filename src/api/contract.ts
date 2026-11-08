@@ -2644,6 +2644,16 @@ export interface PostProcessResult {
   glueLengthMm?: number
   /** 切片软件（`"BambuStudio 02.08.02.60"` —— pass1 从输入头行刮到的完整串） */
   slicer?: string
+  /**
+   * 层厚的**最小 / 最大**（mm）—— 两个一样 = 固定层高。
+   *
+   * 缺 = 层数太少量不出来（或老钩子没这两格）⇒ 界面退回开场事实里那个标称
+   * `facts.layerHeight`。**可变层高（自适应）只有跑到 pass1 数完 `; Z_HEIGHT:` 才知道**：
+   * 输入头里那一行 `; layer_height = 0.2` 写的仍是标称值，照它显示等于没说
+   * （作者 2026-11-08：「如果用户开了可变层高怎么办？……层高是多少多少到多少多少」）。
+   */
+  layerHeightMin?: number
+  layerHeightMax?: number
 }
 
 /**

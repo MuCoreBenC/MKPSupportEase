@@ -610,6 +610,12 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
         print_time_seconds: done.print_time.as_ref().map(|pt| pt.total_seconds),
         glue_length_mm: done.stats.pass1.glue_total_length,
         slicer: done.stats.pass1.slicer_version.clone(),
+        /* 层高范围：`0` 是"量不出来"的哨兵（层数太少），到这一层换成 `None` —— 界面据此
+        退回开场事实里切片器标称的那个数，不把 0 当成 `0.00 mm` 摆出去 */
+        layer_height_min: (done.stats.pass1.layer_height_max > 0.0)
+            .then_some(done.stats.pass1.layer_height_min),
+        layer_height_max: (done.stats.pass1.layer_height_max > 0.0)
+            .then_some(done.stats.pass1.layer_height_max),
     }
 }
 
@@ -1449,6 +1455,8 @@ fn archive_success(
         model_name: done.header_facts.model_name.clone(),
         /* 拉起这一趟的那个切片器进程（父进程）—— 引导层靠它认"我刚才切的那一份" */
         slicer_pid: crate::parent::pid(),
+        // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
+        build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
         warnings: done.warnings.clone(),
         error: None,
@@ -1633,6 +1641,8 @@ fn archive_failure(
         model_name: postprocess::gcode::model_name(&job.gcode),
         /* 失败 / 取消也记：这一趟同样是**那个**切片器拉起来的（见成功那一处） */
         slicer_pid: crate::parent::pid(),
+        // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
+        build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
         warnings: Vec::new(),
         error: Some(error),

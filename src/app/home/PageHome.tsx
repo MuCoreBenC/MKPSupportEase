@@ -1390,7 +1390,10 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick={() => setPickerOpen(true)}
                 data-tip={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>
+                <span
+                  className={p.presetFileName}
+                  data-tip={calibFileName ?? tr('home.calib.pickPreset')}
+                >
                   {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>
@@ -1481,7 +1484,10 @@ export default function PageHome({ density }: PageHomeProps) {
                 onClick={() => setPickerOpen(true)}
                 data-tip={tr('home.calib.pickPresetTitle')}
               >
-                <span className={p.presetFileName}>
+                <span
+                  className={p.presetFileName}
+                  data-tip={calibFileName ?? tr('home.calib.pickPreset')}
+                >
                   {calibFileName ?? tr('home.calib.pickPreset')}
                 </span>
                 <span className={p.presetSwitch}>{tr('home.calib.switch')}</span>

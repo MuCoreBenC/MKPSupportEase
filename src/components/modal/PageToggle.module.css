@@ -1,0 +1,24 @@
+/*
+ * 左下角那颗翻页小钮（`PageToggle.tsx`）。
+ *
+ * 尺寸刻意比页脚正按钮小一档（正按钮 32px 高）：它是"翻过去看看"，不是主动作。
+ * 颜色走 `--text-*`（不是 `--ink-*` —— 那一族 token 全站没定义，写了等于没写）。
+ */
+
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-2);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.toggle:hover {
+  color: var(--text-1);
+  border-color: var(--text-3);
+}

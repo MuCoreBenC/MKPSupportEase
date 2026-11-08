@@ -3,7 +3,7 @@
 //! pass2 第二个 CHANGE_LAYER 触发（首层全部 feature 打完后）；
 //! 校准模式强制禁用。四象限小螺旋复用 tower::generate_mini_spiral_gcode。
 
-use crate::diag::PostprocError;
+use crate::diag::{PostprocError, messages};
 use crate::gcode::{format_float, format_speed, format_z};
 use crate::ir::Ir;
 
@@ -121,12 +121,14 @@ pub(crate) fn emit_first_pen_revitalization(
     }
 
     // 范围检查：4 象限小螺旋机器坐标是否超出机型运动范围（警告不阻断）
+    /* 主语也住文案表：这条警告会出现在模态框那张卡里，写在代码里英文 / 日文界面会夹中文 */
+    let range_source = messages::text("postproc.range_check.first_pen", &[]);
     check_tower_path_range(
         ir_data,
         &mini_spiral_xy_lines,
         "first_pen_revitalization",
         "first_pen_revitalization_range_check",
-        "首笔活化的路径超过工具头的最大运动范围",
+        &range_source,
     );
 
     sink.push_str(";First Pen Revitalization End");
@@ -183,17 +185,33 @@ fn check_tower_path_range(
 }
 
 /// `formatRangeWarningMessage`（revitalization_block.go:170）。
-fn format_range_warning_message(v: &crate::gcode::RangeViolation, source_label: &str) -> String {
-    let (dir_cn, limit_label, axis) = match v.direction {
-        "X+" => ("X+", "机型最大 X", "X"),
-        "X-" => ("X-", "机型最小 X", "X"),
-        "Y+" => ("Y+", "机型最大 Y", "Y"),
-        "Y-" => ("Y-", "机型最小 Y", "Y"),
-        _ => ("X+", "机型最大 X", "X"),
+fn format_range_warning_message(v: &crate::gcode::RangeViolation, source: &str) -> String {
+    /* 方向 → (方向记号, 轴, 这条边界是上限还是下限)。整句与"机型最大 / 最小"都在
+    `messages.toml`：这里只挑键、给值 —— 拼中文会让英文 / 日文界面夹一句中文。 */
+    let (dir, axis, is_max) = match v.direction {
+        "X-" => ("X-", "X", false),
+        "Y+" => ("Y+", "Y", true),
+        "Y-" => ("Y-", "Y", false),
+        _ => ("X+", "X", true),
     };
-    // 坐标量级下 Rust `{}` 与 Go `%g` 输出一致（最短往返表示、无尾零）
-    format!(
-        "{source_label}，向 {dir_cn} 方向移动（实际 {axis}={}，{limit_label}={}）",
-        v.actual_value, v.machine_limit
+    let limit = messages::text(
+        if is_max {
+            "postproc.range_limit.max"
+        } else {
+            "postproc.range_limit.min"
+        },
+        &[("axis", axis)],
+    );
+    messages::text(
+        "postproc.range_violation",
+        &[
+            ("source", source),
+            ("dir", dir),
+            ("axis", axis),
+            /* 坐标量级下 Rust `{}` 与 Go `%g` 输出一致（最短往返表示、无尾零） */
+            ("actual", &v.actual_value.to_string()),
+            ("limit", &limit),
+            ("bound", &v.machine_limit.to_string()),
+        ],
     )
 }

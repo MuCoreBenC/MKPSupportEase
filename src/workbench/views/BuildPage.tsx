@@ -73,6 +73,7 @@ import type {
   FinalizePreview,
   GenerateReport,
   Issue,
+  IssueAction,
   IssueReport,
   IssueWhere,
   MirrorSync,
@@ -141,7 +142,7 @@ function gotoOfWhere(at: IssueWhere): { view: string; focus?: GotoFocus } | null
     case 'menu':
       return { view: 'bundles', focus: { machineId: null, uid: at.uid, key: null } }
     case 'stock':
-      return { view: 'assets', focus: { machineId: null, uid: at.uid, key: null } }
+      return { view: 'assets', focus: { machineId: null, uid: at.uid, key: at.key } }
     case 'fallback':
       return { view: 'assets', focus: { machineId: null, uid: null, key: null } }
     default:
@@ -149,13 +150,13 @@ function gotoOfWhere(at: IssueWhere): { view: string; focus?: GotoFocus } | null
   }
 }
 
-/** 检查项的「去处理」映射。产品的一份账里，不是每一条都有地方可去 */
+/**
+ * 检查项的「去处理」映射。产品的一份账里，不是每一条都有地方可去。
+ *
+ * **落点全部由后端给**（`Issue.at`，含孤儿文件那条的「资产库 + 可选筛选」）——
+ * 前端不再按 id 改道：那等于把"该去哪儿"这条判据抄一份在视图里。
+ */
 function gotoOf(i: Issue): { view: string; focus?: GotoFocus } | null {
-  if (i.id === 'bundle.orphan_files') {
-    /* C14 第二十七轮的修正：孤儿文件去**资产库**并替人筛好「可选」——
-       套餐页里根本没有那些文件，跳过去等于没指路 */
-    return { view: 'assets', focus: { machineId: null, uid: null, key: 'optional' } }
-  }
   return gotoOfWhere(i.at)
 }
 
@@ -693,6 +694,33 @@ export default function BuildPage({
 
   const baselineDirty = baseline?.filter((b) => b.status !== 'same').length ?? 0
 
+  /*
+   * 就地修的命令表：issue id → 那颗按钮。
+   *
+   * **能不能修看后端给的 `i.action === 'fixable'`**，这张表只回答"那条修法调哪个函数"——
+   * 不是判据。加新检查项时后端说 fixable，这里补一行即可；前端不再猜。
+   */
+  const fixers: Record<
+    string,
+    { label: string; busyLabel: string; tip: string; run: () => void }
+  > = {
+    'embedded.catalog_stale': {
+      label: '重新生成',
+      busyLabel: '重算中…',
+      tip: '按当前 presets/ 重算 src-tauri/src/runtime/catalog.generated.json（内容一样就不写）；重新编译客户端后才随安装包生效',
+      run: () => void regenEmbeddedCatalog(),
+    },
+  }
+
+  /* 跳转按钮的文案跟着动作走（按钮本身只有这一颗，落点由后端给） */
+  const gotoLabel: Record<IssueAction, string> = {
+    goto: '去处理',
+    rerun: '去生成',
+    fixable: '去处理',
+    needsDecision: '去查看',
+    none: '',
+  }
+
   return (
     <div className={s.colsRev}>
       {/* —— 检查：左栏的事项清单 —— */}
@@ -701,7 +729,7 @@ export default function BuildPage({
           <h2>检查</h2>
           <span className={s.cardNote}>
             {report
-              ? `阻断 ${report.blocks} · 待办 ${report.todos} · 提示 ${report.hints}`
+              ? `${words.severity.block.label} ${report.blocks} · ${words.severity.todo.label} ${report.todos} · ${words.severity.hint.label} ${report.hints}`
               : '正在读……'}
           </span>
         </div>
@@ -710,13 +738,18 @@ export default function BuildPage({
             report.issues.map((i) => {
               const long = i.detail.length > 120
               const open = expandedIssues.has(i.id)
+              const fix = i.action === 'fixable' ? (fixers[i.id] ?? null) : null
+              const sev = words.severity[i.severity]
               return (
                 <div
                   key={i.id}
                   className={`${s.issue} ${i.severity === 'block' ? s.issueBlock : ''}`}
                 >
-                  <span className={`${s.tag} ${s[`tagSev${i.severity[0].toUpperCase()}${i.severity.slice(1)}` as keyof typeof s] ?? ''}`}>
-                    {i.severity === 'block' ? '阻断' : i.severity === 'todo' ? '待办' : '提示'}
+                  <span
+                    className={`${s.tag} ${s[`tagSev${i.severity[0].toUpperCase()}${i.severity.slice(1)}` as keyof typeof s] ?? ''}`}
+                    data-tip={sev.explain ?? undefined}
+                  >
+                    {sev.label}
                   </span>
                   <span className={s.issueTxt}>
                     <b>{i.title}</b>
@@ -740,26 +773,28 @@ export default function BuildPage({
                       {open ? '收起' : '展开'}
                     </button>
                   )}
-                  {/* 「内嵌目录落后」自带修复动作：不是跳到别的页，而是就地重算那份文件 */}
-                  {i.id === 'embedded.catalog_stale' && (
+                  {/* 就地修：后端说 fixable 才出现，按钮名与命令写在表里 */}
+                  {fix !== null && (
                     <button
                       type="button"
                       className={`${s.btn} ${s.btnSm}`}
                       disabled={regenBusy}
-                      title="按当前 presets/ 重算 src-tauri/src/runtime/catalog.generated.json（内容一样就不写）；重新编译客户端后才随安装包生效"
-                      onClick={() => void regenEmbeddedCatalog()}
+                      title={fix.tip}
+                      onClick={fix.run}
                     >
-                      {regenBusy ? '重算中…' : '重新生成'}
+                      {regenBusy ? fix.busyLabel : fix.label}
                     </button>
                   )}
-                  {/* 每一条都要说清去哪儿处理（issues.rs 的规矩），所以每一条都有这颗按钮 */}
-                  <button
-                    type="button"
-                    className={`${s.btn} ${s.btnSm}`}
-                    onClick={() => issueGoto(i)}
-                  >
-                    去处理
-                  </button>
+                  {/* 只是告知的那一档不给按钮（给了也没地方去） */}
+                  {i.action !== 'none' && (
+                    <button
+                      type="button"
+                      className={`${s.btn} ${s.btnSm}`}
+                      onClick={() => issueGoto(i)}
+                    >
+                      {gotoLabel[i.action]}
+                    </button>
+                  )}
                 </div>
               )
             })

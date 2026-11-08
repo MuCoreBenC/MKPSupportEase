@@ -799,6 +799,8 @@ export const en: Record<StringKey, string> = {
   'mock.advice.collision':
     'Suggestion: move the model up-left — X by at least 32.6 mm, Y by at least 32.6 mm',
   'mock.err.tomlLine': 'TOML syntax error (line 3, column 1)',
+  'mock.warn.scarf':
+    'Scarf joint seam is on. Bambu Studio 2.7.1+ leaves the layer table stale, so printed parts come out broken. Turn the seam off, use 2.6.0 or earlier, or wait for an official fix.',
   'mock.name.empty': 'The new name cannot be empty',
   'mock.name.notFile': 'That name is not a file name',
   'mock.name.extChanged': 'Keep the extension as it is — renaming or copying never changes the file kind (.toml stays .toml)',
@@ -1347,9 +1349,10 @@ export const en: Record<StringKey, string> = {
   'postproc.facts.fileSize': 'File size',
   'postproc.facts.elapsed': 'Time taken / size',
   'postproc.facts.elapsedValue': '{sec} s / {size}',
-  'postproc.warn.line1': 'Warning: {one}',
-  'postproc.warn.lineN': 'Warnings {one}',
-  'postproc.warn.item': 'Warning: {w}',
+  'postproc.warn.title': 'Warnings · {n}',
+  'postproc.warn.tab': 'Warnings',
+  'postproc.warn.toTab': 'Switch to: the warnings for this run',
+  'postproc.warn.toTabTitle': 'View warnings',
   'postproc.dbl.toResult': 'Double-click: back to result',
   'postproc.dbl.toProgress': 'Double-click: back to the progress',
   'postproc.settling': 'Wrapping up…',

@@ -176,13 +176,18 @@ fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_tower_feature_restore(bytes)
 }
 
+/// 抹掉塔区间内的 Z（塔打在本层模型层顶，参考物打在自己的记账高度上）。
+fn zero_tower_region_z(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::zero_tower_region_z(bytes)
+}
+
 /// 与 `tests/end_to_end.rs::normalize` 同一口径：去换笔块 → 去涂胶段 Z/F →
-/// 去塔块 feature 恢复行 → 去标记行。
-/// 少一层就会把 11-03 之后的有意偏离报成「整链不等价」（实测差 1380 字节）。
+/// 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
+/// 少一层就会把有意偏离报成「整链不等价」（实测差 1380 字节）。
 fn normalize(bytes: &[u8]) -> Vec<u8> {
-    strip_mkp_marks(&strip_tower_feature_restore(
+    strip_mkp_marks(&zero_tower_region_z(&strip_tower_feature_restore(
         &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
-    ))
+    )))
 }
 
 #[test]

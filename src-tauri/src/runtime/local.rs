@@ -643,7 +643,7 @@ pub fn toml_syntax_reason(text: &str) -> Option<String> {
             "ui.runtime.local.toml_syntax",
             &[("line", &line.to_string()), ("col", &col.to_string())],
         ),
-        None => "TOML 语法不对".to_owned(),
+        None => ::postprocess::diag::messages::text("ui.runtime.local.toml_syntax_plain", &[]),
     })
 }
 
@@ -653,13 +653,19 @@ fn preset_file_state(path: &Path) -> (Option<LocalState>, Option<String>) {
     let Ok(bytes) = std::fs::read(path) else {
         return (
             Some(LocalState::Unreadable),
-            Some("读不出来（文件不在了 / 读不动）".to_owned()),
+            Some(::postprocess::diag::messages::text(
+                "ui.runtime.local.unreadable",
+                &[],
+            )),
         );
     };
     let Ok(text) = String::from_utf8(bytes) else {
         return (
             Some(LocalState::Unreadable),
-            Some("不是 UTF-8 文本，读不出来".to_owned()),
+            Some(::postprocess::diag::messages::text(
+                "ui.runtime.local.not_utf8",
+                &[],
+            )),
         );
     };
     match toml_syntax_reason(&text) {

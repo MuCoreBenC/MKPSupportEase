@@ -77,6 +77,7 @@ import type {
   RuntimeCatalog,
 } from '../../api'
 import type { FieldSchema } from '../../components/field'
+import { isDirtyValue } from './dirtyValue'
 /* 显示精度唯一出口（`mm` 两位、其余原样）—— 与 `FieldControl` / `NumberField` 同一套 */
 import { displayDecimals, formatNum } from '../../components/field/value'
 /* 关掉模态框再进来的会话缓存（草稿层 + 撤销重做 + 修改历史），见它头注 */
@@ -1645,7 +1646,11 @@ export function useParams(opts: UseParamsOptions = {}): Params {
 
   const factoryOf = useCallback((key: string) => combo?.factoryByKey.get(key) ?? '', [combo])
 
-  const dirtyOf = useCallback((key: string) => draft[key] !== undefined, [draft])
+  /* 判据只有一处（`isDirtyValue`）：草稿里的值真的与已保存值不同才算脏 */
+  const dirtyOf = useCallback(
+    (key: string) => isDirtyValue(draft[key], savedValueOf(key)),
+    [draft, savedValueOf],
+  )
 
   /** 顺着 showWhen.key 往上找第一个不成立的条件。带 seen 防环（注册表写错也不死循环） */
   const findBlocked = useCallback(
@@ -2211,7 +2216,16 @@ export function useParams(opts: UseParamsOptions = {}): Params {
     [active, catalog],
   )
 
-  const dirtyKeys = useMemo(() => Object.keys(draft), [draft])
+  /**
+   * 「真的还有未保存改动的键」。判据与 [`dirtyOf`] 同一条：**值不等**才算。
+   *
+   * 只数"草稿里有这个键"会把"改回原值"也算进去 —— 行上徽章已经灭了，
+   * 底栏与换目标时的提示还挂着 N 项，两个数打架。
+   */
+  const dirtyKeys = useMemo(
+    () => Object.keys(draft).filter((k) => isDirtyValue(draft[k], savedValueOf(k))),
+    [draft, savedValueOf],
+  )
 
   /**
    * 底栏「取消」（2026-10-16，作者：「我的修改参数还缺少取消按钮，风格要一样呀」）：

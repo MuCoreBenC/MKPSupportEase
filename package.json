@@ -39,6 +39,7 @@
     "check:i18n": "node scripts/check-i18n.mjs",
     "translations:todo": "node scripts/stale-translations.mjs",
     "glue:check": "node scripts/glue-check.mjs",
+    "bambu:layers": "node scripts/bambu-layers.mjs",
     "preview:deliver": "cargo run -q --bin preview --features workbench -- deliver",
     "preview:recover": "cargo run -q --bin preview --features workbench -- recover"
   },

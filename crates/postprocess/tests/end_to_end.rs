@@ -155,35 +155,46 @@ fn strip_tower_feature_restore(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::strip_tower_feature_restore(bytes)
 }
 
-/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 去标记行。
-fn normalize(bytes: &[u8]) -> Vec<u8> {
-    strip_mkp_marks(&strip_tower_feature_restore(
-        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
-    ))
+/// 抹掉塔区间内的 Z（塔打在本层模型层顶，参考物打在自己的记账高度上）。
+/// 实现只有 `postprocess::postproc::marks::zero_tower_region_z` 一份。
+fn zero_tower_region_z(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::zero_tower_region_z(bytes)
 }
 
-/// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除 MKP 标记行外逐字节相同**。
+/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
+fn normalize(bytes: &[u8]) -> Vec<u8> {
+    strip_mkp_marks(&zero_tower_region_z(&strip_tower_feature_restore(
+        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
+    )))
+}
+
+/// 整链等价：新项目的输出与 `mkp-sr` 的参考输出**除约定的几处偏离外逐行相同**。
 #[test]
 fn output_is_byte_identical_to_the_mkp_sr_reference() {
     let got = normalize(&run_and_read("same", &[]));
     let want = normalize(&std::fs::read(reference_output()).expect("参考输出 fixture 应当存在"));
 
-    // 先报长度，再逐字节定位——直接 assert_eq! 两个 668KB 的 Vec 会刷屏。
+    // 逐行比、逐行报：两个 668KB 的 Vec 直接 assert_eq! 会刷屏，而"字节偏移 + 附近 80 字节"
+    // 在一片相同的 G-code 里指不出是哪一行。
+    let got_lines = lines_of(&got);
+    let want_lines = lines_of(&want);
     assert_eq!(
-        got.len(),
-        want.len(),
-        "剔除 MKP 标记行后输出长度与参考不等（本侧 {} 字节 / 参考 {} 字节）",
-        got.len(),
-        want.len()
+        got_lines.len(),
+        want_lines.len(),
+        "剔除约定的偏离后行数与参考不等（本侧 {} 行 / 参考 {} 行）",
+        got_lines.len(),
+        want_lines.len()
     );
-    if let Some(i) = (0..got.len()).find(|&i| got[i] != want[i]) {
-        let from = i.saturating_sub(80);
-        panic!(
-            "第 {i} 字节起与参考不同：\n本侧: {:?}\n参考: {:?}",
-            String::from_utf8_lossy(&got[from..(i + 80).min(got.len())]),
-            String::from_utf8_lossy(&want[from..(i + 80).min(want.len())]),
-        );
+    for (i, (a, b)) in got_lines.iter().zip(want_lines.iter()).enumerate() {
+        assert_eq!(a, b, "第 {} 行与参考不同", i + 1);
     }
+}
+
+fn lines_of(bytes: &[u8]) -> Vec<String> {
+    String::from_utf8_lossy(bytes)
+        .split_inclusive('\n')
+        .map(str::to_owned)
+        .collect()
 }
 
 /// 反空转 ①：参考输出不是输入的副本 —— 否则上一条判据在「管线什么都不做」时也会绿。
