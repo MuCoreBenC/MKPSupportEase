@@ -5,4 +5,4 @@
 # 手改会在 `npm run version:check` 里被抓出来。
 #
 # 只有「打 Tag 成功」才算这一版冻结。冻结之后由事务把这里滚到下一个号。
-version = "0.0.10-preview.9"
+version = "0.0.11"
