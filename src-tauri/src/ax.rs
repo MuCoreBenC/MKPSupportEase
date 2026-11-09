@@ -1513,13 +1513,18 @@ mod win {
         1
     }
 
-    /// 指不了时的那句人话（与 mac 侧同一个形状：不编坐标）。
-    fn refused(reason: &str) -> GuideTargetDto {
+    /// 指不了时的那句人话（与 mac 侧**同一个形状**：不编坐标）。
+    ///
+    /// ★ 参数收 `impl Into<String>`（与上面 mac 侧那份一字不差）—— 调用点给的是
+    ///   `messages::text(…)` 的返回值（`String`）。原来这里写 `&str`，Windows 那一趟
+    ///   编译直接 E0308（6 处），而 macOS 编译根本不进这个 `#[cfg(windows)]` 块，
+    ///   所以本地 `cargo test` / clippy 一直是绿的（2026-11-09 打 Windows 包才暴露）。
+    fn refused(reason: impl Into<String>) -> GuideTargetDto {
         GuideTargetDto {
             ready: false,
             window: None,
             target: None,
-            reason: Some(reason.to_owned()),
+            reason: Some(reason.into()),
         }
     }
 
