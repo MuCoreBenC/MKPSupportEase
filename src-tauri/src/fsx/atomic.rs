@@ -18,6 +18,7 @@ use postprocess::diag::messages;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use std::time::SystemTime;
 
 use crate::error::AppError;
 
@@ -55,9 +56,26 @@ fn verbatim(path: &Path) -> std::path::PathBuf {
 /// 跳过是安全的：写盘的唯一目的是让目标等于这串字节，它已经相等了。
 #[allow(clippy::disallowed_methods)] // 本文件是那个唯一的洞
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
-    if let Ok(old) = std::fs::read(verbatim(path)) {
-        if old == bytes {
-            return Ok(());
+    atomic_write_stamped(path, bytes, None)
+}
+
+/// 同上，外加把落盘文件的 mtime **钉成给定时刻**（恢复备份时用：每份文件要回到备份里那一刻）。
+///
+/// 两条与 [`atomic_write`] 不同的地方：
+/// 1. 时间是在 `persist` **之前**打在临时文件上的 —— rename 之后目标就是那一刻，
+///    不会出现"先落盘、再改时间"的中间态；
+/// 2. **不沿用"内容没变就跳过"那条短路**：内容一样但时间要按新的钉，跳过就等于没还原。
+///    所以这一档总是真写一遍（恢复不是热路径）。
+pub fn atomic_write_stamped(
+    path: &Path,
+    bytes: &[u8],
+    modified: Option<SystemTime>,
+) -> Result<(), AppError> {
+    if modified.is_none() {
+        if let Ok(old) = std::fs::read(verbatim(path)) {
+            if old == bytes {
+                return Ok(());
+            }
         }
     }
 
@@ -81,6 +99,12 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     tmp.write_all(bytes).map_err(|e| {
         AppError::io(messages::text("ui.fsx.atomic.015", &[])).with_detail(e.to_string())
     })?;
+    /* 时间改不动（文件系统不支持 / 越界的旧时间）不算写失败：正文已经在临时文件里了 */
+    if let Some(when) = modified {
+        let _ = tmp
+            .as_file()
+            .set_times(std::fs::FileTimes::new().set_modified(when));
+    }
     tmp.as_file().sync_all().map_err(|e| {
         AppError::io(messages::text("ui.fsx.atomic.016", &[])).with_detail(e.to_string())
     })?;

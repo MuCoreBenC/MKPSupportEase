@@ -298,7 +298,7 @@ export const zhTW: Record<StringKey, string> = {
   'settings.backupModal.scopeSettingsNote': '設定 + 執行記錄',
   'settings.backupModal.scan': '正在清點…',
   'settings.backupModal.pack': '正在打包',
-  'settings.backupModal.done': '備份好了 · {files} 個檔案 · {size}',
+  'settings.backupModal.done': '備份好了 · {files} 個檔案 · 原始 {source} → 壓縮後 {size}',
   'settings.backupModal.failed': '備份失敗：{detail}',
   'settings.backupModal.dirFailed': '讀不到預設位置：{detail}',
   'settings.backupModal.dirReading': '讀取位置…',

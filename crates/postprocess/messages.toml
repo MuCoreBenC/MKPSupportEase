@@ -3139,6 +3139,13 @@ text_en = "This backup has no presets — pick another scope, or make a new back
 text_zh_tw = "這份備份裡沒有預設 —— 換個範圍，或重新做一份帶預設的"
 text_ja = "このバックアップにはプリセットがありません — 範囲を変えるか、プリセット込みで作り直してください"
 
+["ui.runtime.backup.369"]
+text = "这份备份来自更新的版本（{v1}），当前是 {v2} —— 先升级客户端再恢复"
+text_en = "This backup comes from a newer version ({v1}); this app is {v2}. Update the app before restoring."
+text_zh_tw = "這份備份來自更新的版本（{v1}），目前是 {v2} —— 先升級客戶端再還原"
+text_ja = "このバックアップは新しいバージョン（{v1}）のものです。現在は {v2} です — アプリを更新してから復元してください"
+params = ["v1", "v2"]
+
 ["ui.runtime.baseline.368"]
 text = "血统里的摘要不是一个 sha256：{sha256}"
 text_en = "The digest in the lineage is not a sha256: {sha256}"

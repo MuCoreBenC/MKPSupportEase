@@ -283,7 +283,7 @@ export const ja: Record<StringKey, string> = {
   'settings.backupModal.scopeSettingsNote': '設定 + 実行記録',
   'settings.backupModal.scan': '数えています…',
   'settings.backupModal.pack': 'まとめています',
-  'settings.backupModal.done': 'バックアップ完了 · {files} ファイル · {size}',
+  'settings.backupModal.done': 'バックアップ完了 · {files} ファイル · 元 {source} → 圧縮後 {size}',
   'settings.backupModal.failed': 'バックアップに失敗しました：{detail}',
   'settings.backupModal.dirFailed': '既定の保存先を読めません：{detail}',
   'settings.backupModal.dirReading': '保存先を読み込み中…',

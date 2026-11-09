@@ -57,13 +57,13 @@ use postprocess::diag::messages;
 
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
 use crate::error::AppError;
-use crate::fsx::atomic::atomic_write;
+use crate::fsx::atomic::atomic_write_stamped;
 
 /// 备份格式的代次。加条目不升号，改语义才升
 pub const BACKUP_SCHEMA: u32 = 1;
@@ -164,6 +164,9 @@ pub struct BackupSummary {
     /// **备份文件自己的绝对路径**（界面照原样显示给用户：他要知道东西落在哪了）
     pub path: String,
     pub files: usize,
+    /// **打包前**那些文件的字节和（界面拿它说"原始多大 → 压缩后多大"）
+    pub source_bytes: u64,
+    /// zip 本身的字节数（恢复时 = 那份包多大）
     pub bytes: u64,
     pub created_unix: i64,
 }
@@ -299,12 +302,83 @@ const COPY_CHUNK: usize = 256 * 1024;
 /// 不然一个 400 MB 的归档会让界面好几十秒没有动静，看着就像卡死了）。
 const TICK_EVERY: Duration = Duration::from_millis(120);
 
+/// 备份里那几种**压得动**的扩展名（其余按原样存，不做 deflate）。
+///
+/// 为什么按扩展名分：图片 / 3MF / zip 本来就不缩，deflate 一遍只是把时间烧在 CPU 上 ——
+/// 实测 17 MB 不可压数据：Deflate 3.6 s、Stored 几十毫秒；而文本（gcode / toml / json）
+/// 反过来，几 MB 能压到几百 KB。2026-11-09 作者问「17 MB 怎么要十几秒」，这就是主因之一。
+const COMPRESSIBLE: [&str; 6] = ["gcode", "toml", "json", "txt", "md", "csv"];
+
+fn compression_for(name: &str) -> zip::CompressionMethod {
+    let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if COMPRESSIBLE.contains(&ext.as_str()) {
+        zip::CompressionMethod::Deflated
+    } else {
+        zip::CompressionMethod::Stored
+    }
+}
+
+/// 本机现在的时区偏移（解析不到按 UTC —— 与 `archive::now_local` 同一条回落）。
+fn local_offset() -> time::UtcOffset {
+    crate::archive::now_local().offset()
+}
+
+/// 文件 mtime → zip 的时间字段。
+///
+/// zip 的时间字段是**本地墙钟**、不带时区（MS-DOS 那套格式），所以先按系统时区换算
+/// 再拆成 y/m/d h:m:s —— macOS 与 Windows 都走这里，不各自算一套。
+/// 出了 zip 能表示的年份（1980–2107）就返回 `None`，调用方落回默认值。
+fn zip_time(t: SystemTime) -> Option<zip::DateTime> {
+    let local = time::OffsetDateTime::from(t).to_offset(local_offset());
+    zip::DateTime::from_date_and_time(
+        u16::try_from(local.year()).ok()?,
+        u8::from(local.month()),
+        local.day(),
+        local.hour(),
+        local.minute(),
+        local.second(),
+    )
+    .ok()
+}
+
+/// zip 的时间字段 → 文件 mtime（按**本地墙钟**解释）。
+///
+/// `1980-01-01 00:00` 是 zip 的"没记时间"哨兵（老备份全是它）—— 认出来就返回 `None`，
+/// 免得把恢复出来的文件统统按到 1980 年。
+fn file_time(dt: zip::DateTime) -> Option<SystemTime> {
+    if dt.year() == 1980
+        && dt.month() == 1
+        && dt.day() == 1
+        && dt.hour() == 0
+        && dt.minute() == 0
+        && dt.second() == 0
+    {
+        return None;
+    }
+    let month = time::Month::try_from(dt.month()).ok()?;
+    let date = time::Date::from_calendar_date(i32::from(dt.year()), month, dt.day()).ok()?;
+    let clock = time::Time::from_hms(dt.hour(), dt.minute(), dt.second()).ok()?;
+    Some(SystemTime::from(
+        time::PrimitiveDateTime::new(date, clock).assume_offset(local_offset()),
+    ))
+}
+
+/// 一条 zip 条目的选项：压缩方式按扩展名，时间用**文件自己的 mtime**
+/// （量不到就落回默认 —— 那是老的 1980，不是我们编的时间）。
+fn entry_options(name: &str, modified: Option<SystemTime>) -> zip::write::SimpleFileOptions {
+    let opts = zip::write::SimpleFileOptions::default().compression_method(compression_for(name));
+    match modified.and_then(zip_time) {
+        Some(when) => opts.last_modified_time(when),
+        None => opts,
+    }
+}
+
 /// **打一份备份**：把上面那些树与文件收进 zip，落在 `dest_dir`。
 ///
 /// `dest_dir` 是用户挑的文件夹（界面那侧用系统文件选择框要的），文件名由这里定 ——
 /// 用户不需要想它叫什么。
 ///
-/// `include_presets = false`：用户自己的那两棵（[`PRESET_DIRS`]）**不进包**。
+/// `include_presets = false`：跟预设有关的那几棵（[`PRESET_DIRS`]）**不进包**。
 /// 这份包恢复时也不许动它们 —— 判断依据写在说明书的 `presets` 那一格。
 ///
 /// `on_progress` 每一跳报一次（见 [`Progress`]）：打包按**字节**报，于是界面上那根条
@@ -318,6 +392,7 @@ pub fn create(
     let created_unix = OffsetDateTime::now_utc().unix_timestamp();
     /* 清点要一个个 stat（几千个文件时不是一瞬间）—— 先报一句，界面才不是"点了没反应" */
     on_progress(&Progress::scanning());
+    let scan_start = Instant::now();
 
     let mut names: Vec<String> = Vec::new();
     for f in MANAGED_FILES {
@@ -334,15 +409,19 @@ pub fn create(
     }
     names.sort();
 
-    /* 分母：这几份文件的字节和。量不到的单份按 0 算 —— 它照样会被打开（真读不出来会在下面报） */
-    let total_bytes: u64 = names
+    /*
+     * 每份文件的 stat 只做一次：字节数（进度分母）与 mtime（zip 里那一格时间）都要它。
+     * 量不到的单份按 0 / 没有时间算 —— 它照样会被打开（真读不出来会在下面报）。
+     */
+    let metas: Vec<Option<std::fs::Metadata>> = names
         .iter()
-        .map(|n| {
-            std::fs::metadata(internal.join(n))
-                .map(|m| m.len())
-                .unwrap_or(0)
-        })
+        .map(|n| std::fs::metadata(internal.join(n)).ok())
+        .collect();
+    let total_bytes: u64 = metas
+        .iter()
+        .map(|m| m.as_ref().map(|m| m.len()).unwrap_or(0))
         .sum();
+    let scan_ms = scan_start.elapsed().as_millis();
 
     let dest = dest_dir.join(backup_name(created_unix));
     let info = BackupInfo {
@@ -358,17 +437,20 @@ pub fn create(
      * 写盘仍走全仓唯一出口（`fsx::atomic`）—— 只是走**流式**那一档：
      * 备份可能几百 MB（执行归档三件套），不该先整个进内存再落。
      */
+    let mut pack_ms = 0u128;
     crate::fsx::atomic::atomic_write_stream(&dest, |file| {
+        let pack_start = Instant::now();
         let mut zip = zip::ZipWriter::new(file);
-        let opts = zip::write::SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Deflated);
 
-        zip.start_file(INFO_FILE, opts).map_err(zip_err)?;
+        zip.start_file(INFO_FILE, entry_options(INFO_FILE, Some(SystemTime::now())))
+            .map_err(zip_err)?;
         zip.write_all(&info_bytes).map_err(io_err)?;
         let mut written = 0u64;
-        for name in &names {
+        for (i, name) in names.iter().enumerate() {
             safe_rel(name)?;
-            zip.start_file(name.as_str(), opts).map_err(zip_err)?;
+            let modified = metas[i].as_ref().and_then(|m| m.modified().ok());
+            zip.start_file(name.as_str(), entry_options(name, modified))
+                .map_err(zip_err)?;
             let mut reader = std::fs::File::open(internal.join(name)).map_err(|e| {
                 AppError::io(messages::text(
                     "ui.runtime.backup.357",
@@ -387,13 +469,30 @@ pub fn create(
             )?;
         }
         zip.finish().map_err(zip_err)?;
+        pack_ms = pack_start.elapsed().as_millis();
         Ok(())
     })?;
 
     let bytes = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
+    /*
+     * 三段分开记（作者 2026-11-09：「17 MB 怎么要十几秒」）：
+     *   scan  = 清点 + stat；
+     *   pack  = 压缩 + 写 zip；
+     *   其余  = sync_all / rename（写盘落稳那一段，落在慢盘或同步盘上会明显）。
+     */
+    tracing::info!(
+        files = names.len(),
+        source_bytes = total_bytes,
+        zip_bytes = bytes,
+        scan_ms,
+        pack_ms,
+        total_ms = scan_start.elapsed().as_millis(),
+        "备份耗时"
+    );
     Ok(BackupSummary {
         path: dest.display().to_string(),
         files: names.len(),
+        source_bytes: total_bytes,
         bytes,
         created_unix,
     })
@@ -493,6 +592,22 @@ pub fn restore(
     }
 
     /*
+     * **更新的版本打的包，老客户端不许恢复**（2026-11-09 作者问「旧版备份 + 新版软件怎么办」）。
+     *
+     * 反方向是安全的：新客户端读旧数据有兜底 —— `app-state` 每一格都是 `Option` +
+     * `serde(default)`（缺的那一段 = 没设过，走默认），预设文件是字节原样。
+     * 但老客户端读新数据没有兜底（新字段、新的 catalog 代次它不认识），
+     * 所以只拦这一头，并让用户先升级。
+     */
+    let current = env!("CARGO_PKG_VERSION");
+    if crate::runtime::release_info::is_newer_version(&info.app_version, current) {
+        return Err(AppError::invalid_argument(messages::text(
+            "ui.runtime.backup.369",
+            &[("v1", &info.app_version), ("v2", current)],
+        )));
+    }
+
+    /*
      * 要预设、可这份当初就没带 ⇒ **明说**（不静默什么都不做 —— 那让人以为恢复了）。
      */
     if scope == Scope::Presets && !info.presets {
@@ -550,6 +665,7 @@ pub fn restore(
 
     /* ④ 逐条解开（只解这一档管的那些；范围外一个都不碰） */
     let mut count = 0usize;
+    let mut source_bytes = 0u64;
     for i in 0..archive.len() {
         let mut entry = archive.by_index(i).map_err(zip_err)?;
         let name = entry.name().to_owned();
@@ -571,9 +687,13 @@ pub fn restore(
                 .with_detail(e.to_string())
             })?;
         }
+        /* 备份里记着这一份的时间（老备份是 1980 哨兵 ⇒ `None`，那就按写入时刻） */
+        let modified = entry.last_modified().and_then(file_time);
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).map_err(io_err)?;
-        atomic_write(&target, &bytes)?;
+        /* 写盘仍走唯一出口；时间在 persist 之前钉上（见 `atomic_write_stamped`） */
+        atomic_write_stamped(&target, &bytes, modified)?;
+        source_bytes += bytes.len() as u64;
         count += 1;
         on_progress(&Progress {
             stage: Stage::Pack,
@@ -586,6 +706,7 @@ pub fn restore(
     Ok(BackupSummary {
         path: zip_path.display().to_string(),
         files: count,
+        source_bytes,
         bytes: std::fs::metadata(zip_path).map(|m| m.len()).unwrap_or(0),
         created_unix: info.created_unix,
     })
@@ -610,6 +731,8 @@ fn zip_err(e: zip::result::ZipError) -> AppError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /* 只有测试会直接铺原始文件（产品代码一律走 create / restore 那两条） */
+    use crate::fsx::atomic::atomic_write;
 
     fn seed(internal: &Path) {
         atomic_write(&internal.join("catalog.json"), b"{\"catalogSchema\":1}").unwrap();
@@ -872,6 +995,96 @@ mod tests {
         assert!(
             internal.join("user/presets-local/A1 涂胶.toml").is_file(),
             "拒了就不许动预设"
+        );
+    }
+
+    /// 每份文件的时间进 zip、恢复时再放回去（作者 2026-11-09：文件时间全是 1980）
+    #[test]
+    fn each_entry_keeps_its_own_time_and_restore_puts_it_back() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+
+        /* 给一份文件钉一个"本地墙钟"的时间（zip 只有 2 秒精度，秒取偶数） */
+        let want = {
+            let date = time::Date::from_calendar_date(2026, time::Month::January, 2).unwrap();
+            let clock = time::Time::from_hms(3, 4, 6).unwrap();
+            SystemTime::from(
+                time::PrimitiveDateTime::new(date, clock).assume_offset(local_offset()),
+            )
+        };
+        /* 铺一份带时间的：与恢复走同一条出口（`atomic_write_stamped`） */
+        atomic_write_stamped(
+            &internal.join("catalog.json"),
+            b"{\"catalogSchema\":1}",
+            Some(want),
+        )
+        .unwrap();
+
+        let zip_at = {
+            let out = d.path().join("out");
+            std::fs::create_dir_all(&out).unwrap();
+            create(&internal, &out, true, &mut |_| {}).unwrap().path
+        };
+
+        {
+            let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_at).unwrap()).unwrap();
+            let entry = archive.by_name("catalog.json").unwrap();
+            let dt = entry.last_modified().expect("这一条该带时间");
+            assert_eq!(
+                (dt.year(), dt.month(), dt.day(), dt.hour(), dt.minute()),
+                (2026, 1, 2, 3, 4),
+                "zip 里记的应是**本地墙钟**"
+            );
+        }
+
+        restore(
+            &internal,
+            std::path::Path::new(&zip_at),
+            Scope::All,
+            &mut |_| {},
+        )
+        .unwrap();
+        let got = std::fs::metadata(internal.join("catalog.json"))
+            .unwrap()
+            .modified()
+            .unwrap();
+        let delta = got.duration_since(want).unwrap_or_else(|e| e.duration());
+        assert!(
+            delta < Duration::from_secs(2),
+            "文件时间没还原：差 {delta:?}"
+        );
+    }
+
+    /// 更新的版本打的包 ⇒ 老客户端拒绝恢复（先升级再说）
+    #[test]
+    fn a_backup_from_a_newer_version_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let internal = d.path().join("appdata");
+        seed(&internal);
+
+        let zip_at = d.path().join("未来的.zip");
+        {
+            #[allow(clippy::disallowed_methods)]
+            let f = std::fs::File::create(&zip_at).unwrap();
+            let mut zip = zip::ZipWriter::new(f);
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file(INFO_FILE, opts).unwrap();
+            zip.write_all(
+                br#"{"schema":1,"appVersion":"99.0.0","createdUnix":0,"files":0,"presets":true}"#,
+            )
+            .unwrap();
+            zip.finish().unwrap();
+        }
+
+        let err =
+            restore(&internal, &zip_at, Scope::All, &mut |_| {}).expect_err("更新的版本，该拒");
+        assert_eq!(err.code, crate::error::ErrorCode::InvalidArgument);
+        assert!(
+            std::fs::read_to_string(internal.join("catalog.json"))
+                .unwrap()
+                .contains("\"catalogSchema\":1"),
+            "拒了就一个字都不许动"
         );
     }
 

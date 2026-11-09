@@ -1311,7 +1311,9 @@ export interface BackupSummary {
   path: string
   /** 里面几个文件 */
   files: number
-  /** 字节数（恢复时 = 那份 zip 的大小） */
+  /** **打包前**那些文件的字节和（界面拿它说"原始多大 → 压缩后多大"；恢复时 = 解出来的字节和） */
+  sourceBytes: number
+  /** zip 本身的字节数（恢复时 = 那份包多大） */
   bytes: number
   /** 什么时候打的这份备份（UTC epoch 秒） */
   createdUnix: number

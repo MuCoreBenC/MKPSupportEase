@@ -313,7 +313,7 @@ export const zhCN = {
   'settings.backupModal.scopeSettingsNote': '设置 + 执行记录',
   'settings.backupModal.scan': '正在清点…',
   'settings.backupModal.pack': '正在打包',
-  'settings.backupModal.done': '备份好了 · {files} 个文件 · {size}',
+  'settings.backupModal.done': '备份好了 · {files} 个文件 · 原始 {source} → 压缩后 {size}',
   'settings.backupModal.failed': '备份失败：{detail}',
   'settings.backupModal.dirFailed': '读不到默认位置：{detail}',
   'settings.backupModal.dirReading': '读取位置…',

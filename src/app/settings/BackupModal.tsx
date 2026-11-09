@@ -275,7 +275,11 @@ export default function BackupModal({ open, host = null, onClose }: BackupModalP
   const stageLine =
     done !== null
       ? backup
-        ? tr('settings.backupModal.done', { files: done.files, size: sizeText(done.bytes) })
+        ? tr('settings.backupModal.done', {
+            files: done.files,
+            source: sizeText(done.sourceBytes),
+            size: sizeText(done.bytes),
+          })
         : tr('settings.restoreModal.done')
       : tick?.stage === 'pack'
         ? `${tr(backup ? 'settings.backupModal.pack' : 'settings.restoreModal.pack')} · ${pct ?? 0}%`

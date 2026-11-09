@@ -281,7 +281,7 @@ export const en: Record<StringKey, string> = {
   'settings.backupModal.scopeSettingsNote': 'Settings + runs',
   'settings.backupModal.scan': 'Counting…',
   'settings.backupModal.pack': 'Packing',
-  'settings.backupModal.done': 'Backup saved · {files} files · {size}',
+  'settings.backupModal.done': 'Backup saved · {files} files · {source} → {size} compressed',
   'settings.backupModal.failed': 'Backup failed: {detail}',
   'settings.backupModal.dirFailed': 'Couldn’t read the default location: {detail}',
   'settings.backupModal.dirReading': 'Reading the location…',
