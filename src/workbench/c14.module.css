@@ -820,6 +820,9 @@
   display: inline-flex;
   gap: 6px;
   align-items: center;
+  /* 被 `flex: 1` 拉宽的按钮（批量修改那一排的「应用」）内容必须居中：
+     默认的 flex-start 会把两个汉字甩到左上角 */
+  justify-content: center;
   height: 28px;
   padding: 0 10px;
   font-size: var(--fs-body);
@@ -4845,6 +4848,28 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/*
+ * 「跟随基线」预览里**值会变**的那一行：左侧一条主色线 + 一档浅底。
+ * 值不变的行不画 —— 一眼扫出哪几列真的会被改，而不是一排「1.2 → 1.2」。
+ */
+.pBatchRowChanged {
+  margin-left: -6px;
+  padding: 4px 6px;
+  border-left: 2px solid var(--wb-primary);
+  border-radius: 2px;
+  background: var(--wb-primary-soft);
+}
+
+/* 行尾那枚「值会变」小签 —— 与行底色同一套主色，不加第二套配色 */
+.pBatchFlag {
+  padding: 0 4px;
+  font-size: var(--fs-label);
+  line-height: 16px;
+  color: var(--wb-primary-deep);
+  border: 1px solid var(--wb-primary);
+  border-radius: 2px;
 }
 
 .pBatchChips {

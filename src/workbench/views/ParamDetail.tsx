@@ -712,7 +712,7 @@ export default function ParamDetail({
             </span>
             {row.impact && row.impact.followers.length > 0 && (
               <>
-                <span className={s.pKvK}>跟着基底走</span>
+                <span className={s.pKvK}>跟着基线走</span>
                 <span className={s.pKvV}>{row.impact.followers.join('、')}</span>
               </>
             )}

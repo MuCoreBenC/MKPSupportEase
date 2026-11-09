@@ -688,7 +688,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
     if (!picked.hasRecipe)
       return {
         label: '补参数源',
-        hint: '这个版本还是纯继承基底（参数源待补）—— 去参数台把它的参数正文钉下来。',
+        hint: '这个版本还是纯继承基线（参数源待补）—— 去参数台把它的参数正文钉下来。',
         run: () => onGoto('params', { machineId: m.id, uid, key: null }),
       }
     const blocks = myBlocks(uid)
@@ -1299,7 +1299,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                   <span className={s.rowName}>{v.name}</span>
                   <span className={s.rowMeta}>{v.recommendedBundle ?? placeholderText.noBundle}</span>
                   {!v.hasRecipe && (
-                    <span className={s.todo} title="纯继承机型基底，还没有自己的参数正文（14.4）">
+                    <span className={s.todo} title="纯继承机型基线，还没有自己的参数正文（14.4）">
                       参数源待补
                     </span>
                   )}
@@ -1513,7 +1513,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
                         </span>
                       </>
                     ) : (
-                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基底">
+                      <span className={s.todo} title="还没有自己的参数正文 —— 值全部继承机型基线">
                         参数源待补
                       </span>
                     )}
@@ -2092,7 +2092,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
         </div>
         <p className={s.cardNoteDim}>
           <strong>id 与版本名都得现在填</strong> —— 版本一建出来就直接参与生成
-          <HelpDot text="没名字的版本在检查页和生成页都认不出来。新版本的标签、说明、套餐还是空的，参数纯继承机型基底（卡片上会标「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。" />
+          <HelpDot text="没名字的版本在检查页和生成页都认不出来。新版本的标签、说明、套餐还是空的，参数纯继承机型基线（卡片上会标「参数源待补」）—— 套餐去版本详情卡指，参数去参数台改。" />
         </p>
       </ModalC14>
 
@@ -2151,7 +2151,7 @@ export default function MachinesPage({ book, words, onGoto, onSave, onBookRefres
           <input type="checkbox" checked={withRecipe} onChange={(e) => setWithRecipe(e.target.checked)} />
           <span>
             <b>同时复制配方</b>
-            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基底都传不到它身上。不勾就是一个纯继承基底的空壳版本（标「参数源待补」）。" />
+            <HelpDot text="拷出来是独立快照 —— 之后改模板、改基线都传不到它身上。不勾就是一个纯继承基线的空壳版本（标「参数源待补」）。" />
           </span>
         </label>
       </ModalC14>

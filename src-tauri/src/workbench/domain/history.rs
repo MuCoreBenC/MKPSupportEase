@@ -222,6 +222,15 @@ impl History {
         self.undo.iter()
     }
 
+    /// **撤销栈顶那一条**：标签 + 它改了几处字段。
+    ///
+    /// 「未保存改动」框里那颗「撤销这一笔（N 处）」用它 —— 那一笔是**一次手势**
+    /// （批量设值就是一条），逐行各给一颗按钮会让人以为只撤那一格。
+    pub fn top_op(&self) -> Option<(String, usize)> {
+        let e = self.undo.back()?;
+        Some((e.label.clone(), e.fields.len()))
+    }
+
     /// **记一条命令**（不碰草稿、不碰文档 —— 调用方已经应用过了）。
     ///
     /// # 为什么逆命令由调用方给
@@ -410,19 +419,19 @@ pub fn dirty_fields(entries: &[Entry]) -> usize {
     dirty_field_entries(entries).len()
 }
 
-/// 去重后的字段账 —— 「改了什么」逐条列的就是这一份。
+/// 跨条目合并后的字段账 —— 「改了什么」逐条列的就是这一份。
 ///
-/// 去重键 = `(层, 归属, 键)`：同一格连点十下只算一处。**唯一口径** ——
-/// [`dirty_fields`]（数个数）与检查框里的字段清单都从这里来，
+/// 去重键 = `(层, 归属, 键)`：同一格连点十下只算一处，**`before` 保最初、
+/// `after` 换最新**。少了"换最新"这一步，一次改过去又改回来
+/// （批量设 1.2 → 跟随基线回 1.0）会各算一处，页头写着「未保存 9」
+/// 而影子树与盘上一模一样（作者 2026-11-09 报的就是这一条）。
+///
+/// **唯一口径** —— [`dirty_fields`]（数个数）与检查框里的字段清单都从这里来，
 /// 各写一遍就会出现"页头 14 处、清单 0 处"那种两个数打架。
-pub fn dirty_field_entries(entries: &[Entry]) -> Vec<&super::txn::FieldEntry> {
-    let mut out: Vec<&super::txn::FieldEntry> = Vec::new();
+pub fn dirty_field_entries(entries: &[Entry]) -> Vec<super::txn::FieldEntry> {
+    let mut out: Vec<super::txn::FieldEntry> = Vec::new();
     for e in entries {
-        for f in e.fields.iter().filter(|f| f.changed()) {
-            if !out.iter().any(|x| x.same_cell(f)) {
-                out.push(f);
-            }
-        }
+        merge_fields(&mut out, e.fields.clone());
     }
     out
 }
@@ -893,5 +902,49 @@ mod tests {
             Some(&Some(serde_json::json!(12.0))),
             "重做之后回到改完的那个值"
         );
+    }
+
+    /// **一趟改过去又改回来 = 0 处**（作者 2026-11-09 报的「未保存 9，点进来空的」）。
+    ///
+    /// 两笔各自都"变了"，但同一格合并之后 `before` 与最新 `after` 是同一个状态
+    /// （都是「跟随（1.0）」）⇒ 净零。以前只留第一条、不换 `after`，于是
+    /// 批量设 1.2 再跟随基线回 1.0 会留下 9 个虚假的改动，而影子树与盘上一模一样。
+    #[test]
+    fn a_round_trip_that_ends_where_it_started_is_not_dirty() {
+        let cell = |before: &str, after: &str| super::super::txn::FieldEntry {
+            level: Some(format!("{:?}", Level::Version)),
+            owner: "A1:STANDARD".to_owned(),
+            key: "wiping.child".to_owned(),
+            label: "塔位置 X".to_owned(),
+            before: Some(before.to_owned()),
+            after: Some(after.to_owned()),
+            why: "user",
+        };
+        let entry = |fields| Entry {
+            label: "批量".to_owned(),
+            action: Action::Value {
+                patch: set(
+                    Level::Version,
+                    "A1/STANDARD",
+                    "wiping.child",
+                    Some(serde_json::json!(1.2)),
+                ),
+                inverse: Vec::new(),
+            },
+            merge_key: None,
+            at: Instant::now(),
+            fields,
+        };
+
+        let entries = vec![
+            entry(vec![cell("跟随（1.0）", "1.2")]),
+            entry(vec![cell("1.2", "跟随（1.0）")]),
+        ];
+        assert_eq!(dirty_fields(&entries), 0, "一进一出必须净零");
+        assert!(dirty_field_entries(&entries).is_empty());
+
+        /* 只走一半：跟随 1.0 → 钉住 1.2，是实打实的 1 处 */
+        let half = vec![entry(vec![cell("跟随（1.0）", "1.2")])];
+        assert_eq!(dirty_fields(&half), 1);
     }
 }

@@ -1439,8 +1439,10 @@ export function WorkbenchApp() {
                   className={s.sbBtn}
                   disabled={txn?.canUndo !== true || busy}
                   data-tip={
-                    txn !== null && txn.ops.length > 0
-                      ? `撤销：${txn.ops[txn.ops.length - 1].label}`
+                    /* 与「未保存改动」框那颗读同一份 `topOp` —— 值编辑不进 `txn.ops`，
+                       拿 `ops` 会在这类撤销上说出一个空标签 */
+                    txn?.topOp != null
+                      ? `撤销：${txn.topOp.label}（${txn.topOp.fields} 处）`
                       : (words?.disabled.nothingToUndo ?? '没有可撤销的改动')
                   }
                   onClick={() => void undo()}
@@ -1523,6 +1525,8 @@ export function WorkbenchApp() {
               canRedo={txn?.canRedo === true}
               onUndo={undo}
               onRedo={redo}
+              /* 撤销栈顶那一条：字段表那颗「撤销这一笔（N 处）」与 undo 弹的是同一条 */
+              topOp={txn?.topOp ?? null}
             />
 
             {/* Toast：右下角，压在模态遮罩之上（遮罩开着时「已撤销」这类提示还得看得见） */}

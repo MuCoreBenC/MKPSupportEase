@@ -717,6 +717,18 @@ impl Ctx {
     ///
     /// 作者 2026-11-03 报的「改了很多还是只有 1」就是第一格曾经写成第三个：
     /// 一次 `setValue` 连带改四行，按文件数永远只算 1。
+    /// 撤销该弹哪一套栈：两套并存时退**最近的那一笔**。
+    ///
+    /// `undo_in` 与 `txn_state.top_op` 共用这一条判据 —— 两处各写一遍，
+    /// 界面上就会"按钮写着撤这一笔、按下去退的是另一套"。
+    fn undo_uses_history(&self) -> bool {
+        match (self.history.undo_last_at(), self.txn.undo_last_at()) {
+            (Some(h), Some(t)) => h >= t,
+            (Some(_), None) => true,
+            _ => false,
+        }
+    }
+
     pub(super) fn txn_state(&self) -> TxnState {
         TxnState {
             /* 「脏」不再问影子树（值编辑根本不写它）：历史里有字段 / 草稿里有挂着的 /
@@ -733,6 +745,13 @@ impl Ctx {
             can_undo: self.history.undo_depth() > 0 || self.txn.undo_depth() > 0,
             can_redo: self.history.redo_depth() > 0 || self.txn.redo_depth() > 0,
             ops: self.txn.ops(),
+            /* 「这一笔」= 下面那颗撤销真会弹掉的那一条（两套栈按时间取最近） */
+            top_op: if self.undo_uses_history() {
+                self.history.top_op()
+            } else {
+                self.txn.undo_top()
+            }
+            .map(|(label, fields)| TopOp { label, fields }),
             /* 回执与事务状态同一趟取走：前端本来就在轮询这一个（800ms），
             不必为它另开一条通道 */
             receipt: take_receipt(),
@@ -1338,6 +1357,15 @@ fn shadow_differs(real: &Path, shadow: &Path) -> Result<bool, AppError> {
     Ok(!txn::equal(&a, &b))
 }
 
+/// 撤销栈顶那一条 —— 「撤销这一笔（N 处）」要的两个数。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopOp {
+    pub label: String,
+    /// 这一笔改了几处字段（同一格合并之后的条数）
+    pub fields: usize,
+}
+
 /// 统一事务的状态（页头三按钮 + 状态栏读它）
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1347,6 +1375,11 @@ pub struct TxnState {
     pub can_undo: bool,
     pub can_redo: bool,
     pub ops: Vec<Op>,
+    /// **撤销栈顶那一条**（值编辑 / 结构编辑按时间取最近的那套）。
+    ///
+    /// 「未保存改动」框把它渲染成一颗「撤销这一笔（N 处）」—— 一次手势改的所有格子
+    /// 是一条，逐行各给一颗按钮会让人以为只撤那一格。
+    pub top_op: Option<TopOp>,
     /// **刚跑完那一笔的请求号**（2026-11-02）。`null` = 这一轮没跑过命令。
     ///
     /// 状态栏把号显示出来，作者就能拿它去日志里 `grep` 出这一次点击的全部行。
@@ -2512,8 +2545,8 @@ fn diff_draft(ctx: &Ctx) -> Vec<DiffLine> {
     let entries: Vec<edit_history::Entry> = ctx.history.entries().cloned().collect();
     let mut rows = ctx.txn.field_changes();
     for f in edit_history::dirty_field_entries(&entries) {
-        if !rows.iter().any(|x| x.same_cell(f)) {
-            rows.push(f.clone());
+        if !rows.iter().any(|x| x.same_cell(&f)) {
+            rows.push(f);
         }
     }
     rows.into_iter()
@@ -2575,8 +2608,8 @@ fn kind_of(why: &str) -> &'static str {
         "structural" => "改定义",
         /* 2026-11-03：`promoted`（为了保住值而多写的版本键）不再单独成一类 ——
         界面只问"这一格变没变"，不问"我们写了几个键"。它现在与不加键的继承
-        是同一种表现，统一叫「随基底生效」。 */
-        "follows" | "promoted" | "inherited" => "改值（随基底）",
+        是同一种表现，统一叫「随基线生效」。 */
+        "follows" | "promoted" | "inherited" => "改值（随基线）",
         "copy" => "改值（复制）",
         _ => "改值",
     }
@@ -3155,13 +3188,9 @@ pub(super) fn undo_in(ctx: &mut Ctx) -> Result<TxnState, AppError> {
          * 迁移期：值编辑在 `ctx.history`（内存命令），结构编辑还在 `ctx.txn`
          * （文件事务）。谁后发生退谁 —— 按栈名轮流退会让撤销顺序与真实顺序相反：
          * 改了个参数、又改了机型信息之后按 Cmd+Z，必须退机型信息那一笔。
-         * 两个 `Instant` 来自同一个进程，可比。
+         * 判据的唯一实现是 `Ctx::undo_uses_history`（`txn_state.top_op` 也读它）。
          */
-        let use_history = match (ctx.history.undo_last_at(), ctx.txn.undo_last_at()) {
-            (Some(h), Some(t)) => h >= t,
-            (Some(_), None) => true,
-            _ => false,
-        };
+        let use_history = ctx.undo_uses_history();
         if use_history {
             /* 反向是「一条命令」：先算它要写哪些行（**在撤销之前算**，
             因为 `changes` 要的是"改前"），再应用 */
@@ -3997,6 +4026,169 @@ mod tests {
         assert!(
             super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
             "保存之后影子与真源一致，框里回空"
+        );
+    }
+
+    /// **一趟「设值 → 跟随基线」= 0 处未保存**（作者 2026-11-09 报的那一幕）。
+    ///
+    /// 9 列批量设 1.2、再整批跟随基线回到 1.0：影子树与盘上一个字节都不差，
+    /// 页头就必须是 0。以前每一笔各自算「变了」，写着「未保存 9」，
+    /// 点进「查看改动」却什么都没有 —— 计数与 diff 同屏两个相反结论。
+    #[test]
+    fn a_follow_round_trip_cancels_the_unsaved_count() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        /* patch 的 `owner` 是版本 uid（斜杠）；`machineVariants` 的叫法是冒号 */
+        let uid = "A1/STANDARD";
+        let at = "A1:STANDARD";
+        let key = "wiping.child";
+        let base = {
+            let inherited = ctx
+                .presets
+                .registry
+                .inherited_value_for(key, at)
+                .expect("这一项有继承值");
+            let p = ctx.presets.registry.param(key).expect("wiping.child");
+            crate::workbench::domain::wording::value_text(p, &inherited)
+        };
+
+        let mut entries: Vec<edit_history::Entry> = Vec::new();
+        for (round, value) in [Some(serde_json::json!(1.2)), None].into_iter().enumerate() {
+            let one = Patch::SetValue {
+                level: Level::Version,
+                owner: uid.to_owned(),
+                key: key.to_owned(),
+                value,
+            };
+            let mut d = Draft::default();
+            crate::workbench::domain::patch::apply(
+                &mut d,
+                &ctx.committed,
+                &ctx.presets.registry,
+                std::slice::from_ref(&one),
+            )
+            .unwrap();
+            let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &d);
+            entries.push(edit_history::Entry {
+                label: "批量".to_owned(),
+                action: edit_history::Action::Value {
+                    patch: one,
+                    inverse: Vec::new(),
+                },
+                merge_key: None,
+                at: std::time::Instant::now(),
+                fields: value_field_entries(&ctx, &staged.changes),
+            });
+            storage::stage_into(&mut ctx.presets, &staged).unwrap();
+            if round == 0 {
+                assert_eq!(
+                    edit_history::dirty_fields(&entries),
+                    1,
+                    "只走一半 ⇒ 实打实 1 处：{entries:?}"
+                );
+            }
+        }
+        assert_eq!(
+            edit_history::dirty_fields(&entries),
+            0,
+            "设成 1.2 再跟回 {base} 必须净零：{entries:?}"
+        );
+        assert!(
+            super::shadow_diff_in(&mut ctx).unwrap().files.is_empty(),
+            "净零时影子树与盘上逐字节相同"
+        );
+    }
+
+    /// **一批里连基线一起改 ⇒ 版本写「跟随」，结果同值**（作者 2026-11-09）。
+    ///
+    /// 前端在 `followsBase` 时给版本发 `value: null`（跟随），基线发新值。
+    /// 两条同一个手势：基线成了 1.2，跟随它的版本也必须是 1.2，
+    /// 而且状态仍是"跟随"（不是各钉一份）。
+    #[test]
+    fn a_batch_that_writes_the_base_leaves_versions_following() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        let key = "wiping.child";
+        let mut d = Draft::default();
+        crate::workbench::domain::patch::apply(
+            &mut d,
+            &ctx.committed,
+            &ctx.presets.registry,
+            &[
+                Patch::SetValue {
+                    level: Level::Machine,
+                    owner: "A1".to_owned(),
+                    key: key.to_owned(),
+                    value: Some(serde_json::json!(1.2)),
+                },
+                Patch::SetValue {
+                    level: Level::Version,
+                    owner: "A1/STANDARD".to_owned(),
+                    key: key.to_owned(),
+                    value: None,
+                },
+            ],
+        )
+        .unwrap();
+        let staged = storage::stage_value_edits(&ctx.presets, &ctx.committed, &d);
+        storage::stage_into(&mut ctx.presets, &staged).unwrap();
+
+        let p = ctx.presets.registry.param(key).expect("wiping.child");
+        assert_eq!(
+            p.machine_variants.get("A1"),
+            Some(&serde_json::json!(1.2)),
+            "基线写进去了"
+        );
+        assert!(
+            crate::presetdata::follows::is_following(p, "A1:STANDARD"),
+            "版本仍是跟随，不是自己钉一份"
+        );
+        let effective = p
+            .machine_variants
+            .get("A1:STANDARD")
+            .cloned()
+            .unwrap_or_else(|| p.machine_variants["A1"].clone());
+        assert_eq!(effective, serde_json::json!(1.2), "跟随后的值 = 基线的新值");
+    }
+
+    /// **「撤销这一笔（N 处）」报的必须是撤销真会弹掉的那一条**（作者 2026-11-09）。
+    ///
+    /// 批量一次改多格 = 历史里一条；`top_op` 的 `fields` 就是它改了几处。
+    #[test]
+    fn top_op_reports_the_entry_undo_would_pop() {
+        let ((_d, _f), _fx, mut ctx) = ctx();
+        let cell = |owner: &str| txn::FieldEntry {
+            level: Some("Version".to_owned()),
+            owner: owner.to_owned(),
+            key: "wiping.child".to_owned(),
+            label: "塔位置 X".to_owned(),
+            before: Some("1.0".to_owned()),
+            after: Some("1.2".to_owned()),
+            why: "user",
+        };
+        ctx.history.record(
+            "擦料塔首层流量 批量设为 1.2（2 列）".to_owned(),
+            None,
+            Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(1.2)),
+            },
+            /* 逆命令非空才占栈（`record` 的第一道闸） */
+            vec![Patch::SetValue {
+                level: Level::Version,
+                owner: "A1/STANDARD".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(1.0)),
+            }],
+            vec![cell("A1:STANDARD"), cell("A1:FAST")],
+        );
+
+        let top = ctx.txn_state().top_op.expect("有一笔可撤销");
+        assert_eq!(top.fields, 2, "这一笔改了两处");
+        assert!(
+            top.label.contains("批量设为"),
+            "标签要带得走：{}",
+            top.label
         );
     }
 
@@ -5414,12 +5606,12 @@ mod tests {
 
         let lines = diff_draft(&ctx);
         assert_eq!(lines.len(), 2, "两处改动两行：{lines:#?}");
-        assert_eq!(lines[0].target, "A1 · 机型基底");
+        assert_eq!(lines[0].target, "A1 · 机型基线");
         assert_eq!(lines[1].target, "A1 · 标准版", "版本归属要翻成人话");
         assert_eq!(lines[1].why, "promoted", "连带项的来源要带到界面上");
-        /* 2026-11-03：`promoted` 与继承统一成「随基底生效」—— 界面不再区分
+        /* 2026-11-03：`promoted` 与继承统一成「随基线生效」—— 界面不再区分
         "我们写没写版本键"，那是存储细节 */
-        assert_eq!(lines[1].kind, "改值（随基底）");
+        assert_eq!(lines[1].kind, "改值（随基线）");
         assert_eq!(lines[1].before, "-1");
         assert_eq!(lines[1].after, "7");
         assert!(lines.iter().all(|l| l.file == VALUE_FILE));

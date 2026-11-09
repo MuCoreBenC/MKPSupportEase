@@ -423,13 +423,13 @@ mod tests {
         assert_eq!(v["build"]["stale"]["label"], "待更新");
         assert!(v["build"]["stale"]["explain"].is_string());
         assert_eq!(v["origin"]["machine"]["label"], "机型");
-        assert_eq!(v["level"]["machine"]["label"], "机型基底");
+        assert_eq!(v["level"]["machine"]["label"], "机型基线");
         assert_eq!(v["placeholder"]["blank"], "空");
         // `save` 这一档没有解释句 —— 为 null 而不是空串，前端才好判
         assert!(v["save"]["saved"]["explain"].is_null());
         // 参数台只有两档：跟不跟随（2026-11-02 作者定稿）。
         // 「出厂默认 / 机型默认 / 本版修改」那三分已退役 —— 它们答的是"值从哪来"
-        assert_eq!(v["paramStatus"]["follow"]["label"], "跟随基底");
+        assert_eq!(v["paramStatus"]["follow"]["label"], "跟随基线");
         assert_eq!(v["paramStatus"]["own"]["label"], "不跟随");
         assert!(
             v["paramStatus"]["dirty"].is_null(),

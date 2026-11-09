@@ -10,6 +10,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+/// 日志保留几份（按天滚动 ⇒ 约 `KEEP_DAYS` 天）。超出的由 `tracing-appender` 自己删。
+const KEEP_DAYS: usize = 14;
+
 /// 新的 trace id。
 ///
 /// uuid v7 而不是 v4：前 48 位是毫秒时间戳，于是"按 id 字典序排"就等于"按时间排"，
@@ -35,13 +38,27 @@ pub fn init_tracing(log_dir: &Path) {
 
     let file_layer = match std::fs::create_dir_all(log_dir) {
         Ok(()) => {
-            // 按天滚动：一天一个文件，文件名形如 supportease.log.2026-09-21
-            let appender = tracing_appender::rolling::daily(log_dir, "supportease.log");
-            Some(
-                tracing_subscriber::fmt::layer()
-                    .with_ansi(false)
-                    .with_writer(appender),
-            )
+            /* 按天滚动：一天一个文件，文件名形如 supportease.log.2026-09-21。
+             *
+             * **最多留 `KEEP_DAYS` 份**（作者 2026-11-09：日志没有上限，长会话一天几十 MB）。
+             * `tracing-appender` 只支持按份数保留，不支持按大小切 —— 份数就是保留期。
+             */
+            match tracing_appender::rolling::RollingFileAppender::builder()
+                .rotation(tracing_appender::rolling::Rotation::DAILY)
+                .filename_prefix("supportease.log")
+                .max_log_files(KEEP_DAYS)
+                .build(log_dir)
+            {
+                Ok(appender) => Some(
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_writer(appender),
+                ),
+                Err(e) => {
+                    eprintln!("[tracing] 日志文件建不出来，退到只写 stderr：{log_dir:?} {e}");
+                    None
+                }
+            }
         }
         Err(e) => {
             eprintln!("[tracing] 日志目录建不出来，退到只写 stderr：{log_dir:?} {e}");

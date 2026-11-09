@@ -62,7 +62,7 @@
  * 客户端根本不读，而且它的路径（`presets/mkp/…`）与真实发布契约（`catalog.path`）
  * 已经冲突 —— 留着只会让人误以为那种路径还合法。**没有迁移成兼容结构。**
  */
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { isAppError, wb } from '../api'
 import type {
@@ -413,20 +413,28 @@ export default function BuildPage({
       .catch(() => setAppVersion(null))
   }, [])
 
+  /**
+   * 重取交付读数（①卡那 9 行 / 「发布凭据」/「N 组有变化」）。
+   *
+   * 生成、发布、**更新发布凭据**都会改盘上的交付文件，这一排必须跟着重算 ——
+   * 作者 2026-11-09 报的「交付检查框里写着就绪，外面还挂着已失效（8 条）」
+   * 就是更新凭据之后只换了框里那份、没换外面这一份。
+   */
+  const reloadDeliveries = useCallback(async () => {
+    try {
+      setDeliveries(await wb.deliveryFiles())
+      setDeliveryError(null)
+    } catch (e: unknown) {
+      setDeliveries(null)
+      setDeliveryError(isAppError(e) ? e.message : String(e))
+    }
+  }, [])
+
   /* 交付读数：进页取一次；生成 / 发布之后（tick）重取 —— 那时盘上的存在与否、目录登记都会变。
      窗口 focus 那一路由外壳 +1 tick（2026-10-19）：外面改了 3MF，切回来这里就跟着重算。 */
   useEffect(() => {
-    void wb
-      .deliveryFiles()
-      .then((s) => {
-        setDeliveries(s)
-        setDeliveryError(null)
-      })
-      .catch((e: unknown) => {
-        setDeliveries(null)
-        setDeliveryError(isAppError(e) ? e.message : String(e))
-      })
-  }, [tick])
+    void reloadDeliveries()
+  }, [tick, reloadDeliveries])
 
   /*
    * 「去处理」的定位（C14 第二十四轮）：滚动到目标模块 + 闪烁两秒。
@@ -547,23 +555,41 @@ export default function BuildPage({
    * 与 `openGenerate` / `openDeliveryList` 不同，它**不先保存草稿** —— 交付检查看的是
    * 盘上已生成的交付文件，与草稿无关；为了看一眼就把草稿写进仓库是副作用。
    */
-  const loadFinalize = async () => {
-    setFinalizePreview(null)
-    setFinalizeErr(null)
-    setFinalizeBusy(true)
-    try {
-      setFinalizePreview(await wb.finalizePreview())
-    } catch (e) {
-      setFinalizeErr(isAppError(e) ? e.message : String(e))
-    } finally {
-      setFinalizeBusy(false)
-    }
-  }
+  const loadFinalize = useCallback(
+    async (quiet = false) => {
+      if (!quiet) {
+        setFinalizePreview(null)
+        setFinalizeErr(null)
+      }
+      setFinalizeBusy(true)
+      try {
+        setFinalizePreview(await wb.finalizePreview())
+        setFinalizeErr(null)
+      } catch (e) {
+        setFinalizeErr(isAppError(e) ? e.message : String(e))
+      } finally {
+        setFinalizeBusy(false)
+      }
+      /* 框里与外面那排读的是同一批交付文件 —— 一边重查了，另一边必须跟上。
+         少了这一句，交付检查说「就绪」、外面还挂着「已失效（8 条）」。 */
+      void reloadDeliveries()
+    },
+    [reloadDeliveries],
+  )
 
   const openFinalize = () => {
     setFinalizeOpen(true)
     void loadFinalize()
   }
+
+  /* 交付检查框开着时，生成 / 发布会改盘上的交付文件 —— 框里的结论要跟着重算，
+     否则外面已经「已失效」，框里还写着「交付就绪」 */
+  const finalizeOpenRef = useRef(false)
+  finalizeOpenRef.current = finalizeOpen
+  useEffect(() => {
+    if (!finalizeOpenRef.current) return
+    void loadFinalize(true)
+  }, [tick, loadFinalize])
 
   /**
    * 「更新发布凭据」：只重写 `manifest.json`（后端整笔校验，集合没收敛就拒绝）。
@@ -576,6 +602,8 @@ export default function BuildPage({
       const r = await wb.updatePublishCredentials()
       setFinalizePreview(r.preview)
       setFinalizeErr(null)
+      /* 凭据已经写进盘上的 manifest —— 外面那排「发布凭据：已失效（N 条）」必须同一趟换掉 */
+      void reloadDeliveries()
       toasts.push(
         r.written
           ? `已更新发布凭据：${r.changed} 条登记按盘上真字节重算（共 ${r.entries} 条）`

@@ -1156,6 +1156,18 @@ impl Txn {
         out
     }
 
+    /// **撤销栈顶那一条**：标签 + 它改了几处字段（与 `history::History::top_op` 同一形状）。
+    ///
+    /// `recovered` 那条合成 op 没有逐条字段（它是"影子树里有一笔说不清的改动"），
+    /// 记 0 处照实说不出来。
+    pub fn undo_top(&self) -> Option<(String, usize)> {
+        if self.recovered {
+            return Some(("上次会话未保存的改动".to_owned(), 0));
+        }
+        let p = self.payloads.last()?;
+        Some((p.label.clone(), p.fields.len()))
+    }
+
     /// **唯一统计来源**：所有 payload 的字段变化并集（去重键 `层, 归属, 键`）。
     ///
     /// 作者 2026-11-03：「你要是做这个，就把事务本身当唯一数据源」——

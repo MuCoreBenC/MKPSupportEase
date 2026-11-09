@@ -76,10 +76,10 @@ const WORDS: Json = {
   },
   origin: {
     factory: { label: '出厂', explain: '注册表里的默认值，全机型共用' },
-    machine: { label: '机型', explain: '这台机器的基底，没自己写过的版本都跟着它' },
+    machine: { label: '机型', explain: '这台机器的基线，没自己写过的版本都跟着它' },
     version: { label: '版本', explain: '这个版本自己钉着的值' },
   },
-  level: { machine: { label: '机型基底', explain: null }, version: { label: '版本', explain: null } },
+  level: { machine: { label: '机型基线', explain: null }, version: { label: '版本', explain: null } },
   visibility: {
     menu: { label: '菜单可见', explain: '客户端的菜单里能看到、能下载' },
     archiveOnly: { label: '仅归档', explain: '文件在仓库里，但客户端看不到' },
@@ -128,14 +128,14 @@ const WORDS: Json = {
     pending: { label: '待落盘', explain: '刚改的还在内存里，停手 2 秒后会写一次快照' },
     failed: { label: '快照写不进去', explain: '快照写不进去，这会儿崩了会丢掉未保存的改动。改动本身没受影响' },
   },
-  /* 与后端 `words.rs` 的 `param_status` 同一副两档：徽章只说"跟不跟基底"，
+  /* 与后端 `words.rs` 的 `param_status` 同一副两档：徽章只说"跟不跟基线"，
   「改了还没保存」由还原按钮与右上角「未保存 N」表达（`app/words.rs` 有断言拦这一条） */
   paramStatus: {
     follow: {
-      label: '跟随基底',
-      explain: '这一层没有自己的值，用的是基底的；基底以后改了它跟着改',
+      label: '跟随基线',
+      explain: '这一层没有自己的值，用的是基线的；基线以后改了它跟着改',
     },
-    own: { label: '不跟随', explain: '这一层自己写了值；基底以后怎么改都不影响它' },
+    own: { label: '不跟随', explain: '这一层自己写了值；基线以后怎么改都不影响它' },
   },
   /* 三档检查标签，与后端 `Severity::label()` / `explain()` 逐字一致 */
   severity: {
@@ -152,9 +152,9 @@ const WORDS: Json = {
     explain: '这一档放开的参数已经全部弃用 —— 选它不会带来任何还改得动的东西',
   },
   matrixRow: {
-    notOwn: { label: '本机无此项', explain: '这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比' },
-    diff: { label: '差异', explain: '有勾选列的值与机型基底不同 —— 绿底的那几格就是' },
-    same: { label: '一致', explain: '勾选列的值都与机型基底一致' },
+    notOwn: { label: '本机无此项', explain: '这一行是别的机型的参数，这台对比机型没有 —— 没有基线可比' },
+    diff: { label: '差异', explain: '有勾选列的值与机型基线不同 —— 绿底的那几格就是' },
+    same: { label: '一致', explain: '勾选列的值都与机型基线一致' },
   },
 }
 
@@ -1431,7 +1431,7 @@ function rowOf(machineId: string, uid: string | null, pdef: FixtureParam): Json 
 
 function buildDesk(machineId: string, uid: string | null, tab: string | null, query: string): Json {
   const cols = [
-    { key: machineId, machineId, versionUid: null, level: 'machine', machine: 'A1', label: '机型基底', items: Object.keys(atRest.base[machineId] ?? {}).length },
+    { key: machineId, machineId, versionUid: null, level: 'machine', machine: 'A1', label: '机型基线', items: Object.keys(atRest.base[machineId] ?? {}).length },
     ...MACHINES[0]!.versions.map((v) => ({
       key: v.uid, machineId, versionUid: v.uid, level: 'version', machine: 'A1',
       label: v.name, items: Object.keys(atRest.over[v.uid] ?? {}).length,
@@ -1536,7 +1536,7 @@ function buildMatrix(
       versionUid: uid,
       level: uid === null ? 'machine' : 'version',
       machine: m?.display ?? c.machineId,
-      label: uid === null ? '机型基底' : (v?.name ?? uid),
+      label: uid === null ? '机型基线' : (v?.name ?? uid),
       items: Object.keys(uid === null ? (atRest.base[c.machineId] ?? {}) : (atRest.over[uid] ?? {})).length,
     }
   })
@@ -1564,7 +1564,7 @@ function buildMatrix(
       const differs = bt !== null && !isBaseCol && cell.text !== bt
       if (differs) {
         cell.differs = true
-        cell.diffTip = `机型基底是 ${bt}`
+        cell.diffTip = `机型基线是 ${bt}`
       }
       return cell
     })
@@ -1599,10 +1599,16 @@ function previewBulkOf(key: string, value: unknown, cols: { machineId: string; v
     skipped: [] as Json[],
   }
   if (!out.allowed) return out
+  /* 这一批里**基线也会被写**的机型 —— 它们的版本列改成跟随基线 */
+  const baseWritten = new Set(
+    cols
+      .filter((c) => c.versionUid === null && blockedOf(c.machineId, null, pdef).length === 0)
+      .map((c) => c.machineId),
+  )
   for (const c of cols) {
     const m = MACHINES.find((x) => x.id === c.machineId)
     const v = m?.versions.find((x) => x.uid === c.versionUid) ?? null
-    const label = v ? v.name : '机型基底'
+    const label = v ? v.name : '机型基线'
     const blocked = blockedOf(c.machineId, c.versionUid, pdef)
     if (blocked.length > 0) {
       ;(out.skipped as Json[]).push({
@@ -1614,10 +1620,11 @@ function previewBulkOf(key: string, value: unknown, cols: { machineId: string; v
     const hit = effective(c.machineId, c.versionUid, key)
     const hadOwn = hit?.origin === (c.versionUid === null ? 'machine' : 'version')
     const kind = hit && String(hit.value) === String(value) ? 'noChange' : hadOwn ? 'changing' : 'detaching'
-    /* 基线 = 该机型基底当前的值；与要写的值相同 ⇒ 这一列可以「保持跟随」 */
+    /* 基线 = 该机型基线当前的值；与要写的值相同 ⇒ 跟随基线不写死 */
     const baseHit = effective(c.machineId, null, key)
     const sameAsBase =
       c.versionUid !== null && baseHit != null && String(baseHit.value) === String(value)
+    const followsBase = c.versionUid !== null && baseWritten.has(c.machineId)
     ;(out.effects as Json[]).push({
       col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
       level: c.versionUid === null ? 'machine' : 'version',
@@ -1626,6 +1633,7 @@ function previewBulkOf(key: string, value: unknown, cols: { machineId: string; v
       kind,
       base: baseHit ? valueText(pdef, baseHit.value) : '不适用',
       sameAsBase,
+      followsBase,
     })
   }
   return out
@@ -1649,7 +1657,7 @@ function previewAttachOf(key: string, cols: { machineId: string; versionUid: str
   for (const c of cols) {
     const m = MACHINES.find((x) => x.id === c.machineId)
     const v = m?.versions.find((x) => x.uid === c.versionUid) ?? null
-    const label = v ? v.name : '机型基底'
+    const label = v ? v.name : '机型基线'
     const blocked = blockedOf(c.machineId, c.versionUid, pdef)
     if (blocked.length > 0) {
       ;(out.skipped as Json[]).push({
@@ -1658,19 +1666,28 @@ function previewAttachOf(key: string, cols: { machineId: string; versionUid: str
       })
       continue
     }
-    const hit = effective(c.machineId, c.versionUid, key)
-    const hadOwn = hit?.origin === (c.versionUid === null ? 'machine' : 'version')
-    if (!hadOwn) {
+    /* 机型基线是这条链的根 —— 它没有「跟随」可言 */
+    if (c.versionUid === null) {
       ;(out.skipped as Json[]).push({
-        col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
-        reason: '这一层没有单独设过这一项，本来就是继承来的', blocked: [],
+        col: c.machineId, machine: m?.display ?? c.machineId, label,
+        reason: '机型基线是这条链的根，没有「跟随」可言', blocked: [],
       })
       continue
     }
+    const hit = effective(c.machineId, c.versionUid, key)
+    const following = hit?.origin !== 'version'
+    /* 挂回之后拿到的是基线（该机型基线的值，基线也没有就是出厂默认）——
+       与 `previewBulkOf` 的 `base` 同一处，两个预览不能各说一个数 */
+    const baseHit = effective(c.machineId, null, key)
+    const inherited = baseHit?.value ?? pdef.defaultValue
+    /* 已在跟随的列**也列出来**：要让人看见基线值是多少（作者 2026-11-09） */
     ;(out.effects as Json[]).push({
-      col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
-      level: c.versionUid === null ? 'machine' : 'version',
+      col: c.versionUid, machine: m?.display ?? c.machineId, label,
+      level: 'version',
       before: hit ? valueText(pdef, hit.value) : '不适用',
+      after: valueText(pdef, inherited),
+      following,
+      changes: !following && (hit == null || String(hit.value) !== String(inherited)),
     })
   }
   return out
@@ -3055,6 +3072,9 @@ export function installMockBackend() {
           canUndo: false,
           canRedo: false,
           ops: [],
+          /* 桩里没有撤销栈 ⇒ 没有"这一笔" */
+          topOp: null,
+          receipt: null,
         })
       case 'wb_diff_draft':
         return Promise.resolve(mockFields)

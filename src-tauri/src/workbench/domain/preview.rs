@@ -17,6 +17,8 @@
 //!
 //! G-code **拒绝批量**：一段多行脚本被整体盖掉是不可逆的误操作。
 
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 use serde_json::Value;
 
@@ -53,16 +55,26 @@ pub struct BulkEffect {
     pub before: String,
     pub after: String,
     pub kind: BulkKind,
-    /// 这一列所属机型**基底的当前值**（人话）。版本列写它 = 与基线同值
+    /// 这一列所属机型**基线的当前值**（人话）。版本列写它 = 与基线同值
     pub base: String,
     /**
      * 要写的值是否**恰好等于基线**。
      *
      * 是的话这一列不必各自钉住：写 `null` 让它**保持跟随**，值一样、还少一行
-     * `machineVariants` + 一行 `follows`（作者 2026-11-09 要的那颗按钮）。
-     * 只有版本列才有这个选择 —— 机型基底是这条链的根。
+     * `machineVariants` + 一行 `follows`（作者 2026-11-09 要的就是这个默认行为）。
+     * 只有版本列才有这个选择 —— 机型基线是这条链的根。
      */
     pub same_as_base: bool,
+    /**
+     * 这一列的机型基线**也在这一批里**（且真的会被写）。
+     *
+     * 那时版本列整列跟着基线走：写 `null`，值由基线带过去 —— 一批里若把
+     * 基线设成 1.2，跟随它的版本结果也是 1.2，文件里不会再给每个版本各留一行
+     * 1.2（作者 2026-11-09：「都是同样的值的时候，它完全可以跟随基线」）。
+     *
+     * 机型基线自己恒 `false`：它是这条链的根。
+     */
+    pub follows_base: bool,
 }
 
 /// 这一列落下去属于哪一类改动
@@ -109,9 +121,13 @@ pub struct AttachPreview {
     /// 能不能批量（G-code 不行，与 [`BulkPreview`] 同一条闸）
     pub allowed: bool,
     pub blocked_reason: Option<String>,
-    /// 真的会挂回跟随的列。**「N 列」数的是这个**
+    /// 勾选里的**每一列版本**（适用的、没被条件关着的），含本来就在跟随的。
+    ///
+    /// 把"已在跟随"也列出来是因为**基线值要看得见**：作者 2026-11-09
+    /// 「跟随基线，它这个默认就要把基线显示出来」——只列"要改的"那几列时，
+    /// 全部已在跟随就只剩 9 行「本来就是继承来的」，一个数字都没有。
     pub effects: Vec<AttachEffect>,
-    /// 跳过（不适用 / 被条件关着 / 本来就在跟随），附原因
+    /// 跳过（不适用 / 被条件关着 / 机型基线是根），附原因
     pub skipped: Vec<BulkSkip>,
 }
 
@@ -123,8 +139,20 @@ pub struct AttachEffect {
     pub machine: String,
     pub label: String,
     pub level: Level,
-    /// 这一层现在钉着的值（人话）—— 删掉它之后这一层改跟基底
+    /// 这一层现在的值（人话）。本来就在跟随的，这里就是它跟随到的基线值
     pub before: String,
+    /// 挂回之后这一层**显示的值** = 这一层不钉时继承到的那个（机型基线 → 出厂默认）。
+    ///
+    /// 与 [`BulkEffect::base`] 同一处取值（`Layers::inherited_value`）：两种预览
+    /// 对"基线是多少"必须说同一个数。
+    pub after: String,
+    /// 这一层**本来就在跟随**（写下去是空操作，只是把基线值摊出来）
+    pub following: bool,
+    /// 挂回去**值会不会变**（归一化后的 `Value` 比较，不比格式化文本）。
+    ///
+    /// 界面上「值会变 / 值不变」只认它 —— 值不变的那些只是把状态改成跟随，
+    /// 不该被说成"从 1.2 改成了 1.2"那样的假变化。
+    pub changes: bool,
 }
 
 impl Book<'_> {
@@ -162,9 +190,38 @@ impl Book<'_> {
             return out;
         }
 
+        let matrix = self.matrix(cols, None, "", None);
+
+        /*
+         * 这一批里**机型基线也会被写**的那些机型。
+         *
+         * 基线写进去之后，跟着它的版本自动变成同一个值 —— 那些版本列就不必
+         * 各写一行相同的数（作者 2026-11-09：「都是同样的值的时候，它完全可以
+         * 跟随基线」）。判据与下面正文同一套：适用 + 没被条件关着。
+         */
+        let mut base_written: BTreeSet<String> = BTreeSet::new();
+        for col in &matrix.cols {
+            if col.level != Level::Machine {
+                continue;
+            }
+            let Some(layers) = self.machine_layers(&col.machine_id) else {
+                continue;
+            };
+            if !layers.applies(key) {
+                continue;
+            }
+            if !Gate::new(&self.presets.registry, &layers)
+                .blocked(key)
+                .is_empty()
+            {
+                continue;
+            }
+            base_written.insert(col.machine_id.clone());
+        }
+
         // 列序照配方本，与矩阵同一条规则：预览里的顺序要和表里的一致，
         // 否则用户得在两份不同顺序的清单之间对照
-        for col in self.matrix(cols, None, "", None).cols {
+        for col in matrix.cols {
             let machine = col.machine.clone();
             let layers = match col.level {
                 Level::Machine => self.machine_layers(&col.machine_id),
@@ -217,6 +274,8 @@ impl Book<'_> {
                 .map(|v| normalize_value(&self.presets.registry, key, v));
             let same_as_base =
                 col.level == Level::Version && inherited.as_ref().is_some_and(|b| b == value);
+            let follows_base =
+                col.level == Level::Version && base_written.contains(&col.machine_id);
             out.effects.push(BulkEffect {
                 col: col.key.clone(),
                 machine,
@@ -231,18 +290,20 @@ impl Book<'_> {
                     .map(|b| w::value_text(p, &b))
                     .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
                 same_as_base,
+                follows_base,
             });
         }
         out
     }
 
-    /// **把这些列挂回跟随**会落到哪几列（写 `null` = 删掉那一层自己写的值）。
+    /// **把这些列挂回跟随**会落到哪几列（写 `null` = 让这一层重新跟着基线）。
     ///
     /// 与 [`Self::preview_bulk`] 是同一个问题的另一半：那个答"设成这个值会发生什么"，
-    /// 这个答"让它重新跟着基底会发生什么"。跳过判据完全一致（不适用 / 被条件关着），
-    /// 只多一档：这一层**本来就在跟随**时写下去没有变化。
+    /// 这个答"让它重新跟着基线会发生什么"。跳过判据完全一致（不适用 / 被条件关着 /
+    /// 机型基线是根），但**本来就在跟随的版本也列进 `effects`**：预览要能把基线值
+    /// 摊给人看，而不是"9 行本来就是继承来的、一个数字都没有"。
     ///
-    /// 为什么要预览而不能直接写：批量一次动十几列，删掉的键是"这一层自己钉住的值"，
+    /// 为什么要预览而不能直接写：批量一次动十几列，改的是"这一层自己钉住的状态"，
     /// 与写入一样是不可逆的误操作面 —— 先看清哪几列真的会变，再点。
     pub fn preview_attach(&self, key: &str, cols: &[ColRef]) -> AttachPreview {
         let Some(p) = self.presets.registry.param(key) else {
@@ -330,28 +391,34 @@ impl Book<'_> {
                     self.version_following(owner, key)
                 }
             };
-            if following {
-                out.skipped.push(BulkSkip {
-                    col: col.key.clone(),
-                    machine,
-                    label: col.label.clone(),
-                    reason: w::disabled::DETACH_NOTHING_TO_DETACH.to_owned(),
-                    blocked: Vec::new(),
-                });
-                continue;
-            }
 
             let before = layers
                 .effective(key)
                 .map(|b| normalize_value(&self.presets.registry, key, b.value));
+            /* 挂回之后拿到的就是继承值 —— 与 `preview_bulk` 的 `base` 同一处，
+            两边各取一次的话「设成基线」与「跟随基线」会报出两个不同的数。 */
+            let inherited = layers
+                .inherited_value(col.level, key)
+                .map(|v| normalize_value(&self.presets.registry, key, v));
+            /* 已在跟随的列**也列出来**：要让人看见基线值是多少（作者 2026-11-09
+            「它这个默认就要把基线显示出来」）。它写下去是空操作，`changes` 恒 false。 */
             out.effects.push(AttachEffect {
                 col: col.key.clone(),
                 machine,
                 label: col.label.clone(),
                 level: col.level,
                 before: before
+                    .clone()
                     .map(|b| w::value_text(p, &b))
                     .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
+                after: inherited
+                    .clone()
+                    .map(|b| w::value_text(p, &b))
+                    .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
+                following,
+                /* 归一化后的 `Value` 相比：`1` 与 `1.0` 是同一个数，不许被
+                格式化文本的差别说成"值会变" */
+                changes: !following && before != inherited,
             });
         }
         out
@@ -479,6 +546,49 @@ mod tests {
         assert!(!miss.effects[0].same_as_base, "67 不等于基线，必须自己钉住");
     }
 
+    /// **基线也在这一批里 ⇒ 版本列写「跟随基线」**（作者 2026-11-09）。
+    ///
+    /// 「基线设成 1.2，跟随它的版本结果也是 1.2」—— 不必给每个版本各写一行 1.2。
+    /// 只勾版本、没勾基线时不能这么判：那时版本没有可跟的新值。
+    #[test]
+    fn a_batch_that_writes_the_base_lets_versions_follow_it() {
+        let f = Fixture::load();
+        let c = committed();
+        let d = Draft::default();
+        let b = super::super::Book::new(&f.presets, &c, &d);
+
+        let with_base = b.preview_bulk(
+            "wiping.child",
+            &serde_json::json!(42),
+            &cols(&[("A1", None), ("A1", Some("A1/STANDARD"))]),
+        );
+        let base = with_base
+            .effects
+            .iter()
+            .find(|e| e.level == Level::Machine)
+            .expect("机型基线在列表里");
+        assert!(!base.follows_base, "基线自己是根，谈不上跟随");
+        let ver = with_base
+            .effects
+            .iter()
+            .find(|e| e.level == Level::Version)
+            .expect("版本列在列表里");
+        assert!(
+            ver.follows_base,
+            "基线也在这一批里 ⇒ 版本跟着基线走：{ver:?}"
+        );
+        /* 预览里两列写的是同一个新值 —— 结果就是"基线 42、版本跟着 42" */
+        assert_eq!(ver.after, base.after, "版本跟随后的值 = 基线的新值");
+
+        /* 只勾版本：没有新的基线可跟，必须自己钉住 */
+        let only_version = b.preview_bulk(
+            "wiping.child",
+            &serde_json::json!(42),
+            &cols(&[("A1", Some("A1/STANDARD"))]),
+        );
+        assert!(!only_version.effects[0].follows_base);
+    }
+
     /// **「跟随基线」只列「不跟随」的版本列**：判据是 `[params.follows]`，不是 `has_own`。
     ///
     /// 关键反例（作者 2026-11-08 报的）：同一机型每个版本都写了同一个值时，`digest`
@@ -515,20 +625,64 @@ mod tests {
         let hit: Vec<&str> = out.effects.iter().map(|e| e.col.as_str()).collect();
         assert_eq!(
             hit,
-            vec!["P1S/LITE"],
-            "只有不跟随的那一列会挂回基底：{:?}",
-            out.skipped
-        );
-        assert!(
-            out.skipped.iter().any(|s| s.reason.contains("继承")),
-            "本来就跟着的列要说清原因：{:?}",
+            vec!["A1/STANDARD", "P1S/LITE"],
+            "版本列都列出来（含已在跟随的），基线值才看得见：{:?}",
             out.skipped
         );
         assert!(
             out.skipped.iter().any(|s| s.reason.contains("根")),
-            "机型基底要单独说清它没有跟随：{:?}",
+            "机型基线要单独说清它没有跟随：{:?}",
             out.skipped
         );
+        /* 已在跟随的列也摊值：不然"全部已跟随"时预览里一个数字都没有 */
+        let follow = out
+            .effects
+            .iter()
+            .find(|e| e.col == "A1/STANDARD")
+            .expect("A1/STANDARD 在列表里");
+        assert!(follow.following, "它本来就在跟随");
+        assert!(!follow.changes, "已在跟随 ⇒ 值不变");
+        assert_eq!(follow.before, follow.after, "前后都写基线值");
+
+        /* 挂回之后的值必须摊给界面：只有 `before` 的话，人看到的是
+        「1.2 → 跟随基线」，不知道值会变成多少（作者 2026-11-09 报的）。 */
+        let p = f
+            .presets
+            .registry
+            .param("wiping.child")
+            .expect("wiping.child");
+        let e = out
+            .effects
+            .iter()
+            .find(|e| e.col == "P1S/LITE")
+            .expect("P1S/LITE 在列表里");
+        assert_eq!(
+            e.after,
+            w::value_text(p, &serde_json::json!(20.0)),
+            "跟随之后拿到的是基线（出厂默认 20）"
+        );
+        assert!(!e.following, "它自己钉着 66");
+        assert!(e.changes, "66 → 20 是值会变");
+    }
+
+    /// 挂回时**值不变**的列要如实说「值不变」（只翻状态）。
+    ///
+    /// 「自己钉着一个与基底相同的数」也是不跟随：挂回会把这一行去掉，
+    /// 但值从头到尾没变 —— 界面不能把它说成"值从 20 变成 20"。
+    #[test]
+    fn attach_marks_columns_whose_value_does_not_change() {
+        let mut f = Fixture::load();
+        let c = committed();
+        f.presets
+            .set_variant("wiping.child", "P1S:LITE", &serde_json::json!(20.0))
+            .unwrap();
+        let d = Draft::default();
+        let b = super::super::Book::new(&f.presets, &c, &d);
+
+        let out = b.preview_attach("wiping.child", &cols(&[("P1S", Some("P1S/LITE"))]));
+        let e = out.effects.first().expect("钉住的那一列会挂回");
+        assert!(!e.changes, "20 → 20 是值不变：{e:?}");
+        assert_eq!(e.before, e.after, "前后值同一个数");
     }
 
     /// 不适用的列也跳过，理由与"被关着"不同

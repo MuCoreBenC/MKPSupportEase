@@ -2746,7 +2746,7 @@ mod tests {
         assert_eq!(m.cols.len(), 1);
         assert_eq!(m.cols[0].level, Level::Machine);
         assert_eq!(m.cols[0].version_uid, None);
-        assert_eq!(m.cols[0].label, "机型基底");
+        assert_eq!(m.cols[0].label, "机型基线");
     }
 
     /// **行取并集不取交集**：只有 P1S 有的那一项，在勾了 P1S 时不该消失
@@ -3139,7 +3139,7 @@ mod tests {
         );
         let tip = row.cells[1].diff_tip.as_deref().expect("差异格要有悬停句");
         assert!(
-            tip.starts_with("机型基底是 ") && tip.ends_with("0 mm"),
+            tip.starts_with("机型基线是 ") && tip.ends_with("0 mm"),
             "悬停句说基准值：{tip}"
         );
 

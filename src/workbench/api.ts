@@ -716,13 +716,18 @@ export interface BulkEffect {
   before: string
   after: string
   kind: BulkKind
-  /** 这一列所属机型**基底的当前值**（人话） */
+  /** 这一列所属机型**基线的当前值**（人话） */
   base: string
   /**
-   * 要写的值**恰好等于基线** ⇒ 这一列可以不钉住，改成「保持跟随」：
+   * 要写的值**恰好等于基线** ⇒ 这一列不钉住，改成「跟随基线」：
    * 值一样，但少一行 `machineVariants` + 一行 `follows`。
    */
   sameAsBase: boolean
+  /**
+   * 这一列的机型基线**也在这一批里** ⇒ 跟着基线走（写 `null`）。
+   * 一批里把基线设成 1.2，跟随它的版本结果也是 1.2。
+   */
+  followsBase: boolean
 }
 
 /** `preview::BulkSkip` */
@@ -748,13 +753,17 @@ export interface BulkPreview {
  * `preview::AttachPreview` —— **把这些列挂回跟随**会落到哪几列。
  *
  * 与 `BulkPreview` 是同一个问题的另一半：那个问"设成这个值"，
- * 这个问"让它重新跟着基底"（写 `null` = 删掉那一层自己写的键）。
+ * 这个问"让它重新跟着基线"（写 `null` = 让这一层重新跟随）。
+ *
+ * `effects` 里**包含本来就在跟随的列** —— 基线值要摊给人看：
+ * 全部已在跟随时也不能只剩一句"本来就是继承来的"。
  */
 export interface AttachPreview {
   key: string
   label: string
   allowed: boolean
   blockedReason: string | null
+  /** 勾选里的每一列版本（适用的、没被条件关着的），含已在跟随的 */
   effects: AttachEffect[]
   skipped: BulkSkip[]
 }
@@ -765,8 +774,17 @@ export interface AttachEffect {
   machine: string
   label: string
   level: Level
-  /** 这一层现在钉着的值（人话）—— 删掉它之后这一层改跟基底 */
+  /** 这一层现在的值（人话）—— 已在跟随的，就是它跟随到的基线值 */
   before: string
+  /**
+   * 挂回之后这一层**显示的值** = 这一层不跟随继承到的那个（机型基线 → 出厂默认）。
+   * 与 `BulkEffect.base` 同一处取值 —— 两种预览对"基线是多少"必须同一个数。
+   */
+  after: string
+  /** 这一层**本来就在跟随**（写下去是空操作，只是把基线值摊出来） */
+  following: boolean
+  /** 挂回去**值会不会变**（归一化后的值比较，不比格式化文本） */
+  changes: boolean
 }
 
 /** `app::DiffLine` */
@@ -810,15 +828,15 @@ export const WHY_LABEL: Record<string, string> = {
   user: '用户修改',
   /* **2026-11-03 起不再单独显示**：它是"我们为保住这个值多写了几个版本键"的
      存储解释，用户不关心。后端已统一归成 `follows`；留在这里只为兼容老数据。 */
-  promoted: '随基底生效',
+  promoted: '随基线生效',
   copy: '复制快照',
   empty: '空表清理',
   unknown: '来源不明',
   structural: '改定义',
-  /* 跟着基底变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
-     用户看到的都是"我改了基底，这一圈跟着变"。 */
-  follows: '随基底生效',
-  inherited: '随基底生效',
+  /* 跟着基线变。**这一种涵盖"写没写版本键"两种情况** —— 那是存储细节，
+     用户看到的都是"我改了基线，这一圈跟着变"。 */
+  follows: '随基线生效',
+  inherited: '随基线生效',
 }
 
 /* ---------- 写 ---------- */
@@ -890,8 +908,21 @@ export interface TxnState {
   canUndo: boolean
   canRedo: boolean
   ops: TxnOp[]
+  /**
+   * 撤销栈顶那一条：标签 + 它改了几处。
+   *
+   * 「未保存改动」框的「撤销这一笔（N 处）」读它 —— 与 `onUndo` 真会弹掉的是同一条。
+   */
+  topOp: TopOp | null
   /** 刚跑完那一笔的回执；`null` = 这一轮没跑过命令（取走即清，不会重复） */
   receipt: CommandReceipt | null
+}
+
+/** `app::TopOp` */
+export interface TopOp {
+  label: string
+  /** 这一笔改了几处字段（同一格合并之后的条数） */
+  fields: number
 }
 
 export interface SaveResult {

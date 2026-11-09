@@ -356,43 +356,53 @@ pub fn stage_value_edits(presets: &Presets, committed: &Committed, draft: &Draft
         .iter()
         .filter(|e| !matches!(e.action, ValueAction::Keep))
         .count();
-    /* ★ `before` 必须**现在**取：`apply_values` 之后就问到刚写进去的值了 */
+    /* ★ `before` 必须**现在**取：`apply_values` 之后就问到刚写进去的值了。
+     *
+     * 前后的写法只有一种：**跟随基底 ⇒「跟随（X）」，自己钉住 ⇒ 值本身**。
+     * 单一写法才抵得掉一进一出 —— 9 列设成 1.2 再跟随基线回到 1.0，
+     * 两笔合起来必须是 0 处，而不是 9 处（作者 2026-11-09 报的
+     * 「上面写未保存 9，点进来什么都没有」）。 */
     let changes: Vec<logging::KeyChange> = planned
         .iter()
         .map(|e| {
-            let at_rest = presets
-                .registry
-                .param(&e.key)
-                .and_then(|p| p.machine_variants.get(&e.owner))
-                .cloned();
-            let after = match &e.action {
-                ValueAction::Write(v) => Some(v.clone()),
-                ValueAction::Clear => None,
-                ValueAction::Keep => at_rest.clone(),
-            };
-            /* **只改了状态**（值本来就等于基底）：前后的值一模一样，那样的条目会被
-            事务当成"没变"剔掉 —— 于是「未保存 N」不动、撤销栈也没有这一笔。
-            这里把它写成**状态的前后**：「不跟随 → 跟随基底」。
-            这是界面上真实发生的事，也正是作者点下去想看到的那一行。 */
-            let (before, after) = if at_rest == after {
-                match e.follows {
-                    Some(on) if was_following(presets, &e.key, &e.owner) != Some(on) => {
-                        let was = was_following(presets, &e.key, &e.owner).unwrap_or(true);
-                        (
-                            Some(serde_json::Value::String(state_label(was).to_owned())),
-                            Some(serde_json::Value::String(state_label(on).to_owned())),
-                        )
-                    }
-                    _ => (at_rest.clone(), after),
-                }
+            let p = presets.registry.param(&e.key);
+            let at_rest = p.and_then(|p| p.machine_variants.get(&e.owner)).cloned();
+            /* 这一层不钉时会拿到的值：版本层 = 机型基底，机型层 = 出厂默认 */
+            let inherited = presets.registry.inherited_value_for(&e.key, &e.owner);
+            let following_before = was_following(presets, &e.key, &e.owner).unwrap_or(false);
+            let following_after = e.follows.unwrap_or(false);
+            let before_value = if following_before {
+                inherited.clone()
             } else {
-                (at_rest, after)
+                at_rest.clone().or_else(|| inherited.clone())
+            };
+            let after_value = match &e.action {
+                ValueAction::Write(v) => Some(v.clone()),
+                ValueAction::Clear => inherited.clone(),
+                /* 只改状态、不动值：跟随的话显示的就是继承值 */
+                ValueAction::Keep => {
+                    if following_after {
+                        inherited.clone()
+                    } else {
+                        at_rest.clone().or_else(|| inherited.clone())
+                    }
+                }
+            };
+            let text = |following: bool, v: Option<&serde_json::Value>| match p {
+                Some(p) => state_text(p, following, v),
+                None => v.map(|x| x.to_string()).unwrap_or_default(),
             };
             logging::KeyChange {
                 key: e.key.clone(),
                 owner: e.owner.clone(),
-                before,
-                after,
+                before: Some(serde_json::Value::String(text(
+                    following_before,
+                    before_value.as_ref(),
+                ))),
+                after: Some(serde_json::Value::String(text(
+                    following_after,
+                    after_value.as_ref(),
+                ))),
                 why: e.why,
             }
         })
@@ -422,13 +432,26 @@ fn was_following(presets: &Presets, key: &str, owner: &str) -> Option<bool> {
     Some(crate::presetdata::follows::is_following(p, owner))
 }
 
-/// 状态在界面上怎么说 —— 与徽章同一套字（[`crate::workbench::domain::wording`]）
-fn state_label(following: bool) -> &'static str {
-    use crate::workbench::domain::wording::param_status;
+/// 这一格的**状态文本**：跟随基底的写「跟随（X）」，自己钉住的写值本身。
+///
+/// 「跟随」与「自己钉着一个相同的数」在文件里差一行、在界面上差一个徽章 ——
+/// 两种状态必须用两种写法进字段账（`FieldEntry::changed` 比的是文本），
+/// 否则一进一出（跟随 1.0 → 钉住 1.2 → 跟随 1.0）抵不掉，也会把
+/// 「钉住 1.0 → 跟随 1.0」这种真实的状态变化说成没变。
+fn state_text(
+    p: &crate::workbench::presets::registry::ParamDef,
+    following: bool,
+    v: Option<&serde_json::Value>,
+) -> String {
+    let text = match v {
+        Some(x) => crate::workbench::domain::wording::value_text(p, x),
+        /* 「空」的写法只有一处（`logfmt`），别在这里再拼一个 */
+        None => crate::logfmt::show(&Some(serde_json::Value::Null)),
+    };
     if following {
-        param_status::FOLLOW_LABEL
+        format!("跟随（{text}）")
     } else {
-        param_status::OWN_LABEL
+        text
     }
 }
 
@@ -1263,8 +1286,8 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(
             changes[0].after.as_ref().and_then(|v| v.as_str()),
-            Some(crate::workbench::domain::wording::param_status::FOLLOW_LABEL),
-            "记的是「跟随基底」这一步，不是空改动"
+            Some("跟随（0.0 mm）"),
+            "记的是「跟随基底」这一步（连值一起），不是空改动"
         );
 
         let p = presets.registry.param("toolhead.offset.x").unwrap();

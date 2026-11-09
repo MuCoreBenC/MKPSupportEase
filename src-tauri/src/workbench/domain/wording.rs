@@ -306,7 +306,7 @@ pub fn origin_explain(origin: Origin) -> &'static str {
 
 pub fn level_label(level: Level) -> &'static str {
     match level {
-        Level::Machine => "机型基底",
+        Level::Machine => "机型基线",
         Level::Version => "版本覆盖",
     }
 }
@@ -428,9 +428,9 @@ fn plain(v: &Value) -> String {
 pub mod disabled {
     /// 「挂回继承」在这一层本来就没写过这一项时不能点
     pub const DETACH_NOTHING_TO_DETACH: &str = "这一层没有单独设过这一项，本来就是继承来的";
-    /// 机型基底是这条链的根 —— 它没有「跟随」可言
+    /// 机型基线是这条链的根 —— 它没有「跟随」可言
     pub const DETACH_ON_ROOT_LAYER: &str =
-        "机型基底是这条链的根，没有「跟随」可言（改它就是改所有人的底）";
+        "机型基线是这条链的根，没有「跟随」可言（改它就是改所有人的底）";
     /// 能点时也给一句，说清点下去会发生什么
     pub const DETACH_READY: &str = "删掉这一层的这一项，让它跟着上一层变";
     /// 被上级条件关着
@@ -516,12 +516,12 @@ pub mod deprecated {
 /// 「改了还没保存」不在这两档里：徽章只描述"跟不跟随"，
 /// 未保存由那一格的还原按钮与右上角的「未保存 N」表达 —— 徽章不随保存状态跳。
 pub mod param_status {
-    /// 这一层没写，值来自基底
-    pub const FOLLOW_LABEL: &str = "跟随基底";
-    pub const FOLLOW_EXPLAIN: &str = "这一层没有自己的值，用的是基底的；基底以后改了它跟着改";
-    /// 这一层写了值（**哪怕和基底相同**，那也是自己定的）
+    /// 这一层没写，值来自基线
+    pub const FOLLOW_LABEL: &str = "跟随基线";
+    pub const FOLLOW_EXPLAIN: &str = "这一层没有自己的值，用的是基线的；基线以后改了它跟着改";
+    /// 这一层写了值（**哪怕和基线相同**，那也是自己定的）
     pub const OWN_LABEL: &str = "不跟随";
-    pub const OWN_EXPLAIN: &str = "这一层自己写了值；基底以后怎么改都不影响它";
+    pub const OWN_EXPLAIN: &str = "这一层自己写了值；基线以后怎么改都不影响它";
 }
 
 /* ---------- 「谁把我关了」 ---------- */
@@ -622,14 +622,14 @@ pub const SELECT_ASSET: &str = "左边选一条文件，这里显示它被谁引
 /* ---------- 对照矩阵的状态列（C14 第四轮） ---------- */
 
 /// 状态列三档：格子里是词，悬停是解释。「差异/一致」说的都是
-/// 「勾选列 vs 基准机型的机型基底」这一件事。
+/// 「勾选列 vs 对比机型的机型基线」这一件事。
 pub mod matrix_row {
     pub const NOT_OWN: &str = "本机无此项";
-    pub const NOT_OWN_EXPLAIN: &str = "这一行是别的机型的参数，这台基准机型没有 —— 没有基准可比";
+    pub const NOT_OWN_EXPLAIN: &str = "这一行是别的机型的参数，这台对比机型没有 —— 没有基线可比";
     pub const DIFF: &str = "差异";
-    pub const DIFF_EXPLAIN: &str = "有勾选列的值与机型基底不同 —— 绿底的那几格就是";
+    pub const DIFF_EXPLAIN: &str = "有勾选列的值与机型基线不同 —— 绿底的那几格就是";
     pub const SAME: &str = "一致";
-    pub const SAME_EXPLAIN: &str = "勾选列的值都与机型基底一致";
+    pub const SAME_EXPLAIN: &str = "勾选列的值都与机型基线一致";
 }
 
 #[cfg(test)]
