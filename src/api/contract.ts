@@ -1275,6 +1275,36 @@ export interface PresetHistory {
   entries: HistoryRecord[]
 }
 
+/**
+ * 备份 / 恢复的一跳进度（一次调用一路 Channel，不是全局广播）。
+ *
+ * `done` / `total` 的单位**按动作定**：备份是**字节**（打包时边写边报），恢复是**文件条数**
+ * （zip 里多少条要放回去）。界面只认 `total > 0` 才画百分比 —— 清点阶段 `total = 0`
+ * 是"还不知道"，不是"零"。
+ */
+export interface BackupTick {
+  /** `scan` = 清点文件 / 认说明书 / 删旧树；`pack` = 真在搬（写 zip / 解条目） */
+  stage: 'scan' | 'pack'
+  /** 正在处理的那一份（相对内部根；清点阶段是空串） */
+  file: string
+  /** 已完成（备份 = 字节；恢复 = 文件条数） */
+  done: number
+  /** 总量（同 `done` 的单位） */
+  total: number
+}
+
+/**
+ * **恢复范围**（2026-11-09）：恢复页那一行下拉。
+ *
+ *   `all`      设置 + 预设 + 执行记录，全都放回（原来的"全量覆盖"）
+ *   `presets`  只动预设那几棵：用户 toml / 修改历史 / 云端原文镜像 / 原文备份 / 回收站
+ *   `settings` 只动设置与执行记录：catalog / app-state / delivery-index / 执行归档
+ *
+ * 选中范围内仍是**整棵换掉**（回到那一刻）；范围外一个都不碰。
+ * 选 `presets` 而这份备份当初没带预设 ⇒ 后端**报错**（不静默什么都不做）。
+ */
+export type RestoreScope = 'all' | 'presets' | 'settings'
+
 /** 打完 / 恢复完一份备份的回执 */
 export interface BackupSummary {
   /** 备份文件自己的绝对路径（界面照原样显示：用户要知道东西落在哪了） */
@@ -3152,8 +3182,19 @@ export interface MkpApi {
    * 备份要的是"丢了就再也回不来的东西"。
    *
    * 文件名由后端定（`SupportEase-备份-<时刻>.zip`），于是同一天打几份也不会互相盖掉。
+   *
+   * `includePresets = false`：跟预设有关的那几棵（用户 toml / 修改历史 / 云端原文镜像 /
+   * 原文备份 / 回收站）**不进包**（界面上那颗「连同预设一起备份」）—— 包里只剩设置与执行归档。
+   * 这份包恢复时也不动它们 —— 判断依据记在说明书里，不靠调用方再传一次。
+   *
+   * `onTick` 可选：给了就看过程（`scan` → 一跳一跳的 `pack`），不给就是"点了等结果"。
+   * 命令本身跑在线程池里（几百 MB 的归档不会把窗口冻住），**进度只有这一条路**。
    */
-  createBackup(destDir: string): Promise<BackupSummary>
+  createBackup(
+    destDir: string,
+    includePresets: boolean,
+    onTick?: (tick: BackupTick) => void,
+  ): Promise<BackupSummary>
 
   /**
    * **从一份备份恢复**（设置页）：**全量覆盖** —— 备份里有的一律覆盖，
@@ -3163,9 +3204,33 @@ export interface MkpApi {
    * （靠多份备份按时间选拿细粒度），要么细粒度同步（要求每个文件有稳定 id 与合并语义）。
    * 我们走前者。
    *
+   * `scope` 决定**动不动哪一块**（见 [`RestoreScope`]）：选中范围内整棵换掉，
+   * 范围外一个都不碰。默认在界面那侧是 `all`。
+   *
    * 恢复完界面要**整窗重载**（盘上的数据换过了，内存里的都不算数）。
    */
-  restoreBackup(zipPath: string): Promise<BackupSummary>
+  restoreBackup(
+    zipPath: string,
+    scope: RestoreScope,
+    onTick?: (tick: BackupTick) => void,
+  ): Promise<BackupSummary>
+
+  /**
+   * **备份的默认落点**（2026-11-09 作者：默认就放桌面）。
+   *
+   * 后端算（系统认得的桌面，建不出来就照实报错；没有桌面环境退回数据根下的
+   * `exports/`）—— 界面**照它显示**，不自己拼 `~/Desktop`：Windows 的桌面不叫这个名，
+   * 被 iCloud / OneDrive 接管的桌面又是另一个真路径。
+   */
+  defaultBackupDir(): Promise<string>
+
+  /**
+   * **在系统文件管理器里选中那份备份**（备份框成功之后那颗「打开位置」）。
+   *
+   * 只认**绝对路径 + `.zip` + 盘上真有这一份**（路径是 `createBackup` 自己给的），
+   * 别的一律拒 —— 这条口子不是"打开任意路径"。
+   */
+  revealBackup(path: string): Promise<void>
 
   /**
    * **把这一份存进用户根**，然后丢掉草稿。存到哪由**这份草稿改的是哪一份**决定：

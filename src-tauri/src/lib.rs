@@ -536,6 +536,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 备份与恢复（2026-10-17）：设置页 —— 打一份 zip / 从一份 zip 全量恢复
         ipc::backup::create_backup,
         ipc::backup::restore_backup,
+        // 备份框的默认落点（桌面）与成功之后那颗「打开位置」（2026-11-09）
+        ipc::backup::default_backup_dir,
+        ipc::backup::reveal_backup,
         // 修改历史（2026-10-17）：一份文件一本账，盘上留着
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,
@@ -730,6 +733,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 备份与恢复（与上面那份清单一字不差）
         ipc::backup::create_backup,
         ipc::backup::restore_backup,
+        ipc::backup::default_backup_dir,
+        ipc::backup::reveal_backup,
         // 修改历史（与上面那份清单一字不差）
         ipc::history::get_preset_history,
         ipc::history::put_preset_history,

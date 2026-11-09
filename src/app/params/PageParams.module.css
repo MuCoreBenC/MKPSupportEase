@@ -819,11 +819,16 @@
   padding: 0 14px;
   border: 0;
   border-radius: var(--r-sm);
-  background: #e5484d;
+  /* 实心红底走 token（与 `Btn variant="danger"` 悬停同一支） */
+  background: var(--danger-fill);
   font: inherit;
   font-size: var(--fs-body);
   color: #fff;
   cursor: pointer;
+}
+
+.danger:hover {
+  background: var(--danger-fill-hover);
 }
 
 /* ---------- 窄窗口 ---------- */

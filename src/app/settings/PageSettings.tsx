@@ -83,9 +83,6 @@ import {
   useState,
   type MouseEvent,
 } from 'react'
-/* 系统文件选择框：挑"备份放哪个文件夹"与"恢复哪一份 zip" —— 位置一律由用户点名 */
-import { open } from '@tauri-apps/plugin-dialog'
-
 import { api, errorText, isAppError } from '../../api'
 import { STORAGE } from '../../api/storageKeys'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
@@ -127,6 +124,8 @@ import BedGlueSection from './BedGlueSection'
 import DataSection from './DataSection'
 /* 预设那一块（2026-10-20）：与上面同一条规矩（自己一个文件、只管自己那一行） */
 import PresetsSection from './PresetsSection'
+/* 备份 / 恢复那一框（2026-11-09）：挑位置、看进度、看结果都在框里 */
+import BackupModal from './BackupModal'
 import { openWithGuideFigure } from '../guide/openWithGuide'
 /* 「保存后的重切引导」那个共用开关（与提示里的「不再显示」写同一个键）：
    这一页是它**唯一能重新打开**的地方，见 `guide/guidesPref` */
@@ -668,80 +667,13 @@ export default function PageSettings({
   const [autoCheckErr, setAutoCheckErr] = useState<Text | null>(null)
 
   /*
-   * **备份与恢复**（2026-10-17）：两个动作都要先问系统要一个位置（文件夹 / 那份 zip）。
+   * **备份与恢复**（2026-10-17 / 2026-11-09）。
    *
-   * ★ 「恢复」是**不可撤销**的（它把现在的数据换掉）⇒ 与「清空历史」同一条规矩：
-   *   点一下只是武装，再点才真做（二次确认在界面这一侧，后端只管照做）。
-   * ★ 恢复完要**整窗重载**：盘上的数据换过了，内存里的都不算数。
+   * 这一页只剩**一个入口**：两件事并进同一扇框（框里自己分页），挑位置、看进度、
+   * 看结果也都在框里 —— 作者的口径：「备份好了不要在这个界面显示」+
+   * 「备份和还原合并成同一个按钮」。
    */
-  const [backupBusy, setBackupBusy] = useState(false)
-  const [restoreBusy, setRestoreBusy] = useState(false)
-  /* 恢复的二次确认：点了「从备份恢复」之后摆出来（再点一次才真恢复） */
-  const [restoreArm, setRestoreArm] = useState<string | null>(null)
-  const [backupNote, setBackupNote] = useState<{ text: Text; bad: boolean } | null>(null)
-
-  /** 备份：问系统"放到哪个文件夹"，剩下的（文件名、打包）全交给后端 */
-  const doBackup = useCallback(async () => {
-    setBackupBusy(true)
-    setBackupNote(null)
-    try {
-      const picked = await open({ directory: true, title: tr('settings.backup.pickDir') })
-      const dir = Array.isArray(picked) ? picked[0] : picked
-      if (typeof dir !== 'string' || dir === '') {
-        setBackupBusy(false)
-        return
-      }
-      const sum = await api.createBackup(dir)
-      setBackupNote({
-        text: msg('settings.backup.done', { path: sum.path, files: sum.files }),
-        bad: false,
-      })
-    } catch (e) {
-      setBackupNote({ text: msg('settings.backup.failed', { detail: errorText(e) }), bad: true })
-    } finally {
-      setBackupBusy(false)
-    }
-  }, [tr])
-
-  /** 恢复：问系统"哪一份备份"，**二次确认**之后才真的覆盖 */
-  const doRestore = useCallback(async () => {
-    /* 第一下：挑一份备份 + 武装；第二下：拿已经挑好的那份真恢复 */
-    if (restoreArm === null) {
-      setBackupNote(null)
-      try {
-        const picked = await open({
-          directory: false,
-          multiple: false,
-          title: tr('settings.restore.pickTitle'),
-          filters: [{ name: tr('settings.restore.pickFilter'), extensions: ['zip'] }],
-        })
-        const at = Array.isArray(picked) ? picked[0] : picked
-        if (typeof at !== 'string' || at === '') return
-        setRestoreArm(at)
-        setBackupNote({
-          text: msg('settings.restore.ask', { path: at }),
-          bad: false,
-        })
-      } catch (e) {
-        setBackupNote({
-          text: msg('settings.restore.pickFailed', { detail: errorText(e) }),
-          bad: true,
-        })
-      }
-      return
-    }
-    setRestoreBusy(true)
-    try {
-      const sum = await api.restoreBackup(restoreArm)
-      /* 盘上换过了 ⇒ 整窗重载（内存里的都不算数） */
-      setBackupNote({ text: msg('settings.restore.done', { files: sum.files }), bad: false })
-      window.setTimeout(() => window.location.reload(), 600)
-    } catch (e) {
-      setBackupNote({ text: msg('settings.restore.failed', { detail: errorText(e) }), bad: true })
-      setRestoreArm(null)
-      setRestoreBusy(false)
-    }
-  }, [restoreArm, tr])
+  const [backupOpen, setBackupOpen] = useState(false)
 
   const read = useCallback(async () => {
     setLoadErr(null)
@@ -1887,61 +1819,30 @@ export default function PageSettings({
        * 恢复 = **全量覆盖**（备份里有的一律覆盖、被管的几棵树里备份没有的删掉）——
        * 想回到"某个时间点"就**多留几份备份、挑哪一份恢复**，而不是在一份里挑文件
        * （同名文件"选哪一份"没有天然答案，那是另一整套冲突解决界面）。
+       *
+       * ★ 2026-11-09：一行一颗按钮。原来那两行（备份 / 从备份恢复）+ 两段说明
+       *   全收进 `BackupModal` —— 作者要的是"合并成同一个按钮"与文字极简；
+       *   但**行标题与 `?` 留着**（那是"这一项是什么"，不是说明文字，省不得）。
        */}
       <section className={s.section} id="backup" data-sec aria-label={tr('settings.backup.title')}>
         <h2 className={s.secTitle}>{tr('settings.backup.title')}</h2>
 
+        {/*
+         * 标准一行：左标题 + `?`，右按钮。
+         * ★ 2026-11-09 作者圈着左边那块空白：「这个肯定是需要的」—— 说明可以短，
+         *   标题与那颗 `?` 不能省（见 eslint 的 `SETTINGS_TITLE_NEEDS_TIP`）。
+         */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
-              {tr('settings.backup.label')}
-              {/* 原来那句里 `noteKeep` 是加粗强调；气泡是一段纯文本，
-                  拼接顺序与原文一致，读起来不缺词 */}
-              <Tip
-                text={`${tr('settings.backup.notePre')}${tr('settings.backup.noteKeep')}${tr('settings.backup.notePost')}`}
-              />
+              {tr('settings.backup.title')}
+              <Tip text={tr('settings.backup.tip')} />
             </div>
           </div>
           <div className={s.ctl}>
-            <Btn disabled={backupBusy} onClick={() => void doBackup()}>
-              {backupBusy ? tr('settings.backup.busy') : tr('settings.backup.do')}
-            </Btn>
+            <Btn onClick={() => setBackupOpen(true)}>{tr('settings.backup.do')}</Btn>
           </div>
         </div>
-
-        <div className={`${s.field} ${s.fieldRow}`}>
-          <div className={s.fieldText}>
-            <div className={s.fieldTitle}>
-              {tr('settings.restore.label')}
-              <Tip
-                text={`${tr('settings.restore.notePre')}${tr('settings.restore.noteKeep')}${tr('settings.restore.notePost')}`}
-              />
-            </div>
-          </div>
-          <div className={s.ctl}>
-            <Btn disabled={restoreBusy} onClick={() => void doRestore()}>
-              {restoreBusy
-                ? tr('settings.restore.busy')
-                : restoreArm === null
-                  ? tr('settings.restore.do')
-                  : tr('settings.restore.confirm')}
-            </Btn>
-            {restoreArm !== null && (
-              <Btn
-                onClick={() => {
-                  setRestoreArm(null)
-                  setBackupNote(null)
-                }}
-              >
-                {tr('settings.restore.cancel')}
-              </Btn>
-            )}
-          </div>
-        </div>
-
-        {backupNote !== null && (
-          <p className={`${s.note} ${backupNote.bad ? s.noteBad : ''}`}>{say(backupNote.text)}</p>
-        )}
       </section>
 
       {/*
@@ -2032,8 +1933,10 @@ export default function PageSettings({
                   value={draft}
                   onChange={(e) => setDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    /* 输入法还在组字：这一下回车是"上屏"，不是"应用" */
-                    if ((e.nativeEvent as InputEvent).isComposing) return
+                    /* 输入法还在组字：这一下回车是"上屏"，不是"应用"。
+                       `nativeEvent` 本来就是 `KeyboardEvent`（`isComposing` 在这个接口上），
+                       原来转成 `InputEvent` 是转错了 —— TS 5 起这种"不重叠的断言"直接报错。 */
+                    if ((e.nativeEvent as KeyboardEvent).isComposing) return
                     if (e.key !== 'Enter') return
                     e.preventDefault()
                     if (busy || !canSet) return
@@ -2144,6 +2047,16 @@ export default function PageSettings({
           },
         ]}
         onClose={() => setGuide(null)}
+      />
+
+      {/*
+       * 备份与恢复那一框（2026-11-09）：一扇框两页 —— 备份 / 恢复在框里自己切，
+       * 这一页只管"开没开"。框里的内务由它自己按"开 / 关"清。
+       */}
+      <BackupModal
+        open={backupOpen}
+        host={pageEl}
+        onClose={() => setBackupOpen(false)}
       />
     </div>
   )

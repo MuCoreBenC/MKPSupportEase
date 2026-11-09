@@ -190,11 +190,21 @@
   color: var(--text-2);
 }
 
-/* 危险（危险动作是描边 + 红字，不是红底 —— 红底满屏太吓人）。
-   字色走 token：原来写死 `#c2373c`，深色下那支暗红躺在深底上几乎看不见。 */
+/* 危险（空闲 = 红描边 + 红字；**悬停整颗变红**，2026-11-09 作者：
+   「应该是整个变红」）。
+   字色走 token：原来写死 `#c2373c`，深色下那支暗红躺在深底上几乎看不见。
+   底走 `--danger-fill`：`--danger` 是"字的红"，白字压上去对比不够。
+   ★ hover 必须带 `:not(:disabled)`（外加文件末尾 `.btn:disabled:hover` 兜底）——
+     灰掉的那颗不许一点就变回能点的样子。 */
 .btnDanger {
   border-color: rgb(229 72 77 / 45%);
   color: var(--danger);
+}
+
+.btnDanger:hover:not(:disabled) {
+  border-color: var(--danger-fill);
+  background: var(--danger-fill);
+  color: #fff;
 }
 
 .btn:disabled {

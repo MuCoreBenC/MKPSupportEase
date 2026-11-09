@@ -808,6 +808,45 @@ text_en = "That backup is gone — pick another one"
 text_zh_tw = "那份備份不在了 —— 重新挑一份"
 text_ja = "そのバックアップは存在しません — 選び直してください"
 
+["ui.ipc.backup.041"]
+text = "这一步没能收回来 —— 再试一次（细节在日志里）"
+text_en = "This step didn’t come back — try again (details are in the log)"
+text_zh_tw = "這一步沒能收回來 —— 再試一次（細節在日誌裡）"
+text_ja = "この処理を回収できませんでした — もう一度お試しください（詳細はログにあります）"
+
+["ui.ipc.backup.042"]
+text = "定位备份要给一个 zip 文件的绝对路径"
+text_en = "Locating a backup needs an absolute path to a zip file"
+text_zh_tw = "定位備份要給一個 zip 檔案的絕對路徑"
+text_ja = "バックアップの位置を開くには zip ファイルの絶対パスが必要です"
+
+["ui.ipc.backup.043"]
+text = "那份备份不在了（{v1}）—— 重新打一份"
+text_en = "That backup is gone ({v1}) — make a new one"
+text_zh_tw = "那份備份不在了（{v1}）—— 重新做一份"
+text_ja = "そのバックアップは存在しません（{v1}）— 新しく作成してください"
+params = ["v1"]
+
+["ui.ipc.backup.044"]
+text = "建不出备份文件夹（{v1}）"
+text_en = "Couldn’t create the backup folder ({v1})"
+text_zh_tw = "建不出備份資料夾（{v1}）"
+text_ja = "バックアップフォルダーを作成できません（{v1}）"
+params = ["v1"]
+
+["ui.ipc.backup.045"]
+text = "打不开那个文件夹 —— 去系统里看一眼"
+text_en = "Couldn’t open that folder — take a look in your file manager"
+text_zh_tw = "打不開那個資料夾 —— 去系統裡看一下"
+text_ja = "そのフォルダーを開けませんでした — ファイルマネージャーで確認してください"
+
+["ui.ipc.backup.046"]
+text = "不认识的恢复范围：{v1}"
+text_en = "Unknown restore scope: {v1}"
+text_zh_tw = "不認識的還原範圍：{v1}"
+text_ja = "不明な復元範囲：{v1}"
+params = ["v1"]
+
 ["ui.ipc.bbs.041"]
 text = "{v1} —— 先在 Bambu Studio 里另存一份工艺预设，再回来重扫"
 text_en = "{v1} — save a process preset in Bambu Studio first, then come back and rescan"
@@ -3093,6 +3132,12 @@ text = "这份 zip 读不动"
 text_en = "This zip cannot be read"
 text_zh_tw = "這份 zip 讀不動"
 text_ja = "この zip を読み取れません"
+
+["ui.runtime.backup.368"]
+text = "这份备份里没有预设 —— 换个范围，或重新打一份带预设的"
+text_en = "This backup has no presets — pick another scope, or make a new backup with presets"
+text_zh_tw = "這份備份裡沒有預設 —— 換個範圍，或重新做一份帶預設的"
+text_ja = "このバックアップにはプリセットがありません — 範囲を変えるか、プリセット込みで作り直してください"
 
 ["ui.runtime.baseline.368"]
 text = "血统里的摘要不是一个 sha256：{sha256}"

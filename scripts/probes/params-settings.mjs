@@ -602,10 +602,9 @@ for (const size of SIZES) {
    */
   check(
     tag,
-    '设置页「备份与恢复」那一块在（打一份 / 从备份恢复两颗按钮都在）',
+    '设置页「备份与恢复」那一块在（行标题 + 一颗「打开…」）',
     setText.includes('备份与恢复') &&
-      (await page.getByRole('button', { name: '打一份备份…' }).count()) === 1 &&
-      (await page.getByRole('button', { name: '从备份恢复…' }).count()) === 1,
+      (await page.getByRole('button', { name: '打开…', exact: true }).count()) === 1,
     setText.includes('备份与恢复') ? '' : `没看到那一块：${setText.slice(0, 120)}`,
   )
 

@@ -982,10 +982,16 @@
   cursor: default;
 }
 
-.recBtnDanger,
-.recBtnDanger:hover:not(:disabled) {
+.recBtnDanger {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+/* 与 `Btn variant="danger"` 同一张脸：悬停整颗变红（2026-11-09 作者：「应该是整个变红」） */
+.recBtnDanger:hover:not(:disabled) {
+  border-color: var(--danger-fill);
+  background: var(--danger-fill);
+  color: #fff;
 }
 
 .noteHint {

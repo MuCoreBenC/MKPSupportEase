@@ -638,11 +638,17 @@
   color: var(--accent-deep);
 }
 
-/* 删除的**第二下**（确认那一下）：红 —— 不可逆动作才用这个颜色 */
-.archBtnDanger,
-.archBtnDanger:hover {
+/* 删除的**第二下**（确认那一下）：红 —— 不可逆动作才用这个颜色。
+   悬停与 `Btn variant="danger"` 同一张脸：整颗变红（2026-11-09）。 */
+.archBtnDanger {
   border-color: var(--danger);
   color: var(--danger);
+}
+
+.archBtnDanger:hover:not(:disabled) {
+  border-color: var(--danger-fill);
+  background: var(--danger-fill);
+  color: #fff;
 }
 
 .archBtn:focus-visible {

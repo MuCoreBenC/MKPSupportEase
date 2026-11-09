@@ -3,13 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog'
 
 import { armedFaultFor } from '../app/dev/fault'
 import { t } from '../i18n'
-import {
-  isAppError,
-  type AppError,
-  type DownloadTick,
-  type MkpApi,
-  type MkpApiMethod,
-} from './contract'
+import { isAppError, type AppError, type MkpApi, type MkpApiMethod } from './contract'
 
 /**
  * IPC 桥：把契约里的方法映射到 Rust 侧的 command。
@@ -105,7 +99,7 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
  * `on_tick` 对上——这种细节在这层收一次，页面只见回调。
  *
  * ★★ **不给回调也照样挂一条**（2026-10-06 修死路，别再改回去）：
- * Rust 侧 `on_tick: Channel<DownloadTick>` 是**必填参数** —— Tauri 的 `Channel` 只有
+ * Rust 侧 `on_tick: Channel<T>` 是**必填参数** —— Tauri 的 `Channel` 只有
  * `CommandArg`、**没有 `Deserialize`**（它要 `Webview` 才能建），所以
  * `Option<Channel<T>>` 根本编译不出来：契约里的"`onTick` 可选"只能**在这一层**兑现。
  * 不挂的后果不是"少个回调"，而是 Tauri 在**参数反序列化**那一步就拒
@@ -118,11 +112,11 @@ async function call<T>(method: MkpApiMethod, command: string, args?: Record<stri
  * Rust 侧 `send_tick` 对"没人听"也只记一行 debug —— 与"点了等结果"共用同一个 command，
  * 没有第二个版本。
  */
-function withTick(
+function withTick<T>(
   args: Record<string, unknown>,
-  onTick?: (tick: DownloadTick) => void,
+  onTick?: (tick: T) => void,
 ): Record<string, unknown> {
-  const channel = new Channel<DownloadTick>()
+  const channel = new Channel<T>()
   if (onTick !== undefined) channel.onmessage = onTick
   return { ...args, onTick: channel }
 }
@@ -238,9 +232,23 @@ export const bridgeApi: MkpApi = {
     }),
   clearPresetHistory: (origin, id) =>
     call('clearPresetHistory', 'clear_preset_history', { origin, id }),
-  /* 备份与恢复（2026-10-17）：设置页，zip 快照 + 全量覆盖 */
-  createBackup: (destDir) => call('createBackup', 'create_backup', { destDir }),
-  restoreBackup: (zipPath) => call('restoreBackup', 'restore_backup', { zipPath }),
+  /*
+   * 备份与恢复（2026-10-17）：设置页，zip 快照 + 全量覆盖。
+   *
+   * 两条都要挂一条 Channel（Rust 侧是必填参数，见 `withTick` 头注）—— 备份几百 MB
+   * 时界面要的正是那条水位：`scan` → 一跳一跳的 `pack`。
+   */
+  createBackup: (destDir, includePresets, onTick) =>
+    call(
+      'createBackup',
+      'create_backup',
+      withTick({ destDir, includePresets }, onTick),
+    ),
+  restoreBackup: (zipPath, scope, onTick) =>
+    call('restoreBackup', 'restore_backup', withTick({ zipPath, scope }, onTick)),
+  /* 备份框的默认落点（桌面）与成功之后那颗「打开位置」（2026-11-09） */
+  defaultBackupDir: () => call('defaultBackupDir', 'default_backup_dir'),
+  revealBackup: (path) => call('revealBackup', 'reveal_backup', { path }),
   commitPresetDraft: () => call('commitPresetDraft', 'commit_preset_draft'),
   /* 「编辑文件」那条链（2026-10-10：与参数草稿分开存，两侧互相作废） */
   getPresetDraftSummary: () =>

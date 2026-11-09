@@ -1867,6 +1867,19 @@ export const mockApi: MkpApi = {
     )
   },
 
+  /**
+   * 备份框的默认落点。浏览器里没有"系统桌面"这回事：给一个**看得出来是演示**的位置，
+   * 与导出计划里那个假桌面同住 `${HOME}/Desktop`。
+   */
+  async defaultBackupDir() {
+    return '/Users/wzy/Desktop'
+  },
+
+  /** 「打开位置」在浏览器里没有系统文件管理器：照实说它在真机上会定位哪一份 */
+  async revealBackup(path) {
+    throw new Error(t('mock.reveal.finder', { path }))
+  },
+
   /** 云端线：另存成 `presets-local/<原名>（已修改）.toml`（与 Rust 侧 `local::edited_name` 同一条规则） */
   async commitPresetDraft() {
     if (mockDraft === null) throw new Error(t('mock.edit.noneToSave'))
