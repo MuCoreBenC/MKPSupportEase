@@ -122,7 +122,7 @@ pub(crate) fn emit_first_pen_revitalization(
 
     // 范围检查：4 象限小螺旋机器坐标是否超出机型运动范围（警告不阻断）
     /* 主语也住文案表：这条警告会出现在模态框那张卡里，写在代码里英文 / 日文界面会夹中文 */
-    let range_source = messages::text("postproc.range_check.first_pen", &[]);
+    let range_source = messages::MessageRef::new("postproc.range_check.first_pen", &[]);
     check_tower_path_range(
         ir_data,
         &mini_spiral_xy_lines,
@@ -147,7 +147,7 @@ fn check_tower_path_range(
     gcode_lines: &[String],
     source: &'static str,
     operation: &str,
-    source_label: &str,
+    source_label: &messages::MessageRef,
 ) {
     // M017：机型维度未识别时跳过检测，不回退默认机型
     if ir_data.machine.max_x == 0.0
@@ -177,41 +177,39 @@ fn check_tower_path_range(
 
     for v in violations {
         let msg = format_range_warning_message(&v, source_label);
-        ir_data.warnings.push(msg.clone());
+        /* 诊断通道是给日志/排查的（旧 Go 口径），要现在这一份文字；
+        记录里存的是上面那条指代，语言到读的时候再定 */
         ir_data
             .warning_diagnostics
-            .push(crate::diag::Diagnostic::warning(operation, msg));
+            .push(crate::diag::Diagnostic::warning(operation, msg.text()));
+        ir_data.warnings.push(msg);
     }
 }
 
 /// `formatRangeWarningMessage`（revitalization_block.go:170）。
-fn format_range_warning_message(v: &crate::gcode::RangeViolation, source: &str) -> String {
-    /* 方向 → (方向记号, 轴, 这条边界是上限还是下限)。整句与"机型最大 / 最小"都在
-    `messages.toml`：这里只挑键、给值 —— 拼中文会让英文 / 日文界面夹一句中文。 */
-    let (dir, axis, is_max) = match v.direction {
-        "X-" => ("X-", "X", false),
-        "Y+" => ("Y+", "Y", true),
-        "Y-" => ("Y-", "Y", false),
-        _ => ("X+", "X", true),
+///
+/// 整句在 `messages.toml`：这里只挑键、给值。`{source}` 本身也是表里的条目，
+/// 所以存成**指代**（[`MessageRef::with_msg`]）而不是渲好的字 —— 否则语言又被
+/// 冻在这一刻。
+fn format_range_warning_message(
+    v: &crate::gcode::RangeViolation,
+    source: &messages::MessageRef,
+) -> messages::MessageRef {
+    /* 认不出的一律当 X+（与旧实现同一口径） */
+    let dir = match v.direction {
+        "X-" => "X-",
+        "Y+" => "Y+",
+        "Y-" => "Y-",
+        _ => "X+",
     };
-    let limit = messages::text(
-        if is_max {
-            "postproc.range_limit.max"
-        } else {
-            "postproc.range_limit.min"
-        },
-        &[("axis", axis)],
-    );
-    messages::text(
+    messages::MessageRef::new(
         "postproc.range_violation",
         &[
-            ("source", source),
             ("dir", dir),
-            ("axis", axis),
             /* 坐标量级下 Rust `{}` 与 Go `%g` 输出一致（最短往返表示、无尾零） */
             ("actual", &v.actual_value.to_string()),
-            ("limit", &limit),
             ("bound", &v.machine_limit.to_string()),
         ],
     )
+    .with_msg("source", source.clone())
 }

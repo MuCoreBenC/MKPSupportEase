@@ -134,9 +134,9 @@ import s from './PageReport.module.css'
 /**
  * 统计里挑给用户看的几格（键与 `_meta.json` 的 `detail.stats` 同名）。
  * 第三格是**值的单位** —— 单位跟着值印（`0 mm`），不挂在字段名上。
+ * 塔高不摆在这：擦料塔那一组的「层数 / 高度」就是同一件事，两处摆容易对不上。
  */
 const STAT_CELLS: [string, StringKey, string][] = [
-  ['towerHeight', 'report.stat.towerHeight', 'mm'],
   ['glueLayerCount', 'report.stat.glueLayers', ''],
   ['totalLayerNumber', 'report.stat.totalLayers', ''],
   ['maxZHeight', 'report.stat.maxZ', 'mm'],
@@ -532,6 +532,15 @@ interface Group {
    */
   sections?: { title: string; cells: [string, string][] }[]
   /**
+   * **一段一段的正文**（2026-11-09）。只给「警告」用。
+   *
+   * 警告不是"字段 → 值"的对子：左边那列（`cells` 那条路的字段列）对它没有意义，
+   * 反倒白吃掉八个多字的宽度 —— 而警告恰恰是整页最长的一类句子（作者：「他这样子
+   * 左右放好，还是说他撑满整个这个宽度」）。给了这一格就按段落渲染：单条不编号，
+   * 多条把序号做成行首徽标（组头已经写了「警告 N 条」，单条再编一次是第三遍）。
+   */
+  lines?: string[]
+  /**
    * 组**末尾**那一句提示 + 可选的去处（2026-11-04）。
    *
    * 目前只有「碰撞位置」用：撞了之后告诉用户"设置里能打开智能塔位置，下次就不用手动挪"。
@@ -562,6 +571,28 @@ function printTimeStatusText(tr: Tr, status: string | null | undefined): string 
   if (status === 'computing') return tr('report.pt.computing')
   if (status === 'failed') return tr('report.pt.failed')
   return '—'
+}
+
+/**
+ * 警告正文（2026-11-09）：**整段满宽**，不是"序号 | 正文"两列。
+ *
+ * 序号只在多条时出现，做在行首 —— 单条时它零信息（组头已经写了「警告 N 条」），
+ * 而那个字段列却要白吃掉八个多字的宽度。换行回到卡片左内边：长句要的就是那一列
+ * 宽度，缩进反而把续行挤窄。
+ */
+function WarnLines({ lines }: { lines: string[] }) {
+  const many = lines.length > 1
+  return (
+    /* `data-many` 才切到"序号 | 正文"两栏（挂起缩进）：单条时正文要占满整行 */
+    <ol className={s.warnList} data-many={many}>
+      {lines.map((w, i) => (
+        <li key={i} className={s.warnItem}>
+          {many && <span className={s.warnNo}>{i + 1}</span>}
+          {w}
+        </li>
+      ))}
+    </ol>
+  )
 }
 
 function shaShort(sha: string | undefined): string {
@@ -798,12 +829,9 @@ function slicerGroup(tr: Tr, slicer: ReportSlicerFacts): Group | null {
     ],
     [
       tr('report.slicer.support'),
-      slicer.treeSupport === undefined && slicer.useDiskWipe === undefined
+      slicer.treeSupport === undefined
         ? '—'
-        : `${tr('report.slicer.tree', { v: onOff(slicer.treeSupport) })} · ${tr(
-            'report.slicer.diskWipe',
-            { v: onOff(slicer.useDiskWipe) },
-          )}`,
+        : tr('report.slicer.tree', { v: onOff(slicer.treeSupport) }),
     ],
   ]
   if (!hasAnyValue(cells)) return null
@@ -914,6 +942,18 @@ function buildGroups(
     sum: `${okText()} · ${elapsedText(tr, st.elapsedMs)}`,
     cells: resultCells,
   })
+
+  /* 警告紧跟结论：出了事要一眼看见；没有就不摆（空组还要占一条横线，等于喊狼来了） */
+  if (detail.warnings.length > 0) {
+    groups.push({
+      id: 'warnings',
+      title: tr('report.g.warnings'),
+      sum: tr('report.warnings.count', { n: detail.warnings.length }),
+      /* 正文走 `lines`，不走"字段 → 值"那张两列网格（见 Group.lines 的说明） */
+      cells: [],
+      lines: detail.warnings,
+    })
+  }
 
   /* 打印：切片器给的事实 + 本程序算出来的打印时间 */
   const printCells: [string, string][] = [
@@ -1125,19 +1165,6 @@ function buildGroups(
         cells: [],
       })
     }
-  }
-
-  /* 警告：没有就不摆这一组（空组还要占一条横线，等于喊狼来了） */
-  if (detail.warnings.length > 0) {
-    groups.push({
-      id: 'warnings',
-      title: tr('report.g.warnings'),
-      sum: tr('report.warnings.count', { n: detail.warnings.length }),
-      cells: detail.warnings.map((w, i): [string, string] => [
-        tr('report.warnings.item', { n: i + 1 }),
-        w,
-      ]),
-    })
   }
 
   /* 管线计时：一步一行，步里的多行细节跟着 */
@@ -1817,7 +1844,7 @@ export default function PageReport({
     return () => {
       alive = false
     }
-  }, [selId, detailNonce])
+  }, [selId, detailNonce, locale])
 
   /*
    * 打印时间还在补算（`printTimeStatus === 'computing'`）时的兜底：隔一会儿再看一眼。
@@ -2277,6 +2304,7 @@ export default function PageReport({
                             role="tab"
                             className={s.tab}
                             data-on={activeTab === g.id}
+                            data-tone={g.id === 'warnings' ? 'warn' : undefined}
                             aria-selected={activeTab === g.id}
                             onClick={() => setTab(g.id)}
                           >
@@ -2291,6 +2319,7 @@ export default function PageReport({
                             key={g.id}
                             className={s.panel}
                             data-on={activeTab === TAB_ALL || activeTab === g.id}
+                            data-tone={g.id === 'warnings' ? 'warn' : undefined}
                           >
                             <p className={s.grpBar}>
                               <span className={s.grpIcon} aria-hidden="true">
@@ -2310,7 +2339,9 @@ export default function PageReport({
                               <b>{g.title}</b>
                               {g.sum !== '' && <span className={s.grpSum}>{g.sum}</span>}
                             </p>
-                            {g.id === 'pipeline' ? (
+                            {g.lines !== undefined ? (
+                              <WarnLines lines={g.lines} />
+                            ) : g.id === 'pipeline' ? (
                               <ol className={s.steps}>
                                 {detail.pipeline.map((step, i) => (
                                   <li key={i} className={s.step}>

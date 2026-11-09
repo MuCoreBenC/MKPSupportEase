@@ -44,7 +44,8 @@ use std::path::{Path, PathBuf};
 use sha2::{Digest, Sha256};
 
 use crate::config;
-use crate::diag::{CancelToken, PostprocError, messages};
+use crate::diag::messages::MessageRef;
+use crate::diag::{CancelToken, PostprocError};
 use crate::ir::{Ir, TowerRelocateModeIr};
 use crate::postproc::calibration::Mode;
 use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
@@ -160,7 +161,8 @@ pub struct ProcessResult {
     pub output_path: PathBuf,
     pub stats: Stats,
     pub print_time: Option<crate::postproc::printtime::Result>,
-    pub warnings: Vec<String>,
+    /// 警告的**指代**（键 + 参数）—— 谁显示谁按自己的语言渲（见 [`MessageRef`]）。
+    pub warnings: Vec<MessageRef>,
     /// 实际执行到的步骤，供顺序断言与展示。
     pub executed_steps: Vec<Step>,
     /// 逐步骤耗时（与 `executed_steps` 同序、同集合）。报告页「管线计时」区与 CLI
@@ -783,7 +785,7 @@ fn run(
     // 必须是最后一道行变换 —— STATS 数的就是落盘的那份，STATS_MATCH 靠这个成立。
     let finalized = crate::postproc::marks::finalize(out_lines, &machine_type)?;
     if finalized.header_added {
-        ir.warnings.push(messages::text(
+        ir.warnings.push(MessageRef::new(
             "postproc.header_layer_declared",
             &[("layers", &finalized.layers.to_string())],
         ));
@@ -801,7 +803,7 @@ fn run(
      */
     if finalized.scarf_flattened && scarf_viewer_is_affected(&pass1_stats.slicer_version) {
         ir.warnings
-            .push(messages::text("postproc.scarf_joint_seam", &[]));
+            .push(MessageRef::new("postproc.scarf_joint_seam", &[]));
     }
     // 报告与文件必须说同一个层数：采集侧改过声明，统计也跟着实测值走。
     pass1_stats.total_layer_number = finalized.layers;

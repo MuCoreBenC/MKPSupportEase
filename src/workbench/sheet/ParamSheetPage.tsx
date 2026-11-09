@@ -107,7 +107,7 @@ import CellEditor from '../views/CellEditor'
 import CompareMatrix from '../views/CompareMatrix'
 import ParamDefModal from '../views/ParamDefModal'
 import { nextSectionId } from '../views/sectionId'
-import ParamDetail, { StatusDot } from '../views/ParamDetail'
+import ParamDetail, { StatusDot, type DetailLayer } from '../views/ParamDetail'
 /* 分组抽屉：改名 / 换位 / 这一组的参数清单都在里头（卡头只负责打开它） */
 /* 组件卡里的画布占位（作者 2026-11-01：「它就占个位置就可以了」） */
 import ComponentSlot from '../views/ComponentSlot'
@@ -1198,6 +1198,15 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
       },
     ]
   })()
+  /**
+   * 「定位」：把正文滚到这一条参数那一行。
+   *
+   * 单版本 = 卡片里的那一行（`t-param-*`）；对照 = 矩阵里那一行（`t-mrow-*`）。
+   * 右栏把正文遮住时，这是确认「我改的是哪一行」的唯一办法。
+   */
+  const locateParam = (key: string) => {
+    locateAnchor(mode === 'single' ? `t-param-${key}` : `t-mrow-${key}`, { row: true })
+  }
   const batchable = selParam !== null && selParam.uiComponent !== 'gcode' && !selParam.deprecated
   const asideShown =
     sel !== null &&
@@ -1232,9 +1241,40 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
           raw: cell?.raw ?? null,
           rest: cell?.rest ?? null,
           dirty: cell?.dirty ?? false,
+          /* `own === false` = 这一层没自己写值、正跟着基底 —— 「跟随基线」只对 false 的有意义 */
+          follows: cell !== null && !cell.own,
         }
       })
   }, [compareCols, book.machines, matrixOv, sel])
+
+  /**
+   * 对照模式「参数详情」要列的层：**勾选的每一列一层**（可跨机型）。
+   *
+   * 以前只取基准机型的 `drawerDesk`，于是勾了 A1 mini / P1S / P2S / X1C 之后，
+   * 右栏仍只显示基准机那几版 —— 作者 2026-11-08：「其他我选中的都没有显示出来」。
+   * 数据取自矩阵那一行（它本来就有每一列的格子）。
+   */
+  const detailLayers = useMemo<DetailLayer[] | null>(() => {
+    if (mode !== 'compare' || sel === null || matrixOv === null) return null
+    const row = matrixOv.rows.find((r) => r.key === sel) ?? null
+    if (row === null) return null
+    const out: DetailLayer[] = []
+    matrixOv.cols.forEach((c, i) => {
+      const cell = row.cells[i]
+      if (cell === undefined) return
+      const base = c.level === 'machine'
+      out.push({
+        owner: base ? '' : (c.versionUid ?? ''),
+        machineId: c.machineId,
+        name: base ? `${c.machine} 基底` : `${c.machine} · ${c.label}`,
+        title: base ? `${c.machine} 基底` : `${c.machine} / ${c.label}`,
+        versionId: base ? null : (c.versionUid?.split('/')[1] ?? null),
+        base,
+        cell,
+      })
+    })
+    return out
+  }, [mode, sel, matrixOv])
 
   /* 模态框要的那几样，全部现推（值改一次它就跟着变，不存会过期的副本） */
   const gcodeParam = gcodeOpen !== null ? (paramOf(gcodeOpen.key) ?? null) : null
@@ -1870,6 +1910,8 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                     book.machines[0]!
                   }
                   words={words}
+                  /* 对照：勾选的每一列一层（跨机型）；单版本自己按 `machine.versions` 拼 */
+                  layers={detailLayers}
                   groupLabel={groupLabelOf(registry, selRow)}
                   /*
                    * 「组内顺序」（2026-11-02）：这一条在它所属分组里的同级清单，
@@ -1881,28 +1923,39 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                      「放弃」照样撤得掉；与定义框的差别只是撤销栈粒度（它攒一次「确认」发一笔） */
                   onMoveOrder={(dir) => void moveOrderOf(sel, dir)}
                   onClose={() => setSel(null)}
+                  onLocate={sel === null ? undefined : () => locateParam(sel)}
                   /* 「属于 X 的子参数」点 X 就换到 X —— 那一行是入口，不是注解 */
                   onPick={(key) => setSel(key)}
                   /* 「编辑定义」：名称/单位/类型/范围/条件/弃用那条改的路（即时落盘） */
                   onEditDef={selParam ? () => setDefEditKey(sel) : undefined}
                   /* 「各版本取值」每一层各有一枚按钮 —— 进来的那一层就是它 */
-                  onOpenGcode={(key, layerUid) => {
+                  onOpenGcode={(key, layerUid, layerMachineId) => {
                     const mid =
-                      mode === 'single'
+                      layerMachineId ??
+                      (mode === 'single'
                         ? (machineId ?? '')
                         : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
-                          baseMachineId)
+                          baseMachineId))
                     setGcodeOpen({ key, mid, uid: layerUid })
                   }}
-                  onWriteLayer={(layerUid, next) => {
+                  onWriteLayer={(layerUid, next, layerMachineId) => {
                     const ownerMid =
-                      mode === 'single'
+                      layerMachineId ??
+                      (mode === 'single'
                         ? (machineId ?? '')
                         : (drawerDesk?.cols.find((c) => (c.versionUid ?? null) === layerUid)?.machineId ??
-                          baseMachineId)
+                          baseMachineId))
                     const row = mode === 'single' ? rowOf(shownDesk, sel) : rowOf(shownDrawerDesk, sel)
                     const idx = cellIndexOf(mode === 'single' ? shownDesk : shownDrawerDesk, layerUid)
-                    const cell = row?.cells[idx] ?? null
+                    /* 跨机型时那一格来自矩阵（`detailLayers`）—— 基准机型的 desk 里没有它 */
+                    const cell =
+                      (detailLayers !== null
+                        ? (detailLayers.find(
+                            (l) =>
+                              l.machineId === ownerMid &&
+                              (l.base ? null : l.owner) === layerUid,
+                          )?.cell ?? null)
+                        : (row?.cells[idx] ?? null)) ?? null
                     writeValue(
                       row ?? selRow,
                       selParam,
@@ -1921,6 +1974,7 @@ function ParamSheetPage({ book, words, initialFocus, tick, dirty, onApply, onMet
                 param={selParam}
                 words={words}
                 targets={batchTargets}
+                onLocate={sel === null ? undefined : () => locateParam(sel)}
                 onApply={async (label, patches) => {
                   /*
                    * 批量是**一整块手势**（一次 apply、一次撤销）—— 走 quiet：

@@ -53,6 +53,16 @@ pub struct BulkEffect {
     pub before: String,
     pub after: String,
     pub kind: BulkKind,
+    /// 这一列所属机型**基底的当前值**（人话）。版本列写它 = 与基线同值
+    pub base: String,
+    /**
+     * 要写的值是否**恰好等于基线**。
+     *
+     * 是的话这一列不必各自钉住：写 `null` 让它**保持跟随**，值一样、还少一行
+     * `machineVariants` + 一行 `follows`（作者 2026-11-09 要的那颗按钮）。
+     * 只有版本列才有这个选择 —— 机型基底是这条链的根。
+     */
+    pub same_as_base: bool,
 }
 
 /// 这一列落下去属于哪一类改动
@@ -86,6 +96,35 @@ pub struct BulkSkip {
     pub reason: String,
     /// 被条件关着时，卡在哪一项上（根在前）
     pub blocked: Vec<BlockedBy>,
+}
+
+/* ---------- 挂回跟随预览（批量） ---------- */
+
+/// 「把这些列挂回跟随」会落到哪几列。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachPreview {
+    pub key: String,
+    pub label: String,
+    /// 能不能批量（G-code 不行，与 [`BulkPreview`] 同一条闸）
+    pub allowed: bool,
+    pub blocked_reason: Option<String>,
+    /// 真的会挂回跟随的列。**「N 列」数的是这个**
+    pub effects: Vec<AttachEffect>,
+    /// 跳过（不适用 / 被条件关着 / 本来就在跟随），附原因
+    pub skipped: Vec<BulkSkip>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachEffect {
+    /// 列的 key（机型 id 或版本 uid）
+    pub col: String,
+    pub machine: String,
+    pub label: String,
+    pub level: Level,
+    /// 这一层现在钉着的值（人话）—— 删掉它之后这一层改跟基底
+    pub before: String,
 }
 
 impl Book<'_> {
@@ -171,6 +210,13 @@ impl Book<'_> {
                 _ if had_own => BulkKind::Changing,
                 _ => BulkKind::Detaching,
             };
+            /* 基线 = 这一层不写时会拿到的值（版本 → 机型基底 → 出厂默认）。
+            与要写的值相同 ⇒ 这一列可以「保持跟随」而不是自己钉一行。 */
+            let inherited = layers
+                .inherited_value(col.level, key)
+                .map(|v| normalize_value(&self.presets.registry, key, v));
+            let same_as_base =
+                col.level == Level::Version && inherited.as_ref().is_some_and(|b| b == value);
             out.effects.push(BulkEffect {
                 col: col.key.clone(),
                 machine,
@@ -181,6 +227,131 @@ impl Book<'_> {
                     .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
                 after: w::value_text(p, value),
                 kind,
+                base: inherited
+                    .map(|b| w::value_text(p, &b))
+                    .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
+                same_as_base,
+            });
+        }
+        out
+    }
+
+    /// **把这些列挂回跟随**会落到哪几列（写 `null` = 删掉那一层自己写的值）。
+    ///
+    /// 与 [`Self::preview_bulk`] 是同一个问题的另一半：那个答"设成这个值会发生什么"，
+    /// 这个答"让它重新跟着基底会发生什么"。跳过判据完全一致（不适用 / 被条件关着），
+    /// 只多一档：这一层**本来就在跟随**时写下去没有变化。
+    ///
+    /// 为什么要预览而不能直接写：批量一次动十几列，删掉的键是"这一层自己钉住的值"，
+    /// 与写入一样是不可逆的误操作面 —— 先看清哪几列真的会变，再点。
+    pub fn preview_attach(&self, key: &str, cols: &[ColRef]) -> AttachPreview {
+        let Some(p) = self.presets.registry.param(key) else {
+            return AttachPreview {
+                key: key.to_owned(),
+                label: key.to_owned(),
+                allowed: false,
+                blocked_reason: Some("字段定义里没有这一项".to_owned()),
+                effects: Vec::new(),
+                skipped: Vec::new(),
+            };
+        };
+        let mut out = AttachPreview {
+            key: key.to_owned(),
+            label: p.label.clone(),
+            allowed: !w::is_gcode(p),
+            blocked_reason: if w::is_gcode(p) {
+                Some(w::disabled::BULK_REFUSES_GCODE.to_owned())
+            } else {
+                None
+            },
+            effects: Vec::new(),
+            skipped: Vec::new(),
+        };
+        if !out.allowed {
+            return out;
+        }
+
+        // 列序照配方本，与矩阵 / 批量预览同一条规则
+        for col in self.matrix(cols, None, "", None).cols {
+            let machine = col.machine.clone();
+            let layers = match col.level {
+                Level::Machine => self.machine_layers(&col.machine_id),
+                Level::Version => col
+                    .version_uid
+                    .as_deref()
+                    .and_then(|u| self.version_layers(u)),
+            };
+            let Some(layers) = layers else {
+                continue;
+            };
+
+            if !layers.applies(key) {
+                out.skipped.push(BulkSkip {
+                    col: col.key.clone(),
+                    machine,
+                    label: col.label.clone(),
+                    reason: w::disabled::NOT_APPLICABLE.to_owned(),
+                    blocked: Vec::new(),
+                });
+                continue;
+            }
+            let blocked = Gate::new(&self.presets.registry, &layers).blocked(key);
+            if !blocked.is_empty() {
+                out.skipped.push(BulkSkip {
+                    col: col.key.clone(),
+                    machine,
+                    label: col.label.clone(),
+                    reason: w::disabled::BLOCKED_BY_CONDITION.to_owned(),
+                    blocked,
+                });
+                continue;
+            }
+            /*
+             * 「这一层跟不跟随」只认 `[params.follows]`（与写值、徽章同一处），
+             * **不能用 `Layers::has_own`** —— 同一机型下每个版本都写了同一个值时，
+             * `digest` 会把它上提成基底，`over` 里就没有这一项了，于是明明 9 行版本键
+             * 还在、界面却报"本来就是继承来的"（作者 2026-11-08 报的就是这个）。
+             *
+             * 机型基底不在这条链的"跟随"语义里（它是根），目标是它时直说。
+             */
+            let following = match col.level {
+                Level::Machine => {
+                    out.skipped.push(BulkSkip {
+                        col: col.key.clone(),
+                        machine,
+                        label: col.label.clone(),
+                        reason: w::disabled::DETACH_ON_ROOT_LAYER.to_owned(),
+                        blocked: Vec::new(),
+                    });
+                    continue;
+                }
+                Level::Version => {
+                    let owner = col.version_uid.as_deref().unwrap_or_default();
+                    self.version_following(owner, key)
+                }
+            };
+            if following {
+                out.skipped.push(BulkSkip {
+                    col: col.key.clone(),
+                    machine,
+                    label: col.label.clone(),
+                    reason: w::disabled::DETACH_NOTHING_TO_DETACH.to_owned(),
+                    blocked: Vec::new(),
+                });
+                continue;
+            }
+
+            let before = layers
+                .effective(key)
+                .map(|b| normalize_value(&self.presets.registry, key, b.value));
+            out.effects.push(AttachEffect {
+                col: col.key.clone(),
+                machine,
+                label: col.label.clone(),
+                level: col.level,
+                before: before
+                    .map(|b| w::value_text(p, &b))
+                    .unwrap_or_else(|| w::NOT_APPLICABLE.to_owned()),
             });
         }
         out
@@ -274,6 +445,90 @@ mod tests {
         assert_eq!(p.skipped.len(), 2);
         assert!(p.skipped.iter().all(|s| !s.blocked.is_empty()));
         assert_eq!(p.skipped[0].blocked[0].key, "wiping.mode");
+    }
+
+    /// **新值恰好等于基线的列要标出来**：那一列可以「保持跟随」而不是各自钉住。
+    ///
+    /// 作者 2026-11-09：批量设成基线那个数时，不该顺手多出 N 行版本键 + N 行 follows。
+    #[test]
+    fn a_value_that_equals_the_base_is_flagged_as_same_as_base() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Machine,
+                owner: "P1S".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(66)),
+            }],
+        )
+        .unwrap();
+        let b = super::super::Book::new(&f.presets, &c, &d);
+        let list = cols(&[("P1S", Some("P1S/LITE"))]);
+
+        let hit = b.preview_bulk("wiping.child", &serde_json::json!(66), &list);
+        let e = hit.effects.first().expect("该有一列");
+        assert!(e.same_as_base, "新值等于基线 66 —— 可以保持跟随");
+        assert!(!e.base.is_empty(), "基线值要摊给界面：{e:?}");
+
+        let miss = b.preview_bulk("wiping.child", &serde_json::json!(67), &list);
+        assert!(!miss.effects[0].same_as_base, "67 不等于基线，必须自己钉住");
+    }
+
+    /// **「跟随基线」只列「不跟随」的版本列**：判据是 `[params.follows]`，不是 `has_own`。
+    ///
+    /// 关键反例（作者 2026-11-08 报的）：同一机型每个版本都写了同一个值时，`digest`
+    /// 会把它上提成基底 —— `has_own` 因此变 false、界面却仍标着「不跟」，于是
+    /// 「跟随基线」把九列全报成"本来就是继承来的"，一条也挂不回去。
+    #[test]
+    fn attach_lists_versions_that_are_not_following() {
+        let f = Fixture::load();
+        let c = committed();
+        let mut d = Draft::default();
+        // 只给 P1S:LITE 写一个自己的值 ⇒ 它不跟随；其余的版本列没动过 ⇒ 仍跟随
+        apply(
+            &mut d,
+            &c,
+            &f.presets.registry,
+            &[Patch::SetValue {
+                level: Level::Version,
+                owner: "P1S/LITE".to_owned(),
+                key: "wiping.child".to_owned(),
+                value: Some(serde_json::json!(66)),
+            }],
+        )
+        .unwrap();
+
+        let list = cols(&[
+            ("A1", None),
+            ("A1", Some("A1/STANDARD")),
+            ("P1S", Some("P1S/LITE")),
+        ]);
+        let b = super::super::Book::new(&f.presets, &c, &d);
+        let out = b.preview_attach("wiping.child", &list);
+
+        assert!(out.allowed, "普通数值参数能挂回跟随");
+        let hit: Vec<&str> = out.effects.iter().map(|e| e.col.as_str()).collect();
+        assert_eq!(
+            hit,
+            vec!["P1S/LITE"],
+            "只有不跟随的那一列会挂回基底：{:?}",
+            out.skipped
+        );
+        assert!(
+            out.skipped.iter().any(|s| s.reason.contains("继承")),
+            "本来就跟着的列要说清原因：{:?}",
+            out.skipped
+        );
+        assert!(
+            out.skipped.iter().any(|s| s.reason.contains("根")),
+            "机型基底要单独说清它没有跟随：{:?}",
+            out.skipped
+        );
     }
 
     /// 不适用的列也跳过，理由与"被关着"不同

@@ -199,6 +199,15 @@ struct Entry {
     #[serde(default)]
     #[allow(dead_code)]
     note: Option<String>,
+    /// 这条说法**改口吻之前的原句**（2026-11-09）。
+    ///
+    /// 老执行记录里存的是当年渲好的句子，读的时候靠它认回本条（`key_of_exact_text`）
+    /// —— 认回了就按**现在的语言与现在的措辞**重说。不参与渲染，也不许拿它当兜底文案。
+    ///
+    /// 只收**没有占位符**的旧句：带 `{参数}` 的那种填过值就再也认不回来，
+    /// 别为了它去写模糊匹配（AGENTS §8.1：认不出就是认不出）。
+    #[serde(default)]
+    legacy: Vec<String>,
 }
 
 /// 解析一次、全局共用。
@@ -271,6 +280,83 @@ pub fn text_in(lang: Lang, key: &str, params: &[(&str, &str)]) -> String {
     }
 }
 
+/// 一条**指代**：表里的键 + 参数。句子本身不在这里 —— 谁读谁按自己的语言渲。
+///
+/// # 为什么不是 `String`
+///
+/// 执行记录（`_meta.json`）要活过语言切换。存渲好的句子 = 把写入那一刻的语言冻进去：
+/// 钩子是切片器拉起来的，默认简体，于是日文 / 英文界面上翻旧记录还是中文。
+/// `error` 那一格 2026-10-31 就是这么修的（见 `src-tauri/src/ipc/report.rs` 的
+/// `localized_error`），警告是同一类事，只是当时没跟着改。
+///
+/// # 参数可以是另一条句子
+///
+/// `postproc.range_violation` 的 `{source}` 本身就是表里的条目 —— 存成字面值
+/// 会把渲染那一刻的语言一起冻住。所以参数是 [`Part`]：要么字面值，要么另一条
+/// [`MessageRef`]；渲染时**同一种语言**一路解到底。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct MessageRef {
+    /// 表里的键（`postproc.scarf_joint_seam` 这种）。
+    pub key: String,
+    /// 占位符 → 值。空的不写进 JSON（多数警告没有参数）。
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub args: BTreeMap<String, Part>,
+}
+
+/// [`MessageRef`] 的一个参数值。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Part {
+    /// 字面值：数、方向记号、文件名……
+    Text(String),
+    /// 另一条表里的句子：语言跟着外层走。
+    Msg(MessageRef),
+}
+
+impl MessageRef {
+    /// 挑一条键 + 几条**字面**参数（最常用的一档）。
+    pub fn new(key: &str, args: &[(&str, &str)]) -> Self {
+        Self {
+            key: key.to_owned(),
+            args: args
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), Part::Text((*v).to_owned())))
+                .collect(),
+        }
+    }
+
+    /// 给一个参数，值本身是表里的句子（`{source}` / `{limit}` 那种）。
+    pub fn with_msg(mut self, name: &str, msg: MessageRef) -> Self {
+        self.args.insert(name.to_owned(), Part::Msg(msg));
+        self
+    }
+
+    /// 按**当前语言**渲这一句。
+    pub fn text(&self) -> String {
+        self.text_in(current())
+    }
+
+    /// 按指定语言渲这一句（归档读口用：记录里存的是键，说的时候按现在的语言）。
+    pub fn text_in(&self, lang: Lang) -> String {
+        let pairs: Vec<(String, String)> = self
+            .args
+            .iter()
+            .map(|(k, v)| {
+                let value = match v {
+                    Part::Text(t) => t.clone(),
+                    Part::Msg(m) => m.text_in(lang),
+                };
+                (k.clone(), value)
+            })
+            .collect();
+        let refs: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        text_in(lang, &self.key, &refs)
+    }
+}
+
 /// `slicer` 字段：给**切片器**那一行的口径（缺省与 [`text`] 同一句）。
 ///
 /// 「让切片器少看 / 别看 / 换个说法」= 在表里给这条加 / 改 `slicer`。
@@ -299,8 +385,9 @@ pub fn keys() -> Vec<&'static str> {
 /// 按**原文**反查键（2026-10-27）。
 ///
 /// 老归档只存了当年那句话（没有键）—— 报告页要按当前语言重说一遍，就得先认出
-/// 它是表里哪一条。比的是 `text` 与 `text_en` 的**整句相等**：带占位符的句子
-/// （值已经填进去了）对不上，那就对不上，不猜、不模糊匹配。
+/// 它是表里哪一条。比的是四格正文 + `legacy` 那张旧句清单的**整句相等**
+/// （四本字典都算：老记录可能是在日文 / 英文界面下写的）；带占位符的句子（值已经
+/// 填进去了）对不上，那就对不上，不猜、不模糊匹配。
 pub fn key_of_exact_text(s: &str) -> Option<&'static str> {
     let want = s.trim();
     if want.is_empty() {
@@ -309,7 +396,11 @@ pub fn key_of_exact_text(s: &str) -> Option<&'static str> {
     table()
         .iter()
         .find(|(_, e)| {
-            e.text.trim() == want || e.text_en.as_deref().is_some_and(|en| en.trim() == want)
+            e.text.trim() == want
+                || e.text_en.as_deref().is_some_and(|t| t.trim() == want)
+                || e.text_zh_tw.as_deref().is_some_and(|t| t.trim() == want)
+                || e.text_ja.as_deref().is_some_and(|t| t.trim() == want)
+                || e.legacy.iter().any(|t| t.trim() == want)
         })
         .map(|(k, _)| k.as_str())
 }
@@ -437,16 +528,122 @@ mod tests {
         );
     }
 
-    /// 按原文反查键：中文原句、英文原句都能认回来；带填值的句子认不出（返回 `None`）。
+    /// 按原文反查键：四本字典的任何一句都能认回来；带填值的句子认不出（返回 `None`）。
     #[test]
     fn exact_text_finds_its_key() {
         let key = "hook.tower_relocate_declined";
-        let zh = text_in(Lang::Zh, key, &[]);
-        let en = text_in(Lang::En, key, &[]);
-        assert_eq!(key_of_exact_text(&zh), Some(key));
-        assert_eq!(key_of_exact_text(&en), Some(key));
+        for lang in [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja] {
+            let said = text_in(lang, key, &[]);
+            assert_eq!(key_of_exact_text(&said), Some(key), "认不回 {lang:?}");
+        }
+        /* 带填值的句子：表里是 `{id}`，盘上是填好的 —— 整句不等，认不出 */
+        let filled = text_in(
+            Lang::Zh,
+            "E_FS_NOT_FOUND_001",
+            &[("target", "x"), ("detail", "d")],
+        );
+        assert_eq!(key_of_exact_text(&filled), None);
         assert_eq!(key_of_exact_text("  根本不存在的句子  "), None);
         assert_eq!(key_of_exact_text(""), None);
+    }
+
+    /// **改过口吻**的那条：老记录里那句原话也要认回本条 —— 报告页据此按现在的语言
+    /// 重说一遍，于是"后处理那一屏"与"执行记录"说的是同一句。
+    ///
+    /// 作者 2026-11-09：「他们两个警告最好用一样的吧，就是说没必要单独分开写了」。
+    #[test]
+    fn a_legacy_wording_finds_its_key() {
+        /* 2026-11-08 那几次实验构建写进执行记录的原话（连 markdown / G-code 记号一起） */
+        let olds = [
+            "成品把 `; has_scarf_joint_seam` 置成了 0：Bambu Studio 只在这一格为 1 时按 `; CHANGE_LAYER` 定层，那种层表会让预览把模型与擦料塔的上半截画不出来。置 0 后它按 Z 平台段数层 —— 层数会比模型层数多（斜接缝的 Z 斜坡被逐段数开），但每一段都对得上实际几何。",
+            "这个件开了斜拼接缝。Bambu Studio 会在「切片完成」的那一屏沿用切片时的层表（它跑完后处理只更新走线、不更新层表），于是预览只画得出半截 —— 这是 Bambu 的缺陷，文件本身没问题。成品已把 `; has_scarf_joint_seam` 置 0，**重新打开（或拖入）这份 G-code** 就能看到完整图形；那一屏的层数会比模型层数多，因为斜接缝的 Z 斜坡被逐段数开了。",
+        ];
+        for old in olds {
+            assert_eq!(
+                key_of_exact_text(old),
+                Some("postproc.scarf_joint_seam"),
+                "旧句认不回来 ⇒ 报告页只能原样摆那句技术话"
+            );
+        }
+
+        /* 重说出来的是**现在**那句：技术词与 G-code 记号都不许再出现 */
+        let now = text_in(Lang::Zh, "postproc.scarf_joint_seam", &[]);
+        for bad in ["层表", "has_scarf_joint_seam", "**", "`"] {
+            assert!(!now.contains(bad), "新说法里还有「{bad}」：{now}");
+        }
+    }
+
+    /// 一条指代：键 + 字面参数，按语言渲出来的句子与 `text_in` 一字不差。
+    #[test]
+    fn a_ref_renders_like_text() {
+        let r = MessageRef::new("postproc.header_layer_declared", &[("layers", "627")]);
+        for lang in [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja] {
+            assert_eq!(
+                r.text_in(lang),
+                text_in(lang, "postproc.header_layer_declared", &[("layers", "627")]),
+            );
+        }
+    }
+
+    /// 参数也可以是另一条句子：两层都按**同一种语言**解，外层不会夹内层的中文。
+    #[test]
+    fn a_ref_can_carry_another_ref() {
+        let r = MessageRef::new(
+            "postproc.range_violation",
+            &[("dir", "X+"), ("actual", "256"), ("bound", "255")],
+        )
+        .with_msg(
+            "source",
+            MessageRef::new("postproc.range_check.first_pen", &[]),
+        );
+
+        /* 内层也得是日文：整句里要能找到内层那条**日文**原文（不是中文原文） */
+        let ja = r.text_in(Lang::Ja);
+        assert!(
+            ja.contains(&text_in(Lang::Ja, "postproc.range_check.first_pen", &[])),
+            "内层没跟着外层语言走：{ja}"
+        );
+        for lang in [Lang::Zh, Lang::ZhTw, Lang::En, Lang::Ja] {
+            let said = r.text_in(lang);
+            assert!(!said.contains('{'), "占位符没解干净（{lang:?}）：{said}");
+        }
+    }
+
+    /// 警告文案不许露内部机制（层表 / 后处理 / G-code 注释名）：那是给工程师看的。
+    ///
+    /// 作者 2026-11-09：「这个警告的文案都太不贴切那种正常软件了」—— 这一条把
+    /// **进 `warnings` 的那几句**钉在"用户看得见的东西"上说。
+    #[test]
+    fn warning_lines_do_not_leak_internals() {
+        const BANNED: [(&str, &str); 6] = [
+            ("postproc.scarf_joint_seam", "层表"),
+            ("postproc.scarf_joint_seam", "后处理"),
+            ("postproc.header_layer_declared", "total layer number"),
+            ("postproc.header_layer_declared", "G-code"),
+            ("postproc.range_check.first_pen", "工具头"),
+            ("postproc.range_check.first_pen", "活化"),
+        ];
+        for (key, word) in BANNED {
+            let zh = text_in(Lang::Zh, key, &[]);
+            assert!(!zh.contains(word), "{key} 里还有内部说法「{word}」：{zh}");
+        }
+    }
+
+    /// 指代能进 JSON 再出来（归档就是这条路径）：键与参数都还在。
+    #[test]
+    fn a_ref_survives_json() {
+        let r = MessageRef::new("postproc.header_layer_declared", &[("layers", "627")]);
+        let json = serde_json::to_string(&r).unwrap();
+        let back: MessageRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, r);
+        assert_eq!(back.text_in(Lang::En), r.text_in(Lang::En));
+
+        /* 没有参数 ⇒ 不写 `args`（记录里那一条短得能一眼读完） */
+        let plain = MessageRef::new("postproc.scarf_joint_seam", &[]);
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            r#"{"key":"postproc.scarf_joint_seam"}"#
+        );
     }
 
     /// 英文那几栏里**不许有中文**（分隔符也换过：`，` → `, `）。

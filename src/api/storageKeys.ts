@@ -28,6 +28,16 @@ export const STORAGE = {
    */
   clientParamsSearchHistory: 'mkp.A40.params.searchHistory',
 
+  /**
+   * 设置页「自定义数据源地址」打过的地址（一串 URL，JSON 数组，新的在前）。
+   *
+   * **纯前端的输入偏好**，不是底账：它只是让人少敲一遍以前那条开发地址。
+   * 记的是"点过应用的那一串"，**探不通的也在里面**（探不通的最需要回来改个字符）；
+   * 所以这一行里有没有某条地址，不等于它当时生效过 —— 生效与否看页面那句话。
+   * 真正生效的是哪一条由后端 `run/app-state.json` 的 `presetSource` 说了算。
+   */
+  clientPresetSourceHistory: 'mkp.A40.settings.presetSourceHistory',
+
   /** 参数页「修改历史」悬浮抽屉的宽度（px，JSON 数字）。同样是纯前端偏好 */
   clientParamsHistoryDrawerW: 'mkp.A40.params.historyDrawerW',
 

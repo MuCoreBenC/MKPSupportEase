@@ -436,7 +436,10 @@ pub struct Outcome {
     pub output: PathBuf,
     pub elapsed_ms: u128,
     /// 内核给的警告：**逐条给用户看**（不是日志）—— 比如"这一盘没有支撑"。
-    pub warnings: Vec<String>,
+    ///
+    /// 存的是**指代**（键 + 参数）而不是句子：归档要活过语言切换（见
+    /// [`messages::MessageRef`]）。要显示时调 `.text()`，按这一趟的语言渲。
+    pub warnings: Vec<messages::MessageRef>,
     /// 打印时间估算**交出去**了（这一趟没算）：交给常驻进程补全。
     /// `None` = 这一趟已经自己算完（或压根不需要）。
     pub deferred_print_time: Option<DeferredPrintTime>,
@@ -696,7 +699,7 @@ pub fn run(
 
     // 归档第一笔：**原件先备份**。原地覆盖模式下原文件会被处理后的内容盖掉，
     // 这一笔是它唯一的副本。失败只降级成警告：产物优先（见 `crate::archive` 模块头）。
-    let mut archive_warnings: Vec<String> = Vec::new();
+    let mut archive_warnings: Vec<messages::MessageRef> = Vec::new();
     let archived = archive_begin(&job.gcode, &raw, &mut archive_warnings);
 
     /*
@@ -1254,16 +1257,16 @@ fn record_id_of(paths: &ArchivePaths) -> String {
 fn archive_begin(
     gcode: &std::path::Path,
     raw: &str,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<messages::MessageRef>,
 ) -> Option<ArchivePaths> {
     let Some(root) = crate::archive::history_root() else {
-        warnings.push(messages::text(keys::ARCHIVE_UNAVAILABLE, &[]));
+        warnings.push(messages::MessageRef::new(keys::ARCHIVE_UNAVAILABLE, &[]));
         return None;
     };
     match crate::archive::begin(&root, gcode, raw, crate::archive::now_local()) {
         Ok(paths) => Some(paths),
         Err(e) => {
-            warnings.push(messages::text(
+            warnings.push(messages::MessageRef::new(
                 keys::ARCHIVE_BACKUP_FAILED,
                 &[("detail", &e.to_string())],
             ));
@@ -1294,7 +1297,7 @@ fn archive_success(
     opening_nozzle: f64,
     started_at: time::OffsetDateTime,
     started: std::time::Instant,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<messages::MessageRef>,
     relocation: Option<&crate::archive::RelocationRecord>,
     // 校准件身份探测结果（在机型核对之前那一次读盘拿到的，见 `probe_model_identity`）
     identity: &postprocess::gcode::IdentityProbe,
@@ -1305,7 +1308,7 @@ fn archive_success(
         None
     } else {
         if let Err(e) = crate::archive::archive_output(paths, &done.output_path) {
-            warnings.push(messages::text(
+            warnings.push(messages::MessageRef::new(
                 keys::ARCHIVE_OUTPUT_FAILED,
                 &[("detail", &e.to_string())],
             ));
@@ -1314,7 +1317,7 @@ fn archive_success(
             Ok(sha) => match crate::archive::file_fact(&done.output_path, None, sha) {
                 Ok(fact) => Some(fact),
                 Err(e) => {
-                    warnings.push(messages::text(
+                    warnings.push(messages::MessageRef::new(
                         keys::ARCHIVE_FACT_FAILED,
                         &[("detail", &e.to_string())],
                     ));
@@ -1322,7 +1325,7 @@ fn archive_success(
                 }
             },
             Err(e) => {
-                warnings.push(messages::text(
+                warnings.push(messages::MessageRef::new(
                     keys::ARCHIVE_SHA_FAILED,
                     &[("detail", &e.to_string())],
                 ));
@@ -1458,7 +1461,10 @@ fn archive_success(
         // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
         build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
-        warnings: done.warnings.clone(),
+        /* 句子与指代都写：`warnings` 是这一刻的语言（人肉排查 / 老读者），
+        `warningRefs` 才是真值 —— 报告页按**打开时**的语言重说（见 `ipc::report`） */
+        warnings: done.warnings.iter().map(|w| w.text()).collect(),
+        warning_refs: Some(done.warnings.clone()),
         error: None,
         error_key: None,
         error_args: None,
@@ -1475,7 +1481,7 @@ fn archive_success(
         detail,
     };
     if let Err(e) = crate::archive::write_meta(paths, &meta) {
-        warnings.push(messages::text(
+        warnings.push(messages::MessageRef::new(
             keys::ARCHIVE_META_FAILED,
             &[("detail", &e.to_string())],
         ));
@@ -1644,7 +1650,10 @@ fn archive_failure(
         // 这份产物是哪一次编译写的（与启动日志同一串）："明明修了还在"时先看这一格
         build: Some(crate::build_fingerprint()),
         invocation: crate::archive::invocation(),
+        /* 失败 / 取消那几条出口没有内核警告；空数组 = "这一格是新的、确实没有"，
+        与"旧记录没这一格"（`null`）分得开 */
         warnings: Vec::new(),
+        warning_refs: Some(Vec::new()),
         error: Some(error),
         /*
          * ★ 存**原因键 + 参数**，不是"拿整句去反查"（2026-10-31 修）。
@@ -2479,7 +2488,8 @@ fn finished_payload(
             exit_code: EXIT_OK,
             elapsed_ms: out.elapsed_ms as u64,
             output: Some(out.output.display().to_string()),
-            warnings: out.warnings.clone(),
+            /* 界面那一面要**句子**（模态框当场就摆）；记录那一面存了指代，语言到打开时再定 */
+            warnings: out.warnings.iter().map(|w| w.text()).collect(),
             /* 结果读数：成功才有（失败 / 取消时内核没把这几个数算出来 —— 空着） */
             result: Some(out.result.clone()),
             /* 校准件那一趟选了哪种跑法 —— 界面与报告据此分开说"两种成功" */
@@ -2560,7 +2570,8 @@ pub fn report(done: Result<Outcome, HookError>, log: Option<&Path>) -> u8 {
             eprintln!("{line}");
             // 警告各占一行：那是**用户要看的东西**，不是日志
             for w in &out.warnings {
-                let line = messages::text(keys::WARNING, &[("text", w)]);
+                let said = w.text();
+                let line = messages::text(keys::WARNING, &[("text", &said)]);
                 tracing::warn!("{line}");
                 eprintln!("{line}");
             }

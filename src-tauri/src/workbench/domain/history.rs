@@ -407,6 +407,15 @@ fn merge_fields(into: &mut Vec<super::txn::FieldEntry>, more: Vec<super::txn::Fi
 
 /// 一条历史条目**改了几处**（去处重后还剩几个字段）。就是页头那个 N 的原料。
 pub fn dirty_fields(entries: &[Entry]) -> usize {
+    dirty_field_entries(entries).len()
+}
+
+/// 去重后的字段账 —— 「改了什么」逐条列的就是这一份。
+///
+/// 去重键 = `(层, 归属, 键)`：同一格连点十下只算一处。**唯一口径** ——
+/// [`dirty_fields`]（数个数）与检查框里的字段清单都从这里来，
+/// 各写一遍就会出现"页头 14 处、清单 0 处"那种两个数打架。
+pub fn dirty_field_entries(entries: &[Entry]) -> Vec<&super::txn::FieldEntry> {
     let mut out: Vec<&super::txn::FieldEntry> = Vec::new();
     for e in entries {
         for f in e.fields.iter().filter(|f| f.changed()) {
@@ -415,7 +424,7 @@ pub fn dirty_fields(entries: &[Entry]) -> usize {
             }
         }
     }
-    out.len()
+    out
 }
 
 /// 值编辑的合并判据：**哪一格**（`v:A1/STANDARD:toolhead.offset.z` 这样的字符串键）。

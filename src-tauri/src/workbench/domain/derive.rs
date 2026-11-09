@@ -244,6 +244,24 @@ impl<'a> Book<'a> {
         ))
     }
 
+    /// 这一版**现在跟随基底吗**：草稿层优先，其次盘上 `[params.follows]`。
+    ///
+    /// 与写值那条路的 `cur_follow` 同一个顺序（`patch::apply_one`）。**不要用
+    /// `Layers::has_own` 代替**：同一机型每个版本都写了同一个值时，`digest` 会把它
+    /// 上提成基底，`over` 里就没有这一项了 —— 数据里版本键还在，`has_own` 却说没有。
+    pub fn version_following(&self, uid: &str, key: &str) -> bool {
+        self.draft
+            .pending_follows(Level::Version, uid, key)
+            .unwrap_or_else(|| {
+                self.presets.registry.param(key).map_or(true, |p| {
+                    crate::presetdata::follows::is_following(
+                        p,
+                        &super::patch::variant_key(Level::Version, uid),
+                    )
+                })
+            })
+    }
+
     /// 一个版本的三层视图。
     ///
     /// 机型层取它那台机型的裸键，版本层只取 `A1: FAST` 这一条 ——

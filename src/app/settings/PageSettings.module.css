@@ -259,6 +259,45 @@
   max-width: 100%;
 }
 
+/*
+ * 「预设数据源」那一格的下拉（2026-11-09）：同 `.slicerPick`，外面这层只为**定宽**。
+ * 三段名字长短差得多（「Gitee（国内直连）」/「GitHub（直连）」/
+ * 「自定义地址（开发 / 排查）」）—— 定一个下限，行右缘不再被撑开；
+ * 再长的名字由共用件在框里省略号收掉。
+ */
+.sourcePick {
+  display: grid;
+  min-width: 220px;
+  max-width: 100%;
+}
+
+/*
+ * 预设数据源的**从属层**（2026-11-09）：「自定义地址」与「用过的地址」不是另外两条
+ * 并列项，而是「预设数据源」那一行的子项。
+ *
+ * 两件事把层级说出来：
+ *   ① **缩进 + 一道左竖线** —— 子项挂在父行下面，右沿也比父行收进来，行宽天然窄一截；
+ *   ② **标题降一档**（见下面 `.sourceKids .fieldTitle`）—— 父行是重的那一档，
+ *      子项小一号、不加粗、次色。
+ *
+ * ★ 不为它再加卡片 / 边框 / 底色：那会变成"组里套一块"，比现在更像独立区块。
+ */
+.sourceKids {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 2px 18px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+}
+
+/* 子项的标题与父行拉开层次：小一号、不加粗、次色（父行仍是 `--fs-body` / 600） */
+.sourceKids .fieldTitle {
+  font-size: var(--fs-label);
+  font-weight: 500;
+  color: var(--text-2);
+}
+
 /* 下拉下面那行（自定义档的完整路径）——长，允许任意断行 */
 .slicerHint {
   margin: 0;
@@ -482,27 +521,6 @@
   color: #8a5a20;
 }
 
-/* 结论一句 + 可折叠的技术详情（普通用户只看结论，作者 2026-10-05） */
-.noteBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.noteDetail summary {
-  font-size: var(--fs-label);
-  color: var(--text-3);
-  cursor: pointer;
-}
-
-.noteDetail p {
-  margin: 4px 0 0;
-  font-size: var(--fs-label);
-  color: var(--text-3);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  overflow-wrap: anywhere;
-}
-
 /* ============ 深色（2026-10-12 第二遍；2026-10-13 a07 复核） ============
  * ★ 只剩两条，全是**语义色**（好消息绿 / 警示棕）在深底上的那一档。
  *   自绘控件一条都不要（它们全走 token，两套主题自动翻）——
@@ -579,8 +597,7 @@
 .section > .note,
 .section > .noteHint,
 .section > .current,
-.section > .hint,
-.section > .noteBlock {
+.section > .hint {
   margin: 6px 0 0;
   padding: 0 12px;
 }
@@ -857,6 +874,14 @@
   font-weight: 600;
 }
 
+/* 危险动作那一扇框的框身：几段（风险句 / 开关行 / 补充说明 / 失败回执）竖着排，
+   `.body` 自己不加间距，所以间距在这里给 */
+.dangerBody {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 /* ---- 中性小字提示（"不会读写你的 3MF"那一句） ---- */
 
 /* ---------- 最近删除：模态框里的列表（2026-10-29） ---------- */
@@ -975,9 +1000,13 @@
 
 
 /* ---- 分段控件（2026-10-30）----
- * 主题 / 界面语言 / 预设数据源原来是"三行竖排单选 + 每行一条小字"，
+ * 主题 / 界面语言原来是"三行竖排单选 + 每行一条小字"，
  * 一屏里最占地方的正是它们（作者：「一条一条一条一条的参数、选项太多了」）。
  * 改成一行的分段控件：选中的那一档用实色块抬起来。
+ *
+ * ★ 只给**名字短**的那几档用（跟随系统 / 浅色 / 深色…）。名字一长（「自定义地址
+ *   （开发 / 排查）」这种）就装不下、把行右缘撑破 —— 那些一律走共用下拉
+ *   `SelectField`，见 `.sourcePick`。
  *
  * ★ 选中态**不许**写 font-weight：`src/styles/global.css` 的兜底网会把
  *   `[aria-checked='true']` 的字重钉回基础值（「状态不许改变盒子尺寸」），
@@ -1022,6 +1051,87 @@
     0 1px 2px rgb(0 0 0 / 18%);
   color: var(--text-1);
   text-shadow: var(--state-bold);
+}
+
+/* ---- 自定义数据源：用过的地址（2026-11-08）----
+ * 一行小字 + 几颗胶囊。它的职责是"找回上次那条开发地址"，所以整块压成
+ * 一档弱色：读得到、看得清是能点的，但**不跟上面那个输入框抢位置**。
+ *
+ * ★ 2026-11-09：**撤掉它自己的底色 / 圆角 / 内衬**。原来那圈 `--surface-sunken`
+ *   让它读成"第二个卡片"，和输入框并列；现在它只是子项里的一行附注 ——
+ *   从属关系由外面 `.sourceKids` 的缩进与竖线给，这里不再单独成块。 */
+
+.addrHistory {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 2px 0 4px;
+  /* 左右各 12px：与外面那个 `.fieldRow` 的内衬对齐（标题跟"自定义地址"同一列，
+     那颗清空图标落在「应用」的右沿上） */
+  padding: 0 12px;
+}
+
+.addrHistoryHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.addrHistoryLabel {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.addrHistoryClear {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: auto;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.addrHistoryClear:hover {
+  color: var(--text-1);
+}
+
+.addrHistoryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* 一条地址一颗胶囊：地址本身可以很长，所以单颗**封顶一行 + 省略号**（全串在 data-tip 里） */
+.addrChip {
+  max-width: 100%;
+  height: 24px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.addrChip:hover {
+  border-color: var(--line-strong);
+  color: var(--text-1);
+}
+
+.addrChip:disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 /* ---- 窄窗：左目录**整块不显示**（作者 2026-10-30：「窄的时候直接不显示就算了」，

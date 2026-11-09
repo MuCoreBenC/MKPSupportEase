@@ -17,7 +17,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 
-import { wb, type ParamView, type Patch, type Words, type BulkPreview } from '../api'
+import { wb, type ParamView, type Patch, type Words, type BulkPreview, type AttachPreview } from '../api'
 import { toasts } from '../c14/toast'
 import ModalC14 from '../c14/ModalC14'
 import { SelectField } from '../components/field'
@@ -39,6 +39,13 @@ export interface BatchTarget {
   rest: unknown
   /** 这一格有没有未保存的改动 —— 「恢复」只对改过的列有意义 */
   dirty: boolean
+  /**
+   * 这一层**正在跟随基底**（没有自己写的值）。
+   *
+   * 「跟随基线」只对 `false` 的列有意义 —— 已经在跟随的列写下去是空操作。
+   * 判据来自矩阵那一格的 `Cell.own`，不由前端按值猜。
+   */
+  follows: boolean
 }
 
 interface Props {
@@ -48,6 +55,11 @@ interface Props {
   targets: BatchTarget[]
   /** 唯一写入口（外壳的 run）。确认写入时带上整批 patch */
   onApply: (label: string, patches: Patch[]) => Promise<void>
+  /**
+   * 滚到中间表格里这一参数那一行（对照模式下右栏遮着表格，不看一眼容易迷路）。
+   * 不给就不画那颗按钮。
+   */
+  onLocate?: () => void
 }
 
 /** 批量值按注册表的值类型归位（与单格写值同一条路） */
@@ -67,12 +79,22 @@ function toInput(param: ParamView, v: unknown): string {
   return v === null || v === undefined ? '' : String(v)
 }
 
-export default function BatchEdit({ param, words, targets, onApply }: Props) {
+export default function BatchEdit({ param, words, targets, onApply, onLocate }: Props) {
   const [pickedIds, setPickedIds] = useState<string[] | null>(null)
   /** 用户自己改过的值。`null` = 还没动过 → 显示各列的**共同当前值**（见 `commonRaw`） */
   const [rawEdit, setRawEdit] = useState<string | null>(null)
   const [preview, setPreview] = useState<BulkPreview | null>(null)
   const [previewValue, setPreviewValue] = useState<unknown>(null)
+  /**
+   * 「与基线同值的列保持跟随」—— 预览框里那颗按钮。
+   *
+   * 关着 = 每一列各自钉住这个值（默认，与以前一样）；开着 = 那些**新值恰好等于
+   * 基线**的列改成写 `null`（跟随基底）：值一样，但少一行 `machineVariants` +
+   * 一行 `follows`，以后基底改它也跟着动。
+   */
+  const [followSame, setFollowSame] = useState(false)
+  /** 「跟随基线」的预览（点下去之前先看清哪几列真的会变） */
+  const [attach, setAttach] = useState<AttachPreview | null>(null)
 
   const pickedTargets = pickedIds ?? targets.map((v) => v.id)
   const picked = targets.filter((t) => pickedTargets.includes(t.id))
@@ -170,6 +192,8 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
         chosen.map((t) => ({ machineId: t.machineId, versionUid: t.uid })),
       )
       setPreviewValue(value)
+      /* 每次开新预览都从"各自钉住"起步 —— 上一轮的跟随选择不该跟着跑 */
+      setFollowSame(false)
       setPreview(out)
     } catch {
       /* previewBulk 拒绝时后端已给过错误横幅（外壳 fail），这里不用再说什么 */
@@ -181,16 +205,21 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
     if (!preview) return
     const byId = new Map(targets.map((t) => [t.id, t]))
     const patches: Patch[] = []
+    /** 「保持跟随」的那几列（值等于基线，写 null 而不是钉住） */
+    let followed = 0
     for (const effect of preview.effects) {
       if (effect.kind === 'noChange') continue
       const t = byId.get(effect.col)
       if (!t) continue
+      const follow = followSame && effect.sameAsBase && t.uid !== null
+      if (follow) followed += 1
       patches.push({
         kind: 'setValue',
         level: t.uid !== null ? 'version' : 'machine',
         owner: t.uid ?? t.machineId,
         key: param.key,
-        value: previewValue,
+        /* `null`（版本层）= 跟随基底，值同步成基线 —— 与「跟随基线」同一个语义 */
+        value: follow ? null : previewValue,
       })
     }
     setPreview(null)
@@ -198,7 +227,65 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
       toasts.push('没有要写的列 —— 勾选的值都已经是这个值了')
       return
     }
-    await onApply(`${param.label} 批量设为 ${shownValue()}（${patches.length} 列）`, patches)
+    const pinned = patches.length - followed
+    await onApply(
+      `${param.label} 批量设为 ${shownValue()}（${pinned} 列${
+        followed > 0 ? ` · ${followed} 列保持跟随` : ''
+      }）`,
+      patches,
+    )
+  }
+
+  /** 预览里**可以**保持跟随的列（新值 = 基线，且不是"没变化"那一档） */
+  const followCandidates =
+    preview?.effects.filter((e) => e.sameAsBase && e.kind !== 'noChange') ?? []
+
+  /* 勾选里**还在自己钉着值**的列 —— 「跟随基线」只对它们有意义 */
+  const attachable = picked.filter((t) => !t.follows)
+
+  /**
+   * 跟随基线：把勾选的列**挂回基底**。
+   *
+   * 写的是 `null`（删掉那一层自己写的键），与单格那颗「跟随 X」同一个语义；
+   * 与「设置新值」相反的方向：那边让这一层自己钉住，这边让它重新跟着基底。
+   * 先过一遍后端预览（哪几列真会变、哪几列本来就跟着），人看过再写。
+   */
+  const askAttach = async () => {
+    if (!picked.length) return
+    try {
+      setAttach(
+        await wb.previewAttach(
+          param.key,
+          picked.map((t) => ({ machineId: t.machineId, versionUid: t.uid })),
+        ),
+      )
+    } catch {
+      /* 后端拒绝时外壳已给过错误横幅（与 `apply` 同一条路） */
+    }
+  }
+
+  const confirmAttach = async () => {
+    if (!attach) return
+    const byId = new Map(targets.map((t) => [t.id, t]))
+    const patches: Patch[] = []
+    for (const e of attach.effects) {
+      const t = byId.get(e.col)
+      if (!t) continue
+      patches.push({
+        kind: 'setValue',
+        level: t.uid !== null ? 'version' : 'machine',
+        owner: t.uid ?? t.machineId,
+        key: param.key,
+        /* `null` = 删键 = 挂回继承（与 `restore` 写 `t.rest` 时同一档） */
+        value: null,
+      })
+    }
+    setAttach(null)
+    if (!patches.length) {
+      toasts.push('勾选的列本来就在跟随基底，不用改')
+      return
+    }
+    await onApply(`${param.label} 跟随基线（${patches.length} 列）`, patches)
   }
 
   return (
@@ -208,6 +295,17 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
         <span className={s.pKvV}>
           {param.label}
           <em className={s.cardNote}>{param.unit ?? ''}</em>
+          {/* 右栏遮着中间那张表时，先看一眼是哪一行再决定改不改 */}
+          {onLocate !== undefined && (
+            <button
+              type="button"
+              className={s.pMiniBtn}
+              data-tip="滚到中间表格的这个参数那一行"
+              onClick={onLocate}
+            >
+              定位
+            </button>
+          )}
         </span>
       </div>
 
@@ -325,6 +423,23 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
         >
           恢复修改前的
         </button>
+        {/*
+          与「设置新值」相反的方向：那一颗让这一层**自己钉住**，这一颗让它**重新跟着基底**。
+          写的是 null（删键），所以先在预览里看清哪几列真的会变 —— 删键与写值同样不可逆。
+        */}
+        <button
+          type="button"
+          className={`${s.btn} ${s.btnSm}`}
+          disabled={attachable.length === 0}
+          data-tip={
+            attachable.length === 0
+              ? '勾选的列本来就在跟随基底，没有可挂回的'
+              : '删掉这一层自己写的值，让它重新跟着基底变'
+          }
+          onClick={() => void askAttach()}
+        >
+          跟随基线
+        </button>
       </div>
       <p className={s.note}>
         写到<b>勾选的那些版本各自那一层</b>，没勾的版本不动。一次动作一条历史，Ctrl+Z 整块退回来。
@@ -355,6 +470,24 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
               <button type="button" className={`${s.btn} ${s.btnSm}`} onClick={() => setPreview(null)}>
                 再改改
               </button>
+              {/*
+                与基线同值的列**不必各自钉住**：写 null 让它保持跟随，值一样、
+                但少一行版本键 + 一行 follows，以后基底改它也跟着动。
+              */}
+              {followCandidates.length > 0 && (
+                <button
+                  type="button"
+                  className={`${s.btn} ${s.btnSm} ${followSame ? s.btnOn : ''}`}
+                  data-tip={
+                    followSame
+                      ? '点一下改回「各自钉住这个值」'
+                      : `这几列的新值正好等于各自基线 —— 保持跟随就不写死它们（值还是这个数）`
+                  }
+                  onClick={() => setFollowSame((v) => !v)}
+                >
+                  {followSame ? '保持跟随中 · 改回各自钉住' : `与基线同值的 ${followCandidates.length} 列保持跟随`}
+                </button>
+              )}
               <button
                 type="button"
                 className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
@@ -386,6 +519,13 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
                     {e.kind === 'detaching' && (
                       <span className={s.cardNote}> · {words.bulkKind.detaching.label}</span>
                     )}
+                    {e.sameAsBase && (
+                      <span className={s.cardNote}>
+                        {' '}
+                        · 与基线 {e.base} 同值
+                        {followSame ? '（保持跟随）' : '，可保持跟随'}
+                      </span>
+                    )}
                   </>
                 )}
               </span>
@@ -399,6 +539,74 @@ export default function BatchEdit({ param, words, targets, onApply }: Props) {
               </span>
               <span className={s.pKvV}>
                 <span className={s.cardNote} data-tip={skip.blocked.map((b) => b.need).join('；') || undefined}>
+                  {skip.reason}
+                </span>
+              </span>
+            </div>
+          ))}
+        </ModalC14>
+      )}
+
+      {/*
+        「跟随基线」的预览：与批量写值同一份纪律 —— 先看清哪几列真的会变、
+        哪几列本来就跟着基底（写下去是空操作），再点确认。
+      */}
+      {attach !== null && (
+        <ModalC14
+          open
+          size="md"
+          title={`跟随基线：${attach.label}`}
+          subtitle={`${attach.effects.length} 列会挂回基底${
+            attach.skipped.length ? ` · 跳过 ${attach.skipped.length}` : ''
+          }`}
+          onClose={() => setAttach(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnSm}`}
+                onClick={() => setAttach(null)}
+              >
+                不跟了
+              </button>
+              <button
+                type="button"
+                className={`${s.btn} ${s.btnPrimary} ${s.btnSm}`}
+                disabled={attach.effects.length === 0}
+                data-tip={
+                  attach.effects.length === 0
+                    ? '勾选的列本来就在跟随基底，写下去没有变化'
+                    : undefined
+                }
+                onClick={() => void confirmAttach()}
+              >
+                确认跟随
+              </button>
+            </>
+          }
+        >
+          {attach.effects.map((e) => (
+            <div key={e.col} className={s.pBatchRow}>
+              <span className={s.pKvK}>
+                {e.label}
+                <em className={s.cardNote}>{e.machine}</em>
+              </span>
+              <span className={s.pKvV}>
+                {e.before} → <b>跟随基底</b>
+              </span>
+            </div>
+          ))}
+          {attach.skipped.map((skip) => (
+            <div key={skip.col} className={s.pBatchRow}>
+              <span className={s.pKvK}>
+                {skip.label}
+                <em className={s.cardNote}>{skip.machine}</em>
+              </span>
+              <span className={s.pKvV}>
+                <span
+                  className={s.cardNote}
+                  data-tip={skip.blocked.map((b) => b.need).join('；') || undefined}
+                >
                   {skip.reason}
                 </span>
               </span>

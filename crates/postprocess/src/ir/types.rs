@@ -7,6 +7,7 @@
 //! 字段缺失依旧报错。
 
 use crate::diag::Diagnostic;
+use crate::diag::messages::MessageRef;
 use serde::{Deserialize, Serialize};
 
 /// Go 的 nil 切片/map 序列化为 `null`；Rust 侧收成空集合（字段缺失仍报错）。
@@ -373,8 +374,16 @@ pub struct Ir {
     pub safety: SafetyIr,
     pub meta: MetaIr,
     pub state: StateIr,
+    /// **警告的指代**（键 + 参数），不是渲好的句子：语言到了**读它的人**手上才定。
+    ///
+    /// 与 `_meta.json` 的 `errorKey` 同一条口径：存事实不存句子。老的做法是在
+    /// 管线里就渲成字符串，于是执行记录里那句永远是写入那一刻的语言 —— 钩子由
+    /// 切片器拉起、默认简体，日文 / 英文界面上翻旧记录就会冒中文。
+    ///
+    /// ★ 每一条都要在 `messages.toml` 里登记：渲的时候查不到会渲成
+    ///   `［未登记的文案 …］`，一眼看得见（不返回空串）。
     #[serde(deserialize_with = "null_to_empty")]
-    pub warnings: Vec<String>,
+    pub warnings: Vec<MessageRef>,
     #[serde(deserialize_with = "null_to_empty")]
     pub warning_diagnostics: Vec<Diagnostic>,
     /// **用户在设置页里点出来的那几档**（2026-10-17）。

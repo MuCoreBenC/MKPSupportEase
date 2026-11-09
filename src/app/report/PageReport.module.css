@@ -700,6 +700,16 @@
   border-bottom-color: var(--accent);
 }
 
+/* 警告页签跟着警告组一起用琥珀，没选中时也能从一排灰页签里认出来 */
+.tab[data-tone='warn'] {
+  color: var(--warn-ink);
+}
+
+.tab[data-tone='warn'][data-on='true'] {
+  color: var(--warn-ink);
+  border-bottom-color: var(--warn-ink);
+}
+
 .panels {
   flex: 1;
   min-height: 0;
@@ -917,6 +927,76 @@
   color: var(--text-1);
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
+}
+
+/*
+ * 警告组：组名那一行与正文整块都是琥珀。面 / 墨 / 描边走 --warn-*，深浅两套自动
+ * 都对；只挂在 data-tone='warn' 这一组上，别的组一个字不动。
+ */
+.panel[data-tone='warn'] .grpBar b,
+.panel[data-tone='warn'] .grpIcon,
+.panel[data-tone='warn'] .grpSum {
+  color: var(--warn-ink);
+}
+
+.panel[data-tone='warn'] .grpBar::after {
+  background: var(--warn-line);
+}
+
+/*
+ * 警告正文（2026-11-09）：**满宽一整块**，不再走 `.kv` 的两列（序号 | 正文）。
+ *
+ * 那个字段列在别的组是"对齐用的尺子"，在这一组换不来任何对齐好处 —— 琥珀卡自带
+ * 边框，竖线本来就不跟别组连；它只吃掉八个多字的宽度，而警告恰恰是整页最长的一类
+ * 句子（作者：「他这样子左右放好，还是说他撑满整个这个宽度」）。
+ *
+ * 语气按**提示条**来，不按"表格里的一行"：面 / 线 / 墨三笔与全站那几处警告块同源
+ * （`NoteBar` / `NoticeHero` / 设置页的 `.dangerNote`），半径用卡片那一档。
+ */
+.warnList {
+  margin: 0;
+  padding: 10px 16px;
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-md);
+  background: var(--warn-surface);
+  color: var(--warn-ink);
+  /* 数字自己画（`.warnNo`），列表标记不要 */
+  list-style: none;
+}
+
+.warnItem {
+  font-size: var(--fs-body);
+  /* 长段中文的呼吸：与模态框那张警告卡的正文同一条（1.65 + 0.2px） */
+  line-height: 1.65;
+  letter-spacing: 0.2px;
+  /* 琥珀做底子，不把每个字都点到最亮 —— 与 hero 正文同一档 */
+  opacity: 0.88;
+  /* 长句里夹的路径 / 文件名不许把卡片撑破（与 `.kvRow dd` 同一条） */
+  overflow-wrap: anywhere;
+}
+
+/* 多条之间用一条发丝线分组：比"只是多空一行"更清楚谁到哪儿结束 */
+.warnItem + .warnItem {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--warn-line);
+}
+
+/*
+ * 行首序号（多条才有）。多条时每条切成"序号 | 正文"两栏 —— **挂起缩进**：
+ * 一条折行时续行对齐正文，不回到序号底下（那会让第一行比后面几行多出两个字，
+ * 读起来像另一段）。单条时不切栏：正文要占满整行。
+ */
+.warnList[data-many='true'] .warnItem {
+  display: grid;
+  grid-template-columns: 1.4em minmax(0, 1fr);
+  column-gap: 0.3em;
+}
+
+.warnNo {
+  /* 比正文弱一档：它是路标，不是内容 */
+  opacity: 0.62;
+  font-variant-numeric: tabular-nums;
 }
 
 /* 管线：一步一行，步里的说明跟在下面 */

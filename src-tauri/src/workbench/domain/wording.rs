@@ -428,6 +428,9 @@ fn plain(v: &Value) -> String {
 pub mod disabled {
     /// 「挂回继承」在这一层本来就没写过这一项时不能点
     pub const DETACH_NOTHING_TO_DETACH: &str = "这一层没有单独设过这一项，本来就是继承来的";
+    /// 机型基底是这条链的根 —— 它没有「跟随」可言
+    pub const DETACH_ON_ROOT_LAYER: &str =
+        "机型基底是这条链的根，没有「跟随」可言（改它就是改所有人的底）";
     /// 能点时也给一句，说清点下去会发生什么
     pub const DETACH_READY: &str = "删掉这一层的这一项，让它跟着上一层变";
     /// 被上级条件关着

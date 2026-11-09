@@ -599,7 +599,18 @@ pub struct Meta {
     /// **只加不改**：旧记录没有这个键 ⇒ 读到 `null`。
     pub build: Option<String>,
     pub invocation: Invocation,
+    /// 写记录**那一刻**渲好的句子（这一趟的语言）。
+    ///
+    /// 它不再是真值：真值是下面的 `warning_refs`。留着这一格是因为①旧版本读得懂、
+    /// ②人肉打开 `_meta.json` 时一眼能读；报告页只在拿不到指代时才退回它。
     pub warnings: Vec<String>,
+    /// 每条警告的**指代**（键 + 参数，2026-11-09）。
+    ///
+    /// 与 `errorKey` 同一条口径：**存事实不存句子** —— 记录要活过语言切换。
+    /// 新记录一律写（没警告就是空数组）；旧记录没有这一格 ⇒ `null` ⇒ 读口退回
+    /// "拿那句原文去表里反查键"（见 `ipc::report::localized_warnings_in`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning_refs: Option<Vec<postprocess::diag::messages::MessageRef>>,
     /// 成功 ⇒ `None`（落 `null`，不是缺键：报告页按"有没有 error"判 `ok`）。
     pub error: Option<String>,
     /// 那句"为什么没成"的**字典键**（2026-10-27）。有了它，报告页就能按当前语言
@@ -1838,6 +1849,10 @@ mod tests {
                 args: vec!["--Gcode".into()],
             },
             warnings: vec!["这一盘没有支撑".into()],
+            warning_refs: Some(vec![postprocess::diag::messages::MessageRef::new(
+                "postproc.scarf_joint_seam",
+                &[],
+            )]),
             error: None,
             error_key: None,
             error_args: None,
@@ -1903,6 +1918,7 @@ mod tests {
             "build",
             "invocation",
             "warnings",
+            "warningRefs",
             "error",
             "cancelled",
             "pipeline",
@@ -1962,6 +1978,8 @@ mod tests {
             build: None,
             invocation: invocation(),
             warnings: Vec::new(),
+            /* 旧记录那一档：没有指代这一格 ⇒ 落 `null`（读口退回按原文反查键） */
+            warning_refs: None,
             error: Some("E_GCODE_BOUNDARY_001: 越界".into()),
             error_key: None,
             error_args: None,

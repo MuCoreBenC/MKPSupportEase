@@ -312,7 +312,7 @@ use crate::workbench::domain::history as edit_history;
 
 use crate::workbench::domain::layer::Layers;
 use crate::workbench::domain::patch::{apply as apply_patches, Draft, Patch};
-use crate::workbench::domain::preview::BulkPreview;
+use crate::workbench::domain::preview::{AttachPreview, BulkPreview};
 use crate::workbench::domain::shadow_diff;
 use crate::workbench::domain::txn::{self, Op, Txn};
 use crate::workbench::domain::variants;
@@ -2154,6 +2154,20 @@ pub fn wb_preview_bulk(
     })
 }
 
+/// **挂回跟随**的预览：点下去之前先看清哪几列真的会变、哪几列本来就跟着基底。
+///
+/// 与 [`wb_preview_bulk`] 是同一个问题的另一半 —— 那个问"设成这个值"，这个问"让它
+/// 重新跟着基底"。写下去的是 `null`（删掉那一层自己写的键），与「跟随」按钮同一个语义。
+#[tauri::command(async)]
+pub fn wb_preview_attach(key: String, cols: Vec<ColRef>) -> Result<AttachPreview, AppError> {
+    traced("wb_preview_attach", |_| {
+        with_ctx(|ctx| {
+            let (c, d, _) = state(ctx)?;
+            Ok(Book::new(&ctx.presets, &c, &d).preview_attach(&key, &cols))
+        })
+    })
+}
+
 /// 未保存改动的逐条清单。保存前的确认弹窗用它 ——
 /// 「有 7 处未保存」不足以让人放心按保存，得看得见是哪七处
 #[derive(Debug, Clone, Serialize)]
@@ -2480,26 +2494,29 @@ fn value_target(ctx: &Ctx, level: Level, owner: &str) -> String {
     }
 }
 
-/// **「改了什么」的数据源**（2026-11-03 定稿：事务是唯一数据源）。
+/// **「改了什么」的数据源**：事务账 + 值编辑历史，两处并起来。
 ///
-/// # 为什么不再读 `ctx.draft`
+/// # 为什么是两份
 ///
-/// 以前它遍历 `draft.values` / `draft.visibility` / `draft.bundles`。可
-/// `wb_apply_draft` 把值写进影子树之后**立刻** `ctx.draft = Draft::default()`
-/// —— 于是打开框时草稿层永远是空的，「改了什么」永远显示「这一份里没有格子级的
-/// 改动」。真正改动只活在 `ctx.txn` 里，而这个函数以前没读它。
+/// 结构编辑进事务（`ctx.txn`），**值编辑只落内存**（`ctx.history`，保存才写影子树）。
+/// 只读事务那份的话，改一格参数这里永远是 0 处 —— 页头写着「未保存 14」、
+/// 清单写「还没进事务」，两句话指的是同一批改动。
 ///
-/// # 为什么从事务读而不是比影子树
+/// # 为什么不用"影子树 vs 磁盘"现比
 ///
-/// 影子树里可能有**不是本次事务**造成的差异（上次会话的残留、外部改过），
-/// 拿"影子树 vs 磁盘"去数会把它们一起算进来。事务里那份是"这一笔到底改了
-/// 哪些字段"的确切记录 —— 作者 2026-11-03 的第 8 条硬约束。
+/// 影子树里可能有**不是这次编辑**造成的差异（上次会话的残留、外部改过），
+/// 拿它去数会把它们一起算进来。两份账各自记的是"这一笔到底改了哪些字段"。
 ///
-/// 现在「未保存 N」也是数它（[`txn::Txn::dirty_count`]），两个数物理同源。
+/// 去重口径与「未保存 N」同一处（[`history::dirty_field_entries`] 的 `same_cell`）。
 fn diff_draft(ctx: &Ctx) -> Vec<DiffLine> {
-    ctx.txn
-        .field_changes()
-        .into_iter()
+    let entries: Vec<edit_history::Entry> = ctx.history.entries().cloned().collect();
+    let mut rows = ctx.txn.field_changes();
+    for f in edit_history::dirty_field_entries(&entries) {
+        if !rows.iter().any(|x| x.same_cell(f)) {
+            rows.push(f.clone());
+        }
+    }
+    rows.into_iter()
         .map(|e| {
             /* `owner` 的写法在两条路上不同：
             值改动是 `A1` / `A1:STANDARD`（`machineVariants` 的叫法），
@@ -5406,6 +5423,45 @@ mod tests {
         assert_eq!(lines[1].before, "-1");
         assert_eq!(lines[1].after, "7");
         assert!(lines.iter().all(|l| l.file == VALUE_FILE));
+    }
+
+    /// **值编辑只落内存、不进事务 —— 「改了什么」也必须看得见它**（2026-11-08 作者报的）。
+    ///
+    /// 页头「未保存 N」数的是两份账（事务 + 值编辑历史）；这个清单以前只读事务那份，
+    /// 于是同一批改动在页头是 14、在清单里是 0 处。
+    #[test]
+    fn the_diff_lists_pending_value_edits_that_never_touch_the_transaction() {
+        let (_d, _f, mut ctx) = ctx();
+        assert!(diff_draft(&ctx).is_empty(), "没有改动时框里是空的");
+
+        let patch = Patch::SetValue {
+            level: crate::workbench::domain::Level::Version,
+            owner: "A1/STANDARD".to_owned(),
+            key: "wiping.tower_first_layer_flow".to_owned(),
+            value: Some(serde_json::json!(1.2)),
+        };
+        ctx.history.record(
+            "改值".to_owned(),
+            None,
+            patch.clone(),
+            vec![patch],
+            vec![txn::FieldEntry {
+                level: Some("Version".to_owned()),
+                owner: "A1:STANDARD".to_owned(),
+                key: "wiping.tower_first_layer_flow".to_owned(),
+                label: "填料塔首层流量".to_owned(),
+                before: Some("1".to_owned()),
+                after: Some("1.2".to_owned()),
+                why: "user",
+            }],
+        );
+
+        let lines = diff_draft(&ctx);
+        assert_eq!(lines.len(), 1, "值编辑不进事务，也要列出来：{lines:#?}");
+        assert_eq!(lines[0].owner, "A1:STANDARD");
+        assert_eq!(lines[0].target, "A1 · 标准版", "归属要翻成人话");
+        assert_eq!(lines[0].after, "1.2");
+        assert!(ctx.txn.field_changes().is_empty(), "这一笔确实没进事务");
     }
 
     /// 草稿里指向已消失版本的条目在**加载时**清掉，并且报出来。

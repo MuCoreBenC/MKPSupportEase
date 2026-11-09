@@ -58,10 +58,15 @@
  *  - 这里留下的是**开发 / 排查的后门**：临时把下载指向本地 `python3 -m http.server`
  *    或别的源。默认状态就是"没被碰过"（内置默认 / 没配），普通用户什么都不用动。
  *
- * 交互：**两个云端源摆成固定单选**（Gitee / GitHub），选上**立即生效**并回写
+ * 交互：**三个源收在一只下拉里**（共用件 `SelectField`：Gitee / GitHub / 自定义地址，
+ * 为什么不是一排按钮见 `sourceOptions` 那段），选上**立即生效**并回写
  * （作者 2026-10-05 推翻旧的"选了不写、另摆按钮"那套 —— 「点了怎么没有立即帮我
- * 切换成 Gitee」）。自定义地址收在最后那一档，仍是两步：选上只展开输入框，
- * 按「应用」才写；保存前先探一次，取不到就整次拒绝。
+ * 切换成 Gitee」）。自定义那一档仍是两步：选上只展开输入框、光标直接落进去，
+ * 按「应用」或**在框里回车**才写；写之前先探一次，取不到就整次拒绝。
+ *
+ * **下拉里打勾的那一条 = 盘上真在用的那一个**：打勾只在写成功之后才移动。选自定义
+ * 只展开输入区，空着 / 没点应用 / 探不通都不会让它离开原来那一档；
+ * 失败时输入区与那条错误留着 —— 地址收回去，人就只能照着报错重敲一遍。
  *
  * # 试验场专用
  *
@@ -82,8 +87,11 @@ import {
 import { open } from '@tauri-apps/plugin-dialog'
 
 import { api, errorText, isAppError } from '../../api'
+import { STORAGE } from '../../api/storageKeys'
 import type { LocalePref, PresetSource, SoftwareUpdate, ThemePref } from '../../api/contract'
-import { msg, useText, useT, type StringKey, type Text } from '../../i18n'
+/* 前端偏好落 localStorage 的那一件（自定义地址的历史就是它） */
+import { useStickyState } from '../../hooks/useStickyState'
+import { msg, useLocale, useText, useT, type StringKey, type Text } from '../../i18n'
 /* 换源广播（2026-10-08）：保存即生效、不许要求重启 —— 两个代次都只回答"要不要重读" */
 import { deliveryMutated, sourceMutated, useSourceRevision } from '../state/deliveryState'
 /* AppState 客户端：主题 / 语言这两格从它读；写完再兜底刷一次（浏览器 mock 没有事件通道） */
@@ -506,6 +514,12 @@ const LOCALE_CHOICES: { id: LocalePref; label: StringKey; hint: StringKey }[] = 
   { id: 'en', label: 'settings.locale.en', hint: 'settings.locale.enHint' },
 ]
 
+/**
+ * 「自定义地址」记几条：应用成功一次的记一条，新的在前、同一个地址不重复。
+ * 再多就把那一行撑成一堵墙 —— 这一格是"找回上次那条开发地址"，不是书签管理器。
+ */
+const ADDR_HISTORY_MAX = 6
+
 /*
  * 深链落点的类型与常量都住在 `settings/targets.ts`（唯一出处）。这一页只消费：
  * `id` 写错字过不了类型检查，也过不了 `check-locate.mjs`。
@@ -518,8 +532,35 @@ export default function PageSettings({
 } = {}) {
   const [source, setSource] = useState<PresetSource | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
+  /*
+   * 下拉里打勾的那一条 = **盘上生效的那一档**（没选过 = 出厂那个内置源）。
+   * 它只在**写成功**时移动：打勾的那个，就必须真的在用哪一个。
+   */
   const [mode, setMode] = useState<Mode>('github')
+  /*
+   * 自定义输入区**展不展开**（纯界面状态，与打勾分开）。
+   *
+   * 分开是因为这两件事同时成立：打勾留在生效的那一档，而输入框与那条错误**得留着**
+   * —— 空着 / 没点应用 / 探不通都不是"切过去了"，把打勾挪过去就是在说假话。
+   */
+  const [customOpen, setCustomOpen] = useState(false)
   const [draft, setDraft] = useState('')
+  /*
+   * 选「自定义地址」⇒ **光标直接落进输入框**：那一档选上只是展开、还没写盘，
+   * 光标在那儿人才知道下一步是打字，而不是"点了一下什么都没发生"。
+   * 用计数不用布尔：接着再点一次「自定义地址」也要再收一次焦点。
+   */
+  const draftRef = useRef<HTMLInputElement | null>(null)
+  const [draftFocus, setDraftFocus] = useState(0)
+  useEffect(() => {
+    if (draftFocus === 0) return
+    draftRef.current?.focus()
+  }, [draftFocus])
+  /*
+   * 用过的自定义地址（新的在前）。落 localStorage —— 它只是"以前写过的那条别丢"，
+   * 不是底账：真正生效的地址由后端 `run/app-state.json` 记。
+   */
+  const [addrHistory, setAddrHistory] = useStickyState<string[]>(STORAGE.clientPresetSourceHistory, [])
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<{ text: Text; bad?: boolean; detail?: string } | null>(null)
   /*
@@ -709,16 +750,53 @@ export default function PageSettings({
       setSource(got)
       /* 初值跟着生效值走：选了自定义 = 自定义那一档；其余 = 出厂默认那个内置源 */
       setMode((got?.mode ?? 'github') as Mode)
+      /* 生效的就是自定义 ⇒ 输入区跟着展开（地址一并填进去，见下一行） */
+      setCustomOpen(got?.mode === 'custom')
       setDraft(got?.mode === 'custom' ? (got?.address ?? '') : '')
+      /*
+       * 现在生效的就是自定义 ⇒ 它也该出现在「用过的地址」里：
+       * 升级上来的人（这一行还没记过任何东西）不必把手上那条再敲一遍。
+       */
+      const live = got?.mode === 'custom' ? (got.address ?? '').trim() : ''
+      if (live !== '') {
+        setAddrHistory((prev) =>
+          prev[0] === live ? prev : [live, ...prev.filter((x) => x !== live)].slice(0, ADDR_HISTORY_MAX),
+        )
+      }
     } catch (e) {
       setSource(null)
       setLoadErr(errorText(e))
     }
-  }, [])
+  }, [setAddrHistory])
 
   useEffect(() => {
     void read()
   }, [read])
+
+  /*
+   * **换界面语言 ⇒ 数据源那几句重新要一次**（2026-11-09）。
+   *
+   * `PresetSource.label` / `builtin[].label` 是**内核**翻的（`runtime::source::label`
+   * → `ui.runtime.source.gitee`），切语言只换了后端那一格，前端手里这份 `source`
+   * 还是旧语言那一串 ⇒ 界面全中文、只有那个按钮写着「Gitee（中国国内から直結）」。
+   *
+   * 只更新 `source`（名字与地址），**不动** `mode` / `customOpen` / `draft`：
+   * 换语言不该顺手把人正在填的地址清掉。
+   */
+  const locale = useLocale()
+  const localeSeen = useRef(locale)
+  useEffect(() => {
+    if (localeSeen.current === locale) return
+    localeSeen.current = locale
+    void api.getPresetSource().then(
+      (got) => {
+        setSource(got)
+        setLoadErr(null)
+      },
+      /* 读不到就留着旧的那一份 —— 名字语言不对，好过整块变成"读不出来" */
+      () => {},
+    )
+  }, [locale])
 
   /*
    * 软件更新：**只在打开这一页时问一次**（铁律 2：更新检查不在启动 / 首屏路径）。
@@ -851,13 +929,20 @@ export default function PageSettings({
 
   /*
    * 选云端源 = **立即生效**（作者 2026-10-05：选了没反应让人怀疑没点上）。
-   * 乐观把单选切过去，后端落盘成功就用回传值校准；失败**回到生效的那一档**，
-   * 结论讲成人话、技术细节进折叠。自定义仍只展开输入框，不在这里写。
+   * 乐观把打勾切过去，后端落盘成功就用回传值校准；失败**回到生效的那一档**，
+   * 结论讲成人话、技术细节进折叠。
+   *
+   * **自定义那档不移动打勾**：它选上只是展开输入区（光标落进去），写盘要等
+   * 「应用」/ 回车 —— 打勾跟着"我点了什么"走的话，空着 / 没应用 / 探不通
+   * 都会让它停在一个没在用的档上。
+   *
+   * 换到内置源成功 ⇒ 自定义输入区收起（那一档已经不是"正在改的东西"了）。
    */
   const pick = async (next: Mode) => {
     setNote(null)
     if (next === 'custom') {
-      setMode('custom')
+      setCustomOpen(true)
+      setDraftFocus((n) => n + 1)
       return
     }
     if (busy) return
@@ -869,19 +954,19 @@ export default function PageSettings({
         /* 演示后端没有内置源（真机必有）：选内置 = 回到"没配"，如实照做 */
         setSource(null)
         setMode(next)
+        setCustomOpen(false)
         sourceChanged()
         return
       }
       setSource(got)
       setMode(got.mode as Mode)
+      setCustomOpen(false)
       setNote({ text: msg('settings.advanced.switched', { label: got.label }) })
       await afterSourceChanged()
     } catch (e) {
       setMode((source?.mode as Mode | undefined) ?? 'github')
       setNote({
-        text: msg('settings.advanced.switchFailed', {
-          label: source?.label ?? tr('settings.advanced.defaultSource'),
-        }),
+        text: msg('settings.advanced.switchFailed', { label: effectiveLabel }),
         bad: true,
         detail: errorText(e),
       })
@@ -1040,25 +1125,37 @@ export default function PageSettings({
     }
   }
 
-  /* 当前生效的那一句账：读不出来 / 没配 / 你指定的 / 内置源 —— 四种都要说得出 */
+  /*
+   * 当前生效的那一句账：读不出来 / 没配 / 没有地址 / 地址本身 —— 四种都要说得出。
+   *
+   * ★ 只说**地址**，不再重复源的名字：名字已经在下拉触发器上（两者显示的永远是同一
+   *   条账），再拼一遍就是「Gitee（国内直连）：https://…」那种两截冒号。
+   *   读不出来的技术原因挂在这一行的悬停气泡上（`data-tip`），可见的只留一句话。
+   */
   const currentText =
     loadErr !== null
-      ? tr('settings.advanced.readFailed', { detail: loadErr })
+      ? tr('settings.advanced.readFailed')
       : source === null
         ? tr('settings.advanced.unconfigured')
-        : source.mode === 'custom'
-          ? tr('settings.advanced.customText', {
-              address:
-                source.address === ''
-                  ? tr('settings.advanced.emptyAddress')
-                  : source.address,
-            })
-          : tr('settings.advanced.builtinText', {
-              label: source.label,
-              address: source.address,
-            })
+        : source.address === ''
+          ? tr('settings.advanced.emptyAddress')
+          : source.address
 
   const canSet = draft.trim() !== ''
+
+  /**
+   * 失败回执里"现在用的还是 ___"那一格：**照生效的那一条说**。
+   *
+   * 内置源报名字；自定义报**地址本身**（报"自定义地址"等于没说 —— 人家要修的正是那一串）。
+   */
+  const effectiveLabel =
+    source === null
+      ? tr('settings.advanced.defaultSource')
+      : source.mode === 'custom'
+        ? source.address === ''
+          ? tr('settings.advanced.emptyAddress')
+          : source.address
+        : source.label
 
   /* 单选显示的永远是**盘上真账**：还没选过（null）时按"跟随系统"那一档显示 */
   const currentTheme: ThemePref = theme ?? 'system'
@@ -1081,6 +1178,26 @@ export default function PageSettings({
   const slicerShow: SlicerId = slicer === 'custom' && slicerCustom === null ? 'system' : slicer
   /* 「跟随系统默认」在这台机器上指谁那一句（问不到 = `null` ⇒ 那行不摆） */
   const slicerSystem = systemSlicerLine(tr, systemApp)
+
+  /*
+   * 数据源下拉的选项：两个云端源（名字由内核给）+ 最后一档自定义。
+   *
+   * ★ 为什么是下拉、不是一排按钮：三段名字都长（「Gitee（国内直连）」/
+   *   「GitHub（直连）」/「自定义地址（开发 / 排查）」），一排并排在行右缘装不下 ——
+   *   越出行边界的同时，还把左边的「当前：…」压成一条窄缝。下拉的触发器定宽，
+   *   长名字在框里省略号解决；哪一条是出厂默认挂在 `note` 上（原来在 `data-tip` 尾巴）。
+   */
+  const sourceOptions: FieldOption[] = [
+    ...(source?.builtin ?? []).map((b) => ({
+      value: b.id,
+      label: b.label,
+      note: b.id === source?.defaultMode ? tr('settings.advanced.defaultTag').trim() : undefined,
+    })),
+    { value: 'custom', label: tr('settings.advanced.customLabel') },
+  ]
+  /* 生效的那一档不在选项里（源读不出来 / 演示后端没有内置源）⇒ 按第一项显示，
+     不把 `github` 这种 id 原文露在触发器上 */
+  const sourceShow = sourceOptions.some((o) => o.value === mode) ? mode : (sourceOptions[0]?.value ?? '')
 
   /**
    * **换源之后广播一声**（2026-10-08 作者要求：地址保存即生效，**不许要求重启**）。
@@ -1133,21 +1250,34 @@ export default function PageSettings({
     })
   }
 
-  /* 自定义地址的落盘（先探后写，后端做）。失败不回滚单选：输入框留着让人改地址重试 */
+  /*
+   * 自定义地址的落盘（先探后写，后端做）。
+   *
+   * 勾**只有写成功才落到自定义上**，失败原地不动 —— 于是失败之后勾仍在原来那一档，
+   * 输入区与错误句留着（地址收回去，人就只能照着报错重敲一遍）。
+   */
   const apply = async () => {
     if (busy) return
     setBusy(true)
     setNote(null)
+    const address = draft.trim()
+    /*
+     * **点了「应用」就记**，成不成探通都记：这一行是"我刚才打的那串地址别丢"，
+     * 不是"验证通过的地址清单" —— 探不通的那条最需要回来改个字符再试，
+     * 丢了就等于要重敲一遍。生效与否看下面那句话，不靠这一行。
+     */
+    setAddrHistory((prev) => [address, ...prev.filter((x) => x !== address)].slice(0, ADDR_HISTORY_MAX))
     try {
-      const got = await api.setPresetSource('custom', draft.trim())
+      const got = await api.setPresetSource('custom', address)
       setSource(got)
+      /* 写进去了才把勾落在自定义上（写之前那个勾一直停在生效的那一档） */
+      setMode('custom')
+      setCustomOpen(true)
       /* 地址生效了还要**当场把目录同步过来** —— 不然界面停在旧目录直到重启 */
       await afterSourceChanged()
     } catch (e) {
       setNote({
-        text: msg('settings.advanced.applyFailed', {
-          label: source?.label ?? tr('settings.advanced.defaultSource'),
-        }),
+        text: msg('settings.advanced.applyFailed', { label: effectiveLabel }),
         bad: true,
         detail: errorText(e),
       })
@@ -1203,6 +1333,31 @@ export default function PageSettings({
    * 只在「最近删除」那个框上用得到 —— 列表搬进框里之后（2026-10-29）。
    */
   const [pageEl, setPageEl] = useState<HTMLDivElement | null>(null)
+
+  /*
+   * 离开这一页再回来 ⇒ 把"敞着、但什么都没写进去"的自定义编辑区收回去。
+   *
+   * 页签是**常驻挂**的（`PageSlot` 只切 `data-hidden`，见 `App.tsx` 那段注释）：
+   * 不主动收的话，切去别的页再回来，输入框仍空着、编辑区仍敞着 —— 而盘上一格没变，
+   * 界面看着像"自定义那一档还没生效"。
+   *
+   * 只收**空着**的那一种：真打了字还没点应用的不动（那是人家正在填的东西，收掉等于删稿）。
+   */
+  useEffect(() => {
+    const slot = pageEl?.closest('[data-hidden]')
+    if (!(slot instanceof HTMLElement)) return
+    let hidden = slot.hasAttribute('data-hidden')
+    const mo = new MutationObserver(() => {
+      const now = slot.hasAttribute('data-hidden')
+      if (hidden && !now && draft.trim() === '') {
+        setCustomOpen(false)
+        setDraft(source?.mode === 'custom' ? source.address : '')
+      }
+      hidden = now
+    })
+    mo.observe(slot, { attributes: true, attributeFilter: ['data-hidden'] })
+    return () => mo.disconnect()
+  }, [pageEl, draft, source])
 
   /* 右栏滚动容器：搜索效果与左目录都认它（左目录里那颗 ref 由 SideNav 收） */
   const mainRef = useRef<HTMLElement | null>(null)
@@ -1821,9 +1976,8 @@ export default function PageSettings({
 
       <section className={s.section} id="advanced" data-sec aria-label={tr('settings.advanced.title')}>
         <h2 className={s.secTitle}>{tr('settings.advanced.title')}</h2>
-        <p className={s.fieldNote}>{tr('settings.advanced.note')}</p>
 
-        {/* 2026-10-30：三行竖排单选 → 一行分段。下面那句就是"现在用的是哪一个"（原在章末） */}
+        {/* 一行：左标题 + 「当前：…」，右侧一只下拉。下面那句就是"现在用的是哪一个"（原在章末） */}
         <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
@@ -1836,77 +1990,106 @@ export default function PageSettings({
               */}
               <Tip text={tr('settings.advanced.sourceNote')} />
             </div>
-            {/* 「现在用的是哪一个」要**常显**（不是说明），所以不走气泡 */}
-            <p className={s.current}>
+            {/* 「现在用的是哪一个」要**常显**（不是说明），所以不走气泡；
+                读不出来的技术原因只挂在悬停气泡上（这一格没读到时才不为空） */}
+            <p className={s.current} data-tip={loadErr ?? undefined}>
               {tr('settings.advanced.current', { text: currentText })}
             </p>
           </div>
-          <div className={s.seg} role="radiogroup" aria-label={tr('settings.advanced.sourceLabel')}>
-            {/* ★ 两个固定档 = 防错第一道：用户没有输错地址的机会。选上**立即生效** */}
-            {(source?.builtin ?? []).map((b) => (
-              <button
-                key={b.id}
-                type="button"
-                role="radio"
-                aria-checked={mode === b.id}
+          <div className={s.ctl}>
+            {/* ★ 两个固定档 = 防错第一道：用户没有输错地址的机会，选上**立即生效**；
+                自定义那一档选上只展开下面的输入区（见 `pick`） */}
+            <span className={s.sourcePick}>
+              <SelectField
+                label={tr('settings.advanced.sourceLabel')}
+                options={sourceOptions}
+                value={sourceShow}
                 disabled={busy}
-                data-tip={
-                  b.id === source?.defaultMode
-                    ? `${b.address} ${tr('settings.advanced.defaultTag')}`
-                    : b.address
-                }
-                onClick={() => void pick(b.id as Mode)}
-              >
-                {b.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              role="radio"
-              aria-checked={mode === 'custom'}
-              disabled={busy}
-              onClick={() => void pick('custom')}
-            >
-              {tr('settings.advanced.customLabel')}
-            </button>
+                onChange={(v) => void pick(v as Mode)}
+              />
+            </span>
           </div>
         </div>
 
-        {/* 自定义：选上只展开（不写）；按「应用」才先探后写 */}
-        {mode === 'custom' && (
-          <div className={`${s.field} ${s.fieldRow}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>
-                {tr('settings.advanced.customLabel')}
-                <Tip text={tr('settings.advanced.hint')} />
+        {/* 自定义：选上只展开（不写）；按「应用」或在框里回车才先探后写。
+            展开与否看 `customOpen` 而不是看打勾 —— 写失败了打勾要退回生效那一档，
+            输入框得留着。
+            ★ 这两块（自定义 + 用过的地址）套在 `.sourceKids` 里：缩进 + 一道左竖线，
+            读起来是上面「预设数据源」那一行的子项，不是并列的另外两条（见 CSS 头注）。 */}
+        {customOpen && (
+          <div className={s.sourceKids}>
+            <div className={`${s.field} ${s.fieldRow}`}>
+              <div className={s.fieldText}>
+                <div className={s.fieldTitle}>
+                  {tr('settings.advanced.customLabel')}
+                  <Tip text={tr('settings.advanced.hint')} />
+                </div>
+              </div>
+              <div className={s.ctl}>
+                <input
+                  ref={draftRef}
+                  className={s.input}
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    /* 输入法还在组字：这一下回车是"上屏"，不是"应用" */
+                    if ((e.nativeEvent as InputEvent).isComposing) return
+                    if (e.key !== 'Enter') return
+                    e.preventDefault()
+                    if (busy || !canSet) return
+                    void apply()
+                  }}
+                  placeholder={tr('settings.advanced.addressPlaceholder')}
+                  aria-label={tr('settings.advanced.addressAria')}
+                />
+                <Btn onClick={() => void apply()} disabled={busy || !canSet}>
+                  {busy ? tr('settings.advanced.checking') : tr('settings.advanced.apply')}
+                </Btn>
               </div>
             </div>
-            <div className={s.ctl}>
-              <input
-                className={s.input}
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={tr('settings.advanced.addressPlaceholder')}
-                aria-label={tr('settings.advanced.addressAria')}
-              />
-              <Btn onClick={() => void apply()} disabled={busy || !canSet}>
-                {busy ? tr('settings.advanced.checking') : tr('settings.advanced.apply')}
-              </Btn>
-            </div>
+
+            {/* 用过的地址：点一下**填回输入框**（不直接应用 —— 与上面同一条约：
+                先探后写，要点「应用」才算数） */}
+            {addrHistory.length > 0 && (
+              <div className={s.addrHistory}>
+                <div className={s.addrHistoryHead}>
+                  <span className={s.addrHistoryLabel}>{tr('settings.advanced.historyLabel')}</span>
+                  <span className={s.noteHint}>{tr('settings.advanced.historyNote')}</span>
+                  {/* 清空：纯动作，用图标替掉那两个字（名字留在 `aria-label` / 气泡里） */}
+                  <button
+                    type="button"
+                    className={s.addrHistoryClear}
+                    aria-label={tr('settings.advanced.historyClear')}
+                    data-tip={tr('settings.advanced.historyClear')}
+                    onClick={() => setAddrHistory([])}
+                  >
+                    <Icon name="trash" size={13} />
+                  </button>
+                </div>
+                <div className={s.addrHistoryList}>
+                  {addrHistory.map((addr) => (
+                    <button
+                      key={addr}
+                      type="button"
+                      className={s.addrChip}
+                      data-tip={addr}
+                      aria-label={tr('settings.advanced.historyPick', { address: addr })}
+                      disabled={busy}
+                      onClick={() => setDraft(addr)}
+                    >
+                      {addr}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
         {note !== null && (
-          <div className={s.noteBlock}>
-            <p className={`${s.note} ${note.bad ? s.noteBad : ''}`}>{say(note.text)}</p>
-            {note.detail !== undefined && (
-              /* 技术细节收进折叠：普通用户只看结论（作者 2026-10-05：
-                 「出了一堆东西我也看不懂，你要给用户看得懂的东西」） */
-              <details className={s.noteDetail}>
-                <summary>{tr('settings.advanced.details')}</summary>
-                <p>{note.detail}</p>
-              </details>
-            )}
-          </div>
+          /* 可见的只有一句结论；技术原因挂在悬停气泡上（`data-tip`），不占版面 */
+          <p className={`${s.note} ${note.bad ? s.noteBad : ''}`} data-tip={note.detail}>
+            {say(note.text)}
+          </p>
         )}
       </section>
           </div>

@@ -5102,6 +5102,7 @@
 
 .pMiniBtn {
   padding: 0 5px;
+  flex: none;
   font-size: var(--fs-label);
   line-height: 16px;
   color: var(--text-3);

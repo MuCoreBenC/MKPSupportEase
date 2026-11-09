@@ -716,6 +716,13 @@ export interface BulkEffect {
   before: string
   after: string
   kind: BulkKind
+  /** 这一列所属机型**基底的当前值**（人话） */
+  base: string
+  /**
+   * 要写的值**恰好等于基线** ⇒ 这一列可以不钉住，改成「保持跟随」：
+   * 值一样，但少一行 `machineVariants` + 一行 `follows`。
+   */
+  sameAsBase: boolean
 }
 
 /** `preview::BulkSkip` */
@@ -735,6 +742,31 @@ export interface BulkPreview {
   blockedReason: string | null
   effects: BulkEffect[]
   skipped: BulkSkip[]
+}
+
+/**
+ * `preview::AttachPreview` —— **把这些列挂回跟随**会落到哪几列。
+ *
+ * 与 `BulkPreview` 是同一个问题的另一半：那个问"设成这个值"，
+ * 这个问"让它重新跟着基底"（写 `null` = 删掉那一层自己写的键）。
+ */
+export interface AttachPreview {
+  key: string
+  label: string
+  allowed: boolean
+  blockedReason: string | null
+  effects: AttachEffect[]
+  skipped: BulkSkip[]
+}
+
+export interface AttachEffect {
+  /** 列的 key（机型 id 或版本 uid） */
+  col: string
+  machine: string
+  label: string
+  level: Level
+  /** 这一层现在钉着的值（人话）—— 删掉它之后这一层改跟基底 */
+  before: string
 }
 
 /** `app::DiffLine` */
@@ -3037,6 +3069,8 @@ export const wb = {
     }),
   previewBulk: (key: string, value: unknown, cols: ColRef[]) =>
     invoke<BulkPreview>('wb_preview_bulk', { key, value, cols }),
+  previewAttach: (key: string, cols: ColRef[]) =>
+    invoke<AttachPreview>('wb_preview_attach', { key, cols }),
   diffDraft: () => invoke<DiffLine[]>('wb_diff_draft'),
 
   /**

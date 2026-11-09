@@ -229,6 +229,10 @@ pub struct FinishedPayload {
     pub elapsed_ms: u64,
     /// 产物落点（成功时就是输入那一份 —— 原地覆盖）
     pub output: Option<String>,
+    /// 警告的**句子**（这一趟的语言）—— 模态框当场就摆，跨进程不传键。
+    ///
+    /// 归档那一面存的是键 + 参数（`archive::Meta::warning_refs`）：记录要活过语言
+    /// 切换，这条消息不用 —— 它就是"眼前这一趟"。
     pub warnings: Vec<String>,
     /// **结果读数**（界面上「结果」几扇要摆的那几格：指标条 + 擦料与胶水消耗）。
     ///

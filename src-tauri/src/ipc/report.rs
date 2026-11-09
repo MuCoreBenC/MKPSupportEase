@@ -145,6 +145,11 @@ pub struct ReportDetail {
     /// **挪塔记录**（`_meta.json` 顶层 `relocation`，2026-10-18）——
     /// 用户选了什么 / 从哪挪到哪 / 挪了多少 / 复检过没过。别的记录一律 `null`。
     pub relocation: Option<serde_json::Value>,
+    /// 这一趟的警告，**按现在这套语言说**（2026-11-09）。
+    ///
+    /// 记录里存的是指代（`warningRefs`：键 + 参数），不是句子 —— 切了语言再翻
+    /// 旧记录，这里跟着换。老记录只有当年那句话，按原文反查得到键就重说，
+    /// 查不到（后来改过措辞 / 句子带填值）就原样摆，不猜。
     pub warnings: Vec<String>,
     /// 调用现场（exe + argv）—— 复制脚本 / 排查对不上时看它
     pub invocation: Option<serde_json::Value>,
@@ -381,6 +386,49 @@ fn error_line_in(
     )
 }
 
+/**
+ * 记录里的警告，按**指定语言**重说一遍（2026-11-09）。
+ *
+ * 与 [`localized_error_in`] 同一条道理，只是警告是**多条**：
+ *
+ * 1. 新记录带 `warningRefs`（键 + 参数）⇒ 逐条按现在的语言渲。参数里套着的
+ *    `{source}` / `{limit}` 也是表里的条目，[`messages::MessageRef::text_in`]
+ *    会一路解到同一种语言（外壳是日文、里层却是中文的那种半截翻译）。
+ * 2. 老记录只有当年那几句 ⇒ 拿原文去表里反查键（`key_of_exact_text`，四本字典都认）；
+ *    认得出就重说，认不出（后来改过措辞、或句子里的占位符已经填进去）就原样摆 ——
+ *    不猜、不模糊匹配。
+ * 3. 指代那一格本身坏了（手改过 / 写了一半）⇒ 退回同一条记录里那句话，
+ *    比少一条强，也比整页读不出来强。
+ */
+fn localized_warnings_in(lang: messages::Lang, meta: &serde_json::Value) -> Vec<String> {
+    let stored: Vec<&str> = meta
+        .get("warnings")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|w| w.as_str()).collect())
+        .unwrap_or_default();
+
+    if let Some(refs) = meta.get("warningRefs").and_then(|v| v.as_array()) {
+        return refs
+            .iter()
+            .enumerate()
+            .map(
+                |(i, raw)| match serde_json::from_value::<messages::MessageRef>(raw.clone()) {
+                    Ok(msg) => msg.text_in(lang),
+                    Err(_) => stored.get(i).map(|s| (*s).to_owned()).unwrap_or_default(),
+                },
+            )
+            .collect();
+    }
+
+    stored
+        .into_iter()
+        .map(|s| match messages::key_of_exact_text(s) {
+            Some(key) => messages::text_in(lang, key, &[]),
+            None => s.to_owned(),
+        })
+        .collect()
+}
+
 /// 在整棵树里找 `<id>_meta.json`（id 全树唯一，文件名即 id）
 fn find_meta(dir: &std::path::Path, id: &str) -> Option<(std::path::PathBuf, String)> {
     let days = std::fs::read_dir(dir).ok()?;
@@ -428,15 +476,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default(),
-        warnings: meta
-            .get("warnings")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|w| w.as_str().map(|s| s.to_owned()))
-                    .collect()
-            })
-            .unwrap_or_default(),
+        warnings: localized_warnings_in(messages::current(), meta),
         collision: meta.get("collision").cloned(),
         model_map: meta.get("modelMap").cloned(),
         relocation: meta.get("relocation").cloned(),
@@ -1588,5 +1628,81 @@ mod tests {
         for bad in ["", ".", "..", "../x", r"..\x", "a/b", "a\\b"] {
             assert!(check_id(bad).is_err(), "{bad:?} 该被拦下");
         }
+    }
+
+    /// **新记录**（带 `warningRefs`）：切了语言再翻，警告跟着换 —— 不再是写入那一刻那句。
+    ///
+    /// 作者 2026-11-09 的截图就是这一条：记录写于中文界面，界面上早就是日文了，
+    /// 报告页还摆着中文。
+    #[test]
+    fn an_archived_warning_is_restated_in_the_current_language() {
+        let meta = serde_json::json!({
+            "warnings": [messages::text_in(messages::Lang::Zh, "postproc.scarf_joint_seam", &[])],
+            "warningRefs": [{ "key": "postproc.scarf_joint_seam" }],
+        });
+
+        for lang in [
+            messages::Lang::Zh,
+            messages::Lang::ZhTw,
+            messages::Lang::En,
+            messages::Lang::Ja,
+        ] {
+            let said = localized_warnings_in(lang, &meta);
+            assert_eq!(said.len(), 1);
+            assert_eq!(
+                said[0],
+                messages::text_in(lang, "postproc.scarf_joint_seam", &[])
+            );
+        }
+
+        /* 日文那一档**不许**等于中文那一档：相等说明根本没重说 */
+        assert_ne!(
+            localized_warnings_in(messages::Lang::Ja, &meta)[0],
+            localized_warnings_in(messages::Lang::Zh, &meta)[0],
+            "日文界面翻出了中文那条"
+        );
+    }
+
+    /// **带参数**的指代：参数值按同一个语言填进去（`{layers}` 是数，不译）。
+    #[test]
+    fn an_archived_warning_keeps_its_arguments() {
+        let meta = serde_json::json!({
+            "warningRefs": [{
+                "key": "postproc.header_layer_declared",
+                "args": { "layers": "627" }
+            }],
+        });
+        let en = localized_warnings_in(messages::Lang::En, &meta);
+        assert_eq!(en.len(), 1);
+        assert!(en[0].contains("627"), "参数丢了：{}", en[0]);
+        assert!(!en[0].contains('{'), "占位符没解干净：{}", en[0]);
+    }
+
+    /// **老记录**（只有句子）：按原文反查得到键就重说；查不到就原样摆（不猜）。
+    #[test]
+    fn an_old_record_warning_is_restated_by_its_own_text() {
+        let zh = messages::text_in(messages::Lang::Zh, "postproc.scarf_joint_seam", &[]);
+        let meta = serde_json::json!({ "warnings": [zh, "这一句表里没有"] });
+
+        let en = localized_warnings_in(messages::Lang::En, &meta);
+        assert_eq!(en.len(), 2);
+        assert_eq!(
+            en[0],
+            messages::text_in(messages::Lang::En, "postproc.scarf_joint_seam", &[])
+        );
+        assert_eq!(en[1], "这一句表里没有", "认不出的句子不许改、也不许丢");
+    }
+
+    /// 指代那一格坏了（手改过 / 写了一半）⇒ 退回同一条记录里那句话，不整页读不出来。
+    #[test]
+    fn a_broken_warning_ref_falls_back_to_the_written_sentence() {
+        let meta = serde_json::json!({
+            "warnings": ["那一刻的原文"],
+            "warningRefs": [{ "nokey": true }],
+        });
+        assert_eq!(
+            localized_warnings_in(messages::Lang::Ja, &meta),
+            vec!["那一刻的原文".to_owned()]
+        );
     }
 }

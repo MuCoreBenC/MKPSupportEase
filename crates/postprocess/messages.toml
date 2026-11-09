@@ -195,51 +195,48 @@ params = ["sides"]
 
 ["postproc.scarf_joint_seam"]
 code = "W_SCARF_JOINT_SEAM_001"
-text = "本次切片开启了斜拼接缝。Bambu Studio 2.7.1 及以后版本在后处理后不刷新层表，已确认会导致打印成品缺失。建议优先关闭斜拼接缝，或改用 2.6.0 及更早版本，或等待官方修复。"
-text_en = "Scarf joint seam is on. Bambu Studio 2.7.1+ leaves the layer table stale, so printed parts come out broken. Turn the seam off, use 2.6.0 or earlier, or wait for an official fix."
-text_zh_tw = "本次切片開啟了斜拼接縫。Bambu Studio 2.7.1 及以後版本在後處理後不更新層表，已確認會造成列印成品缺失。建議優先關閉斜拼接縫，或改用 2.6.0 及更早版本，或等待官方修復。"
-text_ja = "斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降は後処理後にレイヤー表を更新せず、印刷物が欠けます。斜め継ぎ目をオフにするか、2.6.0 以前を使うか、公式修正をお待ちください。"
-note = "三条处置的**顺序就是优先级**（先关开关 → 再退版本 → 最后等官方），别把换旧版排第一。四句话都压到「模态框那张 104px 的 hero 卡里放得下三行」为止 —— 每加一句都要回去量（`?pp=warn` 那一屏 + scripts/probes/pp-modal-height.mjs 同款量法）。分界 2.7.1 来自 BackgroundSlicingProcess.cpp 的比对；2.9.1 仍然坏，所以只说「等官方修复」，不许写「升级就好」。"
+text = "这份文件开了斜拼接缝，Bambu Studio 2.7.1 及以后的版本会漏掉一部分：预览只显示一半，打印出来也可能缺一块。建议切片时把「斜拼接缝」关掉重切一次；不方便改就换 2.6.0 及更早的版本。"
+text_en = "This file uses scarf joint seams. Bambu Studio 2.7.1 and later can drop part of it: the preview shows only half, and the printed part may be missing a chunk. Turn scarf seams off and slice again, or use 2.6.0 or earlier."
+text_zh_tw = "這份檔案開了斜拼接縫，Bambu Studio 2.7.1 及以後的版本會漏掉一部分：預覽只顯示一半，列印出來也可能缺一塊。建議切片時把「斜拼接縫」關掉重切一次；不方便改就換 2.6.0 及更早的版本。"
+text_ja = "このファイルは斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降では一部が欠けます：プレビューは半分しか表示されず、印刷物も欠けることがあります。スライス時に斜め継ぎ目をオフにして切り直すか、2.6.0 以前をご利用ください。"
+note = "说人话：**不写「层表」「后处理」这些内部机制**，只说用户看得见的（预览少一半 / 打印缺一块）与两条处置。处置**顺序就是优先级**（先关开关 → 再退版本），别把换旧版排第一。四句话都压到「模态框那张 104px 的 hero 卡里放得下三行」为止 —— 每加一句都要回去量（`?pp=warn` 那一屏 + scripts/probes/pp-modal-height.mjs 同款量法）。分界 2.7.1 来自 BackgroundSlicingProcess.cpp 的比对；2.9.1 仍然坏，所以只说「换旧版」，不许写「升级就好」。"
+# 改口吻之前的旧句（报告页翻老记录时靠这几句认回本条，见 `key_of_exact_text`）。
+# 第一条是 2026-11-08 那次 `-dirty` 构建写进执行记录的原话（带 markdown 记号），
+# 后四条是 `b3038e3` 里那一版四语言。**新写法不要再往这里加** —— 这张表是历史，不是草稿本。
+legacy = [
+  "成品把 `; has_scarf_joint_seam` 置成了 0：Bambu Studio 只在这一格为 1 时按 `; CHANGE_LAYER` 定层，那种层表会让预览把模型与擦料塔的上半截画不出来。置 0 后它按 Z 平台段数层 —— 层数会比模型层数多（斜接缝的 Z 斜坡被逐段数开），但每一段都对得上实际几何。",
+  "这个件开了斜拼接缝。Bambu Studio 会在「切片完成」的那一屏沿用切片时的层表（它跑完后处理只更新走线、不更新层表），于是预览只画得出半截 —— 这是 Bambu 的缺陷，文件本身没问题。成品已把 `; has_scarf_joint_seam` 置 0，**重新打开（或拖入）这份 G-code** 就能看到完整图形；那一屏的层数会比模型层数多，因为斜接缝的 Z 斜坡被逐段数开了。",
+  "本次切片开启了斜拼接缝。Bambu Studio 2.7.1 及以后版本在后处理后不刷新层表，已确认会导致打印成品缺失。建议优先关闭斜拼接缝，或改用 2.6.0 及更早版本，或等待官方修复。",
+  "Scarf joint seam is on. Bambu Studio 2.7.1+ leaves the layer table stale, so printed parts come out broken. Turn the seam off, use 2.6.0 or earlier, or wait for an official fix.",
+  "本次切片開啟了斜拼接縫。Bambu Studio 2.7.1 及以後版本在後處理後不更新層表，已確認會造成列印成品缺失。建議優先關閉斜拼接縫，或改用 2.6.0 及更早版本，或等待官方修復。",
+  "斜め継ぎ目が有効です。Bambu Studio 2.7.1 以降は後処理後にレイヤー表を更新せず、印刷物が欠けます。斜め継ぎ目をオフにするか、2.6.0 以前を使うか、公式修正をお待ちください。",
+]
 
 ["postproc.header_layer_declared"]
 code = "W_HEADER_LAYER_001"
-text = "G-code 头部没有 `; total layer number:` 声明，已按实测 {layers} 层补写。"
-text_en = "The G-code header had no `; total layer number:` declaration; it now states the measured {layers} layers."
-text_zh_tw = "G-code 頭部沒有 `; total layer number:` 宣告，已按實測 {layers} 層補寫。"
-text_ja = "G-code のヘッダーに `; total layer number:` の宣言がないため、実測値の {layers} 層で書き足しました。"
+text = "这个文件没写总层数，已按实际的 {layers} 层补上。"
+text_en = "This file had no total layer count, so it now says {layers} layers — the number actually in the file."
+text_zh_tw = "這個檔案沒寫總層數，已按實際的 {layers} 層補上。"
+text_ja = "このファイルには総層数の記載がなかったため、実際の {layers} 層で補いました。"
 params = ["layers"]
-note = "层数声明补写：采集侧按实测层数写回去，报告与文件说同一个数（见 pipeline 的 `finalized.layers`）"
+note = "层数声明补写：采集侧按实测层数写回去，报告与文件说同一个数（见 pipeline 的 `finalized.layers`）。**不写 G-code 里的注释名**（`; total layer number:` 是内部写法，用户看不懂）"
 
 ["postproc.range_check.first_pen"]
 code = "W_RANGE_FIRST_PEN_001"
-text = "首笔活化的路径超过工具头的最大运动范围"
-text_en = "The first-pen revitalization path exceeds the toolhead travel range"
-text_zh_tw = "首筆活化的路徑超過工具頭的最大運動範圍"
-text_ja = "ファーストペン活性化の経路がツールヘッドの最大移動範囲を超えています"
+text = "涂胶的路径超出了这台机器能走到的范围"
+text_en = "The glue path goes beyond what this machine can reach"
+text_zh_tw = "塗膠的路徑超出了這台機器能走到的範圍"
+text_ja = "接着剤の経路がこの機種の可動範囲を超えています"
 note = "XY 越界那条警告的**主语**（下面是它的整句），参数 `{source}` 由这里给"
 
 ["postproc.range_violation"]
 code = "W_RANGE_VIOLATION_001"
-text = "{source}，向 {dir} 方向移动（实际 {axis}={actual}，{limit}={bound}）"
-text_en = "{source}; the path moves toward {dir} (actual {axis}={actual}, {limit}={bound})"
-text_zh_tw = "{source}，向 {dir} 方向移動（實際 {axis}={actual}，{limit}={bound}）"
-text_ja = "{source}：{dir} 方向へ移動しています（実際 {axis}={actual}、{limit}={bound}）"
-params = ["source", "dir", "axis", "actual", "limit", "bound"]
-note = "XY 越界：`{dir}` 是 X+/X-/Y+/Y-，`{limit}` 是下面那两条之一，`{bound}` 是机型给的边界值"
-
-["postproc.range_limit.max"]
-text = "机型最大 {axis}"
-text_en = "machine max {axis}"
-text_zh_tw = "機型最大 {axis}"
-text_ja = "機種の最大 {axis}"
-params = ["axis"]
-
-["postproc.range_limit.min"]
-text = "机型最小 {axis}"
-text_en = "machine min {axis}"
-text_zh_tw = "機型最小 {axis}"
-text_ja = "機種の最小 {axis}"
-params = ["axis"]
+text = "{source}：往 {dir} 方向最多只能到 {bound} mm，实际要走 {actual} mm"
+text_en = "{source}: it can only reach {bound} mm toward {dir}, but the path needs {actual} mm"
+text_zh_tw = "{source}：往 {dir} 方向最多只能到 {bound} mm，實際要走 {actual} mm"
+text_ja = "{source}：{dir} 方向は {bound} mm までしか動けませんが、{actual} mm 必要です"
+params = ["source", "dir", "actual", "bound"]
+note = "XY 越界：`{dir}` 是 X+/X-/Y+/Y-，`{bound}` 是机型给的边界值。**不再把「机型最大 X」当零件拼进去** —— 那是内部口径，`{dir}` 已经说明了哪一侧。两条都带 mm（坐标值不带单位，用户不知道是毫米还是格）"
 
 # 边界那一句的几个零件（合起来才是上面 `{sides}`）—— 它们同样是文案，所以也住这里
 ["boundary.clause"]
@@ -463,49 +460,49 @@ params = ["text"]
 # 归档那一路的降级警告（产物优先：这些句子的意思都是"记录没落成，但 G-code 是好的"）
 ["hook.archive_unavailable"]
 code = "W_ARCHIVE_UNAVAILABLE_001"
-text = "归档不可用：找不到应用数据目录（这一次不落执行记录）"
-text_en = "Archive unavailable: cannot find the application data folder (no run record was written this time)"
-text_zh_tw = "歸檔不可用：找不到應用資料目錄（這一次不落執行記錄）"
-text_ja = "アーカイブを利用できません：アプリのデータディレクトリが見つかりません（今回は実行記録を残しません）"
+text = "这次没留下执行记录：找不到保存位置。G-code 已经处理好了。"
+text_en = "No run record was kept this time: the save location could not be found. The G-code was processed fine."
+text_zh_tw = "這次沒留下執行記錄：找不到儲存位置。G-code 已經處理好了。"
+text_ja = "今回は実行記録を残せませんでした：保存先が見つかりません。G-code の処理は完了しています。"
 
 ["hook.archive_backup_failed"]
 code = "W_ARCHIVE_BACKUP_001"
-text = "原件备份失败（这一次不落执行记录）：{detail}"
-text_en = "Failed to back up the original (no run record was written this time): {detail}"
-text_zh_tw = "原件備份失敗（這一次不落執行記錄）：{detail}"
-text_ja = "原本のバックアップに失敗（今回は実行記録を残しません）：{detail}"
+text = "原文件没能备份，这次没留下执行记录（{detail}）。G-code 已经处理好了。"
+text_en = "The original file could not be backed up, so no run record was kept ({detail}). The G-code was processed fine."
+text_zh_tw = "原檔案沒能備份，這次沒留下執行記錄（{detail}）。G-code 已經處理好了。"
+text_ja = "元ファイルをバックアップできなかったため、今回は実行記録を残していません（{detail}）。G-code の処理は完了しています。"
 params = ["detail"]
 
 ["hook.archive_output_failed"]
 code = "W_ARCHIVE_OUTPUT_001"
-text = "输出归档失败：{detail}"
-text_en = "Failed to archive the output: {detail}"
-text_zh_tw = "輸出歸檔失敗：{detail}"
-text_ja = "出力のアーカイブに失敗：{detail}"
+text = "处理后的文件没能存进记录里（{detail}）。"
+text_en = "The processed file could not be stored with the record ({detail})."
+text_zh_tw = "處理後的檔案沒能存進記錄裡（{detail}）。"
+text_ja = "処理後のファイルを記録に保存できませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_fact_failed"]
 code = "W_ARCHIVE_FACT_001"
-text = "输出文件事实读不出来：{detail}"
-text_en = "Cannot read the output file facts: {detail}"
-text_zh_tw = "輸出檔案事實讀不出來：{detail}"
-text_ja = "出力ファイルの情報を読み取れません：{detail}"
+text = "读不出处理后文件的信息（{detail}）。"
+text_en = "Could not read the details of the processed file ({detail})."
+text_zh_tw = "讀不出處理後檔案的資訊（{detail}）。"
+text_ja = "処理後のファイルの情報を読み取れませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_sha_failed"]
 code = "W_ARCHIVE_SHA_001"
-text = "输出文件摘要算不出来：{detail}"
-text_en = "Cannot compute the output file digest: {detail}"
-text_zh_tw = "輸出檔案摘要算不出來：{detail}"
-text_ja = "出力ファイルのダイジェストを計算できません：{detail}"
+text = "算不出处理后文件的校验值（{detail}）。"
+text_en = "Could not compute a checksum for the processed file ({detail})."
+text_zh_tw = "算不出處理後檔案的校驗值（{detail}）。"
+text_ja = "処理後のファイルのチェックサムを計算できませんでした（{detail}）。"
 params = ["detail"]
 
 ["hook.archive_meta_failed"]
 code = "W_ARCHIVE_META_001"
-text = "执行记录写入失败：{detail}"
-text_en = "Failed to write the run record: {detail}"
-text_zh_tw = "執行記錄寫入失敗：{detail}"
-text_ja = "実行記録の書き込みに失敗：{detail}"
+text = "执行记录没写成（{detail}）。G-code 已经处理好了。"
+text_en = "The run record could not be written ({detail}). The G-code was processed fine."
+text_zh_tw = "執行記錄沒寫成（{detail}）。G-code 已經處理好了。"
+text_ja = "実行記録を書き込めませんでした（{detail}）。G-code の処理は完了しています。"
 params = ["detail"]
 
 # ---------------------------------------------------------------- 结论行的框子

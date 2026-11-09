@@ -2748,7 +2748,15 @@ export const mockApi: MkpApi = {
    * 所以「使用内置云端源」在这里 = 回到"没配"。
    */
   async getPresetSource() {
-    return mockSource
+    /*
+     * 名字**每次读的时候按当前语言现拼**（真机就是这样：`runtime::source::label()`
+     * 现取文案表）。存成旧字符串的话，「切了界面语言、源的名字不跟着翻」这个毛病
+     * 在浏览器里就演示不出来，也就验不了设置页那条重读。
+     */
+    if (mockSource === null) return null
+    return mockSource.mode === 'custom'
+      ? { ...mockSource, label: t('mock.settings.customUrl') }
+      : mockSource
   },
 
   async setPresetSource(mode, customUrl) {
@@ -2932,7 +2940,15 @@ export const mockApi: MkpApi = {
   },
 
   async setLocale(locale: LocalePref) {
-    if (locale !== 'system' && locale !== 'zh-CN' && locale !== 'en') {
+    /* 四本字典就四种语言（`LocalePref` 里的 `system` 另算）：演示里少一档就等于
+       "切到日语没反应"，看着像产品坏了 —— 认档跟真机同一个集合 */
+    if (
+      locale !== 'system' &&
+      locale !== 'zh-CN' &&
+      locale !== 'zh-TW' &&
+      locale !== 'ja' &&
+      locale !== 'en'
+    ) {
       throw new Error(t('mock.settings.badLocale', { value: locale }))
     }
     mockLocale = locale

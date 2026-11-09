@@ -927,6 +927,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         app::wb_ui,
         app::wb_save_ui,
         app::wb_preview_bulk,
+        app::wb_preview_attach,
         app::wb_diff_draft,
         // 未保存改动的**逐行** diff（盘上 presets/ ↔ 影子树）。只读
         app::wb_shadow_diff,

@@ -923,6 +923,22 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [presetPrefsRevision, readLocalPresets])
 
   /*
+   * **换界面语言 ⇒ 本机文件那几句重新要一次**（2026-11-09）。
+   *
+   * `LocalPresetFile.stateDetail`（「TOML 语法不对 · 第 3 行第 1 列」这类）是**后端**
+   * 按当时那个语言写的句子；列表留在内存里，切了语言它不会跟着翻。
+   * 只重读本机那一侧（扫盘，**不发网络**），列表行那句原因当场换语言。
+   */
+  const localeSeen = useRef(locale)
+  useEffect(() => {
+    if (localeSeen.current === locale) return
+    localeSeen.current = locale
+    void readLocalPresets().catch(() => {
+      /* 读不到就保持旧列表 —— 与上面同一条纪律 */
+    })
+  }, [locale, readLocalPresets])
+
+  /*
    * **草稿代次也听**（`draftState`）：参数页改了值 / 保存了 / 取消了（含预设页上
    * 那个「修改参数」模态框）、或正文编辑保存作废了参数草稿 —— 列表行上那枚
    * 「未保存」小圆点当场跟着亮 / 灭。只读一眼轻摘要，不重读别的。

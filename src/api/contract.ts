@@ -473,6 +473,13 @@ export interface ReportDetail {
    * 与 `collision` 同一套判空口径（`!= null`）。
    */
   relocation?: RelocationRecord | null
+  /**
+   * 这一趟的警告，**已经按现在这套语言说好**（2026-11-09）。
+   *
+   * 记录里存的是键 + 参数（`warningRefs`），读口按打开时的语言重说 —— 切了语言
+   * 再翻旧记录，这里跟着换；老记录只有当年那句，认得出表里哪一条就重说，
+   * 认不出就原样摆。界面直接摆，不要再自己拼。
+   */
   warnings: string[]
   /** 调用现场（exe + argv）—— 排查「用的哪份预设跑的」看它 */
   invocation: { exe?: string; args?: string[] } | null

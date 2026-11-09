@@ -1614,12 +1614,63 @@ function previewBulkOf(key: string, value: unknown, cols: { machineId: string; v
     const hit = effective(c.machineId, c.versionUid, key)
     const hadOwn = hit?.origin === (c.versionUid === null ? 'machine' : 'version')
     const kind = hit && String(hit.value) === String(value) ? 'noChange' : hadOwn ? 'changing' : 'detaching'
+    /* 基线 = 该机型基底当前的值；与要写的值相同 ⇒ 这一列可以「保持跟随」 */
+    const baseHit = effective(c.machineId, null, key)
+    const sameAsBase =
+      c.versionUid !== null && baseHit != null && String(baseHit.value) === String(value)
     ;(out.effects as Json[]).push({
       col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
       level: c.versionUid === null ? 'machine' : 'version',
       before: hit ? valueText(pdef, hit.value) : '不适用',
       after: valueText(pdef, value),
       kind,
+      base: baseHit ? valueText(pdef, baseHit.value) : '不适用',
+      sameAsBase,
+    })
+  }
+  return out
+}
+
+/** 「挂回跟随」的预览（与后端 `preview_attach` 同一套判据） */
+function previewAttachOf(key: string, cols: { machineId: string; versionUid: string | null }[]): Json {
+  const pdef = PARAMS.find((x) => x.key === key)
+  if (!pdef) {
+    return { key, label: key, allowed: false, blockedReason: '字段定义里没有这一项', effects: [], skipped: [] }
+  }
+  const out: Json = {
+    key,
+    label: pdef.label,
+    allowed: pdef.uiComponent !== 'gcode',
+    blockedReason: pdef.uiComponent === 'gcode' ? 'G-code 不做批量' : null,
+    effects: [] as Json[],
+    skipped: [] as Json[],
+  }
+  if (!out.allowed) return out
+  for (const c of cols) {
+    const m = MACHINES.find((x) => x.id === c.machineId)
+    const v = m?.versions.find((x) => x.uid === c.versionUid) ?? null
+    const label = v ? v.name : '机型基底'
+    const blocked = blockedOf(c.machineId, c.versionUid, pdef)
+    if (blocked.length > 0) {
+      ;(out.skipped as Json[]).push({
+        col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
+        reason: '上一项没打开，这一项现在不生效，所以不让改', blocked,
+      })
+      continue
+    }
+    const hit = effective(c.machineId, c.versionUid, key)
+    const hadOwn = hit?.origin === (c.versionUid === null ? 'machine' : 'version')
+    if (!hadOwn) {
+      ;(out.skipped as Json[]).push({
+        col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
+        reason: '这一层没有单独设过这一项，本来就是继承来的', blocked: [],
+      })
+      continue
+    }
+    ;(out.effects as Json[]).push({
+      col: c.versionUid ?? c.machineId, machine: m?.display ?? c.machineId, label,
+      level: c.versionUid === null ? 'machine' : 'version',
+      before: hit ? valueText(pdef, hit.value) : '不适用',
     })
   }
   return out
@@ -1755,6 +1806,13 @@ export function installMockBackend() {
           previewBulkOf(
             args?.key as string,
             args?.value,
+            (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
+          ),
+        )
+      case 'wb_preview_attach':
+        return Promise.resolve(
+          previewAttachOf(
+            args?.key as string,
             (args?.cols as { machineId: string; versionUid: string | null }[]) ?? [],
           ),
         )
