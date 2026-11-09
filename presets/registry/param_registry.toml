@@ -2426,7 +2426,20 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = 1.0
+"A1" = 1.2
+"A1:STANDARD" = 1.2
+"A1:FAST" = 1.2
+"A1:FASTV3.3" = 1.2
+A1_MINI = 1.2
+"A1_MINI:STANDARD" = 1.2
+"A1_MINI:FAST" = 1.2
+"A1_MINI:FASTV3.3" = 1.2
+P1S = 1.2
+"P1S:LITE" = 1.2
+P2S = 1.2
+"P2S:STANDARD" = 1.2
+X1C = 1.2
+"X1C:LITE" = 1.2
 
 [[params]]
 key = "wiping.tower_first_layer_flow"
