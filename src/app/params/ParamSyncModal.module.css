@@ -1,75 +1,55 @@
 /*
- * 「选择要更新的参数」那一屏的样式（原名「选择要跟随的更新」，2026-10-20 改）。
+ * 「选择要更新的参数」那一屏的样式。
  *
- * 与原型（`docs/supportease-preset-v3.html` 的模态框）同一套版面：三列一行 ——
- * 勾选框 / 参数名与三方值 / 确认后那一格。用项目自己的令牌上色，不照抄原型的调色板。
+ * 版面是一张**表格式列表**，一行三列：
+ *
+ *   [勾选框]  参数名 / 三方值              确认后
+ *
+ * 全框只有两条竖轨，都从框的左右缘量起：
+ *   左轨 = var(--box-inset)     勾选框、分组标题 —— 与标题栏、底栏同一条内衬
+ *   右轨 = var(--box-inset)     「确认后」的值、「已选 n / m 项」—— 与底栏按钮同一条右缘
+ * 中间那一列 = 左轨 + 16px 勾选框 + 12px 间距。
+ *
+ * 行的底色与分隔线**铺到框边**（框身内衬清零，由这一屏自己给）：勾上的若干行连成
+ * 一条通长的淡绿色带 —— 它是列表里的一段，不是一块贴上去的圆角卡。
  */
 
-/*
- * **这一屏的框**（2026-10-20 作者：「不要这么夸张呀。这个模太宽，搞这么大干嘛？
- * 而且，我说的不是把下面变大，是把中间内容呀……这个高度再缩减一半吧，
- * 或者缩减 1/3，就留 2/3 的高度」）。
- *
- * 两条：
- *
- *   ① **宽度收窄**：走 `md` 那一档 480px（原来 `lg` 的 680px 太横 —— 一行三项
- *      本来用不了那么宽，左右全是空白）。
- *   ② **高度给中间**：框本身**不再撑高**（`min-height` 撤了），保持"内容多高就多高"；
- *      真正变化的是**列表区**（`.rows`）的上下限 —— 一两项时不空出半屏，
- *      十几项时中间那段自己滚，底栏永远贴着框底。
- *
- * `syncBox` 这个类名留着：框身那条内衬规则还挂在它身上（见下）。
- */
-
-/*
- * ★★★ **比 `md` 那档再宽一截**（2026-10-29 作者：「这个模态框可以再大一点吧？现在有点小」）。
- *
- * 上面那段 2026-10-20 的账里，作者嫌 `lg`（680）太横、于是收到 `md`（480）；
- * 现在 480 又嫌小 ⇒ 取中间：**560**。不新开宽度档（`components/modal` 五档的口径：
- * 不给自由数值），只在这一屏上抬 `min-width`：
- *
- *   · `width` 仍归 `md`（480），这里只抬下限 ⇒ 不跟 `Modal.module.css` 的档位规则抢；
- *   · `min()` 挡住窄窗 —— 可用区不到 560 时它退回 100%，不会被撑出遮罩（`max-width: 100%`
- *     在 `min-width` 面前是弱的，所以下限自己得带这一层）。
- */
 .syncBox {
+  /* 比 `md` 档（480）宽一截，又不至于像 `lg`（760）那样横 */
   min-width: min(560px, 100%);
 }
 
 /*
- * 框身顶部内衬收一点：全选那一条**往上贴**（作者：「这个全选有没有说可以再往上一点呀？」）。
- * `:global` 那一截是共用件 `.body` 的类名（同一个构建里它自己也加了哈希，所以用包含匹配）。
+ * 框身内衬清零：上（全选那一条）、下（最后一行贴住底栏那条线）、左右（行底色铺到
+ * 框边）都由这一屏自己给。文字仍落在 `--box-inset` 上 —— 与标题栏 / 底栏同一套内衬，
+ * 框里三段内容的左缘因此落在同一条线上。
  */
 .syncBox > :global([class*='body']) {
-  padding-top: 0;
+  padding: 0;
 }
 
 .empty {
   margin: 0;
-  padding: 18px 4px;
+  padding: 18px var(--box-inset);
   font-size: var(--fs-label);
   color: var(--text-3);
 }
 
 /*
- * 全选那一条：钉在列表上方（列表自己滚）。
- *
- * ★ 2026-10-20：**不再铺底色**（作者：「全选那个黑色背景也不好看」）——
- *   原来是 `--bg-1`，深色主题下那几乎就是黑的，整条像被挖掉一块。
- *   现在只有一条细线分隔，与框身同一个底，安静得多。
+ * 全选那一条 = 列表的表头：左端是勾选框，右端是项数。
+ * 不铺底色（深色主题下那一条会像被挖掉一块），只用一条通长的底线把它和列表分开。
  */
 .selectbar {
   display: flex;
   align-items: center;
   gap: 10px;
-  /* 上下留一点就好：框身上内衬已经收了，这一条就贴到副标题下面 */
-  padding: 6px 2px 8px;
+  padding: 6px var(--box-inset) 9px;
   border-bottom: 1px solid var(--line);
 }
 
 /*
- * 「全选」那条（2026-10-17）：框身与对勾 / 半选归共用件 `components/check`
- *（原来是原生绿勾 + 一处现设 `indeterminate` 的 `ref`），这里只剩**小字灰字**这一档
+ * 「全选」那条：框身与对勾 / 半选归共用件 `components/check`
+ * （原来是原生绿勾 + 一处现设 `indeterminate` 的 `ref`），这里只剩**小字灰字**这一档
  * —— 共用件不锁字号 / 文字色（见它头注释）。
  */
 .checkLabel {
@@ -85,18 +65,14 @@
 }
 
 /*
- * **列表区**：框身不再定高（见上面 `.syncBox` 那段），高矮由这里说了算。
+ * **列表区**：三组共用一个滚动区（一组一个滚动框的话，三项就能把弹窗撑成半屏）。
  *
- * 下限 220px：一两项的时候不至于塌成薄薄一条；上限 `min(34vh, 320px)`：
- * 十几项也不会把框拉成半屏（原来 52vh/460 太高）。超了中间自己滚，底栏不动。
- *
- * ★ 2026-10-20：滚动归**这一层**（三组共用），`.rows` 只是组内的列 ——
- *   原来每组各带一个滚动框，三组就是三个 220px 的洞，弹窗直接被撑成半屏。
+ * 高度由内容决定 —— 一两项就是一条短框，超过上限才滚；不再留 `min-height`，
+ * 否则最后一行与底栏之间会空出一块没有内容的灰。
  */
 .list {
   display: flex;
   flex-direction: column;
-  min-height: 220px;
   max-height: min(34vh, 320px);
   overflow-y: auto;
 }
@@ -107,16 +83,21 @@
   flex-direction: column;
 }
 
+/* 组与组之间一条通长的线；上一组的最后一行不画底边，所以这里只有一道 */
+.group + .group {
+  border-top: 1px solid var(--line);
+}
+
 /* 小组标题：把那一组**为什么分开**说一句，不是装饰 */
 .groupLabel {
-  padding: 10px 2px 4px;
+  padding: 12px var(--box-inset) 5px;
   font-size: var(--fs-label);
   color: var(--text-3);
 }
 
-/* 第一组（没冲突）不需要上方留白 —— 它紧接「全选」那一条 */
+/* 第一组（没冲突）上方不需要那么多留白 —— 它紧接「全选」那一条 */
 .group:first-child .groupLabel {
-  padding-top: 6px;
+  padding-top: 9px;
   color: var(--text-2);
 }
 
@@ -130,34 +111,37 @@
   flex-direction: column;
 }
 
+/*
+ * 一行 = 三列。
+ *
+ * `align-items: baseline` 让「确认后」与**参数名**坐在同一条基线上
+ * （居中那一格会悬在两行之间，跟哪一行都不齐）；勾选框单独垂直居中。
+ */
 .row {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 150px;
-  gap: 12px;
-  align-items: center;
-  padding: 9px 8px;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: baseline;
+  padding: 8px var(--box-inset);
   border-bottom: 1px solid var(--line);
-  /* 圆角只在"勾上"那一档看得见（见 `.rowOn`）—— 底色不铺满整行宽，两侧留一点缝 */
-  border-radius: 8px;
 }
 
 .row:last-child {
   border-bottom: none;
 }
 
+.row > :first-child {
+  align-self: center;
+}
+
 /*
- * 勾上的行：**一层很淡的绿**（2026-10-20 作者：「他现在这一个被选中的背景不太好看吧？
- * 他这一条这个黑色不好看，改一下」，随后又：「我不是说要左侧加一个那个东西，
- * 你不用加那个左侧的那一束」—— 去掉了原来那道左缘竖条）。
- *
- * 原来这里是 `--bg-1`：深色主题下那几乎是黑的，整行像被挖掉一块。
- * 现在用 `--accent-soft`（与勾选框同一套绿），淡到不影响读字，也不抢眼。
+ * 勾上的行：**一层很淡的绿**，铺满整行、**没有圆角**。
+ * 相邻两条都勾上时连成一条色带（下边框让位）—— 它是列表里被选中的一段。
  */
 .rowOn {
   background: var(--accent-soft);
 }
 
-/* 勾上的行不画分隔线（底色块下面挂一条线会显得断掉） */
 .rowOn:not(:last-child) {
   border-bottom-color: transparent;
 }
@@ -177,17 +161,44 @@
   color: var(--text-3);
 }
 
+/*
+ * 三方值那一行：**标签小、值大**。
+ * 旧值与新值分开着色 —— `0.00 mm → -5.00 mm` 连成一串时，谁是被换掉的那个、
+ * 哪一个是云端新值，得读箭头两遍才认得出。
+ */
 .vals {
-  margin-top: 2px;
+  margin-top: 3px;
   font-size: var(--fs-label);
   color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
+.valsTag {
+  color: var(--text-3);
+}
+
+.oldVal {
+  color: var(--text-2);
+}
+
+.newVal {
+  color: var(--text-1);
+}
+
+.arrow,
+.dot {
+  margin: 0 5px;
+  font-style: normal;
+  color: var(--text-3);
+}
+
+.dot {
+  margin: 0 6px;
+}
+
 /* 「我」那个值：与行上「本地修改」同一套绿，一眼知道这是他自己的 */
 .local {
   color: #2f7d59;
-  font-weight: 500;
 }
 
 /* 深色（2026-10-12 第二遍）：深绿字压深底几乎读不出，换深色档的亮绿（同 --accent 族） */
@@ -195,25 +206,43 @@
   color: var(--accent);
 }
 
+/*
+ * 「确认后」那一格：标签 + 值，与参数名同一条基线，右缘对齐。
+ *
+ * 勾 / 不勾当场换值，也换这一格的轻重：勾上 = 主文字色 + 半档加粗
+ * （用 `--state-bold` 描边，不用 `font-weight` —— 状态不许改变盒子尺寸），
+ * 不勾 = 次级文字色。字重常量化，切换时右缘不跳。
+ */
 .after {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.afterLabel {
   font-size: var(--fs-label);
   color: var(--text-3);
-  text-align: right;
 }
 
 .afterVal {
-  color: var(--text-1);
-  font-weight: 600;
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 
+.after[data-on='true'] .afterVal {
+  color: var(--text-1);
+  text-shadow: var(--state-bold);
+}
+
 /*
- * 底栏**左侧**那句提示（2026-10-20）：`margin-right: auto` 把它推到左边、
- * 两颗按钮留在右边（底栏本身是 flex 右对齐，见 `components/modal`）。
+ * 底栏**左侧**那句提示：`margin-right: auto` 把它推到左边、两颗按钮留在右边
+ * （底栏本身是 flex 右对齐，见 `components/modal`）。
  *
- * ★ 2026-10-29：这句话现在是**唯一的"应用 ≠ 已保存"告知**（作者：「应用了就不是说
- *   就可以了，你反正还得告诉用户」）⇒ 从 `--text-3` 提到 `--text-2`，别让它混成
- *   底栏的装饰字。
+ * 这句话是**唯一的"应用 ≠ 已保存"告知**（作者：「应用了就不是说就可以了，
+ * 你反正还得告诉用户」）⇒ 用 `--text-2`，别让它混成底栏的装饰字。
  */
 .hint {
   margin-right: auto;
@@ -258,5 +287,5 @@
   cursor: default;
 }
 
-/* （底栏那颗 `.primary` 原来也有一条"深色里换中性亮面"的补丁 —— 已删：
-   它现在自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），深浅一条规则全成立。） */
+/* （底栏那颗 `.primary` 现在自己就是**反色配对**（`--text-1` 底 + `--bg-1` 字），
+   深浅一条规则全成立，不需要按主题另写补丁。） */

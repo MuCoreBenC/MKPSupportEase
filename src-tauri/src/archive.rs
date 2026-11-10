@@ -1905,6 +1905,7 @@ mod tests {
             }),
             relocation: None,
             detail: Detail {
+                debug: None,
                 input_file: FileFact {
                     path: "/tmp/.63288.1.gcode".into(),
                     size_bytes: 23_758_782,
@@ -2010,6 +2011,7 @@ mod tests {
             model_map: None,
             relocation: None,
             detail: Detail {
+                debug: None,
                 input_file: FileFact {
                     path: "/tmp/x.gcode".into(),
                     size_bytes: 3,
