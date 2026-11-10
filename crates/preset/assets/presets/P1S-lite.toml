@@ -1,13 +1,12 @@
 # machine: P1S
 # variant: lite
-# generated_at: 2026-11-10T19:06:24+08:00
+# generated_at: 2026-11-11T00:49:03+08:00
 
 [toolhead]
 # 落笔 G-code
 custom_mount_gcode = """
 L803;此处使喷嘴降温
 G92 E0;挤出机归零
-G1 E-10;长回抽
 G92 E0
 L801
 M204 S10000
@@ -25,13 +24,12 @@ G1 X{target} F{speed};收笔
 G1 F30000
 L802
 G1 F1500
-G1 E10.7;填充回抽
 G1 F30000
 M106 P1 S[AUTO] ; 风扇
 """
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
-MKP_retract = 0 # 回抽长度(mm)
+MKP_retract = -5 # 回抽长度(mm)
 offset_x = -25.9 # 笔尖偏移
 offset_y = 14 # 笔尖偏移
 offset_z = 1.1 # 笔尖偏移

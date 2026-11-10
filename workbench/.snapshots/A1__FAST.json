@@ -1,7 +1,7 @@
 {
-  "toolhead.MKP_retract": 0.0,
-  "toolhead.custom_mount_gcode": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-  "toolhead.custom_unmount_gcode": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+  "toolhead.MKP_retract": -5.0,
+  "toolhead.custom_mount_gcode": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+  "toolhead.custom_unmount_gcode": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
   "toolhead.first_pen_revitalization_flag": false,
   "toolhead.glue_z_offset": -0.05,
   "toolhead.offset.x": -0.7,

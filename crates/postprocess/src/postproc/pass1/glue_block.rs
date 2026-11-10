@@ -712,6 +712,16 @@ pub(crate) fn mount_toolhead(
             sink.push_str(ml);
         }
     }
+    /* 落笔的回抽现在**不在模板里**（模板只剩骨架，E 交给 `MKP_retract` 参数）。
+     * 收笔那边 `pass2` 早就有对称的一条（没有 E 行就补 `G1 E{mkp_extrude}`），
+     * 这里补上落笔这一半 —— 否则会变成「收笔挤出、落笔不回抽」，
+     * 撞笔时笔尖带着料。 */
+    if !custom_mount_gcode_has_retract(ir_data) {
+        sink.push_str(&format!(
+            "G1 E{} F1500",
+            format_e(ir_data.gcode.mkp_retract)
+        ));
+    }
     sink.push_str(";Toolhead Mounted");
     if !skip_final_z {
         // 装好笔后的飞回段用 `current`（原来误用 `last`，凭空少 0.2），

@@ -5,8 +5,6 @@
 # 落笔 G-code
 custom_mount_gcode = """
 G92 E0
-G1 E-5 F1800
-G92 E0
 L801
 M204 S10000
 G1 X{wait} F42000
@@ -23,13 +21,11 @@ G1 X{wait} F5000
 G1 F42000
 L802
 G92 E0
-G1 E5.5 F1000
-G92 E0
 G1 F30000
 """
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
-MKP_retract = 0 # 回抽长度(mm)
+MKP_retract = -5 # 回抽长度(mm)
 offset_x = -0.7 # 笔尖偏移
 offset_y = 24.4 # 笔尖偏移
 offset_z = 3.9 # 笔尖偏移

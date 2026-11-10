@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "b46d1963c6e59ee5",
+  "revision": "102d55fbd5512833",
   "publishedAt": "2026-11-10T12:06:00Z",
   "brands": [
     {
@@ -873,14 +873,14 @@
         "labelEn": "Retract length",
         "labelJa": "リトラクト長",
         "labelTw": "回抽長度",
-        "desc": "涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析",
-        "descEn": "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code",
-        "descJa": "塗布ペンのリトラクト長（mm）。負値＝リトラクト。この値を優先し、0 のときはロード G-code から自動で解析します",
-        "descTw": "塗膠筆回抽長度（mm），負值＝回抽。優先使用此值，為 0 時從裝載 G-code 自動解析",
+        "desc": "涂胶笔回抽长度(mm)，负值=回抽。落笔/收笔的 G-code 里不再写 E，改由这里统一管",
+        "descEn": "Glue pen retract length (mm); negative = retract. The mount/unmount G-code no longer carries E — this is the only place it comes from",
+        "descJa": "塗布ペンのリトラクト長（mm）。負値＝リトラクト。マウント/アンマウント G-code は E を持たず、ここで一元管理します",
+        "descTw": "塗膠筆回抽長度（mm），負值＝回抽。落筆/收筆的 G-code 裡不再寫 E，改由這裡統一管",
         "tomlComment": "回抽长度(mm)",
         "valueType": "float",
         "uiComponent": "number",
-        "defaultValue": 0.0,
+        "defaultValue": -5.0,
         "scope": "universal",
         "section": "toolhead",
         "layout": {
@@ -945,17 +945,17 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
-          "A1_MINI": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
-          "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
-          "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
-          "X1C:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+          "A1": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FAST": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FASTV3.3": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:STANDARD": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1_MINI": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FAST": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FASTV3.3": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:STANDARD": "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
+          "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
+          "X1C:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -1004,17 +1004,17 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:FAST": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:STANDARD": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1_MINI": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "P1S:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
-          "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
-          "X1C:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+          "A1": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1:FAST": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1:STANDARD": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000",
+          "P1S:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
+          "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
+          "X1C:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
@@ -6461,8 +6461,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "c2e8b873aee399f579b60fff963f4f01a22a1648d218d50bd08c2c25af3000f1",
-      "size": 5051
+      "sha256": "eda8b1c4fc5af02f9d3f9c29505648306885057929649d25fa83298b301666da",
+      "size": 5011
     },
     {
       "kind": "mkp_preset",
@@ -6470,8 +6470,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "725691537b2a2688cb0f21eb22c5a565c10df5b1ea7eb7965b169718cab6b267",
-      "size": 5049
+      "sha256": "f1ca3d60bb23770afcac355b8652d246dbaa9ab46f573963bd1b719058ccecaf",
+      "size": 5009
     },
     {
       "kind": "mkp_preset",
@@ -6479,8 +6479,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "b507ee4141fd6791be17b0e45d342133acc4527cce34978b843b753d3b9ef009",
-      "size": 5053
+      "sha256": "8ffcc8e2bab63a5fd7ef48fb1c71ec3ea6aa05d13d145158b7d06eab93dcfd85",
+      "size": 5013
     },
     {
       "kind": "mkp_preset",
@@ -6488,8 +6488,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "670c5dee4f10e580275927ee6879e689630b629a97f2712609029bf7ec7bb300",
-      "size": 5057
+      "sha256": "f3c7e60cdf04ca649c0fc7be886ce40e40c9985fb2095ef29e93a6b319eba110",
+      "size": 5017
     },
     {
       "kind": "mkp_preset",
@@ -6497,8 +6497,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "7b74e23037d3d281bcdaf8029a05ac7e374bdafd8c6771d97eaf08ce1ce1f1fd",
-      "size": 5051
+      "sha256": "8f1283f52f750879a7ce8d8953a57163d4c23fb575fcbc09c34a9b16a006c86c",
+      "size": 5011
     },
     {
       "kind": "mkp_preset",
@@ -6506,8 +6506,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "cb1a436ec93ae2fa8ed27a759af1d5cc07166109530da849c19b5b07bfe8c3cb",
-      "size": 5056
+      "sha256": "0975068bcf3436236f2007a0e9abaf231adbc2682c6cc9e475b4a73328e51a2d",
+      "size": 5016
     },
     {
       "kind": "mkp_preset",
@@ -6515,8 +6515,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "d793457145df793fd8f9ccebb2172ba5d6c1dcffbc7c4b30faac079e999515fe",
-      "size": 5197
+      "sha256": "05731ee29cf16669afdf3d2bf25551496968892f2f72c74ee28c35be4bed5359",
+      "size": 5158
     },
     {
       "kind": "mkp_preset",
@@ -6524,8 +6524,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "58c78c7468a8cffd2d6937832ee51566c3a72a720e73feac055138a677064f35",
-      "size": 5197
+      "sha256": "fba9a026f41d139287af2e53c22ecba6907c5132876009b9c0a3a25f82b8b848",
+      "size": 5158
     },
     {
       "kind": "icon",

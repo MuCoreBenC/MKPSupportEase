@@ -272,14 +272,14 @@ label = "回抽长度"
 labelEn = "Retract length"
 labelJa = "リトラクト長"
 labelTw = "回抽長度"
-desc = "涂胶笔回抽长度(mm)，负值=回抽。优先使用此值，为0时从装载G-code自动解析"
-descEn = "Glue pen retract length (mm); negative = retract. This value takes priority; when 0 it is parsed from the load G-code"
-descJa = "塗布ペンのリトラクト長（mm）。負値＝リトラクト。この値を優先し、0 のときはロード G-code から自動で解析します"
-descTw = "塗膠筆回抽長度（mm），負值＝回抽。優先使用此值，為 0 時從裝載 G-code 自動解析"
+desc = "涂胶笔回抽长度(mm)，负值=回抽。落笔/收笔的 G-code 里不再写 E，改由这里统一管"
+descEn = "Glue pen retract length (mm); negative = retract. The mount/unmount G-code no longer carries E — this is the only place it comes from"
+descJa = "塗布ペンのリトラクト長（mm）。負値＝リトラクト。マウント/アンマウント G-code は E を持たず、ここで一元管理します"
+descTw = "塗膠筆回抽長度（mm），負值＝回抽。落筆/收筆的 G-code 裡不再寫 E，改由這裡統一管"
 tomlComment = "回抽长度(mm)"
 valueType = "float"
 uiComponent = "number"
-defaultValue = 0.0
+defaultValue = -5.0
 scope = "universal"
 section = "toolhead"
 layout = { "order" = 200.0, "sectionId" = "motion" }
@@ -322,17 +322,17 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
-"A1:FAST" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
-"A1:FASTV3.3" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
-"A1:STANDARD" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
-"A1_MINI" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
-"A1_MINI:FAST" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
-"A1_MINI:FASTV3.3" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
-"A1_MINI:STANDARD" = "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
-"P1S:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
-"P2S:STANDARD" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
-"X1C:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"A1" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1:FAST" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1:FASTV3.3" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1:STANDARD" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000"
+"A1_MINI" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"A1_MINI:FAST" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"A1_MINI:FASTV3.3" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"A1_MINI:STANDARD" = "G92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000"
+"P1S:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"P2S:STANDARD" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
+"X1C:LITE" = "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
 
 [params.follows]
 "A1:FAST" = false
@@ -374,17 +374,17 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
-"A1" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:FAST" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:FASTV3.3" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000"
-"A1_MINI" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:FAST" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:FASTV3.3" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"A1_MINI:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000"
-"P1S:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
-"P2S:STANDARD" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
-"X1C:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"A1" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1:FAST" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1:FASTV3.3" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:FAST" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:FASTV3.3" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"A1_MINI:STANDARD" = "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 F30000"
+"P1S:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"P2S:STANDARD" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
+"X1C:LITE" = "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
 
 [params.follows]
 "A1:FAST" = false

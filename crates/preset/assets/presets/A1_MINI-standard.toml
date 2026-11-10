@@ -1,12 +1,10 @@
 # machine: A1_MINI
 # variant: standard
-# generated_at: 2026-11-10T19:20:08+08:00
+# generated_at: 2026-11-11T00:57:47+08:00
 
 [toolhead]
 # 落笔 G-code
 custom_mount_gcode = """
-G92 E0
-G1 E-5 F1800
 G92 E0
 L801
 M204 S10000
@@ -24,13 +22,11 @@ G1 X{wait} F6000
 G1 F30000
 L802
 G92 E0
-G1 E5.5 F1500
-G92 E0
 G1 F30000
 """
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
-MKP_retract = 0 # 回抽长度(mm)
+MKP_retract = -5 # 回抽长度(mm)
 offset_x = -0.3 # 笔尖偏移
 offset_y = 18.1 # 笔尖偏移
 offset_z = 3.9 # 笔尖偏移
