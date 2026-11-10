@@ -269,6 +269,14 @@ pub struct ParamDef {
     pub merge_group: Option<String>,
     #[serde(default)]
     pub pinned: bool,
+    /// **该机型/变体没写值就整行不落盘**（2026-11-10）。
+    ///
+    /// 只对「某些机型用不到」的字段有意义：A 系列的落笔/收笔骨架只动 X，
+    /// 等待位 Y 对它不适用。不标这个的话，出厂默认 `0` 会落进 TOML，界面上
+    /// 就多出一格永远不该被改的 Y —— 而那是绝对坐标，改错就是把工具头甩到零点。
+    /// 标了之后只有机型基底/版本**真的写了值**才落盘。
+    #[serde(default)]
+    pub omit_when_unset: bool,
     #[serde(default)]
     pub serialization: Option<Serialization>,
     /// **哪几册译文跟着这份中文一起过期了**（2026-11-02）。

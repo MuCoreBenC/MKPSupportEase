@@ -22,8 +22,31 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
+import { placeholderName, validate, type PenKind, type PenTemplateIssue } from './penTemplate'
 import type { ParamDef } from './useParams'
 import s from './GcodeBlock.module.css'
+
+/** 这一块是哪一种笔动作（占位符 → 字段的映射依赖它）。 */
+function penKindOf(key: string): PenKind | null {
+  if (key === 'toolhead.custom_mount_gcode') return 'mount'
+  if (key === 'toolhead.custom_unmount_gcode') return 'unmount'
+  return null
+}
+
+/** 占位符在界面上的短名。 */
+const PH_LABEL: Record<string, StringKey> = {
+  wait: 'params.pen.wait',
+  wait_y: 'params.pen.waitY',
+  target: 'params.pen.target',
+  speed: 'params.pen.speed',
+}
+
+/** 结构错误的具体位置 —— 只有符号与数字，不需要再翻一遍。 */
+function issueText(issue: PenTemplateIssue): string {
+  if (issue.kind === 'unknown') return `{${issue.name}}`
+  if (issue.kind === 'unclosed') return `{ … (${issue.at})`
+  return `${issue.line}: ${issue.text}`
+}
 
 interface Props {
   def: ParamDef
@@ -71,6 +94,10 @@ export default function GcodeBlock({
   const tr = useT()
   const [mode, setMode] = useState('view')
   const lines = parse(value)
+
+  /* 落笔/收笔的骨架带占位符：结构错了就当场标红，别等到保存 */
+  const isPenTemplate = penKindOf(def.key) !== null
+  const issue = isPenTemplate ? validate(value) : null
 
   /*
    * 代码模式的三层：行号槽 + 着色层 + 透明输入框（A43 移植，工作台 C15 那套）。
@@ -145,6 +172,12 @@ export default function GcodeBlock({
 
       <p className={s.desc}>{def.desc}</p>
 
+      {issue !== null && (
+        <p className={s.structureError} role="alert">
+          {tr('params.pen.structureError', { detail: issueText(issue) })}
+        </p>
+      )}
+
       {mode === 'code' ? (
         /*
          * 三层代码编辑器（A43 移植）：行号槽 + 着色层 + 透明输入框。
@@ -191,17 +224,36 @@ export default function GcodeBlock({
               ) : (
                 <>
                   <span className={s.cmd}>{line.command}</span>
-                  {line.params.map((p, j) => (
-                    <input
-                      key={`${i}-${j}`}
-                      className={s.param}
-                      value={p}
-                      spellCheck={false}
-                      disabled={disabled}
-                      aria-label={tr('params.gcode.argAria', { row: i + 1, col: j + 1 })}
-                      onChange={(e) => replaceParam(i, j, e.target.value)}
-                    />
-                  ))}
+                  {line.params.map((p, j) => {
+                    /*
+                     * 占位符不是「可以直接改的数字」—— 它的值住在上面那几格字段里。
+                     * 放开让用户改这一格，等于把骨架退化成硬编码，字段立刻脱钩。
+                     */
+                    const ph = placeholderName(p)
+                    if (ph !== null) {
+                      const name = tr(PH_LABEL[ph])
+                      return (
+                        <span
+                          key={`${i}-${j}`}
+                          className={s.placeholder}
+                          data-tip={tr('params.pen.placeholderTip', { name })}
+                        >
+                          {name}
+                        </span>
+                      )
+                    }
+                    return (
+                      <input
+                        key={`${i}-${j}`}
+                        className={s.param}
+                        value={p}
+                        spellCheck={false}
+                        disabled={disabled}
+                        aria-label={tr('params.gcode.argAria', { row: i + 1, col: j + 1 })}
+                        onChange={(e) => replaceParam(i, j, e.target.value)}
+                      />
+                    )
+                  })}
                 </>
               )}
             </li>

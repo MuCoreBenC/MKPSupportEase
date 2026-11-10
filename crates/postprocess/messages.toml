@@ -1379,16 +1379,16 @@ text_ja = "{file_name} はスライサープリセットではありません �
 params = ["file_name"]
 
 ["ui.ipc.presets.122"]
-text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
-text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
-text_zh_tw = "沒找到 Bambu Studio 的使用者設定目錄（user/*/process）—— 裝好切片器、至少開啟過一次再來"
-text_ja = "Bambu Studio のユーザー設定フォルダー（user/*/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
+text = "没找到切片器的用户配置目录（user/<账号>/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find the slicer’s user profile folder (user/<account>/process) — install the slicer and open it at least once, then come back"
+text_zh_tw = "沒找到切片器的使用者設定目錄（user/<帳號>/process）—— 裝好切片器、至少開啟過一次再來"
+text_ja = "スライサーのユーザー設定フォルダー（user/<アカウント>/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
 
 ["ui.ipc.presets.123"]
-text = "{file_name} 还没复制进切片器目录 —— 先在行上点「复制」"
-text_en = "{file_name} has not been copied into the slicer folder yet — click Copy on its row first"
-text_zh_tw = "{file_name} 還沒複製進切片器目錄 —— 先在行上點「複製」"
-text_ja = "{file_name} はまだスライサーフォルダーにコピーされていません — 先に行の「コピー」をクリック"
+text = "{file_name} 还没放入切片器目录 —— 先在行上点「放入」"
+text_en = "{file_name} has not been put into the slicer folder yet — click Put in on its row first"
+text_zh_tw = "{file_name} 還沒放入切片器目錄 —— 先在行上點「放入」"
+text_ja = "{file_name} はまだスライサーフォルダーに入っていません — 先に行の「入れる」をクリック"
 params = ["file_name"]
 
 ["ui.ipc.presets.124"]
@@ -1405,37 +1405,64 @@ text_ja = "カタログにこのファイルがありません：{file_name}"
 params = ["file_name"]
 
 ["ui.ipc.presets.126"]
-text = "{file_name} 是 MKP 预设，不用复制到切片器 —— 它走「启用」"
+text = "{file_name} 是 MKP 预设，不用放进切片器 —— 它走「启用」"
 text_en = "{file_name} is an MKP preset and does not go into the slicer — it is used through Enable"
-text_zh_tw = "{file_name} 是 MKP 預設，不用複製到切片器 —— 它走「啟用」"
-text_ja = "{file_name} は MKP プリセットです。スライサーへのコピーは不要 — 「使用」で有効になります"
+text_zh_tw = "{file_name} 是 MKP 預設，不用放進切片器 —— 它走「啟用」"
+text_ja = "{file_name} は MKP プリセットです。スライサーに入れる必要はありません — 「使用」で有効になります"
 params = ["file_name"]
 
 ["ui.ipc.presets.127"]
-text = "{file_name} 不是切片器配置，复制进切片器目录没有意义"
-text_en = "{file_name} is not a slicer profile; copying it into the slicer folder would be meaningless"
-text_zh_tw = "{file_name} 不是切片器設定，複製進切片器目錄沒有意義"
-text_ja = "{file_name} はスライサープリセットではないため、スライサーフォルダーにコピーしても意味がありません"
+text = "{file_name} 不是切片器配置，放进切片器目录没有意义"
+text_en = "{file_name} is not a slicer profile; putting it into the slicer folder would be meaningless"
+text_zh_tw = "{file_name} 不是切片器設定，放進切片器目錄沒有意義"
+text_ja = "{file_name} はスライサープリセットではないため、スライサーフォルダーに入れても意味がありません"
 params = ["file_name"]
 
 ["ui.ipc.presets.128"]
-text = "本机还没有 {file_name} —— 先「下载」再复制"
-text_en = "{file_name} is not on this machine yet — download it, then copy"
-text_zh_tw = "本機還沒有 {file_name} —— 先「下載」再複製"
-text_ja = "本機にまだ {file_name} がありません — 先に「ダウンロード」してからコピーしてください"
+text = "本机还没有 {file_name} —— 先「下载」再放入"
+text_en = "{file_name} is not on this machine yet — download it, then put it in"
+text_zh_tw = "本機還沒有 {file_name} —— 先「下載」再放入"
+text_ja = "本機にまだ {file_name} がありません — 先に「ダウンロード」してから入れてください"
 params = ["file_name"]
 
 ["ui.ipc.presets.129"]
-text = "没找到 Bambu Studio 的用户配置目录（user/*/process）—— 装好切片器、至少打开过一次再来"
-text_en = "Cannot find Bambu Studio’s user profile folder (user/*/process) — install the slicer and open it at least once, then come back"
-text_zh_tw = "沒找到 Bambu Studio 的使用者設定目錄（user/*/process）—— 裝好切片器、至少開啟過一次再來"
-text_ja = "Bambu Studio のユーザー設定フォルダー（user/*/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
+text = "没找到切片器的用户配置目录（user/<账号>/process）—— 装好切片器、至少打开过一次再来"
+text_en = "Cannot find the slicer’s user profile folder (user/<account>/process) — install the slicer and open it at least once, then come back"
+text_zh_tw = "沒找到切片器的使用者設定目錄（user/<帳號>/process）—— 裝好切片器、至少開啟過一次再來"
+text_ja = "スライサーのユーザー設定フォルダー（user/<アカウント>/process）が見つかりません — スライサーをインストールして一度起動してからお試しください"
 
 ["ui.ipc.presets.130"]
 text = "读不出这一份的字节"
 text_en = "Cannot read the bytes of this copy"
 text_zh_tw = "讀不出這一份的位元組"
 text_ja = "このファイルのバイト列を読み取れません"
+
+["ui.ipc.presets.131"]
+text = "{account} 不是本机的账号目录 —— 切片器那边的目录由本程序扫出来，只认扫到的那几个"
+text_en = "{account} is not an account folder on this machine — the slicer’s folders are scanned by this app, and only those are accepted"
+text_zh_tw = "{account} 不是本機的帳號目錄 —— 切片器那邊的目錄由本程式掃出來，只認掃到的那幾個"
+text_ja = "{account} はこのマシンのアカウントフォルダーではありません — スライサーのフォルダーは本アプリが走査したものだけを使います"
+params = ["account"]
+
+["ui.ipc.presets.132"]
+text = "一个账号目录都没放成 —— 切片器那边可能刚把目录删掉或没有写权限"
+text_en = "Could not put it into a single account folder — the slicer folder may have just been removed, or is not writable"
+text_zh_tw = "一個帳號目錄都沒放成 —— 切片器那邊可能剛把目錄刪掉或沒有寫入權限"
+text_ja = "どのアカウントフォルダーにも入れられませんでした — スライサー側でフォルダーが消えたか、書き込み権限がありません"
+
+["ui.ipc.presets.133"]
+text = "有 {failed} 个账号目录没放成（第一个：{first}）"
+text_en = "{failed} account folder(s) did not get it (first: {first})"
+text_zh_tw = "有 {failed} 個帳號目錄沒放成（第一個：{first}）"
+text_ja = "{failed} 個のアカウントフォルダーに入れられませんでした（最初：{first}）"
+params = ["failed", "first"]
+
+["ui.ipc.presets.134"]
+text = "认不出的切片器：{slicer}（只认 bambu / orca）"
+text_en = "Unknown slicer: {slicer} (only bambu / orca are accepted)"
+text_zh_tw = "認不出的切片器：{slicer}（只認 bambu / orca）"
+text_ja = "不明なスライサー：{slicer}（bambu / orca のみ）"
+params = ["slicer"]
 
 ["ui.ipc.report.131"]
 text = "没有这条执行记录：{id}"

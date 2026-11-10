@@ -86,8 +86,8 @@
  * # 两种类型的「生效」是两件不同的事
  *
  * ```
- * MKP     生效 = 设为当前配置       applyPreset()    已应用 / 未应用   操作 [应用]
- * 切片器   生效 = 复制到切片器目录   copyToSlicer()   已复制 / 未复制   操作 [复制]
+ * MKP     生效 = 设为当前配置       applyPreset()    在用 / 未使用     操作 [使用]
+ * 切片器   生效 = 放进切片器目录     copyToSlicer()   已放入 / 未放入   操作 [放入]
  * ```
  *
  * 切片器 profile 光下到本机没用 —— 它得躺在切片器自己的 profile 目录里才生效。
@@ -102,7 +102,7 @@
  *   我自己的文件             `api.getLocalPresetFiles()`                  真（**本地文件**：扫 `presets-local/`，盘当底账）
  *   本地那份的正文           `api.readLocalPresetText()`                  真（只读；抽屉里看，读不出来照实说）
  *   已应用                   唯一底账 run/active-preset.json  真（**全局唯一**，落 Internal 根，刷新还在）
- *   已复制到切片器           `api.getSlicerCopied()`                     **演示集合**（起始 1 个）
+ *   已放入切片器             `api.getSlicerCopied()`                     真（扫每个账号目录，起始 1 个）
  *   喷嘴 / 层高              `PresetFileInfo.{nozzle,layerHeight}`       真（**只有切片器有，所以只有切片器那张表里有这两列**）
  *   时间 / 大小              `PresetFileInfo.{modifiedText,sizeText}`    **假后端按 path 稳定推的演示值**，前端一行不编
  *                            （交付行的大小是**真值**：catalog 登记的那个字节数）
@@ -192,6 +192,7 @@ import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
+import type { IconName } from '../../components/Icon'
 import type { Density } from '../../hooks/useDensity'
 import {
   comboOf,
@@ -210,6 +211,7 @@ import { dismiss, notify } from '../notify/notify'
 /* 「右键某一份预设 → 打开它的参数」那一屏（2026-10-09）。它里面就是参数页本身 */
 import PresetParamsModal from '../params/PresetParamsModal'
 import CompareModal from './CompareModal'
+import PlacementsModal from './PlacementsModal'
 import TextDiffModal from './TextDiffModal'
 import PresetScopeBar from './PresetScopeBar'
 import PresetStatusPill, { PresetSlicerPill } from './PresetStatusPill'
@@ -236,12 +238,10 @@ import {
   localUnreadableWhy,
   localCountOfAxis,
   treeCountOfAxis,
-  PRESET_SUSPECT_WHY,
   STATUS_TEXT,
   UNSUPPORTED_TEXT,
   /* 「下载」那个词只有一处（`UPDATE_ACTION_TEXT`）—— 右键菜单与操作列那颗按钮不许各写一个 */
   UPDATE_ACTION_TEXT,
-  isSuspectPreset,
   sizeTextOf,
   /* 重命名框：主名与后缀拆开（后缀灰色贴在行尾、不可改） */
   splitFileName,
@@ -695,6 +695,11 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     target: { path: string; fileName: string; machineId: string; versionId: string }
     syncFirst: boolean
   } | null>(null)
+  /**
+   * 「查看放入情况」那个框（2026-11-10）：记的是**哪一份**，每个账号目录的实况由框自己
+   * 现读（`getSlicerPlacements`）—— 盘是底账，框开着的时候用户也可能去访达删掉一份。
+   */
+  const [placements, setPlacements] = useState<{ fileName: string } | null>(null)
   /*
    * 正在做动作的那几行（rowKey 集合）—— 只用来把**那一颗**按钮禁掉 / 换成「下载中」。
    *
@@ -2670,6 +2675,22 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     )
   }
 
+  /*
+   * 「查看放入情况」那个框（2026-11-10）。**不打开系统文件夹**：把这份预设散落的每个
+   * 账号目录都列出来，各带一枚「已放入 / 未放入」徽章 —— 用户在外部删掉其中一份也看得见，
+   * 未放入的那一行当场就能补。
+   */
+  const openPlacements = (row: { fileName: string }) => {
+    menu.close()
+    setPlacements({ fileName: row.fileName })
+  }
+
+  /* 框自己会拿它现读（`load` 的身份要稳，否则那个 effect 每次渲染都重跑） */
+  const loadPlacements = useCallback(
+    (fileName: string) => api.getSlicerPlacements(fileName),
+    [],
+  )
+
   /**
    * 置顶是纯前端的排序，真的能用 —— 落 localStorage，刷新还在。
    *
@@ -2730,58 +2751,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /**
-   * 操作列上那两个**真的能用**的动作。
+   * 操列上那颗**切片器**的动作（`onLive`）。
    *
-   * 一个路子：写底账 → 重读底账（`usePresetData` 的 `apply` / `copy` 里做的）。
-   * **MKP 应用成功不再发提示条**（作者：「这一行可以去掉了，因为上面有了」）——
-   * 已应用状态条就在同一屏上面，应用哪一份写在它身上，同一句话说两遍；
-   * 状态条的 `title` 里说清它是本机底账（刷新还在）。
-   * 切片器的复制成功照旧发：它没有状态条，行上的「已复制」只说状态、不说去了哪。
+   * # 它现在只做一件事：把框打开（2026-11-10 作者）
    *
-   * 失败照抛出来说：假后端的两条校验（仓库里没这个 asset、类型对不上）就是从这里冒上来的，
-   * 真后端还会多一种（切片器路径没配 = 没装那个应用 / 没打开过）；**同名不再拦**——
-   * 那儿原来那份直接换成我们这份（2026-10-13 作者改判）。不吞、不假装成功。
+   * 「放入按钮的话，它能出现模态框……让我选择 BBS 还是哪些，让我自己看着去放入」——
+   * 落点可以有**好几个切片器 × 好几个账号目录**，一次点下去就直接全写不再是对的：
+   * 用户要先看到"哪儿有、哪儿没有"，再决定放哪些。真正落盘的动作在框里那几行
+   * （`PlacementsModal` → `data.copy`），这一侧不再自己写盘。
+   *
+   * 于是行上那颗按钮的三种状态照旧：已放入 = 灰字、未放入 = 可点、不可点 = 带原因的灰
+   * （`PresetTable` 那一侧判的），只是"可点"现在开的是框。
    */
   const runLive = (row: PresetLocalRow) => {
-    /*
-     * 切片器：复制进切片器自己的用户配置目录（真机落盘）。**键是文件名** ——
-     * 下载 / 应用 / 读正文同一个取用口径。成功要发提示条（行上的「已复制」只说状态、
-     * 不说去了哪）；失败照抛出来说（不是切片器配置 / 本机没那份字节）。
-     *
-     * ★ 2026-10-14：这里原来还裹着一层 `if (page.kind !== 'mkp') { … }`，后面跟着
-     * "MKP 档本地行也能使用"那半段（`row.origin === 'local'` 的应用路径）与一条
-     * "正常到不了"的兜底 —— **整段删了**：`onLive` 只喂给非 MKP 档的本地行
-     * （`PresetTable` 里 MKP 本地行走的是 `onUse`），那个 `if` 恒真，后半段一行都执行不到
-     * （兜底那句注释自己都写着"正常到不了"）。
-     */
-    /* 连点两下会往切片器目录写两遍 —— 第二下丢掉（见 `inflightRef`） */
-    const key = `live:${row.rowKey}`
-    if (!enter(key)) return
-    markBusy(row.rowKey)
-    data.copy(row.fileName).then(
-      (outcome) => {
-        leave(key)
-        clearBusy(row.rowKey)
-        /*
-         * **同名换掉**这件事要说清（2026-10-13 作者改判：「有相同的就覆盖吧」）——
-         * 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
-         * 不合并成一句"已复制"。
-         */
-        /* 落点路径不印在提示条上（技术细节，2026-10-13 作者口径）——
-           文件在哪，行上右键有「显示切片器里的那份」 */
-        setNote({
-          text: outcome.replaced
-            ? msg('presets.page.live.copiedReplaced', { name: row.fileName })
-            : msg('presets.page.live.copied', { name: row.fileName }),
-          bad: false,
-        })
-      },
-      (e: unknown) => {
-        leave(key)
-        clearBusy(row.rowKey)
-        setNote({ text: msg('presets.page.live.failed', { detail: errorText(e) }), bad: true })
-      },
-    )
+    openPlacements(row)
   }
 
   /**
@@ -2846,9 +2829,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   }
 
   /*
-   * **「查看工艺预设」**：跳去 BBS 预设查看器看这一份。
+   * **「去工艺页面查看」**：跳去 BBS 预设查看器看这一份。
    *
-   * # 灰着的就不出现（2026-10-16 作者：「mkp 的是灰色的就不显示」）
+   * # 灰着的就不出现
    *
    * 全站那条铁律是「禁用一定带原因」（见 `components/menu/types.ts`）—— 但那条针对的是
    * **用户本来就该能做、这会儿被挡住**的动作（改名 / 复制 / 删除），灰着并说清为什么
@@ -2856,16 +2839,20 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 而 MKP 档整档都是 MKP 配方（toml）—— `bbsWhyNot` **恒**有话说 ⇒ 那一档上它永远灰着。
    * 一个在任何行上都点不动、只为解释自己为什么点不动而存在的项，是纯噪声 ⇒ 干脆不列。
    *
-   * # 词（2026-10-16 作者：「在 BBS 中查看这个文案改成查看工艺预设」）
+   * # 图标由调用方给
    *
-   * 沿革：「在 BBS 预设查看器中打开」→「在 BBS 中查看」→ **「查看工艺预设」**。
-   * 中间那版说的是"去哪儿看"，作者要的是"看的是什么东西"（工艺预设）。
-   * 不挂图标：它只在工艺预设上才出现，是这几张菜单里最冷的一档。
+   * 切片器那张表里这一项挂 `presets`（书签 = 一份工艺预设），MKP 那两张表不传 ——
+   * 那两张表里它永远不出现（见上），形状上也就不动它们。
    */
-  const bbsEntries = (row: PresetTableRow): ContextMenuEntry[] => {
+  const bbsEntries = (row: PresetTableRow, icon?: IconName): ContextMenuEntry[] => {
     if (bbsWhyNot(row) !== undefined) return []
     return [
-      { id: 'bbs', label: tr('presets.page.bbs.open'), onSelect: () => onOpenBbs?.(row.fileName) },
+      {
+        id: 'bbs',
+        icon,
+        label: tr('presets.page.bbs.open'),
+        onSelect: () => onOpenBbs?.(row.fileName),
+      },
     ]
   }
 
@@ -3379,13 +3366,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
      */
     const canEdit =
       row.origin === 'local' && row.kind === 'mkp_preset' && row.localState !== 'unreadable'
-    /*
-     * 内容存疑的那两档（旧版本 / 内容异常）：**不许复制** ——
-     * 与"不许应用、不许改"同一条边界（第三圈第 6 层）：盘上那份的字节我们不认，
-     * 不能让它换个名字继续活着。禁用一定带原因 —— 灰一个项不说为什么，用户只会以为坏了。
-     */
-    const suspect = isSuspectPreset(row.presetState)
 
+    /*
+     * # 这一档不再列「复制」「重命名」
+     *
+     * 那两项是"复制出一份 / 改个名字"的本地文件动作，而这张表里 `row.origin !== 'local'`
+     * 恒成立（列的是目录登记的交付文件）⇒ 两项**永远灰着**。灰一个用户本来就做不了的项
+     * 只会把菜单撑长，所以整项不列（2026-11-10 作者：「没有的就不要显示出来了」）。
+     * 它与「显示切片器里的那份」不同：那一项是**真的能做**、只是这一行还没放入。
+     */
     return [
       /* 两态两枚图标（`pinOff` / `pin`）—— 与上面 MKP 档那一项同一条，理由见那里 */
       {
@@ -3394,6 +3383,17 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         label: row.pinned ? tr('presets.page.menu.unpin') : tr('presets.page.menu.pin'),
         onSelect: () => togglePin(row),
       },
+      /*
+       * **「查看放入情况…」**（2026-11-10 作者）：不打开系统文件夹，花一个框把这份预设
+       * **每个账号目录**里有没有都列出来 —— 用户在外部删掉其中一份也看得见。
+       * 图标 `files`（几个文件夹）：这一项问的正是"散在几处"。
+       */
+      {
+        id: 'placements',
+        icon: 'files',
+        label: tr('presets.page.menu.placements'),
+        onSelect: () => openPlacements(row),
+      },
       /* 参数对比的右键入口（2026-10-10）：两下选两份，见 `compareEntry` ——
          切片器档这一侧只有「本地文件」里读得出来的 MKP 预设才有这一项 */
       ...(canCompare(row) ? [compareEntry(row)] : []),
@@ -3401,47 +3401,34 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
       ...(canEdit
         ? ([{ id: 'edit', label: tr(EDIT_TEXT.cell), onSelect: () => openEdit(row) }] satisfies ContextMenuEntry[])
         : []),
-      {
-        id: 'copy',
-        /* ★ 不挂图标（2026-10-16 作者：「复制文件的不需要图标」）—— 与 MKP 档那一项同一条 */
-        label: tr(LOCAL_COPY.cell),
-        /* 本地文件 → 本地文件（第十一层，按字节复制、来源记录原样带过去）；
-           其余行按 `copyWhyNot` 说明为什么不行（内容存疑那一句优先） */
-        disabled: suspect ? tr(PRESET_SUSPECT_WHY) : copyWhyNot(row),
-        onSelect: () => runDuplicate(row),
-      },
-      {
-        id: 'rename',
-        label: tr('presets.page.menu.rename'),
-        /* 第十层：只有「本地文件」能改名（只动名字、字节一个不动） */
-        disabled: renameWhyNot(row),
-        onSelect: () => openRename(row),
-      },
       /*
-       * 「打开所在文件夹」在这张表里是**两条**（2026-10-13 作者）：切片器配置在磁盘上
+       * 「打开所在文件夹」在这张表里是**两条**：切片器配置在磁盘上
        * 有两个落点，用户要能分别打开 —— 在我们这儿的原件（下载区）与切片器里那份
-       * （复制过去的，他在 BBS 里改的就是那一份）。两处都不是"程序自己管得摸不着"的
-       * 地方（旧版把这一栏整条禁了，理由是"住在程序自己管理的区域"）。
+       * （放过去的，他在 BBS 里改的就是那一份）。
        *
        * 这张表里列的都是**盘上真有**的那些（未下载的不进本地表）⇒ 第一条恒可点；
-       * 第二条看「已复制」那一格（`live`）。
+       * 第二条看「已放入」那一格（`live`）。
        *
-       * 两条也**都不挂图标**：它们是同一件事的两个落点，空着正好把彼此认成一伙。
+       * 两条都挂图标，但**不是同一枚**：`folder` 是我们那份，`external`（↗）是
+       * 切片器那边 —— 并排两行同一枚字形读不出区别，而 `external` 本来就表"在别处"。
        */
       {
         id: 'revealOurs',
+        icon: 'folder',
         label: tr('presets.page.menu.revealOurs'),
         onSelect: () => runRevealOurs(row),
       },
       {
         id: 'revealSlicer',
+        icon: 'external',
         label: tr('presets.page.menu.revealSlicer'),
         disabled: row.live ? undefined : tr('presets.page.menu.revealSlicerDisabled'),
         onSelect: () => runRevealSlicer(row),
       },
-      ...bbsEntries(row),
+      ...bbsEntries(row, 'presets'),
       { separator: true },
-      /* 「批量删除…」—— 与 MKP 档那一项同一个入口、同一段话（见那一处的注释） */
+      /* 「批量删除…」—— 与 MKP 档那一项同一个入口、同一段话（见那一处的注释）。
+         不挂图标：与下面「删除」同族，两枚垃圾桶并排反而分不出粒度。 */
       {
         id: 'bulkRemove',
         label: tr('presets.page.menu.bulkRemove'),
@@ -3452,8 +3439,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
         icon: 'trash',
         label: tr('presets.page.menu.remove'),
         danger: true,
-        /* 本地文件真删；切片器交付行删了可重下；正在使用的那份删掉时后端会一并撤下使用
-           —— 代价在确认框里说清（框在页面层：`askRemove` → `removeAsk`） */
+        /* 切片器交付行删了可重下 —— 代价在确认框里说清（框在页面层：`askRemove`） */
         disabled: removeWhyNotOf(tr, row),
         onSelect: () => askRemove(row),
       },
@@ -4087,6 +4073,21 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
               setCompareOpen(false)
             }}
             onSaved={(text) => setNote({ text, bad: false })}
+          />
+
+          {/*
+           * **放入情况**（2026-11-10）：这份预设散在哪几个账号目录里、哪几处还没有。
+           * 框自己现读（读的是盘），放入 / 打开文件夹都走本页那两个已经存在的动作。
+           */}
+          <PlacementsModal
+            open={placements !== null}
+            fileName={placements?.fileName ?? ''}
+            host={pageEl}
+            onClose={() => setPlacements(null)}
+            onPlaced={() => void data.refreshSlicerCopied()}
+            load={loadPlacements}
+            put={data.copy}
+            reveal={data.revealSlicer}
           />
 
           {/*

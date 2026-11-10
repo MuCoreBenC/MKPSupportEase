@@ -561,7 +561,9 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         界面上要能分别打开 */
         ipc::presets::reveal_delivered_file,
         ipc::presets::reveal_slicer_file,
-        // 切片器的「生效」= 复制进切片器自己的用户配置目录（2026-10-09 接通）
+        // 「这份放进了哪些账号目录」—— 右键菜单那个框按它逐行画
+        ipc::presets::get_slicer_placements,
+        // 切片器的「生效」= 放进切片器自己的用户配置目录（每个账号目录一份）
         ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
@@ -755,7 +757,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         // 打开两个落点所在的文件夹（与上面那份清单一字不差）
         ipc::presets::reveal_delivered_file,
         ipc::presets::reveal_slicer_file,
-        // 切片器的「生效」= 复制进切片器自己的用户配置目录（与上面那份清单一字不差）
+        ipc::presets::get_slicer_placements,
+        // 切片器的「生效」= 放进切片器自己的用户配置目录（与上面那份清单一字不差）
         ipc::presets::copy_to_slicer,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,

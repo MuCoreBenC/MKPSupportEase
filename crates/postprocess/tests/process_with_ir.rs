@@ -69,11 +69,11 @@ fn reference_output() -> PathBuf {
     repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
 }
 
-/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「补抬 Z=10 + 跳过震动检测」生成，
+/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「补抬 Z=5 + 跳过震动检测」生成，
 /// 与出厂档对齐 —— 两张脸都钉回去，字节判据才不假红
 /// （同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
 const PREFERENCE_PINS: &[&str] = &[
-    "Prefs.BeginStageRetractZLiftMm=10",
+    "Prefs.BeginStageRetractZLiftMm=5",
     "Prefs.SkipVibrationCalibration=true",
 ];
 

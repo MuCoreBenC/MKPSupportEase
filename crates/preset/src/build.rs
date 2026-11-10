@@ -28,7 +28,22 @@ use postprocess::ir::types::*;
 // 那是编排层（pipeline）的事。import 进来只会得到一条 unused 警告，
 // 而警告在 -D warnings 下就是错误。
 use postprocess::ir::num_strip;
+use postprocess::postproc::pen_template::{render, PenVars};
 use std::collections::HashMap;
+
+/// 把「骨架 + 字段」渲染成最终 G-code。
+///
+/// 结构不对（未知占位符、没闭合、行首不是 G/M/L）就是预设内容非法，硬错误 ——
+/// 不静默放行，否则用户会拿到一段半截动作。
+fn render_pen_skeleton(
+    skeleton: &str,
+    vars: PenVars,
+    field: &str,
+) -> Result<String, PostprocError> {
+    render(skeleton, &vars).map_err(|e| PostprocError::InvalidConfig {
+        message: format!("{field}: {e}"),
+    })
+}
 
 /// exec_mode 三值（`""` = CLI 回退读 TOML，process.go:219 语义）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -71,8 +86,26 @@ pub fn build(
     ir.toolhead.x_offset = cfg.toolhead.offset_x;
     ir.toolhead.y_offset = cfg.toolhead.offset_y;
     ir.toolhead.z_offset = cfg.toolhead.offset_z;
-    ir.toolhead.custom_mount_gcode = split_gcode_lines(&cfg.toolhead.custom_mount_gcode);
-    ir.toolhead.custom_unmount_gcode = split_gcode_lines(&cfg.toolhead.custom_unmount_gcode);
+    ir.toolhead.custom_mount_gcode = split_gcode_lines(&render_pen_skeleton(
+        &cfg.toolhead.custom_mount_gcode,
+        PenVars {
+            wait: cfg.toolhead.pen_mount_wait_x,
+            wait_y: cfg.toolhead.pen_mount_wait_y,
+            target: cfg.toolhead.pen_mount_x,
+            speed: cfg.toolhead.pen_mount_speed,
+        },
+        "custom_mount_gcode",
+    )?);
+    ir.toolhead.custom_unmount_gcode = split_gcode_lines(&render_pen_skeleton(
+        &cfg.toolhead.custom_unmount_gcode,
+        PenVars {
+            wait: cfg.toolhead.pen_unmount_wait_x,
+            wait_y: cfg.toolhead.pen_unmount_wait_y,
+            target: cfg.toolhead.pen_unmount_x,
+            speed: cfg.toolhead.pen_unmount_speed,
+        },
+        "custom_unmount_gcode",
+    )?);
     ir.toolhead.nozzle_switch_temperature = 0.0;
     ir.toolhead.glue_z_offset = cfg.toolhead.glue_z_offset;
     ir.toolhead.prime_length = cfg.toolhead.prime_length;

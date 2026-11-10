@@ -624,9 +624,10 @@ G1 Z5 F1200
 G90
 ;===== begin stage retract =================
 G91
-G1 Z10 F600
+G380 S2 Z5 F1200
 G90
 G28 X
+G28 Y
 G1 X191 F10000
 G1 X20 F10000
 G1 F5000

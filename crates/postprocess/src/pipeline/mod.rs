@@ -53,7 +53,7 @@ use crate::postproc::disk::{TowerAsk, TowerAskOutcome};
 /// write hooks 的偏好默认值（Go preferences/service.go:165-180；CLI 无偏好通道）。
 pub const DEFAULT_SKIP_VIBRATION: bool = true;
 pub const DEFAULT_BEGIN_STAGE_RETRACT: bool = true;
-pub const DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM: i64 = 10;
+pub const DEFAULT_BEGIN_STAGE_RETRACT_Z_LIFT_MM: i64 = 5;
 /// Z/XY 校准停留秒数（application_defaults [calibration] SSOT：Z=2, XY=3）。
 pub const DEFAULT_Z_DWELL_SEC: i64 = 2;
 pub const DEFAULT_XY_DWELL_SEC: i64 = 3;

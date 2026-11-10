@@ -306,8 +306,15 @@ export const bridgeApi: MkpApi = {
   /* 两个落点各自的「打开所在文件夹」（2026-10-13）：我们那份（下载区）与切片器里那份 */
   revealDeliveredFile: (fileName) =>
     call('revealDeliveredFile', 'reveal_delivered_file', { fileName }),
-  revealSlicerFile: (fileName) => call('revealSlicerFile', 'reveal_slicer_file', { fileName }),
+  revealSlicerFile: (fileName, slicer, account) =>
+    call('revealSlicerFile', 'reveal_slicer_file', {
+      fileName,
+      slicer: slicer ?? null,
+      account: account ?? null,
+    }),
   getSlicerCopied: () => call('getSlicerCopied', 'get_slicer_copied'),
+  getSlicerPlacements: (fileName) =>
+    call('getSlicerPlacements', 'get_slicer_placements', { fileName }),
   getPresetFiles: () => call('getPresetFiles', 'get_preset_files'),
   getMenu: () => call('getMenu', 'get_menu'),
   getParamMeta: () => call('getParamMeta', 'get_param_meta'),
@@ -433,8 +440,13 @@ export const bridgeApi: MkpApi = {
   installUpdate: () => call('installUpdate', 'install_update'),
   openUrl: (url) => call('openUrl', 'open_url', { url }),
 
-  /* ——— 切片器目录（复制进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
-  copyToSlicer: (fileName) => call('copyToSlicer', 'copy_to_slicer', { fileName }),
+  /* ——— 切片器目录（放进去才生效）+ 复制云端链接（2026-10-09 接通）——— */
+  copyToSlicer: (fileName, slicer, account) =>
+    call('copyToSlicer', 'copy_to_slicer', {
+      fileName,
+      slicer: slicer ?? null,
+      account: account ?? null,
+    }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 
   /* ——— 本机 BBS 目录（2026-10-13）：工艺页「本机工艺」那一档 ——— */

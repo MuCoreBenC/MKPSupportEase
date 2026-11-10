@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "09fd429e912c2667",
+  "revision": "b46d1963c6e59ee5",
   "publishedAt": "2026-11-09T12:06:01Z",
   "brands": [
     {
@@ -902,6 +902,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -944,22 +945,23 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
-          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
-          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
-          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X256 F42000\nG1 X261 F10000\nG1 X267 F10000\nG1 X256 F42000\nG1 F42000",
-          "A1_MINI": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
-          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
-          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
-          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X168 F30000\nG1 X175 F10000\nG1 X185 F10000\nG1 X168 F30000\nG1 F30000",
-          "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000",
-          "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000",
-          "X1C:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X20 Y7 F30000;到驻点\nG1 X1 F300;推到X0，笔尖下落\nG1 X20 Y7 F30000;向左离开\nG1 F30000"
+          "A1": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F42000\nG1 F42000",
+          "A1_MINI": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FAST": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:FASTV3.3": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "A1_MINI:STANDARD": "G92 E0\nG1 E-5 F1800\nG92 E0\nL801\nM204 S10000\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F30000\nG1 F30000",
+          "P1S:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
+          "P2S:STANDARD": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000",
+          "X1C:LITE": "L803;此处使喷嘴降温\nG92 E0;挤出机归零\nG1 E-10;长回抽\nG92 E0\nL801\nM204 S10000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};推到底\nG1 X{wait} Y{wait_y} F30000;离开\nG1 F30000"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1002,22 +1004,491 @@
         ],
         "deprecated": false,
         "machineVariants": {
-          "A1": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:FAST": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X273 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1:STANDARD": "M106 S[AUTO]\nG1 X256 F42000\nG1 X261 F10000\nG1 X271 F10000\nG1 X256 F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
-          "A1_MINI": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X168 F30000\nG1 X175 F10000\nG1 X189 F10000\nG1 X168 F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
-          "P1S:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
-          "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe",
-          "X1C:LITE": "G92 E0\nG1 F30000\nG1 X246 Y0 ;到驻点\nG1 X256 F6000 ; 收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇\n;M106 P2 S100\nG1 X70 Y265 F30000;Wipe\nG1 E6;Wipe\nG1 X90 F30000;Wipe\nG1 X120 F30000;Wipe\nG1 X90 F30000;Wipe"
+          "A1": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:FAST": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1:STANDARD": "M106 S[AUTO]\nG1 X{wait} F42000\nG1 X{target} F{speed}\nG1 X{wait} F5000\nG1 F42000\nL802\nG92 E0\nG1 E5.5 F1000\nG92 E0\nG1 F30000",
+          "A1_MINI": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:FAST": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:FASTV3.3": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "A1_MINI:STANDARD": "M106 S[AUTO]\nG1 X{wait} F30000\nG1 X{target} F{speed}\nG1 X{wait} F6000\nG1 F30000\nL802\nG92 E0\nG1 E5.5 F1500\nG92 E0\nG1 F30000",
+          "P1S:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
+          "P2S:STANDARD": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇",
+          "X1C:LITE": "G92 E0\nG1 F30000\nG1 X{wait} Y{wait_y} F30000;到驻点\nG1 X{target} F{speed};收笔\nG1 F30000\nL802\nG1 F1500\nG1 E10.7;填充回抽\nG1 F30000\nM106 P1 S[AUTO] ; 风扇"
         },
         "machineMinVariants": {},
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_mount_wait_x",
+        "configKey": "PenMountWaitX",
+        "tomlKey": "pen_mount_wait_x",
+        "jsonKey": "pen_mount_wait_x",
+        "label": "落笔等待位 X",
+        "labelEn": "Pen mount wait X",
+        "labelJa": "ペン降ろし待機 X",
+        "labelTw": "落筆等待位 X",
+        "desc": "落笔前停住的那个 X 坐标，对应落笔骨架里的 {wait}",
+        "descEn": "X where the head stops before the pen-down bump; feeds {wait} in the mount skeleton",
+        "descJa": "ペンを降ろす前に停止する X 座標。マウント用スケルトンの {wait} に入ります",
+        "descTw": "落筆前停住的那個 X 座標，對應落筆骨架裡的 {wait}",
+        "tomlComment": "落笔等待位 X",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.6,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 256.0,
+          "A1:FASTV3.3": 256.0,
+          "A1:STANDARD": 256.0,
+          "A1_MINI:FAST": 168.0,
+          "A1_MINI:FASTV3.3": 168.0,
+          "A1_MINI:STANDARD": 168.0,
+          "P1S": 20.0,
+          "P1S:LITE": 20.0,
+          "P2S": 20.0,
+          "P2S:STANDARD": 20.0,
+          "X1C": 20.0,
+          "X1C:LITE": 20.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_mount_wait_y",
+        "configKey": "PenMountWaitY",
+        "tomlKey": "pen_mount_wait_y",
+        "jsonKey": "pen_mount_wait_y",
+        "label": "落笔等待位 Y",
+        "labelEn": "Pen mount wait Y",
+        "labelJa": "ペン降ろし待機 Y",
+        "labelTw": "落筆等待位 Y",
+        "desc": "落笔等待位的 Y 坐标，对应骨架里的 {wait_y}。A 系列不动这个轴，留 0",
+        "descEn": "Y of the mount wait position; feeds {wait_y} in the skeleton. A-series keeps this axis still, so it stays 0",
+        "descJa": "ペン降ろし待機位置の Y。スケルトンの {wait_y} に入ります。A シリーズはこの軸を動かさないため 0",
+        "descTw": "落筆等待位的 Y 座標，對應骨架裡的 {wait_y}。A 系列不動這個軸，留 0",
+        "tomlComment": "落笔等待位 Y",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.7,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "P1S": 7.0,
+          "P1S:LITE": 7.0,
+          "P2S": 7.0,
+          "P2S:STANDARD": 7.0,
+          "X1C": 7.0,
+          "X1C:LITE": 7.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": true,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_mount_x",
+        "configKey": "PenMountX",
+        "tomlKey": "pen_mount_x",
+        "jsonKey": "pen_mount_x",
+        "label": "落笔位 X",
+        "labelEn": "Pen mount X",
+        "labelJa": "ペン降ろし位置 X",
+        "labelTw": "落筆位 X",
+        "desc": "推到底、笔尖真正挂上工具头的那个 X，对应落笔骨架里的 {target}",
+        "descEn": "X where the pen actually latches onto the toolhead; feeds {target} in the mount skeleton",
+        "descJa": "ペン先がツールヘッドに実際に掛かる X。マウント用スケルトンの {target} に入ります",
+        "descTw": "推到底、筆尖真正掛上工具頭的那個 X，對應落筆骨架裡的 {target}",
+        "tomlComment": "落笔位 X",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.8,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 267.0,
+          "A1:FASTV3.3": 267.0,
+          "A1:STANDARD": 267.0,
+          "A1_MINI:FAST": 185.0,
+          "A1_MINI:FASTV3.3": 185.0,
+          "A1_MINI:STANDARD": 185.0,
+          "P1S": 1.0,
+          "P1S:LITE": 1.0,
+          "P2S": 1.0,
+          "P2S:STANDARD": 1.0,
+          "X1C": 1.0,
+          "X1C:LITE": 1.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_mount_speed",
+        "configKey": "PenMountSpeed",
+        "tomlKey": "pen_mount_speed",
+        "jsonKey": "pen_mount_speed",
+        "label": "落笔速度",
+        "labelEn": "Pen mount speed",
+        "labelJa": "ペン降ろし速度",
+        "labelTw": "落筆速度",
+        "desc": "落笔时推到动作位那一段的进给速度，对应骨架里的 {speed}",
+        "descEn": "Feedrate of the final bump toward the mount position; feeds {speed} in the skeleton",
+        "descJa": "ペン降ろし位置へ押し込む区間の送り速度。スケルトンの {speed} に入ります",
+        "descTw": "落筆時推到動作位那一段的進給速度，對應骨架裡的 {speed}",
+        "tomlComment": "落笔速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 0.9,
+          "sectionId": "custom_gcode"
+        },
+        "min": 0.0,
+        "max": 100000.0,
+        "step": 100.0,
+        "unit": "mm/min",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 10000.0,
+          "A1:FASTV3.3": 10000.0,
+          "A1:STANDARD": 10000.0,
+          "A1_MINI:FAST": 10000.0,
+          "A1_MINI:FASTV3.3": 10000.0,
+          "A1_MINI:STANDARD": 10000.0,
+          "P1S": 300.0,
+          "P1S:LITE": 300.0,
+          "P2S": 300.0,
+          "P2S:STANDARD": 300.0,
+          "X1C": 300.0,
+          "X1C:LITE": 300.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_unmount_wait_x",
+        "configKey": "PenUnmountWaitX",
+        "tomlKey": "pen_unmount_wait_x",
+        "jsonKey": "pen_unmount_wait_x",
+        "label": "收笔等待位 X",
+        "labelEn": "Pen unmount wait X",
+        "labelJa": "ペン戻し待機 X",
+        "labelTw": "收筆等待位 X",
+        "desc": "收笔前停住的那个 X 坐标，对应收笔骨架里的 {wait}",
+        "descEn": "X where the head stops before the pen-up bump; feeds {wait} in the unmount skeleton",
+        "descJa": "ペンを戻す前に停止する X 座標。アンマウント用スケルトンの {wait} に入ります",
+        "descTw": "收筆前停住的那個 X 座標，對應收筆骨架裡的 {wait}",
+        "tomlComment": "收笔等待位 X",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.1,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 256.0,
+          "A1:FASTV3.3": 256.0,
+          "A1:STANDARD": 256.0,
+          "A1_MINI:FAST": 168.0,
+          "A1_MINI:FASTV3.3": 168.0,
+          "A1_MINI:STANDARD": 168.0,
+          "P1S": 246.0,
+          "P1S:LITE": 246.0,
+          "P2S": 246.0,
+          "P2S:STANDARD": 246.0,
+          "X1C": 246.0,
+          "X1C:LITE": 246.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_unmount_wait_y",
+        "configKey": "PenUnmountWaitY",
+        "tomlKey": "pen_unmount_wait_y",
+        "jsonKey": "pen_unmount_wait_y",
+        "label": "收笔等待位 Y",
+        "labelEn": "Pen unmount wait Y",
+        "labelJa": "ペン戻し待機 Y",
+        "labelTw": "收筆等待位 Y",
+        "desc": "收笔等待位的 Y 坐标，对应骨架里的 {wait_y}。A 系列不动这个轴，留 0",
+        "descEn": "Y of the unmount wait position; feeds {wait_y} in the skeleton. A-series keeps this axis still, so it stays 0",
+        "descJa": "ペン戻し待機位置の Y。スケルトンの {wait_y} に入ります。A シリーズはこの軸を動かさないため 0",
+        "descTw": "收筆等待位的 Y 座標，對應骨架裡的 {wait_y}。A 系列不動這個軸，留 0",
+        "tomlComment": "收笔等待位 Y",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.2,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "P1S": 0.0,
+          "P1S:LITE": 0.0,
+          "P2S": 0.0,
+          "P2S:STANDARD": 0.0,
+          "X1C": 0.0,
+          "X1C:LITE": 0.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": true,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_unmount_x",
+        "configKey": "PenUnmountX",
+        "tomlKey": "pen_unmount_x",
+        "jsonKey": "pen_unmount_x",
+        "label": "收笔位 X",
+        "labelEn": "Pen unmount X",
+        "labelJa": "ペン戻し位置 X",
+        "labelTw": "收筆位 X",
+        "desc": "碰一下把笔尖收回去的那个 X，对应收笔骨架里的 {target}",
+        "descEn": "X whose bump releases the pen tip; feeds {target} in the unmount skeleton",
+        "descJa": "当ててペン先を戻す X。アンマウント用スケルトンの {target} に入ります",
+        "descTw": "碰一下把筆尖收回去的那個 X，對應收筆骨架裡的 {target}",
+        "tomlComment": "收笔位 X",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.3,
+          "sectionId": "custom_gcode"
+        },
+        "min": -20.0,
+        "max": 320.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 271.0,
+          "A1:FASTV3.3": 273.0,
+          "A1:STANDARD": 271.0,
+          "A1_MINI:FAST": 189.0,
+          "A1_MINI:FASTV3.3": 189.0,
+          "A1_MINI:STANDARD": 189.0,
+          "P1S": 256.0,
+          "P1S:LITE": 256.0,
+          "P2S": 256.0,
+          "P2S:STANDARD": 256.0,
+          "X1C": 256.0,
+          "X1C:LITE": 256.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.pen_unmount_speed",
+        "configKey": "PenUnmountSpeed",
+        "tomlKey": "pen_unmount_speed",
+        "jsonKey": "pen_unmount_speed",
+        "label": "收笔速度",
+        "labelEn": "Pen unmount speed",
+        "labelJa": "ペン戻し速度",
+        "labelTw": "收筆速度",
+        "desc": "收笔时推到动作位那一段的进给速度，对应骨架里的 {speed}",
+        "descEn": "Feedrate of the bump toward the unmount position; feeds {speed} in the skeleton",
+        "descJa": "ペン戻し位置へ当てる区間の送り速度。スケルトンの {speed} に入ります",
+        "descTw": "收筆時推到動作位那一段的進給速度，對應骨架裡的 {speed}",
+        "tomlComment": "收笔速度",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "machine_specific",
+        "section": "toolhead",
+        "layout": {
+          "order": 1.4,
+          "sectionId": "custom_gcode"
+        },
+        "min": 0.0,
+        "max": 100000.0,
+        "step": 100.0,
+        "unit": "mm/min",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": "per_variant",
+        "machineFilter": [
+          "A1",
+          "A1_MINI",
+          "P1S",
+          "P2S",
+          "X1C"
+        ],
+        "deprecated": false,
+        "machineVariants": {
+          "A1:FAST": 10000.0,
+          "A1:FASTV3.3": 10000.0,
+          "A1:STANDARD": 10000.0,
+          "A1_MINI:FAST": 10000.0,
+          "A1_MINI:FASTV3.3": 10000.0,
+          "A1_MINI:STANDARD": 10000.0,
+          "P1S": 6000.0,
+          "P1S:LITE": 6000.0,
+          "P2S": 6000.0,
+          "P2S:STANDARD": 6000.0,
+          "X1C": 6000.0,
+          "X1C:LITE": 6000.0
+        },
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1075,6 +1546,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1115,6 +1587,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1182,6 +1655,7 @@
         },
         "mergeGroup": "offset",
         "pinned": true,
+        "omitWhenUnset": false,
         "serialization": {
           "subfieldsOrder": [
             "x",
@@ -1255,6 +1729,7 @@
         },
         "mergeGroup": "offset",
         "pinned": true,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1324,6 +1799,7 @@
         },
         "mergeGroup": "offset",
         "pinned": true,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1368,6 +1844,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1410,6 +1887,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": true,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1453,6 +1931,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1497,6 +1976,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1540,6 +2020,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1584,6 +2065,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1628,6 +2110,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1697,6 +2180,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1758,6 +2242,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1798,6 +2283,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1867,6 +2353,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1907,6 +2394,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1947,6 +2435,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -1987,6 +2476,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2031,6 +2521,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2075,6 +2566,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2119,6 +2611,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2163,6 +2656,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2203,6 +2697,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2264,6 +2759,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2308,6 +2804,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2352,6 +2849,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2396,6 +2894,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2440,6 +2939,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2480,6 +2980,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2524,6 +3025,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2589,6 +3091,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2633,6 +3136,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2698,6 +3202,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2742,6 +3247,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2782,6 +3288,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2822,6 +3329,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2887,6 +3395,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2931,6 +3440,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -2988,6 +3498,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": true,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3053,6 +3564,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3097,6 +3609,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3167,6 +3680,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3207,6 +3721,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3268,6 +3783,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3325,6 +3841,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3365,6 +3882,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3434,6 +3952,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3474,6 +3993,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3535,6 +4055,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3579,6 +4100,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3640,6 +4162,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3684,6 +4207,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3728,6 +4252,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3772,6 +4297,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3816,6 +4342,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3860,6 +4387,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3904,6 +4432,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3948,6 +4477,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -3992,6 +4522,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4032,6 +4563,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4074,6 +4606,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4114,6 +4647,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4183,6 +4717,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4242,6 +4777,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4286,6 +4822,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4330,6 +4867,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4391,6 +4929,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4435,6 +4974,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4479,6 +5019,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4523,6 +5064,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4567,6 +5109,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4636,6 +5179,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4693,6 +5237,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4733,6 +5278,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4795,6 +5341,7 @@
         },
         "mergeGroup": "wiper",
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4855,6 +5402,7 @@
         },
         "mergeGroup": "wiper",
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4899,6 +5447,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -4956,6 +5505,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       },
       {
@@ -5013,6 +5563,7 @@
         "machineMaxVariants": {},
         "mergeGroup": null,
         "pinned": false,
+        "omitWhenUnset": false,
         "serialization": null
       }
     ],
@@ -5660,8 +6211,40 @@
                 "paramKey": "toolhead.custom_mount_gcode"
               },
               {
+                "id": "item_4_0_2",
+                "paramKey": "toolhead.pen_mount_wait_x"
+              },
+              {
+                "id": "item_4_0_3",
+                "paramKey": "toolhead.pen_mount_wait_y"
+              },
+              {
+                "id": "item_4_0_4",
+                "paramKey": "toolhead.pen_mount_x"
+              },
+              {
+                "id": "item_4_0_5",
+                "paramKey": "toolhead.pen_mount_speed"
+              },
+              {
                 "id": "item_4_0_1",
                 "paramKey": "toolhead.custom_unmount_gcode"
+              },
+              {
+                "id": "item_4_0_6",
+                "paramKey": "toolhead.pen_unmount_wait_x"
+              },
+              {
+                "id": "item_4_0_7",
+                "paramKey": "toolhead.pen_unmount_wait_y"
+              },
+              {
+                "id": "item_4_0_8",
+                "paramKey": "toolhead.pen_unmount_x"
+              },
+              {
+                "id": "item_4_0_9",
+                "paramKey": "toolhead.pen_unmount_speed"
               }
             ],
             "component": null,
@@ -5878,8 +6461,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "8bc8d3c6ac248bc0825f71dcd841526200dac36dcde8e64589ba2634d59eb9f2",
-      "size": 4821
+      "sha256": "c2e8b873aee399f579b60fff963f4f01a22a1648d218d50bd08c2c25af3000f1",
+      "size": 5051
     },
     {
       "kind": "mkp_preset",
@@ -5887,8 +6470,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "53212f69de2c7c33511e69f71c96979bc6bf486d11f130b796d6b562ae8dd520",
-      "size": 4819
+      "sha256": "725691537b2a2688cb0f21eb22c5a565c10df5b1ea7eb7965b169718cab6b267",
+      "size": 5049
     },
     {
       "kind": "mkp_preset",
@@ -5896,8 +6479,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "921950a2243130c4a4e2bb0b7fd282b0bd310db4ab1ec714b630f00cce5f4515",
-      "size": 4823
+      "sha256": "b507ee4141fd6791be17b0e45d342133acc4527cce34978b843b753d3b9ef009",
+      "size": 5053
     },
     {
       "kind": "mkp_preset",
@@ -5905,8 +6488,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "d8654e35975aba566de313e807ffd281f06f5e177cae4de8cd705b65ad3511c1",
-      "size": 4827
+      "sha256": "670c5dee4f10e580275927ee6879e689630b629a97f2712609029bf7ec7bb300",
+      "size": 5057
     },
     {
       "kind": "mkp_preset",
@@ -5914,8 +6497,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "9223bc0b02b33a31c852027bde9d0e4ab57ef596f484b5db9ccc2bc3eda59237",
-      "size": 4821
+      "sha256": "7b74e23037d3d281bcdaf8029a05ac7e374bdafd8c6771d97eaf08ce1ce1f1fd",
+      "size": 5051
     },
     {
       "kind": "mkp_preset",
@@ -5923,8 +6506,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "a07e6cc8875d21d573759366524d268fd48877fba63f7a1bc30354d025764bc4",
-      "size": 4826
+      "sha256": "cb1a436ec93ae2fa8ed27a759af1d5cc07166109530da849c19b5b07bfe8c3cb",
+      "size": 5056
     },
     {
       "kind": "mkp_preset",
@@ -5932,8 +6515,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "eb5cff8bc13e3f1041b5557316bd7aacd11e0cb2fa5fc6624233bf4a69944cf4",
-      "size": 4957
+      "sha256": "d793457145df793fd8f9ccebb2172ba5d6c1dcffbc7c4b30faac079e999515fe",
+      "size": 5197
     },
     {
       "kind": "mkp_preset",
@@ -5941,8 +6524,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "8adf21cb2dc7d852dceaea86a67e212a1556b15031889a979c1a85c310fd13a6",
-      "size": 4957
+      "sha256": "58c78c7468a8cffd2d6937832ee51566c3a72a720e73feac055138a677064f35",
+      "size": 5197
     },
     {
       "kind": "icon",

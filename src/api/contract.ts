@@ -2830,14 +2830,58 @@ export interface BbsLocalTree {
 }
 
 /**
- * 「复制进切片器」这一次干了什么（[`MkpApi.copyToSlicer`] 的返回值）。
+ * 「放进切片器」这一次干了什么（[`MkpApi.copyToSlicer`] 的返回值）。
  *
- * `replaced: true` = 切片器目录里原来已经有一份同名的，这一手把它**换成了**我们这份
- * （2026-10-13 作者改判：同名就覆盖）；`false` = 新建。提示条按它说话 ——
- * 「替换掉了你别的东西」与「新放了一份」是两件事，不合并成一句"已复制"。
+ * `replaced: true` = 有目标那儿原来已经有一份同名的，这一手把它**换成了**我们这份
+ * （2026-10-13 作者改判：同名就覆盖）；`false` = 全是新建。提示条按它说话 ——
+ * 「替换掉了你别的东西」与「新放了一份」是两件事，不合并成一句"已放入"。
+ *
+ * `targets` = 这一手**写进了几个账号目录**：切片器读的是当前登录那个账号的目录，
+ * 所以一次写全所有账号目录 —— 提示条按它说清去处。
  */
 export interface CopyToSlicerOutcome {
   replaced: boolean
+  targets: number
+}
+
+/**
+ * 能往里放的切片器 —— 就是 [`SlicerId`] 里那两个**有自己预设目录**的档。
+ *
+ * 写成 `Extract` 而不是另抄一遍联合类型：抄一遍就会有一天少一个档。
+ * `system` / `custom` 是"用哪个程序打开模型"的档，没有自己的账号目录。
+ */
+export type SlicerTarget = Extract<SlicerId, 'bambu' | 'orca'>
+
+/**
+ * 一份预设落在**某个切片器的某个账号目录**里的实况
+ * （[`MkpApi.getSlicerPlacements`] 一行）。
+ *
+ * `account` 是切片器自己分的目录名（数字 uid / `default` / `BBL` …）；`placed` =
+ * 那个目录里**现在**真有这份文件 —— 在系统文件管理器里删掉之后它就会变 `false`。
+ */
+export interface SlicerPlacement {
+  /** 哪个切片器 —— 框里按它分组 */
+  slicer: SlicerTarget
+  account: string
+  /** 那个 `process` 目录的绝对路径（界面显示用，也是「打开文件夹」的落点） */
+  path: string
+  placed: boolean
+}
+
+/**
+ * 「这份放进了哪些账号目录」—— 「查看放入情况」那个框的全部数据。
+ *
+ * 列的是**放入会写的那些目录**（含还没建出来的 `default/process`）：不存在的那一格
+ * 也列出来、`placed: false` —— 用户要看到「还有这一处没放」。
+ *
+ * **自己那一档排在最前**，本机装了的另一个切片器（OrcaSlicer）跟在后面 —— 那一档可以
+ * 手动放，但它不是"这份预设有没生效"的判据（字段表是另一套，界面会说清）。
+ * `available: false` = 本机没有**自己那一档**的 `user/` 目录，`reason` 是那句人话。
+ */
+export interface SlicerPlacements {
+  available: boolean
+  reason: string | null
+  dirs: SlicerPlacement[]
 }
 
 /* ---------- 切片软件（2026-10-13 第二刀：「其他应用…」从磁盘指定） ---------- */
@@ -3391,13 +3435,17 @@ export interface MkpApi {
   revealDeliveredFile(fileName: string): Promise<void>
 
   /**
-   * 打开**切片器目录里那份**（`user/<账号>/process/…`）所在的文件夹，并选中它。
+   * 打开**切片器目录里那份**（`user/<账号>/process/…`）所在的文件夹。
    *
-   * 那是「复制」过去的落点（切片器的生效就是那一手），与我们自己的下载区**不是一处** ——
+   * 那是「放入」过去的落点（切片器的生效就是那一手），与我们自己的下载区**不是一处** ——
    * 用户在 BBS 里改的也是那一份，所以「去文件夹里看看」得能分别打开两处。
-   * 还没复制过去 → 照实报告"先复制"。
+   *
+   * `slicer` 不给 = 这份预设自己那一档（BBS 的工艺预设 → `bambu`）；`account` 给了就
+   * 只看那个账号目录：文件在就选中它，**不在就打开目录本身**（框里那一行的「打开文件夹」
+   * 在未放入时也点得动）；两个都不给就取第一个真有这份的目录，一份都没有 → 照实报告
+   * "先放入"。
    */
-  revealSlicerFile(fileName: string): Promise<void>
+  revealSlicerFile(fileName: string, slicer?: SlicerTarget, account?: string): Promise<void>
 
   /**
    * **删除一份用户文件**：进**回收站**，不是真删（2026-10-29 作者改判）。
@@ -3420,22 +3468,43 @@ export interface MkpApi {
   emptyRecovery(): Promise<number>
 
   /**
-   * 已经复制到切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
-   * 盘就是底账：切片器的用户配置目录里真有这份文件才算「已复制」。
+   * 已经放进切片器的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+   *
+   * 盘就是底账，而且是**每一个账号目录里都有**才算「已放入」：切片器读的是当前登录
+   * 那个账号的目录，少一处用户换个账号就选不到，那不算放好。
    */
   getSlicerCopied(): Promise<string[]>
 
   /**
-   * 把一份切片器配置复制进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
+   * 这份预设在**每个账号目录**里的实况（「查看放入情况」那个框按它逐行画）。
+   *
+   * 列的是**放入会写的那些目录**（含还没建出来的 `default/process`）—— 不存在的那一格
+   * 也列出来、`placed: false`。在系统文件管理器里删掉之后重开这个框，那一行就变回
+   * 「未放入」：读的是盘，不是记忆。
+   */
+  getSlicerPlacements(fileName: string): Promise<SlicerPlacements>
+
+  /**
+   * 把一份切片器配置放进切片器自己的用户配置目录 —— **切片器的「生效」就是这一手**
    * （MKP 预设的生效是「启用」，两回事）。
    *
-   * 真机上会落盘。两条真实的失败照实抛：不是切片器配置 / 本机还没有那份字节（先「下载」）。
+   * 写的是**那一个切片器的每一个**账号目录（登录哪个账号都能选到它）；`slicer` 不给 =
+   * 这份预设自己那一档（行上那颗「放入」就是这么走的），给了就写指定的那个切片器（框里
+   * 那一行点名要放 OrcaSlicer 时走这里）；`account` 再给就只写那一个账号目录。名字都是
+   * 后端扫出来的，认不出来就整次拒绝。
+   *
+   * 真机上会落盘。真实的失败照实抛：不是切片器配置 / 本机还没有那份字节（先「下载」）/
+   * 一个目录都没写成 / 只写成了一部分。
    *
    * ★ **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
    *   原来是拒的，理由是"那份可能被用户在切片器里改过"。覆盖走原子替换，切片器正开着
-   *   也不会读到半个；返回值说清这次是**新建**还是**替换**（提示条按它说话）。
+   *   也不会读到半个；返回值说清这次是**新建**还是**替换**、写进了几个账号目录。
    */
-  copyToSlicer(fileName: string): Promise<CopyToSlicerOutcome>
+  copyToSlicer(
+    fileName: string,
+    slicer?: SlicerTarget,
+    account?: string,
+  ): Promise<CopyToSlicerOutcome>
 
   /**
    * 本机 BBS 目录里现在有哪几份工艺预设（用户层 + 系统层，一次读全）—— 工艺页左边

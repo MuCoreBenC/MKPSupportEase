@@ -272,6 +272,7 @@ import {
   resolveParams,
   resolveVersionFiles,
   slicerCopied,
+  slicerPlacements,
   slicerPresetText,
 } from './mockServer'
 
@@ -2433,10 +2434,14 @@ export const mockApi: MkpApi = {
     return slicerCopied()
   },
 
-  async copyToSlicer(fileName) {
-    /* 只改内存，刷新还原。传错类型会抛 —— 静默成功比报错难查得多。
-       同一份复制第二遍就是「替换」（真机上切片器目录里那份被换成我们这份） */
-    return { replaced: copyToSlicerIn(fileName) }
+  async getSlicerPlacements(fileName) {
+    return slicerPlacements(fileName)
+  },
+
+  async copyToSlicer(fileName, slicer, account) {
+    /* 只改内存，刷新还原。传错类型 / 认不出的切片器或账号会抛 —— 静默成功比报错难查得多。
+       同一份再放一遍就是「替换」（真机上切片器目录里那份被换成我们这份） */
+    return copyToSlicerIn(fileName, slicer, account)
   },
 
   /*
@@ -2893,7 +2898,7 @@ export const mockApi: MkpApi = {
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
-      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 10,
+      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 5,
       zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,

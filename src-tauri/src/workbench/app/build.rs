@@ -99,6 +99,7 @@ use crate::workbench::domain::patch::{BuiltRecord, Patch};
 use crate::workbench::domain::wording as w;
 use crate::workbench::domain::Level;
 use crate::workbench::paths;
+use crate::presetdata::Origin;
 use crate::workbench::presets::registry::{ParamDef, UiComponent, ValueType};
 use postprocess::diag::messages;
 
@@ -398,6 +399,12 @@ pub(super) fn render(book: &Book<'_>, uid: &str) -> Result<Rendered, AppError> {
             let Some(hit) = layers.effective(&p.key) else {
                 continue;
             };
+            /* 「无值不落盘」：只有出厂层有值 ⇒ 该机型/变体根本用不到这一项，整行不写。
+             * 例：A 系列的落笔/收笔骨架只动 X，等待位 Y 对它不适用；落一个 `0` 进
+             * TOML 只会让界面上多出一格永远不该被改的 Y（而那是绝对坐标）。 */
+            if p.omit_when_unset && hit.origin == Origin::Factory {
+                continue;
+            }
             if p.ui_component == UiComponent::Gcode {
                 // 多行字符串：注释在上一行，值用 `"""`
                 push_comment(&mut out, &p.toml_comment, false);

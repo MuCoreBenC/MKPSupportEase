@@ -115,7 +115,7 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
     args.extend(
         [
             "--set",
-            "Prefs.BeginStageRetractZLiftMm=10",
+            "Prefs.BeginStageRetractZLiftMm=5",
             "--set",
             "Prefs.SkipVibrationCalibration=true",
         ]

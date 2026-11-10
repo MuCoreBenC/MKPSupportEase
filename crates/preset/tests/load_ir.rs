@@ -105,8 +105,8 @@ fn run_chain(preset_path: &Path, tag: &str) -> String {
     std::fs::copy(core_path("tests/golden/42274.2.gcode"), &work).expect("复制输入");
     let raw = std::fs::read_to_string(&work).expect("读输入");
     let mut ir = preset::load_ir(preset_path, Some(&raw)).expect("预设 → IR 必须成功");
-    // 用户偏好（`Ir.prefs`）的两颗钉子：参考档是「补抬 Z=10 + 跳过震动检测」。
-    ir.prefs.begin_stage_retract_z_lift_mm = 10;
+    // 用户偏好（`Ir.prefs`）的两颗钉子：参考档是「补抬 Z=5 + 跳过震动检测」。
+    ir.prefs.begin_stage_retract_z_lift_mm = 5;
     ir.prefs.skip_vibration_calibration = true;
     pipeline::process_with_ir_with_tower_ask(
         IrProcessRequest {

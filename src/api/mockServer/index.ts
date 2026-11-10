@@ -36,6 +36,7 @@ export {
   copyToSlicerIn,
   localFileIds,
   slicerCopied,
+  slicerPlacements,
 } from './localFiles'
 export { bbsLocalTree, bbsPresetText } from './bbsLocal'
 export { slicerPresetText } from './slicerPreset'

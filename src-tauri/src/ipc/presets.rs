@@ -16,7 +16,7 @@
 //! | `get_param_meta` | 字段定义（**全部**，含废弃） |
 //! | `get_machine_params` | `machineVariants` 的三层取值 |
 //! | `get_local_files` | 本轮恒为空集合（见下） |
-//! | `get_slicer_copied` | 切片器用户配置目录里**真有**的那几份（盘就是底账） |
+//! | `get_slicer_copied` | 切片器每个账号目录里**都真有**的那几份（盘就是底账） |
 //!
 //! `get_local_user_files` 已经**退役**（2026-10-02）：用户自己的文件是**用户线**，
 //! 不住 catalog 也不住内部根 —— 它在 `<appDataDir>/user/presets-local/`，
@@ -41,7 +41,7 @@
 
 use postprocess::diag::messages;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -932,13 +932,22 @@ pub fn reveal_delivered_file(app: AppHandle, file_name: String) -> Result<(), Ap
     })
 }
 
-/// 打开**切片器目录里那份**所在的文件夹，并选中它（`copy_to_slicer` 过去的那一份，
+/// 打开**切片器目录里那份**所在的文件夹（`copy_to_slicer` 过去的那一份，
 /// 落点 `user/<账号>/process/…`）。
 ///
-/// 只认目录里登记过的**切片器配置**（`bbs_config`）文件名 —— 前端照旧拼不出路径来。
-/// 还没复制过去、或这台机器上没有那个应用 → `NOT_FOUND` 原话（先去行上点「复制」）。
+/// 只认目录里登记过的**切片器配置**文件名 —— 前端照旧拼不出路径来。
+///
+/// `slicer` 不给 = 这份预设自己那一档；`account` 给了就只看那一个账号目录：文件在就
+/// 选中它，不在就把**那个目录本身**打开（「查看放入情况」那个框里，未放入的那一行也要
+/// 能点开看看）；两个都不给就取第一个真有这份的目录，一份都没有 → `NOT_FOUND` 原话
+/// （先去行上点「放入」）。
 #[tauri::command]
-pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppError> {
+pub fn reveal_slicer_file(
+    app: AppHandle,
+    file_name: String,
+    slicer: Option<String>,
+    account: Option<String>,
+) -> Result<(), AppError> {
     traced("revealSlicerFile", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
@@ -947,22 +956,60 @@ pub fn reveal_slicer_file(app: AppHandle, file_name: String) -> Result<(), AppEr
                 &[("file_name", &file_name.to_string())],
             )));
         };
-        if file.kind != "bbs_config" {
+        let Some(own) = slicer_of_kind(&file.kind) else {
             return Err(AppError::invalid_argument(messages::text(
                 "ui.ipc.presets.121",
                 &[("file_name", &file_name.to_string())],
             )));
-        }
-        let dir = slicer_process_dir()
-            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.122", &[])))?;
-        let target = dir.join(&file.file_name);
-        if !target.is_file() {
-            return Err(AppError::not_found(messages::text(
-                "ui.ipc.presets.123",
-                &[("file_name", &file_name.to_string())],
+        };
+        let target_slicer = slicer.as_deref().unwrap_or(own);
+        if !matches!(target_slicer, "bambu" | "orca") {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.134",
+                &[("slicer", target_slicer)],
             )));
         }
-        reveal_in_explorer(&app, &target)
+        let dirs = process_dirs_of(target_slicer)
+            .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.122", &[])))?;
+        let dir = match (slicer.as_deref(), account.as_deref()) {
+            /* 点名了切片器却没点名账号：取这个切片器里第一个真有这份的 */
+            (Some(_), None) => dirs
+                .iter()
+                .find(|dir| dir.join(&file.file_name).is_file())
+                .cloned()
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.presets.123",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?,
+            (_, Some(name)) => dirs
+                .iter()
+                .find(|dir| account_of(dir) == name)
+                .cloned()
+                .ok_or_else(|| unknown_account(name))?,
+            (None, None) => dirs
+                .iter()
+                .find(|dir| dir.join(&file.file_name).is_file())
+                .cloned()
+                .ok_or_else(|| {
+                    AppError::not_found(messages::text(
+                        "ui.ipc.presets.123",
+                        &[("file_name", &file_name.to_string())],
+                    ))
+                })?,
+        };
+        let target = dir.join(&file.file_name);
+        if target.is_file() {
+            return reveal_in_explorer(&app, &target);
+        }
+        /* 这一行还没放入：打开那个账号目录本身（框里那颗「打开文件夹」在这个状态也点得动） */
+        use tauri_plugin_opener::OpenerExt as _;
+        app.opener()
+            .open_path(dir.display().to_string(), None::<&str>)
+            .map_err(|e| {
+                AppError::io(messages::text("ui.ipc.presets.124", &[])).with_detail(e.to_string())
+            })
     })
 }
 
@@ -976,80 +1023,260 @@ fn reveal_in_explorer(app: &AppHandle, target: &std::path::Path) -> Result<(), A
     })
 }
 
-/* ---------- 切片器目录（复制进去才生效） ---------- */
+/* ---------- 切片器目录（放进去才生效） ---------- */
 
-/// Bambu Studio 的**用户工艺配置目录**（`…/user/<账号>/process`）。
+/// 这台机器上**哪个切片器的** `user/` 目录（`…/BambuStudio/user`）。
 ///
-/// 与 `tools/dev-server/bbsFs.mjs` 同一套口径：正式版优先（`BambuStudio`，没有才退
-/// `BambuStudioBeta`）；`user/` 下按账号分目录（数字 uid，也有 BBL / default 这种），
-/// 只认里面**真有 `process/` 子目录的**。命中就给第一个 —— 一台机器一般只有一个账号目录。
+/// # 两档切片器
 ///
-/// 平台差异照实写破：Windows 在 `%APPDATA%`、macOS 在 `~/Library/Application Support`；
+/// - `bambu`：Bambu Studio（正式版优先，没有才退 `BambuStudioBeta`）—— 现在所有工艺预设
+///   资产（`bbs_config`）都归它；
+/// - `orca`：OrcaSlicer —— 它的用户目录是同一套形状（`user/<账号>/process`），
+///   只是字段表是另一套。框里要能让人**自己看着放**，所以这里照样枚举它。
+///
+/// 平台差异只活在这一段：Windows 在 `%APPDATA%`、macOS 在 `~/Library/Application Support`；
 /// 其余平台**不猜目录名**，返回 `None` —— 界面照实说"没找到切片器的配置目录"，
-/// 而不是找错地方复制一份没人用的文件。
-fn slicer_process_dir() -> Option<std::path::PathBuf> {
-    let base: std::path::PathBuf = if cfg!(windows) {
-        std::env::var_os("APPDATA").map(std::path::PathBuf::from)?
+/// 而不是找错地方写一份没人读的文件。
+fn user_base_of(slicer: &str) -> Option<PathBuf> {
+    let base: PathBuf = if cfg!(windows) {
+        std::env::var_os("APPDATA").map(PathBuf::from)?
     } else if cfg!(target_os = "macos") {
-        let home = std::env::var_os("HOME").map(std::path::PathBuf::from)?;
+        let home = std::env::var_os("HOME").map(PathBuf::from)?;
         home.join("Library").join("Application Support")
     } else {
         return None;
     };
-    for app_dir in ["BambuStudio", "BambuStudioBeta"] {
-        let user_base = base.join(app_dir).join("user");
-        let Ok(entries) = std::fs::read_dir(&user_base) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let process = entry.path().join("process");
-            if process.is_dir() {
-                return Some(process);
-            }
-        }
-    }
-    None
+    let candidates: &[&str] = match slicer {
+        "bambu" => &["BambuStudio", "BambuStudioBeta"],
+        "orca" => &["OrcaSlicer"],
+        _ => return None,
+    };
+    candidates
+        .iter()
+        .map(|app| base.join(app).join("user"))
+        .find(|dir| dir.is_dir())
 }
 
-/// 已经复制进切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+/// 这份预设**归哪个切片器**（`bbs_config` → `bambu`）。
 ///
-/// 盘就是底账：切片器目录里真有这份文件才算"已复制"。**找不到切片器目录 = 空集**
-/// （一份都没复制过），与"读失败"是两回事 —— 这里没有会失败的读。
+/// 一种资产只进一个切片器：BBS 的工艺预设放进 Orca 的目录里，Orca 的字段表对不上它
+/// （与「去工艺页面查看」那条判据同源）。所以「放入」不带参数时只写它自己那一档 ——
+/// 想往别的切片器放，得在框里那一行上自己点。
+fn slicer_of_kind(kind: &str) -> Option<&'static str> {
+    match kind {
+        "bbs_config" => Some("bambu"),
+        _ => None,
+    }
+}
+
+/// `user/` 下**真有 `process/`** 的那些账号目录，按账号名排序。
+///
+/// 一台机器上可以有好几个（数字 uid = 登录过的账号，`default` = 没登录时用的那一套，
+/// 还有 BBL 这种）；光有一个不够 —— 切片器读的是**当前登录那个账号**的目录，
+/// 只放一份到别的账号里，用户登录后就选不到。这里只读不建。
+fn process_dirs_in(user_base: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(user_base) else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, PathBuf)> = entries
+        .flatten()
+        .filter_map(|entry| {
+            let process = entry.path().join("process");
+            process
+                .is_dir()
+                .then(|| (entry.file_name().to_string_lossy().into_owned(), process))
+        })
+        .collect();
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out.into_iter().map(|(_, path)| path).collect()
+}
+
+/// 放入要写的那组目录：上面那组 + 没有 `default` 时补上的 `user/default/process`。
+///
+/// `default` 是切片器**没登录时**用的那一套 —— 补上它，用户退掉账号也能选到这份。
+/// 它可能还不存在（`user/default` 有、`process/` 没有），写入时由
+/// [`crate::fsx::atomic::atomic_write`] 顺手把父目录建出来。
+fn copy_targets_in(user_base: &Path, dirs: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut out = dirs;
+    let fallback = user_base.join("default").join("process");
+    if !out.iter().any(|dir| dir == &fallback) {
+        /* 账号名排序里 `default` 本来就排在数字账号之后，追加在末尾仍是同一个序 */
+        out.push(fallback);
+    }
+    out
+}
+
+/// 某个切片器「放入会写到哪里」的那一组目录（`user/` 一层都没有 ⇒ `None`）。
+fn process_dirs_of(slicer: &str) -> Option<Vec<PathBuf>> {
+    let user_base = user_base_of(slicer)?;
+    let dirs = process_dirs_in(&user_base);
+    Some(copy_targets_in(&user_base, dirs))
+}
+
+/// 一个账号目录叫什么（`…/user/2046724740/process` → `2046724740`）。
+fn account_of(dir: &Path) -> String {
+    dir.parent()
+        .and_then(|parent| parent.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+/// 认不出的账号目录名（前端只能给名字，目录由这一侧枚举 —— 不在名单里就是拒）。
+fn unknown_account(name: &str) -> AppError {
+    AppError::invalid_argument(messages::text("ui.ipc.presets.131", &[("account", name)]))
+}
+
+/// 一份预设在**某个切片器的某个账号目录**里的实况
+/// （`placed` = 那个目录里现在真有这份文件）。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SlicerPlacement {
+    /// 哪个切片器：`bambu` / `orca`（与 `src/app/shared/slicer.ts` 的 id 同字）
+    pub slicer: &'static str,
+    /// 账号目录名：数字 uid / `default` / `BBL` …
+    pub account: String,
+    /// 那个 `process` 目录的绝对路径（给界面显示，也让「打开文件夹」有落点）
+    pub path: String,
+    pub placed: bool,
+}
+
+/// 「这份放进了哪些账号目录」—— 界面那个框的全部数据。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SlicerPlacements {
+    /// 这份预设**自己那个切片器**的账号目录在不在（不在 ⇒ 放都没有地方放）
+    pub available: bool,
+    /// `available: false` 时那句人话
+    pub reason: Option<String>,
+    /// **自己那一档排在最前**，本机装了的其他切片器跟在后面
+    pub dirs: Vec<SlicerPlacement>,
+}
+
+/// 这台机器上装了、而且真有 `user/` 目录的切片器（自己那一档总在第一个）。
+fn installed_slicers(own: &'static str) -> Vec<&'static str> {
+    let mut out: Vec<&'static str> = Vec::new();
+    for slicer in [own, "bambu", "orca"] {
+        if out.contains(&slicer) || user_base_of(slicer).is_none() {
+            continue;
+        }
+        out.push(slicer);
+    }
+    out
+}
+
+/// 这份预设落在每个账号目录里的实况 —— 「查看放入情况」那个框按它逐行画。
+///
+/// 列的**不只是它自己那个切片器**：本机装了的另一个切片器（OrcaSlicer）也一并列出，
+/// 让用户自己看着放（2026-11-10 作者：「不只是 BBS，到时候 Orca 的也要放入……
+/// 让我选择 BBS 还是哪些」）。字段表不同这件事由界面那一侧说清。
+///
+/// 列的是**放入会写的那些目录**（含还没建出来的 `default/process`）：用户要看到
+/// 「还有这一处没放」，所以不存在的那一格也列出来，`placed: false`。
+#[tauri::command]
+pub fn get_slicer_placements(
+    app: AppHandle,
+    file_name: String,
+) -> Result<SlicerPlacements, AppError> {
+    traced("getSlicerPlacements", |_| {
+        let catalog = load_presets(&app)?;
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Err(AppError::not_found(messages::text(
+                "ui.ipc.presets.120",
+                &[("file_name", &file_name.to_string())],
+            )));
+        };
+        let Some(own) = slicer_of_kind(&file.kind) else {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.121",
+                &[("file_name", &file_name.to_string())],
+            )));
+        };
+        let own_dirs = process_dirs_of(own);
+        let mut dirs: Vec<SlicerPlacement> = Vec::new();
+        for slicer in installed_slicers(own) {
+            let Some(found) = process_dirs_of(slicer) else {
+                continue;
+            };
+            for dir in found {
+                dirs.push(SlicerPlacement {
+                    slicer,
+                    account: account_of(&dir),
+                    path: dir.display().to_string(),
+                    placed: dir.join(&file.file_name).is_file(),
+                });
+            }
+        }
+        if own_dirs.is_none() {
+            return Ok(SlicerPlacements {
+                available: false,
+                reason: Some(messages::text("ui.ipc.presets.122", &[])),
+                dirs,
+            });
+        }
+        Ok(SlicerPlacements {
+            available: true,
+            reason: None,
+            dirs,
+        })
+    })
+}
+
+/// 已经放进切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
+///
+/// 盘就是底账：**每一个**账号目录里都真有这份文件才算"已放入" —— 少一处用户换个账号
+/// 就选不到，那不算放好。**找不到切片器目录 = 空集**（一份都没放过），与"读失败"是
+/// 两回事 —— 这里没有会失败的读。
 #[tauri::command]
 pub fn get_slicer_copied(app: AppHandle) -> Result<Vec<String>, AppError> {
     traced("getSlicerCopied", |_| {
         let catalog = load_presets(&app)?;
-        let Some(dir) = slicer_process_dir() else {
-            return Ok(Vec::new());
-        };
-        Ok(catalog
-            .files
-            .iter()
-            .filter(|f| f.kind == "bbs_config")
-            .filter(|f| dir.join(&f.file_name).is_file())
-            .map(|f| f.file_name.clone())
-            .collect())
+        let mut out: Vec<String> = Vec::new();
+        /*
+         * 判据只看**这份预设自己那个切片器**的账号目录：别的切片器那一档是可以手动放的
+         * （框里那一行），但它不是"这一份的生效条件" —— 拿它一起算，Orca 那边空着就会
+         * 永远显「未放入」，再点也还是「未放入」。
+         */
+        for slicer in ["bambu", "orca"] {
+            let Some(dirs) = process_dirs_of(slicer) else {
+                continue;
+            };
+            for file in catalog
+                .files
+                .iter()
+                .filter(|f| slicer_of_kind(&f.kind) == Some(slicer))
+            {
+                if dirs.iter().all(|dir| dir.join(&file.file_name).is_file()) {
+                    out.push(file.file_name.clone());
+                }
+            }
+        }
+        Ok(out)
     })
 }
 
-/// 「复制进切片器」这一次干了什么：`replaced` = 目标那儿**原来已经有一份同名的**，
-/// 这一手把它换成了我们这份（false = 新建）。
+/// 「放进切片器」这一次干了什么：`replaced` = 有目标那儿**原来已经有一份同名的**，
+/// 这一手把它换成了我们这份（false = 全是新建）；`targets` = 写成功的目录数。
 ///
 /// 提示条按它说话 —— 「替换掉了你别的东西」与「新放了一份」对用户是两件事，
-/// 不合并成一句"已复制"。
+/// 不合并成一句"已放入"；`targets` 用来说清这一手进了几个账号目录。
 #[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CopyOutcome {
     pub replaced: bool,
+    pub targets: usize,
 }
 
-/// 把一份切片器配置复制进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
+/// 把一份切片器配置放进切片器的用户配置目录 —— **切片器的「生效」就是这一手**
 /// （MKP 预设的生效是「启用」，两回事）。
 ///
-/// 两条真实的失败照实抛，不吞：
-/// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型复制过去没有意义）；
+/// 写的是**那一个切片器的每一个**账号目录（见 [`process_dirs_of`]），登录哪个账号都能
+/// 选到它；`slicer` 给了就写指定的那个切片器（框里那一行点名要放 Orca 时走这里），
+/// `account` 给了就只写那一个账号目录（框里逐行补）。名字都是这一侧枚举出来的，
+/// 认不出来就整次拒绝。
+///
+/// 几条真实的失败照实抛，不吞：
+/// - 这份文件不是切片器配置（MKP 预设走「启用」，别的类型放进去没有意义）；
 /// - 本机还没有这份文件的字节（先「下载」）；
-/// - 找不到切片器的用户配置目录（没装那个应用 / 没打开过）。
+/// - 找不到切片器的用户配置目录（没装那个应用 / 没打开过）；
+/// - 一个目录都没写成（错里带第一条原因），或只写成了一部分（错里说清几个没成）。
 ///
 /// ★ **目标已有同名就换掉它**（2026-10-13 作者改判：「有相同的就覆盖吧」）——
 ///   原来是拒的，理由是"那份可能被用户在切片器里改过"。作者口径优先：这一手就是
@@ -1059,7 +1286,12 @@ pub struct CopyOutcome {
 ///   切片器正开着也不会读到半个文件；盘上那份与源**一个字节不差**时连动都不动
 ///   （mtime 也不变）。
 #[tauri::command]
-pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, AppError> {
+pub fn copy_to_slicer(
+    app: AppHandle,
+    file_name: String,
+    slicer: Option<String>,
+    account: Option<String>,
+) -> Result<CopyOutcome, AppError> {
     traced("copyToSlicer", |_| {
         let catalog = load_presets(&app)?;
         let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
@@ -1074,12 +1306,12 @@ pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, 
                 &[("file_name", &file_name.to_string())],
             )));
         }
-        if file.kind != "bbs_config" {
+        let Some(own) = slicer_of_kind(&file.kind) else {
             return Err(AppError::invalid_argument(messages::text(
                 "ui.ipc.presets.127",
                 &[("file_name", &file_name.to_string())],
             )));
-        }
+        };
         let internal = internal_root(&app)?;
         let source = crate::fsx::paths::resolve_in(&internal, &file.path)?;
         if !source.is_file() {
@@ -1088,27 +1320,77 @@ pub fn copy_to_slicer(app: AppHandle, file_name: String) -> Result<CopyOutcome, 
                 &[("file_name", &file_name.to_string())],
             )));
         }
-        let dir = slicer_process_dir()
+        /*
+         * `slicer` 不给 = 这份预设自己那一档（`bbs_config` → `bambu`），
+         * 也就是行上那颗「放入」—— 它只写这一个切片器，不顺手往别人的目录里塞。
+         * 框里那一行会点名要放哪一个（可以是本机装了的另一个切片器）。
+         */
+        let target_slicer = slicer.as_deref().unwrap_or(own);
+        if !matches!(target_slicer, "bambu" | "orca") {
+            return Err(AppError::invalid_argument(messages::text(
+                "ui.ipc.presets.134",
+                &[("slicer", target_slicer)],
+            )));
+        }
+        let dirs = process_dirs_of(target_slicer)
             .ok_or_else(|| AppError::not_found(messages::text("ui.ipc.presets.129", &[])))?;
-        let target = dir.join(&file.file_name);
-        let replaced = target.is_file();
+        let wanted: Vec<PathBuf> = match account.as_deref() {
+            None => dirs,
+            Some(name) => vec![dirs
+                .iter()
+                .find(|dir| account_of(dir) == name)
+                .cloned()
+                .ok_or_else(|| unknown_account(name))?],
+        };
         let bytes = std::fs::read(&source).map_err(|e| {
             AppError::io(messages::text("ui.ipc.presets.130", &[])).with_detail(e.to_string())
         })?;
-        /* 原子替换：同目录临时文件 → rename（切片器正开着也不会读到半个） */
-        crate::fsx::atomic::atomic_write(&target, &bytes)?;
+        let mut replaced = false;
+        let mut written = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for dir in &wanted {
+            let target = dir.join(&file.file_name);
+            if target.is_file() {
+                replaced = true;
+            }
+            /* 原子替换：同目录临时文件 → rename（切片器正开着也不会读到半个） */
+            match crate::fsx::atomic::atomic_write(&target, &bytes) {
+                Ok(()) => written += 1,
+                Err(e) => failed.push(format!("{}：{}", account_of(dir), e.message)),
+            }
+        }
+        if written == 0 {
+            return Err(AppError::io(messages::text("ui.ipc.presets.132", &[]))
+                .with_detail(failed.join("；")));
+        }
+        if !failed.is_empty() {
+            return Err(AppError::io(messages::text(
+                "ui.ipc.presets.133",
+                &[
+                    ("failed", &failed.len().to_string()),
+                    ("first", &failed[0].to_string()),
+                ],
+            ))
+            .with_detail(failed.join("；")));
+        }
         tracing::info!(
             file = %file_name,
-            target = %target.display(),
+            targets = written,
             replaced,
-            "已复制进切片器目录"
+            "已放入切片器目录"
         );
-        Ok(CopyOutcome { replaced })
+        Ok(CopyOutcome {
+            replaced,
+            targets: written,
+        })
     })
 }
 
 #[cfg(test)]
 mod tests {
+    // 判据要造一棵真实形状的目录树 —— 生产代码的写盘走 `fsx::atomic` 那一个洞。
+    #![allow(clippy::disallowed_methods)]
+
     use super::*;
 
     /// 真仓库的源 + 入库产物 → 真目录。DTO 构建判据的共用输入
@@ -1118,6 +1400,54 @@ mod tests {
             .unwrap()
             .to_path_buf();
         runtime::Catalog::build_from_repo(&repo).expect("真目录构建不出来")
+    }
+
+    /// 账号目录 = `user/` 下每一个**真有 `process/`** 的目录，按账号名排序；
+    /// 没有 `process/` 的那个不算一层。
+    #[test]
+    fn every_account_with_a_process_folder_is_a_target() {
+        let root = tempfile::tempdir().unwrap();
+        let user = root.path().join("BambuStudio/user");
+        std::fs::create_dir_all(user.join("2046724740/process")).unwrap();
+        std::fs::create_dir_all(user.join("BBL/process")).unwrap();
+        std::fs::create_dir_all(user.join("default/process")).unwrap();
+        /* 还没跑过、只有账号目录没有 process/ 的那种 */
+        std::fs::create_dir_all(user.join("orphan")).unwrap();
+
+        let dirs = process_dirs_in(&user);
+        let names: Vec<String> = dirs.iter().map(|dir| account_of(dir)).collect();
+        assert_eq!(names, vec!["2046724740", "BBL", "default"], "{names:?}");
+
+        /* 三个账号目录都有 ⇒ 一个都不补，顺序也不动 */
+        assert_eq!(copy_targets_in(&user, dirs.clone()), dirs);
+    }
+
+    /// `default`（切片器没登录时用的那一套）没建出来也要算一个目标 —— 它就是要被建出来的
+    /// 那一处，否则退掉账号就选不到这份预设。
+    #[test]
+    fn a_missing_default_is_still_a_target_but_not_an_existing_account() {
+        let root = tempfile::tempdir().unwrap();
+        let user = root.path().join("BambuStudio/user");
+        std::fs::create_dir_all(user.join("2046724740/process")).unwrap();
+
+        let existing = process_dirs_in(&user);
+        assert_eq!(existing, vec![user.join("2046724740/process")]);
+
+        let targets = copy_targets_in(&user, existing);
+        assert_eq!(
+            targets,
+            vec![
+                user.join("2046724740/process"),
+                user.join("default/process"),
+            ]
+        );
+    }
+
+    /// 一个账号目录都没有（`user/` 都没建）⇒ 空集，不编一个地方出来
+    #[test]
+    fn a_machine_without_a_user_folder_has_no_accounts() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(process_dirs_in(&root.path().join("nope")).is_empty());
     }
 
     /// `to_text` 是契约那一栏的唯一口径 —— 布尔要成 `on` / `off`（switch 控件的两个选项），

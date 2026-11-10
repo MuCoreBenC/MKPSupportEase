@@ -93,7 +93,7 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     let t = &cfg.toolhead;
     let w = &cfg.wiping;
     Some(match config_key {
-        // ---- toolhead（11 键）----
+        // ---- toolhead（19 键）----
         "XOffset" => ConfigVal::F64(t.offset_x),
         "YOffset" => ConfigVal::F64(t.offset_y),
         "ZOffset" => ConfigVal::F64(t.offset_z),
@@ -103,6 +103,14 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
         "L803LeakPreventFlag" => ConfigVal::Bool(t.l803_leak_prevent_flag),
         "CustomMountGcode" => ConfigVal::Str(t.custom_mount_gcode.clone()),
         "CustomUnmountGcode" => ConfigVal::Str(t.custom_unmount_gcode.clone()),
+        "PenMountWaitX" => ConfigVal::F64(t.pen_mount_wait_x),
+        "PenMountWaitY" => ConfigVal::F64(t.pen_mount_wait_y),
+        "PenMountX" => ConfigVal::F64(t.pen_mount_x),
+        "PenMountSpeed" => ConfigVal::F64(t.pen_mount_speed),
+        "PenUnmountWaitX" => ConfigVal::F64(t.pen_unmount_wait_x),
+        "PenUnmountWaitY" => ConfigVal::F64(t.pen_unmount_wait_y),
+        "PenUnmountX" => ConfigVal::F64(t.pen_unmount_x),
+        "PenUnmountSpeed" => ConfigVal::F64(t.pen_unmount_speed),
         "GlueZOffset" => ConfigVal::F64(t.glue_z_offset),
         "PrimeLength" => ConfigVal::F64(t.prime_length),
         // ---- wiping（66 键）----

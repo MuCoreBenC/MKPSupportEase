@@ -76,6 +76,30 @@
   color: var(--text-2);
 }
 
+/* 结构错误：挡住保存的那一类，用危险色 */
+.structureError {
+  margin: 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--danger-ink, #c0392b);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--danger-ink, #c0392b) 8%, transparent);
+  font-size: var(--fs-label);
+  color: var(--danger-ink, #c0392b);
+}
+
+/* 占位符：值住在上面那几格字段里，这一格只显示它代表什么，不给改 */
+.placeholder {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px dashed var(--accent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--accent);
+  font-size: 12px;
+  cursor: help;
+}
+
 /*
  * 代码模式 = 行号槽 + 着色层 + 透明输入框（A43 移植，照工作台 C15 那套）。
  *

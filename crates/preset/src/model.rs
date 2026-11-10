@@ -39,6 +39,30 @@ pub struct ToolheadConfig {
     pub custom_mount_gcode: String,
     #[serde(default)]
     pub custom_unmount_gcode: String,
+    /// 落笔的等待位 X（落笔骨架里的 `{wait}`）。
+    #[serde(default)]
+    pub pen_mount_wait_x: f64,
+    /// 落笔的等待位 Y（骨架里的 `{wait_y}`）。A 系列不用，留 0。
+    #[serde(default)]
+    pub pen_mount_wait_y: f64,
+    /// 落笔位 X（落笔骨架里的 `{target}`）。
+    #[serde(default)]
+    pub pen_mount_x: f64,
+    /// 落笔动作行的速度（`{speed}`，mm/min）。
+    #[serde(default)]
+    pub pen_mount_speed: f64,
+    /// 收笔的等待位 X（收笔骨架里的 `{wait}`）。
+    #[serde(default)]
+    pub pen_unmount_wait_x: f64,
+    /// 收笔的等待位 Y（`{wait_y}`）。A 系列不用，留 0。
+    #[serde(default)]
+    pub pen_unmount_wait_y: f64,
+    /// 收笔位 X（收笔骨架里的 `{target}`）。
+    #[serde(default)]
+    pub pen_unmount_x: f64,
+    /// 收笔动作行的速度（`{speed}`，mm/min）。
+    #[serde(default)]
+    pub pen_unmount_speed: f64,
     #[serde(default)]
     pub first_pen_revitalization_flag: bool,
     #[serde(default)]

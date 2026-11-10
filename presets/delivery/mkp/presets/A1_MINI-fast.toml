@@ -9,19 +9,17 @@ G1 E-5 F1800
 G92 E0
 L801
 M204 S10000
-G1 X168 F30000
-G1 X175 F10000
-G1 X185 F10000
-G1 X168 F30000
+G1 X{wait} F30000
+G1 X{target} F{speed}
+G1 X{wait} F30000
 G1 F30000
 """
 # 收笔 G-code
 custom_unmount_gcode = """
 M106 S[AUTO]
-G1 X168 F30000
-G1 X175 F10000
-G1 X189 F10000
-G1 X168 F6000
+G1 X{wait} F30000
+G1 X{target} F{speed}
+G1 X{wait} F6000
 G1 F30000
 L802
 G92 E0
@@ -35,6 +33,12 @@ MKP_retract = 0 # 回抽长度(mm)
 offset_x = -0.5 # 笔尖偏移
 offset_y = 24 # 笔尖偏移
 offset_z = 3.9 # 笔尖偏移
+pen_mount_speed = 10000 # 落笔速度
+pen_mount_wait_x = 168 # 落笔等待位 X
+pen_mount_x = 185 # 落笔位 X
+pen_unmount_speed = 10000 # 收笔速度
+pen_unmount_wait_x = 168 # 收笔等待位 X
+pen_unmount_x = 189 # 收笔位 X
 prime_length = 100 # 预涂长度(mm) 范围:0~500
 speed_limit = 70 # 涂胶速度限制 (mm/s)
 
