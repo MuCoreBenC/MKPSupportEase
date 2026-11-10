@@ -25,6 +25,7 @@ G1 F30000
 """
 first_pen_revitalization_flag = false # 首笔活化标志
 glue_z_offset = -0.05 # 涂胶Z偏移(mm) 范围:-5~2
+MKP_extrude = 0 # 挤出长度(mm)
 MKP_retract = -5 # 回抽长度(mm)
 offset_x = -0.9 # 笔尖偏移
 offset_y = 23 # 笔尖偏移

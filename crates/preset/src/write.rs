@@ -79,6 +79,7 @@ pub const EDITABLE_KEYS: &[(&str, &str)] = &[
     ("toolhead", "offset_y"),
     ("toolhead", "offset_z"),
     ("toolhead", "MKP_retract"),
+    ("toolhead", "MKP_extrude"),
     ("toolhead", "custom_mount_gcode"),
     ("toolhead", "custom_unmount_gcode"),
     ("toolhead", "pen_mount_wait_x"),

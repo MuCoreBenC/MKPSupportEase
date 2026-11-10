@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "c41129c8f048564b",
+  "revision": "af1802ab0857fc25",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -884,6 +884,47 @@
         "section": "toolhead",
         "layout": {
           "order": 200.0,
+          "sectionId": "motion"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude",
+        "configKey": "MKPExtrude",
+        "tomlKey": "MKP_extrude",
+        "jsonKey": "MKP_extrude",
+        "label": "挤出长度",
+        "labelEn": "Extrude length",
+        "labelJa": "押出長",
+        "labelTw": "擠出長度",
+        "desc": "收笔时回填的挤出量(mm)。填 0 = 自动按「回抽长度绝对值 + 0.5」算；填了别的数就按这个数，不再联动",
+        "descEn": "Extrusion pushed back on pen-up (mm). 0 = auto (|retract| + 0.5); any other value is used as-is and the link is off",
+        "descJa": "ペンを戻すときの押し出し量（mm）。0 ＝「リトラクト長の絶対値 + 0.5」で自動。それ以外はその値を使い、連動しません",
+        "descTw": "收筆時回填的擠出量（mm）。填 0 ＝ 自動按「回抽長度絕對值 + 0.5」算；填了別的數就按這個數，不再聯動",
+        "tomlComment": "挤出长度(mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.0,
           "sectionId": "motion"
         },
         "min": -50.0,
@@ -5884,6 +5925,10 @@
               {
                 "id": "item_0_1_1",
                 "paramKey": "toolhead.MKP_retract"
+              },
+              {
+                "id": "item_0_1_2",
+                "paramKey": "toolhead.MKP_extrude"
               }
             ],
             "component": null,

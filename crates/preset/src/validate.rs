@@ -93,12 +93,13 @@ pub fn config_value(cfg: &TomlConfig, config_key: &str) -> Option<ConfigVal> {
     let t = &cfg.toolhead;
     let w = &cfg.wiping;
     Some(match config_key {
-        // ---- toolhead（19 键）----
+        // ---- toolhead（20 键）----
         "XOffset" => ConfigVal::F64(t.offset_x),
         "YOffset" => ConfigVal::F64(t.offset_y),
         "ZOffset" => ConfigVal::F64(t.offset_z),
         "MaxSpeed" => ConfigVal::F64(t.speed_limit),
         "MKPRetract" => ConfigVal::F64(t.mkp_retract),
+        "MKPExtrude" => ConfigVal::F64(t.mkp_extrude),
         "FirstPenRevitalizationFlag" => ConfigVal::Bool(t.first_pen_revitalization_flag),
         "L803LeakPreventFlag" => ConfigVal::Bool(t.l803_leak_prevent_flag),
         "CustomMountGcode" => ConfigVal::Str(t.custom_mount_gcode.clone()),

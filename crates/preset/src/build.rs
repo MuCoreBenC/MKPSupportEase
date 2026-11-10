@@ -395,7 +395,13 @@ pub fn build(
     ir.gcode.mkp_retract = mkp_retract;
     ir.gcode.custom_gcode_e_ownership = original_mkp_retract == 0.0;
 
-    let mut mkp_extrude = ((mkp_retract.abs() + 0.5) * 100.0).round() / 100.0;
+    /* 挤出：TOML 显式填了就用它（联动关闭），填 0 才走 `|回抽| + 0.5`。
+     * 用户要的是「可以比回抽多 0.5，也可以自己定」—— 一个 0 就把两件事分开。 */
+    let mut mkp_extrude = if cfg.toolhead.mkp_extrude != 0.0 {
+        cfg.toolhead.mkp_extrude
+    } else {
+        ((mkp_retract.abs() + 0.5) * 100.0).round() / 100.0
+    };
     if ir.gcode.custom_gcode_e_ownership {
         for line in &ir.toolhead.custom_unmount_gcode {
             if line.contains("G1 E") {

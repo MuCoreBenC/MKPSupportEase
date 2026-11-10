@@ -35,6 +35,9 @@ pub struct ToolheadConfig {
     /// 大小写混排键名（不是 snake_case），逐字对照 dto 标签。
     #[serde(rename = "MKP_retract", default)]
     pub mkp_retract: f64,
+    /// 收笔时回填的挤出量。`0` = 按 `|回抽| + 0.5` 自动，非 0 = 用它（联动关闭）。
+    #[serde(rename = "MKP_extrude", default)]
+    pub mkp_extrude: f64,
     #[serde(default)]
     pub custom_mount_gcode: String,
     #[serde(default)]

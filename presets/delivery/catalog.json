@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "102d55fbd5512833",
+  "revision": "357803effc3405da",
   "publishedAt": "2026-11-10T12:06:00Z",
   "brands": [
     {
@@ -885,6 +885,47 @@
         "section": "toolhead",
         "layout": {
           "order": 200.0,
+          "sectionId": "motion"
+        },
+        "min": -50.0,
+        "max": 50.0,
+        "step": 0.1,
+        "unit": "mm",
+        "parentKey": null,
+        "showWhen": null,
+        "choices": [],
+        "variantMode": null,
+        "machineFilter": [],
+        "deprecated": false,
+        "machineVariants": {},
+        "machineMinVariants": {},
+        "machineMaxVariants": {},
+        "mergeGroup": null,
+        "pinned": false,
+        "omitWhenUnset": false,
+        "serialization": null
+      },
+      {
+        "key": "toolhead.MKP_extrude",
+        "configKey": "MKPExtrude",
+        "tomlKey": "MKP_extrude",
+        "jsonKey": "MKP_extrude",
+        "label": "挤出长度",
+        "labelEn": "Extrude length",
+        "labelJa": "押出長",
+        "labelTw": "擠出長度",
+        "desc": "收笔时回填的挤出量(mm)。填 0 = 自动按「回抽长度绝对值 + 0.5」算；填了别的数就按这个数，不再联动",
+        "descEn": "Extrusion pushed back on pen-up (mm). 0 = auto (|retract| + 0.5); any other value is used as-is and the link is off",
+        "descJa": "ペンを戻すときの押し出し量（mm）。0 ＝「リトラクト長の絶対値 + 0.5」で自動。それ以外はその値を使い、連動しません",
+        "descTw": "收筆時回填的擠出量（mm）。填 0 ＝ 自動按「回抽長度絕對值 + 0.5」算；填了別的數就按這個數，不再聯動",
+        "tomlComment": "挤出长度(mm)",
+        "valueType": "float",
+        "uiComponent": "number",
+        "defaultValue": 0.0,
+        "scope": "universal",
+        "section": "toolhead",
+        "layout": {
+          "order": 201.0,
           "sectionId": "motion"
         },
         "min": -50.0,
@@ -5885,6 +5926,10 @@
               {
                 "id": "item_0_1_1",
                 "paramKey": "toolhead.MKP_retract"
+              },
+              {
+                "id": "item_0_1_2",
+                "paramKey": "toolhead.MKP_extrude"
               }
             ],
             "component": null,
@@ -6461,8 +6506,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "eda8b1c4fc5af02f9d3f9c29505648306885057929649d25fa83298b301666da",
-      "size": 5011
+      "sha256": "d83b32852c0540f3e5f51be9955ea323ba8e896ec4fff8042d674eec236bdc27",
+      "size": 5046
     },
     {
       "kind": "mkp_preset",
@@ -6470,8 +6515,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "f1ca3d60bb23770afcac355b8652d246dbaa9ab46f573963bd1b719058ccecaf",
-      "size": 5009
+      "sha256": "94b35cd2f93419e3b9c06c0577bcb9dd2a1529adb5bff3ccbd6989a997d548b5",
+      "size": 5044
     },
     {
       "kind": "mkp_preset",
@@ -6479,8 +6524,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "8ffcc8e2bab63a5fd7ef48fb1c71ec3ea6aa05d13d145158b7d06eab93dcfd85",
-      "size": 5013
+      "sha256": "4044aad41208c12ea53a36141ebe0d94b35f43cc0913f8d8380264a769d1dc3b",
+      "size": 5048
     },
     {
       "kind": "mkp_preset",
@@ -6488,8 +6533,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "f3c7e60cdf04ca649c0fc7be886ce40e40c9985fb2095ef29e93a6b319eba110",
-      "size": 5017
+      "sha256": "6003b577fee7ac0066ac294f5a8c94d6957467435b8024cd214176b909267f25",
+      "size": 5052
     },
     {
       "kind": "mkp_preset",
@@ -6497,8 +6542,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "8f1283f52f750879a7ce8d8953a57163d4c23fb575fcbc09c34a9b16a006c86c",
-      "size": 5011
+      "sha256": "b0a4b047ab40e557eb1e756ec48171791970962080a0bf12f06e1b3fdbfd594e",
+      "size": 5046
     },
     {
       "kind": "mkp_preset",
@@ -6506,8 +6551,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "0975068bcf3436236f2007a0e9abaf231adbc2682c6cc9e475b4a73328e51a2d",
-      "size": 5016
+      "sha256": "38e1974577d8cb597dad93cdaf55e6fc2c02470d450d327e742153fc057c0b11",
+      "size": 5051
     },
     {
       "kind": "mkp_preset",
@@ -6515,8 +6560,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "05731ee29cf16669afdf3d2bf25551496968892f2f72c74ee28c35be4bed5359",
-      "size": 5158
+      "sha256": "32623c219bb269562f66fce5103142686969f68b2ee8158e5e89e6f360941a54",
+      "size": 5193
     },
     {
       "kind": "mkp_preset",
@@ -6524,8 +6569,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "fba9a026f41d139287af2e53c22ecba6907c5132876009b9c0a3a25f82b8b848",
-      "size": 5158
+      "sha256": "9212e7a0bfd65a6d948a3d261dd5c3cb55e5c3013ea07364bd11a98ed06b35aa",
+      "size": 5193
     },
     {
       "kind": "icon",
