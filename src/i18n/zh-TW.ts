@@ -41,7 +41,8 @@ export const zhTW: Record<StringKey, string> = {
   /* 設定頁 —— 外觀（2026-10-25） */
 
   // ---- 設定頁 ----
-  'settings.appearance.title': '外觀',
+  'settings.appearance.title': '外觀與語言',
+  'settings.appearance.desc': '主題與介面語言',
   'settings.locale.label': '介面語言',
   'settings.locale.note': '換完立刻生效，記在應用狀態裡 —— 下次開啟還是這一檔。',
   'settings.locale.system': '跟隨系統',
@@ -103,7 +104,8 @@ export const zhTW: Record<StringKey, string> = {
   'settings.theme.failed': '沒換成：{detail}',
 
   /* 設定頁：後處理模式 */
-  'settings.postproc.title': '後處理模式',
+  'settings.postproc.title': '後處理',
+  'settings.postproc.desc': '完成後的通知與顯示',
   'settings.postproc.notify': '處理完成傳送系統通知',
   'settings.postproc.notifyNote': '處理完成後傳送系統通知，點通知可開啟處理結果',
   'settings.postproc.mode': '這一趟怎麼顯示',
@@ -135,12 +137,13 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：校準與補償 */
   'settings.calib.title': '校準與補償',
+  'settings.calib.desc': '會改 G-code 的幾項',
   'settings.calib.skipVibration': '跳過震動校準檢測',
   'settings.calib.skipVibrationNote': '跳過 G-code 中的震動補償校準檢測步驟（M970/M974），使用印表機已儲存的校準資料，減少列印準備時間',
   'settings.calib.beginRetract': '開始階段收筆',
-  'settings.calib.beginRetractNote': '在 G-code 處理後開頭插入工具頭收起序列（先 Z 歸位、抬到設定高度、再收筆），確保列印開始前工具頭已卸載',
+  'settings.calib.beginRetractNote': '在起始段把 Z 抬起來之後，按下面的設定再補抬一截、把 X 歸零，然後到右端收筆位把筆尖收起',
   'settings.calib.lift': '收筆抬升高度',
-  'settings.calib.liftNote': '「開始階段收筆」把工具頭抬到的絕對 Z 高度（{min}-{max} mm）。太高只是一段白跑的空行程，太低則可能與模型或夾具相碰',
+  'settings.calib.liftNote': '在起始段抬 Z 之後**再補抬**的相對高度（{min}-{max} mm）。太高只是一段白跑的空行程，太低則筆尖可能刮到床面或夾具',
   'settings.calib.zDwell': 'Z 軸校準停留時間',
   'settings.calib.zDwellNote': 'Z 校準每一層測量後的暫停時間（{min}-{max} 秒）',
   'settings.calib.xyDwell': 'XY 軸校準停留時間',
@@ -157,6 +160,7 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：預設 */
   'settings.presets.title': '預設',
+  'settings.presets.desc': '複製與腳本的預設行為',
   'settings.presets.copies': '複製出來的也跟著雲端更新',
   'settings.presets.copiesNote': '預設關：你複製出來的那一份是獨立的一份 —— 它不算「雲端有新版」的那一份，點「更新」也不會動它。開著時它與原件一樣，一樣顯示雲端更新、一樣會被更新到。',
   'settings.presets.autoCopy': '使用後自動複製後處理腳本',
@@ -166,6 +170,7 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：資料與維護 / 清理與卸載 */
   'settings.data.title': '資料與維護',
+  'settings.data.desc': '預設目錄與執行紀錄',
   'settings.data.folder': '預設位置',
   'settings.data.folderNote': '開啟預設設定檔案所在目錄',
   'settings.data.open': '開啟',
@@ -217,37 +222,38 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：軟體更新 */
   'settings.update.title': '軟體更新',
+  'settings.update.desc': '檢查並安裝新版本',
   'settings.update.checking': '正在檢查……',
   'settings.update.hasNew': '有新版本 SupportEase',
+  'settings.update.found': '發現新版本 {version}',
+  'settings.update.autoCheckNote': '同步目錄時順路查一次正式版',
+  'settings.update.channelLabel': '更新管道',
+  'settings.update.channelNote': '選擇更新的發佈管道',
+  'settings.update.channelStable': '正式版',
+  'settings.update.channelPreview': '測試版',
   'settings.update.latest': '已是最新版本',
   'settings.update.unknown': '這次沒能查到更新',
   'settings.update.version': '當前版本 {version}',
   'settings.update.versionTo': '當前版本 {version} → 最新版本 {latest}',
   'settings.update.failed': '這次檢查失敗了：{detail}',
   'settings.update.hint': '更新檢查需要能連上發布地址（見下方「高級設定」）。連不上時如實說沒查到，不冒充「已是最新」。',
-  'settings.update.recheck': '重新檢查',
+  'settings.update.recheck': '檢查更新',
   'settings.update.view': '查看更新',
-  'settings.update.install': '更新',
+  'settings.update.install': '立即更新',
 'settings.update.autoCheck': '自動檢查更新',
   'mock.demo.previewHint': '示範：預覽版只在主動檢查時並列出現，不會主動通知一般使用者。',
-  'settings.update.candidateStable': '正式版',
-  'settings.update.candidatePreview': '預覽版',
-  'settings.update.stableBadge': '推薦',
-  'settings.update.previewBadge': '測試版',
-  'settings.update.updateStable': '更新正式版',
-  'settings.update.tryPreview': '嘗試測試版',
   'settings.update.downloading': '下載中 {pct}',
   'settings.update.installing': '正在安裝…',
   'settings.update.lastFailed': '上次更新沒成功：{detail}（安裝日誌：{log}）',
   'settings.update.previewNote': '僅供嘗鮮，可能存在尚未修復的問題。',
-  'settings.update.recheckHint': '重新檢查會同時查看預覽版；預覽版不會主動通知一般使用者。',
 'settings.update.autoCheckHint': '開啟後，每次成功同步雲端目錄時順路查一次**正式版**新版；不會在啟動時連網，也不會反覆查。預覽版只在你主動重新檢查時出現。',
 'notify.update.title': '有新版本',
 'notify.update.text': 'SupportEase {version} 已發布',
 'notify.update.view': '去看看',
 
   /* 設定頁：切片 */
-  'settings.slicer.title': '切片',
+  'settings.slicer.title': '切片與引導',
+  'settings.slicer.desc': '開啟模型用哪個應用',
   'settings.slicer.label': '預設用哪個切片軟體開啟模型',
   'settings.slicer.note': '立刻生效。「開啟模型」的框裡還可以只對那一次換一個，不動這裡的預設。',
   'settings.slicer.customHandoff': '開啟模型時交給「{name}」：{path}',
@@ -275,6 +281,8 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：備份與還原 */
   'settings.backup.title': '備份與還原',
+  'settings.backup.desc': '打包帶走，刪了能找回',
+  'settings.backup.doLabel': '備份打包與還原',
   'settings.backup.do': '打開…',
   'settings.backup.tip': '打包設定與執行歸檔；還原會覆蓋現在的資料。',
   'settings.backup.pickDir': '把備份放到哪個資料夾',
@@ -322,6 +330,7 @@ export const zhTW: Record<StringKey, string> = {
 
   /* 設定頁：高級設定 */
   'settings.advanced.title': '高級設定',
+  'settings.advanced.desc': '預設資料來源位址',
   'settings.advanced.sourceLabel': '預設資料來源',
   'settings.advanced.sourceNote': '國內選 Gitee 更穩；自訂地址僅供開發排查。',
   'settings.advanced.defaultTag': '（預設）',

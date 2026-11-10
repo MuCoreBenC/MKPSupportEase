@@ -27,6 +27,7 @@ import { msg, useText, useT, type Text, type StringKey } from '../../i18n'
 import { presetPrefsMutated } from '../state/deliveryState'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
+import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
 /*
@@ -129,7 +130,11 @@ export default function PresetsSection() {
 
   return (
     <section className={s.section} aria-label={tr('settings.presets.title')}>
-      <h2 className={s.secTitle}>{tr('settings.presets.title')}</h2>
+      <SectionHead
+        icon="presets"
+        title={tr('settings.presets.title')}
+        desc={tr('settings.presets.desc')}
+      />
 
       <BoolRow
         label="settings.presets.copies"

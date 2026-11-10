@@ -292,10 +292,10 @@ pub struct PostprocPrefs {
     /// **跳过震动补偿校准检测**（G-code 里的 M970/M974），省掉打印准备时间。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skip_vibration_calibration: Option<bool>,
-    /// **开始阶段收笔**：开头插入工具头收起序列（抬升 Z 并收笔）。
+    /// **开始阶段收笔**：在原版抬 Z 段之后插入收笔序列（补抬 Z、归零 X、收笔）。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_enabled: Option<bool>,
-    /// 收笔抬升的 Z 高度（mm）。`None` = 出厂 30。
+    /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。`None` = 出厂 10。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_z_lift_mm: Option<i64>,
     /// Z 轴校准每层测量后的停留秒数（1–20）。`None` = 出厂 2。
@@ -458,14 +458,14 @@ pub const XY_DWELL_DEFAULT: i64 = 3;
 pub const XY_DWELL_MIN: i64 = 1;
 pub const XY_DWELL_MAX: i64 = 10;
 
-/// 开始阶段收笔抬升高度（mm，**绝对 Z**）的出厂值与量程。
+/// 开始阶段收笔在原版抬 Z 之上再补抬的相对高度（mm）的出厂值与量程。
 ///
 /// ★ 量程必须与内核那一份（`postprocess::pipeline::hooks::BEGIN_STAGE_RETRACT_Z_LIFT_*_MM`）
-///   一致：管线对越界值不是夹取、而是**回落到 20**（原厂口径）。界面这边要是宽容到 300，
-///   用户填 150 就会看到"设置里写着 150、切出来却是 20" —— 由 `postproc_prefs` 的测试咬住。
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 30;
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 20;
-pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 100;
+///   一致：管线对越界值不是夹取、而是**回落到下限 10**（原厂口径）。界面这边要是宽容到 300，
+///   用户填 150 就会看到"设置里写着 150、切出来却是 10" —— 由 `postproc_prefs` 的测试咬住。
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 10;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 10;
+pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 30;
 
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///

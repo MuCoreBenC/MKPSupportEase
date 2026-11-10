@@ -53,6 +53,13 @@
 //! 所以比对前用 `strip_swap_travel_blocks` 把「`;Pre-glue preparation` →
 //! `;Glueing Started`」整段剔除。**不用本侧输出覆盖参考物**——那会让整链判据退化成自比自。
 //! 换笔段改由 `tests/travel_clearance.rs`（净空不等式）+ G1/G2 golden（逐字节）看守。
+//!
+//! ## 2026-11-10：再收窄为「除标记行、换笔块、卸载块外逐字节相同」
+//!
+//! 卸载块从文件头挪到原版第一个 `G28 Z P0 T` 之前：原位置是文件第 599 行，那时
+//! Z 高度与 XY 位置都还是未知数，`G0 X25 Y175 F20000` 会在贴床高度全速冲出去
+//! （A1 mini 实测会顶床）。新位置由原版的 `G380` 抬升与 `G28 X` 打底。块的
+//! 位置与内容都变了，比对前用 `strip_begin_stage_retract_blocks` 剔掉整段。
 
 use std::path::PathBuf;
 use std::process::{Command, Output};
@@ -108,7 +115,7 @@ fn run_and_read(tag: &str, extra: &[&str]) -> Vec<u8> {
     args.extend(
         [
             "--set",
-            "Prefs.BeginStageRetractZLiftMm=20",
+            "Prefs.BeginStageRetractZLiftMm=10",
             "--set",
             "Prefs.SkipVibrationCalibration=true",
         ]
@@ -161,10 +168,19 @@ fn zero_tower_region_z(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::zero_tower_region_z(bytes)
 }
 
-/// 统一口径：去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
+/// 剔除卸载块（`;===== begin stage retract` ~ `... end`）：2026-11-10 起块从文件头
+/// 挪到原版 `G28 Z P0 T` 之前。实现只有
+/// `postprocess::postproc::marks::strip_begin_stage_retract_blocks` 一份。
+fn strip_begin_stage_retract_blocks(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_begin_stage_retract_blocks(bytes)
+}
+
+/// 统一口径：去卸载块 → 去换笔块 → 去涂胶段 Z/F → 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
 fn normalize(bytes: &[u8]) -> Vec<u8> {
     strip_mkp_marks(&zero_tower_region_z(&strip_tower_feature_restore(
-        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
+        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(
+            &strip_begin_stage_retract_blocks(bytes),
+        )),
     )))
 }
 

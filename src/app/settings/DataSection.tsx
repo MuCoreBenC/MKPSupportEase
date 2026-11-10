@@ -18,7 +18,7 @@
  *   （关 = 只删本体 / 开 = 先清后删）。
  */
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 
 import { msg, useText, type Text } from '../../i18n'
 
@@ -29,11 +29,22 @@ import { Btn } from '../ui/Controls'
 import Modal from '../../components/modal/Modal'
 import { Tip } from '../../components/tooltip'
 import { Switch } from '../../components/switch'
-import RecoverySection from './RecoverySection'
+import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
-/** `host`：两扇框与「最近删除」共用（遮罩铺满标题栏以下那一块），原样传下去 */
-export default function DataSection({ host }: { host: HTMLElement | null }) {
+/**
+ * `host`：两扇确认框共用（遮罩铺满标题栏以下那一块），原样传下去。
+ * `children`：**这一页自己画的那些行**（2026-11-09：自动清理执行记录那一格，
+ * 它的状态住在 `PageSettings`）—— 排在「预设位置」后面、「清理与卸载」前面，
+ * 于是「预设位置 / 自动清理 / 清理数据 + 卸载」读下来是同一件事：这块盘怎么维护。
+ */
+export default function DataSection({
+  host,
+  children,
+}: {
+  host: HTMLElement | null
+  children?: ReactNode
+}) {
   const tr = useT()
   const say = useText()
   const [folderBusy, setFolderBusy] = useState(false)
@@ -129,10 +140,16 @@ export default function DataSection({ host }: { host: HTMLElement | null }) {
   return (
     <>
       <section className={s.section} aria-label={tr('settings.data.title')}>
-        <h2 className={s.secTitle}>{tr('settings.data.title')}</h2>
+        <SectionHead
+          icon="folder"
+          title={tr('settings.data.title')}
+          desc={tr('settings.data.desc')}
+        />
 
-        {/* 次级行：只是"打开个目录"的附属动作 */}
-        <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+        {/* 整行、不缩进：它是这一类里的**一行**（原来按"打开个目录"的附属动作缩进
+            32px，可上面根本没有父行 —— 作者：「同样只有一个的不缩进，不是子项就不要
+            缩进吧」）。缩进的唯一判据见 `CalibSection`。 */}
+        <div className={`${s.field} ${s.fieldRow}`}>
           <div className={s.fieldText}>
             <div className={s.fieldTitle}>
               {tr('settings.data.folder')}
@@ -146,23 +163,30 @@ export default function DataSection({ host }: { host: HTMLElement | null }) {
           </Btn>
         </div>
 
+        {children}
+
         <p className={s.noteHint}>{tr('settings.data.privacy')}</p>
       </section>
 
-      {/* 「最近删除」是独立一章（产品里它自己一个 section）：套一层带 id 的壳，
-          左目录才跳得到、搜索才筛得到 */}
-      <div id="recovery" data-sec>
-        <RecoverySection host={host} />
-      </div>
-
-      <section className={`${s.section} ${s.dangerBlock}`} aria-label={tr('settings.data.uninstallTitle')}>
-        <h2 className={`${s.secTitle} ${s.dangerTitle}`}>{tr('settings.data.uninstallTitle')}</h2>
-
-        {/* 版面这一句只说"这里有哪两件事、后果收在框里"—— 逐条后果进各自的框 */}
-        <p className={s.dangerNote}>
-          <span className={s.dangerNoteHead}>{tr('common.danger')}</span>
-          {tr('settings.data.dangerNote')}
-        </p>
+      {/*
+       * 「清理与卸载」是**类目里的一段**（2026-11-09）：它挂在「数据与维护」底下，
+       * 所以标题降成小标题（`h3` + 一条橙色分组线），与「后处理」底下的
+       * 「校准与补偿」「热床预涂胶」同一个层级 —— 一类里不许再冒出一个章。
+       */}
+      <section
+        className={`${s.section} ${s.dangerBlock}`}
+        aria-label={tr('settings.data.uninstallTitle')}
+      >
+        {/*
+         * 风险句就是这张卡头的说明（参考稿的橙卡也是这么排的）：不再单独占一段、
+         * 也不再加一个「危险操作」小标题 —— 整张卡是橙的，那两句就是"这块为什么危险"。
+         */}
+        <SectionHead
+          icon="trash"
+          level={3}
+          title={tr('settings.data.uninstallTitle')}
+          desc={tr('settings.data.dangerNote')}
+        />
 
         {/* ① 只清数据：程序本体留着 */}
         <div className={`${s.field} ${s.fieldRow}`}>

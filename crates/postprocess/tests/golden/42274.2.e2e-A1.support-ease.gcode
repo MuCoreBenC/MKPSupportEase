@@ -582,18 +582,6 @@ M203 X500 Y500 Z30 E30
 M204 P20000 R5000 T20000
 M205 X9.00 Y9.00 Z5.00 E3.00
 M106 S0
-;===== begin stage retract =================
-G0 X25 Y175 F20000 ; find a soft place to home
-G28 Z P0 T300; home z with low precision,permit 300deg temperature
-G91
-G1 Z10 F600
-G90
-G1 Z20 F600
-G28 X
-G1 X273 F10000
-G1 X20 F10000
-G1 F5000
-;===== begin stage retract end =============
 ; FEATURE: Custom
 ;===== machine: A1 mini =========================
 ;===== date: 20260513 ==================
@@ -634,6 +622,15 @@ G380 S2 Z30 F1200
 G380 S3 Z-20 F1200
 G1 Z5 F1200
 G90
+;===== begin stage retract =================
+G91
+G1 Z10 F600
+G90
+G28 X
+G1 X191 F10000
+G1 X20 F10000
+G1 F5000
+;===== begin stage retract end =============
 
 ;===== reset machine status =================
 M204 S6000

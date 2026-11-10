@@ -1,10 +1,12 @@
 /*
  * 设置页「后处理模式」那一块（2026-10-17）。
  *
- * 四行：跑完发不发系统通知 / 静默还是 GUI / 支撑面底面涂胶 / 重置后处理状态。
+ * 四行：跑完发不发系统通知 / 静默还是 GUI / 支撑面底面涂胶 / 智能塔位置。
+ * 另导出 `ResetPostprocRow`（重置后处理状态）—— 它是整类的收尾动作，
+ * 由 `PageSettings` 排在大类末尾，不跟在这四行后头。
  *
  * 组件单独一个文件是有原因的：`PageSettings.tsx` 已经一千多行，再往里塞四块会
- * 变成谁都不敢动的大泥球。这一块只管**自己那四行** —— 偏好读写走
+ * 变成谁都不敢动的大泥球。这一块只管**自己那几行** —— 偏好读写走
  * `usePostprocPrefs`，重置走一条命令，别的一概不碰。
  */
 
@@ -18,6 +20,7 @@ import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
 import { Btn } from '../ui/Controls'
 import { SETTINGS_TARGET_TOWER } from './targets'
+import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
 /**
@@ -80,20 +83,24 @@ const TOWER_MODES: {
  */
 export default function PostprocModeSection() {
   const tr = useT()
-  const say = useText()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
-  /** 成功时是后端给的落点原话，失败时是存键的那句 —— 两种都住 [`Text`] */
-  const [resetNote, setResetNote] = useState<Text | null>(null)
-  const [resetBusy, setResetBusy] = useState(false)
 
   const on = (why: string) => setErr(why)
+
+  const head = (
+    <SectionHead
+      icon="bolt"
+      title={tr('settings.postproc.title')}
+      desc={tr('settings.postproc.desc')}
+    />
+  )
 
   /** 偏好还没读回来：不画开关（画一个"看起来是关的"开关会骗人） */
   if (prefs === null) {
     return (
       <section className={s.section} aria-label={tr('settings.postproc.title')}>
-        <h2 className={s.secTitle}>{tr('settings.postproc.title')}</h2>
+        {head}
         <p className={s.fieldNote}>{tr('common.loading')}</p>
       </section>
     )
@@ -101,24 +108,9 @@ export default function PostprocModeSection() {
 
   const r = prefs.resolved
 
-  const doReset = () => {
-    setResetBusy(true)
-    setResetNote(null)
-    void api.resetPostProcessState().then(
-      (line) => {
-        setResetNote(line)
-        setResetBusy(false)
-      },
-      (e: unknown) => {
-        setResetNote(msg('settings.postproc.resetFailed', { detail: errorText(e) }))
-        setResetBusy(false)
-      },
-    )
-  }
-
   return (
     <section className={s.section} aria-label={tr('settings.postproc.title')}>
-      <h2 className={s.secTitle}>{tr('settings.postproc.title')}</h2>
+      {head}
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
@@ -211,22 +203,61 @@ export default function PostprocModeSection() {
         </div>
       </div>
 
-      {/* 次级行：附属动作，往右让一格、字灰一档 */}
-      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+      {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
+
+      {/* 整类的收尾动作：卡片最后一行，整行、不缩进（见下面那段注释） */}
+      <ResetPostprocRow />
+    </section>
+  )
+}
+
+/**
+ * 「重置后处理状态」那一行（2026-11-09 拆出来，排在「后处理」那张卡的末尾）。
+ *
+ * ★ 为什么不再是次级行：它原来紧跟在「智能塔位置」下面、缩进 32px，读起来像塔那一格
+ *   的附属动作（作者：「这个后处理重制的怎么在这个位置」）。它重置的是**整条链**
+ *   的后处理状态，属于这一类自己的收尾动作 ⇒ 卡的最后一行、整行、不缩进。
+ * ★ 缩进的唯一判据（2026-11-09）：**被上面那颗开关放出来的那一格**才缩进
+ *   （见 `CalibSection` 的收笔抬升高度）。
+ */
+export function ResetPostprocRow() {
+  const tr = useT()
+  const say = useText()
+  /** 成功时是后端给的落点原话，失败时是存键的那句 —— 两种都住 [`Text`] */
+  const [note, setNote] = useState<Text | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const doReset = () => {
+    setBusy(true)
+    setNote(null)
+    void api.resetPostProcessState().then(
+      (line) => {
+        setNote(line)
+        setBusy(false)
+      },
+      (e: unknown) => {
+        setNote(msg('settings.postproc.resetFailed', { detail: errorText(e) }))
+        setBusy(false)
+      },
+    )
+  }
+
+  return (
+    <>
+      <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
             {tr('settings.postproc.reset')}
             <Tip text={tr('settings.postproc.resetNote')} />
           </div>
         </div>
-        <Btn variant="danger" disabled={resetBusy} onClick={doReset}>
-          {resetBusy ? tr('settings.postproc.resetting') : tr('settings.postproc.resetAction')}
+        <Btn variant="danger" disabled={busy} onClick={doReset}>
+          {busy ? tr('settings.postproc.resetting') : tr('settings.postproc.resetAction')}
         </Btn>
       </div>
 
-      {resetNote !== null && <p className={s.note}>{say(resetNote)}</p>}
-      {err !== null && <p className={`${s.note} ${s.noteBad}`}>{err}</p>}
-    </section>
+      {note !== null && <p className={s.note}>{say(note)}</p>}
+    </>
   )
 }
 

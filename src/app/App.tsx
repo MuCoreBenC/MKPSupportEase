@@ -17,6 +17,7 @@ import { SETTINGS_TARGET_UPDATE } from './settings/targets'
 import { useDensity } from '../hooks/useDensity'
 import { detectPlatform } from '../hooks/usePlatform'
 import ResizeEdges from './components/ResizeEdges'
+import BreezeBackdrop from './components/BreezeBackdrop'
 import { useUnsavedDraft } from './state/useUnsavedDraft'
 /* 提示气泡（2026-10-30）：全站唯一一份，挂在根上认 `data-tip` */
 import { TipLayer } from '../components/tooltip'
@@ -418,7 +419,8 @@ export default function App() {
   const postProcess = usePostProcessRun(silentPostproc)
 
   return (
-    <div ref={rootRef} className={s.shell} data-density={density}>
+    <div ref={rootRef} className={s.shell} data-density={density} data-tab={tab}>
+      <BreezeBackdrop />
       {/* 开发台（`dev-preview` 事件的接收口）：只在开发构建里收得到事件，真机上是恒"没有"
           （见 `app/dev/preview.tsx`）—— 放最外层，各页的模态框都能认领自己的那一格 */}
       <DevPreviewProvider>

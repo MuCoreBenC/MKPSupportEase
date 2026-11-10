@@ -2893,7 +2893,7 @@ export const mockApi: MkpApi = {
       glueBottomEnabled: mockPostproc.glueBottomEnabled ?? false,
       skipVibrationCalibration: mockPostproc.skipVibrationCalibration ?? false,
       beginStageRetractEnabled: mockPostproc.beginStageRetractEnabled ?? true,
-      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 30,
+      beginStageRetractZLiftMm: mockPostproc.beginStageRetractZLiftMm ?? 10,
       zCalibrationDwellSec: mockPostproc.zCalibrationDwellSec ?? 2,
       xyCalibrationDwellSec: mockPostproc.xyCalibrationDwellSec ?? 3,
       bedGlueEnabled: mockPostproc.bedGlueEnabled ?? false,

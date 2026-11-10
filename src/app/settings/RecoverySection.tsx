@@ -37,8 +37,16 @@ function when(epoch: number): string {
 /**
  * `host`：模态框的遮罩要铺满"标题栏以下那一整块"，框自己只有 `absolute inset:0`，
  * 盖多大取决于挂在谁里面（与 `PagePresets` 同一个做法，见那边 `pageEl` 的注释）。
+ * `nested`：挂在「备份与恢复」大类底下（2026-11-09）—— 只收上下留白，
+ * 这一块本来就只有一行，没有标题可降。
  */
-export default function RecoverySection({ host }: { host: HTMLElement | null }) {
+export default function RecoverySection({
+  host,
+  nested = false,
+}: {
+  host: HTMLElement | null
+  nested?: boolean
+}) {
   const tr = useT()
   const say = useText()
   /* 页面常驻挂：别的页删了预设，这里要跟着刷新（不能只在挂载时读一次） */
@@ -130,8 +138,8 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
 
   const count = entries?.length ?? 0
 
-  return (
-    <section className={s.section} aria-label={tr('settings.recovery.title')}>
+  const body = (
+    <>
       {/*
        * ★ 2026-10-30：原来把 `<h2 class={s.secTitle}>` 塞进了 `.fieldText`（行内），
        *   三个毛病一起犯：① 章节标题自带 12px 左内衬 ⇒ 比别的行右移 12px（作者截图里
@@ -226,6 +234,18 @@ export default function RecoverySection({ host }: { host: HTMLElement | null }) 
 
         {note !== null && <p className={s.noteHint}>{say(note)}</p>}
       </Modal>
+    </>
+  )
+
+  /*
+   * 挂在「备份与恢复」那张卡里（`nested`）时**不再自己套一张卡**：它只是那张卡里的
+   * 第二行，直接交给卡容器排（`.fieldRow + .fieldRow` 的分隔线才接得上）。
+   */
+  return nested ? (
+    body
+  ) : (
+    <section className={s.section} aria-label={tr('settings.recovery.title')}>
+      {body}
     </section>
   )
 }

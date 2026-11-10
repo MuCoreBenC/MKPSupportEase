@@ -410,9 +410,9 @@ pub struct PrefsIr {
     pub glue_bottom_enabled: bool,
     /// 跳过 G-code 里的震动补偿校准检测（M970/M974）。
     pub skip_vibration_calibration: bool,
-    /// 开头插入工具头收起序列。
+    /// 开头插入收笔序列。
     pub begin_stage_retract_enabled: bool,
-    /// 收笔抬升的 Z 高度（mm）。
+    /// 收笔时在原版抬 Z 之上再补抬的相对高度（mm）。
     pub begin_stage_retract_z_lift_mm: i64,
     /// Z 轴校准停留秒数。
     pub z_calibration_dwell_sec: i64,
@@ -451,7 +451,7 @@ impl Default for PrefsIr {
             glue_bottom_enabled: false,
             skip_vibration_calibration: false,
             begin_stage_retract_enabled: true,
-            begin_stage_retract_z_lift_mm: 30,
+            begin_stage_retract_z_lift_mm: 10,
             z_calibration_dwell_sec: 2,
             xy_calibration_dwell_sec: 3,
             bed_glue_enabled: false,

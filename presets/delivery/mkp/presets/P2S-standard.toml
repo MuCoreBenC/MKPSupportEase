@@ -2,7 +2,7 @@
 # variant: standard
 
 [toolhead]
-# 自定义工具头获取 G-code
+# 落笔 G-code
 custom_mount_gcode = """
 L803;此处使喷嘴降温
 G92 E0;挤出机归零
@@ -15,7 +15,7 @@ G1 X1 F300;推到X0，笔尖下落
 G1 X20 Y7 F30000;向左离开
 G1 F30000
 """
-# 自定义工具头收起 G-code
+# 收笔 G-code
 custom_unmount_gcode = """
 G92 E0
 G1 F30000

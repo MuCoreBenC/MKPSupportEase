@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 28 144 144" width="144" height="144">
+  <defs>
+    <filter id="softShadow" filterUnits="userSpaceOnUse" x="44" y="16" width="184" height="184" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#2f6b55" flood-opacity=".26"/>
+    </filter>
+    <clipPath id="cardClip"><rect x="74" y="46" width="108" height="108" rx="32"/></clipPath>
+
+    <!-- 水晶块：左上白、右下透青，边界清楚但里面是透的 -->
+    <linearGradient id="glassTint" gradientUnits="userSpaceOnUse" x1="74" y1="46" x2="182" y2="154">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".82"/>
+      <stop offset=".58" stop-color="#ffffff" stop-opacity=".76"/>
+      <stop offset="1" stop-color="#dff2e9" stop-opacity=".66"/>
+    </linearGradient>
+    <!-- 外圈亮线：左上最亮，右下化开 -->
+    <linearGradient id="rimOuter" gradientUnits="userSpaceOnUse" x1="74" y1="46" x2="182" y2="154">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="1"/>
+      <stop offset=".42" stop-color="#ffffff" stop-opacity=".7"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity=".18"/>
+    </linearGradient>
+    <!-- 顶部内侧白光带：凸起的上缘受光 -->
+    <linearGradient id="topLight" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".62"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(-10 128 100)">
+    <g filter="url(#softShadow)">
+      <rect x="74" y="46" width="108" height="108" rx="32" fill="url(#glassTint)"/>
+    </g>
+
+    <g clip-path="url(#cardClip)">
+      <rect x="74" y="46" width="108" height="20" fill="url(#topLight)"/>
+    </g>
+
+    <!-- 边缘：一圈宽柔光 + 一条细亮线 -->
+    <rect x="75" y="47" width="106" height="106" rx="31"
+          fill="none" stroke="#ffffff" stroke-opacity=".26" stroke-width="5"/>
+    <rect x="74" y="46" width="108" height="108" rx="32"
+          fill="none" stroke="url(#rimOuter)" stroke-width="1.8"/>
+
+    <g fill="none" stroke="#1fa85f" stroke-width="7" stroke-linecap="round">
+      <path d="M103.6 91.1 A26 26 0 0 1 152.4 91.1"/>
+      <path d="M152.4 108.9 A26 26 0 0 1 103.6 108.9"/>
+    </g>
+    <g fill="#1fa85f" stroke="#1fa85f" stroke-width="2" stroke-linejoin="round">
+      <path d="M-3 -9 L12 0 L-3 9 Z" transform="translate(152.43 91.11) rotate(70)"/>
+      <path d="M-3 -9 L12 0 L-3 9 Z" transform="translate(103.57 108.89) rotate(250)"/>
+    </g>
+  </g>
+</svg>

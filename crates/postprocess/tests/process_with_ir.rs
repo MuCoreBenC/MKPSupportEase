@@ -69,11 +69,11 @@ fn reference_output() -> PathBuf {
     repo_root().join("tests/golden/42274.2.e2e-A1.reference.gcode")
 }
 
-/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「抬升 Z=20 + 跳过震动检测」生成
-/// （= 旧管线写死常量），偏好化之后出厂档改成 100 / 不跳 —— 两张脸都钉回去，
-/// 字节判据才不假红（同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
+/// 用户偏好（`Ir.prefs`）的两颗钉子：参考输出按「补抬 Z=10 + 跳过震动检测」生成，
+/// 与出厂档对齐 —— 两张脸都钉回去，字节判据才不假红
+/// （同 `end_to_end.rs` 的同名注释；fixture 保持派生原样）。
 const PREFERENCE_PINS: &[&str] = &[
-    "Prefs.BeginStageRetractZLiftMm=20",
+    "Prefs.BeginStageRetractZLiftMm=10",
     "Prefs.SkipVibrationCalibration=true",
 ];
 
@@ -181,20 +181,30 @@ fn zero_tower_region_z(bytes: &[u8]) -> Vec<u8> {
     postprocess::postproc::marks::zero_tower_region_z(bytes)
 }
 
-/// 与 `tests/end_to_end.rs::normalize` 同一口径：去换笔块 → 去涂胶段 Z/F →
+/// 剔除卸载块 —— 实现只有
+/// `postprocess::postproc::marks::strip_begin_stage_retract_blocks` 一份
+/// （2026-11-10 起块从文件头挪到原版 `G28 Z P0 T` 之前，见那边的注释）。
+fn strip_begin_stage_retract_blocks(bytes: &[u8]) -> Vec<u8> {
+    postprocess::postproc::marks::strip_begin_stage_retract_blocks(bytes)
+}
+
+/// 与 `tests/end_to_end.rs::normalize` 同一口径：去卸载块 → 去换笔块 → 去涂胶段 Z/F →
 /// 去塔块 feature 恢复行 → 抹塔 Z → 去标记行。
 /// 少一层就会把有意偏离报成「整链不等价」（实测差 1380 字节）。
 fn normalize(bytes: &[u8]) -> Vec<u8> {
     strip_mkp_marks(&zero_tower_region_z(&strip_tower_feature_restore(
-        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(bytes)),
+        &strip_glue_section_vertical_moves(&strip_swap_travel_blocks(
+            &strip_begin_stage_retract_blocks(bytes),
+        )),
     )))
 }
 
 #[test]
 fn process_with_ir_matches_the_end_to_end_reference() {
     let _seq = lock_sequence();
-    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除三处**有意偏离**再比：
-    // MKP 标记行（纯增量）、换笔段（2026-10-20 净空修正）、涂胶段 Z/F（2026-11-03 笔尖净空）。
+    // 参考物由来源仓库的 CLI 生成、本仓无法复现 ⇒ 剔除几处**有意偏离**再比：
+    // MKP 标记行（纯增量）、换笔段（2026-10-20 净空修正）、涂胶段 Z/F（2026-11-03 笔尖净空）、
+    // 卸载块（2026-11-10 从文件头挪到原版 `G28 Z P0 T` 之前）。
     let via_ir = normalize(&run_in_place(true));
     let raw = std::fs::read(reference_output()).expect("读整链参考物");
     // 反空转哨兵：参考物必须真的是那 668,687 字节的那一份，

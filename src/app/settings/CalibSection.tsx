@@ -22,19 +22,33 @@ import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import NumberField from '../../components/field/NumberField'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
+import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
-export default function CalibSection() {
+/**
+ * `nested`：挂在「后处理」大类底下（2026-11-09）—— 标题降成小标题（`h3`）、
+ * 上下留白收一档，读起来是那个大类里的一段，不是并列的又一章。
+ */
+export default function CalibSection({ nested = false }: { nested?: boolean }) {
   const tr = useT()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
 
   const on = (why: string) => setErr(why)
 
+  const head = (
+    <SectionHead
+      icon="crosshair"
+      level={nested ? 3 : 2}
+      title={tr('settings.calib.title')}
+      desc={tr('settings.calib.desc')}
+    />
+  )
+
   if (prefs === null) {
     return (
       <section className={s.section} aria-label={tr('settings.calib.title')}>
-        <h2 className={s.secTitle}>{tr('settings.calib.title')}</h2>
+        {head}
         <p className={s.fieldNote}>{tr('common.loading')}</p>
       </section>
     )
@@ -45,7 +59,7 @@ export default function CalibSection() {
 
   return (
     <section className={s.section} aria-label={tr('settings.calib.title')}>
-      <h2 className={s.secTitle}>{tr('settings.calib.title')}</h2>
+      {head}
 
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
@@ -76,7 +90,11 @@ export default function CalibSection() {
       </div>
 
       {/* 只在收笔开着时才问抬多高：关着的时候配一个不生效的数等于骗人
-          （与热床涂胶那一块"只在开着时才问涂哪儿"同一条规矩） */}
+          （与热床涂胶那一块"只在开着时才问涂哪儿"同一条规矩）。
+
+          ★ 缩进的唯一判据（2026-11-09）：**被上面那颗开关放出来的那一格**才缩进。
+            这一格是「开始阶段收笔」派生的数字，缩进正对；下面两条停留时间是并列的
+            参数，谁也不属于，所以不缩进。 */}
       {r.beginStageRetractEnabled && (
         <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
           <div className={s.fieldText}>
@@ -99,7 +117,8 @@ export default function CalibSection() {
         </div>
       )}
 
-      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+      {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
+      <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
             {tr('settings.calib.zDwell')}
@@ -119,7 +138,7 @@ export default function CalibSection() {
         </span>
       </div>
 
-      <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+      <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
             {tr('settings.calib.xyDwell')}

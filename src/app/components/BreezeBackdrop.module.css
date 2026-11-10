@@ -1,0 +1,85 @@
+/*
+ * 浅色窗底：铺满 `.shell`，盖住 `::before` 那三层浅色渐变；深色时组件不渲染。
+ * 与 `::before` 同为 z-index 0，靠 DOM 顺序压在它上面，内容又在它上面。
+ *
+ * 波浪是一张离线算好的 SVG 背景（`assets/hero/breeze-light.svg`，无滤镜），
+ * 整层只用 transform 做极慢循环；运行时没有逐帧计算，也没有 SVG 模糊。
+ */
+.root {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transform: translateZ(0);
+  background:
+    radial-gradient(ellipse 84% 68% at 72% 24%, rgba(255, 255, 255, 0.86) 0%, transparent 62%),
+    radial-gradient(ellipse 76% 64% at 22% 76%, rgba(158, 214, 190, 0.28) 0%, transparent 66%),
+    radial-gradient(ellipse 96% 78% at 52% 52%, rgba(230, 246, 238, 0.46) 0%, transparent 72%),
+    linear-gradient(135deg, #edf8f1 0%, #e9f5ee 52%, #fdfdfb 100%);
+}
+
+.waves {
+  position: absolute;
+  inset: 0;
+  background: url('../assets/hero/breeze-light.svg') center / 100% 100% no-repeat;
+  animation: breeze-breathe 48s ease-in-out infinite;
+}
+
+.decor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.dots {
+  animation: dots-float 22s ease-in-out infinite;
+}
+
+.leaf {
+  animation: leaf-float 26s ease-in-out infinite;
+}
+
+@keyframes breeze-breathe {
+  0%,
+  100% {
+    opacity: 0.9;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes dots-float {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 0.72;
+  }
+  50% {
+    transform: translate(-10px, 7px);
+    opacity: 1;
+  }
+}
+
+@keyframes leaf-float {
+  0%,
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+    opacity: 0.3;
+  }
+  50% {
+    transform: translate(18px, -14px) rotate(8deg);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waves,
+  .dots,
+  .leaf {
+    animation: none;
+  }
+}

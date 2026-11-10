@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "24196b1ae53626a4",
+  "revision": "09fd429e912c2667",
   "publishedAt": "2026-11-09T12:06:01Z",
   "brands": [
     {
@@ -909,15 +909,15 @@
         "configKey": "CustomMountGcode",
         "tomlKey": "custom_mount_gcode",
         "jsonKey": "custom_mount_gcode",
-        "label": "装载胶箱 G-code",
-        "labelEn": "Load glue box G-code",
-        "labelJa": "接着剤ボックスの装着 G-code",
-        "labelTw": "裝載膠箱 G-code",
-        "desc": "用于挂载涂胶笔的自定义指令，支持 [AUTO] 变量",
-        "descEn": "Custom command used to mount the glue pen; supports the [AUTO] variable",
-        "descJa": "塗布ペンを取り付けるためのカスタム命令。[AUTO] 変数に対応します",
-        "descTw": "用於掛載塗膠筆的自訂指令，支援 [AUTO] 變數",
-        "tomlComment": "自定义工具头获取 G-code",
+        "label": "落笔 G-code",
+        "labelEn": "Lower pen G-code",
+        "labelJa": "ペン降ろし G-code",
+        "labelTw": "落筆 G-code",
+        "desc": "让笔尖落下的自定义指令（碰一下右端机构完成切换），支持 [AUTO] 变量",
+        "descEn": "Custom command that lowers the pen tip (one bump against the right-end mechanism); supports the [AUTO] variable",
+        "descJa": "ペン先を降ろすカスタム命令（右端の機構に一度当てて切り替え）。[AUTO] 変数に対応します",
+        "descTw": "讓筆尖落下的自訂指令（碰一下右端機構完成切換），支援 [AUTO] 變數",
+        "tomlComment": "落笔 G-code",
         "valueType": "string",
         "uiComponent": "gcode",
         "defaultValue": "",
@@ -967,15 +967,15 @@
         "configKey": "CustomUnmountGcode",
         "tomlKey": "custom_unmount_gcode",
         "jsonKey": "custom_unmount_gcode",
-        "label": "卸载胶箱 G-code",
-        "labelEn": "Unload glue box G-code",
-        "labelJa": "接着剤ボックスの取り外し G-code",
-        "labelTw": "卸載膠箱 G-code",
-        "desc": "用于卸载涂胶笔的自定义指令，支持 [AUTO] 变量",
-        "descEn": "Custom command used to unmount the glue pen; supports the [AUTO] variable",
-        "descJa": "塗布ペンを取り外すためのカスタム命令。[AUTO] 変数に対応します",
-        "descTw": "用於卸載塗膠筆的自訂指令，支援 [AUTO] 變數",
-        "tomlComment": "自定义工具头收起 G-code",
+        "label": "收笔 G-code",
+        "labelEn": "Retract pen G-code",
+        "labelJa": "ペン戻し G-code",
+        "labelTw": "收筆 G-code",
+        "desc": "把笔尖收起的自定义指令（再碰一次右端机构完成切换），支持 [AUTO] 变量",
+        "descEn": "Custom command that retracts the pen tip (one more bump against the right-end mechanism); supports the [AUTO] variable",
+        "descJa": "ペン先を収めるカスタム命令（右端の機構にもう一度当てて切り替え）。[AUTO] 変数に対応します",
+        "descTw": "把筆尖收起的自訂指令（再碰一次右端機構完成切換），支援 [AUTO] 變數",
+        "tomlComment": "收笔 G-code",
         "valueType": "string",
         "uiComponent": "gcode",
         "defaultValue": "",
@@ -5878,8 +5878,8 @@
       "path": "delivery/mkp/presets/A1-standard.toml",
       "machineId": "A1",
       "versionId": "STANDARD",
-      "sha256": "ae1fc314c958fadecaeaa96bfec061758ff00fc40358a39b88390680a1c92b8b",
-      "size": 4857
+      "sha256": "8bc8d3c6ac248bc0825f71dcd841526200dac36dcde8e64589ba2634d59eb9f2",
+      "size": 4821
     },
     {
       "kind": "mkp_preset",
@@ -5887,8 +5887,8 @@
       "path": "delivery/mkp/presets/A1-fast.toml",
       "machineId": "A1",
       "versionId": "FAST",
-      "sha256": "a1ea93f22ad6134bbae875da9c2622d139f5f6776eb943ea41cec96e1fd15355",
-      "size": 4855
+      "sha256": "53212f69de2c7c33511e69f71c96979bc6bf486d11f130b796d6b562ae8dd520",
+      "size": 4819
     },
     {
       "kind": "mkp_preset",
@@ -5896,8 +5896,8 @@
       "path": "delivery/mkp/presets/A1-fastv3.3.toml",
       "machineId": "A1",
       "versionId": "FASTV3.3",
-      "sha256": "eb7502f6242e4e4830fe8ea1368994079e6f2acbd1c1f52e88fb11f3ffb9edcf",
-      "size": 4859
+      "sha256": "921950a2243130c4a4e2bb0b7fd282b0bd310db4ab1ec714b630f00cce5f4515",
+      "size": 4823
     },
     {
       "kind": "mkp_preset",
@@ -5905,8 +5905,8 @@
       "path": "delivery/mkp/presets/A1_MINI-standard.toml",
       "machineId": "A1_MINI",
       "versionId": "STANDARD",
-      "sha256": "76f715fa7f146db99dde4827016a4d3eacd48875c7c6840a675d9d2bc24d6068",
-      "size": 4863
+      "sha256": "d8654e35975aba566de313e807ffd281f06f5e177cae4de8cd705b65ad3511c1",
+      "size": 4827
     },
     {
       "kind": "mkp_preset",
@@ -5914,8 +5914,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fast.toml",
       "machineId": "A1_MINI",
       "versionId": "FAST",
-      "sha256": "a500909ff161058857f13df63c0641a24c7b912358470cb5571112202fdd2792",
-      "size": 4857
+      "sha256": "9223bc0b02b33a31c852027bde9d0e4ab57ef596f484b5db9ccc2bc3eda59237",
+      "size": 4821
     },
     {
       "kind": "mkp_preset",
@@ -5923,8 +5923,8 @@
       "path": "delivery/mkp/presets/A1_MINI-fastv3.3.toml",
       "machineId": "A1_MINI",
       "versionId": "FASTV3.3",
-      "sha256": "03211d1927498b63c7860c51274038494053f10ff9992b091ecb74ee0fb3a03b",
-      "size": 4862
+      "sha256": "a07e6cc8875d21d573759366524d268fd48877fba63f7a1bc30354d025764bc4",
+      "size": 4826
     },
     {
       "kind": "mkp_preset",
@@ -5932,8 +5932,8 @@
       "path": "delivery/mkp/presets/P1S-lite.toml",
       "machineId": "P1S",
       "versionId": "LITE",
-      "sha256": "1798a0c076672e68896356cebe3bf2605db4eb50bd1edf3789f21402eb65bbdb",
-      "size": 4993
+      "sha256": "eb5cff8bc13e3f1041b5557316bd7aacd11e0cb2fa5fc6624233bf4a69944cf4",
+      "size": 4957
     },
     {
       "kind": "mkp_preset",
@@ -5941,8 +5941,8 @@
       "path": "delivery/mkp/presets/X1C-lite.toml",
       "machineId": "X1C",
       "versionId": "LITE",
-      "sha256": "6f8fe01afc2a6780bc28500309aee955aac91590d4245f426f47dc10b7378982",
-      "size": 4993
+      "sha256": "8adf21cb2dc7d852dceaea86a67e212a1556b15031889a979c1a85c310fd13a6",
+      "size": 4957
     },
     {
       "kind": "icon",

@@ -133,6 +133,35 @@ pub fn strip_swap_travel_blocks(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
+/// 剔除「卸载块」（`;===== begin stage retract` ~ `... end`）后再比对。
+///
+/// 2026-11-10 起这一段的位置是**有意偏离**来源实现的：参考物与本仓旧版都把卸载前的
+/// `G0 X25 Y175 / G28 Z` 放在文件头，那时 Z 高度与 XY 位置都还是未知数，喷嘴可能在
+/// 贴床高度全速冲出去。现在块插在原版第一个 `G28 Z P0 T` 之前，抬升与 X 归零由原版
+/// 的 `G380` / `G28 X` 打底。块的位置与内容都变了，所以整链判据两边都剔掉整段再比。
+///
+/// 与 [`strip_mark_lines`] 同一条纪律：判据侧只有这一份实现。
+pub fn strip_begin_stage_retract_blocks(bytes: &[u8]) -> Vec<u8> {
+    let text = String::from_utf8_lossy(bytes);
+    let mut out = String::with_capacity(text.len());
+    let mut skipping = false;
+    for line in text.split_inclusive('\n') {
+        let t = line.trim_end();
+        if !skipping && t.contains(";===== begin stage retract ====") {
+            skipping = true;
+            continue;
+        }
+        if skipping {
+            if t.contains(";===== begin stage retract end") {
+                skipping = false;
+            }
+            continue;
+        }
+        out.push_str(line);
+    }
+    out.into_bytes()
+}
+
 /// 剔除涂胶段（`;Glueing Started` ~ `;Glueing Finished`）里的**抬笔/落笔与走速**。
 ///
 /// 2026-11-03 起涂胶段内的 `G1 Z`（抬笔/落笔）与配对 `G1 F` 由发射层按「笔尖净空」

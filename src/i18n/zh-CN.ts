@@ -45,7 +45,8 @@ export const zhCN = {
   /* 设置页 —— 外观（2026-10-25） */
 
   // ---- 设置页 ----
-  'settings.appearance.title': '外观',
+  'settings.appearance.title': '外观与语言',
+  'settings.appearance.desc': '主题与界面语言',
   'settings.locale.label': '界面语言',
   'settings.locale.note': '换完立刻生效，记在应用状态里 —— 下次打开还是这一档。',
   'settings.locale.system': '跟随系统',
@@ -107,7 +108,8 @@ export const zhCN = {
   'settings.theme.failed': '没换成：{detail}',
 
   /* 设置页：后处理模式 */
-  'settings.postproc.title': '后处理模式',
+  'settings.postproc.title': '后处理',
+  'settings.postproc.desc': '完成后的通知与显示',
   'settings.postproc.notify': '处理完成发送系统通知',
   'settings.postproc.notifyNote': '处理完成后发送系统通知，点通知可打开处理结果',
   'settings.postproc.mode': '这一趟怎么显示',
@@ -139,12 +141,13 @@ export const zhCN = {
 
   /* 设置页：校准与补偿 */
   'settings.calib.title': '校准与补偿',
+  'settings.calib.desc': '会改 G-code 的几项',
   'settings.calib.skipVibration': '跳过震动校准检测',
   'settings.calib.skipVibrationNote': '跳过 G-code 中的震动补偿校准检测步骤（M970/M974），使用打印机已保存的校准数据，减少打印准备时间',
   'settings.calib.beginRetract': '开始阶段收笔',
-  'settings.calib.beginRetractNote': '在 G-code 处理后开头插入工具头收起序列（先 Z 归位、抬到设定高度、再收笔），确保打印开始前工具头已卸载',
+  'settings.calib.beginRetractNote': '在起始段把 Z 抬起来之后，按下面的设定再补抬一截、把 X 归零，然后到右端收笔位把笔尖收起',
   'settings.calib.lift': '收笔抬升高度',
-  'settings.calib.liftNote': '「开始阶段收笔」把工具头抬到的绝对 Z 高度（{min}-{max} mm）。太高只是一段白跑的空行程，太低则可能与模型或夹具相碰',
+  'settings.calib.liftNote': '在起始段抬 Z 之后**再补抬**的相对高度（{min}-{max} mm）。太高只是一段白跑的空行程，太低则笔尖可能刮到床面或夹具',
   'settings.calib.zDwell': 'Z 轴校准停留时间',
   'settings.calib.zDwellNote': 'Z 校准每一层测量后的暂停时间（{min}-{max} 秒）',
   'settings.calib.xyDwell': 'XY 轴校准停留时间',
@@ -161,6 +164,7 @@ export const zhCN = {
 
   /* 设置页：预设 */
   'settings.presets.title': '预设',
+  'settings.presets.desc': '复制与脚本的默认行为',
   'settings.presets.copies': '复制出来的也跟着云端更新',
   'settings.presets.copiesNote': '默认关：你复制出来的那一份是独立的一份 —— 它不算「云端有新版」的那一份，点「更新」也不会动它。开着时它与原件一样，一样显示云端更新、一样会被更新到。',
   /* 2026-11-01 作者：「我使用之后自动复制后处理脚本……只要变了那个使用的状态，
@@ -172,6 +176,7 @@ export const zhCN = {
 
   /* 设置页：数据与维护 / 清理与卸载 */
   'settings.data.title': '数据与维护',
+  'settings.data.desc': '预设目录与执行记录',
   'settings.data.folder': '预设位置',
   'settings.data.folderNote': '打开预设配置文件所在目录',
   'settings.data.open': '打开',
@@ -227,37 +232,38 @@ export const zhCN = {
 
   /* 设置页：软件更新 */
   'settings.update.title': '软件更新',
+  'settings.update.desc': '检查并安装新版本',
   'settings.update.checking': '正在检查……',
   'settings.update.hasNew': '有新版本 SupportEase',
+  'settings.update.found': '发现新版本 {version}',
+  'settings.update.autoCheckNote': '同步目录时顺路查一次正式版',
+  'settings.update.channelLabel': '更新渠道',
+  'settings.update.channelNote': '选择更新的发布渠道',
+  'settings.update.channelStable': '正式版',
+  'settings.update.channelPreview': '测试版',
   'settings.update.latest': '已是最新版本',
   'settings.update.unknown': '这次没能查到更新',
   'settings.update.version': '当前版本 {version}',
   'settings.update.versionTo': '当前版本 {version} → 最新版本 {latest}',
   'settings.update.failed': '这次检查失败了：{detail}',
   'settings.update.hint': '更新检查需要能连上发布地址（见下方「高级设置」）。连不上时如实说没查到，不冒充「已是最新」。',
-  'settings.update.recheck': '重新检查',
+  'settings.update.recheck': '检查更新',
   'settings.update.view': '查看更新',
-  'settings.update.install': '更新',
+  'settings.update.install': '立即更新',
 'settings.update.autoCheck': '自动检查更新',
   'mock.demo.previewHint': '演示：预览版只在主动检查时并列出现，不会主动通知普通用户。',
-  'settings.update.candidateStable': '正式版',
-  'settings.update.candidatePreview': '预览版',
-  'settings.update.stableBadge': '推荐',
-  'settings.update.previewBadge': '测试版',
-  'settings.update.updateStable': '更新正式版',
-  'settings.update.tryPreview': '尝试测试版',
   'settings.update.downloading': '下载中 {pct}',
   'settings.update.installing': '正在安装…',
   'settings.update.lastFailed': '上次更新没成功：{detail}（安装日志：{log}）',
   'settings.update.previewNote': '仅供尝鲜，可能存在尚未修复的问题。',
-  'settings.update.recheckHint': '重新检查会同时查看预览版；预览版不会主动通知普通用户。',
 'settings.update.autoCheckHint': '打开后，每次成功同步云端目录时顺路查一次**正式版**新版；不会在启动时联网，也不会反复查。预览版只在你主动重新检查时出现。',
 'notify.update.title': '有新版本',
 'notify.update.text': 'SupportEase {version} 已发布',
 'notify.update.view': '去看看',
 
   /* 设置页：切片 */
-  'settings.slicer.title': '切片',
+  'settings.slicer.title': '切片与引导',
+  'settings.slicer.desc': '打开模型用哪个应用',
   'settings.slicer.label': '默认用哪个切片软件打开模型',
   'settings.slicer.note': '立刻生效。「打开模型」的框里还可以只对那一次换一个，不动这里的默认。',
   'settings.slicer.customHandoff': '打开模型时交给「{name}」：{path}',
@@ -285,6 +291,8 @@ export const zhCN = {
 
   /* 设置页：备份与恢复 */
   'settings.backup.title': '备份与恢复',
+  'settings.backup.desc': '打包带走，删了能找回',
+  'settings.backup.doLabel': '备份打包与恢复',
   'settings.backup.do': '打开…',
   'settings.backup.tip': '打包设置与执行归档；恢复会覆盖当前数据。',
   'settings.backup.pickDir': '把备份放到哪个文件夹',
@@ -337,6 +345,7 @@ export const zhCN = {
 
   /* 设置页：高级设置 */
   'settings.advanced.title': '高级设置',
+  'settings.advanced.desc': '预设数据源地址',
   'settings.advanced.sourceLabel': '预设数据源',
   'settings.advanced.sourceNote': '国内选 Gitee 更稳；自定义地址仅供开发排查。',
   'settings.advanced.defaultTag': '（默认）',

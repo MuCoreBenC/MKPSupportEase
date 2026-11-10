@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="56 28 144 144" width="144" height="144">
+  <defs>
+    <filter id="outerBlur" filterUnits="userSpaceOnUse" x="40" y="10" width="180" height="180"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="arrowLift" filterUnits="userSpaceOnUse" x="55" y="35" width="150" height="140" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="2" stdDeviation="1.6" flood-color="#07130e" flood-opacity=".55"/>
+    </filter>
+    <clipPath id="cardClip"><rect x="74" y="46" width="108" height="108" rx="25"/></clipPath>
+    <linearGradient id="glassTint" gradientUnits="userSpaceOnUse" x1="74" y1="46" x2="182" y2="154">
+      <stop offset="0" stop-color="#477c5d" stop-opacity=".2"/>
+      <stop offset=".55" stop-color="#336247" stop-opacity=".24"/>
+      <stop offset="1" stop-color="#234832" stop-opacity=".3"/>
+    </linearGradient>
+    <linearGradient id="outerGlow" gradientUnits="userSpaceOnUse" x1="74" y1="46" x2="182" y2="154">
+      <stop offset="0" stop-color="#63c08f" stop-opacity=".5"/>
+      <stop offset=".4" stop-color="#8de0af" stop-opacity=".18"/>
+      <stop offset="1" stop-color="#78c899" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="bevelLight" gradientUnits="userSpaceOnUse" x1="74" y1="46" x2="182" y2="154">
+      <stop offset="0" stop-color="#9fdfba" stop-opacity=".28"/>
+      <stop offset=".4" stop-color="#a9ffcc" stop-opacity=".12"/>
+      <stop offset="1" stop-color="#8fe8b3" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="rotate(-10 128 100)">
+    <rect x="71" y="43" width="114" height="114" rx="28"
+          fill="none" stroke="#06120d" stroke-width="5" stroke-opacity=".32" filter="url(#outerBlur)"/>
+    <rect x="72.5" y="44.5" width="111" height="111" rx="26.5"
+          fill="none" stroke="url(#outerGlow)" stroke-width="2.5" filter="url(#outerBlur)"/>
+    <g clip-path="url(#cardClip)">
+      <rect x="74" y="46" width="108" height="108" fill="url(#glassTint)"/>
+      <rect x="74" y="46" width="108" height="108" fill="#b3ddc4" opacity=".06"/>
+    </g>
+    <rect x="74.8" y="46.8" width="106.4" height="106.4" rx="24.2"
+          fill="none" stroke="#33584a" stroke-opacity=".8" stroke-width="1"/>
+    <rect x="75" y="47" width="106" height="106" rx="24"
+          fill="none" stroke="url(#bevelLight)" stroke-width="1"/>
+
+    <g filter="url(#arrowLift)" fill="none" stroke="#5fd39a" stroke-width="7" stroke-linecap="round">
+      <path d="M103.6 91.1 A26 26 0 0 1 152.4 91.1"/>
+      <path d="M152.4 108.9 A26 26 0 0 1 103.6 108.9"/>
+    </g>
+    <g fill="#5fd39a" stroke="#5fd39a" stroke-width="2" stroke-linejoin="round">
+      <path d="M-3 -9 L12 0 L-3 9 Z" transform="translate(152.43 91.11) rotate(70)"/>
+      <path d="M-3 -9 L12 0 L-3 9 Z" transform="translate(103.57 108.89) rotate(250)"/>
+    </g>
+  </g>
+</svg>

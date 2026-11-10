@@ -1,9 +1,9 @@
 # machine: A1_MINI
 # variant: fastv3.3
-# generated_at: 2026-11-09T18:48:33+08:00
+# generated_at: 2026-11-10T14:45:00+08:00
 
 [toolhead]
-# 自定义工具头获取 G-code
+# 落笔 G-code
 custom_mount_gcode = """
 G92 E0
 G1 E-5 F1800
@@ -16,7 +16,7 @@ G1 X185 F10000
 G1 X168 F30000
 G1 F30000
 """
-# 自定义工具头收起 G-code
+# 收笔 G-code
 custom_unmount_gcode = """
 M106 S[AUTO]
 G1 X168 F30000
