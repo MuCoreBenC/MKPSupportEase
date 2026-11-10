@@ -295,7 +295,6 @@ export default function ParamSyncModal({
                     const localText = e.local === null ? null : text(e.key, e.local)
                     /* 「上次云端」用滚动记录；没有才退回水位那格（2026-10-31） */
                     const cloudOld = e.origin ?? e.baselineOld
-                    const hasDiff = cloudOld !== null && e.cloudNew !== null
                     return (
                       <div key={e.key} className={on ? `${s.row} ${s.rowOn}` : s.row}>
                         <Check
@@ -323,7 +322,7 @@ export default function ParamSyncModal({
                                 </i>
                               </>
                             )}
-                            {hasDiff ? (
+                            {cloudOld !== null && e.cloudNew !== null ? (
                               <>
                                 <span className={s.valsTag}>{tr('params.sync.cloud')}</span>{' '}
                                 <span className={s.oldVal}>{text(e.key, cloudOld)}</span>

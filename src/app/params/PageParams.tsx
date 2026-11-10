@@ -55,6 +55,8 @@ import { invalidNumberText, useParams, valueText } from './useParams'
 import type { HistoryEntry, ParamDef } from './useParams'
 /* 两态框架那两颗按钮的词 —— 与「编辑文件」/「参数对比台」**同一个源**（作者要的"三处同一句话"） */
 import { EDIT_TEXT } from '../presets/presetTree'
+/* 云端发布时刻是 ISO/UTC —— 与「选择要更新的参数」副标题同一支格式化，两处念同一个时间 */
+import { longStatText } from '../store/package'
 import s from './PageParams.module.css'
 
 interface Props {
@@ -743,6 +745,19 @@ export default function PageParams({
   /** 云端更新里**还没表态**的项数（0 = 都选好了，只差保存） */
   const syncUndecided = Math.max(0, u.pendingCount - u.syncDirty)
   /*
+   * 云端那一版的发布时刻：ISO/UTC → 本机时区的 `2026-11-10 17:19`。
+   * 横幅那两档都要缀这一段，只在这儿翻一次（原来两处各摆一遍原始 ISO）。
+   */
+  const cloudTimeText =
+    u.sync?.currentReleaseTime != null
+      ? (longStatText(u.sync.currentReleaseTime) ?? u.sync.currentReleaseTime)
+      : ''
+  /** 我这份当初基于的那一版：同样只在这儿翻一次，别把原始 ISO 摆到界面 */
+  const basedOnTimeText =
+    u.sync?.basedOnReleaseTime != null
+      ? (longStatText(u.sync.basedOnReleaseTime) ?? u.sync.basedOnReleaseTime)
+      : ''
+  /*
    * 底栏那句状态：值改动与**云端更新的表态**分开数（2026-10-20）。
    * 只点了「用新值 / 保持原样」而没手改任何值时，`dirtyCount` 是 0 —— 但那一笔
    * 同样没保存，底栏必须说出来，否则「保存」亮着而左边写着"没有未保存的改动"。
@@ -1267,16 +1282,16 @@ export default function PageParams({
                   {syncUndecided === 0 ? (
                     <>
                       {tr('params.sync.noticeDirty', { count: u.syncDirty })}
-                      {u.sync?.currentReleaseTime != null
-                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
-                        : ''}
+                      {cloudTimeText === ''
+                        ? ''
+                        : tr('params.sync.cloudTime', { time: cloudTimeText })}
                     </>
                   ) : (
                     <>
                       {tr('params.sync.noticePending', { count: syncUndecided })}
-                      {u.sync?.currentReleaseTime != null
-                        ? tr('params.sync.cloudTime', { time: u.sync.currentReleaseTime })
-                        : ''}
+                      {cloudTimeText === ''
+                        ? ''
+                        : tr('params.sync.cloudTime', { time: cloudTimeText })}
                       {u.syncDirty > 0 && (
                         <span className={s.syncBarHint}>
                           {tr('params.sync.noticeChosen', { count: u.syncDirty })}
@@ -1315,9 +1330,9 @@ export default function PageParams({
               <div className={s.syncBar} role="status">
                 <span className={s.syncBarText}>
                   {tr('params.sync.newVersion')}
-                  {u.sync?.basedOnReleaseTime != null
-                    ? tr('params.sync.basedOn', { time: u.sync.basedOnReleaseTime })
-                    : ''}
+                  {basedOnTimeText === ''
+                    ? ''
+                    : tr('params.sync.basedOn', { time: basedOnTimeText })}
                   <span className={s.syncBarHint}>{tr('params.sync.peekHint')}</span>
                 </span>
                 <button

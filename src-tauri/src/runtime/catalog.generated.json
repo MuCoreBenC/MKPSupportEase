@@ -1,6 +1,6 @@
 {
   "catalogSchema": 1,
-  "revision": "af1802ab0857fc25",
+  "revision": "79c6a6ff17d648b3",
   "brands": [
     {
       "id": "Bambu Lab",
@@ -1103,9 +1103,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 256.0,
           "A1:FAST": 256.0,
           "A1:FASTV3.3": 256.0,
           "A1:STANDARD": 256.0,
+          "A1_MINI": 168.0,
           "A1_MINI:FAST": 168.0,
           "A1_MINI:FASTV3.3": 168.0,
           "A1_MINI:STANDARD": 168.0,
@@ -1217,9 +1219,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 267.0,
           "A1:FAST": 267.0,
           "A1:FASTV3.3": 267.0,
           "A1:STANDARD": 267.0,
+          "A1_MINI": 185.0,
           "A1_MINI:FAST": 185.0,
           "A1_MINI:FASTV3.3": 185.0,
           "A1_MINI:STANDARD": 185.0,
@@ -1277,9 +1281,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 10000.0,
           "A1:FAST": 10000.0,
           "A1:FASTV3.3": 10000.0,
           "A1:STANDARD": 10000.0,
+          "A1_MINI": 10000.0,
           "A1_MINI:FAST": 10000.0,
           "A1_MINI:FASTV3.3": 10000.0,
           "A1_MINI:STANDARD": 10000.0,
@@ -1337,9 +1343,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 256.0,
           "A1:FAST": 256.0,
           "A1:FASTV3.3": 256.0,
           "A1:STANDARD": 256.0,
+          "A1_MINI": 168.0,
           "A1_MINI:FAST": 168.0,
           "A1_MINI:FASTV3.3": 168.0,
           "A1_MINI:STANDARD": 168.0,
@@ -1451,9 +1459,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 271.0,
           "A1:FAST": 271.0,
           "A1:FASTV3.3": 273.0,
           "A1:STANDARD": 271.0,
+          "A1_MINI": 189.0,
           "A1_MINI:FAST": 189.0,
           "A1_MINI:FASTV3.3": 189.0,
           "A1_MINI:STANDARD": 189.0,
@@ -1511,9 +1521,11 @@
         ],
         "deprecated": false,
         "machineVariants": {
+          "A1": 10000.0,
           "A1:FAST": 10000.0,
           "A1:FASTV3.3": 10000.0,
           "A1:STANDARD": 10000.0,
+          "A1_MINI": 10000.0,
           "A1_MINI:FAST": 10000.0,
           "A1_MINI:FASTV3.3": 10000.0,
           "A1_MINI:STANDARD": 10000.0,

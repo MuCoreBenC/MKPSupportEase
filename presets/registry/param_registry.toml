@@ -460,6 +460,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 256.0
+"A1_MINI" = 168.0
 "A1:FAST" = 256.0
 "A1:FASTV3.3" = 256.0
 "A1:STANDARD" = 256.0
@@ -569,6 +571,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 267.0
+"A1_MINI" = 185.0
 "A1:FAST" = 267.0
 "A1:FASTV3.3" = 267.0
 "A1:STANDARD" = 267.0
@@ -626,6 +630,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 10000.0
+"A1_MINI" = 10000.0
 "A1:FAST" = 10000.0
 "A1:FASTV3.3" = 10000.0
 "A1:STANDARD" = 10000.0
@@ -683,6 +689,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 256.0
+"A1_MINI" = 168.0
 "A1:FAST" = 256.0
 "A1:FASTV3.3" = 256.0
 "A1:STANDARD" = 256.0
@@ -792,6 +800,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 271.0
+"A1_MINI" = 189.0
 "A1:FAST" = 271.0
 "A1:FASTV3.3" = 273.0
 "A1:STANDARD" = 271.0
@@ -849,6 +859,8 @@ machineMaxVariants = {  }
 pinned = false
 
 [params.machineVariants]
+"A1" = 10000.0
+"A1_MINI" = 10000.0
 "A1:FAST" = 10000.0
 "A1:FASTV3.3" = 10000.0
 "A1:STANDARD" = 10000.0

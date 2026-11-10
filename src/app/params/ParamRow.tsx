@@ -235,11 +235,18 @@ export default function ParamRow({
    * **上一次保存之前的那个**（`prevSavedValue`）—— 作者 2026-10-21：
    * 「保存之后还是那样显示的，不是这样都变成新的」。
    */
-  const prevOrLocal = prevSavedValue ?? sync?.local ?? null
+  /*
+   * 「我的」要写**被换掉的那个值**：
+   *   · 待处理（刚点「用新值」、还没保存）⇒ 已保存值 —— 那一格正是框里原来的数；
+   *   · 保存过了 ⇒ 上一次保存之前的值（`prevSavedValue`），见上面那段作者口径。
+   * 别用 `sync.local` 当"我的"：它是文件里的值，早被 `prevSavedValue` 盖住过，
+   * 作者看到的就是「我明明是 6，却写着 0」。
+   */
+  const mineBefore = syncPending ? savedValue : (prevSavedValue ?? sync?.local ?? null)
   const mineToCloud =
-    sync !== undefined && prevOrLocal !== null && sync.cloudNew !== null
+    sync !== undefined && mineBefore !== null && sync.cloudNew !== null
       ? t('params.mineArrow', {
-          before: valueText(def, prevOrLocal, tr),
+          before: valueText(def, mineBefore, tr),
           after: valueText(def, sync.cloudNew, tr),
         })
       : diffText
@@ -365,7 +372,7 @@ export default function ParamRow({
                 sync?.cloudNew === null
                   ? tr('params.row.adoptTitleNoCloud')
                   : tr('params.row.adoptTitle', {
-                    value: diffText ?? tr('params.row.cloudCurrent'),
+                    value: valueText(def, sync?.cloudNew ?? null, tr),
                   })
               }
               onClick={() => onAdoptSync(def.key)}
