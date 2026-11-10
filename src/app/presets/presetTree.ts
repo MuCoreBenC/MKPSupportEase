@@ -716,8 +716,21 @@ export function updateStatusOf(row: {
      * **发布前进了，但这一份没变**：不说「有新版」，也不给动作 ——
      * 它确实没有需要更新的内容；云端时间也不许露头。
      */
+    /*
+     * 发布前进了，字节却没变。
+     *
+     * 原来这一档**不给动作**（"确实没有需要更新的内容"）。但同一句话也盖住了另一种
+     * 情况：本地这份文件虽然 sha 对得上，却缺了注册表新加的键（例如落笔/收笔那 6 个
+     * 字段）—— 那时"内容没变"是真的，可它并不是"完整的最新版"，用户也就永远拿不到
+     * 补齐的机会。所以改成：照旧说"内容一致"，但**允许重新下载**。
+     */
     case 'unchanged':
-      return { ...none, text: 'presets.tree.cloudLocal.unchanged' }
+      return {
+        ...none,
+        text: 'presets.tree.cloudLocal.unchanged',
+        action: 'update',
+        showCloudRelease: true,
+      }
     /*
      * **说不清版本关系**：不声称有新版，也不给「更新」——
      * 建立在猜测上的更新会把用户往错误的方向带。出路是右键重新从云端下载。

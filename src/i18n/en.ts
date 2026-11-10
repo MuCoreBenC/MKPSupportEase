@@ -1577,7 +1577,7 @@ export const en: Record<StringKey, string> = {
   'presets.tree.cloudLocal.none': 'Not fetched',
   'presets.tree.cloudLocal.has': 'Up to date',
   'presets.tree.cloudLocal.stale': 'New version available',
-  'presets.tree.cloudLocal.unchanged': 'Up to date (a new release shipped, this file did not change)',
+  'presets.tree.cloudLocal.unchanged': 'Up to date (release moved ahead, content identical; re-download to fill in missing fields)',
   'presets.tree.cloudLocal.elsewhere': 'Other branch — not compared',
   'presets.tree.cloudLocal.newer': 'The cloud copy is older than yours',
   'presets.tree.cloudLocal.detached': 'Local copy (does not follow cloud updates)',

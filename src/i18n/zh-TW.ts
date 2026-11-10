@@ -1607,7 +1607,7 @@ export const zhTW: Record<StringKey, string> = {
   'presets.tree.cloudLocal.none': '未獲取',
   'presets.tree.cloudLocal.has': '已是最新',
   'presets.tree.cloudLocal.stale': '有新版本',
-  'presets.tree.cloudLocal.unchanged': '已是最新（雲端發過新版，這份沒變）',
+  'presets.tree.cloudLocal.unchanged': '已是最新（雲端發布前進過，這份內容一致；可重新下載補齊欄位）',
   'presets.tree.cloudLocal.elsewhere': '跨分支，不比版本',
   'presets.tree.cloudLocal.newer': '雲端這一份比你手上的舊',
   'presets.tree.cloudLocal.detached': '本機副本（不跟雲端更新）',

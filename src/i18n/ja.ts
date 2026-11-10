@@ -1572,7 +1572,7 @@ export const ja: Record<StringKey, string> = {
   'presets.tree.cloudLocal.none': '未取得',
   'presets.tree.cloudLocal.has': '最新',
   'presets.tree.cloudLocal.stale': '新バージョンあり',
-  'presets.tree.cloudLocal.unchanged': '最新（クラウドで新版が公開されましたが、この内容は未変更）',
+  'presets.tree.cloudLocal.unchanged': '最新（クラウドの公開は進みましたが内容は同一。再ダウンロードで不足項目を補えます）',
   'presets.tree.cloudLocal.elsewhere': 'ブランチが異なるため版は比較しません',
   'presets.tree.cloudLocal.newer': 'クラウドのこの版は手元より古い',
   'presets.tree.cloudLocal.detached': 'ローカルコピー（クラウド更新を追跡しません）',

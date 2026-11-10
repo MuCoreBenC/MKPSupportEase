@@ -1637,7 +1637,7 @@ export const zhCN = {
   'presets.tree.cloudLocal.none': '未获取',
   'presets.tree.cloudLocal.has': '已是最新',
   'presets.tree.cloudLocal.stale': '有新版本',
-  'presets.tree.cloudLocal.unchanged': '已是最新（云端发过新版，这份没变）',
+  'presets.tree.cloudLocal.unchanged': '已是最新（云端发布前进过，这份内容一致；可重新下载补齐字段）',
   'presets.tree.cloudLocal.elsewhere': '跨分支，不比版本',
   'presets.tree.cloudLocal.newer': '云端这一份比你手上的旧',
   'presets.tree.cloudLocal.detached': '本地副本（不跟云端更新）',
