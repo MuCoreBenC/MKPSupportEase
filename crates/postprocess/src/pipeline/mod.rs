@@ -763,6 +763,26 @@ fn run(
         )?;
     }
 
+    /* 调试模式：把前面那套结果整段换成「只跑动作」的骨架。
+     *
+     * 动作块不依赖 pass1/pass2 的任何产出（它只用等待位/动作位/速度），所以这里
+     * 直接替换 `out_lines`；写盘、MKP 标记收尾、sha 与正常那一趟共用同一条路。
+     * 代价是白跑了一遍后处理 —— 换来的是零分叉，不会出现两套写盘逻辑。 */
+    if let Some(dbg) = ir.debug.clone() {
+        tracing::info!(
+            machine = machine_type.as_str(),
+            wait = dbg.wait_x,
+            wait_y = dbg.wait_y,
+            mount = dbg.mount_x,
+            unmount = dbg.unmount_x,
+            speed = dbg.speed,
+            test_mount = dbg.test_mount,
+            test_unmount = dbg.test_unmount,
+            "调试模式：生成动作测试产物"
+        );
+        out_lines = debug::build_debug_gcode(&content, &dbg);
+    }
+
     // ---- step 11: write —— 三个 hooks + .part + rename ----
     // 最后一道取消检查点：此后开始落盘，写就写完。
     checkpoint(cancel)?;
@@ -770,16 +790,20 @@ fn run(
     executed.push(Step::Write);
     /* 这三处以前各读一个 `DEFAULT_*` 常量 —— 也就是"设置页那几档从来没被读过"。
     现在全部走 `ir.prefs`（`runtime::postproc_prefs::apply_to_ir` 是唯一写入点）。 */
-    out_lines = hooks::apply_begin_stage_retract(
-        out_lines,
-        &ir,
-        ir.prefs.begin_stage_retract_enabled,
-        ir.prefs.begin_stage_retract_z_lift_mm,
-    );
-    out_lines =
-        hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
-    /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
-    out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
+    /* 调试产物自带归零与动作，这三个钩子一律不跑：
+     * 再插一次收笔块 / 涂胶 / 跳过震动，都会往调试产物里塞它不需要的东西。 */
+    if ir.debug.is_none() {
+        out_lines = hooks::apply_begin_stage_retract(
+            out_lines,
+            &ir,
+            ir.prefs.begin_stage_retract_enabled,
+            ir.prefs.begin_stage_retract_z_lift_mm,
+        );
+        out_lines =
+            hooks::apply_skip_vibration_calibration(out_lines, ir.prefs.skip_vibration_calibration);
+        /* 热床预涂胶：钩子那个空壳换成真实现（`bed_glue.rs`，2026-10-17 从旧侧移植） */
+        out_lines = bed_glue::apply_bed_glue(out_lines, &ir, calib_mode);
+    }
 
     // MKP 标记协议 v1 收尾：ev 按落盘行序重编号 + 文件头 ;MKP_INFO + 文件尾 ;MKP_STATS，
     // 同时把层数声明改成与成品内容一致。
