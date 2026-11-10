@@ -28,7 +28,7 @@ use postprocess::ir::types::*;
 // 那是编排层（pipeline）的事。import 进来只会得到一条 unused 警告，
 // 而警告在 -D warnings 下就是错误。
 use postprocess::ir::num_strip;
-use postprocess::postproc::pen_template::{render, PenVars};
+use postprocess::postproc::pen_template::{PenVars, render};
 use std::collections::HashMap;
 
 /// 把「骨架 + 字段」渲染成最终 G-code。

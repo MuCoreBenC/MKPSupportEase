@@ -34,7 +34,10 @@ impl fmt::Display for PenTemplateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownPlaceholder(name) => {
-                write!(f, "未知占位符 {{{name}}}，只支持 {{wait}}/{{wait_y}}/{{target}}/{{speed}}")
+                write!(
+                    f,
+                    "未知占位符 {{{name}}}，只支持 {{wait}}/{{wait_y}}/{{target}}/{{speed}}"
+                )
             }
             Self::UnclosedPlaceholder(pos) => {
                 write!(f, "占位符没有闭合：第 {pos} 个字节处有一个 `{{` 缺少 `}}`")
