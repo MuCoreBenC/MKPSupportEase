@@ -725,6 +725,7 @@ export const ja: Record<StringKey, string> = {
   'params.pen.speed': '速度',
   'params.pen.placeholderTip': '「{name}」から生成されます。数値を変えるには上の項目を編集してください',
   'params.pen.structureError': '構造が不正です：{detail}（保存前に修正してください）',
+  'params.pen.viewNote': '数値は下の項目で編集します。組み上がった G-code は「表示」で確認できます',
   'params.gcode.filled': '入力済み',
   'params.gcode.revertTitle': '保存済みの内容に戻す（{lines} 行）',
   'params.gcode.revertLabel': '↩ 保存済みの {lines} 行',

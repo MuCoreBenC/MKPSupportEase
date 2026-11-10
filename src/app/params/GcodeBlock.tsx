@@ -22,7 +22,15 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
-import { placeholderName, validate, type PenKind, type PenTemplateIssue } from './penTemplate'
+import {
+  fieldOf,
+  placeholders,
+  render,
+  validate,
+  type PenKind,
+  type PenPlaceholder,
+  type PenTemplateIssue,
+} from './penTemplate'
 import type { ParamDef } from './useParams'
 import s from './GcodeBlock.module.css'
 
@@ -31,14 +39,6 @@ function penKindOf(key: string): PenKind | null {
   if (key === 'toolhead.custom_mount_gcode') return 'mount'
   if (key === 'toolhead.custom_unmount_gcode') return 'unmount'
   return null
-}
-
-/** 占位符在界面上的短名。 */
-const PH_LABEL: Record<string, StringKey> = {
-  wait: 'params.pen.wait',
-  wait_y: 'params.pen.waitY',
-  target: 'params.pen.target',
-  speed: 'params.pen.speed',
 }
 
 /** 结构错误的具体位置 —— 只有符号与数字，不需要再翻一遍。 */
@@ -56,6 +56,8 @@ interface Props {
   disabled?: boolean
   /** 已保存的那一层 —— 还原 chip 指向它，与普通行同一条规矩 */
   savedValue: string
+  /** 取别的参数的当前值（落笔/收笔要把占位符渲染成真值，必须借它） */
+  valueOf?: (key: string) => string
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
 }
@@ -65,39 +67,39 @@ const MODES: { value: string; label: StringKey }[] = [
   { value: 'view', label: 'params.gcode.view' },
 ]
 
-const IS_COMMAND = /^[A-Za-z]\d+$/
-
-interface Parsed {
-  raw: string
-  command: string | null
-  params: string[]
-}
-
-function parse(text: string): Parsed[] {
-  return text.split('\n').map((raw) => {
-    const tokens = raw.trim().split(/\s+/).filter(Boolean)
-    const head = tokens[0] ?? ''
-    if (!IS_COMMAND.test(head)) return { raw, command: null, params: [] }
-    return { raw, command: head, params: tokens.slice(1) }
-  })
-}
-
 export default function GcodeBlock({
   def,
   value,
   dirty,
   disabled = false,
   savedValue,
+  valueOf,
   onEdit,
   onRevertToSaved,
 }: Props) {
   const tr = useT()
   const [mode, setMode] = useState('view')
-  const lines = parse(value)
 
   /* 落笔/收笔的骨架带占位符：结构错了就当场标红，别等到保存 */
-  const isPenTemplate = penKindOf(def.key) !== null
-  const issue = isPenTemplate ? validate(value) : null
+  const kind = penKindOf(def.key)
+  const issue = kind === null ? null : validate(value)
+
+  /*
+   * 骨架 + 兄弟字段 → **真值**。取不到值（字段没填 / 结构坏了）就返回 null，
+   * 界面退回骨架原文 —— 宁可显示 `{wait}`，也不编一个数字出来。
+   */
+  const rendered = useMemo(() => {
+    if (kind === null || valueOf === undefined || issue !== null) return null
+    const need = placeholders(value)
+    if (need.length === 0) return value
+    const vars: Record<PenPlaceholder, number> = { wait: 0, wait_y: 0, target: 0, speed: 0 }
+    for (const name of need) {
+      const n = Number(valueOf(fieldOf(kind, name)))
+      if (!Number.isFinite(n)) return null
+      vars[name] = n
+    }
+    return render(value, vars)
+  }, [kind, value, valueOf, issue])
 
   /*
    * 代码模式的三层：行号槽 + 着色层 + 透明输入框（A43 移植，工作台 C15 那套）。
@@ -128,16 +130,6 @@ export default function GcodeBlock({
     }
   }
   useEffect(syncScroll, [value])
-
-  const replaceParam = (lineAt: number, paramAt: number, next: string) => {
-    const copy = lines.map((l, i) => {
-      if (i !== lineAt || l.command === null) return l.raw
-      const params = [...l.params]
-      params[paramAt] = next
-      return [l.command, ...params.filter((p) => p !== '')].join(' ')
-    })
-    onEdit(def.key, copy.join('\n'))
-  }
 
   return (
     <div className={s.wrap}>
@@ -205,9 +197,11 @@ export default function GcodeBlock({
             <textarea
               ref={taRef}
               className={s.codeTa}
-              value={value}
+              value={rendered ?? value}
               spellCheck={false}
               disabled={disabled}
+              /* 有真值就只读：这里展示的是拼装结果，改数值要回字段那几格 */
+              readOnly={rendered !== null}
               aria-label={tr('params.gcode.codeAria', { label: def.label })}
               onScroll={syncScroll}
               onChange={(e) => onEdit(def.key, e.target.value)}
@@ -215,50 +209,12 @@ export default function GcodeBlock({
           </div>
         </div>
       ) : (
-        <ol className={s.lines}>
-          {lines.map((line, i) => (
-            <li key={`${i}-${line.raw}`} className={s.line}>
-              <span className={s.no}>{i + 1}</span>
-              {line.command === null ? (
-                <span className={s.plain}>{line.raw === '' ? '\u00a0' : line.raw}</span>
-              ) : (
-                <>
-                  <span className={s.cmd}>{line.command}</span>
-                  {line.params.map((p, j) => {
-                    /*
-                     * 占位符不是「可以直接改的数字」—— 它的值住在上面那几格字段里。
-                     * 放开让用户改这一格，等于把骨架退化成硬编码，字段立刻脱钩。
-                     */
-                    const ph = placeholderName(p)
-                    if (ph !== null) {
-                      const name = tr(PH_LABEL[ph])
-                      return (
-                        <span
-                          key={`${i}-${j}`}
-                          className={s.placeholder}
-                          data-tip={tr('params.pen.placeholderTip', { name })}
-                        >
-                          {name}
-                        </span>
-                      )
-                    }
-                    return (
-                      <input
-                        key={`${i}-${j}`}
-                        className={s.param}
-                        value={p}
-                        spellCheck={false}
-                        disabled={disabled}
-                        aria-label={tr('params.gcode.argAria', { row: i + 1, col: j + 1 })}
-                        onChange={(e) => replaceParam(i, j, e.target.value)}
-                      />
-                    )
-                  })}
-                </>
-              )}
-            </li>
-          ))}
-        </ol>
+        /*
+         * 视图模式**不再重复铺一遍代码**：这一块的数值全在下面那几格里，
+         * 代码照旧可以从「代码」页签看（那里已经是拼好的真值）。
+         * 两处都放代码 = 同一份内容占两屏，而且上面那份还是可编辑的假数字。
+         */
+        <p className={s.viewNote}>{tr('params.pen.viewNote')}</p>
       )}
     </div>
   )

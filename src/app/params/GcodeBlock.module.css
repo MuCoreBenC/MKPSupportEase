@@ -76,6 +76,16 @@
   color: var(--text-2);
 }
 
+/* 视图模式的那一句说明：这一屏不放代码，数值全在下面的字段里 */
+.viewNote {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
 /* 结构错误：挡住保存的那一类，用危险色 */
 .structureError {
   margin: 0;

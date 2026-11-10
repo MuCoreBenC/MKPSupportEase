@@ -765,6 +765,7 @@ export const zhCN = {
   'params.pen.speed': '速度',
   'params.pen.placeholderTip': '这一格由「{name}」生成，改数值请改上面那一格',
   'params.pen.structureError': '结构不对：{detail}（保存前请先修好）',
+  'params.pen.viewNote': '数值在下面那几格里改；想看拼好的 G-code 切到「代码」',
   'params.gcode.filled': '已填写',
   'params.gcode.revertTitle': '还原为已保存的那一段（{lines} 行）',
   'params.gcode.revertLabel': '↩ 已保存的 {lines} 行',

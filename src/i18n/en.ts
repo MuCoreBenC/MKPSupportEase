@@ -723,6 +723,7 @@ export const en: Record<StringKey, string> = {
   'params.pen.speed': 'speed',
   'params.pen.placeholderTip': 'Generated from “{name}” — edit that field above to change it',
   'params.pen.structureError': 'Broken structure: {detail} (fix it before saving)',
+  'params.pen.viewNote': 'Edit the numbers in the fields below; switch to Code to see the assembled G-code',
   'params.gcode.filled': 'Filled',
   'params.gcode.revertTitle': 'Restore the saved section ({lines} lines)',
   'params.gcode.revertLabel': '↩ Saved {lines} lines',

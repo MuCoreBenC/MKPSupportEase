@@ -895,6 +895,8 @@ export default function PageParams({
             dirty={u.dirtyOf(def.key)}
             disabled={u.blockedBy(def.key) !== null}
             savedValue={u.savedValueOf(def.key)}
+            /* 落笔/收笔的骨架要靠兄弟字段的值才能渲染成真值 */
+            valueOf={u.valueOf}
             onEdit={u.edit}
             onRevertToSaved={u.revertToSaved}
           />

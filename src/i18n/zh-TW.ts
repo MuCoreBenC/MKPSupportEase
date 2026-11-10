@@ -749,6 +749,7 @@ export const zhTW: Record<StringKey, string> = {
   'params.pen.speed': '速度',
   'params.pen.placeholderTip': '這一格由「{name}」生成，改數值請改上面那一格',
   'params.pen.structureError': '結構不對：{detail}（儲存前請先修好）',
+  'params.pen.viewNote': '數值在下面那幾格裡改；想看拼好的 G-code 切到「程式碼」',
   'params.gcode.filled': '已填寫',
   'params.gcode.revertTitle': '還原為已儲存的那一段（{lines} 行）',
   'params.gcode.revertLabel': '↩ 已儲存的 {lines} 行',
