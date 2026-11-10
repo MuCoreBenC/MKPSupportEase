@@ -397,6 +397,36 @@ pub struct Ir {
     /// 名字带 `prefs` 是为了在 IR 里一眼看出"这不是工艺参数"。
     #[serde(default)]
     pub prefs: PrefsIr,
+
+    /// **调试模式那一趟的动作参数**（2026-11-11）。
+    ///
+    /// `None` = 正常后处理。有值时 `pipeline::run` 在 Parse 之后直接走
+    /// [`crate::pipeline::debug`]，只产出「文件头 → 抬 Z 段 → 落笔/收笔动作 → 文件尾」，
+    /// 不预热、不清嘴、不打印模型。
+    ///
+    /// 它不来自预设：是切片时用户在那扇弹框里填的，只对本次生效，
+    /// 所以带着 `skip_serializing_if` —— 正常那一趟的 IR 里连这个键都不出现。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugIr>,
+}
+
+/// 一次调试运行的动作参数（见 [`Ir::debug`]）。
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
+pub struct DebugIr {
+    /// 驻点（两个动作出发与返回都到这里）。
+    pub wait_x: f64,
+    /// 驻点的 Y。A 系列不用，留 0。
+    pub wait_y: f64,
+    /// 落笔位。
+    pub mount_x: f64,
+    /// 收笔位。
+    pub unmount_x: f64,
+    /// 动作行的移动速度（mm/min）。
+    pub speed: f64,
+    /// 要不要测落笔。
+    pub test_mount: bool,
+    /// 要不要测收笔。
+    pub test_unmount: bool,
 }
 
 /// 用户偏好落到 IR 上的那几个开关（见 [`Ir::prefs`]）。

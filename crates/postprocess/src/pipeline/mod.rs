@@ -34,6 +34,7 @@
 
 /// 热床预涂胶（`bed_glue.go` 那 607 行的移植，2026-10-17）。挂在 `hooks` 那个空壳上。
 pub mod bed_glue;
+pub mod debug;
 pub mod hooks;
 pub mod progress;
 
