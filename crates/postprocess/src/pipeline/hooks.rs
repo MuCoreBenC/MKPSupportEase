@@ -190,9 +190,7 @@ fn clamp_lift(lift_mm: i64) -> i64 {
 /// 并校准，收尾是一条 `G90`。两个机型（A1 系列与 P1/X1）都是这个形状：
 /// A1 mini 在 `avoid end stop` 段，P1S 在 `reset machine status` 段。
 fn z_lift_end_anchor(lines: &[String]) -> Option<usize> {
-    let first = lines
-        .iter()
-        .position(|l| l.trim().starts_with("G380"))?;
+    let first = lines.iter().position(|l| l.trim().starts_with("G380"))?;
     lines[first..]
         .iter()
         .position(|l| l.trim() == "G90")
@@ -227,7 +225,10 @@ pub fn apply_begin_stage_retract(
         match custom_begin_stage_retract_gcode(gcode_machine) {
             Some(lines) => (gcode_machine, lines),
             None => {
-                tracing::warn!(machine = gcode_machine, "G-code 机型没有收笔位数据，跳过收笔块");
+                tracing::warn!(
+                    machine = gcode_machine,
+                    "G-code 机型没有收笔位数据，跳过收笔块"
+                );
                 return lines;
             }
         }
@@ -235,14 +236,20 @@ pub fn apply_begin_stage_retract(
         match custom_begin_stage_retract_gcode(preset_machine) {
             Some(lines) => (preset_machine, lines),
             None => {
-                tracing::warn!(machine = preset_machine, "预设机型没有收笔位数据，跳过收笔块");
+                tracing::warn!(
+                    machine = preset_machine,
+                    "预设机型没有收笔位数据，跳过收笔块"
+                );
                 return lines;
             }
         }
     };
     let (insert_idx, self_contained) = if let Some(idx) = z_lift_end_anchor(&lines) {
         (idx, false)
-    } else if let Some(idx) = lines.iter().position(|l| l.trim().starts_with("G28 Z P0 T")) {
+    } else if let Some(idx) = lines
+        .iter()
+        .position(|l| l.trim().starts_with("G28 Z P0 T"))
+    {
         (idx, false)
     } else {
         tracing::warn!(
@@ -312,8 +319,14 @@ mod tests {
     #[test]
     fn retract_prefers_gcode_machine_over_preset() {
         let out = apply_begin_stage_retract(z_lift_fixture(), &ir_of("A1", "A1_MINI"), true, 20);
-        assert!(out.iter().any(|l| l == "G1 X191 F10000"), "应为 A1 mini 的收笔位");
-        assert!(!out.iter().any(|l| l == "G1 X273 F10000"), "不许用 A1 的收笔位");
+        assert!(
+            out.iter().any(|l| l == "G1 X191 F10000"),
+            "应为 A1 mini 的收笔位"
+        );
+        assert!(
+            !out.iter().any(|l| l == "G1 X273 F10000"),
+            "不许用 A1 的收笔位"
+        );
         // 反向同理
         let out = apply_begin_stage_retract(z_lift_fixture(), &ir_of("A1_MINI", "A1"), true, 20);
         assert!(out.iter().any(|l| l == "G1 X273 F10000"));
@@ -451,12 +464,8 @@ mod tests {
     #[test]
     fn begin_stage_retract_disabled_inserts_nothing() {
         let content = z_lift_fixture();
-        let out = apply_begin_stage_retract(
-            content.clone(),
-            &ir_of("A1_MINI", "A1_MINI"),
-            false,
-            10,
-        );
+        let out =
+            apply_begin_stage_retract(content.clone(), &ir_of("A1_MINI", "A1_MINI"), false, 10);
         assert_eq!(out, content);
         assert!(!out.iter().any(|l| l.contains("begin stage retract")));
     }
