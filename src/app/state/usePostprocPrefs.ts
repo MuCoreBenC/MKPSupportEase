@@ -135,6 +135,11 @@ export function usePostprocPrefs(): PostprocPrefsApi {
             wire.beginStageRetractEnabled ?? before.resolved.beginStageRetractEnabled,
           beginStageRetractZLiftMm:
             wire.beginStageRetractZLiftMm ?? before.resolved.beginStageRetractZLiftMm,
+          debugModeEnabled: wire.debugModeEnabled ?? before.resolved.debugModeEnabled,
+          debugWaitX: wire.debugWaitX ?? before.resolved.debugWaitX,
+          debugMountX: wire.debugMountX ?? before.resolved.debugMountX,
+          debugUnmountX: wire.debugUnmountX ?? before.resolved.debugUnmountX,
+          debugSpeed: wire.debugSpeed ?? before.resolved.debugSpeed,
           zCalibrationDwellSec: wire.zCalibrationDwellSec ?? before.resolved.zCalibrationDwellSec,
           xyCalibrationDwellSec:
             wire.xyCalibrationDwellSec ?? before.resolved.xyCalibrationDwellSec,

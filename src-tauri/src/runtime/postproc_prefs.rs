@@ -63,6 +63,23 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
 
     /* 热床预涂胶同理：`bed_glue.go` 那一套的开关也住在 `state` 这一带，
     这里先只写 `prefs`（生成器读的是它）。等 `state` 那边加了字段再一并写。 */
+
+    /* 调试模式：开关打开时把这一趟的动作参数塞进 IR。
+     * `None` 才是正常后处理 —— 关掉开关必须把它清回 `None`，否则上一次调试的参数会留在
+     * 复用同一个 IR 的下一趟里。 */
+    ir.debug = if prefs.debug_mode_enabled {
+        Some(postprocess::ir::types::DebugIr {
+            wait_x: prefs.debug_wait_x,
+            wait_y: 0.0,
+            mount_x: prefs.debug_mount_x,
+            unmount_x: prefs.debug_unmount_x,
+            speed: prefs.debug_speed,
+            test_mount: true,
+            test_unmount: true,
+        })
+    } else {
+        None
+    };
 }
 
 #[cfg(test)]

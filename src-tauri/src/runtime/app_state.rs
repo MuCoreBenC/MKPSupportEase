@@ -298,6 +298,21 @@ pub struct PostprocPrefs {
     /// 收笔块自己抬 Z 的高度（mm）。`None` = 出厂 30。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub begin_stage_retract_z_lift_mm: Option<i64>,
+    /// **调试模式**：切片只产出「只跑落笔/收笔」的骨架，不打印模型。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mode_enabled: Option<bool>,
+    /// 调试动作的驻点 X。`None` = 出厂 20（喷嘴待命位）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_wait_x: Option<f64>,
+    /// 调试动作的落笔位 X。`None` = 出厂 267（A1 系列）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_x: Option<f64>,
+    /// 调试动作的收笔位 X。`None` = 出厂 276（A1 系列）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_x: Option<f64>,
+    /// 调试动作的移动速度（mm/min）。`None` = 出厂 10000。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_speed: Option<f64>,
     /// Z 轴校准每层测量后的停留秒数（1–20）。`None` = 出厂 2。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_calibration_dwell_sec: Option<i64>,
@@ -402,6 +417,11 @@ impl PostprocPrefs {
                     BEGIN_STAGE_RETRACT_Z_LIFT_MIN,
                     BEGIN_STAGE_RETRACT_Z_LIFT_MAX,
                 ),
+            debug_mode_enabled: self.debug_mode_enabled.unwrap_or(false),
+            debug_wait_x: self.debug_wait_x.unwrap_or(DEBUG_WAIT_X_DEFAULT),
+            debug_mount_x: self.debug_mount_x.unwrap_or(DEBUG_MOUNT_X_DEFAULT),
+            debug_unmount_x: self.debug_unmount_x.unwrap_or(DEBUG_UNMOUNT_X_DEFAULT),
+            debug_speed: self.debug_speed.unwrap_or(DEBUG_SPEED_DEFAULT),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
                 .unwrap_or(Z_DWELL_DEFAULT)
@@ -467,11 +487,21 @@ pub const BEGIN_STAGE_RETRACT_Z_LIFT_DEFAULT: i64 = 5;
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MIN: i64 = 5;
 pub const BEGIN_STAGE_RETRACT_Z_LIFT_MAX: i64 = 30;
 
+/// 调试动作的出厂值 —— A1 系列那一组（驻点 `X20`、落笔 `X267`、收笔 `X276`、`F10000`）。
+///
+/// 与 `hooks.rs` 里那三组硬编码收笔位是**两件事**：那里是「开始阶段收笔」用的固定序列，
+/// 这里是调试弹窗的初值，用户可以现场改。默认值只是让第一次打开有理可依。
+pub const DEBUG_WAIT_X_DEFAULT: f64 = 20.0;
+pub const DEBUG_MOUNT_X_DEFAULT: f64 = 267.0;
+pub const DEBUG_UNMOUNT_X_DEFAULT: f64 = 276.0;
+pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
+
 /// [`PostprocPrefs::resolved`] 的结果：每一项都是**确定的**值（`Option` 已经解掉、量程已经夹住）。
 ///
 /// 管线只认这个类型 —— 于是"量程/默认值"这一层判断只在这里做一次，
 /// 下游不会各夹各的。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/* 不 derive `Eq`：调试那几个坐标是 `f64`，浮点没有全序 —— 有它反而给不了任何保证。 */
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ResolvedPostprocPrefs {
     pub notify_on_finish: bool,
     pub ui_mode: PostprocUiMode,
@@ -479,6 +509,11 @@ pub struct ResolvedPostprocPrefs {
     pub skip_vibration_calibration: bool,
     pub begin_stage_retract_enabled: bool,
     pub begin_stage_retract_z_lift_mm: i64,
+    pub debug_mode_enabled: bool,
+    pub debug_wait_x: f64,
+    pub debug_mount_x: f64,
+    pub debug_unmount_x: f64,
+    pub debug_speed: f64,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,

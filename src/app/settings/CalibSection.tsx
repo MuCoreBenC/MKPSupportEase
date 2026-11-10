@@ -117,6 +117,90 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
         </div>
       )}
 
+      <div className={`${s.field} ${s.fieldRow}`}>
+        <div className={s.fieldText}>
+          <div className={s.fieldTitle}>
+            {tr('settings.calib.debugMode')}
+            <Tip text={tr('settings.calib.debugModeNote')} />
+          </div>
+        </div>
+        <Switch
+          checked={r.debugModeEnabled}
+          ariaLabel={tr('settings.calib.debugMode')}
+          onChange={(next) => void set({ debugModeEnabled: next }, on)}
+        />
+      </div>
+
+      {/* 四个位置只在调试开着时才问 —— 关着的时候摆一排不生效的数等于骗人 */}
+      {r.debugModeEnabled && (
+        <>
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>{tr('settings.calib.debugWait')}</div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.calib.debugWait')}
+                unit="mm"
+                value={r.debugWaitX}
+                min={-20}
+                max={320}
+                step={0.1}
+                onChange={(next) => void set({ debugWaitX: next }, on)}
+              />
+            </span>
+          </div>
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>{tr('settings.calib.debugMount')}</div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.calib.debugMount')}
+                unit="mm"
+                value={r.debugMountX}
+                min={-20}
+                max={320}
+                step={0.1}
+                onChange={(next) => void set({ debugMountX: next }, on)}
+              />
+            </span>
+          </div>
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>{tr('settings.calib.debugUnmount')}</div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.calib.debugUnmount')}
+                unit="mm"
+                value={r.debugUnmountX}
+                min={-20}
+                max={320}
+                step={0.1}
+                onChange={(next) => void set({ debugUnmountX: next }, on)}
+              />
+            </span>
+          </div>
+          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
+            <div className={s.fieldText}>
+              <div className={s.fieldTitle}>{tr('settings.calib.debugSpeed')}</div>
+            </div>
+            <span className={s.numBox}>
+              <NumberField
+                label={tr('settings.calib.debugSpeed')}
+                unit="mm/min"
+                value={r.debugSpeed}
+                min={100}
+                max={60000}
+                step={100}
+                onChange={(next) => void set({ debugSpeed: next }, on)}
+              />
+            </span>
+          </div>
+        </>
+      )}
+
       {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>

@@ -142,6 +142,8 @@ pub struct ReportDetail {
     /// **参数快照**（`detail.snapshot`，2026-10-21）：切片那一刻预设 TOML 的全量参数
     /// + IR 终态原样。旧记录没有这个键 ⇒ `null` ⇒ 页面整组不摆。
     pub snapshot: Option<serde_json::Value>,
+    /// **调试那一趟**（`detail.debug`，2026-11-11）。普通记录 `null` ⇒ 页面整组不摆。
+    pub debug: Option<serde_json::Value>,
     /// **挪塔记录**（`_meta.json` 顶层 `relocation`，2026-10-18）——
     /// 用户选了什么 / 从哪挪到哪 / 挪了多少 / 复检过没过。别的记录一律 `null`。
     pub relocation: Option<serde_json::Value>,
@@ -471,6 +473,7 @@ fn detail_of(summary: ReportSummary, meta: &serde_json::Value) -> ReportDetail {
         tower: detail.and_then(|d| d.get("tower")).cloned(),
         slicer: detail.and_then(|d| d.get("slicer")).cloned(),
         snapshot: detail.and_then(|d| d.get("snapshot")).cloned(),
+        debug: detail.and_then(|d| d.get("debug")).cloned(),
         pipeline: meta
             .get("pipeline")
             .and_then(|v| v.as_array())

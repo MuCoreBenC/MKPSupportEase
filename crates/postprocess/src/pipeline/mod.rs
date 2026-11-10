@@ -170,6 +170,8 @@ pub struct ProcessResult {
     /// 的逐阶段打印都读它 —— 在此之前只有整跑总耗时。
     pub step_timings: Vec<StepTiming>,
     pub input_sha256: String,
+    /// 调试那一趟的参数；普通那趟是 `None`。归档要写它，所以随结果带出来。
+    pub debug: Option<crate::ir::types::DebugIr>,
     pub detail_facts: DetailFacts,
     /// 输入 G-code 头部刮出来的 5 个事实（机型预设名 / 工艺预设名 / 熨平开关 / 3mf 名 /
     /// 3MF 模型名）。
@@ -881,6 +883,7 @@ fn run(
         },
         print_time,
         warnings: ir.warnings.clone(),
+        debug: ir.debug.clone(),
         executed_steps: executed,
         step_timings,
         input_sha256,

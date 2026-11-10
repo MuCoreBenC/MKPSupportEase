@@ -478,6 +478,25 @@ pub struct Detail {
     /// 只加不改：旧记录没有这个键 ⇒ 报告页整组不摆（不编）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snapshot: Option<ParamSnapshot>,
+    /// **调试模式那一趟**（`detail.debug`，2026-11-11）。
+    ///
+    /// 只加不改：普通那一趟恒为 `null`，前端整块不摆。有它时报告页多一组，
+    /// 写明「本次是调试模式」以及用了哪几个位置与速度。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugFacts>,
+}
+
+/// 调试那一趟的参数（见 [`Detail::debug`]）。
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebugFacts {
+    pub wait_x: f64,
+    pub wait_y: f64,
+    pub mount_x: f64,
+    pub unmount_x: f64,
+    pub speed: f64,
+    pub test_mount: bool,
+    pub test_unmount: bool,
 }
 
 /// **校准件这一趟的证据链**（2026-10-18）。

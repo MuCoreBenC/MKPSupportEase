@@ -325,6 +325,17 @@ export interface ReportSlicerFacts {
  * 一份记录能独立回答「当时看的是哪个模型、两边各写了什么、怎么判的、最终用了哪一档」——
  * 用户把原始 3MF 删了也解释得清。
  */
+/** 调试那一趟的参数（`detail.debug`）：报告页据此显示「本次是调试模式」 */
+export interface ReportDebugFacts {
+  waitX: number
+  waitY: number
+  mountX: number
+  unmountX: number
+  speed: number
+  testMount: boolean
+  testUnmount: boolean
+}
+
 export interface ReportCalibrationFacts {
   /** `origin.txt` 的原值（可能是 `.stl`，也可能为空） */
   originPath: string | null
@@ -441,6 +452,12 @@ export interface ReportDetail {
    * 判空一律 `!= null`（Rust 的 `Option` 线上是显式 `null`）。
    */
   calibration?: ReportCalibrationFacts | null
+  /**
+   * **调试模式那一趟**（2026-11-11，`_meta.json` 的 `detail.debug`）。
+   *
+   * 普通那一趟不写这一格、旧记录也没有 ⇒ `null` ⇒ 整组不摆。
+   */
+  debug?: ReportDebugFacts | null
   /**
    * **参数快照**（2026-10-21，`_meta.json` 的 `detail.snapshot`）。
    *
@@ -2266,6 +2283,12 @@ export interface ResolvedPostprocPrefs {
   skipVibrationCalibration: boolean
   beginStageRetractEnabled: boolean
   beginStageRetractZLiftMm: number
+  /** 调试模式：切片只产出「只跑落笔/收笔」的骨架 */
+  debugModeEnabled: boolean
+  debugWaitX: number
+  debugMountX: number
+  debugUnmountX: number
+  debugSpeed: number
   zCalibrationDwellSec: number
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
@@ -2288,6 +2311,11 @@ export interface PostprocPrefsWire {
   skipVibrationCalibration?: boolean | null
   beginStageRetractEnabled?: boolean | null
   beginStageRetractZLiftMm?: number | null
+  debugModeEnabled?: boolean | null
+  debugWaitX?: number | null
+  debugMountX?: number | null
+  debugUnmountX?: number | null
+  debugSpeed?: number | null
   zCalibrationDwellSec?: number | null
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null

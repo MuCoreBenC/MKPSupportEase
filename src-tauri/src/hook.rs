@@ -763,6 +763,8 @@ pub fn run(
         }
     }
 
+
+
     /*
      * 一开场把左栏那张表要的事实（机型 / 耗材 / 大小 / 喷嘴 / 层高）**连开场那一条一起**报过去
      * （2026-10-14 起并成一条：界面上框一出现就是完整形态，值不会在眼前换一轮）。
@@ -1443,6 +1445,16 @@ fn archive_success(
         calibration: calibration_facts(identity, done),
         /* 参数快照：预设 TOML 那一刻的值 + IR 终态（见 `archive::ParamSnapshot`） */
         snapshot: facts.snapshot(),
+        /* 调试那一趟的参数 —— 普通那趟是 `None`，这一格就缺键 */
+        debug: done.debug.as_ref().map(|d| crate::archive::DebugFacts {
+            wait_x: d.wait_x,
+            wait_y: d.wait_y,
+            mount_x: d.mount_x,
+            unmount_x: d.unmount_x,
+            speed: d.speed,
+            test_mount: d.test_mount,
+            test_unmount: d.test_unmount,
+        }),
     };
     let meta = Meta {
         schema_version: Meta::SCHEMA_VERSION,
@@ -1686,6 +1698,8 @@ fn archive_failure(
         model_map,
         relocation: relocation.cloned(),
         detail: Detail {
+            /* 失败那趟不记调试参数：没写产物，记下来也解释不了什么 */
+            debug: None,
             input_file: input_fact(&job.gcode, input_size_bytes, None, ""),
             output_file: None,
             stats: None,
