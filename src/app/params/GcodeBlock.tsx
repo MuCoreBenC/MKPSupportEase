@@ -94,7 +94,11 @@ export default function GcodeBlock({
     if (need.length === 0) return value
     const vars: Record<PenPlaceholder, number> = { wait: 0, wait_y: 0, target: 0, speed: 0 }
     for (const name of need) {
-      const n = Number(valueOf(fieldOf(kind, name)))
+      const raw = valueOf(fieldOf(kind, name))
+      /* 空串必须当「没值」：`Number('') === 0`，放过去会渲染出 `X0` ——
+       * 那是把工具头甩到零点的绝对坐标，比显示 `{wait}` 危险得多 */
+      if (raw.trim() === '') return null
+      const n = Number(raw)
       if (!Number.isFinite(n)) return null
       vars[name] = n
     }
