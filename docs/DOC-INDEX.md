@@ -36,6 +36,7 @@
 | [`docs/RELEASE-TRANSACTIONS.md`](RELEASE-TRANSACTIONS.md) | 发布事务合同：发布预设 ≠ 发布软件版本 | 现行（自标：改它要作者点头） |
 | [`docs/APP-STATE.md`](APP-STATE.md) | 持久化状态地基：一个应用一个 AppState | 现行（10-08 盘点定案已并回本文 §5 / §10） |
 | [`docs/DESIGN-SPACING.md`](DESIGN-SPACING.md) | 间距与动画原则（试验场搬来） | 现行 |
+| [`docs/COPY-STYLE.md`](COPY-STYLE.md) | **界面文字规范**：判据、字数硬指标、禁用写法、术语白话表、状态句与确认框模板。**只管文字，不管间距与组件** | 现行 |
 | [`docs/3D-ASSET-CONTRACT.md`](3D-ASSET-CONTRACT.md) | 上游 3D 资产契约 v3（对外） | 现行（自标：contract v3 取代 v2） |
 | [`HANDOFF.md`](../HANDOFF.md) | **进度台账**：现在在哪、接下来去哪 | 现行·持续追加（最新到"增量之五十"，**未结账那张表在 §2.4**；增量之三十六~四十四已归档，头部 ⚠️ 注记：两条旧口径 + 2026-10-11 清理） |
 | [`docs/RESOURCE-ADDRESSING-ROADMAP.md`](RESOURCE-ADDRESSING-ROADMAP.md) | 寻址改造总纲（长期大纲） | 半现行：自标"大纲已批准 2026-10-05，施工进度以 §8 台账为准" |
@@ -54,6 +55,7 @@
 | [`NEED-BBS-INVALIDATE.md`](NEED-BBS-INVALIDATE.md) + [`INVESTIGATION-BBS-INVALIDATE.md`](INVESTIGATION-BBS-INVALIDATE.md) | 2026-10-15 | 需求：改了 MKP 参数后让 BBS 当前切片结果失效 → 技术调查 | **需求未实施**：BBS `02.08.02.60` 没有无侵入的外部入口（三个入口全排除、运行时注入被 entitlement 封死） |
 | [`detail-card-mock.html`](detail-card-mock.html) | — | 详情卡抽卡的参考图复刻（mock，浏览器直接打开） | 素材（原型） |
 | [`I18N-MAP.md`](I18N-MAP.md) | 2026-10-26 | 文案对照表：四类「名字」各住哪、前缀 → 页面 → 文件、两本字典的分段约定 | 现行（本分支新增，随"英文界面还有中文"那一刀） |
+| [`copy-audit/`](copy-audit/README.md) | 2026-11-10 | 全站文案问题清单：按页分文件，逐条给问题类型与中/繁/日/英四版建议；另附首次使用摸底记录 | **待批注**：只改措辞，不删字段、不改布局；批完再落字典 |
 | [`GLUE-TRAVEL-Z-SAFETY-2026-10-20.md`](GLUE-TRAVEL-Z-SAFETY-2026-10-20.md) | 2026-10-20 | **胶笔移动安全余量权威结论**（高层炒面事故归因）：伸缩笔两态模型 / 逐段公式 + 真实代码行 / 实机账本 / 风险排序 / 未实施的修复方案 | 现行·结论文档（改抬升逻辑前必读；**只记录结论，本节不改代码**） |
 | [`PRINT-FAILURE-2026-11-04-A1-46MM-CRASH.md`](PRINT-FAILURE-2026-11-04-A1-46MM-CRASH.md) | 2026-11-04 | **46mm 崩飞归因**：三次几何扫描证明「G-code 没压模型/没撞模型」；自适应层高（0.2/0.2744 混用）与塔层厚写死 0.28 越走越不同步（139mm 处差 0.98）；顺手排除「涂胶落笔压深」误读；塔 `towerPos` 是移动前 | 现行·结论文档（**只记录归因与教训，本轮不改代码**，等作者关自适应层高做对照） |
 | [`REPORT-TOWER-AND-PREVIEW-2026-11-04.md`](REPORT-TOWER-AND-PREVIEW-2026-11-04.md) | 2026-11-04 | **擦料塔两小节 + 官方塔包围盒 + 两处预览显示**：模型段支撑被算成内墙的根因与修复（feature 上下文复位）、`prime_tower.rs` 的口径（为何必须排除「只有 E」的吐料行）、热床预涂胶那条锚点为何在预览里成了一条高处的长条 | 现行·实现记录（**几何一行未改**；预涂胶那条的观感需在切片器里再验一次） |

@@ -271,6 +271,7 @@ import {
   reportSummaries,
   resolveParams,
   resolveVersionFiles,
+  removeSlicerCopiesIn,
   slicerCopied,
   slicerPlacements,
   slicerPresetText,
@@ -2444,6 +2445,11 @@ export const mockApi: MkpApi = {
     return copyToSlicerIn(fileName, slicer, account)
   },
 
+  async removeSlicerCopies(fileName) {
+    /* 同上：只改内存；返回删了几份（真机上就是那几个账号目录里的同名文件） */
+    return removeSlicerCopiesIn(fileName)
+  },
+
   /*
    * 本机 BBS 目录（工艺页「本机工艺」那一档）：浏览器里没有盘，给一份**演示集合**
    * （6 份：链根 + 两个抽象中间层 + 三台机的标准档 + 一份用户档）。
@@ -3429,7 +3435,8 @@ export const mockApi: MkpApi = {
       hasUpdate: MOCK_NEW_VERSION !== MOCK_APP_VERSION,
       currentVersion: MOCK_APP_VERSION,
       latestVersion: MOCK_NEW_VERSION,
-      notes: t('mock.demo.updateChain'),
+      /* ★ 不给 `notes`：真机上这一格来自 release.json 的发布说明，没有就是没有。
+         预览里塞一句「演示：…」会让版面多出一行、跟真机对不上（作者 2026-11-11）。 */
       url: 'https://example.com/supportease/releases',
       /* 演示带安装包 ⇒ 界面会摆「在应用内下载」；删掉这一格就退回"打开下载页" */
       asset: {
@@ -3444,7 +3451,7 @@ export const mockApi: MkpApi = {
         {
           channel: 'stable',
           version: MOCK_NEW_VERSION,
-          notes: t('mock.demo.updateChain'),
+          /* 同上：不塞演示说明，卡里那一行与真机一样只在真有 notes 时出现 */
           url: 'https://example.com/supportease/releases',
           asset: {
             name: 'SupportEase_demo.app.zip',

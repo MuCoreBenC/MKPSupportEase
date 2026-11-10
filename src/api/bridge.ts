@@ -447,6 +447,8 @@ export const bridgeApi: MkpApi = {
       slicer: slicer ?? null,
       account: account ?? null,
     }),
+  removeSlicerCopies: (fileName) =>
+    call('removeSlicerCopies', 'remove_slicer_copies', { fileName }),
   getFileUrl: (fileName) => call('getFileUrl', 'get_file_url', { fileName }),
 
   /* ——— 本机 BBS 目录（2026-10-13）：工艺页「本机工艺」那一档 ——— */

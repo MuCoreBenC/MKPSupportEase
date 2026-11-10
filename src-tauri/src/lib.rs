@@ -565,6 +565,8 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_slicer_placements,
         // 切片器的「生效」= 放进切片器自己的用户配置目录（每个账号目录一份）
         ipc::presets::copy_to_slicer,
+        // 删除交付行时「连同切片器目录里那份一起删」（删除确认框里那个勾）
+        ipc::presets::remove_slicer_copies,
         // 新数据世界（第一圈）：运行时 catalog，读 `<appDataDir>/catalog.json`
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,
@@ -760,6 +762,7 @@ fn with_commands(b: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
         ipc::presets::get_slicer_placements,
         // 切片器的「生效」= 放进切片器自己的用户配置目录（与上面那份清单一字不差）
         ipc::presets::copy_to_slicer,
+        ipc::presets::remove_slicer_copies,
         // 新数据世界（第一圈）：与上面那份清单保持一字不差
         ipc::catalog::get_runtime_catalog,
         ipc::catalog::get_downloaded_files,

@@ -35,6 +35,7 @@ export { allPlates } from './plates'
 export {
   copyToSlicerIn,
   localFileIds,
+  removeSlicerCopiesIn,
   slicerCopied,
   slicerPlacements,
 } from './localFiles'

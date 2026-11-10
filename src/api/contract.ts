@@ -3976,6 +3976,15 @@ export interface MkpApi {
   deleteDeliveryFile(fileName: string): Promise<void>
 
   /**
+   * **连同切片器目录里那份一起删掉**（[`deleteDeliveryFile`] 之后由调用方按用户勾选决定）。
+   *
+   * 删的是**这份预设自己那个切片器**每个账号目录里的同名文件；别的切片器、以及云端
+   * （发布目录 / BBS 账号里的云端预设）一个字节不动。返回删掉了几份；本来就不在 = 0，
+   * 不报错（删除的目标状态就是"不在"）。
+   */
+  removeSlicerCopies(fileName: string): Promise<number>
+
+  /**
    * **删除归档区里的一份旧版本**（作者裁决 2026-10-06：允许删）。
    *
    * 入参是 [`getArchivedFiles`] 给的那个相对路径。**删了就找不回**

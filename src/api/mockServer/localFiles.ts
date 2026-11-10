@@ -159,6 +159,24 @@ export function slicerPlacements(fileName: string): {
 }
 
 /**
+ * 把这份从**它自己那个切片器**的每个账号目录里删掉（删除确认框里那个勾）。
+ * 返回删掉了几份；本来就不在 = 0。别的切片器与云端一概不碰。
+ */
+export function removeSlicerCopiesIn(fileName: string): number {
+  const hit = allPresetFiles().find((f) => f.fileName === fileName)
+  if (hit === undefined) return 0
+  const own = DEMO_SLICER_OF_KIND[hit.kind]
+  if (own === undefined) return 0
+  let removed = 0
+  for (const account of DEMO_SLICER_ACCOUNTS[own]) {
+    const cell = `${own}/${account}`
+    const placed = DEMO_SLICER_PLACED.get(cell)
+    if (placed?.delete(fileName) === true) removed += 1
+  }
+  return removed
+}
+
+/**
  * 把某个切片器 profile 放进切片器目录（`slicer` 不给 = 它自己那一档；`account` 给了就
  * 只放那一个账号）—— **只改内存，刷新还原。**
  *

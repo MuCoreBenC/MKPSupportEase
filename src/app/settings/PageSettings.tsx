@@ -128,6 +128,8 @@ import PresetsSection from './PresetsSection'
 import RecoverySection from './RecoverySection'
 /* 卡片头（2026-11-10）：图标 + 名称 + 一句说明，全页同一处定义 */
 import { SectionHead } from './SectionHead'
+/* 深色星河（2026-11-10）：算法生成的两层画布，替掉原来那张 1200×470 的静态 SVG */
+import GalaxyBackdrop from './GalaxyBackdrop'
 /* 备份 / 恢复那一框（2026-11-09）：挑位置、看进度、看结果都在框里 */
 import BackupModal from './BackupModal'
 import { openWithGuideFigure } from '../guide/openWithGuide'
@@ -1410,6 +1412,8 @@ export default function PageSettings({
 
   return (
     <div className={s.page} ref={setPageEl}>
+      {/* 深色星河（浅色档自己不渲染）：铺在整页底下，见 `GalaxyBackdrop` 头注 */}
+      <GalaxyBackdrop />
       <header className={s.head}>
         <h1 className={s.title}>{tr('settings.title')}</h1>
         <label className={s.search}>
@@ -2126,7 +2130,45 @@ export default function PageSettings({
   )
 }
 
-/** 软件更新英雄带右侧的装饰插画：透明底，纯装饰，不参与搜索与读屏。 */
+/**
+ * 软件更新英雄带右侧那枚插画：一颗**能翻的牌**。
+ *
+ * 正面是更新那枚循环箭头，点一下翻 180° 露出背面（软件图标，绿色），再点翻回来。
+ * 角度走 WAAPI 写 inline `transform`，不用 CSS transition —— WKWebView 上 transition
+ * 不播（与 `SideNav` 那块高亮块同一个理由）。
+ */
 function UpdateArt() {
-  return <span className={s.updArt} aria-hidden="true" />
+  const tr = useT()
+  const spinRef = useRef<HTMLSpanElement | null>(null)
+  const angle = useRef(0)
+
+  const flip = () => {
+    const el = spinRef.current
+    if (el === null) return
+    const from = angle.current
+    const to = from + 180
+    angle.current = to
+    const anim = el.animate(
+      [{ transform: `rotateY(${from}deg)` }, { transform: `rotateY(${to}deg)` }],
+      { duration: 640, easing: 'cubic-bezier(.22,.68,.2,1)' },
+    )
+    /* 动画本身不留终态：结束后把终点写进 inline style，下一趟才能从当前角度接着转 */
+    anim.onfinish = () => {
+      el.style.transform = `rotateY(${to}deg)`
+    }
+  }
+
+  return (
+    <button
+      type="button"
+      className={s.updArt}
+      onClick={flip}
+      aria-label={tr('settings.update.flipArt')}
+    >
+      <span className={s.updArtSpin} ref={spinRef}>
+        <span className={`${s.updArtFace} ${s.updArtFront}`} aria-hidden="true" />
+        <span className={`${s.updArtFace} ${s.updArtBack}`} aria-hidden="true" />
+      </span>
+    </button>
+  )
 }

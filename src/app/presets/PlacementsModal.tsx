@@ -148,15 +148,14 @@ export default function PlacementsModal({
   const dirs = rows?.dirs ?? []
   const groups = groupsOf(dirs)
   /*
-   * 页脚那颗「全部放入」与副标题都只看**这份预设自己那一档**：
+   * 页脚那颗「全部放入」只看**这份预设自己那一档**：
    *
    * - 表格那一行的「已放入」判的也是这一档（别的切片器不是它的生效条件）；
    * - 另一个切片器那几行是"用户自己看着放"的，不替他一次性塞进去 ——
    *   一颗写着"全部"的按钮把 Orca 也填了，等于把"自己看着"这件事偷偷做掉。
    */
   const ownRows = groups[0]?.rows ?? []
-  const ownPlaced = ownRows.filter((dir) => dir.placed).length
-  const ownMissing = ownRows.length - ownPlaced
+  const ownMissing = ownRows.filter((dir) => !dir.placed).length
 
   const runPut = async (slicer?: SlicerTarget, account?: string) => {
     if (busy !== null) return
@@ -264,11 +263,6 @@ export default function PlacementsModal({
       open={open}
       size="md"
       title={tr('presets.placements.title', { name: fileName })}
-      subtitle={
-        rows !== null && rows.available
-          ? tr('presets.placements.subtitle', { placed: ownPlaced, total: ownRows.length })
-          : undefined
-      }
       host={host}
       onClose={onClose}
       footer={

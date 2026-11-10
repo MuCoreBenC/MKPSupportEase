@@ -506,6 +506,35 @@
 }
 
 /*
+ * 删除确认框里那个**勾**（2026-11-10）：「同时删掉切片器目录里那份」。
+ *
+ * 与上面那段代价错开一行 —— 它是"多删一处"的追加项，不是代价本身。
+ * 小字在下面一行，说清删的是本机那几个账号目录、云端那份不动。
+ */
+.removeOpt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.removeOptText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--fs-label);
+  line-height: 1.6;
+  color: var(--text-1);
+}
+
+.removeOptNote {
+  color: var(--text-3);
+}
+
+/*
  * 关闭那颗叉。
  *
  * # 2026-10-29：从「×」这个**字**换成描边图标（`Icon name="close"`）

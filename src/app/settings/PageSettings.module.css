@@ -47,23 +47,10 @@
   container-name: settings;
 }
 
-/* 银河铺满上半大区：透明底、底部渐隐，下面的卡片是实色自会盖住 */
-.page::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 470px;
-  z-index: -1;
-  background: url('../assets/hero/update_band_galaxy_dark.svg') center top / 100% 100% no-repeat;
-  pointer-events: none;
-}
-
-/* 浅色窗底交给外壳那层薄纱背景，这一页不再叠第二张 */
-[data-theme='light'] .page::before {
-  display: none;
-}
+/*
+ * 深色那层星河不在这里画：由 `GalaxyBackdrop` 用 canvas 铺满整宽（星点按容器
+ * 尺寸现算，左右不再是空的），浅色档它自己不渲染 —— 浅色窗底交给外壳那层薄纱。
+ */
 
 /* 浅色：毛玻璃卡片 —— 半透 + 背后模糊，和深色那档一样通透 */
 [data-theme='light'] .page {
@@ -217,7 +204,8 @@
 .section {
   width: 100%;
   box-sizing: border-box;
-  margin: 0 0 14px;
+  /* 卡与卡之间 10px（作者 2026-11-11：「再减小一点间距」） */
+  margin: 0 0 10px;
   padding: 12px 16px;
   border: 1px solid var(--line);
   border-radius: 14px;
@@ -550,6 +538,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  /*
+   * 抬头这一组（标题 / 检查更新 / 状态 / 版本）比卡片左缘再缩进 16px：
+   * 与卡片**内衬里的文字**对齐，而不是去贴卡片的外框（作者 2026-11-11：
+   * 「是标题那些右移一点」）。
+   */
+  padding-left: 16px;
 }
 
 /*
@@ -577,8 +571,9 @@
   /* 顶对齐：标题就贴在这一块的最上面（作者：「标题……上一点」） */
   align-items: flex-start;
   gap: 20px;
-  /* 上边一点不留：抬头紧贴内容区顶（作者：「上面空白太多了」） */
-  padding: 0 0 14px;
+  /* 上边一点不留：抬头紧贴内容区顶（作者：「上面空白太多了」）；
+     下边只留 8px —— 插画收上去之后，这块与第一张卡之间的空当要跟着收 */
+  padding: 0 0 8px;
 }
 
 /* 标题行：大标题 + 一颗「检查更新」（同一条横线，作者：「跟着标题右侧」） */
@@ -604,21 +599,85 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  margin-bottom: -30px;
+  /* 再往左收 10px：贴着卡片的右缘太紧（作者 2026-11-11：「图标可以左移一点」） */
+  margin-right: 10px;
 }
 
-/* 插画：透明底雾面玻璃图标，尺寸与右侧列对齐 */
+/*
+ * 插画：透明底雾面玻璃图标，尺寸与右侧列对齐。
+ *
+ * ★ 它是一颗**能翻的牌**（2026-11-10 作者：「点击翻转成我们的软件的图标」）：
+ *   正面 = 更新那枚循环箭头，背面 = 软件图标（绿色），点一下翻过去、再点翻回来。
+ *   翻转角度由 TSX 用 WAAPI 写 inline `transform`（WKWebView 上 CSS transition 不播，
+ *   与 `SideNav` 那块高亮块同一个理由）；这里只给透视与两面各自的背面遮挡。
+ */
 .updArt {
   position: relative;
+  /*
+   * 128 见方、往上顶 24px。**上限就是这一档**：`.main` 是滚动容器，内容超出它的
+   * padding box 会被裁掉。玻璃卡在 SVG 里距上边缘 16px（128 缩放下），
+   * 再往上顶 6px 卡顶就压到裁剪线、看着像被切平（作者 2026-11-11 连着报了两次）。
+   * 下面的留白靠 `.updAside` 的负边距收，不靠把图标推出可视区。
+   */
+  top: -24px;
   display: block;
   width: 128px;
   height: 128px;
   flex: 0 0 auto;
-  background: url('../assets/hero/update_art_green.svg') center / contain no-repeat;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  perspective: 520px;
+  -webkit-appearance: none;
+  appearance: none;
 }
 
-/* 浅色用单独调的玻璃图标：绿玻璃底 + 深绿箭头，边与影都是绿色系，不泛黑 */
-[data-theme='light'] .updArt {
+.updArtSpin {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+}
+
+.updArtFace {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 正面：原来那枚箭头（浅色档用另一份调过的绿玻璃） */
+.updArtFront {
+  background-image: url('../assets/hero/update_art_green.svg');
+}
+
+[data-theme='light'] .updArtFront {
   background-image: url('../assets/hero/update_art_light.svg');
+}
+
+/* 背面：软件图标（母版六条 path，绿色），先转 180° 藏着 */
+.updArtBack {
+  transform: rotateY(180deg);
+  background-image: url('../assets/hero/update_art_app.svg');
+}
+
+/* 浅色档：白瓷玻璃 + 深绿图形，与正面那份 `update_art_light` 同一套色 */
+[data-theme='light'] .updArtBack {
+  background-image: url('../assets/hero/update_art_app_light.svg');
+}
+
+/* 悬停别用 filter / opacity：那一类会在祖先链上摊平 3D，背面遮挡就失效了 */
+.updArt:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 6px;
+  border-radius: 28px;
 }
 
 /* 动作条：整组贴卡片右缘（`margin-left: auto`），窄窗折行后也靠右。
@@ -1385,12 +1444,17 @@
     display: none;
   }
 
+  /*
+   * 左目录一没，标题与卡片就直接贴着窗沿了。左右内衬不再对半开：
+   * 左边多留 30px，正文看着才不是"贴在最左边"（作者 2026-11-10：
+   * 「小尺寸窗口这些可以适当往右」）。
+   */
   .head {
-    padding: 14px 18px 12px;
+    padding: 14px 18px 12px 30px;
   }
 
   .main {
-    padding: 12px 18px 34px;
+    padding: 12px 18px 34px 30px;
   }
 }
 
@@ -1412,17 +1476,32 @@
     padding: 0 8px;
   }
 
-  /* 窄了就把那块插画收掉：它只是气氛，别挤掉状态与按钮（见 `.updArt`） */
-  .updArt {
-    display: none;
+  /*
+   * 最窄这一档也**留着**插画，缩到 112（作者 2026-11-11：「小尺寸窗口的放大」）。
+   * 再大就会把「检查更新」挤下去，再小箭头就糊了。
+   */
+  .updHero {
+    gap: 12px;
   }
 
+  .updArt {
+    width: 102px;
+    height: 102px;
+    top: -16px;
+  }
+
+  .updAside {
+    margin-right: 2px;
+    margin-bottom: -32px;
+  }
+
+  /* 更窄的这一档左边仍留 24px（见上面那条 900 断点的说明） */
   .head {
-    padding: 12px 14px 10px;
+    padding: 12px 14px 10px 24px;
   }
 
   .main {
-    padding: 10px 14px 28px;
+    padding: 10px 14px 28px 24px;
   }
 }
 

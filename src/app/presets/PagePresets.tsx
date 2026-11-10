@@ -190,6 +190,7 @@ import { useCopiesFollowCloud } from '../state/deliveryState'
 /* 「正文草稿被别处作废」那一嗓子（参数页保存时发）：编辑器还开着就按新内容重开 */
 import { lastTextDraftDroppedPath, useTextDraftDrop } from '../state/draftState'
 import { FieldLayer } from '../../components/field'
+import { Switch } from '../../components/switch'
 import { ContextMenu, useContextMenu } from '../../components/menu'
 import type { ContextMenuEntry } from '../../components/menu'
 import type { IconName } from '../../components/Icon'
@@ -883,6 +884,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   问句与代价照旧；批量时同一个框说"这 N 份"、并按来源把代价分开数。
    */
   const [removeAsk, setRemoveAsk] = useState<PresetTableRow[] | null>(null)
+  /**
+   * 删除确认框里那个勾：**同时把切片器目录里那份也删掉**（2026-11-10 作者：
+   * 「删除的时候弹窗可以勾选同步删云端的吗」）。
+   *
+   * 云端删不了 —— 发布目录只读、BBS 账号里的云端预设也不归本程序删；能删的是**本机
+   * 切片器目录里那份**，而它正是"删了还在"的来源。默认不勾（删别人的目录要用户自己点）。
+   * 只对**单份、切片器配置、而且确实已放入**的那种行出现（见 `slicerCopyOf`）。
+   */
+  const [alsoSlicerOn, setAlsoSlicer] = useState(false)
 
   /*
    * **多选（批量删除）**（2026-10-29 作者：「我想批量删除」）。
@@ -2491,10 +2501,12 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    * 二次确认是**居中的模态框**（`removeAsk`，2026-10-20 从右键菜单里搬出来）；
    * 正在使用 / 有草稿不再拦 —— 后端把属于这一份的状态一并清掉（确认框讲清了）。
    */
-  const runRemove = (row: PresetTableRow) => {
+  const runRemove = (row: PresetTableRow, alsoSlicer?: boolean) => {
     setNote({ text: msg('presets.page.remove.running', { name: row.fileName }), bad: false })
     const done =
-      row.origin === 'preset' ? data.removePreset(row.fileName) : data.remove(row.path)
+      row.origin === 'preset'
+        ? data.removePreset(row.fileName, alsoSlicer)
+        : data.remove(row.path)
     done.then(
       () =>
         setNote({
@@ -2517,6 +2529,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const askRemove = (row: PresetTableRow) => {
     menu.close()
+    setAlsoSlicer(false)
     setRemoveAsk([row])
   }
 
@@ -2524,8 +2537,9 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const confirmRemove = () => {
     const rows = removeAsk
     if (rows === null || rows.length === 0) return
+    const alsoSlicer = alsoSlicerOn
     setRemoveAsk(null)
-    if (rows.length === 1) runRemove(rows[0])
+    if (rows.length === 1) runRemove(rows[0], alsoSlicer)
     else void runRemoveMany(rows)
   }
 
@@ -2897,6 +2911,15 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    *   （云端表的菜单本来就不含这一项，不经过这里）。
    */
   /* 措辞在模块级 `removeWhyNotOf`（那里才谈得上"依赖稳定"）：effect 里也能老实声明依赖 */
+
+  /**
+   * 这一行**在切片器目录里真有那一份**吗 —— 决定删除确认框里要不要给那个勾。
+   *
+   * 只认切片器那一档的交付行：MKP 预设根本不进切片器（走「使用」），别的来源也没有那一步。
+   * `live` 对切片器 = 「每个账号目录里都有」，也就是确实有东西可删。
+   */
+  const slicerCopyOf = (row: PresetTableRow): boolean =>
+    row.origin === 'preset' && row.kind !== 'mkp_preset' && 'live' in row && row.live
 
   /** 删除确认框的第二行：**代价跟着行的来源走** —— 能重下的说能重下，真删的说真删 */
   const removeConfirmDetail = (row: PresetTableRow): string => {
@@ -4161,7 +4184,14 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             }
             footer={
               <>
-                <button type="button" className={s.editGhost} onClick={() => setRemoveAsk(null)}>
+                <button
+                  type="button"
+                  className={s.editGhost}
+                  onClick={() => {
+                    setRemoveAsk(null)
+                    setAlsoSlicer(false)
+                  }}
+                >
                   {tr('presets.page.removeAsk.cancel')}
                 </button>
                 <button type="button" className={s.editDanger} onClick={confirmRemove}>
@@ -4171,12 +4201,37 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
                 </button>
               </>
             }
-            onClose={() => setRemoveAsk(null)}
+            onClose={() => {
+              setRemoveAsk(null)
+              setAlsoSlicer(false)
+            }}
           >
             {/* 一份 = 原来那一条代价；多份 = 按来源分开数（见 `removeManyDetail`） */}
             {removeAsk !== null &&
               (removeAsk.length === 1 ? (
-                <p className={s.editNote}>{removeConfirmDetail(removeAsk[0])}</p>
+                <>
+                  <p className={s.editNote}>{removeConfirmDetail(removeAsk[0])}</p>
+                  {/*
+                   * **「同时删掉切片器目录里那份」**（2026-11-10 作者要的那个勾）。
+                   * 云端删不了（发布目录只读、BBS 账号里的云端也不归本程序删），
+                   * 所以这里能勾的就是本机盘上那一份 —— 那句话在下面的小字里写明。
+                   */}
+                  {slicerCopyOf(removeAsk[0]) && (
+                    <div className={s.removeOpt}>
+                      <Switch
+                        checked={alsoSlicerOn}
+                        onChange={setAlsoSlicer}
+                        ariaLabel={tr('presets.page.removeAsk.alsoSlicer')}
+                      />
+                      <span className={s.removeOptText}>
+                        <span>{tr('presets.page.removeAsk.alsoSlicer')}</span>
+                        <span className={s.removeOptNote}>
+                          {tr('presets.page.removeAsk.alsoSlicerNote')}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className={s.editNoteLines}>
                   {removeManyDetail(removeAsk).map((line) => (

@@ -1219,6 +1219,55 @@ pub fn get_slicer_placements(
     })
 }
 
+/// **连同切片器目录里那份一起删掉**（删除确认框里那个勾，2026-11-10 作者）。
+///
+/// 为什么需要它：我们在下载区删了，切片器那边还留着一份同名 —— 用户看到的就是
+/// 「删了还在」（他在 BBS 的工艺列表里还能选到它）。这一手把**这份预设自己那个切片器**
+/// 每个账号目录里的同名文件删掉，返回删了几份。
+///
+/// 不碰的东西：
+/// - **别的切片器**（用户自己手动放过去的，不是我们放的）；
+/// - **云端**：我们的发布目录只读，BBS 账号里的云端预设也不归本程序删 —— 这里只删本机盘上那份。
+///
+/// 幂等：本来就不在（没放过 / 已经删过 / 被外部动过）算 0，不报错。
+#[tauri::command]
+pub fn remove_slicer_copies(app: AppHandle, file_name: String) -> Result<usize, AppError> {
+    traced("removeSlicerCopies", |_| {
+        let catalog = load_presets(&app)?;
+        /*
+         * 目录里已经没有这一条（是用户自己放进来的 / 刚换过代）⇒ 没什么可删。
+         * 这里不报错：删除是"目标状态就是不在"，报错只会让一次已经成功的删除看起来失败了。
+         */
+        let Some(file) = catalog.files.iter().find(|f| f.file_name == file_name) else {
+            return Ok(0);
+        };
+        let Some(own) = slicer_of_kind(&file.kind) else {
+            return Ok(0);
+        };
+        let Some(dirs) = process_dirs_of(own) else {
+            return Ok(0);
+        };
+        let mut removed = 0usize;
+        let mut failed: Vec<String> = Vec::new();
+        for dir in dirs {
+            match std::fs::remove_file(dir.join(&file.file_name)) {
+                Ok(()) => removed += 1,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => failed.push(format!("{}：{}", account_of(&dir), e)),
+            }
+        }
+        if !failed.is_empty() {
+            return Err(AppError::io(messages::text(
+                "ui.ipc.presets.135",
+                &[("file_name", &file_name.to_string())],
+            ))
+            .with_detail(failed.join("；")));
+        }
+        tracing::info!(file = %file_name, removed, "已从切片器目录删掉");
+        Ok(removed)
+    })
+}
+
 /// 已经放进切片器目录的那些（**文件名**，与下载 / 应用 / 读正文同一个取用口径）。
 ///
 /// 盘就是底账：**每一个**账号目录里都真有这份文件才算"已放入" —— 少一处用户换个账号

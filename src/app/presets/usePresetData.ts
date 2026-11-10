@@ -386,8 +386,10 @@ export interface PresetData {
   /**
    * **删除本机那份交付预设文件**（2026-10-06 一切皆可删）：删了回「未下载」，
    * 随时可从云端重下。回来**重读云端那一侧**（那一行 + 归档清单一起刷新）。
+   *
+   * `alsoSlicer` = 用户在那个确认框里勾了「同时删掉切片器目录里那份」。
    */
-  removePreset: (fileName: string) => Promise<void>
+  removePreset: (fileName: string, alsoSlicer?: boolean) => Promise<void>
   /**
    * **删除归档区一份旧版本**（2026-10-06 允许删，代价讲清：删了找不回）。
    * 回来重读云端那一侧（归档清单以盘为准）。
@@ -1219,14 +1221,29 @@ export function usePresetData(importRevision = 0): PresetData {
    * 删除本机那份交付预设文件（2026-10-06 一切皆可删）：重读云端那一侧 ——
    * 那一行回「未下载」，归档清单跟着刷新（`readPresetFeed` 连归档一起读）。
    * 若删的是使用中那份，后端会撤使用中指针 —— `appStateMutated` 让横幅同帧回「未应用」。
+   *
+   * ★ `alsoSlicer`（2026-11-10 作者：「删除的时候弹窗可以勾选同步删云端的吗」）：
+   *   云端删不了（发布目录只读、BBS 账号里的云端也不归本程序删），但**切片器目录里那份**
+   *   能删 —— 那正是"删了它还在"的来源。两件事按顺序做，第二件失败也要把第一件的重读做完。
    */
-  const removePreset = useCallback(async (fileName: string) => {
-    await api.deleteDeliveryFile(fileName)
-    /* 投递面广播（本页跟着重读，清单以盘为准）；删的是使用中那份时后端已撤指针，
-       那条走 AppState 的广播（下面这句） */
-    deliveryMutated()
-    appStateMutated()
-  }, [])
+  const removePreset = useCallback(
+    async (fileName: string, alsoSlicer?: boolean) => {
+      try {
+        await api.deleteDeliveryFile(fileName)
+        if (alsoSlicer === true) {
+          await api.removeSlicerCopies(fileName)
+          /* 切片器那一行的「已放入」也跟着翻回「未放入」 */
+          setSlicerCopied(await api.getSlicerCopied())
+        }
+      } finally {
+        /* 投递面广播（本页跟着重读，清单以盘为准）；删的是使用中那份时后端已撤指针，
+           那条走 AppState 的广播（下面这句） */
+        deliveryMutated()
+        appStateMutated()
+      }
+    },
+    [],
+  )
 
   /* 删除归档区一份旧版本（代价讲清在确认框）：投递面广播，清单以盘为准 */
   const removeArchived = useCallback(async (path: string) => {

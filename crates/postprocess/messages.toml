@@ -1464,6 +1464,13 @@ text_zh_tw = "認不出的切片器：{slicer}（只認 bambu / orca）"
 text_ja = "不明なスライサー：{slicer}（bambu / orca のみ）"
 params = ["slicer"]
 
+["ui.ipc.presets.135"]
+text = "切片器目录里那份没删成：{file_name}（本地那份已经删了）"
+text_en = "Could not delete the slicer copy of {file_name} (the local copy is already gone)"
+text_zh_tw = "切片器目錄裡那份沒刪成：{file_name}（本機那份已經刪了）"
+text_ja = "{file_name} のスライサー側のコピーを削除できませんでした（ローカル側は削除済み）"
+params = ["file_name"]
+
 ["ui.ipc.report.131"]
 text = "没有这条执行记录：{id}"
 text_en = "No such run record: {id}"
