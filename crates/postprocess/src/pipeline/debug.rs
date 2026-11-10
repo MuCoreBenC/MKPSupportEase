@@ -227,7 +227,9 @@ mod tests {
         let out = build_debug_gcode(&startup(), &d);
         assert!(out.iter().any(|l| l == "G28 Y"));
         assert_eq!(
-            out.iter().filter(|l| l.as_str() == "G1 X256 Y7 F10000").count(),
+            out.iter()
+                .filter(|l| l.as_str() == "G1 X256 Y7 F10000")
+                .count(),
             3
         );
     }
