@@ -45,6 +45,7 @@ import FieldControl from '../../components/field/FieldControl'
 /* 自绘提示气泡（2026-10-30）：`?` 那颗圈的说明不再用原生 `title` */
 import { Tip } from '../../components/tooltip'
 import Highlight from './highlight'
+import RestoreChip from './RestoreChip'
 import { valueText } from './useParams'
 import type { BlockedBy, ParamDef } from './useParams'
 import s from './ParamRow.module.css'
@@ -406,18 +407,16 @@ export default function ParamRow({
           {/* 弃用的行不许写新值 → 不摆「还原」chip（它的值本来就等于已保存值/无值）。
               打字不合法（未提交）时也摆 —— 那是失焦闸困住之后的可见出口（见上面 badTyping 注） */}
           {(dirty || badTyping) && !locked && !readonly && (
-            <button
-              type="button"
-              className={s.restore}
-              data-tip={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
+            <RestoreChip
+              title={tr('params.row.revertTitle', { saved: savedText, factory: factoryText })}
               onClick={() => {
                 onRevertToSaved(def.key)
                 setResetNonce((n) => n + 1)
                 setBadTyping(false)
               }}
             >
-              ↩ {savedText}
-            </button>
+              {savedText}
+            </RestoreChip>
           )}
           {dep && (
             <span className={s.depBadge} data-tip={tr('params.row.deprecatedBadgeTitle')}>

@@ -33,6 +33,7 @@ import {
   type PenTemplateIssue,
 } from './penTemplate'
 import type { ParamSyncEntry } from '../../api/contract'
+import RestoreChip from './RestoreChip'
 import type { ParamDef } from './useParams'
 import s from './GcodeBlock.module.css'
 
@@ -139,10 +140,24 @@ export default function GcodeBlock({
     [renderPen, hasCloud, cloudValue],
   )
 
-  /* 逐行对齐：左边「当前」、右边「云端」。两栏行数相同，才能并排看 */
+  /*
+   * 左栏永远是**我原本那一份**，不随「选了哪边」变。
+   *
+   * 之前拿 `shown` 当左栏：点了云端之后 `shown` 就成云端了，左边跟着变，
+   * 看起来像「我原来的东西被改掉了」。对比的意义是「两份摆在这儿让我挑」，
+   * 不是「选了之后把另一份覆盖掉」。
+   */
+  const mineText = useMemo(() => {
+    if (!hasCloud) return shown
+    const raw = sync?.local
+    const base = typeof raw === 'string' ? raw : savedValue
+    return renderPen(base) ?? base
+  }, [hasCloud, sync, savedValue, renderPen, shown])
+
+  /* 逐行对齐：左边「我原来的」、右边「云端」。两栏行数相同，才能并排看 */
   const diffRows = useMemo(
-    () => (hasCloud ? alignDiff(shown, cloudShown) : []),
-    [hasCloud, shown, cloudShown],
+    () => (hasCloud ? alignDiff(mineText, cloudShown) : []),
+    [hasCloud, mineText, cloudShown],
   )
 
   /*
@@ -157,7 +172,13 @@ export default function GcodeBlock({
    * 所以真值必须同时喂给这三处，只换 textarea 的 value 是看不见的
    * （2026-11-11 作者截图：代码页仍显示 `X{wait}`，正是这一层还读着骨架）。
    */
-  const srcLines = useMemo(() => shown.split('\n'), [shown])
+  /*
+   * 代码页是**编辑骨架**的地方，所以这一层用 `value`（含 `{wait}`），不是真值。
+   *
+   * 之前喂的是 `shown`（真值）：光标落在视觉位置上却写到骨架里，一输入就
+   * 「字被换掉、光标跳走」—— 编辑体验直接坏掉。真值改到对比里看。
+   */
+  const srcLines = useMemo(() => value.split('\n'), [value])
   const highlighted = useMemo(
     () =>
       srcLines.map((line) => {
@@ -192,14 +213,12 @@ export default function GcodeBlock({
         </span>
         <span className={s.headRight}>
           {dirty && !disabled && (
-            <button
-              type="button"
-              className={s.restore}
-              data-tip={tr('params.gcode.revertTitle', { lines: savedValue.split('\n').length })}
+            <RestoreChip
+              title={tr('params.gcode.revertTitle', { lines: savedValue.split('\n').length })}
               onClick={() => onRevertToSaved(def.key)}
             >
-              {tr('params.gcode.revertLabel', { lines: savedValue.split('\n').length })}
-            </button>
+              {tr('params.gcode.revertLabel')}
+            </RestoreChip>
           )}
           <SegmentedField
             variant="segmented"
@@ -340,7 +359,7 @@ export default function GcodeBlock({
             <textarea
               ref={taRef}
               className={s.codeTa}
-              value={shown}
+              value={value}
               spellCheck={false}
               disabled={disabled}
               /*

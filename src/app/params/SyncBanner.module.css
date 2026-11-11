@@ -1,0 +1,42 @@
+/*
+ * 云端更新的横幅外壳。
+ *
+ * 用警告色而不是主色：它是「有一件事等你决定」，不是推荐你去做。
+ * 左边那条 3px 竖线是这一族的记号（与 RestoreChip 的边框逻辑同源：一眼能认出
+ * 「这是提示，不是正文」）。
+ */
+.bar {
+  /*
+   * 这三条是从原 `.syncBar` 原样搬过来的，抽组件时漏了它们，横幅立刻被压成一条细线：
+   *   · `flex-shrink: 0` —— 父级是 flex 列，不加就被压扁；
+   *   · `margin` 左右与卡片对齐、上下各 10px（作者原话：上下留白一样大，别贴着页签）；
+   *   · `gap` 12px —— 文字与按钮之间那一口气。
+   */
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px calc(var(--pad) + 10px);
+  padding: 8px 12px;
+  /* 四边同粗：左边那条 3px 竖线看着像「标签」，与这套克制的提示语言不搭 */
+  border: 1px solid var(--warn-line);
+  border-radius: var(--r-sm);
+  background: var(--warn-surface);
+}
+
+/* 「忽略」是次要动作：下划线文字，不跟正文按钮抢位置 */
+.dismiss {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dismiss:hover {
+  color: var(--text-2);
+}

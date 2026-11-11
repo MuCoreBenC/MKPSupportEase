@@ -53,6 +53,9 @@
 }
 
 .restore {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   height: 24px;
   padding: 0 9px;
   border: 1px solid var(--warn-line);
@@ -60,9 +63,22 @@
   background: var(--warn-surface);
   font: inherit;
   font-size: var(--fs-label);
+  line-height: 1;
   color: var(--warn-ink);
   white-space: nowrap;
   cursor: pointer;
+}
+
+/*
+ * `↩` 的字形在字符框里天然偏上，与中文的视觉中线差半像素。
+ * 单独下移 1px 让它跟「已保存」三个字坐在同一条基线上。
+ */
+.restoreIcon {
+  display: inline-block;
+  font-size: 13px;
+  line-height: 1;
+  /* `↩` 的字形框天生偏上，下移 2px 才与「已保存」同一视觉中线（逐次微调得出） */
+  transform: translateY(2px);
 }
 
 .restore:hover {
@@ -119,7 +135,8 @@
 .diff {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  /* 两栏之间留出一条明显的缝：贴在一起会看成一张表，分不清是两份 */
+  gap: 16px;
 }
 
 /* 整栏是一颗按钮：点它 = 选这一份。选中态靠边框 + 勾，不靠「点了就变」 */
@@ -174,28 +191,34 @@
   display: block;
   height: 19px;
   line-height: 19px;
-  padding: 0 4px;
+  padding: 0 6px;
   white-space: pre;
-  border-radius: 2px;
   color: var(--text-1);
 }
 
+/*
+ * 变化只靠**很淡的底色**标，不画竖条、不加圆角。
+ * 之前那条 3px 红竖条配圆角，看着像一排「标签」，跟等宽代码不是一套语言。
+ */
 .diffGone {
-  background: color-mix(in srgb, #c0392b 14%, transparent);
+  background: color-mix(in srgb, #c0392b 7%, transparent);
 }
 
 .diffNew {
-  background: color-mix(in srgb, #2e7d5b 16%, transparent);
+  background: color-mix(in srgb, #2e7d5b 9%, transparent);
 }
 
+/*
+ * 对侧没有对应行：铺极淡的点阵，表示「这一格是空的」。
+ * 之前是斜纹，斜率与代码的横线打架，看着像错位；纯空白又让人以为渲染漏了。
+ */
 .diffBlank {
-  background: repeating-linear-gradient(
-    45deg,
-    transparent,
-    transparent 4px,
-    color-mix(in srgb, var(--text-3) 12%, transparent) 4px,
-    color-mix(in srgb, var(--text-3) 12%, transparent) 8px
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--text-3) 28%, transparent) 1px,
+    transparent 1px
   );
+  background-size: 6px 6px;
 }
 
 .diffCol {
