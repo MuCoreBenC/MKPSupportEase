@@ -219,6 +219,150 @@
   white-space: nowrap;
 }
 
+/*
+ * 「云端」表那一颗手动刷新（2026-11-11）：向云端再要一次目录 —— **只换目录，不下文件**。
+ *
+ * 住在「本地 │ 云端」切换器的**左边**（作者：`按钮在这个切换器左边`），只在「云端」这一档
+ * 出现（本地表与云端账无关）。**只有图标、没有字**（同一天作者：`值显示图标把不要文字`）——
+ * 那颗双箭头自己说得清，话留给悬停（`tip`）与读屏（`aria-label`）。
+ *
+ * ★ **它是悬浮的**（作者 2026-11-11：「点了会变布局，我希望它是悬浮的」）：
+ *   槽（`.tbRefreshSlot`）只占 26×26，按钮绝对定位、贴槽的右线**往左**长 ——
+ *   变成胶囊那一下，搜索框 / 分段 / 表格**一个都不动**，胶囊盖在左边那段空档上。
+ *   长出去那半截靠槽的 `z-index` 压在邻居上面；**白底 + 一条细边就够**，
+ *   不要阴影、不要磨砂（作者同一天：「它是个小按钮，没必要做透明和阴影」——
+ *   那两样每帧重新栅格化，和宽度弹簧叠在一起就成了"动画打架"）。
+ *
+ * 尺码跟位置分段里那一格（26px）齐平：它不是这一页的主动作，主动作永远是行上的
+ * 「下载 / 更新」；悬停才浮一层灰底，说明它点得动。
+ * **在走时转**（作者 2026-11-11）：转的是里面那一层图标（`.tbRefreshSpin`，
+ * WAAPI，见 `RefreshSpin`），按钮自己的圆不跟着甩。
+ */
+.tbRefreshSlot {
+  position: relative;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  /* 胶囊往左长出去的那半截要盖在空档 / 分段上，不能钻到它们下面 */
+  z-index: 2;
+  /* 「按下沉」的缩放锚在**右线**上（挨着切换器那头）：胶囊被按下去时向右收，
+     右缘不动，不会像整块漂移（缩放由 `shared/press.ts` 演在槽上） */
+  transform-origin: right center;
+}
+
+.tbRefresh {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  /*
+   * ★ **每一档都贴右**（作者 2026-11-11：「收回的时候它还从左边到了右边」）：
+   *   idle 那个 26 的圆里，右内衬 6px + 图标 14 + 左内衬 6 = 26 —— 与展开态**同一条右线**，
+   *   于是展开、收回、换文案，图标都停在原地，只在横向长 / 收。
+   */
+  justify-content: flex-end;
+  width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  /* 变宽 / 收窄那几百毫秒里，字不许漏到胶囊外面（宽度由 WAAPI 演，见 tsx） */
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/*
+ * 打开那几档（检查中 / 已是最新 / 已更新 / 刷新失败）：圆钮变宽成胶囊。
+ * 这里只写**最终长什么样**；从上一帧宽度动画过来那一步在 `refreshCloud` 下面那条
+ * layout effect（FLIP + WAAPI）。
+ */
+.tbRefresh[data-open='true'] {
+  width: auto;
+  /*
+   * 内容**钉在右线**上（胶囊就往左长，右线不动）—— 字因此不会跟着宽度弹簧的
+   * overshoot 左右晃（作者 2026-11-11：「检查中的字好像会左右跳动」）。
+   * 右内衬 6px = idle 那个 26 圆里图标距右缘的距离 ⇒ 展开前后图标停在原地。
+   */
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0 6px 0 10px;
+  /* 白底（**不透明**）+ 一条细边，就这两样 —— 没有阴影、没有磨砂（见上面那段） */
+  border-color: var(--line);
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+/*
+ * 收回的那一帧：`data-open` 已摘（字也没了），但**白底细边要留住** ——
+ * 否则胶囊在收窄动画开始前就变透明，那条动画看不见（作者 2026-11-11：
+ * 「缩回的时候动画丢失了」）。属性由 layout effect 在收窄期间挂上、结束摘掉。
+ */
+.tbRefresh[data-closing] {
+  border-color: var(--line);
+  background: var(--surface-solid);
+  color: var(--text-2);
+}
+
+/* 打开时悬停**不变灰**（白胶囊就是它这一刻的样子），只把字提亮 */
+.tbRefresh[data-open='true']:hover {
+  background: var(--surface-solid);
+  color: var(--text-1);
+}
+
+/* 键盘焦点照本页那几颗按钮的规矩：内描边，不画外光环 */
+.tbRefresh:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px currentcolor;
+}
+
+/*
+ * 胶囊上的字：**四条候选叠在同一格里**，只有当前那条看得见（其余 `visibility: hidden`）。
+ * 格子取最宽那句 ⇒ 「检查中…」换成「已是最新」时胶囊**一个像素都不变**
+ * （作者 2026-11-11：「3 个字和 4 个字就差一点点的宽度，它还要变，我不喜欢这种」）。
+ * 做法与 `PresetScopeBar.module.css` 的 `.optText` 同一套。
+ */
+.tbRefreshLabel {
+  display: inline-grid;
+  grid-template-columns: min-content;
+  align-items: center;
+  flex: none;
+}
+
+.tbRefreshLabel > * {
+  grid-area: 1 / 1;
+  /* 靠右对齐：字右缘挨着图标（不动），长出来的那半截往左伸 —— 换文案时右缘纹丝不动 */
+  justify-self: end;
+  font-size: var(--fs-label);
+  white-space: nowrap;
+  /* 四条都占着格子（宽度取最长那句），只有当前那条不透明 —— 换档走交叉淡化
+     （WAAPI 演，见 layout effect），这里只是"平时谁看得见" */
+  opacity: 0;
+}
+
+.tbRefreshLabel > [data-on='true'] {
+  opacity: 1;
+}
+
+.tbRefresh:hover {
+  background: var(--surface-sunken);
+  color: var(--text-1);
+}
+
+/* 检查中：点不动（`aria-disabled`，不是 `disabled` 属性 —— 见 tsx 那段注释） */
+.tbRefresh[aria-disabled='true'] {
+  cursor: default;
+}
+
+/* 转的是这一层（图标自己），不是按钮 —— 见 `RefreshSpin` 那段 */
+.tbRefreshSpin {
+  display: inline-flex;
+  /* 展开过程中容器比内容窄，图标不许被 flex 压小（压了会"缩一下"） */
+  flex: none;
+}
+
 /* ---------- 页脚（G07-1 的 4 号：右键提示 + 计数台账同一条） ---------- */
 
 /*

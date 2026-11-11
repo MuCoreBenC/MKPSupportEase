@@ -59,6 +59,8 @@ import { heroPileSource } from '../assets/hero/heroPile'
 import { useIsDark } from '../state/appState'
 import { slicerArgsOf, useSlicerAppPref, useSlicerPick, useSlicerPref } from '../shared/slicer'
 import { SlicerPickView } from '../shared/SlicerPickView'
+/* 药丸宽度那套"弹簧 + 果冻"（2026-11-11 搬到共用，预设页刷新按钮也用同一套） */
+import { islandWidth, MIN_DELTA } from '../shared/springWidth'
 import s from './PageCalib.module.css'
 
 /*
@@ -142,122 +144,6 @@ const TEST_MODEL_ID = 'test-models'
 /** 点击不让它拿焦点：拿了焦点浏览器会把它滚进可视区，整页就跟着挪。键盘 Tab 不受影响 */
 const noFocus = (e: { preventDefault: () => void }) => e.preventDefault()
 
-/*
- * ---------- 药丸宽度的弹簧动画（2026-10-11 第八轮） ----------
- *
- * 作者：「还是一瞬间就变宽变窄了，没有 iOS 那种弹跳、果冻的效果」。
- *
- * CSS 做不出这个效果，两轮都栽在同一个点上：
- *   - `width: fit-content` 不是可插值长度 → `transition: width` 无效；
- *   - `transition: max-width` 是空转（两态都是 100%，没有变化量）；
- *   - `width: calc-size(fit-content, size)` 理论上可插值，实测补间没跑起来，
- *     而且它只能做**单调**补间 —— 而"果冻"要的是 **overshoot（冲过头再回弹）**。
- *
- * 所以走 JS：把自然宽**量成 px**，再解一条**弹簧轨迹**交给 Web Animations API。
- *
- * 灵动岛那个"果冻"感其实是两件事叠出来的（少了任何一个都死板）：
- *   ① **弹簧**：走 stiffness/damping 的阻尼谐振子，带 ≈4.6% 的 overshoot；
- *   ② **squash & stretch**：横向拉得快时纵向压一点、回弹时鼓一点 ——
- *      只有宽度弹性、没有这个挤压，看着就是"死板地变宽"。
- * 用 `width` 做动画会触发布局，但药丸只有几十像素宽的子树，代价可忽略。
- */
-
-/*
- * 弹簧用 **stiffness / damping / mass** 描述，而不是 duration —— 这是灵动岛
- * 那种"物理感"的来源（oksr/react-dynamic-island 的设计说明里也是这么定的：
- * "Springs are parameterized by stiffness and damping rather than duration"）。
- * 好处是**可被中断**：连续点格子时能从当前位置与速度接着走，不会跳回起点。
- *
- * 阻尼比 ζ = damping / (2·√(stiffness·mass)) ≈ 0.71 —— 欠阻尼但不过分，
- * 理论 overshoot ≈ 4.6%，正是灵动岛那种"轻轻弹一下就停"的量。
- * （ζ 再小就晃、再大就没有那一下弹；0.7 附近是它的甜点。）
- */
-const SPRING = { stiffness: 600, damping: 32, mass: 1 }
-
-/*
- * 积分步长取 **1/120**（比显示的 60fps 更细）—— 半隐式欧拉在 1/60 下有明显的
- * 数值阻尼，实测把 4.3% 的 overshoot 吃到只剩 1.1%，弹跳几乎没了；
- * 细化到 1/120 才回到物理值。多出来的帧只进关键帧数组，不做任何额外计算。
- */
-const DT = 1 / 120
-
-/** 静止判定：位置与速度都足够小就收工 */
-const REST_X = 0.0005
-const REST_V = 0.0005
-
-/** 帧数上限（120 帧 = 1s），防数值不收敛时兜底 */
-const MAX_FRAMES = 120
-
-/**
- * 挤压幅度：横向速度带来的纵向形变（**squash & stretch**，果冻感的真正来源）。
- * 变宽时纵向压一点、回弹时纵向鼓一点 —— 灵动岛展开就是这一下。
- */
-const SQUASH = 0.04
-
-/** 变化小于这个像素就不值得播动画（字体渲染的亚像素抖动） */
-const MIN_DELTA = 0.5
-
-/** 阻尼谐振子的一个采样点。x 是相对进度（0→1），v 是速度 */
-interface SpringSample {
-  t: number
-  x: number
-  v: number
-}
-
-/** 数值积分求解弹簧（半隐式欧拉），返回从静止到静止的整条轨迹 */
-function solveSpring(): SpringSample[] {
-  const { stiffness: k, damping: c, mass: m } = SPRING
-  const out: SpringSample[] = [{ t: 0, x: 0, v: 0 }]
-  let x = 0
-  let v = 0
-  let t = 0
-  for (let i = 0; i < MAX_FRAMES; i++) {
-    const a = (-k * (x - 1) - c * v) / m
-    v += a * DT
-    x += v * DT
-    t += DT
-    out.push({ t, x, v })
-    if (Math.abs(x - 1) < REST_X && Math.abs(v) < REST_V) break
-  }
-  /* 尾巴钉死：保证最后一帧正好落在 x=1、v=0，避免停在一个抖动的中间值上 */
-  const last = out[out.length - 1]
-  if (last.x !== 1 || last.v !== 0) out.push({ t: last.t + DT, x: 1, v: 0 })
-  return out
-}
-
-/**
- * 播一段灵动岛式的宽度弹性：宽度走弹簧轨迹，同时按**横向速度**给纵向一点挤压。
- */
-function islandWidth(el: HTMLElement, from: number, to: number): Animation {
-  const path = solveSpring()
-  const delta = to - from
-  const total = path[path.length - 1].t
-
-  /*
-   * 正负速度**分别**归一化：回弹那一段的速度只有峰值的一成左右，
-   * 若按同一个峰值归一化，回弹时几乎不鼓（实测只到 1.002），看着还是"单向压扁"。
-   * 各自归一之后两个方向都吃满 SQUASH，才有真正的"伸缩"果冻感。
-   */
-  let peakOut = 0 // 变宽方向的最大速度
-  let peakBack = 0 // 回弹方向的最大速度（正值）
-  for (const p of path) {
-    if (p.v > peakOut) peakOut = p.v
-    if (-p.v > peakBack) peakBack = -p.v
-  }
-
-  const frames = path.map((p) => {
-    /* 归一化到 [-1, 1]：+1 = 正在全速变宽，-1 = 正在全速回弹 */
-    const s = p.v >= 0 ? p.v / (peakOut || 1) : p.v / (peakBack || 1)
-    return {
-      offset: p.t / total,
-      width: `${from + delta * p.x}px`,
-      /* 变宽 → 纵向压；回弹 → 纵向鼓 */
-      transform: `scaleY(${1 - SQUASH * s})`,
-    }
-  })
-
-  return el.animate(frames, { duration: total * 1000, fill: 'forwards' })
-}
 
 interface PageCalibProps {
   /**

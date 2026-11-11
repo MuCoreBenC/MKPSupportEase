@@ -238,6 +238,15 @@ export interface PresetData {
    */
   refreshLocal: () => Promise<void>
   /**
+   * **手动向云端要一次目录**（「云端」表那一颗刷新按钮，2026-11-11）。
+   *
+   * 自动那一趟一整个运行期只走一次（`checkBootstrapOnce`），用户在工作台发了新版
+   * 之后不重启就看不到 —— 这一颗把那趟再走一遍，判据与自动那条**完全同源**：
+   * 只比目录这一代（`checkRemoteUpdate`），有变化且读得懂才 `applyRemoteUpdate`。
+   * **绝不下载任何预设文件**（下载归行上的「下载 / 更新」）。
+   */
+  refreshCatalog: () => Promise<CatalogRefreshResult>
+  /**
    * **重读「已放入」**（只扫切片器的账号目录，不发网络）。
    *
    * 盘才是底账：用户在系统文件管理器里删掉那一份，界面不能还挂着「已放入」——
@@ -486,6 +495,17 @@ interface BootstrapResult {
   /** 远端有更新但**本客户端读不懂**（`NOT_SUPPORTED`）—— 列表照常，只多一句提示 */
   needsNewerClient: boolean
 }
+
+/**
+ * **手动刷新云端目录**的结局（页面按它选文案，这里不造句）。
+ *
+ *   `same`        远端与这一份同一代 —— 没换，本机那两侧已对过一眼
+ *   `synced`      远端有新版、本机读得懂 —— 目录已换、两表已按新目录重读
+ *   `unreadable`  远端有新版但本客户端读不懂 —— **盘上零改动**，页面去开那句「需升级」
+ *
+ * 失败（没网 / 没配源 / 坏档）照抛给调用方 —— 那一句由页面用提示条说，这里不吞。
+ */
+export type CatalogRefreshResult = 'same' | 'synced' | 'unreadable'
 
 /**
  * 进入「预设」后的**后台检查**一次远端目录（第十七刀；第三刀下半补 readable / 读不懂那一路）。
@@ -1015,6 +1035,34 @@ export function usePresetData(importRevision = 0): PresetData {
   }, [readLocalPresets])
 
   /**
+   * **手动向云端要一次目录**（「云端」表那一颗刷新按钮）。
+   *
+   * 与 `checkBootstrapOnce` 同一条判据、同一道闸（读不懂就不落盘），差别只有两处：
+   * 它**不受"本次运行只一次"那道刹管**（用户点一次就走一趟），并且把结局交回页面
+   * 由页面说话（`same` / `synced` / `unreadable`）；失败照抛，不在这里吞。
+   */
+  const refreshCatalog = useCallback(async (): Promise<CatalogRefreshResult> => {
+    const check = await api.checkRemoteUpdate()
+    if (check.upToDate) {
+      /* 同一代：只把本机那一侧对一眼（扫盘 + 账本，不再发第二条网络） */
+      await readLocalPresets().catch(() => {})
+      setNeedsNewerClient(false)
+      return 'same'
+    }
+    if (!check.readable) {
+      /* 读不懂就不换目录（与自动那条同一道闸）—— 页面去开「需升级」那句 */
+      setNeedsNewerClient(true)
+      return 'unreadable'
+    }
+    await api.applyRemoteUpdate()
+    setNeedsNewerClient(false)
+    /* 目录换了：两张表都以新目录为准重读（同一条出口，代次守卫管着先后） */
+    await readPresetFeedInto().catch(() => {})
+    await readLocalPresets().catch(() => {})
+    return 'synced'
+  }, [readLocalPresets, readPresetFeedInto])
+
+  /**
    * 重读「已放入」。**盘是底账**：用户去访达把那一份删了，这里回来就得变「未放入」。
    *
    * 只在低频时机调（窗口聚焦 / 切回本地页签 / 放入动作跑完），一条命令 = 每个账号目录
@@ -1353,6 +1401,7 @@ export function usePresetData(importRevision = 0): PresetData {
     active,
     slicerCopied,
     refreshLocal,
+    refreshCatalog,
     refreshSlicerCopied,
     pick,
     pickMachine,

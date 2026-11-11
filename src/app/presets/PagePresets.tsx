@@ -149,7 +149,7 @@
  * 带一个 × 手动关。不做自动消失 —— 「契约里还没有这个方法」这种话消失了就等于没说过。
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 /* 内联自定义属性（`--scrollbar-pad`）要一个 `as CSSProperties` —— 见 `.editBody` 那一处 */
 import type { CSSProperties } from 'react'
 import { api, errorText } from '../../api'
@@ -201,6 +201,11 @@ import {
   REVEAL_LABEL_KEY,
 } from '../../hooks/usePlatform'
 import Icon from '../shell/icons'
+/* 工具栏那颗刷新走**全站字形表**（`components/Icon` 的 `refresh`）——
+   外壳那套 `shell/icons` 只有导航与窗口那几枚，没有它 */
+import Glyph from '../../components/Icon'
+/* 「按下沉、松开回位」—— 全站一套手感（见那个文件的头注） */
+import { pressDown, pressUp } from '../shared/press'
 /* 下载过程与逐份结局的措辞（`shared/download.ts`）—— 同一件事一处文案 */
 import { tickText } from '../shared/download'
 /* 「复制后处理脚本」全站那一份（与标题栏 MKP 字标、首页那颗同一个出口）—— 见那个文件的文件头 */
@@ -263,6 +268,107 @@ import { splitHeader, tomlTokens } from './tomlPaint'
 import { locateIntoView } from '../../components/scroll/locate'
 import s from './PagePresets.module.css'
 
+
+/**
+ * 「云端」那颗刷新在走时**转起来的那一圈**（作者 2026-11-11：「加一下旋转的动画呀」）。
+ *
+ * ★ 动效走 **WAAPI**（`element.animate()`），不走 CSS animation —— WKWebView 上
+ *   CSS 动画不播，全站都这么绕（同 `PresetTable` 的 `BusySpin`、`postprocess/HANDOVER.md` §4）。
+ * ★ 先 `cancel()` 上一轮：同一个元素上叠两轮，停下时可能停在半路。
+ * ★ `prefers-reduced-motion` 时干脆不转 —— 不转的双箭头照样读得出"这是刷新"。
+ * ★ **只转里面那一层**（图标自己），按钮的圆在这一圈之外，不跟着甩。
+ */
+function RefreshSpin({ busy }: { busy: boolean }) {
+  const ref = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    const el = ref.current
+    if (el === null || !busy) return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.getAnimations().forEach((a) => a.cancel())
+    const anim = el.animate([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], {
+      duration: 900,
+      iterations: Infinity,
+      easing: 'linear',
+    })
+    return () => anim.cancel()
+  }, [busy])
+
+  return (
+    <span ref={ref} className={s.tbRefreshSpin} aria-hidden>
+      <Glyph name="refresh" size={14} />
+    </span>
+  )
+}
+
+/**
+ * 刷新那一颗的四种回执（**长在按钮自己身上**，见 `refreshCloud`）。
+ *
+ *   `busy`   正在问云端 —— 图标转着，胶囊上写「检查中…」
+ *   `same`   同一代 —— 「已是最新」
+ *   `synced` 目录换过了 —— 「已更新」
+ *   `failed` 网络 / 数据源那边失败了 —— 「刷新失败」，原因在页脚那条
+ */
+type RefreshPhase = 'idle' | 'busy' | 'same' | 'synced' | 'failed'
+
+/** 每档在胶囊上写哪一句：都是短句 —— 它紧挨着「本地 │ 云端」，不抢第二排的位 */
+const REFRESH_LABEL_KEY: Record<Exclude<RefreshPhase, 'idle'>, StringKey> = {
+  busy: 'presets.page.refresh.running',
+  same: 'presets.page.refresh.same',
+  synced: 'presets.page.refresh.synced',
+  failed: 'presets.page.refresh.failedShort',
+}
+
+/**
+ * 胶囊上那**四条候选文案**。
+ *
+ * 四条都画、只有当前那条可见（其余 `opacity: 0` 叠在同一格里，见 CSS 的
+ * `.tbRefreshLabel`）—— 格子取最长那句，于是「检查中…」换成「已是最新」时
+ * **一个像素都不跳**（作者 2026-11-11：「3 个字和 4 个字就差一点点的宽度，
+ * 它还要变，我不喜欢这种」）。同一套做法见 `PresetScopeBar` 的 `.optText`。
+ *
+ * 换档时两条**交叉淡化**（旧的淡出、新的淡入，120ms）—— 不是"啪"地替换掉。
+ */
+const REFRESH_LABEL_KEYS: readonly StringKey[] = Object.values(REFRESH_LABEL_KEY)
+
+/** 文案 → 它在胶囊里的第几格（交叉淡化按它找那两个孩子） */
+const REFRESH_LABEL_INDEX = new Map<StringKey, number>(
+  REFRESH_LABEL_KEYS.map((key, i) => [key, i]),
+)
+
+/**
+ * 回执在胶囊上留多久，然后收回图标。
+ *
+ * 作者 2026-11-11：「缩回去的好快呀，我很难去再次点击」→ 1.8s 太急；
+ * 又「有时候很快、有时候要等很久」→ 去掉"指针停着就不收"那套（它的时长取决于
+ * 鼠标在不在上面，看着就是随机）。现在**从回执出现算起固定 4 秒**，
+ * 这段时间内点空白 / 点别处也会立刻收回（见那条 document 监听）。
+ */
+const REFRESH_HOLD_MS = 4000
+
+/** 展开 / 收回的时长（**单调缓动，不带过冲** —— 果冻那套已经撤掉） */
+const REFRESH_WIDTH_MS = 260
+
+/** 宽度变化小于这个像素就不值得播动画（字体渲染的亚像素抖动） */
+const MIN_WIDTH_DELTA = 0.5
+
+/**
+ * 去重窗口：**10 秒内再点只重演回执，不再问云端**。
+ *
+ * 作者 2026-11-11：「有的人就是喜欢点一下这个刷新动画看一看」—— 看动画可以，
+ * 不能每点一下都真发一趟网络。只有成功的结局（已是最新 / 已更新）进这个窗口；
+ * 失败不缓存，再点就是真重试。
+ */
+const REFRESH_DEDUPE_MS = 10_000
+
+/**
+ * 「检查中…」至少留这么久，才许换成结果。
+ *
+ * 本地那一趟 `checkRemoteUpdate` 常常几十毫秒就回来了 —— 弹簧还没弹完就换字，
+ * 看着就是"字在抖 / 卡一下"（作者 2026-11-11 报的手感就是它）。留够一段，
+ * 让"弹开 → 落定 → 换字"三拍分得开；本地真快也只是多等这一会儿，不碍事。
+ */
+const REFRESH_MIN_BUSY_MS = 420
 
 interface Props {
   density: Density
@@ -629,6 +735,152 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
    */
   const copiesFollowCloud = useCopiesFollowCloud()
   const [note, setNote] = useState<Note | null>(null)
+  /*
+   * 「云端」那一颗刷新现在**自己说话**（作者 2026-11-11）：图标 →（变宽）检查中… →
+   * 已是最新 / 已更新 → 收回图标。回执不再借页脚横幅 —— 那一格太不显眼。
+   */
+  const [refreshPhase, setRefreshPhase] = useState<RefreshPhase>('idle')
+  const refreshBtnRef = useRef<HTMLButtonElement | null>(null)
+  /** 上一帧按钮的宽度（px）：变宽 / 收窄都从它出发（FLIP，见下面的 layout effect） */
+  const refreshWidthRef = useRef<number | null>(null)
+  /** 回执留多久再收回图标（回到 `idle` 只走这个定时器） */
+  const refreshHoldRef = useRef(0)
+  /** 这一下点下去的时刻（算"检查中…"已经过了多久，见 `REFRESH_MIN_BUSY_MS`） */
+  const refreshStartRef = useRef(0)
+  /** 「按下沉」那一层缩放演在槽上（按钮的 `transform` 归宽度动画，见 refreshNode 的注释） */
+  const refreshSlotRef = useRef<HTMLSpanElement | null>(null)
+  /** 胶囊上那行字（展开那几百毫秒里它是**淡进来**的，不跟着宽度抖，见 layout effect） */
+  const refreshLabelRef = useRef<HTMLSpanElement | null>(null)
+  /** 上一档那句文案：换档时拿它找"淡出的是哪一句"（交叉淡化，见 layout effect） */
+  const refreshLabelPrevRef = useRef<StringKey | null>(null)
+  /** 上一次真跑成功的那一趟（时刻 + 结局）：10 秒内的重复点击直接复用它，不再联网 */
+  const refreshLastRef = useRef<{ at: number; outcome: 'same' | 'synced' } | null>(null)
+  /** 点了几次：只认**最新那一次**的结局（「检查中」再点一下会重新问，旧那趟作废） */
+  const refreshGenRef = useRef(0)
+  /** 正在播的那段宽度动画 —— 下一次开工前先把它收掉 */
+  const refreshAnimRef = useRef<Animation | null>(null)
+
+  /*
+   * 按钮是**切到「云端」才画出来**的：它一出现就把静止宽记下来。
+   *
+   * ★ 不这么做的话，第一次展开时 `refreshWidthRef` 还是 `null`（那个 layout effect
+   *   只在档位变的时候跑，按钮出现那一刻它不会跑）⇒ 没有起点，弹簧直接变成"啪"地
+   *   一下变宽 —— 作者 2026-11-11 报的「第一次根本没有动画」就是这一条。
+   */
+  const setRefreshBtn = useCallback((el: HTMLButtonElement | null) => {
+    refreshBtnRef.current = el
+    if (el === null) {
+      /* 按钮收起来了（切走 / 换档）：交叉淡化的"上一句"也一起忘掉 ——
+         否则下次出现时它会拿旧键去找一个刚挂载、还没亮过的孩子，闪一下 */
+      refreshLabelPrevRef.current = null
+      return
+    }
+    refreshWidthRef.current = el.getBoundingClientRect().width
+  }, [])
+
+  /*
+   * 展开 / 收回：先让 React 把新那一版摆进布局，量出**这一帧的自然宽**，再从上一帧
+   * 的宽度**平滑**动画过去（260ms，单调缓动，**没有过冲、没有挤压** ——
+   * 作者 2026-11-11 把弹簧果冻那套撤掉了：「它和我再次点击有点冲突」）。
+   *
+   * ★ 走 WAAPI：WKWebView 上 CSS transition 不播（同全站那几处）。
+   * ★ 系统开了「减弱动态效果」就不动 —— 宽度直接到位。
+   * ★ 它住在这段（组件顶部的 hook 段）：这一页有早退分支，摆到下面就是条件调用。
+   */
+  useLayoutEffect(() => {
+    const btn = refreshBtnRef.current
+    if (btn === null) return
+    /* 上一轮还在跑：拿屏上**此刻**的宽度当起点，别跳回记忆里的旧值 */
+    const live = refreshAnimRef.current === null ? null : btn.getBoundingClientRect().width
+    refreshAnimRef.current?.cancel()
+    refreshAnimRef.current = null
+    const to = btn.getBoundingClientRect().width
+    const from = live ?? refreshWidthRef.current
+    refreshWidthRef.current = to
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    /*
+     * **换档 → 文案交叉淡化**（作者 2026-11-11：「检查中变已是最新，是瞬间替换，
+     * 很不明显看到文字消失又出现」）：旧那句 1→0、新那句 0→1，两条同时走 120ms。
+     *
+     * 只有展开 / 收窄的档位变化不够 —— 换文案时宽度根本不变，所以这一段放在
+     * "宽度要不要演"的判断**之前**。
+     */
+    const label = refreshLabelRef.current
+    const nextKey = refreshPhase === 'idle' ? null : REFRESH_LABEL_KEY[refreshPhase]
+    const prevKey = refreshLabelPrevRef.current
+    if (!reduce && label !== null && nextKey !== null && prevKey !== null && prevKey !== nextKey) {
+      const kids = label.children
+      const out = kids[REFRESH_LABEL_INDEX.get(prevKey) ?? -1]
+      const into = kids[REFRESH_LABEL_INDEX.get(nextKey) ?? -1]
+      out?.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 100, easing: 'ease-out' })
+      into?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 100, easing: 'ease-out' })
+    }
+    refreshLabelPrevRef.current = nextKey
+
+    if (from === null || Math.abs(to - from) < MIN_WIDTH_DELTA) return
+    if (reduce) return
+    const anim = btn.animate(
+      [{ width: `${from}px` }, { width: `${to}px` }],
+      { duration: REFRESH_WIDTH_MS, easing: 'cubic-bezier(.22,.68,.2,1)' },
+    )
+    refreshAnimRef.current = anim
+    /*
+     * 收窄时**保住白底细边**（`data-closing`）：`data-open` 一摘，胶囊立刻变透明，
+     * 那条收窄动画就成了"看不见的动画"（作者 2026-11-11：「缩回的时候动画丢失了」）。
+     */
+    if (to < from) btn.dataset.closing = 'on'
+    /*
+     * ★ **字不跟着宽度抖**：内容钉在右线（右线不动，见 refreshNode 里「[字][图标]」），
+     * 展开时字先不显示，等宽度基本定下来再淡进来 —— 它从头到尾不横移。
+     */
+    if (to > from && label !== null) {
+      label.animate([{ opacity: 0 }, { opacity: 1 }], {
+        duration: 120,
+        /* 等宽度基本走完再淡进来：早了会被左缘"擦着"露出来，看着像字在动 */
+        delay: 200,
+        fill: 'backwards',
+      })
+    }
+    /* 动画不带 fill：结束就回到 CSS 的宽度（同一个值）；收个尾只管清引用与 `data-closing` */
+    void anim.finished.then(
+      () => {
+        if (refreshAnimRef.current !== anim) return
+        refreshAnimRef.current = null
+        delete btn.dataset.closing
+      },
+      () => {
+        /* 被下一段顶掉了：`data-closing` 由它管，这里不动 */
+      },
+    )
+  }, [refreshPhase])
+
+  /*
+   * **点空白 / 点别处就收起来**（作者 2026-11-11）。
+   *
+   * 只监听回执那几档：检查中不打断（那一下本来就不许点）。capture 阶段接，
+   * 免得别的控件在冒泡里 `stopPropagation` 把这一下吃掉。
+   */
+  useEffect(() => {
+    if (refreshPhase === 'idle' || refreshPhase === 'busy') return
+    const onDown = (e: PointerEvent): void => {
+      const slot = refreshSlotRef.current
+      if (slot !== null && e.target instanceof Node && slot.contains(e.target)) return
+      setRefreshPhase('idle')
+    }
+    document.addEventListener('pointerdown', onDown, true)
+    return () => document.removeEventListener('pointerdown', onDown, true)
+  }, [refreshPhase])
+
+  /* 卸载时把定时器与那段动画带走 */
+  useEffect(
+    () => () => {
+      window.clearTimeout(refreshHoldRef.current)
+      refreshAnimRef.current?.cancel()
+    },
+    [],
+  )
+
   /*
    * **参数对比台**（2026-10-08）：一个**独立常驻工具** —— 不挂在"云端版本"或"更新"上，
    * 也不因为有没有新版而变化。它只比**用户自己的本地预设**（`presets-local/`）。
@@ -3529,7 +3781,7 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
     }, 120)
   }
   const searchNode = (
-    /* 位置那一轴两种类型都有（2026-10-09 起），它自带 segPush 顶到右簇 —— 搜索紧挨在它右边 */
+    /* 位置那一轴两种类型都有（2026-10-09 起），右簇（刷新区 + 分段）自带 auto 边距 —— 搜索紧挨在它右边 */
     <div className={s.search}>
 
       <input
@@ -3610,6 +3862,157 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
   const assetCloudCount = data.delivery.presets.filter(
     (p) => p.kind === 'mkp_preset',
   ).length
+
+  /** 撤掉"到期收回"那颗定时器（指针进胶囊、或要重新问一遍时调） */
+  const stopRefreshHold = (): void => window.clearTimeout(refreshHoldRef.current)
+
+  /** 到期把胶囊收回图标；**只有指针不在胶囊上时**才该调它 */
+  const holdRefresh = (ms: number = REFRESH_HOLD_MS): void => {
+    stopRefreshHold()
+    refreshHoldRef.current = window.setTimeout(() => setRefreshPhase('idle'), ms)
+  }
+
+  /*
+   * 「云端」表那一颗**手动刷新**（2026-11-11）。
+   *
+   * 自动检查一整个运行期只走一次（进入预设页那一刻），用户在工作台发了新版之后
+   * 不重启就看不到 —— 这一颗把那趟再走一遍。**只换目录，不下载任何预设文件**。
+   * 只在「云端」那一页出现：本地表与云端账无关，摆一颗在那儿会让人以为点了也会变。
+   *
+   * ★ 回执**长在按钮自己身上**（作者 2026-11-11：页脚那条太不显眼，「按钮变宽显示最新」）：
+   *   点下去圆钮变宽成胶囊、说「检查中…」，回来换成「已是最新 / 已更新」，留一会儿再收回
+   *   图标。失败**照旧进页脚**：那一格才是放原因的地方，胶囊上只写「刷新失败」四个字。
+   *   「远端读不懂」不归这颗按钮 —— 它由页脚那条「需升级」说。
+   */
+  const refreshCloud = (): void => {
+    /*
+     * ★ **检查中不许再点**（作者 2026-11-11：「刷新中的时候不应该我点击」）：
+     * 点了没反应，也没有按压动画。
+     *
+     * 回执那一档（已是最新 / 已更新 / 刷新失败）**可以点** —— 再问一遍，
+     * `refreshGenRef` 记代次，旧那趟回来对不上就作废，不会把新结果盖回去。
+     */
+    if (refreshPhase === 'busy') return
+    stopRefreshHold()
+    const now = performance.now()
+    refreshStartRef.current = now
+    /*
+     * 结果**等展开动画走完再换字**（见 `REFRESH_MIN_BUSY_MS`）—— 本地那趟常常几十毫秒
+     * 就回来了，抢在动画中间换字就是作者说的"卡一下"。
+     */
+    const afterExpand = (run: () => void): void => {
+      const elapsed = performance.now() - refreshStartRef.current
+      window.clearTimeout(refreshHoldRef.current)
+      refreshHoldRef.current = window.setTimeout(run, Math.max(0, REFRESH_MIN_BUSY_MS - elapsed))
+    }
+
+    /* 去重窗口内：把上一次的回执再演一遍，**不联网**（见 `REFRESH_DEDUPE_MS`） */
+    const cached = refreshLastRef.current
+    if (cached !== null && now - cached.at < REFRESH_DEDUPE_MS) {
+      setRefreshPhase('busy')
+      afterExpand(() => {
+        setRefreshPhase(cached.outcome)
+        holdRefresh()
+      })
+      return
+    }
+
+    const gen = ++refreshGenRef.current
+    setRefreshPhase('busy')
+    void data.refreshCatalog().then(
+      (outcome) => {
+        if (gen !== refreshGenRef.current) return
+        if (outcome === 'unreadable') {
+          refreshLastRef.current = null
+          afterExpand(() => setRefreshPhase('idle'))
+          return
+        }
+        /* 成功那一趟记下时刻：10 秒内再点直接复用，动画照演、网络不再发 */
+        refreshLastRef.current = { at: performance.now(), outcome }
+        afterExpand(() => {
+          setRefreshPhase(outcome)
+          /* 固定从回执出现算起 4 秒（点空白会提前收，见那条 document 监听） */
+          holdRefresh()
+        })
+      },
+      (e: unknown) => {
+        if (gen !== refreshGenRef.current) return
+        /* 失败不进去重窗口：再点就是要真重试 */
+        refreshLastRef.current = null
+        /* 原因（后端原话）只有页脚说得下 —— 胶囊只答"这一下成了没有" */
+        setNote({ text: msg('presets.page.refresh.failed', { detail: errorText(e) }), bad: true })
+        afterExpand(() => {
+          setRefreshPhase('failed')
+          holdRefresh(REFRESH_HOLD_MS + 800)
+        })
+      },
+    )
+  }
+
+  const refreshNode =
+    page.scope === 'cloud' ? (
+      /*
+       * **悬浮**（作者 2026-11-11）：槽只有 26×26，按钮绝对定位贴槽右线往左长 ——
+       * 展开成胶囊时**一个邻居都不动**（原来它撑宽了第一排，搜索框被挤到第二行）。
+       *
+       * 「按下沉」的缩放演在**槽**上，不演在按钮上：按钮那一层归宽度动画管，
+       * 两段动画挤在同一个元素上会互相顶掉；槽和按钮是两层，各演各的（见 `shared/press.ts`）。
+       */
+      <span className={s.tbRefreshSlot} ref={refreshSlotRef}>
+        <button
+          ref={setRefreshBtn}
+          type="button"
+          className={s.tbRefresh}
+          /* 打开那几档才变宽（CSS 那边 width:auto + 胶囊内衬） */
+          data-open={refreshPhase === 'idle' ? undefined : true}
+          onClick={refreshCloud}
+          /*
+           * **不用 `disabled` 属性**（作者 2026-11-11）：一 disabled 连 hover / pointerleave
+           * 都收不到，胶囊收回的时机就全乱了。检查中只挂 `aria-disabled` + 点击直接 return，
+           * 指针事件照常走（但**没有**按压动画 —— 那一下点不动）。
+           */
+          aria-disabled={refreshPhase === 'busy'}
+          onPointerDown={(e) => {
+            if (e.button === 0 && refreshPhase !== 'busy') pressDown(refreshSlotRef.current)
+          }}
+          onPointerUp={(e) => {
+            if (e.button === 0 && refreshPhase !== 'busy') pressUp(refreshSlotRef.current)
+          }}
+          onPointerLeave={() => pressUp(refreshSlotRef.current)}
+          onPointerCancel={() => pressUp(refreshSlotRef.current)}
+          /* 平时只有图标（作者 2026-11-11）：话留给悬停与读屏 —— `tip` 说清它做什么，
+             `action` 给读屏一个短名字（那句长话当按钮名会被念一长串） */
+          title={tr('presets.page.refresh.tip')}
+          aria-label={tr('presets.page.refresh.action')}
+          aria-busy={refreshPhase === 'busy'}
+        >
+          {/*
+           * ★ **字在左、图标在右**（2026-11-11）：胶囊钉在右线上往左长，右线是不动的 ——
+           *   只有让内容也钉在右线，展开那几百毫秒里字才**一个像素都不横移**
+           *   （作者：「检查中的字好像会左右跳动」）。图标因此落在字的右边，
+           *   它恰好停在 idle 时那个位置上（26 的圆里居中 = 右内衬 6px，与展开态同值）。
+           */}
+          {refreshPhase !== 'idle' && (
+            /*
+             * 四条候选全画、只有当前那条可见 —— 格子取最长那句，换文案时宽度不动
+             * （见 `REFRESH_LABEL_KEYS` 与 CSS 的 `.tbRefreshLabel`）。
+             */
+            <span ref={refreshLabelRef} className={s.tbRefreshLabel} aria-live="polite">
+              {REFRESH_LABEL_KEYS.map((key) => {
+                const on = key === REFRESH_LABEL_KEY[refreshPhase]
+                return (
+                  <span key={key} data-on={on || undefined} aria-hidden={on ? undefined : true}>
+                    {tr(key)}
+                  </span>
+                )
+              })}
+            </span>
+          )}
+          <RefreshSpin busy={refreshPhase === 'busy'} />
+        </button>
+      </span>
+    ) : null
+
   const metaNode = (
     <span className={s.meta}>
       <span
@@ -3757,7 +4160,10 @@ export default function PagePresets({ density, onOpenBbs, onOpenSettings, pendin
             scope={page.scope}
             onKind={setKind}
             onScope={setScope}
-          />
+          >
+            {/* 「云端」那一页才有它：向云端再要一次目录（见 `refreshCloud`）—— 排在切换器左边 */}
+            {refreshNode}
+          </PresetScopeBar>
 
           {page.kind === 'mkp' ? (
             <>

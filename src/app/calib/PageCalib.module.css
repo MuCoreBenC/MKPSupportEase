@@ -761,3 +761,19 @@
 [data-theme='dark'] .changeBar[data-saved='true'] {
   color: var(--accent);
 }
+
+/*
+ * 弹宽度那一段**卸掉磨砂与大投影**（作者 2026-11-11：「帧率不高」）。
+ *
+ * 药丸一边变宽一边带着 `backdrop-filter` + 三层外阴影：每帧都要按新尺寸把背后的
+ * 板子重新模糊一遍、再重新画一遍影 —— 这两个比宽度本身的布局贵得多，帧率就是
+ * 这么掉下去的。300ms 里少一层 1px 的模糊，形状、渐变、细边都还在，看不出闪。
+ *
+ * `data-spring` 由 `shared/springWidth` 在动画期间挂上、跑完（或被 cancel）摘掉；
+ * 这条要写在深色那几条**之后**，不然同特异性下会被它们的 box-shadow 压回去。
+ */
+.changeBar[data-spring] {
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 0 0 0.5px var(--surface-sunken);
+}

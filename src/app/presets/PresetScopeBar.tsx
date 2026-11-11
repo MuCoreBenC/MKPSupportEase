@@ -35,6 +35,8 @@
  * 都得自己补；原生 radio 白送这些，只需要把圆点藏掉、把 label 画成胶囊。
  */
 
+import type { ReactNode } from 'react'
+
 import { useT } from '../../i18n'
 import {
   KIND_AXIS_TEXT,
@@ -48,6 +50,13 @@ interface Props {
   scope: PresetScopeAxis
   onKind: (next: PresetKindAxis) => void
   onScope: (next: PresetScopeAxis) => void
+  /**
+   * 排在「本地 │ 云端」**左边**的那一颗（今天只有「云端」表的刷新按钮）。
+   *
+   * 它和位置分段是同一簇东西：auto 边距住在外层 `.cluster` 上，两者一起顶到右簇
+   * —— 摆成兄弟的话，刷新会被 auto 边距留在类型分段旁边，离它要刷的那一格很远。
+   */
+  children?: ReactNode
 }
 
 const KINDS: PresetKindAxis[] = ['mkp', 'slicer']
@@ -70,7 +79,7 @@ function SegText({ text }: { text: string }) {
   )
 }
 
-export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) {
+export default function PresetScopeBar({ kind, scope, onKind, onScope, children }: Props) {
   const tr = useT()
   return (
     <>
@@ -105,34 +114,39 @@ export default function PresetScopeBar({ kind, scope, onKind, onScope }: Props) 
        * MKP 的"本地"= 你自己那份本地文件；切片器的"本地"= 本机真有的文件。
        * 所以这条控件**两边都画**，但都不解释自己 —— 解释交给悬停那句话。
        *
-       * auto 边距（`.segPush`）把它推进右簇：右簇 = 位置分段 → 搜索。
+       * 右簇 = [children] → 位置分段 → 搜索。auto 边距住在 `.cluster` 上（不是分段
+       * 自己身上）：children 要跟它一起过来，摆在左边（2026-11-11，作者要刷新在
+       * 切换器**左边**）。
        * 2026-10-10：切片器的机型筛选**搬去筛选区**（不再夹在这两条分段中间）——
        * 第一排从此两档一致（类型 / 位置(右) / 搜索），窄窗不再把搜索挤出第一排。
        */}
-      <span
-        className={`${s.seg} ${s.segPush}`}
-        role="radiogroup"
-        aria-label={tr('presets.tree.aria.scope')}
-      >
-        {/* eslint-disable no-restricted-syntax -- 同上：分段控件，原生 radio 只作语义壳（圆点被 `.radio` 藏起来） */}
-        {SCOPES.map((sc) => (
-          <label
-            key={sc}
-            className={s.opt}
-            data-on={sc === scope}
-          >
-            <input
-              type="radio"
-              className={s.radio}
-              name="preset-scope"
-              value={sc}
-              checked={sc === scope}
-              onChange={() => onScope(sc)}
-            />
-            <SegText text={tr(SCOPE_AXIS_TEXT[sc])} />
-          </label>
-        ))}
-        {/* eslint-enable no-restricted-syntax */}
+      <span className={s.cluster}>
+        {children}
+        <span
+          className={s.seg}
+          role="radiogroup"
+          aria-label={tr('presets.tree.aria.scope')}
+        >
+          {/* eslint-disable no-restricted-syntax -- 同上：分段控件，原生 radio 只作语义壳（圆点被 `.radio` 藏起来） */}
+          {SCOPES.map((sc) => (
+            <label
+              key={sc}
+              className={s.opt}
+              data-on={sc === scope}
+            >
+              <input
+                type="radio"
+                className={s.radio}
+                name="preset-scope"
+                value={sc}
+                checked={sc === scope}
+                onChange={() => onScope(sc)}
+              />
+              <SegText text={tr(SCOPE_AXIS_TEXT[sc])} />
+            </label>
+          ))}
+          {/* eslint-enable no-restricted-syntax */}
+        </span>
       </span>
     </>
   )

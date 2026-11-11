@@ -112,7 +112,13 @@ export default function GcodeBlock({
   const taRef = useRef<HTMLTextAreaElement | null>(null)
   const numRef = useRef<HTMLDivElement | null>(null)
 
-  const srcLines = useMemo(() => value.split('\n'), [value])
+  /*
+   * 这一屏**看到的是高亮层**（着色 `<pre>`），底下那个 textarea 是透明的、只接输入。
+   * 所以真值必须同时喂给这三处，只换 textarea 的 value 是看不见的
+   * （2026-11-11 作者截图：代码页仍显示 `X{wait}`，正是这一层还读着骨架）。
+   */
+  const shown = rendered ?? value
+  const srcLines = useMemo(() => shown.split('\n'), [shown])
   const highlighted = useMemo(
     () =>
       srcLines.map((line) => {
@@ -201,7 +207,7 @@ export default function GcodeBlock({
             <textarea
               ref={taRef}
               className={s.codeTa}
-              value={rendered ?? value}
+              value={shown}
               spellCheck={false}
               disabled={disabled}
               /* 有真值就只读：这里展示的是拼装结果，改数值要回字段那几格 */

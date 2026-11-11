@@ -127,7 +127,9 @@
 2. 套 §6–§9 的模板。
 3. 查 §5 换术语。
 4. 四语一起写。
-5. `npm run check:i18n`。
+5. `npm run check:i18n`，再跑 `npm run check:copy` —— 后者只查描述位（`.note` / `.hint` /
+   `.tip` / `.title` / `.desc` / `.subtitle`）的破折号补解释、括号补丁、超 40 字、
+   安抚话术与内部说法。它已挂进 `npm run lint` 与预推钩子。
 6. 用 §12 自检。
 
 ## 12. 交稿前八问
