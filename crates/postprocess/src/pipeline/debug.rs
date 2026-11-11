@@ -78,7 +78,11 @@ fn action_block(d: &DebugIr) -> Vec<String> {
         }
     };
     /* 到驻点 / 回驻点那一档：开了单独的驻点速度才换，否则与落笔同速 */
-    let travel = if d.use_travel_speed { num(d.travel_speed) } else { speed.clone() };
+    let travel = if d.use_travel_speed {
+        num(d.travel_speed)
+    } else {
+        speed.clone()
+    };
     let walk = |x: f64, y: f64| {
         if d.move_y {
             format!("G1 X{} Y{} F{}", num(x), num(y), travel)

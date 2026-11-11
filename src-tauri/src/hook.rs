@@ -2240,9 +2240,13 @@ impl Asker for ChannelAsker<'_> {
             },
         ];
         /* 超时 = **终止这一趟**（作者 2026-11-11：「超时行为直接终止处理呀」）：
-           调试是拿真机去撞，没人确认就别动。 */
-        self.client
-            .ask(QKIND_DEBUG_PLAN, question, choices, crate::hook_ipc::CHOICE_STOP)
+        调试是拿真机去撞，没人确认就别动。 */
+        self.client.ask(
+            QKIND_DEBUG_PLAN,
+            question,
+            choices,
+            crate::hook_ipc::CHOICE_STOP,
+        )
     }
 
     /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。
