@@ -1588,6 +1588,13 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /*
+   * 窗内容会随着选项变多而变长（Y、Z 归零、测哪个动作）。
+   * 给一个上限并且自己滚：不加的话内容会被框裁掉、滚轮滚的是外面的设置页。
+   */
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 /* 行尾那颗「已开启 / 未开启」：文本按钮，点开设置窗 —— 不跟开关抢，只报告状态 */

@@ -27,7 +27,6 @@ export default function DebugPrefsModal({ open, onClose }: { open: boolean; onCl
       title={tr('settings.calib.debugTitle')}
       subtitle={tr('settings.calib.debugNote')}
       onClose={onClose}
-      size="sm"
     >
       <div className={s.debugBody}>
         <div className={`${s.field} ${s.fieldRow}`}>
