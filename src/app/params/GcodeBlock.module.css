@@ -76,6 +76,66 @@
   color: var(--text-2);
 }
 
+/* 云端更新那一条：与 ParamRow 的行内提示同一套语义（底色 + 主按钮） */
+.syncBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+
+.syncText {
+  flex: 1 1 auto;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+}
+
+.syncToggle,
+.syncAdopt {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-solid);
+  font-size: var(--fs-label);
+  cursor: pointer;
+}
+
+.syncAdopt {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.syncAdopt:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 左右对比：两栏等宽、各自滚动 */
+.diff {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.diffCol {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
 /* 视图模式的那一句说明：这一屏不放代码，数值全在下面的字段里 */
 .viewNote {
   margin: 0;

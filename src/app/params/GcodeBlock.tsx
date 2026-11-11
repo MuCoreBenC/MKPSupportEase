@@ -31,6 +31,7 @@ import {
   type PenPlaceholder,
   type PenTemplateIssue,
 } from './penTemplate'
+import type { ParamSyncEntry } from '../../api/contract'
 import type { ParamDef } from './useParams'
 import s from './GcodeBlock.module.css'
 
@@ -58,6 +59,15 @@ interface Props {
   savedValue: string
   /** 取别的参数的当前值（落笔/收笔要把占位符渲染成真值，必须借它） */
   valueOf?: (key: string) => string
+  /**
+   * 云端更新那一笔（与 `ParamRow` 同一份数据）。
+   *
+   * 这一块走的是 `renderBlock`，**不经过 `ParamRow`** —— 所以它的「云端有新值」
+   * 从来没人渲染过（作者 2026-11-11：「别的都有按钮，就它没有」）。
+   */
+  sync?: ParamSyncEntry
+  syncBusy?: boolean
+  onAdoptSync?: () => void
   onEdit: (key: string, next: string) => void
   onRevertToSaved: (key: string) => void
 }
@@ -74,11 +84,18 @@ export default function GcodeBlock({
   disabled = false,
   savedValue,
   valueOf,
+  sync,
+  syncBusy = false,
+  onAdoptSync,
   onEdit,
   onRevertToSaved,
 }: Props) {
   const tr = useT()
   const [mode, setMode] = useState('view')
+  /** 云端更新那块：展开后左右并排看「现在这一份 / 云端那一份」 */
+  const [showDiff, setShowDiff] = useState(false)
+  const cloudValue = sync?.pending === true ? sync.cloudNew : null
+  const hasCloud = typeof cloudValue === 'string' && cloudValue !== ''
 
   /* 落笔/收笔的骨架带占位符：结构错了就当场标红，别等到保存 */
   const kind = penKindOf(def.key)
@@ -178,6 +195,35 @@ export default function GcodeBlock({
         <p className={s.structureError} role="alert">
           {tr('params.pen.structureError', { detail: issueText(issue) })}
         </p>
+      )}
+
+      {/* 云端更新：这一块不经过 `ParamRow`，所以这条 bar 得自己摆 */}
+      {hasCloud && (
+        <div className={s.syncBar}>
+          <span className={s.syncText}>
+            {tr('params.gcode.cloudDiff', {
+              n: (cloudValue as string).split('\n').length,
+            })}
+          </span>
+          <button type="button" className={s.syncToggle} onClick={() => setShowDiff((v) => !v)}>
+            {tr(showDiff ? 'params.gcode.hideDiff' : 'params.gcode.showDiff')}
+          </button>
+          <button
+            type="button"
+            className={s.syncAdopt}
+            disabled={syncBusy || onAdoptSync === undefined}
+            onClick={onAdoptSync}
+          >
+            {tr('params.gcode.adoptCloud')}
+          </button>
+        </div>
+      )}
+
+      {hasCloud && showDiff && (
+        <div className={s.diff}>
+          <pre className={s.diffCol}>{shown}</pre>
+          <pre className={s.diffCol}>{cloudValue as string}</pre>
+        </div>
       )}
 
       {mode === 'code' ? (

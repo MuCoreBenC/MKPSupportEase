@@ -912,6 +912,10 @@ export default function PageParams({
             savedValue={u.savedValueOf(def.key)}
             /* 落笔/收笔的骨架要靠兄弟字段的值才能渲染成真值 */
             valueOf={u.valueOf}
+            /* 云端更新这一条：G-code 走 renderBlock，不经过 ParamRow，得自己接 */
+            sync={u.sync === null ? undefined : u.syncOf(def.key)}
+            syncBusy={u.syncBusy}
+            onAdoptSync={ro ? undefined : () => u.adoptSync(def.key)}
             onEdit={u.edit}
             onRevertToSaved={u.revertToSaved}
           />
