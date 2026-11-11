@@ -22,6 +22,7 @@ import { usePostprocPrefs } from '../state/usePostprocPrefs'
 import NumberField from '../../components/field/NumberField'
 import { Switch } from '../../components/switch'
 import { Tip } from '../../components/tooltip'
+import DebugPrefsModal from './DebugPrefsModal'
 import { SectionHead } from './SectionHead'
 import s from './PageSettings.module.css'
 
@@ -33,6 +34,8 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
   const tr = useT()
   const { prefs, set } = usePostprocPrefs()
   const [err, setErr] = useState<string | null>(null)
+  /** 调试模式那扇窗开着没 */
+  const [debugOpen, setDebugOpen] = useState(false)
 
   const on = (why: string) => setErr(why)
 
@@ -117,6 +120,9 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
         </div>
       )}
 
+      {/* 调试模式：这一行只显示开关状态，点它进那扇窗改细节。
+          选项只会越来越多（驻点、落笔位、收笔位、速度、测哪个…），
+          摊在设置页会把这一屏撑满，而它是偶尔用一次的临时状态。 */}
       <div className={`${s.field} ${s.fieldRow}`}>
         <div className={s.fieldText}>
           <div className={s.fieldTitle}>
@@ -124,82 +130,12 @@ export default function CalibSection({ nested = false }: { nested?: boolean }) {
             <Tip text={tr('settings.calib.debugModeNote')} />
           </div>
         </div>
-        <Switch
-          checked={r.debugModeEnabled}
-          ariaLabel={tr('settings.calib.debugMode')}
-          onChange={(next) => void set({ debugModeEnabled: next }, on)}
-        />
+        <button type="button" className={s.textBtn} onClick={() => setDebugOpen(true)}>
+          {tr(r.debugModeEnabled ? 'settings.calib.debugOn' : 'settings.calib.debugOff')}
+        </button>
       </div>
 
-      {/* 四个位置只在调试开着时才问 —— 关着的时候摆一排不生效的数等于骗人 */}
-      {r.debugModeEnabled && (
-        <>
-          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>{tr('settings.calib.debugWait')}</div>
-            </div>
-            <span className={s.numBox}>
-              <NumberField
-                label={tr('settings.calib.debugWait')}
-                unit="mm"
-                value={r.debugWaitX}
-                min={-20}
-                max={320}
-                step={0.1}
-                onChange={(next) => void set({ debugWaitX: next }, on)}
-              />
-            </span>
-          </div>
-          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>{tr('settings.calib.debugMount')}</div>
-            </div>
-            <span className={s.numBox}>
-              <NumberField
-                label={tr('settings.calib.debugMount')}
-                unit="mm"
-                value={r.debugMountX}
-                min={-20}
-                max={320}
-                step={0.1}
-                onChange={(next) => void set({ debugMountX: next }, on)}
-              />
-            </span>
-          </div>
-          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>{tr('settings.calib.debugUnmount')}</div>
-            </div>
-            <span className={s.numBox}>
-              <NumberField
-                label={tr('settings.calib.debugUnmount')}
-                unit="mm"
-                value={r.debugUnmountX}
-                min={-20}
-                max={320}
-                step={0.1}
-                onChange={(next) => void set({ debugUnmountX: next }, on)}
-              />
-            </span>
-          </div>
-          <div className={`${s.field} ${s.fieldRow} ${s.rowSub}`}>
-            <div className={s.fieldText}>
-              <div className={s.fieldTitle}>{tr('settings.calib.debugSpeed')}</div>
-            </div>
-            <span className={s.numBox}>
-              <NumberField
-                label={tr('settings.calib.debugSpeed')}
-                unit="mm/min"
-                value={r.debugSpeed}
-                min={100}
-                max={60000}
-                step={100}
-                onChange={(next) => void set({ debugSpeed: next }, on)}
-              />
-            </span>
-          </div>
-        </>
-      )}
+      <DebugPrefsModal open={debugOpen} onClose={() => setDebugOpen(false)} />
 
       {/* 停留时间是并列的参数（不是哪一行的派生值）⇒ 不缩进 */}
       <div className={`${s.field} ${s.fieldRow}`}>
