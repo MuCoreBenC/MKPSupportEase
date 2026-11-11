@@ -183,6 +183,11 @@ mod tests {
             debug_mount_x: 267.0,
             debug_unmount_x: 276.0,
             debug_speed: 10000.0,
+            /* 落笔 / 收笔的 Y 为 `None` = 跟随驻点，与界面上的「跟随」勾一致 */
+            debug_wait_y: 0.0,
+            debug_mount_y: None,
+            debug_unmount_y: None,
+            debug_move_y: false,
             z_calibration_dwell_sec: 7,
             xy_calibration_dwell_sec: 9,
             bed_glue_enabled: true,
