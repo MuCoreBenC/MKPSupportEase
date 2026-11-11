@@ -115,11 +115,18 @@
   cursor: not-allowed;
 }
 
-/* 左右对比：两栏等宽、各自滚动 */
+/* 左右对比：两栏等宽、各自滚动；标题在上，说明哪一栏是哪一份 */
 .diff {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 4px 8px;
+}
+
+.diffHead {
+  padding: 0 2px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-2);
 }
 
 .diffCol {

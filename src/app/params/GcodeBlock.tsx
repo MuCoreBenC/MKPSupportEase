@@ -18,7 +18,7 @@
  * 没见过的写法）在视图模式下整行按纯文本显示 —— 猜错了会把要发给打印机的指令改坏。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
@@ -96,6 +96,8 @@ export default function GcodeBlock({
   const [showDiff, setShowDiff] = useState(false)
   const cloudValue = sync?.pending === true ? sync.cloudNew : null
   const hasCloud = typeof cloudValue === 'string' && cloudValue !== ''
+  /** 已经在用云端那一份了（骨架逐字相等）⇒ 按钮翻成「用回旧值」 */
+  const adopted = hasCloud && value === cloudValue
 
   /* 落笔/收笔的骨架带占位符：结构错了就当场标红，别等到保存 */
   const kind = penKindOf(def.key)
@@ -105,22 +107,34 @@ export default function GcodeBlock({
    * 骨架 + 兄弟字段 → **真值**。取不到值（字段没填 / 结构坏了）就返回 null，
    * 界面退回骨架原文 —— 宁可显示 `{wait}`，也不编一个数字出来。
    */
-  const rendered = useMemo(() => {
-    if (kind === null || valueOf === undefined || issue !== null) return null
-    const need = placeholders(value)
-    if (need.length === 0) return value
-    const vars: Record<PenPlaceholder, number> = { wait: 0, wait_y: 0, target: 0, speed: 0 }
-    for (const name of need) {
-      const raw = valueOf(fieldOf(kind, name))
-      /* 空串必须当「没值」：`Number('') === 0`，放过去会渲染出 `X0` ——
-       * 那是把工具头甩到零点的绝对坐标，比显示 `{wait}` 危险得多 */
-      if (raw.trim() === '') return null
-      const n = Number(raw)
-      if (!Number.isFinite(n)) return null
-      vars[name] = n
-    }
-    return render(value, vars)
-  }, [kind, value, valueOf, issue])
+  const renderPen = useCallback(
+    (text: string): string | null => {
+      if (kind === null || valueOf === undefined) return null
+      if (validate(text) !== null) return null
+      const need = placeholders(text)
+      if (need.length === 0) return text
+      const vars: Record<PenPlaceholder, number> = { wait: 0, wait_y: 0, target: 0, speed: 0 }
+      for (const name of need) {
+        const raw = valueOf(fieldOf(kind, name))
+        /* 空串必须当「没值」：`Number('') === 0`，放过去会渲染出 `X0` ——
+         * 那是把工具头甩到零点的绝对坐标，比显示 `{wait}` 危险得多 */
+        if (raw.trim() === '') return null
+        const n = Number(raw)
+        if (!Number.isFinite(n)) return null
+        vars[name] = n
+      }
+      return render(text, vars)
+    },
+    [kind, valueOf],
+  )
+
+  const rendered = useMemo(() => renderPen(value), [renderPen, value])
+  /* 云端那一份也要按**同一套字段**渲染成真值 —— 否则左边是 `X256`、右边是 `X{wait}`，
+   * 两栏根本没法比（作者 2026-11-11：「到底是左边新还是右边新」）。 */
+  const cloudShown = useMemo(
+    () => (hasCloud ? (renderPen(cloudValue as string) ?? (cloudValue as string)) : ''),
+    [renderPen, hasCloud, cloudValue],
+  )
 
   /*
    * 代码模式的三层：行号槽 + 着色层 + 透明输入框（A43 移植，工作台 C15 那套）。
@@ -205,28 +219,50 @@ export default function GcodeBlock({
               n: (cloudValue as string).split('\n').length,
             })}
           </span>
-          <button type="button" className={s.syncToggle} onClick={() => setShowDiff((v) => !v)}>
+          <button
+            type="button"
+            className={s.syncToggle}
+            onClick={() => {
+              /* 对比就是代码视图的另一面：把左边那块编辑器换成两栏，
+               * 不再往下面接第二份代码（作者：「不要下面那个代码再多占一块」）。 */
+              if (showDiff) {
+                setShowDiff(false)
+              } else {
+                setMode('code')
+                setShowDiff(true)
+              }
+            }}
+          >
             {tr(showDiff ? 'params.gcode.hideDiff' : 'params.gcode.showDiff')}
           </button>
           <button
             type="button"
             className={s.syncAdopt}
-            disabled={syncBusy || onAdoptSync === undefined}
-            onClick={onAdoptSync}
+            disabled={syncBusy || (adopted ? false : onAdoptSync === undefined)}
+            onClick={() => {
+              /* 已经用上新值了 ⇒ 这颗按钮变成「用回旧值」，可以来回切 */
+              if (adopted) {
+                const back = sync?.local
+                onEdit(def.key, typeof back === 'string' ? back : savedValue)
+              } else {
+                onAdoptSync?.()
+              }
+            }}
           >
-            {tr('params.gcode.adoptCloud')}
+            {tr(adopted ? 'params.gcode.revertCloud' : 'params.gcode.adoptCloud')}
           </button>
         </div>
       )}
 
-      {hasCloud && showDiff && (
+      {mode === 'code' && hasCloud && showDiff ? (
+        /* 对比：两栏各带标题，左边「当前这一份」、右边「云端那一份」 */
         <div className={s.diff}>
+          <div className={s.diffHead}>{tr('params.gcode.diffMine')}</div>
+          <div className={s.diffHead}>{tr('params.gcode.diffCloud')}</div>
           <pre className={s.diffCol}>{shown}</pre>
-          <pre className={s.diffCol}>{cloudValue as string}</pre>
+          <pre className={s.diffCol}>{cloudShown}</pre>
         </div>
-      )}
-
-      {mode === 'code' ? (
+      ) : mode === 'code' ? (
         /*
          * 三层代码编辑器（A43 移植）：行号槽 + 着色层 + 透明输入框。
          * 框高按行数算成定值写在这里（不是 rows），行号槽「内容比框高长」也撑不开框。
