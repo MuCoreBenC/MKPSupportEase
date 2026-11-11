@@ -652,7 +652,7 @@ fn result_facts(done: &postprocess::pipeline::ProcessResult) -> crate::hook_ipc:
 fn debug_plan_summary(d: &postprocess::ir::types::DebugIr) -> String {
     if let Some(code) = &d.custom_gcode {
         /* 高级模式：把那段代码原样摆出来（前端按 `\n` 拆行，卡里滚动）。
-           只报"共 N 行"的话，作者没法在动手前确认自己写的那几行对不对。 */
+        只报"共 N 行"的话，作者没法在动手前确认自己写的那几行对不对。 */
         let body: Vec<&str> = code.lines().filter(|l| !l.trim().is_empty()).collect();
         if !body.is_empty() {
             return body.join("\n");
