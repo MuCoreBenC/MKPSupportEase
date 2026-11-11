@@ -110,6 +110,7 @@ import type {
   ReportExportPlan,
   ReportGlueFacts,
   ReportCalibrationFacts,
+  ReportDebugFacts,
   ReportSlicerFacts,
   ReportSlicerTowerFacts,
   ReportSnapshot,
@@ -893,6 +894,36 @@ function calibrationGroup(tr: Tr, c: ReportCalibrationFacts): Group | null {
   }
 }
 
+/**
+ * 调试那一趟（`detail.debug`，2026-11-11）。
+ *
+ * 与「涂胶 / 擦料塔 / 校准」同构：四格指标 + 一句「本次为调试模式」。
+ * 普通那一趟后端不写这一格 ⇒ 旧记录读到 `null` ⇒ 整组不摆。
+ */
+function debugGroup(tr: Tr, d: ReportDebugFacts): Group | null {
+  const waitY = d.waitY !== 0 ? ` / ${fmtNum(d.waitY)}` : ''
+  const actions = [
+    d.testMount ? tr('report.debug.actMount') : null,
+    d.testUnmount ? tr('report.debug.actUnmount') : null,
+  ]
+    .filter((x): x is string => x !== null)
+    .join(' → ')
+
+  const cells: [string, string][] = [
+    [tr('report.debug.wait'), `${fmtNum(d.waitX)}${waitY} mm`],
+    [tr('report.debug.mount'), `${fmtNum(d.mountX)} mm`],
+    [tr('report.debug.unmount'), `${fmtNum(d.unmountX)} mm`],
+    [tr('report.debug.speed'), `${fmtNum(d.speed)} mm/min`],
+    [tr('report.debug.actions'), actions === '' ? '—' : actions],
+  ]
+  return {
+    id: 'debug',
+    title: tr('report.debug.title'),
+    sum: tr('report.debug.summary'),
+    cells,
+  }
+}
+
 /** 一组里所有格子的值都是「—」就别摆这一组（成功/失败两种情况字段不一样多） */
 function hasAnyValue(cells: [string, string][]): boolean {
   return cells.some(([, v]) => v !== '—')
@@ -1006,6 +1037,12 @@ function buildGroups(
   /* 校准件身份证据链：普通模型那一趟后端不写这一格 ⇒ 整组不摆（旧记录同理） */
   if (detail.calibration != null) {
     const g = calibrationGroup(tr, detail.calibration)
+    if (g !== null) groups.push(g)
+  }
+
+  /* 调试那一趟：普通记录没有这一格 ⇒ 整组不摆 */
+  if (detail.debug != null) {
+    const g = debugGroup(tr, detail.debug)
     if (g !== null) groups.push(g)
   }
 
