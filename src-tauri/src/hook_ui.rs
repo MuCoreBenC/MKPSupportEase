@@ -924,6 +924,8 @@ impl HookView {
             ToHook::Answer {
                 question_kind: question_kind.to_owned(),
                 id: id.to_owned(),
+                /* 界面那份「答一问」的 IPC 不带表单值（调试那条走另一条路，见 hook_ipc 的 fields） */
+                values: Default::default(),
             },
             "那一趟已经结束了，这一下没有送出去",
         )
@@ -1015,6 +1017,7 @@ impl crate::devsim::Sink for PreviewSink {
                     })
                     .collect(),
                 geo: None, /* 开发台这两问没有画布几何（挪塔那一问才有） */
+                fields: Vec::new(),
             },
         )));
         let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
@@ -1066,6 +1069,7 @@ impl crate::devsim::Sink for PreviewSink {
                     },
                 ],
                 geo: Some(geo),
+                fields: Vec::new(),
             },
         )));
         let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
@@ -1099,6 +1103,7 @@ impl crate::devsim::Sink for PreviewSink {
                 deadline_unix_ms,
                 choices: Vec::new(),
                 geo: None,
+                fields: Vec::new(),
             },
         )));
         let until = self.ask_wait.map(|w| std::time::Instant::now() + w);
@@ -1274,6 +1279,7 @@ mod tests {
                     deadline_unix_ms: 1_763_000_000_000,
                     choices: Vec::new(),
                     geo: None,
+                    fields: Vec::new(),
                 }),
                 finished: None,
                 preview: false,
@@ -1390,6 +1396,7 @@ mod tests {
                     deadline_unix_ms: 1_763_000_000_000,
                     choices: Vec::new(),
                     geo: None,
+                    fields: Vec::new(),
                 }),
                 ..Shared::default()
             };

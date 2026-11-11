@@ -1704,7 +1704,7 @@ mod tests {
 
         // —— 参数元信息：全部 83 条，含废弃 ——
         let meta = param_meta_dto(&catalog);
-        assert_eq!(meta.len(), 83, "实测 83 条字段定义，一条不少");
+        assert_eq!(meta.len(), 92, "实测 92 条字段定义，一条不少");
         let offset_x = meta
             .iter()
             .find(|p| p.key == "toolhead.offset.x")

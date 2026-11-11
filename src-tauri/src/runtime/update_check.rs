@@ -333,9 +333,10 @@ mod tests {
     /// 占位预览清单（与正式版同版本号）不该凭空多出一张「预览版」卡。
     #[test]
     fn a_placeholder_preview_list_does_not_create_a_card() {
-        // 用比当前构建（0.0.10-dev）新的号，才验得到"占位不摆卡"而不是"旧版被滤掉"
-        let stable = info("0.0.11");
-        let placeholder = info("0.0.11");
+        // 用比当前构建新的号，才验得到"占位不摆卡"而不是"旧版被滤掉"
+        // （当前 APP_VERSION 已涨到 0.0.11 ⇒ 这里用 0.0.12，否则这一问根本不会成立）
+        let stable = info("0.0.12");
+        let placeholder = info("0.0.12");
         let cs = candidates_from_infos(&stable, Some(&placeholder));
         assert_eq!(cs.len(), 1);
         assert_eq!(cs[0].channel, UpdateChannel::Stable);

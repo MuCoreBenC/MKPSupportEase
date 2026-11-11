@@ -3950,7 +3950,7 @@ mod tests {
             eprintln!("没定位到 <repo>/presets，这条检查未执行（不是通过）");
             return;
         };
-        assert_eq!(r.params().len(), 83, "字段条数");
+        assert_eq!(r.params().len(), 92, "字段条数");
         assert!(!r.tabs().is_empty());
         assert!(!r.updated().is_empty(), "updated 没读到");
 
@@ -4105,6 +4105,8 @@ mod tests {
             "follows",
             "mergeGroup",
             "pinned",
+            // 「该机型没写值就整行不落盘」（2026-11-10）；读进 `ParamDef::omit_when_unset`
+            "omitWhenUnset",
             "serialization",
             // 刻意不读的两个：实测 74/74 全 true，零区分度
             "mergeable",

@@ -116,6 +116,39 @@ pub struct QuestionPayload {
     /// （原塔位置 / 自动摆放位置 / 坐标），别的问没有 ⇒ `None`。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geo: Option<RelocateGeoPayload>,
+    /// **要用户现场填的一组数值**（2026-11-11，调试模式那一问）。
+    ///
+    /// 空表 = 这一问只有按钮；非空 = 界面上除了按钮还要画这些输入框，
+    /// 答复时把改后的值一并带回来（见 `ToHook::Answer::values`）。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<QuestionField>,
+}
+
+/// 一问里的一个数值输入框（见 [`QuestionPayload::fields`]）。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionField {
+    /// 钩子按它读回填好的值
+    pub key: String,
+    pub label: String,
+    /// `mm` / `mm/min` / 空
+    #[serde(default)]
+    pub unit: String,
+    pub value: f64,
+    pub min: f64,
+    pub max: f64,
+    #[serde(default)]
+    pub step: f64,
+}
+
+/// 一问的答复（2026-11-11）：选中的选项 + 现场填的那组数值。
+#[derive(Debug, Clone, PartialEq)]
+pub struct Answer {
+    /// 答的是哪一问（界面上那一屏可能已经过期）
+    pub kind: String,
+    pub id: String,
+    /// 只有带 `fields` 的那几问才有内容
+    pub values: std::collections::HashMap<String, f64>,
 }
 
 /// 挪塔那一问的**画布几何 + 坐标**（机器坐标，mm；坐标不取整 —— 作者原话
@@ -373,7 +406,14 @@ pub enum ToHook {
     /// ★ 2026-10-17 从 `Answer { keep: bool }` 泛化而来（校准件那一问有两个以上选项，
     /// 布尔表达不了）。`question_kind` 一并带回：钩子要能判"你答的是不是我现在问的那一问"
     /// （界面上那一屏可能已经过期，见 [`replay_post_process_question`]）。
-    Answer { question_kind: String, id: String },
+    Answer {
+        question_kind: String,
+        id: String,
+        /// 带 `fields` 的那一问：用户在现场改好的数值（`key` → 值）。
+        /// 没这一项的老问不写这个键（`default` ⇒ 空表）。
+        #[serde(default, skip_serializing_if = "std::collections::HashMap::is_empty")]
+        values: std::collections::HashMap<String, f64>,
+    },
 }
 
 /* ---------- 钩子那一侧 ---------- */
@@ -385,7 +425,7 @@ pub enum ToHook {
 pub struct Client {
     conn: Mutex<Option<LoopbackStream>>,
     /// 答复从读线程转过来（只有 [`Client::ask`] 一个人消费）：`(question_kind, id)`
-    answers: Mutex<Option<Receiver<(String, String)>>>,
+    answers: Mutex<Option<Receiver<Answer>>>,
     /// 取消线（读线程收到 `cancel` 直接置位 —— 这样它能**打断**等答复那个等待）
     cancel: CancelToken,
 }
@@ -444,7 +484,7 @@ impl Client {
     fn with_conn(conn: LoopbackStream, cancel: &CancelToken) -> Self {
         let cancel = cancel.clone();
         let answers = conn.try_clone().ok().map(|read_side| {
-            let (tx, rx) = mpsc::channel::<(String, String)>();
+            let (tx, rx) = mpsc::channel::<Answer>();
             let cancel = cancel.clone();
             std::thread::spawn(move || read_loop(read_side, tx, cancel));
             rx
@@ -509,6 +549,41 @@ impl Client {
         on_timeout: &str,
         geo: Option<RelocateGeoPayload>,
     ) -> Option<String> {
+        self.ask_answer(
+            question_kind,
+            question,
+            choices,
+            on_timeout,
+            geo,
+            Vec::new(),
+        )
+        .map(|a| a.id)
+    }
+
+    /// 同一问，但**带一组输入框**，并把用户现场填好的值一并带回来（2026-11-11 调试模式）。
+    ///
+    /// 与 [`Self::ask`] 的区别只有两点：`QuestionPayload.fields` 非空（界面据此画输入框），
+    /// 以及返回的是完整的 [`Answer`]（含 `values`）而不是一个 id。
+    pub fn ask_form(
+        &self,
+        question_kind: &str,
+        question: &str,
+        choices: Vec<QuestionChoice>,
+        on_timeout: &str,
+        fields: Vec<QuestionField>,
+    ) -> Option<Answer> {
+        self.ask_answer(question_kind, question, choices, on_timeout, None, fields)
+    }
+
+    fn ask_answer(
+        &self,
+        question_kind: &str,
+        question: &str,
+        choices: Vec<QuestionChoice>,
+        on_timeout: &str,
+        geo: Option<RelocateGeoPayload>,
+        fields: Vec<QuestionField>,
+    ) -> Option<Answer> {
         if !self.connected() {
             return None;
         }
@@ -520,6 +595,7 @@ impl Client {
             deadline_unix_ms,
             choices,
             geo,
+            fields,
         })));
 
         /*
@@ -546,9 +622,9 @@ impl Client {
             let rx = guard.as_ref()?;
             match rx.recv_timeout(Duration::from_millis(100)) {
                 /* 答案到了：**只要是对这一问的**。界面上过期那一屏的答复不算（丢掉继续等） */
-                Ok((kind, id)) => {
-                    if kind == question_kind {
-                        return Some(id);
+                Ok(answer) => {
+                    if answer.kind == question_kind {
+                        return Some(answer);
                     }
                 }
                 Err(RecvTimeoutError::Timeout) => {
@@ -566,7 +642,12 @@ impl Client {
                         );
                     }
                     if now >= deadline {
-                        return Some(on_timeout.to_owned());
+                        /* 超时按声明的那一项收场：这一趟没有用户填的值 */
+                        return Some(Answer {
+                            kind: question_kind.to_owned(),
+                            id: on_timeout.to_owned(),
+                            values: std::collections::HashMap::new(),
+                        });
                     }
                 }
                 Err(RecvTimeoutError::Disconnected) => return None,
@@ -576,7 +657,7 @@ impl Client {
 }
 
 /// 钩子侧唯一的读循环：`cancel` 直接置取消线，`answer` 转给等答复的人。
-fn read_loop(read_side: LoopbackStream, answers: Sender<(String, String)>, cancel: CancelToken) {
+fn read_loop(read_side: LoopbackStream, answers: Sender<Answer>, cancel: CancelToken) {
     let mut lines = BufReader::new(read_side);
     let mut line = String::new();
     loop {
@@ -593,8 +674,19 @@ fn read_loop(read_side: LoopbackStream, answers: Sender<(String, String)>, cance
                         cancel.cancel();
                         return;
                     }
-                    Ok(ToHook::Answer { question_kind, id }) => {
-                        if answers.send((question_kind, id)).is_err() {
+                    Ok(ToHook::Answer {
+                        question_kind,
+                        id,
+                        values,
+                    }) => {
+                        if answers
+                            .send(Answer {
+                                kind: question_kind,
+                                id,
+                                values,
+                            })
+                            .is_err()
+                        {
                             return; // 没人等了
                         }
                     }
@@ -837,6 +929,7 @@ mod tests {
                 deadline_unix_ms: 1_763_000_000_000,
                 choices: Vec::new(),
                 geo: None,
+                fields: Vec::new(),
             })),
             /* 带选项表的那一问（2026-10-17 新增的校准件那一问就是这种） */
             FromHook::Question(Box::new(QuestionPayload {
@@ -858,6 +951,7 @@ mod tests {
                     },
                 ],
                 geo: None,
+                fields: Vec::new(),
             })),
             FromHook::DeferPrintTime {
                 record_id: "r1".to_owned(),
@@ -901,10 +995,12 @@ mod tests {
             ToHook::Answer {
                 question_kind: "machine-mismatch".to_owned(),
                 id: "keep".to_owned(),
+                values: Default::default(),
             },
             ToHook::Answer {
                 question_kind: "calibration-mode".to_owned(),
                 id: "direct".to_owned(),
+                values: Default::default(),
             },
         ];
         for msg in msgs {

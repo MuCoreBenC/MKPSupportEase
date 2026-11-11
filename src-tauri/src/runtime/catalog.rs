@@ -1296,7 +1296,7 @@ mod tests {
             "2026-10-03 起一版一套：A1 三版 + A1_MINI 三版 + P1S / X1C 各一（照 C15 模型重排）；\
              2026-11-07：P2S 停用 ⇒ P2S_default 一起退出目录"
         );
-        assert_eq!(catalog.registry.params.len(), 83, "实测 83 条字段定义");
+        assert_eq!(catalog.registry.params.len(), 92, "实测 92 条字段定义");
         assert!(
             !catalog.registry.tabs.is_empty() && !catalog.registry.layout.is_empty(),
             "页签元数据与参数摆放都该在"
