@@ -58,28 +58,45 @@ fn tail_start(lines: &[String]) -> Option<usize> {
 /// 两个动作各自可勾选；都不勾时只走一遍驻点，用来确认 XY 归零是否正常。
 fn action_block(d: &DebugIr) -> Vec<String> {
     let speed = num(d.speed);
-    let wait_x = num(d.wait_x);
-    let has_y = d.wait_y.abs() > 1e-9;
-    let wait_y = num(d.wait_y);
-    let to_wait = if has_y {
-        format!("G1 X{wait_x} Y{wait_y} F{speed}")
-    } else {
-        format!("G1 X{wait_x} F{speed}")
+    /*
+     * 动不动 Y 是**用户勾的那一格**（2026-11-11 作者）：
+     *   勾了 → **每一条移动**都带 Y（`G1 X267 Y0 F…`），包括 Y 恰好是 0 的时候；
+     *   没勾 → 一条都不带（`G1 X267 F…`）。
+     *
+     * ★ 不能拿「Y 坐标是不是 0」当判据：作者要的正是「显式把 Y 移到 0」，
+     *   0 是一个合法的目标位置，不是「没填」。
+     */
+    /* 落笔 / 收笔的 Y 没填就**跟随驻点**（作者：不填写就用驻点的） */
+    let mount_y = d.mount_y.unwrap_or(d.wait_y);
+    let unmount_y = d.unmount_y.unwrap_or(d.wait_y);
+    let mv = |x: f64, y: f64| {
+        if d.move_y {
+            format!("G1 X{} Y{} F{}", num(x), num(y), speed)
+        } else {
+            format!("G1 X{} F{}", num(x), speed)
+        }
     };
+    let to_wait = mv(d.wait_x, d.wait_y);
 
     let mut out = vec![";===== debug actions ==================".to_string()];
-    /* 只归 X/Y：Z 由原版 `G380` 段抬到床上方，这里不碰。 */
+    /*
+     * 归零 X 和 Y **总是都做**（2026-11-11 作者：「就算关 Y 也要加上 G28 Y」）。
+     *
+     * 理由：`G28` 是定基准，不是"移动"。不归 Y 的话，动作行里虽然不写 Y，
+     * 但 Y 的物理位置是切片前的残留 —— 那才是真正不可控的。
+     * 归完 Y，不写 Y 的移动就停在 Y=0，位置是确定的。
+     *
+     * Z 不归：由原版 `G380` 段抬到床上方，这里碰了会撞。
+     */
     out.push("G28 X".to_string());
-    if has_y {
-        out.push("G28 Y".to_string());
-    }
+    out.push("G28 Y".to_string());
     out.push(to_wait.clone());
     if d.test_mount {
-        out.push(format!("G1 X{} F{speed}", num(d.mount_x)));
+        out.push(mv(d.mount_x, mount_y));
         out.push(to_wait.clone());
     }
     if d.test_unmount {
-        out.push(format!("G1 X{} F{speed}", num(d.unmount_x)));
+        out.push(mv(d.unmount_x, unmount_y));
         out.push(to_wait);
     }
     out.push(";===== debug actions end ==============".to_string());
@@ -140,6 +157,9 @@ mod tests {
             speed: 10000.0,
             test_mount: true,
             test_unmount: true,
+            mount_y: None,
+            unmount_y: None,
+            move_y: false,
         }
     }
 
@@ -221,17 +241,32 @@ mod tests {
 
     /// 带 Y 的机型（P1/X1）：驻点走两轴，两个动作之间也回两轴。
     #[test]
-    fn wait_y_is_used_when_non_zero() {
+    fn move_y_appends_y_to_every_move() {
         let mut d = params();
+        d.move_y = true;
         d.wait_y = 7.0;
         let out = build_debug_gcode(&startup(), &d);
         assert!(out.iter().any(|l| l == "G28 Y"));
+        /* 驻点、落笔、收笔——**每一条移动**都带 Y */
         assert_eq!(
             out.iter()
                 .filter(|l| l.as_str() == "G1 X256 Y7 F10000")
                 .count(),
             3
         );
+        assert!(out.iter().any(|l| l == "G1 X267 Y7 F10000"));
+        assert!(out.iter().any(|l| l == "G1 X276 Y7 F10000"));
+    }
+
+    /// Y 是 0 也要显式写出来：0 是合法目标位置，不是「没填」。
+    #[test]
+    fn move_y_writes_zero_y_too() {
+        let mut d = params();
+        d.move_y = true;
+        d.wait_y = 0.0;
+        let out = build_debug_gcode(&startup(), &d);
+        assert!(out.iter().any(|l| l == "G1 X256 Y0 F10000"));
+        assert!(out.iter().any(|l| l == "G28 Y"));
     }
 
     /// 进度推到 100，否则 BBS 显示成没打完。

@@ -70,12 +70,15 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
     ir.debug = if prefs.debug_mode_enabled {
         Some(postprocess::ir::types::DebugIr {
             wait_x: prefs.debug_wait_x,
-            wait_y: 0.0,
+            wait_y: prefs.debug_wait_y,
+            mount_y: prefs.debug_mount_y,
+            unmount_y: prefs.debug_unmount_y,
             mount_x: prefs.debug_mount_x,
             unmount_x: prefs.debug_unmount_x,
             speed: prefs.debug_speed,
             test_mount: true,
             test_unmount: true,
+            move_y: prefs.debug_move_y,
         })
     } else {
         None

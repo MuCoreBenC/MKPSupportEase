@@ -427,6 +427,19 @@ pub struct DebugIr {
     pub test_mount: bool,
     /// 要不要测收笔。
     pub test_unmount: bool,
+    /// 落笔位的 Y。`None` = **跟随驻点**（作者：「不填写的话就用驻点的」）。
+    #[serde(default)]
+    pub mount_y: Option<f64>,
+    /// 收笔位的 Y。`None` = 跟随驻点。
+    #[serde(default)]
+    pub unmount_y: Option<f64>,
+    /// **要不要动 Y 轴**（2026-11-11）。
+    ///
+    /// A 系列的笔动作只走 X，Y 应当停在原地；P 系列要站到 `wait_y` 才有得撞。
+    /// 所以不按机型猜（猜错就是把工具头横甩），交给用户显式勾：
+    /// `false` = 全程不出现 Y，`true` = 到驻点时连 Y 一起去 `wait_y`。
+    #[serde(default)]
+    pub move_y: bool,
 }
 
 /// 用户偏好落到 IR 上的那几个开关（见 [`Ir::prefs`]）。

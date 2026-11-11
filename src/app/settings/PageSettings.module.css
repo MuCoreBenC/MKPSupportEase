@@ -54,7 +54,7 @@
 
 /* 浅色：毛玻璃卡片 —— 半透 + 背后模糊，和深色那档一样通透 */
 [data-theme='light'] .page {
-  --surface: rgb(255 255 255 / 58%);
+  --surface: rgb(255 255 255 / 46%);
 }
 
 [data-theme='light'] .section {
@@ -1592,8 +1592,8 @@
    * 窗内容会随着选项变多而变长（Y、Z 归零、测哪个动作）。
    * 给一个上限并且自己滚：不加的话内容会被框裁掉、滚轮滚的是外面的设置页。
    */
-  max-height: min(60vh, 420px);
-  overflow-y: auto;
+  /* 上限由 Modal 的 `bodyFill` 决定（它自己滚），这里只保证不撑破 */
+  min-height: 0;
   padding-right: 4px;
 }
 
@@ -1612,4 +1612,134 @@
 .textBtn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* 底栏左侧那句灰字：与右侧按钮同一行，长文自己省略 */
+.footNote {
+  flex: 1 1 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+/* 行内的「移动 Y」小勾：跟着标题那一行走，不占右侧数字框的位置 */
+.inlineCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 2px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/*
+ * 窗里的行（2026-11-11）。
+ *
+ * 不复用 `.fieldRow`：它带 `+ .fieldRow { border-top: 1px solid }`，那是给
+ * 一整屏长列表用的分隔；搬进窗里就成了「卡片之间用一条线分开」，作者一眼
+ * 看出不对。标题也不复用 `.fieldTitle`（600 粗，是卡片标题的字重），
+ * 窗里的行是表单标签，常规字重就够。
+ */
+.modalRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 38px;
+  padding: 4px 0;
+}
+
+.modalLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-body);
+  font-weight: 400;
+  color: var(--text-1);
+}
+
+/* 调试窗底部的代码预览：等宽、浅底，行数固定所以框高不会跳 */
+.previewBox {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+
+.previewHead {
+  margin-bottom: 6px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.previewCode {
+  margin: 0;
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
+  line-height: 1.7;
+  color: var(--text-2);
+  flex: 1 1 0;
+  white-space: pre;
+  overflow: auto;
+}
+
+/*
+ * 调试窗的左右分栏（2026-11-11 作者：一列排太高，代码那块被压掉了）。
+ * 左参数、右代码；`minmax(0,…)` 是让它真的能缩，不然长行会把右栏撑爆。
+ */
+/*
+ * 左栏 = 开关 + 代码，右栏 = 输入框（2026-11-11 作者给的排法）。
+ *
+ * `align-items: stretch` 是关键：两栏拉成一样高，左下的代码块才能
+ * 把「开关只有两行、右栏有七行」那片空白吃掉 —— 上一版右下角就是空在这儿。
+ */
+.debugGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  gap: 32px;
+  align-items: stretch;
+}
+
+.debugLeft {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* 与右栏等高（grid 的 stretch），内部 flex 才能算出「剩余多少给代码」 */
+  height: 100%;
+}
+
+.debugParams {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 代码块跟着左栏长高，自己不设高度 */
+.debugCode {
+  display: flex;
+  /* basis 必须是 0：写 auto 时基准是「内容高度」，内容几行就撑几行，
+     开关一开一关框高会跟着跳几个像素 */
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 120px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+}
+
+/* Y 那行的尾巴：一个小勾 + 数字框 */
+.rowTail {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.followCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+  white-space: nowrap;
 }

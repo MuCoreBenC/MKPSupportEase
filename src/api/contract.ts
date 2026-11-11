@@ -2289,6 +2289,13 @@ export interface ResolvedPostprocPrefs {
   debugMountX: number
   debugUnmountX: number
   debugSpeed: number
+  /** 调试时动不动 Y 轴（A 系列只走 X；P 系列要站到 Y 才有得撞） */
+  debugWaitY: number
+  /** 落笔位的 Y；`null` = 跟随驻点 */
+  debugMountY: number | null
+  /** 收笔位的 Y；`null` = 跟随驻点 */
+  debugUnmountY: number | null
+  debugMoveY: boolean
   zCalibrationDwellSec: number
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
@@ -2316,6 +2323,10 @@ export interface PostprocPrefsWire {
   debugMountX?: number | null
   debugUnmountX?: number | null
   debugSpeed?: number | null
+  debugWaitY?: number | null
+  debugMountY?: number | null
+  debugUnmountY?: number | null
+  debugMoveY?: boolean | null
   zCalibrationDwellSec?: number | null
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null

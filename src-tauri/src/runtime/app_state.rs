@@ -313,6 +313,19 @@ pub struct PostprocPrefs {
     /// 调试动作的移动速度（mm/min）。`None` = 出厂 10000。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_speed: Option<f64>,
+    /// 驻点的 Y 坐标。只有勾了「移动 Y」才进产物。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_wait_y: Option<f64>,
+    /// 落笔位的 Y。`None` = 跟随驻点。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mount_y: Option<f64>,
+    /// 收笔位的 Y。`None` = 跟随驻点。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_unmount_y: Option<f64>,
+    /// **调试时动不动 Y 轴**。`None` = 出厂 false（Y 保持原地）。
+    /// 不按机型猜：猜错就是把工具头横甩到某个 Y 上。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_move_y: Option<bool>,
     /// Z 轴校准每层测量后的停留秒数（1–20）。`None` = 出厂 2。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub z_calibration_dwell_sec: Option<i64>,
@@ -422,6 +435,10 @@ impl PostprocPrefs {
             debug_mount_x: self.debug_mount_x.unwrap_or(DEBUG_MOUNT_X_DEFAULT),
             debug_unmount_x: self.debug_unmount_x.unwrap_or(DEBUG_UNMOUNT_X_DEFAULT),
             debug_speed: self.debug_speed.unwrap_or(DEBUG_SPEED_DEFAULT),
+            debug_wait_y: self.debug_wait_y.unwrap_or(0.0),
+            debug_mount_y: self.debug_mount_y,
+            debug_unmount_y: self.debug_unmount_y,
+            debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
                 .unwrap_or(Z_DWELL_DEFAULT)
@@ -514,6 +531,10 @@ pub struct ResolvedPostprocPrefs {
     pub debug_mount_x: f64,
     pub debug_unmount_x: f64,
     pub debug_speed: f64,
+    pub debug_wait_y: f64,
+    pub debug_mount_y: Option<f64>,
+    pub debug_unmount_y: Option<f64>,
+    pub debug_move_y: bool,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,
     pub bed_glue_enabled: bool,

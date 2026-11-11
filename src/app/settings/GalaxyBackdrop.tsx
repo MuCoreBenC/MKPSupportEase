@@ -276,17 +276,18 @@ export default function GalaxyBackdrop() {
     }
 
     fit()
+    /* 先画一帧：浅色时画布虽然藏起来，切到深色不用再等第一帧。 */
+    paintStars(ctx, cssW, cssH, list, 0, [])
     nextMeteorAt = performance.now() + 3500
 
     const ro = new ResizeObserver(fit)
     ro.observe(canvas)
 
-    if (reduced) {
-      /* 不动的那一版：画一帧静态星空就够 */
-      paintStars(ctx, cssW, cssH, list, 0, [])
-    } else {
-      raf = window.requestAnimationFrame(frame)
+    if (reduced || !isDark) {
+      return () => ro.disconnect()
     }
+
+    raf = window.requestAnimationFrame(frame)
 
     return () => {
       window.cancelAnimationFrame(raf)
