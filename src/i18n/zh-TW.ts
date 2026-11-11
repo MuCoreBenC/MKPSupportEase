@@ -1925,7 +1925,7 @@ export const zhTW: Record<StringKey, string> = {
   'params.saved.discarded': '已放棄這次沒儲存的改動',
   'params.history.batchTitle': '第 {n} 次儲存',
   'params.moveTower': '移動擦料塔',
-  'params.row.adoptTitleNoCloud': '雲端當前最新版還沒取回來 —— 取回來之後就能看到新值、也能采用它',
+  'params.row.adoptTitleNoCloud': '雲端新版還沒取到，暫時不能採用。',
   'params.row.adoptTitle': '改成雲端 {value}；儲存後生效。',
   'params.row.cloudCurrent': '雲端當前值',
   'params.row.adopt': '用新值',

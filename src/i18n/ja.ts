@@ -1884,7 +1884,7 @@ export const ja: Record<StringKey, string> = {
   'params.saved.discarded': '未保存の変更を破棄しました',
   'params.history.batchTitle': '{n} 回目の保存',
   'params.moveTower': 'パージタワーを移動',
-  'params.row.adoptTitleNoCloud': 'クラウドの最新版がまだ取得できていません — 取得後は新しい値の表示と採用が可能になります',
+  'params.row.adoptTitleNoCloud': 'クラウドの新版をまだ取得していないため、採用できません。',
   'params.row.adoptTitle': 'クラウドの {value} に変更します（保存で反映）。',
   'params.row.cloudCurrent': 'クラウドの現在値',
   'params.row.adopt': '新しい値を使う',

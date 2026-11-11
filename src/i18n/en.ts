@@ -1891,7 +1891,7 @@ export const en: Record<StringKey, string> = {
   'params.saved.discarded': 'Discarded the unsaved changes from this session',
   'params.history.batchTitle': 'Save #{n}',
   'params.moveTower': 'Move the wipe tower',
-  'params.row.adoptTitleNoCloud': 'The latest cloud version has not been fetched yet — once it is, you can see and adopt the new value',
+  'params.row.adoptTitleNoCloud': 'The new cloud version isn’t available yet, so it can’t be adopted.',
   'params.row.adoptTitle': 'Set it to the cloud value {value}; applied on save.',
   'params.row.cloudCurrent': 'the current cloud value',
   'params.row.adopt': 'Use new value',

@@ -430,6 +430,7 @@
 }
 
 .syncBarHint {
+  margin-left: 8px;
   color: var(--text-3);
 }
 

@@ -1955,7 +1955,7 @@ export const zhCN = {
   'params.saved.discarded': '已放弃这次没保存的改动',
   'params.history.batchTitle': '第 {n} 次保存',
   'params.moveTower': '移动擦料塔',
-  'params.row.adoptTitleNoCloud': '云端当前最新版还没取回来 —— 取回来之后就能看到新值、也能采用它',
+  'params.row.adoptTitleNoCloud': '云端新版还没取到，暂时不能采用。',
   'params.row.adoptTitle': '改成云端 {value}；保存后生效。',
   'params.row.cloudCurrent': '云端当前值',
   'params.row.adopt': '用新值',
