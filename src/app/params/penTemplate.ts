@@ -103,6 +103,62 @@ export function render(skeleton: string, vars: Record<PenPlaceholder, number>): 
   )
 }
 
+/** 逐行对比里的一行：左右各一格，用来画成对齐的两栏。 */
+export interface DiffRow {
+  left: string | null
+  right: string | null
+  /** `same` 两边都有且相同；`removed` 只在左边；`added` 只在右边 */
+  kind: 'same' | 'removed' | 'added'
+}
+
+/**
+ * 按 LCS 把两段文本对齐成行序列。
+ *
+ * 十行左右的 G-code，O(n·m) 的 DP 是微秒级 —— 不用为它设计什么增量算法。
+ * 对齐之后左右两栏才能逐行并排：删掉的行只在左边、新增的行只在右边，
+ * 这样「哪一行变了」一眼能看出来，而不是靠行号硬猜。
+ */
+export function alignDiff(leftText: string, rightText: string): DiffRow[] {
+  const left = leftText.split('\n')
+  const right = rightText.split('\n')
+  const n = left.length
+  const m = right.length
+  /* 长度表：`len[i][j]` = left[i..] 与 right[j..] 的 LCS 长度 */
+  const len: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      len[i][j] =
+        left[i] === right[j] ? len[i + 1][j + 1] + 1 : Math.max(len[i + 1][j], len[i][j + 1])
+    }
+  }
+
+  const rows: DiffRow[] = []
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (left[i] === right[j]) {
+      rows.push({ left: left[i], right: right[j], kind: 'same' })
+      i += 1
+      j += 1
+    } else if (len[i + 1][j] >= len[i][j + 1]) {
+      rows.push({ left: left[i], right: null, kind: 'removed' })
+      i += 1
+    } else {
+      rows.push({ left: null, right: right[j], kind: 'added' })
+      j += 1
+    }
+  }
+  while (i < n) {
+    rows.push({ left: left[i], right: null, kind: 'removed' })
+    i += 1
+  }
+  while (j < m) {
+    rows.push({ left: null, right: right[j], kind: 'added' })
+    j += 1
+  }
+  return rows
+}
+
 /** 判断某个参数 token 是不是占位符，是就返回名字。 */
 export function placeholderName(token: string): PenPlaceholder | null {
   if (!token.startsWith('{') || !token.endsWith('}')) return null

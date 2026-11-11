@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { fieldOf, fmtNum, placeholders, placeholderName, render, validate } from './penTemplate'
+import { alignDiff, fieldOf, fmtNum, placeholders, placeholderName, render, validate } from './penTemplate'
 
 /** 与 Rust 侧 `pen_template::tests` 同一批骨架 —— 两边规则必须逐条对上。 */
 const A1_MOUNT =
@@ -59,5 +59,32 @@ describe('penTemplate', () => {
     expect(placeholderName('{wait}')).toBe('wait')
     expect(placeholderName('X{wait}')).toBeNull()
     expect(placeholderName('{nope}')).toBeNull()
+  })
+})
+
+describe('alignDiff', () => {
+  it('完全相同的两段：全是 same', () => {
+    const rows = alignDiff('a\nb\nc', 'a\nb\nc')
+    expect(rows.map((r) => r.kind)).toEqual(['same', 'same', 'same'])
+  })
+
+  it('删掉一行：只在左边出现，标 removed', () => {
+    expect(alignDiff('a\nb\nc', 'a\nc')).toEqual([
+      { left: 'a', right: 'a', kind: 'same' },
+      { left: 'b', right: null, kind: 'removed' },
+      { left: 'c', right: 'c', kind: 'same' },
+    ])
+  })
+
+  it('新增一行：只在右边出现，标 added', () => {
+    expect(alignDiff('a\nc', 'a\nb\nc')[1]).toEqual({ left: null, right: 'b', kind: 'added' })
+  })
+
+  it('毫无交集时仍是左边全删 + 右边全加，两栏行数相同', () => {
+    const rows = alignDiff('a\nb', 'x\ny\nz')
+    expect(rows.length).toBe(5)
+    expect(rows.every((r) => r.kind !== 'same')).toBe(true)
+    expect(rows.filter((r) => r.kind === 'removed').length).toBe(2)
+    expect(rows.filter((r) => r.kind === 'added').length).toBe(3)
   })
 })

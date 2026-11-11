@@ -23,6 +23,7 @@ import { useT, type StringKey } from '../../i18n'
 import { SegmentedField } from '../../components/field'
 import { tokenizeGcodeLine } from './gcode'
 import {
+  alignDiff,
   fieldOf,
   placeholders,
   render,
@@ -129,11 +130,19 @@ export default function GcodeBlock({
   )
 
   const rendered = useMemo(() => renderPen(value), [renderPen, value])
+  /** 当前这一份要显示的文本：能渲染就用真值，取不到才退回骨架原文 */
+  const shown = rendered ?? value
   /* 云端那一份也要按**同一套字段**渲染成真值 —— 否则左边是 `X256`、右边是 `X{wait}`，
    * 两栏根本没法比（作者 2026-11-11：「到底是左边新还是右边新」）。 */
   const cloudShown = useMemo(
     () => (hasCloud ? (renderPen(cloudValue as string) ?? (cloudValue as string)) : ''),
     [renderPen, hasCloud, cloudValue],
+  )
+
+  /* 逐行对齐：左边「当前」、右边「云端」。两栏行数相同，才能并排看 */
+  const diffRows = useMemo(
+    () => (hasCloud ? alignDiff(shown, cloudShown) : []),
+    [hasCloud, shown, cloudShown],
   )
 
   /*
@@ -148,7 +157,6 @@ export default function GcodeBlock({
    * 所以真值必须同时喂给这三处，只换 textarea 的 value 是看不见的
    * （2026-11-11 作者截图：代码页仍显示 `X{wait}`，正是这一层还读着骨架）。
    */
-  const shown = rendered ?? value
   const srcLines = useMemo(() => shown.split('\n'), [shown])
   const highlighted = useMemo(
     () =>
@@ -198,7 +206,11 @@ export default function GcodeBlock({
             label={tr('params.gcode.displayMode', { label: def.label })}
             options={MODES.map((m) => ({ value: m.value, label: tr(m.label) }))}
             value={mode}
-            onChange={setMode}
+            onChange={(next) => {
+              setMode(next)
+              /* 对比只活在代码视图里；切到视图就把对比收起来，否则按钮会停在「收起对比」 */
+              if (next !== 'code') setShowDiff(false)
+            }}
           />
         </span>
       </header>
@@ -235,32 +247,71 @@ export default function GcodeBlock({
           >
             {tr(showDiff ? 'params.gcode.hideDiff' : 'params.gcode.showDiff')}
           </button>
-          <button
-            type="button"
-            className={s.syncAdopt}
-            disabled={syncBusy || (adopted ? false : onAdoptSync === undefined)}
-            onClick={() => {
-              /* 已经用上新值了 ⇒ 这颗按钮变成「用回旧值」，可以来回切 */
-              if (adopted) {
-                const back = sync?.local
-                onEdit(def.key, typeof back === 'string' ? back : savedValue)
-              } else {
-                onAdoptSync?.()
-              }
-            }}
-          >
-            {tr(adopted ? 'params.gcode.revertCloud' : 'params.gcode.adoptCloud')}
-          </button>
         </div>
       )}
 
       {mode === 'code' && hasCloud && showDiff ? (
-        /* 对比：两栏各带标题，左边「当前这一份」、右边「云端那一份」 */
+        /*
+         * 对比 = 代码视图的另一种摆法：左右两栏逐行对齐，点哪一栏就用哪一份。
+         *
+         * 两栏都是 `<button>`：选中态靠边框 + 右上角勾表达，不靠“点完左边变样”。
+         * 行高锁死，`removed` 只在左边、`added` 只在右边，删行与加行各自占一格。
+         */
         <div className={s.diff}>
-          <div className={s.diffHead}>{tr('params.gcode.diffMine')}</div>
-          <div className={s.diffHead}>{tr('params.gcode.diffCloud')}</div>
-          <pre className={s.diffCol}>{shown}</pre>
-          <pre className={s.diffCol}>{cloudShown}</pre>
+          <button
+            type="button"
+            className={`${s.diffPane} ${adopted ? '' : s.diffPicked}`}
+            disabled={syncBusy}
+            onClick={() => {
+              if (adopted) {
+                const back = sync?.local
+                onEdit(def.key, typeof back === 'string' ? back : savedValue)
+              }
+            }}
+          >
+            <span className={s.diffHead}>
+              {tr('params.gcode.diffMine')}
+              {!adopted && <i className={s.diffTick}>✓</i>}
+            </span>
+            <span className={s.diffBody}>
+              {diffRows.map((row, i) => (
+                <span
+                  key={`l${i}`}
+                  className={`${s.diffLine} ${row.kind === 'removed' ? s.diffGone : ''} ${
+                    row.left === null ? s.diffBlank : ''
+                  }`}
+                >
+                  {row.left ?? ''}
+                </span>
+              ))}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            className={`${s.diffPane} ${adopted ? s.diffPicked : ''}`}
+            disabled={syncBusy || onAdoptSync === undefined}
+            onClick={() => {
+              if (!adopted) onAdoptSync?.()
+            }}
+          >
+            <span className={s.diffHead}>
+              {tr('params.gcode.diffCloud')}
+              {adopted && <i className={s.diffTick}>✓</i>}
+            </span>
+            <span className={s.diffBody}>
+              {diffRows.map((row, i) => (
+                <span
+                  key={`r${i}`}
+                  className={`${s.diffLine} ${row.kind === 'added' ? s.diffNew : ''} ${
+                    row.right === null ? s.diffBlank : ''
+                  }`}
+                >
+                  {row.right ?? ''}
+                </span>
+              ))}
+            </span>
+          </button>
         </div>
       ) : mode === 'code' ? (
         /*
@@ -292,8 +343,11 @@ export default function GcodeBlock({
               value={shown}
               spellCheck={false}
               disabled={disabled}
-              /* 有真值就只读：这里展示的是拼装结果，改数值要回字段那几格 */
-              readOnly={rendered !== null}
+              /*
+               * 可编辑：这里就是「直接改这一段」的入口（作者 2026-11-11：
+               * 没对比的时候我连值都改不了）。代价是编辑会把骨架里的占位符
+               * 换成具体数字，之后那几格字段就不再驱动它了 —— 想保持联动就回字段里改。
+               */
               aria-label={tr('params.gcode.codeAria', { label: def.label })}
               onScroll={syncScroll}
               onChange={(e) => onEdit(def.key, e.target.value)}

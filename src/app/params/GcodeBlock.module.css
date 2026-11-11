@@ -119,14 +119,83 @@
 .diff {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px 8px;
+  gap: 8px;
+}
+
+/* 整栏是一颗按钮：点它 = 选这一份。选中态靠边框 + 勾，不靠「点了就变」 */
+.diffPane {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-sunken);
+  text-align: left;
+  cursor: pointer;
+}
+
+.diffPane:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.diffPicked {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface-sunken));
 }
 
 .diffHead {
-  padding: 0 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: var(--fs-label);
   font-weight: 600;
   color: var(--text-2);
+}
+
+.diffTick {
+  color: var(--accent);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.diffBody {
+  display: block;
+  max-height: 220px;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+/* 行高锁死：两栏行数相同（LCS 对齐过），所以逐行能对齐 */
+.diffLine {
+  display: block;
+  height: 19px;
+  line-height: 19px;
+  padding: 0 4px;
+  white-space: pre;
+  border-radius: 2px;
+  color: var(--text-1);
+}
+
+.diffGone {
+  background: color-mix(in srgb, #c0392b 14%, transparent);
+}
+
+.diffNew {
+  background: color-mix(in srgb, #2e7d5b 16%, transparent);
+}
+
+.diffBlank {
+  background: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 4px,
+    color-mix(in srgb, var(--text-3) 12%, transparent) 4px,
+    color-mix(in srgb, var(--text-3) 12%, transparent) 8px
+  );
 }
 
 .diffCol {
