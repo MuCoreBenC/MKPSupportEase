@@ -322,6 +322,18 @@ pub struct PostprocPrefs {
     /// 收笔位的 Y。`None` = 跟随驻点。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug_unmount_y: Option<f64>,
+    /// **高级模式：整段动作块自己写**。`None` = 按字段生成。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_custom_gcode: Option<String>,
+    /// 到驻点 / 回驻点的速度（mm/min）。`None` = 30000。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_travel_speed: Option<f64>,
+    /// 要不要单独用驻点速度。`None` = false（全用落笔速度）。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_use_travel_speed: Option<bool>,
+    /// **这一趟重复几遍**。`None` = 1。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_repeat: Option<u32>,
     /// **调试时动不动 Y 轴**。`None` = 出厂 false（Y 保持原地）。
     /// 不按机型猜：猜错就是把工具头横甩到某个 Y 上。
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -438,6 +450,10 @@ impl PostprocPrefs {
             debug_wait_y: self.debug_wait_y.unwrap_or(0.0),
             debug_mount_y: self.debug_mount_y,
             debug_unmount_y: self.debug_unmount_y,
+            debug_custom_gcode: self.debug_custom_gcode.clone(),
+            debug_travel_speed: self.debug_travel_speed.unwrap_or(30000.0),
+            debug_use_travel_speed: self.debug_use_travel_speed.unwrap_or(false),
+            debug_repeat: self.debug_repeat.unwrap_or(1),
             debug_move_y: self.debug_move_y.unwrap_or(false),
             z_calibration_dwell_sec: self
                 .z_calibration_dwell_sec
@@ -517,8 +533,13 @@ pub const DEBUG_SPEED_DEFAULT: f64 = 10000.0;
 ///
 /// 管线只认这个类型 —— 于是"量程/默认值"这一层判断只在这里做一次，
 /// 下游不会各夹各的。
-/* 不 derive `Eq`：调试那几个坐标是 `f64`，浮点没有全序 —— 有它反而给不了任何保证。 */
-#[derive(Debug, Clone, Copy, PartialEq)]
+/*
+ * 不 derive `Eq`：调试那几个坐标是 `f64`，浮点没有全序 —— 有它反而给不了任何保证。
+ *
+ * 不 derive `Copy`（2026-11-11）：高级模式那一格是 `Option<String>`
+ * （用户直接写的那段动作块），字符串不是 `Copy`。按值搬的地方改 `clone()`。
+ */
+#[derive(Debug, Clone, PartialEq)]
 pub struct ResolvedPostprocPrefs {
     pub notify_on_finish: bool,
     pub ui_mode: PostprocUiMode,
@@ -534,6 +555,10 @@ pub struct ResolvedPostprocPrefs {
     pub debug_wait_y: f64,
     pub debug_mount_y: Option<f64>,
     pub debug_unmount_y: Option<f64>,
+    pub debug_custom_gcode: Option<String>,
+    pub debug_travel_speed: f64,
+    pub debug_use_travel_speed: bool,
+    pub debug_repeat: u32,
     pub debug_move_y: bool,
     pub z_calibration_dwell_sec: i64,
     pub xy_calibration_dwell_sec: i64,

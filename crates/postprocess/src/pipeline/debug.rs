@@ -69,6 +69,7 @@ fn action_block(d: &DebugIr) -> Vec<String> {
     /* 落笔 / 收笔的 Y 没填就**跟随驻点**（作者：不填写就用驻点的） */
     let mount_y = d.mount_y.unwrap_or(d.wait_y);
     let unmount_y = d.unmount_y.unwrap_or(d.wait_y);
+    /* 落笔 / 收笔那一档（`F{speed}`） */
     let mv = |x: f64, y: f64| {
         if d.move_y {
             format!("G1 X{} Y{} F{}", num(x), num(y), speed)
@@ -76,7 +77,16 @@ fn action_block(d: &DebugIr) -> Vec<String> {
             format!("G1 X{} F{}", num(x), speed)
         }
     };
-    let to_wait = mv(d.wait_x, d.wait_y);
+    /* 到驻点 / 回驻点那一档：开了单独的驻点速度才换，否则与落笔同速 */
+    let travel = if d.use_travel_speed { num(d.travel_speed) } else { speed.clone() };
+    let walk = |x: f64, y: f64| {
+        if d.move_y {
+            format!("G1 X{} Y{} F{}", num(x), num(y), travel)
+        } else {
+            format!("G1 X{} F{}", num(x), travel)
+        }
+    };
+    let to_wait = walk(d.wait_x, d.wait_y);
 
     let mut out = vec![";===== debug actions ==================".to_string()];
     /*
@@ -91,16 +101,41 @@ fn action_block(d: &DebugIr) -> Vec<String> {
     out.push("G28 X".to_string());
     out.push("G28 Y".to_string());
     out.push(to_wait.clone());
-    if d.test_mount {
-        out.push(mv(d.mount_x, mount_y));
-        out.push(to_wait.clone());
+    /* 落笔 → 回驻点 → 收笔 → 回驻点，整段按 `repeat` 跑几遍 */
+    for _ in 0..d.repeat.max(1) {
+        if d.test_mount {
+            out.push(mv(d.mount_x, mount_y));
+            out.push(walk(d.wait_x, d.wait_y));
+        }
+        if d.test_unmount {
+            out.push(mv(d.unmount_x, unmount_y));
+            out.push(walk(d.wait_x, d.wait_y));
+        }
     }
-    if d.test_unmount {
-        out.push(mv(d.unmount_x, unmount_y));
-        out.push(to_wait);
+    /* 末尾那条回驻点只留一条：重复时每遍都已经回到驻点，最后这条只是收口 */
+    if out.last() == Some(&to_wait) {
+        out.pop();
     }
+    out.push(to_wait);
     out.push(";===== debug actions end ==============".to_string());
     out
+}
+
+/// 这一段动作去哪儿来：高级模式下用户写的那段，否则由字段生成。
+///
+/// 全空行 / 只有空白 ⇒ 回落到生成那一条，不会产出一段空的动作块。
+fn actions_of(d: &DebugIr) -> Vec<String> {
+    if let Some(txt) = &d.custom_gcode {
+        let lines: Vec<String> = txt
+            .lines()
+            .map(|l| l.trim_end().to_string())
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        if !lines.is_empty() {
+            return lines;
+        }
+    }
+    action_block(d)
 }
 
 /// 拼出调试产物。`lines` 是切片器给的原始 G-code。
@@ -123,7 +158,7 @@ pub fn build_debug_gcode(lines: &[String], d: &DebugIr) -> Vec<String> {
         }
         out.push(line.clone());
     }
-    out.extend(action_block(d));
+    out.extend(actions_of(d));
     /* 进度推到 100：BBS 的进度条与缩略图都读它，缺了会显示成没打完。 */
     out.push("M73 P100 R0".to_string());
     for line in &lines[tail..] {
@@ -159,6 +194,10 @@ mod tests {
             test_unmount: true,
             mount_y: None,
             unmount_y: None,
+            repeat: 1,
+            custom_gcode: None,
+            travel_speed: 42000.0,
+            use_travel_speed: false,
             move_y: false,
         }
     }

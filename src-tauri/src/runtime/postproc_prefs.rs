@@ -78,6 +78,10 @@ pub fn apply_to_ir(ir: &mut Ir, prefs: &ResolvedPostprocPrefs) {
             speed: prefs.debug_speed,
             test_mount: true,
             test_unmount: true,
+            custom_gcode: prefs.debug_custom_gcode.clone(),
+            travel_speed: prefs.debug_travel_speed,
+            use_travel_speed: prefs.debug_use_travel_speed,
+            repeat: prefs.debug_repeat,
             move_y: prefs.debug_move_y,
         })
     } else {
@@ -187,6 +191,10 @@ mod tests {
             debug_wait_y: 0.0,
             debug_mount_y: None,
             debug_unmount_y: None,
+            debug_custom_gcode: None,
+            debug_travel_speed: 30000.0,
+            debug_use_travel_speed: false,
+            debug_repeat: 1,
             debug_move_y: false,
             z_calibration_dwell_sec: 7,
             xy_calibration_dwell_sec: 9,

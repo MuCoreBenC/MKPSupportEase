@@ -5412,3 +5412,49 @@ text = "切片器窗口最小化了 —— 先还原它，再点「查看引导�
 text_en = "The slicer window is minimised — restore it first, then click “View guide”"
 text_zh_tw = "切片器視窗最小化了 —— 先還原它，再點「查看引導」"
 text_ja = "スライサーのウィンドウが最小化されています —— 元に戻してから「ガイドを見る」を押してください"
+
+# ---- 调试那一问（2026-11-11）----
+["hook.question_debug_plan"]
+code = "Q_DEBUG_PLAN_001"
+text = "这一趟测哪些动作？"
+text_en = "Which actions should this run test?"
+text_zh_tw = "這一趟測哪些動作？"
+text_ja = "この実行ではどの動作を試しますか？"
+params = []
+note = "调试模式下开跑前那一问的正文"
+
+["hook.choice_debug_mount"]
+code = "Q_DEBUG_PLAN_002"
+text = "只测落笔"
+text_en = "Pen-down only"
+text_zh_tw = "只測落筆"
+text_ja = "着座のみ"
+params = []
+note = "只碰一下落笔位"
+
+["hook.choice_debug_unmount"]
+code = "Q_DEBUG_PLAN_003"
+text = "只测收笔"
+text_en = "Pen-up only"
+text_zh_tw = "只測收筆"
+text_ja = "離座のみ"
+params = []
+note = "只碰一下收笔位"
+
+["hook.choice_debug_both"]
+code = "Q_DEBUG_PLAN_004"
+text = "落笔和收笔都测"
+text_en = "Both pen-down and pen-up"
+text_zh_tw = "落筆和收筆都測"
+text_ja = "着座と離座の両方"
+params = []
+note = "主按钮；超时也按这一档"
+
+["hook.debug_plan_stopped"]
+code = "Q_DEBUG_PLAN_005"
+text = "调试那一问没有作答，这一趟已停下"
+text_en = "The debug question went unanswered — this run was stopped"
+text_zh_tw = "調試那一問沒有作答，這一趟已停下"
+text_ja = "デバッグの問いに回答がなかったため、この実行は停止しました"
+params = []
+note = "超时/没答时终止处理的那句"

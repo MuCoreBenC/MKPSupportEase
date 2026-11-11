@@ -2296,6 +2296,13 @@ export interface ResolvedPostprocPrefs {
   /** 收笔位的 Y；`null` = 跟随驻点 */
   debugUnmountY: number | null
   debugMoveY: boolean
+  /** 这一趟重复几遍（1 = 一遍） */
+  debugRepeat: number
+  /** 到驻点的速度（mm/min），`debugUseTravelSpeed` 为真时才生效 */
+  debugTravelSpeed: number
+  debugUseTravelSpeed: boolean
+  /** 高级模式：整段动作块自己写；`null` = 按字段生成 */
+  debugCustomGcode: string | null
   zCalibrationDwellSec: number
   xyCalibrationDwellSec: number
   bedGlueEnabled: boolean
@@ -2327,6 +2334,10 @@ export interface PostprocPrefsWire {
   debugMountY?: number | null
   debugUnmountY?: number | null
   debugMoveY?: boolean | null
+  debugRepeat?: number | null
+  debugTravelSpeed?: number | null
+  debugUseTravelSpeed?: boolean | null
+  debugCustomGcode?: string | null
   zCalibrationDwellSec?: number | null
   xyCalibrationDwellSec?: number | null
   bedGlueEnabled?: boolean | null
@@ -2592,6 +2603,26 @@ export interface PostProcessQuestion {
    * 别的一问没有这一格 ⇒ 缺省。界面照它画俯视图与坐标。
    */
   geo?: RelocateGeo | null
+  /**
+   * **要现场填的一组数值**（2026-11-11，调试那一问）。
+   *
+   * 空 / 缺省 = 这一问只有按钮；非空 = 除了按钮还要画这些输入框，
+   * 答复时把改后的值一并带回（`answerPostProcess` 的第三个参数）。
+   */
+  fields?: PostProcessQuestionField[]
+}
+
+/** 问句里的一个数值输入框（与 Rust `hook_ipc::QuestionField` 逐字对齐） */
+export interface PostProcessQuestionField {
+  /** 钩子按它读回填好的值 */
+  key: string
+  label: string
+  /** `mm` / `mm/min` / 空 */
+  unit: string
+  value: number
+  min: number
+  max: number
+  step: number
 }
 
 /**

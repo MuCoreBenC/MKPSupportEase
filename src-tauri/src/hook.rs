@@ -109,6 +109,11 @@ pub(crate) mod keys {
     pub const CHOICE_TOWER_RELOCATE_HINT: &str = "hook.choice_tower_relocate_hint";
     pub const CHOICE_TOWER_MODEL: &str = "hook.choice_tower_model";
     pub const CHOICE_TOWER_MODEL_HINT: &str = "hook.choice_tower_model_hint";
+    pub const QUESTION_DEBUG_PLAN: &str = "hook.question_debug_plan";
+    pub const DEBUG_PLAN_STOPPED: &str = "hook.debug_plan_stopped";
+    pub const CHOICE_DEBUG_MOUNT: &str = "hook.choice_debug_mount";
+    pub const CHOICE_DEBUG_UNMOUNT: &str = "hook.choice_debug_unmount";
+    pub const CHOICE_DEBUG_BOTH: &str = "hook.choice_debug_both";
     pub const CHOICE_CALIB_PRINT: &str = "hook.choice_calib_print";
     pub const CHOICE_CALIB_PRINT_HINT: &str = "hook.choice_calib_print_hint";
     pub const CHOICE_CALIB_DIRECT: &str = "hook.choice_calib_direct";
@@ -477,6 +482,14 @@ pub trait Asker {
     ///
     /// 默认实现给"没有界面"那一档用：不会替用户决定，一律 `None`。
     fn ask_calibration(&mut self, _question: &str) -> Option<String> {
+        None
+    }
+
+    /// 调试那一问（2026-11-11）：这一趟测落笔 / 收笔 / 两个都测。
+    ///
+    /// 返回被选中的 id；`None` = 没有界面 / 超时 —— 那时**不拦**，
+    /// 按偏好里存的那一组跑（调试本来就是自己人用）。
+    fn ask_debug_plan(&mut self, _question: &str) -> Option<String> {
         None
     }
 }
@@ -1061,6 +1074,37 @@ pub fn run(
         current: None,
         done: Vec::new(),
     };
+    /*
+     * 调试那一问（2026-11-11）：开跑前问「这一趟测哪些动作」。
+     *
+     * 答案**直接改 IR 上那两个开关** —— 用户当场说的，比偏好文件里存的优先。
+     * 没界面 / 超时（`None`）就不拦，按偏好跑：调试是自己人用，不该卡住。
+     * 位置必须在 `ir` 被搬进管线**之前**（下面那段 `pipeline::process_with_ir…` 按值搬）。
+     */
+    if let Some(dbg) = ir.debug.as_mut() {
+        if let Some(client) = ui.client() {
+            let mut asker = ChannelAsker { client };
+            match asker.ask_debug_plan(&Reason::new(keys::QUESTION_DEBUG_PLAN).text()) {
+                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_MOUNT => {
+                    dbg.test_mount = true;
+                    dbg.test_unmount = false;
+                }
+                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_UNMOUNT => {
+                    dbg.test_mount = false;
+                    dbg.test_unmount = true;
+                }
+                Some(id) if id == crate::hook_ipc::CHOICE_DEBUG_BOTH => {
+                    dbg.test_mount = true;
+                    dbg.test_unmount = true;
+                }
+                /* 超时（`stop`）或认不出的答复：**直接终止**，不替用户决定 */
+                _ => {
+                    return Err(HookError::stopped(Reason::new(keys::DEBUG_PLAN_STOPPED)));
+                }
+            }
+        }
+    }
+
     let ask: Option<&mut dyn TowerAsk> = tower_ask.as_mut().map(|a| a as &mut dyn TowerAsk);
     /*
      * 模型俯视几何**在 IR 被搬进管线之前**算好（2026-10-27）：管线按值收 IR，
@@ -2164,6 +2208,41 @@ impl Asker for ChannelAsker<'_> {
             ),
             Some(id) if id == crate::hook_ipc::CHOICE_KEEP
         )
+    }
+
+    /// 调试那一问：三颗按钮（只测落笔 / 只测收笔 / 两个都测），主按钮在最右。
+    ///
+    /// 不设超时（`0`）：调试是自己人坐在机器边上，等着就行；
+    /// 没界面时才落到 `None`（调用方按偏好跑）。
+    fn ask_debug_plan(&mut self, question: &str) -> Option<String> {
+        use crate::hook_ipc::{
+            QuestionChoice, CHOICE_DEBUG_BOTH, CHOICE_DEBUG_MOUNT, CHOICE_DEBUG_UNMOUNT,
+            QKIND_DEBUG_PLAN,
+        };
+        let choices = vec![
+            QuestionChoice {
+                id: CHOICE_DEBUG_MOUNT.to_owned(),
+                label: Reason::new(keys::CHOICE_DEBUG_MOUNT).text(),
+                hint: None,
+                accent: false,
+            },
+            QuestionChoice {
+                id: CHOICE_DEBUG_UNMOUNT.to_owned(),
+                label: Reason::new(keys::CHOICE_DEBUG_UNMOUNT).text(),
+                hint: None,
+                accent: false,
+            },
+            QuestionChoice {
+                id: CHOICE_DEBUG_BOTH.to_owned(),
+                label: Reason::new(keys::CHOICE_DEBUG_BOTH).text(),
+                hint: None,
+                accent: true,
+            },
+        ];
+        /* 超时 = **终止这一趟**（作者 2026-11-11：「超时行为直接终止处理呀」）：
+           调试是拿真机去撞，没人确认就别动。 */
+        self.client
+            .ask(QKIND_DEBUG_PLAN, question, choices, crate::hook_ipc::CHOICE_STOP)
     }
 
     /// 校准件那一问：两个选项摆给界面（`print` 主、`direct` 次），超时 = `stop`。

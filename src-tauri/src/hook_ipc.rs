@@ -173,6 +173,14 @@ pub const QKIND_MACHINE_MISMATCH: &str = "machine-mismatch";
 pub const QKIND_CALIBRATION_MODE: &str = "calibration-mode";
 /// 模型与擦料塔相撞：自动把塔挪到不撞的位置 / 自己去挪模型（2026-10-18）
 pub const QKIND_TOWER_RELOCATION: &str = "tower-relocation";
+/// 调试那一问（2026-11-11）：开跑前选「这一趟测哪些动作」。
+pub const QKIND_DEBUG_PLAN: &str = "debug-plan";
+/// 调试：只测落笔
+pub const CHOICE_DEBUG_MOUNT: &str = "debug-mount";
+/// 调试：只测收笔
+pub const CHOICE_DEBUG_UNMOUNT: &str = "debug-unmount";
+/// 调试：两个都测
+pub const CHOICE_DEBUG_BOTH: &str = "debug-both";
 
 /// 机型那一问：继续（`keep = true`）
 pub const CHOICE_KEEP: &str = "keep";

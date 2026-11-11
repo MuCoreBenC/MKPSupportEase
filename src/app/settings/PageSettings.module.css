@@ -1645,8 +1645,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  min-height: 38px;
-  padding: 4px 0;
+  min-height: 30px;
+  padding: 3px 0;
 }
 
 .modalLabel {
@@ -1695,9 +1695,17 @@
  */
 .debugGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 340px);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 300px);
   gap: 32px;
   align-items: stretch;
+  /*
+   * **定高**（不是 min-height）：`align-items: stretch` 只有在下限被钉住时才
+   * 真正生效，否则「表格多少行」会反过来决定框多高 —— 作者两次截图都是
+   * 一点「默认点位」框就长到屏幕上下沿。
+   *
+   * 320 = 右栏八行（`.modalRow` 40 × 8）。改行高时这里跟着改。
+   */
+  height: 290px;
 }
 
 .debugLeft {
@@ -1706,11 +1714,15 @@
   min-height: 0;
   /* 与右栏等高（grid 的 stretch），内部 flex 才能算出「剩余多少给代码」 */
   height: 100%;
+  /* 里面的表格再长也只能在自己的格子里滚，不许把框顶高 */
+  overflow: hidden;
 }
 
 .debugParams {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* 代码块跟着左栏长高，自己不设高度 */
@@ -1720,7 +1732,7 @@
      开关一开一关框高会跟着跳几个像素 */
   flex: 1 1 0;
   flex-direction: column;
-  min-height: 120px;
+  min-height: 80px;
   margin-top: 14px;
   padding: 10px 12px;
   border-radius: 8px;
@@ -1742,4 +1754,303 @@
   color: var(--text-2);
   cursor: pointer;
   white-space: nowrap;
+}
+
+/* ---------- 调试窗的「存档」（2026-11-11）---------- */
+
+/* 标题栏那颗「记录」：走动作槽，坐在 × 左边 */
+.headBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.headBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 正开着列表：底色点一下，知道自己在哪一屏 */
+.headBtnOn {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.headCount {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.presetList {
+  display: flex;
+  /* 按内容高度长：提示得**紧贴最后一条**，不能靠 flex 撑到框底去悬着 */
+  flex: 0 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  /* 存满 10 条时自己滚，不把框顶高 */
+  max-height: 268px;
+  overflow-y: auto;
+}
+
+/* 一条：左边时间 + 摘要，右边删除。整块是按钮，点哪都算「用这条」 */
+.presetRow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.presetUse {
+  display: flex;
+  flex: 1 1 auto;
+  /* 两行：上面时间、下面摘要 —— 一行排下来在窄窗口里会挤成一长条 */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  font: inherit;
+  color: var(--text-1);
+  text-align: left;
+  cursor: pointer;
+}
+
+.presetUse:hover {
+  border-color: var(--hairline);
+  background: var(--surface-sunken);
+}
+
+.presetWhen {
+  flex: 0 0 auto;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.presetWhat {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
+  color: var(--text-2);
+}
+
+.presetDel {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.presetDel:hover {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.presetEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  line-height: 1.6;
+}
+
+/* 存档上限那句提示：列表底下，一行灰字 */
+.presetHint {
+  margin: 8px 0 0;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* 出厂点位参照表：四列，第一列机型宽一点 */
+.anchorWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 十几行，自己滚 —— 不滚就会把整扇窗撑到屏幕上下沿（作者截图里就是那样） */
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: 8px;
+  /* 两个方向都滚：纵向列多，横向窗口窄 */
+  overflow: auto;
+  margin-right: -4px;
+  padding-right: 4px;
+}
+
+.anchorRow {
+  display: grid;
+  /* 固定列宽：`256 → 267` 要多宽就留多宽，窗口小了靠横向滚，不压缩 */
+  grid-template-columns: 62px 84px 84px;
+  justify-content: center;
+  gap: 10px;
+  width: max-content;
+  min-width: 100%;
+  align-items: baseline;
+  padding: 7px 4px;
+  /* 四列一律居中：不然机型靠左、数字靠右，中间那两列看着像错位 */
+  text-align: center;
+}
+
+.anchorRow + .anchorRow {
+  border-top: 1px solid var(--hairline);
+}
+
+.anchorHead {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* 表格上方那句「等待位 → 目标位」：一行小字，不占列头 */
+.anchorLegend {
+  margin: 0 0 4px;
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.anchorMachine {
+  font-size: var(--fs-label);
+  color: var(--text-1);
+  /* `A1 · STANDARD` 不许折成两行；也不加省略号 —— 截了就看不出是哪个版本 */
+  white-space: nowrap;
+  text-align: center;
+}
+
+.anchorNum {
+  font-family: var(--font-code);
+  /* 11px：`256 → 267` 要在一格里放得下，字号再大会挤到隔壁列 */
+  font-size: 11px;
+  color: var(--text-2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* 一折行就看不出是哪一列了 */
+  white-space: nowrap;
+}
+
+/* 组头：机型名只写这一次；右边那句「开始收笔 276」按机型，组内各版本相同 */
+.anchorGroup {
+  display: flex;
+  align-items: baseline;
+  /* 靠左挨着机型名写，不推到行的右端（那样会单独占出一列空白） */
+  justify-content: flex-start;
+  gap: 10px;
+  width: max-content;
+  padding: 8px 4px 2px;
+  /* 组与组之间用双实线隔开 —— 有了它就不用每行都重复机型名 */
+  border-top: 3px double var(--hairline);
+}
+
+.anchorGroup:first-of-type {
+  border-top: none;
+}
+
+.anchorGroupName {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--text-1);
+}
+
+.anchorGroupNote {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.anchorVersion {
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* 高级模式的代码编辑器：与只读预览同一块底，但能改 */
+.codeEditor {
+  flex: 1 1 0;
+  min-height: 120px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  font-family: var(--font-code);
+  font-size: var(--fs-code);
+  line-height: 1.7;
+  color: var(--text-1);
+  resize: none;
+  outline: none;
+}
+
+.codeEditor:focus {
+  border-color: var(--accent);
+}
+
+/* 推荐指令那一排：编辑器底下，小胶囊 */
+.snippetBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.snippetLabel {
+  font-size: var(--fs-label);
+  color: var(--text-3);
+}
+
+.snippetBtn {
+  padding: 3px 9px;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-label);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.snippetBtn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 「恢复默认」那一行：左栏，靠左 */
+.resetRow {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+/* 底栏那句变成校验错误时：红字，与「有毛病」这件事对齐 */
+.footWarn {
+  color: var(--danger);
 }

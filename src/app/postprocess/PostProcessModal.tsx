@@ -1420,16 +1420,21 @@ export default function PostProcessModal({
        * ★ 正文就是后端那一句问话（`question.text`），不另编文案；末行是倒计时。
        */
       <NoticeHero
-        tone={run.question.questionKind === 'calibration-mode' ? 'ask' : 'warn'}
+        /* `debug-plan` 与校准那问同一档：**不是出错**，是"这一盘怎么跑"的流程选择 */
+        tone={run.question.questionKind === 'machine-mismatch' ? 'warn' : 'ask'}
         title={tr(
-          run.question.questionKind === 'calibration-mode'
-            ? 'postproc.ask.calibTitle'
-            : 'postproc.ask.machineTitle',
+          run.question.questionKind === 'debug-plan'
+            ? 'postproc.ask.debugTitle'
+            : run.question.questionKind === 'calibration-mode'
+              ? 'postproc.ask.calibTitle'
+              : 'postproc.ask.machineTitle',
         )}
         lines={[run.question.text]}
         hint={countdownText(run.question.deadlineUnixMs) ?? undefined}
         /* 圈里那枚 `✦` 是**画出来的 SVG**：字体符号自带基线偏移，几何坐标不会 */
-        glyph={run.question.questionKind === 'calibration-mode' ? <SparkMark /> : undefined}
+        glyph={
+          run.question.questionKind === 'machine-mismatch' ? undefined : <SparkMark />
+        }
       />
     )
   } else if (showProgress) {

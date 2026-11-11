@@ -144,6 +144,13 @@ export function usePostprocPrefs(): PostprocPrefsApi {
           debugMountY: wire.debugMountY !== undefined ? wire.debugMountY : before.resolved.debugMountY,
           debugUnmountY: wire.debugUnmountY !== undefined ? wire.debugUnmountY : before.resolved.debugUnmountY,
           debugMoveY: wire.debugMoveY ?? before.resolved.debugMoveY,
+          debugRepeat: wire.debugRepeat ?? before.resolved.debugRepeat,
+          debugTravelSpeed: wire.debugTravelSpeed ?? before.resolved.debugTravelSpeed,
+          debugUseTravelSpeed: wire.debugUseTravelSpeed ?? before.resolved.debugUseTravelSpeed,
+          debugCustomGcode:
+            wire.debugCustomGcode !== undefined
+              ? wire.debugCustomGcode
+              : before.resolved.debugCustomGcode,
           zCalibrationDwellSec: wire.zCalibrationDwellSec ?? before.resolved.zCalibrationDwellSec,
           xyCalibrationDwellSec:
             wire.xyCalibrationDwellSec ?? before.resolved.xyCalibrationDwellSec,

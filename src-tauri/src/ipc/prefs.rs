@@ -376,6 +376,10 @@ pub async fn get_postproc_prefs(app: AppHandle) -> Result<serde_json::Value, App
                 "debugWaitY": r.debug_wait_y,
                 "debugMountY": r.debug_mount_y,
                 "debugUnmountY": r.debug_unmount_y,
+                "debugCustomGcode": r.debug_custom_gcode,
+                "debugTravelSpeed": r.debug_travel_speed,
+                "debugUseTravelSpeed": r.debug_use_travel_speed,
+                "debugRepeat": r.debug_repeat,
                 "debugMoveY": r.debug_move_y,
             },
             /* 量程（界面画数字框要用，**不另写一份**在 TS 里） */
